@@ -53,6 +53,7 @@
 #include "object/weapon_database.h"
 #include "particle/effect_world.h"
 #include "player/first_person_arms_witness.h"
+#include "player/game_config_block.h"
 #include "player/local_player_presenter.h"
 #include "player/local_player_visuals.h"
 #include "player/player_spawn_loadout.h"
@@ -415,6 +416,11 @@ public:
 	// The shell's player profile, whose current records every mission's sim
 	// takes (Simulation.use_player_profile). Null = a fresh profile's defaults.
 	void set_player_profiles(const Ref<PlayerProfiles> &p_profiles) { player_profiles_ = p_profiles; }
+	// The shell's process-lifetime cfg block (game.cfg): every mission's sim
+	// reads its mpreset word at the session create, and a NovaWorld
+	// ServerCommand's config change lands in it and is saved. Null = none.
+	void set_game_config(const Ref<GameConfigBlock> &p_block) { game_config_ = p_block; }
+	Ref<GameConfigBlock> get_game_config() const { return game_config_; }
 	void set_frame_stats(const Ref<FrameStats> &p_board);
 	bool is_water_render_stats_measured() const;
 	// Enables the manual frame-span/A-B probe. Disabling restores every skip
@@ -872,6 +878,7 @@ private:
 	// joiner's ClientAuth).
 	Ref<CharacterJoinProfile> local_character_profile_;
 	Ref<PlayerProfiles> player_profiles_;
+	Ref<GameConfigBlock> game_config_;
 	// The last frame's world-tick leg counters (RuntimePerfCounters).
 	int64_t perf_tick_us_ = 0;
 	int64_t perf_foliage_us_ = 0;

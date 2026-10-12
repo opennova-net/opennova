@@ -292,10 +292,12 @@ std::vector<HostRosterSlot> roster_from_player_list(const VarList &player_list) 
 
 // A ClientHostUpdate's list into the kept one by (VarFNum, VarName): a retail
 // host's update carries only the vars whose values changed since the last one
-// (its whole list only right after the host result), so the service keeps the
-// union [orig: CNapiVarEntry_SetValue @0x630590 dirties a var only on a changed
-// value; NapiStatement_SerializeVarList @0x4d0660 writes `includeAll || dirty`;
-// CNapiGameSession_SendHostUpdate @0x4d3860].
+// (its whole list only at a mission start and on a re-host's result), so the
+// service keeps the union [orig: CNapiVarEntry_SetValue @0x630590 dirties a var
+// only on a changed value; NapiStatement_SerializeVarList @0x4d0660 writes
+// `includeAll || dirty`; CNapiGameSession_SendHostUpdate @0x4d3860;
+// Game_StartMission @0x5248e4..0x524903;
+// CNapiGameSession_HandleHostVerifyResponse @0x4d5c52..0x4d5c9e].
 void merge_var_list(VarList &kept, const VarList &update) {
 	for (const VarEntry &e : update) {
 		auto it = std::find_if(kept.begin(), kept.end(), [&e](const VarEntry &k) {

@@ -60,9 +60,42 @@ struct Mipchain {
 	std::vector<uint8_t> data;
 	uint8_t* levels[16] = {};
 	int level_count = 0;
+
+	// The levels point into this chain's own `data`: a copy points its levels into its own copy (a move keeps the
+	// buffer, so the pointers stand).
+	Mipchain() = default;
+	Mipchain(const Mipchain& other) : data(other.data), level_count(other.level_count) { repoint_(other); }
+	Mipchain& operator=(const Mipchain& other) {
+		if (this != &other) {
+			data = other.data;
+			level_count = other.level_count;
+			repoint_(other);
+		}
+		return *this;
+	}
+	Mipchain(Mipchain&&) noexcept = default;
+	Mipchain& operator=(Mipchain&&) noexcept = default;
+
+private:
+	void repoint_(const Mipchain& other) {
+		for (int i = 0; i < 16; ++i)
+			levels[i] = other.levels[i] ? data.data() + (other.levels[i] - other.data.data()) : nullptr;
+	}
 };
 
 Mipchain build_mipchain(const std::vector<uint16_t>& heightmap);
+
+// The cells of `mc` (built from the heights before) whose texels meet the
+// atlas rect x, z, w, h made again from `heightmap`, every other cell kept: the
+// chain equals a fresh build_mipchain(heightmap) when only that rect changed
+// (an editor's sculpt stroke). The rect is the terrain's region contract
+// (refresh_terrain_scene_snapshot's, refresh_heightfield_normal_map's,
+// TerrainFieldStore::patch_heights'): inside the 1024 atlas, a change across
+// its wrap arriving as several rects, each refreshed; one of no size changes
+// nothing; one not inside is refused (false, nothing changed). A chain of
+// another shape is built whole.
+bool refresh_mipchain(Mipchain& mc, const std::vector<uint16_t>& heightmap,
+                      int x, int z, int w, int h);
 
 // ---------------------------------------------------------------------------
 // Quadtree nodes

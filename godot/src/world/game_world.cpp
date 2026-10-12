@@ -34,6 +34,7 @@ constexpr const char *kSignalMusicContextOpened = "music_context_opened";
 constexpr const char *kSignalMusicContextClosed = "music_context_closed";
 constexpr const char *kSignalMusicVarChanged = "music_var_changed";
 constexpr const char *kSignalCaptureChanged = "capture_changed";
+constexpr const char *kSignalProcessExitRequested = "process_exit_requested";
 
 } // namespace
 
@@ -270,7 +271,11 @@ int GameWorld::load_mission_as_joiner(const Ref<JoinTarget> &p_target) {
 }
 
 String GameWorld::mount_join_expansion(const String &p_expansion) {
-	return drive_.switch_join_expansion(resource_root_, p_expansion);
+	// The shell's live mount (the injected root every load resolves through),
+	// which exists before the process's first mission; the last load's root
+	// otherwise.
+	return drive_.switch_join_expansion(
+			injected_root_.is_valid() ? injected_root_ : resource_root_, p_expansion);
 }
 
 void GameWorld::adopt_novaworld_client(Node *p_client) {
@@ -701,6 +706,11 @@ void GameWorld::on_nw_host_player_enter_result(int64_t p_connection_id, int p_su
 void GameWorld::_bind_methods() {
 	ADD_SIGNAL(MethodInfo(kSignalWorldLoaded));
 	ADD_SIGNAL(MethodInfo(kSignalLoadFailed, PropertyInfo(Variant::STRING, "reason")));
+	// A load's session create found the cfg block's mpreset word set: the
+	// process ends with `exit_code` 0 there, before the mission exists and
+	// with nothing saved (engine: inmatch/server_session.h ProcessExit,
+	// docs/net/novaworld-net-re.md D-NET-385). Emitted in place of load_failed.
+	ADD_SIGNAL(MethodInfo(kSignalProcessExitRequested, PropertyInfo(Variant::INT, "exit_code")));
 	// A joiner's authoritative session record (post-auth S2C 0x7B) resolved
 	// during the pre-load wait: server/mission names + the exact wire-header
 	// world about to be constructed. The shell refreshes its loading screen
@@ -882,6 +892,10 @@ void GameWorld::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_music_director", "director"), &GameWorld::set_music_director);
 	ClassDB::bind_method(D_METHOD("set_player_profiles", "profiles"), &GameWorld::set_player_profiles);
+	ClassDB::bind_method(D_METHOD("set_game_config", "block"), &GameWorld::set_game_config);
+	ClassDB::bind_method(D_METHOD("get_game_config"), &GameWorld::get_game_config);
+	ClassDB::bind_method(D_METHOD("on_nw_host_server_command", "verb", "target", "args"),
+			&GameWorld::on_nw_host_server_command);
 	ClassDB::bind_method(D_METHOD("set_frame_stats", "board"), &GameWorld::set_frame_stats);
 	ClassDB::bind_method(D_METHOD("is_water_render_stats_measured"),
 			&GameWorld::is_water_render_stats_measured);

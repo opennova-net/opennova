@@ -6,11 +6,14 @@
 // with BUILD_NOVAWORLD_HTTP. The cases share one listener and run in order
 // (the admin users case reads the account the register case made; the
 // concurrent case runs last, since it adds accounts and a host). The listener
-// trusts 127.0.0.1 as its proxy, so the website-session cases each name their
-// own client address in X-Real-IP and keep their own rate-limit buckets; a
-// second listener on the same database sets the Secure (__Host-) cookie,
-// trusts no proxy and serves copies of the retail templates and static files,
-// with a planted secret file beside them that no reply may carry. The retail
+// trusts 127.0.0.1 as its proxy and answers /api/ to it alone
+// (ONNET_API_PROXY_ONLY), so the website-session cases each name their own
+// client address in X-Real-IP and keep their own rate-limit buckets; a second
+// listener on the same database sets the Secure (__Host-) cookie, trusts no
+// proxy and serves copies of the retail templates and static files, with a
+// planted secret file beside them that no reply may carry; a third serves the
+// same retail roots with ONNET_API_PROXY_ONLY and a proxy the harness is not,
+// so its /api/ refuses the harness while its retail routes answer. The retail
 // POST /NWLogin.dll cases post an EPASK-encrypted form the way a stock client
 // does.
 //
@@ -97,6 +100,11 @@ struct Harness {
 	// of both listeners, and symlinks under the retail roots lead to it.
 	std::filesystem::path temp_root;
 	std::filesystem::path retail_root;
+	// A third listener on the same database over the retail roots, with
+	// ONNET_API_PROXY_ONLY and a trusted proxy the harness never is, so its
+	// /api/ refuses every request here; its retail login brake starts unspent
+	// for the cases that log in through it.
+	uint16_t fresh_port = 0;
 
 	// Every connect, send and recv waits at most `timeout_ms`.
 	net::HttpReply send(const char *method, const std::string &path,
@@ -440,6 +448,14 @@ int64_t make_account(Harness &h, const std::string &username, const std::string 
 	const auto result = nws::create_user(*h.pool.acquire(), p);
 	if (!result.ok) std::fprintf(stderr, "  create %s: %s\n", username.c_str(), result.error_code.c_str());
 	return result.ok ? result.id : 0;
+}
+
+// A HOSTKEY recorded for `user` the way /NWHost.dll records one for its retail
+// login: at the account's credentials generation now. True when recorded.
+bool record_key_for(Harness &h, const std::string &key, int64_t user) {
+	auto conn = h.pool.acquire();
+	const auto account = nws::get_user_by_id(*conn, user);
+	return account && opennova::hostdb::record_host_key(*conn, key, user, account->credentials_gen);
 }
 
 // The site role an admin gives an account (PUT /api/admin/users/<id> with the
@@ -1045,13 +1061,15 @@ int test_register_brake(Harness &h) {
 // with NAME / PASSWORD encrypted, plus `headers` (a Cookie). With no name, the
 // form carries no credentials (the PERSISTENTEXPRESSLOGINDATA pin path). The
 // harness reaches the listener from 127.0.0.1, the TCP peer the retail login
-// is braked by (no X-Real-IP counts there).
-net::HttpReply nwlogin(Harness &h, const std::string &name, const std::string &password,
-                       const std::vector<std::string> &headers = {}) {
+// is braked by (no X-Real-IP counts there). nwlogin_to posts to the listener
+// on `port`.
+net::HttpReply nwlogin_to(Harness &h, uint16_t port, const std::string &name,
+		const std::string &password, const std::vector<std::string> &headers = {}) {
 	std::vector<std::string> request_headers = {"Content-Type: application/x-www-form-urlencoded"};
 	request_headers.insert(request_headers.end(), headers.begin(), headers.end());
-	if (name.empty()) return h.send("POST", "/NWLogin.dll", request_headers, "");
-	const auto prepare = h.send("GET", std::string("/nwprepare.dll?url=") + kUrlsTemplate);
+	if (name.empty())
+		return h.send_to(port, "POST", "/NWLogin.dll", request_headers, "");
+	const auto prepare = h.send_to(port, "GET", "/nwprepare.dll?url=jop_2_start.htm");
 	opennova::EpaskParams epask;
 	if (!opennova::epask_from_string(set_cookie_value(prepare, "EPASK"), epask)) return {};
 	std::string body;
@@ -1065,7 +1083,12 @@ net::HttpReply nwlogin(Harness &h, const std::string &name, const std::string &p
 	                                     body)) {
 		return {};
 	}
-	return h.send("POST", "/NWLogin.dll", request_headers, body);
+	return h.send_to(port, "POST", "/NWLogin.dll", request_headers, body);
+}
+
+net::HttpReply nwlogin(Harness &h, const std::string &name, const std::string &password,
+		const std::vector<std::string> &headers = {}) {
+	return nwlogin_to(h, h.port, name, password, headers);
 }
 
 bool nwlogin_succeeded(const net::HttpReply &reply) {
@@ -1079,21 +1102,15 @@ bool nwlogin_succeeded(const net::HttpReply &reply) {
 // through nginx) never brakes it. Its refusal is a retail login failure: the
 // msgbase page (jop_2_msg.htm, the template a stock client already shows for a
 // bad password) with its message, HTTP 200, and no login session tag. Its
-// failures leave the site login alone.
+// failures leave the site login alone: the two (username, address) buckets
+// are apart at the same address.
 int test_nwlogin_brake(Harness &h) {
 	// Maintenance would answer before any password is checked.
 	auto reply = h.send("PUT", "/api/admin/server-status", {kJson, kBearer},
 	                    "{\"maintenance_enabled\":false}");
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
 	TEST_EXPECT(make_account(h, "web_retail", "pw-retail") > 0);
-
-	// A flood on the site's login naming the retail client's address...
-	net::HttpReply refusal;
-	const int accepted = accepted_before_429(
-			[&h](int i) { return login(h, "127.0.0.1", address("forged", i), "x"); }, 60, refusal);
-	TEST_EXPECT(accepted >= 20);
-	// ...brakes nothing on the retail login from it.
-	TEST_EXPECT(nwlogin_succeeded(nwlogin(h, "web_retail", "pw-retail")));
+	TEST_EXPECT(make_account(h, "web_retail_flood", "pw-flood") > 0);
 
 	const auto bad = nwlogin(h, "web_retail", "guess0");
 	TEST_EXPECT(bad.transport_ok && bad.code == 200);
@@ -1116,8 +1133,18 @@ int test_nwlogin_brake(Harness &h) {
 	                 "Too many failed logins. Please try again later.");
 	TEST_EXPECT(body_text(refused) == expected);
 
-	// The site login keeps its own buckets: in from another address.
-	TEST_EXPECT(login(h, "10.13.0.2", "web_retail", "pw-retail").code == 200);
+	// The site login keeps its own (username, address) bucket: the same account
+	// from the same address, 127.0.0.1 named in X-Real-IP, is let in.
+	TEST_EXPECT(login(h, "127.0.0.1", "web_retail", "pw-retail").code == 200);
+
+	// A flood on the site's login naming the retail client's address (its
+	// bucket of 20, less the login above)...
+	net::HttpReply refusal;
+	const int accepted = accepted_before_429(
+			[&h](int i) { return login(h, "127.0.0.1", address("forged", i), "x"); }, 60, refusal);
+	TEST_EXPECT(accepted >= 19);
+	// ...brakes nothing on the retail login from it.
+	TEST_EXPECT(nwlogin_succeeded(nwlogin(h, "web_retail_flood", "pw-flood")));
 	return 0;
 }
 
@@ -1177,8 +1204,11 @@ int test_retail_pin_revocation(Harness &h) {
 	TEST_EXPECT(admin_put("{\"account_status\":\"active\"}"));
 	TEST_EXPECT(refused_without_password());
 
-	// A rename keeps the pin.
+	// A rename (the username) keeps the pin, and so does a new handle.
 	TEST_EXPECT(nwlogin_succeeded(nwlogin(h, "web_pinned", "pw-pinned-2", cookie)));
+	TEST_EXPECT(admin_put("{\"username\":\"web_pinned_renamed\"}"));
+	TEST_EXPECT(nws::get_user_by_id(*h.pool.acquire(), id)->username == "web_pinned_renamed");
+	TEST_EXPECT(nwlogin_succeeded(nwlogin(h, "", "", cookie)));
 	TEST_EXPECT(admin_put("{\"nwhandle\":\"Pinned\"}"));
 	TEST_EXPECT(nwlogin_succeeded(nwlogin(h, "", "", cookie)));
 	const auto deleted = h.send("DELETE", user_path, {kBearer});
@@ -1212,6 +1242,13 @@ int test_untrusted_proxy_header_ignored(Harness &h) {
 // generation.
 constexpr uint32_t kConcurrentRid = 2000;
 constexpr int kConcurrentRegistrations = 16;
+// The host writes run back to back, each re-taking the write lock moments after
+// the last COMMIT, and SQLite's busy handler polls (1 ms sleeps growing to
+// 100 ms) rather than queueing, so a registration's BEGIN IMMEDIATE can starve
+// behind the whole run. The pool keeps the server's busy timeout, so that run
+// must fit inside it: at synchronous=FULL every commit fsynced the WAL, and on
+// a loaded disk (WSL2's, under a parallel build) the run once outlasted 5 s
+// and 13 of the 16 registrations failed "database is locked".
 constexpr int kHostGenerations = 40;
 // The case checks that the replies are each request's own and consistent, not
 // how fast they come: the bcrypt registrations queue behind Crow's few workers
@@ -1563,7 +1600,8 @@ int test_listed_server_owners(Harness &h) {
 		if (l.owner) {
 			const std::string key(opennova::hostdb::kHostKeyChars,
 			                      static_cast<char>('A' + (l.rid - 2001)));
-			opennova::hostdb::record_host_key(*conn, key, *l.owner);
+			TEST_EXPECT(opennova::hostdb::record_host_key(
+					*conn, key, *l.owner, nws::get_user_by_id(*conn, *l.owner)->credentials_gen));
 			row.host_user_id = opennova::hostdb::claim_host_key(*conn, key, l.rid);
 			TEST_EXPECT(row.host_user_id == l.owner);
 		}
@@ -1988,7 +2026,7 @@ int test_owner_host_push(Harness &h) {
 	// key minted for her (as /NWHost.dll records one for her retail login).
 	const std::string key = "PONMLKJIHGFEDCBAAAAABBBBCCCCDDDDEEEEFFFFGGGGHHHH";
 	TEST_EXPECT(opennova::hostdb::is_host_key(key));
-	opennova::hostdb::record_host_key(*h.pool.acquire(), key, alice);
+	TEST_EXPECT(record_key_for(h, key, alice));
 	PushHost mine(h.nw_udp.bound_port(), 0x4f574e31u);
 	TEST_EXPECT(mine.host("Owner Push Host"));
 	mine.present_key(key);
@@ -2130,7 +2168,7 @@ int test_owner_host_push(Harness &h) {
 	// route's look-up, but that connection never presented it (its lobby names no owner), so the
 	// listener refuses the push with the same 404 and nothing reaches the host.
 	const std::string stray = "PPPPOOOONNNNMMMMLLLLKKKKJJJJIIIIHHHHGGGGFFFFEEEE";
-	opennova::hostdb::record_host_key(*h.pool.acquire(), stray, alice);
+	TEST_EXPECT(record_key_for(h, stray, alice));
 	TEST_EXPECT(opennova::hostdb::claim_host_key(*h.pool.acquire(), stray, anon->rid) == alice);
 	TEST_EXPECT(opennova::hostdb::listing_owned_by(*h.pool.acquire(), anon->rid, alice));
 	bool lobby_unowned = false;
@@ -2190,7 +2228,7 @@ int test_owner_host_push(Harness &h) {
 	const std::string erin_s = login_token(h, "10.31.0.5", "owner_erin", "pw-owner-erin");
 	TEST_EXPECT(!erin_s.empty());
 	const std::string erin_key = "ABABABABCDCDCDCDEFEFEFEFGHGHGHGHIJIJIJIJKLKLKLKL";
-	opennova::hostdb::record_host_key(*h.pool.acquire(), erin_key, erin);
+	TEST_EXPECT(record_key_for(h, erin_key, erin));
 	PushHost erins(h.nw_udp.bound_port(), 0x4552494eu);
 	TEST_EXPECT(erins.host("Erin Push Host"));
 	erins.present_key(erin_key);
@@ -2611,10 +2649,11 @@ bool has_set_cookie(const net::HttpReply &reply, const std::string &text) {
 
 // A CR, LF, NUL, ';' or ',' in any value a Set-Cookie carries never splits the
 // response or forges a cookie: the cookie goes out empty. The sources: the
-// /nwprepare.dll query (VER1, VER2, GT, CC), an nwhandle from /api/register and
-// from the admin create and update (NWHANDLE, CHAR at /NWLogin.dll and
-// /NWAccount.dll), an admin-set PCID and expansion bits (PCID, EXPBITS), and the
-// pfid a first relay leg stored (NWPF on the second /NWHost.dll and
+// /nwprepare.dll query (VER1, VER2, GT, CC), a stored nwhandle (NWHANDLE, CHAR
+// at /NWLogin.dll and /NWAccount.dll: /api/register and the admin create and
+// update refuse a handle with a control byte, so these are written to the
+// table directly), an admin-set PCID and expansion bits (PCID, EXPBITS), and
+// the pfid a first relay leg stored (NWPF on the second /NWHost.dll and
 // /NWJoin.dll leg). The values a stock client sends, and a handle with a
 // space, go out byte for byte.
 int test_header_values_cannot_split(Harness &h) {
@@ -2649,12 +2688,21 @@ int test_header_values_cannot_split(Harness &h) {
 			"http://127.0.0.1:" + std::to_string(h.port) + "/nwhost.dll|" +
 					"http://127.0.0.1:" + std::to_string(h.port) + "/jop_2.gsb");
 
-	// An nwhandle from /api/register, and expansion bits an admin set: the
-	// retail login's relay and completion.
+	// A stored nwhandle, and expansion bits an admin set: the retail login's
+	// relay and completion. /api/register refuses the handle itself.
+	auto set_handle = [&h](const std::string &username, const std::string &handle) {
+		h.pool.acquire()->exec("UPDATE players SET nwhandle = ? WHERE username = ?;",
+				{ opennova::db::BindValue(handle), opennova::db::BindValue(username) });
+	};
 	reply = h.send("POST", "/api/register", { kJson, kCsrf, from_ip("10.41.0.1") },
 			"{\"username\":\"split_reg\",\"password\":\"pw-split\","
 			"\"nwhandle\":\"Reg\\r\\nX-Injected: reg\"}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 400);
+	TEST_EXPECT(str(crow::json::load(body_text(reply))["error"]) == "invalid_field");
+	reply = h.send("POST", "/api/register", { kJson, kCsrf, from_ip("10.41.0.1") },
+			"{\"username\":\"split_reg\",\"password\":\"pw-split\",\"nwhandle\":\"Reg\"}");
 	TEST_EXPECT(reply.transport_ok && reply.code == 201);
+	set_handle("split_reg", "Reg\r\nX-Injected: reg");
 	const auto reg = nws::get_user_by_username(*h.pool.acquire(), "split_reg");
 	TEST_EXPECT(reg.has_value());
 	reply = h.send("PUT", "/api/admin/users/" + std::to_string(reg->id) + "/game-access",
@@ -2674,13 +2722,22 @@ int test_header_values_cannot_split(Harness &h) {
 	}
 	TEST_EXPECT(has_set_cookie(reply, "PCID=" + reg->pcid + "; Path=/"));
 
-	// An nwhandle from the admin create, then an nwhandle and a PCID from the
-	// admin update: /NWAccount.dll refreshes them.
+	// A stored nwhandle (the admin create and update refuse it), then a PCID
+	// from the admin update: /NWAccount.dll refreshes them for the request's own
+	// retail login.
 	reply = h.send("POST", "/api/admin/users", { kJson, kBearer },
 			"{\"username\":\"split_admin\",\"password\":\"pw-split\",\"pcid\":\"5p11a001\","
 			"\"nwhandle\":\"Adm\\nX-Injected: adm\"}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 400);
+	reply = h.send("POST", "/api/admin/users", { kJson, kBearer },
+			"{\"username\":\"split_admin\",\"password\":\"pw-split\",\"pcid\":\"5p11a001\","
+			"\"nwhandle\":\"Adm\"}");
 	TEST_EXPECT(reply.transport_ok && reply.code == 201);
-	const std::vector<std::string> as_admin_user = { "Cookie: NWHANDLE=split_admin" };
+	set_handle("split_admin", "Adm\nX-Injected: adm");
+	const std::string admin_tag =
+			set_cookie_value(retail_login(h, "split_admin", "pw-split", {}), "LOGINSESSIONTAG");
+	TEST_EXPECT(!admin_tag.empty());
+	const std::vector<std::string> as_admin_user = { "Cookie: LOGINSESSIONTAG=" + admin_tag };
 	reply = h.send_to(h.secure_port, "GET", "/NWAccount.dll", as_admin_user);
 	TEST_EXPECT(split_free(reply) && reply.code == 200);
 	TEST_EXPECT(
@@ -2689,9 +2746,12 @@ int test_header_values_cannot_split(Harness &h) {
 	const auto adm = nws::get_user_by_username(*h.pool.acquire(), "split_admin");
 	TEST_EXPECT(adm.has_value());
 	reply = h.send("PUT", "/api/admin/users/" + std::to_string(adm->id), { kJson, kBearer },
-			"{\"nwhandle\":\"Upd\\r\\n\\r\\nX-Injected: upd\","
-			"\"pcid\":\"p,c;id\\r\\nX-Injected: pcid\"}");
+			"{\"nwhandle\":\"Upd\\r\\n\\r\\nX-Injected: upd\"}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 400);
+	reply = h.send("PUT", "/api/admin/users/" + std::to_string(adm->id), { kJson, kBearer },
+			"{\"pcid\":\"p,c;id\\r\\nX-Injected: pcid\"}");
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	set_handle("split_admin", "Upd\r\n\r\nX-Injected: upd");
 	reply = h.send_to(h.secure_port, "GET", "/NWCharacter.dll", as_admin_user);
 	TEST_EXPECT(split_free(reply) && reply.code == 200);
 	TEST_EXPECT(
@@ -2707,7 +2767,11 @@ int test_header_values_cannot_split(Harness &h) {
 		p.nwhandle = "Space Handle";
 		TEST_EXPECT(nws::create_user(*h.pool.acquire(), p).ok);
 	}
-	reply = h.send_to(h.secure_port, "GET", "/NWAccount.dll", { "Cookie: NWHANDLE=split_space" });
+	const std::string space_tag =
+			set_cookie_value(retail_login(h, "split_space", "pw-split", {}), "LOGINSESSIONTAG");
+	TEST_EXPECT(!space_tag.empty());
+	reply = h.send_to(
+			h.secure_port, "GET", "/NWAccount.dll", { "Cookie: LOGINSESSIONTAG=" + space_tag });
 	TEST_EXPECT(split_free(reply) && reply.code == 200);
 	TEST_EXPECT(has_set_cookie(reply, "NWHANDLE=Space Handle; Path=/"));
 	TEST_EXPECT(has_set_cookie(reply, "CHAR=Space Handle; Path=/"));
@@ -2738,6 +2802,544 @@ int test_header_values_cannot_split(Harness &h) {
 
 	auto conn = h.pool.acquire();
 	opennova::hostdb::remove_host_by_rid(*conn, kSplitRid);
+	return 0;
+}
+
+// ---- The credentials generation, retail identity, the API's proxy, page values
+
+// Whether /NWAccount.dll on the third listener, with `cookies`, names
+// `handle`: its identity cookies set to the account's handle.
+bool account_page_names(
+		Harness &h, const std::vector<std::string> &cookies, const std::string &handle) {
+	const auto reply =
+			h.send_to(h.fresh_port, "GET", "/NWAccount.dll?success=jop_2_main.htm", cookies);
+	return reply.transport_ok && reply.code == 200 &&
+			has_set_cookie(reply, "NWHANDLE=" + handle + "; Path=/") &&
+			has_set_cookie(reply, "CHAR=" + handle + "; Path=/");
+}
+
+// /NWAccount.dll on the third listener with `cookies` names no account: no
+// identity cookie at all.
+bool account_page_anonymous(Harness &h, const std::vector<std::string> &cookies) {
+	const auto reply =
+			h.send_to(h.fresh_port, "GET", "/NWAccount.dll?success=jop_2_main.htm", cookies);
+	return reply.transport_ok && reply.code == 200 &&
+			header_values(reply, "Set-Cookie").size() == 1 &&
+			!set_cookie_value(reply, "YOURIP").empty();
+}
+
+// The race a password reset can run against a login, made deterministic: the
+// seam commits an admin reset of the account inside each password check,
+// after the password matched and before the route grants anything (to the
+// same password, so the credentials generation alone moves). The site login
+// answers the generic 401 with no cookie and mints no session; the retail
+// login (on the third listener) answers a bad password's page with no session
+// tag, writes no session row and stores no pin; neither remembers its
+// address. Without the seam the same logins succeed. Then a reset made behind
+// the HTTP layer's back (a direct update_user, which drops no pin) ends the
+// next login's session tag and pin all the same: the generation refuses them.
+int test_reset_during_login(Harness &h) {
+	const int64_t id = make_account(h, "race_user", "pw-race");
+	TEST_EXPECT(id > 0);
+	const std::vector<std::string> pin = { "Cookie: PERSISTENTEXPRESSLOGINDATA=pin-race-user" };
+	auto reset = [&h](int64_t user_id) {
+		nws::UpdateUserParams p;
+		p.password_plaintext = "pw-race";
+		return nws::update_user(*h.pool.acquire(), user_id, p).ok;
+	};
+	auto generation = [&h, id] {
+		return nws::get_user_by_id(*h.pool.acquire(), id)->credentials_gen;
+	};
+	auto known = [&h](const std::string &address) {
+		return nws::is_known_login_address(*h.pool.acquire(), "race_user", address);
+	};
+	auto rows = [&h, id](const std::string &table) {
+		return h.pool.acquire()
+				->query("SELECT COUNT(*) FROM " + table + " WHERE user_id = ?;",
+						{ opennova::db::BindValue(id) })
+				.front()
+				.as_int(0)
+				.value_or(-1);
+	};
+
+	std::atomic<int> resets{ 0 };
+	nws::set_password_accepted_hook([&reset, &resets](int64_t user_id) {
+		if (reset(user_id))
+			resets.fetch_add(1);
+	});
+	const auto web = login(h, "10.31.0.1", "race_user", "pw-race");
+	const auto retail = nwlogin_to(h, h.fresh_port, "race_user", "pw-race", pin);
+	nws::set_password_accepted_hook(nullptr);
+	TEST_EXPECT(resets.load() == 2);
+	TEST_EXPECT(generation() == 2);
+	TEST_EXPECT(web.transport_ok && web.code == 401);
+	TEST_EXPECT(body_text(web) == "{\"error\":\"invalid_credentials\"}");
+	TEST_EXPECT(header_values(web, "Set-Cookie").empty());
+	TEST_EXPECT(rows("web_sessions") == 0);
+	TEST_EXPECT(retail.transport_ok && retail.code == 200);
+	TEST_EXPECT(set_cookie_value(retail, "LOGINSESSIONTAG").empty());
+	TEST_EXPECT(body_text(retail).find("Invalid username or password") != std::string::npos);
+	TEST_EXPECT(rows("active_user_sessions") == 0);
+	TEST_EXPECT(!known("10.31.0.1") && !known("127.0.0.1"));
+	TEST_EXPECT(
+			set_cookie_value(nwlogin_to(h, h.fresh_port, "", "", pin), "LOGINSESSIONTAG").empty());
+
+	// Without the seam: the same logins succeed and grant.
+	TEST_EXPECT(login(h, "10.31.0.1", "race_user", "pw-race").code == 200);
+	TEST_EXPECT(rows("web_sessions") == 1);
+	const auto good = nwlogin_to(h, h.fresh_port, "race_user", "pw-race", pin);
+	TEST_EXPECT(nwlogin_succeeded(good));
+	TEST_EXPECT(known("10.31.0.1") && known("127.0.0.1"));
+	const std::vector<std::string> tag = { "Cookie: LOGINSESSIONTAG=" +
+		set_cookie_value(good, "LOGINSESSIONTAG") };
+	TEST_EXPECT(account_page_names(h, tag, "race_user"));
+	TEST_EXPECT(account_page_names(h, pin, "race_user"));
+
+	// A reset behind the HTTP layer's back: the tag and the pin stop counting.
+	TEST_EXPECT(reset(id));
+	TEST_EXPECT(account_page_anonymous(h, tag));
+	TEST_EXPECT(account_page_anonymous(h, pin));
+	TEST_EXPECT(
+			set_cookie_value(nwlogin_to(h, h.fresh_port, "", "", pin), "LOGINSESSIONTAG").empty());
+	return 0;
+}
+
+constexpr uint32_t kJoinRid = 4343;
+
+// The /NWJoin.dll second leg on the third listener, as a stock client follows
+// the first: the NWJOINSESSIONTAG the first set, beside `cookies`
+// ("NAME=value" each).
+net::HttpReply join(Harness &h, const std::vector<std::string> &cookies) {
+	const auto first =
+			h.send_to(h.fresh_port, "GET", "/NWJoin.dll?rid=" + std::to_string(kJoinRid));
+	std::string jar = "Cookie: NWJOINSESSIONTAG=" + join_tag(first);
+	for (const std::string &cookie : cookies)
+		jar += "; " + cookie;
+	return h.send_to(h.fresh_port, "GET", "/NWJoin.dll", { jar });
+}
+
+// The account the join just recorded in host_players for the test host (-1:
+// no row). Each join from the harness replaces the one row its address keeps.
+int64_t joined_user(Harness &h) {
+	const auto rows =
+			h.pool.acquire()->query("SELECT user_id FROM host_players WHERE host_rid = ?;",
+					{ opennova::db::BindValue(static_cast<int64_t>(kJoinRid)) });
+	return rows.empty() ? -1 : rows.front().as_int(0).value_or(0);
+}
+
+void forget_joins(Harness &h) {
+	h.pool.acquire()->exec("DELETE FROM host_players WHERE host_rid = ?;",
+			{ opennova::db::BindValue(static_cast<int64_t>(kJoinRid)) });
+}
+
+// `text` with each of `fills`' markers replaced by its text, verbatim: the
+// expected page built without the renderer under test.
+std::string fill_markers(
+		std::string text, const std::vector<std::pair<std::string, std::string>> &fills) {
+	for (const auto &[marker, value] : fills) {
+		for (auto at = text.find(marker); at != std::string::npos;
+				at = text.find(marker, at + value.size())) {
+			text.replace(at, marker.size(), value);
+		}
+	}
+	return text;
+}
+
+// The .joi /NWJoin.dll's second leg renders for the join cases' host, its
+// server name given as the page must carry it. NK and CK are written out: the
+// host's "10.0.0.43:32771" and app id "20", each char plus its key char
+// ("diheijefhgcdjcgcjcfbd", "cfhdcegjigecjehcgjdhe") less '0'.
+std::string expected_joi(Harness &h, const std::string &server_name_as_sent) {
+	return fill_markers(
+			test_io::read_file_text((h.retail_root / "templates" / "jop_2_join.joi").string()),
+			{ { "{{NK}}", "eifegjcjkqffqjh" }, { "{{CK}}", "ef" }, { "{{NI}}", "10.0.0.43" },
+					{ "{{NP}}", "32771" }, { "{{BK}}", "986119" },
+					{ "{{SERVER_NAME}}", server_name_as_sent } });
+}
+
+// /NWJoin.dll takes its joiner from server-side state only: the request's own
+// retail login (its LOGINSESSIONTAG, else its PERSISTENTEXPRESSLOGINDATA pin),
+// never the NWHANDLE cookie, which names an account but proves nothing. An
+// identified joiner gets the PUB* identity and a host_players row, the .joi
+// page byte for byte; an NWHANDLE alone gets neither, and beside a login it
+// changes nothing. A ban (an admin update) ends both cookies' standing, so the
+// banned joiner is anonymous; an account made inactive with no such update
+// (its login still standing) is refused with the msgbase failure page and the
+// game login's NWEC11 / NWEC12 message. /NWAccount.dll resolves the same way.
+int test_join_identity(Harness &h) {
+	{
+		opennova::hostdb::HostRow row;
+		row.rid = kJoinRid;
+		row.gsid = "GSID-JOIN";
+		row.game = "jop_2_consumer";
+		row.app_id = "20";
+		row.server_name = "Plain Server 7";
+		row.host_ip = "10.0.0.43";
+		row.host_port = 32771;
+		row.pcid_key = "pcid-key-for-the-join-case";
+		opennova::hostdb::upsert_host(*h.pool.acquire(), row);
+	}
+	const int64_t joiner = make_account(h, "joiner_ok", "pw-joiner");
+	const int64_t victim = make_account(h, "join_victim", "pw-victim");
+	const int64_t other = make_account(h, "joiner_b", "pw-joiner-b");
+	TEST_EXPECT(joiner > 0 && victim > 0 && other > 0);
+	const std::string pin = "PERSISTENTEXPRESSLOGINDATA=pin-joiner";
+	const auto logged_in =
+			nwlogin_to(h, h.fresh_port, "joiner_ok", "pw-joiner", { "Cookie: " + pin });
+	TEST_EXPECT(nwlogin_succeeded(logged_in));
+	const std::string tag = "LOGINSESSIONTAG=" + set_cookie_value(logged_in, "LOGINSESSIONTAG");
+	auto identified = [](const net::HttpReply &reply) {
+		return reply.transport_ok && reply.code == 200 &&
+				!set_cookie_value(reply, "PUBPCID").empty() &&
+				!set_cookie_value(reply, "PUBNAMEINFO").empty();
+	};
+	auto anonymous = [](const net::HttpReply &reply) {
+		return reply.transport_ok && reply.code == 200 &&
+				has_set_cookie(reply, "PUBPCID=; Path=/") &&
+				has_set_cookie(reply, "PUBNAMEINFO=; Path=/");
+	};
+
+	forget_joins(h);
+	auto reply = join(h, { tag });
+	TEST_EXPECT(identified(reply));
+	TEST_EXPECT(body_text(reply) == expected_joi(h, "Plain Server 7"));
+	TEST_EXPECT(
+			body_text(reply).find("[NK=eifegjcjkqffqjh&CK=ef&NI=10.0.0.43&NP=32771&BK=986119&]") !=
+			std::string::npos);
+	TEST_EXPECT(joined_user(h) == joiner);
+
+	forget_joins(h);
+	TEST_EXPECT(identified(join(h, { pin })));
+	TEST_EXPECT(joined_user(h) == joiner);
+
+	// The handle cookie alone: nobody; beside the login: the login.
+	forget_joins(h);
+	reply = join(h, { "NWHANDLE=join_victim" });
+	TEST_EXPECT(anonymous(reply));
+	TEST_EXPECT(body_text(reply) == expected_joi(h, "Plain Server 7"));
+	TEST_EXPECT(joined_user(h) == -1);
+	TEST_EXPECT(identified(join(h, { "NWHANDLE=join_victim", tag })));
+	TEST_EXPECT(joined_user(h) == joiner);
+	TEST_EXPECT(account_page_anonymous(h, { "Cookie: NWHANDLE=join_victim" }));
+	TEST_EXPECT(account_page_names(h, { "Cookie: NWHANDLE=join_victim; " + tag }, "joiner_ok"));
+
+	// A ban through the admin route: the login and its pin stand for nobody.
+	reply = h.send("PUT", "/api/admin/users/" + std::to_string(joiner), { kJson, kBearer },
+			"{\"account_status\":\"banned\"}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	forget_joins(h);
+	TEST_EXPECT(anonymous(join(h, { tag, pin })));
+	TEST_EXPECT(joined_user(h) == -1);
+	TEST_EXPECT(account_page_anonymous(h, { "Cookie: " + tag }));
+
+	// Inactive with its login still standing: refused, the failure page.
+	const auto other_login = nwlogin_to(h, h.fresh_port, "joiner_b", "pw-joiner-b");
+	TEST_EXPECT(nwlogin_succeeded(other_login));
+	const std::string other_tag =
+			"LOGINSESSIONTAG=" + set_cookie_value(other_login, "LOGINSESSIONTAG");
+	const std::string msg_page =
+			test_io::read_file_text((h.retail_root / "templates" / "jop_2_msg.htm").string());
+	for (const auto &[status, message] :
+			{ std::pair<const char *, const char *>{
+					  "banned", "This NovaWorld account has been banned. NWEC11" },
+					{ "disabled", "This NovaWorld account is restricted. NWEC12" } }) {
+		h.pool.acquire()->exec("UPDATE players SET account_status = ? WHERE id = ?;",
+				{ opennova::db::BindValue(std::string(status)), opennova::db::BindValue(other) });
+		forget_joins(h);
+		reply = join(h, { other_tag });
+		// The message page (its one marker is MESSAGE), filled by hand.
+		const std::string expected = fill_markers(msg_page, { { "{{MESSAGE}}", message } });
+		TEST_EXPECT(expected.find("{{") == std::string::npos);
+		TEST_EXPECT(reply.transport_ok && reply.code == 200 && body_text(reply) == expected);
+		TEST_EXPECT(header_values(reply, "Set-Cookie").size() == 1); // YOURIP alone
+		TEST_EXPECT(joined_user(h) == -1);
+		TEST_EXPECT(account_page_anonymous(h, { "Cookie: " + other_tag }));
+	}
+	h.pool.acquire()->exec("UPDATE players SET account_status = 'active' WHERE id = ?;",
+			{ opennova::db::BindValue(other) });
+	forget_joins(h);
+	TEST_EXPECT(identified(join(h, { other_tag })));
+	TEST_EXPECT(joined_user(h) == other);
+	TEST_EXPECT(account_page_names(h, { "Cookie: " + other_tag }, "joiner_b"));
+
+	forget_joins(h);
+	opennova::hostdb::remove_host_by_rid(*h.pool.acquire(), kJoinRid);
+	return 0;
+}
+
+// ONNET_API_PROXY_ONLY: the third listener answers /api (and everything under
+// it, a route or not, any method) with 403 {"error":"proxy_required"} to a
+// peer that is not its trusted proxy, while its retail routes, the .gsb feed,
+// its templates and its static files answer that peer as ever. The harness
+// listener, whose trusted proxy the harness is, answers /api/ (every website
+// case here runs through it); the Secure listener, with the setting off,
+// answers its /api/ to anyone.
+int test_api_proxy_only(Harness &h) {
+	for (const auto &[method, path] :
+			{ std::pair<const char *, const char *>{ "GET", "/api/health" }, { "GET", "/api" },
+					{ "GET", "/api/lobbies" }, { "GET", "/api/no-such-route" },
+					{ "POST", "/api/login" }, { "POST", "/api/register" },
+					{ "GET", "/api/admin/users" }, { "PUT", "/api/admin/server-status" },
+					{ "GET", "/api/me/hosts" }, { "POST", "/api/me/hosts/1/command" },
+					{ "POST", "/api/me/hosts/1/stop" }, { "GET", "/api/admin/hosts" },
+					{ "POST", "/api/admin/hosts/1/command" },
+					{ "POST", "/api/admin/hosts/1/stop" } }) {
+		const auto reply = h.send_to(h.fresh_port, method, path, { kJson, kCsrf, kBearer }, "{}");
+		if (reply.code != 403)
+			std::fprintf(stderr, "  %s %s: %s\n", method, path, describe(reply).c_str());
+		TEST_EXPECT(reply.transport_ok && reply.code == 403);
+		TEST_EXPECT(body_text(reply) == "{\"error\":\"proxy_required\"}");
+	}
+	for (const char *path : { "/nwprepare.dll?url=jop_2_start.htm", "/NWStart.dll", "/NWLogout.dll",
+				 "/NWAccount.dll", "/jop_2.gsb", "/jop_2_main.htm", "/static/jop_2/nonbhdx2.tga",
+				 "/assets/app.js" }) {
+		const auto reply = h.send_to(h.fresh_port, "GET", path);
+		if (reply.code != 200)
+			std::fprintf(stderr, "  GET %s: %s\n", path, describe(reply).c_str());
+		TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	}
+	TEST_EXPECT(h.send("GET", "/api/health").code == 200);
+	TEST_EXPECT(h.send_to(h.secure_port, "GET", "/api/health").code == 200);
+	return 0;
+}
+
+// A value a page is filled with is text: & < > " ' go out as entities, which
+// a stock client's page parser turns back into the characters, so a request's
+// IN / OUT / MSGBASE on /NWStart.dll, a listed server's name in the .joi page
+// and an admin's maintenance message on the login failure page add no markup.
+// Every value the service and a stock client actually use (A-P keys, session
+// tags, page names, numbers, addresses, URLs, names with spaces) goes out byte
+// for byte, so the pages a stock client gets are the template with the value
+// in it, unchanged.
+int test_template_values_escaped(Harness &h) {
+	for (const std::string &plain : { std::string("ABCDEFGHIJKLMNOPABCDEFGHIJKLMNOP"),
+				 std::string("NWServer:NWLogin.dll:SESSIONTAG:123:0a1b2c3d"),
+				 std::string("jop_2_main.htm"), std::string("32771"), std::string("10.0.0.43"),
+				 std::string("http://127.0.0.1:8080/nwhost.dll"), std::string("Space Handle"),
+				 std::string("Contacting login databases..."), std::string("") }) {
+		TEST_EXPECT(nws::html_escape(plain) == plain);
+		TEST_EXPECT(nws::render_template("[{{V}}]", { { "V", plain } }) == "[" + plain + "]");
+	}
+	TEST_EXPECT(nws::html_escape("Tom & Jerry's <b>\"Base\"</b>") ==
+			"Tom &amp; Jerry&#39;s &lt;b&gt;&quot;Base&quot;&lt;/b&gt;");
+	TEST_EXPECT(nws::render_template("{{ V }}|{{MISSING}}", { { "V", "<i>" } }) ==
+			"&lt;i&gt;|{{MISSING}}");
+
+	// /NWStart.dll: the login page with IN / OUT / MSGBASE in its form.
+	const std::string login_page =
+			test_io::read_file_text((h.retail_root / "templates" / "jop_2_login.htm").string());
+	auto start = [&h](const std::string &in, const std::string &msgbase) {
+		return h.send_to(h.secure_port, "GET",
+				"/NWStart.dll?OUT=jop_2_login.htm&IN=" + pct(in) + "&MSGBASE=" + pct(msgbase));
+	};
+	auto filled = [&login_page](const std::string &in, const std::string &msgbase) {
+		std::string page = login_page;
+		for (const auto &[key, value] : { std::pair<std::string, std::string>{ "{{IN}}", in },
+					 { "{{OUT}}", "jop_2_login.htm" }, { "{{MSGBASE}}", msgbase } }) {
+			const auto at = page.find(key);
+			if (at != std::string::npos)
+				page.replace(at, key.size(), value);
+		}
+		return page;
+	};
+	auto reply = start("jop_2_main.htm", "jop_2_msg.htm");
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	TEST_EXPECT(body_text(reply) == filled("jop_2_main.htm", "jop_2_msg.htm"));
+	reply = start("x\"><b>in</b>", "m'><i>");
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	TEST_EXPECT(
+			body_text(reply) == filled("x&quot;&gt;&lt;b&gt;in&lt;/b&gt;", "m&#39;&gt;&lt;i&gt;"));
+	TEST_EXPECT(body_text(reply).find("<b>in</b>") == std::string::npos);
+
+	// A listed server's own name in the .joi page.
+	{
+		opennova::hostdb::HostRow row;
+		row.rid = kJoinRid;
+		row.gsid = "GSID-JOIN";
+		row.game = "jop_2_consumer";
+		row.app_id = "20";
+		row.server_name = "Tom & Jerry's <b>Base</b>";
+		row.host_ip = "10.0.0.43";
+		row.host_port = 32771;
+		opennova::hostdb::upsert_host(*h.pool.acquire(), row);
+	}
+	reply = join(h, {});
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	TEST_EXPECT(
+			body_text(reply) == expected_joi(h, "Tom &amp; Jerry&#39;s &lt;b&gt;Base&lt;/b&gt;"));
+	TEST_EXPECT(body_text(reply).find("Joining Tom &amp; Jerry&#39;s &lt;b&gt;Base&lt;/b&gt;...") !=
+			std::string::npos);
+	opennova::hostdb::remove_host_by_rid(*h.pool.acquire(), kJoinRid);
+
+	// An admin's maintenance message on the retail login's failure page.
+	reply = h.send("PUT", "/api/admin/server-status", { kJson, kBearer },
+			"{\"maintenance_enabled\":true,\"message\":\"Back <b>soon</b> & then some\"}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	reply = nwlogin_to(h, h.fresh_port, "nobody", "x");
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	TEST_EXPECT(body_text(reply).find("Back &lt;b&gt;soon&lt;/b&gt; &amp; then some") !=
+			std::string::npos);
+	TEST_EXPECT(body_text(reply).find("<b>soon</b>") == std::string::npos);
+	reply = h.send("PUT", "/api/admin/server-status", { kJson, kBearer },
+			"{\"maintenance_enabled\":false}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	return 0;
+}
+
+// POST /api/register's handle: the nwhandle given, else the username, takes
+// the handle rule (at most 30 bytes, the longest a stock host reads whole; no
+// control byte): a 31-byte one, given or defaulted, is 400 invalid_field and
+// adds no account; a 30-byte one registers.
+int test_register_handle_rule(Harness &h) {
+	auto reg = [&h](const std::string &ip, const std::string &body) {
+		return h.send("POST", "/api/register", { kJson, kCsrf, from_ip(ip) }, body);
+	};
+	const std::size_t before = nws::list_users(*h.pool.acquire()).size();
+	for (const std::string &body :
+			{ "{\"username\":\"handle_long\",\"password\":\"pw\",\"nwhandle\":\"" +
+							std::string(31, 'h') + "\"}",
+					"{\"username\":\"" + std::string(31, 'u') + "\",\"password\":\"pw\"}",
+					std::string("{\"username\":\"handle_tab\",\"password\":\"pw\",\"nwhandle\":"
+								"\"a\\tb\"}") }) {
+		const auto reply = reg("10.42.0.1", body);
+		TEST_EXPECT(reply.transport_ok && reply.code == 400);
+		TEST_EXPECT(str(crow::json::load(body_text(reply))["error"]) == "invalid_field");
+	}
+	TEST_EXPECT(nws::list_users(*h.pool.acquire()).size() == before);
+	auto reply =
+			reg("10.42.0.2", "{\"username\":\"" + std::string(30, 'u') + "\",\"password\":\"pw\"}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 201);
+	TEST_EXPECT(
+			str(crow::json::load(body_text(reply))["user"]["nwhandle"]) == std::string(30, 'u'));
+	return 0;
+}
+
+// A retail login's session row stays alive while the login is used: each
+// request it names its account by (here /NWJoin.dll and /NWAccount.dll)
+// restarts the row's idle clock, so the main tick's 2 h sweep keeps a login
+// used 1 h 50 min after its GET /NWLogin.dll, and the join after it still
+// names the joiner. A row left idle past the 2 h is swept, and its tag then
+// names no one.
+int test_login_row_kept_alive(Harness &h) {
+	{
+		opennova::hostdb::HostRow row;
+		row.rid = kJoinRid;
+		row.gsid = "GSID-JOIN";
+		row.game = "jop_2_consumer";
+		row.app_id = "20";
+		row.server_name = "Plain Server 7";
+		row.host_ip = "10.0.0.43";
+		row.host_port = 32771;
+		row.pcid_key = "pcid-key-for-the-join-case";
+		opennova::hostdb::upsert_host(*h.pool.acquire(), row);
+	}
+	const int64_t id = make_account(h, "lobby_sitter", "pw-sitter");
+	TEST_EXPECT(id > 0);
+	const auto logged_in = nwlogin_to(h, h.fresh_port, "lobby_sitter", "pw-sitter");
+	TEST_EXPECT(nwlogin_succeeded(logged_in));
+	const std::string tag = "LOGINSESSIONTAG=" + set_cookie_value(logged_in, "LOGINSESSIONTAG");
+	auto age = [&h, id](const char *ago) {
+		h.pool.acquire()->exec(
+				std::string("UPDATE active_user_sessions SET last_seen_at = datetime('now', '") +
+						ago + "') WHERE user_id = ?;",
+				{ opennova::db::BindValue(id) });
+	};
+	auto fresh_row = [&h, id] {
+		return !h.pool.acquire()
+						->query("SELECT 1 FROM active_user_sessions WHERE user_id = ? "
+								"AND last_seen_at >= datetime('now', '-5 seconds');",
+								{ opennova::db::BindValue(id) })
+						.empty();
+	};
+	auto sweep = [&h] {
+		return nws::evict_active_user_sessions_older_than(*h.pool.acquire(), 2 * 60 * 60);
+	};
+	auto joined_by_login = [&h, &tag] {
+		const auto reply = join(h, { tag });
+		return reply.transport_ok && reply.code == 200 &&
+				!set_cookie_value(reply, "PUBPCID").empty();
+	};
+
+	age("-110 minutes");
+	TEST_EXPECT(joined_by_login());
+	TEST_EXPECT(fresh_row());
+	sweep();
+	TEST_EXPECT(joined_by_login());
+
+	age("-110 minutes");
+	TEST_EXPECT(account_page_names(h, { "Cookie: " + tag }, "lobby_sitter"));
+	TEST_EXPECT(fresh_row());
+
+	age("-121 minutes");
+	TEST_EXPECT(sweep() >= 1);
+	const auto reply = join(h, { tag });
+	TEST_EXPECT(
+			reply.transport_ok && reply.code == 200 && has_set_cookie(reply, "PUBPCID=; Path=/"));
+	forget_joins(h);
+	opennova::hostdb::remove_host_by_rid(*h.pool.acquire(), kJoinRid);
+	return 0;
+}
+
+// /NWHost.dll's second leg serves a tag's HOSTKEY once: the same tag again is
+// the unknown-tag 400, with no key.
+int test_host_tag_serves_once(Harness &h) {
+	const auto first =
+			h.send_to(h.fresh_port, "GET", "/NWHost.dll?success=jop_2_host2.htm&pfid=28");
+	const std::string tag = join_tag(first);
+	TEST_EXPECT(!tag.empty());
+	const auto session = h.sessions.get_host(tag);
+	TEST_EXPECT(session.has_value());
+	const std::vector<std::string> jar = { "Cookie: NWJOINSESSIONTAG=" + tag };
+	auto reply = h.send_to(h.fresh_port, "GET", "/NWHost.dll", jar);
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	TEST_EXPECT(body_text(reply).find("[HOSTKEY=" + session->host_key + "&]") != std::string::npos);
+	TEST_EXPECT(!h.sessions.get_host(tag).has_value());
+	reply = h.send_to(h.fresh_port, "GET", "/NWHost.dll", jar);
+	TEST_EXPECT(reply.transport_ok && reply.code == 400);
+	TEST_EXPECT(body_text(reply).find(session->host_key) == std::string::npos);
+	return 0;
+}
+
+// A database failure's reply is its error code and nothing else: the
+// SqliteError's text names the failing statement ("exec: INSERT INTO players
+// ..."), its extended code and its wait, and goes to the server log alone. A
+// trigger fails each route's write the way any SqliteError does: POST
+// /api/register (the public route, create_user's db_error), PUT
+// /api/admin/server-status and POST /api/admin/hosts (its upsert_failed).
+// Nothing lands.
+int test_db_failure_reply_carries_code_alone(Harness &h) {
+	const char *const triggers[][2] = {
+		{ "harness_fail_players", "players" },
+		{ "harness_fail_server_status", "server_status" },
+		{ "harness_fail_active_hosts", "active_hosts" },
+	};
+	for (const auto &t : triggers) {
+		h.pool.acquire()->exec(std::string("CREATE TRIGGER ") + t[0] + " BEFORE INSERT ON " + t[1] +
+				" BEGIN SELECT RAISE(ABORT, 'harness forced failure'); END;");
+	}
+	auto refused = [](const net::HttpReply &reply, const char *want) {
+		if (reply.transport_ok && reply.code == 500 && body_text(reply) == want)
+			return true;
+		std::fprintf(stderr, "  %s, want HTTP 500 %s\n", describe(reply).c_str(), want);
+		return false;
+	};
+	const auto users_before = nws::list_users(*h.pool.acquire()).size();
+	const auto status_before = nws::get_server_status(*h.pool.acquire());
+
+	TEST_EXPECT(refused(h.send("POST", "/api/register", { kJson, kCsrf, from_ip("10.43.0.1") },
+								credentials("db_failure", "pw-db-failure")),
+			"{\"error\":\"db_error\"}"));
+	TEST_EXPECT(refused(h.send("PUT", "/api/admin/server-status", { kBearer, kJson },
+								"{\"maintenance_enabled\":false,\"message\":\"never\"}"),
+			"{\"error\":\"db_error\"}"));
+	TEST_EXPECT(refused(h.send("POST", "/api/admin/hosts", { kBearer, kJson }, "{\"rid\":4343}"),
+			"{\"error\":\"upsert_failed\"}"));
+
+	for (const auto &t : triggers)
+		h.pool.acquire()->exec(std::string("DROP TRIGGER ") + t[0] + ";");
+	TEST_EXPECT(nws::list_users(*h.pool.acquire()).size() == users_before);
+	TEST_EXPECT(nws::get_server_status(*h.pool.acquire()).message == status_before.message);
+	TEST_EXPECT(h.pool.acquire()->query("SELECT 1 FROM active_hosts WHERE rid = 4343;").empty());
 	return 0;
 }
 
@@ -2780,6 +3382,14 @@ int run(Harness &h) {
 		{ "retail_templates_render", test_retail_templates_render },
 		{ "catch_all_stays_in_root", test_catch_all_stays_in_root },
 		{ "header_values_cannot_split", test_header_values_cannot_split },
+		{ "reset_during_login", test_reset_during_login },
+		{ "join_identity", test_join_identity },
+		{ "api_proxy_only", test_api_proxy_only },
+		{ "template_values_escaped", test_template_values_escaped },
+		{ "register_handle_rule", test_register_handle_rule },
+		{ "login_row_kept_alive", test_login_row_kept_alive },
+		{ "host_tag_serves_once", test_host_tag_serves_once },
+		{ "db_failure_reply_carries_code_alone", test_db_failure_reply_carries_code_alone },
 		{ "concurrent_requests", test_concurrent_requests },
 	};
 	for (const Case &c : cases) {
@@ -2802,6 +3412,9 @@ int main() {
 		// Declared first, so it outlives the pool and the listener: the database
 		// file and its WAL siblings go only once every connection is closed.
 		test_temp::TempDir temp("http_routes");
+		// The server's own busy timeout (kDefaultBusyTimeoutMs), unlike
+		// db_concurrency_test's stress margin: a write that holds the lock past
+		// it fails here as it would in production.
 		ConnectionPool pool(temp.path / "novaworld.db");
 		{
 			auto boot = pool.acquire();
@@ -2837,8 +3450,10 @@ int main() {
 		}
 
 		// The harness talks to the listener from 127.0.0.1 and names each
-		// case's client address in X-Real-IP, the way nginx forwards it.
+		// case's client address in X-Real-IP, the way nginx forwards it; its
+		// /api/ answers that proxy alone, as prod's does.
 		config.trusted_proxies = {"127.0.0.1"};
+		config.api_proxy_only = true;
 
 		opennova::ConnectionManager manager;
 		// The push routes' channel, as main() wires it: a real NW UDP listener on a port the
@@ -2894,6 +3509,7 @@ int main() {
 		nws::ServerConfig secure_config = config;
 		secure_config.cookie_secure = true;
 		secure_config.trusted_proxies.clear();
+		secure_config.api_proxy_only = false;
 		secure_config.templates_dir = retail_root / "templates";
 		secure_config.static_dir = retail_root / "static";
 		secure_config.web_dist_dir = retail_root / "web";
@@ -2901,12 +3517,23 @@ int main() {
 		TEST_EXPECT(secure_http.start(secure_config));
 		TEST_EXPECT(secure_http.bound_port() != 0);
 
+		// The third: the retail roots, /api/ for a proxy the harness is not.
+		nws::ServerConfig fresh_config = secure_config;
+		fresh_config.cookie_secure = false;
+		fresh_config.trusted_proxies = { "10.255.0.1" };
+		fresh_config.api_proxy_only = true;
+		nws::HttpListener fresh_http(manager, pool, sessions);
+		TEST_EXPECT(fresh_http.start(fresh_config));
+		TEST_EXPECT(fresh_http.bound_port() != 0);
+
 		Harness harness{pool, sessions, nw_udp, http.bound_port(), secure_http.bound_port(), {}};
 		harness.temp_root = temp.path;
 		harness.retail_root = retail_root;
+		harness.fresh_port = fresh_http.bound_port();
 		rc = run(harness);
 		// Join the Crow threads before the pool and the TempDir go, then the
 		// NW UDP listener the push routes held.
+		fresh_http.stop();
 		secure_http.stop();
 		http.stop();
 		nw_udp.stop();

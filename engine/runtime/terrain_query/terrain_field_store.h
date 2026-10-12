@@ -70,12 +70,31 @@ public:
 		field_.has_water = water_y_q16 != 0;
 	}
 
+	// Writes `rect` (atlas texels: x, z the column and row, w, h the size) of the heights the store holds
+	// from `src` (raw16, `stride` samples a row, stride >= w), in place: the height view keeps pointing at
+	// the same buffer, so every copy of it (the world's, the kernel's) reads the new ground with no
+	// rebuild (an editor's sculpt stroke; the game reads its heights once, at load). It writes under
+	// every live copy of the view, so a patch and the reads it serves share one thread, or the caller
+	// holds the views' owner. The rect is the terrain's region contract (runtime/terrain refresh_mipchain's):
+	// inside the atlas, a change across its wrap arriving as several rects, each patched. False, nothing
+	// written, with no heights, a rect of no size or one not inside them.
+	bool patch_heights(const CoordsRect &rect, const uint16_t *src, size_t stride);
+
 	// Views into the owned buffers; stable until the next build()/clear().
 	const TerrainHeightField &height_field() const { return field_; }
 	// Zero-initialized (charmap members) when no charmap was supplied. It
 	// carries the placed-tile overlay below, so every copy of the view (the
 	// world's, MissionKernel::wire_terrain's) carries the tiles too.
 	const SurfaceTypeMap &surface_map() const { return surface_map_; }
+
+	// Writes `rect` (char-map texels: x, z the column and row, w, h the size) of the char map the
+	// store holds from `src`, `stride` bytes a row (stride >= w), in place, as JO's mission editor
+	// paints a class into its char map a texel at a time [orig: JOTACmed sub_41D6B0 @ 0x41D7D4 ->
+	// sub_45E3B0]: the surface view keeps pointing at the same raster, so every copy of it reads the
+	// new classes (an editor's brush stroke, no rebuild). It writes under every live copy of the view
+	// (the world's, the kernel's), so a patch and the reads it serves share one thread, or the caller
+	// holds the views' owner. False, nothing written, with no char map or a rect not inside it.
+	bool patch_charmap(const CoordsRect &rect, const uint8_t *src, size_t stride);
 
 	// The .trn facts the mission boot reads beside the field, set by the
 	// format-typed entries (terrain_field_build.h): the map's water height in

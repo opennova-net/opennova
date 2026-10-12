@@ -43,7 +43,7 @@ static bool tile_entry_from_variant(const Variant &value, opennova::TilOverlayEn
 		out_entry.z_fixed = static_cast<int32_t>(dict.get("z_fixed", 0));
 		out_entry.tile_index = static_cast<uint8_t>(std::clamp(static_cast<int>(dict.get("tile_index", 0)), 0, 255));
 		out_entry.flags = static_cast<uint8_t>(std::clamp(static_cast<int>(dict.get("flags", 0)), 0, 255));
-		out_entry = opennova::til_normalize_overlay_entry(out_entry);
+		out_entry.layer = static_cast<uint16_t>(std::clamp(static_cast<int>(dict.get("layer", 0)), 0, 65535));
 		return true;
 	}
 
@@ -113,10 +113,9 @@ void TerrainTileInfo::set_entries(const Array &p_entries) {
 	for (int i = 0; i < p_entries.size(); ++i) {
 		opennova::TilOverlayEntry entry;
 		if (tile_entry_from_variant(p_entries[i], entry)) {
-			til.entries.push_back(opennova::til_normalize_overlay_entry(entry));
+			til.entries.push_back(entry);
 		}
 	}
-	til = opennova::til_normalize_file(til);
 	emit_changed();
 }
 
@@ -132,7 +131,7 @@ void TerrainTileInfo::add_entry(const Ref<TerrainTileEntry> &entry) {
 		return;
 	}
 
-	til.entries.push_back(opennova::til_normalize_overlay_entry(entry->to_native()));
+	til.entries.push_back(entry->to_native());
 	emit_changed();
 }
 
@@ -151,12 +150,12 @@ void TerrainTileInfo::clear_entries() {
 }
 
 void TerrainTileInfo::copy_from_native(const opennova::TilFile &file) {
-	til = opennova::til_normalize_file(file);
+	til = file;
 	emit_changed();
 }
 
 opennova::TilFile TerrainTileInfo::to_native() const {
-	return opennova::til_normalize_file(til);
+	return til;
 }
 
 Error TerrainTileInfo::load_from_path(const String &p_path) {

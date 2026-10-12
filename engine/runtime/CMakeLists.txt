@@ -228,6 +228,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/height_field.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/surface_tiles.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/terrain_field_store.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/terrain_atlas_rects.cpp # where a change to the atlas shows
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/terrain_raycast.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/terrain_scorch_record.cpp
     # wac — the WAC compiler (binds names/vars against the live world) + the VM;
@@ -433,6 +434,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/end_round_protocol.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_file.cpp              # the retail /HOST host file (opennova-serve, ADR 0051)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_config.cpp            # game.cfg onto the host session (opennova-serve, ADR 0051 d2)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/game_config_block.cpp      # the process's game.cfg block, both embedders (D-NET-335)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_boot.cpp              # the one host boot, both phases (ADR 0051 d4)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/mission_rotation.cpp       # the map rotation and its session words (D-NET-331)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/rotation_admin.cpp         # the admin MISSION verbs over the rotation (ADR 0051 PR5b)

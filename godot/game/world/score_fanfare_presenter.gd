@@ -9,11 +9,11 @@ extends RefCounted
 ##  @0x527be0 (ex "PlaySoundOnDedicatedServer") when g_GameConfigState.enableSlotMachine_1F4
 ##  @0x25508ac; Config_SetDefaults @0x54d165 stores 0; parsed by atol @0x54fdfb]
 
-const CONFIG_PATH := "user://settings.cfg"
-const CONFIG_SECTION := "hud"
+# The word in the process's cfg block (GameCfgStore): game.cfg reads it and
+# never writes it back, so only a hand-edited file sets it.
 const CONFIG_KEY := "enable_slotmachine"
 
-var _enabled: bool = int(ConfigStore.read(CONFIG_PATH, CONFIG_SECTION, CONFIG_KEY, 0)) != 0
+var _enabled: bool = GameCfgStore.block().get_word(CONFIG_KEY) != 0
 
 
 ## Consume the sim's score-feedback edge and play its tone set when enabled.

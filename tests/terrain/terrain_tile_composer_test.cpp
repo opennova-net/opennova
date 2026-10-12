@@ -535,6 +535,68 @@ bool test_til_line_is_point_sampled_one_to_one() {
 			expect_pixel(page, 11, 20, base, "no half-strength bleed on the right");
 }
 
+// An index past the atlas's cells: the render divides by the set's columns with no bound on the row
+// [orig: PolyTrn_RenderTile @ 0x60DEBF..0x60DF05], so the quad lies below the atlas and its CLAMP
+// addressing draws the last texel row across the column's span (D-TIL-7) [orig: Terrain_LoadTileSetAtlas
+// @ 0x604B4E, flags 0x100203]. A 3 x 2 set: index 7 is column 1, row 2 (past the 2 rows); a 4 x 1 set: index
+// 4 is column 0, row 1. A set under 64 wide is one column as wide as itself [orig: @ 0x604B97].
+bool test_til_index_past_the_atlas_draws_the_clamped_edge() {
+	const std::array<uint8_t, 3> base_color{40, 80, 120};
+	const std::array<uint8_t, 3> base_normal{128, 128, 255};
+	const std::array<uint8_t, 3> light{128, 128, 255};
+	const auto colormap = quadrants(solid_image(
+			2, 2, {base_color[0], base_color[1], base_color[2], 255}));
+	const auto normal = quadrants(solid_image(
+			2, 2, {base_normal[0], base_normal[1], base_normal[2], 255}));
+	const std::array<uint8_t, 4> base = base_pixel(base_color, base_normal, light);
+	const std::array<float, 3> white{1.0f, 1.0f, 1.0f};
+	const std::array<uint8_t, 4> body{10, 20, 30, 255};
+	const std::array<uint8_t, 4> left{200, 40, 40, 255};
+	const std::array<uint8_t, 4> middle{40, 200, 40, 255};
+	const std::array<uint8_t, 4> right{40, 40, 200, 255};
+	const auto page_of = [&](const Rgba8Image &atlas, uint8_t index) {
+		const auto levels = tile_levels(atlas);
+		opennova::TilFile tiles;
+		tiles.entries.push_back(opennova::make_til_overlay_entry(0, 0, index, 0));
+		opennova::terrain::TerrainTilePageSourceView sources;
+		sources.colormap = &colormap;
+		sources.heightfield_normal = &normal;
+		sources.tile_info = &tiles;
+		sources.tilestrip = &levels;
+		sources.light_bytes = light;
+		return opennova::terrain::compose_terrain_tile_page(cold_job(4), sources);
+	};
+	// Each column's last block row (texel rows 124..127, a solid DXT5 block) its own colour, the rest the body.
+	Rgba8Image three = solid_image(192, 128, body);
+	fill_rect(three, 0, 124, 64, 128, left);
+	fill_rect(three, 64, 124, 128, 128, middle);
+	fill_rect(three, 128, 124, 192, 128, right);
+	const Rgba8Image past = page_of(three, 7);
+	if (!expect(past.is_valid(), "a page with an index past the atlas composes")) return false;
+	const std::array<uint8_t, 4> edge = overlay_pixel(base, dxt5_texel(middle), white);
+	for (const int at : {0, 20, 40, 63})
+		if (!expect_pixel(past, at, at, edge, "index 7 of a 3 x 2 set draws column 1's last texel row")) return false;
+	if (!expect_pixel(past, 64, 64, base, "the tile covers its 16 units alone")) return false;
+	// A 4 x 1 set: index 4 is column 0, a row below; column 0's last block row is its own.
+	Rgba8Image four = solid_image(256, 64, body);
+	fill_rect(four, 0, 60, 64, 64, left);
+	fill_rect(four, 64, 60, 256, 64, right);
+	const Rgba8Image below = page_of(four, 4);
+	if (!expect(below.is_valid(), "a page with index 4 of a 4 x 1 set composes")) return false;
+	if (!expect_pixel(below, 32, 32, overlay_pixel(base, dxt5_texel(left), white),
+			"index 4 of a 4 x 1 set draws column 0's last texel row")) return false;
+	// A set 32 wide: one column, index 0 drawn over the whole set's width.
+	Rgba8Image thin = solid_image(32, 64, body);
+	fill_rect(thin, 0, 0, 16, 64, left);
+	fill_rect(thin, 16, 0, 32, 64, right);
+	const Rgba8Image narrow = page_of(thin, 0);
+	if (!expect(narrow.is_valid(), "a page over a set 32 wide composes")) return false;
+	return expect_pixel(narrow, 8, 8, overlay_pixel(base, dxt5_texel(left), white),
+			"a set 32 wide draws its left half over the tile's first half") &&
+			expect_pixel(narrow, 56, 8, overlay_pixel(base, dxt5_texel(right), white),
+					"a set 32 wide draws its right half over the tile's second half");
+}
+
 // A LOD-3 page draws a 16-unit tile over 32 pixels: two atlas texels per
 // pixel, so the point sample takes the tile-set atlas box level 1.
 // [orig: atlas levels GTexture_CreateFromPixelData_0 @ 0x6877BA..0x6878BE;
@@ -963,9 +1025,51 @@ bool test_map_split_rules() {
 			"a map shorter than its even width overruns the split");
 }
 
+// An editor's tile edit retires only the pages its changed records' squares overlap: a record changed in place
+// names its old and new squares, an added or removed one its own, an unchanged one none; a reorder names every
+// index it moved past.
+bool test_overlay_changes() {
+	using opennova::terrain::TerrainTileSquareQ16;
+	using opennova::terrain::terrain_tile_overlay_changes;
+	opennova::TilFile before;
+	before.entries.resize(3);
+	before.entries[0].x_fixed = 0;
+	before.entries[0].z_fixed = 0;
+	before.entries[1].x_fixed = 32 << 16;
+	before.entries[1].z_fixed = -(16 << 16);
+	before.entries[1].tile_index = 4;
+	before.entries[2].x_fixed = 64 << 16;
+	before.entries[2].tile_index = 9;
+	if (!expect(terrain_tile_overlay_changes(before, before).empty(), "the same placement changes no square")) return false;
+	opennova::TilFile turned = before;
+	turned.entries[1].flags = 4;
+	std::vector<TerrainTileSquareQ16> squares = terrain_tile_overlay_changes(before, turned);
+	if (!expect(squares.size() == 2 && squares[0].minimum_x == (32 << 16) && squares[0].minimum_z == (16 << 16) &&
+			squares[0].maximum_x == (48 << 16) && squares[0].maximum_z == (32 << 16), "a turn names the record's square, z negated"))
+		return false;
+	opennova::TilFile moved = before;
+	moved.entries[0].x_fixed = 100 << 16;
+	squares = terrain_tile_overlay_changes(before, moved);
+	if (!expect(squares.size() == 2 && squares[0].minimum_x == 0 && squares[1].minimum_x == (100 << 16),
+			"a move names the square it left and the one it took"))
+		return false;
+	opennova::TilFile added = before;
+	added.entries.push_back(before.entries[0]);
+	added.entries.back().x_fixed = 200 << 16;
+	squares = terrain_tile_overlay_changes(before, added);
+	if (!expect(squares.size() == 1 && squares[0].minimum_x == (200 << 16), "an added record names its own square")) return false;
+	squares = terrain_tile_overlay_changes(added, before);
+	if (!expect(squares.size() == 1 && squares[0].minimum_x == (200 << 16), "a removed record names its own square")) return false;
+	opennova::TilFile reordered = before;
+	std::swap(reordered.entries[0], reordered.entries[2]);
+	squares = terrain_tile_overlay_changes(before, reordered);
+	return expect(squares.size() == 4, "a reorder names every index it moved past, the unmoved middle none");
+}
+
 int main(int argc, char **argv) {
     retail::configure_mixed(argc, argv);
 	if (!test_map_split_rules()) return 1;
+	if (!test_overlay_changes()) return 1;
 	if (!test_colormap_quadrants_follow_texcompression()) return 1;
 	if (!test_tile_set_levels_are_the_dxt5_decode()) return 1;
 	if (!test_level_density()) return 1;
@@ -977,6 +1081,7 @@ int main(int argc, char **argv) {
 	if (!test_base_pass_coarse_page_samples_box_level_one()) return 1;
 	if (!test_til_line_is_point_sampled_one_to_one()) return 1;
 	if (!test_til_coarse_page_takes_box_level()) return 1;
+	if (!test_til_index_past_the_atlas_draws_the_clamped_edge()) return 1;
 	if (!test_optional_cp12_assets()) return 1;
 	if (!test_optional_00tra_fork_oracle()) return 1;
 	std::printf("OK: terrain tile page composition\n");

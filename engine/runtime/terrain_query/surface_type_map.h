@@ -25,6 +25,8 @@
 
 #include <cstdint>
 
+#include <runtime/terrain_query/atlas_routing.h>
+
 namespace opennova::terrain {
 
 // One placed-tile override entry: the mission .til overlay record reduced to
@@ -56,6 +58,8 @@ struct SurfaceTypeMap {
 	// otherwise, set by PolyTrn_LoadTerrainConfig @ 0x60E4B1..0x60E4CB].
 	bool wrap_x = false;
 	bool wrap_z = false;
+
+	TerrainAtlasRouting routing() const { return TerrainAtlasRouting{sector_grid, origin_x, origin_y, wrap_x, wrap_z}; }
 	// The placed-tile override (D-SND-15): the mission .til array plus the
 	// tileset's .TSD-fed 256-entry tile-index -> surface table. tiles == null
 	// or tile_count == 0 skips the pass; tile_surface == null models retail's
@@ -65,31 +69,6 @@ struct SurfaceTypeMap {
 	int32_t tile_count = 0;
 	const uint8_t *tile_surface = nullptr; // 256 entries
 };
-
-namespace detail {
-inline int32_t surface_clamp_grid(int32_t v, bool wrap) {
-	// Off-grid sector clamp on an axis that does not wrap (its mask -16):
-	// negative -> cell 0, past-the-end -> cell 15 [orig: the ~(v >> 31) byte
-	// trick behind the OOB mask test @ 0x606547]; under a wrap the mask is 0
-	// and the cell's low four bits are taken as they are.
-	if (!wrap && (v & ~0xF) != 0) return v < 0 ? 0 : 15;
-	return v;
-}
-// The width's log2 as the loader counts it (halved while above 1: the floor)
-// [orig: sub_605A10 @ 0x605A82..0x605AA0; Foliage_LoadFoliageMapPCX @
-// 0x605B44..0x605B60].
-inline int32_t surface_shift(int32_t width) {
-	int32_t s = 0;
-	for (uint32_t w = static_cast<uint32_t>(width); w > 1; w >>= 1) ++s;
-	return s;
-}
-// The sample's shift, 10 less that log2: past 1024 it is negative, which the
-// processor's shift takes modulo 32 (a map that wide reads its first texel
-// alone).
-inline int32_t surface_sample_shift(int32_t width) {
-	return (10 - surface_shift(width)) & 31;
-}
-} // namespace detail
 
 // The rows (and columns) a map `width` wide is sampled over, the char map's and the foliage
 // map's lookups alike: each reads (c & 1023) >> surface_sample_shift on both axes, so a map up to
@@ -108,17 +87,12 @@ inline int32_t surface_sample_extent(int32_t width) {
 inline int32_t surface_type_at_fixed(const SurfaceTypeMap &m, int32_t x_fixed, int32_t y_fixed) {
 	if (m.data == nullptr || m.width <= 0 || m.height <= 0) return 1;
 	if (m.sector_grid == nullptr) return 7;
-	const int32_t col = detail::surface_clamp_grid((x_fixed >> 25) - m.origin_x, m.wrap_x);
-	const int32_t row = detail::surface_clamp_grid(((-y_fixed) >> 25) - m.origin_y, m.wrap_z);
-	const int32_t slot = m.sector_grid[16 * (row & 0xF) + (col & 0xF)] - 1;
-	if (slot < 0) return 7;
-	int32_t fine_x = (x_fixed >> 16) & 0x1FF;
-	int32_t fine_z = ((-y_fixed) >> 16) & 0x1FF;
-	if ((slot & 1) != 0) fine_z += 512;
-	if ((slot & 2) != 0) fine_x += 512;
+	// The routing into the atlas (atlas_routing.h); an empty cell reads 7.
+	const TerrainAtlasTexel texel = terrain_atlas_texel_at(m.routing(), x_fixed, y_fixed);
+	if (!texel.mapped) return 7;
 	const int32_t shift = detail::surface_sample_shift(m.width);
-	const int32_t sx = fine_x >> shift;
-	const int32_t sz = fine_z >> shift;
+	const int32_t sx = texel.x >> shift;
+	const int32_t sz = texel.z >> shift;
 	if (sx < 0 || sx >= m.width || sz < 0 || sz >= m.height) return 1;
 	const int32_t sample = m.data[m.width * sz + sx];
 	// Placed-tile override: the first containing tile (inclusive 16-unit AABB,

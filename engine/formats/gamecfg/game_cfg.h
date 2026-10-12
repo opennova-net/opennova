@@ -349,6 +349,15 @@ GameCfg defaults(const DefaultTexts &texts = {}, int32_t player_index = 0, int32
 // key nothing accepts changes nothing. [orig: Config_ParseSettingsLine @0x54F740]
 void apply_line(GameCfg &cfg, const io::ConfigTokens &line, const WeaponRoster &weapons);
 
+// The int32 word a key names as the reader finds it (the cfg table's int and
+// bool rows first, then the switch key in its own letter's arm, both without
+// case): null for a key the reader stores elsewhere or not at all (a string,
+// a float, a class slot or resolution bit, the 16-bit remote_admin_port, a
+// dead or unknown key). For an embedder that keeps its own settings as the
+// block's words by their keys.
+int32_t *int_word(GameCfg &cfg, const char *key);
+const int32_t *int_word(const GameCfg &cfg, const char *key);
+
 // The read of one file's text: every line the walk hands its callback,
 // through apply_line, onto `cfg` as it stands (no defaults, no version check).
 // [orig: File_ParseASCIIFileWithCallback @0x53D980 with Config_ParseSettingsLine]

@@ -8,12 +8,12 @@
       <form class="mt-8 grid gap-6" @submit.prevent="handleSubmit">
         <label class="grid gap-2 text-sm text-ink">
           Game Handle
-          <input v-model="form.username" type="text" required minlength="2" maxlength="32"
+          <input v-model="form.username" type="text" required minlength="2" maxlength="30"
                  class="rounded-control border border-border bg-surface px-4 py-3 focus:border-accent focus:outline-none" />
         </label>
         <label class="grid gap-2 text-sm text-ink">
           Display Name (NW Handle)
-          <input v-model="form.nwhandle" type="text" maxlength="32"
+          <input v-model="form.nwhandle" type="text" maxlength="30"
                  placeholder="defaults to handle"
                  class="rounded-control border border-border bg-surface px-4 py-3 focus:border-accent focus:outline-none" />
         </label>

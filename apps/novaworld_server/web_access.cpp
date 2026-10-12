@@ -3,6 +3,7 @@
 #include "http_cookies.h"
 #include "server_config.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <utility>
 
@@ -40,7 +41,26 @@ crow::json::wvalue session_user_json(int64_t id, const std::string &username,
 	return out;
 }
 
+// The website's API: /api and everything under it. Crow routes the raw path,
+// so this is the test its router applies (no %-decoding, case kept).
+bool is_api_path(const std::string &url) {
+	return url == "/api" || url.rfind("/api/", 0) == 0;
+}
+
 } // namespace
+
+void AccessMiddleware::before_handle(crow::request &req, crow::response &res, context &) {
+	if (!api_proxy_only || !is_api_path(req.url))
+		return;
+	if (std::find(trusted_proxies.begin(), trusted_proxies.end(), req.remote_ip_address) !=
+			trusted_proxies.end()) {
+		return;
+	}
+	res.code = 403;
+	res.body = "{\"error\":\"proxy_required\"}";
+	res.set_header("Content-Type", "application/json");
+	res.end();
+}
 
 void AccessMiddleware::after_handle(crow::request &req, crow::response &res, context &ctx) {
 	if (!ctx.set_cookie.empty()) res.add_header("Set-Cookie", ctx.set_cookie);
@@ -78,11 +98,18 @@ void WebAccess::configure(const ServerConfig &config) {
 	cookie_secure_ = config.cookie_secure;
 	cookie_name_ = cookie_secure_ ? kWebSessionHostCookie : kWebSessionCookie;
 	trusted_proxies_ = config.trusted_proxies;
+	auto &middleware = app_.get_middleware<AccessMiddleware>();
+	middleware.api_proxy_only = config.api_proxy_only;
+	middleware.trusted_proxies = config.trusted_proxies;
 	std::printf("[http] admin api: Bearer token %s; admin-role sessions accepted\n",
 	            admin_token_.empty() ? "DISABLED (set ADMIN_API_TOKEN to enable)" : "ENABLED");
 	std::printf("[http] session cookie %s%s; %zu trusted proxy address(es)\n", cookie_name_.c_str(),
 	            cookie_secure_ ? " (Secure)" : " (not Secure: set ONNET_COOKIE_SECURE=1 for https)",
 	            trusted_proxies_.size());
+	if (config.api_proxy_only) {
+		std::printf("[http] /api/ answers only its trusted proxies (ONNET_API_PROXY_ONLY)%s\n",
+				trusted_proxies_.empty() ? ": none is set, so every /api/ request is refused" : "");
+	}
 }
 
 std::string WebAccess::client_ip(const crow::request &req) const {
@@ -198,12 +225,13 @@ int64_t WebAccess::begin_password_check(LoginRoute route, const std::string &use
 	return 0;
 }
 
-void WebAccess::password_accepted(const LoginTicket &ticket, int64_t user_id) {
+void WebAccess::password_accepted(
+		const LoginTicket &ticket, int64_t user_id, int64_t credentials_gen) {
 	const auto now = RateLimiter::Clock::now();
 	login_failures_per_user_ip_.refund(ticket.pair_key, now);
 	if (!ticket.username_key.empty()) login_failures_per_user_.refund(ticket.username_key, now);
 	try {
-		record_login_address(*pool_.acquire(), user_id, ticket.known_address);
+		record_login_address(*pool_.acquire(), user_id, credentials_gen, ticket.known_address);
 	} catch (const db::SqliteError &e) {
 		std::fprintf(stderr, "[http] WARN login address record failed: %s\n", e.what());
 	}
@@ -227,7 +255,9 @@ int64_t WebAccess::take_register(const std::string &ip) {
 // right password learns that an account is banned or restricted (403, as the
 // game login's NWEC11 / NWEC12). Success mints a session (the session cookie)
 // and answers {id, username, role}; the session the browser held before, if
-// any, is ended.
+// any, is ended. A password reset or a ban that commits while the password is
+// being checked leaves the session unminted (create_web_session tests the
+// generation the check read) and the answer the generic 401.
 crow::response WebAccess::login(const crow::request &req) {
 	if (!has_csrf_header(req)) return json_error(403, "csrf_header_required");
 	auto body = JsonBody::parse(req.body);
@@ -258,7 +288,7 @@ crow::response WebAccess::login(const crow::request &req) {
 			            loggable(ip).c_str());
 			return json_error(401, "invalid_credentials");
 		}
-		password_accepted(ticket, user->id);
+		password_accepted(ticket, user->id, user->credentials_gen);
 		if (user->account_status != "active") {
 			std::printf("[http] /api/login refused: user %lld status=%s\n",
 			            static_cast<long long>(user->id), loggable(user->account_status).c_str());
@@ -266,15 +296,19 @@ crow::response WebAccess::login(const crow::request &req) {
 			                                                         : "account_restricted");
 		}
 		delete_web_session(*db_conn, session_token(req));
-		const std::string token = create_web_session(
-				*db_conn, user->id, ip,
+		const auto token = create_web_session(*db_conn, user->id, user->credentials_gen, ip,
 				req.get_header_value("User-Agent").substr(0, kUserAgentMaxBytes));
+		if (!token) {
+			std::printf("[http] /api/login refused: user %lld changed during the check\n",
+					static_cast<long long>(user->id));
+			return json_error(401, "invalid_credentials");
+		}
 		std::printf("[http] /api/login -> session for user '%s' (id=%lld role=%s) from %s\n",
-		            loggable(user->username).c_str(), static_cast<long long>(user->id),
-		            user->role.c_str(), loggable(ip).c_str());
+				loggable(user->username).c_str(), static_cast<long long>(user->id),
+				loggable(user->role).c_str(), loggable(ip).c_str());
 		crow::response res =
 				json_reply(200, session_user_json(user->id, user->username, user->role));
-		res.add_header("Set-Cookie", session_cookie(token, kWebSessionLifetimeSeconds));
+		res.add_header("Set-Cookie", session_cookie(*token, kWebSessionLifetimeSeconds));
 		res.set_header("Cache-Control", "no-store");
 		return res;
 	} catch (const db::SqliteError &e) {
