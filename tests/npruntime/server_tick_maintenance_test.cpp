@@ -52,6 +52,7 @@
 #include <runtime/world/weapon_inventory.h>
 #include <runtime/world/world.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <vector>
@@ -1588,23 +1589,23 @@ bool check_try_queue_evicts_on_failed_pick() {
 		return false;
 	};
 	const w::EntityHandle p0 = make_player(1);
-	if (!expect(waves.try_queue(world, zone_a, p0) && holds(zone_a, p0),
+	if (!expect(waves.try_queue(zone_a, p0, 1) && holds(zone_a, p0),
 			"the first pick queues at zone A"))
 		return false;
 	for (int i = 0; i < 8; ++i) {
-		if (!expect(waves.try_queue(world, zone_b, make_player(1)), "zone B fills to eight"))
+		if (!expect(waves.try_queue(zone_b, make_player(1), 1), "zone B fills to eight"))
 			return false;
 	}
-	if (!expect(!waves.try_queue(world, zone_b, p0) && !holds(zone_a, p0) && !holds(zone_b, p0),
+	if (!expect(!waves.try_queue(zone_b, p0, 1) && !holds(zone_a, p0) && !holds(zone_b, p0),
 			"a full-row pick fails AND evicts the player from its previous zone"))
 		return false;
-	if (!expect(waves.try_queue(world, zone_a, p0) && holds(zone_a, p0),
+	if (!expect(waves.try_queue(zone_a, p0, 1) && holds(zone_a, p0),
 			"the player re-queues at zone A"))
 		return false;
-	if (!expect(!waves.try_queue(world, zone_c, p0) && !holds(zone_a, p0) && !holds(zone_c, p0),
+	if (!expect(!waves.try_queue(zone_c, p0, 1) && !holds(zone_a, p0) && !holds(zone_c, p0),
 			"an other-team zone pick fails AND evicts the player everywhere"))
 		return false;
-	if (!expect(waves.try_queue(world, zone_a, p0) && !waves.try_queue(world, zone_a, p0) &&
+	if (!expect(waves.try_queue(zone_a, p0, 1) && !waves.try_queue(zone_a, p0, 1) &&
 			holds(zone_a, p0) && row(zone_a)->queued.size() == 1,
 			"a duplicate pick fails but keeps the player in that row"))
 		return false;
@@ -2005,6 +2006,82 @@ bool check_split_slot_team_pick_legs() {
 			"Default Spawn is refused while the slot team holds a zone");
 }
 
+// D-NET-581: the spawn-wave list's rows hold player slots and read the slot
+// team (+416): the picked row's team is matched against it, a miss refusing a
+// pick whose zone has a row, and the S2C 0x6E counts and lists only its rows.
+// [orig: SpawnWaveList_TryQueuePlayer @0x52A4BF, the compare @0x52A4C5..0x52A4C8,
+//  the call @0x519D8F, SpawnWaveList_HasEntryForZone @0x519DAE;
+//  NetPacket_WriteSpawnWaveStatus @0x5074CF, the row filter @0x507539]
+bool check_split_slot_team_wave_rows() {
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(2, 4);
+	w::Entity player_seed;
+	player_seed.kind = w::EntityKind::Organic;
+	player_seed.flags = w::kEntityFlagPlayer | w::kEntityFlagDead;
+	player_seed.engine_flags = player_seed.flags;
+	player_seed.health = 0;
+	player_seed.health_max = 100;
+	const w::EntityHandle player = world.registry.spawn(0, player_seed);
+	auto make_zone = [&](uint8_t team) { // an unnumbered zone, which the wave list rows
+		w::Entity z;
+		z.kind = w::EntityKind::Item;
+		z.team = team;
+		z.alive = true;
+		z.is_spawn_point = true;
+		z.zone_control = 0x10000;
+		return world.registry.spawn(2, z);
+	};
+	const w::EntityHandle blue = make_zone(1);
+	const w::EntityHandle red = make_zone(2);
+	world.zones.spawn_waves.build_from_mission(world, 5, 5);
+	inmatch::GameConfig config;
+	config.game_type = game_type::kTeamDeathmatch;
+	std::vector<inmatch::NapiNPConnection> roster(1);
+	auto &conn = roster.front();
+	conn.type = 1;
+	conn.phase = inmatch::ConnectionPhase::InMatch;
+	conn.burst.spawned = true;
+	conn.link.owned_entity = player;
+	conn.assigned_team = 1;
+	conn.assigned_team_valid = true;
+	auto pick = [&](uint8_t entity_team, w::EntityHandle zone) {
+		w::Entity *entity = world.registry.get(player);
+		entity->team = entity_team;
+		conn.link.respawn_pending = true;
+		return inmatch::dispatch_session_replies(config, conn,
+				{make_protocol_message(c2s::RESPAWN_REQUEST,
+						{static_cast<uint8_t>(zone.packed), static_cast<uint8_t>(zone.packed >> 8)})},
+				100, roster, &world);
+	};
+	auto queued_at = [&](w::EntityHandle zone) {
+		for (const w::SpawnWaveEntry &entry : world.zones.spawn_waves.entries())
+			if (entry.zone == zone)
+				return std::find(entry.queued.begin(), entry.queued.end(), player) !=
+						entry.queued.end();
+		return false;
+	};
+	// A teamless entity resolves the slot team's zone; its row matches the slot team.
+	const std::vector<ProtocolMessage> queued = pick(0, blue);
+	if (!expect(queued.size() == 1 && queued[0].tag == s2c::SPAWN_WAVE_STATUS &&
+					queued_at(blue) && queued[0].payload.size() >= 3 &&
+					queued[0].payload[0] == 1 &&
+					queued[0].payload[1] == static_cast<uint8_t>(blue.packed) &&
+					queued[0].payload[2] == static_cast<uint8_t>(blue.packed >> 8),
+			"a teamless entity queues at the slot team's row and the 0x6E lists that row"))
+		return false;
+	// Entity team 2 resolves its own team's zone, whose row misses the slot team: refused.
+	if (!expect(pick(2, red).empty() && !queued_at(red) && !queued_at(blue),
+			"the other team's row refuses the slot and evicts it everywhere"))
+		return false;
+	// The 0x6E lists the slot team's rows whatever the entity's team.
+	const std::vector<uint8_t> status = inmatch::build_spawn_wave_status_body(world, conn);
+	return expect(status.size() >= 3 && status[0] == 1 &&
+					status[1] == static_cast<uint8_t>(blue.packed) &&
+					status[2] == static_cast<uint8_t>(blue.packed >> 8),
+			"the 0x6E counts and lists the slot team's rows");
+}
+
 // D-NET-582: the deploy placement's no-pick arm positions as the slot team
 // (+416), not the entity's, so a split slot's Default Spawn takes the slot
 // team's Deaths gate and start marker. [orig: Server_PositionPlayerForSpawn
@@ -2267,6 +2344,7 @@ int main() {
 	ok = check_spectator_pick_legs() && ok;
 	ok = check_split_slot_team_pick_legs() && ok;
 	ok = check_split_slot_team_default_spawn_pose() && ok;
+	ok = check_split_slot_team_wave_rows() && ok;
 	if (ok) std::printf("OK\n");
 	return ok ? 0 : 1;
 }

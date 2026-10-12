@@ -1330,7 +1330,7 @@ bool run_disconnect_removes_leaver_from_spawn_waves() {
 	if (!handshake(ctx, peer, client_scrk, 0xC0FFEE44u, server_scrk, &server_sk)) return false;
 	if (!expect(inmatch::bind_connection_player(ctx, peer, 1, h.packed),
 	            "spawn-wave fixture binds the player entity")) return false;
-	if (!expect(w.zones.spawn_waves.try_queue(w, zone_handle, h) &&
+	if (!expect(w.zones.spawn_waves.try_queue(zone_handle, h, 1) &&
 	                    w.zones.spawn_waves.entries()[0].queued.size() == 1 &&
 	                    w.zones.spawn_waves.entries()[0].queued[0] == h,
 	            "the player queues into the zone's spawn-wave row")) return false;

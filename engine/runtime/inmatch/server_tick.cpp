@@ -2245,7 +2245,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 				conn.link.transport->host_send(
 						s2c::SPAWN_WAVE_STATUS,
 						build_spawn_wave_status_body(
-								world, conn.link.owned_entity),
+								world, conn), // the slot's rows (D-NET-581)
 						/*reliable=*/false);
 		}
 	}

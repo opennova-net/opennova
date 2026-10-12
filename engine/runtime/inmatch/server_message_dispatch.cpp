@@ -869,14 +869,14 @@ std::vector<ProtocolMessage> build_spawn_pump_metadata(
 }
 
 std::vector<uint8_t> build_spawn_wave_status_body(
-		const world::World &world, world::EntityHandle requester) {
+		const world::World &world, const NapiNPConnection &conn) {
 	std::vector<uint8_t> body;
-	const world::Entity *recipient = world.registry.get(requester);
-	const uint8_t team = recipient != nullptr ? recipient->team : 0;
+	const world::EntityHandle requester = conn.link.owned_entity;
+	const uint8_t team = conn.assigned_team; // the slot team (D-NET-581) [orig: @0x5074CF]
 	const world::SpawnZoneRegistry zones = world.zones.build_spawn_zone_list();
 	std::vector<const world::SpawnWaveEntry *> visible;
 	for (const world::SpawnWaveEntry &entry : world.zones.spawn_waves.entries())
-		if (entry.team == team && visible.size() < 0xFFu)
+		if (entry.team == team && visible.size() < 0xFFu) // [orig: @0x507539]
 			visible.push_back(&entry);
 	body.reserve(1 + visible.size() * 9);
 	body.push_back(static_cast<uint8_t>(visible.size()));
@@ -1725,13 +1725,13 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					if (target != nullptr && target->zone_number != 0 &&
 					    (target->team != request_team || target->zone_control < 0x10000))
 						break;
-					// A spectator skips the wave [orig: @0x519D65..0x519D7F].
+					// A spectator skips the wave [orig: @0x519D65..0x519D7F]; the queue asks as the
+					// slot team (D-NET-581) [orig: the TryQueuePlayer call @0x519D8F].
 					if (target != nullptr && !conn.link.spectator) {
 						if (world->zones.spawn_waves.try_queue(
-								*world, target->handle, player->handle)) {
-							ProtocolMessage status = make_protocol_message(
-									s2c::SPAWN_WAVE_STATUS,
-									build_spawn_wave_status_body(*world, player->handle));
+								target->handle, player->handle, conn.assigned_team)) {
+							ProtocolMessage status = make_protocol_message(s2c::SPAWN_WAVE_STATUS,
+									build_spawn_wave_status_body(*world, conn));
 							status.reliable = false;
 							replies.push_back(std::move(status));
 							break;
