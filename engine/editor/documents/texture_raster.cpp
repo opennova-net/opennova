@@ -68,15 +68,25 @@ bool read_tga(const std::vector<uint8_t> &bytes, RasterState &out) {
 	return true;
 }
 
-// The entries a PNG's PLTE chunk holds (its length over 3), 0 for none: the chunks walked from the signature.
-uint32_t png_palette_entries(const std::vector<uint8_t> &bytes) {
+// A PNG's first chunk of `type`: its data's offset and length (false for none), the chunks walked from the signature.
+bool png_chunk(const std::vector<uint8_t> &bytes, const char type[4], size_t &data, uint32_t &length) {
 	for (size_t at = 8; at + 12 <= bytes.size();) {
-		const uint32_t length = uint32_t(bytes[at]) << 24 | uint32_t(bytes[at + 1]) << 16 | uint32_t(bytes[at + 2]) << 8 | bytes[at + 3];
-		if (std::memcmp(bytes.data() + at + 4, "PLTE", 4) == 0) return std::min<uint32_t>(length / 3, 256);
-		if (length > bytes.size()) return 0;
+		length = uint32_t(bytes[at]) << 24 | uint32_t(bytes[at + 1]) << 16 | uint32_t(bytes[at + 2]) << 8 | bytes[at + 3];
+		if (length > bytes.size() - at - 12) return false;
+		if (std::memcmp(bytes.data() + at + 4, type, 4) == 0) {
+			data = at + 8;
+			return true;
+		}
 		at += size_t(length) + 12;
 	}
-	return 0;
+	return false;
+}
+
+// The entries a PNG's PLTE chunk holds (its length over 3), 0 for none.
+uint32_t png_palette_entries(const std::vector<uint8_t> &bytes) {
+	size_t data = 0;
+	uint32_t length = 0;
+	return png_chunk(bytes, "PLTE", data, length) ? std::min<uint32_t>(length / 3, 256) : 0;
 }
 
 // A PNG of 8-bit samples (an import's source image; IHDR's bit depth at byte 24, its colour type at 25): a true-colour
@@ -101,6 +111,12 @@ bool read_png(const std::vector<uint8_t> &bytes, RasterState &out) {
 		side->png_entries = png_palette_entries(bytes);
 		if (!png::decode_png(bytes, image, error, &indexed) || indexed.empty() || side->png_entries == 0) return false;
 		std::memcpy(side->palette.data(), indexed.palette, side->palette.size());
+		// Its transparency, written back as it was (no reader of the maps' indices looks at it).
+		size_t data = 0;
+		uint32_t length = 0;
+		if (png_chunk(bytes, "tRNS", data, length))
+			side->png_alpha.assign(bytes.begin() + std::ptrdiff_t(data),
+			                       bytes.begin() + std::ptrdiff_t(data + std::min<uint32_t>(length, side->png_entries)));
 		out.planes.push_back(RasterPlane::from_bytes(RasterFormat::U8, indexed.width, indexed.height, indexed.indices.data()));
 	} else if (colour == 0) {
 		png::GrayImage grey;
@@ -158,7 +174,7 @@ private:
 
 } // namespace
 
-size_t TextureSide::footprint() const { return sizeof(*this) + (bytes ? bytes->size() : 0); }
+size_t TextureSide::footprint() const { return sizeof(*this) + (bytes ? bytes->size() : 0) + png_alpha.size(); }
 
 const TextureSide *texture_side(const RasterState &state) { return dynamic_cast<const TextureSide *>(state.side.get()); }
 
@@ -223,7 +239,8 @@ bool write_texture_state(const RasterState &state, std::vector<uint8_t> &out, st
 	}
 	case TextureSide::Form::Png:
 		out = side->png_colour == 3 ? png::encode_png_indexed(texels.data(), uint32_t(width), uint32_t(height),
-		                                                      side->palette.data(), side->png_entries)
+		                                                      side->palette.data(), side->png_entries,
+		                                                      side->png_alpha.data(), uint32_t(side->png_alpha.size()))
 		      : side->png_colour == 0 ? png::encode_png_gray(texels.data(), uint32_t(width), uint32_t(height))
 		                              : png::encode_png_rgba(texels.data(), uint32_t(width), uint32_t(height));
 		if (out.empty()) error = "The PNG writer made nothing of it.";

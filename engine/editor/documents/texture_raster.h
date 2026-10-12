@@ -39,6 +39,7 @@ struct TextureSide final : RasterSideState {
 	tga::TgaForm tga;                                   // Tga
 	uint8_t png_colour = 6;                             // Png: 6 true colour (2 read as it), 3 palette, 0 grey
 	uint32_t png_entries = 0;                           // Png palette: its PLTE's entries
+	std::vector<uint8_t> png_alpha;                     // Png palette: its tRNS's entries (none: opaque), kept
 	size_t footprint() const override;
 };
 

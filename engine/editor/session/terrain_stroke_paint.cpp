@@ -129,6 +129,18 @@ bool plan_paint_stroke(TerrainStrokeContext &context, TerrainStrokePlan &plan, s
 		        " has no colour there (paint it into an indexed picture).";
 		return false;
 	}
+	// A palette picture's index past its palette's entries is a file the import's reader refuses (formats/png
+	// encode_png_indexed writes none).
+	const TextureSide *side = texture_side(texture->state());
+	if (side && side->form == TextureSide::Form::Png && side->png_colour == 3 &&
+	    (context.plane == TerrainPlane::Surface || context.plane == TerrainPlane::Foliage)) {
+		const int value = context.plane == TerrainPlane::Surface ? context.brush.surface : context.brush.foliage;
+		if (value < 0 || uint32_t(value) >= side->png_entries) {
+			error = file + " holds a palette of " + std::to_string(side->png_entries) + " entries: " +
+			        std::to_string(value) + " is past it (add the entry to its palette in a paint program first).";
+			return false;
+		}
+	}
 	const TerrainMapTarget target = terrain_map_target(*context.family.trn, context.plane, texels.width(), texels.height());
 	const bool categorical = terrain_plane_categorical(context.plane);
 	const int bytes = texels.texel_bytes();
