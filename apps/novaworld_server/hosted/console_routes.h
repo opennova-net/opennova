@@ -16,11 +16,27 @@
 // header on a POST) or require_admin; the arguments (400, before anything is
 // read); the server: the owner's live one (404 no_live_server) or the id (404
 // not_found, 409 not_live), running (409 server_stopping while it stops, 409
-// server_not_running before it runs); for an owner, one token from the
-// account's read or write bucket (429); then the link (503 admin_unavailable
-// with none up, 503 admin_busy with its queue full, 504 admin_timeout past the
-// 3 s a request has for all its commands), and the command's own outcome
-// (console_outcome). Behind ONNET_API_PROXY_ONLY like every /api route.
+// server_not_running before it runs), its link up (503 admin_unavailable); the
+// admission (below: 429 console_busy, 503 console_full, 409 rotation_busy);
+// for an owner, one token from the account's read or write bucket (429
+// rate_limited); then the link (503 admin_busy with its queue full, 504
+// admin_timeout past the 3 s a request has for all its commands; a 503 hands
+// the token back), and the command's own outcome (console_outcome). Behind
+// ONNET_API_PROXY_ONLY like every /api route.
+//
+// The admission. A console request that runs commands holds a Crow handler
+// thread while it waits on the link (up to 3 s; a hosted server pumps its admin
+// port from its main loop, so a map load stalls it), so the console never takes
+// every handler thread: each account (each admin session; the Bearer token as
+// one) has at most one such request in flight, a second answered 429
+// console_busy at once with no token drawn; and at most handler threads - 2
+// are admitted service-wide (503 console_full past that), so two always stay
+// for the rest of the service (the retail pages, the .gsb feeds, the logins).
+// A rotation edit (an add, a remove, a next) also holds the server's one edit:
+// its read of the rotation and its edit run as a pair, a second edit meanwhile
+// answered 409 rotation_busy, so two removes can never both pass the
+// last-map check. GET .../console reads the database alone and is not
+// admitted.
 
 #include "admin_link.h"
 #include "console_commands.h"
@@ -35,7 +51,11 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <map>
+#include <memory>
+#include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -53,36 +73,61 @@ public:
 	static constexpr std::chrono::milliseconds kCommandBudget{ 3000 };
 	// GET .../console's lines: the newest 200 by default, kConsoleKeep at most.
 	static constexpr size_t kConsoleLinesShown = 200;
+	// The handler threads the console always leaves to the rest of the service.
+	static constexpr size_t kHandlersKeptFree = 2;
+	// A rate-limited account's refusals are logged once in this window.
+	static constexpr std::chrono::seconds kLimitLogWindow{ 60 };
 
 	ConsoleRoutes(WebAccess &access, db::ConnectionPool &pool) : access_(access), pool_(pool) {}
 	ConsoleRoutes(const ConsoleRoutes &) = delete;
 	ConsoleRoutes &operator=(const ConsoleRoutes &) = delete;
 
+	// The HTTP listener's handler threads: the console admits at most
+	// `threads` - kHandlersKeptFree requests at once (at least one). Before
+	// register_routes().
+	void set_handler_threads(size_t threads);
 	// Registers the routes on `app`. `links` (which must outlive the routes) is
 	// the service's admin links; null answers every command 503.
 	void register_routes(WebApp &app, AdminLinks *links);
 
 private:
 	// Who a request acts for, on which server, and until when its commands may
-	// wait; or the refusal.
+	// wait; or the refusal. It holds its admission (and, for a rotation edit,
+	// the server's one edit) until it is destroyed, and the owner's token, which
+	// a 503 hands back.
 	struct Caller {
 		std::optional<crow::response> refusal;
 		int64_t server_id = 0;
 		std::string actor; // "owner" or "admin"
 		std::string who;   // the caller in the log
 		std::chrono::steady_clock::time_point deadline;
+		std::shared_ptr<void> admission;
+		std::shared_ptr<void> rotation_edit;
+		RateLimiter *bucket = nullptr;
+		std::string bucket_key;
+		mutable bool refunded = false;
 	};
-	// The owner's live running server, a token drawn from its write bucket (a
-	// command that changes the server) or its read bucket.
-	Caller owner_caller(const WebSessionUser &user, bool write);
-	// Server `id`, live and running.
-	Caller admin_caller(const RouteAccess &access, uint64_t id);
-	// The refusal for a server that is not live and running; nullopt for one that is.
-	static std::optional<crow::response> not_running(const HostedServer &server);
+	// The owner's live running server, admitted, a token drawn from its write
+	// bucket (a command that changes the server) or its read bucket.
+	Caller owner_caller(const WebSessionUser &user, bool write, bool rotation_edit);
+	// Server `id`, live and running, admitted.
+	Caller admin_caller(const RouteAccess &access, uint64_t id, bool rotation_edit);
+	// The server's state and link, for `c.server_id`; the refusal when it is not
+	// running or its link is not up.
+	std::optional<crow::response> check_server(const HostedServer &server);
+	// The admission of `account`'s request on `c`'s server (the class comment).
+	void admit(Caller &c, const std::string &account, bool rotation_edit);
+	// Hands the owner's token back (a 503: the link took no command).
+	static void refund(const Caller &c);
+	// Whether `account`'s rate-limit refusal is logged (once per kLimitLogWindow).
+	bool log_limit(const std::string &account);
 	// One command on the caller's link within its deadline: the replies when the
 	// command succeeded, else nullopt with `refusal` set.
 	std::optional<std::vector<std::string>> run(const Caller &c, const ConsoleCommand &command,
 			std::optional<crow::response> &refusal);
+	// The server's scene (GET GAMESTATE): nullopt in a match, else the refusal
+	// (409 not_in_game, or the link's).
+	std::optional<crow::response> require_match(const Caller &c);
 
 	// The work behind each route, shared by the owner's and the admin's.
 	crow::response players(const Caller &c);
@@ -105,6 +150,13 @@ private:
 	AdminLinks *links_ = nullptr;
 	RateLimiter owner_reads_{ kOwnerReadPerUser };
 	RateLimiter owner_writes_{ kOwnerWritePerUser };
+
+	std::mutex admit_mu_;
+	size_t max_admitted_ = 6;
+	size_t admitted_ = 0;
+	std::set<std::string> busy_accounts_;
+	std::set<int64_t> rotation_edits_;
+	std::map<std::string, std::chrono::steady_clock::time_point> limit_logged_;
 };
 
 } // namespace opennova::novaworld_server::hosted

@@ -25,7 +25,7 @@ namespace {
 const std::vector<std::string> kAllowedPrefixes = {
 	"PLAYER LIST", "PLAYER PUNT ", "PLAYER BAN ", "PLAYER SWAPTEAM ", "PLAYER KILL ", "MISSION AVAILABLE",
 	"MISSION LIST", "MISSION ADD ", "MISSION REMOVE ", "MISSION SETNEXT ", "MISSION CYCLE", "CHAT GET",
-	"CHAT SEND ", "GET GAMESETTINGS",
+	"CHAT SEND ", "GET GAMESETTINGS", "GET GAMESTATE",
 };
 
 bool allowed(const std::string &line) {
@@ -46,7 +46,7 @@ int test_owner_list() {
 	TEST_EXPECT(!hosted::owner_may_run(ConsoleVerb::GameSettings));
 	// The reads are not recorded; every change is.
 	for (const ConsoleVerb verb : { ConsoleVerb::PlayerList, ConsoleVerb::MissionAvailable, ConsoleVerb::MissionList,
-				 ConsoleVerb::ChatGet, ConsoleVerb::GameSettings })
+				 ConsoleVerb::ChatGet, ConsoleVerb::GameSettings, ConsoleVerb::GameState })
 		TEST_EXPECT(!hosted::console_verb_writes(verb));
 	for (const ConsoleVerb verb : { ConsoleVerb::PlayerPunt, ConsoleVerb::PlayerBan, ConsoleVerb::PlayerSwapTeam,
 				 ConsoleVerb::PlayerKill, ConsoleVerb::MissionAdd, ConsoleVerb::MissionRemove,
@@ -63,6 +63,7 @@ int test_compose() {
 	TEST_EXPECT(hosted::console_command(ConsoleVerb::MissionCycle)->line == "MISSION CYCLE");
 	TEST_EXPECT(hosted::console_command(ConsoleVerb::ChatGet)->line == "CHAT GET");
 	TEST_EXPECT(hosted::console_command(ConsoleVerb::GameSettings)->line == "GET GAMESETTINGS");
+	TEST_EXPECT(hosted::console_command(ConsoleVerb::GameState)->line == "GET GAMESTATE");
 	TEST_EXPECT(!hosted::console_command(ConsoleVerb::PlayerPunt) && !hosted::console_command(ConsoleVerb::ChatSend));
 
 	// Slots: 1..255; 0 is the host's own, and 256 would read as 0 on the server ((u8)atol).
@@ -76,16 +77,25 @@ int test_compose() {
 	}
 	TEST_EXPECT(!hosted::console_player_command(ConsoleVerb::ChatSend, 1, why));
 
-	// Rotation indexes 0..255.
+	// Rotation indexes below the rotation's cap (32, the start settings' kMissionsMax: policy).
+	TEST_EXPECT(hosted::kConsoleRotationMax == 32 && hosted::kConsoleIndexMax == 31);
 	TEST_EXPECT(hosted::console_rotation_command(ConsoleVerb::MissionRemove, 0, why)->line == "MISSION REMOVE 0");
-	TEST_EXPECT(hosted::console_rotation_command(ConsoleVerb::MissionSetNext, 4, why)->line == "MISSION SETNEXT 4");
-	why = {};
-	TEST_EXPECT(!hosted::console_rotation_command(ConsoleVerb::MissionRemove, 256, why) && why.error == "invalid_index");
+	TEST_EXPECT(hosted::console_rotation_command(ConsoleVerb::MissionSetNext, 31, why)->line == "MISSION SETNEXT 31");
+	for (const uint64_t index : { uint64_t{ 32 }, uint64_t{ 256 }, uint64_t{ 1 } << 40 }) {
+		why = {};
+		TEST_EXPECT(!hosted::console_rotation_command(ConsoleVerb::MissionRemove, index, why) &&
+				why.error == "invalid_index");
+	}
 
 	// MISSION ADD: a .bms name of letters, digits, _ and -, the launch option always given.
 	TEST_EXPECT(hosted::console_mission_add("ASH_G11A.BMS", false, why)->line == "MISSION ADD ASH_G11A.BMS 0");
 	TEST_EXPECT(hosted::console_mission_add("x-y_1.bms", true, why)->line == "MISSION ADD x-y_1.bms 1");
-	for (const char *bad : { "", "../a.bms", "a b.bms", "a.txt", "a.bms ONESHOT", "a.bms\n", "CYCLE" }) {
+	TEST_EXPECT(hosted::console_mission_add("A.BMS", false, why)->line == "MISSION ADD A.BMS 0");
+	TEST_EXPECT(hosted::console_mission_add(std::string(32, 'm') + ".bms", false, why).has_value());
+	for (const std::string &bad : { std::string(), std::string("../a.bms"), std::string("a b.bms"),
+				 std::string("a.txt"), std::string("a.bms ONESHOT"), std::string("a.bms\n"), std::string("CYCLE"),
+				 std::string(".bms"), std::string(33, 'm') + ".bms", std::string("a.bms\0x", 7),
+				 std::string("a\x7f.bms"), std::string("a\tb.bms"), std::string("\xC2\x85.bms") }) {
 		why = {};
 		TEST_EXPECT(!hosted::console_mission_add(bad, false, why) && why.error == "invalid_mission");
 	}
@@ -98,6 +108,7 @@ int test_compose() {
 	TEST_EXPECT(hosted::console_chat_send(std::string(59, 'x'), why).has_value());
 	for (const std::string &bad : { std::string(), std::string("   "), std::string(60, 'x'), std::string("two\nlines"),
 				 std::string("tab\there"), std::string("bell\x07"), std::string("c1 \xC2\x85"),
+				 std::string("del\x7f"), std::string("nul\0x", 5),
 				 std::string("emoji \xF0\x9F\x98\x80"), std::string("not utf8 \xE9") }) {
 		why = {};
 		TEST_EXPECT(!hosted::console_chat_send(bad, why) && why.error == "invalid_text");
@@ -106,7 +117,7 @@ int test_compose() {
 	// Every line a route can compose is on the list, and one packet carries it.
 	std::vector<std::string> lines;
 	for (const ConsoleVerb verb : { ConsoleVerb::PlayerList, ConsoleVerb::MissionAvailable, ConsoleVerb::MissionList,
-				 ConsoleVerb::MissionCycle, ConsoleVerb::ChatGet, ConsoleVerb::GameSettings })
+				 ConsoleVerb::MissionCycle, ConsoleVerb::ChatGet, ConsoleVerb::GameSettings, ConsoleVerb::GameState })
 		lines.push_back(hosted::console_command(verb)->line);
 	lines.push_back(hosted::console_player_command(ConsoleVerb::PlayerBan, 7, why)->line);
 	lines.push_back(hosted::console_mission_add("a.bms", true, why)->line);
@@ -130,6 +141,12 @@ int test_outcomes() {
 	};
 	TEST_EXPECT(status(V::PlayerList, { "NAME            \t #\tTEAM\tClass\tKills\tDeaths\tPING\n" }) == 200);
 	TEST_EXPECT(error(V::PlayerList, { "ERROR - Not in Game State." }) == "not_in_game");
+	TEST_EXPECT(error(V::PlayerList, { "ERROR - Something else." }) == "admin_error");
+	TEST_EXPECT(status(V::GameState, { "OK - Current State = Menus" }) == 200);
+	TEST_EXPECT(error(V::GameState, { "OK - Current State = Elsewhere" }) == "admin_error");
+	TEST_EXPECT(hosted::console_scene({ "OK - Current State = Game" }) == "Game");
+	TEST_EXPECT(hosted::console_scene({ "OK - Current State = Unknown" }) == "Unknown");
+	TEST_EXPECT(hosted::console_scene({ "ERROR - x" }).empty() && hosted::console_scene({}).empty());
 	TEST_EXPECT(status(V::PlayerPunt, { "OK - Player punted." }) == 200);
 	TEST_EXPECT(error(V::PlayerPunt, { "ERROR - Player Not Found." }) == "player_not_found");
 	TEST_EXPECT(error(V::PlayerPunt, { "ERROR - Cannot punt Host." }) == "invalid_slot");

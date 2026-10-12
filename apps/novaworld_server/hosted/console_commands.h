@@ -19,7 +19,8 @@
 //   MISSION LIST                the rotation (read)
 //   MISSION ADD <file> <0|1>    a map appended to the rotation, its sides swapped at the
 //                               half or not (no insert position: retail's insert leaves the
-//                               next-map cursor unset when the list grows; no ONESHOT)
+//                               next-map cursor unset when the list grows; no ONESHOT), up
+//                               to kConsoleRotationMax entries
 //   MISSION REMOVE <index>      an entry removed (never the last: the routes read the
 //                               rotation first, since an empty one ends the session)
 //   MISSION SETNEXT <index>     the next map (an index the rotation has: the routes check,
@@ -28,15 +29,18 @@
 //   CHAT GET                    the chat window (read)
 //   CHAT SEND <text>            a server chat line
 // The admins' add one read: GET GAMESETTINGS (the live settings, the game and
-// side passwords among them).
+// side passwords among them). The routes also read GET GAMESTATE themselves (a
+// rotation edit's scene check), never as a caller's command.
 //
 // Every argument is checked before a line is composed: a slot is 1..255 (the
-// server compares `(u8)atol`, so 256 would be the host's 0), an index 0..255,
-// a mission a .bms name of letters, digits, '_' and '-' (is_mission_file_name),
-// and chat text the host's cp1252 with no control byte (C1 included), not
-// blank, at most kChatTextMaxBytes. The routes take the slot and the index from
-// the path as unsigned integers, so no command line ever carries a caller's
-// byte outside these rules.
+// server compares `(u8)atol`, so 256 would be the host's 0), an index below
+// kConsoleRotationMax, a mission a .bms name of letters, digits, '_' and '-'
+// (is_mission_file_name), and chat text the host's cp1252 with no control byte
+// (C1 included), not blank, at most kChatTextMaxBytes. The routes take the slot
+// and the index from the path as unsigned integers, so no command line ever
+// carries a caller's byte outside these rules.
+
+#include "hosted_settings.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -61,6 +65,7 @@ enum class ConsoleVerb : uint8_t {
 	ChatGet,
 	ChatSend,
 	GameSettings, // the admins' alone
+	GameState,    // the routes' own scene check (GET GAMESTATE), no caller's
 };
 // The verb's name in the log ("punt", "rotation", ...).
 const char *console_verb_name(ConsoleVerb verb);
@@ -70,9 +75,17 @@ bool owner_may_run(ConsoleVerb verb);
 // the site polls is not recorded), and the owner's write bucket pays for it.
 bool console_verb_writes(ConsoleVerb verb);
 
+// A slot: the server matches `(u8)atol` of the target against each active
+// slot's number, so 1..255 (0 is the server's own, and 256 would read as 0).
+// [orig: CAdminServer_HandlePlayer @0x40407E..0x404136]
 inline constexpr uint64_t kConsoleSlotMin = 1;
 inline constexpr uint64_t kConsoleSlotMax = 255;
-inline constexpr uint64_t kConsoleIndexMax = 255;
+// The longest rotation the console builds (service policy, not a server limit:
+// retail's rotation regrows as it fills, MissionRotation_Append @0x5019D0
+// @0x501A0C): the start settings' kMissionsMax, so an index is below it and an
+// add to a full rotation is refused.
+inline constexpr uint64_t kConsoleRotationMax = kMissionsMax;
+inline constexpr uint64_t kConsoleIndexMax = kConsoleRotationMax - 1;
 // The chat text a server line keeps: CHAT SEND's sender cuts it to 59 in its
 // flood check (and retail joins the words, each with a space, into a 122-byte
 // buffer with no bound, D-NET-362, which 59 keeps within). The same line again
@@ -95,7 +108,7 @@ struct ConsoleRefusal {
 };
 
 // The commands with no argument: PlayerList, MissionAvailable, MissionList,
-// MissionCycle, ChatGet, GameSettings. Nullopt for any other verb.
+// MissionCycle, ChatGet, GameSettings, GameState. Nullopt for any other verb.
 std::optional<ConsoleCommand> console_command(ConsoleVerb verb);
 // PLAYER PUNT / BAN / SWAPTEAM / KILL <slot>.
 std::optional<ConsoleCommand> console_player_command(ConsoleVerb verb, uint64_t slot, ConsoleRefusal &why);
@@ -114,5 +127,8 @@ struct ConsoleOutcome {
 	std::string message;
 };
 ConsoleOutcome console_outcome(ConsoleVerb verb, const std::vector<std::string> &replies);
+// GET GAMESTATE's scene: "Game" (the Game Loop), "Menus" or "Unknown"; "" for a
+// reply that names none. [orig: CAdminServer_HandleGet @0x4033C4..0x40340B]
+std::string console_scene(const std::vector<std::string> &replies);
 
 } // namespace opennova::novaworld_server::hosted

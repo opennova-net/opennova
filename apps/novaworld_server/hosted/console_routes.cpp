@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <climits>
 #include <cstdio>
+#include <functional>
+#include <iterator>
 #include <memory>
 #include <utility>
 
@@ -75,7 +77,32 @@ crow::json::wvalue link_json(const AdminLinkStatus &status) {
 	return out;
 }
 
+// A release run when the last holder of the returned pointer lets it go.
+std::shared_ptr<void> on_release(std::function<void()> fn) {
+	struct Release {
+		std::function<void()> fn;
+		~Release() {
+			if (fn) fn();
+		}
+	};
+	auto release = std::make_shared<Release>();
+	release->fn = std::move(fn);
+	return release;
+}
+
+// A refusal the caller may try again shortly.
+crow::response busy(int status, const char *error, const char *message) {
+	crow::response res = json_error(status, error, message);
+	res.set_header("Retry-After", "1");
+	return res;
+}
+
 } // namespace
+
+void ConsoleRoutes::set_handler_threads(size_t threads) {
+	std::lock_guard<std::mutex> lock(admit_mu_);
+	max_admitted_ = threads > kHandlersKeptFree + 1 ? threads - kHandlersKeptFree : 1;
+}
 
 void ConsoleRoutes::register_routes(WebApp &app, AdminLinks *links) {
 	links_ = links;
@@ -83,14 +110,69 @@ void ConsoleRoutes::register_routes(WebApp &app, AdminLinks *links) {
 	register_admin(app);
 }
 
-std::optional<crow::response> ConsoleRoutes::not_running(const HostedServer &server) {
-	if (server.state == State::Running) return std::nullopt;
+std::optional<crow::response> ConsoleRoutes::check_server(const HostedServer &server) {
 	if (server.state == State::Stopping)
 		return json_error(409, "server_stopping", "this hosted server is being stopped");
-	return json_error(409, "server_not_running", "this hosted server is not running yet");
+	if (server.state != State::Running)
+		return json_error(409, "server_not_running", "this hosted server is not running yet");
+	// No link up: refused before any admission or token.
+	const std::shared_ptr<AdminLink> link = links_ != nullptr ? links_->find(server.id) : nullptr;
+	if (!link || link->status().state != AdminLinkState::Up)
+		return json_error(503, "admin_unavailable", "the server's admin link is not up; try again shortly");
+	return std::nullopt;
 }
 
-ConsoleRoutes::Caller ConsoleRoutes::owner_caller(const WebSessionUser &user, bool write) {
+void ConsoleRoutes::admit(Caller &c, const std::string &account, bool rotation_edit) {
+	std::lock_guard<std::mutex> lock(admit_mu_);
+	if (busy_accounts_.count(account) != 0) {
+		c.refusal = busy(429, "console_busy", "this account's previous console request is still running");
+		return;
+	}
+	if (admitted_ >= max_admitted_) {
+		c.refusal = busy(503, "console_full", "the service's console is busy; try again shortly");
+		return;
+	}
+	if (rotation_edit && rotation_edits_.count(c.server_id) != 0) {
+		c.refusal = busy(409, "rotation_busy", "another edit of this server's rotation is running");
+		return;
+	}
+	busy_accounts_.insert(account);
+	++admitted_;
+	c.admission = on_release([this, account] {
+		std::lock_guard<std::mutex> release_lock(admit_mu_);
+		busy_accounts_.erase(account);
+		--admitted_;
+	});
+	if (rotation_edit) {
+		const int64_t id = c.server_id;
+		rotation_edits_.insert(id);
+		c.rotation_edit = on_release([this, id] {
+			std::lock_guard<std::mutex> release_lock(admit_mu_);
+			rotation_edits_.erase(id);
+		});
+	}
+}
+
+void ConsoleRoutes::refund(const Caller &c) {
+	if (c.bucket == nullptr || c.refunded) return;
+	c.refunded = true;
+	c.bucket->refund(c.bucket_key, RateLimiter::Clock::now());
+}
+
+bool ConsoleRoutes::log_limit(const std::string &account) {
+	std::lock_guard<std::mutex> lock(admit_mu_);
+	const auto now = Clock::now();
+	const auto it = limit_logged_.find(account);
+	if (it != limit_logged_.end() && now - it->second < kLimitLogWindow) return false;
+	if (limit_logged_.size() >= 1024) {
+		for (auto old = limit_logged_.begin(); old != limit_logged_.end();)
+			old = now - old->second >= kLimitLogWindow ? limit_logged_.erase(old) : std::next(old);
+	}
+	limit_logged_[account] = now;
+	return true;
+}
+
+ConsoleRoutes::Caller ConsoleRoutes::owner_caller(const WebSessionUser &user, bool write, bool rotation_edit) {
 	Caller c;
 	c.actor = "owner";
 	c.who = "owner '" + loggable(user.username) + "' (id=" + std::to_string(user.id) + ")";
@@ -100,29 +182,37 @@ ConsoleRoutes::Caller ConsoleRoutes::owner_caller(const WebSessionUser &user, bo
 			c.refusal = json_error(404, "no_live_server", "this account runs no hosted server");
 			return c;
 		}
-		if (auto refusal = not_running(*server)) {
+		c.server_id = server->id;
+		if (auto refusal = check_server(*server)) {
 			c.refusal = std::move(refusal);
 			return c;
 		}
-		c.server_id = server->id;
 	} catch (const db::SqliteError &e) {
 		std::fprintf(stderr, "[http] hosted console lookup failed: %s\n", e.what());
 		c.refusal = json_error(500, "db_error");
 		return c;
 	}
-	// One token, after the checks: a refused request costs the account nothing.
+	const std::string account = "user:" + std::to_string(user.id);
+	admit(c, account, rotation_edit);
+	if (c.refusal) return c;
+	// One token, after the checks and the admission: a refused request costs the
+	// account nothing, and a 503 from the link hands it back (run()).
 	RateLimiter &bucket = write ? owner_writes_ : owner_reads_;
-	if (const int64_t wait = bucket.take("console|" + std::to_string(user.id), RateLimiter::Clock::now())) {
-		std::printf("[hosted] console server %lld: %s %s -> rate_limited\n", static_cast<long long>(c.server_id),
-				c.who.c_str(), write ? "command" : "read");
+	const std::string key = "console|" + std::to_string(user.id);
+	if (const int64_t wait = bucket.take(key, RateLimiter::Clock::now())) {
+		if (log_limit(account))
+			std::printf("[hosted] console server %lld: %s -> rate_limited (logged once a minute)\n",
+					static_cast<long long>(c.server_id), c.who.c_str());
 		c.refusal = too_many_requests(wait);
 		return c;
 	}
+	c.bucket = &bucket;
+	c.bucket_key = key;
 	c.deadline = Clock::now() + kCommandBudget;
 	return c;
 }
 
-ConsoleRoutes::Caller ConsoleRoutes::admin_caller(const RouteAccess &access, uint64_t id) {
+ConsoleRoutes::Caller ConsoleRoutes::admin_caller(const RouteAccess &access, uint64_t id, bool rotation_edit) {
 	Caller c;
 	c.actor = "admin";
 	c.who = access.user ? "admin '" + loggable(access.user->username) + "'" : std::string("admin (token)");
@@ -136,16 +226,18 @@ ConsoleRoutes::Caller ConsoleRoutes::admin_caller(const RouteAccess &access, uin
 			c.refusal = json_error(409, "not_live", "this hosted server has ended");
 			return c;
 		}
-		if (auto refusal = not_running(*server)) {
+		c.server_id = server->id;
+		if (auto refusal = check_server(*server)) {
 			c.refusal = std::move(refusal);
 			return c;
 		}
-		c.server_id = server->id;
 	} catch (const db::SqliteError &e) {
 		std::fprintf(stderr, "[http] hosted console lookup failed: %s\n", e.what());
 		c.refusal = json_error(500, "db_error");
 		return c;
 	}
+	admit(c, access.user ? "user:" + std::to_string(access.user->id) : std::string("token"), rotation_edit);
+	if (c.refusal) return c;
 	c.deadline = Clock::now() + kCommandBudget;
 	return c;
 }
@@ -159,13 +251,15 @@ std::optional<std::vector<std::string>> ConsoleRoutes::run(const Caller &c, cons
 			std::printf("[hosted] console server %lld: %s %s -> %s\n", static_cast<long long>(c.server_id),
 					c.who.c_str(), console_verb_name(command.verb), outcome.c_str());
 	};
-	const std::shared_ptr<AdminLink> link = links_ != nullptr ? links_->find(c.server_id) : nullptr;
-	const auto unavailable = [&]() {
-		log("admin_unavailable");
-		refusal = json_error(503, "admin_unavailable", "the server's admin link is not up; try again shortly");
+	// The link took no command: the owner's token goes back.
+	const auto unavailable = [&](const char *error, const char *message) {
+		log(error);
+		refund(c);
+		refusal = busy(503, error, message);
 		return std::nullopt;
 	};
-	if (!link) return unavailable();
+	const std::shared_ptr<AdminLink> link = links_ != nullptr ? links_->find(c.server_id) : nullptr;
+	if (!link) return unavailable("admin_unavailable", "the server's admin link is not up; try again shortly");
 	const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(c.deadline - Clock::now());
 	if (left.count() <= 0) {
 		log("admin_timeout");
@@ -180,9 +274,7 @@ std::optional<std::vector<std::string>> ConsoleRoutes::run(const Caller &c, cons
 		case AdminCommandOutcome::Answered:
 			break;
 		case AdminCommandOutcome::Busy:
-			log("admin_busy");
-			refusal = json_error(503, "admin_busy", "the server's admin link is busy; try again shortly");
-			return std::nullopt;
+			return unavailable("admin_busy", "the server's admin link is busy; try again shortly");
 		case AdminCommandOutcome::TimedOut: {
 			log(result.sent ? "admin_timeout (sent)" : "admin_timeout (dropped)");
 			crow::json::wvalue out;
@@ -201,7 +293,7 @@ std::optional<std::vector<std::string>> ConsoleRoutes::run(const Caller &c, cons
 			return std::nullopt;
 		case AdminCommandOutcome::LinkDown:
 		case AdminCommandOutcome::Stopped:
-			return unavailable();
+			return unavailable("admin_unavailable", "the server's admin link is not up; try again shortly");
 	}
 	const ConsoleOutcome outcome = console_outcome(command.verb, result.replies);
 	if (outcome.status != 200) {
@@ -211,6 +303,21 @@ std::optional<std::vector<std::string>> ConsoleRoutes::run(const Caller &c, cons
 	}
 	log("ok");
 	return std::move(result.replies);
+}
+
+// Retail answers MISSION LIST with `No missions in queue.` outside the Game Loop
+// (the inter-round window, the menus), and MISSION ADD with `OK - Entry Added`
+// there while it appends nothing, so an empty rotation is read against the
+// scene. [orig: CAdminServer_HandleMissionCommand @0x40634F;
+//  CAdminServer_HandleMissionAdd @0x403E9C..0x403ECF (the append in the Game Loop
+//  alone)]
+std::optional<crow::response> ConsoleRoutes::require_match(const Caller &c) {
+	std::optional<crow::response> refusal;
+	const auto replies = run(c, *console_command(ConsoleVerb::GameState), refusal);
+	if (!replies) return refusal;
+	if (console_scene(*replies) != "Game")
+		return json_error(409, "not_in_game", "the server is between matches; try again shortly");
+	return std::nullopt;
 }
 
 crow::response ConsoleRoutes::players(const Caller &c) {
@@ -270,8 +377,13 @@ crow::response ConsoleRoutes::rotation(const Caller &c) {
 	std::optional<crow::response> refusal;
 	const auto replies = run(c, *console_command(ConsoleVerb::MissionList), refusal);
 	if (!replies) return std::move(*refusal);
+	const std::vector<AdminRotationEntry> entries = admin_parse_mission_list(replies->front());
+	// None listed: between matches, or a match with no rotation.
+	if (entries.empty()) {
+		if (auto out_of_match = require_match(c)) return std::move(*out_of_match);
+	}
 	std::vector<crow::json::wvalue> list;
-	for (const AdminRotationEntry &r : admin_parse_mission_list(replies->front())) {
+	for (const AdminRotationEntry &r : entries) {
 		crow::json::wvalue e;
 		e["index"] = r.index;
 		e["file"] = utf8(r.file);
@@ -288,8 +400,21 @@ crow::response ConsoleRoutes::rotation(const Caller &c) {
 	return no_store(json_reply(200, out));
 }
 
+// The rotation is read first, in the edit the caller's admission holds: a
+// rotation of kConsoleRotationMax entries takes no more (service policy), and an
+// empty one is read against the scene (require_match: retail's ADD answers OK
+// outside a match while it appends nothing).
 crow::response ConsoleRoutes::rotation_add(const Caller &c, const ConsoleCommand &command, const std::string &mission) {
 	std::optional<crow::response> refusal;
+	const auto listed = run(c, *console_command(ConsoleVerb::MissionList), refusal);
+	if (!listed) return std::move(*refusal);
+	const std::vector<AdminRotationEntry> entries = admin_parse_mission_list(listed->front());
+	if (entries.empty()) {
+		if (auto out_of_match = require_match(c)) return std::move(*out_of_match);
+	}
+	if (entries.size() >= kConsoleRotationMax)
+		return json_error(409, "rotation_full",
+				"the rotation holds " + std::to_string(kConsoleRotationMax) + " maps, all the console builds");
 	if (!run(c, command, refusal)) return std::move(*refusal);
 	crow::json::wvalue out;
 	out["server_id"] = c.server_id;
@@ -299,9 +424,11 @@ crow::response ConsoleRoutes::rotation_add(const Caller &c, const ConsoleCommand
 }
 
 // REMOVE and SETNEXT answer OK whatever the index, so the rotation is read
-// first: an index it does not have is refused, and so is removing its last map
-// (service policy: an empty rotation finds no entry at the round's end, as
-// MISSION CLEAR's does, and the session ends, D-NET-331's miss arm).
+// first, in the edit the caller's admission holds (so no other edit lands
+// between the read and this one): an index it does not have is refused, and so
+// is removing its last map (service policy: an empty rotation finds no entry
+// at the round's end, as MISSION CLEAR's does, and the session ends, D-NET-331's
+// miss arm); an empty read is checked against the scene.
 // [orig: CAdminServer_HandleMissionCommand — REMOVE's `OK - Mission Removed.`
 //  and SETNEXT's `OK - Next Mission Set.` @0x4066BF..0x4066EA, either way]
 crow::response ConsoleRoutes::rotation_entry(const Caller &c, const ConsoleCommand &command, uint64_t index) {
@@ -309,6 +436,9 @@ crow::response ConsoleRoutes::rotation_entry(const Caller &c, const ConsoleComma
 	const auto listed = run(c, *console_command(ConsoleVerb::MissionList), refusal);
 	if (!listed) return std::move(*refusal);
 	const std::vector<AdminRotationEntry> entries = admin_parse_mission_list(listed->front());
+	if (entries.empty()) {
+		if (auto out_of_match = require_match(c)) return std::move(*out_of_match);
+	}
 	const bool present = std::any_of(entries.begin(), entries.end(),
 			[index](const AdminRotationEntry &e) { return e.index >= 0 && static_cast<uint64_t>(e.index) == index; });
 	if (!present) return json_error(404, "no_such_entry", "the rotation has no entry at this index");
@@ -414,7 +544,7 @@ void ConsoleRoutes::register_owner(WebApp &app) {
 	const auto simple = [this](const crow::request &req, bool write, Work work) -> crow::response {
 		auto access = access_.require_user(req);
 		if (access.refusal) return std::move(*access.refusal);
-		Caller c = owner_caller(*access.user, write);
+		Caller c = owner_caller(*access.user, write, false);
 		if (c.refusal) return std::move(*c.refusal);
 		return (this->*work)(c);
 	};
@@ -436,7 +566,7 @@ void ConsoleRoutes::register_owner(WebApp &app) {
 		ConsoleRefusal why;
 		const auto command = console_player_command(verb, slot, why);
 		if (!command) return refused(why);
-		Caller c = owner_caller(*access.user, true);
+		Caller c = owner_caller(*access.user, true, false);
 		if (c.refusal) return std::move(*c.refusal);
 		return player_action(c, *command, slot);
 	};
@@ -460,7 +590,7 @@ void ConsoleRoutes::register_owner(WebApp &app) {
 		ConsoleRefusal why;
 		const auto command = console_rotation_command(verb, index, why);
 		if (!command) return refused(why);
-		Caller c = owner_caller(*access.user, true);
+		Caller c = owner_caller(*access.user, true, true);
 		if (c.refusal) return std::move(*c.refusal);
 		return rotation_entry(c, *command, index);
 	};
@@ -484,7 +614,7 @@ void ConsoleRoutes::register_owner(WebApp &app) {
 		ConsoleRefusal why;
 		const auto command = console_mission_add(*mission, swap_sides, why);
 		if (!command) return refused(why);
-		Caller c = owner_caller(*access.user, true);
+		Caller c = owner_caller(*access.user, true, true);
 		if (c.refusal) return std::move(*c.refusal);
 		return rotation_add(c, *command, *mission);
 	});
@@ -501,7 +631,7 @@ void ConsoleRoutes::register_owner(WebApp &app) {
 		ConsoleRefusal why;
 		const auto command = console_chat_send(*text, why);
 		if (!command) return refused(why);
-		Caller c = owner_caller(*access.user, true);
+		Caller c = owner_caller(*access.user, true, false);
 		if (c.refusal) return std::move(*c.refusal);
 		return chat_send(c, *command);
 	});
@@ -531,7 +661,7 @@ void ConsoleRoutes::register_admin(WebApp &app) {
 	const auto simple = [this](const crow::request &req, uint64_t id, Work work) -> crow::response {
 		auto access = access_.require_admin(req);
 		if (access.refusal) return std::move(*access.refusal);
-		Caller c = admin_caller(access, id);
+		Caller c = admin_caller(access, id, false);
 		if (c.refusal) return std::move(*c.refusal);
 		return (this->*work)(c);
 	};
@@ -561,7 +691,7 @@ void ConsoleRoutes::register_admin(WebApp &app) {
 		ConsoleRefusal why;
 		const auto command = console_player_command(verb, slot, why);
 		if (!command) return refused(why);
-		Caller c = admin_caller(access, id);
+		Caller c = admin_caller(access, id, false);
 		if (c.refusal) return std::move(*c.refusal);
 		return player_action(c, *command, slot);
 	};
@@ -588,7 +718,7 @@ void ConsoleRoutes::register_admin(WebApp &app) {
 		ConsoleRefusal why;
 		const auto command = console_rotation_command(verb, index, why);
 		if (!command) return refused(why);
-		Caller c = admin_caller(access, id);
+		Caller c = admin_caller(access, id, true);
 		if (c.refusal) return std::move(*c.refusal);
 		return rotation_entry(c, *command, index);
 	};
@@ -614,7 +744,7 @@ void ConsoleRoutes::register_admin(WebApp &app) {
 				ConsoleRefusal why;
 				const auto command = console_mission_add(*mission, swap_sides, why);
 				if (!command) return refused(why);
-				Caller c = admin_caller(access, id);
+				Caller c = admin_caller(access, id, true);
 				if (c.refusal) return std::move(*c.refusal);
 				return rotation_add(c, *command, *mission);
 			});
@@ -630,7 +760,7 @@ void ConsoleRoutes::register_admin(WebApp &app) {
 				ConsoleRefusal why;
 				const auto command = console_chat_send(*text, why);
 				if (!command) return refused(why);
-				Caller c = admin_caller(access, id);
+				Caller c = admin_caller(access, id, false);
 				if (c.refusal) return std::move(*c.refusal);
 				return chat_send(c, *command);
 			});

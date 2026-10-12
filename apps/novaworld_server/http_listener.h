@@ -4,6 +4,7 @@
 
 #include <net/novacrypto/epask.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
@@ -83,6 +84,18 @@ public:
 	// The port Crow bound and serves (the OS's pick when config.http_port is
 	// 0); valid once start() returned true.
 	uint16_t bound_port() const { return bound_port_; }
+
+	// The handler threads Crow runs: the core count, at least
+	// kMinHandlerThreads. Handlers can wait without working (a hosted server's
+	// console request waits on its admin link for up to 3 s), so a two-core
+	// machine still runs eight; the console admits at most two fewer
+	// waiting requests (hosted/console_routes.h). The SQLite pool grows to the
+	// peak of concurrent leases, one per handler thread at most, which this
+	// bounds.
+	static constexpr unsigned kMinHandlerThreads = 8;
+	static unsigned handler_threads() {
+		return (std::max)(std::thread::hardware_concurrency(), kMinHandlerThreads);
+	}
 
 private:
 	// Route-family registrars called once from start(), in registration

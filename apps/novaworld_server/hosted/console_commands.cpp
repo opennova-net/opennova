@@ -6,7 +6,9 @@
 #include <base/io/cp1252.h>
 #include <base/io/strutil.h>
 
+#include <string>
 #include <string_view>
+#include <utility>
 
 namespace opennova::novaworld_server::hosted {
 
@@ -21,16 +23,6 @@ ConsoleCommand make(ConsoleVerb verb, std::string line) {
 
 ConsoleRefusal refusal(const char *error, std::string message) {
 	return ConsoleRefusal{ error, std::move(message) };
-}
-
-// Whether UTF-8 `text` holds a C1 control (U+0080..U+009F: 0xC2 then 0x80..0x9F).
-bool has_c1_control(std::string_view text) {
-	for (size_t i = 0; i + 1 < text.size(); ++i) {
-		const auto lead = static_cast<uint8_t>(text[i]);
-		const auto next = static_cast<uint8_t>(text[i + 1]);
-		if (lead == 0xC2 && next >= 0x80 && next <= 0x9F) return true;
-	}
-	return false;
 }
 
 bool starts_with(const std::string &text, const char *prefix) {
@@ -75,6 +67,7 @@ const char *console_verb_name(ConsoleVerb verb) {
 		case ConsoleVerb::ChatGet: return "chat";
 		case ConsoleVerb::ChatSend: return "chat send";
 		case ConsoleVerb::GameSettings: return "settings";
+		case ConsoleVerb::GameState: return "scene";
 	}
 	return "?";
 }
@@ -90,6 +83,7 @@ bool console_verb_writes(ConsoleVerb verb) {
 		case ConsoleVerb::MissionList:
 		case ConsoleVerb::ChatGet:
 		case ConsoleVerb::GameSettings:
+		case ConsoleVerb::GameState:
 			return false;
 		default:
 			return true;
@@ -104,6 +98,7 @@ std::optional<ConsoleCommand> console_command(ConsoleVerb verb) {
 		case ConsoleVerb::MissionCycle: return make(verb, "MISSION CYCLE");
 		case ConsoleVerb::ChatGet: return make(verb, "CHAT GET");
 		case ConsoleVerb::GameSettings: return make(verb, "GET GAMESETTINGS");
+		case ConsoleVerb::GameState: return make(verb, "GET GAMESTATE");
 		default: return std::nullopt;
 	}
 }
@@ -132,7 +127,7 @@ std::optional<ConsoleCommand> console_rotation_command(ConsoleVerb verb, uint64_
 		default: return std::nullopt;
 	}
 	if (index > kConsoleIndexMax) {
-		why = refusal("invalid_index", "a rotation index is 0 to 255");
+		why = refusal("invalid_index", "a rotation index is 0 to " + std::to_string(kConsoleIndexMax));
 		return std::nullopt;
 	}
 	return make(verb, std::string("MISSION ") + sub + " " + std::to_string(index));
@@ -183,7 +178,9 @@ ConsoleOutcome console_outcome(ConsoleVerb verb, const std::vector<std::string> 
 	switch (verb) {
 		case ConsoleVerb::PlayerList:
 			if (first == kNotInGame) return failed(409, "not_in_game", "the server is not in a match");
-			return ok();
+			// The table, its header first; any other ERROR is none the verb draws.
+			// [orig: CAdminServer_HandlePlayer @0x403F63, @0x403F7C]
+			return starts_with(first, "ERROR - ") ? unexpected() : ok();
 		case ConsoleVerb::PlayerPunt:
 		case ConsoleVerb::PlayerSwapTeam:
 		case ConsoleVerb::PlayerKill: {
@@ -219,8 +216,17 @@ ConsoleOutcome console_outcome(ConsoleVerb verb, const std::vector<std::string> 
 		case ConsoleVerb::ChatGet:
 		case ConsoleVerb::GameSettings:
 			return starts_with(first, "ERROR - ") ? unexpected() : ok();
+		case ConsoleVerb::GameState:
+			return console_scene(replies).empty() ? unexpected() : ok();
 	}
 	return unexpected();
+}
+
+std::string console_scene(const std::vector<std::string> &replies) {
+	static constexpr const char *kPrefix = "OK - Current State = ";
+	if (replies.size() != 1 || !starts_with(replies[0], kPrefix)) return {};
+	const std::string scene = replies[0].substr(std::char_traits<char>::length(kPrefix));
+	return scene == "Game" || scene == "Menus" || scene == "Unknown" ? scene : std::string();
 }
 
 } // namespace opennova::novaworld_server::hosted

@@ -15,16 +15,6 @@ namespace opennova::novaworld_server::hosted {
 
 namespace {
 
-// Whether UTF-8 `text` holds a C1 control (U+0080..U+009F: 0xC2 then 0x80..0x9F).
-bool has_c1_control(std::string_view text) {
-	for (size_t i = 0; i + 1 < text.size(); ++i) {
-		const auto lead = static_cast<uint8_t>(text[i]);
-		const auto next = static_cast<uint8_t>(text[i + 1]);
-		if (lead == 0xC2 && next >= 0x80 && next <= 0x9F) return true;
-	}
-	return false;
-}
-
 std::optional<SettingsRefusal> out_of_range(const char *field, int value, int min, int max) {
 	if (value >= min && value <= max) return std::nullopt;
 	return SettingsRefusal{ field,
