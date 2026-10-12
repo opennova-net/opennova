@@ -368,7 +368,7 @@ int test_new_terrain() {
 	for (const char *texture : {"isle_c.tga", "isle_dt.tga", "isle_dm.tga", "isle_d1.tga"})
 		TEST_EXPECT(project.find(texture) && project.find(texture)->kind == AssetKind::Texture);
 	TEST_EXPECT(project.find("isle.tset") && project.find("isle.tset")->kind == AssetKind::ImportSource);
-	TEST_EXPECT(project.find("isle_heightmap.png") && project.find("isle_heightmap.png")->kind == AssetKind::ImportInput);
+	TEST_EXPECT(project.find("isle_heightmap.png") && project.find("isle_heightmap.png")->kind == AssetKind::HeightmapInput);
 	TEST_EXPECT(project.find("isle_colormap.png") && project.find("isle_colormap.png")->kind == AssetKind::ImportInput);
 
 	// The build packs the terrain's files, never its images or its set.

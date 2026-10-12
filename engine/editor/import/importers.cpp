@@ -31,7 +31,7 @@ const std::vector<Importer> &importers() {
 		rows.push_back(std::move(image));
 		// The terrain importer (import/terrain_import, S20): a terrain set's images made into a terrain.
 		Importer terrain;
-		terrain.id = "terrain";
+		terrain.id = kTerrainImporterId;
 		terrain.version = kTerrainImporterVersion;
 		terrain.extensions = {kTerrainSetExtension};
 		terrain.options = terrain_import_option_rows();

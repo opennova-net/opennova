@@ -301,6 +301,11 @@ constexpr AssetKindRow kRows[] = {
 	Kind(AssetKind::ImportInput, "import_input", "Import input")
 	        .edited_by(DocumentTypeId::Texture)
 	        .row,
+	// The scan gives it to the input a terrain set's import record reads as the set's `heightmap` (S25), whatever
+	// its name would make it: the terrain's heights before its import bakes them. It never packs: its import's
+	// .cpt does.
+	Kind(AssetKind::HeightmapInput, "heightmap_input", "Heightmap input")
+	        .row,
 };
 
 constexpr bool same_text(const char *a, const char *b) {

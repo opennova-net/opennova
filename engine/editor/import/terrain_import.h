@@ -66,6 +66,8 @@ namespace opennova::editor {
 // codes it compares; Foliage_GenerateInstances_0 @ 0x6002DB..0x60030A, the colour overwritten].
 
 inline constexpr int kTerrainImporterVersion = 1;
+// The terrain importer's id (the import record's `importer`).
+inline constexpr const char *kTerrainImporterId = "terrain";
 inline constexpr const char *kTerrainSetExtension = ".tset";
 // The longest stem a terrain set may have: its longest output, `<stem>_dt.tga`, fits an archive's 16
 // characters.
