@@ -1,7 +1,8 @@
 #include <net/napi/literal.h>
 
-#include <base/io/cp1252.h> // cp1252_isalpha_sign_extended, cp1252_isdigit
-#include <base/io/crt_ftol.h> // io::retail_atol_n
+#include <base/io/cp1252.h> // cp1252_isalpha_sign_extended
+
+#include <cctype>
 
 namespace opennova {
 namespace {
@@ -19,21 +20,18 @@ bool is_alpha(char c) {
 	return cp1252_isalpha_sign_extended(c);
 }
 
-// The CRT _isdigit under the same LC_CTYPE, pinned to cp1252 (D-NET-388): the ten ASCII digits
-// and the superscripts 0xB2, 0xB3, 0xB9. Every arm hands it the sign-extended byte, which reads
-// the byte's own row (the table's mirror; 0xFF is no digit either way) (D-NET-391).
-// [orig: _isdigit @0x76b86d -> _isdigit_l @0x76b81e (pctype & 4); NapiScript_ParseHexValue
-//  @0x62d610 (the calls @0x62d694, @0x62d73e); NapiScript_ParseOctalInteger @0x62d7b0
-//  (@0x62d84f); NapiScript_ParseBinaryLiteral @0x62d900 (@0x62d9a1);
-//  NapiScript_ParseDecimalIntegerB @0x62da20 (@0x62da61, @0x62da87)]
+// The process locale's digit class, where retail's arms call the CRT _isdigit under the
+// game's ".ACP" LC_CTYPE [orig: NapiScript_ParseDecimalIntegerB @0x62da20 (the call
+// @0x62da61)]; D-NET-391's digit half moves it to cp1252_isdigit.
 bool is_digit(char c) {
-	return cp1252_isdigit(static_cast<uint8_t>(c));
+	return std::isdigit(static_cast<unsigned char>(c)) != 0;
 }
 
-// The hex run's letters, compared as signed chars, so no high byte is one.
-// [orig: NapiScript_ParseHexValue @0x62d610 — @0x62d6a2..0x62d6b0]
-bool is_hex_letter(char c) {
-	return (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f');
+int hex_digit(char c) {
+	if (c >= '0' && c <= '9') return c - '0';
+	if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+	if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+	return -1;
 }
 
 bool finish_radix(std::string_view input, size_t cursor, bool suffix_required,
@@ -51,13 +49,6 @@ bool finish_radix(std::string_view input, size_t cursor, bool suffix_required,
 	return true;
 }
 
-// The run is a digit or an ASCII hex letter. Each run byte folds into the value in 32 bits, a
-// digit as 16 * (value - 3) + byte (16 * value + byte - '0'), an upper-case letter as
-// 16 * value + byte - 55 and a lower-case one as 16 * value + byte - 87, the byte sign-extended,
-// so a cp1252 superscript digit folds as its signed byte less '0' (0xB2 as -126).
-// [orig: NapiScript_ParseHexValue @0x62d610 — the run @0x62d690..0x62d6c6; the fold
-//  @0x62d730..0x62d788: _isdigit @0x62d73e and @0x62d74a..0x62d754, isupper @0x62d759 and
-//  @0x62d765..0x62d76e, else @0x62d772..0x62d77b]
 bool parse_hex(std::string_view input, uint32_t &value, size_t &consumed) {
 	if (input.empty()) return false;
 	size_t cursor = 0;
@@ -75,11 +66,10 @@ bool parse_hex(std::string_view input, uint32_t &value, size_t &consumed) {
 	}
 	const size_t first_digit = cursor;
 	uint32_t parsed = 0;
-	while (cursor < input.size() && (is_digit(input[cursor]) || is_hex_letter(input[cursor]))) {
-		const char c = input[cursor];
-		const int32_t byte = static_cast<int8_t>(static_cast<uint8_t>(c));
-		const int32_t offset = is_digit(c) ? '0' : (c >= 'A' && c <= 'F') ? 55 : 87;
-		parsed = parsed * 16u + static_cast<uint32_t>(byte - offset);
+	while (cursor < input.size()) {
+		const int digit = hex_digit(input[cursor]);
+		if (digit < 0) break;
+		parsed = parsed * 16u + static_cast<uint32_t>(digit);
 		++cursor;
 	}
 	if (cursor == first_digit) return false;
@@ -119,8 +109,6 @@ bool parse_octal(std::string_view input, uint32_t &value, size_t &consumed) {
 		}
 		return false;
 	}
-	// After a leading zero, a digit past the 0..7 run fails the arm.
-	// [orig: NapiScript_ParseOctalInteger @0x62d7b0 — _isdigit @0x62d84f, the fail @0x62d859]
 	if (!suffix_required && cursor < input.size() && is_digit(input[cursor]))
 		return false;
 	if (!finish_radix(input, cursor, suffix_required, 'o', consumed)) return false;
@@ -139,34 +127,25 @@ bool parse_binary(std::string_view input, uint32_t &value, size_t &consumed) {
 		++cursor;
 	}
 	if (cursor == first_digit) return false;
-	// After a '%', any digit past the 0 / 1 run fails the arm ("%12", "%1\xB3").
-	// [orig: NapiScript_ParseBinaryLiteral @0x62d900 — _isdigit @0x62d9a1, the fail @0x62d9ab]
-	if (!suffix_required && cursor < input.size() && is_digit(input[cursor]))
-		return false;
 	if (!finish_radix(input, cursor, suffix_required, 'b', consumed)) return false;
 	value = parsed;
 	return true;
 }
 
-// The run is gated and extended by the digit class (a superscript extends it), and its value
-// is the CRT atol of the run, which stops at a superscript and saturates at the int32 range
-// (io::retail_atol_n, D-NET-384), so "12\xB2" reads 12 over three bytes and 4294967295 reads
-// 0x7FFFFFFF.
-// [orig: NapiScript_ParseDecimalIntegerB @0x62da20 — the run @0x62da61..0x62da91, _atol
-//  @0x76ab0a called @0x62dabc, the store @0x62dac5]
 bool parse_decimal(std::string_view input, uint32_t &value, size_t &consumed) {
 	if (input.empty() || !is_digit(input[0])) return false;
 	size_t cursor = 0;
+	uint32_t parsed = 0;
 	while (cursor < input.size() && is_digit(input[cursor])) {
+		parsed = parsed * 10u + static_cast<uint32_t>(input[cursor] - '0');
 		++cursor;
 		if (cursor < input.size() && input[cursor] == '.') return false;
 	}
-	const size_t run = cursor;
 	if (cursor < input.size() && (input[cursor] == 'd' || input[cursor] == 'D'))
 		++cursor;
 	else if (cursor < input.size() && is_alpha(input[cursor]))
 		return false;
-	value = static_cast<uint32_t>(io::retail_atol_n(input.data(), run));
+	value = parsed;
 	consumed = cursor;
 	return true;
 }

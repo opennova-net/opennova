@@ -154,9 +154,7 @@ bool check_retail_loose_numeric_and_ipv4_edges() {
 	if (!expect(r.post_port == 70000u, "POSTIPPORT stores full 32-bit value")) return false;
 	if (!expect((r.reflected_ip == std::array<uint8_t, 4>{1, 2, 3, 4}),
 			"REFLECTEDIPADDRESS ignores chars after fourth octet")) return false;
-	// The literal's decimal arm takes the CRT atol of its run, which saturates at INT32_MAX
-	// (D-NET-391) [orig: NapiScript_ParseDecimalIntegerB @0x62da20 (_atol called @0x62dabc)].
-	if (!expect(r.reflected_port == 0x7FFFFFFFu, "REFLECTEDPORTNUMBER saturates")) return false;
+	if (!expect(r.reflected_port == 4294967295u, "REFLECTEDPORTNUMBER stores u32 max")) return false;
 	if (!expect(r.met_ping == -42, "METPING's atol skips a leading vertical tab")) return false;
 	if (!expect(r.met_ext == 7, "METEXT's atol skips a leading form feed")) return false;
 	return true;
