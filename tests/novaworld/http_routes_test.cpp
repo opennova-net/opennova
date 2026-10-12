@@ -35,6 +35,7 @@
 #include "template_engine.h"
 #include "web_session.h"
 
+#include <base/io/cp1252.h>
 #include <base/io/sha256.h>
 #include <net/novacrypto/epask.h>
 #include <net/napi/session.h>
@@ -447,6 +448,14 @@ int64_t make_account(Harness &h, const std::string &username, const std::string 
 	const auto result = nws::create_user(*h.pool.acquire(), p);
 	if (!result.ok) std::fprintf(stderr, "  create %s: %s\n", username.c_str(), result.error_code.c_str());
 	return result.ok ? result.id : 0;
+}
+
+// A HOSTKEY recorded for `user` the way /NWHost.dll records one for its retail
+// login: at the account's credentials generation now. True when recorded.
+bool record_key_for(Harness &h, const std::string &key, int64_t user) {
+	auto conn = h.pool.acquire();
+	const auto account = nws::get_user_by_id(*conn, user);
+	return account && opennova::hostdb::record_host_key(*conn, key, user, account->credentials_gen);
 }
 
 // The site role an admin gives an account (PUT /api/admin/users/<id> with the
@@ -1607,6 +1616,7 @@ int test_listed_server_owners(Harness &h) {
 	TEST_EXPECT(str(mine["peer_ip"]) == "10.0.0.9");
 	TEST_EXPECT(str(mine["created_at"]).size() == 19 && str(mine["updated_at"]).size() == 19);
 	TEST_EXPECT(!mine.has("owner"));
+	TEST_EXPECT(mine["roster"].t() == crow::json::type::List && mine["roster"].size() == 0);
 
 	// The admin view: the Bearer token or an admin session; a player is refused.
 	reply = h.send("GET", "/api/admin/hosts");
@@ -1672,7 +1682,10 @@ int test_menu_urls_name_bound_port(Harness &h) {
 // verified and hosting, pumped by the test while it waits for what the service pushes.
 class PushHost {
 public:
-	explicit PushHost(uint16_t service_port) : session_(config()) {
+	// `client_index` tells several hosts' sessions apart in the service's log (each has its own
+	// socket, which is what the service keys a connection by).
+	explicit PushHost(uint16_t service_port, uint32_t client_index = 0x48545450u)
+		: session_(config(client_index)) {
 		socket_ = net::ScopedSocket(net::udp_bind(0));
 		service_.ip = {127, 0, 0, 1};
 		service_.port = service_port;
@@ -1700,11 +1713,17 @@ public:
 	}
 	void clear_notices() { notices_.clear(); }
 	void goodbye() { send(session_.build_goodbye()); }
+	// The ClientHostUpdate that first carries the HostKey, as a stock host's at its mission's
+	// start (the key names the listing's owner), pumped while it goes out and is ACKed.
+	void present_key(const std::string &key) {
+		session_.send_host_update({{0, "HostKey", key}}, {});
+		pump_until(300, [] { return false; });
+	}
 
 private:
-	static opennova::ClientSession::Config config() {
+	static opennova::ClientSession::Config config(uint32_t client_index) {
 		opennova::ClientSession::Config cfg;
-		cfg.client_index = 0x48545450u;
+		cfg.client_index = client_index;
 		cfg.client_key = 0x50555348u;
 		cfg.na = "http:push";
 		cfg.cookie_vars = []() {
@@ -1799,6 +1818,17 @@ int test_admin_host_push(Harness &h) {
 		{"{\"verb\":\"SetServerMsg\",\"args\":[\"a\\rb\"]}", "control byte"},
 		{"{\"verb\":\"TextChatServer\",\"args\":[\"tab\\there\"]}", "control byte"},
 		{"{\"verb\":\"TextChatServer\",\"args\":[\"del\\u007f\"]}", "control byte"},
+		// A C1 control (U+0085, NEL) as UTF-8.
+		{"{\"verb\":\"TextChatServer\",\"args\":[\"nel\xC2\x85here\"]}", "control byte"},
+		// The host reads cp1252 (D-NET-382): a character it has no byte for is refused by name.
+		{"{\"verb\":\"TextChatServer\",\"args\":[\"hi \xF0\x9F\x98\x80\"]}", "U+1F600"},
+		{"{\"verb\":\"SetServerMsg\",\"args\":[\"\xE4\xB8\xAD\"]}", "U+4E2D"},
+		// An escaped surrogate pair (Crow decodes each half on its own) is joined and named; an
+		// unpaired half is no UTF-8.
+		{"{\"verb\":\"TextChatServer\",\"args\":[\"gg \\ud83d\\ude00\"]}", "U+1F600"},
+		{"{\"verb\":\"TextChatServer\",\"args\":[\"gg \\ud83d\"]}", "not UTF-8"},
+		// What the host keeps of a name and a message, counted in its bytes.
+		{"{\"verb\":\"SetServerName\",\"args\":[\"abcdefghijklmnopqrstuvwxyz012345\"]}", "keeps 31"},
 	};
 	for (const Refused &r : refused) {
 		reply = command("1", r.body);
@@ -1812,6 +1842,16 @@ int test_admin_host_push(Harness &h) {
 	reply = command("1", "{\"verb\":\"Cycle\",\"args\":[\"" + std::string(506, 'a') + "\"]}");
 	TEST_EXPECT(reply.transport_ok && reply.code == 400);
 	TEST_EXPECT(message_of(reply).find("511") != std::string::npos);
+	reply = command("1", "{\"verb\":\"SetServerMsg\",\"args\":[\"" + std::string(128, 'm') + "\"]}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 400);
+	TEST_EXPECT(message_of(reply).find("keeps 127") != std::string::npos);
+	// Bytes that are not UTF-8 at all.
+	reply = command("1", "{\"verb\":\"TextChatServer\",\"args\":[\"bad\xFF\xFE\"]}");
+	if (reply.code != 400 || message_of(reply).find("UTF-8") == std::string::npos) {
+		std::fprintf(stderr, "  not UTF-8 -> %s\n", describe(reply).c_str());
+	}
+	TEST_EXPECT(reply.transport_ok && reply.code == 400);
+	TEST_EXPECT(message_of(reply).find("UTF-8") != std::string::npos);
 
 	// A RID no connection holds.
 	for (const char *rid : {"0", "999999", "99999999999"}) {
@@ -1844,6 +1884,41 @@ int test_admin_host_push(Harness &h) {
 	TEST_EXPECT(cmd->command.verb == opennova::ServerCommandVerb::SetServerName);
 	TEST_EXPECT(cmd->command.args == std::vector<std::string>{"Route Name"});
 
+	// A name of 31 "é": 62 bytes of UTF-8, 31 in the host's cp1252, so it fits what the host
+	// keeps, and it reaches the host as 31 0xE9 bytes; the reply shows the line as UTF-8.
+	std::string e_acute_31;
+	for (int i = 0; i < 31; ++i) e_acute_31 += "\xC3\xA9";
+	host.clear_notices();
+	reply = command(rid_text, "{\"verb\":\"SetServerName\",\"args\":[\"" + e_acute_31 + "\"]}");
+	if (reply.code != 202) std::fprintf(stderr, "  31 e-acute: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.transport_ok && reply.code == 202);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(json && str(json["cmd"]) == "SetServerName \"" + e_acute_31 + "\"");
+	cmd = host.wait_notice(PushHost::Notice::Kind::Command, 3000);
+	TEST_EXPECT(cmd != nullptr);
+	TEST_EXPECT(cmd->command.args == std::vector<std::string>{std::string(31, '\xE9')});
+
+	// cp1252's printable 0x80..0x9F characters are no C1 controls: "€ ™" reaches the host as
+	// 0x80, a space and 0x99.
+	host.clear_notices();
+	reply = command(rid_text, "{\"verb\":\"TextChatServer\",\"args\":[\"\xE2\x82\xAC \xE2\x84\xA2\"]}");
+	if (reply.code != 202) std::fprintf(stderr, "  euro, tm: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.transport_ok && reply.code == 202);
+	cmd = host.wait_notice(PushHost::Notice::Kind::Command, 3000);
+	TEST_EXPECT(cmd != nullptr);
+	TEST_EXPECT(cmd->command.args == std::vector<std::string>{"\x80 \x99"});
+
+	// A message of 127 host bytes, the most a stock host keeps (126 letters and an "é", 128
+	// bytes of UTF-8), is accepted whole.
+	host.clear_notices();
+	reply = command(rid_text, "{\"verb\":\"SetServerMsg\",\"args\":[\"" + std::string(126, 'm') +
+	                                  "\xC3\xA9\"]}");
+	if (reply.code != 202) std::fprintf(stderr, "  127-byte message: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.transport_ok && reply.code == 202);
+	cmd = host.wait_notice(PushHost::Notice::Kind::Command, 3000);
+	TEST_EXPECT(cmd != nullptr);
+	TEST_EXPECT(cmd->command.args == std::vector<std::string>{std::string(126, 'm') + "\xE9"});
+
 	// An admin's website session pushes too, with the CSRF header (the
 	// bootstrap case made web_boss the admin).
 	const std::string admin = login_token(h, "10.14.0.1", "web_boss", "pw-boss");
@@ -1872,6 +1947,361 @@ int test_admin_host_push(Harness &h) {
 	reply = command(rid_text, valid);
 	TEST_EXPECT(reply.transport_ok && reply.code == 409);
 	host.goodbye();
+	return 0;
+}
+
+// Polls `done` every 20 ms for up to `ms`; its last answer.
+template <typename Done>
+bool wait_until(Done done, int ms = 3000) {
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+	while (!done() && std::chrono::steady_clock::now() < deadline) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(20));
+	}
+	return done();
+}
+
+// The browser's row (active_hosts) of the server named `name`.
+std::optional<opennova::hostdb::HostRow> row_named(Harness &h, const std::string &name) {
+	for (auto &row : opennova::hostdb::list_hosts(*h.pool.acquire())) {
+		if (row.server_name == name) return row;
+	}
+	return std::nullopt;
+}
+
+// POST /api/me/hosts/<rid>/command and /stop: the account that listed a server (its HostKey,
+// active_hosts.host_user_id) pushes to that server alone. GET /api/me/hosts carries the roster the
+// player verbs target. Logged out is 401 and a missing CSRF header 403, before any bucket. Another
+// account's RID and a free one get the same 404 and push nothing; a body the composer refuses is a
+// 400 (read before the listing), SetMPReset a 403 even for the owner; the owner's pushes are 202
+// and reach the host's session, a "café" as the host's cp1252 (an emoji is a 400). The listener
+// re-checks the owner at push time: a claim of the caller's on a connection that does not name
+// the caller is a 404; and again at the drain: a push queued before a ban (which takes the
+// listing's in-memory owner) never goes out. Every push draws one token from the account's
+// bucket (8 at once, 429 with Retry-After past them); the stop ends the listing, and a listed
+// row over a connection no longer hosting is the 409. Each account below keeps to its
+// bucket's eight (Alice waits for a ninth).
+int test_owner_host_push(Harness &h) {
+	using opennova::db::BindValue;
+	using Notice = PushHost::Notice;
+	const int64_t alice = make_account(h, "owner_alice", "pw-owner-alice");
+	TEST_EXPECT(alice > 0);
+	TEST_EXPECT(make_account(h, "owner_bob", "pw-owner-bob") > 0);
+	TEST_EXPECT(make_account(h, "owner_carol", "pw-owner-carol") > 0);
+	TEST_EXPECT(make_account(h, "owner_dave", "pw-owner-dave") > 0);
+	const std::string alice_s = login_token(h, "10.31.0.1", "owner_alice", "pw-owner-alice");
+	const std::string bob_s = login_token(h, "10.31.0.2", "owner_bob", "pw-owner-bob");
+	const std::string carol_s = login_token(h, "10.31.0.3", "owner_carol", "pw-owner-carol");
+	const std::string dave_s = login_token(h, "10.31.0.4", "owner_dave", "pw-owner-dave");
+	TEST_EXPECT(!alice_s.empty() && !bob_s.empty() && !carol_s.empty() && !dave_s.empty());
+
+	auto command = [&h](const std::string &session, const std::string &rid, const std::string &body,
+	                    bool csrf = true) {
+		std::vector<std::string> headers = {kJson, with_session(session)};
+		if (csrf) headers.push_back(kCsrf);
+		return h.send("POST", "/api/me/hosts/" + rid + "/command", headers, body);
+	};
+	auto stop = [&h](const std::string &session, const std::string &rid, bool csrf = true) {
+		std::vector<std::string> headers = {with_session(session)};
+		if (csrf) headers.push_back(kCsrf);
+		return h.send("POST", "/api/me/hosts/" + rid + "/stop", headers);
+	};
+	auto error_of = [](const net::HttpReply &reply) {
+		const auto json = crow::json::load(body_text(reply));
+		return json && json.has("error") ? str(json["error"]) : std::string("<none>");
+	};
+	auto message_of = [](const net::HttpReply &reply) {
+		const auto json = crow::json::load(body_text(reply));
+		return json && json.has("message") ? str(json["message"]) : std::string();
+	};
+	const std::string rename = "{\"verb\":\"SetServerName\",\"args\":[\"Owner Renamed\"]}";
+
+	// Alice's server: listed with no owner by its request, then hers once its update presents a
+	// key minted for her (as /NWHost.dll records one for her retail login).
+	const std::string key = "PONMLKJIHGFEDCBAAAAABBBBCCCCDDDDEEEEFFFFGGGGHHHH";
+	TEST_EXPECT(opennova::hostdb::is_host_key(key));
+	TEST_EXPECT(record_key_for(h, key, alice));
+	PushHost mine(h.nw_udp.bound_port(), 0x4f574e31u);
+	TEST_EXPECT(mine.host("Owner Push Host"));
+	mine.present_key(key);
+	std::optional<opennova::hostdb::HostRow> row;
+	TEST_EXPECT(wait_until([&] {
+		row = row_named(h, "Owner Push Host");
+		return row && row->host_user_id == alice;
+	}));
+	const std::string rid = std::to_string(row->rid);
+	// Another server, listed with no owner (its update never presents a key).
+	PushHost theirs(h.nw_udp.bound_port(), 0x414e4f4eu);
+	TEST_EXPECT(theirs.host("Anonymous Push Host"));
+	std::optional<opennova::hostdb::HostRow> anon;
+	TEST_EXPECT(wait_until([&] {
+		anon = row_named(h, "Anonymous Push Host");
+		return anon.has_value();
+	}));
+	TEST_EXPECT(!anon->host_user_id);
+	const std::string anon_rid = std::to_string(anon->rid);
+
+	// The owner's list: her server with its roster (the host's PlayerList); Bob's has none of it.
+	auto reply = h.send("GET", "/api/me/hosts", {with_session(alice_s)});
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	auto json = crow::json::load(body_text(reply));
+	TEST_EXPECT(json && json["hosts"].size() == 1);
+	TEST_EXPECT(json["hosts"][0]["rid"].i() == static_cast<int64_t>(row->rid));
+	TEST_EXPECT(str(json["hosts"][0]["server_name"]) == "Owner Push Host");
+	const auto &roster = json["hosts"][0]["roster"];
+	TEST_EXPECT(roster.t() == crow::json::type::List && roster.size() == 1);
+	TEST_EXPECT(roster[0]["slot"].i() == 0 && str(roster[0]["player_name"]) == "Host");
+	TEST_EXPECT(json["hosts"][0].has("msg"));
+	reply = h.send("GET", "/api/me/hosts", {with_session(bob_s)});
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	TEST_EXPECT(crow::json::load(body_text(reply))["hosts"].size() == 0);
+
+	// Logged out, a dead session, and no CSRF header: refused before anything else.
+	reply = h.send("POST", "/api/me/hosts/" + rid + "/command", {kJson, kCsrf}, rename);
+	TEST_EXPECT(reply.transport_ok && reply.code == 401);
+	reply = h.send("POST", "/api/me/hosts/" + rid + "/stop", {kCsrf});
+	TEST_EXPECT(reply.transport_ok && reply.code == 401);
+	reply = command(std::string(64, 'a'), rid, rename);
+	TEST_EXPECT(reply.transport_ok && reply.code == 401);
+	reply = command(alice_s, rid, rename, /*csrf=*/false);
+	TEST_EXPECT(reply.transport_ok && reply.code == 403);
+	TEST_EXPECT(error_of(reply) == "csrf_header_required");
+	reply = stop(alice_s, rid, /*csrf=*/false);
+	TEST_EXPECT(reply.transport_ok && reply.code == 403);
+
+	// Another account's server and a free RID: the same 404, and nothing reaches either host.
+	const auto others_command = command(bob_s, rid, rename);
+	const auto free_command = command(bob_s, "999999", rename);
+	TEST_EXPECT(others_command.transport_ok && others_command.code == 404);
+	TEST_EXPECT(error_of(others_command) == "unknown_rid");
+	TEST_EXPECT(body_text(others_command) == body_text(free_command) && free_command.code == 404);
+	const auto others_stop = stop(bob_s, rid);
+	const auto free_stop = stop(bob_s, "999999");
+	TEST_EXPECT(others_stop.transport_ok && others_stop.code == 404);
+	TEST_EXPECT(body_text(others_stop) == body_text(free_stop) && free_stop.code == 404);
+	TEST_EXPECT(body_text(others_stop) == body_text(others_command));
+	reply = command(bob_s, anon_rid, rename);
+	TEST_EXPECT(reply.transport_ok && reply.code == 404 && body_text(reply) == body_text(free_command));
+	TEST_EXPECT(mine.wait_notice(Notice::Kind::Command, 300) == nullptr);
+	TEST_EXPECT(mine.wait_notice(Notice::Kind::StopHosting, 100) == nullptr);
+	TEST_EXPECT(theirs.wait_notice(Notice::Kind::Command, 100) == nullptr);
+	TEST_EXPECT(row_named(h, "Owner Push Host").has_value());
+
+	// The composer's refusals, the admin route's rule (a non-owner's too: the body is read first).
+	struct Refused {
+		const char *body;
+		const char *error;
+		const char *reason; // a substring of the message
+	};
+	const Refused refused[] = {
+		{"not json", "invalid_json", ""},
+		{"{\"args\":[\"x\"]}", "invalid_command", "verb"},
+		{"{\"verb\":\"Nope\"}", "invalid_command", "no ServerCommand verb"},
+		{"{\"verb\":\"KillPlayer\",\"args\":[\"1\"]}", "invalid_command", "needs a target suffix"},
+		{"{\"verb\":\"TextChatServer\"}", "invalid_command", "token-count gate"},
+		{"{\"verb\":\"SetServerMsg\",\"args\":[\"a\\nb\"]}", "invalid_command", "control byte"},
+		{"{\"verb\":\"TextChatServer\",\"args\":[\"\xF0\x9F\x98\x80\"]}", "invalid_command", "U+1F600"},
+	};
+	for (const Refused &r : refused) {
+		reply = command(carol_s, rid, r.body);
+		if (!reply.transport_ok || reply.code != 400 || error_of(reply) != r.error ||
+		    message_of(reply).find(r.reason) == std::string::npos) {
+			std::fprintf(stderr, "  %s -> %s\n", r.body, describe(reply).c_str());
+		}
+		TEST_EXPECT(reply.transport_ok && reply.code == 400);
+		TEST_EXPECT(error_of(reply) == r.error);
+		TEST_EXPECT(message_of(reply).find(r.reason) != std::string::npos);
+	}
+	// SetMPReset is an admin's verb, the owner's own server or not.
+	reply = command(alice_s, rid, "{\"verb\":\"SetMPReset\",\"args\":[\"1\"]}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 403);
+	TEST_EXPECT(error_of(reply) == "verb_not_allowed");
+	TEST_EXPECT(mine.wait_notice(Notice::Kind::Command, 300) == nullptr);
+
+	// The owner: each push is queued and reaches the host's session.
+	reply = command(alice_s, rid, rename);
+	if (reply.code != 202) std::fprintf(stderr, "  owner command: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.transport_ok && reply.code == 202);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(json && str(json["status"]) == "queued" && str(json["statement"]) == "ServerCommand");
+	TEST_EXPECT(json && json["rid"].i() == static_cast<int64_t>(row->rid));
+	TEST_EXPECT(json && str(json["cmd"]) == "SetServerName \"Owner Renamed\"");
+	const Notice *cmd = mine.wait_notice(Notice::Kind::Command, 3000);
+	TEST_EXPECT(cmd != nullptr);
+	TEST_EXPECT(cmd->command.verb == opennova::ServerCommandVerb::SetServerName);
+	TEST_EXPECT(cmd->command.args == std::vector<std::string>{"Owner Renamed"});
+	mine.clear_notices();
+	// "café" in UTF-8 reaches the host in its cp1252: 0xE9 for the é.
+	reply = command(alice_s, rid, "{\"verb\":\"TextChatServer\",\"args\":[\"caf\xC3\xA9\"]}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 202);
+	TEST_EXPECT(str(crow::json::load(body_text(reply))["cmd"]) == "TextChatServer \"caf\xC3\xA9\"");
+	cmd = mine.wait_notice(Notice::Kind::Command, 3000);
+	TEST_EXPECT(cmd != nullptr && cmd->command.verb == opennova::ServerCommandVerb::TextChatServer);
+	TEST_EXPECT(cmd->command.args == std::vector<std::string>{"caf\xE9"});
+	mine.clear_notices();
+	// A player verb, aimed at a roster slot.
+	reply = command(alice_s, rid, "{\"verb\":\"KillPlayer\",\"target\":\"ByIndex\",\"args\":[\"0\"]}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 202);
+	TEST_EXPECT(str(crow::json::load(body_text(reply))["cmd"]) == "KillPlayerByIndex 0");
+	cmd = mine.wait_notice(Notice::Kind::Command, 3000);
+	TEST_EXPECT(cmd != nullptr && cmd->command.verb == opennova::ServerCommandVerb::KillPlayer);
+	TEST_EXPECT(cmd->command.target == opennova::ServerCommandTarget::ByIndex);
+	mine.clear_notices();
+
+	// The route reads the live claim, not the row: a row that names Alice with no key of hers
+	// claimed for it is a 404 at the route.
+	h.pool.acquire()->exec("UPDATE active_hosts SET host_user_id = ? WHERE rid = ?;",
+	                       {BindValue(alice), BindValue(static_cast<int64_t>(anon->rid))});
+	TEST_EXPECT(!opennova::hostdb::listing_owned_by(*h.pool.acquire(), anon->rid, alice));
+	reply = command(alice_s, anon_rid, rename);
+	TEST_EXPECT(reply.transport_ok && reply.code == 404);
+	TEST_EXPECT(body_text(reply) == body_text(free_command));
+	h.pool.acquire()->exec("UPDATE active_hosts SET host_user_id = NULL WHERE rid = ?;",
+	                       {BindValue(static_cast<int64_t>(anon->rid))});
+	// The push-time check: a key of Alice's claimed for the anonymous host's RID passes the
+	// route's look-up, but that connection never presented it (its lobby names no owner), so the
+	// listener refuses the push with the same 404 and nothing reaches the host.
+	const std::string stray = "PPPPOOOONNNNMMMMLLLLKKKKJJJJIIIIHHHHGGGGFFFFEEEE";
+	TEST_EXPECT(record_key_for(h, stray, alice));
+	TEST_EXPECT(opennova::hostdb::claim_host_key(*h.pool.acquire(), stray, anon->rid) == alice);
+	TEST_EXPECT(opennova::hostdb::listing_owned_by(*h.pool.acquire(), anon->rid, alice));
+	bool lobby_unowned = false;
+	for (const auto &entry : h.nw_udp.snapshot_hosted()) {
+		if (entry.lobby.rid == anon->rid) lobby_unowned = !entry.lobby.host_user_id.has_value();
+	}
+	TEST_EXPECT(lobby_unowned);
+	reply = command(alice_s, anon_rid, rename);
+	TEST_EXPECT(reply.transport_ok && reply.code == 404);
+	TEST_EXPECT(body_text(reply) == body_text(free_command));
+	TEST_EXPECT(theirs.wait_notice(Notice::Kind::Command, 500) == nullptr);
+	h.pool.acquire()->exec("DELETE FROM host_keys WHERE key_hash = ?;",
+	                       {BindValue(opennova::hostdb::host_key_hash(stray))});
+
+	// The bucket, per account: Dave's runs dry (the stop draws on it too); Alice's is her own.
+	net::HttpReply refusal;
+	const int accepted = accepted_before_429(
+			[&](int) { return command(dave_s, "999999", rename); }, 40, refusal);
+	if (accepted < 8) std::fprintf(stderr, "  dave's bucket: %d before the 429\n", accepted);
+	TEST_EXPECT(accepted >= 8);
+	TEST_EXPECT(error_of(refusal) == "rate_limited" && is_retry_after(refusal));
+	reply = stop(dave_s, "999999");
+	TEST_EXPECT(reply.transport_ok && reply.code == 429);
+
+	// The stop: the sysop punt reaches the host and the listing leaves the browser; the RID is
+	// then no server of Alice's.
+	reply = stop(alice_s, rid);
+	TEST_EXPECT(reply.transport_ok && reply.code == 202);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(json && str(json["statement"]) == "ServerStopHosting" && json["msg_code"].i() == 7);
+	const Notice *stopped = mine.wait_notice(Notice::Kind::StopHosting, 3000);
+	TEST_EXPECT(stopped != nullptr);
+	TEST_EXPECT(stopped->msg_key == "NWUSERVERMSGCODE_NOVAWORLDSYSOPPUNT");
+	TEST_EXPECT(wait_until([&] { return !row_named(h, "Owner Push Host"); }));
+	reply = command(alice_s, rid, rename);
+	TEST_EXPECT(reply.transport_ok && reply.code == 404);
+
+	// The 409: the row back under the RID (written by hand) with Alice's key still claimed for
+	// it, so the route's check passes, while her connection no longer hosts. Her bucket first
+	// gets a token back (one every 2 s).
+	opennova::hostdb::upsert_host(*h.pool.acquire(), *row);
+	TEST_EXPECT(opennova::hostdb::listing_owned_by(*h.pool.acquire(), row->rid, alice));
+	std::this_thread::sleep_for(std::chrono::milliseconds(2100));
+	reply = command(alice_s, rid, rename);
+	if (reply.code != 409) std::fprintf(stderr, "  owner 409: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.transport_ok && reply.code == 409);
+	TEST_EXPECT(error_of(reply) == "not_hosting");
+	TEST_EXPECT(mine.wait_notice(Notice::Kind::Command, 300) == nullptr);
+	opennova::hostdb::remove_host_by_rid(*h.pool.acquire(), row->rid);
+
+	// The drain's owner re-check, and a revocation taking the in-memory owner with the keys: with
+	// the drain held, Erin's push is queued (202); an admin ban then takes her keys, her session
+	// and her listing's in-memory owner (NwUdpListener::forget_owner), so once the drain runs it
+	// drops the queued push and her server hears nothing.
+	const int64_t erin = make_account(h, "owner_erin", "pw-owner-erin");
+	TEST_EXPECT(erin > 0);
+	const std::string erin_s = login_token(h, "10.31.0.5", "owner_erin", "pw-owner-erin");
+	TEST_EXPECT(!erin_s.empty());
+	const std::string erin_key = "ABABABABCDCDCDCDEFEFEFEFGHGHGHGHIJIJIJIJKLKLKLKL";
+	TEST_EXPECT(record_key_for(h, erin_key, erin));
+	PushHost erins(h.nw_udp.bound_port(), 0x4552494eu);
+	TEST_EXPECT(erins.host("Erin Push Host"));
+	erins.present_key(erin_key);
+	std::optional<opennova::hostdb::HostRow> erin_row;
+	TEST_EXPECT(wait_until([&] {
+		erin_row = row_named(h, "Erin Push Host");
+		return erin_row && erin_row->host_user_id == erin;
+	}));
+	const std::string erin_rid = std::to_string(erin_row->rid);
+	{
+		struct DrainHold {
+			nws::NwUdpListener &nw_udp;
+			~DrainHold() { nw_udp.pause_push_drain(false); }
+		} hold{h.nw_udp};
+		h.nw_udp.pause_push_drain(true);
+		reply = command(erin_s, erin_rid, "{\"verb\":\"TextChatServer\",\"args\":[\"held back\"]}");
+		TEST_EXPECT(reply.transport_ok && reply.code == 202);
+		reply = h.send("PUT", "/api/admin/users/" + std::to_string(erin), {kJson, kBearer},
+		               "{\"account_status\":\"banned\"}");
+		TEST_EXPECT(reply.transport_ok && reply.code == 200);
+		bool erin_unowned = false;
+		for (const auto &entry : h.nw_udp.snapshot_hosted()) {
+			if (entry.lobby.rid == erin_row->rid) erin_unowned = !entry.lobby.host_user_id.has_value();
+		}
+		TEST_EXPECT(erin_unowned);
+	}
+	TEST_EXPECT(erins.wait_notice(Notice::Kind::Command, 1000) == nullptr);
+	reply = command(erin_s, erin_rid, rename);
+	TEST_EXPECT(reply.transport_ok && reply.code == 401);
+
+	mine.goodbye();
+	theirs.goodbye();
+	erins.goodbye();
+	TEST_EXPECT(wait_until([&] {
+		return !row_named(h, "Anonymous Push Host") && !row_named(h, "Erin Push Host");
+	}));
+	return 0;
+}
+
+// A host's own text comes in its code page (a stock host's cp1252) and the public JSON sends it
+// as UTF-8: a server whose session names it "Café" with the byte 0xE9 (as a stock host reports
+// a name its owner set to "café") is "Café" in /api/lobbies and /api/hosts, and both bodies are
+// valid UTF-8. The GSB, which stock clients read, keeps the host's byte.
+int test_host_text_utf8(Harness &h) {
+	const std::string cp1252_name = "Caf\xE9 Lobby";
+	const std::string utf8_name = "Caf\xC3\xA9 Lobby";
+	PushHost host(h.nw_udp.bound_port(), 0x55544638u);
+	TEST_EXPECT(host.host(cp1252_name));
+	TEST_EXPECT(wait_until([&] { return row_named(h, cp1252_name).has_value(); }));
+
+	for (const char *path : {"/api/lobbies", "/api/hosts"}) {
+		const auto reply = h.send("GET", path);
+		TEST_EXPECT(reply.transport_ok && reply.code == 200);
+		const std::string text = body_text(reply);
+		if (!opennova::is_valid_utf8(text)) std::fprintf(stderr, "  %s is not UTF-8\n", path);
+		TEST_EXPECT(opennova::is_valid_utf8(text));
+	}
+	bool in_lobbies = false;
+	const auto lobbies = crow::json::load(body_text(h.send("GET", "/api/lobbies")));
+	TEST_EXPECT(lobbies);
+	for (const auto &game : lobbies["games"]) {
+		for (const auto &e : game["hosts"]) in_lobbies = in_lobbies || str(e["serverName"]) == utf8_name;
+	}
+	TEST_EXPECT(in_lobbies);
+	bool in_hosts = false;
+	const auto hosts = crow::json::load(body_text(h.send("GET", "/api/hosts")));
+	TEST_EXPECT(hosts);
+	for (const auto &e : hosts["hosts"]) in_hosts = in_hosts || str(e["server_name"]) == utf8_name;
+	TEST_EXPECT(in_hosts);
+
+	const auto gsb = h.send("GET", "/jop_2.gsb");
+	TEST_EXPECT(gsb.transport_ok && gsb.code == 200);
+	opennova::GsbResponse parsed;
+	TEST_EXPECT(opennova::gsb_parse_response(gsb.body.data(), gsb.body.size(), parsed));
+	bool raw_in_gsb = false;
+	for (const auto &s : parsed.servers) raw_in_gsb = raw_in_gsb || s.server_name == cp1252_name;
+	TEST_EXPECT(raw_in_gsb);
+
+	host.goodbye();
+	TEST_EXPECT(wait_until([&] { return !row_named(h, cp1252_name); }));
 	return 0;
 }
 
@@ -2642,7 +3072,10 @@ int test_api_proxy_only(Harness &h) {
 			{ std::pair<const char *, const char *>{ "GET", "/api/health" }, { "GET", "/api" },
 					{ "GET", "/api/lobbies" }, { "GET", "/api/no-such-route" },
 					{ "POST", "/api/login" }, { "POST", "/api/register" },
-					{ "GET", "/api/admin/users" }, { "PUT", "/api/admin/server-status" } }) {
+					{ "GET", "/api/admin/users" }, { "PUT", "/api/admin/server-status" },
+					{ "GET", "/api/me/hosts" }, { "POST", "/api/me/hosts/1/command" },
+					{ "POST", "/api/me/hosts/1/stop" }, { "GET", "/api/admin/hosts" },
+					{ "POST", "/api/admin/hosts/1/command" }, { "POST", "/api/admin/hosts/1/stop" } }) {
 		const auto reply = h.send_to(h.fresh_port, method, path, { kJson, kCsrf, kBearer }, "{}");
 		if (reply.code != 403)
 			std::fprintf(stderr, "  %s %s: %s\n", method, path, describe(reply).c_str());
@@ -2891,6 +3324,8 @@ int run(Harness &h) {
 		{ "menu_urls_name_bound_port", test_menu_urls_name_bound_port },
 		{ "unknown_path_404", test_unknown_path_404 },
 		{ "admin_host_push", test_admin_host_push },
+		{ "owner_host_push", test_owner_host_push },
+		{ "host_text_utf8", test_host_text_utf8 },
 		{ "name_and_value_rules", test_name_and_value_rules },
 		{ "template_names_refused", test_template_names_refused },
 		{ "retail_templates_render", test_retail_templates_render },
@@ -2967,12 +3402,14 @@ int main() {
 
 		opennova::ConnectionManager manager;
 		// The push routes' channel, as main() wires it: a real NW UDP listener on a port the
-		// OS picks, with no DB pool (the hosted row lives in its memory only, so the host
-		// cases leave active_hosts as the other cases expect it).
+		// OS picks, over the same pool, so a hosting connection's row (and its owner, which an
+		// owner's push is checked against) lands in active_hosts. The host cases end their
+		// listings, so they leave active_hosts as the other cases expect it.
 		nws::NwUdpListener nw_udp(manager);
 		manager.on_lost([&nw_udp](const opennova::Connection &c, opennova::DropReason r) {
 			nw_udp.erase_lobby_state(c.addr, opennova::drop_reason_name(r));
 		});
+		nw_udp.set_db_pool(&pool);
 		nws::ServerConfig udp_config;
 		udp_config.nw_udp_port = 0;
 		TEST_EXPECT(nw_udp.start(udp_config));

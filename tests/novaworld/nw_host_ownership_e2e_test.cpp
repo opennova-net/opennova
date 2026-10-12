@@ -1,8 +1,8 @@
 // The listing's owner end to end (host_keys, migration 0009), through the
-// service's real listeners in-process: the Crow HttpListener (the retail
-// NW*.dll pages from apps/novaworld_server/templates), the NwUdpListener and
-// the GateListener over one pooled SQLite file, on loopback ports the OS
-// picks. Two such services run side by side, one with ONNET_REQUIRE_HOST_KEY.
+// service's real listeners in-process (nw_service_harness.h: the Crow
+// HttpListener with the retail NW*.dll pages, the NwUdpListener and the
+// GateListener over one pooled SQLite file, on loopback ports the OS picks).
+// Two such services run side by side, one with ONNET_REQUIRE_HOST_KEY.
 // Built only with BUILD_NOVAWORLD_HTTP (the HTTP layer is Linux-only).
 //
 // A host presents its HOSTKEY where a stock host does: not in its fresh
@@ -26,13 +26,9 @@
 //   * on the lenient service a second connection presenting a listed key is
 //     listed with no owner.
 
-#include "auth.h"
-#include "gate_listener.h"
-#include "http_listener.h"
+#include "nw_service_harness.h"
+
 #include "lister.h"
-#include "nw_udp_listener.h"
-#include "server_config.h"
-#include "session_store.h"
 
 #include "net_http.h"
 #include "net_sockets.h"
@@ -40,13 +36,10 @@
 #include <base/io/log.h>
 #include <net/napi/session.h>
 #include <net/novaworld/client_session.h>
-#include <net/novaworld/connection/manager.h>
-#include <net/novaworld/db/sqlite.h>
 #include <net/novaworld/host_repository.h>
 #include <net/novaworld/http_flow.h>
 #include <net/novaworld/lobby_vars.h>
 
-#include "common/file_io.h"
 #include "common/temp_dir.h"
 
 #include <chrono>
@@ -66,10 +59,13 @@
 #endif
 
 namespace net = opennova::net;
-namespace nws = opennova::novaworld_server;
 namespace hostdb = opennova::hostdb;
 using opennova::ClientSession;
 using opennova::HostRegistration;
+using nw_service_test::kOwner;
+using nw_service_test::kOwnerPassword;
+using nw_service_test::Service;
+using nw_service_test::wait_for;
 using namespace std::chrono_literals;
 
 namespace {
@@ -83,8 +79,6 @@ void expect(bool cond, const char *what) {
 	}
 }
 
-constexpr const char *kOwner = "owner";
-constexpr const char *kOwnerPassword = "pw-owner";
 constexpr const char *kNeedToLogin = "NWUSERVERMSGCODE_NEEDTOLOGIN";
 
 // The engine's diagnostics (the lobby, the lister) beside the listeners' own
@@ -93,105 +87,6 @@ void log_sink(opennova::io::LogLevel level, const char *message) {
 	if (level == opennova::io::LogLevel::kDebug) return;
 	std::printf("%s\n", message);
 }
-
-bool wait_for(const std::function<bool()> &done, int tries = 100) {
-	for (int i = 0; i < tries && !done(); ++i) std::this_thread::sleep_for(20ms);
-	return done();
-}
-
-// One NovaWorld service, wired as main() wires it: the HTTP listener first,
-// then the NW UDP listener naming its port as the web domain, then the gate
-// naming both.
-struct Service {
-	opennova::db::ConnectionPool pool;
-	opennova::ConnectionManager manager;
-	nws::SessionStore sessions;
-	nws::HttpListener http;
-	nws::NwUdpListener nwudp;
-	nws::GateListener gate;
-	int64_t owner_id = 0;
-
-	explicit Service(const std::filesystem::path &db_path)
-		: pool(db_path), http(manager, pool, sessions), nwudp(manager) {}
-
-	bool start(const std::filesystem::path &source_dir, const std::filesystem::path &scratch,
-	           bool require_host_key) {
-		{
-			auto boot = pool.acquire();
-			opennova::db::run_migrations(*boot, source_dir / "backend" / "migrations");
-			boot->exec_script(test_io::read_file_text(
-					(source_dir / "backend" / "seed" / "0001_games.sql").string()));
-			nws::CreateUserParams p;
-			p.username = kOwner;
-			p.password = kOwnerPassword;
-			p.pcid = "0e2e0001";
-			p.nwh = "1";
-			p.nwhandle = "OwnerHandle";
-			const auto created = nws::create_user(*boot, p);
-			if (!created.ok) return false;
-			owner_id = created.id;
-		}
-		manager.on_lost([this](const opennova::Connection &c, opennova::DropReason r) {
-			nwudp.erase_lobby_state(c.addr, opennova::drop_reason_name(r));
-		});
-		nws::ServerConfig config;
-		config.public_host = "127.0.0.1";
-		config.http_port = 0;
-		config.nw_udp_port = 0;
-		config.gate_udp_port = 0;
-		config.templates_dir = source_dir / "apps" / "novaworld_server" / "templates";
-		config.web_dist_dir = scratch / "web_dist";
-		config.static_dir = scratch / "static";
-		config.require_host_key = require_host_key;
-		nwudp.set_db_pool(&pool);
-		gate.set_db_pool(&pool);
-		if (!http.start(config)) return false;
-		config.http_port = http.bound_port();
-		if (!nwudp.start(config)) return false;
-		config.nw_udp_port = nwudp.bound_port();
-		return gate.start(config);
-	}
-
-	void stop() {
-		http.stop();
-		gate.stop();
-		nwudp.stop();
-	}
-
-	// The hosting connection named `name`, from the listener's memory.
-	std::optional<opennova::LobbyState> lobby(const std::string &name) const {
-		for (const auto &h : nwudp.snapshot_hosted()) {
-			if (h.lobby.hosting && h.lobby.server_name == name) return h.lobby;
-		}
-		return std::nullopt;
-	}
-
-	// The browser's row (active_hosts) of the connection named `name`.
-	std::optional<hostdb::HostRow> row(const std::string &name) {
-		for (const auto &h : hostdb::list_hosts(*pool.acquire())) {
-			if (h.server_name == name) return h;
-		}
-		return std::nullopt;
-	}
-
-	// The row named `name` once it names `owner` (nullopt: no owner), within a
-	// couple of seconds.
-	bool row_owned_by(const std::string &name, std::optional<int64_t> owner) {
-		return wait_for([&] {
-			const auto r = row(name);
-			return r && r->host_user_id == owner;
-		});
-	}
-
-	// The key's host_keys row: {user_id, claimed_rid}; nullopt when none.
-	std::optional<std::pair<int64_t, std::optional<int64_t>>> key_row(const std::string &key) {
-		const auto rows = pool.acquire()->query(
-				"SELECT user_id, claimed_rid FROM host_keys WHERE key_hash = ?;",
-				{opennova::db::BindValue(hostdb::host_key_hash(key))});
-		if (rows.empty()) return std::nullopt;
-		return std::make_pair(rows[0].as_int(0).value_or(0), rows[0].as_int(1));
-	}
-};
 
 // A ListingSource standing in for a game server: fixed columns, no players,
 // and the host leg's last outcome kept for the test.

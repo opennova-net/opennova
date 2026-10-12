@@ -3847,6 +3847,35 @@ target_include_directories(opennova_wire_scenario_events_test PRIVATE
     ${CMAKE_SOURCE_DIR}/apps/wire)
 add_test(NAME opennova_wire_scenario_events COMMAND opennova_wire_scenario_events_test)
 
+# opennova-wire --parity-events: the canonical parity trace (apps/wire/parity_trace.h) over
+# the committed self-capture session -- the executable prints the library printer's bytes,
+# every line matches scripts/net/wait_parity_wire_ready.ps1's patterns, and the bytes match a
+# pinned hash for the pinned fixture.
+add_executable(opennova_wire_parity_events_test novaworld/wire_parity_events_test.cpp)
+target_link_libraries(opennova_wire_parity_events_test PRIVATE opennova_wire_trace)
+target_include_directories(opennova_wire_parity_events_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(opennova_wire_parity_events_test PRIVATE
+    SELF_CAPTURE_FIXTURE="${CMAKE_SOURCE_DIR}/fixtures/novaworld/self-capture-session.pcap")
+add_test(NAME opennova_wire_parity_events
+         COMMAND opennova_wire_parity_events_test $<TARGET_FILE:opennova_wire>)
+
+# opennova-parity (apps/parity, ADR 0050 R4): every metric identical / within its floor /
+# beyond it over synthetic canonical traces of one scripted case, the A/A widening rule, the
+# evidence checks, the normalization registry and the verdict document.
+add_executable(opennova_parity_metrics_test parity/parity_metrics_test.cpp)
+target_link_libraries(opennova_parity_metrics_test PRIVATE opennova_parity_core)
+target_include_directories(opennova_parity_metrics_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME opennova_parity_metrics COMMAND opennova_parity_metrics_test)
+# Its command line over run directories built from the committed self-capture session: exit
+# codes, the PARITY_* lines, the verdict file, the moved-run-directory rebase.
+add_executable(opennova_parity_cli_test parity/parity_cli_test.cpp)
+target_link_libraries(opennova_parity_cli_test PRIVATE opennova_parity_core)
+target_include_directories(opennova_parity_cli_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(opennova_parity_cli_test PRIVATE
+    SELF_CAPTURE_FIXTURE="${CMAKE_SOURCE_DIR}/fixtures/novaworld/self-capture-session.pcap"
+    ITEMS_FIXTURE="${CMAKE_SOURCE_DIR}/fixtures/def/items.def")
+add_test(NAME opennova_parity_cli COMMAND opennova_parity_cli_test $<TARGET_FILE:opennova_parity>)
+
 # Host-row staleness backstop sweep (prune_stale_hosts).
 add_executable(host_prune_test novaworld/host_prune_test.cpp)
 target_link_libraries(host_prune_test PRIVATE opennova_novaworld_service)
@@ -3906,6 +3935,19 @@ if(BUILD_NOVAWORLD_HTTP)
     target_compile_definitions(nw_host_ownership_e2e_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     add_test(NAME nw_host_ownership_e2e COMMAND nw_host_ownership_e2e_test)
     set_tests_properties(nw_host_ownership_e2e PROPERTIES RUN_SERIAL TRUE TIMEOUT 120)
+
+    # The owner's pushes end to end: an in-process opennova-serve hosting with an account on an
+    # in-process service (the same nw_service_harness.h), administered from the website's routes
+    # (POST /api/login, GET /api/me/hosts, POST /api/me/hosts/<rid>/command and /stop): the
+    # owner's SetServerName renames the match and saves game.cfg, its TextChatServer runs, another
+    # account's push is a 404, and the stop ends the listing. Serial, like the other serve e2e.
+    add_executable(nw_owner_admin_e2e_test novaworld/nw_owner_admin_e2e_test.cpp)
+    target_link_libraries(nw_owner_admin_e2e_test PRIVATE
+        opennova_novaworld_server_core opennova_serve_core opennova_novaworld_service)
+    target_include_directories(nw_owner_admin_e2e_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(nw_owner_admin_e2e_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    add_test(NAME nw_owner_admin_e2e COMMAND nw_owner_admin_e2e_test)
+    set_tests_properties(nw_owner_admin_e2e PROPERTIES RUN_SERIAL TRUE TIMEOUT 120)
 endif()
 
 # The server binary's signal shutdown: SIGINT and SIGTERM each run main()'s

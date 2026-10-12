@@ -2,6 +2,7 @@
 
 #include "auth.h"
 #include "catalog_repository.h"
+#include "host_routes.h"
 #include "http_cookies.h"
 #include "nw_udp_listener.h"
 #include "server_config.h"
@@ -19,6 +20,7 @@
 #include <net/novaworld/relay_request.h>
 #include <net/novaworld/unknown_tracker.h>
 
+#include <base/io/cp1252.h>
 #include <base/io/strutil.h>
 #include <base/os_random/os_random.h>
 
@@ -243,28 +245,6 @@ const char *connection_state_name(ConnectionState s) {
 	return "unknown";
 }
 
-// A listed server for its owner (GET /api/me/hosts) or an admin (GET
-// /api/admin/hosts): its browser columns, the endpoint joiners are sent to and
-// the address its session comes from, and the row's UTC times. The public
-// /api/lobbies and /api/hosts name no owner.
-crow::json::wvalue listed_host_json(const hostdb::HostRow &h) {
-	crow::json::wvalue e;
-	e["rid"]          = h.rid;
-	e["gsid"]         = h.gsid;
-	e["game"]         = h.game;
-	e["server_name"]  = h.server_name;
-	e["mission_name"] = h.mission_name;
-	e["game_type"]    = h.game_type;
-	e["players"]      = h.player_count;
-	e["max_players"]  = h.max_players;
-	e["host_ip"]      = h.host_ip;
-	e["host_port"]    = h.host_port;
-	e["peer_ip"]      = h.peer_ip;
-	e["created_at"]   = h.created_at;
-	e["updated_at"]   = h.updated_at;
-	return e;
-}
-
 // Serialize a user row to JSON (no password_hash). Shared by the
 // public /api/register response and the admin user CRUD routes.
 crow::json::wvalue user_to_json(const UserRecord &u) {
@@ -282,7 +262,7 @@ crow::json::wvalue user_to_json(const UserRecord &u) {
 } // namespace
 
 struct HttpListener::Impl {
-	explicit Impl(db::ConnectionPool &pool) : access(app, pool) {}
+	explicit Impl(db::ConnectionPool &pool) : access(app, pool), hosts(access, pool) {}
 
 	WebApp app;
 	// start()'s handshake with the Crow thread: Pending until Crow serves
@@ -297,6 +277,8 @@ struct HttpListener::Impl {
 	// Who each /api request comes from (web_access.h); declared after `app`,
 	// which it registers its routes on.
 	WebAccess access;
+	// The listed servers' routes (host_routes.h), over `access`.
+	HostRoutes hosts;
 };
 
 HttpListener::HttpListener(ConnectionManager &manager, db::ConnectionPool &db_pool,
@@ -337,6 +319,7 @@ bool HttpListener::start(const ServerConfig &config) {
 
 	register_admin_api_routes(public_host);
 	register_public_api_routes();
+	impl_->hosts.register_routes(impl_->app, nw_udp_);
 	register_legacy_login_routes(templates_dir);
 	register_legacy_host_join_routes(templates_dir);
 	// The catch-all /<path> wildcard must register last: Crow rejects a
@@ -400,11 +383,14 @@ bool HttpListener::start(const ServerConfig &config) {
 // The port is Crow's: its run() stores the port it bound (the OS's pick for
 // port 0) in the app before it accepts the first connection, so every handler
 // reads it settled, and with a nonzero port it is the configured one.
-void HttpListener::forget_persistent_pins(int64_t user_id) {
-	std::lock_guard<std::mutex> lock(persistent_user_mu_);
-	for (auto it = persistent_pins_.begin(); it != persistent_pins_.end();) {
-		it = it->second.user_id == user_id ? persistent_pins_.erase(it) : std::next(it);
+void HttpListener::forget_revoked_account(int64_t user_id) {
+	{
+		std::lock_guard<std::mutex> lock(persistent_user_mu_);
+		for (auto it = persistent_pins_.begin(); it != persistent_pins_.end();) {
+			it = it->second.user_id == user_id ? persistent_pins_.erase(it) : std::next(it);
+		}
 	}
+	if (nw_udp_ != nullptr) nw_udp_->forget_owner(user_id);
 }
 
 std::optional<UserRecord> HttpListener::pinned_user(const std::string &cookie, db::Database &db) {
@@ -461,7 +447,8 @@ std::string HttpListener::gsb_url() const {
 }
 
 // Admin REST API: server status, dev host injection, connection dump, user
-// CRUD. Every handler opens with WebAccess::require_admin: the Bearer
+// CRUD (the listed servers and their pushes are host_routes.h's). Every
+// handler opens with WebAccess::require_admin: the Bearer
 // ADMIN_API_TOKEN, or an admin-role website session (with the CSRF header on a
 // state change).
 void HttpListener::register_admin_api_routes(const std::string &public_host) {
@@ -509,49 +496,6 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 		res.body = out.dump();
 		res.set_header("Content-Type", "application/json");
 		return res;
-	});
-
-	// GET /api/admin/hosts — every listed server with its owner: listed_host_json
-	// plus "owner", {id, username} of the account whose HostKey listed it, or
-	// null for an anonymous listing (the HostKey named no account).
-	CROW_ROUTE(app, "/api/admin/hosts").methods("GET"_method)(
-	    [this](const crow::request &req) {
-		auto caller = impl_->access.require_admin(req);
-		if (caller.refusal) return std::move(*caller.refusal);
-		std::vector<crow::json::wvalue> entries;
-		try {
-			auto db_conn = db_pool_.acquire();
-			db::ReadSnapshot snapshot(*db_conn);
-			std::map<int64_t, std::optional<UserRecord>> owners;
-			for (const auto &h : hostdb::list_hosts(*db_conn)) {
-				crow::json::wvalue e = listed_host_json(h);
-				std::optional<UserRecord> owner;
-				if (h.host_user_id) {
-					auto it = owners.find(*h.host_user_id);
-					if (it == owners.end()) {
-						it = owners.emplace(*h.host_user_id,
-						                    get_user_by_id(*db_conn, *h.host_user_id)).first;
-					}
-					owner = it->second;
-				}
-				if (owner) {
-					crow::json::wvalue o;
-					o["id"] = owner->id;
-					o["username"] = owner->username;
-					e["owner"] = std::move(o);
-				} else {
-					e["owner"] = nullptr;
-				}
-				entries.push_back(std::move(e));
-			}
-		} catch (const db::SqliteError &e) {
-			std::fprintf(stderr, "[http] GET /api/admin/hosts failed: %s\n", e.what());
-			return json_error(500, "db_error");
-		}
-		crow::json::wvalue out;
-		out["count"] = entries.size();
-		out["hosts"] = std::move(entries);
-		return json_reply(200, out);
 	});
 
 	// Dev/test helper: inject an active_hosts row so the GSB browser shows a
@@ -624,122 +568,6 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 		res.body = out.dump();
 		res.set_header("Content-Type", "application/json");
 		return res;
-	});
-
-	// The service's statements to a listed server, pushed over that server's own
-	// NovaWorld UDP session (NwUdpListener::push_server_command / push_stop_hosting;
-	// docs/net/novaworld-net-re.md "the service side"). 202 once queued for the
-	// receive thread, 404 for a RID no live connection holds, 409 for one whose
-	// connection is not hosting, 503 when no NW UDP listener is wired. Admin-gated
-	// like every route here (require_admin: the Bearer token, or an admin session
-	// with the CSRF header).
-	auto push_reply = [](HostPushResult result, uint32_t rid, crow::json::wvalue out) {
-		switch (result) {
-		case HostPushResult::Queued:
-			out["rid"] = rid;
-			out["status"] = host_push_result_name(result);
-			return json_reply(202, out);
-		case HostPushResult::NotHosted:
-			return json_error(409, host_push_result_name(result),
-			                  "the connection holding this RID is not hosting");
-		case HostPushResult::UnknownRid:
-			break;
-		}
-		return json_error(404, host_push_result_name(HostPushResult::UnknownRid),
-		                  "no live NovaWorld connection holds this RID");
-	};
-
-	// POST /api/admin/hosts/<rid>/command — a ServerCommand. Body JSON:
-	//   {"verb": "SetServerName", "target": "None|ByIndex|ByIpAndPort|ByName|ByPCID",
-	//    "args": ["..."]}
-	// composed through server_command_text, so a line the host's reader would
-	// drop (a verb/target pairing, too few args, a quote or NUL, past 511
-	// characters) is a 400 with its reason; so is an arg with a control byte
-	// (has_control_byte, loggable.h). That is the service's own input rule at its
-	// edge, not a reader rule: the stock reader carries such a byte faithfully
-	// inside quotes (String_TokenizeQuotedToArray copies a quoted run as it is),
-	// so server_command_text, the reader's exact inverse, composes it. The harm
-	// is on the host: SetServerName / SetServerMsg save the token into game.cfg
-	// unescaped (Game_SaveConfig @0x54C490, `game_name = "%s"\n`; ours
-	// engine/formats/gamecfg/game_cfg_write.cpp), so a CR or LF injects a line
-	// into a third party's config, and the chat verbs relay the byte to every
-	// player.
-	CROW_ROUTE(app, "/api/admin/hosts/<uint>/command").methods("POST"_method)(
-	    [this, push_reply](const crow::request &req, uint64_t rid) {
-		auto caller = impl_->access.require_admin(req);
-		if (caller.refusal) return std::move(*caller.refusal);
-		auto body = JsonBody::parse(req.body);
-		if (!body) return json_error(400, "invalid_json", "");
-		const auto verb_name = body->text("verb");
-		if (!verb_name) {
-			return json_error(400, "invalid_command", "\"verb\" (a string) is required");
-		}
-		ServerCommandVerb verb = ServerCommandVerb::None;
-		if (!server_command_verb_from_name(*verb_name, verb)) {
-			return json_error(400, "invalid_command", "\"verb\" names no ServerCommand verb");
-		}
-		ServerCommandTarget target = ServerCommandTarget::None;
-		const auto target_name = body->text("target");
-		if (body->wrong_type() ||
-		    (target_name && !server_command_target_from_name(*target_name, target))) {
-			return json_error(400, "invalid_command",
-			                  "\"target\" is None, ByIndex, ByIpAndPort, ByName or ByPCID");
-		}
-		const std::vector<std::string> args = body->text_list("args").value_or(
-				std::vector<std::string>{});
-		if (body->wrong_type()) {
-			return json_error(400, "invalid_command", "\"args\" is a list of strings");
-		}
-		for (const std::string &arg : args) {
-			if (has_control_byte(arg)) {
-				return json_error(400, "invalid_command",
-				                  "an arg holds a control byte (below 0x20, or 0x7F), which a "
-				                  "stock host would carry into its game.cfg or its chat");
-			}
-		}
-		const char *refusal = nullptr;
-		const std::string cmd = server_command_text(verb, target, args, &refusal);
-		if (cmd.empty()) {
-			return json_error(400, "invalid_command", refusal != nullptr ? refusal : "");
-		}
-		if (nw_udp_ == nullptr) {
-			return json_error(503, "no_session_listener", "the NovaWorld UDP listener is not wired");
-		}
-		const uint32_t rid32 = rid <= UINT32_MAX ? static_cast<uint32_t>(rid) : 0u;
-		const HostPushResult result = nw_udp_->push_server_command(rid32, cmd);
-		// The whole line (server_command_text caps it at 511), control bytes escaped.
-		std::printf("[http] POST /api/admin/hosts/%llu/command '%s' -> %s\n",
-		            static_cast<unsigned long long>(rid), loggable(cmd, cmd.size()).c_str(),
-		            host_push_result_name(result));
-		crow::json::wvalue out;
-		out["statement"] = "ServerCommand";
-		out["cmd"] = cmd;
-		return push_reply(result, rid32, std::move(out));
-	});
-
-	// POST /api/admin/hosts/<rid>/stop — a ServerStopHosting with MsgCode 7,
-	// NWUSERVERMSGCODE_NOVAWORLDSYSOPPUNT (SERVER_MSG_CODE_NOVAWORLD_SYSOP_PUNT;
-	// which code the retail service sent is unwitnessed): the sysop punt. A stock
-	// host in a NovaWorld match ends that match for everyone within 62 frames,
-	// goes to the main menu and resets its NovaWorld session
-	// (NwUdpListener::push_stop_hosting; the record's "The exit"); the server
-	// leaves the browser as the statement goes out. No body.
-	CROW_ROUTE(app, "/api/admin/hosts/<uint>/stop").methods("POST"_method)(
-	    [this, push_reply](const crow::request &req, uint64_t rid) {
-		auto caller = impl_->access.require_admin(req);
-		if (caller.refusal) return std::move(*caller.refusal);
-		if (nw_udp_ == nullptr) {
-			return json_error(503, "no_session_listener", "the NovaWorld UDP listener is not wired");
-		}
-		const uint32_t rid32 = rid <= UINT32_MAX ? static_cast<uint32_t>(rid) : 0u;
-		const HostPushResult result =
-				nw_udp_->push_stop_hosting(rid32, SERVER_MSG_CODE_NOVAWORLD_SYSOP_PUNT);
-		std::printf("[http] POST /api/admin/hosts/%llu/stop -> %s\n",
-		            static_cast<unsigned long long>(rid), host_push_result_name(result));
-		crow::json::wvalue out;
-		out["statement"] = "ServerStopHosting";
-		out["msg_code"] = SERVER_MSG_CODE_NOVAWORLD_SYSOP_PUNT;
-		return push_reply(result, rid32, std::move(out));
 	});
 
 	// Connection-registry debug dump.
@@ -828,7 +656,7 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 		if (caller.refusal) return std::move(*caller.refusal);
 		auto db_conn = db_pool_.acquire();
 		auto result = delete_user(*db_conn, id);
-		if (result.ok) forget_persistent_pins(id);
+		if (result.ok) forget_revoked_account(id);
 		crow::response res(result.ok ? 204 :
 		                   result.error_code == "not_found" ? 404 : 500);
 		if (!result.ok) {
@@ -861,7 +689,7 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 		if (body->wrong_type()) return json_error(400, "invalid_field");
 		auto db_conn = db_pool_.acquire();
 		auto result = update_user(*db_conn, id, p);
-		if (result.ok && update_revokes_sessions(p)) forget_persistent_pins(id);
+		if (result.ok && update_revokes_sessions(p)) forget_revoked_account(id);
 		crow::json::wvalue out;
 		if (!result.ok) {
 			out["error"]   = result.error_code;
@@ -919,7 +747,8 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 }
 
 // Public JSON API consumed by the web portal: lobbies, stats, self-signup,
-// games, hosts, health, unknowns, and the logged-in account's listed servers.
+// games, hosts, health, unknowns, and the website's session routes (the
+// logged-in account's listed servers are host_routes.h's).
 void HttpListener::register_public_api_routes() {
 	auto &app = impl_->app;
 
@@ -943,15 +772,17 @@ void HttpListener::register_public_api_routes() {
 					// camelCase to match the web LobbyHost type (snake_case here rendered
 					// every host as "Unnamed Server 0/0" — the Vue card reads
 					// serverName/maxPlayers). hostIp/hostPort surface the join
-					// address so a host is identifiable, not just named.
+					// address so a host is identifiable, not just named. The host's own
+					// text comes in its code page (a stock host's cp1252) and goes out
+					// as UTF-8; the GSB keeps the host's bytes for stock clients.
 					crow::json::wvalue hj;
 					hj["id"]          = h.rid;
-					hj["serverName"]  = h.server_name;
-					hj["hostIp"]      = h.host_ip;
+					hj["serverName"]  = retail_text_to_utf8(h.server_name);
+					hj["hostIp"]      = retail_text_to_utf8(h.host_ip);
 					hj["hostPort"]    = h.host_port;
 					hj["players"]     = h.player_count;
 					hj["maxPlayers"]  = h.max_players;
-					hj["region"]      = h.region;
+					hj["region"]      = retail_text_to_utf8(h.region);
 					hosts.push_back(std::move(hj));
 				}
 				game["hosts"] = std::move(hosts);
@@ -988,29 +819,6 @@ void HttpListener::register_public_api_routes() {
 
 	// POST /api/login, POST /api/logout, GET /api/me (web_access.cpp).
 	impl_->access.register_routes();
-
-	// GET /api/me/hosts — the servers the logged-in account has listed now (each
-	// with a HostKey its client's /NWHost.dll fetch minted for it):
-	// {"hosts": [listed_host_json...]}, oldest first, or 401.
-	CROW_ROUTE(app, "/api/me/hosts")([this](const crow::request &req) {
-		auto access = impl_->access.require_user(req);
-		if (access.refusal) return std::move(*access.refusal);
-		std::vector<crow::json::wvalue> hosts;
-		try {
-			auto db_conn = db_pool_.acquire();
-			for (const auto &h : hostdb::list_hosts_by_owner(*db_conn, access.user->id)) {
-				hosts.push_back(listed_host_json(h));
-			}
-		} catch (const db::SqliteError &e) {
-			std::fprintf(stderr, "[http] GET /api/me/hosts failed: %s\n", e.what());
-			return json_error(500, "db_error");
-		}
-		crow::json::wvalue out;
-		out["hosts"] = std::move(hosts);
-		crow::response res = json_reply(200, out);
-		res.set_header("Cache-Control", "no-store");
-		return res;
-	});
 
 	// POST /api/register — public self-signup. No admin token needed.
 	// Server auto-generates a unique 8-hex-char PCID. nwhandle defaults
@@ -1110,30 +918,33 @@ void HttpListener::register_public_api_routes() {
 			db::ReadSnapshot snapshot(*db_conn);
 			auto rows = hostdb::list_hosts(*db_conn);
 			entries.reserve(rows.size());
+			// The host's own text comes in its code page (a stock host's cp1252)
+			// and goes out as UTF-8; the GSB keeps the host's bytes.
+			const auto text = [](const std::string &s) { return retail_text_to_utf8(s); };
 			for (const auto &h : rows) {
 				crow::json::wvalue e;
 				e["rid"]          = h.rid;
-				e["gsid"]         = h.gsid;
-				e["game"]         = h.game;
-				e["app_id"]       = h.app_id;
-				e["server_name"]  = h.server_name;
-				e["host_ip"]      = h.host_ip;
+				e["gsid"]         = text(h.gsid);
+				e["game"]         = text(h.game);
+				e["app_id"]       = text(h.app_id);
+				e["server_name"]  = text(h.server_name);
+				e["host_ip"]      = text(h.host_ip);
 				e["host_port"]    = h.host_port;
 				e["players"]      = h.player_count;
 				e["max_players"]  = h.max_players;
-				e["region"]       = h.region;
-				e["game_type"]    = h.game_type;
-				e["mission_name"] = h.mission_name;
-				e["country"]      = h.country;
-				e["exp"]          = h.exp;
-				e["exp_bits"]     = h.exp_bits;
-				e["ver1"]         = h.ver1;
-				e["time_left"]    = h.time_left;
-				e["time_of_day"]  = h.time_of_day;
-				e["msg"]          = h.msg;
-				e["mod"]          = h.mod;
-				e["age"]          = h.age;
-				e["pb_server"]    = h.pb_server;
+				e["region"]       = text(h.region);
+				e["game_type"]    = text(h.game_type);
+				e["mission_name"] = text(h.mission_name);
+				e["country"]      = text(h.country);
+				e["exp"]          = text(h.exp);
+				e["exp_bits"]     = text(h.exp_bits);
+				e["ver1"]         = text(h.ver1);
+				e["time_left"]    = text(h.time_left);
+				e["time_of_day"]  = text(h.time_of_day);
+				e["msg"]          = text(h.msg);
+				e["mod"]          = text(h.mod);
+				e["age"]          = text(h.age);
+				e["pb_server"]    = text(h.pb_server);
 				// The host-reported PlayerList (one entry per slot).
 				std::vector<crow::json::wvalue> roster_entries;
 				try {
@@ -1142,9 +953,9 @@ void HttpListener::register_public_api_routes() {
 					for (const auto &s : roster) {
 						crow::json::wvalue re;
 						re["slot"]        = s.slot;
-						re["player_name"] = s.player_name;
-						re["team"]        = s.team;
-						re["type"]        = s.type;
+						re["player_name"] = text(s.player_name);
+						re["team"]        = text(s.team);
+						re["type"]        = text(s.type);
 						roster_entries.push_back(std::move(re));
 					}
 				} catch (const db::SqliteError &) { /* ignore */ }
@@ -1155,9 +966,9 @@ void HttpListener::register_public_api_routes() {
 					player_entries.reserve(players.size());
 					for (const auto &p : players) {
 						crow::json::wvalue pe;
-						pe["nwhandle"] = p.nwhandle;
+						pe["nwhandle"] = text(p.nwhandle);
 						if (p.user_id) pe["user_id"] = static_cast<int64_t>(*p.user_id);
-						pe["peer_ip"]  = p.peer_ip;
+						pe["peer_ip"]  = text(p.peer_ip);
 						player_entries.push_back(std::move(pe));
 					}
 				} catch (const db::SqliteError &) { /* ignore */ }

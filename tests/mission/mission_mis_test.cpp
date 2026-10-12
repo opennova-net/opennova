@@ -540,5 +540,46 @@ int main() {
 		TEST_EXPECT(names.events.size() == 1 && names.events[0] == "e");
 	}
 
+	// The original editor's terrain height (mis_terrain_height, JOTACmed's sub_4226D0): the four texels about the
+	// point blended in 16-bit fractions, each twice its depth word shifted to 16.16, times polytrn_scale / 128; the
+	// sector cell picking the atlas's quadrant; a cell naming no sector 0; a cell off the grid clamped to its edge,
+	// or wrapped.
+	{
+		std::vector<uint16_t> atlas(1024 * 1024, 0);
+		int sectors[16 * 16] = {};
+		const auto texel = [&atlas](int row, int column) -> uint16_t & {
+			return atlas[static_cast<size_t>(row) * 1024 + static_cast<size_t>(column)];
+		};
+		texel(2, 3) = 100;
+		texel(2, 4) = 200;
+		texel(3, 3) = 300;
+		texel(3, 4) = 400;
+		texel(514, 3) = 1000;
+		texel(2, 511) = 50;
+		sectors[0] = 1; // cell (0, 0): the atlas's first quadrant
+		sectors[1] = 2; // cell (1, 0): its second 512 rows
+		MisTerrain terrain;
+		TEST_EXPECT(mis_terrain_height(terrain, 0, 0) == 0); // no terrain
+		terrain.heights = atlas.data();
+		terrain.sectors = sectors;
+		// x 3.5, y -2.25 (2.25 south): row 2, column 3, a quarter down and half across; 0.375 * 100 + 0.375 * 200 +
+		// 0.125 * 300 + 0.125 * 400 = 200 words, a word 1/256 unit: 51200 in 16.16.
+		const int32_t x = bms::to_fixed_16_16(3.5), y = bms::to_fixed_16_16(-2.25);
+		TEST_EXPECT(mis_terrain_height(terrain, x, y) == 51200);
+		terrain.scale = 256;
+		TEST_EXPECT(mis_terrain_height(terrain, x, y) == 102400);
+		terrain.scale = 128;
+		// On a texel: its own height. In cell (1, 0), sector 2: the second 512 rows.
+		TEST_EXPECT(mis_terrain_height(terrain, bms::to_fixed_16_16(4.0), bms::to_fixed_16_16(-3.0)) == 400 * 256);
+		TEST_EXPECT(mis_terrain_height(terrain, bms::to_fixed_16_16(515.0), bms::to_fixed_16_16(-2.0)) == 1000 * 256);
+		// A cell naming no sector: 0.
+		TEST_EXPECT(mis_terrain_height(terrain, bms::to_fixed_16_16(1030.0), y) == 0);
+		// West of the grid: clamped to its first column's cell (the point's own place in the quadrant, column 511),
+		// unless the axis wraps, to its last column's cell, which names none.
+		TEST_EXPECT(mis_terrain_height(terrain, bms::to_fixed_16_16(-1.0), bms::to_fixed_16_16(-2.0)) == 50 * 256);
+		terrain.wrap_x = true;
+		TEST_EXPECT(mis_terrain_height(terrain, bms::to_fixed_16_16(-1.0), bms::to_fixed_16_16(-2.0)) == 0);
+	}
+
 	return 0;
 }

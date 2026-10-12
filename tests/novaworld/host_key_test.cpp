@@ -12,6 +12,9 @@
 //     backs one listed RID at a time, a gone listing frees it, an idle or
 //     revoked key and a banned account claim nothing, a boot's clear_all
 //     releases every claim, and the sweep keeps a listed server's key;
+//   * listing_owned_by (the owner's push routes) holds only for a listed RID
+//     with one of the account's keys claimed for it, read live: a row naming
+//     the account with no claim, or after its keys are revoked, is not its;
 //   * a HostKey links the row where the connection presents it: a stock host's
 //     fresh ClientHostRequest carries none (listed with no owner) and its first
 //     ClientHostUpdate carrying one links it; a request carrying one (a
@@ -354,6 +357,50 @@ int test_claim() {
 	return 0;
 }
 
+// What the owner's push routes ask (listing_owned_by): the RID is listed and one
+// of the account's keys stands claimed for it, read live, so a row that names
+// the account without a claim answers false, and so does a claim once its keys
+// are revoked, before the row's next write drops the owner.
+int test_listing_owned_by() {
+	Database db(":memory:");
+	opennova::db::run_migrations(db, OPENNOVA_SOURCE_DIR "/backend/migrations");
+	const int64_t alice = make_player(db, "alice");
+	const int64_t bob = make_player(db, "bob");
+	constexpr uint32_t kRid = 0x0A000011u;
+	hostdb::record_host_key(db, key_of('A'), alice, 0);
+
+	// A claim with no listing, then a listing with no claim: neither.
+	TEST_EXPECT(hostdb::claim_host_key(db, key_of('A'), kRid) == alice);
+	TEST_EXPECT(!hostdb::listing_owned_by(db, kRid, alice));
+	hostdb::remove_host_by_rid(db, kRid);
+	db.exec("UPDATE host_keys SET claimed_rid = NULL;");
+	list_rid(db, kRid);
+	db.exec("UPDATE active_hosts SET host_user_id = ? WHERE rid = ?;",
+	        {BindValue(alice), BindValue(static_cast<int64_t>(kRid))});
+	TEST_EXPECT(!hostdb::listing_owned_by(db, kRid, alice));
+
+	// Listed and claimed: Alice's, nobody else's, and no other RID.
+	TEST_EXPECT(hostdb::claim_host_key(db, key_of('A'), kRid) == alice);
+	TEST_EXPECT(hostdb::listing_owned_by(db, kRid, alice));
+	TEST_EXPECT(!hostdb::listing_owned_by(db, kRid, bob));
+	TEST_EXPECT(!hostdb::listing_owned_by(db, kRid + 1, alice));
+	TEST_EXPECT(!hostdb::listing_owned_by(db, 0, alice));
+
+	// The keys revoked (an admin reset deletes them): not hers at once, though
+	// the row still names her until its next write.
+	db.exec("DELETE FROM host_keys WHERE user_id = ?;", {BindValue(alice)});
+	TEST_EXPECT(row_owner(db, kRid) == alice);
+	TEST_EXPECT(!hostdb::listing_owned_by(db, kRid, alice));
+
+	// Claimed again, then the listing gone: not hers.
+	hostdb::record_host_key(db, key_of('B'), alice, 0);
+	TEST_EXPECT(hostdb::claim_host_key(db, key_of('B'), kRid) == alice);
+	TEST_EXPECT(hostdb::listing_owned_by(db, kRid, alice));
+	hostdb::remove_host_by_rid(db, kRid);
+	TEST_EXPECT(!hostdb::listing_owned_by(db, kRid, alice));
+	return 0;
+}
+
 // The sweep keeps a listed server's key however long ago it was claimed, and
 // deletes every other key idle for a day.
 int test_prune() {
@@ -628,6 +675,7 @@ int main() {
 	if (test_key_form_and_hash() != 0) return 1;
 	if (test_record() != 0) return 1;
 	if (test_claim() != 0) return 1;
+	if (test_listing_owned_by() != 0) return 1;
 	if (test_prune() != 0) return 1;
 	if (test_lobby_links() != 0) return 1;
 	if (test_owner_needs_live_claim() != 0) return 1;
