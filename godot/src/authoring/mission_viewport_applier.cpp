@@ -1033,8 +1033,7 @@ void MissionViewportApplier::update(const opennova::editor::ViewportModel &viewp
 	// taken once the terrain is built where a build runs.
 	if (terrain_built_ && !build_ && terrain_data_.is_valid() && !terrain_->is_building() &&
 			!terrain_patches_.apply(mission_of(viewport).heights_patches(), **terrain_data_, *terrain_))
-		UtilityFunctions::push_warning("The mission view's terrain did not take a sculpt's patch: it shows the heights "
-				"as it last built them until it builds again.");
+		UtilityFunctions::push_warning("The mission view's terrain did not take a sculpt's patch: it builds again.");
 	// S25 (the maps and the tiles): a paint's regions and the placed tiles into the terrain built, in place, each
 	// file's read taking the stamp it was patched at (so its move does not build the terrain again); one not taken is
 	// reported and the picture made again.
@@ -1297,6 +1296,7 @@ void MissionViewportApplier::apply(const opennova::editor::ViewportModel &viewpo
 	report.heights_taken = terrain_patches_.taken();
 	report.maps_taken = terrain_patches_.maps_taken();
 	report.maps_refused = terrain_patches_.take_maps_refused();
+	report.heights_failed = terrain_patches_.take_failure();
 	if (build_) return;
 	apply_state_(viewport);
 	// A moved entity's terrain shadow follows once its gesture ended (not each sample: the terrain

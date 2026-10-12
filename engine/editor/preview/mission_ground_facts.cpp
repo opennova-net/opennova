@@ -307,7 +307,7 @@ bool MissionGround::patch(const TerrainPatch &patch, const DocumentBase &documen
 			const int x1 = std::min(region.x + region.width, kHeightsSide), y1 = std::min(region.y + region.height, kHeightsSide);
 			if (x0 >= x1 || y0 >= y1) continue;
 			const HeightsRect rect{x0, y0, x1 - x0, y1 - y0};
-			const std::vector<uint16_t> live = heights->live_heights(rect);
+			const std::vector<uint16_t> live = heights->written_heights(rect);
 			if (live.empty() || !store_.patch_heights(terrain::CoordsRect{rect.x, rect.y, rect.w, rect.h}, live.data(),
 			                                          size_t(rect.w)))
 				return false;

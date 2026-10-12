@@ -383,7 +383,7 @@ static int test_columns() {
 	                     "style.directive_form", "style.directive_tail", "style.if_without_argument",
 	                     "style.invalid_name_char", "style.missing_value_delimiter", "style.nul_byte", "style.stops",
 	                     "style.value_is_directive", "terrain.foliage_inert", "terrain.invalid_input", "terrain.no_width",
-	                     "terrain_heights.multiplayer", "terrain_heights.over_rasterizer", "terrain_heights.steep_block",
+	                     "terrain_heights.bake_refused", "terrain_heights.multiplayer", "terrain_heights.over_rasterizer", "terrain_heights.steep_block",
 	                     "terrain_heights.unread", "texture.tga_unfilled", "til.empty", "til.ignored_input", "til.index_past_atlas",
 	                     "til.invalid_input", "til.layer_order", "til.med_cap", "til.unread" }));
 	TEST_EXPECT(finding_row("model.light_no_registers") && finding_row("model.light_no_registers")->gates_build &&

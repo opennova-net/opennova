@@ -28,7 +28,16 @@ public:
 	// terrain not built): the caller builds its terrain again.
 	bool apply(const std::vector<opennova::editor::HeightsDevicePatch> &patches, TerrainData &data, Terrain &terrain);
 	// The terrain built again (or none): the patches up to `serial` stand in it.
-	void built(uint64_t serial) { taken_ = serial; }
+	void built(uint64_t serial) {
+		taken_ = serial;
+		failed_ = false;
+	}
+	// Whether an apply failed since this was last asked (the device's report: its viewport builds it again).
+	bool take_failure() {
+		const bool failed = failed_;
+		failed_ = false;
+		return failed;
+	}
 	uint64_t taken() const { return taken_; }
 	// What the last apply did (a test's count): the regions written and the tiles replaced.
 	int regions_applied() const { return regions_; }
@@ -60,6 +69,7 @@ public:
 
 private:
 	uint64_t taken_ = 0;
+	bool failed_ = false;
 	int regions_ = 0;
 	int tiles_ = 0;
 	uint64_t maps_taken_ = 0;

@@ -65,8 +65,10 @@ size_t RasterHistory::bytes_of(const Step &step) {
 		if (entry.second.before) bytes += entry.second.before->bytes.size();
 		if (entry.second.after) bytes += entry.second.after->bytes.size();
 	}
+	// The side states: the one the step began from whole, the one it ended with over what it shares with it (a
+	// landing's tiles and bake nodes, which the states share but for those it remade).
 	if (step.side_before) bytes += step.side_before->footprint();
-	if (step.side_after) bytes += step.side_after->footprint();
+	if (step.side_after) bytes += step.side_after->footprint_over(step.side_before.get());
 	if (step.whole)
 		for (const RasterState *state : {&step.whole_before, &step.whole_after}) {
 			for (const RasterPlane &plane : state->planes)
@@ -147,10 +149,31 @@ bool RasterHistory::amend_last(RasterChange change) {
 	bytes_ -= last.bytes;
 	last.batches.push_back(absorb(last, change, revision_));
 	last.bytes = bytes_of(last);
-	last.mark.serial = next_step_serial();
 	bytes_ += last.bytes;
 	trim();
 	return true;
+}
+
+void RasterHistory::commit_alone(RasterChange change, uint64_t link) {
+	forget_redo();
+	Step step;
+	step.before_revision = revision_;
+	revision_ = next_revision_++;
+	step.batches.push_back(absorb(step, change, revision_));
+	step.bytes = bytes_of(step);
+	step.mark = StepMark{next_step_serial(), link};
+	bytes_ += step.bytes;
+	steps_.push_back(std::move(step));
+	++cursor_;
+	gesture_ = 0;
+	trim();
+}
+
+bool RasterHistory::holds_link(uint64_t link) const {
+	if (!link) return false;
+	for (const Step &step : steps_)
+		if (step.mark.link == link) return true;
+	return false;
 }
 
 bool RasterHistory::drop_open(uint64_t gesture, RasterState &state) {

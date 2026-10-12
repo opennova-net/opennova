@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -49,6 +50,9 @@ struct TerrainBakeInput {
 	// The threads a quadtree level's nodes are made on, the embedder's count (ADR 0049 d5; 0 is taken
 	// as 1, the calling thread alone). The output is the same whatever the count (quadtree_node.h).
 	unsigned threads = 1;
+	// Read between nodes: set, the bake stops and fails with "cancelled" (an editor dropping a bake it no longer
+	// needs). Never read by the bake's arithmetic: a bake let run makes the same bytes.
+	const std::atomic<bool> *cancel = nullptr;
 
 	// Every hardware thread, at least one: the desktop sizing. An embedder whose platform fixes its
 	// thread pool up front (the web build's pthread pool) passes a smaller count.

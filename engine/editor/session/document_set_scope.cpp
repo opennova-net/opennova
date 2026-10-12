@@ -108,8 +108,17 @@ bool DocumentSet::apply_terrain_edits(DocumentBase &document, const std::vector<
 	return true;
 }
 
-bool DocumentSet::apply_bake_landing(DocumentBase &document, const std::vector<Edit> &edits) {
+bool DocumentSet::apply_bake_landing(DocumentBase &document, const std::vector<Edit> &edits,
+                                     const std::string &alone_words) {
+	// The step keeps the stroke's words (what Undo names), and the status line stays the user's: a bake lands
+	// under whatever they do next. A landing that stands alone takes its own words.
+	const std::string words = document.undo_words();
+	const std::string status = view_.activity.status;
+	const StepMark mark = document.undo_mark();
 	if (!apply_edits(document, edits, false)) return false;
+	const bool amended = document.undo_mark().serial == mark.serial && mark.serial != 0;
+	document.name_step(amended ? words : alone_words);
+	view_.activity.status = status;
 	update_step_next();
 	return true;
 }

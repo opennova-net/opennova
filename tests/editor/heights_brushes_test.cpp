@@ -401,6 +401,22 @@ int test_seed() {
 	return 0;
 }
 
+// The session closed while a seed runs (the project or the editor closed as Sculpt is picked): the seed stops at its
+// next node, so the close does not wait out the bake of the whole file.
+int test_close_during_seed() {
+	auto rig = std::make_unique<SeedRig>("opennova_editor_heights_seed_close");
+	rig->session.handle(request::set_workspace(R"({"terrain_brush": {"tool": "raise"}})"));
+	rig->session.poll();
+	TEST_EXPECT(rig->session.view().documents.preparing == rig->cpt);
+	std::this_thread::sleep_for(std::chrono::milliseconds(50));
+	const auto start = std::chrono::steady_clock::now();
+	rig.reset();
+	const double took = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+	TEST_EXPECT(took < 1.5); // left to run, Tmap's seed takes some 4.5 s more (Release)
+	std::printf("close: the session closed in %.3f s during its seed, the seed stopped\n", took);
+	return 0;
+}
+
 // An imported terrain sculpted (S25 A2b): a stroke in a mission on it routes to the terrain set's heightmap, opened as
 // the heights under the import's white; its first bake lays its seed's whole bake (the .cpt the import makes of the
 // image) under the stroke's regions, and the image then stands in for the import's .cpt in the project's files (what
@@ -479,6 +495,15 @@ int test_imported() {
 	TEST_EXPECT(heights_doc() && !heights_doc()->dirty());
 	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(test_io::read_file(root + "/" + cpt) == standing);
+
+	// The import's white changed while the heightmap is open and clean: the document read again under it (its write
+	// decodes to what it shows).
+	editor_test::handle_to_end(session, request::set_import_options(cpt, {{"top", "120"}}));
+	for (int i = 0; i < 20 && !(heights_doc() && heights_doc()->import_top() == 120.0); ++i) {
+		session.poll();
+		std::this_thread::sleep_for(std::chrono::milliseconds(20));
+	}
+	TEST_EXPECT(heights_doc() && heights_doc()->import_top() == 120.0 && !heights_doc()->dirty());
 	std::printf("imported: a stroke sculpts the heightmap, its bake stands in for the import's .cpt, the reimport makes those bytes\n");
 	return 0;
 }
@@ -486,7 +511,8 @@ int test_imported() {
 } // namespace
 
 int main() {
-	const int failures = test_operators() + test_dabs() + test_session() + test_view() + test_seed() + test_imported();
+	const int failures = test_operators() + test_dabs() + test_session() + test_view() + test_seed() + test_close_during_seed() +
+	                     test_imported();
 	if (failures == 0) std::printf("editor_heights_brushes: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

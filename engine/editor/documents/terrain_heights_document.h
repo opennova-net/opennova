@@ -78,6 +78,9 @@ struct HeightsState : RasterSideState {
 	std::shared_ptr<const std::vector<uint8_t>> source;
 
 	size_t footprint() const override;
+	// Over the state a step began from: the tiles and the bake nodes it remade (the ones the two do not share), and
+	// an image's first bake whole.
+	size_t footprint_over(const RasterSideState *before) const override;
 	uint32_t parts_changed(const RasterSideState &before) const override;
 };
 
@@ -103,11 +106,18 @@ public:
 	uint16_t live_height(int x, int y) const;
 	// The live atlas whole, row-major, the top row first.
 	std::vector<uint16_t> live_atlas() const;
-	// The live atlas over `rect` (inside the atlas), row-major, the top row first: a device's patch.
+	// The live atlas over `rect` (inside the atlas), row-major, the top row first.
 	std::vector<uint16_t> live_heights(const HeightsRect &rect) const;
+	// The live atlas over `rect` as the .cpt written now reads back (a CDEP block past its range clamped, as
+	// CptFile::write_bytes writes it; a DPTH section's as it stands): what a fresh read draws and samples, a device's
+	// patch and the ground the views pick on.
+	std::vector<uint16_t> written_heights(const HeightsRect &rect) const;
+	// A whole atlas (1024 x 1024 depth words) as a write of the document's depth section reads it back.
+	void clamp_as_written(std::vector<uint16_t> &atlas) const;
 	// The .cpt the document is (or, an image's, its import makes): its header, tiles and depth section's form, the
 	// live atlas its depth. False before an image's first bake.
 	bool compose_cpt(CptFile &out) const;
+	// What the file page and the findings read, kept for the document's state (its identity, load and revision).
 	HeightsFacts facts() const;
 	// An imported terrain's heightmap image (S25, the heights lane's A2b): its white, world units (the import record's
 	// `top`, the 127.5 TrnGen's 8-bit scale where it holds none), which its read decodes the image by, and the .cpt its
@@ -132,6 +142,16 @@ public:
 	// the first .trn naming the file; none by default. Not an edit: no step, no revision.
 	const std::array<trngen::CornerLockFlags, 4> &bake_locks() const { return locks_; }
 	void set_bake_locks(const std::array<trngen::CornerLockFlags, 4> &locks) { locks_ = locks; }
+	// Why the bake refuses the heights as they stand (the session's terrain sculpt: TrnGen's bake refusing rough
+	// ground, D-TERRAIN-22), "" none: a finding (terrain_heights.bake_refused) until the heights change. Not an edit.
+	const std::string &bake_refusal() const { return bake_refusal_; }
+	void set_bake_refusal(std::string why) {
+		if (why == bake_refusal_) return;
+		bake_refusal_ = std::move(why);
+		++refusal_serial_;
+	}
+	// What its validation was made from beyond its revision (the validation cache's key): the bake's refusal.
+	uint64_t companion_state() const override { return refusal_serial_; }
 
 	std::unique_ptr<DocumentBase> snapshot() const override;
 	// An image's document stands in for its import's .cpt once the editor baked it (its live atlas, tiles and header):
@@ -147,6 +167,14 @@ private:
 	std::array<trngen::CornerLockFlags, 4> locks_{};
 	double top_ = 127.5;
 	std::string import_cpt_;
+	std::string bake_refusal_;
+	uint64_t refusal_serial_ = 0;
+	struct FactsCache {
+		uint64_t identity = 0, load = 0, revision = 0;
+		bool made = false;
+		HeightsFacts facts;
+	};
+	mutable FactsCache facts_cache_;
 };
 
 // A bake's landing (the session's terrain sculpt, ADR 0046 S25): the remade leaves' footprints and the atlas over
@@ -156,6 +184,10 @@ struct HeightsBakeLanding : RasterEditPayload {
 	// An image's first landing: the whole bake its region bake started from (the cold bake of the input as read:
 	// its atlas, tiles, header and depth section's form), laid first.
 	std::shared_ptr<const CptFile> base;
+	// Where the stroke's step cannot take it (undone with a redo kept, or saved): a step of its own carrying `link`
+	// (the stroke's), named for the bake (the session's settle, a Save that cannot wait for a redo).
+	bool alone = false;
+	uint64_t link = 0;
 	std::vector<HeightsRect> footprints;
 	std::vector<std::vector<uint16_t>> atlas; // each footprint's texels, its rows top first
 	std::vector<std::pair<int, CptTile>> tiles;
@@ -164,6 +196,8 @@ struct HeightsBakeLanding : RasterEditPayload {
 	std::vector<HeightsRect> settled;
 	const char *token() const override { return "heights.bake"; }
 	bool amends() const override { return true; }
+	bool lands_alone() const override { return alone; }
+	uint64_t land_link() const override { return link; }
 	bool apply(RasterCanvas &canvas, Diagnostic &error) const override;
 };
 
@@ -174,6 +208,7 @@ enum class TerrainHeightsFinding {
 	OverRasterizer, // terrain_heights.over_rasterizer: input past 128 units, which TrnGen's draw-back leaves undrawn
 	SteepBlock,     // terrain_heights.steep_block: a CDEP block past its range, which the writer clamps
 	Multiplayer,    // terrain_heights.multiplayer: a changed .cpt; the multiplayer check covers the whole file
+	BakeRefused,    // terrain_heights.bake_refused: the bake refuses the heights as they stand (the .cpt is not saved)
 	kCount,
 };
 const FindingCodeRow &finding_code(TerrainHeightsFinding code);

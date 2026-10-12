@@ -41,7 +41,7 @@ inline constexpr const char *kTerrainDoc =
 		"that plane's edits go. family: the files the view's brush edits as the game resolves them for it (view, "
 		"terrain, planes {heights, surface, foliage, colour, blend: {path, name, import_output, refusal, words}}, tiles). "
 		"sample: the ground at (x, y) in each plane's words. bake: a heights file's bake (its state, the regions it "
-		"waits on). lock: the entities under a disc at (x, y) that follow the ground and those height-locked. legend: the "
+		"waits on, the bakes landed and started, why it refuses the heights). lock: the entities under a disc at (x, y) that follow the ground and those height-locked. legend: the "
 		"surface classes as the game names them. foliage: the foliage codes and what each grows. tiles: the view's tiles "
 		"(its .til's rows in draw order). tiles_at: the tiles whose square meets a box. An op not answered yet in this "
 		"build is refused, saying so.";

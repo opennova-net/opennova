@@ -731,6 +731,8 @@ bool MissionViewport::report_(const ViewportDeviceReport &report) {
 			heights_patches_.end());
 	// The maps' and the tiles' (S25); one it could not take makes the picture again.
 	maps_.taken(report.maps_taken, report.maps_refused);
+	// One it could not take: the picture made again at the next follow.
+	if (report.heights_failed) heights_stale_ = true;
 	missing_ = report.missing;
 	ground_ = report.surface;
 	// What it drew this frame (the foliage, the lights): read on the wire, moving nothing.

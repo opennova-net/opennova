@@ -114,6 +114,16 @@ uint8_t *RasterWriter::texel(int x, int y) {
 
 void RasterWriter::set_u16(int x, int y, uint16_t value) { std::memcpy(texel(x, y), &value, sizeof(value)); }
 
+void RasterWriter::set_rect_u16(int x, int y, int w, int h, const uint16_t *src, size_t stride) {
+	for (int row = 0; row < h; ++row)
+		for (int col = 0; col < w;) {
+			// The run of the row inside one tile: its texels lie side by side.
+			const int run = std::min(w - col, kRasterTileSide - (x + col) % kRasterTileSide);
+			std::memcpy(texel(x + col, y + row), src + size_t(row) * stride + size_t(col), size_t(run) * sizeof(uint16_t));
+			col += run;
+		}
+}
+
 std::vector<TileSwap> RasterWriter::finish() {
 	for (TileSwap &swap : swaps_) swap.after = copies_.at(swap.tile);
 	copies_.clear();

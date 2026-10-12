@@ -38,7 +38,7 @@ bool HeightsTilesFollow::take(const TerrainPatch &patch, const DocumentBase &doc
 		taken.y = y0;
 		taken.w = x1 - x0;
 		taken.h = y1 - y0;
-		taken.heights = heights->live_heights(HeightsRect{taken.x, taken.y, taken.w, taken.h});
+		taken.heights = heights->written_heights(HeightsRect{taken.x, taken.y, taken.w, taken.h});
 		made.regions.push_back(std::move(taken));
 	}
 	// The tiles a landing (or its undo, or its redo) replaced: those whose shared tile is another one now. A

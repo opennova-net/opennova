@@ -112,8 +112,11 @@ bool plan_heights_stroke(TerrainStrokeContext &context, TerrainStrokePlan &plan,
 		return false;
 	}
 	TerrainSculpt &sculpt = context.core.sculpt();
-	// A new stroke on the file stops a bake running for it (its regions join the next).
-	if (context.first) sculpt.interrupt(heights->path());
+	// A new stroke on the file stops a bake running for it (its regions join the next), and opens its ground's window.
+	if (context.first) {
+		sculpt.interrupt(heights->path());
+		sculpt.stroke_began(*heights);
+	}
 	const terrain::TerrainAtlasRouting routing = routing_of(*context.family.trn);
 	stroke->strength = std::clamp(context.brush.strength, 0.0f, 1.0f);
 	// A PNG heightmap's white holds its heights (its 16-bit samples span 0 to it); else the word's top.
@@ -122,12 +125,21 @@ bool plan_heights_stroke(TerrainStrokeContext &context, TerrainStrokePlan &plan,
 	if (stroke->op == HeightsOperator::Set) {
 		stroke->target = int32_t(std::clamp(std::lround(double(context.brush.height) * 256.0), 0L, long(stroke->top)));
 	} else if (stroke->op == HeightsOperator::Flatten) {
-		// Towards the live height under the stroke's first sample, kept for the gesture.
+		// Towards the live height under the stroke's first sample (off the terrain, under the strongest texel its disc
+		// reaches), kept for the gesture; a first sample reaching no ground sets none (the stroke is off the terrain).
 		int32_t target = 0;
 		if (context.first || !sculpt.flatten_target(context.gesture, target)) {
 			const auto &[x, y] = context.points.front();
 			const terrain::TerrainAtlasTexel t = texel_at(routing, std::llround(x), std::llround(y));
-			target = t.mapped ? heights->live_height(t.x, t.z) : 0;
+			const HeightsDabTexel *strongest = nullptr;
+			if (!t.mapped)
+				for (const HeightsDabTexel &texel : stroke->dabs.front())
+					if (!strongest || texel.weight > strongest->weight) strongest = &texel;
+			if (!t.mapped && !strongest) {
+				error = "The brush is off the terrain there: no ground of " + basename_of(heights->path()) + " lies under it.";
+				return false;
+			}
+			target = t.mapped ? heights->live_height(t.x, t.z) : heights->live_height(strongest->x, strongest->z);
 			sculpt.remember_flatten(context.gesture, target);
 		}
 		stroke->target = target;

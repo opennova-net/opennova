@@ -130,12 +130,14 @@ int test_side_whole_amend_cancel() {
 	history.end_edit_group(); // the stroke ended
 	TEST_EXPECT(history.can_amend());
 	const uint64_t stroke = history.revision();
+	const uint64_t stroke_serial = history.undo_mark().serial;
 	RasterChange bake = write(state, {{10, 10}, {70, 10}}, 2);
 	bake.side_before = state.side;
 	bake.side_after = std::make_shared<RasterNote>("baked");
 	state.side = bake.side_after;
 	TEST_EXPECT(history.amend_last(std::move(bake)));
 	TEST_EXPECT(history.revision() > stroke && history.steps() == 2 && history.undo_mark().link == 5);
+	TEST_EXPECT(history.undo_mark().serial == stroke_serial); // its place among the documents' steps kept
 	TEST_EXPECT(history.changes_since(stroke, tiles, parts) && tiles.size() == 2 && parts == 1u);
 	history.undo(state); // one undo takes the stroke and its bake
 	TEST_EXPECT(state.planes[0].u16(10, 10) == 0 && state.planes[0].u16(70, 10) == 0 &&
@@ -147,6 +149,14 @@ int test_side_whole_amend_cancel() {
 	const RasterChange stray = write(state, {{1, 1}}, 3);
 	TEST_EXPECT(!history.can_amend() && !history.amend_last(stray)); // over the saved checkpoint
 	for (const TileSwap &swap : stray.swaps) state.planes[0].set_tile(swap.tile, swap.before); // the caller's to put back
+	// A landing that cannot amend stands alone, carrying its stroke's link: one undo takes it, the next the stroke.
+	const size_t kept = history.steps();
+	history.commit_alone(write(state, {{2, 2}}, 6), 5);
+	TEST_EXPECT(history.steps() == kept + 1 && history.undo_mark().link == 5 && history.dirty() && history.holds_link(5));
+	history.undo(state);
+	TEST_EXPECT(state.planes[0].u16(2, 2) == 0 && !history.dirty() && state.planes[0].u16(70, 10) == 2);
+	history.redo(state);
+	history.undo(state);
 
 	// A whole change: a step of its own, which changes_since cannot say regions of.
 	const uint64_t before_whole = history.revision();

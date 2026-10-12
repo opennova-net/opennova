@@ -210,6 +210,7 @@ bool bake(const TerrainBakeInput &input, CptFile &out, TerrainBakeState *state, 
 		ctx.output_prefix = kPrefix;
 		ctx.base = &base;
 		ctx.files = &files;
+		ctx.cancel = input.cancel;
 		std::vector<std::shared_ptr<const NodeBakeState>> nodes;
 		if (state) {
 			nodes.resize(kCptTileCount);

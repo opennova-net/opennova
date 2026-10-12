@@ -89,6 +89,9 @@ public:
 	uint8_t *texel(int x, int y);
 	void set_u8(int x, int y, uint8_t value) { *texel(x, y) = value; }
 	void set_u16(int x, int y, uint16_t value);
+	// The 16-bit texels of the rect (x, y, w, h) from `src` (`stride` samples a row): a tile's part of a row one
+	// copy, each tile copied on its first write as a texel's is.
+	void set_rect_u16(int x, int y, int w, int h, const uint16_t *src, size_t stride);
 	const RasterPlane &plane() const { return plane_; }
 	// The tiles written, each once, in the order first written; the writer then holds none.
 	std::vector<TileSwap> finish();

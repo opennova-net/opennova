@@ -20,6 +20,12 @@ struct RasterSideState {
 	virtual ~RasterSideState();
 	// What it holds, in bytes (the history's budget).
 	virtual size_t footprint() const = 0;
+	// What it holds that `before` (the state the step began from; null none) does not share, in bytes: what a step
+	// keeping both adds to the budget. footprint() by default.
+	virtual size_t footprint_over(const RasterSideState *before) const {
+		(void)before;
+		return footprint();
+	}
 	// The parts in which it differs from `before`, a bit each of its type's: what changes_since names
 	// beside the regions (RasterChanges::parts). None by default.
 	virtual uint32_t parts_changed(const RasterSideState &before) const;
@@ -63,11 +69,17 @@ public:
 	// A batch the document applied to `state` recorded (the redo branch discarded); it folds into the last
 	// step while the gesture `gesture` (0 none) is open. The step's link is the gesture.
 	void commit(RasterChange change, uint64_t gesture);
-	// The batch joins the last step (a bake's landing in its stroke's step), a revision of its own: only
-	// while nothing is to redo, the last step is no whole change and is not the saved checkpoint. False,
-	// nothing recorded, where it cannot (the caller's change stays applied: it puts it back).
+	// The batch joins the last step (a bake's landing in its stroke's step), a revision of its own and the step's
+	// serial kept (its place among the documents' steps the cross-document undo orders by): only while nothing
+	// is to redo, the last step is no whole change and is not the saved checkpoint. False, nothing recorded,
+	// where it cannot (the caller's change stays applied: it puts it back).
 	bool amend_last(RasterChange change);
 	bool can_amend() const;
+	// The batch a step of its own carrying `link` (a landing that cannot amend: its stroke's step undone with a
+	// redo kept, or saved), the redo branch discarded; no group open after it.
+	void commit_alone(RasterChange change, uint64_t link);
+	// Whether a step it keeps (to undo or to redo) carries the link `link`.
+	bool holds_link(uint64_t link) const;
 	void undo(RasterState &state);
 	void redo(RasterState &state);
 	void end_edit_group() { gesture_ = 0; }

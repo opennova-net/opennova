@@ -9,6 +9,7 @@
 #include <editor/documents/terrain_document.h>
 #include <editor/preview/mission_camera.h>
 #include <editor/preview/mission_handle_edit.h>
+#include <editor/session/terrain_family.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/orbit_canvas.h>
 #include <editor/preview/terrain_canvas.h>
@@ -359,6 +360,9 @@ ViewportAction TerrainViewport::follow_(const ViewportInput &input, PreviewClock
 	std::vector<std::string> patched;
 	if (stroke_.follow(view, *terrain, stroking, ground_, *view.findings.assets, patched) && !patched.empty())
 		picture_.restamp(*view.findings.assets, patched);
+	// The heights the follow patched (a stroke's samples, a bake's landing, an undo or redo of them), queued for the
+	// device with the tiles a landing replaced: an Update, the device patching its terrain (the mission view's leg).
+	const bool sculpted = take_heights_(view);
 	follow_ground_(view);
 	// S25 (the maps and the tiles): the colour, blend and surface maps the follow patched and the placed tiles' move,
 	// queued for the device with their files' stamps, the picture taking them: an Update.
@@ -383,8 +387,8 @@ ViewportAction TerrainViewport::follow_(const ViewportInput &input, PreviewClock
 	const PreviewFollow::Key key{ 0, layout_serial_ };
 	const bool moved = input.change != ChangeClass::None || edited;
 	// The stroke ended over a picture its device did not patch, or the device could not take a patch: made again now.
-	if (!stroking && (stroke_.patched() || maps_.stale())) {
-		made_(view);
+	if (!stroking && (stroke_.patched() || maps_.stale() || heights_stale_)) {
+		made_(view, *terrain);
 		options_moved_ = false;
 		missing_.clear();
 		return picture_.built(FileStamps());
@@ -392,7 +396,7 @@ ViewportAction TerrainViewport::follow_(const ViewportInput &input, PreviewClock
 	switch (picture_.follow(key, moved, files, generation)) {
 	case PreviewFollow::Found::Same:
 		shown(*terrain);
-		if (options_moved_ || overlaid || painted) {
+		if (options_moved_ || overlaid || painted || sculpted) {
 			options_moved_ = false;
 			return ViewportAction::Update;
 		}
@@ -400,21 +404,54 @@ ViewportAction TerrainViewport::follow_(const ViewportInput &input, PreviewClock
 	case PreviewFollow::Found::Files:
 		options_moved_ = false;
 		missing_.clear();
-		made_(view);
+		made_(view, *terrain);
 		return picture_.built(FileStamps());
 	case PreviewFollow::Found::Anew: break;
 	}
 	picture_.show(key, generation);
 	shown(*terrain);
-	made_(view);
+	made_(view, *terrain);
 	options_moved_ = false;
 	missing_.clear();
 	return picture_.built(FileStamps());
 }
 
-void TerrainViewport::made_(const SessionView &view) {
+void TerrainViewport::made_(const SessionView &view, const DocumentBase &document) {
 	stroke_.made();
 	maps_.built(view, tiles_read_());
+	heights_built_(view, document);
+}
+
+bool TerrainViewport::take_heights_(const SessionView &view) {
+	bool any = false;
+	for (const TerrainPatch &patch : stroke_.patches().patches) {
+		if (patch.plane != TerrainPlane::Heights) continue;
+		const DocumentBase *open = nullptr;
+		for (const auto &each : view.documents.open)
+			if (each && each->path() == patch.path) open = each.get();
+		HeightsDevicePatch device;
+		if (!open || !heights_tiles_.take(patch, *open, device)) {
+			// A heights document the picture did not show as it is (read again): the picture made again from its file.
+			heights_stale_ = true;
+			continue;
+		}
+		device.serial = ++heights_serial_;
+		heights_patches_.push_back(std::move(device));
+		any = true;
+	}
+	return any;
+}
+
+void TerrainViewport::heights_built_(const SessionView &view, const DocumentBase &document) {
+	const DocumentBase *open = nullptr;
+	TerrainFamily family;
+	if (resolve_terrain_family(view, document, family) && !family.plane(TerrainPlane::Heights).path.empty())
+		for (const auto &each : view.documents.open)
+			if (each && each->path() == family.plane(TerrainPlane::Heights).path) open = each.get();
+	heights_tiles_.shown(open);
+	heights_patches_.clear();
+	heights_built_serial_ = heights_serial_;
+	heights_stale_ = false;
 }
 
 bool TerrainViewport::takes_(const std::string &member) const {
@@ -448,7 +485,16 @@ bool TerrainViewport::report_(const ViewportDeviceReport &report) {
 	picture_.read(report.files);
 	// The maps' and the tiles' patches the device took (S25); one it could not take makes the picture again.
 	maps_.taken(report.maps_taken, report.maps_refused);
+	// The heights patches the device took.
+	heights_patches_.erase(std::remove_if(heights_patches_.begin(), heights_patches_.end(),
+			[&](const HeightsDevicePatch &patch) { return patch.serial <= report.heights_taken; }),
+			heights_patches_.end());
 	bool moved = surface_ != report.surface;
+	// One it could not take: the picture made again at the next follow.
+	if (report.heights_failed) {
+		heights_stale_ = true;
+		moved = true;
+	}
 	surface_ = report.surface;
 	drawn_ = report.drawn;
 	for (const std::string &name : report.missing)

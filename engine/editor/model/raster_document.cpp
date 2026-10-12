@@ -102,7 +102,8 @@ Edit RasterDocument::edit(std::shared_ptr<const RasterEditPayload> payload, uint
 
 bool RasterDocument::apply_edits(const std::vector<Edit> &edits, Diagnostic &error) {
 	RasterCanvas canvas(state_);
-	bool amends = false;
+	bool amends = false, alone = true;
+	uint64_t link = 0;
 	for (const Edit &edit : edits) {
 		const auto *payload = edit.operation == EditOperation::Apply
 		                              ? dynamic_cast<const RasterEditPayload *>(edit.payload.get())
@@ -113,6 +114,8 @@ bool RasterDocument::apply_edits(const std::vector<Edit> &edits, Diagnostic &err
 			              "A raster document takes only its type's raster edits.");
 		}
 		amends = amends || payload->amends();
+		alone = alone && payload->lands_alone();
+		if (!link) link = payload->land_link();
 		if (!payload->apply(canvas, error)) {
 			canvas.put_back();
 			if (error.asset.empty()) error.asset = path();
@@ -122,12 +125,14 @@ bool RasterDocument::apply_edits(const std::vector<Edit> &edits, Diagnostic &err
 	RasterChange change = canvas.finish();
 	if (change.empty()) return true;
 	if (amends) {
-		if (change.whole || !history_.amend_last(change)) {
-			revert(change, state_);
-			return refuse(error, path(), CoreFinding::DocumentStale,
-			              "The step this edit belongs to is no longer the last one: it was undone or edited since.");
+		if (!change.whole && history_.can_amend() && history_.amend_last(change)) return true;
+		if (!change.whole && alone) {
+			history_.commit_alone(std::move(change), link);
+			return true;
 		}
-		return true;
+		revert(change, state_);
+		return refuse(error, path(), CoreFinding::DocumentStale,
+		              "The step this edit belongs to is no longer the last one: it was undone or edited since.");
 	}
 	history_.commit(std::move(change), edits.empty() ? 0 : edits.front().gesture);
 	return true;

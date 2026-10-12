@@ -27,6 +27,7 @@ bool TerrainPatchApplier::apply(const std::vector<opennova::editor::HeightsDevic
 			if (region.heights.size() != size_t(region.w) * size_t(region.h) ||
 					!data.patch_heights(rect, region.heights.data(), size_t(region.w))) {
 				taken_ = last;
+				failed_ = true;
 				return false;
 			}
 			// Each region its own rect (a change across the atlas's wrap arrives as two): one refresh shows them all.
@@ -36,6 +37,7 @@ bool TerrainPatchApplier::apply(const std::vector<opennova::editor::HeightsDevic
 		if (!patch.tile_indices.empty()) {
 			if (!data.replace_tiles(patch.tile_indices, patch.tiles)) {
 				taken_ = last;
+				failed_ = true;
 				return false;
 			}
 			replaced.insert(replaced.end(), patch.tile_indices.begin(), patch.tile_indices.end());
@@ -47,7 +49,9 @@ bool TerrainPatchApplier::apply(const std::vector<opennova::editor::HeightsDevic
 	std::sort(replaced.begin(), replaced.end());
 	replaced.erase(std::unique(replaced.begin(), replaced.end()), replaced.end());
 	// The foliage grows again with a landing (its tiles: the stroke's end, an undo, a redo), not every sample.
-	return terrain.refresh_region(rects, replaced, !replaced.empty());
+	if (terrain.refresh_region(rects, replaced, !replaced.empty())) return true;
+	failed_ = true;
+	return false;
 }
 
 bool TerrainPatchApplier::apply_maps(const std::vector<opennova::editor::MapsDevicePatch> &patches, Terrain &terrain,

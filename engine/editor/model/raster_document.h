@@ -54,8 +54,13 @@ private:
 struct RasterEditPayload : EditPayload {
 	virtual bool apply(RasterCanvas &canvas, Diagnostic &error) const = 0;
 	// Whether the edit joins the document's last step instead of making one (a bake landing in its stroke's
-	// step: RasterHistory::amend_last); refused where it cannot.
+	// step: RasterHistory::amend_last); refused where it cannot, unless lands_alone().
 	virtual bool amends() const { return false; }
+	// An amending edit the last step cannot take (a redo kept past it, or it is the saved checkpoint) made a step of
+	// its own carrying land_link() (the link of the step it would have joined, so a linked undo still pairs it)
+	// rather than refused.
+	virtual bool lands_alone() const { return false; }
+	virtual uint64_t land_link() const { return 0; }
 };
 
 // How a raster's file reads into planes and a side state, and writes back (one per form: a terrain's .cpt
@@ -105,6 +110,7 @@ public:
 	size_t history_bytes() const override { return history_.bytes(); }
 	StepMark undo_mark() const override { return history_.undo_mark(); }
 	StepMark redo_mark() const override { return history_.redo_mark(); }
+	bool holds_link(uint64_t link) const override { return history_.holds_link(link); }
 	bool changes_since(uint64_t load_generation, uint64_t revision, ChangeSet &out) const override;
 	SerializeResult serialize() const override;
 	std::string save_words() const override;

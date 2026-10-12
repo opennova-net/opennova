@@ -46,7 +46,8 @@ void draw_tools(Workspace &workspace, const TerrainBrush &brush, const TerrainTo
 
 // What a stroke of the heights moves under the brush (S25, D2; the terrain query's lock op): the entities within its
 // radius of where it meets the ground under the pointer (else of the cursor an MCP client placed) in the view's
-// mission, or in the open missions on the view's terrain: those that follow the ground and those height locked.
+// mission, or in the open missions whose ground the view's heights are (as each routes its own strokes): those that
+// follow the ground and those height locked.
 void draw_lock_line(TerrainPaneContext &context) {
 	const SessionView &view = context.workspace.view();
 	const std::vector<const MissionDocument *> missions = missions_under_view(view, context.document, context.family);

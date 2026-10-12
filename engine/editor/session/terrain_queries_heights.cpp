@@ -18,7 +18,7 @@ using io::JsonValue;
 
 // bake: the view's heights file's bake (S25 A3): whether it is open, baked (a .cpt's tiles as read, an image's after
 // its first bake), the regions whose bake is due and whether one runs, the pane's words for it, the bakes the session
-// landed so far.
+// landed and started so far, and why the bake refuses the heights as they stand ("" none).
 JsonValue answer_terrain_bake(const TerrainQueryView &query, std::string &error) {
 	TerrainFamily family;
 	if (!resolve_terrain_family(query.context.core.view(), query.view, family)) {
@@ -54,12 +54,15 @@ JsonValue answer_terrain_bake(const TerrainQueryView &query, std::string &error)
 	out.set("regions", std::move(regions));
 	out.set("words", io::json_string(words));
 	out.set("landed", io::json_number(double(sculpt.bakes_landed())));
+	out.set("started", io::json_number(double(sculpt.bakes_started())));
+	out.set("refused", io::json_string(heights ? heights->bake_refusal() : std::string()));
 	return out;
 }
 
 // lock: the entities under a disc at (x, y) (radius: the brush's where none is asked) that follow the ground when
 // the heights are sculpted and those height-locked, in each open mission the stroke's bake moves: the view's own
-// where it is a mission, else the open missions on the view's terrain (the follow pass's, terrain_follow.h).
+// where it is a mission, else the open missions whose own strokes edit the same heights (the follow pass's routing,
+// terrain_follow.h).
 JsonValue answer_terrain_lock(const TerrainQueryView &query, std::string &error) {
 	const SessionView &view = query.context.core.view();
 	TerrainFamily family;

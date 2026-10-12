@@ -6185,6 +6185,12 @@ target_link_libraries(editor_heights_brushes_test PRIVATE opennova_editor)
 target_include_directories(editor_heights_brushes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_heights_brushes COMMAND editor_heights_brushes_test)
 
+# The heights' bake rules (S25): no loop over a redo or a refused bake, Save settling first, the follow's edits.
+add_executable(editor_heights_bake_rules_test editor/heights_bake_rules_test.cpp)
+target_link_libraries(editor_heights_bake_rules_test PRIVATE opennova_editor)
+target_include_directories(editor_heights_bake_rules_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_heights_bake_rules COMMAND editor_heights_bake_rules_test)
+
 # Unlocked entities following the ground at a bake's landing, locked ones staying (S25).
 add_executable(editor_height_lock_follow_test editor/height_lock_follow_test.cpp)
 target_link_libraries(editor_height_lock_follow_test PRIVATE opennova_editor)

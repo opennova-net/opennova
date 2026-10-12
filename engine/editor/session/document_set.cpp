@@ -1264,30 +1264,50 @@ void DocumentSet::save_all() {
 // when one could not be. (A save while a build packs never reaches here: the busy gate refused
 // it.) `over`: written over a file changed outside the editor (DocumentBase::save's), what the other
 // program saved there lost (DI-01: a conflict's Keep my edits).
-bool DocumentSet::save_documents(const std::vector<std::string> &paths, bool rewrite, bool over, bool name_files) {
+bool DocumentSet::save_documents(const std::vector<std::string> &asked, bool rewrite, bool over, bool name_files) {
+	// S25: the heights' bakes due land first (the regions a stroke sculpted, baked again by TrnGen's bake), the caller
+	// waiting, and the missions their landings moved join what is written (the ground and the entities on it on disk
+	// together). A heights document whose bake cannot land is not written: its sculpted heights over its old tiles would
+	// be a .cpt whose drawn mesh and collision part. A heightmap image writes its input, which its import bakes as the
+	// project refreshes: none waits.
+	std::vector<std::string> paths = asked;
+	std::vector<Diagnostic> unbaked;
+	for (const std::string &path : asked) {
+		auto *heights = dynamic_cast<TerrainHeightsDocument *>(document_for(path));
+		if (!heights || heights->image() || !heights->dirty()) continue;
+		std::string why;
+		std::vector<std::string> followed;
+		if (!core_.sculpt().settle(heights->path(), why, &followed))
+			unbaked.push_back(make_finding(TerrainHeightsFinding::BakeRefused, DiagnosticSeverity::Error,
+			                               heights->path() + " is not saved: its bake cannot land (" + why +
+			                                       "), and its sculpted heights over its old tiles would be a .cpt whose "
+			                                       "drawn ground and collision part.",
+			                               heights->path()));
+		for (const std::string &moved : followed)
+			if (std::find(paths.begin(), paths.end(), moved) == paths.end()) paths.push_back(moved);
+	}
 	std::vector<DocumentBase *> writes;
 	for (const std::string &path : paths)
 		for (const auto &document : documents_)
 			if (document->path() == path &&
 			    (document->dirty() || document->companion_unsaved() ||
 			     (rewrite && document->rewrite_need() != DocumentBase::RewriteNeed::None)))
-				writes.push_back(document.get());
+				if (std::none_of(unbaked.begin(), unbaked.end(), [&](const Diagnostic &d) { return d.asset == path; }))
+					writes.push_back(document.get());
+	if (writes.empty() && !unbaked.empty()) {
+		for (const Diagnostic &d : unbaked) core_.report(d);
+		view_.activity.status = std::to_string(unbaked.size()) + " could not be saved: see Problems.";
+		core_.touch(ViewConcern::Output);
+		return false;
+	}
 	if (writes.empty()) {
 		view_.activity.status = paths.size() == 1 ? paths.front() + " has no changes to save." : "No file has unsaved changes.";
 		core_.touch(ViewConcern::Output);
 		return true;
 	}
 	size_t saved = 0, noted = 0, left = 0;
-	std::vector<Diagnostic> failures;
+	std::vector<Diagnostic> failures = unbaked;
 	std::vector<std::string> written;
-	// S25: the heights' bakes due land first (the regions a stroke sculpted, baked again by TrnGen's bake), the
-	// caller waiting; one that cannot bake leaves its regions written with the sculpted heights over its old tiles.
-	// A heightmap image writes its input, which its import bakes as the project refreshes: none waits.
-	for (DocumentBase *document : writes)
-		if (const auto *heights = dynamic_cast<const TerrainHeightsDocument *>(document); heights && !heights->image()) {
-			std::string why;
-			if (!core_.sculpt().settle(document->path(), why)) core_.note("Saving " + document->path() + " unbaked: " + why);
-		}
 	for (DocumentBase *document : writes) {
 		Diagnostic error;
 		hand_item_classes(*document); // a mission's AI classes as its items' rows hold them now

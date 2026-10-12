@@ -215,6 +215,7 @@ constexpr FindingCodeEntry<TerrainHeightsFinding> kFindingEntries[] = {
 	{ TerrainHeightsFinding::OverRasterizer, listed_code("terrain_heights.over_rasterizer") },
 	{ TerrainHeightsFinding::SteepBlock, listed_code("terrain_heights.steep_block") },
 	{ TerrainHeightsFinding::Multiplayer, listed_code("terrain_heights.multiplayer") },
+	{ TerrainHeightsFinding::BakeRefused, listed_code("terrain_heights.bake_refused") },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(TerrainHeightsFinding::kCount),
               "every TerrainHeightsFinding has exactly one row");
@@ -237,6 +238,34 @@ const char *heights_form_words(HeightsForm form) {
 
 size_t HeightsState::footprint() const {
 	return sizeof(*this) + tiles.size() * sizeof(tiles.front()) + unbaked.size() * sizeof(HeightsRect);
+}
+
+namespace {
+
+size_t tile_bytes(const CptTile &tile) {
+	size_t bytes = sizeof(CptTile) + tile.vertex_indices.size() * sizeof(tile.vertex_indices.front());
+	for (const CptTileLOD &lod : tile.lods) bytes += lod.indices.size() * sizeof(uint16_t);
+	return bytes;
+}
+
+size_t node_bytes(const trngen::NodeBakeState &node) {
+	return sizeof(node) + node.section.faces.size() * sizeof(uint16_t) + node.section.records.size() * sizeof(float) +
+	       node.draw_back.positions.size() * sizeof(float) + node.draw_back.faces.size() * sizeof(uint16_t);
+}
+
+} // namespace
+
+size_t HeightsState::footprint_over(const RasterSideState *before_state) const {
+	const auto *before = dynamic_cast<const HeightsState *>(before_state);
+	size_t bytes = footprint();
+	for (size_t i = 0; i < tiles.size(); ++i)
+		if (tiles[i] && (!before || i >= before->tiles.size() || before->tiles[i] != tiles[i])) bytes += tile_bytes(*tiles[i]);
+	if (bake && (!before || before->bake != bake))
+		for (size_t i = 0; i < bake->nodes.size(); ++i) {
+			const bool shared = before && before->bake && i < before->bake->nodes.size() && before->bake->nodes[i] == bake->nodes[i];
+			if (bake->nodes[i] && !shared) bytes += node_bytes(*bake->nodes[i]);
+		}
+	return bytes;
 }
 
 uint32_t HeightsState::parts_changed(const RasterSideState &before) const {
@@ -265,8 +294,7 @@ bool HeightsBakeLanding::apply(RasterCanvas &canvas, Diagnostic &error) const {
 			error = make_finding(CoreFinding::DocumentPayload, DiagnosticSeverity::Error, "A bake's base is no 1024 x 1024 atlas.");
 			return false;
 		}
-		for (int y = 0; y < kHeightsSide; ++y)
-			for (int x = 0; x < kHeightsSide; ++x) atlas.set_u16(x, y, base->depth_buffer[size_t(y) * kHeightsSide + size_t(x)]);
+		atlas.set_rect_u16(0, 0, kHeightsSide, kHeightsSide, base->depth_buffer.data(), size_t(kHeightsSide));
 		state->header = base->header;
 		state->depth_format = base->depth_format;
 		state->tiles.clear();
@@ -326,6 +354,25 @@ std::vector<uint16_t> TerrainHeightsDocument::live_heights(const HeightsRect &re
 	return out;
 }
 
+std::vector<uint16_t> TerrainHeightsDocument::written_heights(const HeightsRect &rect) const {
+	if (heights().depth_format != DepthFormat::CDEP) return live_heights(rect);
+	// The rows' whole blocks the rect reaches (a block is a 256-texel stretch of a row), clamped, then the rect's own.
+	const int x0 = rect.x / 256 * 256, x1 = (rect.x + rect.w + 255) / 256 * 256;
+	std::vector<uint16_t> blocks = live_heights(HeightsRect{x0, rect.y, x1 - x0, rect.h});
+	if (blocks.empty()) return blocks;
+	cpt_clamp_steep_blocks(blocks.data(), blocks.size());
+	if (x0 == rect.x && x1 == rect.x + rect.w) return blocks;
+	std::vector<uint16_t> out(size_t(rect.w) * size_t(rect.h));
+	for (int row = 0; row < rect.h; ++row)
+		std::copy_n(blocks.begin() + std::ptrdiff_t(row) * (x1 - x0) + (rect.x - x0), rect.w,
+		            out.begin() + std::ptrdiff_t(row) * rect.w);
+	return out;
+}
+
+void TerrainHeightsDocument::clamp_as_written(std::vector<uint16_t> &atlas) const {
+	if (heights().depth_format == DepthFormat::CDEP) cpt_clamp_steep_blocks(atlas.data(), atlas.size());
+}
+
 std::vector<uint16_t> TerrainHeightsDocument::live_atlas() const {
 	std::vector<uint16_t> out(kTexels);
 	if (plane_count() < 2) return out;
@@ -356,6 +403,9 @@ bool TerrainHeightsDocument::compose_cpt(CptFile &out) const {
 }
 
 HeightsFacts TerrainHeightsDocument::facts() const {
+	if (facts_cache_.made && facts_cache_.identity == identity() && facts_cache_.load == load_generation() &&
+	    facts_cache_.revision == revision())
+		return facts_cache_.facts;
 	HeightsFacts facts;
 	if (plane_count() < 2) return facts;
 	const std::vector<uint16_t> live = live_atlas();
@@ -371,6 +421,7 @@ HeightsFacts TerrainHeightsDocument::facts() const {
 	facts.steep_blocks = cpt_steep_blocks(live);
 	facts.unbaked = heights().unbaked.size();
 	facts.tiles = heights().tiles.size();
+	facts_cache_ = FactsCache{identity(), load_generation(), revision(), true, facts};
 	return facts;
 }
 
@@ -432,7 +483,15 @@ std::vector<Diagnostic> validate_terrain_heights_file(const DocumentBase &docume
 						" rise more than 128 units: the .cpt's depth section holds at most 32,766 raw a stretch, so the "
 						"file is written with them clamped.",
 				document.path()));
-	if (document.dirty() || document.wrote_file())
+	if (!heights->bake_refusal().empty())
+		findings.push_back(make_finding(
+				TerrainHeightsFinding::BakeRefused, DiagnosticSeverity::Error,
+				"TrnGen's bake refuses the heights of " + name + " as they stand (" + heights->bake_refusal() +
+						"): the sculpt shows over the old tiles, and " + name +
+						" is not saved until they change (smooth or lower the ground, or undo the stroke).",
+				document.path()));
+	// The multiplayer check covers the .cpt, which a heightmap image's import makes (not the image).
+	if (!heights->image() && (document.dirty() || document.wrote_file()))
 		findings.push_back(make_finding(
 				TerrainHeightsFinding::Multiplayer, DiagnosticSeverity::Info,
 				name + " is changed: the multiplayer check covers the whole .cpt, so players joining a game on this "
