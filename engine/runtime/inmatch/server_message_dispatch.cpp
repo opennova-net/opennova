@@ -1047,20 +1047,22 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 }
 
 bool is_medic_recipient(const NapiNPConnection &candidate,
-		const world::World &world, uint8_t team) {
+		const world::World &world, int32_t team_filter) {
 	// The mask-0x580 group: bit 0x80 admits player-slot state 6/7 (deployed /
 	// round ended — the in-match state; the ordinary death path never rewrites
-	// slot+0x20), bit 0x100 compares the slot team byte, bit 0x400 the Medic
-	// class attribute. No leg reads entity health or the Flags dead bit, so a
-	// dead or respawn-pending same-team Medic still receives the record.
+	// slot+0x20), bit 0x100 compares the slot's own team byte (zero-extended)
+	// with the filter dword, bit 0x400 the Medic class attribute of the slot's
+	// entity. No leg reads entity health or the Flags dead bit, so a dead or
+	// respawn-pending same-team Medic still receives the record.
 	// [orig: NapiNPServer_SendFiltered @0x4C87E0 — roster gate @0x4C889F,
-	//  0x80 @0x4C8948..0x4C8953, 0x100 @0x4C896A..0x4C8977,
+	//  0x80 @0x4C8948..0x4C8953, 0x100 `movzx eax, [esi+1A0h]` @0x4C896A..0x4C8977,
 	//  0x400 @0x4C8990..0x4C89A8]
 	if (!is_in_match(candidate) || candidate.link.transport == nullptr ||
-			!candidate.link.owned_entity.valid())
+			!candidate.link.owned_entity.valid() ||
+			static_cast<int32_t>(candidate.assigned_team) != team_filter)
 		return false;
 	const world::Entity *medic = world.registry.get(candidate.link.owned_entity);
-	return medic != nullptr && medic->team == team &&
+	return medic != nullptr &&
 			world.tables.class_has_attribute(medic->player_class,
 					world::MissionTables::kCharAttrMedic);
 }

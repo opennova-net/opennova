@@ -1122,7 +1122,8 @@ void Server_ProcessPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
 		// alone; automatic mode sends the window directly to the Medic
 		// group. Mask 0x580 does include the host.
 		// [orig: GameEvent_PlayerDeath @0x516DD0 (mask @0x51739C, team
-		//  filter @0x5173AF); NapiNPServer_SendFiltered @0x4C87E0]
+		//  filter @0x5173AF from the victim entity's byte, movsx @0x5173A8);
+		//  NapiNPServer_SendFiltered @0x4C87E0]
 		if (victim_connection != nullptr && victim_entity != nullptr &&
 				victim_connection->link.downed_revive_seconds != 0u) {
 			auto send_downed = [&](NapiNPConnection &recipient,
@@ -1135,7 +1136,8 @@ void Server_ProcessPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
 						encode_player_downed_state(state));
 			};
 			for (NapiNPConnection &candidate : ctx.np_protocol.connection_list) {
-				if (!is_medic_recipient(candidate, world, victim_entity->team))
+				if (!is_medic_recipient(candidate, world,
+						static_cast<int8_t>(victim_entity->team)))
 					continue;
 				send_downed(candidate,
 						victim_connection->link.auto_medic_enabled
