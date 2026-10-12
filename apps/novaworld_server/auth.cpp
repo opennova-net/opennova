@@ -40,7 +40,9 @@ std::function<void(int64_t)> g_password_accepted_hook;
 
 // The columns row_to_user reads, in its order.
 constexpr const char *kUserColumns =
-		"id, username, pcid, nwh, nwhandle, account_status, role, credentials_gen";
+		"id, username, pcid, nwh, nwhandle, account_status, role, credentials_gen, kind, can_host";
+// The column after them (authenticate_user's password_hash).
+constexpr std::size_t kUserColumnCount = 10;
 
 // Verify a password against a bcrypt hash. The stored hash format is
 //     $2a$<cost>$<22-char-salt><31-char-hash>     (or $2b$ — same algo)
@@ -89,6 +91,8 @@ std::optional<UserRecord> row_to_user(const opennova::db::Row &row) {
 	u.account_status = row.as_text(5).value_or("");
 	u.role     = row.as_text(6).value_or("player");
 	u.credentials_gen = row.as_int(7).value_or(0);
+	u.kind     = row.as_text(8).value_or("player");
+	u.can_host = row.as_int(9).value_or(0) != 0;
 	if (u.id == 0) return std::nullopt;
 	return u;
 }
@@ -160,7 +164,7 @@ std::optional<UserRecord> authenticate_user(opennova::db::Database &db,
 		std::fprintf(stderr, "[auth] user '%s' not found\n", loggable(username).c_str());
 		return std::nullopt;
 	}
-	const auto stored_hash = rows.front().as_text(8).value_or("");
+	const auto stored_hash = rows.front().as_text(kUserColumnCount).value_or("");
 	if (!verify_password(password, stored_hash)) {
 		std::fprintf(stderr, "[auth] bad password for user '%s'\n", loggable(username).c_str());
 		return std::nullopt;
@@ -220,7 +224,7 @@ std::optional<UserRecord> get_user_by_login_session_tag(
 		return std::nullopt;
 	auto rows = db.query(
 			"SELECT p.id, p.username, p.pcid, p.nwh, p.nwhandle, p.account_status, p.role, "
-			"       p.credentials_gen "
+			"       p.credentials_gen, p.kind, p.can_host "
 			"FROM active_user_sessions s JOIN players p ON p.id = s.user_id "
 			"WHERE s.session_tag = ? AND s.credentials_gen = p.credentials_gen LIMIT 1;",
 			{ opennova::db::BindValue(session_tag) });
@@ -232,7 +236,8 @@ std::optional<UserRecord> get_user_by_login_session_tag(
 std::vector<UserRecord> list_users(opennova::db::Database &db) {
 	std::vector<UserRecord> out;
 	try {
-		auto rows = db.query(std::string("SELECT ") + kUserColumns + " FROM players ORDER BY id;");
+		auto rows = db.query(std::string("SELECT ") + kUserColumns +
+				" FROM players WHERE kind = 'player' ORDER BY id;");
 		out.reserve(rows.size());
 		for (const auto &r : rows) {
 			if (auto u = row_to_user(r)) out.push_back(*u);
@@ -404,6 +409,9 @@ std::optional<MutationResult> username_refusal(const std::string &username) {
 	if (has_control_byte(username)) {
 		return err("invalid_field", "username holds a control byte");
 	}
+	if (is_service_username(username)) {
+		return err("invalid_field", "usernames starting with srv- are reserved");
+	}
 	return std::nullopt;
 }
 
@@ -419,6 +427,10 @@ std::optional<MutationResult> handle_refusal(const std::string &nwhandle) {
 	}
 	if (has_control_byte(nwhandle)) {
 		return err("invalid_field", "nwhandle holds a control byte");
+	}
+	// A handle names an account to the duplicate checks too (get_user_by_username).
+	if (is_service_username(nwhandle)) {
+		return err("invalid_field", "handles starting with srv- are reserved");
 	}
 	return std::nullopt;
 }
@@ -494,7 +506,7 @@ MutationResult create_user(opennova::db::Database &db, const CreateUserParams &p
 MutationResult delete_user(opennova::db::Database &db, int64_t id) {
 	if (id <= 0) return err("not_found", "invalid id");
 	try {
-		db.exec("DELETE FROM players WHERE id = ?;",
+		db.exec("DELETE FROM players WHERE id = ? AND kind = 'player';",
 		        {opennova::db::BindValue(id)});
 		if (db.changes() == 0) return err("not_found", "no such user");
 	} catch (const opennova::db::SqliteError &e) {
@@ -509,7 +521,8 @@ MutationResult delete_user(opennova::db::Database &db, int64_t id) {
 MutationResult update_user(opennova::db::Database &db, int64_t id,
                            const UpdateUserParams &p) {
 	if (id <= 0) return err("not_found", "invalid id");
-	if (!get_user_by_id(db, id)) return err("not_found", "no such user");
+	const auto existing_user = get_user_by_id(db, id);
+	if (!existing_user || existing_user->kind != "player") return err("not_found", "no such user");
 	if (p.role && *p.role != "player" && *p.role != "admin") {
 		return err("invalid_field", "role must be player or admin");
 	}
@@ -652,7 +665,7 @@ BootstrapAdminResult bootstrap_admin(opennova::db::Database &db, const std::stri
 		out.existing_admin = admins.front().as_text(0).value_or("");
 		return out;
 	}
-	db.exec("UPDATE players SET role = 'admin' WHERE username = ? AND "
+	db.exec("UPDATE players SET role = 'admin' WHERE username = ? AND kind = 'player' AND "
 	        "NOT EXISTS (SELECT 1 FROM players WHERE role = 'admin');",
 	        {opennova::db::BindValue(username)});
 	out.outcome = db.changes() > 0 ? BootstrapAdminResult::Outcome::Promoted
@@ -689,6 +702,111 @@ MutationResult update_game_access(opennova::db::Database &db, int64_t user_id,
 	} catch (const opennova::db::SqliteError &e) {
 		return db_err("update_game_access", e);
 	}
+}
+
+bool is_service_username(std::string_view name) {
+	return strutil::starts_with_icase(name, kServiceUsernamePrefix);
+}
+
+std::string service_username(int64_t hosted_server_id) {
+	return kServiceUsernamePrefix + std::to_string(hosted_server_id);
+}
+
+MutationResult set_can_host(opennova::db::Database &db, int64_t id, bool can_host) {
+	if (id <= 0) return err("not_found", "invalid id");
+	try {
+		db.exec("UPDATE players SET can_host = ? WHERE id = ? AND kind = 'player';",
+				{ opennova::db::BindValue(static_cast<int64_t>(can_host ? 1 : 0)),
+						opennova::db::BindValue(id) });
+		if (db.changes() == 0) return err("not_found", "no such user");
+	} catch (const opennova::db::SqliteError &e) {
+		return db_err("set_can_host", e);
+	}
+	MutationResult m;
+	m.ok = true;
+	m.id = id;
+	return m;
+}
+
+MutationResult upsert_service_account(
+		opennova::db::Database &db, const std::string &username, const std::string &password) {
+	using opennova::db::BindValue;
+	if (!is_service_username(username) || username.size() > kHandleMaxBytes ||
+			has_control_byte(username)) {
+		return err("invalid_field", "a service account is named srv-<id>");
+	}
+	if (password.empty()) return err("missing_field", "a service account needs a password");
+	// Hashed before the transaction, as create_user does: bcrypt is slow, and the
+	// transaction's write lock stalls every other writer.
+	std::string hashed;
+	try {
+		hashed = hash_password(password);
+	} catch (const std::exception &e) {
+		return db_err("upsert_service_account password hash", e);
+	}
+	try {
+		opennova::db::Transaction tx(db);
+		// The name is the account's username and its handle; a player holding
+		// either (only a database written by hand: the prefix is reserved) keeps it.
+		int64_t id = 0;
+		for (const auto &row : db.query("SELECT id, kind, username FROM players "
+		                                "WHERE username = ? OR nwhandle = ?;",
+				     { BindValue(username), BindValue(username) })) {
+			if (row.as_text(1).value_or("") != "service" || row.as_text(2).value_or("") != username)
+				return err("username_exists", "a player holds the service account's name");
+			id = row.as_int(0).value_or(0);
+		}
+		if (id != 0) {
+			// A new password ends whatever the old one granted, as an admin reset
+			// does: the generation moves, and its retail login and keys go.
+			db.exec("UPDATE players SET password_hash = ?, account_status = 'active', "
+			        "credentials_gen = credentials_gen + 1 WHERE id = ?;",
+					{ BindValue(hashed), BindValue(id) });
+			for (const char *table : { "web_sessions", "active_user_sessions", "host_keys" }) {
+				db.exec(std::string("DELETE FROM ") + table + " WHERE user_id = ?;", { BindValue(id) });
+			}
+		} else {
+			// A random PCID no account holds (8 hex digits, as /api/register's).
+			std::string pcid;
+			for (int attempt = 0; attempt < 16 && pcid.empty(); ++attempt) {
+				char candidate[16];
+				std::snprintf(candidate, sizeof(candidate), "%08x",
+						static_cast<unsigned>(os_random_u32()));
+				if (db.query("SELECT 1 FROM players WHERE pcid = ? LIMIT 1;",
+						      { BindValue(std::string(candidate)) })
+								.empty()) {
+					pcid = candidate;
+				}
+			}
+			if (pcid.empty()) return err("pcid_exists", "no free PCID was drawn");
+			db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle, kind) "
+			        "VALUES (?, ?, ?, '1', ?, 'service');",
+					{ BindValue(username), BindValue(hashed), BindValue(pcid), BindValue(username) });
+			id = db.last_insert_rowid();
+		}
+		tx.commit();
+		MutationResult m;
+		m.ok = true;
+		m.id = id;
+		return m;
+	} catch (const opennova::db::SqliteError &e) {
+		return db_err("upsert_service_account", e);
+	}
+}
+
+MutationResult delete_service_account(opennova::db::Database &db, int64_t id) {
+	if (id <= 0) return err("not_found", "invalid id");
+	try {
+		db.exec("DELETE FROM players WHERE id = ? AND kind = 'service';",
+				{ opennova::db::BindValue(id) });
+		if (db.changes() == 0) return err("not_found", "no such service account");
+	} catch (const opennova::db::SqliteError &e) {
+		return db_err("delete_service_account", e);
+	}
+	MutationResult m;
+	m.ok = true;
+	m.id = id;
+	return m;
 }
 
 } // namespace opennova::novaworld_server

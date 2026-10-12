@@ -35,6 +35,13 @@ struct UserRecord {
 	std::string nwhandle;
 	std::string account_status = "active";
 	std::string role = "player"; // players.role: "player" or "admin" (migration 0008)
+	// players.kind (migration 0011): "player" for an account a person registered,
+	// "service" for a hosted server's own account (srv-<id>), which the website's
+	// login refuses and the admin users list hides.
+	std::string kind = "player";
+	// players.can_host (migration 0011): an admin approved the account for a
+	// hosted server.
+	bool can_host = false;
 	// players.credentials_gen (migration 0010), bumped by every update that ends
 	// the account's logins (update_revokes_sessions). What a login grants (a
 	// website session, a retail login's session row and pin, a known address)
@@ -105,8 +112,9 @@ std::optional<UserRecord> get_user_by_id(opennova::db::Database &db, int64_t id)
 std::optional<UserRecord> get_user_by_login_session_tag(
 		opennova::db::Database &db, const std::string &session_tag);
 
-// All registered players, stripped of password_hash, ordered by id.
-// Powers GET /api/admin/users.
+// All registered players, stripped of password_hash, ordered by id; a hosted
+// server's service account is no player and is left out. Powers GET
+// /api/admin/users.
 std::vector<UserRecord> list_users(opennova::db::Database &db);
 
 std::optional<GameAccessRecord> get_game_access(opennova::db::Database &db,
@@ -149,13 +157,16 @@ struct CreateUserParams {
 };
 
 // A username of at most kUsernameMaxBytes bytes and a handle of at most
-// kHandleMaxBytes, neither holding a control byte, else invalid_field.
+// kHandleMaxBytes, neither holding a control byte nor starting with the service
+// accounts' prefix (is_service_username), else invalid_field.
 MutationResult create_user(opennova::db::Database &db, const CreateUserParams &p);
 // Deletes the account with its sessions and hosting keys (ON DELETE CASCADE).
 // A server it has listed stays listed with no owner, and its rows in listed
 // servers' player lists stay with no account (ON DELETE SET NULL); the
 // listing's later refreshes store no owner, the claim having gone with the
-// keys. POST /api/admin/hosts/<rid>/stop ends such a listing.
+// keys. POST /api/admin/hosts/<rid>/stop ends such a listing. A hosted
+// server's service account is not_found here (delete_service_account is the
+// supervisor's).
 MutationResult delete_user(opennova::db::Database &db, int64_t id);
 
 // Optional fields (only those passed-in by the admin) are updated.
@@ -179,7 +190,9 @@ struct UpdateUserParams {
 // the owner to the per-username cap just when someone else is guessing, and
 // the per-(username, address) bucket still brakes a guesser at one of them. A
 // server the account has listed stays listed and loses its owner at its next
-// refresh (the claim went with the keys).
+// refresh (the claim went with the keys). A rename or a new handle starting
+// with the service accounts' prefix is invalid_field, and a hosted server's
+// service account is not_found (the supervisor alone sets its password).
 MutationResult update_user(opennova::db::Database &db, int64_t id,
                            const UpdateUserParams &p);
 bool update_revokes_sessions(const UpdateUserParams &p);
@@ -222,6 +235,32 @@ uint64_t password_verifications();
 // just before returning, so a test can commit a password reset in that window
 // (the race credentials_gen closes). Unset in the server.
 void set_password_accepted_hook(std::function<void(int64_t user_id)> hook);
+
+// --- Hosted servers' accounts (players.kind, players.can_host; migration 0011) ---
+
+// The prefix of every service account's username and handle: "srv-" and the
+// hosted server's id. Reserved, case aside, so no person registers or renames
+// into it.
+inline constexpr const char *kServiceUsernamePrefix = "srv-";
+bool is_service_username(std::string_view name);
+std::string service_username(int64_t hosted_server_id);
+
+// Sets a player's approval for a hosted server (players.can_host). not_found
+// for an unknown id and for a service account; a database failure is db_error.
+MutationResult set_can_host(opennova::db::Database &db, int64_t id, bool can_host);
+
+// The supervisor's account for a hosted server: creates the service account
+// `username` (kind 'service', its handle the same, a random free PCID) with
+// `password`, or, when a service account by that name exists, sets its password
+// the way an admin reset does (its credentials generation moves, and its retail
+// login's session row and its hosting keys go). The account's id, or a failed
+// MutationResult: username_exists when a player holds the name (the prefix is
+// reserved, so only a database written by hand gets there).
+MutationResult upsert_service_account(
+		opennova::db::Database &db, const std::string &username, const std::string &password);
+// Deletes a service account with its sessions and keys (a listing it still
+// holds keeps no owner). not_found for an id that is no service account.
+MutationResult delete_service_account(opennova::db::Database &db, int64_t id);
 
 struct UpdateGameAccessParams {
 	std::string game_slug;

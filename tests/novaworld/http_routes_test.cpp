@@ -25,6 +25,9 @@
 // writers wait on.
 
 #include "auth.h"
+#include "hosted/hosted_repository.h"
+#include "hosted/supervisor.h"
+#include "hosted_fake_provider.h"
 #include "http_cookies.h"
 #include "http_listener.h"
 #include "net_http.h"
@@ -3343,6 +3346,401 @@ int test_db_failure_reply_carries_code_alone(Harness &h) {
 	return 0;
 }
 
+// ---- hosted servers ----------------------------------------------------------
+
+std::string error_of_reply(const net::HttpReply &reply) {
+	const auto json = crow::json::load(body_text(reply));
+	return json && json.has("error") ? str(json["error"]) : std::string("<none>");
+}
+
+// Every hosted row still stopping, ended as the supervisor would end it (the
+// harness runs none), so the cases after see no live server.
+void end_stopping_servers(Harness &h) {
+	h.pool.acquire()->exec("UPDATE hosted_servers SET state = 'stopped' WHERE state = 'stopping';");
+}
+
+// The hosted servers' routes (hosted/hosted_routes.h; the harness listener runs
+// them with ONNET_HOSTED_PROVIDER set, a cap of 2 and the default rotation
+// "default.bms", and no supervisor, so rows stay where the routes put them):
+// the session and CSRF refusals, the approval (PUT
+// /api/admin/users/<id>/can-host, admin only), the settings' refusals, the
+// start, one live server per account, the default rotation, the cap, the
+// owner's stop, the fleet view and the admin's stops (admin only, never the
+// admin password), and a listener with hosting off.
+int test_hosted_server_routes(Harness &h) {
+	namespace hosted = opennova::novaworld_server::hosted;
+	const int64_t ana = make_account(h, "hosted_ana", "pw-hosted-ana");
+	const int64_t ben = make_account(h, "hosted_ben", "pw-hosted-ben");
+	const int64_t cy = make_account(h, "hosted_cy", "pw-hosted-cy");
+	const int64_t dee = make_account(h, "hosted_dee", "pw-hosted-dee");
+	TEST_EXPECT(ana > 0 && ben > 0 && cy > 0 && dee > 0);
+	const std::string ana_s = login_token(h, "10.51.0.1", "hosted_ana", "pw-hosted-ana");
+	const std::string ben_s = login_token(h, "10.51.0.2", "hosted_ben", "pw-hosted-ben");
+	const std::string cy_s = login_token(h, "10.51.0.3", "hosted_cy", "pw-hosted-cy");
+	const std::string dee_s = login_token(h, "10.51.0.4", "hosted_dee", "pw-hosted-dee");
+	TEST_EXPECT(!ana_s.empty() && !ben_s.empty() && !cy_s.empty() && !dee_s.empty());
+	// The start / stop bucket (HostedRoutes::kStartStopPerUser) is 6 per account,
+	// then one every 20 s, and a request refused before it (logged out, no CSRF
+	// header) draws nothing. Ana draws exactly six below (not approved, the
+	// start, already_live, three stops), Dee five (the refused settings), Ben and
+	// Cy one or two: add a draw to one of them and it must move to a new account.
+
+	auto start = [&h](const std::string &session, const std::string &body, bool csrf = true) {
+		std::vector<std::string> headers = { kJson, with_session(session) };
+		if (csrf) headers.push_back(kCsrf);
+		return h.send("POST", "/api/me/server/start", headers, body);
+	};
+	auto stop = [&h](const std::string &session, bool csrf = true) {
+		std::vector<std::string> headers = { with_session(session) };
+		if (csrf) headers.push_back(kCsrf);
+		return h.send("POST", "/api/me/server/stop", headers);
+	};
+	auto me = [&h](const std::string &session) {
+		return h.send("GET", "/api/me/server", { with_session(session) });
+	};
+	auto approve = [&h](int64_t id, const std::string &body, std::vector<std::string> headers) {
+		headers.push_back(kJson);
+		return h.send("PUT", "/api/admin/users/" + std::to_string(id) + "/can-host", headers, body);
+	};
+	const std::string settings =
+			"{\"game_name\":\"Ana's Server\",\"max_players\":16,\"missions\":[\"first.bms\",\"second.bms\"]}";
+
+	// Logged out: 401; no CSRF header on a state change: 403, before any bucket.
+	TEST_EXPECT(h.send("GET", "/api/me/server").code == 401);
+	TEST_EXPECT(h.send("POST", "/api/me/server/start", { kJson, kCsrf }, settings).code == 401);
+	TEST_EXPECT(h.send("POST", "/api/me/server/stop", { kCsrf }).code == 401);
+	auto reply = start(ana_s, settings, /*csrf=*/false);
+	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "csrf_header_required");
+	reply = stop(ana_s, /*csrf=*/false);
+	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "csrf_header_required");
+
+	// Not approved yet.
+	reply = me(ana_s);
+	auto json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["enabled"].b() && !json["can_host"].b());
+	TEST_EXPECT(json["server"].t() == crow::json::type::Null);
+	// The configured rotation, the missions the site's rotation picker offers.
+	TEST_EXPECT(json["default_missions"].size() == 1 &&
+			str(json["default_missions"][0]) == "default.bms");
+	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
+	reply = start(ana_s, settings);
+	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "not_approved");
+
+	// The approval: admin only (the token, or an admin session with the CSRF header).
+	TEST_EXPECT(approve(ana, "{\"can_host\":true}", {}).code == 401);
+	TEST_EXPECT(approve(ana, "{\"can_host\":true}", { with_session(ana_s), kCsrf }).code == 403);
+	reply = approve(ana, "{}", { kBearer });
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "missing_field");
+	reply = approve(ana, "{\"can_host\":1}", { kBearer });
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
+	TEST_EXPECT(approve(999999, "{\"can_host\":true}", { kBearer }).code == 404);
+	reply = approve(ana, "{\"can_host\":true}", { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["user"]["can_host"].b());
+	for (const int64_t id : { ben, cy }) TEST_EXPECT(approve(id, "{\"can_host\":true}", { kBearer }).code == 200);
+	reply = me(ana_s);
+	TEST_EXPECT(crow::json::load(body_text(reply))["can_host"].b());
+
+	// Settings the backend refuses (hosted_supervisor has every rule): a field and why,
+	// a mistyped field, no JSON. Checked before the approval, so dee needs none.
+	struct Refused {
+		const char *body;
+		const char *error;
+		const char *field;
+	};
+	const Refused refused[] = {
+		{ "{\"game_name\":\"\",\"missions\":[\"a.bms\"]}", "invalid_settings", "game_name" },
+		{ "{\"game_name\":\"x\",\"max_players\":99,\"missions\":[\"a.bms\"]}", "invalid_settings",
+				"max_players" },
+		{ "{\"game_name\":\"x\",\"missions\":[\"../a.bms\"]}", "invalid_settings", "missions" },
+		{ "{\"game_name\":\"x\",\"max_players\":\"16\"}", "invalid_field", "" },
+		{ "not json", "invalid_json", "" },
+	};
+	for (const Refused &r : refused) {
+		reply = start(dee_s, r.body);
+		json = crow::json::load(body_text(reply));
+		if (reply.code != 400 || error_of_reply(reply) != r.error)
+			std::fprintf(stderr, "  %s -> %s\n", r.body, describe(reply).c_str());
+		TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == r.error);
+		if (*r.field) TEST_EXPECT(json && str(json["field"]) == r.field && json.has("message"));
+	}
+
+	// The start: 202 with the server, requested, and its first event.
+	reply = start(ana_s, settings);
+	json = crow::json::load(body_text(reply));
+	if (reply.code != 202) std::fprintf(stderr, "  start: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.code == 202 && json && str(json["server"]["state"]) == "requested");
+	const int64_t ana_server = json["server"]["id"].i();
+	TEST_EXPECT(json["server"]["live"].b());
+	TEST_EXPECT(str(json["server"]["settings"]["game_name"]) == "Ana's Server");
+	TEST_EXPECT(json["server"]["settings"]["max_players"].i() == 16);
+	TEST_EXPECT(json["server"]["settings"]["missions"].size() == 2);
+	TEST_EXPECT(str(json["server"]["settings"]["missions"][0]) == "first.bms");
+	TEST_EXPECT(json["server"]["listing"].t() == crow::json::type::Null);
+	reply = me(ana_s);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(json && json["server"]["id"].i() == ana_server);
+	TEST_EXPECT(json["server"]["events"].size() == 1);
+	TEST_EXPECT(str(json["server"]["events"][0]["from"]).empty() &&
+			str(json["server"]["events"][0]["to"]) == "requested");
+
+	// One live server per account.
+	reply = start(ana_s, settings);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "already_live");
+	TEST_EXPECT(json["server_id"].i() == ana_server);
+	// The default rotation when none is named, then the cap (2).
+	reply = start(ben_s, "{\"game_name\":\"Ben's\"}");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 202 && json["server"]["settings"]["missions"].size() == 1);
+	TEST_EXPECT(str(json["server"]["settings"]["missions"][0]) == "default.bms");
+	const int64_t ben_server = json["server"]["id"].i();
+	reply = start(cy_s, "{\"game_name\":\"Cy's\"}");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "at_capacity");
+
+	// The fleet view: admin only; it names the owner and never the admin password.
+	h.pool.acquire()->exec("UPDATE hosted_servers SET admin_password = 'planted-admin-secret' WHERE id = ?;",
+			{ opennova::db::BindValue(ana_server) });
+	TEST_EXPECT(h.send("GET", "/api/admin/hosted").code == 401);
+	TEST_EXPECT(h.send("GET", "/api/admin/hosted", { with_session(ana_s) }).code == 403);
+	reply = h.send("GET", "/api/admin/hosted", { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["cap"].i() == 2 && json["live"].i() == 2);
+	TEST_EXPECT(json["enabled"].b() && str(json["provider"]) == "local");
+	TEST_EXPECT(body_text(reply).find("planted-admin-secret") == std::string::npos);
+	bool seen = false;
+	for (const auto &s : json["servers"]) {
+		if (s["id"].i() != ana_server) continue;
+		seen = true;
+		TEST_EXPECT(s["owner"]["id"].i() == ana && str(s["owner"]["username"]) == "hosted_ana");
+		TEST_EXPECT(s["service_account"].t() == crow::json::type::Null);
+		TEST_EXPECT(str(s["state"]) == "requested");
+	}
+	TEST_EXPECT(seen);
+	TEST_EXPECT(body_text(me(ana_s)).find("planted-admin-secret") == std::string::npos);
+
+	// The owner's stop: stopping, again stopping, then (the row ended) nothing to stop.
+	reply = stop(ana_s);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 202 && str(json["server"]["state"]) == "stopping");
+	reply = stop(ana_s);
+	TEST_EXPECT(reply.code == 202 && str(crow::json::load(body_text(reply))["server"]["state"]) == "stopping");
+	TEST_EXPECT(opennova::novaworld_server::hosted::transition(*h.pool.acquire(), ana_server,
+			hosted::State::Stopping, hosted::State::Stopped, "ended by the test"));
+	reply = stop(ana_s);
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "no_live_server");
+	json = crow::json::load(body_text(me(ana_s)));
+	TEST_EXPECT(str(json["server"]["state"]) == "stopped" && !json["server"]["live"].b());
+	TEST_EXPECT(json["server"]["events"].size() == 3);
+	TEST_EXPECT(json["server"]["ended_at"].t() == crow::json::type::String);
+	// Its place is free again.
+	reply = start(cy_s, "{\"game_name\":\"Cy's\"}");
+	TEST_EXPECT(reply.code == 202);
+	const int64_t cy_server = crow::json::load(body_text(reply))["server"]["id"].i();
+
+	// The admin's stops: one server (404 for none, 409 for an ended one), and the kill switch.
+	auto admin_stop = [&h](const std::string &id, std::vector<std::string> headers) {
+		return h.send("POST", "/api/admin/hosted/" + id + "/stop", headers);
+	};
+	TEST_EXPECT(admin_stop(std::to_string(cy_server), { with_session(cy_s), kCsrf }).code == 403);
+	TEST_EXPECT(admin_stop("999999", { kBearer }).code == 404);
+	reply = admin_stop(std::to_string(ana_server), { kBearer });
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "not_live");
+	reply = admin_stop(std::to_string(cy_server), { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 202 && str(json["server"]["state"]) == "stopping");
+	TEST_EXPECT(str(json["server"]["owner"]["username"]) == "hosted_cy");
+	TEST_EXPECT(h.send("POST", "/api/admin/hosted/stop-all", { with_session(ben_s), kCsrf }).code == 403);
+	reply = h.send("POST", "/api/admin/hosted/stop-all", { kBearer });
+	TEST_EXPECT(reply.code == 200 && crow::json::load(body_text(reply))["stopping"].i() == 1);
+	reply = h.send("POST", "/api/admin/hosted/stop-all", { kBearer });
+	TEST_EXPECT(reply.code == 200 && crow::json::load(body_text(reply))["stopping"].i() == 0);
+	const auto ben_row = hosted::find_server(*h.pool.acquire(), ben_server);
+	TEST_EXPECT(ben_row && ben_row->state == hosted::State::Stopping);
+	end_stopping_servers(h);
+
+	// Hosting off (the Secure listener runs with ONNET_HOSTED_PROVIDER none): 503.
+	std::string token;
+	{
+		auto conn = h.pool.acquire();
+		const auto user = nws::get_user_by_id(*conn, dee);
+		const auto minted = nws::create_web_session(*conn, dee, user->credentials_gen, "127.0.0.1", "harness");
+		TEST_EXPECT(minted.has_value());
+		token = *minted;
+	}
+	reply = h.send_to(h.secure_port, "POST", "/api/me/server/start",
+			{ kJson, kCsrf, with_cookie(nws::kWebSessionHostCookie, token) }, "{\"game_name\":\"x\"}");
+	TEST_EXPECT(reply.code == 503 && error_of_reply(reply) == "hosting_disabled");
+	reply = h.send_to(h.secure_port, "GET", "/api/me/server",
+			{ with_cookie(nws::kWebSessionHostCookie, token) });
+	TEST_EXPECT(reply.code == 200 && !crow::json::load(body_text(reply))["enabled"].b());
+	return 0;
+}
+
+// A hosted server's listing is its owner's (the one rule,
+// hosted::owned_listing_account): the hosted server's service account lists
+// it (a key /NWHost.dll recorded for that account, presented by a hand-driven
+// host), and its owner's GET /api/me/hosts carries it with its hosted server,
+// the owner's ServerCommand reaches it while another account's is a 404, and
+// the admin view names the owner. An admin withdraws the owner's approval
+// through the route and one supervisor pass (a fake provider) moves the server
+// to stopping; a stopping server takes no command (409 server_stopping), and
+// the owner's and the admin's stop on the listing are the hosted server's stop
+// (no ServerStopHosting reaches the host, the supervisor's to send). The
+// service account itself cannot use the site: its right password gets a wrong
+// password's 401, the admin users routes do not know it, and registration
+// refuses the srv- prefix. Last, a stale row (ended, its account still holding
+// the listing) is no longer the owner's, and the admin's stop on its listing
+// takes the plain push, which reaches the host.
+int test_hosted_listing_owner(Harness &h) {
+	namespace hosted = opennova::novaworld_server::hosted;
+	using Notice = PushHost::Notice;
+	const int64_t owner = make_account(h, "listing_owner", "pw-listing-owner");
+	TEST_EXPECT(owner > 0 && make_account(h, "listing_other", "pw-listing-other") > 0);
+	TEST_EXPECT(nws::set_can_host(*h.pool.acquire(), owner, true).ok);
+	const std::string owner_s = login_token(h, "10.52.0.1", "listing_owner", "pw-listing-owner");
+	const std::string other_s = login_token(h, "10.52.0.2", "listing_other", "pw-listing-other");
+	TEST_EXPECT(!owner_s.empty() && !other_s.empty());
+
+	// The hosted server and its service account, as the supervisor makes them.
+	hosted::HostedSettings settings;
+	settings.game_name = "Hosted Owner Test";
+	settings.missions = { "a.bms" };
+	const auto request = hosted::request_server(*h.pool.acquire(), owner, settings, 10);
+	TEST_EXPECT(request.outcome == hosted::RequestOutcome::Created);
+	const int64_t server_id = request.id;
+	const std::string service_name = nws::service_username(server_id);
+	const auto service = nws::upsert_service_account(*h.pool.acquire(), service_name, "pw-service-account");
+	TEST_EXPECT(service.ok);
+	hosted::set_service_account(*h.pool.acquire(), server_id, service.id);
+
+	// Its lister hosts with a key minted for the service account.
+	const std::string key = "PPPPOOOONNNNMMMMLLLLKKKKJJJJIIIIHHHHGGGGFFFFEEEE";
+	TEST_EXPECT(opennova::hostdb::is_host_key(key) && record_key_for(h, key, service.id));
+	PushHost host(h.nw_udp.bound_port(), 0x484f5354u);
+	TEST_EXPECT(host.host("Hosted Listing Host"));
+	host.present_key(key);
+	std::optional<opennova::hostdb::HostRow> row;
+	TEST_EXPECT(wait_until([&] {
+		row = row_named(h, "Hosted Listing Host");
+		return row && row->host_user_id == service.id;
+	}));
+	const uint32_t rid = row->rid;
+	const std::string rid_text = std::to_string(rid);
+
+	// The owner's list carries it, as its hosted server's; another account's does not.
+	auto reply = h.send("GET", "/api/me/hosts", { with_session(owner_s) });
+	auto json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["hosts"].size() == 1);
+	TEST_EXPECT(json["hosts"][0]["rid"].i() == static_cast<int64_t>(rid));
+	TEST_EXPECT(json["hosts"][0]["hosted_server_id"].i() == server_id);
+	reply = h.send("GET", "/api/me/hosts", { with_session(other_s) });
+	TEST_EXPECT(crow::json::load(body_text(reply))["hosts"].size() == 0);
+	reply = h.send("GET", "/api/me/server", { with_session(owner_s) });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(json && json["server"]["listing"]["rid"].i() == static_cast<int64_t>(rid));
+
+	// The owner's ServerCommand reaches the host; another account's is a 404.
+	auto command = [&h, &rid_text](const std::string &session, const std::string &body) {
+		return h.send("POST", "/api/me/hosts/" + rid_text + "/command",
+				{ kJson, kCsrf, with_session(session) }, body);
+	};
+	const std::string chat = "{\"verb\":\"TextChatServer\",\"args\":[\"hello hosted\"]}";
+	reply = command(other_s, chat);
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "unknown_rid");
+	TEST_EXPECT(host.wait_notice(Notice::Kind::Command, 300) == nullptr);
+	reply = command(owner_s, chat);
+	if (reply.code != 202) std::fprintf(stderr, "  owner command: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.code == 202);
+	const Notice *cmd = host.wait_notice(Notice::Kind::Command, 3000);
+	TEST_EXPECT(cmd != nullptr && cmd->command.verb == opennova::ServerCommandVerb::TextChatServer);
+	TEST_EXPECT(cmd->command.args == std::vector<std::string>{ "hello hosted" });
+
+	// The admin view names the hosted server's owner, not its service account.
+	reply = h.send("GET", "/api/admin/hosts", { kBearer });
+	json = crow::json::load(body_text(reply));
+	bool seen = false;
+	for (const auto &e : json["hosts"]) {
+		if (e["rid"].i() != static_cast<int64_t>(rid)) continue;
+		seen = true;
+		TEST_EXPECT(e["owner"]["id"].i() == owner && str(e["owner"]["username"]) == "listing_owner");
+		TEST_EXPECT(e["hosted_server_id"].i() == server_id);
+	}
+	TEST_EXPECT(seen);
+
+	// An admin withdraws the owner's approval (the route), and the supervisor's
+	// next pass (here one hand-driven pass over a fake provider) stops the server.
+	reply = h.send("PUT", "/api/admin/users/" + std::to_string(owner) + "/can-host", { kBearer, kJson },
+			"{\"can_host\":false}");
+	TEST_EXPECT(reply.code == 200 && !crow::json::load(body_text(reply))["user"]["can_host"].b());
+	{
+		hosted_test::FakeProvider fake;
+		hosted::Supervisor supervisor(h.pool, fake, hosted::SupervisorConfig{});
+		supervisor.tick(1000);
+		TEST_EXPECT(fake.launches == 0);
+	}
+	TEST_EXPECT(hosted::find_server(*h.pool.acquire(), server_id)->state == hosted::State::Stopping);
+	json = crow::json::load(body_text(h.send("GET", "/api/me/server", { with_session(owner_s) })));
+	TEST_EXPECT(json && str(json["server"]["state"]) == "stopping");
+	const auto &events = json["server"]["events"];
+	TEST_EXPECT(events.size() >= 2 &&
+			str(events[events.size() - 1]["detail"]).find("approval to host was withdrawn") != std::string::npos);
+
+	// A stopping server takes no more commands; the stops on its listing are the
+	// hosted server's: no ServerStopHosting goes out (the supervisor's to send).
+	host.clear_notices();
+	reply = command(owner_s, chat);
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "server_stopping");
+	TEST_EXPECT(host.wait_notice(Notice::Kind::Command, 300) == nullptr);
+	reply = h.send("POST", "/api/me/hosts/" + rid_text + "/stop", { kCsrf, with_session(other_s) });
+	TEST_EXPECT(reply.code == 404);
+	reply = h.send("POST", "/api/me/hosts/" + rid_text + "/stop", { kCsrf, with_session(owner_s) });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 202 && json && json["hosted_server_id"].i() == server_id);
+	TEST_EXPECT(str(json["state"]) == "stopping" && str(json["status"]) == "hosted_stop");
+	reply = h.send("POST", "/api/admin/hosts/" + rid_text + "/stop", { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 202 && json && json["hosted_server_id"].i() == server_id);
+	TEST_EXPECT(host.wait_notice(Notice::Kind::StopHosting, 500) == nullptr);
+	TEST_EXPECT(row_named(h, "Hosted Listing Host").has_value());
+
+	// The service account and the site.
+	const auto service_login = login(h, "10.52.0.9", service_name, "pw-service-account");
+	const auto wrong_login = login(h, "10.52.0.10", "listing_other", "not-the-password");
+	TEST_EXPECT(service_login.code == 401 && wrong_login.code == 401);
+	TEST_EXPECT(body_text(service_login) == body_text(wrong_login));
+	TEST_EXPECT(set_cookie_value(service_login, nws::kWebSessionCookie).empty());
+	reply = h.send("GET", "/api/admin/users", { kBearer });
+	TEST_EXPECT(reply.code == 200 && body_text(reply).find(service_name) == std::string::npos);
+	const std::string service_path = "/api/admin/users/" + std::to_string(service.id);
+	TEST_EXPECT(h.send("PUT", service_path + "/can-host", { kBearer, kJson }, "{\"can_host\":true}").code == 404);
+	TEST_EXPECT(h.send("PUT", service_path, { kBearer, kJson }, "{\"nwhandle\":\"Taken\"}").code == 404);
+	TEST_EXPECT(h.send("DELETE", service_path, { kBearer }).code == 404);
+	reply = h.send("POST", "/api/register", { kJson, kCsrf, from_ip("10.52.0.11") },
+			"{\"username\":\"srv-777\",\"password\":\"pw-x\"}");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
+
+	// A stale row: the hosted server ended while its service account still holds
+	// the listing (the supervisor ends both in one transaction, so only a
+	// database written by hand gets here). It is no longer the owner's, and the
+	// admin's stop takes the plain push, which reaches the host.
+	TEST_EXPECT(hosted::transition(*h.pool.acquire(), server_id, hosted::State::Stopping,
+			hosted::State::Stopped, "ended by the test"));
+	reply = h.send("GET", "/api/me/hosts", { with_session(owner_s) });
+	TEST_EXPECT(crow::json::load(body_text(reply))["hosts"].size() == 0);
+	reply = command(owner_s, chat);
+	TEST_EXPECT(reply.code == 404);
+	reply = h.send("POST", "/api/admin/hosts/" + rid_text + "/stop", { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 202 && json && str(json["statement"]) == "ServerStopHosting");
+	TEST_EXPECT(host.wait_notice(Notice::Kind::StopHosting, 3000) != nullptr);
+	TEST_EXPECT(wait_until([&] { return !row_named(h, "Hosted Listing Host").has_value(); }));
+
+	host.goodbye();
+	TEST_EXPECT(nws::delete_service_account(*h.pool.acquire(), service.id).ok);
+	return 0;
+}
+
 int run(Harness &h) {
 	struct Case { const char *name; int (*fn)(Harness &); };
 	const Case cases[] = {
@@ -3376,6 +3774,8 @@ int run(Harness &h) {
 		{ "unknown_path_404", test_unknown_path_404 },
 		{ "admin_host_push", test_admin_host_push },
 		{ "owner_host_push", test_owner_host_push },
+		{ "hosted_server_routes", test_hosted_server_routes },
+		{ "hosted_listing_owner", test_hosted_listing_owner },
 		{ "host_text_utf8", test_host_text_utf8 },
 		{ "name_and_value_rules", test_name_and_value_rules },
 		{ "template_names_refused", test_template_names_refused },
@@ -3454,6 +3854,11 @@ int main() {
 		// /api/ answers that proxy alone, as prod's does.
 		config.trusted_proxies = {"127.0.0.1"};
 		config.api_proxy_only = true;
+		// The hosted servers' routes run (no supervisor: rows stay where the routes
+		// put them), with a cap of 2 and a default rotation.
+		config.hosted_provider = "local";
+		config.hosted_cap = 2;
+		config.hosted_missions = { "default.bms" };
 
 		opennova::ConnectionManager manager;
 		// The push routes' channel, as main() wires it: a real NW UDP listener on a port the
@@ -3510,6 +3915,7 @@ int main() {
 		secure_config.cookie_secure = true;
 		secure_config.trusted_proxies.clear();
 		secure_config.api_proxy_only = false;
+		secure_config.hosted_provider = "none"; // hosting off here (the hosted routes case)
 		secure_config.templates_dir = retail_root / "templates";
 		secure_config.static_dir = retail_root / "static";
 		secure_config.web_dist_dir = retail_root / "web";

@@ -42,6 +42,20 @@ bool getenv_bool(const char *name, bool fallback) {
 	return *v == '1' || *v == 't' || *v == 'T' || *v == 'y' || *v == 'Y';
 }
 
+// A comma-separated list, each entry trimmed, empty entries dropped.
+std::vector<std::string> split_list(std::string_view list) {
+	std::vector<std::string> out;
+	size_t pos = 0;
+	while (pos <= list.size()) {
+		const auto comma = list.find(',', pos);
+		const auto end = comma == std::string_view::npos ? list.size() : comma;
+		const auto entry = strutil::trim_view(list.substr(pos, end - pos));
+		if (!entry.empty()) out.emplace_back(entry);
+		pos = end + 1;
+	}
+	return out;
+}
+
 } // namespace
 
 ServerConfig ServerConfig::from_env() {
@@ -67,17 +81,7 @@ ServerConfig ServerConfig::from_env() {
 
 	if (auto v = getenv_safe("ADMIN_API_TOKEN"))     c.admin_api_token = v;
 	c.cookie_secure = getenv_bool("ONNET_COOKIE_SECURE", c.cookie_secure);
-	if (auto v = getenv_safe("ONNET_TRUSTED_PROXIES")) {
-		const std::string_view list(v);
-		size_t pos = 0;
-		while (pos <= list.size()) {
-			const auto comma = list.find(',', pos);
-			const auto end = comma == std::string_view::npos ? list.size() : comma;
-			const auto entry = strutil::trim_view(list.substr(pos, end - pos));
-			if (!entry.empty()) c.trusted_proxies.emplace_back(entry);
-			pos = end + 1;
-		}
-	}
+	if (auto v = getenv_safe("ONNET_TRUSTED_PROXIES")) c.trusted_proxies = split_list(v);
 	c.api_proxy_only = getenv_bool("ONNET_API_PROXY_ONLY", c.api_proxy_only);
 	if (auto v = getenv_safe("ONNET_BOOTSTRAP_ADMIN")) c.bootstrap_admin = v;
 	c.require_host_key = getenv_bool("ONNET_REQUIRE_HOST_KEY", c.require_host_key);
@@ -96,6 +100,14 @@ ServerConfig ServerConfig::from_env() {
 	if (auto v = getenv_safe("ONNET_CLIENT_REFLECT_IP")) c.client_reflect_ip = v;
 	c.client_reflect_gate_port      = getenv_u16("ONNET_CLIENT_REFLECT_GATE_PORT",      c.client_reflect_gate_port);
 	c.client_reflect_novaworld_port = getenv_u16("ONNET_CLIENT_REFLECT_NOVAWORLD_PORT", c.client_reflect_novaworld_port);
+
+	if (auto v = getenv_safe("ONNET_HOSTED_PROVIDER")) c.hosted_provider = v;
+	c.hosted_cap = getenv_int("ONNET_HOSTED_CAP", c.hosted_cap);
+	if (auto v = getenv_safe("ONNET_HOSTED_SERVE_BIN")) c.hosted_serve_bin = v;
+	if (auto v = getenv_safe("ONNET_HOSTED_RESOURCE_DIR")) c.hosted_resource_dir = v;
+	c.hosted_loose_root = getenv_bool("ONNET_HOSTED_LOOSE_ROOT", c.hosted_loose_root);
+	if (auto v = getenv_safe("ONNET_HOSTED_WORK_DIR")) c.hosted_work_dir = v;
+	if (auto v = getenv_safe("ONNET_HOSTED_MISSIONS")) c.hosted_missions = split_list(v);
 
 	return c;
 }
