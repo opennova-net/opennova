@@ -58,7 +58,9 @@ struct ServerStatusRecord {
 // Result of a CRUD mutation. ok=true means success; on failure,
 // `error_code` is one of: "username_exists", "pcid_exists",
 // "missing_field", "invalid_field", "not_found", "db_error". Used as the body
-// foundation for /api/admin/users.* HTTP responses.
+// foundation for /api/admin/users.* HTTP responses, so `error_message` is
+// client-facing: a "db_error" leaves it empty, its text going to the server
+// log alone.
 struct MutationResult {
 	bool        ok = false;
 	int64_t     id = 0;

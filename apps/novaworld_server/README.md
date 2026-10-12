@@ -43,7 +43,9 @@ session handshake, the browser/host/play container services, and the legacy
   `db::SqliteError` carries sqlite's extended code and, for a busy or locked
   statement, how long its failing prepare or step ran, so a busy timeout
   that ran out (`[extended 5, after 5003 ms]`) reads apart from a lock sqlite
-  refused at once (`[extended 517, after 0 ms]`, `SQLITE_BUSY_SNAPSHOT`). A
+  refused at once (`[extended 517, after 0 ms]`, `SQLITE_BUSY_SNAPSHOT`). Its
+  text also names the failing statement, so it goes to the server log alone:
+  a reply to a database failure carries only its error code (`db_error`). A
   write that spans statements (`clear_all`, `replace_roster`,
   `apply_status_blob`, the lobby's host row with its roster, a registration's
   checks and insert) is one `db::Transaction`, and a read that spans them

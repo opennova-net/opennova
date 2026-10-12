@@ -116,10 +116,12 @@ MutationResult err(const char *code, const char *msg) {
 
 // A "db_error" result, logged here with the operation that failed: the
 // routes hand the result to the caller, so without this the failure (a
-// SqliteError's extended code and wait among it) never reaches the log.
+// SqliteError's extended code and wait among it) never reaches the log. The
+// result carries the code alone, with no message: the routes send the message
+// to the client, and what() names the failing statement.
 MutationResult db_err(const char *op, const std::exception &e) {
 	std::fprintf(stderr, "[auth] WARN %s failed: %s\n", op, e.what());
-	return err("db_error", e.what());
+	return err("db_error", "");
 }
 
 } // namespace

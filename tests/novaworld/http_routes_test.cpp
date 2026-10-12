@@ -3300,6 +3300,49 @@ int test_host_tag_serves_once(Harness &h) {
 	return 0;
 }
 
+// A database failure's reply is its error code and nothing else: the
+// SqliteError's text names the failing statement ("exec: INSERT INTO players
+// ..."), its extended code and its wait, and goes to the server log alone. A
+// trigger fails each route's write the way any SqliteError does: POST
+// /api/register (the public route, create_user's db_error), PUT
+// /api/admin/server-status and POST /api/admin/hosts (its upsert_failed).
+// Nothing lands.
+int test_db_failure_reply_carries_code_alone(Harness &h) {
+	const char *const triggers[][2] = {
+		{ "harness_fail_players", "players" },
+		{ "harness_fail_server_status", "server_status" },
+		{ "harness_fail_active_hosts", "active_hosts" },
+	};
+	for (const auto &t : triggers) {
+		h.pool.acquire()->exec(std::string("CREATE TRIGGER ") + t[0] + " BEFORE INSERT ON " + t[1] +
+				" BEGIN SELECT RAISE(ABORT, 'harness forced failure'); END;");
+	}
+	auto refused = [](const net::HttpReply &reply, const char *want) {
+		if (reply.transport_ok && reply.code == 500 && body_text(reply) == want)
+			return true;
+		std::fprintf(stderr, "  %s, want HTTP 500 %s\n", describe(reply).c_str(), want);
+		return false;
+	};
+	const auto users_before = nws::list_users(*h.pool.acquire()).size();
+	const auto status_before = nws::get_server_status(*h.pool.acquire());
+
+	TEST_EXPECT(refused(h.send("POST", "/api/register", { kJson, kCsrf, from_ip("10.43.0.1") },
+								credentials("db_failure", "pw-db-failure")),
+			"{\"error\":\"db_error\"}"));
+	TEST_EXPECT(refused(h.send("PUT", "/api/admin/server-status", { kBearer, kJson },
+								"{\"maintenance_enabled\":false,\"message\":\"never\"}"),
+			"{\"error\":\"db_error\"}"));
+	TEST_EXPECT(refused(h.send("POST", "/api/admin/hosts", { kBearer, kJson }, "{\"rid\":4343}"),
+			"{\"error\":\"upsert_failed\"}"));
+
+	for (const auto &t : triggers)
+		h.pool.acquire()->exec(std::string("DROP TRIGGER ") + t[0] + ";");
+	TEST_EXPECT(nws::list_users(*h.pool.acquire()).size() == users_before);
+	TEST_EXPECT(nws::get_server_status(*h.pool.acquire()).message == status_before.message);
+	TEST_EXPECT(h.pool.acquire()->query("SELECT 1 FROM active_hosts WHERE rid = 4343;").empty());
+	return 0;
+}
+
 int run(Harness &h) {
 	struct Case { const char *name; int (*fn)(Harness &); };
 	const Case cases[] = {
@@ -3346,6 +3389,7 @@ int run(Harness &h) {
 		{ "register_handle_rule", test_register_handle_rule },
 		{ "login_row_kept_alive", test_login_row_kept_alive },
 		{ "host_tag_serves_once", test_host_tag_serves_once },
+		{ "db_failure_reply_carries_code_alone", test_db_failure_reply_carries_code_alone },
 		{ "concurrent_requests", test_concurrent_requests },
 	};
 	for (const Case &c : cases) {
