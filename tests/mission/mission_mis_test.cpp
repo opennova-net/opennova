@@ -190,37 +190,81 @@ int main() {
 	TEST_EXPECT(entity_count(bms_reload, EntityKind::Item) == 1);
 	TEST_EXPECT(bms_reload.events.size() == 1);
 
-	// --- .mis height declaration (D-MIS-4): height_lock + extra_bheight round-trip -----------
-	// [orig: MisLdr_ParseMisLine @ 0x100017b0 (extra_bheight->rec+292, height_lock->rec+356);
-	//  MisLdr_WriteNileProjectXml @ 0x10004930 (scene Y = z/65536 - (lock ? bheight/65536 : 0));
-	//  both misldr.dll]
-	TEST_EXPECT(text.find("  height_lock 1\r\n") != std::string::npos);
+	// --- .mis heights (D-MIS-4): the original editor's frames ------------------------------------
+	// An entity of a .bms is unlocked, as the original editor's new item [orig: JOTACmed.exe
+	// MissionItem_AppendByTypeId @ 0x455954]: no height_lock line [orig: MIS_SaveDocument @ 0x455889], its base 0.
+	TEST_EXPECT(text.find("height_lock") == std::string::npos);
 	TEST_EXPECT(text.find("  extra_bheight 0\r\n") != std::string::npos);
 	TEST_EXPECT(parsed.items.size() == 1);
-	TEST_EXPECT(parsed.items[0].mis_height_lock == 1);
+	TEST_EXPECT(parsed.items[0].mis_height_lock == 0);
 	TEST_EXPECT(parsed.items[0].mis_extra_bheight == 0);
 
-	// Editor-provided base heights (flat, in write order) bake into the emitted extra_bheight; the
-	// absolute z is untouched and the source document's entity is not mutated by the writer.
+	// The terrain's heights under the entities (flat, in write order): an unlocked entity's z is written relative to
+	// the terrain, less its height, its base as it stands; a locked one's z as it stands and its base plus the
+	// terrain's height, height_lock 1 [orig: JOTACmed.exe sub_44E640 @ 0x44e640, from MIS_SaveDocument @ 0x4546b5].
+	// The writer changes nothing of the document.
 	{
 		const std::string baked_path = temp_path("mission_mis_baked_heights.mis");
 		const std::vector<int32_t> base_heights = {25 * 65536};
 		TEST_EXPECT(save_mis_file(authored, baked_path, error, &base_heights));
 		const std::string baked_text = test_io::read_file_text(baked_path);
-		TEST_EXPECT(baked_text.find("  extra_bheight 1638400\r\n") != std::string::npos);
-		TEST_EXPECT(baked_text.find("  height_lock 1\r\n") != std::string::npos);
-		TEST_EXPECT(authored.items[0].mis_extra_bheight == 0);
+		const int32_t z = authored.items[0].z;
+		TEST_EXPECT(baked_text.find(" " + std::to_string(z - 25 * 65536) + "\r\n  ") != std::string::npos);
+		TEST_EXPECT(baked_text.find("  extra_bheight 0\r\n") != std::string::npos);
+		TEST_EXPECT(baked_text.find("height_lock") == std::string::npos);
+		TEST_EXPECT(authored.items[0].mis_extra_bheight == 0 && authored.items[0].z == z);
 
-		bms::File baked;
-		TEST_EXPECT(load_mis_file(baked_path, baked, error));
-		TEST_EXPECT(baked.items.size() == 1);
-		TEST_EXPECT(baked.items[0].mis_extra_bheight == 25 * 65536);
-		TEST_EXPECT(baked.items[0].mis_height_lock == 1);
-		TEST_EXPECT(baked.items[0].z == authored.items[0].z);
-		// The parsed document re-exports its own baked value without a provider.
-		std::string rewritten;
-		TEST_EXPECT(write_mis_text(baked, rewritten, error));
-		TEST_EXPECT(rewritten.find("  extra_bheight 1638400\r\n") != std::string::npos);
+		bms::File locked = authored;
+		locked.items[0].mis_height_lock = 1;
+		locked.items[0].mis_extra_bheight = 2 * 65536; // its base, two units above the ground (the editor's frame)
+		std::string locked_text;
+		TEST_EXPECT(write_mis_text(locked, locked_text, error, &base_heights));
+		TEST_EXPECT(locked_text.find(" " + std::to_string(z) + "\r\n  ") != std::string::npos);
+		TEST_EXPECT(locked_text.find("  extra_bheight " + std::to_string(27 * 65536) + "\r\n") != std::string::npos);
+		TEST_EXPECT(locked_text.find("  height_lock 1\r\n") != std::string::npos);
+	}
+
+	// A .mis as the original editor writes it (authored): an unlocked item (z 3 units above the ground, base 1) and a
+	// locked one (z 70 absolute, base 52 absolute), over a flat terrain 50 units high. The parse reads the file's own
+	// frame; mis_items_to_relative (the original's read, sub_44E6A0 @ 0x44e6a0) then mis_items_to_absolute (its .bms
+	// export, sub_44E5A0 @ 0x44e5a0) take it to the .bms's: both z absolute (53, 70), both bases the editor's (1, 2);
+	// and the writer over the same terrain gives the original's text back.
+	{
+		std::vector<uint16_t> atlas(1024 * 1024, 0);
+		std::vector<int> sectors(256, 1);
+		MisTerrain flat;
+		flat.heights = atlas.data();
+		flat.sectors = sectors.data();
+		// The depth word whose height the original editor samples as 50 units: (word * 2) << 7 = 50 << 16.
+		for (uint16_t &word : atlas) word = static_cast<uint16_t>((50 * 65536) / 256);
+		const int32_t ground = mis_terrain_height(flat, 10 * 65536, -10 * 65536);
+		TEST_EXPECT(ground == 50 * 65536);
+		const std::string med =
+				"// mission metafile\r\n\r\n"
+				"begin item 0\r\n  type_id 1\r\n  id 1\r\n  position 655360 -655360 196608\r\n"
+				"  extra_bheight 65536\r\nend item\r\n\r\n"
+				"begin item 1\r\n  type_id 1\r\n  id 2\r\n  position 655360 -655360 4587520\r\n"
+				"  extra_bheight 3407872\r\n  height_lock 1\r\nend item\r\n\r\n";
+		bms::File read;
+		TEST_EXPECT(parse_mis_text(med, {}, read, error) && read.items.size() == 2);
+		TEST_EXPECT(read.items[0].z == 3 * 65536 && read.items[0].mis_extra_bheight == 65536 && read.items[0].mis_height_lock == 0);
+		TEST_EXPECT(read.items[1].z == 70 * 65536 && read.items[1].mis_extra_bheight == 52 * 65536 &&
+		            read.items[1].mis_height_lock == 1);
+		mis_items_to_relative(read, flat);
+		TEST_EXPECT(read.items[0].z == 3 * 65536 && read.items[1].z == 20 * 65536 && read.items[1].mis_extra_bheight == 2 * 65536);
+		mis_items_to_absolute(read, flat);
+		TEST_EXPECT(read.items[0].z == 53 * 65536 && read.items[0].mis_extra_bheight == 65536);
+		TEST_EXPECT(read.items[1].z == 70 * 65536 && read.items[1].mis_extra_bheight == 2 * 65536);
+		const std::vector<int32_t> under = {ground, ground};
+		std::string back;
+		TEST_EXPECT(write_mis_text(read, back, error, &under));
+		TEST_EXPECT(back.find("  position 655360 -655360 196608\r\n") != std::string::npos);
+		TEST_EXPECT(back.find("  extra_bheight 65536\r\n") != std::string::npos);
+		TEST_EXPECT(back.find("  position 655360 -655360 4587520\r\n") != std::string::npos);
+		TEST_EXPECT(back.find("  extra_bheight 3407872\r\n") != std::string::npos);
+		size_t locks = 0;
+		for (size_t at = back.find("height_lock"); at != std::string::npos; at = back.find("height_lock", at + 1)) ++locks;
+		TEST_EXPECT(locks == 1);
 	}
 
 	// --- Base-10 numeric parsing (D-MIS-5): the octal regression ------------------------------

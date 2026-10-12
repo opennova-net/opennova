@@ -615,20 +615,19 @@ struct Entity {
     // text-authoring concepts that exist only in the .mis metafile. parse_entity/write_entity
     // (bms.cpp) serialize the record field-by-field and never touch these; equal() compares
     // them (they change write_mis_text output, so a difference is a real document change).
-    // Semantics: a plain .mis item z is the editor-frame (terrain-relative) height;
-    // height_lock nonzero declares z ABSOLUTE with extra_bheight carrying the baked base
-    // height under the item, so the original editor recovers the relative offset as
-    //   scene Y = z/65536 - (height_lock ? extra_bheight/65536 : 0)
-    // [orig: MisLdr_ParseMisLine @ 0x100017b0 (extra_bheight->rec+292, height_lock->rec+356);
-    //  MisLdr_WriteNileProjectXml @ 0x10004930 (<ABSOLUTE>TRUE</ABSOLUTE> iff height_lock);
-    //  both misldr.dll]. BMS entity z is always absolute (bms-event-runtime-re.md §6.6), so
-    // the .bms parse path and freshly authored entities mark height_lock = 1; .mis-parsed
-    // entities round-trip their own values. See docs/mission/mis-format-re.md (D-MIS-4).
+    // Semantics (mission_mis.h's frames, D-MIS-4): the original editor keeps an item's z and
+    // its base (extra_bheight) relative to the terrain under it and writes a height-locked
+    // item's both absolute [orig: JOTACmed.exe sub_44E640 @ 0x44e640; MisLdr_ParseMisLine @
+    // 0x100017b0 (extra_bheight->rec+292, height_lock->rec+356), misldr.dll]. A File holds the
+    // .bms's frame: z absolute (bms-event-runtime-re.md §6.6), mis_extra_bheight the base in the
+    // editor's (relative) frame, mis_height_lock 0 unless a .mis locked it (the .bms parse path
+    // and a new entity: 0, as the original's new item). parse_mis_text reads the .mis as written;
+    // mis_items_to_relative / mis_items_to_absolute take it to the .bms's frame.
     // Layout invariant: Entity stays TRIVIAL -- no NSDMIs; every construction site value-initializes,
     // which zeroes all bytes including padding -- and carries no implicit tail padding (the explicit
     // mis_pad_ tail), because bms::equal byte-compares whole records; static_asserts below enforce both.
-    int32_t mis_extra_bheight;         // .mis extra_bheight: baked base height, 16.16 fixed
-    uint8_t mis_height_lock;           // .mis height_lock: nonzero => z ABSOLUTE + bheight baked
+    int32_t mis_extra_bheight;         // .mis extra_bheight: the item's base, 16.16 fixed
+    uint8_t mis_height_lock;           // .mis height_lock: nonzero => kept at its height
     uint8_t mis_pad_[3];               // explicit tail pad: keeps sizeof(Entity) free of implicit
                                        // padding so bms::equal's memcmp is deterministic (always
                                        // zero via value-init; never serialized)

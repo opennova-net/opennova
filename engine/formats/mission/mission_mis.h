@@ -89,13 +89,16 @@ namespace opennova::mission {
 
 // The public .mis entries (ADR 0043 slice E11: the document facade died; the
 // embedder holds the bms::File and calls the two directions itself).
-// `base_heights` (optional): editor-sampled terrain heights under each entity,
-// 16.16 fixed-point, FLAT in WRITE ORDER (items, buildings, markers, organics).
-// When provided, each in-range entry is emitted as that entity's
-// `extra_bheight` (the baked base height the original editor subtracts from
-// the height-locked absolute z); out-of-range / absent entries fall back to
-// the entity's own mis_extra_bheight. See docs/mission/mis-format-re.md
-// (D-MIS-4).
+// `base_heights` (optional): the terrain's height under each entity, 16.16
+// fixed-point, FLAT in WRITE ORDER (items, buildings, markers, organics), as
+// the original editor samples it (mis_terrain_height); 0 for an entity past
+// them. The file is in the .bms's frame (the frames below): an unlocked
+// entity's z is written relative to the terrain, less its height there, its
+// base as it stands, and no height_lock line; a locked entity's z as it stands
+// (absolute), its base plus the terrain's height, and `height_lock 1` [orig:
+// JOTACmed.exe sub_44E640 @ 0x44e640, from MIS_SaveDocument @ 0x4546b5; the
+// height_lock line written for a lock alone, MIS_SaveDocument @ 0x455889..
+// 0x45589a]. See docs/mission/mis-format-re.md (D-MIS-4).
 // `names` (optional): the names written into the events' `name` and the area triggers' and the
 // waypoint paths' `description` lines (empty strings without it); a path is written for a stop or a
 // description, whatever its flags, as the original editor writes it. Refused (false, `error` names the area)
@@ -153,5 +156,21 @@ struct MisTerrain {
 // else wrapped) picks a 512-unit quadrant of the atlas, and the four texels about the point blend bilinearly in
 // 16-bit fractions, the height times scale / 128 truncated. 0 where the cell names no sector, and for no terrain.
 int32_t mis_terrain_height(const MisTerrain &terrain, int32_t x, int32_t y);
+
+// The original editor's two frames of an item's height (its z) and its base (extra_bheight). Its document keeps both
+// relative to the terrain under the item; its .mis save writes a height-locked item's both absolute, the terrain's
+// height added [orig: JOTACmed.exe sub_44E640 @ 0x44e640, from MIS_SaveDocument @ 0x4546b5], and its read takes it off
+// again [orig: sub_44E6A0 @ 0x44e6a0, from MIS_LoadDocument @ 0x45460e]; its .bms export adds it to every item's z and
+// base [orig: sub_44E5A0 @ 0x44e5a0, from sub_44F920 @ 0x44fa4e]; and a change of the terrain takes a locked item's
+// both to absolute over the old terrain and back to relative over the new [orig: sub_402770 @ 0x402c9f..0x402ccd], so
+// a locked item keeps its height and an unlocked one follows the ground. A bms::File holds the .bms's frame: each
+// entity's z absolute (the game's), its mis_extra_bheight the base in the editor's (relative) frame, its
+// mis_height_lock 0 unless a .mis locked it. parse_mis_text reads a .mis as written (an unlocked item's z and base
+// relative, a locked one's absolute); a caller with the terrain takes the file to the .bms's frame with
+// mis_items_to_relative, the original's read (a locked entity's z and base less the terrain's height under it), then
+// mis_items_to_absolute, the original's .bms export (every entity's z plus the terrain's height under it; the export
+// adds it to the base too, which reaches no .bms byte, so the base stays the editor's).
+void mis_items_to_relative(bms::File &file, const MisTerrain &terrain);
+void mis_items_to_absolute(bms::File &file, const MisTerrain &terrain);
 
 } // namespace opennova::mission

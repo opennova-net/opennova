@@ -303,16 +303,23 @@ void write_mis_events(const bms::File &file, std::string &out, const MisNames *n
 	}
 }
 
-// `base_height` (optional) is an editor-sampled terrain height under the entity, 16.16 fixed-point.
-// When provided it overrides entity.mis_extra_bheight in the emitted text; the entity's absolute
-// z is written either way and height_lock declares it absolute, so the original editor recovers
-// the terrain-relative offset as z - extra_bheight
-// [orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll].
+// A 32-bit sum or difference wrapping as the original's int arithmetic does.
+int32_t wrapped_add(int32_t a, int32_t b) { return static_cast<int32_t>(static_cast<uint32_t>(a) + static_cast<uint32_t>(b)); }
+int32_t wrapped_sub(int32_t a, int32_t b) { return static_cast<int32_t>(static_cast<uint32_t>(a) - static_cast<uint32_t>(b)); }
+
+// `base_height` (optional) is the terrain's height under the entity, 16.16 fixed-point (0 for none). The entity is in
+// the .bms's frame (mission_mis.h): its z absolute, its base relative. The original editor's document holds both
+// relative, so an unlocked entity writes its z less the terrain's height and its base as it stands, and a locked one
+// writes both absolute, its z as it stands and its base plus the terrain's height [orig: JOTACmed.exe sub_44E640 @
+// 0x44e640, from MIS_SaveDocument @ 0x4546b5].
 void write_mis_entity(const bms::Entity &entity, size_t index, std::string &out, const int32_t *base_height) {
 	const uint16_t crouch_timer = combined_u16(entity.crouch_timer, entity.unk15a);
 	const int32_t group_rel = combined_i32_from_i16(entity.group_rel_lo, entity.group_rel_hi);
 	const std::string gen_string = fixed_string(entity.gen_string, sizeof(entity.gen_string));
-	const int32_t extra_bheight = base_height != nullptr ? *base_height : entity.mis_extra_bheight;
+	const int32_t terrain = base_height != nullptr ? *base_height : 0;
+	const bool locked = entity.mis_height_lock != 0;
+	const int32_t z = locked ? entity.z : wrapped_sub(entity.z, terrain);
+	const int32_t extra_bheight = locked ? wrapped_add(entity.mis_extra_bheight, terrain) : entity.mis_extra_bheight;
 
 	append_kv(out, "begin item ", index);
 	append_kv(out, "  type_id ", entity.type_id);
@@ -320,7 +327,7 @@ void write_mis_entity(const bms::Entity &entity, size_t index, std::string &out,
 	append_kv(out, "  iai_name \"", mis_string(fixed_string(entity.name1, sizeof(entity.name1))), "\"");
 	append_kv(out, "  ai_textfile \"", mis_string(fixed_string(entity.name2, sizeof(entity.name2))), "\"");
 	append_kv(out, "  id ", entity.id);
-	append_kv(out, "  position ", entity.x, " ", entity.y, " ", entity.z);
+	append_kv(out, "  position ", entity.x, " ", entity.y, " ", z);
 	if (entity.yaw != 0 || entity.pitch != 0 || entity.roll != 0) {
 		append_kv(out, "  facing ", entity.yaw, " ", entity.pitch, " ", entity.roll);
 	}
@@ -377,24 +384,20 @@ void write_mis_entity(const bms::Entity &entity, size_t index, std::string &out,
 	append_line(out, "  extra_val4 0");
 	append_line(out, "  extra_val5 0");
 	append_line(out, "  extra_valmode 0");
-	// Height declaration: the entity's z above is absolute for BMS-sourced documents, so
-	// height_lock marks it ABSOLUTE and extra_bheight carries the baked base (terrain) height
-	// under the item; the original editor recovers the terrain-relative offset as
-	// z - extra_bheight. Without height_lock the editor reads z as terrain-relative and every
-	// object floats by the local terrain height (the D-MIS-4 repro).
-	// [orig: MisLdr_ParseMisLine @ 0x100017b0 (extra_bheight->rec+292, height_lock->rec+356);
-	//  MisLdr_WriteNileProjectXml @ 0x10004930 (scene Y = z/65536 - (lock ? bheight/65536 : 0),
-	//  <ABSOLUTE>TRUE</ABSOLUTE> iff height_lock); both misldr.dll]
+	// The base in the frame its lock gives it (above), and the lock, written for a lock alone as the original editor
+	// writes it [orig: MIS_SaveDocument @ 0x455824 (extra_bheight), @ 0x455889..0x45589a (height_lock, JOTACmed.exe)];
+	// the Nile reader takes the same pair [orig: MisLdr_ParseMisLine @ 0x100017b0 (extra_bheight->rec+292,
+	// height_lock->rec+356); MisLdr_WriteNileProjectXml @ 0x10004930 (scene Y = z/65536 - (lock ? bheight/65536 :
+	// 0)); both misldr.dll].
 	append_kv(out, "  extra_bheight ", extra_bheight);
-	append_kv(out, "  height_lock ", static_cast<int>(entity.mis_height_lock));
+	if (locked) append_kv(out, "  height_lock ", static_cast<int>(entity.mis_height_lock));
 	append_kv(out, "  gen_string \"", mis_string(gen_string.empty() ? std::string("null") : gen_string), "\"");
 	append_line(out, "end item");
 	append_line(out);
 }
 
-// `base_heights` (optional): editor-sampled terrain heights (16.16 fixed-point), FLAT and in WRITE
-// ORDER — items, buildings, markers, organics — one per entity; entries beyond the vector fall
-// back to the entity's own mis_extra_bheight.
+// `base_heights` (optional): the terrain's heights under the entities (16.16 fixed-point), FLAT and in WRITE
+// ORDER — items, buildings, markers, organics — one per entity; an entity past them stands on 0.
 void write_mis_items(const bms::File &file, std::string &out, const std::vector<int32_t> *base_heights) {
 	size_t index = 0;
 	const auto height_at = [base_heights](size_t i) -> const int32_t * {
@@ -440,6 +443,32 @@ bool write_mis_text(const bms::File &file, std::string &out, std::string &error,
 } // namespace opennova::mission::detail
 
 namespace opennova::mission {
+
+namespace {
+
+// Each entity of the four pools, in the writer's order, with the terrain's height under it.
+template <typename Fn> void each_entity_over(bms::File &file, const MisTerrain &terrain, Fn &&fn) {
+	for (std::vector<bms::Entity> *pool : {&file.items, &file.buildings, &file.markers, &file.organics})
+		for (bms::Entity &entity : *pool) fn(entity, mis_terrain_height(terrain, entity.x, entity.y));
+}
+
+} // namespace
+
+void mis_items_to_relative(bms::File &file, const MisTerrain &terrain) {
+	// [orig: JOTACmed.exe sub_44E6A0 @ 0x44e6a0: each item whose height_lock is set, its z and its base less the
+	// terrain's height under it (sub_433690), the point the item's x and y]
+	each_entity_over(file, terrain, [](bms::Entity &entity, int32_t height) {
+		if (!entity.mis_height_lock) return;
+		entity.z = detail::wrapped_sub(entity.z, height);
+		entity.mis_extra_bheight = detail::wrapped_sub(entity.mis_extra_bheight, height);
+	});
+}
+
+void mis_items_to_absolute(bms::File &file, const MisTerrain &terrain) {
+	// [orig: JOTACmed.exe sub_44E5A0 @ 0x44e5a0, from sub_44F920 @ 0x44fa4e: every item's z (and its base, which the
+	// .bms has no room for) plus the terrain's height under it]
+	each_entity_over(file, terrain, [](bms::Entity &entity, int32_t height) { entity.z = detail::wrapped_add(entity.z, height); });
+}
 
 // [orig: JOTACmed.exe sub_4226D0 @ 0x4226d0, the original editor's terrain height, reached through sub_433690 @
 // 0x433690 from its save's height-lock pass sub_44E640 @ 0x44e640]

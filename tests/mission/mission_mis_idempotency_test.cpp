@@ -124,9 +124,9 @@ int check(const std::string &path) {
 	std::string gen1;
 	TEST_EXPECT(write_mis_text(doc, gen1, error));
 	TEST_EXPECT(!gen1.empty());
-	// Every BMS-sourced item block declares its z absolute (D-MIS-4)
-	// [orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll].
-	TEST_EXPECT(gen1.find("  height_lock 1\r\n") != std::string::npos);
+	// A BMS-sourced item is unlocked, as the original editor's new item: no height_lock line, its z relative to the
+	// terrain (none given here: as it stands) [orig: JOTACmed.exe MIS_SaveDocument @ 0x455889] (D-MIS-4).
+	TEST_EXPECT(gen1.find("height_lock") == std::string::npos);
 
 	bms::File reparsed;
 	TEST_EXPECT(parse_mis_text(gen1, resolver, reparsed, error));
@@ -146,7 +146,7 @@ int check(const std::string &path) {
 		TEST_EXPECT(entity->y == spot.y);
 		TEST_EXPECT(entity->z == spot.z);
 		TEST_EXPECT(entity->team == spot.team);
-		TEST_EXPECT(entity->mis_height_lock == 1);
+		TEST_EXPECT(entity->mis_height_lock == 0);
 	}
 
 	std::string gen2;

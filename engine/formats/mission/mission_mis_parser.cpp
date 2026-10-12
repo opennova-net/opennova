@@ -790,11 +790,12 @@ bool parse_mis_item(const std::vector<MisLine> &lines, size_t &pos,
 			if (!token_i32(line, 1, v, error)) return false;
 			entity.lfp_group = static_cast<uint8_t>(std::clamp<int32_t>(v, 0, 255));
 		} else if (key == "extra_bheight") {
-			// .mis-interchange transient fields (never serialized to .bms): height_lock declares
-			// the position z ABSOLUTE and extra_bheight carries the baked base height under the
-			// item [orig: MisLdr_ParseMisLine @ 0x100017b0 (extra_bheight->rec+292,
-			// height_lock->rec+356), misldr.dll]. A .mis-parsed entity round-trips its own values;
-			// an absent height_lock stays 0 (terrain-relative z in the original editor's frame).
+			// .mis-interchange transient fields (never serialized to .bms): the item's base and its
+			// lock, read as written [orig: MisLdr_ParseMisLine @ 0x100017b0 (extra_bheight->rec+292,
+			// height_lock->rec+356), misldr.dll]: an unlocked item's z and base relative to the
+			// terrain, a locked one's absolute; an absent height_lock stays 0, as the original
+			// editor writes none for an unlocked item. mis_items_to_relative / _absolute take the
+			// file to the .bms's frame (mission_mis.h).
 			if (!token_i32(line, 1, entity.mis_extra_bheight, error)) return false;
 		} else if (key == "height_lock") {
 			if (!token_i32(line, 1, v, error)) return false;

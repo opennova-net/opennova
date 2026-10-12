@@ -330,7 +330,7 @@ int main() {
 		TEST_EXPECT(made.crouch_timer == 3 && made.unk15a == 0 && made.shoot_timer == 5 && made.wp_adv_trigger == -1);
 		TEST_EXPECT(made.attention == 30 && made.obliqueness == 15 && made.advancetimer == 10 && made.map_symbol == 0);
 		TEST_EXPECT(std::string(made.gen_string) == "null" && made.name1[0] == 0 && made.name2[0] == 0);
-		TEST_EXPECT(made.mis_height_lock == 1 && made.get_x() == 1.0f && made.yaw == 90);
+		TEST_EXPECT(made.mis_height_lock == 0 && made.get_x() == 1.0f && made.yaw == 90); // the original's new item: unlocked
 		const opennova::bms::Entity marker = new_entity(EntityKind::Marker, 100001, 77);
 		TEST_EXPECT(marker.type == opennova::bms::ItemType::Marker && marker.id == 77 && marker.type_id == 1 &&
 		            marker.x == 0 && marker.attention == 30);

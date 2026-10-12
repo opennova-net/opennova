@@ -546,28 +546,38 @@ func test_create_default_save_as_mis_and_reopen() -> void:
 	DirAccess.remove_absolute(path)
 
 
-func test_save_as_mis_writes_height_lock_and_staged_base_heights() -> void:
-	# A .mis export declares every entity's z ABSOLUTE (height_lock 1) and bakes the
-	# editor-sampled terrain height under it as extra_bheight, so the original editor
-	# recovers the terrain-relative offset as z - extra_bheight
-	# [orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll]. See D-MIS-4.
+# The z of the first item's position line in a .mis text.
+func _mis_position_z(text: String) -> int:
+	for line in text.split("\n"):
+		var stripped := line.strip_edges()
+		if stripped.begins_with("position "):
+			return int(stripped.split(" ")[3])
+	return 0
+
+
+func test_save_as_mis_writes_staged_base_heights() -> void:
+	# A new entity is unlocked, as the original editor's new item: its .mis z is written relative to
+	# the staged terrain height under it (its z less that height), its base as it stands, and no
+	# height_lock line [orig: JOTACmed.exe sub_44E640 @ 0x44e640 from MIS_SaveDocument @ 0x4546b5;
+	# MIS_SaveDocument @ 0x455889]. See D-MIS-4.
 	var m := MissionData.new()
 	assert_eq(m.create_default(), OK)
 	m.add_entity(MissionData.KIND_ITEM, 101291, Vector3(5, 6, 40), Vector3.ZERO)
 	var path := _temp_mis_path()
-	# One 16.16 base height (25.0), flat in write order (items, buildings, markers, organics).
+	# One 16.16 terrain height (25.0), flat in write order (items, buildings, markers, organics).
 	m.set_mis_base_heights(PackedInt32Array([25 * 65536]))
 	assert_eq(m.save_as(path), OK, "save_as consumes the staged heights")
 	var text := FileAccess.get_file_as_string(path)
-	assert_string_contains(text, "height_lock 1", "the item z is declared absolute")
-	assert_string_contains(text, "extra_bheight 1638400", "the staged base height is baked")
+	assert_false(text.contains("height_lock"), "an unlocked item writes no height_lock line")
+	assert_string_contains(text, "extra_bheight 0", "its base as it stands")
+	var relative := _mis_position_z(text)
 
-	# Staged heights are consumed by the save: a second save without re-staging falls back
-	# to the entity's own interchange value (0 for an editor-authored entity).
+	# Staged heights are consumed by the save: a second save without re-staging stands the entity
+	# on no terrain (its z as it stands).
 	assert_eq(m.save_as(path), OK, "a re-save without staging succeeds")
 	text = FileAccess.get_file_as_string(path)
+	assert_eq(_mis_position_z(text) - relative, 25 * 65536, "the first save wrote z less the terrain's height")
 	assert_string_contains(text, "extra_bheight 0", "no stale heights leak into the next save")
-	assert_string_contains(text, "height_lock 1", "the absolute declaration is unconditional")
 	DirAccess.remove_absolute(path)
 
 
