@@ -48,9 +48,11 @@ struct TgaForm {
 // TGA 2.0 footer with both offsets 0. False for any other file, which a writer saves in its own form.
 bool tga_read_form(const uint8_t *bytes, size_t size, TgaForm &out);
 
-// `rgba` as tga_write_rgba32, written in `form`: the header (type 2, the depth, the descriptor), the rows
-// from the bottom up (B, G, R and, at 32 bits, A), then the footer when the form has one. Refused as
-// tga_write_rgba32 is, and for a depth other than 24 or 32.
+// `rgba` as tga_write_rgba32, written in `form`: the header (type 2, the depth, the descriptor as the form
+// carries it), the rows from the bottom up (B, G, R and, at 32 bits, A), then the footer when the form has
+// one. Refused as tga_write_rgba32 is, for a depth other than 24 or 32, and for a 24-bit form over pixels
+// that are not all opaque (the depth holds no alpha: a painted weight would be lost; tga_write_rgb24 is the
+// writer that leaves alpha out by design).
 bool tga_write(const uint8_t *rgba, uint32_t width, uint32_t height, const TgaForm &form, std::vector<uint8_t> &out,
                std::string &error);
 
