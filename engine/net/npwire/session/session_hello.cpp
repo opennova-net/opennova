@@ -343,7 +343,12 @@ std::vector<uint8_t> client_auth_to_bytes(const ClientAuth &msg) {
 	if (!msg.pw.empty()) append_string_field(buf, "PW", msg.pw);
 	if (msg.sip) append_u32_field(buf, "SIP", msg.sip);
 	if (msg.spn) append_u32_field(buf, "SPN", msg.spn);
+	// A CU entry of kCuSlotBytes or more is left out, the rest written; there
+	// is no count bound. [orig: CNapiNPConnection_SendClientJoin @0x61fe20 -
+	//  the entry length @0x62023E, `cmp ebp, 800h` / `jge` @0x620242..0x620248,
+	//  the write @0x6202B0]
 	for (const auto &blob : msg.cu) {
+		if (blob.size() >= kCuSlotBytes) continue;
 		append_bytes_field(buf, "CU", blob.data(), blob.size());
 	}
 	if (!msg.scrk.empty()) append_string_field(buf, "SCRK", msg.scrk);
@@ -591,6 +596,10 @@ void append_cu_field(std::vector<uint8_t> &buf, const std::string &name, const s
 	io::append_u16_le(inner, static_cast<uint16_t>(value.size() + 1));
 	inner.insert(inner.end(), value.begin(), value.end());
 	inner.push_back(0);
+	// An entry of kCuSlotBytes or more is left out; there is no count bound.
+	// [orig: CNapiNPConnection_SendSessionInit @0x620ef0 - the entry length
+	//  @0x621120, `cmp ebx, 800h` / `jge` @0x621124..0x62112A, the write @0x621193]
+	if (inner.size() >= kCuSlotBytes) return;
 	append_flat_tlv(buf, "CU", inner.data(), static_cast<uint16_t>(inner.size()));
 }
 
@@ -682,6 +691,7 @@ bool parse_server_auth(const uint8_t *data, size_t len, ServerAuth &out) {
 	out.client_cs.clear();
 	out.server_cs.clear();
 	out.cu.clear();
+	size_t cu_count = 0;
 	size_t pos = 0;
 	while (pos < len) {
 		FlatTlvField field;
@@ -725,6 +735,16 @@ bool parse_server_auth(const uint8_t *data, size_t len, ServerAuth &out) {
 			}
 		}
 		else if (strutil::iequals(name, "CU")) {
+			// Every CU counts, whatever its shape, into its own 2048-byte slot: a CU of 2048 bytes
+			// or more, or a 65th, ends the walk, and on the socket pass that leg returns without
+			// queuing the 0x82, before the CI / CK match, so the client drops it. The JFC 9 / 10
+			// legs behind the test run only on the queued pass, which never sees it.
+			// [orig: NapiNP_HandleServerJoinResponse @0x629840 - the length bound
+			//  @0x629B97..0x629B9D, the count bound @0x629BA3..0x629BA6, the copy @0x629BB7, the
+			//  socket-pass return @0x629F0B..0x629F12; NapiNPManager_HandlePacket @0x622F10 -
+			//  the flag 0 @0x622F8E]
+			if (size >= kCuSlotBytes || cu_count >= kCuSlots) return false;
+			++cu_count;
 			std::string cu_name, cu_value;
 			if (parse_cu_inner(value, size, cu_name, cu_value)) {
 				out.cu.emplace_back(std::move(cu_name), std::move(cu_value));
@@ -738,9 +758,10 @@ bool parse_server_auth(const uint8_t *data, size_t len, ServerAuth &out) {
 		// Unknown tags intentionally ignored.
 		pos = next;
 	}
-	// No field is required: the reader takes any 0x82 from its connecting peer, and what the
-	// walk gathered decides it (the caller's CI / CK match, then CR's truth), so an accept
-	// without SCRK or a rejection without JFC, JFP or JFS parses like any other.
+	// No field is required: the reader takes any 0x82 from its connecting peer whose CUs stay
+	// in bounds, and what the walk gathered decides it (the caller's CI / CK match, then CR's
+	// truth), so an accept without SCRK or a rejection without JFC, JFP or JFS parses like any
+	// other.
 	// [orig: NapiNP_HandleServerJoinResponse @0x629840 - the connection lookup and state-3
 	//  gate @0x6298E0..0x629901, the CI / CK match @0x629CAC..0x629CBF, the CR split
 	//  @0x629CD2..0x629CD6]
@@ -894,7 +915,7 @@ bool parse_server_hello(const uint8_t *data, size_t len, ServerHello &out) {
 			out.locale_block = true;
 		}
 		else if (strutil::iequals(name, "TZB")) { out.tzb = load_value_dword(value, end); out.locale_block = true; }
-		else if (strutil::iequals(name, "SF")) { out.sf = load_value_dword(value, end); out.is_game_server = true; }
+		else if (strutil::iequals(name, "SF"))   out.sf   = load_value_dword(value, end);
 		else if (strutil::iequals(name, "P1"))   out.p1   = load_value_dword(value, end);
 		else if (strutil::iequals(name, "P2"))   out.p2   = load_value_dword(value, end);
 		else if (strutil::iequals(name, "P3"))   out.p3   = load_value_dword(value, end);

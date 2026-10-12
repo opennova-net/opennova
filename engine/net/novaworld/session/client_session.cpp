@@ -178,7 +178,7 @@ std::vector<uint8_t> ClientSession::start() {
 	sent_client_connected_ = false;
 	reassembly_ = ProtocolReassemblyState{};
 	// A fresh connection: no counted disconnects and no reconnect pending
-	// [orig: InitNPConnection @0x4d408f (+0x710 = 0); NapiNPConnection_Create @0x62acb0].
+	// [orig: InitNPConnection @0x4d408f (+0x710 = 0); CNapiNPConnection_Create @0x62acb0].
 	reconnect_ = Reconnect{};
 	dcnt_ = 0;
 	rcnt_ = 0;
@@ -218,7 +218,8 @@ ClientHello make_client_hello(const ClientSession::Config &cfg, std::string_view
 	// explicit cfg.pg when use_default_pg is false. CO/AP/BDAT are read but never validated.
 	hello.pg = cfg.use_default_pg ? pg_for_pn(cfg.pn) : cfg.pg;
 	hello.pg_present = true;
-	// eip/epn stay 0 (retail zeroes them).
+	// EIP / EPN stay 0, where retail's enumerator writes each target's address and port into the
+	// 0x41 it sends that target (D-NET-520 for the game protocol, D-NET-541 for the NWU lobby).
 	return hello;
 }
 
@@ -355,10 +356,17 @@ bool ClientSession::handle_datagram(const uint8_t *data, size_t len,
 	switch (opcode) {
 	case SESSION_OPCODE_SERVER_HELLO:
 		// The first connect's hello, or a reconnect's: a ServerHello re-joins while the
-		// connection is down and armed, probing or already in the 0x42 leg.
+		// connection is down and armed.
 		// [orig: Nwu_HandleServerHello @0x627e3e..0x627e5f — !conn_flag0 && is_client &&
 		//  conn_flag1 && +0x710]
-		if (state_ == State::Hello || reconnecting()) on_server_hello(body, out);
+		// Either is read only while the enumerator probes: a reconnect's inside its probe
+		// window, so a 0x81 in the re-join's 0x42 leg or in the gap between windows is
+		// missed; the first connect's from its start to its 0x81, which Hello stands in
+		// for, though retail's give-ups also stop that probe (NapiTimer_Stop) and ours
+		// reads a 0x81 in Hello until the lobby's own deadline (D-NET-571, OPEN).
+		// [orig: Nwu_HandleServerHello - the enumerator's +0x2C @0x627559, the miss
+		//  returning 0 @0x626DCB; NapiTimer_Stop @0x61DF00 - +0x2C = 0 @0x61DF06]
+		if (state_ == State::Hello || reconnect_.probing) on_server_hello(body, out);
 		break;
 	case SESSION_OPCODE_SERVER_AUTH:
 		if (state_ == State::Auth) on_server_auth(body);
@@ -382,6 +390,23 @@ bool ClientSession::handle_datagram(const uint8_t *data, size_t len,
 	return state_ != State::Error;
 }
 
+bool ClientSession::server_hello_is_ours(const ServerHello &sh) const {
+	return sh.ci == cfg_.client_index &&
+			server_hello_matches_identity(sh, make_client_hello(cfg_, cfg_.co));
+}
+
+bool ClientSession::takes_server_hello(const uint8_t *data, size_t len) const {
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	if (data == nullptr || !nw_decode_inbound(data, len, opcode, body) ||
+	    opcode != SESSION_OPCODE_SERVER_HELLO)
+		return false;
+	// The phase test is handle_datagram's: the enumerator probing (+0x2C @0x627559).
+	if (state_ != State::Hello && !reconnect_.probing) return false;
+	ServerHello sh;
+	return parse_server_hello(body.data(), body.size(), sh) && server_hello_is_ours(sh);
+}
+
 void ClientSession::on_server_hello(const std::vector<uint8_t> &body,
                                     std::vector<std::vector<uint8_t>> &out) {
 	// Any 0x81 from the peer is read; no field is required (parse_server_hello).
@@ -395,8 +420,8 @@ void ClientSession::on_server_hello(const std::vector<uint8_t> &body,
 	// [orig: Nwu_HandleServerHello @0x626D20 - HK @0x626E97, the CI lookup @0x627533,
 	//  the identity compares @0x62758B / @0x627624 / @0x627643; the 0x42's HK gate
 	//  @0x6200F2]
-	if (sh.ci != cfg_.client_index) return;
-	if (!server_hello_matches_identity(sh, make_client_hello(cfg_, cfg_.co))) return;
+	if (!server_hello_is_ours(sh)) return;
+	++server_hellos_taken_;
 	if (reconnecting()) {
 		// The re-join: the probe stops and InitFromSession re-keys the connection (a fresh CK
 		// and SCRK, this hello's HK, the peer's keys and the CS template reset) into the 0x42
@@ -425,7 +450,8 @@ void ClientSession::on_server_hello(const std::vector<uint8_t> &body,
 }
 
 void ClientSession::on_server_auth(const std::vector<uint8_t> &body) {
-	// Any 0x82 from the connecting peer is read; no field is required (parse_server_auth).
+	// Any 0x82 from the connecting peer is read; no field is required, and one whose CUs overrun
+	// the walk's bounds is dropped here, before the CI / CK match (parse_server_auth).
 	ServerAuth sa;
 	if (!parse_server_auth(body.data(), body.size(), sa)) return;
 	// ServerAuth echoes both correlation values chosen by this client. Do not
@@ -1296,6 +1322,10 @@ std::vector<uint8_t> ClientSession::build_goodbye() {
 	session_role_ = kSessionRoleNone;
 	on_disconnected();
 	receive_clock_armed_ = false;
+	// The connection is destroyed and its enumerator with it, so a probe window open at the
+	// reset takes no later 0x81. [orig: ResetToDisconnected - CNapiNPConnection_Destroy
+	//  @0x4d08a7]
+	reconnect_.probing = false;
 	return nw_encode_outbound(SESSION_OPCODE_CLIENT_GOODBYE, std::move(body));
 }
 

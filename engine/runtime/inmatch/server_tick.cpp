@@ -442,6 +442,10 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world,
 		EdgeDrain edges = EdgeDrain::Route) {
 	std::vector<world::RoundDeath> held;
 	for (const world::RoundDeath &d : world.round_sim.deaths) {
+		if (d.frame_tail_edge) { // the frame tail's (Server_RouteFrameTailEdges)
+			held.push_back(d);
+			continue;
+		}
 		if (d.player_edge && edges == EdgeDrain::AfterConverts) {
 			// The edge's hidden bit and dead bit [orig: @0x4B411E..0x4B4127,
 			// @0x4B4BFE].
@@ -605,18 +609,18 @@ void tick_spawn_protection(NapiNPServerCtx &ctx, world::World &world) {
 }
 
 // The frontier-hint arm of the same walk: a state-6 slot whose bit 0x04 is set
-// and which has played 1240 ticks gets S2C 0x1E event 58 [its team's frontier
-// zone][the enemy's, 0 when the same][0xFF] (mask 0xA0, itself) unless its own
-// frontier is 0; either way the bit clears.
-// [orig: Server_UpdateAllActivePlayerSlots @0x518820 — @0x51890C..0x5189A6]
+// and which has played 1240 ticks gets S2C 0x1E event 58 [its slot team's frontier
+// zone][the enemy team's, 0 when the same][0xFF] (mask 0xA0, itself) unless its own
+// frontier is 0; either way the bit clears. Both read the slot team (D-NET-583).
+// [orig: Server_UpdateAllActivePlayerSlots @0x518820 — @0x51890C..0x5189A6, @0x518929..0x51894A]
 void emit_frontier_hints(NapiNPServerCtx &ctx, world::World &world) {
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (!is_in_match(conn) || !conn.reply.frontier_hint_pending) continue;
 		const world::Entity *player = world.registry.get(conn.link.owned_entity);
 		const world::MatchPlayer *slot = world.match.player(conn.link.owned_entity);
 		if (player == nullptr || slot == nullptr || slot->play_ticks < 1240u) continue;
-		const uint8_t own = world.zones.frontier_zone(player->team);
-		uint8_t enemy = world.zones.frontier_zone(player->team == 1 ? 2 : 1);
+		const uint8_t own = world.zones.frontier_zone(conn.assigned_team);
+		uint8_t enemy = world.zones.frontier_zone(conn.assigned_team == 1 ? 2 : 1);
 		if (enemy == own) enemy = 0;
 		if (own != 0 && conn.link.transport != nullptr)
 			conn.link.transport->host_send(s2c::GAME_EVENT,
@@ -715,10 +719,13 @@ void check_player_violations(NapiNPServerCtx &ctx, world::World &world) {
 				const world::EntityHandle flag = player->mounted_child;
 				world.match.drop_carried_object(world, player->handle);
 				world.match.sync_flag_to_authored_pose(world, flag);
-				// Health = -1; a body that is still alive enters the same death
-				// transaction the breath kill uses (the retail entity death path
-				// picks the store up on its next update; an already-dead body only
-				// keeps the store).
+				// Health = -1 is the store alone: the player body's death edge picks
+				// it up in this frame's entity update, after the tick's send pump and
+				// ahead of the next receive pump; an already-dead body only keeps the
+				// store. Ours raises a player body's transaction from the death queue
+				// (D-AI-9), so a body still alive queues the edge's death for the
+				// host's frame tail: the edge's test runs ahead of the frame's entity
+				// pass (arm_frame_tail_edges), and the tail raises what it kept.
 				const bool was_alive = player->alive && player->health > 0 &&
 						((player->flags | player->engine_flags) &
 								world::kEntityFlagDead) == 0u;
@@ -728,6 +735,7 @@ void check_player_violations(NapiNPServerCtx &ctx, world::World &world) {
 					death.victim = player->handle;
 					death.victim_handle = player->handle.packed;
 					death.event_flags = player->cause_flags & 0xF00u;
+					death.frame_tail_edge = true;
 					world.round_sim.deaths.push_back(death);
 				}
 			}
@@ -1412,7 +1420,7 @@ void emit_periodic_session_maintenance(NapiNPServerCtx &ctx, world::World &world
 				// healthy-LAN capture carries 0; D-NET-374).
 				// [orig: Server_SendEntityHandleAndInputState @0x507BF2..0x507C29 ->
 				//  CharAttr_PackDisabledProperties @0x412550 (IDB
-				//  Input_PackStateFlags until 2026-10-07)]
+				//  Input_PackStateFlags until 2026-10-12)]
 				const uint16_t latches = world.tables.charattr_disabled_word;
 				conn.link.transport->host_send(s2c::CHARATTR_DISABLED_PROPERTIES,
 						{static_cast<uint8_t>(latches), static_cast<uint8_t>(latches >> 8)},
@@ -1668,6 +1676,27 @@ void Server_RecalculateAllPlayerKitWeights(
 //  follows Server_TickUpdate's send pump @0x51E487; Projectile_ProcessExplosionQueue
 //  @0x4EADFC -> GameEvent_HandleMedicInteraction @0x4E6790 ->
 //  GameEvent_RevivePlayer @0x517CD0 / GameEvent_HealPlayer @0x50DE30]
+// The frame tail's player-body edges as this frame's entity update meets them:
+// an unhidden body at Health <= 0 whose dead bit is clear. Tested ahead of the
+// pass, whose local motor leg latches the dead bit as the edge does while the
+// remote leg (a body that uplinked) latches nothing, and a record whose edge
+// is shut is dropped: a body another transaction killed while the record
+// waited for an entity update (a 0x4D in a pre-round frame) dies once.
+// [orig: Entity_UpdateInfantryPlayerBody -- the hidden bit @0x4B411E..0x4B4127,
+//  Health <= 0 @0x4B4BF1, the dead bit @0x4B4BFE]
+static void arm_frame_tail_edges(world::World &world) {
+	std::vector<world::RoundDeath> &deaths = world.round_sim.deaths;
+	deaths.erase(std::remove_if(deaths.begin(), deaths.end(),
+			[&world](const world::RoundDeath &d) {
+				if (!d.frame_tail_edge) return false;
+				const world::Entity *body = world.registry.get(d.victim);
+				return body == nullptr || body->health > 0 ||
+						((body->flags | body->engine_flags) &
+								(world::kEntityFlagCarried | world::kEntityFlagDead)) != 0u;
+			}),
+			deaths.end());
+}
+
 static void route_entity_pass_records(NapiNPServerCtx &ctx, world::World &world) {
 	Server_FanEntityEvents(ctx, world);
 	route_throwable_events(ctx, world);
@@ -1680,7 +1709,7 @@ static void route_entity_pass_records(NapiNPServerCtx &ctx, world::World &world)
 	// entity update) ahead of this pump's 0x41 (Health 0); ours routes the heal
 	// only now, after the pump, so the 0x41's store goes back over it on each
 	// body whose edge is held, and its death keeps the 0x41's Health 0.
-	// [orig: GameEvent_HealPlayer @0x50DE7F; NapiNPServerMsg_ResetPlayerAmmo
+	// [orig: GameEvent_HealPlayer @0x50DE7F; NapiNPServerMsg_DeathTimeoutReset
 	//  @0x510568]
 	for (const world::RoundDeath &d : world.round_sim.deaths)
 		if (d.player_edge)
@@ -1774,8 +1803,8 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// after its converts: retail's edge runs in the entity update after the
 	// whole pump, and skips a body the convert hid (Flags |= 1, which the
 	// convert's deploy leg keeps; it clears only the dead bit).
-	// [orig: Server_KillPlayerAndNotify @0x519E92, Health 1 @0x519EA4, the deploy
-	//  @0x519ECE; Server_ProcessPlayerDeath @0x51787A; the edge's hidden bit
+	// [orig: Server_ConvertPlayerToSpectator @0x519E92, Health 1 @0x519EA4, the deploy
+	//  @0x519ECE; Server_DeployPlayer @0x51787A; the edge's hidden bit
 	//  Entity_UpdateInfantryPlayerBody @0x4B411E..0x4B4127]
 	route_round_deaths(ctx, world, EdgeDrain::AfterConverts);
 
@@ -1941,8 +1970,8 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 				if (!is_in_match(conn) || conn.link.transport == nullptr ||
 						conn.link.owned_entity != release.player)
 					continue;
-				// The leg takes the zone's handle [orig: SpawnWaveList_TickEntry,
-				//  the Server_ProcessPlayerDeath call @0x52A3C0].
+				// The leg takes the zone's handle, placed unresolved (D-NET-592) [orig:
+				//  SpawnWaveList_TickEntry, the Server_DeployPlayer call @0x52A3C0].
 				std::vector<ProtocolMessage> deployment =
 						Server_ReleasePlayerDeployment(ctx.config, conn, world,
 								release.zone, release.zone.packed, ctx.logs.profile);
@@ -2216,7 +2245,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 				conn.link.transport->host_send(
 						s2c::SPAWN_WAVE_STATUS,
 						build_spawn_wave_status_body(
-								world, conn.link.owned_entity),
+								world, conn), // the slot's rows (D-NET-581)
 						/*reliable=*/false);
 		}
 	}
@@ -2391,12 +2420,54 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// through this seam (world/powerup.cpp).
 	ServerRemoteWeaponTables remote_weapon_tables(ctx.np_protocol.connection_list);
 	world.remote_weapon_tables = &remote_weapon_tables;
+	ctx.entity_update_ran = tick.phase == world::TickPhase::Gameplay &&
+			world.entity_update_admitted(/*is_authority=*/true);
+	if (ctx.entity_update_ran) arm_frame_tail_edges(world);
 	world.run_entity_pass(tick);
 	world.remote_weapon_tables = nullptr;
 
 	// (5) flush is implicit: host_send staged each 0x0A on its transport. The loopback's local client
 	// reads it via client_recv / ClientReplicaPipeline::pump; a remote peer's transport outbound_ is popped +
 	// framed into a 0x83 SESSION by the owner (frame_in_match_s2c). No socket I/O in engine/.
+}
+
+// See header. Retail's player-body edge latches the dead bit and raises the
+// transaction in one step; in ours the local motor leg latches the bit in the
+// pass (infantry_death.cpp) and the remote leg latches nothing, so the edge's
+// test runs ahead of the pass (arm_frame_tail_edges, which drops a record whose
+// edge is shut) and this tail raises the transaction for every record left;
+// with no entity update this frame each waits.
+// [orig: Game_ProcessMainFrame -- Server_TickUpdate's send pump @0x51E487,
+//  then the gated Entity_UpdateAllEntities call @0x52674B; the edge
+//  Entity_UpdateInfantryPlayerBody -- the hidden bit @0x4B411E..0x4B4127,
+//  Health <= 0 @0x4B4BF1, the dead bit @0x4B4BFE, its latch @0x4B4CB5..0x4B4CDB,
+//  Entity_CheckAndProcessDeath @0x4B4CEA]
+void Server_RouteFrameTailEdges(NapiNPServerCtx &ctx) {
+	if (ctx.world == nullptr || ctx.is_authority == 0 || !ctx.entity_update_ran) return;
+	world::World &world = *ctx.world;
+	if (std::none_of(world.round_sim.deaths.begin(), world.round_sim.deaths.end(),
+				[](const world::RoundDeath &d) { return d.frame_tail_edge; }))
+		return;
+	std::vector<world::RoundDeath> queued = std::move(world.round_sim.deaths);
+	world.round_sim.deaths.clear();
+	for (const world::RoundDeath &d : queued) {
+		if (!d.frame_tail_edge) {
+			world.round_sim.deaths.push_back(d);
+			continue;
+		}
+		const world::Entity *body = world.registry.get(d.victim);
+		if (body == nullptr) continue;
+		world::RoundDeath death = d;
+		death.frame_tail_edge = false;
+		// The transaction credits the body's +0x178 as the edge leaves it: the
+		// pass's edge cleared it unless a non-lethal hit had staged the death
+		// selection (+0x2C0) [orig: Entity_UpdateInfantryPlayerBody @0x4B4C72
+		//  .. @0x4B4C8D; GameEvent_PlayerDeath reads +0x178 @0x516F47, the
+		//  scoring @0x516FB0].
+		death.killer = body->last_attacker;
+		death.killer_handle = body->last_attacker.valid() ? body->last_attacker.packed : 0xFFFFu;
+		Server_ProcessPlayerDeath(ctx, world, death);
+	}
 }
 
 } // namespace opennova::inmatch

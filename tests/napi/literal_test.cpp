@@ -68,6 +68,20 @@ int main() {
 	if (!expect_literal("017", 15, 3)) return 1;
 	if (!expect_literal("17o", 15, 3)) return 1;
 	if (!expect_literal("0o", 0, 2)) return 1;
+	// D-NET-466: a leading zero with no octal digit after it and an o / O reads 0 over the two
+	// bytes whatever follows; a lone zero fails the octal arm and the decimal arm reads it.
+	// [orig: NapiScript_ParseOctalInteger @0x62d7b0 - the o counted @0x62d875, the flag
+	//  @0x62d878, the zero stored @0x62d89b]
+	if (!expect_literal("0o5", 0, 2)) return 1;
+	if (!expect_literal("0o.", 0, 2)) return 1;
+	if (!expect_literal("0O17", 0, 2)) return 1;
+	if (!expect_literal("0ox", 0, 2)) return 1;
+	if (!expect_literal("0", 0, 1)) return 1;
+	if (!expect_literal("0 ", 0, 1)) return 1;
+	if (!expect_literal("017o5", 15, 4)) return 1;
+	if (!expect_rejected("0.")) return 1;
+	if (!expect_rejected("0q")) return 1;
+	if (!expect_rejected("o")) return 1;
 	if (!expect_literal("%101010", 42, 7)) return 1;
 	if (!expect_literal("101010b", 42, 7)) return 1;
 	if (!expect_literal("42", 42, 2)) return 1;

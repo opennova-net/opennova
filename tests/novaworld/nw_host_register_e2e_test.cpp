@@ -992,6 +992,29 @@ int main() {
 		}
 		expect(live_joiner.has_self_handle(),
 		       "standalone JO host streams a named pool-0 spawn for self discovery");
+		// The world-state load's C2S 0x32 asks for the empty-slot sweep, whose
+		// S2C 0x5D lists every pool-0 row at ItemTypeIndex 0 (D-NET-486). The
+		// standalone world's player bodies carry the Player row's stand-in
+		// ordinal, so the sweep lists none of them and the joiner keeps its own
+		// body. Pump well past the burst; the self handle must hold at every
+		// step (a later 0x0C would bind it again after a sweep retired it).
+		bool self_kept = true;
+		for (int frame = 0; frame < 400; ++frame, ++live_tick) {
+			opennova::net::Endpoint from;
+			const int n = opennova::net::udp_recv_from(
+					live_client, rx, sizeof rx, from, 5);
+			if (n > 0) {
+				live_joiner.receive(rx, static_cast<size_t>(n));
+				self_kept = self_kept && live_joiner.has_self_handle();
+			}
+			for (const auto &dg :
+			     live_joiner.Client_ProcessNetworkFrame(live_tick)) {
+				send_live(dg);
+			}
+			self_kept = self_kept && live_joiner.has_self_handle();
+		}
+		expect(live_joiner.in_match() && self_kept,
+		       "standalone JO joiner keeps its self handle past the empty-slot sweep");
 		opennova::net::close_socket(live_client);
 	}
 

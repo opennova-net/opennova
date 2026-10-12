@@ -3,7 +3,10 @@
 -- This migration is additive so existing development DBs keep their user
 -- records while gaining the controls needed to exercise retail failure paths.
 
-ALTER TABLE players ADD COLUMN account_status TEXT NOT NULL DEFAULT 'active';
+-- 'active', or the name of whatever else the account is ('banned', ...); never
+-- empty, so 'active' alone means active.
+ALTER TABLE players ADD COLUMN account_status TEXT NOT NULL DEFAULT 'active'
+    CHECK (account_status <> '');
 
 CREATE TABLE IF NOT EXISTS player_game_access (
     user_id      INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,

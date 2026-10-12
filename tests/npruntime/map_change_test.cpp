@@ -216,7 +216,7 @@ struct Host {
 // once, binds that body to its items.def row at the spawn (its sound profile)
 // and the mission start's Attack & Defend latch, after the round init, finds it.
 // [orig: Game_StartMission @0x524360 -- the Server_InitAllPlayerEntitiesForRound
-//  call @0x525BAF, the sub_524110 call @0x5260C1; Entity_SpawnFromAnimSlotProperty
+//  call @0x525BAF, the Game_LatchAttackDefendRole call @0x5260C1; Entity_SpawnFromAnimSlotProperty
 //  @0x43C390 -> Entity_InitFromModel @0x40DC30]
 struct PlayHost {
 	std::map<std::string, std::string> files;

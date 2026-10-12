@@ -43,7 +43,7 @@ struct BinaryConfig {
 		Entry terminator;
 		// Its count word is 0xFFFFFFFF: the reader takes no block of entries for it and points its section
 		// at the next label's block [orig: @ 0x75ea73, the element loop skipped and the pointer set
-		// @ 0x75ea6f; @ 0x75eb11; sub_75E850 @ 0x75e874]. Its entries are none.
+		// @ 0x75ea6f; @ 0x75eb11; ConfigFile_CountValueBytes @ 0x75e874]. Its entries are none.
 		bool count_minus_one = false;
 	};
 

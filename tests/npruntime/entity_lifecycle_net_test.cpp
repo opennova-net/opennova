@@ -1,6 +1,6 @@
 // Three witnessed net legs that had no coverage:
 //
-//  (A) S2C 0x50 TEAM ASSIGN — the SECOND writer of the byte_A85B48 team latch (the
+//  (A) S2C 0x50 TEAM ASSIGN — the SECOND writer of the g_LocalTeam team latch (the
 //      S2C 0x04 tail is the first). Self -> re-latch + ONE C2S 0x2F re-submission at
 //      slot 195 RAW; any valid handle -> the decoded row's team. The re-submission is a
 //      PER-SIDE PROFILE RESELECT: the NEW team byte picks the profile side block, that
@@ -83,7 +83,7 @@ std::vector<uint8_t> frame_server_session(SessionSequencing &seq,
 }
 
 // The witnessed 24-byte S2C 0x04 slot assignment; the tail byte is the team latch.
-// [orig: NetPacket_WriteSlotAssignment @0x502b30 -> byte_A85B48 @0x425499]
+// [orig: NetPacket_WriteSlotAssignment @0x502b30 -> g_LocalTeam @0x425499]
 std::vector<uint8_t> slot_assignment(uint8_t team) {
 	std::vector<uint8_t> body(24, 0);
 	body[17] = 0x01; // the joiner's roster slot
@@ -811,6 +811,8 @@ bool run_host_answers_the_sweep_request() {
 	w::World world;
 	world.registry.configure_pool(0, 16);
 	w::AiSystem &ai = world.ai;
+	// The player row's items.def ordinal, which the sweep's empty test reads.
+	world.tables.player.item_type_index = 7;
 
 	w::PlayerSpawn spawn;
 	spawn.position = {0, 0, 0};
@@ -853,6 +855,30 @@ bool run_host_answers_the_sweep_request() {
 		}
 		if (!expect(sweeps == 1, "sweep-host: exactly one 0x5D reply")) return false;
 	}
+
+	// The empty test is the row's ItemTypeIndex (+0x1C) alone (D-NET-486): a LIVE
+	// row of a type items.def lacks (index 0, the lookup's miss) is listed, a live
+	// row with a nonzero index is not. [orig: Server_CollectEmptyPool0Slots
+	// @0x5160F0 -- `cmp dword ptr [eax+1Ch], 0` @0x516123, no def test]
+	world.registry.get(b)->item_type_index = 0;
+	{
+		std::vector<uint16_t> listed;
+		for (const ProtocolMessage &m : inmatch::dispatch_session_replies(
+					inmatch::GameConfig{}, roster[1], request, 100, roster, &world)) {
+			if (m.tag != 0x5D) continue;
+			DestroyEntityList decoded;
+			if (!expect(decode_destroy_entity_list(
+						m.payload.data(), m.payload.size(), decoded),
+					"sweep-host: the reply body decodes with a typeless row"))
+				return false;
+			listed = decoded.pool0_indices;
+		}
+		if (!expect(world.registry.get(b) != nullptr &&
+					listed == std::vector<uint16_t>{static_cast<uint16_t>(b.slot())},
+				"sweep-host: a live row whose ItemTypeIndex is 0 is listed, not the typed rows"))
+			return false;
+	}
+	world.registry.get(b)->item_type_index = 7;
 
 	// Free the MIDDLE slot: only that index may be listed (never the trailing
 	// unused capacity above the high-water mark).

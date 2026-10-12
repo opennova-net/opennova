@@ -101,6 +101,13 @@ void test_player_info_ammo() {
 	CHECK(player_info_fill_ammo(menu, weapons.file, "PRIMARY", 0, 2, -1, 7, text) == 7);
 	CHECK(menu.selected_row(first) == 1 && menu.selected_row(second) == 1);
 	CHECK(menu.selected_row(type) == 2); // missing value leaves selection alone
+	// A saved -1 (a page's filler) selects type 0 and stays -1
+	// [orig: PlayerInfo_PopulateAmmoComboBoxes @0x55e08a..0x55e091]. Retail selects
+	// the row at that index (CListWnd_SetRowVisibility @0x55e0af), ours the row
+	// authored with that value: the same row in player.mnu, which authors FMJ/AP/SP
+	// as 0/1/2 in row order. This fixture authors 2/0/1, so ours takes row 1 here.
+	CHECK(player_info_fill_ammo(menu, weapons.file, "PRIMARY", 0, -1, -1, -1, text) == -1);
+	CHECK(menu.selected_row(type) == 1);
 	weapons.rows[0].flags2 = def::DEF_WEAPON_FLAG2_NOAMMOTYPES;
 	CHECK(player_info_fill_ammo(menu, weapons.file, "PRIMARY", 0, 0, 0, 2, text) == 0);
 	CHECK(menu.is_widget_disabled(type) && menu.selected_row(type) == 1);

@@ -117,10 +117,10 @@ void Server_ChangeEntityTeam(NapiNPServerCtx &ctx, world::World &world,
 // target), the deploy leg (Server_ReleasePlayerDeployment) over the request's
 // handle, its private replies, then S2C 0x32 [5][name] to every active player.
 // Runs once per host tick at the receive pump's place, before the humans
-// count and the state fan. [orig: Server_KillPlayerAndNotify
+// count and the state fan. [orig: Server_ConvertPlayerToSpectator
 //  @0x519E00: gates @0x519E16..0x519E3F, the convert @0x519E5B..0x519EA4,
 //  SpawnWaveList_RemovePlayer @0x519EB3, the latch @0x519EBC..0x519EC8,
-//  Server_ProcessPlayerDeath @0x519ECE, 0x32 @0x519EDC..0x519F43]
+//  Server_DeployPlayer @0x519ECE, 0x32 @0x519EDC..0x519F43]
 void Server_ProcessSpectatorRespawnRequests(NapiNPServerCtx &ctx, world::World &world);
 
 // The deploy leg's placement, between its raise and its spawn-state reset:
@@ -130,7 +130,7 @@ void Server_ProcessSpectatorRespawnRequests(NapiNPServerCtx &ctx, world::World &
 // latch's team substitute, a medic revive's saved position, else the previous
 // reset's position when nothing was placed). Writes the player's pose and
 // returns the placement whose heading word and latches the deploy reads on.
-// [orig: Server_ProcessPlayerDeath @0x517837..0x517868]
+// [orig: Server_DeployPlayer @0x517837..0x517868]
 world::SpawnPointResult Server_PositionDeployingPlayer(const GameConfig &config,
 		NapiNPConnection &conn, world::World &world, world::Entity &player,
 		world::EntityHandle target_zone);

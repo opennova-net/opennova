@@ -96,6 +96,10 @@ func test_player_info_character_save_is_per_side_and_preserves_other_slots() -> 
 	bytes[slot1 + 2] = 0x66
 	bytes.encode_u16(slot1 + 4, 0x9234)
 	bytes[slot1 + SIDE_BYTES] = 0x33
+	# Slot 0's red side carries a character the ACCEPT on blue must leave.
+	bytes[HEADER_BYTES + SIDE_BYTES + 1] = 9
+	bytes[HEADER_BYTES + SIDE_BYTES + 2] = 2
+	bytes.encode_u16(HEADER_BYTES + SIDE_BYTES + 4, 0x8A49)
 	var profiles := _profiles(bytes)
 
 	var profile := {
@@ -113,9 +117,18 @@ func test_player_info_character_save_is_per_side_and_preserves_other_slots() -> 
 	assert_eq(summary.blue.player_class, 9)
 	assert_eq(summary.red.player_class, 9,
 			"retail ACCEPT writes the class to both 0x8006 side blocks")
+	assert_eq(summary.blue.avatar_packed, 0x0400, "the shown side takes its character")
+	assert_eq([summary.red.avatar_a, summary.red.avatar_b, summary.red.avatar_packed],
+			[9, 2, 0x8A49], "the side not shown keeps its bytes, whatever the snapshot carries")
+
+	profile["team"] = 1
+	assert_eq(profiles.apply_character_selection(profile), OK)
+	summary = profiles.character_summary()
+	assert_eq(summary.red.avatar_packed, 0x8407, "shown, red takes its character")
 	assert_eq(summary.blue.avatar_packed, 0x0400)
-	assert_eq(summary.red.avatar_packed, 0x8407,
-			"the two side-specific packed character ids survive together")
+	profile.erase("team")
+	assert_eq(profiles.apply_character_selection(profile), ERR_INVALID_PARAMETER,
+			"a snapshot with no shown side is refused")
 
 	var rewritten := profiles.weapon_sav_bytes()
 	assert_eq(int(rewritten[slot1]), 0x44)
@@ -126,7 +139,8 @@ func test_player_info_character_save_is_per_side_and_preserves_other_slots() -> 
 	assert_eq(int(rewritten[slot1 + SIDE_BYTES]), 0x33,
 			"saving slot 0 does not normalize another slot's class bytes")
 	# [orig: PlayerInfo_SaveFromDialog @0x55EE3F-0x55EE6D class loop,
-	#  @0x55EE93-0x55EF38 selected-side avatar fields]
+	#  @0x55EE93-0x55EF38 selected-side avatar fields, each indexed by
+	#  g_PlayerInfoTeamIndex: @0x55EEAB, @0x55EEEE, @0x55EF31]
 
 
 func test_a_corrupt_profile_is_replaced_at_the_save() -> void:

@@ -92,7 +92,7 @@ struct NapiNPProtocol {
 	uint32_t host_stop_tick = 0;        // [orig +0x540] GetTickCount at StopServer
 	uint32_t host_run_duration_ms = 0;  // [orig +0x544] live elapsed ms; frozen at stop
 
-	// [orig +0xECC: protocol[947]] Monotonic, non-zero connection-id source. NapiNPConnection_Create
+	// [orig +0xECC: protocol[947]] Monotonic, non-zero connection-id source. CNapiNPConnection_Create
 	// @0x62acb0 stamps each new connection's dcb (connection_id, +0x18) from ++protocol[947] (wrapping
 	// 0 -> 1). On a LAN listen host the host ASSIGNS this dcb, ships it in the 0x82 ServerAuth MI TLV
 	// [orig: CNapiNPConnection_SendSessionInit @0x620ef0], and stamps it into the joiner's 0x0C
@@ -252,6 +252,11 @@ struct NapiNPServerCtx {
 	//  @0x518EEC; the clear in Server_InitNewRoundState @0x51C911; the read
 	//  NapiNPServerMsg_0x029 @0x514F7C]
 	std::vector<world::EntityHandle> team_change_entities;
+
+	// Whether this frame's entity update ran (Server_TickUpdate's step 4, behind
+	// its admission gate), which the frame tail's player-body edges need.
+	// [orig: Game_ProcessMainFrame @0x526703..0x526742]
+	bool entity_update_ran = false;
 
 	// The designation table the radio calls fill and the per-player S2C 0x6B
 	// batch reads, cleared at the new-round init

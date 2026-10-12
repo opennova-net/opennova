@@ -124,6 +124,8 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 	w::World world;
 	w::AiSystem &ai = world.ai;
 	world.registry.configure_pool(0, 16);
+	// The trait sweep's player row: a typed body is no empty slot (D-NET-486).
+	world.tables.player.item_type_index = 1;
 	world.registry.configure_pool(2, 16);
 	world.registry.configure_pool(3, 16);
 	{

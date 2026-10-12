@@ -96,7 +96,7 @@ struct EntityHandle {
 // pool-0 slot is below the pool's 256 capacity), the -1 (0xFF) of an entity
 // outside pool 0 or of none. [orig: Pool_GetIndexFromPtr @0x441f90 — the
 // base and capacity tests return -1; its callers store the low byte, e.g.
-// Server_HandleEmoteRequest @0x501e87, the radio call @0x5143c5, the
+// NapiNPServerMsg_HandleEmoteRequest @0x501e87, the radio call @0x5143c5, the
 // waypoint share's owner @0x514897]
 constexpr uint8_t pool0_index_byte(EntityHandle h) {
     return h.valid() && h.pool() == 0 ? static_cast<uint8_t>(h.slot()) : uint8_t{0xFF};
@@ -228,8 +228,8 @@ inline constexpr uint8_t kAdmSlotNone = 0xFF;
 // witnessed meaning; the consolidated per-bit table is
 // docs/world/world-wac-ai-re.md § "The entity Flags dword". Remaining
 // known-but-unnamed bits stay raw at use sites — do not name: 0x10000, 0x2000000,
-// 0x8000000, and vehicle_motor's Flags-dword 0x8/0x20 writes (vehicle-context
-// meanings unwitnessed).
+// and vehicle_motor's Flags-dword 0x8/0x20 writes (vehicle-context meanings
+// unwitnessed).
 inline constexpr uint32_t kEntityFlagCarried = 0x1;          // hidden while attached [orig: Entity_AttachCarriedObject @0x43C130]
 inline constexpr uint32_t kEntityFlagDead = 0x2;              // [orig: kill writes Flags |= 6 @0x43fbf6]
 inline constexpr uint32_t kEntityFlagHusk = 0x4;              // items/buildings: husk swap [orig: @0x43fbf6]
@@ -283,6 +283,12 @@ inline constexpr uint32_t kEntityFlagArmoryZone = 0x400000;   // type-6 volume t
 inline constexpr uint32_t kEntityFlagIndoors = 0x800000;      // [orig: accum bit 2 -> Flags @0x4b39xx; render gates §4]
 inline constexpr uint32_t kEntityFlagNoShadow = 0x1000000;    // BMS NoShadow(1<<24) [orig: @0x40e9f0]
 inline constexpr uint32_t kEntityFlagIndestructible = 0x4000000; // BMS Indestructible(1<<21) or hp==0
+inline constexpr uint32_t kEntityFlagNoTarget = 0x8000000;    // items.def attrib NoTarget (0x100), set by the
+                                                              // model init; the AI target walks and the pool ray
+                                                              // walker (unless its include arg) skip it
+                                                              // [orig: Entity_InitFromModel @0x40DC4F;
+                                                              //  AI_FindBestTargetB @0x467117;
+                                                              //  Physics_RaycastAgainstEntityPool @0x5387A4..0x5387B4]
 inline constexpr uint32_t kEntityFlagScriptDisabled = 0x10000000; // WAC disableSSN; the vehicle motors test it with
                                                                   // the dead bit (10000002h) as their driver-input
                                                                   // gate [orig: WacCmd_DisableSsn @0x4F76DD;
@@ -804,15 +810,15 @@ struct Entity {
     bool item_section_piece = false; // locally allocated class fragment
     // A tower's section clone: the template pins its event (+0x1C8) and
     // update (+0x1C4) callbacks whatever its def, so damage runs the null
-    // row [orig: Entity_SpawnSectionEntity @0x440365 -> sub_406FF0,
+    // row [orig: Entity_SpawnSectionEntity @0x440365 -> NullClass_HandleEvent,
     //  @0x440370 -> Entity_InitFloatingPhysics]. A palm fragment is not one:
-    // it takes item 900's own callbacks [orig: Projectile_SpawnFromTile
+    // it takes item 900's own callbacks [orig: Palm_SpawnFragment
     //  @0x53C35D / @0x53C36F].
     bool section_clone = false;
     // The palm fragment (item 900) a palm transition seeds: its spawn stores
     // the sector builder into item 900's model +0xA8 / +0xAC, so it collides
     // and scars through its palm state, whatever its draw [orig:
-    // Projectile_SpawnFromTile @0x53C1C0, the stores @0x53C3B0 / @0x53C3C6].
+    // Palm_SpawnFragment @0x53C1C0, the stores @0x53C3B0 / @0x53C3C6].
     bool palm_fragment = false;
     // The palm-state (+0x270) section draw: the render tag's psec / cesp bone
     // row [orig: BoneCallback_psec_World @0x53C130 -> @0x53BF10], recomputed
@@ -827,6 +833,12 @@ struct Entity {
     // recomputed on every def resolve. The draw alone: each row's collision
     // column is BoneCallback_Simple @0x4E2600.
     bool death_section_pivot = false;
+    // The bldg draw: the render tag's bldg bone row, whose world callback
+    // translates whatever it draws by the negated graphic-model COBJ origin of
+    // the section byte +0x2C1 names (a section clone's own; 0 draws in place)
+    // [orig: BoneCallback_bldg_World @0x4E21A0, the byte @0x4E2214, the
+    // translate @0x4E221E..0x4E2247], recomputed on every def resolve.
+    bool bldg_section_pivot = false;
     int32_t palm_state = 0; // entity+0x270
     // The def's damage callback is the palm row's (WeaponOverlay_HandleDamage)
     // or its update is psec's physics step (Entity_UpdatePhysicsStep): the load
@@ -861,15 +873,18 @@ struct Entity {
     uint32_t last_state_sent_ms = 0; // entity+560; authority 0x26 send clock
     bool objective_death_scored = false;
     int32_t destroy_timer = 0; // entity+0x1B0 initial fade delay
-    bool destroy_timer_initialized = false;
+    // The item init's once-per-body stores ran on this lifetime: the destroy
+    // timer, Health and Armor (mission::resolve_item_traits).
+    // [orig: Entity_InitFromItemDef @0x49E550]
+    bool item_init_done = false;
     // --- powerup row state (world/powerup.h) ---
     // The bound powerup.def row (-1 = none): retail's row pointer at
     // entity+0x2C0, the pickup/respawn ActionDefs at +0x2B8/+0x2BC beside it
-    // [orig: sub_442D00 @0x442D2A..0x442D3C]. Bound at mission start.
+    // [orig: PowerupEntity_InitFromDef @0x442D2A..0x442D3C]. Bound at mission start.
     int32_t powerup_def_index = -1;
     // The respawn countdown in ticks at entity+0x2B4: -1 idle, >0 counting,
     // 0 fires the respawn [orig: @0x442D65 (idle), the pickup arm
-    //  @0x442AE1, Entity_TickFireTimer @0x442850]
+    //  @0x442AE1, Powerup_TickRespawn @0x442850]
     int32_t powerup_respawn_timer = -1;
     // The remaining respawns at entity+0x2C8: max_respawns-1, or -1 unlimited;
     // 0 makes the next pickup destroy the row [orig: @0x442D51 / @0x442D59;

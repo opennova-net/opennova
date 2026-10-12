@@ -14,7 +14,7 @@
 // so they become pure pumps (ADR 0010 / .agents/README.md: lobby payloads belong in engine/net/novaworld,
 // sockets + signals in Godot). The host registration var-lists (the GSB row), the NW-S5 client
 // identity "Cookie" set (used for BOTH the UDP verify var-list and the HTTP login cookies), and the
-// UDPNOVAWORLD "host:port" split. Godot-free. The bindings pass their GDScript-set config in.
+// UDPNOVAWORLD host-and-port split. Godot-free. The bindings pass their GDScript-set config in.
 namespace opennova {
 
 // The GameText tokens the Host list carries as VALUES (the retail builder resolves them through
@@ -230,9 +230,15 @@ inline constexpr int kNwusidLen = 16;
 // [orig: NovaWorldClient::begin_session identity build]
 std::vector<std::pair<std::string, std::string>> make_lobby_identity_vars(const LobbyIdentityParams &p);
 
-// Split a "host:port" string (the gate's UDPNOVAWORLD). Returns false on a missing colon or a
-// non-numeric port; the port is the faithful truncating static_cast<uint16_t>(stoi(...)).
-// [orig: the inline UDPNOVAWORLD split in NovaWorldClient/Host::poll_gate]
-bool parse_host_port(const std::string &in, std::string &host, uint16_t &port);
+// Split an address string (a gate UDPNOVAWORLD entry) as retail's host-and-port parse does: the
+// text to its first NUL is the string, and one longer than 511 bytes fails (the 512-byte local
+// copy); the host is the text before its first ':' (all of it with no colon), and the port the
+// napi literal reader's value of the text after that colon (`$7D00`, `0x7D00`, `076400` and
+// `32000d` all read 32000), or 0 with no colon or no literal there. The host is the caller's to
+// resolve (Napi_ResolveAddress).
+// [orig: Network_ParseHostAndPort @0x62E200 - the length gate @0x62E260, the copy @0x62E288,
+//  the first ':' @0x62E297, the literal @0x62E2B1 (0 @0x62E2BD), the host to
+//  Napi_ResolveAddress @0x62E2D2]
+bool parse_host_and_port(const std::string &in, std::string &host, uint32_t &port);
 
 } // namespace opennova

@@ -222,7 +222,7 @@ struct MatchPlayer {
     // at join when the mission offers deploy zones, cleared by the deploy
     // leg. Event 25's counter skips a pending slot. The authority mirrors its
     // connection bit here.
-    // [orig: Server_OnPlayerJoin @0x51A6F2; Server_ProcessPlayerDeath
+    // [orig: Server_OnPlayerJoin @0x51A6F2; Server_DeployPlayer
     //  @0x517791; Server_UpdateCaptureZoneProximity @0x5087A2]
     bool respawn_pending = false;
 };
@@ -363,10 +363,10 @@ class Match {
     MatchPlayer *player(EntityHandle entity);
     const std::vector<MatchPlayer> &players() const { return players_; }
     // Mirrors the player-slot spectator latch (+100567) onto the roster row.
-    // [orig: Server_PlayerAdd @0x51CD83; Server_KillPlayerAndNotify @0x519E61]
+    // [orig: Server_PlayerAdd @0x51CD83; Server_ConvertPlayerToSpectator @0x519E61]
     void set_player_spectator(EntityHandle entity, bool spectator);
     // Mirrors the player-slot undeployed bit (+89912 & 0x10) onto the row.
-    // [orig: Server_OnPlayerJoin @0x51A6F2; Server_ProcessPlayerDeath @0x517791]
+    // [orig: Server_OnPlayerJoin @0x51A6F2; Server_DeployPlayer @0x517791]
     void set_player_respawn_pending(EntityHandle entity, bool pending);
     const MatchStats &team_stats(uint8_t team) const;
 

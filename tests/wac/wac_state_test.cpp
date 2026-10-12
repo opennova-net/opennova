@@ -116,8 +116,8 @@ static void test_opcode5_steps_the_generator_for_a_zero_count() {
     WacVm vm;
     vm.load(program);
     vm.execute(f.world);
-    CHECK(vm.capture_runtime_state().rng_seed == 0x66666624u); // one step from 0x12333333
-    CHECK(vm.capture_runtime_state().loop_choices[0] == 0);
+    CHECK(f.world.script.vars.wac.dornd_seed == 0x66666624u); // one step from 0x12333333
+    CHECK(f.world.script.vars.wac.do_choice[0] == 0);
 }
 
 static void test_music_closed_stream_is_a_witnessed_success() {

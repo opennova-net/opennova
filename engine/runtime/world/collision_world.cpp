@@ -458,7 +458,7 @@ void CollisionWorld::prepare_cached_raycast_queries(World &world) {
     }
 
     auto append = [&](const Entity &e) {
-        if ((e.flags & 1u) != 0 || (e.engine_flags & 0x8000000u) != 0) return;
+        if ((e.flags & 1u) != 0 || (e.engine_flags & kEntityFlagNoTarget) != 0) return;
         StableLosCandidate candidate;
         candidate.h = e.handle;
         if (!target_bound(world, e.handle, candidate.pos, candidate.radius,

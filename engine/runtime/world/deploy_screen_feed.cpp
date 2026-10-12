@@ -41,8 +41,13 @@ std::vector<DeployListRow> build_deploy_rows(const DeployListInput &in) {
         rows.push_back(row);
     }
     // ListWidget_SortRows(list, 0, 1) over the whole list — the Default row
-    // included [orig: @0x553c5a]. std::stable_sort: the original qsort's
-    // order among EQUAL texts is unspecified and two rows never share text.
+    // included [orig: @0x553c5a]. Rows whose texts tie stand where the list
+    // sort's quicksort leaves them [orig: Utility_QuickSortDualArray @0x651AB0];
+    // std::stable_sort keeps them in order. Duplicate rows (unregistered zones,
+    // each '@' with STRWPNAME000 and value 0) are identical in every field, so
+    // their order shows nowhere; any other tie, two zones 32 indices apart
+    // (their letters fold together) under one name or the Default row matching
+    // a zone's text, is D-MNU-40's.
     std::stable_sort(rows.begin(), rows.end(), row_text_less);
     // The second loop: EVERY team zone (team byte, def attrib 0x40000, in the
     // spawn-zone list — NO secured gate and NO occupant gate) inserts its

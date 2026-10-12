@@ -41,8 +41,8 @@ bool parse_lan_discovery_reply(const uint8_t *data, size_t size, uint32_t client
 	// 0x41), so the CI filter drops nothing a retail browser would list.
 	// [orig: NapiNPProtocol_HandleClientHello @0x6213b0 ->
 	//  NapiNPProtocol_SendServerInfoPacket @0x6204b0 (the CI echo @0x620563);
-	//  Nwu_HandleServerHello @0x626d20 — sub_6227F0(connection, server_id)
-	//  @0x627533, `if (!entry) return` @0x627541;
+	//  Nwu_HandleServerHello @0x626d20 - NapiNPProtocol_FindConnectionByIndex(protocol,
+	//  server_id) @0x627533, `if (!entry) return` @0x627541;
 	//  NapiNPSession_SendAnnouncePacket @0x61fa00 @0x61fac4 (0x41)]
 	if (client_index == 0 || hello.ci != client_index) return false;
 
@@ -50,10 +50,12 @@ bool parse_lan_discovery_reply(const uint8_t *data, size_t size, uint32_t client
 	// bytewise; PV2 is parsed and stored but is not a discovery gate (it is the
 	// host's 0x42-time check, not the browser's). [orig: Nwu_HandleServerHello
 	//  @0x626d20 — PN @0x62758b, PG @0x627591..0x627620, PV1 @0x627639]
-	if (!hello.is_game_server ||
-	    !server_hello_matches_identity(hello, make_jointoperations_client_hello(0))) {
-		return false;
-	}
+	// No game-server field is required: an SF-less reply reads SF 0 and lists,
+	// the discovery callback gating the session on P2's channel type alone
+	// (LanDiscoveryBrowser::accept_reply). [orig: Nwu_HandleServerHello @0x626d20:
+	//  SF zeroed @0x626eb7, loaded @0x62721a; CNapiNetwork_OnSessionDiscovered
+	//  @0x4c8470: the P2 gate @0x4c84a3..0x4c84ba, SF read @0x4c84f1]
+	if (!server_hello_matches_identity(hello, make_jointoperations_client_hello(0))) return false;
 
 	LanDiscoveryServer parsed;
 	parsed.server_name = std::move(hello.sn);

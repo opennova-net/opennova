@@ -83,10 +83,6 @@ func initial_team(authored_team: int) -> int:
 	return clampi(int(_persisted_profile.get("team", authored_team)), 0, 1)
 
 
-func persisted_name() -> String:
-	return String(_persisted_profile.get("name", ""))
-
-
 func side_selection(side: int) -> Selection:
 	if side < 0 or side >= _side_profiles.size():
 		return null
@@ -182,7 +178,9 @@ func _first_selection(side: int, selected_class: int) -> Selection:
 
 
 # A saved side that still resolves against the mounted Avatars.def is kept as
-# saved; a stale or absent one takes the retail per-side default.
+# saved; a stale or absent one takes the retail per-side default here. The
+# record keeps its bytes until that side is shown and saved: the dialog writes
+# the shown side's character alone (PlayerProfiles.apply_character_selection).
 func _normalize_side(side: int, saved: Selection) -> Selection:
 	var selected_class := (saved.player_class if saved != null
 			else int(_persisted_profile.get("player_class", 8)))

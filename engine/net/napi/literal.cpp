@@ -107,13 +107,15 @@ bool parse_octal(std::string_view input, uint32_t &value, size_t &consumed) {
 		++cursor;
 	}
 	if (cursor == first_digit) {
-		// A lone leading zero is still a valid zero; an invalid following
-		// decimal digit makes this arm fail so decimal gets its turn.
-		if (!suffix_required && (cursor == input.size() ||
-				(cursor + 1 == input.size() &&
-				 (input[cursor] == 'o' || input[cursor] == 'O')))) {
+		// With no octal digit the arm passes only for a leading zero and an o / O, read as 0
+		// over the two bytes whatever follows; a lone zero (or a bare form's empty run) fails
+		// the arm, so the decimal arm reads it. [orig: NapiScript_ParseOctalInteger @0x62d7b0 -
+		//  the o / O @0x62d86b..0x62d873, counted @0x62d875, the flag @0x62d878; no digit and
+		//  no flag fails @0x62d88f..0x62d899; the zero stored @0x62d89b]
+		if (!suffix_required && cursor < input.size() &&
+				(input[cursor] == 'o' || input[cursor] == 'O')) {
 			value = 0;
-			consumed = cursor == input.size() ? 1 : 2;
+			consumed = 2;
 			return true;
 		}
 		return false;

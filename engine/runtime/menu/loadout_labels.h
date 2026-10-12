@@ -29,10 +29,16 @@ std::string weapon_label(const def::DefWeaponDef &w, const hud::GameTextLookup &
 std::string ammo_row_label(const def::DefWeaponDef *w, int clips,
 		const hud::GameTextLookup &gametext);
 
-// The WEAPON screen's slot-list row order: the indices of `labels` sorted
-// case-insensitively ascending by display label; the caller prepends NONE at
-// row 0 [orig: ListWidget_SortRows -> cmp @0x6448a0 with (string, asc); NONE
-// inserted at 0 @0x566f15].
+// The loadout screens' slot-list row order, the WEAPON screen's and the PLAYER
+// screen's: the indices of `labels`, given in the fill's table order, as the
+// list sort leaves them, case-insensitively ascending by display label with
+// tied labels where retail's quicksort puts them; the caller prepends NONE at
+// row 0 [orig: ListWidget_SortRows(list, 0, 1) -> cmp @0x6448a0, the quicksort
+// Utility_QuickSortDualArray @0x651AB0; the WEAPON screen's
+// UI_PopulateThreeCategoryLists @0x566ed5 / @0x566ee0 / @0x566eef, NONE inserted
+// at 0 @0x566f15; PlayerInfo_PopulateWeaponSlotLists @0x560430 -- the sorts
+// @0x56054c / @0x560557 / @0x560566, the NONE inserts @0x56058f / @0x56059d /
+// @0x5605ab]. The case fold is ASCII where the game's is the ".ACP" locale's (D-MNU-39).
 std::vector<int> armory_slot_order(const std::vector<std::string> &labels);
 
 // The weight readout "<TOTAL_WEIGHT> <w> <LBS> (<encumbrance>)": the band from

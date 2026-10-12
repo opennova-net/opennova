@@ -74,7 +74,7 @@ static int weapon_userpoint_slot(const char *key) {
    earlier line of the slot left (jox01's `particlefx fx_Mosquitos_2m_L`: no
    userpoint).
    [orig: ItemDef_ParseProperty @ 0x49eb00, particlefx chain @ 0x4a13ad..0x4a15eb,
-   the copies @ 0x4a13bf..0x4a13fc; Terrain_TokenizeConfigLine @ 0x53cb71..0x53cb81] */
+   the copies @ 0x4a13bf..0x4a13fc; Config_TokenizeLine @ 0x53cb71..0x53cb81] */
 static void parse_item_particle_slot(const io::ConfigTokens &tokens, DefItemParticleFx *slot,
                                      int with_secondary) {
     copy_token(slot->effect, sizeof(slot->effect), tokens, 1);

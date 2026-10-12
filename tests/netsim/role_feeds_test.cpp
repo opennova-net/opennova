@@ -112,7 +112,7 @@ int main() {
 	CHECK(end_round_session_state(joiner).round_ticks == 0);
 	// The joiner's local team is the S2C 0x04 latch; a listen host never
 	// receives that record, so the authority reads its own player entity
-	// [orig: byte_A85B48 @0x5b7f56, latched on the host from its loopback
+	// [orig: g_LocalTeam @0x5b7f56, latched on the host from its loopback
 	// 0x04 @0x425499].
 	{
 		ClientRuntime host_runtime("host");
@@ -241,7 +241,7 @@ int main() {
 		st.death_screen_submode = 0;
 		// The A&D side latch: the first TARGET-attrib def in pool 2 (then 1)
 		// against the local team — another team's target attacks (2), our own
-		// defends (1); any other game type clears it [orig: sub_524110 @0x524110].
+		// defends (1); any other game type clears it [orig: Game_LatchAttackDefendRole @0x524110].
 		kernel.world.registry.configure_pool(1, 4);
 		kernel.world.registry.configure_pool(2, 4);
 		world::Entity item;

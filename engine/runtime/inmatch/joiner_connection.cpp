@@ -237,7 +237,7 @@ std::vector<uint8_t> JoinerConnection::start() {
 	spawn_ = SelfSpawn{};
 	assigned_team_ = 0; // re-latched from the fresh session's S2C 0x04 (the kit seam persists);
 	spectator_mode_ = false;
-	                    // zero like retail's byte_A85B48 until the assignment arrives
+	                    // zero like retail's g_LocalTeam until the assignment arrives
 	class_allow_mask_ = 0x03FFu; // replaced by the fresh session's S2C 0x76
 	current_player_class_ = 0;
 	mission_known_ = false;
@@ -362,9 +362,14 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 	}
 	// Retail serializes the live profile's per-side character block between the
 	// environment strings and the trailing locale/packet scalars. A zero value is
-	// absent, matching CNapiServerInfo's per-field guards. TR uses signed decimal:
-	// 0xFF is the profile's -1/automatic-team sentinel.
-	// [orig: CNapiServerInfo_SerializeToSession @0x4c3a1b..0x4c3c4c]
+	// absent, matching CNapiServerInfo's per-field guards. TR prints its byte
+	// sign-extended, the join's side requirement 0xFF going up as -1 on every
+	// join (kJoinSideRequirement, D-NET-590). CTA/CTB print their bytes
+	// zero-extended, VCA/VCB sign-extended, so an avatar byte past 0x7F goes up
+	// negative (0xC8 as -56).
+	// [orig: CNapiServerInfo_SerializeToSession @0x4c3a1b..0x4c3c4c - TR
+	//  @0x4c3ac7..0x4c3b0c (movsx @0x4c3ad1), movzx @0x4c3b1e / @0x4c3b6e, movsx
+	//  @0x4c3bbe / @0x4c3c0e]
 	auto append_profile_value = [&](const char *name, int value, bool present) {
 		if (!present) return;
 		auth.cu.push_back(make_client_cu_chunk(
@@ -374,18 +379,15 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 			character_join_vars_.char_id[0] != 0);
 	append_profile_value("CI1", character_join_vars_.char_id[1],
 			character_join_vars_.char_id[1] != 0);
-	append_profile_value("TR",
-			character_join_vars_.team_request == 0xFF
-					? -1
-					: character_join_vars_.team_request,
+	append_profile_value("TR", static_cast<int8_t>(character_join_vars_.team_request),
 			character_join_vars_.team_request != 0);
 	append_profile_value("CTA", character_join_vars_.char_class[0],
 			character_join_vars_.char_class[0] != 0);
 	append_profile_value("CTB", character_join_vars_.char_class[1],
 			character_join_vars_.char_class[1] != 0);
-	append_profile_value("VCA", character_join_vars_.avatar[0],
+	append_profile_value("VCA", static_cast<int8_t>(character_join_vars_.avatar[0]),
 			character_join_vars_.avatar[0] != 0);
-	append_profile_value("VCB", character_join_vars_.avatar[1],
+	append_profile_value("VCB", static_cast<int8_t>(character_join_vars_.avatar[1]),
 			character_join_vars_.avatar[1] != 0);
 	// Spectator is opt-in. Keeping both fields absent for Player preserves the
 	// captured retail player-join bytes exactly.
@@ -579,7 +581,8 @@ ConnectionErrorRecord JoinerConnection::connection_error_record() const {
 
 void JoinerConnection::on_server_auth(
 		const std::vector<uint8_t> &body, PollResult & /*out*/) {
-	// Any 0x82 from the connecting host is read; no field is required (parse_server_auth).
+	// Any 0x82 from the connecting host is read; no field is required, and one whose CUs overrun
+	// the walk's bounds is dropped here, before the CI / CK match (parse_server_auth).
 	ServerAuth sa;
 	if (!parse_server_auth(body.data(), body.size(), sa)) return;
 	// ServerSessionInit echoes both client identifiers. Correlate before even
@@ -1340,10 +1343,10 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			out.inbound_world.emplace_back(m.tag, m.payload);
 		} else if (m.tag == s2c::SESSION_SLOT_CONFIG) {
 			// S2C 0x04 slot assignment: the tail byte is this joiner's server-assigned team —
-			// retail's byte_A85B48, the 0x2F loadout-submit header byte 0. A retail host always
+			// retail's g_LocalTeam, the 0x2F loadout-submit header byte 0. A retail host always
 			// writes the full 24-byte body [orig: NetPacket_WriteSlotAssignment @0x502b30];
 			// latch only that witnessed shape and keep the golden default otherwise.
-			// [orig: NapiNPClientMsg_SessionSlotConfig (0x04) @0x425410 -> byte_A85B48 @0x425499]
+			// [orig: NapiNPClientMsg_SessionSlotConfig (0x04) @0x425410 -> g_LocalTeam @0x425499]
 			// Byte 17 is this joiner's OWN roster slot id — retail's
 			// g_LocalPlayerSlotId, and the same value the host keeps at its
 			// per-player record slot+20 [orig: the write side
@@ -1358,18 +1361,18 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			}
 		} else if (m.tag == s2c::SPECTATOR_FLAGS) {
 			// Despite the historical catalog name, byte 1 is the live player-slot
-			// team. Retail overwrites the same byte_A85B48 latch installed by
+			// team. Retail overwrites the same g_LocalTeam latch installed by
 			// 0x04, and its subsequent 0x2F copies this value verbatim.
 			// [orig: NetPacket_SerializeHostEntityState (ex sub_510890) @0x510890 writes playerSlot+416;
 			// NapiNPClientMsg_SetSpectatorMode @0x425A32]
 			if (!m.payload.empty()) spectator_mode_ = (m.payload[0] & 1u) != 0;
 			if (m.payload.size() >= 2) assigned_team_ = m.payload[1];
 		} else if (m.tag == s2c::TEAM_ASSIGN) {
-			// S2C 0x50 TEAM ASSIGN — the SECOND witnessed writer of the byte_A85B48
+			// S2C 0x50 TEAM ASSIGN — the SECOND witnessed writer of the g_LocalTeam
 			// team latch (the S2C 0x04 tail is the first). The host emits it for any
 			// entity retargeted by Server_ChangeEntityTeam @0x518D70, capture zones
 			// included. Witnessed legs, in order:
-			//   (1) entity == local player -> byte_A85B48 = team @0x4319db;
+			//   (1) entity == local player -> g_LocalTeam = team @0x4319db;
 			//   (2) !is_authority -> entity->Team = team @0x4319ee (any pool 0..4);
 			//   (3) the player-slot team byte mirrors it @0x431a0b;
 			//   (4) player (Flags & 0x100) + self -> per-side profile reselect and ONE
@@ -1389,6 +1392,11 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 						assign.entity_handle, assign.team);
 				if (has_self_handle_ && assign.entity_handle == self_handle_) {
 					assigned_team_ = assign.team; // [orig: @0x4319db]
+					// Leg (2) lands on the joiner's own dcb whether or not its
+					// mission start has made it the local entity yet, so L spawns
+					// on it: Player_InitPlayer reads that Team.
+					// [orig: @0x4319ee; Player_InitPlayer @0x4E15F0 - @0x4E1809]
+					spawn_.team = assign.team;
 					out.self_team_changed = true;
 					out.self_team = assign.team;
 					// The re-submission exists only after the 0x1A-released
@@ -1400,9 +1408,11 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					// joiner pushed across the line submits a kit the new side's
 					// class can legally hold. The C2S 0x22/0x23 pair that
 					// follows (@0x431acb..0x431b05) is the replica fold's
-					// (ClientReplicaPipeline, S2C 0x50). Still deferred with
-					// witnesses in D-NET-168: Player_InitPlayer(1) @0x431b14
-					// and the minimap NetId maintenance @0x431b3a..0x431b91.
+					// (ClientReplicaPipeline, S2C 0x50), as is the identity
+					// pair @0x431b3a..0x431b91 on the replica row (D-NET-253);
+					// L's pair and the Player_InitPlayer(1) re-run @0x431b14
+					// are D-NET-570, and this leg's latch and re-submission
+					// ahead of the mission start's Player_InitPlayer, D-NET-572.
 					if (post_auth_stage_ == PostAuthStage::AwaitDeployment ||
 					    post_auth_stage_ == PostAuthStage::AwaitDeployPick ||
 					    post_auth_stage_ == PostAuthStage::AwaitDeployRelease ||
@@ -1604,7 +1614,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// authoritative 0x5A class; absent/inactive/mismatched rows return zero.
 			// [orig: NapiNPClientMsg_HandleChecksumChallenge @0x42E6D0 (reply tag 0x1C,
 			//  len 4 @0x42e723); CharAttr_GetClassChecksum @0x412aa0 (IDB
-			//  AnimMap_GetSlotChecksum until 2026-10-07) — the `return 0` arm
+			//  AnimMap_GetSlotChecksum until 2026-10-12) — the `return 0` arm
 			//  @0x412abf; the host's discard + counter reset
 			//  NapiNPServerMsg_AnimChecksumRequest @0x501D40 @0x501d71/@0x501d79]
 			uint32_t challenge_seed = 0;
@@ -2029,7 +2039,7 @@ void JoinerConnection::seed_in_match(uint32_t session_id, uint32_t client_key,
                                      std::string client_scrk, std::string server_scrk,
                                      uint32_t next_seq, uint32_t last_ack,
                                      uint16_t self_handle, uint16_t self_type,
-                                     uint32_t game_type) {
+                                     uint32_t game_type, uint8_t self_team) {
 	conn_.server_sk = session_id;            // 0x43 header session_id (= ServerAuth.sk)
 	// The captured ClientAuth.ck: the inbound S2C admission gate validates every 0x83
 	// header against the client-local key, so without this a seeded replay silently
@@ -2043,6 +2053,7 @@ void JoinerConnection::seed_in_match(uint32_t session_id, uint32_t client_key,
 	self_handle_ = self_handle;
 	has_self_handle_ = true;
 	spawn_.item_type_id = self_type;
+	spawn_.team = self_team;
 	game_type_ = game_type;
 	mp_attributes_ = 0;
 	session_max_players_ = 0;

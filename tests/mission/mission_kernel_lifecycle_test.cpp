@@ -121,6 +121,43 @@ int main() {
 		CHECK(kernel->world.kill_stats.subgoals_won == 0);
 	}
 
+	// --- the mission start clears WAC's per-IF state after the PreMission pass --
+	// A PreMission write through a bank word to IF 0's fired tick (768) or the
+	// DORND seed (3584) is gone once the start's WAC load runs; one to the DO
+	// choices (3328) survives, as no load clears them (D-EVT-13, D-EVT-15).
+	// [orig: Game_StartMission - the EventTrigger_UpdateAllWithFlag2 call
+	//  @0x525B86, then the WacScript_InitAndLoad call @0x525CB3;
+	//  WacScript_InitAndLoad @0x4F95F9 (the fired-tick memset), @0x4F966B (the
+	//  seed)]
+	{
+		bms::File m{};
+		bms::Event event{};
+		event.flags = bms::EventFlags::PreMission;
+		event.action_index = 0;
+		event.action_count = 3;
+		const auto set_word = [](int32_t word, int32_t value) {
+			bms::Action a{};
+			a.action_type = bms::ActionType::MisvarChange;
+			a.action_sub_type = static_cast<int32_t>(bms::MissionVariableActionSubType::Set);
+			a.param1 = word;
+			a.param2 = value;
+			return a;
+		};
+		m.events = {event};
+		m.actions = {set_word(768, 5), set_word(3328, 0x01020304), set_word(3584, 77)};
+		std::map<std::string, std::string> files;
+		auto kernel = std::make_unique<ms::MissionKernel>();
+		kernel->open_document(std::move(m), "synth", source_over(&files));
+		ms::KernelBootOptions options;
+		options.playable = false;
+		std::string error;
+		CHECK(kernel->boot(options, error));
+		const w::ScriptVarStore &vars = kernel->world.script.vars;
+		CHECK(vars.get_bank_word(768) == 0);
+		CHECK(vars.get_bank_word(3584) == static_cast<int32_t>(w::ScriptVarStore::kDorndSeed));
+		CHECK(vars.get_bank_word(3328) == 0x01020304);
+	}
+
 	// --- the ordering guards ---------------------------------------------------
 	{
 		auto kernel_box = std::make_unique<ms::MissionKernel>();

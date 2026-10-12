@@ -100,6 +100,14 @@ int main() {
     hit=collision.trace_squib(w,h,{0,0,5*65536},{10*65536,0,5*65536});
     CHECK(hit.hit_class==ProjectileHitClass::Person && hit.distance_q16==3*65536);
     CHECK(hit.surface_type==0 && hit.bone_index==0 && hit.hit_zone==0);
+    // A NoTarget row (Flags 0x8000000) stays a squib target: each pool call
+    // passes the walker's include arg 1 [orig: `push 1` @0x449112 ->
+    // Physics_RaycastAgainstPoolByIndex -> Physics_RaycastAgainstEntityPool
+    // @0x5387A4..0x5387B4].
+    w.registry.get(near)->engine_flags|=kEntityFlagNoTarget;
+    hit=collision.trace_squib(w,h,{0,0,5*65536},{10*65536,0,5*65536});
+    CHECK(hit.hit_class==ProjectileHitClass::Person && hit.distance_q16==3*65536);
+    w.registry.get(near)->engine_flags&=~kEntityFlagNoTarget;
     // The separate damage-ammo register, not the presentation override, owns damage.
     ammo.weight_in_grains=100; ammo.velocity=620; ammo.penetration_impact=10;
     w.registry.get(near)->health=100; w.registry.get(near)->health_max=100;

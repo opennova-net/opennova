@@ -26,6 +26,10 @@
 #include <unordered_map>
 #include <vector>
 
+namespace opennova::replication {
+class ClientWorldMaterializer;
+} // namespace opennova::replication
+
 namespace opennova::inmatch {
 
 struct NapiNPServerCtx;
@@ -42,6 +46,11 @@ struct PresentRowsContext {
 	ClientRuntime *runtime = nullptr;
 	bool joiner = false;
 	const NapiNPServerCtx *server = nullptr;
+	// The joiner's materializer: a decoded row's own native row is the one it
+	// owns (ClientWorldMaterializer::replica_world_entity), never a later
+	// lifetime at the same handle. Null on the world path; a bare kernel's
+	// joiner rows without one fall back to the handle and the type.
+	const replication::ClientWorldMaterializer *materializer = nullptr;
 };
 
 // The decoded fold's dead->alive respawn revision, mirrored per pool row on the

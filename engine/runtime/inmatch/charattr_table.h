@@ -6,7 +6,7 @@
 // (g_CharAttrPropertyDisabled @ 0xA79508), which outlive every mission and every session. The latches
 // gate the table's accessors; the authority raises four of them from the session's mp_No* words at each
 // mission start (charattr_apply_restrictions) and tells each joiner (S2C 0x41, S2C 0x42), whose own
-// table follows. Retail's IDB named these AnimMap_* and Input_*State* (renamed 2026-10-07): they are
+// table follows. Retail's IDB named these AnimMap_* and Input_*State* (renamed 2026-10-12): they are
 // charattr data, not .adm animation slots or input modes. Witness record: docs/net/novaworld-net-re.md
 // ("charattr.def: the table and its readers").
 

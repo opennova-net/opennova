@@ -20,7 +20,9 @@
 namespace godot {
 
 class AvatarDatabase;
+class PlayerInfoKitRestore;
 class RtxtStringFile;
+class WeaponDatabase;
 class WeaponProfileSummary;
 
 class PlayerProfiles : public RefCounted {
@@ -72,6 +74,9 @@ public:
 	bool is_first_run() const { return store_.first_run(); }
 
 	bool rename(const String &p_text) { return store_.rename(p_text.utf8().get_data()); }
+	// The PLAYERNAME edit's set and the name rule its change notice runs; the
+	// text the edit is left holding (engine PlayerProfiles::set_name_edit).
+	String set_name_edit(const String &p_text);
 	void commit_name(const String &p_text);
 	void reset_current() { store_.reset_current(defaults_); }
 
@@ -98,11 +103,18 @@ public:
 
 	// The character side of the current weapon.sav record.
 	Ref<WeaponProfileSummary> character_summary() const;
-	// PLAYER_INFO ACCEPT's character snapshot into the current weapon.sav
-	// record: `player_class` (5..9) to both sides, each non-empty
-	// `side_profiles[side]` {avatar_a, avatar_b, avatar_packed} to its side, and
-	// a `kit` array to the edited side's (`team`) class page.
-	// ERR_INVALID_PARAMETER for a snapshot the record cannot take.
+	// PLAYER_INFO's populate: the side's (0 blue, 1 red) class page of the
+	// current record, the one its class byte picks, restored over the weapon
+	// table (engine menu::player_info_restore_kit).
+	Ref<PlayerInfoKitRestore> restore_player_info_kit(int p_side,
+			const Ref<WeaponDatabase> &p_weapons) const;
+	// PLAYER_INFO's dialog save (its ACCEPT, a side radio, a class pick) into the
+	// current weapon.sav record: `player_class` (5..9) to both sides, the shown
+	// side's (`team`, 0 or 1) `side_profiles[team]` {avatar_a, avatar_b,
+	// avatar_packed} to that side alone when non-empty, and a `kit` array to its
+	// page of `kit_class`, the class whose page the screen restored (`player_class`
+	// when absent or outside 5..9). ERR_INVALID_PARAMETER for a snapshot the record
+	// cannot take.
 	Error apply_character_selection(const Dictionary &p_profile);
 
 	void record_mission_start(int p_campaign) { store_.record_mission_start(p_campaign); }

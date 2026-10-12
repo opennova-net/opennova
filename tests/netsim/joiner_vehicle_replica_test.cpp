@@ -4,6 +4,7 @@
 // client attaches from its remote riders' records, and the 0x0D carrier an
 // addeweap child follows.
 
+#include <formats/def/def.h>
 #include <net/npwire/entity_class.h>
 #include <net/npwire/idatagram_socket.h>
 #include <net/npwire/ingame_decode.h>
@@ -356,6 +357,72 @@ bool run_streamed_building_takes_its_armory_points() {
 			"armory: the streamed building takes its def's armory points");
 }
 
+// A streamed topology change re-runs the joiner's items.def sweep, but the
+// Health and Armor stores are an item init's, once per body: a body arriving
+// takes them, an existing one keeps its words (a wire health word of exactly
+// 100, an armor word a pickup moved), the joiner's own body included. Retail
+// stores them at a body's creation (an item init, the player spawn), at the
+// mission start's reload and at a vehicle's respawn (D-PWR-14); no topology
+// change re-runs one.
+// [orig: Entity_InitFromItemDef @0x49E550 - Health @0x49E5C0, Armor
+//  @0x49E5CE; Game_ReloadEntityModelsAndCallbacks @0x522830 - @0x522B65 /
+//  @0x522B78, called @0x52550E]
+bool run_topology_resweep_keeps_initialized_words() {
+	constexpr int32_t kShedType = 1700;
+	static constexpr char kItems[] =
+			"begin \"Resweep Player\"\r\n id 105305\r\n type person\r\n hp 150\r\n mana 5\r\nend\r\n"
+			"begin \"Resweep Shed\"\r\n id 101700\r\n type building\r\n hp 300\r\n mana 7\r\nend\r\n";
+	def::DefItemsFile items = {};
+	if (!expect(def::def_parse_items_memory(reinterpret_cast<const uint8_t *>(kItems),
+			sizeof(kItems) - 1, &items) == 0 && items.count == 2,
+			"resweep: the items table parses"))
+		return false;
+	Harness h;
+	h.kernel->wire_header_world = true;
+	h.kernel->world.registry.configure_pool(2, 16);
+	h.kernel->set_items_table(&items);
+	h.kernel->resolve_item_traits([](int) -> uint8_t { return 0; });
+	const auto stream_shed = [&](int slot) {
+		StaticEntityBatch batch;
+		batch.start_index = static_cast<uint16_t>(slot);
+		StaticEntityRecord rec;
+		rec.item_type_id = static_cast<uint16_t>(kShedType);
+		rec.pos_x = (40 + slot) * 65536;
+		rec.pos_y = 40 * 65536;
+		rec.pos_z = 2 * 65536;
+		batch.records.push_back(rec);
+		batch.entity_count = 1;
+		h.role.runtime->view().apply(s2c::STATIC_ENTITY_BATCH, encode_static_entity_batch(batch));
+		h.role.run_tick(h.input);
+		return h.kernel->world.registry.get(
+				w::EntityHandle{static_cast<uint16_t>(0x2000u | slot)});
+	};
+	bool ok = true;
+	w::Entity *first = stream_shed(3);
+	w::Entity *local = h.kernel->world.registry.get(h.kernel->world.cached.local_player);
+	if (!expect(first != nullptr && local != nullptr, "resweep: the first shed materializes"))
+		return false;
+	ok &= expect(first->health == 300 && first->mana == 7,
+			"resweep: an arriving body takes its def's Health and Armor");
+	ok &= expect(local->mana == 5, "resweep: the joiner's own body took its def's Armor");
+	first->health = 100;
+	first->mana = 3;
+	local->mana = 2;
+	w::Entity *second = stream_shed(4);
+	first = h.kernel->world.registry.get(w::EntityHandle{0x2003});
+	local = h.kernel->world.registry.get(h.kernel->world.cached.local_player);
+	ok &= expect(second != nullptr && second->health == 300 && second->mana == 7,
+			"resweep: the second arrival takes its def's Health and Armor");
+	ok &= expect(first != nullptr && first->health == 100,
+			"resweep: an existing body at exactly 100 keeps its Health");
+	ok &= expect(first != nullptr && first->mana == 3 && first->mana_max == 7,
+			"resweep: an existing body keeps its Armor word");
+	ok &= expect(local != nullptr && local->mana == 2,
+			"resweep: the joiner's own body keeps its Armor word");
+	def::def_free_items(&items);
+	return ok;
+}
+
 int main() {
 	bool ok = true;
 	ok &= run_record_tail_mirrors_flags_and_health();
@@ -364,6 +431,7 @@ int main() {
 	ok &= run_remote_driver_is_the_claimant();
 	ok &= run_unresolved_attachment_follows_its_target_carrier();
 	ok &= run_streamed_building_takes_its_armory_points();
+	ok &= run_topology_resweep_keeps_initialized_words();
 	if (!ok || failures != 0) {
 		std::fprintf(stderr, "joiner_vehicle_replica_test: %d failure(s)\n", failures);
 		return 1;

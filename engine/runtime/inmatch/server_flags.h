@@ -4,8 +4,12 @@
 // P2 TLV the LAN enumerator answers with and the trailing dword of the S2C
 // 0x08 block [orig: CNapiServerConfig_BuildFlags @0x4c4dc0] — and the join
 // entry's next step off it: retail asks the player/spectator question (with
-// its password and team controls) after enumeration whenever the word offers
-// a choice, and a target whose word is not known yet is enumerated first.
+// its password controls) after enumeration whenever the word offers a
+// choice, and a target whose word is not known yet is enumerated first. The
+// join entry's reads of the discovered word never test the TeamChoose bit:
+// PRE.MNU has no team control and every join sends TR=-1
+// (join_character_profile.h, D-NET-590); in the match the death screen's
+// SWAP_TEAMS reads the S2C 0x08 copy's bit (world/deploy_screen_feed.h).
 
 #include <cstdint>
 
@@ -23,9 +27,6 @@ inline constexpr uint32_t kSpectatorPassword = 0x4000u; // nested under kSpectat
 // The joiner's reads of a discovered word; -1 = not discovered yet, and every
 // read of an undiscovered word is false.
 inline bool server_flags_known(int32_t flags) { return flags >= 0; }
-inline bool server_allows_team_choice(int32_t flags) {
-	return flags >= 0 && (static_cast<uint32_t>(flags) & server_flag::kTeamChoice) != 0;
-}
 inline bool server_has_side_password(int32_t flags) {
 	return flags >= 0 &&
 			(static_cast<uint32_t>(flags) &
@@ -63,7 +64,7 @@ enum class JoinEntryStep {
 // server or side password — prompts; anything else dials. TeamChoose alone
 // (a plain team game, 0x904) is not a choice: retail tests the discovered
 // word against 0x6038 and joins at once (D-NET-268).
-// [orig: UI_EnumerateAndJoinSession @0x56a296 `test dword_25E5898, 6038h` ->
+// [orig: UI_EnumerateAndJoinSession @0x56a296 `test g_PreGameServerFlags, 6038h` ->
 //  state 8 (PRE_JOINSESSIONCHOICE) or state 4 (join); the choice panels
 //  UI_ShowPreGameMenuByState @0x568d10 (0x8 password, 0x2000 spectate, 0x30
 //  team password)]

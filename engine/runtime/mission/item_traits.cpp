@@ -148,7 +148,8 @@ world::ItemDeathTraits item_death_traits_from_def(const DefItemDef &def) {
 //   desyncs the retail client mid-frame (retail-join v13, 2026-07-02).
 // - Entity::health_max (+ health lift) from items.def hp (itemDef+0x17C healthMax): the original
 //   spawns Health = healthMax [orig: Entity_InitFromItemDef @0x49e550]; entities still at the
-//   promotion default (100) are lifted to full health, a player body excepted (D-PWR-9). Feeds
+//   promotion default (100) are lifted to full health once, at the sweep that first resolves
+//   their def (D-PWR-12), a player body excepted (D-PWR-9). Feeds
 //   the §5.13 vehicle health word (a too-small value renders every vehicle burning) and the
 //   §5.10 field-17 tier denominator.
 //
@@ -256,9 +257,12 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 		//  MapOverlay_RenderAllByLayer @0x5BE6C4]
 		e->has_graphic_model = def != nullptr && def->graphic[0] != '\0' &&
 				e->kind != world::EntityKind::Marker;
-		// The physics callback table's ewep row selects the gun update.
-		// [orig: g_EntityClassPhysicsTable row @0x82ABE0 -> Entity_UpdateTransformAndTurret @0x440CA0]
-		e->emplaced_update = move_row == world::PhysicsClass::Ewep;
+		// The physics callback table's ewep row selects the gun update. A
+		// section clone's template pins its update callback (the floating
+		// physics) whatever its def, on every resolve.
+		// [orig: g_EntityClassPhysicsTable row @0x82ABE0 -> Entity_UpdateTransformAndTurret @0x440CA0;
+		//  Entity_SpawnSectionEntity @0x440370]
+		e->emplaced_update = !e->section_clone && move_row == world::PhysicsClass::Ewep;
 		// The render tag picks the def+0x144 CTRL callback; the ewep row's
 		// publishes the gun words (world/mount_controls.h).
 		// [orig: EntityDef_InitAllCallbacks @0x4A5AEA..0x4A5B03 ->
@@ -285,12 +289,13 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // the decoded-client record width. A missing or unresolved definition
         // fails closed as Unknown (0).
         e->net_class_code = wire_class ? wire_class(def_id) : 0;
-        // items.def hp -> healthMax; lift spawn-default health to full [orig: @0x49e550].
+        // items.def hp -> healthMax; the item init below lifts spawn-default
+        // health to full [orig: @0x49e550].
         const int hp = world::retail_signed_i16(def != nullptr ? def->hp : 0);
         e->health = world::retail_signed_i16(e->health);
         e->health_max = world::retail_signed_i16(e->health_max);
         e->critical_hp = world::retail_signed_i16(def != nullptr ? def->critical_hp : 0);
-        e->mana_max = e->mana = world::retail_signed_i16(def != nullptr ? def->mana : 0);
+        e->mana_max = world::retail_signed_i16(def != nullptr ? def->mana : 0);
         e->music_location = world::retail_signed_i16(def != nullptr ? def->music_location : 0);
         e->armor_impact = world::retail_signed_i16(
                 def != nullptr ? def->armor_impact : 0);
@@ -303,26 +308,16 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // radarSig (primary-FOV cap), entity+420 = def+378 heatSig (secondary)].
         e->radar_sig = def != nullptr ? (def->radar_sig & 0xFFFF) : 0;
         e->heat_sig = def != nullptr ? (def->heat_sig & 0xFFFF) : 0;
-        // The lift is the mission start's reload over the loaded pools, which
-        // runs ahead of the round init's player spawn, so no player body takes
-        // it on any path ported here: a player's health is its spawn's raises
-        // to the ceiling, which a difficulty word can halve or double to
-        // exactly 100 (D-PWR-9), and which every sweep after its spawn would
-        // otherwise meet (the boot's, bind_spawned_body's, a joiner's on each
-        // streamed topology change). Retail's save-game restore, unported,
-        // stores a restored body's ceiling instead.
-        // [orig: Game_ReloadEntityModelsAndCallbacks @0x522830 - Health =
-        //  healthMax @0x522A07 / @0x522B65, pool 0's ceiling store called
-        //  @0x522CE9 - called @0x52550E, ahead of the
-        //  Server_InitAllPlayerEntitiesForRound call @0x525BAF;
-        //  SaveFile_ReadOrWriteEntityRecord @0x4AC0C0 ->
-        //  Entity_ReloadItemDefAndReinit, called @0x4AC157, the ceiling store
-        //  called @0x4A9F3A]
-        if (hp != 0) {
-            e->health_max = hp;
-            if (e->health == 100 && ((e->flags | e->engine_flags) & world::kEntityFlagPlayer) == 0)
-                e->health = hp; // still at the promotion default
-        }
+        if (hp != 0) e->health_max = hp;
+        // NoTarget item (attrib 0x100): the model init's first leg ORs Flags
+        // 0x8000000, ahead of the hp-0 leg below, and never clears it. The AI
+        // target walks and the pool ray walker skip the bit (the walker unless
+        // its caller passes the include arg), and the 0x10 / 0x0D load stream
+        // carries it in the Flags dword. Resolved defs only, as the hp-0 leg.
+        // [orig: Entity_InitFromModel @0x40DC30 - `test [def+54h], 100h`
+        //  @0x40DC3B, `or [esi+24h], 8000000h` @0x40DC4F]
+        if (def != nullptr && (def->attrib & DEF_ITEM_ATTRIB_NOTARGET) != 0)
+            e->engine_flags |= world::kEntityFlagNoTarget;
         // Indestructible item (def hp == 0): entity Flags |= 0x4000000 and subType = 0xFF —
         // the def-sourced half of the 0x10 static record's flag dword / flag-0x80 byte
         // (D-NET-147; every golden ASH_I5A building carries both) — Health = 1, and the
@@ -381,14 +376,46 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // above. [orig: ItemDef_ParseProperty @0x49fa6c; consumer
         // Entity_UpdateInfantryAI @0x4b9c97; world-wac-ai-re §19]
         e->deathtime_ticks = def != nullptr ? def->deathtime_ticks : 0;
-        if (def != nullptr && !e->destroy_timer_initialized) {
-            // [orig: Entity_InitFromItemDef @0x49E550]
+        // The item init's destroy timer, Health and Armor stores, once per
+        // body: retail runs them at a body's creation (the 0x0C and slot-packet
+        // spawns) and at the mission start's reload over the loaded pools (a
+        // vehicle's respawn stores Health and Armor itself, D-PWR-14), and
+        // no later sweep re-runs them, so a joiner's resweep on each streamed
+        // topology change leaves an existing body's words alone, its own body's
+        // included (D-PWR-12). The reload walks pools 1, 2 and 0 only; a
+        // loaded pool-3 body's stores here are D-PWR-13.
+        // [orig: Entity_InitFromItemDef @0x49E550 - Health @0x49E5C0, Armor
+        //  @0x49E5CE - called @0x42E84D / @0x546A15;
+        //  Game_ReloadEntityModelsAndCallbacks @0x522830 - Armor @0x522A1A /
+        //  @0x522B78 / @0x522D00]
+        if (def != nullptr && !e->item_init_done) {
             e->destroy_timer = def->destroy_timing_ticks[0];
-            e->destroy_timer_initialized = true;
+            e->item_init_done = true;
+            // The lift is the mission start's reload over the loaded pools,
+            // which runs ahead of the round init's player spawn, so no player
+            // body takes it on any path ported here: a player's health is its
+            // spawn's raises to the ceiling, which a difficulty word can halve
+            // or double to exactly 100 (D-PWR-9), and which the first sweep
+            // after its spawn would otherwise meet (the boot's,
+            // bind_spawned_body's). Retail's save-game restore, unported,
+            // stores a restored body's ceiling instead.
+            // [orig: Game_ReloadEntityModelsAndCallbacks @0x522830 - Health =
+            //  healthMax @0x522A07 / @0x522B65, pool 0's ceiling store called
+            //  @0x522CE9 - called @0x52550E, ahead of the
+            //  Server_InitAllPlayerEntitiesForRound call @0x525BAF;
+            //  SaveFile_ReadOrWriteEntityRecord @0x4AC0C0 ->
+            //  Entity_ReloadItemDefAndReinit, called @0x4AC157, the ceiling store
+            //  called @0x4A9F3A]
+            if (hp != 0 && e->health == 100 &&
+                    ((e->flags | e->engine_flags) & world::kEntityFlagPlayer) == 0)
+                e->health = hp; // still at the promotion default
+            e->mana = e->mana_max;
             // The move-function row selects only the update callback, the
             // squib motor [orig: the "squib" row @0x82AC88 of the 12-byte move
-            // table @0x82abc8 -> Entity_ProcessProjectileTravel @0x448D50].
-            if (move_row == world::PhysicsClass::Squib) e->squib.motor = true;
+            // table @0x82abc8 -> Entity_ProcessProjectileTravel @0x448D50],
+            // never a section clone's pinned one [orig: @0x440370].
+            if (move_row == world::PhysicsClass::Squib && !e->section_clone)
+                e->squib.motor = true;
             // The +0x160/+0x26C/+0x2B0/+0x2C8 init is the ai_function class
             // row's second slot, run through def+0x148 whatever the move
             // function [orig: sub_448CE0 @0x448CE0, row @0x813120 +12;
@@ -431,7 +458,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // tag drops the draw. A palm fragment's draw is item 900's own too: its
         // spawn stores the sector builder into the model's collision and scar
         // callbacks, not the draw's (palm_fragment).
-        // [orig: Projectile_SpawnFromTile @0x53C3B0 / @0x53C3C6; Render_SectorEntity
+        // [orig: Palm_SpawnFragment @0x53C3B0 / @0x53C3C6; Render_SectorEntity
         //  @0x5C431B..0x5C4372]
         const std::string_view render =
                 def != nullptr ? render_tag(def->render_function) : std::string_view();
@@ -449,9 +476,17 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         //  third columns BoneCallback_Simple @0x4E2600 (cveh's @0x82CFEC);
         //  Render_SectorEntity @0x5C431B]
         // A model whose own LOD tag is one of these rows binds it too
-        // (D-ITEMDEF-18); the `bldg` row pivots by another rule (D-ITEMDEF-23).
+        // (D-ITEMDEF-18); the `bldg` row pivots by its own rule, below.
         e->death_section_pivot =
                 render == "cveh" || render == "chel" || render == "tank" || render == "cpln";
+        // The `bldg` row's world callback translates the draw of whatever it
+        // draws by the negated origin, in the graphic model's COBJ, of the
+        // section the byte +0x2C1 names; section 0 draws in place. A section
+        // clone carries its own section there.
+        // [orig: row 'bldg' @0x82CF10 -> BoneCallback_bldg_World @0x4E21A0,
+        //  the byte @0x4E2214, the translate @0x4E221E..0x4E2247;
+        //  Entity_SpawnSectionEntity's store @0x4404C1]
+        e->bldg_section_pivot = render == "bldg";
         // The ai_function palm row's callback is WeaponOverlay_HandleDamage and
         // the move_function psec row's update is Entity_UpdatePhysicsStep: the two
         // callbacks the load serializers test before streaming entity+0x270.
@@ -460,10 +495,16 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         e->palm_state_streamed = def != nullptr &&
                 (strutil::iequals(def->ai_function, "palm") ||
                  move_row == world::PhysicsClass::Psec);
-        // The ai_function binds its event row by whole name, ignoring case.
-        // [orig: Entity_LookupRenderCallbacks @0x407dc0, stricmp @0x407de2]
-        e->door_event = def != nullptr && strutil::iequals(def->ai_function, "door");
-        e->door_motion = move_row == world::PhysicsClass::Door;
+        // The ai_function binds its event row by whole name, ignoring case. A
+        // section clone's template pins its event and update callbacks, so
+        // neither door row reaches it on any resolve; a palm fragment takes
+        // item 900's own pair.
+        // [orig: Entity_LookupRenderCallbacks @0x407dc0, stricmp @0x407de2;
+        //  Entity_SpawnSectionEntity @0x440365 / @0x440370;
+        //  Palm_SpawnFragment @0x53C35D / @0x53C36F]
+        e->door_event = !e->section_clone && def != nullptr &&
+                strutil::iequals(def->ai_function, "door");
+        e->door_motion = !e->section_clone && move_row == world::PhysicsClass::Door;
         // Every def carries its two +0x6F3/+0x70B sound names; the door
         // commands play them, and so does the drop of a carried object off
         // its carrier (world::drop_object_from_carrier).
@@ -478,8 +519,13 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // door def, its open sections from the record's section word.
         // [orig: Entity_SpawnFromBMSRecord @0x40F25D..0x40F2DA (types 5/2, attrib
         //  0x80); NapiNPClientMsg_0x010 @0x4336B5..0x433745 (attrib 0x80 alone)]
+        // A piece (a section clone or a palm fragment) comes from neither: its
+        // clone copies 0x2B4 bytes, short of the door slot base +0x2B8, and
+        // nothing allocates it rows (a door item 900's: D-ITEMDEF-27).
+        // [orig: Entity_CloneFromTemplateByType @0x4398A0, the copy @0x43997D]
         const bool wire_doors = !world.rules.logic_authority && e->handle.pool() == 2;
-        if (def != nullptr && (def->attrib & DEF_ITEM_ATTRIB_DOOR) != 0 &&
+        if (def != nullptr && !e->item_section_piece &&
+                (def->attrib & DEF_ITEM_ATTRIB_DOOR) != 0 &&
                 (wire_doors || def->type == DEF_ITEM_TYPE_BUILDING ||
                  def->type == DEF_ITEM_TYPE_DECORATION)) {
             e->door_count = static_cast<int8_t>(def->deathtime_ticks);
@@ -679,6 +725,10 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         row.health_max = world::retail_signed_i16(def->hp);
         row.armor_impact = world::retail_signed_i16(def->armor_impact);
         row.armor_kz = world::retail_signed_i16(def->armor_kz);
+        // The placed entity's model init reads the def's NoTarget bit
+        // [orig: Entity_ConvertRoundToPlacedEntity @0x5455B0 -> the
+        //  Entity_InitFromModel call @0x5455D8].
+        row.no_target = (def->attrib & DEF_ITEM_ATTRIB_NOTARGET) != 0;
         world.throwables.classes.set(row);
     }
     // The AS zone-slot chain — built AFTER the trait stamp (zone registration keys on

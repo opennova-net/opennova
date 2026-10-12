@@ -102,7 +102,7 @@ struct SoundSlotEvent {
 // Packed player-character identity -> the Avatars.def head-sex bit used by
 // Entity_GetProfileSlotSound. The shell installs this immutable mission table;
 // sound selection remains portable and unknown ids deliberately read male.
-// [orig: MinimapSlot_FindByPackedId @0x57a270;
+// [orig: CAvatarDefs_FindComboByPackedId @0x57a270;
 //  Entity_GetProfileSlotSound female select @0x52831c]
 struct CharacterTraitsTable {
     struct Row {
@@ -248,7 +248,8 @@ struct WacNamedValues {
     // location() reads this cached player-body result, not a named-table row.
     // [orig: dword_B763E8, org2 @0x4B634B; WacCmd_Location @0x4ED190]
     int32_t local_location = 0;
-    int32_t random_result = 0; // RND @0xC6B23C, written by random and named-variable stores
+    // RND sits below the mission bank, so it lives in the variable store
+    // (ScriptVarStore::WacState::rnd).
 };
 
 // The def+0x196 unit-class split the SP score block keys on: 3 and 4 are

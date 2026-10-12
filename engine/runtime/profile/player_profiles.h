@@ -94,7 +94,7 @@ bool name_char_allowed(char c);
 // the picked row's value, as a byte, into the shown side's byte at once: no
 // ACCEPT is needed and nothing puts it back (the ACCEPT's dialog read leaves
 // both bytes, and player.mnu authors no other way off the screen)
-// [orig: sub_560030 @0x560030, the store @0x56004c; PlayerInfo_SaveFromDialog
+// [orig: PlayerInfo_HandlePlayerVoiceSelect @0x560030, the store @0x56004c; PlayerInfo_SaveFromDialog
 // @0x55ee10]. The list's fill writes 0 there when its rows do not carry the
 // value [orig: PlayerInfo_PopulatePlayerVoiceCombo @0x55de21], and the fill
 // and the voice preview read it [orig: @0x55ddea; PlayerInfo_PreviewVoice
@@ -106,7 +106,7 @@ bool name_char_allowed(char c);
 // PlayerInfo_PopulateAvatarComboList @0x5603b1 and @0x5608d8]; a nationality,
 // division or combo pick fills it at once against the new combo [orig:
 // PlayerInfo_HandleNationalitySelect @0x560600, PlayerInfo_HandleDivisionSelect
-// @0x560690 -> PlayerInfo_PopulateAvatarComboList; PlayerInfo_HandleVoiceSelect
+// @0x560690 -> PlayerInfo_PopulateAvatarComboList; PlayerInfo_HandleComboListSelect
 // @0x55ff59]. A side other than 0 or 1 reads 0 and writes nothing.
 int voice_override(const playersav::ProfileRecord &record, int side);
 void set_voice_override(playersav::ProfileRecord &record, int side, int value);
@@ -164,6 +164,22 @@ public:
 	// when the last character is refused, which the screen then cuts from the
 	// edit.
 	bool rename(const std::string &text);
+
+	// The PLAYERNAME edit's text set, which posts the edit's change notice to
+	// the name rule above once [orig: CEditWnd_SetText @0x661900, _EditWnd
+	// vtable 0x7E2614 slot +76 - the notice 0x7000001 @0x66197f..0x661986;
+	// PlayerInfo_HandlePlayerNameChange @0x55fbb0, registered for PLAYERNAME
+	// with mask 0x80 @0x561511]: an accepted last character, or no text,
+	// renames the record (rename); a refused one is cut and the edit set again
+	// [orig: @0x55fc35..0x55fc6d], but that set's notice reaches no handler, as
+	// the dispatch detaches the edit's callback chain while it walks it
+	// [orig: CWnd_EmitEventToNamedHandlerAndCallbacks @0x646970 - the detach
+	// @0x646990..0x6469a2, the restore @0x646a09], so the record keeps its
+	// name and flag. Returns the text the edit is left holding. The screen's
+	// populate sets the record's own name this way at its build, a side radio
+	// and a class pick [orig: PlayerInfo_PopulateAllControls @0x5606f0 - the
+	// set @0x5608d5].
+	std::string set_name_edit(std::string text);
 
 	// The PLAYER_INFO ACCEPT's name leg [orig: save_player_info_from_dialog
 	// @0x55efa8..0x55f039]: the edit's text (15 characters) into the name; an
