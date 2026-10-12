@@ -142,6 +142,61 @@ NodeCull cull_node(const QuadNode& node, const TerrainViewCull& cull,
 // Mipchain — port of gobj_trn_build_heightmap_mipchain (0x10030C91)
 // ---------------------------------------------------------------------------
 
+namespace {
+
+// One finest cell: the min and max of the 3 x 3 texels from (col-2, row-2),
+// wrapping at 1024, as bytes of 128 raw units (the max rounded up).
+void mip_finest_cell(const std::vector<uint16_t>& heightmap, int row, int col, uint8_t* out) {
+	int r0 = ((row - 2) & 0x3FF) << 10;
+	int r1 = ((row - 1) & 0x3FF) << 10;
+	int r2 = ((row)     & 0x3FF) << 10;
+	int c0 = (col - 2) & 0x3FF;
+	int c1 = (col - 1) & 0x3FF;
+	int c2 = (col)     & 0x3FF;
+
+	int h[9] = {
+		heightmap[c0 + r0], heightmap[c1 + r0], heightmap[c2 + r0],
+		heightmap[c0 + r1], heightmap[c1 + r1], heightmap[c2 + r1],
+		heightmap[c0 + r2], heightmap[c1 + r2], heightmap[c2 + r2],
+	};
+
+	int min_h = h[0], max_h = h[0];
+	for (int k = 1; k < 9; k++) {
+		if (h[k] < min_h) min_h = h[k];
+		if (h[k] > max_h) max_h = h[k];
+	}
+
+	out[0] = (uint8_t)(min_h >> 7);
+	out[1] = (uint8_t)((max_h + 127) >> 7);
+}
+
+// One coarser cell: the min of its four children's mins, the max of their maxes.
+void mip_parent_cell(const uint8_t* prev, int prev_size, int rr, int cc, uint8_t* out) {
+	const uint8_t* a = prev + (rr * 2 * prev_size + cc * 2) * 2;
+	const uint8_t* b = a + 2;
+	const uint8_t* c = a + prev_size * 2;
+	const uint8_t* d = c + 2;
+
+	uint8_t mn = a[0];
+	if (b[0] < mn) mn = b[0];
+	if (c[0] < mn) mn = c[0];
+	if (d[0] < mn) mn = d[0];
+
+	uint8_t mx = a[1];
+	if (b[1] > mx) mx = b[1];
+	if (c[1] > mx) mx = c[1];
+	if (d[1] > mx) mx = d[1];
+
+	out[0] = mn;
+	out[1] = mx;
+}
+
+constexpr int kMipFinestSide = 512;
+constexpr int kMipLevelCount = 10;
+constexpr size_t kMipDataBytes = 699052;
+
+} // namespace
+
 Mipchain build_mipchain(const std::vector<uint16_t>& heightmap) {
 	Mipchain mc;
 	mc.data.resize(699052, 0);
@@ -151,29 +206,9 @@ Mipchain build_mipchain(const std::vector<uint16_t>& heightmap) {
 	int mip_size = 512;
 
 	for (int row = 2; row < 1026; row += 2) {
-		int r0 = ((row - 2) & 0x3FF) << 10;
-		int r1 = ((row - 1) & 0x3FF) << 10;
-		int r2 = ((row)     & 0x3FF) << 10;
-
 		for (int col = 2; col < 1026; col += 2) {
-			int c0 = (col - 2) & 0x3FF;
-			int c1 = (col - 1) & 0x3FF;
-			int c2 = (col)     & 0x3FF;
-
-			int h[9] = {
-				heightmap[c0 + r0], heightmap[c1 + r0], heightmap[c2 + r0],
-				heightmap[c0 + r1], heightmap[c1 + r1], heightmap[c2 + r1],
-				heightmap[c0 + r2], heightmap[c1 + r2], heightmap[c2 + r2],
-			};
-
-			int min_h = h[0], max_h = h[0];
-			for (int k = 1; k < 9; k++) {
-				if (h[k] < min_h) min_h = h[k];
-				if (h[k] > max_h) max_h = h[k];
-			}
-
-			*write_ptr++ = (uint8_t)(min_h >> 7);
-			*write_ptr++ = (uint8_t)((max_h + 127) >> 7);
+			mip_finest_cell(heightmap, row, col, write_ptr);
+			write_ptr += 2;
 		}
 	}
 
@@ -186,23 +221,8 @@ Mipchain build_mipchain(const std::vector<uint16_t>& heightmap) {
 
 		for (int rr = 0; rr < mip_size; rr++) {
 			for (int cc = 0; cc < mip_size; cc++) {
-				uint8_t* a = prev + (rr * 2 * prev_size + cc * 2) * 2;
-				uint8_t* b = a + 2;
-				uint8_t* c = a + prev_size * 2;
-				uint8_t* d = c + 2;
-
-				uint8_t mn = a[0];
-				if (b[0] < mn) mn = b[0];
-				if (c[0] < mn) mn = c[0];
-				if (d[0] < mn) mn = d[0];
-
-				uint8_t mx = a[1];
-				if (b[1] > mx) mx = b[1];
-				if (c[1] > mx) mx = c[1];
-				if (d[1] > mx) mx = d[1];
-
-				*write_ptr++ = mn;
-				*write_ptr++ = mx;
+				mip_parent_cell(prev, prev_size, rr, cc, write_ptr);
+				write_ptr += 2;
 			}
 		}
 		mc.level_count++;
@@ -213,6 +233,53 @@ Mipchain build_mipchain(const std::vector<uint16_t>& heightmap) {
 		std::swap(mc.levels[i], mc.levels[mc.level_count - 1 - i]);
 
 	return mc;
+}
+
+void refresh_mipchain(Mipchain& mc, const std::vector<uint16_t>& heightmap,
+                      int x, int z, int w, int h) {
+	if (mc.level_count != kMipLevelCount || mc.data.size() != kMipDataBytes ||
+			heightmap.size() != static_cast<size_t>(1024) * 1024) {
+		mc = build_mipchain(heightmap);
+		return;
+	}
+	// The levels over this chain's own bytes, finest first in memory and
+	// coarsest first in the table (build_mipchain's order).
+	size_t offset = 0;
+	for (int i = kMipLevelCount - 1, side = kMipFinestSide; i >= 0; --i, side >>= 1) {
+		mc.levels[i] = mc.data.data() + offset;
+		offset += static_cast<size_t>(side) * side * 2;
+	}
+	if (w <= 0 || h <= 0) return;
+
+	// A finest cell r reads rows 2r, 2r+1 and 2r+2 (wrapping), likewise columns:
+	// it changes only where both meet the rect.
+	const auto in_span = [](int v, int lo, int n) { return v >= lo && v < lo + n; };
+	std::vector<uint8_t> rows(kMipFinestSide), cols(kMipFinestSide);
+	for (int r = 0; r < kMipFinestSide; ++r) {
+		rows[r] = in_span(2 * r, z, h) || in_span(2 * r + 1, z, h) || in_span((2 * r + 2) & 0x3FF, z, h);
+		cols[r] = in_span(2 * r, x, w) || in_span(2 * r + 1, x, w) || in_span((2 * r + 2) & 0x3FF, x, w);
+	}
+	uint8_t* finest = mc.levels[kMipLevelCount - 1];
+	for (int r = 0; r < kMipFinestSide; ++r) {
+		if (!rows[r]) continue;
+		for (int c = 0; c < kMipFinestSide; ++c) {
+			if (cols[c]) mip_finest_cell(heightmap, 2 * r + 2, 2 * c + 2, finest + (r * kMipFinestSide + c) * 2);
+		}
+	}
+	for (int i = kMipLevelCount - 2, side = kMipFinestSide >> 1; i >= 0; --i, side >>= 1) {
+		for (int r = 0; r < side; ++r) {
+			rows[r] = rows[2 * r] || rows[2 * r + 1];
+			cols[r] = cols[2 * r] || cols[2 * r + 1];
+		}
+		const uint8_t* prev = mc.levels[i + 1];
+		uint8_t* level = mc.levels[i];
+		for (int r = 0; r < side; ++r) {
+			if (!rows[r]) continue;
+			for (int c = 0; c < side; ++c) {
+				if (cols[c]) mip_parent_cell(prev, side * 2, r, c, level + (r * side + c) * 2);
+			}
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------

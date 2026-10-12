@@ -64,6 +64,15 @@ struct Mipchain {
 
 Mipchain build_mipchain(const std::vector<uint16_t>& heightmap);
 
+// The cells of `mc` (built from the heights before) whose texels meet the
+// atlas rect x, z, w, h made again from `heightmap`, every other cell kept: the
+// chain equals a fresh build_mipchain(heightmap) when only that rect changed
+// (an editor's sculpt stroke). The level pointers are set again over mc.data
+// (a copied chain's still pointed into its source's). A chain of another shape
+// is built whole.
+void refresh_mipchain(Mipchain& mc, const std::vector<uint16_t>& heightmap,
+                      int x, int z, int w, int h);
+
 // ---------------------------------------------------------------------------
 // Quadtree nodes
 // ---------------------------------------------------------------------------

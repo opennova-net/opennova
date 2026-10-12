@@ -2,7 +2,9 @@
 
 #include <formats/trn/trn.h>
 #include <runtime/renderer/texture_dxt.h>
+#include <runtime/terrain_query/coords.h>
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -32,6 +34,26 @@ Rgba8Image build_heightfield_normal_map(
 		uint32_t width,
 		uint32_t height,
 		const TerrainQuadrantLocks &locks = TerrainQuadrantLocks{});
+
+// The texels of `normals` (build_heightfield_normal_map's over the heights
+// before) whose kernel reads a texel of the atlas rect `rect` made again from
+// `depth`, every other texel kept: equal to a fresh build over `depth` when only
+// that rect changed (an editor's sculpt stroke). The kernel reads a texel's
+// four neighbours, never the texel itself, so the texels made again are those
+// of the rect's rows whose left or right tap meets its columns and those of
+// its columns whose upper or lower tap meets its rows. `quadrants_written`,
+// when given, says which of the map's four quadrants (top-left, top-right,
+// bottom-left, bottom-right) had a texel made again (the device textures cut
+// from them). False, nothing written, where `normals` is not a map of the
+// depth's shape.
+bool refresh_heightfield_normal_map(
+		Rgba8Image &normals,
+		const std::vector<uint16_t> &depth,
+		uint32_t width,
+		uint32_t height,
+		const TerrainQuadrantLocks &locks,
+		const terrain::CoordsRect &rect,
+		std::array<bool, 4> *quadrants_written = nullptr);
 
 // Normalize DBlend RGB with the retail integer path, preserving alpha and
 // mapping a zero RGB sum to pure red.
