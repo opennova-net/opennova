@@ -429,8 +429,9 @@ func test_persisted_side_profiles_restore_each_team_cascade() -> void:
 	var blue := db.resolve_character_id(0x0400, 0)
 	var red := db.resolve_character_id(0x8407, 1)
 	var companion := PlayerInfoMenuCompanion.new()
+	# The edit shows the current record's name, which the populate sets.
+	assert_true(PlayerProfile.store().rename("Persistent"))
 	companion.set_persisted_profile({
-		"name": "Persistent",
 		"team": 0,
 		"side_profiles": [
 			{
@@ -491,6 +492,70 @@ func test_accept_emits_avatar_chosen() -> void:
 	var profile: Dictionary = get_signal_parameters(companion, "avatar_chosen")[0]
 	assert_eq(String(profile.get("name", "")), "Sandman", "the committed profile carries the name")
 	assert_eq(int(profile.get("nationality", -1)), 0, "the committed profile carries the selection")
+
+
+# Every populate sets PLAYERNAME through the edit's own text set, whose change
+# notice runs the name rule on the record's name once: a refused last character
+# is cut from the edit, whose own set reaches no handler (the dispatch detaches
+# the edit's callback chain while it walks it), so the record keeps its name
+# [orig: PlayerInfo_PopulateAllControls @0x5608d5 -> CEditWnd_SetText @0x661900
+# -> PlayerInfo_HandlePlayerNameChange @0x55fbb0, the cut @0x55fc35..0x55fc6d;
+# CWnd_EmitEventToNamedHandlerAndCallbacks @0x646990..0x6469a2, @0x646a09]. The
+# ACCEPT's rule (white space only) keeps such a name, so a record can hold one.
+func test_populate_cuts_one_refused_last_character_from_the_edit() -> void:
+	var store := PlayerProfile.store()
+	store.commit_name("Bob!?")
+	assert_eq(store.get_player_name(), "Bob!?", "the ACCEPT's leg keeps a refused last character")
+	var companion := PlayerInfoMenuCompanion.new()
+	companion.set_database(_load_db())
+	var driver := _make_avatar_driver()
+	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
+	var edit := driver.widget_id("PLAYERNAME")
+	assert_eq(driver.get_widget_text(edit), "Bob!", "the build's set cuts one refused character")
+	assert_eq(store.get_player_name(), "Bob!?", "and the record keeps its name")
+	# A side radio saves the edit's text through the ACCEPT's leg, then
+	# populates: the repopulate's set runs the rule too.
+	driver.set_widget_text(edit, "Ann#")
+	var red_radio := driver.widget_id("SIDE_RED")
+	driver.set_widget_checked(red_radio, true)
+	driver.set_widget_checked(driver.widget_id("SIDE_BLUE"), false)
+	driver.widget_activated.emit(red_radio, "SIDE_RED")
+	assert_eq(driver.get_widget_text(edit), "Ann", "the side switch's populate cuts it")
+	assert_eq(store.get_player_name(), "Ann#", "and the record keeps the saved name")
+
+
+# The rule's kept text, a name or none, clears the record's no-name bit at the
+# populate [orig: PlayerInfo_HandlePlayerNameChange @0x55fc9b], so opening the
+# screen on a nameless record clears the bit without an ACCEPT.
+func test_populate_clears_the_no_name_bit() -> void:
+	var store := PlayerProfile.store()
+	# A record flagged nameless that still carries a name: the bit at +52 of
+	# record 0 (after the 16-byte header), the name at +4.
+	var bytes := store.player_sav_bytes()
+	var record := 16
+	var stored := "Ghost".to_ascii_buffer()
+	for i in 16:
+		bytes[record + 4 + i] = stored[i] if i < stored.size() else 0
+	bytes.encode_u32(record + 52, bytes.decode_u32(record + 52) | 1)
+	store.load_bytes(bytes, true, store.weapon_sav_bytes(), true, "")
+	assert_true(store.is_nameless(), "the record loads flagged nameless")
+	assert_eq(store.get_player_name(), "Ghost")
+	var companion := PlayerInfoMenuCompanion.new()
+	companion.set_database(_load_db())
+	var driver := _make_avatar_driver()
+	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
+	assert_eq(driver.get_widget_text(driver.widget_id("PLAYERNAME")), "Ghost")
+	assert_false(store.is_nameless(), "the build's set clears the no-name bit")
+	# No text is kept too: the ACCEPT's leg empties a name that starts with white
+	# space and flags the record, and the next populate clears the flag again.
+	store.commit_name(" Ghost")
+	assert_true(store.is_nameless())
+	var reopened := PlayerInfoMenuCompanion.new()
+	reopened.set_database(_load_db())
+	var again := _make_avatar_driver()
+	reopened.on_menu_built(again, "player.mnu", "PLAYER_INFO", null)
+	assert_eq(again.get_widget_text(again.widget_id("PLAYERNAME")), "")
+	assert_false(store.is_nameless(), "an empty name is kept and clears the bit")
 
 
 ## ADR 0046 S13 A8: an ACCEPT writes the profile record in memory and the next save point saves

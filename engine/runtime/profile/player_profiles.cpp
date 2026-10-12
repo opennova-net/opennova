@@ -296,6 +296,20 @@ bool PlayerProfiles::rename(const std::string &text) {
 	return true;
 }
 
+std::string PlayerProfiles::set_name_edit(std::string text) {
+	if (rename(text)) return text;
+	// One character off the edit and nothing more: the cut's set finds the
+	// chain detached [orig: @0x55fc4d, the set @0x55fc6d; @0x6469a2]. Retail's
+	// edit holds one byte per character; ours holds the edit's UTF-8, so a
+	// complete multi-byte sequence at the end is that one character.
+	size_t lead = text.size() - 1;
+	while (lead > 0 && (static_cast<unsigned char>(text[lead]) & 0xC0) == 0x80) --lead;
+	const auto b = static_cast<unsigned char>(text[lead]);
+	const size_t seq = b >= 0xF0 && b < 0xF8 ? 4 : b >= 0xE0 ? 3 : b >= 0xC0 ? 2 : 1;
+	text.resize(seq == text.size() - lead ? lead : text.size() - 1);
+	return text;
+}
+
 void PlayerProfiles::commit_name(const std::string &text) {
 	// The edit's text into the 16-byte field [orig: @0x55efc8], then the
 	// white-space test [orig: @0x55efe1..0x55f01e; +52 |= 1 @0x55f02a, +4 = 0

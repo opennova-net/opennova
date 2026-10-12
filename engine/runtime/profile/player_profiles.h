@@ -165,6 +165,22 @@ public:
 	// edit.
 	bool rename(const std::string &text);
 
+	// The PLAYERNAME edit's text set, which posts the edit's change notice to
+	// the name rule above once [orig: CEditWnd_SetText @0x661900, _EditWnd
+	// vtable 0x7E2614 slot +76 - the notice 0x7000001 @0x66197f..0x661986;
+	// PlayerInfo_HandlePlayerNameChange @0x55fbb0, registered for PLAYERNAME
+	// with mask 0x80 @0x561511]: an accepted last character, or no text,
+	// renames the record (rename); a refused one is cut and the edit set again
+	// [orig: @0x55fc35..0x55fc6d], but that set's notice reaches no handler, as
+	// the dispatch detaches the edit's callback chain while it walks it
+	// [orig: CWnd_EmitEventToNamedHandlerAndCallbacks @0x646970 - the detach
+	// @0x646990..0x6469a2, the restore @0x646a09], so the record keeps its
+	// name and flag. Returns the text the edit is left holding. The screen's
+	// populate sets the record's own name this way at its build, a side radio
+	// and a class pick [orig: PlayerInfo_PopulateAllControls @0x5606f0 - the
+	// set @0x5608d5].
+	std::string set_name_edit(std::string text);
+
 	// The PLAYER_INFO ACCEPT's name leg [orig: save_player_info_from_dialog
 	// @0x55efa8..0x55f039]: the edit's text (15 characters) into the name; an
 	// empty one or one that starts or ends with white space empties the name

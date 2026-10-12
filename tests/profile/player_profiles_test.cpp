@@ -283,6 +283,31 @@ int test_name_rules() {
     TEST_EXPECT(p.current().name.empty() && p.current().flags == playersav::kRecordFlagNoName);
     p.commit_name("ABCDEFGHIJKLMNOPQRS");
     TEST_EXPECT(p.current().name == "ABCDEFGHIJKLMNO");
+    // The PLAYERNAME set's notice runs the rule once: a kept text (or none)
+    // names the record and clears the no-name bit, a refused last character
+    // is cut from the edit alone, the cut's own set reaching no handler
+    // [orig: CEditWnd_SetText @0x661900 -> PlayerInfo_HandlePlayerNameChange
+    // @0x55fc35..0x55fc6d, @0x55fc91, @0x55fc9b;
+    // CWnd_EmitEventToNamedHandlerAndCallbacks @0x646990..0x6469a2].
+    p.current().name = "Ghost";
+    p.current().flags = playersav::kRecordFlagNoName;
+    TEST_EXPECT(p.set_name_edit("Ghost") == "Ghost");
+    TEST_EXPECT(p.current().name == "Ghost" && p.current().flags == 0);
+    p.current().flags = playersav::kRecordFlagNoName;
+    TEST_EXPECT(p.set_name_edit("") == "");
+    TEST_EXPECT(p.current().name.empty() && p.current().flags == 0);
+    p.current().name = "Bob";
+    p.current().flags = playersav::kRecordFlagNoName;
+    TEST_EXPECT(p.set_name_edit("Bob!?") == "Bob!");
+    TEST_EXPECT(p.current().name == "Bob" && p.current().flags == playersav::kRecordFlagNoName);
+    // A refused non-ASCII last character goes whole: "José" cuts to "Jos".
+    TEST_EXPECT(p.set_name_edit("Jos\xC3\xA9") == "Jos");
+    TEST_EXPECT(p.set_name_edit("A\xE2\x82\xAC") == "A");
+    TEST_EXPECT(p.current().name == "Bob");
+    p.current().name.clear();
+    p.current().flags = 0;
+    TEST_EXPECT(p.set_name_edit("!#") == "!");
+    TEST_EXPECT(p.current().name.empty() && p.current().flags == 0);
     // [orig: sub_561400 @0x561400]
     p.current().sp_no_scope_drift = 1;
     p.current_weapons().red.player_class = 5;

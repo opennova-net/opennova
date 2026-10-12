@@ -155,10 +155,7 @@ func _wire(_file: String, _screen: String) -> void:
 		_connect_combo(GRENADE_CONTROLS[i], _on_grenade_selected.bind(i))
 	_restore_player_class()
 	_populate_loadout()
-	var saved_name := _character_state.persisted_name()
-	var name_edit := _id("PLAYERNAME")
-	if name_edit >= 0 and not saved_name.is_empty():
-		_driver.set_widget_text(name_edit, saved_name)
+	_populate_name()
 	# The auto-reload / auto-medic boxes show the current record's words
 	# (engine profile_controls.h).
 	var auto_reload := _id(AUTO_RELOAD_CONTROL)
@@ -733,11 +730,7 @@ func _populate_all_controls() -> void:
 	var auto_medic := _id(AUTO_MEDIC_CONTROL)
 	if auto_medic >= 0:
 		_driver.set_widget_checked(auto_medic, PlayerProfile.store().is_auto_medic_checked())
-	# The edit takes the record's name without running the name rule, which
-	# retail's set runs through the edit's change notice (D-PLAYERINFO-23).
-	var name_edit := _id("PLAYERNAME")
-	if name_edit >= 0:
-		_driver.set_widget_text(name_edit, PlayerProfile.store().get_player_name())
+	_populate_name()
 	_populate_loadout()
 
 
@@ -893,6 +886,18 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int, val
 	var handler: Callable = _combo_handlers.get(widget_name.to_upper(), Callable())
 	if handler.is_valid():
 		handler.call(index, value)
+
+
+# The PLAYERNAME edit set from the current record's name, as every populate
+# sets it: the set's change notice runs the name rule on it once, so a kept name
+# renames the record and clears its no-name flag, and a refused last character
+# is cut from the edit alone (engine: PlayerProfiles::set_name_edit). An
+# unauthored edit sets nothing.
+func _populate_name() -> void:
+	var id := _id("PLAYERNAME")
+	if id >= 0:
+		_driver.set_widget_text(id,
+				PlayerProfile.store().set_name_edit(PlayerProfile.store().get_player_name()))
 
 
 # The PLAYERNAME edit's change names the current profile record as the player
