@@ -2933,6 +2933,37 @@ bool run_host_client_discards_authority_owned_reload_echoes() {
 	              "host client does not retain authority-owned reload notifications");
 }
 
+// The listen host's own client reports its connection-quality level over its loopback as a
+// joiner does: one C2S 0x4C [u8 level] on the 311th client frame and every 311th after it, in a
+// session; out of a session (single player) the timer runs and nothing is sent.
+// [orig: Client_ProcessNetworkFrame @0x42C180 - the timer @0x42C22D..0x42C23E, is_in_session
+//  @0x42C240, is_mp_session_peer @0x42C24E, the queue @0x42C279 (no authority test)]
+bool run_host_client_reports_its_quality_over_the_loopback() {
+	for (const bool session : {true, false}) {
+		ns::LoopbackChannel host_loop;
+		inmatch::ClientRuntime host_view(host_loop);
+		host_view.view().set_mp_session(session);
+		host_view.set_net_quality_level(2);
+		std::vector<uint32_t> report_frames;
+		for (uint32_t frame = 1; frame <= 2 * 311; ++frame) {
+			host_view.Client_ProcessNetworkFrame(frame);
+			ns::Datagram datagram;
+			while (host_loop.host_recv(datagram)) {
+				if (datagram.tag != c2s::CLIENT_QUALITY) continue;
+				if (!expect(datagram.body == std::vector<uint8_t>{0x02},
+						"the host's 0x4C carries its level"))
+					return false;
+				report_frames.push_back(frame);
+			}
+		}
+		if (!expect(report_frames == (session ? std::vector<uint32_t>{311, 622}
+		                                      : std::vector<uint32_t>{}),
+				"the listen client reports on its 311th frames, in a session only"))
+			return false;
+	}
+	return true;
+}
+
 bool run_host_zone_timer_value_matches_retail_entry() {
 	ns::LoopbackChannel host_loop;
 	inmatch::ClientRuntime host_view(host_loop);
@@ -7611,6 +7642,7 @@ int main() {
 	                run_roundtrip_with_spawn_zones(/*under_send_holdoff=*/true) &&
 	                run_joiner_remote_reload_stamps_before_same_frame_body_tick() &&
 	                run_host_client_discards_authority_owned_reload_echoes() &&
+	                run_host_client_reports_its_quality_over_the_loopback() &&
 	                run_joiner_weapon_pickup_reaches_the_pipeline() &&
 	                run_host_zone_timer_value_matches_retail_entry() &&
 	                run_zone_timer_channels_share_one_retail_entry() &&
