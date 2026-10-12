@@ -239,8 +239,8 @@ These logs go to the working directory, in retail's names and formats:
 
 | Code | Meaning |
 |---|---|
-| 0 | `--help`, stopped by Ctrl+C, `game.cfg` sets `mpreset` (at its read, or at the session create when the word is set by then), the map rotation ran out (the end of the list with `Replay 0`), or the remote admin's `GOTO MENUSTATE` quit the session. |
-| 1 | The server did not start: the install did not mount, the host file did not open or named no listed mission, no port of the bind scan was free, the NovaWorld listing did not host (no gate answered, the gate was refused, the login or the host request failed; `networkconnecttype = 2` or no `--master-host` serves LAN only), or the mission did not boot. |
+| 0 | `--help`, stopped by Ctrl+C or SIGTERM (one that arrives during the start stops the server once the mission has booted, except on a listed server before its listing hosted: 1), `game.cfg` sets `mpreset` (at its read, or at the session create when the word is set by then), the map rotation ran out (the end of the list with `Replay 0`), or the remote admin's `GOTO MENUSTATE` quit the session. |
+| 1 | The server did not start: the install did not mount, the host file did not open or named no listed mission, no port of the bind scan was free, the NovaWorld listing did not host (no gate answered, the gate was refused, the login or the host request failed; `networkconnecttype = 2` or no `--master-host` serves LAN only), the mission did not boot, or, on a listed server, a Ctrl+C or SIGTERM arrived before the NovaWorld listing hosted. |
 | 2 | A usage error, or the `--credentials` file did not open. |
 | 3 | The session ended otherwise: a later map that did not boot, a mission exit that is not a round end, or the NovaWorld service ending the hosting (its `ServerStopHosting`, an admin's or owner's stop from the site among them). |
 
