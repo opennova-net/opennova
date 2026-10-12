@@ -379,8 +379,7 @@ bool local_usegun_switch_is_instant(const World &world,
 void queue_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w,
                                       bool same_category);
 void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w);
-void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w,
-                                         PlayerViewState &view);
+void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w);
 // The local player's seat-2 / seat-3 detach mounts entity+0x308 (a borrowed
 // seat's saved personal slot, else the last selected one) or, without a def of
 // category < 11 there, the current slot, and the mount, past its early-outs (a

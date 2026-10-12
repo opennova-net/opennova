@@ -837,6 +837,11 @@ bool run_request_turns_l_before_the_0x26() {
 	//  @0x435c5e..0x435c61]
 	constexpr int32_t moved = 0x0F000000;
 	h.kernel->local.input.look_heading = moved;
+	// A sitex attach runs no camera reset, so the echo keeps raised binoculars;
+	// neither does the detach (D-WPN-49). [orig: Entity_AttachToVehicleSlot
+	//  type 1 @0x4946e3..0x494746 (the resets @0x4947ae / @0x4948b4 are types 2 /
+	//  5); Entity_DetachFromVehicle @0x4355F0 writes no g_BinocularsToggle]
+	h.kernel->local.view.binoculars_requested = true;
 	auto &self = h.role.runtime->state().upsert(self_handle);
 	self.cls = EntityClass::Player;
 	self.type_id = w::kPlayerInfantryTypeId;
@@ -845,9 +850,19 @@ bool run_request_turns_l_before_the_0x26() {
 	self.state_flags = w::kEntityFlagMounted;
 	self.state_flags_known = true;
 	h.role.run_tick(h.input);
-	return expect(h.kernel->local.player()->mount_target == vh &&
-			body->heading == moved && h.kernel->local.input.look_heading == moved,
-			"the host's echo seats L and writes no yaw");
+	if (!expect(h.kernel->local.player()->mount_target == vh &&
+			body->heading == moved && h.kernel->local.input.look_heading == moved &&
+			h.kernel->local.view.binoculars_requested,
+			"the host's echo seats L, writes no yaw and keeps the binoculars"))
+		return false;
+	auto &detached = h.role.runtime->state().upsert(self_handle);
+	detached.carrier_handle = w::EntityHandle::kInvalid;
+	detached.mount_bone = 0;
+	detached.state_flags = 0;
+	h.role.run_tick(h.input);
+	return expect(!h.kernel->local.player()->mounted &&
+			h.kernel->local.view.binoculars_requested,
+			"the host's detach echo keeps the binoculars");
 }
 
 // A remote player has only a decoded pool-0 row on a joiner. Its current
