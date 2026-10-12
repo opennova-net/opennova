@@ -380,8 +380,10 @@ std::vector<StatScreenRow> end_round_rows(const RoleView &view, int tab) {
 	}
 	// The header's player_index is the recipient's index into the FROZEN
 	// (points-descending) board array, not a connection slot. Retail joins the
-	// board by the row's stored slot id and highlights the row whose slot
-	// matches board[player_index].slot; the same fold works for both roles
+	// board by the row's stored slot id; it highlights, after the sort, the row
+	// whose column-1 value (the slot) is the local player entity's slot id
+	// (fill_stat_results has the witness). Ours flags the row whose slot is
+	// board[player_index].slot (D-MNU-51), the same fold for both roles
 	// because the listen host consumes its own loopback 0x1D.
 	int local_slot = -1;
 	const int8_t header_index = cs.end_round.header.player_index;
@@ -918,7 +920,7 @@ bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zone
 		// The 0x6E wave group on this zone: its countdown (entity+548) and the
 		// queued members, named through the roster the way retail reads the
 		// member entity's Name (the player entity's name IS the roster name)
-		// [orig: dword_A85BC4[idx] / unk_A85CC4 @0x553cd0..0x553d8b, see world/deploy_screen_feed.h].
+		// [orig: dword_A85BC4[idx] / unk_A85CC4 @0x553ccd..0x553d8e, see world/deploy_screen_feed.h].
 		if (cs.spawn_waves.known) {
 			for (const SpawnWaveGroup &g : cs.spawn_waves.value.groups) {
 				if (g.zone_handle != e->handle.packed) continue;

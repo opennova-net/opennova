@@ -210,4 +210,34 @@ inline std::string retail_text_to_utf8(std::string_view bytes) {
 	return is_valid_utf8(bytes) ? std::string(bytes) : cp1252_to_utf8(bytes);
 }
 
+// The reverse, for a port that hands our text to the game's byte code (a code-page menu's cells and
+// items, which it draws a glyph per byte; a compare, a fold): valid UTF-8 is each character's cp1252
+// byte, '?' for a character cp1252 has no byte for (the game's text never holds one: its tables,
+// fonts, wire strings and typed keys are all the page's bytes; a text decoded from them through
+// retail_text_to_utf8 or cp1252_to_utf8 comes back byte for byte, unless its bytes happened to form
+// UTF-8, which retail_text_to_utf8 kept as they were, and one typed into ours that is not narrows
+// as the menu reader narrows a code-page document's, mnu.cpp's TreeReader::narrow); anything else
+// already is the page's bytes, as retail_text_to_utf8 reads it.
+inline std::string utf8_to_retail_text(std::string_view text) {
+	if (!is_valid_utf8(text)) return std::string(text);
+	std::string out;
+	out.reserve(text.size());
+	size_t i = 0;
+	while (i < text.size()) {
+		const unsigned char c = static_cast<unsigned char>(text[i]);
+		char32_t cp = 0;
+		size_t len = 1;
+		if (c < 0x80) cp = c;
+		else if ((c & 0xE0) == 0xC0) { len = 2; cp = c & 0x1F; }
+		else if ((c & 0xF0) == 0xE0) { len = 3; cp = c & 0x0F; }
+		else { len = 4; cp = c & 0x07; }
+		for (size_t k = 1; k < len; ++k) cp = (cp << 6) | (static_cast<unsigned char>(text[i + k]) & 0x3F);
+		i += len;
+		std::uint8_t byte = '?';
+		cp1252_encode_codepoint(cp, byte);
+		out.push_back(static_cast<char>(byte));
+	}
+	return out;
+}
+
 } // namespace opennova

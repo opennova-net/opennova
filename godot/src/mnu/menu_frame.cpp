@@ -590,7 +590,11 @@ void MenuFrame::set_widget_items(int p_index,
 	for (int64_t i = 0; i < p_items.size(); ++i) {
 		items.push_back(opennova::to_std(p_items[i]));
 	}
-	opennova::menu::frame_set_items(state_, p_index, items);
+	set_widget_item_texts(p_index, items);
+}
+
+void MenuFrame::set_widget_item_texts(int p_index, const std::vector<std::string> &p_items) {
+	opennova::menu::frame_set_items(state_, p_index, p_items);
 	queue_redraw();
 }
 

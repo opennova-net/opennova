@@ -177,6 +177,10 @@ public:
 	// Runtime content channels (the Control-tree path's set_items /
 	// add_row_values / marquee content, now engine state).
 	void set_widget_items(int p_index, const PackedStringArray &p_items);
+	// The same from native texts as they are, bytes and all (the menu runtime's
+	// push): a code-page menu's items are its bytes, which a godot::String
+	// round trip would parse as UTF-8.
+	void set_widget_item_texts(int p_index, const std::vector<std::string> &p_items);
 	void set_widget_selected_set(int p_index, const PackedInt32Array &p_rows);
 	// A spin list's rows the game disabled (MenuWidgetState::disabled_items), C++ only.
 	void set_widget_disabled_items(int p_index, const std::vector<uint8_t> &p_rows);

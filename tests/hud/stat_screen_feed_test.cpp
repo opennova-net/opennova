@@ -8,7 +8,9 @@
 #include <string>
 #include <vector>
 
+#include <formats/mnu/mnu.h>
 #include <runtime/inmatch/stat_screen_feed.h>
+#include <runtime/menu/menu_runtime.h>
 
 using namespace opennova;
 using namespace opennova::inmatch;
@@ -77,11 +79,53 @@ void test_rows() {
 	CHECK(stat_screen_row_visible(2, 1) && !stat_screen_row_visible(2, 2));
 }
 
+// The fill puts the roster's bytes into the NAME and Squad cells (D-MNU-46): the
+// game's table holds the slot's name and squad tag in the code page and draws a
+// glyph per byte, so a stock peer's "J\xF6rg" / "\xC9quipe" stay those bytes in
+// the cells (the binding's UTF-8 round trip left "J\xEF\xBF\xBDrg", which drew
+// three glyphs, and its decoded text "J\xC3\xB6rg" would draw two), and a sort
+// on NAME orders the bytes: "Jack" before "J\xF6rg".
+// [orig: StatScreen_PopulateStatResultsList @0x562240 - the CTableWnd_AddRow
+//  call with the name @0x562565, the column-1 SetCellText with the squad
+//  @0x562585; CTableWnd_SortByColumn @0x640900]
+void test_fill_puts_the_roster_bytes_in_the_cells() {
+	mnu::Document doc;
+	mnu::Screen stat;
+	stat.name = "STAT";
+	mnu::Window root;
+	root.name = "ROOT";
+	root.type = mnu::WindowType::Window;
+	mnu::Window table;
+	table.name = "RESULTLIST";
+	table.type = mnu::WindowType::Table;
+	root.children.push_back(table);
+	stat.roots.push_back(root);
+	doc.screens.push_back(stat);
+	menu::MenuRuntime rt;
+	rt.open_document(&doc, "stat.mnu", "");
+	const int id = rt.widget_id("RESULTLIST");
+	CHECK(id >= 0);
+	std::vector<StatScreenColumn> columns = stat_screen_columns(make_board(), false, 750);
+	CHECK(columns.size() >= 3);
+	std::vector<StatScreenPlayer> players = { {3, 1, "J\xF6rg", "\xC9quipe"}, {5, 2, "Jack", ""} };
+	const std::vector<StatScreenRow> rows = stat_screen_rows(make_board(), players, false, -1);
+	fill_stat_results(rt, id, columns, rows);
+	CHECK(rt.table_row_count(id) == 2);
+	// The stat sort ran (kills descending: 7 then 2), so row 0 is the slot-3 row.
+	CHECK(rt.table_cell_text(id, 0, 0) == "J\xF6rg" && rt.table_cell_text(id, 0, 1) == "\xC9quipe");
+	CHECK(rt.table_cell_text(id, 1, 0) == "Jack" && rt.table_cell_text(id, 1, 1) == "-");
+	CHECK(rt.table_cell_text(id, 0, 2) == "7");
+	rt.table_set_column_ascending(id, 0, true);
+	rt.table_sort_by_column(id, 0);
+	CHECK(rt.table_cell_text(id, 0, 0) == "Jack" && rt.table_cell_text(id, 1, 0) == "J\xF6rg");
+}
+
 } // namespace
 
 int main() {
 	test_columns();
 	test_rows();
+	test_fill_puts_the_roster_bytes_in_the_cells();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;

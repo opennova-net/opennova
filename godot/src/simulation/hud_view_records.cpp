@@ -172,8 +172,14 @@ void EndRoundColumn::_bind_methods() {
 
 // --- EndRoundRow ------------------------------------------------------------
 
-String EndRoundRow::get_name() const { return to_gd(value_.name); }
-String EndRoundRow::get_squad() const { return to_gd(value_.squad); }
+// The player slot's name and squad tag are the 0x46 roster's bytes in the game's
+// code page. The menu's cells take those bytes from the record itself
+// (MenuDriver::fill_stat_results -> inmatch::fill_stat_results, where the
+// witness lives); these getters are the script's view of them, as text
+// (retail_text_to_utf8: a stock peer's cp1252, or the UTF-8 one of ours sent),
+// where a UTF-8 parse made a lone high byte U+FFFD (D-MNU-46).
+String EndRoundRow::get_name() const { return to_gd(opennova::retail_text_to_utf8(value_.name)); }
+String EndRoundRow::get_squad() const { return to_gd(opennova::retail_text_to_utf8(value_.squad)); }
 PackedStringArray EndRoundRow::get_cells() const {
 	PackedStringArray out;
 	for (const std::string &c : value_.cells) out.push_back(to_gd(c));

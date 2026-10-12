@@ -237,6 +237,7 @@ protected:
 
 public:
 	void assign(const opennova::inmatch::StatScreenColumn &p_value) { value_ = p_value; }
+	const opennova::inmatch::StatScreenColumn &value() const { return value_; }
 
 	String get_header() const;
 	String get_header_key() const;
@@ -257,6 +258,7 @@ protected:
 
 public:
 	void assign(const opennova::inmatch::StatScreenRow &p_value) { value_ = p_value; }
+	const opennova::inmatch::StatScreenRow &value() const { return value_; }
 
 	int get_slot() const { return static_cast<int>(value_.slot); }
 	int get_team() const { return static_cast<int>(value_.team); }
