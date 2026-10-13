@@ -352,9 +352,64 @@ int main() {
 						a.y_min == -2621440 && a.y_max == -655360 && a.z_min == 0 &&
 						a.z_max == 131072);
 			}
+			// num_items counts every item section, the markers among them: the original editor
+			// walks that many.
+			const auto items_counted = [](const std::string &text) {
+				size_t sections = 0;
+				for (size_t at = text.find("begin item "); at != std::string::npos;
+						at = text.find("begin item ", at + 1))
+					++sections;
+				const size_t key = text.find("  num_items ");
+				return key != std::string::npos && std::stoul(text.substr(key + 12)) == sections;
+			};
+			const auto count_of = [](const std::string &text, const std::string &what) {
+				size_t n = 0;
+				for (size_t at = text.find(what); at != std::string::npos;
+						at = text.find(what, at + 1))
+					++n;
+				return n;
+			};
+			// Written in the .mis's frame (no terrain took it over): the markers as read, zone 7's
+			// extra_valmode and its least-x marker's base kept, num_items 6.
+			{
+				std::string as_read;
+				TEST_EXPECT(write_mis_text(areas_read, as_read, error));
+				TEST_EXPECT(items_counted(as_read) &&
+						as_read.find("  num_items 6\r\n") != std::string::npos);
+				TEST_EXPECT(count_of(as_read, "  type_id 6013\r\n") == 5 &&
+						as_read.find("  extra_valmode 1\r\n") != std::string::npos);
+				bms::File again;
+				TEST_EXPECT(parse_mis_text(as_read, {}, again, error));
+				TEST_EXPECT(again.mis_area_markers.size() == 5 && again.area_triggers.size() == 1 &&
+						again.area_triggers[0].flags == 1);
+				// Zone 3's box widened: its three markers go, two corners at the new box come,
+				// unlocked as its least-x marker was, their base 0; zone 7's stay. Read back, the
+				// edited box.
+				bms::File edited = areas_read;
+				edited.area_triggers[0].x_max += 65536;
+				std::string written;
+				TEST_EXPECT(write_mis_text(edited, written, error));
+				TEST_EXPECT(items_counted(written) &&
+						count_of(written, "  type_id 6013\r\n") == 4 &&
+						written.find("  position 2031616 -655360 131072\r\n") != std::string::npos);
+				bms::File reread;
+				TEST_EXPECT(parse_mis_text(written, {}, reread, error));
+				TEST_EXPECT(reread.area_triggers.size() == 1 &&
+						reread.area_triggers[0].x_max == 2031616 &&
+						reread.area_triggers[0].x_min == 655360 &&
+						reread.area_triggers[0].z_max == 131072 &&
+						reread.area_triggers[0].flags == 1);
+				// The area gone: its markers go with it; zone 7's stay.
+				edited.area_triggers.clear();
+				TEST_EXPECT(write_mis_text(edited, written, error));
+				TEST_EXPECT(items_counted(written) && count_of(written, "  type_id 6013\r\n") == 2);
+			}
 			mis_items_to_bms_frame(areas_read, flat);
-			TEST_EXPECT(
-					areas_read.area_triggers.size() == 1 && areas_read.mis_area_markers.empty());
+			// Zone 7, which the export makes no area of, keeps its markers as read.
+			TEST_EXPECT(areas_read.area_triggers.size() == 1 &&
+					areas_read.mis_area_markers.size() == 2 &&
+					areas_read.mis_area_markers[0].zone == 7 &&
+					areas_read.mis_area_markers[0].extra_valmode == 1);
 			if (areas_read.area_triggers.size() == 1)
 				TEST_EXPECT(areas_read.area_triggers[0].z_min == 50 * 65536 &&
 						areas_read.area_triggers[0].z_max == 52 * 65536);
@@ -367,10 +422,17 @@ int main() {
 					corners.find("  position 655360 -2621440 3276800\r\n") != std::string::npos);
 			TEST_EXPECT(
 					corners.find("  position 1966080 -655360 3407872\r\n") != std::string::npos);
+			// Five item sections: the item, zone 3's two corners, zone 7's two markers; the
+			// corners' base 0, zone 7's extra_valmode kept.
+			TEST_EXPECT(items_counted(corners) &&
+					corners.find("  num_items 5\r\n") != std::string::npos);
+			TEST_EXPECT(corners.find("  extra_valmode 1\r\n") != std::string::npos &&
+					corners.find("  extra_bheight 3276800\r\n") == std::string::npos);
 			bms::File corners_read;
 			TEST_EXPECT(parse_mis_text(corners, {}, corners_read, error));
 			mis_items_to_bms_frame(corners_read, flat);
-			TEST_EXPECT(corners_read.area_triggers.size() == 1 && corners_read.items.size() == 1);
+			TEST_EXPECT(corners_read.area_triggers.size() == 1 && corners_read.items.size() == 1 &&
+					corners_read.mis_area_markers.size() == 2);
 			if (corners_read.area_triggers.size() == 1 && areas_read.area_triggers.size() == 1) {
 				const bms::AreaTrigger &a = corners_read.area_triggers[0],
 									   &b = areas_read.area_triggers[0];

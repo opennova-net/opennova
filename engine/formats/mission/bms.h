@@ -927,6 +927,7 @@ struct MisAreaMarker {
 	int32_t x, y, z; // its position, in the file's frame (an unlocked one's z relative)
 	int32_t height_lock; // as read, nonzero locked
 	int32_t extra_valmode; // the export keeps an area whose least-x marker's is 0
+	int32_t extra_bheight; // as read
 };
 
 // The frame a File's entity heights are in (mission_mis.h's frames, D-MIS-4). Transient: no .bms
@@ -973,8 +974,9 @@ struct File {
 
     // The frame the entities' heights are in (MisFrame).
     MisFrame mis_frame = MisFrame::Bms;
-	// A .mis's area markers as read (MisAreaMarker), until mis_items_to_bms_frame makes the areas
-	// of them over a terrain; none in a parsed .bms.
+	// A .mis's area markers as read (MisAreaMarker), in the .mis's frame: until mis_items_to_bms_frame
+	// makes the areas of them over a terrain, which keeps those of a zone the export makes no area
+	// of (its least-x marker's extra_valmode not 0); none in a parsed .bms.
 	std::vector<MisAreaMarker> mis_area_markers;
 
     // Get mission name as string
@@ -1059,9 +1061,9 @@ std::string first_differing_section(const File& file, const std::vector<uint8_t>
 // preserve all bytes, padding included. WaypointRecord (inner vectors) compares
 // field-wise. NOTE: if you add a field that write() serializes, add it to equal() too.
 // The Entity byte-compare also covers the .mis-interchange transient fields (mis_extra_bheight /
-// mis_height_lock), and the File's mis_frame is compared too: they never reach .bms bytes, but
-// they do change write_mis_text output, so a difference between them is a real document change
-// for undo/dirty purposes.
+// mis_height_lock), and the File's mis_frame and mis_area_markers are compared too: they never
+// reach .bms bytes, but they do change write_mis_text output, so a difference between them is a
+// real document change for undo/dirty purposes.
 bool equal(const File& a, const File& b);
 
 } // namespace opennova::bms

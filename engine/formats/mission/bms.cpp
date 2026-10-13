@@ -1345,7 +1345,8 @@ bool equal(const File& a, const File& b) {
 	for (size_t i = 0; i < a.mis_area_markers.size(); ++i) {
 		const MisAreaMarker &x = a.mis_area_markers[i], &y = b.mis_area_markers[i];
 		if (x.zone != y.zone || x.x != y.x || x.y != y.y || x.z != y.z ||
-				x.height_lock != y.height_lock || x.extra_valmode != y.extra_valmode) {
+				x.height_lock != y.height_lock || x.extra_valmode != y.extra_valmode ||
+				x.extra_bheight != y.extra_bheight) {
 			return false;
 		}
 	}

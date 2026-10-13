@@ -213,8 +213,10 @@ void mis_items_to_bms_frame(bms::File &file, const MisTerrain &terrain);
 // makes `file`'s areas so from its mis_area_markers, each area's flags those an area of its id held
 // before (an `areatrig` section's); an area of no marker goes. parse_mis_text reads a 6013 item so
 // (none of the pools) and makes the areas in the file's frame; mis_items_to_bms_frame makes them
-// again once the markers stand in the .bms's. The writer writes an area as two 6013 items at the
-// box's least and greatest corners, locked (their z absolute), with its zone id.
+// again once the markers stand in the .bms's, keeping the markers of a zone it makes no area of.
+// The writer writes a zone's markers as read where they still make its area (or, a zone of no area,
+// make none), and any other area as two 6013 items at its box's least and greatest corners, with
+// its zone id (mission_mis_writer.cpp mis_area_markers_written); num_items counts them.
 inline constexpr int32_t kMisAreaMarkerType = 6013;
 void rebuild_mis_areas(bms::File &file);
 

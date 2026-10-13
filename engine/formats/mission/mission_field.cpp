@@ -687,9 +687,10 @@ const MissionField kGroupFields[] = {
 
 using L = bms::WavListRecord;
 
-// A wav list slot's file name, at most 15 characters (the original editor's dialog takes 16 bytes
-// [orig: JOTACmed.exe sub_412FB0 @ 0x413158], its .bms export copying the name into the record's
-// 16), which the game reads and discards (bms.h WavListRecord).
+// A wav list slot's file name, the record's 16 bytes, 16 characters filling them with no NUL (the
+// original editor's dialog takes 16 bytes, so 15 characters [orig: JOTACmed.exe sub_412FB0 @
+// 0x413158], its .bms export copying the name into the record's 16), which the game reads and
+// discards (bms.h WavListRecord).
 const MissionField kWavListFields[] = {
 	{ MissionRecord::WavList, "file_name", MissionFieldType::Text, bms::kWavListNameSize, 0, 0,
 			nullptr, 0, false, get_slot<L, bms::kWavListNameSize, &L::file_name>,

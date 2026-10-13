@@ -449,8 +449,8 @@ bool parse_mis_group(const std::vector<MisLine> &lines, size_t &pos, bms::File &
 // file name
 // @ 0x453eb0, any other key failing the load @ 0x453e88; sub_44F920 @ 0x4509bc..0x450a14]. A slot
 // outside 0..31 is none of the table's (the original's copy runs past its 32), and a file name past
-// 15 characters past the record's 16 bytes (the original's export runs into its stack): each
-// reported, the one skipped, the other cut.
+// the record's 16 bytes (the original's export runs into its stack; 16 characters fill it, no NUL
+// kept): each reported, the one skipped, the other cut.
 bool parse_mis_wav_list(const std::vector<MisLine> &lines, size_t &pos, bms::File &file,
 		std::string &error, std::vector<MisIssue> *issues) {
 	int32_t index = 0;
@@ -469,10 +469,10 @@ bool parse_mis_wav_list(const std::vector<MisLine> &lines, size_t &pos, bms::Fil
 		if (t.size() >= 2 && t[0] == "file_name") {
 			if (!slotted)
 				continue;
-			if (t[1].size() >= bms::kWavListNameSize)
+			if (t[1].size() > bms::kWavListNameSize)
 				note(issues, line.line_no,
 						"wav_list " + std::to_string(index) +
-								"'s file name is past 15 characters; cut");
+								"'s file name is past 16 characters; cut");
 			copy_fixed_field(file.wav_list_records[static_cast<size_t>(index)].file_name,
 					bms::kWavListNameSize, t[1]);
 		} else if (t[0] != "description") {
@@ -684,7 +684,7 @@ bool parse_mis_item(const std::vector<MisLine> &lines, size_t &pos,
 			// (rebuild_mis_areas).
 			if (entity.type_id == kMisAreaMarkerType) {
 				file.mis_area_markers.push_back({ entity.wp_number, entity.x, entity.y, entity.z,
-						entity.mis_height_lock, extra_valmode });
+						entity.mis_height_lock, extra_valmode, entity.mis_extra_bheight });
 				++pos;
 				return true;
 			}
