@@ -6,8 +6,9 @@
 # group its six rules; hosting on plans the launch template (terminate on
 # shutdown, IMDSv2, the encrypted data volume from the snapshot), the game and
 # admin ports, the service role's policy and the outputs app deploy reads; the
-# policy pins a launch to the template's machine type, IMDSv2, gp3 volumes of at
-# most 16 GiB and Canonical's images, and the machine role holds Session
+# data volume takes the snapshot's size; the policy pins a launch to the
+# template's machine type, IMDSv2, gp3 volumes of at most 16 GiB and
+# Canonical's images, and the machine role holds Session
 # Manager's five actions alone (applied against the mocks, so the template's
 # ARN the policy names is known); a burstable machine type is refused.
 
@@ -17,6 +18,9 @@ mock_provider "aws" {
   }
   mock_data "aws_ami" {
     defaults = { id = "ami-0123456789abcdef0", root_device_name = "/dev/sda1" }
+  }
+  mock_data "aws_ebs_snapshot" {
+    defaults = { volume_size = 2 }
   }
   mock_data "aws_subnet" {
     defaults = { cidr_block = "10.44.0.0/24", map_public_ip_on_launch = true }
@@ -103,8 +107,8 @@ run "hosting_on" {
     error_message = "IMDSv2"
   }
   assert {
-    condition     = length([for b in aws_launch_template.hosted[0].block_device_mappings : b if b.device_name == "/dev/sdf" && b.ebs[0].snapshot_id == "snap-0123456789abcdef0" && b.ebs[0].encrypted == "true"]) == 1
-    error_message = "the data volume from the snapshot, encrypted"
+    condition     = length([for b in aws_launch_template.hosted[0].block_device_mappings : b if b.device_name == "/dev/sdf" && b.ebs[0].snapshot_id == "snap-0123456789abcdef0" && b.ebs[0].encrypted == "true" && b.ebs[0].volume_size == 2]) == 1
+    error_message = "the data volume from the snapshot, encrypted, its size the snapshot's"
   }
   assert {
     condition     = length(aws_vpc_security_group_ingress_rule.hosted_game) == 1 && aws_vpc_security_group_ingress_rule.hosted_game["0.0.0.0/0"].from_port == 32768
@@ -149,8 +153,8 @@ run "hosted_policy" {
       for st in data.aws_iam_policy_document.hosted_service[0].statement : st
       if st.sid == "LaunchHostedMachineVolumes" && length([
         for c in st.condition : c
-        if(c.test == "StringEquals" && c.variable == "ec2:VolumeType" && contains(c.values, "gp3")) ||
-        (c.test == "NumericLessThanEquals" && c.variable == "ec2:VolumeSize" && contains(c.values, "16"))
+        if(c.test == "StringEqualsIfExists" && c.variable == "ec2:VolumeType" && contains(c.values, "gp3")) ||
+        (c.test == "NumericLessThanEqualsIfExists" && c.variable == "ec2:VolumeSize" && contains(c.values, "16"))
       ]) == 2
     ]) == 1
     error_message = "a launch's volumes must be gp3 of at most 16 GiB"

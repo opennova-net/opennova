@@ -30,7 +30,9 @@
 #                                 Takes a final backup first unless --no-backup;
 #                                 earlier backups stay in S3
 #   backup now|list               trigger / list the sqlite backups
-#   state push|pull               terraform state <-> 1Password document
+#   state push|pull [--force]     terraform state <-> 1Password document; a pull
+#                                 refuses to overwrite a newer local state
+#                                 unless --force
 #   hosted status [--deployment NAME]
 #                                 this deployment's hosted game server machines
 #   hosted data-snapshot          the hosted servers' game data, once: the Joint
@@ -504,31 +506,72 @@ cmd_backup() {
   esac
 }
 
+# A state file's serial (terraform bumps it at every change); 0 when the file
+# has none or is no state at all.
+state_serial() {
+  local serial
+  serial="$(jq -r '.serial // 0' "$1" 2>/dev/null || true)"
+  case "$serial" in
+    ''|*[!0-9]*) echo 0 ;;
+    *) echo "$serial" ;;
+  esac
+}
+
 cmd_state() {
   require_op
-  # Optional args let other stacks reuse this: state <pull|push> [doc] [tfdir].
-  # Defaults target the AWS stack (tfstate / infra/aws).
-  local action="${1:-pull}"
-  local doc="${2:-tfstate}"
-  local tfdir="${3:-$TF_DIR}"
+  # Optional args let other stacks reuse this:
+  #   state <pull|push> [--force] [doc] [tfdir]
+  # Defaults target the AWS stack (tfstate / infra/aws). A pull refuses to
+  # overwrite a local state newer (a higher serial) than the vault's, which an
+  # apply whose push never ran leaves behind, unless --force; and only a vault
+  # that has no such document reads as a first run: any other failure stops,
+  # so no command goes on with a state of unknown age.
+  local action="${1:-pull}" force=0
+  shift || true
+  if [ "${1:-}" = "--force" ]; then force=1; shift; fi
+  local doc="${1:-tfstate}"
+  local tfdir="${2:-$TF_DIR}"
   local statefile="$tfdir/terraform.tfstate"
+  local fetched="$SECRETS_DIR/state-pull.tfstate" errfile="$SECRETS_DIR/state.err" err local_serial remote_serial
   case "$action" in
     pull) log "pulling state '$doc' from vault…"
           mkdir -p "$(dirname "$statefile")"
           # `op document get --out-file` echoes the path to STDOUT — redirect it
           # so it can't pollute captured output (e.g. `$(... infra output -raw)`,
           # which runs a state pull first). All progress goes via log() to stderr.
-          if op document get "$doc" --vault "$VAULT" --out-file "$statefile" --force >/dev/null 2>&1; then
-            log "wrote $statefile"
-          else
-            log "no remote state yet (first run)"
-          fi ;;
+          # It lands on the tmpfs first, and replaces the local state only once
+          # it is known not to be older.
+          if ! op document get "$doc" --vault "$VAULT" --out-file "$fetched" --force >/dev/null 2>"$errfile"; then
+            err="$(cat "$errfile" 2>/dev/null || true)"
+            rm -f "$errfile" "$fetched"
+            case "$err" in
+              *"isn't an item"*) log "no remote state yet (first run)"; return ;;
+              *) die "pulling state '$doc' from vault '$VAULT' failed: ${err:-no error text}. Refusing to go on with a state of unknown age (run again once the vault answers)" ;;
+            esac
+          fi
+          rm -f "$errfile"
+          if [ -f "$statefile" ] && [ "$force" -eq 0 ]; then
+            local_serial="$(state_serial "$statefile")"
+            remote_serial="$(state_serial "$fetched")"
+            if [ "$local_serial" -gt "$remote_serial" ]; then
+              rm -f "$fetched"
+              die "the local $statefile (serial $local_serial) is newer than vault document '$doc' (serial $remote_serial): an apply whose push never ran? Push it (state push), or overwrite it (state pull --force)"
+            fi
+          fi
+          mv -f "$fetched" "$statefile"
+          log "wrote $statefile" ;;
     push) log "pushing state to vault document '$doc'…"
           [ -f "$statefile" ] || die "no local state at $statefile"
-          if op document get "$doc" --vault "$VAULT" >/dev/null 2>&1; then
+          if op document get "$doc" --vault "$VAULT" >/dev/null 2>"$errfile"; then
+            rm -f "$errfile"
             op document edit "$doc" "$statefile" --vault "$VAULT"
           else
-            op document create "$statefile" --title "$doc" --vault "$VAULT"
+            err="$(cat "$errfile" 2>/dev/null || true)"
+            rm -f "$errfile"
+            case "$err" in
+              *"isn't an item"*) op document create "$statefile" --title "$doc" --vault "$VAULT" ;;
+              *) die "reading vault document '$doc' failed: ${err:-no error text}. Not pushing (a second document would split the state); run state push again once the vault answers" ;;
+            esac
           fi
           log "state pushed." ;;
     *) die "unknown: state $action (try: pull|push)" ;;

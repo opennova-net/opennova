@@ -43,7 +43,7 @@ locals {
   hosted_tag_keys = ["opennova:hosted", "opennova:deployment", "opennova:server-id", "Name"]
   # The largest volume a launch may make: the root volume, and the data volume
   # (the snapshot's size, 2 GiB for a JO:CA install).
-  hosted_max_volume_gb = max(16, var.hosted_root_volume_gb)
+  hosted_max_volume_gb = max(16, var.hosted_root_volume_gb, try(data.aws_ebs_snapshot.hosted[0].volume_size, 0))
   # Canonical, the stock Ubuntu images' owner; var.hosted_ami_id's own owner
   # when one is named.
   hosted_image_owner = "099720109477"
@@ -86,6 +86,14 @@ data "aws_ami" "hosted" {
       values = filter.value
     }
   }
+}
+
+# The game data snapshot, read so its size is explicit in the launch template
+# (and so a mistyped or deleted id fails at plan, not at a launch).
+data "aws_ebs_snapshot" "hosted" {
+  count        = local.hosted_enabled ? 1 : 0
+  owners       = ["self"]
+  snapshot_ids = [var.hosted_data_snapshot_id]
 }
 
 # The subnet the machines launch into (the service's own): its range is the
@@ -243,6 +251,7 @@ resource "aws_launch_template" "hosted" {
 
     ebs {
       snapshot_id           = var.hosted_data_snapshot_id
+      volume_size           = data.aws_ebs_snapshot.hosted[0].volume_size
       volume_type           = "gp3"
       encrypted             = true
       delete_on_termination = true
@@ -310,7 +319,9 @@ data "aws_iam_policy_document" "hosted_service" {
   }
 
   # What such a launch touches besides the machine: its volumes (gp3, no
-  # larger than the template's), its network interface, the template's own
+  # larger than the template's; IfExists, so a request whose context lacks a
+  # key is not refused for that, though the template names both for every
+  # volume), its network interface, the template's own
   # subnet, security group and snapshot, and a Canonical image. RunInstances
   # on these creates nothing without the machine statement above. The snapshot
   # is encrypted with the AWS-managed aws/ebs key, whose key policy admits
@@ -324,12 +335,12 @@ data "aws_iam_policy_document" "hosted_service" {
     resources = ["${local.hosted_arn_prefix}:${local.hosted_account}:volume/*"]
 
     condition {
-      test     = "StringEquals"
+      test     = "StringEqualsIfExists"
       variable = "ec2:VolumeType"
       values   = ["gp3"]
     }
     condition {
-      test     = "NumericLessThanEquals"
+      test     = "NumericLessThanEqualsIfExists"
       variable = "ec2:VolumeSize"
       values   = [tostring(local.hosted_max_volume_gb)]
     }

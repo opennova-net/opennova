@@ -6,7 +6,7 @@ guide is [DEPLOY.md](../DEPLOY.md) at the repo root.
 - `run.sh` / `run.ps1` — wrappers that run the toolbox container.
 - `bin/on-deploy` — the orchestrator: `secrets check`, `infra plan|apply|destroy|output|list`,
   `aws <args...>`, `app deploy|status|logs|restart|down|sql|reset-db`, `backup now|list`,
-  `state push|pull`, `hosted status|data-snapshot` (DEPLOY.md, "Hosted game servers").
+  `state push|pull [--force]`, `hosted status|data-snapshot` (DEPLOY.md, "Hosted game servers").
 - `Dockerfile`, `docker-compose.deploy.yml` — the toolbox image.
 - `compose/` — the runtime stack: base + dev + prod overlays.
 - `env/` — `*.tpl` carry `op://` references; `app.prod.env` carries the
