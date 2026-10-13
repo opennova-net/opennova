@@ -196,10 +196,18 @@ std::vector<uint8_t> JoinerConnection::start() {
 	// Fresh per-connection numeric key, like the per-connection key material
 	// retail regenerates on connect: a CONSTANT ck would alias a quick
 	// reconnect from the same endpoint to the host's same-(CI,CK) retransmit
-	// echo (stale auth material) instead of a fresh node. CI stays 1 — the
-	// first connection node's index. A zero draw is drawn again, zero being no key.
+	// echo (stale auth material) instead of a fresh node. A zero draw is drawn
+	// again, zero being no key.
 	// [orig: CNapiNPConnection_InitFromSession @0x6263F4 -> NapiNP_GenerateSessionKey]
 	client_key_ = make_session_key(session_key_draw_);
+	// The CI: a join from a discovered session goes on with the browse's connection
+	// and its index; a dial without one creates its connection, which takes the
+	// process's next index (D-NET-521).
+	// [orig: CNapiNetwork_StartClientConnection @0x4ca160 (the enumerator's connection
+	//  ctx+0xE60); CNapiNPConnection_Create @0x62b282..0x62b296]
+	client_index_ = discovered_.present && discovered_.client_index != 0
+			? discovered_.client_index
+			: next_connection_index();
 	server_hk_ = 0;
 	server_password_required_ = false;
 	conn_.server_sk = 0;

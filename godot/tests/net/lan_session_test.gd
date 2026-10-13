@@ -81,6 +81,11 @@ func test_browser_discovers_live_host_without_pre_auth_mission_metadata() -> voi
 		assert_ne(flags & JoinTarget.FLAG_SPECTATOR_PASSWORD, 0,
 				"ServerHello.P2 advertises the spectator-password prompt")
 		assert_eq(row.expansion, "jox01")
+		# The row carries the browse's connection index, which a join from it goes
+		# on with (D-NET-521).
+		assert_gt(browser.get_client_index(), 0, "the browse took a connection index")
+		assert_eq(row.client_index, browser.get_client_index(),
+				"the row carries the browse's CI")
 		assert_eq(row.session_id, "",
 				"an unmodeled SUS1 is omitted instead of fabricated")
 		assert_false("mission" in row,

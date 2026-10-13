@@ -8,8 +8,8 @@
 #include "util/data_format.h"
 #include "util/string_convert.h"
 
-#include <base/os_random/os_random.h>
 #include <net/novaworld/lobby_vars.h> // resolve_address_without_dns
+#include <net/npwire/nw_session_framing.h> // next_connection_index
 #include <net/npwire/peer_addr.h>
 
 #include <array>
@@ -23,7 +23,7 @@ namespace {
 
 constexpr const char *DEFAULT_BROADCAST = "255.255.255.255";
 
-Ref<LanServerRow> row_record(const opennova::LanDiscoveryRow &row) {
+Ref<LanServerRow> row_record(const opennova::LanDiscoveryRow &row, uint32_t client_index) {
 	// Retail hosts advertise the typed server name in the host's single-byte
 	// codepage (cp1252), never UTF-8.
 	Ref<LanServerRow> out = LanServerRow::make(
@@ -37,6 +37,8 @@ Ref<LanServerRow> row_record(const opennova::LanDiscoveryRow &row) {
 	out->set_expansion(opennova::to_gd(row.server.expansion));
 	out->set_host_key(static_cast<int64_t>(row.server.host_key));
 	out->set_password_required(row.server.password_required);
+	// The browse's connection, which a join from this row goes on with (D-NET-521).
+	out->set_client_index(static_cast<int64_t>(client_index));
 	return out;
 }
 
@@ -81,6 +83,7 @@ void LanSession::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("stop"), &LanSession::stop);
 	ClassDB::bind_method(D_METHOD("get_servers"), &LanSession::get_servers);
 	ClassDB::bind_method(D_METHOD("is_browsing"), &LanSession::is_browsing);
+	ClassDB::bind_method(D_METHOD("get_client_index"), &LanSession::get_client_index);
 
 	ADD_SIGNAL(MethodInfo("servers_changed", PropertyInfo(Variant::ARRAY, "servers")));
 	// The browse window expired (the 30 s gate): the LAN screen re-enables its
@@ -101,7 +104,7 @@ int LanSession::start_browsing(const String &destination, int port_min, int port
 
 	const String target = destination.strip_edges();
 	if (target.is_empty() ||
-			!browser_.begin(opennova::os_random_nonzero_u32(), enumerate_address(target), port_min,
+			!browser_.begin(opennova::next_connection_index(), enumerate_address(target), port_min,
 					port_max, connect_type)) {
 		emit_error("LAN browse destination or port range is invalid");
 		return static_cast<int>(ERR_INVALID_PARAMETER);
@@ -213,7 +216,7 @@ void LanSession::poll_replies() {
 void LanSession::rebuild_rows() {
 	servers_.clear();
 	for (const opennova::LanDiscoveryRow &row : browser_.servers())
-		servers_.push_back(row_record(row));
+		servers_.push_back(row_record(row, browser_.client_index()));
 	emit_signal("servers_changed", get_servers());
 }
 

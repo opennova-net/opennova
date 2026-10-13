@@ -407,6 +407,89 @@ bool run_connect_writes_pv3_and_its_peer() {
 			"pv3/peer: a joiner with no host writes PV3 but no EIP / EPN");
 }
 
+// D-NET-521: one connection enumerates and joins. The connection counter pre-increments and
+// steps over 0; a LAN browse takes the process's next index for its 0x41s, and the join from a
+// row it discovered goes on with that connection: its first datagram is a 0x42 with the browse's
+// CI, which the host's 0x82 echoes and the joiner accepts. A dial without a row creates its own
+// connection and takes the next index.
+// [orig: CNapiNPConnection_Create @0x62acb0 - @0x62b282..0x62b296; CNapiNetwork_StartClientConnection
+//  @0x4ca160 (the connection ctx+0xE60 whose enumerator found the session @0x4ca1dd..0x4ca1ee) ->
+//  CNapiNPConnection_InitFromSession @0x626320]
+bool run_one_connection_index_per_join() {
+	uint32_t counter = 0xFFFFFFFEu;
+	const uint32_t last = advance_connection_index(counter);
+	const uint32_t wrapped = advance_connection_index(counter);
+	if (!expect(last == 0xFFFFFFFFu && wrapped == 1u && counter == 1u,
+	            "one index: the counter steps over 0 to 1"))
+		return false;
+
+	const PeerAddr joiner_peer{0x0100007Fu, 32790};
+	inmatch::NapiNPServerCtx host;
+	inmatch::test::bring_up_host(host, inmatch::ConnectionMode::HostClient,
+	                             inmatch::SocketMode::Socketless, 0x0FE0E119u);
+	LanDiscoveryBrowser browser;
+	if (!expect(browser.begin(next_connection_index(), 0xFFFFFFFFu, 32768, 32768,
+	                          kLanConnectTypeLan),
+	            "one index: the browse begins"))
+		return false;
+	const uint32_t browse_ci = browser.client_index();
+	const std::vector<uint8_t> probe = browser.probe(32768);
+	const inmatch::HandleResult browse =
+			inmatch::handle_server_datagram(host, joiner_peer, probe.data(), probe.size(), 0);
+	LanDiscoveryServer row;
+	if (!expect(browse.outbound.size() == 1 &&
+	                    parse_lan_discovery_reply(browse.outbound[0].data(),
+	                                              browse.outbound[0].size(), browse_ci, row),
+	            "one index: the browse's 0x81 answers its CI"))
+		return false;
+
+	uint64_t now_ms = 0;
+	inmatch::JoinerConnection join("OneConnection", [&now_ms] { return now_ms; });
+	inmatch::JoinerConnection::DiscoveredSession session;
+	session.present = true;
+	session.host_key = row.host_key;
+	session.password_required = row.password_required;
+	session.client_index = browse_ci;
+	join.set_discovered_session(session);
+	const std::vector<uint8_t> first = join.start();
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	ClientAuth auth;
+	if (!expect(nw_decode_inbound(first.data(), first.size(), opcode, body) &&
+	                    opcode == SESSION_OPCODE_CLIENT_AUTH &&
+	                    parse_client_auth(body.data(), body.size(), auth) &&
+	                    auth.ci == browse_ci && join.client_index() == browse_ci,
+	            "one index: the row's join sends a 0x42 with the browse's CI"))
+		return false;
+	const inmatch::HandleResult admitted =
+			inmatch::handle_server_datagram(host, joiner_peer, first.data(), first.size(), 1);
+	ServerAuth sa;
+	if (!expect(!admitted.outbound.empty() &&
+	                    nw_decode_inbound(admitted.outbound[0].data(),
+	                                      admitted.outbound[0].size(), opcode, body) &&
+	                    opcode == SESSION_OPCODE_SERVER_AUTH &&
+	                    parse_server_auth(body.data(), body.size(), sa) && sa.cr == 1u &&
+	                    sa.ci == browse_ci,
+	            "one index: the host's 0x82 echoes the browse's CI"))
+		return false;
+	join.handle_datagram(admitted.outbound[0].data(), admitted.outbound[0].size());
+	if (!expect(join.phase() == inmatch::JoinerConnection::Phase::Driving,
+	            "one index: the joiner accepts the 0x82 for its CI"))
+		return false;
+
+	// The process's counter as it stands, and the index the next connection takes.
+	uint32_t expected = next_connection_index();
+	advance_connection_index(expected);
+	inmatch::JoinerConnection dial("FreshConnection", [&now_ms] { return now_ms; });
+	const std::vector<uint8_t> hello_datagram = dial.start();
+	ClientHello hello;
+	return expect(nw_decode_inbound(hello_datagram.data(), hello_datagram.size(), opcode, body) &&
+	                      opcode == SESSION_OPCODE_CLIENT_HELLO &&
+	                      parse_client_hello(body.data(), body.size(), hello) &&
+	                      hello.ci == expected && dial.client_index() == expected,
+	              "one index: a dial without a row takes the process's next index");
+}
+
 // A flat-TLV body with every field named `unwanted` left out, the rest as written.
 std::vector<uint8_t> without_field(const std::vector<uint8_t> &body, std::string_view unwanted) {
 	std::vector<uint8_t> out;
@@ -1051,6 +1134,7 @@ int main() {
 	if (!run_unanswered_client_join_fails_after_30000_ms()) return 1;
 	if (!run_discovered_row_join_skips_the_hello()) return 1;
 	if (!run_connect_writes_pv3_and_its_peer()) return 1;
+	if (!run_one_connection_index_per_join()) return 1;
 	if (!run_zero_client_key_is_drawn_again()) return 1;
 	if (!run_server_hello_needs_no_hk()) return 1;
 	if (!run_server_auth_acceptance_follows_retail()) return 1;

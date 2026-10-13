@@ -237,6 +237,12 @@ public:
 		uint32_t host_key = 0;
 		bool password_required = false;
 		std::string expansion; // the 0x81 SUS2, echoed in the C2S JOIN EXP TLV
+		// The browse's connection index (its 0x41s' CI): the join goes on with the
+		// enumerator's connection, so its 0x42 carries the same CI. 0 = unknown, and
+		// the join takes a fresh one (next_connection_index).
+		// [orig: CNapiNetwork_StartClientConnection @0x4ca160 - the connection
+		//  ctx+0xE60 whose enumerator found the session @0x4ca1dd..0x4ca1ee]
+		uint32_t client_index = 0;
 	};
 	void set_discovered_session(DiscoveredSession session) { discovered_ = std::move(session); }
 	// The connection's peer, the host the connect sends to (the dialed endpoint; zero for a
@@ -792,6 +798,8 @@ public:
 	// This connection's own numeric key (ClientAuth.CK; fresh per start()) — the
 	// receiver-local key a host's 0x84 resend request addresses us by.
 	uint32_t client_key() const { return client_key_; }
+	// This connection's index (the 0x41 / 0x42 CI; chosen by start()).
+	uint32_t client_index() const { return client_index_; }
 	// The draw start() makes the CK from (unset, make_session_key's own); a test injects zeros.
 	void set_session_key_draw(std::function<uint32_t()> draw) { session_key_draw_ = std::move(draw); }
 	uint32_t monotonic_milliseconds32() const {
@@ -888,7 +896,7 @@ private:
 	void on_host_disconnect(const DisconnectEvent &event);
 	void fail(std::string reason);
 
-	uint32_t client_index_ = 1;
+	uint32_t client_index_ = 0; // start(): the row's browse CI, else next_connection_index()
 	uint32_t client_key_ = 1;
 	std::function<uint32_t()> session_key_draw_;
 	std::string player_name_;

@@ -34,6 +34,9 @@ public:
 	void stop();
 	TypedArray<LanServerRow> get_servers() const;
 	bool is_browsing() const { return browser_.browsing(); }
+	// The browse's connection index (its 0x41s' CI); a join from one of its rows
+	// carries it (LanServerRow.client_index). 0 before the first browse.
+	int64_t get_client_index() const { return static_cast<int64_t>(browser_.client_index()); }
 
 	void _ready() override;
 	void _process(double delta) override;

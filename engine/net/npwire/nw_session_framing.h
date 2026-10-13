@@ -39,6 +39,20 @@ uint32_t make_random_session_u32();
 //  CNapiNPConnection_InitFromSession @0x6263F4]
 uint32_t make_session_key(const std::function<uint32_t()> &draw = {});
 
+// The CI a new client-side (type-2) connection takes: the game protocol's
+// connection counter, pre-incremented, a step to 0 taking 1 instead.
+// `advance_connection_index` steps the given counter; `next_connection_index`
+// steps the process's one counter. A LAN browse's enumerator connection takes
+// one, and the join from a row it discovered goes on with that same connection,
+// so the browse's 0x41s and the join's 0x42 carry one CI; a dial without a row
+// creates its own connection and takes the next.
+// [orig: CNapiNPConnection_Create @0x62acb0 - `add [esi+0ECCh], edx` @0x62b282,
+//  the 0 -> 1 wrap @0x62b288..0x62b28a, conn+0x14 @0x62b296; a type-2 connection's
+//  enumerator is created with it @0x62b1dc; CNapiNetwork_StartClientConnection
+//  @0x4ca160 -> CNapiNPConnection_InitFromSession @0x626320 on that connection]
+uint32_t advance_connection_index(uint32_t &counter);
+uint32_t next_connection_index();
+
 // Decode an inbound NW-UDP datagram. On success, populates `opcode_out`
 // (byte 0 of the CRC-stripped packet, plaintext) and `body_out` (the
 // NWU-decrypted payload after byte 0). Names are swapped vs onnet —

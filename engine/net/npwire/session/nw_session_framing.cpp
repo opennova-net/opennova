@@ -6,6 +6,7 @@
 
 #include <base/os_random/os_random.h>
 
+#include <mutex>
 #include <random>
 
 namespace opennova {
@@ -66,6 +67,20 @@ uint32_t make_session_key(const std::function<uint32_t()> &draw) {
 		key = draw ? draw() : make_random_session_u32();
 	} while (key == 0); // [orig: NapiNP_GenerateSessionKey @0x61EA70 - jz @0x61EAC3]
 	return key;
+}
+
+uint32_t advance_connection_index(uint32_t &counter) {
+	// [orig: CNapiNPConnection_Create @0x62b282..0x62b296]
+	++counter;
+	if (counter == 0) counter = 1;
+	return counter;
+}
+
+uint32_t next_connection_index() {
+	static std::mutex mutex;
+	static uint32_t counter = 0;
+	const std::lock_guard<std::mutex> lock(mutex);
+	return advance_connection_index(counter);
 }
 
 bool nw_decode_inbound(const uint8_t *raw, size_t raw_len,

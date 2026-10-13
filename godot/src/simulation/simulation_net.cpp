@@ -516,12 +516,13 @@ void Simulation::set_join_cd_cookie(const PackedByteArray &p_cookie) {
 }
 
 void Simulation::set_join_discovered_session(bool p_present, int64_t p_host_key,
-		bool p_password_required, const String &p_expansion) {
+		bool p_password_required, const String &p_expansion, int64_t p_client_index) {
 	opennova::inmatch::JoinerConnection::DiscoveredSession session;
 	session.present = p_present;
 	session.host_key = static_cast<uint32_t>(p_host_key);
 	session.password_required = p_password_required;
 	session.expansion = opennova::to_std(p_expansion);
+	session.client_index = static_cast<uint32_t>(p_client_index);
 	net_.join_discovered_session = std::move(session);
 	// Applied to a live joiner runtime now and on each (re)load in enable_join.
 	if (runtime_) runtime_->set_discovered_session(net_.join_discovered_session);

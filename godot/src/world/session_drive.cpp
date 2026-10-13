@@ -129,7 +129,7 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 	// first, with the row's HK (JoinerConnection::DiscoveredSession).
 	join_preload_sim_->set_join_discovered_session(p_target->get_discovered_session(),
 			p_target->get_session_host_key(), p_target->get_session_password_required(),
-			p_target->get_expansion());
+			p_target->get_expansion(), p_target->get_session_client_index());
 	// A nonzero .joi LN asks for the LAN-discovered endpoint of the named
 	// session instead of the NK relay the target carries. That endpoint has no
 	// producer on this seam: the NovaWorld panel resolves a join without running
