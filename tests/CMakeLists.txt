@@ -5765,6 +5765,13 @@ target_link_libraries(editor_menu_arrange_test PRIVATE opennova_editor)
 target_include_directories(editor_menu_arrange_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_menu_arrange COMMAND editor_menu_arrange_test)
 
+# The mission view's pick math (editor/preview/preview_pick, S14): a segment against a box, a triangle (either
+# face), and the nearest face of a shape before a best parameter.
+add_executable(editor_preview_pick_test editor/preview_pick_test.cpp)
+target_link_libraries(editor_preview_pick_test PRIVATE opennova_editor)
+target_include_directories(editor_preview_pick_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_preview_pick COMMAND editor_preview_pick_test)
+
 # The query seam (S13 A5): every list a query serves paged in C++ (the pages make the list,
 # count the whole, an offset or a limit out of range refused naming the query), the state by
 # section and since a revision, the catalog from the tables, the menu reads editor_menu served

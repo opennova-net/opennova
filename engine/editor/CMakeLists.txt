@@ -187,6 +187,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/sound_preview.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/dialog_preview.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/preview_ambient_mix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/preview_pick.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/preview_clip_sounds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/preview_waves.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/preview_clip_fire.cpp
