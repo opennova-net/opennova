@@ -1183,7 +1183,8 @@ const MissionDocument::Lookups &MissionDocument::lookups() const {
 		}
 	}
 	// The first type-6088 marker of each wp_number.
-	for (const Node *row : made.by_kind[size_t(K::Marker)]) {
+	const std::vector<const Node *> &markers = made.by_kind[size_t(K::Marker)];
+	for (const Node *row : markers) {
 		const bms::Entity &marker = static_cast<const EntityRow &>(*row).native;
 		if (marker.type_id == kNumberedMarkerType) made.numbered.emplace(marker.wp_number, row->id);
 	}
