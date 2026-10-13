@@ -227,9 +227,9 @@ struct Rig {
 		return set(R"({"camera": {"target": [)" + std::to_string(x) + "," + std::to_string(y) + "," + std::to_string(z) +
 				R"(], "yaw": 0, "pitch": 80, "distance": 1}})");
 	}
-	bool listen(bool on, double volume = 1.0, double hour = 12.0) {
+	bool listen(bool on, double hour = 12.0) {
 		return set(R"({"options": {"time": )" + std::to_string(hour) + R"(, "listen": {"on": )" +
-				std::string(on ? "true" : "false") + R"(, "volume": )" + std::to_string(volume) + "}}}");
+				std::string(on ? "true" : "false") + "}}}");
 	}
 	// The clock run on to `ticks` a Shell frame at a time (the session's advance fires the one-shots, the pump follows).
 	void run_to(int32_t ticks) {
@@ -311,7 +311,7 @@ static int test_sources_by_the_hour_and_the_reach() {
 	TEST_EXPECT(words.back().find("Plays LP_DAY on channel") == 0);
 
 	// At night the frogs and the bed play the night set.
-	TEST_EXPECT(rig.listen(true, 1.0, 23.0));
+	TEST_EXPECT(rig.listen(true, 23.0));
 	rig.run_to(80);
 	TEST_EXPECT(status_of(listen, markers[1].row) == "playing");
 	const MissionSoundSource *frogs = listen.source(markers[1].row);
@@ -363,7 +363,7 @@ static int test_the_scripts_weather() {
 	Rig rig;
 	TEST_EXPECT(rig.open());
 	TEST_EXPECT(rig.look_from(0.0, 0.0, 0.0));
-	TEST_EXPECT(rig.listen(true, 0.5));
+	TEST_EXPECT(rig.listen(true));
 	rig.run_to(10);
 	const MissionListen &listen = rig.viewport()->listen();
 	const MissionScriptRun &script = listen.script();
@@ -381,7 +381,7 @@ static int test_the_scripts_weather() {
 	// Each at its own ear (D-SND-38): four metres apart along the mission's x.
 	TEST_EXPECT(left && right && std::fabs(std::fabs(left->at.x - right->at.x) - 4.0f) < 0.01f);
 	TEST_EXPECT(left && left->volume > 200);
-	// The lightning three seconds in: the thunder reaches the Shell's clip voices, its volume the master's half; the
+	// The lightning three seconds in: the thunder reaches the Shell's clip voices at the game's volume; the
 	// bird tree's day shot every second or two, at the tree [orig: Entity_SpawnRegionalEffect @ 0x408290].
 	const uint64_t booted = script.boots();
 	rig.run_to(62 * 6);
@@ -399,7 +399,7 @@ static int test_the_scripts_weather() {
 		for (const WorkspaceView::Voice &voice : play.voices)
 			if (voice.path == "sounds/thunder.wav") {
 				handed = true;
-				TEST_EXPECT(voice.volume > 0 && voice.volume <= 128);
+				TEST_EXPECT(voice.volume > 0 && voice.volume <= 255);
 			}
 	TEST_EXPECT(handed);
 	// A seek back runs the script from its start again: no boot, its tick back.
@@ -420,12 +420,12 @@ static int test_the_wire_and_the_overlay() {
 	Rig rig;
 	TEST_EXPECT(rig.open(false)); // the night bed's wave left out
 	TEST_EXPECT(rig.look_from(0.0, 0.0, 0.0));
-	TEST_EXPECT(rig.listen(true, 0.75, 23.0));
+	TEST_EXPECT(rig.listen(true, 23.0));
 	rig.run_to(40);
 	const JsonValue envelope = rig.json();
 	const JsonValue *options = envelope.get("options");
 	const JsonValue *listen_options = options ? options->get("listen") : nullptr;
-	TEST_EXPECT(listen_options && listen_options->get_bool("on", false) && listen_options->get_number("volume", 0) == 0.75);
+	TEST_EXPECT(listen_options && listen_options->get_bool("on", false) && !listen_options->get("volume"));
 	const JsonValue *body = envelope.get("body");
 	const JsonValue *listen = body ? body->get("listen") : nullptr;
 	TEST_EXPECT(listen && listen->is_object() && listen->get_number("budget", 0) == double(audio::kAmbientMixChannels));
@@ -475,7 +475,7 @@ static int test_the_wire_and_the_overlay() {
 	}
 	TEST_EXPECT(lines > 0 && dots >= 1);
 	// The options refuse what Listen does not take.
-	TEST_EXPECT(!rig.set(R"({"options": {"listen": {"volume": 2}}})"));
+	TEST_EXPECT(!rig.set(R"({"options": {"listen": {"volume": 0.5}}})"));
 	TEST_EXPECT(!rig.set(R"({"options": {"listen": {"loud": true}}})"));
 	// Off: closed, its body null again.
 	TEST_EXPECT(rig.listen(false));
@@ -488,14 +488,13 @@ static int test_the_wire_and_the_overlay() {
 // event's dialog 2, fired on the first event pass, takes the next slot and loads its line at once, the channel free;
 // dialog 1's second line loads once its first has held (audio::dialog_clip_hold), the channel is free of dialog 2's
 // voice and its half second has run, so the dialogs interleave in slot order [orig: Dialog_UpdatePlayback
-// @ 0x44e470]; each line reaches the Shell's clip voices on its tick at its wave's dialog volume (210, the Listen's
-// half of it here), the body's `dialog` says the bank, its sounds and the queue's slots; a seek back empties the
+// @ 0x44e470]; each line reaches the Shell's clip voices on its tick at its wave's dialog volume (210), the body's `dialog` says the bank, its sounds and the queue's slots; a seek back empties the
 // channel and the start registers dialog 1 again.
 static int test_the_dialogs() {
 	Rig rig;
 	TEST_EXPECT(rig.open(true, true));
 	TEST_EXPECT(rig.look_from(0.0, 0.0, 0.0));
-	TEST_EXPECT(rig.listen(true, 0.5));
+	TEST_EXPECT(rig.listen(true));
 	rig.run_to(62 * 6);
 	const MissionListen &listen = rig.viewport()->listen();
 	int32_t d1a = -1, d1b = -1, d2a = -1;
@@ -503,7 +502,7 @@ static int test_the_dialogs() {
 		if (fired.action != "dialog") continue;
 		TEST_EXPECT(fired.state == "played" && fired.bank == "listen.dbf" && fired.voices.size() == 1);
 		if (fired.voices.size() != 1) continue;
-		TEST_EXPECT(fired.voices[0].volume == 105);
+		TEST_EXPECT(fired.voices[0].volume == 210);
 		if (fired.voices[0].wave == "D1A") d1a = fired.tick;
 		if (fired.voices[0].wave == "D1B") d1b = fired.tick;
 		if (fired.voices[0].wave == "D2A") d2a = fired.tick;

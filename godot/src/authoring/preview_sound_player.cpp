@@ -193,8 +193,7 @@ PreviewSoundLoops::~PreviewSoundLoops() {
 	voices_.clear();
 }
 
-void PreviewSoundLoops::follow(const std::string &p_root, const std::vector<Channel> &p_channels, float p_volume,
-		bool p_audible) {
+void PreviewSoundLoops::follow(const std::string &p_root, const std::vector<Channel> &p_channels, bool p_audible) {
 	// A voice for each channel, none past the last.
 	while (voices_.size() > p_channels.size()) {
 		Voice &last = voices_.back();
@@ -205,7 +204,6 @@ void PreviewSoundLoops::follow(const std::string &p_root, const std::vector<Chan
 		voices_.pop_back();
 	}
 	voices_.resize(p_channels.size());
-	const double master = std::clamp(double(p_volume), 0.0, 1.0);
 	for (size_t i = 0; i < p_channels.size(); ++i) {
 		const Channel &channel = p_channels[i];
 		Voice &voice = voices_[i];
@@ -242,9 +240,7 @@ void PreviewSoundLoops::follow(const std::string &p_root, const std::vector<Chan
 		}
 		AudioStreamPlayer3D *player = voice.player;
 		player->set_position(Vector3(channel.at[0], channel.at[1], channel.at[2]));
-		const double linear = double(std::max(channel.volume, 0)) / double(opennova::audio::kVolumeByteMax) * master;
-		player->set_volume_db(float(linear > 0.0 ? opennova::audio::volume_db_from_byte(int32_t(std::lround(linear * 255.0)))
-		                                         : opennova::audio::kVolumeSilentDb));
+		player->set_volume_db(float(opennova::audio::volume_db_from_byte(channel.volume)));
 		player->set_pitch_scale(float(WavLoader::pitch_scale_for(player->get_stream(), opennova::lwf::pitch_from_q16(channel.pitch_q16))));
 		// Held or let go each frame: a 3D player's playback starts at its next physics step, and a pause asked of one
 		// not started yet is not kept.

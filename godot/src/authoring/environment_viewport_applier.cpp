@@ -530,7 +530,7 @@ void EnvironmentViewportApplier::apply_listen_(const EnvironmentViewport &model)
 		channel.at[2] = each.at.z;
 		channels.push_back(std::move(channel));
 	}
-	listen_->follow(project_root_, channels, model.options().listen.volume, listen_idle_frames_ < kListenHeldFrames);
+	listen_->follow(project_root_, channels, listen_idle_frames_ < kListenHeldFrames);
 }
 
 void EnvironmentViewportApplier::clear() {

@@ -841,7 +841,7 @@ io::JsonValue EnvironmentViewport::body_json(const ViewportInput &) const {
 std::vector<ClipSoundFired> EnvironmentViewport::fire_listen_sounds(const AssetScan *scan, audio::SoundSelector &selector,
 		uint64_t &seq) {
 	if (!options_.listen.on || !listen_.open()) return {};
-	std::vector<ClipSoundFired> fired = listen_.fire_sounds(scan, selector, seq, options_.listen.volume);
+	std::vector<ClipSoundFired> fired = listen_.fire_sounds(scan, selector, seq);
 	for (ClipSoundFired &sound : fired) sound.path = path();
 	return fired;
 }

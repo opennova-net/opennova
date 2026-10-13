@@ -209,7 +209,7 @@ void EnvironmentListen::play_to(int32_t tick, const PreviewVec3 &listener, const
 }
 
 std::vector<ClipSoundFired> EnvironmentListen::fire_sounds(const AssetScan *scan, audio::SoundSelector &selector,
-		uint64_t &seq, float volume) {
+		uint64_t &seq) {
 	std::vector<ClipSoundFired> out;
 	if (!opened_) {
 		thunder_.clear();
@@ -226,8 +226,6 @@ std::vector<ClipSoundFired> EnvironmentListen::fire_sounds(const AssetScan *scan
 				kListenView);
 		fired.seq = ++seq;
 		fired.action = "thunder";
-		for (ClipSoundFired::Voice &voice : fired.voices)
-			voice.volume = int32_t(std::lround(double(voice.volume) * double(std::clamp(volume, 0.0f, 1.0f))));
 		if (scan) find_clip_sound_waves(fired, *scan);
 		fired_.push_back(fired);
 		out.push_back(std::move(fired));
@@ -241,7 +239,6 @@ io::JsonValue EnvironmentListen::to_json(const MissionListenOptions &options) co
 	if (!opened_) return JsonValue::make_null();
 	JsonValue out = JsonValue::make_object();
 	out.set("on", JsonValue::make_bool(options.on));
-	out.set("volume", json_number(options.volume));
 	out.set("tick", json_number(tick_));
 	JsonValue channels = JsonValue::make_array();
 	size_t loops = 0;

@@ -449,12 +449,8 @@ void MissionListen::play_to(int32_t tick, const PreviewVec3 &listener, double ho
 }
 
 std::vector<ClipSoundFired> MissionListen::fire_sounds(const AssetScan *scan, audio::SoundSelector &selector,
-		uint64_t &seq, float volume) {
+		uint64_t &seq) {
 	std::vector<ClipSoundFired> out;
-	const auto scaled = [&](ClipSoundFired &fired) {
-		for (ClipSoundFired::Voice &voice : fired.voices)
-			voice.volume = int32_t(std::lround(double(voice.volume) * double(std::clamp(volume, 0.0f, 1.0f))));
-	};
 	std::vector<DialogChannel::Loaded> loaded;
 	for (const MissionScriptSound &sound : script_.take_sounds()) {
 		// A Play dialog: the channel run through the ticks before its own, then its dialog registered, so its tick's
@@ -478,7 +474,6 @@ std::vector<ClipSoundFired> MissionListen::fire_sounds(const AssetScan *scan, au
 			fired.words = "Tick " + std::to_string(sound.tick) + " (the script's voice): " + sound.wave + " at volume " +
 			              std::to_string(voice_volume) + ".";
 			fired.voices.push_back({sound.wave, sound.wave, std::string(), 0x10000u, voice_volume});
-			scaled(fired);
 			if (scan) find_clip_sound_waves(fired, *scan);
 			fired_.push_back(fired);
 			out.push_back(std::move(fired));
@@ -508,7 +503,6 @@ std::vector<ClipSoundFired> MissionListen::fire_sounds(const AssetScan *scan, au
 		ClipSoundFired fired = plan_set_heard(sound.set, sound.tick, what, banks_, heard, selector, kListenView);
 		fired.seq = ++seq;
 		fired.action = sound.shot >= 0 ? std::string("shot") : std::string(mission_script_sound_kind_token(sound.kind));
-		scaled(fired);
 		if (scan) find_clip_sound_waves(fired, *scan);
 		fired_.push_back(fired);
 		out.push_back(std::move(fired));
@@ -539,7 +533,6 @@ std::vector<ClipSoundFired> MissionListen::fire_sounds(const AssetScan *scan, au
 		                                 : " (" + served_name(line.file) + ")") +
 		              (text.empty() ? std::string() : " \"" + text + "\"");
 		if (!line.file.empty()) fired.voices.push_back({line.wave, served_name(line.file), std::string(), 0x10000u, line.volume});
-		scaled(fired);
 		if (scan) find_clip_sound_waves(fired, *scan);
 		fired_.push_back(fired);
 		out.push_back(std::move(fired));
@@ -684,7 +677,6 @@ io::JsonValue MissionListen::source_json(NodeId row) const {
 io::JsonValue MissionListen::to_json(const MissionListenOptions &options) const {
 	JsonValue out = JsonValue::make_object();
 	out.set("on", JsonValue::make_bool(options.on));
-	out.set("volume", json_number(double(options.volume)));
 	out.set("hours", json_number(std::round(hours_ * 1000.0) / 1000.0));
 	out.set("tick", json_number(tick_));
 	out.set("listener", point_json(listener_));

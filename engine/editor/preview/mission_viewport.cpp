@@ -431,7 +431,7 @@ std::vector<ClipSoundFired> MissionViewport::fire_listen_sounds(const AssetScan 
 		people_heard_ = -1;
 		return {};
 	}
-	std::vector<ClipSoundFired> fired = listen_.fire_sounds(scan, selector, seq, options_.listen.volume);
+	std::vector<ClipSoundFired> fired = listen_.fire_sounds(scan, selector, seq);
 	// The people's footsteps and foley on the ticks they played since (S23 C), each where the person stands, heard at
 	// the camera; none over a start again (their spawn), from where it put them.
 	const int32_t now = people_.tick();

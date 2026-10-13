@@ -135,10 +135,9 @@ public:
 	// mix and the channels made again.
 	void play_to(int32_t tick, const PreviewVec3 &listener, double hours);
 	// The one-shots heard since the last call (the thunder, the script's sounds), each planned as the game plays it at
-	// `listener` with its member picked through `selector` and its voices' volume scaled by `volume`, numbered from
-	// `seq`; kept for the wire (the last 16) and returned for the Shell.
-	std::vector<ClipSoundFired> fire_sounds(const AssetScan *scan, audio::SoundSelector &selector, uint64_t &seq,
-			float volume);
+	// `listener` with its member picked through `selector`, numbered from `seq`; kept for the wire (the last 16) and
+	// returned for the Shell.
+	std::vector<ClipSoundFired> fire_sounds(const AssetScan *scan, audio::SoundSelector &selector, uint64_t &seq);
 	// Nothing held (Listen off, no mission).
 	void close();
 	bool open() const { return opened_; }

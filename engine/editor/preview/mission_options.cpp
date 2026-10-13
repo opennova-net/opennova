@@ -241,13 +241,12 @@ bool mission_options_from_json(const JsonValue &json, MissionViewportOptions &he
 io::JsonValue mission_listen_options_to_json(const MissionListenOptions &options) {
 	JsonValue out = JsonValue::make_object();
 	out.set("on", JsonValue::make_bool(options.on));
-	out.set("volume", io::json_number(double(options.volume)));
 	return out;
 }
 
 bool mission_listen_options_from_json(const io::JsonValue &json, MissionListenOptions &held, std::string &error) {
 	if (!json.is_object()) {
-		error = "options.listen is an object, {on, volume}.";
+		error = "options.listen is an object, {on}.";
 		return false;
 	}
 	MissionListenOptions read = held;
@@ -258,15 +257,8 @@ bool mission_listen_options_from_json(const io::JsonValue &json, MissionListenOp
 				return false;
 			}
 			read.on = member.value.boolean;
-		} else if (member.key == "volume") {
-			float volume = 0.0f;
-			if (!io::json_float(member.value, volume) || volume < 0.0f || volume > 1.0f) {
-				error = "options.listen.volume is the master volume, 0 to 1.";
-				return false;
-			}
-			read.volume = volume;
 		} else {
-			error = "Unknown options.listen member \"" + member.key + "\" (it takes on, volume).";
+			error = "Unknown options.listen member \"" + member.key + "\" (it takes on).";
 			return false;
 		}
 	}

@@ -467,8 +467,7 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 		time_popup(options, mission);
 		ImGui::EndPopup();
 	}
-	// Listen (DI-36): the mission's soundscape where the camera stands, as the game plays it; its master volume, and
-	// what plays.
+	// Listen (DI-36): the mission's soundscape where the camera stands, as the game plays it, and what plays.
 	if (tool_button(row, "Listen", options.listen.on, true,
 				options.listen.on
 						? std::string("Stop listening.")
@@ -477,13 +476,6 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 									  "the script's own sounds. The sources' reach is ringed on the ground.")))
 		options.listen.on = !options.listen.on;
 	if (options.listen.on) {
-		const float width = unit * 5.0f;
-		row.next(ui_kit::field_width(width, "Volume"));
-		ImGui::SetNextItemWidth(width);
-		float volume = options.listen.volume;
-		if (ImGui::SliderFloat("Volume", &volume, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp))
-			options.listen.volume = volume;
-		ui_kit::tooltip("The master volume of everything Listen plays (the editor's, not the game's).");
 		if (ui_kit::tool(row, "Heard", true, "What plays on each of the game's channels now, the weather and the script."))
 			ImGui::OpenPopup("heard");
 		if (ImGui::BeginPopup("heard")) {

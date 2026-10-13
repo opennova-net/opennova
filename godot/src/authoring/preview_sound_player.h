@@ -130,7 +130,7 @@ private:
 // The Listen's channels (DI-36): the device half of a mission view's MissionListen. Each channel its mix binds plays its
 // wave looping on an AudioStreamPlayer3D of its own at the channel's place in the device's world, whose camera is the
 // listener, so Godot's panner pans it as the game's own ambient channels are panned (D-SND-8), unattenuated (the volume
-// is the mix's, through the engine's volume law, times the master); its pitch the member's times the registration's.
+// is the mix's, through the engine's volume law); its pitch the member's times the registration's.
 // A channel another candidate took (its `started` moved) starts its wave again from its beginning, as the game's
 // channel opened anew does (D-SND-6); a free one stops. The picks, the places and the volumes are the session's; this
 // only sounds them.
@@ -149,9 +149,9 @@ public:
 	PreviewSoundLoops(const PreviewSoundLoops &) = delete;
 	PreviewSoundLoops &operator=(const PreviewSoundLoops &) = delete;
 
-	// The channels as they stand now (channel i the i-th) of the project under `p_root`, at the master `p_volume`
-	// (0..1); `p_audible` false holds each voice paused where it stands (the picture not drawn).
-	void follow(const std::string &p_root, const std::vector<Channel> &p_channels, float p_volume, bool p_audible);
+	// The channels as they stand now (channel i the i-th) of the project under `p_root`; `p_audible` false holds each
+	// voice paused where it stands (the picture not drawn).
+	void follow(const std::string &p_root, const std::vector<Channel> &p_channels, bool p_audible);
 	// Every voice stopped and freed; the decoded waves kept.
 	void stop();
 	// The decoded waves dropped (the project's files moved).

@@ -26,12 +26,11 @@ enum class MissionColorBy : uint8_t { Team, Group };
 const char *mission_color_by_token(MissionColorBy by);
 bool mission_color_by_from_token(const std::string &token, MissionColorBy &out);
 
-// The mission view's Listen (ADR 0046 DI-36), its options' `listen`: on or off, and the master volume (0..1) every
-// sound it plays is scaled by (the editor's, not the game's). Off by default: a mission opened is silent until asked.
+// The mission view's Listen (ADR 0046 DI-36), its options' `listen`: on or off, each sound at the game's volume.
+// Off by default: a mission opened is silent until asked.
 struct MissionListenOptions {
 	bool on = false;
-	float volume = 1.0f;
-	bool operator==(const MissionListenOptions &o) const { return on == o.on && volume == o.volume; }
+	bool operator==(const MissionListenOptions &o) const { return on == o.on; }
 	bool operator!=(const MissionListenOptions &o) const { return !(*this == o); }
 };
 

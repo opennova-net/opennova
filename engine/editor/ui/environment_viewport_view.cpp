@@ -293,20 +293,6 @@ void EnvironmentViewportView::draw_ready(Workspace &workspace, const ViewportMod
 		change.set("listen", mission_listen_options_to_json(next));
 		set_viewport(workspace, model, "options", std::move(change));
 	}
-	if (listen.on) {
-		const float width = ImGui::GetFontSize() * 5.0f;
-		weather.next(ui_kit::field_width(width, "Volume"));
-		ImGui::SetNextItemWidth(width);
-		float volume = listen.volume;
-		if (ImGui::SliderFloat("Volume", &volume, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp) && volume != listen.volume) {
-			MissionListenOptions next = listen;
-			next.volume = volume;
-			JsonValue change = JsonValue::make_object();
-			change.set("listen", mission_listen_options_to_json(next));
-			set_viewport(workspace, model, "options", std::move(change));
-		}
-		ui_kit::tooltip("The master volume of everything Listen plays (the editor's, not the game's).");
-	}
 	if (model.weather().raining()) {
 		char drops[48];
 		std::snprintf(drops, sizeof(drops), "%d drops", env::PrecipitationField::active_count(channels.rain_pct_fp));

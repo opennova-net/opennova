@@ -54,7 +54,7 @@ struct EnvironmentViewportOptions {
 	bool terrain = true;
 	bool water = true;
 	// Listen (S23 C): the weather heard at the camera, the rain's loops and the lightning's thunder
-	// (preview/environment_listen), at the master volume.
+	// (preview/environment_listen), at the game's volume.
 	MissionListenOptions listen;
 	bool operator==(const EnvironmentViewportOptions &o) const {
 		return time == o.time && day_seconds == o.day_seconds && mission == o.mission && header == o.header &&

@@ -1805,7 +1805,7 @@ func test_the_listen_plays_the_mixs_channels() -> void:
 		return
 	assert_true(device.is_audio_listener_3d(), "the device's camera is its world's listener")
 	assert_true(_change({"kind": "mission", "camera": {"target": [-190, -200, 0], "pitch": 60, "distance": 10},
-			"options": {"time": 12, "listen": {"on": true, "volume": 0.5}}}))
+			"options": {"time": 12, "listen": {"on": true}}}))
 	var listen := {}
 	for _frame in 60:
 		_app.pump()
@@ -1842,7 +1842,7 @@ func test_the_listen_plays_the_mixs_channels() -> void:
 		var player := voice as AudioStreamPlayer3D
 		assert_eq(player.attenuation_model, AudioStreamPlayer3D.ATTENUATION_DISABLED)
 		assert_eq((player.stream as AudioStreamWAV).loop_mode, AudioStreamWAV.LOOP_FORWARD)
-		assert_lt(player.volume_db, 0.0, "the mix's volume, the master's half")
+		assert_true(player.volume_db <= 0.0, "the mix's volume, the game's")
 	var near := 0
 	for voice: Node in voices:
 		near += 1 if (voice as AudioStreamPlayer3D).position.distance_to(at) < 0.01 else 0

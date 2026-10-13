@@ -47,10 +47,9 @@ public:
 	// The clock's tick reached at `listener` (the camera's eye, the presentation frame) over `weather`: the rain's
 	// loops registered beside it while it rains, the mix and the channels made again.
 	void play_to(int32_t tick, const PreviewVec3 &listener, const world::WeatherState &weather);
-	// The thunder heard since the last call, each planned at its distance with its member picked through `selector`
-	// and its voices' volume scaled by `volume`, numbered from `seq`; kept for the wire (the last 16).
-	std::vector<ClipSoundFired> fire_sounds(const AssetScan *scan, audio::SoundSelector &selector, uint64_t &seq,
-			float volume);
+	// The thunder heard since the last call, each planned at its distance with its member picked through `selector`,
+	// numbered from `seq`; kept for the wire (the last 16).
+	std::vector<ClipSoundFired> fire_sounds(const AssetScan *scan, audio::SoundSelector &selector, uint64_t &seq);
 	// Closed: nothing plays, the channels free, the mix forgotten.
 	void close();
 	bool open() const { return opened_; }
@@ -59,7 +58,7 @@ public:
 	const std::vector<ClipSoundFired> &sounds_fired() const { return fired_; }
 	// Moves whenever what plays changes (a channel bound, released, its volume moved): the device's cue.
 	uint64_t serial() const { return serial_; }
-	// The body's `listen`: {on, volume, tick, channels [{channel, set, bank, wave, path, volume, pitch, distance}],
+	// The body's `listen`: {on, tick, channels [{channel, set, bank, wave, path, volume, pitch, distance}],
 	// rain {loops, sets_found}, thunder (the queued), sounds_fired}; null while closed.
 	io::JsonValue to_json(const MissionListenOptions &options) const;
 
