@@ -71,6 +71,8 @@ EntityHandle player(World &world, uint8_t slot, uint8_t team, const char *name) 
     identity.slot = slot;
     identity.name = name;
     world.match.upsert_player(identity);
+    // The slot's team byte (+416) is the body's until a script splits them.
+    world.match.set_player_slot_team(handle, team);
     return handle;
 }
 
@@ -501,6 +503,7 @@ void test_deathmatch_and_hill_outcomes() {
     world->match.configure(tkoth);
     const EntityHandle red = player(*world, 1, 2, "Red");
     world->match.upsert_player({solo, 0, "Solo"});
+    world->match.set_player_slot_team(solo, 1); // the re-add stamps its slot team
     world->registry.get(solo)->position = {0.0f, 0.0f, 0.0f};
     world->registry.get(red)->position = {100.0f, 0.0f, 0.0f};
     // One minute is 60 service steps, not 60 simulation ticks.
@@ -1409,6 +1412,39 @@ void test_alive_readers_take_the_dead_bit_alone() {
     CHECK(world->match.live_scoreboard(*world).teams[1].alive_players == 0);
 }
 
+// D-NET-673: the alive-holder count indexes the team record by the slot's own
+// team byte (+416), not its body's: a split slot (a script team write to the
+// body, which stores the entity byte alone) holds the hill for its slot team,
+// in the hold timer and the TKOTH 0x16 byte alike.
+// [orig: Game_CountAlivePlayersPerTeam `movzx eax, byte ptr [ecx+1A0h]`
+//  @0x50021D, the count @0x50023E; Game_AccumulateTeamScores @0x508DAD;
+//  Server_BuildAndBroadcastScoreboard @0x50D9B5; Entity_SetTeamByNetId
+//  @0x43C680]
+void test_alive_count_reads_the_slot_team() {
+    auto world = std::make_unique<World>();
+    world->registry.configure_pool(0, 8);
+    world->registry.configure_pool(3, 4);
+    MatchRules tkoth;
+    tkoth.game_type = gt::kTeamKingOfTheHill;
+    tkoth.game_time_minutes = 10;
+    tkoth.hill_limit_minutes = 99;
+    world->match.configure(tkoth);
+    // Slot team 1, its body moved to team 2, in the hill.
+    const EntityHandle split = player(*world, 0, 1, "Split");
+    world->registry.get(split)->team = 2;
+    world->registry.get(split)->position = {0.0f, 0.0f, 0.0f};
+    const EntityHandle red = player(*world, 1, 2, "Red");
+    world->registry.get(red)->position = {100.0f, 0.0f, 0.0f};
+    spawn_hill(*world);
+    advance_initial_periodic_passes(*world, 3);
+    CHECK(world->match.player(split)->objective_ticks == 3);
+    CHECK(world->match.team_hold_ticks(1) == 3);
+    CHECK(world->match.team_hold_ticks(2) == 0);
+    const MatchLiveScoreboard board = world->match.live_scoreboard(*world);
+    CHECK(board.teams[1].alive_players == 1);
+    CHECK(board.teams[2].alive_players == 0);
+}
+
 // Non-team boards: the frozen order follows the game-type primary
 // (Player_ComputeScore), the draw byte is the all-tied test, and the winner
 // marker goes to every non-spectator row whose key equals row 0's unless the
@@ -1601,6 +1637,7 @@ int main() {
     test_end_round_team_row_count_rule();
     test_end_result_freezes_team_hold_timer();
     test_alive_readers_take_the_dead_bit_alone();
+    test_alive_count_reads_the_slot_team();
     test_nonteam_board_order_draw_and_winner_marker();
     test_coop_remains_script_owned();
     if (failures != 0) {

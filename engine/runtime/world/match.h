@@ -227,10 +227,16 @@ struct MatchPlayer {
     bool respawn_pending = false;
     // Player-slot +416 (+0x1A0), the slot's own team byte: 0 for a spectator,
     // and left by a script team write to the body, which stores the entity
-    // byte alone. The numbered capture's scorers match it. The authority
-    // mirrors its connection's slot team here wherever that changes.
+    // byte alone. The numbered capture's scorers match it and the alive-holder
+    // count indexes by it. The authority stamps its connection's slot team
+    // here at each player add and wherever it changes a live slot's team (the
+    // spectator convert, a team change, the auto-balance). The teardown's side
+    // swap changes the connection's alone, which no reader sees: the old
+    // mission's bodies are despawned straight after and the next mission's
+    // add stamps the swapped team.
     // [orig: CaptureZone_CheckProximityScoring @0x500CEE / @0x500CF4;
-    //  Entity_SetTeamByNetId @0x43C680]
+    //  Game_CountAlivePlayersPerTeam @0x50021D; Entity_SetTeamByNetId
+    //  @0x43C680]
     uint8_t slot_team = 0;
 };
 
@@ -539,9 +545,9 @@ class Match {
     void return_flag_home(World &world, EntityHandle flag, MatchGameplayEventKind kind,
                           EntityHandle actor = EntityHandle{});
     void update_objective_proximity(const World &world);
-    // Per team: the non-spectator players whose dead bit is clear and whose
-    // last proximity mask holds bit 0 (the 4095 objective, a team-0 hill or
-    // capturable, any hill outside the team modes), none past the round end.
+    // Per slot team: the non-spectator players whose dead bit is clear and
+    // whose last proximity mask holds bit 0 (the 4095 objective, a team-0 hill
+    // or capturable, any hill outside the team modes), none past the round end.
     // Both the hold timer and the TKOTH 0x16 byte read it. [orig: Game_CountAlivePlayersPerTeam
     // @0x5001C0; its callers Game_AccumulateTeamScores @0x508D82 and
     // Server_BuildAndBroadcastScoreboard @0x50D9B5]

@@ -87,6 +87,8 @@ w::EntityHandle match_player(w::World &world, uint8_t slot, uint8_t team,
 	e.engine_flags = w::kEntityFlagPlayer;
 	const w::EntityHandle handle = world.registry.spawn(0, e);
 	world.match.upsert_player({handle, slot, name});
+	// The slot's team byte (+416) is the body's until a script splits them.
+	world.match.set_player_slot_team(handle, team);
 	return handle;
 }
 

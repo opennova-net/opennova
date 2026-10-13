@@ -87,6 +87,9 @@ bool check_scoreboard_projects_every_retail_mode_shape() {
 		roster[slot].burst.spawned = true;
 		roster[slot].link.owned_entity = slot == 0 ? blue : red;
 		roster[slot].reply.player_slot = slot;
+		// The slots' teams (+416) are the bodies'.
+		roster[slot].assigned_team = slot == 0 ? 1 : 2;
+		roster[slot].assigned_team_valid = true;
 	}
 
 	auto objective = [&](int32_t item_id, uint8_t team, uint32_t attrib = 0) {
@@ -115,6 +118,9 @@ bool check_scoreboard_projects_every_retail_mode_shape() {
 		world.match.configure(rules);
 		world.match.upsert_player({blue, 0, "Blue", {}});
 		world.match.upsert_player({red, 1, "Red", {}});
+		// The rows mirror their connections' slot teams (D-NET-650).
+		world.match.set_player_slot_team(blue, roster[0].assigned_team);
+		world.match.set_player_slot_team(red, roster[1].assigned_team);
 		world.match.player(blue)->objective_proximity_mask = blue_proximity_mask;
 		const opennova::ProtocolMessage message =
 				opennova::inmatch::build_player_list_message(config, roster, &world);

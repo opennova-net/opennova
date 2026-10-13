@@ -1583,13 +1583,16 @@ std::array<int32_t, 5> Match::count_alive_players_per_team(const World &world) c
         return holders;
     for (const MatchPlayer &match_player : players_) {
         const Entity *entity = world.registry.get(match_player.identity.entity);
+        // The slot's own team byte (+416) indexes the team record, not its
+        // body's (D-NET-673).
         // [orig: Game_CountAlivePlayersPerTeam @0x5001C0 - the spectator
-        //  test @0x500214, the dead bit @0x50022F, the mask's bit 0 @0x500235]
+        //  test @0x500214, `movzx eax, byte ptr [ecx+1A0h]` @0x50021D, the
+        //  dead bit @0x50022F, the mask's bit 0 @0x500235, the count @0x50023E]
         if (match_player.spectator || !is_live_player(entity) ||
             (match_player.objective_proximity_mask & 0x01u) == 0 ||
-            entity->team >= holders.size())
+            match_player.slot_team >= holders.size())
             continue;
-        ++holders[entity->team];
+        ++holders[match_player.slot_team];
     }
     return holders;
 }
