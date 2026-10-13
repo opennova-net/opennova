@@ -195,7 +195,7 @@ struct Rig {
 				lwf::Single single;
 				single.name = wave;
 				single.path = strutil::to_lower(wave) + ".wav";
-				single.value_hi = 0xD200;
+				single.volume = 0xD2;
 				sounds.singles.push_back(single);
 				ok = ok && editor_test::write_bytes(root + "/sounds/" + strutil::to_lower(wave) + ".wav", tone);
 			}

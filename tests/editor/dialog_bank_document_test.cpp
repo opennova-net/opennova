@@ -115,11 +115,11 @@ std::vector<uint8_t> dbf_bytes(bool findings = false) {
 // The bank's sounds: Z01R100 at the dialog volume 210, Z01R101 at 0 (full), each its file.
 std::vector<uint8_t> sounds_bytes() {
 	lwf::File bank;
-	for (const auto &[name, volume] : std::vector<std::pair<const char *, uint16_t>>{{"Z01R100", 0xD200}, {"Z01R101", 0}}) {
+	for (const auto &[name, volume] : std::vector<std::pair<const char *, uint8_t>>{{"Z01R100", 0xD2}, {"Z01R101", 0}}) {
 		lwf::Single single;
 		single.name = name;
 		single.path = strutil::to_lower(name) + ".wav";
-		single.value_hi = volume;
+		single.volume = volume;
 		bank.singles.push_back(single);
 	}
 	std::vector<uint8_t> out;
