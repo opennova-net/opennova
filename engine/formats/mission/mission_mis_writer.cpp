@@ -333,7 +333,13 @@ MisHeights mis_heights(const bms::Entity &entity, bms::MisFrame frame, const int
 }
 
 // `base_height` (optional) is the terrain's height under the entity, 16.16 fixed-point; `frame` the file's
-// (mission_mis.h's frames).
+// (mission_mis.h's frames). The keys in the original editor's order [orig: JOTACmed.exe MIS_SaveDocument @
+// 0x454630, the item keys @ 0x455228..0x4558c1: grenades after sweapon_type @ 0x455453; extra_mlink, the extra
+// values, extra_bheight and gen_string unconditional @ 0x4557a3..0x455836; then next_ssn, lfp_group,
+// mission_critical, height_lock and color_override, each when not zero]; its `attributes`, `layer` and
+// `blink_*` keys (@ 0x45558c, @ 0x4555a5, @ 0x45573a..0x45578e) print editor fields no .bms record holds,
+// zero here, which it writes none of. The keys it writes when not zero whose parse default here is not zero
+// are written always (D-MIS-5).
 void write_mis_entity(const bms::Entity &entity, size_t index, std::string &out, bms::MisFrame frame,
                       const int32_t *base_height) {
 	const uint16_t crouch_timer = combined_u16(entity.crouch_timer, entity.unk15a);
@@ -367,6 +373,7 @@ void write_mis_entity(const bms::Entity &entity, size_t index, std::string &out,
 	append_kv(out, "  nomorethan ", static_cast<int>(entity.no_more_than));
 	if (byte_from_i16(entity.weapon_types, 0) != 0) append_kv(out, "  weapon_type ", byte_from_i16(entity.weapon_types, 0));
 	if (byte_from_i16(entity.weapon_types, 1) != 0) append_kv(out, "  sweapon_type ", byte_from_i16(entity.weapon_types, 1));
+	if (entity.grenades != 0) append_kv(out, "  grenades ", static_cast<int>(entity.grenades));
 	if (entity.group_id != 0) append_kv(out, "  group_id ", static_cast<int>(entity.group_id));
 	if (group_rel != 0) append_kv(out, "  group_rel ", group_rel);
 	if (entity.waypoint_id != 0) append_kv(out, "  waypoint_id ", static_cast<int>(entity.waypoint_id));
@@ -393,11 +400,6 @@ void write_mis_entity(const bms::Entity &entity, size_t index, std::string &out,
 	append_kv(out, "  advancetimer ", entity.advancetimer);
 	append_kv(out, "  max_attack_distance ", entity.max_attack_distance);
 	append_kv(out, "  edistances ", entity.min_engagement_distance, " ", entity.max_engagement_distance);
-	if (entity.next_ssn != 0) append_kv(out, "  next_ssn ", entity.next_ssn);
-	if (entity.color_override != 0) append_kv(out, "  color_override ", static_cast<int>(entity.color_override));
-	if (entity.grenades != 0) append_kv(out, "  grenades ", static_cast<int>(entity.grenades));
-	if (entity.mission_critical != 0) append_kv(out, "  mission_critical ", static_cast<int>(entity.mission_critical));
-	if (entity.lfp_group != 0) append_kv(out, "  lfp_group ", static_cast<int>(entity.lfp_group));
 	append_line(out, "  extra_mlink \"\"");
 	append_line(out, "  extra_val1 0");
 	append_line(out, "  extra_val2 0");
@@ -411,8 +413,12 @@ void write_mis_entity(const bms::Entity &entity, size_t index, std::string &out,
 	// height_lock->rec+356); MisLdr_WriteNileProjectXml @ 0x10004930 (scene Y = z/65536 - (lock ? bheight/65536 :
 	// 0)); both misldr.dll].
 	append_kv(out, "  extra_bheight ", heights.extra_bheight);
-	if (heights.height_lock != 0) append_kv(out, "  height_lock ", heights.height_lock);
 	append_kv(out, "  gen_string \"", mis_string(gen_string.empty() ? std::string("null") : gen_string), "\"");
+	if (entity.next_ssn != 0) append_kv(out, "  next_ssn ", entity.next_ssn);
+	if (entity.lfp_group != 0) append_kv(out, "  lfp_group ", static_cast<int>(entity.lfp_group));
+	if (entity.mission_critical != 0) append_kv(out, "  mission_critical ", static_cast<int>(entity.mission_critical));
+	if (heights.height_lock != 0) append_kv(out, "  height_lock ", heights.height_lock);
+	if (entity.color_override != 0) append_kv(out, "  color_override ", static_cast<int>(entity.color_override));
 	append_line(out, "end item");
 	append_line(out);
 }
