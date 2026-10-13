@@ -2759,6 +2759,52 @@ bool run_host_server_hello_writes_its_own_identity() {
 	return true;
 }
 
+// D-NET-524: a game host draws a joining connection's SK and then its SCRK from the manager's
+// LCG. The SK's bytes follow b' = 49b + 1 (mod 256), and the SCRK is the mod-32 walk x' = 17x + 1
+// that goes on from the SK's last draw, the NUL slot 31 appending nothing: 61 characters, 62
+// when the SK's last byte sits in the NUL slot.
+// [orig: NapiNPProtocol_HandleClientJoin @0x62b750 - NapiNP_GenerateSessionKey @0x62bf5e, then
+//  CNapiNPConnection_GenerateTxKey @0x62bf99; NapiPRNG_NextInRange @0x62e450]
+bool run_host_server_keys_draw_from_the_manager_lcg() {
+	static constexpr char kCharset[] = "0123456789BCDFGHJKLMNPQRSTVWXYZ";
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::GameConfig config;
+	config.max_players = 8;
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
+			kHostKey, nullptr, config);
+	uint16_t port = 30990;
+	for (int join = 0; join < 3; ++join) {
+		const PeerAddr peer{0x0100007Fu, port++};
+		const std::string name = "LcgJoiner" + std::to_string(join);
+		const ClientAuth auth = make_valid_client_auth(1, 0x24681357u + static_cast<uint32_t>(join),
+				kHostKey, name, "LCGJOINERSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB");
+		const auto dg = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
+		auto r = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
+		uint8_t op = 0;
+		std::vector<uint8_t> body;
+		ServerAuth sa;
+		if (!expect(!r.outbound.empty() &&
+		                    nw_decode_inbound(r.outbound[0].data(), r.outbound[0].size(), op, body) &&
+		                    op == SESSION_OPCODE_SERVER_AUTH && parse_server_auth(body.data(), body.size(), sa) &&
+		                    sa.cr == 1u,
+		            "lcg: the join draws an accepting 0x82")) return false;
+		bool sk_chains = sa.sk != 0;
+		for (int shift = 24; shift > 0; shift -= 8)
+			sk_chains = sk_chains && ((49u * ((sa.sk >> shift) & 0xFFu) + 1u) & 0xFFu) ==
+					((sa.sk >> (shift - 8)) & 0xFFu);
+		if (!expect(sk_chains, "lcg: the SK's bytes follow the manager LCG")) return false;
+		std::string walk;
+		uint32_t x = sa.sk & 31u;
+		for (int i = 0; i < 63; ++i) {
+			x = (17u * x + 1u) & 31u;
+			if (x != 31u) walk.push_back(kCharset[x]);
+		}
+		if (!expect(sa.scrk == walk && sa.scrk.size() == ((sa.sk & 31u) == 31u ? 62u : 61u),
+		            "lcg: the SCRK is the walk that follows the SK, 61 or 62 characters")) return false;
+	}
+	return true;
+}
+
 // A game host's 0x82 carries no CU on either network type. SendSessionInit writes only the
 // connection's type-3 vars; a host stores the 0x42's CUs under their own type 1/2, and only a
 // client's 0x82 handler creates a type-3 var. The NovaworldName / web-domain / NWUID block is the
@@ -4122,6 +4168,7 @@ int main(int argc, char **argv) {
 	ok = run_reconnect_counters_echo_rcnt() && ok;
 	ok = run_game_host_server_auth_carries_no_cu() && ok;
 	ok = run_host_server_hello_writes_its_own_identity() && ok;
+	ok = run_host_server_keys_draw_from_the_manager_lcg() && ok;
 	ok = run_spectator_admission_codes_match_retail() && ok;
 	ok = run_capacity_rejects_when_full() && ok;
 	ok = run_dedicated_host_advertises_and_admits_its_cap() && ok;

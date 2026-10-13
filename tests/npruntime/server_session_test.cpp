@@ -915,6 +915,15 @@ bool check_production_serve_mode_has_no_phantom_and_mints_startup() {
 	            "production serve mode registers no type-2 phantom player")) return false;
 	if (!expect(owner.ctx.np_protocol.host_key != 0,
 	            "production startup mints a nonzero host key")) return false;
+	// D-NET-524: the host key is the manager LCG's four byte draws, so its bytes follow
+	// b' = 49b + 1 (mod 256). [orig: NapiNPProtocol_StartServer @0x62b5f5 ->
+	//  NapiNP_GenerateSessionKey @0x61ea70; NapiPRNG_NextInRange @0x62e450]
+	const uint32_t hk = owner.ctx.np_protocol.host_key;
+	bool hk_chains = true;
+	for (int shift = 24; shift > 0; shift -= 8)
+		hk_chains = hk_chains && ((49u * ((hk >> shift) & 0xFFu) + 1u) & 0xFFu) ==
+				((hk >> (shift - 8)) & 0xFFu);
+	if (!expect(hk_chains, "the host key's bytes follow the manager LCG")) return false;
 	if (!expect(owner.ctx.np_protocol.host_start_tick != 0,
 	            "production startup records a nonzero monotonic start tick")) return false;
 	if (!expect(owner.ctx.np_protocol.session_seed_id >= 100000 &&

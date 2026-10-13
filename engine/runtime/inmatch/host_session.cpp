@@ -43,8 +43,10 @@ uint32_t monotonic_milliseconds() {
 
 SessionStartup make_session_startup(const HostConfig &cfg) {
 	SessionStartup startup;
-	// [orig: NapiNPProtocol_StartServer @0x62B5F5 -> NapiNP_GenerateSessionKey]
-	startup.host_key = cfg.host_key != 0 ? cfg.host_key : make_session_key();
+	// The host key, from the manager's PRNG (D-NET-524).
+	// [orig: NapiNPProtocol_StartServer @0x62b5e0 - NapiNP_GenerateSessionKey on the
+	//  protocol's manager @0x62b5f3..0x62b5f5, stored @0x62b5fc]
+	startup.host_key = cfg.host_key != 0 ? cfg.host_key : manager_session_key();
 	startup.host_start_tick =
 			cfg.host_start_tick != 0 ? cfg.host_start_tick : monotonic_milliseconds();
 	if (cfg.session_seed_id != 0) {

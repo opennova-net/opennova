@@ -8,6 +8,7 @@
 #include <runtime/inmatch/napi_np_connection.h>
 
 #include <net/npwire/ingame_decode.h>     // OrganicSpawnBatch / PlayerExtendedUplink / EntityPacketSubHeader
+#include <net/npwire/nw_session_framing.h> // NapiPrng (the key material's PRNG)
 #include <net/npwire/protocol_message.h>  // ProtocolMessage
 #include <net/npwire/session_hello.h>     // DisconnectEvent
 #include <net/npwire/session_vars.h>      // SessionVars (the 0x60 server-info list)
@@ -800,8 +801,9 @@ public:
 	uint32_t client_key() const { return client_key_; }
 	// This connection's index (the 0x41 / 0x42 CI; chosen by start()).
 	uint32_t client_index() const { return client_index_; }
-	// The draw start() makes the CK from (unset, make_session_key's own); a test injects zeros.
-	void set_session_key_draw(std::function<uint32_t()> draw) { session_key_draw_ = std::move(draw); }
+	// The PRNG start() draws the CK and the SCRK from (null, the default: the process's
+	// manager PRNG, manager_connection_keys); a test injects a seeded one.
+	void set_key_prng(NapiPrng *prng) { key_prng_ = prng; }
 	uint32_t monotonic_milliseconds32() const {
 		return static_cast<uint32_t>(monotonic_milliseconds_() & 0xFFFFFFFFu);
 	}
@@ -898,7 +900,7 @@ private:
 
 	uint32_t client_index_ = 0; // start(): the row's browse CI, else next_connection_index()
 	uint32_t client_key_ = 1;
-	std::function<uint32_t()> session_key_draw_;
+	NapiPrng *key_prng_ = nullptr;
 	std::string player_name_;
 	JoinRole join_role_ = JoinRole::Player;
 	std::string spectator_password_;

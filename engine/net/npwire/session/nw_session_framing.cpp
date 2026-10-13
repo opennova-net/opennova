@@ -6,32 +6,113 @@
 
 #include <base/os_random/os_random.h>
 
+#include <chrono>
 #include <mutex>
 #include <random>
 
 namespace opennova {
 
-// The SCRK generator. Retail makes 63 draws, each an INCLUSIVE
-// NapiPRNG_NextInRange(0, strlen(charset)) — `min + state % (max - min + 1)`
-// — over the 31-char vowel-free charset "0123456789BCDFGHJKLMNPQRSTVWXYZ".
-// Index 31 lands on the charset's NUL, and `sprintf("%c", 0)` appends nothing
-// while the draw counter still decrements, so the key is 63 minus the number
-// of NUL picks: 61.03 chars on average — the "61 chars" every retail capture
-// shows is that expectation, not a fixed length. The random source is the
-// only substitution (retail seeds its 16-bit LCG from the manager; this draws
-// from the OS CSPRNG, base/os_random, as the SCRK, NWUID and session-key
-// helpers below all do).
-// [orig: CNapiNPConnection_GenerateTxKey @0x61dfe0 — `chars_remaining = 63`
-//  @0x61e040, NextInRange(0, g_TxKeyCharsetLen) @0x61e05b, sprintf "%c"
-//  @0x61e075, Napi_CopyString(conn+204, key, 64) @0x61e0c9; charset
-//  g_TxKeyCharset @0x849f10 -> 0x7dfa10; NapiPRNG_NextInRange @0x62e450
-//  `min + state % (max - min + 1)` @0x62e460]
 namespace {
+// The SCRK's draws and charset: 63 draws, each an inclusive 0..31 over the
+// 31-character vowel-free charset, index 31 its NUL.
+// [orig: CNapiNPConnection_GenerateTxKey @0x61dfe0 - `63 - strlen` @0x61e040;
+//  g_TxKeyCharset @0x849f10 -> 0x7dfa10; g_TxKeyCharsetLen @0x31c1074 = 31]
 constexpr int kScrkDraws = 63;
 constexpr char kScrkCharset[] = "0123456789BCDFGHJKLMNPQRSTVWXYZ";
 constexpr int kScrkCharsetLen = static_cast<int>(sizeof(kScrkCharset) - 1); // 31
 } // namespace
 
+// [orig: NapiPRNG_NextInRange @0x62e450]
+int32_t NapiPrng::next_in_range(int32_t min, int32_t max) {
+	// min >= max: min, no draw (`cmp edi, esi / jl` @0x62e45a, `mov eax, edi` @0x62e45e,
+	// `pop edi` @0x62e460, the return @0x62e462).
+	if (min >= max)
+		return min;
+	// imul's low 32 bits, +1, the low 16 kept @0x62e465..0x62e473.
+	state_ = (multiplier_ * state_ + 1u) & 0xFFFFu;
+	const int32_t span = max - min + 1; // @0x62e475..0x62e478
+	const int32_t offset = static_cast<int32_t>(state_) % span; // idiv, state 0..0xFFFF @0x62e47b
+	++draws_; // @0x62e47d
+	return min + offset;
+}
+
+uint32_t napi_prng_platform_seed() {
+	// The steady clock stands in for the time-stamp counter (its two 32-bit halves)
+	// and its millisecond count for GetTickCount. [orig: NapiSession_GenerateId
+	// @0x62e490 - sub_61D600 (rdtsc) @0x62e4a0, GetTickCount @0x62e4a8, the sum
+	// @0x62e4ad..0x62e4b8]
+	using namespace std::chrono;
+	const uint64_t counter = static_cast<uint64_t>(
+			duration_cast<nanoseconds>(steady_clock::now().time_since_epoch()).count());
+	const uint32_t tick = static_cast<uint32_t>(counter / 1000000u);
+	return tick + static_cast<uint32_t>(counter >> 32) + static_cast<uint32_t>(counter);
+}
+
+// [orig: NapiNP_GenerateSessionKey @0x61ea70]
+uint32_t generate_session_key(NapiPrng &prng) {
+	uint32_t key = 0;
+	do {
+		uint32_t value = static_cast<uint32_t>(prng.next_in_range(0, 0xFF)); // @0x61ea7f
+		value = (value << 8) | static_cast<uint32_t>(prng.next_in_range(0, 0xFF)); // @0x61ea92
+		value = (value << 8) | static_cast<uint32_t>(prng.next_in_range(0, 0xFF)); // @0x61eaa7
+		key = (value << 8) | static_cast<uint32_t>(prng.next_in_range(0, 0xFF)); // @0x61eabc
+	} while (key == 0); // @0x61eac3
+	return key;
+}
+
+// [orig: CNapiNPConnection_GenerateTxKey @0x61dfe0]
+std::string generate_tx_key(NapiPrng &prng) {
+	std::string out;
+	out.reserve(kScrkDraws);
+	for (int remaining = kScrkDraws; remaining > 0; --remaining) {
+		// The draw @0x61e05b, then `sprintf("%c", charset[index])` @0x61e075: the NUL
+		// at index 31 prints nothing, and the draw still counts.
+		const char c = kScrkCharset[prng.next_in_range(0, kScrkCharsetLen)];
+		if (c != '\0')
+			out.push_back(c);
+	}
+	return out; // 63 at most: the 64-byte conn+0xCC keeps it whole @0x61e0c9
+}
+
+ConnectionKeys generate_connection_keys(NapiPrng &prng) {
+	ConnectionKeys keys;
+	keys.key = generate_session_key(prng);
+	keys.scrk = generate_tx_key(prng);
+	return keys;
+}
+
+namespace {
+
+// The process's one manager and its PRNG, seeded when first drawn from.
+// [orig: NapiNPManager_Create @0x62c5e0 (called once, CNapiNetwork_Init @0x4ca638) ->
+//  NapiNPManager_Init @0x62c480 -> NapiSession_GenerateId @0x62c4a2]
+struct ManagerPrng {
+	std::mutex mutex;
+	NapiPrng prng{ napi_prng_platform_seed() };
+};
+
+ManagerPrng &manager_prng() {
+	static ManagerPrng manager;
+	return manager;
+}
+
+} // namespace
+
+uint32_t manager_session_key() {
+	ManagerPrng &manager = manager_prng();
+	const std::lock_guard<std::mutex> lock(manager.mutex);
+	return generate_session_key(manager.prng);
+}
+
+ConnectionKeys manager_connection_keys() {
+	ManagerPrng &manager = manager_prng();
+	const std::lock_guard<std::mutex> lock(manager.mutex);
+	return generate_connection_keys(manager.prng);
+}
+
+// The CSPRNG SCRK (nw_session_framing.h): the generator's 63 inclusive draws over
+// its charset, the NUL slot appending nothing, but drawn from base/os_random, so
+// its characters follow no order.
 std::string make_dev_scrk() {
 	OsRandom gen;
 	std::uniform_int_distribution<int> pick(0, kScrkCharsetLen); // inclusive: 32 outcomes

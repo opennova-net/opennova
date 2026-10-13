@@ -192,14 +192,17 @@ JoinerConnection::JoinerConnection(std::string player_name,
 }
 
 std::vector<uint8_t> JoinerConnection::start() {
-	conn_.client_scrk = make_dev_scrk();
-	// Fresh per-connection numeric key, like the per-connection key material
-	// retail regenerates on connect: a CONSTANT ck would alias a quick
-	// reconnect from the same endpoint to the host's same-(CI,CK) retransmit
-	// echo (stale auth material) instead of a fresh node. A zero draw is drawn
-	// again, zero being no key.
-	// [orig: CNapiNPConnection_InitFromSession @0x6263F4 -> NapiNP_GenerateSessionKey]
-	client_key_ = make_session_key(session_key_draw_);
+	// Fresh per-connection key material, the CK and then the SCRK, from the manager's
+	// PRNG (D-NET-524): a CONSTANT ck would alias a quick reconnect from the same
+	// endpoint to the host's same-(CI,CK) retransmit echo (stale auth material)
+	// instead of a fresh node.
+	// [orig: CNapiNPConnection_InitFromSession @0x6263f4 -> NapiNP_GenerateSessionKey
+	//  @0x61ea70 (the CK, stored @0x6263fb), then CNapiNPConnection_GenerateTxKey
+	//  @0x61dfe0 @0x626401]
+	const ConnectionKeys keys =
+			key_prng_ != nullptr ? generate_connection_keys(*key_prng_) : manager_connection_keys();
+	client_key_ = keys.key;
+	conn_.client_scrk = keys.scrk;
 	// The CI: a join from a discovered session goes on with the browse's connection
 	// and its index; a dial without one creates its connection, which takes the
 	// process's next index (D-NET-521).

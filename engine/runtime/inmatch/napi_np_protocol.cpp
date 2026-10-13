@@ -873,15 +873,17 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	conn.admission_stage = GameAdmissionStage::AwaitJoinRequest;
 	conn.admission_padding_x = 0;
 	conn.admission_padding_y = 0;
-	// R2: mint the server SCRK / SK randomly (retail) unless a deterministic source is forced
-	// (golden byte-parity); the SK is drawn until nonzero. [orig: make_dev_scrk /
-	//  NapiNPProtocol_HandleClientJoin @0x62BF5E -> NapiNP_GenerateSessionKey]
+	// R2: the server SK and then its SCRK from the manager's PRNG (D-NET-524), unless a
+	// deterministic source is forced (golden byte-parity).
+	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750 - NapiNP_GenerateSessionKey @0x62bf5e
+	//  (the SK, stored @0x62bf6b), then CNapiNPConnection_GenerateTxKey @0x62bf99]
 	if (ctx.server_key_mint.forced) {
 		conn.server_scrk = ctx.server_key_mint.server_scrk;
 		conn.server_sk = ctx.server_key_mint.server_sk;
 	} else {
-		conn.server_scrk = make_dev_scrk();
-		conn.server_sk = make_session_key();
+		const ConnectionKeys keys = manager_connection_keys();
+		conn.server_sk = keys.key;
+		conn.server_scrk = keys.scrk;
 	}
 	conn.phase = ConnectionPhase::Joined;
 	// The connection is up: the new-connection callback counts a login

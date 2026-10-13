@@ -3746,6 +3746,12 @@ target_link_libraries(session_hello_roundtrip_test PRIVATE opennova_net)
 target_include_directories(session_hello_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME session_hello_roundtrip COMMAND session_hello_roundtrip_test)
 
+# D-NET-524 — the session key material's generator, the NAPI manager's LCG
+add_executable(napi_prng_test novaworld/napi_prng_test.cpp)
+target_link_libraries(napi_prng_test PRIVATE opennova_net)
+target_include_directories(napi_prng_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME napi_prng COMMAND napi_prng_test)
+
 # Phase D — LobbySession dispatch tests
 add_executable(lobby_session_test novaworld/lobby_session_test.cpp)
 target_link_libraries(lobby_session_test PRIVATE opennova_novaworld_service opennova_net)

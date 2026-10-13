@@ -565,16 +565,39 @@ bool run_server_hello_needs_no_hk() {
 			"the LAN browser lists an HK-less 0x81 with host key 0");
 }
 
-// D-NET-438: the joiner's CK is a session key, drawn until nonzero: a draw of {0, 0, 9} joins
-// with CK 9 (a zero was once mapped to 1).
-// [orig: CNapiNPConnection_InitFromSession @0x6263F4 -> NapiNP_GenerateSessionKey @0x61EA70,
-//  jz @0x61EAC3]
-bool run_zero_client_key_is_drawn_again() {
+// The SCRK the manager LCG's mod-32 walk gives after a key whose last byte is `key`'s: x' = 17x
+// + 1 (mod 32) for 63 draws, the NUL slot 31 appending nothing.
+std::string scrk_after_key(uint32_t key) {
+	static constexpr char kCharset[] = "0123456789BCDFGHJKLMNPQRSTVWXYZ";
+	std::string out;
+	uint32_t x = key & 31u;
+	for (int i = 0; i < 63; ++i) {
+		x = (17u * x + 1u) & 31u;
+		if (x != 31u) out.push_back(kCharset[x]);
+	}
+	return out;
+}
+
+// A key whose bytes follow b' = 49b + 1 (mod 256), the LCG's byte draws.
+bool key_bytes_chain(uint32_t key) {
+	for (int shift = 24; shift > 0; shift -= 8) {
+		const uint32_t b = (key >> shift) & 0xFFu;
+		if (((49u * b + 1u) & 0xFFu) != ((key >> (shift - 8)) & 0xFFu)) return false;
+	}
+	return true;
+}
+
+// D-NET-524: the joiner draws its CK and then its SCRK from the manager's LCG. Seeded so the CK
+// is RR's captured 0x4667b839, the 0x42 carries that CK and the 61-character SCRK the LCG walks
+// next; the default (the process's manager) gives a CK whose bytes chain and an SCRK that
+// follows it. (D-NET-438's redraw of a zero key stays ported; the LCG never yields one.)
+// [orig: CNapiNPConnection_InitFromSession @0x6263f4 -> NapiNP_GenerateSessionKey @0x61ea70,
+//  then CNapiNPConnection_GenerateTxKey @0x61dfe0 @0x626401]
+bool run_client_keys_draw_from_the_manager_lcg() {
 	uint64_t now_ms = 0;
-	inmatch::JoinerConnection joiner("ZeroKeyJoiner", [&now_ms] { return now_ms; });
-	const uint32_t draws[] = {0u, 0u, 9u};
-	std::size_t next = 0;
-	joiner.set_session_key_draw([&]() { return draws[next++]; });
+	NapiPrng prng(0x55u);
+	inmatch::JoinerConnection joiner("LcgJoiner", [&now_ms] { return now_ms; });
+	joiner.set_key_prng(&prng);
 	inmatch::JoinerConnection::DiscoveredSession session;
 	session.present = true;
 	session.host_key = 0x0FE0E115u;
@@ -583,11 +606,26 @@ bool run_zero_client_key_is_drawn_again() {
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
 	ClientAuth auth;
-	return expect(nw_decode_inbound(first.data(), first.size(), opcode, body) &&
-				opcode == SESSION_OPCODE_CLIENT_AUTH &&
-				parse_client_auth(body.data(), body.size(), auth) && next == 3 &&
-				joiner.client_key() == 9u && auth.ck == 9u,
-			"a zero CK draw is drawn again: the 0x42 carries the third draw's 9");
+	if (!expect(nw_decode_inbound(first.data(), first.size(), opcode, body) &&
+	                    opcode == SESSION_OPCODE_CLIENT_AUTH &&
+	                    parse_client_auth(body.data(), body.size(), auth),
+	            "lcg: the joiner's first datagram is its 0x42"))
+		return false;
+	if (!expect(auth.ck == 0x4667B839u && joiner.client_key() == 0x4667B839u &&
+	                    auth.scrk == "BCXYGH01LM45QR89VWDFZJK23NP67STBCXYGH01LM45QR89VWDFZJK23NP67S" &&
+	                    joiner.client_scrk() == auth.scrk && prng.draws() == 67u,
+	            "lcg: the seeded CK then SCRK ride the 0x42"))
+		return false;
+
+	inmatch::JoinerConnection fresh("ManagerJoiner", [&now_ms] { return now_ms; });
+	fresh.set_discovered_session(session);
+	const std::vector<uint8_t> second = fresh.start();
+	ClientAuth fresh_auth;
+	return expect(nw_decode_inbound(second.data(), second.size(), opcode, body) &&
+	                      parse_client_auth(body.data(), body.size(), fresh_auth) &&
+	                      fresh_auth.ck != 0 && key_bytes_chain(fresh_auth.ck) &&
+	                      fresh_auth.scrk == scrk_after_key(fresh_auth.ck),
+	              "lcg: the manager's CK chains its bytes and its SCRK follows it");
 }
 
 // D-NET-437: the joiner reads any 0x82 from its host, no field required. One whose CI or CK is
@@ -1135,7 +1173,7 @@ int main() {
 	if (!run_discovered_row_join_skips_the_hello()) return 1;
 	if (!run_connect_writes_pv3_and_its_peer()) return 1;
 	if (!run_one_connection_index_per_join()) return 1;
-	if (!run_zero_client_key_is_drawn_again()) return 1;
+	if (!run_client_keys_draw_from_the_manager_lcg()) return 1;
 	if (!run_server_hello_needs_no_hk()) return 1;
 	if (!run_server_auth_acceptance_follows_retail()) return 1;
 	if (!run_cs_block_drives_the_joiner_ceiling_and_intervals()) return 1;
