@@ -238,6 +238,7 @@ void FirstPersonSources::read_weapon_(const FileSource &files, const std::shared
 	std::fill(std::begin(pos_units_), std::end(pos_units_), 0.0f);
 	std::fill(std::begin(rot_bias_deg_), std::end(rot_bias_deg_), 0.0f);
 	std::fill(std::begin(tpos_units_), std::end(tpos_units_), 0.0f);
+	std::fill(std::begin(tpos_rot_deg_), std::end(tpos_rot_deg_), 0.0f);
 	renderfov_ = renderer::kWeaponRenderFovHDegDefault;
 	fsm_ = world::WeaponFsmDef();
 	baked_ = false;
@@ -267,6 +268,7 @@ void FirstPersonSources::read_weapon_(const FileSource &files, const std::shared
 			// The cant's columns as the game presenter reads them: Q16 degrees [orig: the parser's
 			// degrees -> BAM @0x54471f].
 			rot_bias_deg_[i] = float(row.pos_rotation_deg_q16[i] / io::kFp16OneD);
+			tpos_rot_deg_[i] = float(row.tpos_rotation_deg_q16[i] / io::kFp16OneD);
 		}
 		// The bake, as the game's weapon table bakes this weapon: every weapon on its map before it, in the
 		// file's order, reads the map's shared rings first (an earlier weapon's `auto` reads move a later
@@ -468,6 +470,45 @@ OrbitCamera first_person_eye(const FirstPersonSources &sources, const OrbitCamer
 	return eye;
 }
 
+PreviewVec3 FirstPersonRoot::point(const PreviewVec3 &p) const {
+	return PreviewVec3{origin.x + x.x * p.x + y.x * p.y + z.x * p.z, origin.y + x.y * p.x + y.y * p.y + z.y * p.z,
+	                   origin.z + x.z * p.x + y.z * p.y + z.z * p.z};
+}
+
+PreviewVec3 FirstPersonRoot::direction(const PreviewVec3 &d) const {
+	return PreviewVec3{x.x * d.x + y.x * d.y + z.x * d.z, x.y * d.x + y.y * d.y + z.y * d.z,
+	                   x.z * d.x + y.z * d.y + z.z * d.z};
+}
+
+FirstPersonRoot first_person_root(const FirstPersonSources &sources, int width, int height, const float bias_units[3],
+                                  const float bias_rot_deg[3]) {
+	float hip[3], now[3], turn[3];
+	first_person_view_units(sources, width, height, hip);
+	for (int i = 0; i < 3; ++i) {
+		now[i] = hip[i] + bias_units[i];
+		turn[i] = sources.rot_bias_deg()[i] + bias_rot_deg[i];
+	}
+	const float rig[3] = {0.0f, renderer::kViewmodelRigYawDeg, 0.0f};
+	const renderer::FpViewmodelPose h = renderer::fp_viewmodel_pose(hip, sources.rot_bias_deg(), rig);
+	const renderer::FpViewmodelPose t = renderer::fp_viewmodel_pose(now, turn, rig);
+	// A model point p stands at the camera at Bt p + ot, and the camera at the hip's pose inverted: Bh^T (q - oh).
+	float m[3][3], o[3];
+	for (int i = 0; i < 3; ++i) {
+		o[i] = 0.0f;
+		for (int k = 0; k < 3; ++k) o[i] += h.basis[k * 3 + i] * (t.origin[k] - h.origin[k]);
+		for (int j = 0; j < 3; ++j) {
+			m[i][j] = 0.0f;
+			for (int k = 0; k < 3; ++k) m[i][j] += h.basis[k * 3 + i] * t.basis[k * 3 + j];
+		}
+	}
+	FirstPersonRoot root;
+	root.x = PreviewVec3{m[0][0], m[1][0], m[2][0]};
+	root.y = PreviewVec3{m[0][1], m[1][1], m[2][1]};
+	root.z = PreviewVec3{m[0][2], m[1][2], m[2][2]};
+	root.origin = PreviewVec3{o[0], o[1], o[2]};
+	return root;
+}
+
 // --- the envelope ------------------------------------------------------------------------------------
 
 io::JsonValue first_person_json(const FirstPersonSources &sources, const FirstPersonOptions &options,
@@ -492,6 +533,7 @@ io::JsonValue first_person_json(const FirstPersonSources &sources, const FirstPe
 	out.set("pos", three(sources.pos_units()));
 	out.set("rot", three(sources.rot_bias_deg()));
 	out.set("tpos", three(sources.tpos_units()));
+	out.set("trot", three(sources.tpos_rot_deg()));
 	out.set("renderfov", json_number(sources.renderfov()));
 	const FirstPersonCharacter *who = sources.character();
 	JsonValue characters = JsonValue::make_array();

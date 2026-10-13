@@ -244,6 +244,16 @@ void DefinitionViewportApplier::apply_weapon_(const opennova::editor::ViewportMo
 	// TEX_TEAM the player's team byte on every first-person part, as the view model's per-submit writer stores it
 	// (the engine's fp_ctrl_register_writes and viewmodel_team_byte); none, and any left cleared, otherwise.
 	const bool first_person = weapon && fire.first() && fire.first_person().active();
+	// The gun and the arms where the scope's ease stands the view model (the identity at the hip, the camera's
+	// place), as the game's presenter stands it at the camera each frame (DefinitionWeapon::viewmodel_root).
+	if (first_person && fire.eye()) {
+		const opennova::editor::FirstPersonRoot &root = fire.viewmodel_root();
+		const Transform3D placed(Basis(to_godot(root.x), to_godot(root.y), to_godot(root.z)), to_godot(root.origin));
+		model_->object()->set_transform(placed);
+		arms_->object()->set_transform(placed);
+	} else {
+		arms_->object()->set_transform(Transform3D());
+	}
 	const int team = first_person ? opennova::renderer::viewmodel_team_byte(fire.first_person().team()) : INT32_MIN;
 	if (team != applied_team_ && model_->built()) {
 		applied_team_ = team;

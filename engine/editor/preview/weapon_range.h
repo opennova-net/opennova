@@ -177,6 +177,9 @@ struct WeaponRangeEvent {
 	std::string clip;      // the FP channel at the tick
 	int32_t clip_variant = 0;
 	int32_t clip_ticks = 0;
+	// The view model's offset from the hip at the tick (WeaponRange::viewmodel_bias): view units and degrees.
+	float view_units[3] = {0.0f, 0.0f, 0.0f};
+	float view_rot_deg[3] = {0.0f, 0.0f, 0.0f};
 	std::string words;
 };
 const char *weapon_range_event_token(WeaponRangeEvent::Kind kind);
@@ -253,6 +256,11 @@ public:
 	// range the body update's ray found), what the HUD reads of the view [orig: Render_ProcessMainSceneFrame
 	// @0x5CA299..0x5CA304; HUD_DrawScopeOverlayDetails @0x59E420]. A default frame with no weapon in hand.
 	const world::LocalPlayerViewFrame &view_frame() const { return frame_; }
+	// The view model's offset from the hip the run stands at, as the game's presenter takes it: the scope's eased
+	// offset (view units, X forward, Y left, Z up) and turn (degrees), both dropped while a NoCardSwitch weapon
+	// reloads, zero at the hip [orig: Player_UpdateFirstPersonCamera @0x4dd380, the bias adds @0x4dd40d /
+	// @0x4dd49f, their skips @0x4dd439 / @0x4dd4cc; Player_StepFpViewBiasInterp @0x4ddd20].
+	void viewmodel_bias(float units[3], float rot_deg[3]) const;
 	// The weapon's ammo ("" none) and its tracer rate; whether the range fires an ammo alone (no weapon).
 	const std::string &ammo() const { return ammo_; }
 	bool ammo_alone() const { return setup_.weapon.empty() && !setup_.ammo.empty(); }
@@ -279,6 +287,7 @@ private:
 	void fire_alone_(int32_t tick);
 	void apply_gestures_(int32_t tick);
 	void fire_shots_(int32_t tick);
+	void bias_(bool suppressed, float units[3], float rot_deg[3]) const;
 
 	WeaponRangeSetup setup_;
 	bool ready_ = false;
