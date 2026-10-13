@@ -231,7 +231,11 @@
   `os_random_u64` / `os_random_nonzero_u32`, `make_uuid_v4`, the `OsRandom` generator),
   never `std::random_device`, which libstdc++ serves from RDSEED (AMD's erratum answers
   concurrent draws with 0); it is a compiled lib in `opennova_base`, not `io`, because
-  its Windows call needs `<windows.h>`. The one `std::random_device` left in `engine/`
+  its Windows call needs `<windows.h>`. A child process starts through `base/proc`
+  (`proc::ChildProcess`: an argv array with no shell, the identity, `process_liveness`,
+  release without a kill), the one process seam of the apps and the front ends; it is
+  platform plumbing (citation allowlist) and is left out of the web build. The one
+  `std::random_device` left in `engine/`
   is the narrow exception: the CBIN writer's fresh XOR key (`formats/cbin`, a credits
   file with no preserved key) is written in the clear in the file's own header, so it
   only obfuscates and is neither a secret nor an id, and formats cannot link base. Do
