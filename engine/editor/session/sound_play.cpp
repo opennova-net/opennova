@@ -67,6 +67,29 @@ void start(SessionCore &core, std::vector<WorkspaceView::Voice> voices, const st
 	}
 }
 
+// The model preview of the request's path with a clip playing in it; null, refused, where none plays.
+ModelViewport *playing_clip(SessionCore &core, const EditorRequest &request) {
+	std::string error;
+	auto *clip = dynamic_cast<ModelViewport *>(core.viewports().resolve(core.view(), request.path, ViewportKind::Model, error));
+	if (clip && clip->animating()) return clip;
+	refuse(core, !error.empty() ? error : "No clip plays in the model preview of " + request.path + ".", request.path);
+	return nullptr;
+}
+
+// What a press of a mark fired (one set or several, every one at once), played with its words; refused with them
+// where no voice sounds.
+void play_fired(SessionCore &core, const std::vector<ClipSoundFired> &fired, const std::string &at) {
+	std::vector<WorkspaceView::Voice> voices;
+	std::string words;
+	for (const ClipSoundFired &one : fired) {
+		words += (words.empty() ? "" : " ") + one.words;
+		for (const ClipSoundFired::Voice &voice : one.voices)
+			if (!voice.path.empty()) voices.push_back({voice.path, voice.pitch_q16, voice.volume});
+	}
+	if (voices.empty()) return refuse(core, words, at);
+	start(core, std::move(voices), fired.front().set, fired.front().bank, words);
+}
+
 // A planned play's voices as project waves; a voice whose file the project lacks, or that is past what a
 // card reads, left out and said.
 void start_play(SessionCore &core, const PreviewPlay &play) {
@@ -95,51 +118,31 @@ void start_play(SessionCore &core, const PreviewPlay &play) {
 // that frame, as a press of its mark on the timeline asks (DI-04: ModelViewport::press_event, under its
 // model viewport's sound options), every sound of the event at once.
 void play_clip_event(SessionCore &core, const EditorRequest &request) {
-	const SessionView &view = core.view();
 	const std::optional<int> frame = strutil::parse_int(value_of(request, "frame"));
 	if (!frame || *frame < 0) return refuse(core, "frame is a clip's frame, a whole number from 0.");
-	std::string error;
-	auto *clip = dynamic_cast<ModelViewport *>(
-			core.viewports().resolve(view, request.path, ViewportKind::Model, error));
-	if (!clip || !clip->animating())
-		return refuse(core, !error.empty() ? error : "No clip plays in the model preview of " + request.path + ".",
-		              request.path);
+	ModelViewport *clip = playing_clip(core, request);
+	if (!clip) return;
 	std::vector<ClipSoundFired> fired;
-	if (!clip->press_event(*frame, view.project.scan.get(), core.sound_selector(), fired, error))
+	std::string error;
+	if (!clip->press_event(*frame, core.view().project.scan.get(), core.sound_selector(), fired, error))
 		return refuse(core, error, clip->path());
-	std::vector<WorkspaceView::Voice> voices;
-	std::string words;
-	for (const ClipSoundFired &one : fired) {
-		words += (words.empty() ? "" : " ") + one.words;
-		for (const ClipSoundFired::Voice &voice : one.voices)
-			if (!voice.path.empty()) voices.push_back({voice.path, voice.pitch_q16, voice.volume});
-	}
-	if (voices.empty()) return refuse(core, words, clip->path());
-	start(core, std::move(voices), fired.front().set, fired.front().bank, words);
+	play_fired(core, fired, clip->path());
 }
 
 // values {leg}: the set the weapon action playing the row of a first-person map plays as it begins (begin:
 // its soundset) or finishes (end: its soundsetend), as a press of the leg's mark asks (DI-13:
 // ModelViewport::press_leg).
 void play_action_leg(SessionCore &core, const EditorRequest &request) {
-	const SessionView &view = core.view();
 	const std::string &leg = value_of(request, "leg");
 	if (!strutil::iequals(leg, "begin") && !strutil::iequals(leg, "end"))
 		return refuse(core, "leg is begin (the action's soundset) or end (its soundsetend).");
-	std::string error;
-	auto *clip = dynamic_cast<ModelViewport *>(
-			core.viewports().resolve(view, request.path, ViewportKind::Model, error));
-	if (!clip || !clip->animating())
-		return refuse(core, !error.empty() ? error : "No clip plays in the model preview of " + request.path + ".",
-		              request.path);
+	ModelViewport *clip = playing_clip(core, request);
+	if (!clip) return;
 	std::vector<ClipSoundFired> fired;
-	if (!clip->press_leg(strutil::iequals(leg, "end"), core.sound_selector(), view.project.scan.get(), fired, error))
+	std::string error;
+	if (!clip->press_leg(strutil::iequals(leg, "end"), core.sound_selector(), core.view().project.scan.get(), fired, error))
 		return refuse(core, error, clip->path());
-	std::vector<WorkspaceView::Voice> voices;
-	for (const ClipSoundFired::Voice &voice : fired.front().voices)
-		if (!voice.path.empty()) voices.push_back({voice.path, voice.pitch_q16, voice.volume});
-	if (voices.empty()) return refuse(core, fired.front().words, clip->path());
-	start(core, std::move(voices), fired.front().set, fired.front().bank, fired.front().words);
+	play_fired(core, fired, clip->path());
 }
 
 // values {dialog, line?}: a dialog of the dialog bank `path` names, or of the bank the mission `path` loads, its

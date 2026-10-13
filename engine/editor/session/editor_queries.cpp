@@ -1212,17 +1212,22 @@ constexpr QueryParam kThumbnailParams[] = {
 };
 constexpr QueryChoices kThumbnailChoices[] = { { "transform", transform_choice } };
 
+// The texture file of the project `path` names, by its project-relative path or its logical name; null with the
+// error where the project has none.
+const AssetEntry *texture_entry(const SessionView &view, const std::string &path, std::string &error) {
+	const AssetEntry *entry = view.project.scan ? view.project.scan->at_path(path) : nullptr;
+	if (!entry && view.project.scan) entry = view.project.scan->find(path);
+	if (entry && entry->kind == AssetKind::Texture) return entry;
+	error = "no texture file " + path + " in the project.";
+	return nullptr;
+}
+
 // A texture file as a small picture (ADR 0046 S18, preview/texture_thumbnails), made now when the cache
 // lacks it: its facts and the picture as a PNG.
 JsonValue answer_texture_thumbnail(const QueryContext &context, const QueryArgs &args, std::string &error) {
 	const SessionView &view = context.core.view();
-	const std::string path = args.text("path");
-	const AssetEntry *entry = view.project.scan ? view.project.scan->at_path(path) : nullptr;
-	if (!entry && view.project.scan) entry = view.project.scan->find(path);
-	if (!entry || entry->kind != AssetKind::Texture) {
-		error = "no texture file " + path + " in the project.";
-		return JsonValue::make_null();
-	}
+	const AssetEntry *entry = texture_entry(view, args.text("path"), error);
+	if (!entry) return JsonValue::make_null();
 	TextureLoadTransform transform = TextureLoadTransform::None;
 	for (size_t i = 0; i < size_t(TextureLoadTransform::kCount); ++i)
 		if (args.text("transform") == transform_choice(i)) transform = static_cast<TextureLoadTransform>(i);
@@ -1245,13 +1250,8 @@ constexpr QueryParam kTextureUsesParams[] = {
 // What uses a texture (ADR 0046 S18, graph/texture_uses over the session's index).
 JsonValue answer_texture_uses(const QueryContext &context, const QueryArgs &args, std::string &error) {
 	const SessionView &view = context.core.view();
-	const std::string path = args.text("path");
-	const AssetEntry *entry = view.project.scan ? view.project.scan->at_path(path) : nullptr;
-	if (!entry && view.project.scan) entry = view.project.scan->find(path);
-	if (!entry || entry->kind != AssetKind::Texture) {
-		error = "no texture file " + path + " in the project.";
-		return JsonValue::make_null();
-	}
+	const AssetEntry *entry = texture_entry(view, args.text("path"), error);
+	if (!entry) return JsonValue::make_null();
 	static const std::vector<TextureUse> kNone;
 	const std::vector<TextureUse> &uses =
 			view.documents.texture_uses ? view.documents.texture_uses->uses_of(view, entry->relative_path) : kNone;
