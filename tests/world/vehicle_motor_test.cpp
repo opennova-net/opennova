@@ -122,6 +122,7 @@ struct Rig {
         veh.kind = EntityKind::Item;
         veh.item_id = 1291; // wire type of the dune buggy (items.def id - 100000)
         veh.has_item_def = true; // pool-1 sources need an ItemDef (retail gate)
+        veh.has_graphic_model = true;
         // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
         veh.item_attrib = kItemAttribPlayerControl;
         veh.position = {100.0f, 200.0f, 10.0f};
@@ -1200,6 +1201,7 @@ void test_vehicle_impact_role_and_momentum_edge() {
 		other.item_id = 900;
 		other.item_type = 1;
 		other.has_item_def = true;
+		other.has_graphic_model = true;
 		other.item_attrib = 0x40;
 		other.position = { 150.0f, 200.0f, 10.0f };
 		other.yaw = 90;
@@ -1354,6 +1356,7 @@ static void test_helo_waits_for_its_boarders() {
     helo.alive = true;
     helo.health = 100;
     helo.has_item_def = true;
+    helo.has_graphic_model = true;
     Seat ctrl; ctrl.type = SeatType::Controller;
     Seat pax;  pax.type  = SeatType::Passenger;
     helo.seats.push_back(ctrl);
@@ -1367,6 +1370,7 @@ static void test_helo_waits_for_its_boarders() {
     walker.alive = true;
     walker.health = 100;
     walker.has_item_def = true;
+    walker.has_graphic_model = true;
     walker.kind = EntityKind::Organic;
     const EntityHandle wh = w.registry.spawn(0, walker);
     AiEntity &wb = *ai.at(ai.attach(wh));
@@ -2546,6 +2550,7 @@ void test_vehicle_carrier_follow_and_refresh() {
 	deck.kind = EntityKind::Item;
 	deck.item_id = 500;
 	deck.has_item_def = true;
+	deck.has_graphic_model = true;
 	deck.item_type = 1;
 	deck.position = { 100.0f, 200.0f, 5.0f };
 	deck.bound_radius = 30.0f;

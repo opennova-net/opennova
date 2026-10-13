@@ -1015,6 +1015,7 @@ void test_resolver_move_callback_contact_replaces_solid_push() {
     Rig callback(box_model(1, 0, 2.0, 2.0, 3.0));
     Entity *target = callback.world.registry.get(callback.building);
     target->has_item_def = true;
+    target->has_graphic_model = true;
     target->item_attrib = kItemAttribMoveCallback;
     const auto callback_pos = resolve_transition(callback, true);
     CHECK(callback_pos.second == callback_pos.first);
@@ -1033,6 +1034,7 @@ void test_resolver_move_callback_contact_replaces_solid_push() {
     Rig powerup(box_model(1, 0, 2.0, 2.0, 3.0));
     target = powerup.world.registry.get(powerup.building);
     target->has_item_def = true;
+    target->has_graphic_model = true;
     target->item_attrib = kItemAttribMoveCallback | kItemAttribPowerup;
     const auto powerup_pos = resolve_transition(powerup, true);
     CHECK(powerup_pos.second == powerup_pos.first);
@@ -1048,6 +1050,7 @@ void test_resolver_move_callback_contact_replaces_solid_push() {
     Rig powerup_joiner(box_model(1, 0, 2.0, 2.0, 3.0));
     target = powerup_joiner.world.registry.get(powerup_joiner.building);
     target->has_item_def = true;
+    target->has_graphic_model = true;
     target->item_attrib = kItemAttribPowerup;
     const auto joiner_pos = resolve_transition(powerup_joiner, false);
     CHECK(joiner_pos.second == joiner_pos.first);
@@ -1059,6 +1062,7 @@ void test_resolver_move_callback_contact_replaces_solid_push() {
     Rig withdrawn(box_model(1, 0, 2.0, 2.0, 3.0));
     target = withdrawn.world.registry.get(withdrawn.building);
     target->has_item_def = true;
+    target->has_graphic_model = true;
     target->item_attrib = kItemAttribPowerup;
     target->powerup_def_index = 0;
     target->hidden = true;
@@ -1074,6 +1078,7 @@ void test_resolver_move_callback_contact_replaces_solid_push() {
         Rig npc(box_model(1, 0, 2.0, 2.0, 3.0));
         target = npc.world.registry.get(npc.building);
         target->has_item_def = true;
+        target->has_graphic_model = true;
         target->item_attrib = kItemAttribPowerup;
         npc.move_soldier(12.8, 10.0, 0.0);
         int32_t pos[3] = {fx(12.8), fx(10.0), 0};
@@ -1096,6 +1101,7 @@ void test_resolver_move_callback_contact_replaces_solid_push() {
     Rig replica(box_model(1, 0, 2.0, 2.0, 3.0));
     target = replica.world.registry.get(replica.building);
     target->has_item_def = true;
+    target->has_graphic_model = true;
     target->item_attrib = kItemAttribMoveCallback;
     const auto replica_pos = resolve_transition(replica, false);
     CHECK(replica_pos.second == replica_pos.first);
@@ -1111,6 +1117,7 @@ void test_resolver_move_callback_contact_replaces_solid_push() {
         Rig remote(box_model(1, 0, 2.0, 2.0, 3.0));
         Entity *pack = remote.world.registry.get(remote.building);
         pack->has_item_def = true;
+        pack->has_graphic_model = true;
         pack->item_attrib = kItemAttribPowerup;
         CollisionWorld::ResolveState state;
         const auto resolve_at = [&](double x, uint32_t tick) {
@@ -1143,6 +1150,7 @@ void test_mounted_resolver_keeps_touch_without_parent_pushout() {
     Entity gun{};
     gun.kind = EntityKind::Item;
     gun.has_item_def = true;
+    gun.has_graphic_model = true;
     gun.health = 100;
     gun.alive = true;
     gun.net_id = 0x20;
@@ -1849,6 +1857,7 @@ void test_proximity_tables_use_host_bound_radius() {
     vehicle_seed.kind = EntityKind::Item;
     vehicle_seed.item_id = 900;
     vehicle_seed.has_item_def = true;
+    vehicle_seed.has_graphic_model = true;
     vehicle_seed.item_type = 1;
     vehicle_seed.position = {40.0f, 40.0f, 0.0f};
     vehicle_seed.bound_radius = 8.0f;
@@ -3104,6 +3113,7 @@ void test_vehicle_hull_prefilters_stale_candidates_before_section_matrices() {
     vehicle_seed.kind = EntityKind::Item;
     vehicle_seed.item_id = 900;
     vehicle_seed.has_item_def = true;
+    vehicle_seed.has_graphic_model = true;
     vehicle_seed.item_type = 1;
     vehicle_seed.position = {13.0f, 10.0f, 0.0f};
     vehicle_seed.bound_radius = 1.0f;
@@ -3161,6 +3171,7 @@ void test_vehicle_probes_support_model_decks_and_grade_slopes() {
 	hull.kind = EntityKind::Item;
 	hull.item_id = 900;
 	hull.has_item_def = true;
+	hull.has_graphic_model = true;
 	hull.item_type = 1;
 	hull.bound_radius = 3.0f;
 	hull.position = { 10.0f, 10.0f, 2.0f };
@@ -3221,6 +3232,7 @@ void test_vehicle_hull_skips_mounted_child_ground_chain() {
         seed.kind = EntityKind::Item;
         seed.item_id = item_id;
         seed.has_item_def = true;
+        seed.has_graphic_model = true;
         seed.item_type = 1;
         seed.position = {x, y, z};
         seed.yaw = 90; // mission 90 = engine heading BAM 0, like the wall template
@@ -4354,6 +4366,7 @@ void test_round_inside_bound_sphere_hits_wall() {
     // A def-less target passes the round [orig: Projectile_ProcessDamageOnTarget
     // @0x4E7FCB..0x4E7FD9]; a wall carries its items.def row.
     b->has_item_def = true;
+    b->has_graphic_model = true;
 
     RoundSim &rs = rig.world.round_sim;
     LiveRound &r = rs.rounds[0];
@@ -4983,6 +4996,7 @@ void test_round_person_sections_drive_hit_and_death_animation() {
     Entity victim_seed;
     victim_seed.kind = EntityKind::Organic;
     victim_seed.has_item_def = true;
+    victim_seed.has_graphic_model = true;
     victim_seed.item_type = 3;
     victim_seed.health = 775;
     victim_seed.alive = true;
@@ -5223,6 +5237,7 @@ void test_late_pool1_item_resolves_cfac_or_raises() {
     Entity placed;
     placed.kind = EntityKind::Item;
     placed.has_item_def = true;
+    placed.has_graphic_model = true;
     placed.item_id = 7001;
     placed.position = {5.0f, 0.0f, 0.0f};
     placed.yaw = 90; // identity model placement [orig: entity matrix @0x613F40]
@@ -5853,6 +5868,7 @@ void test_cached_los_excludes_the_endpoint_carrier() {
     Entity hull{};
     hull.kind = EntityKind::Item;
     hull.has_item_def = true;
+    hull.has_graphic_model = true;
     hull.health = 100;
     hull.alive = true;
     hull.net_id = 0x20;
@@ -5998,6 +6014,7 @@ struct RunOverRig {
 		v.kind = EntityKind::Item;
 		v.item_id = 900;
 		v.has_item_def = true;
+		v.has_graphic_model = true;
 		v.item_type = 1;
 		v.health = 500;
 		v.position = {10.0f, 10.0f, 0.0f};
@@ -6009,6 +6026,7 @@ struct RunOverRig {
 		Entity s;
 		s.kind = EntityKind::Organic;
 		s.has_item_def = true;
+		s.has_graphic_model = true;
 		s.item_type = 3;
 		s.health = 100;
 		s.position = {12.8f, 10.0f, 0.0f};

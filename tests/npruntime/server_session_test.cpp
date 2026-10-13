@@ -3595,6 +3595,7 @@ bool check_vehicle_spawn_target_deploys_into_best_seat() {
 	opennova::world::Entity vehicle_seed;
 	vehicle_seed.kind = opennova::world::EntityKind::Item;
 	vehicle_seed.has_item_def = true;
+	vehicle_seed.has_graphic_model = true;
 	vehicle_seed.item_type = 1;
 	// Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
 	vehicle_seed.item_attrib = opennova::world::kItemAttribPlayerControl;
@@ -3733,6 +3734,7 @@ bool check_dead_vehicle_root_is_no_mobile_spawn() {
 	w::Entity root_seed;
 	root_seed.kind = w::EntityKind::Item;
 	root_seed.has_item_def = true;
+	root_seed.has_graphic_model = true;
 	root_seed.item_type = 1;
 	root_seed.item_attrib = w::kItemAttribPlayerControl;
 	root_seed.is_spawn_point = true;
@@ -3747,6 +3749,7 @@ bool check_dead_vehicle_root_is_no_mobile_spawn() {
 	w::Entity child_seed; // a live, ground-attached emplacement with a free seat
 	child_seed.kind = w::EntityKind::Item;
 	child_seed.has_item_def = true;
+	child_seed.has_graphic_model = true;
 	child_seed.team = 1;
 	child_seed.alive = true;
 	child_seed.health = 100;
@@ -3836,6 +3839,7 @@ bool check_refused_mobile_spawn_deploy_clears_hold() {
 	w::Entity vehicle_seed;
 	vehicle_seed.kind = w::EntityKind::Item;
 	vehicle_seed.has_item_def = true;
+	vehicle_seed.has_graphic_model = true;
 	vehicle_seed.item_type = 1;
 	vehicle_seed.item_attrib = w::kItemAttribPlayerControl;
 	vehicle_seed.is_spawn_point = true;
@@ -4868,6 +4872,7 @@ bool check_retail_minimap_overlay_stream_without_zone_chain() {
 	auto building = [](uint8_t team = 0, uint8_t source = 0) {
 		opennova::world::Entity e;
 		e.has_item_def = true;
+		e.has_graphic_model = true;
 		e.item_type = 5; // ItemDef Building
 		e.kind = opennova::world::EntityKind::Building;
 		e.has_minimap_model_marker = true; // graphicModel+0xE0 portal/occlusion pointer
@@ -4900,6 +4905,7 @@ bool check_retail_minimap_overlay_stream_without_zone_chain() {
 	for (int slot = 8; slot <= 12; ++slot) {
 		opennova::world::Entity e;
 		e.has_item_def = true;
+		e.has_graphic_model = true;
 		e.item_type = 6; // Object
 		e.item_id = 1902;
 		e.item_attrib = opennova::world::kItemAttribEweap;
@@ -5026,6 +5032,7 @@ bool check_minimap_overlay_zone_capture_bits() {
 		opennova::world::Entity e;
 		e.kind = opennova::world::EntityKind::Item;
 		e.has_item_def = true;
+		e.has_graphic_model = true;
 		e.item_attrib = opennova::world::kItemAttribSpawnPoint |
 				(chained ? opennova::world::kItemAttribChangeTeam : 0u);
 		e.is_spawn_point = true;
@@ -5118,6 +5125,7 @@ bool check_minimap_overlay_reads_the_slot_team() {
 	opennova::world::Entity vehicle;
 	vehicle.kind = opennova::world::EntityKind::Item;
 	vehicle.has_item_def = true;
+	vehicle.has_graphic_model = true;
 	vehicle.item_type = 1;
 	vehicle.item_attrib2 = 0x00002000u; // a mapped class (icon 5)
 	vehicle.team = 1;
@@ -5128,6 +5136,7 @@ bool check_minimap_overlay_reads_the_slot_team() {
 		opennova::world::Entity e;
 		e.kind = opennova::world::EntityKind::Item;
 		e.has_item_def = true;
+		e.has_graphic_model = true;
 		e.item_attrib = opennova::world::kItemAttribSpawnPoint |
 				opennova::world::kItemAttribChangeTeam;
 		e.is_spawn_point = true;

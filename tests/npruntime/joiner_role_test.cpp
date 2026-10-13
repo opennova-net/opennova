@@ -487,6 +487,7 @@ bool run_confirmed_vehicle_drive(int occupancy, bool server_feedback = false,
 	vehicle.kind = w::EntityKind::Item;
 	vehicle.item_id = 1291;
 	vehicle.has_item_def = true;
+	vehicle.has_graphic_model = true;
 	vehicle.item_type = 1;
 	vehicle.item_attrib = 0x40u;
 	vehicle.net_class_code = static_cast<uint8_t>(EntityClass::Vehicle);
@@ -801,6 +802,7 @@ bool run_request_turns_l_before_the_0x26() {
 	w::Entity vehicle;
 	vehicle.kind = w::EntityKind::Item;
 	vehicle.has_item_def = true;
+	vehicle.has_graphic_model = true;
 	vehicle.position = local->position;
 	vehicle.position.x += 1.0f; // a step away: the scan aims from the eye at the seat point
 	vehicle.health = vehicle.health_max = 100;
@@ -883,6 +885,7 @@ bool run_remote_vehicle_occupancy() {
 	vehicle.kind = w::EntityKind::Item;
 	vehicle.item_id = 1291;
 	vehicle.has_item_def = true;
+	vehicle.has_graphic_model = true;
 	vehicle.item_type = 1;
 	vehicle.item_attrib = 0x40u;
 	vehicle.position = local->position;
@@ -1290,6 +1293,7 @@ bool run_local_replica_turret_channel() {
  w::Entity gun;
  gun.kind = w::EntityKind::Item;
  gun.has_item_def = true; // seats need the def (D-NET-422)
+ gun.has_graphic_model = true;
  gun.item_id = 123;
  gun.spawn_origin = 1u << 24;
  gun.yaw = 90;
