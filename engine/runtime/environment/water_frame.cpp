@@ -40,6 +40,20 @@ float resolve_water_height(const WaterHeightRungs &rungs,
 	return resolve_water_rung(rungs, env, current).height;
 }
 
+ResolvedWaterHeight mission_water_rung(
+		const BmsEnvOverrides &overrides, const Config &environment, float terrain_height) {
+	if (overrides.has_water_height) {
+		return { overrides.water_height * kWaterHeightUnit, WaterRung::Mission };
+	}
+	if (environment.water_height_set) {
+		return { environment.water_height * kWaterHeightUnit, WaterRung::Environment };
+	}
+	if (terrain_height != 0.0f) {
+		return { terrain_height, WaterRung::Terrain };
+	}
+	return { 0.0f, WaterRung::None };
+}
+
 WaterFrameInputs build_water_frame_inputs(const EnvironmentState *env,
 		float murk_default) {
 	WaterFrameInputs inputs;

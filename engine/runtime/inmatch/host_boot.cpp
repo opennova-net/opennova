@@ -59,10 +59,10 @@ void load_environment_and_water(const mission::BootFileSource &files,
 	boot.environment.set_config(&boot.env_config, env_loaded);
 	// The occupant clamp, the vehicle grounding and the footstep water pick
 	// read the plane [orig: g_EnvWaterHeightFixed @0x26C6454]; the rungs and
-	// their witnesses are env::resolve_water_height's.
-	const env::WaterHeightRungs rungs = env::mission_water_rungs(overrides,
-			kernel.terrain_store.terrain_water_height(), kernel.terrain_store.valid());
-	const float water = env::resolve_water_height(rungs, &boot.environment, 0.0f);
+	// their witnesses are env::mission_water_rung's.
+	const float water = env::mission_water_rung(
+			overrides, boot.env_config, kernel.terrain_store.terrain_water_height())
+								.height;
 	boot.water_z_q16 = static_cast<int32_t>(water * io::kFp16One);
 	kernel.world.env.water_z = boot.water_z_q16;
 	kernel.sync_water_plane();
