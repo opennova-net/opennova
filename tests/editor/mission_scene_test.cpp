@@ -816,9 +816,37 @@ int test_label_picks() {
 	return 0;
 }
 
+// The models a placement warms: each graphic once with its items, markers and warm graphics left out; the rows a
+// lift takes, folded back into a whole placement past the most.
+int test_warm_and_lift() {
+	std::vector<MissionEntityMark> entities(5);
+	for (size_t i = 0; i < entities.size(); ++i) {
+		entities[i].row = NodeId(10 + i);
+		entities[i].item = int64_t(100 + i % 2);
+	}
+	entities[3].pool = MissionPool::Marker;
+	entities[4].item = 200;
+	std::vector<const MissionEntityMark *> all;
+	for (const MissionEntityMark &entity : entities) all.push_back(&entity);
+	const auto graphic_of = [](int64_t item) { return item == 200 ? std::string("warm.3di") : "g" + std::to_string(item); };
+	const std::vector<MissionWarmModel> models =
+			mission_models_to_warm(all, graphic_of, [](const std::string &graphic) { return graphic == "warm.3di"; });
+	TEST_EXPECT(models.size() == 2 && models[0].graphic == "g100" && models[0].items == std::vector<int64_t>({ 100 }) &&
+	            models[1].graphic == "g101" && models[1].items == std::vector<int64_t>({ 101 }));
+	// Whole where asked; else the rows not placed alike lifted, and past the most a whole placement again.
+	const auto alike = [](const MissionEntityMark &entity) { return entity.row != 11 && entity.row != 12; };
+	TEST_EXPECT(mission_place_or_lift(entities, true, alike, {}, 256).place);
+	MissionPlacePlan plan = mission_place_or_lift(entities, false, alike, {}, 256);
+	TEST_EXPECT(!plan.place && plan.adds == std::vector<NodeId>({ 11, 12 }));
+	plan = mission_place_or_lift(entities, false, alike, { 12, 40 }, 2);
+	TEST_EXPECT(plan.place && plan.adds.size() == 2);
+	return 0;
+}
+
 } // namespace
 
 int main() {
+	TEST_EXPECT(test_warm_and_lift() == 0);
 	TEST_EXPECT(test_scene() == 0);
 	TEST_EXPECT(test_marks() == 0);
 	TEST_EXPECT(test_sphere_picks() == 0);
