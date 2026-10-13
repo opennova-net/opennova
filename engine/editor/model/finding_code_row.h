@@ -97,7 +97,7 @@ enum class FindingGroup {
 	Shaders,
 	Missions,
 	Textures,
-	Texts, // a text the engine's own reader reads (DI-06: the defs)
+	Texts, // the text type's (documents/text_types.h): none, no reader of its kinds ported
 	SoundBanks,
 	SoundProfiles,
 	Particles, // a particle file, through the effect system's reader (ADR 0046 DI-14)
