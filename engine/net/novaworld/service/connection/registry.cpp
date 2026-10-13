@@ -90,6 +90,20 @@ bool ConnectionRegistry::mark_active_by_addr(const PeerAddr &addr,
 	return true;
 }
 
+bool ConnectionRegistry::rename_hello_by_addr(
+		const PeerAddr &addr, uint32_t reported_id, std::string pn) {
+	std::lock_guard<std::mutex> lock(mu_);
+	auto addr_it = by_addr_.find(addr);
+	if (addr_it == by_addr_.end())
+		return false;
+	auto it = by_id_.find(addr_it->second);
+	if (it == by_id_.end())
+		return false;
+	it->second.reported_id = reported_id;
+	it->second.pn = std::move(pn);
+	return true;
+}
+
 std::optional<Connection> ConnectionRegistry::find(uint32_t id) const {
 	std::lock_guard<std::mutex> lock(mu_);
 	auto it = by_id_.find(id);

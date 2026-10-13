@@ -27,14 +27,17 @@ struct Connection {
 	// Server-local registry identity. It starts as ClientHello.CI, but the
 	// registry may synthesize it when another endpoint already owns that CI.
 	uint32_t id = 0;
-	// The unmodified ClientHello.CI. Keeping it separate lets an exact later
-	// Hello be recognized as a retransmit even when `id` was synthesized.
+	// The unmodified ClientHello.CI of the address's latest Hello. Keeping it
+	// separate lets an exact later Hello be recognized as a retransmit even when
+	// `id` was synthesized; a Hello naming another identity at a live row
+	// re-names the row (ConnectionManager::notify_handshake) without touching
+	// the live connection, so that identity's 0x42 can replace it.
 	uint32_t reported_id = 0;
 	PeerAddr addr;
 	ConnectionState state = ConnectionState::Handshaking;
 	uint64_t created_ms = 0;
 	uint64_t last_seen_ms = 0;
-	std::string pn;          // negotiated Protocol Name from CLIENT_HELLO ("NOVAWORLDUDP", …)
+	std::string pn;          // the latest CLIENT_HELLO's Protocol Name ("NOVAWORLDUDP", …)
 	// Per-session crypto keys for the SESSION (0x43/0x83) inner-NWU cipher.
 	// Inbound SESSION packets (C→S) are encrypted with `client_scrk`;
 	// outbound SESSION packets (S→C) are encrypted with `server_scrk`.
@@ -91,6 +94,10 @@ public:
 	// ci=1 (G.7).
 	bool mark_active_by_addr(const PeerAddr &addr, std::string identity,
 	                         std::string client_scrk, std::string server_scrk);
+
+	// Name the row at `addr` after a Hello's identity (its CI and PN), keeping
+	// its registry id, state, keys and clocks. Returns false if missing.
+	bool rename_hello_by_addr(const PeerAddr &addr, uint32_t reported_id, std::string pn);
 
 	std::optional<Connection> find(uint32_t id) const;
 	std::optional<Connection> find_by_addr(const PeerAddr &addr) const;

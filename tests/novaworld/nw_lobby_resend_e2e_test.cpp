@@ -137,6 +137,19 @@ int main() {
 	expect(session.is_verified(), "the session verifies against the real listener");
 
 	if (session.is_verified()) {
+		// A stray 0x41 naming another identity from the verified endpoint ends nothing:
+		// retail's Hello handler creates and destroys no connection, so the session's next
+		// 0x43 is still served (D-NET-630).
+		// [orig: NapiNPProtocol_HandleClientHello @0x6213B0; NapiNPProtocol_HandleClientJoin
+		//  @0x62BEBA..0x62BF06]
+		opennova::ClientSession::Config stray_cfg = cfg;
+		stray_cfg.client_index = 0x53545259u;
+		opennova::ClientSession stray(stray_cfg);
+		send(stray.start());
+		std::vector<uint8_t> stray_reply;
+		expect(receive_opcode(client, opennova::SESSION_OPCODE_SERVER_HELLO, stray_reply, 1000),
+				"the stray Hello is answered");
+
 		// A host request whose reply is "lost": read it off the socket but never feed it to
 		// the session.
 		auto host_req = opennova::make_client_host_request(
@@ -151,7 +164,8 @@ int main() {
 		opennova::ProtocolPacketHeader lost_hdr;
 		std::vector<opennova::ProtocolMessage> lost_messages;
 		expect(receive_records(client, session.server_scrk(), lost_hdr, lost_messages, 1000),
-		       "the host request draws a 0x83 carrying the ServerHostResult records");
+				"the host request draws a 0x83 carrying the ServerHostResult records (the stray "
+				"Hello left the connection live)");
 
 		// The stock client's 0x44: [service local key][the missing sequence].
 		std::vector<uint8_t> resend_body;

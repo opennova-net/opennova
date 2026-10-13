@@ -35,6 +35,18 @@ void ConnectionManager::notify_handshake(Connection conn) {
 		// synthetic id, Active state, SCRKs, and the listener's cached auth.
 		return;
 	}
+	// A Hello creates and destroys no connection: retail's handler looks none up
+	// and only answers, so a live connection at the address lives on until a
+	// 0x42 that is not its retransmit replaces it. The row this service keeps per
+	// Hello (D-NET-266's zombie guard: a 0x42 needs its Hello's identity) takes
+	// the new Hello's identity and keeps the live connection's id, state and
+	// keys, so that identity's 0x42 replaces it as retail's would.
+	// [orig: NapiNPProtocol_HandleClientHello @0x6213B0 -> NapiNPProtocol_SendServerInfoPacket
+	//  @0x6204B0, no connection lookup; NapiNPProtocol_HandleClientJoin @0x62BEBA..0x62BF06]
+	if (existing_for_addr && existing_for_addr->state == ConnectionState::Active) {
+		registry_.rename_hello_by_addr(conn.addr, conn.reported_id, conn.pn);
+		return;
+	}
 	if (existing_for_addr && lost_handler_) {
 		lost_handler_(*existing_for_addr, DropReason::Replaced);
 	}

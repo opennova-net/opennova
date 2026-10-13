@@ -759,8 +759,9 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 			manager_.notify_handshake(conn);
 			{
 				// Insert after notify_handshake: a replacement Hello can fire
-				// on_lost synchronously for the prior occupant, whose cleanup
-				// removes the old ownership record.
+				// on_lost synchronously for a prior Handshaking occupant, whose
+				// cleanup removes the old ownership record (a live row is only
+				// re-named, D-NET-630).
 				std::lock_guard<std::mutex> lk(lobby_states_mu_);
 				lobby_peers_.insert(peer);
 			}
