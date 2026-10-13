@@ -709,24 +709,32 @@ bool run_0a_subblock_phase_cycle() {
 	            "phase 3 carries won/lost/show-win/show-lose in retail order")) return false;
 	if (!expect(objective_fu.local_tail_present,
 	            "objective bytes cannot be mistaken for the recipient health tail")) return false;
-	// The phase-0 mask is the recipient team's live chain walk: the golden
+	// The phase-0 mask is the recipient slot team's live chain walk: the golden
 	// ASH_I5A steady 0x8 is zone 3 wholly owned, and it follows the zone when
-	// it changes hands. The joiner keeps the word as its FARP unlock mask.
-	// [orig: written @0x4FF996..0x4FF9BB; the client store @0x430136]
+	// it changes hands. The joiner keeps the word as its FARP unlock mask. The
+	// recipient is a split slot (a script team write to the body, which stores
+	// the entity byte alone): its row's slot team is one past its body's, so
+	// the walk is its slot team's, never its body's nor a missing row's team 0
+	// (D-NET-674).
+	// [orig: written @0x4FF996..0x4FF9BB on the recipient slot @0x4FF6B4; the
+	//  client store @0x430136; Entity_SetTeamByNetId @0x43C680]
 	{
 		world.registry.configure_pool(1, 8);
-		const uint8_t team = world.registry.get(host_h)->team;
+		const uint8_t body_team = world.registry.get(host_h)->team;
+		const uint8_t slot_team = static_cast<uint8_t>(body_team + 1);
+		world.match.upsert_player({host_h, 0, "Host"});
+		world.match.set_player_slot_team(host_h, slot_team);
 		w::Entity zone;
 		zone.kind = w::EntityKind::Item;
 		zone.item_id = 1359;
 		zone.alive = true;
 		zone.is_capture_trigger = true;
 		zone.zone_number = 3;
-		zone.team = team;
+		zone.team = slot_team;
 		const w::EntityHandle owned_zone = world.registry.spawn(1, zone);
 		zone.zone_number = 1;
-		zone.team = static_cast<uint8_t>(team + 1);
-		world.registry.spawn(1, zone);
+		zone.team = static_cast<uint8_t>(slot_team + 1);
+		const w::EntityHandle other_zone = world.registry.spawn(1, zone);
 		world.zones.build_chain_from_mission();
 		for (const int32_t expected : {0x8, 0}) {
 			conns[0].s2c_phase = 0xFFu;
@@ -739,13 +747,29 @@ bool run_0a_subblock_phase_cycle() {
 			                    zone_fu.weapon.present,
 			            "zone-chain phase-0 frame decodes")) return false;
 			if (!expect(zone_fu.weapon.uniform_team_mask == expected,
-			            "phase 0 carries the recipient team's owned-zone walk")) return false;
+			            "phase 0 carries the recipient slot team's owned-zone walk")) return false;
 			ns::ClientReplicaPipeline fold;
 			fold.apply(zone_dg.tag, zone_dg.body);
 			if (!expect(fold.state().owned_zone_mask == static_cast<uint32_t>(expected),
 			            "client fold keeps the mask the FARP prompt reads")) return false;
-			world.registry.get(owned_zone)->team = static_cast<uint8_t>(team + 1);
+			world.registry.get(owned_zone)->team = static_cast<uint8_t>(slot_team + 1);
 		}
+		// Zone 3 back with the slot team and zone 1 on the body's: the body's
+		// team would be sent zone 1 (0x2).
+		world.registry.get(owned_zone)->team = slot_team;
+		world.registry.get(other_zone)->team = body_team;
+		conns[0].s2c_phase = 0xFFu;
+		ns::test::emit_all(world, conns);
+		ns::Datagram split_dg;
+		if (!expect(ch.client_recv(split_dg), "split-slot 0x0A frame dequeued")) return false;
+		nw::FrameUpdate split_fu;
+		if (!expect(nw::decode_frame_update(split_dg.body.data(), split_dg.body.size(),
+		                    ns::class_for_type_id, split_fu) &&
+		                    split_fu.weapon.present,
+		            "split-slot phase-0 frame decodes")) return false;
+		if (!expect(split_fu.weapon.uniform_team_mask == 0x8,
+		            "phase 0 carries the recipient slot team's zones, not its body's"))
+			return false;
 	}
 	std::printf("PASS 0a_subblock_phase_cycle\n");
 	return true;

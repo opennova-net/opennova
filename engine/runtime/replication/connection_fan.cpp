@@ -1137,7 +1137,15 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 							: 0u));
 	hs.preround_delay_seconds =
 			static_cast<uint8_t>(w.preround_delay_seconds);
-	hs.owned_zone_mask = w.zones.owned_zone_mask(owned->team);
+	// The weapon block's owned-zone mask is the recipient slot's own team
+	// byte's (+416), not its body's (D-NET-674): the world side keeps it on
+	// the roster row (MatchPlayer::slot_team), which every player add writes.
+	// [orig: NetPacket_WritePlayerState - the slot `mov ebx, [esp+0Ch+playerSlot]`
+	//  @0x4FF6B4, `movzx edx, byte ptr [ebx+1A0h]` @0x4FF996,
+	//  ZoneSlotChain_GetOwnedZoneMask @0x4FF9A3]
+	const world::MatchPlayer *recipient_row = w.match.player(owned->handle);
+	hs.owned_zone_mask =
+			w.zones.owned_zone_mask(recipient_row != nullptr ? recipient_row->slot_team : 0);
 	// [orig: NetPacket_WritePlayerState `cmp ecx,0FFh; jle`: fallmps
 	//  @0x4FFA1A..0x4FFA23, breathtime @0x4FF9E1..0x4FF9EA]
 	hs.fallmps = w.script.wac_values.fallmps > 0xFF
