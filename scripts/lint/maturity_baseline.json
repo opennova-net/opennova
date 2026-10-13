@@ -5,7 +5,6 @@
     "base/gameprofile/gameprofile.cpp",
     "pcapio",
     "base/resource_index/boot_policy.cpp",
-    "base/resource_index/texture_candidates.cpp",
     "base/vfs/vfs_decode.cpp",
     "base/os_random",
     "net/novaworld/service",
