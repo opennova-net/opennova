@@ -100,7 +100,7 @@ std::vector<uint8_t> bank_of(const std::vector<std::string> &sets) {
 		lwf::Single single;
 		single.name = sets[i];
 		single.path = strutil::to_lower(sets[i]) + ".wav";
-		single.value_hi = 0xD200;
+		single.volume = 0xD2;
 		bank.singles.push_back(single);
 		lwf::Multi set;
 		set.name = sets[i];
