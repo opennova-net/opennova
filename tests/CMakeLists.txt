@@ -3668,6 +3668,7 @@ add_executable(hosted_supervisor_test
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_settings.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/local_process_provider.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/owner_file.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/supervisor.cpp)
 target_link_libraries(hosted_supervisor_test
     PRIVATE opennova_novaworld_service opennova_bcrypt opennova_app_common Threads::Threads)
@@ -3705,6 +3706,36 @@ target_compile_definitions(hosted_admin_link_test PRIVATE OPENNOVA_SOURCE_DIR="$
 add_dependencies(hosted_admin_link_test opennova_serve)
 add_test(NAME hosted_admin_link COMMAND hosted_admin_link_test $<TARGET_FILE:opennova_serve>)
 set_tests_properties(hosted_admin_link PROPERTIES RUN_SERIAL TRUE TIMEOUT 300)
+
+# The cloud MachineProvider (apps/novaworld_server/hosted/ec2_provider.h) on a stub
+# CommandRunner that checks every AWS CLI argv and answers it: the launch's run-instances
+# (the launch template, the subnet, the tags, the client token, the user-data file with the
+# bootstrap URL and token filled in, deleted after), describe's state mapping from one
+# cached describe-instances (the bundle fetch gating Running, the launch grace, the cache's
+# lifetime, a failure reading Pending), terminate's idempotence, list_tagged's scope and its
+# throw, and every CLI failure, timeout and malformed reply; the bootstrap tokens
+# (hosted/bootstrap.h: issue, bind, one redeem from the bound address, the lapse, the CIDR
+# reads) and the bundle's JSON; the machine script's render; and the real
+# ProcessCommandRunner against the test binary itself (`--child <mode>`). Crow-free: compiles
+# the hosted sources it needs directly, so it runs on every build.
+add_executable(hosted_ec2_provider_test
+    novaworld/hosted_ec2_provider_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/bootstrap.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/command_runner.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/ec2_provider.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_settings.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/owner_file.cpp)
+target_link_libraries(hosted_ec2_provider_test PRIVATE opennova_net opennova_app_common Threads::Threads)
+if(WIN32)
+    target_link_libraries(hosted_ec2_provider_test PRIVATE advapi32)
+endif()
+target_include_directories(hosted_ec2_provider_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+target_compile_definitions(hosted_ec2_provider_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_test(NAME hosted_ec2_provider
+    COMMAND hosted_ec2_provider_test $<TARGET_FILE:hosted_ec2_provider_test>)
+set_tests_properties(hosted_ec2_provider PROPERTIES TIMEOUT 120)
 
 # The console's curated commands (apps/novaworld_server/hosted/console_commands.h, service
 # policy): the owners' list and the admins' one wider read, every line composed from checked

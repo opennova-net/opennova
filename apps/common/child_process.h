@@ -36,6 +36,11 @@ struct SpawnOptions {
 	// The file the child's standard output and standard error are appended to
 	// (created when missing; owner-only on POSIX); empty discards them.
 	std::string output_path;
+	// The file the child's standard error is appended to instead (created when
+	// missing; owner-only on POSIX), so a program whose output is data keeps it
+	// apart from its diagnostics (the hosted servers' AWS CLI runs,
+	// hosted/command_runner.h); empty sends it where the output goes.
+	std::string error_path;
 	// The child's whole environment, NAME=value entries (filter_environment
 	// picks them from this process's); unset, the child inherits this process's.
 	std::optional<std::vector<std::string>> environment;

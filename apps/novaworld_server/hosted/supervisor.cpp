@@ -94,7 +94,18 @@ void Supervisor::reconcile(uint64_t now_ms) {
 	auto lease = pool_.acquire();
 	db::Database &db = *lease;
 	const std::vector<HostedServer> live = list_live(db);
-	const std::set<std::string> running = end_untracked(live, "reconcile");
+	std::set<std::string> running;
+	bool listed = true;
+	try {
+		running = end_untracked(live, "reconcile");
+	} catch (const std::exception &e) {
+		// The provider could not list its machines (a cloud listing that
+		// failed): nothing is ended or launched again on that, and every live
+		// row's machine resumes as if it ran, until the passes' describes tell.
+		std::fprintf(stderr, "[hosted] WARN reconcile: %s; every live server resumes, nothing is ended\n",
+				e.what());
+		listed = false;
+	}
 	last_orphan_sweep_ms_ = now_ms;
 
 	for (const HostedServer &s : live) {
@@ -104,7 +115,7 @@ void Supervisor::reconcile(uint64_t now_ms) {
 		rt.state = s.state;
 		rt.since_ms = now_ms;
 		rt.last_check_ms = now_ms;
-		if (running.count(s.machine_id) != 0) {
+		if (!listed || running.count(s.machine_id) != 0) {
 			// Its lister re-hosts over the NWU reconnect; the health checks wait for it.
 			rt.grace_until_ms = now_ms + config_.listing_timeout_ms;
 			std::printf("[hosted] reconcile: server %lld resumes %s on machine %s\n",
@@ -135,7 +146,12 @@ void Supervisor::tick(uint64_t now_ms) {
 		// A machine no live row names (a launch whose row write failed, a row
 		// ended while its machine lived on) is ended between the boots too.
 		last_orphan_sweep_ms_ = now_ms;
-		end_untracked(live, "sweep");
+		try {
+			end_untracked(live, "sweep");
+		} catch (const std::exception &e) {
+			// No listing, nothing ended; the pass goes on, and the next sweep tries again.
+			std::fprintf(stderr, "[hosted] WARN sweep: %s; nothing is ended\n", e.what());
+		}
 	}
 	std::set<int64_t> seen;
 	for (const HostedServer &s : live) {

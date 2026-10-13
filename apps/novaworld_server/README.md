@@ -469,17 +469,97 @@ An account an admin approved (`players.can_host`) can have the service run one
   the service (a kill-on-close job on Windows, the parent-death signal on Linux) and at
   its orderly shutdown, where the provider asks each to stop (SIGTERM, on which
   `opennova-serve` deregisters) before it kills it, so the next boot launches them
-  again. The cloud provider comes with the infrastructure.
+  again.
+- **The cloud provider** (`ONNET_HOSTED_PROVIDER=ec2`, `hosted/ec2_provider.*`) runs
+  each server on an EC2 machine of its own, launched from the deployment's launch template
+  (`infra/aws`, DEPLOY.md "Hosted game servers": a stock Ubuntu 24.04 image, the machine
+  type, the game data's private encrypted snapshot as a second volume, the game security
+  group, the machine role, IMDSv2 required, `InstanceInitiatedShutdownBehavior=terminate`).
+  A machine is terminated at its server's end, never stopped, so every launch has a new
+  public address. The provider runs the AWS CLI v2 (installed in the image, pinned and
+  checksummed) through a `CommandRunner` (`hosted/command_runner.*`: an argv array, no
+  shell, a 90 s timeout, the CLI's output and diagnostics apart, an environment of the
+  system's and the `AWS_*` variables alone), its credentials the service instance's role.
+  - `launch` is `run-instances`: the launch template's default version, the subnet, one
+    machine, the tags `opennova:hosted=1`, `opennova:deployment=<ONNET_HOSTED_DEPLOYMENT>`,
+    `opennova:server-id=<id>` and `Name` on the machine and its volumes, a client token,
+    and the user-data: the machine script (`hosted/machine/user_data.sh`) with two values
+    filled in, the bootstrap URL on the service's PRIVATE address and a one-time token.
+    No file and no credential travels in the user-data.
+  - `describe` reads one `describe-instances` of this deployment's tagged machines at most
+    every 10 s: `pending` is booting, `running` is running once the machine has fetched
+    its bundle (booting before, so the listing's 3 min start as the server is about to
+    run), and `shutting-down`, `terminated`, `stopping` and `stopped` are gone. A machine
+    the listing lacks is gone, but booting for 3 min after this service launched it (EC2
+    lists a new machine late). A describe that fails reads booting, never gone: the
+    supervisor's clocks still run, but no AWS blip is a crash. The address is the
+    machine's PRIVATE IPv4, where the admin link connects.
+  - `terminate` is `terminate-instances`; a machine EC2 no longer knows is no error.
+    `list_tagged` filters on `opennova:hosted=1` AND this deployment's tag, so one stack
+    never ends another's machines, and throws when the listing fails, so the supervisor
+    ends nothing on a reply it could not read. Every CLI failure, timeout and malformed
+    reply is logged and handled; the instance role's policy lets the service end only
+    machines carrying both tags.
+  - The plan: the game port 32768 (`mpnovaworldportmin` = `max`; the game security group
+    opens it, UDP, to everyone), the admin port 32800 (TCP, open to the service's
+    security group alone) and the service's private address in `admin.cfg`'s
+    `ip_restrict`. Owners never reach the admin port.
+  - The servers list through `ONNET_PUBLIC_HOST` (`--master-host`), the service's public
+    address, so the listing records each machine's own public address.
+- **The bootstrap** (`hosted/bootstrap.*`, `hosted/bootstrap_route.*`). A launch mints
+  a 48-character token (the OS CSPRNG), kept only as its SHA-256, bound to the server and,
+  once `run-instances` answers, to the machine and its private address. At its first boot
+  the machine posts it to `POST /hosted/bootstrap/<server id>` (`Authorization: Bearer`)
+  and gets its bundle once: `{"server_id", "image", "args", "files": [{"name", "secret",
+  "content_base64"}]}`, the working directory's files (the secret ones among them),
+  `opennova-serve`'s arguments and the serve image (`ONNET_HOSTED_SERVE_IMAGE`). The token
+  is spent at that fetch, lapses 15 minutes after it was issued, and lives in memory, so a
+  service restart forgets it (a machine still booting then powers off, which the
+  supervisor restarts). The route is on this port (8080) but outside `/api/`, so the
+  portal's nginx, which forwards `/api/` alone, and Cloudflare in front of it never reach
+  it; it answers only a TCP peer inside `ONNET_HOSTED_BOOTSTRAP_CIDRS` (the VPC subnet),
+  read from the socket and never from a proxy header, and only the bound address may
+  redeem a token. Every refusal is the same 404 (`Cache-Control: no-store`), logged
+  without the token for a peer inside the range and not at all for any other; the reply
+  is never logged. The machine writes the secret files owner-only (`0600`, the serve
+  image's user) and the token reaches no command line there.
+- **The machine side** (`hosted/machine/user_data.sh`, cloud-init at the first boot, as
+  root): docker installed (and held, so no unattended upgrade restarts it under the
+  server), the data volume (label `opennova-jo`) mounted read-only at `/opt/jo`, the
+  bundle fetched, `/srv/serve` written (`0700`, owned by UID 10001), the image pulled, and
+  `opennova-serve.service` started: the serve image with `--network host`, the data
+  read-only, the working directory, the bundle's arguments, its output in the journal.
+  Whatever ends `opennova-serve` (0, 3, any other code, a signal) powers the machine off
+  (`SuccessAction` and `FailureAction`), and the shutdown behaviour terminates it; a
+  bootstrap step that fails does the same. Nothing on the machine restarts the server:
+  the supervisor is the one place crash restarts are made and counted (3, forgiven after
+  an hour of running, each on a new machine with new credentials), and it tells its own
+  stop from a crash by its row, never by the exit code, so the two never double-count.
+  The machine's end, with the exit, reaches its serial console (`aws ec2
+  get-console-output`). Break-glass is SSM Session Manager (the machine role); no machine
+  has an SSH key.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `ONNET_HOSTED_PROVIDER` | `none` | `local` runs hosted servers as child processes (above); `none` runs none. Any other value, or `local` without `ONNET_HOSTED_SERVE_BIN` and `ONNET_HOSTED_RESOURCE_DIR`, is `none` with a boot warning. |
+| `ONNET_HOSTED_PROVIDER` | `none` | `local` runs hosted servers as child processes, `ec2` on EC2 machines (above); `none` runs none. Any other value, `local` without `ONNET_HOSTED_SERVE_BIN` and `ONNET_HOSTED_RESOURCE_DIR`, or `ec2` missing or mistyping one of its settings below (or with a loopback `ONNET_PUBLIC_HOST`) is `none` with a boot warning naming why. |
 | `ONNET_HOSTED_CAP` | 5 | The most hosted servers live at once, across every account. |
 | `ONNET_HOSTED_SERVE_BIN` | none | The local provider's `opennova-serve` binary. |
 | `ONNET_HOSTED_RESOURCE_DIR` | none | The game data the local provider's servers serve (their `--resource-dir`). Never licensed data in a repository: a Joint Operations install, or a synthetic loose directory. |
 | `ONNET_HOSTED_LOOSE_ROOT` | off | `1` adds `--loose-root` (a directory with no game archives, mounted as loose files). |
 | `ONNET_HOSTED_WORK_DIR` | `backend/data/hosted` | The root of the local provider's working directories. |
 | `ONNET_HOSTED_MISSIONS` | none | Comma-separated `.bms` names, the rotation a start takes when its request names none (the first the starting map), and the missions the site's rotation picker offers (`GET /api/me/server` `default_missions`). Unset, a start must name its missions. |
+| `ONNET_HOSTED_EC2_REGION` | none | `ec2`: the region every AWS CLI call names. |
+| `ONNET_HOSTED_EC2_LAUNCH_TEMPLATE` | none | `ec2`: the launch template (`lt-...`) a machine launches from, its default version. |
+| `ONNET_HOSTED_EC2_SUBNET` | none | `ec2`: the subnet (`subnet-...`) a machine launches into; it must give its machines a public IPv4. |
+| `ONNET_HOSTED_DEPLOYMENT` | none | `ec2`: the `opennova:deployment` tag every machine carries and every describe, list and terminate is scoped to, so two stacks in one account never touch each other's machines (letters, digits, `.`, `_`, `-`). |
+| `ONNET_HOSTED_SERVE_IMAGE` | none | `ec2`: the serve image the machines run, pinned at deploy (`ghcr.io/<owner>/opennova-serve@sha256:...`). |
+| `ONNET_HOSTED_SERVICE_ADDRESS` | none | `ec2`: this service's PRIVATE IPv4, where the machines fetch their bundle and the address their `admin.cfg` admits. |
+| `ONNET_HOSTED_BOOTSTRAP_CIDRS` | none | `ec2`: comma-separated IPv4 CIDRs, the private networks the bootstrap route answers (the machines' subnet). |
+| `ONNET_HOSTED_AWS_CLI` | `/usr/local/bin/aws` | `ec2`: the AWS CLI v2, an absolute path (run as given, no `PATH` search). |
+| `ONNET_HOSTED_MACHINE_SCRIPT` | `apps/novaworld_server/hosted/machine/user_data.sh` (the image: `/app/hosted/machine_user_data.sh`) | `ec2`: the machine script, the user-data template. |
+
+The deploy toolbox's `app deploy` sets every `ec2` setting from the Terraform outputs
+(DEPLOY.md, "Hosted game servers"); nobody copies an id by hand.
 
 The routes (`hosted/hosted_routes.*`, and the approval with the admin user routes), behind
 `ONNET_API_PROXY_ONLY` like every `/api` route. Every refusal is an error code with the
@@ -823,6 +903,16 @@ running, with no link and while stopping, and no line off the curated list reach
 server); `hosted_console_commands`
 ([`tests/novaworld/hosted_console_commands_test.cpp`](../../tests/novaworld/hosted_console_commands_test.cpp),
 every build) the curated list itself, its compositions and its reply mapping;
+`hosted_ec2_provider`
+([`tests/novaworld/hosted_ec2_provider_test.cpp`](../../tests/novaworld/hosted_ec2_provider_test.cpp),
+every build) the ec2 provider on a stub `CommandRunner` that checks every AWS CLI argv
+and answers it (the launch's exact `run-instances` and its user-data file, describe's state
+mapping from one cached listing, the bundle fetch gating `running`, the launch grace,
+terminate's idempotence, `list_tagged`'s scope and its throw, and every CLI failure,
+timeout and malformed reply), the bootstrap tokens and CIDRs, the bundle's JSON, the
+shipped machine script's render, and the real `ProcessCommandRunner` against itself; the
+route harness's `hosted_bootstrap_route` case the route over the wire (the one fetch, the
+refusals, a peer outside the networks whatever `X-Real-IP` says, nothing under `/api/`);
 and `hosted_local_e2e`
 ([`tests/novaworld/hosted_local_e2e_test.cpp`](../../tests/novaworld/hosted_local_e2e_test.cpp),
 `BUILD_NOVAWORLD_HTTP` only) a real `opennova-serve` child run by the supervisor through
