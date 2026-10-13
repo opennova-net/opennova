@@ -18,6 +18,7 @@
 #include <system_error>
 #include <vector>
 
+#include <editor/project/project_document.h>
 #include <editor/session/editor_preferences.h>
 #include <editor/session/file_preferences_store.h>
 #include <editor/session/preferences_store.h>
@@ -329,6 +330,11 @@ static int test_editor_preferences() {
 	            store.preferences().recent_projects == preferences.values().recent_projects);
 	// The recently placed items (S15), per game (the polish): capped at kRecentItemsMax, most recent
 	// first, an item placed again moved to the front; another game's its own, none before any.
+	// S15/S26: a project's items are kept under its game, an expansion's under the expansion with it.
+	ProjectDocument standalone, expansion;
+	standalone.target_game = expansion.target_game = "jo";
+	expansion.expansion.name = "jxm";
+	TEST_EXPECT(recent_items_game(standalone) == "jo" && recent_items_game(expansion) == "jo/jxm");
 	for (int64_t item = 1; item <= 14; ++item) preferences.remember_recent_item("jo", item);
 	const std::vector<int64_t> &jo = preferences.recent_items("jo");
 	TEST_EXPECT(jo.size() == kRecentItemsMax && jo.front() == 14 && jo.back() == 3);
