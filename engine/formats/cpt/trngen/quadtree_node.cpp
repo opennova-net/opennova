@@ -253,7 +253,7 @@ bool process_quadtree(QuadtreeNode* root, QuadtreeContext& ctx, unsigned threads
 
     for (size_t depth = by_depth.size(); depth-- > 0;) {
         const std::vector<QuadtreeNode*>& nodes = by_depth[depth];
-        if (!make_nodes(nodes, ctx, threads, error)) return false;
+        if (!make_nodes(nodes, ctx, threads, error, ctx.cancel)) return false;
         for (QuadtreeNode* node : nodes) {
             if (ctx.node_made) ctx.node_made(*node);
             (*ctx.files)[node->tile_name] = std::move(node->tile_bytes);

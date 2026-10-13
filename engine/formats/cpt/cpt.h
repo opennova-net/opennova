@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -60,5 +61,10 @@ inline constexpr int kCdepMaxRange = 32766;
 // more than a block holds: 32,766 raw (just under 128 world units), its width that of the range plus one within the
 // field's 15 bits, as the shipped files write it. CptFile::write_bytes clamps each (kCdepMaxRange).
 int cpt_steep_blocks(const std::vector<uint16_t> &raw16);
+
+// The heights a CDEP write reads back as: each texel of a block past kCdepMaxRange over the block's lowest held at
+// that (CptFile::write_bytes's clamp of its deltas). `raw16` holds `count` texels of whole blocks, the first at a
+// block's start (a row's 256-texel stretches); a block within the range is left as it is.
+void cpt_clamp_steep_blocks(uint16_t *raw16, size_t count);
 
 } // namespace opennova

@@ -3,7 +3,8 @@
 // edited region alone, lands the bytes and the state a whole bake of the edited map makes: an edit inside one
 // leaf, on a 64 edge, at a four-leaf corner, across the map's wrap, along a locked quadrant's seam, at leaf
 // (0, 0) (whose tile is the root's too), across the map's vertical wrap, along its bottom row, several at once, and
-// two region bakes in a row. One thread or many make the same tiles; a cancel stops it with the state as it was; a
+// two region bakes in a row. A cancel stops a whole bake, making nothing, and one never set changes no byte. One
+// thread or many make the same tiles; a cancel stops a region bake with the state as it was; a
 // state not made, one made without the draw-back, a map of the wrong size, a changed rect not inside the map and
 // ground the whole bake refuses are refused in words; a .cpt not the bake's is refused by the .cpt landing.
 #include <formats/cpt/cpt_io.h>
@@ -148,6 +149,20 @@ void test_regions() {
 	std::string error;
 	expect(bake_terrain_bytes(input_of(map, none), plain, error), "the plain bake: " + error);
 	expect(bytes_of(baked.cpt) == plain, "bake_terrain_state makes bake_terrain's bytes");
+	// A whole bake stops at a cancel (TerrainBakeInput::cancel), between nodes; one never set changes no byte.
+	{
+		std::atomic<bool> stop{true};
+		TerrainBakeInput stopped = input_of(map, none);
+		stopped.cancel = &stop;
+		CptFile none_cpt;
+		TerrainBakeState none_state;
+		expect(!bake_terrain_state(stopped, none_cpt, none_state, error) && error == "cancelled" && none_state.empty(),
+		       "a cancel stops the whole bake: " + error);
+		std::atomic<bool> go{false};
+		stopped.cancel = &go;
+		std::vector<uint8_t> unstopped;
+		expect(bake_terrain_bytes(stopped, unstopped, error) && unstopped == plain, "a cancel never set changes no byte");
+	}
 	expect(!baked.state.empty() && baked.state.nodes.size() == 341u, "the state holds the 341 nodes");
 	int leaves_drawn = 0;
 	for (int i = 85; i < 341; ++i) leaves_drawn += !baked.state.nodes[static_cast<size_t>(i)]->draw_back.faces.empty();
