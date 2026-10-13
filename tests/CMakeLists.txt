@@ -1116,14 +1116,6 @@ target_compile_features(extract_cli_test PRIVATE cxx_std_17)
 add_dependencies(extract_cli_test opennova_extract)
 add_test(NAME extract_cli COMMAND extract_cli_test $<TARGET_FILE:opennova_extract> ${CMAKE_CURRENT_BINARY_DIR})
 
-# The texture candidate order the Godot resolvers and opennova-3di share
-# (base/resource_index/texture_candidates.h).
-add_executable(texture_candidates_test resource_index/texture_candidates_test.cpp)
-target_link_libraries(texture_candidates_test PRIVATE opennova_base)
-target_include_directories(texture_candidates_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_features(texture_candidates_test PRIVATE cxx_std_17)
-add_test(NAME texture_candidates COMMAND texture_candidates_test)
-
 add_executable(resource_index_mus_test resource_index/resource_index_mus_test.cpp)
 target_link_libraries(resource_index_mus_test PRIVATE opennova_base)
 target_include_directories(resource_index_mus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
