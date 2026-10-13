@@ -1913,6 +1913,94 @@ bool run_revive_deploy_respawns_l_on_its_record_edge() {
 			"revive: no grant folds, so L keeps the kit it died with");
 }
 
+// D-COL-21: the redeploy release's reset ends in the candidate-slice rebuild and
+// L's own list, so L walks a slice built at its redeployed pose at once, where it
+// kept the one built at its death spot until the next 17-tick edge.
+// [orig: NetPacket_SerializePlayerState @0x4C113C -> Entity_ResetToSpawnState -
+//  the Entity_BuildProximityListsFromPools call @0x4B98EB, the
+//  Entity_BuildProximityList call @0x4B98F1]
+bool run_redeploy_release_rebuilds_the_candidate_slices() {
+	Harness h;
+	auto &world = h.kernel->world;
+	world.registry.configure_pool(2, 4);
+	// Retail's head row, then the player's: its ordinal 1 is the +0x1C word a
+	// pool-0 source needs.
+	def::DefItemDef defs[2]{};
+	defs[0].id = 100000;
+	defs[1].id = w::kPlayerInfantryTypeId + mission::kItemIdOffset;
+	defs[1].type = 3;
+	defs[1].hp = 100;
+	def::DefItemsFile items{defs, 2};
+	h.kernel->set_items_table(&items);
+	h.kernel->resolve_collision_instances();
+	// The redeploy lands on the frame anchor, where a wall stands.
+	const int32_t anchor[3] = {40 << 16, 30 << 16, 0};
+	w::Entity wall;
+	wall.kind = w::EntityKind::Building;
+	wall.position = {40.0f, 30.0f, 0.0f};
+	wall.bound_radius = 1.0f;
+	wall.alive = true;
+	world.registry.spawn(2, wall);
+	h.kernel->collision.build_initial_tables(world);
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	auto &self_row = h.role.runtime->state().upsert(0x0005);
+	self_row.cls = EntityClass::Player;
+	self_row.type_id = w::kPlayerInfantryTypeId;
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	auto frame = [&](int16_t health, uint8_t state_flags) {
+		FrameUpdate fu;
+		fu.carried_handle = 0xFFFF;
+		fu.health = health;
+		fu.anchor_x = anchor[0];
+		fu.anchor_y = anchor[1];
+		fu.anchor_z = anchor[2];
+		FrameUpdateRecord rec;
+		rec.handle = 0x0005;
+		rec.type_id = w::kPlayerInfantryTypeId;
+		rec.cls = EntityClass::Player;
+		rec.player.carrier_handle = 0xFFFF;
+		rec.player.state_flags = state_flags;
+		fu.records.push_back(rec);
+		std::vector<uint8_t> packet;
+		frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+				{make_protocol_message(s2c::PER_FRAME_UPDATE, encode_frame_update(fu))}, packet);
+		auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+		h.role.runtime->receive(datagram.data(), datagram.size());
+		h.role.run_tick(h.input);
+	};
+	frame(100, 0x00);
+	frame(0, w::kEntityFlagDead);
+	w::Entity *local = world.registry.get(world.cached.local_player);
+	w::AiEntity *local_ai = h.kernel->local.player_ai();
+	if (!expect(local != nullptr && local_ai != nullptr && !local->alive &&
+					local->item_type_index == 1 && h.role.runtime->deployment_pick_pending(),
+			"slice: the death frame downs L, a pool-0 slice source"))
+		return false;
+	// L's corpse lies 500 u off, its slice built there: no wall.
+	local->position = {540.0f, 30.0f, 0.0f};
+	local_ai->pos[0] = 540 << 16;
+	local_ai->pos[1] = 30 << 16;
+	local_ai->pos[2] = 0;
+	h.kernel->collision.rebuild_candidate_slices(world);
+	if (!expect(h.kernel->collision.candidate_count(local->handle) == 0,
+			"slice: the corpse's slice holds no wall"))
+		return false;
+	if (!expect(h.role.runtime->queue_deployment_pick(0xFFFF), "slice: the Default Spawn pick"))
+		return false;
+	h.role.run_tick(h.input);
+	frame(100, 0x00); // the record alive again
+	frame(100, 0x00); // the next tail releases L
+	local = world.registry.get(world.cached.local_player);
+	if (!expect(local != nullptr && local->alive && std::fabs(local->position.x - 40.0f) < 0.01f,
+			"slice: the release lands L on the record's pose"))
+		return false;
+	return expect(h.kernel->collision.candidate_count(local->handle) == 1,
+			"slice: the release rebuilds L's slice at the redeployed pose");
+}
+
 // The socket seam that also records where each datagram went.
 class TargetSocket final : public opennova::IDatagramSocket {
 public:
@@ -2269,6 +2357,7 @@ int main() {
 	ok &= run_end_round_header_holds_the_entity_update();
 	ok &= run_world_state_load_resnaps_local_pose();
 	ok &= run_revive_deploy_respawns_l_on_its_record_edge();
+	ok &= run_redeploy_release_rebuilds_the_candidate_slices();
 	ok &= run_proxy_rendezvous_pump();
 	ok &= run_respawn_key_resets_input_and_sends_0x41();
 	ok &= run_deploy_action_converts_a_dead_permanent_death_player();

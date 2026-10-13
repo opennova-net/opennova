@@ -782,6 +782,11 @@ bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 		ai->team = team;
 		world::infantry_respawn_snap(*ai, pos, heading, health);
 	}
+	// The deploy's reset ends in the slice rebuild and the body's own list; the
+	// rest of this leg's gap to its twin is D-NET-407's [orig: the unreferenced
+	// leave routine @0x519F50 -> Server_DeployPlayer @0x51A00C ->
+	// Entity_ResetToSpawnState @0x517899 - the builder @0x4B98EB, the list @0x4B98F1].
+	if (world.collision != nullptr) world.collision->refresh_entity_proximity(world, *player);
 	return true;
 }
 

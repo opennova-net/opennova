@@ -982,6 +982,10 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		const int32_t heading = pose.found ? pose.heading_bam : motor->heading;
 		world::infantry_respawn_snap(*motor, motor_position, heading, player->health);
 	}
+	// The reset's tail rebuilds every slice at the placed pose (restarting the 17-tick phase),
+	// then the body's list; its resolver pass is D-AI-9's [orig: Entity_ResetToSpawnState
+	// @0x4B9610 - the resolver @0x4B9755, the builder @0x4B98EB, its list @0x4B98F1].
+	if (world.collision != nullptr) world.collision->refresh_entity_proximity(world, *player);
 	// [orig: Server_DeployPlayer @0x5178aa]
     if (player->handle == world.cached.local_player && world.local_player_state != nullptr)
         world.local_player_state->reset_for_new_round();

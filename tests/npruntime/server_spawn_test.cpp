@@ -18,6 +18,7 @@
 #include <net/npwire/ingame_decode.h> // OrganicSpawnRecord / OrganicSpawnBatch
 
 #include <runtime/world/ai.h>
+#include <runtime/world/collision.h> // CollisionWorld::candidate_count
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h> // to_fixed
 #include <base/gameprofile/game_type.h>
@@ -64,8 +65,12 @@ const w::Entity *pool0_player(const w::World &world, uint16_t want_dcb) {
 }
 } // namespace
 
+// Every World below lives on the heap: sizeof(World) is ~230 KB, and main()'s
+// block-scoped locals fit the 1 MB Windows stack only when MSVC overlaps them,
+// which it does not reliably do (STATUS_STACK_OVERFLOW in main's prologue).
 int main() {
-	w::World world;
+	auto world_heap = std::make_unique<w::World>();
+	w::World &world = *world_heap;
 	w::AiSystem &ai = world.ai;
 	make_world(world);
 
@@ -246,7 +251,8 @@ int main() {
 	// [D-NET-112] Players carry no SSN (net_id 0); they are distinguished by their distinct
 	// ownerConnectionId (dcb), the faithful identity. (The old high-band net-id allocator is gone.)
 	{
-		w::World many_world;
+		auto many_heap = std::make_unique<w::World>();
+		w::World &many_world = *many_heap;
 		w::AiSystem &many_ai = many_world.ai;
 		make_world(many_world);
 		many_world.registry.configure_pool(0, 32);
@@ -293,7 +299,8 @@ int main() {
 	// [orig: Server_PlayerAdd @0x51cbc0 writes a free dword_A87048 player slot; slot 0 stays
 	//  active and local from Server_InitNewRoundState @0x51c99a..0x51ca3c]
 	{
-		w::World slot_world;
+		auto slot_heap = std::make_unique<w::World>();
+		w::World &slot_world = *slot_heap;
 		w::AiSystem &slot_ai = slot_world.ai;
 		make_world(slot_world);
 
@@ -508,7 +515,8 @@ int main() {
 	// [orig: Server_PlayerAdd @0x51cbc0 @0x51cff7/@0x51d0b1]. The 0x0C organic batch echoes
 	// entity+0x374 / entity+0x15C raw [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030a0].
 	{
-		w::World cw;
+		auto cw_heap = std::make_unique<w::World>();
+		w::World &cw = *cw_heap;
 		w::AiSystem &cai = cw.ai;
 		make_world(cw);
 
@@ -963,6 +971,86 @@ int main() {
 		const w::Entity *released = pool0_player(*bal_world, inmatch::kFirstJoinerDcb + 1);
 		if (!expect(released != nullptr && released->team == 1,
 		            "balance: the released joiner spawns on its requested side")) return 1;
+	}
+
+	// D-COL-21: a deploy's reset ends in the candidate-slice rebuild and the body's
+	// own list, so the deployed body walks a slice built at its placed pose at once
+	// and the 17-tick phase restarts there; both deploy legs, the release and the
+	// spectator leave. [orig: Server_DeployPlayer -> Entity_ResetToSpawnState
+	//  @0x517899 - the Entity_BuildProximityListsFromPools call @0x4B98EB, the
+	//  Entity_BuildProximityList call @0x4B98F1; the leave routine's deploy @0x51A00C]
+	{
+		auto slice_world = std::make_unique<w::World>();
+		make_world(*slice_world); // the 6002 start at (123, 456, 7)
+		slice_world->registry.configure_pool(2, 4);
+		w::CollisionWorld collision;
+		slice_world->collision = &collision;
+		slice_world->ai.collision = &collision;
+		// The Player row's ordinal, the +0x1C word a pool-0 source needs.
+		slice_world->tables.player.item_type_index = 1;
+		w::Entity wall;
+		wall.kind = w::EntityKind::Building;
+		wall.position = {123.0f, 456.0f, 7.0f};
+		wall.bound_radius = 1.0f;
+		wall.alive = true;
+		slice_world->registry.spawn(2, wall);
+		collision.build_initial_tables(*slice_world);
+		ns::LoopbackChannel slice_loop;
+		inmatch::NapiNPServerCtx slice_ctx;
+		inmatch::GameConfig slice_settings;
+		slice_settings.max_players = 8;
+		inmatch::test::bring_up_host(slice_ctx, inmatch::ConnectionMode::HostClient,
+		                        inmatch::SocketMode::Socketless, /*host_key=*/0, &slice_loop,
+		                        slice_settings);
+		slice_ctx.world = slice_world.get();
+		inmatch::Server_InitNewRoundState(slice_ctx);
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(slice_ctx, *slice_world) == 1,
+		            "slice: the host player spawns")) return 1;
+		inmatch::NapiNPConnection &own = slice_ctx.np_protocol.connection_list.front();
+		const w::EntityHandle body_h = slice_world->cached.local_player;
+		w::Entity *body = slice_world->registry.get(body_h);
+		if (!expect(body != nullptr && body->item_type_index == 1,
+		            "slice: the player is a pool-0 slice source")) return 1;
+		// The body stands 500 u from the start for a full cadence, so its slice
+		// holds nothing, and eight builds into the next, so only a restart at
+		// the deploy keeps the deploy's slice for sixteen builds; then the
+		// deploy places it on the start.
+		const auto stand_far = [&] {
+			body->position = {623.0f, 456.0f, 7.0f};
+			for (int i = 0; i < 17 + 8; ++i) collision.build_tick_tables(*slice_world);
+		};
+		// Sixteen table builds after the deploy keep its slice; the seventeenth
+		// builds at the far spot.
+		const auto phase_restarted = [&] {
+			body->position = {623.0f, 456.0f, 7.0f};
+			for (int i = 0; i < 16; ++i) collision.build_tick_tables(*slice_world);
+			const bool kept = collision.candidate_count(body_h) == 1;
+			collision.build_tick_tables(*slice_world);
+			return kept && collision.candidate_count(body_h) == 0;
+		};
+		stand_far();
+		if (!expect(collision.candidate_count(body_h) == 0,
+		            "slice: the body's far slice holds no wall")) return 1;
+		body->alive = false;
+		body->health = 0;
+		body->flags |= w::kEntityFlagDead;
+		inmatch::Server_ReleasePlayerDeployment(
+				slice_ctx.config, own, *slice_world, w::EntityHandle{}, 0xFFFF);
+		if (!expect(body->alive && body->position.x == 123.0f &&
+		                    collision.candidate_count(body_h) == 1,
+		            "slice: the deploy rebuilds the slice at the start")) return 1;
+		if (!expect(phase_restarted(), "slice: the deploy restarts the 17-tick phase")) return 1;
+		// The spectator leave deploys the same way.
+		if (!expect(inmatch::Server_SetPlayerSpectator(slice_ctx, own, *slice_world, true),
+		            "slice: the player enters spectator mode")) return 1;
+		stand_far();
+		if (!expect(inmatch::Server_SetPlayerSpectator(slice_ctx, own, *slice_world, false) &&
+		                    body->position.x == 123.0f && collision.candidate_count(body_h) == 1,
+		            "slice: the spectator leave rebuilds the slice at the start")) return 1;
+		if (!expect(phase_restarted(),
+		            "slice: the spectator leave restarts the 17-tick phase")) return 1;
+		slice_world->collision = nullptr;
+		slice_world->ai.collision = nullptr;
 	}
 
 	std::printf("OK\n");

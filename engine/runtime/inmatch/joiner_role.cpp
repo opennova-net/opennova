@@ -1580,6 +1580,11 @@ void JoinerRole::apply_authoritative_health() {
 					// seeding, so a NEW motor field re-defaults here without
 					// a second hand-list to forget.
 					inf.reset_for_spawn(heading);
+					// The reset's tail rebuilds every slice, then L's own list, one
+					// 0x0A after retail's record decode runs it (D-NET-687) [orig:
+					// @0x4C113C -> Entity_ResetToSpawnState - @0x4B98EB, @0x4B98F1].
+					if (world.ai.collision != nullptr)
+						world.ai.collision->refresh_entity_proximity(world, *local);
 
 					lp.weapon.fire_held = false;
 					lp.weapon.fire_pressed = false;
