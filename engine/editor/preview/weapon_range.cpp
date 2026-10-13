@@ -392,6 +392,22 @@ void WeaponRange::run_to(int32_t tick) {
 	card_ = frame_.scope_card_active;
 }
 
+void WeaponRange::viewmodel_bias(float units[3], float rot_deg[3]) const {
+	bias_(frame_.suppress_view_bias, units, rot_deg);
+}
+
+void WeaponRange::bias_(bool suppressed, float units[3], float rot_deg[3]) const {
+	for (int i = 0; i < 3; ++i) units[i] = rot_deg[i] = 0.0f;
+	if (!world_ || !local_) return;
+	// The offset alone: the def's pos is the caller's, so the published bias rides a zero pos.
+	const float zero[3] = {0.0f, 0.0f, 0.0f};
+	world::player_view_bias_view_units(local_->view, suppressed, zero, units);
+	int32_t bam[3];
+	world::local_player_viewmodel_rotation_bias(world_.get(), local_->weapon, local_->view, bam);
+	constexpr double kDegreesPerBam = 360.0 / 4294967296.0;
+	for (int i = 0; i < 3; ++i) rot_deg[i] = float(bam[i] * kDegreesPerBam);
+}
+
 void WeaponRange::fire_shots_(int32_t tick) {
 	for (const WeaponRangeShot &shot : shots_list_)
 		if (shot.tick == tick) fire_shot_(shot);
@@ -598,10 +614,22 @@ void WeaponRange::drain_() {
 	const int32_t tick = tick_;
 	static const std::vector<world::WeaponPresentationEvent> kNoRecords;
 	const std::vector<world::WeaponPresentationEvent> &records = local_ ? local_->weapon.events : kNoRecords;
+	// The view model's offset at the tick, read once for the events that need it (the frame decides the reload's
+	// suppression; observing it advances nothing).
+	bool biased = false;
+	float bias_units[3] = {0.0f, 0.0f, 0.0f}, bias_rot[3] = {0.0f, 0.0f, 0.0f};
 	const auto channel = [&](WeaponRangeEvent &event) {
 		event.clip = view_.anim_key;
 		event.clip_variant = view_.anim_variant;
 		event.clip_ticks = view_.anim_advance_ticks;
+		if (!biased && local_) {
+			bias_(local_->view_frame().suppress_view_bias, bias_units, bias_rot);
+			biased = true;
+		}
+		for (int i = 0; i < 3; ++i) {
+			event.view_units[i] = bias_units[i];
+			event.view_rot_deg[i] = bias_rot[i];
+		}
 	};
 	using Kind = WeaponRangeEvent::Kind;
 	// The impacts the flight resolved, each the ammo's row for its tag (the sound leg rides the fire-sound queue,
