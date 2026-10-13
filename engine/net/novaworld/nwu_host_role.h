@@ -91,9 +91,9 @@ public:
 	void set_player_slot(const HostPlayerSlot &slot);
 	void clear_player_slot(int slot);
 	// A kept player's PlayerTeam and PlayerType, as the in-match handlers SetOrCreate them
-	// (a team change, a loadout's accept, a weapon-slot list): the vars alone change, with no
-	// ClientHostPlayerAdded, and ride the next update as its dirty delta. A slot not in the
-	// roster is left alone.
+	// (a team change, a loadout's accept, a weapon-slot list): the vars alone change in the
+	// session's PlayerList at once, with no ClientHostPlayerAdded, and a changed one rides the
+	// next update. A slot not in the roster is left alone.
 	void set_player_vars(int slot, const std::string &team, const std::string &type);
 	// The roster onto `wanted` (plan_roster_sync): the removals, then the adds, then the kept
 	// players' vars.
@@ -126,7 +126,6 @@ public:
 
 private:
 	HostRegistration host_cfg() const;
-	std::vector<ClientVar> player_list_vars() const;
 	void send_host_request(uint32_t currently_hosting);
 	void handle_host_result(const ClientSession::Notice &notice);
 	// The server-info update: the lists' changed vars (and the status heartbeat where no NWU
@@ -146,9 +145,6 @@ private:
 	Phase phase_ = Phase::Idle;
 	std::map<int, HostPlayerSlot> players_;
 	SessionIdRing pcid_ring_;
-	// The dirty-delta baselines: what the last ClientHostUpdate carried, per list.
-	std::vector<ClientVar> last_sent_host_;
-	std::vector<ClientVar> last_sent_players_;
 	double refresh_ticks_ = 0.0;           // logic ticks since the last refresh
 	uint32_t last_tick_ms_ = 0;            // the previous tick's clock
 	bool ticked_ = false;

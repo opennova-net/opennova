@@ -17,8 +17,6 @@ NwuHostRole::NwuHostRole(NwuLobbySession &lobby, Hooks hooks)
 bool NwuHostRole::request(const HostRegistration &cfg) {
 	cfg_ = cfg;
 	players_.clear();
-	last_sent_host_.clear();
-	last_sent_players_.clear();
 	pcid_ring_ = SessionIdRing{};
 	refresh_ticks_ = 0.0;
 	// BuildHostVarLists mints the per-registration AppId first: (tick + rand) folded into
@@ -87,8 +85,8 @@ void NwuHostRole::publish_mission_start() {
 
 // Retail marks every var of both lists changed, runs the server-info update (whose tail,
 // CPlayerManager_RebuildLists(0), sends the marked lists: the whole of both), then in state 6
-// sends both lists in full once more and clears the marks. Ours mark the session's two list
-// flags and empty the dirty-delta baselines, against which every var is dirty.
+// sends both lists in full once more and clears the marks; ours marks the session's two lists
+// the same way (ClientSession::mark_host_lists).
 // [orig: Game_StartMission — the marks on the Host list (session+0x214) @0x5248e4 and the
 //  PlayerList (+0x25c) @0x5248ef, Lobby_UpdateServerInfo(0) @0x5248f5,
 //  CPlayerManager_RebuildLists @0x4d4590 called with 1 @0x524903: the state-6 test @0x4d4593,
@@ -98,8 +96,6 @@ void NwuHostRole::publish_mission_start() {
 //  CNapiGameSession_SendHostUpdate(1) @0x4d5c8c, the marks cleared @0x4d5c95 / @0x4d5c9e]
 void NwuHostRole::republish_lists() {
 	if (ClientSession *session = lobby_.session()) session->mark_host_lists();
-	last_sent_host_.clear();
-	last_sent_players_.clear();
 	update_server_info();
 	// The state-6 test is send_host_update's, as it is for every send.
 	send_host_update(/*full=*/true);
@@ -180,38 +176,43 @@ void NwuHostRole::handle_host_result(const ClientSession::Notice &notice) {
 		hooks_.on_hosting();
 }
 
-// A changed column is dirty in the Host var-list and rides the next refresh (the dirty delta):
-// retail republishes on its 1860-tick timer, not on the edit.
+// The slot's five vars go into the session's PlayerList in any state (a player added while the
+// request is out rides the first update's PlayerList); ClientHostPlayerAdded fires only while
+// hosting is established (state 6), the session's gate. Retail then sends the PlayerList delta
+// at once as well, ours at the next refresh (D-NET-490).
+// [orig: Server_PlayerAdd @0x51d3f0 @0x51d421..0x51d4b5; the state-6 wrapper @0x4d0e20]
 void NwuHostRole::set_player_slot(const HostPlayerSlot &slot) {
 	players_[slot.slot] = slot;
 	cfg_.player_count = static_cast<int>(players_.size());
-	// ClientHostPlayerAdded fires immediately while hosting is established (state 6). Retail then
-	// sends the PlayerList delta at once as well, ours at the next refresh (D-NET-490).
-	// [orig: Server_PlayerAdd @0x51d3f0 @0x51d421..0x51d4b5]
-	ClientSession *session = lobby_.session();
-	if (phase_ == Phase::Hosting && session != nullptr) session->send_host_player_added(slot);
+	if (ClientSession *session = lobby_.session()) session->send_host_player_added(slot);
 }
 
+// The slot's vars leave the session's PlayerList in any state; ClientHostPlayerRemoved fires only
+// while hosting is established (state 6).
+// [orig: Server_PlayerRemove — the state-6 wrapper @0x51b5f3 (@0x4d0e40), then
+//  NapiLinkedList_RemoveByUserData on the PlayerList @0x51b601]
 void NwuHostRole::clear_player_slot(int slot) {
 	if (players_.erase(slot) == 0) return;
 	cfg_.player_count = static_cast<int>(players_.size());
-	// ClientHostPlayerRemoved fires immediately while hosting is established (state 6).
-	ClientSession *session = lobby_.session();
-	if (phase_ == Phase::Hosting && session != nullptr) session->send_host_player_removed(slot);
+	if (ClientSession *session = lobby_.session()) session->send_host_player_removed(slot);
 }
 
-// A team change SetOrCreates the slot's PlayerTeam and sends no ClientHostPlayerAdded; the
-// loadout's accept and every weapon-slot list do the same with its PlayerType. The changed var
-// rides the next ClientHostUpdate (the PlayerList's dirty delta).
+// A team change SetOrCreates the slot's PlayerTeam into the session's PlayerList at once and
+// sends no ClientHostPlayerAdded; the loadout's accept and every weapon-slot list do the same
+// with its PlayerType. A changed value sets the var's bit, so it rides the next ClientHostUpdate
+// even when a later change restores the value it went out with.
 // [orig: Server_ChangeEntityTeam @0x518D70: the CNapiVarList_SetOrCreate call @0x518E22, no
 //  CNapiGameSession_SendPlayerAdded among its callees; NapiNPServerMsg_HandlePlayerLoadout
 //  @0x515790: the SetOrCreate @0x515AE2; Server_SendWeaponSlotListToPlayer @0x502550: the
-//  SetOrCreate @0x5025DB]
+//  SetOrCreate @0x5025DB; CNapiVarEntry_SetValue @0x630590 (the var's bit @0x6305c6)]
 void NwuHostRole::set_player_vars(int slot, const std::string &team, const std::string &type) {
 	const auto it = players_.find(slot);
 	if (it == players_.end()) return;
 	it->second.team = team;
 	it->second.type = type;
+	if (ClientSession *session = lobby_.session())
+		session->set_player_list_vars(
+				{ { slot, "PlayerTeam", team }, { slot, "PlayerType", type } });
 }
 
 void NwuHostRole::sync_roster(const std::vector<HostPlayerSlot> &wanted) {
@@ -304,12 +305,6 @@ HostRegistration NwuHostRole::host_cfg() const {
 	return cfg;
 }
 
-std::vector<ClientVar> NwuHostRole::player_list_vars() const {
-	std::vector<HostPlayerSlot> roster;
-	for (const auto &entry : players_) roster.push_back(entry.second);
-	return make_player_list(roster);
-}
-
 // [orig: CNapiGameSession_SendHostRequest @0x4d3700]
 void NwuHostRole::send_host_request(uint32_t currently_hosting) {
 	ClientSession *session = lobby_.session();
@@ -322,12 +317,14 @@ void NwuHostRole::send_host_request(uint32_t currently_hosting) {
 // Every update goes in state 6 alone: CPlayerManager_RebuildLists tests it ahead of its send (the
 // refresh's, the mission start's, the server-info update's tail) and the host result's includeAll
 // send has its own test, so with a re-host's request out (state 5) no update leaves until its
-// result. includeAll at a mission start and a re-host's result writes both lists whole; any
-// other update carries only the vars whose value changed (dirty_client_vars) and only a list
-// whose changed flag is set, a removal's empty container included, and nothing at all goes
-// when neither flag is (ClientSession::send_host_update).
-// [orig: CPlayerManager_RebuildLists @0x4d4590: `cmp [esi+0x11c], 6` @0x4d4593, the flag
-//  test @0x4d459c..0x4d45ac; CNapiGameSession_HandleHostVerifyResponse @0x4d59d0 (the test
+// result. The server-info update SetOrCreates the whole Host list into the session's, which sets
+// the bit of each var whose value changed; the PlayerList's writers SetOrCreate theirs at once
+// (set_player_slot, clear_player_slot, set_player_vars). includeAll at a mission start and a
+// re-host's result writes both lists whole; any other update writes only a list whose changed
+// flag is set and only its vars whose bit is set (ClientSession::send_host_update).
+// [orig: Lobby_UpdateServerInfo @0x4fe8c0 (the Host SetOrCreates from @0x4fe911);
+//  CPlayerManager_RebuildLists @0x4d4590: `cmp [esi+0x11c], 6` @0x4d4593, the flag test
+//  @0x4d459c..0x4d45ac; CNapiGameSession_HandleHostVerifyResponse @0x4d59d0 (the test
 //  @0x4d5c80..0x4d5c87); CNapiGameSession_SendHostUpdate @0x4d3860 (updateFlag to both lists
 //  @0x4d38b0 / @0x4d38c5)]
 void NwuHostRole::send_host_update(bool full) {
@@ -335,12 +332,8 @@ void NwuHostRole::send_host_update(bool full) {
 	if (session == nullptr || !session->is_verified() ||
 			session->host_state() != ClientSession::HostState::Established)
 		return;
-	const std::vector<ClientVar> host = make_host_var_list(host_cfg(), lobby_text_, /*full=*/true);
-	const std::vector<ClientVar> players = player_list_vars();
-	session->send_host_update(full ? host : dirty_client_vars(last_sent_host_, host),
-	                          full ? players : dirty_client_vars(last_sent_players_, players), full);
-	last_sent_host_ = host;
-	last_sent_players_ = players;
+	session->set_host_list_vars(make_host_var_list(host_cfg(), lobby_text_, /*full=*/true));
+	session->send_host_update(full);
 }
 
 } // namespace opennova
