@@ -494,26 +494,10 @@ void TerrainViewportApplier::apply_state_(const TerrainViewport &model) {
 	// The ground overlay (DI-29): the picture the viewport made of what the game reads at each point, laid over the
 	// terrain from above (presentation x east, z the negated mission y), past it the one value the game reads all
 	// round where there is one (the mission device's leg).
+	// S25: a stroke's patch of it the rows it changed alone, the terrain's texture taken in place (GroundOverlayUpload).
 	if (model.overlay_serial() != overlay_serial_) {
 		overlay_serial_ = model.overlay_serial();
-		const opennova::editor::MissionOverlayImage &overlay = model.overlay();
-		if (overlay.kind == opennova::editor::MissionGroundOverlay::None) {
-			terrain_->clear_ground_overlay();
-		} else {
-			Ref<Image> picture;
-			if (!overlay.empty()) {
-				PackedByteArray bytes;
-				bytes.resize(int64_t(overlay.rgba.size()));
-				std::copy(overlay.rgba.begin(), overlay.rgba.end(), bytes.ptrw());
-				picture = Image::create_from_data(overlay.width, overlay.height, false, Image::FORMAT_RGBA8, bytes);
-			}
-			const Rect2 rect(float(overlay.west), float(-overlay.north), float(overlay.width * overlay.texel),
-					float(overlay.height * overlay.texel));
-			const uint8_t *outside = overlay.outside_rgba;
-			terrain_->set_ground_overlay(picture, rect,
-					Color(outside[0] / 255.0f, outside[1] / 255.0f, outside[2] / 255.0f, outside[3] / 255.0f),
-					overlay.outside);
-		}
+		overlay_upload_.apply(*terrain_, model.overlay());
 	}
 	place_camera_(model);
 }
@@ -534,6 +518,7 @@ void TerrainViewportApplier::clear() {
 	environment_->set_environment_data(Ref<EnvFile>());
 	environment_built_ = false;
 	overlay_serial_ = UINT64_MAX;
+	overlay_upload_.reset();
 	terrain_->clear_ground_overlay();
 	for (std::vector<std::string> &missing : layer_missing_) missing.clear();
 	touch_scene_state_();
@@ -586,6 +571,8 @@ opennova::io::JsonValue TerrainViewportApplier::drawn_json_() const {
 	placed.set("count", json_number(double(tiles.is_valid() ? tiles->get_entry_count() : 0)));
 	placed.set("from", opennova::io::json_string(tiles.is_null() ? "none" : own ? "terrain" : "mission"));
 	out.set("tiles", std::move(placed));
+	// S25: the ground overlay's last upload (its rows and its cost: the painting's frame cost).
+	out.set("overlay", overlay_upload_.to_json());
 	return out;
 }
 
