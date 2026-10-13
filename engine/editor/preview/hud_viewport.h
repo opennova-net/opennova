@@ -103,8 +103,7 @@ struct HudViewportOptions {
 // The most red a hit flashes the screen with as the HUD draws it (world::kScreenFlashRedDrawCap, the red quad's alpha
 // ceiling).
 inline constexpr int kHudDamageMost = world::kScreenFlashRedDrawCap;
-// The JSON of `options` (options_json's), and the change a SetViewport makes to set them.
-io::JsonValue hud_options_json(const HudViewportOptions &options);
+// The change a SetViewport makes to set `options`.
 std::string hud_options_change(const HudViewportOptions &options);
 
 // The Tab board the preview draws (ADR 0046 S23 C): the feed's half of the board as inmatch::scoreboard_feed

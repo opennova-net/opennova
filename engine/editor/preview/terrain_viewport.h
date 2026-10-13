@@ -54,8 +54,7 @@ struct TerrainViewportOptions {
 
 // The options on the wire (the envelope's `options`, a SetViewport's): {mission, overlay, legend, show {foliage, water}}.
 io::JsonValue terrain_options_to_json(const TerrainViewportOptions &options);
-// The change a SetViewport makes to set the options to `options`, and to set the camera.
-std::string terrain_options_change(const TerrainViewportOptions &options);
+// The change a SetViewport makes to set the camera.
 std::string terrain_camera_change(const OrbitCamera &camera);
 
 // A terrain's viewport (DI-30b; ViewportKind::Terrain, the Document tab's main view; CONTEXT.md "Terrain viewport"):

@@ -240,18 +240,6 @@ io::JsonValue environment_options_to_json(const EnvironmentViewportOptions &opti
 	return out;
 }
 
-std::string environment_options_change(const EnvironmentViewportOptions &options, const EnvironmentViewportOptions &held) {
-	JsonValue out = environment_options_to_json(options);
-	// A command is issued each time a change names it: only the one that moved.
-	JsonValue taken = JsonValue::make_object();
-	for (io::JsonMember &member : out.object) {
-		if (member.key == "rain" && options.rain == held.rain) continue;
-		if (member.key == "overcast" && options.overcast == held.overcast) continue;
-		taken.set(member.key, std::move(member.value));
-	}
-	return viewport_change(ViewportKind::Environment, "options", std::move(taken));
-}
-
 std::string environment_camera_change(const OrbitCamera &camera) {
 	// What a SetViewport takes: the camera's own members in the mission's terms (mission_camera.h).
 	JsonValue view = mission_camera_to_json(camera);

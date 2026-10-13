@@ -348,10 +348,6 @@ opennova::hud::HudScoreboardState hud_preview_board(const HudViewportOptions &op
 	return board;
 }
 
-io::JsonValue hud_options_json(const HudViewportOptions &options) {
-	return options_to_json(options);
-}
-
 std::string hud_options_change(const HudViewportOptions &options) {
 	return viewport_change(ViewportKind::Hud, "options", options_to_json(options));
 }
