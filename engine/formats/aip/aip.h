@@ -211,7 +211,8 @@ std::vector<std::string> value_words(const KeyRow &row, int32_t type, int32_t va
 // The profile as the reader reads it again: the same type, every value the same.
 bool same_profile(const Profile &a, const Profile &b);
 
-// The profile's text from scratch (ADR 0003): `type` and then each key of its type whose value is other than
+// The profile's text from scratch (ADR 0003; no original writer of a profile is witnessed, so the form is
+// OpenNova's): `type` and then each key of its type whose value is other than
 // the zeroed record's (the loader clears the slot first, AIProfile_LoadOrFind @ 0x45FE09), each `key<TAB>value`
 // with CR LF after it (the walk splits at a CR LF pair alone), in the key table's order. The text is read again:
 // false with the reason for a value no word reads back to, or a text that does not read back as the profile.

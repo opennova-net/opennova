@@ -52,7 +52,8 @@ HudFxFile hudfx_parse(const uint8_t *data, size_t size);
 // memset(&dword_2723388, 0, 0x240) @ 0x5A4941]. Each slot's name is what its load reads, to its first NUL.
 std::array<std::string, kHudFxSlots> hudfx_slot_names(const HudFxFile &file);
 
-// The file's text from scratch (ADR 0003), from its lines alone: each line `tag<TAB>model` with CR LF after it,
+// The file's text from scratch (ADR 0003; no original writer of hudfx.def is witnessed, so the form is
+// OpenNova's), from its lines alone: each line `tag<TAB>model` with CR LF after it,
 // in the model's order. A line of no model is its tag alone (the game loads nothing for it). False with the
 // reason for a slot past the nine, or a model the walk reads otherwise (holding a blank, a comma, a quote, `;` or
 // `//`).
