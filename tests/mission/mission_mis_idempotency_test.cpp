@@ -27,7 +27,6 @@
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
 #include <formats/mission/mission_mis.h>
-#include <formats/mission/mission_var_names.h>
 
 namespace {
 
@@ -129,7 +128,8 @@ int check(const std::string &path) {
 	size_t locks = 0;
 	for (size_t at = gen1.find("  height_lock 1\r\n"); at != std::string::npos; at = gen1.find("  height_lock 1\r\n", at + 1))
 		++locks;
-	TEST_EXPECT(locks == total);
+	TEST_EXPECT(locks ==
+			total + 2 * doc.area_triggers.size()); // and each area's two locked corners (D-MIS-14)
 
 	bms::File reparsed;
 	TEST_EXPECT(parse_mis_text(gen1, resolver, reparsed, error));
@@ -155,37 +155,48 @@ int check(const std::string &path) {
 	std::string gen2;
 	TEST_EXPECT(write_mis_text(reparsed, gen2, error));
 	TEST_EXPECT(texts_equal(gen1, gen2));
-	// The areas come back by zone id, in id order, with their flags (the .mis holds no bounds: D-MIS-14).
-	std::vector<std::pair<int32_t, uint32_t>> areas_in, areas_back;
-	for (const bms::AreaTrigger &area : doc.area_triggers) areas_in.emplace_back(area.id, area.flags);
-	for (const bms::AreaTrigger &area : reparsed.area_triggers) areas_back.emplace_back(area.id, area.flags);
+	// The areas come back by zone id, in id order, with their flags and their bounds, which two
+	// 6013 items at the box's corners carry (D-MIS-14).
+	std::vector<std::vector<int64_t>> areas_in, areas_back;
+	const auto row = [](const bms::AreaTrigger &a) {
+		return std::vector<int64_t>{ a.id, a.x_min, a.x_max, a.y_min, a.y_max, a.z_min, a.z_max,
+			int64_t(a.flags) };
+	};
+	for (const bms::AreaTrigger &area : doc.area_triggers)
+		areas_in.push_back(row(area));
+	for (const bms::AreaTrigger &area : reparsed.area_triggers)
+		areas_back.push_back(row(area));
 	std::sort(areas_in.begin(), areas_in.end());
 	TEST_EXPECT(areas_back == areas_in);
 
-	// The variable names (mission_var_names.h) ride the layer table, which the .mis carries as
-	// `begin layer N / description`: the tagged table comes back record for record, and the text again.
-	bms::File named = doc;
-	TEST_EXPECT(layer_table(named) != LayerTable::LayerNames); // the fixtures' tables are empty, as shipped
+	// The wav list (bms.h WavListRecord, D-MIS-13) rides `begin wav_list N`, slots 1..31 as the
+	// original editor writes them (its slot 0 never), and the variables' names lines both original
+	// readers skip
+	// (`//var N "name"`): each comes back, and the text again.
 	{
-		const std::vector<VariableName> names = {{2, "alarm"}, {9, "bridge blown"}, {200, "fifteen chars.."}};
-		TEST_EXPECT(set_variable_names(named, names, error));
-		std::string named1;
-		TEST_EXPECT(write_mis_text(named, named1, error));
-		TEST_EXPECT(named1.find("begin layer 0\r\n  description \"OPENNOVA-VAR-NAMES-1\"\r\n") != std::string::npos);
-		bms::File named_back;
-		TEST_EXPECT(parse_mis_text(named1, resolver, named_back, error));
-		TEST_EXPECT(layer_table(named_back) == LayerTable::VariableNames);
-		const std::vector<VariableName> read = variable_names(named_back);
-		TEST_EXPECT(read.size() == names.size());
-		for (size_t i = 0; i < read.size() && i < names.size(); ++i)
-			TEST_EXPECT(read[i].index == names[i].index && read[i].name == names[i].name);
-		for (size_t i = 0; i < named.layer_records.size(); ++i)
-			TEST_EXPECT(std::memcmp(named.layer_records[i].name, named_back.layer_records[i].name,
-			                        bms::kLayerRecordSize) == 0);
-		sync_counts(named_back);
-		std::string named2;
-		TEST_EXPECT(write_mis_text(named_back, named2, error));
-		TEST_EXPECT(texts_equal(named1, named2));
+		bms::File listed = doc;
+		std::memcpy(listed.wav_list_records[2].file_name, "alarm.wav", 9);
+		std::memcpy(listed.wav_list_records[31].file_name, "last.wav", 8);
+		MisNames vars;
+		vars.variables[2] = "alarm";
+		vars.variables[255] = "bridge blown";
+		std::string listed1;
+		TEST_EXPECT(write_mis_text(listed, listed1, error, nullptr, &vars));
+		TEST_EXPECT(listed1.find("begin wav_list 2\r\n  description \"\"\r\n  file_name "
+								 "\"alarm.wav\"\r\nend wav_list\r\n") != std::string::npos);
+		TEST_EXPECT(listed1.find("//var 255 \"bridge blown\"\r\n") != std::string::npos);
+		bms::File listed_back;
+		TEST_EXPECT(parse_mis_text(listed1, resolver, listed_back, error));
+		TEST_EXPECT(std::string(listed_back.wav_list_records[2].file_name) == "alarm.wav" &&
+				std::string(listed_back.wav_list_records[31].file_name) == "last.wav");
+		MisNames vars_back;
+		TEST_EXPECT(parse_mis_names(listed1, vars_back, error));
+		TEST_EXPECT(vars_back.variables[2] == "alarm" &&
+				vars_back.variables[255] == "bridge blown" && vars_back.variables[3].empty());
+		sync_counts(listed_back);
+		std::string listed2;
+		TEST_EXPECT(write_mis_text(listed_back, listed2, error, nullptr, &vars_back));
+		TEST_EXPECT(texts_equal(listed1, listed2));
 	}
 
 	// With names (MisNames): every event named, every area described by its zone id and every path by its

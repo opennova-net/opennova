@@ -75,7 +75,7 @@ static void test_parse_and_bind() {
     e.item_id = 1998;
     e.kind = EntityKind::Building;
     const auto h = w.registry.spawn(2, e);
-    mission::resolve_item_traits(w, items, {});
+    mission::resolve_item_traits(w, items, {}, nullptr);
     const Entity *bound = w.registry.get(h);
     CHECK(bound->door_event && bound->door_motion);
     CHECK(bound->door_count == 2 && bound->door_first_bone == 2);
@@ -83,7 +83,7 @@ static void test_parse_and_bind() {
     const DoorSystem::Slot *slot = w.doors.slot(*bound, 0);
     CHECK(slot != nullptr);
     if (slot != nullptr) CHECK(slot->step == 528);
-    mission::resolve_item_traits(w, items, {});
+    mission::resolve_item_traits(w, items, {}, nullptr);
     CHECK(w.doors.allocated() == 2);
     def::def_free_items(&items);
 }
@@ -237,7 +237,7 @@ static void test_retail_door_pose() {
     e.item_id = 1998;
     e.yaw = 90;
     const auto h = w.registry.spawn(2, e);
-    mission::resolve_item_traits(w, items, {});
+    mission::resolve_item_traits(w, items, {}, &models);
     const mission::CollisionResolveDeps deps{collision, occlusion, pose, models};
     CHECK(mission::resolve_collision_instances(w, items, resolve, deps) == 1);
     // first_door 2 stores 1 at itemDef +0x891: the retail part draw forces

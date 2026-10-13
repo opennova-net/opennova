@@ -64,8 +64,9 @@ func test_comparison_contract_uses_production_spawn_profile_and_presentation_wit
 	var avatar_db := AvatarDatabase.new()
 	assert_eq(avatar_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/avatars/synth_avatars.def")), OK)
+	# The comparison stands for a LAN host session's start (the class clamp; 9 stays 9).
 	var join_profile := avatar_db.character_join_profile(
-			RenderFixtureContract.comparison_spawn_profile(hidden_profile_contract))
+			RenderFixtureContract.comparison_spawn_profile(hidden_profile_contract), true)
 	assert_eq([join_profile.get_character_id(0), join_profile.get_character_id(1)],
 			[0x0402, 0x8207],
 			"the staged tree selections resolve to retail slot 0's character IDs")

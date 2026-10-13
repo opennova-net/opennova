@@ -17,6 +17,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -252,5 +253,30 @@ uint32_t material_texture_side_cap(uint8_t runtime_type);
 // the BMP core's header rules are renderer/d3dx_image_codecs.h's ports.
 enum class DdsCodec : uint8_t { Bmp, Ppm, Dds, Jpeg, Png, Pfm, Hdr, Tga, Dib };
 const std::vector<DdsCodec> &dds_reader_codec_order();
+
+// The DDS reader's content read. It hands the bytes whole to D3DX
+// (GTexture_InitFromMemory's D3DXCreateTextureFromFileInMemoryEx), whose
+// loader tries its codecs in a fixed order (dds_reader_codec_order: BMP, PPM,
+// DDS, JPEG, PNG, PFM, HDR, TGA, DIB) and takes the first that decodes. So a
+// .dds holding a TGA (or a PNG, JPEG, BMP, PPM, ...) loads as that image.
+// dds_codec_header_accepts is a codec's own header test, where it is one:
+// "BM" with a file size that fits, "DDS " with its 124-byte header, libjpeg's
+// SOI marker, the PNG signature, the TGA header checks; the PPM, PFM, HDR and
+// DIB codecs test as they decode (renderer/d3dx_image_codecs.h), so it
+// accepts them and their decode decides. dds_read_by_content walks the order:
+// each codec whose header test passes goes to `decode` (the embedder's decode
+// of the bytes as that codec), the first that decodes wins; the codec, or
+// none when no codec decodes them. The game's texture loader and the editor's
+// texture view read a "DDS" file through it alike.
+// [orig: D3DXTex::CImage::Load @ 0x6DF1DC, the order @ 0x6DF212..0x6DF242,
+// the loop @ 0x6DF286..0x6DF397; LoadBMP @ 0x6DE17B; LoadDDS @
+// 0x6DDA66..0x6DDA91; CImage_LoadJPEG @ 0x6DC576 (D3DX_JPEG_ReadSOI @
+// 0x71BEF0); D3DXTex_LoadPNGFromMemory @
+// 0x6DD513; CImage_LoadTGA @ 0x6DCA3F..0x6DCBB3; reached from
+// GTexture_InitFromMemory @ 0x687DF0 through D3DXCreateTextureFromFileInMemoryEx
+// @ 0x691C30]
+bool dds_codec_header_accepts(DdsCodec codec, const uint8_t *bytes, size_t size);
+std::optional<DdsCodec> dds_read_by_content(
+		const uint8_t *bytes, size_t size, const std::function<bool(DdsCodec codec)> &decode);
 
 } // namespace opennova::renderer

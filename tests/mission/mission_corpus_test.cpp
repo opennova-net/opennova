@@ -29,7 +29,6 @@
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission_field.h>
-#include <formats/mission/mission_var_names.h>
 #include "common/file_io.h"
 #include "common/retail_paths.h"
 #include "common/test_paths.h"
@@ -78,7 +77,8 @@ bool sections_of(const std::vector<uint8_t> &bytes, std::vector<Section> &out) {
 	if (!take("organics", u32(offsetof(bms::Header, num_people)) * bms::kEntitySize)) return false;
 	if (!take("waypoint paths", size_t(bms::kWaypointRecordCount) * bms::kWaypointRecordSize)) return false;
 	if (!take("groups", size_t(bms::kGroupRecordCount) * bms::kGroupRecordSize)) return false;
-	if (!take("layers", size_t(bms::kLayerRecordCount) * bms::kLayerRecordSize)) return false;
+	if (!take("wav list", size_t(bms::kWavListRecordCount) * bms::kWavListRecordSize))
+		return false;
 	if (!take("area triggers", size_t(u16_at(bytes, offsetof(bms::Header, area_trigger_count))) * bms::kAreaTriggerSize))
 		return false;
 	if (at + 12 > bytes.size()) return false;
@@ -116,7 +116,7 @@ bool differing_sections(const std::vector<uint8_t> &a, const std::vector<uint8_t
 }
 
 struct Counts {
-	size_t layer_named = 0; // missions whose layer table holds anything (mission_var_names.h LayerTable)
+	size_t wav_listed = 0; // missions whose wav list table (bms.h WavListRecord) holds any byte
 	size_t missions = 0, identical = 0, failed = 0;
 	size_t paths = 0, stops = 0, over_slots = 0; // the waypoint paths every one its markers' (D-MIS-6)
 	size_t named_groups = 0; // groups whose dropped bytes hold anything (bms.h GroupRecord): none ship
@@ -180,16 +180,26 @@ void check_mission(const std::string &name, const std::vector<uint8_t> &original
 	    !bms::parse(original.data(), original.size(), parsed, error))
 		return fail("does not parse: " + error);
 	if (tally) tally->take(parsed);
-	if (opennova::mission::layer_table(parsed) != opennova::mission::LayerTable::Empty) ++counts.layer_named;
+	{
+		bool any = false;
+		for (const bms::WavListRecord &record : parsed.wav_list_records) {
+			for (uint8_t byte : record.head)
+				any = any || byte != 0;
+			for (char ch : record.file_name)
+				any = any || ch != 0;
+		}
+		if (any)
+			++counts.wav_listed;
+	}
 
 	// Pool vectors must match the header counts, and the fixed sections are always full-size.
 	if (parsed.items.size() != parsed.header.num_items || parsed.buildings.size() != parsed.header.num_buildings ||
 	    parsed.markers.size() != parsed.header.num_markers || parsed.organics.size() != parsed.header.num_people)
 		return fail("pool counts != header counts");
 	if (parsed.waypoint_records.size() != size_t(bms::kWaypointRecordCount) ||
-	    parsed.group_records.size() != size_t(bms::kGroupRecordCount) ||
-	    parsed.layer_records.size() != size_t(bms::kLayerRecordCount))
-		return fail("fixed section count wrong (wp/grp/layer)");
+			parsed.group_records.size() != size_t(bms::kGroupRecordCount) ||
+			parsed.wav_list_records.size() != size_t(bms::kWavListRecordCount))
+		return fail("fixed section count wrong (wp/grp/wav list)");
 
 	// Every path is its markers' (D-MIS-6), as the original editor's writer lays it out: its count the markers
 	// that carry its number, its 32 slots the first of them in wp_number order [orig: JOTACmed.exe
@@ -397,10 +407,11 @@ int test_retail() {
 	}
 	if (counts.missions == 0) return retail::skip_leg("OPENNOVA_JO_DIR with the game's missions in its archives");
 	if (check_new_records(tally) != 0) ++counts.failed;
-	std::printf("retail: %zu missions hold anything in their layer table\n", counts.layer_named);
-	// The variable names' premise (mission_var_names.h): no shipped table holds anything.
-	if (counts.layer_named != 0) {
-		std::fprintf(stderr, "  FAIL shipped missions hold bytes in their layer table\n");
+	std::printf("retail: %zu missions hold anything in their wav list table\n", counts.wav_listed);
+	// No shipped mission's wav list holds a name (D-MIS-13: the original editor's, its .bms
+	// export's alone).
+	if (counts.wav_listed != 0) {
+		std::fprintf(stderr, "  FAIL shipped missions hold bytes in their wav list table\n");
 		++counts.failed;
 	}
 	for (const std::string &line : counts.differing) std::printf("  differs: %s\n", line.c_str());

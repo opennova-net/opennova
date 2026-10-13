@@ -104,26 +104,25 @@ TypedArray<AmbientLayer> SoundBank::describe_ambient(const String &p_name) {
 	}
 	const opennova::lwf::File &bank = _bank_at(loc);
 	const opennova::lwf::Multi &set = bank.multis[static_cast<size_t>(loc.set)];
-	// Each layer as the emitter mix reads it: its member 0 (the engine's emitter_layers).
-	for (const opennova::audio::EmitterLayer &layer : opennova::audio::emitter_layers(bank, set)) {
-		const opennova::lwf::Sndparm &member = bank.sndparms[layer.sndparm];
-		const String wav_path = _member_wav_path(bank, member);
-		if (wav_path.is_empty()) {
-			continue;
-		}
-		// Match _resolve_stream's basename lookup without paying its read/decode
-		// cost during mission setup. Corrupt data is rejected lazily and cached
-		// if the candidate first reaches the physical channel budget.
-		if (resource_root_.is_null() || !resource_root_->has_file(wav_path.get_file())) {
-			continue;
-		}
+	// Each layer as the emitter mix takes it as a candidate (the engine's
+	// ambient_layer_rows: its member 0, whose wave the root holds). The root is
+	// asked by the wave's basename, as _resolve_stream reads it, without paying
+	// its read/decode cost during mission setup; corrupt data is rejected
+	// lazily and cached if the candidate first reaches the physical channel
+	// budget.
+	const auto has_wave = [this](const std::string &p_wave) {
+		return resource_root_.is_valid() &&
+				resource_root_->has_file(opennova::to_gd(p_wave).get_file());
+	};
+	for (const opennova::audio::AmbientLayerRow &layer :
+			opennova::audio::ambient_layer_rows(bank, set, has_wave)) {
 		Ref<AmbientLayer> row;
 		row.instantiate();
-		row->set_wav_path(wav_path);
-		row->set_falloff_radius(static_cast<int>(layer.falloff_u));
-		row->set_min_distance(static_cast<int>(layer.min_u));
-		row->set_volume(static_cast<int>(layer.volume));
-		row->set_clamp_volume(static_cast<int>(layer.clamp));
+		row->set_wav_path(opennova::to_gd(layer.wave));
+		row->set_falloff_radius(static_cast<int>(layer.layer.falloff_u));
+		row->set_min_distance(static_cast<int>(layer.layer.min_u));
+		row->set_volume(static_cast<int>(layer.layer.volume));
+		row->set_clamp_volume(static_cast<int>(layer.layer.clamp));
 		out.push_back(row);
 	}
 	return out;

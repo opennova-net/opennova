@@ -24,6 +24,12 @@ uint64_t steady_now_ms() {
 
 std::string seconds_text(uint64_t ms) { return std::to_string(ms / 1000) + " s"; }
 
+// An exited machine's code as the events read it: unsigned, so a Windows code
+// such as 0xC0000005 reads as it is; "unknown" when the provider has none.
+std::string exit_code_text(const MachineStatus &status) {
+	return status.exit_code ? std::to_string(*status.exit_code) : std::string("unknown");
+}
+
 } // namespace
 
 Supervisor::Supervisor(db::ConnectionPool &pool, MachineProvider &provider, SupervisorConfig config) :
@@ -334,7 +340,7 @@ void Supervisor::on_machine_down(db::Database &db, const HostedServer &s, Runtim
 	// (apps/serve/README.md "Exit codes"), and none of those is the owner's stop.
 	attempt_failed(db, s, rt, now_ms,
 			status.state == MachineState::Exited
-					? "opennova-serve exited with code " + std::to_string(status.exit_code.value_or(-1))
+					? "opennova-serve exited with code " + exit_code_text(status)
 					: std::string("its machine is gone"));
 }
 
@@ -428,7 +434,7 @@ void Supervisor::on_stopping(db::Database &db, const HostedServer &s, Runtime &r
 	if (status.state == MachineState::Exited || status.state == MachineState::Gone) {
 		finish(db, s, State::Stopped,
 				status.state == MachineState::Exited
-						? "opennova-serve exited (code " + std::to_string(status.exit_code.value_or(-1)) + ")"
+						? "opennova-serve exited (code " + exit_code_text(status) + ")"
 						: std::string("its machine is gone"));
 		return;
 	}

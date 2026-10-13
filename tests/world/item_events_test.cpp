@@ -663,7 +663,7 @@ int test_piece_spawn_class_selectors() {
     const auto no_class = [](int32_t) -> uint8_t { return 0; };
     for (const bool authority : {true, false}) {
         kernel.world.rules.logic_authority = authority;
-        opennova::mission::resolve_item_traits(kernel.world, items, no_class);
+        opennova::mission::resolve_item_traits(kernel.world, items, no_class, nullptr);
         const Entity &swept = *kernel.world.registry.get(handle);
         CHECK(!swept.door_event && !swept.door_motion && swept.door_count == 0);
         CHECK(!swept.squib.motor && swept.render_sway);

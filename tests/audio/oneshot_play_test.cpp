@@ -453,14 +453,53 @@ int test_emitter_layers_read_member_zero() {
 	int failed = 0;
 	failed |= !(layers.size() == 2);
 	if (layers.size() == 2) {
-		failed |= !(layers[0].playlist == first && layers[0].sndparm == quiet && layers[0].falloff_u == 120 &&
-				layers[0].min_u == 15 && layers[0].volume == 90 && layers[0].clamp == 200 &&
-				layers[0].pitch_q16 == lwf::kPitchUnityQ16);
-		failed |= !(layers[1].playlist == second && layers[1].sndparm == loud && layers[1].falloff_u == 300 &&
-				layers[1].min_u == 0 && layers[1].volume == 250 && layers[1].pitch_q16 == 0x18000u);
+		failed |= !(layers[0].playlist == first && layers[0].sndparm == quiet &&
+				layers[0].falloff_u == 120 && layers[0].min_u == 15 && layers[0].volume == 90 &&
+				layers[0].clamp == 200);
+		failed |= !(layers[1].playlist == second && layers[1].sndparm == loud &&
+				layers[1].falloff_u == 300 && layers[1].min_u == 0 && layers[1].volume == 250);
 	}
 	if (failed) std::printf("FAIL: emitter_layers reads each layer's member 0\n");
 	return failed;
+}
+
+// A set's emitter layers as the mix takes them as candidates: each with its member 0's wave, a
+// layer whose member names no single or whose wave the embedder lacks taking no channel
+// (MissionAudio's describe_ambient and the editor's Listen alike).
+int test_ambient_layer_rows_keep_the_layers_whose_wave_is_there() {
+	BankBuilder bank;
+	lwf::Single other;
+	other.name = "OTHER";
+	other.path = "sfx\\other.wav";
+	bank.file.singles.push_back(other);
+	const uint32_t tone = bank.member(90, 200);
+	const uint32_t elsewhere = bank.member(250, 255);
+	bank.file.sndparms[elsewhere].single_index = 1;
+	const uint32_t orphan = bank.member(255, 255);
+	bank.file.sndparms[orphan].single_index = 99;
+	const uint32_t first = bank.layer(120, 15, lwf::kFlagInternal, { tone });
+	const uint32_t second = bank.layer(300, 0, lwf::kFlagExternal, { elsewhere });
+	const uint32_t lost = bank.layer(50, 0, lwf::kFlagInternal, { orphan });
+	const int32_t set = bank.set("AMB", 0, { first, second, lost });
+	const lwf::Multi &multi = bank.file.multis[size_t(set)];
+	std::vector<std::string> asked;
+	const std::vector<AmbientLayerRow> held =
+			ambient_layer_rows(bank.file, multi, [&](const std::string &wave) {
+				asked.push_back(wave);
+				return wave == "tone.wav";
+			});
+	TEST_EXPECT(held.size() == 1);
+	TEST_EXPECT(held.size() == 1 && held[0].wave == "tone.wav" && held[0].layer.playlist == first &&
+			held[0].layer.sndparm == tone && held[0].layer.falloff_u == 120 &&
+			held[0].layer.volume == 90);
+	// The embedder is asked by the bank's own spelling, and never for a member with no single.
+	TEST_EXPECT(asked == (std::vector<std::string>{ "tone.wav", "sfx\\other.wav" }));
+	const std::vector<AmbientLayerRow> all =
+			ambient_layer_rows(bank.file, multi, [](const std::string &) { return true; });
+	TEST_EXPECT(
+			all.size() == 2 && all[1].wave == "sfx\\other.wav" && all[1].layer.playlist == second);
+	TEST_EXPECT(ambient_layer_rows(bank.file, multi, nullptr).empty());
+	return 0;
 }
 
 // The first set of a name in one bank, without case (the per-bank rule the
@@ -552,6 +591,7 @@ int main(int argc, char **argv) {
 	failed |= test_member_pick_skips_dangling_indices();
     failed |= test_direct_distance_skips_set_cull_but_retains_layer_gain_and_selection();
 	failed |= test_emitter_layers_read_member_zero();
+	failed |= test_ambient_layer_rows_keep_the_layers_whose_wave_is_there();
 	failed |= test_bank_set_and_set_fire();
 	if (failed) {
 		return 1;

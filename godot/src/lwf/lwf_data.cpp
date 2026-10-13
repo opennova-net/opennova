@@ -206,7 +206,7 @@ bool LwfData::decode_into_tree(const PackedByteArray &bytes) {
 					const auto &sg = f.singles[sp.single_index];
 					name = opennova::to_gd(sg.name);
 					path = opennova::to_gd(sg.path);
-					value_hi = static_cast<int>(sg.value_hi);
+					value_hi = static_cast<int>(sg.volume) << 8; // the u16 at +32, its high byte the volume
 				}
 				member["name"] = name;
 				member["wav_path"] = path;
@@ -295,8 +295,7 @@ void LwfData::build_file_from_tree(opennova::lwf::File &r_file) const {
 		opennova::lwf::Single single;
 		single.name = name;
 		single.path = path;
-		single.value_hi = static_cast<uint16_t>(static_cast<int>(member.get("value_hi", 0)));
-		single.path_offset = 0; // encode_lwf recomputes.
+		single.volume = static_cast<uint8_t>((static_cast<int>(member.get("value_hi", 0)) >> 8) & 0xFF);
 		f.singles.push_back(std::move(single));
 		return idx;
 	};

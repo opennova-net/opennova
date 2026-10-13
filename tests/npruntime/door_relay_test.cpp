@@ -339,7 +339,7 @@ void test_joiner_doors_open_from_the_record() {
 		e.item_id = 700;
 		e.section_mask = 0x4u; // section 2 open on the wire
 		const w::EntityHandle h = world.registry.spawn(2, e);
-		mission::resolve_item_traits(world, items, wire_class, h);
+		mission::resolve_item_traits(world, items, wire_class, nullptr, h);
 		const w::Entity &door = *world.registry.get(h);
 		const w::DoorSystem::Slot *first = world.doors.slot(door, 0);
 		const w::DoorSystem::Slot *second = world.doors.slot(door, 1);

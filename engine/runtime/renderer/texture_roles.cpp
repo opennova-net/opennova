@@ -70,7 +70,7 @@ constexpr TextureRole kRoles[] = {
 	        .size(S::Exact, terrain::kTerrainColourMapSide, terrain::kTerrainColourMapSide)
 	        .row,
 	// [orig: Terrain_ParseConfigCallback @ 0x60F7D0; PolyTrn_InitTextures @ 0x60B15D..0x60B1A6, @ 0x60B1B8,
-	// the split @ 0x60B2C1; sub_520AA0 @ 0x520B4E]
+	// the split @ 0x60B2C1; Game_ShowErrorLogAndAbortMission @ 0x520B4E]
 	Role(R::TerrainBlendMap, L::Tga, kTextureTga).size(S::QuadrantSplit).row,
 	// [orig: PolyTrn_InitTextures @ 0x60ABEF..0x60AC13 (STAGE); by its own name through the TGA reader
 	// for the far blend @ 0x60AC76..0x60AD2A]

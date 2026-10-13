@@ -1003,13 +1003,15 @@ int main() {
 		options.game_type = mission_game_type(kernel.mission);
 		bool zone_marked = false;
 		options.bringup_net_session = [&] {
-			// The placed item stands in for an authored spawn zone (def attrib
-			// 0x40000), present before the host's own player joins.
+			// The placed item stands in for an authored spawn zone (a def with
+			// attrib 0x40000), present before the host's own player joins.
 			w::EntityHandle placed;
 			kernel.world.registry.for_each([&](const w::Entity &e) {
 				if (e.net_id == 21) placed = e.handle;
 			});
 			if (w::Entity *zone = kernel.world.registry.get(placed)) {
+				zone->has_item_def = true;
+				zone->item_attrib |= w::kItemAttribSpawnPoint;
 				zone->is_spawn_point = true;
 				zone_marked = true;
 			}
@@ -1061,6 +1063,42 @@ int main() {
 			kernel.world.tables.mission_attrib_flags |=
 					w::MissionTables::kMissionAttribSinglePlayerRespawn;
 			CHECK(dead_triggers());
+			// The single player's own death under the attribute: no auto-lose,
+			// the DEATH trigger, a SPAWNPOINTS_LIST over the zone its own client
+			// banked from the loopback, and the zone pick on its own client
+			// redeploys the body. [orig: Server_CheckWinConditions @0x51AD68;
+			//  Render_ProcessMainSceneFrame @0x5CAB42..0x5CAB8B;
+			//  UI_UpdateDeathScreenContent @0x553b53..0x553c4e;
+			//  Input_HandleActionBinding case 12 @0x49b17b;
+			//  Server_ProcessClientRequestRespawn @0x519AF0]
+			w::EntityHandle zone_handle;
+			kernel.world.registry.for_each([&](const w::Entity &e) {
+				if (e.net_id == 21) zone_handle = e.handle;
+			});
+			w::Entity *zone_entity = kernel.world.registry.get(zone_handle);
+			CHECK(zone_entity != nullptr);
+			if (zone_entity == nullptr) continue;
+			// An unnumbered zone (control 0) no capture event touches: it has no
+			// timer entry, so it lists [orig: UI_UpdateDeathScreenContent
+			// @0x553bd3..0x553bd5].
+			zone_entity->team = player->team;
+			w::Entity *body = kernel.world.registry.get(own->link.owned_entity);
+			body->alive = false;
+			body->health = 0;
+			body->flags |= w::kEntityFlagDead;
+			for (int i = 0; i < 16; ++i) role.run_tick(tick_input(0));
+			CHECK(kernel.local.local_player_dead());
+			CHECK(!kernel.world.match.outcome().ended);
+			CHECK(inmatch::death_menu_triggered(view));
+			const w::SpawnZoneRegistry zones = kernel.world.zones.build_spawn_zone_list();
+			std::vector<w::DeployZoneRow> rows;
+			CHECK(inmatch::deploy_zone_rows(view, zones, rows));
+			CHECK(rows.size() == 1 && rows[0].index == 0 && rows[0].letter == 'A' &&
+					rows[0].secured);
+			CHECK(host.client_runtime->queue_deployment_pick(zone_handle.packed));
+			for (int i = 0; i < 4 && kernel.local.local_player_dead(); ++i)
+				role.run_tick(tick_input(0));
+			CHECK(!kernel.local.local_player_dead());
 			continue;
 		}
 		CHECK(own->link.respawn_pending && (player->flags & 1u) != 0);

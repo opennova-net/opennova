@@ -16,10 +16,9 @@
 #include "hosted/hosted_settings.h"
 #include "hosted/owner_file.h"
 
-#include "child_process.h"
-
 #include <base/io/base64.h>
 #include <base/io/json.h>
+#include <base/proc/child_process.h>
 
 #include "common/temp_dir.h"
 #include "common/test_expect.h"
@@ -114,7 +113,7 @@ CommandResult answered(const std::string &out) {
 	return r;
 }
 
-CommandResult failed(int code, const std::string &err) {
+CommandResult failed(uint32_t code, const std::string &err) {
 	CommandResult r;
 	r.outcome = CommandResult::Outcome::Exited;
 	r.exit_code = code;
@@ -856,7 +855,7 @@ int test_process_runner(const std::string &scratch) {
 	TEST_EXPECT(r.err.find("diag on stderr") != std::string::npos && r.err.find("stdout") == std::string::npos);
 
 	r = runner.run({ g_self, "--child", "exit", "3" }, 20000);
-	TEST_EXPECT(r.outcome == CommandResult::Outcome::Exited && r.exit_code == 3 && !r.ok());
+	TEST_EXPECT(r.outcome == CommandResult::Outcome::Exited && r.exit_code == 3u && !r.ok());
 
 	const auto started = std::chrono::steady_clock::now();
 	r = runner.run({ g_self, "--child", "sleep" }, 300);

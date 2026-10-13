@@ -1260,7 +1260,7 @@ bool check_join_deploy_idle_punt_uses_state6_elapsed_time() {
 	ctx.np_protocol.connection_list.push_back(std::move(conn));
 	inmatch::NapiNPConnection &live = ctx.np_protocol.connection_list.front();
 	const opennova::world::EntityHandle player =
-			inmatch::Server_BuildPlayerInfoAndAdd(ctx, live, world);
+			inmatch::Server_BuildPlayerInfoAndAdd(ctx, live, world, /*round_init=*/false);
 	if (!expect(player.valid() && live.link.respawn_pending &&
 				live.phase == inmatch::ConnectionPhase::PlayerAdded &&
 				live.reply.state6_entry_host_ms_valid &&

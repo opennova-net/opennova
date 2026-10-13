@@ -79,6 +79,7 @@ void EnvironmentCubeCapture::_bind_methods() {
 			&EnvironmentCubeCapture::advance_frame);
 	ClassDB::bind_method(D_METHOD("is_cube_ready"),
 			&EnvironmentCubeCapture::is_cube_ready);
+	ClassDB::bind_method(D_METHOD("is_globals_held"), &EnvironmentCubeCapture::is_globals_held);
 	ClassDB::bind_method(D_METHOD("is_capture_pending"),
 			&EnvironmentCubeCapture::is_capture_pending);
 	ClassDB::bind_method(D_METHOD("get_render_frame_index"),
@@ -144,7 +145,7 @@ void EnvironmentCubeCapture::_notification(int p_what) {
 		// shader global is unready until the first copy of this residency has
 		// been wired, and that copy is forced regardless of the cadence.
 		RenderingServer *rs = RenderingServer::get_singleton();
-		if (rs != nullptr) {
+		if (rs != nullptr && !globals_held_) {
 			rs->global_shader_parameter_set(
 					"opennova_environment_cube_ready", false);
 		}
@@ -313,14 +314,39 @@ bool EnvironmentCubeCapture::_wire_cube(RenderingServer *p_rs) {
 			environment_cube_.instantiate();
 		}
 		environment_cube_->set_texture_rd_rid(cube);
-		p_rs->global_shader_parameter_set(
-				"opennova_environment_cube", environment_cube_);
+		if (!globals_held_) {
+			p_rs->global_shader_parameter_set("opennova_environment_cube", environment_cube_);
+		}
 	}
 	wired_publishes_ = requested_publishes_;
 	cube_ready_ = true;
-	p_rs->global_shader_parameter_set(
-			"opennova_environment_cube_ready", true);
+	if (!globals_held_) {
+		p_rs->global_shader_parameter_set("opennova_environment_cube_ready", true);
+	}
 	return true;
+}
+
+void EnvironmentCubeCapture::republish_globals() {
+	RenderingServer *rs = RenderingServer::get_singleton();
+	if (rs == nullptr) {
+		return;
+	}
+	if (environment_cube_.is_valid()) {
+		rs->global_shader_parameter_set("opennova_environment_cube", environment_cube_);
+	} else {
+		rs->global_shader_parameter_set("opennova_environment_cube", Variant());
+	}
+	rs->global_shader_parameter_set(
+			"opennova_environment_cube_ready", cube_ready_ && environment_cube_.is_valid());
+}
+
+void EnvironmentCubeCapture::publish_absent() {
+	RenderingServer *rs = RenderingServer::get_singleton();
+	if (rs == nullptr) {
+		return;
+	}
+	rs->global_shader_parameter_set("opennova_environment_cube_ready", false);
+	rs->global_shader_parameter_set("opennova_environment_cube", Variant());
 }
 
 void EnvironmentCubeCapture::_publish_on_render_thread() {
@@ -337,11 +363,9 @@ void EnvironmentCubeCapture::_release_on_render_thread() {
 
 void EnvironmentCubeCapture::_publish_inactive() {
 	RenderingServer *rs = RenderingServer::get_singleton();
-	if (rs != nullptr) {
-		rs->global_shader_parameter_set(
-				"opennova_environment_cube_ready", false);
-		rs->global_shader_parameter_set(
-				"opennova_environment_cube", Variant());
+	// A held capture leaves the pair to the picture that published it (E13).
+	if (rs != nullptr && !globals_held_) {
+		publish_absent();
 	}
 	if (environment_cube_.is_valid()) {
 		environment_cube_->set_texture_rd_rid(RID());

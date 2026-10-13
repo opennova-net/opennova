@@ -13,34 +13,6 @@
 
 namespace opennova::inmatch {
 
-namespace {
-
-uint8_t normalized_damage_class(uint8_t value) {
-	return (value == 1 || value == 2) ? value : 0;
-}
-
-void set_ammo_damage_class(std::vector<std::pair<int16_t, uint8_t>> &classes,
-						   int16_t ammo_index, uint8_t value) {
-	if (ammo_index < 0) return;
-	for (auto &entry : classes) {
-		if (entry.first == ammo_index) {
-			entry.second = value;
-			return;
-		}
-	}
-	classes.emplace_back(ammo_index, value);
-}
-
-uint8_t find_ammo_damage_class(const std::vector<std::pair<int16_t, uint8_t>> &classes,
-							   int16_t ammo_index, uint8_t fallback) {
-	if (ammo_index < 0) return fallback;
-	for (const auto &entry : classes)
-		if (entry.first == ammo_index) return entry.second;
-	return 0;
-}
-
-} // namespace
-
 // The 0x2F submission envelope, checked BEFORE anything is applied: the team byte must be 1..4 —
 // above 4 passes only in a team-less game type — and a NONZERO class byte must be 5..9. Both header
 // bytes are read SIGNED, so 0x80..0xFF is negative and fails the low bound. A failing envelope
@@ -83,8 +55,6 @@ GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 		struct GrantedSlot {
 			uint16_t combo = 0;
 			WeaponLoadoutSlot wire;
-			int16_t ammo_index = -1;
-			uint8_t request_damage_class = 0;
 		};
 		// The original first loads a 780-slot table keyed by category*65+rank. Repeating
 		// that slot replaces it; the later reply walk therefore emits it exactly once.
@@ -94,6 +64,8 @@ GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 			if (we == nullptr) continue; // the AdmDef_GetEntryByIndex fail leg
 			if (!world::loadout_entry_permitted(*we, req.team, reply.avatar_class))
 				continue; // team/char mask filter [orig: @0x502716]
+			// Retail's next test, the map availability (0 refused, 2 only inside an
+			// armory zone), is not ported: D-NET-693 [orig: @0x515A3F..0x515A58].
 			if (we->flags & world::weapon_flag::kArmor) grant.carry_flags |= 8u;
 			if (we->flags2 & 2) grant.carry_flags |= 0x10u;
 			if (we->ammo_class_id >= 0 && we->ammo_class_id < 128) {
@@ -110,8 +82,9 @@ GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 				grant.ammo_pools[
 						static_cast<size_t>(we->ammo_class_id)] = pool;
 			}
-			const uint8_t damage_class = normalized_damage_class(e.variant);
-			set_ammo_damage_class(grant.ammo_damage_classes, we->ammo_index, damage_class);
+			// The accept's store, in request order: the raw fourth byte at the
+			// weapon's round ammo index [orig: @0x515E8B..0x515E92].
+			grant.damage_class_writes.emplace_back(we->ammo_index, e.variant);
 			const world::LoadoutAmmoBytes ammo =
 					world::resolve_loadout_ammo(*table, e.adm_index, e.ammo_primary);
 			GrantedSlot s;
@@ -119,8 +92,6 @@ GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 			s.wire.type_id = e.adm_index;
 			s.wire.ammo_primary = ammo.primary;
 			s.wire.ammo_secondary = ammo.secondary;
-			s.ammo_index = we->ammo_index;
-			s.request_damage_class = damage_class;
 			auto existing = std::find_if(accepted.begin(), accepted.end(),
 									 [combo = s.combo](const GrantedSlot &slot) {
 										 return slot.combo == combo;
@@ -166,8 +137,6 @@ GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
                 else if (bucket_valid) grant.shared_clips[bucket] = draw / we->ammo_class_count;
 			}
 			grant.rows.push_back(row);
-			slot.wire.ammo_alt = find_ammo_damage_class(
-					grant.ammo_damage_classes, slot.ammo_index, slot.request_damage_class);
 			reply.slots.push_back(slot.wire);
 		}
 		return grant;
@@ -180,7 +149,6 @@ GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 		s.type_id = e.adm_index;
 		s.ammo_primary = e.ammo_primary;     // echoed; client clamps on apply (@0x4295d7)
 		s.ammo_secondary = e.ammo_secondary; // echoed; sub-slot clamp (@0x429652)
-		s.ammo_alt = normalized_damage_class(e.variant);
 		auto existing = std::find_if(reply.slots.begin(), reply.slots.end(),
 								 [type_id = s.type_id](const WeaponLoadoutSlot &slot) {
 									 return slot.type_id == type_id;
@@ -195,12 +163,37 @@ GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 	return grant;
 }
 
+// A store outside the table is dropped (D-NET-692): retail's raw index aliases the
+// fields around it. A def with no resolved round keeps the default -1 [orig:
+// AdmDef_InitEntryDefaults @0x53FF58], whose store lands on +0x15E57, the high byte of
+// the loaded-round bucket 127; 128..131 land on the S2C 0x57 countdown dword +0x15ED8
+// and 132..135 on the class dword +0x15EDC.
+void write_ammo_damage_classes(NapiNPConnection &conn, const GrantedWeaponLoadout &grant) {
+	for (const auto &write : grant.damage_class_writes) {
+		if (write.first < 0 ||
+		    static_cast<size_t>(write.first) >= conn.ammo_damage_classes.size())
+			continue;
+		conn.ammo_damage_classes[static_cast<size_t>(write.first)] = write.second;
+	}
+}
+
 void apply_granted_loadout(NapiNPConnection &conn, const GrantedWeaponLoadout &grant,
                            bool rebuild_rows) {
 	SessionReplyState &st = conn.reply;
+	// Each row's fourth byte is the slot's damage-class byte at the weapon's OWN AdmDef
+	// index, read when the list is built: so a weapon whose index equals an accepted
+	// weapon's ammo index shows that entry's raw byte (D-NET-508). A row index of 128 or
+	// more reads the countdown and class dwords in retail, 0 here (D-NET-692).
+	// [orig: Server_SendWeaponSlotListToPlayer @0x502550 - the index @0x502720, the read
+	//  @0x50286A..0x502871, emitted @0x50288A]
+	WeaponLoadout reply = grant.reply;
+	for (WeaponLoadoutSlot &slot : reply.slots)
+		slot.ammo_alt = slot.type_id < conn.ammo_damage_classes.size()
+				? conn.ammo_damage_classes[slot.type_id]
+				: uint8_t{0};
 	// Retain the GRANTED body: the deploy-release bundle re-sends it (the client's
 	// 0x5A apply is the deploy un-latcher — resets g_ClientDeployHold; §5.30, D-NET-156).
-	st.last_loadout_reply = encode_weapon_loadout(grant.reply);
+	st.last_loadout_reply = encode_weapon_loadout(reply);
 	st.ammo_pools = grant.ammo_pools;
 	st.shared_clips = grant.shared_clips;
 	// The 0x06 pipeline used to seed a full clip on first fire; the rebuild now owns

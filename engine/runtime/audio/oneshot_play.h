@@ -14,6 +14,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <optional>
 #include <unordered_map>
@@ -96,9 +97,9 @@ std::vector<uint32_t> layer_members(const lwf::File &bank, const lwf::Playlist &
 // machine [orig: SoundEmitter_UpdateAndMixTop8 @ 0x528649], its falloff radius
 // as the slot's cull range [orig: @ 0x52856a] and its proximity radius in the
 // two-radius curve [orig: @ 0x528667..0x5286df]: the layer's playlist and its
-// member 0's sndparm, both radii in whole units, the member's volume, ceiling
-// and pitch (Q16), the pitch the member authors and the mix never plays (its
-// channel takes the emitter word alone, D-SND-56). A layer the file gives no
+// member 0's sndparm, both radii in whole units, the member's volume and
+// ceiling; never its authored pitch, which is no play factor (the channel
+// takes the emitter's word alone, emitter_play_word; D-SND-56). A layer the file gives no
 // member is left out (the port's: retail's mix would read a null member).
 // MissionAudio's candidates and the editor's Listen (ADR 0046 DI-36) read a set
 // through it alike.
@@ -109,9 +110,21 @@ struct EmitterLayer {
 	int32_t min_u = 0;
 	int32_t volume = 255;
 	int32_t clamp = 255;
-	uint32_t pitch_q16 = 0x10000u;
 };
 std::vector<EmitterLayer> emitter_layers(const lwf::File &bank, const lwf::Multi &set);
+
+// A set's layers as the looping-emitter mix takes them as candidates: each
+// emitter layer whose member 0 names a wave (its single's path, the bank's own
+// spelling) that `has_wave` says the embedder's files hold; a layer whose wave
+// is not there takes no channel (its mix row reads nothing to play). The
+// game's MissionAudio candidates (SoundBank::describe_ambient) and the
+// editor's Listen read a set through it alike.
+struct AmbientLayerRow {
+	EmitterLayer layer;
+	std::string wave;
+};
+std::vector<AmbientLayerRow> ambient_layer_rows(const lwf::File &bank, const lwf::Multi &set,
+		const std::function<bool(const std::string &wave)> &has_wave);
 
 // Pick the member to play for one layer. The selection STATE MACHINE (mode +
 // per-layer cursor/bag) is the SoundSelector's; the mode comes from the

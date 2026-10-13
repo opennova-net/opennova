@@ -9,7 +9,7 @@
 #                                          mission document model; its runtime half
 #                                          is runtime/mission)
 #   opennova_base               STATIC     base/{vfs,resource_index,gameprofile,pcapio,
-#                                          os_random}
+#                                          os_random,proc}
 #   opennova_net                STATIC     net/* — the wire: novacrypto, napi, npwire,
 #                                          the novaworld session/gate legs
 #   opennova_runtime            STATIC     runtime/*, including the in-match session

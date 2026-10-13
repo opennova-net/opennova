@@ -53,8 +53,8 @@ const dbf::Group *find_dialog(const dbf::File &bank, const std::string &name);
 // is set [orig: SoundBank_FindEntryByName @ 0x75bba0, stricmp @ 0x75bbc2, the
 // magic test @ 0x75bbdf]; null for none.
 const lwf::Single *find_dialog_wave(const lwf::File &sounds, const std::string &name);
-// The volume a line plays its wave at, from the wave's byte +33 (the high byte
-// of lwf::Single::value_hi): a byte of 0 plays at full volume [orig:
+// The volume a line plays its wave at, from the wave's byte +33
+// (lwf::Single::volume): a byte of 0 plays at full volume [orig:
 // Dialog_LoadAudioClip @ 0x44dd15 -> sub_75BE10 @ 0x75be10; the play hook
 // sub_527560 @ 0x527583..0x5275a6 scales a nonzero byte by the voice option
 // and takes 255 for 0]. 0..255.

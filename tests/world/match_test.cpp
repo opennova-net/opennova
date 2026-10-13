@@ -730,6 +730,55 @@ void test_proximity_bits_shift_as_bytes() {
     CHECK(pass(gt::kAdvanceAndSecure, 1, 2) == 0x04);
 }
 
+// D-NET-680: the kill bonuses' near-objective tests shift a dword by the
+// entity team byte, its count taken mod 32, and test the low byte against the
+// mask, so a team of 32 and up wraps onto the low bits and 8..31 tests none:
+// a team-33 killer and its team-2 victim in a team-33 hill (both masks 0x02)
+// score bonus 24 (the attacker's mask, the killer's team) and 23 (the victim's
+// mask, the killer's team), not 25 or 26 (the victim's team, bit 0x04).
+// [orig: GameEvent_ProcessScoring @0x52F550 - bonus 24 `mov cl, [ecx+162h]` /
+//  `shl edx, cl` / `test al, dl` @0x53057C..0x530589, 25 @0x5305F4..0x530601,
+//  26 @0x530670..0x53067D, 23 @0x5306EC..0x5306F9, each behind its mask's
+//  `cmp al, 1` / `jbe`]
+void test_kill_bonus_team_bits_shift_as_dwords() {
+    for (const uint8_t killer_team : {uint8_t{33}, uint8_t{9}}) {
+        auto world = std::make_unique<World>();
+        world->registry.configure_pool(0, 4);
+        world->registry.configure_pool(3, 4);
+        MatchRules tkoth = rules(gt::kTeamKingOfTheHill, 10, 99);
+        (*tkoth.score_values)[23] = 3;
+        (*tkoth.score_values)[24] = 4;
+        (*tkoth.score_values)[25] = 5;
+        (*tkoth.score_values)[26] = 6;
+        world->match.configure(tkoth);
+        const EntityHandle killer = player(*world, 0, killer_team, "Killer");
+        const EntityHandle victim = player(*world, 1, 2, "Victim");
+        world->registry.get(killer)->position = {0.0f, 0.0f, 0.0f};
+        world->registry.get(victim)->position = {1.0f, 0.0f, 0.0f};
+        Entity hill;
+        hill.kind = EntityKind::Item;
+        hill.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
+        hill.item_id = 6006;
+        hill.has_item_def = true;
+        hill.team = 33;
+        hill.position = {0.0f, 0.0f, 0.0f};
+        hill.bound_radius = 10.0f;
+        hill.alive = true;
+        world->registry.spawn(3, hill);
+        advance_initial_periodic_passes(*world, 1);
+        CHECK(world->match.player(killer)->objective_proximity_mask == 0x02);
+        CHECK(world->match.player(victim)->objective_proximity_mask == 0x02);
+        world->match.record_death(*world, victim, killer);
+        const MatchPlayer *scorer = world->match.player(killer);
+        const int32_t wraps = killer_team == 33 ? 1 : 0;
+        CHECK(scorer->stats[MatchStats::kAttackerNearOwnObjectiveKills] == wraps);
+        CHECK(scorer->stats[MatchStats::kVictimNearAttackerObjectiveKills] == wraps);
+        CHECK(scorer->stats[MatchStats::kVictimNearOwnObjectiveKills] == 0);
+        CHECK(scorer->stats[MatchStats::kAttackerNearVictimObjectiveKills] == 0);
+        CHECK(scorer->stats[MatchStats::kPoints] == 10 + wraps * (4 + 3));
+    }
+}
+
 void test_retail_objective_proximity_scoring_events() {
     {
         auto world = std::make_unique<World>();
@@ -1725,6 +1774,7 @@ int main() {
     test_retail_objective_proximity_scoring_events();
     test_zone_time_split_reads_the_slot_team();
     test_proximity_bits_shift_as_bytes();
+    test_kill_bonus_team_bits_shift_as_dwords();
     test_retail_zone_and_tkoth_win_quirks();
     test_demolition_flag_and_flagball_gameplay();
     test_target_destroyed_shares_through_both_occupant_links();

@@ -1110,7 +1110,6 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	var world := packed.instantiate() as GameWorld
 	var clear := world.get_node("ClearColor") as WorldEnvironment
-	clear.environment = clear.environment.duplicate()
 	var idle_clear := Color(0.01, 0.02, 0.03)
 	clear.environment.background_color = idle_clear
 

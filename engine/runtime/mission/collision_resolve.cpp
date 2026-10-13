@@ -312,13 +312,6 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				? visual_item_id_for_runtime_type(e->item_id, items)
 				: static_cast<int>(e->item_id) + mission::kItemIdOffset;
 		const DefItemDef *def = find_item_def(items, def_id);
-		// entity+0x30 for an organic is its VISUAL def's graphic (the player's
-		// authored visual item), which the item-traits stamp keyed on the
-		// runtime id cannot see [orig: Game_ReloadEntityModelsAndCallbacks
-		// @0x522830 - the pool-0 +0x30 store @0x522CD1, after a player row's
-		// type index takes its visual item; the persistent-bank gate
-		// MapOverlay_RenderAllByLayer @0x5BE6C4].
-		if (def != nullptr && def->graphic[0] != '\0') e->has_graphic_model = true;
 		// The collectors' render model: every entity whose graphic loads carries
 		// its CMDL sphere (the entity-init form, radius 0 without a collision
 		// block), whatever its collision geometry; an entity without one is
@@ -328,6 +321,15 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				def != nullptr && def->graphic[0] != '\0' && deps.models.has_source()
 				? deps.models.model(std::string(def->graphic)).get()
 				: nullptr;
+		// entity+0x30 is what that load returned, null when it failed; for an
+		// organic it is its VISUAL def's graphic (the player's authored visual
+		// item), which the item-traits stamp keyed on the runtime id cannot
+		// see [orig: Game_ReloadEntityModelsAndCallbacks @0x522830 - the
+		// pool-0 load @0x522CB1 and +0x30 store @0x522CD1, after a player
+		// row's type index takes its visual item; EntityDef_LoadModelsAndCallbacks
+		// - the store @0x439FDC; the persistent-bank gate
+		// MapOverlay_RenderAllByLayer @0x5BE6C4].
+		if (def != nullptr) e->has_graphic_model = render_model != nullptr;
 		if (render_model != nullptr) {
 			deps.occlusion.assign_render_model(h, world::collision_projection_sphere_from_3di(
 					*render_model, 0, 0, world::item_def_zero_bbox_center(def->type, def->attrib)));

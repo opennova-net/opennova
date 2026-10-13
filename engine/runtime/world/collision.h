@@ -1139,6 +1139,9 @@ public:
     // it (0 when no proxy names the handle): a client's remote person is a
     // replica row, never a registry entity.
     int32_t wire_person_bound_radius_q16(uint16_t wire_handle) const;
+    // The decoded pool-1 mover's current proxy (null when none names the
+    // handle): the pose and the verified registry twin every trace reads.
+    const WireDynamicCollisionProxy *wire_dynamic_proxy(uint16_t wire_handle) const;
 
     // Segment arbitration shared by authoritative and visual-only projectile
     // loops. The query is read-only: callers must publish/build collision

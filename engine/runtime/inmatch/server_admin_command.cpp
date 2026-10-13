@@ -5,8 +5,8 @@
 #include <net/npwire/ingame_decode.h>   // ChatBroadcast
 #include <net/npwire/ingame_encode.h>   // encode_chat_broadcast
 #include <net/npwire/ingame_message_id.h>
-#include <net/npwire/peer_addr.h>
 #include <net/npwire/session_hello.h>   // DisconnectEvent
+#include <net/novaworld/lobby_vars.h> // parse_host_and_port / resolve_address_without_dns
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/server_spawn.h> // Server_ChangeEntityTeam
 #include <runtime/inmatch/server_tick.h> // Server_StageHostDisconnect
@@ -16,7 +16,6 @@
 #include <runtime/world/world.h>
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <string>
 #include <string_view>
@@ -69,47 +68,34 @@ NapiNPConnection *slot_by_index(NapiNPServerCtx &ctx, int32_t index) {
 	return nullptr;
 }
 
-// Network_ParseHostAndPort's dotted-quad leg: "a.b.c.d:port" (the DNS resolve
-// is a platform primitive; a name that is not a dotted quad resolves nothing).
-bool parse_host_and_port(const std::string &text, PeerAddr &out) {
-	const size_t colon = text.rfind(':');
-	if (colon == std::string::npos) return false;
-	std::array<uint8_t, 4> octets{};
-	size_t octet = 0;
-	uint32_t value = 0;
-	bool digits = false;
-	for (size_t i = 0; i <= colon; ++i) {
-		const char c = i < colon ? text[i] : '.';
-		if (c >= '0' && c <= '9') {
-			value = value * 10u + static_cast<uint32_t>(c - '0');
-			if (value > 255u) return false;
-			digits = true;
-		} else if (c == '.') {
-			if (!digits || octet >= 4) return false;
-			octets[octet++] = static_cast<uint8_t>(value);
-			value = 0;
-			digits = false;
-		} else {
-			return false;
-		}
-	}
-	if (octet != 4) return false;
-	const int32_t port = atol_token(text.substr(colon + 1));
-	if (port < 0 || port > 0xFFFF) return false;
-	out = peer_addr_from_octets(octets, static_cast<uint16_t>(port));
-	return true;
-}
-
-// Server_FindPlayerSlotByNetKeys: the active slot whose connection carries
-// this UDP source [orig: @0x5008B0].
+// Server_FindPlayerSlotByNetKeys: the first active slot whose connection
+// holds the token's address and port, read as Network_ParseHostAndPort does
+// with DNS off (the host before the FIRST ':' through Napi_ResolveAddress, the
+// port the napi literal after it, else 0), the two compared as dwords with
+// the connection's peer address (+0x30) and port (+0x34) over every slot
+// with a connection. The listen host's own slot is its loopback connection
+// at address 0, port 0 (its local client probes and joins its own server at
+// 0:0 through the manager's FIFO), so a token that reads 0.0.0.0 and port 0
+// (a bare "0", or any host inet_addr does not read, with no port) finds it.
+// [orig: CNapiGameSession_HandleServerCommand @0x4D22F0 - the parse
+//  @0x4D245D with DNS off (push ebx @0x4D245B), the lookup @0x4D248E;
+//  Server_FindPlayerSlotByNetKeys @0x5008B0 - slot+4 @0x5008D0, slot+28
+//  @0x5008D6, NapiNPPlayer+0xB8 @0x5008DD, the +0x30 / +0x34 compare
+//  @0x5008E7..0x5008EF; NapiNPProtocol_HandleClientJoin @0x62B750 - the local
+//  flag addr == 0 @0x62BF1C..0x62BF21, the stores @0x62BF28 / @0x62BF2B; the
+//  local client's 0:0 probe @0x629161..0x629170 (its local byte set
+//  @0x62B31F), the reply's source kept @0x62769D / @0x6276A1 and copied to
+//  its +0x30 / +0x34 @0x6263AE..0x6263B7; CNapiNPManager_SendTo's zero
+//  address queues the FIFO with the port @0x61EC59..0x61ECCD]
 NapiNPConnection *slot_by_ip_and_port(NapiNPServerCtx &ctx, const std::string &text) {
-	PeerAddr peer;
-	if (!parse_host_and_port(text, peer)) return nullptr;
+	std::string host;
+	uint32_t port = 0;
+	if (!parse_host_and_port(text, host, port)) return nullptr;
+	const uint32_t address = resolve_address_without_dns(host);
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		if (conn.type != NapiNPConnection::kTypeServerSide) continue;
 		if (conn.phase < ConnectionPhase::PlayerAdded || conn.phase >= ConnectionPhase::Goodbye)
 			continue;
-		if (conn.peer == peer) return &conn;
+		if (conn.peer.ip == address && static_cast<uint32_t>(conn.peer.port) == port) return &conn;
 	}
 	return nullptr;
 }

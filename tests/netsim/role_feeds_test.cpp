@@ -8,8 +8,10 @@
 //  @0x562240; UI_UpdateDeathScreenContent @0x5536a0]
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/effect_pose_index.h>
+#include <runtime/inmatch/loopback_channel.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/role_feeds.h>
+#include <runtime/replication/client_world_materializer.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/world/angle.h>
 
@@ -380,8 +382,10 @@ int main() {
 	// banks hold (transient, persistent, special in that order; a 0x40 slot
 	// skipped), each zone's local BMS facts (team, control) and SpawnZoneList
 	// index (-1 lists as '@' / STRWPNAME000), with the 0x6E wave group's
-	// occupants named through the roster; every other role emits nothing
-	// [orig: UI_UpdateDeathScreenContent @0x553b53..0x553c4e].
+	// occupants named through the roster. A zone with no timer entry lists
+	// whatever its entity's control word holds; the authority's own client
+	// lists the same way by its body's team [orig: UI_UpdateDeathScreenContent
+	// @0x553b53..0x553c4e; the entry gate @0x553bce..0x553bdd].
 	{
 		mission::MissionKernel kernel;
 		kernel.world.registry.configure_pool(2, 8);
@@ -437,8 +441,8 @@ int main() {
 		CHECK(rows.size() == 3); // the other team's zone is not a row, the 0x40 slot is skipped
 		CHECK(rows.size() == 3 && rows[0].index == -1 && rows[0].letter == '@' &&
 				rows[0].name_key == "STRWPNAME000" && rows[0].secured);
-		CHECK(rows.size() == 3 && rows[1].index == 1 && rows[1].letter == 'B' && !rows[1].secured &&
-				rows[1].occupants.empty());
+		CHECK(rows.size() == 3 && rows[1].index == 1 && rows[1].letter == 'B' && rows[1].secured &&
+				rows[1].occupants.empty()); // no entry: its 0x8000 control is never read
 		CHECK(rows.size() == 3 && rows[2].index == 0 && rows[2].letter == 'A' &&
 				rows[2].name_key == "STRWPNAME001" && rows[2].secured);
 		CHECK(rows.size() == 3 && rows[2].wave_countdown == 42 && rows[2].occupants.size() == 2);
@@ -449,10 +453,91 @@ int main() {
 		cs.minimap = replication::ClientMinimapState();
 		CHECK(deploy_zone_rows(jv, reg, rows) && rows.empty());
 		cs.minimap = banks;
-		// The authority's view (the listen host) lists nothing through this feed.
+		// A zone's team is its entity's Team byte as this client holds it: on a
+		// joiner the replica row once a team store lands (here a 0x50 moving
+		// `theirs` to team 0), over the placed team [orig: the team compare
+		// @0x553bb5..0x553bc0; NapiNPClientMsg_TeamAssign @0x4319ee].
+		replication::ClientEntityState retarget;
+		retarget.handle = theirs.packed;
+		retarget.team = 0;
+		retarget.team_known = true;
+		cs.entities.push_back(retarget);
+		CHECK(deploy_zone_rows(jv, reg, rows) && rows.size() == 4 && rows[3].index == 2);
+		// The DEATH map reads the same byte [orig: MapOverlay_DrawView `v12[354]`
+		// @0x5a5ae9].
+		auto map_zone = [](const hud::DeathMapFacts &f,
+								world::EntityHandle h) -> const hud::DeathMapZone * {
+			for (const hud::DeathMapZone &z : f.zones)
+				if (z.handle == h.packed) return &z;
+			return nullptr;
+		};
+		hud::DeathMapFacts map_facts;
+		CHECK(death_map_facts(jv, reg, map_facts));
+		const hud::DeathMapZone *moved = map_zone(map_facts, theirs);
+		CHECK(moved != nullptr && moved->team == 0 && moved->timer_ready);
+		cs.entities.pop_back();
+		CHECK(death_map_facts(jv, reg, map_facts));
+		moved = map_zone(map_facts, theirs);
+		CHECK(moved != nullptr && moved->team == 1); // the placed team again
+		// The authority's view (the listen host, the single player): its own
+		// client's banks, by its own body's team byte, the body marked as self
+		// in a wave group. The zone's own entity team decides, never a 0x6F
+		// entry's mode (the handler stores only +544/+545), and an entry whose
+		// value sits below its limit keeps the zone off the list.
+		// [orig: the team compare @0x553bb5..0x553bc6; NapiNPClientMsg_ZoneTimerValue
+		//  @0x428d60; the entry gate @0x553bce..0x553bdd; the self compare @0x553d64]
+		kernel.world.registry.get(contested)->team = 1;
+		kernel.world.registry.get(secured)->team = 1;
+		kernel.world.registry.configure_pool(0, 4);
+		world::Entity body;
+		body.kind = world::EntityKind::Organic;
+		body.team = 1;
+		kernel.world.cached.local_player = kernel.world.registry.spawn(0, body);
+		replication::LoopbackChannel host_loop;
+		ClientRuntime host_view(host_loop);
+		auto zone_value = [&host_loop](world::EntityHandle h, uint8_t team, int32_t value,
+								  int32_t limit) {
+			std::vector<uint8_t> b = { static_cast<uint8_t>(h.packed),
+				static_cast<uint8_t>(h.packed >> 8), team };
+			for (const int32_t word : { value, limit })
+				for (int shift = 0; shift < 32; shift += 8)
+					b.push_back(static_cast<uint8_t>(static_cast<uint32_t>(word) >> shift));
+			b.insert(b.end(), { 0, 0, 0, 0 }); // rate, +544, +545
+			host_loop.host_send(0x6F, b);
+		};
+		zone_value(contested, 0, 0x8000, 0x10000); // a mode the list never reads
+		zone_value(secured, 0, 0x10000, 0x10000);
+		host_view.Client_ProcessNetworkFrame();
+		replication::ClientState &hs = host_view.state();
+		hs.minimap = banks;
+		SpawnWaveGroup ours;
+		ours.zone_handle = theirs.packed;
+		ours.members = { kernel.world.cached.local_player.packed };
+		hs.spawn_waves.known = true;
+		hs.spawn_waves.value.groups = { ours };
 		RoleView hv;
 		hv.kernel = &kernel;
-		hv.runtime = &runtime;
+		hv.runtime = &host_view;
+		CHECK(deploy_list_team(hv) == 1 && deploy_list_team(jv) == runtime.assigned_team());
+		CHECK(deploy_zone_rows(hv, reg, rows));
+		CHECK(rows.size() == 3); // the team-0 transient zone is not a row
+		CHECK(rows.size() == 3 && rows[0].index == 1 && !rows[0].secured);
+		CHECK(rows.size() == 3 && rows[1].index == 0 && rows[1].secured);
+		CHECK(rows.size() == 3 && rows[2].index == 2 && rows[2].letter == 'C' && rows[2].secured);
+		CHECK(rows.size() == 3 && rows[2].occupants.size() == 1 && rows[2].occupants[0].self);
+		// The authority's DEATH map: each zone's own entity team under 0x6F
+		// entries whose mode names the other team, and the entry's ready gate
+		// [orig: MapOverlay_DrawView `v12[354]` @0x5a5ae9; the entry gate
+		//  @0x5a5b6e..0x5a5b7f].
+		CHECK(death_map_facts(hv, reg, map_facts));
+		const hud::DeathMapZone *taking = map_zone(map_facts, contested);
+		const hud::DeathMapZone *held = map_zone(map_facts, secured);
+		const hud::DeathMapZone *untouched = map_zone(map_facts, theirs);
+		CHECK(taking != nullptr && taking->team == 1 && !taking->timer_ready);
+		CHECK(held != nullptr && held->team == 1 && held->timer_ready);
+		CHECK(untouched != nullptr && untouched->team == 1 && untouched->timer_ready);
+		// Without a replica runtime there is nothing to walk.
+		hv.runtime = nullptr;
 		CHECK(!deploy_zone_rows(hv, reg, rows) && rows.empty());
 		cs.spawn_waves = replication::ClientSpawnWaveStatus();
 		cs.roster[0] = replication::ClientRosterSlot();
@@ -535,6 +620,63 @@ int main() {
 		feed.collect(view, step, {}, {}, 0, changes);
 		CHECK(changes.size() == 1 && changes[0].bms_id == 41 && !changes[0].lighting.interior &&
 				changes[0].lighting.interior_bms == 0 && changes[0].lighting.light_transfer == 0.0f);
+	}
+
+	// The joiner's wire walk takes a decoded row's native twin by the replica
+	// rule (D-NET-676): a header-only world's owned row lends the row its
+	// contained context, and a same-type newcomer spawned at the handle after
+	// that lifetime lends none (the row runs its own blink walk at its decoded
+	// position). Retail keeps one entity per slot, the wire handle naming the
+	// slot's entity [orig: NapiNPClientMsg_EntityDeath @0x42EBC6, the handle's
+	// slot address].
+	{
+		mission::MissionKernel kernel;
+		world::World &w = kernel.world;
+		w.registry.configure_pool(1, 4);
+		w.registry.configure_pool(2, 4);
+		kernel.wire_header_world = true;
+		world::Entity building;
+		building.kind = world::EntityKind::Building;
+		building.item_type = 5;
+		building.has_item_def = true;
+		building.bms_id = 40;
+		building.spawn_origin = world::spawn_origin_pack(2, 0);
+		const world::EntityHandle house = w.registry.spawn(2, building);
+		const uint32_t hit = (static_cast<uint32_t>(house.slot()) << 20) | (3u << 12);
+		ClientRuntime decoded_runtime("LightReuse");
+		replication::ClientEntityState decoded;
+		decoded.handle = world::EntityHandle::make(1, 0).packed;
+		decoded.type_id = 1296;
+		decoded.spawn_revision = 1;
+		decoded.cls = EntityClass::Vehicle;
+		decoded_runtime.state().upsert(decoded.handle) = decoded;
+		replication::ClientWorldMaterializer materializer;
+		materializer.sync(decoded_runtime.state(), w);
+		const world::EntityHandle h{decoded.handle};
+		world::Entity *mine = w.registry.get(h);
+		CHECK(mine != nullptr && materializer.owned(w, h) == mine);
+		if (mine != nullptr) mine->blink_hits[0] = hit;
+		RoleView jv;
+		jv.kernel = &kernel;
+		jv.runtime = &decoded_runtime;
+		jv.joiner = true;
+		jv.materializer = &materializer;
+		EntityLightingFeed feed;
+		const int32_t step[3] = { 0, 0, 65536 * 200 };
+		std::vector<EntityLightingChange> changes;
+		feed.collect(jv, step, {}, {}, 0, changes);
+		CHECK(changes.size() == 1 && changes[0].wire && changes[0].handle == decoded.handle &&
+				changes[0].lighting.interior && changes[0].lighting.interior_bms == 40);
+		w.registry.despawn(h);
+		world::Entity newcomer;
+		newcomer.kind = world::EntityKind::Item;
+		newcomer.item_id = 1296;
+		newcomer.alive = true;
+		newcomer.blink_hits[0] = hit;
+		CHECK(w.registry.spawn_at(h, newcomer) == h && materializer.owned(w, h) == nullptr);
+		feed.collect(jv, step, {}, {}, 0, changes);
+		CHECK(changes.size() == 1 && changes[0].wire && changes[0].handle == decoded.handle &&
+				!changes[0].lighting.interior && changes[0].lighting.interior_bms == 0);
 	}
 
 	// The present-effect pose index over a joiner's decoded rows: a lookup

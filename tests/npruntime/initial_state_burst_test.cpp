@@ -8,6 +8,7 @@
 // mission-text-backed 0x7E briefing pair; only the conditional 0x45 terrain stays absent here.
 
 #include <runtime/inmatch/server_initial_state.h>
+#include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/server_spawn.h>
 
@@ -22,6 +23,7 @@
 #include <net/npwire/ingame_decode.h> // decode_organic_spawn_batch / decode_pool3_sync_batch
 #include <net/npwire/ingame_encode.h> // encode_pool_spawn_batch
 #include <net/npwire/ingame_message_id.h> // s2c::WORLD_STATE_LOAD
+#include <net/npwire/protocol_message.h> // make_protocol_message (the C2S 0x0B)
 #include <runtime/replication/client_replica_pipeline.h> // the joiner's 0x0F apply
 #include <runtime/replication/entity_wire_bridge.h> // build_pool1_spawn_batch
 
@@ -34,6 +36,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdio>
+#include <initializer_list>
 #include <iterator>
 #include <memory>
 #include <string>
@@ -645,6 +648,91 @@ int main_impl() {
 		if (!expect(saw_42 && saw_0f && saw_3e, "phase 8 emits the game-start bundle (0x42/0x0F/0x3E)")) return 1;
 		if (!expect(saw_transient_42,
 		            "phase-8 input flags use retail's one-send transient delivery")) return 1;
+	}
+
+	// --- The game-start bundle opens on the C2S 0x0B alone, for a spectator (whose 0x2F draws
+	// nothing, D-NET-678) and a player alike: the 0x0B receiver tests neither the role nor a
+	// loadout, and a stock client sends it like any peer; but it drops a 0x0B from a slot
+	// whose entity does not exist yet, so only one sent after the entity opens the bundle
+	// [orig: Game_StartMission @0x52624B; NapiNPServerMsg_PlayerJoinRequest @0x51AB10, its
+	// gates @0x51AB21..0x51AB4B; NapiNPServerMsg_HandlePlayerLoadout @0x5157EB..0x5157F2]. ---
+	for (const bool as_spectator : {true, false}) {
+		// Heap-held: main_impl's frame already carries three worlds.
+		const auto w4_owner = std::make_unique<w::World>();
+		w::World &w4 = *w4_owner;
+		w4.registry.configure_pool(0, 16);
+		w4.registry.configure_pool(3, 16);
+		{
+			w::Entity m;
+			m.kind = w::EntityKind::Marker;
+			m.item_id = 6002;
+			m.position = {10.0f, 20.0f, 1.0f};
+			m.item_type_index = 1;
+			m.has_item_def = true;
+			w4.registry.spawn(3, m);
+		}
+		const auto ctx4_owner = std::make_unique<inmatch::NapiNPServerCtx>();
+		inmatch::NapiNPServerCtx &ctx4 = *ctx4_owner;
+		const auto lb4 = std::make_unique<ns::LoopbackChannel>();
+		inmatch::test::bring_up_host(ctx4, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
+		                        /*host_key=*/0, lb4.get());
+		ctx4.world = &w4;
+		ctx4.mission = &mission;
+		inmatch::Server_InitNewRoundState(ctx4);
+		inmatch::Server_ProcessPendingPlayerSpawns(ctx4, w4);
+		inmatch::NapiNPConnection joiner4{};
+		joiner4.type = 1;
+		joiner4.connection_id = inmatch::kFirstJoinerDcb;
+		joiner4.phase = inmatch::ConnectionPhase::PlayerAdded;
+		joiner4.link.spectator = as_spectator;
+		ctx4.np_protocol.connection_list.push_back(joiner4);
+		inmatch::NapiNPConnection &sconn = ctx4.np_protocol.connection_list.back();
+		for (int i = 0; i < 64 && sconn.burst.sync_state != 3; ++i)
+			(void)inmatch::Server_SendInitialGameStateToPlayer(ctx4, sconn, /*now_tick=*/1);
+		if (!expect(sconn.burst.sync_state == 3, "the joiner's player sync parks at state 3"))
+			return 1;
+		sconn.burst.game_state = 9; // the C2S 0x0A advance
+		sconn.burst.sync_state = 4;
+		sconn.burst.world_stream_phase = 0;
+		bool gated = false;
+		for (int i = 0; i < 256 && !gated; ++i) {
+			(void)inmatch::Server_SendInitialGameStateToPlayer(ctx4, sconn, /*now_tick=*/1);
+			gated = sconn.burst.sync_state == 4 && sconn.burst.world_stream_phase == 8;
+		}
+		if (!expect(gated, "the joiner's burst reaches the phase-8 gate")) return 1;
+		// An accepted 0x2F alone opens nothing.
+		sconn.burst.loadout_received = true;
+		bool reached = false;
+		for (int i = 0; i < 16 && !reached; ++i)
+			reached = inmatch::Server_SendInitialGameStateToPlayer(ctx4, sconn, 2).reached_in_game;
+		if (!expect(!reached && !sconn.burst.spawned,
+		            "the bundle does not open on a 0x2F")) return 1;
+		sconn.burst.loadout_received = false;
+		// The C2S 0x0B through the receiver.
+		auto send_0b = [&]() {
+			inmatch::ServerDispatchInputs inputs;
+			inputs.server_ctx = &ctx4;
+			std::vector<opennova::ProtocolMessage> msgs;
+			msgs.push_back(opennova::make_protocol_message(opennova::c2s::MISSION_FILE_STATUS, {0x00}));
+			(void)inmatch::dispatch_session_replies(ctx4.config, sconn, msgs, 3,
+					ctx4.np_protocol.connection_list, &w4, inputs);
+		};
+		// The slot has no entity yet: retail drops its 0x0B, so the bundle stays shut.
+		send_0b();
+		for (int i = 0; i < 16 && !reached; ++i)
+			reached = inmatch::Server_SendInitialGameStateToPlayer(ctx4, sconn, 3).reached_in_game;
+		if (!expect(!reached && !sconn.reply.mission_status_received,
+		            "a 0x0B from a slot without its entity is dropped")) return 1;
+		w::PlayerSpawn body;
+		body.team = 1;
+		sconn.link.owned_entity = w::spawn_remote_player(w4, body);
+		if (!expect(sconn.link.owned_entity.valid(), "the slot's entity spawns")) return 1;
+		send_0b();
+		for (int i = 0; i < 16 && !reached; ++i)
+			reached = inmatch::Server_SendInitialGameStateToPlayer(ctx4, sconn, 4).reached_in_game;
+		if (!expect(reached && sconn.burst.spawned,
+		            as_spectator ? "a spectator's bundle opens on its 0x0B alone"
+		                         : "a player's bundle opens on its 0x0B alone")) return 1;
 	}
 
 	std::printf("OK\n");

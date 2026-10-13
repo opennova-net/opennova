@@ -156,8 +156,8 @@ void sync_counts(bms::File &file) {
 	if (file.group_records.empty()) {
 		file.group_records.resize(bms::kGroupRecordCount);
 	}
-	if (file.layer_records.empty()) {
-		file.layer_records.resize(bms::kLayerRecordCount);
+	if (file.wav_list_records.empty()) {
+		file.wav_list_records.resize(bms::kWavListRecordCount);
 	}
 	// A freshly-resized WaypointRecord has empty padding, so the writer emits a short
 	// (8-byte) record that no longer reparses (parse expects the fixed 136-byte record).

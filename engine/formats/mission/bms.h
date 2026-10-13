@@ -23,7 +23,8 @@ constexpr size_t kHeaderSize = 616;
 constexpr size_t kEntitySize = 0xAC;  // 172 bytes
 constexpr size_t kWaypointRecordSize = 136;
 constexpr size_t kGroupRecordSize = 32;
-constexpr size_t kLayerRecordSize = 20;
+constexpr size_t kWavListRecordSize = 20;
+constexpr size_t kWavListNameSize = 16;
 constexpr size_t kAreaTriggerSize = 32;
 constexpr size_t kEventSize = 24;
 constexpr size_t kTriggerSize = 32;
@@ -32,7 +33,7 @@ constexpr size_t kBoundingBoxSize = 36;
 
 constexpr int kWaypointRecordCount = 128;
 constexpr int kGroupRecordCount = 64;
-constexpr int kLayerRecordCount = 32;
+constexpr int kWavListRecordCount = 32;
 
 // ============================================================================
 // Enumerations
@@ -691,12 +692,12 @@ struct GroupRecord {
     int32_t value;
     char name[kGroupNameSize];
 };
-// A character a quoted .mis value carries as written: no control character, no double quote (both stock
-// readers toggle their quoting at one, with no escape) and no ';' (they cut the line at the first, quoted or
-// not) [orig: sub_10007AB0 @0x10007ab0 (the ';' @0x10007b25, the quote @0x10007b81), misldr.dll;
-// sub_463050 @0x463050 (@0x4630c9, @0x463131), JOTACmed.exe]. The one rule every name the .mis carries keeps:
-// a group's (set_group_name), a variable's (mission_var_names.h) and an event's, area's or path's
-// (mission_mis.h mis_name_allowed).
+// A character a quoted .mis value carries as written: no control character, no double quote (both
+// stock readers toggle their quoting at one, with no escape) and no ';' (they cut the line at the
+// first, quoted or not) [orig: sub_10007AB0 @0x10007ab0 (the ';' @0x10007b25, the quote
+// @0x10007b81), misldr.dll; sub_463050 @0x463050 (@0x4630c9, @0x463131), JOTACmed.exe]. The one
+// rule every name the .mis carries keeps: a group's (set_group_name), a variable's, a wav list
+// slot's and an event's, area's or path's (mission_mis.h mis_name_allowed).
 bool mis_value_char(char ch);
 // Whether the 20 bytes are no name (all zero) or one set_group_name would write: printable characters other
 // than a double quote or a ';' up to the first NUL, zeros after it. Bytes of another tool (a control byte, a
@@ -709,10 +710,17 @@ std::string group_name(const GroupRecord& record);
 // quoted `description` cannot carry.
 bool set_group_name(GroupRecord& record, const std::string& name, std::string& error);
 
-// [orig editor: Med_WriteBmsFile @0x44f920 copies the editor LAYER NAME (a string) into this 20-byte record.
-//  JO reads-and-discards it, but the editor-authored bytes are a fixed-width name, not an opaque payload.]
-struct LayerRecord {
-    char name[kLayerRecordSize];
+// The table after the groups: the original editor's wav list, a record per slot 0..31, each a
+// zeroed record with the slot's file name copied in at +4, 16 bytes of it reaching the file [orig:
+// JOTACmed.exe sub_44F920 @ 0x4509bc..0x450a14: the 32 records @ 0x4509c8, zeroed @
+// 0x4509d2..0x4509e2, the name's strcpy
+// @ 0x4509e8..0x4509f2, written @ 0x4509fb]; its slot's description never reaches it. The game
+// reads the table and drops it [orig: Mission_LoadBMSFile @0x40f4e0, the loop @0x40fc05..0x40fc38].
+// `head` is the record's first four bytes as stored (zero in the original's), kept so a table of
+// any bytes writes back as read.
+struct WavListRecord {
+	uint8_t head[4];
+	char file_name[kWavListNameSize];
 };
 
 // 32-byte area-trigger / restriction-zone record.
@@ -910,16 +918,30 @@ struct ItemAvailabilityEntry {
 // Mission File
 // ============================================================================
 
+// A type-6013 item of a .mis, the original editor's area marker: an area is the box its markers of
+// one zone id span (mission_mis.h, D-MIS-14). Transient: no .bms byte holds one; parse_mis_text
+// keeps them as read, in the .mis's frame, and mis_items_to_bms_frame makes the areas of them again
+// over the terrain.
+struct MisAreaMarker {
+	int32_t zone; // its wpnumber: the area's zone id (1..99 make one)
+	int32_t x, y, z; // its position, in the file's frame (an unlocked one's z relative)
+	int32_t height_lock; // as read, nonzero locked
+	int32_t extra_valmode; // the export keeps an area whose least-x marker's is 0
+	int32_t extra_bheight; // as read
+};
+
 // The frame a File's entity heights are in (mission_mis.h's frames, D-MIS-4). Transient: no .bms
 // byte holds it; write_mis_text reads it.
 enum class MisFrame : uint8_t {
-    // The .bms's: each entity's z absolute (the game's), its mis_extra_bheight the base in the
-    // original editor's (relative) frame. A parsed .bms, a new File, and one
-    // mission::mis_items_to_bms_frame took here.
-    Bms,
-    // The .mis's as written: an unlocked entity's z and base relative to the terrain under it, a
-    // locked one's absolute. parse_mis_text's, until mis_items_to_bms_frame takes it over a terrain.
-    Mis,
+	// The .bms's: each entity's z absolute (the game's), its mis_extra_bheight a locked entity's
+	// base absolute, as the original editor keeps a locked item's through a terrain change
+	// (sub_402770 @ 0x402c9f..0x402ccd), an unlocked one's relative. A parsed .bms, a new File,
+	// and one mission::mis_items_to_bms_frame took here.
+	Bms,
+	// The .mis's as written: an unlocked entity's z and base relative to the terrain under it, a
+	// locked one's absolute. parse_mis_text's, until mis_items_to_bms_frame takes it over a
+	// terrain.
+	Mis,
 };
 
 struct File {
@@ -937,7 +959,7 @@ struct File {
     std::vector<Entity> organics;
     std::vector<WaypointRecord> waypoint_records;
     std::vector<GroupRecord> group_records;
-    std::vector<LayerRecord> layer_records;
+	std::vector<WavListRecord> wav_list_records;
     std::vector<AreaTrigger> area_triggers;
     std::vector<Event> events;
     std::vector<Trigger> triggers;
@@ -952,6 +974,12 @@ struct File {
 
     // The frame the entities' heights are in (MisFrame).
     MisFrame mis_frame = MisFrame::Bms;
+	// A .mis's area markers (MisAreaMarker), each in the .mis's frame as read: parse_mis_text keeps
+	// them; mis_items_to_bms_frame makes the areas of them over a terrain and keeps only those of a
+	// zone the export makes no area of (its least-x marker's extra_valmode not 0); write_mis_text
+	// writes a zone's back where they still make its area (or, such a zone, none). None in a parsed
+	// .bms.
+	std::vector<MisAreaMarker> mis_area_markers;
 
     // Get mission name as string
     std::string get_mission_name() const;
@@ -1035,9 +1063,9 @@ std::string first_differing_section(const File& file, const std::vector<uint8_t>
 // preserve all bytes, padding included. WaypointRecord (inner vectors) compares
 // field-wise. NOTE: if you add a field that write() serializes, add it to equal() too.
 // The Entity byte-compare also covers the .mis-interchange transient fields (mis_extra_bheight /
-// mis_height_lock), and the File's mis_frame is compared too: they never reach .bms bytes, but
-// they do change write_mis_text output, so a difference between them is a real document change
-// for undo/dirty purposes.
+// mis_height_lock), and the File's mis_frame and mis_area_markers are compared too: they never
+// reach .bms bytes, but they do change write_mis_text output, so a difference between them is a
+// real document change for undo/dirty purposes.
 bool equal(const File& a, const File& b);
 
 } // namespace opennova::bms

@@ -563,8 +563,10 @@ struct Entity {
     // byte. The transient projectile class uses the same offset as bounce_count.
     // [orig: WacScript_EntityFireAtTarget @0x4F259E..0x4F25C3]
     uint8_t script_fire_userpoint_counter = 0;
-    // Per-player replicated damage class, indexed by AmmoDef file index. C2S
-    // loadout entry byte 4 writes it; 1 = x0.9, 2 = x1.1, other = x1.
+    // Per-player damage class, indexed by AmmoDef file index; 1 = x0.9, 2 = x1.1,
+    // other = x1. On the authority a player's is its slot's damage-class bytes
+    // (the C2S 0x2F accept's raw stores, inmatch's
+    // NapiNPConnection::ammo_damage_classes), copied at each accept and spawn.
     std::vector<uint8_t> ammo_damage_class;
     // Loadout-derived entity+44 bits 8 (armor) and 16 (parachute).
     // [orig: WeaponSlotTable_LoadAllFromDefs @0x541503..0x5415ba]

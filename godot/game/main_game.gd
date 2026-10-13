@@ -31,8 +31,8 @@ const HudHiddenCaptureWitness := preload("res://game/world/hud_hidden_capture_wi
 const DEV_TOOLS_KEY := KEY_INSERT
 # Shift+F6: pick the entity under the crosshair into the debug pick list
 # (DebugPickSession). Works while playing or with F3 in Interact. Unmodified F6 stays
-# with the retail-configurable binding rows (huddetail's default, shadowing
-# hudcolor's — the retail first-match order, D-CTRL-4).
+# with the retail-configurable binding rows (huddetail's default; hudcolor's is
+# Ctrl+F6, D-CTRL-4).
 const PICK_KEY := KEY_F6
 # ARMORY = the WEAPON screen over LIVE play: the world keeps ticking (the witnessed
 # armory runs with no world-stop leg — and under the listen-server model a pausing

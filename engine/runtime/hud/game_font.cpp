@@ -87,11 +87,20 @@ int GameFont::char_width(uint8_t byte, float scale_x, int tab_width) const {
 	if (glyph == nullptr) {
 		return 0;
 	}
-	const float pad = static_cast<float>(font_->glyph_spacing - 1);
-	return static_cast<int>(std::floor(
-			((glyph->uv.u1 - glyph->uv.u0) * 256.0f + pad) *
-					fnt_design_scale(font_->design_width) * scale_x +
-			0.5f));
+	return glyph_extent(
+			glyph->uv, font_->glyph_spacing, fnt_design_scale(font_->design_width), scale_x);
+}
+
+int glyph_extent(
+		const opennova::fnt::fnt_uv_t &uv, int32_t glyph_spacing, float scale, float scale_x) {
+	// Each step rounds to single precision, in the fold's order (24-bit precision control,
+	// game_font.h).
+	float extent = (uv.u1 - uv.u0) * 256.0f;
+	extent += static_cast<float>(glyph_spacing);
+	extent -= 1.0f;
+	extent *= scale;
+	extent *= scale_x;
+	return static_cast<int>(std::floor(extent + 0.5f));
 }
 
 float GameFont::line_height(float scale_y) const {

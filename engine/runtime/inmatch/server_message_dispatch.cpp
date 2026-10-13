@@ -982,6 +982,10 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		const int32_t heading = pose.found ? pose.heading_bam : motor->heading;
 		world::infantry_respawn_snap(*motor, motor_position, heading, player->health);
 	}
+	// The reset's tail rebuilds every slice at the placed pose (restarting the 17-tick phase),
+	// then the body's list; its resolver pass is D-AI-9's [orig: Entity_ResetToSpawnState
+	// @0x4B9610 - the resolver @0x4B9755, the builder @0x4B98EB, its list @0x4B98F1].
+	if (world.collision != nullptr) world.collision->refresh_entity_proximity(world, *player);
 	// [orig: Server_DeployPlayer @0x5178aa]
     if (player->handle == world.cached.local_player && world.local_player_state != nullptr)
         world.local_player_state->reset_for_new_round();
@@ -1439,6 +1443,10 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				world::Entity *loadout_player = (world != nullptr && conn.link.owned_entity.valid())
 						? world->registry.get(conn.link.owned_entity)
 						: nullptr;
+				// A slot with no entity, or a spectator's, is answered with nothing, ahead of
+				// the armory window, the parse and every list send (D-NET-678).
+				// [orig: @0x5157E1..0x5157E5 (slot[0]), @0x5157EB..0x5157F2 (+0x188D7)]
+				if (loadout_player == nullptr || conn.link.spectator) break;
 				// The armory-window gate runs BEFORE the body is parsed: a joined (state-10)
 				// slot whose pre-round latch is clear, whose entity is neither DEAD (0x2)
 				// nor inside an ARMORY zone (0x400000), and no pre-round timer, is answered
@@ -1447,8 +1455,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// the pre-round window and the first post-join/deploy submit (the latch)
 				// bypass it. [orig: NapiNPServerMsg_HandlePlayerLoadout @0x51581c..0x51583e
 				//  -> Server_SendWeaponSlotListToPlayer]
-				if (!conn.link.spectator && is_in_match(conn) &&
-				    !conn.link.preround_loadout_latch && loadout_player != nullptr &&
+				if (is_in_match(conn) && !conn.link.preround_loadout_latch &&
 				    ((loadout_player->flags | loadout_player->engine_flags) &
 				     (world::kEntityFlagDead | world::kEntityFlagArmoryZone)) == 0u &&
 				    world->preround_delay_seconds == 0) {
@@ -1467,35 +1474,32 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// slot list and NO state write — no class stamp, no damage-class table, no
 				// phase-8 gate, no retained body [orig: @0x5158a9 / @0x515fa5, both
 				// `return Server_SendWeaponSlotListToPlayer(player)`].
-				// Retail reaches these sends only with the slot's entity, whose
-				// absence returns ahead of them [orig: @0x5157E1..0x5157E5].
-				if (!conn.link.spectator &&
-				    !loadout_envelope_accepted(req, config.game_type)) {
-					if (loadout_player != nullptr)
-						replies.push_back(make_protocol_message(0x5A, current_weapon_slot_list(conn, world)));
+				if (!loadout_envelope_accepted(req, config.game_type)) {
+					replies.push_back(make_protocol_message(0x5A, current_weapon_slot_list(conn, world)));
 					break;
 				}
 				// The armory-reuse cooldown: a nonzero soldier type is accepted only while
 				// playerSlot+356 has expired or the pre-round timer runs; otherwise the same
 				// current-list re-send. Class 0 skips this test. The per-tick decrement is
 				// tick_respawn_holds. [orig: @0x5158d0 -> @0x515fa5]
-				if (!conn.link.spectator && req.player_class != 0 &&
-				    conn.link.armory_reuse_seconds > 0 &&
-				    (world == nullptr || world->preround_delay_seconds == 0)) {
-					if (loadout_player != nullptr)
-						replies.push_back(make_protocol_message(0x5A, current_weapon_slot_list(conn, world)));
+				if (req.player_class != 0 && conn.link.armory_reuse_seconds > 0 &&
+				    world->preround_delay_seconds == 0) {
+					replies.push_back(make_protocol_message(0x5A, current_weapon_slot_list(conn, world)));
 					break;
 				}
-				const GrantedWeaponLoadout grant = conn.link.spectator
-						? GrantedWeaponLoadout{}
-						: grant_weapon_loadout(req, config.class_allow_mask, armory);
+				const GrantedWeaponLoadout grant =
+						grant_weapon_loadout(req, config.class_allow_mask, armory);
 				// The accepted entries become the slot's loadout buffer, which every
 				// deploy rebuilds the kit from (D-NET-378) [orig: @0x515CBD..0x515D83].
-				if (!conn.link.spectator) {
-					st.loadout_buffer = req;
-					st.loadout_buffer.player_class = grant.reply.avatar_class;
-					st.loadout_buffer_set = true;
-				}
+				st.loadout_buffer = req;
+				st.loadout_buffer.player_class = grant.reply.avatar_class;
+				st.loadout_buffer_set = true;
+				// The accepted class is the slot's class and its PlayerType, at its store and its
+				// list send [orig: the slot store @0x515AA8; @0x515AE2; the
+				// Server_SendWeaponSlotListToPlayer call @0x515F95].
+				conn.slot_class = grant.reply.avatar_class;
+				conn.player_list_type = grant.reply.avatar_class;
+				write_ammo_damage_classes(conn, grant);
 				apply_granted_loadout(conn, grant, armory != nullptr);
 				if (armory != nullptr) {
 					// The accept points the entity's EquippedSlot at the submitted slot and
@@ -1515,45 +1519,26 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					}
 				}
 				replies.push_back(make_protocol_message(s2c::WEAPON_LOADOUT, st.last_loadout_reply));
-				// The accepted class is the slot's PlayerType, at its store and its list send
-				// [orig: @0x515AE2; the Server_SendWeaponSlotListToPlayer call @0x515F95].
-				if (!conn.link.spectator && loadout_player) conn.player_list_type = grant.reply.avatar_class;
 				// Accepted soldier type -> entity+660 playerClass [orig: @0x515ab0] — feeds the
 				// §5.10 field-17 class nibble and the 0x0C/0x18 spawn records for this player.
-				if (loadout_player != nullptr) {
-					world::Entity *pe = loadout_player;
-					pe->player_class = grant.reply.avatar_class;
-					pe->carry_flags = (pe->carry_flags & ~0x18u) | grant.carry_flags;
-					// The fourth accepted byte is copied to the player-slot table at
-					// [ammoDef.index]. Weapon_CalcImpactDamage later interprets 1 as
-					// x0.9 and 2 as x1.1 for person targets.
-					if (armory != nullptr) {
-						pe->ammo_damage_class.assign(world->tables.ammo.entries.size(), 0);
-						for (const auto &entry : grant.ammo_damage_classes) {
-							const size_t ammo_index = static_cast<size_t>(entry.first);
-							if (ammo_index < pe->ammo_damage_class.size())
-								pe->ammo_damage_class[ammo_index] = entry.second;
-						}
-					}
-				}
+				loadout_player->player_class = grant.reply.avatar_class;
+				loadout_player->carry_flags =
+						(loadout_player->carry_flags & ~0x18u) | grant.carry_flags;
+				// The impact damage's copy of the slot's damage-class bytes (D-NET-508).
+				loadout_player->ammo_damage_class.assign(conn.ammo_damage_classes.begin(),
+						conn.ammo_damage_classes.end());
 				// The accept re-arms the armory cooldown unless the pre-round latch is
-				// set, then clears the latch — class 0 included. A spectator never reaches
-				// retail's accept (its handler returns before the parse), so its empty
-				// grant seeds nothing. [orig: @0x515b96..0x515bb3 — `if (!(byte & 2))
-				//  slot[89] = armoryReuseTime_A38; byte &= 0xFD`]
-				if (!conn.link.spectator) {
-					if (!conn.link.preround_loadout_latch)
-						conn.link.armory_reuse_seconds =
-								static_cast<int32_t>(config.armory_reuse_time);
-					conn.link.preround_loadout_latch = false;
-				}
+				// set, then clears the latch, class 0 included. [orig: @0x515b96..0x515bb3,
+				//  `if (!(byte & 2)) slot[89] = armoryReuseTime_A38; byte &= 0xFD`]
+				if (!conn.link.preround_loadout_latch)
+					conn.link.armory_reuse_seconds = static_cast<int32_t>(config.armory_reuse_time);
+				conn.link.preround_loadout_latch = false;
 				st.loadout_synced = true;
 				conn.burst.loadout_received = true;
 				// Every accepted loadout re-stamps every player's live kit weight
 				// [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515f9d ->
 				//  Server_RecalculateAllPlayerScores @0x5014E0].
-				if (world != nullptr)
-					Server_RecalculateAllPlayerKitWeights(roster, *world);
+				Server_RecalculateAllPlayerKitWeights(roster, *world);
 				break;
 			}
 			case c2s::SPAWN_MENU_REQUEST: // spawn-menu request [orig: NapiNPServerMsg_HandlePlayerSpawnRequest @0x513260]
@@ -1988,7 +1973,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				break;
 			}
 			case c2s::MISSION_FILE_STATUS: // mission-file status report [orig: NapiNPServerMsg_PlayerJoinRequest @0x51AB10]
-				st.mission_status_received = true;
+				Server_HandlePlayerJoinRequest(conn, world);
 				break;
 			case c2s::FIRED_ROUND: { // client fired round -> ammo authority + the S2C 0x0A tag-2 round echo
 				// [orig: NapiNPServerMsg_0x006_ClientFiredRound @0x513310, slot lookup @0x513338]

@@ -286,6 +286,14 @@ public:
   // chain, including Godot's required 2x2/1x1 terminal levels.
   static bool bake_fd_image(const Ref<Image> &p_image);
 
+	// The hold (ADR 0046 S14, E13) over the mask pass's process-wide globals
+	// (FoliageMaskPass::set_globals_held); the game never holds.
+	void set_globals_held(bool p_held) { mask_pass_.set_globals_held(p_held); }
+	bool is_globals_held() const { return mask_pass_.is_globals_held(); }
+	void republish_globals() { mask_pass_.republish_globals(); }
+	static void publish_absent() { FoliageMaskPass::publish_absent(); }
+	static int64_t get_absent_writes() { return FoliageMaskPass::get_absent_writes(); }
+
 protected:
   static void _bind_methods();
   void _notification(int p_what);

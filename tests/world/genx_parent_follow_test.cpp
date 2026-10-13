@@ -101,7 +101,7 @@ int main() {
     clone_seed.item_section_piece = true;
     clone_seed.section_clone = true;
     const EntityHandle clone = w.registry.spawn(1, clone_seed);
-    mission::resolve_item_traits(w, file, {});
+    mission::resolve_item_traits(w, file, {}, nullptr);
     loop_every_region(w, kDish);
     loop_every_region(w, kDeco);
 
@@ -116,7 +116,7 @@ int main() {
     CHECK(w.registry.get(clone)->drop_motion == DropMotion::None);
     // A resweep leaves the callback the ride itself installed.
     w.registry.get(dish)->drop_motion = DropMotion::Fall;
-    mission::resolve_item_traits(w, file, {});
+    mission::resolve_item_traits(w, file, {}, nullptr);
     CHECK(w.registry.get(dish)->drop_motion == DropMotion::Fall);
     w.registry.get(dish)->drop_motion = DropMotion::Ride;
 

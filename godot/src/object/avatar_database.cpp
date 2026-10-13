@@ -107,8 +107,8 @@ void AvatarDatabase::_bind_methods() {
 			DEFVAL(-1));
 	ClassDB::bind_method(D_METHOD("first_character_id", "alignment"),
 			&AvatarDatabase::first_character_id);
-	ClassDB::bind_method(D_METHOD("character_join_profile", "selection"),
-			&AvatarDatabase::character_join_profile, DEFVAL(Dictionary()));
+	ClassDB::bind_method(D_METHOD("character_join_profile", "selection", "in_session"),
+			&AvatarDatabase::character_join_profile);
 
 	BIND_ENUM_CONSTANT(PART_HEAD);
 	BIND_ENUM_CONSTANT(PART_BODY);
@@ -355,7 +355,7 @@ int AvatarDatabase::first_character_id(int alignment) const {
 }
 
 Ref<CharacterJoinProfile> AvatarDatabase::character_join_profile(
-		const Dictionary &p_selection) const {
+		const Dictionary &p_selection, bool p_in_session) const {
 	opennova::inmatch::JoinSideSelection saved[2];
 	const Array sides = p_selection.has("side_profiles")
 			? (Array)p_selection["side_profiles"]
@@ -377,31 +377,33 @@ Ref<CharacterJoinProfile> AvatarDatabase::character_join_profile(
 	}
 	Ref<CharacterJoinProfile> out;
 	out.instantiate();
-	out->assign(opennova::inmatch::join_character_profile(character_registry(), saved));
+	out->assign(opennova::inmatch::join_character_profile(character_registry(), saved,
+			p_in_session));
 	return out;
 }
 
 Ref<CharacterJoinProfile> AvatarDatabase::character_join_profile_from_loadout(
-		const Ref<PlayerSpawnLoadout> &p_loadout) const {
+		const Ref<PlayerSpawnLoadout> &p_loadout, bool p_in_session) const {
 	opennova::inmatch::JoinSideSelection saved[2];
 	if (p_loadout.is_valid()) {
 		p_loadout->fill_join_sides(saved);
 	}
 	Ref<CharacterJoinProfile> out;
 	out.instantiate();
-	out->assign(opennova::inmatch::join_character_profile(character_registry(), saved));
+	out->assign(opennova::inmatch::join_character_profile(character_registry(), saved,
+			p_in_session));
 	return out;
 }
 
 Ref<CharacterJoinProfile> AvatarDatabase::character_join_profile_without_table(
-		const Ref<PlayerSpawnLoadout> &p_loadout) {
+		const Ref<PlayerSpawnLoadout> &p_loadout, bool p_in_session) {
 	opennova::inmatch::JoinSideSelection saved[2];
 	if (p_loadout.is_valid()) {
 		p_loadout->fill_join_sides(saved);
 	}
 	Ref<CharacterJoinProfile> out;
 	out.instantiate();
-	out->assign(opennova::inmatch::join_character_profile_without_table(saved));
+	out->assign(opennova::inmatch::join_character_profile_without_table(saved, p_in_session));
 	return out;
 }
 

@@ -9,13 +9,11 @@
 #include "world/game_world.h"
 
 #include <cmath>
-#include <cstring>
-#include <vector>
 
 #include <base/gameprofile/resource_missing.h>
+#include <formats/mission/bms_edit.h>
 #include <runtime/environment/environment_state.h>
 #include <runtime/mission/mission_sidecars.h>
-#include <runtime/mission/runtime_boot.h>
 
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/file_access.hpp>
@@ -131,7 +129,7 @@ int GameWorld::load_world(const String &p_dir) {
 	clear_mission_tile_info();
 	resource_root_ = resource_root;
 	load_environment(terrain_file_, env_file_);
-	if (!load_terrain(terrain_file_, String(), env_file_)) {
+	if (!load_terrain(terrain_file_, String(), env_file_.get_basename())) {
 		emit_signal(kSignalLoadFailed, vformat("failed to load %s", terrain_file_));
 		return ERR_CANT_OPEN;
 	}
@@ -297,15 +295,12 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	Ref<MissionInfo> mission_info = p_mission->get_info();
 	mission_clock_start_q8_8_ = mission_info->get_start_time();
 	mission_clock_minutes_per_day_ = mission_info->get_minutes_per_day();
-	if (env_ != nullptr) {
-		env_->configure_mission_clock(mission_clock_start_q8_8_, mission_clock_minutes_per_day_);
-	}
+	scene_.configure_mission_clock(mission_clock_start_q8_8_, mission_clock_minutes_per_day_);
 	prepare_world_driven_weather();
 	timeline->end_span();
 	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_TERRAIN));
 	timeline->span("terrain");
-	if (!load_terrain(trn, p_mission->get_tile_set_ref(),
-				p_mission->get_environment_ref().is_empty() ? String() : env_name)) {
+	if (!load_terrain(trn, p_mission->get_tile_set_ref(), p_mission->get_environment_ref())) {
 		emit_signal(kSignalLoadFailed, vformat("failed to load %s", trn));
 		timeline->finish();
 		return ERR_CANT_OPEN;
@@ -429,8 +424,8 @@ void GameWorld::place_mission_objects(const Ref<MissionData> &p_mission) {
 		sim->set_character_avatar_database(avatar_db);
 	}
 	if (avatar_db.is_valid()) {
-		local_character_profile_ =
-				avatar_db->character_join_profile_from_loadout(player_visuals_->spawn_loadout());
+		local_character_profile_ = avatar_db->character_join_profile_from_loadout(
+				player_visuals_->spawn_loadout(), drive_.pending_session());
 	} else {
 		UtilityFunctions::push_warning("GameWorld: Avatars.def unavailable; players draw their item model");
 		if (!resource_root_->has_file("Avatars.def")) {
@@ -441,7 +436,7 @@ void GameWorld::place_mission_objects(const Ref<MissionData> &p_mission) {
 		// The empty table still projects the record's voice override (engine
 		// join_character_profile_without_table).
 		local_character_profile_ = AvatarDatabase::character_join_profile_without_table(
-				player_visuals_->spawn_loadout());
+				player_visuals_->spawn_loadout(), drive_.pending_session());
 	}
 	panm_clock_->sample(get_frame_clock_ms(),
 			static_cast<int64_t>(Engine::get_singleton()->get_process_frames()));
@@ -579,54 +574,25 @@ void GameWorld::load_environment(const String &p_trn_path, const String &p_env_p
 	if (env_ == nullptr) {
 		return;
 	}
-	Ref<EnvFile> env;
-	env.instantiate();
-	// The overcast table the overcast blend cross-fades against: the .trn's
-	// keyframes and overcast.def's after them, as the same load takes them
-	// (an empty one fades toward black, env #41).
-	Ref<EnvFile> overcast;
-	overcast.instantiate();
-	// The terrain's .trn, overcast.def, then the .env over them; a .env that is
-	// not there is skipped and the world runs on the earlier passes over the
-	// engine's defaults (opennova::env::load_mission_env); the load goes on
-	// either way.
-	if (!env->load_mission_environment(resource_root_, p_trn_path, p_env_path, overcast)) {
+	// The load and its post-steps are the scene's (world/world_scene.h); the
+	// game words what it found.
+	const WorldEnvironmentLoad loaded =
+			scene_.load_environment(resource_root_, p_trn_path, p_env_path);
+	if (!loaded.loaded) {
 		UtilityFunctions::push_warning(vformat(
 				"GameWorld: environment '%s' did not load; the engine defaults stand", p_env_path));
-		// One that is not there (one that does not parse is no miss): the log line the editor's Play reads
-		// back into a Problems row on the mission naming it (ADR 0046 DI-27).
-		if (!p_env_path.is_empty() && resource_root_.is_valid() && !resource_root_->has_file(p_env_path.get_file())) {
-			ResourceRoot::report_missing(opennova::gameprofile::resource_kind::kEnvironment, p_env_path.get_file(), String(),
-					"the mission runs on the engine's default environment");
-		}
 	}
-	// MissionEnvironment's setter reloads + pushes shader globals on assignment.
-	env_->set_environment_data(env);
-	env_->set_overcast_data(overcast);
+	// One that is not there (one that does not parse is no miss): the log line the editor's Play
+	// reads back into a Problems row on the mission naming it (ADR 0046 DI-27).
+	if (loaded.environment_missing) {
+		ResourceRoot::report_missing(opennova::gameprofile::resource_kind::kEnvironment,
+				p_env_path.get_file(), String(),
+				"the mission runs on the engine's default environment");
+	}
 	// The engine's env::kOvercastFile carries the name and the witness.
-	if (resource_root_.is_valid() && !resource_root_->has_file(opennova::env::kOvercastFile)) {
+	if (loaded.overcast_missing) {
 		ResourceRoot::report_missing(opennova::gameprofile::resource_kind::kFile, opennova::env::kOvercastFile, String(),
 				"the overcast weather has no table of its own to blend toward");
-	}
-	// GameWorld retains one Weather node across loads. A replacement ENV is
-	// a discrete state change: retail snaps every color block to the new mission
-	// targets instead of easing over from the previous mission's currents.
-	if (weather_ != nullptr) {
-		weather_->resync_colors();
-	}
-	if (celestial_ != nullptr) {
-		celestial_->set_resource_root(resource_root_);
-	}
-	if (precipitation_ != nullptr) {
-		precipitation_->set_resource_root(resource_root_);
-	}
-	// FrameFX's mission texture (the "ffscan" scanlines) draws from the render
-	// CRT stream here, as Render_InitMissionTextures does.
-	if (framefx_ != nullptr) {
-		framefx_->init_mission_textures();
-	}
-	if (environment_cube_ != nullptr) {
-		environment_cube_->force_capture();
 	}
 }
 
@@ -637,22 +603,11 @@ void GameWorld::apply_mission_environment_overrides(const Ref<MissionData> &p_mi
 	if (p_mission.is_null()) {
 		return;
 	}
-	Ref<MissionEnvironmentOverrides> overrides = p_mission->get_environment_overrides();
-	// EnvFile owns the other live-view overrides, while water keeps the BMS
-	// rung distinct so a flagged zero still beats a nonzero TRN height.
-	if (env_ != nullptr) {
-		Ref<EnvFile> env_data = env_->get_environment_data();
-		if (env_data.is_valid()) {
-			env_data->apply_mission_overrides_or_clear(overrides);
-		}
-	}
-	set_mission_water_height_override(overrides->get_water_height_world_or_nan());
+	scene_.apply_mission_overrides(p_mission->get_environment_overrides());
 }
 
 void GameWorld::set_mission_water_height_override(float p_world_height) {
-	if (water_ != nullptr) {
-		water_->set_mission_water_height_override(p_world_height);
-	}
+	scene_.set_mission_water_height_override(p_world_height);
 }
 
 void GameWorld::set_water_world_rendering_enabled(bool p_enabled) {
@@ -668,22 +623,11 @@ void GameWorld::set_weather_world_tick_driven(bool p_enabled) {
 }
 
 void GameWorld::prepare_world_driven_weather() {
-	if (weather_ != nullptr) {
-		weather_->prepare_world_driven();
-	} else {
-		set_weather_world_tick_driven(true);
-	}
+	scene_.prepare_world_driven_weather();
 }
 
 void GameWorld::prepare_autonomous_weather() {
-	if (weather_ != nullptr) {
-		// A world without a mission runs the environment's standalone weather
-		// home: drop any bound Simulation first.
-		weather_->bind_simulation(nullptr);
-		weather_->prepare_autonomous();
-	} else {
-		set_weather_world_tick_driven(false);
-	}
+	scene_.prepare_autonomous_weather();
 }
 
 // The witnessed mission-start environment boundary, phase B of the one host
@@ -737,24 +681,21 @@ void GameWorld::load_mission_tile_info(const String &p_bms_name, const Ref<Missi
 	if (p_mission.is_null()) {
 		return;
 	}
-	std::vector<uint8_t> bytes;
-	const String til_name = opennova::to_gd(opennova::mission::read_placed_tiles(
-			opennova::mission::boot_files_from_index(p_resource_root->native_index()),
-			opennova::to_std(p_bms_name), p_mission->native_file(), bytes));
-	if (til_name.is_empty()) {
+	const opennova::mission::MissionInfo info =
+			opennova::mission::mission_info(p_mission->native_file());
+	MissionTilesRead read;
+	const Ref<TerrainTileInfo> tile_info = read_mission_tiles(
+			p_resource_root, opennova::to_std(p_bms_name), info.terrain, info.environment, &read);
+	if (read.file.empty()) {
 		return;
 	}
-	PackedByteArray til_bytes;
-	til_bytes.resize(static_cast<int64_t>(bytes.size()));
-	std::memcpy(til_bytes.ptrw(), bytes.data(), bytes.size());
-	Ref<TerrainTileInfo> tile_info;
-	tile_info.instantiate();
-	if (tile_info->load_from_bytes(til_bytes) != OK) {
-		UtilityFunctions::push_warning(vformat("GameWorld: failed to parse mission tile file '%s'.", til_name));
+	if (tile_info.is_null()) {
+		UtilityFunctions::push_warning(vformat(
+				"GameWorld: failed to parse mission tile file '%s'.", opennova::to_gd(read.file)));
 		return;
 	}
 	mission_tile_info_ = tile_info;
-	mission_til_bytes_ = til_bytes;
+	mission_til_bytes_ = read.bytes;
 }
 
 bool GameWorld::apply_join_wire_til_if_ready() {
@@ -920,37 +861,22 @@ void GameWorld::clear_mission_tile_info() {
 
 // --- terrain + foliage ---------------------------------------------------------------
 
-bool GameWorld::load_terrain(const String &p_trn_path, const String &p_tile_set, const String &p_env_path) {
+bool GameWorld::load_terrain(
+		const String &p_trn_path, const String &p_tile_set, const String &p_environment) {
 	Ref<TerrainData> data;
 	data.instantiate();
-	data->set_mission_tile_set(p_tile_set);
-	data->set_mission_environment(p_env_path);
+	prepare_terrain_load(**data, p_tile_set, p_environment);
 	if (data->load_from_resource_root(resource_root_, p_trn_path) != OK) {
 		return false;
 	}
 	if (terrain_ == nullptr) {
 		return false;
 	}
-	terrain_->set_tile_info_override(mission_tile_info_);
 	terrain_data_ = data;
-	terrain_->set_terrain_data(data);
-	if (slot_shadow_ != nullptr) {
-		// The shadow anchor march probes this terrain through the engine's
-		// Terrain_GetHeightAtPosition port (the cite lives with the native
-		// SlotShadow planner, godot/src/env/slot_shadow.cpp).
-		slot_shadow_->set_terrain_data(data);
-	}
+	// Every row that reads the terrain takes it (world/world_scene.h), then
+	// the terrain builds whole.
+	scene_.bind_terrain(data, mission_tile_info_);
 	terrain_->build();
-	if (water_ != nullptr) {
-		water_->set_terrain_data(data);
-	}
-	if (environment_cube_ != nullptr) {
-		environment_cube_->set_terrain_data(data);
-	}
-	if (celestial_ != nullptr) {
-		// The glare occlusion rays march this terrain (env #14).
-		celestial_->set_terrain_data(data);
-	}
 	configure_foliage();
 	return true;
 }
@@ -963,8 +889,7 @@ void GameWorld::configure_foliage() {
 	if (dispatcher_ == nullptr || terrain_data_.is_null()) {
 		return;
 	}
-	dispatcher_->configure_for_terrain(resource_root_, terrain_data_, terrain_->get_tile_info_override());
-	const Array diagnostics = dispatcher_->get_slot_diagnostics();
+	const Array diagnostics = scene_.configure_foliage(resource_root_, terrain_data_);
 	for (int64_t i = 0; i < diagnostics.size(); ++i) {
 		const Dictionary diagnostic = diagnostics[i];
 		const String status = diagnostic.get("status", "");

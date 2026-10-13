@@ -1213,17 +1213,22 @@ void Match::score_kill(World &world, EntityHandle killer_handle,
         bonus(MatchStats::kVictimNearNeutralObjectiveKills, 21);
     if ((attacker_mask & 0x01u) != 0)
         bonus(MatchStats::kAttackerNearNeutralObjectiveKills, 22);
-    if (team_mode && attacker_mask > 1u && killer_team < 8u &&
-        (attacker_mask & static_cast<uint8_t>(1u << killer_team)) != 0)
+    // Each team-relative test shifts a dword by the entity team byte, the
+    // count taken mod 32, and tests its low byte, so a team of 32 and up
+    // wraps onto the low bits and 8..31 tests none (D-NET-680).
+    // [orig: `mov cl, [ecx+162h]` / `shl edx, cl` / `test al, dl` - bonus 24
+    //  @0x53057C..0x530589, 25 @0x5305F4..0x530601, 26 @0x530670..0x53067D,
+    //  23 @0x5306EC..0x5306F9]
+    const auto team_bit = [](uint8_t team) {
+        return static_cast<uint8_t>(1u << (team & 31u));
+    };
+    if (team_mode && attacker_mask > 1u && (attacker_mask & team_bit(killer_team)) != 0)
         bonus(MatchStats::kAttackerNearOwnObjectiveKills, 24);
-    if (team_mode && victim_mask > 1u && victim_team < 8u &&
-        (victim_mask & static_cast<uint8_t>(1u << victim_team)) != 0)
+    if (team_mode && victim_mask > 1u && (victim_mask & team_bit(victim_team)) != 0)
         bonus(MatchStats::kVictimNearOwnObjectiveKills, 25);
-    if (team_mode && attacker_mask > 1u && victim_team < 8u &&
-        (attacker_mask & static_cast<uint8_t>(1u << victim_team)) != 0)
+    if (team_mode && attacker_mask > 1u && (attacker_mask & team_bit(victim_team)) != 0)
         bonus(MatchStats::kAttackerNearVictimObjectiveKills, 26);
-    if (team_mode && victim_mask > 1u && killer_team < 8u &&
-        (victim_mask & static_cast<uint8_t>(1u << killer_team)) != 0)
+    if (team_mode && victim_mask > 1u && (victim_mask & team_bit(killer_team)) != 0)
         bonus(MatchStats::kVictimNearAttackerObjectiveKills, 23);
 }
 

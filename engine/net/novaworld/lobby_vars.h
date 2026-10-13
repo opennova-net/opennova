@@ -14,7 +14,8 @@
 // so they become pure pumps (ADR 0010 / .agents/README.md: lobby payloads belong in engine/net/novaworld,
 // sockets + signals in Godot). The host registration var-lists (the GSB row), the NW-S5 client
 // identity "Cookie" set (used for BOTH the UDP verify var-list and the HTTP login cookies), and the
-// UDPNOVAWORLD host-and-port split. Godot-free. The bindings pass their GDScript-set config in.
+// host-and-port split with its DNS-off resolve (the UDPNOVAWORLD entries, the ServerCommand's
+// ByIpAndPort target). Godot-free. The bindings pass their GDScript-set config in.
 namespace opennova {
 
 // The GameText tokens the Host list carries as VALUES (the retail builder resolves them through
@@ -233,7 +234,8 @@ inline constexpr int kNwusidLen = 16;
 // [orig: NovaWorldClient::begin_session identity build]
 std::vector<std::pair<std::string, std::string>> make_lobby_identity_vars(const LobbyIdentityParams &p);
 
-// Split an address string (a gate UDPNOVAWORLD entry) as retail's host-and-port parse does: the
+// Split an address string (a gate UDPNOVAWORLD entry, a ServerCommand's ByIpAndPort token) as
+// retail's host-and-port parse does: the
 // text to its first NUL is the string, and one longer than 511 bytes fails (the 512-byte local
 // copy); the host is the text before its first ':' (all of it with no colon), and the port the
 // napi literal reader's value of the text after that colon (`$7D00`, `0x7D00`, `076400` and
@@ -241,7 +243,27 @@ std::vector<std::pair<std::string, std::string>> make_lobby_identity_vars(const 
 // resolve (Napi_ResolveAddress).
 // [orig: Network_ParseHostAndPort @0x62E200 - the length gate @0x62E260, the copy @0x62E288,
 //  the first ':' @0x62E297, the literal @0x62E2B1 (0 @0x62E2BD), the host to
-//  Napi_ResolveAddress @0x62E2D2]
+//  Napi_ResolveAddress @0x62DF90, called @0x62E2D2]
 bool parse_host_and_port(const std::string &in, std::string &host, uint32_t &port);
+
+// inet_addr, a platform primitive, as the retail game's platform answers it: the Windows
+// ws2_32 call, written out from its measured answers (2026-10-13, Windows 11) so every host
+// reads alike. One to four parts split by '.', each a C integer that starts with a digit
+// (0x / 0X hex with at least one hex digit, a leading 0 octal without 8 or 9, else decimal),
+// read into a 32-bit accumulator that fails only on a step that makes it smaller (so
+// "6966210500" wraps to 159.55.239.196 and "4294967296" fails); every part but the last at
+// most 255 and the last filling the bytes left (a, a.b with a 24-bit b, a.b.c with a 16-bit c,
+// a.b.c.d); the text may end at an ASCII whitespace character, and a lone " " is 0. The
+// address is packed as the platform stores it (the first octet in the lowest-addressed byte,
+// PeerAddr's ip), and 0xFFFFFFFF (INADDR_NONE) is the answer for a text that reads no address,
+// as it is for "255.255.255.255" itself.
+uint32_t platform_inet_addr(const std::string &text);
+
+// Napi_ResolveAddress with DNS off: "255.255.255.255" (any case) is itself, else inet_addr's
+// address, else 0, so a text inet_addr does not read and an all-ones address in any other
+// spelling both resolve to 0.
+// [orig: Napi_ResolveAddress @0x62DF90 - Napi_StrCaseEqual @0x62DF9B..0x62DFA7, inet_addr
+//  @0x62DFAD, its -1 test @0x62DFB6, 0 with DNS off @0x62DFD8]
+uint32_t resolve_address_without_dns(const std::string &host);
 
 } // namespace opennova
