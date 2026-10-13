@@ -12,6 +12,7 @@
 //  "Table render"]
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -35,15 +36,27 @@ inline constexpr uint32_t kTableRowFlagState1Color = 0x1u;
 inline constexpr uint32_t kTableRowFlagColor = 0x4u;
 inline constexpr uint32_t kTableRowHiddenMask = 0xAu;
 
+// The texts (+0) are the row's cell pointers: the insert zeroes them and sets
+// the first, a set writes the one it names, so a cell no write reached is
+// missing (NULL), as is one past the last set cell; the sort answers a
+// missing cell, the draw shows nothing for it: no text (`cell` reads it as
+// empty) and no image (MenuFrameCompiler::table_cell_image_).
+// [orig: CTableWnd_InsertRow @0x641c30 - the zeroing memset @0x641dd5, the
+//  first cell @0x641e4e..0x641ee2; CTableWnd_SetCellText @0x63edf0 - the
+//  cell's text @0x63efb2, NULL for none @0x63ef81; CUITable_Render
+//  @0x6411d0 - a text cell drawn only when set @0x6417c5] (D-MNU-43).
 struct MenuTableRow {
-	std::vector<std::string> cells;
+	std::vector<std::optional<std::string>> cells;
 	std::vector<int32_t> values;
 	int32_t state = kTableRowDefault;
 	uint32_t flags = 0;
 	uint32_t color = 0;
 
 	bool hidden() const { return (flags & kTableRowHiddenMask) != 0; }
+	// The column's text, empty when the cell is missing.
 	const std::string &cell(int column) const;
+	// The column's text, nullptr when the cell is missing.
+	const std::string *cell_text(int column) const;
 	int32_t value(int column) const;
 };
 

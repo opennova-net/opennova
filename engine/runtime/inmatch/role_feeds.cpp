@@ -31,6 +31,11 @@ bool local_death_screen_active(const RoleView &view) {
 	return view.runtime != nullptr && view.runtime->state().death_screen_active;
 }
 
+uint32_t session_rules_word(const RoleView &view) {
+	if (view.joiner && view.runtime != nullptr) return view.runtime->view().mp_attributes();
+	return view.kernel != nullptr ? view.kernel->world.rules.mpattrib : 0u;
+}
+
 bool local_player_dead(const RoleView &view) {
 	if (view.joiner) return view.runtime != nullptr && view.runtime->local_player_dead();
 	return view.kernel != nullptr && view.kernel->local.local_player_dead();
@@ -375,8 +380,10 @@ std::vector<StatScreenRow> end_round_rows(const RoleView &view, int tab) {
 	}
 	// The header's player_index is the recipient's index into the FROZEN
 	// (points-descending) board array, not a connection slot. Retail joins the
-	// board by the row's stored slot id and highlights the row whose slot
-	// matches board[player_index].slot; the same fold works for both roles
+	// board by the row's stored slot id; it highlights, after the sort, the row
+	// whose column-1 value (the slot) is the local player entity's slot id
+	// (fill_stat_results has the witness). Ours flags the row whose slot is
+	// board[player_index].slot (D-MNU-51), the same fold for both roles
 	// because the listen host consumes its own loopback 0x1D.
 	int local_slot = -1;
 	const int8_t header_index = cs.end_round.header.player_index;
@@ -402,12 +409,11 @@ bool collect_friendly_tags(const RoleView &view, std::vector<world::FriendlyTagS
 	world::FriendlyTagPassContext ctx;
 	ctx.death_screen = local_death_screen_active(view);
 	ctx.game_type = view.runtime != nullptr ? view.runtime->game_type() : 0;
-	// The session's rules word: a joiner's S2C 0x64 fixed block (+44), the
-	// host's own mp_attributes. Bit 0x400 = the host option FriendlyTag 0.
-	const uint32_t rules_word = (view.joiner && view.runtime != nullptr)
-			? view.runtime->view().mp_attributes()
-			: view.staged_mp_attributes;
-	ctx.rules_no_friendly_tags = (rules_word & GameConfig::kMpAttribNoFriendlyTag) != 0;
+	// The session's rules word (session_rules_word): a joiner's S2C 0x64 fixed
+	// block (+44), the host's live World word. Bit 0x400 = the host option
+	// FriendlyTag 0 [orig: `test g_RulesFlags, 400h` @0x5A4480].
+	ctx.rules_no_friendly_tags =
+			(session_rules_word(view) & GameConfig::kMpAttribNoFriendlyTag) != 0;
 	// The player walk's slot owner: the listen client's own S2C 0x4C table,
 	// each entry's slot (retail's PlayerSlot +0x24 entity, +0x10 revive
 	// seconds, +0x2C medic request, the +0x14 / +0x20 label) as its loopback
@@ -914,7 +920,7 @@ bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zone
 		// The 0x6E wave group on this zone: its countdown (entity+548) and the
 		// queued members, named through the roster the way retail reads the
 		// member entity's Name (the player entity's name IS the roster name)
-		// [orig: dword_A85BC4[idx] / unk_A85CC4 @0x553cd0..0x553d8b, see world/deploy_screen_feed.h].
+		// [orig: dword_A85BC4[idx] / unk_A85CC4 @0x553ccd..0x553d8e, see world/deploy_screen_feed.h].
 		if (cs.spawn_waves.known) {
 			for (const SpawnWaveGroup &g : cs.spawn_waves.value.groups) {
 				if (g.zone_handle != e->handle.packed) continue;

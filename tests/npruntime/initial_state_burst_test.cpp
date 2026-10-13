@@ -23,6 +23,7 @@
 #include <net/npwire/ingame_encode.h> // encode_pool_spawn_batch
 #include <runtime/replication/entity_wire_bridge.h> // build_pool1_spawn_batch
 
+#include <runtime/mission/mission_text.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/player_spawn.h>
@@ -950,6 +951,82 @@ int pool3_page_start_impl() {
 	std::printf("PASS pool3_page_start\n");
 	return 0;
 }
+
+// The 0x0F location names come from the bring-up's install over the promoted
+// world: each type-2044 marker the spawn admitted names itself by its own
+// record's name_index (TDH_I3A's markers carry 0,1,4,3,5,2 in file order, 0
+// keying LOCATION000 like any other), in spawn order, and a record without a
+// text names itself by its key string. A refused record (its slot left empty)
+// registers no name, so the count skips it (D-NET-511).
+// [orig: Entity_SpawnFromBMSRecord @0x40F17C..0x40F20C; the refusals @0x40EA94..0x40EAC2,
+//  @0x40EAD2..0x40EB05, @0x40EB1C..0x40EB2E;
+//  NetPacket_WriteWorldStateLoad0x0F @0x502D10]
+int location_names_by_name_index_impl() {
+	w::World world;
+	world.registry.configure_pool(0, 16);
+	world.registry.configure_pool(3, 16);
+	opennova::bms::File mission;
+	const auto add_marker = [&](int32_t type_id, int32_t name_index, bool admitted) {
+		opennova::bms::Entity record{};
+		record.type_id = type_id;
+		record.name_index = name_index;
+		mission.markers.push_back(record);
+		w::Entity m;
+		m.kind = w::EntityKind::Marker;
+		m.item_id = type_id;
+		m.position = {static_cast<float>(mission.markers.size()), 20.0f, 1.0f};
+		m.item_type_index = 1; // the trait sweep's row: not an empty slot
+		m.has_item_def = true;
+		// The record's slot is its index; a refused record leaves its slot empty.
+		if (admitted)
+			world.registry.spawn_at(
+					w::EntityHandle::make(3, static_cast<int>(mission.markers.size() - 1)), m);
+	};
+	add_marker(6002, 0, true); // the host player's start
+	for (const int32_t name_index : {0, 1, 4, 3, 5, 2}) add_marker(2044, name_index, true);
+	add_marker(2044, 6, false); // refused at its spawn: no name, no count
+	add_marker(2044, 9, true);  // no [Locations] text: the key string
+	opennova::mission::MissionText text;
+	text.loaded = true;
+	for (int32_t i = 0; i <= 6; ++i) text.location_texts[i] = "Place " + std::to_string(i);
+
+	ns::LoopbackChannel loopback;
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient,
+	                        inmatch::SocketMode::Socketless, /*host_key=*/0, &loopback);
+	ctx.world = &world;
+	inmatch::install_mission_location_names(ctx, world, mission, text);
+	const std::vector<std::string> want = {"Place 0", "Place 1", "Place 4", "Place 3",
+	                                       "Place 5", "Place 2", "LOCATION009"};
+	if (!expect(ctx.mission_location_names == want,
+	            "the install keys each admitted marker by its record's name_index"))
+		return 1;
+	inmatch::Server_InitNewRoundState(ctx);
+	inmatch::Server_ProcessPendingPlayerSpawns(ctx, world);
+	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list[0];
+	const std::vector<uint8_t> *body = nullptr;
+	std::vector<inmatch::InitialStateMessage> emitted;
+	bool reached = false;
+	for (int i = 0; i < 64 && !reached; ++i) {
+		inmatch::InitialStateStep step =
+				inmatch::Server_SendInitialGameStateToPlayer(ctx, conn, /*now_tick=*/1);
+		if (!step.advanced) break;
+		for (auto &m : step.messages) emitted.push_back(m);
+		reached = step.reached_in_game;
+	}
+	for (const inmatch::InitialStateMessage &m : emitted)
+		if (m.tag == 0x0F) body = &m.body;
+	opennova::WorldStateLoad state;
+	if (!expect(reached && body != nullptr &&
+	                    opennova::decode_world_state_load(body->data(), body->size(), state),
+	            "the burst carries a decodable 0x0F"))
+		return 1;
+	if (!expect(state.team_name_count == want.size() && state.team_names == want,
+	            "the 0x0F location names are the admitted markers' name_index texts in spawn order"))
+		return 1;
+	std::printf("PASS location_names_by_name_index\n");
+	return 0;
+}
 } // namespace
 
 int main() {
@@ -957,5 +1034,7 @@ int main() {
 	const int flags = pool1_flags_field_impl();
 	const int bytes = pool1_fixture_bytes_impl();
 	const int pool3 = pool3_page_start_impl();
-	return burst != 0 ? burst : (flags != 0 ? flags : (bytes != 0 ? bytes : pool3));
+	const int locations = location_names_by_name_index_impl();
+	return burst != 0 ? burst
+	                  : (flags != 0 ? flags : (bytes != 0 ? bytes : (pool3 != 0 ? pool3 : locations)));
 }

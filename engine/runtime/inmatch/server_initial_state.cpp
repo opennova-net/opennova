@@ -11,15 +11,13 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include <formats/charattr/charattr.h>            // the restriction properties (the join's 0x41s)
 #include <formats/def/reserved_items.h>           // DEF_TYPE_NAMED_LOCATION (the 0x0F location names)
 #include <formats/mission/bms.h>                  // bms::File, bms::encode_loaded_header_blob (0x0B body)
-#include <runtime/hud/game_text_lookup.h>         // hud::text_key (a location's LOCATION%03i fallback)
-#include <runtime/mission/mission_text.h>         // mission::location_numbers
+#include <runtime/mission/mission_text.h>         // MissionText::location_name (the 0x0F location names)
 #include <runtime/replication/entity_wire_bridge.h>    // build_pool0_organic_batch / build_pool3_spawn_marker_batch
 #include <base/gameprofile/game_type.h>          // is_waypoint_family (the §5.32 selector)
 #include <net/npwire/ingame_encode.h>      // encode_organic_spawn_batch / encode_pool3_sync_batch
@@ -812,17 +810,27 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 	return step;
 }
 
-void install_mission_location_names(NapiNPServerCtx &ctx, const bms::File &mission,
-                                    const std::unordered_map<int32_t, std::string> &location_texts) {
+void install_mission_location_names(NapiNPServerCtx &ctx, const world::World &world,
+                                    const bms::File &mission, const mission::MissionText &text) {
 	ctx.mission_location_names.clear();
-	// LOCATION001.. follow type-2044 marker spawn order; the BMS ttool_index
-	// is zero for both 00TRg markers and is not the text key.
-	for (const int32_t location_index : mission::location_numbers(mission.markers)) {
-		if (location_index == 0) continue;
-		const auto found = location_texts.find(location_index);
-		std::string label = found != location_texts.end()
-				? found->second
-				: hud::text_key(hud::kLocationKey, location_index);
+	// The pool-3 load hands record k to the spawn in record order; each
+	// type-2044 record the spawn admits (its slot is live: a refused record
+	// returns before the type tests and leaves its slot empty) appends the
+	// name its own name_index keys at the count's slot, then counts. So the
+	// list is in spawn order, keyed by the record, not by the count.
+	// [orig: Mission_LoadBMSFile pool-3 loop @0x40FA5B..0x40FAA4;
+	//  Entity_SpawnFromBMSRecord `cmp dword ptr [edi], 7FCh` @0x40F17C /
+	//  @0x40F182, entity+0x280 = g_LocationNameCount @0x40F188..0x40F18F, the
+	//  copy into g_LocationNames[count] @0x40F1C4..0x40F1DF,
+	//  g_LocationNameCount++ @0x40F20C; the refusals, each to the return-0
+	//  epilogue @0x40EB07..0x40EB1B: the attribute gates @0x40EA94..0x40EAC2,
+	//  the def attrib 0x10000 gate @0x40EAD2..0x40EB05, the team-3/4 gate
+	//  @0x40EB1C..0x40EB2E]
+	for (std::size_t slot = 0; slot < mission.markers.size(); ++slot) {
+		if (mission.markers[slot].type_id != def::DEF_TYPE_NAMED_LOCATION) continue;
+		if (world.registry.get(world::EntityHandle::make(3, static_cast<int>(slot))) == nullptr)
+			continue;
+		std::string label = text.location_name(mission.markers[slot].name_index);
 		// Retail stores the resolved text in a 64-byte location-name slot.
 		if (label.size() > 63) label.resize(63);
 		ctx.mission_location_names.push_back(std::move(label));

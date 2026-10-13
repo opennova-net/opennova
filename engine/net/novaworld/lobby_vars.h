@@ -159,9 +159,12 @@ LobbyStatusBlob make_host_status_blob(const HostRegistration &cfg, const HostLob
 
 // The vars whose values changed (or are new) between two snapshots, in `next`'s order: the
 // dirty set a periodic ClientHostUpdate carries. Retail marks an entry dirty only when
-// SetValue sees a different string, and the whole update is skipped when nothing is dirty.
+// SetValue sees a different string (or creates it); whether the update goes at all is decided
+// by the two lists' changed flags, which a removal raises with nothing dirty
+// (ClientSession::send_host_update).
 // [orig: CNapiVarEntry_SetValue @0x630590 (String_ExactMatch gate); NapiStatement_SerializeVarList
-//  @0x4d0660 (`includeAll || node+24`); CPlayerManager_RebuildLists @0x4d4590]
+//  @0x4d0660 (`includeAll || node+24`); CPlayerManager_RebuildLists @0x4d4590 (the flag test
+//  @0x4d45ac)]
 std::vector<ClientVar> dirty_client_vars(const std::vector<ClientVar> &previous,
                                          const std::vector<ClientVar> &next);
 

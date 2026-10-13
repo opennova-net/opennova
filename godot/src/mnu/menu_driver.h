@@ -37,6 +37,7 @@ class ResourceRoot;
 class RtxtStringFile;
 class AvatarDatabase;
 class AvatarComboRow;
+class DeployListRow;
 class EndRoundColumn;
 class EndRoundRow;
 class WeaponDatabase;
@@ -296,10 +297,13 @@ public:
 	int table_sort_column(int p_id) const;
 	// The end-of-round stat table (StatScreen_PopulateStatResultsList, witnessed in
 	// inmatch stat_screen_feed.h): the engine's column set installed (the RESULTLIST authors no HEADER), the
-	// rows with their team colours, the local row selected, then the sort on
-	// the first stat column, descending (inmatch stat_screen_feed.h).
+	// rows with their team colours, the sort on the first stat column,
+	// descending, and the local row selected (inmatch stat_screen_feed.h).
 	void fill_stat_results(int p_id, const TypedArray<EndRoundColumn> &p_columns,
 			const TypedArray<EndRoundRow> &p_rows);
+	// The death screen's SPAWNPOINTS_LIST items from its compiled rows (engine
+	// world deploy_screen_feed.h deploy_list_items), in the menu's code page.
+	void set_deploy_list_items(int p_id, const TypedArray<DeployListRow> &p_rows);
 	// The CTableWnd operations (engine menu_table_row.h).
 	int table_insert_row(int p_id, const String &p_text0, int p_value0, int p_flags,
 			int p_insert_index);

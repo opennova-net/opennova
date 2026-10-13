@@ -3,9 +3,9 @@
 // the bms_edit free functions and written by bms::write, with its string table through rtxt::write.
 // On the minted terrain (Tmap) under the minted environment (synth_full), every record inside mission
 // x, y of -512..512: three items and two buildings whose items.def graphics are models of
-// fixtures/threedi/synth (pump, armory), four path markers and a location marker (def type 2044), two
-// organics (shed), the first named (name_index 1), in group 1 and on waypoint path 1; path 1 over the
-// four markers; two area triggers (zone 20, and zone 30 the mission's boundary); two events that name
+// fixtures/threedi/synth (pump, armory), four path markers and a location marker (def type 2044,
+// name_index 1), two organics (shed), the first named (name_index 1), in group 1 and on waypoint
+// path 1; path 1 over the four markers; two area triggers (zone 20, and zone 30 the mission's boundary); two events that name
 // one another (a SingleIsWithinArea trigger naming an SSN and zone 1 with a ResetEvent action; an
 // Event trigger with a KillGroup action); a four-entry loadout, each with its four strings; the first
 // win and lose conditions naming directive 1. The table holds the keys those records form
@@ -97,7 +97,10 @@ bool build_mission(std::vector<uint8_t> &bytes, std::string &err) {
 	place(doc, EntityKind::Marker, waypoint_item, 200.0f, -200.0f, 0);
 	place(doc, EntityKind::Marker, waypoint_item, 200.0f, 200.0f, 0);
 	place(doc, EntityKind::Marker, waypoint_item, -200.0f, 200.0f, 0);
-	place(doc, EntityKind::Marker, mission::kItemIdOffset + 2044, 0.0f, 0.0f, 0);
+	// The location marker names itself by its record's name_index, so 1 keys the table's
+	// LOCATION001 [orig: Entity_SpawnFromBMSRecord @0x40F196..0x40F1B8] (D-NET-511).
+	const size_t location = place(doc, EntityKind::Marker, mission::kItemIdOffset + 2044, 0.0f, 0.0f, 0);
+	doc.markers[location].name_index = 1;
 	// Two organics (shed, a person): the first named, in group 1 and walking path 1 from its first
 	// stop; the second in group 2.
 	const size_t walker = place(doc, EntityKind::Organic, 106102, 30.0f, -200.0f, 45);

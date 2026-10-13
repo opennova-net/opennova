@@ -15,11 +15,13 @@ namespace opennova::inmatch {
 namespace {
 
 // Server_SendOverlayActionToAlive with the entity's composite for `type`: the
-// S2C 0x34 sound at the entity's position to every ALIVE in-match player
-// (mask 128); the listen host's own copy rides the local slot-sound route.
+// S2C 0x34 sound at the entity's position to every slot in state 6/7 (mask
+// 128, which reads no entity or health, so a dead player hears it too); the
+// listen host's own copy rides the local slot-sound route.
 // [orig: SoundProfile_FindByEntityAndType @0x528180 ->
-//  Server_SendOverlayActionToAlive @0x50A1B0]
-void fan_entity_sound_to_alive(NapiNPServerCtx &ctx, world::World &world,
+//  Server_SendOverlayActionToAlive @0x50A1B0 (mask 0x80 @0x50A1D3);
+//  NapiNPServer_SendFiltered @0x4C893E..0x4C8953]
+void fan_entity_sound_in_match(NapiNPServerCtx &ctx, world::World &world,
 		const world::Entity &source, int type) {
 	char set_name[24] = {};
 	audio::compose_entity_sound_set(source.anim_slot, type, set_name, sizeof(set_name));
@@ -33,11 +35,7 @@ void fan_entity_sound_to_alive(NapiNPServerCtx &ctx, world::World &world,
 	cmd.pos_z = static_cast<int16_t>(world::to_fixed(source.position.z) >> 16);
 	const std::vector<uint8_t> body = encode_play_sound(cmd);
 	for (NapiNPConnection &candidate : ctx.np_protocol.connection_list) {
-		if (!is_in_match(candidate) || candidate.link.transport == nullptr ||
-				!candidate.link.owned_entity.valid())
-			continue;
-		const world::Entity *listener = world.registry.get(candidate.link.owned_entity);
-		if (listener == nullptr || listener->health <= 0) continue; // the mask-128 alive filter
+		if (!active_player_recipient(candidate)) continue;
 		if (candidate.link.mode == replication::TransportMode::Loopback) {
 			world::SoundSlotEvent local;
 			local.source_handle = source.handle.packed;
@@ -97,7 +95,7 @@ void Server_UpdatePlayerBreathTimers(NapiNPServerCtx &ctx, world::World &world) 
 			// [orig: Server_UpdatePlayerBreathTimers @0x50D882..0x50D8CB]
 			const int32_t prev = static_cast<int32_t>(conn.link.underwater_breath_samples);
 			if (prev > 4 && player->anim_slot != 0) {
-				fan_entity_sound_to_alive(ctx, world, *player,
+				fan_entity_sound_in_match(ctx, world, *player,
 						prev <= gasp_after ? audio::kEntitySoundSurfaceBreath
 						                   : audio::kEntitySoundSurfaceGasp);
 			}
@@ -112,7 +110,7 @@ void Server_UpdatePlayerBreathTimers(NapiNPServerCtx &ctx, world::World &world) 
 			//  @0x50D863..0x50D878].
 			if ((samples == limit - 12 || samples == limit - 36 || samples == limit - 24) &&
 					player->anim_slot != 0)
-				fan_entity_sound_to_alive(ctx, world, *player, audio::kEntitySoundWaterGag);
+				fan_entity_sound_in_match(ctx, world, *player, audio::kEntitySoundWaterGag);
 			continue;
 		}
 		// The drowning: the attacker slot (+0x178) cleared, so the death reports

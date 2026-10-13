@@ -228,12 +228,12 @@ public:
 	// come across: the seat/mount table (moved out: it installs before mission
 	// promotion — the wire-header join prewarms it pre-load) and its graphic
 	// sources, the player's mouse settings and scoped aim oscillators, the
-	// declared half of the script's mission-variable bank (the retail bank is
-	// process-global and no load path zeroes the compiler-declared slots, so a
-	// restart or the next mission reads slot n at the previous run's value;
-	// V# and G# start at zero per load, ScriptVarStore::carry_declared_from),
-	// WAC's DO choices and RND (no mission load clears them,
-	// ScriptVarStore::carry_wac_kept_from), and the entity-update counter
+	// script's variable banks and WAC's state (process globals no load
+	// rebuilds: the PreMission pass reads every word at the previous run's
+	// value, then the start's WAC load clears V0..V255, the G bank, the IF
+	// state and the DO counters and seeds DORND, while the declared slots,
+	// the DO choices and RND stay; ScriptVarStore::carry_from), and the
+	// entity-update counter
 	// (process-global and never reset: the next mission's staggers continue
 	// its phase [orig: g_EntityUpdateCounter, whose one writer is
 	// Entity_UpdateAllEntities @0x4C2639]), and the precipitation drawer's

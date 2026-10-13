@@ -13,6 +13,7 @@
 #include "mnu/mnu_document.h"
 #include "resource_index/resource_root.h"
 #include "rtxt/rtxt_string_file.h"
+#include "simulation/deploy_rows.h"
 #include "simulation/hud_view_records.h"
 #include "util/string_convert.h"
 
@@ -20,6 +21,7 @@
 #include <runtime/menu/loadout_screen.h>
 #include <runtime/menu/menu_commands.h>
 #include <runtime/menu/menu_credits.h>
+#include <runtime/world/deploy_screen_feed.h>
 
 #include <godot_cpp/classes/input.hpp>
 #include <godot_cpp/classes/input_event_mouse_button.hpp>
@@ -87,6 +89,22 @@ PackedStringArray to_gd_strings(const std::vector<std::string> &p_values) {
 	return out;
 }
 
+// A menu text for the script: a code-page document's model holds the page's
+// bytes (an authored text, a typed character, a cell or an item the engine
+// fills with roster or gametext bytes, D-MNU-46) and a text a script set its
+// UTF-8 (D-MNU-49), so a read takes the mixed rule, valid UTF-8 as it is and
+// anything else as cp1252 (retail_text_to_utf8), where a UTF-8 parse made each
+// high byte U+FFFD and logged a parse error.
+String menu_text_to_gd(const std::string &p_text) {
+	return to_gd(opennova::retail_text_to_utf8(p_text));
+}
+
+PackedStringArray menu_texts_to_gd(const std::vector<std::string> &p_values) {
+	PackedStringArray out;
+	for (const std::string &value : p_values) out.push_back(menu_text_to_gd(value));
+	return out;
+}
+
 PackedInt32Array to_gd_ints(const std::vector<int> &p_values) {
 	PackedInt32Array out;
 	for (int value : p_values) out.push_back(value);
@@ -144,7 +162,10 @@ public:
 		if (MenuFrame *f = frame()) f->set_widget_text(index, to_gd(text));
 	}
 	void set_widget_items(int index, const std::vector<std::string> &items) override {
-		if (MenuFrame *f = frame()) f->set_widget_items(index, to_gd_strings(items));
+		// The items as the runtime holds them, bytes and all: a round trip
+		// through godot::String parses them as UTF-8, which turns a code-page
+		// byte into U+FFFD (D-MNU-46).
+		if (MenuFrame *f = frame()) f->set_widget_item_texts(index, items);
 	}
 	void set_widget_selection(int index, int selected, int hover, int scroll_row) override {
 		if (MenuFrame *f = frame()) f->set_widget_selection(index, selected, hover, scroll_row);
@@ -442,15 +463,15 @@ void MenuDriver::on_runtime_event_(const opennova::menu::MenuEvent &p_event) {
 			emit_signal("url_requested", to_gd(p_event.text), p_event.flag);
 			break;
 		case Kind::FilterRequested:
-			emit_signal("filter_requested", p_event.id, p_event.value, to_gd(p_event.text),
-					p_event.flag, to_gd(p_event.text2));
+			emit_signal("filter_requested", p_event.id, p_event.value,
+					menu_text_to_gd(p_event.text), p_event.flag, to_gd(p_event.text2));
 			break;
 		case Kind::Sound:
 			play_widget_sound(to_gd(p_event.text2), to_gd(p_event.text));
 			break;
 		case Kind::ValueChanged:
 			emit_signal("widget_value_changed", to_gd(p_event.text), to_gd(p_event.text2),
-					p_event.value, to_gd(p_event.text3));
+					p_event.value, menu_text_to_gd(p_event.text3));
 			break;
 		case Kind::WidgetActivated:
 			emit_signal("widget_activated", p_event.id, to_gd(p_event.text));
@@ -561,19 +582,21 @@ bool MenuDriver::is_widget_checked(int p_id) const { return runtime_.is_widget_c
 void MenuDriver::set_widget_text(int p_id, const String &p_text) {
 	runtime_.set_widget_text(p_id, to_std(p_text));
 }
-String MenuDriver::get_widget_text(int p_id) const { return to_gd(runtime_.get_widget_text(p_id)); }
+String MenuDriver::get_widget_text(int p_id) const {
+	return menu_text_to_gd(runtime_.get_widget_text(p_id));
+}
 void MenuDriver::set_widget_items(int p_id, const PackedStringArray &p_items) {
 	runtime_.set_widget_items(p_id, to_std_strings(p_items));
 }
 PackedStringArray MenuDriver::get_widget_items(int p_id) const {
-	return to_gd_strings(runtime_.get_widget_items(p_id));
+	return menu_texts_to_gd(runtime_.get_widget_items(p_id));
 }
 int MenuDriver::item_count(int p_id) const { return runtime_.item_count(p_id); }
 String MenuDriver::item_text(int p_id, int p_row) const {
-	return to_gd(runtime_.item_text(p_id, p_row));
+	return menu_text_to_gd(runtime_.item_text(p_id, p_row));
 }
 String MenuDriver::item_value(int p_id, int p_row) const {
-	return to_gd(runtime_.item_value(p_id, p_row));
+	return menu_text_to_gd(runtime_.item_value(p_id, p_row));
 }
 TypedArray<MnuActionRow> MenuDriver::widget_actions(int p_id) const {
 	return doc_.is_valid() ? doc_->get_widget_actions(p_id) : TypedArray<MnuActionRow>();
@@ -615,7 +638,7 @@ void MenuDriver::table_add_row(int p_id, const PackedStringArray &p_cells) {
 void MenuDriver::table_clear_rows(int p_id) { runtime_.table_clear_rows(p_id); }
 int MenuDriver::table_row_count(int p_id) const { return runtime_.table_row_count(p_id); }
 String MenuDriver::table_cell_text(int p_id, int p_row, int p_col) const {
-	return to_gd(runtime_.table_cell_text(p_id, p_row, p_col));
+	return menu_text_to_gd(runtime_.table_cell_text(p_id, p_row, p_col));
 }
 void MenuDriver::table_select_row(int p_id, int p_row, bool p_additive) {
 	runtime_.table_select_row(p_id, p_row, p_additive);
@@ -658,49 +681,37 @@ int MenuDriver::table_sort_column(int p_id) const {
 	return runtime_.table_sort_column(p_id);
 }
 
-// The stat RESULTLIST filled the way StatScreen_PopulateStatResultsList fills it (the
-// witness lives at the engine home, inmatch stat_screen_feed.h): the column
-// set-up, the rows with their team colours, the local row selected, the sort.
-// The engine supplies the columns, the rows and the sort constants; the
-// local row is selected before the sort, which carries it.
+// The stat RESULTLIST filled the way StatScreen_PopulateStatResultsList fills it: the
+// engine's fill (inmatch stat_screen_feed.h, where the witness lives) over the
+// records' own values, so the NAME and Squad cells take the roster's bytes.
 void MenuDriver::fill_stat_results(int p_id, const TypedArray<EndRoundColumn> &p_columns,
 		const TypedArray<EndRoundRow> &p_rows) {
-	std::vector<opennova::menu::MenuTableColumn> columns;
+	std::vector<opennova::inmatch::StatScreenColumn> columns;
+	columns.reserve(static_cast<size_t>(p_columns.size()));
 	for (int i = 0; i < p_columns.size(); ++i) {
 		const Ref<EndRoundColumn> column = p_columns[i];
-		if (column.is_null()) continue;
-		opennova::menu::MenuTableColumn c;
-		c.label = to_std(column->get_header());
-		c.width = column->get_width();
-		c.justify = opennova::inmatch::kStatScreenColumnJustify;
-		c.vjustify = opennova::inmatch::kStatScreenColumnVJustify;
-		c.body_justify = c.justify;
-		c.body_vjustify = c.vjustify;
-		// NAME and Squad compare as text; a stat field numerically (init_table_row's
-		// sort argument 0 / 1 @ 0x562346 / 0x56237a / 0x56242b).
-		c.numeric_sort = column->get_field_id() != 0;
-		columns.push_back(std::move(c));
+		if (column.is_valid()) columns.push_back(column->value());
 	}
-	runtime_.table_clear_rows(p_id);
-	runtime_.table_set_columns(p_id, columns);
-	int selected = -1;
+	std::vector<opennova::inmatch::StatScreenRow> rows;
+	rows.reserve(static_cast<size_t>(p_rows.size()));
 	for (int i = 0; i < p_rows.size(); ++i) {
 		const Ref<EndRoundRow> row = p_rows[i];
-		if (row.is_null()) continue;
-		std::vector<std::string> cells{ to_std(row->get_name()), to_std(row->get_squad()) };
-		for (const String &cell : row->get_cells()) cells.push_back(to_std(cell));
-		runtime_.table_add_row(p_id, cells);
-		const int index = runtime_.table_row_count(p_id) - 1;
-		// A team row takes its colour (stat_screen_feed.h); any other keeps the
-		// table's (the feed's white).
-		const uint32_t color = static_cast<uint32_t>(row->get_color());
-		if (color != 0xFFFFFFFFu) runtime_.table_set_row_color(p_id, index, true, color);
-		if (row->get_selected()) selected = index;
+		if (row.is_valid()) rows.push_back(row->value());
 	}
-	if (selected >= 0) runtime_.table_select_row(p_id, selected, false);
-	runtime_.table_set_column_ascending(p_id, opennova::inmatch::kStatScreenSortColumn,
-			opennova::inmatch::kStatScreenSortAscending);
-	runtime_.table_sort_by_column(p_id, opennova::inmatch::kStatScreenSortColumn);
+	opennova::inmatch::fill_stat_results(runtime_, p_id, columns, rows);
+}
+
+// The death screen's SPAWNPOINTS_LIST from the compiled rows: the engine's items
+// (world deploy_screen_feed.h deploy_list_items: the tags stripped, each row in
+// the code page's bytes, an occupant's roster name as the roster holds it).
+void MenuDriver::set_deploy_list_items(int p_id, const TypedArray<DeployListRow> &p_rows) {
+	std::vector<opennova::world::DeployListRow> rows;
+	rows.reserve(static_cast<size_t>(p_rows.size()));
+	for (int i = 0; i < p_rows.size(); ++i) {
+		const Ref<DeployListRow> row = p_rows[i];
+		if (row.is_valid()) rows.push_back(row->value());
+	}
+	runtime_.set_widget_items(p_id, opennova::world::deploy_list_items(rows));
 }
 
 // ---- activation / actions --------------------------------------------------------
@@ -1148,6 +1159,8 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("table_sort_column", "id"), &MenuDriver::table_sort_column);
 	ClassDB::bind_method(D_METHOD("fill_stat_results", "id", "columns", "rows"),
 			&MenuDriver::fill_stat_results);
+	ClassDB::bind_method(D_METHOD("set_deploy_list_items", "id", "rows"),
+			&MenuDriver::set_deploy_list_items);
 	ClassDB::bind_method(D_METHOD("table_insert_row", "id", "text0", "value0", "flags",
 								 "insert_index"),
 			&MenuDriver::table_insert_row, DEFVAL(0), DEFVAL(-1));

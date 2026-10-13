@@ -254,13 +254,18 @@ NapiMessage make_client_host_request(int currently_hosting,
 }
 
 // [orig: CNapiGameSession_SendHostUpdate @ 0x4d3860] — the heartbeat refresh:
-// only the Host and PlayerList var-lists, no params, no Cookie/HostSetup.
-NapiMessage make_client_host_update(const std::vector<ClientVar> &host,
-                                    const std::vector<ClientVar> &player_list) {
+// only the Host and PlayerList var-lists, no params, no Cookie/HostSetup. Each
+// serialize returns before any container for a list that is neither included
+// whole nor flagged changed [orig: NapiStatement_SerializeVarList @0x4d0660:
+// `!includeAll && !list+0x44` @0x4d06ac..0x4d06be; the Host call @0x4d38b0, the
+// PlayerList call @0x4d38c5].
+NapiMessage make_client_host_update(const std::vector<ClientVar> &host, bool write_host,
+                                    const std::vector<ClientVar> &player_list,
+                                    bool write_player_list) {
 	NapiMessage m;
 	m.name = "ClientHostUpdate";
-	m.children.push_back(make_client_var_list("Host", host));
-	m.children.push_back(make_client_var_list("PlayerList", player_list));
+	if (write_host) m.children.push_back(make_client_var_list("Host", host));
+	if (write_player_list) m.children.push_back(make_client_var_list("PlayerList", player_list));
 	return m;
 }
 

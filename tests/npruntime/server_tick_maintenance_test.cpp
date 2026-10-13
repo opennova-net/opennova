@@ -937,6 +937,11 @@ bool check_team_downed_resend() {
 	roster[0].reply.player_slot = 1;
 	roster[1].reply.player_slot = 2;
 	roster[2].reply.player_slot = 3;
+	const uint8_t slot_teams[] = {1, 2, 1}; // +0x1A0, as the bodies'
+	for (size_t i = 0; i < roster.size(); ++i) {
+		roster[i].assigned_team = slot_teams[i];
+		roster[i].assigned_team_valid = true;
+	}
 
 	auto count_downed = [&](ns::UdpSessionTransport &wire, uint8_t expected_state,
 			bool &shape_ok) {
@@ -999,6 +1004,34 @@ bool check_team_downed_resend() {
 	if (!expect(count_downed(mate_wire, 117, mate_shape) == 1 && mate_shape,
 			"the resend repeats every 62 ticks"))
 		return false;
+	// The filter is the victim SLOT's team and each candidate's slot team, no
+	// body read on either side (D-NET-636): a script team write that moves a
+	// body alone [orig: Entity_SetTeamByNetId @0x43C680] changes no recipient.
+	// [orig: `movzx edx, [esi+1A0h]` @0x51E35D -> @0x51E36D;
+	//  NapiNPServer_SendFiltered @0x4C896A..0x4C8977]
+	(void)drain(victim_wire);
+	(void)drain(killer_wire);
+	const auto split_leg = [&](uint8_t victim_body, uint8_t mate_body, uint8_t killer_body,
+			uint8_t expected_state, const char *label) {
+		world.registry.get(victim)->team = victim_body;
+		world.registry.get(teammate)->team = mate_body;
+		world.registry.get(killer)->team = killer_body;
+		for (int i = 0; i < 62; ++i) inmatch::Server_TickUpdate(ctx);
+		const int victim_count = count_downed(victim_wire, expected_state, victim_shape);
+		const int mate_count = count_downed(mate_wire, expected_state, mate_shape);
+		const int killer_count = count_downed(killer_wire, expected_state, killer_shape);
+		return expect(victim_count == 1 && mate_count == 1 && killer_count == 0 &&
+						victim_shape && mate_shape,
+				label);
+	};
+	if (!split_leg(2, 1, 2, 116,
+				"a victim body moved to team 2 still resends to its slot team, not team 2"))
+		return false;
+	if (!split_leg(1, 2, 1, 115,
+				"a split candidate receives by its slot team, not its body's"))
+		return false;
+	world.registry.get(teammate)->team = 1;
+	world.registry.get(killer)->team = 2;
 
 	// A headshot death is never resent.
 	roster[0].link.death_cause_revivable = false;

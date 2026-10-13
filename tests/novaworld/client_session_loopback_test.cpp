@@ -1372,6 +1372,74 @@ void test_reconnect_rehost() {
 	       "rehost: the ServerHostResult re-supplies the GSID");
 }
 
+// A ClientHostUpdate writes a list's container only under includeAll or while the list's
+// changed flag is set (a changed value, a new entry, a removal or a mark since the last
+// update), and goes only when either is; each update clears both flags (D-NET-489).
+// [orig: NapiStatement_SerializeVarList @0x4d0660 (the return @0x4d06b6); CPlayerManager_RebuildLists
+//  @0x4d4590 (the test @0x4d45ac, the clears @0x4d45c2 / @0x4d45cf); CNapiVarEntry_SetValue
+//  @0x6305ce; CNapiVarList_CreateEntry @0x6318a7; NapiLinkedList_RemoveByUserData @0x63086d;
+//  CNapiGameSession_InitHeapsAndSerializeCounter @0x4ce32f / @0x4ce33c]
+void test_host_update_writes_changed_lists() {
+	MiniServer server;
+	ClientSession::Config cfg;
+	cfg.client_index = 0x00000039u;
+	cfg.client_key = 0x39393939u;
+	ClientSession client(cfg);
+	if (!expect(bring_up(server, client), "host update: session reaches Verified")) return;
+	HostRegistration reg;
+	reg.server_name = "Lists Srv";
+	reg.app_id = 1357;
+	std::vector<std::vector<uint8_t>> out;
+	exchange(server, client, sent(client, client.request_hosting(reg, 0)), out);
+	if (!expect(client.host_state() == ClientSession::HostState::Established,
+	            "host update: the host result establishes the hosting")) return;
+	// The lists an update put on the wire, by VarList name, and each one's var count.
+	const auto lists_of = [&](bool queued, std::vector<std::pair<std::string, size_t>> &lists) {
+		lists.clear();
+		const auto datagrams = sent(client, queued);
+		std::vector<NapiMessage> containers;
+		if (!decode_client_statements(datagrams, client.client_scrk(), containers) || containers.size() != 1 ||
+				containers[0].name != "ClientHostUpdate")
+			return false;
+		for (const NapiMessage &list : containers[0].children)
+			lists.emplace_back(field_of(list, "VarList"), list.children.size());
+		std::vector<std::vector<uint8_t>> acked;
+		exchange(server, client, datagrams, acked);
+		return true;
+	};
+	using Lists = std::vector<std::pair<std::string, size_t>>;
+	Lists lists;
+	expect(lists_of(client.send_host_update({{0, "Players", "1"}}, {}), lists) &&
+	               lists == Lists{{"Host", 1}, {"PlayerList", 0}},
+	       "host update: the request's marks stand, so the first update writes both lists");
+	expect(!client.send_host_update({{0, "Players", "1"}}, {}),
+	       "host update: nothing changed and nothing marked, so no update goes");
+	expect(lists_of(client.send_host_update({{0, "Players", "2"}}, {}), lists) &&
+	               lists == Lists{{"Host", 1}},
+	       "host update: a changed Host value writes the Host list alone");
+	HostPlayerSlot joiner;
+	joiner.slot = 1;
+	joiner.player_name = "Joiner";
+	joiner.ip_and_port = "10.0.0.9:32768";
+	joiner.team = "1";
+	joiner.type = "8";
+	exchange(server, client, sent(client, client.send_host_player_added(joiner)), out);
+	expect(lists_of(client.send_host_update({}, make_player_list({joiner})), lists) &&
+	               lists == Lists{{"PlayerList", 5}},
+	       "host update: an added player's vars write the PlayerList alone");
+	exchange(server, client, sent(client, client.send_host_player_removed(1)), out);
+	expect(lists_of(client.send_host_update({}, {}), lists) && lists == Lists{{"PlayerList", 0}},
+	       "host update: a removal alone writes the PlayerList's empty container");
+	expect(lists_of(client.send_host_update({}, {}, /*include_all=*/true), lists) &&
+	               lists == Lists{{"Host", 0}, {"PlayerList", 0}},
+	       "host update: includeAll writes both lists whatever changed");
+	expect(!client.send_host_update({}, {}), "host update: the includeAll update cleared both flags");
+	client.mark_host_lists();
+	expect(lists_of(client.send_host_update({}, {}), lists) &&
+	               lists == Lists{{"Host", 0}, {"PlayerList", 0}},
+	       "host update: a mark writes both lists");
+}
+
 // The re-join's 0x42 leg: re-sent every > 3000 ms until 20000 ms from the ServerHello, which
 // drops back to the down state; the schedule's next window opens past hello + 1000 + 20000.
 // [orig: PumpStateMachine case 3 @0x629508..0x629595; Nwu_HandleServerHello @0x627ea1..0x627eb3]
@@ -1697,7 +1765,7 @@ void test_lobby_np_connection() {
 		cfg.client_key = 0x43434343u;
 		ClientSession client(cfg);
 		if (!expect(bring_up(server, client), "0x84: session reaches Verified")) return;
-		const auto update = sent(client, client.queue_statement(make_client_host_update({{0, "Players", "3"}}, {})));
+		const auto update = sent(client, client.queue_statement(make_client_host_update({{0, "Players", "3"}}, true, {}, true)));
 		ProtocolPacketHeader sent_hdr;
 		std::vector<ProtocolMessage> sent_records;
 		if (!expect(update.size() == 1 && decode_client_packet(update[0], server.client_scrk, sent_hdr, sent_records),
@@ -1769,7 +1837,7 @@ void test_lobby_np_connection() {
 		client.handle_datagram(update.data(), update.size(), out);
 		pump_client(client);
 		for (int i = 0; i < 3; ++i)
-			client.queue_statement(make_client_host_update({{0, "Players", std::to_string(i)}}, {}));
+			client.queue_statement(make_client_host_update({{0, "Players", std::to_string(i)}}, true, {}, true));
 		out = pump_client(client);
 		expect(client.state() == ClientSession::State::Closed && client.last_error() == "NP.C:MSGCRE",
 		       "pool: the third node overflows a two-node pool and tears the connection down");
@@ -1800,6 +1868,7 @@ int main() {
 	test_reconnect_redraws_a_zero_client_key();
 	test_client_reads_the_server_hello_as_retail();
 	test_reconnect_rehost();
+	test_host_update_writes_changed_lists();
 	test_reconnect_join_timeout();
 	test_reconnect_takes_a_hello_only_while_probing();
 	test_reconnect_verified_word();
@@ -2029,8 +2098,8 @@ int main() {
 	// @ 0x4d3860]
 	{
 		auto host_upd = make_client_host_update(
-		    /*Host*/      {{0, "Players", "2"}, {0, "ServerName", "OpenNova Host 2"}},
-		    /*PlayerList*/{{0, "PlayerName", "Host"}, {1, "PlayerName", "Joiner"}});
+		    /*Host*/      {{0, "Players", "2"}, {0, "ServerName", "OpenNova Host 2"}}, true,
+		    /*PlayerList*/{{0, "PlayerName", "Host"}, {1, "PlayerName", "Joiner"}}, true);
 		auto d_upd = sent(client, client.queue_statement(host_upd));
 		expect(!d_upd.empty(), "host-update datagram non-empty");
 		auto s_upd = respond_all(server, d_upd);

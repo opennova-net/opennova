@@ -132,6 +132,44 @@ int main() {
 		CHECK(end_round_session_state(joiner).local_team == 0); // the joiner's latch, unset here
 	}
 
+	// The host's HUD gates read the live rules word (g_RulesFlags: the mission-data block's,
+	// as an admin SET moves it), not the shell's staged option word: FriendlyTag 0 (0x400)
+	// set in the world word hides the friendly tags whatever the staged word holds, and the
+	// reverse (D-NET-631).
+	// [orig: HUD_DrawFriendlyTagsPass @0x5A4480 `test g_RulesFlags, 400h`; the FriendlyTags
+	//  SET @0x405EF6 / @0x405F05]
+	{
+		ClientRuntime host_runtime("host");
+		host_runtime.state().death_screen_active = true; // the pass gates admit every team
+		mission::MissionKernel kernel;
+		kernel.world.registry.configure_pool(0, 8);
+		world::Entity local;
+		local.kind = world::EntityKind::Organic;
+		local.team = 1;
+		kernel.world.cached.local_player = kernel.world.registry.spawn(0, local);
+		world::Entity mate;
+		mate.kind = world::EntityKind::Organic;
+		mate.team = 1;
+		mate.has_item_def = true;
+		mate.display_name = "Mate";
+		kernel.world.registry.spawn(0, mate);
+		RoleView host;
+		host.runtime = &host_runtime;
+		host.kernel = &kernel;
+		std::vector<world::FriendlyTagSource> tags;
+		host.staged_mp_attributes = 0;
+		kernel.world.rules.mpattrib = 0x400;
+		CHECK(session_rules_word(host) == 0x400);
+		collect_friendly_tags(host, tags);
+		CHECK(tags.empty());
+		host.staged_mp_attributes = 0x400;
+		kernel.world.rules.mpattrib = 0x4204; // the out-of-session word
+		CHECK(session_rules_word(host) == 0x4204);
+		collect_friendly_tags(host, tags);
+		CHECK(tags.size() == 1 && tags[0].name == "Mate");
+		CHECK(session_rules_word(RoleView{}) == 0);
+	}
+
 	// The breath bar's facts: the replica's 0x0A breath samples and the 0x1D
 	// latch on every role; the breath seconds from a joiner's sub-block-1 copy
 	// or the authority's own WAC named value.

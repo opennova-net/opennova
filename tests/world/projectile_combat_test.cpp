@@ -2909,7 +2909,9 @@ static void test_move_effect_ballistic_leg_ignores_the_water_plane() {
     RoundSpawnParams p;
     p.owner = rig.shooter;
     p.shooter_handle = rig.shooter.packed;
-    p.origin = {0.0f, 0.0f, -5.0f}; // under the plane
+    // Under the plane and above the Z -1.0 floor, which releases a ballistic
+    // round below it [orig: Projectile_UpdatePhysics @0x4EA0C9..0x4EA0D0].
+    p.origin = {0.0f, 0.0f, -0.5f};
     p.dir_yaw_bam = 0;
     p.dir_pitch_bam = 0; // level, along +x, never crossing the plane
     p.ammo_index = 0;
@@ -2920,7 +2922,7 @@ static void test_move_effect_ballistic_leg_ignores_the_water_plane() {
     rig.world.round_sim.tick(rig.world, nullptr);
     CHECK(r.active);
     CHECK(r.move_effect_live); // armed under water: no water term on this leg
-    r.pos = {40.0f, 0.0f, -5.0f};
+    r.pos = {40.0f, 0.0f, -0.5f};
     rig.world.round_sim.tick(rig.world, nullptr);
     CHECK(r.active);
     CHECK(r.move_effect_live); // and never released by the plane
@@ -3443,12 +3445,27 @@ void test_visual_person_hit_on_the_joiners_body_stages_and_rolls_without_consequ
     world.collision = nullptr;
 }
 
-// A round inside a building's BB volume crosses terrain without stopping,
-// then resumes terrain collision after leaving the volume [orig: @0x4EA2F0].
+// A ballistic round's Indoors state is its spawn's: a round an indoors body
+// fires takes both bits and crosses terrain outside any BB, and a round an
+// outdoors body fires stops at the terrain even inside a BB; the pellet fans
+// stamp the +0x114 bit alone, and the Z -1.0 floor spares only that bit
+// [orig: RoundData_SpawnRound @0x4EC830..0x4EC83F; Weapon_SpawnProjectileBurst
+// @0x4EBB05..0x4EBB13; Projectile_UpdatePhysics @0x4EA375 / @0x4EA38A, the
+// floor @0x4EA0C5..0x4EA0D0].
 void test_projectile_indoor_terrain_gate() {
     HeapWorldFixture f;
     World &w = f.world;
+    w.registry.configure_pool(0, 4);
     w.registry.configure_pool(2, 4);
+    Entity indoors_body;
+    indoors_body.kind = EntityKind::Organic;
+    indoors_body.position = {100.0f, 100.0f, 0.0f};
+    indoors_body.flags = kEntityFlagIndoors;
+    const EntityHandle indoors_shooter = w.registry.spawn(0, indoors_body);
+    Entity outdoors_body;
+    outdoors_body.kind = EntityKind::Organic;
+    outdoors_body.position = {120.0f, 100.0f, 0.0f};
+    const EntityHandle outdoors_shooter = w.registry.spawn(0, outdoors_body);
     Entity building;
     building.kind = EntityKind::Building;
     building.item_type = 5;
@@ -3481,22 +3498,192 @@ void test_projectile_indoor_terrain_gate() {
     ammo.velocity = 620;
     ammo.max_age_ticks = 20;
     w.tables.ammo.entries.push_back(ammo);
+    AmmoTableEntry fan = ammo;
+    fan.flags = kAmmoFlagClaymore;
+    fan.spread_count = 3;
+    w.tables.ammo.entries.push_back(fan);
+
+    // Outside the BB, the indoors body's round crosses the terrain and keeps
+    // flying below the Z -1.0 floor on its word bit.
     RoundSpawnParams params;
-    params.origin = {10.0f, -20.0f, 2.0f};
+    params.owner = indoors_shooter;
+    params.origin = {50.0f, -20.0f, 2.0f};
     params.ammo_index = 0;
-    const int slot = w.round_sim.spawn(w, params);
-    CHECK(slot >= 0);
-    if (slot < 0) return;
-    LiveRound &r = w.round_sim.rounds[slot];
-    r.vel = {0.0f, 0.0f, -10.0f};
+    const int indoor_slot = w.round_sim.spawn(w, params);
+    CHECK(indoor_slot >= 0);
+    if (indoor_slot < 0) return;
+    LiveRound &indoor = w.round_sim.rounds[indoor_slot];
+    CHECK(indoor.indoors_word && indoor.indoors_flags);
+    indoor.vel = {0.0f, 0.0f, -10.0f};
     w.round_sim.tick(w, &flat, &cw);
-    CHECK(r.active);
-    CHECK(r.pos.z < 0.0f);
-    // Outside the volume, the same terrain-crossing segment must stop.
-    r.pos = {50.0f, -20.0f, 2.0f};
-    r.vel = {0.0f, 0.0f, -10.0f};
+    CHECK(indoor.active);
+    CHECK(indoor.pos.z < -1.0f);
     w.round_sim.tick(w, &flat, &cw);
-    CHECK(!r.active);
+    CHECK(indoor.active);
+    indoor.active = false;
+    --w.round_sim.active_count;
+
+    // Inside the BB, the outdoors body's round stops at the terrain.
+    params.owner = outdoors_shooter;
+    params.origin = {10.0f, -20.0f, 2.0f};
+    const int outdoor_slot = w.round_sim.spawn(w, params);
+    CHECK(outdoor_slot >= 0);
+    if (outdoor_slot < 0) return;
+    LiveRound &outdoor = w.round_sim.rounds[outdoor_slot];
+    CHECK(!outdoor.indoors_word && !outdoor.indoors_flags);
+    outdoor.vel = {0.0f, 0.0f, -10.0f};
+    w.round_sim.tick(w, &flat, &cw);
+    CHECK(!outdoor.active);
+
+    // A pellet fan stamps the word bit alone.
+    params.owner = indoors_shooter;
+    params.origin = {50.0f, -20.0f, 2.0f};
+    params.ammo_index = 1;
+    const int pellet_slot = w.round_sim.spawn(w, params);
+    CHECK(pellet_slot >= 0);
+    int pellets = 0;
+    for (LiveRound &pellet : w.round_sim.rounds) {
+        if (!pellet.active) continue;
+        ++pellets;
+        CHECK(pellet.indoors_word && !pellet.indoors_flags);
+        pellet.active = false;
+        --w.round_sim.active_count;
+    }
+    CHECK(pellets == 3);
+
+    // With no terrain under it, an outdoors round below Z -1.0 releases ahead
+    // of its sweep; a NoCollide round does not.
+    w.collision = nullptr;
+    params.owner = outdoors_shooter;
+    params.origin = {50.0f, -20.0f, -2.0f};
+    params.ammo_index = 0;
+    const int low_slot = w.round_sim.spawn(w, params);
+    CHECK(low_slot >= 0);
+    if (low_slot < 0) return;
+    LiveRound &low = w.round_sim.rounds[low_slot];
+    low.vel = {1.0f, 0.0f, 0.0f};
+    w.round_sim.tick(w, nullptr);
+    CHECK(!low.active);
+    CHECK(low.pos.x == 50.0f);
+    w.tables.ammo.entries[0].flags = opennova::def::DEF_AMMO_FLAG_NOCOLLIDE;
+    const int nocollide_slot = w.round_sim.spawn(w, params);
+    CHECK(nocollide_slot >= 0);
+    if (nocollide_slot < 0) return;
+    LiveRound &nocollide = w.round_sim.rounds[nocollide_slot];
+    nocollide.vel = {1.0f, 0.0f, 0.0f};
+    w.round_sim.tick(w, nullptr);
+    CHECK(nocollide.active);
+    CHECK(nocollide.pos.x > 50.0f);
+    nocollide.active = false;
+    --w.round_sim.active_count;
+
+    // The deep floor reads no bit: an indoors round whose ray end falls below
+    // Z -16000.0 releases ahead of its sweep, one above it flies on
+    // [orig: Projectile_UpdatePhysics @0x4EA301..0x4EA315].
+    w.tables.ammo.entries[0].flags = 0;
+    params.owner = indoors_shooter;
+    params.origin = {50.0f, -20.0f, -15999.0f};
+    const int deep_slot = w.round_sim.spawn(w, params);
+    CHECK(deep_slot >= 0);
+    if (deep_slot < 0) return;
+    LiveRound &deep = w.round_sim.rounds[deep_slot];
+    CHECK(deep.indoors_word);
+    deep.vel = {0.0f, 0.0f, -2.0f};
+    w.round_sim.tick(w, nullptr);
+    CHECK(!deep.active);
+    CHECK(deep.pos.z == -15999.0f);
+    params.origin = {50.0f, -20.0f, -15000.0f};
+    const int above_slot = w.round_sim.spawn(w, params);
+    CHECK(above_slot >= 0);
+    if (above_slot < 0) return;
+    LiveRound &above = w.round_sim.rounds[above_slot];
+    above.vel = {0.0f, 0.0f, -2.0f};
+    w.round_sim.tick(w, nullptr);
+    CHECK(above.active);
+    CHECK(above.pos.z < -15000.0f);
+}
+
+// The host's Indoors producer for a vehicle walks the vehicle's candidate
+// slice, as retail's does for a def of type 1, not the static building prefix:
+// a vehicle that drives into a BB before its 17-tick slice refresh stays
+// outdoors and its round stops at the terrain; once the slice holds the
+// building, the walk finds the box and the round crosses it.
+// [orig: Entity_BuildProximityList - the def+0x5C read @0x4B3E47, the 1 / 3
+//  tests @0x4B3E53..0x4B3E5F, the candidate walk @0x4B3F3E..0x4B3F93;
+//  RoundData_SpawnRound @0x4EC830; Projectile_UpdatePhysics @0x4EA38A]
+void test_host_vehicle_indoors_walks_its_candidate_slice() {
+    HeapWorldFixture f;
+    World &w = f.world;
+    w.registry.configure_pool(1, 4);
+    w.registry.configure_pool(2, 4);
+    Entity building;
+    building.kind = EntityKind::Building;
+    building.item_type = 5;
+    building.position = {10.0f, -20.0f, 0.0f};
+    building.bound_radius = 30.0f;
+    const auto bh = w.registry.spawn(2, building);
+    Entity vehicle;
+    vehicle.kind = EntityKind::Item;
+    vehicle.has_item_def = true;
+    vehicle.item_type = 1;
+    vehicle.position = {60.0f, -20.0f, 2.0f}; // out of the slice's reach
+    const auto vh = w.registry.spawn(1, vehicle);
+    CollisionModel model;
+    CollisionVolume bb;
+    bb.type = 8;
+    bb.flags = 0; // flags ^ 6 includes the indoor bit
+    bb.min_x = bb.min_y = bb.min_z = -5 * 65536;
+    bb.max_x = bb.max_y = bb.max_z = 5 * 65536;
+    model.volumes.push_back(bb);
+    CollisionSection sec;
+    sec.volume_count = 1;
+    model.sections.push_back(sec);
+    CollisionWorld cw;
+    cw.assign_entity(bh, cw.add_model(std::move(model)));
+    std::vector<uint16_t> heights(512u * 512u, 0);
+    std::vector<int> sectors(256u, 1);
+    opennova::terrain::TerrainHeightField flat;
+    flat.heightmap = heights.data();
+    flat.dim = 512;
+    flat.layout.sector_grid = sectors.data();
+    cw.terrain = &flat;
+    cw.build_initial_tables(w); // the slices: the vehicle's lacks the building
+    w.collision = &cw;
+    AmmoTableEntry ammo;
+    ammo.valid = true;
+    ammo.velocity = 620;
+    ammo.max_age_ticks = 20;
+    w.tables.ammo.entries.push_back(ammo);
+    Entity *v = w.registry.get(vh);
+    CHECK(v != nullptr);
+    if (v == nullptr) return;
+    auto fire_down = [&](bool expect_indoors) {
+        RoundSpawnParams params;
+        params.owner = vh;
+        params.origin = {10.0f, -20.0f, 2.0f};
+        params.ammo_index = 0;
+        const int slot = w.round_sim.spawn(w, params);
+        CHECK(slot >= 0);
+        if (slot < 0) return;
+        LiveRound &r = w.round_sim.rounds[slot];
+        CHECK(r.indoors_word == expect_indoors && r.indoors_flags == expect_indoors);
+        r.vel = {0.0f, 0.0f, -10.0f};
+        w.round_sim.tick(w, &flat, &cw);
+        CHECK(r.active == expect_indoors); // crosses the terrain only indoors
+        if (r.active) {
+            r.active = false;
+            --w.round_sim.active_count;
+        }
+    };
+    // Driven into the box before the slice refresh: the walk finds nothing.
+    v->position = {10.0f, -20.0f, 2.0f};
+    cw.refresh_blink(w, *v);
+    CHECK((v->flags & kEntityFlagIndoors) == 0);
+    fire_down(false);
+    // The slice rebuilt around the vehicle holds the building now.
+    cw.refresh_entity_proximity(w, *v);
+    CHECK((v->flags & kEntityFlagIndoors) != 0);
+    fire_down(true);
 }
 
 void test_guided_round_uses_live_target_ammo_and_pool_lifetime() {
@@ -3707,6 +3894,7 @@ static const NamedTest kTests[] = {
     {"test_jox_tank_round_bullets_class_splashes", test_jox_tank_round_bullets_class_splashes},
     {"test_guided_round_uses_live_target_ammo_and_pool_lifetime", test_guided_round_uses_live_target_ammo_and_pool_lifetime},
     {"test_projectile_indoor_terrain_gate", test_projectile_indoor_terrain_gate},
+    {"test_host_vehicle_indoors_walks_its_candidate_slice", test_host_vehicle_indoors_walks_its_candidate_slice},
     {"test_item_callbacks_receive_geometric_section_on_both_peers", test_item_callbacks_receive_geometric_section_on_both_peers},
     {"test_projectile_stamps_burn_before_death_dispatch", test_projectile_stamps_burn_before_death_dispatch},
     {"test_arming_dud_and_armed_damage", test_arming_dud_and_armed_damage},

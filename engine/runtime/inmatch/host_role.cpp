@@ -230,7 +230,7 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	ctx.mission_text_loaded = bringup.mission_text.loaded;
 	ctx.mission_briefing3 = bringup.mission_text.briefing3;
 	ctx.mission_briefing2 = bringup.mission_text.briefing2;
-	inmatch::install_mission_location_names(ctx, kernel.mission, bringup.mission_text.location_texts);
+	inmatch::install_mission_location_names(ctx, kernel.world, kernel.mission, bringup.mission_text);
 	// A host session's start zeroes the round count [orig: UI_HandleHostSessionStart
 	// @0x556EAB; HostDialog_StartSession @0x5587BD].
 	if (rotation_ != nullptr) rotation_->round_count = 0;
@@ -273,7 +273,7 @@ void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 	ctx.mission_text_loaded = bringup.mission_text.loaded;
 	ctx.mission_briefing3 = bringup.mission_text.briefing3;
 	ctx.mission_briefing2 = bringup.mission_text.briefing2;
-	inmatch::install_mission_location_names(ctx, kernel.mission, bringup.mission_text.location_texts);
+	inmatch::install_mission_location_names(ctx, kernel.world, kernel.mission, bringup.mission_text);
 	inmatch::continue_host_session(state.host_owner, host_cfg);
 	map_change.torn_down = false;
 	if (host_cfg.serve_and_play) make_client_runtime(host_cfg.config.game_type);

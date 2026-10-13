@@ -62,17 +62,16 @@ int32_t whole_units(int32_t q16) {
 void Server_SendDesignationsToPlayer(NapiNPConnection &conn, const ServerDesignationTable &table,
 		const world::World &world) {
 	if (conn.link.transport == nullptr) return;
-	// The recipient slot's team byte [orig: playerSlot[416] @0x517f8a]; the
-	// port's slot team is its player's.
-	uint8_t team = 0;
-	if (const world::Entity *player = world.registry.get(conn.link.owned_entity))
-		team = player->team;
+	// The recipient slot's own team byte, zero-extended, never its body's
+	// (D-NET-636) [orig: `movzx eax, [eax+1A0h]` @0x517f83, pushed @0x517f8a].
+	const int32_t team = conn.assigned_team;
 	MinimapOverlayBatch batch;
 	for (const ServerDesignation &row : table) {
 		if (row.remaining_ticks == 0 || !row.owner.valid()) continue; // [orig: @0x5116c1 / @0x5116cf]
-		// The owner row's team, read live [orig: entity+354 @0x5116dc..0x5116e3].
+		// The owner ENTITY's team, read live and sign-extended [orig: `movsx edx,
+		//  [eax+162h]` @0x5116d5, the compare @0x5116dc..0x5116e3].
 		const world::Entity *owner = world.registry.get(row.owner);
-		if (owner == nullptr || owner->team != team) continue;
+		if (owner == nullptr || static_cast<int8_t>(owner->team) != team) continue;
 		MinimapOverlayBatch::Entry entry;
 		entry.handle = row.owner.packed; // the pool walk @0x5116e9..0x51180a
 		entry.x = static_cast<int16_t>(whole_units(row.point[0])); // @0x51175a

@@ -17,9 +17,14 @@ bool row_in_range(const std::vector<MenuTableRow> &rows, int row) {
 } // namespace
 
 const std::string &MenuTableRow::cell(int column) const {
-	return column >= 0 && column < static_cast<int>(cells.size())
-			? cells[static_cast<size_t>(column)]
-			: kEmpty;
+	const std::string *text = cell_text(column);
+	return text != nullptr ? *text : kEmpty;
+}
+
+const std::string *MenuTableRow::cell_text(int column) const {
+	if (column < 0 || column >= static_cast<int>(cells.size())) return nullptr;
+	const std::optional<std::string> &text = cells[static_cast<size_t>(column)];
+	return text.has_value() ? &*text : nullptr;
 }
 
 int32_t MenuTableRow::value(int column) const {
@@ -31,9 +36,13 @@ int32_t MenuTableRow::value(int column) const {
 int table_insert_row(std::vector<MenuTableRow> &rows, const std::string &text0, int32_t value0,
 		uint32_t flags, int insert_index) {
 	// -1 appends; an index past the count clamps to it [orig: @0x641c3e,
-	// @0x641cc4]. The row is zeroed, column 0's text copied in, the column-0
-	// cell record set from the caller's pair ({0, value}), the caller's word
-	// the flags, the state 0 [orig: @0x641d38..0x641e0f, @0x642002..0x642082].
+	// @0x641cc4]. The row is zeroed, column 0's text copied in (every other
+	// cell missing, D-MNU-43), the column-0 cell record set from the caller's
+	// pair ({0, value}), the caller's word the flags, the state 0 [orig:
+	// @0x641d38..0x641e0f, the first cell @0x641ee2, @0x642002..0x642082].
+	// A column-0 SUBST row whose value matches stands its own text in for
+	// the inserted one in the game (@0x641d3e); that swap is unported
+	// (D-MNU-45).
 	const int count = static_cast<int>(rows.size());
 	int at = insert_index == -1 ? count : insert_index;
 	if (at > count) at = count;
@@ -49,6 +58,8 @@ int table_insert_row(std::vector<MenuTableRow> &rows, const std::string &text0, 
 bool table_set_cell_text(std::vector<MenuTableRow> &rows, int row, int column, int column_count,
 		const std::string &text) {
 	if (!row_in_range(rows, row) || column < 0 || column >= column_count) return false;
+	// The one cell it names; the cells between the row's last one and it stay
+	// missing [orig: @0x63efb2] (D-MNU-43).
 	MenuTableRow &r = rows[static_cast<size_t>(row)];
 	if (static_cast<int>(r.cells.size()) <= column) r.cells.resize(static_cast<size_t>(column) + 1);
 	r.cells[static_cast<size_t>(column)] = text;

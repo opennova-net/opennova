@@ -302,7 +302,74 @@ void test_shroud_reveal_and_refresh() {
 
 } // namespace
 
+// The list's items as the death screen's code-page menu holds them (D-MNU-46):
+// the tags stripped, a member's roster name as its bytes ("J\xF6rg", where the
+// binding's UTF-8 round trip left "J\xEF\xBF\xBDrg"), the embedder's UTF-8 zone
+// name in the page's bytes, and every item the list then holds those bytes.
+// [orig: UI_UpdateDeathScreenContent @0x5536a0 - the member's sprintf @0x553d8e,
+//  the UIList_AddRow call @0x553da5]
+void test_list_items_are_the_page_bytes() {
+	DeployListInput in;
+	in.team_color_tag = "<c4040FF>";
+	in.default_key = "D";
+	in.default_home = "Home Base";
+	DeployZoneRow z = zone(0, true);
+	DeployOccupant self;
+	self.name = "J\xF6rg";
+	self.self = true;
+	DeployOccupant other;
+	other.name = "\xC9mile";
+	z.occupants = { self, other };
+	in.zones = { z };
+	in.zone_name = [](const std::string &) { return std::string("\xC3\x89" "cole"); }; // UTF-8 "Ecole"
+	const std::vector<DeployListRow> rows = build_deploy_rows(in);
+	const std::vector<std::string> items = deploy_list_items(rows);
+	CHECK(items.size() == rows.size() && items.size() == 5);
+	if (items.size() == 5) {
+		// The sort puts zone A before the Default 'D' row; the members follow A.
+		CHECK(items[0] == "'A' \xC9" "cole");
+		CHECK(items[1] == "** J\xF6rg **");
+		CHECK(items[2] == "\xC9mile");
+		CHECK(items[3].empty());
+		CHECK(items[4] == "'D' Home Base");
+	}
+}
+
+// A zone past 'Z' (list index 63) letters its row with the byte 0x80, the
+// game's "%c" of index + 0x41, beside the gametext name's bytes. The builder
+// encodes the embedder's UTF-8 zone name, and the Default row's key and home,
+// before it joins them, so each row is the page's bytes throughout and the
+// list holds "\xC9cole" (one glyph for the E-acute), where joining the UTF-8
+// name to the raw letter left a text that is not UTF-8, which the items took
+// as it was: the name's two UTF-8 bytes.
+// [orig: UI_UpdateDeathScreenContent @0x5536a0 - GameText_GetString("WPNames")
+//  @0x553c10, the letter's add @0x553c16, sprintf("%s'%c' %s")
+//  @0x553c1f..0x553c25; the Default row's sprintf("%s'%s' %s") @0x553b30..0x553b36]
+void test_rows_are_the_page_bytes_past_z() {
+	DeployListInput in = base_input();
+	in.default_home = "Base \xC3\xA9t\xC3\xA9"; // UTF-8 "Base ete", both e acute
+	in.zones = { zone(63, true) };
+	in.zone_name = [](const std::string &) { return std::string("\xC3\x89" "cole"); }; // UTF-8 "Ecole"
+	const std::vector<DeployListRow> rows = build_deploy_rows(in);
+	// The sort: 'D' folds to 0x64, below the letter 0x80, so the Default row
+	// leads; the zone's blank follows its row.
+	CHECK(rows.size() == 3);
+	if (rows.size() == 3) {
+		CHECK(rows[0].value == 0 && rows[0].text == "<c4040FF>'D' Base \xE9t\xE9");
+		CHECK(rows[1].value == 64 && rows[1].text == "<c4040FF>'\x80' \xC9" "cole");
+		CHECK(rows[2].value == -1 && rows[2].text.empty());
+	}
+	const std::vector<std::string> items = deploy_list_items(rows);
+	CHECK(items.size() == 3);
+	if (items.size() == 3) {
+		CHECK(items[0] == "'D' Base \xE9t\xE9");
+		CHECK(items[1] == "'\x80' \xC9" "cole");
+	}
+}
+
 int main() {
+	test_list_items_are_the_page_bytes();
+	test_rows_are_the_page_bytes_past_z();
 	test_shroud_reveal_and_refresh();
 	test_instruction_branches();
 	test_status_text();
