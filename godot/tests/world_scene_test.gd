@@ -154,3 +154,27 @@ func test_clearing_the_terrain_lets_every_row_go_of_it() -> void:
 	WorldSceneTable.clear_terrain(parent)
 	for name in ["Terrain", "Water", "EnvironmentCubeCapture", "Celestial", "FoliageDispatcher"]:
 		assert_null(parent.get_node(name).get_terrain_data(), "%s lets the terrain go" % name)
+
+
+func test_each_world_owns_its_clear_colour_environment() -> void:
+	# Every frame writes the witnessed clear into the ClearColor Environment, and a
+	# world's _ready takes its idle clear from it: a shared sub-resource would hand
+	# a second world the first one's last clear as its idle colour.
+	var packed := load(GAME_WORLD_SCENE) as PackedScene
+	var first := packed.instantiate() as GameWorld
+	add_child_autofree(first)
+	var first_clear := first.get_node("ClearColor") as WorldEnvironment
+	var idle := first_clear.environment.background_color
+	first_clear.environment.background_color = Color(0.7, 0.8, 0.9)
+	var second := packed.instantiate() as GameWorld
+	add_child_autofree(second)
+	var second_clear := second.get_node("ClearColor") as WorldEnvironment
+	assert_ne(
+		second_clear.environment, first_clear.environment, "the Environment is each world's own"
+	)
+	assert_eq(
+		second_clear.environment.background_color,
+		idle,
+		"a second world starts on the scene's clear"
+	)
+	assert_eq(second.get_current_frame_clear_color(), idle, "its idle clear is the scene's")
