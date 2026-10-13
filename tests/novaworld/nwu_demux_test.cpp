@@ -78,6 +78,14 @@ uint8_t opcode_of(const std::vector<uint8_t> &dg) {
 	return nw_decode_inbound(dg.data(), dg.size(), opcode, body) ? opcode : 0;
 }
 
+// The 0x41 `dg` carries, parsed (false when it is none).
+bool hello_of(const std::vector<uint8_t> &dg, ClientHello &out) {
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	return nw_decode_inbound(dg.data(), dg.size(), opcode, body) &&
+	       opcode == SESSION_OPCODE_CLIENT_HELLO && parse_client_hello(body.data(), body.size(), out);
+}
+
 // The server's 0x81 to the session's 0x41 `hello_dg`: its CI and identity echoed, the CI
 // changed by `ci_xor`.
 std::vector<uint8_t> server_hello_to(const std::vector<uint8_t> &hello_dg, uint32_t ci_xor = 0) {
@@ -271,20 +279,35 @@ int main() {
 		for (std::size_t i = 0; i < want.size() && i < lobby.targets().size(); ++i) {
 			CHECK(lobby.targets()[i].ip == want[i].first && lobby.targets()[i].port == want[i].second);
 		}
-		// One 0x41 per target, in order, the port narrowed to 16 bits at the send.
+		// One 0x41 per target, in order, the port narrowed to 16 bits at the send. D-NET-541: each
+		// is that target's own announce, carrying the target's address and port (as kept, before
+		// the narrowing) as EIP / EPN, and no ET; the rest of the hello is the connection's.
+		// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0 - @0x629190..0x62919D;
+		//  NapiNPSession_SendAnnouncePacket @0x61FA00 - EIP @0x61FCF5, EPN @0x61FD23, ET
+		//  @0x61FD51; NapiNPEnumerator_CreateTarget @0x624C30 - @0x624C9F]
 		const std::vector<PeerAddr> sent_to = {at(127, 0, 0, 1, 32000), at(10, 0, 0, 9, 64206),
 		                                       at(127, 0, 0, 2, 64206), PeerAddr{0xFFFFFFFFu, 9},
 		                                       at(127, 0, 0, 3, 1)};
+		auto check_announces = [&](std::size_t first) {
+			ClientHello lead;
+			CHECK(hello_of(session.sent[first].second, lead));
+			for (std::size_t i = 0; i < sent_to.size() && first + i < session.sent.size(); ++i) {
+				const auto &dg = session.sent[first + i];
+				CHECK(dg.first == sent_to[i]);
+				ClientHello hello;
+				CHECK(hello_of(dg.second, hello));
+				CHECK(hello.eip == want[i].first && hello.epn == want[i].second);
+				CHECK(hello.et == 0);
+				CHECK(hello.ci == lead.ci && hello.pn == lead.pn && hello.pg == lead.pg);
+			}
+		};
 		CHECK(session.sent.size() == sent_to.size());
-		for (std::size_t i = 0; i < sent_to.size() && i < session.sent.size(); ++i) {
-			CHECK(session.sent[i].first == sent_to[i]);
-			CHECK(opcode_of(session.sent[i].second) == SESSION_OPCODE_CLIENT_HELLO);
-			CHECK(session.sent[i].second == session.sent[0].second);
-		}
-		// The re-announce goes to every target again.
+		check_announces(0);
+		// The re-announce goes to every target again, each its own announce once more.
 		lobby.tick(10 + SESSION_CONNECT_RETRANSMIT_MS + 1);
 		CHECK(session.sent.size() == 2 * sent_to.size());
 		CHECK(session.sent.back().first == sent_to.back());
+		if (session.sent.size() == 2 * sent_to.size()) check_announces(sent_to.size());
 		CHECK(lobby.nw_peer() == PeerAddr{});
 		// Until then the connection has no server, so its own packets (all but the 0x41) go
 		// nowhere. [orig: CNapiNPManager_SendTo @0x61EC20 - the address test @0x61EC59]

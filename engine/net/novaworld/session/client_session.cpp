@@ -230,8 +230,9 @@ ClientHello make_client_hello(const ClientSession::Config &cfg, std::string_view
 	// explicit cfg.pg when use_default_pg is false. CO/AP/BDAT are read but never validated.
 	hello.pg = cfg.use_default_pg ? pg_for_pn(cfg.pn) : cfg.pg;
 	hello.pg_present = true;
-	// EIP / EPN stay 0, where retail's enumerator writes each target's address and port into the
-	// 0x41 it sends that target (D-NET-520 for the game protocol, D-NET-541 for the NWU lobby).
+	// EIP / EPN stay 0 here: the NWU lobby's enumerator writes each target's address and port
+	// into the 0x41 it sends that target (ClientSession::build_announce); the game protocol's
+	// half is D-NET-520.
 	return hello;
 }
 
@@ -267,9 +268,17 @@ ClientAuth make_client_auth(const ClientSession::Config &cfg, std::string_view c
 }
 
 std::vector<uint8_t> ClientSession::build_client_hello() {
+	return build_announce(0, 0);
+}
+
+// [orig: NapiNPSession_SendAnnouncePacket @0x61FA00 - EIP @0x61FCF5, EPN @0x61FD23, ET
+//  @0x61FD51, each written iff nonzero (client_hello_to_bytes keeps the same gates)]
+std::vector<uint8_t> ClientSession::build_announce(uint32_t eip, uint32_t epn) {
 	last_framed_send_ms_ = clock_ms_;
-	return nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO,
-	                               client_hello_to_bytes(make_client_hello(cfg_, cfg_.co)));
+	ClientHello hello = make_client_hello(cfg_, cfg_.co);
+	hello.eip = eip;
+	hello.epn = epn;
+	return nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 }
 
 std::vector<uint8_t> ClientSession::build_client_auth() {

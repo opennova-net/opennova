@@ -236,6 +236,18 @@ public:
 	//  CNapiNPConnection_PumpStateMachine @0x6292e0 case 3 (the 0x42 re-send)]
 	std::vector<uint8_t> retransmit_stage_datagram();
 
+	// The 0x41 the enumerator sends one probe target: this connection's hello carrying the
+	// target's address and port as EIP / EPN, each written only when nonzero, and no ET (a
+	// target's +0x34 is 0 from its creation). The owner re-addresses every 0x41 the session
+	// hands it (start(), the stage retransmit, the reconnect's re-probe) with one of these per
+	// target. `eip` is the address as the socket layer holds it (PeerAddr's packing), `epn` the
+	// port as the target keeps it (NwuLobbySession::Target::port, before the send narrows it).
+	// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0 - the target walk
+	//  @0x629190..0x62919D pushes +0x14, +0x18 and +0x34 per target;
+	//  NapiNPSession_SendAnnouncePacket @0x61FA00 - EIP @0x61FCF5, EPN @0x61FD23, ET @0x61FD51,
+	//  each iff nonzero; NapiNPEnumerator_CreateTarget @0x624C30 - +0x34 = 0 @0x624C9F]
+	std::vector<uint8_t> build_announce(uint32_t eip, uint32_t epn);
+
 	// Feed one inbound datagram (received off the UDP socket, CRC envelope intact). Appends the
 	// datagrams retail sends from inside its receive pump to `out` — the 0x42 answering a
 	// ServerHello, a teardown's 0x46 burst, the packets a 0x84 asks for — to send at once;

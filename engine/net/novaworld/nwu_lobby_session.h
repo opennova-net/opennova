@@ -96,7 +96,8 @@ public:
 	// the gate worker's and the first connect's retransmits and deadlines.
 	void tick(uint32_t now_ms);
 	// Send one datagram (fires on_sent per send): the announce (a 0x41) to every probe target,
-	// anything else to the connection's server.
+	// each target its own announce carrying that target's address and port as EIP / EPN
+	// (ClientSession::build_announce), anything else to the connection's server.
 	void send(const std::vector<uint8_t> &dg);
 	// One connection send pump now, outside the tick: what the session queued (a stop statement
 	// before the goodbye) goes out at once.

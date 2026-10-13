@@ -335,17 +335,20 @@ void NwuLobbySession::begin_session() {
 }
 
 // The announce (the 0x41) is the enumerator's and goes to every target in list order, one
-// datagram each, at the target's port narrowed to 16 bits; everything else is the connection's.
+// datagram each, at the target's port narrowed to 16 bits, each its own announce carrying that
+// target's address and port as EIP / EPN; everything else is the connection's.
 // [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0 - the target walk @0x629183..0x6291B4
 //  (the NWU enumerator's +0x26 set @0x4D4261), NapiNPSession_SendAnnouncePacket @0x61FA00 per
-//  target (the call @0x62919D) -> CNapiNPManager_SendTo @0x61FDE4; NapiSocket_SendTo's htons
-//  @0x62D040]
+//  target (the call @0x62919D, its address, port and +0x34 pushed @0x629190..0x62919C) ->
+//  CNapiNPManager_SendTo @0x61FDE4; NapiSocket_SendTo's htons @0x62D040]
 void NwuLobbySession::send(const std::vector<uint8_t> &dg) {
 	if (session_socket_ == nullptr || dg.empty()) return;
 	uint8_t opcode = 0;
 	if (stripped_opcode(dg.data(), dg.size(), opcode) && opcode == SESSION_OPCODE_CLIENT_HELLO) {
-		for (const Target &target : targets_)
-			send_one(PeerAddr{target.ip, static_cast<uint16_t>(target.port)}, dg);
+		for (const Target &target : targets_) {
+			const PeerAddr to{target.ip, static_cast<uint16_t>(target.port)};
+			send_one(to, session_ ? session_->build_announce(target.ip, target.port) : dg);
+		}
 		return;
 	}
 	send_one(nw_peer_, dg);
