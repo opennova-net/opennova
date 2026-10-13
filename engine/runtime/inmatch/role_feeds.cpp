@@ -630,6 +630,22 @@ void transform_point22(const world::CollisionMatrix &m, const int32_t in[3], int
 	}
 }
 
+// A spawn zone's Team byte (+0x162) as this client holds it, the byte the
+// DEATH screen's list and map read: the authority's own entity; on a joiner
+// the replica row once a 0x50 / 0x51 team store or a world-stream team byte
+// has landed (retail's non-authority store; the joiner's world entity never
+// takes the 0x50 retarget), else the placed team. A zone timer entry's mode
+// is never the team: the 0x6F handler stores only +544 / +545 on the zone.
+// [orig: NapiNPClientMsg_TeamAssign @0x4319EE; NapiNPClientMsg_HandlePlayerSpawn
+//  @0x431C6D; NapiNPClientMsg_ZoneTimerValue @0x428D60]
+uint8_t zone_team_byte(const RoleView &view, const world::Entity &zone) {
+	if (view.joiner && view.runtime != nullptr) {
+		const replication::ClientEntityState *row = view.runtime->state().find(zone.handle.packed);
+		if (row != nullptr && row->team_known) return row->team;
+	}
+	return zone.team;
+}
+
 } // namespace
 
 bool death_map_facts(const RoleView &view, const world::SpawnZoneRegistry &zones,
@@ -688,15 +704,19 @@ bool death_map_facts(const RoleView &view, const world::SpawnZoneRegistry &zones
 		hud::DeathMapZone zone;
 		zone.handle = e->handle.packed;
 		zone.index = static_cast<int32_t>(world::spawn_zone_index_of(zones, handle));
-		zone.team = e->team;
+		// The zone entity's own Team byte, never a timer entry's mode: the
+		// letter colour, the own-team pulse and labels, and the blip's team
+		// reads all take +0x162 [orig: MapOverlay_DrawView `v12[354]`
+		//  @0x5A5AE9 and @0x5A5C73; sub_597FD0 `entity_ptr[354]` @0x598102].
+		zone.team = zone_team_byte(view, *e);
 		if (runtime != nullptr) {
+			// Any timer entry gates the letter, a window-only one (zeros) as
+			// ready [orig: CProximityList_FindEntryById @0x5A5B6E, `!EntryById ||
+			//  EntryById[9] >= EntryById[10]` @0x5A5B77..0x5A5B7F].
 			const auto live = runtime->zone_states().find(e->handle.packed);
-			if (live != runtime->zone_states().end() && live->second.has_value) {
-				zone.team = static_cast<uint8_t>(live->second.entry.mode_a);
+			if (live != runtime->zone_states().end())
 				zone.timer_ready = !(live->second.entry.value_target <
-						live->second.entry.value_limit);
-			}
-			// The S2C 0x53 mode_b lands at the zone entity's +0x223 and stays
+						live->second.entry.value_limit);			// The S2C 0x53 mode_b lands at the zone entity's +0x223 and stays
 			// [orig: ZoneTimerList_SetEntryWindow @0x537DE0 via the 0x53
 			//  handler @0x428AE0].
 			if (live != runtime->zone_states().end() && live->second.has_window)
@@ -896,23 +916,11 @@ bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zone
 		const world::Entity *e = w.registry.get(handle);
 		if (e == nullptr) continue;
 		const int index = world::spawn_zone_index_of(zones, handle);
-		// Both loops compare the zone entity's own Team byte (+0x162) with the
-		// local entity's, never a timer entry's mode: the 0x6F handler stores
-		// only +544/+545 on the zone. The authority reads its own entity; a
-		// joiner's copy of the byte is its replica row once a 0x50 / 0x51
-		// team store or a world-stream team byte has landed (retail's
-		// non-authority store), else the placed team.
-		// [orig: UI_UpdateDeathScreenContent `mov dl, [esi+162h]; cmp dl,
-		//  [eax+162h]` @0x553BB5..0x553BC0 and the second loop's
-		//  @0x553C5F..0x553DE3 team test; NapiNPClientMsg_ZoneTimerValue
-		//  @0x428D60 (entity[544] / entity[545] only);
-		//  NapiNPClientMsg_TeamAssign @0x4319EE; NapiNPClientMsg_HandlePlayerSpawn
-		//  @0x431C6D]
-		uint8_t zone_team = e->team;
-		if (view.joiner) {
-			const replication::ClientEntityState *row = cs.find(e->handle.packed);
-			if (row != nullptr && row->team_known) zone_team = row->team;
-		}
+		// Both loops compare the zone entity's own Team byte (zone_team_byte)
+		// with the local entity's [orig: UI_UpdateDeathScreenContent `mov dl,
+		//  [esi+162h]; cmp dl, [eax+162h]` @0x553BB5..0x553BC0 and the second
+		//  loop's @0x553C5F..0x553DE3 team test].
+		const uint8_t zone_team = zone_team_byte(view, *e);
 		// The first-loop gate reads the zone's shared timer-list entry alone: no
 		// entry lists the zone, and an entry lists it once its DWORD 9 (the value
 		// target) reaches its DWORD 10 (the limit), a signed compare. Only the
