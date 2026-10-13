@@ -130,6 +130,8 @@ GameConfig host_screen_default_config() {
 	// "100" @0x8332A8 -> useLineupQueue_3F8 / lineupQueueSize_3FC]
 	config.use_lineup_queue = 1;
 	config.lineup_queue_size = 100;
+	// [orig: mphostpuntplayerswithsamepcids "1" @0x833350 -> puntDuplicatePcids_330]
+	config.punt_duplicate_pcids = 1;
 	return config;
 }
 

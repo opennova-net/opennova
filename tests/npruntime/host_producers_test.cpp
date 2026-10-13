@@ -498,6 +498,25 @@ bool check_vehicle_spawn_availability() {
 			"a team without slots is refused");
 }
 
+// D-NET-699: the S2C 0x79 boundary kicks a connection the join validator flagged for a
+// duplicate PCID; a tick off the boundary kicks no one.
+// [orig: Server_TickUpdate - the 0x79 countdown @0x51E1B2..0x51E1C5, the send @0x51E202,
+//  CNapiServer_DisconnectPendingSpawnBans @0x51E20C]
+bool check_duplicate_pcid_kick_at_the_quality_boundary() {
+	HostFixture f(2);
+	f.conn(0).account.pcid = "P-DUP-0001";
+	f.conn(0).duplicate_pcid_kick_pending = true;
+	inmatch::Server_TickUpdate(f.ctx); // the countdown at 1000: no boundary
+	if (!expect(!f.conn(0).pending_disconnect, "off the 0x79 boundary no one is kicked"))
+		return false;
+	f.ctx.network_quality_broadcast_countdown = 0;
+	inmatch::Server_TickUpdate(f.ctx);
+	return expect(f.conn(0).pending_disconnect && f.conn(0).disconnect_event_valid &&
+					f.conn(0).disconnect_event.dstr == "N.C:SPTWNTBP[P-DUP-0001]" &&
+					!f.conn(1).pending_disconnect,
+			"the 0x79 boundary kicks the flagged connection");
+}
+
 bool check_spectator_respawn_request() {
 	HostFixture f(2);
 	// Gates: permanent death and a spectator capacity.
@@ -1945,6 +1964,7 @@ int main() {
 	ok = check_chat_routing() && ok;
 	ok = check_loaded_model_reply_stamp() && ok;
 	ok = check_vehicle_spawn_availability() && ok;
+	ok = check_duplicate_pcid_kick_at_the_quality_boundary() && ok;
 	ok = check_spectator_respawn_request() && ok;
 	ok = check_spectator_convert_deploys() && ok;
 	ok = check_spectator_convert_humans_count() && ok;

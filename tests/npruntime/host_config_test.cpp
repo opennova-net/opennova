@@ -117,6 +117,8 @@ int main() {
 		TEST_EXPECT(c.use_lineup_queue == screen.use_lineup_queue &&
 				c.lineup_queue_size == screen.lineup_queue_size);
 		TEST_EXPECT(c.use_lineup_queue == 1 && c.lineup_queue_size == 100);
+		TEST_EXPECT(c.punt_duplicate_pcids == screen.punt_duplicate_pcids &&
+				c.punt_duplicate_pcids == 1);
 		TEST_EXPECT(host.game_type_setting == stock.game_type_setting);
 		TEST_EXPECT(c.server_name == "Untitled");
 		TEST_EXPECT(c.max_players == 64u && !c.dedicated_server && c.player_slot_limit() == 64u);
@@ -189,6 +191,7 @@ int main() {
 		cfg.mp_gametype = 65540;
 		cfg.mp_use_lineup_queue = 0;
 		cfg.mp_lineup_queue_size = 12;
+		cfg.mp_host_punt_same_pcids = 0;
 		const HostScreenState host = host_session_settings(cfg);
 		const GameConfig &c = host.config;
 		TEST_EXPECT(cfg.mp_max_players == 65); // the in-session cap, written back
@@ -199,6 +202,7 @@ int main() {
 		TEST_EXPECT(c.player_slot_limit() == 66u); // 65 plus the dedicated slot
 		TEST_EXPECT(host.game_type_setting == 65540);
 		TEST_EXPECT(c.use_lineup_queue == 0 && c.lineup_queue_size == 12);
+		TEST_EXPECT(c.punt_duplicate_pcids == 0);
 		TEST_EXPECT(c.server_name == "A name of thirty-one characters"); // 31 bytes
 		TEST_EXPECT(c.server_password == "pw");
 		TEST_EXPECT(c.side_a_password == "blue" && c.side_b_password == "red");

@@ -132,16 +132,18 @@ bool decrypt_join_cookie_field(const JoinCookiePairs &cookie, const std::string 
 	return true;
 }
 
-void load_join_account(const JoinCookiePairs &cookie, const std::string &local_address,
+bool load_join_account(const JoinCookiePairs &cookie, const std::string &local_address,
 		const SessionIdRing &key_table, JoinAccount &account) {
 	std::vector<uint8_t> buf;
-	if (decrypt_join_cookie_field(cookie, local_address + "PCID", key_table, kPcidOutCapacity, buf)) {
+	const bool pcid_decrypted = decrypt_join_cookie_field(
+			cookie, local_address + "PCID", key_table, kPcidOutCapacity, buf);
+	if (pcid_decrypted) {
 		set_join_account_pcid(account, std::string_view(reinterpret_cast<const char *>(buf.data()),
 				buf.size()));
 	}
 	if (!decrypt_join_cookie_field(cookie, local_address + "SQUADINFO", key_table,
 				kSquadOutCapacity, buf))
-		return;
+		return pcid_decrypted;
 	// The out-length bounds both strings; it counts the NUL after the plaintext.
 	const std::size_t end = buf.size();
 	std::size_t names = 0;
@@ -158,6 +160,7 @@ void load_join_account(const JoinCookiePairs &cookie, const std::string &local_a
 	account.squad_id = squad_id;
 	account.squad_name = squad_name;
 	account.squad_tag = bounded_string(buf, tag, end, kSquadTagChars);
+	return pcid_decrypted;
 }
 
 } // namespace opennova

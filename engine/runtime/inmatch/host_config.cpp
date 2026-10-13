@@ -76,6 +76,9 @@ HostScreenState host_session_settings(gamecfg::GameCfg &cfg) {
 	//  CNapiNetwork_ValidateJoinRequest @0x4C6220..0x4C624E].
 	config.use_lineup_queue = cfg.mp_use_lineup_queue;
 	config.lineup_queue_size = cfg.mp_lineup_queue_size;
+	// The join validator's duplicate-PCID word [orig: puntDuplicatePcids_330,
+	//  Server_ValidatePlayerJoinRequest @0x512771].
+	config.punt_duplicate_pcids = cfg.mp_host_punt_same_pcids;
 
 	// The identity. The name is copied 31 bytes deep into both of its homes
 	// [orig: Game_ApplySessionSettingsToGlobals @0x551FEB strncpy(g_ServerNameStr,

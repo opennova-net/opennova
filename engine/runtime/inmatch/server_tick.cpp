@@ -1398,6 +1398,7 @@ void emit_periodic_session_maintenance(NapiNPServerCtx &ctx, world::World &world
 					s2c::NETWORK_QUALITY, {ctx.host_network_quality});
 		}
 	}
+	Server_KickDuplicatePcids(ctx, network_quality_boundary); // [orig: @0x51E20C]
 	// State-6 work: the quartet and the punts under retail's session tests, the two age
 	// counters under state 6 alone, so their session gate is ours (D-NET-696; no production
 	// path clears is_in_session) [orig: @0x5189AD, @0x51E0D4; @0x51D966, @0x51E062].

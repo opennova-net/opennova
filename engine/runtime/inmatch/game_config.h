@@ -118,6 +118,15 @@ struct GameConfig {
 	//  ctx+0xF2C / +0xF30 by CNapiNetwork_ValidateJoinRequest @0x4C6220..0x4C624E]
 	int32_t use_lineup_queue = 0;
 	int32_t lineup_queue_size = 0;
+	// game.cfg's mphostpuntplayerswithsamepcids: a NovaWorld joiner whose
+	// decrypted PCID another of the session's connections holds is refused
+	// (code 30), and every such remote connection is kicked at the next S2C
+	// 0x79 boundary (Server_ValidateJoinBans, Server_KickDuplicatePcids). Zero
+	// keeps a bare config inert; the cfg table's default is 1.
+	// [orig: g_GameConfigState.puntDuplicatePcids_330 @0x25509E8, read live by
+	//  Server_ValidatePlayerJoinRequest @0x512771..0x512778; the cfg row
+	//  @0x833350]
+	int32_t punt_duplicate_pcids = 0;
 	// The session's player cap: the cfg max the session create put into 1..65
 	// (session_player_cap), without the dedicated host's own slot. The MP TLV,
 	// the LAN discovery reply, the join gate, the spawn pump and the status

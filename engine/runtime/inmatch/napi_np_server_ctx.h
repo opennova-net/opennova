@@ -524,14 +524,16 @@ inline bool get_local_address(const NapiNPServerCtx &ctx, std::string &out) {
 // The JOIN handler's cookie leg for a remote connection: on a NovaWorld session
 // its CD cookie's PCID and SQUADINFO land in the connection's account fields.
 // The host's own loopback skips it (its account is the shell's login PCID).
+// True when the cookie's PCID decrypted (load_join_account).
 // [orig: NapiNPServer_HandlePlayerJoinMessage @0x512AA0 — the loopback gate
 //  `!connection+0x2E` @0x512ca2, GetLocalAddress && cookie @0x512cdc]
-inline void load_join_account_from_cookie(const NapiNPServerCtx &ctx, NapiNPConnection &conn) {
+inline bool load_join_account_from_cookie(const NapiNPServerCtx &ctx, NapiNPConnection &conn) {
 	std::string local_address;
 	if (conn.type == NapiNPConnection::kTypeClientSide || !get_local_address(ctx, local_address) ||
 			conn.join_identity_pairs.empty())
-		return;
-	load_join_account(conn.join_identity_pairs, local_address, ctx.cookie_key_table, conn.account);
+		return false;
+	return load_join_account(
+			conn.join_identity_pairs, local_address, ctx.cookie_key_table, conn.account);
 }
 
 // The NovaWorld host binding's account facts: the cookie-key table, and the

@@ -83,6 +83,9 @@ opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type)
 		cfg.config.multiplayer_reset = block.mp_reset;
 		cfg.config.use_lineup_queue = block.mp_use_lineup_queue;
 		cfg.config.lineup_queue_size = block.mp_lineup_queue_size;
+		// The join validator reads the block's duplicate-PCID word live
+		// (Server_ValidatePlayerJoinRequest @0x512771).
+		cfg.config.punt_duplicate_pcids = block.mp_host_punt_same_pcids;
 	}
 	cfg.socket_mode = is_host_listening() ? inmatch::SocketMode::Lan : inmatch::SocketMode::Socketless;
 	cfg.serve_and_play = is_host_listening() ? net_.host_serve_and_play : true;

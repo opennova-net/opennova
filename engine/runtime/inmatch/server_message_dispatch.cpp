@@ -1116,7 +1116,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// Its TLV walk keeps the CD cookie, whose PCID / SQUADINFO a remote
 				// connection on a NovaWorld session decrypts before the validator.
 				conn.join_identity_pairs = parse_join_identity_pairs(admission_message->payload);
-				if (inputs.server_ctx != nullptr) load_join_account_from_cookie(*inputs.server_ctx, conn);
+				const bool pcid_decrypted = inputs.server_ctx != nullptr &&
+						load_join_account_from_cookie(*inputs.server_ctx, conn);
 				if (conn.type != NapiNPConnection::kTypeClientSide) {
 					conn.link.spectator = conn.join_spectator_request != 0;
 					uint32_t reject_dpc = validate_join_environment(conn.join_environment);
@@ -1127,7 +1128,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					if (reject_dpc == 0)
 						reject_dpc = validate_side_password(config, conn);
 					if (reject_dpc == 0 && inputs.server_ctx != nullptr)
-						reject_dpc = Server_ValidateJoinBans(*inputs.server_ctx, conn); // 29 / 31
+						reject_dpc = Server_ValidateJoinBans(
+								*inputs.server_ctx, conn, pcid_decrypted); // 29 / 30 / 31
 					if (reject_dpc != 0) {
 						(void)stage_join_gate_reject(conn, reject_dpc);
 						conn.admission_stage = GameAdmissionStage::Rejected;
