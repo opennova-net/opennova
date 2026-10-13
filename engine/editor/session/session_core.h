@@ -11,6 +11,7 @@
 
 #include <editor/import/import_run.h>
 #include <editor/model/diagnostic.h>
+#include <editor/preview/terrain_brush.h>
 #include <editor/project/local_settings.h>
 #include <editor/project/project_document.h>
 #include <editor/project_build/build_run.h>
@@ -39,6 +40,7 @@ struct PlayIntent;
 struct ExportIntent;
 class RenameController;
 class FileChores;
+class TerrainSculpt;
 class UnsavedGuard;
 class TextureUseIndex;
 class Viewports;
@@ -76,6 +78,7 @@ public:
 		DiskWatch *disk = nullptr;
 		NavigationController *navigation = nullptr;
 		FileChores *chores = nullptr;
+		TerrainSculpt *sculpt = nullptr; // S25: the heights' baker
 	};
 	void bind(const Parts &parts) { parts_ = parts; }
 	DocumentSet &documents() const { return *parts_.documents; }
@@ -87,6 +90,7 @@ public:
 	DiskWatch &disk() const { return *parts_.disk; }
 	NavigationController &navigation() const { return *parts_.navigation; }
 	FileChores &chores() const { return *parts_.chores; }
+	TerrainSculpt &sculpt() const { return *parts_.sculpt; }
 
 	// Once, when the session starts: the preferences read (a store that cannot be read is a finding,
 	// the defaults in effect) and shown, no project open.
@@ -396,6 +400,8 @@ private:
 		std::string handle;
 		float x = 0.0f;
 		float y = 0.0f;
+		// S25: a brush drag's dab path, its walk carried from sample to sample as a canvas carries a person's.
+		TerrainDabPath dabs;
 	};
 	// The wire's drag in the document at `path` while its gesture is open there (null for none; one
 	// whose gesture ended another way forgotten).

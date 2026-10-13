@@ -59,6 +59,7 @@ enum class EditorQueryKind : uint8_t {
 	SoundsPlaying,
 	Complete,
 	ParticleKeys,
+	Terrain,
 	kCount,
 };
 

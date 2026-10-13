@@ -118,6 +118,22 @@ void block_middle(int c, double &x, double &y) {
 	y = 512.0 - 4.0 * tz - 2.0;
 }
 
+// A .til of one tile whose stored z is `z` (the north edge of the square the game draws it over; the surface sampler
+// tests the square 16 units north of -z, D-TIL-9).
+std::vector<uint8_t> tile_stored(double x, double z, uint8_t index) {
+	opennova::TilFile til;
+	opennova::TilOverlayEntry entry;
+	entry.x_fixed = opennova::bms::to_fixed_16_16(x);
+	entry.z_fixed = opennova::bms::to_fixed_16_16(z);
+	entry.tile_index = index;
+	til.entries.push_back(entry);
+	std::vector<uint8_t> bytes;
+	std::string error;
+	if (!opennova::save_til(til, bytes, error)) std::fprintf(stderr, "the .til: %s\n", error.c_str());
+	return bytes;
+}
+
+// A .til of one tile whose surface sampler square starts at (x, y), 16 units east and north (its stored z -y).
 std::vector<uint8_t> tile_at(double x, double y, uint8_t index) {
 	opennova::TilFile til;
 	opennova::TilOverlayEntry entry;
@@ -191,14 +207,20 @@ int test_foliage_facts() {
 	facts = ground.terrain_at(1500.0, 0.0, 30.0);
 	TEST_EXPECT(facts.foliage_code == 0 && facts.grows.empty());
 
-	// A placed tile's square keeps a definition without forceon off within 2 units of it.
+	// A placed tile's drawn square keeps a definition without forceon off within 2 units of it (both foliage generators
+	// pass the candidate's -y, so the blocker reads the square the tile is drawn over).
 	block_middle(0, x, y);
-	files->put("pad.til", tile_at(x + 1.0, y - 8.0, 0));
+	files->put("pad.til", tile_stored(x + 1.0, y + 8.0, 0));
 	ground.follow(files, 2, header, "pad");
 	facts = ground.terrain_at(x, y, 30.0);
 	TEST_EXPECT(facts.foliage_code == 254 && facts.grows.empty() && facts.kept_off.size() == 1 &&
 	            mission_ground_line(facts).find("bush1.3di (foliage 1) kept off by a placed tile") != std::string::npos);
 	TEST_EXPECT(ground.foliage_kept_off(x, y, 1) == 1 && ground.foliage_kept_off(x - 40.0, y, 1) == 0);
+	// The split (D-TIL-9, the original's): the surface sampler reads the tile on the drawn square's mirror across y = 0,
+	// where no foliage is kept off; on the drawn square the char map decides the class.
+	TEST_EXPECT(ground.terrain_at(x + 9.0, -y, 30.0).from == MissionSurfaceFrom::Tile &&
+	            ground.foliage_kept_off(x + 9.0, -y, 1) == 0);
+	TEST_EXPECT(ground.terrain_at(x, y, 30.0).from != MissionSurfaceFrom::Tile);
 	json = mission_ground_to_json(facts);
 	TEST_EXPECT(json.get("foliage") && json.get("foliage")->get("kept_off") &&
 	            json.get("foliage")->get("kept_off")->array.size() == 1);
@@ -298,9 +320,9 @@ int test_foliage_overlay() {
 	            second->words == "grows bush2.3di (foliage 2, codes 253)" && std::fabs(first->share - 1024.0 / 65536.0) < 1e-9);
 	TEST_EXPECT(image.outside && image.outside_rgba[3] == 0 && image.legend.size() == 2);
 
-	// A placed tile in the bush1 block: its square, 2 units round, kept off and grey.
+	// A placed tile in the bush1 block: the square it is drawn over, 2 units round, kept off and grey.
 	block_middle(0, x, y);
-	files->put("pad.til", tile_at(x, y, 0));
+	files->put("pad.til", tile_stored(x, y + 16.0, 0));
 	ground.follow(files, 2, header, "pad");
 	image = mission_ground_overlay(ground, MissionGroundOverlay::Foliage);
 	TEST_EXPECT(rgb_is(texel_at(image, x + 8.0, y + 8.0), 128, 128, 128) && row_of(image, "kept off"));

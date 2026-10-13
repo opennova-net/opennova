@@ -868,13 +868,50 @@ LabelledField name_field(K kind) {
 	return out;
 }
 
+// An entity's Height lock (ADR 0046 S25): the original editor's, which its .mis carries (height_lock, written for a
+// lock alone) and the .bms has no room for (bms::Entity::mis_height_lock, read from and written to the .mis beside the
+// mission: documents/mission_names_file.h). Locked, the entity keeps its height when the terrain under it is
+// sculpted; unlocked, as the original editor's new item is [orig: JOTACmed.exe MissionItem_AppendByTypeId @
+// 0x455954], it keeps its height above the ground. Beside its z.
+LabelledField height_lock_field() {
+	LabelledField out;
+	FieldSchema &entry = out.schema;
+	entry.id = "height_lock";
+	entry.type = FieldType::Integer;
+	entry.ranged = true;
+	entry.min = 0;
+	entry.max = 1;
+	entry.choices = {FieldChoice{"no", 0, "Off"}, FieldChoice{"yes", 1, "On"}};
+	entry.label = "Height lock";
+	entry.group = "position";
+	entry.applies = Applicability::Ignored;
+	entry.description = "Keeps its height when the terrain is sculpted (the original editor's height lock); off: it "
+	                    "follows the ground. Kept in the .mis beside the mission, which the game never reads.";
+	out.value.get = [](const RecordHandle &record, Value &value) {
+		value = int64_t(static_cast<const bms::Entity *>(record.data)->mis_height_lock != 0 ? 1 : 0);
+		return true;
+	};
+	out.value.set = [](const RecordHandle &record, const Value &value, std::string &error) {
+		const auto *on = std::get_if<int64_t>(&value);
+		if (!on || (*on != 0 && *on != 1)) {
+			error = "A height lock is on (1) or off (0).";
+			return false;
+		}
+		static_cast<bms::Entity *>(record.data)->mis_height_lock = int32_t(*on);
+		return true;
+	};
+	return out;
+}
+
 RecordTable make_table() {
 	std::vector<TableKind> kinds;
 	for (const KindRow &row : kKinds) {
 		TableKind kind(RecordKindRow{k(row.kind), row.token, row.label, row.add_label, row.top});
 		if (row.kind == K::Event || row.kind == K::Area || row.kind == K::WaypointPath) kind.field(name_field(row.kind));
-		for (const MissionField &field : mission_fields(row.record))
+		for (const MissionField &field : mission_fields(row.record)) {
 			if (!derived(field.record, field.key)) kind.field(labelled(row, field));
+			if (row.record == MissionRecord::Entity && same_text(field.key, "z")) kind.field(height_lock_field());
+		}
 		switch (row.kind) {
 		case K::Mission:
 			kind.list({spec(K::Loadout, "Weapon loadout"),

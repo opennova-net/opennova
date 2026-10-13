@@ -6,6 +6,7 @@
 #include <variant>
 
 #include <base/io/fixed.h>
+#include <base/io/hash.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
@@ -17,6 +18,8 @@
 #include <editor/preview/viewport_device.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <editor/preview/terrain_brush_spaces.h>
+#include <editor/preview/terrain_view_commands.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/mission.h>
 #include <runtime/hud/hud_map_view.h>
@@ -184,7 +187,29 @@ float mission_map_zoom_for(double metres, int width) {
 bool MissionMapOptions::operator==(const MissionMapOptions &o) const {
 	return items == o.items && buildings == o.buildings && markers == o.markers && organics == o.organics &&
 	       areas == o.areas && paths == o.paths && labels == o.labels && links == o.links && grid == o.grid &&
-	       text == o.text && stick == o.stick && snap == o.snap && color_by == o.color_by;
+	       text == o.text && stick == o.stick && snap == o.snap && color_by == o.color_by && background == o.background &&
+	       water == o.water;
+}
+
+const char *mission_map_background_token(MissionMapBackground background) {
+	switch (background) {
+	case MissionMapBackground::Colour: return "colour";
+	case MissionMapBackground::Height: return "height";
+	case MissionMapBackground::Delta: return "delta";
+	case MissionMapBackground::Flatness: return "flatness";
+	case MissionMapBackground::None: return "none";
+	case MissionMapBackground::kCount: break;
+	}
+	return "colour";
+}
+
+bool mission_map_background_from_token(const std::string &token, MissionMapBackground &out) {
+	for (size_t i = 0; i < size_t(MissionMapBackground::kCount); ++i)
+		if (token == mission_map_background_token(MissionMapBackground(i))) {
+			out = MissionMapBackground(i);
+			return true;
+		}
+	return false;
 }
 
 io::JsonValue mission_map_options_to_json(const MissionMapOptions &options) {
@@ -204,12 +229,14 @@ io::JsonValue mission_map_options_to_json(const MissionMapOptions &options) {
 	out.set("text", JsonValue::make_bool(options.text));
 	out.set("stick", JsonValue::make_bool(options.stick));
 	out.set("snap", json_number(options.snap));
+	out.set("background", JsonValue::make_string(mission_map_background_token(options.background)));
+	out.set("water", JsonValue::make_bool(options.water));
 	return out;
 }
 
 bool mission_map_options_from_json(const io::JsonValue &json, MissionMapOptions &held, std::string &error) {
 	if (!json.is_object()) {
-		error = "options is an object: {marks?, color_by?, grid?, text?, stick?, snap?}.";
+		error = "options is an object: {marks?, color_by?, grid?, text?, stick?, snap?, background?, water?}.";
 		return false;
 	}
 	MissionMapOptions out = held;
@@ -241,8 +268,13 @@ bool mission_map_options_from_json(const io::JsonValue &json, MissionMapOptions 
 				error = "options.color_by is team or group.";
 				return false;
 			}
-		} else if (name == "grid" || name == "text" || name == "stick") {
-			bool &into = name == "grid" ? out.grid : name == "text" ? out.text : out.stick;
+		} else if (name == "background") {
+			if (!member.value.is_string() || !mission_map_background_from_token(member.value.string, out.background)) {
+				error = "options.background is colour, height, delta, flatness or none.";
+				return false;
+			}
+		} else if (name == "grid" || name == "text" || name == "stick" || name == "water") {
+			bool &into = name == "grid" ? out.grid : name == "text" ? out.text : name == "stick" ? out.stick : out.water;
 			if (!read_bool(json, name.c_str(), into, error)) return false;
 		} else if (name == "snap") {
 			if (!member.value.is_number() || !(member.value.number >= 0.0) || !(member.value.number <= 1000.0)) {
@@ -251,9 +283,21 @@ bool mission_map_options_from_json(const io::JsonValue &json, MissionMapOptions 
 			}
 			out.snap = float(member.value.number);
 		} else {
-			error = "options takes marks, color_by, grid, text, stick and snap, not " + name + ".";
+			error = "options takes marks, color_by, grid, text, stick, snap, background and water, not " + name + ".";
 			return false;
 		}
+	}
+	// Water is the original mission editor's over its heights' views; the colour map shows the commander map's own
+	// (its water cut as the game's map cuts it): asked over the colour map or none it is refused, and a background
+	// taken back to them drops it.
+	if (out.water && (out.background == MissionMapBackground::Colour || out.background == MissionMapBackground::None)) {
+		const JsonValue *asked = json.get("water");
+		if (asked && asked->is_bool() && asked->boolean) {
+			error = "options.water lays the original mission editor's water over the height, delta or flatness background; "
+			        "the colour map shows the commander map's own.";
+			return false;
+		}
+		out.water = false;
 	}
 	held = out;
 	return true;
@@ -548,14 +592,29 @@ std::string MissionMapViewport::camera_change(const MissionMapCamera &camera) co
 }
 
 void MissionMapViewport::follow_ground_(const SessionView &view) {
-	reader_.follow(view.findings.assets, view.findings.assets ? view.findings.assets->generation() : 0, scene_.header(),
-			mission::mission_base_name(path()));
+	followed_terrain(view);
+	// S25: the placed tiles the device draws over the map, followed by what they hold (the file taken, each record).
+	uint64_t hash = io::kFnv1a64Offset;
+	const auto mix = [&hash](uint64_t value) {
+		for (int i = 0; i < 8; ++i) hash = (hash ^ ((value >> (8 * i)) & 0xFFu)) * io::kFnv1a64Prime;
+	};
+	for (const char c : terrain_.tiles_file()) mix(uint8_t(c));
+	for (const TilOverlayEntry &entry : terrain_.placed().entries) {
+		mix(uint32_t(entry.x_fixed));
+		mix(uint32_t(entry.z_fixed));
+		mix(uint64_t(entry.tile_index) | uint64_t(entry.flags) << 8);
+	}
+	if (hash != tiles_hash_) {
+		tiles_hash_ = hash;
+		++tiles_serial_;
+		moved_ = true;
+	}
 	MissionMapGround ground;
 	ground.terrain = scene_.header().terrain;
 	// The header's RotateMap180: the CMAP turned half a turn (MissionMapView::flip_180).
 	ground.flip_180 = (scene_.header().attrib_flags & 0x20u) != 0;
-	ground.water = reader_.water();
-	ground.water_height = ground.water ? reader_.water_height() : 0.0;
+	ground.water = terrain_.water();
+	ground.water_height = ground.water ? terrain_.water_height() : 0.0;
 	// The grid's origin: the first marker whose record's type is 2043 (the Map Centerpoint, items.def 102043), as
 	// the game's HUD init scans its pool-3 entities [orig: HUD_InitOverlaySystem @0x5a4999, entity+80 == 2043; the
 	// runtime's promote, mission::kItemIdOffset]. Every record stands in the editor: the game's scan is over the ones
@@ -694,6 +753,37 @@ ViewportAction MissionMapViewport::stop_(Reason reason) {
 	return picture_.stop();
 }
 
+uint64_t MissionMapViewport::gesture_held_(const ViewportInput &input) const {
+	if (const uint64_t picture = gesture_feeding_(input, picture_reads())) return picture;
+	return gesture_feeding_(input, &terrain_.stamps());
+}
+
+const MissionGround &MissionMapViewport::followed_terrain(const SessionView &view) const {
+	terrain_.follow(view.findings.assets, view.findings.assets ? view.findings.assets->generation() : 0, scene_.header(),
+	                mission::mission_base_name(path()));
+	return terrain_;
+}
+
+bool MissionMapViewport::follow_terrain_view_(const SessionView &view) {
+	const uint64_t before = terrain_view_.serial();
+	const MissionMapBackground background = options_.background;
+	const uint16_t *atlas = nullptr;
+	uint64_t revision = 0;
+	int32_t water = 0;
+	if (background == MissionMapBackground::Height || background == MissionMapBackground::Delta ||
+	    background == MissionMapBackground::Flatness) {
+		const MissionGround &ground = followed_terrain(view);
+		const terrain::TerrainHeightField *field = ground.height_field();
+		if (field && field->dim == 1024) {
+			atlas = field->heightmap;
+			revision = ground.heights_revision();
+		}
+		if (ground.water()) water = int32_t(ground.water_height() * 65536.0);
+	}
+	terrain_view_.follow(background, options_.water, atlas, revision, water);
+	return terrain_view_.serial() != before;
+}
+
 ViewportAction MissionMapViewport::follow_(const ViewportInput &input, PreviewClock &) {
 	const SessionView &view = input.view;
 	if (!view.project.open || !view.findings.assets) return stop_(Reason::NoProject);
@@ -711,8 +801,13 @@ ViewportAction MissionMapViewport::follow_(const ViewportInput &input, PreviewCl
 		scene_.read(*source);
 		follow_ground_(view);
 		follow_outlines_(view, kOutlinesFirstUs);
+		follow_terrain_view_(view);
 		picture_.show(key, generation);
 		shown(*document);
+		// S25: the terrain files' states as drawn (a stroke's first patch is against them).
+		std::vector<std::string> drawn;
+		stroke_.follow(view, *document, false, terrain_, files, drawn);
+		stroke_.made();
 		if (!framed_) {
 			// The one change its follow derives: the map over every entity and area.
 			framed_ = true;
@@ -730,8 +825,42 @@ ViewportAction MissionMapViewport::follow_(const ViewportInput &input, PreviewCl
 		delta = scene_.patch(*rows, *source);
 		shown(*document);
 	}
+	// S25: a stroke in a terrain file the picture or its ground reads: the ground patched in place and the files' new
+	// stamps taken (no read of them again whole per dab, no Rebuild), the device's patches kept; one that cannot be
+	// patched is read again below as before, its Rebuild held to the stroke's end. A stroke's end over a picture its
+	// device did not patch makes it again.
+	const bool stroking = gesture_held_(input) != 0;
+	std::vector<std::string> patched;
+	if (stroke_.follow(view, *document, stroking, terrain_, *view.findings.assets, patched) && !patched.empty())
+		picture_.restamp(*view.findings.assets, patched);
+	// The heights' patches made again in the background where it shows them (its revision the ground's after them).
+	std::vector<MissionMapAtlasRect> heights;
+	for (const TerrainPatch &patch : stroke_.patches().patches)
+		if (patch.plane == TerrainPlane::Heights)
+			for (const RasterRegion &region : patch.regions)
+				heights.push_back({region.x, region.y, region.x + region.width, region.y + region.height});
+	if (!heights.empty())
+		if (const terrain::TerrainHeightField *field = terrain_.height_field()) {
+			const uint64_t serial = terrain_view_.serial();
+			terrain_view_.patch(field->heightmap, heights, terrain_.heights_revision());
+			if (terrain_view_.serial() != serial) moved_ = true;
+		}
+	// Out of a stroke, the heights' picture takes the scale their lowest and highest give it now (kept while one went,
+	// S25; an undo's, a redo's or a landing's patch settled at once): a scan of them only where a patch moved them.
+	if (!stroking)
+		if (const terrain::TerrainHeightField *field = terrain_.height_field()) {
+			const uint64_t serial = terrain_view_.serial();
+			terrain_view_.settle(field->heightmap);
+			if (terrain_view_.serial() != serial) moved_ = true;
+		}
+	if (!stroking && stroke_.patched()) {
+		stroke_.made();
+		moved_ = false;
+		return picture_.built(FileStamps());
+	}
 	follow_ground_(view);
 	if (follow_outlines_(view, kOutlinesFrameUs)) moved_ = true;
+	if (follow_terrain_view_(view)) moved_ = true; // S25: the background in place of the colour map
 	// A file the device read moved (the terrain, the HUD's layout and art): the picture made again from the files.
 	if (picture_.follow(key, false, files, generation) == PreviewFollow::Found::Files) {
 		moved_ = false;
@@ -866,6 +995,13 @@ bool MissionMapViewport::handle_point(const ViewportContext &context, NodeId id,
 
 bool MissionMapViewport::drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
 		std::string &error) const {
+	// S25: the terrain tools' (terrain_view_commands.h).
+	const MissionGround &terrain_ground = followed_terrain(context.input.view);
+	const MapBrushSpace terrain_space(view(context.width, context.height), &terrain_ground);
+	const TerrainViewContext terrain{context, terrain_space, path(), ViewportKind::Map, &terrain_ground};
+	bool terrain_handled = false;
+	const bool terrain_done = terrain_view_drag(terrain, drag, out, error, terrain_handled);
+	if (terrain_handled) return terrain_done;
 	float hx = 0.0f, hy = 0.0f;
 	if (!handle_point(context, drag.id, drag.handle, hx, hy, error)) return false;
 	const Document *document = planned(context, error);
@@ -969,8 +1105,27 @@ bool MissionMapViewport::command(const ViewportContext &context, const std::stri
 	return true;
 }
 
+bool MissionMapViewport::drop(const ViewportContext &context, const ViewportDrop &drop, CanvasRequests &out,
+		std::string &error) const {
+	// S25: the terrain tools' (terrain_view_commands.h).
+	const MissionGround &terrain_ground = followed_terrain(context.input.view);
+	const MapBrushSpace terrain_space(view(context.width, context.height), &terrain_ground);
+	const TerrainViewContext terrain{context, terrain_space, path(), ViewportKind::Map, &terrain_ground};
+	bool terrain_handled = false;
+	const bool terrain_done = terrain_view_drop(terrain, drop, out, error, terrain_handled);
+	if (terrain_handled) return terrain_done;
+	return ViewportModel::drop(context, drop, out, error);
+}
+
 bool MissionMapViewport::command_of(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
 		std::string &error) const {
+	// S25: the terrain tools' (terrain_view_commands.h).
+	const MissionGround &terrain_ground = followed_terrain(context.input.view);
+	const MapBrushSpace terrain_space(view(context.width, context.height), &terrain_ground);
+	const TerrainViewContext terrain{context, terrain_space, path(), ViewportKind::Map, &terrain_ground};
+	bool terrain_handled = false;
+	const bool terrain_done = terrain_view_command(terrain, command, out, error, terrain_handled);
+	if (terrain_handled) return terrain_done;
 	if (command.name != "new_event") return ViewportModel::command_of(context, command, out, error);
 	const Document *document = planned(context, error);
 	if (!document) return false;

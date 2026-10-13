@@ -657,6 +657,38 @@ its legend over the picture's corner.
 _Avoid_: overlay alone (one shape a canvas draws over the picture), debug mode (the terrain shader's
 diagnostic colourings)
 
+**Terrain brush**:
+The tool a mission's 3D view, its map and a terrain's own view edit the terrain with (ADR 0046 S25): one per
+session (`set_workspace`'s `terrain_brush`), its tool (Sculpt: Raise, Lower, Smooth, Flatten, Set; Paint: Surface,
+Foliage, Colour, Detail; Tiles: Stamp, Select), its radius, strength, falloff and spacing, and each tool's value (a
+surface class, a foliage code, a colour, a detail layer, a stamp's cell, turn and flips). A drag lays its dabs along
+the pointer's path on the ground as one stroke (`terrain_stroke`, one gesture), each into the file the game reads
+for its plane (the heights' `.cpt`, the surface or foliage map, the colour or blend texture, the mission's `.til`),
+which opens beside the view and is undone and saved with it.
+_Avoid_: sculpt mode, paint tool, terrain editor
+
+**Terrain pane**:
+The pane beside a mission's or a terrain's picture that shows the terrain brush (ADR 0046 S25; the toolbar's
+Terrain, Ctrl+E): where the edits go, the terrain files left unsaved, the bake line, the brush's numbers and a tab
+per tool family (Sculpt, Paint, Tiles) holding its values (the surface legend, the foliage codes, the tile palette),
+the tabs staying in sight over a body that scrolls. It takes the Logic pane's place: one shows at a time.
+_Avoid_: terrain window, tool palette
+
+**Heights document**:
+A terrain's heights as the editor holds them (ADR 0046 S25): the `.cpt`'s depth atlas, a raster document the
+brush's strokes edit, the regions a stroke changed baked again into the `.cpt`'s polygons as TrnGen's bake makes
+them (the bake line says what waits). It opens beside the view a stroke came from, quietly: the view stays the
+active document, its Undo takes the stroke back and its Save saves it.
+_Avoid_: heightmap (a terrain set's PNG, an import input), heightfield
+
+**Height lock**:
+An entity's flag the original mission editor keeps (`height_lock` in its `.mis`; ADR 0046 S25, D-MIS-4): locked,
+the entity keeps its height when the terrain under it changes; unlocked (every `.bms` entity and every new one), it
+keeps its height above the ground and follows a sculpt. The `.bms` has no room for it: the editor keeps it in the
+`.mis` beside the mission, and a save over a terrain that does not read writes every entity locked there, listed
+(D-MIS-17).
+_Avoid_: pin, anchor, absolute height
+
 **Import closure**:
 What an import "with the files these need" brings beside the files chosen (ADR 0046 S14): every
 file they reference, and those files' in turn; the file that defines each name they use (an

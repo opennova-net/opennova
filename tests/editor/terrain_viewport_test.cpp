@@ -4,7 +4,9 @@
 // environment, tile set, tiles and overrides) or the engine's own; the ground as the game reads it (the terrain, the
 // mission's tiles, else the terrain's own polytrn_tileinfo); the camera framed on the mapped sectors within the fog;
 // DI-29's overlays an Update; the ground under a point in the game's words (DI-07); an edit of the terrain building
-// the picture again; a terrain the gate refuses; the wire's options, its refusals and its commands.
+// the picture again; a terrain the gate refuses; the wire's options, its refusals and its commands. S25: a Paint stroke
+// in the terrain's surface map an Update while it goes (its ground patched in place, the map never serialized again
+// per sample, no Rebuild), its end a Rebuild.
 #include <cmath>
 #include <cstdio>
 #include <sstream>
@@ -13,6 +15,7 @@
 
 #include <base/io/json.h>
 #include <editor/documents/document_types.h>
+#include <editor/assets/project_asset_source.h>
 #include <editor/documents/terrain_document.h>
 #include <editor/preview/terrain_viewport.h>
 #include <editor/preview/viewport_kinds.h>
@@ -258,12 +261,68 @@ int test_session(const std::string &repo) {
 	return 0;
 }
 
+// S25: a Paint stroke over the wire in the terrain's own surface map while the terrain's view draws it: each sample its
+// ground patched in place (the class painted read at once), the open map never serialized again and the picture never
+// built again while the stroke goes; built again at its end.
+int test_stroke(const std::string &repo) {
+	Rig rig;
+	editor_test::handle_to_end(rig.session, request::new_project(rig.dir.file("project"), "Terrain stroke"));
+	editor_test::create_missing_files(rig.session);
+	const std::string root = rig.root();
+	const std::string fixtures = repo + "/fixtures/terrain/tmap/";
+	for (const char *name : { "Tmap.trn", "Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx" })
+		TEST_EXPECT(editor_test::write_bytes(root + "/" + name, test_io::read_file(fixtures + name)));
+	editor_test::handle_to_end(rig.session, request::rescan());
+	rig.session.handle(request::open_document(rig.path));
+	TEST_EXPECT(rig.set(R"({"kind": "terrain", "device": {"width": 320, "height": 240}})"));
+	rig.session.handle(request::set_workspace(
+			R"({"document": {"path": "Tmap.trn", "terrain": true}, "terrain_brush": {"tool": "surface", "surface": 12, "radius": 4}})"));
+	TEST_EXPECT(rig.session.outcome().done());
+	const SessionView &view = rig.session.view();
+	// A frame: the device takes what the viewport says, then the view's canvas reads its ground (the brush's hint).
+	const auto frame = [&rig, &view]() {
+		rig.pump();
+		if (const TerrainViewport *viewport = rig.viewport()) viewport->followed_ground(view);
+	};
+	frame();
+	const TerrainViewport *viewport = rig.viewport();
+	TEST_EXPECT(viewport != nullptr && view.findings.assets != nullptr);
+	if (!viewport || !view.findings.assets) return 1;
+	const auto sample = [&rig](uint64_t gesture, double x, bool end) {
+		TerrainStrokeAsk ask;
+		ask.plane = TerrainPlane::Surface;
+		ask.points.emplace_back(x, 0.0);
+		ask.gesture = gesture;
+		ask.end = end;
+		rig.session.handle(request::terrain_stroke("Tmap.trn", ask));
+		return rig.session.outcome().done() ? rig.session.outcome().gesture : 0;
+	};
+	const uint64_t gesture = sample(0, 0.0, false);
+	TEST_EXPECT(gesture != 0);
+	frame();
+	const uint64_t serialized = view.findings.assets->serializations();
+	const uint64_t builds = viewport->builds();
+	for (int i = 1; i <= 4; ++i) {
+		TEST_EXPECT(sample(gesture, 2.0 * i, false) == gesture);
+		frame();
+	}
+	TEST_EXPECT(view.findings.assets->serializations() == serialized && viewport->builds() == builds);
+	TEST_EXPECT(viewport->followed_ground(view).terrain_at(8.0, 0.0, 0.0).surface == 12);
+	rig.session.handle(request::end_edit("Tmap.trn", gesture));
+	frame();
+	// None at its end either: the device takes the surface map in place (S25, the maps and the tiles).
+	TEST_EXPECT(viewport->builds() == builds);
+	std::printf("stroke: an Update while it goes (no serialization, no build), the ground patched; none at its end\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	const std::string repo = test_paths_repo_root(__FILE__);
 	int failures = test_kind();
 	failures += test_session(repo);
+	failures += test_stroke(repo);
 	if (failures == 0) std::printf("editor_terrain_viewport: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

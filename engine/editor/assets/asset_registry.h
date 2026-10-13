@@ -66,8 +66,10 @@ struct AssetScan {
 		bool racy = false;
 		int64_t read_ticks = 0;
 		uint64_t racy_fingerprint = 0;
-		// An import record's inputs (S20), project-relative: the files at them are ImportInputs.
+		// An import record's inputs (S20), project-relative: the files at them are ImportInputs; of them a
+		// terrain set's heightmap (S25) is a HeightmapInput.
 		std::vector<std::string> inputs;
+		std::vector<std::string> heightmap_inputs;
 	};
 	// The scan of the walk's visits, by path ("" the project's folder itself, when it cannot be
 	// read): the entries indexed and the findings made from them (what a ProjectScan hands over).

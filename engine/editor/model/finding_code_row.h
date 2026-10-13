@@ -47,6 +47,8 @@ enum class FindingFix {
 	                   // each an edit_record of the file, opened first, one undo step
 	UnusedVariable,    // a stylesheet variable no menu names (style.unused): Remove its line, where no
 	                   // menu's text names it inside a longer text either (DI-11)
+	DeleteFile,        // a file of the project that hides what the game reads in its place (til.empty, S25):
+	                   // Delete it (to the project's trash: Undo file brings it back)
 };
 
 // Where Problems takes a finding of the code: what the file holds (its document opened on the
@@ -112,6 +114,8 @@ enum class FindingGroup {
 	HudEffects, // hudfx.def, as the HUD's init reads it (ADR 0046 S23 B)
 	ScoreTables, // score.ini, through the game's score table reader (ADR 0046 S23 B)
 	AvatarTables, // Avatars.def, through the game's avatar reader (ADR 0046 S23 B)
+	TilePlacements, // a .til, through the game's tile placement load (ADR 0046 S25)
+	TerrainHeights, // a .cpt (or an imported terrain's heightmap) as the heights a brush sculpts (ADR 0046 S25)
 	kCount
 };
 inline constexpr size_t kFindingGroupCount = static_cast<size_t>(FindingGroup::kCount);
@@ -512,6 +516,10 @@ enum class CoreFinding {
 	ViewportRefused,
 	WorkspaceRefused,
 	WaveOperation, // round S23 lane A, appended
+	TerrainStroke, // S25, appended
+	TextureCharMapOverrun, // S25 B5, appended
+	TextureCharMapShape,   // S25 B5, appended
+	TextureCharMapClass,   // S25, appended
 	kCount
 };
 inline constexpr size_t kCoreFindingCount = static_cast<size_t>(CoreFinding::kCount);

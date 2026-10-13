@@ -817,5 +817,7 @@ void run_shortcuts_tests();
 void run_board_tests();
 void run_space_tests();
 void run_live_tests();
+// ADR 0046 S25, the terrain tools in the views (terrain_test.cpp).
+void run_terrain_tests();
 
 } // namespace editor_ui_test

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <variant>
 #include <vector>
 
@@ -44,12 +45,16 @@ struct TextChanges {
 	std::vector<TextSpan> spans;
 };
 
-// A raster's regions (the terrain slice makes them): each rectangle of cells that changed.
+// A raster's regions (ADR 0046 S25, the raster core: RasterDocument): each rectangle of texels that changed,
+// in the plane it changed in (whole tiles, cut at the plane's edge), and the side state's changed parts (a bit
+// each, its type's: RasterSideState::parts_changed).
 struct RasterRegion {
 	int x = 0, y = 0, width = 0, height = 0;
+	int plane = 0;
 };
 struct RasterChanges {
 	std::vector<RasterRegion> regions;
+	uint32_t parts = 0;
 };
 
 using ChangeSet = std::variant<RowChanges, TextChanges, RasterChanges>;

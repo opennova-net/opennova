@@ -208,7 +208,7 @@ bool TextDocument::apply_edits(const std::vector<Edit> &edits, Diagnostic &error
 	}
 	// A batch that changes nothing takes no step (as a Set of the value held takes none).
 	if (batch.empty()) return true;
-	history_.commit(std::move(batch), group_of(edits.front()));
+	history_.commit(std::move(batch), group_of(edits.front()), edits.front().gesture);
 	return true;
 }
 
@@ -220,6 +220,12 @@ void TextDocument::undo_step() {
 
 void TextDocument::redo_step() {
 	history_.redo([this](size_t offset, size_t count, const std::string &with) {
+		replace_at(offset, count, with);
+	});
+}
+
+bool TextDocument::cancel_gesture_step(uint64_t gesture) {
+	return history_.drop_open(gesture, [this](size_t offset, size_t count, const std::string &with) {
 		replace_at(offset, count, with);
 	});
 }
