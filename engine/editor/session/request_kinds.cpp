@@ -555,7 +555,7 @@ constexpr RequestKindRow kRows[] = {
 			"kept); fresh: it is emptied first, a first run (the run section says fresh). start (Play from here, "
 			"DI-26): the player starts at a point of mission, as a start marker of the build's copy of it in the run "
 			"directory, OpenNova and the game install alike (play.start without a mission). play_mode: how this "
-			"Play runs (runtime, install, strict), left out the project's own (the OpenNova runtime for a project "
+			"Play runs (runtime or strict), left out the project's own (the OpenNova runtime for a project "
 			"never set to another), which it leaves as it is; the run section says the mode it ran in (ran_mode). "
 			"With unsaved edits, Play saves them first while save_before_play is on (this Play's, else the "
 			"project's; on for a project never set), else it waits on the prompt.")

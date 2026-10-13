@@ -148,11 +148,6 @@ std::string file_named(const std::string &folder, const char *name) {
 	return std::string();
 }
 
-// The saves the game keeps beside itself, read at boot from its working directory and written
-// back there as the player changes them [orig: PlayerProfile_LoadAllFromDisk @ 0x54f4d0, the
-// CWD-relative path build @0x54f68c-0x54f6b7; PlayerProfile_SaveToFiles @ 0x54be00].
-constexpr const char *kInstallSaves[] = {"player.sav", "weapon.sav"};
-
 // The record of an install's files a copy cache holds (prepare_expansion_run): each file's name
 // with the size and last write of the install's file it was copied from.
 constexpr const char *kInstallCopyRecordFileName = "install_copy.json";
@@ -474,112 +469,6 @@ bool prepare_runtime_run(const std::string &build_dir, const std::string &run_di
 	return stage_build_files(path_of(build_dir), path_of(run_dir), built, link, error, staged);
 }
 
-bool prepare_retail_launch_plan(const std::string &retail_directory, const std::string &build_dir,
-                                const std::string &run_dir, LaunchPlan &out, Diagnostic &error,
-                                const std::string &expansion, const std::string &copy_cache, const FileLink &link,
-                                const std::string &base_game) {
-	out = LaunchPlan();
-	std::error_code ec;
-	if (retail_directory.empty() || !fs::is_directory(system_path(retail_directory), ec)) {
-		error = make_finding(CoreFinding::PlayInstallMissing, DiagnosticSeverity::Error,
-		                     "Choose the game install folder in File > Project settings... first.");
-		return false;
-	}
-	const fs::path retail = path_of(retail_directory);
-	const fs::path build = path_of(build_dir);
-	const fs::path run = path_of(run_dir);
-	// The build's files, but its record: a game.cfg among them is the project's own, as a save is. An
-	// expansion's build holds its folder alone (a configuration is no file of an expansion:
-	// FileKindFacts::expansion_loose), which prepare_expansion_run stages.
-	std::vector<std::string> built;
-	fs::path config; // the build's own game.cfg ("" for none)
-	for (const fs::directory_entry &entry : fs::directory_iterator(system_path(build_dir), ec)) {
-		std::error_code kind;
-		if (!expansion.empty() || !entry.is_regular_file(kind)) continue;
-		const std::string name = utf8_of(entry.path().filename());
-		if (name == kBuildRecordFileName) continue;
-		if (strutil::to_lower(name) == "game.cfg") config = build / path_of(name);
-		else built.push_back(name);
-	}
-	if (ec) {
-		error = make_finding(CoreFinding::PlayInstallCopy, DiagnosticSeverity::Error,
-		                     "Could not read the build " + utf8_of(build) + ": " + ec.message());
-		return false;
-	}
-	// The run directory's own copy of a file the game writes, kept from a run before (run/run_directory.h).
-	const auto run_holds = [&run_dir](const char *name) { return !file_named(run_dir, name).empty(); };
-	// The install's executable and Bink DLL, and the build's game.cfg, staged; the install's game.cfg seeded
-	// where neither the build nor the run directory has one. The same three files as the former
-	// GamePacker.stage_retail (4521b859e^), into the run directory.
-	std::vector<std::pair<fs::path, const char *>> staged = {{retail / kInstallExecutable, kInstallExecutable},
-	                                                         {install_bink(retail), "binkw32.dll"}};
-	if (!config.empty()) staged.emplace_back(config, "game.cfg");
-	// The install's game.cfg and saves (the player's profile and bindings the game starts with) and, beside
-	// a standalone build's game, the files it reads by name, as a player's install holds them (an
-	// expansion's run seeds those with its base game), where neither the project nor the run directory has
-	// its own: seeds, which the run keeps as the game rewrites them. A save the install lacks is the game's
-	// to make.
-	std::vector<std::string> seeds;
-	const bool seed_config = config.empty() && !run_holds("game.cfg");
-	if (seed_config) seeds.push_back("game.cfg");
-	const auto seed_unless_own = [&](const char *name) {
-		const bool own = std::any_of(built.begin(), built.end(),
-		                             [name](const std::string &held) { return strutil::iequals(held, name); });
-		const std::string found = file_named(retail_directory, name);
-		if (!own && !found.empty() && !run_holds(name)) seeds.push_back(found);
-	};
-	for (const char *save : kInstallSaves) seed_unless_own(save);
-	if (expansion.empty())
-		for (const char *read : kInstallRootReads) seed_unless_own(read);
-	// Every source checked before anything is copied, so a missing file launches nothing.
-	for (const auto &[source, name] : staged) {
-		if (fs::is_regular_file(system_path(utf8_of(source)), ec)) continue;
-		error = make_finding(CoreFinding::PlayInstallMissing, DiagnosticSeverity::Error,
-		                     "The game install has no " + utf8_of(source));
-		return false;
-	}
-	if (seed_config && !fs::is_regular_file(system_path(utf8_of(retail / "game.cfg")), ec)) {
-		error = make_finding(CoreFinding::PlayInstallMissing, DiagnosticSeverity::Error,
-		                     "The game install has no " + utf8_of(retail / "game.cfg") +
-		                             ". Run the game once from its install folder to create game.cfg.");
-		return false;
-	}
-	// An expansion's: the install's base game and the build's expansion folder.
-	if (!expansion.empty() && !prepare_expansion_run(base_game.empty() ? retail_directory : base_game, build_dir, expansion,
-	                                                 run_dir, copy_cache, error, link, &out.staged))
-		return false;
-	// The build's files beside the game.
-	if (!stage_build_files(build, run, built, link, error, &out.staged)) return false;
-	for (const auto &[source, name] : staged) {
-		std::string reason;
-		add_staged(&out.staged, path_of(name));
-		if (free_name(run / name, reason) && copy_to(source, run / name, reason)) continue;
-		error = make_finding(CoreFinding::PlayInstallCopy, DiagnosticSeverity::Error,
-		                     "Could not stage " + utf8_of(source) + ": " + reason);
-		return false;
-	}
-	for (const std::string &seed : seeds) {
-		std::string reason;
-		if (copy_to(retail / path_of(seed), run / path_of(seed), reason)) continue;
-		error = make_finding(CoreFinding::PlayInstallCopy, DiagnosticSeverity::Error,
-		                     "Could not stage " + utf8_of(retail / path_of(seed)) + ": " + reason);
-		return false;
-	}
-	out.executable = utf8_of(run / kInstallExecutable);
-	out.build_dir = utf8_of(build);
-	out.working_dir = utf8_of(run);
-	out.resource_dir = out.working_dir; // the game opens what it mounts from its working directory
-	out.expansion = expansion;
-	out.log_file = utf8_of(run / filelog::kInstallFileLogName);
-	out.args = {"/w", "/d"};
-	if (!expansion.empty()) {
-		out.args.push_back(kLaunchFlagExpansion);
-		out.args.push_back(expansion);
-	}
-	out.args.push_back("/FRISK");
-	return true;
-}
-
 bool prepare_strict_install_launch_plan(const std::string &install, const std::string &build_dir,
                                         const std::string &run_dir, const std::string &expansion, LaunchPlan &out,
                                         Diagnostic &error, const FileLink &link, const std::string &base_game,
@@ -614,8 +503,8 @@ bool prepare_strict_install_launch_plan(const std::string &install, const std::s
 		return false;
 	}
 	if (on_install) {
-		// The base game and the expansion's folder as prepare_expansion_run stages them for lenient Play,
-		// none of the files the game reads by name: the install's archives and its loose files (a file the
+		// The base game and the expansion's folder as prepare_expansion_run stages them for the OpenNova
+		// runtime, none of the files the game reads by name: the install's archives and its loose files (a file the
 		// expansion packs left out), then the build's expansion/<b>/.
 		if (!prepare_expansion_run(install, build_dir, expansion, run_dir, copy_cache, error, link, &out.staged,
 		                           /*seed_root_reads=*/false))

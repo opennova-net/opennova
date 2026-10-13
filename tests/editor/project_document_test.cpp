@@ -296,13 +296,15 @@ static int test_local_play_settings() {
 	TEST_EXPECT(load_local_settings(paths, local, error) && local.play_mode == PlayMode::Runtime);
 	TEST_EXPECT(editor_test::write_text(paths.local_settings_file, "{\"schema_version\": 2, \"play_mode\": true}\n"));
 	TEST_EXPECT(load_local_settings(paths, local, error) && local.play_mode == PlayMode::Runtime);
+	// S26 K1: the install mode is gone; a local.json naming it (an older editor's) plays in the OpenNova runtime.
+	TEST_EXPECT(editor_test::write_text(paths.local_settings_file, "{\"schema_version\": 2, \"play_mode\": \"install\"}\n"));
+	TEST_EXPECT(load_local_settings(paths, local, error) && local.play_mode == PlayMode::Runtime);
 	PlayMode read = PlayMode::Strict;
-	TEST_EXPECT(!play_mode_from_token("Strict", read) && read == PlayMode::Strict && play_mode_from_token("install", read) &&
-	            read == PlayMode::Install);
+	TEST_EXPECT(!play_mode_from_token("Strict", read) && read == PlayMode::Strict && !play_mode_from_token("install", read) &&
+	            play_mode_from_token("runtime", read) && read == PlayMode::Runtime);
 	TEST_EXPECT(std::string(play_mode_token(PlayMode::Runtime)) == kRunModeRuntime &&
-	            std::string(play_mode_token(PlayMode::Install)) == kRunModeInstall &&
 	            std::string(play_mode_token(PlayMode::Strict)) == kRunModeStrict);
-	TEST_EXPECT(!plays_in_install(PlayMode::Runtime) && plays_in_install(PlayMode::Install) && plays_in_install(PlayMode::Strict));
+	TEST_EXPECT(!plays_in_install(PlayMode::Runtime) && plays_in_install(PlayMode::Strict));
 	return 0;
 }
 

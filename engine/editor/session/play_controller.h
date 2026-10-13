@@ -163,8 +163,7 @@ private:
 	// exited) and strictly so (its mode's), whether its run directory held a game.cfg before its first start, whether
 	// it was started again, when it started, and what its file log said it loaded.
 	LaunchPlan plan_;
-	bool install_run_ = false;
-	bool strict_run_ = false;
+	bool install_run_ = false; // Strict Play in the game install (else the OpenNova runtime)
 	bool had_config_ = false;
 	bool started_again_ = false;
 	bool start_again_pending_ = false; // waiting for the game before to let its gate go

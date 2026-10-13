@@ -197,18 +197,16 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 	// never reaches another project, nor another editor on the machine).
 	ImGui::SeparatorText("Play");
 	const auto set_mode = [&set](PlayMode mode) { set("play_mode", io::JsonValue::make_string(play_mode_token(mode))); };
-	bool in_install = plays_in_install(held.play_mode);
-	if (ImGui::Checkbox("Play in the game install", &in_install)) set_mode(in_install ? PlayMode::Install : PlayMode::Runtime);
-	ui_kit::tooltip("Play starts the game install on the build instead of the OpenNova runtime.");
-	ImGui::Indent();
-	ImGui::BeginDisabled(!in_install);
-	bool strict = held.play_mode == PlayMode::Strict;
-	if (ImGui::Checkbox("Strict: as a player's install", &strict)) set_mode(strict ? PlayMode::Strict : PlayMode::Install);
-	ImGui::EndDisabled();
-	ImGui::Unindent();
-	ui_kit::tooltip("The game runs on the build alone, as a player who dropped Jointops.exe into the build's folder "
-	                "runs it: nothing of the install but its program and Bink DLL, no /d. Off, the install's "
-	                "configuration and saves are beside it and loose files win (/d).");
+	bool strict = plays_in_install(held.play_mode);
+	if (ImGui::Checkbox("Play in the game install (strict)", &strict)) set_mode(strict ? PlayMode::Strict : PlayMode::Runtime);
+	ui_kit::tooltip("Play starts the game install's own program on the build instead of the OpenNova runtime, as a "
+	                "player who dropped Jointops.exe into the build's folder runs it: nothing of the install but its "
+	                "program and Bink DLL, no /d. It starts at its menu, where the mission is chosen.");
+	// DI-26: Play saves first instead of asking (S26 K6: kept here alone, the Build menu's copy gone).
+	bool save_first = held.save_before_play;
+	if (ImGui::Checkbox("Save all before Play", &save_first)) set("save_before_play", io::JsonValue::make_bool(save_first));
+	ui_kit::tooltip("Play writes every file with unsaved edits first, as Save all does, and starts at once. Off, Play "
+	                "asks first, as Build does.");
 	ImGui::TextDisabled("This project's, on this computer (.opennova/local.json): other projects play as each is set.");
 
 	if (!error_.empty()) {
@@ -246,6 +244,7 @@ void ProjectSettingsDialog::apply(Workspace &workspace) {
 	settings.game_install = held.game_install;
 	if (!v.activity.source_run) settings.runtime_executable = held.runtime;
 	settings.play_mode = held.play_mode;
+	settings.save_before_play = held.save_before_play;
 	waiting_ = true;
 	error_.clear();
 	workspace.request(std::move(request));

@@ -17,7 +17,7 @@ struct SessionView;
 // on the file of the project that names the missing name and the record and field that name it, so a
 // row's Go to lands there and its fixes are a missing reference's or a required file's
 // (session/problem_fixes.h). The rows are the Play's: PlayController keeps those of each mode (OpenNova,
-// the game install, strict Play in the game install) until the next Play of that mode, or until the
+// strict Play in the game install) until the next Play of that mode, or until the
 // project closes.
 
 // Which game a row's words name: "OpenNova", "the game install", "the game install (strict Play)".

@@ -786,7 +786,7 @@ void test_project_settings() {
 	              v.workspace.settings.open && v.workspace.settings.title == "Armory",
 	      "the dialog opens, the workspace's, over the settings in effect");
 	CHECK(in_order(logged_frame(ui), {"Armory", "Name", "Missions", "Multiplayer", "Game install folder", "OpenNova runtime",
-	                                  "Play in the game install", "Strict: as a player's install", "Apply", "Cancel"}),
+	                                  "Play in the game install (strict)", "Save all before Play", "Apply", "Cancel"}),
 	      "its fields");
 	ui.activate(item_id(dialog, {"Apply"}));
 	std::vector<EditorRequest> requests = serve(ui, session);
@@ -1051,30 +1051,10 @@ void test_menus() {
 		ui.drain();
 	}
 	CHECK(choose(ui, "Build", {"Stop"}).empty(), "Build > Stop: nothing runs");
-	r = raised("Build", {"Play in the game install"}, EditorRequestKind::ApplyProjectSettings);
-	CHECK(r.kind == EditorRequestKind::ApplyProjectSettings && r.settings.play_mode == std::optional<PlayMode>(PlayMode::Install) &&
-	              !r.settings.title && !r.settings.mission && !r.settings.game_install && !r.settings.runtime_executable,
-	      "Build > Play in the game install: the project's play mode alone");
-	CHECK(choose(ui, "Build", {"Strict: as a player's install"}).empty(), "Build > Strict: only under Play in the game install");
-	v.project.play_mode = PlayMode::Install;
-	v.revisions.touch(ViewConcern::Preferences);
-	ui.frames(2);
-	ui.drain();
-	r = raised("Build", {"Strict: as a player's install"}, EditorRequestKind::ApplyProjectSettings);
-	CHECK(r.kind == EditorRequestKind::ApplyProjectSettings && r.settings.play_mode == std::optional<PlayMode>(PlayMode::Strict) &&
-	              !r.settings.title,
-	      "Build > Strict: the project's play mode alone");
-	v.project.play_mode = PlayMode::Strict;
-	v.revisions.touch(ViewConcern::Preferences);
-	ui.frames(2);
-	ui.drain();
-	r = raised("Build", {"Play in the game install"}, EditorRequestKind::ApplyProjectSettings);
-	CHECK(r.kind == EditorRequestKind::ApplyProjectSettings && r.settings.play_mode == std::optional<PlayMode>(PlayMode::Runtime),
-	      "Build > Play in the game install, unchecked: the OpenNova runtime, strict or not");
-	v.project.play_mode = PlayMode::Runtime;
-	v.revisions.touch(ViewConcern::Preferences);
-	ui.frames(2);
-	ui.drain();
+	// S26 K6: Play's settings live in the Project settings dialog alone, and K4: Build to folder is gone.
+	CHECK(choose(ui, "Build", {"Play in the game install"}).empty() && choose(ui, "Build", {"Save all before Play"}).empty() &&
+	              choose(ui, "Build", {"Build to folder..."}).empty(),
+	      "Build holds no Play setting and no Build to folder");
 	r = raised("Build", {"Show build folder"}, EditorRequestKind::RevealPath);
 	CHECK(r.kind == EditorRequestKind::RevealPath && r.path == v.activity.last_build->build_dir, "Build > Show build folder");
 	v.activity.play_state = PlayState::Running;

@@ -276,8 +276,6 @@ void test_windows_show_the_gate() {
 	        {"Build > Build", K::Build, menu("Build", {"Build"}, K::Build), nullptr},
 	        {"Build > Play", K::Play, menu("Build", {"Play"}, K::Play), nullptr},
 	        {"Build > Export", K::Export, menu("Build", {"Export"}, K::Export), nullptr},
-	        {"Build > Play in the game install", K::ApplyProjectSettings,
-	         menu("Build", {"Play in the game install"}, K::ApplyProjectSettings), nullptr},
 	        {"Build > Show build folder", K::RevealPath, menu("Build", {"Show build folder"}, K::RevealPath), nullptr},
 	        {"the bar's Build", K::Build, pressed(item_id(bar, {"status", "Build"}), K::Build), nullptr},
 	        {"the bar's Play", K::Play, pressed(item_id(bar, {"status", "Play"}), K::Play), nullptr},

@@ -107,10 +107,10 @@ constexpr RequestField kFields[] = {
 			"The unsaved-changes prompt's answer: save, discard or cancel." },
 	{ F::Settings, "settings", J::Object,
 			"The settings to set, {serial?, title?, mission?, multiplayer?, expansion?, builds_on?, "
-			"base_project?, game_install?, runtime_executable?, play_mode?, save_before_play?, build_folder?}, "
+			"base_project?, game_install?, runtime_executable?, play_mode?, save_before_play?}, "
 			"each left out as it is (expansion \"\" a standalone project, builds_on \"\" the base game, "
 			"base_project \"\" the game install's base game, else the base game's project, T5). play_mode "
-			"(runtime, install or strict: Strict Play stages the build and the install's program alone and "
+			"(runtime or strict: Strict Play stages the build and the install's program alone and "
 			"launches without /d, as a player's drop-in) and save_before_play are the open project's Play "
 			"settings, kept in its .opennova/local.json on this checkout, never the editor's: a project that "
 			"never set them plays in the OpenNova runtime and saves first." },

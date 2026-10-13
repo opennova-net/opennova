@@ -266,7 +266,7 @@ JsonValue run_section(const SessionView &view) {
 	out.set("runtime_executable", json_string(activity.runtime_executable));
 	out.set("runtime_setting", json_string(view.project.runtime_setting));
 	out.set("boot_missing", io::json_string_array(activity.boot_missing));
-	// The mode the game ran in (runtime, install or strict), whether the game install's first run was started
+	// The mode the game ran in (runtime or strict), whether the game install's first run was started
 	// again, and what its file log said it loaded once it exited (null before one was read).
 	out.set("ran_mode", json_string(activity.play_run_mode));
 	out.set("started_again", boolean(activity.play_started_again));
@@ -474,7 +474,6 @@ JsonValue preferences_section(const SessionView &view) {
 	out.set("runtime_setting", json_string(view.project.runtime_setting));
 	out.set("import_dependencies", boolean(view.project.import_dependencies));
 	out.set("preview_background", json_string(preview_background_token(view.project.preview_background)));
-	out.set("build_folder", json_string(view.project.build_folder));
 	JsonValue items = JsonValue::make_array();
 	for (const int64_t item : view.project.recent_items) items.push(json_number(double(item)));
 	out.set("recent_items", std::move(items));
@@ -574,7 +573,7 @@ constexpr ViewSectionRow kSections[] = {
 			"the run directory it runs in and the log there Play tails (run_dir, log_file: never "
 			"the build directory), whether that directory was emptied first (fresh) and what it kept of "
 			"what the runs before wrote there (kept: the game's game.cfg, its saves), the files it reported "
-			"missing at boot, how the open project plays (play_mode: runtime, install or strict; "
+			"missing at boot, how the open project plays (play_mode: runtime or strict; "
 			"save_before_play: its local.json's) and the mode the running or last game ran in (ran_mode), "
 			"and what Play runs (the game install, the runtime)." },
 	{ S::Import, "import", concern_set({ C::Dialogs, C::Preferences, C::Files }), import_section,

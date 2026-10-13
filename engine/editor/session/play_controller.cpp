@@ -38,7 +38,6 @@ namespace {
 std::string run_mode_of(PlayMode mode) {
 	switch (mode) {
 	case PlayMode::Runtime: return kRunModeRuntime;
-	case PlayMode::Install: return kRunModeInstall;
 	case PlayMode::Strict: return kRunModeStrict;
 	}
 	return kRunModeRuntime;
@@ -200,7 +199,7 @@ bool PlayController::refused(const PlayIntent &intent) {
 
 std::vector<Diagnostic> PlayController::play_rows() const {
 	std::vector<Diagnostic> rows = findings_;
-	for (const char *mode : {kRunModeRuntime, kRunModeInstall, kRunModeStrict})
+	for (const char *mode : {kRunModeRuntime, kRunModeStrict})
 		if (const auto found = log_findings_.find(mode); found != log_findings_.end())
 			rows.insert(rows.end(), found->second.begin(), found->second.end());
 	return rows;
@@ -213,7 +212,6 @@ void PlayController::publish_findings() {
 
 PlayGame PlayController::play_game() const {
 	if (mode_ == kRunModeStrict) return {"the game install (strict Play)"};
-	if (mode_ == kRunModeInstall) return {"the game install"};
 	return {"OpenNova"};
 }
 
@@ -226,10 +224,9 @@ void PlayController::start(const PlayIntent &intent) {
 	Diagnostic error;
 	std::error_code ec;
 	// The mode this Play runs in, as it was asked (intent_of: the request's, else the project's own), its
-	// run directory's too (run/run_directory.h): the game install's lenient or strict, else OpenNova.
+	// run directory's too (run/run_directory.h): Strict Play in the game install (the build and the install's
+	// program alone, no /d), else OpenNova.
 	const bool in_install = plays_in_install(intent.mode);
-	// Strict Play: the build and the install's program alone, no /d.
-	const bool strict = intent.mode == PlayMode::Strict;
 	const std::string mode = run_mode_of(intent.mode);
 	// The last run's boot report, its mission's and its exit go, their rows with them (the next
 	// validation would make none), and so do the rows the logs of this mode's last Play made (DI-27: each
@@ -332,11 +329,8 @@ void PlayController::start(const PlayIntent &intent) {
 			           "): the next Play starts from an empty run directory.");
 	};
 	if (in_install) {
-		const bool staged =
-		        strict ? prepare_strict_install_launch_plan(core_.game_install(), build_dir, run_dir, expansion, plan, error,
-		                                                    io::link_file, core_.base_game(), copy_cache)
-		               : prepare_retail_launch_plan(core_.game_install(), build_dir, run_dir, plan, error, expansion,
-		                                            copy_cache, io::link_file, core_.base_game());
+		const bool staged = prepare_strict_install_launch_plan(core_.game_install(), build_dir, run_dir, expansion, plan,
+		                                                       error, io::link_file, core_.base_game(), copy_cache);
 		record_staging(plan.staged);
 		if (!staged) {
 			core_.report(error);
@@ -378,11 +372,10 @@ void PlayController::start(const PlayIntent &intent) {
 	// Behind the others when the request asked (the MCP gaps lane): how the platform starts it.
 	plan.behind = behind;
 	install_run_ = in_install;
-	strict_run_ = strict;
 	// Strict Play's first run: whether the run directory (the build's files and the install's program in
 	// it, and what the runs before wrote there) holds a game.cfg before the game starts, the build's own or
 	// one a run before wrote.
-	had_config_ = strict && fs::is_regular_file(system_path(join_path(plan.working_dir, "game.cfg")), ec);
+	had_config_ = in_install && fs::is_regular_file(system_path(join_path(plan.working_dir, "game.cfg")), ec);
 	started_again_ = false;
 	view_.activity.play_run_mode = mode;
 	view_.activity.play_started_again = false;
@@ -456,7 +449,7 @@ bool PlayController::launch(const LaunchPlan &plan, Diagnostic &error) {
 	// One line for the game, its command line and its whole log folded under it; what matters of the log
 	// (an error, a warning, a file it lacks) shown below it as it comes (the UX round's problems lane). The
 	// game install's log is folded under it once the game has exited.
-	game_name_ = !install_run_ ? "OpenNova" : strict_run_ ? "the game install (strict)" : "the game install";
+	game_name_ = install_run_ ? "the game install (strict)" : "OpenNova";
 	game_lines_ = 0;
 	game_shown_ = 0;
 	game_line_ = core_.note_folded(game_words(), {"Command line: " + view_.activity.play_command_line});
@@ -498,7 +491,7 @@ void PlayController::poll() {
 				report_file_log(log_read);
 				absorb_install_logs(log_read);
 			}
-			if (strict_run_) start_again_if_first_run();
+			if (install_run_) start_again_if_first_run();
 		}
 		view_.activity.play_state = play_.state();
 		view_.activity.play_pid = play_.pid();

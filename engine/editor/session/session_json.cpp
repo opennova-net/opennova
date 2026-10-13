@@ -72,7 +72,6 @@ constexpr Token<PickPurpose> kPurposeTokens[] = {
 	{PickPurpose::RuntimeExecutable, "runtime_executable"},
 	{PickPurpose::GameInstall, "game_install"},
 	{PickPurpose::ImportFiles, "import_files"},
-	{PickPurpose::BuildFolder, "build_folder"},
 	{PickPurpose::NewProjectInstall, "new_project_install"},
 	{PickPurpose::TextureImage, "texture_image"},
 };
@@ -249,7 +248,7 @@ bool settings_from_json(const JsonValue &json, ProjectSettingsChange &out, std::
 	if (!json.is_object()) { error = "\"settings\" must be an object."; return false; }
 	if (!io::json_members_known(json, {"serial", "title", "mission", "multiplayer", "expansion", "builds_on", "base_project",
 	                          "game_install",
-	                          "runtime_executable", "play_mode", "save_before_play", "build_folder"},
+	                          "runtime_executable", "play_mode", "save_before_play"},
 	                   "settings", error)) return false;
 	ProjectSettingsChange change;
 	if (const JsonValue *serial = json.get("serial"); serial && !io::json_exact_whole(*serial, change.serial)) {
@@ -274,7 +273,7 @@ bool settings_from_json(const JsonValue &json, ProjectSettingsChange &out, std::
 	    !text("expansion", change.expansion) || !text("builds_on", change.builds_on) ||
 	    !text("base_project", change.base_project) ||
 	    !text("game_install", change.game_install) || !text("runtime_executable", change.runtime_executable) ||
-	    !flag("save_before_play", change.save_before_play) || !text("build_folder", change.build_folder))
+	    !flag("save_before_play", change.save_before_play))
 		return false;
 	if (const JsonValue *mode = json.get("play_mode")) {
 		PlayMode read = PlayMode::Runtime;
@@ -302,7 +301,6 @@ JsonValue settings_to_json(const ProjectSettingsChange &change) {
 		out.set("runtime_executable", json_string(*change.runtime_executable));
 	if (change.play_mode) out.set("play_mode", json_string(play_mode_token(*change.play_mode)));
 	if (change.save_before_play) out.set("save_before_play", boolean(*change.save_before_play));
-	if (change.build_folder) out.set("build_folder", json_string(*change.build_folder));
 	return out;
 }
 

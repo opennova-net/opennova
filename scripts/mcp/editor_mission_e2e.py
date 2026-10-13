@@ -25,7 +25,7 @@ and in OpenNova's mission catalog, the build saying nothing of the stock game's 
 untitled (build.expansion.mission_untitled), and the game's strings showing the expansion's own table
 (its EXP_NAME set by the run, read from the loose <expansion>.bin the build placed).
 
-With --play-mode install or strict (ADR 0046 S23 D) Play runs the game install's own Jointops.exe over
+With --play-mode strict (ADR 0046 S23 D) Play runs the game install's own Jointops.exe over
 the build (strict: as a player who dropped it into the build's folder runs it, an expansion with /exp over
 the install's base game), which starts at its menu and has no endpoint: the run is read from what the editor
 says of it (its mode, its command line, its run directory) and, once it is stopped, from the file log the
@@ -94,12 +94,27 @@ def request(client: GameMcp, kind: str, wait_s: float = 0.0, **fields) -> dict:
     if wait_s > 0:
         body["wait"] = True
         body["wait_ms"] = int(wait_s * 1000)
+    started = time.monotonic()
     payload = client.call("editor_request", body, timeout=wait_s + 60 if wait_s > 0 else 120)
     if payload.get("isError"):
         raise StepFailed(f"{kind} was not read: {text_of(payload)}")
     answer = payload.get("structuredContent", {})
     outcome = answer.get("outcome", {})
     expect(outcome.get("done", False), f"{kind} was not done: {json.dumps(outcome)}")
+    if answer.get("timed_out"):
+        # The tool's wait is at most its own (under five minutes): an operation still running past it (a whole
+        # install's import) is followed through the operation query to its end, within wait_s.
+        operation = int(outcome.get("operation", 0) or 0)
+        deadline = started + wait_s
+        while time.monotonic() < deadline:
+            state = client.structured("editor_query", {"query": "operation"})
+            running = state.get("operation") or {}
+            if not running.get("running") or int(running.get("id", 0)) != operation:
+                last = state.get("last_operation") or {}
+                answer["operation"] = last if int(last.get("id", 0)) == operation else {}
+                answer.pop("timed_out", None)
+                break
+            time.sleep(1.0)
     expect(not answer.get("timed_out"), f"{kind} did not end within {wait_s:.0f} s")
     ended = answer.get("operation") or {}
     expect(ended.get("end", "done") == "done", f"{kind}'s operation ended {ended.get('end')}: {json.dumps(ended)}")
@@ -537,7 +552,7 @@ def run(args: argparse.Namespace, project: Path, pid_file: Path, started_pids: d
             f"({same.get('bytes', 0) / 1e6:.1f} MB) left out as the base game's own, "
             f"{same.get('base_bytes_read', 0) / 1e6:.1f} MB of the base read")
 
-    if args.play_mode in ("install", "strict"):
+    if args.play_mode == "strict":
         play_in_install(args, client, started_pids)
         say("10. every step held")
         return
@@ -619,7 +634,7 @@ def run(args: argparse.Namespace, project: Path, pid_file: Path, started_pids: d
 
 
 def play_in_install(args: argparse.Namespace, client: GameMcp, started_pids: dict) -> None:
-    """Play in the game install (install or strict): the install's Jointops.exe over the build, at its menu,
+    """Strict Play in the game install: the install's Jointops.exe over the build, at its menu,
     read through the editor's run section, then stopped and read through its file log."""
     say(f"8. Play ({args.play_mode}) in the game install")
     play = {"kind": "play"}
@@ -698,10 +713,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--game-timeout", dest="game_timeout", type=float, default=300.0,
                         help="seconds the mission may take to load in the game")
     parser.add_argument("--keep", action="store_true", help="keep the project folder (a temp one is removed otherwise)")
-    parser.add_argument("--play-mode", dest="play_mode", choices=("runtime", "install", "strict"), default=None,
+    parser.add_argument("--play-mode", dest="play_mode", choices=("runtime", "strict"), default=None,
                         help="how Play runs the game (the project's play_mode; default: the OpenNova runtime)")
     parser.add_argument("--install-run", dest="install_run", type=float, default=30.0,
-                        help="with --play-mode install or strict: seconds the game runs before it is stopped")
+                        help="with --play-mode strict: seconds the game runs before it is stopped")
     parser.add_argument("--live", action="store_true",
                         help="the live logic leg (S24 Live; the OpenNova runtime only): an event made over an area "
                              "before the build, then in the game the player teleported into the area and the event "
@@ -710,8 +725,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--live-variable", dest="live_variable", type=int, default=250,
                         help="with --live: the mission variable the event sets (V0..V255; default 250)")
     args = parser.parse_args(argv)
-    if args.live and args.play_mode in ("install", "strict"):
-        print("editor_mission_e2e: --live needs the OpenNova runtime (no --play-mode install or strict)", file=sys.stderr)
+    if args.live and args.play_mode == "strict":
+        print("editor_mission_e2e: --live needs the OpenNova runtime (no --play-mode strict)", file=sys.stderr)
         return EXIT_NOT_READ
 
     made_temp = args.project is None

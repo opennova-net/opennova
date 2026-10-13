@@ -132,7 +132,6 @@ enum class PickPurpose {
 	RuntimeExecutable,
 	GameInstall,
 	ImportFiles,
-	BuildFolder, // Build > Build to folder...: where a build for players lands
 	NewProjectInstall, // the New project form's game install
 	TextureImage // a texture's Replace with image... (S18): the image it is made from
 };
@@ -168,14 +167,11 @@ struct ProjectSettingsChange {
 	std::optional<std::string> base_project;
 	std::optional<std::string> game_install;
 	std::optional<std::string> runtime_executable; // "" = the runtime packaged beside the editor
-	// How the project plays (LocalSettings::play_mode: the OpenNova runtime, the game install, or Strict Play
-	// in it: the build and the install's program alone, no /d), and whether Play saves every unsaved file
+	// How the project plays (LocalSettings::play_mode: the OpenNova runtime, or Strict Play in the game
+	// install: the build and the install's program alone, no /d), and whether Play saves every unsaved file
 	// first instead of asking (DI-26, LocalSettings::save_before_play): the open project's, on this checkout.
 	std::optional<PlayMode> play_mode;
 	std::optional<bool> save_before_play;
-	// The folder Build to folder builds into, kept with the project's local settings ("" for none): the
-	// modder's pick (a build's out_dir keeps nothing).
-	std::optional<std::string> build_folder;
 };
 
 inline bool operator==(const ProjectSettingsChange &a, const ProjectSettingsChange &b) {
@@ -183,7 +179,7 @@ inline bool operator==(const ProjectSettingsChange &a, const ProjectSettingsChan
 			a.multiplayer == b.multiplayer && a.expansion == b.expansion && a.builds_on == b.builds_on &&
 			a.base_project == b.base_project &&
 			a.game_install == b.game_install && a.runtime_executable == b.runtime_executable &&
-			a.play_mode == b.play_mode && a.save_before_play == b.save_before_play && a.build_folder == b.build_folder;
+			a.play_mode == b.play_mode && a.save_before_play == b.save_before_play;
 }
 
 // Where Paste puts the clipboard: into the owner `parent` (0 = the row `row` itself) at

@@ -451,7 +451,6 @@ OperationOutcome SessionCore::absorb_open(OpenOperation &open) {
 	// workspace, a setting's Apply).
 	run_install_ = open.run_install().empty() ? std::string() : absolute_install_path(open.run_install());
 	view_.project.refused.clear();
-	view_.project.build_folder = local_.build_folder;
 	// How it plays here, its own (a project that never said plays in the OpenNova runtime and saves first).
 	view_.project.play_mode = local_.play_mode;
 	view_.project.save_before_play = local_.save_before_play;
@@ -529,7 +528,6 @@ bool SessionCore::close_project() {
 	paths_ = ProjectPaths();
 	local_ = LocalSettings();
 	run_install_.clear();
-	view_.project.build_folder.clear();
 	// Its Play settings go with it: the next project plays as it says.
 	view_.project.play_mode = local_.play_mode;
 	view_.project.save_before_play = local_.save_before_play;
@@ -878,28 +876,6 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 			} else {
 				failures.push_back(error);
 			}
-		}
-	}
-	// The folder Build to folder builds into, kept with the project's local settings (Build > Build to <it>): the
-	// modder's pick, never what a build request's out_dir names (a script's build keeps nothing, L4).
-	if (change.build_folder && !view_.project.open) {
-		failures.push_back(make_finding(CoreFinding::ProjectNone, DiagnosticSeverity::Error,
-		                                "Open a project to keep a folder to build it into."));
-	} else if (change.build_folder && !change.build_folder->empty() &&
-	           io::path_within(path_of(*change.build_folder).lexically_normal(), path_of(paths_.root))) {
-		failures.push_back(make_finding(CoreFinding::BuildOutDirInProject, DiagnosticSeverity::Error,
-		                                "A folder to build into for players lies outside the project: " +
-		                                        *change.build_folder + " is inside it."));
-	} else if (change.build_folder && *change.build_folder != local_.build_folder) {
-		LocalSettings local = local_;
-		local.build_folder = *change.build_folder;
-		Diagnostic error;
-		if (save_local_settings(paths_, local, error)) {
-			local_ = std::move(local);
-			view_.project.build_folder = local_.build_folder;
-			touch(ViewConcern::Preferences);
-		} else {
-			failures.push_back(error);
 		}
 	}
 	// How the project plays and whether Play saves first: the project's own, kept with its local settings on

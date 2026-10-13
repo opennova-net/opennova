@@ -21,7 +21,7 @@ namespace {
 
 // A Play mode's directory under the run root names it (kRunMode*): one of the three, never a path.
 bool run_mode_known(const std::string &mode) {
-	return mode == kRunModeRuntime || mode == kRunModeInstall || mode == kRunModeStrict;
+	return mode == kRunModeRuntime || mode == kRunModeStrict;
 }
 
 // A run directory's name: a number from 1, written without leading zeros (a few digits: a mode's

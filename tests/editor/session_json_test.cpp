@@ -847,7 +847,7 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 			out.start.at[2] = 8.0;
 			out.start.yaw = 90.0;
 			break;
-		case F::PlayMode: out.play_mode = PlayMode::Install; break;
+		case F::PlayMode: out.play_mode = PlayMode::Strict; break;
 		case F::SaveBeforePlay: out.save_before_play = false; break;
 		case F::PreviewBackground: out.preview_background = PreviewBackground::Checker; break;
 		case F::KeepSelection: out.keep_selection = true; break;
@@ -1025,13 +1025,16 @@ static int test_settings_json() {
 	            expansion_back.settings.expansion == std::optional<std::string>("jxm") &&
 	            expansion_back.settings.builds_on == std::optional<std::string>("") && !expansion_back.settings.title);
 	// One setting named: the others are not set.
-	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":{\"play_mode\":\"install\"}}", back).empty());
-	TEST_EXPECT(back.settings.play_mode == std::optional<PlayMode>(PlayMode::Install) && back.settings.serial == 0 &&
+	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":{\"play_mode\":\"strict\"}}", back).empty());
+	TEST_EXPECT(back.settings.play_mode == std::optional<PlayMode>(PlayMode::Strict) && back.settings.serial == 0 &&
 	            !back.settings.title && !back.settings.mission && !back.settings.multiplayer && !back.settings.game_install &&
 	            !back.settings.runtime_executable && !back.settings.save_before_play);
 	// A play mode no mode has, or one that is no string, is refused naming the modes.
 	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":{\"play_mode\":\"retail\"}}", back)
-	                    .find("must be a play mode (runtime, install, strict), not \"retail\"") != std::string::npos);
+	                    .find("must be a play mode (runtime, strict), not \"retail\"") != std::string::npos);
+	// S26 K1: the install mode is gone.
+	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":{\"play_mode\":\"install\"}}", back)
+	                    .find("must be a play mode (runtime, strict), not \"install\"") != std::string::npos);
 	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":{\"play_mode\":true}}", back)
 	                    .find("settings.play_mode") != std::string::npos);
 	// The settings must be named (an empty object sets nothing); the keys before S13 A4 name nothing.
@@ -1055,7 +1058,7 @@ static int test_settings_json() {
 	const JsonValue plain = editor_request_to_json(request::play());
 	TEST_EXPECT(!plain.get("play_mode") && !plain.get("save_before_play"));
 	TEST_EXPECT(request_error("{\"kind\":\"play\",\"play_mode\":\"jointops\"}", back)
-	                    .find("\"play_mode\" must be a play mode (runtime, install, strict), not \"jointops\"") !=
+	                    .find("\"play_mode\" must be a play mode (runtime, strict), not \"jointops\"") !=
 	            std::string::npos);
 	TEST_EXPECT(request_error("{\"kind\":\"play\",\"save_before_play\":\"yes\"}", back).find("save_before_play") !=
 	            std::string::npos);
@@ -2063,7 +2066,7 @@ static int test_import_plan_json() {
 static int test_game_install_keys() {
 	SessionView view;
 	view.project.retail_directory = "C:/games/JO";
-	view.project.play_mode = PlayMode::Install;
+	view.project.play_mode = PlayMode::Strict;
 	view.project.save_before_play = false;
 	view.activity.play_run_mode = "strict";
 	view.project.retail_files = {"items.def", "main.mnu"};
@@ -2072,14 +2075,14 @@ static int test_game_install_keys() {
 	TEST_EXPECT(run.get_string("mission", "") == "04TR.bms");
 	const JsonValue import = view_section_to_json(view, ViewSection::Import);
 	const JsonValue preferences = view_section_to_json(view, ViewSection::Preferences);
-	TEST_EXPECT(run.get_string("play_mode", "") == "install" && !run.get_bool("save_before_play", true) &&
+	TEST_EXPECT(run.get_string("play_mode", "") == "strict" && !run.get_bool("save_before_play", true) &&
 	            run.get_string("ran_mode", "") == "strict" && run.get_string("game_install", "") == "C:/games/JO" &&
 	            !run.get("retail") && !run.get("retail_directory") && !run.get("in_install") && !run.get("strict") &&
 	            !run.get("ran_strict"));
 	TEST_EXPECT(view_section_to_json(SessionView(), ViewSection::Run).get_string("ran_mode", "x").empty());
 	TEST_EXPECT(import.get_int("install_files", 0) == 2 && !import.get("retail_files"));
 	TEST_EXPECT(preferences.get_string("game_install", "") == "C:/games/JO" &&
-	            preferences.get_string("play_mode", "") == "install" && !preferences.get_bool("save_before_play", true) &&
+	            preferences.get_string("play_mode", "") == "strict" && !preferences.get_bool("save_before_play", true) &&
 	            !preferences.get("play_in_install") && !preferences.get("retail_directory"));
 	return 0;
 }

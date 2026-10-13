@@ -115,36 +115,9 @@ inline constexpr const char *kInstallExecutable = "Jointops.exe";
 // crt_exit(0) @ 0x4a7c3f]. The first one held is a game running; Play passes none of those flags.
 inline constexpr const char *kInstallInstanceSemaphore = "semaphore:NOVALOGIC JOINT OPERATIONS:1";
 
-// The historical Jointops.exe /w /d /FRISK launch in `run_dir`: the game install's game opens its
-// archives and, under /d, its loose files from its working directory [orig: PFF_OpenAllArchives @
-// 0x4a4310, CWD-relative _lopen; docs/vfs/vfs-pff-mount-re.md] and writes there (game.cfg, its
-// saves, its _filelog.txt), so the run directory gets the build's files (one the game only reads
-// linked, copied where the file system cannot link it; every other, which the game may write,
-// copied), the install's executable and Bink DLL, a game.cfg, the build's own when the project has
-// one, and the install's game.cfg, player.sav and weapon.sav and the files it reads from its folder by
-// name (score.ini, earlyerr.txt, admin.cfg) where neither the project nor the run directory has its own
-// (seeds: the profile, bindings and device the player starts with). A seed never replaces the run
-// directory's own copy, newer or not: the game rewrites its game.cfg as it quits every run [orig: Game_Run
-// @ 0x4a7fff Game_SaveConfig after the loop], so an install's copy newer than the run's says only that the
-// install was played since; the run keeps what its own runs chose (the device its dialog named above
-// all), and a fresh Play (RunTake::fresh) seeds again. The seeds are not staged files (LaunchPlan::staged):
-// the next Play keeps them as the game left them. The required files are checked before any is copied,
-// so a missing one launches nothing. The game install and the build directory are only read. A build of
-// the expansion `expansion` (ADR 0046 S16) is staged as prepare_expansion_run stages it, the install's
-// own game.cfg and saves beside it, and the game launched `/w /d /exp <expansion> /FRISK`. `link` gives a
-// file a second name, as prepare_expansion_run's. `base_game` is the folder the expansion's base game is
-// staged from where it is not the install's (an expansion of a project's base game, ADR 0046 T5: that
-// project's export); "" the install's.
-bool prepare_retail_launch_plan(const std::string &retail_directory, const std::string &build_dir,
-                                const std::string &run_dir, LaunchPlan &out, Diagnostic &error,
-                                const std::string &expansion = std::string(),
-                                const std::string &copy_cache = std::string(), const FileLink &link = io::link_file,
-                                const std::string &base_game = std::string());
-
 // Strict Play in the game install: the game as a player who dropped the install's Jointops.exe into
 // the build's folder runs it. The run directory gets the build's files (one the game only reads linked,
-// copied where the file system cannot link it; every other copied, as prepare_retail_launch_plan stages
-// them, so no write reaches the build) and the install's executable and Bink DLL (copied), nothing else
+// copied where the file system cannot link it; every other copied, so no write reaches the build) and the install's executable and Bink DLL (copied), nothing else
 // of the install: no configuration, save, score table, early error text or admin configuration (a
 // game.cfg the build holds is the project's own and is staged with the rest), so the game boots on the
 // build alone and writes its own, which strict Play's own run directory (`.opennova/run/strict/<n>`)

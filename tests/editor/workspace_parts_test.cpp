@@ -194,7 +194,7 @@ int test_settings() {
 	TEST_EXPECT(shown.get("settings") && shown.get("settings")->get_string("title", "") == "Harbor" &&
 	            shown.get("settings")->get_bool("multiplayer", false) &&
 	            shown.get("settings")->get_string("play_mode", "") == "strict");
-	// A settings change with no serial (a menu's Play in the game install) leaves the dialog open.
+	// A settings change with no serial (a script's apply_project_settings) leaves the dialog open.
 	ProjectSettingsChange play;
 	play.play_mode = PlayMode::Runtime;
 	TEST_EXPECT(session.handle(request::apply_project_settings(play)) && settings.open);

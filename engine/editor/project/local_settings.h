@@ -28,9 +28,6 @@ struct LocalSettings {
 	// The project's game install (ADR 0046 d6/d10: project-local): what it imports from,
 	// depends on and plays in ("" = none). The editor and opennova-project both read it here.
 	std::string game_install;
-	// The folder Build to folder last built into (the UX round's problems lane: a build for players, a
-	// folder outside the project), which Build > Build to <it> builds into again ("" = none yet).
-	std::string build_folder;
 	// The documents open as the project last closed or the editor quit (the UX round's project lane), in
 	// their tabs' order, each with the record selected in it (its Document::locator, "" for none), and the
 	// one active: what the project reopens with. Written only when they changed.
