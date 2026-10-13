@@ -97,6 +97,14 @@ begin "Power Up AR-15"
 	type powerup
 	attrib: powerup notarget
 end
+begin "Power Up Pistol"
+	powerupdef PU_ONPIST
+	graphic onpist_3
+	disk_function POWERUP
+	id 102051
+	type powerup
+	attrib: powerup notarget
+end
 begin "Waypoint"
 	id 106005
 	type marker
