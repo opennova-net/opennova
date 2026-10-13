@@ -9,7 +9,7 @@
 // Pinned: the gun and the arms (fp_viewmodel_spec: a character with none draws none, an emplaced weapon
 // none); the character seeded and one chosen, its team; the actions' runs (FIRE's soundsetend on its
 // first tick, RELOAD's soundset as it begins and soundsetend 20 ticks on, the ticks the channel steps the
-// clip, the action handed to); the legs fired as the clock runs, again as a repeated one-shot plays again,
+// clip, the action handed to); the legs fired as the clock runs, a one-shot's once as the game plays it,
 // the tick-0 shot heard however many ticks the Play's first frame runs, muted, handed to the Shell; a
 // first-person clip's events not fired and its marks refused; a leg pressed (play_sound {leg}) and its
 // refusal; the eye: a posed camera standing where the game's presenter stands the view model
@@ -307,19 +307,19 @@ int test_actions_and_their_sets() {
 	            events->array[0].get("plays")->array.size() == 1 &&
 	            events->array[0].get("plays")->array[0].string.rfind("The game reads no first-person clip event", 0) == 0);
 
-	// The clock runs: the shot as the clock leaves the clip's tick 0, again as the repeated one-shot plays
-	// again (its 17 ticks and the hold), never the clip's footstep.
+	// The clock runs: the shot as the clock leaves the clip's tick 0, once (a one-shot plays once, as the game
+	// plays it), never the clip's footstep.
 	std::vector<ClipSoundFired> fired = project.run(60);
 	TEST_EXPECT(project.viewport()->clip_length_ticks() == 17);
-	TEST_EXPECT(fired.size() == 2 && fired[0].tick == 0 && fired[0].action == "fire" && fired[0].leg == "end" &&
+	TEST_EXPECT(fired.size() == 1 && fired[0].tick == 0 && fired[0].action == "fire" && fired[0].leg == "end" &&
 	            fired[0].set == "GS_TEST" && fired[0].bank == "game.lwf" && fired[0].state == "played" &&
-	            fired[0].slot == -1 && fired[1].tick == 48);
+	            fired[0].slot == -1);
 	if (!fired.empty()) {
 		TEST_EXPECT(fired[0].voices.size() == 1 && fired[0].voices[0].path == "sounds/gs_test.wav");
 		TEST_EXPECT(fired[0].words.rfind("FIRE finishes (tick 0 of its clip): GS_TEST in game.lwf: ", 0) == 0);
 		// What the Shell is handed.
 		const std::vector<ClipSoundPlay> plays = project.session.clip_sounds_since(fired[0].seq - 1);
-		TEST_EXPECT(plays.size() == 2 && plays[0].voices.size() == 1 && plays[0].voices[0].path == "sounds/gs_test.wav");
+		TEST_EXPECT(plays.size() == 1 && plays[0].voices.size() == 1 && plays[0].voices[0].path == "sounds/gs_test.wav");
 	}
 	shown = project.json();
 	const JsonValue *wire = shown.get("body")->get("animation")->get("sounds_fired");
@@ -328,14 +328,14 @@ int test_actions_and_their_sets() {
 	// The Play's first frame running four ticks at once (a slow frame; a 60 Hz frame runs one): the shot still
 	// heard on tick 0, the run from where the Play's seek put the clock heard whole.
 	fired = project.run(60, 4.0);
-	TEST_EXPECT(fired.size() == 2 && fired[0].tick == 0 && fired[0].set == "GS_TEST" && fired[1].tick == 48);
+	TEST_EXPECT(fired.size() == 1 && fired[0].tick == 0 && fired[0].set == "GS_TEST");
 	// Muted: fired and said, not handed over.
 	TEST_EXPECT(project.set(R"({"options": {"sound": {"mute": true}}})"));
 	fired = project.run(4);
 	TEST_EXPECT(fired.size() == 1 && fired[0].state == "muted");
 	TEST_EXPECT(project.set(R"({"options": {"sound": {"mute": false}}})"));
 
-	// The reload row: its begin on tick 0 and its end on the 20th, before the clip (33 ticks) plays again.
+	// The reload row: its begin on tick 0 and its end on the 20th.
 	TEST_EXPECT(project.select("anim_wpn_reload"));
 	fired = project.run(30);
 	TEST_EXPECT(fired.size() == 2 && fired[0].tick == 0 && fired[0].set == "RL_TEST" && fired[0].leg == "begin" &&
