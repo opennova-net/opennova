@@ -30,7 +30,8 @@ struct DiskMultiHeader {
 
 struct DiskSingle {
   char name[kSingleNameBytes];
-  uint16_t value_hi;
+  uint8_t word32;  // no reader reads it
+  uint8_t volume;  // +33
   uint16_t pad0;
   uint32_t reserved0[3];
   uint32_t path_offset;
@@ -50,7 +51,8 @@ struct DiskMulti {
 
 // [orig: SoundBank_LoadTriggerSets @ 0x75c548 reads this 48-byte record (0x30)]
 struct DiskPlaylist {
-  uint32_t member_count;
+  uint16_t member_count;     // the engine's u16 count [orig: @ 0x75bf58]
+  uint16_t cursor;           // the engine's sequential cursor [orig: @ 0x75bf8b]: written zero
   uint16_t falloff_radius;   // tool "Falloff": audible falloff radius
   uint16_t min_distance;     // tool "Min distance": proximity fade radius
   uint32_t flags;
@@ -218,7 +220,7 @@ bool parse_lwf_buffer(const uint8_t *data, size_t size, File &out, std::string &
 
     Single s{};
     s.name = fixed_string(ds.name, sizeof(ds.name));
-    s.value_hi = ds.value_hi;
+    s.volume = ds.volume;
     if (!has_filenames && s.name.size() <= 28) {
       std::memcpy(&s.entry_word28, ds.name + 28, sizeof(s.entry_word28));
     }
@@ -389,7 +391,7 @@ bool encode_lwf(const File &file, std::vector<uint8_t> &out, std::string &error)
       const uint32_t word = s.name.size() == 28 ? s.entry_word28 & ~0xFFu : s.entry_word28;
       std::memcpy(ds.name + 28, &word, sizeof(word));
     }
-    ds.value_hi = s.value_hi;
+    ds.volume = s.volume;
     // The path pointer: the slot's offset in an 'LWF1' bank, which the engine rebinds;
     // none in another, where a non-zero one would be taken as a path [orig: @ 0x75c671].
     ds.path_offset = file.header.magic == kMagic ? string_pool_off + i * static_cast<uint32_t>(kPathSlotBytes) : 0;
@@ -426,7 +428,7 @@ bool encode_lwf(const File &file, std::vector<uint8_t> &out, std::string &error)
   // Write playlists.
   for (const auto &pl : file.playlists) {
     DiskPlaylist dp{};
-    dp.member_count = static_cast<uint32_t>(pl.sndparm_indices.size());
+    dp.member_count = static_cast<uint16_t>(pl.sndparm_indices.size());
     dp.falloff_radius = pl.falloff_radius;
     dp.min_distance = pl.min_distance;
     dp.flags = pl.flags;

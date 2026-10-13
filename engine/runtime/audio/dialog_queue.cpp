@@ -41,7 +41,7 @@ const lwf::Single *find_dialog_wave(const lwf::File &sounds, const std::string &
 }
 
 int dialog_wave_volume(const lwf::Single &wave) {
-	const int byte = int(wave.value_hi >> 8);
+	const int byte = int(wave.volume);
 	return byte == 0 ? 255 : byte;
 }
 

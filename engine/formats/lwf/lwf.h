@@ -99,7 +99,10 @@ struct MultiHeader {
 
 struct Single {
   std::string name;
-  uint16_t value_hi = 0;          // high byte carries the numeric field
+  // The byte at +33, a dialog line's volume (0 full) [orig: sub_75BE10 @ 0x75be10,
+  // from Dialog_LoadAudioClip @ 0x44dd15]; +32 is no field (no reader reads it),
+  // written zero.
+  uint8_t volume = 0;
   // The single's file: string pool slot i, the one the engine binds single i to
   // whatever the entry's +48 offset says [orig: SoundBank_LoadTriggerSets @
   // 0x75c6e1..0x75c711]; empty in a non-'LWF1' bank, which binds none [orig: @ 0x75c671].
@@ -177,8 +180,11 @@ struct Playlist {
   std::vector<uint32_t> sndparm_indices;    // indices into sndparm table
   // The random-sequential anchor, the low 16 bits of the dword at +12, which the
   // engine reads where flag 0x100 is set [orig: SoundBank_SelectTriggerEntryFromBank
-  // @ 0x75bf20, the read @ 0x75c001] and sets it itself on a first play; read and
-  // written where a file's flags hold 0x100 (no shipped layer does), zero otherwise.
+  // @ 0x75bf20, the read @ 0x75c001], on the 0x80 path with 0x10 clear alone
+  // [orig: @ 0x75bfb3], and sets itself on a first play; read and written where a
+  // file's flags hold 0x100 (no shipped layer does), zero otherwise. (The layer's
+  // u16 at +2 is the engine's sequential cursor [orig: @ 0x75bf8b], which it keeps
+  // at run time: no field, written zero.)
   uint16_t anchor = 0;
 };
 

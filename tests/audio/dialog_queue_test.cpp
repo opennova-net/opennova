@@ -27,7 +27,7 @@ lwf::File sounds_with(const std::vector<std::pair<std::string, int>> &waves) {
 		lwf::Single single;
 		single.name = name;
 		single.path = name + ".wav";
-		single.value_hi = uint16_t(volume << 8);
+		single.volume = uint8_t(volume);
 		file.singles.push_back(single);
 		lwf::Multi set;
 		set.name = "SET_" + name;

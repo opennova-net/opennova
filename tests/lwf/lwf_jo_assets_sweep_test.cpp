@@ -32,7 +32,7 @@ bool same_bank(const File &a, const File &b) {
 		return false;
 	for (size_t i = 0; i < a.singles.size(); ++i) {
 		const auto &x = a.singles[i], &y = b.singles[i];
-		if (x.name != y.name || x.value_hi != y.value_hi || x.path != y.path ||
+		if (x.name != y.name || x.volume != y.volume || x.path != y.path ||
 				x.entry_word28 != y.entry_word28)
 			return false;
 	}
@@ -124,7 +124,7 @@ std::vector<uint8_t> stale_masked(const std::vector<uint8_t> &bytes, const File 
 	for (size_t i = 0; i < file.playlists.size(); ++i) {
 		const size_t at = layers + i * 48;
 		zero((u32(at + 8) & 0x100u) ? at + 14 : at + 12, at + 16);
-		zero(at + 16 + std::min<size_t>(u32(at), 8) * 4, at + 48);
+		zero(at + 16 + std::min<size_t>(u32(at) & 0xFFFFu, 8) * 4, at + 48);
 	}
 	const size_t members = layers + file.playlists.size() * 48;
 	for (size_t i = 0; i < file.sndparms.size(); ++i)
