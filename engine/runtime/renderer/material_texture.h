@@ -12,7 +12,7 @@ enum class MaterialTextureTransform : uint8_t { Unchanged, NormalFromAlpha, Hori
 
 // The reader a material row's loader decodes its one file with, chosen by the
 // row's type and the name, never by the file's bytes: the DDS reader (the file
-// handed whole to D3DX, which decodes it by its content: dds_reader_format),
+// handed whole to D3DX, which decodes it by its content: dds_read_by_content),
 // the TGA reader (a TGA header parse, which reads .TGA
 // and .MDT files alike and no other format), the PCX reader, or the chunk
 // container the dedicated producers read. None is a failed load (the
@@ -25,28 +25,6 @@ struct MaterialTextureSource {
 	std::string file; // empty with None: the loader opens no file
 	MaterialTextureReader reader = MaterialTextureReader::None;
 };
-// What the DDS reader decodes a file as. It hands the bytes whole to D3DX
-// (GTexture_InitFromMemory's D3DXCreateTextureFromFileInMemoryEx), whose
-// loader tries its formats in a fixed order and takes the first that accepts
-// them: BMP, PPM, DDS, JPEG, PNG, PFM, HDR, TGA, DIB. So a .dds holding a
-// TGA (or a PNG, JPEG or BMP) loads as that image. These are the formats of
-// that order the port decodes, each by D3DX's own acceptance test: "BM" with
-// a file size that fits, "DDS " with its 124-byte header, libjpeg's SOI
-// marker, the PNG signature, and the TGA header checks. None for anything
-// else: no bytes a PPM, PFM or HDR test accepts pass a later test of these
-// (their second byte fails the TGA test's colour-map type), so skipping them
-// changes no answer, and the port decodes neither those nor a bare DIB (tried
-// after the TGA), which fail to the checkerboard where D3DX would decode them.
-// [orig: D3DXTex::CImage::Load @ 0x6DF1DC, the order @ 0x6DF212..0x6DF242,
-// the loop @ 0x6DF286..0x6DF397; LoadBMP @ 0x6DE17B; LoadDDS @
-// 0x6DDA66..0x6DDA91; CImage_LoadJPEG @ 0x6DC576 (D3DX_JPEG_ReadSOI @
-// 0x71BEF0); D3DXTex_LoadPNGFromMemory @
-// 0x6DD513; CImage_LoadTGA @ 0x6DCA3F..0x6DCBB3; reached from
-// GTexture_InitFromMemory @ 0x687DF0 through D3DXCreateTextureFromFileInMemoryEx
-// @ 0x691C30]
-enum class DdsReaderFormat : uint8_t { None, Bmp, Dds, Jpeg, Png, Tga };
-DdsReaderFormat dds_reader_format(const uint8_t *bytes, size_t size);
-
 // A test on a file name: whether the files hold it (`exists`), or whether the
 // session serves its loose file first (`loose_first`: the loose-first search
 // policy with that loose file there). An empty test answers false.

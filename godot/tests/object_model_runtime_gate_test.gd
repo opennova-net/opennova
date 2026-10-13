@@ -297,7 +297,7 @@ func _armory_exterior(path: String) -> ShaderMaterial:
 func test_a_dds_stage_file_decodes_by_its_content() -> void:
 	# armory material 0 names armry.tga; its DDS sibling armry.dds holds a TGA
 	# here. The DDS reader hands the file whole to D3DX, which takes an image by
-	# its content (renderer::dds_reader_format, retail's D3DXTex CImage::Load
+	# its content (renderer::dds_read_by_content, retail's D3DXTex CImage::Load
 	# order), so the TGA binds, with the full chain D3DX builds. The same in a
 	# res:// folder: its file is decoded by the row's reader too, never by an
 	# importer that goes by the name.
