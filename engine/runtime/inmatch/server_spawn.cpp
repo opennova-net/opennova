@@ -469,8 +469,8 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// non-tail disconnect can be reused without colliding with a later live player.
 	// [orig: Server_PlayerAdd @0x51cbc0 writes the player into dword_A87048[slot]; 0x4D/0x16/0x46 read it]
 	// D-NET-132: link.owned_entity (bound above) IS the roster binding — the reply builders read the
-	// wire handle off owned_entity.packed and the team off the live entity (team @entity+344). Only the
-	// roster ORDER (player_slot) and the echoed name stay on conn.reply.
+	// wire handle off owned_entity.packed, and the team is the slot's own, assigned_team (D-NET-651).
+	// Only the roster ORDER (player_slot) and the echoed name stay on conn.reply.
 	conn.reply.player_slot = *player_slot;
 	// Golden parity: a player carries a NAME in BOTH its 0x0C organic record (entity name, read by
 	// build_pool0_organic_batch) and its 0x46 player-sync (conn.reply.player_name). The host's own

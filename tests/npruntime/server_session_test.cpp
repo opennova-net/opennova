@@ -298,6 +298,117 @@ bool check_host_scoreboard_status_and_counts() {
 	              "past the round end (state 7) the 0x16 lists no rows");
 }
 
+// The 0x16 row's team is the listed slot's own team byte (+0x1A0), packed
+// 2 * team beside the spectator latch, never its body's: a split slot (a
+// script team write to the player body stores the entity byte alone) is
+// listed under its slot team, with or without a World (D-NET-651).
+// [orig: Server_BuildAndBroadcastScoreboard `mov dl, [esi+1A0h]` @0x50DAF2,
+//  stored @0x50DAFB; NetPacket_SerializeScoreboard0x16 @0x504C2E..0x504C30;
+//  Entity_SetTeamByNetId @0x43C680]
+bool check_scoreboard_row_team_is_the_slot_team() {
+	opennova::inmatch::GameConfig config;
+	config.game_type = opennova::game_type::kTeamDeathmatch;
+	opennova::world::World world;
+	world.registry.configure_pool(0, 4);
+	auto spawn_player = [&](uint8_t team) {
+		opennova::world::Entity entity;
+		entity.kind = opennova::world::EntityKind::Organic;
+		entity.team = team;
+		entity.alive = true;
+		return world.registry.spawn(0, entity);
+	};
+	std::vector<opennova::inmatch::NapiNPConnection> roster(2);
+	for (uint8_t slot = 0; slot < roster.size(); ++slot) {
+		roster[slot].phase = opennova::inmatch::ConnectionPhase::InMatch;
+		roster[slot].burst.spawned = true;
+		roster[slot].reply.player_slot = slot;
+		roster[slot].assigned_team_valid = true;
+	}
+	roster[0].assigned_team = 1;
+	roster[0].link.owned_entity = spawn_player(2); // slot team 1, body team 2
+	roster[1].assigned_team = 2;
+	roster[1].link.owned_entity = spawn_player(1); // slot team 2, body team 1
+	auto row_flags = [&](opennova::world::World *source, uint8_t slot) {
+		const opennova::ProtocolMessage message =
+				opennova::inmatch::build_player_list_message(config, roster, source);
+		opennova::PlayerList list;
+		if (!opennova::decode_player_list(message.payload.data(), message.payload.size(), list))
+			return 0xFF;
+		for (const opennova::PlayerListRow &row : list.players)
+			if (row.slot_id == slot) return static_cast<int>(row.flags);
+		return 0xFF;
+	};
+	return expect(row_flags(&world, 0) == 0x02 && row_flags(&world, 1) == 0x04,
+	              "a split slot's 0x16 row carries its slot team, not its body's") &&
+	       expect(row_flags(nullptr, 0) == 0x02 && row_flags(nullptr, 1) == 0x04,
+	              "the World-less 0x16 row carries the slot team too");
+}
+
+// The S2C 0x46 field-0x0004 team and the S2C 0x75 byte 1 are the slot's own
+// team byte (+0x1A0) too, never its body's: a split slot's sync and its
+// entity-state reply carry its slot team, World or not (D-NET-651).
+// [orig: NetPacket_SerializePlayerSync0x46 - slot+4 @0x5060B9,
+//  `mov cl, [ebx+1A0h]` @0x5060D1; NetPacket_SerializeHostEntityState
+//  `mov dl, [eax+1A0h]` @0x5108D0; Entity_SetTeamByNetId @0x43C680]
+bool check_player_sync_and_0x75_carry_the_slot_team() {
+	opennova::inmatch::GameConfig config;
+	config.game_type = opennova::game_type::kTeamDeathmatch;
+	opennova::world::World world;
+	world.registry.configure_pool(0, 4);
+	auto spawn_player = [&](uint8_t team) {
+		opennova::world::Entity entity;
+		entity.kind = opennova::world::EntityKind::Organic;
+		entity.team = team;
+		entity.alive = true;
+		return world.registry.spawn(0, entity);
+	};
+	std::vector<opennova::inmatch::NapiNPConnection> roster(2);
+	for (uint8_t slot = 0; slot < roster.size(); ++slot) {
+		roster[slot].type = opennova::inmatch::NapiNPConnection::kTypeServerSide;
+		roster[slot].phase = opennova::inmatch::ConnectionPhase::InMatch;
+		roster[slot].admission_stage = opennova::inmatch::GameAdmissionStage::Complete;
+		roster[slot].burst.spawned = true;
+		roster[slot].reply.player_slot = slot;
+		roster[slot].assigned_team_valid = true;
+	}
+	roster[0].assigned_team = 1;
+	roster[0].link.owned_entity = spawn_player(2); // slot team 1, body team 2
+	roster[1].assigned_team = 2;
+	roster[1].link.owned_entity = spawn_player(1); // slot team 2, body team 1
+	auto sync_team = [&](opennova::world::World *source, uint8_t slot) {
+		const std::vector<opennova::ProtocolMessage> replies =
+				opennova::inmatch::dispatch_session_replies(config, roster[1 - slot],
+						{opennova::make_protocol_message(opennova::c2s::PLAYER_SYNC_REQUEST,
+								{slot, uint8_t(opennova::kPlayerSyncHasTeamByte), 0x00})},
+						100, roster, source);
+		for (const opennova::ProtocolMessage &reply : replies) {
+			opennova::PlayerSync sync;
+			if (reply.tag == opennova::s2c::PLAYER_SYNC &&
+					opennova::decode_player_sync(reply.payload.data(), reply.payload.size(), sync) &&
+					sync.slot_id == slot && (sync.field_bitmask & opennova::kPlayerSyncHasTeamByte) != 0)
+				return static_cast<int>(sync.team);
+		}
+		return 0xFF;
+	};
+	auto state_team = [&](opennova::world::World *source, uint8_t slot) {
+		const std::vector<opennova::ProtocolMessage> replies =
+				opennova::inmatch::dispatch_session_replies(config, roster[slot],
+						{opennova::make_protocol_message(opennova::c2s::PING, {})}, 100, roster,
+						source);
+		for (const opennova::ProtocolMessage &reply : replies)
+			if (reply.tag == opennova::s2c::SPECTATOR_FLAGS && reply.payload.size() == 2)
+				return static_cast<int>(reply.payload[1]);
+		return 0xFF;
+	};
+	bool ok = expect(sync_team(&world, 0) == 1 && sync_team(&world, 1) == 2,
+	                 "a split slot's 0x46 team byte is its slot team, not its body's");
+	ok = expect(sync_team(nullptr, 0) == 1 && sync_team(nullptr, 1) == 2,
+	            "the World-less 0x46 team byte is the slot team too") && ok;
+	ok = expect(state_team(&world, 0) == 1 && state_team(&world, 1) == 2,
+	            "a split slot's 0x75 byte 1 is its slot team, not its body's") && ok;
+	return ok;
+}
+
 void add_retail_game_environment(opennova::ClientAuth &auth) {
 	for (const auto &field : {
 			std::pair{"BT", "0"},
@@ -5190,6 +5301,8 @@ int main() {
 	ok = check_scoreboard_message_is_transient() && ok;
 	ok = check_scoreboard_projects_every_retail_mode_shape() && ok;
 	ok = check_host_scoreboard_status_and_counts() && ok;
+	ok = check_scoreboard_row_team_is_the_slot_team() && ok;
+	ok = check_player_sync_and_0x75_carry_the_slot_team() && ok;
 	ok = check_connection_mode_table() && ok;
 	ok = check_single_player_signature() && ok;
 	ok = check_script_change_reaches_the_same_frame() && ok;

@@ -431,11 +431,12 @@ struct SessionReplyState {
 	// is bound yet (pose_for_conn prefers the live registry Entity once owned_entity binds).
 	PreSpawnJoinerPose pre_spawn_pose{};
 
-	// The reactive-reply ROSTER IDENTITY. D-NET-132 / ADR 0013 §6.9 COLLAPSED the cached team + entity
-	// handle onto link.owned_entity: `CAdminServer_HandleStatus @0x402e30` reads name/team/class OFF the
-	// pool-0 entity (team @entity+344), so the reply builders now read the handle from
-	// link.owned_entity.packed and the team from the live registry Entity through it — not a parallel
-	// cache. player_slot (roster ORDER, not stored on the entity) stays a field; player_name is the
+	// The reactive-reply ROSTER IDENTITY. D-NET-132 / ADR 0013 §6.9 COLLAPSED the cached entity
+	// handle onto link.owned_entity: the reply builders read the handle from link.owned_entity.packed,
+	// not a parallel cache. Their team byte (the 0x16 rows, the 0x46 field 0x0004, the 0x75 byte 1) is
+	// the slot's own, assigned_team (slot+416), as `CAdminServer_HandleStatus @0x402e30` reads it too
+	// (`movzx eax, [ebx+158h]` @0x40316A over slot+0x48), never the entity's (D-NET-651).
+	// player_slot (roster ORDER, not stored on the entity) stays a field; player_name is the
 	// echoed game ClientAuth.NA the entity does not carry in the reimpl. The pre-World reactive path
 	// (bind_session_reply_player) now stamps link.owned_entity with the bare wire handle instead of a
 	// separate handle cache, so a World-less session-responder host resolves the same way.
