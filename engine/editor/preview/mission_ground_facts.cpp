@@ -278,19 +278,19 @@ void MissionGround::read_(const std::shared_ptr<const FileSource> &files, const 
 		};
 		terrain::resolve_tileset_surface_table(tile_files, trn_mission_tilestrip(trn, header.tile_set), tile_surface_.data());
 	}
-	// The water plane by the game's ladder: the mission's override, the environment's, the terrain's
-	// (water_frame.h; the device's Water resolves the same), the environment as the mission's load makes it
-	// (env::load_mission_env_config: the terrain's .trn, overcast.def, then the .env over them).
+	// The water plane by the game's ladder (env::mission_water_rung, its witnesses there; the
+	// device's Water resolves the same): the mission's override, then the environment as the
+	// mission's load makes it (env::load_mission_env_config: the terrain's .trn, overcast.def, then
+	// the .env over them, the earlier passes standing where the .env is not there), then the
+	// terrain's.
 	const env::BmsEnvOverrides overrides = env::bms_env_overrides_from_header(header.attrib_flags, header.water_override,
 			header.fog_override, header.fog_color, header.water_color, header.water_murk);
 	env::MissionEnv mission_env;
-	const bool env_loaded =
-			env::load_mission_env_config(*stamped, header.terrain, header.environment, overrides, mission_env);
-	env::EnvironmentState state;
-	if (env_loaded) state.set_config(&mission_env.config, true);
-	const env::WaterHeightRungs rungs =
-			env::mission_water_rungs(overrides, loaded ? float(trn.water_height) * 0.5f : 0.0f, loaded);
-	const float height = env::resolve_water_height(rungs, env_loaded ? &state : nullptr, 0.0f);
+	(void)env::load_mission_env_config(
+			*stamped, header.terrain, header.environment, overrides, mission_env);
+	const float height = env::mission_water_rung(
+			overrides, mission_env.config, loaded ? float(trn.water_height) * 0.5f : 0.0f)
+								 .height;
 	// As the game's world takes it (Simulation::set_water_z): the plane in 16.16, 0 none.
 	water_z_ = static_cast<int32_t>(double(height) * io::kFp16OneD);
 	stamps_ = stamped->stamps();
