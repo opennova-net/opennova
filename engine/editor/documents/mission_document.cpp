@@ -27,7 +27,6 @@
 #include <runtime/audio/dialog_queue.h>
 #include <runtime/hud/game_text_lookup.h>
 #include <runtime/mission/mission_sidecars.h>
-#include <runtime/mission/mission_text.h>
 
 namespace opennova::editor {
 
@@ -344,12 +343,6 @@ const std::vector<MissionDocument::StopPlace> &MissionDocument::stops_of(const N
 	const Lookups &made = lookups();
 	const auto found = made.stops.find(marker.id);
 	return found == made.stops.end() ? kNone : found->second;
-}
-
-int MissionDocument::location_of(const Node &row) const {
-	const Lookups &made = lookups();
-	const auto found = made.locations.find(row.id);
-	return found == made.locations.end() ? 0 : found->second;
 }
 
 size_t MissionDocument::count_of(MissionKind kind) const {
@@ -1038,7 +1031,14 @@ void MissionDocument::refine_field(const NodeAddress &address, FieldUse &use) co
 		use.key_first = first;
 		use.key_last = last;
 	};
-	if (!address.child && is_entity_kind(address.kind) && id == "name_index") keyed(hud::kPeopleNameKey, 1, INT32_MAX);
+	// A def-type 2044 marker's name index keys its LOCATION%03i in Locations first, any number
+	// [orig: Entity_SpawnFromBMSRecord @0x40F196..0x40F1A4].
+	if (!address.child && is_entity_kind(address.kind) && id == "name_index") {
+		const Node *node = row(address.row);
+		const int32_t type = node && is_entity_kind(node->kind) ? static_cast<const EntityRow &>(*node).native.type_id : 0;
+		if (type == def::DEF_TYPE_NAMED_LOCATION) keyed(hud::kLocationKey, 0, INT32_MAX);
+		else keyed(hud::kPeopleNameKey, 1, INT32_MAX);
+	}
 	// A waypoint's name id (record +0x60), which a type-6005 or 6006 marker's spawn keeps for the waypoint
 	// HUD, keying STRWPNAME%03i in WPNames, any number [orig: Entity_SpawnFromBMSRecord @0x40f0ad,
 	// @0x40f176: entity+672; HUD_GetWaypointName @0x59473d]; the type-6005 spawn looks the name up
@@ -1182,17 +1182,10 @@ const MissionDocument::Lookups &MissionDocument::lookups() const {
 			made.zones.emplace(static_cast<const AreaRow &>(*row).native.id, row->id);
 		}
 	}
-	// The markers' location numbers, in spawn order (mission_references' LOCATION keys) [orig:
-	// Entity_SpawnFromBMSRecord @0x40f182..0x40f221: each def-type 2044 marker registers the next
-	// location name; runtime/mission/mission_text.h location_numbers].
-	const std::vector<const Node *> &markers = made.by_kind[size_t(K::Marker)];
-	std::vector<bms::Entity> marker_records;
-	marker_records.reserve(markers.size());
-	for (const Node *row : markers) marker_records.push_back(static_cast<const EntityRow &>(*row).native);
-	const std::vector<int32_t> locations = mission::location_numbers(marker_records);
-	for (size_t i = 0; i < markers.size(); ++i) {
-		if (locations[i]) made.locations.emplace(markers[i]->id, int(locations[i]));
-		if (marker_records[i].type_id == kNumberedMarkerType) made.numbered.emplace(marker_records[i].wp_number, markers[i]->id);
+	// The first type-6088 marker of each wp_number.
+	for (const Node *row : made.by_kind[size_t(K::Marker)]) {
+		const bms::Entity &marker = static_cast<const EntityRow &>(*row).native;
+		if (marker.type_id == kNumberedMarkerType) made.numbered.emplace(marker.wp_number, row->id);
 	}
 	// Each marker's stops, the paths in their order.
 	for (const Node *row : made.by_kind[size_t(K::WaypointPath)]) {
@@ -1533,9 +1526,11 @@ void mission_text_edges(const MissionDocument &document, const NodeAddress &addr
 	const bms::Header &head = header->native.header;
 	if (!address.child && is_entity_kind(row->kind)) {
 		const bms::Entity &entity = static_cast<const EntityRow &>(*row).native;
-		// [orig: Entity_SpawnFromBMSRecord @0x40f182..0x40f221: each def-type 2044 marker registers the
-		// next location name, in spawn order]
-		if (const int location = document.location_of(*row)) text(std::string(), hud::kLocationKey, location);
+		// [orig: Entity_SpawnFromBMSRecord @0x40F17C..0x40F20C: a def-type 2044 marker names itself by
+		// sprintf("LOCATION%03i", rec+4), its own name_index, any number (0 keys LOCATION000); the
+		// runtime's install_mission_location_names, D-NET-511]
+		if (entity.type_id == def::DEF_TYPE_NAMED_LOCATION)
+			text("name_index", hud::kLocationKey, number_of("name_index", entity.name_index));
 		// [orig: Entity_SpawnFromBMSRecord @0x40ecbf..0x40ed0a: sprintf("STRNAME%03i", rec+4), gated
 		// on the index being nonzero]
 		if (const int64_t name = number_of("name_index", entity.name_index)) text("name_index", hud::kPeopleNameKey, name);
