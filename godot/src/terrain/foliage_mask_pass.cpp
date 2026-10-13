@@ -869,7 +869,8 @@ void FoliageMaskPass::republish_globals() {
 	if (server == nullptr) {
 		return;
 	}
-	if (target_texture_.is_valid()) {
+	// A released pass's target is gone: it binds no dead texture.
+	if (target_texture_.is_valid() && target_.is_valid()) {
 		server->global_shader_parameter_set("opennova_foliage_mask_depth", target_texture_);
 		texture_bound_ = true;
 	}

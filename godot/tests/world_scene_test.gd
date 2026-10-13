@@ -71,7 +71,13 @@ func test_rows_built_from_the_table_match_the_packaged_scene() -> void:
 
 
 func test_every_property_the_packaged_scene_sets_the_built_rows_hold() -> void:
-	var state := (load(GAME_WORLD_SCENE) as PackedScene).get_state()
+	# Uncached: the packaged ClearColor's Environment is shared with every
+	# GameWorld instanced from the cached scene, whose frames write its clear.
+	var packaged := (
+		ResourceLoader.load(GAME_WORLD_SCENE, "", ResourceLoader.CACHE_MODE_IGNORE_DEEP)
+		as PackedScene
+	)
+	var state := packaged.get_state()
 	var parent := Node3D.new()
 	autofree(parent)
 	WorldSceneTable.build(parent, false)
