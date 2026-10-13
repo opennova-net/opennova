@@ -100,23 +100,6 @@ void SessionCore::start() {
 	view_.project.recent_projects = settings.recent_projects;
 	read_recent_details();
 	show_installs();
-	// Play's settings are each project's (its local.json): the ones an earlier editor kept in the editor's
-	// settings for every project are said once and dropped, the file written again without them, read by
-	// nothing (pre-1.0: no reader carries them into a project). A project with none of its own plays in the
-	// OpenNova runtime.
-	if (!settings.retired_play.empty()) {
-		std::string held;
-		for (const std::string &each : settings.retired_play) held += (held.empty() ? "" : ", ") + each;
-		note("note: Play's settings are each project's now, kept in its .opennova/local.json. The editor's settings "
-		     "held Play settings an earlier editor kept for every project (" + held + "), which nothing reads: "
-		     "a project plays in the OpenNova runtime until it is set to play in the game install (File > Project "
-		     "settings..., or the Build menu), and saves first before Play unless set not to. The editor's settings "
-		     "are written again without them.");
-		Preferences kept = settings;
-		kept.retired_play.clear();
-		Diagnostic unwritten;
-		if (!preferences_.write(kept, unwritten)) report(unwritten);
-	}
 	view_.project.runtime_setting = settings.runtime_executable;
 	view_.project.import_dependencies = settings.import_dependencies;
 	view_.project.preview_background = settings.preview_background;
