@@ -16,8 +16,10 @@
 //
 // The writer writes every record from its fields (ADR 0003): the bytes a name's
 // field or a file's slot holds past its terminator, a set's or a layer's offset
-// slots past its count, a layer's scratch dword and the trigger records (which no
-// reader interprets) are written zero where the authoring tools left stale memory,
+// slots past its count, a layer's scratch dword where no flag makes it the anchor,
+// the trigger records (which no reader interprets), the reserved words of the
+// headers, a single's runtime words (+34..+47) and a member's two trailing words
+// are written zero where the authoring tools left stale memory,
 // and the string pool is a 256-byte slot per single made from its path; a shipped
 // bank written back reads as it was read, its bytes otherwise
 // (docs/audio/lwf-dbf-sound-re.md). A name or a path as wide as its field is
@@ -85,15 +87,14 @@ struct Header {
   uint32_t trigger_count = 0;
   uint32_t multi_header_off = 0;  // offset to MultiHeader
   uint32_t string_pool_off = 0;   // offset to start of string pool
-  uint32_t reserved1 = 0;         // as read; no reader of the engine's reads it
+  // (+24 is no field: no reader of the engine's reads it; written zero.)
 };
 
 struct MultiHeader {
   uint32_t header_size = 0;       // expected 20
   uint32_t multi_count = 0;
   uint32_t multi_table_off = 0;   // offset to first MultiEntry
-  uint32_t reserved0 = 0;
-  uint32_t reserved1 = 0;
+  // (+12 and +16 are no fields: no reader reads them; written zero.)
 };
 
 struct Single {
@@ -110,8 +111,12 @@ struct Single {
   // character's). Read and written in such a bank where the name is 28
   // characters or fewer, its low byte the terminator at 28; zero otherwise.
   uint32_t entry_word28 = 0;
-  uint16_t pad0 = 0;
-  std::array<uint32_t, 3> reserved0{};
+  // (+34..+47 are no fields: the engine's runtime words, the preload mark at +34
+  // [orig: SoundBank_LoadTriggerSets @ 0x75c5fd], the loaded flag at +35 and the
+  // wave pointer at +36 [orig: sub_75BC20 @ 0x75bc20], which a file's set +35
+  // would make the engine take as a wave buffer: written zero; +48, the path
+  // pointer, is the pool slot's offset in an 'LWF1' bank, zero in another, which
+  // binds none [orig: @ 0x75c671].)
 };
 
 struct Multi {
@@ -170,10 +175,11 @@ struct Playlist {
   uint16_t min_distance = 0;
   uint32_t flags = 0;                       // PlaylistFlags bitmask
   std::vector<uint32_t> sndparm_indices;    // indices into sndparm table
-  // (The dword at +12 is no field: the engine reads its low 16 bits as the
-  // random-sequential anchor only after it has set flag 0x100 itself
-  // [orig: SoundBank_SelectTriggerEntryFromBank @ 0x75bf20]; no shipped layer
-  // holds 0x100, and the writer writes it zero.)
+  // The random-sequential anchor, the low 16 bits of the dword at +12, which the
+  // engine reads where flag 0x100 is set [orig: SoundBank_SelectTriggerEntryFromBank
+  // @ 0x75bf20, the read @ 0x75c001] and sets it itself on a first play; read and
+  // written where a file's flags hold 0x100 (no shipped layer does), zero otherwise.
+  uint16_t anchor = 0;
 };
 
 struct Sndparm {
@@ -182,7 +188,7 @@ struct Sndparm {
   uint32_t random_pitch_scaled = 0;         // additive jitter: (range * rand8) >> 8 [orig: @ 0x75cedc]
   uint32_t volume = 0;                      // 0..255 member volume [orig: @ 0x75cf25]
   uint32_t clamp_volume = 0;                // ceiling on the distance-scaled volume + pan amplitude [orig: SoundBank_CalcDistanceVolPan @ 0x75ca65]
-  std::array<uint32_t, 2> reserved{};       // trailing dwords; unread by the engine player
+  // (The two trailing dwords are no fields: unread by the engine's player; written zero.)
 };
 
 // The 12-byte trigger records' width: the engine reads the table and never

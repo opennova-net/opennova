@@ -85,6 +85,12 @@ int main(int argc, char **argv) {
 			for (size_t i = 2; i < 16; ++i)
 				TEST_EXPECT(written[28 + 0x24 + i] == 0);
 		}
+		// A name as wide as its 24-byte field comes back as it went (no terminator).
+		read.groups[0].group_name = std::string(24, 'G');
+		TEST_EXPECT(opennova::dbf::encode_dbf(read, written, error));
+		opennova::dbf::File back;
+		TEST_EXPECT(opennova::dbf::parse_dbf_memory(written.data(), written.size(), back, error) &&
+				!back.groups.empty() && back.groups[0].group_name == std::string(24, 'G'));
 	}
 
 	// The retail leg: 00TRg's bank (11 dialogs; dlg001 -> Z00gR100).

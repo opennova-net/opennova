@@ -78,8 +78,7 @@ struct Line {
 	uint8_t def_id_index = 0xFF;
 	uint8_t delay = 0;
 	uint32_t param = 0;
-	uint32_t resd0 = 0;
-	uint32_t resd1 = 0;
+	// (+0x3C and +0x40 are no fields: no reader reads them; written zero.)
 };
 
 struct Group {

@@ -206,11 +206,9 @@ bool parse_lwf_buffer(const uint8_t *data, size_t size, File &out, std::string &
 
   // Fill header structures.
   out.header = Header{raw_header.header_size, raw_header.magic, raw_header.single_count,
-                      raw_header.trigger_count, raw_header.multi_header_off, raw_header.string_pool_off,
-                      raw_header.reserved1};
+                      raw_header.trigger_count, raw_header.multi_header_off, raw_header.string_pool_off};
   out.multi_header = MultiHeader{raw_multi_header.header_size, raw_multi_header.multi_count,
-                                 raw_multi_header.multi_table_off, raw_multi_header.reserved0,
-                                 raw_multi_header.reserved1};
+                                 raw_multi_header.multi_table_off};
 
   // Singles.
   out.singles.reserve(raw_header.single_count);
@@ -224,8 +222,6 @@ bool parse_lwf_buffer(const uint8_t *data, size_t size, File &out, std::string &
     if (!has_filenames && s.name.size() <= 28) {
       std::memcpy(&s.entry_word28, ds.name + 28, sizeof(s.entry_word28));
     }
-    s.pad0 = ds.pad0;
-    s.reserved0 = {ds.reserved0[0], ds.reserved0[1], ds.reserved0[2]};
 
     if (!has_filenames) {
       // No filename table: the single names no file [orig: @ 0x75c671].
@@ -282,6 +278,7 @@ bool parse_lwf_buffer(const uint8_t *data, size_t size, File &out, std::string &
     p.falloff_radius = dp.falloff_radius;
     p.min_distance = dp.min_distance;
     p.flags = dp.flags;
+    if (dp.flags & 0x100u) p.anchor = static_cast<uint16_t>(dp.reserved0 & 0xFFFFu);
 
     for (uint32_t j = 0; j < dp.member_count && j < kMaxSndparmsPerPlaylist; ++j) {
       const uint32_t raw = dp.member_offsets[j];
@@ -316,7 +313,6 @@ bool parse_lwf_buffer(const uint8_t *data, size_t size, File &out, std::string &
     s.random_pitch_scaled = ds.random_pitch_scaled;
     s.volume = ds.volume;
     s.clamp_volume = ds.clamp_volume;
-    s.reserved = {ds.reserved0, ds.reserved1};
     if (s.single_index >= out.singles.size()) {
       error = "sndparm references out-of-range single";
       return false;
@@ -381,7 +377,6 @@ bool encode_lwf(const File &file, std::vector<uint8_t> &out, std::string &error)
   hdr.trigger_count = trigger_count;
   hdr.multi_header_off = multi_header_off;
   hdr.string_pool_off = string_pool_off;
-  hdr.reserved1 = file.header.reserved1;
   write_val(out, hdr);
 
   // Write singles.
@@ -395,11 +390,9 @@ bool encode_lwf(const File &file, std::vector<uint8_t> &out, std::string &error)
       std::memcpy(ds.name + 28, &word, sizeof(word));
     }
     ds.value_hi = s.value_hi;
-    ds.pad0 = s.pad0;
-    ds.reserved0[0] = s.reserved0[0];
-    ds.reserved0[1] = s.reserved0[1];
-    ds.reserved0[2] = s.reserved0[2];
-    ds.path_offset = string_pool_off + i * static_cast<uint32_t>(kPathSlotBytes);
+    // The path pointer: the slot's offset in an 'LWF1' bank, which the engine rebinds;
+    // none in another, where a non-zero one would be taken as a path [orig: @ 0x75c671].
+    ds.path_offset = file.header.magic == kMagic ? string_pool_off + i * static_cast<uint32_t>(kPathSlotBytes) : 0;
     write_val(out, ds);
   }
 
@@ -407,13 +400,11 @@ bool encode_lwf(const File &file, std::vector<uint8_t> &out, std::string &error)
   // kept, each written zero (no reader interprets one).
   out.insert(out.end(), static_cast<size_t>(trigger_count) * kTriggerRecordBytes, uint8_t{0});
 
-  // Write the multi header, its reserved words as read.
+  // Write the multi header, its reserved words zero.
   DiskMultiHeader mhdr{};
   mhdr.header_size = multi_header_size;
   mhdr.multi_count = multi_count;
   mhdr.multi_table_off = multi_table_off;
-  mhdr.reserved0 = file.multi_header.reserved0;
-  mhdr.reserved1 = file.multi_header.reserved1;
   write_val(out, mhdr);
 
   // Write multis.
@@ -439,6 +430,7 @@ bool encode_lwf(const File &file, std::vector<uint8_t> &out, std::string &error)
     dp.falloff_radius = pl.falloff_radius;
     dp.min_distance = pl.min_distance;
     dp.flags = pl.flags;
+    if (pl.flags & 0x100u) dp.reserved0 = pl.anchor;
     for (size_t i = 0; i < pl.sndparm_indices.size() && i < kMaxSndparmsPerPlaylist; ++i) {
       dp.member_offsets[i] = sndparms_off + pl.sndparm_indices[i] * sndparm_entry_size;
     }
@@ -453,8 +445,6 @@ bool encode_lwf(const File &file, std::vector<uint8_t> &out, std::string &error)
     ds.random_pitch_scaled = sp.random_pitch_scaled;
     ds.volume = sp.volume;
     ds.clamp_volume = sp.clamp_volume;
-    ds.reserved0 = sp.reserved[0];
-    ds.reserved1 = sp.reserved[1];
     write_val(out, ds);
   }
 

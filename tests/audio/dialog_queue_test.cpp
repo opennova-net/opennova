@@ -172,6 +172,12 @@ int test_a_wave_found_as_the_bank_finds_it() {
 	TEST_EXPECT(find_dialog_wave(sounds, "Z01R100") == nullptr);
 	sounds.singles[0].entry_word28 = 1;
 	TEST_EXPECT(find_dialog_wave(sounds, "Z01R100") == &sounds.singles[0]);
+	// A name past 28 characters: its 29th byte sits in the dword the lookup tests, so it always
+	// finds.
+	const std::string long_name(29, 'L');
+	sounds.singles[1].name = long_name;
+	sounds.singles[1].entry_word28 = 0;
+	TEST_EXPECT(find_dialog_wave(sounds, long_name) == &sounds.singles[1]);
 	return 0;
 }
 

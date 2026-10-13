@@ -117,15 +117,20 @@ int main() {
 		            parsed.sndparms.size() == 3);
 		for (const auto &single : parsed.singles) TEST_EXPECT(single.path.empty());
 		TEST_EXPECT(parsed.singles.size() == 3 && parsed.singles[2].name == "TONE");
-		// Written back: the records as they were, the string pool (which no reader of such a bank
-		// reads) a zero slot per single.
+		// Written back: the records as they were but each single's +48 path pointer zero (such a
+		// bank binds no path, and the engine would take a non-zero one as a path [orig: @
+		// 0x75c671]), the string pool (which no reader of such a bank reads) a zero slot per
+		// single.
 		std::vector<uint8_t> again;
 		TEST_EXPECT(
 				opennova::lwf::encode_lwf(parsed, again, error) && again.size() == foreign.size());
 		uint32_t pool = 0;
 		std::memcpy(&pool, foreign.data() + 20, sizeof(pool));
+		std::vector<uint8_t> expected = foreign;
+		for (size_t i = 0; i < 3; ++i)
+			std::fill(expected.begin() + 28 + i * 52 + 48, expected.begin() + 28 + i * 52 + 52, 0);
 		TEST_EXPECT(pool <= again.size() &&
-				std::equal(again.begin(), again.begin() + pool, foreign.begin()));
+				std::equal(again.begin(), again.begin() + pool, expected.begin()));
 		for (size_t i = pool; i < again.size(); ++i)
 			TEST_EXPECT(again[i] == 0);
 	}
@@ -176,6 +181,33 @@ int main() {
 				again.singles.size() == 3 && again.singles[0].entry_word28 == word);
 	}
 
+	// A layer whose flags hold 0x100 reads the low 16 bits of its +12 as its random-sequential
+	// anchor [orig: SoundBank_SelectTriggerEntryFromBank @ 0x75c001]: kept, the high half zero;
+	// without the flag, +12 is zero.
+	{
+		std::vector<uint8_t> anchored = bytes;
+		uint32_t multi_header = 0, multi_table = 0;
+		std::memcpy(&multi_header, anchored.data() + 16, 4);
+		std::memcpy(&multi_table, anchored.data() + multi_header + 8, 4);
+		const size_t layer = multi_table + 3 * 80;
+		uint32_t flags = 0;
+		std::memcpy(&flags, anchored.data() + layer + 8, 4);
+		flags |= 0x180u;
+		std::memcpy(anchored.data() + layer + 8, &flags, 4);
+		const uint32_t word = 0xABCD1234u;
+		std::memcpy(anchored.data() + layer + 12, &word, 4);
+		opennova::lwf::File read;
+		TEST_EXPECT(
+				opennova::lwf::parse_lwf_buffer(anchored.data(), anchored.size(), read, error) &&
+				!read.playlists.empty() && read.playlists[0].anchor == 0x1234u);
+		std::vector<uint8_t> written;
+		TEST_EXPECT(opennova::lwf::encode_lwf(read, written, error) && written.size() > layer + 16);
+		uint32_t at12 = 0;
+		if (written.size() > layer + 16)
+			std::memcpy(&at12, written.data() + layer + 12, 4);
+		TEST_EXPECT(at12 == 0x1234u);
+	}
+
 	// The game's lookup in a bank of another magic tests the whole dword at +28: a name of 29
 	// characters or more always finds (its 29th byte is a character's), one of 28 by the three
 	// bytes after its terminator. A name as wide as its field (32 characters, no terminator), a
@@ -184,7 +216,8 @@ int main() {
 		opennova::lwf::File wide = file;
 		wide.header.magic = 0x4C574630u;
 		wide.singles[0].name = std::string(28, 'N');
-		wide.singles[0].entry_word28 = 0x01020300u;
+		wide.singles[0].entry_word28 =
+				0x010203FFu; // its low byte is the terminator at 28: written 0
 		wide.singles[1].name = std::string(29, 'M');
 		wide.singles[1].entry_word28 = 0x55u; // no room: the name's own bytes
 		std::vector<uint8_t> written;
