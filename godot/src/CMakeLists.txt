@@ -217,6 +217,7 @@ add_library(${TARGET_NAME} SHARED
     simulation/person_overlay_models.cpp
     simulation/fire_presenter.cpp
     simulation/destruction_presenter.cpp
+    simulation/husk_swap.cpp
     simulation/throwable_presenter.cpp
     simulation/vehicle_trail_presenter.cpp
     simulation/vehicle_water_wake_presenter.cpp

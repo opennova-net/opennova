@@ -27,6 +27,7 @@
 #include "object/object_model.h"
 #include "simulation/present_stats.h"
 #include "world/item_effect_director.h"
+#include "simulation/husk_swap.h"
 
 namespace godot {
 
@@ -151,23 +152,12 @@ private:
 		ObjectID node;
 		bool pinned = false;
 	};
-	// One intact child's authored visibility, restored on reset.
-	struct HuskRestoreChild {
-		ObjectID node;
-		bool visible = true;
-	};
-	// The original state behind one husk graft: an individual node's hidden
-	// children, or a carved batched static's placed transform + replacement.
+	// The original state behind one husk graft (simulation/husk_swap.h) and
+	// the identity it was keyed by.
 	struct HuskRestore {
-		enum Kind { INDIVIDUAL, STATIC };
-		Kind kind = INDIVIDUAL;
-		int bms_id = 0;
+		HuskGraft graft;
 		int64_t spawn_origin = 0;
 		int wire_handle = -1;
-		std::vector<HuskRestoreChild> children;
-		Transform3D placed_transform;
-		String husk_graphic;
-		bool casts_static_shadow = false;
 	};
 
 	Simulation *sim() const;
@@ -177,8 +167,6 @@ private:
 	EffectLightDirector *lights() const;
 	Node3D *resolve_entity_node(int p_bms_id, int64_t p_spawn_origin, int p_wire_handle) const;
 	void restore_intact(const String &p_key);
-	static bool node_has_static_shadow_caster(Node *p_root);
-	static void set_husk_static_shadow(ObjectModel *p_model, bool p_enabled);
 	Variant present_transform_for_identity(int p_bms_id, int64_t p_spawn_origin) const;
 	void sync_static_husks();
 	void apply_effect(const opennova::world::DestructionEffectEvent &p_effect);
