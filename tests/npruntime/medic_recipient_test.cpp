@@ -11,7 +11,10 @@
 // call's mask 128 reads the slot state alone, so the dead Medic it is for, and
 // the downed requester, hear it too (D-NET-637) [orig:
 // Server_SendOverlayActionToAlive @0x50A1B0, mask 0x80 @0x50A1D3;
-// NapiNPServer_SendFiltered @0x4C893E..0x4C8953].
+// NapiNPServer_SendFiltered @0x4C893E..0x4C8953]. It goes only for a
+// requester body with an ItemDef and a composite a loaded bank holds
+// (D-NET-653) [orig: Server_BroadcastMedicRequest @0x515519..0x51551D;
+// SoundProfile_FindByEntityAndType @0x5281D6; the null test @0x50A1B4].
 // [orig: GameEvent_PlayerDeath @0x51739C (mask 0x580) / @0x5173AF (team
 //  filter, the victim entity's byte @0x5173A8); NapiNPServer_SendFiltered
 //  @0x4C87E0 - roster gate @0x4C889F, 0x80 @0x4C8948..0x4C8953, 0x100
@@ -31,6 +34,8 @@
 #include <net/npwire/protocol_message.h>
 
 #include <base/gameprofile/game_type.h>
+#include <formats/lwf/lwf.h>
+#include <runtime/audio/oneshot_play.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/world.h>
 
@@ -68,6 +73,7 @@ w::EntityHandle spawn_person(w::World &world, uint8_t team,
 	e.alive = true;
 	e.flags = w::kEntityFlagPlayer;
 	e.engine_flags = w::kEntityFlagPlayer;
+	e.has_item_def = true; // the Player ItemDef (+0x20)
 	e.name = name;
 	return world.registry.spawn(0, e);
 }
@@ -103,6 +109,18 @@ int main() {
 	// Class 8 carries the Medic charattr; class 7 does not.
 	world.tables.class_attribute_flags[(8u - 1u) & 0xFu] |=
 			w::MissionTables::kCharAttrMedic;
+	// The loaded banks hold the help call's BM1 and BM2 composites.
+	audio::SoundSetIndex sets;
+	{
+		lwf::File bank;
+		for (const char *name : {"BM1_MEDIC_REQUEST", "BM2_MEDIC_REQUEST"}) {
+			lwf::Multi set;
+			set.name = name;
+			bank.multis.push_back(set);
+		}
+		sets.add_bank(0, bank);
+	}
+	world.tables.sound_sets = &sets;
 
 	const w::EntityHandle victim = spawn_person(world, 1, 7, "Downed");
 	const w::EntityHandle dead_medic = spawn_person(world, 1, 8, "DeadMedic");
@@ -261,6 +279,12 @@ int main() {
 				"request: a same-team non-Medic receives neither the window nor the chat");
 		expect(bodies_of(rifleman_rows, 0x34).size() == 1,
 				"request: the alive non-Medic still receives the mask-128 help call");
+		// The requester's body-model byte is 0, which names BM1.
+		const auto help = bodies_of(rifleman_rows, 0x34);
+		expect(help.size() == 1 && help[0].size() > 1 &&
+						std::string(reinterpret_cast<const char *>(help[0].data()) + 1) ==
+								"BM1_MEDIC_REQUEST",
+				"request: a zero body-model byte calls BM1_MEDIC_REQUEST");
 		const auto enemy_rows = drain(enemy_wire);
 		expect(bodies_of(enemy_rows, s2c::PLAYER_DOWNED_STATE).empty() &&
 						bodies_of(enemy_rows, s2c::CHAT_BROADCAST).empty(),
@@ -269,6 +293,62 @@ int main() {
 		expect(bodies_of(split_rows, s2c::PLAYER_DOWNED_STATE).size() == 1 &&
 						bodies_of(split_rows, s2c::CHAT_BROADCAST).size() == 1,
 				"request: the split slot's Medic receives the window and the chat line");
+	}
+
+	// --- The help call's send gates (D-NET-653): a requester body with no
+	// ItemDef (+0x20) sends the chat line but no 0x34, whatever its body-model
+	// byte, and so does a composite no loaded bank holds (BM3 here); a
+	// repeat call with both sends it again.
+	// [orig: Server_BroadcastMedicRequest - the chat sends @0x5154DC /
+	//  @0x51550B, the latch @0x515510, the ItemDef test @0x515519..0x51551D;
+	//  SoundProfile_FindByEntityAndType @0x5281D6, 0 on a miss;
+	//  Server_SendOverlayActionToAlive's null test @0x50A1B4..0x50A1B6]
+	{
+		const std::string format = "%s needs a medic!";
+		inmatch::ServerDispatchInputs inputs;
+		inputs.medic_request_format = &format;
+		MedicRequest request;
+		request.entity_index = victim.packed & 0xFFFu;
+		auto call = [&]() {
+			inmatch::dispatch_session_replies(ctx.config, roster[0],
+					{make_protocol_message(c2s::MEDIC_REQUEST,
+							encode_medic_request(request))},
+					world.logic_tick, roster, &world, inputs);
+			return drain(rifleman_wire);
+		};
+		auto help_call_heard = [&](const std::vector<std::vector<uint8_t>> &rows) {
+			return bodies_of(rows, 0x34);
+		};
+		auto drain_others = [&]() {
+			drain(victim_wire);
+			drain(medic_wire);
+			drain(enemy_wire);
+			drain(split_wire);
+		};
+		w::Entity *body = world.registry.get(victim);
+		body->has_item_def = false;
+		body->anim_slot = 2;
+		auto rows = call();
+		expect(help_call_heard(rows).empty(),
+				"gates: a requester body with no ItemDef sends no help call");
+		expect(bodies_of(drain(medic_wire), s2c::CHAT_BROADCAST).size() == 1,
+				"gates: the Medic still gets the chat line");
+		drain_others();
+		body->has_item_def = true;
+		body->anim_slot = 3;
+		rows = call();
+		expect(help_call_heard(rows).empty(),
+				"gates: a composite no loaded bank holds sends no help call");
+		drain_others();
+		body->anim_slot = 2;
+		rows = call();
+		const auto heard = help_call_heard(rows);
+		expect(heard.size() == 1 && heard[0].size() > 1 &&
+						std::string(reinterpret_cast<const char *>(heard[0].data()) + 1) ==
+								"BM2_MEDIC_REQUEST",
+				"gates: a body with an ItemDef and a loaded composite calls again");
+		drain_others();
+		body->anim_slot = 0;
 	}
 
 	// --- The revive: a Medic's revive of the downed requester filters its
