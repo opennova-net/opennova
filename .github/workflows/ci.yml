@@ -84,24 +84,24 @@ jobs:
           python -m pip install --quiet clang-format==21.1.6 ruff==0.16.9 gdtoolkit==4.5.0
           python scripts/lint/format_lint.py --github
 
-  # The C++ engine + ctest suites, core then retail, from ONE build. Built with
-  # Ninja + sccache (.github/actions/compiler-cache): the Visual Studio
-  # generator ignores CMAKE_*_COMPILER_LAUNCHER. scripts/build.sh lets CMake
-  # read CMAKE_GENERATOR and the launcher variables from the environment on a
-  # fresh configure, and Release carries no PDB flags, so every object is
-  # cacheable as-is. The retail leg (docs/asset-gated-tests.md) reuses the
-  # tree: the two roots are read at test time only, so `--suite retail`
-  # rebuilds nothing. It runs whenever the reference data is reachable (not on
-  # fork PRs) and blocks the merge like the core leg.
-  test:
-    # One-entry matrix on purpose: branch protection requires the check named
-    # "test (windows-latest)", which the matrix produces.
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest]
-    runs-on: ${{ matrix.os }}
-    needs: [changes, retail-availability]
+  # The C++ engine + ctest suites on Windows: the core suite (test-core) and
+  # the retail suite (test-retail) on two runners at once, each its own build
+  # from the same compiler cache, and `test` reporting both under the required
+  # check's name. One runner ran them back to back (~28 min: ~7 build, ~12
+  # core, ~7 retail); in parallel the core leg alone sets the pace.
+  #
+  # Built with Ninja + sccache (.github/actions/compiler-cache): the Visual
+  # Studio generator ignores CMAKE_*_COMPILER_LAUNCHER. scripts/build.sh lets
+  # CMake read CMAKE_GENERATOR and the launcher variables from the environment
+  # on a fresh configure, and Release carries no PDB flags, so every object is
+  # cacheable as-is. Linked by lld-link (CMAKE_LINKER_TYPE LLD; the runner
+  # image has LLVM on PATH): the ~930 executables are mostly tests over the
+  # same static libraries, and link.exe spent ~3 min of every build on them
+  # after the last cache hit. Only the link step changes, so the cache's
+  # objects serve either linker.
+  test-core:
+    runs-on: windows-latest
+    needs: [changes]
     permissions:
       contents: read
       actions: write   # the compiler cache's branch save replaces its older entries
@@ -110,7 +110,6 @@ jobs:
       CMAKE_CXX_COMPILER_LAUNCHER: sccache
       CMAKE_C_COMPILER_LAUNCHER: sccache
       CODE: ${{ needs.changes.outputs.code }}
-      RETAIL: ${{ needs.retail-availability.outputs.available }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -194,18 +193,19 @@ jobs:
           flavour: win-root
           mode: restore
 
-      - name: Toolchain sanity (Ninja + cl on PATH)
+      - name: Toolchain sanity (Ninja + cl + lld-link on PATH)
         if: env.CODE == 'true'
         shell: bash
         run: |
           cmake --version
           ninja --version
           command -v cl
+          command -v lld-link
 
       - name: Build
         if: env.CODE == 'true'
         shell: bash
-        run: scripts/build.sh --no-godot --suite core --no-test
+        run: scripts/build.sh --no-godot --suite core --no-test --cmake-arg -DCMAKE_LINKER_TYPE=LLD
 
       # Right after the build, so the step's numbers are this build's hit rate.
       - name: sccache stats
@@ -231,35 +231,122 @@ jobs:
             build/Testing/
             build/.ninja_log
 
-      # The retail data the asset gates need (docs/asset-gated-tests.md): the
-      # composite action restores or checks out the two private reference
-      # repositories and exports the two roots.
-      - name: Mount the reference data
-        if: env.CODE == 'true' && env.RETAIL == 'true'
-        uses: ./.github/actions/mount-reference-data
-        with:
-          token: ${{ secrets.REFERENCE_ASSETS_TOKEN }}
-          enabled: ${{ env.RETAIL }}
-
-      - name: Test (retail)
-        if: env.CODE == 'true' && env.RETAIL == 'true'
-        shell: bash
-        run: scripts/build.sh --no-godot --suite retail
-
-      - name: Upload native retail test reports
-        if: always() && env.CODE == 'true' && env.RETAIL == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: native-retail-reports
-          if-no-files-found: warn
-          path: build/Testing/
-
+      # The one Windows leg that saves the win-root flavour: test-retail builds
+      # the same objects and only reads it.
       - name: Save the compiler cache
         if: env.CODE == 'true'
         uses: ./.github/actions/compiler-cache
         with:
           flavour: win-root
           mode: save
+
+  # The retail suite (docs/asset-gated-tests.md) on a runner of its own: the
+  # core leg's build (the two roots are read at test time only), then the
+  # retail ctests. It runs whenever the reference data is reachable (not on
+  # fork PRs) and blocks the merge like the core leg, through `test`.
+  test-retail:
+    runs-on: windows-latest
+    needs: [changes, retail-availability]
+    if: needs.changes.outputs.code == 'true' && needs.retail-availability.outputs.available == 'true'
+    permissions:
+      contents: read
+    env:
+      CMAKE_GENERATOR: Ninja
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
+      CMAKE_C_COMPILER_LAUNCHER: sccache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false   # scoped below: the tests read fixtures/ only
+          submodules: recursive
+
+      - name: Pull Git LFS assets (fixtures/ only)
+        shell: bash
+        run: |
+          git lfs install --local
+          git lfs pull --include="fixtures/**"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Restore the compiler cache
+        uses: ./.github/actions/compiler-cache
+        with:
+          flavour: win-root
+          mode: restore
+
+      - name: Build
+        shell: bash
+        run: scripts/build.sh --no-godot --suite core --no-test --cmake-arg -DCMAKE_LINKER_TYPE=LLD
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: sccache --show-stats
+
+      # The retail data the asset gates need: the composite action restores
+      # or checks out the two private reference repositories and exports the
+      # two roots.
+      - name: Mount the reference data
+        uses: ./.github/actions/mount-reference-data
+        with:
+          token: ${{ secrets.REFERENCE_ASSETS_TOKEN }}
+          enabled: 'true'
+
+      - name: Test (retail)
+        shell: bash
+        run: scripts/build.sh --no-godot --suite retail
+
+      - name: Upload native retail test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-retail-reports
+          if-no-files-found: warn
+          path: build/Testing/
+
+  # The required check "test (windows-latest)" (branch protection names it):
+  # green when the core leg passed and the retail leg passed, or was skipped
+  # because there was nothing for it to run (a docs-only change, or a fork PR
+  # without the reference data). It runs when a leg fails too, so a failure
+  # reports red, never skipped.
+  test:
+    name: test (windows-latest)
+    if: ${{ !cancelled() }}
+    needs: [changes, retail-availability, test-core, test-retail]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Both Windows legs
+        shell: bash
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          AVAILABILITY: ${{ needs.retail-availability.result }}
+          CORE: ${{ needs.test-core.result }}
+          RETAIL: ${{ needs.test-retail.result }}
+          CODE: ${{ needs.changes.outputs.code }}
+          AVAILABLE: ${{ needs.retail-availability.outputs.available }}
+        run: |
+          echo "test-core: ${CORE}; test-retail: ${RETAIL}"
+          if [[ "$CHANGES" != success || "$AVAILABILITY" != success ]]; then
+            echo "::error::a gate job did not pass (changes: ${CHANGES}, retail-availability: ${AVAILABILITY})"
+            exit 1
+          fi
+          if [[ "$CORE" != success ]]; then
+            echo "::error::test-core: ${CORE}"
+            exit 1
+          fi
+          want=skipped
+          if [[ "$CODE" == true && "$AVAILABLE" == true ]]; then want=success; fi
+          if [[ "$RETAIL" != "$want" ]]; then
+            echo "::error::test-retail: ${RETAIL} (expected ${want})"
+            exit 1
+          fi
 
   # The same build on Linux, configured with the NovaWorld server's HTTP layer
   # ON (the deploy target's flag set; it adds the Crow sources to the server
@@ -909,7 +996,7 @@ jobs:
             }
 
   # Secrets are unavailable on fork PRs. Record that explicitly and skip only
-  # retail legs (test's retail steps, godot-tests-retail); ordinary engine and
+  # retail legs (test-retail, godot-tests-retail); ordinary engine and
   # Godot checks always run.
   retail-availability:
     runs-on: ubuntu-latest
