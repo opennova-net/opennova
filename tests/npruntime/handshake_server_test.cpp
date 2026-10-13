@@ -885,7 +885,8 @@ bool run_reactive_replies() {
 	// 0x2F -> 0x5A weapon loadout, DERIVED from the request [orig: NapiNPServerMsg_HandlePlayerLoadout
 	// @0x515790 -> Server_SendWeaponSlotListToPlayer @0x502550]: reply set = the request's adm
 	// entries sorted ascending (the weapon-slot table walk order), avatarClass = the accepted
-	// soldier type, ammo bytes echoed (the client clamps them on apply @0x4295d7), 4th byte 0.
+	// soldier type, ammo bytes echoed (the client clamps them on apply @0x4295d7), 4th byte the
+	// slot table's at the row's AdmDef index, 0 here (no armory resolves a round to store at).
 	// Request bytes = the live retail v14 capture's C2S 0x2F (class 2 / soldier 8 / entries
 	// {21,3,83,76,77,78,2}, ammo 255/255, var 255).
 	{
@@ -3293,6 +3294,36 @@ bool run_loadout_resolve_with_armory() {
 		              "malformed 0x2F leaves the loadout gate and prior grant untouched");
 	};
 
+	// The fourth bytes (D-NET-508): each accepted entry stores its RAW byte at its
+	// weapon's round ammo index in the slot's table (the last store at an index
+	// winning), and each reply row reads the table at its OWN AdmDef index.
+	// [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515E8B..0x515E92;
+	//  Server_SendWeaponSlotListToPlayer @0x50286A..0x50288A]
+	// The test's own copy of the table: each accepted entry's fixed byte at its weapon's
+	// shipped round index, zero elsewhere; the connection's table and every row's byte must
+	// match it, so a filtered entry's index stays zero.
+	std::array<uint8_t, inmatch::NapiNPConnection::kAmmoDamageClassBytes> expected_bytes{};
+	auto damage_bytes_follow_the_slot_table = [&](const WeaponLoadout &lo,
+			const std::vector<std::pair<uint8_t, uint8_t>> &accepted,
+			const char *label) -> bool {
+		const inmatch::NapiNPConnection *connection = nullptr;
+		for (const inmatch::NapiNPConnection &candidate : ctx.np_protocol.connection_list)
+			if (candidate.peer == peer) connection = &candidate;
+		if (!expect(connection != nullptr, label)) return false;
+		for (const auto &entry : accepted) {
+			const int16_t ammo = world.tables.weapons.entries[entry.first].ammo_index;
+			if (ammo >= 0 && static_cast<size_t>(ammo) < expected_bytes.size())
+				expected_bytes[static_cast<size_t>(ammo)] = entry.second;
+		}
+		if (!expect(connection->ammo_damage_classes == expected_bytes, label)) return false;
+		for (const WeaponLoadoutSlot &slot : lo.slots) {
+			const uint8_t want =
+					slot.type_id < expected_bytes.size() ? expected_bytes[slot.type_id] : 0;
+			if (!expect(slot.ammo_alt == want, label)) return false;
+		}
+		return true;
+	};
+
 	// Retail's 0x2F reader stops the entry loop ONLY on the 0xFF terminator and
 	// never checks for trailing bytes after it (@0x515a99), so trailing bytes are
 	// accepted; an unterminated/truncated list is the retail zero-fill infinite
@@ -3338,8 +3369,9 @@ bool run_loadout_resolve_with_armory() {
 		                    lo.slots[2].ammo_secondary == 6,
 		            "AK47M203AUTO: 300/30 -> 10; alt = the different-class M203HE 6/1 -> 6"))
 			return false;
-		for (const WeaponLoadoutSlot &s : lo.slots)
-			if (!expect(s.ammo_alt == 0, "restriction byte 0")) return false;
+		if (!damage_bytes_follow_the_slot_table(lo, {{21, 0xFF}, {3, 0xFF}, {2, 0xFF}},
+		            "the accepted 0xFF bytes land at the round ammo indices, read by AdmDef index"))
+			return false;
 	}
 
 	// Soldier-type mask in isolation: a BLUE sniper (class 1 / soldier 6) requests M4AUTO + the
@@ -3353,6 +3385,15 @@ bool run_loadout_resolve_with_armory() {
 		if (!expect(lo.avatar_class == 6, "soldier 6 accepted verbatim")) return false;
 		if (!expect(lo.slots.size() == 1 && lo.slots[0].type_id == 1,
 		            "charfilter drops the rifleman-band M4AUTO for a sniper")) return false;
+		if (!damage_bytes_follow_the_slot_table(lo, {{1, 0xFF}},
+		            "a filtered entry stores no fourth byte")) return false;
+		const int16_t m4_round = world.tables.weapons.entries[9].ammo_index;
+		const inmatch::NapiNPConnection *c = nullptr;
+		for (const inmatch::NapiNPConnection &candidate : ctx.np_protocol.connection_list)
+			if (candidate.peer == peer) c = &candidate;
+		if (!expect(c != nullptr && m4_round >= 0 &&
+		                    c->ammo_damage_classes[static_cast<size_t>(m4_round)] == 0,
+		            "the filtered M4AUTO's round index stays zero")) return false;
 	}
 
 	// Explicit requested count: blue rifleman asks 4 mags of M4AUTO -> min(4, maxclips 10) = 4.
@@ -3363,9 +3404,11 @@ bool run_loadout_resolve_with_armory() {
 		if (!loadout_reply(req, 150, lo)) return false;
 		if (!expect(lo.slots.size() == 1 && lo.slots[0].type_id == 9 &&
 		                    lo.slots[0].ammo_primary == 4 &&
-		                    lo.slots[0].ammo_secondary == 0xFF &&
-		                    lo.slots[0].ammo_alt == 2,
-		            "explicit request -> clips plus the accepted damage-class byte")) return false;
+		                    lo.slots[0].ammo_secondary == 0xFF,
+		            "explicit request -> clips")) return false;
+		if (!damage_bytes_follow_the_slot_table(lo, {{9, 2}},
+		            "the accepted damage-class byte lands at the M4AUTO round's ammo index"))
+			return false;
 		const world::WeaponTableEntry *m4 = world.tables.weapons.by_index(9);
 		const inmatch::NapiNPConnection *connection = nullptr;
 		for (const inmatch::NapiNPConnection &candidate : ctx.np_protocol.connection_list)
@@ -3401,8 +3444,9 @@ bool run_loadout_resolve_with_armory() {
 	                    world.tables.weapons.entries[static_cast<size_t>(m4_m203_auto)].ammo_index == m4_ammo,
 	            "M4AUTO and M4M203AUTO share one resolved AmmoDef index")) return false;
 
-	// player+89688 is indexed by AmmoDef, not by granted weapon. The later accepted M4M203AUTO
-	// therefore overwrites the M4AUTO's class, and BOTH serialized slots read back the final 2.
+	// player+89688 is written by AmmoDef index, not by granted weapon. The later accepted
+	// M4M203AUTO therefore overwrites the M4AUTO's byte at the shared ammo index; each row
+	// reads the table at its own AdmDef index.
 	{
 		std::vector<uint8_t> req = {
 				0x01, 0x08, 0, 0, 0, 0,
@@ -3413,14 +3457,14 @@ bool run_loadout_resolve_with_armory() {
 		if (!loadout_reply(req, 160, lo)) return false;
 		if (!expect(lo.slots.size() == 2, "two different shared-ammo slots are granted"))
 			return false;
-		for (const WeaponLoadoutSlot &slot : lo.slots)
-			if (!expect(slot.ammo_alt == 2,
-			            "all shared-ammo slots serialize the final per-ammo damage class"))
-				return false;
+		if (!damage_bytes_follow_the_slot_table(lo,
+		            {{static_cast<uint8_t>(m4_auto), 1}, {static_cast<uint8_t>(m4_m203_auto), 2}},
+		            "the shared ammo index keeps the later entry's byte"))
+			return false;
 	}
 
 	// Repeating the same category*65+rank does not create a second granted slot: the load
-	// table entry is replaced. Its later ammo count and normalized damage class are retained.
+	// table entry is replaced. Its later ammo count and damage-class byte are retained.
 	{
 		std::vector<uint8_t> req = {
 				0x01, 0x08, 0, 0, 0, 0,
@@ -3430,8 +3474,12 @@ bool run_loadout_resolve_with_armory() {
 		WeaponLoadout lo;
 		if (!loadout_reply(req, 170, lo)) return false;
 		if (!expect(lo.slots.size() == 1 && lo.slots[0].type_id == m4_auto &&
-		                    lo.slots[0].ammo_primary == 4 && lo.slots[0].ammo_alt == 1,
+		                    lo.slots[0].ammo_primary == 4,
 		            "duplicate weapon slot serializes once with its last accepted values"))
+			return false;
+		if (!damage_bytes_follow_the_slot_table(lo,
+		            {{static_cast<uint8_t>(m4_auto), 2}, {static_cast<uint8_t>(m4_auto), 1}},
+		            "the duplicate's later byte is the one stored"))
 			return false;
 	}
 	return true;

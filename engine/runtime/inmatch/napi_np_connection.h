@@ -746,6 +746,23 @@ struct NapiNPConnection {
 	uint8_t fireteam = 0;
 	uint8_t punt_vote = 0xFF;
 
+	// The slot's damage-class bytes (player+0x15E58, the 128 bytes below the S2C 0x57
+	// countdown dword +0x15ED8, beside the 128 pools at +0x15A58 and buckets at
+	// +0x15C58): each accepted C2S 0x2F entry writes its RAW fourth byte at its
+	// weapon's round ammo index, in request order, and nothing clears them but a
+	// remote add's slot memset, or for the host's own slot, whose add arm skips it,
+	// the slot table's allocation memset. The S2C 0x5A reads them at each weapon's own
+	// AdmDef index, the impact damage at the round's ammo index (1 = x0.9, 2 = x1.1;
+	// the entity's ammo_damage_class is its copy). An index outside the table aliases
+	// the fields around it in retail; ours keeps to the table (D-NET-692). (D-NET-508)
+	// [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515E8B..0x515E92; Server_PlayerAdd
+	//  @0x51CD06, the local arm @0x51CC33..0x51CC60; Server_AllocatePlayerSlotTable
+	//  @0x51C1CB; Server_SendWeaponSlotListToPlayer @0x50286A..0x50288A;
+	//  Weapon_CalcImpactDamage @0x4ECA11..0x4ECA24; the countdown Server_TickUpdate
+	//  @0x51E3BB..0x51E3C8 / @0x51E40D]
+	static constexpr size_t kAmmoDamageClassBytes = 0x15ED8 - 0x15E58;
+	std::array<uint8_t, kAmmoDamageClassBytes> ammo_damage_classes{};
+
 	// Host-side per-weapon-slot fire/ammo state, by slot combo (WeaponSlotState above). Seeded
 	// lazily on the first 0x06 for a combo; refilled by the 0x25 relay. (D-NET-152)
 	std::map<uint16_t, WeaponSlotState> weapon_slots;

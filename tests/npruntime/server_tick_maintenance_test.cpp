@@ -23,7 +23,8 @@
 //     @0x5014E0];
 //   - the unconditional other-row eviction of SpawnWaveList_TryQueuePlayer @0x52A490;
 //   - the C2S 0x0E Conquer & Control auto-pick rejection, the handle-0 admission and
-//     the revive latch's targetless deploy [orig: Server_ProcessClientRequestRespawn @0x519AF0].
+//     the revive latch's targetless deploy [orig: Server_ProcessClientRequestRespawn @0x519AF0];
+//   - the slot's damage-class bytes behind the S2C 0x5A fourth byte (D-NET-508).
 
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_protocol.h>
@@ -53,8 +54,11 @@
 #include <runtime/world/world.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstdio>
+#include <initializer_list>
+#include <utility>
 #include <vector>
 
 #include "conn_fixture.h"
@@ -1582,6 +1586,158 @@ bool check_deploy_rebuilds_the_kit_from_the_loadout_buffer() {
 }
 
 // --------------------------------------------------------------------------
+// The slot's damage-class bytes behind the S2C 0x5A fourth byte (D-NET-508).
+// --------------------------------------------------------------------------
+
+// Each accepted 0x2F entry stores its RAW fourth byte at its weapon's round ammo
+// index in the slot's table, which nothing but the add clears; every 0x5A row reads
+// the table at the row weapon's OWN AdmDef index, and the impact damage's copy (the
+// entity's) follows the slot table onto a kept slot's next entity.
+// [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515E8B..0x515E92 (the store, no clear
+//  among the accept's memsets @0x515BC1 / @0x515BD3); Server_SendWeaponSlotListToPlayer
+//  @0x50286A..0x50288A (the read at AvatarDef_FindIndexByName @0x502720); Server_PlayerAdd
+//  @0x51CD06; Weapon_CalcImpactDamage @0x4ECA11..0x4ECA24]
+bool check_loadout_damage_class_bytes() {
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
+	ctx.is_in_session = 1;
+	ctx.config.max_players = 4;
+	ctx.config.armory_reuse_time = 0; // back-to-back accepts
+	w::World world;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(3, 8);
+	install_rifle_armory(world); // adm 5, round ammo index 1
+	// adm 1: a pistol whose round is ammo index 5, the rifle's own AdmDef index.
+	w::WeaponTableEntry &pistol = world.tables.weapons.entries[1];
+	pistol.name = "WPN_TESTPISTOL";
+	pistol.valid = true;
+	pistol.category = 2;
+	pistol.rank = 0;
+	pistol.clipsize = 7;
+	pistol.startrounds = 21;
+	pistol.maxclips = 3;
+	pistol.charfilter = 0xFF;
+	pistol.teamfilter = 0x03;
+	pistol.loadout_selectable = 1;
+	pistol.ammo_class = "CLS_A";
+	pistol.ammo_class_id = 0;
+	pistol.ammo_class_count = 1;
+	pistol.ammo_index = 5;
+	// adm 2: a medic-only weapon (filtered for class 8) firing ammo 7; adm 3: one whose
+	// round index, 128, lies past the 128-byte table.
+	for (const uint8_t adm : {uint8_t{2}, uint8_t{3}}) {
+		w::WeaponTableEntry &e = world.tables.weapons.entries[adm];
+		e = pistol;
+		e.name = adm == 2 ? "WPN_TESTMEDIC" : "WPN_TESTWIDE";
+		e.rank = adm;
+	}
+	world.tables.weapons.entries[2].charfilter = 0x01; // medic only
+	world.tables.weapons.entries[2].ammo_index = 7;
+	world.tables.weapons.entries[3].ammo_index = 128;
+	ctx.world = &world;
+	ns::UdpSessionTransport transport(ns::UdpSessionTransport::Role::Host);
+	inmatch::NapiNPConnection joiner;
+	joiner.peer = {0x0100007Fu, 35002};
+	joiner.type = 1;
+	joiner.connection_id = inmatch::kFirstJoinerDcb;
+	joiner.link.mode = ns::TransportMode::Client;
+	joiner.link.transport = &transport;
+	ctx.np_protocol.connection_list.push_back(std::move(joiner));
+	auto &roster = ctx.np_protocol.connection_list;
+	inmatch::NapiNPConnection &conn = roster.front();
+	if (!expect(inmatch::Server_BuildPlayerInfoAndAdd(ctx, conn, world,
+	                    /*round_init=*/false).valid(),
+			"the damage-class fixture adds its player"))
+		return false;
+	auto submit = [&](std::vector<LoadoutSubmitEntry> entries, WeaponLoadout &out) {
+		if (w::Entity *body = world.registry.get(conn.link.owned_entity))
+			body->flags |= w::kEntityFlagDead; // the armory-window gate admits a dead player
+		LoadoutSubmit request;
+		request.team = 1;
+		request.player_class = 8;
+		request.weapon_slot_index = 3 * 65 + 2;
+		request.entries = std::move(entries);
+		const std::vector<ProtocolMessage> replies = inmatch::dispatch_session_replies(
+				ctx.config, conn,
+				{make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(request))},
+				100, roster, &world);
+		for (const ProtocolMessage &m : replies)
+			if (m.tag == 0x5A)
+				return decode_weapon_loadout(m.payload.data(), m.payload.size(), out);
+		return false;
+	};
+	auto row = [](const WeaponLoadout &lo, uint8_t adm) -> const WeaponLoadoutSlot * {
+		for (const WeaponLoadoutSlot &slot : lo.slots)
+			if (slot.type_id == adm) return &slot;
+		return nullptr;
+	};
+	auto copy = [&](size_t index) -> int {
+		const w::Entity *body = world.registry.get(conn.link.owned_entity);
+		return body != nullptr && index < body->ammo_damage_class.size()
+				? body->ammo_damage_class[index]
+				: -1;
+	};
+	// The table as the witness leaves it: fixed bytes at fixed indices, zero elsewhere.
+	auto table_is = [&](std::initializer_list<std::pair<size_t, uint8_t>> set) {
+		std::array<uint8_t, inmatch::NapiNPConnection::kAmmoDamageClassBytes> want{};
+		for (const auto &entry : set) want[entry.first] = entry.second;
+		const w::Entity *body = world.registry.get(conn.link.owned_entity);
+		return conn.ammo_damage_classes == want && body != nullptr &&
+		       body->ammo_damage_class == std::vector<uint8_t>(want.begin(), want.end());
+	};
+
+	// The rifle's raw 0xFF lands at ammo 1 and the pistol's 2 at ammo 5; each row reads
+	// its own AdmDef index, so the pistol (adm 1) shows the rifle's byte and the rifle
+	// (adm 5) the pistol's.
+	// The medic-only entry is filtered and stores nothing at its ammo 7; the wide one is
+	// accepted, but its index 128 lies past the table, so nothing in it changes.
+	WeaponLoadout first;
+	if (!expect(submit({{5, 3, 0xFF, 0xFF}, {1, 2, 0xFF, 2}, {2, 1, 0xFF, 0x33},
+	                    {3, 1, 0xFF, 0x44}},
+	                    first),
+	            "the first 0x2F is accepted"))
+		return false;
+	const WeaponLoadoutSlot *pistol_row = row(first, 1);
+	const WeaponLoadoutSlot *rifle_row = row(first, 5);
+	if (!expect(table_is({{1, 0xFF}, {5, 2}}),
+			"the accept stores each raw fourth byte at its weapon's round ammo index, nothing else"))
+		return false;
+	if (!expect(row(first, 2) == nullptr && row(first, 3) != nullptr && row(first, 3)->ammo_alt == 0,
+			"the filtered entry has no row, the wide one reads its own index 3"))
+		return false;
+	if (!expect(pistol_row != nullptr && pistol_row->ammo_alt == 0xFF && rifle_row != nullptr &&
+					rifle_row->ammo_alt == 2,
+			"each 0x5A row's fourth byte is the slot table at the row's own AdmDef index"))
+		return false;
+	if (!expect(copy(1) == 0xFF && copy(5) == 2,
+			"the impact damage's copy holds the slot table, raw"))
+		return false;
+
+	// A second accept with the rifle alone rewrites ammo 1 and clears nothing: ammo 5
+	// keeps the pistol's 2, which the rifle's row still reads.
+	WeaponLoadout second;
+	if (!expect(submit({{5, 3, 0xFF, 1}}, second), "the second 0x2F is accepted")) return false;
+	rifle_row = row(second, 5);
+	if (!expect(table_is({{1, 1}, {5, 2}}) && second.slots.size() == 1 && rifle_row != nullptr &&
+					rifle_row->ammo_alt == 2,
+			"a later accept overwrites its own indices and keeps the rest"))
+		return false;
+	if (!expect(copy(1) == 1 && copy(5) == 2, "the copy keeps the bytes the accept did not write"))
+		return false;
+
+	// The map change's round init gives the kept slot a new entity; its copy is the
+	// slot's table, not a fresh zero.
+	conn.link.owned_entity = w::EntityHandle{};
+	if (!expect(inmatch::Server_BuildPlayerInfoAndAdd(ctx, conn, world,
+	                    /*round_init=*/true).valid(),
+			"the kept slot's round-init entity spawns"))
+		return false;
+	return expect(copy(1) == 1 && copy(5) == 2,
+			"a kept slot's new entity takes the slot's damage-class bytes");
+}
+
+// --------------------------------------------------------------------------
 // SpawnWaveList_TryQueuePlayer's unconditional other-row eviction.
 // --------------------------------------------------------------------------
 
@@ -2372,6 +2528,7 @@ int main() {
 	ok = check_priority_target_sweep() && ok;
 	ok = check_kit_weight_recompute() && ok;
 	ok = check_deploy_rebuilds_the_kit_from_the_loadout_buffer() && ok;
+	ok = check_loadout_damage_class_bytes() && ok;
 	ok = check_try_queue_evicts_on_failed_pick() && ok;
 	ok = check_respawn_pick_admission() && ok;
 	ok = check_revived_pick_takes_no_target() && ok;

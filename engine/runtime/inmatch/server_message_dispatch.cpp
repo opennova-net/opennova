@@ -1500,6 +1500,14 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					st.loadout_buffer.player_class = grant.reply.avatar_class;
 					st.loadout_buffer_set = true;
 				}
+				// The accepted class is the slot's class and its PlayerType, at its store and its
+				// list send [orig: the slot store @0x515AA8; @0x515AE2; the
+				// Server_SendWeaponSlotListToPlayer call @0x515F95].
+				if (!conn.link.spectator && loadout_player) {
+					conn.slot_class = grant.reply.avatar_class;
+					conn.player_list_type = grant.reply.avatar_class;
+				}
+				write_ammo_damage_classes(conn, grant);
 				apply_granted_loadout(conn, grant, armory != nullptr);
 				if (armory != nullptr) {
 					// The accept points the entity's EquippedSlot at the submitted slot and
@@ -1519,30 +1527,15 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					}
 				}
 				replies.push_back(make_protocol_message(s2c::WEAPON_LOADOUT, st.last_loadout_reply));
-				// The accepted class is the slot's class and its PlayerType, at its store and its
-				// list send [orig: the slot store @0x515AA8; @0x515AE2; the
-				// Server_SendWeaponSlotListToPlayer call @0x515F95].
-				if (!conn.link.spectator && loadout_player) {
-					conn.slot_class = grant.reply.avatar_class;
-					conn.player_list_type = grant.reply.avatar_class;
-				}
 				// Accepted soldier type -> entity+660 playerClass [orig: @0x515ab0] — feeds the
 				// §5.10 field-17 class nibble and the 0x0C/0x18 spawn records for this player.
 				if (loadout_player != nullptr) {
 					world::Entity *pe = loadout_player;
 					pe->player_class = grant.reply.avatar_class;
 					pe->carry_flags = (pe->carry_flags & ~0x18u) | grant.carry_flags;
-					// The fourth accepted byte is copied to the player-slot table at
-					// [ammoDef.index]. Weapon_CalcImpactDamage later interprets 1 as
-					// x0.9 and 2 as x1.1 for person targets.
-					if (armory != nullptr) {
-						pe->ammo_damage_class.assign(world->tables.ammo.entries.size(), 0);
-						for (const auto &entry : grant.ammo_damage_classes) {
-							const size_t ammo_index = static_cast<size_t>(entry.first);
-							if (ammo_index < pe->ammo_damage_class.size())
-								pe->ammo_damage_class[ammo_index] = entry.second;
-						}
-					}
+					// The impact damage's copy of the slot's damage-class bytes (D-NET-508).
+					pe->ammo_damage_class.assign(conn.ammo_damage_classes.begin(),
+							conn.ammo_damage_classes.end());
 				}
 				// The accept re-arms the armory cooldown unless the pre-round latch is
 				// set, then clears the latch — class 0 included. A spectator never reaches

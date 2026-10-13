@@ -408,6 +408,11 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 
 	conn.link.owned_entity = h; // the per-connection S2C anchor + C2S owner-verify subject
 	world.registry.get(h)->player_slot_id = conn.reply.player_slot; // entity+0x154 (Entity::player_slot_id)
+	// The impact damage reads the shooter's slot table, which a kept slot keeps across
+	// the round init's new entity: the entity's copy of it (D-NET-508). [orig:
+	//  Weapon_CalcImpactDamage @0x4ECA11..0x4ECA24 (Entity_ValidatePtr's slot)]
+	world.registry.get(h)->ammo_damage_class.assign(conn.ammo_damage_classes.begin(),
+			conn.ammo_damage_classes.end());
 	conn.link.owned_entity_spawn_id = world.registry.get(h)->registry_spawn_id;
 	conn.link.last_deploy_tick = world.logic_tick;
 	conn.link.last_deploy_tick_valid = true;
@@ -659,6 +664,15 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 				// full, no AiSystem) leaves the walk; only a successful add
 				// restarts it from the head [orig: unlink @0x4C8FF6, goto LABEL_5
 				// @0x4C9128].
+				// A remote add's slot memset zeroes its damage-class bytes, which
+				// the round init's re-add keeps; the host's own add arm skips the
+				// memset, its bytes the slot table's allocation zero, as its fresh
+				// loopback connection's are. The memset precedes the add's class
+				// store [orig: Server_PlayerAdd @0x51CD06 ahead of @0x51D09A, the
+				// local arm @0x51CC33..0x51CC60; Server_AllocatePlayerSlotTable
+				// @0x51C1CB].
+				if (conn.type == NapiNPConnection::kTypeServerSide)
+					conn.ammo_damage_classes.fill(0);
 				if (!Server_BuildPlayerInfoAndAdd(ctx, conn, world, /*round_init=*/false).valid())
 					continue;
 				// The pump's add is Server_PlayerAdd's, which writes the slot's
@@ -919,6 +933,11 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 	conn->link.owned_entity = h;
 	conn->link.owned_entity_spawn_id = world.registry.get(h)->registry_spawn_id;
 	world.registry.get(h)->player_slot_id = *player_slot; // entity+0x154 (Entity::player_slot_id)
+	// The add's memset zeroes the slot's damage-class bytes, and the impact damage
+	// reads the entity's copy (D-NET-508) [orig: Server_PlayerAdd @0x51CD06].
+	conn->ammo_damage_classes.fill(0);
+	world.registry.get(h)->ammo_damage_class.assign(conn->ammo_damage_classes.begin(),
+			conn->ammo_damage_classes.end());
 	// [orig: Server_PlayerAdd @0x51CBC0 binds the fresh player allocation]
 	conn->link.transport = transport;
 	conn->link.mode = replication::TransportMode::Client;
