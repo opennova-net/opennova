@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+#include <optional>
 
 #include <base/io/strutil.h>
 #include <formats/bfc1/bfc1.h>
@@ -11,9 +12,11 @@
 #include <formats/png/png_decode.h>
 #include <formats/tga/tga.h>
 #include <formats/tga/tga_read.h>
+#include <runtime/renderer/d3dx_image_codecs.h>
 #include <runtime/renderer/device_texture.h>
 #include <runtime/renderer/material_texture.h>
 #include <runtime/renderer/texture_dxt.h>
+#include <runtime/renderer/texture_load_rules.h>
 
 namespace opennova::editor {
 
@@ -219,38 +222,119 @@ void read_png(TextureImage &image, const std::vector<uint8_t> &bytes, const char
 	built_chain(image);
 }
 
+// A file under a .dds name that D3DX decodes as another image, decoded here as D3DX's codec decodes
+// it.
+void read_decoded(TextureImage &image, const char *name, RgbaImage &rgba, const char *texels) {
+	fact(image, "format", "File format",
+			std::string(name) + " image under a .dds name (D3DX reads it as one)");
+	fact(image, "reader", "Read by", "D3DX, which reads the bytes by their content");
+	image.loads = true;
+	image.decoded = true;
+	image.levels.push_back({ uint32_t(rgba.width), uint32_t(rgba.height), std::move(rgba.pixels) });
+	size_fact(image);
+	fact(image, "texels", "Texels", texels);
+	fact(image, "loads", "In the game", "loads it");
+	classify_alpha(image);
+	built_chain(image);
+}
+
 void read_dds(TextureImage &image, const std::vector<uint8_t> &bytes, bool first_level_only) {
 	constexpr const char *kD3dx = "D3DX, which reads the bytes by their content";
-	// D3DX takes the first of its formats whose test the bytes pass (renderer::dds_reader_format).
-	const renderer::DdsReaderFormat content = renderer::dds_reader_format(bytes.data(), bytes.size());
-	switch (content) {
-	case renderer::DdsReaderFormat::Dds: break;
-	case renderer::DdsReaderFormat::Png:
-		read_png(image, bytes, "PNG image under a .dds name (D3DX reads it as a PNG)", kD3dx);
-		return;
-	case renderer::DdsReaderFormat::Tga:
-	case renderer::DdsReaderFormat::Bmp:
-	case renderer::DdsReaderFormat::Jpeg: {
-		const char *name = content == renderer::DdsReaderFormat::Tga ? "TGA" : content == renderer::DdsReaderFormat::Bmp ? "BMP" : "JPEG";
-		fact(image, "format", "File format", std::string(name) + " image under a .dds name (D3DX reads it as one)");
-		fact(image, "reader", "Read by", kD3dx);
-		image.loads = true;
-		image.undecoded = std::string("D3DX's ") + name + " reader, which the editor does not decode yet";
-		fact(image, "loads", "In the game", "loads it");
-		return;
+	// D3DX's walk over its codecs (renderer::dds_read_by_content), the game's as the editor's: each
+	// codec whose header test passes is tried in turn, the first that decodes the file's. The DDS,
+	// PNG, PPM, PFM and HDR codecs decode here as the game decodes them; the BMP and DIB codecs are
+	// taken at the BMP core's header rules (renderer::d3dx_bmp_rehead, d3dx_dib_to_bmp), the JPEG
+	// and TGA codecs at their header tests, their pixels not decoded here.
+	dds::DdsImage dds;
+	std::string dds_error, error;
+	RgbaImage rgba;
+	std::vector<uint8_t> bmp;
+	const std::optional<renderer::DdsCodec> codec =
+			renderer::dds_read_by_content(bytes.data(), bytes.size(), [&](renderer::DdsCodec each) {
+				switch (each) {
+					case renderer::DdsCodec::Dds:
+						return dds::dds_read(bytes.data(), bytes.size(), dds, dds_error) &&
+								dds.loads;
+					case renderer::DdsCodec::Png:
+						return png::decode_png(bytes, rgba, error);
+					case renderer::DdsCodec::Ppm:
+						return renderer::decode_d3dx_ppm(bytes.data(), bytes.size(), rgba, error);
+					case renderer::DdsCodec::Pfm:
+						return renderer::decode_d3dx_pfm(bytes.data(), bytes.size(), rgba, error);
+					case renderer::DdsCodec::Hdr: {
+						int width = 0, height = 0;
+						if (!renderer::d3dx_hdr_size(
+									bytes.data(), bytes.size(), width, height, error))
+							return false;
+						rgba.width = width;
+						rgba.height = height;
+						rgba.pixels.assign(size_t(width) * size_t(height) * 4, 0);
+						return renderer::decode_d3dx_hdr_into(
+								bytes.data(), bytes.size(), rgba.pixels.data(), error);
+					}
+					case renderer::DdsCodec::Bmp:
+						return renderer::d3dx_bmp_rehead(bytes.data(), bytes.size(), bmp, error);
+					case renderer::DdsCodec::Dib:
+						return renderer::d3dx_dib_to_bmp(bytes.data(), bytes.size(), bmp, error);
+					case renderer::DdsCodec::Jpeg:
+					case renderer::DdsCodec::Tga:
+						return true;
+				}
+				return false;
+			});
+	bool parsed = true;
+	if (!codec) {
+		// A DDS header D3DX's DDS codec refuses, and no other codec decodes the bytes: its facts
+		// and the refusal.
+		if (!renderer::dds_codec_header_accepts(
+					renderer::DdsCodec::Dds, bytes.data(), bytes.size())) {
+			fact(image, "format", "File format", "unknown");
+			fact(image, "reader", "Read by", kD3dx);
+			image.refusal = "D3DX reads none of its formats from these bytes.";
+			return;
+		}
+		dds = dds::DdsImage();
+		dds_error.clear();
+		parsed = dds::dds_read(bytes.data(), bytes.size(), dds, dds_error);
 	}
-	case renderer::DdsReaderFormat::None:
-		fact(image, "format", "File format", "unknown");
-		fact(image, "reader", "Read by", kD3dx);
-		image.refusal = "D3DX reads none of its formats from these bytes.";
-		return;
+	switch (codec ? *codec : renderer::DdsCodec::Dds) {
+		case renderer::DdsCodec::Dds:
+			break;
+		case renderer::DdsCodec::Png:
+			read_decoded(image, "PNG", rgba, "8 bits a channel, as D3DX's PNG reader expands them");
+			return;
+		case renderer::DdsCodec::Ppm:
+			read_decoded(image, "PPM", rgba, "8 bits a channel, opaque");
+			return;
+		case renderer::DdsCodec::Pfm:
+			read_decoded(image, "PFM", rgba,
+					"32-bit floats a channel, shown through D3DX's 8-bit encode");
+			return;
+		case renderer::DdsCodec::Hdr:
+			read_decoded(image, "Radiance HDR", rgba, "RGBE, shown through D3DX's 8-bit encode");
+			return;
+		case renderer::DdsCodec::Bmp:
+		case renderer::DdsCodec::Dib:
+		case renderer::DdsCodec::Jpeg:
+		case renderer::DdsCodec::Tga: {
+			const char *name = *codec == renderer::DdsCodec::Tga ? "TGA"
+					: *codec == renderer::DdsCodec::Bmp			 ? "BMP"
+					: *codec == renderer::DdsCodec::Dib			 ? "DIB"
+																 : "JPEG";
+			fact(image, "format", "File format",
+					std::string(name) + " image under a .dds name (D3DX reads it as one)");
+			fact(image, "reader", "Read by", kD3dx);
+			image.loads = true;
+			image.undecoded =
+					std::string("D3DX's ") + name + " reader, which the editor does not decode yet";
+			fact(image, "loads", "In the game", "loads it");
+			return;
+		}
 	}
 	fact(image, "format", "File format", "DDS (DirectDraw surface)");
 	fact(image, "reader", "Read by", kD3dx);
-	dds::DdsImage dds;
-	std::string error;
-	if (!dds::dds_read(bytes.data(), bytes.size(), dds, error)) {
-		image.refusal = error;
+	if (!parsed) {
+		image.refusal = dds_error;
 		return;
 	}
 	image.loads = dds.loads;
