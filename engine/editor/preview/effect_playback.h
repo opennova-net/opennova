@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 
+#include <editor/preview/effect_schedule.h>
 #include <runtime/particle/effect_scene.h>
 
 namespace opennova::editor {
@@ -32,13 +33,11 @@ particle::EffectPose effect_play_pose();
 // One effect played on the preview clock through the engine's own effect scene (ADR 0046 DI-14): the
 // scene opened over the effect's closure (particle::effect_closure), the effect spawned at tick 0 of
 // the clock as the game spawns it (effect_play_pose), once, as the game spawns an effect once per event,
-// and stepped a game tick at a time as the clock runs (each tick the scene's fixed step, so what shows at
-// a tick is the same however the frames fell). A jump of the clock (a seek, a step back, more ticks at
-// once than one advance takes) spawns it again pre-aged by its age at the tick sought, as the engine's
-// catch-up spawn ages one (EffectSpawnRequest::initial_age_ticks, bounded by
-// kEffectInitialAgeTickLimit: past that it shows the age the bound allows), so the picture at a tick is
-// the spawn's at that age; Replay spawns it anew at the tick. The scene is the device's picture: it
-// reads the scene's snapshot and draws it (godot/src/authoring/preview_effects).
+// and played on the preview clock as every editor effect scene is (EffectSchedule: a game tick at a time
+// through the view's planes; a jump of the clock spawns it again pre-aged by its age at the tick sought,
+// bounded by kEffectInitialAgeTickLimit: past that it shows the age the bound allows), so the picture at a
+// tick is the spawn's at that age. The scene is the device's picture: it reads the scene's snapshot and
+// draws it (godot/src/authoring/preview_effects).
 class EffectPlayback {
 public:
 	// The scene opened over `config` with `effect` to spawn (its name; a name the catalog lacks spawns
@@ -47,11 +46,10 @@ public:
 	void open(const particle::EffectSceneConfig &config, const std::string &effect);
 	// No scene: nothing plays.
 	void close();
-	// The next play spawns the effect again as a seek to its tick does (its age the tick's).
-	void restart() { jump_ = true; }
 
-	// The scene played to the clock's tick `tick`.
-	void play_to(int32_t tick, const EffectPlayOptions &options);
+	// The scene played to the clock's tick `tick`, `frustum` the view's (preview_view_frustum; none: every emitter
+	// advances).
+	void play_to(int32_t tick, const EffectPlayOptions &options, const particle::ParticleViewFrustum &frustum = {});
 
 	// The scene the picture draws (null: none open). Shared with the device, which only reads it.
 	const std::shared_ptr<particle::EffectScene> &scene() const { return scene_; }
@@ -62,11 +60,11 @@ public:
 	// The clock tick the spawn counts its age from, its age at the tick played, the ticks it was pre-aged
 	// by, and how many spawns were made since the scene opened.
 	int32_t cycle_start() const { return cycle_start_; }
-	int32_t age() const { return tick_ - cycle_start_; }
+	int32_t age() const { return schedule_.tick() - cycle_start_; }
 	uint32_t pre_aged() const { return pre_aged_; }
 	uint64_t spawns() const { return spawns_; }
-	int32_t tick() const { return tick_; }
-	bool played() const { return played_; }
+	int32_t tick() const { return schedule_.tick(); }
+	bool played() const { return schedule_.played(); }
 	// Moves whenever the scene is opened or advanced: the snapshot a device drew is stale.
 	uint64_t serial() const { return serial_; }
 
@@ -79,9 +77,8 @@ private:
 	particle::EffectHandle handle_;
 	particle::EffectGroupId group_;
 	particle::EffectSpawnStatus last_status_ = particle::EffectSpawnStatus::InvalidHandle;
-	bool played_ = false;
-	bool jump_ = true;
-	int32_t tick_ = 0;
+	EffectSchedule schedule_;
+	EffectTimedSpawns timed_; // none: the one spawn stands, made again at a jump
 	int32_t cycle_start_ = 0;
 	uint32_t pre_aged_ = 0;
 	uint64_t spawns_ = 0;

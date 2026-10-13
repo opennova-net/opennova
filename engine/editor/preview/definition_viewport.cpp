@@ -774,7 +774,8 @@ ViewportAction DefinitionViewport::follow_(const ViewportInput &input, PreviewCl
 	}
 	// Its effects over the catalog the game would load, played to the clock.
 	effects_.plan(catalog_, catalog_.serial(), spawns_());
-	effects_.play_to(clock.ticks());
+	const ViewportState drawn_at = size();
+	effects_.play_to(clock.ticks(), preview_view_frustum(camera(), drawn_at.width, drawn_at.height));
 	// The death's sounds play from the project's banks, read as the game reads them (DI-04's sources).
 	if (options_.state == DefinitionState::Destroying)
 		sound_sources_.refresh(*view.findings.assets,

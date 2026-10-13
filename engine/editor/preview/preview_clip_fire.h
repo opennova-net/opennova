@@ -102,8 +102,9 @@ public:
 			const ClipFireOptions &options);
 	void clear();
 	// The run to the clock's tick `tick`: every shot on the ticks up to it fired (the range stands after that tick,
-	// as the game's frame shows what its tick left), the effects it spawned played to it.
-	void run_to(int32_t tick);
+	// as the game's frame shows what its tick left), the effects it spawned played to it through `frustum` (the
+	// view's, preview_view_frustum; none: every emitter advances).
+	void run_to(int32_t tick, const particle::ParticleViewFrustum &frustum = {});
 
 	// Whether anything fires: the body reads fire bits, the clip carries one, and the item's bytes name an ammo.
 	bool armed() const { return armed_; }

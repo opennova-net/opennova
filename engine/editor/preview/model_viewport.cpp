@@ -711,7 +711,8 @@ std::vector<ClipSoundFired> ModelViewport::fire_sounds(const PreviewClock &clock
 		}
 	// What the clip's shots sounded on those ticks (DI-24): each ammo's ai_launch, each stop's row, where it plays;
 	// the run taken to the clock first (a device follows after the clock ran).
-	clip_fire_.run_to(now);
+	const ViewportState picture = size();
+	clip_fire_.run_to(now, preview_view_frustum(camera(), picture.width, picture.height));
 	for (ClipSoundFired &fired : clip_fire_.sounds_between(from, now, sound_sources_, camera().eye(), selector)) {
 		fired.seq = ++next_seq;
 		fired.path = path();
@@ -1277,7 +1278,8 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 			                                                           : nullptr;
 	clip_fire_.refresh(view, sound_sources_.item(), sound_binding_, model_, skeleton_, clip_key_, clip_variant_,
 	                   playing ? &playing->clip.playback() : nullptr, clip_track_, options_.fire);
-	clip_fire_.run_to(clock.ticks());
+	const ViewportState picture = size();
+	clip_fire_.run_to(clock.ticks(), preview_view_frustum(camera(), picture.width, picture.height));
 	// An event selected in the clip seeks the clock to the tick the clip first samples it, and
 	// holds it there (as a scrub does).
 	const auto *clip_document = dynamic_cast<const AnimationDocument *>(&document);

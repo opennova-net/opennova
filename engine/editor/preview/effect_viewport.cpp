@@ -271,7 +271,8 @@ ViewportAction EffectViewport::follow_(const ViewportInput &input, PreviewClock 
 		scene_handed_ = false;
 	}
 	shown_ = effect;
-	playback_.play_to(clock.ticks(), options_.play);
+	const ViewportState picture = size();
+	playback_.play_to(clock.ticks(), options_.play, preview_view_frustum(camera_, picture.width, picture.height));
 	if (closure_.spawns()) {
 		reason_ = EffectViewStatus::Ready;
 		detail_.clear();

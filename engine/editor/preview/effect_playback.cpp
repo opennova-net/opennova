@@ -20,7 +20,7 @@ void EffectPlayback::open(const particle::EffectSceneConfig &config, const std::
 	handle_ = scene_->intern(effect);
 	group_ = particle::EffectGroupId();
 	last_status_ = particle::EffectSpawnStatus::InvalidHandle;
-	jump_ = true;
+	schedule_.restart();
 	++serial_;
 }
 
@@ -31,8 +31,7 @@ void EffectPlayback::close() {
 	handle_ = particle::EffectHandle();
 	group_ = particle::EffectGroupId();
 	last_status_ = particle::EffectSpawnStatus::InvalidHandle;
-	played_ = false;
-	jump_ = true;
+	schedule_.unplay();
 	cycle_start_ = 0;
 	pre_aged_ = 0;
 }
@@ -56,33 +55,15 @@ void EffectPlayback::spawn_(int32_t tick, int32_t age) {
 	++spawns_;
 }
 
-void EffectPlayback::play_to(int32_t tick, const EffectPlayOptions &options) {
+void EffectPlayback::play_to(int32_t tick, const EffectPlayOptions &options, const particle::ParticleViewFrustum &frustum) {
 	if (!scene_) return;
-	tick = std::max(tick, 0);
 	scene_->set_global_wind(particle::mission_wind_vector(options.wind_speed, options.wind_direction));
-	const bool continuous = played_ && !jump_ && tick >= tick_ &&
-			tick - tick_ <= int32_t(particle::kEffectAdvanceTickLimit);
-	if (!continuous) {
-		// A jump: the scene emptied and the effect spawned again at its age then: the spawn's where the tick
-		// is past it, else its age since tick 0 (older than it lives, nothing stands).
-		scene_->reset_runtime_state();
-		const int32_t age = played_ && tick >= cycle_start_ ? tick - cycle_start_ : tick;
-		spawn_(tick, age);
-		jump_ = false;
-		played_ = true;
-		tick_ = tick;
-		++serial_;
-		return;
-	}
-	// A game tick at a time (the scene's own fixed step).
-	particle::EffectAdvanceRequest step;
-	step.delta_seconds = 1.0f / static_cast<float>(io::kTickHz);
-	for (int32_t at = tick_ + 1; at <= tick; ++at) {
-		scene_->advance_simulation(step);
-		if (group_ && !scene_->contains_group(group_)) group_ = particle::EffectGroupId();
-	}
-	if (tick != tick_) ++serial_;
-	tick_ = tick;
+	// A jump: the effect spawned again at its age then, the spawn's where the tick is past it, else its age since
+	// tick 0 (older than it lives, nothing stands).
+	const auto jumped = [&](int32_t at) {
+		spawn_(at, schedule_.played() && at >= cycle_start_ ? at - cycle_start_ : at);
+	};
+	if (schedule_.play_to(*scene_, tick, frustum, timed_, EffectSchedule::Make(), jumped)) ++serial_;
 }
 
 } // namespace opennova::editor

@@ -398,7 +398,8 @@ void MissionViewport::follow_effects_(const SessionView &view, const PreviewCloc
 	effects_.refresh(view, scene_, poses_);
 	// The Shoot tool's impacts in the same scene (DI-23).
 	effects_.set_shot_spawns(shot_spawns_());
-	effects_.play_to(clock.ticks());
+	const ViewportState picture = size();
+	effects_.play_to(clock.ticks(), preview_view_frustum(camera_, picture.width, picture.height));
 }
 
 double MissionViewport::hours() const {

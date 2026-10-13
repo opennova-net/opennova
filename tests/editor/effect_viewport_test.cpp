@@ -140,10 +140,6 @@ int test_playback() {
 	once.play_to(7, options);
 	once.play_to(6, options);
 	TEST_EXPECT(once.alive() && once.spawns() == 3 && once.pre_aged() == 6 && once.cycle_start() == 0);
-	// Replay: the next play spawns it again as a seek does.
-	once.restart();
-	once.play_to(6, options);
-	TEST_EXPECT(once.alive() && once.spawns() == 4 && once.pre_aged() == 6);
 	// A jump past its life: older than it lives, nothing stands.
 	EffectPlayback far;
 	far.open(closure.config, "Puff");

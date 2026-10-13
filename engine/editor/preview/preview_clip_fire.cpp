@@ -364,7 +364,7 @@ void ClipFire::schedule_to_(int32_t tick) {
 	range_.set_shots(std::move(fired));
 }
 
-void ClipFire::run_to(int32_t tick) {
+void ClipFire::run_to(int32_t tick, const particle::ParticleViewFrustum &frustum) {
 	if (!armed_) {
 		effects_.close();
 		return;
@@ -379,7 +379,7 @@ void ClipFire::run_to(int32_t tick) {
 	}
 	if (planned_events_ != range_.events().size()) plan_spawns_();
 	effects_.plan(catalog_, catalog_.serial(), spawns_);
-	effects_.play_to(tick);
+	effects_.play_to(tick, frustum);
 }
 
 void ClipFire::plan_spawns_() {

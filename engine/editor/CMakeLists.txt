@@ -240,6 +240,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/ammo_impacts.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/effect_catalog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/effect_playback.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/effect_schedule.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/effect_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/environment_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/terrain_viewport.cpp
