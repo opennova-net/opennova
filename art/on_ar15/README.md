@@ -43,16 +43,13 @@ skeleton's root frame (the rig's origin is 1.07 m above that root):
 ## The pack's camera
 
 The pack's first-person camera rides the Manny `head` bone, which its clips turn (up to 0.6° in the
-idle, 1.3° in the fire, 2.1° in the holster and the reload, 2.7° in the draw; never moved). The game draws the viewmodel at the camera
-and moves its camera by nothing a clip carries, so the head's turn is baked into `BN01 Weapon origin`
-as its inverse: at each frame `BN01` is `X H0 H(t)^-1 X^-1` in the rig's space, where `H(t)` is the
-head in the clip's skeleton, `H0` the head on the clip's first frame and `X` the map from that
-skeleton's root frame into the rig's. The arms and gun then stand against the view as they do against
-the pack's moving camera. Every clip starts and ends with `BN01` at rest, since a change of action
-snaps to the next clip's first frame.
-
-The reload's head comes from the pack's own `A_TFA_FP_AR_Reload` (exported from its Unreal project as
-FBX, which matches the clip to 0.005 mm), eased to rest over frames 74 to 79 as the bones are.
+idle, 1.3° in the fire, 2.1° in the holster and the reload, 2.7° in the draw). The game's first-person
+camera moves by nothing a weapon clip carries: the engine samples a clip's per-frame events (velocity,
+`bottom`, `top`) for a soldier's body only (`AnimChannel_InterpolateKeyframe @0x40B230`, reached only
+through `AnimMap_UpdateDualChannels @0x40B8C0` from the infantry body and AI updates), never for the
+first-person channel. So the camera stays still, and `BN01 Weapon origin` stays at rest in every clip.
+Baking the head's turn into `BN01` as its inverse was tried and dropped: it moves the arms and gun
+against a still world, which does not read as the pack's moving camera.
 
 ## Aiming
 
@@ -73,7 +70,7 @@ out and the post's tip stands in the peep's centre at the middle of the screen.
 ## Re-baking a clip
 
 The pack's clips are not in the repository. To change one: export the TFA clip from the pack's Unreal
-project as FBX and import it into a scratch scene (keep its leaf bones: `head` is one), sample its arm
-and gun bones onto `on_ar15 Rig` (`X` above: fitted on the arm bones, a turn and the 1.07 m drop from
-the skeleton's root), sample its `head` and key `BN01` as above, set the Action's frame range and Clip
-rate (30), then Export Animations.
+project as FBX and import it into a scratch scene, sample its arm and gun bones onto `on_ar15 Rig` (the
+map from the skeleton's root frame into the rig's: fitted on the arm bones, a turn and the 1.07 m drop
+from the skeleton's root), leave `BN01` at rest, set the Action's frame range and Clip rate (30), then
+Export Animations.
