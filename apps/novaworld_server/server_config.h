@@ -196,7 +196,8 @@ struct ServerConfig {
 	// bootstrap route answers (ONNET_HOSTED_BOOTSTRAP_CIDRS, comma-separated
 	// IPv4 CIDRs: the VPC's subnet); the AWS CLI (ONNET_HOSTED_AWS_CLI, an
 	// absolute path); and the machine script (ONNET_HOSTED_MACHINE_SCRIPT, the
-	// user-data template, hosted/machine/user_data.sh).
+	// user-data template, hosted/machine/user_data.sh, which the server image
+	// ships at the default path; a run outside the image names its own).
 	std::string hosted_ec2_region;
 	std::string hosted_ec2_launch_template;
 	std::string hosted_ec2_subnet;
@@ -205,7 +206,7 @@ struct ServerConfig {
 	std::string hosted_service_address;
 	std::vector<std::string> hosted_bootstrap_cidrs;
 	std::string hosted_aws_cli = "/usr/local/bin/aws";
-	std::string hosted_machine_script = "apps/novaworld_server/hosted/machine/user_data.sh";
+	std::string hosted_machine_script = "/app/hosted/machine_user_data.sh";
 
 	// Build a config by reading env vars, falling back to the defaults
 	// above for anything not set.

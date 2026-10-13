@@ -20,7 +20,9 @@
 //               subnet, one machine, the tags opennova:hosted=1,
 //               opennova:deployment=<ONNET_HOSTED_DEPLOYMENT>,
 //               opennova:server-id=<id> and Name on the machine and its
-//               volumes, a client token (a retried call launches once), and
+//               volumes, a client token (the CLI's own retries of the call
+//               launch once; a later launch is a new call, and the
+//               supervisor's sweep ends a machine no row holds), and
 //               the user-data: machine/user_data.sh with the bootstrap URL (the
 //               service's PRIVATE address) and a one-time token filled in, and
 //               nothing else (bootstrap.h). The file the CLI reads it from is
@@ -38,11 +40,15 @@
 //               launch, when EC2 may not list it yet, Pending. A describe
 //               that fails reads Pending (with the address last read): the
 //               supervisor's clocks still run, but a blip is never a crash.
+//               After a failure the CLI runs again only describe_ttl_ms
+//               later, so an API outage costs a pass one CLI run, not one per
+//               server.
 //               The address is the machine's PRIVATE IPv4, where the admin
 //               link connects.
 //   terminate   terminate-instances; a machine EC2 no longer knows is no
 //               error, and a machine id that is no EC2 id (another provider's)
-//               is skipped. The service's IAM policy lets it end only machines
+//               is skipped. The machine's token goes even when the call
+//               fails. The service's IAM policy lets it end only machines
 //               tagged opennova:hosted=1 and this deployment.
 //   list_tagged a fresh describe-instances, filtered on opennova:hosted=1 AND
 //               this deployment's tag, so a dev stack never ends prod's
@@ -99,6 +105,14 @@ public:
 	static constexpr const char *kTokenBlank = "@OPENNOVA_BOOTSTRAP_TOKEN@";
 	// EC2's raw user-data cap is 16 KB; the script stays well inside it.
 	static constexpr size_t kMaxUserDataBytes = 12 * 1024;
+	// The supervisor's clocks for a cloud machine (main() sets them with this
+	// provider; SupervisorConfig's defaults fit the local one). The boot covers
+	// EC2's pending, cloud-init, the docker install (its apt retries), the
+	// data volume's wait and the bundle's fetch; the listing covers the image
+	// pull, opennova-serve's own boot and its first listing. DEPLOY.md's smoke
+	// test records the real durations.
+	static constexpr uint64_t kBootTimeoutMs = 10 * 60 * 1000;
+	static constexpr uint64_t kListingTimeoutMs = 5 * 60 * 1000;
 
 	using Clock = std::function<uint64_t()>;
 
@@ -151,6 +165,7 @@ private:
 	std::map<std::string, uint64_t> launched_ms_;
 	std::map<std::string, uint64_t> terminated_ms_;
 	bool describe_failing_ = false;
+	uint64_t describe_failed_ms_ = 0;
 	uint64_t describe_failure_logged_ms_ = 0;
 };
 

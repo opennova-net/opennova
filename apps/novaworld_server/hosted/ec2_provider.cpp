@@ -130,7 +130,10 @@ std::string Ec2Provider::check_config(const Ec2Config &c) {
 	if (!is_aws_id(c.subnet, "subnet-")) return "ONNET_HOSTED_EC2_SUBNET is no subnet id";
 	if (c.deployment.empty() || c.deployment.size() > 64 || !all_of(c.deployment, is_name_char))
 		return "ONNET_HOSTED_DEPLOYMENT is not 1..64 letters, digits, '.', '_' and '-'";
-	if (c.serve_image.empty() || c.serve_image.size() > 255 || !all_of(c.serve_image, is_image_char))
+	// An image reference starts with a letter or digit (never '-', which
+	// `docker pull` and `docker run` would read as an option).
+	if (c.serve_image.empty() || c.serve_image.size() > 255 || !is_alnum(c.serve_image[0]) ||
+			!all_of(c.serve_image, is_image_char))
 		return "ONNET_HOSTED_SERVE_IMAGE is no image reference";
 	if (!parse_ipv4(c.service_address)) return "ONNET_HOSTED_SERVICE_ADDRESS is no IPv4 address";
 	if (c.machine_script.find(kUrlBlank) == std::string::npos ||
@@ -346,6 +349,7 @@ void Ec2Provider::note_describe_failure(uint64_t now_ms, const std::string &erro
 		describe_failure_logged_ms_ = now_ms;
 	}
 	describe_failing_ = true;
+	describe_failed_ms_ = now_ms;
 }
 
 MachineStatus Ec2Provider::describe(const std::string &machine_id) {
@@ -354,7 +358,12 @@ MachineStatus Ec2Provider::describe(const std::string &machine_id) {
 	if (terminated_ms_.count(machine_id) != 0 || !is_instance_id(machine_id)) return status; // Gone
 	const uint64_t now = now_();
 	bool fresh = have_listing_ && now - listed_ms_ < config_.describe_ttl_ms;
-	if (!fresh) {
+	// A describe-instances that failed is tried again describe_ttl_ms later,
+	// not at every describe: while the EC2 API is down, each server's describe
+	// on a pass would otherwise wait out its own CLI run (up to its timeout),
+	// and the pass (its stops, health checks and launches) behind them all.
+	const bool backing_off = describe_failing_ && now - describe_failed_ms_ < config_.describe_ttl_ms;
+	if (!fresh && !backing_off) {
 		std::string error;
 		fresh = refresh(now, error);
 		if (!fresh) note_describe_failure(now, error);
@@ -400,6 +409,9 @@ void Ec2Provider::terminate(const std::string &machine_id) {
 			result.err.find("InvalidInstanceID.NotFound") != std::string::npos;
 	if (!result.ok() && !unknown) {
 		// It may run on: the supervisor's sweep finds it untracked and ends it.
+		// Its token goes all the same, so nothing fetches a bundle for a
+		// machine the service is ending.
+		bootstrap_.forget_machine(machine_id);
 		std::fprintf(stderr, "[hosted] WARN ec2: ending machine %s failed: %s\n", machine_id.c_str(),
 				aws_failure("terminate-instances", result).c_str());
 		return;

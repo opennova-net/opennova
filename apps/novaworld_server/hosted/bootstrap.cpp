@@ -95,6 +95,43 @@ bool ipv4_admitted(std::string_view peer, const std::vector<Ipv4Cidr> &cidrs) {
 	return false;
 }
 
+bool ipv4_cidr_private(const Ipv4Cidr &cidr) {
+	static constexpr Ipv4Cidr kPrivate[] = {
+		{ 0x0A000000u, 0xFF000000u }, // 10.0.0.0/8
+		{ 0xAC100000u, 0xFFF00000u }, // 172.16.0.0/12
+		{ 0xC0A80000u, 0xFFFF0000u }, // 192.168.0.0/16
+	};
+	for (const Ipv4Cidr &range : kPrivate) {
+		// At least the range's prefix, and its network inside the range.
+		if ((cidr.mask & range.mask) == range.mask && (cidr.network & range.mask) == range.network) return true;
+	}
+	return false;
+}
+
+std::string ipv4_cidr_text(const Ipv4Cidr &cidr) {
+	int prefix = 0;
+	for (uint32_t bit = 0x80000000u; bit != 0 && (cidr.mask & bit) != 0; bit >>= 1) ++prefix;
+	std::string out;
+	for (int shift = 24; shift >= 0; shift -= 8) {
+		out += std::to_string((cidr.network >> shift) & 0xFFu);
+		out += shift != 0 ? "." : "/";
+	}
+	return out + std::to_string(prefix);
+}
+
+LogThrottle::LogThrottle(Clock now_ms) : now_(now_ms ? std::move(now_ms) : Clock(steady_now_ms)) {}
+
+bool LogThrottle::admit(const std::string &key) {
+	std::lock_guard<std::mutex> lock(mu_);
+	const uint64_t now = now_();
+	for (auto it = last_ms_.begin(); it != last_ms_.end();) {
+		it = now - it->second >= kWindowMs ? last_ms_.erase(it) : std::next(it);
+	}
+	if (last_ms_.count(key) != 0 || last_ms_.size() >= kMaxKeys) return false;
+	last_ms_[key] = now;
+	return true;
+}
+
 std::string bootstrap_bundle_json(const BootstrapBundle &bundle) {
 	io::JsonValue out = io::JsonValue::make_object();
 	out.set("server_id", io::json_number(static_cast<double>(bundle.server_id)));
@@ -120,6 +157,9 @@ void BootstrapStore::prune(uint64_t now_ms) {
 	for (auto it = entries_.begin(); it != entries_.end();) {
 		it = now_ms >= it->second.expires_ms ? entries_.erase(it) : std::next(it);
 	}
+	for (auto it = unfetched_.begin(); it != unfetched_.end();) {
+		it = now_ms >= it->second ? unfetched_.erase(it) : std::next(it);
+	}
 }
 
 std::string BootstrapStore::issue(BootstrapBundle bundle) {
@@ -141,13 +181,16 @@ bool BootstrapStore::bind(const std::string &token, const std::string &machine_i
 	if (it == entries_.end()) return false;
 	it->second.machine_id = machine_id;
 	it->second.address = address;
-	machines_[machine_id] = false;
+	unfetched_[machine_id] = it->second.expires_ms + kUnfetchedRecordMs;
 	return true;
 }
 
 void BootstrapStore::revoke(const std::string &token) {
 	std::lock_guard<std::mutex> lock(mu_);
-	entries_.erase(token_key(token));
+	const auto it = entries_.find(token_key(token));
+	if (it == entries_.end()) return;
+	if (!it->second.machine_id.empty()) unfetched_.erase(it->second.machine_id);
+	entries_.erase(it);
 }
 
 std::optional<BootstrapStore::Redeemed> BootstrapStore::redeem(int64_t server_id, std::string_view token,
@@ -180,20 +223,21 @@ std::optional<BootstrapStore::Redeemed> BootstrapStore::redeem(int64_t server_id
 	Redeemed out;
 	out.bundle = std::move(entry.bundle);
 	out.machine_id = entry.machine_id;
-	machines_[entry.machine_id] = true;
+	unfetched_.erase(entry.machine_id);
 	entries_.erase(it);
 	return out;
 }
 
 bool BootstrapStore::awaiting_fetch(const std::string &machine_id) const {
 	std::lock_guard<std::mutex> lock(mu_);
-	const auto it = machines_.find(machine_id);
-	return it != machines_.end() && !it->second;
+	const auto it = unfetched_.find(machine_id);
+	return it != unfetched_.end() && now_() < it->second;
 }
 
 void BootstrapStore::forget_machine(const std::string &machine_id) {
 	std::lock_guard<std::mutex> lock(mu_);
-	machines_.erase(machine_id);
+	prune(now_());
+	unfetched_.erase(machine_id);
 	for (auto it = entries_.begin(); it != entries_.end();) {
 		it = it->second.machine_id == machine_id ? entries_.erase(it) : std::next(it);
 	}
