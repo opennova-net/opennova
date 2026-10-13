@@ -236,12 +236,14 @@ std::string FontViewport::glyph_words(size_t glyph) const {
 	if (!picture_ || glyph >= fnt::FNT_GLYPH_COUNT) return std::string();
 	const FontGlyph g{picture_->font.glyphs[glyph].page, picture_->font.glyphs[glyph].uv};
 	const FontGlyphRect rect = font_glyph_rect(g);
-	FontRow header;
-	header.design_width = picture_->font.design_width;
-	header.spacing = picture_->font.glyph_spacing;
-	return byte_words(uint8_t(fnt::FNT_FIRST_CHAR + glyph)) + ": page " + std::to_string(g.page) + ", " +
-	       std::to_string(rect.x) + ", " + std::to_string(rect.y) + ", " + std::to_string(rect.width) + " x " +
-	       std::to_string(rect.height) + ", advance " + std::to_string(font_glyph_advance(header, g));
+	const uint8_t byte = uint8_t(fnt::FNT_FIRST_CHAR + glyph);
+	// The advance the game's own font measures for the byte [orig: CGameFont_GetCharExtent @0x674dc0, the engine's
+	// hud::GameFont::char_width], as the picture's run draws it.
+	hud::GameFont engine;
+	engine.set_font(&picture_->font);
+	return byte_words(byte) + ": page " + std::to_string(g.page) + ", " + std::to_string(rect.x) + ", " +
+	       std::to_string(rect.y) + ", " + std::to_string(rect.width) + " x " + std::to_string(rect.height) +
+	       ", advance " + std::to_string(engine.char_width(byte, 1.0f));
 }
 
 NodeAddress FontViewport::glyph_address(const ViewportInput &input, size_t glyph) const {
