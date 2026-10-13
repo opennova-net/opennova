@@ -231,12 +231,7 @@ io::JsonValue environment_options_to_json(const EnvironmentViewportOptions &opti
 }
 
 std::string environment_camera_change(const OrbitCamera &camera) {
-	// What a SetViewport takes: the camera's own members in the mission's terms (mission_camera.h).
-	JsonValue view = mission_camera_to_json(camera);
-	JsonValue taken = JsonValue::make_object();
-	for (const char *member : { "target", "yaw", "pitch", "distance" })
-		if (const JsonValue *value = view.get(member)) taken.set(member, *value);
-	return viewport_change(ViewportKind::Environment, "camera", std::move(taken));
+	return viewport_change(ViewportKind::Environment, "camera", mission_camera_members(camera));
 }
 
 // --- EnvironmentViewport ---------------------------------------------------------------------------

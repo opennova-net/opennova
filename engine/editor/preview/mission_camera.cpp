@@ -104,6 +104,14 @@ io::JsonValue mission_camera_to_json(const OrbitCamera &camera) {
 	return out;
 }
 
+io::JsonValue mission_camera_members(const OrbitCamera &camera) {
+	JsonValue view = mission_camera_to_json(camera);
+	JsonValue taken = JsonValue::make_object();
+	for (const char *member : { "target", "yaw", "pitch", "distance" })
+		if (const JsonValue *value = view.get(member)) taken.set(member, *value);
+	return taken;
+}
+
 bool mission_camera_from_json(const io::JsonValue &json, OrbitCamera &camera, std::string &error) {
 	if (!json.is_object()) {
 		error = "\"camera\" is an object, {target, yaw, pitch, distance}.";

@@ -19,6 +19,7 @@
 #include <editor/preview/animation_uses.h>
 #include <editor/preview/model_canvas.h>
 #include <editor/preview/model_placement.h>
+#include <editor/preview/orbit_canvas.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/project/project_document.h>
 #include <editor/session/request_factories.h>
@@ -208,54 +209,6 @@ bool read_options(const JsonValue &json, ModelViewportOptions &held, std::string
 	return true;
 }
 
-// The camera a `camera` member sets over `held`: {yaw, pitch, distance (> 0), target [x, y, z],
-// frame (look at the whole model again)}, each optional, the pitch kept within kOrbitPitchLimit.
-bool read_camera(const JsonValue &json, OrbitCamera &held, bool &frame, std::string &error) {
-	if (!json.is_object()) {
-		error = "\"camera\" is an object.";
-		return false;
-	}
-	OrbitCamera camera = held;
-	frame = false;
-	for (const io::JsonMember &member : json.object) {
-		const std::string &key = member.key;
-		const JsonValue &value = member.value;
-		if (key == "yaw" || key == "pitch" || key == "distance") {
-			if (!value.is_number() || !std::isfinite(value.number)) {
-				error = "camera." + key + " is a number.";
-				return false;
-			}
-			const float f = float(value.number);
-			if (key == "distance" && !(f > 0.0f)) {
-				error = "camera.distance is more than 0.";
-				return false;
-			}
-			(key == "yaw" ? camera.yaw : key == "pitch" ? camera.pitch : camera.distance) = f;
-		} else if (key == "target") {
-			bool numbers = value.is_array() && value.array.size() == 3;
-			for (size_t i = 0; numbers && i < 3; ++i) numbers = value.array[i].is_number();
-			if (!numbers) {
-				error = "camera.target is [x, y, z].";
-				return false;
-			}
-			camera.target = PreviewVec3{ float(value.array[0].number), float(value.array[1].number),
-				float(value.array[2].number) };
-		} else if (key == "frame") {
-			if (!value.is_bool()) {
-				error = "camera.frame is true or false.";
-				return false;
-			}
-			frame = value.boolean;
-		} else {
-			error = "Unknown camera member \"" + key + "\" (it takes yaw, pitch, distance, target, frame).";
-			return false;
-		}
-	}
-	camera.pitch = std::clamp(camera.pitch, -kOrbitPitchLimit, kOrbitPitchLimit);
-	held = camera;
-	return true;
-}
-
 } // namespace
 
 std::string model_view_status_message(ModelViewStatus status, const std::string &detail) {
@@ -279,12 +232,7 @@ std::string model_view_status_message(ModelViewStatus status, const std::string 
 }
 
 std::string model_camera_change(const OrbitCamera &camera) {
-	JsonValue view = JsonValue::make_object();
-	view.set("target", vec3(camera.target));
-	view.set("yaw", json_number(camera.yaw));
-	view.set("pitch", json_number(camera.pitch));
-	view.set("distance", json_number(camera.distance));
-	return viewport_change(ViewportKind::Model, "camera", std::move(view));
+	return viewport_change(ViewportKind::Model, "camera", orbit_camera_to_json(camera));
 }
 
 io::JsonValue model_options_to_json(const ModelViewportOptions &held) {
@@ -1345,7 +1293,7 @@ bool ModelViewport::check_(const io::JsonValue &json, std::string &error) const 
 		return false;
 	OrbitCamera camera = camera_;
 	bool frame = false;
-	if (const JsonValue *member = json.get("camera"); member && !read_camera(*member, camera, frame, error))
+	if (const JsonValue *member = json.get("camera"); member && !read_orbit_camera(*member, camera, frame, error))
 		return false;
 	// The first-person eye (DI-13) stands where the game's camera does: the orbit's camera moves only once
 	// the view is the orbit again.
@@ -1391,7 +1339,7 @@ void ModelViewport::apply_(const io::JsonValue &json, PreviewClock &clock) {
 		sound_binding_ = clip_sound_binding(sound_sources_.profiles(), options_.sound, sound_sources_.item(), rig_);
 	}
 	bool frame = false;
-	if (const JsonValue *member = json.get("camera")) read_camera(*member, camera_, frame, error);
+	if (const JsonValue *member = json.get("camera")) read_orbit_camera(*member, camera_, frame, error);
 	if (frame) frame_();
 }
 

@@ -131,12 +131,7 @@ std::string mission_view_status_message(MissionViewStatus status) {
 }
 
 std::string mission_camera_change(const OrbitCamera &camera) {
-	// What a SetViewport takes: the camera's own members, not the read-only eye and fov.
-	JsonValue view = mission_camera_to_json(camera);
-	JsonValue taken = JsonValue::make_object();
-	for (const char *member : { "target", "yaw", "pitch", "distance" })
-		if (const JsonValue *value = view.get(member)) taken.set(member, *value);
-	return viewport_change(ViewportKind::Mission, "camera", std::move(taken));
+	return viewport_change(ViewportKind::Mission, "camera", mission_camera_members(camera));
 }
 
 // --- MissionViewport -----------------------------------------------------------------------------

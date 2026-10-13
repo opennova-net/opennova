@@ -128,11 +128,7 @@ io::JsonValue terrain_options_to_json(const TerrainViewportOptions &options) {
 }
 
 std::string terrain_camera_change(const OrbitCamera &camera) {
-	JsonValue view = mission_camera_to_json(camera);
-	JsonValue taken = JsonValue::make_object();
-	for (const char *member : { "target", "yaw", "pitch", "distance" })
-		if (const JsonValue *value = view.get(member)) taken.set(member, *value);
-	return viewport_change(ViewportKind::Terrain, "camera", std::move(taken));
+	return viewport_change(ViewportKind::Terrain, "camera", mission_camera_members(camera));
 }
 
 // --- TerrainViewport -------------------------------------------------------------------------------

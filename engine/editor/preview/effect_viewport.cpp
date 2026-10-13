@@ -39,10 +39,6 @@ OrbitCamera default_camera() {
 	return camera;
 }
 
-JsonValue camera_to_json(const OrbitCamera &camera) {
-	return orbit_camera_to_json(camera);
-}
-
 // A SetViewport's options over `held`: {effect, wind_speed, wind_direction, grid}, each optional;
 // `effects` the file's (an effect must be one of them).
 bool read_options(const JsonValue &json, const std::vector<EffectViewportEffect> &effects, EffectViewportOptions &held,
@@ -94,11 +90,6 @@ bool read_options(const JsonValue &json, const std::vector<EffectViewportEffect>
 	return true;
 }
 
-// The camera a `camera` member sets over `held` (read_orbit_camera); `frame` the camera on the live particles.
-bool read_camera(const JsonValue &json, OrbitCamera &held, bool &frame, std::string &error) {
-	return read_orbit_camera(json, held, frame, error);
-}
-
 } // namespace
 
 io::JsonValue effect_options_to_json(const EffectViewportOptions &options) {
@@ -115,7 +106,7 @@ std::string effect_options_change(const EffectViewportOptions &options) {
 }
 
 std::string effect_camera_change(const OrbitCamera &camera) {
-	return viewport_change(ViewportKind::Effect, "camera", camera_to_json(camera));
+	return viewport_change(ViewportKind::Effect, "camera", orbit_camera_to_json(camera));
 }
 
 EffectViewport::EffectViewport(std::string path) : ViewportModel(ViewportKind::Effect, std::move(path), kHeadlessSize) {
@@ -297,7 +288,7 @@ bool EffectViewport::check_(const io::JsonValue &json, std::string &error) const
 		return false;
 	OrbitCamera camera = camera_;
 	bool frame = false;
-	if (const JsonValue *member = json.get("camera"); member && !read_camera(*member, camera, frame, error)) return false;
+	if (const JsonValue *member = json.get("camera"); member && !read_orbit_camera(*member, camera, frame, error)) return false;
 	return true;
 }
 
@@ -306,7 +297,7 @@ void EffectViewport::apply_(const io::JsonValue &json, PreviewClock &) {
 	if (const JsonValue *member = json.get("options")) read_options(*member, effects_, options_, error);
 	if (const JsonValue *member = json.get("camera")) {
 		bool frame = false;
-		read_camera(*member, camera_, frame, error);
+		read_orbit_camera(*member, camera_, frame, error);
 		if (frame) {
 			const ViewportState at = size();
 			camera_ = framed(at.width, at.height);
@@ -435,7 +426,7 @@ io::JsonValue EffectViewport::options_json() const {
 }
 
 io::JsonValue EffectViewport::camera_json() const {
-	return camera_to_json(camera_);
+	return orbit_camera_to_json(camera_);
 }
 
 io::JsonValue EffectViewport::body_json(const ViewportInput &) const {
