@@ -90,17 +90,6 @@ TerrainTileQuadrantSource build_terrain_tile_quadrant_source(
 TerrainTileQuadrantChain build_terrain_tile_quadrant_chain(
 		const Rgba8Image &atlas, int quadrant, uint32_t creation_flags = kTerrainQuadrantCreationFlags);
 
-// The quadrants of `source` (build_terrain_tile_quadrant_source's of an atlas
-// of `atlas`'s shape) that `quadrants` names made again from `atlas`, every
-// other quadrant kept: equal to a fresh build when only those quadrants'
-// texels changed (an editor's sculpt stroke). `quadrants` names the atlas's
-// quadrants in the .trn lock order (top-left, top-right, bottom-left,
-// bottom-right: refresh_heightfield_normal_map's report). False, nothing
-// changed, for an atlas of another shape or an invalid source.
-bool refresh_terrain_tile_quadrant_source(TerrainTileQuadrantSource &source,
-		const Rgba8Image &atlas, const std::array<bool, 4> &quadrants,
-		uint32_t creation_flags = kTerrainQuadrantCreationFlags);
-
 // The colormap as the map's terrain pass samples it: the four quadrants'
 // first levels under the session's texcompression_level, put back together.
 // [orig: render_terrain_decal @ 0x6071C0 (the passes over Colormap0..3,

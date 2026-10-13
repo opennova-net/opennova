@@ -239,7 +239,7 @@ func test_a_colour_stroke_is_an_update_its_pages_draw() -> void:
 
 	var answer: Dictionary = _seam.request({"kind": "terrain_stroke", "path": MISSION, "stroke": {"plane": "colour",
 			"brush": {"tool": "colour", "colour": "#FF2000", "radius": 6, "strength": 1}, "points": [[AT.x, AT.y]],
-			"gesture": 4343, "end": true}})
+			"gesture": 0, "end": true}})
 	assert_true(bool(answer.get("outcome", {}).get("done", false)), str(answer.get("outcome")))
 	var after := await _settled(terrain)
 	state = _state()
@@ -286,7 +286,7 @@ func test_a_foliage_stroke_is_an_update_its_codes_in_place() -> void:
 	var before := data.get_foliage_index_world(AT.x, -AT.y)
 
 	var answer: Dictionary = _seam.request({"kind": "terrain_stroke", "path": MISSION, "stroke": {"plane": "foliage",
-			"brush": {"tool": "foliage", "foliage": 77, "radius": 6}, "points": [[AT.x, AT.y]], "gesture": 4545,
+			"brush": {"tool": "foliage", "foliage": 77, "radius": 6}, "points": [[AT.x, AT.y]], "gesture": 0,
 			"end": true}})
 	assert_true(bool(answer.get("outcome", {}).get("done", false)), str(answer.get("outcome")))
 	for _frame in 30:

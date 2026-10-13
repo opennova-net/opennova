@@ -1972,7 +1972,7 @@ func test_the_map_draws_a_background_of_the_heights() -> void:
 	assert_gt(uploads, 0, str(drawn))
 	var gesture := 0
 	for i in 4:
-		var sample: Dictionary = _seam.request({"kind": "terrain_stroke", "path": "missions/synth_logic.bms",
+		var sample: Dictionary = _seam.sample({"kind": "terrain_stroke", "path": "missions/synth_logic.bms",
 				"stroke": {"plane": "heights", "brush": {"tool": "raise", "radius": 6, "strength": 1},
 				"points": [[-200.0 + 3.0 * i, 200.0]], "gesture": gesture, "end": false}})
 		assert_true(bool(sample.get("outcome", {}).get("done", false)), str(sample.get("outcome")))

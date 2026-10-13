@@ -19,6 +19,7 @@ const AT := Vector2(-200.0, 200.0)
 var _dirs: Array[String] = []
 var _app: Node = null
 var _seam: RefCounted = null
+var _gesture := 0
 
 
 func before_each() -> void:
@@ -110,9 +111,14 @@ func _ground(data: TerrainData, at: Vector2) -> float:
 	return MissionObjectPlacer.godot_to_bms_position(Vector3(godot.x, height, godot.z)).z
 
 
+## A sample of one stroke: gesture 0 begins it, its answer's token carries the next (a wire stroke's token must be
+## open); a sample but the last is not settled (its gesture holds the validation back: a settle would wait out its
+## lapse).
 func _stroke(points: Array, end: bool) -> Dictionary:
-	var answer: Dictionary = _seam.request({"kind": "terrain_stroke", "path": MISSION, "stroke": {"plane": "heights",
-			"brush": {"tool": "raise", "radius": 8, "strength": 1}, "points": points, "gesture": 4242, "end": end}})
+	var fields := {"kind": "terrain_stroke", "path": MISSION, "stroke": {"plane": "heights",
+			"brush": {"tool": "raise", "radius": 8, "strength": 1}, "points": points, "gesture": _gesture, "end": end}}
+	var answer: Dictionary = _seam.request(fields) if end else _seam.sample(fields)
+	_gesture = 0 if end else int(answer.get("outcome", {}).get("gesture", 0))
 	_app.pump()
 	return answer
 
@@ -142,7 +148,8 @@ func test_a_sculpt_is_an_update_of_the_missions_view() -> void:
 	assert_gt(_ground(data, AT), before + 0.5, "the device's ground raised under the dab")
 
 	# The stroke ends; its bake lands in the background: its tiles put in place, still nothing built.
-	assert_true(bool(_stroke([[AT.x + 4.0, AT.y]], true).get("outcome", {}).get("done", false)))
+	var last := _stroke([[AT.x + 4.0, AT.y]], true)
+	assert_true(bool(last.get("outcome", {}).get("done", false)), str(last.get("outcome")))
 	var landed := false
 	for _frame in 2400:
 		_app.pump()

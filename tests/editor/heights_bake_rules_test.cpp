@@ -400,6 +400,10 @@ int test_env_routing() {
 	// An open mission on the other .cpt: no follower of a stroke in the .trn's view, as its own strokes edit Away.cpt.
 	rig.session.handle(request::open_document(near));
 	rig.session.handle(request::open_document(rig.trn));
+	// The .trn's view drawn under no mission (its option "none"): its brush edits the terrain's own files (under a
+	// mission, that mission's: the first, away.bms, would route it to Away.cpt as its picture does).
+	rig.session.handle(request::set_viewport(rig.trn, R"({"kind": "terrain", "options": {"mission": "none"}})"));
+	TEST_EXPECT(rig.session.outcome().done() && rig.session.view().workspace.document(rig.trn).terrain_mission == "none");
 	io::JsonValue args = io::JsonValue::make_object();
 	args.set("path", io::json_string(rig.trn));
 	args.set("op", io::json_string("lock"));
