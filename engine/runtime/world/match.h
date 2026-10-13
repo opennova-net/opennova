@@ -228,15 +228,16 @@ struct MatchPlayer {
     // Player-slot +416 (+0x1A0), the slot's own team byte: 0 for a spectator,
     // and left by a script team write to the body, which stores the entity
     // byte alone. The numbered capture's scorers match it, the alive-holder
-    // count indexes by it and the proximity pass's zone-time split tests its
-    // bit. The authority stamps its connection's slot team here at each player
-    // add and wherever it changes a live slot's team (the spectator convert, a
-    // team change, the auto-balance). The teardown's side swap changes the
-    // connection's alone, which no reader sees: the old mission's bodies are
-    // despawned straight after and the next mission's add stamps the swapped
-    // team.
+    // count and the capture delta's team sizes count by it and the proximity
+    // pass's zone-time split tests its bit. The authority stamps its
+    // connection's slot team here at each player add and wherever it changes
+    // a live slot's team (the spectator convert, a team change, the
+    // auto-balance). The teardown's side swap changes the connection's alone,
+    // which no reader sees: the old mission's bodies are despawned straight
+    // after and the next mission's add stamps the swapped team.
     // [orig: CaptureZone_CheckProximityScoring @0x500CEE / @0x500CF4;
     //  Game_CountAlivePlayersPerTeam @0x50021D;
+    //  CaptureZone_CalculateControlDelta @0x50119B;
     //  Server_UpdateCaptureZoneProximity @0x508C95; Entity_SetTeamByNetId
     //  @0x43C680]
     uint8_t slot_team = 0;

@@ -179,6 +179,70 @@ void test_secure_pass_empty_side_divides_by_zero() {
           control->friendlies == 1);
 }
 
+// D-NET-671: the takeover speed's team sizes count each census slot under its
+// own team byte (+416), not its body's, while the presence compares the
+// bodies' teams. Three slot-team-1 bodies split onto team 2 stand far away;
+// a slot-team-2 body split onto team 1 stands in the team-2 zone beside the
+// attacker, so it counts against the owner by its body (two enemies, no
+// friendly) and on team 2 by its slot. Team 1 is sized at four, no boost at
+// five in all, so the delta at the default speed setting (1: 24) is
+// 65536 / (4 * 24 / -2) = -1365, where the bodies' teams would size it at
+// two, -2730, and a presence by slot team would cancel to 0.
+// [orig: CaptureZone_CalculateControlDelta - `cmp byte ptr [ebp+1A0h], 5`
+//  @0x501192, `movzx eax, byte ptr [ebp+1A0h]` @0x50119B, the count @0x5011A2,
+//  the speed setting @0x50127E..0x5012A4, the sizing side's read @0x5012DF,
+//  the boost @0x5012F8..0x501303, the presence compare @0x50120D..0x501217;
+//  Entity_SetTeamByNetId @0x43C680]
+void test_control_delta_sizes_teams_by_slot_team() {
+    auto world = make_world(gt::kAdvanceAndSecure);
+    zone(*world, 1, 1, {0.0f, 0.0f, 0.0f});
+    const EntityHandle held = zone(*world, 2, 2, {500.0f, 0.0f, 0.0f});
+    zone(*world, 3, 2, {1000.0f, 0.0f, 0.0f});
+    world->zones.build_chain_from_mission();
+    world->registry.get(held)->zone_control = 0x8000;
+    player(*world, 0, 1, {500.0f, 0.0f, 0.0f});
+    for (uint8_t slot = 1; slot <= 3; ++slot) {
+        const EntityHandle split = player(*world, slot, 1, {3000.0f, float(slot) * 10.0f, 0.0f});
+        world->registry.get(split)->team = 2;
+    }
+    const EntityHandle inside = player(*world, 4, 2, {505.0f, 0.0f, 0.0f});
+    world->registry.get(inside)->team = 1;
+    ZoneCaptureEvents events;
+    world->zones.capture_second_tick(events);
+    const auto controls = events_of<ZoneCaptureEvents::Control>(events);
+    const ZoneCaptureEvents::Control *control = control_of(controls, held);
+    CHECK(control != nullptr && control->friendlies == 0 && control->enemies == 2);
+    CHECK(control != nullptr && control->delta == static_cast<int16_t>(-1365));
+    CHECK(world->registry.get(held)->zone_control == 0x8000 - 1365);
+}
+
+// Past the round end the census takes no slot (retail's round end moves every
+// active one to state 7, out of the census's state-6 test; ours's decided
+// outcome stands in): a body in a zone moves no control and is counted on
+// neither side (D-NET-441's round-over half).
+// [orig: CaptureZone_CalculateControlDelta state 6 @0x501188 / `jnz`
+//  @0x50118C, the zero-presence exit @0x501278; Server_ProcessRoundEnd's
+//  state 7 @0x51685E; Server_TickUpdate - Server_CheckWinConditions
+//  @0x51DF5A before Server_UpdateCaptureZoneEntities @0x51DF73]
+void test_control_census_is_empty_past_the_round_end() {
+    auto world = make_world(gt::kAdvanceAndSecure);
+    zone(*world, 1, 1, {0.0f, 0.0f, 0.0f});
+    const EntityHandle held = zone(*world, 2, 2, {500.0f, 0.0f, 0.0f});
+    zone(*world, 3, 2, {1000.0f, 0.0f, 0.0f});
+    world->zones.build_chain_from_mission();
+    world->registry.get(held)->zone_control = 0x8000;
+    player(*world, 0, 1, {500.0f, 0.0f, 0.0f});
+    world->process_round_end(1);
+    CHECK(world->match.outcome().ended);
+    ZoneCaptureEvents events;
+    world->zones.capture_second_tick(events);
+    const auto controls = events_of<ZoneCaptureEvents::Control>(events);
+    const ZoneCaptureEvents::Control *control = control_of(controls, held);
+    CHECK(control != nullptr && control->friendlies == 0 && control->enemies == 0 &&
+          control->delta == 0);
+    CHECK(world->registry.get(held)->zone_control == 0x8000);
+}
+
 // A numbered SpawnPoint flip carries GameEvent_FlagCapture's inputs: the
 // zone's number and rank, whether the enemy mask held, the capturer's frontier
 // after the refresh, the decided test and the capturer's slot.
@@ -474,6 +538,8 @@ int main() {
     test_secure_pass_latches_before_reading_control();
     test_secure_pass_counts_every_enemy();
     test_secure_pass_empty_side_divides_by_zero();
+    test_control_delta_sizes_teams_by_slot_team();
+    test_control_census_is_empty_past_the_round_end();
     test_numbered_flip_feeds_the_capture_pair();
     test_numbered_scorers_match_slot_teams();
     test_capture_scoring_needs_a_session();

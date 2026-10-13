@@ -218,20 +218,33 @@ void ZoneSystem::capture_second_tick(ZoneCaptureEvents &out) {
     ZoneCaptureState &state = world.zones.capture;
     const MatchRules &rules = world.match.rules();
 
-    // The in-game census the delta walks: every registered Player whose body is
-    // neither carried nor dead. [orig: CaptureZone_CalculateControlDelta
-    // @0x501120 — slot active, `test byte [ent+24h], 3`, state 6 @0x501173..0x501199]
+    // The in-game census the delta walks: every slot in state 6 whose body is
+    // neither carried nor dead. Past the round end, which moves every active
+    // slot to state 7, it takes none, so every presence and every delta is 0.
+    // Ours's roster carries no slot state: the census takes every registered
+    // Player's row, none once the outcome is decided, and so still counts a
+    // joiner loading between its add and its join (D-NET-441).
+    // [orig: CaptureZone_CalculateControlDelta @0x501120 — slot active
+    //  @0x501169, its entity @0x501173..0x501178, `test byte [ent+24h], 3`
+    //  @0x50117E, state 6 @0x501188 / `jnz` @0x50118C; Server_ProcessRoundEnd's
+    //  state 7 @0x51685E; the zero-presence exit @0x501278]
+    // The team sizes count each census slot under its own team byte (+416)
+    // when below 5, not its body's (D-NET-671); the presence counts below
+    // compare the bodies' teams. [orig: `cmp byte ptr [ebp+1A0h], 5`
+    // @0x501192 / `jnb` @0x501199, `movzx eax, byte ptr [ebp+1A0h]` @0x50119B;
+    // the presence compare @0x50120D..0x501217]
     std::vector<const Entity *> census;
-    for (const MatchPlayer &row : world.match.players()) {
-        const Entity *e = world.registry.get(row.identity.entity);
-        if (e == nullptr ||
-                (entity_flags(*e) & (kEntityFlagCarried | kEntityFlagDead)) != 0)
-            continue;
-        census.push_back(e);
-    }
     std::array<int, 5> team_players{};
-    for (const Entity *e : census)
-        if (e->team < team_players.size()) ++team_players[e->team]; // [orig: @0x5011A2]
+    if (!world.match.outcome().ended) {
+        for (const MatchPlayer &row : world.match.players()) {
+            const Entity *e = world.registry.get(row.identity.entity);
+            if (e == nullptr ||
+                    (entity_flags(*e) & (kEntityFlagCarried | kEntityFlagDead)) != 0)
+                continue;
+            census.push_back(e);
+            if (row.slot_team < team_players.size()) ++team_players[row.slot_team]; // [orig: @0x5011A2]
+        }
+    }
 
     // The sorted SpawnZoneList's numbered ownership, read by every delta.
     // [orig: SpawnZoneList_GetCount @0x50134F; the census @0x501366..0x5013A7]
