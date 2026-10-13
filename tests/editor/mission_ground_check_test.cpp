@@ -513,6 +513,17 @@ static int test_check() {
 	TEST_EXPECT(check->checked() == 0 && s.off().size() == 8);
 	editor_test::handle_to_end(s.session, request::undo(kMission));
 	TEST_EXPECT(s.off().size() == 7);
+	// A height-locked entity's finding says so (S25): it keeps its height as the ground under it is sculpted.
+	Edit lock;
+	lock.address = crate;
+	lock.field = "height_lock";
+	lock.value = int64_t(1);
+	editor_test::handle_to_end(s.session, request::edit_record(kMission, lock));
+	bool said = false;
+	for (const Diagnostic *d : s.off())
+		said = said || (d->row_id == crate.row &&
+		                d->message.find("(Height locked: it keeps its height as the ground under it is sculpted.)") != std::string::npos);
+	TEST_EXPECT(said && s.off().size() == 7);
 	std::printf("test_check passed\n");
 	return 0;
 }

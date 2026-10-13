@@ -219,7 +219,7 @@ static int test_registry() {
 			return 1;
 		const DocumentTypeId at = static_cast<DocumentTypeId>(id);
 		TEST_EXPECT((type->project_check != nullptr) ==
-				(at == DocumentTypeId::Menu || at == DocumentTypeId::Mission));
+				(at == DocumentTypeId::Menu || at == DocumentTypeId::Mission || at == DocumentTypeId::TilePlacement));
 	}
 	(void)probe_type();
 	g_probe = Probe();
@@ -227,8 +227,10 @@ static int test_registry() {
 	TEST_EXPECT(menu_render_check(&checks) != nullptr && menu_render_check(nullptr) == nullptr);
 	TEST_EXPECT(checks.of(DocumentTypeId::None) == nullptr);
 	TEST_EXPECT(mission_ground_check(&checks) != nullptr && mission_ground_check(nullptr) == nullptr);
+	TEST_EXPECT(checks.of(DocumentTypeId::TilePlacement) != nullptr);
 	for (size_t id = 1; id <= kDocumentTypeCount; ++id)
-		if (static_cast<DocumentTypeId>(id) != DocumentTypeId::Menu && static_cast<DocumentTypeId>(id) != DocumentTypeId::Mission)
+		if (static_cast<DocumentTypeId>(id) != DocumentTypeId::Menu && static_cast<DocumentTypeId>(id) != DocumentTypeId::Mission &&
+		    static_cast<DocumentTypeId>(id) != DocumentTypeId::TilePlacement)
 			TEST_EXPECT(checks.of(static_cast<DocumentTypeId>(id)) == nullptr);
 	Project project("opennova_editor_project_checks_registry");
 	TEST_EXPECT(project.make({ { "defs/items.def", item("Alpha", 5) } }));

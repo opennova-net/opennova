@@ -8,9 +8,12 @@
 #include <cmath>
 #include <iterator>
 
+#include <editor/documents/terrain_planes.h>
 #include <editor/preview/mission_ground_facts.h>
+#include <editor/preview/terrain_patch.h>
 #include <formats/mission/bms.h>
 #include <formats/trn/charmap_legend.h>
+#include <runtime/terrain_query/terrain_atlas_rects.h>
 #include <runtime/world/ammo_table.h>
 
 namespace opennova::editor {
@@ -96,16 +99,22 @@ Point point_of(const MissionOverlayImage &image, int i, int j) {
 	return p;
 }
 
-// The texels whose middles lie within `pad` units of a placed tile's 16-unit square (its z the negated mission y
-// it starts at): where a sampler that walks the tiles is asked; elsewhere the tiles decide nothing.
+// Which of a placed tile's two squares a pass reads (D-TIL-9): the one the game draws it over and keeps foliage off
+// (16 units south of its stored z), or the one the surface sampler tests (16 units north of the stored z negated).
+enum class TileSquareRead { Drawn, Sampled };
+
+// The texels whose middles lie within `pad` units of a placed tile's 16-unit square, as `read` takes it: where a
+// sampler that walks the tiles is asked; elsewhere the tiles decide nothing.
 std::vector<uint8_t> near_tiles(const MissionOverlayImage &image, const std::vector<terrain::SurfaceTileEntry> &tiles,
-		double pad) {
+		double pad, TileSquareRead read) {
 	std::vector<uint8_t> out;
 	if (tiles.empty()) return out;
 	out.assign(size_t(image.width) * size_t(image.height), 0);
 	for (const terrain::SurfaceTileEntry &tile : tiles) {
 		const double x0 = double(tile.x_fixed) / 65536.0 - pad, x1 = double(tile.x_fixed) / 65536.0 + 16.0 + pad;
-		const double y0 = -double(tile.z_fixed) / 65536.0 - pad, y1 = -double(tile.z_fixed) / 65536.0 + 16.0 + pad;
+		const double south = read == TileSquareRead::Drawn ? double(tile.z_fixed) / 65536.0 - 16.0
+		                                                   : -double(tile.z_fixed) / 65536.0;
+		const double y0 = south - pad, y1 = south + 16.0 + pad;
 		const int i0 = std::max(0, int(std::floor((x0 - image.west) / image.texel)) - 1);
 		const int i1 = std::min(image.width - 1, int(std::floor((x1 - image.west) / image.texel)) + 1);
 		const int j0 = std::max(0, int(std::floor((image.north - y1) / image.texel)) - 1);
@@ -144,6 +153,48 @@ std::string class_row_words(int surface) {
 	return out;
 }
 
+// Each placed tile whose square decides the class (DI-07's leg) outlined: their count (image.deciding).
+void outline_tiles(MissionOverlayImage &image, const MissionGround &ground) {
+	image.deciding = 0;
+	for (const terrain::SurfaceTileEntry &tile : ground.placed_tiles()) {
+		const double x0 = double(tile.x_fixed) / 65536.0, y0 = -double(tile.z_fixed) / 65536.0;
+		if (ground.terrain_at(x0 + 8.0, y0 + 8.0, 0.0).from != MissionSurfaceFrom::Tile) continue;
+		++image.deciding;
+		const int i0 = int(std::floor((x0 - image.west) / image.texel));
+		const int i1 = int(std::floor((x0 + 16.0 - image.west) / image.texel));
+		const int j0 = int(std::floor((image.north - (y0 + 16.0)) / image.texel));
+		const int j1 = int(std::floor((image.north - y0) / image.texel));
+		for (int j = j0; j <= j1; ++j)
+			for (int i = i0; i <= i1; ++i) {
+				if (i < 0 || j < 0 || i >= image.width || j >= image.height) continue;
+				if (i == i0 || i == i1 || j == j0 || j == j1) put(image, i, j, kOutline, 255);
+			}
+	}
+}
+
+// The surfaces' legend from the counts: each class's share, then the tiles outlined.
+void surfaces_legend(MissionOverlayImage &image) {
+	image.legend.clear();
+	const double texels = double(image.width) * double(image.height);
+	for (int surface = 0; surface < 256; ++surface) {
+		if (!image.counts[size_t(surface)]) continue;
+		MissionOverlayRow row;
+		row.key = std::to_string(surface);
+		class_rgb(surface, row.rgb);
+		row.share = double(image.counts[size_t(surface)]) / texels;
+		row.words = class_row_words(surface);
+		image.legend.push_back(std::move(row));
+	}
+	if (image.deciding) {
+		MissionOverlayRow row;
+		row.key = "tile";
+		std::copy(std::begin(kOutline), std::end(kOutline), row.rgb);
+		row.words = std::to_string(image.deciding) + " placed tile(s) of the mission's .til, outlined: each square's class "
+				"is its tile set's table entry (TSD_NULL with no .tsd), not the char map's";
+		image.legend.push_back(std::move(row));
+	}
+}
+
 void surfaces(MissionOverlayImage &image, const MissionGround &ground) {
 	const int side = ground.surface_side();
 	const terrain::SurfaceTypeMap sampler = ground.surface_sampler();
@@ -180,8 +231,9 @@ void surfaces(MissionOverlayImage &image, const MissionGround &ground) {
 	terrain::SurfaceTypeMap bare = sampler;
 	bare.tiles = nullptr;
 	bare.tile_count = 0;
-	const std::vector<uint8_t> near = near_tiles(image, ground.placed_tiles(), 1.0);
-	size_t counts[256] = {};
+	const std::vector<uint8_t> near = near_tiles(image, ground.placed_tiles(), 1.0, TileSquareRead::Sampled);
+	image.keys.assign(size_t(image.width) * size_t(image.height), 0);
+	image.counts.assign(256, 0);
 	for (int j = 0; j < image.height; ++j)
 		for (int i = 0; i < image.width; ++i) {
 			const Point p = point_of(image, i, j);
@@ -190,42 +242,11 @@ void surfaces(MissionOverlayImage &image, const MissionGround &ground) {
 			uint8_t rgb[3];
 			class_rgb(surface, rgb);
 			put(image, i, j, rgb, kMissionOverlayAlpha);
-			++counts[surface & 0xFF];
+			image.keys[size_t(j) * size_t(image.width) + size_t(i)] = uint8_t(surface & 0xFF);
+			++image.counts[surface & 0xFF];
 		}
-	// Each placed tile whose square decides the class (DI-07's leg) outlined.
-	size_t deciding = 0;
-	for (const terrain::SurfaceTileEntry &tile : ground.placed_tiles()) {
-		const double x0 = double(tile.x_fixed) / 65536.0, y0 = -double(tile.z_fixed) / 65536.0;
-		if (ground.terrain_at(x0 + 8.0, y0 + 8.0, 0.0).from != MissionSurfaceFrom::Tile) continue;
-		++deciding;
-		const int i0 = int(std::floor((x0 - image.west) / image.texel));
-		const int i1 = int(std::floor((x0 + 16.0 - image.west) / image.texel));
-		const int j0 = int(std::floor((image.north - (y0 + 16.0)) / image.texel));
-		const int j1 = int(std::floor((image.north - y0) / image.texel));
-		for (int j = j0; j <= j1; ++j)
-			for (int i = i0; i <= i1; ++i) {
-				if (i < 0 || j < 0 || i >= image.width || j >= image.height) continue;
-				if (i == i0 || i == i1 || j == j0 || j == j1) put(image, i, j, kOutline, 255);
-			}
-	}
-	const double texels = double(image.width) * double(image.height);
-	for (int surface = 0; surface < 256; ++surface) {
-		if (!counts[surface]) continue;
-		MissionOverlayRow row;
-		row.key = std::to_string(surface);
-		class_rgb(surface, row.rgb);
-		row.share = double(counts[surface]) / texels;
-		row.words = class_row_words(surface);
-		image.legend.push_back(std::move(row));
-	}
-	if (deciding) {
-		MissionOverlayRow row;
-		row.key = "tile";
-		std::copy(std::begin(kOutline), std::end(kOutline), row.rgb);
-		row.words = std::to_string(deciding) + " placed tile(s) of the mission's .til, outlined: each square's class is "
-				"its tile set's table entry (TSD_NULL with no .tsd), not the char map's";
-		image.legend.push_back(std::move(row));
-	}
+	outline_tiles(image, ground);
+	surfaces_legend(image);
 	if (image.outside) {
 		// Past the mapped sectors, an empty cell's value, read where the grid's empty cells begin.
 		const Point beyond{ 0.0, 0.0, bms::to_fixed_16_16(image.west - kSector * 0.5),
@@ -261,6 +282,57 @@ void mask_rgb(int mask, uint8_t out[3]) {
 	out[2] = uint8_t(n ? b / n : 0);
 }
 
+// One texel of the foliage overlay: what grows at its middle (the map's mask less what the placed tiles keep off,
+// `walk`: one may), its tint and its key counted.
+void foliage_texel(MissionOverlayImage &image, const MissionGround &ground, const terrain::FoliageMaskMap &masks, int i,
+                   int j, bool walk) {
+	const size_t at = size_t(j) * size_t(image.width) + size_t(i);
+	const Point p = point_of(image, i, j);
+	const int mask = terrain::foliage_mask_at_fixed(masks, p.fx, p.fy) & 0xF;
+	if (!mask) {
+		uint8_t none[3] = {0, 0, 0};
+		put(image, i, j, none, 0);
+		image.keys[at] = kNothingKey;
+		return;
+	}
+	const int kept = walk ? ground.foliage_kept_off(p.x, p.y, mask) : 0;
+	const int grows = mask & ~kept;
+	if (grows) {
+		uint8_t rgb[3];
+		mask_rgb(grows, rgb);
+		put(image, i, j, rgb, kMissionOverlayAlpha);
+		image.keys[at] = uint8_t(grows);
+	} else {
+		put(image, i, j, kKeptOff, kMissionOverlayAlpha);
+		image.keys[at] = kKeptOffKey;
+	}
+	++image.counts[image.keys[at]];
+}
+
+// The foliage's legend from the counts: each grown mask's share, then the texels kept off.
+void foliage_legend(MissionOverlayImage &image, const std::vector<FoliageDef> &defs) {
+	image.legend.clear();
+	const double texels = double(image.width) * double(image.height);
+	for (int mask = 1; mask < 16; ++mask) {
+		if (!image.counts[size_t(mask)]) continue;
+		MissionOverlayRow row;
+		for (int slot = 0; slot < 4; ++slot)
+			if (mask & (1 << slot)) row.key += (row.key.empty() ? "foliage " : " + ") + std::to_string(slot + 1);
+		mask_rgb(mask, row.rgb);
+		row.share = double(image.counts[size_t(mask)]) / texels;
+		row.words = "grows " + slots_words(defs, mask);
+		image.legend.push_back(std::move(row));
+	}
+	if (image.counts[kKeptOffKey]) {
+		MissionOverlayRow row;
+		row.key = "kept off";
+		std::copy(std::begin(kKeptOff), std::end(kKeptOff), row.rgb);
+		row.share = double(image.counts[kKeptOffKey]) / texels;
+		row.words = "a placed tile's square (2 units round it) keeps every definition without forceon off";
+		image.legend.push_back(std::move(row));
+	}
+}
+
 void foliage(MissionOverlayImage &image, const MissionGround &ground) {
 	const IndexedImage8 &codes = ground.foliage_codes();
 	// Past the mapped sectors, and everywhere with no map, nothing grows: no tint.
@@ -278,46 +350,15 @@ void foliage(MissionOverlayImage &image, const MissionGround &ground) {
 		image.words = "The terrain's sector grid maps no sector: nothing grows.";
 		return;
 	}
-	const std::vector<uint8_t> near = near_tiles(image, ground.placed_tiles(), 3.0);
-	size_t counts[16] = {};
-	size_t kept_texels = 0;
+	const std::vector<uint8_t> near = near_tiles(image, ground.placed_tiles(), 3.0, TileSquareRead::Drawn);
+	image.keys.assign(size_t(image.width) * size_t(image.height), kNothingKey);
+	image.counts.assign(256, 0);
 	for (int j = 0; j < image.height; ++j)
 		for (int i = 0; i < image.width; ++i) {
-			const Point p = point_of(image, i, j);
-			const int mask = terrain::foliage_mask_at_fixed(masks, p.fx, p.fy) & 0xF;
-			if (!mask) continue;
 			const bool walk = !near.empty() && near[size_t(j) * size_t(image.width) + size_t(i)];
-			const int kept = walk ? ground.foliage_kept_off(p.x, p.y, mask) : 0;
-			const int grows = mask & ~kept;
-			if (grows) {
-				uint8_t rgb[3];
-				mask_rgb(grows, rgb);
-				put(image, i, j, rgb, kMissionOverlayAlpha);
-				++counts[grows];
-			} else {
-				put(image, i, j, kKeptOff, kMissionOverlayAlpha);
-				++kept_texels;
-			}
+			foliage_texel(image, ground, masks, i, j, walk);
 		}
-	const double texels = double(image.width) * double(image.height);
-	for (int mask = 1; mask < 16; ++mask) {
-		if (!counts[mask]) continue;
-		MissionOverlayRow row;
-		for (int slot = 0; slot < 4; ++slot)
-			if (mask & (1 << slot)) row.key += (row.key.empty() ? "foliage " : " + ") + std::to_string(slot + 1);
-		mask_rgb(mask, row.rgb);
-		row.share = double(counts[mask]) / texels;
-		row.words = "grows " + slots_words(defs, mask);
-		image.legend.push_back(std::move(row));
-	}
-	if (kept_texels) {
-		MissionOverlayRow row;
-		row.key = "kept off";
-		std::copy(std::begin(kKeptOff), std::end(kKeptOff), row.rgb);
-		row.share = double(kept_texels) / texels;
-		row.words = "a placed tile's square (2 units round it) keeps every definition without forceon off";
-		image.legend.push_back(std::move(row));
-	}
+	foliage_legend(image, defs);
 	if (defs.empty()) image.words = "The terrain holds no foliage definition (its .trn's foliage blocks): nothing grows.";
 	else if (image.legend.empty()) image.words = "No code its foliage map holds selects a definition: nothing grows.";
 }
@@ -348,6 +389,71 @@ MissionOverlayImage mission_ground_overlay(const MissionGround &ground, MissionG
 	if (kind == MissionGroundOverlay::Surfaces) surfaces(image, ground);
 	else foliage(image, ground);
 	return image;
+}
+
+bool mission_ground_overlay_patch(const MissionGround &ground, MissionOverlayImage &image,
+                                  const std::vector<MissionOverlayRect> &rects) {
+	const size_t texels = size_t(std::max(image.width, 0)) * size_t(std::max(image.height, 0));
+	if (image.empty() || image.keys.size() != texels || image.counts.size() != 256 || !ground.terrain()) return false;
+	const bool surface = image.kind == MissionGroundOverlay::Surfaces;
+	if (!surface && image.kind != MissionGroundOverlay::Foliage) return false;
+	if (surface && ground.surface_side() <= 0) return false;
+	const terrain::SurfaceTypeMap sampler = ground.surface_sampler();
+	const terrain::FoliageMaskMap masks = ground.foliage_sampler(false);
+	for (const MissionOverlayRect &rect : rects) {
+		// The texels whose middles may lie in the rect, a texel more each way.
+		const int i0 = std::max(0, int(std::floor((rect.x0 - image.west) / image.texel)) - 1);
+		const int i1 = std::min(image.width - 1, int(std::floor((rect.x1 - image.west) / image.texel)) + 1);
+		const int j0 = std::max(0, int(std::floor((image.north - rect.y1) / image.texel)) - 1);
+		const int j1 = std::min(image.height - 1, int(std::floor((image.north - rect.y0) / image.texel)) + 1);
+		for (int j = j0; j <= j1; ++j)
+			for (int i = i0; i <= i1; ++i) {
+				const size_t at = size_t(j) * size_t(image.width) + size_t(i);
+				if (image.keys[at] != kNothingKey || surface) --image.counts[image.keys[at]];
+				if (surface) {
+					// The sampler with its tiles: an exact answer everywhere (past every square the walk returns the char
+					// map's class).
+					const Point p = point_of(image, i, j);
+					const int value = terrain::surface_type_at_fixed(sampler, p.fx, p.fy);
+					uint8_t rgb[3];
+					class_rgb(value, rgb);
+					put(image, i, j, rgb, kMissionOverlayAlpha);
+					image.keys[at] = uint8_t(value & 0xFF);
+					++image.counts[image.keys[at]];
+				} else {
+					foliage_texel(image, ground, masks, i, j, true);
+				}
+			}
+	}
+	if (surface) {
+		outline_tiles(image, ground);
+		surfaces_legend(image);
+	} else {
+		foliage_legend(image, ground.foliage_defs());
+	}
+	return true;
+}
+
+std::vector<MissionOverlayRect> mission_overlay_patch_rects(const MissionGround &ground, MissionGroundOverlay kind,
+                                                            const TerrainPatches &patches) {
+	std::vector<MissionOverlayRect> out;
+	const TerrainPlane plane = kind == MissionGroundOverlay::Surfaces ? TerrainPlane::Surface : TerrainPlane::Foliage;
+	if (kind == MissionGroundOverlay::None || !ground.terrain()) return out;
+	const int width = plane == TerrainPlane::Surface ? ground.surface_side() : ground.foliage_codes().width;
+	const terrain::FoliageMaskMap grid = grid_of(ground);
+	if (width <= 0 || grid.sector_grid == nullptr) return out;
+	for (const TerrainPatch &patch : patches.patches) {
+		if (patch.plane != plane) continue;
+		std::vector<RasterRegion> regions = patch.regions;
+		if (patch.whole) regions.assign(1, RasterRegion{0, 0, width, width, 0});
+		for (const RasterRegion &region : regions) {
+			const terrain::CoordsRect atlas =
+			        terrain::terrain_map_atlas_rect(terrain::CoordsRect{region.x, region.y, region.width, region.height}, width);
+			for (const terrain::TerrainWorldRect &rect : terrain::terrain_atlas_world_rects(grid.routing(), atlas))
+				out.push_back({double(rect.x0), -double(rect.z1), double(rect.x1), -double(rect.z0)});
+		}
+	}
+	return out;
 }
 
 io::JsonValue mission_overlay_to_json(const MissionOverlayImage &image) {

@@ -157,6 +157,22 @@ bool StagedRows::move(NodeId id, size_t position) {
 	return true;
 }
 
+std::vector<NodeId> StagedRows::placed() const {
+	std::vector<std::pair<size_t, NodeId>> at;
+	for (const auto &entry : touched_)
+		if (entry.second.added) at.push_back({index_of(entry.first), entry.first});
+	for (const NodeId id : moved_) {
+		const auto touched = touched_.find(id);
+		if (touched != touched_.end() && touched->second.added) continue;
+		at.push_back({index_of(id), id});
+	}
+	std::sort(at.begin(), at.end());
+	std::vector<NodeId> out;
+	for (const auto &[index, id] : at)
+		if (index < size()) out.push_back(id);
+	return out;
+}
+
 void StagedRows::for_each_changed(const std::function<void(Node &)> &fn) {
 	for (auto &entry : touched_)
 		if (entry.second.changed)

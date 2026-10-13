@@ -5826,7 +5826,8 @@ add_test(NAME editor_font_import COMMAND editor_font_import_test)
 # Back and Forward (the navigation history: the arrows, Alt+Left and Alt+Right, the mouse's buttons)
 # navigation_test.cpp's; the jumps' keys and menus (DI-18: Go to file and name, Go to definition, Find usages, the Go
 # menu, the right-click menus) shortcuts_test.cpp's; the mission logic (ADR 0046 S24: the Event board, the logic in
-# the views, the live logic during Play) board_test.cpp's, space_test.cpp's and live_test.cpp's; all share editor_ui/editor_ui_test_support.h. One ctest row per group (S13 V1: a failure names its
+# the views, the live logic during Play) board_test.cpp's, space_test.cpp's and live_test.cpp's; the terrain tools in
+# the views (ADR 0046 S25) terrain_test.cpp's; all share editor_ui/editor_ui_test_support.h. One ctest row per group (S13 V1: a failure names its
 # group, the rows run in parallel), each running `editor_ui_test <group>`; editor_ui_groups holds
 # this list and the program's table of groups to one list.
 if(OPENNOVA_IMGUI)
@@ -5837,12 +5838,13 @@ if(OPENNOVA_IMGUI)
                                   editor_ui/logic_test.cpp editor_ui/animation_test.cpp
                                   editor_ui/model_test.cpp editor_ui/project_test.cpp
                                   editor_ui/navigation_test.cpp editor_ui/shortcuts_test.cpp
-                                  editor_ui/board_test.cpp editor_ui/space_test.cpp editor_ui/live_test.cpp)
+                                  editor_ui/board_test.cpp editor_ui/space_test.cpp editor_ui/live_test.cpp
+                                  editor_ui/terrain_test.cpp)
     target_link_libraries(editor_ui_test PRIVATE opennova_editor opennova_imgui)
     target_include_directories(editor_ui_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     set(OPENNOVA_EDITOR_UI_GROUPS workspace markers bounds field_widgets reference_picker find rename
                                   menu inspector preview styles problems gate logic animation model
-                                  project navigation shortcuts board space live)
+                                  project navigation shortcuts board space live terrain)
     foreach(group IN LISTS OPENNOVA_EDITOR_UI_GROUPS)
         add_test(NAME editor_ui_${group} COMMAND editor_ui_test ${group})
     endforeach()
@@ -6190,3 +6192,112 @@ add_executable(editor_wave_document_test editor/wave_document_test.cpp)
 target_link_libraries(editor_wave_document_test PRIVATE opennova_editor)
 target_include_directories(editor_wave_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_wave_document COMMAND editor_wave_document_test)
+
+# --- ADR 0046 S25, terrain editing: the round's rows (added with its shared seams; each lane fills its own). ---
+
+# The terrain brush (ADR 0046 S25): its tools, a dab's weight, the dabs along a path, the brush on the wire.
+add_executable(editor_terrain_brush_test editor/terrain_brush_test.cpp)
+target_link_libraries(editor_terrain_brush_test PRIVATE opennova_editor)
+target_include_directories(editor_terrain_brush_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_terrain_brush COMMAND editor_terrain_brush_test)
+
+# The terrain tools' shared seams (S25): the step marks, the undo across documents by link, EndEdit by a gesture's
+# token and its cancel, the terrain_stroke request on the wire and its refusals, the brush and the Terrain pane.
+add_executable(editor_terrain_stroke_test editor/terrain_stroke_test.cpp)
+target_link_libraries(editor_terrain_stroke_test PRIVATE opennova_editor)
+target_include_directories(editor_terrain_stroke_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_terrain_stroke COMMAND editor_terrain_stroke_test)
+
+# The terrain family (S25): each plane's file as the game resolves it for a mission or a terrain.
+add_executable(editor_terrain_family_test editor/terrain_family_test.cpp)
+target_link_libraries(editor_terrain_family_test PRIVATE opennova_editor)
+target_include_directories(editor_terrain_family_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_terrain_family COMMAND editor_terrain_family_test)
+
+# The raster core's history (S25).
+add_executable(editor_raster_history_test editor/raster_history_test.cpp)
+target_link_libraries(editor_raster_history_test PRIVATE opennova_editor)
+target_include_directories(editor_raster_history_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_raster_history COMMAND editor_raster_history_test)
+
+# The raster document (S25).
+add_executable(editor_raster_document_test editor/raster_document_test.cpp)
+target_link_libraries(editor_raster_document_test PRIVATE opennova_editor)
+target_include_directories(editor_raster_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_raster_document COMMAND editor_raster_document_test)
+
+# The heights document (S25); the retail twin opens and saves every JO:CA .cpt byte for byte.
+add_executable(editor_terrain_heights_document_test editor/terrain_heights_document_test.cpp)
+target_link_libraries(editor_terrain_heights_document_test PRIVATE opennova_editor)
+target_include_directories(editor_terrain_heights_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_terrain_heights_document COMMAND editor_terrain_heights_document_test)
+
+# The heights brushes (S25).
+add_executable(editor_heights_brushes_test editor/heights_brushes_test.cpp)
+target_link_libraries(editor_heights_brushes_test PRIVATE opennova_editor)
+target_include_directories(editor_heights_brushes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_heights_brushes COMMAND editor_heights_brushes_test)
+
+# The heights' bake rules (S25): no loop over a redo or a refused bake, Save settling first, the follow's edits.
+add_executable(editor_heights_bake_rules_test editor/heights_bake_rules_test.cpp)
+target_link_libraries(editor_heights_bake_rules_test PRIVATE opennova_editor)
+target_include_directories(editor_heights_bake_rules_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_heights_bake_rules COMMAND editor_heights_bake_rules_test)
+
+# Unlocked entities following the ground at a bake's landing, locked ones staying (S25).
+add_executable(editor_height_lock_follow_test editor/height_lock_follow_test.cpp)
+target_link_libraries(editor_height_lock_follow_test PRIVATE opennova_editor)
+target_include_directories(editor_height_lock_follow_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_height_lock_follow COMMAND editor_height_lock_follow_test)
+
+# The .til document (S25): a .til's tiles over formats/til, their layers kept ascending, the source notes and
+# the files read only; the retail twin opens and saves all 116 shipped .til byte for byte.
+add_executable(editor_til_document_test editor/til_document_test.cpp)
+target_link_libraries(editor_til_document_test PRIVATE opennova_editor)
+target_include_directories(editor_til_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_til_document COMMAND editor_til_document_test)
+
+# The tile tools (S25).
+add_executable(editor_tile_tools_test editor/tile_tools_test.cpp)
+target_link_libraries(editor_tile_tools_test PRIVATE opennova_editor)
+target_include_directories(editor_tile_tools_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_tile_tools COMMAND editor_tile_tools_test)
+
+# The tile tools through the session (S25 B2): edit_record's terrain_view, the mission's .til made seeded with the
+# terrain's own tiles, the view's Undo and Save, the view's tile planners, the terrain query's tiles ops.
+add_executable(editor_tile_edit_test editor/tile_edit_test.cpp)
+target_link_libraries(editor_tile_edit_test PRIVATE opennova_editor)
+target_include_directories(editor_tile_edit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_tile_edit COMMAND editor_tile_edit_test)
+
+# The maps and the tiles in the mission's 3D view as they are made: each paint and tile edit an Update with its device
+# patch (S25).
+add_executable(editor_terrain_maps_view_test editor/terrain_maps_view_test.cpp)
+target_link_libraries(editor_terrain_maps_view_test PRIVATE opennova_editor)
+target_include_directories(editor_terrain_maps_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_terrain_maps_view COMMAND editor_terrain_maps_view_test)
+
+# Painting a texture used as a terrain map (S25); the retail twin paints every shipped map, undoes it and saves it
+# identical.
+add_executable(editor_texture_paint_test editor/texture_paint_test.cpp)
+target_link_libraries(editor_texture_paint_test PRIVATE opennova_editor)
+target_include_directories(editor_texture_paint_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_texture_paint COMMAND editor_texture_paint_test)
+
+# The paint planner (S25).
+add_executable(editor_terrain_map_paint_test editor/terrain_map_paint_test.cpp)
+target_link_libraries(editor_terrain_map_paint_test PRIVATE opennova_editor)
+target_include_directories(editor_terrain_map_paint_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_terrain_map_paint COMMAND editor_terrain_map_paint_test)
+
+# The 2D map's backgrounds (S25): Nile's Height and Delta maps, MED's flatness and water.
+add_executable(editor_mission_map_terrain_view_test editor/mission_map_terrain_view_test.cpp)
+target_link_libraries(editor_mission_map_terrain_view_test PRIVATE opennova_editor)
+target_include_directories(editor_mission_map_terrain_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_mission_map_terrain_view COMMAND editor_mission_map_terrain_view_test)
+
+# A mission entity's Height lock (S25): the field, the .mis companion's height_lock, the DI-28 words.
+add_executable(editor_mission_height_lock_test editor/mission_height_lock_test.cpp)
+target_link_libraries(editor_mission_height_lock_test PRIVATE opennova_editor)
+target_include_directories(editor_mission_height_lock_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_mission_height_lock COMMAND editor_mission_height_lock_test)

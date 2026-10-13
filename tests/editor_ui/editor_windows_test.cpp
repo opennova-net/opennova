@@ -128,10 +128,11 @@ void test_frame_bracket_follows_the_table() {
 	// S18: a texture's whole-image edit names the active one, as an edit_record does.
 	// The plain-words lane: a string id's words set name the document whose field holds the id.
 	// S23: a wave's whole-wave edit names the active one, as a texture's does.
+	// S25: a terrain stroke names the view it is in, the active one.
 	const std::vector<K> active = {K::OpenDocument, K::ReloadDocument, K::CloseDocument, K::SelectRecord, K::EditRecord,
 	                               K::SetStringText, K::RevertToSaved, K::EndEdit, K::Copy, K::Cut, K::Paste, K::Duplicate, K::Save,
 	                               K::Undo, K::Redo, K::TextureOperation, K::SetViewport, K::EditInViewport,
-	                               K::WaveOperation};
+	                               K::WaveOperation, K::TerrainStroke};
 	const auto listed = [](const std::vector<K> &kinds, K kind) {
 		return std::find(kinds.begin(), kinds.end(), kind) != kinds.end();
 	};
@@ -2908,6 +2909,7 @@ constexpr Group kGroups[] = {
 	{"shortcuts", run_shortcuts_tests},
 	{"board", run_board_tests},           {"space", run_space_tests},
 	{"live", run_live_tests},
+	{"terrain", run_terrain_tests},
 };
 
 } // namespace

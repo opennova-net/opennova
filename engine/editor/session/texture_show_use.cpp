@@ -233,7 +233,9 @@ void show_texture_use(SessionCore &core, const EditorRequest &request) {
 					!placed.entries.empty()) {
 				double box[4] = { 1e30, 1e30, -1e30, -1e30 };
 				for (const TilOverlayEntry &entry : placed.entries) {
-					const double x = double(entry.x_fixed) / 65536.0, y = -double(entry.z_fixed) / 65536.0;
+					// The square the game draws (preview/tile_tools.h): its south-west corner, 16 units each way.
+					const double x = double(entry.x_fixed) / 65536.0,
+					             y = double(entry.z_fixed) / 65536.0 - TIL_CELL_WORLD_UNITS;
 					box[0] = std::min(box[0], x);
 					box[1] = std::min(box[1], y);
 					box[2] = std::max(box[2], x + TIL_CELL_WORLD_UNITS);

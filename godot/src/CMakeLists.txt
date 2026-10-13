@@ -416,6 +416,7 @@ if(OPENNOVA_EDITOR)
         authoring/preview_backdrop.cpp
         authoring/preview_sound_player.cpp
         authoring/script_device.cpp
+        authoring/terrain_patch_applier.cpp
         authoring/terrain_viewport_applier.cpp
         authoring/script_edit.cpp
         authoring/script_highlighter.cpp

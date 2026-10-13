@@ -34,16 +34,21 @@ static int test_the_table() {
 		TEST_EXPECT(row.kind == kind && asset_kind_from_token(row.token) == kind);
 		TEST_EXPECT(&row.facts() == &file_kind_facts(kind));
 		// A kind a document type edits is one the build packs, but the project's notes, which the text type
-		// opens and the game never reads.
+		// opens and the game never reads, and an import's inputs, which the texture type opens (S25 B3: the
+		// images a terrain set's import makes its maps from) and the heights type its heightmap (S25 A2b), its
+		// outputs packing in their place.
 		if (row.document != DocumentTypeId::None) {
 			edited.insert(row.document);
 			const DocumentType *type = document_type(row.document);
-			TEST_EXPECT(type && document_type_for(kind) == type && asset_kind_packed(kind) == (kind != AssetKind::Notes));
+			TEST_EXPECT(type && document_type_for(kind) == type &&
+			            asset_kind_packed(kind) == (kind != AssetKind::Notes && kind != AssetKind::ImportInput &&
+			                                            kind != AssetKind::HeightmapInput));
 		} else {
 			TEST_EXPECT(document_type_for(kind) == nullptr);
 		}
 		const bool left_out = kind == AssetKind::Unknown || kind == AssetKind::Archive || kind == AssetKind::ImportSource ||
-		                      kind == AssetKind::ImportInput || kind == AssetKind::MissionText || kind == AssetKind::Notes;
+		                      kind == AssetKind::ImportInput || kind == AssetKind::HeightmapInput ||
+		                      kind == AssetKind::MissionText || kind == AssetKind::Notes;
 		TEST_EXPECT(asset_kind_packed(kind) == !left_out);
 	}
 	TEST_EXPECT(edited.size() == kDocumentTypeCount);

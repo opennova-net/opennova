@@ -371,28 +371,42 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 	ui_kit::WrapRow row;
 	const bool edits = context.editable();
 	const std::string held = context.not_editable();
-	// The tools: what a click on the picture does (a tool pressed again goes back to Select).
+	// The tools: what a click on the picture does (a tool pressed again goes back to Select). S25: while the terrain
+	// brush is live (the Terrain button shows its tool) none shows pressed, and a tool pressed puts the brush down first
+	// (a set_workspace, then its set_viewport: two requests, as the wire makes them).
+	const SessionView &shown = workspace.view();
+	const bool brushing = shown.workspace.document(mission.path()).terrain && shown.workspace.terrain_brush.tool != TerrainTool::None;
 	const MissionTool tool = options.tool;
-	const auto pick = [&](MissionTool chosen) { options.tool = tool == chosen ? MissionTool::Select : chosen; };
-	if (tool_button(row, "Select", tool == MissionTool::Select, true,
+	const auto put_brush_down = [&] {
+		if (brushing)
+			window_requests::set_workspace(workspace, "terrain_brush", "tool",
+			                               io::JsonValue::make_string(terrain_tool_token(TerrainTool::None)));
+	};
+	const auto pick = [&](MissionTool chosen) {
+		put_brush_down();
+		options.tool = !brushing && tool == chosen ? MissionTool::Select : chosen;
+	};
+	if (tool_button(row, "Select", !brushing && tool == MissionTool::Select, true,
 				"Click a mark to select it (Shift adds, Ctrl toggles), drag it to move it (Alt-drag copies it), "
-				"drag on nothing for a box. Esc."))
+				"drag on nothing for a box. Esc.")) {
+		put_brush_down();
 		options.tool = MissionTool::Select;
-	if (tool_button(row, "Place", tool == MissionTool::Place, edits,
+	}
+	if (tool_button(row, "Place", !brushing && tool == MissionTool::Place, edits,
 				edits ? "Pick an item in the palette, then click the ground to place one, facing the way the camera "
 						"looks; or drag it from the palette onto the picture. Esc stops."
 					  : held))
 		pick(MissionTool::Place);
-	if (tool_button(row, "Path stops", tool == MissionTool::Path, edits,
+	if (tool_button(row, "Path stops", !brushing && tool == MissionTool::Path, edits,
 				edits ? "Pick a waypoint path, then click the ground to add its next stop (a marker the path visits). "
 						"Esc stops."
 					  : held))
 		pick(MissionTool::Path);
-	if (tool_button(row, "Area", tool == MissionTool::Area, edits,
+	if (tool_button(row, "Area", !brushing && tool == MissionTool::Area, edits,
 				edits ? "Drag a box on the ground to make an area trigger over it. Esc stops." : held))
 		pick(MissionTool::Area);
 	// Shoot (DI-23) edits nothing: a held mission takes it too.
-	if (tool_button(row, "Shoot", tool == MissionTool::Shoot, true,
+	if (tool_button(row, "Shoot", !brushing && tool == MissionTool::Shoot, true,
 				"Pick an ammo, then click the terrain or an object to fire it there: the impact plays as the game "
 				"plays it (its effect, its sound and its scar, the object's damage). Esc stops."))
 		pick(MissionTool::Shoot);
@@ -517,6 +531,16 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 					  : std::string("Show the mission's events beside the picture, each a card that reads as its sentence "
 									"(Ctrl+L).")))
 		window_requests::show_logic(workspace, mission.path(), !logic);
+	// The Terrain pane (S25): sculpt the ground, paint its maps and lay its tiles beside the picture (Ctrl+E; the
+	// Windows menu's tick), the button naming the brush's tool while it brushes.
+	const bool terrain = view.workspace.document(mission.path()).terrain;
+	const TerrainTool brush_tool = view.workspace.terrain_brush.tool;
+	const std::string terrain_label =
+			terrain && brush_tool != TerrainTool::None ? std::string("Terrain: ") + terrain_tool_label(brush_tool) : std::string("Terrain");
+	if (tool_button(row, terrain_label.c_str(), terrain, true,
+				terrain ? std::string("Hide the Terrain pane (Ctrl+E): the picture's own tools again.")
+						: std::string("Sculpt the ground, paint its maps and lay its tiles here and on the map (Ctrl+E).")))
+		window_requests::show_terrain(workspace, mission.path(), !terrain);
 	// The mission's script (S15): the <stem>.wac the game compiles with it [orig: WacScript_InitAndLoad @
 	// 0x4F91F0], opened, or made beside the mission where the project has none.
 	const MissionScript script = mission_script(view, mission.path());

@@ -95,6 +95,9 @@ io::JsonValue mission_ground_to_json(const MissionGroundFacts &facts);
 // game resolves (env::resolve_water_height: the mission's override, the environment's, the terrain's).
 // Read when first asked, and again where the header's terrain, tile set, environment or water override or
 // the mission's name moved, or (the files' generation having moved) a file it read moved its stamp.
+struct TerrainPatch;
+class DocumentBase;
+
 class MissionGround {
 public:
 	void follow(const std::shared_ptr<const FileSource> &files, uint64_t generation, const MissionSceneHeader &header,
@@ -113,6 +116,28 @@ public:
 	double water_height() const;
 	// How often it read its files (a test's count).
 	int reads() const { return reads_; }
+	// Moves with each read of its files and each patch written in place (S25): what a reader of the ground keys on.
+	uint64_t revision() const { return revision_; }
+	// Moves with each read of its files and each heights patch alone (S25: what a picture of the heights keys on, which
+	// a surface or foliage patch leaves as it is).
+	uint64_t heights_revision() const { return heights_revision_; }
+	// The files it read, each at the stamp it read it at (S25: a stroke's file among them feeds a view's ground).
+	const FileStamps &stamps() const { return stamps_; }
+	// The files `names` names (as it read them, in any case) take the stamps `files` gives them now (S25: a stroke's file
+	// patched in place), so the next follow does not read them again.
+	void restamp(const FileSource &files, const std::vector<std::string> &names);
+	// S25: what a stroke changed of a file it read, patched in place from the open document that holds it (a region of
+	// the heights: the live atlas there; a map's texels), never reading the files again per dab; false where it cannot
+	// (the caller reads them again: follow). `stands_for` names the map an import makes from the document (an imported
+	// terrain's surface or foliage source, TerrainFamilyFile::import_output's name; "" none): its texels patch that map
+	// through the import's translation (an index or a grey level the class or code, a legend colour its class: runtime/
+	// terrain decode_charmap_source, decode_foliage_map_source, which keep the side).
+	bool patch(const TerrainPatch &patch, const DocumentBase &document, const std::string &stands_for = std::string());
+	// S25: the placed tiles alone moved (a tile tool's edit): the file the game takes now (`took`, "" none) and its bytes
+	// read in place of the tiles held, and the files `names` names take their stamps in `files` now; the terrain read
+	// stands. Nothing where no terrain was read (its next follow reads them all).
+	void retile(const FileSource &files, const std::string &took, const std::vector<uint8_t> &bytes,
+	            const std::vector<std::string> &names);
 
 	// The game's own samplers over what it read (DI-29): the char map's, with the placed tiles and their
 	// table (terrain::surface_type_at_fixed), and the foliage map's, its codes (`codes` true) or its texels
@@ -127,6 +152,8 @@ public:
 	const std::vector<FoliageDef> &foliage_defs() const { return foliage_defs_; }
 	// The placed tiles' squares, as the game keeps them (x and z 16.16, z the negated mission y).
 	const std::vector<terrain::SurfaceTileEntry> &placed_tiles() const { return tiles_; }
+	// The placed tiles' records, in file order (the foliage blocker's and the map's 2D tile view's read).
+	const TilFile &placed() const { return placed_; }
 	// The definition slots (a mask) a placed tile's square keeps a candidate at mission (x, y) off: every
 	// slot without forceon where the candidate's square (2 units each way) meets a tile's [orig:
 	// Foliage_PathBlockedByPlacedTile @ 0x606490; til_blocks_foliage], 0 for none.
@@ -138,6 +165,8 @@ public:
 	MissionGroundFacts record_at(NodeId row, const std::string &title, double x, double y, double z) const;
 
 private:
+	// Whether every file it read that moved since is a tile placement (a .til): the placed tiles alone moved.
+	bool tiles_alone_moved_(const FileSource &files) const;
 	struct Key {
 		std::string terrain, tile_set, environment, mission;
 		uint32_t water_attrib = 0;
@@ -166,6 +195,10 @@ private:
 	terrain::FoliageMaskRaster foliage_;
 	std::vector<FoliageDef> foliage_defs_;
 	int reads_ = 0;
+	uint64_t revision_ = 0;
+	uint64_t heights_revision_ = 0;
+	// The heights read (the .trn's polytrn_polydata, a .cpt; "" none).
+	std::string heights_file_;
 };
 
 } // namespace opennova::editor

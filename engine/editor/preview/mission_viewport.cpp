@@ -19,6 +19,7 @@
 #include <editor/preview/mission_ground_check.h>
 #include <editor/preview/mission_hint.h>
 #include <editor/preview/mission_items.h>
+#include <editor/session/terrain_family.h>
 #include <editor/preview/mission_link_shapes.h>
 #include <editor/preview/mission_overlay.h>
 #include <editor/preview/mission_palette.h>
@@ -30,6 +31,8 @@
 #include <editor/session/play_controller.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <editor/preview/terrain_brush_spaces.h>
+#include <editor/preview/terrain_view_commands.h>
 #include <formats/env/env.h>
 #include <formats/env/env_weather.h>
 #include <formats/env/tod_clock.h>
@@ -330,6 +333,16 @@ void MissionViewport::follow_ground_(const SessionView &view) const {
 			scene_.header(), mission::mission_base_name(path()));
 }
 
+void MissionViewport::patch_overlay_(uint64_t ground_before) {
+	// S25: an overlay current before the stroke's patches takes their regions of its map in place (another plane's
+	// patch leaves it as it is), never the whole picture made again per dab.
+	if (overlay_.empty() || overlay_ground_ != ground_before || terrain_ground_.revision() == ground_before) return;
+	const std::vector<MissionOverlayRect> rects = mission_overlay_patch_rects(terrain_ground_, overlay_.kind, stroke_.patches());
+	if (!rects.empty() && !mission_ground_overlay_patch(terrain_ground_, overlay_, rects)) return;
+	overlay_ground_ = terrain_ground_.revision();
+	if (!rects.empty()) ++overlay_serial_;
+}
+
 bool MissionViewport::follow_overlay_(const SessionView &view) {
 	const MissionGroundOverlay kind = options_.overlay;
 	if (kind == MissionGroundOverlay::None) {
@@ -339,9 +352,9 @@ bool MissionViewport::follow_overlay_(const SessionView &view) {
 		return true;
 	}
 	follow_ground_(view);
-	if (overlay_.kind == kind && overlay_reads_ == terrain_ground_.reads()) return false;
+	if (overlay_.kind == kind && overlay_ground_ == terrain_ground_.revision()) return false;
 	overlay_ = mission_ground_overlay(terrain_ground_, kind);
-	overlay_reads_ = terrain_ground_.reads();
+	overlay_ground_ = terrain_ground_.revision();
 	++overlay_serial_;
 	return true;
 }
@@ -351,9 +364,9 @@ bool MissionViewport::stand_people_(const SessionView &view, bool posed) {
 	// The people stand on the mission's terrain as the game reads it (DI-38): again where a record, a pose
 	// or the terrain moved.
 	follow_ground_(view);
-	if (!posed && stood_serial_ == scene_.serial() && stood_reads_ == terrain_ground_.reads()) return false;
+	if (!posed && stood_serial_ == scene_.serial() && stood_ground_ == terrain_ground_.revision()) return false;
 	stood_serial_ = scene_.serial();
-	stood_reads_ = terrain_ground_.reads();
+	stood_ground_ = terrain_ground_.revision();
 	return poses_.stand(scene_, terrain_ground_.height_field());
 }
 
@@ -506,6 +519,10 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 		follow_overlay_(view);
 		picture_.show(key, generation);
 		shown(*document);
+		// S25: the terrain files' states as drawn (a stroke's first patch is against them).
+		std::vector<std::string> drawn;
+		stroke_.follow(view, *document, false, terrain_ground_, files, drawn);
+		stroke_.made();
 		follow_shots_(input, *document, clock);
 		follow_effects_(view, clock);
 		follow_listen_(view, document, clock);
@@ -520,6 +537,7 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 			state_moved();
 		}
 		options_moved_ = false;
+		heights_built_(view, *document);
 		return picture_.built(FileStamps());
 	}
 	MissionSceneDelta delta;
@@ -527,6 +545,31 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 		delta = scene_.patch(*rows, *source);
 		shown(*document);
 	}
+	// S25: a stroke in a terrain file the picture reads: the ground patched in place and the files' new stamps taken (no
+	// read of them again whole per dab, no Rebuild), the device's patches kept; one that cannot be patched is read again
+	// below as before, its Rebuild held to the stroke's end. A stroke's end over a picture its device did not patch
+	// makes it again.
+	const bool stroking = gesture_held_(input) != 0;
+	std::vector<std::string> patched;
+	const uint64_t ground_before = terrain_ground_.revision();
+	if (stroke_.follow(view, *document, stroking, terrain_ground_, files, patched) && !patched.empty()) picture_.restamp(files, patched);
+	patch_overlay_(ground_before);
+	// S25 (the maps and the tiles): the colour, blend and surface maps the follow patched and the placed tiles' move,
+	// queued for the device with their files' stamps, the picture taking them: an Update, the device patching its
+	// terrain in place.
+	std::vector<std::string> mapped;
+	const bool painted = maps_.take(view, *document, stroke_.patches(), tiles_read_(), terrain_ground_, mapped);
+	if (!mapped.empty()) picture_.restamp(files, mapped);
+	if (!stroking && stroke_.patched()) {
+		stroke_.made();
+		fog_reach_ = mission_fog_reach(files, scene_.header());
+		options_moved_ = false;
+		heights_built_(view, *document);
+		return picture_.built(FileStamps());
+	}
+	// S25 (the heights): the heights the follow patched (a stroke's samples, a bake's landing, an undo or redo of
+	// them), queued for the device with the tiles a landing replaced: an Update, the device patching its terrain.
+	const bool sculpted = take_heights_(view);
 	bound_items_(view);
 	// The people posed again where a record they read, the graph or a file they read moved (DI-38): an
 	// Update poses them, the picture standing.
@@ -546,17 +589,20 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 	// What the mission sounds like at the camera (DI-36): the device plays the channels as they stand each frame.
 	follow_listen_(view, document, clock);
 	// A file the device read moved: the picture made again from the files, over the scene as it is.
-	if (picture_.follow(key, false, files, generation) == PreviewFollow::Found::Files) {
+	if (picture_.follow(key, false, files, generation) == PreviewFollow::Found::Files ||
+			((heights_stale_ || maps_.stale()) && !stroking)) {
 		fog_reach_ = mission_fog_reach(files, scene_.header());
 		options_moved_ = false;
+		heights_built_(view, *document);
 		return picture_.built(FileStamps());
 	}
 	if (delta.header || delta.reshaped) {
 		if (delta.header) fog_reach_ = mission_fog_reach(files, scene_.header());
 		options_moved_ = false;
+		heights_built_(view, *document);
 		return ViewportAction::Rebuild;
 	}
-	if (!delta.moved && !options_moved_ && !posed && !overlaid) return ViewportAction::Keep;
+	if (!delta.moved && !options_moved_ && !posed && !overlaid && !sculpted && !painted) return ViewportAction::Keep;
 	options_moved_ = false;
 	return ViewportAction::Update;
 }
@@ -650,8 +696,55 @@ void MissionViewport::apply_(const io::JsonValue &json, PreviewClock &clock) {
 	}
 }
 
+bool MissionViewport::take_heights_(const SessionView &view) {
+	bool any = false;
+	for (const TerrainPatch &patch : stroke_.patches().patches) {
+		if (patch.plane != TerrainPlane::Heights) continue;
+		const DocumentBase *open = nullptr;
+		for (const auto &each : view.documents.open)
+			if (each && each->path() == patch.path) open = each.get();
+		HeightsDevicePatch device;
+		if (!open || !heights_tiles_.take(patch, *open, device)) {
+			// A heights document the picture did not show as it is (read again): the picture made again from its file.
+			heights_stale_ = true;
+			continue;
+		}
+		device.serial = ++heights_serial_;
+		heights_patches_.push_back(std::move(device));
+		any = true;
+	}
+	return any;
+}
+
+void MissionViewport::heights_built_(const SessionView &view, const DocumentBase &document) {
+	const DocumentBase *open = nullptr;
+	TerrainFamily family;
+	if (resolve_terrain_family(view, document, family) && !family.plane(TerrainPlane::Heights).path.empty())
+		for (const auto &each : view.documents.open)
+			if (each && each->path() == family.plane(TerrainPlane::Heights).path) open = each.get();
+	heights_tiles_.shown(open);
+	heights_patches_.clear();
+	heights_built_serial_ = heights_serial_;
+	heights_stale_ = false;
+	// The maps' and the placed tiles' too (S25: the device reads the files as they stand).
+	maps_.built(view, tiles_read_());
+}
+
+TilesRead MissionViewport::tiles_read_() const {
+	// The mission's own name: the game reads <mission>.til, the name cut at its first dot (mission_base_name).
+	return TilesRead{mission::mission_base_name(path()), scene_.header().terrain, scene_.header().environment};
+}
+
 bool MissionViewport::report_(const ViewportDeviceReport &report) {
 	picture_.read(report.files);
+	// The heights patches the device took.
+	heights_patches_.erase(std::remove_if(heights_patches_.begin(), heights_patches_.end(),
+			[&](const HeightsDevicePatch &patch) { return patch.serial <= report.heights_taken; }),
+			heights_patches_.end());
+	// The maps' and the tiles' (S25); one it could not take makes the picture again.
+	maps_.taken(report.maps_taken, report.maps_refused);
+	// One it could not take: the picture made again at the next follow.
+	if (report.heights_failed) heights_stale_ = true;
 	missing_ = report.missing;
 	ground_ = report.surface;
 	// What it drew this frame (the foliage, the lights): read on the wire, moving nothing.
@@ -849,6 +942,13 @@ std::vector<MissionPressed> MissionViewport::taken_(const ViewportContext &conte
 
 bool MissionViewport::drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
 		std::string &error) const {
+	// S25: the terrain tools' (terrain_view_commands.h): the brush's drag, a click while it is live, the eyedropper and
+	// the tile commands, drops and drags.
+	const CameraBrushSpace terrain_space(context, camera_, &followed_ground(context.input.view));
+	const TerrainViewContext terrain{context, terrain_space, path(), ViewportKind::Mission, &terrain_ground_};
+	bool terrain_handled = false;
+	const bool terrain_done = terrain_view_drag(terrain, drag, out, error, terrain_handled);
+	if (terrain_handled) return terrain_done;
 	float hx = 0.0f, hy = 0.0f;
 	// The handle where the picture shows it now: what a `by` goes from, and what refuses a handle the
 	// record has not. A drag to a point takes a handle that is off the picture.
@@ -965,6 +1065,13 @@ bool MissionViewport::drag(const ViewportContext &context, const ViewportDrag &d
 
 bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &drop, CanvasRequests &out,
 		std::string &error) const {
+	// S25: the terrain tools' (terrain_view_commands.h): the brush's drag, a click while it is live, the eyedropper and
+	// the tile commands, drops and drags.
+	const CameraBrushSpace terrain_space(context, camera_, &followed_ground(context.input.view));
+	const TerrainViewContext terrain{context, terrain_space, path(), ViewportKind::Mission, &terrain_ground_};
+	bool terrain_handled = false;
+	const bool terrain_done = terrain_view_drop(terrain, drop, out, error, terrain_handled);
+	if (terrain_handled) return terrain_done;
 	const Document *document = planned_(context, error);
 	if (!document) return false;
 	if (!context.editable()) {
@@ -1201,6 +1308,13 @@ bool MissionViewport::play_from_here_(const ViewportContext &context, const View
 
 bool MissionViewport::command_of(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
 		std::string &error) const {
+	// S25: the terrain tools' (terrain_view_commands.h): the brush's drag, a click while it is live, the eyedropper and
+	// the tile commands, drops and drags.
+	const CameraBrushSpace terrain_space(context, camera_, &followed_ground(context.input.view));
+	const TerrainViewContext terrain{context, terrain_space, path(), ViewportKind::Mission, &terrain_ground_};
+	bool terrain_handled = false;
+	const bool terrain_done = terrain_view_command(terrain, command, out, error, terrain_handled);
+	if (terrain_handled) return terrain_done;
 	if (command.name == "play_from_here") return play_from_here_(context, command, out, error);
 	if (command.name == "new_event") {
 		// S24: a recipe's event made over the record named (the right-click menu's New event).
