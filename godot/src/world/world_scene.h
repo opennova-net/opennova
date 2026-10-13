@@ -158,6 +158,8 @@ public:
 	// Every such global as a process has it with no scene: the environment's
 	// shipped defaults, no water, no weather rings, no cube, no veil, no masks
 	// (a picture with no world, the model's, after one that published its own).
+	// Only while every live scene is held: an unheld row keeps its own
+	// written-value latches and would not write its value again after this.
 	static void publish_absent();
 
 private:

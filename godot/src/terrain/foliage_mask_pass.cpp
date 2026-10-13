@@ -865,9 +865,13 @@ void FoliageMaskPass::_set_view_eye(const Vector3 &p_eye) {
 }
 
 void FoliageMaskPass::publish_absent() {
+	++absent_writes_;
 	if (RenderingServer *server = RenderingServer::get_singleton()) {
+		server->global_shader_parameter_set("opennova_foliage_mask_depth", Variant());
 		server->global_shader_parameter_set("opennova_foliage_mask_active", false);
+		server->global_shader_parameter_set("opennova_foliage_mask_eye", Vector3());
 		server->global_shader_parameter_set("opennova_foliage_mask_inset_active", false);
+		server->global_shader_parameter_set("opennova_foliage_mask_inset_eye", Vector3());
 	}
 }
 
