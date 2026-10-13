@@ -21,6 +21,8 @@
 
 #include <net/npwire/ingame_decode.h> // decode_organic_spawn_batch / decode_pool3_sync_batch
 #include <net/npwire/ingame_encode.h> // encode_pool_spawn_batch
+#include <net/npwire/ingame_message_id.h> // s2c::WORLD_STATE_LOAD
+#include <runtime/replication/client_replica_pipeline.h> // the joiner's 0x0F apply
 #include <runtime/replication/entity_wire_bridge.h> // build_pool1_spawn_batch
 
 #include <runtime/mission/mission_text.h>
@@ -33,6 +35,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -957,10 +960,15 @@ int pool3_page_start_impl() {
 // record's name_index (TDH_I3A's markers carry 0,1,4,3,5,2 in file order, 0
 // keying LOCATION000 like any other), in spawn order, and a record without a
 // text names itself by its key string. A refused record (its slot left empty)
-// registers no name, so the count skips it (D-NET-511).
-// [orig: Entity_SpawnFromBMSRecord @0x40F17C..0x40F20C; the refusals @0x40EA94..0x40EAC2,
-//  @0x40EAD2..0x40EB05, @0x40EB1C..0x40EB2E;
-//  NetPacket_WriteWorldStateLoad0x0F @0x502D10]
+// registers no name, so the count skips it (D-NET-511). Each name is copied
+// whole into its 64-byte slot, so a 70-byte one runs on into the next slot,
+// which the next name overwrites: the 0x0F carries that slot's first 64
+// bytes and the next name, and a joiner's handler keeps 63 bytes of each
+// (D-NET-657).
+// [orig: Entity_SpawnFromBMSRecord @0x40F17C..0x40F20C, the copies @0x40F1D3..0x40F1DF /
+//  @0x40F200..0x40F20A; the refusals @0x40EA94..0x40EAC2, @0x40EAD2..0x40EB05,
+//  @0x40EB1C..0x40EB2E; NetPacket_WriteWorldStateLoad0x0F @0x502D10, the strlen
+//  @0x502EA0..0x502EAC; NapiNPClientMsg_0x00F's bounded copy @0x42e538..0x42e584]
 int location_names_by_name_index_impl() {
 	w::World world;
 	world.registry.configure_pool(0, 16);
@@ -988,7 +996,15 @@ int location_names_by_name_index_impl() {
 	add_marker(2044, 9, true);  // no [Locations] text: the key string
 	opennova::mission::MissionText text;
 	text.loaded = true;
-	for (int32_t i = 0; i <= 6; ++i) text.location_texts[i] = "Place " + std::to_string(i);
+	text.table.sections.push_back({"Locations", 0});
+	const std::string long_name = "Place 4 " + std::string(62, 'x'); // 70 bytes
+	for (int32_t i = 0; i <= 6; ++i) {
+		opennova::rtxt::Entry entry;
+		entry.key = "LOCATION00" + std::to_string(i);
+		entry.text = i == 4 ? long_name : "Place " + std::to_string(i);
+		text.table.entries.push_back(entry);
+		++text.table.sections.back().string_count;
+	}
 
 	ns::LoopbackChannel loopback;
 	inmatch::NapiNPServerCtx ctx;
@@ -996,10 +1012,10 @@ int location_names_by_name_index_impl() {
 	                        inmatch::SocketMode::Socketless, /*host_key=*/0, &loopback);
 	ctx.world = &world;
 	inmatch::install_mission_location_names(ctx, world, mission, text);
-	const std::vector<std::string> want = {"Place 0", "Place 1", "Place 4", "Place 3",
-	                                       "Place 5", "Place 2", "LOCATION009"};
+	const std::vector<std::string> want = {"Place 0", "Place 1", long_name.substr(0, 64) + "Place 3",
+	                                       "Place 3", "Place 5", "Place 2", "LOCATION009"};
 	if (!expect(ctx.mission_location_names == want,
-	            "the install keys each admitted marker by its record's name_index"))
+	            "the install keys each admitted marker by its record's name_index, as its slot reads"))
 		return 1;
 	inmatch::Server_InitNewRoundState(ctx);
 	inmatch::Server_ProcessPendingPlayerSpawns(ctx, world);
@@ -1023,6 +1039,14 @@ int location_names_by_name_index_impl() {
 		return 1;
 	if (!expect(state.team_name_count == want.size() && state.team_names == want,
 	            "the 0x0F location names are the admitted markers' name_index texts in spawn order"))
+		return 1;
+	auto joiner_storage = std::make_unique<ns::ClientReplicaPipeline>();
+	ns::ClientReplicaPipeline &joiner = *joiner_storage;
+	joiner.apply(opennova::s2c::WORLD_STATE_LOAD, *body);
+	std::vector<std::string> kept = want;
+	kept[2] = long_name.substr(0, 63);
+	if (!expect(joiner.state().location_names == kept,
+	            "a joiner's 0x0F handler keeps each name to 63 bytes"))
 		return 1;
 	std::printf("PASS location_names_by_name_index\n");
 	return 0;

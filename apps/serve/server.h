@@ -222,6 +222,9 @@ private:
 
 	ServeOptions options_;
 	ResourceIndex index_;
+	// The mount's expansion text-override table, read once at the boot's
+	// mount (vfs_expansion_override_table); empty = none.
+	std::vector<uint8_t> text_override_table_;
 	std::unique_ptr<assets::AssetStore> assets_;
 	std::vector<mission_catalog::Row> catalog_;
 	// The process's cfg block: game.cfg in the working directory and the

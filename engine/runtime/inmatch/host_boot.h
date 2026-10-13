@@ -64,6 +64,11 @@ struct HostBootRequest {
 	// The mounted reader; its read_loose_first serves the reads retail makes
 	// off the disk (score.ini, the .til).
 	mission::BootFileSource files;
+	// The mount's expansion text-override table, the bytes of its loose
+	// expansion\<n>\<n>.bin (empty = none; the mount decides which,
+	// vfs_expansion_override_table); the mission text's lookups search it
+	// first [orig: g_TextOverrideTable @0x33429B0].
+	std::vector<uint8_t> text_override_table;
 	// The shared native assets (null = none) and the embedder's parsed
 	// items.def rows (null = the kernel parses items.def off `files`); both
 	// outlive the kernel.

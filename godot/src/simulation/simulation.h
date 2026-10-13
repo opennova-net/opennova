@@ -1623,7 +1623,7 @@ public:
 	void fill_objectives(const Ref<RtxtStringFile> &p_mission_text,
 			std::vector<opennova::hud::HudObjectiveRow> &r_rows) const;
 	// The briefing panel's text: info/briefing2, else info/briefing (HudBriefingState). NOT bound.
-	const std::string &mission_briefing_text() const { return net_.mission_text.briefing2; }
+	std::string mission_briefing_text() const { return net_.mission_text.briefing2(); }
 	// The FSM snapshot for the shell: latest clip/action payloads, diagnostic serials,
 	// ammo, kick, and the 3P body channel. Ordered presentation events drain through
 	// drain_local_player_weapon_events(); the snapshot alone is not an event queue.
