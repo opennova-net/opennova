@@ -428,12 +428,17 @@ func _on_disconnected(reason: String) -> void:
 			"Retry", Callable(self, "_reconnect"), Screen.CONNECTING)
 
 
+# A connect failure the client reports as an NWEC tag (the gate's NWEC15, a give-up
+# of the first connect's NWEC40..NWEC48) shows its menutxt text, as the retail
+# NovaWorld error dialog does; any other message keeps the plain-language lead.
 func _on_error(message: String) -> void:
 	if _suppress_client_messages or _closing:
 		return
 	_reset_connection_state()
-	_show_message("The matchmaking service could not be reached.\n\n%s" % message,
-			"Retry", Callable(self, "_reconnect"), Screen.CONNECTING)
+	var text := error_message(message)
+	if text == message:
+		text = "The matchmaking service could not be reached.\n\n%s" % message
+	_show_message(text, "Retry", Callable(self, "_reconnect"), Screen.CONNECTING)
 
 
 # Fill the browser from the GSB server list. Rows arrive asynchronously over

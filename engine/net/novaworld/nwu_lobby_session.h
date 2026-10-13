@@ -47,8 +47,9 @@ public:
 		std::function<void(const RxInfo &)> on_received;
 		// The session advanced: the owner maps ClientSession::State onto its own states.
 		std::function<void()> on_session_state;
-		// Fatal: a gate response naming no UDPNOVAWORLD, a session error, or a connect deadline.
-		// The message is the retail NWEC tag when one is witnessed for the failure.
+		// Fatal: a gate response naming no UDPNOVAWORLD, a session error, or a give-up of the
+		// first connect (novaworld_connect_error_tag's NWEC). The message is the retail NWEC tag
+		// when one is witnessed for the failure.
 		std::function<void(const std::string &)> on_fatal;
 		// Recoverable decode noise on the gate socket (a bad envelope or response).
 		std::function<void(const std::string &)> on_soft_error;
@@ -92,8 +93,9 @@ public:
 	void close();
 	// One tick at the owner's wall clock: the gate socket until its reply landed, the session
 	// socket (each datagram through the session, its immediate sends out), the receive batch's
-	// missing-sequence tail, the connection's send pump, the periodic update's statements, then
-	// the gate worker's and the first connect's retransmits and deadlines.
+	// missing-sequence tail, the connection's send pump, the periodic update's statements and its
+	// first-connect give-up, then the gate worker's retransmits and deadline, the first connect's
+	// poll (its give-ups and their NWEC reports) and its stage retransmits.
 	void tick(uint32_t now_ms);
 	// Send one datagram (fires on_sent per send): the announce (a 0x41) to every probe target,
 	// each target its own announce carrying that target's address and port as EIP / EPN
@@ -154,9 +156,14 @@ private:
 	void poll_session();
 	void send_gate_probe();
 	bool resolve(const std::string &host, uint16_t port, PeerAddr &out) const;
-	// The handshake phase for the timeout diagnostic (gate_probing / session_hello /
-	// session_join).
-	const char *phase_name() const;
+	// The periodic update's give-up legs, then the first connect's poll.
+	void give_up_stalled_connect();
+	bool poll_connect();
+	// A give-up: the session's abort, its sends out.
+	void abort_connect();
+	// A connect wait's failure: the session's reset (a connection still up tears down) and the
+	// code's NWEC to on_fatal.
+	void fail_connect(int code);
 
 	Hooks hooks_;
 	Environment env_;
@@ -177,11 +184,18 @@ private:
 	// The gate worker: the probe re-sent every retry interval until the deadline.
 	uint32_t gate_started_ms_ = 0;
 	uint32_t gate_last_send_ms_ = 0;
-	// The first connect's legs: the stage datagram re-sent every retransmit interval until the
-	// session's connect deadline.
-	uint32_t connect_started_ms_ = 0;
+	// The first connect's poll, retail's NovaWorld menu running PollConnectPhase1, the validation
+	// wait, PollConnectPhase2 and the connection wait in turn: its stamp (dword_B5F444), its
+	// timed-out flag (dword_B5F448) and the give-up word the periodic update sets (session+0x12C:
+	// 1 the state-1 give-up). The stage datagram is re-sent every retransmit interval while it
+	// runs.
+	// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - states 5..8 @0x55919E..0x55923C]
+	enum class ConnectPoll { Off, Connect, Verify, Done };
+	ConnectPoll connect_poll_ = ConnectPoll::Off;
+	uint32_t connect_stamp_ms_ = 0;
+	bool connect_timed_out_ = false;
+	int give_up_ = 0;
 	uint32_t connect_last_send_ms_ = 0;
-	bool connect_reported_ = false;
 };
 
 } // namespace opennova

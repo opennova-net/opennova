@@ -153,6 +153,9 @@ std::vector<uint8_t> ClientSession::start() {
 	session_flags_ = 0;
 	session_role_ = kSessionRoleNone;
 	set_lobby_state(1);
+	// The first probe runs from here (InitPlayerConnection's NapiTimer_Start) until its 0x81 or a
+	// give-up stops it. [orig: CNapiGameSession_InitPlayerConnection - NapiTimer_Start @0x4D43C2]
+	first_probe_stopped_ = false;
 	server_hk_ = 0;
 	server_sk_ = 0;
 	server_scrk_.clear();
@@ -206,9 +209,15 @@ std::vector<uint8_t> ClientSession::retransmit_stage_datagram() {
 	// A reconnect's 0x41 / 0x42 ride the session's own pump (pump()).
 	if (reconnecting()) return {};
 	switch (state_) {
-	case State::Hello: return build_client_hello();
-	case State::Auth: return build_client_auth();
-	default: return {};
+		// The re-announce is the enumerator's, which a give-up's NapiTimer_Stop ends.
+		// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0 - the timer gate
+		// @0x6290E0..0x629170]
+		case State::Hello:
+			return first_probe_stopped_ ? std::vector<uint8_t>{} : build_client_hello();
+		case State::Auth:
+			return build_client_auth();
+		default:
+			return {};
 	}
 }
 
@@ -380,14 +389,14 @@ bool ClientSession::handle_datagram(const uint8_t *data, size_t len,
 		// connection is down and armed.
 		// [orig: Nwu_HandleServerHello @0x627e3e..0x627e5f — !conn_flag0 && is_client &&
 		//  conn_flag1 && +0x710]
-		// Either is read only while the enumerator probes: a reconnect's inside its probe
-		// window, so a 0x81 in the re-join's 0x42 leg or in the gap between windows is
-		// missed; the first connect's from its start to its 0x81, which Hello stands in
-		// for, though retail's give-ups also stop that probe (NapiTimer_Stop) and ours
-		// reads a 0x81 in Hello until the lobby's own deadline (D-NET-571, OPEN).
+		// Either is read only while the enumerator probes (probing()): a reconnect's inside its
+		// probe window, so a 0x81 in the re-join's 0x42 leg or in the gap between windows is
+		// missed; the first connect's from its start until its 0x81 or a give-up stops the
+		// probe (abort_connect).
 		// [orig: Nwu_HandleServerHello - the enumerator's +0x2C @0x627559, the miss
 		//  returning 0 @0x626DCB; NapiTimer_Stop @0x61DF00 - +0x2C = 0 @0x61DF06]
-		if (state_ == State::Hello || reconnect_.probing) on_server_hello(body, out);
+		if (probing())
+			on_server_hello(body, out);
 		break;
 	case SESSION_OPCODE_SERVER_AUTH:
 		if (state_ == State::Auth) on_server_auth(body);
@@ -423,7 +432,8 @@ bool ClientSession::takes_server_hello(const uint8_t *data, size_t len) const {
 	    opcode != SESSION_OPCODE_SERVER_HELLO)
 		return false;
 	// The phase test is handle_datagram's: the enumerator probing (+0x2C @0x627559).
-	if (state_ != State::Hello && !reconnect_.probing) return false;
+	if (!probing())
+		return false;
 	ServerHello sh;
 	return parse_server_hello(body.data(), body.size(), sh) && server_hello_is_ours(sh);
 }
@@ -585,6 +595,29 @@ bool ClientSession::reconnecting() const {
 	return !receive_clock_armed_ && reconnect_.was_connected && reconnect_armed();
 }
 
+bool ClientSession::probing() const {
+	return (state_ == State::Hello && !first_probe_stopped_) || reconnect_.probing;
+}
+
+// The NP connection's state 5 is the accepted 0x82's (receive_clock_armed_) until its teardown.
+// [orig: CNapiNPConnection_RequestDisconnect @0x61E0F0 - `cmp eax, 5` @0x61E0F3, SetState(6)
+//  @0x61E0FA -> CNapiNPConnection_TeardownActiveConnection @0x6253C0]
+void ClientSession::request_disconnect(std::vector<std::vector<uint8_t>> &out) {
+	if (receive_clock_armed_)
+		teardown_connection(out);
+}
+
+// [orig: CNapiGameSession_PumpConnection @0x4D0A40 (CNapiGameSession_ProcessNetwork @0x4D09F0 the
+//  same) - the state-1 flag @0x4D0A48 -> SetState(0) @0x4D0A53; RequestDisconnect @0x4D0A5F;
+//  NapiTimer_Stop @0x4D0A71]
+void ClientSession::abort_connect(std::vector<std::vector<uint8_t>> &out) {
+	if ((session_flags_ & 0x1u) != 0)
+		set_lobby_state(0);
+	request_disconnect(out);
+	first_probe_stopped_ = true;
+	reconnect_.probing = false;
+}
+
 // The disconnect callback drops the session to state 0 (so neither the host nor the play leg
 // stands) and leaves the hosting/playing word alone; it resets the session strings the
 // connection fed: the web domain to "???", the NWUID and the GSID (the in-match SUS1) cleared
@@ -611,7 +644,8 @@ void ClientSession::latch_disconnect(const DisconnectEvent &event) {
 }
 
 // [orig: CGameSession_SetState @0x4ce140 — a no-op on the current state @0x4ce165; the
-//  leaving state's flag clear @0x4ce17c..0x4ce1bc, the entered state's set
+//  leaving state's flag clear @0x4ce17c..0x4ce1bc, the state and its GetTickCount stamp
+//  @0x4CE1CD..0x4CE1D5, the entered state's set
 //  @0x4ce1ea..0x4ce288 (state 0 zeroes the word); case 4 arms the GLSVSS deadline from
 //  GLSVSSRIMS (from any state) or GLSVSSAGRMS (returning from state 8) when a request
 //  string is set]
@@ -630,6 +664,7 @@ void ClientSession::set_lobby_state(int state) {
 	default: break;
 	}
 	lobby_state_ = state;
+	lobby_state_entered_ms_ = clock_ms_;
 	switch (state) {
 	case 0: session_flags_ = 0; break;
 	case 1: session_flags_ |= 0x1u; break;

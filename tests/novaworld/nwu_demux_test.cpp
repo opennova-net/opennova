@@ -83,7 +83,8 @@ bool hello_of(const std::vector<uint8_t> &dg, ClientHello &out) {
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
 	return nw_decode_inbound(dg.data(), dg.size(), opcode, body) &&
-	       opcode == SESSION_OPCODE_CLIENT_HELLO && parse_client_hello(body.data(), body.size(), out);
+			opcode == SESSION_OPCODE_CLIENT_HELLO &&
+			parse_client_hello(body.data(), body.size(), out);
 }
 
 // The server's 0x81 to the session's 0x41 `hello_dg`: its CI and identity echoed, the CI
@@ -307,7 +308,8 @@ int main() {
 		lobby.tick(10 + SESSION_CONNECT_RETRANSMIT_MS + 1);
 		CHECK(session.sent.size() == 2 * sent_to.size());
 		CHECK(session.sent.back().first == sent_to.back());
-		if (session.sent.size() == 2 * sent_to.size()) check_announces(sent_to.size());
+		if (session.sent.size() == 2 * sent_to.size())
+			check_announces(sent_to.size());
 		CHECK(lobby.nw_peer() == PeerAddr{});
 		// Until then the connection has no server, so its own packets (all but the 0x41) go
 		// nowhere. [orig: CNapiNPManager_SendTo @0x61EC20 - the address test @0x61EC59]

@@ -125,9 +125,11 @@ void NwuLobbySession::open(IDatagramSocket &gate, IDatagramSocket &session) {
 	clock_ms_ = 0;
 	gate_started_ms_ = 0;
 	gate_last_send_ms_ = 0;
-	connect_started_ms_ = 0;
+	connect_poll_ = ConnectPoll::Off;
+	connect_stamp_ms_ = 0;
+	connect_timed_out_ = false;
+	give_up_ = 0;
 	connect_last_send_ms_ = 0;
-	connect_reported_ = false;
 }
 
 void NwuLobbySession::probe(const std::string &gate_host, uint16_t gate_port) {
@@ -190,14 +192,37 @@ NwuLobbySession::MatchFacts NwuLobbySession::match_facts() const {
 	return out;
 }
 
+namespace {
+
+// The connect waits' failure codes (the menu's NWEC map, novaworld_connect_error_tag).
+// [orig: CGameSession_WaitForNWUValidation @0x4D0F20 - the poll's timeout -15 @0x4D0FD6, the
+//  give-up word 1 -> -17 @0x4D111C, 2 -> -18 @0x4D10FF, else -19 @0x4D10E2, a session not in
+//  states 2..4 -20 @0x4D1196; CGameSession_WaitForNWUConnection @0x4D1230 - the poll's timeout
+//  -21 @0x4D1296, a session whose flags lack bit 2 (states 2..8) -23 @0x4D1381]
+constexpr int kConnectPollTimedOut = -15;
+constexpr int kConnectGaveUpInStateOne = -17;
+constexpr int kConnectGaveUpConnectionDown = -18;
+constexpr int kConnectGaveUpOther = -19;
+constexpr int kConnectNotVerifying = -20;
+constexpr int kConnectVerifyTimedOut = -21;
+constexpr int kConnectNotConnected = -23;
+
+// The give-up word's values (session+0x12C) the periodic update sets: 1 the state-1 give-up.
+// [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 - 1 @0x4D44B1]
+constexpr int kGiveUpStateOne = 1;
+constexpr int kGiveUpConnectionDown = 2;
+
+} // namespace
+
 void NwuLobbySession::tick(uint32_t now_ms) {
 	clock_ms_ = now_ms;
 	if (session_) session_->set_clock_ms(clock_ms_);
 
 	if (gate_socket_ != nullptr && !gate_answered_) poll_gate();
 	if (session_socket_ != nullptr && session_) poll_session();
+	if (session_socket_ != nullptr && session_)
+		give_up_stalled_connect();
 
-	using S = ClientSession::State;
 	// The gate worker: while no gate response has landed, re-send the probe every
 	// SESSION_GATE_PROBE_RETRY_MS and give up past SESSION_GATE_PROBE_TIMEOUT_MS (the gate-error
 	// map with no response phase -> NWEC15). [orig: CNapiGateManager_ProbeThreadProc
@@ -211,37 +236,133 @@ void NwuLobbySession::tick(uint32_t now_ms) {
 		if (clock_ms_ - gate_last_send_ms_ > SESSION_GATE_PROBE_RETRY_MS) send_gate_probe();
 	}
 
-	// The first connect's legs: the ClientHello / ClientAuth stage datagram is re-sent every
-	// SESSION_CONNECT_RETRANSMIT_MS, and the whole connect gives up past
-	// SESSION_CONNECT_TIMEOUT_MS. Once verified they stand down for good: a reconnect's re-probe
-	// and re-join are the session's own (ClientSession::reconnecting).
+	if (session_socket_ == nullptr || !session_)
+		return;
+	if (poll_connect())
+		return; // a give-up was reported
+	// The first connect's stage datagram (the 0x41 while the probe runs, the 0x42 while it
+	// awaits its 0x82) is re-sent every SESSION_CONNECT_RETRANSMIT_MS while its poll runs. Once
+	// the poll ends it stands down for good: a reconnect's re-probe and re-join are the
+	// session's own (ClientSession::reconnecting).
 	// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0; PumpStateMachine case 3
-	//  @0x629508; the ConnectOrHost poll @0x4d4f10 (0xEA60)]
-	if (session_ && session_->state() == S::Verified) connect_reported_ = true;
-	const bool connecting = session_ && !session_->reconnecting() &&
-			(session_->state() == S::Hello || session_->state() == S::Auth ||
-			 session_->state() == S::Verifying);
-	if (connecting && !connect_reported_) {
-		if (clock_ms_ - connect_started_ms_ > SESSION_CONNECT_TIMEOUT_MS) {
-			connect_reported_ = true; // report once
-			if (hooks_.on_fatal) hooks_.on_fatal(std::string("handshake timeout in state ") + phase_name());
-			return;
-		}
-		if (clock_ms_ - connect_last_send_ms_ > SESSION_CONNECT_RETRANSMIT_MS) {
-			const std::vector<uint8_t> again = session_->retransmit_stage_datagram();
-			connect_last_send_ms_ = clock_ms_;
-			if (!again.empty()) send(again);
-		}
+	//  @0x629508]
+	const bool polling =
+			connect_poll_ == ConnectPoll::Connect || connect_poll_ == ConnectPoll::Verify;
+	if (polling && !session_->reconnecting() &&
+			clock_ms_ - connect_last_send_ms_ > SESSION_CONNECT_RETRANSMIT_MS) {
+		const std::vector<uint8_t> again = session_->retransmit_stage_datagram();
+		connect_last_send_ms_ = clock_ms_;
+		if (!again.empty())
+			send(again);
 	}
 }
 
-const char *NwuLobbySession::phase_name() const {
-	if (!session_) return "gate_probing";
-	switch (session_->state()) {
-	case ClientSession::State::Hello: return "session_hello";
-	case ClientSession::State::Auth:
-	case ClientSession::State::Verifying: return "session_join";
-	default: return "connected";
+// The periodic update's give-up: a first connect (the hosting/playing word 0) still in state 1
+// SESSION_PERIODIC_UPDATE_TIMEOUT_MS after the state's entry is aborted, the word set to 1.
+// [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 - the word test @0x4D4483, the state-1
+//  test @0x4D4493, the 0x4E20 compare @0x4D44A3, CNapiGameSession_ProcessNetwork @0x4D44AC,
+//  +0x12C = 1 @0x4D44B1]
+void NwuLobbySession::give_up_stalled_connect() {
+	if (session_->session_role() != ClientSession::kSessionRoleNone)
+		return;
+	if (session_->lobby_state() != 1)
+		return;
+	if (clock_ms_ - session_->lobby_state_entered_ms() <= SESSION_PERIODIC_UPDATE_TIMEOUT_MS)
+		return;
+	abort_connect();
+	give_up_ = kGiveUpStateOne;
+}
+
+void NwuLobbySession::abort_connect() {
+	std::vector<std::vector<uint8_t>> out;
+	session_->abort_connect(out);
+	for (const auto &dg : out)
+		send(dg);
+}
+
+// The reset the connect waits run on a failure: a connection still up tears down (its burst out),
+// the poll's flag and the give-up word clear, and the menu shows the code's NWEC.
+// [orig: CNapiGameSession_ResetToDisconnected @0x4D0890 - CNapiNPConnection_RequestDisconnect
+//  @0x4D08A1, +0x12C..+0x138 = 0 @0x4D08E4..0x4D08F6; UI_ProcessLANSessionStateMachine
+//  @0x558DE0 - the error leg @0x55915F..0x559160 -> UI_ShowNovaWorldConnectError @0x5584A0]
+void NwuLobbySession::fail_connect(int code) {
+	connect_poll_ = ConnectPoll::Done;
+	connect_timed_out_ = false;
+	give_up_ = 0;
+	std::vector<std::vector<uint8_t>> out;
+	session_->request_disconnect(out);
+	for (const auto &dg : out)
+		send(dg);
+	if (hooks_.on_fatal)
+		hooks_.on_fatal(novaworld_connect_error_tag(code));
+}
+
+// The first connect's poll, one wait per tick as the menu runs one state per frame: the connect
+// poll while the session is in state 1 (giving up SESSION_CONNECT_POLL_TIMEOUT_MS after the
+// connect's stamp), the validation wait (its failures, else the re-stamp), the verify poll while
+// the session is in state 2 or 3 (giving up SESSION_CONNECT_VERIFY_TIMEOUT_MS after the
+// re-stamp), then the connection wait (verified, or its failure). True when it reported a
+// failure.
+// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - state 5 @0x55919E, 6 @0x5591D0, 7
+//  @0x5591FE, 8 @0x559230; CNapiGameSession_PollConnectPhase1 @0x4D4C30 - the state-1 test
+//  @0x4D4C50, the compare @0x4D4C6A, the give-up @0x4D4CB2, the flag @0x4D4CB7;
+//  CGameSession_WaitForNWUValidation @0x4D0F20 - the flag @0x4D0F86, the word @0x4D107E, the
+//  states @0x4D1137..0x4D114A, the re-stamp @0x4D120C;
+//  CNapiGameSession_PollConnectPhase2 @0x4D4D70 - the states @0x4D4D90..0x4D4D9E, the compare
+//  @0x4D4DB1, the flag @0x4D4DBF, the give-up @0x4D4E03; CGameSession_WaitForNWUConnection
+//  @0x4D1230 - the flag @0x4D1244, bit 2 @0x4D1332]
+bool NwuLobbySession::poll_connect() {
+	switch (connect_poll_) {
+		case ConnectPoll::Connect: {
+			if (session_->lobby_state() == 1) {
+				if (clock_ms_ - connect_stamp_ms_ <= SESSION_CONNECT_POLL_TIMEOUT_MS)
+					return false;
+				abort_connect();
+				connect_timed_out_ = true;
+			}
+			if (connect_timed_out_) {
+				fail_connect(kConnectPollTimedOut);
+				return true;
+			}
+			if (give_up_ != 0) {
+				int code = kConnectGaveUpOther;
+				if (give_up_ == kGiveUpStateOne)
+					code = kConnectGaveUpInStateOne;
+				else if (give_up_ == kGiveUpConnectionDown)
+					code = kConnectGaveUpConnectionDown;
+				fail_connect(code);
+				return true;
+			}
+			const int state = session_->lobby_state();
+			if (state != 2 && state != 3 && state != 4) {
+				fail_connect(kConnectNotVerifying);
+				return true;
+			}
+			connect_stamp_ms_ = clock_ms_;
+			connect_poll_ = ConnectPoll::Verify;
+			return false;
+		}
+		case ConnectPoll::Verify: {
+			const int state = session_->lobby_state();
+			if (state == 2 || state == 3) {
+				if (clock_ms_ - connect_stamp_ms_ <= SESSION_CONNECT_VERIFY_TIMEOUT_MS)
+					return false;
+				connect_timed_out_ = true;
+				abort_connect();
+			}
+			if (connect_timed_out_) {
+				fail_connect(kConnectVerifyTimedOut);
+				return true;
+			}
+			if ((session_->session_flags() & 0x2u) == 0) {
+				fail_connect(kConnectNotConnected);
+				return true;
+			}
+			connect_poll_ = ConnectPoll::Done;
+			return false;
+		}
+		default:
+			return false;
 	}
 }
 
@@ -327,9 +448,13 @@ void NwuLobbySession::begin_session() {
 	session_->set_clock_ms(clock_ms_);
 	if (hooks_.on_session_created)
 		hooks_.on_session_created(cfg.cu_vars.size(), cfg.cookie_vars ? cfg.cookie_vars().size() : 0);
-	connect_started_ms_ = clock_ms_;
+	// The connect's stamp, its poll from here. [orig: CNapiGameSession_ConnectToNovaWorld
+	//  @0x4D4640 - dword_B5F444 @0x4D4BD5, the flags cleared @0x4D4BDA..0x4D4BE0]
+	connect_poll_ = ConnectPoll::Connect;
+	connect_stamp_ms_ = clock_ms_;
+	connect_timed_out_ = false;
+	give_up_ = 0;
 	connect_last_send_ms_ = clock_ms_;
-	connect_reported_ = false;
 	if (hooks_.on_session_state) hooks_.on_session_state();
 	send(session_->start());
 }
@@ -346,7 +471,7 @@ void NwuLobbySession::send(const std::vector<uint8_t> &dg) {
 	uint8_t opcode = 0;
 	if (stripped_opcode(dg.data(), dg.size(), opcode) && opcode == SESSION_OPCODE_CLIENT_HELLO) {
 		for (const Target &target : targets_) {
-			const PeerAddr to{target.ip, static_cast<uint16_t>(target.port)};
+			const PeerAddr to{ target.ip, static_cast<uint16_t>(target.port) };
 			send_one(to, session_ ? session_->build_announce(target.ip, target.port) : dg);
 		}
 		return;

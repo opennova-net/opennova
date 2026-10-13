@@ -630,3 +630,22 @@ func test_join_rejection_resolves_menutxt_and_retains_diagnostic_code() -> void:
 	panel.client_for_test().emit_signal("join_failed", "NWEC09")
 	assert_eq(panel.message_text(), "This game's identity does not match the server.\n\n(NWEC09)")
 	Strings.register_table(Strings.TABLE_MENUTXT, previous)
+
+
+# A connect give-up the client reports as an NWEC tag (D-NET-571's NWEC42, the
+# state-1 give-up) shows its menutxt text with the tag, as the retail NovaWorld
+# error dialog shows the connect's NWEC texts; a prose message keeps its lead.
+func test_connection_error_tag_resolves_menutxt() -> void:
+	var previous := Strings.get_table(Strings.TABLE_MENUTXT)
+	var table := RtxtStringFile.new()
+	table.add_section("NovaWorld")
+	table.add_entry("NWEC42", "Unable to connect to NovaWorld.", 0, Vector2i())
+	Strings.register_table(Strings.TABLE_MENUTXT, table)
+	var panel := _make_panel(PackedStringArray())
+	panel.client_for_test().emit_signal("error_occurred", "NWEC42")
+	assert_eq(panel.current_screen(), NovaWorldPanel.Screen.MESSAGE)
+	assert_eq(panel.message_text(), "Unable to connect to NovaWorld.\n\n(NWEC42)")
+	var prose_panel := _make_panel(PackedStringArray())
+	prose_panel.client_for_test().emit_signal("error_occurred", "DNS lookup failed.")
+	assert_string_contains(prose_panel.message_text(), "matchmaking service")
+	Strings.register_table(Strings.TABLE_MENUTXT, previous)

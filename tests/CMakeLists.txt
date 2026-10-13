@@ -4739,6 +4739,11 @@ add_test(NAME serve_registration_parity COMMAND serve_registration_parity_test)
 add_executable(nwu_demux_test novaworld/nwu_demux_test.cpp)
 target_link_libraries(nwu_demux_test PRIVATE opennova_net)
 add_test(NAME nwu_demux COMMAND nwu_demux_test)
+# The first NovaWorld connect's give-ups (D-NET-571): the NWU lobby driver's poll over its
+# session, each give-up's stopped probe and its NWEC.
+add_executable(nwu_lobby_connect_test novaworld/nwu_lobby_connect_test.cpp)
+target_link_libraries(nwu_lobby_connect_test PRIVATE opennova_net)
+add_test(NAME nwu_lobby_connect COMMAND nwu_lobby_connect_test)
 # The NWU lobby driver's own draws (no Environment::random_u32, as opennova-nw-lister runs):
 # 32 sessions opened on 32 threads at once share no client index or key.
 add_executable(nwu_lobby_draws_test novaworld/nwu_lobby_draws_test.cpp)
