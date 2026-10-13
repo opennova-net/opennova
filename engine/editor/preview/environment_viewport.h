@@ -26,7 +26,7 @@ enum class EnvironmentViewStatus : uint8_t {
 	Ready,
 };
 // "no_project", "no_environment", "unwritable", "ready": its token on the wire.
-const char *environment_view_status_token(EnvironmentViewStatus status);
+inline constexpr const char *kEnvironmentViewStatusTokens[] = {"no_project", "no_environment", "unwritable", "ready"};
 
 // A weather command as a mission's script gives it: a percent and the seconds it takes to get there
 // [orig: WacCmd_Rain @ 0x4edf60; WacCmd_Overcast @ 0x4ee040].
@@ -149,7 +149,7 @@ public:
 	OrbitCamera framed(int width, int height) const;
 
 	ViewportStatus status() const override;
-	const char *reason() const override { return environment_view_status_token(reason_); }
+	const char *reason() const override { return enum_token(kEnvironmentViewStatusTokens, reason_); }
 	std::string message() const override;
 	const std::string &detail() const override { return detail_; }
 	std::string caption() const override;

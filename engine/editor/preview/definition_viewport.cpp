@@ -167,19 +167,6 @@ bool read_options(const JsonValue &json, DefinitionViewportOptions &held, std::s
 
 } // namespace
 
-const char *definition_view_status_token(DefinitionViewStatus status) {
-	switch (status) {
-	case DefinitionViewStatus::NoProject: return "no_project";
-	case DefinitionViewStatus::NoCatalog: return "no_catalog";
-	case DefinitionViewStatus::NoRecord: return "no_record";
-	case DefinitionViewStatus::NoModel: return "no_model";
-	case DefinitionViewStatus::Missing: return "missing";
-	case DefinitionViewStatus::Unreadable: return "unreadable";
-	case DefinitionViewStatus::Ready: return "ready";
-	}
-	return "no_project";
-}
-
 const char *definition_state_token(DefinitionState state) {
 	switch (state) {
 	case DefinitionState::Alive: return "alive";

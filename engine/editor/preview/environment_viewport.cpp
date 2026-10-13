@@ -194,16 +194,6 @@ JsonValue keyframe_colours(const env::TodState &tod, bool night) {
 
 } // namespace
 
-const char *environment_view_status_token(EnvironmentViewStatus status) {
-	switch (status) {
-	case EnvironmentViewStatus::NoProject: return "no_project";
-	case EnvironmentViewStatus::NoEnvironment: return "no_environment";
-	case EnvironmentViewStatus::Unwritable: return "unwritable";
-	case EnvironmentViewStatus::Ready: return "ready";
-	}
-	return "no_project";
-}
-
 const char *environment_clock_from_token(EnvironmentClockFrom from) {
 	switch (from) {
 	case EnvironmentClockFrom::Option: return "option";

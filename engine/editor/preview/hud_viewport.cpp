@@ -265,15 +265,6 @@ bool is_none(const std::string &weapon) {
 
 } // namespace
 
-const char *hud_view_status_token(HudViewStatus status) {
-	switch (status) {
-	case HudViewStatus::NoProject: return "no_project";
-	case HudViewStatus::NoLayout: return "no_layout";
-	case HudViewStatus::Ready: return "ready";
-	}
-	return "no_layout";
-}
-
 const char *hud_preview_view_token(HudPreviewView view) {
 	const size_t index = static_cast<size_t>(view);
 	return index < std::size(kViewTokens) ? kViewTokens[index] : "normal";

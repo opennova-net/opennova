@@ -26,7 +26,9 @@ enum class EffectViewStatus : uint8_t {
 	Ready,
 };
 // "no_project", "no_file", "unreadable", "no_effect", "spawns_nothing", "ready": its token on the wire.
-const char *effect_view_status_token(EffectViewStatus status);
+inline constexpr const char *kEffectViewStatusTokens[] = {
+	"no_project", "no_file", "unreadable", "no_effect", "spawns_nothing", "ready",
+};
 
 // How an effect viewport plays and draws its effect: the effect shown (its id; "" the file's first,
 // and an id the file no longer defines the first too), how it plays (effect_playback.h: the wind),
@@ -100,7 +102,7 @@ public:
 	std::string place_of(const std::string &id) const;
 
 	ViewportStatus status() const override;
-	const char *reason() const override { return effect_view_status_token(reason_); }
+	const char *reason() const override { return enum_token(kEffectViewStatusTokens, reason_); }
 	std::string message() const override;
 	const std::string &detail() const override { return detail_; }
 	std::string caption() const override;

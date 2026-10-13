@@ -238,16 +238,6 @@ std::shared_ptr<const TextureImage> texture_as_used(const std::shared_ptr<const 
 	return out;
 }
 
-const char *texture_view_status_token(TextureViewStatus status) {
-	switch (status) {
-	case TextureViewStatus::NoTexture: return "no_texture";
-	case TextureViewStatus::Unloadable: return "unloadable";
-	case TextureViewStatus::Undecoded: return "undecoded";
-	case TextureViewStatus::Ready: return "ready";
-	}
-	return "no_texture";
-}
-
 const char *texture_channels_token(TextureChannels channels) {
 	const size_t index = static_cast<size_t>(channels);
 	return index < std::size(kChannelTokens) ? kChannelTokens[index] : "rgba";

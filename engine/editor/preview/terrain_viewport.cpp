@@ -115,17 +115,6 @@ bool read_options(const JsonValue &json, const TerrainUses &uses, TerrainViewpor
 
 } // namespace
 
-const char *terrain_view_status_token(TerrainViewStatus status) {
-	switch (status) {
-	case TerrainViewStatus::NoProject: return "no_project";
-	case TerrainViewStatus::NoTerrain: return "no_terrain";
-	case TerrainViewStatus::Unwritable: return "unwritable";
-	case TerrainViewStatus::Refused: return "refused";
-	case TerrainViewStatus::Ready: return "ready";
-	}
-	return "no_project";
-}
-
 io::JsonValue terrain_options_to_json(const TerrainViewportOptions &options) {
 	JsonValue out = JsonValue::make_object();
 	out.set("mission", json_string(options.mission));

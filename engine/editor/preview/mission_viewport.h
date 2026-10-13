@@ -39,7 +39,7 @@ enum class MissionViewStatus : uint8_t {
 	Ready,
 };
 // "no_project", "no_mission", "ready": its token on the wire.
-const char *mission_view_status_token(MissionViewStatus status);
+inline constexpr const char *kMissionViewStatusTokens[] = {"no_project", "no_mission", "ready"};
 // The line a mission viewport shows for a status ("" when ready).
 std::string mission_view_status_message(MissionViewStatus status);
 
@@ -203,7 +203,7 @@ public:
 	MissionCanvasFrame canvas_frame(const ViewportContext &context) const;
 
 	ViewportStatus status() const override;
-	const char *reason() const override { return mission_view_status_token(reason_); }
+	const char *reason() const override { return enum_token(kMissionViewStatusTokens, reason_); }
 	std::string message() const override { return mission_view_status_message(reason_); }
 	const std::string &detail() const override { return detail_; }
 	const FileStamps *picture_reads() const override { return &picture_.files(); }

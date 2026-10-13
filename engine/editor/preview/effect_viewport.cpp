@@ -101,18 +101,6 @@ bool read_camera(const JsonValue &json, OrbitCamera &held, bool &frame, std::str
 
 } // namespace
 
-const char *effect_view_status_token(EffectViewStatus status) {
-	switch (status) {
-	case EffectViewStatus::NoProject: return "no_project";
-	case EffectViewStatus::NoFile: return "no_file";
-	case EffectViewStatus::Unreadable: return "unreadable";
-	case EffectViewStatus::NoEffect: return "no_effect";
-	case EffectViewStatus::SpawnsNothing: return "spawns_nothing";
-	case EffectViewStatus::Ready: return "ready";
-	}
-	return "no_project";
-}
-
 io::JsonValue effect_options_to_json(const EffectViewportOptions &options) {
 	JsonValue out = JsonValue::make_object();
 	out.set("effect", json_string(options.effect));

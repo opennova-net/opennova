@@ -146,15 +146,6 @@ private:
 
 } // namespace
 
-const char *font_view_status_token(FontViewStatus status) {
-	switch (status) {
-	case FontViewStatus::NoFont: return "no_font";
-	case FontViewStatus::Unwritable: return "unwritable";
-	case FontViewStatus::Ready: return "ready";
-	}
-	return "no_font";
-}
-
 bool FontViewportOptions::operator==(const FontViewportOptions &o) const {
 	return text == o.text && color == o.color && page == o.page && zoom == o.zoom && bold == o.bold && italic == o.italic &&
 	       underline == o.underline;

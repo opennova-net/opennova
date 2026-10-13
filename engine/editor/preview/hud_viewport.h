@@ -32,7 +32,7 @@ enum class HudViewStatus : uint8_t {
 	Ready,
 };
 // "no_project", "no_layout", "ready".
-const char *hud_view_status_token(HudViewStatus status);
+inline constexpr const char *kHudViewStatusTokens[] = {"no_project", "no_layout", "ready"};
 
 // The first-person view a HUD preview draws over: the plain view, the binoculars' or the night-vision
 // goggles' (their masks the game's own view effects, godot/game/world/player_view_effects.gd).
@@ -229,7 +229,7 @@ public:
 			CanvasRequests &out, std::string &error) const;
 
 	ViewportStatus status() const override;
-	const char *reason() const override { return hud_view_status_token(reason_); }
+	const char *reason() const override { return enum_token(kHudViewStatusTokens, reason_); }
 	std::string message() const override;
 	const std::string &detail() const override { return detail_; }
 	std::string caption() const override;

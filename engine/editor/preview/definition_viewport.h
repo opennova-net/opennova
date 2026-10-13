@@ -37,7 +37,9 @@ enum class DefinitionViewStatus : uint8_t {
 	Ready,
 };
 // "no_project", "no_catalog", "no_record", "no_model", "missing", "unreadable", "ready".
-const char *definition_view_status_token(DefinitionViewStatus status);
+inline constexpr const char *kDefinitionViewStatusTokens[] = {
+	"no_project", "no_catalog", "no_record", "no_model", "missing", "unreadable", "ready",
+};
 
 // The state an item is drawn in (the State menu): alive, as its mission starts; destroying, its death as the
 // game runs it from the preview clock's tick 0 (preview/model_damage's plan: the husk swap, the pieces' sections
@@ -212,7 +214,7 @@ public:
 	               int height, uint64_t gesture, std::vector<Edit> &out) const;
 
 	ViewportStatus status() const override;
-	const char *reason() const override { return definition_view_status_token(reason_); }
+	const char *reason() const override { return enum_token(kDefinitionViewStatusTokens, reason_); }
 	std::string message() const override;
 	const std::string &detail() const override { return detail_; }
 	std::string caption() const override;

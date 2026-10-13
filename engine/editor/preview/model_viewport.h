@@ -39,7 +39,9 @@ enum class ModelViewStatus : uint8_t {
 	Ready,
 };
 // "no_project", "ready", ...: its token on the wire.
-const char *model_view_status_token(ModelViewStatus status);
+inline constexpr const char *kModelViewStatusTokens[] = {
+	"no_project", "no_model", "unserializable", "unreadable", "no_rig", "reading", "ready",
+};
 // The line a model viewport shows for a status (`detail`: the first serialize issue, the
 // animation's file).
 std::string model_view_status_message(ModelViewStatus status, const std::string &detail);
@@ -291,7 +293,7 @@ public:
 	NodeAddress record_of(const ViewportInput &input, const ModelOverlay &overlay) const;
 
 	ViewportStatus status() const override;
-	const char *reason() const override { return model_view_status_token(reason_); }
+	const char *reason() const override { return enum_token(kModelViewStatusTokens, reason_); }
 	std::string message() const override { return model_view_status_message(reason_, detail_); }
 	const std::string &detail() const override { return detail_; }
 	std::string caption() const override;

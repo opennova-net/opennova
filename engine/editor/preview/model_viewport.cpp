@@ -258,19 +258,6 @@ bool read_camera(const JsonValue &json, OrbitCamera &held, bool &frame, std::str
 
 } // namespace
 
-const char *model_view_status_token(ModelViewStatus status) {
-	switch (status) {
-	case ModelViewStatus::NoProject: return "no_project";
-	case ModelViewStatus::NoModel: return "no_model";
-	case ModelViewStatus::Unserializable: return "unserializable";
-	case ModelViewStatus::Unreadable: return "unreadable";
-	case ModelViewStatus::NoRig: return "no_rig";
-	case ModelViewStatus::Reading: return "reading";
-	case ModelViewStatus::Ready: return "ready";
-	}
-	return "no_project";
-}
-
 std::string model_view_status_message(ModelViewStatus status, const std::string &detail) {
 	switch (status) {
 	case ModelViewStatus::NoProject: return "Open a project to preview its models.";

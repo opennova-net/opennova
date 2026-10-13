@@ -121,15 +121,6 @@ std::string title_of(const SessionView &view, const Document &document, const No
 
 } // namespace
 
-const char *mission_view_status_token(MissionViewStatus status) {
-	switch (status) {
-	case MissionViewStatus::NoProject: return "no_project";
-	case MissionViewStatus::NoMission: return "no_mission";
-	case MissionViewStatus::Ready: return "ready";
-	}
-	return "no_project";
-}
-
 std::string mission_view_status_message(MissionViewStatus status) {
 	switch (status) {
 	case MissionViewStatus::NoProject: return "Open a project to see its missions.";

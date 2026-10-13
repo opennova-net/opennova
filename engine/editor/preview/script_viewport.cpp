@@ -109,14 +109,6 @@ std::string script_read_only_reason(const SessionView &view, const DocumentBase 
 	return std::string();
 }
 
-const char *script_view_status_token(ScriptViewStatus status) {
-	switch (status) {
-	case ScriptViewStatus::NoText: return "no_text";
-	case ScriptViewStatus::Ready: return "ready";
-	}
-	return "no_text";
-}
-
 std::string ScriptMark::tip() const {
 	std::string out;
 	for (const ScriptMarkFinding &finding : findings) {

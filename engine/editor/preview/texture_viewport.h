@@ -22,7 +22,7 @@ enum class TextureViewStatus : uint8_t {
 	Ready,
 };
 // "no_texture", "unloadable", "undecoded", "ready": its token on the wire.
-const char *texture_view_status_token(TextureViewStatus status);
+inline constexpr const char *kTextureViewStatusTokens[] = {"no_texture", "unloadable", "undecoded", "ready"};
 
 // Which of a texture's channels the picture shows: its colour (alpha left out), one channel as grey,
 // its alpha as grey, its colour over a checkerboard by its alpha (what shows through where it is
@@ -184,7 +184,7 @@ public:
 	std::string texel_words(uint32_t tx, uint32_t ty, const uint8_t rgba[4]) const;
 
 	ViewportStatus status() const override;
-	const char *reason() const override { return texture_view_status_token(reason_); }
+	const char *reason() const override { return enum_token(kTextureViewStatusTokens, reason_); }
 	std::string message() const override;
 	const std::string &detail() const override { return detail_; }
 	std::string caption() const override;
