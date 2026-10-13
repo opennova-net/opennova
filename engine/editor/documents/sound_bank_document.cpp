@@ -460,7 +460,7 @@ bool SoundBankDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std
 		auto row = std::make_shared<SoundBankRow>(kWave);
 		row->wave.name = single.name;
 		row->wave.file = single.path;
-		row->wave.volume = uint32_t(single.value_hi >> 8);
+		row->wave.volume = uint32_t(single.volume);
 		shape(*row);
 		rows.push_back(std::move(row));
 	}
@@ -512,7 +512,7 @@ bool SoundBankDocument::bank(lwf::File &file, std::vector<SourceIssue> *issues) 
 		lwf::Single single;
 		single.name = row->wave.name;
 		single.path = row->wave.file;
-		single.value_hi = uint16_t((row->wave.volume & 0xFF) << 8);
+		single.volume = uint8_t(row->wave.volume & 0xFF);
 		first_of.emplace(strutil::to_lower(single.name), uint32_t(file.singles.size()));
 		file.singles.push_back(std::move(single));
 	}
