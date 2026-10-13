@@ -410,7 +410,10 @@ ProjectileHit CollisionWorld::trace_knife_impact(
     return hit;
 }
 
-// [orig: Entity_ComputeClampedDisplacement @ 0x4AD6A0]
+// [orig: Entity_ComputeClampedDisplacement @ 0x4AD6A0]. Its pools-2/1 face
+// walk differs from retail's in three ways, D-COL-17: the back-face argument
+// (retail pushes 0), the candidate gates (retail's ray state carries no
+// direction, so they test the start point) and the in-triangle point.
 int32_t CollisionWorld::minefield_ground(const World &world, EntityHandle source,
         FixedVec3 position, bool indoors, EntityHandle *out_ground) const {
     ProjectileTrace trace;
