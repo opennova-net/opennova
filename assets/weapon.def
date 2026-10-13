@@ -34,11 +34,13 @@ weapon "WPN_ON_AR15"
 	teamfilter red
 	flags auto
 	flags whileswimming
+	flags sighted
+	flags nocardswitch
 	error 0.0165 0.2 0.25 0.0165 0.032 0.047
 	weaponweight 5.5
 	clipweight 1.5
 	pos 25.188 -5.494 -144.952 0 0 0
-	tpos -0.821 11.761 -138.449 0 0 0
+	tpos -0.821 11.866 -135.642 0 0 0
 	action "idle"
 		anim anim_wpn_idle
 		delayend 125

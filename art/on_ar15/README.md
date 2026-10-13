@@ -36,7 +36,7 @@ skeleton's root frame (the rig's origin is 1.07 m above that root):
 ## The pack's camera
 
 The pack's first-person camera rides the Manny `head` bone, which its clips turn (up to 0.6° in the
-idle, 1.3° in the fire, 2.1° in the holster; never moved). The game draws the viewmodel at the camera
+idle, 1.3° in the fire, 2.1° in the holster and the reload; never moved). The game draws the viewmodel at the camera
 and moves its camera by nothing a clip carries, so the head's turn is baked into `BN01 Weapon origin`
 as its inverse: at each frame `BN01` is `X H0 H(t)^-1 X^-1` in the rig's space, where `H(t)` is the
 head in the clip's skeleton, `H0` the head on the clip's first frame and `X` the map from that
@@ -44,12 +44,22 @@ skeleton's root frame into the rig's. The arms and gun then stand against the vi
 the pack's moving camera. Every clip starts and ends with `BN01` at rest, since a change of action
 snaps to the next clip's first frame.
 
-The reload keeps `BN01` at rest: the pack's tactical first-person reload, the only source of its head
-track, is not among the files the clips were rebuilt from.
+The reload's head comes from the pack's own `A_TFA_FP_AR_Reload` (exported from its Unreal project as
+FBX, which matches the clip to 0.005 mm), eased to rest over frames 74 to 79 as the bones are.
+
+## Aiming
+
+The weapon.def entry is `flags sighted` and `flags nocardswitch`: the scope key eases the view from the
+`Hip view` eye to the `Aim view` eye (`pos` to `tpos`, 15 steps) and narrows it to 80° over the slot's
+zoom (`scope_max_mag 2`, so 40°), and the gun stays drawn instead of the 2D sights card. The game looks
+along the model's forward from the eye, so the `Aim view` stands on the rear peep sight's centre line:
+4.90 cm above and 0.80 cm beside the `MFLASH01` user point, 13.7 cm behind the peep (the peep's
+aperture is about 8 mm across; the front sight is folded). Its rotation is not used.
 
 ## Re-baking a clip
 
-The pack's clips are not in the repository. To change one: put the TFA clip on a Manny armature in a
-scratch scene, sample its arm and gun bones in the skeleton's root frame onto `on_ar15 Rig` (`X`
-above: Godot/glTF Y-up to Blender Z-up, origin lowered 1.07 m), sample its `head` and key `BN01` as
-above, set the Action's frame range and Clip rate (30), then Export Animations.
+The pack's clips are not in the repository. To change one: export the TFA clip from the pack's Unreal
+project as FBX and import it into a scratch scene (keep its leaf bones: `head` is one), sample its arm
+and gun bones onto `on_ar15 Rig` (`X` above: fitted on the arm bones, a turn and the 1.07 m drop from
+the skeleton's root), sample its `head` and key `BN01` as above, set the Action's frame range and Clip
+rate (30), then Export Animations.
