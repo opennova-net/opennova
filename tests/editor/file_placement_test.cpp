@@ -335,7 +335,8 @@ int test_move_import_source() {
 	return 0;
 }
 
-// The command line's mv moves as the editor does; a refusal exits 1, nothing moved.
+// The command line moves as the editor does, through the request verb (S26 K3: mv is gone); a refusal exits 1,
+// nothing moved.
 int test_command_line() {
 	FlatProject project;
 	TEST_EXPECT(project.made);
@@ -347,12 +348,14 @@ int test_command_line() {
 		for (const std::string &a : args) argv.push_back(a.c_str());
 		return opennova::project::run_project_command(static_cast<int>(argv.size()), argv.data(), stdout, stderr);
 	};
-	TEST_EXPECT(run({"mv", root, "items.def", "defs"}) == 0);
+	const auto move = [&run, &root](const std::string &path, const std::string &folder) {
+		return run({"request", root, R"({"kind": "move_asset", "path": ")" + path + R"(", "folder": ")" + folder + R"("})"});
+	};
+	TEST_EXPECT(move("items.def", "defs") == 0);
 	TEST_EXPECT(on_disk(root, "defs/items.def") && !on_disk(root, "items.def"));
-	TEST_EXPECT(run({"mv", root, "defs/items.def", "/"}) == 0);
+	TEST_EXPECT(move("defs/items.def", "/") == 0);
 	TEST_EXPECT(on_disk(root, "items.def") && !fs::exists(system_path(join_path(root, "defs"))));
-	TEST_EXPECT(run({"mv", root, "items.def", ".."}) == 1 && on_disk(root, "items.def"));
-	TEST_EXPECT(run({"mv", root, "items.def"}) == 2); // a folder named, always
+	TEST_EXPECT(move("items.def", "..") == 1 && on_disk(root, "items.def"));
 	return 0;
 }
 
