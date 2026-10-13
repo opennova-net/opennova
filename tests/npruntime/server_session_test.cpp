@@ -4469,9 +4469,11 @@ bool check_numbered_flip_pair_and_banner_wire() {
 		conn.link.mode = opennova::replication::TransportMode::Client;
 		conn.link.transport = &transports.back();
 		conn.link.owned_entity = owned;
-		// The slot team (+0x1A0) the pair's filters match (D-NET-636).
+		// The slot team (+0x1A0) the pair's filters match (D-NET-636), and
+		// its roster row mirror, which the scorers match (D-NET-650).
 		conn.assigned_team = world.registry.get(owned)->team;
 		conn.assigned_team_valid = true;
+		world.match.set_player_slot_team(owned, conn.assigned_team);
 		ctx.np_protocol.connection_list.push_back(std::move(conn));
 	}
 	auto events = [](Transport &transport) {

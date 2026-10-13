@@ -122,6 +122,7 @@ void Server_AutoBalanceTeams(NapiNPServerCtx &ctx, world::World *world) {
 				: nullptr;
 		if (entity == nullptr) continue;
 		entity->team = moved_to;
+		world->match.set_player_slot_team(entity->handle, moved_to); // the mirror (D-NET-650)
 		const auto listed = std::find(ctx.team_change_entities.begin(),
 				ctx.team_change_entities.end(), entity->handle);
 		if (listed == ctx.team_change_entities.end())

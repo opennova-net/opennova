@@ -498,9 +498,12 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// end-round winner award skips a spectator-flagged top scorer
 	// [orig: Server_PlayerAdd @0x51CD83], and its undeployed bit so event 25
 	// skips a pending slot [orig: Server_OnPlayerJoin @0x51A6F2;
-	// Server_UpdateCaptureZoneProximity @0x5087A2].
+	// Server_UpdateCaptureZoneProximity @0x5087A2], and its team byte (+416),
+	// which the numbered capture's scorers match (D-NET-650)
+	// [orig: CaptureZone_CheckProximityScoring @0x500CEE].
 	world.match.set_player_spectator(h, conn.link.spectator);
 	world.match.set_player_respawn_pending(h, conn.link.respawn_pending);
+	world.match.set_player_slot_team(h, conn.assigned_team_valid ? conn.assigned_team : uint8_t{0});
 
 	conn.phase = ConnectionPhase::PlayerAdded;
 	if (!is_host_own) {
@@ -673,6 +676,7 @@ bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 		world.match.set_player_spectator(conn.link.owned_entity, true);
 		conn.assigned_team = 0;
 		conn.assigned_team_valid = true;
+		world.match.set_player_slot_team(conn.link.owned_entity, 0); // the mirror (D-NET-650)
 		player->team = 0;
 		player->flags |= 1u;
 		// The witnessed spectator entity state: damage permanently disabled
@@ -697,6 +701,7 @@ bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 	if (team == 0) team = 1;
 	conn.assigned_team = team;
 	conn.assigned_team_valid = true;
+	world.match.set_player_slot_team(conn.link.owned_entity, team); // the mirror (D-NET-650)
 	const world::SpawnPointResult selected = world::resolve_player_spawn_pose(
 			world, player->handle, world::EntityHandle{},
 			conn.reply.player_slot, team, ctx.config.game_type);
@@ -777,6 +782,7 @@ void Server_ChangeEntityTeam(NapiNPServerCtx &ctx, world::World &world,
 		conn->reply.score_delta_sound_value = 0;               // +332 @0x518DDB
 		conn->assigned_team = team;                            // +416 @0x518DEF
 		conn->assigned_team_valid = true;
+		world.match.set_player_slot_team(handle, team);        // the mirror (D-NET-650)
 		// The "PlayerTeam" NovaWorld var @0x518E07..0x518E22 follows the slot
 		// team through the embedder's roster sync.
 		// Side A for teams 1/3 or a non-team game, else side B; its character
@@ -888,6 +894,7 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 	match_player.slot = *player_slot;
 	match_player.name = conn->player_name;
 	world.match.upsert_player(match_player);
+	world.match.set_player_slot_team(h, conn->assigned_team); // the slot team mirror (D-NET-650)
 	return h;
 }
 

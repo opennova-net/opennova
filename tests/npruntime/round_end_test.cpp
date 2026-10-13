@@ -992,6 +992,9 @@ void test_aas_capture_events_carry_zone_numbers() {
 	for (size_t i = 0; i < 3; ++i) {
 		ctx.np_protocol.connection_list[i].assigned_team = slot_teams[i];
 		ctx.np_protocol.connection_list[i].assigned_team_valid = true;
+		// The roster row's mirror of the slot team (D-NET-650).
+		world.match.set_player_slot_team(
+				ctx.np_protocol.connection_list[i].link.owned_entity, slot_teams[i]);
 	}
 	// The body already stands in the box: the first frame's entity update
 	// records the contact after that frame's one-second service, the next
