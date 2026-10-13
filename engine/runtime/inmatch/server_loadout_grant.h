@@ -110,4 +110,9 @@ uint8_t current_player_class(const NapiNPConnection &conn, const world::World *w
 std::vector<uint8_t> build_current_loadout_reply(const std::vector<uint8_t> &retained,
                                                  uint8_t player_class);
 
+// Server_SendWeaponSlotListToPlayer for a re-send that grants nothing new: the slot's
+// PlayerType set to its live class (NapiNPConnection::player_list_type), then that
+// class's current-list body (build_current_loadout_reply over the retained body).
+std::vector<uint8_t> current_weapon_slot_list(NapiNPConnection &conn, const world::World *world);
+
 } // namespace opennova::inmatch

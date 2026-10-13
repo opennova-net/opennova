@@ -520,6 +520,16 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	return h;
 }
 
+// The add's PlayerList entry: PlayerTeam the entity's signed team byte,
+// PlayerType its class [orig: Server_PlayerAdd: movsx entity+0x162 @0x51D368,
+// entity+0x294 @0x51D382, the SetOrCreates @0x51D48F / @0x51D4AA].
+void stamp_player_list_add(NapiNPConnection &conn, const world::World &world) {
+	const world::Entity *player = world.registry.get(conn.link.owned_entity);
+	if (player == nullptr) return;
+	conn.player_list_team = static_cast<int8_t>(player->team);
+	conn.player_list_type = player->player_class;
+}
+
 namespace {
 
 // Server_CountAlivePlayers: the active player-slot rows that carry a bound
@@ -630,6 +640,14 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 				// restarts it from the head [orig: unlink @0x4C8FF6, goto LABEL_5
 				// @0x4C9128].
 				if (!Server_BuildPlayerInfoAndAdd(ctx, conn, world).valid()) continue;
+				// The pump's add is Server_PlayerAdd's, which writes the slot's
+				// PlayerList entry; the map change's round init re-adds a kept
+				// slot through no PlayerAdd and writes none, so its PlayerTeam
+				// and PlayerType stay the previous mission's [orig:
+				// CNapiServer_ProcessPendingPlayerSpawns -> Server_BuildPlayerInfoAndAdd
+				// @0x4C903A -> Server_PlayerAdd @0x51D7A7; Server_InitAllPlayerEntitiesForRound
+				// @0x516AA0 -> Entity_SpawnFromAnimSlotProperty @0x516B67, no SetOrCreate].
+				stamp_player_list_add(conn, world);
 				++spawned;
 				restart = true;
 				break;
@@ -783,8 +801,11 @@ void Server_ChangeEntityTeam(NapiNPServerCtx &ctx, world::World &world,
 		conn->assigned_team = team;                            // +416 @0x518DEF
 		conn->assigned_team_valid = true;
 		world.match.set_player_slot_team(handle, team);        // the mirror (D-NET-650)
-		// The "PlayerTeam" NovaWorld var @0x518E07..0x518E22 follows the slot
-		// team through the embedder's roster sync.
+		// The slot's PlayerTeam var, the entity's signed team byte, and no
+		// ClientHostPlayerAdded: the change rides the next ClientHostUpdate
+		// [orig: sprintf("%ld", movsx entity+0x162) @0x518DF5..0x518E07,
+		//  CNapiVarList_SetOrCreate(PlayerList, slot, "PlayerTeam") @0x518E22].
+		conn->player_list_team = static_cast<int8_t>(team);
 		// Side A for teams 1/3 or a non-team game, else side B; its character
 		// id and avatar become the entity's NetId and animSlot.
 		// [orig: @0x518E27..0x518E71, stores @0x518E7E / @0x518E8C]
@@ -895,6 +916,7 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 	match_player.name = conn->player_name;
 	world.match.upsert_player(match_player);
 	world.match.set_player_slot_team(h, conn->assigned_team); // the slot team mirror (D-NET-650)
+	stamp_player_list_add(*conn, world);
 	return h;
 }
 

@@ -200,6 +200,49 @@ void NwuHostRole::clear_player_slot(int slot) {
 	if (phase_ == Phase::Hosting && session != nullptr) session->send_host_player_removed(slot);
 }
 
+// A team change SetOrCreates the slot's PlayerTeam and sends no ClientHostPlayerAdded; the
+// loadout's accept and every weapon-slot list do the same with its PlayerType. The changed var
+// rides the next ClientHostUpdate (the PlayerList's dirty delta).
+// [orig: Server_ChangeEntityTeam @0x518D70: the CNapiVarList_SetOrCreate call @0x518E22, no
+//  CNapiGameSession_SendPlayerAdded among its callees; NapiNPServerMsg_HandlePlayerLoadout
+//  @0x515790: the SetOrCreate @0x515AE2; Server_SendWeaponSlotListToPlayer @0x502550: the
+//  SetOrCreate @0x5025DB]
+void NwuHostRole::set_player_vars(int slot, const std::string &team, const std::string &type) {
+	const auto it = players_.find(slot);
+	if (it == players_.end()) return;
+	it->second.team = team;
+	it->second.type = type;
+}
+
+void NwuHostRole::sync_roster(const std::vector<HostPlayerSlot> &wanted) {
+	const RosterSync sync = plan_roster_sync(players_, wanted);
+	for (int slot : sync.removed) clear_player_slot(slot);
+	for (const HostPlayerSlot &player : sync.added) set_player_slot(player);
+	for (const HostPlayerSlot &player : sync.vars) set_player_vars(player.slot, player.team, player.type);
+}
+
+RosterSync plan_roster_sync(const std::map<int, HostPlayerSlot> &current,
+                            const std::vector<HostPlayerSlot> &wanted) {
+	const auto same_player = [](const HostPlayerSlot &a, const HostPlayerSlot &b) {
+		return a.player_name == b.player_name && a.ip_and_port == b.ip_and_port && a.pcid == b.pcid;
+	};
+	RosterSync sync;
+	for (const auto &entry : current) {
+		bool kept = false;
+		for (const HostPlayerSlot &player : wanted)
+			if (player.slot == entry.first && same_player(player, entry.second)) kept = true;
+		if (!kept) sync.removed.push_back(entry.first);
+	}
+	for (const HostPlayerSlot &player : wanted) {
+		const auto it = current.find(player.slot);
+		if (it == current.end() || !same_player(player, it->second))
+			sync.added.push_back(player);
+		else if (player.team != it->second.team || player.type != it->second.type)
+			sync.vars.push_back(player);
+	}
+	return sync;
+}
+
 void NwuHostRole::set_columns(const HostRegistration &columns) {
 	HostRegistration next = columns;
 	next.app_id = cfg_.app_id;

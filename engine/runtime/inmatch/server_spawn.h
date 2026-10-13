@@ -82,6 +82,12 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPConnection &conn,
                                                  world::World &world);
 
+// The player add's PlayerList entry (NapiNPConnection::player_list_team /
+// player_list_type): the bound entity's signed team byte and its class. The
+// spawn pump's add and the synthetic admit stamp it; the round init's re-add
+// of a kept slot does not.
+void stamp_player_list_add(NapiNPConnection &conn, const world::World &world);
+
 // Mutate an already-added authoritative player between the ordinary body and
 // retail spectator state. The connection flag is serialized by S2C 0x75; the
 // neutral/hidden entity keeps its roster identity while simulation continues.

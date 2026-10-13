@@ -1041,12 +1041,13 @@ public:
 	// The NovaWorld UDP session the shell keeps through the match (in use, flags, hosting/playing
 	// word, its own exit store): the N icon's inputs and the 62-frame NovaWorld exit's (D-NET-220).
 	void set_nwu_session(bool p_in_use, uint32_t p_flags, int32_t p_role, int32_t p_exit_reason);
-	// The admitted remote joiners as the NovaWorld host's PlayerList sees them (Server_PlayerAdd's
-	// five per-slot vars), keyed by roster slot; the host's own slot is the gate binding's.
+	// The added players as the NovaWorld host's PlayerList sees them (Server_PlayerAdd's five
+	// per-slot vars), keyed by roster slot; the host's own (`own`) takes the gate binding's identity.
 	struct HostPeerSlot {
 		int slot = 0;
+		bool own = false;
 		String player_name, ip_and_port, pcid; // "a.b.c.d:port"; the decrypted PUBPCID or ""
-		String team;                // "%ld" of the assigned team; empty until assigned
+		String team, type; // the match's PlayerTeam / PlayerType ("%ld")
 	};
 	std::vector<HostPeerSlot> host_peer_slots() const;
 	int32_t round_time_remaining_ticks() const; // the live round clock (world::Match), -1 untimed

@@ -692,6 +692,27 @@ struct NapiNPConnection {
 	bool assigned_team_valid = false;
 	uint8_t assigned_team = 0;
 
+	// The slot's PlayerTeam and PlayerType in the session's PlayerList (each
+	// "%ld" of the value), as the in-match handlers SetOrCreate them: both at
+	// the player add (the entity's team and class), PlayerTeam at a team
+	// change, PlayerType at the loadout's accept and at every weapon-slot list
+	// send (the slot's class); nothing else writes them: the map change's
+	// round init re-adds a kept slot with no write (after a side swap the slot
+	// keeps its previous PlayerTeam), and the other class stores (the own
+	// slot's profile init at a mission start, a C2S 0x1B class select) leave
+	// PlayerType. A NovaWorld host's roster mirrors them, each change riding
+	// the next ClientHostUpdate. [orig: dword_B6023C (the PlayerList);
+	// Server_PlayerAdd @0x51CBC0: the values @0x51D35C..0x51D3C3, the
+	// SetOrCreates @0x51D441..0x51D4AA; Server_ChangeEntityTeam @0x518D70: the
+	// SetOrCreate @0x518E22; NapiNPServerMsg_HandlePlayerLoadout @0x515790: the
+	// SetOrCreate @0x515AE2; Server_SendWeaponSlotListToPlayer @0x502550: the
+	// SetOrCreate @0x5025DB; Server_InitAllPlayerEntitiesForRound @0x516AA0
+	// (no SetOrCreate among its callees); the class stores PlayerSession_InitFromProfile
+	// @0x50CB7C (called from Game_StartMission @0x524F23) and
+	// NapiNPServerMsg_SetFarClip @0x501D90 (the 0x1B handler) @0x501DE7]
+	int32_t player_list_team = 0;
+	int32_t player_list_type = 0;
+
 	// The command map's squad bytes on the player slot: its leader's slot
 	// (+100576; 0xFF none) and its fireteam (+100577), seeded 0xFF / 0 by the
 	// player add, and the slot it votes to punt (+100578). Retail's add

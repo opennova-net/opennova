@@ -1032,9 +1032,7 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	// respawn edge (D-NET-379), nor out of a session (world.rules.mp_session)
 	// [orig: @0x5178F2, under the @0x5178C5 test and is_in_session @0x5178E9 / @0x5178EF].
 	if (!revive_deploy && world.rules.mp_session)
-		replies.push_back(make_protocol_message(
-				0x5A, build_current_loadout_reply(
-						conn.reply.last_loadout_reply, player->player_class)));
+		replies.push_back(make_protocol_message(0x5A, current_weapon_slot_list(conn, &world)));
 	replies.push_back(make_protocol_message(0x61, Server_RerollPlayerTickSeed(conn)));
 	// The slot team's frontier (D-NET-583) [orig: @0x5179BA, the call @0x5179D9]
 	const uint8_t frontier = world.zones.frontier_zone(conn.assigned_team);
@@ -1454,10 +1452,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				    ((loadout_player->flags | loadout_player->engine_flags) &
 				     (world::kEntityFlagDead | world::kEntityFlagArmoryZone)) == 0u &&
 				    world->preround_delay_seconds == 0) {
-					replies.push_back(make_protocol_message(
-							0x5A, build_current_loadout_reply(
-										  st.last_loadout_reply,
-										  current_player_class(conn, world))));
+					replies.push_back(make_protocol_message(0x5A, current_weapon_slot_list(conn, world)));
 					break;
 				}
 				// The decoder owns the framing contract: header, whole 4-byte entries, and one
@@ -1472,12 +1467,12 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// slot list and NO state write — no class stamp, no damage-class table, no
 				// phase-8 gate, no retained body [orig: @0x5158a9 / @0x515fa5, both
 				// `return Server_SendWeaponSlotListToPlayer(player)`].
+				// Retail reaches these sends only with the slot's entity, whose
+				// absence returns ahead of them [orig: @0x5157E1..0x5157E5].
 				if (!conn.link.spectator &&
 				    !loadout_envelope_accepted(req, config.game_type)) {
-					replies.push_back(make_protocol_message(
-							0x5A, build_current_loadout_reply(
-										  st.last_loadout_reply,
-										  current_player_class(conn, world))));
+					if (loadout_player != nullptr)
+						replies.push_back(make_protocol_message(0x5A, current_weapon_slot_list(conn, world)));
 					break;
 				}
 				// The armory-reuse cooldown: a nonzero soldier type is accepted only while
@@ -1487,10 +1482,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				if (!conn.link.spectator && req.player_class != 0 &&
 				    conn.link.armory_reuse_seconds > 0 &&
 				    (world == nullptr || world->preround_delay_seconds == 0)) {
-					replies.push_back(make_protocol_message(
-							0x5A, build_current_loadout_reply(
-										  st.last_loadout_reply,
-										  current_player_class(conn, world))));
+					if (loadout_player != nullptr)
+						replies.push_back(make_protocol_message(0x5A, current_weapon_slot_list(conn, world)));
 					break;
 				}
 				const GrantedWeaponLoadout grant = conn.link.spectator
@@ -1522,6 +1515,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					}
 				}
 				replies.push_back(make_protocol_message(s2c::WEAPON_LOADOUT, st.last_loadout_reply));
+				// The accepted class is the slot's PlayerType, at its store and its list send
+				// [orig: @0x515AE2; the Server_SendWeaponSlotListToPlayer call @0x515F95].
+				if (!conn.link.spectator && loadout_player) conn.player_list_type = grant.reply.avatar_class;
 				// Accepted soldier type -> entity+660 playerClass [orig: @0x515ab0] — feeds the
 				// §5.10 field-17 class nibble and the 0x0C/0x18 spawn records for this player.
 				if (loadout_player != nullptr) {

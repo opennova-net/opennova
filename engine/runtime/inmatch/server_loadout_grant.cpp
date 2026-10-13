@@ -250,4 +250,13 @@ std::vector<uint8_t> build_current_loadout_reply(const std::vector<uint8_t> &ret
 	return encode_weapon_loadout(current);
 }
 
+// The list send first sets the slot's PlayerType to its class, then builds the list.
+// [orig: Server_SendWeaponSlotListToPlayer @0x502550: slot+0x15EDC @0x5025A8, the
+//  SetOrCreate @0x5025DB, no test ahead of it]
+std::vector<uint8_t> current_weapon_slot_list(NapiNPConnection &conn, const world::World *world) {
+	const uint8_t player_class = current_player_class(conn, world);
+	conn.player_list_type = player_class;
+	return build_current_loadout_reply(conn.reply.last_loadout_reply, player_class);
+}
+
 } // namespace opennova::inmatch
