@@ -1,5 +1,5 @@
 # opennova_base — the engine base services (vfs, resource_index, gameprofile,
-# pcapio, os_random), one STATIC group target (Shape A). The header-only
+# pcapio, os_random, proc), one STATIC group target (Shape A). The header-only
 # base/io leaf keeps its own INTERFACE target in its subdirectory.
 #
 # base sits ABOVE formats in the Shape A chain (the deliberate inversion): vfs
@@ -32,11 +32,23 @@ target_include_directories(opennova_base
         ${CMAKE_CURRENT_SOURCE_DIR}/..
 )
 
+# proc — child processes from an argv array, no shell (the hosted-server
+# supervisor's opennova-serve, a front end's game). Not in the web build: a
+# browser starts no process. Its POSIX side blocks signals around the fork
+# with pthread_sigmask.
+if(NOT EMSCRIPTEN)
+    target_sources(opennova_base PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/proc/child_process.cpp)
+    find_package(Threads REQUIRED)
+    target_link_libraries(opennova_base PRIVATE Threads::Threads)
+endif()
+
 target_link_libraries(opennova_base PUBLIC opennova_io opennova_formats)
 if(WIN32)
     # os_random.cpp: BCryptGenRandom. `bcrypt` names the system import library;
     # the vendored password-hash library is the distinct opennova_bcrypt target.
-    target_link_libraries(opennova_base PRIVATE bcrypt)
+    # proc/child_process.cpp: terminate()'s WM_CLOSE (EnumWindows,
+    # PostMessageW) is user32's.
+    target_link_libraries(opennova_base PRIVATE bcrypt user32)
 endif()
 
 target_compile_features(opennova_base PUBLIC cxx_std_17)

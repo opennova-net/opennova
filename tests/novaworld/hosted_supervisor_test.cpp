@@ -26,7 +26,6 @@
 // runs on every build.
 
 #include "auth.h"
-#include "child_process.h"
 #include "hosted/admin_link.h"
 #include "hosted/hosted_repository.h"
 #include "hosted/hosted_settings.h"
@@ -37,6 +36,7 @@
 
 #include <base/io/cp1252.h>
 #include <base/io/file_io.h>
+#include <base/proc/child_process.h>
 #include <formats/admincfg/admin_cfg.h>
 #include <formats/gamecfg/game_cfg.h>
 #include <net/novaworld/db/sqlite.h>
@@ -1286,7 +1286,7 @@ int test_local_provider() {
 		code << "5";
 	}
 	TEST_EXPECT(wait_state(provider, *id, hosted::MachineState::Exited));
-	TEST_EXPECT(provider.describe(*id).exit_code == 5);
+	TEST_EXPECT(provider.describe(*id).exit_code == 5u);
 	std::string console;
 	std::string read_error;
 	TEST_EXPECT(opennova::io::read_file_text((dir / "console.log").u8string(), console, read_error));
