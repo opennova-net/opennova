@@ -118,6 +118,9 @@ private:
 		// The import sources it rewrote in place (write_files): imported again after each way.
 		std::vector<std::string> reimport;
 	};
+	// Undo's and Redo's one body: the last step of `from` taken (back: undone) and moved onto `to`, said with
+	// `said` and its words; refused with `none` when `from` is empty.
+	void step_over(std::vector<Step> &from, std::vector<Step> &to, bool back, const char *none, const char *said);
 	// The step taken back (`back`) or done again; false, refused with why, nothing changed.
 	bool take(Step &step, bool back);
 	// A folder renamed now (plan_folder_rename, each move committed in turn, put back when one fails), its files

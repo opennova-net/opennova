@@ -1305,16 +1305,30 @@ constexpr QueryParam kFileCardParams[] = {
 			"left out, the file whose page the Document window shows." },
 };
 
+// The file a query's "path" names, else `fallback` (the page, the active document): "" with the error naming
+// `what` and why there is no `fallback` (`none`) when neither names one.
+std::string path_or(const QueryArgs &args, const std::string &fallback, const char *what, const char *none,
+                    std::string &error) {
+	const std::string path = args.text("path").empty() ? fallback : args.text("path");
+	if (path.empty()) error = std::string("name the ") + what + " with \"path\" (" + none + ").";
+	return path;
+}
+
+// Whether the project file `path` names is of `kind` (one the scan does not list passes: its answer holds nothing);
+// false with the error naming `words`.
+bool of_kind(const SessionView &view, const std::string &path, AssetKind kind, const char *words, std::string &error) {
+	const AssetEntry *entry = view.project.scan ? view.project.scan->named(path) : nullptr;
+	if (!entry || entry->kind == kind) return true;
+	error = path + " is not " + words + ".";
+	return false;
+}
+
 // A file's card (session/file_card.h): what it is, what reads it, where a build puts it, what it defines, who
 // names it and what it names, in words; the page showing with the record its Go to marked.
 JsonValue answer_file_card(const QueryContext &context, const QueryArgs &args, std::string &error) {
 	const SessionView &view = context.core.view();
-	const std::string path = args.text("path").empty() ? view.documents.page : args.text("path");
-	if (path.empty()) {
-		error = "name the file with \"path\" (no page shows).";
-		return JsonValue::make_null();
-	}
-	return file_card_json(shown_file_card(view, path));
+	const std::string path = path_or(args, view.documents.page, "file", "no page shows", error);
+	return path.empty() ? JsonValue::make_null() : file_card_json(shown_file_card(view, path));
 }
 
 // Who names a file, in one look (the deep-integration plan's DI-05): the Inspector's Used by.
@@ -1325,12 +1339,8 @@ constexpr QueryParam kUsedByParams[] = {
 
 JsonValue answer_used_by(const QueryContext &context, const QueryArgs &args, std::string &error) {
 	const SessionView &view = context.core.view();
-	const std::string path = args.text("path").empty() ? view.documents.active : args.text("path");
-	if (path.empty()) {
-		error = "name the file with \"path\" (no document is active).";
-		return JsonValue::make_null();
-	}
-	return file_users_json(file_users(view, path));
+	const std::string path = path_or(args, view.documents.active, "file", "no document is active", error);
+	return path.empty() ? JsonValue::make_null() : file_users_json(file_users(view, path));
 }
 
 // The missions that run on an environment (DI-19a): a .env named by its path, else the active document.
@@ -1352,31 +1362,16 @@ constexpr QueryParam kTerrainUsesParams[] = {
 
 JsonValue answer_terrain_uses(const QueryContext &context, const QueryArgs &args, std::string &error) {
 	const SessionView &view = context.core.view();
-	const std::string path = args.text("path").empty() ? view.documents.active : args.text("path");
-	if (path.empty()) {
-		error = "name the terrain with \"path\" (no document is active).";
-		return JsonValue::make_null();
-	}
-	const AssetEntry *entry = view.project.scan ? view.project.scan->named(path) : nullptr;
-	if (entry && entry->kind != AssetKind::Terrain) {
-		error = path + " is not a terrain (.trn).";
-		return JsonValue::make_null();
-	}
+	const std::string path = path_or(args, view.documents.active, "terrain", "no document is active", error);
+	if (path.empty() || !of_kind(view, path, AssetKind::Terrain, "a terrain (.trn)", error)) return JsonValue::make_null();
 	return terrain_uses_json(terrain_uses(view, path));
 }
 
 JsonValue answer_environment_uses(const QueryContext &context, const QueryArgs &args, std::string &error) {
 	const SessionView &view = context.core.view();
-	const std::string path = args.text("path").empty() ? view.documents.active : args.text("path");
-	if (path.empty()) {
-		error = "name the environment with \"path\" (no document is active).";
+	const std::string path = path_or(args, view.documents.active, "environment", "no document is active", error);
+	if (path.empty() || !of_kind(view, path, AssetKind::Environment, "an environment (.env)", error))
 		return JsonValue::make_null();
-	}
-	const AssetEntry *entry = view.project.scan ? view.project.scan->named(path) : nullptr;
-	if (entry && entry->kind != AssetKind::Environment) {
-		error = path + " is not an environment (.env).";
-		return JsonValue::make_null();
-	}
 	return environment_uses_json(environment_uses(view, path));
 }
 
