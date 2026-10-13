@@ -156,11 +156,12 @@ struct InitialStateBurst {
 	uint16_t phase_loop_counter = 0;    // [playerSlot+89884] per-phase record cursor (reserved; paging)
 	uint8_t  game_state = 0;            // [CNetPlayer_SetGameState] 8 player-added / 9 in-game
 	uint32_t entity_batch_count = 0;    // world-stream batches emitted — the F3 readiness signal
-	bool     loadout_received = false;  // C2S 0x2F (loadout request) received — gates the game-start
-	                                    // bundle (phase 8). Golden: 0x1A (end of world-stream, f316) ->
-	                                    // client sends 0x2F (f317) -> server replies 0x5A + game-start
-	                                    // (f318). Without this gate, 0x1A and game-start land in the
-	                                    // same datagram batch and the client never gets to send 0x2F.
+	bool     loadout_received = false;  // a C2S 0x2F accepted (the 0x5A grant sent). The
+	                                    // game-start bundle (phase 8) waits for the 0x0B, not
+	                                    // this (D-NET-678).
+	                                    // Golden: 0x1A (end of world-stream, f316) -> client sends
+	                                    // 0x2F + 0x0B (f317) -> server replies 0x5A + game-start
+	                                    // (f318).
 	// (the prior loadout_wait_ticks fallback counter was removed — the phase-8 wait has NO
 	//  timeout: the golden host emits nothing in-match until the joiner's 0x2F, D-NET-145)
 	bool     spawned = false;           // set with game_state==9 (the PeerSpawned source)
@@ -338,7 +339,7 @@ struct SessionReplyState {
 	//  the host-kit seed Server_PlayerAdd @0x51D12A]
 	LoadoutSubmit loadout_buffer;
 	bool loadout_buffer_set = false;
-	bool mission_status_received = false; // 0x0B mission-file status report seen
+	bool mission_status_received = false; // an accepted 0x0B (Server_HandlePlayerJoinRequest)
 	// Retail's join completion is three packet boundaries, not one semantic
 	// bag. The C2S 0x02 handler emits admission metadata; a later pending-spawn
 	// pump replays settings + 0x04; the first 0x37 response then carries 0x64 +

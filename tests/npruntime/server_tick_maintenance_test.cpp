@@ -1310,12 +1310,13 @@ bool check_armory_reuse_cooldown() {
 	if (!expect(replies.size() == 1 && entity->player_class == 6,
 			"an alive player inside an armory zone is granted"))
 		return false;
-	// A spectator's empty grant never seeds.
+	// A spectator's submit returns with nothing: no reply, no cooldown (D-NET-678)
+	// [orig: NapiNPServerMsg_HandlePlayerLoadout @0x5157EB..0x5157F2].
 	conn.link.spectator = true;
 	conn.link.armory_reuse_seconds = 0;
 	replies = dispatch(submit);
-	return expect(replies.size() == 1 && conn.link.armory_reuse_seconds == 0,
-			"a spectator submit seeds no cooldown");
+	return expect(replies.empty() && conn.link.armory_reuse_seconds == 0,
+			"a spectator submit draws nothing and seeds no cooldown");
 }
 
 // --------------------------------------------------------------------------

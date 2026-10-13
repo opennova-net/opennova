@@ -882,39 +882,27 @@ bool run_reactive_replies() {
 		            reply_has_tag(msgs, 0x64) && !reply_has_tag(msgs, 0x75),
 		            "0x37 -> 0x64 only, without an invented 0x75")) return false;
 	}
-	// 0x2F -> 0x5A weapon loadout, DERIVED from the request [orig: NapiNPServerMsg_HandlePlayerLoadout
-	// @0x515790 -> Server_SendWeaponSlotListToPlayer @0x502550]: reply set = the request's adm
-	// entries sorted ascending (the weapon-slot table walk order), avatarClass = the accepted
-	// soldier type, ammo bytes echoed (the client clamps them on apply @0x4295d7), 4th byte the
-	// slot table's at the row's AdmDef index, 0 here (no armory resolves a round to store at).
-	// Request bytes = the live retail v14 capture's C2S 0x2F (class 2 / soldier 8 / entries
-	// {21,3,83,76,77,78,2}, ammo 255/255, var 255).
+	// 0x2F from a slot with no entity (this host has no world, so its joiner has none): retail's
+	// handler returns with nothing, no 0x5A and no state write (D-NET-678)
+	// [orig: NapiNPServerMsg_HandlePlayerLoadout @0x5157E1..0x5157E5].
 	{
-		std::vector<uint8_t> req = {0x02, 0x08, 0xC3, 0x00, 0x00, 0x00};
-		for (uint8_t adm : {uint8_t(21), uint8_t(3), uint8_t(83), uint8_t(76), uint8_t(77),
-		                    uint8_t(78), uint8_t(2)}) {
-			req.push_back(adm); req.push_back(0xFF); req.push_back(0xFF); req.push_back(0xFF);
+		std::vector<uint8_t> req = {0x02, 0x08, 0xC3, 0x00, 0x00, 0x00, 21, 0xFF, 0xFF, 0xFF, 0xFF};
+		auto dg = craft_session(client_scrk, server_sk, seq++, {make_protocol_message(0x2F, req)});
+		auto r = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 130);
+		bool saw_5a = false;
+		for (const std::vector<uint8_t> &outbound : r.outbound) {
+			ProtocolPacketHeader hdr;
+			std::vector<ProtocolMessage> msgs;
+			if (decode_s2c(outbound, server_scrk, hdr, msgs) && reply_has_tag(msgs, 0x5A))
+				saw_5a = true;
 		}
-		req.push_back(0xFF); // adm-index terminator
-		std::vector<ProtocolMessage> msgs;
-		if (!expect(send_session({make_protocol_message(0x2F, req)}, 130, msgs) &&
-		            reply_has_tag(msgs, 0x5A), "0x2F -> 0x5A loadout")) return false;
-		for (const ProtocolMessage &m : msgs) {
-			if (m.tag != 0x5A) continue;
-			WeaponLoadout lo;
-			if (!expect(decode_weapon_loadout(m.payload.data(), m.payload.size(), lo),
-			            "0x5A reply decodes")) return false;
-			if (!expect(lo.avatar_class == 8, "avatarClass = accepted soldier type")) return false;
-			const uint8_t want[7] = {2, 3, 21, 76, 77, 78, 83};
-			if (!expect(lo.slots.size() == 7, "one reply slot per accepted request entry"))
-				return false;
-			for (size_t i = 0; i < 7; ++i) {
-				if (!expect(lo.slots[i].type_id == want[i],
-				            "slots sorted ascending by adm index (the golden order)")) return false;
-				if (!expect(lo.slots[i].ammo_primary == 0xFF && lo.slots[i].ammo_alt == 0,
-				            "ammo bytes echoed; restriction byte 0")) return false;
-			}
-		}
+		const inmatch::NapiNPConnection *c = nullptr;
+		for (const inmatch::NapiNPConnection &candidate : ctx.np_protocol.connection_list)
+			if (candidate.peer == peer) c = &candidate;
+		if (!expect(!saw_5a && c != nullptr && !c->reply.loadout_synced &&
+		                    !c->burst.loadout_received && !c->reply.loadout_buffer_set &&
+		                    c->reply.last_loadout_reply.empty(),
+		            "a 0x2F from a slot with no entity draws nothing")) return false;
 	}
 	// 0x0A -> 0x19 ack only (golden f161-162: C 0x0A empty -> S 0x19 tick). The prior emit_roster
 	// (0x46/0x16/0x19/0x1A) sent an unsolicited 0x1A + 0x16 that triggered 0x22 re-request storms.
@@ -3238,6 +3226,7 @@ bool run_loadout_resolve_with_armory() {
 	world.tables.ammo = world::build_ammo_table(af);
 	def_free_ammo(&af);
 	world::resolve_weapon_round_types(world.tables.weapons, world.tables.ammo);
+	world.registry.configure_pool(0, 16);
 	ctx.world = &world;
 
 	const PeerAddr peer{0x0100007Fu, 30100};
@@ -3248,6 +3237,9 @@ bool run_loadout_resolve_with_armory() {
 	if (!handshake(
 			ctx, peer, client_scrk, 0xDEADBEE2u, server_scrk,
 			&server_sk, &seq)) return false;
+	// The handler needs the slot's entity (D-NET-678): the spawn pump binds it.
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(ctx, world) == 1,
+	            "the admitted joiner spawns its player entity")) return false;
 
 	auto send_session = [&](std::vector<ProtocolMessage> msgs, uint32_t now,
 	                        std::vector<ProtocolMessage> &out) -> bool {
@@ -3651,6 +3643,58 @@ bool run_loadout_envelope_gates() {
 		            "a denied class is remapped in the S2C 0x5A grant")) return false;
 		if (!expect(joiner_entity()->player_class == 6,
 		            "the same remapped class stamps the owned Person")) return false;
+		ctx.config.class_allow_mask = 0xFFFFu;
+	}
+
+	// (8) 0x2F -> 0x5A weapon loadout, DERIVED from the request [orig:
+	// NapiNPServerMsg_HandlePlayerLoadout @0x515790 -> Server_SendWeaponSlotListToPlayer
+	// @0x502550]: reply set = the request's adm entries sorted ascending (the weapon-slot table
+	// walk order), avatarClass = the accepted soldier type, ammo bytes echoed (the client clamps
+	// them on apply @0x4295d7), 4th byte the slot table's at the row's AdmDef index, 0 here (no
+	// armory resolves a round to store at). Request bytes = the live retail v14 capture's C2S 0x2F
+	// (class 2 / soldier 8 / entries {21,3,83,76,77,78,2}, ammo 255/255, var 255).
+	{
+		std::vector<uint8_t> req = {0x02, 0x08, 0xC3, 0x00, 0x00, 0x00};
+		for (uint8_t adm : {uint8_t(21), uint8_t(3), uint8_t(83), uint8_t(76), uint8_t(77),
+		                    uint8_t(78), uint8_t(2)}) {
+			req.push_back(adm); req.push_back(0xFF); req.push_back(0xFF); req.push_back(0xFF);
+		}
+		req.push_back(0xFF); // adm-index terminator
+		const std::vector<uint8_t> body = submit(req, 270);
+		WeaponLoadout lo;
+		if (!expect(decode_weapon_loadout(body.data(), body.size(), lo), "0x2F -> 0x5A loadout"))
+			return false;
+		if (!expect(lo.avatar_class == 8, "avatarClass = accepted soldier type")) return false;
+		const uint8_t want[7] = {2, 3, 21, 76, 77, 78, 83};
+		if (!expect(lo.slots.size() == 7, "one reply slot per accepted request entry"))
+			return false;
+		for (size_t i = 0; i < 7; ++i) {
+			if (!expect(lo.slots[i].type_id == want[i],
+			            "slots sorted ascending by adm index (the golden order)")) return false;
+			if (!expect(lo.slots[i].ammo_primary == 0xFF && lo.slots[i].ammo_alt == 0,
+			            "ammo bytes echoed; restriction byte 0")) return false;
+		}
+	}
+
+	// (9) A spectator's 0x2F returns with nothing, ahead of the armory window and the parse: no
+	// 0x5A, no class stamp, no retained body, no cooldown (D-NET-678)
+	// [orig: NapiNPServerMsg_HandlePlayerLoadout @0x5157EB..0x5157F2, the +0x188D7 latch].
+	{
+		inmatch::NapiNPConnection *c = nullptr;
+		for (inmatch::NapiNPConnection &candidate : ctx.np_protocol.connection_list)
+			if (candidate.peer == peer) c = &candidate;
+		if (!expect(c != nullptr, "the joiner's connection resolves")) return false;
+		c->link.spectator = true;
+		c->link.armory_reuse_seconds = 0;
+		ctx.config.armory_reuse_time = 30;
+		const std::vector<uint8_t> retained = c->reply.last_loadout_reply;
+		const std::vector<uint8_t> body =
+				submit({0x01, 0x06, 0xC3, 0x00, 0x00, 0x00, 9, 0xFF, 0xFF, 0xFF, 0xFF}, 280);
+		if (!expect(body.empty() && c->reply.last_loadout_reply == retained &&
+		                    joiner_entity()->player_class == 8 && c->link.armory_reuse_seconds == 0,
+		            "a spectator's 0x2F draws nothing and writes nothing")) return false;
+		c->link.spectator = false;
+		ctx.config.armory_reuse_time = 0;
 	}
 	return true;
 }

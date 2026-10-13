@@ -624,6 +624,13 @@ bool balance_join_admits(const NapiNPServerCtx &ctx, const NapiNPConnection &con
 
 } // namespace
 
+// See header. [orig: NapiNPServerMsg_PlayerJoinRequest @0x51AB10]
+void Server_HandlePlayerJoinRequest(NapiNPConnection &conn, const world::World *world) {
+	if (!player_slot_active(conn) || is_in_match(conn)) return;
+	if (world == nullptr || world->registry.get(conn.link.owned_entity) == nullptr) return;
+	conn.reply.mission_status_received = true;
+}
+
 // [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0] — gated is_authority && !dword_24D1DE0 &&
 // !g_SpawnSuccessGate. dword_24D1DE0 is the mission-LOADING-in-progress flag (set/cleared all over
 // Game_StartMission @0x524360); the original does NOT process spawns until the load completes and the

@@ -422,7 +422,7 @@ bool drive_to_an_early_in_match_release(Harness &h, uint8_t period) {
 			make_protocol_message(0x5A, {0x08, 0x03, 0x0A, 0xFF, 0x00, 0xFF})});
 	return expect(h.client.in_match() &&
 	                      std::string(h.client.admission_stage_name()) ==
-	                              std::string("awaiting the loadout grants"),
+	                              std::string("awaiting the world state (S2C 0x0F)"),
 			"early release: the joiner is in the match inside the final wait for the 0x0F");
 }
 

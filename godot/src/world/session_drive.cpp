@@ -405,8 +405,8 @@ void SessionDrive::update_joiner_admission_signals() {
 	const String loss_reason = sim->get_session_loss_reason();
 	const bool deploy_pending = sim->is_join_deploy_pick_pending();
 	// The first valid S2C 0x5A opens retail's independent gameplay gate and
-	// can make is_joined_in_match true BEFORE 0x0F supplies the deployment
-	// policy or the second initial grant makes a required DEATH pick ready.
+	// can make is_joined_in_match true BEFORE the 0x0F completes the admission
+	// and makes a required DEATH pick ready (a spectator's comes at the 0x0F).
 	// Only the native initial-admission boundary distinguishes that split
 	// ordering from a complete no-pick join; later redeploys leave the
 	// predicate monotonically true.
