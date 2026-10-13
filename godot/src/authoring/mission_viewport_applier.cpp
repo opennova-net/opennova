@@ -1355,7 +1355,7 @@ opennova::io::JsonValue MissionViewportApplier::drawn_json_() const {
 	listen.set("decoding", json_number(listen_->decoding()));
 	listen.set("failed", json_number(listen_->failed()));
 	listen.set("started", json_number(double(listen_->started())));
-	listen.set("audible", JsonValue::make_bool(listen_idle_frames_ < kListenHeldFrames));
+	listen.set("audible", JsonValue::make_bool(listen_->audible()));
 	out.set("listen", std::move(listen));
 	return out;
 }
@@ -1520,27 +1520,8 @@ void MissionViewportApplier::apply_shots_(const opennova::editor::MissionViewpor
 void MissionViewportApplier::apply_listen_(const opennova::editor::MissionViewport &mission) {
 	// The Listen's channels (DI-36) as the viewport's mix binds them now, heard while the picture is drawn.
 	const opennova::editor::MissionListen &listen = mission.listen();
-	if (!mission.options().listen.on || !listen.open() || project_root_.empty()) {
-		listen_->stop();
-		listen_idle_frames_ = kListenHeldFrames;
-		return;
-	}
-	listen_idle_frames_ = presented_ != listen_presented_ ? 0 : std::min(listen_idle_frames_ + 1, kListenHeldFrames);
-	listen_presented_ = presented_;
-	std::vector<PreviewSoundLoops::Channel> channels;
-	channels.reserve(listen.channels().size());
-	for (const opennova::editor::MissionSoundChannel &each : listen.channels()) {
-		PreviewSoundLoops::Channel channel;
-		channel.started = each.started;
-		channel.path = each.candidate >= 0 ? each.path : std::string();
-		channel.volume = each.volume;
-		channel.pitch_q16 = each.pitch_q16;
-		channel.at[0] = each.at.x;
-		channel.at[1] = each.at.y;
-		channel.at[2] = each.at.z;
-		channels.push_back(std::move(channel));
-	}
-	listen_->follow(project_root_, channels, listen_idle_frames_ < kListenHeldFrames);
+	listen_->listen(project_root_, listen.channels(), mission.options().listen.on && listen.open() && !project_root_.empty(),
+			presented_);
 }
 
 // --- the frame -----------------------------------------------------------------------------------

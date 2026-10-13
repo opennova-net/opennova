@@ -115,7 +115,8 @@ namespace godot {
 //
 // DI-36: the Listen. While the options listen, each channel the viewport's MissionListen binds plays its wave looping
 // at its place (PreviewSoundLoops, DI-02's player), the SubViewport's camera the 3D listener, as the game's ambient
-// channels play; heard while the picture is drawn (held paused once it has not been for kListenHeldFrames frames).
+// channels play; heard while the picture is drawn (held paused once it has not been for PreviewSoundLoops::kHeldFrames
+// frames).
 class MissionViewportApplier final : public ViewportApplier {
 public:
 	explicit MissionViewportApplier(SubViewport &viewport);
@@ -441,15 +442,11 @@ private:
 	bool shown_foliage_ = true, shown_effects_ = true, shown_lights_ = true;
 	int64_t clock_ms_ = 0;
 	uint64_t overlay_frame_id_ = 0;
-	// DI-36: the Listen's channels, the project's root its waves are read under, and how many frames passed since the
-	// picture was last presented (heard while under kListenHeldFrames). apply_listen_ binds the channels as the
-	// viewport's mix holds them now.
+	// DI-36: the Listen's channels and the project's root its waves are read under. apply_listen_ binds the channels as
+	// the viewport's mix holds them now.
 	void apply_listen_(const opennova::editor::MissionViewport &mission);
-	static constexpr int kListenHeldFrames = 30;
 	std::unique_ptr<PreviewSoundLoops> listen_;
 	std::string project_root_;
-	uint64_t listen_presented_ = 0;
-	int listen_idle_frames_ = kListenHeldFrames;
 	// The frames presented, and the last one's foliage, light and effect legs (microseconds).
 	uint64_t presented_ = 0;
 	int64_t leg_us_[3] = { 0, 0, 0 };

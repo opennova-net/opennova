@@ -510,27 +510,8 @@ void EnvironmentViewportApplier::apply_listen_(const EnvironmentViewport &model)
 	// The Listen's rain loops (S23 C) as the viewport's mix binds them now, heard while the picture is drawn (held a
 	// moment past its last drawn frame, as the mission device's Listen is).
 	const opennova::editor::EnvironmentListen &listen = model.listen();
-	if (!model.options().listen.on || !listen.open() || project_root_.empty()) {
-		listen_->stop();
-		listen_idle_frames_ = kListenHeldFrames;
-		return;
-	}
-	listen_idle_frames_ = presented_ != listen_presented_ ? 0 : std::min(listen_idle_frames_ + 1, kListenHeldFrames);
-	listen_presented_ = presented_;
-	std::vector<PreviewSoundLoops::Channel> channels;
-	channels.reserve(listen.channels().size());
-	for (const opennova::editor::MissionSoundChannel &each : listen.channels()) {
-		PreviewSoundLoops::Channel channel;
-		channel.started = each.started;
-		channel.path = each.candidate >= 0 ? each.path : std::string();
-		channel.volume = each.volume;
-		channel.pitch_q16 = each.pitch_q16;
-		channel.at[0] = each.at.x;
-		channel.at[1] = each.at.y;
-		channel.at[2] = each.at.z;
-		channels.push_back(std::move(channel));
-	}
-	listen_->follow(project_root_, channels, listen_idle_frames_ < kListenHeldFrames);
+	listen_->listen(project_root_, listen.channels(), model.options().listen.on && listen.open() && !project_root_.empty(),
+			presented_);
 }
 
 void EnvironmentViewportApplier::clear() {

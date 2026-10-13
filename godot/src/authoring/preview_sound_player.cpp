@@ -255,6 +255,31 @@ void PreviewSoundLoops::follow(const std::string &p_root, const std::vector<Chan
 	}
 }
 
+void PreviewSoundLoops::listen(const std::string &p_root,
+		const std::vector<opennova::editor::MissionSoundChannel> &p_channels, bool p_on, uint64_t p_presented) {
+	if (!p_on) {
+		stop();
+		idle_frames_ = kHeldFrames;
+		return;
+	}
+	idle_frames_ = p_presented != presented_ ? 0 : std::min(idle_frames_ + 1, kHeldFrames);
+	presented_ = p_presented;
+	std::vector<Channel> channels;
+	channels.reserve(p_channels.size());
+	for (const opennova::editor::MissionSoundChannel &each : p_channels) {
+		Channel channel;
+		channel.started = each.started;
+		channel.path = each.candidate >= 0 ? each.path : std::string();
+		channel.volume = each.volume;
+		channel.pitch_q16 = each.pitch_q16;
+		channel.at[0] = each.at.x;
+		channel.at[1] = each.at.y;
+		channel.at[2] = each.at.z;
+		channels.push_back(std::move(channel));
+	}
+	follow(p_root, channels, audible());
+}
+
 void PreviewSoundLoops::stop() {
 	for (Voice &voice : voices_)
 		if (voice.player != nullptr) {
