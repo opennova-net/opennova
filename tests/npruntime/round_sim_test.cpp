@@ -1203,12 +1203,15 @@ bool test_dismemberment_damage_path() {
 				"clone keeps exactly the complementary cut sections"))
 			return false;
 		// The clone leg severs health and the SSN key (+0x7C); the memcpy keeps
-		// everything else of the victim's, its stamped attacker and its
-		// damage state included [orig: @0x407697, @0x4076AB; the copy
-		// @0x4398DC].
+		// everything else of the victim's, its damage state included [orig:
+		// @0x407697, @0x4076AB; the copy @0x4398DC]. The clone carries the
+		// cut's selection and no attacker, what its edge would read from the
+		// unchanged record (D-AI-9).
 		if (!expect(piece->health == 0 && !piece->alive && piece->net_id == 0 &&
 					piece->damage_state == victim->damage_state &&
-					piece->last_attacker == rig.shooter &&
+					!piece->last_attacker.valid() &&
+					piece->death_anim_state == victim->death_anim_state &&
+					piece->death_anim_state != 0 &&
 					piece->item_id == victim->item_id &&
 					piece->spawn_origin == w::kSpawnOriginNone,
 				"the clone keeps the victim's words but its health and SSN key"))

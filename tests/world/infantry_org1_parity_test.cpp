@@ -579,20 +579,16 @@ void test_org1_edge_reads_the_recorded_round() {
     }
 }
 
-// The clone's own edge re-enters the cut: its +0x2C0 is its row's recycled
-// tail (zero for a row unused this mission), so its first update takes the
-// unstaged leg and the hit callback, whose gates still pass (zero health, the
-// dead bit not yet latched, the record still holding the round). Each
-// generation hides the bits it shows (the same cut adds them all) and copies
-// itself into the next free row, which the walk reaches on the next tick (its
-// bound is the used count read before the walk), until the record changes or
-// the pool is full, where retail's unchecked clone faults and the port stops
-// (D-AI-9). Every generation shares the victim's slot pair and dies silently
-// (its mask always holds bit 0).
-// [orig: Entity_UpdateInfantryAI @0x4B9CC9..0x4B9CF1 (the callback before the
-//  dead bit @0x4B9D18); OrganicClass_HandleEvent @0x40759E..0x4076C9;
-//  Entity_UpdateAllEntities used read @0x4C242C; the silent leg @0x4B9C68]
-void test_org1_clone_edge_cuts_again() {
+// The clone's own edge. Retail's clone carries a recycled +0x2C0 (zero), so
+// its edge would take the unstaged leg and the hit callback would cut it
+// again, one generation per update, until the record changes, and the last
+// generation's differing request would re-init the shared slot pair on every
+// pass. The port's clone carries the cut's selection and no attacker
+// (D-AI-9), so its edge takes the staged leg: it dies silently on the
+// victim's clip, no second clone, and the shared pair plays one death.
+// [orig: Entity_UpdateInfantryAI @0x4B9CC9..0x4B9CF1, the dead bit @0x4B9D18;
+//  the silent leg @0x4B9C68; AnimMap_UpdateEntity re-init @0x40B645]
+void test_org1_clone_edge_takes_the_cut_selection() {
     Org1Rig rig;
     arm_death(rig);
     rig.entity().yaw = 90;
@@ -605,28 +601,23 @@ void test_org1_clone_edge_cuts_again() {
     rig.tick(40);
     CHECK(rig.clones() == 1);
     CHECK(rig.entity().section_mask == cut);
-    rig.tick(41);
-    rig.tick(42);
-    CHECK(rig.clones() == 3); // the body and three generations fill the pool of 4
-    rig.tick(43);
-    CHECK(rig.clones() == 3); // the last generation's cut finds no row
-    int fully_hidden = 0;
-    int showing_the_cut = 0;
-    int32_t shared = -2;
-    bool one_pair = true;
+    const int selection = compute_death_anim_state(3, 2, death_cause::kBullet);
+    for (uint32_t t = 41; t <= 60; ++t) rig.tick(t);
+    CHECK(rig.clones() == 1);
     rig.w->registry.for_each_in_pool(0, [&](const Entity &e) {
         if (e.handle == rig.handle) return;
-        if (e.section_mask == 0xFFFFFFFFu) ++fully_hidden;
-        if (e.section_mask == ~cut) ++showing_the_cut;
+        CHECK(e.section_mask == ~cut);
         CHECK((e.flags & kEntityFlagDead) != 0);
         const AiEntity *body = rig.w->ai.for_handle(e.handle);
         CHECK(body != nullptr);
         if (body == nullptr) return;
-        if (shared == -2) shared = body->shared_anim_slot;
-        one_pair = one_pair && body->shared_anim_slot == shared && shared >= 0;
+        CHECK(body->inf.anim_state == selection);
+        CHECK(body->shared_anim_slot >= 0 && body->shared_anim_slot == rig.e().shared_anim_slot);
     });
-    CHECK(fully_hidden == 3 && showing_the_cut == 0);
-    CHECK(one_pair && rig.e().shared_anim_slot == shared);
+    CHECK(rig.e().inf.anim_state == selection);
+    // One death clip, advancing (no re-init fight): the shared playhead moves.
+    CHECK(rig.e().inf.anim_playing_state == selection);
+    CHECK(rig.e().inf.anim_blend_weight == 1.0f);
 }
 
 // The plyr class callback's waypoint tail: a team 1/2 player whose AI slot
@@ -862,7 +853,7 @@ int main() {
     test_org1_float_reads_this_ticks_eye();
     test_player_waypoint_tail();
     test_org1_edge_reads_the_recorded_round();
-    test_org1_clone_edge_cuts_again();
+    test_org1_clone_edge_takes_the_cut_selection();
     test_org1_round_leaves_along_this_ticks_look();
     test_org1_fire_latch_is_a_pass_local();
     test_org1_airborne_body_skips_the_think();

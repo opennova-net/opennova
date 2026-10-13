@@ -249,6 +249,15 @@ struct AiDetail {
 	int32_t corpse_timer = 0;
 	int32_t deathtime_ticks = 0;
 	bool leave_corpse = false;
+	// The dismemberment state (world-wac-ai-re §19.2): the hidden sections,
+	// the AnimMap slot pair a clone shares (-1 = the body's own), the
+	// channel's playing id, playhead and blend, and the motor velocity.
+	int64_t section_mask = 0;
+	int32_t shared_anim_slot = -1;
+	int32_t anim_playing_state = -1;
+	int32_t clip_phase = 0;
+	float anim_blend_weight = 1.0f;
+	int32_t vel[3] = {};
 };
 
 // The full per-entity debug card: the world/registry half, the AI half, or

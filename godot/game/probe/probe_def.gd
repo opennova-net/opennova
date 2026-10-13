@@ -580,6 +580,25 @@ static func _build_definitions() -> Array[ProbeDef]:
 				+ "through the seam the window's checkbox and game_debug share; captures the "
 				+ "workspace.",
 				RUNTIME + "entity_pick_probe.gd", {}, [], true, true, 120_000),
+		ProbeDef.make("dismember_shot",
+				"An aimlocked shot for the dismemberment leg (world-wac-ai-re §19.2): nodismember "
+				+ "cleared on every organic and the local player NoDie for the run, the player stood "
+				+ "`standoff` m from the target (`wire_handle`, else the nearest live NPC) on the first "
+				+ "clear one of eight bearings (or `bearing`), the "
+				+ "real look input steered every frame onto the target's live position plus `height` "
+				+ "m, `burst_frames` fired once locked, then `watch_frames` with a capture every "
+				+ "`capture_every` frames and every pool-0 organic within 6 m logged (alive, mask, "
+				+ "shared slot, anim, velocity).",
+				RUNTIME + "dismember_shot_probe.gd", {
+					"wire_handle": { "type": "integer", "default": -1 },
+					"bearing": { "type": "integer", "minimum": -1, "maximum": 7, "default": -1 },
+					"height": { "type": "number", "default": 0.55 },
+					"standoff": { "type": "number", "minimum": 1.0, "default": 4.0 },
+					"burst_frames": { "type": "integer", "minimum": 1, "default": 4 },
+					"watch_frames": { "type": "integer", "minimum": 0, "default": 240 },
+					"capture_every": { "type": "integer", "minimum": 1, "default": 30 },
+					"output_dir": { "type": "string", "default": "" },
+				}, [], true, true, 120_000),
 		ProbeDef.make("terrain_ground",
 				"The ground the game reads at a mission point (x east, y north, metres) on the live "
 				+ "process: the engine's pick ray dropped straight down there meets the terrain (its "

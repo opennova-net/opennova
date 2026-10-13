@@ -277,6 +277,12 @@ void fill_ai_detail(World &world, const AiEntity &e, AiDetail &d,
 	d.corpse_timer = ent ? ent->corpse_timer : 0;
 	d.deathtime_ticks = ent ? ent->deathtime_ticks : 0;
 	d.leave_corpse = ent ? ent->leave_corpse : false;
+	d.section_mask = ent ? static_cast<int64_t>(ent->section_mask) : 0;
+	d.shared_anim_slot = e.shared_anim_slot;
+	d.anim_playing_state = e.inf.anim_playing_state;
+	d.clip_phase = e.inf.clip_phase;
+	d.anim_blend_weight = e.inf.anim_blend_weight;
+	for (int i = 0; i < 3; ++i) d.vel[i] = e.inf.vel[i];
 }
 
 // The registry/world half — the old get_world_entity_debug body. Pool-1

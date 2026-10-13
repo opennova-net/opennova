@@ -254,7 +254,19 @@ Entity make_dismemberment_piece_seed(const Entity &victim, const Entity &row,
     Entity piece = victim;
     // The tail [orig: Entity_Destroy memsets 0x2B4 bytes @0x43EA70].
     piece.ai_state = row.ai_state;                                 // +0x2B4
-    piece.death_anim_state = row.death_anim_state;                 // +0x2C0
+    // +0x2C0 is tail too, normally zero, so retail's clone edge takes the
+    // unstaged leg (selection 174, +0x178 = 0, the class callback before the
+    // dead bit) and the callback cuts it again from the global hit record:
+    // one clone per update until the record changes or the pool faults, the
+    // last generation requesting a death the others do not, so the shared
+    // slot pair re-inits on every pass and no half's death clip ever plays.
+    // Deliberate divergence (D-AI-9): the clone carries the selection its cut
+    // made and no attacker, which is what that edge reads from an unchanged
+    // record, so it dies on the victim's clip without re-entering the cut.
+    // [orig: Entity_UpdateInfantryAI @0x4B9CC9..0x4B9CF1, the dead bit
+    //  @0x4B9D18; AnimMap_UpdateEntity re-init @0x40B645]
+    piece.death_anim_state = victim.death_anim_state;
+    piece.last_attacker = EntityHandle{};
     piece.pre_use_gun_equipped_adm_index = row.pre_use_gun_equipped_adm_index; // +0x308
     piece.spawn_position = row.spawn_position;                     // +0x318..+0x320
     piece.spawn_heading = row.spawn_heading;                       // +0x330

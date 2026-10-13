@@ -154,6 +154,14 @@ Dictionary ai_json(const AiDetail &d) {
 	out["corpse_timer"] = d.corpse_timer;
 	out["deathtime_ticks"] = d.deathtime_ticks;
 	out["leave_corpse"] = d.leave_corpse;
+	out["section_mask"] = d.section_mask;
+	out["shared_anim_slot"] = d.shared_anim_slot;
+	out["anim_playing_state"] = d.anim_playing_state;
+	out["clip_phase"] = d.clip_phase;
+	out["anim_blend_weight"] = d.anim_blend_weight;
+	Array vel;
+	for (int i = 0; i < 3; ++i) vel.push_back(d.vel[i]);
+	out["vel"] = vel;
 	return out;
 }
 

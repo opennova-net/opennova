@@ -350,6 +350,10 @@ void Simulation::_bind_methods() {
 	                     &Simulation::debug_set_world_entity_weapon_ammo);
 	ClassDB::bind_method(D_METHOD("debug_set_entity_item_attrib", "handle", "attrib", "attrib2"),
 	                     &Simulation::debug_set_entity_item_attrib);
+	ClassDB::bind_method(D_METHOD("debug_set_organics_nodismember", "on"),
+	                     &Simulation::debug_set_organics_nodismember);
+	ClassDB::bind_method(D_METHOD("debug_organics_nodismember"),
+	                     &Simulation::debug_organics_nodismember);
 	ClassDB::bind_method(D_METHOD("debug_teleport_local_player", "mission_pos", "yaw_deg", "pitch_deg"),
 	                     &Simulation::debug_teleport_local_player);
 	ClassDB::bind_method(D_METHOD("debug_apply_local_pose", "x", "y", "z", "yaw_deg", "pitch_deg"),
