@@ -53,7 +53,7 @@ func _font_overlay() -> HudOverlay:
 func test_message_log_toggle_edge() -> void:
 	var toggles := HudToggles.new()
 	var poll := func(down: bool, chorded: bool, active: bool) -> int:
-		return toggles.poll((1 << HudToggles.ROW_OLD_MESSAGES) if down else 0, false,
+		return toggles.poll((1 << HudToggles.ROW_OLD_MESSAGES) if down else 0,
 				chorded, active, false, false)
 	assert_eq(poll.call(true, false, true),
 			HudToggles.EVENT_MESSAGE_LOG_TOGGLED | HudToggles.EVENT_OVERLAY_WINDOWS_CLEARED)

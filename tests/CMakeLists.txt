@@ -75,6 +75,25 @@ target_compile_features(os_random_test PRIVATE cxx_std_17)
 target_include_directories(os_random_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME os_random COMMAND os_random_test)
 
+# The child-process seam (base/proc): a child from an argv array with no shell, run
+# against the test binary itself (its path is the argument; `--child <mode>` makes it
+# the child): exit codes (unsigned on Windows), every argument whole, the working
+# directory, stdin, the output file and the error file, terminate and kill, the
+# refusals, the environment, the identity and process_liveness, release (past the
+# starter's kill-on-close job), on Windows the polite stop of a window child started
+# behind and the paths past MAX_PATH, and on POSIX the released child's own session
+# and no inherited descriptor.
+add_executable(child_process_test proc/child_process_test.cpp)
+target_link_libraries(child_process_test PRIVATE opennova_base)
+if(WIN32)
+    # The window child (CreateWindowExW, the message loop) and the job query.
+    target_link_libraries(child_process_test PRIVATE user32)
+endif()
+target_compile_features(child_process_test PRIVATE cxx_std_17)
+target_include_directories(child_process_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME child_process COMMAND child_process_test $<TARGET_FILE:child_process_test>)
+set_tests_properties(child_process PROPERTIES TIMEOUT 120)
+
 # Roundtrip test
 add_executable(threedi_roundtrip_test threedi/roundtrip_test.cpp)
 target_link_libraries(threedi_roundtrip_test PRIVATE opennova_formats)
@@ -1116,14 +1135,6 @@ target_compile_features(extract_cli_test PRIVATE cxx_std_17)
 add_dependencies(extract_cli_test opennova_extract)
 add_test(NAME extract_cli COMMAND extract_cli_test $<TARGET_FILE:opennova_extract> ${CMAKE_CURRENT_BINARY_DIR})
 
-# The texture candidate order the Godot resolvers and opennova-3di share
-# (base/resource_index/texture_candidates.h).
-add_executable(texture_candidates_test resource_index/texture_candidates_test.cpp)
-target_link_libraries(texture_candidates_test PRIVATE opennova_base)
-target_include_directories(texture_candidates_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_features(texture_candidates_test PRIVATE cxx_std_17)
-add_test(NAME texture_candidates COMMAND texture_candidates_test)
-
 add_executable(resource_index_mus_test resource_index/resource_index_mus_test.cpp)
 target_link_libraries(resource_index_mus_test PRIVATE opennova_base)
 target_include_directories(resource_index_mus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1579,7 +1590,7 @@ target_link_libraries(hud_config_tokens_test PRIVATE opennova_runtime)
 add_test(NAME hud_config_tokens COMMAND hud_config_tokens_test)
 
 # The HUD's key-driven toggles (hud/hud_toggles.h): the gated down-edge latch,
-# the shared-key cycles, the view actions, the overlay windows and the resets.
+# the cycles, the view actions, the overlay windows and the resets.
 add_executable(hud_toggles_test hud/hud_toggles_test.cpp)
 target_link_libraries(hud_toggles_test PRIVATE opennova_runtime)
 target_compile_features(hud_toggles_test PRIVATE cxx_std_17)
@@ -3646,17 +3657,6 @@ target_include_directories(web_session_test PRIVATE
 target_compile_definitions(web_session_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME web_session COMMAND web_session_test)
 
-# apps/common/child_process.h: a child from an argv array with no shell, run against
-# the test binary itself (its path is the argument; `--child <mode>` makes it the
-# child): exit codes, every argument whole, the working directory, stdin and the
-# output file, terminate and kill, the refusals, and on POSIX no inherited
-# descriptor. Runs on every build.
-add_executable(app_process_test novaworld/app_process_test.cpp)
-target_link_libraries(app_process_test PRIVATE opennova_app_common)
-target_include_directories(app_process_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME app_process COMMAND app_process_test $<TARGET_FILE:app_process_test>)
-set_tests_properties(app_process PROPERTIES TIMEOUT 120)
-
 # The hosted servers' supervisor (apps/novaworld_server/hosted, migration 0011):
 # the settings and their renders, the service accounts, the start request's
 # checks, the whole lifecycle on a FakeProvider and a hand-stepped clock (the
@@ -3731,7 +3731,7 @@ add_executable(hosted_ec2_provider_test
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/ec2_provider.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_settings.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/owner_file.cpp)
-target_link_libraries(hosted_ec2_provider_test PRIVATE opennova_net opennova_app_common Threads::Threads)
+target_link_libraries(hosted_ec2_provider_test PRIVATE opennova_net Threads::Threads)
 if(WIN32)
     target_link_libraries(hosted_ec2_provider_test PRIVATE advapi32)
 endif()

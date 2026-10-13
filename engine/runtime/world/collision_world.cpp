@@ -294,6 +294,14 @@ int32_t CollisionWorld::wire_person_bound_radius_q16(uint16_t wire_handle) const
             ? it->bound_radius_q16 : 0;
 }
 
+const WireDynamicCollisionProxy *CollisionWorld::wire_dynamic_proxy(uint16_t wire_handle) const {
+    const auto it = std::lower_bound(wire_dynamic_proxies_.begin(), wire_dynamic_proxies_.end(),
+            wire_handle, [](const WireDynamicCollisionProxy &proxy, uint16_t handle) {
+                return proxy.wire_handle < handle;
+            });
+    return it != wire_dynamic_proxies_.end() && it->wire_handle == wire_handle ? &*it : nullptr;
+}
+
 void CollisionWorld::set_trace_profile_enabled(bool enabled) {
     if (trace_profile_enabled_ == enabled) return;
     trace_profile_enabled_ = enabled;

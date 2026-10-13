@@ -68,8 +68,11 @@ bool parse_dbf_memory(const uint8_t *data, size_t size, File &out, std::string &
 		Group group;
 		group.group_name = fixed_string(raw_group.group_name, sizeof(raw_group.group_name));
 		group.idlist_count = raw_group.idlist_count;
+		// The id list's entries up to its count; the bytes past them are the tools' stale memory, which the
+		// writer writes zero (ADR 0003).
 		group.def_id_indices.assign(raw_group.def_id_indices,
-				raw_group.def_id_indices + sizeof(raw_group.def_id_indices));
+				raw_group.def_id_indices +
+						std::min<size_t>(raw_group.idlist_count, sizeof(raw_group.def_id_indices)));
 
 		for (uint32_t j = 0; j < raw_group.line_count; ++j) {
 			if (offset + sizeof(RawLineRecord) > size) {
@@ -88,8 +91,6 @@ bool parse_dbf_memory(const uint8_t *data, size_t size, File &out, std::string &
 			line.def_id_index = raw_line.def_id_index;
 			line.delay = raw_line.delay;
 			line.param = raw_line.param;
-			line.resd0 = raw_line.resd0;
-			line.resd1 = raw_line.resd1;
 
 			group.lines.push_back(std::move(line));
 		}
@@ -128,7 +129,8 @@ bool encode_dbf(const File &file, std::vector<uint8_t> &out, std::string &error)
 	for (const auto &group : file.groups) {
 		RawGroupRecord raw_group{};
 		raw_group.record_size = 52;
-		size_t name_len = std::min(group.group_name.size(), sizeof(raw_group.group_name) - 1);
+		// A name as wide as its field is written without a terminator, as read.
+		size_t name_len = std::min(group.group_name.size(), sizeof(raw_group.group_name));
 		std::memcpy(raw_group.group_name, group.group_name.c_str(), name_len);
 		raw_group.line_count = static_cast<uint32_t>(group.lines.size());
 		raw_group.idlist_count = group.idlist_count;
@@ -140,19 +142,17 @@ bool encode_dbf(const File &file, std::vector<uint8_t> &out, std::string &error)
 		for (const auto &line : group.lines) {
 			RawLineRecord raw_line{};
 			raw_line.line_flags = line.line_flags;
-			size_t def_len = std::min(line.def_id_name.size(), sizeof(raw_line.def_id_name) - 1);
+			size_t def_len = std::min(line.def_id_name.size(), sizeof(raw_line.def_id_name));
 			std::memcpy(raw_line.def_id_name, line.def_id_name.c_str(), def_len);
 			// The sequence as the line holds it: its digits after the last '_' are the line's subtitle's
 			// entry in the mission text [orig: Dialog_LoadAudioClip @ 0x44ddec..0x44de3c], so the writer
 			// invents none (an empty one names no entry).
-			size_t seq_len = std::min(line.sequence.size(), sizeof(raw_line.sequence) - 1);
+			size_t seq_len = std::min(line.sequence.size(), sizeof(raw_line.sequence));
 			std::memcpy(raw_line.sequence, line.sequence.c_str(), seq_len);
 			raw_line.def_id_index = line.def_id_index;
 			raw_line.delay = line.delay;
 			raw_line.padding = 0;
 			raw_line.param = line.param;
-			raw_line.resd0 = line.resd0;
-			raw_line.resd1 = line.resd1;
 			std::memcpy(out.data() + offset, &raw_line, sizeof(RawLineRecord));
 			offset += sizeof(RawLineRecord);
 		}

@@ -103,7 +103,7 @@ struct Rig {
         e.alive = true;
         building = w.registry.spawn(2, e);
         CHECK(building.valid());
-        mission::resolve_item_traits(w, items.file, [](int) -> uint8_t { return 0; });
+        mission::resolve_item_traits(w, items.file, [](int) -> uint8_t { return 0; }, &models);
         const mission::CollisionResolveDeps deps{collision, occlusion, pose, models};
         CHECK(mission::resolve_collision_instances(w, items.file, state, deps) == 1);
     }

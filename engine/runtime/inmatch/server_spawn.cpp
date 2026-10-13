@@ -271,7 +271,7 @@ void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 
 // [orig: Server_BuildPlayerInfoAndAdd @0x51d560 -> Server_PlayerAdd @0x51cbc0]
 world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPConnection &conn,
-                                                 world::World &world) {
+                                                 world::World &world, bool round_init) {
 	const std::optional<uint8_t> player_slot =
 			Server_ReservePlayerSlot(
 					ctx.np_protocol.connection_list, conn,
@@ -355,19 +355,39 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		// [orig: Player_InitPlayer @0x4e15f0 (@0x4e1843) <- g_AvatarTeam1/2 + g_CharClassTeam1/2
 		// <- Game_ApplySessionSettingsToGlobals @0x551500 (class clamp @0x5516ab..0x5516ec, avatar
 		// via Avatars_ResolveSelectionIndex (ex sub_57AE60)); ids validated + stored by PlayerSession_InitFromProfile @0x50ca80]
+		// Retail's round init spawns the own slot with the slot's class (the session create's
+		// side-requirement pick, then its own accepts'), and Player_InitPlayer re-stamps the
+		// class word from g_CharClassTeam1/2 by the team, which every weapon-slot list sent to
+		// the own slot rewrites with the slot's class; this arm takes the session start's
+		// per-side selection, which no own accept or list updates (D-NET-695)
+		// [orig: CNapiGameSession_CreateSession @0x4C9952..0x4C996C, the profile init
+		//  @0x4C9CCE; Player_InitPlayer @0x4E1809..0x4E1832;
+		//  Server_SendWeaponSlotListToPlayer @0x502629..0x50264B].
 		spawn.anim_slot = conn.char_vars.avatar[side];
 		spawn.minimap_net_id = conn.char_vars.char_id[side];
 		const uint8_t cls = conn.char_vars.char_class[side];
 		spawn.player_class = (cls >= 5 && cls <= 9) ? cls : 8;
+	} else if (round_init) {
+		spawn.anim_slot = conn.char_vars.avatar[side];
+		spawn.minimap_net_id = conn.char_vars.char_id[side];
+		// The round init spawns a kept slot with the slot's class, its last
+		// writer's (the add's, an accepted loadout's), and stores none.
+		// [orig: Server_InitAllPlayerEntitiesForRound @0x516AA0 - movzx edx,
+		//  byte [ebp+15EDCh] @0x516B56, the Entity_SpawnFromAnimSlotProperty call
+		//  @0x516B67]
+		spawn.player_class = static_cast<uint8_t>(conn.slot_class);
 	} else {
 		spawn.anim_slot = conn.char_vars.avatar[side];       // raw echo; 0 = tag absent (retail)
 		spawn.minimap_net_id = conn.char_vars.char_id[side]; // 0 -> encoder shim
 		// playerClass = TR ? CTB : CTA [orig: Server_BuildPlayerInfoAndAdd @0x51d711 buf[52]];
 		// absent (0) -> 8 in-session [@0x51d02b]; outside [5,9] -> 8 [@0x51d102]. The joiner's
 		// later C2S 0x2F loadout re-stamps it (server_message_dispatch case 0x2F), same as retail.
+		// The add stores it as the slot's class [orig: Server_PlayerAdd @0x51D09A, the
+		// clamp's store @0x51D10E].
 		const uint8_t cls = conn.char_vars.team_request != 0 ? conn.char_vars.char_class[1]
 		                                                     : conn.char_vars.char_class[0];
 		spawn.player_class = (cls >= 5 && cls <= 9) ? cls : 8;
+		conn.slot_class = spawn.player_class;
 	}
 
 	// Outside the team game types every player spawns BERSERK, everyone's enemy.
@@ -388,6 +408,11 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 
 	conn.link.owned_entity = h; // the per-connection S2C anchor + C2S owner-verify subject
 	world.registry.get(h)->player_slot_id = conn.reply.player_slot; // entity+0x154 (Entity::player_slot_id)
+	// The impact damage reads the shooter's slot table, which a kept slot keeps across
+	// the round init's new entity: the entity's copy of it (D-NET-508). [orig:
+	//  Weapon_CalcImpactDamage @0x4ECA11..0x4ECA24 (Entity_ValidatePtr's slot)]
+	world.registry.get(h)->ammo_damage_class.assign(conn.ammo_damage_classes.begin(),
+			conn.ammo_damage_classes.end());
 	conn.link.owned_entity_spawn_id = world.registry.get(h)->registry_spawn_id;
 	conn.link.last_deploy_tick = world.logic_tick;
 	conn.link.last_deploy_tick_valid = true;
@@ -599,6 +624,13 @@ bool balance_join_admits(const NapiNPServerCtx &ctx, const NapiNPConnection &con
 
 } // namespace
 
+// See header. [orig: NapiNPServerMsg_PlayerJoinRequest @0x51AB10]
+void Server_HandlePlayerJoinRequest(NapiNPConnection &conn, const world::World *world) {
+	if (!player_slot_active(conn) || is_in_match(conn)) return;
+	if (world == nullptr || world->registry.get(conn.link.owned_entity) == nullptr) return;
+	conn.reply.mission_status_received = true;
+}
+
 // [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0] — gated is_authority && !dword_24D1DE0 &&
 // !g_SpawnSuccessGate. dword_24D1DE0 is the mission-LOADING-in-progress flag (set/cleared all over
 // Game_StartMission @0x524360); the original does NOT process spawns until the load completes and the
@@ -639,7 +671,17 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 				// full, no AiSystem) leaves the walk; only a successful add
 				// restarts it from the head [orig: unlink @0x4C8FF6, goto LABEL_5
 				// @0x4C9128].
-				if (!Server_BuildPlayerInfoAndAdd(ctx, conn, world).valid()) continue;
+				// A remote add's slot memset zeroes its damage-class bytes, which
+				// the round init's re-add keeps; the host's own add arm skips the
+				// memset, its bytes the slot table's allocation zero, as its fresh
+				// loopback connection's are. The memset precedes the add's class
+				// store [orig: Server_PlayerAdd @0x51CD06 ahead of @0x51D09A, the
+				// local arm @0x51CC33..0x51CC60; Server_AllocatePlayerSlotTable
+				// @0x51C1CB].
+				if (conn.type == NapiNPConnection::kTypeServerSide)
+					conn.ammo_damage_classes.fill(0);
+				if (!Server_BuildPlayerInfoAndAdd(ctx, conn, world, /*round_init=*/false).valid())
+					continue;
 				// The pump's add is Server_PlayerAdd's, which writes the slot's
 				// PlayerList entry; the map change's round init re-adds a kept
 				// slot through no PlayerAdd and writes none, so its PlayerTeam
@@ -761,6 +803,11 @@ bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 		ai->team = team;
 		world::infantry_respawn_snap(*ai, pos, heading, health);
 	}
+	// The deploy's reset ends in the slice rebuild and the body's own list; the
+	// rest of this leg's gap to its twin is D-NET-407's [orig: the unreferenced
+	// leave routine @0x519F50 -> Server_DeployPlayer @0x51A00C ->
+	// Entity_ResetToSpawnState @0x517899 - the builder @0x4B98EB, the list @0x4B98F1].
+	if (world.collision != nullptr) world.collision->refresh_entity_proximity(world, *player);
 	return true;
 }
 
@@ -893,6 +940,11 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 	conn->link.owned_entity = h;
 	conn->link.owned_entity_spawn_id = world.registry.get(h)->registry_spawn_id;
 	world.registry.get(h)->player_slot_id = *player_slot; // entity+0x154 (Entity::player_slot_id)
+	// The add's memset zeroes the slot's damage-class bytes, and the impact damage
+	// reads the entity's copy (D-NET-508) [orig: Server_PlayerAdd @0x51CD06].
+	conn->ammo_damage_classes.fill(0);
+	world.registry.get(h)->ammo_damage_class.assign(conn->ammo_damage_classes.begin(),
+			conn->ammo_damage_classes.end());
 	// [orig: Server_PlayerAdd @0x51CBC0 binds the fresh player allocation]
 	conn->link.transport = transport;
 	conn->link.mode = replication::TransportMode::Client;
@@ -916,6 +968,8 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 	match_player.name = conn->player_name;
 	world.match.upsert_player(match_player);
 	world.match.set_player_slot_team(h, conn->assigned_team); // the slot team mirror (D-NET-650)
+	// The add's class is the slot's [orig: Server_PlayerAdd @0x51D09A].
+	conn->slot_class = world.registry.get(h)->player_class;
 	stamp_player_list_add(*conn, world);
 	return h;
 }

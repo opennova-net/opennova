@@ -153,6 +153,23 @@ public:
 	// drive the test harness uses; the engine's virtual delegates here.
 	void advance_frame(double p_delta);
 
+	// The hold (ADR 0046 S14, E13), as MissionEnvironment's: while held, the
+	// weather writes none of its process-wide state (its eight shader globals,
+	// the models' wave rings and FLICKER/SWING registers); its runtime and the
+	// environment's state still move. republish_globals writes them from the
+	// current state whatever the hold; publish_absent leaves the models' rings
+	// and registers as a process has them with no weather (the shader globals'
+	// shipped values are MissionEnvironment::publish_shipped_defaults'). The
+	// game never holds.
+	void set_globals_held(bool p_held) { globals_held_ = p_held; }
+	bool is_globals_held() const { return globals_held_; }
+	void republish_globals();
+	static void publish_absent();
+	// How many times a weather wrote its process-wide state since the process
+	// began (a read-back for the hold's tests: a headless renderer keeps no
+	// global to read back).
+	static int64_t get_global_writes() { return global_writes_; }
+
 	void _ready() override;
 	void _exit_tree() override;
 	// A Weather freed off-tree never sees _exit_tree: release the sim's
@@ -178,11 +195,16 @@ private:
 	// light publication and push the weather-owned shader globals (the
 	// witnessed per-writeback refresh).
 	void _post_runtime(MissionEnvironment *p_env);
+	// The process-wide writes _post_runtime makes (the shader globals, the
+	// models' rings and registers).
+	void _write_globals(MissionEnvironment *p_env);
 
 	NodePath environment_path_;
 	opennova::env::WeatherRuntime runtime_;
 	ObjectID env_node_id_;
 	ObjectID sim_id_;
+	bool globals_held_ = false;
+	static inline int64_t global_writes_ = 0;
 	PackedInt32Array iris_samples_;
 };
 

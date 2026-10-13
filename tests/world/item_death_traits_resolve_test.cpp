@@ -136,7 +136,7 @@ struct Rig {
         building = w.registry.spawn(2, e);
         CHECK(building.valid());
         // The trait rows the sweep fills come from the items.def fold first.
-        mission::resolve_item_traits(w, items.file, [](int) -> uint8_t { return 0; });
+        mission::resolve_item_traits(w, items.file, [](int) -> uint8_t { return 0; }, &models);
         const mission::CollisionResolveDeps deps{collision, occlusion, pose, models};
         CHECK(mission::resolve_collision_instances(w, items.file, state, deps) == 1);
     }
@@ -393,7 +393,7 @@ static void test_class_init_seeds_the_brain_floors() {
     w.ai.attach(heli);
     w.ai.attach(boat);
     w.ai.for_handle(boat)->profile.subtype = 1;
-    mission::resolve_item_traits(w, items.file, [](int) -> uint8_t { return 0; });
+    mission::resolve_item_traits(w, items.file, [](int) -> uint8_t { return 0; }, &models);
     const mission::CollisionResolveDeps deps{collision, occlusion, pose, models};
     CHECK(mission::resolve_collision_instances(w, items.file, state, deps) == 3);
 

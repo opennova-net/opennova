@@ -81,6 +81,7 @@ void PlayerInputRouter::setup(Node *p_world, LocalPlayerPresenter *p_presenter,
 void PlayerInputRouter::teardown() {
 	world_id_ = ObjectID();
 	presenter_id_ = ObjectID();
+	if (controls_.is_valid()) controls_->set_scan_gates(false, false);
 	controls_.unref();
 	input_override_.unref();
 }
@@ -128,6 +129,18 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 		if (tick_sim.is_valid()) controls_->advance_scripted_input(tick_sim->get_logic_tick());
 		scripted_look = scripted->take_look();
 	}
+	// The death screen samples the same device input: the engine's filter
+	// hands it to the free-fly motor or the chase orbit, and the binding scan
+	// admits only the death-screen rows (PlayerActionPoll::death_screen).
+	const bool spectating = tick_sim.is_valid() && tick_sim->local_death_screen_active();
+	// The key scan's gates for every poll of this frame, the HUD's after the
+	// world tick too: the death screen, and the scan word, set on a dedicated
+	// host and otherwise while the local body is dead (engine
+	// BindingSet::set_scan_gates carries the witness).
+	if (controls_.is_valid())
+		controls_->set_scan_gates(spectating, tick_sim.is_valid() &&
+				(tick_sim->session_role() == Simulation::ROLE_DEDICATED_HOST ||
+						tick_sim->local_player_dead()));
 	if (!owner->has_player()) {
 		owner->set_fly_camera_locked(false);
 		release_mouse_capture();
@@ -135,10 +148,6 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 		look_delta_ = Vector2();
 		return frame_input;
 	}
-	// The death screen samples the same device input: the engine's filter
-	// hands it to the free-fly motor or the chase orbit, and the binding scan
-	// admits only the death-screen rows (PlayerActionPoll::death_screen).
-	const bool spectating = tick_sim.is_valid() && tick_sim->local_death_screen_active();
 	owner->set_fly_camera_locked(true);
 	Input *input = Input::get_singleton();
 	if (p_capture_mouse && input->get_mouse_mode() != Input::MOUSE_MODE_CAPTURED) {

@@ -140,7 +140,7 @@ bool def_texture_field_role(std::string_view field, TextureRoleId &out);
 // mission's load aborts without the file, the colour map's ("colormap" logged @ 0x60B389) and, once the key names
 // one at all, the blend map's (the key alone sets the blend on [orig: Terrain_ParseConfigCallback @ 0x60F7D0], and
 // every card with pixel shaders takes it, PolyTrn_InitTextures @ 0x60B15D..0x60B176; "blendermap" logged
-// @ 0x60B19A), either error aborting it [orig: sub_520AA0 @ 0x520B4E].
+// @ 0x60B19A), either error aborting it [orig: Game_ShowErrorLogAndAbortMission @ 0x520B4E].
 bool trn_key_texture_role(std::string_view key, TextureRoleId &out, bool *aborts_mission = nullptr);
 
 // The role an environment keyword's file is opened in (`key` lower case): the cloud layers' sky_map1 and sky_map2

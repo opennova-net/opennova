@@ -1,6 +1,5 @@
 #include "simulation/destruction_presenter.h"
 
-#include <godot_cpp/classes/visual_instance3d.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/templates/vector.hpp>
 #include <godot_cpp/variant/callable_method_pointer.hpp>
@@ -12,14 +11,12 @@
 #include <string>
 
 #include <runtime/world/present_passes.h>
-#include <runtime/world/model_geometry.h>
 
 #include "audio/mission_audio.h"
 #include "lights/effect_light_director.h"
 #include "mission/mission_data.h"
 #include "particle/effect_world.h"
 #include "render/object_lod_frame.h"
-#include "render/visual_layers.h"
 #include "simulation/effect_owner_keys.h"
 #include "simulation/entity_presenter.h"
 #include "simulation/simulation.h"
@@ -122,23 +119,7 @@ void DestructionPresenter::reset_runtime_state() {
 	burning_.clear();
 
 	for (const KeyValue<String, HuskRestore> &kv : husk_restore_) {
-		const HuskRestore &restore = kv.value;
-		const int restored_bms_id = restore.bms_id;
-		if (placer_.is_valid() && restored_bms_id != 0) {
-			placer_->clear_static_terrain_shadow_replacement(restored_bms_id);
-		}
-		if (restore.kind == HuskRestore::STATIC) {
-			if (placer_.is_valid()) {
-				placer_->show_static_instance(restored_bms_id);
-			}
-			continue;
-		}
-		for (const HuskRestoreChild &saved : restore.children) {
-			Node3D *child = live_node3d(saved.node);
-			if (child != nullptr) {
-				child->set_visible(saved.visible);
-			}
-		}
+		husk_graft_restore(placer_.ptr(), kv.value.graft);
 	}
 	husk_restore_.clear();
 
@@ -222,13 +203,7 @@ Node3D *DestructionPresenter::resolve_entity_node(int p_bms_id, int64_t p_spawn_
 // render-pick fallback (batched statics stay in their batches).
 void DestructionPresenter::restore_intact(const String &key) {
 	if (const HuskRestore *restore = husk_restore_.getptr(key)) {
-		if (placer_.is_valid() && restore->bms_id != 0)
-			placer_->clear_static_terrain_shadow_replacement(restore->bms_id);
-		if (restore->kind == HuskRestore::STATIC && placer_.is_valid())
-			placer_->show_static_instance(restore->bms_id);
-		for (const HuskRestoreChild &saved : restore->children)
-			if (Node3D *child = live_node3d(saved.node))
-				child->set_visible(saved.visible);
+		husk_graft_restore(placer_.ptr(), restore->graft);
 	}
 	husk_restore_.erase(key);
 	if (const ObjectID *id = husked_.getptr(key)) {
@@ -279,60 +254,24 @@ void DestructionPresenter::apply_husk_swap(const opennova::world::HuskSwapEvent 
 	}
 	Node3D *node = resolve_entity_node(bms_id, spawn_origin, wire_handle);
 	if (node != nullptr) {
-		// A qualifying intact model transfers its static-caster role to the husk.
-		const bool individual_casts_static_shadow = node_has_static_shadow_caster(node);
-		ObjectModel *intact_model = Object::cast_to<ObjectModel>(node);
-		const bool individual_mirror_reflected =
-				intact_model != nullptr && intact_model->get_mirror_reflected();
-		ObjectModel *model = placer_->build_model_from_graphic(
-				husk_graphic, String(), node, String(), String(), true);
-		if (model == nullptr) {
+		// The husk grafts under the entity's own node (simulation/husk_swap.h).
+		HuskRestore restore;
+		restore.spawn_origin = spawn_origin;
+		restore.wire_handle = wire_handle;
+		if (husk_graft_individual(**placer_, *node, husk_graphic, bms_id, restore.graft) !=
+				HuskGraftResult::Grafted) {
 			husked_[husk_key] = ObjectID();
 			++stat_no_husk_;
 			return;
 		}
-		model->set_name("HuskModel");
-		if (intact_model != nullptr) model->set_authored_lod_projection_owner(intact_model);
-        if (intact_model != nullptr)
-            model->set_occlusion_section_mask(intact_model->get_occlusion_section_mask(),
-                    intact_model->get_forced_section_mask());
-		set_husk_static_shadow(model, individual_casts_static_shadow);
-		// The reflect flag belongs to the entity, not its current graphic. The
-		// individual branch must preserve it just like the batched carve branch
-		// below; build_model_from_graphic has already built the replacement, so
-		// apply the layer choice through one rebuild.
-		if (individual_mirror_reflected) {
-			model->set_mirror_reflected(true);
-			model->rebuild();
-		}
-		HuskRestore restore;
-		restore.kind = HuskRestore::INDIVIDUAL;
-		restore.bms_id = bms_id;
-		restore.spawn_origin = spawn_origin;
-		restore.wire_handle = wire_handle;
-		for (int i = 0; i < node->get_child_count(); ++i) {
-			Node3D *child = Object::cast_to<Node3D>(node->get_child(i));
-			if (child != nullptr && child != model) {
-				HuskRestoreChild saved;
-				saved.node = child->get_instance_id();
-				saved.visible = child->is_visible();
-				restore.children.push_back(saved);
-				child->set_visible(false);
-			}
-		}
+		husked_[husk_key] = restore.graft.husk;
 		husk_restore_[husk_key] = restore;
-		husked_[husk_key] = model->get_instance_id();
-		if (bms_id != 0) {
-			placer_->set_static_terrain_shadow_replacement(bms_id,
-					husk_graphic, node->get_transform(),
-					individual_casts_static_shadow);
-		}
 		return;
 	}
 	if (uses_dynamic_husk_identity(bms_id, spawn_origin, wire_handle)) {
 		// A budgeted cold row can build its node later. Its retained PF_HUSK
-        // pick retries then; do not cache this temporary resolution miss.
-        ++stat_no_husk_;
+		// pick retries then; do not cache this temporary resolution miss.
+		++stat_no_husk_;
 		return;
 	}
 	// Batched static (world-wac-ai-re §24.6): carve the instance, graft at its
@@ -343,86 +282,19 @@ void DestructionPresenter::apply_husk_swap(const opennova::world::HuskSwapEvent 
 		husked_[husk_key] = ObjectID();
 		return;
 	}
-	// Batched replacements inherit the carved instance's authored eligibility.
-	const bool batched_casts_static_shadow =
-			placer_->static_instance_casts_terrain_shadow(bms_id);
-	const bool batched_mirror_reflected =
-			placer_->static_instance_is_mirror_reflected(bms_id);
-	ObjectModel *graft = placer_->build_model_from_graphic(
-			husk_graphic, String(), container_node, String(), String(), true);
-	if (graft == nullptr) {
-		husked_[husk_key] = ObjectID();
-		++stat_no_husk_;
-		return;
-	}
-	// The placer owns its static lookup by raw BMS id; canonical ownership above
-	// must not change the key used to carve and later restore this batch slot.
-	const Variant xform_v = placer_->hide_static_instance(bms_id);
-	if (xform_v.get_type() != Variant::TRANSFORM3D) {
-		graft->set_visible(false);
-		graft->queue_free();
-		husked_[husk_key] = ObjectID();
-		return;
-	}
-	const Transform3D placed_transform = xform_v;
 	HuskRestore restore;
-	restore.kind = HuskRestore::STATIC;
-	restore.bms_id = bms_id;
 	restore.spawn_origin = spawn_origin;
-	restore.placed_transform = placed_transform;
-	restore.husk_graphic = husk_graphic;
-	restore.casts_static_shadow = batched_casts_static_shadow;
+	const HuskGraftResult grafted =
+			husk_graft_static(**placer_, *container_node, bms_id, husk_graphic, restore.graft);
+	if (grafted != HuskGraftResult::Grafted) {
+		husked_[husk_key] = ObjectID();
+		if (grafted == HuskGraftResult::NoModel) {
+			++stat_no_husk_;
+		}
+		return;
+	}
 	husk_restore_[husk_key] = restore;
-	graft->set_name(vformat("HuskModel_%d", bms_id));
-	graft->set_transform(placed_transform);
-	placer_->inherit_static_entity_projection(bms_id, graft);
-	// Changing the rendered graphic does not reinitialize entity+0. Carry the
-	// static entity query and identity into its new live-model representation.
-	// The native EntityLightQuery contract retains the original query on swaps.
-	const auto light_sources = placer_->static_item_effect_sources();
-	for (int64_t i = 0; i < light_sources.size(); ++i) {
-		const auto &source = light_sources[i];
-		if (source.bms_id != bms_id) continue;
-		graft->set_bound_radii_q16(
-				opennova::world::model_bound_radius_q16_from_3di(
-						graft->get_object_data()->native_model()),
-				source.entity_bound_radius_q16);
-		graft->set_entity_ref(EntityRef::make(source.kind, source.entity_index,
-				bms_id, source.item_id, -1));
-		break;
-	}
-	set_husk_static_shadow(graft, batched_casts_static_shadow);
-	// Retail's husk swap keeps the entity's reflect flag: the mirror
-	// collectors keep filtering on entity+36 & 0x400, which destruction never
-	// clears [orig: Entity_SpawnFromBMSRecord @ 0x40ed1d..0x40ed2b writer;
-	// husk swap flips only Flags & 4].
-	if (batched_mirror_reflected) {
-		graft->set_mirror_reflected(true);
-		graft->rebuild();
-	}
-	placer_->set_static_terrain_shadow_replacement(bms_id, husk_graphic,
-			graft->get_transform(), batched_casts_static_shadow);
-	husked_[husk_key] = graft->get_instance_id();
-}
-
-bool DestructionPresenter::node_has_static_shadow_caster(Node *p_root) {
-	if (VisualInstance3D *visual = Object::cast_to<VisualInstance3D>(p_root)) {
-		if ((visual->get_layer_mask() & visual_layers::STATIC_SHADOW_CASTER) != 0) {
-			return true;
-		}
-	}
-	for (int i = 0; i < p_root->get_child_count(); ++i) {
-		if (node_has_static_shadow_caster(p_root->get_child(i))) {
-			return true;
-		}
-	}
-	return false;
-}
-
-void DestructionPresenter::set_husk_static_shadow(ObjectModel *p_model, bool p_enabled) {
-	if (p_enabled && p_model != nullptr) {
-		p_model->set_static_shadow_caster_enabled(true);
-	}
+	husked_[husk_key] = restore.graft.husk;
 }
 
 // Node-less wrecks still move while death physics settles them. Resolve the
@@ -456,8 +328,8 @@ Variant DestructionPresenter::present_transform_for_identity(int p_bms_id,
 	if (opennova::world::husk_settle_keeps_carved_tilt(rotation_deg.x, rotation_deg.z)) {
 		const String husk_key = identity_key(p_bms_id, p_spawn_origin, -1);
 		if (const HuskRestore *restore = husk_restore_.getptr(husk_key)) {
-			if (restore->kind == HuskRestore::STATIC) {
-				basis = restore->placed_transform.basis;
+			if (restore->graft.kind == HuskGraft::STATIC) {
+				basis = restore->graft.placed_transform.basis;
 			}
 		}
 	}
@@ -467,7 +339,7 @@ Variant DestructionPresenter::present_transform_for_identity(int p_bms_id,
 void DestructionPresenter::sync_static_husks() {
 	for (const KeyValue<String, HuskRestore> &kv : husk_restore_) {
 		const HuskRestore &restore = kv.value;
-		if (restore.kind != HuskRestore::STATIC) {
+		if (restore.graft.kind != HuskGraft::STATIC) {
 			continue;
 		}
 		const ObjectID *graft_id = husked_.getptr(kv.key);
@@ -475,7 +347,8 @@ void DestructionPresenter::sync_static_husks() {
 		if (graft == nullptr) {
 			continue;
 		}
-		const Variant live_v = present_transform_for_identity(restore.bms_id, restore.spawn_origin);
+		const Variant live_v =
+				present_transform_for_identity(restore.graft.bms_id, restore.spawn_origin);
 		if (live_v.get_type() == Variant::TRANSFORM3D) {
 			const Transform3D live = live_v;
 			// The husk registration set the replacement once; this per-frame
@@ -485,9 +358,8 @@ void DestructionPresenter::sync_static_husks() {
 			}
 			graft->set_transform(live);
 			if (placer_.is_valid()) {
-				placer_->set_static_terrain_shadow_replacement(
-						restore.bms_id, restore.husk_graphic, live,
-						restore.casts_static_shadow);
+				placer_->set_static_terrain_shadow_replacement(restore.graft.bms_id,
+						restore.graft.husk_graphic, live, restore.graft.casts_static_shadow);
 			}
 		}
 	}

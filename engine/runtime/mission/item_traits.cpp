@@ -94,6 +94,18 @@ const DefItemDef *find_item(
     return it == by_id.end() ? nullptr : it->second;
 }
 
+// The def's model slot (def+0xF0, which every entity copies into +0x30) holds
+// what the load of its graphic returned: null for a def that names none, and
+// null when the .3di fails to load. A world with no model source loads none.
+// [orig: EntityDef_LoadModelsAndCallbacks @0x439F50 - the graphic test
+//  @0x439FB9..0x439FC2, the ThreediGp_LoadModel store @0x439FDC;
+//  ThreediGp_LoadModel @0x5B6160 returns null when ThreediGp_LoadFromFile
+//  fails @0x5B6230..0x5B624E]
+bool graphic_model_loads(const DefItemDef *def, const assets::AssetStore *models) {
+    return def != nullptr && def->graphic[0] != '\0' && models != nullptr &&
+            models->has_source() && models->model(std::string(def->graphic)) != nullptr;
+}
+
 } // namespace
 
 world::ItemDeathTraits item_death_traits_from_def(const DefItemDef &def) {
@@ -162,7 +174,8 @@ world::ItemDeathTraits item_death_traits_from_def(const DefItemDef &def) {
 // wire id = def_id - 100000). The offset here is mandatory: without it every pool-1 lookup misses.
 // [orig: NapiNPClientMsg_0x00D @0x432c40; docs/net/novaworld-net-re.md D-NET-97]
 void resolve_item_traits(world::World &world, const DefItemsFile &items,
-                         const ItemWireClassFn &wire_class, world::EntityHandle only) {
+                         const ItemWireClassFn &wire_class, const assets::AssetStore *models,
+                         world::EntityHandle only) {
     const std::unordered_map<int, const DefItemDef *> by_id = index_items(items);
     // Cache the Player template's items.def hp at world level so LATE-JOINER spawns (which happen
     // after this sweep) seed full health without an item-db reach-back [orig:
@@ -181,7 +194,9 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
     world.tables.player.has_item_def = player_def != nullptr;
     world.tables.player.item_type_index =
             player_def != nullptr ? static_cast<int32_t>(player_def - items.entries) : 0;
-    world.tables.player.has_graphic_model = player_def != nullptr && player_def->graphic[0] != '\0';
+    // The Player row's model slot, which a later spawn copies into +0x30.
+    // [orig: Entity_InitFromItemDef @0x49E550 - the +0x30 store @0x49E598]
+    world.tables.player.has_graphic_model = graphic_model_loads(player_def, models);
     world.tables.player.item_hp =
             world::retail_signed_i16(player_def != nullptr ? player_def->hp : 0);
     world.tables.player.critical_hp =
@@ -251,14 +266,16 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 				}
 		}
 		e->item_type = static_cast<uint8_t>(def != nullptr ? def->type : 0);
-		// entity+0x30: the def's named graphic model, which every mission
-		// start stores from the def for pools 1, 2 and 0 alone, so a marker
-		// (pool 3) carries none.
+		// entity+0x30: the def's graphic model as its load returned it, which
+		// every mission start loads and stores from the def for pools 1, 2 and
+		// 0 alone, so a marker (pool 3) carries none. A player's is its visual
+		// def's, which the collision sweep stamps after this one (a sweep with
+		// none after it leaves the runtime row's: the type re-point, D-NET-348).
 		// [orig: Game_ReloadEntityModelsAndCallbacks @0x522830 (from
-		//  Game_StartMission @0x52550E) - the +0x30 stores @0x5229D7 /
-		//  @0x522B35 / @0x522CD1; the persistent-bank gate
-		//  MapOverlay_RenderAllByLayer @0x5BE6C4]
-		e->has_graphic_model = def != nullptr && def->graphic[0] != '\0' &&
+		//  Game_StartMission @0x52550E) - the loads @0x5229B8 / @0x522B16 /
+		//  @0x522CB1, the +0x30 stores @0x5229D7 / @0x522B35 / @0x522CD1; the
+		//  persistent-bank gate MapOverlay_RenderAllByLayer @0x5BE6C4]
+		e->has_graphic_model = graphic_model_loads(def, models) &&
 				e->kind != world::EntityKind::Marker;
 		// The physics callback table's ewep row selects the gun update. A
 		// section clone's template pins its update callback (the floating
@@ -759,7 +776,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         //  @0x5455D6].
         row.attrib = def->attrib;
         row.attrib2 = def->attrib2;
-        row.has_graphic_model = def->graphic[0] != '\0';
+        row.has_graphic_model = graphic_model_loads(def, models);
         world.throwables.classes.set(row);
     }
     // The AS zone-slot chain — built AFTER the trait stamp (zone registration keys on

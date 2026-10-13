@@ -70,7 +70,7 @@ world::EntityHandle MissionKernel::spawn_teammate(const world::TeammateSpawn &re
     if (!handle.valid()) return {};
     world.ai.release(handle);
     const int index = world.ai.attach(handle);
-    mission::resolve_item_traits(world, *table, item_wire_class_, handle);
+    mission::resolve_item_traits(world, *table, item_wire_class_, &assets(), handle);
     Entity &entity = *world.registry.get(handle);
     // The helicopter takes the request's transform verbatim: its BAM heading
     // (the flyover's 0x7FFFFF80) with zero pitch and roll, never a rounding
@@ -152,7 +152,7 @@ world::EntityHandle MissionKernel::spawn_teammate(const world::TeammateSpawn &re
 
     const ItemAttachmentSpawns children = spawn_item_attachments(world, {handle}, seat_specs);
     for (EntityHandle child : children.handles) {
-        mission::resolve_item_traits(world, *table, item_wire_class_, child);
+        mission::resolve_item_traits(world, *table, item_wire_class_, &assets(), child);
         ensure_collision_instance(world, child);
     }
     world.facials.initialize(world);
@@ -172,7 +172,7 @@ world::EntityHandle MissionKernel::spawn_item_piece(const world::Entity &seed) {
     if (pool < 0) return {};
     const auto handle = world.registry.spawn(pool, seed);
     if (!handle.valid()) return {};
-    mission::resolve_item_traits(world, *table, item_wire_class_, handle);
+    mission::resolve_item_traits(world, *table, item_wire_class_, &assets(), handle);
     // Template values win over definition initialization for these fields.
     auto &piece = *world.registry.get(handle);
     piece.health = seed.health;

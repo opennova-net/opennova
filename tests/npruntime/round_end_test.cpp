@@ -388,6 +388,82 @@ void test_tdm_round_wire_and_linger() {
 			"the round end stores mission exit 3 at exactly 2790 post-announcement ticks");
 }
 
+// The periodic 0x16 runs through the linger (D-NET-654): retail's scoreboard
+// clock and broadcast sit ahead of Server_TickUpdate's session and round-over
+// tests, so past the round end every active slot still gets the list every
+// 311 ticks, listing no rows (no slot is in state 6, D-NET-635) with the
+// in-game count still counted; the integrity family sends a state-7 slot
+// nothing while its toggle still flips, and the 0x79 keeps its own clock.
+// [orig: Server_TickUpdate @0x51D8F9..0x51D917, is_in_session @0x51D9A5,
+//  g_SpawnSuccessGate @0x51D9B1, the 0x79 @0x51E1B2..0x51E202;
+//  Server_BroadcastWeaponSlotStateToPlayers - state 6 @0x508584, the toggle
+//  @0x50868E; Server_ProcessRoundEnd @0x51685E]
+void test_periodic_list_runs_through_the_linger() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	world.rules.mp_session = true;
+	w::MatchRules rules;
+	rules.game_type = 0x10000u;
+	rules.score_limit = 1;
+	rules.score_values.emplace();
+	(*rules.score_values)[3] = 10;
+	world.match.configure(rules);
+	const w::EntityHandle blue = match_player(world, 3, 1, "Blue");
+	const w::EntityHandle red = match_player(world, 7, 2, "Red");
+	ns::LoopbackChannel blue_wire;
+	ns::LoopbackChannel red_wire;
+	inmatch::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = rules.game_type;
+	ctx.np_protocol.connection_list.push_back(
+			make_conn(1, 1, &blue_wire, ns::TransportMode::Client, blue, true));
+	ctx.np_protocol.connection_list.push_back(
+			make_conn(2, 1, &red_wire, ns::TransportMode::Client, red, true));
+	ready_mp_connection(ctx.np_protocol.connection_list[0], 3);
+	ready_mp_connection(ctx.np_protocol.connection_list[1], 7);
+	inmatch::Server_TickUpdate(ctx);
+	push_death(world, red, blue);
+	for (int i = 0; i < 62 && !world.match.outcome().ended; ++i) inmatch::Server_TickUpdate(ctx);
+	if (!expect(world.match.outcome().ended && ctx.round_end_announced,
+			"linger list: the kill limit ends the round"))
+		return;
+	// The next boundary is the 0x30 family's, which a state-6 slot always gets.
+	ctx.integrity_entity_family_next = true;
+	blue_wire.clear();
+	red_wire.clear();
+	for (int i = 0; i < 311; ++i) inmatch::Server_TickUpdate(ctx);
+	for (ns::LoopbackChannel *wire : {&blue_wire, &red_wire}) {
+		int lists = 0;
+		int empty_lists = 0;
+		int integrity = 0;
+		int quality = 0;
+		ns::Datagram datagram;
+		while (wire->client_recv(datagram)) {
+			if (datagram.tag == s2c::PLAYER_LIST) {
+				++lists;
+				PlayerList list;
+				if (decode_player_list(datagram.body.data(), datagram.body.size(), list) &&
+						list.player_count == 0 && list.players.empty() && list.in_game_count == 2)
+					++empty_lists;
+			}
+			if (datagram.tag == s2c::ENTITY_CHECKSUM_REQ || datagram.tag == s2c::LOADOUT_CRC_REQ)
+				++integrity;
+			if (datagram.tag == s2c::NETWORK_QUALITY) ++quality;
+		}
+		expect(lists == 1 && empty_lists == 1,
+				"past the round end each active slot gets one zero-row 0x16 in 311 ticks, "
+				"its in-game count still counted");
+		expect(integrity == 0, "past the round end the integrity family sends nothing");
+		expect(quality >= 1, "past the round end the 0x79 keeps its own clock");
+	}
+	expect(!ctx.integrity_entity_family_next,
+			"the integrity family's toggle still flips at the boundary");
+	expect(ctx.is_in_session == 1 && ctx.round_end_linger_ticks > 0,
+			"the boundary fell inside the linger");
+}
+
 // The DM/KOTH-family 0x1D: an in-session non-team round end serializes the
 // top three frozen-board rows (name + primary score) instead of the
 // winner/team-score words, and the recipient index still names the frozen
@@ -1810,6 +1886,7 @@ int main() {
 	expect(world.out.effects.count("round_end") == 1, "no second round_end effect");
 
 	test_tdm_round_wire_and_linger();
+	test_periodic_list_runs_through_the_linger();
 	test_dm_round_wire_named_header();
 	test_dm_round_wire_kill_order_and_tie();
 	test_tdm_inactive_columns_keep_configured_matrix_width();

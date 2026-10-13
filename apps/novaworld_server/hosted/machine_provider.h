@@ -59,7 +59,7 @@ enum class MachineState : uint8_t {
 
 struct MachineStatus {
 	MachineState state = MachineState::Gone;
-	std::optional<int> exit_code; // Exited: opennova-serve's code (0: it stopped cleanly)
+	std::optional<uint32_t> exit_code; // Exited: opennova-serve's code (0: it stopped cleanly)
 	std::string address;          // where the service reaches the machine (the admin link)
 };
 

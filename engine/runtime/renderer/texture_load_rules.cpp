@@ -1,5 +1,7 @@
 #include "texture_load_rules.h"
 
+#include <algorithm>
+
 #include <base/io/strutil.h>
 #include <runtime/menu/menu_assets.h>
 
@@ -325,6 +327,106 @@ const std::vector<DdsCodec> &dds_reader_codec_order() {
 	static const std::vector<DdsCodec> order = {DdsCodec::Bmp, DdsCodec::Ppm, DdsCodec::Dds,
 			DdsCodec::Jpeg, DdsCodec::Png, DdsCodec::Pfm, DdsCodec::Hdr, DdsCodec::Tga, DdsCodec::Dib};
 	return order;
+}
+
+namespace {
+
+uint16_t u16_at(const uint8_t *bytes, size_t at) {
+	return static_cast<uint16_t>(bytes[at] | (bytes[at + 1] << 8));
+}
+uint32_t u32_at(const uint8_t *bytes, size_t at) {
+	return static_cast<uint32_t>(u16_at(bytes, at)) |
+			static_cast<uint32_t>(u16_at(bytes, at + 2)) << 16;
+}
+
+// D3DX's TGA test before it reads any pixel: a colour-map type of 0 or 1, an
+// image type of 1..3 (+8 run-length), both sides nonzero, a colour map's
+// entry depth of 15, 16, 24 or 32, the pixel depth the image type takes (a
+// mapped image 8 bits with a map, a true-colour one 15, 16, 24 or 32, a grey
+// one 8), and room for the image ID and the colour map.
+// [orig: CImage_LoadTGA @0x6DCA52..0x6DCB94, the map size @0x6DCBB3]
+bool d3dx_takes_tga(const uint8_t *bytes, size_t size) {
+	if (size < 18)
+		return false;
+	const uint8_t map_type = bytes[1], image_type = bytes[2], map_depth = bytes[7],
+				  depth = bytes[16];
+	if ((map_type & 0xFE) != 0 || (image_type & 0xF4) != 0 || u16_at(bytes, 12) == 0 ||
+			u16_at(bytes, 14) == 0)
+		return false;
+	const auto true_colour = [](uint8_t bits) {
+		return bits == 15 || bits == 16 || bits == 24 || bits == 32;
+	};
+	if (map_type != 0 && !true_colour(map_depth))
+		return false;
+	switch (image_type & 3) {
+		case 1:
+			if (map_type == 0 || depth != 8)
+				return false;
+			break;
+		case 2:
+			if (!true_colour(depth))
+				return false;
+			break;
+		case 3:
+			if (depth != 8)
+				return false;
+			break;
+		default:
+			return false;
+	}
+	const size_t after_header = size - 18;
+	if (after_header < bytes[0])
+		return false;
+	return after_header - bytes[0] >= static_cast<size_t>((map_depth + 7) >> 3) * u16_at(bytes, 5);
+}
+
+} // namespace
+
+// [orig: D3DXTex::CImage::Load @0x6DF1DC: BMP, PPM, DDS, JPEG, PNG, PFM, HDR,
+// TGA, DIB @0x6DF212..0x6DF242]
+bool dds_codec_header_accepts(DdsCodec codec, const uint8_t *bytes, size_t size) {
+	if (bytes == nullptr)
+		return false;
+	switch (codec) {
+		case DdsCodec::Bmp:
+			// [orig: LoadBMP @0x6DE17B..0x6DE195]
+			return size >= 14 && bytes[0] == 'B' && bytes[1] == 'M' && u32_at(bytes, 2) <= size;
+		case DdsCodec::Dds:
+			// [orig: LoadDDS @0x6DDA6E..0x6DDA91: "DDS " and a 124-byte header]
+			return size >= 4 + 124 && u32_at(bytes, 0) == 0x20534444u;
+		case DdsCodec::Jpeg:
+			// [orig: CImage_LoadJPEG @0x6DC576 -> jpeg_read_header @0x71ACA0; the SOI
+			// marker first, D3DX_JPEG_ReadSOI @0x71BF57]
+			return size >= 2 && bytes[0] == 0xFF && bytes[1] == 0xD8;
+		case DdsCodec::Png: {
+			// [orig: D3DXTex_LoadPNGFromMemory @0x6DD536, D3DX_PNG_SigCmp @0x71D37A]: the
+			// signature compared over min(size, 8) bytes (@0x6DD521..0x6DD536); the floor of
+			// 8 is ours, with the same outcome (no shorter file decodes as a PNG).
+			static const uint8_t png[8] = { 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A };
+			return size >= 8 && std::equal(png, png + 8, bytes);
+		}
+		case DdsCodec::Tga:
+			return d3dx_takes_tga(bytes, size);
+		case DdsCodec::Ppm:
+		case DdsCodec::Pfm:
+		case DdsCodec::Hdr:
+		case DdsCodec::Dib:
+			return true;
+	}
+	return false;
+}
+
+// [orig: D3DXTex::CImage::Load @0x6DF1DC, the loop @0x6DF286..0x6DF397: each codec in
+// the order, the first that decodes wins]
+std::optional<DdsCodec> dds_read_by_content(
+		const uint8_t *bytes, size_t size, const std::function<bool(DdsCodec codec)> &decode) {
+	if (bytes == nullptr || !decode)
+		return std::nullopt;
+	for (const DdsCodec codec : dds_reader_codec_order()) {
+		if (dds_codec_header_accepts(codec, bytes, size) && decode(codec))
+			return codec;
+	}
+	return std::nullopt;
 }
 
 // [orig: GTexture_DownsampleToLimits @ 0x687200..0x68723C — the sides halved, then

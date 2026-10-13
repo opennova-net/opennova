@@ -8,6 +8,7 @@
 // (tests/novaworld/hosted_ec2_provider_test.cpp). Platform plumbing, not a port.
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -20,7 +21,7 @@ struct CommandResult {
 		NotStarted, // never ran: `error` says why
 	};
 	Outcome outcome = Outcome::NotStarted;
-	int exit_code = -1;
+	uint32_t exit_code = 0; // Exited: the program's code, unsigned as base/proc reads it
 	std::string out; // standard output
 	std::string err; // standard error
 	std::string error;
@@ -36,7 +37,7 @@ public:
 	virtual CommandResult run(const std::vector<std::string> &argv, int timeout_ms) = 0;
 };
 
-// The real runner: apps/common/child_process.h, its standard output and error
+// The real runner: base/proc/child_process.h, its standard output and error
 // each in a file of its own under `scratch_dir` (owner-only), read back and
 // deleted once it ends. The child's environment is `environment` alone (the
 // NAME=value entries the service hands it: the AWS CLI's own variables, never

@@ -155,6 +155,50 @@ void test_runtime_over_the_state_frame() {
 	      service[0]->id == run.rt.widget_id("LAN") && service[0]->value == 14);
 }
 
+// A code-side EDIT set clamps the caret to the label it stored; a MULTILINE_EDIT set goes back to
+// its first line [orig: CEditWnd_SetText @ 0x661900 - @ 0x661917..0x661933; CMEditWnd_SetText
+// @ 0x6612d0 -> CMEditWnd_UpdateScrollRange - +3912 = 0 @ 0x66121e, CScrollWnd_SetScrollPos(0)
+// @ 0x661228].
+const char *kEdits = R"(<SCREEN>
+	<NAME>EDITS</NAME>
+	<WINDOW type="window" name="MAIN">
+		<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+		<WINDOW type="edit" name="NAME">
+			<POSITION><LEFT>100</LEFT><TOP>100</TOP><RIGHT>300</RIGHT><BOTTOM>140</BOTTOM></POSITION>
+		</WINDOW>
+		<WINDOW type="multiline_edit" name="DESC">
+			<POSITION><LEFT>100</LEFT><TOP>200</TOP><RIGHT>300</RIGHT><BOTTOM>400</BOTTOM></POSITION>
+		</WINDOW>
+	</WINDOW>
+</SCREEN>
+)";
+
+void test_edit_sets_clamp_the_caret_and_reset_the_first_line() {
+	Run run;
+	CHECK(run.open(kEdits, "edits.mnu"));
+	const int name = run.rt.widget_id("NAME");
+	run.click(150, 120);
+	CHECK(run.rt.focused_widget() == name);
+	for (const int c : { 'A', 'B', 'C', 'D', 'E' }) run.rt.handle_key(vk(c, c));
+	CHECK(run.row("NAME") && run.row("NAME")->caret == 5);
+	// A shorter label pulls the caret to its end; a longer one leaves it.
+	run.rt.set_widget_text(name, "AB");
+	CHECK(run.row("NAME")->caret == 2);
+	run.rt.set_widget_text(name, "ABCDEFG");
+	CHECK(run.row("NAME")->caret == 2);
+	// The {hot} cut counts: the label is "XY", two bytes.
+	run.rt.handle_key(vk(35)); // End
+	CHECK(run.row("NAME")->caret == 7);
+	run.rt.set_widget_text(name, "X{hot}Y");
+	CHECK(run.row("NAME")->caret == 2);
+	// The multiline edit scrolled down goes back to its first line at a set.
+	const int desc = run.rt.widget_id("DESC");
+	run.rt.set_scroll_row(desc, 3);
+	CHECK(run.row("DESC") && run.row("DESC")->scroll_row == 3);
+	run.rt.set_widget_text(desc, "one two three four five six seven eight");
+	CHECK(run.row("DESC")->scroll_row == 0);
+}
+
 void test_frame_state_writes() {
 	MenuFrameState state;
 	frame_set_scroll_range(state, 3, 10, 5, 2, 7);
@@ -288,6 +332,7 @@ void test_options_policy() {
 int main() {
 	test_runtime_over_the_state_frame();
 	test_frame_state_writes();
+	test_edit_sets_clamp_the_caret_and_reset_the_first_line();
 	test_commands();
 	test_options_policy();
 	if (failures) {

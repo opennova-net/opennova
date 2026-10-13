@@ -1347,20 +1347,19 @@ void emit_periodic_session_maintenance(NapiNPServerCtx &ctx, world::World &world
 	if (network_quality_boundary)
 		ctx.network_quality_broadcast_countdown =
 				NETWORK_QUALITY_BROADCAST_PERIOD_TICKS;
-	// The process-global clocks above run before retail's session gate, so their
-	// phase survives an interval with no live match. Everything below is a
-	// per-player session maintenance block and must remain silent (and must not
-	// age/reset per-player state) once the session has closed.
-	// [orig: Server_TickUpdate @0x51D8F9..0x51D97E]
-	if (!ctx.is_in_session) return;
+	// Ahead of retail's session and round-over tests: the 0x16 to every active
+	// slot (no rows past the round end, D-NET-635), the integrity family to
+	// state-6 slots alone (none past it, all in state 7; the toggle above flips
+	// regardless), the 0x79 to states 6 / 7. [orig: the 0x16 @0x51D90D, the family
+	//  @0x51D912, is_in_session @0x51D9A5, g_SpawnSuccessGate @0x51D9B1; the 0x79
+	//  @0x51E1B2 ahead of @0x51E211; state 6 @0x508584; Server_ProcessRoundEnd @0x51685E]
+	const bool round_over = world.match.outcome().ended;
 	const ProtocolMessage scoreboard = integrity_boundary
 			? build_player_list_message(
 					ctx.config, ctx.np_protocol.connection_list, &world)
 			: ProtocolMessage{};
-
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		SessionReplyState &reply = conn.reply;
-		const world::Entity *player = integrity_player(conn, world);
+		const world::Entity *player = round_over ? nullptr : integrity_player(conn, world);
 		// The retail boundary rebuilds and broadcasts the transient 0x16 before
 		// entering the integrity family walk. Keep both semantic records on the
 		// same owner boundary and in that order. [orig: @0x51D90D/@0x51D912]
@@ -1398,6 +1397,13 @@ void emit_periodic_session_maintenance(NapiNPServerCtx &ctx, world::World &world
 			conn.link.transport->host_send(
 					s2c::NETWORK_QUALITY, {ctx.host_network_quality});
 		}
+	}
+	// State-6 work: the quartet and the punts under retail's session tests, the two age
+	// counters under state 6 alone, so their session gate is ours (D-NET-696; no production
+	// path clears is_in_session) [orig: @0x5189AD, @0x51E0D4; @0x51D966, @0x51E062].
+	if (!ctx.is_in_session || round_over) return;
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		SessionReplyState &reply = conn.reply;
 		// UpdateAllActivePlayerSlots checks the PREVIOUS live-age value. Age is
 		// incremented later in Server_TickUpdate only for a state-6 player entity
 		// whose Flags bit 0 is clear. Pending/hidden pauses rather than resets age;
@@ -2009,10 +2015,9 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 		}
 	}
 
-	// Queue per-peer retail maintenance on this tick so the requests share
-	// HostSession's next open S2C boundary with the 0x0A fan above.
-	if (!world.match.outcome().ended)
-		emit_periodic_session_maintenance(ctx, world, periodic_second);
+	// Queue per-peer retail maintenance so the requests share HostSession's next open
+	// S2C boundary with the 0x0A fan above; it runs through the linger too (D-NET-654).
+	emit_periodic_session_maintenance(ctx, world, periodic_second);
 
 	// (2d) The capture transaction at 1 Hz [orig: the
 	// Server_TickUpdate g_PeriodicSecondTimer block @0x51DF50..0x51DF8C: proximity ->

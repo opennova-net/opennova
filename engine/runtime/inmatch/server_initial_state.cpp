@@ -764,27 +764,30 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 		// ONLY player-path caller of Server_OnPlayerJoin (the bundle builder —
 		// 0x42, live 0x0A, 0x0F, 0x4D, 0x61, 0x3E) [orig: NapiNPServerMsg_PlayerJoinRequest
 		// @0x51AB10 -> Server_OnPlayerJoin @0x51A680 @0x51aba1/@0x51abb5; the two
-		// other callers @0x51b93a/@0x51d2e1 are the spectator arms]. A stock client
+		// other callers @0x51b93a/@0x51d2e1 are the bot arms, behind the slot's
+		// +0x178E3 bot byte @0x51B928 / @0x51D2CF]. A stock client
 		// flushes its first 0x2F alone, pumps, runs Player_InitPlayer, THEN sends
 		// 2F#2 + 0x0B — so a bundle released on the first 0x2F could land before
-		// the client's own init (corrected 2026-09-10, jo-c cross-check). The
-		// spectator arms fire at player-add; our spectator flow keeps its 0x2F
-		// gate (an empty grant) since it never reports a mission file.
-		const bool bundle_trigger_seen = conn.link.spectator
-				? b.loadout_received
-				: (b.loadout_received && conn.reply.mission_status_received);
+		// the client's own init (corrected 2026-09-10, jo-c cross-check). The 0x0B
+		// is the trigger whatever the role and whatever became of the 0x2F: the
+		// receiver tests no spectator latch and no loadout, a spectator's client
+		// sends the same 0x0B, and a spectator's 0x2F (or one from a slot without
+		// its entity) draws nothing (D-NET-678) [orig: Game_StartMission
+		// @0x52624B; the 0x0B receiver's gates @0x51AB21..0x51AB4B;
+		// NapiNPServerMsg_HandlePlayerLoadout @0x5157EB..0x5157F2].
+		const bool bundle_trigger_seen = conn.reply.mission_status_received;
 		if (is_remote && b.sync_state == 4 && b.world_stream_phase == InitialStateBurst::kStreamGameStartBundle && !bundle_trigger_seen) {
-			// WAIT for the client's C2S 0x2F (loadout select) -> S2C 0x5A and its 0x0B before
-			// the game-start bundle AND the per-frame 0x0A stream — with NO timeout. The golden
-			// retail host emits NOTHING in-match until the joiner's 0x2F/0x0B: its first S2C
-			// 0x0A directly follows the 0x5A reply (retail-ashi5a f223117-f223118, where 2F#2
-			// and 0x0B share the packet), and the 0x2F is the client's load-complete signal
-			// (it cannot build a loadout before its own weapon.def/AdmDef
-			// table exists). The prior reimpl-invented ~10 s fallback force-opened this gate and
+			// WAIT for the client's C2S 0x0B before the game-start bundle AND the per-frame
+			// 0x0A stream, with NO timeout. The golden retail host emits NOTHING in-match
+			// until the joiner's 0x2F/0x0B: its first S2C 0x0A directly follows the 0x5A
+			// reply (retail-ashi5a f223117-f223118, where 2F#2 and 0x0B share the packet,
+			// the 0x0B last), and the 0x0B is the client's load-complete signal (sent after
+			// its weapon.def/AdmDef table exists and its Player_InitPlayer ran). The prior
+			// reimpl-invented ~10 s fallback force-opened this gate and
 			// blasted 0x0A at a still-LOADING client; once the records carried real anim-def
-			// bytes, the client's UNGATED off-16 apply (§5.10) touched its mid-build AdmDef table
-			// — the live-witnessed v16 loading wedge (D-NET-145). A joiner that never selects
-			// never deploys, exactly like retail (the session-level timeout reaps true zombies).
+			// bytes, the client's UNGATED off-16 apply (§5.10) touched its mid-build AdmDef table:
+			// the live-witnessed v16 loading wedge (D-NET-145). A joiner that never reports
+			// its mission file never deploys, as in retail (the session timeout reaps zombies).
 			break;
 		}
 		if (step.messages.size() >= budget) break; // per-tick pacing cap — resume next tick

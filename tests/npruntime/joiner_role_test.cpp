@@ -531,6 +531,100 @@ bool run_full_bms_child_gun_mount() {
 			"a confirmed gunner mount on a full-BMS addeweap child attaches the local body");
 }
 
+// A decoded pool-1 mover's collision proxy names the decoded row's own native
+// row as its registry twin by the replica rule (D-NET-676): a header-only
+// world's owned lifetime, never a same-type newcomer spawned at the handle
+// after it; on a full-BMS join the promoted (spawn-origin) row, never the
+// joiner's own unattached spawn of the type. Retail keeps one entity per slot,
+// the wire handle naming the slot's entity.
+// [orig: NapiNPClientMsg_EntityDeath @0x42EBC6, the handle's slot address]
+bool run_wire_proxy_twin_takes_the_owned_lifetime(bool wire_header_world) {
+	constexpr uint16_t kType = 1291;
+	Harness h;
+	w::World &world = h.kernel->world;
+	h.kernel->wire_header_world = wire_header_world;
+	world.registry.configure_pool(1, 16);
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, 0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	// A cveh vehicle def (type 1) naming no graphic: its proxy is candidate-
+	// source eligible and carries no model.
+	def::DefItemDef defs[2]{};
+	defs[0].id = w::kPlayerInfantryTypeId + mission::kItemIdOffset;
+	defs[0].type = 3;
+	defs[0].hp = 100;
+	defs[1].id = kType + mission::kItemIdOffset;
+	defs[1].type = 1;
+	std::strcpy(defs[1].ai_function, "cveh");
+	def::DefItemsFile items{defs, 2};
+	h.kernel->set_items_table(&items);
+	h.kernel->resolve_collision_instances();
+	const w::EntityHandle own{0x1003};
+	const w::EntityHandle other{0x1004};
+	bool ok = true;
+	if (wire_header_world) {
+		PoolSpawnBatch batch;
+		PoolSpawnRecord rec;
+		rec.slot_id = own.packed;
+		rec.item_type_id = kType;
+		rec.pos_x = 10 << 16;
+		rec.pos_y = -20 << 16;
+		rec.pos_z = 2 << 16;
+		batch.records.push_back(rec);
+		h.role.runtime->view().apply(s2c::POOL_SPAWN, encode_pool_spawn_batch(batch));
+		h.role.run_tick(h.input);
+		const w::Entity *mine = world.registry.get(own);
+		const w::WireDynamicCollisionProxy *proxy = h.kernel->collision.wire_dynamic_proxy(own.packed);
+		ok &= expect(mine != nullptr && h.role.materializer().owned(world, own) == mine &&
+						proxy != nullptr && proxy->registry_twin == own,
+				"wire proxy: a header-only world's owned row is the proxy's twin");
+		world.registry.despawn(own);
+		w::Entity newcomer;
+		newcomer.kind = w::EntityKind::Item;
+		newcomer.item_id = kType;
+		newcomer.alive = true;
+		newcomer.position = {10.0f, -20.0f, 2.0f};
+		if (!expect(world.registry.spawn_at(own, newcomer) == own &&
+						h.role.materializer().owned(world, own) == nullptr,
+				"wire proxy: a same-type newcomer at the handle is not the owned lifetime"))
+			return false;
+		h.role.run_tick(h.input);
+		proxy = h.kernel->collision.wire_dynamic_proxy(own.packed);
+		ok &= expect(proxy != nullptr && !proxy->registry_twin.valid(),
+				"wire proxy: the slot's same-type newcomer is no twin of the decoded row");
+		return ok;
+	}
+	// A full-BMS join: the promoted row (its spawn origin set) and the joiner's
+	// own spawn of the same type (no origin, no attachment).
+	w::Entity promoted;
+	promoted.kind = w::EntityKind::Item;
+	promoted.item_id = kType;
+	promoted.alive = true;
+	promoted.spawn_origin = (1u << 24) | 4u;
+	w::Entity local_spawn = promoted;
+	local_spawn.spawn_origin = w::kSpawnOriginNone;
+	if (!expect(world.registry.spawn_at(own, promoted) == own &&
+					world.registry.spawn_at(other, local_spawn) == other,
+			"wire proxy: the full-BMS rows spawn"))
+		return false;
+	for (const w::EntityHandle row_handle : {own, other}) {
+		auto &row = h.role.runtime->state().upsert(row_handle.packed);
+		row.type_id = kType;
+		row.cls = EntityClass::Vehicle;
+	}
+	h.role.run_tick(h.input);
+	const w::WireDynamicCollisionProxy *promoted_proxy =
+			h.kernel->collision.wire_dynamic_proxy(own.packed);
+	const w::WireDynamicCollisionProxy *local_proxy =
+			h.kernel->collision.wire_dynamic_proxy(other.packed);
+	ok &= expect(promoted_proxy != nullptr && promoted_proxy->registry_twin == own,
+			"wire proxy: a full-BMS join's promoted row is its decoded row's twin");
+	ok &= expect(local_proxy != nullptr && !local_proxy->registry_twin.valid(),
+			"wire proxy: the joiner's own same-type spawn is no twin of the decoded row");
+	return ok;
+}
+
 // Retail drives the carrier from the mounted person's C2S 0x0C. Exercise
 // the joiner frame's confirmed mount, input and client prediction together.
 // [orig: Client_ProcessNetworkFrame @0x42c180;
@@ -1819,6 +1913,94 @@ bool run_revive_deploy_respawns_l_on_its_record_edge() {
 			"revive: no grant folds, so L keeps the kit it died with");
 }
 
+// D-COL-21: the redeploy release's reset ends in the candidate-slice rebuild and
+// L's own list, so L walks a slice built at its redeployed pose at once, where it
+// kept the one built at its death spot until the next 17-tick edge.
+// [orig: NetPacket_SerializePlayerState @0x4C113C -> Entity_ResetToSpawnState -
+//  the Entity_BuildProximityListsFromPools call @0x4B98EB, the
+//  Entity_BuildProximityList call @0x4B98F1]
+bool run_redeploy_release_rebuilds_the_candidate_slices() {
+	Harness h;
+	auto &world = h.kernel->world;
+	world.registry.configure_pool(2, 4);
+	// Retail's head row, then the player's: its ordinal 1 is the +0x1C word a
+	// pool-0 source needs.
+	def::DefItemDef defs[2]{};
+	defs[0].id = 100000;
+	defs[1].id = w::kPlayerInfantryTypeId + mission::kItemIdOffset;
+	defs[1].type = 3;
+	defs[1].hp = 100;
+	def::DefItemsFile items{defs, 2};
+	h.kernel->set_items_table(&items);
+	h.kernel->resolve_collision_instances();
+	// The redeploy lands on the frame anchor, where a wall stands.
+	const int32_t anchor[3] = {40 << 16, 30 << 16, 0};
+	w::Entity wall;
+	wall.kind = w::EntityKind::Building;
+	wall.position = {40.0f, 30.0f, 0.0f};
+	wall.bound_radius = 1.0f;
+	wall.alive = true;
+	world.registry.spawn(2, wall);
+	h.kernel->collision.build_initial_tables(world);
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	auto &self_row = h.role.runtime->state().upsert(0x0005);
+	self_row.cls = EntityClass::Player;
+	self_row.type_id = w::kPlayerInfantryTypeId;
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	auto frame = [&](int16_t health, uint8_t state_flags) {
+		FrameUpdate fu;
+		fu.carried_handle = 0xFFFF;
+		fu.health = health;
+		fu.anchor_x = anchor[0];
+		fu.anchor_y = anchor[1];
+		fu.anchor_z = anchor[2];
+		FrameUpdateRecord rec;
+		rec.handle = 0x0005;
+		rec.type_id = w::kPlayerInfantryTypeId;
+		rec.cls = EntityClass::Player;
+		rec.player.carrier_handle = 0xFFFF;
+		rec.player.state_flags = state_flags;
+		fu.records.push_back(rec);
+		std::vector<uint8_t> packet;
+		frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+				{make_protocol_message(s2c::PER_FRAME_UPDATE, encode_frame_update(fu))}, packet);
+		auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+		h.role.runtime->receive(datagram.data(), datagram.size());
+		h.role.run_tick(h.input);
+	};
+	frame(100, 0x00);
+	frame(0, w::kEntityFlagDead);
+	w::Entity *local = world.registry.get(world.cached.local_player);
+	w::AiEntity *local_ai = h.kernel->local.player_ai();
+	if (!expect(local != nullptr && local_ai != nullptr && !local->alive &&
+					local->item_type_index == 1 && h.role.runtime->deployment_pick_pending(),
+			"slice: the death frame downs L, a pool-0 slice source"))
+		return false;
+	// L's corpse lies 500 u off, its slice built there: no wall.
+	local->position = {540.0f, 30.0f, 0.0f};
+	local_ai->pos[0] = 540 << 16;
+	local_ai->pos[1] = 30 << 16;
+	local_ai->pos[2] = 0;
+	h.kernel->collision.rebuild_candidate_slices(world);
+	if (!expect(h.kernel->collision.candidate_count(local->handle) == 0,
+			"slice: the corpse's slice holds no wall"))
+		return false;
+	if (!expect(h.role.runtime->queue_deployment_pick(0xFFFF), "slice: the Default Spawn pick"))
+		return false;
+	h.role.run_tick(h.input);
+	frame(100, 0x00); // the record alive again
+	frame(100, 0x00); // the next tail releases L
+	local = world.registry.get(world.cached.local_player);
+	if (!expect(local != nullptr && local->alive && std::fabs(local->position.x - 40.0f) < 0.01f,
+			"slice: the release lands L on the record's pose"))
+		return false;
+	return expect(h.kernel->collision.candidate_count(local->handle) == 1,
+			"slice: the release rebuilds L's slice at the redeployed pose");
+}
+
 // The socket seam that also records where each datagram went.
 class TargetSocket final : public opennova::IDatagramSocket {
 public:
@@ -2162,6 +2344,8 @@ int main() {
 	ok &= run_confirmed_vehicle_drive(0, true);
 	ok &= run_confirmed_vehicle_drive(0, true, true);
 	ok &= run_full_bms_child_gun_mount();
+	ok &= run_wire_proxy_twin_takes_the_owned_lifetime(true);
+	ok &= run_wire_proxy_twin_takes_the_owned_lifetime(false);
 	ok &= run_flare_descriptor_carries_the_pilot_handheld();
 	ok &= run_guided_fire_preserves_selected_target();
 	ok &= run_rules_stamp_from_mp_attributes(0x10000u, true);
@@ -2173,6 +2357,7 @@ int main() {
 	ok &= run_end_round_header_holds_the_entity_update();
 	ok &= run_world_state_load_resnaps_local_pose();
 	ok &= run_revive_deploy_respawns_l_on_its_record_edge();
+	ok &= run_redeploy_release_rebuilds_the_candidate_slices();
 	ok &= run_proxy_rendezvous_pump();
 	ok &= run_respawn_key_resets_input_and_sends_0x41();
 	ok &= run_deploy_action_converts_a_dead_permanent_death_player();

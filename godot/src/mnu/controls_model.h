@@ -99,6 +99,11 @@ public:
 	// The chat line's keyboard capture (engine BindingSet::set_keyboard_captured
 	// carries the rule and its witness): no keyboard slot fires while set.
 	void set_keyboard_captured(bool p_captured) { bindings_.set_keyboard_captured(p_captured); }
+	// The key scan's live gates for this frame's polls (engine
+	// BindingSet::set_scan_gates carries the rule and its witness).
+	void set_scan_gates(bool p_death_screen, bool p_scan_word) {
+		bindings_.set_scan_gates(p_death_screen, p_scan_word);
+	}
 	// The special-key handler's take: a key-down it consumed never reaches the
 	// action rows, so every row bound to that key reads it up until the key
 	// is released (engine hud_toggles.h hud_toggles_quit_dialog_key carries

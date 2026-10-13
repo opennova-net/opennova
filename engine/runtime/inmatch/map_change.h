@@ -89,7 +89,7 @@ MapChangeStep begin_host_map_change(HostRole &role,
 // The round init over the kept slots on the next mission's World, which a
 // map change runs after the PreMission pass: auto-balance when it is due, the
 // previous-mode word, the objective and non-team coercion (team 2 -> 1), and
-// a new entity for every active slot.
+// a new entity for every active slot, a remote one with the slot's class.
 // [orig: Server_InitAllPlayerEntitiesForRound @0x516AA0 (the call @0x525BAF)]
 void init_all_player_entities_for_round(HostRole &role);
 

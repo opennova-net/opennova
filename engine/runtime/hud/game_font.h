@@ -161,10 +161,9 @@ public:
 	// @0x674e57]. The friendly-tag line metric measures '0'.
 	float char_height(uint8_t byte, float scale_y) const;
 
-	// One glyph's pixel extent WITH the spacing pad, rounded — the
-	// per-character extent the chat wrapper walks with:
-	// floor(((u1 - u0) * 256 + glyph_spacing - 1) * (800 / design_width) + 0.5)
-	// (scale_x multiplied into the design fold; the original takes no scale).
+	// One glyph's pixel extent WITH the spacing pad, rounded (glyph_extent
+	// below), the per-character extent the chat wrapper walks with (scale_x
+	// multiplied into the design fold; the original takes no scale).
 	// Bytes below 0x20 measure 0; a tab measures `tab_width` when nonzero
 	// (retail's per-font tab width, this+0x168) and the SPACE glyph otherwise
 	// [orig: CGameFont_GetCharExtent @0x674dc0 — tab @0x674dd8, control bytes
@@ -179,5 +178,19 @@ private:
 	const opennova::fnt::fnt_font_t *font_ = nullptr;
 	uint32_t page_base_ = 0;
 };
+
+// One glyph's pixel extent WITH the spacing pad, rounded, by the glyph's texture rect, the font's
+// glyph spacing and the font's stored scale, in the witnessed order: the u-extent times 256, plus
+// the spacing, less 1, times the scale (and scale_x), plus 0.5, floored [orig:
+// CGameFont_GetCharExtent @0x674de4..0x674e25: fld u1; fsub u0; fmul 256.0; fiadd glyph_spacing;
+// fsub 1.0; fmul [esi+12ECh]; fadd 0.5; floor]. The x87 runs at 24-bit precision control in game
+// (the device is created without D3DCREATE_FPU_PRESERVE [orig: CGfxDevice_CreateDevice
+// @0x67e9fd / @0x67ea35]), so every step rounds to single precision. The scale is the font's
+// own: 800 / design_width for a HUD font [orig: GameFont_LoadFromBlob @0x674781..0x67479e, from
+// HUD_LoadFontIntoSlot @0x580437], 1.0 for a menu font, which the font cache writes over it
+// [orig: CFontCache_LoadOrGetFont @0x6530e7; CFontCache_EnsureFontLoaded @0x653ea0, flt_84C10C].
+// GameFont::char_width and the editor's font view measure a glyph through it.
+int glyph_extent(const opennova::fnt::fnt_uv_t &uv, int32_t glyph_spacing, float scale,
+		float scale_x = 1.0f);
 
 } // namespace opennova::hud

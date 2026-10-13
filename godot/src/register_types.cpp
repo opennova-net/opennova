@@ -419,6 +419,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_INTERNAL_CLASS(LiveWorldView);
 	GDREGISTER_INTERNAL_CLASS(LiveArmoryWorldView);
 	GDREGISTER_CLASS(GameWorld);
+	GDREGISTER_ABSTRACT_CLASS(WorldSceneTable);
 	GDREGISTER_CLASS(FrameFxCompositorEffect);
 	GDREGISTER_CLASS(FrameFx);
 	GDREGISTER_CLASS(DisplayDecode);

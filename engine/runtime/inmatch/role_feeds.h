@@ -41,6 +41,9 @@ namespace opennova::menu {
 struct CommandMapRoster;
 struct CommandMapLocations;
 }
+namespace opennova::replication {
+class ClientWorldMaterializer;
+}
 
 namespace opennova::inmatch {
 
@@ -57,6 +60,11 @@ struct RoleView {
 	// The authority's session context; null on a joiner and the bare local role.
 	const NapiNPServerCtx *host = nullptr;
 	bool joiner = false;
+	// The joiner's materializer: a decoded row's own native row is the one the
+	// replica rule gives (replication::replica_row_entity), never a later
+	// lifetime at the same handle. Null on every other role; a joiner view
+	// without one falls back to the handle and the type.
+	const replication::ClientWorldMaterializer *materializer = nullptr;
 	// The host option word the embedder staged (GameConfig::mp_attributes) —
 	// the deploy screen's team-button word on a hosting process (its ctx+0x68
 	// pick, deploy_screen_status); the in-match rules word is
@@ -302,6 +310,20 @@ bool command_map_roster(const RoleView &view, menu::CommandMapRoster &out);
 bool command_map_locations(const RoleView &view, const world::SpawnZoneRegistry &zones,
 		menu::CommandMapLocations &out);
 
+// The team the DEATH list filters its zones by and tags its rows with:
+// retail's local player entity Team byte (+0x162). The authority reads its own
+// body's; a joiner reads its S2C team latch (ClientRuntime::assigned_team).
+// [orig: UI_UpdateDeathScreenContent -- the row tag @0x553adb..0x553af1, the
+//  zone filters @0x553b53..0x553c4e / @0x553c5f..0x553de3]
+uint8_t deploy_list_team(const RoleView &view);
+
+// The DEATH screen's SPAWNPOINTS_LIST zone rows for THIS client, on every
+// role that opens the screen (the authority's own client folds its minimap
+// banks, zone values and wave groups over its loopback like a joiner): the
+// banked zones of the deploy_list_team, each with its SpawnZoneList index,
+// its secured gate and its 0x6E wave group's occupants. False without a
+// kernel or a replica runtime. [orig: UI_UpdateDeathScreenContent
+// @0x553b53..0x553c4e / @0x553c5f..0x553de3]
 bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zones,
 		std::vector<world::DeployZoneRow> &out);
 

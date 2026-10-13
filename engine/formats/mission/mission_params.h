@@ -133,15 +133,13 @@ inline constexpr int32_t kPlayerSsnSlots = 256;
 constexpr bool ssn_is_players(int32_t ssn) {
 	return (ssn & 0xFFFF) >= kPlayerSsn && (ssn & 0xFFFF) < kPlayerSsn + kPlayerSsnSlots;
 }
-// The SSN a new entity takes after the largest the mission's records hold: one past it, as the original
-// editor gives an item it places one past the largest its items hold [orig: JOTACmed.exe
-// MissionItem_NextUniqueId @ 0x44db70, written as the record's +8 by sub_44C8E0 @ 0x44c8e0], past the
-// players' net ids, which the original's does not skip: an entity holding one would answer that player's
-// lookups (above). D-MIS-10, OPEN: the skip is this port's, proposed with the row.
+// The SSN a new entity takes after the largest the mission's records hold: one past it, as the
+// original editor gives an item it places one past the largest its items hold, skipping none [orig:
+// JOTACmed.exe MissionItem_NextUniqueId @ 0x44db70, written as the record's +8 by sub_44C8E0 @
+// 0x44c8e0] (an SSN the players' net ids share answers that player's lookups, above: the original
+// allocates it all the same).
 constexpr int32_t ssn_after(int32_t largest) {
-	int32_t next = largest + 1;
-	while (ssn_is_players(next)) next = (next & ~0xFFFF) + kPlayerSsn + kPlayerSsnSlots;
-	return next;
+	return largest + 1;
 }
 
 // The SSNs the sees, targeted and shot relation records and the visited words keyed by an SSN hold:

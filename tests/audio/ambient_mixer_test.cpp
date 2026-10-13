@@ -20,6 +20,7 @@ using opennova::audio::calc_distance_volume;
 using opennova::audio::crossfade_volume_byte;
 using opennova::audio::emitter_layer_volume;
 using opennova::audio::emitter_lifetime_word;
+using opennova::audio::emitter_play_word;
 using opennova::audio::oneshot_layer_volume;
 using opennova::audio::time_of_day_region;
 
@@ -46,6 +47,17 @@ int64_t doubling_occlusion(void *ctx, const float[3], const float[3],
 }
 
 } // namespace
+
+// The channel's play word: the slot's word alone, 0 read as 0x10000, read
+// unsigned [orig: SoundEmitter_UpdateAndMixTop8 @ 0x528943..0x528949].
+static int check_emitter_play_word() {
+	TEST_EXPECT(emitter_play_word(0) == 0x10000u);
+	TEST_EXPECT(emitter_play_word(0x10000) == 0x10000u);
+	TEST_EXPECT(emitter_play_word(0xC000) == 0xC000u);
+	TEST_EXPECT(emitter_play_word(64) == 64u);
+	TEST_EXPECT(emitter_play_word(-1) == 0xFFFFFFFFu);
+	return 0;
+}
 
 int main() {
     const float kOrigin[3] = {0.0f, 0.0f, 0.0f};
@@ -547,5 +559,5 @@ int main() {
         TEST_EXPECT(mx.marker_region(99).region == 0 && mx.marker_region(99).blend == 1.0f);
     }
 
-    return 0;
+	return check_emitter_play_word();
 }

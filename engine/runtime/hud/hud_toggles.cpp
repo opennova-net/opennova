@@ -126,10 +126,10 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	// view1st, viewwithgun (0x0C0008xx / 0x0C000Cxx), commander_menu
 	// (0x04000801), AudioEmote and RadioMacro (0x0C000C01).
 	const bool bit0_active = k.active && !s.paused;
-	// huddetail (row 50) precedes hudcolor (row 76): when both rows resolve to
-	// the same physical key the huddetail row consumes the edge and hudcolor
-	// ships dormant on it; distinct keys leave both rows live (D-CTRL-4).
-	// [orig: the first-match key scan @0x49d42f; rows 50 < 76]
+	// A key both rows carry reaches one of them: the key scan's first match
+	// (controls::BindingSet::pressed_key, the sampler) gives it to hudcolor
+	// (code 10) before huddetail (19) [orig: the first-match key scan
+	// @0x49d42f / @0x49d488].
 	if (s.huddetail.step(k.huddetail, k.active, k.chorded)) {
 		// The huddetail cycle: level + 1, wrapping past 3 to 0, on the LIVE
 		// level only (game.cfg keeps the config value) [orig:
@@ -138,8 +138,7 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 		s.hud_detail_level = next_hud_detail_level(s.hud_detail_level);
 		events |= kHudDetailCycled;
 	}
-	const bool hudcolor_down = k.hudcolor && !(k.huddetail && k.rows_share_key);
-	if (s.hudcolor.step(hudcolor_down, k.active, k.chorded)) {
+	if (s.hudcolor.step(k.hudcolor, k.active, k.chorded)) {
 		// The color-scheme cycle 0..5 with wrap; deliberately NO toast — the
 		// retail case only cycles and restamps the color [orig: the `hudcolor`
 		// action, dispatch code 10 @0x49afc7 — idx+1, >5 wraps to 0]

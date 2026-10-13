@@ -16,6 +16,7 @@
 #include <runtime/menu/command_map_screen.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/replication/client_roster_tags.h>
+#include <runtime/replication/client_world_materializer.h> // replica_row_entity
 #include <runtime/replication/entity_wire_bridge.h> // entity_class_of
 #include <runtime/world/collision.h>
 #include <runtime/world/radar_contacts.h> // radar_hud_frame
@@ -629,6 +630,22 @@ void transform_point22(const world::CollisionMatrix &m, const int32_t in[3], int
 	}
 }
 
+// A spawn zone's Team byte (+0x162) as this client holds it, the byte the
+// DEATH screen's list and map read: the authority's own entity; on a joiner
+// the replica row once a 0x50 / 0x51 team store or a world-stream team byte
+// has landed (retail's non-authority store; the joiner's world entity never
+// takes the 0x50 retarget), else the placed team. A zone timer entry's mode
+// is never the team: the 0x6F handler stores only +544 / +545 on the zone.
+// [orig: NapiNPClientMsg_TeamAssign @0x4319EE; NapiNPClientMsg_HandlePlayerSpawn
+//  @0x431C6D; NapiNPClientMsg_ZoneTimerValue @0x428D60]
+uint8_t zone_team_byte(const RoleView &view, const world::Entity &zone) {
+	if (view.joiner && view.runtime != nullptr) {
+		const replication::ClientEntityState *row = view.runtime->state().find(zone.handle.packed);
+		if (row != nullptr && row->team_known) return row->team;
+	}
+	return zone.team;
+}
+
 } // namespace
 
 bool death_map_facts(const RoleView &view, const world::SpawnZoneRegistry &zones,
@@ -687,15 +704,19 @@ bool death_map_facts(const RoleView &view, const world::SpawnZoneRegistry &zones
 		hud::DeathMapZone zone;
 		zone.handle = e->handle.packed;
 		zone.index = static_cast<int32_t>(world::spawn_zone_index_of(zones, handle));
-		zone.team = e->team;
+		// The zone entity's own Team byte, never a timer entry's mode: the
+		// letter colour, the own-team pulse and labels, and the blip's team
+		// reads all take +0x162 [orig: MapOverlay_DrawView `v12[354]`
+		//  @0x5A5AE9 and @0x5A5C73; sub_597FD0 `entity_ptr[354]` @0x598102].
+		zone.team = zone_team_byte(view, *e);
 		if (runtime != nullptr) {
+			// Any timer entry gates the letter, a window-only one (zeros) as
+			// ready [orig: CProximityList_FindEntryById @0x5A5B6E, `!EntryById ||
+			//  EntryById[9] >= EntryById[10]` @0x5A5B77..0x5A5B7F].
 			const auto live = runtime->zone_states().find(e->handle.packed);
-			if (live != runtime->zone_states().end() && live->second.has_value) {
-				zone.team = static_cast<uint8_t>(live->second.entry.mode_a);
+			if (live != runtime->zone_states().end())
 				zone.timer_ready = !(live->second.entry.value_target <
-						live->second.entry.value_limit);
-			}
-			// The S2C 0x53 mode_b lands at the zone entity's +0x223 and stays
+						live->second.entry.value_limit);			// The S2C 0x53 mode_b lands at the zone entity's +0x223 and stays
 			// [orig: ZoneTimerList_SetEntryWindow @0x537DE0 via the 0x53
 			//  handler @0x428AE0].
 			if (live != runtime->zone_states().end() && live->second.has_window)
@@ -865,15 +886,27 @@ bool joiner_in_match_ready(const RoleView &view, bool auto_deploy) {
 			(!auto_deploy || !runtime.deployment_pick_pending());
 }
 
+uint8_t deploy_list_team(const RoleView &view) {
+	if (view.joiner) return view.runtime != nullptr ? view.runtime->assigned_team() : 0;
+	const world::Entity *player = view.kernel != nullptr ? view.kernel->local.player() : nullptr;
+	return player != nullptr ? player->team : 0;
+}
+
 bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zones,
 		std::vector<world::DeployZoneRow> &out) {
 	out.clear();
-	if (view.kernel == nullptr || !view.joiner || view.runtime == nullptr) return false;
+	if (view.kernel == nullptr || view.runtime == nullptr) return false;
 	const ClientRuntime &runtime = *view.runtime;
 	const world::World &w = view.kernel->world;
-	const uint8_t team = runtime.assigned_team();
+	const uint8_t team = deploy_list_team(view);
 	const replication::ClientState &cs = runtime.state();
-	const uint16_t self_handle = runtime.has_self_handle() ? runtime.self_handle() : 0xFFFFu;
+	// The self marker compares the member with the local player entity
+	// [orig: `cmp eax, g_LocalPlayerEntity` @0x553d64]: the
+	// authority's own body, a joiner's bound self record.
+	const world::EntityHandle local = w.cached.local_player;
+	const uint16_t self_handle = view.joiner
+			? (runtime.has_self_handle() ? runtime.self_handle() : 0xFFFFu)
+			: (local.valid() ? local.packed : 0xFFFFu);
 	// The zone walk is the minimap banks' (banked_spawn_zones): a zone the
 	// server never sent is not listed, the rows follow first arrival, and a
 	// banked zone outside the SpawnZoneList lists as index -1.
@@ -883,22 +916,27 @@ bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zone
 		const world::Entity *e = w.registry.get(handle);
 		if (e == nullptr) continue;
 		const int index = world::spawn_zone_index_of(zones, handle);
-		uint8_t effective_team = e->team;
-		int32_t effective_control = e->zone_control;
-		int32_t effective_limit = 0x10000;
+		// Both loops compare the zone entity's own Team byte (zone_team_byte)
+		// with the local entity's [orig: UI_UpdateDeathScreenContent `mov dl,
+		//  [esi+162h]; cmp dl, [eax+162h]` @0x553BB5..0x553BC0 and the second
+		//  loop's @0x553C5F..0x553DE3 team test].
+		const uint8_t zone_team = zone_team_byte(view, *e);
+		// The first-loop gate reads the zone's shared timer-list entry alone: no
+		// entry lists the zone, and an entry lists it once its DWORD 9 (the value
+		// target) reaches its DWORD 10 (the limit), a signed compare. Only the
+		// client's 0x53 / 0x6F folds create entries, so a zone no capture event
+		// ever touched (an unnumbered zone, whose entity control stays 0) lists;
+		// the entity's own control word is never read here.
+		// [orig: UI_UpdateDeathScreenContent -- CProximityList_FindEntryById
+		//  @0x553bce, `test eax, eax; jz` @0x553bd3..0x553bd5, `cmp [eax+24h],
+		//  [eax+28h]; jl` @0x553bd7..0x553bdd; the entry creators
+		//  NapiNPClientMsg_ZoneTimerWindow @0x428bd4 and
+		//  NapiNPClientMsg_ZoneTimerValue @0x428e6b]
+		bool secured = true;
 		const auto live = runtime.zone_states().find(e->handle.packed);
-		if (live != runtime.zone_states().end()) {
-			// The DEATH list reads the value entry's team and exact value >= limit
-			// gate. 0x53 is the separate timed-capture window; retaining an old
-			// window after a later 0x6F must not overwrite this ownership channel.
-			// [orig: UI_UpdateDeathScreenContent @0x5536a0; §5.49/§5.61]
-			if (live->second.has_value) {
-				effective_team = live->second.value.mode;
-				effective_control = live->second.value.value_s;
-				effective_limit = live->second.value.limit_s;
-			}
-		}
-		if (effective_team != team) continue;
+		if (live != runtime.zone_states().end())
+			secured = !(live->second.entry.value_target < live->second.entry.value_limit);
+		if (zone_team != team) continue;
 		world::DeployZoneRow row;
 		// No -1 guard in the first loop: an unregistered zone lists as '@'
 		// with STRWPNAME000 and value 0 [orig: @0x553bd6..0x553c1f].
@@ -907,13 +945,10 @@ bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zone
 		char name_key[32];
 		std::snprintf(name_key, sizeof(name_key), "STRWPNAME%03d", index + 1);
 		row.name_key = name_key;
-		// The first-loop gate: a zone whose live timer entry sits below its limit
-		// is NOT listed; no entry (or level >= limit) lists it. There is no zone-
-		// number term (an earlier port carried one) — the retail list walk tests
-		// only the timer entry's level against its limit and then the def's
-		// spawn-zone attribute (engine record: deploy_screen_feed.h cites the
-		// UI_UpdateDeathScreenContent list loop).
-		row.secured = !(effective_control < effective_limit);
+		// There is no zone-number term (an earlier port carried one): the walk
+		// tests only the timer entry above and then the def's spawn-zone
+		// attribute (engine record: deploy_screen_feed.h cites the list loop).
+		row.secured = secured;
 		// The 0x6E wave group on this zone: its countdown (entity+548) and the
 		// queued members, named through the roster the way retail reads the
 		// member entity's Name (the player entity's name IS the roster name)
@@ -1034,8 +1069,8 @@ void EntityLightingFeed::collect(const RoleView &view, const int32_t sun_step_q1
 	// address their placed node by BMS id; only rows without authored identity
 	// reach the wire walk and therefore need a wire-handle lighting update.
 	// On a joiner, pool-0 H must NEVER be cast to a local EntityHandle (H=0 and
-	// L=0 can coexist); streamed pool-1 twins are allowed only after the type
-	// check below. Host/SP rows use their authoritative exact-handle entity.
+	// L=0 can coexist); a streamed twin is only the replica rule's row of the
+	// row's type below. Host/SP rows use their authoritative exact-handle entity.
 	// Cadence: like the registry walk above, the casts run per display frame.
 	// Retail casts inside the sector render walk for every drawn entity every
 	// frame; only the candidate SLICE the walker iterates refreshes on the
@@ -1102,13 +1137,14 @@ void EntityLightingFeed::collect(const RoleView &view, const int32_t sun_step_q1
 			// state and emit the restoration instead of assuming the default.
 			if (es.state_flags_known && (es.state_flags & 0x01u) != 0) continue;
 
+			// The twin is the decoded row's own native row by the replica rule,
+			// never a later same-type occupant of the handle (D-NET-676)
+			// [orig: NapiNPClientMsg_EntityDeath @0x42EBC6, the slot address].
 			const world::EntityHandle h{ handle };
-			const world::Entity *joiner_twin = nullptr;
-			if (h.pool() != 0) {
-				const world::Entity *candidate = w.registry.get(h);
-				if (candidate != nullptr && static_cast<uint16_t>(candidate->item_id) == es.type_id)
-					joiner_twin = candidate;
-			}
+			const world::Entity *joiner_twin = h.pool() != 0
+					? replication::replica_row_entity(view.materializer, w, h, es.type_id,
+							kernel.wire_header_world)
+					: nullptr;
 			// The wire walk defers authored rows to their placed node (or static
 			// batch). Do not repeat the same native ray query and cache an update
 			// for a wire node that deliberately does not exist.

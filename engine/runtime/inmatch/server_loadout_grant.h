@@ -32,16 +32,17 @@ namespace opennova::inmatch {
 // filtering each slot by the team/char masks (@0x502716) and emitting one 4-byte group:
 // [admIdx = AvatarDef_FindIndexByName @0x50273b][ammoPrimary = WeaponSlot_GetTotalClips
 // @0x502794][ammoSecondary = the same count for the first different-ammoclass sub-variant in
-// parent+1..parent+LSC (@0x5027c8), else 0xFF][per-ammo damage class from
-// player+89688: 1 = x0.9, 2 = x1.1, other/default = 0].]
+// parent+1..parent+LSC (@0x5027c8), else 0xFF][the slot's player+89688 damage-class byte at
+// the weapon's own AdmDef index (@0x50286A..0x50288A)].]
 //
 // With the armory table fed (world::World::weapons), the reply resolves REAL counts through the
 // witnessed rules (weapon_table_build: loadout_entry_permitted / resolve_loadout_ammo) — the
 // golden ASH_I5A reply {2:255, 3:10, 21:10, 76:1, 77:2, 78:3, 83:3} reproduces from the host's
 // own resolved weapon.def (D-NET-141). Table-less hosts (unit paths / no resource root) keep the
 // prior request-echo: the client clamps echoed bytes on apply [orig: @0x4295d7-0x4295e9], a
-// tracked divergence for that configuration only. The accepted fourth byte is the
-// player+89688 per-ammo damage class; captured 0xFF defaults normalize to 0.
+// tracked divergence for that configuration only. The accepted fourth byte is stored RAW in the
+// slot's player+89688 table at the weapon's round ammo index (write_ammo_damage_classes), and
+// every row reads that table at its own AdmDef index (apply_granted_loadout) (D-NET-508).
 struct GrantedWeaponLoadout {
 	WeaponLoadout reply;
 	// The serverPlayer+88664 authority pool image copied by S2C 0x0F. Each
@@ -50,10 +51,11 @@ struct GrantedWeaponLoadout {
 	std::array<int32_t, 128> ammo_pools{};
     // Loaded-round buckets [orig: player+89176; sub_540670 @0x540670].
     std::array<int32_t, 128> shared_clips{};
-	// Final player+89688 values, keyed by the resolved AmmoDef index. The retail
-	// request walk overwrites this table in request order, so the last accepted
-	// weapon using an ammo type controls every granted slot that uses that ammo.
-	std::vector<std::pair<int16_t, uint8_t>> ammo_damage_classes;
+	// The accept's player+89688 stores, in request order: each accepted entry's
+	// weapon round ammo index (adm+4; -1 unresolved) and its raw fourth byte, the
+	// last store at an index winning. [orig: NapiNPServerMsg_HandlePlayerLoadout
+	//  @0x515E0D..0x515E92]
+	std::vector<std::pair<int16_t, uint8_t>> damage_class_writes;
 	uint32_t carry_flags = 0;
 	// The host-side 780-row weapon-slot table this accept rebuilds, one row per
 	// granted combo with the clip the rebuild drew (rounds) — the rows the C2S
@@ -80,7 +82,15 @@ GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 										  uint16_t class_allow_mask,
 										  const world::WeaponTable *table);
 
-// The rebuilt kit onto the slot: the retained 0x5A body the re-sends answer with, the
+// The accept's damage-class stores onto the slot's table (NapiNPConnection::
+// ammo_damage_classes), the accept's alone: the deploy's rebuild writes none.
+// [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515E8B..0x515E92; the table's one other
+//  writer is the out-of-session armory apply, WeaponLoadout_ApplyFromBuffer @0x565CD0
+//  (the store @0x56618C)]
+void write_ammo_damage_classes(NapiNPConnection &conn, const GrantedWeaponLoadout &grant);
+
+// The rebuilt kit onto the slot: the retained 0x5A body the re-sends answer with (each
+// row's fourth byte the slot's damage-class byte at the row's AdmDef index), the
 // authority ammo pools and loaded-round buckets, and (with a weapon table) the
 // host-side slot rows — every granted combo with its drawn clip replaces the previous
 // rows. A table-less host keeps its rows (the lazy first-fire seed).

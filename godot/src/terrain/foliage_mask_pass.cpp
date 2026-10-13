@@ -773,7 +773,7 @@ bool FoliageMaskPass::_ensure_target(const Vector2i &p_size) {
 		target_texture_.instantiate();
 	}
 	target_texture_->set_texture_rd_rid(target_);
-	if (!texture_bound_) {
+	if (!texture_bound_ && !globals_held_) {
 		if (RenderingServer *server = RenderingServer::get_singleton()) {
 			server->global_shader_parameter_set("opennova_foliage_mask_depth",
 					target_texture_);
@@ -802,9 +802,14 @@ void FoliageMaskPass::_set_active(bool p_active) {
 	if (active_written_ && active_ == p_active) {
 		return;
 	}
+	active_ = p_active;
+	// Held, the value waits for republish_globals (E13).
+	active_written_ = false;
+	if (globals_held_) {
+		return;
+	}
 	if (RenderingServer *server = RenderingServer::get_singleton()) {
 		server->global_shader_parameter_set("opennova_foliage_mask_active", p_active);
-		active_ = p_active;
 		active_written_ = true;
 	}
 }
@@ -813,9 +818,14 @@ void FoliageMaskPass::_set_eye(const Vector3 &p_eye) {
 	if (eye_written_ && eye_ == p_eye) {
 		return;
 	}
+	eye_ = p_eye;
+	// Held, the value waits for republish_globals (E13).
+	eye_written_ = false;
+	if (globals_held_) {
+		return;
+	}
 	if (RenderingServer *server = RenderingServer::get_singleton()) {
 		server->global_shader_parameter_set("opennova_foliage_mask_eye", p_eye);
-		eye_ = p_eye;
 		eye_written_ = true;
 	}
 }
@@ -826,9 +836,14 @@ void FoliageMaskPass::_set_view_active(bool p_active) {
 	if (view_active_written_ && view_active_ == p_active) {
 		return;
 	}
+	view_active_ = p_active;
+	// Held, the value waits for republish_globals (E13).
+	view_active_written_ = false;
+	if (globals_held_) {
+		return;
+	}
 	if (RenderingServer *server = RenderingServer::get_singleton()) {
 		server->global_shader_parameter_set("opennova_foliage_mask_inset_active", p_active);
-		view_active_ = p_active;
 		view_active_written_ = true;
 	}
 }
@@ -837,11 +852,47 @@ void FoliageMaskPass::_set_view_eye(const Vector3 &p_eye) {
 	if (view_eye_written_ && view_eye_ == p_eye) {
 		return;
 	}
+	view_eye_ = p_eye;
+	// Held, the value waits for republish_globals (E13).
+	view_eye_written_ = false;
+	if (globals_held_) {
+		return;
+	}
 	if (RenderingServer *server = RenderingServer::get_singleton()) {
 		server->global_shader_parameter_set("opennova_foliage_mask_inset_eye", p_eye);
-		view_eye_ = p_eye;
 		view_eye_written_ = true;
 	}
+}
+
+void FoliageMaskPass::publish_absent() {
+	++absent_writes_;
+	if (RenderingServer *server = RenderingServer::get_singleton()) {
+		server->global_shader_parameter_set("opennova_foliage_mask_depth", Variant());
+		server->global_shader_parameter_set("opennova_foliage_mask_active", false);
+		server->global_shader_parameter_set("opennova_foliage_mask_eye", Vector3());
+		server->global_shader_parameter_set("opennova_foliage_mask_inset_active", false);
+		server->global_shader_parameter_set("opennova_foliage_mask_inset_eye", Vector3());
+	}
+}
+
+void FoliageMaskPass::republish_globals() {
+	RenderingServer *server = RenderingServer::get_singleton();
+	if (server == nullptr) {
+		return;
+	}
+	// A released pass's target is gone: it binds no dead texture.
+	if (target_texture_.is_valid() && target_.is_valid()) {
+		server->global_shader_parameter_set("opennova_foliage_mask_depth", target_texture_);
+		texture_bound_ = true;
+	}
+	server->global_shader_parameter_set("opennova_foliage_mask_active", active_);
+	server->global_shader_parameter_set("opennova_foliage_mask_eye", eye_);
+	server->global_shader_parameter_set("opennova_foliage_mask_inset_active", view_active_);
+	server->global_shader_parameter_set("opennova_foliage_mask_inset_eye", view_eye_);
+	active_written_ = true;
+	eye_written_ = true;
+	view_active_written_ = true;
+	view_eye_written_ = true;
 }
 
 void FoliageMaskPass::publish(Node *p_scope,

@@ -23,7 +23,6 @@
 // The supervisor's side (a link up from running, down at stopping) is
 // hosted_supervisor's and hosted_local_e2e's.
 
-#include "child_process.h"
 #include "hosted/admin_link.h"
 #include "hosted/hosted_repository.h"
 #include "hosted/hosted_settings.h"
@@ -32,6 +31,7 @@
 
 #include "net_sockets.h"
 
+#include <base/proc/child_process.h>
 #include <formats/gamecfg/game_cfg.h>
 #include <net/novaworld/db/sqlite.h>
 

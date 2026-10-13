@@ -285,6 +285,8 @@ func test_reset_runtime_state_restores_individual_visuals_and_retires_anchors() 
 	intact.add_child(originally_visible)
 	intact.add_child(originally_hidden)
 	intact.add_child(static_caster)
+	# A non-default occlusion mask the husk must start with (simulation/husk_swap.cpp).
+	intact.set_occlusion_section_mask(0x5, 0x1)
 	var index := _index_of([_entry(intact, 41)])
 	var events := DestructionDrain.make(
 			[HuskSwapEvent.make(41, BUGGY_ITEM_ID)],
@@ -305,6 +307,11 @@ func test_reset_runtime_state_restores_individual_visuals_and_retires_anchors() 
 	assert_not_null(PresentPassFixture.live_owned_row(fx, 'piece:5'),
 			'the piece spawned its owned trail group')
 	var graft: ObjectModel = _husk_models(self)[0]
+	assert_eq(
+		graft.get_occlusion_section_mask(),
+		intact.get_occlusion_section_mask(),
+		"the husk starts with the intact model's occlusion masks"
+	)
 	assert_true(graft.is_static_shadow_caster_enabled(),
 			"the individual husk replaces the intact static silhouette")
 
@@ -450,8 +457,15 @@ func test_reset_runtime_state_restores_batched_static_and_removes_husk_graft() -
 	var events := DestructionDrain.make([HuskSwapEvent.make(77, BUGGY_ITEM_ID)])
 	var presenter := _make_presenter(null, container, _index_of([]), placer, _item_db, anchors, fx)
 
+	var revision := placer.get_static_terrain_shadow_source_revision()
 	presenter.present_destruction_drained(events, [])
 
+	assert_gt(
+		placer.get_static_terrain_shadow_source_revision(),
+		revision,
+		"the carved static's terrain shadow passes to its husk graft"
+	)
+	revision = placer.get_static_terrain_shadow_source_revision()
 	assert_true(placer.is_static_instance_hidden(77))
 	assert_eq(_husk_models(self).size(), 1)
 	var graft: ObjectModel = _husk_models(self)[0]
@@ -465,6 +479,11 @@ func test_reset_runtime_state_restores_batched_static_and_removes_husk_graft() -
 
 	presenter.reset_wire_runtime_state()
 
+	assert_gt(
+		placer.get_static_terrain_shadow_source_revision(),
+		revision,
+		"the reset gives the static its terrain shadow back"
+	)
 	assert_false(placer.is_static_instance_hidden(77),
 			'the pass uses the placer public inverse to restore the static')
 	assert_true(graft.is_queued_for_deletion())

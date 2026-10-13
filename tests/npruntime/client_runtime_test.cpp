@@ -1479,6 +1479,27 @@ bool run_retail_post_auth_prelude() {
 		return false;
 	}
 
+	// A spectator's 0x2F draws no 0x5A, and retail's 0x0F clears g_ClientDeployHold for
+	// any role, so a world-state load alone ends the deploy wait (D-NET-678). A fork of
+	// this joiner, fed its own copy of the server sequence, takes the 0x0F first.
+	// [orig: NapiNPClientMsg_0x00F @0x42E391]
+	{
+		inmatch::JoinerConnection spectator_fork = joiner;
+		SessionSequencing fork_seq = server_seq;
+		const std::vector<uint8_t> world_state_only = frame_server_session(
+				fork_seq, server_scrk, client_auth.ck,
+				{make_protocol_message(0x0F, std::vector<uint8_t>(23, 0))});
+		const inmatch::JoinerConnection::PollResult released =
+				spectator_fork.handle_datagram(world_state_only.data(), world_state_only.size());
+		if (!expect(released.gameplay_release_applied && released.reached_in_match &&
+		                    spectator_fork.in_match() &&
+		                    spectator_fork.initial_admission_complete(),
+		            "a 0x0F alone releases the deploy wait and completes the admission, "
+		            "as a spectator's must")) {
+			return false;
+		}
+	}
+
 	// Every retail 0x5A apply clears g_ClientDeployHold immediately. Split the first
 	// grant from both the second grant and 0x0F policy to prove that gameplay
 	// release is independent from the later deploy-UI decision.
@@ -1538,13 +1559,13 @@ bool run_retail_post_auth_prelude() {
 				completion[4].payload == std::vector<uint8_t>({0x00, 0xF7, 0x5C}) &&
 				completion[5].tag == 0x23 && completion[5].payload.empty() &&
 				joiner.in_match() && !joiner.deployment_pick_pending() &&
-				!joiner.initial_admission_complete(),
-			"world-state completion preserves the first-grant gameplay release "
-			"without making the deploy UI ready before both grants")) {
+				joiner.initial_admission_complete(),
+			"the world-state load completes the admission with one grant in, as it ends "
+			"retail's mission-start wait (NapiNPClientMsg_0x00F @0x42E2CD)")) {
 		return false;
 	}
 
-	// The second grant completes admission without forcing a pick. An explicit
+	// A later grant changes nothing of the admission and forces no pick. An explicit
 	// selection on the host-driven overlay remains a valid C2S 0x0E afterward.
 	server_seq.last_inbound_seq = 13;
 	const std::vector<uint8_t> split_second_grant_datagram =
@@ -1562,7 +1583,7 @@ bool run_retail_post_auth_prelude() {
 				joiner.in_match() && !joiner.deployment_pick_pending() &&
 				joiner.initial_admission_complete() &&
 				joiner.self_handle() == kRetailSelfHandle,
-			"the second grant completes admission and deploys the player, no pick owed")) {
+			"the second grant keeps the admission and the player deployed, no pick owed")) {
 		return false;
 	}
 	if (!expect(!joiner.frame_deployment_pick(0xFFFFu).empty() &&

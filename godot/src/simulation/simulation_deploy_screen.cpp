@@ -82,12 +82,14 @@ TypedArray<DeployListRow> Simulation::get_deploy_list_rows(const String &p_defau
 		const String &p_default_home, const Dictionary &p_zone_names) {
 	// The compiled SPAWNPOINTS_LIST: the engine builder runs both witnessed
 	// loops over the zone rows this sim exposes (deploy_zone_rows), the team
-	// colour tag, and the embedder-resolved WPNames strings.
+	// colour tag, and the embedder-resolved WPNames strings. Every role that
+	// opens the screen lists (inmatch::deploy_zone_rows).
 	TypedArray<DeployListRow> out;
-	if (!kernel_ || !is_joiner() || !runtime_) return out;
+	if (!kernel_ || !runtime_) return out;
 	opennova::world::DeployListInput in;
 	// [orig: "<c4040FF>", or "<cFF2020>" when Team == 2 @0x553adb..0x553af1]
-	in.team_color_tag = runtime_->assigned_team() == 2 ? "<cFF2020>" : "<c4040FF>";
+	in.team_color_tag =
+			opennova::inmatch::deploy_list_team(role_view()) == 2 ? "<cFF2020>" : "<c4040FF>";
 	in.default_key = opennova::to_std(p_default_key);
 	in.default_home = opennova::to_std(p_default_home);
 	in.zones = deploy_zone_rows();
