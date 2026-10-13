@@ -145,9 +145,13 @@ def test_markers_that_time_an_action():
           "fire takes no Ready marker: its recovery is each entry's rate", why)
     fire.pose_markers.remove(fire.pose_markers[weapon.READY])
     draw = model.o3d.rows[4].variants[0].action
-    weapon.set_marker(draw, weapon.ACTIVE, 5)
+    weapon.set_marker(draw, weapon.ACTIVE, 6)
+    check("action switchto 0.2 0.2" in request_lines(model),
+          "a draw with markers is timed by its clip (its row names wpn_std_idle)", request_lines(model))
+    weapon.set_marker(draw, weapon.SHOT, 2)
     why = refusal(lambda: weapon.request_text(model))
-    check(why is not None and "switch timer" in why, "draw takes no marker: the switch timer paces it", why)
+    check(why is not None and "do not time switchto" in why, "a draw takes Active End and Ready alone", why)
+    draw.pose_markers.remove(draw.pose_markers[weapon.SHOT])
     draw.pose_markers.remove(draw.pose_markers[weapon.ACTIVE])
     reload = model.o3d.rows[3].variants[0].action
     weapon.set_marker(reload, weapon.ACTIVE, 90)
