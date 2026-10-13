@@ -98,12 +98,6 @@ Edit edge_edit(EditOperation operation, const NodeAddress &window, const char *f
 
 } // namespace
 
-const char *layout_handle_token(LayoutHandle handle) {
-	for (const HandleToken &entry : kHandleTokens)
-		if (entry.handle == handle) return entry.token;
-	return "move";
-}
-
 bool layout_handle_from_token(const std::string &token, LayoutHandle &out) {
 	for (const HandleToken &entry : kHandleTokens)
 		if (token == entry.token) {

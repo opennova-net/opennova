@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <iterator>
 #include <string>
 #include <variant>
 #include <vector>
@@ -101,10 +102,14 @@ std::vector<NodeId> applied(std::vector<NodeId> from, const std::vector<std::pai
 } // namespace
 
 static int test_tokens() {
-	for (const ArrangeOp op : kArrangeOps) {
+	const char *const tokens[] = {"align_left", "align_right", "align_top", "align_bottom", "align_horizontal_centers",
+	                              "align_vertical_centers", "distribute_horizontally", "distribute_vertically",
+	                              "bring_to_front", "bring_forward", "send_backward", "send_to_back"};
+	static_assert(std::size(tokens) == std::size(kArrangeOps), "a token per op");
+	for (size_t i = 0; i < std::size(tokens); ++i) {
 		ArrangeOp back = ArrangeOp::SendToBack;
-		TEST_EXPECT(arrange_op_from_token(arrange_op_token(op), back) && back == op);
-		TEST_EXPECT(*arrange_op_label(op) != 0);
+		TEST_EXPECT(arrange_op_from_token(tokens[i], back) && back == kArrangeOps[i]);
+		TEST_EXPECT(*arrange_op_label(kArrangeOps[i]) != 0);
 	}
 	ArrangeOp none;
 	TEST_EXPECT(!arrange_op_from_token("align_middle", none));

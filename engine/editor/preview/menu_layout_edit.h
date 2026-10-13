@@ -25,8 +25,7 @@ class MnuDocument;
 
 // What the drag holds: the window itself, one of its edges, or one of its corners.
 enum class LayoutHandle : uint8_t { Move, Left, Right, Top, Bottom, TopLeft, TopRight, BottomLeft, BottomRight };
-// "move", "left", "top_right", ...: the token the MCP and the tests name a handle by.
-const char *layout_handle_token(LayoutHandle handle);
+// The handle the MCP names by its token ("move", "left", "top_right", ...).
 bool layout_handle_from_token(const std::string &token, LayoutHandle &out);
 
 // The window where the drag began: its authored POSITION (each edge with whether the file

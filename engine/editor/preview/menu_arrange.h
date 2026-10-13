@@ -48,9 +48,7 @@ inline constexpr ArrangeOp kArrangeOps[] = {
         ArrangeOp::DistributeHorizontally, ArrangeOp::DistributeVertically, ArrangeOp::BringToFront,
         ArrangeOp::BringForward,        ArrangeOp::SendBackward,         ArrangeOp::SendToBack,
 };
-// "align_left", "distribute_horizontally", "bring_to_front", ...: the token the MCP and
-// the tests name an op by.
-const char *arrange_op_token(ArrangeOp op);
+// The op the MCP names by its token ("align_left", "distribute_horizontally", "bring_to_front", ...).
 bool arrange_op_from_token(const std::string &token, ArrangeOp &out);
 // "Align left edges", ...: the name the editor shows.
 const char *arrange_op_label(ArrangeOp op);
