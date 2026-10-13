@@ -96,9 +96,6 @@ void EffectViewportView::draw_ready(Workspace &workspace, const ViewportModel &v
 	if (ui_kit::tool(row, "Replay", true, "The effect spawned anew: the preview clock at tick 0."))
 		set_clock(workspace, model, "ticks", io::json_number(0));
 	EffectViewportOptions options = model.options();
-	row.next(ui_kit::checkbox_width("Loop"));
-	ImGui::Checkbox("Loop", &options.play.loop);
-	ui_kit::tooltip("Spawn the effect again as it dies (the editor's aid: the game spawns it once per event).");
 	row.next(ui_kit::checkbox_width("Grid"));
 	ImGui::Checkbox("Grid", &options.grid);
 	ui_kit::tooltip("A metre's squares on the ground the effect spawns on (the editor's aid).");
@@ -122,7 +119,7 @@ void EffectViewportView::draw_ready(Workspace &workspace, const ViewportModel &v
 	if (ui_kit::tool(row, "Frame", true, "The camera on the live particles (F, or a double click on the picture)."))
 		workspace.request(request::set_viewport(model.path(), effect_camera_change(model.framed(context.width, context.height))));
 	if (options != model.options()) workspace.request(request::set_viewport(model.path(), effect_options_change(options)));
-	// The playing cycle: its tick, its age, and what the scene holds.
+	// The spawn: its tick, its age, and what the scene holds.
 	const EffectPlayback &play = model.playback();
 	size_t particles = 0;
 	if (play.scene()) particles = play.scene()->live_counts().particle_count;
@@ -133,7 +130,7 @@ void EffectViewportView::draw_ready(Workspace &workspace, const ViewportModel &v
 	ImGui::AlignTextToFramePadding();
 	ImGui::TextDisabled("%s", readout);
 	ui_kit::tooltip(play.alive() ? "The effect as the game's effect scene steps it, a game tick at a time."
-	                             : "The effect died: Replay spawns it again, or Loop does as it dies.");
+	                             : "The effect died: Replay spawns it again (the game spawns an effect once per event).");
 	// Where the game resolves the name, when it is not this block; a file the game does not load; the
 	// graphics the project lacks.
 	const particle::EffectClosure &closure = model.closure();

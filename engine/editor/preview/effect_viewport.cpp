@@ -43,12 +43,12 @@ JsonValue camera_to_json(const OrbitCamera &camera) {
 	return orbit_camera_to_json(camera);
 }
 
-// A SetViewport's options over `held`: {effect, loop, wind_speed, wind_direction, grid}, each optional;
+// A SetViewport's options over `held`: {effect, wind_speed, wind_direction, grid}, each optional;
 // `effects` the file's (an effect must be one of them).
 bool read_options(const JsonValue &json, const std::vector<EffectViewportEffect> &effects, EffectViewportOptions &held,
 		std::string &error) {
 	if (!json.is_object()) {
-		error = "options is an object {effect, loop, wind_speed, wind_direction, grid}.";
+		error = "options is an object {effect, wind_speed, wind_direction, grid}.";
 		return false;
 	}
 	EffectViewportOptions options = held;
@@ -70,12 +70,12 @@ bool read_options(const JsonValue &json, const std::vector<EffectViewportEffect>
 				return false;
 			}
 			options.effect = defined != effects.end() ? defined->id : value.string;
-		} else if (key == "loop" || key == "grid") {
+		} else if (key == "grid") {
 			if (!value.is_bool()) {
-				error = "options." + key + " is true or false.";
+				error = "options.grid is true or false.";
 				return false;
 			}
-			(key == "loop" ? options.play.loop : options.grid) = value.boolean;
+			options.grid = value.boolean;
 		} else if (key == "wind_speed" || key == "wind_direction") {
 			int64_t whole = 0;
 			const bool speed = key == "wind_speed";
@@ -86,7 +86,7 @@ bool read_options(const JsonValue &json, const std::vector<EffectViewportEffect>
 			}
 			(speed ? options.play.wind_speed : options.play.wind_direction) = int(whole);
 		} else {
-			error = "Unknown effect option \"" + key + "\" (it takes effect, loop, wind_speed, wind_direction, grid).";
+			error = "Unknown effect option \"" + key + "\" (it takes effect, wind_speed, wind_direction, grid).";
 			return false;
 		}
 	}
@@ -116,7 +116,6 @@ const char *effect_view_status_token(EffectViewStatus status) {
 io::JsonValue effect_options_to_json(const EffectViewportOptions &options) {
 	JsonValue out = JsonValue::make_object();
 	out.set("effect", json_string(options.effect));
-	out.set("loop", JsonValue::make_bool(options.play.loop));
 	out.set("wind_speed", json_number(options.play.wind_speed));
 	out.set("wind_direction", json_number(options.play.wind_direction));
 	out.set("grid", JsonValue::make_bool(options.grid));
@@ -484,7 +483,7 @@ io::JsonValue EffectViewport::body_json(const ViewportInput &) const {
 	resolved.set("particles", std::move(particles));
 	resolved.set("spawns", JsonValue::make_bool(closure_.spawns()));
 	out.set("resolved", std::move(resolved));
-	// The playing cycle on the preview clock, and what the scene holds now.
+	// The spawn on the preview clock, and what the scene holds now.
 	JsonValue play = JsonValue::make_object();
 	play.set("tick", json_number(playback_.tick()));
 	play.set("cycle_start", json_number(playback_.cycle_start()));

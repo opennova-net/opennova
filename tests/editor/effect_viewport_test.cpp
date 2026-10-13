@@ -2,14 +2,13 @@
 // through the engine's own effect scene (the reader's places, each effect's block and its id's place, are
 // formats/particle's: tests/particle/particle_effect_places_test; the closure's, runtime/particle/effect_closure,
 // tests/particle/particle_effect_closure_test, with its retail leg over the install's catalog). The playback
-// (preview/effect_playback): spawned at tick 0, stepped a tick at a time (one call or many alike), spawned
-// again at the tick it dies while it loops and left dead when it does not, a jump spawning it pre-aged
-// (bounded by the engine's catch-up), the wind. The particle type (documents/particle_type): the
+// (preview/effect_playback): spawned once at tick 0, stepped a tick at a time (one call or many alike),
+// left dead as it dies, a jump or Replay spawning it pre-aged (bounded by the engine's catch-up), the wind. The particle type (documents/particle_type): the
 // reader's stop and a duplicate effect as findings at their places. The kinds'
 // table (ViewportKind::Effect, the particle type's Preview kind; the script device its Main). Through a
 // real session over a project: the catalog in the effect system's order (a .ptl before another, the
 // gore set the project picks), the viewport made as the file opens and its device given the scene, its
-// envelope (what the game resolves the name to, a definition another file shadows, the playing cycle),
+// envelope (what the game resolves the name to, a definition another file shadows, the spawn),
 // the clock sought to 0 for an effect newly shown, a SetViewport of its options refused for an effect
 // the file lacks, a Go to of an effect's name opening the text at its id (the graph's symbol, read from
 // the open document too) and the preview following it, an edit reopening the scene with its age kept, a
@@ -106,55 +105,51 @@ std::vector<particle::EffectCatalogDocument> short_catalog() {
 
 int test_playback() {
 	const particle::EffectClosure closure = particle::effect_closure(short_catalog(), "Puff");
-	EffectPlayback loop;
-	loop.open(closure.config, "Puff");
-	EffectPlayOptions options;
-	loop.play_to(0, options);
-	TEST_EXPECT(loop.alive() && loop.spawns() == 1 && loop.cycle_start() == 0 && loop.age() == 0 &&
-	            loop.last_status() == particle::EffectSpawnStatus::Spawned);
-	// A tick at a time to its death: spawned again at the tick it died.
-	int32_t died = -1;
-	for (int32_t tick = 1; tick <= 60 && died < 0; ++tick) {
-		loop.play_to(tick, options);
-		if (loop.spawns() == 2) died = tick;
-	}
-	TEST_EXPECT(died > 10 && died < 40 && loop.cycle_start() == died && loop.alive());
-	// The same ticks in one call: the same scene (each tick the scene's fixed step).
 	EffectPlayback once;
 	once.open(closure.config, "Puff");
+	EffectPlayOptions options;
 	once.play_to(0, options);
-	once.play_to(died + 5, options);
-	loop.play_to(died + 5, options);
+	TEST_EXPECT(once.alive() && once.spawns() == 1 && once.cycle_start() == 0 && once.age() == 0 &&
+	            once.last_status() == particle::EffectSpawnStatus::Spawned);
+	// A tick at a time to its death: spawned once, as the game spawns an effect once per event, dead it stays.
+	int32_t died = -1;
+	for (int32_t tick = 1; tick <= 60 && died < 0; ++tick) {
+		once.play_to(tick, options);
+		if (!once.alive()) died = tick;
+	}
+	TEST_EXPECT(died > 10 && died < 40 && once.spawns() == 1 && once.scene()->live_counts().group_count == 0);
+	once.play_to(80, options);
+	TEST_EXPECT(!once.alive() && once.spawns() == 1);
+	// The same ticks in one call: the same scene (each tick the scene's fixed step).
+	EffectPlayback stepped, jumped;
+	stepped.open(closure.config, "Puff");
+	jumped.open(closure.config, "Puff");
+	stepped.play_to(0, options);
+	jumped.play_to(0, options);
+	for (int32_t tick = 1; tick <= 8; ++tick) stepped.play_to(tick, options);
+	jumped.play_to(8, options);
 	particle::ParticleFrameSnapshot a, b;
-	loop.scene()->write_snapshot(a);
-	once.scene()->write_snapshot(b);
-	TEST_EXPECT(once.spawns() == 2 && once.cycle_start() == died && a.particles.size() == b.particles.size());
+	stepped.scene()->write_snapshot(a);
+	jumped.scene()->write_snapshot(b);
+	TEST_EXPECT(jumped.spawns() == 1 && !a.particles.empty() && a.particles.size() == b.particles.size());
 	for (size_t i = 0; i < a.particles.size(); ++i)
 		TEST_EXPECT(a.particles[i].position.x == b.particles[i].position.x && a.particles[i].position.y == b.particles[i].position.y);
-	// Not looping: dead it stays, until the clock goes back.
-	EffectPlayback single;
-	single.open(closure.config, "Puff");
-	EffectPlayOptions no_loop;
-	no_loop.loop = false;
-	single.play_to(0, no_loop);
-	single.play_to(80, no_loop);
-	TEST_EXPECT(!single.alive() && single.spawns() == 1 && single.scene()->live_counts().group_count == 0);
-	// Loop turned on: a cycle begins at once.
-	single.play_to(80, options);
-	TEST_EXPECT(single.alive() && single.spawns() == 2 && single.cycle_start() == 80);
-	// A step back: a jump, spawned again pre-aged by its age in the playing cycle.
-	single.play_to(85, options);
-	single.play_to(83, options);
-	TEST_EXPECT(single.alive() && single.spawns() == 3 && single.pre_aged() == 3 && single.cycle_start() == 80);
-	// Back before the cycle: its age since tick 0.
-	single.play_to(5, options);
-	TEST_EXPECT(single.alive() && single.pre_aged() == 5 && single.cycle_start() == 0);
-	// A jump past the engine's catch-up bound: the age it allows; one so old it died within it spawned anew.
+	// A step back: a jump, spawned again pre-aged by its age at the tick sought.
+	once.play_to(5, options);
+	TEST_EXPECT(once.alive() && once.spawns() == 2 && once.pre_aged() == 5 && once.cycle_start() == 0);
+	once.play_to(7, options);
+	once.play_to(6, options);
+	TEST_EXPECT(once.alive() && once.spawns() == 3 && once.pre_aged() == 6 && once.cycle_start() == 0);
+	// Replay: the next play spawns it again as a seek does.
+	once.restart();
+	once.play_to(6, options);
+	TEST_EXPECT(once.alive() && once.spawns() == 4 && once.pre_aged() == 6);
+	// A jump past its life: older than it lives, nothing stands.
 	EffectPlayback far;
 	far.open(closure.config, "Puff");
 	far.play_to(0, options);
 	far.play_to(1000, options);
-	TEST_EXPECT(far.alive() && far.cycle_start() == 1000 && far.spawns() == 3 && far.age() == 0);
+	TEST_EXPECT(!far.alive() && far.spawns() == 2 && far.cycle_start() == 0);
 	// The wind: GLOBALWIND particles drift with the mission header's.
 	const particle::EffectClosure windy_closure = particle::effect_closure(
 	        {document("w.ptl", effect_text("Windy", "Drift") + particle_text("Drift", 1.0f, 30.0f, 2.0f, "", "", "GLOBALWIND") +
@@ -223,8 +218,8 @@ int test_kind() {
 	            default_viewport_kind(DocumentTypeId::Particles) == ViewportKind::Effect);
 	std::unique_ptr<ViewportModel> made = row.make("particles/t.ptl");
 	TEST_EXPECT(made && made->make_canvas() && made->camera_json().is_object() && std::string(made->reason()) == "no_project" &&
-	            made->status() == ViewportStatus::Empty && made->options_json().get("loop") &&
-	            made->options_json().get("loop")->boolean);
+	            made->status() == ViewportStatus::Empty && !made->options_json().get("loop") &&
+	            made->options_json().get("grid") && made->options_json().get("grid")->boolean);
 	return 0;
 }
 
