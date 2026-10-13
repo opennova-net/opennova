@@ -481,8 +481,8 @@ Ref<TerrainTileInfo> FoliageDispatcher::get_tile_info() const {
 }
 
 void FoliageDispatcher::_on_tile_info_changed() {
-  // A placed tile keeps foliage off its square and the blocker's reach round it [orig:
-  // Foliage_PathBlockedByPlacedTile @ 0x606490; formats/foliage kPlacedTileReach]: an editor's tile edit (ADR 0046
+  // A placed tile keeps foliage off its square and the blocker's reach round it (formats/foliage kPlacedTileReach,
+  // where the blocker is cited): an editor's tile edit (ADR 0046
   // S25, the game never changes them in a match) grows again the cells over the squares of the tiles that came or
   // went, on the Godot plane (x, z = -y: the square [-z, -z + 16], til_world_z_from_fixed), never every cell. Past
   // kMaxTileRects squares, every cell.
