@@ -418,10 +418,10 @@ If the service is down, end the machines by hand:
 `./deploy/run.sh aws ec2 terminate-instances --instance-ids <machine> ...` ends them. A
 machine the service finds with no live server is ended at its next boot or sweep anyway.
 
-To turn hosting off for good: stop all, wait until `hosted status` lists nothing, delete
-the `hosted` vault item, then `infra apply` (it removes the hosted resources) and
-`app deploy`. The snapshot stays until you delete it
-(`./deploy/run.sh aws ec2 delete-snapshot --snapshot-id <id>`).
+To turn hosting off for good: stop all, wait until `hosted status` lists nothing, deploy
+with `--no-hosting`, delete the `hosted` vault item, then `infra apply` (it removes the
+hosted resources; later deploys find hosting off on their own). The snapshot stays until
+you delete it (`./deploy/run.sh aws ec2 delete-snapshot --snapshot-id <id>`).
 
 ### Operating notes
 
@@ -435,6 +435,11 @@ the `hosted` vault item, then `infra apply` (it removes the hosted resources) an
   (through `./deploy/run.sh aws`) shows the bootstrap's steps and the server's end, also
   after the machine is gone; on a live machine, over SSM, `journalctl -u opennova-serve`
   and `/var/log/cloud-init-output.log`.
+- **A refused call.** The service logs each AWS CLI failure with its message (`app logs
+  novaworld`, lines `[hosted] ...`); the timeline the owner sees says only "the launch
+  failed". For an `UnauthorizedOperation`,
+  `./deploy/run.sh aws sts decode-authorization-message --encoded-message <message>`
+  names the statement or condition that refused it.
 - **The machine side never restarts the server.** Whatever ends `opennova-serve` ends the
   machine; the service makes and counts every crash restart (3, forgiven after an hour of
   running), each on a new machine with new credentials.
