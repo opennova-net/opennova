@@ -2570,26 +2570,29 @@ bool check_global_scoreboard_integrity_phase() {
 	            "second 311 boundary alternates to transient 0x30"))
 		return false;
 
-	// The global clocks advance even after the session gate closes, but every
-	// maintenance send remains session-only. Keep the peer fully spawned/live so
-	// this exercises the gate itself rather than making the recipient ineligible.
-	// Then a reused mission owner resets the counter and connection table; after
-	// the peer is re-admitted, the process-global toggle survives. Stale
-	// health/alive do not suppress 0x30 while Flags bit
+	// The global clocks and the boundary sends run ahead of the session gate:
+	// with the session closed the in-match peer still receives the 0x16, its
+	// (toggle-zero) 0x31 and the 0x79 (D-NET-654). Keep the peer fully
+	// spawned/live so this exercises the gate itself rather than making the
+	// recipient ineligible. Then a reused mission owner resets the counter and
+	// connection table; after the peer is re-admitted, the process-global
+	// toggle survives. Stale health/alive do not suppress 0x30 while Flags bit
 	// 0x02 is clear.
+	// [orig: Server_TickUpdate - the 0x16 @0x51D90D and the family @0x51D912
+	//  ahead of is_in_session @0x51D9A5, the 0x79 @0x51E1B2 ahead of @0x51E211]
 	ctx.is_in_session = 0;
 	ctx.scoreboard_broadcast_timer = 0x136u;
 	ctx.network_quality_broadcast_countdown = 0;
 	opennova::inmatch::Server_TickUpdate(ctx);
 	boundary = drain();
-	if (!expect(index_of(boundary, opennova::s2c::PLAYER_LIST) == boundary.size() &&
-	                    !has_integrity(boundary) &&
-	                    index_of(boundary, opennova::s2c::NETWORK_QUALITY) ==
-	                            boundary.size() &&
+	if (!expect(index_of(boundary, opennova::s2c::PLAYER_LIST) <
+	                            index_of(boundary, opennova::s2c::LOADOUT_CRC_REQ) &&
+	                    index_of(boundary, opennova::s2c::LOADOUT_CRC_REQ) < boundary.size() &&
+	                    index_of(boundary, opennova::s2c::NETWORK_QUALITY) < boundary.size() &&
 	                    ctx.integrity_entity_family_next &&
 	                    ctx.network_quality_broadcast_countdown ==
 	                            opennova::inmatch::NETWORK_QUALITY_BROADCAST_PERIOD_TICKS,
-	            "closed session advances global clocks without maintenance sends"))
+	            "a closed session still sends the boundary's 0x16, 0x31 and 0x79"))
 		return false;
 	ctx.scoreboard_broadcast_timer = 77;
 	opennova::inmatch::create_session(
