@@ -42,8 +42,6 @@ struct BankLine {
 	uint32_t flags = 0;        // +0, read by nothing
 	uint8_t def_id_index = 0xFF; // +52, read by nothing
 	uint32_t param = 0;        // +56, read by nothing
-	uint32_t resd0 = 0;        // +60
-	uint32_t resd1 = 0;        // +64
 };
 struct BankDialog {
 	std::string name;

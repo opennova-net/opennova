@@ -89,7 +89,7 @@ std::vector<uint8_t> bank_bytes(const std::vector<std::string> &waves, const std
 		lwf::Single single;
 		single.name = strutil::to_upper(wave);
 		single.path = wave + ".wav";
-		single.value_hi = 0xD200;
+		single.volume = 0xD2;
 		bank.singles.push_back(single);
 	}
 	lwf::Multi set;
@@ -644,7 +644,7 @@ int test_retail_banks() {
 		            again.sndparms.size() == original.sndparms.size();
 		for (size_t i = 0; same && i < original.singles.size(); ++i)
 			same = again.singles[i].name == original.singles[i].name && again.singles[i].path == original.singles[i].path &&
-			       (again.singles[i].value_hi >> 8) == (original.singles[i].value_hi >> 8);
+			       again.singles[i].volume == original.singles[i].volume;
 		for (size_t s = 0; same && s < original.multis.size(); ++s) {
 			const lwf::Multi &a = original.multis[s], &b = again.multis[s];
 			same = a.name == b.name && a.pitch_base == b.pitch_base && a.pitch_random_range == b.pitch_random_range &&
