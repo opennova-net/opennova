@@ -759,8 +759,12 @@ uint64_t MissionMapViewport::gesture_held_(const ViewportInput &input) const {
 }
 
 const MissionGround &MissionMapViewport::followed_terrain(const SessionView &view) const {
+	const int reads = terrain_.reads();
 	terrain_.follow(view.findings.assets, view.findings.assets ? view.findings.assets->generation() : 0, scene_.header(),
 	                mission::mission_base_name(path()));
+	// S25, the painting feedback: read whole, it holds an imported terrain's maps as last imported; the paint of their
+	// open sources laid over them.
+	if (terrain_.reads() != reads) lay_open_sources(view, path(), terrain_);
 	return terrain_;
 }
 

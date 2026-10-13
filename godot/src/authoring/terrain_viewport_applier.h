@@ -13,6 +13,7 @@
 #include <base/io/json.h>
 #include <editor/preview/viewport_follow.h>
 
+#include "authoring/ground_overlay_upload.h"
 #include "authoring/terrain_patch_applier.h"
 #include "authoring/viewport_applier.h"
 #include "env/env_file.h"
@@ -171,6 +172,7 @@ private:
 	std::unique_ptr<Build> build_;
 	uint64_t scene_state_ = 0;
 	uint64_t overlay_serial_ = UINT64_MAX; // the viewport's overlay as last given the terrain
+	GroundOverlayUpload overlay_upload_; // its upload, the rows a patch changed alone (S25)
 	bool shown_water_ = true, shown_foliage_ = true;
 	int32_t wave_tick_ = -1; // the preview clock's tick the oscillator stands at (-1: not started)
 	int64_t clock_ms_ = 0;
