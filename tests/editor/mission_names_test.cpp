@@ -2,10 +2,10 @@
 // it ("V12"), a trigger and an action reading a variable word it through MissionNames::variable (a name the
 // mission gives it overriding them); and the live logic the session holds while Play runs is empty until a game
 // reports (documents/mission_live.h), an event found by its index. C2/C3 over the minted synth_logic mission: a
-// group named in its record's dropped bytes and a variable named in the tagged layer table, as the document's
-// words, labels and values say them; the edits that name a variable (one batch), the 31 the table takes, a table
-// of the original editor's layer names never written over, and a tagged table's records never edited as layer
-// names (read-only, refused).
+// group named in its record's dropped bytes and a variable named as the .mis's `//var` lines carry it (master
+// #1095: no .bms byte holds a variable's name), as the document's words, labels and values say them; the edit that
+// names a variable (one file-wide value), what the .mis refuses, and the table after the groups read as the
+// original editor's wav list.
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -192,56 +192,42 @@ int test_variable_names() {
 	std::unique_ptr<Document> document = open_mission();
 	TEST_EXPECT(document != nullptr);
 	const MissionDocument &m = dynamic_cast<const MissionDocument &>(*document);
-	TEST_EXPECT(mission_variable_table(m) == mission::LayerTable::Empty && mission_variable_names_left(m) == 31);
+	TEST_EXPECT(mission_variable_names(m).empty() && mission_variable_names_left(m) == mission::kVariableNameCount);
 	std::vector<Edit> edits;
 	std::string error;
-	// V12 named: the tag and one record, one batch.
-	TEST_EXPECT(mission_variable_name_edits(m, 12, "alarm_raised", edits, error) && edits.size() == 2);
+	// V12 named: one file-wide value, the .mis's `//var` line (master #1095: no .bms byte holds it).
+	TEST_EXPECT(mission_variable_name_edits(m, 12, "alarm_raised", edits, error) && edits.size() == 1 &&
+	            edits[0].operation == EditOperation::SetFileValue);
 	TEST_EXPECT(apply_edits(*document, edits));
-	TEST_EXPECT(mission_variable_table(m) == mission::LayerTable::VariableNames && mission_variable_names_left(m) == 30);
+	TEST_EXPECT(mission_variable_names_left(m) == mission::kVariableNameCount - 1);
 	TEST_EXPECT(same(mission_variable_name(m, 12), "alarm_raised") && mission_variable_name(m, 3).empty());
 	{
 		const DocumentMissionNames names(m);
 		TEST_EXPECT(same(names.variable(12), "alarm_raised") && same(names.variable(3), "V3"));
 		TEST_EXPECT(same(trigger_words(variable_trigger(1, 12, 2), names), "alarm_raised equals 2"));
 	}
-	// The table reads as the names, its records not editable as layer names.
-	const std::vector<NodeAddress> layers = listed(m, MissionKind::Layer);
-	TEST_EXPECT(layers.size() == bms::kLayerRecordCount);
-	TEST_EXPECT(same(mission_record_label(m, layers[0], nullptr), "Variable names (the editor's)"));
-	TEST_EXPECT(same(mission_record_label(m, layers[1], nullptr), "Variable 12: alarm_raised"));
-	TEST_EXPECT(same(mission_record_label(m, layers[2], nullptr), "No variable name"));
-	for (const FieldSchema &schema : m.fields(k(MissionKind::Layer)))
-		if (schema.id == "name") TEST_EXPECT(m.field_on(layers[1], schema).read_only);
-	TEST_EXPECT(!apply_edits(*document, {set_of(layers[0], "name", "Base layer")})); // the tag
-	TEST_EXPECT(!apply_edits(*document, {set_of(layers[1], "name", "Patrols")}));    // a layer name among the names
+	// The table after the groups is the original editor's wav list: a slot each, by its file name, which a name
+	// leaves as it is.
+	const std::vector<NodeAddress> slots = listed(m, MissionKind::WavList);
+	TEST_EXPECT(slots.size() == bms::kWavListRecordCount);
+	TEST_EXPECT(same(mission_record_label(m, slots[1], nullptr), "Wav 1"));
+	TEST_EXPECT(apply_edits(*document, {set_of(slots[1], "file_name", "alarm.wav")}));
+	TEST_EXPECT(same(mission_record_label(m, slots[1], nullptr), "Wav 1: alarm.wav"));
 	TEST_EXPECT(same(mission_variable_name(m, 12), "alarm_raised"));
-	// A second name sorts by index; a rename changes one record; nothing changed plans nothing.
+	// A second name sorts by index; a rename is one edit; nothing changed plans nothing.
 	TEST_EXPECT(mission_variable_name_edits(m, 3, "bridge blown", edits, error) && apply_edits(*document, edits));
-	TEST_EXPECT(same(mission_record_label(m, layers[1], nullptr), "Variable 3: bridge blown") &&
-	            same(mission_record_label(m, layers[2], nullptr), "Variable 12: alarm_raised"));
+	TEST_EXPECT(mission_variable_names(m).size() == 2 && mission_variable_names(m)[0].index == 3);
 	TEST_EXPECT(mission_variable_name_edits(m, 12, "alarm", edits, error) && edits.size() == 1 && apply_edits(*document, edits));
 	TEST_EXPECT(mission_variable_name_edits(m, 12, "alarm", edits, error) && edits.empty());
-	// What the format refuses: past V255 (the script's own VAR words), a name too long for its record.
+	// What the .mis refuses: past V255 (the script's own VAR words), a double quote, a name past a description's
+	// width.
 	TEST_EXPECT(!mission_variable_name_edits(m, 256, "x", edits, error) && error.find("V255") != std::string::npos);
-	TEST_EXPECT(!mission_variable_name_edits(m, 4, "eighteen chars....", edits, error));
-	// The 31 the table takes: a 32nd refused.
-	for (int i = 100; i < 129 && mission_variable_names_left(m) > 0; ++i)
-		TEST_EXPECT(mission_variable_name_edits(m, i, "v" + std::to_string(i), edits, error) && apply_edits(*document, edits));
-	TEST_EXPECT(mission_variable_names_left(m) == 0 && mission_variable_names(m).size() == 31);
-	TEST_EXPECT(!mission_variable_name_edits(m, 200, "one more", edits, error));
-	// Every name taken away empties the table again, as shipped.
-	for (const mission::VariableName &name : mission_variable_names(m))
+	TEST_EXPECT(!mission_variable_name_edits(m, 4, "say \"hi\"", edits, error));
+	TEST_EXPECT(!mission_variable_name_edits(m, 4, std::string(mission::kMisDescriptionChars + 1, 'x'), edits, error));
+	// Every name taken away.
+	for (const MissionVariableName &name : mission_variable_names(m))
 		TEST_EXPECT(mission_variable_name_edits(m, name.index, "", edits, error) && apply_edits(*document, edits));
-	TEST_EXPECT(mission_variable_table(m) == mission::LayerTable::Empty && mission_variable_names_left(m) == 31);
-
-	// A table of the original editor's layer names: edited as layer names, never written over by a name.
-	TEST_EXPECT(apply_edits(*document, {set_of(layers[0], "name", "Base layer")}));
-	TEST_EXPECT(mission_variable_table(m) == mission::LayerTable::LayerNames && mission_variable_names_left(m) == 0);
-	for (const FieldSchema &schema : m.fields(k(MissionKind::Layer)))
-		if (schema.id == "name") TEST_EXPECT(!m.field_on(layers[1], schema).read_only);
-	TEST_EXPECT(!mission_variable_name_edits(m, 12, "alarm", edits, error) && error.find("layer names") != std::string::npos);
-	TEST_EXPECT(same(mission_record_label(m, layers[0], nullptr), m.record_name(layers[0])));
+	TEST_EXPECT(mission_variable_names(m).empty());
 	return 0;
 }
 
@@ -268,11 +254,11 @@ int test_variables_wire() {
 		return answer;
 	};
 	JsonValue listed = ask("{\"path\": \"missions/logic.bms\", \"op\": \"variables\"}");
-	TEST_EXPECT(listed.get_string("table", "") == "empty" && listed.get_number("left", 0) == 31 &&
-	            listed.get("names") && listed.get("names")->array.empty() && !listed.get("edits"));
+	TEST_EXPECT(listed.get_number("left", 0) == double(mission::kVariableNameCount) && listed.get("names") &&
+	            listed.get("names")->array.empty() && !listed.get("edits"));
 	JsonValue planned = ask("{\"path\": \"missions/logic.bms\", \"op\": \"variables\", \"variable\": 12, \"name\": \"alarm_raised\"}");
 	const JsonValue *edits = planned.get("edits");
-	TEST_EXPECT(edits && edits->array.size() == 2 && !planned.get("refusal"));
+	TEST_EXPECT(edits && edits->array.size() == 1 && !planned.get("refusal"));
 	if (!edits) return 1;
 	JsonValue request = JsonValue::make_object();
 	request.set("kind", opennova::io::json_string("edit_record"));
@@ -282,12 +268,13 @@ int test_variables_wire() {
 	session.run_operations();
 	listed = ask("{\"path\": \"missions/logic.bms\", \"op\": \"variables\"}");
 	const JsonValue *names = listed.get("names");
-	TEST_EXPECT(listed.get_string("table", "") == "names" && listed.get_number("left", 0) == 30 && names &&
+	TEST_EXPECT(listed.get_number("left", 0) == double(mission::kVariableNameCount - 1) && names &&
 	            names->array.size() == 1 && names->array[0].get_number("index", -1) == 12 &&
 	            names->array[0].get_string("name", "") == "alarm_raised");
 	// One Undo takes the name back whole.
 	editor_test::handle_to_end(session, request::undo());
-	TEST_EXPECT(ask("{\"path\": \"missions/logic.bms\", \"op\": \"variables\"}").get_string("table", "") == "empty");
+	const JsonValue undone = ask("{\"path\": \"missions/logic.bms\", \"op\": \"variables\"}");
+	TEST_EXPECT(undone.get("names") && undone.get("names")->array.empty());
 	const JsonValue refused = ask("{\"path\": \"missions/logic.bms\", \"op\": \"variables\", \"variable\": 300, \"name\": \"x\"}");
 	TEST_EXPECT(refused.get_string("refusal", "").find("V255") != std::string::npos && refused.get("edits") &&
 	            refused.get("edits")->array.empty());

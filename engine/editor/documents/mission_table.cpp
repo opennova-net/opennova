@@ -64,7 +64,7 @@ constexpr KindRow kKinds[] = {
 	{K::Loadout, "loadout", "Loadout entry", "", false, MissionRecord::Loadout, self},
 	{K::Availability, "availability", "Item availability rule", "", false, MissionRecord::Availability, self},
 	{K::Group, "group", "Group", "", false, MissionRecord::Group, self},
-	{K::Layer, "layer", "Layer", "", false, MissionRecord::Layer, self},
+	{K::WavList, "wav_list", "Wav list slot", "", false, MissionRecord::WavList, self},
 	{K::BoundingBox, "bounding_box", "Bounding box", "", false, MissionRecord::BoundingBox, self},
 	{K::Item, "item", "Item", "Add item", true, MissionRecord::Entity, self},
 	{K::Building, "building", "Building", "Add building", true, MissionRecord::Entity, self},
@@ -328,8 +328,9 @@ constexpr AppliesRow kApplies[] = {
 	// (docs/mission/bms-event-runtime-re.md section 3a).
 	{MissionRecord::Group, "flags", Applicability::Unverified},
 	{MissionRecord::Group, "value", Applicability::Unverified},
-	// Read and discarded [orig editor: Med_WriteBmsFile @0x44f920 writes the layer's name].
-	{MissionRecord::Layer, "name", Applicability::Unverified},
+	// Read and discarded [orig: Mission_LoadBMSFile @0x40fc05..0x40fc38]; the original editor's wav list's file
+	// names [orig editor: sub_44F920 @0x4509bc..0x450a14].
+	{MissionRecord::WavList, "file_name", Applicability::Unverified},
 	{MissionRecord::Entity, "next_ssn", Applicability::Unverified},
 	// Read on a waypoint marker alone, a type-6005 or 6006 one: the spawn reads the record's +0x60 in
 	// those two types' arms and nowhere else [orig: Entity_SpawnFromBMSRecord @0x40f05a, @0x40f0aa,
@@ -725,7 +726,7 @@ ListOps file_list(K kind, std::vector<Record> &(*list)(bms::File &), bool (*fres
 std::vector<bms::WeaponLoadoutRecord> &loadout_of(bms::File &file) { return file.loadout.entries; }
 std::vector<bms::ItemAvailabilityEntry> &availability_of(bms::File &file) { return file.item_availability; }
 std::vector<bms::GroupRecord> &groups_of(bms::File &file) { return file.group_records; }
-std::vector<bms::LayerRecord> &layers_of(bms::File &file) { return file.layer_records; }
+std::vector<bms::WavListRecord> &wav_list_of(bms::File &file) { return file.wav_list_records; }
 std::vector<bms::BoundingBox> &boxes_of(bms::File &file) { return file.bounding_boxes; }
 
 // A loadout entry and an availability rule end their chunk at an empty name, so a new one has no name
@@ -920,8 +921,8 @@ RecordTable make_table() {
 			           file_list<bms::ItemAvailabilityEntry>(K::Availability, availability_of, fresh_availability), {}});
 			kind.list({spec(K::Group, "Groups", bms::kGroupRecordCount, true),
 			           fixed_list<bms::GroupRecord>(K::Group, groups_of, bms::kGroupRecordCount), {}});
-			kind.list({spec(K::Layer, "Layers", bms::kLayerRecordCount, true),
-			           fixed_list<bms::LayerRecord>(K::Layer, layers_of, bms::kLayerRecordCount), {}});
+			kind.list({spec(K::WavList, "Wav list", bms::kWavListRecordCount, true),
+			           fixed_list<bms::WavListRecord>(K::WavList, wav_list_of, bms::kWavListRecordCount), {}});
 			kind.list({spec(K::BoundingBox, "Bounding boxes"),
 			           file_list<bms::BoundingBox>(K::BoundingBox, boxes_of, fresh_box), {}});
 			break;

@@ -36,7 +36,7 @@ namespace opennova::editor {
 // and its stop, an area trigger, an event and the trigger and the action it holds. The rows' kinds
 // stand in the order the writer writes their records (mission_band).
 enum class MissionKind : NodeKind {
-	Mission, Loadout, Availability, Group, Layer, BoundingBox, Item, Building, Marker, Organic, WaypointPath, Stop,
+	Mission, Loadout, Availability, Group, WavList, BoundingBox, Item, Building, Marker, Organic, WaypointPath, Stop,
 	Area, Event, Trigger, Action, kCount,
 };
 inline constexpr size_t kMissionKindCount = size_t(MissionKind::kCount);
@@ -62,7 +62,7 @@ struct MissionPath {
 // bms::Entity; a path, an area trigger and an event its row (mission_document.h PathRow, AreaRow,
 // EventRow: a MissionPath, a bms::AreaTrigger and a mission::EventChain with the name the .bms has no
 // room for beside it, S24 Names, each kind's first field); a loadout entry a bms::WeaponLoadoutRecord, an availability rule a
-// bms::ItemAvailabilityEntry, a group a bms::GroupRecord, a layer a bms::LayerRecord, a bounding box a
+// bms::ItemAvailabilityEntry, a group a bms::GroupRecord, a wav list slot a bms::WavListRecord, a bounding box a
 // bms::BoundingBox, a stop its marker's index (uint32_t), a trigger a bms::Trigger, an action a
 // bms::Action.
 const RecordTable &mission_table();

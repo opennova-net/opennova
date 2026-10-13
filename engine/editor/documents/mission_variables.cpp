@@ -60,7 +60,7 @@ std::vector<MissionVariable> mission_variables(const MissionDocument &document, 
 		variable.uses.push_back(std::move(use));
 	});
 	// A variable the mission names (S24 Names) that no event uses yet: listed, so its name can be changed.
-	for (const mission::VariableName &name : mission_variable_names(document)) held[name.index].index = name.index;
+	for (const MissionVariableName &name : mission_variable_names(document)) held[name.index].index = name.index;
 	std::vector<MissionVariable> out;
 	for (auto &[index, variable] : held) {
 		variable.name = names.variable(index);
@@ -72,7 +72,7 @@ std::vector<MissionVariable> mission_variables(const MissionDocument &document, 
 int64_t mission_new_variable(const MissionDocument &document, const std::vector<int64_t> &script) {
 	std::set<int64_t> used(script.begin(), script.end());
 	each_variable(document, [&](const EventRow &, size_t, bool, size_t, int, int64_t value) { used.insert(value); });
-	for (const mission::VariableName &name : mission_variable_names(document)) used.insert(name.index);
+	for (const MissionVariableName &name : mission_variable_names(document)) used.insert(name.index);
 	int64_t index = 0;
 	while (used.count(index)) ++index;
 	return index;
