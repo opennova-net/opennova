@@ -31,6 +31,8 @@ void MissionPeople::reset(const MissionPoses &poses, int32_t tick) {
 		// standing as the warmup left them (world::infantry_org1_motor_head).
 		if (world::physics_class_from_move_function(pose.definition.move_function) != world::PhysicsClass::Org1)
 			continue;
+		// A route's walker stands at its spawn pose: the game walks it along its route, which no think runs here.
+		if (pose.state == world::anim_state::kWalkForward) continue;
 		Person person;
 		person.row = pose.row;
 		person.channels = pose.channels;

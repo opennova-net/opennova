@@ -22,8 +22,10 @@ class MissionPoses;
 // update), one tick a tick of the preview clock, from the tick of the clock it was posed at; another row's body
 // (org0, whose update is a nullsub) stands as its warmup left it. Each tick's event word is what the body's sound
 // block and its fire pass read that tick (the mission view hears the people's footsteps and foley with Listen on). The editor's
-// choice beside the game's: the think does not run, so a person plays the state its spawn requested on and on (a
-// route's walk in place, an idle's variants as its ring serves them), the clock's ticks standing in for the world's.
+// choice beside the game's: the think does not run, so a person plays the state its spawn requested on and on (an
+// idle's variants as its ring serves them), the clock's ticks standing in for the world's; a route's walker, whom the
+// game walks along its route, stands frozen at its spawn pose rather than walking in place (the maintainer's S26
+// ruling).
 class MissionPeople {
 public:
 	// A jump of the clock longer than this many ticks (a seek, the Shell held up, a clock gone back) starts the people

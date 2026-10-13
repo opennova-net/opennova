@@ -473,8 +473,8 @@ static int test_retail() {
 // posed body on the org1 physics row by the game's own org1 motor head (world::infantry_org1_motor_head), in pool order
 // over the shared ring heads, so after each tick every such body is the world's own body after its init and as many
 // ticks of the world's motor on ticks its think does not run, and the event words are the world's; a body on the org0
-// row (the civilian) stands as its warmup left it, as the game's nullsub leaves it; a clock gone back starts them again
-// from their spawn.
+// row (the civilian) stands as its warmup left it, as the game's nullsub leaves it, and a route's walker stands at its
+// spawn pose (S26: no think walks it along its route); a clock gone back starts them again from their spawn.
 static int test_people_play() {
 	Rig rig("opennova_editor_mission_people_play");
 	TEST_EXPECT(rig.open());
@@ -482,7 +482,14 @@ static int test_people_play() {
 	if (!viewport) return 1;
 	const MissionPeople &playing = viewport->people();
 	const std::vector<NodeAddress> rows = rig.organics();
-	TEST_EXPECT(playing.playing() == 6);
+	// The org1 bodies play but a route's walker.
+	const auto walker = [&](size_t i) {
+		const MissionPose *pose = viewport->poses().pose(rows[i].row);
+		return pose && pose->state == world::anim_state::kWalkForward;
+	};
+	size_t players = 0;
+	for (size_t i = 0; i < 7; ++i) players += kPeople[i].item == 106200 && !walker(i) ? 1 : 0;
+	TEST_EXPECT(walker(1) && players < 6 && playing.playing() == players);
 	WorldPeople people;
 	DirRigFiles files;
 	files.root = rig.session.view().project.root;
@@ -513,6 +520,10 @@ static int test_people_play() {
 		if (played != tick) return 1;
 		for (size_t i = 0; i < 7; ++i) {
 			const world::InfantryBodyPose *pose = rig.viewport()->people().pose(rows[i].row);
+			if (kPeople[i].item == 106200 && walker(i)) {
+				TEST_EXPECT(!pose);
+				continue;
+			}
 			if (kPeople[i].item != 106200) {
 				TEST_EXPECT(!pose);
 				TEST_EXPECT(same(viewport->poses().pose(rows[i].row)->pose, people.pose(bodies[i])));
@@ -538,9 +549,9 @@ static int test_people_play() {
 	const uint64_t serial = rig.viewport()->people().serial();
 	MissionPeople again;
 	again.reset(viewport->poses(), 0);
-	TEST_EXPECT(again.playing() == 6);
+	TEST_EXPECT(again.playing() == players);
 	for (size_t i = 0; i < 7; ++i)
-		if (kPeople[i].item == 106200)
+		if (kPeople[i].item == 106200 && !walker(i))
 			TEST_EXPECT(same(*again.pose(rows[i].row), viewport->poses().pose(rows[i].row)->pose));
 	TEST_EXPECT(again.run_to(viewport->poses(), -5) && again.tick() == -5 && again.started_at() == -5);
 	TEST_EXPECT(rig.viewport()->people().serial() == serial);
@@ -623,7 +634,8 @@ static int test_people_heard() {
 	TEST_EXPECT(steps > 0);
 	const JsonValue body = viewport_to_json(rig.session.view(), *rig.viewport(), JsonPage());
 	const JsonValue *people = body.get("body") ? body.get("body")->get("people") : nullptr;
-	TEST_EXPECT(people && people->get("playing") && people->get("playing")->number == 6.0);
+	// The org1 bodies but the route's walker, who stands at its spawn pose (S26).
+	TEST_EXPECT(people && people->get("playing") && people->get("playing")->number == 5.0);
 	std::printf("test_people_heard passed\n");
 	return 0;
 }

@@ -1477,7 +1477,8 @@ func test_people_play_their_clips() -> void:
 		_app.pump()
 	state = _state()
 	var people: Dictionary = state.get("body", {}).get("people", {})
-	assert_eq(int(people.get("playing", -1)), 2, str(people))
+	# The guard plays; the route's walker stands at its spawn pose (S26: no think walks it along its route).
+	assert_eq(int(people.get("playing", -1)), 1, str(people))
 	assert_gt(int(people.get("tick", 0)), int(people.get("started_at", 0)), "played on: %s" % str(people))
 	var played := 0
 	for row: Variant in state.get("items", []):
@@ -1485,6 +1486,12 @@ func test_people_play_their_clips() -> void:
 		if String(mark.get("kind", "")) != "organic":
 			continue
 		var now: Dictionary = mark.get("pose", {}).get("now", {})
+		if String(mark.get("pose", {}).get("because", "")) == "route":
+			assert_true(now.is_empty(), "the walker plays nothing: %s" % str(mark.get("pose", {})).left(300))
+			var walker := _person_model(mark)
+			if walker != null:
+				_assert_posed(walker, mark["pose"], String(mark.get("name", "")) + " at its spawn")
+			continue
 		assert_false(now.is_empty(), str(mark.get("pose", {})).left(300))
 		var model := _person_model(mark)
 		assert_not_null(model)
@@ -1493,7 +1500,7 @@ func test_people_play_their_clips() -> void:
 		_assert_posed(model, now, String(mark.get("name", "")) + " now")
 		if int(now["playing"].get("phase", -1)) != int(mark["pose"]["playing"].get("phase", -1)):
 			played += 1
-	assert_eq(played, 2, "both played on from their spawn")
+	assert_eq(played, 1, "the guard played on from its spawn")
 	# A seek back to the start: at their spawn again.
 	assert_true(_change({"kind": "mission", "clock": {"ticks": 0}}))
 	for _frame in 3:
