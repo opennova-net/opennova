@@ -266,6 +266,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_preview_camera.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_preview_rig.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_viewport.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_viewport_damage.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/script_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/shown_text.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/text_burst.cpp
