@@ -607,9 +607,14 @@ bool MissionDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 	mission->native.actions.clear();
 	shape(*mission);
 	rows.push_back(mission);
+	// Each entity's height lock, the one a matching .mis gives it (S25; MissionNamesFile::kept_locks, in the writer's
+	// order), else none (the .bms has no room for one).
+	size_t entity_at = 0;
 	const auto entities = [&](K kind, const std::vector<bms::Entity> &records) {
 		for (const bms::Entity &record : records) {
 			auto row = std::make_shared<EntityRow>(k(kind), record);
+			if (take) row->native.mis_height_lock = entity_at < names.kept_locks.size() ? names.kept_locks[entity_at] : 0;
+			++entity_at;
 			shape(*row);
 			rows.push_back(row);
 		}
@@ -683,7 +688,8 @@ uint64_t MissionDocument::names_file_overwrite() const {
 
 bool MissionDocument::companion_unsaved() const {
 	const MissionNamesFile &known = names_file();
-	return known.found != MissionNamesFile::Found::Unread && !same_names(mission_names(*this), known.kept);
+	return known.found != MissionNamesFile::Found::Unread &&
+	       (!same_names(mission_names(*this), known.kept) || !same_locks(mission_locks(*this), known.kept_locks));
 }
 
 bool MissionDocument::names_file_due(const CompanionFile &now) {
@@ -694,9 +700,10 @@ bool MissionDocument::names_file_due(const CompanionFile &now) {
 	if (known.found == MissionNamesFile::Found::Unread) return false; // read from bytes alone: nothing beside it known
 	switch (now.state) {
 	case CompanionFile::State::Absent:
-		// None there, or gone since: the editor's to make where the mission holds a name the .mis carries. Holding
-		// none, it has none to save: its names are saved as none (no .mis is no name), and nothing stays unsaved.
-		if (mission_holds_names(*this)) return true;
+		// None there, or gone since: the editor's to make where the mission holds a name the .mis carries, or a height
+		// lock (S25). Holding none, it has none to save: its names are saved as none (no .mis is no name, no lock), and
+		// nothing stays unsaved.
+		if (mission_holds_names(*this) || mission_holds_locks(*this)) return true;
 		names_file_ = MissionNamesFile();
 		names_file_.found = MissionNamesFile::Found::None;
 		outside_names_ = MissionNamesFile();
@@ -729,6 +736,22 @@ bool MissionDocument::names_file_due(const CompanionFile &now) {
 bool MissionDocument::names_file_text(std::string &text) {
 	std::string error;
 	const bool made = mission_names_text(*this, &base_heights_, text, error);
+	// The unlocked entities past the heights handed (all of them where the terrain did not read): written height locked
+	// at their heights (mission::write_mis_text, D-MIS-17), listed.
+	names_left_.locked.clear();
+	names_left_.locked_count = 0;
+	if (made) {
+		size_t at = 0;
+		for (const K kind : {K::Item, K::Building, K::Marker, K::Organic})
+			for (const Node *row : rows_of(kind)) {
+				if (at >= base_heights_.size() && static_cast<const EntityRow &>(*row).native.mis_height_lock == 0) {
+					++names_left_.locked_count;
+					if (names_left_.locked.size() < MissionNamesLeft::kLockedNamed)
+						names_left_.locked.push_back(mission_entity_title(*this, *row, nullptr));
+				}
+				++at;
+			}
+	}
 	base_heights_.clear();
 	++names_state_;
 	if (!made) {
@@ -754,12 +777,18 @@ void MissionDocument::names_file_written(bool ok, uint64_t fingerprint, const st
 	written.ours = true;
 	written.fingerprint = fingerprint;
 	written.kept = mission_names(*this);
+	written.kept_locks = mission_locks(*this);
 	// What it holds, as a read of it would hold it: the names and the events' lines it was written with.
 	written.names = written.kept;
 	for (const Node *row : rows_of(K::Event)) written.events.push_back(static_cast<const EventRow &>(*row).native);
 	names_file_ = std::move(written);
 	outside_names_ = MissionNamesFile();
+	// The entities it was written with height locked (D-MIS-17) stay listed until the next write.
+	std::vector<std::string> locked = std::move(names_left_.locked);
+	const size_t locked_count = names_left_.locked_count;
 	names_left_ = MissionNamesLeft();
+	names_left_.locked = std::move(locked);
+	names_left_.locked_count = locked_count;
 }
 
 bool MissionDocument::set_file_value(std::shared_ptr<const FileState> &state, const Edit &edit, Diagnostic &error) {

@@ -1,5 +1,7 @@
 #include <editor/session/workspace_parts.h>
 
+#include <editor/session/terrain_tools_parts.h>
+
 #include <algorithm>
 #include <cmath>
 #include <iterator>
@@ -236,6 +238,10 @@ constexpr WorkspaceMember kDocument[] = {
 	{ "pick", J::Object,
 			"Pick in view (S24): {record, slot}, a trigger's or an action's parameter (slot 0 to 3) that what is clicked "
 			"next in the 3D view or the map is picked for; {} or null (as the view reports none) ends it." },
+	{ "terrain", J::Boolean,
+			"A mission's or a terrain's Terrain pane (S25) shown beside its 3D view (the Logic pane hidden), or hidden: "
+			"its views brush with the workspace's terrain_brush while it shows." },
+	{ "tiles", J::Integers, "The tiles its tile tools have selected, rows of the .til its tiles go to, by identity (S25)." },
 };
 
 constexpr WorkspacePartRow kParts[] = {
@@ -255,6 +261,8 @@ constexpr WorkspacePartRow kParts[] = {
 	{ "import", kImport, std::size(kImport), "The import dialog's filters, Replace existing files and its checks." },
 	{ "problems", kProblems, std::size(kProblems), "Problems' filters and its confirmation." },
 	{ "document", kDocument, std::size(kDocument), "What a document's views show of it: filters, kinds, order, a menu's and a texture's fields." },
+	{ "terrain_brush", kTerrainBrushMembers, std::size(kTerrainBrushMembers),
+	  "The terrain brush every view strokes with while its document's Terrain pane shows (S25): its tool, shape and values." },
 };
 
 // The windows `focus` brings forward: each one's token and its title (devtools::Window::title()).
@@ -316,6 +324,11 @@ bool typed(const JsonValue &value, WorkspaceJson json) {
 			return true;
 		case J::Number:
 			return value.is_number() && std::isfinite(value.number);
+		case J::Numbers:
+			if (!value.is_array()) return false;
+			for (const JsonValue &item : value.array)
+				if (!item.is_number() || !std::isfinite(item.number)) return false;
+			return true;
 	}
 	return false;
 }
@@ -336,6 +349,8 @@ const char *type_words(WorkspaceJson json) {
 			return "an object of strings and whole numbers";
 		case J::Number:
 			return "a number";
+		case J::Numbers:
+			return "an array of numbers";
 	}
 	return "a string";
 }
@@ -985,6 +1000,8 @@ bool set_document(Change &change, const JsonValue &part) {
 		}
 		shown.pick = asked;
 	}
+	// S25: its Terrain pane and its tiles (session/terrain_tools_parts.h).
+	if (std::string why; !set_document_terrain(change.view, part, *document, shown, why)) return change.refuse(why, at);
 	bool beside_moved = false;
 	if (const JsonValue *map = part.get("map")) {
 		const DocumentTypeId type = asset_kind_row(document->kind()).document;
@@ -1002,9 +1019,16 @@ bool set_document(Change &change, const JsonValue &part) {
 	                   held.remap_from != shown.remap_from || held.remap_to != shown.remap_to || held.logic != shown.logic ||
 	                   held.logic_split != shown.logic_split || held.logic_filter != shown.logic_filter ||
 	                   held.logic_folded != shown.logic_folded || held.logic_attention != shown.logic_attention ||
-	                   held.pick != shown.pick;
+	                   held.pick != shown.pick || document_terrain_moved(held, shown);
 	held = std::move(shown);
 	return moved;
+}
+
+// The terrain brush (S25, session/terrain_tools_parts.h).
+bool set_brush(Change &change, const JsonValue &part) {
+	std::string why;
+	const bool moved = set_terrain_brush(change.view, part, why);
+	return why.empty() ? moved : change.refuse(why);
 }
 
 // `focus`: the window it names opened, shown where it stands aside, and brought forward (a focus_window view event
@@ -1126,6 +1150,7 @@ JsonValue document_json(const SessionView &view, const DocumentBase &document, c
 			out.set("pick", JsonValue::make_null());
 		}
 	}
+	document_terrain_json(document, shown, out); // S25
 	out.set("active", flag(document.path() == view.documents.active));
 	return out;
 }
@@ -1154,6 +1179,8 @@ const char *workspace_json_token(WorkspaceJson json) {
 			return "object";
 		case J::Number:
 			return "number";
+		case J::Numbers:
+			return "number[]";
 	}
 	return "string";
 }
@@ -1201,7 +1228,7 @@ bool check_workspace_change(const JsonValue &json, std::string &error) {
 				return false;
 			}
 			// A pick none: null, as the view reports it, is {} (its member's words say so).
-			const bool none = value.value.is_null() && std::string(row->token) == "pick";
+			const bool none = value.value.is_null() && (std::string(row->token) == "pick" || std::string(row->token) == "cursor");
 			if (!none && !typed(value.value, row->json)) {
 				error = "\"workspace." + member.key + "." + value.key + "\" must be " + type_words(row->json) + ".";
 				return false;
@@ -1250,6 +1277,7 @@ bool apply_workspace_change(SessionView &view, const std::string &json, std::vec
 		{ "import", set_import },
 		{ "problems", set_problems },
 		{ "document", set_document },
+		{ "terrain_brush", set_brush },
 	};
 	static_assert(std::size(kSetters) == std::size(kParts), "a setter per part of the table");
 	const Openings before = openings_of(view.workspace);
@@ -1505,6 +1533,7 @@ JsonValue workspace_to_json(const SessionView &view) {
 	card.set("path", text(workspace.card.path));
 	out.set("card", std::move(card));
 	out.set("sound", sound_json(workspace.sound));
+	out.set("terrain_brush", terrain_brush_json(workspace)); // S25
 	JsonValue build = JsonValue::make_object();
 	build.set("open", flag(workspace.build_result.open));
 	out.set("build_result", std::move(build));

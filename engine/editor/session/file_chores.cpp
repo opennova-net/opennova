@@ -15,6 +15,7 @@
 #include <editor/project/project_files.h>
 #include <editor/session/document_set.h>
 #include <editor/session/file_card.h>
+#include <editor/session/import_controller.h>
 #include <editor/session/navigation_controller.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/request_factories.h>
@@ -200,6 +201,59 @@ void FileChores::made(const std::string &words, const std::vector<std::string> &
 	step.folders_made = folders;
 	push(std::move(step));
 	if (!folders.empty()) core_.update_folders(folders, {});
+}
+
+bool FileChores::write_files(const std::string &words,
+                             const std::vector<std::pair<std::string, std::vector<uint8_t>>> &replace,
+                             const std::vector<std::pair<std::string, std::vector<uint8_t>>> &make) {
+	if (!view_.project.open || (replace.empty() && make.empty())) return false;
+	Step step;
+	step.words = words;
+	std::vector<std::string> replaced;
+	for (const auto &[path, bytes] : replace) replaced.push_back(path);
+	// The replaced files' bytes to the trash first (all or none), then every file written; one that does not write
+	// takes back what was written and puts the replaced files back.
+	std::string error;
+	if (!replaced.empty() && !trash_paths(paths_, replaced, step.gone_batch, error)) {
+		refuse(CoreFinding::FileWrite, error + " " + words + " was not done.");
+		return false;
+	}
+	std::vector<std::string> written;
+	const auto put_back = [&] {
+		for (const std::string &path : written) {
+			std::error_code ignored;
+			fs::remove(at(paths_, path), ignored);
+		}
+		std::string ignored;
+		if (step.gone_batch.id) restore_trash(paths_, step.gone_batch, ignored);
+	};
+	for (const auto *list : {&replace, &make})
+		for (const auto &[path, bytes] : *list) {
+			const std::string target = join_path(paths_.root, path);
+			if (!io::ensure_directory(utf8_of(path_of(target).parent_path()), error) ||
+			    !io::write_file_atomic(target, bytes.data(), bytes.size(), error)) {
+				put_back();
+				refuse(CoreFinding::FileWrite, path + " could not be written: " + error + ". " + words + " was not done.", path);
+				return false;
+			}
+			written.push_back(path);
+		}
+	step.came = written;
+	step.gone = replaced;
+	// The replaced import sources stay in the import list whichever way the step goes (take drops what leaves and
+	// puts back step.sources).
+	if (view_.project.imports)
+		for (const ImportedSource &source : *view_.project.imports)
+			for (const std::string &path : replaced)
+				if (strutil::iequals(source.source, path)) {
+					step.sources.push_back(source);
+					step.reimport.push_back(path);
+				}
+	const std::vector<std::string> reimport = step.reimport;
+	push(std::move(step));
+	core_.update_files(written);
+	for (const std::string &source : reimport) core_.imports().reimport(source, true);
+	return true;
 }
 
 void FileChores::close_documents(const std::vector<std::string> &paths) {
@@ -871,6 +925,8 @@ bool FileChores::take(Step &step, bool back) {
 	for (const std::string &file : files_at(came)) read.push_back(file);
 	if (!read.empty()) core_.update_files(read);
 	if (!made.empty() || !removed.empty()) core_.update_folders(made, removed);
+	// A source the step rewrote in place, imported again as it now stands.
+	for (const std::string &source : step.reimport) core_.imports().reimport(source, true);
 	return true;
 }
 

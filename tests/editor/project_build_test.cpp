@@ -145,6 +145,7 @@ const Route kRoutes[] = {
 	{AssetKind::Notes, ArchiveSlot::None}, // a .md (no kind, said) and a .txt the game never reads (Text) before
 	{AssetKind::ImportSource, ArchiveSlot::None}, // ImageSource, a .png's, before S13 A8
 	{AssetKind::ImportInput, ArchiveSlot::None}, // a terrain set's images (S20)
+	{AssetKind::HeightmapInput, ArchiveSlot::None}, // a terrain set's heightmap (S25)
 };
 
 static int test_routing() {

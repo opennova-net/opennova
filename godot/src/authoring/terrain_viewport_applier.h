@@ -13,6 +13,7 @@
 #include <base/io/json.h>
 #include <editor/preview/viewport_follow.h>
 
+#include "authoring/terrain_patch_applier.h"
 #include "authoring/viewport_applier.h"
 #include "env/env_file.h"
 #include "env/mission_environment.h"
@@ -151,6 +152,9 @@ private:
 	Water *water_ = nullptr;
 	Terrain *terrain_ = nullptr;
 	FoliageDispatcher *foliage_ = nullptr;
+	// S25: the heights', the maps' and the tiles' patches taken in place (terrain_patch_applier.h), as the mission
+	// view's.
+	TerrainPatchApplier terrain_patches_;
 	Camera3D *camera_ = nullptr;
 	Ref<ResourceRoot> root_files_;
 	std::shared_ptr<const opennova::editor::ProjectAssetSource> mounted_;

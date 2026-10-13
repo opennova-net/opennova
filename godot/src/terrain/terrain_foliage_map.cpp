@@ -1,5 +1,7 @@
 #include "terrain/terrain_foliage_map.h"
 
+#include <cstring>
+
 using namespace godot;
 
 namespace {
@@ -50,4 +52,14 @@ uint8_t TerrainFoliageMap::sample_detail_flat_wrap(int32_t atlas_x_fixed,
 
 void TerrainFoliageMap::copy_from_native(const opennova::FoliageMap &map) {
 	foliage_map = ensure_valid_map(map);
+}
+
+bool TerrainFoliageMap::write_rect(int x, int y, int w, int h, const uint8_t *codes) {
+	if (codes == nullptr || x < 0 || y < 0 || w <= 0 || h <= 0 || x + w > foliage_map.width || y + h > foliage_map.height ||
+			foliage_map.indices.size() != size_t(foliage_map.width) * size_t(foliage_map.height))
+		return false;
+	for (int row = 0; row < h; ++row)
+		std::memcpy(&foliage_map.indices[size_t(y + row) * size_t(foliage_map.width) + size_t(x)], codes + size_t(row) * size_t(w),
+				size_t(w));
+	return true;
 }

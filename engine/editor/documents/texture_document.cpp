@@ -69,32 +69,93 @@ const FindingCodeRow &finding_code(TextureFinding code) {
 	return kFindingRows[static_cast<size_t>(code)];
 }
 
+TextureDocument::TextureDocument(HistoryBudget budget) : RasterDocument(&pick_texture_codec, budget) {}
+
 const std::vector<uint8_t> &TextureDocument::bytes() const {
 	static const std::vector<uint8_t> none;
-	return versions_.empty() ? none : *versions_[cursor_].bytes;
+	if (!loaded_) return none;
+	if (bytes_ && bytes_revision_ == revision() && bytes_generation_ == load_generation()) return *bytes_;
+	bytes_revision_ = revision();
+	bytes_generation_ = load_generation();
+	// The texels and form it read (a stroke undone shares the tiles it read): the file as read.
+	const RasterState &now = state();
+	bool as_read = now.side == read_state_.side && now.planes.size() == read_state_.planes.size();
+	for (size_t i = 0; as_read && i < now.planes.size(); ++i) as_read = now.planes[i].shares_tiles_with(read_state_.planes[i]);
+	if (as_read) {
+		bytes_ = read_bytes_;
+		return *bytes_;
+	}
+	// A whole step's state (a texture operation's): the operation's bytes as it wrote them.
+	for (const auto &[whole, written] : whole_bytes_) {
+		bool same = written && now.side == whole.side && now.planes.size() == whole.planes.size();
+		for (size_t i = 0; same && i < now.planes.size(); ++i) same = now.planes[i].shares_tiles_with(whole.planes[i]);
+		if (same) {
+			bytes_ = written;
+			return *bytes_;
+		}
+	}
+	auto written = std::make_shared<std::vector<uint8_t>>();
+	std::string error;
+	if (!write_texture_state(now, *written, error)) written->clear();
+	bytes_ = std::move(written);
+	return *bytes_;
 }
 
 const std::shared_ptr<const TextureImage> &TextureDocument::image() const {
-	if (loaded_ && !image_) image_ = decode_texture(path(), bytes());
+	if (!loaded_) return image_;
+	if (!image_ || image_revision_ != revision() || image_generation_ != load_generation()) {
+		image_ = painted_image_();
+		if (!image_) image_ = decode_texture(path(), bytes());
+		image_revision_ = revision();
+		image_generation_ = load_generation();
+	}
 	return image_;
 }
 
-bool TextureDocument::dirty() const { return revision() != saved_revision_; }
-
-uint64_t TextureDocument::revision() const { return versions_.empty() ? 0 : versions_[cursor_].revision; }
-
-size_t TextureDocument::history_bytes() const {
-	size_t total = 0;
-	for (const Version &version : versions_) total += version.bytes->size();
-	return total;
+std::shared_ptr<const TextureImage> TextureDocument::painted_image_() const {
+	const RasterState &now = state();
+	// A paint keeps the form it read (its side); a whole step (a texture operation) makes another, decoded from its bytes.
+	if (!read_bytes_ || !texture_paintable(now) || now.side != read_state_.side) return nullptr;
+	if (!read_image_ || read_image_generation_ != load_generation()) {
+		read_image_ = decode_texture(path(), *read_bytes_);
+		read_image_generation_ = load_generation();
+	}
+	if (!read_image_ || !read_image_->decoded || read_image_->levels.size() != 1) return nullptr;
+	// The texels and form it read (a stroke undone shares the tiles it read): the image read.
+	bool as_read = now.side == read_state_.side && now.planes.size() == read_state_.planes.size();
+	for (size_t i = 0; as_read && i < now.planes.size(); ++i) as_read = now.planes[i].shares_tiles_with(read_state_.planes[i]);
+	if (as_read) return read_image_;
+	const RasterPlane &plane = now.planes.front();
+	const int w = plane.width(), h = plane.height();
+	if (uint32_t(w) != read_image_->width() || uint32_t(h) != read_image_->height()) return nullptr;
+	const TextureSide &side = *texture_side(now);
+	std::vector<uint8_t> rgba, indices, luminance;
+	if (!texture_rgba_rect(now, 0, 0, w, h, rgba)) return nullptr;
+	if (plane.format() == RasterFormat::U8) {
+		indices.resize(size_t(w) * size_t(h));
+		plane.copy_rect(0, 0, w, h, indices.data());
+		// A palette PNG's transparency, as its reader expands it.
+		if (side.form == TextureSide::Form::Png && side.png_colour == 3)
+			for (size_t i = 0; i < indices.size(); ++i)
+				rgba[i * 4 + 3] = indices[i] < side.png_alpha.size() ? side.png_alpha[indices[i]] : 255;
+		// An 8-bit PCX's archive alpha: each palette entry's luminance, (85 * (r + g + b)) >> 8 in 16 bits
+		// (formats/pcx decode_pcx_luminance_alpha), its rows of its width (a paintable form's).
+		if (side.form == TextureSide::Form::Pcx8) {
+			uint8_t lum[256];
+			for (size_t e = 0; e < 256; ++e) {
+				const uint16_t sum = uint16_t(side.palette[e * 3] + side.palette[e * 3 + 1] + side.palette[e * 3 + 2]);
+				lum[e] = uint8_t(uint16_t(85u * sum) >> 8);
+			}
+			luminance.resize(indices.size());
+			for (size_t i = 0; i < indices.size(); ++i) luminance[i] = lum[indices[i]];
+		}
+	}
+	return retexel_texture(*read_image_, std::move(rgba), std::move(indices), std::move(luminance));
 }
 
-bool TextureDocument::changes_since(uint64_t load_generation, uint64_t revision, ChangeSet &out) const {
-	// The state a caller read is this one, or another whole image (its sides perhaps others): the caller
-	// takes everything as changed.
-	if (load_generation != this->load_generation() || revision != this->revision()) return false;
-	out = RasterChanges();
-	return true;
+void TextureDocument::on_saved() {
+	RasterDocument::on_saved();
+	saved_state_ = state();
 }
 
 SerializeResult TextureDocument::serialize() const {
@@ -107,61 +168,47 @@ std::unique_ptr<DocumentBase> TextureDocument::snapshot() const {
 	return std::make_unique<TextureDocument>(*this);
 }
 
-void TextureDocument::moved() { image_.reset(); }
-
 bool TextureDocument::apply_edits(const std::vector<Edit> &edits, Diagnostic &error) {
-	// One batch, one step: its last image (each a whole file).
-	const TextureImageEdit *image = nullptr;
+	// A whole image (a texture operation's bytes) is read by the texture's reader into a whole change; texels
+	// painted go to the raster as they are.
+	std::vector<Edit> raster;
+	raster.reserve(edits.size());
+	std::vector<std::shared_ptr<TextureWholeEdit>> wholes;
 	for (const Edit &edit : edits) {
-		const auto *made = edit.operation == EditOperation::Apply ? dynamic_cast<const TextureImageEdit *>(edit.payload.get()) : nullptr;
-		if (!made) {
-			error = make_finding(CoreFinding::DocumentPayload, DiagnosticSeverity::Error,
-			                     "A texture takes a whole image (a texture operation), no other edit.", path());
-			return false;
+		const auto *image = edit.operation == EditOperation::Apply ? dynamic_cast<const TextureImageEdit *>(edit.payload.get()) : nullptr;
+		if (!image) {
+			raster.push_back(edit);
+			continue;
 		}
-		image = made;
+		auto whole = std::make_shared<TextureWholeEdit>();
+		whole->state = read_texture_state(path(), image->bytes);
+		whole->bytes = std::make_shared<const std::vector<uint8_t>>(image->bytes);
+		wholes.push_back(whole);
+		Edit made = edit;
+		made.payload = std::move(whole);
+		raster.push_back(std::move(made));
 	}
-	if (!image) return true;
-	// The versions after the current go (a redo branch), the new one is the current, and past the budget the
-	// oldest go, never the one before the current.
-	versions_.resize(cursor_ + 1);
-	versions_.push_back({std::make_shared<const std::vector<uint8_t>>(image->bytes), next_revision_++});
-	cursor_ = versions_.size() - 1;
-	while (versions_.size() > budget_.min_steps + 1 && history_bytes() > budget_.bytes) {
-		versions_.erase(versions_.begin());
-		--cursor_;
+	if (!RasterDocument::apply_edits(raster, error)) return false;
+	// The states the whole steps made, each with the bytes it was read from (bytes(): a save writes them as they are).
+	constexpr size_t kWholeKept = 16;
+	for (const auto &whole : wholes) {
+		whole_bytes_.emplace_back(whole->state, whole->bytes);
+		if (whole_bytes_.size() > kWholeKept) whole_bytes_.erase(whole_bytes_.begin());
 	}
-	moved();
 	return true;
 }
 
-void TextureDocument::undo_step() {
-	if (cursor_ == 0) return;
-	--cursor_;
-	moved();
-}
-
-void TextureDocument::redo_step() {
-	if (cursor_ + 1 >= versions_.size()) return;
-	++cursor_;
-	moved();
-}
-
-void TextureDocument::on_saved() { saved_revision_ = revision(); }
-
 bool TextureDocument::read_source(const std::vector<uint8_t> &decoded, bool adopt, std::vector<SourceIssue> &issues,
                                   Diagnostic &error) {
-	(void)issues;
-	(void)error;
-	// Every file reads: what the game cannot load is said by its image (why it does not load), never a
-	// document that does not open.
+	if (!RasterDocument::read_source(decoded, adopt, issues, error)) return false;
 	if (!adopt) return true;
-	versions_.assign(1, Version{std::make_shared<const std::vector<uint8_t>>(decoded), 0});
-	cursor_ = 0;
-	next_revision_ = 1;
-	saved_revision_ = 0;
+	read_bytes_ = std::make_shared<const std::vector<uint8_t>>(decoded);
+	read_state_ = state();
+	saved_state_ = state();
+	whole_bytes_.clear();
 	loaded_ = true;
-	moved();
+	bytes_.reset();
+	image_.reset();
 	return true;
 }
 

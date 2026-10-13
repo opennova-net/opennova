@@ -64,6 +64,14 @@ struct ViewportDeviceReport {
 	// What the device drew this frame of the layers its kind reports (a mission's foliage and lights, DI-31),
 	// the kind's wire form as the device makes it; null for none.
 	io::JsonValue drawn;
+	// The last heights patch it took (a mission's or a terrain view's terrain, S25: HeightsDevicePatch), 0 none, and
+	// whether one could not be taken (its viewport builds its picture again at its next follow).
+	uint64_t heights_taken = 0;
+	bool heights_failed = false;
+	// The last maps patch it took (a terrain's maps and placed tiles, S25: MapsDevicePatch), 0 none, and whether one
+	// could not be taken (its picture is made again).
+	uint64_t maps_taken = 0;
+	bool maps_refused = false;
 };
 
 // Where a canvas draws a device's picture this frame (ADR 0046 S13 V5), in the pixels the canvas
