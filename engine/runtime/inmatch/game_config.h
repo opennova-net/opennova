@@ -66,10 +66,12 @@ struct GameConfig {
 	std::string server_password;               // [orig game_settings +0x20] BuildFlags |0x8
 	std::string side_a_password;               // [orig game_settings +0x40] BuildFlags |0x20; join-reject 19
 	std::string side_b_password;               // [orig game_settings +0x60] BuildFlags |0x10; join-reject 20
-	// Signed spectator limit: 0 disables spectating, -1 shares max_players,
-	// and a positive value adds that many spectator-only capacity slots.
-	// [orig: HostDialog_ReadSettings @0x555940; CNapiNetwork_ValidateJoinRequest
-	// @0x4c61b0]
+	// Signed spectator limit: 0 disables spectating, -1 shares max_players, and
+	// a positive value is the game-layer join's spectator count (DPC 15); it
+	// never widens the 0x42 gate (join_capacity). Our slot table still grows by
+	// a positive count (total_player_slot_capacity, D-NET-401).
+	// [orig: maxSpectators_26C, HostDialog_ReadSettings @0x555940;
+	//  Server_ValidatePlayerJoinRequest @0x51235C]
 	int32_t spectator_slots = 0;
 	std::string spectator_password;             // [orig SPECTATOR_PW; BuildFlags |0x4000]
 	// Host-dialog configuration retained for the session. Readback and defaults:
@@ -102,9 +104,20 @@ struct GameConfig {
 	// [orig: Game_ApplySessionSettingsToGlobals @0x551F6F..0x551F75]. A
 	// session's word rides config_bytes[6] (game.cfg's mp_difficulty).
 	int32_t profile_difficulty = 0;
-	// (retail game_settings +0x80 internet_address has no reader here; +0xC4
-	//  use_lineup_queue and +0xC8 lineup_queue_size, which the join gate reads,
-	//  are not modelled: join_capacity, D-NET-403.)
+	// (retail game_settings +0x80 internet_address has no reader here.)
+	// The session's lineup queue, game.cfg's mpuselineupqueue / mplineupqueuesize
+	// (the host file's UseLineUpQueue / LineUpQueueSize; the cfg table's 1 /
+	// 100): while the queue is on and its size positive, the 0x42 join gate
+	// admits that many connections past the cap and its full reject carries JFP
+	// 5 (join_capacity, lineup_queue_open). Zero here keeps a bare config's gate
+	// at its cap; host_screen_default_config and host_session_settings carry the
+	// cfg's words.
+	// [orig: game_settings +0xC4 use_lineup_queue / +0xC8 lineup_queue_size,
+	//  filled from g_GameConfigState.useLineupQueue_3F8 / lineupQueueSize_3FC by
+	//  CNapiGameSession_BuildAndCreateSession @0x569626..0x569646; read as
+	//  ctx+0xF2C / +0xF30 by CNapiNetwork_ValidateJoinRequest @0x4C6220..0x4C624E]
+	int32_t use_lineup_queue = 0;
+	int32_t lineup_queue_size = 0;
 	// The session's player cap: the cfg max the session create put into 1..65
 	// (session_player_cap), without the dedicated host's own slot. The MP TLV,
 	// the LAN discovery reply, the join gate, the spawn pump and the status
@@ -417,9 +430,10 @@ struct GameConfig {
 	uint32_t player_slot_limit() const;
 
 	// The fixed player-slot table: the slot limit, grown by the positive
-	// spectator-only slots ours admits (join_capacity) and clamped to 251
-	// rows. Retail's table is the slot limit alone (D-NET-401), and a limit
-	// past 65 allocates none (D-NET-402).
+	// spectator count and clamped to 251 rows. Retail's table is the slot limit
+	// alone (D-NET-401), and a limit past 65 allocates none (D-NET-402); its
+	// gate admits the lineup queue past the cap (join_capacity), so it can admit
+	// more connections than it has rows, which is D-NET-401's open half.
 	// [orig: g_PlayerSlotCapacity @0x24C0CA4 = the slot limit,
 	//  Server_InitNewRoundState @0x51C976..0x51C97B]
 	uint32_t total_player_slot_capacity() const {
@@ -428,16 +442,23 @@ struct GameConfig {
 		return static_cast<uint32_t>(total < 251u ? total : 251u);
 	}
 
+	// The lineup queue counts at the join gate: on, with a positive size.
+	// [orig: CNapiNetwork_ValidateJoinRequest - `test edx, edx` over ctx+0xF2C
+	//  @0x4C6226, `test eax, eax; jle` over ctx+0xF30 @0x4C6236..0x4C6238; the
+	//  same two tests pick the reject's reason @0x4C6241..0x4C624C]
+	bool lineup_queue_open() const { return use_lineup_queue != 0 && lineup_queue_size > 0; }
+
 	// The join gate's capacity: ONE count of players and spectators against
 	// the session's cap (never the slot limit, so a dedicated host admits
-	// max_players joiners) plus a positive spectator limit; -1 shares the cap,
-	// 0 adds nothing. The add has no clamp. Retail adds the lineup queue's
-	// size there instead, while the queue is on (game_settings +0xC8 under
-	// +0xC4, stock 1 / 100), which this config does not model (D-NET-403).
-	// [orig: CNapiNetwork_ValidateJoinRequest @0x4C6220..0x4C623F]
-	uint32_t join_capacity() const {
-		return max_players +
-				(spectator_slots > 0 ? static_cast<uint32_t>(spectator_slots) : 0u);
+	// max_players joiners), plus the lineup queue's size while it is open; the
+	// spectator limit never widens it (that is the game-layer join's DPC 15).
+	// The add is a 32-bit add with no clamp, and the gate compares it signed,
+	// so a size that wraps the sum admits nothing.
+	// [orig: CNapiNetwork_ValidateJoinRequest @0x4C6220..0x4C623F - ecx = ctx+0xF28,
+	//  `add ecx, eax` @0x4C623A, `cmp [esi+2Ch], ecx; jl` @0x4C623C..0x4C623F]
+	int32_t join_capacity() const {
+		const uint32_t queue = lineup_queue_open() ? static_cast<uint32_t>(lineup_queue_size) : 0u;
+		return static_cast<int32_t>(max_players + queue);
 	}
 
 	uint32_t effective_send_holdoff_ticks(

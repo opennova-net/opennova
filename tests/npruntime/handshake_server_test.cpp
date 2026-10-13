@@ -2886,6 +2886,9 @@ bool run_spectator_admission_codes_match_retail() {
 	settings.max_players = 1;
 	settings.spectator_slots = 1;
 	settings.spectator_password = "watch";
+	// The 0x42 gate's headroom is the lineup queue's, one connection here.
+	settings.use_lineup_queue = 1;
+	settings.lineup_queue_size = 1;
 	inmatch::test::bring_up_host(
 			ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
 			kHostKey, nullptr, settings);
@@ -2912,11 +2915,11 @@ bool run_spectator_admission_codes_match_retail() {
 		return false;
 	}
 
-	// The 0x42 gate is ONE shared count against max_players + positive slots:
-	// an ordinary player may occupy the spectator headroom (retail has no
-	// separate ordinary cap), and the join past the shared total rejects with
-	// the CR=0 0x82 carrying JFC=14 and JFP=5 (the positive-spectator-slots
-	// reason). [orig: CNapiNetwork_ValidateJoinRequest @0x4c61b0 reasons 4/5;
+	// The 0x42 gate is ONE shared count, players and spectators alike, against
+	// max_players plus the open lineup queue: an ordinary player may take the
+	// queue's headroom, and the join past the shared total rejects with the
+	// CR=0 0x82 carrying JFC=14 and JFP=5 (the open-queue reason).
+	// [orig: CNapiNetwork_ValidateJoinRequest @0x4c6220..0x4c624e reasons 4/5;
 	// NapiNPProtocol_SendJoinRejection @0x620cd0]
 	{
 		const std::string player_scrk =
@@ -2926,10 +2929,8 @@ bool run_spectator_admission_codes_match_retail() {
 		const PeerAddr player_peer{0x0100007Fu, 32014};
 		inmatch::HandleResult player_result = inmatch::handle_server_datagram(
 				ctx, player_peer, player_auth.data(), player_auth.size(), 4);
-		if (!expect(
-				!player_result.outbound.empty() &&
-				inmatch::connection_count(ctx) == 2,
-				"an ordinary player occupies the spectator headroom (shared count)")) {
+		if (!expect(!player_result.outbound.empty() && inmatch::connection_count(ctx) == 2,
+					"an ordinary player occupies the lineup queue's headroom (shared count)")) {
 			return false;
 		}
 		const PeerAddr third{0x0100007Fu, 32013};
@@ -3111,6 +3112,103 @@ bool run_capacity_rejects_when_full() {
 	return true;
 }
 
+// The 0x42 gate's headroom is the session's lineup queue (D-NET-403): the cap plus the queue's
+// size while the queue is on and its size positive, counted signed, the full reject's reason
+// JFP 5 under that same test, else JFP 4. A positive spectator limit never widens the gate
+// (its count is the game-layer join's DPC 15).
+// [orig: CNapiNetwork_ValidateJoinRequest @0x4C6220..0x4C623F (the capacity), @0x4C6241..0x4C624E
+//  (the reason); CNapiGameSession_BuildAndCreateSession @0x569626..0x569646 (the two words)]
+bool run_join_gate_admits_the_lineup_queue() {
+	const std::string scrk = "LINEUPQUEUESCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
+	// Joins `count` peers in turn and returns the last one's reply: 0 when it was admitted,
+	// else the reject's JFP (0xFFFFFFFF when no 0x82 came back).
+	auto last_join = [&](inmatch::NapiNPServerCtx &ctx, uint16_t base_port, int count) {
+		uint32_t result = 0;
+		for (int i = 0; i < count; ++i) {
+			const PeerAddr peer{ 0x0100007Fu, static_cast<uint16_t>(base_port + i) };
+			auto a = craft_auth(
+					"JOINTOPERATIONS", kHostKey, 0x7000u + static_cast<uint32_t>(i), scrk);
+			const inmatch::HandleResult r = inmatch::handle_server_datagram(
+					ctx, peer, a.data(), a.size(), static_cast<uint32_t>(i + 1));
+			uint8_t opcode = 0;
+			std::vector<uint8_t> body;
+			ServerAuth reply;
+			if (r.outbound.empty() ||
+					!nw_decode_inbound(
+							r.outbound.front().data(), r.outbound.front().size(), opcode, body) ||
+					opcode != SESSION_OPCODE_SERVER_AUTH ||
+					!parse_server_auth(body.data(), body.size(), reply)) {
+				result = 0xFFFFFFFFu;
+			} else {
+				result = reply.cr == 1 ? 0u : (reply.jfc == 14 ? reply.jfp : 0xFFFFFFFEu);
+			}
+		}
+		return result;
+	};
+	auto host = [](inmatch::NapiNPServerCtx &ctx, const inmatch::GameConfig &settings) {
+		inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly,
+				inmatch::SocketMode::Lan, kHostKey, nullptr, settings);
+	};
+
+	// A positive spectator limit with the queue off: the gate is the bare cap.
+	{
+		inmatch::GameConfig settings;
+		settings.max_players = 1;
+		settings.spectator_slots = 2;
+		inmatch::NapiNPServerCtx ctx;
+		host(ctx, settings);
+		if (!expect(settings.join_capacity() == 1 && last_join(ctx, 32301, 2) == 4u &&
+							inmatch::connection_count(ctx) == 1,
+					"a spectator limit never widens the 0x42 gate: the second joiner meets the "
+					"cap with JFP 4"))
+			return false;
+	}
+	// The queue on with a positive size: the cap plus the queue, then JFP 5.
+	{
+		inmatch::GameConfig settings;
+		settings.max_players = 1;
+		settings.use_lineup_queue = 1;
+		settings.lineup_queue_size = 2;
+		inmatch::NapiNPServerCtx ctx;
+		host(ctx, settings);
+		if (!expect(settings.lineup_queue_open() && settings.join_capacity() == 3 &&
+							last_join(ctx, 32311, 3) == 0u && inmatch::connection_count(ctx) == 3,
+					"the open queue admits two connections past a cap of one"))
+			return false;
+		if (!expect(last_join(ctx, 32321, 1) == 5u && inmatch::connection_count(ctx) == 3,
+					"the join past the cap and the queue rejects with JFP 5"))
+			return false;
+	}
+	// A queue switched off, or of no size, adds nothing and the reject is JFP 4.
+	const std::pair<int32_t, int32_t> closed_queues[] = { { 0, 5 }, { 1, 0 }, { 1, -3 } };
+	for (const std::pair<int32_t, int32_t> &closed : closed_queues) {
+		inmatch::GameConfig settings;
+		settings.max_players = 1;
+		settings.use_lineup_queue = closed.first;
+		settings.lineup_queue_size = closed.second;
+		inmatch::NapiNPServerCtx ctx;
+		host(ctx, settings);
+		if (!expect(!settings.lineup_queue_open() && settings.join_capacity() == 1 &&
+							last_join(ctx, 32331, 2) == 4u,
+					"a closed queue (off, or a size of zero or less) keeps the cap and JFP 4"))
+			return false;
+	}
+	// The add is 32-bit and the compare signed: a size that wraps the sum admits nothing.
+	{
+		inmatch::GameConfig settings;
+		settings.max_players = 2;
+		settings.use_lineup_queue = 1;
+		settings.lineup_queue_size = 0x7FFFFFFF;
+		inmatch::NapiNPServerCtx ctx;
+		host(ctx, settings);
+		if (!expect(settings.join_capacity() < 0 && last_join(ctx, 32341, 1) == 5u &&
+							inmatch::connection_count(ctx) == 0,
+					"a queue that wraps the capacity negative admits no one"))
+			return false;
+	}
+	return true;
+}
+
 // A Serve Only host (D-NET-400) advertises, admits and publishes its session cap; only the
 // slot limit carries its own slot. A cfg block with a cap of 2, dedicated, makes a session
 // whose LAN discovery 0x81 MP is 2 (protocol +0x524, the session's copy of the cap), whose
@@ -3128,8 +3226,7 @@ bool run_dedicated_host_advertises_and_admits_its_cap() {
 	cfg.mp_max_players = 2;
 	cfg.dedicated = 1;
 	cfg.unlimited_vehicles = 0;
-	// The gate's bare cap: retail adds the lineup queue's size while it is on
-	// (stock 1 / 100), which the port does not model (D-NET-403).
+	// The gate's bare cap: the lineup queue off (stock 1 / 100 would admit the third).
 	cfg.mp_use_lineup_queue = 0;
 	const inmatch::HostScreenState serve_only = inmatch::host_session_settings(cfg);
 	inmatch::NapiNPServerCtx ctx;
@@ -3176,6 +3273,28 @@ bool run_dedicated_host_advertises_and_admits_its_cap() {
 	            rejected.cr == 0 && rejected.jfc == 14 && rejected.jfp == 4 &&
 	            inmatch::connection_count(ctx) == 2,
 	            "the third joiner meets the full cap, not the dedicated slot")) return false;
+
+	// The stock queue on: the same third joiner is admitted past the cap.
+	{
+		gamecfg::GameCfg queued = gamecfg::defaults();
+		queued.mp_max_players = 2;
+		queued.dedicated = 1;
+		const inmatch::HostScreenState stock = inmatch::host_session_settings(queued);
+		inmatch::NapiNPServerCtx queued_ctx;
+		inmatch::test::bring_up_host(queued_ctx, inmatch::ConnectionMode::HostOnly,
+				inmatch::SocketMode::Lan, kHostKey, nullptr, stock.config);
+		auto queued_join = [&](const PeerAddr &p, uint32_t ck, uint32_t now) {
+			auto a = craft_auth("JOINTOPERATIONS", kHostKey, ck, scrk);
+			return inmatch::handle_server_datagram(queued_ctx, p, a.data(), a.size(), now);
+		};
+		queued_join(PeerAddr{ 0x0100007Fu, 32161 }, 0x5161u, 2);
+		queued_join(PeerAddr{ 0x0100007Fu, 32162 }, 0x5162u, 3);
+		queued_join(PeerAddr{ 0x0100007Fu, 32163 }, 0x5163u, 4);
+		if (!expect(stock.config.join_capacity() == 102 &&
+							inmatch::connection_count(queued_ctx) == 3,
+					"the stock lineup queue (1 / 100) admits a third joiner past a cap of 2"))
+			return false;
+	}
 
 	cfg.dedicated = 0;
 	cfg.unlimited_vehicles = 2;
@@ -4097,6 +4216,7 @@ int main(int argc, char **argv) {
 	ok = run_host_server_hello_writes_its_own_identity() && ok;
 	ok = run_spectator_admission_codes_match_retail() && ok;
 	ok = run_capacity_rejects_when_full() && ok;
+	ok = run_join_gate_admits_the_lineup_queue() && ok;
 	ok = run_dedicated_host_advertises_and_admits_its_cap() && ok;
 	ok = run_mps_negotiates_the_connection_ceiling() && ok;
 	ok = run_character_join_vars_parsed() && ok;

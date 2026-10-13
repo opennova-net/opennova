@@ -125,6 +125,11 @@ GameConfig host_screen_default_config() {
 	config.destroy_buildings = game_rules::kDefaultDestroyBuildings;
 	config.death_messages = game_rules::kDefaultDeathMessages;
 	config.custom_text = game_rules::kCustomTextDefault;
+	// The lineup queue the session create copies from the block, the cfg
+	// table's defaults [orig: mpuselineupqueue "1" @0x833290, mplineupqueuesize
+	// "100" @0x8332A8 -> useLineupQueue_3F8 / lineupQueueSize_3FC]
+	config.use_lineup_queue = 1;
+	config.lineup_queue_size = 100;
 	return config;
 }
 

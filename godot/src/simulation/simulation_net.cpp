@@ -73,11 +73,17 @@ opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type)
 		cfg.config = inmatch::singleplayer_game_config(p_game_type,
 				player_.profile_record_set ? &player_.profile_record : nullptr);
 	}
-	// Every session create reads the process's cfg block word, single player's
+	// Every session create reads the process's cfg block words, single player's
 	// and a host's alike (engine: inmatch/game_config_block.h; the create's
-	// ProcessExit, inmatch/server_session.h).
-	if (net_.game_config.is_valid())
-		cfg.config.multiplayer_reset = net_.game_config->native().cfg().mp_reset;
+	// ProcessExit, inmatch/server_session.h): mpreset, and the lineup queue the
+	// 0x42 gate admits past the cap (GameConfig::join_capacity; the session
+	// create's copy, CNapiGameSession_BuildAndCreateSession @0x569626..0x569646).
+	if (net_.game_config.is_valid()) {
+		const opennova::gamecfg::GameCfg &block = net_.game_config->native().cfg();
+		cfg.config.multiplayer_reset = block.mp_reset;
+		cfg.config.use_lineup_queue = block.mp_use_lineup_queue;
+		cfg.config.lineup_queue_size = block.mp_lineup_queue_size;
+	}
 	cfg.socket_mode = is_host_listening() ? inmatch::SocketMode::Lan : inmatch::SocketMode::Socketless;
 	cfg.serve_and_play = is_host_listening() ? net_.host_serve_and_play : true;
 	cfg.network_type = is_host_listening() ? net_.host_network_type : inmatch::NetworkType::Lan;
