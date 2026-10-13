@@ -971,7 +971,7 @@ void MissionViewportApplier::drop_entities_() {
 	// The husks go with what they stood in for (an individual one's with its intact model, a graft here).
 	for (auto &entry : husks_)
 		if (entry.second.intact == 0)
-			if (ObjectModel *model = Object::cast_to<ObjectModel>(ObjectDB::get_instance(ObjectID(entry.second.model)))) model->queue_free();
+			if (ObjectModel *model = Object::cast_to<ObjectModel>(ObjectDB::get_instance(entry.second.graft.husk))) model->queue_free();
 	husks_.clear();
 	for (auto &entry : entities_)
 		if (entry.second.lifted)
@@ -1395,13 +1395,13 @@ void MissionViewportApplier::tick(const opennova::editor::ViewportModel &viewpor
 }
 
 void MissionViewportApplier::unhusk_(Husk &husk) {
-	if (ObjectModel *model = Object::cast_to<ObjectModel>(ObjectDB::get_instance(ObjectID(husk.model)))) {
+	// The intact entity as it stood (simulation/husk_swap: its parts shown, a carved static's rows back, its terrain
+	// shadow its own again), the husk model freed.
+	husk_graft_restore(placer_.ptr(), husk.graft);
+	if (ObjectModel *model = Object::cast_to<ObjectModel>(ObjectDB::get_instance(husk.graft.husk))) {
 		model->set_visible(false);
 		model->queue_free();
 	}
-	for (const auto &child : husk.hidden_children)
-		if (Node3D *node = Object::cast_to<Node3D>(ObjectDB::get_instance(ObjectID(child.first)))) node->set_visible(child.second);
-	if (husk.intact == 0 && husk.key != 0 && placer_.is_valid()) placer_->show_static_instance(husk.key);
 	husk = Husk();
 	relight_pending_ = true;
 	picture_moved_();
@@ -1419,10 +1419,11 @@ void MissionViewportApplier::apply_husks_(const MissionViewport &mission, int32_
 	for (auto it = husks_.begin(); it != husks_.end();) {
 		const auto now = due.find(it->first);
 		const auto placed = entities_.find(it->first);
-		const bool stands = now != due.end() && now->second.husk == it->second.husk && placed != entities_.end() &&
-				!placed->second.hidden && placed->second.model == it->second.intact &&
-				(it->second.intact != 0 || placed->second.key == it->second.key) &&
-				ObjectDB::get_instance(ObjectID(it->second.model)) != nullptr;
+		const Husk &held = it->second;
+		const bool stands = now != due.end() && now->second.husk == held.husk && placed != entities_.end() &&
+				!placed->second.hidden && placed->second.model == held.intact &&
+				(held.intact != 0 || placed->second.key == held.graft.bms_id) &&
+				ObjectDB::get_instance(held.graft.husk) != nullptr;
 		if (stands) {
 			++it;
 			continue;
@@ -1437,50 +1438,29 @@ void MissionViewportApplier::apply_husks_(const MissionViewport &mission, int32_
 		if (found == entities_.end() || found->second.hidden) continue;
 		const Placed &placed = found->second;
 		Husk &husk = husks_[row];
-		ObjectModel *model = Object::cast_to<ObjectModel>(ObjectDB::get_instance(ObjectID(husk.model)));
+		ObjectModel *model = Object::cast_to<ObjectModel>(ObjectDB::get_instance(husk.graft.husk));
 		if (model == nullptr) {
-			// Swapped in as the game's destruction presenter swaps it (simulation/destruction_presenter.cpp's
-			// apply_husk_swap): an individual model's husk under it, its own parts hidden; a retained static's rows
-			// hidden and the husk grafted at its placed transform, its projection the static's.
+			// Swapped in through the game's own swap (simulation/husk_swap, the destruction presenter's): an
+			// individual model's husk under it, its parts hidden; a retained static carved out of its batches and the
+			// husk grafted at its placed transform; either way the husk keeps the entity's terrain shadow, mirror
+			// flag, projection and occlusion masks.
 			const String graphic = opennova::to_gd(frame.husk);
 			husk = Husk();
 			husk.husk = frame.husk;
+			HuskGraftResult result = HuskGraftResult::NotCarved;
 			if (ObjectModel *intact = model_of_(placed)) {
-				model = placer_->build_model_from_graphic(graphic, String(), intact, String(), String(), true);
-				if (model == nullptr) {
-					husks_.erase(row);
-					continue;
-				}
-				model->set_name("HuskModel");
-				model->set_authored_lod_projection_owner(intact);
-				for (int i = 0; i < intact->get_child_count(); ++i) {
-					Node3D *child = Object::cast_to<Node3D>(intact->get_child(i));
-					if (child == nullptr || child == model) continue;
-					husk.hidden_children.emplace_back(child->get_instance_id(), child->is_visible());
-					child->set_visible(false);
-				}
+				result = husk_graft_individual(**placer_, *intact, graphic, placed.key, husk.graft);
 				husk.intact = intact->get_instance_id();
 			} else if (placed.key != 0) {
-				const Variant at = placer_->hide_static_instance(placed.key);
-				if (at.get_type() != Variant::TRANSFORM3D) {
-					husks_.erase(row);
-					continue;
-				}
-				model = placer_->build_model_from_graphic(graphic, String(), lifted_root_, String(), String(), true);
-				if (model == nullptr) {
-					placer_->show_static_instance(placed.key);
-					husks_.erase(row);
-					continue;
-				}
-				model->set_name(vformat("HuskModel_%d", int64_t(row)));
-				model->set_transform(Transform3D(at));
-				placer_->inherit_static_entity_projection(placed.key, model);
-				husk.key = placed.key;
-			} else {
+				result = husk_graft_static(**placer_, *lifted_root_, placed.key, graphic, husk.graft);
+			}
+			model = result == HuskGraftResult::Grafted
+					? Object::cast_to<ObjectModel>(ObjectDB::get_instance(husk.graft.husk))
+					: nullptr;
+			if (model == nullptr) {
 				husks_.erase(row);
 				continue;
 			}
-			husk.model = model->get_instance_id();
 			relight_pending_ = true;
 			picture_moved_();
 		}

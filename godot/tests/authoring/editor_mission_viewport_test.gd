@@ -1768,7 +1768,7 @@ func test_a_shot_swaps_in_the_husk() -> void:
 		_app.pump()
 		await get_tree().process_frame
 		deaths = _state().get("body", {}).get("shots", {}).get("deaths", [])
-		var found := _device(_state()).find_children("HuskModel_%d" % int(pump["id"]), "ObjectModel", true, false)
+		var found := _device(_state()).find_children("HuskModel_%d" % key, "ObjectModel", true, false)
 		if not found.is_empty():
 			husk = found[0]
 			break
@@ -1790,7 +1790,7 @@ func test_a_shot_swaps_in_the_husk() -> void:
 		_app.pump()
 		await get_tree().process_frame
 	assert_false(placer.is_static_instance_hidden(key), "the pump shown again")
-	assert_true(_device(_state()).find_children("HuskModel_%d" % int(pump["id"]), "ObjectModel", true, false).is_empty()
+	assert_true(_device(_state()).find_children("HuskModel_%d" % key, "ObjectModel", true, false).is_empty()
 			or not is_instance_valid(husk) or husk.is_queued_for_deletion(), "the husk let go")
 
 
