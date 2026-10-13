@@ -19,7 +19,11 @@
 // on Windows, the parent-death signal on Linux. The kernel sends that signal
 // when the THREAD that started the child exits, so start children from a
 // thread that lives as long as they should (LocalProcessProvider keeps a
-// spawner thread of its own for this). A ChildProcess owns its child:
+// spawner thread of its own for this). Without `end_with_parent` the child is
+// meant to outlive this process: on Windows it breaks away from any job this
+// process is in (where that job allows it), so the job's kill-on-close does not
+// take it down; on POSIX it leads a session of its own (setsid), so a hangup of
+// this process's terminal does not either. A ChildProcess owns its child:
 // destroying one whose child still runs kills the child and reaps it, unless
 // release() let it go first.
 //
@@ -60,12 +64,15 @@ struct SpawnOptions {
 	bool behind = false;
 };
 
-// A process as the OS knows it: the image it runs, as the OS reports it (a link
-// or an alias resolved; '/'-separated), and when the OS created it, as the
-// platform writes it (Windows: GetProcessTimes' creation FILETIME as a decimal
-// 100 ns count; Linux: /proc/<pid>/stat's starttime, clock ticks after boot).
-// `created` is compared with another of the same platform, never read: equal
-// for one process, different for another that later takes its pid.
+// A process as the OS knows it: the image it runs, '/'-separated (Windows: the
+// path it was started by, QueryFullProcessImageNameW's, with any 8.3 component
+// spelled out by GetLongPathNameW; Linux: /proc/<pid>/exe's target, a link
+// resolved), and when the OS created it, as the platform writes it (Windows:
+// GetProcessTimes' creation FILETIME as a decimal 100 ns count; Linux:
+// "<boot_id>:<starttime>", the boot's id from /proc/sys/kernel/random/boot_id
+// and /proc/<pid>/stat's starttime in clock ticks after boot). `created` is
+// compared with another of the same platform, never read: equal for one
+// process, different for another that later takes its pid, after a reboot too.
 struct ProcessIdentity {
 	std::string image;
 	std::string created;
@@ -84,7 +91,9 @@ enum class Liveness : uint8_t { Alive, Dead, Unknown };
 // not positive, when the process will not be opened (Windows' OpenProcess for
 // PROCESS_QUERY_LIMITED_INFORMATION alone, which an elevated process still
 // grants, failing for any reason but that no such process exists), and on
-// platforms other than Windows and Linux.
+// platforms other than Windows and Linux. On Windows the exit is asked by
+// waiting on the process (SYNCHRONIZE; its exit code could be STILL_ACTIVE's
+// 259), and by its exit code only where that right is refused.
 Liveness process_liveness(int64_t pid, const std::string &created);
 
 // This process's environment as NAME=value entries (Windows' hidden
@@ -139,23 +148,26 @@ public:
 	// Asks the child to stop. POSIX: SIGTERM (opennova-serve then stops its
 	// session and deregisters). Windows: WM_CLOSE posted to each of the child's
 	// top-level unowned windows (a game's orderly quit); a child with no such
-	// window (a console or headless one, opennova-serve's) has no stop request
-	// to take, so it is ended with TerminateProcess. A child may ignore the
-	// request: a caller that needs it gone waits, then kill()s. A no-op once it
-	// exited.
-	void terminate();
+	// window (a console or headless one, opennova-serve's, or a GUI one whose
+	// window is not up yet) has no stop request to take, so it is ended with
+	// TerminateProcess, or with `polite_only` left alone. True when the request
+	// was delivered (a WM_CLOSE posted, SIGTERM sent) or the fallback ended the
+	// child; false when nothing was delivered or no child runs. A child may
+	// ignore the request: a caller that needs it gone waits, then kill()s.
+	bool terminate(bool polite_only = false);
 	// Ends the child now: SIGKILL, or TerminateProcess (code 1). Returns at once;
 	// wait() reaps it. A no-op once it exited.
 	void kill();
 
 	// Lets the child go without ending it: this object forgets it (closing the
 	// handles it holds; a POSIX child is reaped by a detached thread once it
-	// exits), keeps no exit code, and then holds nothing. The child must have
-	// been started with end_with_parent false: one started with it true that
-	// still runs would end with this process regardless (the job's
-	// kill-on-close, the parent-death signal, which cannot be taken back), so
-	// that release() is refused (false) and the child stays held. True
-	// otherwise, also when nothing was held.
+	// exits), keeps no exit code, and then holds nothing. A child meant to be
+	// let go is started with end_with_parent false. One that runs in its
+	// kill-on-close job (Windows) or with the parent-death signal armed (Linux)
+	// would end with this process regardless (neither can be taken back), so
+	// that release() is refused (false) and the child stays held; where the
+	// job or the signal could not be set up, it is let go. True otherwise, also
+	// when nothing was held.
 	bool release();
 
 private:
@@ -163,7 +175,7 @@ private:
 
 	int64_t pid_ = 0;
 	std::optional<uint32_t> exit_code_;
-	bool end_with_parent_ = true;
+	bool ends_with_parent_ = false; // the kill-on-close job or the parent-death signal is armed
 	ProcessIdentity identity_; // read at spawn
 #ifdef _WIN32
 	void *process_ = nullptr; // HANDLE, kept until release() or destruction

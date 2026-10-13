@@ -79,10 +79,16 @@ add_test(NAME os_random COMMAND os_random_test)
 # against the test binary itself (its path is the argument; `--child <mode>` makes it
 # the child): exit codes (unsigned on Windows), every argument whole, the working
 # directory, stdin and the output file, terminate and kill, the refusals, the
-# environment, the identity and process_liveness, release, on Windows the paths past
-# MAX_PATH, and on POSIX no inherited descriptor.
+# environment, the identity and process_liveness, release (past the starter's
+# kill-on-close job), on Windows the polite stop of a window child started behind and
+# the paths past MAX_PATH, and on POSIX the released child's own session and no
+# inherited descriptor.
 add_executable(child_process_test proc/child_process_test.cpp)
 target_link_libraries(child_process_test PRIVATE opennova_base)
+if(WIN32)
+    # The window child (CreateWindowExW, the message loop) and the job query.
+    target_link_libraries(child_process_test PRIVATE user32)
+endif()
 target_compile_features(child_process_test PRIVATE cxx_std_17)
 target_include_directories(child_process_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME child_process COMMAND child_process_test $<TARGET_FILE:child_process_test>)

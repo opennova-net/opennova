@@ -94,28 +94,41 @@ std::wstring native_path(const std::string &path) {
 	return out;
 }
 
-// A path CreateProcessW takes: one past `limit` characters (the system's current
-// directory holds MAX_PATH less its trailing backslash and terminator, an image
-// MAX_PATH less its terminator) given in its short (8.3) form where the volume
-// keeps one, asked through the \\?\ form a long path needs; empty where even that
-// is past the limit (the spawn is refused, never handed a path it would cut).
-std::wstring within(const std::wstring &path, size_t limit) {
-	if (path.size() <= limit)
-		return path;
+// `path` without the \\?\ (or \\?\UNC\) prefix a call was asked through.
+std::wstring without_extended_prefix(std::wstring path) {
+	if (path.rfind(L"\\\\?\\UNC\\", 0) == 0)
+		return L"\\\\" + path.substr(8);
+	if (path.rfind(L"\\\\?\\", 0) == 0)
+		path.erase(0, 4);
+	return path;
+}
+
+// `path` as GetShortPathNameW (`to_short`) or GetLongPathNameW spells it, asked
+// through the \\?\ form a long path needs; empty when the call fails (the file
+// is not there).
+std::wstring respelled(const std::wstring &path, bool to_short) {
 	const std::wstring extended = io::os_path(std::filesystem::path(path)).native();
-	const DWORD needed = GetShortPathNameW(extended.c_str(), nullptr, 0);
+	const auto call = to_short ? GetShortPathNameW : GetLongPathNameW;
+	const DWORD needed = call(extended.c_str(), nullptr, 0);
 	if (needed == 0)
 		return std::wstring();
 	std::wstring out(static_cast<size_t>(needed), L'\0');
-	const DWORD written = GetShortPathNameW(extended.c_str(), out.data(), needed);
+	const DWORD written = call(extended.c_str(), out.data(), needed);
 	if (written == 0 || written >= needed)
 		return std::wstring();
 	out.resize(written);
-	if (out.rfind(L"\\\\?\\UNC\\", 0) == 0) {
-		out = L"\\\\" + out.substr(8);
-	} else if (out.rfind(L"\\\\?\\", 0) == 0) {
-		out.erase(0, 4);
-	}
+	return without_extended_prefix(out);
+}
+
+// A path CreateProcessW takes: one past `limit` characters (the system's current
+// directory holds MAX_PATH less its trailing backslash and terminator, an image
+// MAX_PATH less its terminator) given in its short (8.3) form where the volume
+// keeps one; empty where even that is past the limit (the spawn is refused,
+// never handed a path it would cut).
+std::wstring within(const std::wstring &path, size_t limit) {
+	if (path.size() <= limit)
+		return path;
+	const std::wstring out = respelled(path, true);
 	return out.size() <= limit ? out : std::wstring();
 }
 
@@ -144,14 +157,18 @@ std::string creation_stamp(HANDLE handle) {
 constexpr DWORD kLongestPath = 32768;
 
 // The process's identity read through `handle` now. The image query fails once
-// the process has exited, so the spawn reads it while the child is there.
+// the process has exited, so the spawn reads it while the child is there. It
+// reports the path the child was started by, an 8.3 one included (within()'s),
+// so the image is spelled out in full (GetLongPathNameW) and compares equal
+// however the child was started.
 ProcessIdentity read_identity(HANDLE handle) {
 	ProcessIdentity out;
 	std::wstring image(kLongestPath, L'\0');
 	DWORD length = static_cast<DWORD>(image.size());
 	if (QueryFullProcessImageNameW(handle, 0, image.data(), &length) != 0) {
 		image.resize(length);
-		out.image = io::narrow_utf8(image);
+		const std::wstring full = respelled(image, false);
+		out.image = io::narrow_utf8(full.empty() ? image : full);
 		std::replace(out.image.begin(), out.image.end(), '\\', '/');
 	}
 	out.created = creation_stamp(handle);
@@ -215,6 +232,9 @@ int above_standard(int fd) {
 }
 
 // A released child's reaper: waits for its exit so it leaves no zombie behind.
+// Not hot-reload safe: the detached thread runs this module's code until the
+// child exits, so a module unloaded meanwhile (a reloaded GDExtension) would
+// leave it running code that is gone.
 void *reap_released(void *arg) {
 	const pid_t pid = static_cast<pid_t>(reinterpret_cast<intptr_t>(arg));
 	int status = 0;
@@ -270,8 +290,39 @@ bool read_proc_stat(int64_t pid, char &state, std::string &starttime, bool &miss
 	return true;
 }
 
+// This boot's id (/proc/sys/kernel/random/boot_id), read once; "" when it
+// cannot be read.
+const std::string &boot_id() {
+	static const std::string id = [] {
+		std::string text;
+		const int fd = ::open("/proc/sys/kernel/random/boot_id", O_RDONLY | O_CLOEXEC);
+		if (fd >= 0) {
+			char buffer[64];
+			ssize_t got = 0;
+			do {
+				got = ::read(fd, buffer, sizeof(buffer));
+			} while (got < 0 && errno == EINTR);
+			if (got > 0)
+				text.assign(buffer, static_cast<size_t>(got));
+			::close(fd);
+		}
+		while (!text.empty() && (text.back() == '\n' || text.back() == ' '))
+			text.pop_back();
+		return text;
+	}();
+	return id;
+}
+
+// A process's creation stamp from its starttime: "<boot_id>:<starttime>", so a
+// process of another boot that reuses the pid and the starttime never matches
+// (the starttime alone where the boot id cannot be read).
+std::string creation_stamp(const std::string &starttime) {
+	const std::string &boot = boot_id();
+	return boot.empty() ? starttime : boot + ":" + starttime;
+}
+
 // Process `pid`'s identity read from /proc now: /proc/<pid>/exe's target (gone
-// once the process is a zombie) and its starttime.
+// once the process is a zombie) and its creation stamp.
 ProcessIdentity read_identity(int64_t pid) {
 	ProcessIdentity out;
 	const std::string exe = "/proc/" + std::to_string(pid) + "/exe";
@@ -288,8 +339,9 @@ ProcessIdentity read_identity(int64_t pid) {
 	}
 	char state = 0;
 	bool missing = false;
-	if (!read_proc_stat(pid, state, out.created, missing))
-		out.created.clear();
+	std::string starttime;
+	if (read_proc_stat(pid, state, starttime, missing))
+		out.created = creation_stamp(starttime);
 	return out;
 }
 
@@ -352,14 +404,26 @@ Liveness process_liveness(int64_t pid, const std::string &created) {
 	if (pid <= 0)
 		return Liveness::Unknown;
 #ifdef _WIN32
-	HANDLE handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, static_cast<DWORD>(pid));
+	// Whether it has exited is asked by waiting on it (SYNCHRONIZE): its exit
+	// code cannot tell, since a process may exit with STILL_ACTIVE's 259. One
+	// that will not grant that right is asked through the query right alone,
+	// and its exit code then has to do.
+	const DWORD id = static_cast<DWORD>(pid);
+	bool can_wait = true;
+	HANDLE handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, id);
+	if (handle == nullptr && GetLastError() == ERROR_ACCESS_DENIED) {
+		can_wait = false;
+		handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, id);
+	}
 	if (handle == nullptr) {
 		// No process of that id is Dead; one that will not be opened may be it: Unknown.
 		return GetLastError() == ERROR_INVALID_PARAMETER ? Liveness::Dead : Liveness::Unknown;
 	}
 	Liveness state = Liveness::Unknown;
 	DWORD code = 0;
-	if (GetExitCodeProcess(handle, &code) != 0 && code != STILL_ACTIVE) {
+	const bool exited = can_wait ? WaitForSingleObject(handle, 0) == WAIT_OBJECT_0
+								 : GetExitCodeProcess(handle, &code) != 0 && code != STILL_ACTIVE;
+	if (exited) {
 		state = Liveness::Dead; // it has exited (a handle someone holds keeps it listed)
 	} else if (!created.empty()) {
 		const std::string now = creation_stamp(handle);
@@ -378,7 +442,7 @@ Liveness process_liveness(int64_t pid, const std::string &created) {
 		return Liveness::Dead; // exited, not reaped yet
 	if (created.empty())
 		return Liveness::Unknown;
-	return starttime == created ? Liveness::Alive : Liveness::Dead;
+	return creation_stamp(starttime) == created ? Liveness::Alive : Liveness::Dead;
 #else
 	(void)created;
 	return Liveness::Unknown;
@@ -406,7 +470,7 @@ ChildProcess &ChildProcess::operator=(ChildProcess &&other) noexcept {
 	reset();
 	pid_ = other.pid_;
 	exit_code_ = other.exit_code_;
-	end_with_parent_ = other.end_with_parent_;
+	ends_with_parent_ = other.ends_with_parent_;
 	identity_ = std::move(other.identity_);
 	other.pid_ = 0;
 	other.exit_code_.reset();
@@ -430,6 +494,7 @@ void ChildProcess::reset() {
 	job_ = nullptr;
 #endif
 	pid_ = 0;
+	ends_with_parent_ = false;
 	identity_ = ProcessIdentity{};
 }
 
@@ -446,7 +511,7 @@ int64_t ChildProcess::pid() const { return pid_; }
 bool ChildProcess::release() {
 	// A child that ends with this process cannot be let go while it runs; one
 	// that has exited is reaped here and forgotten like any other.
-	if (started() && end_with_parent_ && !poll())
+	if (started() && ends_with_parent_ && !poll())
 		return false;
 #ifndef _WIN32
 	if (started()) {
@@ -561,21 +626,32 @@ bool ChildProcess::spawn(const SpawnOptions &options, std::string &error) {
 		startup.StartupInfo.wShowWindow = SW_SHOWNOACTIVATE;
 	}
 	startup.lpAttributeList = attributes;
-	// Suspended until it is in its job, so it cannot start a grandchild outside
-	// it. CREATE_NO_WINDOW keeps a console child from opening a console window;
-	// a GUI child's own windows are untouched.
+	// One that ends with this process starts suspended until it is in its job,
+	// so it cannot start a grandchild outside it. One that does not breaks away
+	// from any job this process is in, whose kill-on-close would otherwise end it
+	// with that job; where the job allows no breakaway, it stays in it.
+	// CREATE_NO_WINDOW keeps a console child from opening a console window; a
+	// GUI child's own windows are untouched.
 	DWORD flags = EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT;
-	if (options.end_with_parent) flags |= CREATE_SUSPENDED;
-	std::vector<wchar_t> command(command_line.begin(), command_line.end());
-	command.push_back(L'\0');
+	flags |= options.end_with_parent ? CREATE_SUSPENDED : CREATE_BREAKAWAY_FROM_JOB;
 	// The environment the options name, else this process's (null).
 	std::vector<wchar_t> environment;
 	if (options.environment) environment = environment_block(*options.environment);
 	PROCESS_INFORMATION info{};
-	const BOOL created = CreateProcessW(program.c_str(), command.data(), nullptr, nullptr, TRUE,
-			flags, options.environment ? environment.data() : nullptr,
-			cwd.empty() ? nullptr : cwd.c_str(), &startup.StartupInfo, &info);
-	const DWORD create_error = GetLastError();
+	DWORD create_error = 0;
+	auto create = [&](DWORD with) {
+		// A fresh buffer each time: CreateProcessW may write into the command line.
+		std::vector<wchar_t> command(command_line.begin(), command_line.end());
+		command.push_back(L'\0');
+		const BOOL ok = CreateProcessW(program.c_str(), command.data(), nullptr, nullptr, TRUE,
+				with, options.environment ? environment.data() : nullptr,
+				cwd.empty() ? nullptr : cwd.c_str(), &startup.StartupInfo, &info);
+		create_error = GetLastError();
+		return ok != 0;
+	};
+	bool created = create(flags);
+	if (!created && create_error == ERROR_ACCESS_DENIED && (flags & CREATE_BREAKAWAY_FROM_JOB) != 0)
+		created = create(flags & ~static_cast<DWORD>(CREATE_BREAKAWAY_FROM_JOB));
 	DeleteProcThreadAttributeList(attributes);
 	close_std();
 	if (!created) {
@@ -585,11 +661,14 @@ bool ChildProcess::spawn(const SpawnOptions &options, std::string &error) {
 	}
 	if (options.end_with_parent) {
 		// Best effort: a process already in a job that refuses nesting runs
-		// without one.
+		// without one. The job lets a process in it start one that breaks away
+		// (a child of the child that is itself started with end_with_parent
+		// false, above).
 		HANDLE job = CreateJobObjectW(nullptr, nullptr);
 		if (job != nullptr) {
 			JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
-			limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+			limits.BasicLimitInformation.LimitFlags =
+					JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK;
 			if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits,
 						sizeof(limits)) ||
 					!AssignProcessToJobObject(job, info.hProcess)) {
@@ -603,7 +682,7 @@ bool ChildProcess::spawn(const SpawnOptions &options, std::string &error) {
 	CloseHandle(info.hThread);
 	process_ = info.hProcess;
 	pid_ = static_cast<int64_t>(info.dwProcessId);
-	end_with_parent_ = options.end_with_parent;
+	ends_with_parent_ = job_ != nullptr;
 	identity_ = read_identity(info.hProcess);
 	return true;
 }
@@ -644,15 +723,20 @@ bool ChildProcess::identity(ProcessIdentity &out) const {
 	return !out.created.empty();
 }
 
-void ChildProcess::terminate() {
+bool ChildProcess::terminate(bool polite_only) {
 	if (!started())
-		return;
+		return false;
 	CloseRequest request;
 	request.pid = static_cast<DWORD>(pid_);
 	EnumWindows(close_top_level_window, reinterpret_cast<LPARAM>(&request));
-	// No window to ask: nothing else would carry the request.
-	if (request.posted == 0)
-		TerminateProcess(handle_of(process_), 1);
+	if (request.posted > 0)
+		return true;
+	// No window to ask (a console or headless child, a GUI one still starting):
+	// nothing would carry the request, so the child is ended, unless the
+	// caller asked politely only.
+	if (polite_only)
+		return false;
+	return TerminateProcess(handle_of(process_), 1) != 0;
 }
 
 void ChildProcess::kill() {
@@ -745,9 +829,13 @@ bool ChildProcess::spawn(const SpawnOptions &options, std::string &error) {
 			if (::getppid() != parent) ::_exit(127);
 		}
 #else
-		(void)end_with_parent;
 		(void)parent;
 #endif
+		// One meant to outlive this process leads a session of its own, so a
+		// hangup of this process's terminal, or a signal to its process group,
+		// misses it.
+		if (!end_with_parent)
+			::setsid();
 		// Handlers reset at exec on their own; an ignored signal stays ignored.
 		const int defaults[] = { SIGPIPE, SIGINT, SIGTERM, SIGHUP, SIGQUIT, SIGCHLD };
 		for (const int sig : defaults) ::signal(sig, SIG_DFL);
@@ -797,8 +885,8 @@ bool ChildProcess::spawn(const SpawnOptions &options, std::string &error) {
 		return false;
 	}
 	pid_ = static_cast<int64_t>(pid);
-	end_with_parent_ = options.end_with_parent;
 #ifdef __linux__
+	ends_with_parent_ = options.end_with_parent; // the parent-death signal armed
 	identity_ = read_identity(pid_);
 #endif
 	return true;
@@ -857,8 +945,9 @@ bool ChildProcess::identity(ProcessIdentity &out) const {
 #endif
 }
 
-void ChildProcess::terminate() {
-	if (started()) ::kill(static_cast<pid_t>(pid_), SIGTERM);
+bool ChildProcess::terminate(bool polite_only) {
+	(void)polite_only; // SIGTERM is the request itself
+	return started() && ::kill(static_cast<pid_t>(pid_), SIGTERM) == 0;
 }
 
 void ChildProcess::kill() {
