@@ -5,7 +5,8 @@ extends GutTest
 ## a colour stroke and a foliage stroke are each an Update of the picture (its builds stand, the device's Terrain node
 ## and its data stay the ones it built), the device's terrain takes them in place (its tile override holds the stamped
 ## tile, its colour map image the painted texels, its tile cache's pages recomposed with the art, its foliage map the
-## painted codes), and the mission's Undo puts each back.
+## painted codes), the mission's Undo puts each back, and what they make in place is what a rebuild over the same
+## files makes.
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
@@ -305,3 +306,93 @@ func test_a_foliage_stroke_is_an_update_its_codes_in_place() -> void:
 		await get_tree().process_frame
 	assert_eq(int(_state().get("builds", 0)), builds, "the undo is an Update")
 	assert_eq(data.get_foliage_index_world(AT.x, -AT.y), before, "the code as the terrain loaded it")
+
+
+## The review's m14: what the device's terrain shows after a tile, a colour and a foliage edit each taken in place is
+## what it shows built anew over the same files. The header's terrain set away and undone is a Rebuild of the same
+## state; the pages resident under the corner (their composed output) and the foliage codes around it match.
+func test_in_place_edits_equal_a_rebuild() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission())
+	_look_at_corner()
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	var builds := int(state.get("builds", 0))
+	var terrain := _terrain(state)
+	assert_not_null(terrain, "the device built its terrain")
+	if terrain == null:
+		return
+	var data := terrain.get_terrain_data()
+	var before := await _settled(terrain)
+	assert_true(bool(_stamp(2).get("outcome", {}).get("done", false)), "the stamp")
+	var colour: Dictionary = _seam.request({"kind": "terrain_stroke", "path": MISSION, "stroke": {"plane": "colour",
+			"brush": {"tool": "colour", "colour": "#20FF40", "radius": 6, "strength": 1}, "points": [[AT.x, AT.y]],
+			"gesture": 4646, "end": true}})
+	assert_true(bool(colour.get("outcome", {}).get("done", false)), str(colour.get("outcome")))
+	var foliage: Dictionary = _seam.request({"kind": "terrain_stroke", "path": MISSION, "stroke": {"plane": "foliage",
+			"brush": {"tool": "foliage", "foliage": 77, "radius": 6}, "points": [[AT.x, AT.y]], "gesture": 4747,
+			"end": true}})
+	assert_true(bool(foliage.get("outcome", {}).get("done", false)), str(foliage.get("outcome")))
+	var in_place := await _settled(terrain)
+	assert_eq(int(_state().get("builds", 0)), builds, "each edit an Update")
+	assert_ne(int(in_place.get("resident_output_hash", 0)), int(before.get("resident_output_hash", 0)),
+			"the pages show the tile and the colour")
+	var codes := _codes(terrain.get_terrain_data())
+	assert_true(codes.has(77), "the foliage stroke's codes in place")
+
+	# The header's terrain set away and back: built anew over the mission's files as they stand.
+	var page: Dictionary = _seam.query("document", {"path": MISSION, "limit": 1})
+	var rows: Array = page.get("rows", [])
+	assert_false(rows.is_empty(), str(page).left(300))
+	if rows.is_empty():
+		return
+	var header_id := int((rows[0] as Dictionary).get("id", 0))
+	var away: Dictionary = _seam.request({"kind": "edit_record", "path": MISSION,
+			"edits": [{"op": "set", "id": header_id, "field": "terrain", "value": "nightisle"}]})
+	assert_true(bool(away.get("outcome", {}).get("done", false)), str(away.get("outcome")).left(300))
+	state = await _built_after(builds)
+	var away_builds := int(state.get("builds", 0))
+	assert_gt(away_builds, builds, "the terrain set away is a Rebuild")
+	assert_true(bool(_seam.request({"kind": "undo", "path": MISSION}).get("outcome", {}).get("done", false)))
+	state = await _built_after(away_builds)
+	assert_gt(int(state.get("builds", 0)), away_builds, "and back, a Rebuild")
+	var rebuilt := _terrain(state)
+	assert_not_null(rebuilt, "the device built the terrain again")
+	if rebuilt == null:
+		return
+	assert_ne(rebuilt.get_terrain_data(), data, "its data read anew")
+	var tiles := rebuilt.get_tile_info_override()
+	assert_true(tiles != null and tiles.get_entry_count() == 1 and tiles.get_entry(0).get_tile_index() == 2,
+			"the rebuild reads the stamped tile")
+	var built := await _settled(rebuilt)
+	assert_eq(int(built.get("ready_pages", 0)), int(in_place.get("ready_pages", 0)), "the same pages resident")
+	assert_eq(int(built.get("resident_output_hash", 0)), int(in_place.get("resident_output_hash", 0)),
+			"the pages the edits made in place are the ones a rebuild composes")
+	assert_eq(_codes(rebuilt.get_terrain_data()), codes, "the foliage codes in place are the ones a rebuild reads")
+
+
+## The device's foliage codes over the 33 units around the point, a unit apart (the terrain's plane takes the
+## mission's -y).
+func _codes(data: TerrainData) -> PackedInt32Array:
+	var codes := PackedInt32Array()
+	if data == null:
+		return codes
+	for dy in range(-16, 17):
+		for dx in range(-16, 17):
+			codes.append(data.get_foliage_index_world(AT.x + dx, -(AT.y + dy)))
+	return codes
+
+
+## The viewport's state once its device has built past `builds` and is ready.
+func _built_after(builds: int) -> Dictionary:
+	var state := _state()
+	for _frame in 900:
+		if String(state.get("status", "")) == "ready" and int(state.get("builds", 0)) > builds \
+				and not bool(state.get("device", {}).get("build", {}).get("loading", true)):
+			break
+		await get_tree().process_frame
+		_app.pump()
+		state = _state()
+	_app.pump()
+	return _state()
