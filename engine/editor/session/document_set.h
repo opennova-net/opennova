@@ -218,6 +218,12 @@ private:
 	std::string edit_words(const Document &document, const std::vector<Edit> &edits, const std::string &named) const;
 	// The step the last edit of `document` made named with the status line's words (what Undo says).
 	void name_step(DocumentBase &document) const;
+	// A whole-file operation's document (a texture's, a wave's): opened first when the request asks; null,
+	// refused (`code`, or DocumentNotOpen), where it is no `noun` (`is_kind`) or an import makes its file.
+	DocumentBase *operation_target(const EditorRequest &request, CoreFinding code, const char *noun,
+	                               bool (*is_kind)(const DocumentBase &));
+	// Its change applied as one step, named with its `words` and the file's name.
+	void apply_operation(DocumentBase &document, std::shared_ptr<const EditPayload> payload, const std::string &words);
 	// After `document` moved from the state (load_generation, revision) by an edit, an undo or a
 	// redo: the active selection repaired against the rows that changed since (changes_since; all
 	// of them when the document cannot say), a gone primary giving way to `owner`.

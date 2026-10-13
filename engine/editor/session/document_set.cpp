@@ -944,28 +944,50 @@ void DocumentSet::edit_record(const EditorRequest &request) {
 	core_.touch(ViewConcern::Selection);
 }
 
-void DocumentSet::texture_operation(const EditorRequest &request) {
+DocumentBase *DocumentSet::operation_target(const EditorRequest &request, CoreFinding code, const char *noun,
+                                             bool (*is_kind)(const DocumentBase &)) {
 	if (!document_for(request.path) && request.open_first && view_.project.open && !request.path.empty())
 		open_document(request::open_document(request.path));
 	DocumentBase *document = document_for(request.path);
-	auto *texture = dynamic_cast<TextureDocument *>(document);
-	if (!texture) {
+	if (!document || !is_kind(*document)) {
 		if (view_.project.open)
-			core_.refuse_request(document ? CoreFinding::TextureOperation : CoreFinding::DocumentNotOpen,
-			                 document ? basename_of(document->path()) + " is no texture." : "Open the texture before editing it.",
-			                 request.path);
-		return;
+			core_.refuse_request(document ? code : CoreFinding::DocumentNotOpen,
+			                     document ? basename_of(document->path()) + " is no " + noun + "."
+			                              : std::string("Open the ") + noun + " before editing it.",
+			                     request.path);
+		return nullptr;
 	}
-	const std::string &path = texture->path();
-	const std::string file = basename_of(path);
 	// A file an import makes is made by its import's options, never edited in place.
+	const std::string &path = document->path();
 	if (const AssetEntry *entry = core_.project_file(path); entry && !entry->imported_from.empty()) {
-		core_.refuse_now(CoreFinding::TextureOperation,
-		                 file + " is made from " + entry->imported_from + ": change how it is made (its import's options), "
-		                 "not the file, which the next import makes again.",
+		core_.refuse_now(code,
+		                 basename_of(path) + " is made from " + entry->imported_from + ": change how it is made (its "
+		                 "import's options), not the file, which the next import makes again.",
 		                 path);
-		return;
+		return nullptr;
 	}
+	return document;
+}
+
+void DocumentSet::apply_operation(DocumentBase &document, std::shared_ptr<const EditPayload> payload,
+                                  const std::string &words) {
+	Edit edit;
+	edit.operation = EditOperation::Apply;
+	edit.payload = std::move(payload);
+	const std::string said = words + " (" + basename_of(document.path()) + ").";
+	if (!apply_edits(document, {edit})) return;
+	// The step named with the operation's words, what Undo says it takes back.
+	view_.activity.status = said;
+	name_step(document);
+}
+
+void DocumentSet::texture_operation(const EditorRequest &request) {
+	DocumentBase *document = operation_target(request, CoreFinding::TextureOperation, "texture",
+	                                          [](const DocumentBase &d) { return dynamic_cast<const TextureDocument *>(&d) != nullptr; });
+	if (!document) return;
+	const auto &texture = static_cast<const TextureDocument &>(*document);
+	const std::string &path = texture.path();
+	const std::string file = basename_of(path);
 	TextureOperation operation;
 	if (!texture_operation_kind(request.operation, operation.kind)) {
 		core_.refuse_now(CoreFinding::TextureOperation,
@@ -977,44 +999,23 @@ void DocumentSet::texture_operation(const EditorRequest &request) {
 	operation.params = request.values;
 	auto image = std::make_shared<TextureImageEdit>();
 	std::string why;
-	if (!apply_texture_operation(path, texture->bytes(), operation, image->bytes, image->words, why)) {
+	if (!apply_texture_operation(path, texture.bytes(), operation, image->bytes, image->words, why)) {
 		core_.refuse_now(CoreFinding::TextureOperation, "Cannot " + std::string(texture_operation_token(operation.kind)) + " " + file +
 		                                                        ": " + why + ".",
 		                 path);
 		return;
 	}
-	Edit edit;
-	edit.operation = EditOperation::Apply;
-	edit.payload = image;
-	const std::string words = image->words + " (" + file + ").";
-	if (!apply_edits(*document, {edit})) return;
-	// The step named with the operation's words, what Undo says it takes back.
-	view_.activity.status = words;
-	name_step(*document);
+	const std::string words = image->words;
+	apply_operation(*document, std::move(image), words);
 }
 
 void DocumentSet::wave_operation(const EditorRequest &request) {
-	if (!document_for(request.path) && request.open_first && view_.project.open && !request.path.empty())
-		open_document(request::open_document(request.path));
-	DocumentBase *document = document_for(request.path);
-	auto *wave = dynamic_cast<WaveDocument *>(document);
-	if (!wave) {
-		if (view_.project.open)
-			core_.refuse_request(document ? CoreFinding::WaveOperation : CoreFinding::DocumentNotOpen,
-			                     document ? basename_of(document->path()) + " is no wave." : "Open the wave before editing it.",
-			                     request.path);
-		return;
-	}
-	const std::string &path = wave->path();
+	DocumentBase *document = operation_target(request, CoreFinding::WaveOperation, "wave",
+	                                          [](const DocumentBase &d) { return dynamic_cast<const WaveDocument *>(&d) != nullptr; });
+	if (!document) return;
+	const auto &wave = static_cast<const WaveDocument &>(*document);
+	const std::string &path = wave.path();
 	const std::string file = basename_of(path);
-	// A file an import makes is made by its import's options, never edited in place.
-	if (const AssetEntry *entry = core_.project_file(path); entry && !entry->imported_from.empty()) {
-		core_.refuse_now(CoreFinding::WaveOperation,
-		                 file + " is made from " + entry->imported_from + ": change how it is made (its import's options), "
-		                 "not the file, which the next import makes again.",
-		                 path);
-		return;
-	}
 	WaveOperation operation;
 	if (!wave_operation_kind(request.operation, operation.kind)) {
 		core_.refuse_now(CoreFinding::WaveOperation, "A wave takes no operation '" + request.operation + "': trim or normalise.", path);
@@ -1023,18 +1024,13 @@ void DocumentSet::wave_operation(const EditorRequest &request) {
 	operation.params = request.values;
 	auto made = std::make_shared<WaveBytesEdit>();
 	std::string why;
-	if (!apply_wave_operation(wave->bytes(), operation, made->bytes, made->words, why)) {
+	if (!apply_wave_operation(wave.bytes(), operation, made->bytes, made->words, why)) {
 		core_.refuse_now(CoreFinding::WaveOperation,
 		                 "Cannot " + std::string(wave_operation_token(operation.kind)) + " " + file + ": " + why + ".", path);
 		return;
 	}
-	Edit edit;
-	edit.operation = EditOperation::Apply;
-	edit.payload = made;
-	const std::string words = made->words + " (" + file + ").";
-	if (!apply_edits(*document, {edit})) return;
-	view_.activity.status = words;
-	name_step(*document);
+	const std::string words = made->words;
+	apply_operation(*document, std::move(made), words);
 }
 
 void DocumentSet::set_string_text(const EditorRequest &request) {

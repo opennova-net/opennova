@@ -45,19 +45,24 @@ std::string folder_words(const std::string &folder) {
 // rename that would rewrite a file with unsaved edits, or leave them behind on the old name, never
 // reaches here with them: it waits on the unsaved prompt first (UnsavedGuard), whose Save writes
 // them.
+template <class Planner>
+void RenameController::start_rename(Planner planner, const std::string &what, std::string status) {
+	const RenameOperation::Kept kept{view_.documents.active, view_.documents.selection};
+	const uint64_t id = core_.start_operation(std::make_unique<RenameOperation>(core_.problems(), paths_,
+			*view_.project.document, core_.problems().graph(), std::move(planner), kept));
+	if (id == 0) return core_.refuse_busy(what); // the gate let no operation run beside it
+	core_.outcome().operation = id;
+	view_.activity.status = std::move(status);
+	core_.touch(ViewConcern::Output);
+}
+
 void RenameController::rename_asset(const std::string &file, const std::string &new_name) {
 	if (!view_.project.open) return;
-	const RenameOperation::Kept kept{view_.documents.active, view_.documents.selection};
 	RenameOperation::FilePlanner planner = [this, file, new_name](std::shared_ptr<const AssetScan> &scan) {
 		scan = view_.project.scan;
 		return plan_rename(paths_, *scan, core_.problems().graph(), file, new_name);
 	};
-	const uint64_t id = core_.start_operation(std::make_unique<RenameOperation>(core_.problems(), paths_,
-			*view_.project.document, core_.problems().graph(), std::move(planner), kept));
-	if (id == 0) return core_.refuse_busy(file); // the gate let no operation run beside it
-	core_.outcome().operation = id;
-	view_.activity.status = "Renaming " + basename_of(file) + " to " + new_name + "...";
-	core_.touch(ViewConcern::Output);
+	start_rename(std::move(planner), file, "Renaming " + basename_of(file) + " to " + new_name + "...");
 }
 
 // A file put in another folder under its own name (DI-03): a rename that keeps the name (plan_move: no
@@ -66,33 +71,21 @@ void RenameController::rename_asset(const std::string &file, const std::string &
 // has unsaved edits waits on the unsaved prompt first (UnsavedGuard), as a rename's does.
 void RenameController::move_asset(const std::string &file, const std::string &folder) {
 	if (!view_.project.open) return;
-	const RenameOperation::Kept kept{view_.documents.active, view_.documents.selection};
 	RenameOperation::FilePlanner planner = [this, file, folder](std::shared_ptr<const AssetScan> &scan) {
 		scan = view_.project.scan;
 		return plan_move(paths_, *view_.project.document, *scan, file, folder, view_.project.imports.get());
 	};
-	const uint64_t id = core_.start_operation(std::make_unique<RenameOperation>(core_.problems(), paths_,
-			*view_.project.document, core_.problems().graph(), std::move(planner), kept));
-	if (id == 0) return core_.refuse_busy(file); // the gate let no operation run beside it
-	core_.outcome().operation = id;
-	view_.activity.status = "Moving " + basename_of(file) + " to " + folder_words(folder) + "...";
-	core_.touch(ViewConcern::Output);
+	start_rename(std::move(planner), file, "Moving " + basename_of(file) + " to " + folder_words(folder) + "...");
 }
 
 void RenameController::split_texture(const EditorRequest &request) {
 	if (!view_.project.open) return;
-	const RenameOperation::Kept kept{view_.documents.active, view_.documents.selection};
 	RenameOperation::FilePlanner planner = [this, request](std::shared_ptr<const AssetScan> &scan) {
 		scan = view_.project.scan;
 		const BaseNames base{&view_.project.base_files};
 		return plan_split(paths_, *scan, core_.problems().graph(), request.path, request.new_name, request.paths, &base);
 	};
-	const uint64_t id = core_.start_operation(std::make_unique<RenameOperation>(core_.problems(), paths_,
-			*view_.project.document, core_.problems().graph(), std::move(planner), kept));
-	if (id == 0) return core_.refuse_busy(request.path); // the gate let no operation run beside it
-	core_.outcome().operation = id;
-	view_.activity.status = "Splitting " + basename_of(request.path) + " into " + request.new_name + "...";
-	core_.touch(ViewConcern::Output);
+	start_rename(std::move(planner), request.path, "Splitting " + basename_of(request.path) + " into " + request.new_name + "...");
 }
 
 // A rename's commit read back into the session. A plan refused wrote nothing: its refusals are
@@ -385,17 +378,11 @@ void RenameController::preview(const EditorRequest &request) {
 // prompt first (UnsavedGuard), whose Save writes them.
 void RenameController::rename_symbol(const EditorRequest &request) {
 	if (!view_.project.open) return;
-	const RenameOperation::Kept kept{view_.documents.active, view_.documents.selection};
 	RenameOperation::SymbolPlanner planner = [this, request](std::shared_ptr<const AssetScan> &scan) {
 		scan = view_.project.scan;
 		return plan_symbol(request);
 	};
-	const uint64_t id = core_.start_operation(std::make_unique<RenameOperation>(core_.problems(), paths_,
-			*view_.project.document, core_.problems().graph(), std::move(planner), kept));
-	if (id == 0) return core_.refuse_busy(request.path); // the gate let no operation run beside it
-	core_.outcome().operation = id;
-	view_.activity.status = "Renaming in " + basename_of(request.path) + " everywhere...";
-	core_.touch(ViewConcern::Output);
+	start_rename(std::move(planner), request.path, "Renaming in " + basename_of(request.path) + " everywhere...");
 }
 
 // A requirement satisfied by renaming a project file of the expected kind to the name
