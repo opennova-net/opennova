@@ -198,19 +198,22 @@ int test_references() {
 	for (const GraphSymbol &symbol : extracted.symbols)
 		if (symbol.kind == ReferenceKind::MissionEntity || symbol.kind == ReferenceKind::MissionZone)
 			TEST_EXPECT(symbol.scope == "SYNTH_LOGIC.BMS" && !symbol.inert);
-	// The text keys the records' numbers form: the location marker's, the walker's name, the objectives
-	// panel's win row, in the mission's own table, else medmssn.bin (never both), none rewritable.
+	// The text keys the records' numbers form: the location marker's (its name_index, D-NET-511, which
+	// keys its STRNAME too), the walker's name, the objectives panel's win row, in the mission's own
+	// table, else medmssn.bin (never both), none rewritable.
 	const GraphEdge *location = edge(extracted, ReferenceKind::TextId, "LOCATION001");
 	TEST_EXPECT(location && location->scope == "SYNTH_LOGIC.BIN/Locations" && !location->rewritable &&
 	            location->scope_alternate == "MEDMSSN.BIN" && location->scopes_after.empty() &&
-	            location->address == row_at(*document, MissionKind::Marker, 4));
-	const GraphEdge *name = edge(extracted, ReferenceKind::TextId, "STRNAME001");
-	TEST_EXPECT(name && name->scope == "SYNTH_LOGIC.BIN/PeopleNames" && name->field == "name_index" &&
-	            name->address == row_at(*document, MissionKind::Organic, 0));
+	            location->field == "name_index" && location->address == row_at(*document, MissionKind::Marker, 4));
+	const NodeAddress walker = row_at(*document, MissionKind::Organic, 0);
+	const GraphEdge *name = nullptr;
+	for (const GraphEdge &e : extracted.edges)
+		if (e.kind == ReferenceKind::TextId && e.value == "STRNAME001" && e.address == walker) name = &e;
+	TEST_EXPECT(name && name->scope == "SYNTH_LOGIC.BIN/PeopleNames" && name->field == "name_index");
 	const NodeAddress header = row_at(*document, MissionKind::Mission, 0);
 	const GraphEdge *win = edge(extracted, ReferenceKind::TextId, "STRWINCOND001");
 	TEST_EXPECT(win && win->scope == "SYNTH_LOGIC.BIN/WinConditions" && win->field == "win_conditions[0]" &&
-	            win->address == header && count_edges(extracted, ReferenceKind::TextId) == 7 &&
+	            win->address == header && count_edges(extracted, ReferenceKind::TextId) == 8 &&
 	            edge(extracted, ReferenceKind::TextId, "STRWPNAME000")); // and the four waypoint markers' names
 	// The panel's rows stop at the first slot of id 0 or 255; an action reads its slot's id: a won or
 	// lost subgoal's chat line, a shown subgoal's directive (none when it hides one), a text's line.
