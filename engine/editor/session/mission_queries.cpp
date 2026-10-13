@@ -143,17 +143,13 @@ JsonValue answer_variables(const QueryContext &context, const QueryArgs &args, s
 		out = planned_edits(*mission, ok, edits, refusal);
 	}
 	JsonValue names = JsonValue::make_array();
-	for (const mission::VariableName &name : mission_variable_names(*mission)) {
+	for (const MissionVariableName &name : mission_variable_names(*mission)) {
 		JsonValue entry = JsonValue::make_object();
 		entry.set("index", json_number(double(name.index)));
 		entry.set("name", json_string(name.name));
 		names.push(std::move(entry));
 	}
 	out.set("names", std::move(names));
-	const mission::LayerTable table = mission_variable_table(*mission);
-	out.set("table", json_string(table == mission::LayerTable::Empty           ? "empty"
-	                             : table == mission::LayerTable::VariableNames ? "names"
-	                                                                           : "layer_names"));
 	out.set("left", json_number(double(mission_variable_names_left(*mission))));
 	return out;
 }

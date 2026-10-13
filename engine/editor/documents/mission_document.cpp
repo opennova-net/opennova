@@ -210,7 +210,7 @@ template <> std::string MissionRecordRow<mission::EventChain>::name() const { re
 template <> size_t MissionRow::footprint() const {
 	size_t bytes = sizeof(MissionRow) + ids_footprint() + footprint_of(native.loadout.entries) +
 	               footprint_of(native.item_availability) + footprint_of(native.group_records) +
-	               footprint_of(native.layer_records) + footprint_of(native.bounding_boxes);
+	               footprint_of(native.wav_list_records) + footprint_of(native.bounding_boxes);
 	for (const bms::WeaponLoadoutRecord &entry : native.loadout.entries)
 		bytes += footprint_of(entry.name) + footprint_of(entry.ammo_primary) + footprint_of(entry.ammo_secondary) +
 		         footprint_of(entry.flags);
@@ -462,7 +462,7 @@ SerializeResult MissionDocument::serialize() const {
 }
 
 bool MissionDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
-                            std::shared_ptr<const FileState> &, std::vector<SourceIssue> &issues,
+                            std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues,
                             Diagnostic &error) {
 	if (!is_mission_kind(kind())) {
 		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not a mission.", path());
@@ -606,7 +606,12 @@ bool MissionDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 	const auto entities = [&](K kind, const std::vector<bms::Entity> &records) {
 		for (const bms::Entity &record : records) {
 			auto row = std::make_shared<EntityRow>(k(kind), record);
-			if (take) row->native.mis_height_lock = entity_at < names.kept_locks.size() ? names.kept_locks[entity_at] : 0;
+			if (take) {
+				row->native.mis_height_lock = entity_at < names.kept_locks.size() ? names.kept_locks[entity_at] : 0;
+				// A locked entity's base as the .mis keeps it, absolute (D-MIS-4).
+				if (row->native.mis_height_lock != 0 && entity_at < names.kept_bases.size())
+					row->native.mis_extra_bheight = names.kept_bases[entity_at];
+			}
 			++entity_at;
 			shape(*row);
 			rows.push_back(row);
@@ -637,6 +642,14 @@ bool MissionDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 		if (take && i < names.kept.events.size()) row->name = names.kept.events[i];
 		shape(*row);
 		rows.push_back(row);
+	}
+	// The variables' names a matching .mis gives the mission (its `//var` lines, mission_mis.h kMisVariableLine):
+	// the document's own, no .bms byte holding them (MissionFileState::variables).
+	if (take && std::any_of(names.kept.variables.begin(), names.kept.variables.end(),
+	                        [](const std::string &name) { return !name.empty(); })) {
+		auto made = std::make_shared<MissionFileState>();
+		made->variables = names.kept.variables;
+		state = std::move(made);
 	}
 	if (names_read) {
 		names_file_ = std::move(names);
@@ -785,6 +798,24 @@ void MissionDocument::names_file_written(bool ok, uint64_t fingerprint, const st
 }
 
 bool MissionDocument::set_file_value(std::shared_ptr<const FileState> &state, const Edit &edit, Diagnostic &error) {
+	// A variable's name (mission_variable_name_edits): V`position`, the value its name, "" none.
+	if (edit.field == kMisVariableField) {
+		const auto *name = std::get_if<std::string>(&edit.value);
+		std::string why;
+		if (edit.position >= mission::kVariableNameCount || !name ||
+		    (!name->empty() && !mission::mis_name_allowed(*name, mission::kMisDescriptionChars, why))) {
+			error = make_finding(CoreFinding::DocumentValue, DiagnosticSeverity::Error,
+			                     "A variable's name names V0 to V" + std::to_string(mission::kVariableNameIndexMax) +
+			                             (why.empty() ? std::string(".") : ": " + why),
+			                     path());
+			return false;
+		}
+		auto made = std::make_shared<MissionFileState>();
+		if (const MissionFileState *was = mission_file_state(state.get())) *made = *was;
+		made->variables[edit.position] = *name;
+		state = std::move(made);
+		return true;
+	}
 	const bool overwrite = edit.field == kMisOverwriteField, known = edit.field == kMisKnownField;
 	if (!overwrite && !known) {
 		error = make_finding(CoreFinding::DocumentValue, DiagnosticSeverity::Error, "A mission has no such file-wide value.", path());
@@ -911,16 +942,6 @@ bool MissionDocument::accept_step(const EditStep &step, const StagedRows &rows, 
 				return false;
 			}
 		}
-		// A layer table holding the mission's variable names (S24 Names) changes as the names do
-		// (mission_variable_name_edits): a record edited as a layer name, the tag among them, would leave
-		// names the editor cannot read, or the table the original editor's for good.
-		if (swap.in_place() && swap.before->kind == k(K::Mission) &&
-		    !mission_variable_table_kept(static_cast<const MissionRow &>(*swap.before).native,
-		                                 static_cast<const MissionRow &>(*swap.after).native)) {
-			refusal.message = "This mission's layer table holds its variable names: name a variable (the variables' "
-			                  "names), or empty the table, rather than edit its records as layer names.";
-			return false;
-		}
 		const NodeKind kind = swap.before ? swap.before->kind : swap.after ? swap.after->kind : -1;
 		if ((kind != k(K::Mission) && kind != k(K::WaypointPath)) || swap.in_place()) continue;
 		refusal.message = kind == k(K::Mission) ? "A mission keeps its mission row where it is."
@@ -977,10 +998,6 @@ void MissionDocument::refine_field(const NodeAddress &address, FieldUse &use) co
 	if (is_entity_kind(address.kind) && address.child == 0 && id == "name1")
 		if (const Node *node = row(address.row); node && item_class(static_cast<const EntityRow &>(*node).native))
 			use.read_only = true; // its item's row sets it on every save (get)
-	// A layer table holding the variable names reads as them (mission_labels): its records are named
-	// through the variables, never as layer names (accept_step).
-	if (address.kind == k(K::Layer) && id == "name" && mission_variable_table(*this) == mission::LayerTable::VariableNames)
-		use.read_only = true;
 	if (address.kind == k(K::Trigger) && id == "sub_type") use.own_choices = true;
 	if (address.kind == k(K::Action) && id == "action_sub_type") use.own_choices = true;
 	const int slot = param_slot(id);

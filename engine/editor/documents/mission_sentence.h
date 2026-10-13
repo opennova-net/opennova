@@ -58,8 +58,8 @@ public:
 // (the first in the lookups' pool order, as the game finds it: MissionDocument::entity_holder), titled
 // as the document titles it (its kind and its SSN where the title is the bare number), an area by its
 // record, an event by its place, and a group, a variable, an area, a path and an event by the name the mission
-// gives it (S24 Names: a group's in its record's dropped bytes, a variable's in the tagged layer table, an
-// area's, a path's and an event's in the .mis beside the mission), else the base's words;
+// gives it (S24 Names: a group's in its record's dropped bytes; a variable's, an area's, a path's and an event's
+// in the .mis beside the mission), else the base's words;
 // a value no record holds says so. It reads no string table: text() is the base's. Made for one state of
 // the document.
 class DocumentMissionNames : public MissionNames {
