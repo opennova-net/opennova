@@ -293,9 +293,10 @@ private:
 	void heights_built_(const SessionView &view, const DocumentBase &document);
 	// The names its picture reads the placed tiles by (the mission's own, the header's terrain and environment).
 	TilesRead tiles_read_() const;
-	// The posed people stood on that ground (MissionPoses::stand) where a record, a pose (`posed`) or
-	// the terrain moved; true when a person's lift moved.
-	bool stand_people_(const SessionView &view, bool posed);
+	// The posed people stood on that ground and the floors about them in `document`'s mission as it stands
+	// (MissionPoses::stand) where a record, a pose (`posed`), the terrain or a file the floors read moved; true
+	// when a person's lift moved.
+	bool stand_people_(const SessionView &view, const Document &document, bool posed);
 	// The scene's items' bounds asked of the project, where the scene, the graph or the asset source's
 	// generation moved.
 	void bound_items_(const SessionView &view);

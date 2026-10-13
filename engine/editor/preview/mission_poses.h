@@ -18,6 +18,9 @@ class RigFiles;
 namespace opennova::terrain {
 struct TerrainHeightField;
 }
+namespace opennova::bms {
+struct File;
+}
 
 namespace opennova {
 class StampedFiles;
@@ -25,8 +28,12 @@ class StampedFiles;
 
 namespace opennova::editor {
 
+class MissionGround;
+struct MissionEntityMark;
 class MissionScene;
 class ProjectAssetSource;
+struct MissionFiles;
+struct MissionWorld;
 struct SessionView;
 
 // What a person's spawn reads of its definition (its item's first row: its class, its .adm, its
@@ -73,12 +80,13 @@ struct MissionPose {
 	double rise = 0.0;
 	int32_t capsule_bottom = 0;
 	// Where the spawn stands the person's origin over its record's z, metres: the rise, less the
-	// ground solve's clearance where it is below one unit, over the terrain alone
-	// (world::terrain_settle_clearance; the game's solve also stands a person on a model's floor,
-	// which the editor does not read). The device draws the person there. The rise alone with no
-	// terrain read.
+	// ground solve's clearance where it is below one unit, the motor's ground tail probing the
+	// terrain and the body's candidates (a model's floor, mission_pose_floor_clearance; over the
+	// terrain alone, world::terrain_settle_clearance, with no mission world to probe). The device
+	// draws the person there. The rise alone with no terrain read.
 	double lift = 0.0;
-	bool settled = false; // the terrain's solve moved it
+	bool settled = false; // the solve moved it
+	NodeId on = 0;        // the record whose floor the solve met (0: the terrain, or nothing)
 	std::string clip, source_clip; // the .bad each channel plays ("" none)
 	uint32_t stamp = 0; // moves when anything above does
 	// The definition it was posed from, its .adm's id in the poses' root motion, and its channels as the init and
@@ -123,6 +131,33 @@ void mission_pose_people(const std::vector<MissionPoseInput> &inputs,
 int32_t mission_pose_clearance(const MissionPose &pose, double x, double y, double z,
 		const terrain::TerrainHeightField *terrain);
 
+// The same solve over a mission's world (MissionWorld, its collision's candidate slices built as the
+// load builds them before the people's init [orig: Entity_InitAllFromModels @0x40E460, its
+// Entity_BuildAllProximityLists call @0x40E5A1 ahead of the pool-0 definition callbacks
+// @0x40E5DA..0x40E60B]) for the posed
+// person `body` stands for: the body lifted by its rise, the motor's ground tail probing from its
+// height raised to the 6144 grid down 2.0 u through the terrain and the body's candidate slice (each
+// candidate's type-1 solids), its feet's clearance over what it meets (16.16) and `on` the record
+// whose floor that is (`marks` the scene's; 0: the terrain, or nothing) [orig:
+// Entity_WarmUpOrganicAnimation @0x4B8BD8..0x4B8BF5 -> Entity_MovementCollisionResolver's
+// ground-settle tail @0x4B3D6E..0x4B3DA9 -> Entity_RaycastGroundHeightAndObject @0x414320].
+// INT32_MAX for a handle the world holds no body of.
+int32_t mission_pose_floor_clearance(MissionWorld &world, world::EntityHandle body, const MissionPose &pose,
+		const std::vector<MissionEntityMark> &marks, NodeId &on);
+
+// What a mission's people stand on (MissionPoses::stand): the mission's terrain (null: none read),
+// and, for the floors the game's solve meets too, the mission as it stands (its file composed),
+// its ground (its terrain, the char map, the water) and each item's bound (metres, how far a
+// record's candidates reach) — with any of them null the terrain alone.
+inline constexpr double kMissionFloorPad = 4.0;    // a pool-0 body's candidate pad, units
+inline constexpr double kMissionFloorReach = 20.0; // an item of no known bound: kept within this, metres
+struct MissionPeopleFloor {
+	const terrain::TerrainHeightField *terrain = nullptr;
+	const bms::File *mission = nullptr;
+	const MissionGround *ground = nullptr;
+	const std::unordered_map<int64_t, float> *bounds = nullptr;
+};
+
 // The poses of a mission's people (MissionViewport's, ADR 0046 S14's device draws them): every
 // organic of the scene posed again where its records, the project's graph or a file the poses
 // read (a catalog, an .adm, a clip) moved; each catalog and each .adm read once while its stamp
@@ -136,10 +171,14 @@ public:
 
 	// True when a pose changed (the device poses its people again).
 	bool refresh(const SessionView &view, const MissionScene &scene);
-	// Each posed person stood where the spawn's ground solve stands it over `terrain` (null: none
-	// read, the rise alone), at its record as `scene` holds it now; cheap, so run on every follow.
-	// True when a person's lift moved (its stamp with it).
-	bool stand(const MissionScene &scene, const terrain::TerrainHeightField *terrain);
+	// Each posed person stood where the spawn's ground solve stands it over `floor` (no terrain
+	// read: the rise alone), at its record as `scene` holds it now: with the mission given, over its
+	// world (the posed people and the items and buildings within their candidates' reach, loaded as
+	// the game's load spawns them over the project's files, MissionWorld), else over the terrain
+	// alone. True when a person's lift moved (its stamp with it).
+	bool stand(const MissionScene &scene, const MissionPeopleFloor &floor);
+	// Whether a file the floors' world read moved since (a model's floor edited: stand them again).
+	bool floor_files_moved() const;
 	void clear();
 	// A row's pose (null: no organic row of the scene).
 	const MissionPose *pose(NodeId row) const;
@@ -168,6 +207,7 @@ private:
 
 	std::shared_ptr<const ProjectAssetSource> source_;
 	std::shared_ptr<StampedFiles> files_; // what the clips read, by the stamp they read it at
+	std::shared_ptr<MissionFiles> floor_files_; // what the floors' world read, kept while it stands
 	std::unique_ptr<anim::AdmRootMotion> motion_;
 	world::AnimVariantRings rings_;
 	std::unordered_map<std::string, Catalog> catalogs_;

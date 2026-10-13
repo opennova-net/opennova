@@ -350,15 +350,27 @@ bool MissionViewport::follow_overlay_(const SessionView &view) {
 	return true;
 }
 
-bool MissionViewport::stand_people_(const SessionView &view, bool posed) {
+bool MissionViewport::stand_people_(const SessionView &view, const Document &document, bool posed) {
 	if (poses_.posed() == 0) return false;
-	// The people stand on the mission's terrain as the game reads it (DI-38): again where a record, a pose
-	// or the terrain moved.
+	// The people stand on the mission's ground as the game's spawn reads it (DI-38): the terrain and the floors of
+	// the items and buildings about them, in the mission's world as it stands; again where a record, a pose, the
+	// terrain or a file the floors read moved.
 	follow_ground_(view);
-	if (!posed && stood_serial_ == scene_.serial() && stood_ground_ == terrain_ground_.revision()) return false;
+	if (!posed && stood_serial_ == scene_.serial() && stood_ground_ == terrain_ground_.revision() &&
+			!poses_.floor_files_moved())
+		return false;
 	stood_serial_ = scene_.serial();
 	stood_ground_ = terrain_ground_.revision();
-	return poses_.stand(scene_, terrain_ground_.height_field());
+	MissionPeopleFloor floor;
+	floor.terrain = terrain_ground_.height_field();
+	bms::File mission;
+	const auto *composed = dynamic_cast<const MissionDocument *>(&document);
+	if (composed && composed->compose(mission)) {
+		floor.mission = &mission;
+		floor.ground = &terrain_ground_;
+		floor.bounds = &items_.radii();
+	}
+	return poses_.stand(scene_, floor);
 }
 
 ViewportAction MissionViewport::stop_(MissionViewStatus reason) {
@@ -509,7 +521,7 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 		scene_.read(*source);
 		fog_reach_ = mission_fog_reach(files, scene_.header());
 		bound_items_(view);
-		stand_people_(view, poses_.refresh(view, scene_));
+		stand_people_(view, *document, poses_.refresh(view, scene_));
 		people_.run_to(poses_, clock.ticks());
 		follow_overlay_(view);
 		picture_.show(key, generation);
@@ -569,7 +581,7 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 	// The people posed again where a record they read, the graph or a file they read moved (DI-38): an
 	// Update poses them, the picture standing.
 	bool posed = poses_.refresh(view, scene_);
-	posed = stand_people_(view, posed) || posed;
+	posed = stand_people_(view, *document, posed) || posed;
 	// The people play their clips on to the clock (S23 C): the device poses them each frame as they stand, no Update
 	// asked.
 	people_.run_to(poses_, clock.ticks());

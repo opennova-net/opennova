@@ -6,7 +6,9 @@
 // by the warmup, standing on the roof, falling at the start (no finding), flying, and hanging under a class
 // with no motor. Then the check over a real session: each off entity a mission.off_ground Warning on its z
 // with its planned fix, applied from the closed mission and undone; a live edit floating a crate; nothing
-// checked again while nothing moves. Mixed: the retail leg (OPENNOVA_JO_DIR) runs the rules over every
+// checked again while nothing moves; and the mission view's people stood as the game's spawn stands them, the
+// person on the roof on the house's floor (the warmup's ground tail meeting it in his candidates), the settled
+// one on the terrain. Mixed: the retail leg (OPENNOVA_JO_DIR) runs the rules over every
 // shipped mission of the base game over the game's own item table, models, terrains, tables and clips and
 // counts what they flag (`--list` prints each).
 #include <algorithm>
@@ -27,9 +29,12 @@
 #include <editor/preview/mission_ground_check.h>
 #include <editor/preview/mission_ground_facts.h>
 #include <editor/preview/mission_ground_rules.h>
+#include <editor/preview/mission_poses.h>
+#include <editor/preview/mission_viewport.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/mission_source.h>
 #include <editor/preview/viewport_follow.h>
+#include <editor/preview/viewports.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/project_session.h>
@@ -40,6 +45,7 @@
 #include <formats/mission/bms_edit.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/entity_spawn.h>
 
 #include "common/file_io.h"
 #include "common/retail_paths.h"
@@ -47,6 +53,7 @@
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
+#include "editor/viewport_test_support.h"
 
 using namespace opennova::editor;
 namespace bms = opennova::bms;
@@ -591,12 +598,70 @@ static int test_retail() {
 	return 0;
 }
 
+// The mission view's people stand where the game's spawn stands them (DI-38, MissionPoses::stand over the mission's
+// world): the person on the house's roof is set down on its floor, which the terrain alone would leave him over;
+// the settled one stands on the terrain, on no record.
+static int test_people_floors() {
+	Session s("opennova_editor_mission_people_floors");
+	TEST_EXPECT(s.open());
+	if (s.placed.empty()) return 1;
+	editor_test::FakeDevices devices;
+	editor_test::handle_to_end(s.session, request::open_document(kMission));
+	devices.sync(s.session);
+	const DocumentBase *opened = s.session.document_for(kMission);
+	const auto *viewport = opened ? static_cast<const MissionViewport *>(
+	                                        s.session.viewports().find(opened->path(), ViewportKind::Mission))
+	                              : nullptr;
+	TEST_EXPECT(viewport != nullptr);
+	if (!viewport) return 1;
+	// Each record's mark by its item and place; the house's row.
+	const auto mark_of = [&](int record) -> const MissionEntityMark * {
+		for (const MissionEntityMark &mark : viewport->scene().entities())
+			if (mark.item == s.placed[record].item && near(mark.x, s.placed[record].x) &&
+			    near(mark.y, s.placed[record].y) && near(mark.z, s.placed[record].z))
+				return &mark;
+		return nullptr;
+	};
+	const MissionEntityMark *house = mark_of(kHouse);
+	const MissionEntityMark *on_roof = mark_of(kOnRoofPerson);
+	const MissionEntityMark *settled = mark_of(kSettled);
+	TEST_EXPECT(house && on_roof && settled);
+	if (!house || !on_roof || !settled) return 1;
+	const MissionPose *roof = viewport->poses().pose(on_roof->row);
+	TEST_EXPECT(roof && roof->status == "posed");
+	if (!roof || roof->status != "posed") return 1;
+	// Over the terrain alone he is more than a unit over it: the rise alone. The world's tail meets the roof: set
+	// down on it, his feet on its floor.
+	MissionGround ground;
+	MissionSceneHeader header;
+	header.terrain = "Tmap";
+	auto files = std::make_shared<MemoryFiles>();
+	put_rig(*files);
+	ground.follow(files, 1, header, "ground");
+	TEST_EXPECT(mission_pose_clearance(*roof, on_roof->x, on_roof->y, on_roof->z, ground.height_field()) >=
+	            opennova::world::kOrganicWarmupSettleQ16);
+	if (!roof->settled || roof->on != house->row)
+		std::printf("  roof person: settled %d on %llu lift %.3f rise %.3f\n", int(roof->settled),
+		            (unsigned long long)roof->on, roof->lift, roof->rise);
+	TEST_EXPECT(roof->settled && roof->on == house->row);
+	const double feet = on_roof->z + roof->lift - double(roof->capsule_bottom) / 65536.0;
+	TEST_EXPECT(near(feet, s.placed[kOnRoofPerson].z, 0.02));
+	// The settled person stands on the terrain, on no record; the wire names the roof's.
+	const MissionPose *terrain = viewport->poses().pose(settled->row);
+	TEST_EXPECT(terrain && terrain->settled && terrain->on == 0);
+	const opennova::io::JsonValue json = mission_pose_json(*roof);
+	TEST_EXPECT(json.get("on") && NodeId(json.get("on")->number) == house->row);
+	std::printf("test_people_floors passed\n");
+	return 0;
+}
+
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	for (int i = 1; i < argc; ++i)
 		if (std::strcmp(argv[i], "--list") == 0) g_list = true;
 	TEST_EXPECT(test_rules() == 0);
 	TEST_EXPECT(test_check() == 0);
+	TEST_EXPECT(test_people_floors() == 0);
 	TEST_EXPECT(test_retail() == 0);
 	std::printf("editor_mission_ground: all tests passed\n");
 	return 0;

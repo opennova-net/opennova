@@ -307,8 +307,10 @@ static int test_poses() {
 		field.layout.sector_grid = sectors.data();
 		MissionPoses own;
 		TEST_EXPECT(own.refresh(rig.session.view(), viewport->scene()));
-		TEST_EXPECT(own.stand(viewport->scene(), &field));
-		TEST_EXPECT(!own.stand(viewport->scene(), &field)); // stood: nothing moves
+		MissionPeopleFloor floor;
+		floor.terrain = &field;
+		TEST_EXPECT(own.stand(viewport->scene(), floor));
+		TEST_EXPECT(!own.stand(viewport->scene(), floor)); // stood: nothing moves
 		for (size_t i = 0; i < 7; ++i) {
 			const MissionPose *stood = own.pose(rows[i].row);
 			TEST_EXPECT(stood && stood->settled && stood->lift == double(stood->capsule_bottom) / 65536.0);
