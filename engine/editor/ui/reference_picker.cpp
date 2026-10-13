@@ -491,7 +491,6 @@ bool ReferencePicker::draw_completions(Workspace &workspace, const Document &doc
 		completing_.choices = picker_choices(view.findings.graph.get(), document, record, field, names ? &*names : nullptr);
 		completing_.view = reads;
 		completing_.scope = field.scope;
-		++completions_made_;
 	}
 	std::vector<ReferenceCompletion> completions = complete_reference(completing_.choices, field, typed);
 	// The whole name typed, and nothing else beginning it: nothing to complete.

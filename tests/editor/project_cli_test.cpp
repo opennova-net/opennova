@@ -111,7 +111,7 @@ static int test_expansion_project() {
 	for (const char *role : { "expansion_table", "expansion_version" })
 		TEST_EXPECT(run({ "create-missing", root, "--role", role }) == 0);
 	TEST_EXPECT(run({ "build", root }) == 0);
-	const std::string built = opennova::editor::last_good_build_dir(root + "/.opennova/build/play");
+	const std::string built = editor_test::last_good_build_dir(root + "/.opennova/build/play");
 	TEST_EXPECT(!built.empty() && fs::is_regular_file(built + "/expansion/jxm/jxm.pff") &&
 	            fs::is_regular_file(built + "/expansion/jxm/jxmL.pff") && fs::is_regular_file(built + "/expansion/jxm/jxm.bin") &&
 	            fs::is_regular_file(built + "/expansion/jxm/version.txt") && !fs::exists(built + "/language.pff"));
@@ -345,7 +345,7 @@ static int test_imports() {
 	TEST_EXPECT(run_capture(capture, {"build", root, "--out", dir.file("out")}, text) == 0);
 	TEST_EXPECT(fs::is_regular_file(root + "/.opennova/.gitignore"));
 	TEST_EXPECT(text.find("imported art/logo.png") != std::string::npos);
-	const std::string build = opennova::editor::last_good_build_dir(dir.file("out"));
+	const std::string build = editor_test::last_good_build_dir(dir.file("out"));
 	TEST_EXPECT(!build.empty());
 	// logo.png's record asks for a PCX; splash.png, imported by the import verb, takes the image importer's
 	// default, a 32-bit TGA.

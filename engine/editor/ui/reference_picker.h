@@ -91,7 +91,6 @@ public:
 	bool draw_completions(Workspace &workspace, const Document &document, const NodeAddress &record, const FieldUse &field,
 	                      const Value &value, std::string &picked);
 	// How many times the completion's names were made (a test's measure).
-	size_t completions_made() const { return completions_made_; }
 	// How many times a popup's list was made (the graph's choices, the missing value's finding and
 	// its fixes): once per opening, and again while it is open only when what it reads moves
 	// (ListKey), never for a change of anything else (a line of Output, a build's step).
@@ -170,7 +169,6 @@ private:
 		bool hovered = false;     // the pointer was over the list then
 	};
 	Completing completing_;
-	size_t completions_made_ = 0;
 	const SessionView *pruned_view_ = nullptr;
 	RevisionKey pruned_key_;
 	size_t lists_made_ = 0;

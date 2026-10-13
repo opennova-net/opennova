@@ -128,9 +128,8 @@ static int test_tokens() {
 		TEST_EXPECT(editor_request_kind_from_token(token, back) && back == kind);
 		TEST_EXPECT(request_kind_from_token(token, back) && back == kind);
 	}
-	TEST_EXPECT(editor_request_kind_tokens().size() == kEditorRequestKindCount);
 	TEST_EXPECT(std::string(editor_request_kind_token(EditorRequestKind::CancelOperation)) == "cancel_operation");
-	TEST_EXPECT(editor_request_kind_tokens().front() == "new_project");
+	TEST_EXPECT(std::string(editor_request_kind_token(static_cast<EditorRequestKind>(0))) == "new_project");
 	for (int i = 0; i <= static_cast<int>(EditOperation::Apply); ++i) {
 		const auto operation = static_cast<EditOperation>(i);
 		EditOperation back = EditOperation::Set;
@@ -1397,8 +1396,9 @@ static int test_over_a_session() {
 		TEST_EXPECT(graph_counts.get(stat) == nullptr);
 	const GraphStats &stats = graph.stats();
 	TEST_EXPECT(stats.files_extracted + stats.files_reused + stats.files_failed > 0);
-	TEST_EXPECT(!graph_edges_to_json(*view.findings.graph, view.findings.graph->references_of("main.mnu")).array.empty());
-	TEST_EXPECT(graph_edges_to_json(*view.findings.graph, view.findings.graph->references_of("main.mnu")).array.front().get_string("status", "") == "present");
+	const std::vector<const GraphEdge *> menu_edges = view.findings.graph->references_of("main.mnu");
+	TEST_EXPECT(!menu_edges.empty() && menu_edges.front() &&
+	            graph_edge_to_json(*view.findings.graph, *menu_edges.front()).get_string("status", "") == "present");
 	TEST_EXPECT(record_to_json(*document, NodeAddress{}, view).is_null());
 	TEST_EXPECT(record_to_json(*document, NodeAddress{99999, 1, 0}, view).is_null());
 	// The root's font as its picker and its Go to see it (S12 Z2): the project's fonts and the

@@ -1,8 +1,6 @@
 #include "finding_codes.h"
 
 #include <iterator>
-#include <string_view>
-#include <unordered_map>
 
 #include <editor/documents/document_types.h>
 
@@ -89,23 +87,7 @@ constexpr bool groups_well_formed() {
 static_assert(std::size(kGroups) == kFindingGroupCount, "every FindingGroup has exactly one row");
 static_assert(groups_well_formed(), "the group rows follow FindingGroup's order, each key its own");
 
-const std::unordered_map<std::string_view, const FindingCodeRow *> &lookup() {
-	static const std::unordered_map<std::string_view, const FindingCodeRow *> map = [] {
-		std::unordered_map<std::string_view, const FindingCodeRow *> out;
-		for (const NamedFindingTable &table : finding_tables())
-			for (const FindingCodeRow &row : table.rows) out.emplace(row.token, &row);
-		return out;
-	}();
-	return map;
-}
-
 } // namespace
-
-const FindingCodeRow *finding_row(const std::string &token) {
-	const auto &map = lookup();
-	const auto found = map.find(std::string_view(token));
-	return found == map.end() ? nullptr : found->second;
-}
 
 std::vector<NamedFindingTable> finding_tables() {
 	std::vector<NamedFindingTable> out{ { "core", core_finding_codes() } };
@@ -114,12 +96,6 @@ std::vector<NamedFindingTable> finding_tables() {
 		if (type && type->findings) out.push_back({ type->name, type->findings() });
 	}
 	return out;
-}
-
-const char *finding_owner(const FindingCodeRow *row) {
-	for (const NamedFindingTable &table : finding_tables())
-		if (table.rows.holds(row)) return table.owner;
-	return nullptr;
 }
 
 const char *finding_fix_token(FindingFix fixes) {

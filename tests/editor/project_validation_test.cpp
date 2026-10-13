@@ -76,10 +76,10 @@ int check_rows(const char *project, const std::vector<Diagnostic> &rows, const A
 		std::set<std::string> &codes) {
 	for (const Diagnostic &d : rows) {
 		codes.insert(d.code());
-		const char *owner = finding_owner(d.row());
-		if (!owner || finding_row(d.code()) != d.row())
+		const char *owner = editor_test::finding_owner(d.row());
+		if (!owner || editor_test::finding_row(d.code()) != d.row())
 			std::fprintf(stderr, "%s: %s has no table's row\n", project, d.code().c_str());
-		TEST_EXPECT(owner && finding_row(d.code()) == d.row());
+		TEST_EXPECT(owner && editor_test::finding_row(d.code()) == d.row());
 		if (std::string(owner) != "core") {
 			const AssetEntry *file = scan.at_path(d.asset);
 			const DocumentType *type = file ? document_type_for(file->kind) : nullptr;

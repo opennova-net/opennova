@@ -104,7 +104,6 @@ public:
 	void set_thumbnail_images(TextureThumbnailImages *images) { thumbnail_images_ = images; }
 
 	// The new-project form (the welcome view's and File > New project...'s), for a test.
-	const NewProjectForm &new_project_form() const { return new_project_; }
 
 	// Workspace
 	const SessionView &view() const override;

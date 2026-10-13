@@ -202,7 +202,7 @@ static int test_empty_project_is_blocked() {
 	TEST_EXPECT(!plan.diagnostics.empty());
 	const BuildReport report = run_build(plan, p.output_root());
 	TEST_EXPECT(!report.ok && report.build_dir.empty());
-	TEST_EXPECT(last_good_build_dir(p.output_root()).empty());
+	TEST_EXPECT(editor_test::last_good_build_dir(p.output_root()).empty());
 	return 0;
 }
 
@@ -261,7 +261,7 @@ static int test_filled_project_builds_and_mounts() {
 	TEST_EXPECT(fs::is_regular_file(fs::path(report.build_dir) / "menumus.sbf"));
 	TEST_EXPECT(fs::is_regular_file(fs::path(report.build_dir) / kBuildRecordFileName));
 	TEST_EXPECT(!fs::exists(fs::path(p.output_root()) / (report.build_id + ".tmp")));
-	TEST_EXPECT(last_good_build_dir(p.output_root()) == report.build_dir);
+	TEST_EXPECT(editor_test::last_good_build_dir(p.output_root()) == report.build_dir);
 
 	// The runtime's own mount, archive-only over the fixed boot table, resolves every name.
 	// (Scoped: an open mount holds the archives, and a held build is never pruned.)
@@ -300,7 +300,7 @@ static int test_filled_project_builds_and_mounts() {
 	TEST_EXPECT(changed.archives_reused.size() == 2);
 	for (const BuiltFile &file : changed.built)
 		if (file.archive) TEST_EXPECT(file.reused == (file.name != "language.pff"));
-	TEST_EXPECT(last_good_build_dir(p.output_root()) == changed.build_dir);
+	TEST_EXPECT(editor_test::last_good_build_dir(p.output_root()) == changed.build_dir);
 	TEST_EXPECT(!fs::exists(report.build_dir)); // the older build is pruned
 	return 0;
 }
@@ -360,7 +360,7 @@ static int test_protected_build_survives_and_archives_are_refused() {
 	                                    "{\"schema_version\":1,\"build_id\":\"someone-else\"}"));
 
 	TEST_EXPECT(write_table(p.root + "/strings/menutxt.bin", "two"));
-	const BuildReport second = run_build(p.plan(), p.output_root(), protect_dirs({first.build_dir}));
+	const BuildReport second = run_build(p.plan(), p.output_root(), editor_test::protect_dirs({first.build_dir}));
 	TEST_EXPECT(second.ok && second.build_dir != first.build_dir);
 	TEST_EXPECT(fs::is_directory(first.build_dir)); // a running child's build is never pruned
 	TEST_EXPECT(fs::is_regular_file(out + "/my important documents/keep.txt"));
@@ -1223,7 +1223,7 @@ static int test_steps_are_bounded() {
 	TEST_EXPECT(steps >= 80);
 	TEST_EXPECT(upward && largest <= budget);
 	TEST_EXPECT(run.bytes_done() == run.bytes_total());
-	TEST_EXPECT(run.items_done() == run.items_total() && run.item_name(0) == "language.pff");
+	TEST_EXPECT(run.items_done() == run.items_total());
 	TEST_EXPECT(fs::file_size(fs::path(run.report().build_dir) / "big.sbf") == big);
 	return 0;
 }
@@ -1250,7 +1250,7 @@ static int test_cancel_publishes_nothing() {
 	run.cancel();
 	TEST_EXPECT(run.done() && run.cancelled() && !run.report().ok && run.report().diagnostics.empty());
 	TEST_EXPECT(run.report().build_dir.empty() && staging_dirs(p.output_root()) == 0);
-	TEST_EXPECT(last_good_build_dir(p.output_root()) == first.build_dir && fs::is_directory(first.build_dir));
+	TEST_EXPECT(editor_test::last_good_build_dir(p.output_root()) == first.build_dir && fs::is_directory(first.build_dir));
 	TEST_EXPECT(run.step(16) && run.cancelled()); // a cancelled run stays done
 	size_t builds = 0;
 	for (const fs::directory_entry &entry : fs::directory_iterator(p.output_root()))
@@ -1262,7 +1262,7 @@ static int test_cancel_publishes_nothing() {
 		while (!dropped.done() && staging_dirs(p.output_root()) == 0) dropped.step(uint64_t(1) << 20);
 		TEST_EXPECT(!dropped.done() && staging_dirs(p.output_root()) == 1);
 	}
-	TEST_EXPECT(staging_dirs(p.output_root()) == 0 && last_good_build_dir(p.output_root()) == first.build_dir);
+	TEST_EXPECT(staging_dirs(p.output_root()) == 0 && editor_test::last_good_build_dir(p.output_root()) == first.build_dir);
 	return 0;
 }
 
@@ -1372,7 +1372,7 @@ static int test_file_rewritten_mid_read_fails() {
 		const std::vector<Diagnostic> &found = run.report().diagnostics;
 		TEST_EXPECT(found.size() == 1 && found[0].code() == "build.changed" && found[0].asset == name);
 		TEST_EXPECT(run.report().build_dir.empty() && staging_dirs(p.output_root()) == 0 &&
-		            last_good_build_dir(p.output_root()).empty());
+		            editor_test::last_good_build_dir(p.output_root()).empty());
 	}
 	return 0;
 }
@@ -1689,7 +1689,7 @@ static int test_publish_waits_for_a_held_file() {
 	while (!run.done() && ++steps < 100000) run.step(uint64_t(1) << 20);
 	for (const Diagnostic &d : run.report().diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
 	TEST_EXPECT(run.done() && run.report().ok && staging_dirs(p.output_root()) == 0);
-	TEST_EXPECT(last_good_build_dir(p.output_root()) == run.report().build_dir);
+	TEST_EXPECT(editor_test::last_good_build_dir(p.output_root()) == run.report().build_dir);
 	return 0;
 }
 
@@ -1767,7 +1767,7 @@ static int test_held_archives_are_never_written_through() {
 		std::vector<uint8_t> after;
 		TEST_EXPECT(opennova::io::read_file_bytes(held_path, after, error) && after == before);
 #endif
-		TEST_EXPECT(last_good_build_dir(p.output_root()) == rebuilt.build_dir);
+		TEST_EXPECT(editor_test::last_good_build_dir(p.output_root()) == rebuilt.build_dir);
 	}
 	// The game gone, the next publish prunes what the cancel left.
 	TEST_EXPECT(write_table(p.root + "/strings/menutxt.bin", "free") &&
@@ -1833,7 +1833,7 @@ static int test_deep_output_root() {
 	std::error_code ec;
 	TEST_EXPECT(fs::is_regular_file(system_path(copied), ec));
 	TEST_EXPECT(fs::is_regular_file(system_path(report.build_dir + "/localres.pff"), ec));
-	TEST_EXPECT(last_good_build_dir(output_root) == report.build_dir);
+	TEST_EXPECT(editor_test::last_good_build_dir(output_root) == report.build_dir);
 
 	TEST_EXPECT(write_table(root + "/strings/menutxt.bin", "deep") &&
 	            editor_test::backdate(root + "/strings/menutxt.bin", std::chrono::minutes(50)));

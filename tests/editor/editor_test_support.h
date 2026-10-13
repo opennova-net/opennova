@@ -32,6 +32,8 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/project/project_files.h>
 #include <editor/requirements/requirements.h>
+#include <base/io/json.h>
+#include <editor/project_build/build_run.h>
 #include <editor/session/finding_codes.h>
 #include <editor/session/original_files.h>
 #include <editor/session/project_session.h>
@@ -41,6 +43,42 @@
 #include <formats/lwf/lwf.h>
 
 namespace editor_test {
+
+// A finding code's row by its token over every table (the editor's own, then each document type's), null
+// for a token no table declares; and whose table holds a row ("core" or the type's name, null for none).
+// (S26 D1: the tests' alone, out of session/finding_codes.)
+inline const opennova::editor::FindingCodeRow *finding_row(const std::string &token) {
+	for (const opennova::editor::NamedFindingTable &table : opennova::editor::finding_tables())
+		for (const opennova::editor::FindingCodeRow &row : table.rows)
+			if (row.token && token == row.token) return &row;
+	return nullptr;
+}
+inline const char *finding_owner(const opennova::editor::FindingCodeRow *row) {
+	for (const opennova::editor::NamedFindingTable &table : opennova::editor::finding_tables())
+		for (const opennova::editor::FindingCodeRow &held : table.rows)
+			if (&held == row) return table.owner;
+	return nullptr;
+}
+
+// ProtectedDirs naming `dirs` whenever it is asked; and the last good build's directory under `output_root`
+// as its last_good.json names it ("" when none, or when the directory is gone). (S26 D1: the tests' alone,
+// out of project_build/build_run.)
+inline opennova::editor::ProtectedDirs protect_dirs(std::vector<std::string> dirs) {
+	return [dirs = std::move(dirs)] { return dirs; };
+}
+inline std::string last_good_build_dir(const std::string &output_root) {
+	std::string text, error;
+	if (!opennova::io::read_file_text(opennova::io::utf8_join(output_root, opennova::editor::kLastGoodBuildFileName),
+	                                  text, error))
+		return std::string();
+	opennova::io::JsonValue json;
+	if (!opennova::io::json_parse(text, json, error) || !json.is_object() ||
+	    json.get_int("schema_version", -1) != opennova::editor::kBuildRecordSchemaVersion)
+		return std::string();
+	const std::string dir = opennova::io::utf8_join(output_root, json.get_string("build_id", ""));
+	std::error_code ec;
+	return std::filesystem::is_directory(opennova::editor::system_path(dir), ec) ? dir : std::string();
+}
 
 // A shared member of a hand-made view (ProjectView's document, scan, requirements and imports,
 // ActivityView's last build, an import preview's plan, a rename preview's sites: each read only
@@ -319,7 +357,7 @@ inline std::string tree_digest(const std::string &dir) {
 inline opennova::editor::Diagnostic finding_of(opennova::editor::DiagnosticSeverity severity,
 		const std::string &code, std::string message, std::string asset = std::string(),
 		std::string field = std::string()) {
-	const opennova::editor::FindingCodeRow *row = opennova::editor::finding_row(code);
+	const opennova::editor::FindingCodeRow *row = finding_row(code);
 	if (!row) {
 		std::fprintf(stderr, "no finding code row declares %s\n", code.c_str());
 		std::abort();

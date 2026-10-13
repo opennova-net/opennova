@@ -401,7 +401,7 @@ int test_marks() {
 	view.documents.open = {std::shared_ptr<const DocumentBase>(std::move(base))};
 	const DocumentBase &document = *view.documents.open.front();
 	const FindingCodeRow &compile = finding_code(ScriptFinding::Compile);
-	const FindingCodeRow *missing = finding_row("reference.missing");
+	const FindingCodeRow *missing = editor_test::finding_row("reference.missing");
 	// A row about the file as a whole (Files shows it, no line of it).
 	const FindingCodeRow *file_wide = nullptr;
 	for (const FindingCodeRow &row : core_finding_codes())

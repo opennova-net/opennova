@@ -58,14 +58,6 @@ bool is_build_id(const std::string &name);
 // The directories a build must not prune, asked when it publishes (not when it starts: a game
 // may start from a build while another packs).
 using ProtectedDirs = std::function<std::vector<std::string>()>;
-// ProtectedDirs naming `dirs` whenever it is asked (the tests', a caller that knows them).
-ProtectedDirs protect_dirs(std::vector<std::string> dirs);
-
-struct BuildProgress {
-	virtual ~BuildProgress() = default;
-	// Called once per archive as it is written or reused, and once per loose file.
-	virtual void on_step(const std::string &what, size_t done, size_t total) = 0;
-};
 
 // A file a build published (the UX round's problems lane: the build panel's): an archive with how many
 // files it packs and whether the last good build's was kept, or a loose file; its size as published.
@@ -151,11 +143,9 @@ public:
 	uint64_t bytes_done() const { return bytes_done_; }
 	uint64_t bytes_total() const { return bytes_total_; }
 	const std::string &label() const { return label_; }
-	// The archives and loose files written or reused so far, out of how many, and each one's
-	// name in that order (the command line's lines).
+	// The archives and loose files written or reused so far, out of how many.
 	size_t items_done() const { return items_done_; }
 	size_t items_total() const { return plan_.archives.size() + plan_.loose.size(); }
-	const std::string &item_name(size_t index) const;
 
 	const BuildReport &report() const { return report_; }
 
@@ -256,10 +246,6 @@ private:
 };
 
 // The whole build in one call (the command line, the tests).
-BuildReport run_build(const BuildPlan &plan, const std::string &output_root, ProtectedDirs protected_dirs = {},
-                      BuildProgress *progress = nullptr);
-
-// The last good build's directory under `output_root` ("" when none).
-std::string last_good_build_dir(const std::string &output_root);
+BuildReport run_build(const BuildPlan &plan, const std::string &output_root, ProtectedDirs protected_dirs = {});
 
 } // namespace opennova::editor

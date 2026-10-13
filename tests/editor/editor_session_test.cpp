@@ -4119,7 +4119,7 @@ static int test_play_then_close() {
 	TEST_EXPECT(!v.project.open && !v.activity.operation.running());
 	TEST_EXPECT(v.activity.last_operation.id == id &&
 			v.activity.last_operation.end == OperationEnd::Cancelled);
-	TEST_EXPECT(staging_dirs(output_root) == 0 && last_good_build_dir(output_root).empty());
+	TEST_EXPECT(staging_dirs(output_root) == 0 && editor_test::last_good_build_dir(output_root).empty());
 	TEST_EXPECT(output_has(v, "Cancelled the build."));
 	for (int i = 0; i < 5; ++i) session.poll();
 	TEST_EXPECT(platform.spawns == 0 && v.activity.play_state == PlayState::Stopped &&

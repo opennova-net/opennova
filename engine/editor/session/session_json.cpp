@@ -1261,13 +1261,6 @@ bool problem_grouping_from_token(const std::string &token, ProblemGrouping &out)
 	return value_of(kGroupingTokens, token, out);
 }
 
-std::vector<std::string> editor_request_kind_tokens() {
-	std::vector<std::string> tokens;
-	for (size_t i = 0; i < kEditorRequestKindCount; ++i)
-		tokens.emplace_back(request_kind_row(static_cast<EditorRequestKind>(i)).token);
-	return tokens;
-}
-
 void set_page(JsonValue &out, const JsonPage &page, size_t total, size_t beside) {
 	out.set("count", json_number(double(total)));
 	const size_t span = total > beside ? total : beside;
@@ -1786,13 +1779,6 @@ JsonValue graph_edge_to_json(const AssetGraph &graph, const GraphEdge &edge) {
 	const ReferenceStatus status = edge.target.empty() ? ReferenceStatus::NotAReference : graph.resolve(edge, &file);
 	out.set("status", json_string(reference_status_token(status)));
 	if (!file.empty()) out.set("file", json_string(file));
-	return out;
-}
-
-JsonValue graph_edges_to_json(const AssetGraph &graph, const std::vector<const GraphEdge *> &edges) {
-	JsonValue out = JsonValue::make_array();
-	for (const GraphEdge *edge : edges)
-		if (edge) out.push(graph_edge_to_json(graph, *edge));
 	return out;
 }
 

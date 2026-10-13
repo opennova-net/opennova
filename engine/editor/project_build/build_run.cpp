@@ -391,24 +391,12 @@ struct BuildRun::Streams {
 	}
 };
 
-ProtectedDirs protect_dirs(std::vector<std::string> dirs) {
-	return [dirs = std::move(dirs)] { return dirs; };
-}
-
 bool is_build_id(const std::string &name) {
 	if (name.size() != 16) return false;
 	for (const char c : name) {
 		if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
 	}
 	return true;
-}
-
-std::string last_good_build_dir(const std::string &output_root) {
-	LastGood last;
-	if (!read_last_good(output_root, last)) return std::string();
-	const std::string dir = join_path(output_root, last.build_id);
-	std::error_code ec;
-	return fs::is_directory(system_path(dir), ec) ? dir : std::string();
 }
 
 BuildRun::BuildRun(BuildPlan plan, std::string output_root, ProtectedDirs protected_dirs) :
@@ -462,11 +450,6 @@ BuildRun::~BuildRun() {
 
 size_t BuildRun::stamp_index(size_t group, size_t entry) const {
 	return group_base_[group] + entry;
-}
-
-const std::string &BuildRun::item_name(size_t index) const {
-	if (index < plan_.archives.size()) return plan_.archives[index].file_name;
-	return plan_.loose[index - plan_.archives.size()].build_path;
 }
 
 void BuildRun::advance(uint64_t bytes) {
@@ -1200,15 +1183,9 @@ void BuildRun::list_built() {
 	}
 }
 
-BuildReport run_build(const BuildPlan &plan, const std::string &output_root, ProtectedDirs protected_dirs,
-                      BuildProgress *progress) {
+BuildReport run_build(const BuildPlan &plan, const std::string &output_root, ProtectedDirs protected_dirs) {
 	BuildRun run(plan, output_root, std::move(protected_dirs));
-	size_t reported = 0;
-	for (;;) {
-		const bool finished = run.step(kRunBuildStepBytes);
-		for (; progress && reported < run.items_done(); ++reported)
-			progress->on_step(run.item_name(reported), reported + 1, run.items_total());
-		if (finished) break;
+	while (!run.step(kRunBuildStepBytes)) {
 	}
 	return run.report();
 }

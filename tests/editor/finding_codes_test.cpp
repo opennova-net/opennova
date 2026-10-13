@@ -34,6 +34,7 @@
 #include <vector>
 
 #include "common/test_expect.h"
+#include "editor/editor_test_support.h"
 
 using namespace opennova;
 using namespace opennova::editor;
@@ -113,10 +114,10 @@ static int test_tokens_unique() {
 		TEST_EXPECT(walked[i].owner == named[i].owner && walked[i].rows.rows == named[i].rows.rows &&
 		            walked[i].rows.count == named[i].rows.count);
 		for (const FindingCodeRow &row : named[i].rows)
-			TEST_EXPECT(finding_owner(&row) && std::string(finding_owner(&row)) == named[i].owner);
+			TEST_EXPECT(editor_test::finding_owner(&row) && std::string(editor_test::finding_owner(&row)) == named[i].owner);
 	}
 	const FindingCodeRow stray{ "stray.code" };
-	TEST_EXPECT(!finding_owner(&stray) && !finding_owner(nullptr));
+	TEST_EXPECT(!editor_test::finding_owner(&stray) && !editor_test::finding_owner(nullptr));
 	std::set<std::string> fixes;
 	for (const FindingFix fix : { FindingFix::None, FindingFix::Requirement, FindingFix::WrongKind, FindingFix::Rename,
 	                              FindingFix::ResetRow, FindingFix::Reference, FindingFix::UnimportedTexture,
@@ -138,10 +139,10 @@ static int test_tokens_unique() {
 static int test_lookup() {
 	for (const Table &table : tables())
 		for (const FindingCodeRow &row : table.rows)
-			TEST_EXPECT(finding_row(row.token) == &row);
-	TEST_EXPECT(!finding_row("") && !finding_row("reference") && !finding_row("reference.missing.") &&
-	            !finding_row("no.such_code"));
-	TEST_EXPECT(finding_row("reference.missing") == &finding_code(CoreFinding::ReferenceMissing));
+			TEST_EXPECT(editor_test::finding_row(row.token) == &row);
+	TEST_EXPECT(!editor_test::finding_row("") && !editor_test::finding_row("reference") && !editor_test::finding_row("reference.missing.") &&
+	            !editor_test::finding_row("no.such_code"));
+	TEST_EXPECT(editor_test::finding_row("reference.missing") == &finding_code(CoreFinding::ReferenceMissing));
 	TEST_EXPECT(std::string(finding_code(CoreFinding::AssetKindUnknown).token) == "asset.kind.unknown");
 	TEST_EXPECT(std::string(finding_code(CoreFinding::UnsavedNone).token) == "unsaved.none");
 	TEST_EXPECT(std::string(finding_code(CoreFinding::DocumentUnserializable).token) == "document.unserializable");
@@ -161,7 +162,7 @@ static int test_lookup() {
 // A test's stand-in in a registered type's place (S13 D6), with no finding codes of its own,
 // hides none of that type's: the lookup and the tables read the registry as registered.
 static int test_stand_in_hides_nothing() {
-	const FindingCodeRow *unused = finding_row("style.unused");
+	const FindingCodeRow *unused = editor_test::finding_row("style.unused");
 	TEST_EXPECT(unused == &finding_code(StyleFinding::Unused));
 	DocumentType blank_styles;
 	blank_styles.id = DocumentTypeId::Styles;
@@ -171,7 +172,7 @@ static int test_stand_in_hides_nothing() {
 	{
 		DocumentTypeStandIn stand_in(blank_styles);
 		TEST_EXPECT(document_type(DocumentTypeId::Styles) == &blank_styles);
-		TEST_EXPECT(finding_row("style.unused") == unused && finding_row("style.line_ending"));
+		TEST_EXPECT(editor_test::finding_row("style.unused") == unused && editor_test::finding_row("style.line_ending"));
 		bool styles = false;
 		for (const NamedFindingTable &table : finding_tables())
 			styles = styles || (std::string(table.owner) == "styles" && table.rows.holds(unused));
@@ -199,7 +200,7 @@ static int test_type_tables() {
 		const auto note = static_cast<menu::MenuFrameNoteCode>(i);
 		const FindingCodeRow &row = finding_code(note);
 		TEST_EXPECT(std::string(row.token) == std::string("menu.render.") + menu::menu_frame_note_token(note));
-		TEST_EXPECT(finding_row(row.token) == &row && menu_finding_codes().holds(&row) &&
+		TEST_EXPECT(editor_test::finding_row(row.token) == &row && menu_finding_codes().holds(&row) &&
 		            row.source == FindingSource::RenderCheck && row.group == FindingGroup::Menus);
 	}
 	TEST_EXPECT(menu_finding_codes().count ==
@@ -246,7 +247,7 @@ static int test_type_tables() {
 		const FindingCodeRow &row = finding_code(code);
 		if (token != row.token)
 			std::fprintf(stderr, "%s reads as %s\n", mns::diagnostic_code_token(code), row.token);
-		TEST_EXPECT(token == row.token && finding_row(token) == &row && style_finding_codes().holds(&row));
+		TEST_EXPECT(token == row.token && editor_test::finding_row(token) == &row && style_finding_codes().holds(&row));
 	}
 	TEST_EXPECT(&finding_code(mns::DiagnosticCode::LineEnding) == &finding_code(StyleFinding::LineEnding));
 	return 0;
@@ -329,7 +330,7 @@ static int test_columns() {
 		{ "til.ignored_input", "without the input the game ignores" },
 	};
 	for (const auto &[token, does] : rewrites) {
-		const FindingCodeRow *row = finding_row(token);
+		const FindingCodeRow *row = editor_test::finding_row(token);
 		TEST_EXPECT(row && row->rewrite_does && does == row->rewrite_does);
 	}
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.blocks_save; }) ==
@@ -388,8 +389,8 @@ static int test_columns() {
 	                     "terrain_heights.bake_refused", "terrain_heights.multiplayer", "terrain_heights.over_rasterizer", "terrain_heights.steep_block",
 	                     "terrain_heights.unread", "texture.tga_unfilled", "til.empty", "til.ignored_input", "til.index_past_atlas",
 	                     "til.invalid_input", "til.layer_order", "til.med_cap", "til.unread" }));
-	TEST_EXPECT(finding_row("model.light_no_registers") && finding_row("model.light_no_registers")->gates_build &&
-	            finding_row("style.hangs")->gates_build && finding_row("style.line_ending")->gates_build);
+	TEST_EXPECT(editor_test::finding_row("model.light_no_registers") && editor_test::finding_row("model.light_no_registers")->gates_build &&
+	            editor_test::finding_row("style.hangs")->gates_build && editor_test::finding_row("style.line_ending")->gates_build);
 	// A ConfigFile past its reader's pool gates, the game's own failure, which its row says and cites: the reader
 	// clears past the pool into the heap, and the game crashes later [orig: ConfigFile_ParseText @ 0x7609e8]; so
 	// does hudfx.def's HUD model as its one line read, the power slots' draw then reading a slot of no model, and an
@@ -402,13 +403,13 @@ static int test_columns() {
 	// game's own reader stops at gates either way, saying what the game does.
 	{
 		const Diagnostic dropped =
-		        make_finding(*finding_row("strings.invalid_input"), DiagnosticSeverity::Error, "dropped", "lang/strings.bin");
+		        make_finding(*editor_test::finding_row("strings.invalid_input"), DiagnosticSeverity::Error, "dropped", "lang/strings.bin");
 		ShippedFiles closed, edited;
 		edited.unsaved.insert("lang/strings.bin");
 		TEST_EXPECT(blocks_build(dropped) && !blocks_build(dropped, nullptr, &closed) && blocks_build(dropped, nullptr, &edited) &&
 		            !blocks_build(dropped, nullptr, nullptr));
 		const Diagnostic stops =
-		        make_finding(*finding_row("catalog.reader_stops"), DiagnosticSeverity::Error, "stops", "defs/weapon.def");
+		        make_finding(*editor_test::finding_row("catalog.reader_stops"), DiagnosticSeverity::Error, "stops", "defs/weapon.def");
 		TEST_EXPECT(blocks_build(stops, nullptr, &closed) && blocks_build(stops, nullptr, nullptr) && blocker_is_the_games(stops) &&
 		            blocker_reason(stops).rfind("The game fails here as the original does: its reader stops", 0) == 0);
 	}
@@ -514,7 +515,7 @@ static int test_make_finding() {
 	            !requirement_subject(by_row) && !reference_subject(by_row) && subject_target(by_row).empty());
 	const Diagnostic note = make_finding(finding_code(menu::MenuFrameNoteCode::TextTruncated),
 	                                     DiagnosticSeverity::Warning, "Cut.");
-	TEST_EXPECT(note.row() == finding_row("menu.render.text_truncated") && note.code() == "menu.render.text_truncated");
+	TEST_EXPECT(note.row() == editor_test::finding_row("menu.render.text_truncated") && note.code() == "menu.render.text_truncated");
 	const Diagnostic core = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Warning, "Unread.");
 	TEST_EXPECT(core.code() == "graph.unreadable" && core.asset.empty() && core.field.empty());
 	const Diagnostic none;

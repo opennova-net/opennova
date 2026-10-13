@@ -212,9 +212,9 @@ static int test_query() {
 	TEST_EXPECT(kinds.groups[2].key == "style" && kinds.groups[2].rows.size() == 2 && kinds.groups[5].key == "rename");
 	TEST_EXPECT(kinds.rows == std::vector<size_t>({1, 3, 4, 2, 0, 5, 6}) && kinds.total() == 7);
 	// A group's title is its row's group's (the families the old table did not name have one too).
-	TEST_EXPECT(std::string(finding_group_title(finding_row("reference.missing")->group)) == "Missing references" &&
-	            std::string(finding_group_title(finding_row("animation_map.row")->group)) == "Animation maps" &&
-	            std::string(finding_group_title(finding_row("rename.site")->group)) == "Renames");
+	TEST_EXPECT(std::string(finding_group_title(editor_test::finding_row("reference.missing")->group)) == "Missing references" &&
+	            std::string(finding_group_title(editor_test::finding_row("animation_map.row")->group)) == "Animation maps" &&
+	            std::string(finding_group_title(editor_test::finding_row("rename.site")->group)) == "Renames");
 	// Grouped and filtered: the groups hold what is shown ("4 of 7").
 	query.errors = false;
 	const ProblemAnswer filtered = answer_problems(query, view);
