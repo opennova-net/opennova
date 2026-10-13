@@ -48,8 +48,8 @@ class PreviewAmbientMix {
 public:
 	// One layer that may take a channel: a source's set's layer, or a rain loop's.
 	struct Candidate {
-		int source = -1; // the Listen's source index (-1: the rain)
-		const char *kind = "marker";
+		int source = -1; // the Listen's source index (-1: none, the rain's or an item's)
+		const char *kind = "marker"; // "marker", "rain", "item"
 		std::string set, bank, wave, path;
 		int layer = 0;
 	};
@@ -71,6 +71,9 @@ public:
 	// no bank holds.
 	std::vector<audio::AmbientMixer::LayerDesc> describe(const ClipSoundSources &banks, const std::string &set, int source,
 			const char *kind, const SessionView &view);
+	// `layers` (a set's, described) under fresh ids, each new id's candidate the described one's: another emitter's own
+	// candidates of the set, as MissionAudio gives each dynamic emitter its own.
+	std::vector<audio::AmbientMixer::LayerDesc> renumber(const std::vector<audio::AmbientMixer::LayerDesc> &layers);
 	// The rain's two loops' layers (world::kRainAmbientSets), described as the rain's candidates.
 	void describe_rain(const ClipSoundSources &banks, const SessionView &view);
 	const std::unordered_map<int32_t, Candidate> &candidates() const { return candidates_; }

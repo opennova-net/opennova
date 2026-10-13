@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <string_view>
 #include <cmath>
 #include <cstdio>
 
@@ -214,11 +215,19 @@ bool MissionListen::refresh(const SessionView &view, const MissionScene &scene, 
 			sources_.push_back(std::move(source));
 		}
 	}
-	// The rain's two loops, beside the listener.
+	// The rain's two loops, beside the listener; the sets the items loop.
 	mix_.describe_rain(banks_, view);
+	item_sets_.clear();
+	for (const std::string &name : script_.item_loop_sets()) {
+		std::vector<audio::AmbientMixer::LayerDesc> layers = mix_.describe(banks_, name, -1, "item", view);
+		if (!layers.empty()) item_sets_[name] = std::move(layers);
+	}
 	// Other candidates than before (a source added, removed or given other sets, a wave found or lost): the channels
-	// start again.
-	bool same = before.size() == mix_.candidates().size();
+	// start again. An item's own candidates of its set (made as it registers) are not among them.
+	size_t kept = 0;
+	for (const auto &[id, candidate] : before)
+		if (std::string_view(candidate.kind) != "item" || mix_.candidates().count(id)) ++kept;
+	bool same = kept == mix_.candidates().size();
 	for (const auto &[id, candidate] : mix_.candidates()) {
 		if (!same) break;
 		const auto was = before.find(id);
@@ -237,12 +246,43 @@ void MissionListen::remix_() {
 	// channel, its wave playing on, once the new table's first walk registers it again.
 	mix_.new_mixer();
 	mixed_tick_ = -1;
+	item_loops_.clear();
 	for (const MissionSoundSource &source : sources_) {
 		if (source.marker < 0) continue;
 		const float at[3] = { source.at.x, source.at.y, source.at.z };
 		mix_.mixer().add_marker(at, 0, source.stagger, 0, marker_keys_[size_t(source.marker)].data(),
 				marker_sets_[size_t(source.marker)]);
 	}
+}
+
+void MissionListen::register_item_(const MissionScriptEmitter &emitter) {
+	audio::AmbientMixer &mixer = mix_.mixer();
+	const world::SoundEmitterEvent &event = emitter.event;
+	if (emitter.tick > mixer.clock_tick()) mixer.advance_to_tick(emitter.tick);
+	const float at[3] = { event.pos.x, event.pos.y, event.pos.z };
+	const int32_t lifetime = audio::emitter_lifetime_word(event.lifetime_ticks);
+	const std::pair<uint64_t, int> key{ event.source_spawn_id, int(event.lane) };
+	if (event.source_only) {
+		mixer.update_emitter_source(event.source_spawn_id, at, event.source_bms_id);
+		return;
+	}
+	if (event.pitch_q16 == 0 || event.volume_q8_8 == 0) {
+		mixer.register_emitter(event.source_spawn_id, event.lane, at, event.source_bms_id, lifetime, event.pitch_q16,
+				event.volume_q8_8, {});
+		item_loops_.erase(key);
+		return;
+	}
+	const auto set = item_sets_.find(event.set_name);
+	if (set == item_sets_.end()) return;
+	ItemLoop &loop = item_loops_[key];
+	if (loop.set != event.set_name) {
+		if (!loop.set.empty())
+			mixer.register_emitter(event.source_spawn_id, event.lane, at, event.source_bms_id, lifetime, 0, 0, {});
+		loop.set = event.set_name;
+		loop.layers = mix_.renumber(set->second);
+	}
+	mixer.register_emitter(event.source_spawn_id, event.lane, at, event.source_bms_id, lifetime, event.pitch_q16,
+			event.volume_q8_8, loop.layers);
 }
 
 void MissionListen::play_to(int32_t tick, const PreviewVec3 &listener, double hours) {
@@ -263,7 +303,9 @@ void MissionListen::play_to(int32_t tick, const PreviewVec3 &listener, double ho
 	// A step back of the clock: the sources register again from the start, as at the mission's.
 	if (!mix_.has_mixer() || tick < mixed_tick_) remix_();
 	mix_.mixer().set_time_of_day_hours(float(hours));
-	// The cohorts the ticks since visit [orig: Entity_UpdateAllEntities @ 0x4c225a].
+	// The items' loops the script's entity update registered, each at its tick; then the cohorts the ticks since visit
+	// [orig: Entity_UpdateAllEntities @ 0x4c225a].
+	for (const MissionScriptEmitter &emitter : script_.take_emitters()) register_item_(emitter);
 	mix_.mixer().advance_to_tick(tick);
 	mixed_tick_ = tick;
 	// The rain beside the listener while it rains, registered into the same table at the tick.

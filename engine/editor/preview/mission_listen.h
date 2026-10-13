@@ -98,8 +98,11 @@ struct MissionSoundSource {
 // building over it); the hour the picture's (the options' time, else the mission's start time). Not heard: the
 // occlusion the game inflates a distance by (no world stands between them in the picture: DI-04's rule), the music
 // (the game context's lead-in and its one GAMINT sting, which the shell's music director plays: the body names the
-// pair and what it plays, docs/audio/mus-sbf-re.md), what only a running world raises (a vehicle's engine, a placed
-// genx item's hum: D-SND-32). The people's footsteps and foley as they play their clips from their spawn (S23 C,
+// pair and what it plays, docs/audio/mus-sbf-re.md), and a vehicle's engine, which only a running world raises (a
+// driven hull's motor registers it; nothing drives one in the picture: D-SND-32). A placed genx item's hum is heard:
+// MissionScriptRun's entity update registers it on its cohort's visit (world::update_item_ambient_sound), and the
+// Listen registers each into the same table at its tick as MissionAudio registers a dynamic emitter, its set's layers
+// its own candidates. The people's footsteps and foley as they play their clips from their spawn (S23 C,
 // preview/mission_people) are heard beside it, kept with its one-shots (keep).
 class MissionListen {
 public:
@@ -167,6 +170,9 @@ private:
 	const Catalog &catalog_(const SessionView &view, const std::string &file);
 	// The mixer made again over the sources (each resolved one a marker), its clock at the start.
 	void remix_();
+	// An item's ambient loop registered into the table at its tick (MissionAudio's dynamic emitter): its set's layers
+	// its own candidates, made again where its set changes; one with no pitch or volume registered empty, a clear.
+	void register_item_(const MissionScriptEmitter &emitter);
 	// The dialog `number` (dlg%03i) a Play dialog registers: the dialog of the name in the mission's dialog bank, its
 	// lines with their waves (audio::resolve_dialog_lines), onto the channel (DI-32) [orig: Dialog_PlayByIndex
 	// @ 0x527ae0 -> Dialog_PlayByName @ 0x44d9f0 -> Dialog_Register @ 0x44d980].
@@ -193,6 +199,13 @@ private:
 	std::unordered_map<NodeId, size_t> source_index_;
 	std::vector<std::vector<std::vector<audio::AmbientMixer::LayerDesc>>> marker_sets_; // per source, its sets' layers
 	std::vector<std::array<int32_t, 4>> marker_keys_; // per source, its slots' sets by index (-1 none)
+	// The sets the items loop, each described once; each item's lane registered, its set and its own candidates.
+	std::map<std::string, std::vector<audio::AmbientMixer::LayerDesc>> item_sets_;
+	struct ItemLoop {
+		std::string set;
+		std::vector<audio::AmbientMixer::LayerDesc> layers;
+	};
+	std::map<std::pair<uint64_t, int>, ItemLoop> item_loops_;
 	PreviewAmbientMix mix_;
 	std::vector<ClipSoundFired> fired_;
 	PreviewVec3 listener_;

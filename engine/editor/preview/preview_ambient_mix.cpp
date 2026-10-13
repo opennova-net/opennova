@@ -19,8 +19,8 @@ using io::json_string;
 using io::JsonValue;
 
 // The listener's own source in the mixer's dynamic table (the rain beside it), standing in for the local player's
-// registry serial.
-constexpr uint64_t kListenerSource = 1;
+// registry serial: none an item's (the kernel's serials count up from 1) can take.
+constexpr uint64_t kListenerSource = ~uint64_t(0);
 
 float distance_between(const PreviewVec3 &a, const PreviewVec3 &b) {
 	const double dx = double(a.x) - b.x, dy = double(a.y) - b.y, dz = double(a.z) - b.z;
@@ -92,6 +92,19 @@ std::vector<audio::AmbientMixer::LayerDesc> PreviewAmbientMix::describe(const Cl
 		desc.clamp_vol = each.clamp;
 		candidates_[desc.candidate_id] = std::move(candidate);
 		out.push_back(desc);
+	}
+	return out;
+}
+
+std::vector<audio::AmbientMixer::LayerDesc> PreviewAmbientMix::renumber(
+		const std::vector<audio::AmbientMixer::LayerDesc> &layers) {
+	std::vector<audio::AmbientMixer::LayerDesc> out = layers;
+	for (audio::AmbientMixer::LayerDesc &desc : out) {
+		const auto found = candidates_.find(desc.candidate_id);
+		if (found == candidates_.end()) continue;
+		Candidate candidate = found->second;
+		desc.candidate_id = next_candidate_++;
+		candidates_[desc.candidate_id] = std::move(candidate);
 	}
 	return out;
 }
