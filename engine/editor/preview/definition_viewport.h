@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include <editor/model/edit.h>
 #include <editor/preview/ammo_impacts.h>
 #include <editor/preview/definition_effects.h>
 #include <editor/preview/definition_weapon.h>
@@ -190,6 +191,25 @@ public:
 			uint64_t &next_seq);
 	// The camera looking at the drawn model on a picture `width` x `height` (its angles kept).
 	OrbitCamera framed(int width, int height) const;
+	// A weapon's two eyes in first person, seen from the orbit (the eye view stands at the hip's): where the game's
+	// camera stands before the view model at the hip (`pos`) and aimed (`tpos`), each with the way it looks and its
+	// up, in the preview's space (the eye of renderer::fp_viewmodel_pose's camera, first_person_eye's; its place
+	// is the view units' alone, its turn the view record's). None for another record, view or camera. The game's
+	// camera never moves: pos and tpos stand the gun before it. The orbit holds the gun still instead, so each eye is
+	// where that camera stands against the gun.
+	struct Eye {
+		const char *handle = ""; // "pos" or "tpos": the view record it places ("" the game's camera now)
+		PreviewVec3 at, look, up;
+	};
+	std::vector<Eye> eyes(int width, int height) const;
+	// Where the game's camera stands against the still gun at the clock's tick, seen from the orbit: at the hip's
+	// eye, eased along to the aimed one while the scope is up (DefinitionWeapon::view_now), and the field of view it
+	// sees with (`fov_deg`, horizontal). False where eyes() shows none.
+	bool game_camera(int width, int height, Eye &out, float &fov_deg) const;
+	// The edits the eye `handle` moved to `to` makes on the record shown, its view record's three places in the
+	// file's units (1/256 metre, three decimals), those that change; false for a handle the record has not.
+	bool eye_edits(const DocumentBase &document, const std::string &handle, const PreviewVec3 &to, int width,
+	               int height, uint64_t gesture, std::vector<Edit> &out) const;
 
 	ViewportStatus status() const override;
 	const char *reason() const override { return definition_view_status_token(reason_); }
