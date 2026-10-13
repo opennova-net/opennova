@@ -88,7 +88,7 @@ const char *texture_gates(int32_t loader_arg) {
 	if (!texture_arg_gates(loader_arg)) return nullptr;
 	return "[orig: PolyTrn_InitTextures @ 0x60B389 (\"colormap\") and @ 0x60B19A (\"blendermap\", the blend on by its "
 	       "key alone, Terrain_ParseConfigCallback @ 0x60F7D0) logging the error Game_StartMission @ 0x525AD8 shows as "
-	       "\"Polytrn: Critical file not found\" before it aborts the mission, sub_520AA0 @ 0x520B4E..0x520B64]";
+	       "\"Polytrn: Critical file not found\" before it aborts the mission, Game_ShowErrorLogAndAbortMission @ 0x520B4E..0x520B64]";
 }
 
 // What the game does without the file, in the role's words (texture_roles.h); where the project holds the
