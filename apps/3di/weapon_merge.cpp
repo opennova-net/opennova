@@ -308,8 +308,14 @@ bool parse_weapon_edits(const std::string &text, std::vector<WeaponEditEntry> &o
 				if (!strutil::iequals(edit.value, "auto") &&
 				    (edit.value.empty() || *end != '\0' || ticks < 0 || ticks > 0x7FFFFFFF))
 					return fail(error, where + "a delay is a whole number of ticks or auto");
+			} else if (edit.key == "function") {
+				// The handler the action's slot runs [orig: Anim_InitActions
+				//  @ 0x541fa0, the name lookup @ 0x542117..0x542139].
+				if (weapon_handler_named(edit.value.c_str()) == weapon_handler::kPlaceholder)
+					return fail(error, where + "'" + edit.value + "' is no weapon action handler (wpn_std_idle, "
+					                            "wpn_std_reload, ...)");
 			} else {
-				return fail(error, where + "an action key is anim, delaystart or delayend");
+				return fail(error, where + "an action key is anim, delaystart, delayend or function");
 			}
 			for (const auto &k : entry.keys)
 				if (k.action == edit.action && k.key == edit.key)
@@ -382,6 +388,8 @@ bool merge_weapon_def(const std::string &def, const std::vector<WeaponEditEntry>
 				// keeps may bind another one to the slot.
 				// [orig: Anim_InitActions @ 0x541fa0, the rewrite @ 0x542117..0x542139]
 				std::set<int> noted;
+				for (const auto &k : edit.keys)
+					if (k.key == "function") noted.insert(k.action); // the edits bind it themselves
 				for (const auto &k : edit.keys) {
 					if (!noted.insert(k.action).second) continue;
 					for (size_t r = 0; r < parsed.actions_count; ++r) {

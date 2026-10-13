@@ -132,6 +132,22 @@ int main(int argc, char **argv) {
 		if (e.scenario == wa::kSwitchFrom && e.kind == "switch_complete") { CHECK(e.clip_ticks > 0); holster_complete = true; }
 	}
 	CHECK(draw_ready && holster_complete);
+	// A draw timed by its clip names the idle handler, which runs on its
+	// delays: ready one second in, where the switch timer's draw is ~31 ticks.
+	{
+		auto timed = request;
+		for (auto &a : timed.actions)
+			if (a.action == wa::kSwitchTo) a.active_seconds = 1.0;
+		WeaponTimingPlan p;
+		CHECK(plan_weapon_timing(timed, p, error));
+		const WeaponTimingRow *draw = row(p.entries[0], wa::kSwitchTo);
+		CHECK(draw != nullptr && draw->delaystart == 63 && draw->function == "wpn_std_idle");
+		int ready = -1;
+		for (const auto &e : p.entries[0].events)
+			if (e.scenario == wa::kSwitchTo && e.kind == "ready" && ready < 0) ready = e.tick;
+		CHECK(ready >= 63 && ready <= 65);
+		CHECK(contains(weapon_edits_text(p), "action switchto function wpn_std_idle\n"));
+	}
 
 	// Refusals, each with the reason an author can act on.
 	const auto refused = [&](const WeaponTimingRequest &r, const char *why) {
@@ -461,6 +477,27 @@ int main(int argc, char **argv) {
 		// The kept FUNCTION binds another handler than the timing ran.
 		CHECK(notes.size() == 1 && contains(notes[0], "FIRE block keeps FUNCTION wpn_std_empty"));
 	}
+	// A draw timed by its clip: the edits name its FUNCTION, which the merge
+	// sets on the block's own line (no note: the edits bind it), and an
+	// unknown handler is refused.
+	{
+		std::vector<WeaponEditEntry> draw_edits;
+		CHECK(parse_weapon_edits("weapon_edits 1\nentry WPN_DRAW auto\naction switchto delaystart 98\n"
+		                         "action switchto delayend 0\naction switchto function wpn_std_idle\n",
+		                         draw_edits, error));
+		const std::string draw = "weapon \"WPN_DRAW\"\r\n\tflags auto\r\n"
+		                         "\taction \"switchto\"\r\n\t\tanim anim_wpn_switchto\r\n\t\tdelayend 2\r\n"
+		                         "\t\tfunction wpn_std_switchto\r\n\tend\r\nend\r\n";
+		CHECK(merge_weapon_def(draw, draw_edits, merged, notes, error));
+		CHECK(merged == "weapon \"WPN_DRAW\"\r\n\tflags auto\r\n"
+		                "\taction \"switchto\"\r\n\t\tanim anim_wpn_switchto\r\n\t\tdelayend 0\r\n"
+		                "\t\tfunction wpn_std_idle\r\n\t\tdelaystart\t98\r\n\tend\r\nend\r\n");
+		CHECK(notes.empty());
+		std::vector<WeaponEditEntry> bad_function;
+		CHECK(!parse_weapon_edits("weapon_edits 1\nentry WPN_DRAW auto\naction switchto function wpn_std_dance\n",
+		                          bad_function, error) &&
+		      contains(error, "no weapon action handler"));
+	}
 	// A comment that cuts a value's token stays after the new value, and a
 	// pos line short of six values gets its zeros ahead of its comment.
 	{
@@ -572,7 +609,7 @@ int main(int argc, char **argv) {
 	for (const char *broken : {
 		"weapon_edits 2\nentry WPN_X auto\n",
 		"weapon_edits 1\npos 1 2 3\n",
-		"weapon_edits 1\nentry WPN_X auto\naction fire function wpn_std_idle\n",
+		"weapon_edits 1\nentry WPN_X auto\naction fire function wpn_std_dance\n",
 		"weapon_edits 1\nentry WPN_X auto\naction fire delayend -1\n",
 		"weapon_edits 1\nentry WPN_X auto\naction fire delayend 99999999999\n",
 		"weapon_edits 1\nentry WPN_X auto\naction fire delayend 2\naction fire delayend 3\n",
