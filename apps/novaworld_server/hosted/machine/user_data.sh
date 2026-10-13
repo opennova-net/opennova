@@ -158,12 +158,16 @@ cat > /usr/local/sbin/opennova-serve-run <<'RUN'
 # opennova-serve in its container (opennova-serve.service's ExecStart): the game
 # data read-only at /opt/jo, the working directory at /srv/serve, the machine's
 # own network (NovaWorld takes the server's address from its session's
-# datagrams), and the arguments and the image the bootstrap bundle named. Its
-# output goes to the journal (journalctl -u opennova-serve, over SSM).
+# datagrams), and the arguments and the image the bootstrap bundle named. It
+# runs as UID 10001 with no capability and no way to gain one (no setuid), so
+# it never leaves the UID the metadata fence matches; it binds only ports above
+# 1024 and needs none. Its output goes to the journal (journalctl -u
+# opennova-serve, over SSM).
 set -euo pipefail
 image="$(cat /etc/opennova/serve.image)"
 mapfile -d '' -t args < /etc/opennova/serve.args
 exec /usr/bin/docker run --rm --name opennova-serve --network host --user 10001:10001 \
+  --cap-drop ALL --security-opt no-new-privileges \
   --stop-timeout 60 --log-driver journald \
   --mount type=bind,source=/opt/jo,target=/opt/jo,readonly \
   --mount type=bind,source=/srv/serve,target=/srv/serve \
@@ -174,12 +178,15 @@ cat > /usr/local/sbin/opennova-serve-fence <<'FENCE'
 # opennova-serve.service's ExecStartPre, at every start: the server runs as UID
 # 10001 on the machine's own network, which reaches the instance metadata
 # service and with it the machine role's credentials. These rules refuse that
-# UID every packet to the metadata addresses (IPv4, and Nitro's IPv6).
+# UID every packet to the metadata addresses (IPv4, and Nitro's IPv6 where the
+# kernel has IPv6 at all).
 set -eu
 iptables -C OUTPUT -d 169.254.169.254 -m owner --uid-owner 10001 -j REJECT 2>/dev/null \
   || iptables -I OUTPUT -d 169.254.169.254 -m owner --uid-owner 10001 -j REJECT
-ip6tables -C OUTPUT -d fd00:ec2::254 -m owner --uid-owner 10001 -j REJECT 2>/dev/null \
-  || ip6tables -I OUTPUT -d fd00:ec2::254 -m owner --uid-owner 10001 -j REJECT
+if [ -e /proc/net/if_inet6 ]; then
+  ip6tables -C OUTPUT -d fd00:ec2::254 -m owner --uid-owner 10001 -j REJECT 2>/dev/null \
+    || ip6tables -I OUTPUT -d fd00:ec2::254 -m owner --uid-owner 10001 -j REJECT
+fi
 FENCE
 cat > /usr/local/sbin/opennova-serve-ended <<'ENDED'
 #!/bin/sh
@@ -216,12 +223,13 @@ TimeoutStopSec=90
 WantedBy=multi-user.target
 UNIT
 chmod 0644 /etc/systemd/system/opennova-serve.service
-# The fence holds before the server ever starts: UID 10001 reaches no
-# metadata address (no HTTP status at all, not even IMDSv2's 401).
+# The fence holds before the server ever starts: UID 10001's connection to the
+# metadata service is refused (curl's exit 7), neither answered nor timed out.
 /usr/local/sbin/opennova-serve-fence || end_machine "the metadata fence did not apply"
-imds_code="$(setpriv --reuid="$SERVE_UID" --regid="$SERVE_UID" --clear-groups \
-  curl -s -m 3 -o /dev/null -w '%{http_code}' http://169.254.169.254/latest/meta-data/ || true)"
-[ "$imds_code" = "000" ] || end_machine "UID $SERVE_UID still reaches the metadata service"
+imds_rc=0
+setpriv --reuid="$SERVE_UID" --regid="$SERVE_UID" --clear-groups \
+  curl -s -m 3 -o /dev/null http://169.254.169.254/latest/meta-data/ || imds_rc=$?
+[ "$imds_rc" -eq 7 ] || end_machine "UID $SERVE_UID still reaches the metadata service (curl exit $imds_rc)"
 systemctl daemon-reload
 systemctl enable opennova-serve.service
 systemctl start --no-block opennova-serve.service
