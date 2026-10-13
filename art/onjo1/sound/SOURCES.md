@@ -2,7 +2,10 @@
 
 Every game sound in `assets/` is OpenNova's own, made on 2026-10-05 and 2026-10-06 from the CC0
 files below (cut, layered, filtered, levelled) or synthesised (procedural noise,
-clicks and glides, no source). Freesound files are each sound's HQ OGG preview,
+clicks and glides, no source). The carbine's six (`onar15*.wav`) are the exception: they are
+mixed from the sounds of Infima Games' Tactical FPS Animations, the pack the carbine and its clips
+come from (`art/on_ar15/README.md`), used under the maintainer's licence for the pack (2026-10-13).
+The pack's files (its uncompressed waves, exported from the pack's Unreal project) are not kept here; each row names the ones it was mixed from. Freesound files are each sound's HQ OGG preview,
 the stream its page plays (the original upload needs a login); each page said
 Creative Commons 0 when it was downloaded. Kenney's files are from the Impact
 Sounds pack, its `License.txt` kept beside them.
@@ -64,8 +67,6 @@ Every third-party file is CC0 1.0, downloaded 2026-10-05 (the death, fall, landi
 | `freesound/fs504626_leonelmail.ogg` | BODY FALL - V HVY - DIRT | leonelmail | [freesound.org/s/504626](https://freesound.org/s/504626/) | CC0 1.0 |
 | `freesound/fs840628_loganzsound.ogg` | Closeup Thunder Strike 01 | loganzsound | [freesound.org/s/840628](https://freesound.org/s/840628/) | CC0 1.0 |
 | `freesound/fs182263_martian.ogg` | Foley bullet hit metal 02.wav | martian | [freesound.org/s/182263](https://freesound.org/s/182263/) | CC0 1.0 |
-| `freesound/fs427596_michorvath.ogg` | AR15 rifle shot | michorvath | [freesound.org/s/427596](https://freesound.org/s/427596/) | CC0 1.0 |
-| `freesound/fs427597_michorvath.ogg` | AR15 rifle shot from 50 yards away | michorvath | [freesound.org/s/427597](https://freesound.org/s/427597/) | CC0 1.0 |
 | `freesound/fs789388_modusmogulus.ogg` | Bullet impact ground (subsonic) SFX | modusmogulus | [freesound.org/s/789388](https://freesound.org/s/789388/) | CC0 1.0 |
 | `freesound/fs513249_nickmaysoundmusic.ogg` | Spring Distant thunderstorm suburban birds wind single rumble - short | nickmaysoundmusic | [freesound.org/s/513249](https://freesound.org/s/513249/) | CC0 1.0 |
 | `freesound/fs513250_nickmaysoundmusic.ogg` | Spring Distant thunderstorm suburban birds wind single rumble - medium | nickmaysoundmusic | [freesound.org/s/513250](https://freesound.org/s/513250/) | CC0 1.0 |
@@ -77,9 +78,6 @@ Every third-party file is CC0 1.0, downloaded 2026-10-05 (the death, fall, landi
 | `freesound/fs798649_randbsoundbites.ogg` | The Last gasp before death | randbsoundbites | [freesound.org/s/798649](https://freesound.org/s/798649/) | CC0 1.0 |
 | `freesound/fs200990_rayjensen.ogg` | rayjensen - thunder-crack 41k 16bit mono.wav | rayjensen | [freesound.org/s/200990](https://freesound.org/s/200990/) | CC0 1.0 |
 | `freesound/fs396801_scorpion67890.ogg` | Male Death 4 | scorpion67890 | [freesound.org/s/396801](https://freesound.org/s/396801/) | CC0 1.0 |
-| `freesound/fs725397_ser_ut_nin--depriv_d.ogg` | An M16 Rifle being reloaded while empty; full sequence | serøutōnin--deprivəd | [freesound.org/s/725397](https://freesound.org/s/725397/) | CC0 1.0 |
-| `freesound/fs725402_ser_ut_nin--depriv_d.ogg` | A rifle being dry fired once | serøutōnin--deprivəd | [freesound.org/s/725402](https://freesound.org/s/725402/) | CC0 1.0 |
-| `freesound/fs725403_ser_ut_nin--depriv_d.ogg` | A rifle being moved around and handled w/ magazine removals | serøutōnin--deprivəd | [freesound.org/s/725403](https://freesound.org/s/725403/) | CC0 1.0 |
 | `freesound/fs752733_simonjeffery13.ogg` | Man Drowning Underwater | simonjeffery13 | [freesound.org/s/752733](https://freesound.org/s/752733/) | CC0 1.0 |
 | `freesound/fs509880_slamaxu.ogg` | male_gasp.wav | slamaxu | [freesound.org/s/509880](https://freesound.org/s/509880/) | CC0 1.0 |
 | `freesound/fs643671_SnowFightStudios.ogg` | Various Man Dying Grunts.mp3 | SnowFightStudios | [freesound.org/s/643671](https://freesound.org/s/643671/) | CC0 1.0 |
@@ -221,12 +219,12 @@ Each file in `assets/`, what it was made from and how (PCM mono; the rate and bi
 | `onbltby7.wav` | 22050 Hz 16-bit | 0.160 s | -7.8 dB | synthesised: band noise gliding 6500->2600 Hz through the pass at 0.06 s, N-wave crack; 0.16 s; soft-clipped (tanh, 0.4 dB drive) toward its retail counterpart loudness |
 | `onbltby8.wav` | 22050 Hz 16-bit | 0.660 s | -11.9 dB | synthesised: band noise gliding 3800->1200 Hz through the pass at 0.06 s, whistle; 0.66 s |
 | `onnull.wav` | 22050 Hz 8-bit | 0.050 s | silent | 50 ms of silence (the silent member of a layer) |
-| `onar15f1.wav` | 44100 Hz 16-bit | 0.640 s | -6.5 dB | michorvath [#427596](https://freesound.org/s/427596/) (AR15 rifle shot) @0.04s; cut 0.64 s, high-pass 40 Hz, tail decay from 0.30 s; soft-clipped (tanh, 4.0 dB drive) toward its retail counterpart loudness |
-| `onar15f2.wav` | 22050 Hz 16-bit | 1.470 s | -13.0 dB | michorvath [#427597](https://freesound.org/s/427597/) (AR15 rifle shot from 50 yards away) @0.60s; cut 1.47 s, high-pass 60 Hz |
-| `onar15rl.wav` | 22050 Hz 16-bit | 2.240 s | -13.0 dB | serøutōnin--deprivəd [#725397](https://freesound.org/s/725397/) (M16 reloaded while empty) @0.15 s (0.62 s), @2.02 s (0.80 s) and @4.10 s (0.82 s) spliced end to end with 30 ms fades; 2.24 s, high-pass 80 Hz |
-| `onar15dry.wav` | 22050 Hz 8-bit | 0.150 s | -12.7 dB | serøutōnin--deprivəd [#725402](https://freesound.org/s/725402/) (a rifle dry fired once) @0.00s; cut 0.15 s, high-pass 150 Hz |
-| `onar15st.wav` | 22050 Hz 8-bit | 0.790 s | -12.1 dB | serøutōnin--deprivəd [#725403](https://freesound.org/s/725403/) (a rifle handled, magazine removals) @1.79s; cut 0.79 s, high-pass 100 Hz |
-| `onar15sf.wav` | 22050 Hz 8-bit | 0.650 s | -12.7 dB | serøutōnin--deprivəd [#725403](https://freesound.org/s/725403/) (a rifle handled, magazine removals) @0.59s; cut 0.65 s, high-pass 100 Hz |
+| `onar15f1.wav` | 44100 Hz 16-bit | 0.640 s | -10.8 dB | Infima TFA `A_TFA_AR_Fire_Single_001` (the shot) with `A_TFA_AR_Click_004` (the bolt) at 0.112 s, the pack's fire montage (`AM_TFA_FP_WEP_AR_Fire`); cut 0.64 s, faded over its last 0.12 s; limited 6 dB, then soft-clipped (tanh, 7.0 dB drive) toward its retail counterpart loudness |
+| `onar15f2.wav` | 22050 Hz 16-bit | 1.470 s | -15.7 dB | Infima TFA `A_TFA_AR_Fire_Tail_Long_001` (the shot's tail, the montage's second cue at 0); cut 1.47 s, faded over its last 0.35 s; limited 1.8 dB |
+| `onar15rl.wav` | 22050 Hz 16-bit | 2.640 s | -20.4 dB | Infima TFA, the tactical reload montage's cues (`AM_TFA_FP_WEP_AR_Reload`) at their times and volumes: `A_TFA_Foley_Cloth_001` 0.084 s (x0.15), `A_TFA_AR_GunSmack_001` 0.130 s (x0.5), `A_TFA_Foley_Cloth_002` 0.577 s (x0.15), `A_TFA_AR_Click_005` 0.684 s (x0.3), `A_TFA_AR_Mag_Insert_001` 0.847 s, `A_TFA_Foley_Cloth_003` 1.694 s (x0.075), `A_TFA_AR_GunSmack_002` 2.150 s (x0.3); cut at the reload's 2.64 s; limited 6 dB, the rest of its loudness in its set's volume |
+| `onar15dry.wav` | 22050 Hz 8-bit | 0.150 s | -13.1 dB | Infima TFA `A_TFA_AR_Click_001` (a member of the dry-fire cue `A_TFA_AR_Fire_Empty_Cue`, x0.8); cut 0.15 s; limited 6 dB, then soft-clipped (tanh, 6.0 dB drive) toward its retail counterpart loudness |
+| `onar15st.wav` | 22050 Hz 8-bit | 0.790 s | -16.9 dB | Infima TFA `A_TFA_Foley_Cloth_004` (x0.06), `A_TFA_AR_Handling_001` at 0.03 s as the gun swings up, and `A_TFA_AR_GunSmack_001` (x0.5) at 0.45 s, where the draw (`A_TFA_FP_AR_Equip_Quick`) brings the left hand onto the handguard; limited 6 dB, the rest of its loudness in its set's volume |
+| `onar15sf.wav` | 22050 Hz 8-bit | 0.650 s | -19.2 dB | Infima TFA `A_TFA_Foley_Cloth_005` (x0.15) and `A_TFA_AR_Handling_002` at 0.03 s; limited 6 dB, the rest of its loudness in its set's volume |
 | `onfsswm1.wav` | 22050 Hz 8-bit | 1.300 s | -15.0 dB | swordofkings128 [#398037](https://freesound.org/s/398037/) (water swimming); cut 1.30 s from the stroke, high-pass 100 Hz |
 | `onfsswm2.wav` | 22050 Hz 8-bit | 1.500 s | -15.0 dB | swordofkings128 [#398036](https://freesound.org/s/398036/) (water swimming); cut 1.50 s from the stroke, high-pass 100 Hz |
 | `onfsswm3.wav` | 22050 Hz 8-bit | 1.600 s | -15.0 dB | swordofkings128 [#398040](https://freesound.org/s/398040/) (water swimming); cut 1.60 s from the stroke, high-pass 100 Hz |
