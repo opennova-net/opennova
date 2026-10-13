@@ -271,7 +271,7 @@ void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 
 // [orig: Server_BuildPlayerInfoAndAdd @0x51d560 -> Server_PlayerAdd @0x51cbc0]
 world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPConnection &conn,
-                                                 world::World &world) {
+                                                 world::World &world, bool round_init) {
 	const std::optional<uint8_t> player_slot =
 			Server_ReservePlayerSlot(
 					ctx.np_protocol.connection_list, conn,
@@ -355,19 +355,39 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		// [orig: Player_InitPlayer @0x4e15f0 (@0x4e1843) <- g_AvatarTeam1/2 + g_CharClassTeam1/2
 		// <- Game_ApplySessionSettingsToGlobals @0x551500 (class clamp @0x5516ab..0x5516ec, avatar
 		// via Avatars_ResolveSelectionIndex (ex sub_57AE60)); ids validated + stored by PlayerSession_InitFromProfile @0x50ca80]
+		// Retail's round init spawns the own slot with the slot's class (the session create's
+		// side-requirement pick, then its own accepts'), and Player_InitPlayer re-stamps the
+		// class word from g_CharClassTeam1/2 by the team, which every weapon-slot list sent to
+		// the own slot rewrites with the slot's class; this arm takes the session start's
+		// per-side selection, which no own accept or list updates (D-NET-695)
+		// [orig: CNapiGameSession_CreateSession @0x4C9952..0x4C996C, the profile init
+		//  @0x4C9CCE; Player_InitPlayer @0x4E1809..0x4E1832;
+		//  Server_SendWeaponSlotListToPlayer @0x502629..0x50264B].
 		spawn.anim_slot = conn.char_vars.avatar[side];
 		spawn.minimap_net_id = conn.char_vars.char_id[side];
 		const uint8_t cls = conn.char_vars.char_class[side];
 		spawn.player_class = (cls >= 5 && cls <= 9) ? cls : 8;
+	} else if (round_init) {
+		spawn.anim_slot = conn.char_vars.avatar[side];
+		spawn.minimap_net_id = conn.char_vars.char_id[side];
+		// The round init spawns a kept slot with the slot's class, its last
+		// writer's (the add's, an accepted loadout's), and stores none.
+		// [orig: Server_InitAllPlayerEntitiesForRound @0x516AA0 - movzx edx,
+		//  byte [ebp+15EDCh] @0x516B56, the Entity_SpawnFromAnimSlotProperty call
+		//  @0x516B67]
+		spawn.player_class = static_cast<uint8_t>(conn.slot_class);
 	} else {
 		spawn.anim_slot = conn.char_vars.avatar[side];       // raw echo; 0 = tag absent (retail)
 		spawn.minimap_net_id = conn.char_vars.char_id[side]; // 0 -> encoder shim
 		// playerClass = TR ? CTB : CTA [orig: Server_BuildPlayerInfoAndAdd @0x51d711 buf[52]];
 		// absent (0) -> 8 in-session [@0x51d02b]; outside [5,9] -> 8 [@0x51d102]. The joiner's
 		// later C2S 0x2F loadout re-stamps it (server_message_dispatch case 0x2F), same as retail.
+		// The add stores it as the slot's class [orig: Server_PlayerAdd @0x51D09A, the
+		// clamp's store @0x51D10E].
 		const uint8_t cls = conn.char_vars.team_request != 0 ? conn.char_vars.char_class[1]
 		                                                     : conn.char_vars.char_class[0];
 		spawn.player_class = (cls >= 5 && cls <= 9) ? cls : 8;
+		conn.slot_class = spawn.player_class;
 	}
 
 	// Outside the team game types every player spawns BERSERK, everyone's enemy.
@@ -639,7 +659,8 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 				// full, no AiSystem) leaves the walk; only a successful add
 				// restarts it from the head [orig: unlink @0x4C8FF6, goto LABEL_5
 				// @0x4C9128].
-				if (!Server_BuildPlayerInfoAndAdd(ctx, conn, world).valid()) continue;
+				if (!Server_BuildPlayerInfoAndAdd(ctx, conn, world, /*round_init=*/false).valid())
+					continue;
 				// The pump's add is Server_PlayerAdd's, which writes the slot's
 				// PlayerList entry; the map change's round init re-adds a kept
 				// slot through no PlayerAdd and writes none, so its PlayerTeam
@@ -916,6 +937,8 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 	match_player.name = conn->player_name;
 	world.match.upsert_player(match_player);
 	world.match.set_player_slot_team(h, conn->assigned_team); // the slot team mirror (D-NET-650)
+	// The add's class is the slot's [orig: Server_PlayerAdd @0x51D09A].
+	conn->slot_class = world.registry.get(h)->player_class;
 	stamp_player_list_add(*conn, world);
 	return h;
 }

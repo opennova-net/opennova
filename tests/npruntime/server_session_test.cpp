@@ -4651,13 +4651,15 @@ bool check_roster_mirrors_the_undeployed_bit() {
 	deployer.reply.capture_nag_held = true;
 	deployer.reply.chat_last_ms = 77;
 	const opennova::world::EntityHandle a =
-			opennova::inmatch::Server_BuildPlayerInfoAndAdd(ctx, deployer, world);
+			opennova::inmatch::Server_BuildPlayerInfoAndAdd(ctx, deployer, world,
+					/*round_init=*/false);
 	if (!expect(deployer.reply.frontier_hint_pending && !deployer.reply.capture_nag_held &&
 	                    deployer.reply.chat_last_ms == 0,
 	            "the join sets the frontier-hint bit and clears the nag state"))
 		return false;
 	const opennova::world::EntityHandle b =
-			opennova::inmatch::Server_BuildPlayerInfoAndAdd(ctx, watcher, world);
+			opennova::inmatch::Server_BuildPlayerInfoAndAdd(ctx, watcher, world,
+					/*round_init=*/false);
 	auto pending = [&world](opennova::world::EntityHandle handle) {
 		const opennova::world::MatchPlayer *row = world.match.player(handle);
 		return row != nullptr && row->respawn_pending;

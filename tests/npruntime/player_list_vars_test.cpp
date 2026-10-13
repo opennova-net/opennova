@@ -9,7 +9,9 @@
 //   - the loadout's accept stamps the accepted class, and every weapon-slot list (an abort's
 //     re-send) the slot's live class;
 //   - the roster sync turns a kept player's team or type change into its vars alone, never a
-//     ClientHostPlayerAdded, and a slot's new player into a removal and an add.
+//     ClientHostPlayerAdded, and a slot's new player into a removal and an add;
+//   - a kept remote slot's round init spawns with the slot's class, its last writer's (the
+//     add's join pick, a loadout's accepted class), never the join's pick again (D-NET-677).
 // [orig: Server_PlayerAdd @0x51D368 / @0x51D382, the SetOrCreates @0x51D48F / @0x51D4AA;
 //  Server_ChangeEntityTeam @0x518DF5..0x518E22; NapiNPServerMsg_HandlePlayerLoadout @0x515AE2,
 //  its list sends @0x51581F / @0x515F95 / @0x515FA5; Server_SendWeaponSlotListToPlayer
@@ -149,6 +151,72 @@ void in_match_writers() {
 	expect(conn.player_list_team == 1, "and again");
 }
 
+// A kept remote slot's class at the round init (D-NET-677): the add stores the join's
+// pick (TR ? CTB : CTA, clamped) as the slot's class, a loadout's accept stores the
+// accepted class, and the map change's round init spawns the slot's entity with it.
+// [orig: Server_PlayerAdd @0x51D09A / @0x51D10E; NapiNPServerMsg_HandlePlayerLoadout
+//  @0x515AA8; Server_InitAllPlayerEntitiesForRound @0x516AA0 - the load @0x516B56, the
+//  Entity_SpawnFromAnimSlotProperty call @0x516B67]
+void remote_slot_class_at_round_init() {
+	auto world_storage = std::make_unique<w::World>();
+	w::World &world = *world_storage;
+	world.registry.configure_pool(0, 16);
+	world.registry.configure_pool(3, 16);
+	ns::LoopbackChannel loopback;
+	auto role_storage = std::make_unique<inmatch::HostRole>();
+	inmatch::NapiNPServerCtx &ctx = role_storage->state.host_owner.ctx;
+	inmatch::GameConfig config;
+	config.max_players = 4;
+	config.num_teams = 2;
+	config.game_type = opennova::game_type::kTeamDeathmatch;
+	config.armory_reuse_time = 0;
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient,
+	                             inmatch::SocketMode::Socketless, /*host_key=*/0, &loopback, config);
+	ctx.world = &world;
+	// Two remote joiners: side A's class 8 and side B's 6, no side request.
+	for (uint32_t i = 0; i < 2; ++i) {
+		inmatch::NapiNPConnection joining;
+		joining.type = inmatch::NapiNPConnection::kTypeServerSide;
+		joining.connection_id = inmatch::kFirstJoinerDcb + i;
+		joining.self_id_seen = true;
+		joining.phase = inmatch::ConnectionPhase::Joined;
+		joining.char_vars.char_class[0] = 8;
+		joining.char_vars.char_class[1] = 6;
+		ctx.np_protocol.connection_list.push_back(joining);
+	}
+	inmatch::Server_InitNewRoundState(ctx);
+	inmatch::Server_ProcessPendingPlayerSpawns(ctx, world);
+	std::vector<inmatch::NapiNPConnection *> remotes;
+	for (inmatch::NapiNPConnection &c : ctx.np_protocol.connection_list)
+		if (c.type == inmatch::NapiNPConnection::kTypeServerSide) remotes.push_back(&c);
+	expect(remotes.size() == 2, "two remote joiners");
+	if (remotes.size() != 2) return;
+	for (inmatch::NapiNPConnection *c : remotes) {
+		const w::Entity *body = world.registry.get(c->link.owned_entity);
+		expect(body != nullptr && body->player_class == 8 && c->slot_class == 8,
+		       "the add spawns the join's pick, side A's class 8, and stores it as the slot's");
+	}
+	// The first accepts class 7; the second accepts nothing.
+	inmatch::NapiNPConnection &accepted = *remotes[0];
+	inmatch::NapiNPConnection &kept = *remotes[1];
+	(void)submit_loadout(ctx, accepted, world, /*team=*/1, /*class=*/7, 100);
+	const w::Entity *body = world.registry.get(accepted.link.owned_entity);
+	expect(body != nullptr && body->player_class == 7 && accepted.slot_class == 7,
+	       "the accept stores the accepted class as the slot's");
+	// The map change: the teardown frees both entities, the round init re-adds both.
+	for (inmatch::NapiNPConnection *c : remotes) {
+		world.registry.despawn(c->link.owned_entity);
+		c->link.owned_entity = {};
+	}
+	inmatch::init_all_player_entities_for_round(*role_storage);
+	body = world.registry.get(accepted.link.owned_entity);
+	expect(body != nullptr && body->player_class == 7 && accepted.slot_class == 7,
+	       "the round init spawns the accepted slot with its class 7, not the join's 8");
+	body = world.registry.get(kept.link.owned_entity);
+	expect(body != nullptr && body->player_class == 8 && kept.slot_class == 8,
+	       "the round init spawns the other slot with the add's class 8");
+}
+
 HostPlayerSlot slot(int number, const char *name, const char *team, const char *type) {
 	HostPlayerSlot s;
 	s.slot = number;
@@ -193,6 +261,7 @@ void roster_sync() {
 
 int main() {
 	in_match_writers();
+	remote_slot_class_at_round_init();
 	roster_sync();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

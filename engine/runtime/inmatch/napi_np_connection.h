@@ -699,8 +699,8 @@ struct NapiNPConnection {
 	// send (the slot's class); nothing else writes them: the map change's
 	// round init re-adds a kept slot with no write (after a side swap the slot
 	// keeps its previous PlayerTeam), and the other class stores (the own
-	// slot's profile init at a mission start, a C2S 0x1B class select) leave
-	// PlayerType. A NovaWorld host's roster mirrors them, each change riding
+	// slot's profile init at the session create, a C2S 0x1B class select)
+	// leave PlayerType. A NovaWorld host's roster mirrors them, each change riding
 	// the next ClientHostUpdate. [orig: dword_B6023C (the PlayerList);
 	// Server_PlayerAdd @0x51CBC0: the values @0x51D35C..0x51D3C3, the
 	// SetOrCreates @0x51D441..0x51D4AA; Server_ChangeEntityTeam @0x518D70: the
@@ -708,10 +708,22 @@ struct NapiNPConnection {
 	// SetOrCreate @0x515AE2; Server_SendWeaponSlotListToPlayer @0x502550: the
 	// SetOrCreate @0x5025DB; Server_InitAllPlayerEntitiesForRound @0x516AA0
 	// (no SetOrCreate among its callees); the class stores PlayerSession_InitFromProfile
-	// @0x50CB7C (called from Game_StartMission @0x524F23) and
+	// @0x50CB7C (called from CNapiGameSession_CreateSession @0x4C9CCE, and from
+	// Game_StartMission @0x524F23 out of a session alone, @0x524D7D..0x524D83) and
 	// NapiNPServerMsg_SetFarClip @0x501D90 (the 0x1B handler) @0x501DE7]
 	int32_t player_list_team = 0;
 	int32_t player_list_type = 0;
+	// The slot's class (+0x15EDC), as its last writer stored it: a remote
+	// add's class after its [5, 9] clamp, a loadout's accepted class. The map
+	// change's round init spawns a kept remote slot's entity with it. The own
+	// slot's add stores none (its local arm): retail's own slot takes its class
+	// from the profile init at the session create and from its own accepts,
+	// and its round init spawn reads it, which ours's own arm does not
+	// (D-NET-695). [orig: Server_PlayerAdd @0x51D09A / the clamp @0x51D10E;
+	// NapiNPServerMsg_HandlePlayerLoadout @0x515AA8;
+	// Server_InitAllPlayerEntitiesForRound: the load @0x516B56, the
+	// Entity_SpawnFromAnimSlotProperty call @0x516B67]
+	int32_t slot_class = 0;
 
 	// The command map's squad bytes on the player slot: its leader's slot
 	// (+100576; 0xFF none) and its fireteam (+100577), seeded 0xFF / 0 by the

@@ -1515,9 +1515,13 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					}
 				}
 				replies.push_back(make_protocol_message(s2c::WEAPON_LOADOUT, st.last_loadout_reply));
-				// The accepted class is the slot's PlayerType, at its store and its list send
-				// [orig: @0x515AE2; the Server_SendWeaponSlotListToPlayer call @0x515F95].
-				if (!conn.link.spectator && loadout_player) conn.player_list_type = grant.reply.avatar_class;
+				// The accepted class is the slot's class and its PlayerType, at its store and its
+				// list send [orig: the slot store @0x515AA8; @0x515AE2; the
+				// Server_SendWeaponSlotListToPlayer call @0x515F95].
+				if (!conn.link.spectator && loadout_player) {
+					conn.slot_class = grant.reply.avatar_class;
+					conn.player_list_type = grant.reply.avatar_class;
+				}
 				// Accepted soldier type -> entity+660 playerClass [orig: @0x515ab0] — feeds the
 				// §5.10 field-17 class nibble and the 0x0C/0x18 spawn records for this player.
 				if (loadout_player != nullptr) {

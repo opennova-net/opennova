@@ -188,7 +188,8 @@ bool check_spawn_protection_seeded_at_creation() {
 		conn.link.transport = &transport;
 		ctx.np_protocol.connection_list.push_back(std::move(conn));
 		inmatch::NapiNPConnection &live = ctx.np_protocol.connection_list.front();
-		const w::EntityHandle player = inmatch::Server_BuildPlayerInfoAndAdd(ctx, live, world);
+		const w::EntityHandle player =
+				inmatch::Server_BuildPlayerInfoAndAdd(ctx, live, world, /*round_init=*/false);
 		const w::Entity *entity = world.registry.get(player);
 		if (!expect(entity != nullptr && entity->damage_state == 620,
 				"a zone-less joiner's entity is created under the 620-tick protection"))

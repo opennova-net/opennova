@@ -78,9 +78,11 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 // (publishes World::cached.local_player); a type-1 remote joiner -> world::spawn_remote_player (the
 // host never republishes its local player). Binds the handle onto conn.link.owned_entity and advances
 // conn.phase = PlayerAdded. Returns the spawned handle (invalid if pool 0 is full or World has no
-// AiSystem).
+// AiSystem). `round_init` is the map change's re-add of a kept slot
+// [orig: Server_InitAllPlayerEntitiesForRound @0x516AA0]: a remote slot spawns with the slot's
+// class (NapiNPConnection::slot_class), where the pump's add picks the join's and stores it.
 world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPConnection &conn,
-                                                 world::World &world);
+                                                 world::World &world, bool round_init);
 
 // The player add's PlayerList entry (NapiNPConnection::player_list_team /
 // player_list_type): the bound entity's signed team byte and its class. The
