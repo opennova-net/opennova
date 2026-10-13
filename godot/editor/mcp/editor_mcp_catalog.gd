@@ -8,15 +8,17 @@ extends RefCounted
 ## table cannot carry (how a request answers, how a query pages, which viewport op is a read and
 ## which a request, the build, Play, a picture, the transport's log) is written here, once each.
 
-## Play builds first, and editor_build waits for its operation.
-const BUILD_TIMEOUT_MS := 300_000
+## How long editor_request may run, its wait included (a build, an import, Play's build).
+const TOOL_BUDGET_MS := 300_000
+## The longest wait editor_request's `wait` awaits (and its default): below the tool's budget, so a wait
+## past it answers timed_out instead of the registry's cut (S26 C2).
+const REQUEST_WAIT_MAX_MS := TOOL_BUDGET_MS - 10_000
 ## The most entries a query's page holds when the catalog does not say (its page_max).
 const PAGE_MAX := McpJson.MAX_ENTRIES
 
-const PLAY_OPS: Array[String] = ["start", "stop", "state"]
-## How a Play runs (the session's PlayMode tokens): the OpenNova runtime, the game install, or Strict Play
-## in it. A project's own (apply_project_settings' play_mode, its .opennova/local.json), or one Play's.
-const PLAY_MODES: Array[String] = ["runtime", "install", "strict"]
+## How a Play runs (the session's PlayMode tokens): the OpenNova runtime, or Strict Play in the game install.
+## A project's own (apply_project_settings' play_mode, its .opennova/local.json), or one Play's.
+const PLAY_MODES: Array[String] = ["runtime", "strict"]
 ## What the previews of the project's own data draw behind their picture (the session's PreviewBackground
 ## tokens), the editor's preference: set_preview_background sets it, the preferences section says it.
 const PREVIEW_BACKGROUNDS: Array[String] = ["dark", "grey", "light", "checker"]
@@ -136,60 +138,6 @@ static func definitions(app: Node) -> Array[McpToolDef]:
 		_state_tool(catalog),
 		_request_tool(catalog),
 		_query_tool(catalog),
-		McpToolDef.make("editor_build",
-			"Pack the project to an immutable build directory and wait for it: build raised as the windows "
-			+ "raise it, then frames awaited until its operation ends (editor_state and editor_query answer the "
-			+ "while; a build running already is joined); refused while required files are missing; with "
-			+ "unsaved documents it waits on the unsaved-changes prompt (editor_request resolve_unsaved save "
-			+ "writes them and builds). Returns the build (ok, dir, archives, diagnostics) with the operation it "
-			+ "waited on (id, end, findings). With report false, the build result's panel stays closed as it ends "
-			+ "(the person's work left as it is).",
-			{
-				"report": {"type": "boolean", "description": "The build result's panel opens over the editor as "
-						+ "the build ends (true when left out)."},
-			}, [], true, BUILD_TIMEOUT_MS),
-		McpToolDef.make("editor_play",
-			"op=start: build, waiting as editor_build does, then run the game on the build (the runtime beside "
-			+ "the editor, or this Godot binary in a source run) with its own MCP endpoint, its port allocated as "
-			+ "the build lands; the reply is the run section (state, pid, mcp_port: game_state, game_menu and "
-			+ "game_probe on that port drive it, mission, exit_code). With mission (op=start), a .bms of the "
-			+ "project by its logical name, the game starts in that mission instead of at its menu (one the "
-			+ "project does not hold is refused, play.mission.unknown; one that does not load is a "
-			+ "play.mission.failed Problems row). With behind (op=start; Windows only), the game's window starts "
-			+ "behind every other window, the editor keeping the foreground, until the person brings it forward "
-			+ "(the run section's behind). The run directory keeps what the game wrote there in the Plays of "
-			+ "the same mode before (its game.cfg, which spares the game install its device dialog, its saves: "
-			+ "the run section's kept); with fresh (op=start) it is emptied first, a first run. Play from here "
-			+ "(op=start, DI-26): start {at: [x, y, z], yaw?} with mission starts the player at that point of the "
-			+ "mission facing yaw (compass degrees); from_here true has the mission's view (mission's, else the "
-			+ "active document's) start it on the ground under its camera, or under the picture point at [x, y], "
-			+ "facing the way the camera looks. Neither game takes a place on its command line: the build's copy of "
-			+ "the mission in the run directory gets the start markers its player deploys at moved there (the run "
-			+ "section's start), never the project's file. How it runs is the project's own play_mode (runtime, "
-			+ "install or strict: kept in its .opennova/local.json, set by apply_project_settings; runtime for a "
-			+ "project never set), or play_mode (op=start) for this Play alone, the project's left as it is; the run "
-			+ "section says play_mode (the project's) and ran_mode (the game's). With unsaved documents Play saves "
-			+ "them first while save_before_play is on (this Play's, else the project's; on by default). op=stop "
-			+ "ends the game and waits; op=state reads the run section.",
-			{
-				"op": {"type": "string", "enum": PLAY_OPS},
-				"mission": {"type": "string", "description": "op=start: the mission the game starts in (04TR.bms)"},
-				"behind": {"type": "boolean", "description": "op=start: the game's window behind every other, the "
-						+ "editor keeping the foreground (Windows only; false when left out)"},
-				"fresh": {"type": "boolean", "description": "op=start: the run directory emptied of what the runs "
-						+ "before wrote there (game.cfg, saves) before the game starts (false when left out)"},
-				"start": {"type": "object", "description": "op=start, with mission: where the player starts, "
-						+ "{at: [x, y, z] mission metres (x east, y north, z up), yaw?: compass degrees}"},
-				"from_here": {"type": "boolean", "description": "op=start: Play from here in the mission's view "
-						+ "(mission's, else the active document's): the player on the ground under its camera"},
-				"at": {"type": "array", "items": {"type": "number"}, "description": "op=start with from_here: the "
-						+ "picture point [x, y] (the view's pixels) whose ground the player starts on"},
-				"play_mode": {"type": "string", "enum": PLAY_MODES, "description": "op=start: how this Play runs "
-						+ "(runtime: the OpenNova runtime; install: the game install; strict: Strict Play in it), for "
-						+ "this Play alone; left out, the project's own (runtime unless the project was set otherwise)"},
-				"save_before_play": {"type": "boolean", "description": "op=start: this Play writes the unsaved "
-						+ "files first (true) or waits on the unsaved-changes prompt (false); left out, the project's own"},
-			}, ["op"], true, BUILD_TIMEOUT_MS),
 		_viewport_tool(catalog),
 		McpToolDef.make("editor_screenshot",
 			"Capture the editor window (its ImGui workspace, the Preview window's picture and the Document tab's); "
@@ -375,8 +323,9 @@ static func _request_tool(catalog: Dictionary) -> McpToolDef:
 	var properties := {"kind": {"type": "string", "enum": served},
 			"wait": {"type": "boolean", "description": "Await the operation the request starts or joins, and the "
 					+ "validation after it, before answering (this tool's, not the request's)."},
-			"wait_ms": {"type": "integer", "minimum": 0, "description": "How long wait awaits (300000 when left "
-					+ "out); past it the answer says timed_out."}}
+			"wait_ms": {"type": "integer", "minimum": 0, "maximum": REQUEST_WAIT_MAX_MS, "description": ("How long wait "
+					+ "awaits, at most %d (and when left out); past it the answer says timed_out, and editor_query "
+					+ "operation follows the operation from there.") % REQUEST_WAIT_MAX_MS}}
 	for field: Variant in catalog.get("fields", []):
 		var name := String(field.get("field", ""))
 		var schema: Dictionary
@@ -388,7 +337,7 @@ static func _request_tool(catalog: Dictionary) -> McpToolDef:
 			schema = FIELD_SCHEMAS.get(name, _json_schema(String(field.get("type", "string")))).duplicate(true)
 		schema["description"] = String(field.get("doc", ""))
 		properties[name] = schema
-	return McpToolDef.make("editor_request", " ".join(PackedStringArray(lines)), properties, ["kind"], true, BUILD_TIMEOUT_MS)
+	return McpToolDef.make("editor_request", " ".join(PackedStringArray(lines)), properties, ["kind"], true, TOOL_BUDGET_MS)
 
 
 static func _query_tool(catalog: Dictionary) -> McpToolDef:

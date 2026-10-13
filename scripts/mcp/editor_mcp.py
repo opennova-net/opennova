@@ -270,7 +270,7 @@ REQUEST_SWITCHES = ("with_dependencies", "replace", "force", "ask_name", "open_f
                     "planned", "behind", "fresh", "report", "save_before_play", "alone")
 REQUEST_NUMBERS = ("plan", "steps")
 # How a Play runs (the session's play modes): the project's own (apply_project_settings' play_mode), or one Play's.
-PLAY_MODES = ("runtime", "install", "strict")
+PLAY_MODES = ("runtime", "strict")
 # What the previews of the project's own data draw behind their picture (the editor's preference,
 # set_preview_background; the state's preferences section says the one in effect).
 PREVIEW_BACKGROUNDS = ("dark", "grey", "light", "checker")
@@ -518,6 +518,10 @@ def cmd_export(args: argparse.Namespace) -> int:
     return EXIT_OK if ended.get("end") == "done" and exported.get("ok") else EXIT_NOT_DONE
 
 
+# How long `play stop` reads the run section for the game to leave (the session kills it after 5 s).
+STOP_WAIT_S = 15.0
+
+
 def run_section(client: GameMcp) -> dict:
     return client.structured("editor_state", {"sections": ["run"]}).get("run", {})
 
@@ -531,7 +535,7 @@ def cmd_play(args: argparse.Namespace) -> int:
         if args.mission:
             request["mission"] = args.mission
         # --behind: the game's window starts behind every other, the editor keeping the foreground (Windows
-        # only); by default it starts as Play starts it, as the editor_play tool's does.
+        # only); by default it starts as Play starts it.
         if args.behind:
             request["behind"] = True
         # --fresh: the run directory emptied of what the runs before wrote there (game.cfg, saves) first, a
@@ -568,11 +572,20 @@ def cmd_play(args: argparse.Namespace) -> int:
         run["operation"] = ended
         print_json(run)
         return EXIT_OK if run.get("state") == "running" else EXIT_NOT_DONE
-    payload = client.call("editor_play", {"op": args.op}, timeout=args.timeout)
-    if payload.get("isError"):
-        print(text_of(payload), file=sys.stderr)
-        return EXIT_NOT_READ
-    print_json(payload.get("structuredContent", {}))
+    if args.op == "stop":
+        # Stop: the stop_play request, then the run section read until the game has left (STOP_WAIT_S).
+        payload = client.call("editor_request", {"kind": "stop_play"}, timeout=60)
+        if payload.get("isError"):
+            print(text_of(payload), file=sys.stderr)
+            return EXIT_NOT_READ
+        deadline = time.monotonic() + min(args.timeout, STOP_WAIT_S)
+        run = run_section(client)
+        while run.get("state") != "stopped" and time.monotonic() < deadline:
+            time.sleep(0.25)
+            run = run_section(client)
+        print_json(run)
+        return EXIT_OK if run.get("state") == "stopped" else EXIT_NOT_DONE
+    print_json(run_section(client))
     return EXIT_OK
 
 
@@ -609,7 +622,7 @@ def cmd_stop(args: argparse.Namespace) -> int:
     pid, port, client = stop_target(args, DEFAULT_PORT, "editor")
     if (args.url or port_open(port)) and (not pid or serves_pid(client, pid, "editor")):
         try:
-            client.call("editor_play", {"op": "stop"}, timeout=30)
+            client.call("editor_request", {"kind": "stop_play"}, timeout=30)
         except GameMcpError:
             pass  # no game running, or the editor is already leaving
         try:
@@ -779,7 +792,7 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("--purpose", default=None, help="the pickers' purpose (refused over MCP: pass paths)")
     request.add_argument("--settings", default=None,
                          help="apply_project_settings: the settings to set as a JSON object (title, mission, "
-                              "multiplayer, game_install, runtime_executable, play_mode (runtime, install or "
+                              "multiplayer, game_install, runtime_executable, play_mode (runtime or "
                               "strict) and save_before_play, the open project's own; one left out stays)")
     request.add_argument("--viewport", default=None,
                          help="set_viewport: the change as a JSON object {kind, device, clock, options, camera} "
@@ -962,8 +975,7 @@ def build_parser() -> argparse.ArgumentParser:
                            "in (left out: its menu)")
     play.add_argument("--behind", action="store_true",
                       help="start: the game's window starts behind every other, the editor keeping the foreground "
-                           "(play's behind; Windows only). Left out, it starts as Play starts it, as the editor_play "
-                           "tool's does")
+                           "(play's behind; Windows only). Left out, it starts as Play starts it")
     play.add_argument("--fresh", action="store_true",
                       help="start: the run directory emptied of what the runs before wrote there (the game's game.cfg, "
                            "its saves) before the game starts, a first run (play's fresh). Left out, it keeps them")
@@ -977,8 +989,8 @@ def build_parser() -> argparse.ArgumentParser:
                       help="start --from-here: the picture point X,Y (the view's pixels) whose ground the player "
                            "starts on")
     play.add_argument("--play-mode", dest="play_mode", choices=PLAY_MODES, default=None,
-                      help="start: how this Play runs (runtime: the OpenNova runtime; install: the game install; "
-                           "strict: Strict Play in it), for this Play alone. Left out, the project's own (its "
+                      help="start: how this Play runs (runtime: the OpenNova runtime; strict: Strict Play in the "
+                           "game install), for this Play alone. Left out, the project's own (its "
                            ".opennova/local.json: runtime unless the project was set otherwise). A Play that may "
                            "start the game install needs the retail lock first")
     play.add_argument("--save-before-play", dest="save_before_play", choices=("true", "false"), default=None,

@@ -89,16 +89,23 @@ void serve_create_missing(SessionCore &core, const EditorRequest &request) {
 	if (core.view().project.open)
 		core.create_missing(request.roles);
 }
+// Build, Play and Export need a project: refused without one (S26 K2: the editor_build and editor_play
+// tools refused it themselves; with them gone the request says it, as it does to every client).
+bool project_needed(SessionCore &core, const char *what) {
+	if (core.view().project.open) return true;
+	core.refuse_now(CoreFinding::ProjectNone, std::string("No project is open: open or make one to ") + what + ".");
+	return false;
+}
 void serve_build(SessionCore &core, const EditorRequest &request) {
-	if (core.view().project.open)
+	if (project_needed(core, "build it"))
 		core.start_build(PlayIntent(), request.out_dir, request.rehash, ExportIntent(), request.report);
 }
 void serve_play(SessionCore &core, const EditorRequest &request) {
-	if (core.view().project.open)
+	if (project_needed(core, "play it"))
 		core.start_build(core.play().intent_of(request), std::string(), false, ExportIntent());
 }
 void serve_export(SessionCore &core, const EditorRequest &request) {
-	if (core.view().project.open)
+	if (project_needed(core, "export it"))
 		core.start_build(PlayIntent(), std::string(), request.rehash, ExportIntent{ true, request.export_dir });
 }
 void serve_stop_play(SessionCore &core, const EditorRequest &) {
