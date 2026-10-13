@@ -14,6 +14,7 @@
 #include <editor/session/texture_use_index.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/viewport_widgets.h>
 #include <editor/ui/workspace.h>
 
 namespace opennova::editor {
@@ -47,11 +48,6 @@ std::string percent(float scale) {
 std::string level_words(uint32_t width, uint32_t height, size_t level) {
 	return "Level " + std::to_string(level) + ": " + std::to_string(std::max(1u, width >> level)) + " x " +
 	       std::to_string(std::max(1u, height >> level));
-}
-
-// A combo as wide as its widest choice, its arrow and its padding: none is cut.
-float combo_width(float widest_text) {
-	return widest_text + ImGui::GetFrameHeight() + ImGui::GetStyle().FramePadding.x * 2.0f;
 }
 
 } // namespace

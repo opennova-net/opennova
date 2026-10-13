@@ -9,16 +9,12 @@
 #include <editor/preview/font_viewport.h>
 #include <editor/session/request_factories.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/viewport_widgets.h>
 #include <editor/ui/workspace.h>
 
 namespace opennova::editor {
 
 namespace {
-
-// A combo as wide as its widest choice, its arrow and its padding: none is cut.
-float combo_width(float widest_text) {
-	return widest_text + ImGui::GetFrameHeight() + ImGui::GetStyle().FramePadding.x * 2.0f;
-}
 
 std::string page_words(int page, uint32_t pages) {
 	return page < 0 ? std::string("Text") : "Page " + std::to_string(page + 1) + " of " + std::to_string(pages);

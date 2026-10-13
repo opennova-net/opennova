@@ -18,19 +18,13 @@
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/viewport_widgets.h>
 #include <editor/ui/workspace.h>
 #include <runtime/world/ammo_table.h>
 
 namespace opennova::editor {
 
 namespace {
-
-void set_clock(Workspace &workspace, const DefinitionViewport &model, const char *member, io::JsonValue value) {
-	io::JsonValue clock = io::JsonValue::make_object();
-	clock.set(member, std::move(value));
-	workspace.request(
-			request::set_viewport(model.path(), viewport_change(ViewportKind::Definition, "clock", std::move(clock))));
-}
 
 std::string seconds(int32_t ticks) {
 	char text[32];
@@ -431,18 +425,9 @@ void DefinitionViewportView::draw_ready(Workspace &workspace, const ViewportMode
 	ui_kit::WrapRow row;
 	options_row(workspace, model, row);
 	// The preview clock: Run or Pause (Play is the game's), and Replay (the state from its start).
-	const bool playing = clock.playing();
-	const char *run = playing ? "Pause" : "Run";
-	row.next(ui_kit::button_width(run));
-	if (ImGui::Button(run)) set_clock(workspace, model, "playing", io::JsonValue::make_bool(!playing));
-	ui_kit::tooltip("Run or hold the preview clock: the game ticks the effects, the death and its sound play on.");
-	if (ui_kit::tool(row, "Replay", true, "The state from its start: the preview clock at tick 0, run.")) {
-		io::JsonValue from = io::JsonValue::make_object();
-		from.set("ticks", io::json_number(0));
-		from.set("playing", io::JsonValue::make_bool(true));
-		workspace.request(
-				request::set_viewport(model.path(), viewport_change(ViewportKind::Definition, "clock", std::move(from))));
-	}
+	clock_buttons(workspace, row, model, clock,
+			"Run or hold the preview clock: the game ticks the effects, the death and its sound play on.",
+			"The state from its start: the preview clock at tick 0, run.", true);
 	DefinitionViewportOptions options = model.options();
 	row.next(ui_kit::checkbox_width("Grid"));
 	ImGui::Checkbox("Grid", &options.grid);

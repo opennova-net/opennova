@@ -36,6 +36,7 @@
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/viewport_widgets.h>
 #include <editor/ui/viewport_canvas.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <runtime/anim/anim_event_bits.h>
@@ -53,26 +54,21 @@ constexpr ImU32 kEventColor = IM_COL32(255, 220, 90, 255);
 constexpr ImU32 kLegColor = IM_COL32(110, 190, 255, 255);
 
 void set_options(Workspace &workspace, const ModelViewport &model, const ModelViewportOptions &options) {
-	workspace.request(request::set_viewport(
-			model.path(), viewport_change(ViewportKind::Model, "options", model_options_to_json(options))));
+	set_viewport_member(workspace, model, "options", model_options_to_json(options));
 }
 
 // The preview clock run or held, or sought to a clip tick (and held).
 void set_playing(Workspace &workspace, const ModelViewport &model, bool playing) {
-	io::JsonValue clock = io::JsonValue::make_object();
-	clock.set("playing", io::JsonValue::make_bool(playing));
-	workspace.request(request::set_viewport(model.path(), viewport_change(ViewportKind::Model, "clock", std::move(clock))));
+	set_clock(workspace, model, "playing", io::JsonValue::make_bool(playing));
 }
 void seek_ticks(Workspace &workspace, const ModelViewport &model, int32_t ticks, bool hold) {
 	io::JsonValue clock = io::JsonValue::make_object();
 	clock.set("ticks", io::json_number(std::max(ticks, 0)));
 	if (hold) clock.set("playing", io::JsonValue::make_bool(false));
-	workspace.request(request::set_viewport(model.path(), viewport_change(ViewportKind::Model, "clock", std::move(clock))));
+	set_viewport_member(workspace, model, "clock", std::move(clock));
 }
 void set_rate(Workspace &workspace, const ModelViewport &model, double rate) {
-	io::JsonValue clock = io::JsonValue::make_object();
-	clock.set("rate", io::json_number(rate));
-	workspace.request(request::set_viewport(model.path(), viewport_change(ViewportKind::Model, "clock", std::move(clock))));
+	set_clock(workspace, model, "rate", io::json_number(rate));
 }
 
 // The playback speeds the timeline offers, and their words.

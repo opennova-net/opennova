@@ -14,6 +14,7 @@
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/viewport_widgets.h>
 #include <editor/ui/workspace.h>
 #include <runtime/hud/hud_texture_names.h>
 #include <runtime/hud/hud_math.h>
@@ -49,10 +50,6 @@ std::string weapon_words(const HudViewport &model, const std::string &weapon) {
 		                               : "First weapon: " + model.weapons().front().name;
 	if (weapon == "NONE") return "No weapon";
 	return weapon;
-}
-
-float combo_width(float widest_text) {
-	return widest_text + ImGui::GetFrameHeight() + ImGui::GetStyle().FramePadding.x * 2.0f;
 }
 
 // A combo of `count` choices on `row`, the chosen one's words shown; true with `chosen` set when a choice

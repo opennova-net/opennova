@@ -14,6 +14,7 @@
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/viewport_widgets.h>
 #include <editor/ui/viewport_canvas.h>
 #include <base/io/strutil.h>
 #include <runtime/menu/menu_frame.h>
@@ -46,9 +47,7 @@ std::string unreadable_banner(const std::vector<std::string> &unreadable) {
 
 // The viewport's options set (a SetViewport of them).
 void set_options(Workspace &workspace, const MenuViewport &menu, const MenuViewportOptions &options) {
-	workspace.request(request::set_viewport(menu.path(),
-			viewport_change(ViewportKind::Menu, "options",
-					menu_options_to_json(options, menu.show(), menu.pointer(), menu.sound()))));
+	set_viewport_member(workspace, menu, "options", menu_options_to_json(options, menu.show(), menu.pointer(), menu.sound()));
 }
 
 // The sounds muted or heard (a SetViewport of that alone, DI-34).

@@ -18,6 +18,7 @@
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/overlay_legend.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/viewport_widgets.h>
 #include <editor/ui/viewport_canvas.h>
 #include <editor/ui/workspace.h>
 #include <formats/trn/charmap_legend.h>
@@ -29,7 +30,7 @@ namespace {
 using io::JsonValue;
 
 void set_options(Workspace &workspace, const TerrainViewport &model, JsonValue options) {
-	workspace.request(request::set_viewport(model.path(), viewport_change(ViewportKind::Terrain, "options", std::move(options))));
+	set_viewport_member(workspace, model, "options", std::move(options));
 }
 
 } // namespace

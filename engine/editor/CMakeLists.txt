@@ -451,6 +451,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/inspector_layout.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/inspector_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/main_viewport_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/viewport_widgets.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/menu_inspector.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/menu_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/menu_viewport_view.cpp

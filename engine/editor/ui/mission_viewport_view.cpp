@@ -34,6 +34,7 @@
 #include <editor/ui/project_find.h>
 #include <editor/ui/reference_picker.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/viewport_widgets.h>
 #include <editor/ui/viewport_canvas.h>
 #include <formats/mission/mission.h>
 #include <formats/trn/charmap_legend.h>
@@ -53,8 +54,7 @@ void set_options(Workspace &workspace, const MissionViewport &mission, const Mis
 		if (!was || io::json_write(*was) != io::json_write(member.value)) changed.set(member.key, member.value);
 	}
 	if (changed.object.empty()) return;
-	workspace.request(
-			request::set_viewport(mission.path(), viewport_change(ViewportKind::Mission, "options", std::move(changed))));
+	set_viewport_member(workspace, mission, "options", std::move(changed));
 }
 
 // A command (frame, top, ground, duplicate, select_same, paste, play_from_here) over the selection, as an
@@ -85,14 +85,6 @@ void drop_item(Workspace &workspace, const MissionViewport &mission, int64_t ite
 	drop.snap = snap;
 	drop.kind = ViewportKind::Mission;
 	workspace.request(request::edit_in_viewport(mission.path(), std::move(drop)));
-}
-
-// A tool's button on the toolbar's row, shown pressed while it is the tool.
-bool tool_button(ui_kit::WrapRow &row, const char *label, bool active, bool enabled, const std::string &tip) {
-	if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-	const bool pressed = ui_kit::tool(row, label, enabled, tip);
-	if (active) ImGui::PopStyleColor();
-	return pressed;
 }
 
 // The viewport's tool set (its options' tool, the Place tool's item, the Path tool's path): one
@@ -398,27 +390,27 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 		put_brush_down();
 		options.tool = !brushing && tool == chosen ? MissionTool::Select : chosen;
 	};
-	if (tool_button(row, "Select", !brushing && tool == MissionTool::Select, true,
+	if (lit_tool(row, "Select", !brushing && tool == MissionTool::Select, true,
 				"Click a mark to select it (Shift adds, Ctrl toggles), drag it to move it (Alt-drag copies it), "
 				"drag on nothing for a box. Esc.")) {
 		put_brush_down();
 		options.tool = MissionTool::Select;
 	}
-	if (tool_button(row, "Place", !brushing && tool == MissionTool::Place, edits,
+	if (lit_tool(row, "Place", !brushing && tool == MissionTool::Place, edits,
 				edits ? "Pick an item in the palette, then click the ground to place one, facing the way the camera "
 						"looks; or drag it from the palette onto the picture. Esc stops."
 					  : held))
 		pick(MissionTool::Place);
-	if (tool_button(row, "Path stops", !brushing && tool == MissionTool::Path, edits,
+	if (lit_tool(row, "Path stops", !brushing && tool == MissionTool::Path, edits,
 				edits ? "Pick a waypoint path, then click the ground to add its next stop (a marker the path visits). "
 						"Esc stops."
 					  : held))
 		pick(MissionTool::Path);
-	if (tool_button(row, "Area", !brushing && tool == MissionTool::Area, edits,
+	if (lit_tool(row, "Area", !brushing && tool == MissionTool::Area, edits,
 				edits ? "Drag a box on the ground to make an area trigger over it. Esc stops." : held))
 		pick(MissionTool::Area);
 	// Shoot (DI-23) edits nothing: a held mission takes it too.
-	if (tool_button(row, "Shoot", !brushing && tool == MissionTool::Shoot, true,
+	if (lit_tool(row, "Shoot", !brushing && tool == MissionTool::Shoot, true,
 				"Pick an ammo, then click the terrain or an object to fire it there: the impact plays as the game "
 				"plays it (its effect, its sound and its scar, the object's damage). Esc stops."))
 		pick(MissionTool::Shoot);
@@ -468,7 +460,7 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 		ImGui::EndPopup();
 	}
 	// Listen (DI-36): the mission's soundscape where the camera stands, as the game plays it, and what plays.
-	if (tool_button(row, "Listen", options.listen.on, true,
+	if (lit_tool(row, "Listen", options.listen.on, true,
 				options.listen.on
 						? std::string("Stop listening.")
 						: std::string("Hear the mission where the camera stands, as the game plays it: its ambient sources by "
@@ -530,7 +522,7 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 	// The mission's Logic pane (S24, the Event board) beside the picture: its events as cards reading as their
 	// sentences (Ctrl+L; the Windows menu's tick).
 	const bool logic = view.workspace.document(mission.path()).logic;
-	if (tool_button(row, "Logic", logic, true,
+	if (lit_tool(row, "Logic", logic, true,
 				logic ? std::string("Hide the Logic pane (Ctrl+L).")
 					  : std::string("Show the mission's events beside the picture, each a card that reads as its sentence "
 									"(Ctrl+L).")))
@@ -541,7 +533,7 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 	const TerrainTool brush_tool = view.workspace.terrain_brush.tool;
 	const std::string terrain_label =
 			terrain && brush_tool != TerrainTool::None ? std::string("Terrain: ") + terrain_tool_label(brush_tool) : std::string("Terrain");
-	if (tool_button(row, terrain_label.c_str(), terrain, true,
+	if (lit_tool(row, terrain_label.c_str(), terrain, true,
 				terrain ? std::string("Hide the Terrain pane (Ctrl+E): the picture's own tools again.")
 						: std::string("Sculpt the ground, paint its maps and lay its tiles here and on the map (Ctrl+E).")))
 		window_requests::show_terrain(workspace, mission.path(), !terrain);

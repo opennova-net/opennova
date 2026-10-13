@@ -14,6 +14,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/viewport_widgets.h>
 #include <editor/ui/workspace.h>
 #include <formats/env/env.h>
 #include <formats/env/tod_clock.h>
@@ -25,16 +26,6 @@ namespace {
 
 using io::JsonValue;
 
-void set_viewport(Workspace &workspace, const EnvironmentViewport &model, const char *member, JsonValue value) {
-	workspace.request(request::set_viewport(model.path(), viewport_change(ViewportKind::Environment, member, std::move(value))));
-}
-
-void set_clock(Workspace &workspace, const EnvironmentViewport &model, const char *member, JsonValue value) {
-	JsonValue clock = JsonValue::make_object();
-	clock.set(member, std::move(value));
-	set_viewport(workspace, model, "clock", std::move(clock));
-}
-
 // One weather command as a script issues it: issued each time, whatever the last one was.
 void issue(Workspace &workspace, const EnvironmentViewport &model, const char *name, const EnvironmentWeatherCommand &command) {
 	JsonValue value = JsonValue::make_object();
@@ -42,7 +33,7 @@ void issue(Workspace &workspace, const EnvironmentViewport &model, const char *n
 	value.set("seconds", io::json_number(command.seconds));
 	JsonValue options = JsonValue::make_object();
 	options.set(name, std::move(value));
-	set_viewport(workspace, model, "options", std::move(options));
+	set_viewport_member(workspace, model, "options", std::move(options));
 }
 
 std::string day_words(int seconds) {
@@ -135,7 +126,7 @@ void day_track(Workspace &workspace, const EnvironmentViewport &model) {
 		if (std::fabs(minute - model.options().time) > 1e-6) {
 			JsonValue options = JsonValue::make_object();
 			options.set("time", io::json_number(minute));
-			set_viewport(workspace, model, "options", std::move(options));
+			set_viewport_member(workspace, model, "options", std::move(options));
 		}
 	}
 }
@@ -179,11 +170,8 @@ void EnvironmentViewportView::draw_ready(Workspace &workspace, const ViewportMod
 	const EnvironmentViewportOptions &options = model.options();
 	ui_kit::WrapRow row;
 	// The preview clock: Run or Pause (Play is the game's).
-	const bool playing = context.input.clock.playing();
-	const char *run = playing ? "Pause" : "Run";
-	row.next(ui_kit::button_width(run));
-	if (ImGui::Button(run)) set_clock(workspace, model, "playing", JsonValue::make_bool(!playing));
-	ui_kit::tooltip("Run or hold the preview clock: the time of day runs on its game ticks.");
+	clock_buttons(workspace, row, model, context.input.clock,
+			"Run or hold the preview clock: the time of day runs on its game ticks.");
 	const std::string now = environment_clock_words(model.hours());
 	row.next(ui_kit::text_width(now.c_str()));
 	ImGui::AlignTextToFramePadding();
@@ -200,7 +188,7 @@ void EnvironmentViewportView::draw_ready(Workspace &workspace, const ViewportMod
 			if (ImGui::Selectable(day_words(seconds).c_str(), seconds == options.day_seconds)) {
 				JsonValue change = JsonValue::make_object();
 				change.set("day_seconds", io::json_number(seconds));
-				set_viewport(workspace, model, "options", std::move(change));
+				set_viewport_member(workspace, model, "options", std::move(change));
 			}
 		ImGui::EndCombo();
 	}
@@ -222,7 +210,7 @@ void EnvironmentViewportView::draw_ready(Workspace &workspace, const ViewportMod
 				if (ImGui::Selectable(io::utf8_file_name(use.mission).c_str(), drawn && use.mission == drawn->mission)) {
 					JsonValue change = JsonValue::make_object();
 					change.set("mission", io::json_string(use.mission));
-					set_viewport(workspace, model, "options", std::move(change));
+					set_viewport_member(workspace, model, "options", std::move(change));
 				}
 			ImGui::EndCombo();
 		}
@@ -242,7 +230,7 @@ void EnvironmentViewportView::draw_ready(Workspace &workspace, const ViewportMod
 		if (ImGui::Checkbox("Mission header", &header)) {
 			JsonValue change = JsonValue::make_object();
 			change.set("header", JsonValue::make_bool(header));
-			set_viewport(workspace, model, "options", std::move(change));
+			set_viewport_member(workspace, model, "options", std::move(change));
 		}
 		ImGui::EndDisabled();
 		std::string tip = overrides.empty() ? "Its header sets nothing over this environment." : "Its header sets, as the game loads the two:";
@@ -261,7 +249,7 @@ void EnvironmentViewportView::draw_ready(Workspace &workspace, const ViewportMod
 			show.set("water", JsonValue::make_bool(water));
 			JsonValue change = JsonValue::make_object();
 			change.set("show", std::move(show));
-			set_viewport(workspace, model, "options", std::move(change));
+			set_viewport_member(workspace, model, "options", std::move(change));
 		}
 		ImGui::EndPopup();
 	}
@@ -280,18 +268,15 @@ void EnvironmentViewportView::draw_ready(Workspace &workspace, const ViewportMod
 				R"({"kind": "environment", "options": {"rain": {"percent": 0, "seconds": 0}, "overcast": {"percent": 0, "seconds": 0}}})"));
 	// Listen (S23 C): the rain's loops and the lightning's thunder heard at the camera, as the game plays them.
 	const MissionListenOptions &listen = options.listen;
-	if (listen.on) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-	const bool toggled = ui_kit::tool(weather, "Listen", true,
-			listen.on ? std::string("Stop listening.")
-			          : std::string("Hear the weather where the camera stands, as the game plays it: the rain's two loops "
-			                        "beside the listener while it rains, the thunder of the lightning."));
-	if (listen.on) ImGui::PopStyleColor();
-	if (toggled) {
+	if (lit_tool(weather, "Listen", listen.on, true,
+			    listen.on ? std::string("Stop listening.")
+			              : std::string("Hear the weather where the camera stands, as the game plays it: the rain's two "
+			                            "loops beside the listener while it rains, the thunder of the lightning."))) {
 		MissionListenOptions next = listen;
 		next.on = !next.on;
 		JsonValue change = JsonValue::make_object();
 		change.set("listen", mission_listen_options_to_json(next));
-		set_viewport(workspace, model, "options", std::move(change));
+		set_viewport_member(workspace, model, "options", std::move(change));
 	}
 	if (model.weather().raining()) {
 		char drops[48];
