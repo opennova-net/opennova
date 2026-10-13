@@ -75,6 +75,7 @@ struct ServeOptions {
 	std::string game;         // /game <code>
 	bool loose_root = false;  // --loose-root: a directory with no archives mounts loose
 	std::string host_file;    // /HOST <file>
+	bool lan_switch = false;  // /LAN: every game.cfg read forces mpnovaworldhostlanonly
 	// The first port of the bind scan (--lan-port; 0 binds the OS's pick; unset, the cfg
 	// range's head: game.cfg mplanserverportmin, or mpnovaworldportmin on the NovaWorld
 	// network type).

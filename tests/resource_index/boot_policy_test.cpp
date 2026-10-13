@@ -57,6 +57,14 @@ void test_flags_parse_case_insensitively_with_values() {
     CHECK(parse_launch_flags({"game.exe", "/NoReload"}).no_reload);
     CHECK(!parse_launch_flags({"game.exe", "/noreloads"}).no_reload);
     CHECK(!parse_launch_flags({"game.exe"}).no_reload);
+    // /LAN: the whole token, any case [orig: Game_ParseCommandLineAndInit
+    // `_stricmp(token, "/LAN")` @0x4A74D9..0x4A74EB].
+    CHECK(parse_launch_flags({"game.exe", "/LAN"}).lan);
+    CHECK(parse_launch_flags({"game.exe", "/w", "/lan"}).lan);
+    CHECK(!parse_launch_flags({"game.exe", "/LANX"}).lan);
+    CHECK(!parse_launch_flags({"game.exe", "LAN"}).lan);
+    CHECK(!parse_launch_flags({"game.exe", "/LAN="}).lan);
+    CHECK(!parse_launch_flags({"game.exe"}).lan);
 }
 
 // `/mod` is `/exp`: one arm of the game's walk, the value token stepped over,

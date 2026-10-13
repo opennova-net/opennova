@@ -189,6 +189,34 @@ int main() {
 		}
 	}
 
+	// --- 1b. /LAN (any case): every read forces mpnovaworldhostlanonly, so the
+	//     session the boot creates is LAN only and the exit's save carries the
+	//     word. [orig: Game_ParseCommandLineAndInit @0x4A74D9..0x4A74EB;
+	//     Game_LoadConfig @0x5514B1..0x5514BA]
+	{
+		const fs::path work = serve_test::fresh_dir("game_cfg_lan");
+		dirs.push_back(work);
+		serve_test::ScopedCwd cwd(work);
+		gamecfg::GameCfg cfg = gamecfg::defaults();
+		cfg.mp_novaworld_host_lan_only = 0;
+		serve::ServeOptions parsed;
+		std::string error;
+		CHECK(serve::parse_serve_options({"--resource-dir", root.string(), "/HOST",
+				(root / "mission_only.host").string(), "/lan"}, parsed, error) == 0);
+		CHECK(parsed.lan_switch);
+		std::unique_ptr<serve::Server> server =
+				start_server(root, root / "mission_only.host", &cfg, error, {"/Lan"});
+		if (!server) std::printf("start: %s\n", error.c_str());
+		CHECK(server != nullptr);
+		if (server) {
+			CHECK(server->game_cfg().mp_novaworld_host_lan_only == 1);
+			CHECK(server->role().state.host_owner.ctx.config.server_lan_only == 1);
+			server->stop();
+			const gamecfg::LoadResult after = gamecfg::load_file(gamecfg::kFileName, {});
+			CHECK(after.file_read && after.cfg.mp_novaworld_host_lan_only == 1);
+		}
+	}
+
 	// --- 2. no game.cfg: the defaults, and the file is created.
 	{
 		const fs::path work = serve_test::fresh_dir("game_cfg_fresh");

@@ -106,6 +106,37 @@ int main() {
 		TEST_EXPECT(block.cfg().sfx_level == 192);
 	}
 
+	// --- The /LAN switch: every read forces mpnovaworldhostlanonly to 1 after
+	//     the mpreset exit and before the version check, so a version reset's
+	//     defaults undo it; the host session settings read the forced word.
+	//     [orig: g_LanSwitch; Game_LoadConfig @0x5514B1..0x5514BA, the version
+	//     check @0x5514C4]
+	{
+		test_temp::TempDir dir("game_config_block_lan");
+		write_text(dir.file("game.cfg"), "version = 29\r\nmpnovaworldhostlanonly = 0\r\n");
+		GameConfigBlock plain(dir.file("game.cfg"));
+		TEST_EXPECT(plain.load());
+		TEST_EXPECT(plain.cfg().mp_novaworld_host_lan_only == 0);
+		GameConfigBlock block(dir.file("game.cfg"));
+		block.set_lan_switch(true);
+		TEST_EXPECT(block.load());
+		TEST_EXPECT(!block.version_reset());
+		TEST_EXPECT(block.cfg().mp_novaworld_host_lan_only == 1);
+		TEST_EXPECT(host_session_settings(block.cfg()).config.server_lan_only == 1);
+		// A main-menu entry's read takes it too.
+		GameConfigBlock::MenuMount mount;
+		mount.id = "game|";
+		std::string error;
+		block.cfg().mp_novaworld_host_lan_only = 0;
+		TEST_EXPECT(block.enter_main_menu(mount, error));
+		TEST_EXPECT(block.cfg().mp_novaworld_host_lan_only == 1);
+		// Another version: the defaults after the force, so the word is 0.
+		write_text(dir.file("game.cfg"), "version = 28\r\nmpnovaworldhostlanonly = 0\r\n");
+		TEST_EXPECT(block.load());
+		TEST_EXPECT(block.version_reset());
+		TEST_EXPECT(block.cfg().mp_novaworld_host_lan_only == 0);
+	}
+
 	// --- A file that sets mpreset ends the process at the read, ahead of the
 	//     version check: load() is false and writes nothing.
 	{
