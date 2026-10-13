@@ -14,9 +14,12 @@
 // what this reader still refuses that the engine would open is D-SND-3
 // (docs/audio/lwf-dbf-sound-re.md).
 //
-// Round-trip is byte-exact on the *unmodified* parse->encode path: garbage in
-// unused/reserved slots and the original string pool are preserved verbatim.
-// See docs/audio/lwf-dbf-sound-re.md.
+// The writer writes every record from its fields (ADR 0003): the bytes a name's
+// field or a file's slot holds past its terminator, and a set's or a layer's
+// offset slots past its count, are written zero where the authoring tools left
+// stale memory, and the string pool is a 256-byte slot per single made from its
+// path; a shipped bank written back reads as it was read, its bytes otherwise
+// (docs/audio/lwf-dbf-sound-re.md).
 #pragma once
 
 #include <array>
@@ -80,7 +83,7 @@ struct Header {
   uint32_t trigger_count = 0;
   uint32_t multi_header_off = 0;  // offset to MultiHeader
   uint32_t string_pool_off = 0;   // offset to start of string pool
-  uint32_t reserved1 = 0;         // for byte-perfect round-trip
+  uint32_t reserved1 = 0;         // as read; no reader of the engine's reads it
 };
 
 struct MultiHeader {
@@ -96,8 +99,11 @@ struct Single {
   uint16_t value_hi = 0;          // high byte carries the numeric field
   uint32_t path_offset = 0;       // relative offset into string pool
   std::string path;               // parsed from string pool (256-byte slots); empty in a non-'LWF1' bank
-  // Raw bytes for byte-perfect round-trip (includes garbage after null terminator).
-  std::array<char, kSingleNameBytes> raw_name{};
+  // The dword at +28 of the 52-byte entry, inside the name's 32 bytes: a bank not
+  // of the 'LWF1' magic finds a single by its name only where this is set [orig:
+  // SoundBank_FindEntryByName @ 0x75bba0, the magic test @ 0x75bbdf]. Read and
+  // written in such a bank where the name ends before it; zero otherwise.
+  uint32_t entry_word28 = 0;
   uint16_t pad0 = 0;
   std::array<uint32_t, 3> reserved0{};
 };
@@ -118,9 +124,6 @@ struct Multi {
   // [orig: SoundBank_LoadTriggerSets @ 0x75c489 -> Sound_Play3DPositional
   //  @ 0x527cd1..0x527da1]
   uint32_t target_id = 0;
-  // Raw bytes for byte-perfect round-trip.
-  std::array<char, kMultiNameBytes> raw_name{};
-  std::array<uint32_t, kMaxPlaylistsPerMulti> raw_playlist_ids{};  // includes garbage in unused slots
   // Playback gate flags; bit0 = also require the layer's flag bit 0x20 to match
   // the listener view state [orig: SoundBank_PlayTriggerEntries @ 0x75cd54].
   uint32_t set_flags = 0;
@@ -161,10 +164,9 @@ struct Playlist {
   uint16_t min_distance = 0;
   uint32_t flags = 0;                       // PlaylistFlags bitmask
   std::vector<uint32_t> sndparm_indices;    // indices into sndparm table
-  // Raw bytes for byte-perfect round-trip. On disk this dword is scratch; the
-  // engine overwrites it at runtime with the random-sequential cycle anchor.
+  // As read: the engine overwrites it at runtime with the random-sequential
+  // cycle anchor.
   uint32_t reserved0 = 0;
-  std::array<uint32_t, kMaxSndparmsPerPlaylist> raw_member_offsets{};  // includes garbage in unused slots
 };
 
 struct Sndparm {
@@ -189,7 +191,6 @@ struct File {
   std::vector<Multi> multis;
   std::vector<Playlist> playlists;
   std::vector<Sndparm> sndparms;
-  std::vector<uint8_t> string_pool;        // raw blob from string_pool_off to EOF
 };
 
 // Parse an .LWF from memory into strongly typed structures. Returns false on

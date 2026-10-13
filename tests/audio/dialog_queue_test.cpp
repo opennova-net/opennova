@@ -8,7 +8,6 @@
 
 #include "common/test_expect.h"
 
-#include <cstring>
 #include <initializer_list>
 #include <set>
 #include <string>
@@ -171,8 +170,7 @@ int test_a_wave_found_as_the_bank_finds_it() {
 	TEST_EXPECT(find_dialog_wave(sounds, "z01r100") == &sounds.singles[0]);
 	sounds.header.magic = 0;
 	TEST_EXPECT(find_dialog_wave(sounds, "Z01R100") == nullptr);
-	const uint32_t word = 1;
-	std::memcpy(sounds.singles[0].raw_name.data() + 28, &word, sizeof(word));
+	sounds.singles[0].entry_word28 = 1;
 	TEST_EXPECT(find_dialog_wave(sounds, "Z01R100") == &sounds.singles[0]);
 	return 0;
 }

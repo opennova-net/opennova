@@ -1,7 +1,9 @@
-// Byte-exact parse->encode round-trip for opennova::lwf over the synthetic
-// menu.lwf (tests/fixtures/minimal_lwf_gen.cpp), plus a mutate-and-reread
-// check. The retail profiles are swept by lwf_jo_assets_sweep_test behind
+// Parse->encode round-trip for opennova::lwf over the synthetic menu.lwf
+// (tests/fixtures/minimal_lwf_gen.cpp, our writer's own bytes, so byte-exact),
+// plus a mutate-and-reread check, and the stale bytes a tool leaves written
+// zero. The retail profiles are swept by lwf_jo_assets_sweep_test behind
 // OPENNOVA_JO_ASSETS. Mirrors mission/mission_bms_test.cpp.
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -19,8 +21,8 @@ namespace {
 
 using test_io::read_file;
 
-// Parse->encode must reproduce the input byte-for-byte (raw slots + original
-// string pool preserved). Returns 0 on success.
+// Parse->encode reproduces a bank our writer made byte-for-byte. Returns 0 on
+// success.
 int check_byte_exact(const std::string &path) {
 	const std::vector<uint8_t> original = read_file(path);
 	if (original.empty()) {
@@ -115,8 +117,60 @@ int main() {
 		            parsed.sndparms.size() == 3);
 		for (const auto &single : parsed.singles) TEST_EXPECT(single.path.empty());
 		TEST_EXPECT(parsed.singles.size() == 3 && parsed.singles[2].name == "TONE");
+		// Written back: the records as they were, the string pool (which no reader of such a bank
+		// reads) a zero slot per single.
 		std::vector<uint8_t> again;
-		TEST_EXPECT(opennova::lwf::encode_lwf(parsed, again, error) && again == foreign);
+		TEST_EXPECT(
+				opennova::lwf::encode_lwf(parsed, again, error) && again.size() == foreign.size());
+		uint32_t pool = 0;
+		std::memcpy(&pool, foreign.data() + 20, sizeof(pool));
+		TEST_EXPECT(pool <= again.size() &&
+				std::equal(again.begin(), again.begin() + pool, foreign.begin()));
+		for (size_t i = pool; i < again.size(); ++i)
+			TEST_EXPECT(again[i] == 0);
+	}
+
+	// What the authoring tools leave stale is written zero (ADR 0003): a single's name bytes past
+	// its terminator, a set's name bytes past its own, a set's and a layer's offset slots past
+	// their count, a file slot's bytes past its path; read back, the bank is the same. In a bank of
+	// another magic the dword at +28 of a single's entry is the one the game's lookup tests [orig:
+	// SoundBank_FindEntryByName @ 0x75bba0, @ 0x75bbdf], kept; in an 'LWF1' bank, zero.
+	{
+		std::vector<uint8_t> stale = bytes;
+		const auto put = [&stale](size_t at, const char *text) {
+			for (size_t i = 0; text[i] != '\0' && at + i < stale.size(); ++i)
+				stale[at + i] = static_cast<uint8_t>(text[i]);
+		};
+		uint32_t multi_header = 0, multi_table = 0, pool = 0;
+		std::memcpy(&multi_header, stale.data() + 16, 4);
+		std::memcpy(&pool, stale.data() + 20, 4);
+		std::memcpy(&multi_table, stale.data() + multi_header + 8, 4);
+		put(28 + 20, "OLDNAME"); // the first single's name (MSOVR_2) past its NUL
+		put(28 + 28, "WXYZ"); // its dword +28
+		put(multi_table + 16, "ZZ"); // the first set's name past its NUL
+		const uint32_t junk = 0xDEADBEEFu;
+		std::memcpy(stale.data() + multi_table + 40 + 7 * 4, &junk, 4); // its last playlist slot
+		put(pool + 200, "stale path"); // the first file slot past its path
+		opennova::lwf::File read;
+		TEST_EXPECT(opennova::lwf::parse_lwf_buffer(stale.data(), stale.size(), read, error));
+		TEST_EXPECT(read.singles.size() == 3 && read.singles[0].entry_word28 == 0);
+		std::vector<uint8_t> written;
+		TEST_EXPECT(opennova::lwf::encode_lwf(read, written, error) && written == bytes);
+		// The same in a bank of another magic: the +28 dword is kept.
+		stale[4] = '0';
+		opennova::lwf::File foreign;
+		TEST_EXPECT(opennova::lwf::parse_lwf_buffer(stale.data(), stale.size(), foreign, error));
+		uint32_t word = 0;
+		std::memcpy(&word, "WXYZ", 4);
+		TEST_EXPECT(foreign.singles.size() == 3 && foreign.singles[0].entry_word28 == word);
+		TEST_EXPECT(opennova::lwf::encode_lwf(foreign, written, error) && written.size() > 28 + 32);
+		uint32_t written_word = 0;
+		if (written.size() > 28 + 32)
+			std::memcpy(&written_word, written.data() + 28 + 28, 4);
+		TEST_EXPECT(written_word == word && written[28 + 20] == 0);
+		opennova::lwf::File again;
+		TEST_EXPECT(opennova::lwf::parse_lwf_buffer(written.data(), written.size(), again, error) &&
+				again.singles.size() == 3 && again.singles[0].entry_word28 == word);
 	}
 
 	// A nonzero trigger count: the engine reads 12 * count bytes after the singles and nothing

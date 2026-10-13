@@ -1,9 +1,11 @@
 // Retail sound-profile sweep: every .lwf / .pwf directly under the extracted
-// asset tree parses, re-encodes byte-exact (the raw-slot and string-pool
-// preservation the reader/writer pair promises), and carries the structural
-// facts the reader's contract states: 'LWF1' magic, single_count == the
-// singles table, at least one set/layer/member, and every member's single
-// index in range. Reports Skipped without OPENNOVA_JO_ASSETS.
+// asset tree parses, is written from its fields and read back as the same bank
+// (the stale bytes the authoring tools left past a name, a path or a count
+// written zero, ADR 0003; the count of banks whose bytes so differ printed), our
+// writer's bytes a fixed point, and carries the structural facts the reader's
+// contract states: 'LWF1' magic, single_count == the singles table, at least one
+// set/layer/member, and every member's single index in range. Reports Skipped
+// without OPENNOVA_JO_ASSETS.
 
 #include <formats/lwf/lwf.h>
 
@@ -18,6 +20,49 @@
 #include "common/retail_paths.h"
 
 namespace {
+
+using opennova::lwf::File;
+
+// The bank as its fields hold it: every record's fields but the offsets the writer computes.
+bool same_bank(const File &a, const File &b) {
+	if (a.header.magic != b.header.magic || a.header.reserved1 != b.header.reserved1 ||
+			a.multi_header.reserved0 != b.multi_header.reserved0 ||
+			a.multi_header.reserved1 != b.multi_header.reserved1 || a.triggers != b.triggers ||
+			a.singles.size() != b.singles.size() || a.multis.size() != b.multis.size() ||
+			a.playlists.size() != b.playlists.size() || a.sndparms.size() != b.sndparms.size())
+		return false;
+	for (size_t i = 0; i < a.singles.size(); ++i) {
+		const auto &x = a.singles[i], &y = b.singles[i];
+		if (x.name != y.name || x.value_hi != y.value_hi || x.path != y.path ||
+				x.entry_word28 != y.entry_word28 || x.pad0 != y.pad0 || x.reserved0 != y.reserved0)
+			return false;
+	}
+	for (size_t i = 0; i < a.multis.size(); ++i) {
+		const auto &x = a.multis[i], &y = b.multis[i];
+		if (x.name != y.name || x.pitch_base != y.pitch_base ||
+				x.pitch_random_range != y.pitch_random_range ||
+				x.playlist_indices != y.playlist_indices || x.target_id != y.target_id ||
+				x.set_flags != y.set_flags)
+			return false;
+	}
+	for (size_t i = 0; i < a.playlists.size(); ++i) {
+		const auto &x = a.playlists[i], &y = b.playlists[i];
+		if (x.falloff_radius != y.falloff_radius || x.min_distance != y.min_distance ||
+				x.flags != y.flags || x.sndparm_indices != y.sndparm_indices ||
+				x.reserved0 != y.reserved0)
+			return false;
+	}
+	for (size_t i = 0; i < a.sndparms.size(); ++i) {
+		const auto &x = a.sndparms[i], &y = b.sndparms[i];
+		if (x.single_index != y.single_index || x.pitch_scaled != y.pitch_scaled ||
+				x.random_pitch_scaled != y.random_pitch_scaled || x.volume != y.volume ||
+				x.clamp_volume != y.clamp_volume || x.reserved != y.reserved)
+			return false;
+	}
+	return true;
+}
+
+int g_differ = 0;
 
 bool is_profile(const std::filesystem::path &path) {
 	std::string ext = path.extension().string();
@@ -57,11 +102,18 @@ int check(const std::filesystem::path &path) {
 		std::printf("FAIL: %s encode: %s\n", name.c_str(), error.c_str());
 		return failures + 1;
 	}
-	if (encoded.size() != original.size() || std::memcmp(encoded.data(), original.data(), original.size()) != 0) {
-		std::printf("FAIL: %s is not byte-exact across parse->encode (%zu vs %zu bytes)\n",
-		            name.c_str(), encoded.size(), original.size());
+	opennova::lwf::File again;
+	std::vector<uint8_t> twice;
+	if (!opennova::lwf::parse_lwf_buffer(encoded.data(), encoded.size(), again, error) ||
+			!same_bank(file, again)) {
+		std::printf("FAIL: %s does not read back as the bank it was written from\n", name.c_str());
+		++failures;
+	} else if (!opennova::lwf::encode_lwf(again, twice, error) || twice != encoded) {
+		std::printf("FAIL: %s written again is not the same bytes\n", name.c_str());
 		++failures;
 	}
+	if (encoded != original)
+		++g_differ;
 	return failures;
 }
 
@@ -82,6 +134,8 @@ int main() {
 		std::printf("FAIL: no .lwf/.pwf directly under %s\n", assets.c_str());
 		return 1;
 	}
-	std::printf("lwf_jo_assets_sweep: %d profiles, %d failures\n", swept, failures);
+	std::printf(
+			"lwf_jo_assets_sweep: %d profiles, %d failures, %d written with stale bytes zeroed\n",
+			swept, failures, g_differ);
 	return failures == 0 ? 0 : 1;
 }
