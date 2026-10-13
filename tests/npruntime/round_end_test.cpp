@@ -79,6 +79,7 @@ w::EntityHandle match_player(w::World &world, uint8_t slot, uint8_t team,
 		const char *name) {
 	w::Entity e;
 	e.kind = w::EntityKind::Organic;
+	e.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
 	e.player_class = 8;
 	e.team = team;
 	e.health = 100;
@@ -1061,6 +1062,9 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 	const w::Vec3 bay_position{19.75f, -3.25f, 3.0f};
 	blue_entity->position = flag_position;
 	blue_entity->net_move_input |= w::Entity::kMoveOrderMoving;
+	// A person's model bound: the candidate slice built at the flag reaches
+	// the bay through it.
+	blue_entity->bound_radius = 1.0f;
 	const w::EntityHandle host = match_player(world, 1, 1, "Host");
 	world.registry.get(host)->position = {1000.0f, 1000.0f, 3.0f};
 

@@ -366,6 +366,7 @@ void test_hurt_volume_updates_registry_health() {
 
     Entity infantry;
     infantry.kind = EntityKind::Organic;
+    infantry.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     infantry.position = {10.0f, 10.0f, 0.5f};
     infantry.health = 1;
     infantry.health_max = 1;
@@ -420,6 +421,7 @@ void test_remote_player_body_publishes_exact_change_team_contact() {
 
     Entity player;
     player.kind = EntityKind::Organic;
+    player.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     player.position = {10.0f, 10.0f, 0.5f};
     player.player_class = 5;
     player.health = 100;
@@ -560,6 +562,7 @@ struct ClimbRig {
         ladder_h = world.registry.spawn(2, ladder);
         Entity body;
         body.kind = EntityKind::Organic;
+        body.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         body.position = {10.6f, 10.0f, 0.0f};
         body.health = 100;
         body.alive = true;
@@ -744,6 +747,7 @@ void test_org1_ladder_hold_press_and_top_select() {
     CHECK(m->inf.anim_state == anim_state::kClimbUp);
     Entity blocker;
     blocker.kind = EntityKind::Organic;
+    blocker.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     blocker.position = {10.0f, 10.0f, 1.9f};
     blocker.bound_radius = 1.0f; // the probe's z-band reads the peer ENTITY
                                  // bound (persons carry ~1u), not the staged
@@ -5227,6 +5231,7 @@ void test_slope_probes_include_candidate_models() {
  const auto support = world.registry.spawn(2,solid);
  Entity person;
  person.kind = EntityKind::Organic;
+ person.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
  person.position = {10,10,3};
  person.item_id = 5305;
  person.item_type = 3;

@@ -1119,6 +1119,11 @@ public:
     // snapshots stay at their published epoch; unrelated contacts are retained.
     // [orig: WacCmd_Tele @0x4F22D0 -> 0x4B8EB0, 0x4B3DC0]
     void refresh_entity_proximity(World &world, Entity &entity);
+    // The candidate-slice build alone, outside the 17-tick cadence (which it
+    // restarts): every source's slice over the published pool tables.
+    // [orig: Entity_BuildProximityListsFromPools @0x4B8EB0, called by
+    //  Entity_RespawnVehicle @0x460133]
+    void rebuild_candidate_slices(World &world);
 
     // Atomically replace the persistent decoded collision projection. Sorting
     // by wire handle gives both domains deterministic order; the wire-keyed
@@ -1674,6 +1679,7 @@ public:
 private:
     void build_tables(World &world, bool advance_candidate_slices);
     void build_candidate_slices(World &world);
+    void purge_stale_candidate_slices(const World &world);
     // entity_los_clear over an endpoint described by its read fields.
     bool entity_los_clear_impl(World &world, EntityHandle listener, EntityHandle source,
             bool endpoint_present, bool endpoint_indoors, EntityHandle parent_b,
@@ -1725,6 +1731,10 @@ private:
         // The source position the slice was built at (wire slices only): a
         // row that has moved past its pad since then needs a fresh build.
         int32_t built_pos[3] = {0, 0, 0};
+        // The registry lifetime the slice was built for (registry slices
+        // only): the slot's words outlive a build the gates skip, never a
+        // respawn into the slot.
+        uint64_t lifetime = 0;
     };
     struct StableLosCandidate {
         EntityHandle h;
@@ -1870,7 +1880,15 @@ private:
     // Server H used solely as local L's ordering key during proxy-enabled
     // person walks. Geometry and ignore logic continue to use L.
     uint16_t wire_local_player_handle_ = 0xFFFF;
-    std::vector<EntityHandle> arena_;   // cap 3000 [orig: g_ProxCandidateArena]
+    // The arena's 3000 entries and its fill count. A build refills it from 0
+    // and leaves the entries past the fill as the last build that reached
+    // them wrote them; a slice a later build skipped keeps its start and
+    // count, so it reads whatever the arena holds there now.
+    // [orig: g_ProxCandidateArena, g_ProxCandidateArenaUsed; the < 3000 tests
+    //  @0x4b8fd4 / @0x4b90bc / @0x4b9214 / @0x4b92fc]
+    static constexpr int32_t kCandidateArenaCap = 3000;
+    std::vector<EntityHandle> arena_;
+    int32_t arena_used_ = 0;
     std::unordered_map<uint16_t, CandidateSlice> candidates_;
     // A distinct identity domain for decoded rows. Using a second arena/map is
     // structural: wire H=0 and a registry L=0 are both valid simultaneously.

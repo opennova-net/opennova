@@ -57,6 +57,7 @@ MatchRules rules(uint32_t game_type, uint32_t game_time_minutes, uint32_t score_
 EntityHandle player(World &world, uint8_t slot, uint8_t team, const char *name) {
     Entity entity;
     entity.kind = EntityKind::Organic;
+    entity.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     entity.item_id = 5305;
     entity.has_item_def = true;
     entity.player_class = 8;
@@ -93,6 +94,7 @@ EntityHandle objective(World &world, int32_t item_id, uint8_t team, Vec3 positio
                        uint32_t item_attrib = kItemAttribMoveCallback) {
     Entity entity;
     entity.kind = EntityKind::Item;
+    entity.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     entity.item_id = item_id;
     entity.has_item_def = true;
     entity.item_attrib = item_attrib;
@@ -477,6 +479,7 @@ void test_deathmatch_and_hill_outcomes() {
     world->registry.get(solo)->position = {0.0f, 0.0f, 0.0f};
     Entity hill;
     hill.kind = EntityKind::Item;
+    hill.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     hill.item_id = 6006;
     hill.has_item_def = true;
     hill.position = {0.0f, 0.0f, 0.0f};
@@ -609,6 +612,7 @@ void test_retail_objective_proximity_state_and_kill_bonuses() {
 
         Entity hill;
         hill.kind = EntityKind::Item;
+        hill.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
         hill.item_id = 6006;
         hill.has_item_def = true;
         hill.position = {0.0f, 0.0f, 0.0f};
@@ -618,6 +622,7 @@ void test_retail_objective_proximity_state_and_kill_bonuses() {
 
         Entity numbered;
         numbered.kind = EntityKind::Item;
+        numbered.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
         numbered.has_item_def = true;
         numbered.item_attrib = kItemAttribSpawnPoint;
         numbered.zone_number = 1;
@@ -738,6 +743,7 @@ void test_retail_objective_proximity_scoring_events() {
 
         Entity hill;
         hill.kind = EntityKind::Item;
+        hill.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
         hill.item_id = 6006;
         hill.has_item_def = true;
         hill.position = {0.0f, 0.0f, 0.0f};
@@ -776,6 +782,7 @@ void test_retail_objective_proximity_scoring_events() {
 
         Entity numbered;
         numbered.kind = EntityKind::Item;
+        numbered.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
         numbered.has_item_def = true;
         numbered.item_attrib = kItemAttribSpawnPoint;
         numbered.zone_number = 1;
@@ -872,6 +879,7 @@ void test_retail_zone_and_tkoth_win_quirks() {
         world->registry.get(team4)->position = {0.0f, 0.0f, 0.0f};
         Entity hill;
         hill.kind = EntityKind::Item;
+        hill.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
         hill.item_id = 6006;
         hill.has_item_def = true;
         hill.position = {0.0f, 0.0f, 0.0f};
@@ -1408,6 +1416,7 @@ void test_end_round_team_row_count_rule() {
 EntityHandle spawn_hill(World &world) {
     Entity entity;
     entity.kind = EntityKind::Item;
+    entity.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     entity.item_id = 6006;
     entity.has_item_def = true;
     entity.position = {0.0f, 0.0f, 0.0f};

@@ -111,6 +111,7 @@ struct Rig {
         body.item_type = 3;
         body.has_item_def = true;
         body.kind = EntityKind::Organic;
+        body.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         body.health = body.health_max = 150;
         body.team = team;
         body.net_id = uint16_t(700 + idx);
@@ -174,6 +175,7 @@ struct Rig {
         item.has_item_def = true;
         item.item_attrib = attrib;
         item.kind = EntityKind::Item;
+        item.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
         item.health = item.health_max = 100;
         item.net_id = net_id;
         item.bound_radius = 1.0f;

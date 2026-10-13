@@ -69,8 +69,33 @@ func _copy_fixture(dir: String, source_res_path: String, dest_name: String) -> v
 	TestFs.copy(self, source_res_path, dir.path_join(dest_name))
 
 
+# The rows a retail items.def leads with: the "Null" marker at row 0, which no
+# mission places (an ItemTypeIndex of 0 reads as no item to the pool walks and
+# the candidate-slice gate), and, for a text that carries none, a player body's
+# row, whose ordinal a spawned player carries (D-COL-14). A text with its own
+# 105305 row keeps it: an id resolves to its first row.
+const _ITEMS_NULL_ROW := """begin "Null"
+  id 100000
+  type marker
+end
+"""
+const _ITEMS_PLAYER_ROW := """begin "Player #1, Multiplayer"
+  id 105305
+  type person
+  hp 100
+end
+"""
+
+
+func _items_head(text: String) -> String:
+	var player_row := RegEx.create_from_string("(?m)^\\s*id\\s+105305\\b")
+	if player_row.search(text) != null:
+		return _ITEMS_NULL_ROW
+	return _ITEMS_NULL_ROW + _ITEMS_PLAYER_ROW
+
+
 func _item_db_from_text(dir: String, text: String) -> ItemDatabase:
-	TestFs.write_text(self, dir.path_join("items.def"), text)
+	TestFs.write_text(self, dir.path_join("items.def"), _items_head(text) + text)
 	var db := ItemDatabase.new()
 	assert_eq(db.load(dir.path_join("items.def")), OK)
 	return db
@@ -188,7 +213,7 @@ func _vehicle_ctrl_item_db() -> ItemDatabase:
 	assert_not_null(file)
 	if file == null:
 		return null
-	file.store_string(TestFs.crlf("""begin "CTRL Vehicle Fixture"
+	file.store_string(TestFs.crlf(_ITEMS_NULL_ROW + _ITEMS_PLAYER_ROW + """begin "CTRL Vehicle Fixture"
   id 105007
   type vehicle
   graphic tank

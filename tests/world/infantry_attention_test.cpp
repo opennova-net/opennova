@@ -60,6 +60,7 @@ struct Fixture {
     EntityHandle person(Vec3 position, int ssn = 9, int group = 3, int team = 1) {
         Entity entity;
         entity.kind = EntityKind::Organic;
+        entity.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         entity.item_id = 1;
         entity.has_item_def = true;
         entity.net_id = ssn;
@@ -381,6 +382,7 @@ static void test_mounted_attention_respects_vehicle_motion() {
             const auto target = f.person({3, 1, 2});
             Entity vehicle;
             vehicle.kind = EntityKind::Item;
+            vehicle.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
             vehicle.item_id = 2;
             vehicle.has_item_def = true;
             // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].

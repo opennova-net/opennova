@@ -211,6 +211,7 @@ struct Rig {
         s.net_id = 1;
         s.position = {0.0f, 0.0f, 0.0f};
         s.bound_radius = 1.0f; // production Entity_InitFromModel stamp
+        s.item_type_index = 3; // a def row's ordinal: the +0x1C slice gate
         s.alive = true;
         soldier = world.registry.spawn(0, s);
 
@@ -799,6 +800,7 @@ void test_candidate_sun_segment_includes_pool1_dynamics() {
 
     Entity source_seed;
     source_seed.kind = EntityKind::Organic;
+    source_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     source_seed.position = {0.0f, 0.0f, 1.0f};
     source_seed.bound_radius = 1.0f;
     source_seed.alive = true;
@@ -842,12 +844,17 @@ void test_pool1_source_slice_uses_itemdef_gate_not_vehicle_traits() {
     collision.assign_entity(
             wall, collision.add_model(box_model(1, 0, 1.0, 1.0, 2.0)));
 
-    auto spawn_source = [&](uint32_t attrib, uint8_t type, bool has_def) {
+    // The +0x1C word is the def row's ordinal: ordinal 0 (the first
+    // items.def row) reads as no source.
+    auto spawn_source = [&](uint32_t attrib, uint8_t type, bool has_def,
+                            int32_t type_index = 7, uint32_t flags = 0) {
         Entity seed;
         seed.kind = EntityKind::Item;
         seed.has_item_def = has_def;
+        seed.item_type_index = type_index;
         seed.item_type = type;
         seed.item_attrib = attrib;
+        seed.flags = flags;
         seed.bound_radius = 1.0f;
         seed.alive = true;
         return world.registry.spawn(1, seed);
@@ -857,12 +864,193 @@ void test_pool1_source_slice_uses_itemdef_gate_not_vehicle_traits() {
     const EntityHandle type1_exception =
             spawn_source(kItemAttribEweap, 1, true);
     const EntityHandle no_def = spawn_source(0, 1, false);
+    const EntityHandle ordinal_zero = spawn_source(0, 6, true, 0);
+    const EntityHandle carried = spawn_source(0, 6, true, 7, kEntityFlagCarried);
 
     for (int i = 0; i < 17; ++i) collision.build_tick_tables(world);
     CHECK(collision.candidate_count(ordinary) > 0);
     CHECK(collision.candidate_count(eweap) == 0);
     CHECK(collision.candidate_count(type1_exception) > 0);
     CHECK(collision.candidate_count(no_def) == 0);
+    CHECK(collision.candidate_count(ordinal_zero) == 0);
+    CHECK(collision.candidate_count(carried) == 0);
+}
+
+// The pool-0 source gate is the +0x1C word alone: no kind test, no Flags
+// test. [orig: Entity_BuildProximityListsFromPools @0x4B8EB0 - the test
+//  @0x4B8EF9..0x4B8F00]
+void test_pool0_source_slice_gate_is_the_type_index() {
+    World world;
+    world.registry.configure_pool(0, 8);
+    world.registry.configure_pool(2, 4);
+    CollisionWorld collision;
+    Entity wall_seed;
+    wall_seed.kind = EntityKind::Building;
+    wall_seed.position = {2.0f, 0.0f, 0.0f};
+    wall_seed.alive = true;
+    const EntityHandle wall = world.registry.spawn(2, wall_seed);
+    collision.assign_entity(
+            wall, collision.add_model(box_model(1, 0, 1.0, 1.0, 2.0)));
+    auto spawn_body = [&](EntityKind kind, int32_t type_index, uint32_t flags) {
+        Entity seed;
+        seed.kind = kind;
+        seed.item_type_index = type_index;
+        seed.flags = flags;
+        seed.bound_radius = 1.0f;
+        seed.alive = true;
+        return world.registry.spawn(0, seed);
+    };
+    const EntityHandle person = spawn_body(EntityKind::Organic, 3, 0);
+    const EntityHandle hidden = spawn_body(EntityKind::Organic, 3, 1u);
+    const EntityHandle other_kind = spawn_body(EntityKind::Item, 3, 0);
+    const EntityHandle unnumbered = spawn_body(EntityKind::Organic, 0, 0);
+    for (int i = 0; i < 17; ++i) collision.build_tick_tables(world);
+    CHECK(collision.candidate_count(person) == 1);
+    CHECK(collision.candidate_count(hidden) == 1);
+    CHECK(collision.candidate_count(other_kind) == 1);
+    CHECK(collision.candidate_count(unnumbered) == 0);
+}
+
+// A pool-1 row the gates skip keeps its last pointer and count, which then
+// read the re-filled arena: here the entry another source's slice now holds.
+// A respawn into the slot starts with none. [orig: the stores @0x4B9157 /
+//  @0x4B915D behind the gates @0x4B9127..0x4B9147; the fill reset @0x4B8ED0;
+//  the spawn memset @0x40EA27]
+void test_skipped_row_keeps_its_slice_into_the_refilled_arena() {
+    World world;
+    world.registry.configure_pool(1, 8);
+    world.registry.configure_pool(2, 4);
+    CollisionWorld collision;
+    auto spawn_wall = [&](float x) {
+        Entity seed;
+        seed.kind = EntityKind::Building;
+        seed.position = {x, 0.0f, 0.0f};
+        seed.alive = true;
+        const EntityHandle h = world.registry.spawn(2, seed);
+        collision.assign_entity(h, collision.add_model(box_model(1, 0, 1.0, 1.0, 2.0)));
+        return h;
+    };
+    const EntityHandle near_wall = spawn_wall(0.0f);
+    const EntityHandle far_wall = spawn_wall(400.0f);
+    auto spawn_item = [&](float x) {
+        Entity seed;
+        seed.kind = EntityKind::Item;
+        seed.has_item_def = true;
+        seed.item_type_index = 7;
+        seed.item_type = 6;
+        seed.position = {x, 0.0f, 0.0f};
+        seed.alive = true;
+        return world.registry.spawn(1, seed);
+    };
+    // Slot order: the first source fills the arena ahead of the second.
+    const EntityHandle first = spawn_item(1000.0f); // sees nothing
+    const EntityHandle second = spawn_item(1.0f);   // sees near_wall
+    for (int i = 0; i < 17; ++i) collision.build_tick_tables(world);
+    CHECK(collision.candidate_count(first) == 0);
+    CHECK(collision.candidate_count(second) == 1);
+    // The second is carried away; the first moves beside the far wall.
+    world.registry.get(second)->flags |= kEntityFlagCarried;
+    world.registry.get(second)->position = {2000.0f, 0.0f, 0.0f};
+    world.registry.get(first)->position = {401.0f, 0.0f, 0.0f};
+    for (int i = 0; i < 17; ++i) collision.build_tick_tables(world);
+    CHECK(collision.candidate_count(first) == 1);
+    int32_t kept = 0;
+    const EntityHandle *kept_slice = collision.candidate_slice(second, kept);
+    CHECK(kept == 1);
+    if (kept_slice != nullptr && kept == 1) CHECK(kept_slice[0] == far_wall);
+    CHECK(near_wall.valid());
+    // A new body in the second's slot starts with no slice, whatever the
+    // gates then say.
+    world.registry.despawn(EntityLifetime{second, world.registry.get(second)->registry_spawn_id});
+    Entity respawn_seed;
+    respawn_seed.kind = EntityKind::Item;
+    respawn_seed.has_item_def = true;
+    respawn_seed.item_type_index = 7;
+    respawn_seed.flags = kEntityFlagCarried;
+    respawn_seed.alive = true;
+    CHECK(world.registry.spawn_at(second, respawn_seed) == second);
+    collision.build_tick_tables(world);
+    CHECK(collision.candidate_count(second) == 0);
+}
+
+// A source's range is its own boundRadius word plus the pad: a zero radius
+// adds nothing. [orig: @0x4B8F02..0x4B8F0B; @0x4B9149..0x4B9152]
+void test_candidate_range_reads_the_raw_bound_radius() {
+    World world;
+    world.registry.configure_pool(0, 8);
+    world.registry.configure_pool(2, 4);
+    CollisionWorld collision;
+    Entity wall_seed;
+    wall_seed.kind = EntityKind::Building;
+    wall_seed.position = {0.0f, 0.0f, 0.0f};
+    wall_seed.alive = true;
+    const EntityHandle wall = world.registry.spawn(2, wall_seed);
+    collision.assign_entity(
+            wall, collision.add_model(box_model(1, 0, 1.0, 1.0, 2.0)));
+    auto spawn_body = [&](float radius) {
+        Entity seed;
+        seed.kind = EntityKind::Organic;
+        seed.item_type_index = 3;
+        seed.bound_radius = radius;
+        seed.alive = true;
+        return world.registry.spawn(0, seed);
+    };
+    const EntityHandle sized = spawn_body(1.0f);
+    const EntityHandle unsized = spawn_body(0.0f);
+    auto place = [&](float x) {
+        world.registry.get(sized)->position = {x, 0.0f, 0.0f};
+        world.registry.get(unsized)->position = {x, 0.0f, 0.0f};
+        for (int i = 0; i < 17; ++i) collision.build_tick_tables(world);
+    };
+    // The farthest quarter-unit step the 1.0u source still sees the wall.
+    float reach = 0.0f;
+    for (float x = 1.0f; x < 64.0f; x += 0.25f) {
+        place(x);
+        if (collision.candidate_count(sized) == 1) reach = x;
+    }
+    CHECK(reach > 2.0f);
+    // Half a unit inside it the 1.0u source sees the wall and the 0u one,
+    // a whole unit shorter, does not.
+    place(reach - 0.5f);
+    CHECK(collision.candidate_count(sized) == 1);
+    CHECK(collision.candidate_count(unsized) == 0);
+}
+
+// The vehicle respawn rebuilds every source's slice with the vehicle at its
+// respawn point, restarting the 17-tick phase. [orig: Entity_RespawnVehicle
+//  @0x45FF40 - the Entity_BuildProximityListsFromPools call @0x460133]
+void test_vehicle_respawn_rebuilds_the_candidate_slices() {
+    World world;
+    world.registry.configure_pool(1, 8);
+    world.registry.configure_pool(2, 4);
+    CollisionWorld collision;
+    world.ai.collision = &collision;
+    Entity wall_seed;
+    wall_seed.kind = EntityKind::Building;
+    wall_seed.position = {0.0f, 0.0f, 0.0f};
+    wall_seed.alive = true;
+    const EntityHandle wall = world.registry.spawn(2, wall_seed);
+    collision.assign_entity(
+            wall, collision.add_model(box_model(1, 0, 1.0, 1.0, 2.0)));
+    Entity vehicle_seed;
+    vehicle_seed.kind = EntityKind::Item;
+    vehicle_seed.has_item_def = true;
+    vehicle_seed.item_type_index = 7;
+    vehicle_seed.item_type = 1;
+    vehicle_seed.position = {500.0f, 0.0f, 0.0f};
+    vehicle_seed.alive = true;
+    const EntityHandle vehicle = world.registry.spawn(1, vehicle_seed);
+    for (int i = 0; i < 17; ++i) collision.build_tick_tables(world);
+    CHECK(collision.candidate_count(vehicle) == 0);
+    world.registry.get(vehicle)->position = {1.0f, 0.0f, 0.0f};
+    world.vehicles.respawn(*world.registry.get(vehicle));
+    CHECK(collision.candidate_count(vehicle) == 1);
+    // Sixteen table builds keep the respawn's slices; the seventeenth builds.
+    world.registry.get(vehicle)->position = {500.0f, 0.0f, 0.0f};
+    for (int i = 0; i < 16; ++i) collision.build_tick_tables(world);
+    CHECK(collision.candidate_count(vehicle) == 1);
+    collision.build_tick_tables(world);
+    CHECK(collision.candidate_count(vehicle) == 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -1149,6 +1337,7 @@ void test_mounted_resolver_keeps_touch_without_parent_pushout() {
 
     Entity gun{};
     gun.kind = EntityKind::Item;
+    gun.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     gun.has_item_def = true;
     gun.has_graphic_model = true;
     gun.health = 100;
@@ -1163,6 +1352,7 @@ void test_mounted_resolver_keeps_touch_without_parent_pushout() {
 
     Entity rider{};
     rider.kind = EntityKind::Organic;
+    rider.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     rider.health = 100;
     rider.alive = true;
     rider.net_id = 0x10;
@@ -1691,6 +1881,7 @@ void test_slice_cadence_and_invuln() {
     const EntityHandle building = world.registry.spawn(2, b);
     Entity s;
     s.kind = EntityKind::Organic;
+    s.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     s.net_id = 1;
     s.position = {10.0f, 10.0f, 0.0f};
     s.alive = true;
@@ -1725,6 +1916,7 @@ void test_slice_cadence_and_invuln() {
 
         Entity source_seed;
         source_seed.kind = EntityKind::Organic;
+        source_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         source_seed.alive = true;
         const EntityHandle source = refresh_world.registry.spawn(0, source_seed);
         refresh_cw.build_initial_tables(refresh_world);
@@ -1827,6 +2019,7 @@ void test_proximity_tables_use_host_bound_radius() {
 
     Entity source_seed;
     source_seed.kind = EntityKind::Organic;
+    source_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     source_seed.alive = true;
     const EntityHandle source = world.registry.spawn(0, source_seed);
 
@@ -1855,6 +2048,7 @@ void test_proximity_tables_use_host_bound_radius() {
     // the old hard-coded 1u source radius incorrectly dropped it.
     Entity vehicle_seed;
     vehicle_seed.kind = EntityKind::Item;
+    vehicle_seed.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     vehicle_seed.item_id = 900;
     vehicle_seed.has_item_def = true;
     vehicle_seed.has_graphic_model = true;
@@ -1886,6 +2080,7 @@ void test_proximity_tables_use_host_bound_radius() {
     // band, while the authored 8u peer must push the source away.
     Entity peer_seed;
     peer_seed.kind = EntityKind::Organic;
+    peer_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     peer_seed.position = {2.0f, 0.0f, 0.0f};
     peer_seed.bound_radius = 8.0f;
     peer_seed.alive = true;
@@ -1916,6 +2111,7 @@ void test_pool1_item_is_one_collision_candidate() {
 
     Entity organic;
     organic.kind = EntityKind::Organic;
+    organic.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     organic.position = {10.0f, 10.0f, 0.0f};
     organic.alive = true;
     const EntityHandle source = world.registry.spawn(0, organic);
@@ -3111,6 +3307,7 @@ void test_vehicle_hull_prefilters_stale_candidates_before_section_matrices() {
 
     Entity vehicle_seed;
     vehicle_seed.kind = EntityKind::Item;
+    vehicle_seed.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     vehicle_seed.item_id = 900;
     vehicle_seed.has_item_def = true;
     vehicle_seed.has_graphic_model = true;
@@ -3169,6 +3366,7 @@ void test_vehicle_probes_support_model_decks_and_grade_slopes() {
 	CollisionWorld collision;
 	Entity hull;
 	hull.kind = EntityKind::Item;
+	hull.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
 	hull.item_id = 900;
 	hull.has_item_def = true;
 	hull.has_graphic_model = true;
@@ -3230,6 +3428,7 @@ void test_vehicle_hull_skips_mounted_child_ground_chain() {
                           float bound_radius) {
         Entity seed;
         seed.kind = EntityKind::Item;
+        seed.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
         seed.item_id = item_id;
         seed.has_item_def = true;
         seed.has_graphic_model = true;
@@ -3486,6 +3685,7 @@ void test_iris_static_rays_prefilter_before_section_matrices() {
 
     Entity source_seed;
     source_seed.kind = EntityKind::Organic;
+    source_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     source_seed.bound_radius = 1.0f;
     source_seed.alive = true;
     const EntityHandle source = world.registry.spawn(0, source_seed);
@@ -3541,6 +3741,7 @@ void test_sound_los_prefilters_candidates_before_section_matrices() {
 
     Entity listener_seed;
     listener_seed.kind = EntityKind::Organic;
+    listener_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     listener_seed.bound_radius = 1.0f;
     listener_seed.alive = true;
     const EntityHandle listener = world.registry.spawn(0, listener_seed);
@@ -3608,6 +3809,7 @@ void test_sound_occlusion_flagged_planes_ignore_thin_ray_shrink() {
 
         Entity listener_seed;
         listener_seed.kind = EntityKind::Organic;
+        listener_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         listener_seed.alive = true;
         const EntityHandle listener = world.registry.spawn(0, listener_seed);
         CHECK(listener.valid());
@@ -5737,6 +5939,7 @@ void test_entity_sun_visibility_rays_and_eligibility() {
 
     Entity person_seed;
     person_seed.kind = EntityKind::Organic;
+    person_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     person_seed.position = Vec3{0.0f, 0.0f, 0.0f};
     person_seed.alive = true;
     const EntityHandle person = world.registry.spawn(0, person_seed);
@@ -5744,6 +5947,7 @@ void test_entity_sun_visibility_rays_and_eligibility() {
 
     Entity open_seed;
     open_seed.kind = EntityKind::Organic;
+    open_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     open_seed.position = Vec3{50.0f, 0.0f, 0.0f};
     open_seed.alive = true;
     const EntityHandle open_person = world.registry.spawn(0, open_seed);
@@ -5755,6 +5959,7 @@ void test_entity_sun_visibility_rays_and_eligibility() {
     // carries the roof.
     Entity far_seed;
     far_seed.kind = EntityKind::Organic;
+    far_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     far_seed.position = Vec3{30.0f, 0.0f, 0.0f};
     far_seed.alive = true;
     const EntityHandle far_person = world.registry.spawn(0, far_seed);
@@ -6006,12 +6211,14 @@ struct RunOverRig {
 		cw.terrain = &field.field;
 		Entity d;
 		d.kind = EntityKind::Organic;
+		d.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
 		d.position = {50.0f, 50.0f, 0.0f};
 		d.team = 1;
 		d.alive = true;
 		driver = world.registry.spawn(0, d);
 		Entity v;
 		v.kind = EntityKind::Item;
+		v.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
 		v.item_id = 900;
 		v.has_item_def = true;
 		v.has_graphic_model = true;
@@ -6025,6 +6232,7 @@ struct RunOverRig {
 		vehicle = world.registry.spawn(1, v);
 		Entity s;
 		s.kind = EntityKind::Organic;
+		s.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
 		s.has_item_def = true;
 		s.has_graphic_model = true;
 		s.item_type = 3;
@@ -6188,6 +6396,10 @@ int main() {
     test_clip_segment_uses_nearest_candidate_and_indoors_terrain_gate();
     test_candidate_sun_segment_includes_pool1_dynamics();
     test_pool1_source_slice_uses_itemdef_gate_not_vehicle_traits();
+    test_pool0_source_slice_gate_is_the_type_index();
+    test_skipped_row_keeps_its_slice_into_the_refilled_arena();
+    test_candidate_range_reads_the_raw_bound_radius();
+    test_vehicle_respawn_rebuilds_the_candidate_slices();
     test_sound_occlusion();
     test_ray_clip();
     test_ground_probe_roof();

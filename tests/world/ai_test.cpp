@@ -370,6 +370,7 @@ static void test_aim_origin_takes_the_non_person_leg() {
 
     Entity veh_seed{};
     veh_seed.kind = EntityKind::Item;
+    veh_seed.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     veh_seed.has_item_def = true;
     veh_seed.has_graphic_model = true;
     veh_seed.item_type = 1; // not def type 3: the non-person leg
@@ -405,6 +406,7 @@ static void test_aim_origin_takes_the_non_person_leg() {
     // the weapon point or the address of the tick global. [orig: @0x43B4C5]
     Entity person_seed{};
     person_seed.kind = EntityKind::Organic;
+    person_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     person_seed.has_item_def = true;
     person_seed.has_graphic_model = true;
     person_seed.item_type = 3;
@@ -474,6 +476,7 @@ static void test_aim_solution_uses_muzzle_stamp() {
     w.registry.configure_pool(0, 8);
     Entity player_seed;
     player_seed.kind = EntityKind::Organic;
+    player_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     player_seed.item_id = 1001;
     player_seed.has_item_def = true;
     player_seed.has_graphic_model = true;
@@ -487,6 +490,7 @@ static void test_aim_solution_uses_muzzle_stamp() {
 
     Entity npc_seed;
     npc_seed.kind = EntityKind::Organic;
+    npc_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     npc_seed.team = 1;
     npc_seed.health = 100;
     npc_seed.net_id = 0x11;
@@ -868,6 +872,7 @@ static void test_round_hit_reaches_the_same_pass_body_update() {
     const EntityHandle shooter_h = w.registry.spawn(0, shooter_seed);
     Entity victim_seed;
     victim_seed.kind = EntityKind::Organic;
+    victim_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     victim_seed.has_item_def = true;
     victim_seed.has_graphic_model = true;
     victim_seed.item_type = 3;
@@ -919,6 +924,7 @@ static void test_lethal_hit_blends_into_death_animation_without_position_jump() 
 
     Entity victim_seed;
     victim_seed.kind = EntityKind::Organic;
+    victim_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     victim_seed.has_item_def = true;
     victim_seed.has_graphic_model = true;
     victim_seed.item_type = 3;
@@ -1038,6 +1044,7 @@ static void test_world_feed_never_engages_same_team() {
 
     Entity ally_seed{};
     ally_seed.kind = EntityKind::Organic;
+    ally_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     ally_seed.has_item_def = true;
     ally_seed.has_graphic_model = true;
     ally_seed.item_type = 3;
@@ -1050,6 +1057,7 @@ static void test_world_feed_never_engages_same_team() {
 
     Entity npc_seed{};
     npc_seed.kind = EntityKind::Organic;
+    npc_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     npc_seed.team = 1;
     npc_seed.health = 100;
     npc_seed.net_id = 0x11;
@@ -1081,6 +1089,7 @@ static void test_script_target_policy_reaches_infantry_and_weapons() {
     w->registry.configure_pool(0, 8);
     Entity seed{};
     seed.kind = EntityKind::Organic;
+    seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     seed.item_id = 1001;
     seed.item_type = 3;
     seed.net_id = 0x11;
@@ -1186,6 +1195,7 @@ static void test_berserk_candidate_is_intentional_team_exception() {
 
     Entity candidate_seed{};
     candidate_seed.kind = EntityKind::Organic;
+    candidate_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     candidate_seed.item_id = 1001;
     candidate_seed.item_type = 3;
     candidate_seed.team = 1;
@@ -1196,6 +1206,7 @@ static void test_berserk_candidate_is_intentional_team_exception() {
 
     Entity npc_seed{};
     npc_seed.kind = EntityKind::Organic;
+    npc_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     npc_seed.team = 1;
     npc_seed.health = 100;
     npc_seed.net_id = 0x11;
@@ -1243,6 +1254,7 @@ static void test_damage_hit_sets_retail_alert_state() {
 
     Entity shooter_seed{};
     shooter_seed.kind = EntityKind::Organic;
+    shooter_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     shooter_seed.team = 2;
     shooter_seed.health = 100;
     shooter_seed.net_id = 0x21;
@@ -1251,6 +1263,7 @@ static void test_damage_hit_sets_retail_alert_state() {
 
     Entity npc_seed{};
     npc_seed.kind = EntityKind::Organic;
+    npc_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     npc_seed.team = 1;
     npc_seed.health = 100;
     npc_seed.net_id = 0x11;
@@ -1313,11 +1326,13 @@ static void test_remote_player_hit_skips_npc_group_alert() {
 
     Entity shooter_seed{};
     shooter_seed.kind = EntityKind::Organic;
+    shooter_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     shooter_seed.health = 100;
     const EntityHandle shooter_h = w->registry.spawn(0, shooter_seed);
 
     Entity player_seed{};
     player_seed.kind = EntityKind::Organic;
+    player_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     player_seed.health = 100;
     player_seed.net_id = 0x41;
     player_seed.group_id = 3;
@@ -1352,6 +1367,7 @@ static void test_mounted_gunner_acquires_and_fires() {
 
     Entity enemy_seed{};
     enemy_seed.kind = EntityKind::Organic;
+    enemy_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     enemy_seed.item_id = 1001;
     enemy_seed.has_item_def = true;
     enemy_seed.has_graphic_model = true;
@@ -1365,6 +1381,7 @@ static void test_mounted_gunner_acquires_and_fires() {
 
     Entity gun{};
     gun.kind = EntityKind::Item;
+    gun.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     gun.has_item_def = true; // seats need the def (D-NET-422)
     gun.has_graphic_model = true;
     gun.team = 1;
@@ -1383,6 +1400,7 @@ static void test_mounted_gunner_acquires_and_fires() {
 
     Entity npc_seed{};
     npc_seed.kind = EntityKind::Organic;
+    npc_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     npc_seed.team = 1;
     npc_seed.health = 100;
     npc_seed.net_id = 0x11;
@@ -1461,6 +1479,7 @@ static void test_mounted_gunner_fires_from_the_slot_barrel() {
 
         Entity enemy_seed{};
         enemy_seed.kind = EntityKind::Organic;
+        enemy_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         enemy_seed.item_id = 1001;
         enemy_seed.has_item_def = true;
         enemy_seed.has_graphic_model = true;
@@ -1474,6 +1493,7 @@ static void test_mounted_gunner_fires_from_the_slot_barrel() {
 
         Entity gun{};
         gun.kind = EntityKind::Item;
+        gun.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
         gun.has_item_def = true; // the boarding needs the def (D-NET-422); the fixture,
         gun.has_graphic_model = true;
                                  // built around a def-less gun, drops it below
@@ -1504,6 +1524,7 @@ static void test_mounted_gunner_fires_from_the_slot_barrel() {
 
         Entity npc_seed{};
         npc_seed.kind = EntityKind::Organic;
+        npc_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         npc_seed.team = 1;
         npc_seed.health = 100;
         npc_seed.net_id = 0x11;
@@ -1568,12 +1589,14 @@ static void test_weapon_fire_position_legs() {
 
     Entity person_seed{};
     person_seed.kind = EntityKind::Organic;
+    person_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     person_seed.health = 100;
     person_seed.team = 1;
     person_seed.net_id = 0x11;
     const EntityHandle person_h = w->registry.spawn(0, person_seed);
     Entity veh_seed{};
     veh_seed.kind = EntityKind::Item;
+    veh_seed.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     veh_seed.has_item_def = true;
     veh_seed.has_graphic_model = true;
     veh_seed.item_type = 1;
@@ -1607,6 +1630,7 @@ static void test_weapon_fire_position_legs() {
     // its no-clip word selects.
     Entity gun{};
     gun.kind = EntityKind::Item;
+    gun.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     gun.team = 1;
     gun.net_id = 0x31;
     gun.has_item_def = true;
@@ -1699,6 +1723,7 @@ static void test_turret_gunners_scan_from_the_gun_point() {
 
         Entity enemy_seed{};
         enemy_seed.kind = EntityKind::Item;
+        enemy_seed.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
         enemy_seed.item_id = 1002;
         enemy_seed.has_item_def = true;
         enemy_seed.has_graphic_model = true;
@@ -1712,6 +1737,7 @@ static void test_turret_gunners_scan_from_the_gun_point() {
 
         Entity gun{};
         gun.kind = EntityKind::Item;
+        gun.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
         gun.item_id = cannon ? 100166 : 100182;
         gun.has_item_def = true;
         gun.has_graphic_model = true;
@@ -1746,6 +1772,7 @@ static void test_turret_gunners_scan_from_the_gun_point() {
 
         Entity npc_seed{};
         npc_seed.kind = EntityKind::Organic;
+        npc_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         npc_seed.item_id = 1001;
         npc_seed.has_item_def = true;
         npc_seed.has_graphic_model = true;
@@ -1841,6 +1868,7 @@ static void test_infantry_floats_and_splashes_once() {
 
     Entity seed{};
     seed.kind = EntityKind::Organic;
+    seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     seed.team = 2;
     seed.health = 100;
     seed.net_id = 0x60;
@@ -1910,6 +1938,7 @@ static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
 
     Entity target_seed{};
     target_seed.kind = EntityKind::Organic;
+    target_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     target_seed.team = 2;
     target_seed.health = 100;
     target_seed.net_id = 0x21;
@@ -1918,6 +1947,7 @@ static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
 
     Entity gun{};
     gun.kind = EntityKind::Item;
+    gun.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     gun.has_item_def = true; // the boarding needs the def (D-NET-422); the fixture,
     gun.has_graphic_model = true;
                              // built around a def-less gun, drops it below
@@ -1937,6 +1967,7 @@ static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
 
     Entity npc_seed{};
     npc_seed.kind = EntityKind::Organic;
+    npc_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     npc_seed.team = 1;
     npc_seed.health = 100;
     npc_seed.net_id = 0x11;
@@ -2050,6 +2081,7 @@ static void test_weapon_walk_pumps_hot_unoccupied_guns() {
     const auto spawn_gun = [&](uint32_t attrib, bool occupied, int32_t window) {
         Entity gun{};
         gun.kind = EntityKind::Item;
+        gun.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
         gun.has_item_def = true;
         gun.has_graphic_model = true;
         gun.item_attrib = attrib;
@@ -2101,6 +2133,7 @@ static void test_weapon_walk_visits_pool0_in_slot_order() {
     const auto spawn_gun = [&](uint16_t net_id) {
         Entity gun{};
         gun.kind = EntityKind::Item;
+        gun.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
         gun.has_item_def = true; // seats need the def (D-NET-422)
         gun.has_graphic_model = true;
         gun.team = 1;
@@ -2115,6 +2148,7 @@ static void test_weapon_walk_visits_pool0_in_slot_order() {
     const auto spawn_npc = [&](uint16_t net_id) {
         Entity seed{};
         seed.kind = EntityKind::Organic;
+        seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         seed.team = 1;
         seed.health = 100;
         seed.net_id = net_id;
@@ -2149,6 +2183,7 @@ static void test_mounted_request_copies_the_parent_adm_byte() {
 
     Entity target_seed{};
     target_seed.kind = EntityKind::Organic;
+    target_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     target_seed.team = 2;
     target_seed.health = 100;
     target_seed.net_id = 0x21;
@@ -2157,6 +2192,7 @@ static void test_mounted_request_copies_the_parent_adm_byte() {
 
     Entity gun{};
     gun.kind = EntityKind::Item;
+    gun.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     gun.has_item_def = true; // seats need the def (D-NET-422)
     gun.has_graphic_model = true;
     gun.team = 1;
@@ -2175,6 +2211,7 @@ static void test_mounted_request_copies_the_parent_adm_byte() {
 
     Entity npc_seed{};
     npc_seed.kind = EntityKind::Organic;
+    npc_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     npc_seed.team = 1;
     npc_seed.health = 100;
     npc_seed.net_id = 0x11;
@@ -2222,6 +2259,7 @@ static void test_mounted_gunner_runs_the_anim_event_fire_block() {
 
     Entity gun{};
     gun.kind = EntityKind::Item;
+    gun.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     gun.has_item_def = true; // seats need the def (D-NET-422)
     gun.has_graphic_model = true;
     gun.team = 1;
@@ -2240,6 +2278,7 @@ static void test_mounted_gunner_runs_the_anim_event_fire_block() {
 
     Entity npc_seed{};
     npc_seed.kind = EntityKind::Organic;
+    npc_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     npc_seed.team = 1;
     npc_seed.health = 100;
     npc_seed.net_id = 0x11;
@@ -2282,6 +2321,7 @@ static void test_mounted_request_runs_for_a_passenger() {
 
         Entity target_seed{};
         target_seed.kind = EntityKind::Organic;
+        target_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         target_seed.team = 2;
         target_seed.health = 100;
         target_seed.net_id = 0x21;
@@ -2290,6 +2330,7 @@ static void test_mounted_request_runs_for_a_passenger() {
 
         Entity truck{};
         truck.kind = EntityKind::Item;
+        truck.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
         truck.has_item_def = true; // seats need the def (D-NET-422)
         truck.has_graphic_model = true;
         truck.team = 1;
@@ -2308,6 +2349,7 @@ static void test_mounted_request_runs_for_a_passenger() {
 
         Entity npc_seed{};
         npc_seed.kind = EntityKind::Organic;
+        npc_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         npc_seed.team = 1;
         npc_seed.health = 100;
         npc_seed.net_id = 0x12;
@@ -2347,6 +2389,7 @@ static void test_mounted_request_copies_the_parents_live_byte() {
 
     Entity target_seed{};
     target_seed.kind = EntityKind::Organic;
+    target_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     target_seed.team = 2;
     target_seed.health = 100;
     target_seed.net_id = 0x21;
@@ -2355,6 +2398,7 @@ static void test_mounted_request_copies_the_parents_live_byte() {
 
     Entity gun{};
     gun.kind = EntityKind::Item;
+    gun.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     gun.has_item_def = true; // seats need the def (D-NET-422)
     gun.has_graphic_model = true;
     gun.team = 1;
@@ -2373,6 +2417,7 @@ static void test_mounted_request_copies_the_parents_live_byte() {
 
     Entity npc_seed{};
     npc_seed.kind = EntityKind::Organic;
+    npc_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     npc_seed.team = 1;
     npc_seed.health = 100;
     npc_seed.net_id = 0x11;
@@ -2399,6 +2444,7 @@ static void test_mounted_look_traverses_before_fire_request() {
 
     Entity target_seed{};
     target_seed.kind = EntityKind::Organic;
+    target_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     target_seed.team = 2;
     target_seed.health = 100;
     target_seed.net_id = 0x21;
@@ -2407,6 +2453,7 @@ static void test_mounted_look_traverses_before_fire_request() {
 
     Entity gun{};
     gun.kind = EntityKind::Item;
+    gun.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     gun.has_item_def = true; // seats need the def (D-NET-422)
     gun.has_graphic_model = true;
     gun.team = 1;
@@ -2425,6 +2472,7 @@ static void test_mounted_look_traverses_before_fire_request() {
 
     Entity npc_seed{};
     npc_seed.kind = EntityKind::Organic;
+    npc_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     npc_seed.team = 1;
     npc_seed.health = 100;
     npc_seed.net_id = 0x11;
@@ -2463,6 +2511,7 @@ static void test_mounted_gunner_dismounts_into_death_animation() {
 
     Entity gun{};
     gun.kind = EntityKind::Item;
+    gun.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     gun.has_item_def = true; // seats need the def (D-NET-422)
     gun.has_graphic_model = true;
     gun.net_id = 0x31;
@@ -2473,6 +2522,7 @@ static void test_mounted_gunner_dismounts_into_death_animation() {
 
     Entity npc_seed{};
     npc_seed.kind = EntityKind::Organic;
+    npc_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     npc_seed.team = 1;
     npc_seed.health = 100;
     npc_seed.net_id = 0x11;
@@ -2522,6 +2572,7 @@ static void test_mounted_collision_tail_uses_retail_eight_tick_phase_without_mod
 
     Entity gun{};
     gun.kind = EntityKind::Item;
+    gun.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     gun.has_item_def = true; // the boarding needs the def (D-NET-422); the
     gun.has_graphic_model = true;
                              // test's subject, a def-less parent, drops it below
@@ -2533,6 +2584,7 @@ static void test_mounted_collision_tail_uses_retail_eight_tick_phase_without_mod
 
     Entity npc_seed{};
     npc_seed.kind = EntityKind::Organic;
+    npc_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     npc_seed.team = 1;
     npc_seed.health = 100;
     npc_seed.net_id = 0x10;
@@ -2586,6 +2638,7 @@ static void test_joiner_evaluates_vehicle_idle_without_integrating_motor() {
 
     Entity npc{};
     npc.kind = EntityKind::Organic;
+    npc.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     npc.health = 100;
     npc.alive = true;
     const EntityHandle npc_h = w->registry.spawn(0, npc);
@@ -2994,6 +3047,7 @@ static void test_vehicle_class_state_machine_gates() {
 	const EntityHandle hull = w.registry.spawn(1, hull_seed);
 	Entity crew_seed;
 	crew_seed.kind = EntityKind::Organic;
+	crew_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
 	const EntityHandle crew = w.registry.spawn(0, crew_seed);
 	auto sys_heap = std::make_unique<AiSystem>();
 	AiSystem &sys = *sys_heap;
@@ -3433,6 +3487,7 @@ void test_vehicle_brain_think_countdown() {
     //  visit's @0x4B8E3C and the pool-2/3 walks' @0x4C22B3 / @0x4C2378]
     Entity organic;
     organic.kind = EntityKind::Organic;
+    organic.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     organic.health = 100;
     const EntityHandle oh = w.registry.spawn(0, organic);
     AiEntity &o = *sys.at(sys.attach(oh));
@@ -4724,6 +4779,7 @@ int main() {
         // The player: pool 0, team 2, 20 u east of the NPC, at ground height 0.
         Entity player_seed;
         player_seed.kind = EntityKind::Organic;
+        player_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         player_seed.item_id = 1001;
     player_seed.has_item_def = true;
     player_seed.has_graphic_model = true;
@@ -4739,6 +4795,7 @@ int main() {
         // The NPC rifleman: pool 0, team 1, armed via the organic ammo seed (§33.35).
         Entity npc_seed;
         npc_seed.kind = EntityKind::Organic;
+        npc_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         npc_seed.team = 1;
         npc_seed.health = 100;
         npc_seed.net_id = 0x11;

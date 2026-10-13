@@ -96,6 +96,7 @@ struct Rig {
 
         Entity pl;
         pl.kind = EntityKind::Organic;
+        pl.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         pl.item_id = 5305;
         pl.player_class = 8;
         pl.group_id = 1; // the deploy stamp [orig: @0x519fd0]
@@ -1184,6 +1185,7 @@ void test_post_epoch_player_spawn_discovers_nearby_seat_immediately() {
 
     Entity vehicle;
     vehicle.kind = EntityKind::Item;
+    vehicle.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     vehicle.has_item_def = true; // seats need the def (D-NET-422)
     vehicle.has_graphic_model = true;
     vehicle.position = {10.0f, 20.0f, 0.0f};
@@ -1200,6 +1202,8 @@ void test_post_epoch_player_spawn_discovers_nearby_seat_immediately() {
 
     for (int i = 0; i < 17; ++i) cw.build_tick_tables(w);
 
+    // The player def row's ordinal the spawn stamps (the +0x1C slice gate).
+    w.tables.player.item_type_index = 3;
     PlayerSpawn spawn;
     spawn.position = {12.0f, 20.0f, 0.0f};
     spawn.health = 100;
@@ -1227,6 +1231,7 @@ void test_restore_refreshes_completed_candidate_epoch() {
 
     Entity other;
     other.kind = EntityKind::Item;
+    other.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     other.has_item_def = true; // seats need the def (D-NET-422)
     other.has_graphic_model = true;
     other.position = {200.0f, 200.0f, 10.0f};
@@ -3653,6 +3658,7 @@ void test_attach_labels_build_enemy_occupancy_once() {
 
     Entity player_seed;
     player_seed.kind = EntityKind::Organic;
+    player_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     player_seed.position = {100.0f, 200.0f, 10.0f};
     player_seed.yaw = 90; // facing +x, down the row of seats (the aim cone)
     player_seed.health = 100;
@@ -3665,6 +3671,7 @@ void test_attach_labels_build_enemy_occupancy_once() {
     for (int i = 0; i < 32; ++i) {
         Entity vehicle;
         vehicle.kind = EntityKind::Item;
+        vehicle.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
         vehicle.has_item_def = true; // seats need the def (D-NET-422)
         vehicle.has_graphic_model = true;
         vehicle.position = {
@@ -3686,6 +3693,7 @@ void test_attach_labels_build_enemy_occupancy_once() {
     for (int i = 0; i < 64; ++i) {
         Entity organic;
         organic.kind = EntityKind::Organic;
+        organic.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         organic.position = {120.0f + static_cast<float>(i), 200.0f, 10.0f};
         organic.health = 100;
         organic.alive = true;

@@ -4214,6 +4214,7 @@ bool check_timed_capture_host_wire_transaction() {
 	auto soldier = [&](uint8_t team) {
 		opennova::world::Entity entity;
 		entity.kind = opennova::world::EntityKind::Organic;
+		entity.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
 		entity.player_class = 8;
 		entity.team = team;
 		entity.health = 150;
@@ -4445,6 +4446,7 @@ bool check_numbered_flip_pair_and_banner_wire() {
 	auto soldier = [&](uint8_t team, int32_t x, int32_t y) {
 		opennova::world::Entity entity;
 		entity.kind = opennova::world::EntityKind::Organic;
+		entity.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
 		entity.player_class = 8;
 		entity.team = team;
 		entity.health = 150;

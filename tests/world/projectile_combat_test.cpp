@@ -51,6 +51,7 @@ struct Rig : HeapWorldFixture {
         // the damage pass skips [orig: Projectile_DamagePairEligible @0x4E74F0].
         Entity s;
         s.kind = EntityKind::Organic;
+        s.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         s.item_type = 3;
         s.team = 1;
         s.position = {0.0f, 0.0f, 0.0f};
@@ -59,6 +60,7 @@ struct Rig : HeapWorldFixture {
 
         Entity t;
         t.kind = EntityKind::Organic;
+        t.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         t.has_item_def = true;
         t.item_type = 3;
         t.team = 2;
@@ -125,6 +127,7 @@ struct PosedDamageRig : HeapWorldFixture {
 
         Entity s;
         s.kind = EntityKind::Organic;
+        s.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         s.item_type = 3;
         s.team = 1; // enemies: a same-side NPC pair is a protected pair (D-WPN-42)
         s.health = 100;
@@ -132,6 +135,7 @@ struct PosedDamageRig : HeapWorldFixture {
 
         Entity t;
         t.kind = EntityKind::Organic;
+        t.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         t.has_item_def = true;
         t.item_type = 3;
         t.team = 2;
@@ -456,6 +460,7 @@ void test_nodie_and_nontransparent_damage_gates() {
     target->alive = false;
     Entity behind;
     behind.kind = EntityKind::Organic;
+    behind.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     behind.item_type = 3;
     behind.position = {8.0f, 0.0f, 0.0f};
     behind.health = 100;
@@ -480,11 +485,13 @@ void test_posed_head_zone_multiplier() {
     world.registry.configure_pool(0, 8);
     Entity shooter;
     shooter.kind = EntityKind::Organic;
+    shooter.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     shooter.item_type = 3;
     shooter.team = 1; // enemies: a same-side NPC pair is a protected pair (D-WPN-42)
     const EntityHandle sh = world.registry.spawn(0, shooter);
     Entity target;
     target.kind = EntityKind::Organic;
+    target.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     target.has_item_def = true;
     target.item_type = 3;
     target.team = 2;
@@ -953,12 +960,14 @@ void test_visual_person_proxy_keeps_wire_identity_out_of_authority() {
     // The hidden dummy remains in the registry person table but cannot collide.
     Entity dummy;
     dummy.kind = EntityKind::Organic;
+    dummy.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     dummy.hidden = true;
     dummy.position = {100.0f, 100.0f, 0.0f};
     CHECK(world.registry.spawn(0, dummy).packed == 0);
 
     Entity local;
     local.kind = EntityKind::Organic;
+    local.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     local.has_item_def = true;
     local.item_type = 3;
     local.position = {8.0f, 0.0f, 0.0f};
@@ -1113,11 +1122,13 @@ void test_knife_instant_kill_zone_raycast() {
 
     Entity shooter;
     shooter.kind = EntityKind::Organic;
+    shooter.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     shooter.item_type = 3;
     const EntityHandle sh = world.registry.spawn(0, shooter);
 
     Entity target;
     target.kind = EntityKind::Organic;
+    target.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     target.has_item_def = true;
     target.item_type = 3;
     target.position = {2.0f, 0.0f, 0.0f};
@@ -1187,6 +1198,7 @@ void test_knife_instant_kill_zone_raycast() {
     // [orig: Weapon_RaycastAndSpawnImpact @0x4e8880..0x4e8888].
     Entity flesh_target;
     flesh_target.kind = EntityKind::Organic;
+    flesh_target.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     flesh_target.has_item_def = true;
     flesh_target.item_type = 3;
     flesh_target.position = {1.0f, 0.0f, 0.0f};
@@ -1218,6 +1230,7 @@ void test_knife_instant_kill_zone_raycast() {
     // [orig: @0x4e87cb item leg (<); @0x4e8867 material + 4].
     Entity item;
     item.kind = EntityKind::Item;
+    item.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     item.has_item_def = true;
     item.item_type = 3;
     item.position = {0.5f, 0.0f, 0.0f};
@@ -1254,6 +1267,7 @@ void test_visual_dynamic_proxy_projects_decoded_pose_geometry() {
 
     Entity shooter;
     shooter.kind = EntityKind::Organic;
+    shooter.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     shooter.item_type = 3;
     shooter.position = {0.0f, 0.0f, 0.0f};
     const EntityHandle sh = world.registry.spawn(0, shooter);
@@ -1263,6 +1277,7 @@ void test_visual_dynamic_proxy_projects_decoded_pose_geometry() {
     // at authored spawn X=5 rather than the host's current pose.
     Entity ghost;
     ghost.kind = EntityKind::Item;
+    ghost.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     ghost.has_item_def = true;
     ghost.position = {5.0f, 0.0f, 0.0f};
     const EntityHandle gh = world.registry.spawn(1, ghost);
@@ -1364,6 +1379,7 @@ void test_visual_dynamic_proxy_carrier_gate_and_unresolved_model_raises() {
 
     Entity shooter;
     shooter.kind = EntityKind::Organic;
+    shooter.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     shooter.item_type = 3;
     const EntityHandle sh = world.registry.spawn(0, shooter);
     world.cached.local_player = sh;
@@ -1429,6 +1445,7 @@ void test_visual_dynamic_proxy_excludes_shooter_self_slot() {
 
     Entity shooter;
     shooter.kind = EntityKind::Organic;
+    shooter.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     shooter.item_type = 3;
     const EntityHandle sh = world.registry.spawn(0, shooter);
     world.cached.local_player = sh;
@@ -1476,6 +1493,7 @@ void test_visual_throwable_motor_sweeps_wire_proxies() {
 
     Entity shooter;
     shooter.kind = EntityKind::Organic;
+    shooter.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     shooter.item_type = 3;
     const EntityHandle sh = world.registry.spawn(0, shooter);
     world.cached.local_player = sh;
@@ -1561,6 +1579,7 @@ void test_visual_infantry_proxy_joins_person_walk() {
 
     Entity local;
     local.kind = EntityKind::Organic;
+    local.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     local.item_type = 3;
     const EntityHandle local_l = world.registry.spawn(0, local);
     world.cached.local_player = local_l;
@@ -1570,6 +1589,7 @@ void test_visual_infantry_proxy_joins_person_walk() {
     // (the host moved it to X=9) serves instead.
     Entity frozen_ai;
     frozen_ai.kind = EntityKind::Organic;
+    frozen_ai.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     frozen_ai.has_item_def = true;
     frozen_ai.item_type = 3;
     frozen_ai.position = {5.0f, 0.0f, -0.9f};
@@ -1616,6 +1636,7 @@ void test_person_walk_orders_local_player_by_its_server_handle() {
         for (int i = 0; i < 4; ++i) {
             Entity ghost;
             ghost.kind = EntityKind::Organic;
+            ghost.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
             ghost.has_item_def = true;
             ghost.item_type = 3;
             ghost.position = {100.0f + static_cast<float>(i), 100.0f, -0.9f};
@@ -1626,6 +1647,7 @@ void test_person_walk_orders_local_player_by_its_server_handle() {
 
         Entity local;
         local.kind = EntityKind::Organic;
+        local.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         local.has_item_def = true;
         local.item_type = 3;
         local.position = {4.0f, 0.0f, -0.9f};
@@ -1759,6 +1781,7 @@ void test_person_impact_tag_splits_on_identity_and_squad_health() {
         Rig r;
         Entity local;
         local.kind = EntityKind::Organic;
+        local.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         local.item_type = 3;
         local.position = {0.0f, 50.0f, 0.0f};
         local.health = 100;
@@ -1782,6 +1805,7 @@ void test_person_impact_tag_splits_on_identity_and_squad_health() {
         Rig r;
         Entity local;
         local.kind = EntityKind::Organic;
+        local.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         local.item_type = 3;
         local.position = {0.0f, 50.0f, 0.0f};
         local.health = 100;
@@ -1806,6 +1830,7 @@ void test_person_impact_tag_splits_on_identity_and_squad_health() {
         Rig r;
         Entity local;
         local.kind = EntityKind::Organic;
+        local.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         local.item_type = 3;
         local.position = {0.0f, 50.0f, 0.0f};
         local.health = 100;
@@ -1851,6 +1876,7 @@ void test_exact_one_hop_vehicle_parent_damage_routing() {
 
         Entity parent;
         parent.kind = EntityKind::Item;
+        parent.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
         parent.has_item_def = true;
         parent.item_type = parent_type;
         parent.position = {100.0f, 100.0f, 100.0f};
@@ -1889,6 +1915,7 @@ void test_exact_one_hop_vehicle_parent_damage_routing() {
     r.world.tables.ammo.entries[0].arm_age_ticks = 0;
     Entity vehicle;
     vehicle.kind = EntityKind::Item;
+    vehicle.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     vehicle.has_item_def = true;
     vehicle.item_type = 1;
     vehicle.position = {100.0f, 100.0f, 100.0f};
@@ -1928,6 +1955,7 @@ void test_zero_damage_hit_still_notifies_the_vehicle_brain() {
     r.world.tables.ammo.entries[0].arm_age_ticks = 0;
     Entity hull;
     hull.kind = EntityKind::Item;
+    hull.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     hull.has_item_def = true;
     hull.item_type = 1;
     hull.is_ai_capable = true;
@@ -2013,6 +2041,7 @@ void test_vehicle_occupant_reduction_count_cap_and_depth() {
 
     Entity vehicle;
     vehicle.kind = EntityKind::Item;
+    vehicle.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     vehicle.item_type = 1;
     vehicle.position = {100.0f, 100.0f, 100.0f};
     vehicle.health = 5000;
@@ -2053,6 +2082,7 @@ void test_vehicle_occupant_reduction_count_cap_and_depth() {
                                int pool = 0) {
         Entity rider;
         rider.kind = EntityKind::Organic;
+        rider.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         rider.has_item_def = true;
         rider.item_type = 3;
         rider.position = {100.0f, 100.0f, 100.0f};
@@ -2081,6 +2111,7 @@ void test_vehicle_occupant_reduction_count_cap_and_depth() {
 
     Entity no_item_def;
     no_item_def.kind = EntityKind::Organic;
+    no_item_def.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     no_item_def.item_type = 3;
     no_item_def.position = {100.0f, 100.0f, 100.0f};
     no_item_def.health = 100;
@@ -2095,6 +2126,7 @@ void test_vehicle_occupant_reduction_count_cap_and_depth() {
 
     Entity deck_stander;
     deck_stander.kind = EntityKind::Organic;
+    deck_stander.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     deck_stander.has_item_def = true;
     deck_stander.item_type = 3;
     deck_stander.position = {100.0f, 100.0f, 100.0f};
@@ -2207,6 +2239,7 @@ void test_round_passes_through_people_in_a_line() {
         r.world.tables.ammo.entries[0].arm_age_ticks = 0;
         Entity behind;
         behind.kind = EntityKind::Organic;
+        behind.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         behind.has_item_def = true;
         behind.item_type = 3;
         behind.position = {8.0f, 0.0f, 0.0f};
@@ -2238,6 +2271,7 @@ void test_round_passes_through_people_in_a_line() {
         world.rules.projectile_authority = false;
         Entity shooter;
         shooter.kind = EntityKind::Organic;
+        shooter.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         shooter.item_type = 3;
         const EntityHandle sh = world.registry.spawn(0, shooter);
         world.cached.local_player = sh;
@@ -2336,6 +2370,7 @@ void test_terrain_impact_samples_charmap_surface() {
         world.registry.configure_pool(0, 4);
         Entity s;
         s.kind = EntityKind::Organic;
+        s.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         s.item_type = 3;
         s.position = {0.0f, 0.0f, 10.0f};
         const EntityHandle shooter = world.registry.spawn(0, s);
@@ -2400,6 +2435,7 @@ void test_terrain_impact_emits_permanent_scorch() {
     world.registry.configure_pool(0, 4);
     Entity shooter;
     shooter.kind = EntityKind::Organic;
+    shooter.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     shooter.item_type = 3;
     shooter.position = {0.0f, 0.0f, 10.0f};
     const EntityHandle owner = world.registry.spawn(0, shooter);
@@ -2462,6 +2498,7 @@ void test_terrain_stop_records_the_round() {
     world.registry.configure_pool(0, 4);
     Entity shooter;
     shooter.kind = EntityKind::Organic;
+    shooter.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     shooter.item_type = 3;
     shooter.position = {0.0f, 0.0f, 10.0f};
     const EntityHandle owner = world.registry.spawn(0, shooter);
@@ -2514,6 +2551,7 @@ void test_bullet_building_material_is_plain_plus_four() {
 
     Entity shooter;
     shooter.kind = EntityKind::Organic;
+    shooter.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     shooter.has_item_def = true;
     shooter.item_type = 3;
     shooter.position = {0.0f, 0.0f, 0.0f};
@@ -2581,6 +2619,7 @@ void test_entity_material_penetration() {
             world.registry.configure_pool(2, 4);
             Entity pane;
             pane.kind = EntityKind::Item;
+            pane.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
             pane.has_item_def = true;
             pane.item_type = 1; // a vehicle window is not a building section
             pane.health = 1000;
@@ -2652,6 +2691,7 @@ void test_visual_round_wire_proxy_material_decides_survival() {
         world.rules.projectile_authority = false;
         Entity shooter;
         shooter.kind = EntityKind::Organic;
+        shooter.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         shooter.item_type = 3;
         const EntityHandle sh = world.registry.spawn(0, shooter);
         world.cached.local_player = sh;
@@ -2727,6 +2767,7 @@ void test_material_15_breaks_the_building_glass_section() {
 
         Entity shooter;
         shooter.kind = EntityKind::Organic;
+        shooter.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         shooter.has_item_def = true;
         shooter.item_type = 3;
         shooter.position = {0.0f, 0.0f, 0.0f};
@@ -2793,6 +2834,7 @@ void test_material_15_breaks_the_building_glass_section() {
 
     Entity shooter;
     shooter.kind = EntityKind::Organic;
+    shooter.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     shooter.has_item_def = true;
     shooter.item_type = 3;
     const EntityHandle owner = world.registry.spawn(0, shooter);
@@ -3011,6 +3053,7 @@ struct PlayerVictimRig : HeapWorldFixture {
 
         Entity s;
         s.kind = EntityKind::Organic;
+        s.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         s.item_type = 3;
         s.team = 2; // enemies: a same-side NPC pair is a protected pair (D-WPN-42)
         s.health = 100;
@@ -3236,6 +3279,7 @@ void test_same_projectile_second_player_kill_latches_0x100() {
     world.registry.configure_pool(0, 8);
     Entity s;
     s.kind = EntityKind::Organic;
+    s.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     s.item_type = 3;
     s.team = 1; // an enemy of its teamless victims (D-WPN-42)
     s.health = 100;
@@ -3243,6 +3287,7 @@ void test_same_projectile_second_player_kill_latches_0x100() {
     auto spawn_player_victim = [&](float x) {
         Entity t;
         t.kind = EntityKind::Organic;
+        t.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         t.has_item_def = true;
         t.item_type = 3;
         t.position = {x, 0.0f, 0.0f};
@@ -3304,6 +3349,7 @@ void test_kill_event_reads_the_pre_hit_health_and_the_dead_flag() {
     world.registry.configure_pool(0, 8);
     Entity s;
     s.kind = EntityKind::Organic;
+    s.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     s.item_type = 3;
     s.team = 1; // an enemy of its teamless victims (D-WPN-42)
     s.health = 100;
@@ -3311,6 +3357,7 @@ void test_kill_event_reads_the_pre_hit_health_and_the_dead_flag() {
     auto spawn_victim = [&](int32_t health, uint32_t flags) {
         Entity t;
         t.kind = EntityKind::Organic;
+        t.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         t.has_item_def = true;
         t.item_type = 3;
         t.position = {5.0f, 0.0f, 0.0f};
@@ -3387,6 +3434,7 @@ void test_visual_person_hit_on_the_joiners_body_stages_and_rolls_without_consequ
 
     Entity s;
     s.kind = EntityKind::Organic;
+    s.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     s.item_type = 3;
     s.team = 1; // an enemy of its teamless victims (D-WPN-42)
     s.health = 100;
@@ -3459,11 +3507,13 @@ void test_projectile_indoor_terrain_gate() {
     w.registry.configure_pool(2, 4);
     Entity indoors_body;
     indoors_body.kind = EntityKind::Organic;
+    indoors_body.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     indoors_body.position = {100.0f, 100.0f, 0.0f};
     indoors_body.flags = kEntityFlagIndoors;
     const EntityHandle indoors_shooter = w.registry.spawn(0, indoors_body);
     Entity outdoors_body;
     outdoors_body.kind = EntityKind::Organic;
+    outdoors_body.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     outdoors_body.position = {120.0f, 100.0f, 0.0f};
     const EntityHandle outdoors_shooter = w.registry.spawn(0, outdoors_body);
     Entity building;
@@ -3624,6 +3674,7 @@ void test_host_vehicle_indoors_walks_its_candidate_slice() {
     const auto bh = w.registry.spawn(2, building);
     Entity vehicle;
     vehicle.kind = EntityKind::Item;
+    vehicle.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     vehicle.has_item_def = true;
     vehicle.item_type = 1;
     vehicle.position = {60.0f, -20.0f, 2.0f}; // out of the slice's reach
@@ -3800,6 +3851,7 @@ void test_impact_producers_apply_their_own_gates() {
         world.registry.configure_pool(0, 4);
         Entity shooter;
         shooter.kind = EntityKind::Organic;
+        shooter.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         shooter.item_type = 3;
         shooter.position = {0.0f, 0.0f, 10.0f};
         const EntityHandle owner = world.registry.spawn(0, shooter);
@@ -3865,6 +3917,7 @@ void test_jox_tank_round_bullets_class_splashes() {
 
     Entity bystander;
     bystander.kind = EntityKind::Organic;
+    bystander.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     bystander.has_item_def = true;
     bystander.item_type = 3;
     bystander.position = {5.0f, 4.0f, 0.0f};
