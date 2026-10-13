@@ -72,6 +72,10 @@ enum class RequestFieldId : uint8_t {
 	Event,
 	Variable,
 	Value,
+	Stroke,
+	Gesture,
+	Cancel,
+	TerrainView,
 	kCount,
 };
 

@@ -116,6 +116,9 @@ public:
 	// The canvases' mice this frame (DI-34), which the Shell hands the session after the frame's layout.
 	void canvas_mouse(const ViewportMouse &mouse) override;
 	const std::vector<ViewportMouse> &canvas_mice() const { return canvas_mice_; }
+	// S25: the terrain brush's ground under the pointer, this frame's or the frame before's (begin_frame moves it).
+	void note_brush_ground(const std::string &path, double x, double y) override;
+	bool brush_ground(const std::string &path, double &x, double &y) const override;
 	// A window's offer of what F12 and Shift+F12 act on this frame (DI-18): one under the pointer wins over one
 	// with the keyboard, the later of two alike.
 	void offer_jump(const JumpSubject &subject) override;
@@ -172,6 +175,13 @@ private:
 	bool in_frame_ = false;
 	bool pointer_hidden_ = false; // hide_pointer asked this frame (begin_frame clears it)
 	std::vector<ViewportMouse> canvas_mice_; // canvas_mouse this frame (begin_frame clears it)
+	// The terrain brush's ground under the pointer this frame and the frame before (note_brush_ground; the path empty:
+	// none).
+	struct BrushGround {
+		std::string path;
+		double x = 0.0, y = 0.0;
+	};
+	BrushGround brush_ground_, brush_ground_before_;
 	// What the windows offered F12 and Shift+F12 this frame, and the frame before (begin_frame moves it).
 	JumpSubject offered_;
 	JumpSubject subject_;

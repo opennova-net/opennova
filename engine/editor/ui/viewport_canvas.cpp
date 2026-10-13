@@ -262,6 +262,12 @@ bool ViewportCanvas::begin(float height, int device_width, int device_height) {
 		keyboard.remove = ImGui::IsKeyPressed(ImGuiKey_Delete, false);
 		keyboard.page = (ImGui::IsKeyPressed(ImGuiKey_PageUp) ? 1 : 0) -
 				(ImGui::IsKeyPressed(ImGuiKey_PageDown) ? 1 : 0);
+		// S25: the terrain brush's keys (its canvases read them only while the brush is live).
+		keyboard.bracket = (ImGui::IsKeyPressed(ImGuiKey_RightBracket) ? 1 : 0) -
+				(ImGui::IsKeyPressed(ImGuiKey_LeftBracket) ? 1 : 0);
+		keyboard.rotate = !io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_R, false);
+		keyboard.flip_h = !io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_H, false);
+		keyboard.flip_v = !io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_V, false);
 	}
 	popup_last_frame_ = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
 	input_.dt = io.DeltaTime;

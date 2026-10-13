@@ -19,7 +19,11 @@
 #include <editor/preview/mission_poses.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/mission_shots.h>
+#include <editor/preview/terrain_patch.h>
 #include <editor/preview/preview_clip_sounds.h>
+#include <editor/preview/terrain_heights_patch.h>
+#include <editor/preview/terrain_maps_patch.h>
+#include <editor/preview/terrain_patch.h>
 #include <editor/preview/viewport_follow.h>
 #include <editor/preview/viewport_model.h>
 
@@ -110,11 +114,33 @@ public:
 	// What that reads of the mission's files (its terrain, its char map, its tiles and its water plane), as
 	// last asked.
 	const MissionGround &ground_reader() const { return terrain_ground_; }
+	// S25: what the last follow patched in place of the terrain files its picture reads, during a stroke (each file's
+	// regions; a serial moving with each): the device patches them over its picture (TerrainStrokeFollow).
+	const TerrainPatches &terrain_patches() const { return stroke_.patches(); }
+	// The ground followed over the project's files first (S25: the terrain brush's space and hints); while a stroke
+	// feeds a file it read, as it stands: the view's own follow patches it in place (a read here, the first of a frame,
+	// would read the files the stroke changed again whole per sample).
+	const MissionGround &followed_ground(const SessionView &view) const {
+		if (!terrain_ground_.terrain() || !gesture_reading_(view, terrain_ground_.stamps())) follow_ground_(view);
+		return terrain_ground_;
+	}
 	// The ground overlay its options ask (DI-29, mission_ground_overlay.h: the surface classes or the foliage the
 	// game reads at each point), made over the ground as last followed; its kind None with the option's. Its
 	// serial moves each time it is made again (what the device takes it again by).
 	const MissionOverlayImage &overlay() const { return overlay_; }
 	uint64_t overlay_serial() const { return overlay_serial_; }
+	// S25 (the heights): what a stroke or a bake's landing changed of the open heights document its terrain reads,
+	// since the picture was last made, as its device takes it (terrain_heights_patch.h), each with a serial; and
+	// the serial the picture was last made at (every patch up to it stands in a picture built from the files).
+	// The device says how far it took them (ViewportDeviceReport::heights_taken), and those are dropped.
+	const std::vector<HeightsDevicePatch> &heights_patches() const { return heights_patches_; }
+	uint64_t heights_built_serial() const { return heights_built_serial_; }
+	// S25 (the maps and the tiles): what a paint stroke (or its undo) changed of the colour, blend and surface maps its
+	// terrain reads, and each move of the placed tiles the game reads for it, since the picture was last made, as its
+	// device takes them (terrain_maps_patch.h), each with a serial; the device says how far it took them
+	// (ViewportDeviceReport::maps_taken), and those are dropped.
+	const std::vector<MapsDevicePatch> &maps_patches() const { return maps_.patches(); }
+	uint64_t maps_built_serial() const { return maps_.built_serial(); }
 
 	// The Shoot tool's shots (DI-23, preview/mission_shots): the run on the preview clock (its effects spawned in the
 	// items' effect scene, effects(), while that layer shows), its scars in the presentation frame (the device's),
@@ -243,6 +269,12 @@ public:
 
 protected:
 	ViewportAction follow_(const ViewportInput &input, PreviewClock &clock) override;
+	// S25: a gesture in its own document or in a file its picture or its ground read (a terrain stroke's) holds its
+	// Rebuild.
+	uint64_t gesture_held_(const ViewportInput &input) const override {
+		if (const uint64_t picture = gesture_feeding_(input, picture_reads())) return picture;
+		return gesture_feeding_(input, &terrain_ground_.stamps());
+	}
 	bool takes_(const std::string &member) const override;
 	bool check_(const io::JsonValue &json, std::string &error) const override;
 	void apply_(const io::JsonValue &json, PreviewClock &clock) override;
@@ -254,6 +286,13 @@ private:
 	void follow_ground_(const SessionView &view) const;
 	// The overlay made again where the option's kind or the ground's reads moved (DI-29); true when it was.
 	bool follow_overlay_(const SessionView &view);
+	// S25 (the heights): the heights patches the stroke follow made this follow (stroke_.patches(): the ground already
+	// patched, the file restamped) queued for the device with the tiles each replaced; true when one was.
+	// heights_built_: the picture made again from the files, which hold every change so far.
+	bool take_heights_(const SessionView &view);
+	void heights_built_(const SessionView &view, const DocumentBase &document);
+	// The names its picture reads the placed tiles by (the mission's own, the header's terrain and environment).
+	TilesRead tiles_read_() const;
 	// The posed people stood on that ground (MissionPoses::stand) where a record, a pose (`posed`) or
 	// the terrain moved; true when a person's lift moved.
 	bool stand_people_(const SessionView &view, bool posed);
@@ -302,6 +341,11 @@ private:
 
 	MissionViewportOptions options_;
 	bool options_moved_ = false;
+	HeightsTilesFollow heights_tiles_;
+	bool heights_stale_ = false; // a heights patch the device could not take: the picture made again
+	std::vector<HeightsDevicePatch> heights_patches_;
+	uint64_t heights_serial_ = 0;
+	uint64_t heights_built_serial_ = 0;
 	OrbitCamera camera_;
 	bool framed_ = false; // the camera framed a document's entities once
 	// The ground box a SetViewport asked framed, framed as asked and again on the terrain's ground at the next follow.
@@ -326,13 +370,20 @@ private:
 	MissionListen listen_;
 	io::JsonValue drawn_;
 	uint64_t stood_serial_ = 0; // the scene's serial the people were last stood over
-	int stood_reads_ = -1; // the ground's reads then
+	uint64_t stood_ground_ = UINT64_MAX; // the ground's revision then
 	std::vector<std::string> missing_;
 	bool ground_ = false;
 	// Mutable: the ground's facts read through it, its files read once while they stand (DI-07).
 	mutable MissionGround terrain_ground_;
+	// S25: the ground patched in place during a stroke; its device patches the heights, the colour, blend and surface
+	// maps in place (TerrainPatchApplier), the foliage map's making the picture again at the stroke's end.
+	TerrainStrokeFollow stroke_{terrain_plane_bit(TerrainPlane::Heights) | kMapsDevicePlanes};
+	TerrainMapsFollow maps_; // S25: the maps' and the placed tiles' device patches
 	MissionOverlayImage overlay_;
 	uint64_t overlay_serial_ = 0;
+	// The overlay over the regions the stroke follow patched since `ground_before` (the ground's revision before it), in
+	// place where it was current then.
+	void patch_overlay_(uint64_t ground_before);
 	// The Shoot tool's (DI-23).
 	MissionShots shots_;
 	uint64_t shots_key_ = 0;
@@ -340,7 +391,7 @@ private:
 	std::vector<ClipSoundFired> shot_fired_;
 	int32_t shot_cursor_ = -1;
 	uint64_t shot_seeks_ = 0;
-	int overlay_reads_ = -1; // the ground's reads it was made over
+	uint64_t overlay_ground_ = UINT64_MAX; // the ground's revision it was made over
 	bool gesture_open_ = false;
 };
 

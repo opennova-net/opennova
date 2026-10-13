@@ -9,6 +9,9 @@
 #include <editor/preview/mission_ground_overlay.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/model_preview_camera.h>
+#include <editor/preview/terrain_heights_patch.h>
+#include <editor/preview/terrain_maps_patch.h>
+#include <editor/preview/terrain_patch.h>
 #include <editor/preview/viewport_follow.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/session/terrain_uses.h>
@@ -83,6 +86,18 @@ public:
 	const std::string &mission_name() const { return mission_name_; }
 	// The ground as the game reads it (the terrain, its tiles, its water), for the readout and the overlay.
 	const MissionGround &ground() const { return ground_; }
+	// The ground followed over the project's files first (S25: the terrain brush's space and hints); while a stroke
+	// feeds a file it read, as it stands: the view's own follow patches it in place (a read here, the first of a frame,
+	// would read the files the stroke changed again whole per sample).
+	const MissionGround &followed_ground(const SessionView &view) const {
+		if (!ground_.terrain() || !gesture_reading_(view, ground_.stamps())) follow_ground_(view);
+		return ground_;
+	}
+	// S25 (the maps and the tiles): what a paint stroke (or its undo) changed of the colour, blend and surface maps,
+	// and each move of the placed tiles, since the picture was last made, as its device takes them in place
+	// (terrain_maps_patch.h); the device says how far it took them (ViewportDeviceReport::maps_taken).
+	const std::vector<MapsDevicePatch> &maps_patches() const { return maps_.patches(); }
+	uint64_t maps_built_serial() const { return maps_.built_serial(); }
 	// The overlay the options ask (DI-29) and its serial (moves each time it is made again: the device's Update).
 	const MissionOverlayImage &overlay() const { return overlay_; }
 	uint64_t overlay_serial() const { return overlay_serial_; }
@@ -100,6 +115,11 @@ public:
 	float fog_reach() const { return fog_reach_; }
 	// What the device's ray meets first under picture pixel (x, y), in the game's words (DI-07).
 	MissionGroundFacts ground_under(const ViewportContext &context, float x, float y) const;
+	// S25 (the heights): what a stroke or a bake's landing changed of the open heights document its terrain reads,
+	// since the picture was last made, as its device takes it (terrain_heights_patch.h), each with a serial, as the
+	// mission view's; the device says how far it took them (ViewportDeviceReport::heights_taken) and those are dropped.
+	const std::vector<HeightsDevicePatch> &heights_patches() const { return heights_patches_; }
+	uint64_t heights_built_serial() const { return heights_built_serial_; }
 
 	ViewportStatus status() const override;
 	const char *reason() const override { return terrain_view_status_token(reason_); }
@@ -114,7 +134,11 @@ public:
 	ViewportHit hit(const ViewportContext &context, float x, float y) const override;
 	bool handle_point(const ViewportContext &context, NodeId id, const std::string &handle, float &x, float &y,
 			std::string &error) const override;
+	// The terrain tools' drags (the brush's, a tile's), drops (a Stamp's) and commands (S25, terrain_view_commands.h).
 	bool drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
+			std::string &error) const override;
+	bool drop(const ViewportContext &context, const ViewportDrop &drop, CanvasRequests &out, std::string &error) const override;
+	bool command_of(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
 			std::string &error) const override;
 	// "frame" (the camera on the mapped cells) and "top" (straight down over its target, north up).
 	bool command(const ViewportContext &context, const std::string &name, const std::vector<NodeId> &ids,
@@ -128,6 +152,11 @@ public:
 
 protected:
 	ViewportAction follow_(const ViewportInput &input, PreviewClock &clock) override;
+	// S25: a gesture in its own document or in a file its picture read (a terrain stroke's) holds its Rebuild.
+	uint64_t gesture_held_(const ViewportInput &input) const override {
+		if (const uint64_t picture = gesture_feeding_(input, picture_reads())) return picture;
+		return gesture_feeding_(input, &ground_.stamps());
+	}
 	bool takes_(const std::string &member) const override;
 	bool check_(const io::JsonValue &json, std::string &error) const override;
 	void apply_(const io::JsonValue &json, PreviewClock &clock) override;
@@ -139,8 +168,17 @@ private:
 	// made from (the environment, the tile set, the tiles, the overrides) moved.
 	bool place_(const SessionView &view);
 	void follow_ground_(const SessionView &view) const;
+	// The names its picture reads the placed tiles by (the mission drawn under, the header's terrain and environment).
+	TilesRead tiles_read_() const { return TilesRead{mission_name_, header_.terrain, header_.environment}; }
+	// The picture made from the files (`document` the view's): its stroke, maps and heights follows start again from
+	// them.
+	void made_(const SessionView &view, const DocumentBase &document);
 	// The overlay made again where the option or the ground moved; true when it did.
 	bool follow_overlay_(const SessionView &view);
+	// The heights patches the stroke follow made this follow queued for the device (true when one was), and the
+	// picture made again from the files (which hold every change so far): the mission view's legs.
+	bool take_heights_(const SessionView &view);
+	void heights_built_(const SessionView &view, const DocumentBase &document);
 
 	TerrainViewStatus reason_ = TerrainViewStatus::NoProject;
 	std::string detail_;
@@ -162,8 +200,17 @@ private:
 	std::string mission_name_;
 	std::string mission_path_; // the use drawn ("" none)
 	mutable MissionGround ground_;
+	// S25: the ground patched in place during a stroke; its device patches the heights and the maps in place
+	// (TerrainPatchApplier).
+	TerrainStrokeFollow stroke_{terrain_plane_bit(TerrainPlane::Heights) | kMapsDevicePlanes};
+	TerrainMapsFollow maps_; // S25: the maps' and the placed tiles' device patches
+	HeightsTilesFollow heights_tiles_;
+	bool heights_stale_ = false; // a heights patch the device could not take: the picture made again
+	std::vector<HeightsDevicePatch> heights_patches_;
+	uint64_t heights_serial_ = 0;
+	uint64_t heights_built_serial_ = 0;
 	MissionOverlayImage overlay_;
-	int overlay_reads_ = -1;
+	uint64_t overlay_ground_ = UINT64_MAX;
 	uint64_t overlay_serial_ = 0;
 	bool surface_ = false;
 	io::JsonValue drawn_;

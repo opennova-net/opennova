@@ -141,6 +141,46 @@ void MissionMapViewportView::draw_ready(Workspace &workspace, const ViewportMode
 	ImGui::Checkbox("Stick", &options.stick);
 	ui_kit::tooltip("A moved entity keeps its height over the ground (as the 3D view's Stick).");
 	{
+		// S25: what the map draws under its marks, the original tools' views of the heights among them.
+		constexpr MissionMapBackground kBackgrounds[] = {MissionMapBackground::Colour, MissionMapBackground::Height,
+		                                                 MissionMapBackground::Delta, MissionMapBackground::Flatness,
+		                                                 MissionMapBackground::None};
+		const char *const words[] = {"Colour map", "Height", "Delta", "Flatness", "None"};
+		const char *const tips[] = {
+				"The commander map's own colours (the terrain's colour map, its water cut as the game's map cuts it).",
+				"Nile's Height map: each texel's height in green between the terrain's lowest and highest.",
+				"Nile's Delta map: green where a texel's height equals its four neighbours', red where it does not.",
+				"The original mission editor's flatness view: black where a texel equals its four neighbours, grey "
+				"where it does not.",
+				"Nothing under the marks."};
+		size_t current = 0;
+		for (size_t i = 0; i < std::size(kBackgrounds); ++i)
+			if (kBackgrounds[i] == options.background) current = i;
+		const float width = ui_kit::text_width("Colour map") + ImGui::GetFrameHeight() + ImGui::GetStyle().FramePadding.x * 2.0f;
+		row.next(ui_kit::field_width(width, "Background"));
+		ImGui::SetNextItemWidth(width);
+		if (ImGui::BeginCombo("Background", words[current])) {
+			for (size_t i = 0; i < std::size(kBackgrounds); ++i) {
+				if (ImGui::Selectable(words[i], i == current)) options.background = kBackgrounds[i];
+				ui_kit::tooltip(tips[i]);
+			}
+			ImGui::EndCombo();
+		}
+		ui_kit::tooltip(std::string("What the map draws under its marks: ") + tips[current]);
+		const bool heights = options.background == MissionMapBackground::Height ||
+		                     options.background == MissionMapBackground::Delta ||
+		                     options.background == MissionMapBackground::Flatness;
+		if (!heights) options.water = false;
+		row.next(ui_kit::checkbox_width("Water"));
+		ImGui::BeginDisabled(!heights);
+		ImGui::Checkbox("Water", &options.water);
+		ImGui::EndDisabled();
+		ui_kit::tooltip(heights ? "The original mission editor's water over the heights' view: each texel under the water "
+		                          "level darkened toward blue."
+		                        : "Water lays the original mission editor's over the Height, Delta and Flatness views; the "
+		                          "colour map shows the commander map's own.");
+	}
+	{
 		int current = 0;
 		for (size_t i = 0; i < std::size(kMissionSnaps); ++i)
 			if (kMissionSnaps[i] == options.snap) current = int(i);

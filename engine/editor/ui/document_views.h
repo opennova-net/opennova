@@ -144,6 +144,9 @@ struct DocumentViewRow {
 	// A MainViewport row's pane beside its viewport (S24: the mission's Logic pane), made with its view; null
 	// for none.
 	std::unique_ptr<DocumentPane> (*make_pane)() = nullptr;
+	// Its Terrain pane (S25: a mission's and a terrain's), shown in the same place while the document view's terrain
+	// is on, the other pane hidden; null for none.
+	std::unique_ptr<DocumentPane> (*make_terrain_pane)() = nullptr;
 };
 
 // A type's row; null for None and past the last.

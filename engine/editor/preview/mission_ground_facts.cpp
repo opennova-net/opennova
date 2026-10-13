@@ -2,10 +2,16 @@
 
 #include <editor/preview/mission_ground_facts.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 
+#include <base/io/strutil.h>
+#include <editor/documents/terrain_heights_document.h>
+#include <editor/project/project_files.h>
+#include <editor/model/raster_document.h>
 #include <editor/preview/mission_scene.h>
+#include <editor/preview/terrain_patch.h>
 #include <formats/env/env.h>
 #include <formats/foliage/runtime.h>
 #include <formats/mission/bms.h>
@@ -182,6 +188,23 @@ void MissionGround::follow(const std::shared_ptr<const FileSource> &files, uint6
 	const bool moved = generation != generation_ && files && stamps_.moved(*files);
 	generation_ = generation;
 	if (read_once_ && key == key_ && !moved) return;
+	// S25: the placed tiles alone moved (a tile tool's edit, the mission's .til made or read again): read again in
+	// place, the terrain read standing (retile), never the whole terrain per drag sample.
+	if (read_once_ && key == key_ && store_.valid() && tiles_alone_moved_(*files)) {
+		const auto stamped = std::make_shared<StampedFiles>(files);
+		const terrain::TerrainFileReader read = [stamped](const std::string &name, std::vector<uint8_t> &out) {
+			return stamped->read(name, out);
+		};
+		std::vector<uint8_t> bytes;
+		const std::string mission_til = key_.mission.empty() ? std::string() : key_.mission + ".til";
+		const std::string took =
+		        terrain::read_placed_tile_bytes(read, read, mission_til, header.terrain, header.environment, bytes);
+		std::vector<std::string> names;
+		for (const FileStamp &file : stamped->stamps().files())
+			if (strutil::ends_with_icase(file.name, ".til")) names.push_back(file.name);
+		retile(*files, took, bytes, names);
+		return;
+	}
 	read_once_ = true;
 	key_ = std::move(key);
 	read_(files, header);
@@ -189,6 +212,8 @@ void MissionGround::follow(const std::shared_ptr<const FileSource> &files, uint6
 
 void MissionGround::read_(const std::shared_ptr<const FileSource> &files, const MissionSceneHeader &header) {
 	++reads_;
+	++revision_;
+	++heights_revision_;
 	store_.clear();
 	error_.clear();
 	surface_map_.clear();
@@ -201,6 +226,7 @@ void MissionGround::read_(const std::shared_ptr<const FileSource> &files, const 
 	foliage_map_.clear();
 	foliage_ = terrain::FoliageMaskRaster();
 	foliage_defs_.clear();
+	heights_file_.clear();
 	stamps_.clear();
 	if (!files) {
 		error_ = "The project's files are not read yet.";
@@ -213,6 +239,7 @@ void MissionGround::read_(const std::shared_ptr<const FileSource> &files, const 
 	else loaded = terrain::terrain_field_store_load(store_, *stamped, header.terrain, header.tile_set, header.environment,
 	                                                 error_, &trn);
 	if (loaded) {
+		heights_file_ = trn.polydata;
 		if (store_.surface_map().data != nullptr) surface_map_ = trn.charmap;
 		// The mission's placed tiles as the game's load takes them: <mission>.til, else the terrain's own
 		// polytrn_tileinfo, a missing, short or bad-magic file sending it on (terrain::read_placed_tile_bytes),
@@ -277,13 +304,123 @@ terrain::FoliageMaskMap MissionGround::foliage_sampler(bool codes) const {
 	return terrain::foliage_mask_map(foliage_, store_.height_field(), codes);
 }
 
+bool MissionGround::patch(const TerrainPatch &patch, const DocumentBase &document, const std::string &stands_for) {
+	const std::string name = patch.path.substr(patch.path.find_last_of('/') + 1);
+	// The colour and blend maps are no part of the ground the game reads (S25 B4): nothing to patch.
+	if (patch.plane == TerrainPlane::Colour || patch.plane == TerrainPlane::Blend) return true;
+	// The heights (S25 A4): the live atlas over each region (the input where a bake is due, else the baked atlas)
+	// written into the heights the game's collision reads, in place (TerrainFieldStore::patch_heights).
+	if (patch.plane == TerrainPlane::Heights) {
+		// A ground not read yet holds nothing to patch: its first follow reads the document's state.
+		if (!read_once_) return true;
+		const auto *heights = dynamic_cast<const TerrainHeightsDocument *>(&document);
+		// The .cpt the ground read: the document's own, or a heightmap image's import's (S25 A2b).
+		if (!heights || heights->plane_count() < 2 || !store_.valid() || store_.height_field().dim != kHeightsSide ||
+				!strutil::iequals(basename_of(heights->cpt_path()), heights_file_))
+			return false;
+		std::vector<RasterRegion> regions = patch.regions;
+		if (patch.whole) regions.assign(1, RasterRegion{0, 0, kHeightsSide, kHeightsSide, 0});
+		for (const RasterRegion &region : regions) {
+			const int x0 = std::max(region.x, 0), y0 = std::max(region.y, 0);
+			const int x1 = std::min(region.x + region.width, kHeightsSide), y1 = std::min(region.y + region.height, kHeightsSide);
+			if (x0 >= x1 || y0 >= y1) continue;
+			const HeightsRect rect{x0, y0, x1 - x0, y1 - y0};
+			const std::vector<uint16_t> live = heights->written_heights(rect);
+			if (live.empty() || !store_.patch_heights(terrain::CoordsRect{rect.x, rect.y, rect.w, rect.h}, live.data(),
+			                                          size_t(rect.w)))
+				return false;
+		}
+		if (!regions.empty()) {
+			++revision_;
+			++heights_revision_;
+		}
+		return true;
+	}
+	// The surface and foliage maps (S25 B4): the regions written into what the game's load keeps of them, in place
+	// (TerrainFieldStore::patch_charmap, patch_foliage_mask_raster), never reading the files again per dab.
+	if (patch.plane != TerrainPlane::Surface && patch.plane != TerrainPlane::Foliage) return false;
+	// A ground not read yet holds nothing to patch: its first follow reads the document's state.
+	if (!read_once_) return true;
+	const RasterDocument *raster = document.as_raster();
+	if (patch.whole || !raster || raster->plane_count() != 1) return false;
+	const RasterPlane &plane = raster->plane(0);
+	const bool surface = patch.plane == TerrainPlane::Surface;
+	const std::string &read = surface ? surface_map_ : foliage_map_;
+	const std::string read_name = read.substr(read.find_last_of('/') + 1);
+	const bool source = !stands_for.empty() && strutil::iequals(stands_for, read_name);
+	if (!source && !strutil::iequals(name, read_name)) return false;
+	// The texels as the map holds them: its own 8-bit indices, or a source's through the import's translation (an
+	// index or grey level as it stands; a surface source's legend colour its class).
+	// A true-colour source: a surface source's legend colours, a foliage source's grey levels (its red).
+	const bool colours = source && (plane.format() == RasterFormat::Rgb8 || plane.format() == RasterFormat::Rgba8);
+	if (plane.format() != RasterFormat::U8 && !colours) return false;
+	for (const RasterRegion &region : patch.regions) {
+		if (region.width <= 0 || region.height <= 0) continue;
+		std::vector<uint8_t> texels(size_t(region.width) * size_t(region.height));
+		if (colours) {
+			for (int y = 0; y < region.height; ++y)
+				for (int x = 0; x < region.width; ++x) {
+					const uint8_t *c = plane.texel(region.x + x, region.y + y);
+					const int cls = surface ? charmap_legend_class(c[0], c[1], c[2]) : int(c[0]);
+					texels[size_t(y) * size_t(region.width) + size_t(x)] = uint8_t(cls < 0 ? 0 : cls);
+				}
+		} else {
+			plane.copy_rect(region.x, region.y, region.width, region.height, texels.data());
+		}
+		const terrain::CoordsRect rect{region.x, region.y, region.width, region.height};
+		const bool written = surface ? store_.patch_charmap(rect, texels.data(), size_t(region.width))
+		                             : terrain::patch_foliage_mask_raster(foliage_, rect, texels.data(), size_t(region.width));
+		if (!written) return false;
+	}
+	if (!patch.regions.empty()) ++revision_;
+	return true;
+}
+
+void MissionGround::retile(const FileSource &files, const std::string &took, const std::vector<uint8_t> &bytes,
+                           const std::vector<std::string> &names) {
+	if (!store_.valid()) return;
+	// As read_ takes them: the char map's tiles (terrain::surface_tiles_from_til_bytes) and the foliage blocker's.
+	tiles_.clear();
+	placed_ = TilFile();
+	tiles_file_ = took;
+	if (!took.empty()) {
+		tiles_ = terrain::surface_tiles_from_til_bytes(bytes);
+		std::string til_error;
+		if (!load_til(bytes.data(), bytes.size(), placed_, til_error)) placed_ = TilFile();
+	}
+	restamp(files, names);
+	++revision_;
+}
+
+bool MissionGround::tiles_alone_moved_(const FileSource &files) const {
+	bool any = false;
+	for (const FileStamp &file : stamps_.files()) {
+		if (files.stamp(file.name) == file.stamp) continue;
+		if (!strutil::ends_with_icase(file.name, ".til")) return false;
+		any = true;
+	}
+	return any;
+}
+
+void MissionGround::restamp(const FileSource &files, const std::vector<std::string> &names) {
+	FileStamps kept;
+	for (const FileStamp &file : stamps_.files()) {
+		bool named = false;
+		for (const std::string &name : names) named = named || strutil::iequals(name, file.name);
+		kept.note(file.name, named ? files.stamp(file.name) : file.stamp);
+	}
+	stamps_ = std::move(kept);
+}
+
 int MissionGround::foliage_kept_off(double x, double y, int mask) const {
 	if (mask == 0 || placed_.entries.empty()) return 0;
-	// The candidate's square, the generator's reach each way, against each tile's inclusive 16-unit square, the
-	// tile's z the mission y it starts at (til_world_z_from_fixed); a definition with forceon skips the test
-	// (formats/foliage kPlacedTileReach, placed_tiles_keep_off) [orig: Foliage_PathBlockedByPlacedTile @ 0x606490;
-	// Foliage_GenerateInstances_0 @ 0x5FFFB6].
-	if (!til_blocks_foliage(placed_, float(x), float(y), foliage::kPlacedTileReach)) return 0;
+	// The candidate's square, the generator's reach each way, against each tile's inclusive 16-unit square on the
+	// terrain's plane, whose second axis is the mission y negated (til_world_z_from_fixed: the stored z negated): both
+	// generators pass the candidate's -y, so the test keeps foliage off the square the tile is drawn over, never the
+	// surface sampler's mirror of it (D-TIL-9). A definition with forceon skips it (formats/foliage kPlacedTileReach,
+	// placed_tiles_keep_off) [orig: Foliage_PathBlockedByPlacedTile @ 0x606490; Foliage_GenerateModelTileInstances @
+	// 0x600B6F; Foliage_GenerateInstances_0 @ 0x5FFFB8..0x600008].
+	if (!til_blocks_foliage(placed_, float(x), float(-y), foliage::kPlacedTileReach)) return 0;
 	int kept = 0;
 	for (size_t slot = 0; slot < foliage_defs_.size() && slot < size_t(FOLIAGE_MAX_DEFS); ++slot)
 		if ((mask & (1 << slot)) && foliage::placed_tiles_keep_off(foliage_defs_[slot].attrib_flags)) kept |= 1 << slot;

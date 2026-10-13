@@ -116,6 +116,33 @@ void take_kept(const bms::File &mission, size_t event_count, MissionNamesFile &o
 	}
 }
 
+// The locks a matching .mis gives the mission (S25): each locked entity of the file, in its order, to the mission's
+// first entity of its SSN not given one yet, over the four pools flat in the writer's order (items, buildings,
+// markers, organics); one the mission has none of said in words. The .mis is read with no items.def at hand, so every
+// `begin item` lands in the read's item pool whatever its TYPE; an SSN's TYPE puts all its entities in one pool, so
+// the n-th of an SSN in the file is the n-th of it in the mission, a building's, a marker's or an organic's as an
+// item's.
+void take_locks(const bms::File &mission, MissionNamesFile &out) {
+	std::vector<int32_t> ids;
+	for (const std::vector<bms::Entity> *pool : {&mission.items, &mission.buildings, &mission.markers, &mission.organics})
+		for (const bms::Entity &entity : *pool) ids.push_back(entity.id);
+	out.kept_locks.assign(ids.size(), 0);
+	std::vector<bool> given(ids.size(), false);
+	for (const MissionNamesFile::Lock &lock : out.locks) {
+		if (!lock.lock) continue;
+		bool found = false;
+		for (size_t i = 0; i < ids.size() && !found; ++i)
+			if (ids[i] == lock.id && !given[i]) {
+				given[i] = true;
+				out.kept_locks[i] = lock.lock;
+				found = true;
+			}
+		if (!found)
+			out.refused.push_back("SSN " + std::to_string(lock.id) +
+			                      "'s height lock (the mission has no entity of that SSN: left unlocked)");
+	}
+}
+
 // The Set of a row's name field.
 Edit set_name(const NodeAddress &address, const char *field, const std::string &value) {
 	Edit edit;
@@ -173,6 +200,13 @@ MissionNamesFile read_names_file(const bms::File &mission, const std::vector<mis
 	}
 	for (size_t g = 0; g < read.group_records.size() && g < out.groups.size(); ++g)
 		out.groups[g] = bms::group_name(read.group_records[g]);
+	{
+		int pool = 0;
+		for (const std::vector<bms::Entity> *entities : {&read.items, &read.buildings, &read.markers, &read.organics}) {
+			for (const bms::Entity &entity : *entities) out.locks.push_back({pool, entity.id, entity.mis_height_lock});
+			++pool;
+		}
+	}
 	mission::RunReport report;
 	if (!mission::split_event_chains(read, out.events, report)) {
 		out.found = Found::Unreadable;
@@ -198,6 +232,7 @@ MissionNamesFile read_names_file(const bms::File &mission, const std::vector<mis
 	}
 	out.found = Found::Matched;
 	take_kept(mission, events.size(), out);
+	take_locks(mission, out);
 	return out;
 }
 
@@ -272,6 +307,24 @@ bool mission_holds_names(const MissionDocument &document) {
 		if (!mission::variable_names(mission->native).empty()) return true;
 	}
 	return false;
+}
+
+std::vector<int32_t> mission_locks(const MissionDocument &document) {
+	std::vector<int32_t> out;
+	for (const K kind : {K::Item, K::Building, K::Marker, K::Organic})
+		for (const Node *row : document.rows_of(kind)) out.push_back(static_cast<const EntityRow &>(*row).native.mis_height_lock);
+	return out;
+}
+
+bool same_locks(const std::vector<int32_t> &a, const std::vector<int32_t> &b) {
+	for (size_t i = 0; i < std::max(a.size(), b.size()); ++i)
+		if ((i < a.size() ? a[i] : 0) != (i < b.size() ? b[i] : 0)) return false;
+	return true;
+}
+
+bool mission_holds_locks(const MissionDocument &document) {
+	const std::vector<int32_t> locks = mission_locks(document);
+	return std::any_of(locks.begin(), locks.end(), [](int32_t lock) { return lock != 0; });
 }
 
 bool mission_names_text(const MissionDocument &document, const std::vector<int32_t> *base_heights, std::string &text,
@@ -409,11 +462,15 @@ void names_file_findings(const MissionDocument &document, std::vector<Diagnostic
 	const std::string mis = mission::mission_base_name(basename_of(document.path())) + ".mis";
 	const uint64_t overwrite = document.names_file_overwrite();
 	const bool unsaved = document.companion_unsaved();
-	// What a save that leaves the file means for the names the mission holds.
-	const std::string kept =
-	        unsaved ? " The names the mission holds are not in it: they stay unsaved until it is written, and the unsaved "
-	                  "prompt asks before the mission is closed."
-	                : std::string();
+	// What a save that leaves the file means for the names and the height locks the mission holds.
+	const bool names_differ = !same_names(mission_names(document), file.kept);
+	const bool locks_differ = !same_locks(mission_locks(document), file.kept_locks);
+	const std::string held = names_differ && locks_differ ? "The names and the height locks"
+	                         : locks_differ                ? "The height locks"
+	                                                        : "The names";
+	const std::string kept = unsaved ? " " + held + " the mission holds are not in it: they stay unsaved until it is "
+	                                   "written, and the unsaved prompt asks before the mission is closed."
+	                                 : std::string();
 	// Write it from the mission: the bytes a save then writes over.
 	const auto write_over = [&](Diagnostic &d, uint64_t fingerprint, Over over) {
 		if (fingerprint == 0 || overwrite == fingerprint) return;
@@ -488,6 +545,24 @@ void names_file_findings(const MissionDocument &document, std::vector<Diagnostic
 		out.push_back(make_finding(MissionFinding::NamesUnwritten, DiagnosticSeverity::Warning,
 		                           mis + " was not written: " + sentence(left.unwritten) + " The mission's own file was saved." + kept,
 		                           document.path()));
+	if (!left.locked.empty()) {
+		// D-MIS-17: no height under them known, so written locked at their heights, which the original editor reads
+		// exact over whatever terrain it loads (a note: the save stands).
+		// The first titles alone, the rest counted (a mission of thousands on a terrain that does not read).
+		const size_t more = left.locked_count > left.locked.size() ? left.locked_count - left.locked.size() : 0;
+		std::string what;
+		for (size_t i = 0; i < left.locked.size(); ++i)
+			what += (i == 0 ? "" : i + 1 == left.locked.size() && !more ? " and " : ", ") + left.locked[i];
+		if (more) what += " and " + std::to_string(more) + " more";
+		out.push_back(make_finding(MissionFinding::NamesLocked, DiagnosticSeverity::Info,
+		                           mis + " was written with " + counted(left.locked_count, "entity", "entities") +
+		                                   " height locked at " + (left.locked_count == 1 ? "its height" : "their heights") +
+		                                   " (" + what + "): the mission's terrain did not read, so the height of the "
+		                                   "ground under them was not known. The original editor reads them at these "
+		                                   "heights whatever terrain it loads; once the terrain reads, a save writes them "
+		                                   "unlocked again.",
+		                           document.path()));
+	}
 	if (!file.refused.empty()) {
 		std::string what;
 		for (size_t i = 0; i < file.refused.size(); ++i)

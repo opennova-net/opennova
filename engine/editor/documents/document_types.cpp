@@ -35,6 +35,9 @@
 #include <editor/documents/text_types.h>
 #include <editor/documents/terrain_document.h>
 #include <editor/documents/texture_document.h>
+#include <editor/documents/terrain_heights_document.h>
+#include <editor/documents/til_document.h>
+#include <editor/documents/til_project_check.h>
 // The menu type's project check, by its hook alone: the render check runs the preview's headless
 // screen compile (MenuScreenRender), so it sits with it in preview/ (ADR 0046 S13 V9).
 #include <editor/preview/make_menu_render_check.h>
@@ -90,6 +93,8 @@ std::unique_ptr<DocumentBase> make_hudfx() { return std::make_unique<HudFxDocume
 std::unique_ptr<DocumentBase> make_charattr() { return std::make_unique<CharAttrDocument>(); }
 std::unique_ptr<DocumentBase> make_score() { return std::make_unique<ScoreDocument>(); }
 std::unique_ptr<DocumentBase> make_avatars() { return std::make_unique<AvatarsDocument>(); }
+std::unique_ptr<DocumentBase> make_til() { return std::make_unique<TilDocument>(); }
+std::unique_ptr<DocumentBase> make_terrain_heights() { return std::make_unique<TerrainHeightsDocument>(); }
 
 constexpr DocumentType kTypes[] = {
 	// The catalogs: a weapon, an ammo, a mounted gun by the names the player sees (the plain-words lane).
@@ -218,6 +223,15 @@ constexpr DocumentType kTypes[] = {
 	// names, its shown name a key of Game.bin's Avatars section, its models files.
 	{ DocumentTypeId::Avatars, "avatars", make_avatars, validate_avatars_file, AvatarsDocument::schema,
 			avatars_finding_codes },
+	// The tile placement (S25): a .til's tiles in their order (the game's draw order), each its cell, corner and
+	// orientation, MED's layer carried.
+	{ DocumentTypeId::TilePlacement, "tile_placement", make_til, validate_til_file, TilDocument::schema,
+			til_finding_codes, make_til_project_check },
+	// The terrain's heights (S25): a .cpt's CDEP atlas (or an imported terrain's heightmap) as the planes a brush
+	// sculpts, the rest of the .cpt its side state; it names nothing.
+	{ DocumentTypeId::TerrainHeights, "terrain_heights", make_terrain_heights, validate_terrain_heights_file,
+			terrain_heights_fields, terrain_heights_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+			nullptr, terrain_heights_content_json },
 };
 
 // One type per DocumentTypeId past None, in its order, each making its documents, validating its
@@ -257,6 +271,7 @@ DocumentContent content_made(const DocumentType &type) {
 	const std::unique_ptr<DocumentBase> made = type.make();
 	if (records_of(*made)) return DocumentContent::Records;
 	if (text_of(*made)) return DocumentContent::Text;
+	if (made->as_raster()) return DocumentContent::Raster;
 	return made->holds_bytes() ? DocumentContent::Bytes : DocumentContent::Other;
 }
 

@@ -29,6 +29,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/request_kinds.h>
 #include <editor/session/workspace_parts.h>
+#include <editor/session/terrain_stroke.h>
 #include <base/io/strutil.h>
 
 namespace opennova::editor {
@@ -636,11 +637,13 @@ bool drag_from_json(const JsonValue &json, ViewportDrag &out, std::string &error
 		return false;
 	};
 	ViewportDrag drag;
-	const JsonValue *id = json.get("id");
-	if (!id || !io::json_exact_whole(*id, drag.id) || drag.id == 0) return refuse("id", "a record identity");
 	const JsonValue *handle = json.get("handle");
 	if (!handle || !handle->is_string() || handle->string.empty()) return refuse("handle", "a handle's token");
 	drag.handle = handle->string;
+	// The terrain brush's drag names no record (S25: id 0, handle "brush").
+	const JsonValue *id = json.get("id");
+	if (!id || !io::json_exact_whole(*id, drag.id) || (drag.id == 0 && drag.handle != "brush"))
+		return refuse("id", drag.handle == "brush" ? "0 (the brush names no record)" : "a record identity");
 	const JsonValue *by = json.get("by"), *to = json.get("to");
 	if ((by != nullptr) == (to != nullptr)) {
 		error = "\"drag\" goes by [dx, dy] or to [x, y], one of them.";
@@ -937,6 +940,12 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 		return true;
 	}
 	case F::Edits: {
+		// An edit_record's empty batch with a terrain_view opens the view's tile placement alone, as the Tiles part's Open
+		// does (S25); editor_request_from_json refuses one without.
+		if (request.kind == EditorRequestKind::EditRecord && json.is_array() && json.array.empty()) {
+			request.edits.clear();
+			return true;
+		}
 		RecordBatch batch;
 		if (!record_batch_from_json(
 					json, names, batch_form(request.kind, text), batch, error, !unresolved))
@@ -1063,6 +1072,13 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 		if (io::json_exact_whole_in(json, -2147483648.0, 2147483647.0, request.value)) return true;
 		error = std::string("\"") + token + "\" must be a 32-bit whole number.";
 		return false;
+	case F::Stroke: return terrain_stroke_from_json(json, request.stroke, error); // S25: session/terrain_stroke_json.cpp
+	case F::Gesture:
+		if (io::json_exact_whole(json, request.gesture)) return true;
+		error = std::string("\"") + token + "\" must be a gesture's token, a whole number.";
+		return false;
+	case F::Cancel: return flag_of(json, token, request.cancel, error);
+	case F::TerrainView: return text_of(json, token, request.terrain_view, error);
 	case F::kCount: break;
 	}
 	error = std::string("Unknown request member \"") + token + "\".";
@@ -1190,6 +1206,10 @@ bool field_to_json(
 	case F::Event: out = json_number(double(request.event)); return request.event >= 0;
 	case F::Variable: out = json_number(double(request.variable)); return request.variable >= 0;
 	case F::Value: out = json_number(double(request.value)); return request.value != 0;
+	case F::Stroke: out = terrain_stroke_to_json(request.stroke); return request.stroke.asked();
+	case F::Gesture: out = json_number(double(request.gesture)); return request.gesture != 0;
+	case F::Cancel: out = boolean(request.cancel); return request.cancel;
+	case F::TerrainView: out = json_string(request.terrain_view); return !request.terrain_view.empty();
 	case F::kCount: break;
 	}
 	out = JsonValue::make_null();
@@ -1319,6 +1339,12 @@ bool editor_request_from_json(
 					text, labels, error))
 			return false;
 		carried |= field_bit(id);
+	}
+	const JsonValue *edits = json.get("edits");
+	if (request.kind == EditorRequestKind::EditRecord && edits && edits->is_array() && edits->array.empty() &&
+		request.terrain_view.empty()) {
+		error = "\"edits\" is a list of one edit or more (none only with a terrain_view: the view's tiles opened alone).";
+		return false;
 	}
 	for (size_t i = 0; i < kRequestFieldCount; ++i) {
 		const auto id = static_cast<RequestFieldId>(i);

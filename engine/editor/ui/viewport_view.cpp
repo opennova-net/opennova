@@ -110,6 +110,9 @@ void ViewportView::canvas(Workspace &workspace, const ViewportModel &model, View
 		}
 		if (inside) inside(in);
 		half_->input(context, in, requests);
+		// S25: where the terrain brush meets the ground under the pointer, for the Terrain pane's lock line.
+		double brush_x = 0.0, brush_y = 0.0;
+		if (half_->brush_ground(context, in, brush_x, brush_y)) workspace.note_brush_ground(path_, brush_x, brush_y);
 		const CanvasCursor cursor = half_->cursor(context, in);
 		// Where the picture draws a pointer of its own the system's is hidden, so one pointer shows: the
 		// game's. A press begun this frame shows the canvas's own (a handle's, a move's) instead.

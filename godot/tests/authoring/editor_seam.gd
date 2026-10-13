@@ -31,6 +31,13 @@ func request(fields: Dictionary) -> Dictionary:
 	return answer if answer is Dictionary else {}
 
 
+## A sample of a gesture still open (a terrain stroke's but its last), by its wire form, not settled: the gesture
+## holds the validation back until it ends, so a settle would wait out its 10 s lapse and end it (S25).
+func sample(fields: Dictionary) -> Dictionary:
+	var answer: Variant = parsed(String(app.call("request_json", JSON.stringify(fields, "", false))))
+	return answer if answer is Dictionary else {}
+
+
 ## A request's outcome ({} when it did not read).
 func outcome(fields: Dictionary) -> Dictionary:
 	var answer := request(fields)

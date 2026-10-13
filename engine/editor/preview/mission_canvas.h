@@ -14,6 +14,7 @@
 #include <editor/preview/mission_label_picks.h>
 #include <editor/preview/mission_link_shapes.h>
 #include <editor/preview/mission_scene.h>
+#include <editor/preview/terrain_brush_canvas.h>
 #include <editor/preview/viewport_overlay.h>
 
 namespace opennova::editor {
@@ -117,6 +118,7 @@ public:
 	OverlayList shapes(const ViewportContext &context, const CanvasInput &in) const override;
 	CanvasCursor cursor(const ViewportContext &context, const CanvasInput &in) const override;
 	std::string hover_tip(const ViewportContext &context, const CanvasInput &in) const override;
+	bool brush_ground(const ViewportContext &context, const CanvasInput &in, double &x, double &y) const override;
 	// What the line under the picture says now (mission_hint.h): what the tool does, what a click or a
 	// drag would do where the pointer is.
 	std::string hint(const ViewportContext &context, const CanvasInput &in) const;
@@ -154,6 +156,8 @@ public:
 	// The way one step goes to the camera's right on the file's nearest axis (Ctrl+D's offset, the
 	// right arrow's nudge), metres east and north.
 	void step_right(double &east, double &north) const;
+	// The terrain brush's half (S25): while it is live it takes the left button and its keys before the tools.
+	const TerrainBrushHalf &brush() const { return brush_; }
 
 private:
 	void keys_(const ViewportContext &context, const CanvasInput &in, CanvasRequests &out);
@@ -198,6 +202,7 @@ private:
 	MissionLinkCounts counts_;
 	// The hovered record's uses (its badge's words), kept while it, the document and the names stand.
 	mutable MissionLinkHover hover_;
+	TerrainBrushHalf brush_{ViewportKind::Mission};
 	MissionTool tool_ = MissionTool::Select;
 	int64_t item_ = 0;
 	std::string item_name_;
