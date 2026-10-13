@@ -17,9 +17,12 @@
 #endif
 #include <windows.h>
 
+#include <filesystem>
+
 #include <base/io/os_path.h>
 #else
 #include <cerrno>
+#include <climits>
 #include <csignal>
 #include <fcntl.h>
 #include <pthread.h>
@@ -84,6 +87,90 @@ HANDLE handle_of(void *h) { return static_cast<HANDLE>(h); }
 
 wchar_t upper(wchar_t c) { return (c >= L'a' && c <= L'z') ? static_cast<wchar_t>(c - L'a' + L'A') : c; }
 
+// A UTF-8 path as Windows spells it: UTF-16, every '/' a '\'.
+std::wstring native_path(const std::string &path) {
+	std::wstring out = io::widen_utf8(path);
+	std::replace(out.begin(), out.end(), L'/', L'\\');
+	return out;
+}
+
+// A path CreateProcessW takes: one past `limit` characters (the system's current
+// directory holds MAX_PATH less its trailing backslash and terminator, an image
+// MAX_PATH less its terminator) given in its short (8.3) form where the volume
+// keeps one, asked through the \\?\ form a long path needs; empty where even that
+// is past the limit (the spawn is refused, never handed a path it would cut).
+std::wstring within(const std::wstring &path, size_t limit) {
+	if (path.size() <= limit)
+		return path;
+	const std::wstring extended = io::os_path(std::filesystem::path(path)).native();
+	const DWORD needed = GetShortPathNameW(extended.c_str(), nullptr, 0);
+	if (needed == 0)
+		return std::wstring();
+	std::wstring out(static_cast<size_t>(needed), L'\0');
+	const DWORD written = GetShortPathNameW(extended.c_str(), out.data(), needed);
+	if (written == 0 || written >= needed)
+		return std::wstring();
+	out.resize(written);
+	if (out.rfind(L"\\\\?\\UNC\\", 0) == 0) {
+		out = L"\\\\" + out.substr(8);
+	} else if (out.rfind(L"\\\\?\\", 0) == 0) {
+		out.erase(0, 4);
+	}
+	return out.size() <= limit ? out : std::wstring();
+}
+
+// The refusal of a path `within` found no form of: `what` names it.
+std::string too_long(const std::string &program, const std::string &what, size_t limit) {
+	return "cannot start " + program + ": " + what + " is past the " + std::to_string(limit) +
+			" characters CreateProcessW takes and has no short (8.3) form within them";
+}
+
+// The process's creation time as the OS keeps it (a FILETIME's 100 ns count), in
+// decimal: equal for one process, different for another that later takes its
+// pid. "" when it cannot be read.
+std::string creation_stamp(HANDLE handle) {
+	FILETIME created{};
+	FILETIME exited{};
+	FILETIME kernel{};
+	FILETIME user{};
+	if (GetProcessTimes(handle, &created, &exited, &kernel, &user) == 0)
+		return std::string();
+	return std::to_string(
+			(static_cast<uint64_t>(created.dwHighDateTime) << 32) | created.dwLowDateTime);
+}
+
+// The process's identity read through `handle` now. The image query fails once
+// the process has exited, so the spawn reads it while the child is there.
+ProcessIdentity read_identity(HANDLE handle) {
+	ProcessIdentity out;
+	std::wstring image(32768, L'\0');
+	DWORD length = static_cast<DWORD>(image.size());
+	if (QueryFullProcessImageNameW(handle, 0, image.data(), &length) != 0) {
+		image.resize(length);
+		out.image = io::narrow_utf8(image);
+		std::replace(out.image.begin(), out.image.end(), '\\', '/');
+	}
+	out.created = creation_stamp(handle);
+	return out;
+}
+
+// terminate()'s request: WM_CLOSE to each top-level unowned window of the
+// process, counted.
+struct CloseRequest {
+	DWORD pid = 0;
+	int posted = 0;
+};
+
+BOOL CALLBACK close_top_level_window(HWND window, LPARAM param) {
+	CloseRequest &request = *reinterpret_cast<CloseRequest *>(param);
+	DWORD owner = 0;
+	GetWindowThreadProcessId(window, &owner);
+	if (owner == request.pid && GetWindow(window, GW_OWNER) == nullptr &&
+			PostMessageW(window, WM_CLOSE, 0, 0) != 0)
+		++request.posted;
+	return TRUE;
+}
+
 // CreateProcessW's environment block: each NAME=value in UTF-16, sorted by name
 // case aside (the order an environment block keeps), each ended by a NUL, the
 // block by one more.
@@ -122,6 +209,87 @@ int above_standard(int fd) {
 	::close(fd);
 	return moved;
 }
+
+// A released child's reaper: waits for its exit so it leaves no zombie behind.
+void *reap_released(void *arg) {
+	const pid_t pid = static_cast<pid_t>(reinterpret_cast<intptr_t>(arg));
+	int status = 0;
+	while (::waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+	}
+	return nullptr;
+}
+
+#ifdef __linux__
+
+// /proc/<pid>/stat's state (field 3) and starttime (field 22, clock ticks after
+// boot), read after the last ')': the command name in field 2 may hold spaces
+// and parentheses. False when the file does not open (`missing` when no such
+// process) or does not parse.
+bool read_proc_stat(int64_t pid, char &state, std::string &starttime, bool &missing) {
+	missing = false;
+	const std::string path = "/proc/" + std::to_string(pid) + "/stat";
+	const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+	if (fd < 0) {
+		missing = errno == ENOENT || errno == ESRCH;
+		return false;
+	}
+	std::string text;
+	char buffer[1024];
+	for (;;) {
+		const ssize_t got = ::read(fd, buffer, sizeof(buffer));
+		if (got < 0 && errno == EINTR)
+			continue;
+		if (got <= 0)
+			break;
+		text.append(buffer, static_cast<size_t>(got));
+	}
+	::close(fd);
+	const size_t close_paren = text.rfind(')');
+	if (close_paren == std::string::npos)
+		return false;
+	// The fields after the name, from field 3 on, one space apart.
+	std::vector<std::string> fields;
+	size_t at = close_paren + 1;
+	while (at < text.size()) {
+		while (at < text.size() && (text[at] == ' ' || text[at] == '\n'))
+			++at;
+		const size_t end = text.find_first_of(" \n", at);
+		if (at < text.size())
+			fields.push_back(
+					text.substr(at, end == std::string::npos ? std::string::npos : end - at));
+		at = end == std::string::npos ? text.size() : end;
+	}
+	if (fields.size() < 20 || fields[0].empty())
+		return false;
+	state = fields[0][0];
+	starttime = fields[19];
+	return true;
+}
+
+// Process `pid`'s identity read from /proc now: /proc/<pid>/exe's target (gone
+// once the process is a zombie) and its starttime.
+ProcessIdentity read_identity(int64_t pid) {
+	ProcessIdentity out;
+	const std::string exe = "/proc/" + std::to_string(pid) + "/exe";
+	std::string target(PATH_MAX, '\0');
+	for (;;) {
+		const ssize_t got = ::readlink(exe.c_str(), target.data(), target.size());
+		if (got < 0)
+			break;
+		if (static_cast<size_t>(got) < target.size()) {
+			out.image.assign(target.data(), static_cast<size_t>(got));
+			break;
+		}
+		target.resize(target.size() * 2);
+	}
+	char state = 0;
+	bool missing = false;
+	if (!read_proc_stat(pid, state, out.created, missing))
+		out.created.clear();
+	return out;
+}
+
+#endif
 
 #endif
 
@@ -176,6 +344,43 @@ std::vector<std::string> filter_environment(const std::vector<std::string> &name
 	return out;
 }
 
+Liveness process_liveness(int64_t pid, const std::string &created) {
+	if (pid <= 0)
+		return Liveness::Unknown;
+#ifdef _WIN32
+	HANDLE handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, static_cast<DWORD>(pid));
+	if (handle == nullptr) {
+		// No process of that id is Dead; one that will not be opened may be it: Unknown.
+		return GetLastError() == ERROR_INVALID_PARAMETER ? Liveness::Dead : Liveness::Unknown;
+	}
+	Liveness state = Liveness::Unknown;
+	DWORD code = 0;
+	if (GetExitCodeProcess(handle, &code) != 0 && code != STILL_ACTIVE) {
+		state = Liveness::Dead; // it has exited (a handle someone holds keeps it listed)
+	} else if (!created.empty()) {
+		const std::string now = creation_stamp(handle);
+		if (!now.empty())
+			state = now == created ? Liveness::Alive : Liveness::Dead;
+	}
+	CloseHandle(handle);
+	return state;
+#elif defined(__linux__)
+	char state = 0;
+	std::string starttime;
+	bool missing = false;
+	if (!read_proc_stat(pid, state, starttime, missing))
+		return missing ? Liveness::Dead : Liveness::Unknown;
+	if (state == 'Z' || state == 'X')
+		return Liveness::Dead; // exited, not reaped yet
+	if (created.empty())
+		return Liveness::Unknown;
+	return starttime == created ? Liveness::Alive : Liveness::Dead;
+#else
+	(void)created;
+	return Liveness::Unknown;
+#endif
+}
+
 ChildProcess::ChildProcess() = default;
 
 ChildProcess::~ChildProcess() {
@@ -197,8 +402,11 @@ ChildProcess &ChildProcess::operator=(ChildProcess &&other) noexcept {
 	reset();
 	pid_ = other.pid_;
 	exit_code_ = other.exit_code_;
+	end_with_parent_ = other.end_with_parent_;
+	identity_ = std::move(other.identity_);
 	other.pid_ = 0;
 	other.exit_code_.reset();
+	other.identity_ = ProcessIdentity{};
 #ifdef _WIN32
 	process_ = other.process_;
 	job_ = other.job_;
@@ -212,23 +420,54 @@ void ChildProcess::reset() {
 #ifdef _WIN32
 	if (process_ != nullptr) CloseHandle(handle_of(process_));
 	// Closing the job ends a child still in it (kill-on-close); the destructor
-	// has killed and reaped it by then.
+	// has killed and reaped it by then, and release() refuses one that runs.
 	if (job_ != nullptr) CloseHandle(handle_of(job_));
 	process_ = nullptr;
 	job_ = nullptr;
 #endif
 	pid_ = 0;
+	identity_ = ProcessIdentity{};
 }
 
 bool ChildProcess::started() const {
 #ifdef _WIN32
-	return process_ != nullptr;
+	return process_ != nullptr && !exit_code_.has_value();
 #else
 	return pid_ > 0;
 #endif
 }
 
 int64_t ChildProcess::pid() const { return pid_; }
+
+bool ChildProcess::release() {
+	// A child that ends with this process cannot be let go while it runs; one
+	// that has exited is reaped here and forgotten like any other.
+	if (started() && end_with_parent_ && !poll())
+		return false;
+#ifndef _WIN32
+	if (started()) {
+		// Reaped once it exits, so it leaves no zombie; with no thread to spare
+		// it stays one until this process ends. Signals stay blocked in that
+		// thread (it inherits the mask), so none of this process's land there.
+		sigset_t all;
+		sigset_t saved;
+		sigfillset(&all);
+		pthread_sigmask(SIG_SETMASK, &all, &saved);
+		pthread_attr_t attributes;
+		if (pthread_attr_init(&attributes) == 0) {
+			pthread_attr_setdetachstate(&attributes, PTHREAD_CREATE_DETACHED);
+			pthread_t reaper;
+			pthread_create(&reaper, &attributes, reap_released,
+					reinterpret_cast<void *>(static_cast<intptr_t>(pid_)));
+			pthread_attr_destroy(&attributes);
+		}
+		pthread_sigmask(SIG_SETMASK, &saved, nullptr);
+	}
+#endif
+	reset();
+	exit_code_.reset();
+	return true;
+}
 
 #ifdef _WIN32
 
@@ -243,14 +482,26 @@ bool ChildProcess::spawn(const SpawnOptions &options, std::string &error) {
 	}
 	reset();
 	exit_code_.reset();
-	const std::wstring program = io::widen_utf8(options.argv[0]);
-	std::wstring command_line;
-	for (size_t i = 0; i < options.argv.size(); ++i) {
-		if (i != 0) command_line.push_back(L' ');
+	// The image and the current directory within what the call takes (above).
+	const std::wstring program = within(native_path(options.argv[0]), MAX_PATH - 1);
+	if (program.empty()) {
+		error = too_long(options.argv[0], "its path", MAX_PATH - 1);
+		return false;
+	}
+	const std::wstring cwd = options.working_dir.empty()
+			? std::wstring()
+			: within(native_path(options.working_dir), MAX_PATH - 2);
+	if (!options.working_dir.empty() && cwd.empty()) {
+		error = too_long(
+				options.argv[0], "the working directory " + options.working_dir, MAX_PATH - 2);
+		return false;
+	}
+	// argv[0] reaches the child as the path it runs.
+	std::wstring command_line = quote_argument(program);
+	for (size_t i = 1; i < options.argv.size(); ++i) {
+		command_line.push_back(L' ');
 		command_line += quote_argument(io::widen_utf8(options.argv[i]));
 	}
-	const std::wstring cwd =
-			options.working_dir.empty() ? std::wstring() : io::widen_utf8(options.working_dir);
 
 	// The two handles the child gets, inheritable, and the attribute list that
 	// hands it those alone (every other inheritable handle stays here).
@@ -262,7 +513,7 @@ bool ChildProcess::spawn(const SpawnOptions &options, std::string &error) {
 	HANDLE out = options.output_path.empty()
 			? CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &inheritable,
 					  OPEN_EXISTING, 0, nullptr)
-			: CreateFileW(io::widen_utf8(options.output_path).c_str(), FILE_APPEND_DATA,
+			: CreateFileW(io::os_path(options.output_path).c_str(), FILE_APPEND_DATA,
 					  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, &inheritable, OPEN_ALWAYS,
 					  FILE_ATTRIBUTE_NORMAL, nullptr);
 	auto close_std = [&] {
@@ -299,8 +550,16 @@ bool ChildProcess::spawn(const SpawnOptions &options, std::string &error) {
 	startup.StartupInfo.hStdInput = in;
 	startup.StartupInfo.hStdOutput = out;
 	startup.StartupInfo.hStdError = out;
+	if (options.behind) {
+		// Its first window shown without activation (a GUI child's first
+		// ShowWindow takes this in place of the one it asks for).
+		startup.StartupInfo.dwFlags |= STARTF_USESHOWWINDOW;
+		startup.StartupInfo.wShowWindow = SW_SHOWNOACTIVATE;
+	}
 	startup.lpAttributeList = attributes;
-	// Suspended until it is in its job, so it cannot start a grandchild outside it.
+	// Suspended until it is in its job, so it cannot start a grandchild outside
+	// it. CREATE_NO_WINDOW keeps a console child from opening a console window;
+	// a GUI child's own windows are untouched.
 	DWORD flags = EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT;
 	if (options.end_with_parent) flags |= CREATE_SUSPENDED;
 	std::vector<wchar_t> command(command_line.begin(), command_line.end());
@@ -316,7 +575,8 @@ bool ChildProcess::spawn(const SpawnOptions &options, std::string &error) {
 	DeleteProcThreadAttributeList(attributes);
 	close_std();
 	if (!created) {
-		error = windows_error("CreateProcessW", create_error);
+		error = "cannot start " + options.argv[0] + ": " +
+				windows_error("CreateProcessW", create_error);
 		return false;
 	}
 	if (options.end_with_parent) {
@@ -339,24 +599,57 @@ bool ChildProcess::spawn(const SpawnOptions &options, std::string &error) {
 	CloseHandle(info.hThread);
 	process_ = info.hProcess;
 	pid_ = static_cast<int64_t>(info.dwProcessId);
+	end_with_parent_ = options.end_with_parent;
+	identity_ = read_identity(info.hProcess);
 	return true;
 }
 
-std::optional<int> ChildProcess::poll() { return wait(0); }
+std::optional<uint32_t> ChildProcess::poll() {
+	return wait(0);
+}
 
-std::optional<int> ChildProcess::wait(int timeout_ms) {
+std::optional<uint32_t> ChildProcess::wait(int timeout_ms) {
 	if (!started()) return exit_code_;
 	const DWORD waited = WaitForSingleObject(
 			handle_of(process_), timeout_ms < 0 ? INFINITE : static_cast<DWORD>(timeout_ms));
 	if (waited != WAIT_OBJECT_0) return std::nullopt;
 	DWORD code = 0;
 	if (!GetExitCodeProcess(handle_of(process_), &code)) code = 1;
-	exit_code_ = static_cast<int>(code);
-	reset();
+	exit_code_ = static_cast<uint32_t>(code);
+	pid_ = 0;
+	// The process handle stays (identity() reads through it until release());
+	// the job goes now, and with it any grandchild still in it.
+	if (job_ != nullptr)
+		CloseHandle(handle_of(job_));
+	job_ = nullptr;
 	return exit_code_;
 }
 
-void ChildProcess::terminate() { kill(); }
+bool ChildProcess::identity(ProcessIdentity &out) const {
+	if (process_ == nullptr)
+		return false;
+	out = identity_;
+	// What the spawn could not read, read now.
+	if (out.image.empty() || out.created.empty()) {
+		const ProcessIdentity now = read_identity(handle_of(process_));
+		if (out.image.empty())
+			out.image = now.image;
+		if (out.created.empty())
+			out.created = now.created;
+	}
+	return !out.created.empty();
+}
+
+void ChildProcess::terminate() {
+	if (!started())
+		return;
+	CloseRequest request;
+	request.pid = static_cast<DWORD>(pid_);
+	EnumWindows(close_top_level_window, reinterpret_cast<LPARAM>(&request));
+	// No window to ask: nothing else would carry the request.
+	if (request.posted == 0)
+		TerminateProcess(handle_of(process_), 1);
+}
 
 void ChildProcess::kill() {
 	if (started()) TerminateProcess(handle_of(process_), 1);
@@ -500,10 +793,14 @@ bool ChildProcess::spawn(const SpawnOptions &options, std::string &error) {
 		return false;
 	}
 	pid_ = static_cast<int64_t>(pid);
+	end_with_parent_ = options.end_with_parent;
+#ifdef __linux__
+	identity_ = read_identity(pid_);
+#endif
 	return true;
 }
 
-std::optional<int> ChildProcess::poll() {
+std::optional<uint32_t> ChildProcess::poll() {
 	if (!started()) return exit_code_;
 	int status = 0;
 	pid_t reaped = 0;
@@ -515,9 +812,9 @@ std::optional<int> ChildProcess::poll() {
 		// Reaped elsewhere (a SIGCHLD set to SIG_IGN): its code is gone.
 		exit_code_ = 1;
 	} else if (WIFEXITED(status)) {
-		exit_code_ = WEXITSTATUS(status);
+		exit_code_ = static_cast<uint32_t>(WEXITSTATUS(status));
 	} else if (WIFSIGNALED(status)) {
-		exit_code_ = 128 + WTERMSIG(status);
+		exit_code_ = 128u + static_cast<uint32_t>(WTERMSIG(status));
 	} else {
 		return std::nullopt; // stopped or continued, still there
 	}
@@ -525,7 +822,7 @@ std::optional<int> ChildProcess::poll() {
 	return exit_code_;
 }
 
-std::optional<int> ChildProcess::wait(int timeout_ms) {
+std::optional<uint32_t> ChildProcess::wait(int timeout_ms) {
 	const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
 	for (;;) {
 		if (auto code = poll()) return code;
@@ -533,6 +830,27 @@ std::optional<int> ChildProcess::wait(int timeout_ms) {
 		if (timeout_ms >= 0 && std::chrono::steady_clock::now() >= deadline) return std::nullopt;
 		std::this_thread::sleep_for(std::chrono::milliseconds(10));
 	}
+}
+
+bool ChildProcess::identity(ProcessIdentity &out) const {
+#ifdef __linux__
+	if (pid_ <= 0)
+		return false;
+	out = identity_;
+	// What the spawn could not read, read now (the child is unreaped, so the
+	// pid is still its own).
+	if (out.image.empty() || out.created.empty()) {
+		const ProcessIdentity now = read_identity(pid_);
+		if (out.image.empty())
+			out.image = now.image;
+		if (out.created.empty())
+			out.created = now.created;
+	}
+	return !out.created.empty();
+#else
+	(void)out;
+	return false;
+#endif
 }
 
 void ChildProcess::terminate() {

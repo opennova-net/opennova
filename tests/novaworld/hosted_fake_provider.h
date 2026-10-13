@@ -24,7 +24,7 @@ public:
 	struct Machine {
 		int64_t server_id = 0;
 		hosted::MachineState state = hosted::MachineState::Pending;
-		std::optional<int> exit_code;
+		std::optional<uint32_t> exit_code;
 		hosted::LaunchSpec spec;
 		bool terminated = false;
 		int describes = 0;
@@ -86,7 +86,7 @@ public:
 
 	// The test's hands.
 	void run(const std::string &id) { machines.at(id).state = hosted::MachineState::Running; }
-	void exit_with(const std::string &id, int code) {
+	void exit_with(const std::string &id, uint32_t code) {
 		machines.at(id).state = hosted::MachineState::Exited;
 		machines.at(id).exit_code = code;
 	}

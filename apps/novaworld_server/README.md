@@ -456,7 +456,7 @@ An account an admin approved (`players.can_host`) can have the service run one
   with its secret files `0600` on POSIX, a DACL granting the service's account alone on
   Windows), `opennova-serve` (`ONNET_HOSTED_SERVE_BIN`) with `--resource-dir
   ONNET_HOSTED_RESOURCE_DIR` (and `--loose-root` with `ONNET_HOSTED_LOOSE_ROOT=1`),
-  started from an argv array with no shell (`apps/common/child_process.h`), its output in
+  started from an argv array with no shell (`engine/base/proc/child_process.h`), its output in
   `console.log` there, listing on this service over loopback with free loopback ports.
   Its environment is an allowlist (`PATH`, `HOME`, `LANG`, `LC_*`, `TZ`, `TMPDIR`; on
   Windows `PATH`, `SystemRoot`, `SystemDrive`, `windir`, `TEMP`, `TMP`), so none of the
@@ -810,9 +810,9 @@ ring's cap, and the admin links following the running servers), then
 `LocalProcessProvider` against the test binary itself as its
 server (the files, the environment allowlist against a planted secret, the secrets
 deleted at terminate, and its children outliving the supervisor's thread to get an
-orderly stop); `app_process`
-([`tests/novaworld/app_process_test.cpp`](../../tests/novaworld/app_process_test.cpp),
-every build) the child-process helper against itself; the route harness's
+orderly stop); `child_process`
+([`tests/proc/child_process_test.cpp`](../../tests/proc/child_process_test.cpp),
+every build) the child-process seam against itself; the route harness's
 `hosted_server_routes` and `hosted_listing_owner` cases the routes' refusals, approval,
 cap and stops and the owner rule against a hand-driven host listing as a service account,
 and its `hosted_console_routes` case the console routes over a real admin link to a

@@ -1,15 +1,20 @@
-// apps/common/child_process.h: a child started from an argv array with no shell, run
+// base/proc/child_process.h: a child started from an argv array with no shell, run
 // against this test binary itself (ctest passes its path; `--child <mode>` makes
-// it the child). Exit codes, every argument reaching the child as it was given
-// (spaces, quotes, backslashes, an empty one), the working directory, stdin at
-// end of file, stdout and stderr appended to the output file, poll while it
-// runs, terminate and kill, the refusals (a missing program, a missing working
-// directory, a second spawn while one runs), the environment (inherited by
-// default, else exactly what the options name: a planted variable stays here)
-// and, on POSIX, no descriptor of this process reaching the child and the
-// destructor killing a running one.
+// it the child). Exit codes (unsigned: a Windows code past 0x7FFFFFFF reads as it
+// is), every argument reaching the child as it was given (spaces, quotes,
+// backslashes, an empty one), the working directory, stdin at end of file, stdout
+// and stderr appended to the output file, poll while it runs, terminate (a
+// windowless child still ends) and kill, the refusals (a missing program, a
+// missing working directory, a second spawn while one runs), the environment
+// (inherited by default, else exactly what the options name: a planted variable
+// stays here), the identity and process_liveness (Alive with the child's own
+// stamp, Dead with another or once it exited, Unknown with none), release (refused
+// for a child that ends with this process; one that does not keeps running, and
+// is watched until it ends on its own), on Windows the paths past MAX_PATH (the
+// short form, or the refusal that says why), and on POSIX no descriptor of this
+// process reaching the child and the destructor killing a running one.
 
-#include "child_process.h"
+#include <base/proc/child_process.h>
 
 #include <algorithm>
 
@@ -28,7 +33,9 @@
 #include <thread>
 #include <vector>
 
-#ifndef _WIN32
+#ifdef _WIN32
+#include <base/io/os_path.h>
+#else
 #include <cerrno>
 #include <csignal>
 #include <fcntl.h>
@@ -38,6 +45,9 @@
 
 namespace fs = std::filesystem;
 using opennova::proc::ChildProcess;
+using opennova::proc::Liveness;
+using opennova::proc::process_liveness;
+using opennova::proc::ProcessIdentity;
 using opennova::proc::SpawnOptions;
 
 namespace {
@@ -48,7 +58,9 @@ std::string g_self;
 
 int child_main(int argc, char **argv) {
 	const std::string mode = argc > 2 ? argv[2] : "";
-	if (mode == "exit") return argc > 3 ? std::atoi(argv[3]) : 0;
+	// The code as an unsigned number: a Windows process exits with all 32 bits.
+	if (mode == "exit")
+		return argc > 3 ? static_cast<int>(std::strtoul(argv[3], nullptr, 10)) : 0;
 	if (mode == "args") {
 		for (int i = 3; i < argc; ++i) std::printf("[%s]\n", argv[i]);
 		return 0;
@@ -71,6 +83,10 @@ int child_main(int argc, char **argv) {
 	if (mode == "sleep") {
 		std::this_thread::sleep_for(std::chrono::seconds(60));
 		return 9;
+	}
+	if (mode == "nap") {
+		std::this_thread::sleep_for(std::chrono::milliseconds(argc > 3 ? std::atoi(argv[3]) : 0));
+		return 0;
 	}
 	if (mode == "env") {
 		for (const std::string &entry : opennova::proc::current_environment()) std::printf("%s\n", entry.c_str());
@@ -112,7 +128,14 @@ std::vector<std::string> read_lines(const fs::path &path) {
 }
 
 int test_exit_codes() {
-	for (const int code : { 0, 7, 42 }) {
+	// POSIX keeps a code's low 8 bits alone; Windows all 32, so a code such as
+	// 0xC0000005 (an access violation's) must not read negative.
+#ifdef _WIN32
+	const uint32_t codes[] = { 0u, 7u, 42u, 0xC0000005u };
+#else
+	const uint32_t codes[] = { 0u, 7u, 42u, 255u };
+#endif
+	for (const uint32_t code : codes) {
 		ChildProcess p;
 		std::string error;
 		TEST_EXPECT(p.spawn(child({ "exit", std::to_string(code) }), error));
@@ -122,6 +145,16 @@ int test_exit_codes() {
 		TEST_EXPECT(!p.started() && p.pid() == 0);
 		TEST_EXPECT(p.exit_code() == code);
 		TEST_EXPECT(p.poll() == code); // reaped: the kept code
+	}
+	{
+		// Behind: the first window shown without activation; a console child
+		// has none and runs as ever (ignored on POSIX).
+		ChildProcess p;
+		std::string error;
+		SpawnOptions options = child({ "exit", "3" });
+		options.behind = true;
+		TEST_EXPECT(p.spawn(options, error));
+		TEST_EXPECT(p.wait(20000) == 3u);
 	}
 	return 0;
 }
@@ -137,7 +170,7 @@ int test_arguments_arrive_whole(const fs::path &dir) {
 	ChildProcess p;
 	std::string error;
 	TEST_EXPECT(p.spawn(child(child_args, out.u8string()), error));
-	TEST_EXPECT(p.wait(20000) == 0);
+	TEST_EXPECT(p.wait(20000) == 0u);
 	const auto lines = read_lines(out);
 	if (lines.size() != args.size()) std::fprintf(stderr, "  %zu lines, want %zu\n", lines.size(), args.size());
 	TEST_EXPECT(lines.size() == args.size());
@@ -158,7 +191,7 @@ int test_working_dir_stdin_and_output(const fs::path &dir) {
 		options.working_dir = work.u8string();
 		std::string error;
 		TEST_EXPECT(p.spawn(options, error));
-		TEST_EXPECT(p.wait(20000) == 0);
+		TEST_EXPECT(p.wait(20000) == 0u);
 		const auto lines = read_lines(dir / "cwd.txt");
 		TEST_EXPECT(lines.size() == 1);
 		std::error_code ec;
@@ -168,7 +201,7 @@ int test_working_dir_stdin_and_output(const fs::path &dir) {
 		ChildProcess p;
 		std::string error;
 		TEST_EXPECT(p.spawn(child({ "stdin" }, (dir / "stdin.txt").u8string()), error));
-		TEST_EXPECT(p.wait(20000) == 0);
+		TEST_EXPECT(p.wait(20000) == 0u);
 		TEST_EXPECT(read_lines(dir / "stdin.txt") == std::vector<std::string>{ "eof" });
 	}
 	{
@@ -180,7 +213,7 @@ int test_working_dir_stdin_and_output(const fs::path &dir) {
 		ChildProcess p;
 		std::string error;
 		TEST_EXPECT(p.spawn(child({ "stderr" }, (dir / "both.txt").u8string()), error));
-		TEST_EXPECT(p.wait(20000) == 0);
+		TEST_EXPECT(p.wait(20000) == 0u);
 		const auto lines = read_lines(dir / "both.txt");
 		TEST_EXPECT(lines.size() == 3);
 		TEST_EXPECT(lines[0] == "before" && lines[1] == "to stdout" && lines[2] == "to stderr");
@@ -190,13 +223,15 @@ int test_working_dir_stdin_and_output(const fs::path &dir) {
 		ChildProcess p;
 		std::string error;
 		TEST_EXPECT(p.spawn(child({ "args", "discarded" }), error));
-		TEST_EXPECT(p.wait(20000) == 0);
+		TEST_EXPECT(p.wait(20000) == 0u);
 	}
 	return 0;
 }
 
 int test_terminate_and_kill() {
 	{
+		// The test binary is a console child with no window: on Windows
+		// terminate() has no window to ask and ends it with TerminateProcess.
 		ChildProcess p;
 		std::string error;
 		TEST_EXPECT(p.spawn(child({ "sleep" }), error));
@@ -209,9 +244,9 @@ int test_terminate_and_kill() {
 		const auto code = p.wait(20000);
 		TEST_EXPECT(code.has_value());
 #ifdef _WIN32
-		TEST_EXPECT(*code == 1);
+		TEST_EXPECT(*code == 1u);
 #else
-		TEST_EXPECT(*code == 128 + SIGTERM);
+		TEST_EXPECT(*code == 128u + SIGTERM);
 #endif
 	}
 	{
@@ -222,9 +257,9 @@ int test_terminate_and_kill() {
 		const auto code = p.wait(20000);
 		TEST_EXPECT(code.has_value());
 #ifdef _WIN32
-		TEST_EXPECT(*code == 1);
+		TEST_EXPECT(*code == 1u);
 #else
-		TEST_EXPECT(*code == 128 + SIGKILL);
+		TEST_EXPECT(*code == 128u + SIGKILL);
 #endif
 		// Once exited, both are no-ops.
 		p.terminate();
@@ -242,6 +277,12 @@ int test_refusals(const fs::path &dir) {
 		options.argv = { (dir / "no-such-program").u8string() };
 		TEST_EXPECT(!p.spawn(options, error));
 		TEST_EXPECT(!error.empty() && !p.started());
+		// The OS's own error rides the message.
+#ifdef _WIN32
+		TEST_EXPECT(error.find("CreateProcessW failed (Windows error 2)") != std::string::npos);
+#else
+		TEST_EXPECT(error.find("cannot start") != std::string::npos);
+#endif
 	}
 	{
 		ChildProcess p;
@@ -286,7 +327,7 @@ int test_environment(const fs::path &dir) {
 		ChildProcess p;
 		std::string error;
 		TEST_EXPECT(p.spawn(child({ "env" }, (dir / "env_inherited.txt").u8string()), error));
-		TEST_EXPECT(p.wait(20000) == 0);
+		TEST_EXPECT(p.wait(20000) == 0u);
 		TEST_EXPECT(has_line(read_lines(dir / "env_inherited.txt"), "OPENNOVA_PROCESS_PLANTED=hunter2"));
 	}
 	{
@@ -296,7 +337,7 @@ int test_environment(const fs::path &dir) {
 		options.environment = opennova::proc::filter_environment({ "PATH", "SystemRoot", "KEEP_*" });
 		options.environment->push_back("KEEP_ME=kept");
 		TEST_EXPECT(p.spawn(options, error));
-		TEST_EXPECT(p.wait(20000) == 0);
+		TEST_EXPECT(p.wait(20000) == 0u);
 		const auto lines = read_lines(dir / "env_own.txt");
 		TEST_EXPECT(has_line(lines, "KEEP_ME=kept") && has_line(lines, "KEEP_PREFIX_A=1"));
 		TEST_EXPECT(!has_name(lines, "OPENNOVA_PROCESS_PLANTED"));
@@ -308,6 +349,137 @@ int test_environment(const fs::path &dir) {
 	return 0;
 }
 
+bool ends_with(const std::string &text, const std::string &tail) {
+	return text.size() >= tail.size() &&
+			text.compare(text.size() - tail.size(), tail.size(), tail) == 0;
+}
+
+#if defined(_WIN32) || defined(__linux__)
+
+// Polls process_liveness until it reads Dead (true) or `timeout_ms` passes.
+bool becomes_dead(int64_t pid, const std::string &created, int timeout_ms) {
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+	while (std::chrono::steady_clock::now() < deadline) {
+		if (process_liveness(pid, created) == Liveness::Dead)
+			return true;
+		std::this_thread::sleep_for(std::chrono::milliseconds(20));
+	}
+	return process_liveness(pid, created) == Liveness::Dead;
+}
+
+// The identity (the image this binary is, a creation stamp read the same twice)
+// and process_liveness against it, while the child runs and once it exited.
+int test_identity_and_liveness() {
+	ChildProcess p;
+	std::string error;
+	TEST_EXPECT(p.spawn(child({ "sleep" }), error));
+	ProcessIdentity first;
+	ProcessIdentity second;
+	TEST_EXPECT(p.identity(first) && p.identity(second));
+	TEST_EXPECT(!first.created.empty() && first.created == second.created &&
+			first.image == second.image);
+	const std::string name = fs::u8path(g_self).filename().u8string();
+	if (!ends_with(first.image, "/" + name))
+		std::fprintf(
+				stderr, "  image %s, want one ending /%s\n", first.image.c_str(), name.c_str());
+	TEST_EXPECT(ends_with(first.image, "/" + name));
+	const int64_t pid = p.pid();
+	TEST_EXPECT(process_liveness(pid, first.created) == Liveness::Alive);
+	TEST_EXPECT(process_liveness(pid, first.created + "1") == Liveness::Dead); // a recycled pid's
+	TEST_EXPECT(process_liveness(pid, "") == Liveness::Unknown);
+	TEST_EXPECT(process_liveness(0, first.created) == Liveness::Unknown);
+	p.kill();
+	TEST_EXPECT(p.wait(20000).has_value());
+	TEST_EXPECT(becomes_dead(pid, first.created, 20000));
+	ProcessIdentity after;
+#ifdef _WIN32
+	// The handle stays held past the exit: the same identity reads through it.
+	TEST_EXPECT(p.identity(after) && after.created == first.created && after.image == first.image);
+#else
+	// Reaped: its pid may already be another's, so there is none to read.
+	TEST_EXPECT(!p.identity(after));
+#endif
+	return 0;
+}
+
+// release(): refused for a child that ends with this process while it runs;
+// one started with end_with_parent false is let go and keeps running (past this
+// object's destruction too), and is watched through process_liveness until it
+// ends on its own, so the test leaves nothing behind.
+int test_release() {
+	{
+		ChildProcess p;
+		TEST_EXPECT(p.release()); // nothing held
+		std::string error;
+		TEST_EXPECT(p.spawn(child({ "sleep" }), error));
+		TEST_EXPECT(!p.release() && p.started());
+		p.kill();
+		TEST_EXPECT(p.wait(20000).has_value());
+		TEST_EXPECT(p.release() && !p.started() && p.pid() == 0 && !p.exit_code());
+	}
+	int64_t pid = 0;
+	ProcessIdentity id;
+	{
+		ChildProcess p;
+		std::string error;
+		SpawnOptions options = child({ "nap", "1500" });
+		options.end_with_parent = false;
+		TEST_EXPECT(p.spawn(options, error));
+		TEST_EXPECT(p.identity(id));
+		pid = p.pid();
+		TEST_EXPECT(p.release());
+		TEST_EXPECT(!p.started() && p.pid() == 0 && !p.exit_code() && !p.poll());
+		ProcessIdentity none;
+		TEST_EXPECT(!p.identity(none));
+	}
+	TEST_EXPECT(process_liveness(pid, id.created) == Liveness::Alive);
+	TEST_EXPECT(becomes_dead(pid, id.created, 20000));
+	return 0;
+}
+
+#endif
+
+#ifdef _WIN32
+// Paths past MAX_PATH: a program that has no short form (it does not exist) is
+// refused with that reason; a working directory that exists runs through its
+// short form where the volume keeps 8.3 names, else is refused saying why.
+int test_long_paths(const fs::path &dir) {
+	const std::string a(100, 'a');
+	const std::string b(100, 'b');
+	const std::string c(100, 'c');
+	{
+		ChildProcess p;
+		std::string error;
+		SpawnOptions options;
+		options.argv = { (dir / a / b / c / "program.exe").generic_u8string() };
+		TEST_EXPECT(!p.spawn(options, error) && !p.started());
+		TEST_EXPECT(error.find("past the 259 characters") != std::string::npos &&
+				error.find("no short (8.3) form") != std::string::npos);
+	}
+	const fs::path work = dir / a / b / c;
+	std::error_code ec;
+	fs::create_directories(opennova::io::os_path(work.u8string()), ec);
+	TEST_EXPECT(!ec);
+	ChildProcess p;
+	std::string error;
+	SpawnOptions options = child({ "cwd" }, (dir / "long_cwd.txt").u8string());
+	options.working_dir = work.generic_u8string(); // '/' separators, spelled '\' at the call
+	if (p.spawn(options, error)) {
+		TEST_EXPECT(p.wait(20000) == 0u);
+		const auto lines = read_lines(dir / "long_cwd.txt");
+		TEST_EXPECT(lines.size() == 1);
+		TEST_EXPECT(lines[0].size() <= 258);
+		TEST_EXPECT(fs::equivalent(
+				opennova::io::os_path(lines[0]), opennova::io::os_path(work.u8string()), ec));
+	} else {
+		std::fprintf(stderr, "  no 8.3 names on this volume: %s\n", error.c_str());
+		TEST_EXPECT(error.find("the working directory") != std::string::npos &&
+				error.find("no short (8.3) form") != std::string::npos);
+	}
+	return 0;
+}
+#endif
+
 #ifndef _WIN32
 int test_posix_descriptors_and_destructor(const fs::path &dir) {
 	// A descriptor this process holds without close-on-exec stays here.
@@ -317,7 +489,7 @@ int test_posix_descriptors_and_destructor(const fs::path &dir) {
 		ChildProcess p;
 		std::string error;
 		TEST_EXPECT(p.spawn(child({ "fds" }, (dir / "fds.txt").u8string()), error));
-		TEST_EXPECT(p.wait(20000) == 0);
+		TEST_EXPECT(p.wait(20000) == 0u);
 	}
 	::close(held);
 	TEST_EXPECT(read_lines(dir / "fds.txt") == std::vector<std::string>{ "0" });
@@ -341,17 +513,24 @@ int test_posix_descriptors_and_destructor(const fs::path &dir) {
 int main(int argc, char **argv) {
 	if (argc > 1 && std::strcmp(argv[1], "--child") == 0) return child_main(argc, argv);
 	if (argc < 2) {
-		std::fprintf(stderr, "usage: app_process_test <this binary's path>\n");
+		std::fprintf(stderr, "usage: child_process_test <this binary's path>\n");
 		return 2;
 	}
 	g_self = argv[1];
-	test_temp::TempDir temp("app_process");
+	test_temp::TempDir temp("child_process");
 	TEST_EXPECT(test_exit_codes() == 0);
 	TEST_EXPECT(test_arguments_arrive_whole(temp.path) == 0);
 	TEST_EXPECT(test_working_dir_stdin_and_output(temp.path) == 0);
 	TEST_EXPECT(test_terminate_and_kill() == 0);
 	TEST_EXPECT(test_refusals(temp.path) == 0);
 	TEST_EXPECT(test_environment(temp.path) == 0);
+#if defined(_WIN32) || defined(__linux__)
+	TEST_EXPECT(test_identity_and_liveness() == 0);
+	TEST_EXPECT(test_release() == 0);
+#endif
+#ifdef _WIN32
+	TEST_EXPECT(test_long_paths(temp.path) == 0);
+#endif
 #ifndef _WIN32
 	TEST_EXPECT(test_posix_descriptors_and_destructor(temp.path) == 0);
 #endif
