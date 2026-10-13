@@ -31,7 +31,7 @@
 #include <vector>
 
 #include <base/io/strutil.h>
-#include <base/resource_index/texture_candidates.h>
+#include <base/resource_index/texture_folder.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_build.h>
 #include <formats/threedi/threedi_panm.h>
