@@ -40,6 +40,14 @@ float resolve_water_height(const WaterHeightRungs &rungs,
 	return resolve_water_rung(rungs, env, current).height;
 }
 
+ResolvedWaterHeight mission_water_rung(const BmsEnvOverrides &overrides, const Config &environment,
+		bool environment_loaded, float terrain_height, bool has_loaded_terrain) {
+	EnvironmentState state;
+	state.set_config(&environment, environment_loaded);
+	return resolve_water_rung(
+			mission_water_rungs(overrides, terrain_height, has_loaded_terrain), &state, 0.0f);
+}
+
 WaterFrameInputs build_water_frame_inputs(const EnvironmentState *env,
 		float murk_default) {
 	WaterFrameInputs inputs;
