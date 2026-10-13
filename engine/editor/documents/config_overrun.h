@@ -20,13 +20,11 @@ namespace opennova::editor {
 // error at the first value past the pool (configfile::data_strings_overrun_offset), saying how many bytes
 // past, which refuses a build (its row's game_refusal: the game's heap is corrupt from that load on); one
 // in the CBIN form (a credits file stored so, which its type writes back so) is read by the binary reader,
-// whose pools are cleared at their own sizes, and makes none. Its fix, where the kind's type says which
-// lines change nothing its loader reads (DocumentType::config_idle_lines) and putting the ConfigFile's
-// comment (';', configfile::config_commented) before those of them that hold numbers alone (each takes
-// values away and no byte of text) brings the file under the line: that edit, one step Undo takes back. Reads a text document's text as the game reads those bytes; a
-// blocked document makes none. A record document of such a kind (the character attributes, S23 B) makes the same
-// finding in its own validator over the text its save writes, in these words, its fix the same lines commented out
-// in its layout (documents/charattr_document.h).
+// whose pools are cleared at their own sizes, and makes none. Reads a text document's text as the game reads
+// those bytes; a blocked document makes none. A record document of such a kind (the character attributes, S23 B)
+// makes the same finding in its own validator over the text its save writes, in these words, with its fix: the
+// lines its loader reads the same without, holding numbers alone, commented out in its layout
+// (documents/charattr_document.h).
 std::vector<Diagnostic> config_overrun_findings(const DocumentBase &document);
 // The finding's words: what `file` holds, what the reader makes of it, where the first value past the pool is.
 std::string config_overrun_words(const std::string &file, const configfile::DataStringsPool &pool);
