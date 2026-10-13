@@ -29,7 +29,9 @@ extern const char *const kPreviewBackdropCode;
 MeshInstance3D *make_preview_backdrop_3d();
 void set_preview_backdrop(MeshInstance3D &backdrop, opennova::editor::PreviewBackground background);
 
-// A 2D picture's background over a whole ColorRect (the HUD's): its material, `own` the colour Dark draws.
+// A 2D picture's background over a whole ColorRect (the HUD's): its material, `own` the colour Dark draws. Drawn on a
+// screen stretched over the picture, its `backdrop_pixel_scale` uniform is the stretch (the picture's size over the
+// screen's), so the checker's squares are the picture's pixels.
 Ref<ShaderMaterial> make_preview_backdrop_canvas(const Color &own);
 // The background's uniforms on a material whose shader holds kPreviewBackdropCode.
 void set_preview_backdrop(ShaderMaterial &material, opennova::editor::PreviewBackground background);

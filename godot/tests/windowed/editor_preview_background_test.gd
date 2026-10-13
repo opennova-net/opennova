@@ -156,9 +156,10 @@ func _check_each(path: String, kind: String, x: int, own: Callable) -> void:
 				_near(image.get_pixel(x, 2), 0xD2D2D2, what + " at the top")
 				_near(image.get_pixel(x, low), 0xB4B4B4, what + " at the bottom")
 			"checker":
-				# The square at the top left and the one beside it (squares of 8 from the picture's corner).
-				_near(image.get_pixel(x % 8, 2), 0x9E9E9E, what + "'s first square")
-				_near(image.get_pixel(8 + x % 8, 2), 0x666666, what + "'s second square")
+				# The square at the top left and the one beside it (squares of 8 from the picture's corner), each read
+				# inside its square: a picture stretched from a screen of its own (the HUD's) filters its squares' edges.
+				_near(image.get_pixel(2, 2), 0x9E9E9E, what + "'s first square")
+				_near(image.get_pixel(10, 2), 0x666666, what + "'s second square")
 			"dark":
 				own.call(image.get_pixel(x, 2), what)
 

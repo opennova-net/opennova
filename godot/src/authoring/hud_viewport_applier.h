@@ -77,6 +77,8 @@ private:
 	// The sights' frame (the scope readouts, the card, the mask), and the Tab board on the clock's tick.
 	void apply_sights_(const opennova::editor::HudViewport &hud);
 	void apply_board_(const opennova::editor::HudViewport &hud, int64_t ticks);
+	// The backdrop's pixels scaled by the screen's stretch over the picture (preview_backdrop's backdrop_pixel_scale).
+	void scale_backdrop_();
 
 	uint64_t backdrop_id_ = 0;
 	Ref<ShaderMaterial> backdrop_material_; // the backdrop's: the editor's preview background over it
