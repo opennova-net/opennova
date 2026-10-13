@@ -5,7 +5,10 @@ files below (cut, layered, filtered, levelled) or synthesised (procedural noise,
 clicks and glides, no source). The carbine's six (`onar15*.wav`) are the exception: they are
 mixed from the sounds of Infima Games' Tactical FPS Animations, the pack the carbine and its clips
 come from (`art/on_ar15/README.md`), used under the maintainer's licence for the pack (2026-10-13).
-The pack's files (its uncompressed waves, exported from the pack's Unreal project) are not kept here; each row names the ones it was mixed from. Freesound files are each sound's HQ OGG preview,
+The pistol's five (`onpist*.wav`) are the other exception: they are cut from the sounds of
+KINEMATION's Tactical Shooter Pack, the pack the pistol and its clips come from
+(`art/on_pist/README.md`), used under the maintainer's licence for that pack (2026-10-13).
+Neither pack's files (their uncompressed waves) are kept here; each row names the ones it was mixed from. Freesound files are each sound's HQ OGG preview,
 the stream its page plays (the original upload needs a login); each page said
 Creative Commons 0 when it was downloaded. Kenney's files are from the Impact
 Sounds pack, its `License.txt` kept beside them.
@@ -225,6 +228,11 @@ Each file in `assets/`, what it was made from and how (PCM mono; the rate and bi
 | `onar15dry.wav` | 22050 Hz 8-bit | 0.150 s | -13.1 dB | Infima TFA `A_TFA_AR_Click_001` (a member of the dry-fire cue `A_TFA_AR_Fire_Empty_Cue`, x0.8); cut 0.15 s; limited 6 dB, then soft-clipped (tanh, 6.0 dB drive) toward its retail counterpart loudness |
 | `onar15st.wav` | 22050 Hz 8-bit | 0.790 s | -16.9 dB | Infima TFA `A_TFA_Foley_Cloth_004` (x0.06), `A_TFA_AR_Handling_001` at 0.03 s as the gun swings up, and `A_TFA_AR_GunSmack_001` (x0.5) at 0.45 s, where the draw (`A_TFA_FP_AR_Equip_Quick`) brings the left hand onto the handguard; limited 6 dB, the rest of its loudness in its set's volume |
 | `onar15sf.wav` | 22050 Hz 8-bit | 0.650 s | -19.2 dB | Infima TFA `A_TFA_Foley_Cloth_005` (x0.15) and `A_TFA_AR_Handling_002` at 0.03 s; limited 6 dB, the rest of its loudness in its set's volume |
+| `onpistf1.wav` | 44100 Hz 16-bit | 0.640 s | -13.9 dB | KINEMATION `SFX/WK-11_Viper/Fire/S_WK-11_Viper_Shot_1_With_Tail` (the shot, the slide in it); cut 0.64 s, faded over its last 0.12 s; limited 6 dB, then soft-clipped (tanh, 4.75 dB drive) toward 1.5 dB under the carbine's shot |
+| `onpistf2.wav` | 22050 Hz 16-bit | 1.470 s | -23.5 dB | KINEMATION `S_WK-11_Viper_Shot_1_With_Tail` again, low-passed at 4 kHz (4th order) for the far report; cut 1.47 s, faded over its last 0.35 s; limited 1.2 dB toward 1.5 dB under the carbine's tail |
+| `onpistrl.wav` | 22050 Hz 16-bit | 2.930 s | -29.8 dB | KINEMATION `SFX/WK-11_Viper/Actions/S_WK-11_Viper_Reload_Tactical` (the pack's foley for the tactical reload the clip is cut from, in step with it); cut at the reload's 2.93 s, faded over its last 0.05 s; limited 6 dB, the rest of its loudness in its set's volume |
+| `onpistst.wav` | 22050 Hz 8-bit | 0.850 s | -17.7 dB | KINEMATION `SFX/General/S_DrawPistolWithoutHolster`; cut 0.85 s, faded over its last 0.10 s; limited 6 dB, the rest of its loudness in its set's volume |
+| `onpistsf.wav` | 22050 Hz 8-bit | 0.650 s | -18.2 dB | KINEMATION `SFX/General/S_HolsterPistolWithoutHolster`; cut 0.65 s, faded over its last 0.10 s; limited 6 dB, the rest of its loudness in its set's volume |
 | `onfsswm1.wav` | 22050 Hz 8-bit | 1.300 s | -15.0 dB | swordofkings128 [#398037](https://freesound.org/s/398037/) (water swimming); cut 1.30 s from the stroke, high-pass 100 Hz |
 | `onfsswm2.wav` | 22050 Hz 8-bit | 1.500 s | -15.0 dB | swordofkings128 [#398036](https://freesound.org/s/398036/) (water swimming); cut 1.50 s from the stroke, high-pass 100 Hz |
 | `onfsswm3.wav` | 22050 Hz 8-bit | 1.600 s | -15.0 dB | swordofkings128 [#398040](https://freesound.org/s/398040/) (water swimming); cut 1.60 s from the stroke, high-pass 100 Hz |
