@@ -488,14 +488,14 @@ std::string low16_of_decimal(const std::vector<uint8_t> &text) {
 std::string handshake_field_key(uint8_t opcode, const FlatTlvField &field) {
 	static_assert(has_normalization("handshake.0x42.CU.CI0"));
 	const std::string name(field.name);
-	const std::vector<uint8_t> value(field.value, field.value + field.size);
+	const std::vector<uint8_t> value(field.value, field.value + field.present);
 	const uint32_t size_class = handshake_length_class(opcode, name);
 	const bool in_class = size_class != 0 &&
 			(field.size == size_class || field.size == size_class + 1);
 	std::string key = name + "|" +
 			(in_class ? std::to_string(size_class) + "-" + std::to_string(size_class + 1)
 					  : std::to_string(field.size));
-	if (name == "CU" && field.size >= 5) {
+	if (name == "CU" && value.size() >= 5) {
 		// [u8 type][name\0][u16 len][value]
 		const uint8_t type = value[0];
 		size_t p = 1;
@@ -579,7 +579,7 @@ std::string key_generator(const wire::ParityHandshake *handshake) {
 		if (next == kFlatTlvEnd || field.name.empty())
 			break;
 		if (field.name == "SCRK")
-			return follows_key_cycle(std::vector<uint8_t>(field.value, field.value + field.size))
+			return follows_key_cycle(std::vector<uint8_t>(field.value, field.value + field.present))
 					? "lcg-cycle"
 					: "other";
 		pos = next;

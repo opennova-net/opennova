@@ -245,9 +245,10 @@ uint32_t validate_join_request(
 	std::size_t pos = 0;
 	std::string expansion;
 	std::string version_crc;
-	// The TLV walk accepts unknown fields, uses the last matching value, and stops at its first
-	// short field or an empty name; tag names compare through Napi_StrCaseEqual @0x616e70. Each
-	// string copies from its value to the first NUL whatever its length (load_value_string).
+	// The TLV walk accepts unknown fields, uses the last matching value, and stops only at an
+	// empty name (read_flat_tlv; @0x512B64); tag names compare through Napi_StrCaseEqual
+	// @0x616e70. Each string copies from its value to the first NUL whatever its length
+	// (load_value_string).
 	// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512aa0 - EXP into 32 bytes @0x512BFF,
 	//  VERSIONCRCSTRING into 512 @0x512C31]
 	while (pos < payload.size()) {
@@ -792,8 +793,10 @@ std::vector<std::pair<std::string, std::string>> parse_join_identity_pairs(
 		if (next == kFlatTlvEnd || field.name.empty()) break;
 		pos = next;
 		if (!strutil::iequals(field.name, "CD")) continue;
+		// The pairs inside the JOIN's own bytes: a CD that runs past them reads on in
+		// retail (D-NET-410), and the pairs past them are not read here.
 		const uint8_t *cursor = field.value;
-		const uint8_t *end = field.value + field.size;
+		const uint8_t *end = field.value + field.present;
 		while (cursor < end) {
 			const uint8_t *name_end = std::find(cursor, end, uint8_t{0});
 			if (name_end == end) break;

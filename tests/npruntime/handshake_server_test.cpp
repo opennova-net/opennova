@@ -2026,6 +2026,20 @@ bool run_client_join_rejects_match_retail() {
 	bad = auth;
 	bad.cu.assign(65, std::vector<uint8_t>{1});
 	if (!dropped(bad, {}, "a 0x42 with a 65th CU is dropped unanswered")) return false;
+	// A last CU declaring 2048 bytes that the datagram cuts is dropped all the same: the walk
+	// hands the field back with its declared length, which the bound reads (D-NET-412).
+	// [orig: NapiNP_ReadTLV @0x61DBE0 - the length out @0x61DCEA, the value out @0x61DCF7;
+	//  NapiNPProtocol_HandleClientJoin - `mov esi, [len]` @0x62BBE7]
+	{
+		std::vector<uint8_t> body = client_auth_to_bytes(auth);
+		body.insert(body.end(), { 'C', 'U', 0x00, 0x00, 0x08 });
+		body.insert(body.end(), 10, 0x03);
+		auto dg = craft(SESSION_OPCODE_CLIENT_AUTH, body);
+		const auto result = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
+		if (!expect(result.outbound.empty() && inmatch::connection_count(ctx) == 0,
+					"a 0x42 whose cut CU declares 2048 bytes is dropped unanswered"))
+			return false;
+	}
 	bad.cu.assign(63, std::vector<uint8_t>{1});
 	bad.cu.push_back(std::vector<uint8_t>(2047, 1));
 	bad.hk ^= 1;
