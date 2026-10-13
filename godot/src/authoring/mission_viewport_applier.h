@@ -19,6 +19,7 @@
 #include <editor/preview/mission_shots.h>
 #include <editor/preview/viewport_follow.h>
 
+#include "authoring/ground_overlay_upload.h"
 #include "authoring/terrain_patch_applier.h"
 #include "authoring/preview_effects.h"
 #include "authoring/preview_sound_player.h"
@@ -480,6 +481,7 @@ private:
 	double applied_time_ = -2.0;
 	bool shown_water_ = true, shown_shadows_ = true;
 	uint64_t overlay_serial_ = 0; // the mission's ground overlay given the terrain (DI-29)
+	GroundOverlayUpload overlay_upload_; // its upload, the rows a patch changed alone (S25)
 };
 
 } // namespace godot

@@ -42,9 +42,19 @@ namespace opennova::editor {
 
 namespace {
 
+// The options set, the members that moved alone: a whole set would name the overlay the toolbar read, which the
+// terrain brush may have moved since, and an overlay named is the person's choice over the brush's (S25,
+// BrushOverlay::chosen).
 void set_options(Workspace &workspace, const MissionViewport &mission, const MissionViewportOptions &options) {
-	workspace.request(request::set_viewport(
-			mission.path(), viewport_change(ViewportKind::Mission, "options", mission_options_to_json(options))));
+	const io::JsonValue held = mission_options_to_json(mission.options());
+	io::JsonValue changed = io::JsonValue::make_object();
+	for (const io::JsonMember &member : mission_options_to_json(options).object) {
+		const io::JsonValue *was = held.get(member.key);
+		if (!was || io::json_write(*was) != io::json_write(member.value)) changed.set(member.key, member.value);
+	}
+	if (changed.object.empty()) return;
+	workspace.request(
+			request::set_viewport(mission.path(), viewport_change(ViewportKind::Mission, "options", std::move(changed))));
 }
 
 // A command (frame, top, ground, duplicate, select_same, paste, play_from_here) over the selection, as an

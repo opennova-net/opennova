@@ -72,10 +72,17 @@ public:
 	// again since is no patch (false).
 	bool follow(const SessionView &view, const std::vector<std::pair<TerrainPlane, std::string>> &files, TerrainPatches &out);
 	const std::vector<Followed> &followed() const { return followed_; }
-	void clear() { followed_.clear(); }
+	// The files the last follow found changed as no patch says (closed, read again, a history that no longer holds the
+	// state followed).
+	const std::vector<std::string> &unsaid() const { return unsaid_; }
+	void clear() {
+		followed_.clear();
+		unsaid_.clear();
+	}
 
 private:
 	std::vector<Followed> followed_;
+	std::vector<std::string> unsaid_;
 };
 
 // The views' rule during a stroke (ADR 0046 S25, the shared seams): a view whose picture reads a terrain family's files
@@ -95,7 +102,9 @@ public:
 	explicit TerrainStrokeFollow(uint32_t in_place = terrain_plane_bit(TerrainPlane::Heights)) : in_place_(in_place) {}
 	// The family of `document` (its view: a mission or a terrain) followed; `stroking`: a gesture feeds the picture now.
 	// True when the ground holds every change since (each patched, or none), the patched files' names in `names` (for
-	// the picture's own stamps: PreviewFollow::restamp). False: the caller reads again.
+	// the picture's own stamps: PreviewFollow::restamp). False: the caller reads again. An imported terrain's open
+	// source closed or read again (its paint dropped) has the ground read whole at its next follow, in a stroke or out
+	// of one: the import's output it stands for never moved, so nothing else would (MissionGround::read_again).
 	bool follow(const SessionView &view, const DocumentBase &document, bool stroking, MissionGround &ground,
 	            const FileSource &files, std::vector<std::string> &names);
 	// The last follow's patches (each file once, its regions), and a serial that moves with each patch: the device takes

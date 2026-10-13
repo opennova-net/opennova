@@ -502,7 +502,9 @@ bool ViewportCanvas::legend(const Legend &legend) {
 	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(pad, pad));
 	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(gap, kLegendRowGap));
 	bool toggled = false;
-	if (ImGui::BeginChild("overlay_legend", ImVec2(width, height), ImGuiChildFlags_None, ImGuiWindowFlags_NoSavedSettings)) {
+	// NoMove: a press on it never drags a view window that floats undocked (a child inherits only its parent's NoMove).
+	if (ImGui::BeginChild("overlay_legend", ImVec2(width, height), ImGuiChildFlags_None,
+	                      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove)) {
 		ImGui::PushStyleColor(ImGuiCol_Text, kBadgeText);
 		toggled = ImGui::ArrowButtonEx("##fold", legend.open ? ImGuiDir_Down : ImGuiDir_Right, ImVec2(line, line));
 		ui_kit::tooltip(legend.open ? "Fold the legend to its title." : "Open the legend: a row for each value the picture shows.");

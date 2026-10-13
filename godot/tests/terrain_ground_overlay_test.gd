@@ -86,3 +86,26 @@ func test_an_overlay_set_before_the_build_is_kept_by_it() -> void:
 	terrain.set_ground_overlay(_picture(), Rect2(0.0, 0.0, 16.0, 8.0), Color(1.0, 1.0, 1.0, 1.0), false)
 	outside = material.get_shader_parameter("u_overlay_outside")
 	assert_eq(outside.a, 0.0, "no tint past the picture")
+
+
+func test_a_picture_of_the_same_size_takes_the_texture_in_place() -> void:
+	# The editor's paint gives the terrain the overlay again per stroke sample (ADR 0046 S25, the painting feedback): a
+	# picture of the size and format shown updates the texture it has, a new texture only for another size.
+	var terrain := _terrain()
+	terrain.build()
+	var area := Rect2(0.0, 0.0, 16.0, 8.0)
+	terrain.set_ground_overlay(_picture(), area, Color(), false)
+	var material := terrain.get_terrain_material()
+	var first: Texture2D = material.get_shader_parameter("u_overlay")
+	var red := Image.create_empty(4, 2, false, Image.FORMAT_RGBA8)
+	red.fill(Color(1.0, 0.0, 0.0, 1.0))
+	terrain.set_ground_overlay(red, area, Color(), false)
+	var again: Texture2D = material.get_shader_parameter("u_overlay")
+	# (Its texels are the renderer's: a headless run's dummy renderer reads back none.)
+	assert_same(again, first, "the same texture, updated in place")
+	var wider := Image.create_empty(8, 2, false, Image.FORMAT_RGBA8)
+	terrain.set_ground_overlay(wider, area, Color(), false)
+	var other: Texture2D = material.get_shader_parameter("u_overlay")
+	assert_ne(other, first, "another size: a new texture")
+	if other:
+		assert_eq(other.get_width(), 8)

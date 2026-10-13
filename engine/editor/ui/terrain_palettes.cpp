@@ -193,13 +193,11 @@ Swatch swatch_of(MissionGroundOverlay kind, int value, const std::vector<Foliage
 	return out;
 }
 
-// A palette of values as a grid of swatches as wide as the pane (S25, the painting feedback): its title's line, then
-// each value its colour with its number on it, its name and words in its tip, the brush's (`picked`) outlined; a
-// click picks one (`pick`). Each swatch's id is its value's ("##swatch" under PushID(value)).
+// A palette of values as a grid of swatches as wide as the pane (S25, the painting feedback): each value its colour
+// with its number on it, its name and words in its tip, the brush's (`picked`) outlined; a click picks one (`pick`).
+// Each swatch's id is its value's ("##swatch" under PushID(value)). No title line: the field under it names it.
 template <class Pick>
-void draw_swatches(const std::vector<Swatch> &swatches, int picked, const char *title, const char *tip, Pick &&pick) {
-	ImGui::TextUnformatted(title);
-	ui_kit::tooltip(tip);
+void draw_swatches(const std::vector<Swatch> &swatches, int picked, Pick &&pick) {
 	const float side = std::max(ImGui::GetFrameHeight(), ImGui::CalcTextSize("000").x + 6.0f);
 	const float gap = std::floor(ImGui::GetStyle().ItemSpacing.x * 0.5f);
 	const int columns = std::max(1, int((ImGui::GetContentRegionAvail().x + gap) / (side + gap)));
@@ -292,15 +290,15 @@ void draw_paint_part(TerrainPaneContext &context) {
 		std::vector<Swatch> swatches;
 		for (int surface = 0; surface < kCharmapLegendCount; ++surface)
 			swatches.push_back(swatch_of(MissionGroundOverlay::Surfaces, surface, {}));
-		draw_swatches(swatches, brush.surface, "Surface class",
-		              "The class the game reads under a body or a round there: its footsteps, its impacts, its tyres.",
-		              [&](int value) { set("surface", io::json_number(value)); });
+		draw_swatches(swatches, brush.surface, [&](int value) { set("surface", io::json_number(value)); });
 		ui_kit::WrapRow row;
 		int held = brush.surface;
 		row.next(ui_kit::field_width(ImGui::GetFontSize() * 7.0f, "Class"));
 		ImGui::SetNextItemWidth(ImGui::GetFontSize() * 7.0f);
 		ImGui::InputInt("Class", &held);
-		ui_kit::tooltip("Any class, 0 to 255: the tile set tables name the first 20. The game reads one past them as it "
+		ui_kit::tooltip("The surface class the brush paints: the class the game reads under a body or a round there (its "
+		                "footsteps, its impacts, its tyres). Any class, 0 to 255: the tile set tables name the first 20. The "
+		                "game reads one past them as it "
 		                "stands: its footsteps and weather treat it as no class they name, and a round striking there "
 		                "takes an impact row no shipped table authors (20 to 23) or the ammo's obj row (24 and past).");
 		if (ImGui::IsItemDeactivatedAfterEdit()) set("surface", io::json_number(std::clamp(held, 0, 255)));
@@ -325,15 +323,14 @@ void draw_paint_part(TerrainPaneContext &context) {
 		if (std::find(codes.begin(), codes.end(), brush.foliage) == codes.end()) codes.push_back(brush.foliage);
 		std::vector<Swatch> swatches;
 		for (const int code : codes) swatches.push_back(swatch_of(MissionGroundOverlay::Foliage, code, defs));
-		draw_swatches(swatches, brush.foliage, "Foliage code",
-		              "The code the foliage map holds there: each definition whose match lists it grows its model there.",
-		              [&](int value) { set("foliage", io::json_number(value)); });
+		draw_swatches(swatches, brush.foliage, [&](int value) { set("foliage", io::json_number(value)); });
 		ui_kit::WrapRow row;
 		int held = brush.foliage;
 		row.next(ui_kit::field_width(ImGui::GetFontSize() * 7.0f, "Code"));
 		ImGui::SetNextItemWidth(ImGui::GetFontSize() * 7.0f);
 		ImGui::InputInt("Code", &held);
-		ui_kit::tooltip("Any code, 0 to 255: a definition whose match lists it grows there.");
+		ui_kit::tooltip("The foliage code the brush paints into the foliage map: each definition whose match lists it grows "
+		                "its model there. Any code, 0 to 255.");
 		if (ImGui::IsItemDeactivatedAfterEdit()) set("foliage", io::json_number(std::clamp(held, 0, 255)));
 		const std::string grows = mission_overlay_brush_row(MissionGroundOverlay::Foliage, brush.foliage, defs).name;
 		const std::string name = "grows " + grows;

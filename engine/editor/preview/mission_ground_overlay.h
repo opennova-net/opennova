@@ -55,6 +55,13 @@ struct MissionOverlayImage {
 	std::vector<uint8_t> keys;
 	std::vector<size_t> counts;
 	size_t deciding = 0;
+	// Which picture this is and which of its rows each patch changed (S25, the painting feedback: a device uploads the
+	// rows that moved since it last took the picture, never the whole of it per stroke sample): `made` the viewport's
+	// mark of the whole make (0 none), `stamp` counting the patches since, each row the stamp of the last that changed
+	// it (empty: none since the make).
+	uint64_t made = 0;
+	uint64_t stamp = 0;
+	std::vector<uint64_t> row_stamps;
 	bool empty() const { return width <= 0 || height <= 0; }
 };
 inline constexpr uint8_t kKeptOffKey = 16;

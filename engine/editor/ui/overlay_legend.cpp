@@ -39,17 +39,15 @@ ViewportCanvas::LegendRow legend_row(const MissionOverlayRow &row, bool marked) 
 
 } // namespace
 
-void draw_overlay_legend(Workspace &workspace, ViewportCanvas &ui, const std::string &path, ViewportKind kind,
-                         const MissionOverlayImage &overlay, const std::vector<FoliageDef> &defs, bool open) {
-	if (overlay.kind == MissionGroundOverlay::None) return;
-	const SessionView &view = workspace.view();
-	// The value the brush lays, while it paints the overlay's map here.
-	const bool brushes = terrain_brush_overlay(view, path) == overlay.kind;
+ViewportCanvas::Legend overlay_legend_of(const SessionView &view, const std::string &path, const MissionOverlayImage &overlay,
+                                         const std::vector<FoliageDef> &defs, bool open) {
+	// The value the brush lays, while it paints the overlay's map here: its class or code, or with Erase the game's
+	// default in their place (class 1, code 0: session/terrain_stroke_paint.cpp).
+	const bool surfaces = overlay.kind == MissionGroundOverlay::Surfaces;
+	const bool brushes = overlay.kind != MissionGroundOverlay::None && terrain_brush_overlay(view, path) == overlay.kind;
 	const TerrainBrush &brush = view.workspace.terrain_brush;
-	const MissionOverlayRow laid =
-	        brushes ? mission_overlay_brush_row(overlay.kind,
-	                                            overlay.kind == MissionGroundOverlay::Surfaces ? brush.surface : brush.foliage, defs)
-	                : MissionOverlayRow();
+	const int value = brush.erase ? (surfaces ? 1 : 0) : surfaces ? brush.surface : brush.foliage;
+	const MissionOverlayRow laid = brushes ? mission_overlay_brush_row(overlay.kind, value, defs) : MissionOverlayRow();
 	ViewportCanvas::Legend legend;
 	legend.open = open;
 	legend.title = overlay.kind == MissionGroundOverlay::Surfaces ? "Surface classes" : "Foliage";
@@ -68,7 +66,13 @@ void draw_overlay_legend(Workspace &workspace, ViewportCanvas &ui, const std::st
 		legend.rows.push_back(std::move(line));
 	}
 	if (legend.rows.empty()) legend.empty = overlay.words;
-	if (!ui.legend(legend)) return;
+	return legend;
+}
+
+void draw_overlay_legend(Workspace &workspace, ViewportCanvas &ui, const std::string &path, ViewportKind kind,
+                         const MissionOverlayImage &overlay, const std::vector<FoliageDef> &defs, bool open) {
+	if (overlay.kind == MissionGroundOverlay::None) return;
+	if (!ui.legend(overlay_legend_of(workspace.view(), path, overlay, defs, open))) return;
 	io::JsonValue options = io::JsonValue::make_object();
 	options.set("legend", io::JsonValue::make_bool(!open));
 	workspace.request(request::set_viewport(path, viewport_change(kind, "options", std::move(options))));

@@ -282,7 +282,8 @@ std::string slots_words(const std::vector<FoliageDef> &defs, int mask) {
 std::string slots_name(const std::vector<FoliageDef> &defs, int mask) {
 	std::string out;
 	for (size_t slot = 0; slot < defs.size() && slot < 4; ++slot)
-		if (mask & (1 << slot)) out += (out.empty() ? "" : " + ") + defs[slot].graphic;
+		if (mask & (1 << slot))
+			out += (out.empty() ? "" : " + ") + (defs[slot].graphic.empty() ? std::string("(no model)") : defs[slot].graphic);
 	return out;
 }
 
@@ -416,12 +417,16 @@ bool mission_ground_overlay_patch(const MissionGround &ground, MissionOverlayIma
 	if (surface && ground.surface_side() <= 0) return false;
 	const terrain::SurfaceTypeMap sampler = ground.surface_sampler();
 	const terrain::FoliageMaskMap masks = ground.foliage_sampler(false);
+	// The rows this patch changes, stamped for a device's upload of them alone.
+	++image.stamp;
+	image.row_stamps.resize(size_t(image.height), 0);
 	for (const MissionOverlayRect &rect : rects) {
 		// The texels whose middles may lie in the rect, a texel more each way.
 		const int i0 = std::max(0, int(std::floor((rect.x0 - image.west) / image.texel)) - 1);
 		const int i1 = std::min(image.width - 1, int(std::floor((rect.x1 - image.west) / image.texel)) + 1);
 		const int j0 = std::max(0, int(std::floor((image.north - rect.y1) / image.texel)) - 1);
 		const int j1 = std::min(image.height - 1, int(std::floor((image.north - rect.y0) / image.texel)) + 1);
+		for (int j = j0; j <= j1; ++j) image.row_stamps[size_t(j)] = image.stamp;
 		for (int j = j0; j <= j1; ++j)
 			for (int i = i0; i <= i1; ++i) {
 				const size_t at = size_t(j) * size_t(image.width) + size_t(i);

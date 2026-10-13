@@ -5,6 +5,7 @@
 // files they account for at their stamps; the picture's files take those stamps, so the device's read of them does not
 // find them moved. A foliage stroke is an Update too: its patch the codes and the plane's rects whose foliage reads them.
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -15,6 +16,7 @@
 #include <editor/preview/mission_ground_overlay.h>
 #include <editor/preview/mission_map.h>
 #include <editor/preview/mission_viewport.h>
+#include <editor/preview/terrain_brush_overlay.h>
 #include <editor/preview/terrain_maps_patch.h>
 #include <editor/preview/terrain_patch.h>
 #include <editor/preview/terrain_viewport.h>
@@ -387,11 +389,10 @@ int test_imported() {
 }
 
 // The ground at (x, y) as the terrain query's sample reads it for the view `path`: its surface class (-1: none) and
-// foliage code, and whose ground answered.
+// foliage code.
 struct Sampled {
 	int surface = -1;
 	int code = -1;
-	std::string from;
 };
 Sampled sample(ProjectSession &session, const std::string &path, double x, double y) {
 	JsonValue args = JsonValue::make_object();
@@ -408,14 +409,19 @@ Sampled sample(ProjectSession &session, const std::string &path, double x, doubl
 	out.surface = int(ground->get_number("surface", -1.0));
 	if (const JsonValue *foliage = ground->get("foliage"); foliage && foliage->is_object())
 		out.code = int(foliage->get_number("code", -1.0));
-	out.from = answer.get_string("from", "");
 	return out;
+}
+
+// Whether the overlay's legend holds a row of `value` (a class, a grown mask).
+bool legend_holds(const MissionOverlayImage &overlay, int value) {
+	return std::any_of(overlay.legend.begin(), overlay.legend.end(), [&](const MissionOverlayRow &row) { return row.value == value; });
 }
 
 // The painting feedback (2026-10-13): the terrain query's sample reads unsaved paint. On an imported terrain the maps
 // are painted in the set's source images, and the import's outputs move only as the set is saved and imported again: a
 // sample answers from the view's own ground, which holds the paint (patched in place, or laid over a ground read whole
-// after the stroke: a view first followed once the stroke is in), never from the outputs read again.
+// after the stroke: a view first followed once the stroke is in), never from the outputs read again. A source read again
+// or closed unsaved (its paint dropped: the review's M1) has the view's ground read whole again, the overlay with it.
 int test_sample_unsaved() {
 	editor_test::TempProjectDir dir("opennova_editor_terrain_maps_view_sample");
 	editor_test::NoProcess platform;
@@ -438,31 +444,83 @@ int test_sample_unsaved() {
 	ask.points = {{8.0, 8.0}};
 	session.handle(request::terrain_stroke(m, ask));
 	TEST_EXPECT(session.outcome().done() && contains(session.outcome().stroke.changed.front().path, "isle_surface.png"));
+	const std::string surface_source = session.outcome().stroke.changed.front().path;
 	ask.plane = TerrainPlane::Foliage;
 	ask.brush.tool = TerrainTool::Foliage;
 	session.handle(request::terrain_stroke(m, ask));
 	TEST_EXPECT(session.outcome().done() && contains(session.outcome().stroke.changed.front().path, "isle_foliage"));
+	const std::string foliage_source = session.outcome().stroke.changed.front().path;
 	const Sampled painted = sample(session, m, 8.0, 8.0);
-	if (painted.surface != 5 || painted.code != 3)
-		std::fprintf(stderr, "  sampled surface %d, code %d from %s\n", painted.surface, painted.code, painted.from.c_str());
-	TEST_EXPECT(painted.surface == 5 && painted.code == 3 && painted.from == "view");
+	if (painted.surface != 5 || painted.code != 3) std::fprintf(stderr, "  sampled surface %d, code %d\n", painted.surface, painted.code);
+	TEST_EXPECT(painted.surface == 5 && painted.code == 3);
 	TEST_EXPECT(sample(session, m, 40.0, 40.0).surface == 2);
-	// The outputs stand as imported: a ground read over the project's files alone reads the old class, and the open
-	// sources laid over it (the query's rule where no view holds a ground) read the paint.
-	const auto *mission = static_cast<const MissionViewport *>(session.viewports().find(m, ViewportKind::Mission));
+	// The view's surfaces overlay shows the class painted.
+	session.handle(request::set_viewport(m, R"({"kind": "mission", "options": {"overlay": "surfaces"}})"));
+	const auto *mission = static_cast<const MissionViewport *>(session.viewports().follow_one(v, m, ViewportKind::Mission));
 	TEST_EXPECT(mission != nullptr);
 	if (!mission) return 1;
+	TEST_EXPECT(legend_holds(mission->overlay(), 5));
+	// The outputs stand as imported: a ground read over the project's files alone reads the old class, and the open
+	// sources laid over it (the views' rule at each whole read) read the paint; what a 512 a side source costs.
 	MissionGround read;
 	read.follow(v.findings.assets, v.findings.assets->generation(), mission->scene().header(), "isle1");
 	TEST_EXPECT(read.terrain() && read.terrain_at(8.0, 8.0, 0.0).surface == 2);
+	const auto laying = std::chrono::steady_clock::now();
 	TEST_EXPECT(lay_open_sources(v, m, read) && read.terrain_at(8.0, 8.0, 0.0).surface == 5 &&
 	            read.terrain_at(8.0, 8.0, 0.0).foliage_code == 3);
-	// Undone, the samples read the class as imported again.
+	std::printf("  lay_open_sources over the surface and foliage sources (512 a side): %.2f ms\n",
+	            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - laying).count());
+	// Discarded paint is gone from the view (the review's M1): the surface source read again unsaved reads the class as
+	// imported, the overlay with it; the foliage source closed unsaved reads its code as imported.
+	const auto discard_if_asked = [&] {
+		if (v.dialogs.unsaved_prompt.open) session.handle(request::resolve_unsaved(UnsavedChoice::Discard));
+		session.run_operations();
+	};
+	session.handle(request::reload_document(surface_source));
+	discard_if_asked();
+	const Sampled reloaded = sample(session, m, 8.0, 8.0);
+	if (reloaded.surface != 2) std::fprintf(stderr, "  reloaded: surface %d\n", reloaded.surface);
+	TEST_EXPECT(reloaded.surface == 2 && reloaded.code == 3);
+	session.viewports().follow_one(v, m, ViewportKind::Mission);
+	TEST_EXPECT(!legend_holds(mission->overlay(), 5));
+	session.handle(request::close_document(foliage_source));
+	discard_if_asked();
+	TEST_EXPECT(session.document_base_for(foliage_source) == nullptr);
+	const Sampled closed = sample(session, m, 8.0, 8.0);
+	if (closed.code != 0) std::fprintf(stderr, "  closed: code %d\n", closed.code);
+	TEST_EXPECT(closed.surface == 2 && closed.code == 0);
+	// Painted again, then undone: the samples read the class as imported again.
+	ask.plane = TerrainPlane::Surface;
+	ask.brush.tool = TerrainTool::Surface;
+	session.handle(request::terrain_stroke(m, ask));
+	TEST_EXPECT(session.outcome().done() && sample(session, m, 8.0, 8.0).surface == 5);
 	session.handle(request::undo(m));
-	session.handle(request::undo(m));
-	const Sampled undone = sample(session, m, 8.0, 8.0);
-	TEST_EXPECT(undone.surface == 2 && undone.code == 0);
-	std::printf("sample: unsaved paint of an imported terrain's sources read from the view's ground, the outputs as imported\n");
+	TEST_EXPECT(sample(session, m, 8.0, 8.0).surface == 2);
+	std::printf("sample: unsaved paint of an imported terrain's sources read from the view's ground, the outputs as imported; "
+	            "a source read again or closed unsaved drops its paint from the view\n");
+	return 0;
+}
+
+// BrushOverlay alone (the review's m2): a choice of the person's as the view is made, or equal to the brush's own while
+// it paints, stands; the body says null for it.
+int test_brush_overlay_rule() {
+	BrushOverlay made;
+	MissionGroundOverlay overlay = MissionGroundOverlay::Foliage;
+	made.chosen(); // the set_viewport that made the view named its overlay
+	TEST_EXPECT(!made.follow(MissionGroundOverlay::Surfaces, overlay) && overlay == MissionGroundOverlay::Foliage);
+	TEST_EXPECT(made.to_json().is_null());
+	TEST_EXPECT(!made.follow(MissionGroundOverlay::None, overlay) && overlay == MissionGroundOverlay::Foliage);
+	BrushOverlay same;
+	overlay = MissionGroundOverlay::None;
+	TEST_EXPECT(same.follow(MissionGroundOverlay::Surfaces, overlay) && overlay == MissionGroundOverlay::Surfaces);
+	TEST_EXPECT(same.to_json().get_string("overlay", "") == "surfaces");
+	same.chosen(); // the person asks for the surfaces too: theirs now
+	TEST_EXPECT(same.to_json().is_null());
+	TEST_EXPECT(!same.follow(MissionGroundOverlay::None, overlay) && overlay == MissionGroundOverlay::Surfaces);
+	// A new painting imposes its map again, and goes back to the person's choice (the surfaces) after.
+	TEST_EXPECT(same.follow(MissionGroundOverlay::Foliage, overlay) && overlay == MissionGroundOverlay::Foliage);
+	TEST_EXPECT(same.follow(MissionGroundOverlay::None, overlay) && overlay == MissionGroundOverlay::Surfaces);
+	std::printf("brush overlay rule: a choice as the view is made and one equal to the brush's stand\n");
 	return 0;
 }
 
@@ -545,7 +603,7 @@ int test_brush_overlay() {
 	TEST_EXPECT(shown(m, "mission") == "surfaces");
 	session.handle(request::set_viewport(m, R"({"kind": "mission", "options": {"overlay": "foliage"}})"));
 	devices.sync(session);
-	TEST_EXPECT(shown(m, "mission") == "foliage");
+	TEST_EXPECT(shown(m, "mission") == "foliage" && brushed(m, "mission") == "null");
 	TEST_EXPECT(brush("raise"));
 	TEST_EXPECT(shown(m, "mission") == "foliage" && brushed(m, "mission") == "null");
 	// The person's own overlay is what painting returns to.
@@ -553,6 +611,16 @@ int test_brush_overlay() {
 	TEST_EXPECT(shown(m, "mission") == "surfaces" && brushed(m, "mission") == "surfaces then foliage");
 	TEST_EXPECT(brush("none"));
 	TEST_EXPECT(shown(m, "mission") == "foliage");
+	// The person asking for the brush's own overlay while it paints keeps it: theirs, not put back as the tool moves.
+	TEST_EXPECT(brush("surface"));
+	TEST_EXPECT(shown(m, "mission") == "surfaces" && brushed(m, "mission") == "surfaces then foliage");
+	session.handle(request::set_viewport(m, R"({"kind": "mission", "options": {"overlay": "surfaces"}})"));
+	devices.sync(session);
+	TEST_EXPECT(shown(m, "mission") == "surfaces" && brushed(m, "mission") == "null");
+	TEST_EXPECT(brush("none"));
+	TEST_EXPECT(shown(m, "mission") == "surfaces");
+	session.handle(request::set_viewport(m, R"({"kind": "mission", "options": {"overlay": "foliage"}})"));
+	devices.sync(session);
 	// The legend folded and opened: the option on the wire, no Update of the device.
 	editor_test::FakeDevice *device = devices.held(m, ViewportKind::Mission);
 	TEST_EXPECT(device != nullptr);
@@ -593,6 +661,7 @@ int main() {
 	failures += test_view();
 	failures += test_imported();
 	failures += test_sample_unsaved();
+	failures += test_brush_overlay_rule();
 	failures += test_brush_overlay();
 	if (failures == 0) std::printf("editor_terrain_maps_view: all tests passed\n");
 	return failures == 0 ? 0 : 1;

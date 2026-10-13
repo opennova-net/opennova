@@ -360,6 +360,7 @@ bool MissionViewport::follow_overlay_(const SessionView &view) {
 	overlay_ = mission_ground_overlay(terrain_ground_, kind);
 	overlay_ground_ = terrain_ground_.revision();
 	++overlay_serial_;
+	overlay_.made = overlay_serial_;
 	return true;
 }
 
@@ -668,6 +669,8 @@ void MissionViewport::apply_(const io::JsonValue &json, PreviewClock &clock) {
 		if (drawn != options_) options_moved_ = true;
 		options_ = options;
 	}
+	// S25: an overlay the person names is theirs over the brush's (BrushOverlay::chosen).
+	if (const JsonValue *member = json.get("options"); member && member->get("overlay") && error.empty()) brush_overlay_.chosen();
 	if (const JsonValue *member = json.get("camera")) {
 		mission_camera_from_json(*member, camera_, error);
 		framed_ = true; // a camera set stands over the first framing

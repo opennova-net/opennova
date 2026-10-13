@@ -187,10 +187,10 @@ void MissionGround::follow(const std::shared_ptr<const FileSource> &files, uint6
 	// A file it read is asked its stamp only where the files' generation moved.
 	const bool moved = generation != generation_ && files && stamps_.moved(*files);
 	generation_ = generation;
-	if (read_once_ && key == key_ && !moved) return;
+	if (read_once_ && key == key_ && !moved && !read_again_) return;
 	// S25: the placed tiles alone moved (a tile tool's edit, the mission's .til made or read again): read again in
 	// place, the terrain read standing (retile), never the whole terrain per drag sample.
-	if (read_once_ && key == key_ && store_.valid() && tiles_alone_moved_(*files)) {
+	if (read_once_ && key == key_ && !read_again_ && store_.valid() && tiles_alone_moved_(*files)) {
 		const auto stamped = std::make_shared<StampedFiles>(files);
 		const terrain::TerrainFileReader read = [stamped](const std::string &name, std::vector<uint8_t> &out) {
 			return stamped->read(name, out);
@@ -206,6 +206,7 @@ void MissionGround::follow(const std::shared_ptr<const FileSource> &files, uint6
 		return;
 	}
 	read_once_ = true;
+	read_again_ = false;
 	key_ = std::move(key);
 	read_(files, header);
 }

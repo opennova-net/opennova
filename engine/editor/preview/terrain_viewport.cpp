@@ -272,6 +272,7 @@ bool TerrainViewport::follow_overlay_(const SessionView &view) {
 	overlay_ = mission_ground_overlay(ground_, kind);
 	overlay_ground_ = ground_.revision();
 	++overlay_serial_;
+	overlay_.made = overlay_serial_;
 	return true;
 }
 
@@ -500,6 +501,8 @@ void TerrainViewport::apply_(const io::JsonValue &json, PreviewClock &) {
 			if (options.foliage != options_.foliage || options.water != options_.water || options.overlay != options_.overlay)
 				options_moved_ = true;
 			options_ = options;
+			// S25: an overlay the person names is theirs over the brush's (BrushOverlay::chosen).
+			if (member->get("overlay")) brush_overlay_.chosen();
 		}
 	}
 	if (const JsonValue *member = json.get("camera")) mission_camera_from_json(*member, camera_, error);

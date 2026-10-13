@@ -16,6 +16,7 @@ namespace opennova::editor {
 bool TerrainFamilyFollow::follow(const SessionView &view, const std::vector<std::pair<TerrainPlane, std::string>> &files,
                                  TerrainPatches &out) {
 	bool told = true;
+	unsaid_.clear();
 	std::vector<Followed> now;
 	for (const auto &[plane, path] : files) {
 		Followed state;
@@ -38,13 +39,16 @@ bool TerrainFamilyFollow::follow(const SessionView &view, const std::vector<std:
 		const bool opened = was && !was->open && state.open;
 		if (was && !opened && (was->open != state.open || was->identity != state.identity || was->load != state.load)) {
 			told = false;
+			unsaid_.push_back(path);
 		} else if (was && document && (opened || was->revision != state.revision)) {
 			ChangeSet changes;
 			const RasterChanges *raster = nullptr;
 			if (document->changes_since(opened ? state.load : was->load, opened ? 0 : was->revision, changes))
 				raster = std::get_if<RasterChanges>(&changes);
-			if (!raster) told = false;
-			else
+			if (!raster) {
+				told = false;
+				unsaid_.push_back(path);
+			} else
 				for (const RasterRegion &region : raster->regions) out.add(plane, path, region);
 		}
 		now.push_back(std::move(state));
@@ -66,7 +70,14 @@ bool TerrainStrokeFollow::follow(const SessionView &view, const DocumentBase &do
 				planes.emplace_back(static_cast<TerrainPlane>(i), family.planes[i].path);
 	TerrainPatches now;
 	const bool told = follow_.follow(view, planes, now);
-	if (!told) return !stroking;
+	if (!told) {
+		// An import's source whose paint the ground held, closed or read again: the ground read whole at its next follow
+		// (the sources still open laid over it then).
+		for (const std::string &path : follow_.unsaid())
+			for (const TerrainFamilyFile &file : family.planes)
+				if (!file.import_output.empty() && file.path == path) ground.read_again();
+		return !stroking;
+	}
 	bool maps = false;
 	for (const TerrainPatch &patch : now.patches) {
 		// Out of a stroke only the planes the device patches in place are (a bake's landing, an undo or a redo of a

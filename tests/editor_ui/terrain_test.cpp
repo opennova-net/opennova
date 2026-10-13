@@ -19,6 +19,8 @@
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/terrain_viewport.h>
 #include <editor/ui/editor_requests.h>
+#include <editor/ui/overlay_legend.h>
+#include <editor/ui/viewport_canvas.h>
 
 #include "editor_ui_test_support.h"
 
@@ -716,6 +718,51 @@ void test_painting_feedback() {
 	run.take();
 	legend = MissionRun::drawn_window("/overlay_legend_");
 	CHECK(legend && legend->Scroll.y > scrolled, "the legend scrolled to the brush's class");
+	// A class in the middle after the last: scrolled back up to it, short of the legend's top (the review's m5).
+	const float bottom = legend ? legend->Scroll.y : 0.0f;
+	run.session.handle(request::set_workspace(R"({"terrain_brush": {"surface": 10}})"));
+	run.settle();
+	run.take();
+	legend = MissionRun::drawn_window("/overlay_legend_");
+	const float middle = legend ? legend->Scroll.y : 0.0f;
+	CHECK(legend && middle < bottom && middle > 0.0f, "the legend scrolled back to a class in its middle");
+	// Erase: the row of what the brush lays marked, class 1 (the game's default), never the brush's class (m3); the
+	// legend scrolled up to it.
+	run.session.handle(request::set_workspace(R"({"terrain_brush": {"erase": true}})"));
+	run.settle();
+	run.take();
+	{
+		const ViewportCanvas::Legend erasing =
+		        overlay_legend_of(v, run.path, model->overlay(), model->ground_reader().foliage_defs(), true);
+		std::vector<std::string> marked;
+		for (const ViewportCanvas::LegendRow &row : erasing.rows)
+			if (row.marked) marked.push_back(row.key);
+		CHECK(marked == std::vector<std::string>{"1"}, "Erase: class 1 the row marked");
+		legend = MissionRun::drawn_window("/overlay_legend_");
+		CHECK(legend && legend->Scroll.y < middle, "Erase: the legend scrolled up to class 1");
+	}
+	run.session.handle(request::set_workspace(R"({"terrain_brush": {"erase": false}})"));
+	run.settle();
+	run.take();
+	// A drag over the panel reaches nothing under it: no stroke, the camera standing (m5).
+	legend = MissionRun::drawn_window("/overlay_legend_");
+	CHECK(legend != nullptr, "the legend drawn");
+	if (legend) {
+		const opennova::editor::OrbitCamera before = model->camera();
+		const ImVec2 at(legend->Pos.x + legend->Size.x * 0.5f, legend->Pos.y + legend->Size.y * 0.75f);
+		run.ui.mouse(at.x, at.y);
+		run.ui.button(true);
+		for (int i = 1; i <= 4; ++i) run.ui.mouse(at.x + 6.0f * float(i), at.y - 3.0f * float(i));
+		run.ui.button(false);
+		run.settle();
+		const std::vector<EditorRequest> pressed = run.take();
+		const opennova::editor::OrbitCamera after = model->camera();
+		CHECK(of_kind(pressed, EditorRequestKind::TerrainStroke).empty(), "no stroke from a drag over the legend");
+		CHECK(after.yaw == before.yaw && after.pitch == before.pitch && after.distance == before.distance &&
+		              after.target.x == before.target.x && after.target.z == before.target.z,
+		      "the camera stands under the legend");
+		run.ui.away();
+	}
 	// Foliage: the foliage overlay, the pane whole too.
 	body = tab_body();
 	CHECK(body && run.ui.click_item(item_id(body->ID, {"Foliage"})), "the Foliage tool clicked");
