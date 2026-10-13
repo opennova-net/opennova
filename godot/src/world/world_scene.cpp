@@ -27,6 +27,7 @@
 #include "env/water.h"
 #include "env/weather.h"
 #include "render/frame_fx.h"
+#include "render/visual_layers.h"
 #include "resource_index/resource_root.h"
 #include "terrain/foliage_dispatcher.h"
 #include "terrain/terrain.h"
@@ -38,8 +39,8 @@ namespace godot {
 namespace {
 
 // The capture layer the cube capture's cameras draw (the sky and the bodies
-// join it): EnvironmentCubeCapture's capture mask.
-constexpr uint32_t kEnvironmentCaptureLayerMask = 1024;
+// join it).
+constexpr uint32_t kEnvironmentCaptureLayerMask = visual_layers::ENVIRONMENT_CAPTURE;
 
 // A NodePath property a row takes and the row it names.
 struct RowPath {
@@ -442,6 +443,12 @@ void WorldScene::hold_globals(bool p_held) const {
 	if (nodes_.environment_cube != nullptr) {
 		nodes_.environment_cube->set_globals_held(p_held);
 	}
+	if (nodes_.celestial != nullptr) {
+		nodes_.celestial->set_globals_held(p_held);
+	}
+	if (nodes_.foliage != nullptr) {
+		nodes_.foliage->set_globals_held(p_held);
+	}
 }
 
 void WorldScene::publish_globals() const {
@@ -449,10 +456,7 @@ void WorldScene::publish_globals() const {
 		nodes_.environment->republish_shader_globals();
 	}
 	if (nodes_.water != nullptr) {
-		const bool held = nodes_.water->is_globals_held();
-		nodes_.water->set_globals_held(false);
-		nodes_.water->set_world_rendering_enabled(true);
-		nodes_.water->set_globals_held(held);
+		nodes_.water->republish_globals();
 	}
 	if (nodes_.weather != nullptr) {
 		nodes_.weather->republish_globals();
@@ -460,14 +464,24 @@ void WorldScene::publish_globals() const {
 	if (nodes_.environment_cube != nullptr) {
 		nodes_.environment_cube->republish_globals();
 	}
+	if (nodes_.celestial != nullptr) {
+		nodes_.celestial->republish_globals();
+	}
+	if (nodes_.foliage != nullptr) {
+		nodes_.foliage->republish_globals();
+	}
 }
 
 // --- the terrain's load ------------------------------------------------------------
 
 void prepare_terrain_load(
-		TerrainData &p_data, const String &p_tile_set, const String &p_environment_file) {
+		TerrainData &p_data, const String &p_tile_set, const String &p_environment) {
 	p_data.set_mission_tile_set(p_tile_set);
-	p_data.set_mission_environment(p_environment_file);
+	// The header names the .env without its extension, as the time-of-day
+	// load opens it (Environment_LoadTimeOfDayConfig forces "env"); none
+	// named, none read.
+	p_data.set_mission_environment(
+			p_environment.is_empty() ? String() : p_environment + String(".env"));
 }
 
 Ref<TerrainTileInfo> read_mission_tiles(const Ref<ResourceRoot> &p_root,
@@ -504,6 +518,33 @@ Ref<TerrainTileInfo> read_mission_tiles(const Ref<ResourceRoot> &p_root,
 	Ref<TerrainTileInfo> tiles;
 	tiles.instantiate();
 	return tiles->load_from_bytes(til) == OK ? tiles : Ref<TerrainTileInfo>();
+}
+
+// --- the table's GDScript seam ----------------------------------------------------
+
+Array WorldSceneTable::get_rows() {
+	return WorldScene::describe_rows();
+}
+
+void WorldSceneTable::build(Node *p_parent, bool p_held_globals) {
+	if (p_parent != nullptr) {
+		(void)WorldScene::create(*p_parent, WorldScene::all_rows(), p_held_globals);
+	}
+}
+
+void WorldSceneTable::clear_terrain(Node *p_parent) {
+	if (p_parent != nullptr) {
+		WorldScene::bind(*p_parent).clear_terrain();
+	}
+}
+
+void WorldSceneTable::_bind_methods() {
+	ClassDB::bind_static_method(
+			"WorldSceneTable", D_METHOD("get_rows"), &WorldSceneTable::get_rows);
+	ClassDB::bind_static_method("WorldSceneTable", D_METHOD("build", "parent", "held_globals"),
+			&WorldSceneTable::build);
+	ClassDB::bind_static_method("WorldSceneTable", D_METHOD("clear_terrain", "parent"),
+			&WorldSceneTable::clear_terrain);
 }
 
 } // namespace godot

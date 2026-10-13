@@ -163,16 +163,6 @@ int GameWorld::clamp_object_detail(int p_level) {
 	return opennova::renderer::clamp_object_lod_detail(p_level);
 }
 
-Array GameWorld::get_scene_rows() {
-	return WorldScene::describe_rows();
-}
-
-void GameWorld::build_scene_rows(Node *p_parent, bool p_held_globals) {
-	if (p_parent != nullptr) {
-		(void)WorldScene::create(*p_parent, WorldScene::all_rows(), p_held_globals);
-	}
-}
-
 int GameWorld::texfilter_level_fresh_profile() {
 	return opennova::renderer::kTexFilterLevelFreshProfile;
 }
@@ -770,10 +760,6 @@ void GameWorld::_bind_methods() {
 			&GameWorld::object_detail_fresh_profile);
 	ClassDB::bind_static_method("GameWorld", D_METHOD("clamp_object_detail", "level"),
 			&GameWorld::clamp_object_detail);
-	ClassDB::bind_static_method(
-			"GameWorld", D_METHOD("get_scene_rows"), &GameWorld::get_scene_rows);
-	ClassDB::bind_static_method("GameWorld", D_METHOD("build_scene_rows", "parent", "held_globals"),
-			&GameWorld::build_scene_rows);
 	ClassDB::bind_method(D_METHOD("set_texfilter_level", "level"), &GameWorld::set_texfilter_level);
 	ClassDB::bind_method(D_METHOD("get_texfilter_level"), &GameWorld::get_texfilter_level);
 	ClassDB::bind_method(D_METHOD("get_session_texfilter_level"),

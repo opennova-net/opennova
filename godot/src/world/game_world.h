@@ -196,12 +196,6 @@ public:
 	int get_object_detail() const { return object_detail_; }
 	static int object_detail_fresh_profile();
 	static int clamp_object_detail(int p_level);
-	// The scene stack's table (world/world_scene.h): each row's name, class,
-	// NodePath properties and capture layer, in game_world.tscn's order, and
-	// every row made under `parent` from it (the editor's devices make theirs
-	// the same way): what a test pins the packaged scene against.
-	static Array get_scene_rows();
-	static void build_scene_rows(Node *p_parent, bool p_held_globals);
 	// game.cfg's texfilter_level (engine: renderer/texture_filter.h): the shell
 	// hands over its persisted options word whenever it changes. The model
 	// effects' filter follows it at once (retail reloads every effect at the
@@ -739,9 +733,11 @@ private:
 	bool apply_join_wire_til_if_ready();
 	void place_streamed_mission_objects(const Ref<Simulation> &p_sim);
 	void clear_mission_tile_info();
-	// The terrain's load: the .trn, then overcast.def and the mission's `p_env_path` (empty: none) through the
-	// terrain's parser (D-TERRAIN-18), with the mission's tile set over its tilestrip.
-	bool load_terrain(const String &p_trn_path, const String &p_tile_set, const String &p_env_path);
+	// The terrain's load: the .trn, then overcast.def and the mission's .env (`p_environment`, its
+	// name without the extension; empty: none) through the terrain's parser (D-TERRAIN-18), with
+	// the mission's tile set over its tilestrip.
+	bool load_terrain(
+			const String &p_trn_path, const String &p_tile_set, const String &p_environment);
 	void configure_foliage();
 	int start_runtime(const Ref<MissionData> &p_mission, const String &p_bms_name);
 	void load_player_weapon_profile();

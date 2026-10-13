@@ -159,6 +159,13 @@ public:
 	void clear();
 	void release();
 	FoliageMaskReport get_report() const;
+	// The hold (ADR 0046 S14, E13), as MissionEnvironment's: while held, the
+	// pass writes none of its process-wide globals (the target, the two views'
+	// active flags and eyes); its frames still compile. republish_globals
+	// writes the pass's current set whatever the hold. The game never holds.
+	void set_globals_held(bool p_held) { globals_held_ = p_held; }
+	bool is_globals_held() const { return globals_held_; }
+	void republish_globals();
 
 private:
 	std::shared_ptr<FoliageMaskFrame> _build_frame(
@@ -193,6 +200,7 @@ private:
 	Vector3 eye_;
 	bool eye_written_ = false;
 	bool texture_bound_ = false;
+	bool globals_held_ = false;
 	int64_t last_draws_ = 0;
 	int64_t last_instances_ = 0;
 	// Whether the main / Inset frame carries masks (each view's active global).

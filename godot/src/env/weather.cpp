@@ -109,12 +109,14 @@ void Weather::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_cloud_uv_rate_per_second"),
 			&Weather::get_cloud_uv_rate_per_second);
 
-	// The render-frame drive: the frame pipeline's environment leg and the
-	// tests call it; the node never self-clocks through a process callback.
+	// The hold (E13) and its read-backs.
 	ClassDB::bind_method(D_METHOD("is_globals_held"), &Weather::is_globals_held);
 	ClassDB::bind_static_method(
 			"Weather", D_METHOD("get_global_writes"), &Weather::get_global_writes);
 	ClassDB::bind_method(D_METHOD("republish_globals"), &Weather::republish_globals);
+
+	// The render-frame drive: the frame pipeline's environment leg and the
+	// tests call it; the node never self-clocks through a process callback.
 	ClassDB::bind_method(D_METHOD("advance_frame", "delta"),
 			&Weather::advance_frame);
 
@@ -181,6 +183,11 @@ void Weather::republish_globals() {
 		return;
 	}
 	_write_globals(env);
+	// With no mission behind it, no local player hashes the rings: the
+	// registers hold no other picture's pair.
+	if (_bound_sim() == nullptr) {
+		ObjectData::set_weather_ctrl_registers(0, 0);
+	}
 }
 
 void Weather::publish_absent() {

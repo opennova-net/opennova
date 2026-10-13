@@ -129,7 +129,7 @@ int GameWorld::load_world(const String &p_dir) {
 	clear_mission_tile_info();
 	resource_root_ = resource_root;
 	load_environment(terrain_file_, env_file_);
-	if (!load_terrain(terrain_file_, String(), env_file_)) {
+	if (!load_terrain(terrain_file_, String(), env_file_.get_basename())) {
 		emit_signal(kSignalLoadFailed, vformat("failed to load %s", terrain_file_));
 		return ERR_CANT_OPEN;
 	}
@@ -295,15 +295,12 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	Ref<MissionInfo> mission_info = p_mission->get_info();
 	mission_clock_start_q8_8_ = mission_info->get_start_time();
 	mission_clock_minutes_per_day_ = mission_info->get_minutes_per_day();
-	if (env_ != nullptr) {
-		env_->configure_mission_clock(mission_clock_start_q8_8_, mission_clock_minutes_per_day_);
-	}
+	scene_.configure_mission_clock(mission_clock_start_q8_8_, mission_clock_minutes_per_day_);
 	prepare_world_driven_weather();
 	timeline->end_span();
 	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_TERRAIN));
 	timeline->span("terrain");
-	if (!load_terrain(trn, p_mission->get_tile_set_ref(),
-				p_mission->get_environment_ref().is_empty() ? String() : env_name)) {
+	if (!load_terrain(trn, p_mission->get_tile_set_ref(), p_mission->get_environment_ref())) {
 		emit_signal(kSignalLoadFailed, vformat("failed to load %s", trn));
 		timeline->finish();
 		return ERR_CANT_OPEN;
@@ -864,10 +861,11 @@ void GameWorld::clear_mission_tile_info() {
 
 // --- terrain + foliage ---------------------------------------------------------------
 
-bool GameWorld::load_terrain(const String &p_trn_path, const String &p_tile_set, const String &p_env_path) {
+bool GameWorld::load_terrain(
+		const String &p_trn_path, const String &p_tile_set, const String &p_environment) {
 	Ref<TerrainData> data;
 	data.instantiate();
-	prepare_terrain_load(**data, p_tile_set, p_env_path);
+	prepare_terrain_load(**data, p_tile_set, p_environment);
 	if (data->load_from_resource_root(resource_root_, p_trn_path) != OK) {
 		return false;
 	}

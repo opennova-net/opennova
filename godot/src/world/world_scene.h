@@ -18,6 +18,8 @@
 #include <string>
 
 #include <godot_cpp/classes/node.hpp>
+#include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/core/object.hpp>
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
@@ -146,10 +148,12 @@ public:
 
 	// The hold (ADR 0046 S14, E13) over every process-wide write the rows make:
 	// the environment's shader globals, the water's plane, the weather's
-	// globals and model rings, the cube's texture.
+	// globals and model rings, the cube's texture, the bodies' veil alpha, the
+	// foliage masks' target and eyes.
 	void hold_globals(bool p_held) const;
 	// Every such global written again from this scene's state, whatever the
-	// hold (another picture published its own since).
+	// hold (another picture published its own since); no row's state changes
+	// (the water's render activity stays as it is).
 	void publish_globals() const;
 
 private:
@@ -159,11 +163,11 @@ private:
 };
 
 // A TerrainData about to load a mission's terrain: the mission's tile set and
-// its .env (`environment_file`, "<name>.env", "" none), whose terrain lines
-// the terrain's parser takes after the .trn's (D-TERRAIN-18). Every
-// TerrainData load of a mission's terrain goes through it.
+// its .env (`environment`, the header's name without its extension, "" none),
+// whose terrain lines the terrain's parser takes after the .trn's
+// (D-TERRAIN-18). Every TerrainData load of a mission's terrain goes through it.
 void prepare_terrain_load(
-		TerrainData &p_data, const String &p_tile_set, const String &p_environment_file);
+		TerrainData &p_data, const String &p_tile_set, const String &p_environment);
 
 // The placed tiles a mission's load takes (mission::read_placed_tiles: the
 // mission's <mission>.til, else the terrain's own polytrn_tileinfo), parsed;
@@ -179,5 +183,20 @@ struct MissionTilesRead {
 Ref<TerrainTileInfo> read_mission_tiles(const Ref<ResourceRoot> &p_root,
 		const std::string &p_mission_file, const std::string &p_terrain,
 		const std::string &p_environment, MissionTilesRead *r_read = nullptr);
+
+// The table's GDScript seam, for the tests that pin game_world.tscn against it:
+// the rows as data, every row built under a parent, and a scene's terrain let
+// go. The devices call WorldScene directly.
+class WorldSceneTable : public Object {
+	GDCLASS(WorldSceneTable, Object)
+
+public:
+	static Array get_rows();
+	static void build(Node *p_parent, bool p_held_globals);
+	static void clear_terrain(Node *p_parent);
+
+protected:
+	static void _bind_methods();
+};
 
 } // namespace godot
