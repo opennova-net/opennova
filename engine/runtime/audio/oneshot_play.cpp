@@ -104,8 +104,22 @@ std::vector<EmitterLayer> emitter_layers(const lwf::File &bank, const lwf::Multi
 		row.min_u = static_cast<int32_t>(layer.min_distance);
 		row.volume = static_cast<int32_t>(member.volume);
 		row.clamp = static_cast<int32_t>(member.clamp_volume);
-		row.pitch_q16 = member.pitch_scaled;
 		out.push_back(row);
+	}
+	return out;
+}
+
+std::vector<AmbientLayerRow> ambient_layer_rows(const lwf::File &bank, const lwf::Multi &set,
+		const std::function<bool(const std::string &wave)> &has_wave) {
+	std::vector<AmbientLayerRow> out;
+	for (const EmitterLayer &layer : emitter_layers(bank, set)) {
+		const lwf::Sndparm &member = bank.sndparms[layer.sndparm];
+		if (member.single_index >= bank.singles.size())
+			continue;
+		const std::string &wave = bank.singles[member.single_index].path;
+		if (wave.empty() || !has_wave || !has_wave(wave))
+			continue;
+		out.push_back(AmbientLayerRow{ layer, wave });
 	}
 	return out;
 }
