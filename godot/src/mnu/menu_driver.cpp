@@ -158,8 +158,8 @@ public:
 	void set_widget_checked(int index, bool checked) override {
 		if (MenuFrame *f = frame()) f->set_widget_checked(index, checked);
 	}
-	void set_widget_text(int index, const std::string &text) override {
-		if (MenuFrame *f = frame()) f->set_widget_text(index, to_gd(text));
+	void set_widget_text(int index, const std::string &text, int hotkey_pos) override {
+		if (MenuFrame *f = frame()) f->set_widget_text(index, to_gd(text), hotkey_pos);
 	}
 	void set_widget_items(int index, const std::vector<std::string> &items) override {
 		// The items as the runtime holds them, bytes and all: a round trip
@@ -579,8 +579,8 @@ void MenuDriver::set_widget_checked(int p_id, bool p_checked) {
 	runtime_.set_widget_checked(p_id, p_checked);
 }
 bool MenuDriver::is_widget_checked(int p_id) const { return runtime_.is_widget_checked(p_id); }
-void MenuDriver::set_widget_text(int p_id, const String &p_text) {
-	runtime_.set_widget_text(p_id, to_std(p_text));
+String MenuDriver::set_widget_text(int p_id, const String &p_text) {
+	return to_gd(runtime_.set_widget_text(p_id, to_std(p_text)));
 }
 String MenuDriver::get_widget_text(int p_id) const {
 	return menu_text_to_gd(runtime_.get_widget_text(p_id));
@@ -685,7 +685,7 @@ int MenuDriver::table_sort_column(int p_id) const {
 // engine's fill (inmatch stat_screen_feed.h, where the witness lives) over the
 // records' own values, so the NAME and Squad cells take the roster's bytes.
 void MenuDriver::fill_stat_results(int p_id, const TypedArray<EndRoundColumn> &p_columns,
-		const TypedArray<EndRoundRow> &p_rows) {
+		const TypedArray<EndRoundRow> &p_rows, int p_local_slot) {
 	std::vector<opennova::inmatch::StatScreenColumn> columns;
 	columns.reserve(static_cast<size_t>(p_columns.size()));
 	for (int i = 0; i < p_columns.size(); ++i) {
@@ -698,7 +698,7 @@ void MenuDriver::fill_stat_results(int p_id, const TypedArray<EndRoundColumn> &p
 		const Ref<EndRoundRow> row = p_rows[i];
 		if (row.is_valid()) rows.push_back(row->value());
 	}
-	opennova::inmatch::fill_stat_results(runtime_, p_id, columns, rows);
+	opennova::inmatch::fill_stat_results(runtime_, p_id, columns, rows, p_local_slot);
 }
 
 // The death screen's SPAWNPOINTS_LIST from the compiled rows: the engine's items
@@ -1157,7 +1157,7 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("table_select_row", "id", "row", "additive"),
 			&MenuDriver::table_select_row, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("table_sort_column", "id"), &MenuDriver::table_sort_column);
-	ClassDB::bind_method(D_METHOD("fill_stat_results", "id", "columns", "rows"),
+	ClassDB::bind_method(D_METHOD("fill_stat_results", "id", "columns", "rows", "local_slot"),
 			&MenuDriver::fill_stat_results);
 	ClassDB::bind_method(D_METHOD("set_deploy_list_items", "id", "rows"),
 			&MenuDriver::set_deploy_list_items);

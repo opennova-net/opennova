@@ -16,6 +16,8 @@
 #include "resource_index/resource_root.h"
 #include "simulation/simulation.h"
 
+#include <net/novaworld/lobby_vars.h> // HostPlayerSlot (the hosting bind's own slot)
+
 #include <map>
 #include <string>
 
@@ -213,9 +215,10 @@ private:
 	bool nw_host_bound_ = false;
 	// Set once the feed starts (sync_nwu_session); cleared by reset().
 	bool nwu_feed_live_ = false;
-	// The roster slots last mirrored onto the hosting session: slot -> the
-	// per-slot signature (name|ip:port|team), so only a changed slot re-sends.
-	std::map<int, std::string> nw_roster_sent_;
+	// A listen host's own PlayerList slot as the hosting bind published it;
+	// the roster sync keeps its identity and follows its PlayerTeam / PlayerType.
+	opennova::HostPlayerSlot nw_self_slot_;
+	bool nw_self_slot_set_ = false;
 	// The typed session request at the shell seam (ADR 0017): exactly one is
 	// non-null during a net load -- the host screen's HostSessionOptions or
 	// the joiner's dial JoinTarget -- stamped onto MissionSetupOptions as

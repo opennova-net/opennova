@@ -46,10 +46,11 @@ void frame_set_caret(MenuFrameState &state, int index, int caret) {
 	frame_widget(state, index).caret = caret;
 }
 
-void frame_set_text(MenuFrameState &state, int index, const std::string &text) {
+void frame_set_text(MenuFrameState &state, int index, const std::string &text, int hotkey_pos) {
 	MenuWidgetState &row = frame_widget(state, index);
 	row.has_text = true;
 	row.text = text;
+	row.text_hotkey_pos = hotkey_pos;
 }
 
 void frame_set_rect(MenuFrameState &state, int index, int left, int top, int right, int bottom) {
@@ -211,8 +212,8 @@ void MenuStateFrame::set_widget_checked(int index, bool checked) {
 	frame_set_checked(state_, index, checked);
 	++serial_;
 }
-void MenuStateFrame::set_widget_text(int index, const std::string &text) {
-	frame_set_text(state_, index, text);
+void MenuStateFrame::set_widget_text(int index, const std::string &text, int hotkey_pos) {
+	frame_set_text(state_, index, text, hotkey_pos);
 	++serial_;
 }
 void MenuStateFrame::set_widget_items(int index, const std::vector<std::string> &items) {

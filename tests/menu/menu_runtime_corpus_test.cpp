@@ -100,7 +100,7 @@ public:
 	void set_widget_shown_override(int, bool) override {}
 	void set_widget_disabled(int, bool) override {}
 	void set_widget_checked(int, bool) override {}
-	void set_widget_text(int i, const std::string &t) override { texts_[i] = t; }
+	void set_widget_text(int i, const std::string &t, int) override { texts_[i] = t; }
 	void set_widget_items(int, const std::vector<std::string> &) override {}
 	void set_widget_selection(int, int, int, int) override {}
 	void set_widget_scroll_range(int, int, int, int, int) override {}

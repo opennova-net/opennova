@@ -7,6 +7,7 @@
 #include <base/gameprofile/gameprofile.h>
 #include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
+#include <formats/rtxt/rtxt.h>
 #include <runtime/menu/menu_edit.h>
 #include <runtime/menu/options_policy.h>
 
@@ -424,7 +425,7 @@ void MenuRuntime::replay_state_() {
 		if (state->has_shown) frame_->set_widget_shown_override(index, state->shown);
 		if (state->has_disabled) frame_->set_widget_disabled(index, state->disabled);
 		if (state->has_checked) frame_->set_widget_checked(index, state->checked);
-		if (state->has_text) frame_->set_widget_text(index, state->text);
+		if (state->has_text) frame_->set_widget_text(index, state->text, state->text_hotkey_pos);
 		if (state->has_items) frame_->set_widget_items(index, state->items);
 		if (state->has_selected_item || state->has_scroll_row)
 			frame_->set_widget_selection(index, state->selected_item, -1, state->scroll_row);
@@ -585,12 +586,57 @@ bool MenuRuntime::is_widget_checked(int id) const {
 	return w != nullptr && w->checked;
 }
 
-void MenuRuntime::set_widget_text(int id, const std::string &text) {
+namespace {
+
+// The classes whose vtable has the text set, slot +0x4C: each is the label set
+// or runs it first; the other classes' vtables end before the slot.
+// [orig: CButtonWnd_SetLabel @ 0x6572F0 on ??_7_StaticWnd 0x7E1C14 (+0x4C
+//  @ 0x7E1C60), _ButtonWnd 0x7E1CA4, _CheckWnd 0x7E128C, the radio's 0x7E1BA4,
+//  _SpinListWnd 0x7E131C, the list's 0x7E0D04, _LanWnd 0x7E204C, _ComboWnd
+//  0x7E2104, _TableWnd 0x7E08D4 (@ 0x7E0920); CEditWnd_SetText @ 0x661900
+//  (SetLabel @ 0x661912) on _EditWnd 0x7E2614; CMEditWnd_SetText @ 0x6612D0
+//  (SetLabel @ 0x6612df) on _MEditWnd 0x7E259C; ??_7_Window 0x7E0E0C,
+//  _ScrollWnd 0x7E13C4, _MarqueeWnd 0x7E21A4, _GLBTableWnd 0x7E2414,
+//  _RadioEditWnd 0x7E2244 and _GopherWnd 0x7E1F54 hold text at +0x4C]
+bool has_label_set(mnu::WindowType type) {
+	switch (type) {
+		case mnu::WindowType::Static:
+		case mnu::WindowType::Button:
+		case mnu::WindowType::CheckBox:
+		case mnu::WindowType::Radio:
+		case mnu::WindowType::SpinList:
+		case mnu::WindowType::List:
+		case mnu::WindowType::LanList:
+		case mnu::WindowType::Combo:
+		case mnu::WindowType::Table:
+		case mnu::WindowType::Edit:
+		case mnu::WindowType::MultilineEdit:
+			return true;
+		default:
+			return false;
+	}
+}
+
+} // namespace
+
+std::string MenuRuntime::set_widget_text(int id, const std::string &text) {
+	// The label set cuts the first {hot} marker, case-sensitively, and keeps
+	// where it stood; the rest of the text, later markers included, is the
+	// label [orig: CButtonWnd_SetLabel @ 0x6572F0 - strstr @ 0x657451, the
+	// offset @ 0x65746c, the tail shift @ 0x657476..0x657480]. The label is
+	// what an edit's notice carries [orig: CEditWnd_SetText @ 0x661900 - the
+	// label +732 @ 0x66195c into the 0x7000001 notice @ 0x661986].
+	const mnu::Window *w = index_.window(id);
+	int hotkey_pos = -1;
+	const std::string label =
+			w != nullptr && has_label_set(w->type) ? rtxt::strip_hotkey(text, hotkey_pos) : text;
 	MenuWidgetRuntimeState &state = state_of_(id);
-	state.text = text;
+	state.text = label;
+	state.text_hotkey_pos = hotkey_pos;
 	state.has_text = true;
 	const int index = frame_index(id);
-	if (index >= 0) frame_->set_widget_text(index, text);
+	if (index >= 0) frame_->set_widget_text(index, label, hotkey_pos);
+	return label;
 }
 
 void MenuRuntime::set_widget_rect(int id, int left, int top, int right, int bottom) {
@@ -901,8 +947,6 @@ void init_record(MenuTableColumn &record, int column, bool numeric_sort, int wid
 // The count over the records the table holds (menu_table.h): the authored ones
 // until code set a count, kept by a count that does not grow the table, every one
 // started over by one that does. [orig: CTableWnd_ResizeColumnCount @0x63f6c0]
-// A smaller count also frees every row's cells at or past it in the game, which
-// ours leaves in the rows (D-MNU-47) [orig: the row walk @0x63f90d..0x63f98d].
 void MenuRuntime::table_resize_records_(int id, int count) {
 	const int current = table_column_count_(id);
 	MenuWidgetRuntimeState &state = state_of_(id);
@@ -917,10 +961,28 @@ void MenuRuntime::table_resize_records_(int id, int count) {
 				if (h.set_up && h.column < current)
 					state.table_columns[static_cast<size_t>(h.column)].sort_cell = h.column;
 	}
-	if (count > current)
+	if (count > current) {
 		state.table_columns.assign(static_cast<size_t>(count), zeroed_record());
-	else
+	} else {
 		state.table_columns.resize(static_cast<size_t>(count));
+		// A smaller count frees every row's cells from it up to the old count: the
+		// text freed and NULLed, the image zeroed, so the cell is missing (D-MNU-43)
+		// and a later growth, which copies the old count's cells alone, reads it
+		// missing; the cell records (the values) stay [orig: the row walk
+		// @0x63f90d..0x63f98d - the free @0x63f945, the NULL @0x63f956, the image
+		// @0x63f967; the grow's copies @0x63f79b / @0x63f80b] (D-MNU-47).
+		bool freed = false;
+		for (MenuTableRow &row : state.table_rows) {
+			const int end = std::min(current, static_cast<int>(row.cells.size()));
+			for (int c = count; c < end; ++c) {
+				std::optional<std::string> &cell = row.cells[static_cast<size_t>(c)];
+				freed = freed || cell.has_value();
+				cell.reset();
+			}
+		}
+		if (freed)
+			push_table_rows_(id);
+	}
 	state.has_table_columns = true;
 }
 
@@ -982,9 +1044,15 @@ void MenuRuntime::table_set_cell_value(int id, int row, int col, int32_t value) 
 		push_table_rows_(id);
 }
 
-int32_t MenuRuntime::table_cell_value(int id, int row, int col) const {
+std::optional<int32_t> MenuRuntime::table_cell_record(int id, int row, int col) const {
 	const MenuWidgetRuntimeState *state = saved_state_(id);
-	return state != nullptr ? menu::table_cell_value(state->table_rows, row, col) : 0;
+	if (state == nullptr)
+		return std::nullopt;
+	return menu::table_cell_record(state->table_rows, row, col, table_column_count_(id));
+}
+
+int32_t MenuRuntime::table_cell_value(int id, int row, int col) const {
+	return table_cell_record(id, row, col).value_or(0);
 }
 
 void MenuRuntime::table_remove_row(int id, int row) {

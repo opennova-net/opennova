@@ -152,6 +152,9 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     // player's entity [orig: PlayerClass_InitEntity @0x4b10d0..0x4b10de].
     if (is_local && world.local_player_state != nullptr)
         world.local_player_state->radar.lock_tone = 0;
+    // The registry edge's republish. An embedder that binds the body's def and
+    // model after this builds the slices again once the model init stamped
+    // its bound radius (MissionKernel::bind_spawned_body).
     if (world.collision != nullptr)
         world.collision->refresh_after_registry_change(world);
     return h;

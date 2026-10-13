@@ -149,6 +149,48 @@ func test_the_session_copy_takes_the_profile_input_words() -> void:
 	assert_false(sim.is_session_auto_reload(), "auto-reload waits for the session copy")
 
 
+# The flipmouse and mousescale rows act on the session's LIVE look words only:
+# flipmouse flips the Y invert, mousescale steps the sensitivity by 16 (down on
+# the fire's sign bit) within 1..511; the profile record keeps its own words.
+# [orig: Input_HandleActionBinding case 9 `xor g_MouseInvertY, 1` @0x49afbb;
+#  case 17 @0x49b185..0x49b1b9]
+func test_the_look_rows_change_the_live_words_only() -> void:
+	var profiles := PlayerProfiles.new()
+	profiles.load_bytes(PackedByteArray(), false, PackedByteArray(), false, "")
+	assert_true(profiles.set_word("invert_mouse", 1))
+	assert_true(profiles.set_word("mouse_sensitivity", 500))
+	var world := WorldFixture.make_world(self)
+	world.set_player_profiles(profiles)
+	assert_eq(WorldFixture.load_mission(world, ProjectSettings.globalize_path(
+			WorldFixture.BOOT_FIXTURE_DIR)), OK)
+	var sim := world.get_sim()
+	assert_not_null(sim)
+	if sim == null:
+		return
+	var presenter: GameHudPresenter = autofree(GameHudPresenter.new())
+	presenter.setup(world, null, null)
+	presenter.poll_look_rows(true, false, false, true)
+	assert_false(sim.is_session_mouse_inverted(), "flipmouse flips the live invert")
+	presenter.poll_look_rows(true, false, false, true)
+	assert_false(sim.is_session_mouse_inverted(),
+			"a held row fires once: ours' press edge, not retail's auto-repeat (D-CTRL-6)")
+	presenter.poll_look_rows(false, false, false, true)
+	presenter.poll_look_rows(true, false, false, true)
+	assert_true(sim.is_session_mouse_inverted(), "the next press flips it back")
+	presenter.poll_look_rows(false, true, false, true)
+	assert_eq(sim.get_session_mouse_sensitivity(), 511, "500 + 16 clamps to 511")
+	presenter.poll_look_rows(false, false, false, true)
+	presenter.poll_look_rows(false, true, true, true)
+	assert_eq(sim.get_session_mouse_sensitivity(), 495, "the signed fire steps down")
+	presenter.poll_look_rows(false, false, false, true)
+	presenter.poll_look_rows(false, true, false, false)
+	assert_eq(sim.get_session_mouse_sensitivity(), 495, "no fire while gameplay input is closed")
+	assert_eq(profiles.get_word("invert_mouse"), 1, "the record keeps its invert")
+	assert_eq(profiles.get_word("mouse_sensitivity"), 500, "the record keeps its sensitivity")
+	# The toast over the shipped string's shape.
+	assert_eq(HudToggles.mouse_scale_toast(null, 495), "", "no table posts nothing")
+
+
 # /noreload forces the auto-reload global off whatever the record holds
 # [orig: dword_B4C4F4 @0x4A76E9; @0x551a48].
 func test_noreload_forces_auto_reload_off() -> void:

@@ -164,7 +164,9 @@ public:
 	void set_widget_checked(int p_index, bool p_checked);
 	void set_widget_focused(int p_index, bool p_focused);
 	void set_widget_caret(int p_index, int p_caret);
-	void set_widget_text(int p_index, const String &p_text);
+	// The label as the runtime's text set left it, `p_hotkey_pos` its cut
+	// {hot} offset (-1 none; engine MenuRuntime::set_widget_text).
+	void set_widget_text(int p_index, const String &p_text, int p_hotkey_pos);
 	// CWnd_SetRect: the widget's own rect (parent-relative design units).
 	void set_widget_rect(int p_index, const Rect2i &p_rect);
 	void set_widget_selection(int p_index, int p_selected_item, int p_hover_item,

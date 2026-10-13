@@ -173,6 +173,20 @@ int ControlsModel::pressed_key_for_token(const String &p_token) const {
 			physical_vk_down);
 }
 
+bool ControlsModel::is_token_fire_signed(const String &p_token) const {
+	Input *input = Input::get_singleton();
+	if (input == nullptr) {
+		return false;
+	}
+	uint16_t held = 0;
+	if (input->is_mouse_button_pressed(MOUSE_BUTTON_LEFT)) held |= opennova::controls::kMouseLeft;
+	if (input->is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)) held |= opennova::controls::kMouseRight;
+	if (input->is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE)) held |= opennova::controls::kMouseMiddle;
+	const auto key_down = [this](int vk) { return vk_down_(vk); };
+	return bindings_.fire_signed(bindings_.index_of_token(p_token.utf8().get_data()), held,
+			key_down);
+}
+
 bool ControlsModel::vk_down_(int p_vk) const {
 	Input *input = Input::get_singleton();
 	const int key = godot_key_from_vk(p_vk);
@@ -411,6 +425,8 @@ void ControlsModel::_bind_methods() {
 			&ControlsModel::advance_scripted_input);
 	ClassDB::bind_method(D_METHOD("pressed_key_for_token", "token"),
 			&ControlsModel::pressed_key_for_token);
+	ClassDB::bind_method(D_METHOD("is_token_fire_signed", "token"),
+			&ControlsModel::is_token_fire_signed);
 	ClassDB::bind_method(D_METHOD("set_keyboard_captured", "captured"),
 			&ControlsModel::set_keyboard_captured);
 	ClassDB::bind_method(D_METHOD("is_keyboard_captured"), &ControlsModel::is_keyboard_captured);

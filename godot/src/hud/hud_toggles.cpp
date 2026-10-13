@@ -4,7 +4,7 @@ using namespace godot;
 
 int HudToggles::poll(int p_rows_down, bool p_rows_share_key, bool p_chorded, bool p_active,
 		bool p_in_session, bool p_objective_game, bool p_local_alive, bool p_authority,
-		bool p_mp_session_peer) {
+		bool p_mp_session_peer, bool p_mouse_scale_negative) {
 	opennova::hud::HudKeyPoll keys;
 	opennova::hud::hud_key_poll_set_rows(keys, static_cast<uint32_t>(p_rows_down));
 	keys.rows_share_key = p_rows_share_key;
@@ -15,6 +15,7 @@ int HudToggles::poll(int p_rows_down, bool p_rows_share_key, bool p_chorded, boo
 	keys.local_alive = p_local_alive;
 	keys.authority = p_authority;
 	keys.mp_session_peer = p_mp_session_peer;
+	keys.mouse_scale_negative = p_mouse_scale_negative;
 	return static_cast<int>(opennova::hud::hud_toggles_poll(state_, keys));
 }
 
@@ -62,6 +63,10 @@ String HudToggles::friendly_tag_toast_key() const {
 }
 String HudToggles::verbose_toast_key() const {
 	return String(opennova::hud::verbose_toast_key(state_.mp_verbose));
+}
+String HudToggles::mouse_scale_toast(const Ref<RtxtStringFile> &p_gametext, int p_scale) {
+	return opennova::to_gd(
+			opennova::hud::mouse_scale_toast(game_text_lookup(p_gametext), p_scale));
 }
 void HudToggles::cycle_hud_color() {
 	state_.hud_color_index = opennova::hud::next_hud_color_index(state_.hud_color_index);
@@ -125,8 +130,8 @@ bool HudToggles::is_tip_showing() const { return opennova::hud::tip_is_showing(s
 void HudToggles::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("poll", "rows_down", "rows_share_key", "chorded", "active",
 								 "in_session", "objective_game", "local_alive", "authority",
-								 "mp_session_peer"),
-			&HudToggles::poll, DEFVAL(true), DEFVAL(false), DEFVAL(false));
+								 "mp_session_peer", "mouse_scale_negative"),
+			&HudToggles::poll, DEFVAL(true), DEFVAL(false), DEFVAL(false), DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("escape", "in_session", "spawn_gate", "authority"),
 			&HudToggles::escape, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("session_init", "in_session", "mp_session_peer"),
@@ -149,6 +154,8 @@ void HudToggles::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("cycle_friendly_tags"), &HudToggles::cycle_friendly_tags);
 	ClassDB::bind_method(D_METHOD("friendly_tag_toast_key"), &HudToggles::friendly_tag_toast_key);
 	ClassDB::bind_method(D_METHOD("verbose_toast_key"), &HudToggles::verbose_toast_key);
+	ClassDB::bind_static_method("HudToggles", D_METHOD("mouse_scale_toast", "gametext", "scale"),
+			&HudToggles::mouse_scale_toast);
 	ClassDB::bind_method(D_METHOD("cycle_hud_color"), &HudToggles::cycle_hud_color);
 	ClassDB::bind_method(D_METHOD("cycle_hud_detail"), &HudToggles::cycle_hud_detail);
 	ClassDB::bind_method(D_METHOD("cycle_showhud"), &HudToggles::cycle_showhud);
@@ -209,6 +216,9 @@ void HudToggles::_bind_methods() {
 	BIND_ENUM_CONSTANT(EVENT_SERVER_STATUS_VIEW_TOGGLED);
 	BIND_ENUM_CONSTANT(EVENT_SERVER_STATUS_SCORE_LIST_TOGGLED);
 	BIND_ENUM_CONSTANT(EVENT_QUIT_DIALOG_OPENED);
+	BIND_ENUM_CONSTANT(EVENT_MOUSE_FLIPPED);
+	BIND_ENUM_CONSTANT(EVENT_MOUSE_SCALE_STEPPED);
+	BIND_ENUM_CONSTANT(EVENT_MOUSE_SCALE_NEGATIVE);
 	BIND_ENUM_CONSTANT(SPECIAL_KEY_CONSUMED);
 	BIND_ENUM_CONSTANT(SPECIAL_KEY_CHAIN_TAKEN);
 	BIND_ENUM_CONSTANT(SPECIAL_KEY_QUIT_CONFIRMED);
@@ -237,5 +247,7 @@ void HudToggles::_bind_methods() {
 	BIND_ENUM_CONSTANT(ROW_AUDIO_EMOTE);
 	BIND_ENUM_CONSTANT(ROW_RADIO_MACRO);
 	BIND_ENUM_CONSTANT(ROW_TOGGLE_SERVER);
+	BIND_ENUM_CONSTANT(ROW_FLIP_MOUSE);
+	BIND_ENUM_CONSTANT(ROW_MOUSE_SCALE);
 	BIND_ENUM_CONSTANT(ROW_COUNT);
 }

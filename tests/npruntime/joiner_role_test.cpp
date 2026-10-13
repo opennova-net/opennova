@@ -465,6 +465,72 @@ bool run_spawn_stamps_equipped_adm_from_midframe_grant() {
 }
 
 
+// A full-BMS join's promote spawns each carrier's addeweap child with no spawn
+// origin, riding its carrier's attachment row; it is the decoded slot's own
+// entity on both peers, so the replica rule takes it and a confirmed gunner
+// mount on it attaches the local body (D-NET-620).
+// [orig: NapiNPClientMsg_EntityDeath @0x42EBC6; Entity_SpawnWeaponOverlays: the
+//  Pool_AllocEntry call @0x40F393]
+bool run_full_bms_child_gun_mount() {
+	Harness h;
+	w::World &world = h.kernel->world;
+	world.registry.configure_pool(1, 16);
+	world.load_systems();
+	h.role.poll_preload();
+	constexpr uint16_t self_handle = 0x0005;
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, self_handle, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	w::Entity *local = h.kernel->local.player();
+	if (!expect(local != nullptr && !h.kernel->wire_header_world,
+			"child gun: a full-BMS joiner's local body")) return false;
+	w::Entity carrier;
+	carrier.kind = w::EntityKind::Item;
+	carrier.item_id = 1889;
+	carrier.has_item_def = true;
+	carrier.item_type = 1;
+	carrier.spawn_origin = (1u << 24) | 4u;
+	carrier.position = local->position;
+	carrier.position.x += 1.0f;
+	carrier.health = carrier.health_max = 1000;
+	carrier.team = local->team;
+	const w::EntityHandle ch = world.registry.spawn(1, carrier);
+	w::Entity gun;
+	gun.kind = w::EntityKind::Item;
+	gun.item_id = 1887;
+	gun.has_item_def = true;
+	gun.item_type = 1;
+	gun.spawn_origin = w::kSpawnOriginNone;
+	gun.position = world.registry.get(ch)->position;
+	gun.health = gun.health_max = 100;
+	gun.team = local->team;
+	gun.emplacement_parent = ch;
+	gun.emplacement_parent_spawn_id = world.registry.get(ch)->registry_spawn_id;
+	gun.emplacement_pose_metadata_resolved = true;
+	w::Seat gunner;
+	gunner.type = w::SeatType::Gunner;
+	gunner.bone_index = 1;
+	gunner.source_name = "gunrx00";
+	gun.seats.push_back(gunner);
+	const w::EntityHandle gh = world.registry.spawn(1, gun);
+	for (const w::EntityHandle row_handle : {ch, gh}) {
+		auto &row = h.role.runtime->state().upsert(row_handle.packed);
+		row.type_id = static_cast<uint16_t>(world.registry.get(row_handle)->item_id);
+		row.cls = EntityClass::NoNetworkCallback;
+	}
+	auto &self = h.role.runtime->state().upsert(self_handle);
+	self.cls = EntityClass::Player;
+	self.type_id = w::kPlayerInfantryTypeId;
+	self.carrier_handle = gh.packed;
+	self.mount_bone = 1;
+	self.state_flags = w::kEntityFlagMounted;
+	self.state_flags_known = true;
+	h.role.run_tick(h.input);
+	local = h.kernel->local.player();
+	return expect(local != nullptr && local->mounted && local->mount_target == gh,
+			"a confirmed gunner mount on a full-BMS addeweap child attaches the local body");
+}
+
 // Retail drives the carrier from the mounted person's C2S 0x0C. Exercise
 // the joiner frame's confirmed mount, input and client prediction together.
 // [orig: Client_ProcessNetworkFrame @0x42c180;
@@ -487,6 +553,7 @@ bool run_confirmed_vehicle_drive(int occupancy, bool server_feedback = false,
 	vehicle.kind = w::EntityKind::Item;
 	vehicle.item_id = 1291;
 	vehicle.has_item_def = true;
+	vehicle.has_graphic_model = true;
 	vehicle.item_type = 1;
 	vehicle.item_attrib = 0x40u;
 	vehicle.net_class_code = static_cast<uint8_t>(EntityClass::Vehicle);
@@ -801,6 +868,7 @@ bool run_request_turns_l_before_the_0x26() {
 	w::Entity vehicle;
 	vehicle.kind = w::EntityKind::Item;
 	vehicle.has_item_def = true;
+	vehicle.has_graphic_model = true;
 	vehicle.position = local->position;
 	vehicle.position.x += 1.0f; // a step away: the scan aims from the eye at the seat point
 	vehicle.health = vehicle.health_max = 100;
@@ -883,6 +951,7 @@ bool run_remote_vehicle_occupancy() {
 	vehicle.kind = w::EntityKind::Item;
 	vehicle.item_id = 1291;
 	vehicle.has_item_def = true;
+	vehicle.has_graphic_model = true;
 	vehicle.item_type = 1;
 	vehicle.item_attrib = 0x40u;
 	vehicle.position = local->position;
@@ -1290,6 +1359,7 @@ bool run_local_replica_turret_channel() {
  w::Entity gun;
  gun.kind = w::EntityKind::Item;
  gun.has_item_def = true; // seats need the def (D-NET-422)
+ gun.has_graphic_model = true;
  gun.item_id = 123;
  gun.spawn_origin = 1u << 24;
  gun.yaw = 90;
@@ -1877,6 +1947,68 @@ bool run_respawn_key_resets_input_and_sends_0x41() {
 	return ok;
 }
 
+// The deploy action on a joiner (dispatch 12) under permanent death (the S2C
+// 0x08 bit 15): a player killed by a 0x0A tail at Health 0 is back in the
+// deploy flow, owing a pick, and its press sends the reliable 0x51 [i16
+// 0xFFFF] when spectators are allowed (bit 13) and nothing when they are not;
+// the 0x0E pick it owes never ships (the listen host's own press, live and
+// dead: host_role).
+// [orig: Input_HandleActionBinding -- the dead bit @0x49AD7B, case 12
+//  @0x49B024..0x49B03C, the convert @0x49B085..0x49B0B9;
+//  NapiNPClientMsg_HandleSessionConfig @0x428386 / @0x42838C]
+bool run_deploy_action_converts_a_dead_permanent_death_player() {
+	bool ok = true;
+	for (const bool spectators : {true, false}) {
+		Harness h;
+		h.kernel->world.load_systems();
+		h.role.poll_preload();
+		h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+		                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+		h.role.run_tick(h.input);
+		h.kernel->world.rules.mp_session = true;
+		SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+		const auto deliver = [&](uint8_t tag, std::vector<uint8_t> body) {
+			std::vector<uint8_t> packet;
+			frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+					{make_protocol_message(tag, std::move(body))}, packet);
+			auto datagram =
+					nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+			h.role.runtime->receive(datagram.data(), datagram.size());
+			h.role.run_tick(h.input);
+		};
+		// The 0x08 record: 10 rule dwords, 7 bytes, the rules word.
+		std::vector<uint8_t> config(47, 0);
+		const uint32_t rules = 0x8000u | (spectators ? 0x2000u : 0u);
+		for (int i = 0; i < 4; ++i) config.push_back(static_cast<uint8_t>(rules >> (8 * i)));
+		deliver(s2c::SESSION_CONFIG, config);
+		const replication::ClientState &cs = h.role.runtime->state();
+		ok &= expect(cs.permanent_death && cs.spectators_allowed == spectators,
+				"deploy action: the 0x08 latches permanent death and the spectator bit");
+		// The death edge: a 0x0A tail at Health 0 returns the joiner to the
+		// deploy flow (JoinerConnection::begin_redeployment), owing a pick.
+		FrameUpdate fu;
+		fu.local_tail_present = true;
+		fu.health = 0;
+		fu.complete = true;
+		deliver(s2c::PER_FRAME_UPDATE, encode_frame_update(fu));
+		ok &= expect(h.role.runtime->local_player_dead() &&
+				h.role.runtime->awaiting_deploy_pick(),
+				"deploy action: the death edge reads dead and owes a pick");
+		ProtocolMessage m;
+		const bool queued = h.role.request_deployment_pick(0xFFFFu);
+		for (int i = 0; i < 3; ++i) h.role.run_tick(h.input);
+		const bool convert = h.socket.last_message(c2s::SPECTATOR_RESPAWN, m) &&
+				m.payload == std::vector<uint8_t>{0xFF, 0xFF};
+		ok &= expect(queued == spectators && convert == spectators,
+				spectators ? "deploy action: a dead player under permanent death sends 0x51 [0xFFFF]"
+				           : "deploy action: with spectators off a dead player sends nothing");
+		ok &= expect(!h.socket.last_message(c2s::RESPAWN_REQUEST, m) &&
+				h.role.runtime->awaiting_deploy_pick(),
+				"deploy action: the owed 0x0E pick never ships");
+	}
+	return ok;
+}
+
 } // namespace
 
 // A pool-1 shooter's round takes the Indoors bit retail's client keeps for the
@@ -2029,6 +2161,7 @@ int main() {
 	ok &= run_confirmed_vehicle_drive(4);
 	ok &= run_confirmed_vehicle_drive(0, true);
 	ok &= run_confirmed_vehicle_drive(0, true, true);
+	ok &= run_full_bms_child_gun_mount();
 	ok &= run_flare_descriptor_carries_the_pilot_handheld();
 	ok &= run_guided_fire_preserves_selected_target();
 	ok &= run_rules_stamp_from_mp_attributes(0x10000u, true);
@@ -2042,6 +2175,7 @@ int main() {
 	ok &= run_revive_deploy_respawns_l_on_its_record_edge();
 	ok &= run_proxy_rendezvous_pump();
 	ok &= run_respawn_key_resets_input_and_sends_0x41();
+	ok &= run_deploy_action_converts_a_dead_permanent_death_player();
 	ok &= run_pool1_shooter_round_takes_its_indoors_state();
 	if (!ok) return 1;
 	std::printf("joiner_role_test: OK\n");

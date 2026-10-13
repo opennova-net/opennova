@@ -120,8 +120,10 @@ struct Rig {
         veh.bms_id = 77;
         veh.spawn_origin = (1u << 24) | 3u;
         veh.kind = EntityKind::Item;
+        veh.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
         veh.item_id = 1291; // wire type of the dune buggy (items.def id - 100000)
         veh.has_item_def = true; // pool-1 sources need an ItemDef (retail gate)
+        veh.has_graphic_model = true;
         // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
         veh.item_attrib = kItemAttribPlayerControl;
         veh.position = {100.0f, 200.0f, 10.0f};
@@ -138,6 +140,7 @@ struct Rig {
 
         Entity drv;
         drv.kind = EntityKind::Organic;
+        drv.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         drv.item_id = 5305; // player template
         drv.player_class = 8;
         drv.position = {100.0f, 199.0f, 10.0f};
@@ -163,6 +166,7 @@ EntityHandle add_second_control_occupant(Rig &r) {
 
     Entity occupant;
     occupant.kind = EntityKind::Organic;
+    occupant.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     occupant.item_id = 5305;
     occupant.player_class = 8;
     occupant.health = 150;
@@ -499,6 +503,7 @@ void test_gunner_first_claims_and_stops() {
 
     Entity gunner_e;
     gunner_e.kind = EntityKind::Organic;
+    gunner_e.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     gunner_e.item_id = 5305;
     gunner_e.player_class = 8;
     gunner_e.health = 150;
@@ -1197,9 +1202,11 @@ void test_vehicle_impact_role_and_momentum_edge() {
 		r.w.ai.collision = &collision;
 		Entity other;
 		other.kind = EntityKind::Item;
+		other.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
 		other.item_id = 900;
 		other.item_type = 1;
 		other.has_item_def = true;
+		other.has_graphic_model = true;
 		other.item_attrib = 0x40;
 		other.position = { 150.0f, 200.0f, 10.0f };
 		other.yaw = 90;
@@ -1354,6 +1361,7 @@ static void test_helo_waits_for_its_boarders() {
     helo.alive = true;
     helo.health = 100;
     helo.has_item_def = true;
+    helo.has_graphic_model = true;
     Seat ctrl; ctrl.type = SeatType::Controller;
     Seat pax;  pax.type  = SeatType::Passenger;
     helo.seats.push_back(ctrl);
@@ -1367,7 +1375,9 @@ static void test_helo_waits_for_its_boarders() {
     walker.alive = true;
     walker.health = 100;
     walker.has_item_def = true;
+    walker.has_graphic_model = true;
     walker.kind = EntityKind::Organic;
+    walker.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     const EntityHandle wh = w.registry.spawn(0, walker);
     AiEntity &wb = *ai.at(ai.attach(wh));
     // The board order lives in the walker's AiSlot (entity+0x68), not its brain
@@ -2544,8 +2554,10 @@ void test_vehicle_carrier_follow_and_refresh() {
 	CollisionWorld collision;
 	Entity deck;
 	deck.kind = EntityKind::Item;
+	deck.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
 	deck.item_id = 500;
 	deck.has_item_def = true;
+	deck.has_graphic_model = true;
 	deck.item_type = 1;
 	deck.position = { 100.0f, 200.0f, 5.0f };
 	deck.bound_radius = 30.0f;

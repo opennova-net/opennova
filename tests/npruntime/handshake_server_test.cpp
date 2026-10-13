@@ -3895,6 +3895,8 @@ bool run_periodic_scoreboard_repairs_pre_sync_dropped_row() {
 	joiner.link.transport = &transport;
 	joiner.reply.player_slot = 1;
 	joiner.reply.player_name = "RetailJoin403";
+	joiner.assigned_team = 1;
+	joiner.assigned_team_valid = true;
 	joiner.reply.roster_pushed = true;
 	joiner.reply.roster_counted = true;
 	joiner.reply.roster_seen_gen = ctx.np_protocol.roster_generation;
@@ -3950,6 +3952,7 @@ bool run_periodic_scoreboard_repairs_pre_sync_dropped_row() {
 	// trailer count incremented. Retail uses both values to move the row into
 	// the spectator column and subtract it from the HUD's player count.
 	remote.link.spectator = true;
+	remote.assigned_team = 0; // the convert zeroes the slot team the row reads (D-NET-651)
 	world.registry.get(joiner_handle)->team = 0;
 	ctx.scoreboard_broadcast_timer = 310;
 	inmatch::Server_TickUpdate(ctx);

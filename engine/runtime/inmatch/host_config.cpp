@@ -186,7 +186,7 @@ HostScreenState host_session_settings(gamecfg::GameCfg &cfg) {
 	// [orig: dword_24D2110 = multiplayerDifficulty_484 on the authority
 	// @0x551E80 / @0x551F75].
 	config.config_bytes[6] = static_cast<uint8_t>(cfg.mp_difficulty);
-	// [orig: byte_A821EF = permanentDeath_5E4 @0x5522AA, byte_A821F0 =
+	// [orig: g_SessionPermanentDeath = permanentDeath_5E4 @0x5522AA, byte_A821F0 =
 	//  allowSniperScopeZoom_5EC != 0 @0x5522B9, both in session on the authority]
 	config.permanent_death = cfg.mp_permanent_death != 0;
 	config.allow_sniper_scope_zoom = cfg.mp_allowsniperscopezoom != 0;

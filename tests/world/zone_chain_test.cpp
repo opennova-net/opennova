@@ -117,6 +117,8 @@ struct AshFixture {
         MatchRules rules;
         rules.game_type = opennova::game_type::kAdvanceAndSecure;
         w.match.configure(rules);
+        // A network session: the capture scoring runs only in one (D-NET-650).
+        w.rules.mp_session = true;
         w.zones.build_chain_from_mission();
         w.zones.latch_control();
     }
@@ -281,6 +283,7 @@ void test_spawn_zone_presence_and_zone_info() {
 EntityHandle spawn_soldier(World &w, uint8_t team, Vec3 pos) {
     Entity e;
     e.kind = EntityKind::Organic;
+    e.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     e.item_id = 5305;
     e.player_class = 8;
     e.team = team;
@@ -293,6 +296,9 @@ EntityHandle spawn_soldier(World &w, uint8_t team, Vec3 pos) {
     // [orig: CaptureZone_CalculateControlDelta @0x501120;
     // CaptureZone_CheckProximityScoring @0x500C50]
     w.match.upsert_player({handle, static_cast<uint8_t>(handle.slot()), "Soldier"});
+    // The slot's team byte (+416), the body's until a script splits them; the
+    // numbered capture's scorers match it (D-NET-650).
+    w.match.set_player_slot_team(handle, team);
     return handle;
 }
 

@@ -1041,12 +1041,13 @@ public:
 	// The NovaWorld UDP session the shell keeps through the match (in use, flags, hosting/playing
 	// word, its own exit store): the N icon's inputs and the 62-frame NovaWorld exit's (D-NET-220).
 	void set_nwu_session(bool p_in_use, uint32_t p_flags, int32_t p_role, int32_t p_exit_reason);
-	// The admitted remote joiners as the NovaWorld host's PlayerList sees them (Server_PlayerAdd's
-	// five per-slot vars), keyed by roster slot; the host's own slot is the gate binding's.
+	// The added players as the NovaWorld host's PlayerList sees them (Server_PlayerAdd's five
+	// per-slot vars), keyed by roster slot; the host's own (`own`) takes the gate binding's identity.
 	struct HostPeerSlot {
 		int slot = 0;
+		bool own = false;
 		String player_name, ip_and_port, pcid; // "a.b.c.d:port"; the decrypted PUBPCID or ""
-		String team;                // "%ld" of the assigned team; empty until assigned
+		String team, type; // the match's PlayerTeam / PlayerType ("%ld")
 	};
 	std::vector<HostPeerSlot> host_peer_slots() const;
 	int32_t round_time_remaining_ticks() const; // the live round clock (world::Match), -1 untimed
@@ -1407,6 +1408,9 @@ public:
 	// apply — the [1,511] range is the +/- adjust's); Y invert (flipmouse, default off).
 	// (engine: runtime/world/player_look.h)
 	void set_local_player_mouse(int p_sensitivity, bool p_invert_y);
+	// The flipmouse / mousescale rows on those live words (the step returns the new word).
+	void flip_local_player_mouse();
+	int step_local_player_mouse_scale(int p_param_value, bool p_negative);
 	// Stance SELECT request (0 stand / 1 crouch / 2 prone) — the 3-key semantics: each
 	// key selects its stance, mutual exclusion at apply, REFUSED while the equipped
 	// weapon has ForceCrouch (0x40000). Returns whether the stance changed. (engine: runtime/inmatch/client_runtime.h)
@@ -1623,7 +1627,7 @@ public:
 	void fill_objectives(const Ref<RtxtStringFile> &p_mission_text,
 			std::vector<opennova::hud::HudObjectiveRow> &r_rows) const;
 	// The briefing panel's text: info/briefing2, else info/briefing (HudBriefingState). NOT bound.
-	const std::string &mission_briefing_text() const { return net_.mission_text.briefing2; }
+	std::string mission_briefing_text() const { return net_.mission_text.briefing2(); }
 	// The FSM snapshot for the shell: latest clip/action payloads, diagnostic serials,
 	// ammo, kick, and the 3P body channel. Ordered presentation events drain through
 	// drain_local_player_weapon_events(); the snapshot alone is not an event queue.

@@ -79,8 +79,13 @@ bool table_set_cell_text(std::vector<MenuTableRow> &rows, int row, int column, i
 // SetCellValue], and the column-0 rewrite [orig: sub_63F440 @0x63f440].
 bool table_set_cell_value(std::vector<MenuTableRow> &rows, int row, int column, int column_count,
 		int32_t value);
-// [orig: sub_63F400 @0x63f400 + 4; CTableWnd_GetRowValue @0x63f3d0 = column 0]
-int32_t table_cell_value(const std::vector<MenuTableRow> &rows, int row, int column);
+// The cell record's value (+4), none when the row or the column is out of range
+// (`column_count` is the table's COLUMN COUNT, +796): a record a smaller count
+// left past it is no record until the count grows back (D-MNU-55).
+// [orig: CTableWnd_GetCellRecord @0x63f400 + 4 - the row bound @0x63f408, the
+//  column bound @0x63f418, none @0x63f433; CTableWnd_GetRowValue @0x63f3d0 = column 0]
+std::optional<int32_t> table_cell_record(
+		const std::vector<MenuTableRow> &rows, int row, int column, int column_count);
 
 // CTableWnd_RemoveRow: -1 clears the table, a row index removes that row.
 // [orig: CTableWnd_RemoveRow @0x641a40]

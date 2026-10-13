@@ -469,8 +469,8 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// non-tail disconnect can be reused without colliding with a later live player.
 	// [orig: Server_PlayerAdd @0x51cbc0 writes the player into dword_A87048[slot]; 0x4D/0x16/0x46 read it]
 	// D-NET-132: link.owned_entity (bound above) IS the roster binding — the reply builders read the
-	// wire handle off owned_entity.packed and the team off the live entity (team @entity+344). Only the
-	// roster ORDER (player_slot) and the echoed name stay on conn.reply.
+	// wire handle off owned_entity.packed, and the team is the slot's own, assigned_team (D-NET-651).
+	// Only the roster ORDER (player_slot) and the echoed name stay on conn.reply.
 	conn.reply.player_slot = *player_slot;
 	// Golden parity: a player carries a NAME in BOTH its 0x0C organic record (entity name, read by
 	// build_pool0_organic_batch) and its 0x46 player-sync (conn.reply.player_name). The host's own
@@ -498,9 +498,12 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// end-round winner award skips a spectator-flagged top scorer
 	// [orig: Server_PlayerAdd @0x51CD83], and its undeployed bit so event 25
 	// skips a pending slot [orig: Server_OnPlayerJoin @0x51A6F2;
-	// Server_UpdateCaptureZoneProximity @0x5087A2].
+	// Server_UpdateCaptureZoneProximity @0x5087A2], and its team byte (+416),
+	// which the numbered capture's scorers match (D-NET-650)
+	// [orig: CaptureZone_CheckProximityScoring @0x500CEE].
 	world.match.set_player_spectator(h, conn.link.spectator);
 	world.match.set_player_respawn_pending(h, conn.link.respawn_pending);
+	world.match.set_player_slot_team(h, conn.assigned_team_valid ? conn.assigned_team : uint8_t{0});
 
 	conn.phase = ConnectionPhase::PlayerAdded;
 	if (!is_host_own) {
@@ -515,6 +518,16 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		if (const world::Entity *added = world.registry.get(h)) ctx.logs.profile->write_player(*added);
 	}
 	return h;
+}
+
+// The add's PlayerList entry: PlayerTeam the entity's signed team byte,
+// PlayerType its class [orig: Server_PlayerAdd: movsx entity+0x162 @0x51D368,
+// entity+0x294 @0x51D382, the SetOrCreates @0x51D48F / @0x51D4AA].
+void stamp_player_list_add(NapiNPConnection &conn, const world::World &world) {
+	const world::Entity *player = world.registry.get(conn.link.owned_entity);
+	if (player == nullptr) return;
+	conn.player_list_team = static_cast<int8_t>(player->team);
+	conn.player_list_type = player->player_class;
 }
 
 namespace {
@@ -627,6 +640,14 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 				// restarts it from the head [orig: unlink @0x4C8FF6, goto LABEL_5
 				// @0x4C9128].
 				if (!Server_BuildPlayerInfoAndAdd(ctx, conn, world).valid()) continue;
+				// The pump's add is Server_PlayerAdd's, which writes the slot's
+				// PlayerList entry; the map change's round init re-adds a kept
+				// slot through no PlayerAdd and writes none, so its PlayerTeam
+				// and PlayerType stay the previous mission's [orig:
+				// CNapiServer_ProcessPendingPlayerSpawns -> Server_BuildPlayerInfoAndAdd
+				// @0x4C903A -> Server_PlayerAdd @0x51D7A7; Server_InitAllPlayerEntitiesForRound
+				// @0x516AA0 -> Entity_SpawnFromAnimSlotProperty @0x516B67, no SetOrCreate].
+				stamp_player_list_add(conn, world);
 				++spawned;
 				restart = true;
 				break;
@@ -673,6 +694,7 @@ bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 		world.match.set_player_spectator(conn.link.owned_entity, true);
 		conn.assigned_team = 0;
 		conn.assigned_team_valid = true;
+		world.match.set_player_slot_team(conn.link.owned_entity, 0); // the mirror (D-NET-650)
 		player->team = 0;
 		player->flags |= 1u;
 		// The witnessed spectator entity state: damage permanently disabled
@@ -697,6 +719,7 @@ bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 	if (team == 0) team = 1;
 	conn.assigned_team = team;
 	conn.assigned_team_valid = true;
+	world.match.set_player_slot_team(conn.link.owned_entity, team); // the mirror (D-NET-650)
 	const world::SpawnPointResult selected = world::resolve_player_spawn_pose(
 			world, player->handle, world::EntityHandle{},
 			conn.reply.player_slot, team, ctx.config.game_type);
@@ -777,8 +800,12 @@ void Server_ChangeEntityTeam(NapiNPServerCtx &ctx, world::World &world,
 		conn->reply.score_delta_sound_value = 0;               // +332 @0x518DDB
 		conn->assigned_team = team;                            // +416 @0x518DEF
 		conn->assigned_team_valid = true;
-		// The "PlayerTeam" NovaWorld var @0x518E07..0x518E22 follows the slot
-		// team through the embedder's roster sync.
+		world.match.set_player_slot_team(handle, team);        // the mirror (D-NET-650)
+		// The slot's PlayerTeam var, the entity's signed team byte, and no
+		// ClientHostPlayerAdded: the change rides the next ClientHostUpdate
+		// [orig: sprintf("%ld", movsx entity+0x162) @0x518DF5..0x518E07,
+		//  CNapiVarList_SetOrCreate(PlayerList, slot, "PlayerTeam") @0x518E22].
+		conn->player_list_team = static_cast<int8_t>(team);
 		// Side A for teams 1/3 or a non-team game, else side B; its character
 		// id and avatar become the entity's NetId and animSlot.
 		// [orig: @0x518E27..0x518E71, stores @0x518E7E / @0x518E8C]
@@ -888,6 +915,8 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 	match_player.slot = *player_slot;
 	match_player.name = conn->player_name;
 	world.match.upsert_player(match_player);
+	world.match.set_player_slot_team(h, conn->assigned_team); // the slot team mirror (D-NET-650)
+	stamp_player_list_add(*conn, world);
 	return h;
 }
 
@@ -963,6 +992,12 @@ void Server_ProcessSpectatorRespawnRequests(NapiNPServerCtx &ctx, world::World &
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (!conn.reply.spectator_convert_pending) continue;
 		conn.reply.spectator_convert_pending = false;
+		// The handler's first gate is the round-over latch, which the match
+		// outcome stands for on the host; the request was staged in the same
+		// receive pump, so the latch reads as the handler saw it
+		// [orig: Server_ProcessClientRequestSpectatorRespawn - `cmp
+		//  g_SpawnSuccessGate, 0` / `jnz` @0x51C840..0x51C847].
+		if (world.match.outcome().ended) continue;
 		// The handler's own gates repeat inside the kill: authority, a live
 		// entity, not already a spectator [orig: @0x519E22..0x519E4B].
 		if (!conn.link.owned_entity.valid() || conn.link.spectator) continue;

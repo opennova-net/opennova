@@ -162,6 +162,25 @@ class BindingSet {
   // 0 while the keyboard is captured (below).
   int pressed_key(int index, const std::function<bool(int)> &key_down) const;
 
+  // Whether the record's fire RIGHT NOW carries the sign bit (bit 31 of the
+  // queued binding id, which steps mousescale down): the keyboard fallback
+  // pass and the mouse dispatch set it while Shift (VK 16) is held; the
+  // modifier pass and the joystick button queue the bare id. So a
+  // modifier-less key or a held mouse button fires signed under Shift, and a
+  // row fired through its held modifier (Ctrl+Shift+key) or a joystick button
+  // fires unsigned. The row flag 0x200 the two signed sites also test rides no
+  // catalog row, and no file reaches the flag word: player.sav's load and
+  // default.key merge +24..+37 alone over the default table [orig:
+  // KeyBinding_MergeWeaponSlotParams @0x54c3f0 - @0x54c444..0x54c479, from
+  // PlayerProfile_LoadAllFromDisk @0x54f60f; the default.key callback
+  // @0x54bf40].
+  // [orig: Input_ProcessKeyboardEvents @0x49d452..0x49d483 (the fallback's
+  //  sign) vs @0x49d41e..0x49d42f (the modifier pass, unsigned);
+  //  Input_TryDispatchBindingByWeaponType @0x499180..0x4991a4;
+  //  Input_TryTriggerJoystickButton @0x497b30 (unsigned)]
+  bool fire_signed(int index, uint16_t held_mouse_mask,
+      const std::function<bool(int)> &key_down) const;
+
   // An open text line (the chat entry) owns the keyboard: while set, no
   // keyboard slot fires, so a token resolves from its mouse and joystick arms
   // alone (a mouse row's modifier word still reads the live key state).

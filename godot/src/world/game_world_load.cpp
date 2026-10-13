@@ -438,7 +438,10 @@ void GameWorld::place_mission_objects(const Ref<MissionData> &p_mission) {
 			ResourceRoot::report_missing(opennova::gameprofile::resource_kind::kFile, "Avatars.def", String(),
 					"players draw their item model");
 		}
-		local_character_profile_.unref();
+		// The empty table still projects the record's voice override (engine
+		// join_character_profile_without_table).
+		local_character_profile_ = AvatarDatabase::character_join_profile_without_table(
+				player_visuals_->spawn_loadout());
 	}
 	panm_clock_->sample(get_frame_clock_ms(),
 			static_cast<int64_t>(Engine::get_singleton()->get_process_frames()));

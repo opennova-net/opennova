@@ -11,9 +11,9 @@
 #include <runtime/inmatch/game_config.h> // inmatch::GameConfig — the reactive reply handlers read it
 #include <runtime/inmatch/napi_np_connection.h>
 
-// The roster identity (team @entity+344, wire handle) is read THROUGH each connection's
-// link.owned_entity from the live registry (D-NET-132 / §6.9). Forward-declared so world/world.h stays
-// out of this light header.
+// The roster identity's wire handle is read THROUGH each connection's link.owned_entity from the
+// live registry (D-NET-132 / §6.9); its team is the slot's own, assigned_team (D-NET-651).
+// Forward-declared so world/world.h stays out of this light header.
 namespace opennova::world {
 class World;
 struct EntityHandle;
@@ -179,8 +179,9 @@ void broadcast_player_sync_on_join(const GameConfig &config,
 // replies read: stamps the bare wire `entity_handle` onto conn.link.owned_entity (the SINGLE binding,
 // D-NET-132) plus the roster name/slot. The World-path spawn (Server_BuildPlayerInfoAndAdd) binds
 // owned_entity to a LIVE registry entity; this pre-World reactive path (a World-less session-responder
-// / test host) binds it to the bare handle, so both resolve team/handle the same way (team defaults
-// when no live entity backs the handle). [orig: a player bound to its allocated slot/entity at add]
+// / test host) binds it to the bare handle, so both resolve the handle the same way. The rows' team
+// byte is the slot's own (assigned_team, slot+416), never the entity's (D-NET-651).
+// [orig: a player bound to its allocated slot/entity at add]
 bool bind_session_reply_player(NapiNPConnection &conn, std::string player_name, uint8_t player_slot,
                                uint16_t entity_handle);
 

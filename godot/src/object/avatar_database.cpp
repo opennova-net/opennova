@@ -393,6 +393,18 @@ Ref<CharacterJoinProfile> AvatarDatabase::character_join_profile_from_loadout(
 	return out;
 }
 
+Ref<CharacterJoinProfile> AvatarDatabase::character_join_profile_without_table(
+		const Ref<PlayerSpawnLoadout> &p_loadout) {
+	opennova::inmatch::JoinSideSelection saved[2];
+	if (p_loadout.is_valid()) {
+		p_loadout->fill_join_sides(saved);
+	}
+	Ref<CharacterJoinProfile> out;
+	out.instantiate();
+	out->assign(opennova::inmatch::join_character_profile_without_table(saved));
+	return out;
+}
+
 std::vector<AvatarDatabase::CharacterSexRow>
 AvatarDatabase::character_sex_rows() const {
 	// File order, duplicate packed ids first-wins (the registry's walk order).

@@ -314,8 +314,10 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 		const DefItemDef *def = find_item_def(items, def_id);
 		// entity+0x30 for an organic is its VISUAL def's graphic (the player's
 		// authored visual item), which the item-traits stamp keyed on the
-		// runtime id cannot see [orig: Entity_InitFromModel @0x40df06; the
-		// persistent-bank gate MapOverlay_RenderAllByLayer @0x5BE6C4].
+		// runtime id cannot see [orig: Game_ReloadEntityModelsAndCallbacks
+		// @0x522830 - the pool-0 +0x30 store @0x522CD1, after a player row's
+		// type index takes its visual item; the persistent-bank gate
+		// MapOverlay_RenderAllByLayer @0x5BE6C4].
 		if (def != nullptr && def->graphic[0] != '\0') e->has_graphic_model = true;
 		// The collectors' render model: every entity whose graphic loads carries
 		// its CMDL sphere (the entity-init form, radius 0 without a collision

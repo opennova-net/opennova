@@ -87,6 +87,9 @@ bool check_scoreboard_projects_every_retail_mode_shape() {
 		roster[slot].burst.spawned = true;
 		roster[slot].link.owned_entity = slot == 0 ? blue : red;
 		roster[slot].reply.player_slot = slot;
+		// The slots' teams (+416) are the bodies'.
+		roster[slot].assigned_team = slot == 0 ? 1 : 2;
+		roster[slot].assigned_team_valid = true;
 	}
 
 	auto objective = [&](int32_t item_id, uint8_t team, uint32_t attrib = 0) {
@@ -115,6 +118,9 @@ bool check_scoreboard_projects_every_retail_mode_shape() {
 		world.match.configure(rules);
 		world.match.upsert_player({blue, 0, "Blue", {}});
 		world.match.upsert_player({red, 1, "Red", {}});
+		// The rows mirror their connections' slot teams (D-NET-650).
+		world.match.set_player_slot_team(blue, roster[0].assigned_team);
+		world.match.set_player_slot_team(red, roster[1].assigned_team);
 		world.match.player(blue)->objective_proximity_mask = blue_proximity_mask;
 		const opennova::ProtocolMessage message =
 				opennova::inmatch::build_player_list_message(config, roster, &world);
@@ -296,6 +302,117 @@ bool check_host_scoreboard_status_and_counts() {
 	                      after.players.empty() && after.spectator_count == 0 &&
 	                      after.in_game_count == 5,
 	              "past the round end (state 7) the 0x16 lists no rows");
+}
+
+// The 0x16 row's team is the listed slot's own team byte (+0x1A0), packed
+// 2 * team beside the spectator latch, never its body's: a split slot (a
+// script team write to the player body stores the entity byte alone) is
+// listed under its slot team, with or without a World (D-NET-651).
+// [orig: Server_BuildAndBroadcastScoreboard `mov dl, [esi+1A0h]` @0x50DAF2,
+//  stored @0x50DAFB; NetPacket_SerializeScoreboard0x16 @0x504C2E..0x504C30;
+//  Entity_SetTeamByNetId @0x43C680]
+bool check_scoreboard_row_team_is_the_slot_team() {
+	opennova::inmatch::GameConfig config;
+	config.game_type = opennova::game_type::kTeamDeathmatch;
+	opennova::world::World world;
+	world.registry.configure_pool(0, 4);
+	auto spawn_player = [&](uint8_t team) {
+		opennova::world::Entity entity;
+		entity.kind = opennova::world::EntityKind::Organic;
+		entity.team = team;
+		entity.alive = true;
+		return world.registry.spawn(0, entity);
+	};
+	std::vector<opennova::inmatch::NapiNPConnection> roster(2);
+	for (uint8_t slot = 0; slot < roster.size(); ++slot) {
+		roster[slot].phase = opennova::inmatch::ConnectionPhase::InMatch;
+		roster[slot].burst.spawned = true;
+		roster[slot].reply.player_slot = slot;
+		roster[slot].assigned_team_valid = true;
+	}
+	roster[0].assigned_team = 1;
+	roster[0].link.owned_entity = spawn_player(2); // slot team 1, body team 2
+	roster[1].assigned_team = 2;
+	roster[1].link.owned_entity = spawn_player(1); // slot team 2, body team 1
+	auto row_flags = [&](opennova::world::World *source, uint8_t slot) {
+		const opennova::ProtocolMessage message =
+				opennova::inmatch::build_player_list_message(config, roster, source);
+		opennova::PlayerList list;
+		if (!opennova::decode_player_list(message.payload.data(), message.payload.size(), list))
+			return 0xFF;
+		for (const opennova::PlayerListRow &row : list.players)
+			if (row.slot_id == slot) return static_cast<int>(row.flags);
+		return 0xFF;
+	};
+	return expect(row_flags(&world, 0) == 0x02 && row_flags(&world, 1) == 0x04,
+	              "a split slot's 0x16 row carries its slot team, not its body's") &&
+	       expect(row_flags(nullptr, 0) == 0x02 && row_flags(nullptr, 1) == 0x04,
+	              "the World-less 0x16 row carries the slot team too");
+}
+
+// The S2C 0x46 field-0x0004 team and the S2C 0x75 byte 1 are the slot's own
+// team byte (+0x1A0) too, never its body's: a split slot's sync and its
+// entity-state reply carry its slot team, World or not (D-NET-651).
+// [orig: NetPacket_SerializePlayerSync0x46 - slot+4 @0x5060B9,
+//  `mov cl, [ebx+1A0h]` @0x5060D1; NetPacket_SerializeHostEntityState
+//  `mov dl, [eax+1A0h]` @0x5108D0; Entity_SetTeamByNetId @0x43C680]
+bool check_player_sync_and_0x75_carry_the_slot_team() {
+	opennova::inmatch::GameConfig config;
+	config.game_type = opennova::game_type::kTeamDeathmatch;
+	opennova::world::World world;
+	world.registry.configure_pool(0, 4);
+	auto spawn_player = [&](uint8_t team) {
+		opennova::world::Entity entity;
+		entity.kind = opennova::world::EntityKind::Organic;
+		entity.team = team;
+		entity.alive = true;
+		return world.registry.spawn(0, entity);
+	};
+	std::vector<opennova::inmatch::NapiNPConnection> roster(2);
+	for (uint8_t slot = 0; slot < roster.size(); ++slot) {
+		roster[slot].type = opennova::inmatch::NapiNPConnection::kTypeServerSide;
+		roster[slot].phase = opennova::inmatch::ConnectionPhase::InMatch;
+		roster[slot].admission_stage = opennova::inmatch::GameAdmissionStage::Complete;
+		roster[slot].burst.spawned = true;
+		roster[slot].reply.player_slot = slot;
+		roster[slot].assigned_team_valid = true;
+	}
+	roster[0].assigned_team = 1;
+	roster[0].link.owned_entity = spawn_player(2); // slot team 1, body team 2
+	roster[1].assigned_team = 2;
+	roster[1].link.owned_entity = spawn_player(1); // slot team 2, body team 1
+	auto sync_team = [&](opennova::world::World *source, uint8_t slot) {
+		const std::vector<opennova::ProtocolMessage> replies =
+				opennova::inmatch::dispatch_session_replies(config, roster[1 - slot],
+						{opennova::make_protocol_message(opennova::c2s::PLAYER_SYNC_REQUEST,
+								{slot, uint8_t(opennova::kPlayerSyncHasTeamByte), 0x00})},
+						100, roster, source);
+		for (const opennova::ProtocolMessage &reply : replies) {
+			opennova::PlayerSync sync;
+			if (reply.tag == opennova::s2c::PLAYER_SYNC &&
+					opennova::decode_player_sync(reply.payload.data(), reply.payload.size(), sync) &&
+					sync.slot_id == slot && (sync.field_bitmask & opennova::kPlayerSyncHasTeamByte) != 0)
+				return static_cast<int>(sync.team);
+		}
+		return 0xFF;
+	};
+	auto state_team = [&](opennova::world::World *source, uint8_t slot) {
+		const std::vector<opennova::ProtocolMessage> replies =
+				opennova::inmatch::dispatch_session_replies(config, roster[slot],
+						{opennova::make_protocol_message(opennova::c2s::PING, {})}, 100, roster,
+						source);
+		for (const opennova::ProtocolMessage &reply : replies)
+			if (reply.tag == opennova::s2c::SPECTATOR_FLAGS && reply.payload.size() == 2)
+				return static_cast<int>(reply.payload[1]);
+		return 0xFF;
+	};
+	bool ok = expect(sync_team(&world, 0) == 1 && sync_team(&world, 1) == 2,
+	                 "a split slot's 0x46 team byte is its slot team, not its body's");
+	ok = expect(sync_team(nullptr, 0) == 1 && sync_team(nullptr, 1) == 2,
+	            "the World-less 0x46 team byte is the slot team too") && ok;
+	ok = expect(state_team(&world, 0) == 1 && state_team(&world, 1) == 2,
+	            "a split slot's 0x75 byte 1 is its slot team, not its body's") && ok;
+	return ok;
 }
 
 void add_retail_game_environment(opennova::ClientAuth &auth) {
@@ -3484,6 +3601,7 @@ bool check_vehicle_spawn_target_deploys_into_best_seat() {
 	opennova::world::Entity vehicle_seed;
 	vehicle_seed.kind = opennova::world::EntityKind::Item;
 	vehicle_seed.has_item_def = true;
+	vehicle_seed.has_graphic_model = true;
 	vehicle_seed.item_type = 1;
 	// Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
 	vehicle_seed.item_attrib = opennova::world::kItemAttribPlayerControl;
@@ -3622,6 +3740,7 @@ bool check_dead_vehicle_root_is_no_mobile_spawn() {
 	w::Entity root_seed;
 	root_seed.kind = w::EntityKind::Item;
 	root_seed.has_item_def = true;
+	root_seed.has_graphic_model = true;
 	root_seed.item_type = 1;
 	root_seed.item_attrib = w::kItemAttribPlayerControl;
 	root_seed.is_spawn_point = true;
@@ -3636,6 +3755,7 @@ bool check_dead_vehicle_root_is_no_mobile_spawn() {
 	w::Entity child_seed; // a live, ground-attached emplacement with a free seat
 	child_seed.kind = w::EntityKind::Item;
 	child_seed.has_item_def = true;
+	child_seed.has_graphic_model = true;
 	child_seed.team = 1;
 	child_seed.alive = true;
 	child_seed.health = 100;
@@ -3725,6 +3845,7 @@ bool check_refused_mobile_spawn_deploy_clears_hold() {
 	w::Entity vehicle_seed;
 	vehicle_seed.kind = w::EntityKind::Item;
 	vehicle_seed.has_item_def = true;
+	vehicle_seed.has_graphic_model = true;
 	vehicle_seed.item_type = 1;
 	vehicle_seed.item_attrib = w::kItemAttribPlayerControl;
 	vehicle_seed.is_spawn_point = true;
@@ -4093,6 +4214,7 @@ bool check_timed_capture_host_wire_transaction() {
 	auto soldier = [&](uint8_t team) {
 		opennova::world::Entity entity;
 		entity.kind = opennova::world::EntityKind::Organic;
+		entity.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
 		entity.player_class = 8;
 		entity.team = team;
 		entity.health = 150;
@@ -4324,6 +4446,7 @@ bool check_numbered_flip_pair_and_banner_wire() {
 	auto soldier = [&](uint8_t team, int32_t x, int32_t y) {
 		opennova::world::Entity entity;
 		entity.kind = opennova::world::EntityKind::Organic;
+		entity.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
 		entity.player_class = 8;
 		entity.team = team;
 		entity.health = 150;
@@ -4358,9 +4481,11 @@ bool check_numbered_flip_pair_and_banner_wire() {
 		conn.link.mode = opennova::replication::TransportMode::Client;
 		conn.link.transport = &transports.back();
 		conn.link.owned_entity = owned;
-		// The slot team (+0x1A0) the pair's filters match (D-NET-636).
+		// The slot team (+0x1A0) the pair's filters match (D-NET-636), and
+		// its roster row mirror, which the scorers match (D-NET-650).
 		conn.assigned_team = world.registry.get(owned)->team;
 		conn.assigned_team_valid = true;
+		world.match.set_player_slot_team(owned, conn.assigned_team);
 		ctx.np_protocol.connection_list.push_back(std::move(conn));
 	}
 	auto events = [](Transport &transport) {
@@ -4656,6 +4781,17 @@ bool check_frontier_hint_waits_for_the_play_ticks() {
 	opennova::inmatch::Server_TickUpdate(bare.ctx);
 	ok = expect(bare.hints().empty() && !bare.conn().reply.frontier_hint_pending,
 	            "no frontier: the bit clears without a record") && ok;
+
+	// The hint sits in the walk's state-6 block, which the round end leaves
+	// (its slots move to state 7): a mature slot's bit waits, unsent.
+	// [orig: @0x518878; Server_ProcessRoundEnd @0x51685E]
+	FrontierHintFixture over(/*with_chain=*/true);
+	over.conn().reply.frontier_hint_pending = true;
+	over.world.match.player(over.player)->play_ticks = 1240;
+	over.world.match.latch_round_over();
+	opennova::inmatch::Server_TickUpdate(over.ctx);
+	ok = expect(over.hints().empty() && over.conn().reply.frontier_hint_pending,
+	            "past the round end the walk sends no hint and keeps the bit") && ok;
 	return ok;
 }
 
@@ -4755,6 +4891,7 @@ bool check_retail_minimap_overlay_stream_without_zone_chain() {
 	auto building = [](uint8_t team = 0, uint8_t source = 0) {
 		opennova::world::Entity e;
 		e.has_item_def = true;
+		e.has_graphic_model = true;
 		e.item_type = 5; // ItemDef Building
 		e.kind = opennova::world::EntityKind::Building;
 		e.has_minimap_model_marker = true; // graphicModel+0xE0 portal/occlusion pointer
@@ -4787,6 +4924,7 @@ bool check_retail_minimap_overlay_stream_without_zone_chain() {
 	for (int slot = 8; slot <= 12; ++slot) {
 		opennova::world::Entity e;
 		e.has_item_def = true;
+		e.has_graphic_model = true;
 		e.item_type = 6; // Object
 		e.item_id = 1902;
 		e.item_attrib = opennova::world::kItemAttribEweap;
@@ -4913,6 +5051,7 @@ bool check_minimap_overlay_zone_capture_bits() {
 		opennova::world::Entity e;
 		e.kind = opennova::world::EntityKind::Item;
 		e.has_item_def = true;
+		e.has_graphic_model = true;
 		e.item_attrib = opennova::world::kItemAttribSpawnPoint |
 				(chained ? opennova::world::kItemAttribChangeTeam : 0u);
 		e.is_spawn_point = true;
@@ -5005,6 +5144,7 @@ bool check_minimap_overlay_reads_the_slot_team() {
 	opennova::world::Entity vehicle;
 	vehicle.kind = opennova::world::EntityKind::Item;
 	vehicle.has_item_def = true;
+	vehicle.has_graphic_model = true;
 	vehicle.item_type = 1;
 	vehicle.item_attrib2 = 0x00002000u; // a mapped class (icon 5)
 	vehicle.team = 1;
@@ -5015,6 +5155,7 @@ bool check_minimap_overlay_reads_the_slot_team() {
 		opennova::world::Entity e;
 		e.kind = opennova::world::EntityKind::Item;
 		e.has_item_def = true;
+		e.has_graphic_model = true;
 		e.item_attrib = opennova::world::kItemAttribSpawnPoint |
 				opennova::world::kItemAttribChangeTeam;
 		e.is_spawn_point = true;
@@ -5073,6 +5214,290 @@ bool check_minimap_overlay_reads_the_slot_team() {
 			"slot team 1's enemy may take zone 3 (0x40), team 1 may not") && ok;
 	ok = expect(source_of(vehicle_h) != -1,
 			"team 1's vehicle is listed to the slot of team 1, whatever its body's team") && ok;
+	return ok;
+}
+
+// FlagBall's carried-flag overlay legs (D-NET-660). The scene: slot 0 (slot
+// team 1, its body moved to team 2) and slot 1 (slot team 2), slot 1's body
+// carrying a green flag at pool-1 slot 0 (the pickup hides it),
+// a loose blue flag at pool-1 slot 128 (both on the first visit's phase 0),
+// and `buildings` pool-2 Buildings for the initial scan.
+struct FlagOverlayScene {
+	opennova::world::World world;
+	opennova::inmatch::NapiNPServerCtx ctx;
+	opennova::replication::UdpSessionTransport a_transport{
+			opennova::replication::UdpSessionTransport::Role::Host};
+	opennova::replication::UdpSessionTransport b_transport{
+			opennova::replication::UdpSessionTransport::Role::Host};
+	opennova::world::EntityHandle a_body, b_body, carried, loose;
+};
+
+bool build_flag_overlay_scene(FlagOverlayScene &s, uint32_t game_type, int buildings,
+		uint32_t max_score) {
+	using namespace opennova;
+	s.ctx.is_authority = 1;
+	s.ctx.is_in_session = 1;
+	s.ctx.config.game_type = game_type;
+	s.ctx.world = &s.world;
+	s.world.rules.mp_session = true;
+	s.world.registry.configure_pool(0, 4);
+	s.world.registry.configure_pool(1, 256);
+	s.world.registry.configure_pool(2, 20);
+	world::MatchRules rules;
+	rules.game_type = game_type;
+	rules.max_score = max_score; // FlagBall's limit scan has no zero guard: 0 ends the round
+	s.world.match.configure(rules);
+
+	for (int i = 0; i < buildings; ++i) {
+		world::Entity e;
+		e.has_item_def = true;
+		e.has_graphic_model = true;
+		e.item_type = 5; // ItemDef Building
+		e.kind = world::EntityKind::Building;
+		e.has_minimap_model_marker = true;
+		e.health = 1;
+		e.alive = true;
+		s.world.registry.spawn_from(2, static_cast<size_t>(i), e);
+	}
+	auto body = [&](uint8_t team) {
+		world::Entity e;
+		e.kind = world::EntityKind::Organic;
+		e.team = team;
+		e.health = 100;
+		e.alive = true;
+		return s.world.registry.spawn(0, e);
+	};
+	s.a_body = body(2); // the split body: slot team 1, body team 2
+	s.b_body = body(2);
+	auto flag = [&](int32_t id, size_t slot) {
+		world::Entity e;
+		e.kind = world::EntityKind::Item;
+		e.item_id = id;
+		e.item_type_index = 1;
+		e.has_item_def = true;
+		e.has_graphic_model = true;
+		e.health = 1;
+		e.alive = true;
+		return s.world.registry.spawn_from(1, slot, e);
+	};
+	s.carried = flag(4095, 0);
+	s.loose = flag(4091, 128);
+	// The pickup's three writes (Match::record_flag_pickup) [orig:
+	// Entity_AttachCarriedObject @0x43C144 / @0x43C14A / @0x43C14F].
+	world::Entity *carried = s.world.registry.get(s.carried);
+	if (!expect(s.carried.slot() == 0 && s.loose.slot() == 128 && carried != nullptr,
+	            "the flags take pool-1 slots 0 and 128"))
+		return false;
+	s.world.registry.get(s.b_body)->mounted_child = s.carried;
+	carried->flags |= world::kEntityFlagCarried;
+	carried->primary_occupant = s.b_body;
+
+	auto add = [&](uint8_t slot, uint8_t team, world::EntityHandle h,
+	               replication::UdpSessionTransport *transport) {
+		inmatch::NapiNPConnection conn;
+		conn.type = 1;
+		conn.phase = inmatch::ConnectionPhase::InMatch;
+		conn.burst.spawned = true;
+		conn.link.mode = replication::TransportMode::Client;
+		conn.link.transport = transport;
+		conn.link.owned_entity = h;
+		conn.reply.player_slot = slot;
+		conn.assigned_team = team;
+		conn.assigned_team_valid = true;
+		s.ctx.np_protocol.connection_list.push_back(std::move(conn));
+	};
+	add(0, 1, s.a_body, &s.a_transport);
+	add(1, 2, s.b_body, &s.b_transport);
+	return true;
+}
+
+std::vector<opennova::CaptureZoneOverlayBatch> drain_overlay_batches(
+		opennova::replication::UdpSessionTransport &transport) {
+	std::vector<opennova::CaptureZoneOverlayBatch> batches;
+	std::vector<uint8_t> raw;
+	while (transport.pop_outbound(raw)) {
+		if (raw.empty() || raw.front() != opennova::s2c::CAPTURE_ZONE_STATE) continue;
+		opennova::CaptureZoneOverlayBatch batch;
+		if (!opennova::decode_capture_zone_overlay(raw.data() + 1, raw.size() - 1, batch))
+			batch.count = 0xFF; // poisons every count check below
+		batches.push_back(std::move(batch));
+	}
+	return batches;
+}
+
+const opennova::CaptureZoneOverlay *overlay_row(
+		const std::vector<opennova::CaptureZoneOverlayBatch> &batches,
+		opennova::world::EntityHandle h) {
+	for (const auto &batch : batches)
+		for (const auto &row : batch.entries)
+			if (row.handle == static_cast<uint16_t>(h.packed)) return &row;
+	return nullptr;
+}
+
+// In FlagBall the pool-1 visit lists a flag (icon 2) whose occupant link is
+// set only to a recipient whose SLOT team is the occupant's team; a script's
+// UnhideSSN is what shows a carried flag (the pickup hides it, and a hidden
+// row never reaches the classifier). Other game types list it to everyone.
+// [orig: Server_BuildOverlayStateForPlayer - the hidden test @0x518490, `cmp
+//  al, 2` @0x518512, `cmp g_GameType, 10008h` @0x518516, the occupant
+//  `[esi+170h]` @0x518522, `movsx edx, [eax+162h]` @0x51852C, `movzx ecx,
+//  [eax+1A0h]` @0x518537, the compare @0x51853E..0x518540;
+//  Entity_AttachCarriedObject `Flags |= 1` @0x43C14A, `+0x170 = carrier`
+//  @0x43C14F; WacCmd_UnhideSsn `and Flags, ~1` @0x4F77FD]
+bool check_minimap_overlay_flagball_carried_flag() {
+	using namespace opennova;
+	bool ok = true;
+	{
+		auto s = std::make_unique<FlagOverlayScene>();
+		if (!build_flag_overlay_scene(*s, game_type::kFlagBall, 0, 5)) return false;
+		inmatch::Server_TickUpdate(s->ctx);
+		const auto a = drain_overlay_batches(s->a_transport);
+		const auto b = drain_overlay_batches(s->b_transport);
+		ok = expect(overlay_row(a, s->carried) == nullptr && overlay_row(b, s->carried) == nullptr &&
+		                    overlay_row(a, s->loose) != nullptr,
+		            "a hidden carried flag is listed to nobody") && ok;
+	}
+	for (const uint32_t gt : {game_type::kFlagBall, game_type::kCaptureTheFlag}) {
+		auto s = std::make_unique<FlagOverlayScene>();
+		if (!build_flag_overlay_scene(*s, gt, 0, 5)) return false;
+		if (!expect(s->world.commands.set_ssn_hidden(world::EntityTarget(s->carried), false),
+		            "UnhideSSN shows the carried flag"))
+			return false;
+		inmatch::Server_TickUpdate(s->ctx);
+		const auto a = drain_overlay_batches(s->a_transport);
+		const auto b = drain_overlay_batches(s->b_transport);
+		const CaptureZoneOverlay *seen_by_b = overlay_row(b, s->carried);
+		ok = expect(seen_by_b != nullptr && seen_by_b->param == 2 && seen_by_b->icon_color == 0x0C,
+		            "the carrier's team sees the shown carried flag") && ok;
+		ok = expect(overlay_row(a, s->loose) != nullptr && overlay_row(b, s->loose) != nullptr,
+		            "a loose flag (no occupant) is listed to both teams") && ok;
+		if (gt == game_type::kFlagBall)
+			ok = expect(overlay_row(a, s->carried) == nullptr,
+			            "FlagBall hides it from slot team 1, whatever that slot's body team") && ok;
+		else
+			ok = expect(overlay_row(a, s->carried) != nullptr,
+			            "outside FlagBall the shown carried flag is listed to both teams") && ok;
+	}
+	return ok;
+}
+
+// In FlagBall and Flag Me the visit's last pass walks the slot table and, for
+// each slot whose flag carry is past 60 seconds, queues an icon-2, colour-12
+// entry naming that slot's body, handed to the WALKED slot: a ring that is
+// full there flushes the recipient's 16 staged entries to the carrier's slot,
+// and the recipient's final flush carries the carrier entry alone. The visit
+// is the tick head's per-player walk, ahead of the periodic block's violation
+// sweep that counts the carry, so a visit reads the count the last sweep left;
+// the visit sits in the walk's state-6 block, which the round end leaves (its
+// slots move to state 7), so no visit runs past it.
+// [orig: Server_BuildOverlayStateForPlayer @0x518755..0x5187DD (the game
+//  types @0x51875A..0x518764, `cmp [edi+15F10h], 3Ch` / `jle` @0x518776..
+//  0x51877D, `push edi` / Server_QueueOverlayStateEntry(slot, handle, 2,
+//  0x0C, 0, 0) @0x5187BD..0x5187BE), the final flush @0x5187EE;
+//  Server_QueueOverlayStateEntry @0x50FEA0 (the full ring flushes to its slot
+//  argument @0x50FEA9..0x50FEAE); the walk Server_UpdateAllActivePlayerSlots
+//  @0x518820 (the state test @0x518878, the visit @0x5188D6), called @0x51D88B
+//  ahead of the periodic block's Server_CheckPlayerViolations @0x51DF5F (the
+//  count @0x51AC5A); Server_ProcessRoundEnd's state 7 @0x51685E]
+bool check_minimap_overlay_flag_carrier_pass() {
+	using namespace opennova;
+	bool ok = true;
+	struct Case {
+		uint32_t game_type;
+		uint32_t carry_at_head; // the count the visit reads; the sweep adds one after it
+		bool listed;
+		const char *what;
+	};
+	const Case cases[] = {
+		{game_type::kFlagBall, 61, true, "FlagBall lists a carrier past 60 seconds"},
+		{game_type::kFlagMe, 61, true, "Flag Me lists a carrier past 60 seconds"},
+		{game_type::kFlagBall, 60, false,
+		 "a count of 60 at the visit is not listed, though the tick's sweep raises it to 61"},
+		{game_type::kCaptureTheFlag, 61, false, "CTF counts the carry but has no carrier pass"},
+	};
+	for (const Case &c : cases) {
+		auto s = std::make_unique<FlagOverlayScene>();
+		if (!build_flag_overlay_scene(*s, c.game_type, 0, 5)) return false;
+		s->ctx.np_protocol.connection_list[1].link.flag_carry_seconds = c.carry_at_head;
+		inmatch::Server_TickUpdate(s->ctx);
+		if (!expect(s->ctx.np_protocol.connection_list[1].link.flag_carry_seconds ==
+		                    c.carry_at_head + 1,
+		            "the first tick's periodic second counts the carry after the visit"))
+			return false;
+		for (replication::UdpSessionTransport *t : {&s->a_transport, &s->b_transport}) {
+			const auto batches = drain_overlay_batches(*t);
+			const CaptureZoneOverlay *row = overlay_row(batches, s->b_body);
+			if (c.listed)
+				ok = expect(row != nullptr && row->param == 2 && row->icon_color == 0x0C &&
+				                    row->flags == 0 && row->source == 0,
+				            c.what) && ok;
+			else
+				ok = expect(row == nullptr, c.what) && ok;
+		}
+		if (c.game_type != game_type::kFlagBall || c.listed) continue;
+		// The next visit, 14 ticks on, reads the 61 the sweep left.
+		for (int i = 0; i < 14; ++i) inmatch::Server_TickUpdate(s->ctx);
+		ok = expect(overlay_row(drain_overlay_batches(s->a_transport), s->b_body) != nullptr,
+		            "the next visit lists the carrier the last sweep raised past 60") && ok;
+	}
+
+	// 15 Buildings and the loose flag stage 16 entries; slot 1 is not visited
+	// this tick, so everything it receives is slot 0's.
+	{
+		auto s = std::make_unique<FlagOverlayScene>();
+		if (!build_flag_overlay_scene(*s, game_type::kFlagBall, 15, 5)) return false;
+		s->ctx.np_protocol.connection_list[1].link.flag_carry_seconds = 61;
+		s->ctx.np_protocol.connection_list[1].reply.minimap_overlay_cooldown = 5;
+		inmatch::Server_TickUpdate(s->ctx);
+		const auto a = drain_overlay_batches(s->a_transport);
+		const auto b = drain_overlay_batches(s->b_transport);
+		ok = expect(b.size() == 1 && b[0].count == 16 && b[0].entries.front().handle == 0x2000 &&
+		                    overlay_row(b, s->loose) != nullptr &&
+		                    overlay_row(b, s->b_body) == nullptr,
+		            "the full ring flushes slot 0's 16 staged entries to the walked carrier slot") &&
+				ok;
+		ok = expect(a.size() == 1 && a[0].count == 1 &&
+		                    a[0].entries[0].handle == static_cast<uint16_t>(s->b_body.packed),
+		            "slot 0's final flush carries the carrier entry alone") && ok;
+		ok = expect(s->ctx.np_protocol.connection_list[0].reply.minimap_overlay_cooldown == 13 &&
+		                    s->ctx.np_protocol.connection_list[1].reply.minimap_overlay_cooldown == 4,
+		            "the visited slot re-arms, the other counts down") && ok;
+	}
+
+	// The walk is in slot order, whatever the list's: slot 1 stored first,
+	// slot 0's visit still runs first, so the carrier slot 1 gets slot 0's 16
+	// staged entries (15 Buildings and the loose flag) ahead of its own visit's
+	// two (the loose flag and its carrier entry; its initial scan is done).
+	// [orig: Server_UpdateAllActivePlayerSlots @0x518824..0x518A81]
+	{
+		auto s = std::make_unique<FlagOverlayScene>();
+		if (!build_flag_overlay_scene(*s, game_type::kFlagBall, 15, 5)) return false;
+		auto &list = s->ctx.np_protocol.connection_list;
+		std::swap(list[0], list[1]);
+		if (!expect(list[0].reply.player_slot == 1, "slot 1 is stored first")) return false;
+		list[0].link.flag_carry_seconds = 61;
+		list[0].reply.minimap_initial_scan_pending = false;
+		inmatch::Server_TickUpdate(s->ctx);
+		const auto b = drain_overlay_batches(s->b_transport);
+		ok = expect(b.size() == 2 && b[0].count == 16 && b[1].count == 2 &&
+		                    overlay_row({b[1]}, s->b_body) != nullptr,
+		            "slot 0's flush reaches slot 1 ahead of slot 1's own visit") && ok;
+	}
+
+	// A zero score limit ends the round at the first tick's win check, after
+	// that tick's visit (which lists the carrier); the next visit's slot has
+	// left state 6, so nothing more goes out.
+	auto s = std::make_unique<FlagOverlayScene>();
+	if (!build_flag_overlay_scene(*s, game_type::kFlagBall, 0, /*max_score=*/0)) return false;
+	s->ctx.np_protocol.connection_list[1].link.flag_carry_seconds = 61;
+	inmatch::Server_TickUpdate(s->ctx);
+	ok = expect(overlay_row(drain_overlay_batches(s->a_transport), s->b_body) != nullptr,
+	            "the round's last visit lists the carrier") && ok;
+	if (!expect(s->world.match.outcome().ended, "the zero limit ends the round")) return false;
+	for (int i = 0; i < 14; ++i) inmatch::Server_TickUpdate(s->ctx);
+	ok = expect(drain_overlay_batches(s->a_transport).empty() &&
+	                    s->ctx.np_protocol.connection_list[0].reply.minimap_overlay_cooldown == 13,
+	            "past the round end no visit runs and the cooldown holds") && ok;
 	return ok;
 }
 
@@ -5190,6 +5615,8 @@ int main() {
 	ok = check_scoreboard_message_is_transient() && ok;
 	ok = check_scoreboard_projects_every_retail_mode_shape() && ok;
 	ok = check_host_scoreboard_status_and_counts() && ok;
+	ok = check_scoreboard_row_team_is_the_slot_team() && ok;
+	ok = check_player_sync_and_0x75_carry_the_slot_team() && ok;
 	ok = check_connection_mode_table() && ok;
 	ok = check_single_player_signature() && ok;
 	ok = check_script_change_reaches_the_same_frame() && ok;
@@ -5239,6 +5666,8 @@ int main() {
 	ok = check_retail_minimap_overlay_stream_without_zone_chain() && ok;
 	ok = check_minimap_overlay_zone_capture_bits() && ok;
 	ok = check_minimap_overlay_reads_the_slot_team() && ok;
+	ok = check_minimap_overlay_flagball_carried_flag() && ok;
+	ok = check_minimap_overlay_flag_carrier_pass() && ok;
 	ok = check_preround_delay_phase_boundary() && ok;
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;

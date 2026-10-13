@@ -1,5 +1,6 @@
 #include "player/game_config_block.h"
 
+#include "resource_index/launch_flags.h"
 #include "resource_index/resource_root.h"
 #include "rtxt/rtxt_string_file.h"
 #include "util/string_convert.h"
@@ -40,6 +41,11 @@ void warn_save_error(const std::string &p_error) {
 		UtilityFunctions::push_warning(vformat("GameConfigBlock: %s", opennova::to_gd(p_error)));
 }
 
+// The process's command-line switches every read takes: `/LAN` (LaunchFlags).
+void take_launch_switches(inmatch::GameConfigBlock &p_block) {
+	p_block.set_lan_switch(LaunchFlags::lan());
+}
+
 } // namespace
 
 void GameConfigBlock::_bind_methods() {
@@ -68,6 +74,11 @@ String GameConfigBlock::get_path() const {
 	return opennova::to_gd(block_.path());
 }
 
+bool GameConfigBlock::load() {
+	take_launch_switches(block_);
+	return block_.load();
+}
+
 Error GameConfigBlock::save() {
 	std::string error;
 	if (block_.save(error)) return OK;
@@ -78,6 +89,7 @@ Error GameConfigBlock::save() {
 bool GameConfigBlock::enter_main_menu(const Ref<ResourceRoot> &p_root,
 		const Ref<RtxtStringFile> &p_gametext, const Vector2i &p_desktop) {
 	std::string error;
+	take_launch_switches(block_);
 	const bool kept = block_.enter_main_menu(menu_mount(p_root, p_gametext, p_desktop), error);
 	warn_save_error(error);
 	return kept;
@@ -86,6 +98,7 @@ bool GameConfigBlock::enter_main_menu(const Ref<ResourceRoot> &p_root,
 bool GameConfigBlock::reload_main_menu(const Ref<ResourceRoot> &p_root,
 		const Ref<RtxtStringFile> &p_gametext, const Vector2i &p_desktop) {
 	std::string error;
+	take_launch_switches(block_);
 	const bool kept = block_.reload_main_menu(menu_mount(p_root, p_gametext, p_desktop), error);
 	warn_save_error(error);
 	return kept;

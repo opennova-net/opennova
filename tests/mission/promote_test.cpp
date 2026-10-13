@@ -30,6 +30,7 @@ static void stamp_fixture_carrier_defs(World &world) {
 		if (!v.seats.empty() && !v.has_item_def) {
 			Entity &def = *world.registry.get(v.handle);
 			def.has_item_def = true;
+			def.has_graphic_model = true; // the def's graphic, the seats' model
 			def.item_type = 1;
 			def.item_attrib |= kItemAttribPlayerControl;
 		}

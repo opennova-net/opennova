@@ -12,6 +12,7 @@
 #include <formats/wac/bytecode.h>
 #include <runtime/assets/asset_store.h>
 #include <runtime/mission/mission_kernel.h>
+#include <runtime/world/player_spawn.h>
 
 #include "common/boot_file_source.h"
 #include "common/file_io.h"
@@ -529,6 +530,93 @@ static void test_board_walk_reaches_a_kernel_named_point() {
 	fs::remove_all(root, ec);
 }
 
+// A spawned body's first candidate slice reads the bound radius its model
+// init stamps: the host's and the joiner's bind, and a spawn once the
+// collision world is up, build the slices after the model init.
+// [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - Entity_InitFromModel
+//  called @0x43C492, the Entity_BuildProximityListsFromPools call @0x43C4EB]
+static void test_player_spawn_slice_reads_its_model_radius() {
+	namespace fs = std::filesystem;
+	const std::string root = std::string(test_paths_temp_dir()) + "/" +
+			test_paths_unique("opennova_kernel_spawn_slice");
+	std::error_code ec;
+	fs::remove_all(root, ec);
+	fs::create_directories(root, ec);
+	const std::vector<uint8_t> mount = test_io::read_file(
+			std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth/mount.3di");
+	if (test_io::is_lfs_pointer(mount)) {
+		std::printf("SKIP-LEG: needs the LFS fixture fixtures/threedi/synth/mount.3di\n");
+		return;
+	}
+	CHECK(!mount.empty() && test_io::write_file(root + "/SliceMount.3di", mount));
+	// Retail's head row, the player's (its model the same mount), and the
+	// placed mount.
+	static const char kItems[] =
+			"begin \"Null\"\r\n id 100000\r\n type marker\r\nend\r\n"
+			"begin \"Player\"\r\n id 105305\r\n type person\r\n graphic SliceMount\r\n hp 100\r\nend\r\n"
+			"begin \"Slice mount\"\r\n id 100164\r\n type object\r\n graphic SliceMount\r\n hp 100\r\nend\r\n";
+	def::DefItemsFile items{};
+	CHECK(def::def_parse_items_memory(reinterpret_cast<const uint8_t *>(kItems),
+			sizeof(kItems) - 1, &items) == 0);
+	{
+		ResourceIndex index;
+		CHECK(index.scan(root, std::string(), VfsMountMode::LooseOnly));
+		assets::AssetStore store{&index};
+		std::map<std::string, std::string> files;
+		bms::File m{};
+		m.items.push_back(item(/*type_id=*/164, 10 << 16, 20 << 16, 0));
+		m.items[0].id = 21;
+		ms::MissionKernel kernel;
+		kernel.set_items_table(&items);
+		kernel.set_assets(&store);
+		kernel.open_document(std::move(m), "slice", source_over(&files));
+		ms::KernelBootOptions options;
+		options.playable = false;
+		options.wac = false;
+		options.terrain = false;
+		options.seat_specs = false;
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		w::World &world = kernel.world;
+		const w::Entity *carrier = world.registry.by_net_id(21);
+		CHECK(carrier != nullptr && world.collision == &kernel.collision);
+		if (carrier == nullptr || world.collision == nullptr) {
+			def::def_free_items(&items);
+			return;
+		}
+		const float radius = carrier->bound_radius;
+		CHECK(radius > 0.25f);
+		for (int i = 0; i < 17; ++i) kernel.collision.build_tick_tables(world);
+		// Half the model radius past what a radius-0 slice reaches: only the
+		// stamped radius brings the mount into the body's slice.
+		const float x = 10.0f + 4.0f + 1.5f * radius;
+		// The host's (and the joiner's) path: the spawn, then the bind.
+		w::PlayerSpawn spawn;
+		spawn.position = {x, 20.0f, 0.0f};
+		spawn.health = 100;
+		const w::EntityHandle remote = w::spawn_remote_player(world, spawn);
+		CHECK(remote.valid());
+		kernel.bind_spawned_body(remote);
+		const w::Entity *body = world.registry.get(remote);
+		CHECK(body != nullptr && body->bound_radius > 0.0f);
+		CHECK(kernel.collision.candidate_count(remote) == 1);
+		// A spawn after the boot through the kernel's own spawn.
+		spawn.position = {10.0f, 20.0f - (4.0f + 1.5f * radius), 0.0f};
+		CHECK(kernel.spawn_local_player(spawn));
+		const w::EntityHandle local = world.cached.local_player;
+		const w::Entity *own = world.registry.get(local);
+		CHECK(own != nullptr && own->bound_radius > 0.0f);
+		int32_t count = 0;
+		const w::EntityHandle *slice = kernel.collision.candidate_slice(local, count);
+		bool sees_mount = false;
+		for (int32_t i = 0; slice != nullptr && i < count; ++i)
+			if (slice[i] == carrier->handle) sees_mount = true;
+		CHECK(sees_mount);
+	}
+	def::def_free_items(&items);
+	fs::remove_all(root, ec);
+}
+
 int main() {
     test_first_frame_tick_matches_on_host_and_joiner();
     test_joiner_installs_only_the_wac_terminator();
@@ -540,6 +628,7 @@ int main() {
 	test_initial_wac_waits_for_the_weather_owner_once();
 	test_restart_cancel_keeps_the_personal_slot_zoom();
 	test_board_walk_reaches_a_kernel_named_point();
+	test_player_spawn_slice_reads_its_model_radius();
 	// The synthetic mission: two placed entities plus one (empty) BMS event,
 	// and a mission-named WAC layer in the in-memory source.
 	std::map<std::string, std::string> files;

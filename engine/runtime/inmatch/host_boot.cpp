@@ -134,7 +134,9 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 
 	// The mission text ahead of the kernel: the briefings and location names
 	// feed the bring-up (S2C 0x7E / 0x0F) and [PeopleNames] the promote-time
-	// name resolver (resolve_mission_text carries the fallback witness).
+	// name resolver (resolve_mission_text carries the fallback witness). Its
+	// lookups search the mount's override table first, with or without a
+	// mission table (mission_text.h).
 	{
 		std::vector<uint8_t> text;
 		(void)mission::resolve_mission_text(files, basename, text);
@@ -143,6 +145,15 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 				!mission::parse_mission_text(text.data(), text.size(), boot.mission_text, text_error))
 			io::logf(io::LogLevel::kWarn, "host boot: the mission text did not parse: %s",
 					text_error.c_str());
+		if (!request.text_override_table.empty()) {
+			auto override_table = std::make_shared<rtxt::File>();
+			if (rtxt::parse(request.text_override_table.data(), request.text_override_table.size(),
+						*override_table, text_error))
+				boot.mission_text.override_table = std::move(override_table);
+			else
+				io::logf(io::LogLevel::kWarn, "host boot: the text-override table did not parse: %s",
+						text_error.c_str());
+		}
 	}
 
 	// The gametext "Server" strings the host's handlers print through, which

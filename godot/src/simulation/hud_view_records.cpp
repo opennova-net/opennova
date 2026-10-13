@@ -186,14 +186,25 @@ PackedStringArray EndRoundRow::get_cells() const {
 	return out;
 }
 
+Ref<EndRoundRow> EndRoundRow::make(int p_slot, int p_team) {
+	opennova::inmatch::StatScreenRow v;
+	v.slot = static_cast<uint8_t>(p_slot);
+	v.team = static_cast<uint8_t>(p_team);
+	Ref<EndRoundRow> out;
+	out.instantiate();
+	out->assign(v);
+	return out;
+}
+
 void EndRoundRow::_bind_methods() {
+	ClassDB::bind_static_method(
+			"EndRoundRow", D_METHOD("make", "slot", "team"), &EndRoundRow::make, DEFVAL(0));
 	OPENNOVA_RECORD_READ_ONLY(EndRoundRow, Variant::INT, slot)
 	OPENNOVA_RECORD_READ_ONLY(EndRoundRow, Variant::INT, team)
 	OPENNOVA_RECORD_READ_ONLY(EndRoundRow, Variant::STRING, name)
 	OPENNOVA_RECORD_READ_ONLY(EndRoundRow, Variant::STRING, squad)
 	OPENNOVA_RECORD_READ_ONLY(EndRoundRow, Variant::PACKED_STRING_ARRAY, cells)
 	OPENNOVA_RECORD_READ_ONLY(EndRoundRow, Variant::INT, color)
-	OPENNOVA_RECORD_READ_ONLY(EndRoundRow, Variant::BOOL, selected)
 }
 
 // --- DeployStatus -----------------------------------------------------------

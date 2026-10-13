@@ -543,8 +543,8 @@ void MenuFrame::set_widget_caret(int p_index, int p_caret) {
 	queue_redraw();
 }
 
-void MenuFrame::set_widget_text(int p_index, const String &p_text) {
-	opennova::menu::frame_set_text(state_, p_index, opennova::to_std(p_text));
+void MenuFrame::set_widget_text(int p_index, const String &p_text, int p_hotkey_pos) {
+	opennova::menu::frame_set_text(state_, p_index, opennova::to_std(p_text), p_hotkey_pos);
 	queue_redraw();
 }
 
@@ -1332,7 +1332,7 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::set_widget_disabled);
 	ClassDB::bind_method(D_METHOD("set_widget_checked", "index", "checked"),
 			&MenuFrame::set_widget_checked);
-	ClassDB::bind_method(D_METHOD("set_widget_text", "index", "text"),
+	ClassDB::bind_method(D_METHOD("set_widget_text", "index", "text", "hotkey_pos"),
 			&MenuFrame::set_widget_text);
 	ClassDB::bind_method(D_METHOD("get_widget_hover_item", "index"),
 			&MenuFrame::get_widget_hover_item);

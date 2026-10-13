@@ -92,6 +92,10 @@ public:
 	// those same two passes — the sampler's seam for rules that look at WHICH
 	// key fired (the USE hold's digit swallow). Mouse-mask holds report 0.
 	int pressed_key_for_token(const String &p_token) const;
+	// Whether the token's fire RIGHT NOW carries the sign bit (engine
+	// BindingSet::fire_signed carries the rule: Shift on a modifier-less key
+	// or a held mouse button) -- the mousescale step's direction.
+	bool is_token_fire_signed(const String &p_token) const;
 	// The chat line's keyboard capture (engine BindingSet::set_keyboard_captured
 	// carries the rule and its witness): no keyboard slot fires while set.
 	void set_keyboard_captured(bool p_captured) { bindings_.set_keyboard_captured(p_captured); }

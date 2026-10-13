@@ -214,16 +214,17 @@ func _populate(sim: Simulation) -> void:
 
 # One table fill: the columns the populate defines (stat.mnu's RESULTLIST
 # authors none), then the rows the engine's tab filter admits (0 all, 1 team
-# 2, 2 team 1) with their team colours and the local player's row selected,
-# sorted as the fill sorts. The header is the columns' labels, not a row
-# (MenuDriver fill_stat_results; the witness, the width split's design rect
-# among it, lives at the engine home, inmatch stat_screen_feed.h).
+# 2, 2 team 1) with their team colours, sorted as the fill sorts, and the row
+# of the local player entity's slot selected after the sort. The header is the
+# columns' labels, not a row (MenuDriver fill_stat_results; the witness, the
+# width split's design rect among it, lives at the engine home, inmatch
+# stat_screen_feed.h).
 func _fill_table(sim: Simulation, list_id: int, tab: int) -> void:
 	# The design rect the width split reads (CWnd_GetRect's, not the scaled one).
 	var rect := _driver.widget_local_rect(list_id)
 	var table_width := int(rect.size.x) if rect.size.x > 0.0 else RESULT_LIST_DEFAULT_WIDTH
 	_driver.fill_stat_results(list_id, sim.get_end_round_columns(table_width, _gametext()),
-			sim.get_end_round_rows(tab))
+			sim.get_end_round_rows(tab), sim.get_end_round_state().get_local_slot())
 
 
 func close() -> void:
@@ -260,8 +261,10 @@ func _on_widget_activated(_id: int, widget_name: String) -> void:
 		return
 	# The tab radios map onto the engine's tab index [orig:
 	# StatScreen_StatFilterTabHandler @0x562140, registered with params 0/1/2 by
-	# HUD_CacheStatPanelValues @0x5627a8..0x5627f5]; the filter itself is the
-	# sim feed's.
+	# HUD_CacheStatPanelValues @0x5627a8..0x5627f5]. The game hides the filled
+	# rows by their team value (CTableWnd_SetRowVisible), keeping their order and
+	# selection; ours refills the table with the rows the sim feed admits, which
+	# sorts and selects them again (D-MNU-53).
 	if widget_name.begins_with("RADIO_TAB_"):
 		var tab := 0
 		for i in TAB_WIDGETS.size():

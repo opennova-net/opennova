@@ -2633,6 +2633,12 @@ add_executable(item_events_test world/item_events_test.cpp)
 target_link_libraries(item_events_test PRIVATE opennova_runtime)
 add_test(NAME item_events COMMAND item_events_test)
 
+# The genx row's class callback (Entity_UpdateParentTransform): its installs
+# and removals, the pool-1 and pool-2 visits, the ground follow and the loop.
+add_executable(genx_parent_follow_test world/genx_parent_follow_test.cpp)
+target_link_libraries(genx_parent_follow_test PRIVATE opennova_runtime)
+add_test(NAME genx_parent_follow COMMAND genx_parent_follow_test)
+
 # The collision sweep's death-trait mining (mission/collision_resolve ->
 # world::ItemDeathTraits): the first husk's KZ / DEAD banks, the huskFinal-only
 # and missing-husk gates, and the retail GLASS userpoint table, over
@@ -4414,6 +4420,12 @@ add_test(NAME npruntime_server_spawn COMMAND npruntime_server_spawn_test)
 add_executable(npruntime_initial_state_burst_test npruntime/initial_state_burst_test.cpp)
 target_link_libraries(npruntime_initial_state_burst_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_initial_state_burst COMMAND npruntime_initial_state_burst_test)
+
+# D-NET-659: the slot's PlayerList PlayerTeam / PlayerType, written where retail's in-match
+# handlers SetOrCreate them, and the NovaWorld roster sync's vars-only change.
+add_executable(npruntime_player_list_vars_test npruntime/player_list_vars_test.cpp)
+target_link_libraries(npruntime_player_list_vars_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_player_list_vars COMMAND npruntime_player_list_vars_test)
 
 # S10a (ADR 0028): the joiner world<->net bridge — the witnessed client-frame hook order
 # [orig: Game_ProcessMainFrame @0x5263f0; Client_ProcessNetworkFrame @0x42c180], the ClientHello

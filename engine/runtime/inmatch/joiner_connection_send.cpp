@@ -430,7 +430,7 @@ std::vector<uint8_t> JoinerConnection::frame_deployment_pick(uint16_t wire_value
 bool JoinerConnection::prepare_deployment_pick(
 		uint16_t wire_value, ProtocolMessage &message_out) {
 	// The player's deploy-map pick [orig: Input_HandleActionBinding case 12
-	// @0x49b0c5-0x49b17b — dialogs reset, dword_81474C set, one C2S 0x0E [i16]].
+	// @0x49b0c5-0x49b17b — dialogs reset, g_ClientDeployHold set, one C2S 0x0E [i16]].
 	// A re-pick while awaiting the release is retail behavior: the host silently
 	// drops an invalid/contested pick and the screen stays up; every list click
 	// queues a fresh 0x0E. The release rule keys on the FIRST in-flight pick's
@@ -454,7 +454,7 @@ bool JoinerConnection::prepare_deployment_pick(
 			0x0E, {static_cast<uint8_t>(wire_value & 0xFFu),
 			       static_cast<uint8_t>((wire_value >> 8) & 0xFFu)});
 	deployment_pick_sent_ = true;
-	// Input case 12 re-arms dword_81474C without leaving the established
+	// Input case 12 re-arms g_ClientDeployHold without leaving the established
 	// in-session phase. ClientRuntime closes its separate gameplay gate when the
 	// input action is accepted; the ACK-qualified S2C 0x5A, or the self record's
 	// respawn edge (release_deployment_on_respawn), opens it again.

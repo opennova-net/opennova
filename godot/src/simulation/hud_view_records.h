@@ -259,6 +259,8 @@ protected:
 public:
 	void assign(const opennova::inmatch::StatScreenRow &p_value) { value_ = p_value; }
 	const opennova::inmatch::StatScreenRow &value() const { return value_; }
+	// The test constructor (the stat fill's rows): a slot and its team.
+	static Ref<EndRoundRow> make(int p_slot, int p_team);
 
 	int get_slot() const { return static_cast<int>(value_.slot); }
 	int get_team() const { return static_cast<int>(value_.team); }
@@ -266,7 +268,6 @@ public:
 	String get_squad() const;
 	PackedStringArray get_cells() const;
 	int64_t get_color() const { return static_cast<int64_t>(value_.color_argb); }
-	bool get_selected() const { return value_.selected; }
 };
 
 // The DEATH screen's STATIC facts (Simulation::get_deploy_status;

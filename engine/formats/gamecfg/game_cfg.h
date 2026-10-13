@@ -377,7 +377,7 @@ struct LoadOptions {
 	int32_t hw3d_deviceno = 0;
 	// The `/LAN` command-line switch: forces mpnovaworldhostlanonly to 1 after
 	// the read [orig: Game_ParseCommandLineAndInit @0x4A74EB sets
-	// dword_B4C694; Game_LoadConfig @0x5514B1..0x5514BA].
+	// g_LanSwitch; Game_LoadConfig @0x5514B1..0x5514BA].
 	bool lan_switch = false;
 };
 

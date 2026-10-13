@@ -40,7 +40,7 @@ int main() {
     }
 
     // --- the setting is consumed RAW per frame: no clamp on this path [orig: the
-    //     `shl 11` @ 0x4996dd reads dword_24D207C as is; the [1, 0x1FF] range is the
+    //     `shl 11` @ 0x4996dd reads g_MouseSensitivity as is; the [1, 0x1FF] range is the
     //     +/- adjust's @ 0x49b19b, i.e. the writer's, and the profile apply
     //     @ 0x55161e copies unclamped].
     {
@@ -110,6 +110,50 @@ int main() {
         player_look_keys(yaw, pitch, false, false, false, true, true, 0x1000000);
         CHECK(pitch == 0x1000000 - kLookPitchProneMax);
     }
+    // --- the flipmouse row flips the live Y invert [orig: case 9 `xor
+    //     g_MouseInvertY, 1` @0x49afbb].
+    {
+        PlayerLookSettings s;
+        player_look_flip_mouse(s);
+        CHECK(s.invert_y);
+        player_look_flip_mouse(s);
+        CHECK(!s.invert_y);
+    }
+
+    // --- the mousescale row: +16, -16 with the sign bit, a nonzero param as
+    //     the new word, then the 1..0x1FF clamp [orig: case 17
+    //     @0x49b185..0x49b1b9].
+    {
+        PlayerLookSettings s; // 128
+        CHECK(player_look_mouse_scale(s, 0, false) == 144 && s.sensitivity == 144);
+        CHECK(player_look_mouse_scale(s, 0, true) == 128 && s.sensitivity == 128);
+        CHECK(player_look_mouse_scale(s, 0, true) == 112);
+        s.sensitivity = 500;
+        CHECK(player_look_mouse_scale(s, 0, false) == 0x1FF);  // 516 >= 0x200
+        CHECK(player_look_mouse_scale(s, 0, false) == 0x1FF);  // 527 again
+        s.sensitivity = 0x1F0;
+        CHECK(player_look_mouse_scale(s, 0, false) == 0x1FF);  // 0x200 itself clamps
+        s.sensitivity = 0x1EF;
+        CHECK(player_look_mouse_scale(s, 0, false) == 0x1FF);  // 0x1FF is kept
+        s.sensitivity = 16;
+        CHECK(player_look_mouse_scale(s, 0, true) == 1);       // 0 clamps up
+        s.sensitivity = 17;
+        CHECK(player_look_mouse_scale(s, 0, true) == 1);       // 1 is kept
+        s.sensitivity = 5;
+        CHECK(player_look_mouse_scale(s, 0, true) == 1);       // -11
+        // The console's `mousescale <n>`: the word as given, then the clamp.
+        CHECK(player_look_mouse_scale(s, 300, true) == 300);
+        CHECK(player_look_mouse_scale(s, 1000, false) == 0x1FF);
+        CHECK(player_look_mouse_scale(s, -5, false) == 1);
+        // An unclamped profile word steps from where it is, and the 32-bit add
+        // wraps [orig: `add esi, 10h` @0x49b193].
+        s.sensitivity = 2000;
+        CHECK(player_look_mouse_scale(s, 0, true) == 0x1FF);
+        s.sensitivity = INT32_MAX;
+        CHECK(player_look_mouse_scale(s, 0, false) == 1);
+        CHECK(!s.invert_y); // the step never touches the invert
+    }
+
     if (failures == 0) std::printf("player_look_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }

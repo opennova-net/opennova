@@ -8,6 +8,7 @@
 #include <base/gameprofile/game_type.h>
 #include <runtime/inmatch/spectator_session.h>
 #include <runtime/world/music_vars.h>
+#include <runtime/world/player_look.h>
 #include <runtime/world/player_view.h>
 
 
@@ -94,11 +95,24 @@ void Simulation::add_local_player_look(float p_dx_px, float p_dy_px) {
 void Simulation::set_local_player_mouse(int p_sensitivity, bool p_invert_y) {
 	// The profile apply copies the setting dword UNCLAMPED (the retail
 	// Game_ApplySessionSettingsToGlobals leg; the [1, 0x1FF] range belongs to the
-	// mousescale +/- adjust, a binding the shell does not service, D-CTRL-1 — see
-	// engine player_look.h for the witnesses). The options control's own range is
-	// the shell's (player_options.gd).
+	// mousescale +/- adjust, step_local_player_mouse_scale below; see engine
+	// player_look.h for the witnesses). The options control's own range is the
+	// shell's (player_options.gd).
 	kernel_->local.look_settings.sensitivity = p_sensitivity;
 	kernel_->local.look_settings.invert_y = p_invert_y;
+}
+
+// The flipmouse / mousescale rows act on the session's LIVE words only; the
+// profile record keeps its own, which the next mission start's session copy
+// writes back (engine player_look.h and profile_controls.h carry the witness).
+void Simulation::flip_local_player_mouse() {
+	if (kernel_) opennova::world::player_look_flip_mouse(kernel_->local.look_settings);
+}
+
+int Simulation::step_local_player_mouse_scale(int p_param_value, bool p_negative) {
+	if (!kernel_) return 0;
+	return opennova::world::player_look_mouse_scale(kernel_->local.look_settings,
+			p_param_value, p_negative);
 }
 
 bool Simulation::request_local_player_stance(Stance p_stance) {

@@ -94,6 +94,14 @@ public:
 	// with exit code 0 and the caller writes nothing; the block then holds the
 	// read as it stood at the exit.
 	bool load();
+	// The `/LAN` switch: every read after it forces mpnovaworldhostlanonly to
+	// 1 past the mpreset exit, which a version reset's defaults then undo
+	// (gamecfg::LoadOptions::lan_switch). The process's command line sets it
+	// before the start's read and every read takes it [orig: g_LanSwitch, set
+	// by Game_ParseCommandLineAndInit @0x4A74EB, read by every Game_LoadConfig
+	// @0x5514B1].
+	void set_lan_switch(bool on) { lan_switch_ = on; }
+	bool lan_switch() const { return lan_switch_; }
 	// Game_SaveConfig. False (with `error`) when the file does not open, where
 	// retail writes nothing, silently.
 	bool save(std::string &error) const;
@@ -156,6 +164,7 @@ private:
 	bool version_reset_ = false;
 	bool reset_exit_ = false;
 	bool video_test_ran_ = false;
+	bool lan_switch_ = false;
 };
 
 } // namespace opennova::inmatch

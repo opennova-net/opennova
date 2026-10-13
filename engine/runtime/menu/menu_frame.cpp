@@ -660,16 +660,17 @@ MenuFrameCompiler::ResolvedText MenuFrameCompiler::resolved_widget_text(
 		const WidgetNode &node,
 		const MenuWidgetState *ws) const {
 	if (ws != nullptr && ws->has_text) {
+		// A runtime text is the label the set left: the set cut the first
+		// marker and kept its offset (MenuRuntime::set_widget_text); no %VAR%
+		// pass runs (that pass is parse-time, D-MNU-1)
+		// [orig: CButtonWnd_SetLabel @ 0x6572F0 - widget+740 @ 0x65746c].
 		ResolvedText resolved;
-		if (node.window->type == mnu::WindowType::Button) {
-			// A runtime relabel is raw text: retail's SetLabel strips the
-			// mnemonic marker but runs no %VAR% pass (that pass is parse-time,
-			// D-MNU-1) [orig: CButtonWnd_SetLabel @ 0x6572F0].
-			resolved.text = mnu::strip_hotkey_marker(ws->text, &resolved.hotkey,
-					&resolved.hotkey_pos);
-			return resolved;
-		}
 		resolved.text = ws->text;
+		if (ws->text_hotkey_pos >= 0 &&
+				ws->text_hotkey_pos < static_cast<int>(ws->text.size())) {
+			resolved.hotkey_pos = ws->text_hotkey_pos;
+			resolved.hotkey = std::string(1, ws->text[static_cast<size_t>(ws->text_hotkey_pos)]);
+		}
 		return resolved;
 	}
 	const mnu::Window &w = *node.window;

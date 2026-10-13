@@ -129,7 +129,7 @@ bool Server_ApplyPlayerEnterResult(NapiNPServerCtx &ctx, uint32_t connection_id,
 		bool success, int32_t msg_code);
 
 // Re-arm every connection's ONE-SHOT minimap initial scan (the pool-2
-// non-spawn-point sweep emit_minimap_overlay_state runs once per client
+// non-spawn-point sweep emit_minimap_overlay_for_slot runs once per client
 // epoch, then leaves to the SpawnPoint refresh + the 14-tick pool-1 phase
 // walk). A mission restart resets each client view to empty retained map
 // banks, so the host calls this alongside the baseline restore — the next

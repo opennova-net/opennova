@@ -7,6 +7,7 @@
 #include <formats/def/reserved_items.h>
 #include <net/npwire/ingame_encode.h>   // encode_chat_broadcast / encode_player_downed_state / encode_play_sound
 #include <net/npwire/ingame_message_id.h>
+#include <runtime/audio/oneshot_play.h>  // SoundSetIndex (the loaded banks)
 #include <runtime/audio/sound_profile.h> // compose_entity_sound_set — the 0x2E MEDIC_REQUEST composite
 #include <runtime/inmatch/server_console.h>  // the client-less host's CHAT ring
 #include <runtime/inmatch/server_message_dispatch.h> // is_medic_recipient
@@ -154,13 +155,19 @@ std::vector<ProtocolMessage> Server_HandleMedicRequest(const std::string *format
 	// positioned at the requester, to every slot in state 6/7 (mask 128, which
 	// reads no entity or health: the dead Medics it is for hear it, and so does
 	// the downed requester). The listen host's own copy rides the local
-	// slot-sound route the death scream uses.
-	// [orig: SoundProfile_FindByEntityAndType(entity, 1) @0x515526 ->
-	//  Server_SendOverlayActionToAlive @0x50A1B0 (mask 0x80 @0x50A1D3);
+	// slot-sound route the death scream uses. A body with no ItemDef (+0x20)
+	// calls nothing, and nor does a composite no loaded bank holds (a null set).
+	// [orig: the ItemDef test `cmp dword ptr [esi+20h], 0` @0x515519..0x51551D;
+	//  SoundProfile_FindByEntityAndType(entity, 1) @0x515526 (0 on a miss,
+	//  @0x5281D6) -> Server_SendOverlayActionToAlive @0x50A1B0 (the null test
+	//  @0x50A1B4..0x50A1B6, mask 0x80 @0x50A1D3);
 	//  NapiNPServer_SendFiltered @0x4C893E..0x4C8953]
+	if (!requester->has_item_def) return replies;
 	char set_name[24] = {};
 	audio::compose_entity_sound_set(requester->anim_slot, audio::kEntitySoundMedicRequest,
 			set_name, sizeof(set_name));
+	if (world->tables.sound_sets == nullptr || !world->tables.sound_sets->has(set_name))
+		return replies;
 	PlaySoundCommand cmd;
 	cmd.flag = 1;
 	cmd.sound_name = set_name;

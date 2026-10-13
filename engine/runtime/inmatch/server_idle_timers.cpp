@@ -6,6 +6,7 @@
 #include <net/npwire/ingame_decode.h>     // PlaySoundCommand
 #include <net/npwire/ingame_encode.h>     // encode_play_sound
 #include <net/npwire/ingame_message_id.h> // s2c::PLAY_SOUND
+#include <runtime/audio/oneshot_play.h>   // SoundSetIndex (the loaded banks)
 #include <runtime/audio/sound_profile.h>  // compose_entity_sound_set (the drowning composites)
 #include <runtime/world/geom.h>           // to_fixed
 #include <runtime/world/infantry.h>       // the drown death animation
@@ -17,15 +18,18 @@ namespace {
 // Server_SendOverlayActionToAlive with the entity's composite for `type`: the
 // S2C 0x34 sound at the entity's position to every slot in state 6/7 (mask
 // 128, which reads no entity or health, so a dead player hears it too); the
-// listen host's own copy rides the local slot-sound route.
-// [orig: SoundProfile_FindByEntityAndType @0x528180 ->
-//  Server_SendOverlayActionToAlive @0x50A1B0 (mask 0x80 @0x50A1D3);
+// listen host's own copy rides the local slot-sound route. A composite no
+// loaded bank holds is a null set, which sends nothing.
+// [orig: SoundProfile_FindByEntityAndType @0x528180 (SoundBank_FindSetByNameAnyBank
+//  @0x5281D6, 0 on a miss) -> Server_SendOverlayActionToAlive @0x50A1B0 (the
+//  null test @0x50A1B4..0x50A1B6, mask 0x80 @0x50A1D3);
 //  NapiNPServer_SendFiltered @0x4C893E..0x4C8953]
 void fan_entity_sound_in_match(NapiNPServerCtx &ctx, world::World &world,
 		const world::Entity &source, int type) {
 	char set_name[24] = {};
 	audio::compose_entity_sound_set(source.anim_slot, type, set_name, sizeof(set_name));
 	if (set_name[0] == 0) return;
+	if (world.tables.sound_sets == nullptr || !world.tables.sound_sets->has(set_name)) return;
 	PlaySoundCommand cmd;
 	cmd.flag = 1;
 	cmd.sound_name = set_name;
@@ -91,10 +95,12 @@ void Server_UpdatePlayerBreathTimers(NapiNPServerCtx &ctx, world::World &world) 
 		//  g_EnvWaterHeightFixed; jge`]
 		if (world::to_fixed(player->position.z) + player->eye_offset_z >= world.env.water_z) {
 			// Surfacing after more than four samples plays the breath (a dive
-			// no longer than 160% of the breath value) or the gasp composite.
-			// [orig: Server_UpdatePlayerBreathTimers @0x50D882..0x50D8CB]
+			// no longer than 160% of the breath value) or the gasp composite,
+			// for a body with an ItemDef (+0x20).
+			// [orig: Server_UpdatePlayerBreathTimers @0x50D882..0x50D8CB, the
+			//  ItemDef test `cmp [ecx+20h], ebx` @0x50D88D..0x50D890]
 			const int32_t prev = static_cast<int32_t>(conn.link.underwater_breath_samples);
-			if (prev > 4 && player->anim_slot != 0) {
+			if (prev > 4 && player->has_item_def) {
 				fan_entity_sound_in_match(ctx, world, *player,
 						prev <= gasp_after ? audio::kEntitySoundSurfaceBreath
 						                   : audio::kEntitySoundSurfaceGasp);
@@ -105,11 +111,12 @@ void Server_UpdatePlayerBreathTimers(NapiNPServerCtx &ctx, world::World &world) 
 
 		const int32_t samples = static_cast<int32_t>(++conn.link.underwater_breath_samples);
 		if (samples <= limit) {
-			// Three warnings ahead of the kill, 12 / 36 / 24 samples before it
-			// [orig: the compares @0x50D842..0x50D861, the WATER_GAG composite
-			//  @0x50D863..0x50D878].
+			// Three warnings ahead of the kill, 12 / 36 / 24 samples before it,
+			// for a body with an ItemDef (+0x20) [orig: the compares
+			// @0x50D842..0x50D861, the ItemDef test @0x50D863..0x50D866, the
+			// WATER_GAG composite @0x50D868..0x50D878].
 			if ((samples == limit - 12 || samples == limit - 36 || samples == limit - 24) &&
-					player->anim_slot != 0)
+					player->has_item_def)
 				fan_entity_sound_in_match(ctx, world, *player, audio::kEntitySoundWaterGag);
 			continue;
 		}

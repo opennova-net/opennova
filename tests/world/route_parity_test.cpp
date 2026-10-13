@@ -124,6 +124,7 @@ struct AirRig {
         w.ai.attach(helo_h);
         Entity pilot{};
         pilot.kind = EntityKind::Organic;
+        pilot.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         pilot.alive = true;
         pilot.health = 100;
         pilot.position = {0.0f, 0.0f, 50.0f};
@@ -676,6 +677,7 @@ void test_ground_samples_refresh_the_link() {
 
     Entity &helo = r.helo();
     helo.has_item_def = true; // a pool-1 candidate source needs its ItemDef
+    helo.item_type_index = 7; // ... and its def row's ordinal (the +0x1C word)
     helo.position = {10.0f, 10.0f, 5.0f};
     helo.bound_radius = 1.0f;
     for (int i = 0; i < 17; ++i) cw.build_tick_tables(r.w);

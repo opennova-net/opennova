@@ -111,7 +111,7 @@ public:
 	bool queue_door_request(uint16_t handle, int16_t state, uint8_t section);
 
 	// Effective gameplay readiness. Every C2S gameplay send (0x0C uplink,
-	// 0x06 fire, 0x2C ping) requires both retail's dword_81474C hold to be open
+	// 0x06 fire, 0x2C ping) requires both retail's g_ClientDeployHold hold to be open
 	// and the independent authoritative spawn/health latch to be released.
 	// Every valid 0x5A opens the literal gameplay gate even while a spawn-zone
 	// deploy screen remains pending; queuing C2S 0x0E closes only that gate. A
@@ -122,7 +122,7 @@ public:
 	bool is_deployed() const {
 		return deployed_ && authoritative_spawn_released_;
 	}
-	// The literal dword_81474C state. Every valid S2C 0x5A opens it, including
+	// The literal g_ClientDeployHold state. Every valid S2C 0x5A opens it, including
 	// an unrelated loadout echo while dead; that alone cannot resume gameplay.
 	bool gameplay_gate_open() const { return deployed_; }
     // Local Game_InitNewRound clears the medic latch and gameplay hold.
@@ -329,6 +329,12 @@ public:
 	// retail's mode-init value (the ceiling metric 255) until the first 2 s
 	// window closes; any rate at or above 16 scores the floor. Joiner only.
 	void set_observed_frame_rate(int32_t fps) { observed_frame_rate_ = fps; }
+	// The local player's Position (fixed 16.16), the client handlers' read of
+	// g_LocalPlayerEntity->Position: each role stamps its world's local player
+	// ahead of the client frame (the joiner's L, the listen host's own body);
+	// with none the last stamp stands. The 0x53 adoption distance reads it
+	// [orig: NapiNPClientMsg_ZoneTimerWindow @0x428C19..0x428CB1].
+	void set_local_player_position(const world::World &world);
 	// The bucketed 0..4 quality level the C2S 0x4C report carries and the
 	// client's own ping readings (0 before the first completed round trip).
 	// The level is g_NetQuality's first dword [orig: `mov eax, g_NetQuality`
@@ -573,6 +579,11 @@ public:
 	// the deployment UI/state cannot accept a pick. The listen host's own client
 	// sends the same request over its loopback to its own server.
 	bool queue_deployment_pick(uint16_t wire_value);
+	// The deploy action's convert arm (Role::request_deployment_pick): one
+	// reliable C2S 0x51 [i16 0xFFFF], the stock client's (no target), closing
+	// the gameplay dword as the pick does. The listen host's own client sends
+	// it over its loopback to its own server. False out of a session.
+	bool queue_spectator_convert();
 
 	// Pre-load join seam. Handshake and admission traffic continue through terminal S2C 0x11 while
 	// false; only C2S 0x0A and the resulting world/deployment stream are held.
@@ -779,6 +790,7 @@ private:
 	void adopt_tracked_window(const ZoneTimerWindow &window);
 	void advance_tracked_window();
 	TrackedCaptureWindow tracked_window_;
+	int32_t local_player_position_[3] = {0, 0, 0}; // set_local_player_position
 	// The client-side 1 Hz revive countdown over the roster: every 63rd frame
 	// each active slot with an entity and a nonzero revive window loses one
 	// second [orig: Client_ProcessNetworkFrame @0x42C27E..0x42C2DA —

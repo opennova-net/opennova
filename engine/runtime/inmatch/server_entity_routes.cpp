@@ -1,5 +1,6 @@
 #include <runtime/inmatch/server_entity_routes.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <variant>
@@ -9,6 +10,7 @@
 #include <net/npwire/ingame_decode.h>          // ExplosionEffectRecord / ObjectiveNotification / GuidedRecord
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <runtime/audio/oneshot_play.h>         // SoundSetIndex (the loaded banks)
 #include <runtime/inmatch/napi_np_connection.h> // is_in_match / active_player_recipient
 #include <runtime/replication/connection_fan.h> // build_water_cross_messages
 #include <runtime/world/world.h>
@@ -99,6 +101,18 @@ void Server_RouteWaterCrossings(NapiNPServerCtx &ctx, world::World &world) {
 	//  NapiNPClientMsg_PlaySoundByName
 	//  @0x4283A0 -> Entity_PlaySound3D_FullVolume @0x428499 over a zeroed
 	//  entity]
+	// Every crossing site passes the mission start's resolve of BODYWATER1 or
+	// SURFACE_WTR against the loaded banks, a null set where no bank holds it,
+	// and a null set sends nothing, the host's own copy included.
+	// [orig: DialogSystem_Init @0x5275E0 (the resolve @0x527692..0x5276C0);
+	//  Server_SendOverlayActionToAlive's null test @0x50A1B4..0x50A1B6]
+	std::vector<world::WaterCrossEvent> &crossings = world.out.water_crossings.events;
+	crossings.erase(std::remove_if(crossings.begin(), crossings.end(),
+			[&world](const world::WaterCrossEvent &ev) {
+				return world.tables.sound_sets == nullptr ||
+						!world.tables.sound_sets->has(
+								ev.airborne ? kWaterCrossAirborneEffect : kWaterCrossWadeEffect);
+			}), crossings.end());
 	if (!world.out.water_crossings.events.empty()) {
 		const std::vector<std::vector<uint8_t>> splashes =
 				replication::build_water_cross_messages(world);

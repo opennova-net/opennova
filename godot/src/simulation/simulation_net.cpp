@@ -338,16 +338,15 @@ std::vector<Simulation::HostPeerSlot> Simulation::host_peer_slots() const {
 	const opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
 	if (ctx == nullptr) return out;
 	for (const opennova::inmatch::NapiNPConnection &c : ctx->np_protocol.connection_list) {
-		if (c.type != opennova::inmatch::NapiNPConnection::kTypeServerSide ||
-				c.phase < opennova::inmatch::ConnectionPhase::PlayerAdded) {
-			continue;
-		}
+		if (c.phase < opennova::inmatch::ConnectionPhase::PlayerAdded) continue;
 		HostPeerSlot s;
 		s.slot = c.reply.player_slot;
+		s.own = c.type == opennova::inmatch::NapiNPConnection::kTypeClientSide;
 		s.player_name = opennova::to_gd(c.player_name);
 		s.ip_and_port = opennova::to_gd(opennova::peer_addr_to_string(c.peer));
 		s.pcid = opennova::to_gd(c.account.pcid);
-		if (c.assigned_team_valid) s.team = String::num_int64(c.assigned_team);
+		s.team = String::num_int64(c.player_list_team);
+		s.type = String::num_int64(c.player_list_type);
 		out.push_back(std::move(s));
 	}
 	return out;
@@ -993,8 +992,10 @@ bool Simulation::send_deployment_pick(int p_param) {
 	// [orig: Input_HandleActionBinding case 12 @0x49b0c5-0x49b17b — param 0 -> 0xFFFF,
 	// 65534 -> 0xFFFE, else SpawnZoneList_GetByIndex(param-1) -> the entity handle;
 	// an index that resolves no entity falls through to 0xFFFF @0x49b17b LABEL_70]
-	// The listen host's own client sends the same pick over its loopback.
-	if (!runtime_) return false;
+	// The listen host's own client sends the same pick over its loopback; the
+	// role's case-12 gate turns a dead permanent-death press into the 0x51
+	// convert or nothing (Role::request_deployment_pick).
+	if (!runtime_ || !kernel_) return false;
 	uint16_t wire = opennova::world::kDeployPickNone;
 	if (p_param == 65534) {
 		wire = opennova::world::kDeployPickAutoTeam;
@@ -1003,7 +1004,7 @@ bool Simulation::send_deployment_pick(int p_param) {
 		const size_t idx = static_cast<size_t>(p_param - 1);
 		if (idx < reg.entries.size()) wire = reg.entries[idx].packed;
 	}
-	return runtime_->queue_deployment_pick(wire);
+	return active_role().request_deployment_pick(wire);
 }
 
 int Simulation::get_joiner_phase() const {

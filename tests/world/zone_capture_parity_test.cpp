@@ -45,6 +45,8 @@ std::unique_ptr<World> make_world(uint32_t game_type, int32_t duration = 15) {
     rules.game_type = game_type;
     rules.capture_duration_seconds = duration;
     world->match.configure(rules);
+    // A network session: the capture scoring runs only in one.
+    world->rules.mp_session = true;
     return world;
 }
 
@@ -79,6 +81,8 @@ EntityHandle player(World &world, uint8_t slot, uint8_t team, Vec3 position) {
     entity.engine_flags = kEntityFlagPlayer;
     const EntityHandle handle = world.registry.spawn(0, entity);
     world.match.upsert_player({handle, slot, "P"});
+    // The slot's team byte (+416) is the body's until a script splits them.
+    world.match.set_player_slot_team(handle, team);
     return handle;
 }
 
@@ -175,6 +179,70 @@ void test_secure_pass_empty_side_divides_by_zero() {
           control->friendlies == 1);
 }
 
+// D-NET-671: the takeover speed's team sizes count each census slot under its
+// own team byte (+416), not its body's, while the presence compares the
+// bodies' teams. Three slot-team-1 bodies split onto team 2 stand far away;
+// a slot-team-2 body split onto team 1 stands in the team-2 zone beside the
+// attacker, so it counts against the owner by its body (two enemies, no
+// friendly) and on team 2 by its slot. Team 1 is sized at four, no boost at
+// five in all, so the delta at the default speed setting (1: 24) is
+// 65536 / (4 * 24 / -2) = -1365, where the bodies' teams would size it at
+// two, -2730, and a presence by slot team would cancel to 0.
+// [orig: CaptureZone_CalculateControlDelta - `cmp byte ptr [ebp+1A0h], 5`
+//  @0x501192, `movzx eax, byte ptr [ebp+1A0h]` @0x50119B, the count @0x5011A2,
+//  the speed setting @0x50127E..0x5012A4, the sizing side's read @0x5012DF,
+//  the boost @0x5012F8..0x501303, the presence compare @0x50120D..0x501217;
+//  Entity_SetTeamByNetId @0x43C680]
+void test_control_delta_sizes_teams_by_slot_team() {
+    auto world = make_world(gt::kAdvanceAndSecure);
+    zone(*world, 1, 1, {0.0f, 0.0f, 0.0f});
+    const EntityHandle held = zone(*world, 2, 2, {500.0f, 0.0f, 0.0f});
+    zone(*world, 3, 2, {1000.0f, 0.0f, 0.0f});
+    world->zones.build_chain_from_mission();
+    world->registry.get(held)->zone_control = 0x8000;
+    player(*world, 0, 1, {500.0f, 0.0f, 0.0f});
+    for (uint8_t slot = 1; slot <= 3; ++slot) {
+        const EntityHandle split = player(*world, slot, 1, {3000.0f, float(slot) * 10.0f, 0.0f});
+        world->registry.get(split)->team = 2;
+    }
+    const EntityHandle inside = player(*world, 4, 2, {505.0f, 0.0f, 0.0f});
+    world->registry.get(inside)->team = 1;
+    ZoneCaptureEvents events;
+    world->zones.capture_second_tick(events);
+    const auto controls = events_of<ZoneCaptureEvents::Control>(events);
+    const ZoneCaptureEvents::Control *control = control_of(controls, held);
+    CHECK(control != nullptr && control->friendlies == 0 && control->enemies == 2);
+    CHECK(control != nullptr && control->delta == static_cast<int16_t>(-1365));
+    CHECK(world->registry.get(held)->zone_control == 0x8000 - 1365);
+}
+
+// Past the round end the census takes no slot (retail's round end moves every
+// active one to state 7, out of the census's state-6 test; ours's decided
+// outcome stands in): a body in a zone moves no control and is counted on
+// neither side (D-NET-441's round-over half).
+// [orig: CaptureZone_CalculateControlDelta state 6 @0x501188 / `jnz`
+//  @0x50118C, the zero-presence exit @0x501278; Server_ProcessRoundEnd's
+//  state 7 @0x51685E; Server_TickUpdate - Server_CheckWinConditions
+//  @0x51DF5A before Server_UpdateCaptureZoneEntities @0x51DF73]
+void test_control_census_is_empty_past_the_round_end() {
+    auto world = make_world(gt::kAdvanceAndSecure);
+    zone(*world, 1, 1, {0.0f, 0.0f, 0.0f});
+    const EntityHandle held = zone(*world, 2, 2, {500.0f, 0.0f, 0.0f});
+    zone(*world, 3, 2, {1000.0f, 0.0f, 0.0f});
+    world->zones.build_chain_from_mission();
+    world->registry.get(held)->zone_control = 0x8000;
+    player(*world, 0, 1, {500.0f, 0.0f, 0.0f});
+    world->process_round_end(1);
+    CHECK(world->match.outcome().ended);
+    ZoneCaptureEvents events;
+    world->zones.capture_second_tick(events);
+    const auto controls = events_of<ZoneCaptureEvents::Control>(events);
+    const ZoneCaptureEvents::Control *control = control_of(controls, held);
+    CHECK(control != nullptr && control->friendlies == 0 && control->enemies == 0 &&
+          control->delta == 0);
+    CHECK(world->registry.get(held)->zone_control == 0x8000);
+}
+
 // A numbered SpawnPoint flip carries GameEvent_FlagCapture's inputs: the
 // zone's number and rank, whether the enemy mask held, the capturer's frontier
 // after the refresh, the decided test and the capturer's slot.
@@ -219,6 +287,93 @@ void test_numbered_flip_feeds_the_capture_pair() {
     const auto open_flips = events_of<ZoneCaptureEvents::Flip>(events);
     CHECK(open_flips.size() == 1 && !open_flips[0].unchanged &&
           open_flips[0].scorers.size() == 1 && open_flips[0].scorers[0] == taker);
+}
+
+// A numbered flip's scorers are the slots whose own team byte (+416) is the
+// capturer slot's, whatever their bodies' teams: a split slot (a script team
+// write to the body, which stores the entity byte alone) of the capturer's
+// slot team scores, one of the other slot team does not (D-NET-650).
+// [orig: CaptureZone_CheckProximityScoring @0x500C50 - the capturer's slot
+//  Entity_ValidatePtr @0x500C8E, `mov cl, [ebx+1A0h]` @0x500CEE /
+//  `cmp cl, [eax+1A0h]` @0x500CF4, event 24 @0x500D84; Entity_SetTeamByNetId
+//  @0x43C680]
+void test_numbered_scorers_match_slot_teams() {
+    auto world = make_world(gt::kAdvanceAndSecure);
+    zone(*world, 1, 1, {0.0f, 0.0f, 0.0f});
+    const EntityHandle open = zone(*world, 2, 0, {500.0f, 0.0f, 0.0f});
+    zone(*world, 3, 2, {1000.0f, 0.0f, 0.0f});
+    world->zones.build_chain_from_mission();
+    const EntityHandle taker = player(*world, 0, 1, {500.0f, 0.0f, 0.0f});
+    // Slot team 1, its body moved to team 2.
+    const EntityHandle split_ally = player(*world, 1, 1, {505.0f, 0.0f, 0.0f});
+    world->registry.get(split_ally)->team = 2;
+    // Slot team 2, its body moved to team 1.
+    const EntityHandle split_enemy = player(*world, 2, 2, {495.0f, 0.0f, 0.0f});
+    world->registry.get(split_enemy)->team = 1;
+    world->zones.capture.requests.push_back({open, 1, taker});
+    ZoneCaptureEvents events;
+    world->zones.capture_second_tick(events);
+    const auto flips = events_of<ZoneCaptureEvents::Flip>(events);
+    CHECK(flips.size() == 1);
+    if (!flips.empty()) {
+        CHECK(flips[0].numbered && flips[0].new_team == 1);
+        CHECK(flips[0].scorers.size() == 2);
+        if (flips[0].scorers.size() == 2)
+            CHECK(flips[0].scorers[0] == taker && flips[0].scorers[1] == split_ally);
+    }
+
+    // The capturer's own slot team leads: a capturer split onto team 1 from
+    // slot team 2 scores the slot-team-2 rows, itself among them.
+    auto second = make_world(gt::kAdvanceAndSecure);
+    zone(*second, 1, 1, {0.0f, 0.0f, 0.0f});
+    const EntityHandle neutral = zone(*second, 2, 0, {500.0f, 0.0f, 0.0f});
+    zone(*second, 3, 2, {1000.0f, 0.0f, 0.0f});
+    second->zones.build_chain_from_mission();
+    const EntityHandle split_taker = player(*second, 0, 2, {500.0f, 0.0f, 0.0f});
+    second->registry.get(split_taker)->team = 1;
+    const EntityHandle mate = player(*second, 1, 2, {505.0f, 0.0f, 0.0f});
+    const EntityHandle body_mate = player(*second, 2, 1, {495.0f, 0.0f, 0.0f});
+    (void)body_mate;
+    second->zones.capture.requests.push_back({neutral, 1, split_taker});
+    second->zones.capture_second_tick(events);
+    const auto split_flips = events_of<ZoneCaptureEvents::Flip>(events);
+    CHECK(split_flips.size() == 1);
+    if (!split_flips.empty()) {
+        CHECK(split_flips[0].new_team == 1);
+        CHECK(split_flips[0].scorers.size() == 2);
+        if (split_flips[0].scorers.size() == 2)
+            CHECK(split_flips[0].scorers[0] == split_taker && split_flips[0].scorers[1] == mate);
+    }
+}
+
+// Out of a network session the capture scoring returns first: a numbered flip
+// scores nobody in its radius and an unnumbered one no takeover (D-NET-650).
+// [orig: CaptureZone_CheckProximityScoring `cmp g_NapiNPCtx.is_in_session, 0`
+//  @0x500C6D, `jz` @0x500C74]
+void test_capture_scoring_needs_a_session() {
+    auto world = make_world(gt::kAdvanceAndSecure);
+    world->rules.mp_session = false;
+    zone(*world, 1, 1, {0.0f, 0.0f, 0.0f});
+    const EntityHandle open = zone(*world, 2, 0, {500.0f, 0.0f, 0.0f});
+    zone(*world, 3, 2, {1000.0f, 0.0f, 0.0f});
+    world->zones.build_chain_from_mission();
+    const EntityHandle taker = player(*world, 0, 1, {500.0f, 0.0f, 0.0f});
+    world->zones.capture.requests.push_back({open, 1, taker});
+    ZoneCaptureEvents events;
+    world->zones.capture_second_tick(events);
+    const auto flips = events_of<ZoneCaptureEvents::Flip>(events);
+    CHECK(flips.size() == 1 && flips[0].numbered && flips[0].new_team == 1 &&
+          flips[0].scorers.empty());
+
+    auto unnumbered = make_world(gt::kAdvanceAndSecure, 0);
+    unnumbered->rules.mp_session = false;
+    const EntityHandle objective = zone(*unnumbered, 0, 2, {0.0f, 0.0f, 0.0f});
+    const EntityHandle capturer = player(*unnumbered, 0, 1, {0.0f, 0.0f, 0.0f});
+    unnumbered->zones.capture.requests.push_back({objective, 1, capturer});
+    unnumbered->zones.capture_second_tick(events);
+    const auto plain = events_of<ZoneCaptureEvents::Flip>(events);
+    CHECK(plain.size() == 1 && !plain[0].numbered && !plain[0].takeover &&
+          plain[0].scorers.empty());
 }
 
 // The all-owned helper answers only in A&S and C&C: a flip that leaves one owner
@@ -383,7 +538,11 @@ int main() {
     test_secure_pass_latches_before_reading_control();
     test_secure_pass_counts_every_enemy();
     test_secure_pass_empty_side_divides_by_zero();
+    test_control_delta_sizes_teams_by_slot_team();
+    test_control_census_is_empty_past_the_round_end();
     test_numbered_flip_feeds_the_capture_pair();
+    test_numbered_scorers_match_slot_teams();
+    test_capture_scoring_needs_a_session();
     test_all_owned_arm_is_as_and_cc_only();
     test_conquer_and_control_exempts_the_frontier();
     test_unnumbered_capture_scores_psp_takeover();

@@ -591,20 +591,18 @@ void tick_respawn_holds(NapiNPServerCtx &ctx, const world::World &world) {
 //  (!g_SpawnSuccessGate && !g_PreRoundDelayTimer), non-session zero
 //  @0x51889c, latch -1 @0x5188ac, decrement @0x5188b8..0x5188c5; caller
 //  Server_TickUpdate @0x51d88b ahead of the recv pump @0x51d895]
-void tick_spawn_protection(NapiNPServerCtx &ctx, world::World &world) {
+void tick_spawn_protection(world::World &world, NapiNPConnection &conn) {
 	if (world.match.outcome().ended || world.preround_delay_seconds != 0) return;
-	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		if (!is_in_match(conn) || !conn.link.owned_entity.valid()) continue;
-		world::Entity *player = world.registry.get(conn.link.owned_entity);
-		if (player == nullptr) continue;
-		if (world.rules.mp_session) {
-			if (conn.link.spectator)
-				player->damage_state = -1;
-			else if (player->damage_state > 0)
-				--player->damage_state;
-		} else {
-			player->damage_state = 0;
-		}
+	if (!is_in_match(conn) || !conn.link.owned_entity.valid()) return;
+	world::Entity *player = world.registry.get(conn.link.owned_entity);
+	if (player == nullptr) return;
+	if (world.rules.mp_session) {
+		if (conn.link.spectator)
+			player->damage_state = -1;
+		else if (player->damage_state > 0)
+			--player->damage_state;
+	} else {
+		player->damage_state = 0;
 	}
 }
 
@@ -613,19 +611,43 @@ void tick_spawn_protection(NapiNPServerCtx &ctx, world::World &world) {
 // zone][the enemy team's, 0 when the same][0xFF] (mask 0xA0, itself) unless its own
 // frontier is 0; either way the bit clears. Both read the slot team (D-NET-583).
 // [orig: Server_UpdateAllActivePlayerSlots @0x518820 — @0x51890C..0x5189A6, @0x518929..0x51894A]
-void emit_frontier_hints(NapiNPServerCtx &ctx, world::World &world) {
-	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		if (!is_in_match(conn) || !conn.reply.frontier_hint_pending) continue;
-		const world::Entity *player = world.registry.get(conn.link.owned_entity);
-		const world::MatchPlayer *slot = world.match.player(conn.link.owned_entity);
-		if (player == nullptr || slot == nullptr || slot->play_ticks < 1240u) continue;
-		const uint8_t own = world.zones.frontier_zone(conn.assigned_team);
-		uint8_t enemy = world.zones.frontier_zone(conn.assigned_team == 1 ? 2 : 1);
-		if (enemy == own) enemy = 0;
-		if (own != 0 && conn.link.transport != nullptr)
-			conn.link.transport->host_send(s2c::GAME_EVENT,
-					{0x3A, own, enemy, 0xFF, 0, 0, 0, 0});
-		conn.reply.frontier_hint_pending = false;
+void emit_frontier_hint(world::World &world, NapiNPConnection &conn) {
+	if (!is_in_match(conn) || !conn.reply.frontier_hint_pending) return;
+	const world::Entity *player = world.registry.get(conn.link.owned_entity);
+	const world::MatchPlayer *slot = world.match.player(conn.link.owned_entity);
+	if (player == nullptr || slot == nullptr || slot->play_ticks < 1240u) return;
+	const uint8_t own = world.zones.frontier_zone(conn.assigned_team);
+	uint8_t enemy = world.zones.frontier_zone(conn.assigned_team == 1 ? 2 : 1);
+	if (enemy == own) enemy = 0;
+	if (own != 0 && conn.link.transport != nullptr)
+		conn.link.transport->host_send(s2c::GAME_EVENT,
+				{0x3A, own, enemy, 0xFF, 0, 0, 0, 0});
+	conn.reply.frontier_hint_pending = false;
+}
+
+// The per-player maintenance walk at the tick head, ahead of the receive pump:
+// per slot, the spawn-protection arm, the minimap overlay visit, then the
+// frontier hint. All three sit in the walk's state-6 block, and the round end
+// moves every slot to state 7, which the match outcome stands for here, so
+// none runs through the end-round linger. The walk is the slot table's, in
+// slot order: a visit's carrier pass can flush its ring to another slot, so
+// the order shows on that slot's wire.
+// [orig: Server_UpdateAllActivePlayerSlots @0x518820 - the slot-index walk
+//  @0x518824..0x518A81, the state test @0x518878, the protection
+//  @0x5188AC..0x5188C5, the overlay visit @0x5188D6, the frontier hint
+//  @0x518929; called @0x51D88B; Server_ProcessRoundEnd's state 7 @0x51685E]
+void update_all_active_player_slots(NapiNPServerCtx &ctx, world::World &world) {
+	if (world.match.outcome().ended) return;
+	std::vector<NapiNPConnection *> slots;
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) slots.push_back(&conn);
+	std::stable_sort(slots.begin(), slots.end(),
+			[](const NapiNPConnection *a, const NapiNPConnection *b) {
+				return a->reply.player_slot < b->reply.player_slot;
+			});
+	for (NapiNPConnection *conn : slots) {
+		tick_spawn_protection(world, *conn);
+		emit_minimap_overlay_for_slot(ctx, world, *conn);
+		emit_frontier_hint(world, *conn);
 	}
 }
 
@@ -1762,10 +1784,9 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			world.priority_target_clear_countdown = 744;
 		}
 	}
-	// Then the spawn-protection arm of the per-player maintenance walk
+	// Then the per-player maintenance walk
 	// [orig: Server_UpdateAllActivePlayerSlots @0x518820, called @0x51d88b].
-	tick_spawn_protection(ctx, world);
-	emit_frontier_hints(ctx, world);
+	update_all_active_player_slots(ctx, world);
 	// The host CNetQuality send window, on its own 62-frame countdown (retail
 	// samples it from the main frame beside this tick).
 	Server_SampleHostNetQuality(ctx);
@@ -1990,10 +2011,8 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 
 	// Queue per-peer retail maintenance on this tick so the requests share
 	// HostSession's next open S2C boundary with the 0x0A fan above.
-	if (!world.match.outcome().ended) {
+	if (!world.match.outcome().ended)
 		emit_periodic_session_maintenance(ctx, world, periodic_second);
-		emit_minimap_overlay_state(ctx, world);
-	}
 
 	// (2d) The capture transaction at 1 Hz [orig: the
 	// Server_TickUpdate g_PeriodicSecondTimer block @0x51DF50..0x51DF8C: proximity ->

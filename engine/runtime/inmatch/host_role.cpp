@@ -155,6 +155,8 @@ void HostRole::make_client_runtime(uint32_t game_type) {
 	mission::MissionKernel &kernel = *kernel_;
 	state.client_runtime = std::make_unique<inmatch::ClientRuntime>(state.host_loop);
 	state.host_owner.ctx.host_client = state.client_runtime.get();
+	// A fresh view counts its 0x0F / 0x50 folds from zero.
+	track_seen_ = ReplicaTrackSeen{};
 	state.client_runtime->set_profile(kernel.world.profile);
 	state.client_runtime->view().set_game_type(game_type);
 	state.client_runtime->view().set_mp_session(kernel.world.rules.mp_session);
@@ -228,8 +230,8 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	inmatch::set_server_text(ctx, bringup.server_text);
 	ctx.terrain_til_data = bringup.terrain_til_data; // S2C 0x45 terrain-tile load source (empty => skipped, §5.37)
 	ctx.mission_text_loaded = bringup.mission_text.loaded;
-	ctx.mission_briefing3 = bringup.mission_text.briefing3;
-	ctx.mission_briefing2 = bringup.mission_text.briefing2;
+	ctx.mission_briefing3 = bringup.mission_text.briefing3();
+	ctx.mission_briefing2 = bringup.mission_text.briefing2();
 	inmatch::install_mission_location_names(ctx, kernel.world, kernel.mission, bringup.mission_text);
 	// A host session's start zeroes the round count [orig: UI_HandleHostSessionStart
 	// @0x556EAB; HostDialog_StartSession @0x5587BD].
@@ -271,8 +273,8 @@ void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 	inmatch::set_server_text(ctx, bringup.server_text);
 	ctx.terrain_til_data = bringup.terrain_til_data;
 	ctx.mission_text_loaded = bringup.mission_text.loaded;
-	ctx.mission_briefing3 = bringup.mission_text.briefing3;
-	ctx.mission_briefing2 = bringup.mission_text.briefing2;
+	ctx.mission_briefing3 = bringup.mission_text.briefing3();
+	ctx.mission_briefing2 = bringup.mission_text.briefing2();
 	inmatch::install_mission_location_names(ctx, kernel.world, kernel.mission, bringup.mission_text);
 	inmatch::continue_host_session(state.host_owner, host_cfg);
 	map_change.torn_down = false;
@@ -369,6 +371,10 @@ void HostRole::drain_host_client_gameplay_requests() {
 		// respawn handler deploys the host's own player like a joiner
 		// [orig: Input_HandleActionBinding case 12 @0x49b17b;
 		//  Server_ProcessClientRequestRespawn @0x519AF0].
+		// So does the same action's spectator convert, the reliable 0x51 a
+		// dead player under permanent death queues, whose handler reads the
+		// host context [orig: case 12 @0x49B0B9;
+		//  Server_ProcessClientRequestSpectatorRespawn @0x51C840].
 		// So does its stance key's 0x1D: the handler latches the host's own
 		// player on the frame after the press, ahead of that frame's body
 		// update. Retail's pack runs before it and is overwritten by it; here
@@ -408,17 +414,19 @@ void HostRole::drain_host_client_gameplay_requests() {
 				dg.tag != c2s::EMOTE_REQUEST && dg.tag != c2s::RADIO_CALL_REQUEST &&
 				dg.tag != c2s::TEAM_CHANGE_REQUEST && dg.tag != c2s::STANCE_CHANGE &&
 				dg.tag != c2s::RESPAWN_REQUEST && dg.tag != c2s::DEATH_TIMEOUT_RESET &&
-				dg.tag != c2s::CLIENT_QUALITY) {
+				dg.tag != c2s::SPECTATOR_RESPAWN && dg.tag != c2s::CLIENT_QUALITY) {
 			deferred.push_back(std::move(dg));
 			continue;
 		}
 		// The chat handler, the snapshot builder, the radio call (its
 		// designation table and zone test), the squad handlers, the team
-		// change and the Respawn key's 0x41 (the authority and the respawn
-		// timeout) read the host context.
+		// change, the Respawn key's 0x41 (the authority and the respawn
+		// timeout) and the 0x51 convert (its authority test) read the host
+		// context.
 		const bool reads_ctx = squad || dg.tag == c2s::CHAT_MESSAGE ||
 				dg.tag == c2s::VISIBLE_PLAYERS_REQUEST || dg.tag == c2s::RADIO_CALL_REQUEST ||
-				dg.tag == c2s::TEAM_CHANGE_REQUEST || dg.tag == c2s::DEATH_TIMEOUT_RESET;
+				dg.tag == c2s::TEAM_CHANGE_REQUEST || dg.tag == c2s::DEATH_TIMEOUT_RESET ||
+				dg.tag == c2s::SPECTATOR_RESPAWN;
 		std::vector<ProtocolMessage> messages;
 		messages.push_back(make_protocol_message(dg.tag, std::move(dg.body)));
 		inmatch::ServerDispatchInputs inputs;
@@ -582,10 +590,21 @@ void HostRole::run_tick(const TickInput &input) {
 		// [orig: Game_ProcessMainFrame — CNetQuality_SetLevel @0x52659b,
 		//  CNetQuality_UpdateIndicators @0x52668d, Server_TickUpdate @0x5266b6].
 		state.client_runtime->set_net_quality_level(ctx.net_quality_level);
+		state.client_runtime->set_local_player_position(kernel.world);
 		state.client_runtime->Client_ProcessNetworkFrame(now);
 		state.client_runtime->apply_received_effects(kernel.world);
 		state.client_runtime->flush_host_sends(); // the receive handlers' own sends
 		state.client_runtime->raise_net_quality_link_errors(ctx.net_quality_link_errors);
+		// The own client's 0x0F copies its location names, each cut to its
+		// slot, into the one g_LocationNames the spawn filled, so the host's
+		// later reads (a later joiner's 0x0F, the chat's location labels) read
+		// that copy [orig: NapiNPClientMsg_0x00F: the count @0x42e51b and the
+		// copy @0x42e526..0x42e5ad, no authority test on them (the handler's
+		// tests gate the spawn-position store @0x42e360..0x42e369 and the ack
+		// burst @0x42e5b7)].
+		const replication::ClientState &own = state.client_runtime->state();
+		if (own.world_state.revision != track_seen_.world_state_revision)
+			ctx.mission_location_names = own.location_names;
 		// The own client's 0x0F / 0x50 track legs: the map POI list outside
 		// the waypoint gametypes (the route stays the promotion's).
 		apply_replica_track(kernel.world, state.client_runtime->state(),

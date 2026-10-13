@@ -30,7 +30,7 @@ void frame_set_disabled(MenuFrameState &state, int index, bool disabled);
 void frame_set_checked(MenuFrameState &state, int index, bool checked);
 void frame_set_focused(MenuFrameState &state, int index, bool focused);
 void frame_set_caret(MenuFrameState &state, int index, int caret);
-void frame_set_text(MenuFrameState &state, int index, const std::string &text);
+void frame_set_text(MenuFrameState &state, int index, const std::string &text, int hotkey_pos);
 // CWnd_SetRect: the widget's own rect, parent-relative design edges.
 void frame_set_rect(MenuFrameState &state, int index, int left, int top, int right, int bottom);
 // The open dropdown's hovered row; false when it already was.
@@ -95,7 +95,7 @@ public:
 	void set_widget_shown_override(int index, bool shown) override;
 	void set_widget_disabled(int index, bool disabled) override;
 	void set_widget_checked(int index, bool checked) override;
-	void set_widget_text(int index, const std::string &text) override;
+	void set_widget_text(int index, const std::string &text, int hotkey_pos) override;
 	void set_widget_items(int index, const std::vector<std::string> &items) override;
 	void set_widget_selection(int index, int selected, int hover, int scroll_row) override;
 	void set_widget_scroll_range(int index, int minimum, int maximum, int page, int value) override;

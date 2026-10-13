@@ -148,6 +148,11 @@ EndRoundSessionState end_round_session_state(const RoleView &view) {
 	v.round_ticks = round_ticks_remaining(view);
 	v.death_screen = local_death_screen_active(view);
 	v.local_team = local_team_of(view);
+	// The local player entity's slot id the stat fill selects its row by
+	// [orig: g_LocalPlayerEntity +0x154, read @0x562724]: the slot the role's
+	// runtime latched (a joiner's S2C 0x04, the listen host's own connection),
+	// as the command map's roster reads it.
+	v.local_slot = view.runtime->local_roster_slot();
 	// The team-mode arm stat.mnu's RADIO_TAB_* trio rides (the g_GameType
 	// 0x10000 bit, base/gameprofile/game_type.h; the show callback's witness is
 	// stat_screen_feed.h's).
@@ -272,7 +277,7 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 	if (view.runtime != nullptr) {
 		const replication::ClientState &cs = view.runtime->state();
 		const replication::ClientScoreboard &sb = cs.scoreboard;
-		s.permanent_death = cs.permanent_death;              // byte_A821EF
+		s.permanent_death = cs.permanent_death;              // g_SessionPermanentDeath
 		s.remaining_count = sb.alive_player_count;            // g_ScoreboardDeadRowCount
 		s.row_count = static_cast<int>(sb.rows.size());       // g_ScoreboardRowCount
 		s.spectator_count = sb.spectator_count;               // g_ScoreboardSpectatorCount
@@ -361,8 +366,10 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 
 std::vector<StatScreenRow> end_round_rows(const RoleView &view, int tab) {
 	// The PLAYER SLOT table retail walks is the roster every role's view folds
-	// from 0x46 (name / clan / team). The local row comes from the 0x1D
-	// header's board index, resolved to a connection slot below.
+	// from 0x46 (name / clan / team). Retail joins the board by the row's
+	// stored slot id; the local row is the fill's, by the local player entity's
+	// slot id (end_round_session_state's local_slot; fill_stat_results has the
+	// witness).
 	std::vector<StatScreenRow> out;
 	if (view.runtime == nullptr) return out;
 	const replication::ClientState &cs = view.runtime->state();
@@ -378,20 +385,10 @@ std::vector<StatScreenRow> end_round_rows(const RoleView &view, int tab) {
 		p.squad = slot.clan;
 		players.push_back(p);
 	}
-	// The header's player_index is the recipient's index into the FROZEN
-	// (points-descending) board array, not a connection slot. Retail joins the
-	// board by the row's stored slot id; it highlights, after the sort, the row
-	// whose column-1 value (the slot) is the local player entity's slot id
-	// (fill_stat_results has the witness). Ours flags the row whose slot is
-	// board[player_index].slot (D-MNU-51), the same fold for both roles
-	// because the listen host consumes its own loopback 0x1D.
-	int local_slot = -1;
-	const int8_t header_index = cs.end_round.header.player_index;
-	if (header_index >= 0 &&
-			static_cast<size_t>(header_index) < cs.end_round.board.players.size())
-		local_slot = cs.end_round.board.players[static_cast<size_t>(header_index)].slot;
-	for (const StatScreenRow &r : stat_screen_rows(cs.end_round.board, players, false, local_slot)) {
-		// The tab filter (stat_screen_row_visible carries the witness).
+	for (const StatScreenRow &r : stat_screen_rows(cs.end_round.board, players, false)) {
+		// The tab filter (stat_screen_row_visible carries the witness): the rows
+		// it admits, which the presenter's refill puts in, where the game hides
+		// the filled rows (D-MNU-53).
 		if (stat_screen_row_visible(tab, r.team)) out.push_back(r);
 	}
 	return out;

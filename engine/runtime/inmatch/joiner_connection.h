@@ -162,11 +162,11 @@ public:
 		std::vector<std::pair<uint8_t, std::vector<uint8_t>>> inbound_reducer;
 		bool reached_in_match = false;                // applicable deployment edge once self H is known
 		// Every successfully decoded S2C 0x5A runs retail's unconditional
-		// dword_81474C clear, independently from whether it is the causal
+		// g_ClientDeployHold clear, independently from whether it is the causal
 		// ACK-qualified deployment/UI release.
 		bool gameplay_release_applied = false;
 		// The headless auto-pick can be queued inside this receive fold. It re-arms
-		// only dword_81474C after an initial 0x5A may already have opened gameplay.
+		// only g_ClientDeployHold after an initial 0x5A may already have opened gameplay.
 		bool gameplay_hold_rearmed = false;
 		// S2C 0x61 — the per-player TICK SEED (not an SCRK exchange). The client's whole
 		// network-role clock is anchored to it: retail stores it into BOTH currentTick and
@@ -627,7 +627,7 @@ public:
 	// the revive's is the only release, since its deploy sends no 0x5A (D-NET-379). Leaves
 	// the pick/release stages for Complete and returns Phase::InMatch; true on a release.
 	// [orig: NetPacket_SerializePlayerState @0x4C1109 -> Game_InitNewRound @0x4C114C, its
-	//  dword_81474C clear @0x4227CE]
+	//  g_ClientDeployHold clear @0x4227CE]
 	bool release_deployment_on_respawn();
 
 	// Retail completes the 0x00 -> 0x01 -> 0x02 exchange and learns the mission from S2C 0x7B before it
