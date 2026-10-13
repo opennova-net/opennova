@@ -303,10 +303,12 @@ bool decode_protocol_packet_plaintext(const uint8_t *body, size_t body_len,
 		messages_out.clear();
 		return true;
 	}
+	// The record region is decrypted with the connection's key whenever it is nonempty, whatever
+	// that key is, an empty key included (D-NET-450).
+	// [orig: CNapiNPConnection_ParseMessages @0x625BC0 - the length test @0x625DCE..0x625DD0,
+	//  NapiNP_DecryptBuffer(region, len, conn+0x10C) @0x625DDF]
 	std::vector<uint8_t> inner(body + PROTOCOL_PACKET_HEADER_SIZE, body + body_len);
-	if (!scrk.empty()) {
-		nwu_encrypt(inner.data(), inner.size(), scrk);
-	}
+	nwu_encrypt(inner.data(), inner.size(), scrk);
 	return parse_protocol_messages(inner.data(), inner.size(), messages_out);
 }
 
@@ -319,7 +321,11 @@ bool encode_protocol_packet_plaintext(const ProtocolPacketHeader &hdr,
 		body_out.clear();
 		return false;
 	}
-	if (!inner.empty() && !scrk.empty()) {
+	// A nonempty record region is encrypted with the outbound key whatever that key is, an empty
+	// key included (D-NET-450).
+	// [orig: CNapiNPConnection_SendSessionPacket @0x61EDD0 - the length test
+	//  @0x61EF90..0x61EF92, NapiNP_EncryptBuffer(records, len, conn+0xCC) @0x61EF9D]
+	if (!inner.empty()) {
 		nwu_decrypt(inner.data(), inner.size(), scrk);
 	}
 	body_out.clear();

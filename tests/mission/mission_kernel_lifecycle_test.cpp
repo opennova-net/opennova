@@ -335,6 +335,42 @@ int main() {
 		CHECK(third.world.script.vars.get_mission(2) == 2);
 	}
 
+	// --- WAC's DO choices and RND across kernels ---------------------------------
+	// No mission load stores to the DO choices or RND (the start's WAC load clears the
+	// IF state and the DO counters and seeds DORND), so a rebuilt kernel reads
+	// both at the previous run's values until it writes them (D-EVT-15).
+	// [orig: WacScript_InitAndLoad @0x4F91F0 - the memsets
+	// @0x4F95F9 / @0x4F9609 / @0x4F9619 / @0x4F9629, the seed @0x4F966B;
+	// g_WacLoopChoices @0xC6E640; g_WacVarRND @0xC6B23C, WacCmd_Random @0x4ED2C8]
+	{
+		std::map<std::string, std::string> files;
+		files["synth.wac"] = "random(1000)\n";
+		auto first_box = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &first = *first_box;
+		first.open_document(two_entity_mission(), "synth", source_over(&files));
+		ms::KernelBootOptions options;
+		std::string error;
+		CHECK(first.boot(options, error));
+		const int32_t first_rnd = first.world.script.vars.wac.rnd;
+		CHECK(first_rnd != 0);
+		// A play-time BMS write of word 3328 sets choices 0 and 1.
+		first.world.script.vars.set_bank_word(3328, 0x0302);
+
+		std::map<std::string, std::string> reader;
+		reader["synth.wac"] = "v3 = RND\nv4 = RND\n";
+		auto second_box = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &second = *second_box;
+		second.carry_across_load_from(first);
+		CHECK(second.world.script.vars.wac.rnd == first_rnd);
+		CHECK(second.world.script.vars.wac.do_choice[0] == 2);
+		CHECK(second.world.script.vars.wac.do_choice[1] == 3);
+		second.open_document(two_entity_mission(), "synth", source_over(&reader));
+		CHECK(second.boot(options, error));
+		CHECK(second.world.script.vars.get_mission(3) == first_rnd); // read before any write
+		// A cat-4 read of word 3328 packs choices 0..3.
+		CHECK(second.world.script.vars.get_bank_word(3328) == 0x0302);
+	}
+
 	// --- the precipitation drawer's memory across kernels -------------------------
 	// Retail's drawer memory (dword_2C05A14 the mode, dword_2C05A18..20 the
 	// camera) is zero-initialized data only the drawer writes, never reset

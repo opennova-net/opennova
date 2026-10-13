@@ -343,11 +343,16 @@ std::vector<uint8_t> client_auth_to_bytes(const ClientAuth &msg) {
 	if (!msg.pw.empty()) append_string_field(buf, "PW", msg.pw);
 	if (msg.sip) append_u32_field(buf, "SIP", msg.sip);
 	if (msg.spn) append_u32_field(buf, "SPN", msg.spn);
-	// A CU entry of kCuSlotBytes or more is left out, the rest written; there
-	// is no count bound. [orig: CNapiNPConnection_SendClientJoin @0x61fe20 -
+	// Only a var of type 1 or 2 is written: any other type goes straight to
+	// the next var, ahead of the length bound, and takes no CU (a blob with no
+	// type byte is no such var). Then an entry of kCuSlotBytes or more is left
+	// out, the rest written; there is no count bound.
+	// [orig: CNapiNPConnection_SendClientJoin @0x61fe20 - the type byte +0x14
+	//  `cmp bl, 1` / `cmp bl, 2` @0x620210..0x62021B, the next var @0x6202B8;
 	//  the entry length @0x62023E, `cmp ebp, 800h` / `jge` @0x620242..0x620248,
 	//  the write @0x6202B0]
 	for (const auto &blob : msg.cu) {
+		if (blob.empty() || (blob[0] != 1 && blob[0] != 2)) continue;
 		if (blob.size() >= kCuSlotBytes) continue;
 		append_bytes_field(buf, "CU", blob.data(), blob.size());
 	}

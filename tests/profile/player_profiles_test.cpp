@@ -308,6 +308,26 @@ int test_name_rules() {
     p.current().flags = 0;
     TEST_EXPECT(p.set_name_edit("!#") == "!");
     TEST_EXPECT(p.current().name.empty() && p.current().flags == 0);
+    // The set strips the first {hot} marker, case-sensitively, before the
+    // notice carries the label to the rule [orig: CEditWnd_SetText @0x661900
+    // -> CButtonWnd_SetLabel @0x661912, strstr @0x657451, the shift
+    // @0x657476..0x657480].
+    p.current().flags = playersav::kRecordFlagNoName;
+    TEST_EXPECT(p.set_name_edit("Gh{hot}ost") == "Ghost");
+    TEST_EXPECT(p.current().name == "Ghost" && p.current().flags == 0);
+    TEST_EXPECT(p.set_name_edit("A{hot}B{hot}C") == "AB{hot}C");
+    TEST_EXPECT(p.current().name == "AB{hot}C");
+    // "{HOT}" is literal: its '}' is refused and cut, the record kept.
+    TEST_EXPECT(p.set_name_edit("{HOT}") == "{HOT");
+    TEST_EXPECT(p.current().name == "AB{hot}C");
+    // The cut's set strips the next marker [orig: the set @0x55fc6d].
+    TEST_EXPECT(p.set_name_edit("A{hot}B{hot}!") == "AB");
+    TEST_EXPECT(p.current().name == "AB{hot}C");
+    // A lone marker strips to no text, which the rule accepts: the record
+    // is named "" and its no-name flag cleared.
+    p.current().flags = playersav::kRecordFlagNoName;
+    TEST_EXPECT(p.set_name_edit("{hot}").empty());
+    TEST_EXPECT(p.current().name.empty() && p.current().flags == 0);
     // [orig: sub_561400 @0x561400]
     p.current().sp_no_scope_drift = 1;
     p.current_weapons().red.player_class = 5;

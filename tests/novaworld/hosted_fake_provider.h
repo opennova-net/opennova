@@ -27,6 +27,7 @@ public:
 		std::optional<int> exit_code;
 		hosted::LaunchSpec spec;
 		bool terminated = false;
+		int describes = 0;
 	};
 
 	const char *name() const override { return "fake"; }
@@ -63,7 +64,9 @@ public:
 		if (it == machines.end() || it->second.terminated) return s; // Gone
 		s.state = it->second.state;
 		s.exit_code = it->second.exit_code;
-		s.address = "10.0.0.2";
+		// A cloud machine is given its address as it boots: the first
+		// hide_address_describes describes of a machine name none.
+		if (++it->second.describes > hide_address_describes) s.address = "10.0.0.2";
 		return s;
 	}
 
@@ -118,6 +121,7 @@ public:
 	int launches = 0;
 	bool start_running = false;
 	bool fail_next_launch = false;
+	int hide_address_describes = 0;
 	// Runs inside launch(), once the machine exists (a route acting mid-launch).
 	std::function<void()> on_launch;
 

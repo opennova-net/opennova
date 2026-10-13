@@ -1,8 +1,10 @@
 #include <net/novacrypto/nwu.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -31,6 +33,45 @@ bool check_gateapi_seed() {
 // [orig: NapiNP_ComputeKeySeed @0x618430, `lea eax, [esi+edx+32h]` @0x618475]
 bool check_empty_key_seed() {
 	if (!expect(opennova::nwu_compute_seed("") == 50u, "empty key seed is len + 50 == 50")) return false;
+	return true;
+}
+
+// An empty key still runs the chain: the buffer test is the only gate, the
+// seed is 50, and only the key-byte pass skips (D-NET-450). Two bytes through
+// the SUBTRACT chain (our nwu_encrypt), derived step by step from the primitives:
+// three LCG steps give the progression's seed and step bytes and the reverse
+// flag, the LCG pass subtracts each next step's low byte, the progression
+// subtracts seed + i, then the reverse; the ADD chain restores the input.
+// [orig: NapiNP_DecryptBuffer @0x618880 - the length gate @0x618898, the three
+//  steps @0x6188B7..0x6188F3; Crypto_SubLCG @0x6183F0; Crypto_SubProgressive
+//  @0x618290; Crypto_SubKeyBytes @0x618340 - the empty-key skip @0x61836E..0x618370]
+bool check_empty_key_runs_the_seed_50_chain() {
+	const auto step = [](uint16_t state) {
+		return static_cast<uint16_t>(static_cast<uint16_t>(state * 0x5731u) + 1u);
+	};
+	const uint16_t s1 = step(50);
+	const uint16_t s2 = step(s1);
+	const uint16_t s3 = step(s2);
+	const uint16_t s4 = step(s3);
+	const uint16_t s5 = step(s4);
+	const uint8_t seed = static_cast<uint8_t>(s1);
+	const uint8_t increment = static_cast<uint8_t>(s2);
+	const std::vector<uint8_t> original = {0x5A, 0xC3};
+	std::vector<uint8_t> expected = original;
+	expected[0] = static_cast<uint8_t>(expected[0] - static_cast<uint8_t>(s4));
+	expected[1] = static_cast<uint8_t>(expected[1] - static_cast<uint8_t>(s5));
+	expected[0] = static_cast<uint8_t>(expected[0] - seed);
+	expected[1] = static_cast<uint8_t>(expected[1] - static_cast<uint8_t>(seed + increment + 1));
+	if ((s3 & 1u) != 0) std::swap(expected[0], expected[1]);
+
+	std::vector<uint8_t> buf = original;
+	if (!expect(opennova::nwu_encrypt(buf.data(), buf.size(), "") == buf.size(),
+	            "an empty key processes the buffer")) return false;
+	if (!expect(buf == expected, "an empty key runs the seed-50 chain")) return false;
+	if (!expect(buf != original, "the empty-key chain is not the identity")) return false;
+	if (!expect(opennova::nwu_decrypt(buf.data(), buf.size(), "") == buf.size() &&
+	                    buf == original,
+	            "the empty-key chain round-trips")) return false;
 	return true;
 }
 
@@ -111,6 +152,7 @@ bool check_reverse_order_roundtrip() {
 int main() {
 	if (!check_gateapi_seed()) return 1;
 	if (!check_empty_key_seed()) return 1;
+	if (!check_empty_key_runs_the_seed_50_chain()) return 1;
 	if (!check_signed_key_bytes()) return 1;
 	if (!check_gateapi_roundtrip()) return 1;
 	if (!check_key_sensitivity()) return 1;

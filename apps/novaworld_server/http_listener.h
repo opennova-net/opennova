@@ -4,6 +4,7 @@
 
 #include <net/novacrypto/epask.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
@@ -27,6 +28,7 @@ namespace opennova::novaworld_server {
 struct ServerConfig;
 class SessionStore;
 class NwUdpListener;
+namespace hosted { class AdminLinks; }
 
 // Crow-backed HTTP listener. start() registers six route families, each in
 // its own registrar (bodies in http_listener.cpp, the listed servers' in
@@ -66,6 +68,11 @@ public:
 	// outlive the HTTP listener. Null answers those routes 503.
 	void set_nw_udp_listener(NwUdpListener *listener) { nw_udp_ = listener; }
 
+	// The hosted servers' admin links the console routes run their commands on
+	// (hosted/console_routes.h). Set before start(); they must outlive the HTTP
+	// listener. Null answers every console command 503.
+	void set_admin_links(hosted::AdminLinks *links) { admin_links_ = links; }
+
 	HttpListener(const HttpListener &) = delete;
 	HttpListener &operator=(const HttpListener &) = delete;
 
@@ -77,6 +84,18 @@ public:
 	// The port Crow bound and serves (the OS's pick when config.http_port is
 	// 0); valid once start() returned true.
 	uint16_t bound_port() const { return bound_port_; }
+
+	// The handler threads Crow runs: the core count, at least
+	// kMinHandlerThreads. Handlers can wait without working (a hosted server's
+	// console request waits on its admin link for up to 3 s), so a two-core
+	// machine still runs eight; the console admits at most two fewer
+	// waiting requests (hosted/console_routes.h). The SQLite pool grows to the
+	// peak of concurrent leases, one per handler thread at most, which this
+	// bounds.
+	static constexpr unsigned kMinHandlerThreads = 8;
+	static unsigned handler_threads() {
+		return (std::max)(std::thread::hardware_concurrency(), kMinHandlerThreads);
+	}
 
 private:
 	// Route-family registrars called once from start(), in registration
@@ -161,6 +180,9 @@ private:
 	// The push channel to listed servers (set_nw_udp_listener), handed to the
 	// host routes at start(); null in tests that do not wire one.
 	NwUdpListener *nw_udp_ = nullptr;
+	// The console routes' admin links (set_admin_links); null in tests that do
+	// not wire them.
+	hosted::AdminLinks *admin_links_ = nullptr;
 	// config.public_host, set in start() before Crow runs (host_url() /
 	// gsb_url()).
 	std::string public_host_;

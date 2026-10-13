@@ -15,31 +15,10 @@ namespace opennova::novaworld_server::hosted {
 
 namespace {
 
-// Whether UTF-8 `text` holds a C1 control (U+0080..U+009F: 0xC2 then 0x80..0x9F).
-bool has_c1_control(std::string_view text) {
-	for (size_t i = 0; i + 1 < text.size(); ++i) {
-		const auto lead = static_cast<uint8_t>(text[i]);
-		const auto next = static_cast<uint8_t>(text[i + 1]);
-		if (lead == 0xC2 && next >= 0x80 && next <= 0x9F) return true;
-	}
-	return false;
-}
-
 std::optional<SettingsRefusal> out_of_range(const char *field, int value, int min, int max) {
 	if (value >= min && value <= max) return std::nullopt;
 	return SettingsRefusal{ field,
 		"must be " + std::to_string(min) + " to " + std::to_string(max) };
-}
-
-bool is_mission_name(std::string_view name) {
-	if (name.size() < 5 || name.size() > kMissionNameMaxBytes) return false;
-	if (!strutil::ends_with_icase(name, ".bms")) return false;
-	for (const char c : name.substr(0, name.size() - 4)) {
-		const bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-				c == '_' || c == '-';
-		if (!ok) return false;
-	}
-	return true;
 }
 
 // A host-file value: quoted, in the host's code page (check_settings has
@@ -52,6 +31,17 @@ std::string quoted(const std::string &utf8) {
 }
 
 } // namespace
+
+bool is_mission_file_name(std::string_view name) {
+	if (name.size() < 5 || name.size() > kMissionNameMaxBytes) return false;
+	if (!strutil::ends_with_icase(name, ".bms")) return false;
+	for (const char c : name.substr(0, name.size() - 4)) {
+		const bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+				c == '_' || c == '-';
+		if (!ok) return false;
+	}
+	return true;
+}
 
 std::optional<SettingsRefusal> check_settings(const HostedSettings &s) {
 	{
@@ -91,7 +81,7 @@ std::optional<SettingsRefusal> check_settings(const HostedSettings &s) {
 		return SettingsRefusal{ "missions",
 			"names more than " + std::to_string(kMissionsMax) + " missions" };
 	for (const std::string &m : s.missions) {
-		if (!is_mission_name(m))
+		if (!is_mission_file_name(m))
 			return SettingsRefusal{ "missions",
 				"names \"" + loggable(m, 40) +
 						"\", which is no .bms file name of letters, digits, _ and -" };

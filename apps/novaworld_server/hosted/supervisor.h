@@ -14,8 +14,9 @@
 //   booting       until the machine runs opennova-serve
 //   listing       until the server's listing appears (a listed RID with one of
 //                 the service account's HostKeys claimed)
-//   running       every health interval the listing is checked, every pass the
-//                 process; health_misses missing listings in a row end the
+//   running       every health interval the listing is checked and (with admin
+//                 links) the server's admin link answering, every pass the
+//                 process; health_misses failed checks in a row end the
 //                 machine and fail the server
 //   stopping      asked for by the owner, an admin or the supervisor itself (an
 //                 owner's account deleted or no longer active, or its approval,
@@ -35,9 +36,9 @@
 // machine gone, the boot or the listing not coming in time and a launch that
 // fails. A crash ends the machine and goes back to provisioning after
 // restart_backoff_ms while the server has restarts left: restart_limit of them
-// within the restart window, restart_reset_ms of running in one go forgiving
-// those before it (3 within an hour, so an always-on server that crashes now
-// and then over weeks is never failed for it). A stopped or failed server's
+// (3), and an hour (restart_reset_ms) of continuous running resets the count,
+// so an always-on server that crashes now and then over weeks is never failed
+// for it. A stopped or failed server's
 // service account is deleted with the transition that ends it. Always on:
 // nothing reaps an idle server, and nothing ends one for its age.
 //
@@ -49,11 +50,17 @@
 // first half, ending the machines no live row names, runs again every
 // orphan_sweep_interval_ms.
 //
+// The admin link (admin_link.h): with set_admin_links, every pass ends by
+// syncing the links with the servers in running, so a server's link comes up
+// once it runs, is replaced when a restart rendered a new login, and goes down
+// as the server leaves running (at stopping, or a crash).
+//
 // The routes only write requests and stops (hosted_repository.h); every
 // transition past them is the supervisor's, a compare-and-set on the row, so a
 // stop that lands while a pass is launching wins and the launched machine is
 // ended on the next pass. Each pass leases its own pooled connection.
 
+#include "admin_link.h"
 #include "hosted_repository.h"
 #include "machine_provider.h"
 
@@ -110,6 +117,10 @@ public:
 
 	// Set before start(); unset, a stop ends the machine without the push.
 	void set_stop_listing(StopListing push) { stop_listing_ = std::move(push); }
+	// The admin links the passes keep in step with the running servers; set
+	// before start(), and it must outlive the supervisor's thread. Unset, no
+	// server gets one.
+	void set_admin_links(AdminLinks *links) { admin_links_ = links; }
 
 	// Reconciles, then runs a pass every tick_interval_ms on the supervisor's own
 	// thread until stop().
@@ -169,11 +180,19 @@ private:
 	// Ends every machine the provider runs that no live row in `live` names
 	// (`when` labels the log line); the ids of the ones it keeps.
 	std::set<std::string> end_untracked(const std::vector<HostedServer> &live, const char *when);
+	// The provider's describe of the server's machine; an address the row lacks
+	// (none was known at the launch) is written from it.
+	MachineStatus describe(db::Database &db, const HostedServer &s);
+	// The admin links brought in step with the servers in running (their rows
+	// read again, after this pass's moves): each one's machine address and
+	// admin login.
+	void sync_admin_links(db::Database &db);
 
 	db::ConnectionPool &pool_;
 	MachineProvider &provider_;
 	const SupervisorConfig config_;
 	StopListing stop_listing_;
+	AdminLinks *admin_links_ = nullptr;
 	std::map<int64_t, Runtime> runtimes_;
 	uint64_t last_orphan_sweep_ms_ = 0;
 

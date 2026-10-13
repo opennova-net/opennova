@@ -94,7 +94,8 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
                          const std::vector<GameEntitySnapshot> &ents,
                          uint32_t game_type = 0,
                          std::size_t max_frame_body_bytes = 0,
-                         int32_t server_fps = 0);
+                         int32_t server_fps = 0,
+                         int32_t server_cpu_percent = 0);
 
 // The same frame, built but NOT sent: every per-recipient state advance (phase,
 // age, cache, watermark) happens here and the 0x0A body lands in `frame_out`.
@@ -108,11 +109,16 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 // server-status sub-block carries; 0 = none measured yet (retail's mode-init
 // value) [orig: Server_TickUpdate @0x51D7E0..0x51D7E5 copies g_StatsAvgFps to
 // g_ServerFps; NetPacket_WritePlayerState @0x4FFA5C..0x4FFA62 writes its byte].
+// `server_cpu_percent` is the host's CPU share (g_StatsCpuPercent), which
+// the sub-block carries as min(share, 0xFF), compared unsigned, so a negative
+// share crosses as 0xFF [orig: Server_TickUpdate @0x51D7EA..0x51D7FB ->
+// g_ServerCpuPct; NetPacket_WritePlayerState @0x4FFA76..0x4FFA7C].
 bool build_connection_s2c(const world::World &w, Connection &conn,
                           const std::vector<GameEntitySnapshot> &ents,
                           std::vector<uint8_t> &frame_out,
                           uint32_t game_type = 0,
                           std::size_t max_frame_body_bytes = 0,
-                          int32_t server_fps = 0);
+                          int32_t server_fps = 0,
+                          int32_t server_cpu_percent = 0);
 
 } // namespace opennova::replication

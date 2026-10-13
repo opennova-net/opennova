@@ -85,6 +85,28 @@ void test_rows_sort_and_occupants() {
 	CHECK(rows[8].value == 0);
 }
 
+// Rows whose texts tie stand where the list sort's quicksort leaves them, not
+// in their order: the Default row and two secured zones 32 indices apart
+// ('D' and 'd' fold together) under its name. Three rows equal on the
+// compare come out third, first, second (2 and 0 swap, then 2 and 1), and the
+// second loop then puts each zone's blank after its row.
+// [orig: ListWidget_SortRows @0x644990 -> Utility_SortDualArray (the call
+//  @0x6449c0) -> Utility_QuickSortDualArray @0x651AB0; cmp @0x6448a0]
+void test_tied_rows_stand_as_the_quicksort_leaves_them() {
+	DeployListInput in = base_input();
+	in.zone_name = [](const std::string &) { return std::string("Home Base"); };
+	in.zones.push_back(zone(3, true));
+	in.zones.push_back(zone(35, true));
+	CHECK(in.zones[1].letter == 'd');
+	const std::vector<DeployListRow> rows = build_deploy_rows(in);
+	CHECK(rows.size() == 5);
+	CHECK(rows[0].value == 36 && rows[0].text == "<c4040FF>'d' Home Base");
+	CHECK(rows[1].value == -1 && rows[1].text.empty());
+	CHECK(rows[2].value == 0 && rows[2].text == "<c4040FF>'D' Home Base");
+	CHECK(rows[3].value == 4 && rows[3].text == "<c4040FF>'D' Home Base");
+	CHECK(rows[4].value == -1 && rows[4].text.empty());
+}
+
 // A zone with occupants but no list row (not secured: the second loop has no
 // secured gate) inserts at position 0 -> right after whatever row 0 is.
 void test_unsecured_zone_occupants_land_after_row_zero() {
@@ -286,6 +308,7 @@ int main() {
 	test_status_text();
 	test_rows_sort_and_occupants();
 	test_unsecured_zone_occupants_land_after_row_zero();
+	test_tied_rows_stand_as_the_quicksort_leaves_them();
 	test_status_line();
 	test_statics();
 	test_statics_text();

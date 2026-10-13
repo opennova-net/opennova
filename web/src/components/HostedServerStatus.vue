@@ -95,7 +95,8 @@
           <dd class="break-all font-mono text-ink">{{ server.listing.host_ip }}:{{ server.listing.host_port }}</dd>
         </dl>
         <p class="text-sm text-ink-muted">
-          Players find it in the NovaWorld server browser. Chat, renaming and player controls:
+          Players find it in the NovaWorld server browser. Its players, rotation and chat are in the console
+          below; renaming it and its message:
           <RouterLink to="/me/servers" class="text-accent hover:text-ink-bright">My servers</RouterLink>.
         </p>
       </div>
@@ -152,8 +153,16 @@
       </dl>
     </section>
 
-    <!-- PR K's console panes mount here (HostedServerConsole is the seam). -->
-    <HostedServerConsole v-if="server.live" :server="server" />
+    <!-- The console, while the server runs (its admin link is up only then). -->
+    <HostedServerConsole
+      v-if="server.state === 'running'"
+      :key="server.id"
+      :target="{ kind: 'owner' }"
+      mode="owner"
+      :server-name="server.listing?.server_name || server.settings.game_name"
+      @gone="emit('console-gone')"
+      @unauthorized="emit('session-ended')"
+    />
 
     <!-- Every transition, oldest first. -->
     <section v-if="events.length > 0" class="space-y-3" :aria-labelledby="ids.timeline">
@@ -231,9 +240,10 @@
 <script setup lang="ts">
 // One hosted server as its owner sees it: where it is in its life
 // (requested -> provisioning -> booting -> listing -> running, then stopping
-// -> stopped, or failed), its listing, its settings, the console seam, its
-// timeline and, while it is live, the owner's stop (POST /api/me/server/stop).
-// The page (HostedServerPage) polls and hands the server in.
+// -> stopped, or failed), its listing, its settings, its console while it
+// runs (HostedServerConsole, in the page's console queue), its timeline and,
+// while it is live, the owner's stop (POST /api/me/server/stop). The page
+// (HostedServerPage) polls and hands the server in.
 import { computed, nextTick, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
 import HostedServerConsole from './HostedServerConsole.vue';
@@ -259,6 +269,10 @@ const emit = defineEmits<{
   (e: 'stopped', server: HostedServer | null): void;
   // A refusal the page acts on besides showing it here.
   (e: 'refused', error: HostedError): void;
+  // The console was refused because the server is not running any more.
+  (e: 'console-gone'): void;
+  // The console was refused the session.
+  (e: 'session-ended'): void;
 }>();
 
 const ids = computed(() => {

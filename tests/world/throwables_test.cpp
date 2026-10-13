@@ -854,6 +854,88 @@ void test_placed_device_takes_the_model_init_no_target_bit() {
     CHECK(streamed);
 }
 
+// The same init's matrix-built leg ORs Flags 0x20000 for a decoration,
+// building or object def or a null update callback (+0x1C4), which the rest
+// leg nulled for an unparented round and set to the parent follow for a
+// parented one; its hp-0 leg makes an indestructible def's device Flags
+// 0x4000000, Health 1, subType 0xFF with the def's armor words 0xFFFF; and it
+// copies the def's signatures. The pool-1 load stream carries both bits.
+// [orig: Entity_ConvertRoundToPlacedEntity @0x5455B0, the memcpy @0x5455D6,
+//  the Entity_InitFromModel call @0x5455D8; Entity_InitFromModel
+//  @0x40E0D4..0x40E105, @0x40DC85..0x40DCAF, @0x40E136..0x40E156; satchel rest
+//  leg @0x4489FB / @0x448A10]
+void test_placed_device_takes_the_model_init_matrix_and_hp0_legs() {
+    Rig rig(0);
+    const AmmoTableEntry &ammo = rig.w.tables.ammo.entries[kAmmoSatchel];
+    Entity parent_seed;
+    parent_seed.kind = EntityKind::Item;
+    parent_seed.position = Vec3{10, 10, 1};
+    const EntityHandle parent = rig.w.registry.spawn(1, parent_seed);
+    CHECK(parent.valid());
+    auto place = [&](const Vec3 &pos, EntityHandle on) -> const Entity * {
+        const size_t before = rig.w.throwables.devices.size();
+        CHECK(rig.w.throwables.place_from_round(rig.w, make_satchel_round(rig, pos, on),
+                                                ammo));
+        if (rig.w.throwables.devices.size() != before + 1) return nullptr;
+        return rig.w.registry.get(rig.w.throwables.devices.back().entity);
+    };
+    auto streamed_flags = [&](const Entity *e) -> uint32_t {
+        const opennova::PoolSpawnBatch batch =
+                opennova::replication::build_pool1_spawn_batch(rig.w);
+        for (const opennova::PoolSpawnRecord &rec : batch.records)
+            if (e != nullptr && rec.slot_id == e->handle.packed) return rec.entity_flags;
+        return 0xFFFFFFFFu;
+    };
+    // A vehicle def (type 1), whose round retail's clone puts in pool 1 and
+    // whose type alone never takes the bit: an unparented device takes it
+    // whatever its type, a parented one does not. The seeded rows author hp 5.
+    // [orig: Entity_CloneFromTemplateByType @0x439925..0x43992D]
+    ThrowableClassRow satchel = *rig.w.throwables.classes.get(kItemSatchel);
+    satchel.def_type = opennova::def::DEF_ITEM_TYPE_VEHICLE;
+    rig.w.throwables.classes.set(satchel);
+    const Entity *loose = place(Vec3{20, 20, 2}, EntityHandle{});
+    CHECK(loose != nullptr && (loose->engine_flags & kEntityFlagMatrixBuilt) != 0);
+    CHECK(loose != nullptr && (loose->engine_flags & kEntityFlagIndestructible) == 0);
+    CHECK(loose != nullptr && loose->health == 5 && loose->sub_type == 0);
+    CHECK((streamed_flags(loose) & 0x20000u) != 0);
+    const Entity *stuck = place(Vec3{11, 10, 2}, parent);
+    CHECK(stuck != nullptr && (stuck->engine_flags & kEntityFlagMatrixBuilt) == 0);
+    CHECK((streamed_flags(stuck) & 0x20000u) == 0);
+    // items.def 101891 "Satchel Charge" is `type object`, the type retail's
+    // clone puts in pool 1. A decoration or building def's round clones into
+    // pool 2 there, out of the pool-1 batch, so those two rows check the
+    // init's leg alone. [orig: Entity_CloneFromTemplateByType @0x439925..0x43993B]
+    for (const int type : {opennova::def::DEF_ITEM_TYPE_DECORATION,
+                           opennova::def::DEF_ITEM_TYPE_BUILDING,
+                           opennova::def::DEF_ITEM_TYPE_OBJECT}) {
+        satchel.def_type = type;
+        rig.w.throwables.classes.set(satchel);
+        const Entity *typed = place(Vec3{11, 12, 2}, parent);
+        CHECK(typed != nullptr && (typed->engine_flags & kEntityFlagMatrixBuilt) != 0);
+        if (type == opennova::def::DEF_ITEM_TYPE_OBJECT)
+            CHECK((streamed_flags(typed) & 0x20000u) != 0);
+        if (!rig.w.throwables.devices.empty())
+            rig.w.throwables.devices.pop_back(); // under the satchel cap
+    }
+    // An hp-0 vehicle def, with signatures.
+    satchel.def_type = opennova::def::DEF_ITEM_TYPE_VEHICLE;
+    satchel.health_max = 0;
+    satchel.armor_impact = 7;
+    satchel.armor_kz = 8;
+    satchel.radar_sig = 40;
+    satchel.heat_sig = 30;
+    rig.w.throwables.classes.set(satchel);
+    rig.w.throwables.devices.clear();
+    const Entity *hard = place(Vec3{24, 20, 2}, EntityHandle{});
+    CHECK(hard != nullptr && (hard->engine_flags & kEntityFlagIndestructible) != 0);
+    CHECK(hard != nullptr && hard->health == 1);
+    CHECK(hard != nullptr && hard->sub_type == 0xFF);
+    CHECK(hard != nullptr && hard->armor_impact == -1 && hard->armor_kz == -1);
+    CHECK(hard != nullptr && hard->radar_sig == 40 && hard->heat_sig == 30);
+    CHECK((streamed_flags(hard) & 0x4000000u) != 0);
+    CHECK((streamed_flags(hard) & 0x20000u) != 0);
+}
+
 void test_placed_device_pose_and_ballistic_damage() {
     Rig rig(0);
     LiveRound round = make_satchel_round(rig, Vec3{20, 20, 2});
@@ -1694,6 +1776,7 @@ int main() {
     test_round_slot_reuse_clears_throwable_state();
     test_satchel_places_device();
     test_placed_device_takes_the_model_init_no_target_bit();
+    test_placed_device_takes_the_model_init_matrix_and_hp0_legs();
     test_placed_device_pose_and_ballistic_damage();
     test_parented_device_follows_parent_yaw();
     test_parented_device_adopts_parent_pitch();

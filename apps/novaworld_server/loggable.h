@@ -10,8 +10,10 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdio>
+#include <mutex>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace opennova::novaworld_server {
 
@@ -23,6 +25,19 @@ inline bool has_control_byte(std::string_view s) {
 		const auto byte = static_cast<unsigned char>(c);
 		return byte < 0x20 || byte == 0x7F;
 	});
+}
+
+// Whether UTF-8 `text` holds a C1 control (U+0080..U+009F: 0xC2 then
+// 0x80..0x9F), which a user's text may hold no more than a control byte: the
+// hosted settings' game name, a pushed ServerCommand arg and a console chat line.
+inline bool has_c1_control(std::string_view text) {
+	for (size_t i = 0; i + 1 < text.size(); ++i) {
+		const auto lead = static_cast<unsigned char>(text[i]);
+		const auto next = static_cast<unsigned char>(text[i + 1]);
+		if (lead == 0xC2 && next >= 0x80 && next <= 0x9F)
+			return true;
+	}
+	return false;
 }
 
 // `text` as a log line may carry it: each control byte (below 0x20, or 0x7F)
@@ -58,6 +73,50 @@ inline std::string loggable_secret(std::string_view secret) {
 	if (secret.empty())
 		return "(none)";
 	return "<redacted #" + io::sha256_hex(io::sha256(secret)).substr(0, 8) + ">";
+}
+
+// The process's log secrets: values no log line may show, each registered while it is live
+// (a hosted server's remote-admin password, for as long as its admin link holds it; ADR 0053
+// d5). main()'s engine log sink masks every line it prints, and a holder masks its own lines
+// (mask_log_secrets). A registration counts: a value registered twice stays masked until it
+// is removed twice. A value under 8 bytes is not registered: masking it would shred the log,
+// and no secret the service mints is that short.
+namespace log_secrets_detail {
+struct Registry {
+	std::mutex mu;
+	std::vector<std::string> values;
+};
+inline Registry &registry() {
+	static Registry r;
+	return r;
+}
+} // namespace log_secrets_detail
+
+inline void add_log_secret(const std::string &secret) {
+	if (secret.size() < 8)
+		return;
+	auto &r = log_secrets_detail::registry();
+	std::lock_guard<std::mutex> lock(r.mu);
+	r.values.push_back(secret);
+}
+
+inline void remove_log_secret(const std::string &secret) {
+	auto &r = log_secrets_detail::registry();
+	std::lock_guard<std::mutex> lock(r.mu);
+	const auto it = std::find(r.values.begin(), r.values.end(), secret);
+	if (it != r.values.end())
+		r.values.erase(it);
+}
+
+// `line` with every registered secret replaced by "***".
+inline std::string mask_log_secrets(std::string line) {
+	auto &r = log_secrets_detail::registry();
+	std::lock_guard<std::mutex> lock(r.mu);
+	for (const std::string &secret : r.values) {
+		for (size_t at = line.find(secret); at != std::string::npos; at = line.find(secret, at + 3))
+			line.replace(at, secret.size(), "***");
+	}
+	return line;
 }
 
 // Whether a cookie (or form field) named `name` carries a bearer secret: a

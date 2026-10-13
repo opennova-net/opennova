@@ -24,7 +24,10 @@
 // once, and shared cache's SQLITE_LOCKED skips the busy timeout a WAL file's
 // writers wait on.
 
+#include "admin_tcp_server.h"
 #include "auth.h"
+#include "hosted/admin_link.h"
+#include "hosted/console_commands.h"
 #include "hosted/hosted_repository.h"
 #include "hosted/supervisor.h"
 #include "hosted_fake_provider.h"
@@ -39,7 +42,10 @@
 #include "web_session.h"
 
 #include <base/io/cp1252.h>
+#include <base/io/crt_rand.h>
 #include <base/io/sha256.h>
+#include <formats/admincfg/admin_cfg.h>
+#include <net/admin/admin_server.h>
 #include <net/novacrypto/epask.h>
 #include <net/napi/session.h>
 #include <net/novaworld/client_session.h>
@@ -58,9 +64,11 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <cstddef>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <mutex>
@@ -108,6 +116,9 @@ struct Harness {
 	// /api/ refuses every request here; its retail login brake starts unspent
 	// for the cases that log in through it.
 	uint16_t fresh_port = 0;
+	// The first listener's admin links (the console routes run their commands on
+	// them); the console case syncs them by hand.
+	opennova::novaworld_server::hosted::AdminLinks *links = nullptr;
 
 	// Every connect, send and recv waits at most `timeout_ms`.
 	net::HttpReply send(const char *method, const std::string &path,
@@ -3741,6 +3752,632 @@ int test_hosted_listing_owner(Harness &h) {
 	return 0;
 }
 
+// A remote-admin server on loopback for the console routes: the engine's
+// connection machine (net/admin/admin_server.h, its challenge and login) behind
+// the apps' pump (admin_tcp_server.h) on a thread of its own, its verbs
+// answered by a scripted console in retail's reply strings
+// (docs/net/novaworld-net-re.md §6.9: two players, a two-map catalog, a
+// rotation, a chat window), every line it is sent kept. The test turns its
+// knobs: a delay before one verb's reply (a request in flight), the scene (a
+// server between matches answers as retail's does there), hostile replies, and
+// the rotation.
+class FakeAdminConsole final : public opennova::AdminCommandHandler {
+public:
+	explicit FakeAdminConsole(const std::string &password) :
+			server_(config(password), *this, rand_), tcp_(server_) {}
+	~FakeAdminConsole() override { stop(); }
+
+	bool start() {
+		if (!tcp_.listen(0, /*loopback_only=*/true)) return false;
+		thread_ = std::thread([this] {
+			while (!stop_.load()) {
+				tcp_.pump();
+				std::this_thread::sleep_for(std::chrono::milliseconds(2));
+			}
+		});
+		return true;
+	}
+	void stop() {
+		stop_.store(true);
+		if (thread_.joinable()) thread_.join();
+		tcp_.close();
+	}
+	uint16_t port() const { return tcp_.port(); }
+	std::vector<std::string> lines() {
+		std::lock_guard<std::mutex> lock(mu_);
+		return lines_;
+	}
+	// The next replies to a line starting with `prefix` wait `ms` first (0: none).
+	void delay(const std::string &prefix, int ms) {
+		std::lock_guard<std::mutex> lock(mu_);
+		delay_prefix_ = prefix;
+		delay_ms_ = ms;
+	}
+	void set_scene(const std::string &scene) {
+		std::lock_guard<std::mutex> lock(mu_);
+		scene_ = scene;
+	}
+	void set_hostile(bool hostile) {
+		std::lock_guard<std::mutex> lock(mu_);
+		hostile_ = hostile;
+	}
+	void set_rotation(std::vector<std::string> rotation) {
+		std::lock_guard<std::mutex> lock(mu_);
+		rotation_ = std::move(rotation);
+		next_ = -1;
+	}
+	std::vector<std::string> rotation() {
+		std::lock_guard<std::mutex> lock(mu_);
+		return rotation_;
+	}
+
+	bool dispatch(const opennova::AdminSession &, std::string_view line, std::vector<std::string> &replies) override {
+		int delay_ms = 0;
+		{
+			std::lock_guard<std::mutex> lock(mu_);
+			lines_.emplace_back(line);
+			if (!delay_prefix_.empty() && line.substr(0, delay_prefix_.size()) == delay_prefix_) delay_ms = delay_ms_;
+		}
+		if (delay_ms > 0) std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+		std::lock_guard<std::mutex> lock(mu_);
+		std::vector<std::string> t;
+		for (size_t i = 0; i < line.size();) {
+			const size_t end = std::min(line.find(' ', i), line.size());
+			if (end > i) t.emplace_back(line.substr(i, end - i));
+			i = end + 1;
+		}
+		const auto is = [&t](size_t i, const char *word) { return t.size() > i && t[i] == word; };
+		const auto number = [&t](size_t i) { return t.size() > i ? std::atoi(t[i].c_str()) : -1; };
+		const bool in_game = scene_ == "Game";
+		if (is(0, "QUIT")) return false;
+		if (is(0, "GET") && is(1, "GAMESTATE")) {
+			replies.push_back("OK - Current State = " + scene_);
+		} else if (is(0, "GET") && is(1, "GAMESETTINGS")) {
+			replies.emplace_back("AutoBalanceOnRecycle = 1\nServerName           = Console Test\n"
+								 "ServerPassword       = s3cret\n");
+		} else if (is(0, "PLAYER") && is(1, "LIST")) {
+			if (!in_game) {
+				replies.emplace_back("ERROR - Not in Game State.");
+			} else if (hostile_) {
+				replies.emplace_back("NAME            \t #\tTEAM\tClass\tKills\tDeaths\tPING\n"
+									 "abc\n"
+									 "garbage\tline\n"
+									 "x\ty\tz\tw\n"
+									 "Ev\x01l           \t 1\t 1\t0\t0\t0\t0\n"
+									 "Caf\xE9            \t 2\t 2\t0\t0\t0\t0\n");
+			} else {
+				replies.emplace_back("NAME            \t #\tTEAM\tClass\tKills\tDeaths\tPING\n"
+									 "Host            \t 0\t 0\t0\t0\t0\t0\n"
+									 "Ann             \t 1\t 1\t2\t5\t1\t40\n"
+									 "Bob             \t 2\t 2\t1\t0\t3\t55\n");
+			}
+		} else if (is(0, "PLAYER") && t.size() == 3) {
+			const int slot = number(2);
+			if (slot != 1 && slot != 2) {
+				replies.emplace_back("ERROR - Player Not Found.");
+			} else if (is(1, "PUNT")) {
+				replies.emplace_back("OK - Player punted.");
+			} else if (is(1, "SWAPTEAM")) {
+				replies.emplace_back("OK - Player Swapped.");
+			} else if (is(1, "KILL")) {
+				replies.emplace_back("OK - Player Killed.");
+			} else if (is(1, "BAN") && slot == 1) {
+				replies.emplace_back("OK - Banned Player #1 \"Ann\".");
+				replies.emplace_back("OK - Player Banned.");
+			} else if (is(1, "BAN")) {
+				replies.emplace_back("ERROR - Player #2 \"Bob\" doesn't have a PCID.");
+			}
+		} else if (is(0, "MISSION") && is(1, "AVAILABLE")) {
+			replies.emplace_back(hostile_ ? "abc\n. (\n7. ODD.BMS (Odd (title))\n"
+										  : "0. ALPHA.BMS (Alpha Base)\n1. BRAVO.BMS (Bravo Ridge)\n");
+		} else if (is(0, "MISSION") && is(1, "LIST")) {
+			// Outside a match retail lists nothing. [orig: @0x40634F]
+			std::string out = hostile_ ? "abc\n: - (\n-1: x - ()\n" : "";
+			for (size_t i = 0; in_game && i < rotation_.size(); ++i) {
+				out += std::to_string(i) + ": " + rotation_[i] + " - () () () " + (i == 0 ? "<CURRENT MISSION>" : "<>") +
+						" " + (static_cast<int>(i) == next_ ? "<NEXT MISSION>" : "<>") + "\n";
+			}
+			replies.push_back(!in_game || rotation_.empty() ? std::string("No missions in queue.") : out);
+		} else if (is(0, "MISSION") && is(1, "ADD") && t.size() >= 3) {
+			std::string file = t[2];
+			for (char &c : file) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+			if (file == "ALPHA.BMS" || file == "BRAVO.BMS") {
+				// The reply in any state, the append in a match alone. [orig: @0x403E9C..0x403ECF]
+				if (in_game) rotation_.push_back(file);
+				replies.emplace_back("OK - Entry Added\n");
+			} else {
+				replies.emplace_back("ERROR - File Not Found.");
+			}
+		} else if (is(0, "MISSION") && is(1, "REMOVE")) {
+			const int index = number(2);
+			if (in_game && index >= 0 && index < static_cast<int>(rotation_.size()))
+				rotation_.erase(rotation_.begin() + index);
+			replies.emplace_back("OK - Mission Removed.");
+		} else if (is(0, "MISSION") && is(1, "SETNEXT")) {
+			const int index = number(2);
+			if (index >= 0 && index < static_cast<int>(rotation_.size())) next_ = index;
+			replies.emplace_back("OK - Next Mission Set.");
+		} else if (is(0, "MISSION") && is(1, "CYCLE")) {
+			replies.emplace_back(in_game ? "OK - Server is cycling..." : "ERROR - Must be in Game State to cycle server.");
+		} else if (is(0, "CHAT") && is(1, "GET")) {
+			std::string out;
+			for (const std::string &l : chat_) out += l + "\r\n";
+			replies.push_back(hostile_ ? std::string("\x01" "ctl\r\n\xE9t\xE9\r\n") : out);
+		} else if (is(0, "CHAT") && is(1, "SEND")) {
+			std::string text;
+			for (size_t i = 2; i < t.size(); ++i) text += t[i] + " ";
+			chat_.push_back("Server: " + text);
+			replies.emplace_back("OK - Chat sent.");
+		} else {
+			replies.emplace_back("USAGE - [QUIT | GET | SET | MISSION | PLAYER | WEAPON | CMD | GOTO]");
+		}
+		return true;
+	}
+	std::string status_report() override { return {}; }
+
+private:
+	static opennova::admincfg::AdminConfig config(const std::string &password) {
+		const std::string text = "svc " + password + " 7F\r\nip_restrict = 127.0.0.1\r\n";
+		return opennova::admincfg::parse(text.data(), text.size());
+	}
+
+	opennova::io::CrtRand rand_;
+	opennova::AdminServer server_;
+	opennova::net::AdminTcpServer tcp_;
+	std::atomic<bool> stop_{ false };
+	std::thread thread_;
+	std::mutex mu_;
+	std::vector<std::string> lines_;
+	std::string delay_prefix_;
+	int delay_ms_ = 0;
+	std::string scene_ = "Game";
+	bool hostile_ = false;
+	std::vector<std::string> rotation_{ "ALPHA.BMS" };
+	int next_ = -1;
+	std::vector<std::string> chat_;
+};
+
+// A line the server was sent, checked as the dispatcher splits it (' ' and
+// '\t'..'\r'): the curated commands' exact shapes (console_commands.h), every
+// argument inside its rule.
+bool curated_line(const std::string &line) {
+	std::vector<std::string> t;
+	std::string token;
+	for (const char c : line) {
+		if (c == ' ' || (c >= '\t' && c <= '\r')) {
+			if (!token.empty()) t.push_back(token);
+			token.clear();
+		} else {
+			token.push_back(c);
+		}
+	}
+	if (!token.empty()) t.push_back(token);
+	const auto digits = [](const std::string &s, size_t max_len) {
+		return !s.empty() && s.size() <= max_len && std::all_of(s.begin(), s.end(), [](char c) { return c >= '0' && c <= '9'; });
+	};
+	if (t.size() >= 2 && t[0] == "PLAYER" && (t[1] == "PUNT" || t[1] == "BAN" || t[1] == "SWAPTEAM" || t[1] == "KILL"))
+		return t.size() == 3 && digits(t[2], 3) && std::atoi(t[2].c_str()) >= 1 && std::atoi(t[2].c_str()) <= 255;
+	if (t.size() >= 2 && t[0] == "MISSION" && t[1] == "ADD") {
+		if (t.size() != 4 || (t[3] != "0" && t[3] != "1")) return false;
+		const std::string &f = t[2];
+		const bool bms = f.size() > 4 && (f.compare(f.size() - 4, 4, ".bms") == 0 || f.compare(f.size() - 4, 4, ".BMS") == 0);
+		return bms && std::all_of(f.begin(), f.end() - 4, [](char c) {
+			return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-';
+		});
+	}
+	// An index below the maps a rotation holds: the composition's cap.
+	if (t.size() >= 2 && t[0] == "MISSION" && (t[1] == "REMOVE" || t[1] == "SETNEXT"))
+		return t.size() == 3 && digits(t[2], 2) &&
+				static_cast<uint64_t>(std::atoi(t[2].c_str())) <=
+				opennova::novaworld_server::hosted::kConsoleIndexMax;
+	if (line.compare(0, 10, "CHAT SEND ") == 0) {
+		return line.size() <= 69 && std::none_of(line.begin(), line.end(), [](char c) {
+			const auto byte = static_cast<unsigned char>(c);
+			return byte < 0x20 || byte == 0x7F;
+		});
+	}
+	static const std::set<std::string> exact = { "PLAYER LIST", "MISSION AVAILABLE", "MISSION LIST", "MISSION CYCLE",
+		"CHAT GET", "GET GAMESETTINGS", "GET GAMESTATE" };
+	return exact.count(line) != 0;
+}
+
+// Whether `want` appears in `lines` in order (other lines between).
+bool in_order(const std::vector<std::string> &lines, const std::vector<std::string> &want) {
+	size_t next = 0;
+	for (const std::string &line : lines) {
+		if (next < want.size() && line == want[next]) ++next;
+	}
+	return next == want.size();
+}
+
+// The console routes (hosted/console_routes.h) over a real admin link
+// (hosted/admin_link.h) to a scripted remote-admin server on loopback
+// (FakeAdminConsole), the hosted row put in running by hand (no supervisor):
+// the session and CSRF refusals (an admin session's too) and the proxy-only
+// listener's; the owner's server resolved by its session alone, so another
+// account reaches none and neither reaches the admin's routes; each curated
+// command and its reply, in the exact line the server receives; the arguments
+// refused before anything is sent (JSON-escaped control characters among
+// them); hostile replies parsed into valid JSON; the rotation's checks (no such
+// entry, the last map, a full rotation, between matches); the admission (one
+// request in flight per account, one rotation edit per server); the owner's
+// write bucket; the console ring (the writes recorded with their sender, the
+// reads not, the admin password nowhere, `limit` and `after`); the admin's
+// routes and their one wider read; the refusals before running, with no link
+// and while stopping; and every line the server was sent checked against the
+// curated shapes.
+int test_hosted_console_routes(Harness &h) {
+	namespace hosted = opennova::novaworld_server::hosted;
+	const std::string password = "ConsoleRoutesAdminPw0123456789";
+	FakeAdminConsole fake(password);
+	TEST_EXPECT(fake.start());
+	const int64_t owner = make_account(h, "console_owner", "pw-console-owner");
+	const int64_t admin = make_account(h, "console_admin", "pw-console-admin");
+	TEST_EXPECT(owner > 0 && admin > 0 && make_account(h, "console_other", "pw-console-other") > 0);
+	TEST_EXPECT(nws::set_can_host(*h.pool.acquire(), owner, true).ok);
+	TEST_EXPECT(set_role(h, admin, "admin"));
+	const std::string owner_s = login_token(h, "10.53.0.1", "console_owner", "pw-console-owner");
+	const std::string other_s = login_token(h, "10.53.0.2", "console_other", "pw-console-other");
+	const std::string admin_s = login_token(h, "10.53.0.3", "console_admin", "pw-console-admin");
+	TEST_EXPECT(!owner_s.empty() && !other_s.empty() && !admin_s.empty());
+
+	auto get = [&h](const std::string &path, const std::vector<std::string> &headers) {
+		return h.send("GET", path, headers, {}, 5000);
+	};
+	auto post = [&h](const std::string &path, std::vector<std::string> headers, const std::string &body = "{}") {
+		headers.push_back(kJson);
+		return h.send("POST", path, headers, body, 5000);
+	};
+	const std::vector<std::string> as_owner = { with_session(owner_s) };
+	const std::vector<std::string> as_owner_post = { with_session(owner_s), kCsrf };
+	auto result_of = [](const net::HttpReply &r) {
+		const auto json = crow::json::load(body_text(r));
+		return json && json.has("result") ? str(json["result"]) : std::string("<none>");
+	};
+
+	// No server yet; then one, not running yet; then running with no link.
+	auto reply = get("/api/me/server/players", as_owner);
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "no_live_server");
+	hosted::HostedSettings settings;
+	settings.game_name = "Console Test";
+	settings.missions = { "alpha.bms" };
+	const auto request = hosted::request_server(*h.pool.acquire(), owner, settings, 10);
+	TEST_EXPECT(request.outcome == hosted::RequestOutcome::Created);
+	const int64_t id = request.id;
+	const std::string base = "/api/admin/hosted/" + std::to_string(id);
+	reply = get("/api/me/server/players", as_owner);
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "server_not_running");
+	{
+		auto db = h.pool.acquire();
+		db->exec("UPDATE hosted_servers SET state = 'running', machine_address = '127.0.0.1' WHERE id = ?;",
+				{ opennova::db::BindValue(id) });
+		hosted::set_admin_login(*db, id, fake.port(), "svc", password);
+	}
+	reply = get("/api/me/server/players", as_owner);
+	TEST_EXPECT(reply.code == 503 && error_of_reply(reply) == "admin_unavailable");
+	hosted::AdminLinkTarget target;
+	target.host = "127.0.0.1";
+	target.port = fake.port();
+	target.user = "svc";
+	target.password = password;
+	h.links->sync({ { id, target } });
+	TEST_EXPECT(wait_until([&] {
+		const auto link = h.links->find(id);
+		return link && link->status().state == hosted::AdminLinkState::Up;
+	}, 10000));
+
+	// Logged out: 401; a POST without the CSRF header: 403, an admin session's too, before
+	// anything is read; the proxy-only listener answers no one but its proxy.
+	TEST_EXPECT(get("/api/me/server/players", {}).code == 401);
+	TEST_EXPECT(post("/api/me/server/players/1/punt", {}).code == 401);
+	reply = post("/api/me/server/players/1/punt", { with_session(owner_s) });
+	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "csrf_header_required");
+	reply = post(base + "/players/1/punt", { with_session(admin_s) });
+	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "csrf_header_required");
+	reply = h.send_to(h.fresh_port, "GET", "/api/me/server/players", as_owner);
+	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "proxy_required");
+	reply = h.send_to(h.fresh_port, "POST", "/api/me/server/chat", { with_session(owner_s), kCsrf, kJson },
+			"{\"text\":\"hi\"}");
+	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "proxy_required");
+	// Another account reaches no server: the owner's routes name none, its session resolves it.
+	reply = get("/api/me/server/players", { with_session(other_s) });
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "no_live_server");
+	reply = post("/api/me/server/players/1/punt", { with_session(other_s), kCsrf });
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "no_live_server");
+	TEST_EXPECT(get("/api/me/server/console", { with_session(other_s) }).code == 404);
+	// Nor do the owners reach the admin's routes.
+	TEST_EXPECT(get(base + "/players", { with_session(other_s) }).code == 403);
+	TEST_EXPECT(get(base + "/players", { with_session(owner_s) }).code == 403);
+	TEST_EXPECT(get(base + "/settings", { with_session(owner_s) }).code == 403);
+	TEST_EXPECT(post(base + "/players/1/punt", { with_session(owner_s), kCsrf }).code == 403);
+
+	// The reads.
+	reply = get("/api/me/server/players", as_owner);
+	auto json = crow::json::load(body_text(reply));
+	if (reply.code != 200) std::fprintf(stderr, "  players: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.code == 200 && json && json["players"].size() == 2);
+	TEST_EXPECT(json["server_id"].i() == id && json["players"][0]["slot"].i() == 1);
+	TEST_EXPECT(str(json["players"][0]["name"]) == "Ann" && json["players"][0]["team"].i() == 1);
+	TEST_EXPECT(json["players"][0]["kills"].i() == 5 && json["players"][1]["ping"].i() == 55);
+	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
+	reply = get("/api/me/server/missions", as_owner);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["missions"].size() == 2);
+	TEST_EXPECT(str(json["missions"][1]["file"]) == "BRAVO.BMS" && str(json["missions"][1]["title"]) == "Bravo Ridge");
+	reply = get("/api/me/server/rotation", as_owner);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["rotation"].size() == 1 && json["rotation"][0]["current"].b());
+
+	// Hostile replies: names holding a control byte and a cp1252 letter, lines that are
+	// no row; the JSON stays valid and the parsers keep what parses.
+	fake.set_hostile(true);
+	reply = get("/api/me/server/players", as_owner);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["players"].size() == 2);
+	TEST_EXPECT(json && str(json["players"][0]["name"]) == "Ev\x01l" && str(json["players"][1]["name"]) == "Caf\xC3\xA9");
+	reply = get("/api/me/server/rotation", as_owner);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["rotation"].size() == 1 &&
+			str(json["rotation"][0]["file"]) == "ALPHA.BMS");
+	reply = get("/api/me/server/missions", as_owner);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["missions"].size() == 1 && json["missions"][0]["index"].i() == 7 &&
+			str(json["missions"][0]["title"]) == "Odd (title)");
+	reply = get("/api/me/server/chat", as_owner);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["lines"].size() == 2 && str(json["lines"][0]) == "\x01" "ctl" &&
+			str(json["lines"][1]) == "\xC3\xA9t\xC3\xA9");
+	fake.set_hostile(false);
+
+	// Arguments outside their rules: refused before anything is sent or any token drawn.
+	const size_t lines_before = fake.lines().size();
+	struct Refused {
+		const char *path;
+		const char *body;
+		const char *error; // "" for any 400
+	};
+	const std::string long_mission = "{\"mission\":\"" + std::string(33, 'm') + ".bms\"}";
+	const std::string long_text = "{\"text\":\"" + std::string(60, 'x') + "\"}";
+	const Refused refusals[] = {
+		{ "/api/me/server/players/0/punt", "{}", "invalid_slot" },
+		{ "/api/me/server/players/256/ban", "{}", "invalid_slot" },
+		{ "/api/me/server/rotation/32/remove", "{}", "invalid_index" },
+		{ "/api/me/server/rotation/256/next", "{}", "invalid_index" },
+		{ "/api/me/server/rotation", "{\"mission\":\"../x.bms\"}", "invalid_mission" },
+		{ "/api/me/server/rotation", "{\"mission\":\"a.bms 1 0 ONESHOT\"}", "invalid_mission" },
+		{ "/api/me/server/rotation", "{\"mission\":\".bms\"}", "invalid_mission" },
+		{ "/api/me/server/rotation", long_mission.c_str(), "invalid_mission" },
+		{ "/api/me/server/rotation", "{\"mission\":\"a\\u0000.bms\"}", "" },
+		{ "/api/me/server/rotation", "{\"mission\":\"a\\u0085.bms\"}", "invalid_mission" },
+		{ "/api/me/server/rotation", "{\"mission\":\"a\\t.bms\"}", "invalid_mission" },
+		{ "/api/me/server/rotation", "{\"mission\":\"a\\u007f.bms\"}", "invalid_mission" },
+		{ "/api/me/server/rotation", "{}", "missing_field" },
+		{ "/api/me/server/rotation", "{\"mission\":1}", "invalid_field" },
+		{ "/api/me/server/rotation", "{\"mission\":\"a.bms\",\"swap_sides\":1}", "invalid_field" },
+		{ "/api/me/server/chat", "{\"text\":\"two\\nlines\"}", "invalid_text" },
+		{ "/api/me/server/chat", "{\"text\":\"a\\u0000b\"}", "" },
+		{ "/api/me/server/chat", "{\"text\":\"a\\u0085b\"}", "invalid_text" },
+		{ "/api/me/server/chat", "{\"text\":\"a\\tb\"}", "invalid_text" },
+		{ "/api/me/server/chat", "{\"text\":\"a\\u007fb\"}", "invalid_text" },
+		{ "/api/me/server/chat", "{\"text\":\"\\ud83d\\ude00\"}", "invalid_text" },
+		{ "/api/me/server/chat", "{\"text\":\"   \"}", "invalid_text" },
+		{ "/api/me/server/chat", long_text.c_str(), "invalid_text" },
+		{ "/api/me/server/chat", "{}", "missing_field" },
+		{ "/api/me/server/chat", "not json", "invalid_json" },
+	};
+	for (const Refused &r : refusals) {
+		reply = post(r.path, as_owner_post, r.body);
+		const bool ok = reply.code == 400 && (*r.error == '\0' || error_of_reply(reply) == r.error);
+		if (!ok) std::fprintf(stderr, "  %s %s -> %s\n", r.path, r.body, describe(reply).c_str());
+		TEST_EXPECT(ok);
+	}
+	TEST_EXPECT(fake.lines().size() == lines_before);
+
+	// The writes, eight of them: the owner's bucket.
+	reply = post("/api/me/server/players/1/punt", as_owner_post);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && str(json["result"]) == "punted" && json["slot"].i() == 1);
+	reply = post("/api/me/server/players/9/kill", as_owner_post);
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "player_not_found");
+	reply = post("/api/me/server/players/1/ban", as_owner_post);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && str(json["result"]) == "banned" && json["listed"].b());
+	reply = post("/api/me/server/players/2/ban", as_owner_post);
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "no_pcid");
+	TEST_EXPECT(body_text(reply).find("Bob") == std::string::npos);
+	reply = post("/api/me/server/players/2/swap", as_owner_post);
+	TEST_EXPECT(reply.code == 200 && result_of(reply) == "swapped");
+	reply = post("/api/me/server/chat", as_owner_post, "{\"text\":\"hello from the site\"}");
+	TEST_EXPECT(reply.code == 200 && result_of(reply) == "sent");
+	reply = post("/api/me/server/rotation", as_owner_post, "{\"mission\":\"bravo.bms\",\"swap_sides\":true}");
+	TEST_EXPECT(reply.code == 200 && result_of(reply) == "added");
+	reply = post("/api/me/server/rotation", as_owner_post, "{\"mission\":\"nope.bms\"}");
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "mission_not_found");
+	// The exact lines the server received for them.
+	TEST_EXPECT(in_order(fake.lines(), { "PLAYER PUNT 1", "PLAYER KILL 9", "PLAYER BAN 1", "PLAYER BAN 2",
+			"PLAYER SWAPTEAM 2", "CHAT SEND hello from the site", "MISSION LIST", "MISSION ADD bravo.bms 1",
+			"MISSION LIST", "MISSION ADD nope.bms 0" }));
+	// The bucket runs dry (one token every 2 s after eight).
+	bool limited = false;
+	for (int i = 0; i < 12 && !limited; ++i) {
+		reply = post("/api/me/server/rotation/cycle", as_owner_post);
+		limited = reply.code == 429;
+	}
+	TEST_EXPECT(limited && error_of_reply(reply) == "rate_limited" && has_header(reply, "Retry-After"));
+	// The chat window has the line (a read: another bucket).
+	reply = get("/api/me/server/chat", as_owner);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["lines"].size() == 1 &&
+			str(json["lines"][0]).find("hello from the site") != std::string::npos);
+
+	// The admin's routes (the token, no bucket): the rotation's checks, the wider read.
+	reply = get(base + "/rotation", { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["rotation"].size() == 2 &&
+			str(json["rotation"][1]["file"]) == "BRAVO.BMS");
+	reply = post(base + "/rotation/5/remove", { kBearer });
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "no_such_entry");
+	reply = post(base + "/rotation/5/next", { kBearer });
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "no_such_entry");
+	reply = post(base + "/rotation/1/next", { kBearer });
+	TEST_EXPECT(reply.code == 200 && result_of(reply) == "next_set");
+	reply = post(base + "/rotation/0/remove", { kBearer });
+	TEST_EXPECT(reply.code == 200 && result_of(reply) == "removed");
+	reply = post(base + "/rotation/0/remove", { kBearer });
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "last_mission");
+	reply = post(base + "/rotation", { kBearer }, "{\"mission\":\"ALPHA.BMS\"}");
+	TEST_EXPECT(reply.code == 200);
+	// An admin session with the CSRF header works the same.
+	reply = post(base + "/rotation", { with_session(admin_s), kCsrf }, "{\"mission\":\"A.BMS\"}");
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "mission_not_found"); // composed and sent: no such map
+	reply = post(base + "/rotation/cycle", { kBearer });
+	TEST_EXPECT(reply.code == 200 && result_of(reply) == "cycling");
+	reply = post(base + "/players/2/kill", { kBearer });
+	TEST_EXPECT(reply.code == 200 && result_of(reply) == "killed");
+	reply = post(base + "/chat", { kBearer }, "{\"text\":\"the admin here\"}");
+	TEST_EXPECT(reply.code == 200);
+	reply = get(base + "/players", { kBearer });
+	TEST_EXPECT(reply.code == 200 && crow::json::load(body_text(reply))["players"].size() == 2);
+	reply = get(base + "/settings", { kBearer });
+	json = crow::json::load(body_text(reply));
+	bool named = false;
+	if (reply.code == 200 && json) {
+		for (const auto &row : json["settings"])
+			named = named || (str(row["key"]) == "ServerName" && str(row["value"]) == "Console Test");
+	}
+	TEST_EXPECT(named);
+	TEST_EXPECT(get("/api/admin/hosted/999999/players", { kBearer }).code == 404);
+
+	// A full rotation takes no more (kConsoleRotationMax, policy).
+	const std::vector<std::string> saved = fake.rotation();
+	fake.set_rotation(std::vector<std::string>(32, "ALPHA.BMS"));
+	reply = post(base + "/rotation", { kBearer }, "{\"mission\":\"BRAVO.BMS\"}");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "rotation_full");
+	fake.set_rotation(saved);
+
+	// Between matches: retail lists no rotation and answers an add OK while it appends
+	// nothing, so the routes read the scene and refuse.
+	fake.set_scene("Menus");
+	reply = get(base + "/rotation", { kBearer });
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "not_in_game");
+	reply = post(base + "/rotation", { kBearer }, "{\"mission\":\"BRAVO.BMS\"}");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "not_in_game");
+	reply = post(base + "/rotation/0/remove", { kBearer });
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "not_in_game");
+	reply = get(base + "/players", { kBearer });
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "not_in_game");
+	reply = post(base + "/rotation/cycle", { kBearer });
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "not_in_game");
+	TEST_EXPECT(fake.rotation() == saved);
+	fake.set_scene("Game");
+
+	// The admission: one console request in flight per account (a second answers at
+	// once, with no token), and one rotation edit per server, its read and its edit a pair.
+	const auto sent_since = [&fake](size_t before, const std::string &want) {
+		const auto l = fake.lines();
+		return std::find(l.begin() + static_cast<std::ptrdiff_t>(std::min(before, l.size())), l.end(), want) != l.end();
+	};
+	fake.delay("PLAYER LIST", 800);
+	net::HttpReply slow;
+	const size_t sent_before = fake.lines().size();
+	std::thread first([&] { slow = get("/api/me/server/players", as_owner); });
+	const bool in_flight = wait_until([&] { return sent_since(sent_before, "PLAYER LIST"); }, 3000);
+	const auto busy_started = std::chrono::steady_clock::now();
+	const net::HttpReply second = get("/api/me/server/missions", as_owner);
+	const auto busy_took = std::chrono::steady_clock::now() - busy_started;
+	first.join();
+	TEST_EXPECT(in_flight && slow.code == 200);
+	TEST_EXPECT(second.code == 429 && error_of_reply(second) == "console_busy" && has_header(second, "Retry-After"));
+	TEST_EXPECT(busy_took < std::chrono::milliseconds(500));
+	fake.delay("MISSION LIST", 800);
+	TEST_EXPECT(fake.rotation().size() == 2);
+	net::HttpReply edit;
+	const size_t edit_before = fake.lines().size();
+	std::thread editing([&] { edit = post(base + "/rotation/0/remove", { kBearer }); });
+	const bool editing_now = wait_until([&] { return sent_since(edit_before, "MISSION LIST"); }, 3000);
+	const net::HttpReply racing = post("/api/me/server/rotation/1/remove", as_owner_post);
+	editing.join();
+	fake.delay("", 0);
+	TEST_EXPECT(editing_now && racing.code == 409 && error_of_reply(racing) == "rotation_busy");
+	TEST_EXPECT(edit.code == 200 && fake.rotation().size() == 1);
+
+	// The console: the writes recorded with their sender, the reads not, no password.
+	reply = get("/api/me/server/console", as_owner);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && str(json["link"]["state"]) == "up");
+	bool owner_punt = false;
+	bool punt_reply = false;
+	bool admin_kill = false;
+	bool read_recorded = false;
+	int64_t first_id = 0;
+	int64_t last_id = 0;
+	size_t total = 0;
+	if (json) {
+		total = json["lines"].size();
+		if (total != 0) first_id = json["lines"][0]["id"].i();
+		for (const auto &line : json["lines"]) {
+			const std::string kind = str(line["kind"]);
+			const std::string text = str(line["text"]);
+			owner_punt = owner_punt || (kind == "command" && str(line["actor"]) == "owner" && text == "PLAYER PUNT 1");
+			punt_reply = punt_reply || (kind == "reply" && text == "OK - Player punted.");
+			admin_kill = admin_kill || (kind == "command" && str(line["actor"]) == "admin" && text == "PLAYER KILL 2");
+			read_recorded = read_recorded || (kind == "command" && (text == "PLAYER LIST" || text == "MISSION LIST" ||
+																		   text == "CHAT GET" || text == "GET GAMESTATE"));
+			last_id = line["id"].i();
+		}
+	}
+	TEST_EXPECT(owner_punt && punt_reply && admin_kill && !read_recorded);
+	TEST_EXPECT(body_text(reply).find(password) == std::string::npos);
+	// Past the last id: nothing but a status line the link's poll may have added since.
+	reply = get("/api/me/server/console?after=" + std::to_string(last_id), as_owner);
+	json = crow::json::load(body_text(reply));
+	bool past_last = reply.code == 200 && json;
+	if (past_last) {
+		for (const auto &line : json["lines"])
+			past_last = past_last && line["id"].i() > last_id && str(line["kind"]) == "status";
+	}
+	TEST_EXPECT(past_last);
+	// limit=0 reads one line; limit=9999 every line from the oldest (fewer than 200 here, so
+	// the default read's too); after=abc is no after.
+	reply = get("/api/me/server/console?limit=0", as_owner);
+	TEST_EXPECT(reply.code == 200 && crow::json::load(body_text(reply))["lines"].size() == 1);
+	TEST_EXPECT(total > 0 && total < 200); // ConsoleRoutes::kConsoleLinesShown
+	for (const char *query : { "?limit=9999", "?after=abc" }) {
+		reply = get(std::string("/api/me/server/console") + query, as_owner);
+		json = crow::json::load(body_text(reply));
+		TEST_EXPECT(reply.code == 200 && json && json["lines"].size() >= total &&
+				json["lines"][0]["id"].i() == first_id);
+	}
+	TEST_EXPECT(get(base + "/console", { kBearer }).code == 200);
+
+	// Every line the server was sent has a curated command's exact shape.
+	for (const std::string &line : fake.lines()) {
+		const bool curated = curated_line(line);
+		if (!curated) std::fprintf(stderr, "  the server was sent '%s'\n", line.c_str());
+		TEST_EXPECT(curated);
+	}
+
+	// Stopping: refused before the link, the console still read.
+	TEST_EXPECT(hosted::request_stop(*h.pool.acquire(), id, "stopped by the test"));
+	reply = get("/api/me/server/players", as_owner);
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "server_stopping");
+	reply = post(base + "/players/1/punt", { kBearer });
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "server_stopping");
+	TEST_EXPECT(get("/api/me/server/console", as_owner).code == 200);
+
+	// The end: the link down, the row ended.
+	h.links->sync({});
+	TEST_EXPECT(hosted::transition(*h.pool.acquire(), id, hosted::State::Stopping, hosted::State::Stopped,
+			"ended by the test"));
+	reply = get(base + "/players", { kBearer });
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "not_live");
+	reply = get("/api/me/server/players", as_owner);
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "no_live_server");
+	TEST_EXPECT(set_role(h, admin, "player")); // the cases after count no admin of this one's
+	fake.stop();
+	return 0;
+}
+
 int run(Harness &h) {
 	struct Case { const char *name; int (*fn)(Harness &); };
 	const Case cases[] = {
@@ -3776,6 +4413,7 @@ int run(Harness &h) {
 		{ "owner_host_push", test_owner_host_push },
 		{ "hosted_server_routes", test_hosted_server_routes },
 		{ "hosted_listing_owner", test_hosted_listing_owner },
+		{ "hosted_console_routes", test_hosted_console_routes },
 		{ "host_text_utf8", test_host_text_utf8 },
 		{ "name_and_value_rules", test_name_and_value_rules },
 		{ "template_names_refused", test_template_names_refused },
@@ -3874,8 +4512,12 @@ int main() {
 		udp_config.nw_udp_port = 0;
 		TEST_EXPECT(nw_udp.start(udp_config));
 		nws::SessionStore sessions;
+		// The console routes' admin links (the console case syncs them by hand),
+		// declared before the listener so they outlive it.
+		opennova::novaworld_server::hosted::AdminLinks links(&pool);
 		nws::HttpListener http(manager, pool, sessions);
 		http.set_nw_udp_listener(&nw_udp);
+		http.set_admin_links(&links);
 		TEST_EXPECT(http.start(config));
 		TEST_EXPECT(http.bound_port() != 0);
 
@@ -3936,12 +4578,14 @@ int main() {
 		harness.temp_root = temp.path;
 		harness.retail_root = retail_root;
 		harness.fresh_port = fresh_http.bound_port();
+		harness.links = &links;
 		rc = run(harness);
 		// Join the Crow threads before the pool and the TempDir go, then the
 		// NW UDP listener the push routes held.
 		fresh_http.stop();
 		secure_http.stop();
 		http.stop();
+		links.stop_all();
 		nw_udp.stop();
 	}
 	net::shutdown();

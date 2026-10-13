@@ -909,6 +909,118 @@ static void test_named_event_reset_and_declared_variables() {
     CHECK(w.diagnostics.empty());
 }
 
+// reset()'s three stores take no bound: the ever-fired and fired-tick dwords
+// at 0xC6CE40 / 0xC6BE40 + 4i and the active byte at 0xC6DE40 + i, so an
+// index outside the IF space clears what lies there in the arrays' run and
+// the banks around it (a V# carries such an index into the IF-name slot);
+// a word past the modelled ones drops the store (D-EVT-14).
+// [orig: WacCmd_Reset @0x4ED300 - the stores @0x4ED30C / @0x4ED313 /
+//  @0x4ED322]
+static void test_reset_index_outside_the_if_space() {
+    BehaviorWorld w;
+    ScriptVarStore &vars = w.script.vars;
+    ScriptVarStore::WacState &wac = vars.wac;
+    const Program program = compile_source("reset(v5)\n", {});
+    CHECK(program.ok());
+    const auto reset = [&](int32_t index) {
+        vars.set_mission(5, index);
+        WacVm vm;
+        vm.load(program);
+        vm.execute(w);
+    };
+    // reset(1024 + 3): its fired tick is ever-fired dword 3, its ever-fired
+    // dword the active bytes 12..15, its active byte DO counter 3.
+    wac.ever_fired[3] = 9;
+    wac.ever_fired[4] = 9;
+    for (int i = 11; i <= 16; ++i) wac.active[size_t(i)] = 1;
+    wac.do_counter[3] = 7;
+    wac.do_counter[4] = 7;
+    reset(1027);
+    CHECK(wac.ever_fired[3] == 0 && wac.ever_fired[4] == 9);
+    CHECK(wac.active[11] == 1 && wac.active[16] == 1);
+    for (int i = 12; i <= 15; ++i) CHECK(wac.active[size_t(i)] == 0);
+    CHECK(wac.do_counter[3] == 0 && wac.do_counter[4] == 7);
+    // reset(2048 + 5): its fired tick is the active bytes 20..23, its active
+    // byte DO choice 5, and its ever-fired dword (word 3845, past the DORND
+    // seed) is no modelled word.
+    wac.do_choice[5] = 3;
+    wac.do_choice[6] = 3;
+    for (int i = 19; i <= 24; ++i) wac.active[size_t(i)] = 1;
+    reset(2053);
+    CHECK(wac.do_choice[5] == 0 && wac.do_choice[6] == 3);
+    CHECK(wac.active[19] == 1 && wac.active[24] == 1);
+    for (int i = 20; i <= 23; ++i) CHECK(wac.active[size_t(i)] == 0);
+    // reset(-1): its fired tick is G255, its ever-fired dword IF 1023's fired
+    // tick, its active byte the top byte of IF 1023's ever-fired dword.
+    vars.set_global(255, 5);
+    vars.set_global(254, 5);
+    wac.fired_tick[1023] = 6;
+    wac.fired_tick[1022] = 6;
+    wac.ever_fired[1023] = 0x7F000001;
+    reset(-1);
+    CHECK(vars.get_global(255) == 0 && vars.get_global(254) == 5);
+    CHECK(wac.fired_tick[1023] == 0 && wac.fired_tick[1022] == 6);
+    CHECK(wac.ever_fired[1023] == 0x00000001);
+    // reset(-513): its fired tick is V255; reset(-769): RND, below the bank.
+    vars.set_mission(255, 4);
+    vars.set_mission(254, 4);
+    reset(-513);
+    CHECK(vars.get_mission(255) == 0 && vars.get_mission(254) == 4);
+    wac.rnd = -17;
+    reset(-769);
+    CHECK(wac.rnd == 0);
+    CHECK(w.diagnostics.empty());
+}
+
+// reset(-1) walks every IF: its depth byte, the top byte of the IF name
+// table's last row's ever-fired pointer, is 0 (the load zeroes the table, and
+// a named row's pointer is 0x00C6xxxx), and every IF's depth is at least 1.
+// [orig: WacCmd_Reset @0x4ED300 - the depth read @0x4ED31B, the walk
+//  @0x4ED330..0x4ED354; WacScript_InitAndLoad - the table's memset pushed
+//  @0x4F940C; Script_Compile - the row's pointer @0x4F37F8, the depth @0x4F49EF]
+static void test_reset_minus_one_walks_every_if() {
+    BehaviorWorld w;
+    ScriptVarStore &vars = w.script.vars;
+    ScriptVarStore::WacState &wac = vars.wac;
+    // The IFs never fire, so only the reset touches their fired ticks and
+    // ever-fired dwords.
+    const Program program = compile_source(
+            "reset(v5)\n"
+            "if [root] false(1) then inc(v9)\n"
+            " if [child] false(1) then inc(v9) endif\n"
+            "endif\n"
+            "if [adjacent] false(1) then inc(v9) endif\n", {});
+    CHECK(program.ok());
+    CHECK(program.event_count == 3);
+    const auto seed = [&] {
+        for (size_t i = 0; i < 4; ++i) {
+            wac.ever_fired[i] = 1;
+            wac.fired_tick[i] = 7;
+        }
+        vars.set_global(254, 5);
+    };
+    const auto reset = [&](int32_t index) {
+        vars.set_mission(5, index);
+        WacVm vm;
+        vm.load(program);
+        vm.execute(w);
+    };
+    // reset(-2): its depth byte and the next lie in the unnamed last row, both
+    // 0, so it walks nothing; its fired tick is G254.
+    seed();
+    reset(-2);
+    CHECK(vars.get_global(254) == 0);
+    for (size_t i = 0; i < 3; ++i) CHECK(wac.ever_fired[i] == 1 && wac.fired_tick[i] == 7);
+    // reset(-1): every IF of the program, nested or not, up to the count.
+    seed();
+    reset(-1);
+    for (size_t i = 0; i < 3; ++i) CHECK(wac.ever_fired[i] == 0 && wac.fired_tick[i] == 0);
+    CHECK(wac.ever_fired[3] == 1 && wac.fired_tick[3] == 7); // past the count
+    CHECK(vars.get_global(254) == 5);
+    CHECK(vars.get_mission(9) == 0);
+    CHECK(w.diagnostics.empty());
+}
+
 static void test_empty_server_holds_script_divider_after_boot() {
     BehaviorWorld w;
     WacSystem sys;
@@ -2088,6 +2200,8 @@ int main() {
     test_raw_text_slots_read_the_operand_bytes();
     test_numbered_v_tokens_accept_decimal_prefixes_after_name_lookup();
     test_named_event_reset_and_declared_variables();
+    test_reset_index_outside_the_if_space();
+    test_reset_minus_one_walks_every_if();
     test_empty_server_holds_script_divider_after_boot();
     test_nested_conditions_and_accumulator_lifetime();
     test_do_sections_cycle_and_restore_independently();

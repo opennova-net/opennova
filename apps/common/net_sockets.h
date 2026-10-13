@@ -67,6 +67,9 @@ bool tcp_send_all(Socket &s, const uint8_t *data, size_t len);
 int tcp_recv(Socket &s, uint8_t *buf, size_t cap);
 // Fill `buf` exactly. False when the peer closed first, or on an error or a timeout.
 bool tcp_recv_exact(Socket &s, uint8_t *buf, size_t len);
+// Wait at most `timeout_ms` (0: just look) for `s` to have bytes to read (or a close or an
+// error, which the next recv reports): 1 when it has, 0 on the timeout, -1 on an error.
+int tcp_wait_readable(Socket &s, int timeout_ms);
 // Open a non-blocking TCP listener on `port` (0: ephemeral; the bound port goes to `out_bound`)
 // with `backlog`, on every interface or on loopback alone. An invalid Socket when it fails.
 Socket tcp_listen(uint16_t port, int backlog, uint16_t *out_bound = nullptr, bool loopback_only = false);

@@ -192,6 +192,119 @@ int main() {
 		expect(admin_parse_time_left_minutes("Tracers              = 1\n") == -1, "no GameTime row");
 	}
 
+	// PLAYER LIST's numeric columns; MISSION AVAILABLE, MISSION LIST, CHAT GET and GET
+	// GAMESETTINGS as the console routes read them.
+	{
+		const auto rows = admin_parse_player_list("NAME            \t #\tTEAM\tClass\tKills\tDeaths\tPING\n"
+		                                          "Host            \t 0\t 0\t0\t0\t0\t0\n"
+		                                          "Ann Lee         \t 3\t 1\t2\t5\t1\t40\n");
+		expect(rows.size() == 1 && rows[0].slot == 3 && rows[0].name == "Ann Lee" && rows[0].team == "1" &&
+		               rows[0].player_class == 2 && rows[0].kills == 5 && rows[0].deaths == 1 && rows[0].ping == 40,
+		       "a PLAYER LIST row's columns");
+
+		const auto catalog = admin_parse_mission_available("0. ALPHA.BMS (Alpha Base)\n"
+		                                                   "1. AS - Black Rock TAC.npj (Black Rock (TAC))\n"
+		                                                   "2. ODD (Odd)\n");
+		expect(catalog.size() == 3 && catalog[0].index == 0 && catalog[0].file == "ALPHA.BMS" &&
+		               catalog[0].title == "Alpha Base",
+		       "MISSION AVAILABLE: the index, the file and the title");
+		expect(catalog.size() == 3 && catalog[1].file == "AS - Black Rock TAC.npj" &&
+		               catalog[1].title == "Black Rock (TAC)",
+		       "a file holding spaces and a title holding parentheses");
+		expect(catalog.size() == 3 && catalog[2].file == "ODD" && catalog[2].title == "Odd", "no known extension");
+		expect(admin_parse_mission_available("").empty(), "an empty catalog");
+
+		const auto rotation = admin_parse_mission_list("0: ALPHA.BMS - () () () <CURRENT MISSION> <>\n"
+		                                               "1: AS - Black Rock TAC.npj - (2x) (IS FLIPPED) (ONE_SHOT) <> "
+		                                               "<NEXT MISSION>\n");
+		expect(rotation.size() == 2 && rotation[0].index == 0 && rotation[0].file == "ALPHA.BMS" &&
+		               rotation[0].current && !rotation[0].next && !rotation[0].swap_sides,
+		       "MISSION LIST: the current entry");
+		expect(rotation.size() == 2 && rotation[1].file == "AS - Black Rock TAC.npj" && rotation[1].swap_sides &&
+		               rotation[1].flipped && rotation[1].one_shot && !rotation[1].current && rotation[1].next,
+		       "the marks, the file found before them from the end");
+		expect(admin_parse_mission_list("No missions in queue.").empty(), "no rotation");
+		const auto hostile = admin_parse_mission_list("abc\n: - (\n-1: x - ()\n0: A.BMS - () () () <> <>\n");
+		expect(hostile.size() == 1 && hostile[0].index == 0 && hostile[0].file == "A.BMS",
+		       "lines that are no entry (a negative index among them) are dropped");
+		const auto hostile_catalog = admin_parse_mission_available("abc\n. (\n-2. X.BMS (X)\n7. Y.BMS (Y)\n");
+		expect(hostile_catalog.size() == 1 && hostile_catalog[0].index == 7,
+		       "catalog lines that are no row (a negative index among them) are dropped");
+
+		const auto chat = admin_parse_chat_window("Server: hello \r\n  continued\r\nAnn: hi\r\n");
+		expect(chat == std::vector<std::string>({"Server: hello ", "  continued", "Ann: hi"}),
+		       "CHAT GET: the lines, a continuation's two spaces kept");
+		expect(admin_parse_chat_window("").empty(), "an empty window");
+
+		const auto settings = admin_parse_game_settings("AutoBalanceOnRecycle = 1\n"
+		                                                "VotePercent          = 0.600000\n"
+		                                                "ServerName           = My = Server\n"
+		                                                "ServerPassword       = \n");
+		expect(settings.size() == 4 && settings[0] == std::make_pair(std::string("AutoBalanceOnRecycle"), std::string("1")) &&
+		               settings[2].second == "My = Server" && settings[3].first == "ServerPassword" &&
+		               settings[3].second.empty(),
+		       "GET GAMESETTINGS: each key and value");
+	}
+
+	// The reply plan: how many packets each command draws (§6.9's dispatcher), split as it
+	// splits, its verbs case aside.
+	{
+		const auto plan_is = [](const char *line, AdminReplyFraming framing, int count) {
+			const AdminReplyPlan p = admin_reply_plan(line);
+			return p.framing == framing && (framing != AdminReplyFraming::Exact || p.count == count);
+		};
+		using F = AdminReplyFraming;
+		expect(plan_is("QUIT", F::Exact, 0) && plan_is("quit now", F::Exact, 0), "QUIT draws none");
+		expect(plan_is("", F::Exact, 1) && plan_is("   ", F::Exact, 1) && plan_is("NOSUCHVERB", F::Exact, 1),
+		       "an empty line and an unknown verb draw the usage");
+		for (const char *line : {"GET", "GET GAMESTATE", "get gamesettings", "MISSION", "MISSION LIST",
+		                         "MISSION AVAILABLE", "MISSION ADD a.bms 1", "MISSION REMOVE 2", "MISSION CLEAR",
+		                         "MISSION CYCLE", "MISSION SETNEXT 1", "WEAPON LIST", "CMD say hi", "CHAT",
+		                         "CHAT GET", "CHAT SEND hello there", "ADMINUSER LIST", "BANLIST", "PETERRABBIT",
+		                         "PLAYER", "PLAYER LIST", "player list", "PLAYER PUNT", "PLAYER PUNT 3",
+		                         "PLAYER PUNT ALL", "PLAYER SWAPTEAM 2", "PLAYER KILL ALL", "PLAYER ZEROSCORE 4",
+		                         "PLAYER CEASEFIRE 1", "GOTO", "SET", "SET ServerPassword", "SET Bogus",
+		                         "SET ServerName a b c", "set killlimit 20"}) {
+			expect(plan_is(line, F::Exact, 1), line);
+		}
+		expect(plan_is("SET Bogus 1", F::Exact, 2) && plan_is("SET LevelRestrict 1", F::Exact, 2),
+		       "SET with a key it does not write draws the usage and Setting Not Found");
+		expect(plan_is("GOTO GAMESTATE", F::Exact, 2) && plan_is("GOTO ELSEWHERE", F::Exact, 2),
+		       "GOTO's other forms draw their reply and the cycle tail");
+		expect(plan_is("GOTO MENUSTATE", F::MenuState, 0) && plan_is("goto menustate", F::MenuState, 0),
+		       "GOTO MENUSTATE: the first reply decides");
+		expect(plan_is("PLAYER BAN 3", F::BanTarget, 0), "PLAYER BAN <#>: the first reply decides");
+		expect(plan_is("PLAYER BAN ALL", F::QuietGap, 0) && plan_is("PLAYER BAN all", F::QuietGap, 0),
+		       "PLAYER BAN ALL: per banned slot");
+		expect(plan_is("PLAYER WAVE 3", F::QuietGap, 0), "a PLAYER sub-verb the server does not know");
+		expect(plan_is("PLAYER\tLIST", F::Exact, 1) && plan_is("  PLAYER  BAN\t3 ", F::BanTarget, 0),
+		       "tabs and runs of spaces split as the dispatcher's isspace does");
+		// A cp1252 byte >= 0x80 is no separator: "PLAYER\xA0LIST" is one token, an unknown verb.
+		expect(plan_is("PLAYER\xA0LIST", F::Exact, 1), "a high byte does not split");
+
+		const AdminReplyPlan ban = admin_reply_plan("PLAYER BAN 3");
+		expect(!admin_replies_complete(ban, {}), "BAN: none read yet");
+		expect(admin_replies_complete(ban, {"OK - Player Banned."}), "BAN with no ban list: the punt's reply");
+		expect(admin_replies_complete(ban, {"ERROR - Player Not Found."}), "BAN on no slot");
+		expect(admin_replies_complete(ban, {"ERROR - Player #3 \"x\" doesn't have a PCID."}), "BAN with no PCID");
+		expect(!admin_replies_complete(ban, {"OK - Banned Player #3 \"x\"."}), "BAN listed: a second follows");
+		expect(admin_replies_complete(ban, {"OK - Banned Player #3 \"x\".", "OK - Player Banned."}),
+		       "BAN listed: both read");
+		const AdminReplyPlan menu = admin_reply_plan("GOTO MENUSTATE");
+		expect(admin_replies_complete(menu, {"OK - Server is cycling..."}), "MENUSTATE in a match: the tail");
+		expect(!admin_replies_complete(menu, {"ERROR - Already in 'Menu' State"}), "MENUSTATE in the menu");
+		expect(admin_replies_complete(menu, {"ERROR - Already in 'Menu' State",
+		                                     "ERROR - Must be in Game State to cycle server."}),
+		       "MENUSTATE in the menu: its error and the tail");
+		const AdminReplyPlan two = admin_reply_plan("SET Bogus 1");
+		expect(!admin_replies_complete(two, {"USAGE -  SET [...]"}) &&
+		               admin_replies_complete(two, {"USAGE -  SET [...]", "ERROR - Setting Not Found."}),
+		       "an exact count");
+		expect(!admin_replies_complete(admin_reply_plan("PLAYER BAN ALL"), {"a", "b", "c"}),
+		       "the quiet gap is never complete by count");
+		expect(admin_replies_complete(admin_reply_plan("QUIT"), {}), "QUIT is complete at once");
+	}
+
 	if (g_failures == 0) {
 		std::printf("admin_protocol: OK\n");
 		return 0;

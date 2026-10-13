@@ -142,6 +142,29 @@ void set_machine(db::Database &db, int64_t id, const std::string &provider,
 void set_admin_login(db::Database &db, int64_t id, int admin_port, const std::string &user,
 		const std::string &password);
 
+// --- The remote-admin console (hosted_server_console, migration 0012) ---
+//
+// One line of a hosted server's console: a command the service's admin link
+// (admin_link.h) sent on the server's retail remote-admin port, a reply packet
+// the server answered with, or one of the link's own status lines. A capped
+// ring per server: every append keeps the server's newest kConsoleKeep lines.
+
+inline constexpr size_t kConsoleKeep = 500;
+struct ConsoleLine {
+	int64_t id = 0;
+	std::string kind;  // "command", "reply" or "status"
+	std::string actor; // a command's sender: "owner", "admin" or "service"; "" for the rest
+	std::string text;  // UTF-8
+	std::string at;    // UTC 'YYYY-MM-DD HH:MM:SS'
+};
+// Appends `lines` (their ids unread) in one transaction and trims the server's
+// ring to its newest `keep`.
+void append_console(db::Database &db, int64_t server_id, const std::vector<ConsoleLine> &lines,
+		size_t keep = kConsoleKeep);
+// The server's lines with an id past `after_id`, the newest `limit` of them,
+// oldest first.
+std::vector<ConsoleLine> list_console(db::Database &db, int64_t server_id, int64_t after_id, size_t limit);
+
 // The RID of the listing the account `account_user_id` holds now: listed, with
 // one of its HostKeys claimed for the RID (hostdb::listing_owned_by's rule).
 // The newest when it holds several; nullopt for none.

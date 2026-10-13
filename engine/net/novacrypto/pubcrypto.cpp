@@ -83,8 +83,12 @@ void phase_keycycle(std::vector<uint8_t> &buf, const std::string &key, bool subt
 
 // [orig: == NWU NapiNP_EncryptBuffer@0x6187b0 / NapiNP_DecryptBuffer@0x618880 (retail). Python's
 //        _ticket_transform is an inlined NWU copy; proven byte-identical to the NWU cipher (NW-C3).]
+// It runs under any key, as the NWU chain does: an empty one (a key chain's empty segment) seeds 50
+// and skips only the key-byte pass (D-NET-450). [orig: the chain's segment crypts
+// NapiNP_EncryptAndEncodeToHexAlpha @0x6190B7 and NapiNP_DecodeEncryptedString @0x6192E1, each
+// over a segment buffer with no emptiness test]
 void ticket_transform(std::vector<uint8_t> &data, const std::string &key, bool decrypt) {
-	if (data.empty() || key.empty()) return;
+	if (data.empty()) return;
 
 	const uint32_t key_hash = key_fold(key);
 	const uint32_t phase_start = (MULTIPLIER * key_hash + 1) & 0xFFFFFFFFu;

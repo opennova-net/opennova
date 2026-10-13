@@ -3,6 +3,7 @@
 #include "auth.h"
 #include "hosted/hosted_repository.h"
 #include "http_json.h"
+#include "loggable.h"
 #include "nw_udp_listener.h"
 
 #include <base/io/cp1252.h>
@@ -77,17 +78,6 @@ std::string join_surrogate_pairs(std::string_view text) {
 		++i;
 	}
 	return out;
-}
-
-// Whether UTF-8 `text` holds a C1 control (U+0080..U+009F, 0xC2 then 0x80..0x9F).
-bool has_c1_control(std::string_view text) {
-	for (size_t i = 0; i + 1 < text.size(); ++i) {
-		const auto lead = static_cast<uint8_t>(text[i]);
-		const auto next = static_cast<uint8_t>(text[i + 1]);
-		if (lead == 0xC2 && next >= 0x80 && next <= 0x9F)
-			return true;
-	}
-	return false;
 }
 
 // "U+1F600" for each codepoint, comma-separated (the first four, then "and more").
@@ -267,10 +257,10 @@ void HostRoutes::register_routes(WebApp &app, NwUdpListener *nw_udp) {
 
 // GET /api/admin/hosts — every listed server with its owner: listed_host_json
 // plus "owner", {id, username} of the account whose HostKey listed it (for a
-// hosted server's listing, held by its service account, the hosted server's
-// owner: hosted::hosted_server_of_account), or null for an anonymous listing
-// (the HostKey named no account) and a hosted one whose owner is gone, and
-// "hosted_server_id", the hosted server a listing is, else null.
+// live hosted server's listing, held by its service account, the hosted
+// server's owner: hosted::hosted_server_of_account), or null for an anonymous
+// listing (the HostKey named no account) and a hosted one whose owner is gone,
+// and "hosted_server_id", the live hosted server a listing is, else null.
 crow::response HostRoutes::admin_hosts(const crow::request &req) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -286,7 +276,12 @@ crow::response HostRoutes::admin_hosts(const crow::request &req) {
 			std::optional<hosted::HostedAccount> hosted_server;
 			std::optional<int64_t> owner_id;
 			if (h.host_user_id) {
+				// A service account stands for its hosted server's owner only while
+				// the server is live (the one rule, hosted_repository.h); an ended
+				// server's lingering listing is its account's own.
 				hosted_server = hosted::hosted_server_of_account(*db_conn, *h.host_user_id);
+				if (hosted_server && !hosted::is_live(hosted_server->state))
+					hosted_server.reset();
 				owner_id = hosted_server ? hosted_server->owner_user_id : h.host_user_id;
 			}
 			if (owner_id) {

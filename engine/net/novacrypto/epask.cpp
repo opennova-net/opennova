@@ -139,6 +139,17 @@ uint32_t atoi64_u32(std::string_view s) {
 	return static_cast<uint32_t>(io::retail_atoi64(owned.c_str()));
 }
 
+// Both NWU passes run only for a key whose first byte is nonzero: an empty key
+// (a null one reads as the empty string) skips the crypt, though the crypt
+// itself would run under any key (D-NET-450).
+// [orig: EPASK_Encrypt @0x6669A0 - a null key -> g_EmptyStr @0x6669E7..0x6669EB;
+//  `cmp [ebx], cl` / `jz` @0x666A3C..0x666A3E ahead of NapiNP_EncryptBufferAlt
+//  @0x666A59; `cmp byte ptr [ebx], 0` / `jz` @0x666AA0..0x666AA7 ahead of the
+//  second @0x666AAC]
+bool epask_key_keys_the_crypt(const std::string &key) {
+	return key.c_str()[0] != '\0';
+}
+
 } // namespace
 
 bool generate_epask(EpaskParams &out) {
@@ -241,14 +252,17 @@ bool epask_decrypt(const std::string &ciphertext, const EpaskParams &params, std
 		if (error != nullptr) *error = "EPASK field is not an A-P value (odd length or a character outside A-P)";
 		return false;
 	}
-	if (!step1.empty()) nwu_encrypt(step1.data(), step1.size(), params.key);
+	// The inverse of epask_encrypt's passes, under the same gate: no NWU pass for an
+	// empty key (retail's client has the encrypt alone; this is its server-side inverse).
+	const bool keyed = epask_key_keys_the_crypt(params.key);
+	if (keyed && !step1.empty()) nwu_encrypt(step1.data(), step1.size(), params.key);
 	std::vector<uint8_t> step3;
 	std::string why;
 	if (!modexp_decrypt_bf(step1, params.exponent, params.modulus, step3, why)) {
 		if (error != nullptr) *error = why;
 		return false;
 	}
-	if (!step3.empty()) nwu_encrypt(step3.data(), step3.size(), params.key);
+	if (keyed && !step3.empty()) nwu_encrypt(step3.data(), step3.size(), params.key);
 	out.assign(step3.begin(), step3.end());
 	return true;
 }
@@ -269,14 +283,15 @@ bool epask_encrypt(const std::string &plaintext, const EpaskParams &params, std:
 	const size_t plaintext_len = (nul == std::string::npos) ? plaintext.size() : nul;
 	std::vector<uint8_t> step1(plaintext.begin(), plaintext.begin() + plaintext_len);
 	out.clear();
-	if (!step1.empty()) nwu_decrypt(step1.data(), step1.size(), params.key);
+	const bool keyed = epask_key_keys_the_crypt(params.key);
+	if (keyed && !step1.empty()) nwu_decrypt(step1.data(), step1.size(), params.key);
 	std::vector<uint8_t> step2;
 	if (!modexp_encrypt(step1, params.exponent, params.modulus, step2)) {
 		// The modexp pass's -1 is the encrypt's [orig: @0x666a99..0x666a9b].
 		if (error != nullptr) *error = kRejectedParams;
 		return false;
 	}
-	if (!step2.empty()) nwu_decrypt(step2.data(), step2.size(), params.key);
+	if (keyed && !step2.empty()) nwu_decrypt(step2.data(), step2.size(), params.key);
 	out = encode_ap(step2);
 	return true;
 }

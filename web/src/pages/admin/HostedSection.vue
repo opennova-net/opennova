@@ -125,7 +125,17 @@
                   {{ s.machine_address }}<template v-if="s.admin_port"> (admin {{ s.admin_port }})</template>
                 </span>
               </td>
-              <td class="whitespace-nowrap px-4 py-3 text-right">
+              <td class="space-x-3 whitespace-nowrap px-4 py-3 text-right">
+                <button
+                  v-if="s.state === 'running'"
+                  type="button"
+                  class="text-accent hover:text-ink-bright"
+                  :aria-expanded="consoleOpen(s.id) ? 'true' : 'false'"
+                  :aria-controls="consoleOpen(s.id) ? consolePanelId(s.id) : undefined"
+                  @click="toggleConsole(s.id)"
+                >
+                  {{ consoleOpen(s.id) ? 'Close console' : 'Console' }}<span class="sr-only"> of server {{ s.id }}, {{ s.settings.game_name }}</span>
+                </button>
                 <button
                   v-if="s.live && s.state !== 'stopping'"
                   type="button"
@@ -140,6 +150,43 @@
           </tbody>
         </table>
       </div>
+    </section>
+
+    <!-- The consoles opened from the list: read-only, plus cycle. -->
+    <section
+      v-for="s in openConsoles"
+      :id="consolePanelId(s.id)"
+      :key="s.id"
+      class="space-y-4 rounded-panel border border-border bg-panel p-4 sm:p-6"
+      :aria-labelledby="`${consolePanelId(s.id)}-heading`"
+    >
+      <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div class="min-w-0">
+          <p class="text-xs uppercase tracking-[0.3em] text-ink-muted">Server #{{ s.id }}</p>
+          <h2 :id="`${consolePanelId(s.id)}-heading`" class="mt-1 break-words text-xl font-semibold text-ink">
+            {{ s.settings.game_name || 'Unnamed' }}
+          </h2>
+          <p class="text-sm text-ink-muted">
+            <template v-if="s.owner">{{ s.owner.username }}'s hosted server</template>
+            <template v-else>A hosted server whose owner was deleted</template>
+          </p>
+        </div>
+        <button
+          type="button"
+          class="shrink-0 rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover"
+          @click="toggleConsole(s.id)"
+        >
+          Close<span class="sr-only"> the console of server {{ s.id }}</span>
+        </button>
+      </div>
+      <HostedServerConsole
+        :target="{ kind: 'admin', id: s.id }"
+        mode="admin"
+        :server-name="s.listing?.server_name || s.settings.game_name"
+        :heading-level="3"
+        @gone="load(true)"
+        @unauthorized="onConsoleRefused(s.id)"
+      />
     </section>
 
     <!-- The kill switch. -->
@@ -202,9 +249,16 @@
 // /admin/hosted: the hosted servers' fleet (GET /api/admin/hosted), a stop per
 // server (POST /api/admin/hosted/<id>/stop) and the kill switch (POST
 // /api/admin/hosted/stop-all) behind a typed confirmation. The list refreshes
-// itself, faster while a server is changing state.
+// itself, faster while a server is changing state. A running server's console
+// opens below the list (HostedServerConsole, read-only plus cycle, on
+// /api/admin/hosted/<id>/...); every open console makes its admitted calls
+// through this page's one console queue, each under its own scope, since the
+// service runs one console request per admin account at once (the Bearer
+// token counting as one account).
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { fetchHostedFleet, stopAllFleetServers, stopFleetServer } from '../../api/admin';
+import HostedServerConsole from '../../components/HostedServerConsole.vue';
+import { provideConsoleQueue } from '../../composables/useConsoleQueue';
 import type { FleetResponse, FleetServer } from '../../types/hostedServer';
 import { isTransitioning, stateBadgeClass, stateLabel } from '../../utils/hostedState';
 import { durationSince, isoOf, localOf } from '../../utils/utcTime';
@@ -237,6 +291,46 @@ let retryDelay = RETRY_POLL_FIRST_MS;
 let errorFromLoad = false;
 
 const liveCount = computed(() => fleet.value?.servers.filter((s) => s.live).length ?? 0);
+
+provideConsoleQueue();
+
+// The servers whose console is open, in the order they were opened. A console
+// shows while its server runs; one that has left running closes.
+const openIds = ref<number[]>([]);
+
+const openConsoles = computed(() => {
+  const running = new Map((fleet.value?.servers ?? []).filter((s) => s.state === 'running').map((s) => [s.id, s]));
+  return openIds.value.flatMap((id) => {
+    const s = running.get(id);
+    return s ? [s] : [];
+  });
+});
+
+function consoleOpen(id: number): boolean {
+  return openIds.value.includes(id);
+}
+
+function consolePanelId(id: number): string {
+  return `hosted-console-panel-${id}`;
+}
+
+async function toggleConsole(id: number) {
+  if (consoleOpen(id)) {
+    openIds.value = openIds.value.filter((open) => open !== id);
+    return;
+  }
+  openIds.value = [...openIds.value, id];
+  await nextTick();
+  document.getElementById(consolePanelId(id))?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// A console's credentials were refused (the client's interceptor has already
+// dropped a refused token and told the gate): that console stopped reading,
+// so it closes, and opening it again once the admin is back starts it fresh.
+function onConsoleRefused(id: number) {
+  openIds.value = openIds.value.filter((open) => open !== id);
+  fail(`The admin credentials were refused, so the console of server #${id} closed. Open it again once you are signed in.`);
+}
 
 // Since when a server has been in its state: running since it first ran, an
 // ended one since it ended, any other since its last change.
@@ -308,6 +402,11 @@ async function load(background: boolean) {
     fleet.value = result.value;
     loadedAt.value = now.value;
     pollTrouble.value = false;
+    // A console whose server has left running closes for good.
+    const running = new Set(result.value.servers.filter((s) => s.state === 'running').map((s) => s.id));
+    if (openIds.value.some((id) => !running.has(id))) {
+      openIds.value = openIds.value.filter((id) => running.has(id));
+    }
     // A failed read's banner goes with the next good one (a stop's stays).
     if (errorFromLoad) {
       error.value = null;

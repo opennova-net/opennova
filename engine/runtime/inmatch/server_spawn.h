@@ -126,9 +126,10 @@ void Server_ProcessSpectatorRespawnRequests(NapiNPServerCtx &ctx, world::World &
 // The deploy leg's placement, between its raise and its spawn-state reset:
 // the convert's hold arm (conn.reply.convert_holds_pose) places nothing, the
 // body keeping its position with its three angle words zeroed; any other
-// deploy runs Server_PositionPlayerForSpawn over the target (the spectator
-// latch's team substitute, a medic revive's saved position, else the previous
-// reset's position when nothing was placed). Writes the player's pose and
+// deploy runs Server_PositionPlayerForSpawn over the target, resolved again
+// against the player entity's team (a miss takes the no-pick arm; the
+// spectator latch's team substitute, a medic revive's saved position, else
+// the previous reset's position when nothing was placed). Writes the player's pose and
 // returns the placement whose heading word and latches the deploy reads on.
 // [orig: Server_DeployPlayer @0x517837..0x517868]
 world::SpawnPointResult Server_PositionDeployingPlayer(const GameConfig &config,

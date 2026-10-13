@@ -729,6 +729,10 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // [orig: Entity_ConvertRoundToPlacedEntity @0x5455B0 -> the
         //  Entity_InitFromModel call @0x5455D8].
         row.no_target = (def->attrib & DEF_ITEM_ATTRIB_NOTARGET) != 0;
+        // ...and its type and signatures [orig: @0x40E0D7, @0x40E136..0x40E156].
+        row.def_type = def->type;
+        row.radar_sig = def->radar_sig & 0xFFFF;
+        row.heat_sig = def->heat_sig & 0xFFFF;
         world.throwables.classes.set(row);
     }
     // The AS zone-slot chain — built AFTER the trait stamp (zone registration keys on

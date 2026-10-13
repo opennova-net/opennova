@@ -5,6 +5,7 @@
 
 #include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
+#include <runtime/menu/list_sort.h>
 
 #include <algorithm>
 #include <cctype>
@@ -57,53 +58,59 @@ std::vector<int> table_sort_order(const std::vector<MenuTableRow> &rows,
 	std::vector<int> order(rows.size());
 	std::iota(order.begin(), order.end(), 0);
 	const size_t depth = std::min<size_t>(columns.size(), 20);
-	const auto compare = [&](const MenuTableRow &ra, const MenuTableRow &rb) -> int64_t {
-		const std::vector<std::string> &a = ra.cells;
-		const std::vector<std::string> &b = rb.cells;
+	// The answer is the game's int: the direction times the difference, both
+	// 32-bit [orig: imul @0x63eb02, @0x63ec1c].
+	const auto times = [](int32_t direction, int32_t value) {
+		return static_cast<int32_t>(
+				static_cast<uint32_t>(direction) * static_cast<uint32_t>(value));
+	};
+	const auto compare = [&](int x, int y) -> int32_t {
+		const std::vector<std::string> &a = rows[static_cast<size_t>(x)].cells;
+		const std::vector<std::string> &b = rows[static_cast<size_t>(y)].cells;
 		for (size_t i = 0; i < depth && i < keys.size(); ++i) {
 			const int key = keys[i];
 			if (key < 0 || key >= static_cast<int>(columns.size())) {
 				return 0;
 			}
 			const MenuTableColumn &column = columns[static_cast<size_t>(key)];
-			const int64_t direction = column.ascending ? 1 : -1;
+			const int32_t direction = column.ascending ? 1 : -1;
 			const size_t cell = static_cast<size_t>(key);
 			const std::string *ca = cell < a.size() ? &a[cell] : nullptr;
 			const std::string *cb = cell < b.size() ? &b[cell] : nullptr;
 			// A text column (and a custom one whose first row has the cell):
-			// two missing cells pass to the next key; one missing cell decides
-			// [orig: CTableWnd_CompareRows answers the column's direction both ways
-			// round, leaving the order to its quicksort; ordered here as the
-			// missing cell first, so the comparison stays consistent].
+			// two missing cells pass to the next key; one missing cell answers
+			// the column's direction, whichever row lacks it, which leaves the
+			// pair's order to the quicksort [orig: CTableWnd_CompareRows - the
+			// custom gate @0x63ea5d..0x63ea70, both missing @0x63ea91, the
+			// answers @0x63eaa1 / @0x63eab1 -> @0x63ec12..0x63ec1b].
 			if (column.cell_type == 0 || (column.cell_type == 2 && ca != nullptr)) {
-				if (ca != nullptr && cb == nullptr) {
-					return direction;
+				if (ca == nullptr && cb == nullptr) {
+					continue;
 				}
-				if (ca == nullptr) {
-					if (cb == nullptr) {
-						continue;
-					}
-					return -direction;
+				if (ca == nullptr || cb == nullptr) {
+					return direction;
 				}
 			}
 			if (column.numeric_sort) {
 				const int32_t diff = static_cast<int32_t>(
 						static_cast<uint32_t>(numeric_cell(ca)) - static_cast<uint32_t>(numeric_cell(cb)));
 				if (diff != 0) {
-					return direction * diff;
+					return times(direction, diff);
 				}
 			} else {
 				const int c = text_compare(ca, cb);
 				if (c != 0) {
-					return direction * c;
+					return times(direction, c);
 				}
 			}
 		}
 		return 0;
 	};
-	std::stable_sort(order.begin(), order.end(), [&](int x, int y) {
-		return compare(rows[static_cast<size_t>(x)], rows[static_cast<size_t>(y)]) < 0;
-	});
+	// The rows sorted in place through the list widgets' quicksort, so rows
+	// equal on every key stand where its swaps leave them [orig:
+	// CTableWnd_SortByColumn @0x640900 -> Utility_SortDualArray (the call
+	// @0x640991) -> Utility_QuickSortDualArray @0x651AB0] (D-MNU-40).
+	sort_dual_array(order, compare);
 	return order;
 }
 

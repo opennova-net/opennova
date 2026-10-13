@@ -84,7 +84,9 @@ void revive_player(NapiNPServerCtx &ctx, world::World &world,
 	victim_connection->link.respawn_delay_seconds = 0;
 	world.zones.spawn_waves.remove_player(r.victim);          // @0x517D6D
 
-	// 0x54 [handle][0], mask 0x580 = the Medic set of the victim's team.
+	// 0x54 [handle][0], mask 0x580 = the Medic set of the victim entity's
+	// team byte, sign-extended [orig: @0x517D72, movsx @0x517D7E, the filter
+	// store @0x517D91].
 	{
 		PlayerDownedState state;
 		state.entity_handle = r.victim.packed;
@@ -92,7 +94,8 @@ void revive_player(NapiNPServerCtx &ctx, world::World &world,
 		state.medic_request_active = false;
 		const std::vector<uint8_t> body = encode_player_downed_state(state);
 		for (NapiNPConnection &candidate : ctx.np_protocol.connection_list) {
-			if (!is_medic_recipient(candidate, world, victim->team)) continue;
+			if (!is_medic_recipient(candidate, world, static_cast<int8_t>(victim->team)))
+				continue;
 			candidate.link.transport->host_send(s2c::PLAYER_DOWNED_STATE, body);
 		}
 	}

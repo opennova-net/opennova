@@ -13,7 +13,9 @@
 // the restart window (an hour of running forgives the crashes before it), the
 // boot and listing timeouts, the health checks, an owner's account banned or
 // deleted or its approval withdrawn (also during a crash restart's backoff),
-// the reconciliation at the service's start and the periodic orphan sweep.
+// the reconciliation at the service's start (a provisioning row whose machine
+// is gone among it) and the periodic orphan sweep, and the admin links kept in
+// step with the running servers.
 // Then LocalProcessProvider against this test binary itself as the
 // opennova-serve it runs (`--resource-dir ...` makes it the fake server): the
 // working directory rendered from scratch with its secret files owner-only and
@@ -25,6 +27,7 @@
 
 #include "auth.h"
 #include "child_process.h"
+#include "hosted/admin_link.h"
 #include "hosted/hosted_repository.h"
 #include "hosted/hosted_settings.h"
 #include "hosted/local_process_provider.h"
@@ -1009,6 +1012,173 @@ int test_reconciliation() {
 	return 0;
 }
 
+// A provider that knows a machine's address only once it boots (a cloud
+// machine): the launch's describe names none, and the next describe writes it,
+// so the running server's admin link has its target.
+int test_address_after_launch() {
+	Rig rig("hosted_address_late");
+	rig.fake.hide_address_describes = 1;
+	hosted::AdminLinkConfig link_config;
+	link_config.io_timeout_ms = 200;
+	link_config.reconnect_min_ms = 50;
+	link_config.log = [](const std::string &) {};
+	hosted::AdminLinks links(nullptr, link_config);
+	rig.sup->set_admin_links(&links);
+	const int64_t id = rig.request("late_address");
+	TEST_EXPECT(id != 0);
+	rig.tick(); // requested -> provisioning
+	rig.tick(); // the launch: its describe names no address
+	TEST_EXPECT(rig.state(id) == State::Booting && rig.server(id)->machine_address.empty());
+	rig.fake.run(rig.fake.last_machine);
+	rig.tick(); // -> listing, the address written
+	TEST_EXPECT(rig.state(id) == State::Listing && rig.server(id)->machine_address == "10.0.0.2");
+	TEST_EXPECT(list_as(*rig.pool.acquire(), *rig.server(id)->service_user_id, 9301));
+	rig.tick(); // -> running
+	const auto link = links.find(id);
+	TEST_EXPECT(rig.state(id) == State::Running && link && link->target().host == "10.0.0.2");
+	links.stop_all();
+	return 0;
+}
+
+// The console ring (hosted_server_console, migration 0012): an append keeps a
+// server's newest `keep` lines and leaves another server's alone; the reads go
+// oldest first, past an id, the newest `limit`.
+int test_console_ring() {
+	Rig rig("hosted_console_ring");
+	const int64_t a = rig.request("console_a");
+	const int64_t b = rig.request("console_b");
+	TEST_EXPECT(a != 0 && b != 0);
+	auto line = [](const std::string &text) {
+		hosted::ConsoleLine l;
+		l.kind = "reply";
+		l.text = text;
+		l.at = "2026-10-12 10:00:00";
+		return l;
+	};
+	auto db = rig.pool.acquire();
+	hosted::append_console(*db, b, { line("b0") }, 5);
+	for (int i = 0; i < 4; ++i) hosted::append_console(*db, a, { line("a" + std::to_string(i)) }, 5);
+	hosted::append_console(*db, a, { line("a4"), line("a5"), line("a6") }, 5);
+	auto texts = [&](int64_t id, int64_t after, size_t limit) {
+		std::vector<std::string> out;
+		for (const auto &l : hosted::list_console(*db, id, after, limit)) out.push_back(l.text);
+		return out;
+	};
+	TEST_EXPECT(texts(a, 0, 100) == (std::vector<std::string>{ "a2", "a3", "a4", "a5", "a6" }));
+	TEST_EXPECT(texts(b, 0, 100) == std::vector<std::string>{ "b0" });
+	TEST_EXPECT(texts(a, 0, 2) == (std::vector<std::string>{ "a5", "a6" }));
+	const auto all = hosted::list_console(*db, a, 0, 100);
+	TEST_EXPECT(texts(a, all[2].id, 100) == (std::vector<std::string>{ "a5", "a6" }));
+	TEST_EXPECT(all[0].kind == "reply" && all[0].at == "2026-10-12 10:00:00");
+	// The schema's checks: a kind or actor outside the sets is refused.
+	hosted::ConsoleLine bad = line("x");
+	bad.actor = "player";
+	bool refused = false;
+	try {
+		hosted::append_console(*db, a, { bad });
+	} catch (const opennova::db::SqliteError &) {
+		refused = true;
+	}
+	TEST_EXPECT(refused && texts(a, 0, 100).size() == 5);
+	return 0;
+}
+
+// A row in provisioning whose machine is gone at the service's start (launched
+// just before the service went, its move to booting never written): its
+// machine is cleared with no event and no restart counted, and the next pass
+// launches it again.
+int test_reconcile_provisioning_gone() {
+	Rig rig("hosted_reconcile_provisioning");
+	const int64_t id = rig.request("rec_provisioning");
+	TEST_EXPECT(id != 0);
+	rig.tick(); // requested -> provisioning
+	TEST_EXPECT(rig.state(id) == State::Provisioning);
+	hosted::set_machine(*rig.pool.acquire(), id, "fake", "fake-ghost", "10.0.0.2");
+	const std::vector<std::string> before = transitions(*rig.pool.acquire(), id);
+	rig.make_supervisor();
+	rig.advance(1000);
+	rig.sup->reconcile(rig.now);
+
+	const auto row = rig.server(id);
+	TEST_EXPECT(row && row->state == State::Provisioning && row->machine_id.empty() &&
+			row->machine_address.empty() && row->restarts == 0);
+	TEST_EXPECT(transitions(*rig.pool.acquire(), id) == before);
+	const int launches = rig.fake.launches;
+	rig.tick();
+	TEST_EXPECT(rig.state(id) == State::Booting && rig.fake.launches == launches + 1);
+	TEST_EXPECT(rig.server(id)->machine_id != "fake-ghost" && !rig.server(id)->machine_id.empty());
+	return 0;
+}
+
+// The admin links follow the rows (Supervisor::set_admin_links): none before
+// running; one once running, at the machine's address with the admin login the
+// start rendered; none from a crash's move back to provisioning, and a new one
+// with the restart's new login once it runs again; none from stopping on.
+int test_admin_links_follow_running() {
+	Rig rig("hosted_admin_links");
+	hosted::AdminLinkConfig link_config;
+	link_config.io_timeout_ms = 200;
+	link_config.reconnect_min_ms = 50;
+	link_config.reconnect_max_ms = 200;
+	link_config.log = [](const std::string &) {};
+	hosted::AdminLinks links(nullptr, link_config);
+	rig.sup->set_admin_links(&links);
+	const int64_t id = rig.request("links_owner");
+	TEST_EXPECT(id != 0);
+	rig.tick();
+	rig.tick();
+	TEST_EXPECT(rig.state(id) == State::Booting && links.find(id) == nullptr);
+	const std::string machine = rig.fake.last_machine;
+	rig.fake.run(machine);
+	rig.tick(); // -> listing
+	TEST_EXPECT(links.find(id) == nullptr);
+	TEST_EXPECT(list_as(*rig.pool.acquire(), *rig.server(id)->service_user_id, 9201));
+	rig.tick(); // -> running
+	TEST_EXPECT(rig.state(id) == State::Running);
+	const auto link = links.find(id);
+	const auto login = hosted::admin_login_of(*rig.pool.acquire(), id);
+	TEST_EXPECT(link != nullptr && login.has_value());
+	if (link && login) {
+		TEST_EXPECT(link->target().host == "10.0.0.2");
+		TEST_EXPECT(link->target().port == login->port && login->port == 41000 + id);
+		TEST_EXPECT(link->target().user == "svc" && link->target().password == login->password);
+		TEST_EXPECT(login->password.size() == hosted::kAdminPasswordChars);
+	}
+	rig.tick();
+	TEST_EXPECT(links.find(id) == link); // the same target keeps its link
+
+	// A crash: the link goes with the move out of running.
+	rig.fake.exit_with(machine, 1);
+	rig.tick();
+	TEST_EXPECT(rig.state(id) == State::Provisioning && links.find(id) == nullptr);
+	TEST_EXPECT(!rig.back_to_running(id, 9202).empty());
+	const auto relinked = links.find(id);
+	TEST_EXPECT(relinked != nullptr && relinked != link);
+	if (relinked && link) TEST_EXPECT(relinked->target().password != link->target().password);
+
+	// The stop: no link from stopping on.
+	TEST_EXPECT(hosted::request_stop(*rig.pool.acquire(), id, "stopped by its owner"));
+	rig.tick();
+	TEST_EXPECT(rig.state(id) == State::Stopping && links.find(id) == nullptr);
+
+	// The health check counts the link (ADR 0053 d6): a running server whose link never
+	// answers (no server behind it) fails after health_misses checks, listed all along.
+	const int64_t quiet = rig.request("links_quiet");
+	TEST_EXPECT(quiet != 0 && !rig.to_running(quiet, 9203).empty());
+	TEST_EXPECT(links.find(quiet) != nullptr && !links.answering(quiet));
+	for (int i = 0; i < rig.config.health_misses; ++i) {
+		rig.advance(rig.config.health_interval_ms);
+		rig.tick();
+	}
+	const auto failed = rig.server(quiet);
+	TEST_EXPECT(failed && failed->state == State::Failed &&
+			contains(failed->failure_reason, "no answer on its admin link"));
+	TEST_EXPECT(links.find(quiet) == nullptr);
+	links.stop_all();
+	TEST_EXPECT(link == nullptr || link->finished());
+	return 0;
+}
+
 // --- LocalProcessProvider over this binary as the server ----------------------
 
 // The variable the test plants in its own environment, which no server may see.
@@ -1239,6 +1409,10 @@ int main(int argc, char **argv) {
 		{ "timeouts_and_health", test_timeouts_and_health },
 		{ "owner_changes", test_owner_changes },
 		{ "reconciliation", test_reconciliation },
+		{ "reconcile_provisioning_gone", test_reconcile_provisioning_gone },
+		{ "console_ring", test_console_ring },
+		{ "admin_links_follow_running", test_admin_links_follow_running },
+		{ "address_after_launch", test_address_after_launch },
 		{ "orphan_sweep", test_orphan_sweep },
 		{ "local_provider", test_local_provider },
 		{ "children_outlive_the_supervisor_thread", test_children_outlive_the_supervisor_thread },

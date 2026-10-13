@@ -54,9 +54,11 @@ struct TilAtlasLayout {
 	float step_v = 0.0f;
 };
 
-// One 12-byte tile record. The game reads +0 x, +4 z (stored negated), +8 the atlas cell and +9 the
-// flags [orig: PolyTrn_RenderTile @ 0x60DE20..0x60DF09; Terrain_GetSurfaceTypeAtPosition @ 0x6065CC..
-// 0x60660C]; +10 is MED's u16 layer (its sort order), written by the editor and never read by the
+// One 12-byte tile record. The game reads +0 x, +4 z, +8 the atlas cell and +9 the flags [orig:
+// PolyTrn_RenderTile @ 0x60DE20..0x60DF09; Terrain_GetSurfaceTypeAtPosition @ 0x6065CC..0x60660C]. The
+// record's (x, z) is, in mission x and y, the north-west corner of the square the game draws it over: the
+// page pass reads z negated on the terrain's row axis, which runs south (docs/tiles/til-re.md "Where a
+// record lies on the mission's plane"; the surface walk reads the square's mirror, D-TIL-9); +10 is MED's u16 layer (its sort order), written by the editor and never read by the
 // game [orig: JOTACmed MapTileStore_Append @ 0x433BBF; MapTileStore_Serialize @ 0x433F88 writes the
 // records grouped by ascending layer]. Every byte is a field, so a record writes back as it was read.
 struct TilOverlayEntry {
@@ -203,6 +205,8 @@ inline float til_world_x_from_fixed(int32_t x_fixed) {
 	return static_cast<float>(x_fixed) / static_cast<float>(TIL_FIXED_UNITS);
 }
 
+// The record's z on the terrain's plane (the Godot z, the mission y negated): the drawn square's north edge, the
+// square running 16 units from it along that axis (south).
 inline float til_world_z_from_fixed(int32_t z_fixed) {
 	return -static_cast<float>(z_fixed) / static_cast<float>(TIL_FIXED_UNITS);
 }
@@ -258,8 +262,12 @@ inline bool til_entry_matches_cell(const TilOverlayEntry &entry, int cell_x, int
 }
 
 // Tests the candidate's square footprint against the mission tile array's
-// inclusive 16x16 world AABBs. Runtime foliage supplies radius 2.0.
-// [orig: Foliage_PathBlockedByPlacedTile @ 0x606490;
+// inclusive 16x16 world AABBs. Runtime foliage supplies radius 2.0. `world_z`
+// is the candidate on the terrain's plane (the mission y negated), as both
+// foliage generators pass it, so the test keeps foliage off the square each
+// tile is drawn over. [orig: Foliage_PathBlockedByPlacedTile @ 0x606490;
+// Foliage_GenerateInstances_0 @ 0x5FFFB8..0x600009;
+// Foliage_GenerateModelTileInstances @ 0x600B6F;
 // Terrain_LoadTileInfoFile @ 0x60a740]
 bool til_blocks_foliage(const TilFile &file, float world_x, float world_z, float radius);
 

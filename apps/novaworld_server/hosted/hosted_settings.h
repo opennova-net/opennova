@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace opennova::novaworld_server::hosted {
@@ -69,6 +70,11 @@ struct SettingsRefusal {
 // printable ASCII with no space or double quote; a mission is a .bms file name
 // of letters, digits, '_' and '-'.
 std::optional<SettingsRefusal> check_settings(const HostedSettings &settings);
+
+// A rotation entry's file name: a .bms name of letters, digits, '_' and '-',
+// at most kMissionNameMaxBytes bytes (check_settings' rule, and the console's
+// MISSION ADD).
+bool is_mission_file_name(std::string_view name);
 
 // The missions column: one name per line.
 std::string join_missions(const std::vector<std::string> &missions);

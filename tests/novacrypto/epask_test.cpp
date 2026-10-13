@@ -1,7 +1,10 @@
+#include <net/novacrypto/ap_alphabet.h>
 #include <net/novacrypto/epask.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -178,6 +181,29 @@ bool encrypt_truncates_at_first_nul() {
 	return true;
 }
 
+// An empty key skips both NWU passes: the field is the A-P packing of the modexp words alone,
+// pow(byte + 2, e, n) per byte as a little-endian dword, and it decrypts back. The crypt would run
+// under an empty key; EPASK_Encrypt gates each pass on the key's first byte itself.
+// [orig: EPASK_Encrypt @0x6669A0 - a null key -> g_EmptyStr @0x6669E7..0x6669EB, the gates
+//  @0x666A3C..0x666A3E and @0x666AA0..0x666AA7 ahead of NapiNP_EncryptBufferAlt @0x666A59 /
+//  @0x666AAC; EPASK_ModexpEncrypt @0x666600]
+bool empty_key_skips_the_crypt() {
+	const opennova::EpaskParams params{10001, 207887, ""};
+	const std::string plaintext = "DevUser";
+	std::vector<uint8_t> words;
+	for (const unsigned char byte : plaintext) {
+		uint64_t power = 1;
+		for (uint32_t i = 0; i < params.exponent; ++i)
+			power = power * (static_cast<uint64_t>(byte) + 2u) % params.modulus;
+		for (int shift = 0; shift < 32; shift += 8)
+			words.push_back(static_cast<uint8_t>((power >> shift) & 0xFFu));
+	}
+	const std::string want = opennova::encode_ap(words);
+	if (!expect_eq(encrypt(plaintext, params), want, "an empty key skips the NWU passes"))
+		return false;
+	return expect_eq(decrypt(want, params), plaintext, "an empty-key field decrypts back");
+}
+
 bool generate_yields_valid_params() {
 	opennova::EpaskParams params;
 	if (!opennova::generate_epask(params)) {
@@ -228,6 +254,7 @@ int main() {
 	ok = malformed_epask_string_is_rejected_or_atoi_tolerant() && ok;
 	ok = rejected_params_never_reach_modexp() && ok;
 	ok = encrypt_truncates_at_first_nul() && ok;
+	ok = empty_key_skips_the_crypt() && ok;
 	ok = generate_yields_valid_params() && ok;
 	ok = malformed_inputs_are_rejected() && ok;
 	if (!ok) {
