@@ -111,6 +111,10 @@ void Weather::_bind_methods() {
 
 	// The render-frame drive: the frame pipeline's environment leg and the
 	// tests call it; the node never self-clocks through a process callback.
+	ClassDB::bind_method(D_METHOD("is_globals_held"), &Weather::is_globals_held);
+	ClassDB::bind_static_method(
+			"Weather", D_METHOD("get_global_writes"), &Weather::get_global_writes);
+	ClassDB::bind_method(D_METHOD("republish_globals"), &Weather::republish_globals);
 	ClassDB::bind_method(D_METHOD("advance_frame", "delta"),
 			&Weather::advance_frame);
 
@@ -165,6 +169,27 @@ void Weather::_post_runtime(MissionEnvironment *p_env) {
 		return;
 	}
 	p_env->flush_publication();
+	if (globals_held_) {
+		return;
+	}
+	_write_globals(p_env);
+}
+
+void Weather::republish_globals() {
+	MissionEnvironment *env = _env_node();
+	if (env == nullptr || !env->state().is_loaded()) {
+		return;
+	}
+	_write_globals(env);
+}
+
+void Weather::publish_absent() {
+	ObjectData::set_weather_ctrl_registers(0, 0);
+	ObjectData::clear_weather_rings();
+}
+
+void Weather::_write_globals(MissionEnvironment *p_env) {
+	++global_writes_;
 	const opennova::env::WeatherShaderGlobals globals =
 			opennova::env::build_weather_shader_globals(p_env->state(),
 					runtime_, p_env->is_underwater_view());
@@ -233,11 +258,11 @@ void Weather::bind_simulation(Object *p_sim) {
 	if (state != nullptr) {
 		sim->set_weather_render_owner(this);
 		runtime_.set_world_tick_driven(true);
-	} else {
+	} else if (!globals_held_) {
 		// No mission behind the registers: the last hash must not keep
-		// feeding every model outside one.
-		ObjectData::set_weather_ctrl_registers(0, 0);
-		ObjectData::clear_weather_rings();
+		// feeding every model outside one (a held weather leaves another
+		// picture's to it, E13).
+		publish_absent();
 	}
 }
 
@@ -248,8 +273,9 @@ bool Weather::tod_keyframed() const {
 
 void Weather::release_simulation() {
 	sim_id_ = ObjectID();
-	ObjectData::set_weather_ctrl_registers(0, 0);
-	ObjectData::clear_weather_rings();
+	if (!globals_held_) {
+		publish_absent();
+	}
 	MissionEnvironment *env = _env_node();
 	runtime_.attach_state(nullptr, env != nullptr ? &env->state() : nullptr);
 }

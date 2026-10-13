@@ -78,6 +78,7 @@
 #include "world/resource_root_resolver.h"
 #include "world/runtime_perf_counters.h"
 #include "world/session_drive.h"
+#include "world/world_scene.h"
 #include "world/world_view.h"
 
 namespace godot {
@@ -195,6 +196,12 @@ public:
 	int get_object_detail() const { return object_detail_; }
 	static int object_detail_fresh_profile();
 	static int clamp_object_detail(int p_level);
+	// The scene stack's table (world/world_scene.h): each row's name, class,
+	// NodePath properties and capture layer, in game_world.tscn's order, and
+	// every row made under `parent` from it (the editor's devices make theirs
+	// the same way): what a test pins the packaged scene against.
+	static Array get_scene_rows();
+	static void build_scene_rows(Node *p_parent, bool p_held_globals);
 	// game.cfg's texfilter_level (engine: renderer/texture_filter.h): the shell
 	// hands over its persisted options word whenever it changes. The model
 	// effects' filter follows it at once (retail reloads every effect at the
@@ -750,7 +757,8 @@ private:
 	void resync_weather_after_restore();
 
 	// --- the world's retained scene nodes (game_world.tscn; absent from a
-	//     code-built world) ---
+	//     code-built world), bound through the one scene table ---
+	WorldScene scene_;
 	Terrain *terrain_ = nullptr;
 	MissionEnvironment *env_ = nullptr;
 	Water *water_ = nullptr;

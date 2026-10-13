@@ -68,53 +68,28 @@ void GameWorld::_ready() {
 	if (rs != nullptr && !rs->is_connected("frame_post_draw", post_draw)) {
 		rs->connect("frame_post_draw", post_draw);
 	}
-	terrain_ = Object::cast_to<Terrain>(get_node_or_null(NodePath("Terrain")));
-	env_ = Object::cast_to<MissionEnvironment>(get_node_or_null(NodePath("MissionEnvironment")));
-	water_ = Object::cast_to<Water>(get_node_or_null(NodePath("Water")));
-	environment_cube_ = Object::cast_to<EnvironmentCubeCapture>(
-			get_node_or_null(NodePath("EnvironmentCubeCapture")));
-	framefx_ = Object::cast_to<FrameFx>(get_node_or_null(NodePath("FrameFx")));
-	weather_ = Object::cast_to<Weather>(get_node_or_null(NodePath("Weather")));
-	precipitation_ = Object::cast_to<Precipitation>(get_node_or_null(NodePath("Precipitation")));
-	celestial_ = Object::cast_to<Celestial>(get_node_or_null(NodePath("Celestial")));
-	sky_dome_ = Object::cast_to<SkyDome>(get_node_or_null(NodePath("SkyDome")));
-	clear_color_ = Object::cast_to<WorldEnvironment>(get_node_or_null(NodePath("ClearColor")));
-	// The foliage dispatcher sits beside the terrain, never under it: the
-	// indoors letter hides the terrain but closes only the dispatcher's
-	// detail passes (the occlusion frame's gates), so the MODEL masks draw on.
-	dispatcher_ = Object::cast_to<FoliageDispatcher>(get_node_or_null(NodePath("FoliageDispatcher")));
+	// The scene stack game_world.tscn holds, bound and wired through the one
+	// table every world-drawing device shares (world/world_scene.h).
+	scene_ = WorldScene::bind(*this);
+	const WorldSceneNodes &nodes = scene_.nodes();
+	terrain_ = nodes.terrain;
+	env_ = nodes.environment;
+	water_ = nodes.water;
+	environment_cube_ = nodes.environment_cube;
+	framefx_ = nodes.framefx;
+	weather_ = nodes.weather;
+	precipitation_ = nodes.precipitation;
+	celestial_ = nodes.celestial;
+	sky_dome_ = nodes.sky;
+	clear_color_ = nodes.clear_color;
+	dispatcher_ = nodes.foliage;
+	sun_shadow_ = nodes.sun_shadow;
+	slot_shadow_ = nodes.slot_shadow;
 	// The occlusion frame's retained render nodes exist from here on; its
 	// per-mission members arrive with each load.
 	occlusion_->setup(terrain_, dispatcher_, sky_dome_, celestial_, water_, env_);
 	if (clear_color_ != nullptr && clear_color_->get_environment().is_valid()) {
 		idle_frame_clear_color_ = clear_color_->get_environment()->get_bg_color();
-	}
-	if (dispatcher_ != nullptr) {
-		// The applier reads the native detail-cell handoff and the composed
-		// surface textures through this wired owner (never a parent probe).
-		dispatcher_->set_terrain(terrain_);
-		// The detail sway phase reads the weather oscillator's ring slot 0
-		// (retail g_EnvWaveOscRing[0] in Foliage_SetupVertexShaderConstants).
-		dispatcher_->set_weather(weather_);
-	}
-	// The two shadow nodes live in game_world.tscn (after Celestial) like the
-	// other env presenters, absent from a code-built world; the environment
-	// node is wired here (no NodePath property).
-	sun_shadow_ = Object::cast_to<SunShadow>(get_node_or_null(NodePath("SunShadow")));
-	if (sun_shadow_ != nullptr) {
-		sun_shadow_->set_environment_node(env_);
-	}
-	// The render-slot entity ground shadows: the per-slot silhouette capture
-	// device + the terrain drape publisher (retail's per-entity RT pipeline --
-	// engine/runtime/renderer/render_slot_shadow.h carries the witness map).
-	slot_shadow_ = Object::cast_to<SlotShadow>(get_node_or_null(NodePath("SlotShadow")));
-	if (slot_shadow_ != nullptr) {
-		// The highest selectable retail profile is SHADOWQUALITY=3. Detail 4 is
-		// an internal oversample tier (1024px slot 0 and all slots every frame),
-		// not the shipped maximum; profile 3 uses 512px captures and retail's
-		// half-rate stagger for non-player slots.
-		slot_shadow_->set_shadow_detail(3);
-		slot_shadow_->set_environment_node(env_);
 	}
 	// The retained water renderer starts dormant until a successful load
 	// chooses its runtime mode. In particular, do not let an authored scene
@@ -186,6 +161,16 @@ int GameWorld::object_detail_fresh_profile() {
 
 int GameWorld::clamp_object_detail(int p_level) {
 	return opennova::renderer::clamp_object_lod_detail(p_level);
+}
+
+Array GameWorld::get_scene_rows() {
+	return WorldScene::describe_rows();
+}
+
+void GameWorld::build_scene_rows(Node *p_parent, bool p_held_globals) {
+	if (p_parent != nullptr) {
+		(void)WorldScene::create(*p_parent, WorldScene::all_rows(), p_held_globals);
+	}
 }
 
 int GameWorld::texfilter_level_fresh_profile() {
@@ -785,6 +770,10 @@ void GameWorld::_bind_methods() {
 			&GameWorld::object_detail_fresh_profile);
 	ClassDB::bind_static_method("GameWorld", D_METHOD("clamp_object_detail", "level"),
 			&GameWorld::clamp_object_detail);
+	ClassDB::bind_static_method(
+			"GameWorld", D_METHOD("get_scene_rows"), &GameWorld::get_scene_rows);
+	ClassDB::bind_static_method("GameWorld", D_METHOD("build_scene_rows", "parent", "held_globals"),
+			&GameWorld::build_scene_rows);
 	ClassDB::bind_method(D_METHOD("set_texfilter_level", "level"), &GameWorld::set_texfilter_level);
 	ClassDB::bind_method(D_METHOD("get_texfilter_level"), &GameWorld::get_texfilter_level);
 	ClassDB::bind_method(D_METHOD("get_session_texfilter_level"),
