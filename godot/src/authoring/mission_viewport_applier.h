@@ -290,6 +290,7 @@ private:
 	void note_missing_(int layer, const String &name);
 	// `carried`: the units of a terrain load or build in flight under the key that stands (m6).
 	void plan_(Build &build, const opennova::editor::MissionViewport &mission, std::vector<Unit> carried);
+	std::vector<Unit> model_units_(const std::vector<const opennova::editor::MissionEntityMark *> &entities);
 	// One unit run, its reads given to its layer: false when the build failed (`failure` says why).
 	bool run_(Build &build, const Unit &unit, const opennova::editor::ViewportModel &model, std::string &failure);
 	void run_environment_(const opennova::editor::MissionScene &scene);

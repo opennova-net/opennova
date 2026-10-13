@@ -379,6 +379,22 @@ ObjectModel *MissionViewportApplier::model_of_(const Placed &placed) {
 
 // --- the build -----------------------------------------------------------------------------------
 
+std::vector<MissionViewportApplier::Unit> MissionViewportApplier::model_units_(
+		const std::vector<const MissionEntityMark *> &entities) {
+	// Each graphic the entities name, once, with the items that draw it (editor::mission_models_to_warm: a marker
+	// none), a graphic warmed already left out.
+	std::vector<Unit> units;
+	for (opennova::editor::MissionWarmModel &model : opennova::editor::mission_models_to_warm(
+				 entities, [this](int64_t item) { return opennova::to_std(graphic_of_(item)); },
+				 [this](const std::string &graphic) { return warm_.count(graphic) != 0; })) {
+		Unit unit{ Unit::Kind::Model };
+		unit.graphic = opennova::to_gd(model.graphic);
+		unit.items = std::move(model.items);
+		units.push_back(std::move(unit));
+	}
+	return units;
+}
+
 void MissionViewportApplier::plan_(Build &build, const MissionViewport &mission, std::vector<Unit> carried) {
 	const MissionScene &scene = mission.scene();
 	const MissionSceneHeader &header = scene.header();
@@ -436,19 +452,15 @@ void MissionViewportApplier::plan_(Build &build, const MissionViewport &mission,
 	}
 	// The entities: placed whole when none are placed (or a placement was cut short); else the rows
 	// added since, or given another item, group or attributes, lifted (keys are rows), the lifted set
-	// folded back into a whole placement past kLiftedMost.
-	bool place = need_items || !placed_;
-	std::vector<NodeId> adds;
-	if (!place) {
-		for (const MissionEntityMark &entity : scene.entities()) {
-			const auto found = entities_.find(entity.row);
-			if (found == entities_.end() || !places_alike_(found->second, entity)) adds.push_back(entity.row);
-		}
-		size_t lifted = adds.size();
-		for (const NodeId row : lifted_)
-			if (std::find(adds.begin(), adds.end(), row) == adds.end()) ++lifted;
-		place = lifted > kLiftedMost;
-	}
+	// folded back into a whole placement past kLiftedMost (editor::mission_place_or_lift).
+	const opennova::editor::MissionPlacePlan plan = opennova::editor::mission_place_or_lift(scene.entities(),
+			need_items || !placed_,
+			[this](const MissionEntityMark &entity) {
+				const auto found = entities_.find(entity.row);
+				return found != entities_.end() && places_alike_(found->second, entity);
+			},
+			lifted_, kLiftedMost);
+	const bool place = plan.place;
 	build.place = place;
 	if (need_items) {
 		// The item table read first; the graphics it names are planned as it is read.
@@ -457,35 +469,20 @@ void MissionViewportApplier::plan_(Build &build, const MissionViewport &mission,
 	} else {
 		// The graphics the entities name, each warmed once: every one for a placement, the adds' for a
 		// lift.
-		std::vector<Unit> models;
-		const auto want = [&](const MissionEntityMark &entity) {
-			// A marker draws nothing (the placement places none).
-			if (entity.pool == MissionPool::Marker) return;
-			const String graphic = graphic_of_(entity.item);
-			if (graphic.is_empty() || warm_.count(opennova::to_std(graphic))) return;
-			auto unit = std::find_if(models.begin(), models.end(), [&](const Unit &u) { return u.graphic == graphic; });
-			if (unit == models.end()) {
-				Unit model{ Unit::Kind::Model };
-				model.graphic = graphic;
-				models.push_back(model);
-				unit = models.end() - 1;
-			}
-			if (std::find(unit->items.begin(), unit->items.end(), entity.item) == unit->items.end())
-				unit->items.push_back(entity.item);
-		};
+		std::vector<const MissionEntityMark *> named;
 		if (place) {
-			for (const MissionEntityMark &entity : scene.entities()) want(entity);
+			for (const MissionEntityMark &entity : scene.entities()) named.push_back(&entity);
 		} else {
-			for (const NodeId row : adds)
-				if (const MissionEntityMark *entity = scene.entity(row)) want(*entity);
+			for (const NodeId row : plan.adds) named.push_back(scene.entity(row));
 		}
+		const std::vector<Unit> models = model_units_(named);
 		build.units.insert(build.units.end(), models.begin(), models.end());
 	}
 	if (place) {
 		build.units.push_back(Unit{ Unit::Kind::Place });
 		build.units.push_back(Unit{ Unit::Kind::Shadows });
 	} else {
-		build.adds = std::move(adds);
+		build.adds = plan.adds;
 		for (size_t first = 0; first < build.adds.size(); first += kLiftPerUnit) {
 			Unit unit{ Unit::Kind::Lift };
 			unit.first = first;
@@ -561,21 +558,9 @@ bool MissionViewportApplier::run_(Build &build, const Unit &unit, const opennova
 		if (placer_->get_item_db().is_valid()) {
 			// The item table read: the graphics the entities name, now that it names them, before the
 			// placement.
-			std::vector<Unit> models;
-			for (const MissionEntityMark &entity : scene.entities()) {
-				if (entity.pool == MissionPool::Marker) continue;
-				const String graphic = graphic_of_(entity.item);
-				if (graphic.is_empty() || warm_.count(opennova::to_std(graphic))) continue;
-				auto found = std::find_if(models.begin(), models.end(), [&](const Unit &u) { return u.graphic == graphic; });
-				if (found == models.end()) {
-					Unit model{ Unit::Kind::Model };
-					model.graphic = graphic;
-					models.push_back(model);
-					found = models.end() - 1;
-				}
-				if (std::find(found->items.begin(), found->items.end(), entity.item) == found->items.end())
-					found->items.push_back(entity.item);
-			}
+			std::vector<const MissionEntityMark *> named;
+			for (const MissionEntityMark &entity : scene.entities()) named.push_back(&entity);
+			const std::vector<Unit> models = model_units_(named);
 			build.units.insert(build.units.begin() + std::ptrdiff_t(build.next), models.begin(), models.end());
 		}
 		break;

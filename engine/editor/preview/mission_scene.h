@@ -58,21 +58,21 @@ inline bool mission_entity_places_alike(const MissionEntityMark &a, const Missio
 	return a.item == b.item && a.group == b.group && a.attributes == b.attributes;
 }
 
-// The models a mission view's placement warms before it places (ADR 0046 DI-31; STAGED, NOT WIRED: the live owner is
-// godot/src/authoring/mission_viewport_applier.cpp's plan and its Items unit, which keep their copies until the 3D
-// appliers' S26 restructure moves them onto this): each graphic `graphic_of` names for `entities` (a marker none: the
-// placement places none), once, in the order first named, with the items that draw it; a graphic `warm` holds
-// already, and an empty one, left out.
+// The models a mission view's placement warms before it places (ADR 0046 DI-31; the mission
+// device's plan and its Items unit): each graphic `graphic_of` names for `entities` (a marker none:
+// the placement places none; a null entry none), once, in the order first named, with the items
+// that draw it; a graphic `warm` holds already, and an empty one, left out.
 struct MissionWarmModel {
 	std::string graphic;
 	std::vector<int64_t> items;
 };
 std::vector<MissionWarmModel> mission_models_to_warm(const std::vector<const MissionEntityMark *> &entities,
 		const std::function<std::string(int64_t item)> &graphic_of, const std::function<bool(const std::string &)> &warm);
-// Whether a mission view places its entities whole or lifts the rows that moved (DI-31, E14; staged as above): whole
-// where `whole` (none placed yet, or the item table read again); else the rows added since or given another item,
-// group or attributes (`placed_alike` false) are lifted, the lifted set (those and `lifted`, the rows lifted before)
-// folded back into a whole placement past `most`.
+// Whether a mission view places its entities whole or lifts the rows that moved (DI-31, E14; the
+// device's plan): whole where `whole` (none placed yet, or the item table read again); else the
+// rows added since or given another item, group or attributes (`placed_alike` false) are lifted,
+// the lifted set (those and `lifted`, the rows lifted before) folded back into a whole placement
+// past `most`.
 struct MissionPlacePlan {
 	bool place = true;
 	std::vector<NodeId> adds;
