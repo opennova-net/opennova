@@ -2,19 +2,18 @@
 
 #include <iterator>
 
-#include <editor/assets/project_asset_source.h>
 #include <editor/model/document.h>
 #include <editor/model/document_base.h>
 #include <editor/preview/mission_ground_facts.h>
-#include <editor/preview/mission_source.h>
+#include <editor/preview/mission_viewport.h>
 #include <editor/preview/terrain_brush_spaces.h>
-#include <runtime/mission/mission_sidecars.h>
+#include <editor/preview/terrain_viewport.h>
+#include <editor/preview/viewports.h>
 #include <editor/project/project_files.h>
 #include <editor/session/document_set.h>
 #include <editor/session/session_core.h>
 #include <editor/session/terrain_family.h>
 #include <editor/session/terrain_tools_parts.h>
-#include <editor/session/terrain_uses.h>
 
 namespace opennova::editor {
 
@@ -72,56 +71,39 @@ JsonValue answer_family(const TerrainQueryView &query, std::string &error) {
 	return out;
 }
 
+// The ground the view of the document reads now (S25, the painting feedback): its Main viewport's, which an open mission
+// or terrain always has (Viewports::track): the mission's 3D view, the terrain viewport. Followed first, so it holds
+// every stroke served since, patched in place as the view's stroke follow patches it, and read whole where the files
+// moved (an imported terrain's open sources laid over it each time: lay_open_sources), unsaved paint among them.
+const MissionGround *view_ground(const TerrainQueryView &query) {
+	SessionCore &core = query.context.core;
+	const SessionView &view = core.view();
+	const std::string &path = query.view.path();
+	const ViewportKind kind = query.view.kind() == AssetKind::Mission ? ViewportKind::Mission : ViewportKind::Terrain;
+	std::string refused;
+	ViewportModel *model = core.viewports().resolve(view, path, kind, refused);
+	if (const auto *mission = dynamic_cast<const MissionViewport *>(model)) return &mission->followed_ground(view);
+	if (const auto *terrain = dynamic_cast<const TerrainViewport *>(model)) return &terrain->followed_ground(view);
+	return nullptr;
+}
+
 // sample: the ground at (x, y) as the game reads it for the view (DI-07's facts: its height, its surface class, its
-// foliage code, a tile there), over the files the view's mission reads (a terrain under no mission: its own).
+// foliage code, a tile there), over the files the view's mission reads (a terrain under no mission: its own), as the
+// view's own ground holds them now (view_ground), unsaved edits among them.
 JsonValue answer_sample(const TerrainQueryView &query, std::string &error) {
 	if (!query.args.has("x") || !query.args.has("y")) {
 		error = "terrain: sample takes the point, x and y (mission metres).";
 		return JsonValue();
 	}
-	const SessionView &view = query.context.core.view();
-	MissionSceneHeader header;
-	std::string mission;
-	if (const Document *records = records_of(query.view); records && query.view.kind() == AssetKind::Mission) {
-		const std::unique_ptr<MissionSceneSource> source = mission_scene_source(*records);
-		if (!source || !source->header(header)) {
-			error = "terrain: " + basename_of(query.view.path()) + " has no header to read its terrain from.";
-			return JsonValue();
-		}
-		mission = mission::mission_base_name(query.view.path());
-	} else {
-		const std::string name = basename_of(query.view.path());
-		header.terrain = name.substr(0, name.rfind('.'));
-		// Under the mission its viewport draws it with (the brush's family's): that mission's environment, tile set and
-		// .til, as TerrainViewport reads them.
-		TerrainFamily family;
-		if (resolve_terrain_family(view, query.view, family) && !family.mission.empty())
-			for (const TerrainMissionUse &use : terrain_uses(view, query.view.path()).missions)
-				if (use.mission == family.mission) {
-					header.environment = use.environment;
-					header.tile_set = use.tile_set;
-					header.start_time = use.start_time;
-					header.minutes_per_day = use.minutes_per_day;
-					header.attrib_flags = use.attrib_flags;
-					header.water_override = use.water_override;
-					header.fog_override = use.fog_override;
-					header.water_murk = use.water_murk;
-					for (int i = 0; i < 3; ++i) {
-						header.fog_color[i] = use.fog_color[i];
-						header.water_color[i] = use.water_color[i];
-					}
-					mission = use.name;
-				}
-	}
-	MissionGround ground;
-	ground.follow(view.findings.assets, view.findings.assets ? view.findings.assets->generation() : 0, header, mission);
-	if (!ground.terrain()) {
-		error = "terrain: no terrain reads for " + basename_of(query.view.path()) + (ground.error().empty() ? "" : ": " + ground.error()) + ".";
+	const MissionGround *ground = view_ground(query);
+	if (!ground || !ground->terrain()) {
+		const std::string why = ground ? ground->error() : std::string("its view does not read");
+		error = "terrain: no terrain reads for " + basename_of(query.view.path()) + (why.empty() ? "" : ": " + why) + ".";
 		return JsonValue();
 	}
 	const TerrainPoint at{query.args.number("x"), query.args.number("y")};
 	double height = 0.0;
-	const bool on = mission_ground_height(ground, at, height);
+	const bool on = mission_ground_height(*ground, at, height);
 	JsonValue out = JsonValue::make_object();
 	out.set("path", io::json_string(query.view.path()));
 	out.set("at", [&] {
@@ -131,7 +113,7 @@ JsonValue answer_sample(const TerrainQueryView &query, std::string &error) {
 		return point;
 	}());
 	out.set("height", on ? io::json_number(height) : JsonValue::make_null());
-	out.set("ground", mission_ground_to_json(ground.terrain_at(at.x, at.y, height)));
+	out.set("ground", mission_ground_to_json(ground->terrain_at(at.x, at.y, height)));
 	return out;
 }
 

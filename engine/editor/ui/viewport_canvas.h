@@ -70,13 +70,30 @@ public:
 	// After picture(): a line over the picture's top left corner (S13 V6: how far its device's build
 	// is while the last picture shows, or why the build failed).
 	void badge(const std::string &text);
-	// After picture(): a legend over the picture's bottom left corner (DI-29, a ground overlay's): its title,
-	// then a row a swatch and its line.
+	// After picture(): a legend in a panel over the picture's bottom left corner (DI-29, a ground overlay's; S25, the
+	// painting feedback: never more than a third of the picture either way, its rows scrolled within it). Its header a
+	// toggle and the title, the title's tip `tip`; open, its rows in as many columns as its width holds, each a swatch,
+	// its key and a short name, the row's `tip` its words, a `marked` row outlined (the brush's value: scrolled into sight
+	// as it comes to be the marked one, the person's scroll kept after), and with no row
+	// `empty`'s words. A child window of its own (the canvas's surface takes no press under it), leaving the canvas's
+	// layout as it found it. True when its toggle was pressed: the caller folds or opens it (the viewport's option).
 	struct LegendRow {
 		uint8_t rgb[3] = {};
-		std::string text;
+		std::string key;
+		std::string name;
+		std::string tip;
+		bool marked = false;
 	};
-	void legend(const std::string &title, const std::vector<LegendRow> &rows);
+	struct Legend {
+		std::string title;
+		std::string tip;
+		std::vector<LegendRow> rows;
+		std::string empty;
+		bool open = true;
+	};
+	// The share of the picture's width and height the panel takes at most.
+	static constexpr float kLegendShare = 1.0f / 3.0f;
+	bool legend(const Legend &legend);
 	// The right button clicked on the canvas this frame (not while it pans). On a picture that fills
 	// the canvas, whose right button is its kind's (a look), a click is the button let go having
 	// travelled less than a drag does.
@@ -108,6 +125,7 @@ private:
 	CanvasPoint surface_min_, surface_max_; // the canvas's surface on the screen (the shapes' clip)
 	CanvasInput input_;
 	PreviewBackdrop backdrop_ = preview_backdrop(PreviewBackground::Dark);
+	std::string legend_marked_; // the legend's row last scrolled into sight as the marked one (its key)
 };
 
 } // namespace opennova::editor

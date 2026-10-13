@@ -16,6 +16,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
+#include <editor/ui/overlay_legend.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/viewport_canvas.h>
 #include <editor/ui/workspace.h>
@@ -29,22 +30,6 @@ using io::JsonValue;
 
 void set_options(Workspace &workspace, const TerrainViewport &model, JsonValue options) {
 	workspace.request(request::set_viewport(model.path(), viewport_change(ViewportKind::Terrain, "options", std::move(options))));
-}
-
-void legend(ViewportCanvas &ui, const TerrainViewport &model) {
-	const MissionOverlayImage &overlay = model.overlay();
-	std::vector<ViewportCanvas::LegendRow> rows;
-	for (const MissionOverlayRow &row : overlay.legend) {
-		ViewportCanvas::LegendRow line;
-		std::copy(std::begin(row.rgb), std::end(row.rgb), line.rgb);
-		char share[16] = "";
-		if (row.share > 0.0) std::snprintf(share, sizeof(share), " (%.1f%%)", row.share * 100.0);
-		line.text = row.key + ": " + ui_kit::fit(row.words, ImGui::GetFontSize() * 30.0f) + share;
-		rows.push_back(std::move(line));
-	}
-	std::string title = overlay.title;
-	if (!overlay.words.empty()) title += (title.empty() ? "" : "\n") + overlay.words;
-	ui.legend(title, rows);
 }
 
 } // namespace
@@ -150,7 +135,10 @@ void TerrainViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 	const float under = line + (model.missing().empty() ? 0.0f : line);
 	canvas(workspace, viewport, context, std::max(48.0f, ImGui::GetContentRegionAvail().y - under),
 	       [&](const CanvasInput &in) {
-		       if (options.overlay != MissionGroundOverlay::None) legend(canvas_ui(), model);
+		       // The ground overlay's legend over the picture's corner (DI-29; S25: a compact panel, the brush's value
+		       // outlined).
+		       draw_overlay_legend(workspace, canvas_ui(), model.path(), ViewportKind::Terrain, model.overlay(),
+		                           model.ground().foliage_defs(), options.legend);
 		       // S25: the terrain brush's own line while it is live.
 		       const auto *brush = dynamic_cast<const TerrainCanvas *>(half());
 		       brush_hint_ = brush ? brush->hint(context, in) : std::string();

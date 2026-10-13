@@ -73,6 +73,9 @@ struct MissionViewportOptions {
 	float turn = 15.0f;
 	std::string palette;
 	MissionGroundOverlay overlay = MissionGroundOverlay::None;
+	// The overlay's legend open over the picture's corner, or folded to its title (S25, the painting feedback): the
+	// canvas's alone.
+	bool legend = true;
 	std::string ammo;
 	MissionListenOptions listen;
 };
@@ -87,7 +90,7 @@ inline bool operator!=(const MissionViewportOptions &a, const MissionViewportOpt
 // The wire form: {show: {terrain, sky, water, models, shadows, foliage, effects, lights}, marks: {items,
 // buildings, markers, organics, areas, paths, labels, links}, color_by (team or group), mark_range, stick, time
 // (null: the mission's start time), tool (its token), item, path, snap, turn, palette, overlay (none, surfaces or
-// foliage), ammo, listen {on, volume}}.
+// foliage), legend (the overlay's legend open), ammo, listen {on, volume}}.
 io::JsonValue mission_options_to_json(const MissionViewportOptions &options);
 // A SetViewport's options member set over `held`: every member checked before any applies; false,
 // nothing changed, with `error` naming the member and what it takes.

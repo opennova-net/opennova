@@ -126,6 +126,9 @@ public:
 	// The files `names` names (as it read them, in any case) take the stamps `files` gives them now (S25: a stroke's file
 	// patched in place), so the next follow does not read them again.
 	void restamp(const FileSource &files, const std::vector<std::string> &names);
+	// The next follow reads the files whole again, their stamps standing or not (S25, the painting feedback: an imported
+	// terrain's open source read again or closed, whose paint the ground holds over an import output that never moved).
+	void read_again() { read_again_ = true; }
 	// S25: what a stroke changed of a file it read, patched in place from the open document that holds it (a region of
 	// the heights: the live atlas there; a map's texels), never reading the files again per dab; false where it cannot
 	// (the caller reads them again: follow). `stands_for` names the map an import makes from the document (an imported
@@ -178,6 +181,7 @@ private:
 	void foot_(MissionGroundFacts &facts, bool on_record) const;
 
 	bool read_once_ = false;
+	bool read_again_ = false;
 	Key key_;
 	uint64_t generation_ = 0;
 	FileStamps stamps_;
