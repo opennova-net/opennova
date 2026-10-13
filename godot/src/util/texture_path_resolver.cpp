@@ -19,7 +19,6 @@
 
 #include <algorithm>
 #include <cstring>
-#include <initializer_list>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -143,35 +142,6 @@ godot::Ref<godot::Image> read_tga(const godot::PackedByteArray &bytes, tga::TgaR
 	return godot::Image::create_from_data(width, height, false, godot::Image::FORMAT_RGBA8, pixels);
 }
 
-bool starts_with(const godot::PackedByteArray &bytes, std::initializer_list<uint8_t> magic) {
-	if (static_cast<size_t>(bytes.size()) < magic.size()) {
-		return false;
-	}
-	size_t i = 0;
-	for (const uint8_t byte : magic) {
-		if (bytes[static_cast<int64_t>(i++)] != byte) {
-			return false;
-		}
-	}
-	return true;
-}
-
-// Whether the bytes carry a TGA header D3DX's TGA codec would take: a colour-map type
-// of 0 or 1, one of the image types it reads and a pixel depth it knows. A check before
-// Godot's decoder so a file that is no TGA fails quietly, as the codec does.
-bool looks_like_tga(const godot::PackedByteArray &bytes) {
-	if (bytes.size() < 18) {
-		return false;
-	}
-	const uint8_t map_type = bytes[1];
-	const uint8_t image_type = bytes[2];
-	const uint8_t depth = bytes[16];
-	const bool type_ok = image_type == 1 || image_type == 2 || image_type == 3 ||
-			image_type == 9 || image_type == 10 || image_type == 11;
-	const bool depth_ok = depth == 8 || depth == 15 || depth == 16 || depth == 24 || depth == 32;
-	return map_type <= 1 && type_ok && depth_ok;
-}
-
 godot::PackedByteArray packed_bytes(const std::vector<uint8_t> &bytes) {
 	godot::PackedByteArray packed;
 	packed.resize(static_cast<int64_t>(bytes.size()));
@@ -181,16 +151,18 @@ godot::PackedByteArray packed_bytes(const std::vector<uint8_t> &bytes) {
 	return packed;
 }
 
-// The "DDS" reader: D3DX decodes the bytes by their content, its codecs tried in turn
-// (renderer::dds_reader_codec_order). Godot decodes DDS, JPEG, PNG and TGA (its TGA
-// decoder honours the origin bit as D3DX's codec does) and the BMP and DIB pixels,
-// each BMP re-headed with the pixel offset D3DX's BMP core reads; the PPM, PFM and
-// HDR codecs are the engine's ports (renderer/d3dx_image_codecs.h).
+// The "DDS" reader: D3DX decodes the bytes by their content, each codec whose header
+// test passes tried in turn, the first that decodes wins (the engine's
+// renderer::dds_read_by_content walks the order and the tests). Godot decodes DDS,
+// JPEG, PNG and TGA (its TGA decoder honours the origin bit as D3DX's codec does) and
+// the BMP and DIB pixels, each BMP re-headed with the pixel offset D3DX's BMP core
+// reads; the PPM, PFM and HDR codecs are the engine's ports
+// (renderer/d3dx_image_codecs.h).
 godot::Ref<godot::Image> read_dds_by_content(const godot::PackedByteArray &bytes) {
 	const uint8_t *data = bytes.ptr();
 	const size_t size = static_cast<size_t>(bytes.size());
-	for (const renderer::DdsCodec codec : renderer::dds_reader_codec_order()) {
-		godot::Ref<godot::Image> image;
+	godot::Ref<godot::Image> image;
+	const auto decode = [&](renderer::DdsCodec codec) {
 		image.instantiate();
 		godot::Error err = godot::ERR_FILE_UNRECOGNIZED;
 		std::string error;
@@ -237,25 +209,21 @@ godot::Ref<godot::Image> read_dds_by_content(const godot::PackedByteArray &bytes
 				break;
 			}
 			case renderer::DdsCodec::Dds:
-				if (godot::bytes_look_like_dds(bytes)) err = image->load_dds_from_buffer(bytes);
+				err = image->load_dds_from_buffer(bytes);
 				break;
 			case renderer::DdsCodec::Jpeg:
-				if (starts_with(bytes, { 0xFF, 0xD8, 0xFF })) err = image->load_jpg_from_buffer(bytes);
+				err = image->load_jpg_from_buffer(bytes);
 				break;
 			case renderer::DdsCodec::Png:
-				if (starts_with(bytes, { 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A })) {
-					err = image->load_png_from_buffer(bytes);
-				}
+				err = image->load_png_from_buffer(bytes);
 				break;
 			case renderer::DdsCodec::Tga:
-				if (looks_like_tga(bytes)) err = image->load_tga_from_buffer(bytes);
+				err = image->load_tga_from_buffer(bytes);
 				break;
 		}
-		if (err == godot::OK && !image->is_empty()) {
-			return image;
-		}
-	}
-	return godot::Ref<godot::Image>();
+		return err == godot::OK && image.is_valid() && !image->is_empty();
+	};
+	return renderer::dds_read_by_content(data, size, decode) ? image : godot::Ref<godot::Image>();
 }
 
 // The reader alone: RGBA8 and null when the bytes do not decode. Only a DDS-reader

@@ -1,4 +1,5 @@
 #include <runtime/renderer/material_texture.h>
+#include <runtime/renderer/texture_load_rules.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -6,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <optional>
 #include <vector>
 
 #include <base/io/os_path.h>
@@ -174,12 +176,14 @@ int main() {
 				material_texture_source("brick.tga", 4, {}, {}).reader == Reader::Tga,
 				"an empty test answers false");
 	}
-	// What the DDS reader decodes a file as: D3DX's loader takes the first
-	// format of its order whose test the bytes pass, of those the port decodes.
+	// The DDS reader's content read: each codec of D3DX's order whose header test the bytes
+	// pass goes to the decode, the first that decodes wins.
 	// [orig: D3DXTex::CImage::Load @0x6DF1DC, the order @0x6DF212..0x6DF242]
 	{
-		using Format = DdsReaderFormat;
-		const auto format = [](std::vector<uint8_t> bytes) { return dds_reader_format(bytes.data(), bytes.size()); };
+		using Codec = DdsCodec;
+		const auto accepts = [](Codec codec, const std::vector<uint8_t> &bytes) {
+			return dds_codec_header_accepts(codec, bytes.data(), bytes.size());
+		};
 		const auto tga = [](uint8_t map_type, uint8_t image_type, uint8_t depth, uint16_t side) {
 			std::vector<uint8_t> bytes(18 + 4 * 4 * 4, 0);
 			bytes[1] = map_type;
@@ -191,26 +195,60 @@ int main() {
 		};
 		std::vector<uint8_t> dds(4 + 124, 0);
 		dds[0] = 'D', dds[1] = 'D', dds[2] = 'S', dds[3] = ' ';
-		expect(format(dds) == Format::Dds, "\"DDS \" and its 124-byte header");
-		expect(format(std::vector<uint8_t>(dds.begin(), dds.begin() + 20)) == Format::None, "a DDS cut short");
-		expect(format(tga(0, 2, 32, 4)) == Format::Tga && format(tga(0, 3, 8, 4)) == Format::Tga &&
-				format(tga(0, 10, 24, 4)) == Format::Tga,
+		expect(accepts(Codec::Dds, dds), "\"DDS \" and its 124-byte header");
+		expect(!accepts(Codec::Dds, std::vector<uint8_t>(dds.begin(), dds.begin() + 20)),
+				"a DDS cut short");
+		expect(accepts(Codec::Tga, tga(0, 2, 32, 4)) && accepts(Codec::Tga, tga(0, 3, 8, 4)) &&
+						accepts(Codec::Tga, tga(0, 10, 24, 4)),
 				"true-colour, grey and run-length TGA headers");
-		expect(format(tga(2, 2, 32, 4)) == Format::None && format(tga(0, 0, 32, 4)) == Format::None &&
-				format(tga(0, 2, 32, 0)) == Format::None && format(tga(0, 1, 8, 4)) == Format::None &&
-				format(tga(0, 3, 32, 4)) == Format::None && format(tga(0, 2, 12, 4)) == Format::None,
-				"D3DX's TGA test: the colour-map type, the image type, the sides, a mapped image's map, the depth");
-		expect(format({0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0}) == Format::Png, "the PNG signature");
-		expect(format({0xFF, 0xD8, 0xFF, 0xE0}) == Format::Jpeg, "the JPEG SOI marker");
+		expect(!accepts(Codec::Tga, tga(2, 2, 32, 4)) && !accepts(Codec::Tga, tga(0, 0, 32, 4)) &&
+						!accepts(Codec::Tga, tga(0, 2, 32, 0)) &&
+						!accepts(Codec::Tga, tga(0, 1, 8, 4)) &&
+						!accepts(Codec::Tga, tga(0, 3, 32, 4)) &&
+						!accepts(Codec::Tga, tga(0, 2, 12, 4)),
+				"D3DX's TGA test: the colour-map type, the image type, the sides, a mapped image's "
+				"map, the depth");
+		expect(accepts(Codec::Png, { 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0 }),
+				"the PNG signature");
+		expect(accepts(Codec::Jpeg, { 0xFF, 0xD8, 0xFF, 0xE0 }) &&
+						accepts(Codec::Jpeg, { 0xFF, 0xD8 }),
+				"the JPEG SOI marker alone");
 		std::vector<uint8_t> bmp(14, 0);
 		bmp[0] = 'B', bmp[1] = 'M', bmp[2] = 14;
-		expect(format(bmp) == Format::Bmp, "\"BM\" with a file size that fits");
+		expect(accepts(Codec::Bmp, bmp), "\"BM\" with a file size that fits");
 		bmp[2] = 15;
-		expect(format(bmp) == Format::None, "a BMP's file size past the bytes");
-		const std::string ppm = "P6\n4 4\n255\n";
-		expect(format(std::vector<uint8_t>(ppm.begin(), ppm.end())) == Format::None &&
-				dds_reader_format(nullptr, 0) == Format::None,
-				"a PPM (decoded by D3DX, not the port) passes no later test");
+		expect(!accepts(Codec::Bmp, bmp), "a BMP's file size past the bytes");
+		expect(accepts(Codec::Ppm, bmp) && accepts(Codec::Pfm, bmp) && accepts(Codec::Hdr, bmp) &&
+						accepts(Codec::Dib, bmp) &&
+						!dds_codec_header_accepts(Codec::Dds, nullptr, 0),
+				"the PPM, PFM, HDR and DIB codecs test as they decode; no bytes, no codec");
+		// The walk: the codecs offered in D3DX's order, each past its header test, until one
+		// decodes.
+		const auto walk = [](const std::vector<uint8_t> &bytes, Codec decodes,
+								  std::vector<Codec> &offered) {
+			offered.clear();
+			return dds_read_by_content(bytes.data(), bytes.size(), [&](Codec codec) {
+				offered.push_back(codec);
+				return codec == decodes;
+			});
+		};
+		std::vector<Codec> offered;
+		std::optional<Codec> took = walk(tga(0, 2, 32, 4), Codec::Tga, offered);
+		expect(took == Codec::Tga &&
+						offered ==
+								std::vector<Codec>{
+										Codec::Ppm, Codec::Pfm, Codec::Hdr, Codec::Tga },
+				"a TGA under a .dds name: the codecs that test as they decode first, then the TGA");
+		took = walk(dds, Codec::Dds, offered);
+		expect(took == Codec::Dds && offered == std::vector<Codec>{ Codec::Ppm, Codec::Dds },
+				"a DDS: the PPM codec tries it first, then the DDS reader takes it");
+		took = walk(dds, Codec::Jpeg, offered);
+		expect(!took &&
+						offered ==
+								std::vector<Codec>{ Codec::Ppm, Codec::Dds, Codec::Pfm, Codec::Hdr,
+										Codec::Dib },
+				"no codec decodes: none, after every codec whose header passed");
+		expect(!dds_read_by_content(dds.data(), dds.size(), nullptr), "no decode, no codec");
 	}
 	// A row that loads only as a DDS sibling: a runtime 0/2/8 query no reader
 	// of the plain path decodes.
