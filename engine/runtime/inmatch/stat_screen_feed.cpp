@@ -63,8 +63,7 @@ std::vector<StatScreenColumn> stat_screen_columns(const EndRoundStats &board,
 }
 
 std::vector<StatScreenRow> stat_screen_rows(const EndRoundStats &board,
-		const std::vector<StatScreenPlayer> &players, bool show_disabled,
-		int local_slot) {
+		const std::vector<StatScreenPlayer> &players, bool show_disabled) {
 	// [orig: @0x5624a3..0x5626fa]
 	std::vector<StatScreenRow> out;
 	for (const StatScreenPlayer &p : players) {
@@ -107,7 +106,6 @@ std::vector<StatScreenRow> stat_screen_rows(const EndRoundStats &board,
 			}
 			sr.cells.push_back(cell);
 		}
-		sr.selected = local_slot >= 0 && p.slot == local_slot;
 		out.push_back(sr);
 	}
 	return out;
@@ -121,7 +119,8 @@ bool stat_screen_row_visible(int tab_index, uint8_t team) {
 }
 
 void fill_stat_results(menu::MenuRuntime &menu, int table,
-		const std::vector<StatScreenColumn> &columns, const std::vector<StatScreenRow> &rows) {
+		const std::vector<StatScreenColumn> &columns, const std::vector<StatScreenRow> &rows,
+		int local_slot) {
 	std::vector<menu::MenuTableColumn> set;
 	set.reserve(columns.size());
 	for (const StatScreenColumn &column : columns) {
@@ -139,30 +138,40 @@ void fill_stat_results(menu::MenuRuntime &menu, int table,
 	}
 	menu.table_clear_rows(table);
 	menu.table_set_columns(table, set);
-	int selected = -1;
 	for (const StatScreenRow &row : rows) {
-		// The slot's name and squad tag as the roster's bytes [orig: @0x562565 /
-		// @0x562585], then the formatted fields.
-		std::vector<std::string> cells{ row.name, row.squad };
-		cells.insert(cells.end(), row.cells.begin(), row.cells.end());
-		menu.table_add_row(table, cells);
-		const int index = menu.table_row_count(table) - 1;
+		// The slot's name and squad tag as the roster's bytes, the row appended
+		// with the slot's team as its column-0 value, the flags 0 [orig: the
+		// CTableWnd_AddRow call @0x562565, the team pushed @0x562550..0x56255a];
+		// the slot id as column 1's value [orig: the value call @0x562576, the
+		// byte +0x0C @0x56256a; the IDB's CEffectCompiler_HasErrors @0x6420f0, a
+		// misnomer: SetCellValue] beside the squad [orig: @0x562585], then the
+		// formatted fields [orig: CTableWnd_SetCellText @0x5626b1].
+		const int index = menu.table_insert_row(table, row.name, row.team, 0, -1);
+		menu.table_set_cell_value(table, index, 1, row.slot);
+		menu.table_set_cell_text(table, index, 1, row.squad);
 		// A team row takes its colour; any other keeps the table's (the feed's
 		// white) [orig: sub_640110 @0x5625a9].
-		if (row.color_argb != 0xFFFFFFFFu) menu.table_set_row_color(table, index, true, row.color_argb);
-		if (row.selected) selected = index;
+		if (row.color_argb != 0xFFFFFFFFu)
+			menu.table_set_row_color(table, index, true, row.color_argb);
+		for (size_t i = 0; i < row.cells.size(); ++i)
+			menu.table_set_cell_text(table, index, static_cast<int>(i) + 2, row.cells[i]);
 	}
 	// The sort: the first stat column, descending [orig: sub_63EC30(table, 2, 0)
-	// then CTableWnd_SortByColumn(table, 2) @0x5626e6..0x5626f9]. The game
-	// selects after it: the first row whose column-1 cell value (the slot, which
-	// the fill writes beside the squad @0x562576) is the local player entity's
-	// slot id (+0x154) [orig: the row walk @0x562700..0x562754, the compare
-	// @0x56271e..0x56272e, CTableWnd_SetRowSelected @0x562754]. Ours selects the
-	// feed's flagged row before the sort, which carries it, and writes no
-	// column-1 value (D-MNU-51).
-	if (selected >= 0) menu.table_select_row(table, selected, false);
+	// then CTableWnd_SortByColumn(table, 2) @0x5626e6..0x5626f9].
 	menu.table_set_column_ascending(table, kStatScreenSortColumn, kStatScreenSortAscending);
 	menu.table_sort_by_column(table, kStatScreenSortColumn);
+	// After it, the first row whose column-1 value (the slot) is the local
+	// player entity's slot id (+0x154) is selected, through the table's
+	// MULTISELECT rule; no match selects nothing [orig: the row walk
+	// @0x562700..0x562754 over CTableWnd_GetCellRecord(row, 1) @0x562715, the compare
+	// @0x56271e..0x56272e, CTableWnd_SetRowSelected @0x562754] (D-MNU-51).
+	const int count = menu.table_row_count(table);
+	for (int r = 0; r < count; ++r) {
+		if (menu.table_cell_value(table, r, 1) == local_slot) {
+			menu.table_set_row_selected(table, r, true);
+			break;
+		}
+	}
 }
 
 } // namespace opennova::inmatch
