@@ -1738,8 +1738,17 @@ Terrain::DebugMode Terrain::get_debug_mode() const { return debug_mode; }
 
 void Terrain::set_ground_overlay(const Ref<Image> &p_image, const Rect2 &p_rect, const Color &p_outside,
 		bool p_outside_on) {
-	ground_overlay_texture_.unref();
-	if (p_image.is_valid() && !p_image->is_empty()) ground_overlay_texture_ = ImageTexture::create_from_image(p_image);
+	// A picture of the size and format of the one shown takes its texture in place (the editor's paint updates it per
+	// stroke sample: no texture made again); another makes a new one.
+	const bool picture = p_image.is_valid() && !p_image->is_empty();
+	if (picture && ground_overlay_texture_.is_valid() && ground_overlay_texture_->get_width() == p_image->get_width() &&
+			ground_overlay_texture_->get_height() == p_image->get_height() &&
+			ground_overlay_texture_->get_format() == p_image->get_format() && !p_image->has_mipmaps()) {
+		ground_overlay_texture_->update(p_image);
+	} else {
+		ground_overlay_texture_.unref();
+		if (picture) ground_overlay_texture_ = ImageTexture::create_from_image(p_image);
+	}
 	const float span_x = p_rect.size.x > 0.0f ? p_rect.size.x : 1.0f;
 	const float span_z = p_rect.size.y > 0.0f ? p_rect.size.y : 1.0f;
 	// No picture: every point is past it.
