@@ -1386,6 +1386,7 @@ int main() {
 		const opennova::env::BmsEnvOverrides none;
 		const std::string trn = "water_height 21\r\n";
 		const std::string overcast = "water_height 40\r\n";
+		const std::string env = "water_height 30\r\n";
 		opennova::env::MissionEnvTexts texts;
 		texts.terrain = &trn;
 		texts.overcast = &overcast;
@@ -1393,22 +1394,32 @@ int main() {
 		ok &= expect(!opennova::env::load_mission_env(texts, skipped),
 				"no .env: the load skips its pass");
 		ResolvedWaterHeight resolved =
-				opennova::env::mission_water_rung(none, skipped.config, false, 10.5f, true);
+				opennova::env::mission_water_rung(none, skipped.config, 10.5f);
 		ok &= expect(resolved.rung == WaterRung::Environment && near(resolved.height, 20.0f),
 				"the .env skipped, overcast.def's line over the .trn's is the environment's rung");
+		texts.environment = &env;
+		opennova::env::MissionEnv read;
+		ok &= expect(opennova::env::load_mission_env(texts, read), "the .env read");
+		resolved = opennova::env::mission_water_rung(none, read.config, 10.5f);
+		ok &= expect(resolved.rung == WaterRung::Environment && near(resolved.height, 15.0f),
+				"the .env's line over overcast.def's");
+		texts.environment = nullptr;
 		texts.overcast = nullptr;
 		opennova::env::MissionEnv trn_only;
 		(void)opennova::env::load_mission_env(texts, trn_only);
-		resolved = opennova::env::mission_water_rung(none, trn_only.config, false, 10.5f, true);
+		resolved = opennova::env::mission_water_rung(none, trn_only.config, 10.5f);
 		ok &= expect(resolved.rung == WaterRung::Environment && near(resolved.height, 10.5f),
 				"the .trn's line alone: the same height as the terrain's");
 		const opennova::env::BmsEnvOverrides flagged =
 				opennova::env::bms_env_overrides_from_header(0x1, 0, 0, no_colour, no_colour, 0);
-		resolved = opennova::env::mission_water_rung(flagged, skipped.config, false, 10.5f, true);
+		resolved = opennova::env::mission_water_rung(flagged, skipped.config, 10.5f);
 		ok &= expect(resolved.rung == WaterRung::Mission && resolved.height == 0.0f,
 				"the header's flagged zero over every line");
 		const opennova::env::Config empty;
-		resolved = opennova::env::mission_water_rung(none, empty, false, 0.0f, true);
+		resolved = opennova::env::mission_water_rung(none, empty, 10.5f);
+		ok &= expect(resolved.rung == WaterRung::Terrain && near(resolved.height, 10.5f),
+				"a config with no line: OpenNova's terrain fallback (D-ENV-S26B2)");
+		resolved = opennova::env::mission_water_rung(none, empty, 0.0f);
 		ok &= expect(resolved.rung == WaterRung::None && resolved.height == 0.0f,
 				"no line and no terrain height: no plane, never a stale one");
 	}

@@ -57,22 +57,25 @@ ResolvedWaterHeight resolve_water_rung(const WaterHeightRungs &rungs,
 float resolve_water_height(const WaterHeightRungs &rungs,
 		const EnvironmentState *env, float current);
 
-// A mission's water plane as its load leaves it, with no plane before it: the
-// header's flagged override, else the environment's water_height line, else
-// the terrain's, else none (0) [orig: Game_LoadTerrainDuringConnect
-// @ 0x520710]. The environment's line is the one global every pass of the
-// time-of-day load writes after Environment_InitDefaults zeroed it [orig:
-// Environment_InitDefaults memset @ 0x57c01e over g_EnvWaterHeightFixed;
-// TimeOfDay_ParseProperty @ 0x57cb45..0x57cb6a, atol << 15]: the .trn's, then
-// overcast.def's, then the .env's; a .env that is not there returns before its
-// pass [orig: Environment_LoadTimeOfDayConfig @ 0x57dca3] and the earlier
-// passes' line stands. So `environment` is the config that load made
-// (env::load_mission_env_config) whether or not it read the .env
-// (`environment_loaded`), never left out for a .env that is not there. The
-// host boot, the editor's ground facts and its environment uses resolve it
-// here alike.
-ResolvedWaterHeight mission_water_rung(const BmsEnvOverrides &overrides, const Config &environment,
-		bool environment_loaded, float terrain_height, bool has_loaded_terrain);
+// A mission's water plane as its load leaves it, with no plane before it:
+// the header's flagged override [orig: Terrain_Init @ 0x60fcb1..0x60fcba,
+// which stores only a height its caller flags in bit 31, the header's], else
+// the environment's water_height line, else the terrain's, else none (0). The
+// environment's line is the one global every pass of the time-of-day load
+// writes after Environment_InitDefaults zeroed it [orig: Environment_InitDefaults
+// memset @ 0x57c01e over g_EnvWaterHeightFixed; TimeOfDay_ParseProperty
+// @ 0x57cb45..0x57cb6a, atol << 15]: the .trn's, then overcast.def's, then
+// the .env's; a .env that is not there returns before its pass [orig:
+// Environment_LoadTimeOfDayConfig @ 0x57dca3] and the earlier passes' line
+// stands. So `environment` is the config that load made
+// (env::load_mission_env_config) whether or not it read the .env. The terrain
+// rung is OpenNova's fallback, not retail's (the global has no terrain
+// writer; a .trn's water_height is a time-of-day line, already the
+// environment's): it serves a caller whose config never read the .trn
+// (D-ENV-S26B2). The host boot, the editor's ground facts and its environment
+// uses resolve it here alike.
+ResolvedWaterHeight mission_water_rung(
+		const BmsEnvOverrides &overrides, const Config &environment, float terrain_height);
 
 // One frame of strip-march/shader inputs. Defaults are the shader-uniform
 // stand-in values so owners without a loaded env still march strips.
