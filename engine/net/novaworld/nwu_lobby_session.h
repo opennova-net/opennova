@@ -53,6 +53,10 @@ public:
 		std::function<void(const std::string &)> on_fatal;
 		// Recoverable decode noise on the gate socket (a bad envelope or response).
 		std::function<void(const std::string &)> on_soft_error;
+		// The gate named no NWU address and its POST address and port are both set: the connect
+		// goes on with no NWU session (retail's NovaWorld menu then opens its web lobby, menu
+		// state 9). No session is created; match_facts().in_use stays false.
+		std::function<void()> on_sessionless;
 	};
 	struct Environment {
 		// The client index/key draws, the reconnect's fresh CK and the host role's AppId and
@@ -69,6 +73,15 @@ public:
 		//  @0x4d4913..0x4d493e]
 		int32_t max_packet_size = 0;
 	};
+	// The NovaWorld switches of the game's command line the gate response reads: the POST address
+	// (resolved with DNS on; one that does not resolve overrides nothing) and port (0 overrides
+	// nothing) that replace the gate's POSTIPADDRESS / POSTIPPORT (LaunchFlags).
+	// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - dword_B4C6B0 into dword_B5F490
+	//  @0x4CF54B..0x4CF554, dword_B4C6B4 into dword_B5F494 @0x4CF559..0x4CF562]
+	struct CommandLine {
+		std::string post_ip_address;
+		int32_t post_port_number = 0;
+	};
 	// What a match reads of this session: the gate named an NWU address (retail's dword_B5FD2C),
 	// and the session's flags word, hosting/playing word and mission-exit store (all 0 once the
 	// session is dropped). The first is the gate response's, so it outlives a closed session as
@@ -81,6 +94,9 @@ public:
 	};
 
 	NwuLobbySession(Hooks hooks, Environment env);
+
+	// The command line's switches (unset: none), read at each gate response.
+	void set_command_line(CommandLine command_line) { command_line_ = std::move(command_line); }
 
 	// Start over on the embedder's two bound sockets (non-owning; they outlive close()) and mint
 	// the ci/ck pair. The clock restarts at 0 with the first tick().
@@ -153,6 +169,8 @@ private:
 	uint32_t resolve_address(const std::string &host) const;
 	void send_one(const PeerAddr &to, const std::vector<uint8_t> &dg);
 	void poll_gate();
+	// The command line's POST address and port over the gate response's.
+	void apply_command_line_post();
 	void poll_session();
 	void send_gate_probe();
 	bool resolve(const std::string &host, uint16_t port, PeerAddr &out) const;
@@ -167,6 +185,7 @@ private:
 
 	Hooks hooks_;
 	Environment env_;
+	CommandLine command_line_;
 	IDatagramSocket *gate_socket_ = nullptr;
 	IDatagramSocket *session_socket_ = nullptr;
 	PeerAddr gate_peer_;
@@ -180,6 +199,7 @@ private:
 	std::vector<Target> targets_; // the enumerator's target list
 	PeerAddr nw_peer_;
 	GateResponse gate_response_;
+	bool in_use_ = false; // dword_B5FD2C
 	uint32_t clock_ms_ = 0;
 	// The gate worker: the probe re-sent every retry interval until the deadline.
 	uint32_t gate_started_ms_ = 0;

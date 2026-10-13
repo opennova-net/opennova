@@ -2,6 +2,7 @@
 
 #include "network/host_session_options.h"
 #include "network/novaworld_identity.h"
+#include "resource_index/launch_flags.h"
 #include "rtxt/rtxt_string_file.h"
 #include "util/data_format.h"
 #include "util/string_convert.h"
@@ -318,6 +319,12 @@ void NovaWorldClient::start() {
 	});
 	clock_accum_s_ = 0.0;
 	clock_ms_ = 0;
+	// The game's command line: its NovaWorld switches override the gate response.
+	const opennova::LaunchFlags flags = LaunchFlags::parsed();
+	opennova::NwuLobbySession::CommandLine command_line;
+	command_line.post_ip_address = flags.post_ip_address;
+	command_line.post_port_number = flags.post_port_number;
+	lobby_.set_command_line(command_line);
 	lobby_.open(*gate_socket_, demux.session());
 	// A session that ended in error or a disconnect may have left the hosting leg
 	// mid-request; the new session starts it idle (no statement: the old session is gone).
@@ -437,6 +444,13 @@ opennova::NwuLobbySession::Hooks NovaWorldClient::make_lobby_hooks() {
 	};
 	hooks.on_soft_error = [this](const std::string &message) {
 		emit_signal("error_occurred", opennova::cp1252_to_gd(message));
+	};
+	// A gate that names no NovaWorld session server sends retail's menu to its web lobby with
+	// no session; the shell's lobby rides the session, so it reports the gate instead.
+	hooks.on_sessionless = [this]() {
+		enter_state(STATE_ERROR,
+				String("The NovaWorld gate named no session server; its lobby without one is not "
+					   "supported."));
 	};
 	return hooks;
 }

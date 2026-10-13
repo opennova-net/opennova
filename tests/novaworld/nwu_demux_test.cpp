@@ -337,25 +337,71 @@ int main() {
 		lobby.close();
 	}
 	// A gate naming only addresses that resolve to none still starts the connection, which probes
-	// nothing; one naming no UDPNOVAWORLD at all ends ours (retail's sessionless path, D-NET-540).
+	// nothing, POST pair or not (the in-use word passes the POST test). D-NET-540: one naming no
+	// UDPNOVAWORLD needs the POST address and port: without either the gate fails (state -9, the
+	// menu's NWEC25), with both the connect goes on with no NWU session (on_sessionless, no
+	// session, the in-use word clear). The command line's POST pair stands in for the gate's.
+	// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - the in-use word @0x4CF525..0x4CF541,
+	//  the command line's POST pair @0x4CF54B..0x4CF562, the in-use test @0x4CF599..0x4CF5A0,
+	//  the address @0x4CF5A6, the port @0x4CF627, -9 @0x4CF6AC;
+	//  UI_ProcessLANSessionStateMachine @0x558DE0 - NWEC25 @0x5590FD]
 	{
-		for (const char *body : {"VAR \"UDPNOVAWORLD\" \"0.0.0.0:5\"\r\n",
-		                         "VAR \"LOBBYNAME\" \"jop_2_consumer\"\r\n"}) {
+		struct Case {
+			NwuLobbySession::CommandLine command_line;
+			bool session;
+			bool sessionless;
+			const char *fatal;
+		};
+		const NwuLobbySession::CommandLine none;
+		NwuLobbySession::CommandLine post_switches;
+		post_switches.post_ip_address = "10.1.2.3";
+		post_switches.post_port_number = 7000;
+		NwuLobbySession::CommandLine unresolved_post = post_switches;
+		unresolved_post.post_ip_address = "nowhere.example";
+		const std::string post_ip = "VAR \"POSTIPADDRESS\" \"192.168.0.5\"\r\n";
+		const std::string post_port = "VAR \"POSTIPPORT\" \"7598\"\r\n";
+		const std::string lobby_name = "VAR \"LOBBYNAME\" \"jop_2_consumer\"\r\n";
+		const std::string unresolved = "VAR \"UDPNOVAWORLD\" \"0.0.0.0:5\"\r\n";
+		const std::vector<std::pair<std::string, Case>> cases = {
+			{ unresolved, { none, true, false, nullptr } },
+			{ unresolved + post_ip + post_port, { none, true, false, nullptr } },
+			{ lobby_name, { none, false, false, "NWEC25" } },
+			{ lobby_name + post_ip, { none, false, false, "NWEC25" } },
+			{ lobby_name + post_port, { none, false, false, "NWEC25" } },
+			{ lobby_name + post_ip + post_port, { none, false, true, nullptr } },
+			{ lobby_name, { post_switches, false, true, nullptr } },
+			{ lobby_name + post_port, { unresolved_post, false, false, "NWEC25" } },
+		};
+		for (const auto &[body, want] : cases) {
 			MemorySocket gate;
 			MemorySocket session;
 			std::vector<std::string> fatals;
+			int sessionless = 0;
+			GateResponse seen;
 			NwuLobbySession::Hooks hooks;
 			hooks.on_fatal = [&fatals](const std::string &message) { fatals.push_back(message); };
+			hooks.on_sessionless = [&sessionless]() { ++sessionless; };
+			hooks.on_gate_response = [&seen](const GateResponse &gate) { seen = gate; };
 			NwuLobbySession lobby(hooks, NwuLobbySession::Environment{});
+			lobby.set_command_line(want.command_line);
 			lobby.open(gate, session);
 			lobby.probe("127.0.0.1", GATE_DEFAULT_PORT);
 			gate.inbound.push_back({PeerAddr{0x0100007Fu, GATE_DEFAULT_PORT}, gate_reply(body)});
 			lobby.tick(10);
-			const bool named = std::string(body).find("UDPNOVAWORLD") != std::string::npos;
 			CHECK(lobby.targets().empty());
 			CHECK(session.sent.empty());
-			CHECK(named ? (fatals.empty() && lobby.session() != nullptr)
-			            : (fatals == std::vector<std::string>{"no UDPNOVAWORLD"} && lobby.session() == nullptr));
+			CHECK((lobby.session() != nullptr) == want.session);
+			CHECK(lobby.match_facts().in_use == want.session);
+			CHECK(sessionless == (want.sessionless ? 1 : 0));
+			CHECK(want.fatal == nullptr ? fatals.empty()
+										: fatals == std::vector<std::string>{ want.fatal });
+			if (!want.command_line.post_ip_address.empty() && want.sessionless) {
+				// The switches' pair is the response's, as the hook and the heartbeat read it.
+				CHECK((lobby.gate_response().post_ip == std::array<uint8_t, 4>{ 10, 1, 2, 3 }));
+				CHECK(lobby.gate_response().post_port == 7000u);
+				CHECK((seen.post_ip == std::array<uint8_t, 4>{ 10, 1, 2, 3 }) &&
+						seen.post_port == 7000u);
+			}
 			lobby.close();
 		}
 	}

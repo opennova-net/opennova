@@ -65,6 +65,20 @@ void test_flags_parse_case_insensitively_with_values() {
     CHECK(!parse_launch_flags({"game.exe", "LAN"}).lan);
     CHECK(!parse_launch_flags({"game.exe", "/LAN="}).lan);
     CHECK(!parse_launch_flags({"game.exe"}).lan);
+
+    // D-NET-540: /POSTIPADDRESS <address> and /POSTPORTNUMBER <n>, any case, the last one
+    // standing; the port is the CRT atol of its token (0 when absent, so it overrides nothing)
+    // [orig: Game_ParseCommandLineAndInit @0x4a7310 - @0x4A75A4..0x4A75CF,
+    // @0x4A75D4..0x4A75FE].
+    const LaunchFlags post = parse_launch_flags(
+            {"game.exe", "/postipaddress", "10.0.0.1", "/POSTIPADDRESS", "nw.example",
+             "/PostPortNumber", " 7598x"});
+    CHECK(post.post_ip_address == "nw.example");
+    CHECK(post.post_port_number == 7598);
+    CHECK(parse_launch_flags({"game.exe", "/POSTPORTNUMBER", "-3"}).post_port_number == -3);
+    CHECK(parse_launch_flags({"game.exe", "/POSTPORTNUMBER", "port"}).post_port_number == 0);
+    CHECK(parse_launch_flags({"game.exe", "/POSTPORTNUMBER"}).post_port_number == 0);
+    CHECK(parse_launch_flags({"game.exe"}).post_ip_address.empty());
 }
 
 // `/mod` is `/exp`: one arm of the game's walk, the value token stepped over,

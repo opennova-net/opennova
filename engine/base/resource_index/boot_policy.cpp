@@ -3,6 +3,7 @@
 #include <base/resource_index/boot_policy.h>
 
 #include <base/gameprofile/gameprofile.h>
+#include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
 
@@ -97,6 +98,9 @@ LaunchFlags parse_launch_flags(const std::vector<std::string> &args) {
     f.no_hud = has_flag(args, kLaunchFlagNoHud); // [orig: @0x4A79F6..0x4A7A09]
     f.no_reload = has_flag(args, kLaunchFlagNoReload); // [orig: @0x4A76D7..0x4A76E9]
     f.lan = has_flag(args, kLaunchFlagLan); // [orig: @0x4A74D9..0x4A74EB]
+    f.post_ip_address = value_after(args, kLaunchFlagPostIpAddress); // [orig: @0x4A75A4..0x4A75CF]
+    // [orig: @0x4A75D4..0x4A75FE]
+    f.post_port_number = io::retail_atol(value_after(args, kLaunchFlagPostPortNumber).c_str());
     return f;
 }
 

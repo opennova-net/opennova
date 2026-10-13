@@ -9,6 +9,7 @@
 
 #include <base/io/strutil.h>
 
+#include <array>
 #include <cstdlib>
 
 namespace opennova {
@@ -122,6 +123,7 @@ void NwuLobbySession::open(IDatagramSocket &gate, IDatagramSocket &session) {
 	targets_.clear();
 	nw_peer_ = PeerAddr{};
 	gate_response_ = GateResponse{};
+	in_use_ = false;
 	clock_ms_ = 0;
 	gate_started_ms_ = 0;
 	gate_last_send_ms_ = 0;
@@ -155,6 +157,22 @@ void NwuLobbySession::probe(const std::string &gate_host, uint16_t gate_port) {
 	send_gate_probe();
 }
 
+// The command line's POST pair over the gate's, each only when set (an address that resolves,
+// a nonzero port), as the gate response stores them.
+// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - @0x4CF54B..0x4CF562;
+//  Game_ParseCommandLineAndInit @0x4A7310 - Napi_ResolveAddress(token, 1) @0x4A75C7]
+void NwuLobbySession::apply_command_line_post() {
+	if (!command_line_.post_ip_address.empty()) {
+		const uint32_t ip = resolve_address(command_line_.post_ip_address);
+		if (ip != 0) {
+			for (std::size_t i = 0; i < 4; ++i)
+				gate_response_.post_ip[i] = static_cast<uint8_t>(ip >> (8 * i));
+		}
+	}
+	if (command_line_.post_port_number != 0)
+		gate_response_.post_port = static_cast<uint32_t>(command_line_.post_port_number);
+}
+
 void NwuLobbySession::send_gate_probe() {
 	gate_last_send_ms_ = clock_ms_;
 	if (gate_socket_ == nullptr || !gate_resolved_ || gate_probe_datagram_.empty()) return;
@@ -183,7 +201,7 @@ bool NwuLobbySession::claims(const PeerAddr &from, const uint8_t *data, std::siz
 
 NwuLobbySession::MatchFacts NwuLobbySession::match_facts() const {
 	MatchFacts out;
-	out.in_use = !gate_response_.udp_novaworld.empty();
+	out.in_use = in_use_;
 	if (session_) {
 		out.flags = session_->session_flags();
 		out.role = session_->session_role();
@@ -403,12 +421,30 @@ void NwuLobbySession::poll_gate() {
 		gate_answered_ = true;
 		gate_probe_datagram_.clear();
 		gate_response_ = parsed;
-		if (hooks_.on_gate_response) hooks_.on_gate_response(parsed);
+		apply_command_line_post();
+		if (hooks_.on_gate_response)
+			hooks_.on_gate_response(gate_response_);
 
-		// Retail goes on without an NWU session when a response naming no UDPNOVAWORLD holds
-		// POSTIPADDRESS and POSTIPPORT, and fails the gate without them (D-NET-540, OPEN).
-		if (parsed.udp_novaworld.empty()) {
-			if (hooks_.on_fatal) hooks_.on_fatal("no UDPNOVAWORLD");
+		// The NWU session is in use when the gate named an address. Without one the response
+		// must hold the POST address and port ("NO NW POST IP" / "NO NW POST PORT"): the gate
+		// state -9, which the menu shows as NWEC25; with both the connect goes on with no
+		// session (ConnectToNovaWorld returns at once, each connect poll too, and the menu opens
+		// its web lobby).
+		// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - the in-use word dword_B5FD2C
+		//  @0x4CF525..0x4CF541, its test @0x4CF599..0x4CF5A0, the POST address @0x4CF5A6, the
+		//  port @0x4CF627, the -9 store @0x4CF6AC; UI_ProcessLANSessionStateMachine @0x558DE0 -
+		//  state 3's -9 -> NWEC25 @0x5590FD..0x559102, state 9 @0x559262;
+		//  CNapiGameSession_ConnectToNovaWorld @0x4D4640 - @0x4D46EA..0x4D46F0]
+		in_use_ = !parsed.udp_novaworld.empty();
+		if (!in_use_) {
+			const std::array<uint8_t, 4> none{ 0, 0, 0, 0 };
+			if (gate_response_.post_ip == none || gate_response_.post_port == 0) {
+				if (hooks_.on_fatal)
+					hooks_.on_fatal(novaworld_gate_error_tag(-9, true));
+				return;
+			}
+			if (hooks_.on_sessionless)
+				hooks_.on_sessionless();
 			return;
 		}
 		// The old targets go, then each gate entry is made a probe target; one that names no

@@ -90,6 +90,11 @@ Lister::Lister(ListerOptions options, std::unique_ptr<ListingSource> owned, List
 	          hooks.on_soft_error = [](const std::string &message) {
 		          io::logf(LogLevel::kDebug, "[gate] %s", message.c_str());
 	          };
+	          // A gate naming no UDPNOVAWORLD leaves no NWU session to register the host on.
+	          hooks.on_sessionless = [this]() {
+		          io::logf(LogLevel::kError, "[gate] the gate named no NovaWorld session server (UDPNOVAWORLD)");
+		          end(kExitFailed);
+	          };
 	          return hooks;
           }(),
           [this]() {

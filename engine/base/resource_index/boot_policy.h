@@ -12,6 +12,9 @@
 //                 the SCR decode key. Defaults to "jo" when absent.
 //   /LAN          every game.cfg read forces mpnovaworldhostlanonly on: a
 //                 NovaWorld host advertises LAN only.
+//   /POSTIPADDRESS <address>, /POSTPORTNUMBER <n>
+//                 override the NovaWorld gate response's POST address and
+//                 port (NwuLobbySession::CommandLine).
 //   --resource-dir <absolute path>
 //                 the game-data directory for this process. Without the flag
 //                 the shell boots its bundled assets/ (ADR 0048); the flag
@@ -88,6 +91,8 @@ inline constexpr const char *kLaunchFlagWorkingDir = "--working-dir";
 inline constexpr const char *kLaunchFlagNoHud = "/NOHUD";
 inline constexpr const char *kLaunchFlagNoReload = "/noreload";
 inline constexpr const char *kLaunchFlagLan = "/LAN";
+inline constexpr const char *kLaunchFlagPostIpAddress = "/POSTIPADDRESS";
+inline constexpr const char *kLaunchFlagPostPortNumber = "/POSTPORTNUMBER";
 
 struct LaunchFlags {
     bool loose_override = false;   // /d
@@ -127,6 +132,16 @@ struct LaunchFlags {
     // @0x4A74D9..0x4A74E9 -> g_LanSwitch = 1 @0x4A74EB; Game_LoadConfig
     // @0x5514B1..0x5514BA].
     bool lan = false;
+    // /POSTIPADDRESS <address> and /POSTPORTNUMBER <n>, each the whole token in any case and
+    // its next token, the last one standing: the address the game resolves (DNS on; one that
+    // does not resolve overrides nothing) and the port's CRT atol (0 overrides nothing), which
+    // the NovaWorld gate response takes over its own POSTIPADDRESS / POSTIPPORT
+    // (NwuLobbySession::CommandLine). "" / 0 when absent.
+    // [orig: Game_ParseCommandLineAndInit @0x4a7310 - "/POSTIPADDRESS" @0x4A75A4,
+    //  Napi_ResolveAddress(token, 1) @0x4A75C7 into dword_B4C6B0 @0x4A75CF; "/POSTPORTNUMBER"
+    //  @0x4A75D4, _atol @0x4A75F6 into dword_B4C6B4 @0x4A75FE]
+    std::string post_ip_address;
+    int post_port_number = 0;
 };
 
 LaunchFlags parse_launch_flags(const std::vector<std::string> &args);
