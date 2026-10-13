@@ -2558,6 +2558,42 @@ func test_voice_override_is_the_local_players_avatar_byte() -> void:
 		await get_tree().process_frame
 
 
+# With no Avatars.def the table is empty and the session start still takes the
+# record's voice override where nonzero, else the resolve's miss, 1: the local
+# player's avatar byte is the override or 1, not the stock table's bytes
+# (engine join_character_profile_without_table).
+# [orig: CAvatarDefs_Init @0x57b180 - the clears @0x57b1ae / @0x57b1c1;
+#  Game_ApplySessionSettingsToGlobals @0x551735..0x551769;
+#  Avatars_ResolveSelectionIndex @0x57ae60 - the miss @0x57ae85;
+#  Player_InitPlayer @0x4e1838, the store @0x4e1843]
+func test_voice_override_stands_with_no_avatars_def() -> void:
+	var root_dir := _stage_viewmodel_fixture("voice_override_no_table", false)
+	assert_false(FileAccess.file_exists(root_dir.path_join("Avatars.def")), "no Avatars.def staged")
+	# [blue override, expected anim slot]
+	for case in [[0, 1], [7, 7]]:
+		var world := WorldFixture.make_world(self)
+		var loadout := PlayerSpawnLoadout.new()
+		loadout.set_side_voice(PlayerSpawnLoadout.SIDE_BLUE, case[0])
+		loadout.set_side_voice(PlayerSpawnLoadout.SIDE_RED, 9)
+		world.set_local_player_spawn_loadout(loadout)
+		assert_eq(WorldFixture.load_mission(world, root_dir), OK)
+		var sim := world.get_sim()
+		assert_true(sim.has_local_player(), "the playable load spawns the local player")
+		var player: EntityCard = null
+		for ai_index in range(sim.get_entity_count()):
+			var card: EntityCard = sim.entity_card_by_ai_index(ai_index)
+			if card.get_item_id() == 0x14B9:
+				player = card
+				break
+		assert_not_null(player, "the local player's body is in the registry")
+		if player != null:
+			assert_eq(player.get_character_anim_slot(), case[1],
+					"with no table a blue override of %d gives the avatar byte %d"
+					% [case[0], case[1]])
+		world.queue_free()
+		await get_tree().process_frame
+
+
 func test_joiner_challenge_prewarm_loads_player_and_current_viewmodels_before_freeze() -> void:
 	var root_dir := _stage_viewmodel_fixture("challenge_prewarm", true)
 	var world := WorldFixture.boot_minimal(self, root_dir)

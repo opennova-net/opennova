@@ -74,7 +74,9 @@ void SessionDrive::clear_pending_session() {
 // per-side defaults and its witnesses are the engine's
 // (runtime/inmatch/join_character_profile.h via AvatarDatabase); `loadout`
 // is the typed spawn record the world stages (null = no side selected, the
-// per-side defaults).
+// per-side defaults). With no Avatars.def the projection runs over the empty
+// table, which keeps the record's voice override (engine
+// join_character_profile_without_table).
 Ref<CharacterJoinProfile> SessionDrive::build_join_character_profile(
 		const Ref<ResourceRoot> &p_resource_root, const Ref<PlayerSpawnLoadout> &p_loadout) {
 	if (p_resource_root.is_null()) {
@@ -85,7 +87,7 @@ Ref<CharacterJoinProfile> SessionDrive::build_join_character_profile(
 	if (db->load_from_resource_root(p_resource_root, "Avatars.def") != OK || !db->is_loaded()) {
 		UtilityFunctions::push_warning(vformat(
 				"SessionDrive: Avatars.def not loaded for LAN join profile (%s)", db->get_last_error()));
-		return Ref<CharacterJoinProfile>();
+		return AvatarDatabase::character_join_profile_without_table(p_loadout);
 	}
 	return db->character_join_profile_from_loadout(p_loadout);
 }

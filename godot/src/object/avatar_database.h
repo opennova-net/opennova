@@ -170,6 +170,10 @@ public:
 	// engine walk; null = no side present (the per-side defaults).
 	Ref<CharacterJoinProfile> character_join_profile_from_loadout(
 			const Ref<PlayerSpawnLoadout> &p_loadout) const;
+	// The same projection with no Avatars.def loaded (engine
+	// inmatch::join_character_profile_without_table).
+	static Ref<CharacterJoinProfile> character_join_profile_without_table(
+			const Ref<PlayerSpawnLoadout> &p_loadout);
 	// Native projection consumed by Simulation's portable character-traits
 	// table. File order is retained and duplicate packed ids are first-wins,
 	// matching resolve_character_id's registry walk.
