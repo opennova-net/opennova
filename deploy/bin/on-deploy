@@ -7,14 +7,22 @@
 #
 # Subcommands:
 #   secrets check                 dry-run every op:// reference
-#   infra plan|apply|destroy      terraform (AWS + Cloudflare)
+#   infra plan|apply|destroy      terraform (AWS + Cloudflare); plan and apply pass
+#                                 further terraform args on (-replace=ADDRESS)
 #   infra output|list [args...]   terraform output / state list
 #   aws <args...>                 run the AWS CLI with vault credentials
-#   app deploy [--tag SHA] [--game-tag SHA]
-#                                 pull GHCR images + compose up on the target
+#   app deploy [--tag SHA] [--game-tag SHA] [--serve-tag TAG] [--no-hosting]
+#                                 pull GHCR images + compose up on the target;
+#                                 with hosted game servers set up (infra output
+#                                 hosted_enabled), the service gets every
+#                                 ONNET_HOSTED_* ec2 setting from the Terraform
+#                                 outputs and the serve image pinned to the digest
+#                                 --serve-tag (default latest) names now;
+#                                 --no-hosting deploys with hosting off
 #   app status|logs [svc]|restart|down
 #   app sql <statement>           run SQL against the live sqlite DB
-#   app reset-db --yes-drop-database --tag SHA [--game-tag SHA] [--no-backup]
+#   app reset-db --yes-drop-database --tag SHA [--game-tag SHA] [--serve-tag TAG]
+#                [--no-hosting] [--no-backup]
 #                                 delete the sqlite DB, then deploy SHA onto an
 #                                 empty one (a deploy with an edited migration;
 #                                 DEPLOY.md "Resetting the service database").
@@ -22,6 +30,13 @@
 #                                 earlier backups stay in S3
 #   backup now|list               trigger / list the sqlite backups
 #   state push|pull               terraform state <-> 1Password document
+#   hosted status [--deployment NAME]
+#                                 this deployment's hosted game server machines
+#   hosted data-snapshot          the hosted servers' game data, once: the Joint
+#                                 Operations folder mounted at /hosted-data
+#                                 (HOSTED_DATA_DIR=<folder> ./deploy/run.sh ...)
+#                                 into a new private encrypted EBS snapshot;
+#                                 prints its id (DEPLOY.md, "Hosted game servers")
 #
 # OP_VAULT (default OpenNova-Deploy) names the vault.
 set -euo pipefail
@@ -87,10 +102,39 @@ cmd_secrets() {
         && log "  app.prod.env.tpl     OK" || { err "  app.prod.env.tpl     FAILED"; rc=1; }
       op read "op://$VAULT/ssh/private key?ssh-format=openssh" >/dev/null \
         && log "  ssh private key      OK" || { err "  ssh private key      FAILED"; rc=1; }
+      # Optional: hosted game servers are off without it (DEPLOY.md, "Hosted game servers").
+      if op read "op://$VAULT/hosted/data_snapshot_id" >/dev/null 2>&1; then
+        log "  hosted data snapshot OK"
+      else
+        log "  hosted data snapshot absent (hosted game servers off)"
+      fi
       [ "$rc" -eq 0 ] || die "one or more references did not resolve — create the missing vault items (DEPLOY.md §1)"
       log "all references resolved."
       ;;
     *) die "unknown: secrets $1 (try: check)" ;;
+  esac
+}
+
+# The hosted game servers' data snapshot (infra/aws/hosted.tf), from the vault:
+# item `hosted`, field `data_snapshot_id`, as TF_VAR_hosted_data_snapshot_id.
+# No `hosted` item means hosting is off (the variable stays empty, and hosted.tf
+# makes nothing). Any other failure to read it stops the run, so a vault hiccup
+# never plans the hosting resources away.
+hosted_snapshot_var() {
+  local value errfile="$SECRETS_DIR/hosted-read.err" err
+  if value="$(op read "op://$VAULT/hosted/data_snapshot_id" 2>"$errfile")"; then
+    rm -f "$errfile"
+    export TF_VAR_hosted_data_snapshot_id="$value"
+    log "hosted game servers: data snapshot '${value:-<empty>}' (vault item 'hosted')"
+    return
+  fi
+  err="$(cat "$errfile" 2>/dev/null || true)"
+  rm -f "$errfile"
+  case "$err" in
+    *"isn't an item"*)
+      export TF_VAR_hosted_data_snapshot_id=""
+      log "hosted game servers: off (no 'hosted' item in vault '$VAULT')" ;;
+    *) die "reading op://$VAULT/hosted/data_snapshot_id failed: ${err:-no error text}. Refusing to run terraform with hosting unknown (fix the vault access, or delete the 'hosted' item to turn hosting off)" ;;
   esac
 }
 
@@ -99,16 +143,21 @@ cmd_infra() {
   cmd_state pull
   tf_init
   local action="${1:-plan}"
+  case "$action" in
+    plan|apply|destroy) hosted_snapshot_var ;;
+  esac
   log "terraform $action…"
   # op run injects AWS + Cloudflare + ssh pubkey as env for the terraform run.
+  # plan and apply pass any further arguments on (say a -replace=ADDRESS).
+  shift || true
   case "$action" in
-    plan)    op run --env-file="$TF_ENV_TPL" -- terraform -chdir="$TF_DIR" plan -input=false ;;
-    apply)   op run --env-file="$TF_ENV_TPL" -- terraform -chdir="$TF_DIR" apply -input=false -auto-approve
+    plan)    op run --env-file="$TF_ENV_TPL" -- terraform -chdir="$TF_DIR" plan -input=false "$@" ;;
+    apply)   op run --env-file="$TF_ENV_TPL" -- terraform -chdir="$TF_DIR" apply -input=false -auto-approve "$@"
              cmd_state push ;;
     destroy) op run --env-file="$TF_ENV_TPL" -- terraform -chdir="$TF_DIR" destroy -input=false -auto-approve
              cmd_state push ;;
-    output)  shift; terraform -chdir="$TF_DIR" output "$@" ;;
-    list)    shift; terraform -chdir="$TF_DIR" state list "$@" ;;
+    output)  terraform -chdir="$TF_DIR" output "$@" ;;
+    list)    terraform -chdir="$TF_DIR" state list "$@" ;;
     *) die "unknown: infra $action (try: plan|apply|destroy|output|list)" ;;
   esac
 }
@@ -188,6 +237,52 @@ app_images() {
   export GAME_IMAGE="ghcr.io/${owner}/opennova-game:${game_tag}"
 }
 
+# The hosted game servers' settings for the service (apps/novaworld_server/
+# README.md, "Hosted servers"), from the Terraform outputs, so nobody copies an
+# id by hand: while hosted_data_snapshot_id is set (output hosted_enabled),
+# ONNET_HOSTED_PROVIDER=ec2 and every ec2 setting, and the serve image pinned to
+# the digest `serve_tag` names right now; else, or with --no-hosting (`hosting`
+# 0), ONNET_HOSTED_PROVIDER=none. Exported for compose's interpolation
+# (docker-compose.yml passes them to the server); the shell's values win over
+# the env files'.
+hosted_app_env() {
+  local serve_tag="$1" hosting="$2" enabled owner ref digest
+  enabled="$(terraform -chdir="$TF_DIR" output -raw hosted_enabled 2>/dev/null || echo false)"
+  if [ "$hosting" -eq 0 ] || [ "$enabled" != "true" ]; then
+    export ONNET_HOSTED_PROVIDER=none
+    if [ "$hosting" -eq 0 ]; then
+      log "hosted game servers: off (--no-hosting)"
+    else
+      log "hosted game servers: off (no data snapshot in the infra; DEPLOY.md, \"Hosted game servers\")"
+    fi
+    return
+  fi
+  tf_output() {
+    terraform -chdir="$TF_DIR" output -raw "$1" 2>/dev/null \
+      || die "no '$1' output; run 'infra apply' (hosted_data_snapshot_id is set, its resources are not)"
+  }
+  ONNET_HOSTED_EC2_REGION="$(tf_output region)"
+  ONNET_HOSTED_EC2_LAUNCH_TEMPLATE="$(tf_output hosted_launch_template_id)"
+  ONNET_HOSTED_EC2_SUBNET="$(tf_output hosted_subnet_id)"
+  ONNET_HOSTED_DEPLOYMENT="$(tf_output hosted_deployment)"
+  ONNET_HOSTED_SERVICE_ADDRESS="$(tf_output service_private_ip)"
+  ONNET_HOSTED_BOOTSTRAP_CIDRS="$(tf_output hosted_subnet_cidr)"
+  owner="$(op read "op://$VAULT/ghcr/owner" 2>/dev/null || echo opennova-net)"
+  ref="ghcr.io/${owner}/opennova-serve:${serve_tag}"
+  digest="$(docker buildx imagetools inspect "$ref" --format '{{json .Manifest}}' 2>/dev/null | jq -r '.digest // empty')"
+  case "$digest" in
+    sha256:*) ;;
+    *) die "cannot resolve $ref to a digest (is the opennova-serve package public, and the tag published?)" ;;
+  esac
+  ONNET_HOSTED_SERVE_IMAGE="ghcr.io/${owner}/opennova-serve@${digest}"
+  export ONNET_HOSTED_PROVIDER=ec2 ONNET_HOSTED_EC2_REGION ONNET_HOSTED_EC2_LAUNCH_TEMPLATE \
+    ONNET_HOSTED_EC2_SUBNET ONNET_HOSTED_DEPLOYMENT ONNET_HOSTED_SERVICE_ADDRESS \
+    ONNET_HOSTED_BOOTSTRAP_CIDRS ONNET_HOSTED_SERVE_IMAGE
+  log "hosted game servers: ec2 in $ONNET_HOSTED_EC2_REGION, launch template $ONNET_HOSTED_EC2_LAUNCH_TEMPLATE,"
+  log "  subnet $ONNET_HOSTED_EC2_SUBNET ($ONNET_HOSTED_BOOTSTRAP_CIDRS), deployment $ONNET_HOSTED_DEPLOYMENT,"
+  log "  service $ONNET_HOSTED_SERVICE_ADDRESS, image $ref = $ONNET_HOSTED_SERVE_IMAGE"
+}
+
 check_target() {
   ssh -i "$(ssh_key_file)" -o StrictHostKeyChecking=accept-new \
     "ubuntu@$(target_ip)" "docker --version" >/dev/null \
@@ -239,20 +334,27 @@ running_server() {
 # the reset cannot be undone without one. --no-backup is for a database known
 # to be worthless or a backup path that is itself broken.
 app_reset_db() {
-  local tag="" game_tag="latest" confirmed=0 backup=1
+  local tag="" game_tag="latest" serve_tag="latest" hosting=1 confirmed=0 backup=1
   while [ $# -gt 0 ]; do
     case "$1" in
       --yes-drop-database) confirmed=1; shift ;;
       --tag)      [ $# -ge 2 ] || die "--tag needs a value"; tag="$2"; shift 2 ;;
       --game-tag) [ $# -ge 2 ] || die "--game-tag needs a value"; game_tag="$2"; shift 2 ;;
+      --serve-tag) [ $# -ge 2 ] || die "--serve-tag needs a value"; serve_tag="$2"; shift 2 ;;
+      --no-hosting) hosting=0; shift ;;
       --no-backup) backup=0; shift ;;
-      *) die "unknown: app reset-db $1 (try: --yes-drop-database --tag SHA [--game-tag SHA] [--no-backup])" ;;
+      *) die "unknown: app reset-db $1 (try: --yes-drop-database --tag SHA [--game-tag SHA] [--serve-tag TAG] [--no-hosting] [--no-backup])" ;;
     esac
   done
   [ -n "$tag" ] || die "app reset-db needs --tag SHA: the server image carrying the edited migration, deployed onto the empty database"
 
   app_images "$tag" "$game_tag"
   remote_compose
+  # The deploy below recreates the server: with the same hosted settings as
+  # `app deploy`. (A reset drops every hosted server's row: stop them all from
+  # the admin fleet view first, or the next boot's reconciliation ends their
+  # machines, which no row names.)
+  hosted_app_env "$serve_tag" "$hosting"
   # Read-only lookups for the plan. A compose file that does not parse leaves
   # them blank here, and the pull below fails with compose's own error.
   local project volume running
@@ -335,16 +437,19 @@ cmd_app() {
   local action="${1:-status}"; shift || true
   case "$action" in
     deploy)
-      local tag="latest" game_tag="latest"
+      local tag="latest" game_tag="latest" serve_tag="latest" hosting=1
       while [ $# -gt 0 ]; do
         case "$1" in
           --tag) tag="$2"; shift 2 ;;
           --game-tag) game_tag="$2"; shift 2 ;;
-          *) die "unknown: app deploy $1 (try: --tag SHA, --game-tag SHA)" ;;
+          --serve-tag) [ $# -ge 2 ] || die "--serve-tag needs a value"; serve_tag="$2"; shift 2 ;;
+          --no-hosting) hosting=0; shift ;;
+          *) die "unknown: app deploy $1 (try: --tag SHA, --game-tag SHA, --serve-tag TAG, --no-hosting)" ;;
         esac
       done
       app_images "$tag" "$game_tag"
       remote_compose
+      hosted_app_env "$serve_tag" "$hosting"
       log "deploying $SERVER_IMAGE + $WEB_IMAGE + $GAME_IMAGE to $(target_ip)…"
       check_target
       app_pull
@@ -405,6 +510,117 @@ cmd_state() {
   esac
 }
 
+# ---------------------------------------------------------------------------
+# Hosted game servers (ADR 0053; DEPLOY.md "Hosted game servers")
+# ---------------------------------------------------------------------------
+
+# Where the Joint Operations folder is mounted into this container for
+# `hosted data-snapshot` (run.sh and run.ps1 mount HOSTED_DATA_DIR there).
+HOSTED_DATA_MOUNT=/hosted-data
+HOSTED_DATA_IMAGE=opennova-hosted-data:local
+
+# The deployment tag the hosted machines carry: --deployment, else the infra's
+# output, else the stack's default name (instance_name's default).
+hosted_deployment() {
+  local given="$1" out
+  if [ -n "$given" ]; then printf '%s' "$given"; return; fi
+  out="$(terraform -chdir="$TF_DIR" output -raw hosted_deployment 2>/dev/null || true)"
+  printf '%s' "${out:-opennova-server}"
+}
+
+# hosted status: every machine this deployment tagged (the service's own
+# listing's scope), with its server, state and addresses.
+hosted_status() {
+  local given="" dep
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --deployment) [ $# -ge 2 ] || die "--deployment needs a value"; given="$2"; shift 2 ;;
+      *) die "unknown: hosted status $1 (try: --deployment NAME)" ;;
+    esac
+  done
+  dep="$(hosted_deployment "$given")"
+  log "hosted machines tagged opennova:deployment=$dep:"
+  # shellcheck disable=SC2016  # a JMESPath literal, not a shell expansion
+  cmd_aws ec2 describe-instances \
+    --filters "Name=tag:opennova:hosted,Values=1" "Name=tag:opennova:deployment,Values=$dep" \
+    --query 'Reservations[].Instances[].{machine:InstanceId,server:Tags[?Key==`opennova:server-id`]|[0].Value,state:State.Name,type:InstanceType,private:PrivateIpAddress,public:PublicIpAddress,launched:LaunchTime}' \
+    --output table
+}
+
+# hosted data-snapshot: the hosted servers' game data, once, as a private
+# encrypted EBS snapshot. The Joint Operations Combined Arms folder is mounted
+# here (HOSTED_DATA_MOUNT) read-only; only the files opennova-serve reads are
+# taken (apps/serve/README.md, "Container image"): the three base archives,
+# Escalation's archive pair and its version.txt (required), and score.ini and
+# _NSTMOUT.TXT when present. They stream as a tar into the helper image
+# (deploy/hosted-data), built on this docker, which makes an ext4 image of them
+# labelled opennova-jo and writes it into a new snapshot through the EBS direct
+# APIs: no machine, no bucket, no SSH. The snapshot is the only AWS resource it
+# makes, and it deletes it on any failure; the image and the staging copy live
+# in the helper's container alone (--rm). Prints the snapshot id.
+hosted_data_snapshot() {
+  local given="" dep dir="$HOSTED_DATA_MOUNT" rel found
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --deployment) [ $# -ge 2 ] || die "--deployment needs a value"; given="$2"; shift 2 ;;
+      *) die "unknown: hosted data-snapshot $1 (try: --deployment NAME)" ;;
+    esac
+  done
+  if [ ! -d "$dir" ] || [ -z "$(ls -A "$dir" 2>/dev/null)" ]; then
+    die "no Joint Operations folder at $dir: run HOSTED_DATA_DIR='<your JO:CA folder>' ./deploy/run.sh hosted data-snapshot (DEPLOY.md, \"Hosted game servers\")"
+  fi
+  local files=()
+  for rel in resource.pff localres.pff language.pff expansion/jox01/jox01.pff \
+             expansion/jox01/jox01L.pff expansion/jox01/version.txt; do
+    found="$(cd "$dir" && find . -type f -ipath "./$rel" | head -n 1)"
+    [ -n "$found" ] || die "$dir has no $rel: mount a Joint Operations Combined Arms install (with expansion/jox01)"
+    files+=("${found#./}")
+  done
+  for rel in score.ini _nstmout.txt; do
+    found="$(cd "$dir" && find . -maxdepth 1 -type f -iname "$rel" | head -n 1)"
+    [ -z "$found" ] || files+=("${found#./}")
+  done
+  dep="$(hosted_deployment "$given")"
+  log "the data snapshot takes, from $dir:"
+  for rel in "${files[@]}"; do log "  $rel"; done
+  log "building the helper image (deploy/hosted-data)…"
+  docker build -q -t "$HOSTED_DATA_IMAGE" /workspace/deploy/hosted-data >/dev/null \
+    || die "the helper image did not build"
+  log "making the snapshot (tagged opennova:deployment=$dep); a GiB takes a few minutes…"
+  # The vault's AWS credentials and region alone, for the helper, in the tmpfs.
+  local all_env="$SECRETS_DIR/terraform.env" aws_env="$SECRETS_DIR/hosted-aws.env" snapshot rc=0
+  inject "$TF_ENV_TPL" "$all_env" >/dev/null
+  grep -E '^AWS_(ACCESS_KEY_ID|SECRET_ACCESS_KEY|REGION|DEFAULT_REGION)=' "$all_env" > "$aws_env" || true
+  chmod 600 "$aws_env"
+  rm -f "$all_env"
+  snapshot="$( (cd "$dir" && tar -cf - "${files[@]}") \
+    | docker run --rm -i --env-file "$aws_env" "$HOSTED_DATA_IMAGE" --deployment "$dep")" || rc=$?
+  rm -f "$aws_env"
+  [ "$rc" -eq 0 ] \
+    || die "the snapshot was not made (the helper deletes one it started; check: ./deploy/run.sh aws ec2 describe-snapshots --owner-ids self --filters Name=tag:opennova:hosted-data,Values=1)"
+  snapshot="$(printf '%s\n' "$snapshot" | tail -n 1)"
+  case "$snapshot" in
+    snap-*) ;;
+    *) die "the helper printed no snapshot id ('$snapshot')" ;;
+  esac
+  log "made $snapshot. Next (DEPLOY.md, \"Hosted game servers\"):"
+  log "  1. in vault '$VAULT', an item 'hosted' with the field data_snapshot_id = $snapshot"
+  log "  2. ./deploy/run.sh infra plan, then infra apply"
+  log "  3. ./deploy/run.sh app deploy --tag <server tag> --serve-tag <serve tag>"
+  printf '%s\n' "$snapshot"
+}
+
+cmd_hosted() {
+  require_op
+  local action="${1:-status}"
+  shift || true
+  case "$action" in
+    status)        hosted_status "$@" ;;
+    data-snapshot) hosted_data_snapshot "$@" ;;
+    *) die "unknown: hosted $action (try: status|data-snapshot)" ;;
+  esac
+}
+
 # The header comment above `set -euo pipefail` is the help text.
 usage() {
   sed -n '2,/^[^#]/p' "${BASH_SOURCE[0]}" | sed -e '$d' -e 's/^# \{0,1\}//'
@@ -419,6 +635,7 @@ main() {
     app)     cmd_app "$@" ;;
     backup)  cmd_backup "$@" ;;
     state)   cmd_state "$@" ;;
+    hosted)  cmd_hosted "$@" ;;
     help|-h|--help) usage ;;
     *) err "unknown command: $group"; usage; exit 1 ;;
   esac

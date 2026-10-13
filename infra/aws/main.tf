@@ -208,6 +208,20 @@ resource "aws_security_group" "server" {
     }
   }
 
+  # The hosted game server machines (hosted.tf) fetch their bootstrap bundle
+  # from this port over the private network; the service answers only their
+  # subnet there (ONNET_HOSTED_BOOTSTRAP_CIDRS). No rule while hosting is off.
+  dynamic "ingress" {
+    for_each = aws_security_group.hosted[*].id
+    content {
+      description     = "Hosted machines' bootstrap fetch (private)"
+      from_port       = var.game_http_port
+      to_port         = var.game_http_port
+      protocol        = "tcp"
+      security_groups = [ingress.value]
+    }
+  }
+
   dynamic "ingress" {
     for_each = var.allowed_cidrs
     content {

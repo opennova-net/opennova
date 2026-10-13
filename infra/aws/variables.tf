@@ -153,3 +153,52 @@ variable "backup_bucket_name" {
   type        = string
   default     = "opennova-backups"
 }
+
+# ---------------------------------------------------------------------------
+# Hosted game servers (hosted.tf; DEPLOY.md "Hosted game servers")
+# ---------------------------------------------------------------------------
+
+variable "hosted_data_snapshot_id" {
+  description = "The private, encrypted EBS snapshot holding the licensed Joint Operations data the hosted game servers mount read-only (made once by `./deploy/run.sh hosted data-snapshot`). Empty (the default) leaves hosting off: hosted.tf creates nothing and changes nothing. The toolbox reads it from the vault (item `hosted`, field `data_snapshot_id`) as TF_VAR_hosted_data_snapshot_id."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.hosted_data_snapshot_id == "" || can(regex("^snap-[0-9a-f]{8,17}$", var.hosted_data_snapshot_id))
+    error_message = "hosted_data_snapshot_id must be empty or a snapshot id (snap-...)."
+  }
+}
+
+variable "hosted_instance_type" {
+  description = "The hosted game server machines' type: one machine per server. Never a burstable type (t2/t3/t4g...), whose spent CPU credits would starve the 62.5 Hz tick."
+  type        = string
+  default     = "c7a.medium"
+
+  validation {
+    condition     = !can(regex("^t[0-9]", var.hosted_instance_type))
+    error_message = "hosted_instance_type must not be a burstable t-family type."
+  }
+}
+
+variable "hosted_ami_id" {
+  description = "Override the hosted machines' image (an Ubuntu 24.04 x86_64 AMI). Empty: Canonical's newest when the launch template is made; later images wait for `terraform apply -replace='aws_launch_template.hosted[0]'`."
+  type        = string
+  default     = ""
+}
+
+variable "hosted_root_volume_gb" {
+  description = "The hosted machines' root volume (the OS, docker, the serve image and the server's working directory), in GiB."
+  type        = number
+  default     = 10
+}
+
+variable "hosted_deployment" {
+  description = "The opennova:deployment tag every hosted machine carries and the service's every EC2 call is scoped to, so two stacks in one account never touch each other's machines. Empty: instance_name."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9._-]{0,64}$", var.hosted_deployment))
+    error_message = "hosted_deployment takes up to 64 letters, digits, '.', '_' and '-'."
+  }
+}

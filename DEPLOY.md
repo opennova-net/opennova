@@ -235,10 +235,11 @@ from the vault into a tmpfs, and drives the remote docker engine over
 
 Another image, `ghcr.io/<owner>/opennova-serve`, publishes from its own workflow
 (`.github/workflows/serve-image.yml`, `apps/serve/Dockerfile`): the headless game server
-the hosted game servers will run (ADR 0053), with no retail byte in it
-(`apps/serve/README.md`, "Container image"). `app deploy` does not pull it, `--tag` does
-not move it, and nothing deploys it yet. Make the `opennova-serve` package public once,
-like the server and web images.
+the hosted game servers run (ADR 0053), with no retail byte in it
+(`apps/serve/README.md`, "Container image"). The target never pulls it: each hosted
+server's machine does, at the digest `app deploy` pins (`--serve-tag`, section 6), and
+`--tag` does not move it. Make the `opennova-serve` package public once, like the server
+and web images.
 
 ### The web build (game.<domain>)
 
@@ -271,6 +272,175 @@ docker run --rm -p 8090:8090 opennova-game          # http://localhost:8090
 ```
 
 A backup sidecar also runs nightly (see `deploy/backup/`).
+
+## 6. Hosted game servers
+
+An account an admin approved (`can_host` in the admin users page) can start one
+headless Joint Operations server from the site's My server page (ADR 0053). The service
+launches one EC2 machine per server (`infra/aws/hosted.tf`, `c7a.medium` by default),
+running the public `opennova-serve` image over the game data, a private encrypted EBS
+snapshot made once from your licensed install and mounted read-only. The server lists
+itself on this NovaWorld through the service's public address, its owner administers it
+from the site (the service is the only client of its admin port, 32800, open to the
+service's security group alone; owners never get RAT access), and its stop terminates
+the machine. Machines are terminated, never stopped, so every start has a new public
+address. No machine has an SSH key; break-glass is SSM Session Manager.
+
+How the service launches, watches and ends the machines, the bootstrap route and the
+machine script are in `apps/novaworld_server/README.md`, "Hosted servers".
+
+Hosting stays off until a data snapshot exists: with no `hosted` item in the vault,
+`infra apply` creates nothing for it and changes nothing, and `app deploy` runs the
+service with `ONNET_HOSTED_PROVIDER=none`.
+
+### The game data
+
+The snapshot holds the files `opennova-serve` reads from the install, and nothing else:
+
+| File | Why |
+|---|---|
+| `resource.pff`, `localres.pff`, `language.pff` | the retail boot table it mounts (`engine/base/vfs/vfs.h`) |
+| `expansion/jox01/jox01.pff`, `expansion/jox01/jox01L.pff` | Escalation, for a server started with it (`/exp jox01`) |
+| `expansion/jox01/version.txt` | the expansion checksum the session advertises to joiners |
+| `score.ini` (when present) | the scoring table a server reads loose from the install |
+| `_NSTMOUT.TXT` (when present) | the session timeout override, read when it is there |
+
+The movies, the music, the executables and the player's files stay home. A JO:CA install
+gives about 1 GB, a 2 GiB volume. The snapshot is encrypted with the account's default
+EBS key (`aws/ebs`) and private to the account; it never goes in git or an image, and
+players never reach it (the machines mount it read-only and run nothing but the server).
+
+### Turning it on
+
+1. **Make the data snapshot, once.** Mount your JO:CA folder into the toolbox and run
+   `hosted data-snapshot`. From PowerShell:
+
+   ```powershell
+   $env:OP_SERVICE_ACCOUNT_TOKEN = "ops_..."
+   docker compose -f deploy\docker-compose.deploy.yml run --rm -T `
+     -v "D:/SteamLibrary/steamapps/common/Joint Operations Combined Arms:/hosted-data:ro" `
+     deploy hosted data-snapshot
+   ```
+
+   or `$env:HOSTED_DATA_DIR = "<folder>"; .\deploy\run.ps1 hosted data-snapshot`, or from
+   Git Bash `HOSTED_DATA_DIR="D:/SteamLibrary/steamapps/common/Joint Operations Combined
+   Arms" ./deploy/run.sh hosted data-snapshot`.
+
+   The toolbox takes the files above from the folder (the one place it reads them) and
+   streams them into a helper image it builds on your docker (`deploy/hosted-data`),
+   which makes an ext4 file system of them labelled `opennova-jo` and writes it straight
+   into a new snapshot through the EBS direct APIs: no EC2 machine, no S3 bucket, no SSH.
+   The snapshot is the only AWS resource it makes, and it deletes it if anything fails;
+   the copy of the files lives only in the helper's container, which goes when it ends.
+   It prints the snapshot id (`snap-...`). The vault's AWS credentials need
+   `ebs:StartSnapshot`, `ebs:PutSnapshotBlock`, `ebs:CompleteSnapshot`,
+   `ec2:DescribeSnapshots` and `ec2:DeleteSnapshot`.
+
+2. **Record it in the vault.** Create an item `hosted` in the deploy vault with a field
+   `data_snapshot_id` holding the id. Every `infra` run reads it as
+   `TF_VAR_hosted_data_snapshot_id`; with no `hosted` item hosting is off, and any other
+   failure to read it stops the run, so a vault error never plans hosting away.
+
+3. **Plan, then apply.**
+
+   ```bash
+   ./deploy/run.sh infra plan
+   ```
+
+   The plan must create the hosted resources alone: `aws_launch_template.hosted`,
+   `aws_security_group.hosted` and its three rules, `aws_iam_role.hosted_machine` with
+   its SSM attachment and instance profile, and `aws_iam_policy.hosted_service` with
+   its attachment to the existing service role; update `aws_security_group.server` in
+   place (one ingress rule: the machines' bootstrap fetch on 8080, from their security
+   group); and add outputs. It must not touch `aws_instance.server` (it holds the
+   database). Then `./deploy/run.sh infra apply`.
+
+4. **Deploy the app.**
+
+   ```bash
+   ./deploy/run.sh app deploy --tag sha-<server> --serve-tag sha-<serve>
+   ```
+
+   With the infra's `hosted_enabled` output true, `app deploy` gives the server
+   `ONNET_HOSTED_PROVIDER=ec2` and every setting the provider needs from the Terraform
+   outputs: the region, the launch template, the subnet and its range (the only peers
+   the bootstrap route answers), the deployment tag, the server instance's private
+   address, and the serve image pinned to the digest `--serve-tag` names at that moment
+   (default `latest`; pick a tag from the "Serve image" workflow). The server logs
+   `[boot] hosted servers: ec2 in <region>, ...`; a setting it lacks turns hosting off
+   with a boot warning naming it. `app reset-db` sets the same.
+
+   Optional, in `deploy/env/app.prod.env`: `ONNET_HOSTED_CAP` (the most servers at once,
+   default 5) and `ONNET_HOSTED_MISSIONS` (the rotation a start takes when it names none,
+   and the maps the site's picker offers).
+
+5. **Approve the first account** (the admin users page, `can_host`) and run the smoke
+   test below.
+
+### The smoke test
+
+1. Start a server from My server. Its timeline runs `requested`, `provisioning`,
+   `booting` (the machine boots, installs docker, mounts the data and fetches its
+   bundle: a few minutes), `listing`, then `running`.
+   `./deploy/run.sh hosted status` lists the machine.
+2. The server shows in the OpenNova and the retail server browsers, at the machine's
+   public address. A retail client and an OpenNova client both join. Run `/PROFILE` to
+   check the tick holds on the machine type.
+3. The site's console works: the player list, chat, a map change.
+4. A crash: open a shell on the machine (`aws ssm start-session --target <machine>`,
+   which needs the Session Manager plugin where you run it) and
+   `sudo docker kill opennova-serve`. The machine powers off and terminates, and the
+   server's timeline shows the crash and a restart on a new machine (restart 1 of 3).
+5. Restart the service (`./deploy/run.sh app restart novaworld`): the running server
+   resumes on its machine and lists again.
+6. Stop it from My server: the machine terminates (`hosted status` shows it
+   `shutting-down`, then nothing).
+7. The bootstrap route answers no one outside the VPC:
+   `curl -i -X POST http://<EIP>:8080/hosted/bootstrap/1` answers 404.
+
+### Cost
+
+One always-on `c7a.medium` is about $0.05 an hour, about $37 a month, plus its public
+IPv4 address (about $3.60 a month) and its volumes (a 10 GiB root and the 2 GiB data
+volume, about $1 a month). The snapshot costs a few cents a month. Egress can add as much
+again as the compute: a full 64-player server sends about 1.8 GB an hour. At the cap of 5
+always-on servers, budget about $200 a month and more under load. `ONNET_HOSTED_CAP`
+lowers the cap.
+
+### The kill switch
+
+The admin fleet view's **stop all** (`POST /api/admin/hosted/stop-all`) moves every live
+server to `stopping`, and the service terminates each machine. Then, to keep hosting off
+across deploys, deploy with `./deploy/run.sh app deploy --no-hosting ...`.
+
+If the service is down, end the machines by hand:
+`./deploy/run.sh hosted status` lists them, and
+`./deploy/run.sh aws ec2 terminate-instances --instance-ids <machine> ...` ends them. A
+machine the service finds with no live server is ended at its next boot or sweep anyway.
+
+To turn hosting off for good: stop all, wait until `hosted status` lists nothing, delete
+the `hosted` vault item, then `infra apply` (it removes the hosted resources) and
+`app deploy`. The snapshot stays until you delete it
+(`./deploy/run.sh aws ec2 delete-snapshot --snapshot-id <id>`).
+
+### Operating notes
+
+- **A new machine image.** The launch template keeps the Ubuntu image it was made with
+  (it ignores later image changes, as the server instance does). To move new machines to
+  Canonical's newest: `./deploy/run.sh infra apply -replace='aws_launch_template.hosted[0]'`,
+  then `app deploy` (the template's id changes). Running machines keep theirs.
+- **New data.** Run `hosted data-snapshot` again, put the new id in the vault, `infra
+  apply` (the template moves to it), and delete the old snapshot. New machines take it.
+- **A machine's logs.** `aws ec2 get-console-output --instance-id <machine> --latest`
+  (through `./deploy/run.sh aws`) shows the bootstrap's steps and the server's end, also
+  after the machine is gone; on a live machine, over SSM, `journalctl -u opennova-serve`
+  and `/var/log/cloud-init-output.log`.
+- **The machine side never restarts the server.** Whatever ends `opennova-serve` ends the
+  machine; the service makes and counts every crash restart (3, forgiven after an hour of
+  running), each on a new machine with new credentials.
+- **The offline infra check.** `infra/aws/tests/hosted.tftest.hcl` plans the hosted
+  resources against mock providers (no credentials, nothing reaches AWS); the file says
+  how to run it.
 
 ## Resetting the service database
 
