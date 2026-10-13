@@ -453,11 +453,11 @@ int test_emitter_layers_read_member_zero() {
 	int failed = 0;
 	failed |= !(layers.size() == 2);
 	if (layers.size() == 2) {
-		failed |= !(layers[0].playlist == first && layers[0].sndparm == quiet && layers[0].falloff_u == 120 &&
-				layers[0].min_u == 15 && layers[0].volume == 90 && layers[0].clamp == 200 &&
-				layers[0].pitch_q16 == lwf::kPitchUnityQ16);
-		failed |= !(layers[1].playlist == second && layers[1].sndparm == loud && layers[1].falloff_u == 300 &&
-				layers[1].min_u == 0 && layers[1].volume == 250 && layers[1].pitch_q16 == 0x18000u);
+		failed |= !(layers[0].playlist == first && layers[0].sndparm == quiet &&
+				layers[0].falloff_u == 120 && layers[0].min_u == 15 && layers[0].volume == 90 &&
+				layers[0].clamp == 200);
+		failed |= !(layers[1].playlist == second && layers[1].sndparm == loud &&
+				layers[1].falloff_u == 300 && layers[1].min_u == 0 && layers[1].volume == 250);
 	}
 	if (failed) std::printf("FAIL: emitter_layers reads each layer's member 0\n");
 	return failed;

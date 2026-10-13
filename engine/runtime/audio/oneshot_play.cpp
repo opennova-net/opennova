@@ -104,7 +104,6 @@ std::vector<EmitterLayer> emitter_layers(const lwf::File &bank, const lwf::Multi
 		row.min_u = static_cast<int32_t>(layer.min_distance);
 		row.volume = static_cast<int32_t>(member.volume);
 		row.clamp = static_cast<int32_t>(member.clamp_volume);
-		row.pitch_q16 = member.pitch_scaled;
 		out.push_back(row);
 	}
 	return out;

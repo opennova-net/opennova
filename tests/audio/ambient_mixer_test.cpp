@@ -559,5 +559,5 @@ int main() {
         TEST_EXPECT(mx.marker_region(99).region == 0 && mx.marker_region(99).blend == 1.0f);
     }
 
-    return check_emitter_play_word();
+	return check_emitter_play_word();
 }

@@ -113,11 +113,15 @@ struct AmbientCandidate {
 // The play word a looping emitter's channel takes: its slot's registration
 // word alone, a word of 0 read as 0x10000 [orig: SoundEmitter_UpdateAndMixTop8
 // @ 0x528943..0x528949], into the channel's +4 word through the
-// AudioChannel_OpenSlotChecked call @ 0x528ae3 and the AudioChannel_SetAndPlay
-// call @ 0x528a5c; the layer member's authored pitch is never a play factor
-// (member 0 is read for its wave, volume and clamp alone, @ 0x528649;
-// D-SND-56). Read unsigned and exact; its doppler is unported
-// (Sound_Calculate3DAttenuation, called @ 0x52896a; D-SND-8).
+// AudioChannel_OpenSlotChecked call @ 0x528adb (its handle stored @ 0x528ae3)
+// and the AudioChannel_SetAndPlay call @ 0x528a5c; the layer member's authored
+// pitch is never a play factor (member 0 is read for its wave, volume and clamp
+// alone, @ 0x528649; D-SND-56). Read unsigned and exact; its doppler is
+// unported (Sound_Calculate3DAttenuation, called @ 0x52896a; D-SND-8). A slot
+// whose word is 0 never reaches a channel: the mix skips it before candidacy
+// (@ 0x528582) and a lane registered with 0 is cleared
+// (AmbientMixer::register_emitter, SoundEmitter_RegisterSetLayers @ 0x528340),
+// so the 0 rung is the read's alone.
 inline uint32_t emitter_play_word(int32_t pitch_q16) {
 	return pitch_q16 == 0 ? 0x10000u : static_cast<uint32_t>(pitch_q16);
 }
