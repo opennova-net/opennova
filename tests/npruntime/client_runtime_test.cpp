@@ -1479,7 +1479,7 @@ bool run_retail_post_auth_prelude() {
 		return false;
 	}
 
-	// Every retail 0x5A apply clears dword_81474C immediately. Split the first
+	// Every retail 0x5A apply clears g_ClientDeployHold immediately. Split the first
 	// grant from both the second grant and 0x0F policy to prove that gameplay
 	// release is independent from the later deploy-UI decision.
 	const std::vector<uint8_t> first_grant_datagram = frame_server_session(
@@ -3207,6 +3207,58 @@ bool run_zone_presence_updates_only_a_tracked_window() {
 	return expect(w.tracked() && w.target == 310 && w.limit == 372 && w.progress == 310 &&
 	                      w.rate == 1,
 	              "tracked window: an adoption from nothing keeps the stale progress and the pump clamps it to the target");
+}
+
+// A 0x53 for another entity than the tracked one is adopted when at least as
+// near the local player's Position as the tracked one and within 20.0 u of
+// it. The 0x0A anchor is the recipient's eye (D-NET-518), never the distance
+// origin: here it sits far from both zones, as the stamped body does not.
+// [orig: NapiNPClientMsg_ZoneTimerWindow @0x428AE0 - g_LocalPlayerEntity->
+//  Position @0x428C19 / @0x428C2D / @0x428C42 against the tracked entity,
+//  @0x428C93 / @0x428CA2 / @0x428CB1 against the new one, the compare
+//  @0x428CF5]
+bool run_zone_window_adoption_measures_from_the_local_player() {
+	ns::LoopbackChannel host_loop;
+	inmatch::ClientRuntime host_view(host_loop);
+	constexpr uint16_t kFar = 0x1003, kNear = 0x1004;
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	w::Entity body;
+	body.kind = w::EntityKind::Organic;
+	body.position = {100.0f, 0.0f, 0.0f};
+	world.cached.local_player = world.registry.spawn(0, body);
+	host_view.set_local_player_position(world);
+	ns::ClientState &cs = host_view.state();
+	cs.anchor_x = 0; // an anchor 100 u off the body
+	cs.anchor_y = 0;
+	cs.anchor_z = 0;
+	ns::ClientEntityState &far = cs.upsert(kFar);
+	far.x = w::to_fixed(85.0); // 15 u from the body, 85 u from the anchor
+	ns::ClientEntityState &near = cs.upsert(kNear);
+	near.x = w::to_fixed(110.0); // 10 u from the body, 110 u from the anchor
+	host_loop.host_send(
+			s2c::ZONE_TIMER_WINDOW, zone_timer_window_body(kFar, 0, 1, 0, 15, 1));
+	host_view.Client_ProcessNetworkFrame();
+	const inmatch::ClientRuntime::TrackedCaptureWindow &tracked =
+			host_view.tracked_capture_window();
+	if (!expect(tracked.tracked() && tracked.zone == kFar,
+	            "zone adoption: the first window is tracked from nothing"))
+		return false;
+	host_loop.host_send(
+			s2c::ZONE_TIMER_WINDOW, zone_timer_window_body(kNear, 0, 1, 0, 15, 1));
+	host_view.Client_ProcessNetworkFrame();
+	if (!expect(tracked.zone == kNear,
+	            "zone adoption: a window nearer the local player's Position is adopted"))
+		return false;
+	// A body moved to 50 u: the far zone (35 u) is nearer than the tracked one
+	// (60 u) but past 20 u, so its window does not take the cluster.
+	world.registry.get(world.cached.local_player)->position = {50.0f, 0.0f, 0.0f};
+	host_view.set_local_player_position(world);
+	host_loop.host_send(
+			s2c::ZONE_TIMER_WINDOW, zone_timer_window_body(kFar, 0, 1, 0, 15, 1));
+	host_view.Client_ProcessNetworkFrame();
+	return expect(tracked.zone == kNear,
+	              "zone adoption: a window past 20 u of the local player is not adopted");
 }
 
 // The client-side 1 Hz revive countdown: every 63rd client frame each active
@@ -5099,7 +5151,7 @@ bool run_unrelated_loadout_cannot_revive_dead_client() {
 		return false;
 
 	// WeaponLoadout_ApplyFromBuffer still performs its unconditional
-	// dword_81474C clear. That literal edge must remain incapable of reopening
+	// g_ClientDeployHold clear. That literal edge must remain incapable of reopening
 	// authoritative spawn or accepting the stale positive tail beside it.
 	FrameUpdate stale_positive;
 	stale_positive.carried_handle = 0xFFFF;
@@ -5132,7 +5184,7 @@ bool run_unrelated_loadout_cannot_revive_dead_client() {
 // Game_InitNewRound clears the deploy hold. Another player's respawn edge
 // releases nothing, and the self row's first alive sample is no edge.
 // [orig: NetPacket_SerializePlayerState @0x4C1109 -> Game_InitNewRound
-//  @0x4C114C, dword_81474C = 0 @0x4227CE; Server_DeployPlayer @0x5178C5]
+//  @0x4C114C, g_ClientDeployHold = 0 @0x4227CE; Server_DeployPlayer @0x5178C5]
 bool run_self_respawn_edge_releases_a_revive_deploy() {
 	const std::string client_scrk = "CLIENT-REVIVE-EDGE-SCRK";
 	const std::string server_scrk = "SERVER-REVIVE-EDGE-SCRK";
@@ -5199,7 +5251,7 @@ bool run_self_respawn_edge_releases_a_revive_deploy() {
 // PumpClientProtocolSend builds whatever is queued; only the 0x2C ping and the 0x0C uplink are
 // built behind the deploy gate, and nothing drains the list on death.
 // [orig: Client_ProcessNetworkFrame @0x42c3ee..0x42c4a3 (the 0x2C / 0x0C builds behind
-//  is_in_session && !is_authority && !dword_81474C && !g_SpawnSuccessGate), the tail
+//  is_in_session && !is_authority && !g_ClientDeployHold && !g_SpawnSuccessGate), the tail
 //  @0x42c4b1 -> PumpClientProtocolSend @0x42c4bc in every branch;
 //  CNapiNPConnection_DrainMessageQueues @0x625600 runs only at join @0x629dfc / @0x62c26f
 //  and destroy @0x62a50a]
@@ -7695,6 +7747,7 @@ int main() {
 	                run_host_zone_timer_value_matches_retail_entry() &&
 	                run_zone_timer_channels_share_one_retail_entry() &&
 	                run_zone_presence_updates_only_a_tracked_window() &&
+	                run_zone_window_adoption_measures_from_the_local_player() &&
 	                run_roster_revive_countdown_ticks_once_per_63_frames() &&
 	                run_medic_request_queues_one_reliable_0x2e() &&
 	                run_respawn_request_queues_one_reliable_0x41() &&

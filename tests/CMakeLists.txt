@@ -2633,6 +2633,12 @@ add_executable(item_events_test world/item_events_test.cpp)
 target_link_libraries(item_events_test PRIVATE opennova_runtime)
 add_test(NAME item_events COMMAND item_events_test)
 
+# The genx row's class callback (Entity_UpdateParentTransform): its installs
+# and removals, the pool-1 and pool-2 visits, the ground follow and the loop.
+add_executable(genx_parent_follow_test world/genx_parent_follow_test.cpp)
+target_link_libraries(genx_parent_follow_test PRIVATE opennova_runtime)
+add_test(NAME genx_parent_follow COMMAND genx_parent_follow_test)
+
 # The collision sweep's death-trait mining (mission/collision_resolve ->
 # world::ItemDeathTraits): the first husk's KZ / DEAD banks, the huskFinal-only
 # and missing-husk gates, and the retail GLASS userpoint table, over

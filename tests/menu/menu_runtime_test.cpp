@@ -43,6 +43,7 @@ struct FakeFrame : MenuFrameSeam {
 	std::vector<std::string> log;
 	bool configured = true;
 	std::map<int, std::string> texts;
+	std::map<int, int> hotkeys;
 	std::map<int, int> carets;
 	std::map<int, int> counts;
 	std::map<int, std::vector<MenuTableRow>> table_rows;
@@ -96,9 +97,10 @@ struct FakeFrame : MenuFrameSeam {
 	void set_widget_checked(int i, bool v) override {
 		note("checked " + std::to_string(i) + (v ? " 1" : " 0"));
 	}
-	void set_widget_text(int i, const std::string &t) override {
+	void set_widget_text(int i, const std::string &t, int hotkey_pos) override {
 		note("text " + std::to_string(i) + " " + t);
 		texts[i] = t;
+		hotkeys[i] = hotkey_pos;
 	}
 	void set_widget_items(int i, const std::vector<std::string> &items) override {
 		note("items " + std::to_string(i) + " " + std::to_string(items.size()));
@@ -468,6 +470,48 @@ void test_navigation_and_replay() {
 	// POP_SCREEN past the file's own history is the embedder's cross-file pop.
 	CHECK(!rt.pop_screen() && rec.count(MenuEvent::Kind::PopRequested) == 1);
 	CHECK(rt.current_screen() == "MAIN");
+}
+
+// A code-side text set is the window's vtable slot +0x4C: on every class that
+// has it the label set cuts the text's first {hot} marker (case-sensitive) and
+// keeps where it stood; WINDOW and SCROLL have no slot and keep the text. The
+// cut label and its offset reach the frame, the read-back and a replay.
+// [orig: CButtonWnd_SetLabel @ 0x6572F0 - strstr @ 0x657451, the offset
+//  @ 0x65746c, the tail shift @ 0x657476..0x657480; CEditWnd_SetText
+//  @ 0x661900; ??_7_Window 0x7E0E0C, ??_7_ScrollWnd 0x7E13C4]
+void test_text_set_cuts_the_label_marker() {
+	const mnu::Document doc = make_document();
+	FakeFrame frame;
+	MenuRuntime rt;
+	rt.set_frame(&frame);
+	CHECK(rt.open_document(&doc, "MAIN.MNU", "main"));
+	// PLAY 3 Button, R1 5 Radio, COMBO 8, SPIN 9, NAME 10 Edit, MULTI 13 List,
+	// TABLE 14: each cuts the first marker only.
+	for (const int id : { 3, 5, 8, 9, 10, 13, 14 }) {
+		rt.set_widget_text(id, "A{hot}B{hot}C");
+		const int index = rt.frame_index(id);
+		CHECK(rt.get_widget_text(id) == "AB{hot}C");
+		CHECK(frame.texts[index] == "AB{hot}C" && frame.hotkeys[index] == 1);
+	}
+	// The marker is case-sensitive: "{HOT}" is text.
+	rt.set_widget_text(3, "{HOT}Go");
+	CHECK(frame.texts[rt.frame_index(3)] == "{HOT}Go" && frame.hotkeys[rt.frame_index(3)] == -1);
+	// The set returns the label it stored, which an edit's notice carries.
+	CHECK(rt.set_widget_text(10, "Gh{hot}ost") == "Ghost");
+	// A marker at the end leaves the offset past the label's last byte.
+	rt.set_widget_text(10, "Name{hot}");
+	CHECK(rt.get_widget_text(10) == "Name" && frame.hotkeys[rt.frame_index(10)] == 4);
+	// PANEL 4 (WINDOW) and VOL 16 (SCROLL) have no text set: the text stays.
+	for (const int id : { 4, 16 }) {
+		rt.set_widget_text(id, "A{hot}B");
+		CHECK(frame.texts[rt.frame_index(id)] == "A{hot}B" && frame.hotkeys[rt.frame_index(id)] == -1);
+	}
+	// An off-screen set keeps the cut label and its offset for the replay.
+	rt.set_widget_text(19, "B{hot}ack");
+	CHECK(rt.get_widget_text(19) == "Back");
+	CHECK(rt.navigate_to_screen("OPTIONS"));
+	const int back = rt.frame_index(19);
+	CHECK(frame.texts[back] == "Back" && frame.hotkeys[back] == 1);
 }
 
 // The activation [orig: CWnd_EmitEventToNamedHandlerAndCallbacks @ 0x646970;
@@ -2278,6 +2322,7 @@ int main() {
 	test_index_and_frameless();
 	test_startup_version();
 	test_navigation_and_replay();
+	test_text_set_cuts_the_label_marker();
 	test_activation_order();
 	test_rows();
 	test_bubble();

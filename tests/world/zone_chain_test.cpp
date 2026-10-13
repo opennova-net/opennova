@@ -283,6 +283,7 @@ void test_spawn_zone_presence_and_zone_info() {
 EntityHandle spawn_soldier(World &w, uint8_t team, Vec3 pos) {
     Entity e;
     e.kind = EntityKind::Organic;
+    e.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     e.item_id = 5305;
     e.player_class = 8;
     e.team = team;

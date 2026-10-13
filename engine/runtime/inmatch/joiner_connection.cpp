@@ -1088,7 +1088,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			if (decode_weapon_loadout(
 					m.payload.data(), m.payload.size(), loadout)) {
 				valid_weapon_loadout = true;
-				// The handler's tail clears dword_81474C for every valid apply,
+				// The handler's tail clears g_ClientDeployHold for every valid apply,
 				// including a loadout echo unrelated to deploy-UI completion.
 				out.gameplay_release_applied = true;
 				current_player_class_ = loadout.avatar_class;
@@ -1786,7 +1786,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			}
 		} else if (m.tag == s2c::WEAPON_LOADOUT && valid_weapon_loadout &&
 		           post_auth_stage_ == PostAuthStage::AwaitDeployment) {
-			// Every valid retail 0x5A apply clears dword_81474C immediately,
+			// Every valid retail 0x5A apply clears g_ClientDeployHold immediately,
 			// independently from the deploy screen becoming pick-ready. Retain
 			// the pair count only for that later UI/pick transition.
 			// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0]

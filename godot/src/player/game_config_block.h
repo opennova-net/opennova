@@ -39,7 +39,7 @@ public:
 
 	// The start's read: false when the file set mpreset, where the process
 	// exits with code 0 and writes nothing.
-	bool load() { return block_.load(); }
+	bool load();
 	// The save: OK, or ERR_FILE_CANT_WRITE (logged) when the file does not open.
 	Error save();
 	// A main-menu entry over the mounted `p_root` (its weapon.def table, the

@@ -196,6 +196,77 @@ void check_own_world_state_location_names(std::map<std::string, std::string> &fi
 
 } // namespace
 
+// The permanent-death and spectator bits reach the host's own client in
+// its looped-back S2C 0x08. A dead body's deploy press then queues the
+// reliable 0x51 [i16 0xFFFF] when spectators are allowed, whose next-frame
+// drain converts the host's own slot through the server's handler, and
+// queues nothing when they are not; a live body's press is the 0x0E pick.
+// [orig: Input_HandleActionBinding -- a6 @0x49AD76..0x49AD98, case 12
+//  @0x49B024..0x49B03C, the convert @0x49B085..0x49B0B9;
+//  NapiNPClientMsg_HandleSessionConfig @0x428386 / @0x42838C;
+//  Server_ProcessClientRequestSpectatorRespawn @0x51C840]
+void check_listen_host_deploy_convert(std::map<std::string, std::string> &files) {
+	for (const int spectators : {2, 0}) {
+		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		auto &kernel = *kernel_storage;
+		auto role_storage = std::make_unique<inmatch::HostRole>();
+		auto &role = *role_storage;
+		role.bind(kernel);
+		inmatch::ListenHostState &host = role.state;
+		kernel.open_document(two_entity_mission(), "deploy_convert", source_over(&files));
+		ms::KernelBootOptions options;
+		options.mp_session = true;
+		options.game_type = mission_game_type(kernel.mission);
+		options.bringup_net_session = [&] {
+			inmatch::HostConfig cfg;
+			cfg.config.server_name = "deploy_convert";
+			cfg.config.max_players = 4;
+			cfg.config.game_type = options.game_type;
+			cfg.config.respawn_timeout = 7;
+			cfg.config.permanent_death = true;
+			cfg.config.spectator_slots = spectators;
+			cfg.socket_mode = inmatch::SocketMode::Lan;
+			cfg.serve_and_play = true;
+			inmatch::HostBringup bringup;
+			bringup.host_cfg = cfg;
+			role.bring_up(bringup);
+		};
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		CHECK(host.client_runtime != nullptr && kernel.local.has_local_player());
+		opennova::inmatch::NullDatagramSocket socket;
+		role.set_socket(&socket);
+		for (int i = 0; i < 4; ++i) role.run_tick(tick_input(0));
+		inmatch::NapiNPConnection *own = nullptr;
+		for (inmatch::NapiNPConnection &conn : host.host_owner.ctx.np_protocol.connection_list)
+			if (conn.link.owned_entity == kernel.world.cached.local_player) own = &conn;
+		CHECK(own != nullptr);
+		if (own == nullptr) continue;
+		const opennova::replication::ClientState &cs = host.client_runtime->state();
+		CHECK(cs.permanent_death && cs.spectators_allowed == (spectators != 0));
+		// A live body's press is the pick, on the host's own client.
+		CHECK(!kernel.local.local_player_dead());
+		CHECK(role.request_deployment_pick(0xFFFFu));
+		role.run_tick(tick_input(0));
+		role.run_tick(tick_input(0));
+		CHECK(!own->link.spectator);
+		// The Respawn key's 0x41 kills the body through the server's handler.
+		inmatch::TickInput press = tick_input(0);
+		press.player.pressed_action_bits = inmatch::PRESSED_RESPAWN;
+		role.apply_input(press);
+		role.run_tick(tick_input(0));
+		role.run_tick(tick_input(0));
+		CHECK(kernel.local.local_player_dead());
+		const std::size_t queued = host.host_loop.c2s_pending();
+		const bool sent = role.request_deployment_pick(0xFFFFu);
+		CHECK(sent == (spectators != 0));
+		role.run_tick(tick_input(0)); // the press frame's client frame flushes it
+		CHECK(host.host_loop.c2s_pending() == queued + (spectators != 0 ? 1u : 0u));
+		for (int i = 0; i < 3; ++i) role.run_tick(tick_input(0));
+		CHECK(own->link.spectator == (spectators != 0));
+	}
+}
+
 int main() {
 	std::map<std::string, std::string> files;
 
@@ -809,6 +880,8 @@ int main() {
 			CHECK(body->health > 0 && !kernel.local.local_player_dead());
 		}
 	}
+
+	check_listen_host_deploy_convert(files);
 
 	// --- the authority's own stance rides its looped-back C2S 0x1D ----------
 	// The server handler latches the host's own player from the 0x1D its own

@@ -992,6 +992,12 @@ void Server_ProcessSpectatorRespawnRequests(NapiNPServerCtx &ctx, world::World &
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (!conn.reply.spectator_convert_pending) continue;
 		conn.reply.spectator_convert_pending = false;
+		// The handler's first gate is the round-over latch, which the match
+		// outcome stands for on the host; the request was staged in the same
+		// receive pump, so the latch reads as the handler saw it
+		// [orig: Server_ProcessClientRequestSpectatorRespawn - `cmp
+		//  g_SpawnSuccessGate, 0` / `jnz` @0x51C840..0x51C847].
+		if (world.match.outcome().ended) continue;
 		// The handler's own gates repeat inside the kill: authority, a live
 		// entity, not already a spectator [orig: @0x519E22..0x519E4B].
 		if (!conn.link.owned_entity.valid() || conn.link.spectator) continue;

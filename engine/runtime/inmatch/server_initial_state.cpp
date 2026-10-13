@@ -177,7 +177,7 @@ std::vector<uint8_t> serialize_briefing_text(const NapiNPServerCtx &ctx) {
 
 // [orig: Server_SendEntityStateToPlayer @0x517ba0 / NapiNPClientMsg_0x00F @0x42E200; §5.29] S2C 0x0F
 // world-state-load — the game-start deploy unsticker. Carries the joiner's spawn pose, game flags, and
-// the fixed 128-entry ammo-pool block; the client handler clears its dword_81474C load-gate and queues
+// the fixed 128-entry ammo-pool block; the client handler clears its g_ClientDeployHold load-gate and queues
 // the post-load C2S burst (0x22/0x23/0x28/0x29/0x2D/0x32) that lets it deploy. Without it a retail
 // joiner world-loads but stays undeployed (floods C2S 0x0f) — the observed live "stuck at 7%". Minimal
 // faithful body: the TDM/DM path has waypointCount 0; waypoint Co-op serializes the recipient's
@@ -549,7 +549,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 		case InitialStateBurst::kStreamGameStartBundle: { // GAME-START BUNDLE [orig: Server_OnPlayerJoin @0x51a680 tail] — the deploy unsticker.
 			// Without it a retail joiner world-loads but stays undeployed (floods C2S 0x0f, "stuck at 7%").
 			// 0x41 per charattr restriction, 0x42 the charattr latches, 0x0F world-state-load (clears the
-			// client's dword_81474C load-gate + queues its deploy burst), 0x4D player-index, 0x61
+			// client's g_ClientDeployHold load-gate + queues its deploy burst), 0x4D player-index, 0x61
 			// session-key/seed, 0x3E terminator. The per-frame 0x0A the original interleaves here is
 			// covered by Server_TickUpdate's 0x0A fan (starts once spawned), so it is not re-emitted in the
 			// bundle. [§5.29 / §5.43 / D-NET-114]

@@ -788,6 +788,12 @@ int test_destroy_phases_and_ambient() {
     CHECK(w.out.sound_emitters[0].lifetime_ticks == 31);
     CHECK(w.out.sound_emitters[0].volume_q8_8 == 65534);
     CHECK(w.out.sound_emitters[0].pitch_q16 == 65536);
+    // Only the batch's last tick registers it [orig: @0x4A93CC].
+    w.out.sound_emitters.clear();
+    w.rules.last_tick_of_batch = false;
+    tick_item_death_motion(w,e,nullptr,0,w.out.destruction);
+    CHECK(w.out.sound_emitters.empty());
+    w.rules.last_tick_of_batch = true;
     return 0;
 }
 int test_class_scoring_and_explosion_draws() {

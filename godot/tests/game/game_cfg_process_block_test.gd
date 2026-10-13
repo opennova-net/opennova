@@ -69,6 +69,18 @@ func _record(name: String, value: Variant) -> void:
 	_signals.append([name, value])
 
 
+func test_the_lan_switch_forces_the_lan_only_word() -> void:
+	# `/LAN`, any case: every read of the block forces mpnovaworldhostlanonly
+	# to 1 (docs/gamecfg/game-cfg-re.md, D-GAMECFG-5).
+	_write_cfg("version = 29\r\nmpnovaworldhostlanonly = 0\r\n")
+	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", _run_dir, "/lan"]))
+	GameCfgStore.reset()
+	assert_eq(GameCfgStore.block().get_word("mpnovaworldhostlanonly"), 1, "the start's read")
+	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", _run_dir]))
+	GameCfgStore.reset()
+	assert_eq(GameCfgStore.block().get_word("mpnovaworldhostlanonly"), 0, "no switch, the file's")
+
+
 func test_the_shell_words_are_the_cfg_words() -> void:
 	# The words the shell keeps, by their game.cfg keys and without case, at
 	# the defaults' values (docs/gamecfg/game-cfg-re.md, the key table).

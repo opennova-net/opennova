@@ -356,7 +356,7 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     }
     if ((e = live()) == nullptr) return;
     // A dropped carried object's installed fall or ride (Match owns the
-    // carry objects).
+    // carry objects), or a genx def's own ride.
     if (e->drop_motion != DropMotion::None) update_dropped_object(*this, *e);
     if ((e = live()) == nullptr) return;
     // A mounted non-organic brain re-poses on its seat after the mover ran.

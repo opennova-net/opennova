@@ -266,6 +266,10 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 		// [orig: g_EntityClassPhysicsTable row @0x82ABE0 -> Entity_UpdateTransformAndTurret @0x440CA0;
 		//  Entity_SpawnSectionEntity @0x440370]
 		e->emplaced_update = !e->section_clone && move_row == world::PhysicsClass::Ewep;
+		// The genx row's update is the parent follow: the def's own callback
+		// wherever a store puts def+0x158 back (world::def_update_drop_motion).
+		// [orig: row 'genx' @0x82AC10 -> Entity_UpdateParentTransform @0x4A88B0]
+		e->parent_follow_update = move_row == world::PhysicsClass::Genx;
 		// The render tag picks the def+0x144 CTRL callback; the ewep row's
 		// publishes the gun words (world/mount_controls.h).
 		// [orig: EntityDef_InitAllCallbacks @0x4A5AEA..0x4A5B03 ->
@@ -419,6 +423,20 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
             // never a section clone's pinned one [orig: @0x440370].
             if (move_row == world::PhysicsClass::Squib && !e->section_clone)
                 e->squib.motor = true;
+            // The creation paths this init stands for store the def's own
+            // update callback, so a genx def's body rides from its creation,
+            // once: a later resweep leaves a fall or ride the callback itself
+            // installed. A section clone keeps its pinned one; the S2C 0x59
+            // body and the round-to-device conversion overwrite the store with
+            // their own (Interpolate or none), and their bodies take their own
+            // motors here.
+            // [orig: Entity_SpawnFromBMSRecord @0x40EC7A, NapiNPClientMsg_0x00D
+            //  @0x43331A, NapiNPClientMsg_0x010 @0x43367E, Entity_InitFromItemDef
+            //  @0x49E58C, Entity_SpawnFromAnimSlotProperty @0x43C453;
+            //  Entity_SpawnSectionEntity @0x440370; Entity_SpawnOrUpdateFromSlotPacket
+            //  @0x5468A5 / @0x546A5A; Entity_ConvertRoundToPlacedEntity @0x545602]
+            if (e->parent_follow_update && !e->section_clone)
+                e->drop_motion = world::DropMotion::Ride;
             // The +0x160/+0x26C/+0x2B0/+0x2C8 init is the ai_function class
             // row's second slot, run through def+0x148 whatever the move
             // function [orig: sub_448CE0 @0x448CE0, row @0x813120 +12;

@@ -482,6 +482,7 @@ void test_radius_blast_skips_pool1_los() {
 
     Entity victim_seed;
     victim_seed.kind = EntityKind::Item;
+    victim_seed.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     victim_seed.item_id = 500;
     victim_seed.has_item_def = true;
     victim_seed.health = 120;
@@ -528,6 +529,7 @@ void test_organic_blast_los_is_unlifted() {
 
     Entity victim_seed;
     victim_seed.kind = EntityKind::Organic;
+    victim_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     victim_seed.item_id = 502;
     victim_seed.health = 120;
     victim_seed.health_max = 120;

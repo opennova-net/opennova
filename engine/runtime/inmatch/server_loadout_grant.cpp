@@ -199,7 +199,7 @@ void apply_granted_loadout(NapiNPConnection &conn, const GrantedWeaponLoadout &g
                            bool rebuild_rows) {
 	SessionReplyState &st = conn.reply;
 	// Retain the GRANTED body: the deploy-release bundle re-sends it (the client's
-	// 0x5A apply is the deploy un-latcher — resets dword_81474C; §5.30, D-NET-156).
+	// 0x5A apply is the deploy un-latcher — resets g_ClientDeployHold; §5.30, D-NET-156).
 	st.last_loadout_reply = encode_weapon_loadout(grant.reply);
 	st.ammo_pools = grant.ammo_pools;
 	st.shared_clips = grant.shared_clips;

@@ -41,6 +41,7 @@ void LaunchFlags::_bind_methods() {
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("mcp_port"), &LaunchFlags::mcp_port);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("no_hud"), &LaunchFlags::no_hud);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("no_reload"), &LaunchFlags::no_reload);
+	ClassDB::bind_static_method("LaunchFlags", D_METHOD("lan"), &LaunchFlags::lan);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("set_args_override", "args"),
 			&LaunchFlags::set_args_override);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("working_dir"), &LaunchFlags::working_dir);
@@ -166,6 +167,10 @@ bool LaunchFlags::no_hud() {
 
 bool LaunchFlags::no_reload() {
 	return parse().no_reload;
+}
+
+bool LaunchFlags::lan() {
+	return parse().lan;
 }
 
 void LaunchFlags::set_args_override(const PackedStringArray &args) {

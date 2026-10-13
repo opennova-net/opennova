@@ -24,9 +24,11 @@
 #include "conn_fan_test_util.h"
 
 #include <net/npwire/ingame_decode.h> // EntityPacketSubHeader / PlayerExtendedUplink
+#include <runtime/terrain_query/height_field.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/ingame_encode.h> // network_compress_fixedpoint, encode_* uplink
 #include <runtime/world/ai.h>                // AiSystem / AiEntity (engine-frame mirror)
+#include <runtime/world/collision.h>         // CollisionWorld (the LOS ray log)
 #include <runtime/world/angle.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h>
@@ -709,24 +711,32 @@ bool run_0a_subblock_phase_cycle() {
 	            "phase 3 carries won/lost/show-win/show-lose in retail order")) return false;
 	if (!expect(objective_fu.local_tail_present,
 	            "objective bytes cannot be mistaken for the recipient health tail")) return false;
-	// The phase-0 mask is the recipient team's live chain walk: the golden
+	// The phase-0 mask is the recipient slot team's live chain walk: the golden
 	// ASH_I5A steady 0x8 is zone 3 wholly owned, and it follows the zone when
-	// it changes hands. The joiner keeps the word as its FARP unlock mask.
-	// [orig: written @0x4FF996..0x4FF9BB; the client store @0x430136]
+	// it changes hands. The joiner keeps the word as its FARP unlock mask. The
+	// recipient is a split slot (a script team write to the body, which stores
+	// the entity byte alone): its row's slot team is one past its body's, so
+	// the walk is its slot team's, never its body's nor a missing row's team 0
+	// (D-NET-674).
+	// [orig: written @0x4FF996..0x4FF9BB on the recipient slot @0x4FF6B4; the
+	//  client store @0x430136; Entity_SetTeamByNetId @0x43C680]
 	{
 		world.registry.configure_pool(1, 8);
-		const uint8_t team = world.registry.get(host_h)->team;
+		const uint8_t body_team = world.registry.get(host_h)->team;
+		const uint8_t slot_team = static_cast<uint8_t>(body_team + 1);
+		world.match.upsert_player({host_h, 0, "Host"});
+		world.match.set_player_slot_team(host_h, slot_team);
 		w::Entity zone;
 		zone.kind = w::EntityKind::Item;
 		zone.item_id = 1359;
 		zone.alive = true;
 		zone.is_capture_trigger = true;
 		zone.zone_number = 3;
-		zone.team = team;
+		zone.team = slot_team;
 		const w::EntityHandle owned_zone = world.registry.spawn(1, zone);
 		zone.zone_number = 1;
-		zone.team = static_cast<uint8_t>(team + 1);
-		world.registry.spawn(1, zone);
+		zone.team = static_cast<uint8_t>(slot_team + 1);
+		const w::EntityHandle other_zone = world.registry.spawn(1, zone);
 		world.zones.build_chain_from_mission();
 		for (const int32_t expected : {0x8, 0}) {
 			conns[0].s2c_phase = 0xFFu;
@@ -739,13 +749,29 @@ bool run_0a_subblock_phase_cycle() {
 			                    zone_fu.weapon.present,
 			            "zone-chain phase-0 frame decodes")) return false;
 			if (!expect(zone_fu.weapon.uniform_team_mask == expected,
-			            "phase 0 carries the recipient team's owned-zone walk")) return false;
+			            "phase 0 carries the recipient slot team's owned-zone walk")) return false;
 			ns::ClientReplicaPipeline fold;
 			fold.apply(zone_dg.tag, zone_dg.body);
 			if (!expect(fold.state().owned_zone_mask == static_cast<uint32_t>(expected),
 			            "client fold keeps the mask the FARP prompt reads")) return false;
-			world.registry.get(owned_zone)->team = static_cast<uint8_t>(team + 1);
+			world.registry.get(owned_zone)->team = static_cast<uint8_t>(slot_team + 1);
 		}
+		// Zone 3 back with the slot team and zone 1 on the body's: the body's
+		// team would be sent zone 1 (0x2).
+		world.registry.get(owned_zone)->team = slot_team;
+		world.registry.get(other_zone)->team = body_team;
+		conns[0].s2c_phase = 0xFFu;
+		ns::test::emit_all(world, conns);
+		ns::Datagram split_dg;
+		if (!expect(ch.client_recv(split_dg), "split-slot 0x0A frame dequeued")) return false;
+		nw::FrameUpdate split_fu;
+		if (!expect(nw::decode_frame_update(split_dg.body.data(), split_dg.body.size(),
+		                    ns::class_for_type_id, split_fu) &&
+		                    split_fu.weapon.present,
+		            "split-slot phase-0 frame decodes")) return false;
+		if (!expect(split_fu.weapon.uniform_team_mask == 0x8,
+		            "phase 0 carries the recipient slot team's zones, not its body's"))
+			return false;
 	}
 	std::printf("PASS 0a_subblock_phase_cycle\n");
 	return true;
@@ -1371,6 +1397,191 @@ bool run_0a_player_record_field_sources() {
 	if (!expect(rec->player.anim_channel_ratio == 37, "anim channel ratio rides off-15"))
 		return false;
 	std::printf("PASS 0a_player_record_field_sources\n");
+	return true;
+}
+
+// (i1b) D-NET-518 - the anchor is the recipient's EYE: Position plus the
+//      CameraOffset its body tick mirrors (entity+0x6C/+0x70/+0x74), as the
+//      header refs, the record origin and the priority reference, so the
+//      recipient's own record encodes -CameraOffset and another body's record
+//      encodes against the eye. The live retail capture's own z code for the
+//      0xD000 standing eye is 0x6801.
+//      [orig: Server_SendEntityStateToPlayer @0x517BEF..0x517C13; the eye
+//       mirror AiSystem::mirror_wire_anim]
+bool run_0a_anchor_is_the_recipient_eye() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	const w::EntityHandle me =
+			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
+	const w::EntityHandle other =
+			w::spawn_remote_player(world, player_spawn({9.0f, -4.0f, 3.5f}, 0, 0xFFF1));
+	w::AiEntity *body = world.ai.for_handle(me);
+	if (!expect(body != nullptr && world.ai.for_handle(other) != nullptr,
+	            "both bodies resolvable"))
+		return false;
+	constexpr int32_t kEyeX = 0x0700, kEyeY = -0x0380, kEyeZ = 0xD000;
+	body->inf.eye_offset_x = kEyeX;
+	body->inf.eye_offset_y = kEyeY;
+	body->inf.eye_offset_z = kEyeZ;
+	world.ai.mirror_wire_anim(*body, world);
+
+	std::vector<ns::Connection> conns;
+	ns::LoopbackChannel ch;
+	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, me, 0});
+	ns::test::emit_all(world, conns);
+	ns::Datagram dg;
+	nw::FrameUpdate fu;
+	if (!expect(ch.client_recv(dg) &&
+	                    nw::decode_frame_update(dg.body.data(), dg.body.size(),
+	                                            ns::class_for_type_id, fu),
+	            "0x0A frame decodes"))
+		return false;
+	const int32_t mx = w::to_fixed(1.0), my = w::to_fixed(2.0), mz = w::to_fixed(3.0);
+	const int32_t ex = mx + kEyeX, ey = my + kEyeY, ez = mz + kEyeZ;
+	if (!expect(fu.anchor_x == ex && fu.anchor_y == ey && fu.anchor_z == ez,
+	            "the header refs are the recipient's Position + CameraOffset"))
+		return false;
+	const nw::FrameUpdateRecord *own = nullptr, *peer = nullptr;
+	for (const auto &r : fu.records) {
+		if (r.handle == me.packed) own = &r;
+		if (r.handle == other.packed) peer = &r;
+	}
+	if (!expect(own != nullptr && peer != nullptr, "both player records present")) return false;
+	if (!expect(own->player.pos_x_compressed == nw::network_compress_fixedpoint(-kEyeX) &&
+	                    own->player.pos_y_compressed == nw::network_compress_fixedpoint(-kEyeY) &&
+	                    own->player.pos_z_compressed == 0x6801,
+	            "the own record encodes -CameraOffset (z code 0x6801 for the 0xD000 eye)"))
+		return false;
+	const int32_t ox = w::to_fixed(9.0), oy = w::to_fixed(-4.0), oz = w::to_fixed(3.5);
+	if (!expect(peer->player.pos_x_compressed == nw::network_compress_fixedpoint(ox - ex) &&
+	                    peer->player.pos_y_compressed == nw::network_compress_fixedpoint(oy - ey) &&
+	                    peer->player.pos_z_compressed == nw::network_compress_fixedpoint(oz - ez),
+	            "another body's record encodes against the eye"))
+		return false;
+	std::printf("PASS 0a_anchor_is_the_recipient_eye\n");
+	return true;
+}
+
+// (i1c) D-NET-518 - two legs measure from the recipient's BODY, not the eye
+//      refs: the round-event proximity score loads the slot's entity and reads
+//      its Position, and the priority list's LOS ray starts at Position. With
+//      a 5 u eye two rounds keep their body order (the one through the body
+//      first, though the eye sits on the other's line) and the LOS ray still
+//      starts at the body.
+//      [orig: Server_BuildRoundEventListForPlayer @0x4FFEE0 (`mov eax, [edi]`
+//       @0x50000A, Position @0x50000C..0x500012, the subtraction
+//       @0x500015..0x50001B); Server_BuildEntityPriorityList (`lea edx,
+//       [ecx+4]` @0x50EACD, heightOffset 0)]
+struct FanFlatTerrain {
+	static constexpr int kDim = 512;
+	std::vector<uint16_t> heightmap;
+	std::vector<int> sector_grid;
+	opennova::terrain::TerrainHeightField field;
+	FanFlatTerrain() : heightmap(kDim * kDim, 0), sector_grid(256, 1) {
+		field.heightmap = heightmap.data();
+		field.dim = kDim;
+		field.layout.sector_grid = sector_grid.data();
+		field.layout.origin_x = 0;
+		field.layout.origin_y = 0;
+	}
+};
+
+bool run_0a_round_score_and_los_read_the_body() {
+	constexpr int32_t kEyeZ = 5 << 16;
+	bool ok = true;
+	// Rounds: the shot_seq names each one (the stable key).
+	for (const int32_t eye_z : {0, kEyeZ}) {
+		w::World world;
+		world.registry.configure_pool(0, 8);
+		const w::EntityHandle me =
+				w::spawn_remote_player(world, player_spawn({100.0f, 100.0f, 10.0f}, 90, 0xFFF0));
+		const w::EntityHandle shooter =
+				w::spawn_remote_player(world, player_spawn({100.0f, 60.0f, 10.0f}, 0, 0xFFF1));
+		w::AiEntity *body = world.ai.for_handle(me);
+		if (!expect(body != nullptr, "recipient body resolvable")) return false;
+		body->inf.eye_offset_z = eye_z;
+		world.ai.mirror_wire_anim(*body, world);
+		std::vector<ns::Connection> conns;
+		ns::LoopbackChannel ch;
+		conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, me, 0});
+		ns::test::emit_all(world, conns); // arms the watermark
+		ns::Datagram dg;
+		(void)ch.client_recv(dg);
+		const auto round = [&](uint16_t seq, float z) {
+			w::RoundEvent ev;
+			ev.shooter_handle = shooter.packed;
+			ev.origin_x = w::to_fixed(100.0);
+			ev.origin_y = w::to_fixed(90.0);
+			ev.origin_z = w::to_fixed(z);
+			ev.dir_yaw = 0; // forward +y
+			ev.shot_seq = seq;
+			world.out.rounds.add(ev);
+		};
+		round(1, 15.0f); // passes 5 u over the body, through a 5 u eye
+		round(2, 10.0f); // passes through the body
+		ns::test::emit_all(world, conns);
+		nw::FrameUpdate fu;
+		if (!expect(ch.client_recv(dg) &&
+		                    nw::decode_frame_update(dg.body.data(), dg.body.size(),
+		                                            ns::class_for_type_id, fu),
+		            "the round frame decodes"))
+			return false;
+		if (!expect(fu.anchor_z == w::to_fixed(10.0) + eye_z,
+		            "the header refs keep the eye"))
+			return false;
+		ok = expect(fu.round_events.size() == 2 && fu.round_events[0].shot_seq == 2 &&
+		                    fu.round_events[1].shot_seq == 1,
+		            "the round through the body leads, whatever the eye") && ok;
+	}
+
+	// LOS: the replication ray starts at the body plus the 0.9 u lift.
+	for (const int32_t eye_z : {0, kEyeZ}) {
+		w::World world;
+		world.registry.configure_pool(0, 8);
+		world.registry.configure_pool(1, 8);
+		FanFlatTerrain terrain;
+		w::CollisionWorld cw;
+		cw.terrain = &terrain.field;
+		world.collision = &cw;
+		world.ai.terrain = &terrain.field;
+		world.ai.collision = &cw;
+		cw.set_ray_debug_enabled(true);
+		const w::EntityHandle me =
+				w::spawn_remote_player(world, player_spawn({100.0f, 100.0f, 10.0f}, 90, 0xFFF0));
+		w::AiEntity *body = world.ai.for_handle(me);
+		if (!expect(body != nullptr, "recipient body resolvable")) return false;
+		body->inf.eye_offset_z = eye_z;
+		world.ai.mirror_wire_anim(*body, world);
+		w::Entity veh;
+		veh.kind = w::EntityKind::Item;
+		veh.item_id = 0x050D;
+		veh.net_class_code = uint8_t(nw::EntityClass::Vehicle);
+		veh.health = 3000;
+		veh.health_max = 3000;
+		veh.position = {150.0f, 100.0f, 10.0f};
+		veh.yaw = 90;
+		const w::EntityHandle target = world.registry.spawn(1, veh);
+		world.weather.core.scalar_channels.fog_dist_fp = 600 << 16; // the view distance
+		std::vector<ns::Connection> conns;
+		ns::LoopbackChannel ch;
+		conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, me, 0});
+		ns::test::emit_all(world, conns);
+		const auto &ring = cw.ray_debug_rings()[static_cast<size_t>(
+				w::CollisionWorld::RayDebugCategory::kReplicationLos)];
+		bool found = false;
+		for (int i = 0; i < ring.count; ++i) {
+			const w::CollisionWorld::RayDebugEvent &ray = ring.events[static_cast<size_t>(i)];
+			if (ray.end.x != w::to_fixed(150.0)) continue;
+			found = ray.start.x == w::to_fixed(100.0) && ray.start.y == w::to_fixed(100.0) &&
+					ray.start.z == w::to_fixed(10.0) + 0xE666 &&
+					ray.result == w::CollisionWorld::kRayDebugClear;
+		}
+		ok = expect(target.valid() && found,
+		            "the LOS ray starts at the body plus the lift, whatever the eye, and clears") &&
+				ok;
+	}
+	if (!ok) return false;
+	std::printf("PASS 0a_round_score_and_los_read_the_body\n");
 	return true;
 }
 
@@ -2177,6 +2388,8 @@ int main() {
 	                run_0a_priority_dead_recipient_social_score() &&
 	                run_0a_owner_hidden_admission() &&
 	                run_0a_player_record_field_sources() &&
+	                run_0a_anchor_is_the_recipient_eye() &&
+	                run_0a_round_score_and_los_read_the_body() &&
 	                run_0a_deploy_hold_and_tail_stance() && run_0x26_attach_mounted_echo() &&
 	                run_mounted_g_slot_route_echo() &&
 	                run_vehicle_drive_authority() &&

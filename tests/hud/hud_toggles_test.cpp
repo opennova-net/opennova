@@ -558,6 +558,58 @@ void test_toggle_server_row() {
 	CHECK(s.server_status_view);
 }
 
+// flipmouse (row 79, dispatch 9) and mousescale (row 82, dispatch 17) fire on
+// their press edge for the embedder's look words; the step carries the fire's
+// sign, and Shift (the sign) is no chord guard on either row; the toast is
+// Misc/STRMISC_MOUSESCALE with the word as $A [orig: case 9 @0x49afbb; case 17
+// @0x49b185..0x49b1fe].
+void test_mouse_rows() {
+	CHECK(std::strcmp(hud_toggle_row_token(kRowFlipMouse), "flipmouse") == 0);
+	CHECK(std::strcmp(hud_toggle_row_token(kRowMouseScale), "mousescale") == 0);
+	HudKeyPoll rows;
+	hud_key_poll_set_rows(rows, (1u << kRowFlipMouse) | (1u << kRowMouseScale));
+	CHECK(rows.flipmouse && rows.mousescale && !rows.toggle_server);
+	HudToggleState s;
+	HudKeyPoll k = keys();
+	k.flipmouse = true;
+	CHECK(hud_toggles_poll(s, k) == kMouseFlipped);
+	// Held: ours' press edge fires once (retail's auto-repeat re-fires, D-CTRL-6).
+	CHECK(hud_toggles_poll(s, k) == 0);
+	k.flipmouse = false;
+	hud_toggles_poll(s, k);
+	// A Shift/Alt chord does not hold either row back.
+	k.chorded = true;
+	k.flipmouse = true;
+	CHECK(hud_toggles_poll(s, k) == kMouseFlipped);
+	k.flipmouse = false;
+	k.mousescale = true;
+	CHECK(hud_toggles_poll(s, k) == kMouseScaleStepped);
+	k.mousescale = false;
+	hud_toggles_poll(s, k);
+	k.mousescale = true;
+	k.mouse_scale_negative = true;
+	CHECK(hud_toggles_poll(s, k) == (kMouseScaleStepped | kMouseScaleNegative));
+	k.mousescale = false;
+	hud_toggles_poll(s, k);
+	// Gameplay input closed: no fire.
+	k.active = false;
+	k.mousescale = true;
+	CHECK(hud_toggles_poll(s, k) == 0);
+	// The toast.
+	const GameTextLookup gametext = [](const char *section, const char *key,
+			const char *fallback) -> std::string {
+		if (std::strcmp(section, "Misc") == 0 && std::strcmp(key, "STRMISC_MOUSESCALE") == 0)
+			return "Mouse scale set to $A (128 is nominal).";
+		return fallback;
+	};
+	CHECK(mouse_scale_toast(gametext, 144) == "Mouse scale set to 144 (128 is nominal).");
+	CHECK(mouse_scale_toast(gametext, 1) == "Mouse scale set to 1 (128 is nominal).");
+	const GameTextLookup none = [](const char *, const char *, const char *fallback) {
+		return std::string(fallback);
+	};
+	CHECK(mouse_scale_toast(none, 144).empty());
+}
+
 // The view's reroutes: the map legend is refused on the authority's view;
 // the playerlist action flips the page's score list instead of the Tab board
 // (a dedicated host's always) [orig: @0x49af8c..0x49af9c; case 102
@@ -771,6 +823,7 @@ int main() {
 	test_voice_macro_menus();
 	test_escape_pause_and_voice_menus();
 	test_toggle_server_row();
+	test_mouse_rows();
 	test_server_status_reroutes();
 	test_quit_dialog_escape_legs();
 	test_special_keys();

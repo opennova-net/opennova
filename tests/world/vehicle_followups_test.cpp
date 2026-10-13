@@ -39,6 +39,7 @@ struct Rig {
         terrain.layout.origin_x = terrain.layout.origin_y = 0;
         Entity v;
         v.kind = EntityKind::Item;
+        v.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
         v.has_item_def = true;
         // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
         v.item_attrib = kItemAttribPlayerControl;
@@ -55,6 +56,7 @@ struct Rig {
         handle = world.registry.spawn(1, v);
         Entity d;
         d.kind = EntityKind::Organic;
+        d.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         d.health = d.health_max = 100;
         d.alive = true;
         driver = world.registry.spawn(0, d);
@@ -658,6 +660,7 @@ CollisionModel box_model(double hx, double hy, double hz) {
 EntityHandle side_block(Rig &r, CollisionWorld &collision, int32_t attrib) {
     Entity block;
     block.kind = EntityKind::Item;
+    block.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     block.item_id = 901;
     block.item_type = 1;
     block.has_item_def = true;

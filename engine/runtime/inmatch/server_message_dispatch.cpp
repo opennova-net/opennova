@@ -1575,7 +1575,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				}
 				// Golden (f161-162): C 0x0A (empty) -> S 0x19 (4 B tick) ONLY. The prior
 				// emit_roster sent 0x46/0x16/0x19/0x1A — the unsolicited 0x1A re-sets
-				// dword_81474C (the deploy gate) via NapiClient_WaitForGameStart @0x42cc10,
+				// g_ClientDeployHold (the deploy gate) via NapiClient_WaitForGameStart @0x42cc10,
 				// re-blocking deploy after 0x0F cleared it. The 0x16 pushes are proactive
 				// (post-handshake + periodic during world-stream), not reactive to 0x0A.
 				// The body is the host's GetTickCount, the 0x28 window's floor.
@@ -1974,8 +1974,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				break;
 			}
 			case c2s::SPECTATOR_RESPAWN: { // [orig: Server_ProcessClientRequestSpectatorRespawn @0x51C840]
-				// Gates in order: no spawn gate, authority, permanent death on, a
-				// spectator capacity, a player, not already a spectator; then
+				// Gates in order: the round-over latch (where the convert runs), authority,
+				// permanent death, a spectator capacity, a player, not a spectator; then
 				// Server_ConvertPlayerToSpectator(player, packet i16, 1). The conversion
 				// needs the owning context, so it is staged for the host tick.
 				if (inputs.server_ctx == nullptr || !inputs.server_ctx->is_authority) break;

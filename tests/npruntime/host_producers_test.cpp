@@ -519,7 +519,17 @@ bool check_spectator_respawn_request() {
 	bool saw = false;
 	for (const ns::Datagram &d : to_p2)
 		if (d.tag == s2c::FORMATTED_GAME_TEXT && d.body == want) saw = true;
-	return expect(saw, "S2C 0x32 [5][name] reaches the other player");
+	if (!expect(saw, "S2C 0x32 [5][name] reaches the other player")) return false;
+	// Past the round end the handler's first gate drops the request.
+	// [orig: Server_ProcessClientRequestSpectatorRespawn @0x51C840..0x51C847]
+	HostFixture over(2);
+	over.ctx.config.permanent_death = true;
+	over.ctx.config.spectator_slots = 1;
+	over.world.match.latch_round_over();
+	(void)over.dispatch(0, c2s::SPECTATOR_RESPAWN, {0xFF, 0xFF});
+	inmatch::Server_ProcessSpectatorRespawnRequests(over.ctx, over.world);
+	return expect(!over.conn(0).link.spectator && !over.conn(0).reply.spectator_convert_pending,
+			"past the round end the request converts nothing");
 }
 
 // D-NET-408: the convert ends in the deploy leg. The stock request names no

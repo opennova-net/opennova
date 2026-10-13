@@ -2238,7 +2238,7 @@ int main() {
 
 	// --- 5. The 0x0E deploy of a RESPAWN-PENDING joiner emits the DEPLOY-RELEASE bundle
 	// (0x5A + 0x61 + optional 0x1E) and clears the pending/hidden pair — the client's 0x5A
-	// apply resets its dword_81474C wait-gate (set by the pick) and resumes the C2S 0x0C
+	// apply resets its g_ClientDeployHold wait-gate (set by the pick) and resumes the C2S 0x0C
 	// uplink [orig: Server_DeployPlayer deploy tail: Server_SendWeaponSlotListToPlayer
 	// @0x502550 + Server_SendRandomSeedToPlayer @0x5101a0; client un-latch §5.30
 	// @0x4290E0; golden deploy frame 240018 = 0x5A + 0x61 + 0x1E one datagram; the v32

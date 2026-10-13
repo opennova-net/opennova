@@ -68,6 +68,7 @@ Result resolve(int16_t nx, int16_t ny, int16_t nz, int32_t velocity,
     if (!replica) {
         Entity body;
         body.kind = EntityKind::Organic;
+        body.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         body.position = {10, 10, 5};
         body.bound_radius = 1;
         body.alive = true;
@@ -183,6 +184,7 @@ struct MotorRig {
         collision.terrain = &flat.field;
         Entity e;
         e.kind = EntityKind::Organic;
+        e.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         e.position = {10.0f, 10.0f, static_cast<float>(start_z) / 65536.0f};
         e.bound_radius = 1;
         e.alive = true;

@@ -832,7 +832,11 @@ bool tick_item_class_motion(World &world, Entity &entity,
     if (entity.death_motion != DeathMotionMode::BuildingEffects) return false;
     const auto *traits = world.tables.item_death_traits.get(entity.item_id);
     if (traits == nullptr || traits->physics != 0) return true;
-    if ((entity.engine_flags & 6u) == 0) update_item_ambient_sound(world, entity);
+    // The ambient loop for a live, unhusked row on the batch's last tick, as
+    // the genx row's tail [orig: Entity_UpdateWaterPhysicsAndEffects - Flags & 6
+    //  @0x4A93C5, dword_24E0E80 @0x4A93CC, Entity_UpdateEnvSoundEmitter @0x4A93D6].
+    if ((entity.engine_flags & 6u) == 0 && world.rules.last_tick_of_batch)
+        update_item_ambient_sound(world, entity);
     if ((entity.engine_flags & kEntityFlagHusk) == 0) return true;
     const double progress = entity.destroy_progress;
     // The one-time 0x26 send uses subtype bit 0x20.
@@ -906,6 +910,13 @@ void tick_item_event_pool(World &world, int pool) {
             continue;
         }
         tick_item_death_motion(world, *entity, world.tables.terrain, water_z, world.out.destruction);
+        // A genx row's own update, its parent follow, on the same cohort
+        // [orig: Entity_UpdateParentTransform @0x4A88B0 through @0x4C22E7 /
+        //  @0x4C2393].
+        entity = world.registry.get(handle);
+        if (entity != nullptr && entity->registry_spawn_id == lifetime &&
+                entity->drop_motion != DropMotion::None)
+            update_dropped_object(world, *entity);
     }
 }
 

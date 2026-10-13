@@ -141,6 +141,7 @@ struct Rig {
         building = w.registry.spawn(2, b);
         Entity s;
         s.kind = EntityKind::Organic;
+        s.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         s.net_id = 1;
         s.position = {static_cast<float>(x), static_cast<float>(y), 0.0f};
         s.bound_radius = 1.0f;
@@ -283,6 +284,7 @@ struct DropRig {
         w.collision = &cw;
         Entity s;
         s.kind = EntityKind::Organic;
+        s.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         s.net_id = 1;
         s.position = at;
         s.alive = true;
@@ -308,6 +310,7 @@ struct DropRig {
     EntityHandle carry_flag(Vec3 home) {
         Entity f;
         f.kind = EntityKind::Item;
+        f.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
         f.item_id = 4091;
         f.has_item_def = true;
         f.net_id = 7;
@@ -650,6 +653,7 @@ struct CarrierRig {
         w.registry.configure_pool(1, 4);
         Entity v;
         v.kind = EntityKind::Item;
+        v.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
         v.has_item_def = true;
         v.item_type = 1;
         v.health = 100;
@@ -693,6 +697,7 @@ void test_ewep_class_callback_rides_the_carrier_quad() {
         rig.w.tables.item_death_traits.set(700, traits);
         Entity gunner;
         gunner.kind = EntityKind::Organic;
+        gunner.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         gunner.alive = true;
         rig.gun().primary_occupant = rig.w.registry.spawn(0, gunner);
         destruction_notify_item_damage(rig.w, rig.gun(), 0);
@@ -726,6 +731,7 @@ void test_seated_rider_rides_the_parent_quad() {
     w.registry.configure_pool(1, 4);
     Entity gun_seed;
     gun_seed.kind = EntityKind::Item;
+    gun_seed.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     gun_seed.has_item_def = true; // seats need the def (D-NET-422)
     gun_seed.health = 100;
     gun_seed.alive = true;
@@ -740,6 +746,7 @@ void test_seated_rider_rides_the_parent_quad() {
     const EntityHandle gun_h = w.registry.spawn(1, gun_seed);
     Entity gunner;
     gunner.kind = EntityKind::Organic;
+    gunner.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     gunner.player_class = 8;
     gunner.health = 100;
     gunner.alive = true;

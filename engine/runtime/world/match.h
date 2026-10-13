@@ -227,10 +227,19 @@ struct MatchPlayer {
     bool respawn_pending = false;
     // Player-slot +416 (+0x1A0), the slot's own team byte: 0 for a spectator,
     // and left by a script team write to the body, which stores the entity
-    // byte alone. The numbered capture's scorers match it. The authority
-    // mirrors its connection's slot team here wherever that changes.
+    // byte alone. The numbered capture's scorers match it, the alive-holder
+    // count and the capture delta's team sizes count by it and the proximity
+    // pass's zone-time split tests its bit. The authority stamps its
+    // connection's slot team here at each player add and wherever it changes
+    // a live slot's team (the spectator convert, a team change, the
+    // auto-balance). The teardown's side swap changes the connection's alone,
+    // which no reader sees: the old mission's bodies are despawned straight
+    // after and the next mission's add stamps the swapped team.
     // [orig: CaptureZone_CheckProximityScoring @0x500CEE / @0x500CF4;
-    //  Entity_SetTeamByNetId @0x43C680]
+    //  Game_CountAlivePlayersPerTeam @0x50021D;
+    //  CaptureZone_CalculateControlDelta @0x50119B;
+    //  Server_UpdateCaptureZoneProximity @0x508C95; Entity_SetTeamByNetId
+    //  @0x43C680]
     uint8_t slot_team = 0;
 };
 
@@ -539,9 +548,9 @@ class Match {
     void return_flag_home(World &world, EntityHandle flag, MatchGameplayEventKind kind,
                           EntityHandle actor = EntityHandle{});
     void update_objective_proximity(const World &world);
-    // Per team: the non-spectator players whose dead bit is clear and whose
-    // last proximity mask holds bit 0 (the 4095 objective, a team-0 hill or
-    // capturable, any hill outside the team modes), none past the round end.
+    // Per slot team: the non-spectator players whose dead bit is clear and
+    // whose last proximity mask holds bit 0 (the 4095 objective, a team-0 hill
+    // or capturable, any hill outside the team modes), none past the round end.
     // Both the hold timer and the TKOTH 0x16 byte read it. [orig: Game_CountAlivePlayersPerTeam
     // @0x5001C0; its callers Game_AccumulateTeamScores @0x508D82 and
     // Server_BuildAndBroadcastScoreboard @0x50D9B5]
@@ -594,9 +603,10 @@ DropCarrierPose drop_carrier_pose(const World &world, const Entity &carrier);
 //  NapiNPClientMsg_0x02F @0x43105c / @0x4310dc]
 void drop_object_from_carrier(World &world, Entity &object, const DropCarrierPose &carrier);
 
-// One pool-1 visit of a dropped object's installed callback (Entity::
-// drop_motion): the fall until the clamped ground stops it, then the ride on
-// the entity it landed on, which falls again when that entity dies.
+// One visit of an entity's installed drop motion (Entity::drop_motion; every
+// pool-1 visit, a pool-2/3 row's cohort): a dropped object's fall until the
+// clamped ground stops it, then the ride on the entity it landed on, which
+// falls again when that entity dies; or a genx def's own ride.
 // [orig: Entity_UpdatePositionAndTransform @0x4adef0;
 //  Entity_UpdateParentTransform @0x4a88b0; Entity_InterpolateFromParentDelta
 //  @0x4a8d60]

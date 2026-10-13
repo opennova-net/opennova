@@ -371,6 +371,10 @@ void HostRole::drain_host_client_gameplay_requests() {
 		// respawn handler deploys the host's own player like a joiner
 		// [orig: Input_HandleActionBinding case 12 @0x49b17b;
 		//  Server_ProcessClientRequestRespawn @0x519AF0].
+		// So does the same action's spectator convert, the reliable 0x51 a
+		// dead player under permanent death queues, whose handler reads the
+		// host context [orig: case 12 @0x49B0B9;
+		//  Server_ProcessClientRequestSpectatorRespawn @0x51C840].
 		// So does its stance key's 0x1D: the handler latches the host's own
 		// player on the frame after the press, ahead of that frame's body
 		// update. Retail's pack runs before it and is overwritten by it; here
@@ -410,17 +414,19 @@ void HostRole::drain_host_client_gameplay_requests() {
 				dg.tag != c2s::EMOTE_REQUEST && dg.tag != c2s::RADIO_CALL_REQUEST &&
 				dg.tag != c2s::TEAM_CHANGE_REQUEST && dg.tag != c2s::STANCE_CHANGE &&
 				dg.tag != c2s::RESPAWN_REQUEST && dg.tag != c2s::DEATH_TIMEOUT_RESET &&
-				dg.tag != c2s::CLIENT_QUALITY) {
+				dg.tag != c2s::SPECTATOR_RESPAWN && dg.tag != c2s::CLIENT_QUALITY) {
 			deferred.push_back(std::move(dg));
 			continue;
 		}
 		// The chat handler, the snapshot builder, the radio call (its
 		// designation table and zone test), the squad handlers, the team
-		// change and the Respawn key's 0x41 (the authority and the respawn
-		// timeout) read the host context.
+		// change, the Respawn key's 0x41 (the authority and the respawn
+		// timeout) and the 0x51 convert (its authority test) read the host
+		// context.
 		const bool reads_ctx = squad || dg.tag == c2s::CHAT_MESSAGE ||
 				dg.tag == c2s::VISIBLE_PLAYERS_REQUEST || dg.tag == c2s::RADIO_CALL_REQUEST ||
-				dg.tag == c2s::TEAM_CHANGE_REQUEST || dg.tag == c2s::DEATH_TIMEOUT_RESET;
+				dg.tag == c2s::TEAM_CHANGE_REQUEST || dg.tag == c2s::DEATH_TIMEOUT_RESET ||
+				dg.tag == c2s::SPECTATOR_RESPAWN;
 		std::vector<ProtocolMessage> messages;
 		messages.push_back(make_protocol_message(dg.tag, std::move(dg.body)));
 		inmatch::ServerDispatchInputs inputs;
@@ -584,6 +590,7 @@ void HostRole::run_tick(const TickInput &input) {
 		// [orig: Game_ProcessMainFrame — CNetQuality_SetLevel @0x52659b,
 		//  CNetQuality_UpdateIndicators @0x52668d, Server_TickUpdate @0x5266b6].
 		state.client_runtime->set_net_quality_level(ctx.net_quality_level);
+		state.client_runtime->set_local_player_position(kernel.world);
 		state.client_runtime->Client_ProcessNetworkFrame(now);
 		state.client_runtime->apply_received_effects(kernel.world);
 		state.client_runtime->flush_host_sends(); // the receive handlers' own sends

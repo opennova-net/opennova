@@ -702,7 +702,7 @@ void Match::record_flag_pickup(World &world, EntityHandle player_handle,
     flag->flags |= kEntityFlagCarried;
     // The attach puts back the def's own update callback, ending a drop's
     // fall or ride. [orig: Entity_AttachCarriedObject @0x43c191]
-    flag->drop_motion = DropMotion::None;
+    flag->drop_motion = def_update_drop_motion(*flag);
     state->return_ticks = static_cast<int32_t>(rules_.flag_return_ticks);
     add_event(world, *scorer, MatchStats::kFlagPickups, score_value(11));
     add_team_event(carrier->team, MatchStats::kFlagPickups, score_value(11));
@@ -1480,9 +1480,14 @@ void Match::update_objective_proximity(const World &world) {
             if (!within_2d(player_entity->position, hill->position,
                            hill->bound_radius))
                 continue;
-            if (live && hill->team < 8u)
-                match_player.objective_proximity_mask |=
-                    team_mode ? static_cast<uint8_t>(1u << hill->team) : 0x01u;
+            // The team modes OR the hill team's bit through a byte `shl`, its
+            // count taken mod 32; the others set bit 0 whatever the team.
+            // [orig: Server_UpdateCaptureZoneProximity `mov cl, [edi+162h]` /
+            //  `shl dl, cl` @0x508A7D..0x508A87; `or byte ptr [esi+15F0Ch], 1`
+            //  @0x508ABB]
+            if (live)
+                match_player.objective_proximity_mask |= team_mode
+                    ? static_cast<uint8_t>(1u << (hill->team & 31u)) : uint8_t{0x01};
             if (!team_mode || hill->team == 0)
                 in_hill = true;
         }
@@ -1498,9 +1503,10 @@ void Match::update_objective_proximity(const World &world) {
                 !world.zones.is_capturable(2, *zone))
                 continue;
             in_capturable_entity = true;
-            if (live && team_mode && zone->team < 8u)
+            // [orig: `mov cl, [edi+162h]` / `shl dl, cl` @0x508C16..0x508C1E]
+            if (live && team_mode)
                 match_player.objective_proximity_mask |=
-                    static_cast<uint8_t>(1u << zone->team);
+                    static_cast<uint8_t>(1u << (zone->team & 31u));
         }
 
         // A numbered capturable entity anywhere in the mission globally wins
@@ -1540,9 +1546,17 @@ void Match::update_objective_proximity(const World &world) {
                     add_team_event(player_entity->team, MatchStats::kHillTime,
                                    score_value(33), raw_delta);
             } else {
-                const bool friendly_zone = player_entity->team < 8u &&
+                // The owner bit tested is the slot's own team byte's (+416),
+                // not its body's (D-NET-672), shifted as a dword; the team
+                // rows below stay the body's (the scorer's entity+0x162).
+                // [orig: `movzx ecx, byte ptr [esi+1A0h]` @0x508C95 /
+                //  @0x508CBE, `shl edx, cl` @0x508C9C / @0x508CCA, the mask
+                //  byte test @0x508C9E..0x508CA7 / @0x508CCC..0x508CD5;
+                //  GameEvent_ProcessScoring `movsx esi, byte ptr [ebx+162h]`
+                //  @0x52F65F]
+                const bool friendly_zone =
                     (match_player.objective_proximity_mask &
-                     static_cast<uint8_t>(1u << player_entity->team)) != 0;
+                     (1u << (match_player.slot_team & 31u))) != 0;
                 if (friendly_zone) {
                     // Event 20 writes friendly time to the player, but retail
                     // writes hostile time to the team row. The mismatch is in
@@ -1583,13 +1597,16 @@ std::array<int32_t, 5> Match::count_alive_players_per_team(const World &world) c
         return holders;
     for (const MatchPlayer &match_player : players_) {
         const Entity *entity = world.registry.get(match_player.identity.entity);
+        // The slot's own team byte (+416) indexes the team record, not its
+        // body's (D-NET-673).
         // [orig: Game_CountAlivePlayersPerTeam @0x5001C0 - the spectator
-        //  test @0x500214, the dead bit @0x50022F, the mask's bit 0 @0x500235]
+        //  test @0x500214, `movzx eax, byte ptr [ecx+1A0h]` @0x50021D, the
+        //  dead bit @0x50022F, the mask's bit 0 @0x500235, the count @0x50023E]
         if (match_player.spectator || !is_live_player(entity) ||
             (match_player.objective_proximity_mask & 0x01u) == 0 ||
-            entity->team >= holders.size())
+            match_player.slot_team >= holders.size())
             continue;
-        ++holders[entity->team];
+        ++holders[match_player.slot_team];
     }
     return holders;
 }
@@ -1719,7 +1736,8 @@ void fall_step(World &world, Entity &object) {
                                                                              : DropMotion::Ride;
 }
 
-// The landed object's parent follow: its own pose saved, then the ground
+// The parent follow of a landed object or a genx def's entity (the genx
+// row's own callback, def_update_drop_motion): its own pose saved, then the ground
 // entity's per-tick delta applied, the translation and the rotation about the
 // ground entity with the attitude adopted (the one arithmetic both callbacks
 // share, world/carrier_motion.h). The ride alone drops back into the fall

@@ -74,9 +74,9 @@ public:
 	bool is_first_run() const { return store_.first_run(); }
 
 	bool rename(const String &p_text) { return store_.rename(p_text.utf8().get_data()); }
-	// The PLAYERNAME edit's set and the name rule its change notice runs; the
-	// text the edit is left holding (engine PlayerProfiles::set_name_edit).
-	String set_name_edit(const String &p_text);
+	// The PLAYERNAME edit's change notice over its label: the label, or the
+	// cut the edit is set to (engine PlayerProfiles::name_changed).
+	String name_changed(const String &p_label);
 	void commit_name(const String &p_text);
 	void reset_current() { store_.reset_current(defaults_); }
 

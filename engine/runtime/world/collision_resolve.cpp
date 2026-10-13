@@ -956,10 +956,14 @@ int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32
     // Entity_BuildProximityListsFromPools callers Entity_ResetToSpawnState
     // @ 0x4b98eb, Entity_RespawnVehicle @ 0x460133, WacCmd_Tele @ 0x4f2384,
     // WacCmd_TeleSsn @ 0x4f7f48, EventAction_TeleportEntityToSpawn @ 0x43e14f].
+    // The ad-hoc slice is scratch past the arena's own entries (which a
+    // skipped row's kept slice may still read), holding at most the room the
+    // current fill leaves, as one more source of the build would.
     const size_t arena_mark = arena_.size();
+    const int32_t room = kCandidateArenaCap - arena_used_;
     const int32_t range = source_bound_radius_q16 + 0x40000;
     CandidateSlice slice;
-    slice.start = static_cast<int32_t>(arena_.size());
+    slice.start = static_cast<int32_t>(arena_mark);
     slice.count = 0;
     auto wire_slice = candidate_slices_built_
             ? wire_candidates_.find(exclude_handle)
@@ -984,7 +988,7 @@ int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32
             abs32(d.z - pos[2]) > total)
             continue;
         if (vec_len_ftol(d.x - pos[0], d.y - pos[1], d.z - pos[2]) > total) continue;
-        if (arena_.size() >= 3000) break;
+        if (slice.count >= room) break;
         arena_.push_back(d.h);
         ++slice.count;
     }
@@ -998,7 +1002,7 @@ int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32
             abs32(sz - pos[2]) > total)
             continue;
         if (vec_len_ftol(sx - pos[0], sy - pos[1], sz - pos[2]) > total) continue;
-        if (arena_.size() >= 3000) break;
+        if (slice.count >= room) break;
         arena_.push_back(s.h);
         ++slice.count;
     }

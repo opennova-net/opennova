@@ -141,6 +141,35 @@ int main() {
 		check(character_join_vars(p).avatar[1] == 11, "the override rides as VCB");
 	}
 
+	// No Avatars.def: the table is empty and the session start still takes the
+	// record's override where nonzero, else the resolve's miss, 1, on BOTH
+	// sides (side B is not the stock table's head voice 10); no character
+	// resolves, so the id is the empty walk's 0 and a saved class stands
+	// [orig: CAvatarDefs_Init @0x57b180 - the clears @0x57b1ae / @0x57b1c1;
+	//  Game_ApplySessionSettingsToGlobals @0x551735..0x5517a2;
+	//  Avatars_ResolveSelectionIndex @0x57ae60 - the miss @0x57ae85].
+	{
+		JoinSideSelection none[2];
+		JoinCharacterProfile p = join_character_profile_without_table(none);
+		check(p.avatars[0] == 1 && p.avatars[1] == 1, "no table: a zero override is 1 on both sides");
+		check(p.character_ids[0] == 0 && p.character_ids[1] == 0, "no table: no character id");
+		check(p.player_classes[0] == 8 && p.player_classes[1] == 8, "no table: the default classes");
+		JoinSideSelection saved[2];
+		saved[0].voice_override = 7;
+		saved[1].present = true;
+		saved[1].nationality_index = 0;
+		saved[1].division_index = 0;
+		saved[1].combo_index = 0;
+		saved[1].player_class = 6;
+		p = join_character_profile_without_table(saved);
+		check(p.avatars[0] == 7, "no table: a nonzero override is the avatar byte");
+		check(p.avatars[1] == 1, "no table: a saved side's zero override is 1");
+		check(p.character_ids[1] == 0 && p.player_classes[1] == 6,
+				"no table: a saved side resolves no id and keeps its class");
+		const opennova::inmatch::CharacterJoinVars vars = character_join_vars(p);
+		check(vars.avatar[0] == 7 && vars.avatar[1] == 1, "the bytes ride as VCA / VCB");
+	}
+
 	// The wire projection: ids and bytes narrowed, and the TR byte the join's
 	// side requirement, 0xFF (-1) whatever the profile holds (D-NET-590)
 	// [orig: UI_JoinSelectedSession @0x569bff / @0x569c23].

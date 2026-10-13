@@ -176,6 +176,15 @@ void MissionKernel::bind_spawned_body(w::EntityHandle handle) {
 				[](int32_t) -> uint8_t { return 0; }, handle);
 	mission::resolve_ai_weapons(world, *items, handle, &assets());
 	ensure_collision_instance(world, handle);
+	// The host's spawn builds the slices after its model init, so the body's
+	// first slice reads the bound radius the model stamped.
+	// [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - EntityDef_LoadModelsAndCallbacks
+	//  called @0x43C45F, Entity_InitFromModel @0x43C492, the
+	//  Entity_BuildProximityListsFromPools call @0x43C4EB]
+	// A joiner's own body: retail's client creates it in NapiNPClientMsg_0x00C
+	// @0x42E730, which never calls the builder; world::spawn_player already
+	// rebuilt there, so this rebuild adds no edge, it rereads the radius.
+	if (world.collision != nullptr) world.collision->refresh_after_registry_change(world);
 }
 
 int MissionKernel::resolve_collision_instances() {
@@ -415,6 +424,16 @@ int MissionKernel::spawn_local_player_at_start(uint32_t game_type) {
 bool MissionKernel::spawn_local_player(const w::PlayerSpawn &spawn) {
 	const w::EntityHandle h = w::spawn_player(world, spawn);
 	if (!h.valid()) return false;
+	// Once the collision world is up (a spawn after the boot's), the model
+	// init stamps the bound radius ahead of the spawn's slice build; the
+	// boot's own spawn precedes the wiring, and the mission start's build
+	// follows its collision step. [orig: Entity_SpawnFromAnimSlotProperty
+	//  @0x43C390 - Entity_InitFromModel called @0x43C492, the
+	//  Entity_BuildProximityListsFromPools call @0x43C4EB]
+	if (world.collision != nullptr) {
+		ensure_collision_instance(world, h);
+		world.collision->refresh_after_registry_change(world);
+	}
 	resolve_new_infantry_adm_ids();
 	// The look yaw starts at the spawn's heading word [orig:
 	// Entity_FindBestSpawnPoint @0x50CF4D].

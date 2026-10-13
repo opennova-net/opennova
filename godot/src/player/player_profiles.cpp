@@ -227,8 +227,8 @@ bool PlayerProfiles::is_nameless() const {
 	return (store_.current().flags & playersav::kRecordFlagNoName) != 0;
 }
 
-String PlayerProfiles::set_name_edit(const String &p_text) {
-	return opennova::to_gd(store_.set_name_edit(p_text.utf8().get_data()));
+String PlayerProfiles::name_changed(const String &p_label) {
+	return opennova::to_gd(store_.name_changed(p_label.utf8().get_data()));
 }
 
 void PlayerProfiles::commit_name(const String &p_text) {
@@ -396,7 +396,7 @@ void PlayerProfiles::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_nameless"), &PlayerProfiles::is_nameless);
 	ClassDB::bind_method(D_METHOD("is_first_run"), &PlayerProfiles::is_first_run);
 	ClassDB::bind_method(D_METHOD("rename", "text"), &PlayerProfiles::rename);
-	ClassDB::bind_method(D_METHOD("set_name_edit", "text"), &PlayerProfiles::set_name_edit);
+	ClassDB::bind_method(D_METHOD("name_changed", "label"), &PlayerProfiles::name_changed);
 	ClassDB::bind_method(D_METHOD("commit_name", "text"), &PlayerProfiles::commit_name);
 	ClassDB::bind_method(D_METHOD("reset_current"), &PlayerProfiles::reset_current);
 	ClassDB::bind_static_method("PlayerProfiles", D_METHOD("word_names"), &PlayerProfiles::word_names);

@@ -34,7 +34,7 @@ namespace {
 
 const char kUsage[] =
 		"usage: opennova-serve --resource-dir <game dir> /HOST <host file> [/exp <name>] [/d]\n"
-		"                      [/game <code>] [--loose-root] [--lan-port <n>] [--log-debug]\n"
+		"                      [/game <code>] [/LAN] [--loose-root] [--lan-port <n>] [--log-debug]\n"
 		"                      [--master-host <gate>] [--master-gate-port <n>]\n"
 		"                      [--credentials <file>] [--allow-public]\n"
 		"  --resource-dir   the game install to serve from (its PFF set, as opennova.exe takes it)\n"
@@ -43,6 +43,8 @@ const char kUsage[] =
 		"                   line per rotation entry; the last Mission line is the starting map\n"
 		"  /exp, /d, /game  mount the expansion (/mod is /exp), prefer loose files, pick the\n"
 		"                   data's game code\n"
+		"  /LAN             every game.cfg read sets mpnovaworldhostlanonly: a NovaWorld\n"
+		"                   listing advertises LAN only\n"
 		"  --loose-root     mount a directory that holds no game archives as loose files\n"
 		"  --lan-port       the first port of the bind scan (default: game.cfg mplanserverportmin,\n"
 		"                   the head of the retail LAN server range; mpnovaworldportmin when\n"
@@ -142,6 +144,10 @@ int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out,
 			out.expansion = launch_expansion_name(name);
 		} else if (strutil::iequals(a, "/game")) {
 			if (!value(out.game)) return 1;
+		} else if (strutil::iequals(a, kLaunchFlagLan)) {
+			// [orig: Game_ParseCommandLineAndInit `_stricmp(token, "/LAN")`
+			//  @0x4A74D9..0x4A74E9 -> g_LanSwitch = 1 @0x4A74EB]
+			out.lan_switch = true;
 		} else if (const int log = parse_log_switch(args, i, out.log_switches, error); log != 0) {
 			if (log < 0) return 1;
 			i += static_cast<size_t>(log - 1);
@@ -183,7 +189,11 @@ int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out,
 	return 0;
 }
 
-Server::Server(ServeOptions options) : options_(std::move(options)) {}
+Server::Server(ServeOptions options) : options_(std::move(options)) {
+	// The switch every read of the process takes [orig: g_LanSwitch, read by
+	// Game_LoadConfig @0x5514B1].
+	config_.set_lan_switch(options_.lan_switch);
+}
 
 Server::~Server() { stop(); }
 

@@ -24,6 +24,7 @@ bool GameConfigBlock::load() {
 	options.weapons = roster_;
 	options.player_index = cfg_.player_index;
 	options.hw3d_deviceno = cfg_.hw3d_deviceno;
+	options.lan_switch = lan_switch_; // [orig: g_LanSwitch @0x5514B1]
 	gamecfg::LoadResult loaded = gamecfg::load_file(path_, options);
 	cfg_ = std::move(loaded.cfg);
 	file_read_ = loaded.file_read;

@@ -165,23 +165,24 @@ public:
 	// edit.
 	bool rename(const std::string &text);
 
-	// The PLAYERNAME edit's text set, which strips the text's first {hot}
-	// marker as a label set does (rtxt::strip_hotkey) and posts the edit's
-	// change notice to the name rule above once [orig: CEditWnd_SetText
-	// @0x661900 -> CButtonWnd_SetLabel @0x661912, _EditWnd vtable 0x7E2614
-	// slot +76 - the notice 0x7000001 @0x66197f..0x661986;
-	// PlayerInfo_HandlePlayerNameChange @0x55fbb0, registered for PLAYERNAME
-	// with mask 0x80 @0x561511]: an accepted last character, or no text,
-	// renames the record (rename); a refused one is cut and the edit set again
-	// [orig: @0x55fc35..0x55fc6d], but that set's notice reaches no handler, as
-	// the dispatch detaches the edit's callback chain while it walks it
+	// The PLAYERNAME edit's change notice, as the screen's populate set and the
+	// player's typing both post it with the edit's label (the populate's set
+	// is the edit's own text set, which cut the label's first {hot} marker,
+	// menu::MenuRuntime::set_widget_text) [orig: CEditWnd_SetText @0x661900 ->
+	// CButtonWnd_SetLabel @0x661912, _EditWnd vtable 0x7E2614 slot +76 - the
+	// notice 0x7000001 @0x66197f..0x661986; PlayerInfo_HandlePlayerNameChange
+	// @0x55fbb0, registered for PLAYERNAME with mask 0x80 @0x561511]: an
+	// accepted last character, or no text, renames the record (rename) and the
+	// edit keeps the label; a refused one is cut [orig: @0x55fc35..0x55fc6d]
+	// and the cut returned for the edit's set again, a text set like the first
+	// (it cuts the next marker), whose notice reaches no handler, as the
+	// dispatch detaches the edit's callback chain while it walks it
 	// [orig: CWnd_EmitEventToNamedHandlerAndCallbacks @0x646970 - the detach
-	// @0x646990..0x6469a2, the restore @0x646a09], so the record keeps its
-	// name and flag. Returns the text the edit is left holding. The screen's
-	// populate sets the record's own name this way at its build, a side radio
-	// and a class pick [orig: PlayerInfo_PopulateAllControls @0x5606f0 - the
-	// set @0x5608d5].
-	std::string set_name_edit(std::string text);
+	// @0x646990..0x6469a2, the restore @0x646a09], so the record keeps its name
+	// and flag. Returns the label, or the cut to set. The screen's populate
+	// sets the record's own name at its build, a side radio and a class pick
+	// [orig: PlayerInfo_PopulateAllControls @0x5606f0 - the set @0x5608d5].
+	std::string name_changed(std::string label);
 
 	// The PLAYER_INFO ACCEPT's name leg [orig: save_player_info_from_dialog
 	// @0x55efa8..0x55f039]: the edit's text (15 characters) into the name; an

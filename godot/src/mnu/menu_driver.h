@@ -263,7 +263,9 @@ public:
 	bool is_widget_disabled(int p_id) const;
 	void set_widget_checked(int p_id, bool p_checked);
 	bool is_widget_checked(int p_id) const;
-	void set_widget_text(int p_id, const String &p_text);
+	// The text set; returns the label it stored (engine
+	// MenuRuntime::set_widget_text), the script's own text, not the frame's.
+	String set_widget_text(int p_id, const String &p_text);
 	String get_widget_text(int p_id) const;
 	void set_widget_items(int p_id, const PackedStringArray &p_items);
 	PackedStringArray get_widget_items(int p_id) const;

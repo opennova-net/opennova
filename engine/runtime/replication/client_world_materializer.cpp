@@ -364,7 +364,7 @@ void ClientWorldMaterializer::apply_objective_state(const ClientState &state,
 		// The attach hides the flag and puts back the def's own update
 		// callback. [orig: Entity_AttachCarriedObject @0x43c14a, @0x43c191]
 		child.flags |= world::kEntityFlagCarried;
-		child.drop_motion = world::DropMotion::None;
+		child.drop_motion = world::def_update_drop_motion(child);
 	}
 	tracked.objective_parent = next;
 	// A moved flag re-runs its proximity/blink query at the new position.

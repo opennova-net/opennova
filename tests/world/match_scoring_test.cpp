@@ -62,6 +62,8 @@ EntityHandle player(World &world, uint8_t slot, uint8_t team) {
     identity.slot = slot;
     identity.name = "P";
     world.match.upsert_player(identity);
+    // The slot's team byte (+416) is the body's until a script splits them.
+    world.match.set_player_slot_team(handle, team);
     return handle;
 }
 
