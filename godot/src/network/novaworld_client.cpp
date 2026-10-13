@@ -324,6 +324,9 @@ void NovaWorldClient::start() {
 	opennova::NwuLobbySession::CommandLine command_line;
 	command_line.post_ip_address = flags.post_ip_address;
 	command_line.post_port_number = flags.post_port_number;
+	command_line.udp_novaworld = flags.udp_novaworld;
+	command_line.use_junction = flags.use_junction;
+	command_line.clear_junction = flags.clear_junction;
 	lobby_.set_command_line(command_line);
 	lobby_.open(*gate_socket_, demux.session());
 	// A session that ended in error or a disconnect may have left the hosting leg

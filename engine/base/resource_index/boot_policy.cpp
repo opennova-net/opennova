@@ -33,6 +33,28 @@ std::string value_after(const std::vector<std::string> &args, const char *flag) 
     return value;
 }
 
+// The CRT atol of the token following `flag` (the last one standing), else `absent`.
+int atol_after(const std::vector<std::string> &args, const char *flag, int absent) {
+    int value = absent;
+    for (std::size_t i = 0; i + 1 < args.size(); ++i)
+        if (strutil::iequals(args[i], flag)) value = io::retail_atol(args[i + 1].c_str());
+    return value;
+}
+
+// Every /UDPNOVAWORLD's next token, stepped over, the first six kept to 31 characters
+// [orig: Game_ParseCommandLineAndInit @ 0x4a7310, @0x4A74F1..0x4A7530].
+std::vector<std::string> udp_novaworld_after(const std::vector<std::string> &args) {
+    std::vector<std::string> out;
+    for (std::size_t i = 0; i < args.size(); ++i) {
+        if (!strutil::iequals(args[i], kLaunchFlagUdpNovaWorld) || i + 1 >= args.size()) continue;
+        ++i;
+        if (out.size() >= kLaunchUdpNovaWorldMax) continue;
+        const std::string entry = strutil::trim(args[i]);
+        out.push_back(entry.substr(0, kLaunchUdpNovaWorldChars));
+    }
+    return out;
+}
+
 // `/mod` and `/exp` share one arm of the game's walk [orig:
 // Game_ParseCommandLineAndInit @ 0x4a7310, the two `stricmp`s @ 0x4a76ac]: with
 // a next token the walk steps onto it (@ 0x4a76c1), so that token is never read
@@ -101,6 +123,9 @@ LaunchFlags parse_launch_flags(const std::vector<std::string> &args) {
     f.post_ip_address = value_after(args, kLaunchFlagPostIpAddress); // [orig: @0x4A75A4..0x4A75CF]
     // [orig: @0x4A75D4..0x4A75FE]
     f.post_port_number = io::retail_atol(value_after(args, kLaunchFlagPostPortNumber).c_str());
+    f.udp_novaworld = udp_novaworld_after(args);
+    f.use_junction = atol_after(args, kLaunchFlagUseJunction, -1);     // [orig: @0x4A7603..0x4A762D]
+    f.clear_junction = atol_after(args, kLaunchFlagClearJunction, -1); // [orig: @0x4A7632..0x4A765C]
     return f;
 }
 

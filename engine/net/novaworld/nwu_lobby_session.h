@@ -73,19 +73,26 @@ public:
 		//  @0x4d4913..0x4d493e]
 		int32_t max_packet_size = 0;
 	};
-	// The NovaWorld switches of the game's command line the gate response reads: the POST address
-	// (resolved with DNS on; one that does not resolve overrides nothing) and port (0 overrides
-	// nothing) that replace the gate's POSTIPADDRESS / POSTIPPORT (LaunchFlags).
+	// The NovaWorld switches of the game's command line the gate response and the connect read
+	// (LaunchFlags): the POST address (resolved with DNS on; one that does not resolve overrides
+	// nothing) and port (0 overrides nothing) that replace the gate's POSTIPADDRESS / POSTIPPORT;
+	// the /UDPNOVAWORLD entries, which mark the NWU session in use and are probed in place of the
+	// gate's; and the USEJUNCTION / CLEARJUNCTION overrides (-1 overrides nothing).
 	// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - dword_B4C6B0 into dword_B5F490
-	//  @0x4CF54B..0x4CF554, dword_B4C6B4 into dword_B5F494 @0x4CF559..0x4CF562]
+	//  @0x4CF54B..0x4CF554, dword_B4C6B4 into dword_B5F494 @0x4CF559..0x4CF562, the command
+	//  line's count dword_B4C71C @0x4CF52E, dword_829F88 / dword_829F8C @0x4CF6ED..0x4CF709;
+	//  CNapiGameSession_ConnectToNovaWorld @0x4D4640 - the entries @0x4D4A78..0x4D4A9E]
 	struct CommandLine {
 		std::string post_ip_address;
 		int32_t post_port_number = 0;
+		std::vector<std::string> udp_novaworld;
+		int32_t use_junction = -1;
+		int32_t clear_junction = -1;
 	};
-	// What a match reads of this session: the gate named an NWU address (retail's dword_B5FD2C),
-	// and the session's flags word, hosting/playing word and mission-exit store (all 0 once the
-	// session is dropped). The first is the gate response's, so it outlives a closed session as
-	// retail's global does.
+	// What a match reads of this session: the gate or the command line named an NWU address
+	// (retail's dword_B5FD2C), and the session's flags word, hosting/playing word and mission-exit
+	// store (all 0 once the session is dropped). The first is the gate response's, so it outlives
+	// a closed session as retail's global does.
 	struct MatchFacts {
 		bool in_use = false;
 		uint32_t flags = 0;
@@ -97,6 +104,17 @@ public:
 
 	// The command line's switches (unset: none), read at each gate response.
 	void set_command_line(CommandLine command_line) { command_line_ = std::move(command_line); }
+	// The NovaWorld menu's JUNCTIONCODE form field: when it is nonempty at the connect, its one
+	// address is the connect's only probe target, ahead of the command line's and the gate's
+	// entries. A gate response whose USEJUNCTION (or the command line's) is set empties it, and
+	// so does the menu's entry (open()) when the last response's USEJUNCTION and CLEARJUNCTION
+	// were both set. It outlives open() and close(), as the menu's form does. Only the web
+	// lobby's form writes it in retail, which no shell here has (unwitnessed).
+	// [orig: CNapiGameSession_ConnectToNovaWorld @0x4D4640 - the read @0x4D4A31..0x4D4A4A, its
+	//  one target @0x4D4A4F..0x4D4A71; CNapiGateManager_ProcessResponse @0x4CED20 - the clear
+	//  @0x4CF71B..0x4CF76E; UI_ProcessLANSessionStateMachine @0x558DE0 - @0x558E2D..0x558E64]
+	void set_junction_code(std::string code) { junction_code_ = std::move(code); }
+	const std::string &junction_code() const { return junction_code_; }
 
 	// Start over on the embedder's two bound sockets (non-owning; they outlive close()) and mint
 	// the ci/ck pair. The clock restarts at 0 with the first tick().
@@ -200,6 +218,13 @@ private:
 	PeerAddr nw_peer_;
 	GateResponse gate_response_;
 	bool in_use_ = false; // dword_B5FD2C
+	// The menu form's JUNCTIONCODE, and the last gate response's word set (dword_B5FF48) with its
+	// USEJUNCTION / CLEARJUNCTION after the command line's (dword_B5FD38 / dword_B5FD3C), which
+	// the menu's entry reads; none reset by open().
+	std::string junction_code_;
+	bool gate_ok_ = false;
+	int32_t use_junction_ = 0;
+	int32_t clear_junction_ = 0;
 	uint32_t clock_ms_ = 0;
 	// The gate worker: the probe re-sent every retry interval until the deadline.
 	uint32_t gate_started_ms_ = 0;

@@ -79,6 +79,24 @@ void test_flags_parse_case_insensitively_with_values() {
     CHECK(parse_launch_flags({"game.exe", "/POSTPORTNUMBER", "port"}).post_port_number == 0);
     CHECK(parse_launch_flags({"game.exe", "/POSTPORTNUMBER"}).post_port_number == 0);
     CHECK(parse_launch_flags({"game.exe"}).post_ip_address.empty());
+
+    // D-NET-542: /UDPNOVAWORLD <address>, any case: its next token is stepped over (so never read
+    // as a flag) and the first six kept, each to 31 characters; one with no next token keeps
+    // nothing [orig: Game_ParseCommandLineAndInit @0x4a7310 - @0x4A74F1..0x4A7530].
+    const LaunchFlags udp = parse_launch_flags(
+            {"game.exe", "/udpnovaworld", "1.2.3.4:5", "/UDPNOVAWORLD", "/UDPNOVAWORLD",
+             "/UDPNOVAWORLD", std::string(40, 'a'), "/UDPNOVAWORLD", "c", "/UDPNOVAWORLD", "d",
+             "/UDPNOVAWORLD", "e", "/UDPNOVAWORLD", "f", "/UDPNOVAWORLD"});
+    CHECK((udp.udp_novaworld ==
+           std::vector<std::string>{"1.2.3.4:5", "/UDPNOVAWORLD", std::string(31, 'a'), "c", "d", "e"}));
+    CHECK(parse_launch_flags({"game.exe", "/UDPNOVAWORLD"}).udp_novaworld.empty());
+    // /USEJUNCTION and /CLEARJUNCTION: the atol of the next token, the last one standing, -1
+    // when absent [orig: @0x4A7603..0x4A762D, @0x4A7632..0x4A765C; -1 in .data @0x829F88].
+    const LaunchFlags junction = parse_launch_flags(
+            {"game.exe", "/USEJUNCTION", "1", "/usejunction", "0", "/ClearJunction", "2x"});
+    CHECK(junction.use_junction == 0 && junction.clear_junction == 2);
+    CHECK(parse_launch_flags({"game.exe"}).use_junction == -1);
+    CHECK(parse_launch_flags({"game.exe", "/CLEARJUNCTION"}).clear_junction == -1);
 }
 
 // `/mod` is `/exp`: one arm of the game's walk, the value token stepped over,

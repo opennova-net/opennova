@@ -109,6 +109,12 @@ bool NwuLobbySession::add_target(const std::string &address) {
 }
 
 void NwuLobbySession::open(IDatagramSocket &gate, IDatagramSocket &session) {
+	// The NovaWorld menu's entry empties JUNCTIONCODE when the last gate response went through
+	// with USEJUNCTION and CLEARJUNCTION both set.
+	// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - dword_B5FF48 @0x558E2D, dword_B5FD38
+	//  @0x558E3B, dword_B5FD3C @0x558E43, the form write @0x558E64]
+	if (gate_ok_ && use_junction_ != 0 && clear_junction_ != 0)
+		junction_code_.clear();
 	gate_socket_ = &gate;
 	session_socket_ = &session;
 	client_index_ = random_u32();
@@ -425,7 +431,8 @@ void NwuLobbySession::poll_gate() {
 		if (hooks_.on_gate_response)
 			hooks_.on_gate_response(gate_response_);
 
-		// The NWU session is in use when the gate named an address. Without one the response
+		// The NWU session is in use when the gate or the command line named an address (the
+		// command line's count @0x4CF52E). Without one the response
 		// must hold the POST address and port ("NO NW POST IP" / "NO NW POST PORT"): the gate
 		// state -9, which the menu shows as NWEC25; with both the connect goes on with no
 		// session (ConnectToNovaWorld returns at once, each connect poll too, and the menu opens
@@ -435,7 +442,7 @@ void NwuLobbySession::poll_gate() {
 		//  port @0x4CF627, the -9 store @0x4CF6AC; UI_ProcessLANSessionStateMachine @0x558DE0 -
 		//  state 3's -9 -> NWEC25 @0x5590FD..0x559102, state 9 @0x559262;
 		//  CNapiGameSession_ConnectToNovaWorld @0x4D4640 - @0x4D46EA..0x4D46F0]
-		in_use_ = !parsed.udp_novaworld.empty();
+		in_use_ = !parsed.udp_novaworld.empty() || !command_line_.udp_novaworld.empty();
 		if (!in_use_) {
 			const std::array<uint8_t, 4> none{ 0, 0, 0, 0 };
 			if (gate_response_.post_ip == none || gate_response_.post_port == 0) {
@@ -443,21 +450,46 @@ void NwuLobbySession::poll_gate() {
 					hooks_.on_fatal(novaworld_gate_error_tag(-9, true));
 				return;
 			}
+		}
+		// The response's success tail: its USEJUNCTION / CLEARJUNCTION take the command line's
+		// overrides, a set USEJUNCTION empties the menu's JUNCTIONCODE (and sets the web lobby
+		// form's USEJUNCTION, which nothing here reads), and the gate's info stands.
+		// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - the overrides @0x4CF6ED..0x4CF709,
+		//  the form writes @0x4CF71B..0x4CF76E, dword_B5FF48 = 1 @0x4CF81D]
+		use_junction_ = command_line_.use_junction != -1
+				? command_line_.use_junction
+				: static_cast<int32_t>(parsed.use_junction);
+		clear_junction_ = command_line_.clear_junction != -1
+				? command_line_.clear_junction
+				: static_cast<int32_t>(parsed.clear_junction);
+		if (use_junction_ != 0)
+			junction_code_.clear();
+		gate_ok_ = true;
+		if (!in_use_) {
 			if (hooks_.on_sessionless)
 				hooks_.on_sessionless();
 			return;
 		}
-		// The old targets go, then each gate entry is made a probe target; one that names no
-		// address makes none and is passed over, so with none the connect probes nothing until
-		// its deadline. Retail's first two sources, the JUNCTIONCODE form field and the
-		// /UDPNOVAWORLD command line, have none here (D-NET-542, OPEN).
+		// The old targets go, then the connect's one source is made probe targets: the menu's
+		// JUNCTIONCODE when it is nonempty, else every /UDPNOVAWORLD command-line entry, else
+		// every gate entry. An address that names none makes no target and is passed over, so
+		// with none the connect probes nothing until it gives up.
 		// [orig: CNapiGameSession_ConnectToNovaWorld @0x4D4640 - the old targets
 		//  freed @0x4D4A22 (NapiNPEnumerator_DestroyAllTimers @0x6220C0 over the list
-		//  CreateTarget fills); the gate variables @0x4D4AA2..0x4D4ACE (CMissionInfo_GetVariable
-		//  @0x4D4AB8, CNapiGameSession_SendToAddress @0x4D4AC0, its result unread), then
-		//  CNapiGameSession_InitPlayerConnection @0x4D4B16]
+		//  CreateTarget fills); JUNCTIONCODE @0x4D4A4A, its one target @0x4D4A71; the command
+		//  line's entries @0x4D4A78..0x4D4A9E; the gate variables @0x4D4AA2..0x4D4ACE
+		//  (CMissionInfo_GetVariable @0x4D4AB8, CNapiGameSession_SendToAddress @0x4D4AC0, its
+		//  result unread), then CNapiGameSession_InitPlayerConnection @0x4D4B16]
 		targets_.clear();
-		for (const std::string &address : parsed.udp_novaworld) add_target(address);
+		if (!junction_code_.empty()) {
+			add_target(junction_code_);
+		} else if (!command_line_.udp_novaworld.empty()) {
+			for (const std::string &address : command_line_.udp_novaworld)
+				add_target(address);
+		} else {
+			for (const std::string &address : parsed.udp_novaworld)
+				add_target(address);
+		}
 		begin_session();
 		return;
 	}

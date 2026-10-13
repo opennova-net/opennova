@@ -76,7 +76,8 @@ struct GateResponse {
 	// to kGateUdpNovaWorldChars characters (a 17th line is not kept, the table staying at 16,
 	// though it still counts toward var_count, the parsed-field count @0x4CF4BB); the NovaWorld
 	// connect makes a probe target of each (NwuLobbySession). A response naming none leaves the
-	// NWU session unused. [orig: CNapiGateManager_ProcessResponse @0x4CED20 -
+	// NWU session unused unless the command line names one (NwuLobbySession::CommandLine).
+	// [orig: CNapiGateManager_ProcessResponse @0x4CED20 -
 	//  CMissionInfo_AddVariable @0x4CD9D0 called @0x4CF315 (16 entries of 64 bytes at
 	//  mission info +0x4DC, the count +0x4D8 = dword_B5F928); the in-use word dword_B5FD2C
 	//  @0x4CF525..0x4CF541]
