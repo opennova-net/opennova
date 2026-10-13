@@ -40,10 +40,12 @@ PlayState PlaySession::poll() {
 		finish();
 		return state_;
 	}
-	if (state_ == PlayState::Stopping && platform_.now_ms() - stop_requested_ms_ >= kPlayStopDeadlineMs) {
-		platform_.kill(pid_);
+	// Past the deadline the child is forced, and Stopped only once it is seen gone: a kill that did not take (a
+	// child stuck in a driver, a refused TerminateProcess) leaves Play stopping, its lease and run directory
+	// kept, and is tried again at the next poll (S26 C8: it reported a game stopped that still ran).
+	if (state_ == PlayState::Stopping && platform_.now_ms() - stop_requested_ms_ >= kPlayStopDeadlineMs &&
+	    platform_.kill(pid_) && !platform_.is_running(pid_))
 		finish();
-	}
 	return state_;
 }
 

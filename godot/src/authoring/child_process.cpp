@@ -252,12 +252,10 @@ bool ChildProcessPlatform::kill(int64_t pid) {
 	if (has_exited(handle)) {
 		return true;
 	}
-	if (TerminateProcess(handle, 0) == 0) {
-		return false;
-	}
-	// TerminateProcess only requests the exit; the child can hold its files open for a
-	// moment afterwards, and the next build repacks into that directory's neighbour.
-	return WaitForSingleObject(handle, 2000) == WAIT_OBJECT_0;
+	// TerminateProcess only requests the exit: the child holds its files until its handle signals, which
+	// PlaySession's next poll observes (is_running) before Play reads it stopped. Never waited on here: the
+	// editor's frame never blocks on the game (S26 C8: two seconds a frame while it held the lock).
+	return TerminateProcess(handle, 0) != 0;
 #else
 	(void)pid;
 	return false;

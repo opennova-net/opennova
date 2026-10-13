@@ -43,7 +43,8 @@ public:
 	// Ask the child to exit (close its window / SIGTERM); true when the request was delivered
 	// or the child had already exited.
 	virtual bool terminate(int64_t pid) = 0;
-	// Force the child down; true when it is gone afterwards.
+	// Force the child down, never waiting on it: true when the force was delivered (or it had exited);
+	// is_running says when it is gone.
 	virtual bool kill(int64_t pid) = 0;
 	// The code an exited child ended with, read through the handle spawn kept (so before
 	// release()); false while it runs, or where the platform cannot read one.

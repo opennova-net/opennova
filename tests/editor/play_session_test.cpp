@@ -164,13 +164,26 @@ static int test_lifecycle() {
 	TEST_EXPECT(session.poll() == PlayState::Stopped);
 	TEST_EXPECT(platform.log[platform.log.size() - 2] == "kill 102");
 
+	// S26 C8: a kill that does not take leaves Play stopping (the lease, the run directory and the build it runs
+	// kept), tried again at each poll, until the child is seen gone.
+	TEST_EXPECT(session.start(plan, error));
+	const int64_t stuck = session.pid();
+	platform.kill_fails = true;
+	session.stop();
+	platform.clock += kPlayStopDeadlineMs;
+	TEST_EXPECT(session.poll() == PlayState::Stopping && session.running_build_dir() == plan.build_dir);
+	TEST_EXPECT(session.poll() == PlayState::Stopping && platform.log.back() == "kill " + std::to_string(stuck));
+	platform.kill_fails = false;
+	platform.exit_child(stuck);
+	TEST_EXPECT(session.poll() == PlayState::Stopped);
+
 	// wait() polls on the clock, pausing between observations, and gives up honestly.
 	TEST_EXPECT(session.start(plan, error));
 	const int64_t before_wait = platform.clock;
 	TEST_EXPECT(!session.wait(35));
 	TEST_EXPECT(platform.clock - before_wait >= 35 && platform.clock - before_wait < 35 + 2 * kPlayWaitStepMs);
 	TEST_EXPECT(session.state() == PlayState::Running); // a timed-out wait changes nothing
-	platform.exit_child(103);
+	platform.exit_child(session.pid());
 	TEST_EXPECT(session.wait(35));
 	TEST_EXPECT(session.exited_on_its_own() && session.exit_code() == -1); // a code the platform could not read
 

@@ -43,6 +43,7 @@ struct FakePlatform : opennova::editor::ProcessPlatform {
 	// A stop request ends the child at once (a game that quits when asked); false: the child
 	// runs on until the test ends it (exit_child) or a kill does.
 	bool terminate_exits = true;
+	bool kill_fails = false;   // a kill that does not take (a child stuck in a driver): the child runs on
 	std::vector<int64_t> running;
 	std::map<int64_t, uint32_t> codes; // the code each exited child ended with
 	// How process_liveness answers for a game this platform does not hold (one an earlier editor
@@ -88,6 +89,7 @@ struct FakePlatform : opennova::editor::ProcessPlatform {
 	}
 	bool kill(int64_t pid) override {
 		log.push_back("kill " + std::to_string(pid));
+		if (kill_fails) return false;
 		exit_child(pid);
 		return true;
 	}
