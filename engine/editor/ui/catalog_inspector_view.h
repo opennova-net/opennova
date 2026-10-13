@@ -21,7 +21,6 @@ bool draw_catalog_inspector(Workspace &workspace, const Document &document, cons
 // EditInViewport, so the wire's is the same request. The tool over the Inspector and the catalog line's menu
 // item (`menu`) say where it arms Place, or why it cannot.
 bool places_in_mission(const Document &document, const NodeAddress &record);
-void draw_place_in_mission(Workspace &workspace, const Document &document, const NodeAddress &record, bool menu);
 // The catalog's line menu items (OutlineSpec::row_menu): Place in mission over an item record.
 void draw_catalog_row_menu(Workspace &workspace, const Document &document, const NodeAddress &record);
 

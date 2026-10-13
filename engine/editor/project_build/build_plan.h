@@ -56,10 +56,6 @@ struct BuildTarget {
 	bool is_expansion() const { return !expansion.empty(); }
 };
 
-// Why an expansion's base game is not there to build over: the game install unset or not mounting, or,
-// for an expansion of a project's base game, that project's export missing (build.expansion.base_missing).
-std::string base_missing_words(const BuildTarget &target);
-
 struct BuildPlan {
 	BuildTarget target;
 	// Standalone: always the three boot-table archives, in slot order. An expansion: always its two,
@@ -111,10 +107,6 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 // `expansion` the project's own (its name, "" for a standalone project): where it builds a file, so which
 // names an archive must store (ADR 0046 S16).
 std::vector<Diagnostic> plan_scan_findings(const AssetScan &scan, const std::string &expansion = std::string());
-// The same of one file (the rule plan_scan_findings runs over every file): true with the finding for a file
-// the build refuses or leaves out with a word (Files' card says it as the build would), false for one it
-// packs or copies, or leaves out without one.
-bool plan_file_finding(const AssetEntry &asset, const std::string &expansion, Diagnostic &out);
 // Where a build of the project (as the expansion `expansion`, "" for the standalone game) puts a file, in a
 // sentence, from the decision the plan makes: its own finding on the file (plan_file_finding: an archive it
 // refuses, a player's file it leaves out, a name no archive stores), else its placement (the archive it

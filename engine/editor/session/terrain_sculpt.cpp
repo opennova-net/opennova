@@ -138,8 +138,11 @@ bool sculpting(TerrainTool tool) {
 
 } // namespace
 
-std::array<trngen::CornerLockFlags, 4> terrain_bake_locks(const SessionCore &core, const std::string &cpt_name,
-                                                          std::vector<std::string> *others) {
+// The quadrant lock flags of the first .trn (by its path) naming the .cpt `cpt_name` as its polytrn_polydata, from the
+// session's view of the project's files; none where no .trn names it. `others` names each later .trn naming it with
+// other flags (the conflict noted).
+static std::array<trngen::CornerLockFlags, 4> terrain_bake_locks(const SessionCore &core, const std::string &cpt_name,
+                                                          std::vector<std::string> *others = nullptr) {
 	std::array<trngen::CornerLockFlags, 4> out{};
 	const SessionView &view = core.view();
 	if (!view.project.scan || !view.findings.assets) return out;

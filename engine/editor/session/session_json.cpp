@@ -177,7 +177,11 @@ void set_texture_role(JsonValue &out, ReferenceKind kind, int32_t loader_arg) {
 
 } // namespace
 
-JsonValue texture_reference_json(const SessionView &view, const TextureReferenceLoad &load) {
+// What a texture reference loads (ADR 0046 S18, reference_queries' texture_reference): {name, status,
+// and where its loader opens a project file: file, transform, and what the file is (the thumbnails'
+// facts: loads, refusal, width, height, levels, format, texels, alpha)}. A texture field's record JSON
+// carries it as `texture`, and so does each choice of its picker.
+static JsonValue texture_reference_json(const SessionView &view, const TextureReferenceLoad &load) {
 	JsonValue out = JsonValue::make_object();
 	out.set("name", json_string(load.name));
 	out.set("status", json_string(reference_status_token(load.status)));

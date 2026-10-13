@@ -785,7 +785,10 @@ bool view_section_moved(const SessionView &view, ViewSection section, uint64_t s
 	return false;
 }
 
-JsonValue operation_status_to_json(const OperationStatus &status) {
+// The operation that runs: {running}, and while one does its id, kind token, label, done, total,
+// unit token (bytes, files, steps), cancellable, and reads and writes (tokens: files, documents,
+// project, slot).
+static JsonValue operation_status_to_json(const OperationStatus &status) {
 	JsonValue out = JsonValue::make_object();
 	out.set("running", boolean(status.running()));
 	if (!status.running())

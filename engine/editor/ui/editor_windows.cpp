@@ -130,12 +130,6 @@ devtools::DockLayout editor_layout() {
 	return layout;
 }
 
-const DocumentBase *active_document(const SessionView &v) {
-	for (const auto &document : v.documents.open)
-		if (document->path() == v.documents.active) return document.get();
-	return nullptr;
-}
-
 // A number of bytes as the bar's tooltip says it: "512 bytes", "3.4 KB", "12.0 MB".
 std::string size_text(uint64_t bytes) {
 	char text[32];
@@ -295,7 +289,7 @@ JumpSubject EditorWindows::jump_subject() const {
 	if (!subject_.definition.empty() && !subject_.usages_file.empty()) return subject_;
 	const SessionView &v = view();
 	JumpSubject out;
-	const DocumentBase *base = active_document(v);
+	const DocumentBase *base = v.documents.active_document();
 	if (base) {
 		out.usages_file = base->path();
 		const Document *document = records_of(*base);
@@ -464,7 +458,7 @@ void EditorWindows::deliver_picks(PickPurpose purpose, const std::vector<std::st
 
 void EditorWindows::draw_menu_bar(devtools::ImGuiPass &) {
 	const SessionView &v = view();
-	const DocumentBase *document = active_document(v);
+	const DocumentBase *document = v.documents.active_document();
 	draw_navigation(v);
 	draw_file_menu(v);
 	draw_edit_menu(v, document);

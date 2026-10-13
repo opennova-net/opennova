@@ -1507,7 +1507,9 @@ bool modal_may_show(const SessionView &view, HeldModal modal, const std::string 
 	return shown.modal == HeldModal::None || (shown.modal == modal && shown.path == path);
 }
 
-const char *held_modal_token(HeldModal modal) {
+// "" none; unsaved, import, texture_source, settings, new_project, new_file, file_rename, file_delete, rename,
+// rename_back, project_find, confirm, remove_screen.
+static const char *held_modal_token(HeldModal modal) {
 	switch (modal) {
 		case HeldModal::None: return "";
 		case HeldModal::Unsaved: return "unsaved";

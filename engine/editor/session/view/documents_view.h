@@ -78,6 +78,9 @@ struct DocumentsView {
 	// The open documents, each as the base: a window that reads rows asks records_of.
 	std::vector<std::shared_ptr<const DocumentBase>> open;
 	std::string active; // the active document's path ("" = none)
+	// The open document at exactly `path`, null for none; the active one.
+	const DocumentBase *open_at(const std::string &path) const;
+	const DocumentBase *active_document() const { return open_at(active); }
 	// The file whose page the Document window shows beside the documents (the plain-words lane, the
 	// audit's 4.6): one of a kind the editor has no editor for, opened by an OpenDocument naming it (what
 	// it is, what reads it, who names it: session/file_card.h) and closed by a CloseDocument naming it;

@@ -41,7 +41,4 @@ std::string build_result_line(const BuildResult &result);
 // has moved on to): "Refused: <its first refusal> (and N more)."; "" for a build not refused.
 std::string refused_words(const BuildReport &report);
 
-// A size in a modder's units: "812 B", "4.5 KB", "220.4 MB", "1.2 GB".
-std::string size_words(uint64_t bytes);
-
 } // namespace opennova::editor

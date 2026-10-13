@@ -41,7 +41,7 @@ bool places_in_mission(const Document &document, const NodeAddress &record) {
 	return row && static_cast<const CatalogRow &>(*row).record_kind() == def::DefRecordKind::Item;
 }
 
-void draw_place_in_mission(Workspace &workspace, const Document &document, const NodeAddress &record, bool menu) {
+static void draw_place_in_mission(Workspace &workspace, const Document &document, const NodeAddress &record, bool menu) {
 	const SessionView &view = workspace.view();
 	const std::string mission = place_in_mission_target(view);
 	const bool can = !mission.empty() && view.allows(EditorRequestKind::EditInViewport);

@@ -47,16 +47,6 @@ enum class PlayDebugAnswer : uint8_t { Taken, Refused, NoAnswer, Gone };
 // for the snapshot read (an invoke of mission_logic_snapshot, which needs none).
 io::JsonValue play_debug_arguments(const PlayDebugCall &call);
 io::JsonValue live_snapshot_arguments();
-// A call in words ("fire event 3", "set V12 to 1").
-std::string play_debug_words(const PlayDebugCall &call);
-
-// The game's mission_logic_snapshot record (the row's result, or the invoke's whole answer {error, result}) read
-// into `out`: its tick, its events with their latch, countdowns, each trigger's last truth and a fire pending, its
-// mission variables (those absent read 0); `game_mission` the game's mission by its file's basename, "" at its
-// menu. A joiner's report (authority false) holds no rows. False, `error` why, for a record that is no snapshot.
-// `out.mission`, `played_revision`, `stale` and `serial` are the session's and are left as they were.
-bool live_logic_from_snapshot(const io::JsonValue &snapshot, LiveLogic &out, std::string &game_mission,
-                              std::string &error);
 
 // The live logic of the game Play runs: what it last reported, the document state it was played at, and the
 // calls asked of it. Owned by Play (PlayController), which tells it when its game starts and ends.

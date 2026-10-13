@@ -157,11 +157,6 @@ io::JsonValue record_to_json(const Document &document, const NodeAddress &addres
 // The asset graph's edges (each with its resolution) and symbols.
 io::JsonValue graph_edge_to_json(const AssetGraph &graph, const GraphEdge &edge);
 io::JsonValue graph_symbol_to_json(const GraphSymbol &symbol);
-// What a texture reference loads (ADR 0046 S18, reference_queries' texture_reference): {name, status,
-// and where its loader opens a project file: file, transform, and what the file is (the thumbnails'
-// facts: loads, refusal, width, height, levels, format, texels, alpha)}. A texture field's record JSON
-// carries it as `texture`, and so does each choice of its picker.
-io::JsonValue texture_reference_json(const SessionView &view, const TextureReferenceLoad &load);
 // A reference field of a record, as it applies to it (Document::field_on): the names its
 // picker offers (reference_choices): {field, reference (its kind token), scope,
 // count, choices: [{name, kind, file, record, label (what the name names in words, ADR 0046 S15:

@@ -72,7 +72,13 @@ JsonValue line_to_json(const BoardLine &line) {
 
 } // namespace
 
-JsonValue board_card_to_json(const BoardCard &card) {
+// {event, index, title, sentence, when, then, delay, repeat, repeats, at_start, at_end, delay_steps,
+// repeat_steps, delay_seconds, repeat_seconds, folded, trigger_refusal, action_refusal, triggers, actions:
+// [{record, index, action, type: {type, sub, title, group} | null, type_words, negated, join, last, words,
+// runs: [{text, slot}], chips: [{slot, field, label, words, value, kind, unit, picks, unset, missing}]}],
+// notes: [{record, code, words}], live?: {active, fired, activate_countdown, repeat_countdown, truth,
+// last_checked_tick}}.
+static JsonValue board_card_to_json(const BoardCard &card) {
 	JsonValue out = JsonValue::make_object();
 	out.set("event", identity(card.event));
 	out.set("index", number(double(card.index)));
@@ -121,7 +127,8 @@ JsonValue board_card_to_json(const BoardCard &card) {
 	return out;
 }
 
-JsonValue mission_recipe_to_json(const MissionRecipe &recipe) {
+// {token, title, tip, subject, trigger: {type, sub, title} | null, start, events, missions, seen_in}.
+static JsonValue mission_recipe_to_json(const MissionRecipe &recipe) {
 	JsonValue out = JsonValue::make_object();
 	out.set("token", json_string(recipe.token));
 	out.set("title", json_string(recipe.title));

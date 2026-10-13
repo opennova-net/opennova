@@ -28,12 +28,6 @@ namespace opennova::editor {
 
 namespace {
 
-const DocumentBase *open_at(const SessionView &view, const std::string &path) {
-	for (const auto &document : view.documents.open)
-		if (document && document->path() == path) return document.get();
-	return nullptr;
-}
-
 const std::string &value_of(const EditorRequest &request, const char *token) {
 	static const std::string none;
 	for (const auto &[key, value] : request.values)
@@ -172,7 +166,7 @@ void play_dialog(SessionCore &core, const EditorRequest &request) {
 		text_mission = mission::mission_base_name(bank);
 	} else if (entry->kind == AssetKind::Mission) {
 		std::unique_ptr<MissionDocument> loaded;
-		const auto *mission = dynamic_cast<const MissionDocument *>(open_at(view, entry->relative_path));
+		const auto *mission = dynamic_cast<const MissionDocument *>(view.documents.open_at(entry->relative_path));
 		if (!mission && view.project.document) {
 			loaded = std::make_unique<MissionDocument>();
 			Diagnostic error;
@@ -226,7 +220,7 @@ void play_stream(SessionCore &core, const EditorRequest &request) {
 		                            (request.path.empty() ? std::string("none is named.") : request.path + " is none."));
 	const std::string &place = value_of(request, "stream");
 	std::unique_ptr<MusicBankDocument> loaded;
-	const auto *bank = dynamic_cast<const MusicBankDocument *>(open_at(view, entry->relative_path));
+	const auto *bank = dynamic_cast<const MusicBankDocument *>(view.documents.open_at(entry->relative_path));
 	if (bank && bank->dirty())
 		return refuse(core, entry->logical_name + " has unsaved changes: the editor streams the bank's file as the game "
 		                                          "does, so save it to hear them.",
@@ -266,7 +260,9 @@ int slot_named(const std::string &text) {
 
 } // namespace
 
-std::vector<PreviewBank> project_banks(const SessionView &view) {
+// The project's sound banks: each .lwf of the scan, an open bank document's rows in place of its file; a
+// bank that does not read left out.
+static std::vector<PreviewBank> project_banks(const SessionView &view) {
 	std::vector<PreviewBank> banks;
 	if (!view.project.open || !view.project.scan) return banks;
 	for (const AssetEntry &entry : view.project.scan->entries) {
@@ -274,7 +270,7 @@ std::vector<PreviewBank> project_banks(const SessionView &view) {
 		PreviewBank bank;
 		bank.name = entry.logical_name;
 		bank.path = entry.relative_path;
-		if (const auto *document = dynamic_cast<const SoundBankDocument *>(open_at(view, entry.relative_path))) {
+		if (const auto *document = dynamic_cast<const SoundBankDocument *>(view.documents.open_at(entry.relative_path))) {
 			if (!document->bank(bank.file)) continue;
 		} else {
 			std::vector<uint8_t> bytes;
@@ -288,11 +284,13 @@ std::vector<PreviewBank> project_banks(const SessionView &view) {
 	return banks;
 }
 
-std::vector<audio::SoundProfile> project_profiles(const SessionView &view) {
+// The project's sound profiles: its SndProf.def as the game reads it, an open document's rows in place of
+// the file; none without one.
+static std::vector<audio::SoundProfile> project_profiles(const SessionView &view) {
 	if (!view.project.open || !view.project.scan || !view.project.document) return {};
 	for (const AssetEntry &entry : view.project.scan->entries) {
 		if (entry.kind != AssetKind::SoundProfileDefs) continue;
-		if (const auto *document = dynamic_cast<const SoundProfileDocument *>(open_at(view, entry.relative_path)))
+		if (const auto *document = dynamic_cast<const SoundProfileDocument *>(view.documents.open_at(entry.relative_path)))
 			return document->profiles();
 		SoundProfileDocument document;
 		Diagnostic error;
@@ -350,7 +348,7 @@ void serve_sound_play(SessionCore &core, const EditorRequest &request) {
 	// A wave of the project, as recorded (workspace_parts.h's play_sound): the Shell plays the file, so an open wave
 	// with unsaved edits is refused, as a bank is (round S23 lane A).
 	if (const AssetEntry *entry = request.path.empty() ? nullptr : view.project.scan->named(request.path)) {
-		const DocumentBase *open = open_at(view, entry->relative_path);
+		const DocumentBase *open = view.documents.open_at(entry->relative_path);
 		if (open && open->dirty())
 			return refuse(core, entry->logical_name + " has unsaved changes: the editor plays the wave's file as the game "
 			                                          "loads it, so save it to hear them.",

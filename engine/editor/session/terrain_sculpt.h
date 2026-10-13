@@ -145,10 +145,4 @@ private:
 	const void *imports_scan_ = nullptr; // the scan the image documents' imports were last read against
 };
 
-// The quadrant lock flags of the first .trn (by its path) naming the .cpt `cpt_name` as its polytrn_polydata, from the
-// session's view of the project's files; none where no .trn names it. `others` names each later .trn naming it with
-// other flags (the conflict noted).
-std::array<trngen::CornerLockFlags, 4> terrain_bake_locks(const SessionCore &core, const std::string &cpt_name,
-                                                          std::vector<std::string> *others = nullptr);
-
 } // namespace opennova::editor

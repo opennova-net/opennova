@@ -36,6 +36,10 @@
 
 namespace opennova::editor {
 
+static bool draw_type_picker(CardContext &context, bool actions);
+
+static std::vector<ScriptUse> script_event_uses(const SessionView &view, const MissionDocument &mission, size_t index);
+
 namespace {
 
 constexpr NodeKind k(MissionKind kind) { return node_kind(kind); }
@@ -635,7 +639,8 @@ std::map<int64_t, std::vector<ScriptUse>> script_variable_uses(const SessionView
 	return out;
 }
 
-std::vector<ScriptUse> script_event_uses(const SessionView &view, const MissionDocument &mission, size_t index) {
+// The script lines that name the event at `index` by its number (event(n)).
+static std::vector<ScriptUse> script_event_uses(const SessionView &view, const MissionDocument &mission, size_t index) {
 	const AssetGraph *graph = view.findings.graph.get();
 	if (!graph) return {};
 	return script_uses_of(graph->referrers_of(ReferenceKind::MissionEventLatch, std::to_string(index), mission_event_scope(mission.path())));
@@ -674,7 +679,10 @@ void draw_mission_line(CardContext &context, const BoardCard &card, const BoardL
 	}
 }
 
-bool draw_type_picker(CardContext &context, bool actions) {
+// The type picker for the add or the retype `state` names, drawn in an open popup's body: Common (the shipped
+// missions' most used), for a trigger the recipes' triggers with their presets, then every type by its group,
+// filtered by what is typed. True once it raised the add or the retype (the popup then closed).
+static bool draw_type_picker(CardContext &context, bool actions) {
 	CardState &state = context.state;
 	const float em = ImGui::GetFontSize();
 	if (ImGui::IsWindowAppearing()) {

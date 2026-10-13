@@ -11,7 +11,8 @@
 
 namespace opennova::editor {
 
-std::string size_words(uint64_t bytes) {
+// A size in a modder's units: "812 B", "4.5 KB", "220.4 MB", "1.2 GB".
+static std::string size_words(uint64_t bytes) {
 	char text[32];
 	const double b = static_cast<double>(bytes);
 	if (bytes < 1024) std::snprintf(text, sizeof(text), "%llu B", static_cast<unsigned long long>(bytes));
