@@ -98,6 +98,7 @@ PackedInt64Array building_visibility_changes_since(opennova::mission::MissionKer
 // ticks are the entities' own, whichever view collects.
 void collect_view_verdicts(opennova::mission::MissionKernel &kernel,
 		opennova::inmatch::ClientRuntime *runtime, bool joiner,
+		const opennova::replication::ClientWorldMaterializer *materializer,
 		std::unordered_map<uint16_t, uint8_t> &r_wire_latch,
 		std::vector<opennova::world::EntityHandle> &r_handles,
 		const opennova::world::OcclusionFrameCamera &cam, std::vector<int32_t> &r_culled_bms,
@@ -179,15 +180,13 @@ void collect_view_verdicts(opennova::mission::MissionKernel &kernel,
 			// itself, and its latch does not tick (the gate's bit0 test in
 			// OcclusionWorld::entity_render_visible).
 			if (es.state_flags_known && (es.state_flags & 0x01u) != 0) continue;
+			// A joiner's twin is the decoded row's own native row by the replica
+			// rule, never a later same-type occupant of the handle (D-NET-676).
 			const opennova::world::EntityHandle h{handle};
-			const opennova::world::Entity *twin = nullptr;
-			if (!joiner || h.pool() != 0) {
-				const opennova::world::Entity *candidate =
-						kernel.world.registry.get(h);
-				if (candidate != nullptr &&
-						static_cast<uint16_t>(candidate->item_id) == es.type_id)
-					twin = candidate;
-			}
+			opennova::world::Entity *twin = !joiner || h.pool() != 0
+					? opennova::replication::replica_row_entity(materializer, kernel.world, h,
+							es.type_id, kernel.wire_header_world)
+					: nullptr;
 			if (twin != nullptr && (twin->bms_id != 0 ||
 					twin->spawn_origin != opennova::world::kSpawnOriginNone))
 				continue; // a placed row: the registry walk above gated it
@@ -199,13 +198,11 @@ void collect_view_verdicts(opennova::mission::MissionKernel &kernel,
 				// row is a spawn image — the loopback 0x0A is header-only, so
 				// es.x/y/z never follow a moving carrier, and a sphere pinned
 				// there culled the gun the moment the driven buggy left it.
-				opennova::world::Entity *live = kernel.world.registry.get(h);
-				if (live == nullptr) continue;
 				if (!kernel.occlusion.entity_render_visible(
-							kernel.world, kernel.collision, *live, cam))
+							kernel.world, kernel.collision, *twin, cam))
 					r_culled_wire.push_back(static_cast<int32_t>(handle));
 				else
-					anchor_entity(*live);
+					anchor_entity(*twin);
 				continue;
 			}
 			// A bare row is the client-built pool entity retail's collector
@@ -353,9 +350,11 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 	// Terrain_CollectVisibleEntities @ 0x5c91bc).
 	kernel_->occlusion.collect_death_piece_draws(kernel_->world, cam,
 			present_.death_piece_draws);
-	collect_view_verdicts(*kernel_, runtime_, is_joiner(), present_.wire_occlusion_latch,
-			present_.occlusion_probe_handles, cam, present_.occlusion_culled_bms,
-			present_.occlusion_culled_wire, present_.foliage_mask_anchors);
+	collect_view_verdicts(*kernel_, runtime_, is_joiner(),
+			joiner_role_ != nullptr ? &joiner_role_->materializer() : nullptr,
+			present_.wire_occlusion_latch, present_.occlusion_probe_handles, cam,
+			present_.occlusion_culled_bms, present_.occlusion_culled_wire,
+			present_.foliage_mask_anchors);
 	if (runtime_profiling_enabled_)
 		present_.last_occlusion_probe_us = opennova::io::perf_now_us() - occl_probe_start;
 }
@@ -377,9 +376,10 @@ const InsetOcclusionView &Simulation::run_inset_occlusion(const InsetOcclusionRe
 	kernel_->occlusion.select_view(opennova::world::OcclusionView::kInset);
 	kernel_->occlusion.build_frame(kernel_->world, kernel_->collision, cam);
 	kernel_->occlusion.collect_death_piece_draws(kernel_->world, cam, inset.death_piece_draws);
-	collect_view_verdicts(*kernel_, runtime_, is_joiner(), present_.wire_occlusion_latch,
-			present_.occlusion_probe_handles, cam, inset.culled_bms, inset.culled_wire,
-			inset.foliage_mask_anchors);
+	collect_view_verdicts(*kernel_, runtime_, is_joiner(),
+			joiner_role_ != nullptr ? &joiner_role_->materializer() : nullptr,
+			present_.wire_occlusion_latch, present_.occlusion_probe_handles, cam,
+			inset.culled_bms, inset.culled_wire, inset.foliage_mask_anchors);
 	inset.building_changes = building_visibility_changes_since(*kernel_, inset.building_last);
 	inset.water_visible = kernel_->occlusion.water_visible();
 	kernel_->occlusion.select_view(opennova::world::OcclusionView::kMain);

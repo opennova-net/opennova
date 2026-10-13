@@ -2163,11 +2163,13 @@ void JoinerRole::refresh_wire_collision_proxies() {
 			proxy.bbox_center_q16 = shape.bbox_center_q16;
 			proxy.candidate_source_eligible =
 					shape.pool1_candidate_source_eligible;
-			const world::EntityHandle possible_twin{entity.handle};
-			const world::Entity *twin = world.registry.get(possible_twin);
-			if (twin != nullptr &&
-					static_cast<uint16_t>(twin->item_id) == entity.type_id)
-				proxy.registry_twin = possible_twin;
+			// The twin is the decoded row's own native row by the replica rule,
+			// never a later same-type occupant of the handle (D-NET-676)
+			// [orig: NapiNPClientMsg_EntityDeath @0x42EBC6, the slot address].
+			if (const world::Entity *twin = replication::replica_row_entity(&materializer_,
+						world, world::EntityHandle{entity.handle}, entity.type_id,
+						kernel.wire_header_world))
+				proxy.registry_twin = twin->handle;
 			dynamic_proxies.push_back(proxy);
 		}
 	}

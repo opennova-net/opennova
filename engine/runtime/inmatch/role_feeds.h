@@ -41,6 +41,9 @@ namespace opennova::menu {
 struct CommandMapRoster;
 struct CommandMapLocations;
 }
+namespace opennova::replication {
+class ClientWorldMaterializer;
+}
 
 namespace opennova::inmatch {
 
@@ -57,6 +60,11 @@ struct RoleView {
 	// The authority's session context; null on a joiner and the bare local role.
 	const NapiNPServerCtx *host = nullptr;
 	bool joiner = false;
+	// The joiner's materializer: a decoded row's own native row is the one the
+	// replica rule gives (replication::replica_row_entity), never a later
+	// lifetime at the same handle. Null on every other role; a joiner view
+	// without one falls back to the handle and the type.
+	const replication::ClientWorldMaterializer *materializer = nullptr;
 	// The host option word the embedder staged (GameConfig::mp_attributes) —
 	// the deploy screen's team-button word on a hosting process (its ctx+0x68
 	// pick, deploy_screen_status); the in-match rules word is
