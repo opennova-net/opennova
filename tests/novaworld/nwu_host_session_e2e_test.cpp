@@ -198,8 +198,18 @@ int main() {
 	expect(tick_until([&] { return players() == before + 1; }, 300),
 	       "ClientHostPlayerAdded reaches the service while hosting");
 
+	// The live session the server-info update reads its columns from at each run, as an
+	// embedder's bound match: from here a column changes with it, never with the registration.
+	// [orig: Lobby_UpdateServerInfo @0x4fe8c0]
+	std::string live_name = "Engine Driver Host";
+	std::string live_mission = "ASH_G11A";
+	role.set_column_source([&](opennova::HostRegistration &r) {
+		r.server_name = live_name;
+		r.mission_name = live_mission;
+	});
+
 	// The refresh: a changed column rides the next 1860-tick delta, not the edit.
-	role.set_server_name("Engine Driver Renamed");
+	live_name = "Engine Driver Renamed";
 	for (int i = 0; i < 20; ++i) tick();
 	expect(!row("Engine Driver Renamed"), "a renamed column waits for the refresh");
 	tick(30000); // past SESSION_HOST_INFO_REFRESH_TICKS (1860 ticks, ~29.8 s)
@@ -208,12 +218,17 @@ int main() {
 	expect(host_var("Engine Driver Renamed", "MissionName") == "ASH_G11A",
 			"the first refresh carries every column (nothing went out before it)");
 
-	// The mission start's update: both lists in full at once, outside the refresh timer.
-	// [orig: Game_StartMission @0x5248c6..0x524903]
-	role.set_server_name("Engine Driver Started");
+	// The mission start's update: both lists in full at once, outside the refresh timer; a map
+	// change's next mission is the column the live session now reads (D-NET-373).
+	// [orig: Game_StartMission @0x5248c6..0x524903; Lobby_UpdateServerInfo's MissionName
+	//  @0x4fe989..0x4fe9d0]
+	live_name = "Engine Driver Started";
+	live_mission = "ASH_G12A";
 	role.publish_mission_start();
 	expect(tick_until([&] { return row("Engine Driver Started"); }, 100),
 			"the mission start's update carries a changed column at once");
+	expect(host_var("Engine Driver Started", "MissionName") == "ASH_G12A",
+			"the mission start's update lists the next map's mission");
 
 	// The NWU reconnect's re-host: the re-verify counts ReconnectCounter up and re-sends the
 	// request with the session's kept lists, and the result republishes both lists in full. A
@@ -222,7 +237,7 @@ int main() {
 	// [orig: CNapiGameSession_HandleConnectVerifyResponse @0x4d5800 (the count @0x4d5968);
 	//  CNapiGameSession_HandleHostVerifyResponse @0x4d59d0 (the gate @0x4d5c52..0x4d5c58, the
 	//  republish @0x4d5c5a..0x4d5c9e)]
-	role.set_server_name("Engine Driver Rehosted");
+	live_name = "Engine Driver Rehosted";
 	auto tick_lobby = [&](uint32_t step_ms = 10) {
 		now += step_ms;
 		lobby.tick(now);
@@ -309,7 +324,7 @@ int main() {
 		republished = row("Engine Driver Rehosted");
 	}
 	expect(republished, "the re-host's result republishes the column changed before the drop");
-	expect(host_var("Engine Driver Rehosted", "MissionName") == "ASH_G11A",
+	expect(host_var("Engine Driver Rehosted", "MissionName") == "ASH_G12A",
 			"the republish carries the whole Host list");
 
 	// Stop: ClientStopHosting on one pump, then the goodbye burst; the row goes.

@@ -291,6 +291,9 @@ void NwuHostRole::send_status_blob() {
 
 HostRegistration NwuHostRole::host_cfg() const {
 	HostRegistration cfg = cfg_;
+	// The session's columns as they stand now (set_column_source).
+	if (column_source_)
+		column_source_(cfg);
 	// Players counts the active slots, the host's own only when it is a peer: a listen host's
 	// slot 0 is active from the round init, a dedicated server's never counts, so its roster
 	// (the joiners) is the whole count. [orig: Lobby_UpdateServerInfo @0x4feaa6..0x4feacb;

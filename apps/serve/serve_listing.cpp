@@ -7,6 +7,7 @@
 #include <runtime/inmatch/host_config.h> // run_host_server_command
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/server_info.h>
 #include <runtime/inmatch/server_tick.h>
 
 namespace opennova::serve {
@@ -81,20 +82,16 @@ bool ServeListing::refresh(uint32_t now_ms, bool force) {
 // The Host list's columns. HostSetup's MaxPlayers is the host file's cap, clamped by the lister
 // to 1..65 for a dedicated host; the refreshed list's is the published cap less the dedicated
 // slot, so neither counts the server's own slot. Dedicated is the STRNOVA11 text (listen_host
-// false). The rest is the session config the boot made, which a ServerCommand edits.
+// false). Once the match binds, the session's columns are the live session's, which a
+// ServerCommand or a map change edits (inmatch::read_session_listing_columns, the game's too).
 // [orig: CNapiGameSession_BuildHostVarLists @0x4d0b50; CNapiGameSession_ConnectOrHost
-//  @0x4d5046..0x4d507b; Lobby_UpdateServerInfo @0x4fe8c0 (@0x4feb03..0x4feb0a, @0x4febe2..0x4fec52)]
+//  @0x4d5046..0x4d507b; Lobby_UpdateServerInfo @0x4fe8c0 (@0x4feb03..0x4feb0a,
+//  @0x4febe2..0x4fec52)]
 HostRegistration ServeListing::registration() const {
 	HostRegistration r = base_;
 	r.listen_host = false;
 	if (role_ == nullptr) return r;
-	const inmatch::GameConfig &config = role_->state.host_owner.ctx.config;
-	r.server_name = config.server_name;
-	r.server_message = config.custom_text;
-	r.password = !config.server_password.empty();
-	r.published_cap = static_cast<int>(config.player_slot_limit());
-	r.tracers = (config.mp_attributes & inmatch::GameConfig::kMpAttribNoTracers) == 0;
-	if (kernel_ != nullptr) r.round_time_remaining_ticks = kernel_->world.match.remaining_ticks();
+	inmatch::read_session_listing_columns(r, role_->state.host_owner.ctx, seams_.gametext);
 	return r;
 }
 

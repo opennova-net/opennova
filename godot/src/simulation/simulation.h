@@ -825,8 +825,6 @@ private:
 	// every reader guards (an absent host reads exactly like an idle one).
 	opennova::inmatch::ListenHostState *host_state();
 	const opennova::inmatch::ListenHostState *host_state() const;
-	opennova::inmatch::NapiNPServerCtx *host_ctx();
-	const opennova::inmatch::NapiNPServerCtx *host_ctx() const;
 	// The role feeds' view of this session (inmatch/role_feeds.h RoleView).
 	opennova::inmatch::RoleView role_view() const;
 	// The active role's HostClient (host/SP) OR Joiner runtime; the present-snapshot source.
@@ -1050,14 +1048,14 @@ public:
 		String team, type; // the match's PlayerTeam / PlayerType ("%ld")
 	};
 	std::vector<HostPeerSlot> host_peer_slots() const;
-	int32_t round_time_remaining_ticks() const; // the live round clock (world::Match), -1 untimed
-	// A NovaWorld ServerCommand (the hosting session's `server_command` verb, target and args) at
-	// the host (inmatch::run_host_server_command): on its hosting context, else a session-less one
-	// where SetMPReset alone passes. A config change lands in the cfg block (use_game_config) and
-	// the host session record; the caller saves it, republishes, and owns `stop_hosting`.
+	// The host role's server context (null without one): the NovaWorld listing's live columns.
+	opennova::inmatch::NapiNPServerCtx *host_ctx();
+	const opennova::inmatch::NapiNPServerCtx *host_ctx() const;
+	// A NovaWorld ServerCommand's verb, target and args at the host (run_host_server_command): on
+	// its hosting context, else a session-less one where SetMPReset alone passes. A config change
+	// lands in the cfg block and the host session record; the caller saves, owns `stop_hosting`.
 	struct ServerCommandResult {
-		bool handled = false, stop_hosting = false, config_changed = false, has_config = false;
-		String server_name, server_message; // the live config after the verb ran (has_config)
+		bool handled = false, stop_hosting = false, config_changed = false;
 	};
 	ServerCommandResult execute_server_command(const String &p_verb, const String &p_target,
 			const PackedStringArray &p_args);

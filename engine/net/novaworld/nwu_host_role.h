@@ -99,11 +99,15 @@ public:
 	// players' vars.
 	void sync_roster(const std::vector<HostPlayerSlot> &wanted);
 	const std::map<int, HostPlayerSlot> &roster() const { return players_; }
-	// The live round clock the TimeLeft column reads at every refresh (-1 = untimed).
-	void set_round_time_remaining_ticks(int ticks) { cfg_.round_time_remaining_ticks = ticks; }
-	// A ServerCommand's config change: the columns ride the next refresh.
-	void set_server_name(const std::string &name) { cfg_.server_name = name; }
-	void set_server_message(const std::string &message) { cfg_.server_message = message; }
+	// The live session the server-info update reads its columns from at each run, over the
+	// registration's (the embedder's match: its name and message, game type, mission, caps,
+	// lock, rules and round clock, inmatch::read_session_listing_columns); the embedder installs
+	// it once its match binds and clears it as the match goes. Null: the registration's columns
+	// stand. A changed column rides the next update as a changed var.
+	// [orig: Lobby_UpdateServerInfo @0x4fe8c0 — every column read off the session's globals at
+	//  each run, the SetOrCreates @0x4fe911..0x4ff3ff]
+	using ColumnSource = std::function<void(HostRegistration &)>;
+	void set_column_source(ColumnSource source) { column_source_ = std::move(source); }
 	// Every listing column at once (a mirrored server's new map, name, settings): the
 	// registration's own keys stay (AppId, HostKey, LobbyName, the PCIDKey ring, the
 	// ReconnectCounter) and the changed columns ride the next refresh as its dirty delta.
@@ -141,6 +145,7 @@ private:
 	NwuLobbySession &lobby_;
 	Hooks hooks_;
 	HostRegistration cfg_;
+	ColumnSource column_source_;
 	HostLobbyText lobby_text_;
 	Phase phase_ = Phase::Idle;
 	std::map<int, HostPlayerSlot> players_;

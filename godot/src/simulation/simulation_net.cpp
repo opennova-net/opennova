@@ -370,17 +370,13 @@ Simulation::ServerCommandResult Simulation::execute_server_command(const String 
 	out.handled = outcome.handled;
 	out.stop_hosting = outcome.stop_hosting;
 	out.config_changed = outcome.config_changed;
-	if (ctx == nullptr)
-		return out;
-	out.has_config = true;
-	if (outcome.config_changed) {
-		// The sim's host session record is what the next session build reads.
+	if (ctx != nullptr && outcome.config_changed) {
+		// The sim's host session record is what the next session build reads; the NovaWorld
+		// listing reads the live context's (inmatch::read_session_listing_columns).
 		net_.host_session_config.server_name = ctx->config.server_name;
 		net_.host_session_config.custom_text = ctx->config.custom_text;
 		net_.host_session_config.multiplayer_reset = ctx->config.multiplayer_reset;
 	}
-	out.server_name = opennova::to_gd(ctx->config.server_name);
-	out.server_message = opennova::to_gd(ctx->config.custom_text);
 	return out;
 }
 
