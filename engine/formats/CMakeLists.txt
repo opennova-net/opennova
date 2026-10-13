@@ -121,7 +121,6 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_records.cpp  # bms:: structs <-> typed mission records
     # mns — menu stylesheet
     ${CMAKE_CURRENT_SOURCE_DIR}/mns/mns.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/mns/mns_document.cpp
     # mnu — menu UI
     ${CMAKE_CURRENT_SOURCE_DIR}/mnu/mnu.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mnu/mnu_layout.cpp

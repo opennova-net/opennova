@@ -2347,13 +2347,15 @@ target_link_libraries(mns_parse_test PRIVATE opennova_formats)
 target_include_directories(mns_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mns_parse COMMAND mns_parse_test)
 
-# Lossless MNS document model (ADR 0009): synthetic byte round-trips, edit
-# stability and diagnostics unconditionally; the shipped menu_style.mns legs
-# read the reference fixture set (SKIP-LEG without OPENNOVA_JO_ASSETS).
-add_executable(mns_document_test mns/mns_document_test.cpp)
-target_link_libraries(mns_document_test PRIVATE opennova_formats)
-target_include_directories(mns_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(mns_document COMMAND mns_document_test)
+# The stylesheet writer (formats/mns, mns::write): the reader's list written in the
+# writer's form, a minted list byte for byte, an authored sheet read back as its list,
+# what the reader reads otherwise refused; the retail twin reads the reference set's
+# menu_style.mns (OPENNOVA_JO_ASSETS) and every .mns the packed install serves
+# (OPENNOVA_JO_DIR), each written and read back as the same list.
+add_executable(mns_write_test mns/mns_write_test.cpp)
+target_link_libraries(mns_write_test PRIVATE opennova_base opennova_formats)
+target_include_directories(mns_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(mns_write COMMAND mns_write_test)
 
 # World runtime substrate: addressable entities (faithful find_by_net_id), shared
 # var store, entity-command primitives, the logic-tick clock, snapshot/restore.

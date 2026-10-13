@@ -37,7 +37,7 @@
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
 #include <formats/mnu/mnu.h>
-#include <formats/mns/mns_document.h>
+#include <formats/mns/mns.h>
 #include <formats/rtxt/rtxt.h>
 #include <runtime/menu/menu_assets.h>
 #include <runtime/menu/menu_frame.h>
@@ -172,9 +172,9 @@ std::map<std::string, std::string> style_vars(const AssetSource &assets) {
 	std::map<std::string, std::string> vars;
 	std::vector<uint8_t> style;
 	if (assets.read("menu_style.mns", style)) {
-		const opennova::mns::EvaluationResult evaluated = opennova::mns::Document::parse(
-				reinterpret_cast<const char *>(style.data()), style.size()).evaluate();
-		for (const auto &kv : evaluated.sheet.variables) vars[kv.first] = kv.second;
+		opennova::mns::KeyValueList list;
+		opennova::mns::parse_key_value_buffer(reinterpret_cast<const char *>(style.data()), style.size(), list);
+		for (const auto &kv : list.sheet().variables) vars[kv.first] = kv.second;
 	}
 	return vars;
 }

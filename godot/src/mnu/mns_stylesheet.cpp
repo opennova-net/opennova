@@ -4,11 +4,12 @@
 
 #include "util/string_convert.h"
 
+#include <base/io/strutil.h>
+
 #include <godot_cpp/classes/file_access.hpp>
-#include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
-#include <cstring>
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -22,10 +23,24 @@ using opennova::to_std;
 } // namespace
 
 void MnsStyleSheet::_refresh() {
-	const opennova::mns::EvaluationResult result = doc_.evaluate();
-	sheet_ = result.sheet;
-	evaluation_diagnostics_ = result.diagnostics;
-	runtime_valid_ = result.success;
+	sheet_ = list_.sheet();
+}
+
+int MnsStyleSheet::_find(const std::string &p_name) const {
+	for (size_t i = 0; i < list_.nodes.size(); ++i)
+		if (opennova::strutil::iequals(list_.nodes[i].name, p_name)) return static_cast<int>(i);
+	return -1;
+}
+
+void MnsStyleSheet::_read(const std::string &p_text) {
+	list_ = opennova::mns::KeyValueList();
+	stops_.clear();
+	const opennova::mns::ReadResult read = opennova::mns::parse_key_value_buffer(p_text.data(), p_text.size(), list_);
+	runtime_valid_ = read.status == opennova::mns::ReadStatus::Read;
+	if (!runtime_valid_)
+		stops_.push_back({opennova::mns::line_at_offset(p_text.data(), p_text.size(), read.offset),
+		                  read.status == opennova::mns::ReadStatus::Hangs, opennova::mns::stop_message(read.status)});
+	_refresh();
 }
 
 Ref<MnsStyleSheet> MnsStyleSheet::load_shell(const Ref<ResourceRoot> &p_root) {
@@ -48,12 +63,8 @@ Ref<MnsStyleSheet> MnsStyleSheet::from_shell_style(const opennova::menu::ShellSt
 	for (const opennova::menu::ShellSheetRead &read : p_style.sheets) {
 		if (!read.present || read.read.status == opennova::mns::ReadStatus::Read) continue;
 		sheet->runtime_valid_ = false;
-		const bool hangs = read.read.status == opennova::mns::ReadStatus::Hangs;
-		sheet->evaluation_diagnostics_.push_back(opennova::mns::Diagnostic{
-		        read.stopped_line, opennova::mns::Severity::Error,
-		        hangs ? opennova::mns::DiagnosticCode::Hangs : opennova::mns::DiagnosticCode::Stops,
-		        read.name + (hangs ? ": the game stops responding reading this line"
-		                           : ": the game stops reading the stylesheet on this line")});
+		sheet->stops_.push_back({read.stopped_line, read.read.status == opennova::mns::ReadStatus::Hangs,
+		                         read.name + ": " + opennova::mns::stop_message(read.read.status)});
 	}
 	return sheet;
 }
@@ -81,205 +92,180 @@ const std::unordered_map<std::string, std::string> &MnsStyleSheet::variables() c
 void MnsStyleSheet::set_variable(const String &p_name, const String &p_value) {
 	const std::string name = to_std(p_name);
 	const std::string value = to_std(p_value);
-	std::string error;
-	if (doc_.find_entry(name) >= 0) {
-		if (sheet_.get(name) == value) {
-			return; // no-op: equal value, no dirty flip
-		}
-		if (!doc_.set_value(name, value, &error)) {
-			UtilityFunctions::push_warning("MnsStyleSheet: set_variable failed: ", error.c_str());
-			return;
-		}
+	if (!opennova::mns::is_valid_name(name) || !opennova::mns::is_valid_value(value)) {
+		UtilityFunctions::push_warning("MnsStyleSheet: set_variable: '", p_name, "' = '", p_value,
+		                               "' is no name and value the reader reads back");
+		return;
+	}
+	const int at = _find(name);
+	if (at >= 0) {
+		if (list_.nodes[size_t(at)].value == value) return; // no-op: equal value, no dirty flip
+		list_.nodes[size_t(at)].value = value;
 	} else {
-		if (!doc_.add_define(name, value, -1, std::string(), &error)) {
-			UtilityFunctions::push_warning("MnsStyleSheet: set_variable failed: ", error.c_str());
-			return;
-		}
+		list_.nodes.push_back({name, value});
 	}
 	_refresh();
 	emit_changed();
 }
 
 bool MnsStyleSheet::remove_variable(const String &p_name) {
-	std::string error;
-	if (!doc_.remove_define(to_std(p_name), &error)) {
-		if (!error.empty()) {
-			UtilityFunctions::push_warning(
-					"MnsStyleSheet: remove_variable failed: ", error.c_str());
-		}
-		return false; // unchanged: no dirty signal
-	}
+	const int at = _find(to_std(p_name));
+	if (at < 0) return false; // unchanged: no dirty signal
+	list_.nodes.erase(list_.nodes.begin() + at);
 	_refresh();
 	emit_changed();
 	return true;
 }
 
 void MnsStyleSheet::set_variables(const Dictionary &p_variables) {
-	doc_ = opennova::mns::Document();
+	list_ = opennova::mns::KeyValueList();
 	const Array keys = p_variables.keys();
 	for (int i = 0; i < keys.size(); ++i) {
 		const String key = keys[i];
-		std::string error;
-		if (!doc_.add_define(to_std(key), to_std(p_variables[key]), -1, std::string(), &error)) {
-			UtilityFunctions::push_warning("MnsStyleSheet: set_variables skipped '", key, "': ", error.c_str());
+		const std::string name = to_std(key);
+		const std::string value = to_std(p_variables[key]);
+		if (!opennova::mns::is_valid_name(name) || !opennova::mns::is_valid_value(value) || _find(name) >= 0) {
+			UtilityFunctions::push_warning("MnsStyleSheet: set_variables skipped '", key, "'");
+			continue;
 		}
+		list_.nodes.push_back({name, value});
 	}
 	_refresh();
 	emit_changed();
 }
 
 void MnsStyleSheet::clear() {
-	if (doc_.nodes().empty() && sheet_.variables.empty()) {
+	if (list_.nodes.empty() && sheet_.variables.empty()) {
 		return;
 	}
-	doc_ = opennova::mns::Document();
+	list_ = opennova::mns::KeyValueList();
 	_refresh();
 	emit_changed();
 }
 
 Array MnsStyleSheet::get_entries() const {
 	Array out;
-	for (const opennova::mns::Document::Entry &entry : doc_.entries()) {
+	for (const opennova::mns::KeyValue &node : list_.nodes) {
 		Dictionary row;
-		row["name"] = to_gd(entry.name);
-		row["value"] = to_gd(entry.value);
-		row["raw_value"] = to_gd(entry.raw_value);
-		row["inline_comment"] = to_gd(entry.inline_comment);
-		row["line"] = entry.line;
-		row["node_index"] = entry.node_index;
-		row["multiline"] = entry.multiline;
-		row["group"] = entry.group;
-		PackedStringArray comments;
-		for (const std::string &c : entry.preceding_comments) {
-			comments.append(to_gd(c));
-		}
-		row["preceding_comments"] = comments;
+		row["name"] = to_gd(node.name);
+		row["value"] = to_gd(node.value);
 		out.append(row);
 	}
 	return out;
 }
 
 int MnsStyleSheet::get_entry_count() const {
-	return static_cast<int>(doc_.entries().size());
-}
-
-Array MnsStyleSheet::get_diagnostics() const {
-	Array out;
-	for (const opennova::mns::Diagnostic &d : doc_.diagnostics()) {
-		Dictionary row;
-		row["line"] = d.line;
-		row["severity"] = (d.severity == opennova::mns::Severity::Error) ? "error" : "warning";
-		row["code"] = to_gd(opennova::mns::diagnostic_code_token(d.code));
-		row["message"] = to_gd(d.message);
-		out.append(row);
-	}
-	return out;
+	return static_cast<int>(list_.nodes.size());
 }
 
 Array MnsStyleSheet::get_evaluation_diagnostics() const {
 	Array out;
-	for (const opennova::mns::Diagnostic &d : evaluation_diagnostics_) {
+	for (const Stop &stop : stops_) {
 		Dictionary row;
-		row["line"] = d.line;
-		row["severity"] = (d.severity == opennova::mns::Severity::Error) ? "error" : "warning";
-		row["code"] = to_gd(opennova::mns::diagnostic_code_token(d.code));
-		row["message"] = to_gd(d.message);
+		row["line"] = stop.line;
+		row["severity"] = "error";
+		row["code"] = stop.hangs ? "hangs" : "stops";
+		row["message"] = to_gd(stop.message);
 		out.append(row);
 	}
 	return out;
 }
 
 String MnsStyleSheet::get_source_text() const {
-	return to_gd(doc_.source_text());
+	std::string text, error;
+	if (!opennova::mns::write(list_, text, error)) return String();
+	return to_gd(text);
 }
 
 void MnsStyleSheet::set_source_text(const String &p_text) {
-	const std::string text = to_std(p_text);
-	if (text == doc_.source_text()) {
-		return; // no-op
-	}
-	doc_.set_source_text(text);
-	_refresh();
-	emit_changed();
+	const opennova::mns::KeyValueList before = list_;
+	const bool was_valid = runtime_valid_;
+	_read(to_std(p_text));
+	bool same = was_valid == runtime_valid_ && before.nodes.size() == list_.nodes.size();
+	for (size_t i = 0; same && i < list_.nodes.size(); ++i)
+		same = before.nodes[i].name == list_.nodes[i].name && before.nodes[i].value == list_.nodes[i].value;
+	if (!same) emit_changed();
 }
 
 bool MnsStyleSheet::add_variable(const String &p_name, const String &p_value, const String &p_after_name) {
-	int before_node = -1;
+	const std::string name = to_std(p_name);
+	const std::string value = to_std(p_value);
+	if (!opennova::mns::is_valid_name(name) || !opennova::mns::is_valid_value(value)) {
+		UtilityFunctions::push_warning("MnsStyleSheet: add_variable: '", p_name, "' = '", p_value,
+		                               "' is no name and value the reader reads back");
+		return false;
+	}
+	if (_find(name) >= 0) {
+		UtilityFunctions::push_warning("MnsStyleSheet: add_variable: '", p_name, "' is already a variable");
+		return false;
+	}
+	size_t at = list_.nodes.size();
 	if (!p_after_name.is_empty()) {
-		const int after = doc_.find_entry(to_std(p_after_name));
+		const int after = _find(to_std(p_after_name));
 		if (after < 0) {
 			UtilityFunctions::push_warning("MnsStyleSheet: add_variable: no variable named '", p_after_name, "'");
 			return false;
 		}
-		before_node = doc_.entries()[static_cast<size_t>(after)].node_index + 1;
+		at = size_t(after) + 1;
 	}
-	std::string error;
-	if (!doc_.add_define(to_std(p_name), to_std(p_value), before_node, std::string(), &error)) {
-		UtilityFunctions::push_warning("MnsStyleSheet: add_variable failed: ", error.c_str());
-		return false;
-	}
+	list_.nodes.insert(list_.nodes.begin() + std::ptrdiff_t(at), opennova::mns::KeyValue{name, value});
 	_refresh();
 	emit_changed();
 	return true;
 }
 
 bool MnsStyleSheet::rename_variable(const String &p_old_name, const String &p_new_name) {
-	std::string error;
-	if (!doc_.rename_define(to_std(p_old_name), to_std(p_new_name), &error)) {
-		UtilityFunctions::push_warning("MnsStyleSheet: rename_variable failed: ", error.c_str());
+	const std::string name = to_std(p_new_name);
+	const int at = _find(to_std(p_old_name));
+	const int other = _find(name);
+	if (at < 0 || !opennova::mns::is_valid_name(name) || (other >= 0 && other != at)) {
+		UtilityFunctions::push_warning("MnsStyleSheet: rename_variable: cannot rename '", p_old_name, "' to '",
+		                               p_new_name, "'");
 		return false;
 	}
+	list_.nodes[size_t(at)].name = name;
 	_refresh();
 	emit_changed();
 	return true;
 }
 
 bool MnsStyleSheet::move_variable(const String &p_name, int p_to_entry_index) {
-	const std::vector<opennova::mns::Document::Entry> entries = doc_.entries();
-	const int before_node = (p_to_entry_index < 0 || p_to_entry_index >= static_cast<int>(entries.size()))
-			? static_cast<int>(doc_.nodes().size())
-			: entries[static_cast<size_t>(p_to_entry_index)].node_index;
-	std::string error;
-	if (!doc_.move_define(to_std(p_name), before_node, &error)) {
-		UtilityFunctions::push_warning("MnsStyleSheet: move_variable failed: ", error.c_str());
+	const int at = _find(to_std(p_name));
+	if (at < 0) {
+		UtilityFunctions::push_warning("MnsStyleSheet: move_variable: no variable named '", p_name, "'");
 		return false;
 	}
-	_refresh();
-	emit_changed();
-	return true;
-}
-
-bool MnsStyleSheet::set_inline_comment(const String &p_name, const String &p_comment) {
-	std::string error;
-	if (!doc_.set_inline_comment(to_std(p_name), to_std(p_comment), &error)) {
-		UtilityFunctions::push_warning("MnsStyleSheet: set_inline_comment failed: ", error.c_str());
-		return false;
-	}
+	const opennova::mns::KeyValue node = list_.nodes[size_t(at)];
+	list_.nodes.erase(list_.nodes.begin() + at);
+	const size_t to = p_to_entry_index < 0 ? list_.nodes.size()
+	                                       : std::min(size_t(p_to_entry_index), list_.nodes.size());
+	list_.nodes.insert(list_.nodes.begin() + std::ptrdiff_t(to), node);
 	_refresh();
 	emit_changed();
 	return true;
 }
 
 bool MnsStyleSheet::is_valid_variable_name(const String &p_name) const {
-	return opennova::mns::Document::is_valid_name(to_std(p_name));
+	return opennova::mns::is_valid_name(to_std(p_name));
 }
 
 bool MnsStyleSheet::is_valid_variable_value(const String &p_value) const {
-	return opennova::mns::Document::is_valid_value(to_std(p_value));
+	return opennova::mns::is_valid_value(to_std(p_value));
 }
 
 Error MnsStyleSheet::load_from_bytes(const PackedByteArray &p_bytes) {
-	// The lossless document load is permissive, so a malformed source stays repairable;
-	// the variables are what the game reads of it (is_runtime_valid: all of it).
-	doc_ = opennova::mns::Document::parse(reinterpret_cast<const char *>(p_bytes.ptr()),
-			static_cast<size_t>(p_bytes.size()));
-	_refresh();
+	// What the game reads of the bytes, up to where it stops (is_runtime_valid: all of it).
+	_read(std::string(reinterpret_cast<const char *>(p_bytes.ptr()), static_cast<size_t>(p_bytes.size())));
 	return OK;
 }
 
 PackedByteArray MnsStyleSheet::to_byte_array() const {
-	const std::vector<uint8_t> bytes = doc_.serialize();
-	return to_packed_bytes(bytes);
+	std::string text, error;
+	if (!opennova::mns::write(list_, text, error)) {
+		UtilityFunctions::push_warning("MnsStyleSheet: the list has no written form: ", error.c_str());
+		return PackedByteArray();
+	}
+	return to_packed_bytes(std::vector<uint8_t>(text.begin(), text.end()));
 }
 
 Error MnsStyleSheet::load_from_path(const String &p_path) {
@@ -293,12 +279,16 @@ Error MnsStyleSheet::load_from_path(const String &p_path) {
 }
 
 Error MnsStyleSheet::save_to_path(const String &p_path) const {
-	const PackedByteArray packed = to_byte_array();
+	std::string text, error;
+	if (!opennova::mns::write(list_, text, error)) {
+		UtilityFunctions::push_warning("MnsStyleSheet: the list has no written form: ", error.c_str());
+		return ERR_INVALID_DATA;
+	}
 	Ref<FileAccess> file = FileAccess::open(p_path, FileAccess::WRITE);
 	if (file.is_null()) {
 		return ERR_FILE_CANT_WRITE;
 	}
-	file->store_buffer(packed);
+	file->store_buffer(to_packed_bytes(std::vector<uint8_t>(text.begin(), text.end())));
 	file->close();
 	return OK;
 }
@@ -315,7 +305,6 @@ void MnsStyleSheet::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("get_entries"), &MnsStyleSheet::get_entries);
 	ClassDB::bind_method(D_METHOD("get_entry_count"), &MnsStyleSheet::get_entry_count);
-	ClassDB::bind_method(D_METHOD("get_diagnostics"), &MnsStyleSheet::get_diagnostics);
 	ClassDB::bind_method(D_METHOD("is_runtime_valid"), &MnsStyleSheet::is_runtime_valid);
 	ClassDB::bind_method(D_METHOD("get_evaluation_diagnostics"),
 			&MnsStyleSheet::get_evaluation_diagnostics);
@@ -324,7 +313,6 @@ void MnsStyleSheet::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("add_variable", "name", "value", "after_name"), &MnsStyleSheet::add_variable, DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("rename_variable", "old_name", "new_name"), &MnsStyleSheet::rename_variable);
 	ClassDB::bind_method(D_METHOD("move_variable", "name", "to_entry_index"), &MnsStyleSheet::move_variable);
-	ClassDB::bind_method(D_METHOD("set_inline_comment", "name", "comment"), &MnsStyleSheet::set_inline_comment);
 	ClassDB::bind_method(D_METHOD("is_valid_variable_name", "name"), &MnsStyleSheet::is_valid_variable_name);
 	ClassDB::bind_method(D_METHOD("is_valid_variable_value", "value"), &MnsStyleSheet::is_valid_variable_value);
 

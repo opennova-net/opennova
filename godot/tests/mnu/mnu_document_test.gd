@@ -128,40 +128,34 @@ func test_mns_stylesheet() -> void:
 	assert_eq(sheet.substitute("%UNKNOWN%"), "%UNKNOWN%", "unknown var left as-is")
 
 
-# --- MNS document surface (lossless model behind MnsStyleSheet, ADR 0014) -------
+# --- MNS list surface (the reader's list behind MnsStyleSheet) -------------------
 
-# The shipped style sheet's bytes, empty (after pending) without the reference set.
-func test_mns_diagnostics_report_line_and_severity() -> void:
+# A sheet's text is what the game reads of it: its directives decided, its comments,
+# blanks and switched-off lines read as nothing; the writer puts the list down alone.
+func test_mns_source_text_is_the_writers_form() -> void:
 	var sheet := MnsStyleSheet.new()
-	sheet.set_source_text("FOO a\r\nFOO b\r\n#if 2\r\nBAR c\r\n")
-	var diagnostics := sheet.get_diagnostics()
-	assert_gt(diagnostics.size(), 0, "problems surface as diagnostics")
-	var codes := PackedStringArray()
-	for diag_value in diagnostics:
-		var diag := diag_value as Dictionary
-		codes.append(String(diag.get("code", "")))
-		assert_gt(int(diag.get("line", 0)), 0, "diagnostics carry 1-based lines")
-		assert_true(String(diag.get("severity", "")) in ["error", "warning"], "severity is error|warning")
-	assert_has(codes, "duplicate-name", "duplicate names are diagnosed")
-	assert_has(codes, "noncanonical-if-arg",
-		"a retail-truthy non-0/1 #if argument is diagnosed without rejection")
-	assert_eq(sheet.get_variable("FOO"), "b", "the parse stays lenient: last duplicate wins")
+	sheet.set_source_text("// a comment\r\nFOO a\r\nFOO b\r\n#if 0\r\nBAR c\r\n#endif\r\nBAZ   d   // e\r\n")
+	assert_true(sheet.is_runtime_valid(), "the game reads the whole sheet")
+	assert_eq(sheet.get_variable("FOO"), "b", "a later definition replaces the value")
+	assert_false(sheet.has_variable("BAR"), "a switched-off line is read as nothing")
+	assert_eq(sheet.get_source_text(), "FOO\tb\r\nBAZ\td\r\n", "the writer's form: no comment, blank or directive")
+	assert_eq(sheet.to_byte_array(), "FOO\tb\r\nBAZ\td\r\n".to_utf8_buffer(), "the bytes are the text")
 
 
 func test_mns_runtime_evaluation_validity_is_distinct_from_repairable_load() -> void:
 	var sheet := MnsStyleSheet.new()
 	# The game's reader stops at a name holding '%' and keeps what it read before.
 	assert_eq(sheet.load_from_bytes("OK value\r\nBAD%NAME x\r\nLATER 1\r\n".to_utf8_buffer()), OK,
-		"lossless editor load remains permissive")
+		"the load keeps what the game reads")
 	assert_false(sheet.is_runtime_valid(), "the reader's stop is runtime-visible")
 	assert_eq(sheet.get_variable("OK"), "value", "what the game read before the stop stays")
 	assert_false(sheet.has_variable("LATER"), "nothing after the stop is read")
 	var diagnostics := sheet.get_evaluation_diagnostics()
-	assert_gt(diagnostics.size(), 0, "evaluation diagnostics are exposed")
-	var codes := PackedStringArray()
-	for value in diagnostics:
-		codes.append(String((value as Dictionary).get("code", "")))
-	assert_has(codes, "invalid-name-char", "the stop reports the evaluator code")
+	assert_eq(diagnostics.size(), 1, "the reader's stop is exposed")
+	if diagnostics.size() == 1:
+		var stop := diagnostics[0] as Dictionary
+		assert_eq(String(stop.get("code", "")), "stops", "the stop's code")
+		assert_eq(int(stop.get("line", 0)), 2, "the stop's line")
 	sheet.set_source_text("OK value\r\n")
 	assert_true(sheet.is_runtime_valid(), "repairing source refreshes runtime validity")
 	# A stray #else is no failure: the game switches the lines after it off.
@@ -208,32 +202,23 @@ func test_mns_load_shell_layers_brand_over_menu_style() -> void:
 func test_mns_entry_add_rename_remove_move() -> void:
 	var sheet := MnsStyleSheet.new()
 	sheet.set_source_text("A 1\r\nB 2\r\nC 3\r\n")
+	watch_signals(sheet)
 	assert_true(sheet.add_variable("MID", "x", "A"), "insert after a named entry")
 	assert_eq(String((sheet.get_entries()[1] as Dictionary).get("name", "")), "MID", "MID landed after A")
 	assert_false(sheet.add_variable("mid", "y"), "duplicate names reject (case-insensitive)")
 	assert_true(sheet.rename_variable("MID", "MIDDLE"), "rename")
 	assert_false(sheet.rename_variable("MIDDLE", "B"), "rename collisions reject")
-	assert_true(sheet.set_inline_comment("MIDDLE", "the middle one"), "comment attaches")
-	assert_string_contains(String(sheet.get_source_text()), "// the middle one", "comment rendered")
 	assert_true(sheet.move_variable("C", 0), "move to the front")
 	assert_eq(String((sheet.get_entries()[0] as Dictionary).get("name", "")), "C", "C now first")
-	assert_true(sheet.remove_variable("MIDDLE"), "safe standalone define removes")
+	assert_true(sheet.remove_variable("MIDDLE"), "a variable removes")
 	assert_false(sheet.has_variable("MIDDLE"), "removed")
+	assert_false(sheet.remove_variable("MIDDLE"), "removing an absent variable changes nothing")
+	assert_signal_emit_count(sheet, "changed", 4, "each change emits changed once, a refused one never")
+	assert_eq(sheet.get_source_text(), "C\t3\r\nA\t1\r\nB\t2\r\n", "the list in the writer's form")
 	assert_true(sheet.is_valid_variable_name("DEF_TEXT_FG"), "name validation binds")
 	assert_false(sheet.is_valid_variable_name("BAD NAME"), "whitespace rejects")
 	assert_false(sheet.is_valid_variable_value("a//b"), "values cannot carry comment starts")
-
-
-func test_mns_remove_rejects_control_flow_owning_entry_without_dirtying() -> void:
-	var sheet := MnsStyleSheet.new()
-	sheet.set_source_text("#if 1\r\nFOO bar \\\r\n#endif\r\nbaz\r\nQUX 7\r\n")
-	var before := sheet.get_source_text()
-	watch_signals(sheet)
-	assert_false(sheet.remove_variable("FOO"),
-		"a continuation crossing a directive cannot be structurally removed")
-	assert_eq(sheet.get_source_text(), before, "rejected remove leaves source byte-stable")
-	assert_true(sheet.has_variable("FOO"), "rejected entry remains in evaluated view")
-	assert_signal_not_emitted(sheet, "changed", "rejected mutation does not dirty the editor")
+	assert_false(sheet.is_valid_variable_value("a\\b"), "a lone backslash continues the value")
 
 
 # --- M10.1: item-row authoring (list / multi / spinlist / combo) ----------------
