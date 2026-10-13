@@ -328,10 +328,10 @@ func test_in_place_edits_equal_a_rebuild() -> void:
 	assert_true(bool(_stamp(2).get("outcome", {}).get("done", false)), "the stamp")
 	var colour: Dictionary = _seam.request({"kind": "terrain_stroke", "path": MISSION, "stroke": {"plane": "colour",
 			"brush": {"tool": "colour", "colour": "#20FF40", "radius": 6, "strength": 1}, "points": [[AT.x, AT.y]],
-			"gesture": 4646, "end": true}})
+			"gesture": 0, "end": true}})
 	assert_true(bool(colour.get("outcome", {}).get("done", false)), str(colour.get("outcome")))
 	var foliage: Dictionary = _seam.request({"kind": "terrain_stroke", "path": MISSION, "stroke": {"plane": "foliage",
-			"brush": {"tool": "foliage", "foliage": 77, "radius": 6}, "points": [[AT.x, AT.y]], "gesture": 4747,
+			"brush": {"tool": "foliage", "foliage": 77, "radius": 6}, "points": [[AT.x, AT.y]], "gesture": 0,
 			"end": true}})
 	assert_true(bool(foliage.get("outcome", {}).get("done", false)), str(foliage.get("outcome")))
 	var in_place := await _settled(terrain)
