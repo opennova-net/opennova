@@ -379,9 +379,16 @@ bool is_menu_kind(AssetKind kind) {
 	return asset_kind_row(kind).document == DocumentTypeId::Menu;
 }
 
+namespace {
+
+// A string id's scope: the "menu" section of the table its window reads (menu::window_text_rsrc; "" =
+// none, so the scope matches no symbol and the game shows the id) [orig: CUIStringTable_LookupString @
+// 0x6527c0].
 std::string menu_text_scope(const std::string &table) {
 	return strutil::to_upper(basename_of(table)) + "/" + menu::kMenuTextSection;
 }
+
+} // namespace
 
 std::string menu_screen_scope(const std::string &menu_file) {
 	return strutil::to_upper(basename_of(menu_file));

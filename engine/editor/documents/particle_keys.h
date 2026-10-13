@@ -44,11 +44,6 @@ std::string particle_block_title(const ParticleKeyBlock &block);
 // the game takes as at least 1"), and the key only the writer writes said so.
 std::string particle_key_words(const particle::KeyRow &row);
 
-// Whether the reader takes `value` as the row says, as written: false with why, worded after the reader (a number
-// written otherwise, what atol or atof reads of it; a byte past 255, its low byte; fewer than three bytes; a name the
-// flag table lacks; a whole number past the clamp: "the game reads it as 1"), and for a value the text cannot hold
-// (a ';', a line's end).
-bool particle_key_value_ok(const particle::KeyRow &row, const std::string &value, std::string &why);
 // The edit that sets `key` of `block` to `value` (its row's checks first): the span of `field` replaced where it
 // names one of the block's lines (each line of a repeated key its own row), else the span of the key's last line,
 // else a line of its own where the game's line-ordered reader takes it: a key a graphic line copies into its layer

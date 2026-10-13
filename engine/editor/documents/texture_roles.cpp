@@ -426,6 +426,8 @@ std::string texture_alpha_meaning_words(renderer::TextureAlphaMeaning meaning, c
 	return "unused: " + by + " reads no alpha of this texture";
 }
 
+namespace {
+
 const char *texture_size_rule_token(renderer::TextureSizeRule rule) {
 	switch (rule) {
 	case S::Any: return "any";
@@ -440,6 +442,8 @@ const char *texture_size_rule_token(renderer::TextureSizeRule rule) {
 	}
 	return "any";
 }
+
+} // namespace
 
 io::JsonValue texture_role_json(const TextureRoleRow &row) {
 	using io::json_number;

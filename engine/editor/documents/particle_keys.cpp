@@ -250,6 +250,12 @@ std::string particle_key_words(const KeyRow &row) {
 	return words;
 }
 
+namespace {
+
+// Whether the reader takes `value` as the row says, as written: false with why, worded after the reader (a number
+// written otherwise, what atol or atof reads of it; a byte past 255, its low byte; fewer than three bytes; a name the
+// flag table lacks; a whole number past the clamp: "the game reads it as 1"), and for a value the text cannot hold
+// (a ';', a line's end).
 bool particle_key_value_ok(const KeyRow &row, const std::string &value, std::string &why) {
 	why.clear();
 	if (value.find_first_of(";\r\n") != std::string::npos) {
@@ -332,6 +338,8 @@ bool particle_key_value_ok(const KeyRow &row, const std::string &value, std::str
 	}
 	return true;
 }
+
+} // namespace
 
 bool particle_key_edit(const TextDocument &document, const ParticleKeyBlock &block, const std::string &key,
 		const std::string &value, Edit &out, std::string &why, const ParticleKeyField *field) {

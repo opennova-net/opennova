@@ -27,6 +27,10 @@ bool requirement_multiplayer_only(const std::string &role) {
 	return false;
 }
 
+namespace {
+
+// Whether the project's checklist has the manifest's row: its phase on (requirement_phase_enabled), and a
+// multiplayer-only row's Multiplayer feature on; mp.mnu on Multiplayer alone.
 bool requirement_row_enabled(const ProjectDocument &doc, const RequiredResource &resource) {
 	const std::string role = resource.role ? resource.role : "";
 	// mp.mnu is the shell's: the startup screen's NW_MULTI_PLAYER and NW_ACTIVATE controls load it with no
@@ -36,6 +40,8 @@ bool requirement_row_enabled(const ProjectDocument &doc, const RequiredResource 
 	if (!requirement_phase_enabled(doc, resource.phase)) return false;
 	return doc.features.multiplayer || !requirement_multiplayer_only(role);
 }
+
+} // namespace
 
 const char *requirement_phase_label(int phase) {
 	switch (phase) {

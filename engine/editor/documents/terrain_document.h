@@ -57,15 +57,6 @@ const RecordTable &terrain_table();
 // polytrn_scale).
 const FieldSchema *terrain_key_field(const std::string &key, int32_t *loader_arg = nullptr);
 
-// The lines of a terrain's text the game's readers read otherwise than the record holds (formats/trn
-// trn_source_issues, each a SourceIssue on its line in the editor's words): a key neither reader reads, one
-// written again (the last line wins), a grid row before the width or short of it (its cells the slots an earlier
-// line left), a row past the width's columns, a fifth foliage block (from it on the file is read by no arm), a
-// block's line its arms do not read, a match past its fourth code or past a byte, a murk past 0.99, a last line
-// no CR LF ends; and, blocking, an environment keyword the record does not hold (the environment's reader takes
-// it in the terrain's pass), polytrn_scale (the multiplayer check's alone) and polytrn_depthmap.
-void terrain_source_issues(const std::string &text, std::vector<SourceIssue> &issues);
-
 class TerrainDocument : public TableDocument {
 public:
 	const RecordTable &table() const override { return terrain_table(); }
@@ -95,10 +86,6 @@ protected:
 	// A terrain keeps its one row.
 	bool accept_step(const EditStep &step, const StagedRows &rows, StepRefusal &refusal) const override;
 };
-
-// The admission gate over a record (formats/trn trn_refusal, the rows the writer writes: max(1, sector_rows))
-// [orig: Terrain_LoadEnvironmentConfig @ 0x610940, its tail]: "" where the game takes it, else its words.
-std::string terrain_refusal(const TrnConfig &config);
 
 // The terrain type's validator (DocumentType::validate_file), an open document standing in for its file:
 // its source findings (terrain.invalid_input, terrain.ignored_input); the gate's refusal (terrain.refused,

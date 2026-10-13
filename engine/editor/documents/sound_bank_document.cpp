@@ -19,7 +19,10 @@
 #include <runtime/audio/sound_selector.h>
 
 namespace opennova::editor {
+
 namespace {
+
+const char *layer_selection_words(uint32_t flags);
 
 constexpr NodeKind kWave = node_kind(SoundBankKind::Wave);
 constexpr NodeKind kSet = node_kind(SoundBankKind::Set);
@@ -360,8 +363,13 @@ const RecordTable &sound_bank_table() {
 	return table;
 }
 
+namespace {
+
+// The scope a bank's own names live in (its waves'): its file name, upper case ("GAME.LWF").
 std::string sound_bank_scope(const std::string &path) { return strutil::to_upper(basename_of(path)); }
 
+// How a layer's flags pick its member, in words [orig: SoundBank_PlayTriggerEntries @ 0x75cd5c..0x75cdfc]:
+// "in order" (0x10), "a random start, then in order" (0x80), else "at random" (0x08 never read).
 const char *layer_selection_words(uint32_t flags) {
 	// The member selection the game's player runs for the flags (audio::selection_mode_for_flags).
 	switch (audio::selection_mode_for_flags(flags)) {
@@ -371,6 +379,8 @@ const char *layer_selection_words(uint32_t flags) {
 	}
 	return "at random";
 }
+
+} // namespace
 
 // --- the row -------------------------------------------------------------------------------------
 

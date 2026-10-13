@@ -20,8 +20,6 @@ namespace opennova::editor {
 // What a search lists (the project_search query's `scope`, the workspace's project_find): every file and name
 // (Find in project), the files alone (Go to file) or the names the files define alone (Go to name).
 enum class SearchScope : uint8_t { All, Files, Names };
-// all, files, names.
-const char *search_scope_token(SearchScope scope);
 bool search_scope_from_token(const std::string &token, SearchScope &out);
 
 // AssetGraph::search over one scope. All as the graph lists them (files first, then the names); Files the

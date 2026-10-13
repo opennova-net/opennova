@@ -761,8 +761,13 @@ std::string source_issue_words(const TrnSourceIssue &read) {
 	return std::string();
 }
 
-} // namespace
-
+// The lines of a terrain's text the game's readers read otherwise than the record holds (formats/trn
+// trn_source_issues, each a SourceIssue on its line in the editor's words): a key neither reader reads, one
+// written again (the last line wins), a grid row before the width or short of it (its cells the slots an earlier
+// line left), a row past the width's columns, a fifth foliage block (from it on the file is read by no arm), a
+// block's line its arms do not read, a match past its fourth code or past a byte, a murk past 0.99, a last line
+// no CR LF ends; and, blocking, an environment keyword the record does not hold (the environment's reader takes
+// it in the terrain's pass), polytrn_scale (the multiplayer check's alone) and polytrn_depthmap.
 void terrain_source_issues(const std::string &text, std::vector<SourceIssue> &issues) {
 	// What the readers read otherwise than the record holds (formats/trn trn_source_issues), each a source issue.
 	for (const TrnSourceIssue &read : trn_source_issues(text)) {
@@ -775,6 +780,8 @@ void terrain_source_issues(const std::string &text, std::vector<SourceIssue> &is
 	}
 	std::stable_sort(issues.begin(), issues.end(), [](const SourceIssue &a, const SourceIssue &b) { return a.line < b.line; });
 }
+
+} // namespace
 
 // --- the row --------------------------------------------------------------------------------------
 
@@ -809,6 +816,10 @@ const FieldSchema *terrain_key_field(const std::string &key, int32_t *loader_arg
 	return nullptr;
 }
 
+namespace {
+
+// The admission gate over a record (formats/trn trn_refusal, the rows the writer writes: max(1, sector_rows))
+// [orig: Terrain_LoadEnvironmentConfig @ 0x610940, its tail]: "" where the game takes it, else its words.
 std::string terrain_refusal(const TrnConfig &config) {
 	// The gate (formats/trn trn_refusal) over the rows the writer writes: one where the record holds none.
 	const int rows = std::max(1, config.sector_rows);
@@ -826,6 +837,8 @@ std::string terrain_refusal(const TrnConfig &config) {
 	}
 	return std::string();
 }
+
+} // namespace
 
 // --- the document ---------------------------------------------------------------------------------
 
