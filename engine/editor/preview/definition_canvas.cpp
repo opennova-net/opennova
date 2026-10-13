@@ -13,12 +13,15 @@ namespace opennova::editor {
 
 namespace {
 
-// The eyes' colours: the hip's warm, the aimed one's cool, their path between grey.
+// The eyes' colours: the hip's warm, the aimed one's cool, their path between grey, the game's camera white.
 constexpr uint32_t kHipRgb = 0xFFB040;
 constexpr uint32_t kAimedRgb = 0x40C8FF;
 constexpr uint32_t kPathRgb = 0xB0B0B0;
+constexpr uint32_t kCameraRgb = 0xFFFFFF;
 // How far an eye's look line reaches, metres.
 constexpr float kLookReach = 0.25f;
+// How far before the game's camera its frustum's picture stands, metres.
+constexpr float kFrustumDepth = 0.12f;
 
 CanvasSubject subject_of(const ViewportModel &viewport) {
 	CanvasSubject subject;
@@ -31,7 +34,36 @@ PreviewVec3 along(const PreviewVec3 &at, const PreviewVec3 &way, float metres) {
 }
 
 const char *eye_words(const char *handle) {
-	return std::string(handle) == "pos" ? "Hip eye (pos)" : "Aimed eye (tpos)";
+	return std::string(handle) == "pos" ? "Camera at the hip (pos)" : "Camera aimed (tpos)";
+}
+
+PreviewVec3 cross(const PreviewVec3 &a, const PreviewVec3 &b) {
+	return PreviewVec3{a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+}
+
+// The game's camera as a frustum: its eye, the picture's corners kFrustumDepth before it (the field of view across,
+// the picture's aspect down) and a triangle over the picture's top for its up.
+void frustum(OverlayList &list, const OrbitCamera &camera, const DefinitionViewport::Eye &eye, float fov_deg,
+		int width, int height) {
+	const float half_w = kFrustumDepth * std::tan(fov_deg * 0.5f * 3.14159265f / 180.0f);
+	const float half_h = width > 0 ? half_w * float(height) / float(width) : half_w;
+	const PreviewVec3 right = cross(eye.look, eye.up);
+	const PreviewVec3 centre = along(eye.at, eye.look, kFrustumDepth);
+	auto at = [&](float r, float u) { return along(along(centre, right, r), eye.up, u); };
+	const PreviewVec3 corners[4] = {at(-half_w, half_h), at(half_w, half_h), at(half_w, -half_h), at(-half_w, -half_h)};
+	const PreviewVec3 roof[3] = {at(-half_w * 0.5f, half_h * 1.15f), at(half_w * 0.5f, half_h * 1.15f),
+	                             at(0.0f, half_h * 1.15f + half_w * 0.5f)};
+	CanvasPoint e, c[4], r[3];
+	if (!camera.project(eye.at, width, height, e.x, e.y)) return;
+	for (int i = 0; i < 4; ++i)
+		if (!camera.project(corners[i], width, height, c[i].x, c[i].y)) return;
+	for (int i = 0; i < 3; ++i)
+		if (!camera.project(roof[i], width, height, r[i].x, r[i].y)) return;
+	for (int i = 0; i < 4; ++i) {
+		list.line(e, c[i], kCameraRgb, 1.0f, OverlayRole::Normal, 200);
+		list.line(c[i], c[(i + 1) % 4], kCameraRgb, 1.5f, OverlayRole::Normal, 230);
+	}
+	for (int i = 0; i < 3; ++i) list.line(r[i], r[(i + 1) % 3], kCameraRgb, 1.5f, OverlayRole::Normal, 230);
 }
 
 } // namespace
@@ -144,6 +176,10 @@ OverlayList DefinitionCanvas::shapes(const ViewportContext &context, const Canva
 	const std::vector<DefinitionViewport::Eye> eyes = viewport_->eyes(in.width, in.height);
 	if (eyes.empty()) return list;
 	const int under = grabbed_ >= 0 ? grabbed_ : (in.hovered ? eye_under(context, in.mouse.x, in.mouse.y) : -1);
+	// The game's camera where it stands against the still gun now: on the hip's eye, along the path while it aims.
+	DefinitionViewport::Eye now;
+	float fov = 0.0f;
+	if (viewport_->game_camera(in.width, in.height, now, fov)) frustum(list, camera, now, fov, in.width, in.height);
 	// The path the scope eases along, hip to aimed.
 	CanvasPoint a, b;
 	if (eyes.size() == 2 && camera.project(eyes[0].at, in.width, in.height, a.x, a.y) &&
@@ -179,11 +215,14 @@ std::string DefinitionCanvas::hover_tip(const ViewportContext &context, const Ca
 	if (under < 0) return std::string();
 	const std::vector<DefinitionViewport::Eye> eyes = viewport_->eyes(in.width, in.height);
 	const std::string handle = eyes[size_t(under)].handle;
+	// The game moves the gun before a still camera; the orbit holds the gun still, so the camera's place moves.
 	return handle == "pos"
-	               ? "The hip eye: where the game's camera stands before the gun at the hip (weapon.def pos). Drag to "
-	                 "move it in the picture's plane; Alt drags it along the way it looks."
-	               : "The aimed eye: where the game's camera stands before the gun aimed down its sights (weapon.def "
-	                 "tpos, its turn tpos's rotation). Drag to move it; Alt drags it along the way it looks.";
+	               ? "Where the game's camera stands against the gun at the hip (weapon.def pos). In the game the camera "
+	                 "stays put and pos places the gun before it; here the gun stays put and the white frustum is the "
+	                 "camera. Drag to move it in the picture's plane; Alt drags it along the way it looks."
+	               : "Where the game's camera stands against the gun aimed down its sights (weapon.def tpos, its turn "
+	                 "tpos's rotation). Aim slides the white frustum here; in the game the gun comes up to the camera "
+	                 "instead (Eye on shows that). Drag to move it; Alt drags it along the way it looks.";
 }
 
 } // namespace opennova::editor

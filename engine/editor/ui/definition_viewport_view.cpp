@@ -57,8 +57,10 @@ void weapon_options(const DefinitionViewport &model, DefinitionViewportOptions &
 	if (options.weapon == DefinitionWeaponView::First) {
 		row.next(ui_kit::checkbox_width("Eye"));
 		ImGui::Checkbox("Eye", &fire.eye);
-		ui_kit::tooltip("Seen from the first-person eye, where the game's camera stands the view model, through the "
-		                "weapon's renderfov; off, the camera orbits the gun and the arms.");
+		ui_kit::tooltip("Seen through the game's camera, through the weapon's renderfov: it never moves, and aiming "
+		                "brings the gun up to it, as the game does. Off, the camera orbits a still gun and the arms, "
+		                "and shows the game's camera (the white frustum, which Aim slides from pos to tpos) and its "
+		                "places at the hip (pos) and aimed (tpos), which a drag moves.");
 		const std::vector<FirstPersonCharacter> &characters = model.weapon().first_person().characters();
 		if (!characters.empty()) {
 			const FirstPersonCharacter *who = model.weapon().first_person().character();

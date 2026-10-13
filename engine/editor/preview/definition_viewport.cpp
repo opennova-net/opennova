@@ -888,6 +888,19 @@ void eye_units(const float raw[3], int width, int height, float out[3]) {
 // view frame on the camera's axes, rig the yaw-180), as first_person_eye places its camera.
 PreviewVec3 eye_at(const float units[3]) { return PreviewVec3{-units[1], -units[2], -units[0]}; }
 
+// The eye of the view units `units` turned by `turn` (degrees).
+DefinitionViewport::Eye eye_of(const char *handle, const float units[3], const float turn[3]) {
+	const float rig[3] = {0.0f, renderer::kViewmodelRigYawDeg, 0.0f};
+	const renderer::FpViewmodelPose pose = renderer::fp_viewmodel_pose(units, turn, rig);
+	DefinitionViewport::Eye eye;
+	eye.handle = handle;
+	eye.at = eye_at(units);
+	// The camera's axes are the root's rows: it looks along -back.
+	eye.look = PreviewVec3{-pose.basis[6], -pose.basis[7], -pose.basis[8]};
+	eye.up = PreviewVec3{pose.basis[3], pose.basis[4], pose.basis[5]};
+	return eye;
+}
+
 } // namespace
 
 std::vector<DefinitionViewport::Eye> DefinitionViewport::eyes(int width, int height) const {
@@ -895,7 +908,6 @@ std::vector<DefinitionViewport::Eye> DefinitionViewport::eyes(int width, int hei
 	if (!weapon_record() || !weapon_.first() || eye_) return out;
 	const FirstPersonSources &sources = weapon_.first_person();
 	if (!sources.active() || sources.spec().gun.empty()) return out;
-	const float rig[3] = {0.0f, renderer::kViewmodelRigYawDeg, 0.0f};
 	struct Row {
 		const char *handle;
 		const float *raw;
@@ -906,16 +918,19 @@ std::vector<DefinitionViewport::Eye> DefinitionViewport::eyes(int width, int hei
 	for (const Row &row : rows) {
 		float units[3];
 		eye_units(row.raw, width, height, units);
-		const renderer::FpViewmodelPose pose = renderer::fp_viewmodel_pose(units, row.turn, rig);
-		Eye eye;
-		eye.handle = row.handle;
-		eye.at = eye_at(units);
-		// The camera's axes are the root's rows: it looks along -back.
-		eye.look = PreviewVec3{-pose.basis[6], -pose.basis[7], -pose.basis[8]};
-		eye.up = PreviewVec3{pose.basis[3], pose.basis[4], pose.basis[5]};
-		out.push_back(eye);
+		out.push_back(eye_of(row.handle, units, row.turn));
 	}
 	return out;
+}
+
+bool DefinitionViewport::game_camera(int width, int height, Eye &out, float &fov_deg) const {
+	if (eyes(width, height).empty()) return false;
+	// The view units and turn the presenter stands the model by now; against the still gun, its camera's eye.
+	float units[3], turn[3];
+	weapon_.view_now(units, turn);
+	out = eye_of("", units, turn);
+	fov_deg = weapon_.eye_camera().fov_degrees();
+	return true;
 }
 
 bool DefinitionViewport::eye_edits(const DocumentBase &document, const std::string &handle, const PreviewVec3 &to,

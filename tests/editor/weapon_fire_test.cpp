@@ -609,6 +609,58 @@ int test_the_eyes() {
 	return 0;
 }
 
+// Aiming seen from the orbit: the gun stays still and the game's camera moves against it, from the hip's eye to
+// the aimed one (the same motion the eye's view shows as the gun coming up to a still camera); its frustum is drawn.
+int test_the_game_camera() {
+	WeaponProject project;
+	TEST_EXPECT(project.made && project.select("WPN_SIGHTED"));
+	TEST_EXPECT(project.options(R"({"weapon": "first", "fire": {"view": "orbit"}})"));
+	const DefinitionViewport *viewport = project.viewport();
+	TEST_EXPECT(viewport != nullptr);
+	if (!viewport) return 1;
+	const ViewportContext context = viewport_context(project.session.view(), *viewport);
+	const std::vector<DefinitionViewport::Eye> eyes = viewport->eyes(context.width, context.height);
+	TEST_EXPECT(eyes.size() == 2);
+	if (eyes.size() != 2) return 1;
+	const auto near = [](const PreviewVec3 &a, const PreviewVec3 &b) {
+		return std::fabs(a.x - b.x) < 1e-3f && std::fabs(a.y - b.y) < 1e-3f && std::fabs(a.z - b.z) < 1e-3f;
+	};
+	DefinitionViewport::Eye now;
+	float fov = 0.0f;
+	TEST_EXPECT(viewport->game_camera(context.width, context.height, now, fov));
+	TEST_EXPECT(near(now.at, eyes[0].at) && near(now.look, eyes[0].look) && near(now.up, eyes[0].up));
+	TEST_EXPECT(std::fabs(fov - 80.0f) < 1e-3f);
+	// Aimed: the camera on the aimed eye, the gun where it was.
+	TEST_EXPECT(project.perform(R"([{"tick": 2, "gesture": "scope"}])", 60));
+	viewport = project.viewport();
+	TEST_EXPECT(viewport->weapon().range().scoped());
+	TEST_EXPECT(viewport->game_camera(context.width, context.height, now, fov));
+	TEST_EXPECT(near(now.at, eyes[1].at) && near(now.look, eyes[1].look) && near(now.up, eyes[1].up));
+	const FirstPersonRoot &root = viewport->weapon().viewmodel_root();
+	TEST_EXPECT(std::fabs(root.origin.x) + std::fabs(root.origin.y) + std::fabs(root.origin.z) < 1e-6f);
+	TEST_EXPECT(root.x.x == 1.0f && root.y.y == 1.0f && root.z.z == 1.0f);
+	// The canvas draws it: the frustum's eight lines and its roof's three beside the eyes' own.
+	const std::unique_ptr<CanvasHalf> canvas = viewport->make_canvas();
+	editor_test::Gathered out;
+	const ViewportContext aimed = viewport_context(project.session.view(), *viewport);
+	canvas->follow(*viewport, aimed, out);
+	CanvasInput in;
+	in.width = aimed.width;
+	in.height = aimed.height;
+	const OverlayList shapes = canvas->shapes(aimed, in);
+	size_t white = 0;
+	for (const OverlayShape &shape : shapes.shapes)
+		white += shape.kind == OverlayKind::Line && shape.rgb == 0xFFFFFF ? 1 : 0;
+	TEST_EXPECT(white == 11);
+	// Through the eye the gun moves instead, the camera at the hip.
+	TEST_EXPECT(project.options(R"({"fire": {"view": "eye"}})"));
+	viewport = project.viewport();
+	const FirstPersonRoot &moved = viewport->weapon().viewmodel_root();
+	TEST_EXPECT(std::fabs(moved.origin.x) + std::fabs(moved.origin.y) + std::fabs(moved.origin.z) > 1e-3f);
+	TEST_EXPECT(!viewport->game_camera(context.width, context.height, now, fov));
+	return 0;
+}
+
 // The run is a function of its gestures: stepped back, it runs again to the same events; a gesture added on the
 // clock's tick drops those after it.
 int test_the_run_again() {
@@ -849,6 +901,7 @@ int main() {
 	TEST_EXPECT(test_scope() == 0);
 	TEST_EXPECT(test_aim_down_sights() == 0);
 	TEST_EXPECT(test_the_eyes() == 0);
+	TEST_EXPECT(test_the_game_camera() == 0);
 	TEST_EXPECT(test_the_sounds() == 0);
 	TEST_EXPECT(test_third_person() == 0);
 	TEST_EXPECT(test_wire() == 0);

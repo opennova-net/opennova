@@ -125,9 +125,14 @@ public:
 	// The eye at the hip, seeing with the weapon's renderfov, or with the game's sighted or scoped field of view
 	// while the SIGHTS card is up (the frame's: 80, or the world's, over the slot's zoom).
 	const OrbitCamera &eye_camera() const { return eye_camera_; }
-	// Where the first person's gun and arms stand at the run's tick: the identity at the hip, eased toward the
-	// aimed view (tpos) while the scope is up (first_person_root over WeaponRange::viewmodel_bias).
+	// Where the first person's gun and arms stand at the run's tick: seen through the eye, the identity at the hip,
+	// eased toward the aimed view (tpos) while the scope is up (first_person_root over WeaponRange::viewmodel_bias),
+	// as the game's presenter moves the model before its still camera; seen from the orbit, the identity throughout,
+	// the gun held still and the camera moving instead (DefinitionViewport::game_camera).
 	const FirstPersonRoot &viewmodel_root() const { return viewmodel_root_; }
+	// The view record's view units and turn at the run's tick: the hip's (pos, its turn) plus the scope's eased
+	// offset (WeaponRange::viewmodel_bias), as first_person_root stands the model by them.
+	void view_now(float units[3], float turn_deg[3]) const;
 	// The first person's SIGHTS card is up: the game draws the card, not the gun and the arms (WeaponRange::card).
 	bool card_up() const { return first_ && range_.card(); }
 
@@ -174,6 +179,7 @@ private:
 	uint64_t rig_serial_ = 0;
 	FileStamps rig_read_;
 	bool eye_ = false;
+	bool through_eye_ = false; // the picture is seen through the eye (the fire options' eye): the model moves
 	OrbitCamera eye_camera_;
 	float eye_fov_ = 0.0f; // the eye's renderfov
 	int width_ = 0, height_ = 0;

@@ -16,7 +16,9 @@ inline constexpr float kDefinitionEyeSlop = 8.0f;
 // what it shows (a drag of the left button orbits, of the middle one or with Shift pans, the wheel dollies, a double
 // click or F frames), every camera change a SetViewport. A weapon seen in first person from the orbit shows its two
 // eyes (DefinitionViewport::eyes): where the game's camera stands before the view model at the hip (weapon.def `pos`)
-// and aimed (`tpos`), each with the way it looks, joined by the path the scope eases along. A drag of an eye moves it
+// and aimed (`tpos`), each with the way it looks, joined by the path the scope eases along, and the game's camera
+// itself as a frustum where it stands against the still gun now (DefinitionViewport::game_camera: the orbit holds the
+// gun still, so aiming slides the frustum from the one eye to the other). A drag of an eye moves it
 // in the plane through it that faces the camera, each step an EditRecord of the record's view record (one undo
 // step), and Alt held moves it along the way it looks.
 class DefinitionCanvas final : public CanvasHalf {
