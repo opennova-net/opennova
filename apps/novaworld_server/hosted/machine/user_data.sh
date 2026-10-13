@@ -18,8 +18,9 @@
 #   4. writes the working directory /srv/serve (0700, the secret files 0600,
 #      owned by the image's user 10001) and the run's arguments and image
 #      (/etc/opennova);
-#   5. pulls the image and starts opennova-serve.service, which runs the
-#      server in its container (/usr/local/sbin/opennova-serve-run).
+#   5. pulls the image, fences the server's UID off the instance metadata
+#      service (the role's credentials), and starts opennova-serve.service,
+#      which runs the server in its container (/usr/local/sbin/opennova-serve-run).
 #
 # The machine lives as long as that server: whatever ends it (exit 0 for a
 # rotation's end or the admin's GOTO MENUSTATE, 3 for the service's
@@ -62,13 +63,18 @@ log "installing docker"
 export DEBIAN_FRONTEND=noninteractive
 apt_get() { apt-get -o DPkg::Lock::Timeout=300 -q -y "$@"; }
 for attempt in 1 2 3; do
-  if apt_get update && apt_get install --no-install-recommends docker.io; then break; fi
+  if apt_get update && apt_get install --no-install-recommends docker.io iptables; then break; fi
   [ "$attempt" -lt 3 ] || end_machine "apt-get could not install docker"
   sleep 15
 done
 # An upgrade of these restarts docker, and with it the server's container.
 apt-mark hold docker.io containerd runc >/dev/null || log "the docker packages could not be held"
 systemctl enable --now docker
+# The metadata fence (step 5) matches the server's UID on the host: no user
+# namespace remapping may stand between the container's UID and the host's.
+if docker info --format '{{json .SecurityOptions}}' | grep -q userns; then
+  end_machine "docker remaps user namespaces"
+fi
 
 # --- 2. the game data ------------------------------------------------------------
 log "mounting the game data"
@@ -88,6 +94,8 @@ done
 log "fetching the bootstrap bundle"
 install -d -m 0700 "$RUN_DIR"
 # The token goes to curl in a file (a builtin writes it): never on a command line.
+# It is spent at the first answer: a retry after a lost reply gets 404, the
+# machine powers off, and the supervisor counts one crash restart.
 printf 'Authorization: Bearer %s\n' "$BOOTSTRAP_TOKEN" > "$RUN_DIR/auth"
 unset BOOTSTRAP_TOKEN
 curl -fsS --retry 6 --retry-connrefused --retry-delay 5 --connect-timeout 10 --max-time 30 \
@@ -106,7 +114,7 @@ bundle_path, work, conf, uid = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.ar
 with open(bundle_path, 'rb') as f:
     bundle = json.load(f)
 image = bundle.get('image')
-if not isinstance(image, str) or not re.fullmatch(r'[A-Za-z0-9./:@_-]{1,255}', image):
+if not isinstance(image, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9./:@_-]{0,254}', image):
     sys.exit('the bundle names no usable image')
 args = bundle.get('args')
 if not isinstance(args, list) or not args or not all(isinstance(a, str) and a and '\0' not in a for a in args):
@@ -155,19 +163,32 @@ cat > /usr/local/sbin/opennova-serve-run <<'RUN'
 set -euo pipefail
 image="$(cat /etc/opennova/serve.image)"
 mapfile -d '' -t args < /etc/opennova/serve.args
-exec /usr/bin/docker run --rm --name opennova-serve --network host \
+exec /usr/bin/docker run --rm --name opennova-serve --network host --user 10001:10001 \
   --stop-timeout 60 --log-driver journald \
   --mount type=bind,source=/opt/jo,target=/opt/jo,readonly \
   --mount type=bind,source=/srv/serve,target=/srv/serve \
   "$image" "${args[@]}"
 RUN
+cat > /usr/local/sbin/opennova-serve-fence <<'FENCE'
+#!/bin/sh
+# opennova-serve.service's ExecStartPre, at every start: the server runs as UID
+# 10001 on the machine's own network, which reaches the instance metadata
+# service and with it the machine role's credentials. These rules refuse that
+# UID every packet to the metadata addresses (IPv4, and Nitro's IPv6).
+set -eu
+iptables -C OUTPUT -d 169.254.169.254 -m owner --uid-owner 10001 -j REJECT 2>/dev/null \
+  || iptables -I OUTPUT -d 169.254.169.254 -m owner --uid-owner 10001 -j REJECT
+ip6tables -C OUTPUT -d fd00:ec2::254 -m owner --uid-owner 10001 -j REJECT 2>/dev/null \
+  || ip6tables -I OUTPUT -d fd00:ec2::254 -m owner --uid-owner 10001 -j REJECT
+FENCE
 cat > /usr/local/sbin/opennova-serve-ended <<'ENDED'
 #!/bin/sh
 # opennova-serve.service's ExecStopPost: the server's end on the serial console,
 # which `aws ec2 get-console-output` still reads once the machine is gone.
 echo "opennova-machine: opennova-serve ended (${SERVICE_RESULT:-unknown}, ${EXIT_CODE:-unknown} ${EXIT_STATUS:-}); the machine powers off" > /dev/console
 ENDED
-chmod 0755 /usr/local/sbin/opennova-serve-run /usr/local/sbin/opennova-serve-ended
+chmod 0755 /usr/local/sbin/opennova-serve-run /usr/local/sbin/opennova-serve-fence \
+  /usr/local/sbin/opennova-serve-ended
 
 cat > /etc/systemd/system/opennova-serve.service <<'UNIT'
 [Unit]
@@ -183,6 +204,7 @@ FailureAction=poweroff
 
 [Service]
 Type=exec
+ExecStartPre=/usr/local/sbin/opennova-serve-fence
 ExecStartPre=-/usr/bin/docker rm -f opennova-serve
 ExecStart=/usr/local/sbin/opennova-serve-run
 ExecStopPost=/usr/local/sbin/opennova-serve-ended
@@ -194,6 +216,12 @@ TimeoutStopSec=90
 WantedBy=multi-user.target
 UNIT
 chmod 0644 /etc/systemd/system/opennova-serve.service
+# The fence holds before the server ever starts: UID 10001 reaches no
+# metadata address (no HTTP status at all, not even IMDSv2's 401).
+/usr/local/sbin/opennova-serve-fence || end_machine "the metadata fence did not apply"
+imds_code="$(setpriv --reuid="$SERVE_UID" --regid="$SERVE_UID" --clear-groups \
+  curl -s -m 3 -o /dev/null -w '%{http_code}' http://169.254.169.254/latest/meta-data/ || true)"
+[ "$imds_code" = "000" ] || end_machine "UID $SERVE_UID still reaches the metadata service"
 systemctl daemon-reload
 systemctl enable opennova-serve.service
 systemctl start --no-block opennova-serve.service

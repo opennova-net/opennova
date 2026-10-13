@@ -127,6 +127,7 @@ struct HostedMachines {
 	std::unique_ptr<hosted_ns::BootstrapStore> bootstrap;
 	std::vector<hosted_ns::Ipv4Cidr> bootstrap_cidrs;
 	hosted_ns::Ec2Provider *ec2 = nullptr; // the provider, when it is the ec2 one
+	std::filesystem::path scratch_dir;     // the ec2 provider's, removed at the shutdown
 	std::unique_ptr<hosted_ns::MachineProvider> provider;
 };
 
@@ -147,6 +148,13 @@ void make_ec2_machines(const opennova::novaworld_server::ServerConfig &config, H
 		const auto cidr = hosted_ns::parse_ipv4_cidr(text);
 		if (!cidr) {
 			off("finds ONNET_HOSTED_BOOTSTRAP_CIDRS entry '" + loggable(text) + "' no IPv4 CIDR");
+			return;
+		}
+		// The route hands out the servers' secrets: it never answers a peer
+		// outside the private networks (and no prefix shorter than /8).
+		if (!hosted_ns::ipv4_cidr_private(*cidr)) {
+			off("finds ONNET_HOSTED_BOOTSTRAP_CIDRS entry '" + loggable(text) +
+			    "' outside the private networks (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)");
 			return;
 		}
 		cidrs.push_back(*cidr);
@@ -193,9 +201,14 @@ void make_ec2_machines(const opennova::novaworld_server::ServerConfig &config, H
 			hosted_ns::ProcessCommandRunner::service_environment(), ec2.scratch_dir);
 	m.bootstrap = std::make_unique<hosted_ns::BootstrapStore>();
 	m.bootstrap_cidrs = std::move(cidrs);
+	m.scratch_dir = scratch;
+	std::string admitted;
+	for (const hosted_ns::Ipv4Cidr &cidr : m.bootstrap_cidrs)
+		admitted += (admitted.empty() ? "" : ", ") + hosted_ns::ipv4_cidr_text(cidr);
 	std::printf("[boot] hosted servers: ec2 in %s, launch template %s, subnet %s, deployment %s, image %s\n",
 	            ec2.region.c_str(), ec2.launch_template.c_str(), ec2.subnet.c_str(), ec2.deployment.c_str(),
 	            loggable(ec2.serve_image, 255).c_str());
+	std::printf("[boot] hosted servers: the bootstrap route answers %s alone\n", admitted.c_str());
 	auto provider = std::make_unique<hosted_ns::Ec2Provider>(std::move(ec2), *m.runner, *m.bootstrap);
 	m.ec2 = provider.get();
 	m.provider = std::move(provider);
@@ -461,6 +474,12 @@ int main() {
 		// address, so the listing records the machine's own public one.
 		hosted_config.master_host = hosted_machines.ec2 ? config.public_host : "127.0.0.1";
 		hosted_config.master_gate_port = gate.bound_port();
+		// A cloud machine boots (EC2, cloud-init, docker, the fetch) and pulls
+		// its image before it lists: the ec2 provider's own clocks.
+		if (hosted_machines.ec2) {
+			hosted_config.boot_timeout_ms = hosted::Ec2Provider::kBootTimeoutMs;
+			hosted_config.listing_timeout_ms = hosted::Ec2Provider::kListingTimeoutMs;
+		}
 		supervisor = std::make_unique<hosted::Supervisor>(*db_pool, *hosted_provider, hosted_config);
 		// A stop's ServerStopHosting, scoped to the service account that holds
 		// the listing (the sysop punt's code, as the admin stop route's).
@@ -553,6 +572,12 @@ int main() {
 	// HTTP listener below.
 	if (admin_links) admin_links->stop_all();
 	hosted_provider.reset();
+	// The ec2 provider's scratch directory (the CLI's output and user-data
+	// files, each deleted after its call) goes with it.
+	if (!hosted_machines.scratch_dir.empty()) {
+		std::error_code scratch_ec;
+		std::filesystem::remove_all(hosted_machines.scratch_dir, scratch_ec);
+	}
 #endif
 	std::printf("[shutdown] stopping listeners\n");
 #ifdef OPENNOVA_HTTP_ENABLED

@@ -49,6 +49,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && /tmp/aws/install --install-dir /usr/local/aws-cli --bin-dir /usr/local/bin \
     && /usr/local/bin/aws --version
 
+# The provider calls ec2 alone (sts for a credentials check by hand): the help
+# examples, the completer and its index, and every other service's model go
+# (about 160 MB of the CLI's 270). The models' root files (endpoints.json,
+# partitions.json) stay. Then the check: both services' commands still build,
+# and a real describe-instances runs to its HTTP request (fake keys, a closed
+# local port, so it can reach nothing).
+RUN dist=/usr/local/aws-cli/v2/current/dist \
+    && data="$dist/awscli/botocore/data" \
+    && test -d "$data/ec2" && test -d "$data/sts" && test -f "$data/endpoints.json" \
+    && rm -rf "$dist/awscli/examples" "$dist/awscli/data/ac.index" "$dist/aws_completer" \
+        /usr/local/aws-cli/v2/current/bin/aws_completer /usr/local/bin/aws_completer \
+    && find "$data" -mindepth 1 -maxdepth 1 -type d ! -name ec2 ! -name sts -exec rm -rf {} + \
+    && aws ec2 describe-instances --generate-cli-skeleton >/dev/null \
+    && aws ec2 run-instances --generate-cli-skeleton >/dev/null \
+    && aws ec2 terminate-instances --generate-cli-skeleton >/dev/null \
+    && aws sts get-caller-identity --generate-cli-skeleton >/dev/null \
+    && out="$(AWS_ACCESS_KEY_ID=AKIAEXAMPLEEXAMPLE00 AWS_SECRET_ACCESS_KEY=example AWS_MAX_ATTEMPTS=1 \
+        aws ec2 describe-instances --region us-east-1 --endpoint-url http://127.0.0.1:9 \
+        --cli-connect-timeout 2 --output json --no-cli-pager 2>&1 || true)" \
+    && echo "$out" | grep -q 'Could not connect to the endpoint URL' \
+    && du -sh /usr/local/aws-cli
+
 # ---- runtime stage --------------------------------------------------------
 # Same distro/glibc as the build stage so the binary's GLIBC/GLIBCXX
 # requirements resolve (a debian:12 runtime is too old for ubuntu:24.04's

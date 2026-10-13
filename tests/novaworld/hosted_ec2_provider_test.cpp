@@ -4,8 +4,9 @@
 // token, deleted after), describe's state mapping from one cached describe-instances (the
 // bundle fetch gating Running, the launch grace, the cache's lifetime, a failure reading
 // Pending), terminate's idempotence, list_tagged's scope and its throw, and every CLI
-// failure, timeout and malformed reply. Then the bootstrap tokens and the CIDR reads
-// (hosted/bootstrap.h), the bundle's JSON, the shipped machine script's render, and the
+// failure, timeout and malformed reply, and the describe's back-off after one. Then the
+// bootstrap tokens, the CIDR reads and the refusal log's throttle (hosted/bootstrap.h),
+// the bundle's JSON, the shipped machine script's render and metadata fence, and the
 // real ProcessCommandRunner against this binary itself (`--child <mode>`). Crow-free:
 // compiles the hosted sources it needs directly, so it runs on every build.
 
@@ -249,6 +250,18 @@ bool traces_commands(const std::string &script) {
 	return false;
 }
 
+// Whether a command line of `script` (comments aside) holds `needle`.
+bool runs_line(const std::string &script, const std::string &needle) {
+	std::istringstream lines(script);
+	std::string line;
+	while (std::getline(lines, line)) {
+		const size_t start = line.find_first_not_of(" \t");
+		if (start == std::string::npos || line[start] == '#') continue;
+		if (line.find(needle, start) != std::string::npos) return true;
+	}
+	return false;
+}
+
 bool is_alnum_text(const std::string &text) {
 	for (const char c : text) {
 		const bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
@@ -300,6 +313,9 @@ int test_config_checks(const std::string &scratch) {
 	TEST_EXPECT(refused([](hosted::Ec2Config &c) { c.deployment = "prod,dev"; }));
 	TEST_EXPECT(refused([](hosted::Ec2Config &c) { c.serve_image = ""; }));
 	TEST_EXPECT(refused([](hosted::Ec2Config &c) { c.serve_image = "ghcr.io/x y"; }));
+	// No reference docker would read as an option.
+	TEST_EXPECT(refused([](hosted::Ec2Config &c) { c.serve_image = "--privileged"; }));
+	TEST_EXPECT(refused([](hosted::Ec2Config &c) { c.serve_image = "-ghcr.io/opennova-net/opennova-serve"; }));
 	TEST_EXPECT(refused([](hosted::Ec2Config &c) { c.service_address = "10.44.0"; }));
 	TEST_EXPECT(refused([](hosted::Ec2Config &c) { c.service_address = "ip-10-44-0-10"; }));
 	TEST_EXPECT(refused([](hosted::Ec2Config &c) { c.machine_script = "#!/bin/bash\n"; }));
@@ -317,6 +333,19 @@ int test_machine_script() {
 	TEST_EXPECT(!traces_commands(script));
 	TEST_EXPECT(traces_commands("set -euxo pipefail\n") && traces_commands("  set -o xtrace\n"));
 	TEST_EXPECT(!traces_commands("# never set -x\nset -euo pipefail\n"));
+	// The server shares the machine's network (and so its metadata service, the role's
+	// credentials): it runs as UID 10001, and that UID is refused every packet to the
+	// metadata addresses at every start of its unit, and checked before the first.
+	TEST_EXPECT(runs_line(script, "readonly SERVE_UID=10001"));
+	TEST_EXPECT(runs_line(script, "--network host --user 10001:10001"));
+	TEST_EXPECT(runs_line(script, "iptables -I OUTPUT -d 169.254.169.254 -m owner --uid-owner 10001 -j REJECT"));
+	TEST_EXPECT(runs_line(script, "ip6tables -I OUTPUT -d fd00:ec2::254 -m owner --uid-owner 10001 -j REJECT"));
+	TEST_EXPECT(runs_line(script, "ExecStartPre=/usr/local/sbin/opennova-serve-fence"));
+	TEST_EXPECT(runs_line(script, "install --no-install-recommends docker.io iptables"));
+	const size_t fence_check = script.find("still reaches the metadata service\"");
+	const size_t first_start = script.find("systemctl start --no-block opennova-serve.service");
+	TEST_EXPECT(fence_check != std::string::npos && first_start != std::string::npos && fence_check < first_start);
+	TEST_EXPECT(!runs_line("# iptables -I OUTPUT -d 169.254.169.254\n", "iptables -I OUTPUT"));
 
 	const std::string url = hosted::Ec2Provider::bootstrap_url(kService, 8080, 7);
 	TEST_EXPECT(url == "http://10.44.0.10:8080/hosted/bootstrap/7");
@@ -431,6 +460,12 @@ int test_launch_failures(const std::string &scratch) {
 	TEST_EXPECT(launch_fails(answered("{}"), "answered no machine id"));
 	TEST_EXPECT(launch_fails(answered("{\"Instances\":[]}"), "answered no machine id"));
 	TEST_EXPECT(launch_fails(answered("{\"Instances\":[{\"InstanceId\":\"i-XYZ\"}]}"), "answered no machine id"));
+	// One machine asked for, two answered: no one machine to bind the token to (both carry
+	// the tags, and the supervisor's sweep ends what no row holds).
+	TEST_EXPECT(launch_fails(answered(std::string("{\"Instances\":[{\"InstanceId\":\"") + kMachineA +
+											 "\",\"PrivateIpAddress\":\"10.44.0.21\"},{\"InstanceId\":\"" + kMachineB +
+											 "\",\"PrivateIpAddress\":\"10.44.0.22\"}]}"),
+			"answered no machine id"));
 	// A machine with no private address: nothing could bootstrap it, so it is ended at once.
 	rig.runner.replies.push_back(answered(run_instances_reply(kMachineA, "")));
 	rig.runner.replies.push_back(answered("{}")); // the terminate-instances it then makes
@@ -507,7 +542,9 @@ int test_describe(const std::string &scratch) {
 int test_describe_failures(const std::string &scratch) {
 	Rig rig(scratch);
 	TEST_EXPECT(!rig.launch(7, kMachineA, "10.44.0.21").empty());
-	// Every failure reads Pending, with the address last known, and is tried again next time.
+	// Every failure reads Pending, with the address last known, and is tried again kTtl
+	// later: until then no describe runs the CLI (an API outage costs a supervisor pass one
+	// run, not one per server).
 	for (CommandResult reply :
 			{ failed(255, "Could not connect to the endpoint URL"), timed_out(), not_started(),
 					answered("not json"), answered("{}"), answered("{\"Reservations\":{}}") }) {
@@ -516,12 +553,27 @@ int test_describe_failures(const std::string &scratch) {
 		const hosted::MachineStatus status = rig.provider.describe(kMachineA);
 		TEST_EXPECT(rig.runner.calls.size() == calls + 1);
 		TEST_EXPECT(status.state == MachineState::Pending && status.address == "10.44.0.21");
+		rig.now += kTtl - 1;
+		const hosted::MachineStatus again = rig.provider.describe(kMachineA);
+		TEST_EXPECT(again.state == MachineState::Pending && again.address == "10.44.0.21");
+		TEST_EXPECT(rig.provider.describe(kMachineB).state == MachineState::Pending);
+		TEST_EXPECT(rig.runner.calls.size() == calls + 1);
+		rig.now += 1;
 	}
 	// A machine it never knew reads Pending too: no word is no crash.
 	rig.runner.replies.push_back(timed_out());
 	TEST_EXPECT(rig.provider.describe(kMachineB).state == MachineState::Pending);
+	// The sweep's list_tagged reads fresh, back-off or not.
+	rig.runner.replies.push_back(answered(listing({ instance_json(kMachineB, "running", "10.44.0.22", "8") })));
+	{
+		const size_t calls = rig.runner.calls.size();
+		const std::vector<hosted::TaggedMachine> tagged = rig.provider.list_tagged();
+		// B, and A within its launch grace.
+		TEST_EXPECT(rig.runner.calls.size() == calls + 1 && tagged.size() == 2);
+	}
 
 	// Junk inside a well-formed reply is skipped, not fatal.
+	rig.now += kTtl;
 	rig.runner.replies.push_back(answered("{\"Reservations\":[7,{\"Instances\":{}},{\"Instances\":[\"x\","
 										  "{\"State\":{\"Name\":\"running\"}},{\"InstanceId\":\"i-XYZ\"}," +
 			instance_json(kMachineB, "running", "10.44.0.22", "8") + "]}]}"));
@@ -562,9 +614,14 @@ int test_terminate(const std::string &scratch) {
 	calls = rig.runner.calls.size();
 	TEST_EXPECT(rig.provider.describe(kMachineB).state == MachineState::Gone && rig.runner.calls.size() == calls);
 
-	// A refusal leaves the machine as EC2 says it is (the supervisor's sweep tries again).
+	// A refusal leaves the machine as EC2 says it is (the supervisor's sweep tries again),
+	// but its token goes all the same: nothing fetches a bundle for a machine being ended.
+	const std::string c_token = rig.launch(9, "i-0ccccccccccccccc3", "10.44.0.23");
+	TEST_EXPECT(!c_token.empty() && rig.bootstrap.awaiting_fetch("i-0ccccccccccccccc3"));
 	rig.runner.replies.push_back(failed(254, "An error occurred (UnauthorizedOperation)"));
 	rig.provider.terminate("i-0ccccccccccccccc3");
+	TEST_EXPECT(!rig.bootstrap.redeem(9, c_token, "10.44.0.23", why) && rig.bootstrap.live_tokens() == 0);
+	TEST_EXPECT(!rig.bootstrap.awaiting_fetch("i-0ccccccccccccccc3"));
 	rig.now += kTtl;
 	rig.runner.replies.push_back(answered(listing({ instance_json("i-0ccccccccccccccc3", "running", "10.44.0.23", "9") })));
 	TEST_EXPECT(rig.provider.describe("i-0ccccccccccccccc3").state == MachineState::Running);
@@ -657,8 +714,13 @@ int test_bootstrap_store() {
 	now += hosted::BootstrapStore::kTokenLifetimeMs;
 	TEST_EXPECT(!store.redeem(7, other, "10.44.0.22", why) && store.live_tokens() == 0);
 	TEST_EXPECT(!store.bind(other, kMachineB, "10.44.0.22"));
-	// The machine it was for still never fetched: it reads as booting until it ends.
+	// The machine it was for still never fetched: it reads as booting until it ends, or
+	// kUnfetchedRecordMs past its token's lapse (the supervisor ended it long before).
 	TEST_EXPECT(store.awaiting_fetch(kMachineB));
+	now += hosted::BootstrapStore::kUnfetchedRecordMs - 1;
+	TEST_EXPECT(store.awaiting_fetch(kMachineB));
+	now += 1;
+	TEST_EXPECT(!store.awaiting_fetch(kMachineB));
 	store.forget_machine(kMachineB);
 	TEST_EXPECT(!store.awaiting_fetch(kMachineB));
 
@@ -670,6 +732,30 @@ int test_bootstrap_store() {
 	TEST_EXPECT(store.bind(fourth, kMachineB, "10.44.0.22"));
 	store.forget_machine(kMachineB);
 	TEST_EXPECT(!store.redeem(7, fourth, "10.44.0.22", why) && store.live_tokens() == 0);
+	// A token revoked after its bind takes its machine's record with it.
+	const std::string fifth = store.issue(bundle);
+	TEST_EXPECT(store.bind(fifth, kMachineA, "10.44.0.21") && store.awaiting_fetch(kMachineA));
+	store.revoke(fifth);
+	TEST_EXPECT(!store.awaiting_fetch(kMachineA) && store.live_tokens() == 0);
+	return 0;
+}
+
+int test_log_throttle() {
+	uint64_t now = 1000;
+	hosted::LogThrottle throttle([&now] { return now; });
+	TEST_EXPECT(throttle.admit("10.44.0.21") && !throttle.admit("10.44.0.21"));
+	TEST_EXPECT(throttle.admit("10.44.0.22"));
+	now += hosted::LogThrottle::kWindowMs - 1;
+	TEST_EXPECT(!throttle.admit("10.44.0.21"));
+	now += 1;
+	TEST_EXPECT(throttle.admit("10.44.0.21"));
+	// At most kMaxKeys peers at once: one more is not logged until one lapses.
+	now += hosted::LogThrottle::kWindowMs;
+	for (size_t i = 0; i < hosted::LogThrottle::kMaxKeys; ++i)
+		TEST_EXPECT(throttle.admit("10.45.0." + std::to_string(i)));
+	TEST_EXPECT(!throttle.admit("10.46.0.1"));
+	now += hosted::LogThrottle::kWindowMs;
+	TEST_EXPECT(throttle.admit("10.46.0.1"));
 	return 0;
 }
 
@@ -697,6 +783,23 @@ int test_cidrs() {
 	for (const char *outside : { "10.45.0.1", "127.0.0.1", "192.168.8.1", "54.162.79.147", "::1", "", "::ffff:" })
 		TEST_EXPECT(!hosted::ipv4_admitted(outside, admitted));
 	TEST_EXPECT(!hosted::ipv4_admitted("10.44.3.4", {}));
+
+	// ONNET_HOSTED_BOOTSTRAP_CIDRS: the private networks alone, no prefix under /8.
+	const auto is_private = [](const char *text) {
+		const auto cidr = parse_ipv4_cidr(text);
+		return cidr && hosted::ipv4_cidr_private(*cidr);
+	};
+	for (const char *inside : { "10.0.0.0/8", "10.44.0.0/16", "10.44.0.5", "172.16.0.0/12", "172.31.32.0/20",
+				 "192.168.0.0/16", "192.168.7.0/24" })
+		TEST_EXPECT(is_private(inside));
+	for (const char *outside : { "0.0.0.0/0", "8.0.0.0/7", "10.0.0.0/7", "172.0.0.0/8", "172.32.0.0/16",
+				 "192.168.0.0/15", "54.162.0.0/16", "100.64.0.0/10", "127.0.0.0/8" }) {
+		TEST_EXPECT(parse_ipv4_cidr(outside));
+		TEST_EXPECT(!is_private(outside));
+	}
+	TEST_EXPECT(hosted::ipv4_cidr_text(*vpc) == "10.44.0.0/16");
+	TEST_EXPECT(hosted::ipv4_cidr_text(*host) == "10.44.0.5/32");
+	TEST_EXPECT(hosted::ipv4_cidr_text(*parse_ipv4_cidr("0.0.0.0/0")) == "0.0.0.0/0");
 	return 0;
 }
 
@@ -826,6 +929,7 @@ int main(int argc, char **argv) {
 		{ "terminate", test_terminate },
 		{ "list_tagged", test_list_tagged },
 		{ "bootstrap_store", [](const std::string &) { return test_bootstrap_store(); } },
+		{ "log_throttle", [](const std::string &) { return test_log_throttle(); } },
 		{ "cidrs", [](const std::string &) { return test_cidrs(); } },
 		{ "bundle_json", [](const std::string &) { return test_bundle_json(); } },
 		{ "process_runner", test_process_runner },

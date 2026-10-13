@@ -14,7 +14,7 @@
 // the same 404 as an unknown path, with nothing logged. A peer inside the range
 // still needs a live token bound to its own address (BootstrapStore::redeem).
 // Every refusal is that one 404; a refusal inside the range is logged without
-// the token. The reply carries Cache-Control: no-store, and is never logged.
+// the token, at most once per peer per minute (LogThrottle). The reply carries Cache-Control: no-store, and is never logged.
 
 #include "bootstrap.h"
 #include "web_access.h"
