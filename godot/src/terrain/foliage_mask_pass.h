@@ -166,6 +166,9 @@ public:
 	void set_globals_held(bool p_held) { globals_held_ = p_held; }
 	bool is_globals_held() const { return globals_held_; }
 	void republish_globals();
+	// The masks as a process has them with no foliage: neither view active (a
+	// picture with no foliage after one that published its own, E13).
+	static void publish_absent();
 
 private:
 	std::shared_ptr<FoliageMaskFrame> _build_frame(

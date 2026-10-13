@@ -161,6 +161,9 @@ public:
 	void set_globals_held(bool p_held) { globals_held_ = p_held; }
 	bool is_globals_held() const { return globals_held_; }
 	void republish_globals();
+	// The veil alpha as a process has it with no bodies: 0 (a picture with no
+	// Celestial after one that published its own, E13).
+	static void publish_absent();
 	int get_sun_veil_stopdown() const;
 
 	void _ready() override;

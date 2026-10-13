@@ -864,6 +864,13 @@ void FoliageMaskPass::_set_view_eye(const Vector3 &p_eye) {
 	}
 }
 
+void FoliageMaskPass::publish_absent() {
+	if (RenderingServer *server = RenderingServer::get_singleton()) {
+		server->global_shader_parameter_set("opennova_foliage_mask_active", false);
+		server->global_shader_parameter_set("opennova_foliage_mask_inset_active", false);
+	}
+}
+
 void FoliageMaskPass::republish_globals() {
 	RenderingServer *server = RenderingServer::get_singleton();
 	if (server == nullptr) {

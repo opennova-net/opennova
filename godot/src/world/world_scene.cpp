@@ -472,6 +472,15 @@ void WorldScene::publish_globals() const {
 	}
 }
 
+void WorldScene::publish_absent() {
+	MissionEnvironment::publish_shipped_defaults();
+	Water::publish_absent();
+	Weather::publish_absent();
+	EnvironmentCubeCapture::publish_absent();
+	Celestial::publish_absent();
+	FoliageDispatcher::publish_absent();
+}
+
 // --- the terrain's load ------------------------------------------------------------
 
 void prepare_terrain_load(
@@ -538,6 +547,10 @@ void WorldSceneTable::clear_terrain(Node *p_parent) {
 	}
 }
 
+void WorldSceneTable::publish_absent() {
+	WorldScene::publish_absent();
+}
+
 void WorldSceneTable::_bind_methods() {
 	ClassDB::bind_static_method(
 			"WorldSceneTable", D_METHOD("get_rows"), &WorldSceneTable::get_rows);
@@ -545,6 +558,8 @@ void WorldSceneTable::_bind_methods() {
 			&WorldSceneTable::build);
 	ClassDB::bind_static_method("WorldSceneTable", D_METHOD("clear_terrain", "parent"),
 			&WorldSceneTable::clear_terrain);
+	ClassDB::bind_static_method(
+			"WorldSceneTable", D_METHOD("publish_absent"), &WorldSceneTable::publish_absent);
 }
 
 } // namespace godot

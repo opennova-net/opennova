@@ -423,6 +423,12 @@ void Celestial::_publish_idle_veil() {
 	}
 }
 
+void Celestial::publish_absent() {
+	if (RenderingServer *rs = RenderingServer::get_singleton()) {
+		rs->global_shader_parameter_set("opennova_sun_veil_alpha", 0.0f);
+	}
+}
+
 void Celestial::republish_globals() {
 	if (RenderingServer *rs = RenderingServer::get_singleton()) {
 		rs->global_shader_parameter_set("opennova_sun_veil_alpha", get_sun_veil_alpha());
