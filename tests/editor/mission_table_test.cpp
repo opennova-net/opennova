@@ -164,8 +164,8 @@ Span span_of(const bms::File &file, MissionKind kind, size_t index) {
 	skip(bms::kWaypointRecordCount, bms::kWaypointRecordSize);
 	if (kind == MissionKind::Group) return {at + index * bms::kGroupRecordSize, bms::kGroupRecordSize};
 	skip(bms::kGroupRecordCount, bms::kGroupRecordSize);
-	if (kind == MissionKind::Layer) return {at + index * bms::kLayerRecordSize, bms::kLayerRecordSize};
-	skip(bms::kLayerRecordCount, bms::kLayerRecordSize);
+	if (kind == MissionKind::WavList) return {at + index * bms::kWavListRecordSize, bms::kWavListRecordSize};
+	skip(bms::kWavListRecordCount, bms::kWavListRecordSize);
 	if (kind == MissionKind::Area) return {at + index * bms::kAreaTriggerSize, bms::kAreaTriggerSize};
 	skip(file.area_triggers.size(), bms::kAreaTriggerSize);
 	at += 12;
@@ -392,7 +392,8 @@ int test_complete() {
 	// A group: the word the writer writes as a constant (@12 ten) and its flags word past bits 0 and 1; the bytes
 	// the loader drops (@4..7, @16..31) are its name.
 	if (coverage(MissionKind::Group, 0, bytes({{1, 3}, {12, 4}}), "group") != 0) return 1;
-	if (coverage(MissionKind::Layer, 0, {}, "layer") != 0) return 1;
+	// A wav list slot: its file name a field's, its head (@0..3, zero in the original editor's export) kept as stored.
+	if (coverage(MissionKind::WavList, 0, bytes({{0, 4}}), "wav list slot") != 0) return 1;
 	// A bounding box: every word a field's, the reserved word a Mission box's name's last four characters.
 	if (coverage(MissionKind::BoundingBox, 0, {}, "bounding box", with_box) != 0) return 1;
 	std::printf("complete: every byte the writer takes from a header, an entity, an event, a trigger, an action, an "
@@ -491,10 +492,10 @@ int test_fields() {
 	const RecordHandle group = nested(m, MissionKind::Group, 3);
 	TEST_EXPECT(!set(group, "flags", int64_t(4), error) && set(group, "flags", int64_t(3), error) &&
 	            file.group_records[3].flags == 3);
-	const RecordHandle layer = nested(m, MissionKind::Layer, 0);
-	TEST_EXPECT(set(layer, "name", std::string(20, 'L'), error) &&
-	            std::memcmp(file.layer_records[0].name, std::string(20, 'L').data(), 20) == 0);
-	TEST_EXPECT(!set(layer, "name", std::string(21, 'L'), error));
+	const RecordHandle slot = nested(m, MissionKind::WavList, 0);
+	TEST_EXPECT(set(slot, "file_name", std::string(16, 'L'), error) &&
+	            std::memcmp(file.wav_list_records[0].file_name, std::string(16, 'L').data(), 16) == 0);
+	TEST_EXPECT(!set(slot, "file_name", std::string(17, 'L'), error));
 
 	const RecordHandle event = rows_of(m, MissionKind::Event)[1];
 	bms::Event &native = event.as<EventRow>().native.event;
@@ -542,7 +543,7 @@ int test_lists() {
 	std::string error;
 
 	// The fixed tables: set, never added to or removed.
-	for (MissionKind fixed : {MissionKind::Group, MissionKind::Layer}) {
+	for (MissionKind fixed : {MissionKind::Group, MissionKind::WavList}) {
 		const TableList &list = list_of(MissionKind::Mission, fixed);
 		const DetachedRecord one = list.ops.copy(root, 0);
 		TEST_EXPECT(list.spec.fixed && !list.ops.insert(root, 0, &one, error) && !list.ops.erase(root, 0));
@@ -647,7 +648,7 @@ bool record_at(const bms::File &file, size_t offset, MissionKind &kind, size_t &
 	       in(MissionKind::Organic, file.organics.size(), bms::kEntitySize, at) ||
 	       in(MissionKind::WaypointPath, bms::kWaypointRecordCount, bms::kWaypointRecordSize, at) ||
 	       in(MissionKind::Group, bms::kGroupRecordCount, bms::kGroupRecordSize, at) ||
-	       in(MissionKind::Layer, bms::kLayerRecordCount, bms::kLayerRecordSize, at) ||
+	       in(MissionKind::WavList, bms::kWavListRecordCount, bms::kWavListRecordSize, at) ||
 	       in(MissionKind::Area, file.area_triggers.size(), bms::kAreaTriggerSize, at) ||
 	       (at += 12, in(MissionKind::Event, file.events.size(), bms::kEventSize, at)) ||
 	       in(MissionKind::Trigger, file.triggers.size(), bms::kTriggerSize, at) ||
@@ -657,14 +658,14 @@ bool record_at(const bms::File &file, size_t offset, MissionKind &kind, size_t &
 
 // A fixed text slot of a record: its field and its bytes in the record, found on the synthetic
 // mission by the bytes a Set of a full slot of other letters moves (the header's, an entity's, a
-// layer's).
+// wav list slot's).
 struct Slot {
 	std::string field;
 	Span span;
 };
 std::map<MissionKind, std::vector<Slot>> text_slots() {
 	std::map<MissionKind, std::vector<Slot>> out;
-	for (MissionKind kind : {MissionKind::Mission, MissionKind::Item, MissionKind::Layer}) {
+	for (MissionKind kind : {MissionKind::Mission, MissionKind::Item, MissionKind::WavList}) {
 		for (const FieldSchema &field : T().kind(k(kind))->fields()) {
 			if (field.type != FieldType::Text || !field.width || field.read_only) continue;
 			Loaded m;

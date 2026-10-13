@@ -638,21 +638,14 @@ std::string mission_record_label(const Document &base, const NodeAddress &addres
 		const DisplayName group = mission_group_display(*document, int64_t(index));
 		return index == 0 ? "Group 0 (no group)" : group.text;
 	}
-	case K::Layer: {
-		// A table holding the mission's variable names reads as them (S24 Names), its first record the tag
-		// that says so; any other as its layer names.
-		if (mission_variable_table(*document) != mission::LayerTable::VariableNames) break;
-		if (index == 0) return "Variable names (the editor's)";
-		const auto &layers = static_cast<const MissionRow &>(*row).native.layer_records;
-		if (index >= layers.size()) break;
+	case K::WavList: {
+		// The original editor's wav list slot, by its number and its file name.
+		const auto &slots = static_cast<const MissionRow &>(*row).native.wav_list_records;
+		if (index >= slots.size()) break;
 		size_t length = 0;
-		while (length < bms::kLayerRecordSize && layers[index].name[length] != 0) ++length;
-		const std::string text(layers[index].name, length);
-		if (text.empty()) return "No variable name";
-		for (const mission::VariableName &name : mission_variable_names(*document))
-			if (text == "V" + std::to_string(name.index) + " " + name.name)
-				return "Variable " + std::to_string(name.index) + ": " + name.name;
-		return "Not a variable name: " + text;
+		while (length < bms::kWavListNameSize && slots[index].file_name[length] != 0) ++length;
+		const std::string file(slots[index].file_name, length);
+		return "Wav " + std::to_string(index) + (file.empty() ? std::string() : ": " + file);
 	}
 	case K::Loadout: {
 		const auto &entries = static_cast<const MissionRow &>(*row).native.loadout.entries;
