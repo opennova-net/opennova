@@ -38,8 +38,13 @@ using ItemWireClassFn = std::function<uint8_t(int definition_id)>;
 // Idempotent; call after mission promotion (and again after spawning the
 // local player). A valid only handle initializes one new row without rebuilding
 // mission capture state; the default performs the original full load sweep.
+// The graphic-model flags (an entity's, the Player row's, a throwable class
+// row's) are what the def's graphic load returns through models: none for a
+// def with no graphic, a .3di that fails to load, or a world with no model
+// source (a null or sourceless store).
 void resolve_item_traits(world::World &world, const opennova::def::DefItemsFile &items,
-                         const ItemWireClassFn &wire_class, world::EntityHandle only = {});
+                         const ItemWireClassFn &wire_class, const assets::AssetStore *models,
+                         world::EntityHandle only = {});
 
 // The death traits an items.def row carries itself (world/destruction.h ItemDeathTraits),
 // each from its def field: the event/death callback class from the ai_function tag, the

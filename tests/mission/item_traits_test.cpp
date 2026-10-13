@@ -6,18 +6,30 @@
 // throwable class scan with first-wins duplicate ids, and the organic ammo
 // seed (§33.35). Parser token semantics are def's own tests; exotic fields are stamped
 // post-parse so this file pins only the FOLD's mapping.
+#include "common/file_io.h"
+#include "common/test_paths.h"
+
+#include <base/resource_index/resource_index.h>
 #include <formats/def/def.h>
+#include <runtime/mission/collision_resolve.h>
 #include <runtime/mission/item_traits.h>
 #include <runtime/replication/entity_wire_bridge.h>
 #include <runtime/world/item_sections.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/player_spawn.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/entity_pose.h>
+#include <runtime/world/occlusion.h>
+#include <runtime/world/vehicle_attach.h>
 #include <runtime/world/world.h>
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <memory>
 #include <string>
+#include <vector>
 
 using namespace opennova;
 using namespace opennova::world;
@@ -338,6 +350,116 @@ EntityHandle spawn(World &w, int pool, uint16_t item_id, EntityKind kind) {
     return w.registry.spawn(pool, e);
 }
 
+// D-ITEMDEF-35: entity+0x30 is what the def's graphic load returned: null for
+// a def that names none, for a .3di that fails to load and in a world with no
+// model source, so a carrier whose graphic failed is refused admission through
+// its loaded child's seat; the Player row's and a throwable class row's slots
+// take the same load, and an organic takes its visual def's.
+// [orig: EntityDef_LoadModelsAndCallbacks @0x439F50 - the store @0x439FDC;
+//  Game_ReloadEntityModelsAndCallbacks @0x522830 - the +0x30 stores @0x5229D7 /
+//  @0x522B35 / @0x522CD1; Entity_InitFromItemDef @0x49E598; Entity_CanEnterVehicle
+//  @0x435498..0x43549A]
+void test_graphic_model_is_the_loads_result() {
+    namespace fs = std::filesystem;
+    const std::vector<uint8_t> mount = test_io::read_file(
+            std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth/mount.3di");
+    if (mount.empty() || test_io::is_lfs_pointer(mount)) {
+        std::printf("SKIP-LEG: needs the LFS fixture fixtures/threedi/synth/mount.3di\n");
+        return;
+    }
+    const std::string root = std::string(test_paths_temp_dir()) + "/" +
+            test_paths_unique("opennova_graphic_load");
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    fs::create_directories(root, ec);
+    CHECK(test_io::write_file(root + "/LoadsHull.3di", mount));
+    // Retail's head row; the Player row, its loading model; the visual row,
+    // a lost one; a carrier whose graphic is lost and one whose loads; a row
+    // with no graphic; a mine class row of each kind.
+    static const char kDefs[] =
+        "begin \"Null\"\r\n id 100000\r\n type marker\r\nend\r\n"
+        "begin \"Player\"\r\n id 105305\r\n type person\r\n graphic LoadsHull\r\n hp 100\r\nend\r\n"
+        "begin \"Player visual\"\r\n id 105310\r\n type person\r\n graphic LostBody\r\n hp 100\r\nend\r\n"
+        "begin \"Hull lost\"\r\n id 100700\r\n type vehicle\r\n graphic LostHull\r\n hp 100\r\nend\r\n"
+        "begin \"Hull kept\"\r\n id 100701\r\n type vehicle\r\n graphic LoadsHull\r\n hp 100\r\nend\r\n"
+        "begin \"Bare\"\r\n id 100702\r\n type object\r\n hp 100\r\nend\r\n"
+        "begin \"Mine lost\"\r\n id 100703\r\n type powerup\r\n graphic LostMine\r\n ai_function vmne\r\nend\r\n"
+        "begin \"Mine kept\"\r\n id 100704\r\n type powerup\r\n graphic LoadsHull\r\n ai_function vmne\r\nend\r\n";
+    DefItemsFile defs{};
+    CHECK(def_parse_items_memory(reinterpret_cast<const uint8_t *>(kDefs),
+            sizeof(kDefs) - 1, &defs) == 0);
+    {
+        ResourceIndex index;
+        CHECK(index.scan(root, std::string(), VfsMountMode::LooseOnly));
+        assets::AssetStore models{&index};
+        auto wp = std::make_unique<World>();
+        World &w = *wp;
+        w.registry.configure_pool(0, 4);
+        w.registry.configure_pool(1, 8);
+        const EntityHandle lost_h = spawn(w, 1, 700, EntityKind::Item);
+        const EntityHandle kept_h = spawn(w, 1, 701, EntityKind::Item);
+        const EntityHandle bare_h = spawn(w, 1, 702, EntityKind::Item);
+        const EntityHandle body_h = spawn(w, 0, 5305, EntityKind::Organic);
+        // Each carrier's ground-attached child has its def, its model and a seat.
+        for (const EntityHandle carrier : {lost_h, kept_h}) {
+            Entity child;
+            child.kind = EntityKind::Item;
+            child.item_id = 701;
+            child.health = 100;
+            child.alive = true;
+            child.ground_target = carrier;
+            Seat sit;
+            sit.type = SeatType::Passenger;
+            sit.bone_index = 1;
+            child.seats.push_back(sit);
+            w.registry.spawn(1, child);
+            Entity &c = *w.registry.get(carrier);
+            c.spawn_position = c.position; // at its spawn anchor
+        }
+        mission::resolve_item_traits(w, defs, {}, &models);
+        CHECK(!w.registry.get(lost_h)->has_graphic_model);
+        CHECK(w.registry.get(kept_h)->has_graphic_model);
+        CHECK(!w.registry.get(bare_h)->has_graphic_model);
+        CHECK(w.registry.get(body_h)->has_graphic_model); // its runtime row's
+        CHECK(w.tables.player.has_graphic_model);
+        const ThrowableClassRow *mine_lost = w.throwables.classes.get(703);
+        const ThrowableClassRow *mine_kept = w.throwables.classes.get(704);
+        CHECK(mine_lost != nullptr && !mine_lost->has_graphic_model);
+        CHECK(mine_kept != nullptr && mine_kept->has_graphic_model);
+        // The admission refuses the carrier whose graphic failed before its walk
+        // reaches the child's seat.
+        CHECK(!vehicle_can_enter(w, nullptr, *w.registry.get(lost_h)));
+        CHECK(vehicle_can_enter(w, nullptr, *w.registry.get(kept_h)));
+        // The collision sweep's load is the organic's visual def's, lost here.
+        world::EntityPoseProvider pose;
+        pose.set_assets(&models);
+        CollisionWorld collision;
+        OcclusionWorld occlusion;
+        mission::CollisionResolveState state;
+        const mission::CollisionResolveDeps deps{collision, occlusion, pose, models};
+        mission::resolve_collision_instances(w, defs, state, deps);
+        CHECK(!w.registry.get(body_h)->has_graphic_model);
+        CHECK(!w.registry.get(lost_h)->has_graphic_model);
+        CHECK(w.registry.get(kept_h)->has_graphic_model);
+    }
+    {
+        // No model source loads none: a null store, and one over no mount.
+        ResourceIndex unmounted;
+        const assets::AssetStore sourceless{&unmounted};
+        for (const assets::AssetStore *models : {static_cast<const assets::AssetStore *>(nullptr),
+                     &sourceless}) {
+            World w;
+            w.registry.configure_pool(1, 4);
+            const EntityHandle kept_h = spawn(w, 1, 701, EntityKind::Item);
+            mission::resolve_item_traits(w, defs, {}, models);
+            CHECK(!w.registry.get(kept_h)->has_graphic_model);
+            CHECK(!w.tables.player.has_graphic_model);
+        }
+    }
+    def_free_items(&defs);
+    fs::remove_all(root, ec);
+}
+
 } // namespace
 
 int main() {
@@ -486,7 +608,7 @@ int main() {
         if (def_id == 100510) return 2; // Infantry
         return 0;
     };
-    mission::resolve_item_traits(w, file, wire_class);
+    mission::resolve_item_traits(w, file, wire_class, nullptr);
 
     // ---- the Player template block (D-NET-144) ----
     CHECK(w.tables.player.has_item_def);
@@ -820,7 +942,7 @@ int main() {
 			std::snprintf(psec_def->render_function, sizeof(psec_def->render_function), "gnrc");
 			std::snprintf(gnrc_def->render_function, sizeof(gnrc_def->render_function), "psec");
 			fragment->palm_fragment = true;
-			mission::resolve_item_traits(w, file, wire_class);
+			mission::resolve_item_traits(w, file, wire_class, nullptr);
 			CHECK(!w.registry.get(psec_palm_h)->palm_sections);
 			CHECK(w.registry.get(gnrc_palm_h)->palm_sections);
 			// ai_function psec, no section tag: no palm draw, the store kept.
@@ -831,7 +953,7 @@ int main() {
 			std::snprintf(psec_def->render_function, sizeof(psec_def->render_function), "psec");
 			std::snprintf(gnrc_def->render_function, sizeof(gnrc_def->render_function), "gnrc");
 			fragment->palm_fragment = false;
-			mission::resolve_item_traits(w, file, wire_class);
+			mission::resolve_item_traits(w, file, wire_class, nullptr);
 			CHECK(w.registry.get(psec_palm_h)->palm_sections);
 			CHECK(!w.registry.get(gnrc_palm_h)->palm_sections);
 			CHECK(!fragment->palm_sections);
@@ -873,12 +995,12 @@ int main() {
 			for (const auto &tag : tags) {
 				std::snprintf(truck_def->render_function, sizeof(truck_def->render_function),
 						"%s", tag.tag);
-				mission::resolve_item_traits(w, file, wire_class);
+				mission::resolve_item_traits(w, file, wire_class, nullptr);
 				CHECK(w.registry.get(truck_h)->death_section_pivot == tag.pivots);
 				CHECK(w.registry.get(truck_h)->bldg_section_pivot == tag.bldg);
 			}
 			std::snprintf(truck_def->render_function, sizeof(truck_def->render_function), "cveh");
-			mission::resolve_item_traits(w, file, wire_class);
+			mission::resolve_item_traits(w, file, wire_class, nullptr);
 			CHECK(w.registry.get(truck_h)->death_section_pivot);
 			CHECK(!w.registry.get(truck_h)->bldg_section_pivot);
 		}
@@ -914,7 +1036,9 @@ int main() {
         // @0x5455D6].
         CHECK(mine->attrib == DEF_ITEM_ATTRIB_NOTARGET);
         CHECK(mine->attrib2 == 0);
-        CHECK(mine->has_graphic_model); // graphic atmine
+        // Its graphic, atmine, loads from no model source here (the load
+        // itself: test_graphic_model_is_the_loads_result).
+        CHECK(!mine->has_graphic_model);
     }
     CHECK(frag == nullptr || !frag->no_target);
     // vmne is an event row only: as a move_function it binds the physics
@@ -945,7 +1069,7 @@ int main() {
     CHECK(w.throwables.classes.get(500) == nullptr);
 
     // Idempotent re-run: the once-per-id tables must not duplicate or reset.
-    mission::resolve_item_traits(w, file, wire_class);
+    mission::resolve_item_traits(w, file, wire_class, nullptr);
     CHECK(w.vehicles.traits.get(500) != nullptr);
     CHECK(w.registry.get(tank_h)->health == -25536);
 
@@ -1048,7 +1172,7 @@ int main() {
                     rifle_h, authored | DEF_ITEM_ATTRIB_NODIE | DEF_ITEM_ATTRIB_SPAWNPOINT, 0x2000u));
             CHECK(rifle_override->is_spawn_point);
             CHECK(w.tables.item_death_traits.get(510) == nullptr || !w.tables.item_death_traits.get(510)->no_die);
-            mission::resolve_item_traits(w, file, wire_class);
+            mission::resolve_item_traits(w, file, wire_class, nullptr);
             rifle_override = w.registry.get(rifle_h);
             CHECK(rifle_override != nullptr && rifle_override->item_attrib == authored);
             CHECK(rifle_override != nullptr && rifle_override->item_attrib2 == 0u);
@@ -1072,7 +1196,7 @@ int main() {
         sp.registry.configure_pool(0, 8);
         sp.rules.mp_session = false;
         sp.rules.difficulty = 1;
-        mission::resolve_item_traits(sp, file, wire_class); // the Player row's word
+        mission::resolve_item_traits(sp, file, wire_class, nullptr); // the Player row's word
         CHECK(sp.tables.player.item_hp == 200);
         PlayerSpawn ps;
         ps.net_id = 0xFFF0;
@@ -1082,7 +1206,7 @@ int main() {
         CHECK(body != nullptr && sp.cached.local_player == body_h);
         CHECK(body != nullptr && body->health == 100); // halved at the word 1
         CHECK(body != nullptr && body->health_max == 200);
-        mission::resolve_item_traits(sp, file, wire_class); // the kernel's item_traits step
+        mission::resolve_item_traits(sp, file, wire_class, nullptr); // the kernel's item_traits step
         body = sp.registry.get(body_h);
         CHECK(body != nullptr && body->health == 100);
         CHECK(body != nullptr && body->health_max == 200);
@@ -1093,6 +1217,7 @@ int main() {
     }
 
     def_free_items(&file);
+    test_graphic_model_is_the_loads_result();
     if (failures == 0) std::printf("mission_item_traits: OK\n");
     return failures == 0 ? 0 : 1;
 }

@@ -465,6 +465,10 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 		OS.delay_msec(1)
 	assert_true(joiner.install_seat_specs_for_type_ids(
 			db, PackedInt32Array([DESIGNATED_G_PARENT_TYPE])))
+	# The header-only shell's late resolution re-runs the trait sweep once the
+	# root is wired (local_player_visuals.cpp): a row's graphic model is its
+	# load's result, which the rootless sweeps at the stream could not make.
+	joiner.resolve_item_traits(db)
 
 	# The zone pick is the DEATH flow now (the initial join deploys with no
 	# C2S 0x0E — retail sends none): kill on the authority, wait out the

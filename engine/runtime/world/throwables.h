@@ -125,7 +125,7 @@ struct ThrowableClassRow {
     // entity's +0x1A6 / +0x1A4 [orig: Entity_InitFromModel @0x40E136..0x40E156].
     int32_t radar_sig = 0;
     int32_t heat_sig = 0;
-    // The def's attrib words and whether it names a graphic: the conversion's
+    // The def's attrib words and whether its graphic loaded: the conversion's
     // copy of the round carries its def pointer and graphic model (+0x20,
     // +0x30) into the placed entity, whose readers then read the def's own
     // type and words [orig: Entity_ConvertRoundToPlacedEntity @0x5455D6].

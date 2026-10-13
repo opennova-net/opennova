@@ -434,10 +434,12 @@ struct PlayerTemplate {
     // The Player row's items.def ordinal (entity+0x1C ItemTypeIndex); 0 until the
     // sweep resolves it [orig: Entity_SpawnFromBMSRecord @0x40EBFC].
     int32_t item_type_index = 0;
-    // Whether the Player row names a graphic (entity+0x30 graphicModel), the
-    // device sweeps' candidate gate; true for native harnesses like
-    // has_item_def [orig: Entity_InitFromItemDef @0x49E550 - the +0x30
-    // store @0x49E598; the gate @0x43CC19].
+    // Whether the Player row's graphic loaded (its model slot, def+0xF0, which
+    // a spawn copies into entity+0x30), the device sweeps' candidate gate; true
+    // for native harnesses like has_item_def until the sweep stores the load's
+    // result [orig: EntityDef_LoadModelsAndCallbacks @0x439F50 - the store
+    // @0x439FDC; Entity_InitFromItemDef @0x49E550 - the +0x30 store @0x49E598;
+    // the gate @0x43CC19].
     bool has_graphic_model = true;
     // The Player row's hp word (itemDef+0x17C healthMax), 0 a real word: unset
     // until the traits sweep stores it (or a harness seeds one), and while unset
