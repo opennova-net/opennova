@@ -14,6 +14,7 @@
 
 #include <base/io/json.h>
 #include <editor/preview/mission_people.h>
+#include <editor/preview/model_preview_camera.h>
 #include <editor/preview/mission_poses.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/mission_shots.h>
@@ -176,8 +177,8 @@ public:
 	// What a pick casts against for one placed entity: its faces in its own space (three vertices a
 	// triangle) and their box.
 	struct PickShape {
-		PackedVector3Array faces;
-		AABB box;
+		std::vector<opennova::editor::PreviewVec3> faces; // three points a triangle
+		opennova::editor::PreviewVec3 low, high;           // their box
 		bool any = false;
 	};
 

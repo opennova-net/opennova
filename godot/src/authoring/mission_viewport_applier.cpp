@@ -26,6 +26,7 @@
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/preview_clock.h>
+#include <editor/preview/preview_pick.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/session/view/session_view.h>
 #include <formats/env/env.h>
@@ -1645,54 +1646,24 @@ bool MissionViewportApplier::surface_at(float x, float y, float point[3]) const 
 
 namespace {
 
-// Whether the segment from `a` to `b` meets `box` at a parameter below `limit` (the slabs).
-bool segment_meets_box(const AABB &box, const Vector3 &a, const Vector3 &b, real_t limit) {
-	real_t low = 0.0f, high = limit;
-	const Vector3 along = b - a;
-	const Vector3 end = box.position + box.size;
-	for (int axis = 0; axis < 3; ++axis) {
-		if (Math::abs(along[axis]) < CMP_EPSILON) {
-			if (a[axis] < box.position[axis] || a[axis] > end[axis]) return false;
-			continue;
-		}
-		real_t t0 = (box.position[axis] - a[axis]) / along[axis], t1 = (end[axis] - a[axis]) / along[axis];
-		if (t0 > t1) std::swap(t0, t1);
-		low = MAX(low, t0);
-		high = MIN(high, t1);
-		if (low > high) return false;
-	}
-	return true;
-}
-
-// The parameter of the segment from `a` to `b` where it meets the triangle (either face), in [0, 1].
-bool segment_meets_triangle(const Vector3 &a, const Vector3 &b, const Vector3 &v0, const Vector3 &v1, const Vector3 &v2,
-		real_t &at) {
-	const Vector3 along = b - a;
-	const Vector3 e1 = v1 - v0, e2 = v2 - v0;
-	const Vector3 p = along.cross(e2);
-	const real_t det = e1.dot(p);
-	if (Math::abs(det) < 1e-12f) return false;
-	const real_t inverse = 1.0f / det;
-	const Vector3 t = a - v0;
-	const real_t u = t.dot(p) * inverse;
-	if (u < 0.0f || u > 1.0f) return false;
-	const Vector3 q = t.cross(e1);
-	const real_t v = along.dot(q) * inverse;
-	if (v < 0.0f || u + v > 1.0f) return false;
-	at = e2.dot(q) * inverse;
-	return at >= 0.0f && at <= 1.0f;
+opennova::editor::PreviewVec3 to_preview(const Vector3 &v) {
+	return opennova::editor::PreviewVec3{ v.x, v.y, v.z };
 }
 
 void add_faces(MissionViewportApplier::PickShape &shape, const PackedVector3Array &faces, const Transform3D &through) {
 	for (int64_t i = 0; i < faces.size(); ++i) {
 		const Vector3 at = through.xform(faces[i]);
+		const opennova::editor::PreviewVec3 point = to_preview(at);
 		if (!shape.any) {
-			shape.box = AABB(at, Vector3());
+			shape.low = shape.high = point;
 			shape.any = true;
 		} else {
-			shape.box.expand_to(at);
+			shape.low = opennova::editor::PreviewVec3{ std::min(shape.low.x, point.x), std::min(shape.low.y, point.y),
+				std::min(shape.low.z, point.z) };
+			shape.high = opennova::editor::PreviewVec3{ std::max(shape.high.x, point.x), std::max(shape.high.y, point.y),
+				std::max(shape.high.z, point.z) };
 		}
-		shape.faces.push_back(at);
+		shape.faces.push_back(point);
 	}
 }
 
@@ -1762,7 +1733,7 @@ opennova::editor::ViewportRayHit MissionViewportApplier::ray_between(const doubl
 	const Vector3 end = MissionObjectPlacer::bms_to_godot_position(Vector3(float(to[0]), float(to[1]), float(to[2])));
 	const real_t length = (end - start).length();
 	// The terrain's point along the segment, then the nearest face before it.
-	real_t best = 1.0f;
+	float best = 1.0f;
 	bool ground = false;
 	if (terrain_built_ && terrain_data_.is_valid() && length > 0.0f) {
 		const Vector3 hit = terrain_data_->raycast_terrain(start, end);
@@ -1776,17 +1747,11 @@ opennova::editor::ViewportRayHit MissionViewportApplier::ray_between(const doubl
 		Transform3D xform;
 		const PickShape *shape = pick_shape_(entry.first, entry.second, xform);
 		if (shape == nullptr) continue;
+		// The segment in the shape's own space, through the editor's pick (preview/preview_pick).
 		const Transform3D inverse = xform.affine_inverse();
-		const Vector3 a = inverse.xform(start), b = inverse.xform(end);
-		if (!segment_meets_box(shape->box, a, b, best)) continue;
-		const Vector3 *faces = shape->faces.ptr();
-		for (int64_t i = 0; i + 2 < shape->faces.size(); i += 3) {
-			real_t at = 0.0f;
-			if (segment_meets_triangle(a, b, faces[i], faces[i + 1], faces[i + 2], at) && at < best) {
-				best = at;
-				row = entry.first;
-			}
-		}
+		if (opennova::editor::segment_nearest_face(shape->faces.data(), shape->faces.size(), shape->low, shape->high,
+					to_preview(inverse.xform(start)), to_preview(inverse.xform(end)), best))
+			row = entry.first;
 	}
 	if (row != 0 || ground) {
 		out.met = row != 0 ? opennova::editor::ViewportRayHit::Met::Record : opennova::editor::ViewportRayHit::Met::Surface;

@@ -6,12 +6,10 @@
 
 namespace opennova::editor {
 
-// STAGED, NOT WIRED: the live owner is godot/src/authoring/mission_viewport_applier.cpp (its ray_between, which holds
-// its own Vector3 copies of these until the 3D appliers' S26 restructure moves it onto them).
-//
-// A segment through the picture's shapes, the mission view's pick (ADR 0046 S14: a click, a drop or a drag's ray
-// meeting the placed models' faces before the ground): the editor's pick, not a port. A segment runs from `a` to `b`
-// in a shape's own space, its points at the parameter t in [0, 1].
+// A segment through the picture's shapes, the mission view's pick (ADR 0046 S14: a click, a drop or
+// a drag's ray meeting the placed models' faces before the ground;
+// godot/src/authoring/mission_viewport_applier's ray_between): the editor's pick, not a port. A
+// segment runs from `a` to `b` in a shape's own space, its points at the parameter t in [0, 1].
 
 // The slab test: whether the segment meets the box [`low`, `high`] at a parameter below `limit` (an axis the
 // segment runs along within 1e-5 of nothing tested by where `a` stands on it).
