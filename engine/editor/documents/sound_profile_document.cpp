@@ -9,6 +9,7 @@
 #include <cstring>
 #include <unordered_map>
 
+#include <base/io/fixed.h>
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/project/project_files.h>
@@ -88,9 +89,9 @@ bool set_text(std::string &field, size_t bytes, const char *what, const Value &v
 // A column-2 or column-3 number: the file's decimal, stored x 65536 [orig: @ 0x527122..0x527169].
 bool set_q16(int32_t &field, const Value &value, std::string &error) {
 	double number = 0.0;
-	if (!number_of(value, number) || std::fabs(number) * 65536.0 > double(INT32_MAX))
+	if (!number_of(value, number) || std::fabs(number) * io::kFp16OneD > double(INT32_MAX))
 		return error = "The number is from -32767 to 32767.", false;
-	field = int32_t(std::lround(number * 65536.0));
+	field = int32_t(std::lround(number * io::kFp16OneD));
 	return true;
 }
 
@@ -162,13 +163,13 @@ RecordTable make_table() {
 	slot.field(RF{schema_of("param2", FieldType::Real, "Number 1",
 	                        "The line's third column, stored x 65536 [orig: @ 0x527122]; a loop's low pitch, a "
 	                        "time-of-day shot's first value. Read only after a set."),
-	              {[](const RecordHandle &r, Value &out) { return out = slot_of(r).param2_q16 / 65536.0, true; },
+	              {[](const RecordHandle &r, Value &out) { return out = slot_of(r).param2_q16 / io::kFp16OneD, true; },
 	               [](const RecordHandle &r, const Value &v, std::string &e) {
 		               return set_q16(r.as<ProfileSlot>().param2_q16, v, e);
 	               }}});
 	slot.field(RF{schema_of("param3", FieldType::Real, "Number 2",
 	                        "The line's fourth column, stored x 65536 [orig: @ 0x527169]; a loop's high pitch."),
-	              {[](const RecordHandle &r, Value &out) { return out = slot_of(r).param3_q16 / 65536.0, true; },
+	              {[](const RecordHandle &r, Value &out) { return out = slot_of(r).param3_q16 / io::kFp16OneD, true; },
 	               [](const RecordHandle &r, const Value &v, std::string &e) {
 		               return set_q16(r.as<ProfileSlot>().param3_q16, v, e);
 	               }}});

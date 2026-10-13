@@ -4,6 +4,7 @@
 
 #include <cmath>
 
+#include <base/io/fixed.h>
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/source_issue_findings.h>
@@ -170,7 +171,7 @@ bool music_stream_pcm(const std::vector<uint8_t> &bytes, int place, lwf::WavPcm 
 		out.pcm16[i * 2 + 1] = uint8_t(uint16_t(samples[i]) >> 8);
 	}
 	out.loader_samples = uint32_t(samples.size() / SBF_CHANNELS);
-	out.loader_pitch_q16 = 0x10000;
+	out.loader_pitch_q16 = io::kFp16OneInt;
 	return true;
 }
 

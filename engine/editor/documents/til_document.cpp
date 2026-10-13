@@ -8,6 +8,7 @@
 #include <limits>
 #include <set>
 
+#include <base/io/fixed.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/model/staged_rows.h>
 #include <formats/til/til_io.h>
@@ -34,7 +35,7 @@ bool fixed_of(const Value &value, int32_t &out, std::string &error) {
 	if (const auto *real = std::get_if<double>(&value)) number = *real;
 	else if (const auto *whole = std::get_if<int64_t>(&value)) number = double(*whole);
 	else return error = "A tile's corner is a number of mission units.", false;
-	const double scaled = std::nearbyint(number * 65536.0);
+	const double scaled = std::nearbyint(number * io::kFp16OneD);
 	if (!std::isfinite(scaled) || scaled < double(std::numeric_limits<int32_t>::min()) ||
 	    scaled > double(std::numeric_limits<int32_t>::max()))
 		return error = "A tile's corner is a 16.16 word of mission units: this one is past what the word holds.", false;
@@ -72,7 +73,7 @@ RecordTable make_table() {
 			"east of it [orig: PolyTrn_RenderTile @ 0x60DE20..0x60DE60].");
 	x.group = "position";
 	tile.field(RF{x,
-	              {[](const RecordHandle &r, Value &out) { return out = double(entry_of(r).x_fixed) / 65536.0, true; },
+	              {[](const RecordHandle &r, Value &out) { return out = double(entry_of(r).x_fixed) / io::kFp16OneD, true; },
 	               [](const RecordHandle &r, const Value &v, std::string &e) {
 		               int32_t fixed = 0;
 		               if (!fixed_of(v, fixed, e)) return false;
@@ -86,7 +87,7 @@ RecordTable make_table() {
 			"z negated instead [orig: Terrain_GetSurfaceTypeAtPosition @ 0x6065CC..0x606601], D-TIL-9.)");
 	y.group = "position";
 	tile.field(RF{y,
-	              {[](const RecordHandle &r, Value &out) { return out = double(entry_of(r).z_fixed) / 65536.0, true; },
+	              {[](const RecordHandle &r, Value &out) { return out = double(entry_of(r).z_fixed) / io::kFp16OneD, true; },
 	               [](const RecordHandle &r, const Value &v, std::string &e) {
 		               int32_t fixed = 0;
 		               if (!fixed_of(v, fixed, e)) return false;
@@ -115,7 +116,7 @@ const TilRow &tile_row(const Node &node) { return static_cast<const TilRow &>(no
 
 std::string units(int32_t fixed) {
 	char text[32];
-	std::snprintf(text, sizeof(text), "%.6g", double(fixed) / 65536.0);
+	std::snprintf(text, sizeof(text), "%.6g", double(fixed) / io::kFp16OneD);
 	return text;
 }
 
