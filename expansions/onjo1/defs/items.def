@@ -161,6 +161,12 @@ begin "Field radio on an ammunition crate"
 	armor -1 -1
 	attrib: notarget
 end
+begin "Armory"
+	graphic onarmry1
+	id 100021
+	type decoration
+	attrib: Landable Armory
+end
 
 begin "Supply shed"
 	graphic onshed1
