@@ -1,12 +1,9 @@
 // MNU menu file parser implementation: the typed layer over mnu_xml's retail
-// reader, which names each record's element for the text layout (mnu_text_layout.h);
-// the writer is mnu_write.cpp. docs/mnu/menu-re.md ("The reader", "The writer") has the
+// reader; the writer is mnu_write.cpp. docs/mnu/menu-re.md ("The reader", "The writer") has the
 // rules with their witnesses.
 #include <formats/mnu/mnu.h>
 
 #include <formats/mns/mns.h>
-#include <formats/mnu/mnu_text_layout.h>
-#include <formats/mnu/mnu_write.h>
 #include <formats/mnu/mnu_xml.h>
 #include <formats/rtxt/rtxt.h>
 
@@ -180,7 +177,7 @@ struct ReadScope {
 
 class TreeReader {
 public:
-  TreeReader(SourceEncoding encoding, TextLayoutCapture &capture) : encoding_(encoding), capture_(capture) {}
+  explicit TreeReader(SourceEncoding encoding) : encoding_(encoding) {}
 
   void read_document(const mnu_xml::Document &xml, Document &out);
   void sweep(const mnu_xml::Document &xml, std::vector<ParseNote> &notes) const;
@@ -247,7 +244,7 @@ private:
   bool read_screen(const Node &node, Screen &out);
   bool read_created_window(const Node &node, Window &out);
   void read_window_body(const Node &node, Window &w, ReadScope &frame);
-  void read_part(const Node &node, WindowPart &part, WindowType type, ReadScope &owner, const char *key);
+  void read_part(const Node &node, WindowPart &part, WindowType type, ReadScope &owner);
   bool read_appearance(const Node &node, Appearance &out, const char *const *types);
   bool read_sound(const Node &node, Sound &out);
   void read_position(const Node &node, Position &pos);
@@ -263,13 +260,9 @@ private:
   bool read_items(const Node &node, Items &items, bool list_rule, bool table_rule);
   void read_column(const Node &node, TableColumn &column);
   Element read_extra(const Node &node);
-  // `by`: the element whose parse stopped (the text layout keeps the rest while it stands as read).
-  void unread_rest(const Node &parent, size_t from, const char *const *tags, const std::string &why, const Node &by);
+  void unread_rest(const Node &parent, size_t from, const char *const *tags, const std::string &why);
 
   SourceEncoding encoding_;
-  // Told which element each record and singleton was read from, and which elements are read
-  // for nothing only while another stands (the text layout's Tied tokens).
-  TextLayoutCapture &capture_;
   std::map<const void *, std::string> reasons_;
   std::set<const void *> fatal_;
   bool reads_ = true; // retail reads what is being read now
@@ -413,20 +406,17 @@ bool TreeReader::singleton(ReadScope &frame, const Node &node, const char *tag, 
   it->second->read = false;
   fatal_.erase(it->second);
   because(it->second, std::string("A later ") + tag + " replaces this one (retail keeps the last); it is left out.");
-  capture_.tie(*it->second, node);
   it->second = &node;
   return false;
 }
 
 // Marks the elements of `tags` from `from` on as not read, with `why`.
-void TreeReader::unread_rest(const Node &parent, size_t from, const char *const *tags, const std::string &why,
-                             const Node &by) {
+void TreeReader::unread_rest(const Node &parent, size_t from, const char *const *tags, const std::string &why) {
   for (size_t i = from; i < parent.children.size(); ++i) {
     const Node &child = *parent.children[i];
     if (tags && !tag_in(child, tags)) continue;
     child.read = false;
     because(&child, why);
-    capture_.tie(child, by);
   }
 }
 
@@ -439,7 +429,6 @@ void TreeReader::read_document(const mnu_xml::Document &xml, Document &out) {
       continue;
     }
     Screen screen;
-    screen.source = capture_.record(*root);
     read_screen(*root, screen);
     out.screens.push_back(std::move(screen));
   }
@@ -458,7 +447,6 @@ bool TreeReader::read_screen(const Node &node, Screen &out) {
     const Node &child = *child_ptr;
     if (tag_is(child, "NAME")) {
       singleton(frame, child, "NAME", false);
-      capture_.keep(child, "NAME");
       out.name = text_of(child);
     } else if (tag_is(child, "MUSICVAR")) {
       // wcstok(text, L"\"") then wcstol: an empty one faults.
@@ -471,7 +459,6 @@ bool TreeReader::read_screen(const Node &node, Screen &out) {
         continue;
       }
       singleton(frame, child, "MUSICVAR", false);
-      capture_.keep(child, "MUSICVAR");
       child.read = true;
       variable_number(child, nullptr, tok);
       out.music_var = static_cast<int>(mnu_xml::wcstol(tok, 10));
@@ -510,7 +497,6 @@ bool TreeReader::read_created_window(const Node &node, Window &out) {
   }
   out.type = parse_window_type(token_text);
   out.type_token = token_text;
-  out.source = capture_.record(node);
   ReadScope frame;
   read_window_body(node, out, frame);
   return true;
@@ -519,7 +505,7 @@ bool TreeReader::read_created_window(const Node &node, Window &out) {
 // A part's own embedded widget parses the element's children with its own chain
 // (the attributes are the element's); an empty one hands the parse no node, which
 // faults. A repeated part element parses into the same widget.
-void TreeReader::read_part(const Node &node, WindowPart &part, WindowType type, ReadScope &owner, const char *key) {
+void TreeReader::read_part(const Node &node, WindowPart &part, WindowType type, ReadScope &owner) {
   if (node.children.empty()) {
     if (reads_)
       fatal_because(&node, "An empty " + mnu_xml::ascii(node.tag) +
@@ -530,7 +516,6 @@ void TreeReader::read_part(const Node &node, WindowPart &part, WindowType type, 
   }
   const bool first_time = !part.present();
   Window &w = part.author(type);
-  capture_.keep(node, key);
   if (!first_time) {
     because(&node, "A repeated " + mnu_xml::ascii(node.tag) + ": retail parses it into the same widget; "
                        "it is saved as one.");
@@ -602,13 +587,11 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
         because(&child, "An APPEARANCE with no attributes or no STATE retail knows (DEFAULT, DISABLED, "
                         "MOUSEOVER, SELECTED) stops this window's parse in retail: it, the elements after it "
                         "and the child windows are left out.");
-        capture_.tie(child, node);
         unread_rest(node, i + 1, kBaseTags,
-                    "Not read: an earlier APPEARANCE or SOUND stopped this window's parse in retail.", node);
+                    "Not read: an earlier APPEARANCE or SOUND stopped this window's parse in retail.");
         continue;
       }
       child.read = true;
-      appearance.source = capture_.record(child);
       w.appearances.push_back(std::move(appearance));
     } else if (tag_is(child, "SOUND")) {
       Sound sound;
@@ -618,42 +601,34 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
         because(&child, "A SOUND with no STATE retail knows (MOUSEIN, MOUSEOUT, SELECTED) or no TRIGGER stops "
                         "this window's parse in retail: it, the elements after it and the child windows are "
                         "left out.");
-        capture_.tie(child, node);
         unread_rest(node, i + 1, kBaseTags,
-                    "Not read: an earlier APPEARANCE or SOUND stopped this window's parse in retail.", node);
+                    "Not read: an earlier APPEARANCE or SOUND stopped this window's parse in retail.");
         continue;
       }
       child.read = true;
-      sound.source = capture_.record(child);
       w.sounds.push_back(std::move(sound));
     } else if (tag_is(child, "FRAME")) {
       const bool first_one = singleton(frame, child, "FRAME", true);
-      capture_.keep(child, "FRAME");
       read_frame(child, w.frame);
       if (!first_one) child.read = false;
     } else if (tag_is(child, "POSITION")) {
       const bool first_one = singleton(frame, child, "POSITION", true);
-      capture_.keep(child, "POSITION");
       read_position(child, w.position);
       if (!first_one) child.read = false;
     } else if (tag_is(child, "FONT")) {
       const bool first_one = singleton(frame, child, "FONT", true);
-      capture_.keep(child, "FONT");
       read_font(child, w.font);
       if (!first_one) child.read = false;
     } else if (tag_is(child, "TEXT_RSRC")) {
       singleton(frame, child, "TEXT_RSRC", false);
-      capture_.keep(child, "TEXT_RSRC");
       w.text_rsrc = text_of(child);
       w.has_text_rsrc = true;
     } else if (tag_is(child, "ACTION")) {
       Action action;
       read_action(child, action);
-      action.source = capture_.record(child);
       w.actions.push_back(std::move(action));
     } else if (tag_is(child, "CURSOR")) {
       const bool first_one = singleton(frame, child, "CURSOR", true);
-      capture_.keep(child, "CURSOR");
       read_cursor(child, w.cursor);
       if (!first_one) child.read = false;
     } else if (tag_is(child, "HOTKEY")) {
@@ -661,11 +636,9 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
       Hotkey hotkey;
       hotkey.virtual_key = flag(child, "VIRTUAL");
       hotkey.value = text_of(child);
-      hotkey.source = capture_.record(child);
       w.hotkeys.push_back(std::move(hotkey));
     } else if (tag_is(child, "PRIVATE_DATA")) {
       singleton(frame, child, "PRIVATE_DATA", false);
-      capture_.keep(child, "PRIVATE_DATA");
       w.private_data = text_of(child);
     } else if (tag_is(child, "WINDOW")) {
       windows.push_back(&child);
@@ -677,7 +650,6 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
       if (tag_is(*child, "WINDOW")) {
         child->read = false;
         because(child.get(), "Not created: an APPEARANCE or SOUND stopped this window's parse in retail.");
-        capture_.tie(*child, node);
       }
   for (const Node *child : windows) {
     Window window;
@@ -698,32 +670,28 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
     Reads reads(*this, type_reads(w.type, child));
     if (tag_is(child, "STRING")) {
       const bool first_one = singleton(frame, child, "STRING", true);
-      capture_.keep(child, "STRING");
       read_string(child, w.string_data, !first_one);
     } else if (tag_is(child, "TOGGLE_STRING")) {
       singleton(frame, child, "TOGGLE_STRING", false);
-      capture_.keep(child, "TOGGLE_STRING");
       w.toggle_string.present = true;
       w.toggle_string.type = keyword(child, "TYPE", kStringTypes);
       w.toggle_string.value = text_of(child);
     } else if (tag_is(child, "GROUP")) {
       singleton(frame, child, "GROUP", false);
-      capture_.keep(child, "GROUP");
       w.group = number_text(child);
       w.has_group = true;
     } else if (tag_is(child, "ITEMS")) {
       const bool first_one = singleton(frame, child, "ITEMS", true);
-      capture_.keep(child, "ITEMS");
       if (!read_items(child, w.items, list_rule, table_rule)) {
         own_stopped = true;
         unread_rest(node, i + 1, list_rule ? kListTags : kTableTags,
-                    "Not read: an earlier ITEMS APPEARANCE stopped this widget's list parse in retail.", child);
+                    "Not read: an earlier ITEMS APPEARANCE stopped this widget's list parse in retail.");
       }
       if (!first_one) child.read = false;
     } else if (tag_is(child, "SPINUP")) {
-      read_part(child, w.spinup, WindowType::Button, frame, "SPINUP");
+      read_part(child, w.spinup, WindowType::Button, frame);
     } else if (tag_is(child, "SPINDOWN")) {
-      read_part(child, w.spindown, WindowType::Button, frame, "SPINDOWN");
+      read_part(child, w.spindown, WindowType::Button, frame);
     } else if (tag_is(child, "LIST_BOX")) {
       // [orig: CComboWnd_ParseXMLDefinition @ 0x65c0d0] sb_edge_pad is the combo's;
       // every other attribute and the content are the embedded list's.
@@ -731,28 +699,24 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
         w.sb_edge_pad = number;
         w.has_sb_edge_pad = true;
       }
-      read_part(child, w.list_box, WindowType::List, frame, "LIST_BOX");
+      read_part(child, w.list_box, WindowType::List, frame);
     } else if (tag_is(child, "SCROLLBAR")) {
-      read_part(child, w.scrollbar, WindowType::Scroll, frame, "SCROLLBAR");
+      read_part(child, w.scrollbar, WindowType::Scroll, frame);
     } else if (tag_is(child, "MIN_ITEM_HEIGHT")) {
       singleton(frame, child, "MIN_ITEM_HEIGHT", false);
-      capture_.keep(child, "MIN_ITEM_HEIGHT");
       w.table_data.min_item_height = number_text(child);
       w.table_data.has_min_item_height = true;
     } else if (tag_is(child, "FIXED_HEADER_HEIGHT")) {
       singleton(frame, child, "FIXED_HEADER_HEIGHT", false);
-      capture_.keep(child, "FIXED_HEADER_HEIGHT");
       w.table_data.fixed_header_height = number_text(child);
       w.table_data.has_fixed_header_height = true;
     } else if (tag_is(child, "COLUMN")) {
       if (frame.seen.count("COLUMN")) {
         because(&child, "A repeated COLUMN: retail's result depends on the COUNTs (docs/mnu/menu-re.md); "
                         "only the first COLUMN is kept.");
-        capture_.tie(child, *frame.seen["COLUMN"]);
         continue;
       }
       frame.seen["COLUMN"] = &child;
-      capture_.keep(child, "COLUMN");
       read_column(child, w.table_data.column);
     } else if (tag_is(child, "ORIENTATION")) {
       // Only a HORIZONTAL text sets anything and nothing resets it [orig: @ 0x64c745 /
@@ -760,26 +724,21 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
       const auto seen = frame.seen.find("ORIENTATION");
       if (seen == frame.seen.end()) {
         frame.seen["ORIENTATION"] = &child;
-        capture_.keep(child, "ORIENTATION");
         w.orientation = text_of(child);
       } else if (mnu_xml::iequals(child.text, kHorizontalOrientation) &&
                  !mnu_xml::iequals(seen->second->text, kHorizontalOrientation)) {
         seen->second->read = false;
         because(seen->second, "A later HORIZONTAL ORIENTATION decides (retail never resets it to vertical); "
                               "this one is left out.");
-        capture_.tie(*seen->second, child);
         seen->second = &child;
-        capture_.keep(child, "ORIENTATION");
         w.orientation = text_of(child);
       } else {
         because(&child, "A repeated ORIENTATION changes nothing in retail (only a HORIZONTAL one sets anything, "
                         "and nothing resets it); it is left out.");
-        capture_.tie(child, *seen->second);
       }
     } else if (tag_is(child, "HEIGHT") || tag_is(child, "WIDTH")) {
       // One slot: the last authored of either [orig: @ 0x64c766 / 0x64c77e].
       singleton(frame, child, "HEIGHT", false);
-      capture_.keep(child, "SCROLL_EXTENT");
       w.scroll_extent = number_text(child);
       w.has_scroll_extent = true;
       w.scroll_extent_is_width = tag_is(child, "WIDTH");
@@ -790,20 +749,17 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
         scroll_stopped = true;
         because(&child, mnu_xml::ascii(child.tag) + " with no STATE retail knows stops the scroll parse in "
                                                    "retail: it and the scroll elements after it are left out.");
-        capture_.tie(child, node);
         unread_rest(node, i + 1, kScrollTags,
-                    "Not read: an earlier scroll part stopped the scroll parse in retail.", node);
+                    "Not read: an earlier scroll part stopped the scroll parse in retail.");
         continue;
       }
       // (Not a SCROLL: retail reads none of these; the row is kept as authored.)
       child.read = true;
-      row.source = capture_.record(child);
       if (tag_is(child, "SHUTTLE")) w.shuttle.push_back(std::move(row));
       else if (tag_is(child, "SCROLLUP") || tag_is(child, "SCROLLLEFT")) w.scrollup.push_back(std::move(row));
       else w.scrolldown.push_back(std::move(row));
     } else if (tag_is(child, "DATASOURCE")) {
       // Every one loads and appends its credits [orig: @ 0x65ceeb -> CMarqueeWnd_LoadCreditsFromIni].
-      capture_.keep(child, "DATASOURCE#" + std::to_string(w.datasources.size()));
       w.datasources.push_back(text_of(child));
     } else if (tag_in(child, kExtraTags)) {
       w.extras.push_back(read_extra(child));
@@ -851,27 +807,21 @@ void TreeReader::read_position(const Node &node, Position &pos) {
     if (tag_is(c, "LEFT") || tag_is(c, "ULX")) {
       pos.left = number_text(c);
       pos.has_left = true;
-      capture_.keep(c, "LEFT");
     } else if (tag_is(c, "RIGHT")) {
       pos.right = number_text(c);
       pos.has_right = true;
-      capture_.keep(c, "RIGHT");
     } else if (tag_is(c, "TOP") || tag_is(c, "ULY")) {
       pos.top = number_text(c);
       pos.has_top = true;
-      capture_.keep(c, "TOP");
     } else if (tag_is(c, "BOTTOM")) {
       pos.bottom = number_text(c);
       pos.has_bottom = true;
-      capture_.keep(c, "BOTTOM");
     } else if (tag_is(c, "WIDTH")) {
       pos.right = pos.left + number_text(c);
       pos.has_right = true;
-      capture_.keep(c, "RIGHT");
     } else if (tag_is(c, "HEIGHT")) {
       pos.bottom = pos.top + number_text(c);
       pos.has_bottom = true;
-      capture_.keep(c, "BOTTOM");
     }
   }
 }
@@ -897,7 +847,6 @@ void TreeReader::read_font(const Node &node, Font &font) {
     else if (tag_is(c, "MOUSEOVER_BG")) slot = &font.mouseover_bg;
     if (slot) {
       *slot = text_of(c);
-      capture_.keep(c, strutil::to_upper(mnu_xml::ascii(c.tag)));
     }
   }
 }
@@ -916,13 +865,10 @@ void TreeReader::read_frame(const Node &node, mnu::Frame &frame) {
       if (number_attr(c, "INSETX", number)) { frame.insetx = number; frame.has_insetx = true; }
       if (number_attr(c, "INSETY", number)) { frame.insety = number; frame.has_insety = true; }
       frame.stencil = text_of(c);
-      capture_.keep(c, "STENCIL");
     } else if (tag_is(c, "BRUSH")) {
       frame.brush = text_of(c);
-      capture_.keep(c, "BRUSH");
     } else if (tag_is(c, "MONOGRAM")) {
       frame.monogram = text_of(c);
-      capture_.keep(c, "MONOGRAM");
     }
   }
 }
@@ -967,10 +913,8 @@ void TreeReader::read_cursor(const Node &node, Cursor &cursor) {
     const Node &c = *child_ptr;
     if (tag_is(c, "FILE")) {
       cursor.file = text_of(c);
-      capture_.keep(c, "FILE");
     } else if (tag_is(c, "FLAGS")) {
       cursor.flags = text_of(c);
-      capture_.keep(c, "FLAGS");
     }
   }
 }
@@ -1024,18 +968,15 @@ bool TreeReader::read_items(const Node &node, Items &items, bool list_rule, bool
       Reads reads(*this, !table_rule);
       Item item;
       read_item(c, item, false);
-      item.source = capture_.record(c);
       items.items.push_back(std::move(item));
     } else if (tag_is(c, "ROW")) {
       Reads reads(*this, table_rule);
       c.read = true;
       TableRow row;
-      row.source = capture_.record(c);
       for (const auto &cell_ptr : c.children) {
         if (!tag_is(*cell_ptr, "ITEM")) continue;
         Item cell;
         read_item(*cell_ptr, cell, true);
-        cell.source = capture_.record(*cell_ptr);
         row.cells.push_back(std::move(cell));
       }
       items.rows.push_back(std::move(row));
@@ -1046,13 +987,11 @@ bool TreeReader::read_items(const Node &node, Items &items, bool list_rule, bool
       if (!ok && (list_rule || table_rule)) {
         because(&c, "An ITEMS APPEARANCE with no STATE retail knows ends this widget's list parse in retail: "
                     "it and what follows are left out.");
-        capture_.tie(c, node);
-        unread_rest(node, i + 1, nullptr, "Not read: an earlier ITEMS APPEARANCE ended the list parse.", node);
+        unread_rest(node, i + 1, nullptr, "Not read: an earlier ITEMS APPEARANCE ended the list parse.");
         return false;
       }
       // (Another type reads no ITEMS APPEARANCE: the row is kept as authored.)
       c.read = true;
-      appearance.source = capture_.record(c);
       items.appearances.push_back(std::move(appearance));
     }
   }
@@ -1159,7 +1098,6 @@ void TreeReader::read_column(const Node &node, TableColumn &column) {
                     "without a COUNT of 1 or more) is not set up by retail.");
         c.read = false;
       }
-      header.source = capture_.record(c);
       column.headers.push_back(std::move(header));
     } else if (tag_is(c, "BODY")) {
       c.read = true;
@@ -1181,7 +1119,6 @@ void TreeReader::read_column(const Node &node, TableColumn &column) {
       }
       body.scale_bitmap = flag(c, "SCALE_BITMAP");
       body.bitmap_flags = string_attr(c, "BITMAP_FLAGS");
-      body.source = capture_.record(c);
       column.bodies.push_back(std::move(body));
     } else if (tag_is(c, "SUBST")) {
       c.read = true;
@@ -1191,7 +1128,6 @@ void TreeReader::read_column(const Node &node, TableColumn &column) {
       subst.is_url = flag(c, "URL");
       subst.is_file = flag(c, "FILE");
       subst.file = text_of(c);
-      subst.source = capture_.record(c);
       column.substitutions.push_back(std::move(subst));
     }
   }
@@ -1209,7 +1145,6 @@ void TreeReader::read_column(const Node &node, TableColumn &column) {
 Element TreeReader::read_extra(const Node &node) {
   node.read = true;
   Element element;
-  element.source = capture_.record(node);
   element.tag = strutil::to_upper(mnu_xml::ascii(node.tag));
   element.text = narrow(node.text);
   for (const Attribute &a : node.attributes) {
@@ -1428,13 +1363,13 @@ const Window *find_window(const Screen &screen, const std::string &name) {
 }
 
 bool parse(const std::string &content, Document &out, std::string &error,
-           std::vector<ParseNote> *notes, ParseLayout layout) {
+           std::vector<ParseNote> *notes) {
   return parse(reinterpret_cast<const uint8_t *>(content.data()),
-               content.size(), out, error, notes, layout);
+               content.size(), out, error, notes);
 }
 
 bool parse(const uint8_t *data, size_t size, Document &out, std::string &error,
-           std::vector<ParseNote> *notes, ParseLayout layout) {
+           std::vector<ParseNote> *notes) {
   out = Document{};
   if (notes) notes->clear();
   if (!data && size != 0) {
@@ -1448,27 +1383,18 @@ bool parse(const uint8_t *data, size_t size, Document &out, std::string &error,
     out.screens.clear();
     return false;
   }
-  TextLayoutCapture capture(out.source_encoding, layout == ParseLayout::Text);
-  TreeReader reader(out.source_encoding, capture);
+  TreeReader reader(out.source_encoding);
   reader.read_document(xml, out);
   if (notes) {
     // The reader's own notes are all retail hangs or overruns.
     for (const mnu_xml::Note &n : xml.notes) notes->push_back({n.line, std::string(), n.message, true});
     reader.sweep(xml, *notes);
   }
-  // The file's look, when asked for, modeled against the writer's words for the records as read;
-  // the bytes the loader skips before the text (the byte order mark) are the layout's.
-  if (!capture.on()) return true;
-  const size_t skipped = out.source_encoding == SourceEncoding::Utf16LE ? std::min<size_t>(size, 2)
-                         : out.source_encoding == SourceEncoding::Utf8Bom ? 3
-                                                                          : 0;
-  out.text_layout = capture.finish(text, xml, written_screens(out),
-                                   std::string(reinterpret_cast<const char *>(data), skipped));
   return true;
 }
 
 bool parse_file(const std::string &path, Document &out, std::string &error,
-                std::vector<ParseNote> *notes, ParseLayout layout) {
+                std::vector<ParseNote> *notes) {
   std::ifstream file(path, std::ios::binary);
   if (!file) {
     error = "Failed to open file: " + path;
@@ -1479,7 +1405,7 @@ bool parse_file(const std::string &path, Document &out, std::string &error,
   buffer << file.rdbuf();
   std::string content = buffer.str();
 
-  return parse(content, out, error, notes, layout);
+  return parse(content, out, error, notes);
 }
 
 std::string strip_hotkey_marker(const std::string &text,
