@@ -211,9 +211,11 @@ bool extract_hudpos(const std::string &name, const std::vector<uint8_t> &bytes, 
 	texture(std::string(), "armor_icon", Assets::kArmorIconRole, assets.armor_icon);
 	texture(std::string(), "hudls_bracket", Assets::kHudlsRole, assets.hudls_bracket);
 	texture(std::string(), "hudls_moreav", Assets::kHudlsRole, assets.hudls_moreav);
-	// A vehicle panel's interface art through the HUD loader in alpha mode (render-material-re.md "The
-	// game's texture loaders"); its icon and static texture: no load of either is witnessed, the name as
-	// written.
+	// A vehicle panel's three names through the HUD loader in alpha mode (render-material-re.md "The game's texture
+	// loaders"): VEHICLE_END copies them into each item of the block's alias [orig: HUD_ParseHudposToken @
+	// 0x59F53C..0x59F59A], whose three HUD names the HUD loads in alpha mode [orig: HUD_LoadAllTextures @
+	// 0x59E248..0x59E26A (+0xA74, the icon), @ 0x59E272..0x59E297 (+0xA94, the interface), @ 0x59E29F..0x59E2CB
+	// (+0xAB4, the static texture)]; the interface alone has a witnessed drawer (interface/hud-re.md).
 	for (size_t i = 0; i < hud.vehicle_huds_count; ++i) {
 		const def::DefVehicleHudBlock &vehicle = hud.vehicle_huds[i];
 		const std::string record = std::string("VEHICLE_HUD ") + vehicle.sid;
@@ -221,9 +223,9 @@ bool extract_hudpos(const std::string &name, const std::vector<uint8_t> &bytes, 
 		// own name is its alias, so a rename of the alias renames the block, not one name of it: no site a rename
 		// rewrites (native_text_sites).
 		if (vehicle.sid[0]) out.edges.push_back(edge_of(name, record, "sid", ReferenceKind::ItemAlias, vehicle.sid));
-		edge(record, "icon", ReferenceKind::Texture, vehicle.icon);
+		texture(record, "icon", hud::kVehicleHudInterfaceRole, vehicle.icon);
 		texture(record, "interface", hud::kVehicleHudInterfaceRole, vehicle.interface_texture);
-		edge(record, "statictexture", ReferenceKind::Texture, vehicle.static_texture);
+		texture(record, "statictexture", hud::kVehicleHudInterfaceRole, vehicle.static_texture);
 	}
 	def::def_free_hudpos(&file);
 	return true;
