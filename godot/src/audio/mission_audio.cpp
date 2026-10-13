@@ -1253,19 +1253,12 @@ void MissionAudio::_release_retired_candidate_ids() {
 	retired_candidate_ids_ = still_retired;
 }
 
-// The player's pitch: the emitter's 16.16 pitch word alone (the native mix row's
-// pitch_q16), 0 read as 0x10000, the channel's play factor; the layer's member 0
-// is read for its wave, volume and clamp, never its pitch (D-SND-56) [orig:
-// SoundEmitter_UpdateAndMixTop8 @ 0x528943..0x528949, into the channel's +4
-// through the AudioChannel_OpenSlotChecked call @ 0x528ae3 and the
-// AudioChannel_SetAndPlay call @ 0x528a5c; member 0 @ 0x528649]. The word goes as
-// the mixer reads it, unsigned and exact, its doppler unported
-// (Sound_Calculate3DAttenuation, called @ 0x52896a; D-SND-8): a word whose step is
-// 0 plays at the mixer's least step through the player's scale
-// (WavLoader::pitch_scale_for).
+// The player's pitch: the channel's play word (the engine's
+// audio::emitter_play_word over the native mix row's pitch_q16, which carries the
+// witness), as a scale; a word whose step is 0 plays at the mixer's least step
+// through the player's scale (WavLoader::pitch_scale_for).
 double MissionAudio::_pitch_scale(int p_pitch_q16) {
-	return opennova::lwf::pitch_from_q16(p_pitch_q16 == 0 ? opennova::lwf::kPitchUnityQ16
-			: static_cast<uint32_t>(p_pitch_q16));
+	return opennova::lwf::pitch_from_q16(opennova::audio::emitter_play_word(p_pitch_q16));
 }
 
 // HHMM (MissionEnvironment.time_of_day) -> hours, through the engine's

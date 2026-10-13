@@ -110,6 +110,18 @@ struct AmbientCandidate {
     float pos[3] = {0.0f, 0.0f, 0.0f};
 };
 
+// The play word a looping emitter's channel takes: its slot's registration
+// word alone, a word of 0 read as 0x10000 [orig: SoundEmitter_UpdateAndMixTop8
+// @ 0x528943..0x528949], into the channel's +4 word through the
+// AudioChannel_OpenSlotChecked call @ 0x528ae3 and the AudioChannel_SetAndPlay
+// call @ 0x528a5c; the layer member's authored pitch is never a play factor
+// (member 0 is read for its wave, volume and clamp alone, @ 0x528649;
+// D-SND-56). Read unsigned and exact; its doppler is unported
+// (Sound_Calculate3DAttenuation, called @ 0x52896a; D-SND-8).
+inline uint32_t emitter_play_word(int32_t pitch_q16) {
+	return pitch_q16 == 0 ? 0x10000u : static_cast<uint32_t>(pitch_q16);
+}
+
 class AmbientMixer {
 public:
     // Slot capacity of the transient emitter table [orig: 767 x 48-byte slots

@@ -110,6 +110,21 @@ std::vector<EmitterLayer> emitter_layers(const lwf::File &bank, const lwf::Multi
 	return out;
 }
 
+std::vector<AmbientLayerRow> ambient_layer_rows(const lwf::File &bank, const lwf::Multi &set,
+		const std::function<bool(const std::string &wave)> &has_wave) {
+	std::vector<AmbientLayerRow> out;
+	for (const EmitterLayer &layer : emitter_layers(bank, set)) {
+		const lwf::Sndparm &member = bank.sndparms[layer.sndparm];
+		if (member.single_index >= bank.singles.size())
+			continue;
+		const std::string &wave = bank.singles[member.single_index].path;
+		if (wave.empty() || !has_wave || !has_wave(wave))
+			continue;
+		out.push_back(AmbientLayerRow{ layer, wave });
+	}
+	return out;
+}
+
 int32_t pick_layer_member(const lwf::File &bank, const SetLocation &loc,
 		int32_t layer_index, uint32_t playlist_index, SoundSelector &selector) {
 	if (playlist_index >= bank.playlists.size()) {

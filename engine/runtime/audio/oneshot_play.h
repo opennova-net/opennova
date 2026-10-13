@@ -14,6 +14,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <optional>
 #include <unordered_map>
@@ -112,6 +113,19 @@ struct EmitterLayer {
 	uint32_t pitch_q16 = 0x10000u;
 };
 std::vector<EmitterLayer> emitter_layers(const lwf::File &bank, const lwf::Multi &set);
+
+// A set's layers as the looping-emitter mix takes them as candidates: each
+// emitter layer whose member 0 names a wave (its single's path, the bank's own
+// spelling) that `has_wave` says the embedder's files hold; a layer whose wave
+// is not there takes no channel (its mix row reads nothing to play). The
+// game's MissionAudio candidates (SoundBank::describe_ambient) and the
+// editor's Listen read a set through it alike.
+struct AmbientLayerRow {
+	EmitterLayer layer;
+	std::string wave;
+};
+std::vector<AmbientLayerRow> ambient_layer_rows(const lwf::File &bank, const lwf::Multi &set,
+		const std::function<bool(const std::string &wave)> &has_wave);
 
 // Pick the member to play for one layer. The selection STATE MACHINE (mode +
 // per-layer cursor/bag) is the SoundSelector's; the mode comes from the
