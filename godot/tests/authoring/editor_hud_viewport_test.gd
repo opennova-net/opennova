@@ -323,7 +323,7 @@ func test_the_preview_background_draws_behind_the_hud() -> void:
 ## S23 C: the sights and the Tab board. A scoped rifle with a rangefinder and an elevation readout, its sights up
 ## with the aim on a wall 300 metres away: the game's SIGHTS card up with its one row, the scoped view's ring over
 ## it, the scope readouts drawn at hudpos.def's HUDSCOPE places from gametext's templates; the binoculars put them
-## down. The Tab board held up for a team game over stand-in players draws as the game's board.
+## down. The Tab board held up for a team game draws as the game's board (no rows: a preview has no session).
 func test_the_sights_and_the_board_draw() -> void:
 	if _app == null:
 		return
@@ -408,14 +408,14 @@ end
 	if cards.size() == 1:
 		assert_false(bool(cards[0].call("is_card_up")), "no card under the binoculars")
 	assert_true(_item(state, "scope_details").is_empty(), "no readouts under the binoculars")
-	# The Tab board over six stand-in players of a team game.
+	# The Tab board of a team game.
 	assert_true(_seam.done({"kind": "set_viewport", "path": LAYOUT,
 			"viewport": {"kind": "hud", "options": {"view": "normal", "sights": false, "board": true,
-					"game_type": "TDM", "players": 6}}}))
+					"game_type": "TDM"}}}))
 	await _pump_frames(3)
 	state = _viewport()
 	assert_false(_item(state, "scoreboard").is_empty(), "the Tab board drew")
-	assert_eq(int(state.get("body", {}).get("board", {}).get("rows", 0)), 6)
+	assert_eq(int(state.get("body", {}).get("board", {}).get("rows", -1)), 0)
 	assert_true(_seam.done({"kind": "set_viewport", "path": LAYOUT,
 			"viewport": {"kind": "hud", "options": {"board": false}}}))
 	await _pump_frames(3)

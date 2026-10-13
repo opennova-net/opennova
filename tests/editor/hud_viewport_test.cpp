@@ -669,44 +669,41 @@ int test_sights_and_board() {
 	rig.pump();
 	TEST_EXPECT(!viewport->scope_frame() && viewport->scope_why().find("neither scoped nor sighted") != std::string::npos);
 
-	// The board's stand-ins: a team game's players over its two sides, the score falling; a free-for-all's on none.
+	// The board: a team game's two sides, a free-for-all's none; no rows (a preview has no session).
 	HudViewportOptions options;
 	options.game_type = opennova::game_type::kTeamDeathmatch;
-	options.players = 5;
 	const opennova::hud::GameTextLookup none = [](const char *, const char *, const char *fallback) {
 		return std::string(fallback);
 	};
 	opennova::hud::HudScoreboardState board = hud_preview_board(options, none, false, none);
-	TEST_EXPECT(board.game_type == options.game_type && board.team_count == 2 && board.rows.size() == 5 && board.local_team == 1);
-	TEST_EXPECT(board.rows[0].name == "Player 1" && board.rows[0].score1 == 5 && board.rows[0].team == 1 &&
-	            board.rows[1].team == 2 && board.rows[4].score1 == 1 && board.rows[4].team == 1 && board.rows[2].has_entity);
-	TEST_EXPECT(board.title == "!Kill List" && board.players_line == " 5" && board.spectators_line.empty() &&
+	TEST_EXPECT(board.game_type == options.game_type && board.team_count == 2 && board.rows.empty() && board.local_team == 1);
+	TEST_EXPECT(board.title == "!Kill List" && board.players_line == " 0" && board.spectators_line.empty() &&
 	            board.footer == "!PgUp and PgDn to change pages");
 	options.game_type = opennova::game_type::kDeathmatch;
 	board = hud_preview_board(options, none, false, none);
-	TEST_EXPECT(board.team_count == 0 && board.rows[1].team == 0);
+	TEST_EXPECT(board.team_count == 0 && board.rows.empty());
 	// On the wire, and the refusals.
 	editor_test::handle_to_end(rig.session, request::set_viewport(rig.layout,
-	        "{\"kind\":\"hud\",\"options\":{\"board\":true,\"game_type\":\"ctf\",\"players\":12}}"));
+	        "{\"kind\":\"hud\",\"options\":{\"board\":true,\"game_type\":\"ctf\"}}"));
 	TEST_EXPECT(rig.session.outcome().done() && viewport->options().board &&
-	            viewport->options().game_type == opennova::game_type::kCaptureTheFlag && viewport->options().players == 12);
+	            viewport->options().game_type == opennova::game_type::kCaptureTheFlag);
 	state = rig.query("viewport", "{\"path\":\"" + rig.layout + "\",\"op\":\"state\"}");
 	const JsonValue *options_json = state.get("options");
-	TEST_EXPECT(options_json && options_json->get_string("game_type", "") == "CTF" &&
-	            options_json->get_number("players", 0) == 12.0 && options_json->get_bool("board", false));
+	TEST_EXPECT(options_json && options_json->get_string("game_type", "") == "CTF" && !options_json->get("players") &&
+	            options_json->get_bool("board", false));
 	body = state.get("body");
-	TEST_EXPECT(body && body->get("board") && body->get("board")->get_number("rows", 0) == 12.0 &&
+	TEST_EXPECT(body && body->get("board") && body->get("board")->get_number("rows", -1) == 0.0 &&
 	            body->get("board")->get_number("teams", 0) == 2.0);
 	// The model's board, its strings composed headlessly over the project's tables (it has none: the literals).
-	TEST_EXPECT(viewport->board().rows.size() == 12 && viewport->board().title == "!Kill List" &&
-	            viewport->board().players_line == " 12" && viewport->board().game_type == opennova::game_type::kCaptureTheFlag);
-	for (const char *refused : { "{\"game_type\":\"TAG\"}", "{\"players\":129}", "{\"range\":1}", "{\"sights\":1}" }) {
+	TEST_EXPECT(viewport->board().rows.empty() && viewport->board().title == "!Kill List" &&
+	            viewport->board().players_line == " 0" && viewport->board().game_type == opennova::game_type::kCaptureTheFlag);
+	for (const char *refused : { "{\"game_type\":\"TAG\"}", "{\"players\":12}", "{\"range\":1}", "{\"sights\":1}" }) {
 		editor_test::handle_to_end(rig.session, request::set_viewport(rig.layout,
 		        std::string("{\"kind\":\"hud\",\"options\":") + refused + "}"));
 		TEST_EXPECT(!rig.session.outcome().done());
 	}
 	TEST_EXPECT(hud_board_game_types().size() == 12 && std::string(hud_board_game_type_token(0x30020u)) == "COOP");
-	std::printf("sights and board: the scope's frame at the range's wall, refused in words; the board's stand-ins\n");
+	std::printf("sights and board: the scope's frame at the range's wall, refused in words; the board with no rows\n");
 	return 0;
 }
 

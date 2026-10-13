@@ -261,7 +261,7 @@ void HudViewportApplier::apply_board_(const opennova::editor::HudViewport &model
 		board_shown_ = false;
 		return;
 	}
-	// The model's board: its stand-in rows, its strings composed over the project's tables.
+	// The model's board: its header's strings composed over the project's tables (no rows: a preview has no session).
 	hud->set_scoreboard_board(true, int(ticks), gametext_, model.board());
 	board_shown_ = true;
 }

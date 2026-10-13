@@ -137,7 +137,6 @@ JsonValue options_to_json(const HudViewportOptions &options) {
 	out.set("picked", json_string(options.picked));
 	out.set("board", JsonValue::make_bool(options.board));
 	out.set("game_type", json_string(hud_board_game_type_token(options.game_type)));
-	out.set("players", json_number(options.players));
 	out.set("sights", JsonValue::make_bool(options.sights));
 	out.set("range", json_number(options.range));
 	return out;
@@ -154,7 +153,7 @@ bool whole(const JsonValue &value, int least, int most, int &out) {
 bool read_options(const JsonValue &json, HudViewportOptions &held, std::string &error) {
 	if (!json.is_object()) {
 		error = "options is an object {width, height, stance, weapon, clip, reserve, health, view, damage, detail, "
-		        "crosshair, picked, board, game_type, players, sights, range}.";
+		        "crosshair, picked, board, game_type, sights, range}.";
 		return false;
 	}
 	HudViewportOptions options = held;
@@ -232,11 +231,6 @@ bool read_options(const JsonValue &json, HudViewportOptions &held, std::string &
 				        "COOP.";
 				return false;
 			}
-		} else if (key == "players") {
-			if (!whole(value, 0, kHudBoardPlayersMost, options.players)) {
-				error = "options.players is the stand-in players the board lists, 0 to 128.";
-				return false;
-			}
 		} else if (key == "range") {
 			if (!whole(value, kHudSightsRangeLeast, kHudSightsRangeMost, options.range)) {
 				error = "options.range is the metres the sights' aim rests at, 2 to 1000.";
@@ -245,7 +239,7 @@ bool read_options(const JsonValue &json, HudViewportOptions &held, std::string &
 		} else {
 			error = "Unknown options member \"" + key +
 			        "\" (it takes width, height, stance, weapon, clip, reserve, health, view, damage, detail, "
-			        "crosshair, picked, board, game_type, players, sights, range).";
+			        "crosshair, picked, board, game_type, sights, range).";
 			return false;
 		}
 	}
@@ -298,7 +292,7 @@ bool HudViewportOptions::operator==(const HudViewportOptions &other) const {
 	return width == other.width && height == other.height && stance == other.stance && weapon == other.weapon &&
 	       clip == other.clip && reserve == other.reserve && health == other.health && view == other.view &&
 	       damage == other.damage && detail == other.detail && crosshair == other.crosshair && picked == other.picked &&
-	       board == other.board && game_type == other.game_type && players == other.players && sights == other.sights &&
+	       board == other.board && game_type == other.game_type && sights == other.sights &&
 	       range == other.range;
 }
 
@@ -329,19 +323,8 @@ opennova::hud::HudScoreboardState hud_preview_board(const HudViewportOptions &op
 	board.game_type = options.game_type;
 	board.team_count = opennova::game_type::active_team_count(options.game_type, 2);
 	board.local_team = 1;
-	for (int i = 0; i < options.players; ++i) {
-		opennova::hud::ScoreboardEntry row;
-		row.slot_id = uint8_t(i + 1);
-		row.score1 = int16_t(options.players - i);
-		row.team = board.team_count > 0 ? uint8_t(i % board.team_count + 1) : uint8_t(0);
-		row.has_entity = true;
-		row.name = "Player " + std::to_string(i + 1);
-		row.quality = uint8_t(i % 3 + 1);
-		row.player_class = uint8_t(5 + i % 5);
-		board.rows.push_back(std::move(row));
-	}
 	const opennova::hud::ScoreboardHeaderStrings strings = opennova::hud::scoreboard_header_strings(
-			gametext, gametext_loaded, keyhelp, board.game_type, options.players, 0);
+			gametext, gametext_loaded, keyhelp, board.game_type, 0, 0);
 	board.title = strings.title;
 	board.game_type_label = strings.game_type_label;
 	board.players_line = strings.players_line;
@@ -928,7 +911,7 @@ io::JsonValue HudViewport::body_json(const ViewportInput &) const {
 	JsonValue board = JsonValue::make_object();
 	board.set("shown", JsonValue::make_bool(options_.board));
 	board.set("game_type", json_string(hud_board_game_type_token(options_.game_type)));
-	board.set("rows", json_number(options_.board ? options_.players : 0));
+	board.set("rows", json_number(options_.board ? double(board_.rows.size()) : 0.0));
 	board.set("teams", json_number(opennova::game_type::active_team_count(options_.game_type, 2)));
 	out.set("board", std::move(board));
 	JsonValue sights = JsonValue::make_object();

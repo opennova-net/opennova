@@ -41,7 +41,7 @@ class Control;
 // applies the player's state the options choose, as the game's presenter feeds it from the world (the weapon's HUD
 // slice and silhouette, the clip and the reserve, the stance and the health on the preview clock's ticks, the
 // view; the sights' frame the model's run left through the overlay's scope readouts, the card and the mask; the
-// Tab board the model composes, its stand-in rows and its strings over the project's tables, through the
+// Tab board the model composes, its strings over the project's tables (no rows), through the
 // overlay's board entry), and reports the files it
 // read and where each element of the HUD's walk drew (ViewportDeviceReport::rects, one per HudElement,
 // in the screen's pixels: runtime/hud/hud_elements.h). It reads none of the process-wide render state a

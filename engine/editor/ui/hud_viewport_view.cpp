@@ -227,7 +227,7 @@ void HudViewportView::draw_ready(Workspace &workspace, const ViewportModel &view
 		row.next(ui_kit::checkbox_width("Player list"));
 		bool board = options.board;
 		if (ImGui::Checkbox("Player list", &board)) options.board = board;
-		ui_kit::tooltip("The Tab board held up, drawn as the game draws it over stand-in players.");
+		ui_kit::tooltip("The Tab board held up, drawn as the game draws it (its rows a session's players: none here).");
 		if (options.board) {
 			const std::vector<uint32_t> &types = hud_board_game_types();
 			int current = 0;
@@ -240,12 +240,6 @@ void HudViewportView::draw_ready(Workspace &workspace, const ViewportModel &view
 			           "The session's game type the board is drawn for: its header's rung and team scores, and "
 			           "its columns (a team game's by side)."))
 				options.game_type = types[size_t(chosen)];
-			row.next(ui_kit::field_width(digits, "Players"));
-			ImGui::SetNextItemWidth(digits);
-			int players = options.players;
-			if (ImGui::InputInt("Players", &players, 1, 8))
-				options.players = std::clamp(players, 0, kHudBoardPlayersMost);
-			ui_kit::tooltip("How many stand-in players the board lists (the game's rows come from the server).");
 		}
 	}
 	if (options != model.options()) workspace.request(request::set_viewport(model.path(), hud_options_change(options)));
