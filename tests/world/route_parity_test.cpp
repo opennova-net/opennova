@@ -259,7 +259,7 @@ void test_item_type_index_is_the_first_row_ordinal() {
     const EntityHandle flyable_h = spawn(172);
     const EntityHandle truck_h = spawn(1294);
     const EntityHandle stray_h = spawn(4242);
-    mission::resolve_item_traits(w, items, [](int) -> uint8_t { return 0; });
+    mission::resolve_item_traits(w, items, [](int) -> uint8_t { return 0; }, nullptr);
     CHECK(w.registry.get(null_h)->item_type_index == 0);
     CHECK(w.registry.get(flyable_h)->item_type_index == 1); // not the later duplicate
     CHECK(w.registry.get(truck_h)->item_type_index == 2);

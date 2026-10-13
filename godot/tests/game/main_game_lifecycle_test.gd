@@ -511,6 +511,55 @@ func test_join_loading_stays_raised_until_authoritative_admission() -> void:
 			"the renderer attempted every streamed row even when this minimal fixture lacks its .3di")
 
 
+# A spectator draws no S2C 0x5A, so the host's 0x0F alone completes its admission,
+# as it ends retail's mission-start wait for every role (D-NET-678)
+# [orig: NapiNPClientMsg_0x00F @0x42E2CD; Game_StartMission @0x52628D].
+func test_spectator_join_is_admitted_at_the_world_state_load() -> void:
+	_shell = await _make_shell()
+	if _shell == null:
+		return
+	var world = _shell.get_node("World")
+	var mission := MissionData.new()
+	assert_eq(mission.open_file(ProjectSettings.globalize_path(
+			FIXTURE_DIR.path_join("mnml.bms"))), OK)
+	var host := Simulation.new()
+	var host_options := HostSessionOptions.new()
+	host_options.server_name = "Spectator Admission Host"
+	host_options.mission_name = "Minimal"
+	host_options.mission_file = "wire_only_spectator.bms"
+	host_options.game_type = 0x30020
+	host_options.max_players = 4
+	host_options.spectator_slots = -1
+	host_options.spectator_password = "watch"
+	host_options.expansion = ""
+	host.configure_host_session(host_options)
+	assert_true(host.enable_host_listen(0))
+	host.set_terrain_til_data(TilFixture.bytes_for_cell(4))
+	assert_true(host.load_from_mission_data(mission))
+
+	var target := JoinTarget.new()
+	target.host_ip = "127.0.0.1"
+	target.port = host.get_host_listen_port()
+	target.join_role = JoinTarget.ROLE_SPECTATOR
+	target.role_explicit = true
+	target.spectator_password = "watch"
+	_shell.join_lan_server(target)
+
+	var admitted := false
+	for _frame in range(1200):
+		host.step()
+		await get_tree().process_frame
+		var join_sim: Simulation = world.get_sim()
+		if join_sim != null and join_sim.is_joined_in_match() and not _shell.is_world_loading():
+			admitted = true
+			break
+
+	assert_true(admitted, "the spectator's join edge releases the loading screen")
+	assert_true(world.visible, "the admitted spectator's world is revealed")
+	assert_true(world.get_sim() != null and world.get_sim().is_local_spectator(),
+			"the admitted joiner is the host's spectator")
+
+
 func test_join_rejects_a_truncated_terrain_stream_before_reveal() -> void:
 	_shell = await _make_shell()
 	if _shell == null:

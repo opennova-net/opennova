@@ -45,6 +45,7 @@
 #include <net/npwire/session_ping.h>
 #include <net/npwire/visible_players.h>
 #include <net/npwire/emote_wire.h>
+#include <net/novaworld/lobby_vars.h>
 
 #include <runtime/world/entity.h>
 #include <runtime/world/player_spawn.h>
@@ -1135,6 +1136,134 @@ bool check_server_commands() {
 	return expect(!out.handled, "ReloadPlayer is not modeled");
 }
 
+// The ByIpAndPort target: the token split at its FIRST ':', the host through
+// inet_addr with DNS off (Windows' answers, measured: parts, radixes and the
+// 32-bit wrap; all-ones in any spelling but
+// "255.255.255.255", and any text inet_addr does not read, resolve to 0), the
+// port the napi literal (else 0), compared as dwords with each slot
+// connection's UDP source, the listen host's own loopback 0.0.0.0:0 included.
+// [orig: Network_ParseHostAndPort @0x62E200 (strstr @0x62E297, the literal
+//  @0x62E2B1, else 0 @0x62E2BD); Napi_ResolveAddress @0x62DF90 with DNS off
+//  (@0x4D245B); Server_FindPlayerSlotByNetKeys @0x5008B0 (+0x30 / +0x34
+//  @0x5008E7..0x5008EF); the loopback's 0:0 (NapiNPProtocol_HandleClientJoin
+//  @0x62BF1C..0x62BF2B)]
+bool check_server_command_ip_and_port_target() {
+	struct AddrCase {
+		const char *text;
+		uint32_t address;
+	};
+	const auto quad = [](uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
+		return peer_addr_from_octets({a, b, c, d}, 0).ip;
+	};
+	const AddrCase addresses[] = {
+			{"1.2.3.4", quad(1, 2, 3, 4)},
+			{"1.2.3.4 tail", quad(1, 2, 3, 4)},
+			{"012.0x10.0X1f.0", quad(10, 16, 31, 0)},
+			{"1.16777215", quad(1, 255, 255, 255)},
+			{"1.2.65535", quad(1, 2, 255, 255)},
+			{"167772161", quad(10, 0, 0, 1)},
+			{"0", 0u},
+			{"4294967295", 0xFFFFFFFFu},
+			{"1.16777216", 0xFFFFFFFFu},
+			{"256.1.1.1", 0xFFFFFFFFu},
+			{"1.2.3.4.5", 0xFFFFFFFFu},
+			{"1.2.3.4x", 0xFFFFFFFFu},
+			{"08.1.1.1", 0xFFFFFFFFu},
+			{"0x", 0xFFFFFFFFu},
+			{"0x.1", 0xFFFFFFFFu},
+			{"10.0x.0.1", 0xFFFFFFFFu},
+			{".1", 0xFFFFFFFFu},
+			{"", 0xFFFFFFFFu},
+			{" ", 0u},
+			{"  ", 0xFFFFFFFFu},
+			{" 1.2.3.4", 0xFFFFFFFFu},
+			{"1 2", quad(0, 0, 0, 1)},
+			{"4294967296", 0xFFFFFFFFu},
+			{"6966210500", quad(159, 55, 239, 196)},
+			{"30000000000", quad(252, 35, 172, 0)},
+			{"300000000000", 0xFFFFFFFFu},
+			{"0x123456789", quad(35, 69, 103, 137)},
+			{"047777777777", quad(63, 255, 255, 255)},
+			{"1.0400", quad(1, 0, 1, 0)},
+	};
+	for (const AddrCase &c : addresses) {
+		if (!expect(platform_inet_addr(c.text) == c.address, c.text)) return false;
+	}
+	if (!expect(resolve_address_without_dns("255.255.255.255") == 0xFFFFFFFFu &&
+	                    resolve_address_without_dns("0xffffffff") == 0u &&
+	                    resolve_address_without_dns("nw.example.com") == 0u &&
+	                    resolve_address_without_dns("10.0.0.1") == quad(10, 0, 0, 1),
+	            "the DNS-off resolve keeps only the dotted all-ones and reads the rest as 0"))
+		return false;
+
+	HostFixture f(2, 1);
+	f.conn(0).peer = peer_addr_from_octets({10, 0, 0, 1}, 32000);
+	f.conn(1).peer = peer_addr_from_octets({10, 0, 0, 2}, 2302);
+	// The slot a CmdEchoPlayerByIpAndPort reaches: 0 / 1, or -1 for none.
+	const auto reached = [&f](const char *token) {
+		for (auto &t : f.transports) (void)drain(t);
+		const inmatch::ServerCommandOutcome out = inmatch::Server_ExecuteServerCommand(
+				f.ctx, &f.world, "CmdEchoPlayer", "ByIpAndPort", {token, "x"});
+		int hit = -1;
+		for (size_t i = 0; i < f.transports.size(); ++i)
+			if (!drain(f.transports[i]).empty()) hit = static_cast<int>(i);
+		return out.handled ? hit : -1;
+	};
+	struct TargetCase {
+		const char *token;
+		int slot;
+	};
+	const TargetCase targets[] = {
+			{"10.0.0.1:32000", 0},
+			{"10.0.0.1:$7D00", 0},
+			{"10.0.0.1:0x7D00", 0},
+			{"10.0.0.1:076400", 0},
+			{"10.0.0.1:32000d", 0},
+			{"167772161:32000", 0},
+			{"012.0.0.2:2302", 1},
+			{"0xa.0.0.2:2302", 1},
+			{"10.2:2302", 1},
+			{"10.0.0.2:2302:9", 1},
+			{"10.0.0.1:0x17D00", -1},
+			{"10.0.0.1", -1},
+			{"10.0.0.256:32000", -1},
+			{"10.0.0.2:2303", -1},
+	};
+	for (const TargetCase &c : targets) {
+		if (!expect(reached(c.token) == c.slot, c.token)) return false;
+	}
+
+	// The listen host's own slot is the type-2 loopback at 0.0.0.0:0.
+	HostFixture g(2, 1);
+	g.conn(0).type = inmatch::NapiNPConnection::kTypeClientSide;
+	g.conn(0).link.mode = ns::TransportMode::Loopback;
+	g.conn(1).peer = peer_addr_from_octets({10, 0, 0, 2}, 2302);
+	struct LocalCase {
+		const char *token;
+		bool stops;
+	};
+	const LocalCase locals[] = {
+			{"0.0.0.0:0", true},
+			{"0", true},
+			{"nohost", true},
+			{"0xffffffff", true},
+			{"255.255.255.255", false},
+			{"0.0.0.0:1", false},
+	};
+	for (const LocalCase &c : locals) {
+		const inmatch::ServerCommandOutcome out = inmatch::Server_ExecuteServerCommand(
+				g.ctx, &g.world, "PuntPlayer", "ByIpAndPort", {c.token});
+		if (!expect(out.stop_hosting == c.stops && out.handled == c.stops &&
+		                    !g.conn(1).host_disconnect_sent,
+		            c.token))
+			return false;
+	}
+	const inmatch::ServerCommandOutcome remote = inmatch::Server_ExecuteServerCommand(
+			g.ctx, &g.world, "PuntPlayer", "ByIpAndPort", {"10.0.0.2:2302"});
+	return expect(remote.handled && !remote.stop_hosting && g.conn(1).host_disconnect_sent,
+	              "PuntPlayerByIpAndPort beside the loopback still punts the remote");
+}
+
 // The ServerCommand gates are per verb, as retail's arms test them: every verb but SetMPReset
 // needs the authority with its hosted session up; the player-targeted verbs and ChangeTeam /
 // SwapTeam also need the player table (a World here); a verb that reads an argument it cannot
@@ -1827,6 +1956,7 @@ int main() {
 	ok = check_session_ping_codec() && ok;
 	ok = check_server_commands() && ok;
 	ok = check_server_command_gates() && ok;
+	ok = check_server_command_ip_and_port_target() && ok;
 	ok = check_change_team() && ok;
 	ok = check_player_enter_hook() && ok;
 	ok = check_visible_players_snapshot() && ok;

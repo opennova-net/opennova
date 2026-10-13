@@ -16,6 +16,7 @@
 #include <runtime/menu/command_map_screen.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/replication/client_roster_tags.h>
+#include <runtime/replication/client_world_materializer.h> // replica_row_entity
 #include <runtime/replication/entity_wire_bridge.h> // entity_class_of
 #include <runtime/world/collision.h>
 #include <runtime/world/radar_contacts.h> // radar_hud_frame
@@ -1034,8 +1035,8 @@ void EntityLightingFeed::collect(const RoleView &view, const int32_t sun_step_q1
 	// address their placed node by BMS id; only rows without authored identity
 	// reach the wire walk and therefore need a wire-handle lighting update.
 	// On a joiner, pool-0 H must NEVER be cast to a local EntityHandle (H=0 and
-	// L=0 can coexist); streamed pool-1 twins are allowed only after the type
-	// check below. Host/SP rows use their authoritative exact-handle entity.
+	// L=0 can coexist); a streamed twin is only the replica rule's row of the
+	// row's type below. Host/SP rows use their authoritative exact-handle entity.
 	// Cadence: like the registry walk above, the casts run per display frame.
 	// Retail casts inside the sector render walk for every drawn entity every
 	// frame; only the candidate SLICE the walker iterates refreshes on the
@@ -1102,13 +1103,14 @@ void EntityLightingFeed::collect(const RoleView &view, const int32_t sun_step_q1
 			// state and emit the restoration instead of assuming the default.
 			if (es.state_flags_known && (es.state_flags & 0x01u) != 0) continue;
 
+			// The twin is the decoded row's own native row by the replica rule,
+			// never a later same-type occupant of the handle (D-NET-676)
+			// [orig: NapiNPClientMsg_EntityDeath @0x42EBC6, the slot address].
 			const world::EntityHandle h{ handle };
-			const world::Entity *joiner_twin = nullptr;
-			if (h.pool() != 0) {
-				const world::Entity *candidate = w.registry.get(h);
-				if (candidate != nullptr && static_cast<uint16_t>(candidate->item_id) == es.type_id)
-					joiner_twin = candidate;
-			}
+			const world::Entity *joiner_twin = h.pool() != 0
+					? replication::replica_row_entity(view.materializer, w, h, es.type_id,
+							kernel.wire_header_world)
+					: nullptr;
 			// The wire walk defers authored rows to their placed node (or static
 			// batch). Do not repeat the same native ray query and cache an update
 			// for a wire node that deliberately does not exist.

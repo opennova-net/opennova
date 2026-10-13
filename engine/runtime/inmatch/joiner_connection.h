@@ -46,7 +46,8 @@
 //   <- S2C 0x0C organic-spawn (0x83)  : owner-ID match self and retain wire handle H
 //   <- S2C 0x1A                       : send the 0x2F/0x2F/0x0B loadout/status bundle (the
 //                                       binding's kit via set_loadout_kit, else the capture default)
-//   <- initial S2C 0x5A grant pair    : open gameplay once H is known; if zones, keep deploy UI pending
+//   <- initial S2C 0x5A grants, 0x0F  : open gameplay once H is known; the 0x0F completes admission
+//                                      for any role (D-NET-678); if zones, keep deploy UI pending
 //                                      (headless callers immediately send C2S 0x0E {FFFF} and re-arm hold)
 //   <- ACK-qualified post-pick 0x5A   : reopen the 0x0E-armed gameplay hold; complete deploy UI
 //   frame_c2s_uplink(H, ...)          : per-frame C2S 0x0C player uplink
@@ -600,10 +601,11 @@ public:
 	}
 	// The player-paced half alone: the pick is owed and not yet sent.
 	bool awaiting_deploy_pick() const { return post_auth_stage_ == PostAuthStage::AwaitDeployPick; }
-	// Monotonic initial-admission boundary: the host's deployment policy and
-	// BOTH profile-side 0x5A grants have been consumed. This is deliberately
-	// independent from Phase::InMatch (the first grant opens gameplay early)
-	// and from deployment_pick_pending() (the shell routes that UI separately).
+	// Monotonic initial-admission boundary: the host's S2C 0x0F has been consumed
+	// in the deploy wait, for any role and with no loadout grant owed, as retail's
+	// mission-start wait ends (D-NET-678). This is deliberately independent from
+	// Phase::InMatch (the first grant opens gameplay early) and from
+	// deployment_pick_pending() (the shell routes that UI separately).
 	// Redeploy and terminal session loss do not erase the historical boundary.
 	bool initial_admission_complete() const {
 		return initial_admission_complete_;
@@ -958,9 +960,7 @@ private:
 	bool preload_ready_ = false; // terminal pre-world S2C 0x11 received and ACK boundary reached
 	bool sync_tail_seen_ = false; // the host emits 0x11 exactly once; latch an early arrival
 	bool player_list_seen_ = false; // valid S2C 0x16 may arrive before the 0x64 transfer completes
-	bool deployment_policy_seen_ = false; // a valid S2C 0x0F supplied gameFlags (completes admission)
-	uint8_t initial_loadout_grant_count_ = 0; // both profile-side 0x5A grants precede the pick
-	bool initial_admission_complete_ = false;
+	bool initial_admission_complete_ = false; // a S2C 0x0F seen in the deploy wait
 	bool deployment_pick_sent_ = false;
 	uint32_t deployment_pick_sequence_ = 0; // release 0x5A must cumulatively ACK this C2S 0x0E
 	bool deployment_pick_sequence_unbound_ = false; // queued, its packet not yet built

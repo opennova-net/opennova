@@ -1252,8 +1252,9 @@ public:
 	// True once the joiner has name-matched its organic-spawn record and received the
 	// applicable deployment release (self handle H known and gameplay uplink enabled).
 	bool is_joined_in_match() const;
-	// Monotonic initial-admission boundary: policy + both initial loadout grants
-	// have landed. Deploy-pick state is intentionally exposed separately.
+	// Monotonic initial-admission boundary: the host's S2C 0x0F has landed in the
+	// deploy wait, for any role (D-NET-678). Deploy-pick state is intentionally
+	// exposed separately.
 	bool is_join_initial_admission_complete() const;
 	// The per-second joiner trace is deliberately opt-in for release play: the
 	// `net_joiner_diagnostics` debug control (F3 / MCP game_debug) switches it

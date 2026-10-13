@@ -326,7 +326,7 @@ std::vector<std::pair<std::string, std::string>> make_lobby_identity_vars(const 
 }
 
 // [orig: Network_ParseHostAndPort @0x62E200 - strlen > 511 fails @0x62E260; Napi_CopyString
-//  into the 512-byte buffer @0x62E288; strstr(":") @0x62E297, the colon zeroed and
+//  into the 512-byte buffer @0x62E288; Napi_StrStr(":") @0x62E297, the colon zeroed and
 //  NapiScript_ParseLiteralValue on the rest @0x62E2B1, else port 0 @0x62E2BD]
 bool parse_host_and_port(const std::string &in, std::string &host, uint32_t &port) {
 	const std::string text = in.substr(0, in.find('\0'));
@@ -339,6 +339,77 @@ bool parse_host_and_port(const std::string &in, std::string &host, uint32_t &por
 	host = text.substr(0, colon);
 	port = parsed;
 	return true;
+}
+
+// [orig: inet_addr, the ws2_32 import Napi_ResolveAddress calls @0x62DFAD]
+uint32_t platform_inet_addr(const std::string &text) {
+	constexpr uint32_t kInaddrNone = 0xFFFFFFFFu;
+	if (text == " ") return 0; // Winsock's one-space answer, INADDR_ANY
+	const auto at = [&text](std::size_t i) -> unsigned char {
+		return i < text.size() ? static_cast<unsigned char>(text[i]) : '\0';
+	};
+	std::array<uint32_t, 3> parts{};
+	std::size_t count = 0;
+	std::size_t i = 0;
+	uint32_t value = 0;
+	bool digit = false;
+	for (;;) {
+		unsigned char c = at(i);
+		if (c < '0' || c > '9') return kInaddrNone;
+		value = 0;
+		digit = false;
+		uint32_t base = 10;
+		if (c == '0') {
+			c = at(++i);
+			if (c == 'x' || c == 'X') {
+				base = 16;
+				c = at(++i);
+			} else {
+				base = 8;
+				digit = true;
+			}
+		}
+		for (;;) {
+			uint32_t d = 0;
+			if (c >= '0' && c <= '9') {
+				d = c - '0';
+				if (d >= base) return kInaddrNone;
+			} else if (base == 16 && c >= 'a' && c <= 'f') {
+				d = c - 'a' + 10;
+			} else if (base == 16 && c >= 'A' && c <= 'F') {
+				d = c - 'A' + 10;
+			} else {
+				break;
+			}
+			// A 32-bit accumulator that fails only on a step that makes it smaller.
+			const uint32_t next = value * base + d;
+			if (next < value) return kInaddrNone;
+			value = next;
+			digit = true;
+			c = at(++i);
+		}
+		if (base == 16 && !digit) return kInaddrNone; // a bare 0x
+		if (c != '.') break;
+		if (count >= parts.size() || value > 0xFFu) return kInaddrNone;
+		parts[count++] = static_cast<uint32_t>(value);
+		++i;
+	}
+	const unsigned char end = at(i);
+	if (end != '\0' && end != ' ' && (end < '\t' || end > '\r')) return kInaddrNone;
+	if (!digit) return kInaddrNone;
+	static constexpr uint32_t kLastPartMax[4] = {0xFFFFFFFFu, 0xFFFFFFu, 0xFFFFu, 0xFFu};
+	if (value > kLastPartMax[count]) return kInaddrNone;
+	uint32_t host_order = value;
+	for (std::size_t p = 0; p < count; ++p) host_order |= parts[p] << (24 - 8 * p);
+	// Network order as the platform stores it: the first octet in the low byte.
+	return ((host_order >> 24) & 0xFFu) | ((host_order >> 8) & 0xFF00u) |
+	       ((host_order << 8) & 0xFF0000u) | ((host_order << 24) & 0xFF000000u);
+}
+
+uint32_t resolve_address_without_dns(const std::string &host) {
+	if (strutil::iequals(host, "255.255.255.255")) return 0xFFFFFFFFu;
+	const uint32_t address = platform_inet_addr(host);
+	return address == 0xFFFFFFFFu ? 0u : address;
 }
 
 } // namespace opennova

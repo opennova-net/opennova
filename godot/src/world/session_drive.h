@@ -103,6 +103,11 @@ public:
 	// spawn, ADR 0015 serve mode); read by the world's playable gate before
 	// stage_runtime_options consumes the request.
 	bool pending_dedicated() const;
+	// True while the load is a session's: a staged host or join request, a
+	// joiner's preload, or a kept session's next map; false for single
+	// player (the session start's class clamp runs only in a session,
+	// engine inmatch::join_character_profile).
+	bool pending_session() const;
 	// Stamp the staged session request onto the runtime's typed options
 	// record, then clear the staging: the typed record
 	// (host_session/join_target), the net-transport/gate fields derived from

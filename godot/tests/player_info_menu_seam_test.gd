@@ -130,7 +130,7 @@ func _player_classes(profile: CharacterJoinProfile) -> Array[int]:
 
 func test_join_auth_profile_uses_retail_avatar_packing_and_defaults() -> void:
 	var db := _load_db()
-	var profile := db.character_join_profile()
+	var profile := db.character_join_profile({}, true)
 
 	# The first combo of each alignment in table order (N00 D00 combo 1; N04 D00
 	# combo 1). The shipped table yields 0x8207 there (its first evil entry is N07).
@@ -160,7 +160,7 @@ func test_join_auth_profile_packs_the_selected_character_for_its_side() -> void:
 			{"player_class": 6},
 		],
 	}
-	var profile := db.character_join_profile(selected)
+	var profile := db.character_join_profile(selected, true)
 	var combo := db.get_combo(0, 0, 1)
 
 	assert_eq(profile.get_character_id(0), 0x0400,
@@ -198,11 +198,27 @@ func test_join_auth_profile_carries_both_persisted_side_characters() -> void:
 			},
 		],
 	}
-	var profile := db.character_join_profile(selected)
+	var profile := db.character_join_profile(selected, true)
 	assert_eq(_character_ids(profile), [0x0400, 0x8407],
 			"assignment to either team receives that side's persisted character")
 	assert_eq(_player_classes(profile), [5, 9],
 			"an untouched loaded profile retains its two retail class bytes")
+
+
+# A saved class byte outside 5..9: a session's start clamps it (a 4 goes up as
+# 5, a 200 as 9), single player's takes no class from the record and the
+# projection keeps the default 8 (engine inmatch::join_character_profile
+# carries the witness).
+func test_join_auth_profile_clamps_a_class_outside_five_to_nine_in_a_session() -> void:
+	var db := _load_db()
+	var selected := {
+		"team": 0,
+		"side_profiles": [{"team": 0, "player_class": 4}, {"team": 1, "player_class": 200}],
+	}
+	assert_eq(_player_classes(db.character_join_profile(selected, true)), [5, 9],
+			"in a session the class bytes clamp into 5..9")
+	assert_eq(_player_classes(db.character_join_profile(selected, false)), [8, 8],
+			"out of a session a byte outside 5..9 keeps the default")
 
 
 func test_owns_menu_detects_player_info() -> void:

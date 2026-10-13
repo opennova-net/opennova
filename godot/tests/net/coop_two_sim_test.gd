@@ -667,8 +667,8 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	assert_true(reached, "joiner reached in-match (handshake -> spawn gate -> 0x0C name-match)")
 	assert_eq(host.get_host_peer_count(), before_peers + 1, "host registered exactly one joiner peer")
 	assert_true(joiner.has_local_player(), "joiner spawned its local player L at the H-learned pose")
-	# Retail's initial join sends no C2S 0x0E: the initial 0x5A grant pair
-	# completes admission and the joiner deploys directly (witnessed on the wire
+	# Retail's initial join sends no C2S 0x0E: the S2C 0x0F completes
+	# admission and the joiner deploys directly (witnessed on the wire
 	# against a live retail co-op host). The 0x0E spawn pick belongs to the DEATH
 	# flow — drive it there through the authority's real death transaction.
 	assert_false(joiner.is_join_deploy_pick_pending(),

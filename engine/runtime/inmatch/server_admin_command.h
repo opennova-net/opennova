@@ -37,8 +37,10 @@ namespace opennova::inmatch {
 // (docs/net/novaworld-net-re.md D-NET-383). Numbers are the CRT atol's, 32-bit
 // saturating on every host, and an index past the slot capacity is no slot
 // (D-NET-387). A targeted verb
-// resolves its slot ByIndex (atol -> roster slot), ByIpAndPort ("a.b.c.d:port"
-// against the connection's UDP source), ByName ("*NN" -> slot NN, else the
+// resolves its slot ByIndex (atol -> roster slot), ByIpAndPort ("host:port"
+// split at the first ':', the host through inet_addr with DNS off and the port
+// the napi literal, against every slot connection's UDP source, the listen
+// host's own loopback 0.0.0.0:0 included; D-NET-467), ByName ("*NN" -> slot NN, else the
 // unique case-insensitive callsign) or ByPCID (the slot's entity type name —
 // every pool-0 player shares one items.def name on this host, so it resolves
 // nothing), and no suffix is a no-op.

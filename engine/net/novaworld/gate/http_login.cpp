@@ -24,7 +24,7 @@ std::string subnet_key(const std::string &host) {
 	if (parse_ipv4_octets(key, octets)) return key;
 	// Any other host is reversed, cut at its second '.' and reversed back, keeping its
 	// last two dot-labels; with no dot or one it is reversed back whole, unchanged.
-	// [orig: Buffer_ReverseBytes @0x61B290 (@0x62E01D); sub_6173B0 @0x6173B0, a plain
+	// [orig: Buffer_ReverseBytes @0x61B290 (@0x62E01D); Napi_StrStr @0x6173B0, a plain
 	//  strstr for "." (@0x62E028, then past the first dot @0x62E060); the cut @0x62E088;
 	//  the reverses back @0x62E04D / @0x62E07E / @0x62E09D]
 	std::reverse(key.begin(), key.end());

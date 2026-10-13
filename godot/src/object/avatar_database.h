@@ -163,17 +163,19 @@ public:
 	// The joiner's profile-to-wire projection (runtime/inmatch/
 	// join_character_profile.h): `selection` is the PLAYER_INFO profile shape
 	// (side_profiles [blue, red] each carrying nationality/division/combo tree
-	// indices and player_class).
-	Ref<CharacterJoinProfile> character_join_profile(const Dictionary &p_selection = Dictionary()) const;
+	// indices and player_class); `in_session` whether the session start that
+	// takes it runs in a session (its class clamp, the engine projection).
+	Ref<CharacterJoinProfile> character_join_profile(const Dictionary &p_selection,
+			bool p_in_session) const;
 	// The same projection over the typed spawn record the world stages
 	// (player/player_spawn_loadout.h): its two per-side selections feed the
 	// engine walk; null = no side present (the per-side defaults).
 	Ref<CharacterJoinProfile> character_join_profile_from_loadout(
-			const Ref<PlayerSpawnLoadout> &p_loadout) const;
+			const Ref<PlayerSpawnLoadout> &p_loadout, bool p_in_session) const;
 	// The same projection with no Avatars.def loaded (engine
 	// inmatch::join_character_profile_without_table).
 	static Ref<CharacterJoinProfile> character_join_profile_without_table(
-			const Ref<PlayerSpawnLoadout> &p_loadout);
+			const Ref<PlayerSpawnLoadout> &p_loadout, bool p_in_session);
 	// Native projection consumed by Simulation's portable character-traits
 	// table. File order is retained and duplicate packed ids are first-wins,
 	// matching resolve_character_id's registry walk.

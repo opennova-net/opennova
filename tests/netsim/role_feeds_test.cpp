@@ -10,6 +10,7 @@
 #include <runtime/inmatch/effect_pose_index.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/role_feeds.h>
+#include <runtime/replication/client_world_materializer.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/world/angle.h>
 
@@ -535,6 +536,63 @@ int main() {
 		feed.collect(view, step, {}, {}, 0, changes);
 		CHECK(changes.size() == 1 && changes[0].bms_id == 41 && !changes[0].lighting.interior &&
 				changes[0].lighting.interior_bms == 0 && changes[0].lighting.light_transfer == 0.0f);
+	}
+
+	// The joiner's wire walk takes a decoded row's native twin by the replica
+	// rule (D-NET-676): a header-only world's owned row lends the row its
+	// contained context, and a same-type newcomer spawned at the handle after
+	// that lifetime lends none (the row runs its own blink walk at its decoded
+	// position). Retail keeps one entity per slot, the wire handle naming the
+	// slot's entity [orig: NapiNPClientMsg_EntityDeath @0x42EBC6, the handle's
+	// slot address].
+	{
+		mission::MissionKernel kernel;
+		world::World &w = kernel.world;
+		w.registry.configure_pool(1, 4);
+		w.registry.configure_pool(2, 4);
+		kernel.wire_header_world = true;
+		world::Entity building;
+		building.kind = world::EntityKind::Building;
+		building.item_type = 5;
+		building.has_item_def = true;
+		building.bms_id = 40;
+		building.spawn_origin = world::spawn_origin_pack(2, 0);
+		const world::EntityHandle house = w.registry.spawn(2, building);
+		const uint32_t hit = (static_cast<uint32_t>(house.slot()) << 20) | (3u << 12);
+		ClientRuntime decoded_runtime("LightReuse");
+		replication::ClientEntityState decoded;
+		decoded.handle = world::EntityHandle::make(1, 0).packed;
+		decoded.type_id = 1296;
+		decoded.spawn_revision = 1;
+		decoded.cls = EntityClass::Vehicle;
+		decoded_runtime.state().upsert(decoded.handle) = decoded;
+		replication::ClientWorldMaterializer materializer;
+		materializer.sync(decoded_runtime.state(), w);
+		const world::EntityHandle h{decoded.handle};
+		world::Entity *mine = w.registry.get(h);
+		CHECK(mine != nullptr && materializer.owned(w, h) == mine);
+		if (mine != nullptr) mine->blink_hits[0] = hit;
+		RoleView jv;
+		jv.kernel = &kernel;
+		jv.runtime = &decoded_runtime;
+		jv.joiner = true;
+		jv.materializer = &materializer;
+		EntityLightingFeed feed;
+		const int32_t step[3] = { 0, 0, 65536 * 200 };
+		std::vector<EntityLightingChange> changes;
+		feed.collect(jv, step, {}, {}, 0, changes);
+		CHECK(changes.size() == 1 && changes[0].wire && changes[0].handle == decoded.handle &&
+				changes[0].lighting.interior && changes[0].lighting.interior_bms == 40);
+		w.registry.despawn(h);
+		world::Entity newcomer;
+		newcomer.kind = world::EntityKind::Item;
+		newcomer.item_id = 1296;
+		newcomer.alive = true;
+		newcomer.blink_hits[0] = hit;
+		CHECK(w.registry.spawn_at(h, newcomer) == h && materializer.owned(w, h) == nullptr);
+		feed.collect(jv, step, {}, {}, 0, changes);
+		CHECK(changes.size() == 1 && changes[0].wire && changes[0].handle == decoded.handle &&
+				!changes[0].lighting.interior && changes[0].lighting.interior_bms == 0);
 	}
 
 	// The present-effect pose index over a joiner's decoded rows: a lookup

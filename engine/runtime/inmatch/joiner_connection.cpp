@@ -224,8 +224,6 @@ std::vector<uint8_t> JoinerConnection::start() {
 	preload_ready_ = false;
 	sync_tail_seen_ = false;
 	player_list_seen_ = false;
-	deployment_policy_seen_ = false;
-	initial_loadout_grant_count_ = 0;
 	initial_admission_complete_ = false;
 	deployment_pick_sent_ = false;
 	deployment_pick_sequence_ = 0;
@@ -947,13 +945,11 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		}
 		if (!m.flags.settings_update && m.full_tag < PROTOCOL_FULL_TAG_HIGH_BASE &&
 		    m.tag == s2c::WORLD_STATE_LOAD && m.payload.size() > 22) {
-			// The S2C 0x0F world-state-load is the deployment-policy marker that
-			// (with both initial 0x5A grants) completes initial admission. Its
-			// game_flags bit0 (payload[22] & 1) raises g_DeployScreenActive.
+			// The S2C 0x0F world-state-load completes initial admission (below).
+			// Its game_flags bit0 (payload[22] & 1) raises g_DeployScreenActive.
 			// Completing admission must preserve the user's later selection:
 			// a spawn-zone host can still require C2S 0x0E to release its hold.
 			// [orig: NapiNPClientMsg_0x00F @0x42e2ed]
-			deployment_policy_seen_ = true;
 			// The 0x0F ends a reload's last wait [orig: Game_StartMission's
 			// 0x0B loop @0x52629B..0x5262E5].
 			reloading_ = false;
@@ -1031,6 +1027,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		post_auth_stage_ = PostAuthStage::AwaitJoinAck;
 	}
 	std::size_t message_index = 0;
+	bool world_state_load_seen = false; // this packet's S2C 0x0F (completes admission below)
 	for (const ProtocolMessage &m : messages) {
 		const uint32_t packet_ack = containing_packet_ack[message_index++];
 		// The ONE settings-flagged record that is not connection control to skip: the
@@ -1522,6 +1519,14 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					c2s::PLAYER_SYNC_REQUEST, {0x00, 0xF7, 0x5C}));
 			periodic_replies.push_back(make_protocol_message(
 					c2s::VISIBLE_PLAYERS_REQUEST, {}));
+			// The handler clears g_ClientDeployHold whatever the role, so the 0x0F
+			// ends the deploy wait as a 0x5A does: a spectator's 0x2F draws no 0x5A,
+			// making this its release; a player's 0x5A came ahead of it (D-NET-678).
+			// [orig: NapiNPClientMsg_0x00F @0x42E391, the zero @0x42E353 / @0x42E35E]
+			out.gameplay_release_applied = true;
+			world_state_load_seen = true;
+			if (post_auth_stage_ == PostAuthStage::AwaitDeployment)
+				release_deployment(/*deployment_complete=*/false);
 		} else if (m.tag == s2c::WAIT_FOR_GAME_START_ACK &&
 		           post_auth_stage_ == PostAuthStage::AwaitWorldStreamEnd) {
 			// The world-stream terminator releases retail's loadout/status submission: the SAME
@@ -1787,11 +1792,8 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		} else if (m.tag == s2c::WEAPON_LOADOUT && valid_weapon_loadout &&
 		           post_auth_stage_ == PostAuthStage::AwaitDeployment) {
 			// Every valid retail 0x5A apply clears g_ClientDeployHold immediately,
-			// independently from the deploy screen becoming pick-ready. Retain
-			// the pair count only for that later UI/pick transition.
+			// independently from the admission the 0x0F completes.
 			// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0]
-			if (initial_loadout_grant_count_ < 2)
-				++initial_loadout_grant_count_;
 			release_deployment(/*deployment_complete=*/false);
 		} else if (m.tag == s2c::WEAPON_LOADOUT && valid_weapon_loadout &&
 		           post_auth_stage_ == PostAuthStage::AwaitDeployRelease) {
@@ -1985,11 +1987,16 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		out.queued_send_after.push_back(reducer_entries);
 		out.queued_send_messages.push_back(std::move(periodic_replies[reply]));
 	}
-	if (admission.admitted && initial_loadout_grant_count_ >= 2 &&
-	    deployment_policy_seen_ &&
+	if (admission.admitted && world_state_load_seen &&
 	    post_auth_stage_ == PostAuthStage::AwaitDeployment) {
 		initial_admission_complete_ = true;
-		// The grant pair completes admission independently of the deploy-map
+		// The 0x0F completes admission, for any role and with no loadout grant
+		// owed, as it ends retail's mission-start wait: the handler sets the
+		// wait's completion flag, which the mission start cleared and its pump
+		// loop then tests; a player's two grants come ahead of it, a spectator's
+		// 0x2F draws none (D-NET-678). [orig: NapiNPClientMsg_0x00F @0x42E2CD;
+		// Game_StartMission @0x5243BE (the clear), @0x52628D / @0x5262DF (the
+		// tests)] Admission completes independently of the deploy-map
 		// overlay: a wave host can spawn without a manual selection. A spawn-zone
 		// host can instead keep its alive player respawn-pending (0x0A flags1 bit1)
 		// until the user selects a spawn. prepare_deployment_pick accepts that
@@ -2098,8 +2105,6 @@ std::vector<uint8_t> JoinerConnection::begin_mission_reload() {
 	preload_ready_ = false;
 	sync_tail_seen_ = false;
 	player_list_seen_ = false;
-	deployment_policy_seen_ = false;
-	initial_loadout_grant_count_ = 0;
 	initial_admission_complete_ = false;
 	deployment_pick_sent_ = false;
 	deployment_pick_sequence_ = 0;

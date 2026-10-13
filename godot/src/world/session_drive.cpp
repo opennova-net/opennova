@@ -87,9 +87,10 @@ Ref<CharacterJoinProfile> SessionDrive::build_join_character_profile(
 	if (db->load_from_resource_root(p_resource_root, "Avatars.def") != OK || !db->is_loaded()) {
 		UtilityFunctions::push_warning(vformat(
 				"SessionDrive: Avatars.def not loaded for LAN join profile (%s)", db->get_last_error()));
-		return AvatarDatabase::character_join_profile_without_table(p_loadout);
+		return AvatarDatabase::character_join_profile_without_table(p_loadout, true);
 	}
-	return db->character_join_profile_from_loadout(p_loadout);
+	// A join's session start runs in a session (the class clamp).
+	return db->character_join_profile_from_loadout(p_loadout, true);
 }
 
 int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
@@ -404,8 +405,8 @@ void SessionDrive::update_joiner_admission_signals() {
 	const String loss_reason = sim->get_session_loss_reason();
 	const bool deploy_pending = sim->is_join_deploy_pick_pending();
 	// The first valid S2C 0x5A opens retail's independent gameplay gate and
-	// can make is_joined_in_match true BEFORE 0x0F supplies the deployment
-	// policy or the second initial grant makes a required DEATH pick ready.
+	// can make is_joined_in_match true BEFORE the 0x0F completes the admission
+	// and makes a required DEATH pick ready (a spectator's comes at the 0x0F).
 	// Only the native initial-admission boundary distinguishes that split
 	// ordering from a complete no-pick join; later redeploys leave the
 	// predicate monotonically true.
@@ -489,6 +490,11 @@ void SessionDrive::cancel_join_preload() {
 	policy_->disarm_preload();
 	join_preload_sim_.unref();
 	join_preload_root_.unref();
+}
+
+bool SessionDrive::pending_session() const {
+	return pending_host_.is_valid() || pending_join_.is_valid() || kept_sim_.is_valid() ||
+			join_preload_sim_.is_valid();
 }
 
 bool SessionDrive::pending_dedicated() const {

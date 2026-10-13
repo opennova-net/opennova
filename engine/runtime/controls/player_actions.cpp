@@ -194,10 +194,12 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 	//  (the index byte @0x49C3BA, the entry @0x49C32C) -> case 55 @0x49B20B]
 	frame.respawn_edge = world::latched_key_edge(
 			admitted("respawn") && source.pressed("respawn"), gate.active, respawn_was_down_);
-	// ToSpecial's keys are read raw (the handler reads g_InputState.keyState);
-	// an edge dispatches only with captured gameplay input and under the
-	// death screen's binding scan, like the other weapon rows, and the latch
-	// follows the keys regardless.
+	// ToSpecial's held state is the binding sampler's, its keys under the
+	// scan's first match (BindingSet::pressed_key); the handler itself reads
+	// the keys raw (g_InputState.keyState), and a release whose press another
+	// row took is D-CTRL-9's. An edge dispatches only with captured gameplay
+	// input and under the death screen's binding scan, like the other weapon
+	// rows, and the latch follows the keys regardless.
 	// [orig: Input_HandleActionBinding_0 case 0xDC @0x4E1161..0x4E1181]
 	frame.to_special_held = source.pressed("ToSpecial");
 	frame.to_special_edge = frame.to_special_held != to_special_was_down_ && captured &&

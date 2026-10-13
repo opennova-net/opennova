@@ -50,13 +50,14 @@ const opennova::inmatch::NapiNPServerCtx *Simulation::host_ctx() const {
 
 // What the role feeds (inmatch/role_feeds.h) read of the running role: the
 // kernel, the role's replica runtime, the authority's session context, the
-// joiner bit and the staged host option word.
+// joiner bit, the joiner's materializer and the staged host option word.
 opennova::inmatch::RoleView Simulation::role_view() const {
 	opennova::inmatch::RoleView view;
 	view.kernel = kernel_.get();
 	view.runtime = runtime_;
 	view.host = host_ctx();
 	view.joiner = is_joiner();
+	view.materializer = joiner_role_ != nullptr ? &joiner_role_->materializer() : nullptr;
 	view.staged_mp_attributes = net_.host_session_config.mp_attributes;
 	return view;
 }

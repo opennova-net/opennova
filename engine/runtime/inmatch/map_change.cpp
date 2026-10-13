@@ -243,9 +243,10 @@ void init_all_player_entities_for_round(HostRole &role) {
 				((game_type & game_type::kObjectiveBit) != 0 ||
 						(game_type & game_type::kTeamBit) == 0))
 			conn->assigned_team = 1;
-		// The slot's new entity [orig: Entity_SpawnFromAnimSlotProperty
-		// @0x516B67 and the slot's stamps @0x516B6C..0x516C20].
-		(void)Server_BuildPlayerInfoAndAdd(ctx, *conn, world);
+		// The slot's new entity, with the slot's class [orig: the class load
+		// @0x516B56, Entity_SpawnFromAnimSlotProperty @0x516B67 and the slot's
+		// stamps @0x516B6C..0x516C20].
+		(void)Server_BuildPlayerInfoAndAdd(ctx, *conn, world, /*round_init=*/true);
 	}
 	// Every kept slot names a new entity: the roster every in-match client
 	// holds is stale.

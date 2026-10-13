@@ -1,7 +1,7 @@
 // The HUD's key-driven toggles (hud/hud_toggles.h), pinned where they used to
 // live in the Godot shell's HUD presenter and panel lanes (ADR 0040 ladder
-// E3): the gated down-edge latch, the huddetail/hudcolor shared-key
-// shadowing (D-CTRL-4), the cycles and their wraps, the view actions' gun bit
+// E3): the gated down-edge latch, the huddetail / hudcolor cycles and their
+// wraps (a shared key's first match is the binding sampler's), the view actions' gun bit
 // and camera preference, the three overlay window toggles with ShowScore's
 // SP-only gate and sibling close, the respawn reset, the death-screen force,
 // the friendly-tags and verbose rows, the help / map legend / briefing
@@ -44,7 +44,10 @@ void test_edge_latch() {
 	CHECK(e.step(true, true, false)); // reset forgets the held key
 }
 
-void test_huddetail_cycle_and_shared_key_shadowing() {
+// The rows' down states arrive resolved: a key both rows carry reaches one of
+// them in the binding sampler (controls::BindingSet::pressed_key, the
+// first-match scan), so the poll fires every row handed in down.
+void test_huddetail_and_hudcolor_cycles() {
 	HudToggleState s;
 	s.hud_detail_level = 2;
 	s.hud_color_index = 5;
@@ -57,31 +60,19 @@ void test_huddetail_cycle_and_shared_key_shadowing() {
 	k.huddetail = true;
 	CHECK(hud_toggles_poll(s, k) == kHudDetailCycled);
 	CHECK(s.hud_detail_level == 0); // 3 wraps to 0
-	// Both rows down on a shared key: huddetail (row 50) consumes the edge and
-	// hudcolor stays dormant; the hudcolor latch follows the shadowed state.
 	k.huddetail = false;
-	hud_toggles_poll(s, k);
-	k.huddetail = true;
-	k.hudcolor = true;
-	k.rows_share_key = true;
-	CHECK(hud_toggles_poll(s, k) == kHudDetailCycled);
-	CHECK(s.hud_color_index == 5);
-	k.huddetail = false;
-	k.hudcolor = false;
 	hud_toggles_poll(s, k);
 	// hudcolor alone (Ctrl+F6) cycles and wraps 5 -> 0.
 	k.hudcolor = true;
 	CHECK(hud_toggles_poll(s, k) == kHudColorCycled);
 	CHECK(s.hud_color_index == 0);
-	// Distinct keys leave both rows live.
-	k.huddetail = false;
+	// Both rows down (two keys) cycle both.
 	k.hudcolor = false;
 	hud_toggles_poll(s, k);
 	k.huddetail = true;
 	k.hudcolor = true;
-	k.rows_share_key = false;
 	CHECK(hud_toggles_poll(s, k) == (kHudDetailCycled | kHudColorCycled));
-	CHECK(s.hud_detail_level == 2 && s.hud_color_index == 1);
+	CHECK(s.hud_detail_level == 1 && s.hud_color_index == 1);
 }
 
 void test_showhud_goals_dotsize_and_view_actions() {
@@ -809,7 +800,7 @@ void test_deploy_keys() {
 
 int main() {
 	test_edge_latch();
-	test_huddetail_cycle_and_shared_key_shadowing();
+	test_huddetail_and_hudcolor_cycles();
 	test_showhud_goals_dotsize_and_view_actions();
 	test_overlay_windows();
 	test_death_screen_and_friendly_tags();

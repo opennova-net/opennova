@@ -206,8 +206,8 @@ std::vector<uint8_t> JoinerConnection::finish_receive_pump() {
 //   - after the mission load, NapiClient_WaitForDisconnect queues the 0x09 and sends only after
 //     MORE than 100 ms, until S2C 0x11 sets dword_A82358;
 //   - NapiClient_WaitForGameStart queues the 0x0A and spins until S2C 0x1A sets dword_A82364;
-//   - Game_StartMission's last loop spins until S2C 0x0F sets dword_A8236C, and only then does
-//     the game loop's Client_ProcessNetworkFrame take over.
+//   - Game_StartMission's last loop spins until S2C 0x0F sets g_ClientWorldStateLoaded, and
+//     only then does the game loop's Client_ProcessNetworkFrame take over.
 // A latched 0x11 that leaves the 0x0A owed means WaitForDisconnect has returned: the 0x0A's
 // loop is WaitForGameStart's. The deploy stages, a death's re-pick included, are in-match.
 // [orig: MultiPlayer_JoinSessionStateMachine @0x56a320 — state 4 queues 0x00 @0x56a53f and
@@ -219,7 +219,7 @@ std::vector<uint8_t> JoinerConnection::finish_receive_pump() {
 //  @0x42cbb5, returns on dword_A82358 @0x42cbe7, set by NapiNPClientMsg_0x011 @0x4226e0),
 //  NapiClient_WaitForGameStart (@0x524e29; pump @0x42cc92, returns on dword_A82364 @0x42ccbf,
 //  set by NapiNPClientMsg_0x01A @0x425ecb), the final loop @0x52628d..0x5262df (send @0x5262da,
-//  exits on dword_A8236C, set by NapiNPClientMsg_0x00F @0x42e2cd)]
+//  exits on g_ClientWorldStateLoaded, set by NapiNPClientMsg_0x00F @0x42e2cd)]
 JoinerConnection::SendPumpLoop JoinerConnection::send_pump_loop() const {
 	// A joiner the host already released into the match runs our in-match frame (its
 	// uplink and input pack ride that frame's gate), whatever admission stage remains: an

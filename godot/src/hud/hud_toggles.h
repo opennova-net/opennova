@@ -104,7 +104,7 @@ public:
 	// ToggleServer row, the map-legend gate and the playerlist reroute);
 	// `mouse_scale_negative` is the mousescale fire's sign bit
 	// (ControlsModel.is_token_fire_signed).
-	int poll(int p_rows_down, bool p_rows_share_key, bool p_chorded, bool p_active,
+	int poll(int p_rows_down, bool p_chorded, bool p_active,
 			bool p_in_session, bool p_objective_game, bool p_local_alive = true,
 			bool p_authority = false, bool p_mp_session_peer = false,
 			bool p_mouse_scale_negative = false);

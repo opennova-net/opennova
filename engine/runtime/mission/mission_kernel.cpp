@@ -158,7 +158,7 @@ void MissionKernel::resolve_item_traits(mission::ItemWireClassFn wire_class) {
 
 void MissionKernel::resweep_item_traits() {
 	if (item_wire_class_ && items_table() != nullptr)
-		mission::resolve_item_traits(world, *items_table(), item_wire_class_);
+		mission::resolve_item_traits(world, *items_table(), item_wire_class_, &assets());
 	if (items_table() != nullptr)
 		world.facials.configure(world, asset_index(), *items_table());
 	if (items_table() != nullptr && !world.tables.ammo.entries.empty())
@@ -170,10 +170,10 @@ void MissionKernel::bind_spawned_body(w::EntityHandle handle) {
 	if (items == nullptr || !handle.valid()) return;
 	// The boot's own classifier until the embedder supplied its wire classes.
 	if (item_wire_class_)
-		mission::resolve_item_traits(world, *items, item_wire_class_, handle);
+		mission::resolve_item_traits(world, *items, item_wire_class_, &assets(), handle);
 	else
 		mission::resolve_item_traits(world, *items,
-				[](int32_t) -> uint8_t { return 0; }, handle);
+				[](int32_t) -> uint8_t { return 0; }, &assets(), handle);
 	mission::resolve_ai_weapons(world, *items, handle, &assets());
 	ensure_collision_instance(world, handle);
 	// The host's spawn builds the slices after its model init, so the body's
@@ -360,7 +360,7 @@ bool MissionKernel::load_mission_into_world(const KernelBootOptions &options) {
 	// predicates and dynamically spawned helpers must see those traits now.
 	// [orig: Entity_SpawnFromBMSRecord @0x40E9F0 -> Entity_InitFromModel]
 	if (items_table() != nullptr)
-		mission::resolve_item_traits(world, *items_table(), item_wire_class_);
+		mission::resolve_item_traits(world, *items_table(), item_wire_class_, &assets());
 	register_mission_systems();
 	return true;
 }
@@ -754,7 +754,7 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	if (has_item_db) {
 		step("item_traits");
 		mission::resolve_item_traits(world, *items_table(),
-				[](int32_t) -> uint8_t { return 0; });
+				[](int32_t) -> uint8_t { return 0; }, &assets());
 		world.facials.configure(world, asset_index(), *items_table());
 	}
 	if (has_item_db && options.collision) {

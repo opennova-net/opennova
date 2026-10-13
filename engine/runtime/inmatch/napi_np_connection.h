@@ -156,11 +156,12 @@ struct InitialStateBurst {
 	uint16_t phase_loop_counter = 0;    // [playerSlot+89884] per-phase record cursor (reserved; paging)
 	uint8_t  game_state = 0;            // [CNetPlayer_SetGameState] 8 player-added / 9 in-game
 	uint32_t entity_batch_count = 0;    // world-stream batches emitted — the F3 readiness signal
-	bool     loadout_received = false;  // C2S 0x2F (loadout request) received — gates the game-start
-	                                    // bundle (phase 8). Golden: 0x1A (end of world-stream, f316) ->
-	                                    // client sends 0x2F (f317) -> server replies 0x5A + game-start
-	                                    // (f318). Without this gate, 0x1A and game-start land in the
-	                                    // same datagram batch and the client never gets to send 0x2F.
+	bool     loadout_received = false;  // a C2S 0x2F accepted (the 0x5A grant sent). The
+	                                    // game-start bundle (phase 8) waits for the 0x0B, not
+	                                    // this (D-NET-678).
+	                                    // Golden: 0x1A (end of world-stream, f316) -> client sends
+	                                    // 0x2F + 0x0B (f317) -> server replies 0x5A + game-start
+	                                    // (f318).
 	// (the prior loadout_wait_ticks fallback counter was removed — the phase-8 wait has NO
 	//  timeout: the golden host emits nothing in-match until the joiner's 0x2F, D-NET-145)
 	bool     spawned = false;           // set with game_state==9 (the PeerSpawned source)
@@ -338,7 +339,7 @@ struct SessionReplyState {
 	//  the host-kit seed Server_PlayerAdd @0x51D12A]
 	LoadoutSubmit loadout_buffer;
 	bool loadout_buffer_set = false;
-	bool mission_status_received = false; // 0x0B mission-file status report seen
+	bool mission_status_received = false; // an accepted 0x0B (Server_HandlePlayerJoinRequest)
 	// Retail's join completion is three packet boundaries, not one semantic
 	// bag. The C2S 0x02 handler emits admission metadata; a later pending-spawn
 	// pump replays settings + 0x04; the first 0x37 response then carries 0x64 +
@@ -699,8 +700,8 @@ struct NapiNPConnection {
 	// send (the slot's class); nothing else writes them: the map change's
 	// round init re-adds a kept slot with no write (after a side swap the slot
 	// keeps its previous PlayerTeam), and the other class stores (the own
-	// slot's profile init at a mission start, a C2S 0x1B class select) leave
-	// PlayerType. A NovaWorld host's roster mirrors them, each change riding
+	// slot's profile init at the session create, a C2S 0x1B class select)
+	// leave PlayerType. A NovaWorld host's roster mirrors them, each change riding
 	// the next ClientHostUpdate. [orig: dword_B6023C (the PlayerList);
 	// Server_PlayerAdd @0x51CBC0: the values @0x51D35C..0x51D3C3, the
 	// SetOrCreates @0x51D441..0x51D4AA; Server_ChangeEntityTeam @0x518D70: the
@@ -708,10 +709,22 @@ struct NapiNPConnection {
 	// SetOrCreate @0x515AE2; Server_SendWeaponSlotListToPlayer @0x502550: the
 	// SetOrCreate @0x5025DB; Server_InitAllPlayerEntitiesForRound @0x516AA0
 	// (no SetOrCreate among its callees); the class stores PlayerSession_InitFromProfile
-	// @0x50CB7C (called from Game_StartMission @0x524F23) and
+	// @0x50CB7C (called from CNapiGameSession_CreateSession @0x4C9CCE, and from
+	// Game_StartMission @0x524F23 out of a session alone, @0x524D7D..0x524D83) and
 	// NapiNPServerMsg_SetFarClip @0x501D90 (the 0x1B handler) @0x501DE7]
 	int32_t player_list_team = 0;
 	int32_t player_list_type = 0;
+	// The slot's class (+0x15EDC), as its last writer stored it: a remote
+	// add's class after its [5, 9] clamp, a loadout's accepted class. The map
+	// change's round init spawns a kept remote slot's entity with it. The own
+	// slot's add stores none (its local arm): retail's own slot takes its class
+	// from the profile init at the session create and from its own accepts,
+	// and its round init spawn reads it, which ours's own arm does not
+	// (D-NET-695). [orig: Server_PlayerAdd @0x51D09A / the clamp @0x51D10E;
+	// NapiNPServerMsg_HandlePlayerLoadout @0x515AA8;
+	// Server_InitAllPlayerEntitiesForRound: the load @0x516B56, the
+	// Entity_SpawnFromAnimSlotProperty call @0x516B67]
+	int32_t slot_class = 0;
 
 	// The command map's squad bytes on the player slot: its leader's slot
 	// (+100576; 0xFF none) and its fireteam (+100577), seeded 0xFF / 0 by the
@@ -733,6 +746,23 @@ struct NapiNPConnection {
 	uint8_t squad_leader = 0xFF;
 	uint8_t fireteam = 0;
 	uint8_t punt_vote = 0xFF;
+
+	// The slot's damage-class bytes (player+0x15E58, the 128 bytes below the S2C 0x57
+	// countdown dword +0x15ED8, beside the 128 pools at +0x15A58 and buckets at
+	// +0x15C58): each accepted C2S 0x2F entry writes its RAW fourth byte at its
+	// weapon's round ammo index, in request order, and nothing clears them but a
+	// remote add's slot memset, or for the host's own slot, whose add arm skips it,
+	// the slot table's allocation memset. The S2C 0x5A reads them at each weapon's own
+	// AdmDef index, the impact damage at the round's ammo index (1 = x0.9, 2 = x1.1;
+	// the entity's ammo_damage_class is its copy). An index outside the table aliases
+	// the fields around it in retail; ours keeps to the table (D-NET-692). (D-NET-508)
+	// [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515E8B..0x515E92; Server_PlayerAdd
+	//  @0x51CD06, the local arm @0x51CC33..0x51CC60; Server_AllocatePlayerSlotTable
+	//  @0x51C1CB; Server_SendWeaponSlotListToPlayer @0x50286A..0x50288A;
+	//  Weapon_CalcImpactDamage @0x4ECA11..0x4ECA24; the countdown Server_TickUpdate
+	//  @0x51E3BB..0x51E3C8 / @0x51E40D]
+	static constexpr size_t kAmmoDamageClassBytes = 0x15ED8 - 0x15E58;
+	std::array<uint8_t, kAmmoDamageClassBytes> ammo_damage_classes{};
 
 	// Host-side per-weapon-slot fire/ammo state, by slot combo (WeaponSlotState above). Seeded
 	// lazily on the first 0x06 for a combo; refilled by the 0x25 relay. (D-NET-152)
