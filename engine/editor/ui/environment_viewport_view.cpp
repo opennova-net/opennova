@@ -177,8 +177,9 @@ void EnvironmentViewportView::draw_ready(Workspace &workspace, const ViewportMod
 	ImGui::AlignTextToFramePadding();
 	ImGui::TextUnformatted(now.c_str());
 	ui_kit::tooltip(std::string(model.weather().is_night_phase() ? "Night: the moon lights it." : "Day: the sun lights it.") +
-	                " The game's clock, from " + environment_clock_words(double(model.start_fixed24()) / 16777216.0) +
-	                " at " + rate_words(model) + ".");
+	                " The game's clock, from " +
+	                environment_clock_words(double(model.start_fixed24()) / double(env::kTodFixed24OneHour)) + " at " +
+	                rate_words(model) + ".");
 	// The day's length.
 	const float speed_width = ImGui::GetFontSize() * 11.0f;
 	row.next(speed_width);
