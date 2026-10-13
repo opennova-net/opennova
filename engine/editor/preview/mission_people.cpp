@@ -85,6 +85,11 @@ const world::InfantryBodyPose *MissionPeople::pose(NodeId row) const {
 	return found == rows_.end() ? nullptr : &people_[found->second].pose;
 }
 
+const world::InfantryState *MissionPeople::channels(NodeId row) const {
+	const auto found = rows_.find(row);
+	return found == rows_.end() ? nullptr : &people_[found->second].channels;
+}
+
 io::JsonValue mission_body_json(const world::InfantryBodyPose &body, int32_t tick) {
 	using io::JsonValue;
 	using io::json_number;

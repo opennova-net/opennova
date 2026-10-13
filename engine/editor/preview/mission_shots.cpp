@@ -3,28 +3,22 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
-#include <map>
 #include <unordered_map>
 
 #include <base/io/bam.h>
 #include <base/io/fixed.h>
 #include <base/io/strutil.h>
-#include <base/resource_index/resource_index.h>
+#include <editor/preview/mission_world.h>
 #include <formats/def/def.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/mission.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
-#include <runtime/assets/asset_store.h>
 #include <runtime/mission/collision_resolve.h>
-#include <runtime/mission/item_traits.h>
-#include <runtime/mission/promote.h>
 #include <runtime/mission/runtime_boot.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/destruction.h>
-#include <runtime/world/entity_pose.h>
 #include <runtime/world/fire_sound.h>
 #include <runtime/world/impact_scar.h>
-#include <runtime/world/occlusion.h>
 #include <runtime/world/present_drains.h>
 #include <runtime/world/present_passes.h>
 #include <runtime/world/round_sim.h>
@@ -86,15 +80,18 @@ int32_t to_bam(double radians) {
 	return int32_t(uint32_t(int64_t(std::llround(radians / io::kRadiansPerBam))));
 }
 
-// The pool a promoted entity's kind is placed in, as the scene names it.
-bool pool_of(world::EntityKind kind, MissionPool &out) {
-	switch (kind) {
-	case world::EntityKind::Item: out = MissionPool::Item; return true;
-	case world::EntityKind::Building: out = MissionPool::Building; return true;
-	case world::EntityKind::Marker: out = MissionPool::Marker; return true;
-	case world::EntityKind::Organic: out = MissionPool::Organic; return true;
-	}
-	return false;
+// A person's channels as the mission view plays them, on the world's body: the people's whole channel state, and the
+// words the game's organic init writes of its facing kept at the body's heading (the body, target, aim and leg headings;
+// the torso roll, the lean and the pitches zeroed) [orig: Entity_InitOrganicAI @0x4BFCC0], which the posed rig's aim
+// overlay reads against the heading.
+void play_channels(world::AiEntity &body, const world::InfantryState &channels) {
+	world::InfantryState &inf = body.inf;
+	inf = channels;
+	inf.body_heading = inf.target_heading = inf.aim_heading = body.heading;
+	inf.leg_yaw[0] = inf.leg_yaw[1] = body.heading;
+	inf.leg_target[0] = inf.leg_target[1] = body.heading;
+	inf.torso_roll = inf.lean_angle = 0;
+	body.pitch = body.body_pitch = body.roll = 0;
 }
 
 // The point's distance from the segment a to b.
@@ -185,19 +182,9 @@ const char *mission_shot_event_token(MissionShotEvent::Kind kind) {
 }
 
 // The world a run fires in, as the game's load makes it, and what the run keeps of it.
-struct MissionShots::Run {
-	std::shared_ptr<StampedFiles> stamped;
-	ResourceIndex index;
-	std::unique_ptr<assets::AssetStore> store;
-	def::DefItemsFile items{};
-	bool items_read = false;
-	world::World world;
-	world::CollisionWorld collision;
-	world::OcclusionWorld occlusion;
-	world::EntityPoseProvider pose;
-	mission::CollisionResolveState state;
-	const terrain::TerrainHeightField *terrain = nullptr;
-	float water_height = 0.0f;
+// The run's world (MissionWorld: the mission promoted, its traits and collision over the project's files) and what
+// the run keeps of it.
+struct MissionShots::Run : MissionWorld {
 	// Each promoted entity's record (by its packed handle): its row, its item, its hit points as last seen.
 	struct Held {
 		NodeId row = 0;
@@ -208,10 +195,8 @@ struct MissionShots::Run {
 	std::unordered_map<uint16_t, Held> held;
 	// A death's legs not yet due.
 	std::vector<MissionShotEvent> pending;
-
-	~Run() {
-		if (items_read) def::def_free_items(&items);
-	}
+	// Each posed person's handle (packed) and row, whose channels each tick plays.
+	std::vector<std::pair<uint16_t, NodeId>> people;
 };
 
 MissionShots::MissionShots() = default;
@@ -284,22 +269,16 @@ bool MissionShots::build_(Run &run) {
 		why_ = "No mission is shown.";
 		return false;
 	}
-	run.stamped = std::make_shared<StampedFiles>(setup_.files);
-	run.index.mount_source(run.stamped);
-	run.store = std::make_unique<assets::AssetStore>(&run.index);
+	run.files = std::make_shared<MissionFiles>(setup_.files);
 	world::World &world = run.world;
 	// ammo.def and items.def as the mission load reads them: ammo.def through the load's own read
 	// (mission::read_ammo_table) [orig: AmmoDef_LoadAll @ 0x40B0B0; the item list's load].
-	if (mission::read_ammo_table(mission::boot_files_from_index(run.index), "ammo.def", world.tables.ammo) !=
+	if (mission::read_ammo_table(mission::boot_files_from_index(run.files->index), "ammo.def", world.tables.ammo) !=
 	    mission::DefTableRead::Read) {
 		why_ = "The project has no ammo.def the game reads: no round flies.";
-		reads_ = run.stamped->stamps();
+		reads_ = run.files->stamped->stamps();
 		return false;
 	}
-	std::vector<uint8_t> bytes;
-	if (run.stamped->read("items.def", bytes) && !bytes.empty() &&
-	    def::def_parse_items_memory(bytes.data(), bytes.size(), &run.items) == 0)
-		run.items_read = true;
 	// The mission as it stands, the entities near no shot's line loaded empty in their place (their record's
 	// index kept, so every other record lands where the game's load puts it).
 	bms::File mission = *setup_.mission;
@@ -323,61 +302,36 @@ bool MissionShots::build_(Run &run) {
 			if (segment_distance(at, line.data(), line.data() + 3) <= reach) return true;
 		return false;
 	};
-	std::map<std::pair<int, int>, const MissionEntityMark *> marks;
-	for (const MissionEntityMark &mark : setup_.entities) marks[{int(mark.pool), mark.index}] = &mark;
-	const auto thin = [&](std::vector<bms::Entity> &records, MissionPool pool) {
-		for (size_t i = 0; i < records.size(); ++i) {
-			const auto found = marks.find({int(pool), int(i)});
-			if (found == marks.end() || !near_a_shot(*found->second)) records[i].type_id = -1;
-		}
-	};
-	thin(mission.items, MissionPool::Item);
-	thin(mission.buildings, MissionPool::Building);
-	thin(mission.markers, MissionPool::Marker);
-	thin(mission.organics, MissionPool::Organic);
-	// Promoted as the game's load spawns a mission's records [orig: Mission_LoadBMSFile @ 0x40F4E0], their items'
-	// traits [orig: Entity_InitFromItemDef @ 0x49E550] and collision models (BVOL/BPLN, CFAC) attached.
-	mission::PromoteOptions options;
-	if (run.items_read) {
-		const def::DefItemsFile *items = &run.items;
-		options.item_attributes = [items](int32_t type_id) -> uint32_t {
-			const def::DefItemDef *def = mission::find_item_def(*items, int(type_id) + int(mission::kItemIdOffset));
-			return def ? def->attrib : 0u;
-		};
-	}
-	mission::promote_mission(mission, world, options);
-	world.ai.is_authority = true;
-	if (run.items_read) mission::resolve_item_traits(world, run.items, [](int32_t) -> uint8_t { return 0; }, run.store.get());
-	run.terrain = setup_.ground->height_field();
-	run.water_height = setup_.ground->water() ? float(setup_.ground->water_height()) : 0.0f;
-	world.tables.surface_map = setup_.ground->surface_sampler();
-	world.env.water_z = setup_.ground->water() ? int32_t(std::lround(setup_.ground->water_height() * io::kFp16OneD)) : 0;
-	run.pose.set_assets(run.store.get());
-	run.collision.terrain = run.terrain;
-	run.collision.set_pose_provider(&run.pose);
-	world.collision = &run.collision;
-	world.pose_provider = &run.pose;
-	world.ai.collision = &run.collision;
-	if (run.items_read) {
-		const mission::CollisionResolveDeps deps{run.collision, run.occlusion, run.pose, *run.store};
-		entities_collidable_ = mission::resolve_collision_instances(world, run.items, run.state, deps);
-	}
-	run.collision.build_initial_tables(world);
+	mission_world_thin(mission, setup_.entities, near_a_shot);
+	// Each posed person stood where the view draws it, its record lifted by its spawn's lift, before the collision's
+	// tables read where it stands.
+	run.load(run.files, mission, *setup_.ground, [&](world::World &placed) {
+		if (!setup_.person) return;
+		placed.registry.for_each_in_pool(0, [&](const world::Entity &entity) {
+			const MissionEntityMark *mark = run.mark_of(entity, setup_.entities);
+			MissionShotPerson person;
+			if (!mark || !setup_.person(mark->row, person)) return;
+			world::AiEntity *body = placed.ai.for_handle(entity.handle);
+			world::Entity *row = placed.registry.get(entity.handle);
+			if (!body || !row) return;
+			body->pos[2] = io::bam_add(body->pos[2], int32_t(std::lround(person.lift * io::kFp16OneD)));
+			row->position.z = float(double(body->pos[2]) / io::kFp16OneD);
+			run.people.push_back({ entity.handle.packed, mark->row });
+		});
+	});
+	entities_collidable_ = run.collidable;
 	// Each entity loaded of the mission's, by its record (the promote's back-reference: its pool and index).
 	world.registry.for_each([&](const world::Entity &entity) {
-		if (entity.item_id < 0) return;
-		MissionPool pool = MissionPool::Item;
-		if (!pool_of(entity.kind, pool)) return;
-		const auto found = marks.find({int(pool), int(world::spawn_origin_index(entity.spawn_origin))});
-		if (found == marks.end()) return;
+		const MissionEntityMark *mark = run.mark_of(entity, setup_.entities);
+		if (!mark) return;
 		Run::Held held;
-		held.row = found->second->row;
-		held.item = found->second->item;
+		held.row = mark->row;
+		held.item = mark->item;
 		held.health = entity.health;
 		run.held[entity.handle.packed] = held;
 		++entities_loaded_;
 	});
-	reads_ = run.stamped->stamps();
+	reads_ = run.files->stamped->stamps();
 	return true;
 }
 
@@ -413,6 +367,12 @@ void MissionShots::step_() {
 	// @ 0x529310].
 	world.logic_tick = uint32_t(tick_);
 	world.out.fire_sounds.tick();
+	// The people as the view plays them this tick.
+	for (const auto &[handle, row] : run.people) {
+		MissionShotPerson person;
+		world::AiEntity *body = world.ai.for_handle(world::EntityHandle{ handle });
+		if (body && setup_.person && setup_.person(row, person) && person.channels) play_channels(*body, *person.channels);
+	}
 	// The scars' rings as they stand, and the trail's cursor: what this tick writes is told apart.
 	std::vector<uint32_t> cursors;
 	cursors.push_back(world.out.scars.world_ring().cursor);
@@ -474,6 +434,7 @@ void MissionShots::step_() {
 		                                                          : nullptr;
 		if (hit && hit->kind == world::RoundDebugEvent::kOrganic) {
 			event.on = "person";
+			event.section = hit->organic_fallback ? -1 : int(hit->section);
 		} else if (hit && (hit->kind == world::RoundDebugEvent::kItemFace || hit->kind == world::RoundDebugEvent::kItemSphere)) {
 			event.on = "object";
 			event.surface = hit->kind == world::RoundDebugEvent::kItemFace ? int(hit->material) : -1;
@@ -505,7 +466,9 @@ void MissionShots::step_() {
 		              (event.on == "object" ? (event.record.empty() ? std::string("an object") : event.record) +
 		                                              (event.surface >= 0 ? "'s face of material " + std::to_string(event.surface)
 		                                                                  : std::string("'s bound"))
-		               : event.on == "person"  ? (event.record.empty() ? std::string("a person") : event.record)
+		               : event.on == "person"  ? (event.record.empty() ? std::string("a person") : event.record) +
+		                                                (event.section >= 0 ? "'s bone " + std::to_string(event.section)
+		                                                                    : std::string("'s torso stand-in"))
 		               : event.on == "water"   ? std::string("the water")
 		                                       : "the terrain (" + mission_surface_words(event.surface) + ", surface " +
 		                                                std::to_string(event.surface) + ")") +
@@ -578,7 +541,7 @@ void MissionShots::step_() {
 		MissionShotEvent death = damage;
 		death.kind = Kind::Death;
 		const def::DefItemDef *def =
-				run.items_read ? mission::find_item_def(run.items, int(held.item)) : nullptr;
+				run.files->items_read ? mission::find_item_def(run.files->items, int(held.item)) : nullptr;
 		if (!def) {
 			death.words = damage.record + " is destroyed.";
 			events_.push_back(std::move(death));
@@ -589,9 +552,9 @@ void MissionShots::step_() {
 		const std::string husk = world::husk_render_graphic(item.husk, item.huskfinal);
 		const std::string pieces = world::death_piece_graphic(item.husk, item.huskfinal);
 		if (!husk.empty())
-			if (const assets::Model model = run.store->model(husk)) note_damage_husk(*model, models);
+			if (const assets::Model model = run.files->store->model(husk)) note_damage_husk(*model, models);
 		if (!pieces.empty())
-			if (const assets::Model model = run.store->model(pieces)) note_damage_pieces(*model, models);
+			if (const assets::Model model = run.files->store->model(pieces)) note_damage_pieces(*model, models);
 		const DamagePlan plan = damage_plan(item, models);
 		deaths_.push_back(MissionShotDeath{ held.row, held.item, tick, item, plan });
 		death.words = (damage.record.empty() ? item.name : damage.record) + " is destroyed: " + plan.class_words +
@@ -750,6 +713,7 @@ io::JsonValue MissionShots::to_json() const {
 		if (event.kind == MissionShotEvent::Kind::Impact) {
 			row.set("on", json_string(event.on));
 			row.set("surface", json_number(event.surface));
+			if (event.on == "person") row.set("section", json_number(event.section));
 			if (event.surface >= 0) row.set("surface_words", json_string(mission_surface_words(event.surface)));
 			if (event.on == "terrain" || event.on == "water") {
 				row.set("from", json_string(mission_surface_from_token(event.ground.from)));

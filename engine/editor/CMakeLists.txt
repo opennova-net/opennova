@@ -234,6 +234,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_viewport_shots.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_shots.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/definition_canvas.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_world.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/orbit_canvas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/definition_effects.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/definition_viewport.cpp

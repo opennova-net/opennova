@@ -51,6 +51,8 @@ public:
 
 	// A person's body as it plays now (null: no posed person of the row).
 	const world::InfantryBodyPose *pose(NodeId row) const;
+	// Its channels as they play now (null: no posed person of the row), what the Shoot tool's world poses its rig by.
+	const world::InfantryState *channels(NodeId row) const;
 	// The event words of the last kCatchUpTicks ticks played, in tick order.
 	const std::vector<Event> &events() const { return events_; }
 	// The clock's tick the people stand at, the tick they were started at, how many play; a serial that moves with

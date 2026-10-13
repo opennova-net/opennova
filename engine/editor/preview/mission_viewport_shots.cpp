@@ -65,13 +65,14 @@ bool MissionViewport::follow_shots_(const ViewportInput &input, const Document &
 		}
 		return had;
 	}
-	// The world the shots fire in is the mission as it stands: built again where the scene, its ground or the items'
-	// bounds moved, or a file it read moved (never under a drag, whose end builds it).
+	// The world the shots fire in is the mission as it stands: built again where the scene, its ground, the items'
+	// bounds or the people's poses moved, or a file it read moved (never under a drag, whose end builds it).
 	follow_ground_(view);
 	uint64_t key = io::kFnv1a64Offset;
 	key = mix(key, scene_.serial());
 	key = mix(key, terrain_ground_.revision());
 	key = mix(key, bounds_graph_);
+	key = mix(key, poses_.serial());
 	if (!gesture_open_ && (key != shots_key_ || shots_.files_moved())) {
 		MissionShotsSetup setup;
 		setup.files = view.findings.assets;
@@ -85,6 +86,16 @@ bool MissionViewport::follow_shots_(const ViewportInput &input, const Document &
 		setup.bounds = items_.radii();
 		for (const MissionEntityMark &mark : scene_.entities())
 			if (mark.pool != MissionPool::Marker) setup.titles[mark.row] = record_title(view, document, mark.row);
+		// Each person as the view draws it: its spawn's lift, its channels as the people play them now (its spawn's
+		// before they start).
+		setup.person = [this](NodeId row, MissionShotPerson &out) {
+			const MissionPose *pose = poses_.pose(row);
+			if (!pose || pose->status != "posed") return false;
+			out.lift = pose->lift;
+			const world::InfantryState *now = people_.channels(row);
+			out.channels = now ? now : &pose->channels;
+			return true;
+		};
 		shots_.configure(std::move(setup));
 		shots_key_ = key;
 	}
