@@ -388,6 +388,16 @@ protected:
 	// The kind's follow derived a change of its state (viewport_model.h ViewportState: a held
 	// window, a framing).
 	void state_moved() { ++state_serial_; }
+	// The gesture a Rebuild of the picture waits on (S13 V8), 0 none: by default, where its kind's row holds for a
+	// gesture, the one open in its own document. S25 generalises it to a gesture in a document feeding the picture (a
+	// terrain stroke's file): its device takes Updates and region patches meanwhile, never a Rebuild.
+	virtual uint64_t gesture_held_(const ViewportInput &input) const;
+	// A gesture open in its own document or in one whose file its picture read (`reads`, by file name), 0 none: what a
+	// kind whose picture reads a terrain's files answers (the mission's 3D view, the terrain's).
+	uint64_t gesture_feeding_(const ViewportInput &input, const FileStamps *reads) const;
+	// A gesture open in a document whose file `reads` names (by its name or a name it stands in for), 0 none: a stroke
+	// feeding a ground the view's own follow patches in place (S25).
+	static uint64_t gesture_reading_(const SessionView &view, const FileStamps &reads);
 
 	ViewportState state_;
 

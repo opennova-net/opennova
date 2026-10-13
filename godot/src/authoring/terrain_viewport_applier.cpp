@@ -2,8 +2,10 @@
 
 #include "authoring/mission_placed_tiles.h"
 
+#include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/classes/environment.hpp>
 #include <godot_cpp/classes/image.hpp>
+#include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/basis.hpp>
@@ -226,7 +228,10 @@ void TerrainViewportApplier::plan_(Build &build, const TerrainViewport &model) {
 		build.units.push_back(Unit{ Unit::Kind::Environment });
 	}
 	if (build.terrain) {
-		// The .trn parsed as the load begins (its units planned then); a terrain that does not load is a note.
+		// The .trn parsed as the load begins (its units planned then); a terrain that does not load is a note. The maps,
+		// tiles and heights it reads hold every paint's, tile edit's and sculpt's patch the viewport made so far (S25).
+		terrain_patches_.maps_built(model.maps_built_serial());
+		terrain_patches_.built(model.heights_built_serial());
 		layer_missing_[kTerrain].clear();
 		loading_.unref();
 		const String trn = opennova::to_gd(terrain_key.terrain) + ".trn";
@@ -457,6 +462,25 @@ opennova::editor::OperationProgress TerrainViewportApplier::progress() const {
 // --- the state -----------------------------------------------------------------------------------
 
 void TerrainViewportApplier::update(const opennova::editor::ViewportModel &viewport, const opennova::editor::PreviewClock &) {
+	// S25 (the heights): a stroke's regions and a landing's tiles into the terrain built, never building it again; one
+	// it cannot take has the next follow build it again (the patches it took are reported, the rest kept).
+	if (terrain_built_ && !build_ && terrain_data_.is_valid() && !terrain_->is_building() &&
+			!terrain_patches_.apply(terrain_of(viewport).heights_patches(), **terrain_data_, *terrain_)) {
+		UtilityFunctions::push_warning("The terrain view's terrain did not take a sculpt's patch: it builds again.");
+	}
+	// S25 (the maps and the tiles): a paint's regions and the placed tiles into the terrain built, in place, each
+	// file's read taking the stamp it was patched at (so its move does not build the terrain again); one not taken is
+	// reported and the picture made again.
+	if (terrain_built_ && !build_ && terrain_data_.is_valid() && !terrain_->is_building()) {
+		terrain_patches_.apply_maps(terrain_of(viewport).maps_patches(), *terrain_, foliage_data_.is_valid() ? foliage_ : nullptr,
+				[this](const std::string &name, uint64_t stamp) {
+					if (stamped_) stamped_->restamp(name, stamp);
+					for (opennova::FileStamps &files : layer_files_) files.restamp(name, stamp);
+				});
+		// The foliage keeps candidates off the tiles the terrain draws (a new override where it held none).
+		if (foliage_data_.is_valid() && foliage_->get_tile_info() != terrain_->get_tile_info_override())
+			foliage_->set_tile_info(terrain_->get_tile_info_override());
+	}
 	apply_state_(terrain_of(viewport));
 }
 
@@ -518,11 +542,15 @@ void TerrainViewportApplier::clear() {
 void TerrainViewportApplier::apply(const opennova::editor::ViewportModel &viewport, const opennova::editor::PreviewClock &,
 		opennova::editor::ViewportDeviceReport &report) {
 	report.missing.clear();
+	report.heights_taken = terrain_patches_.taken();
+	report.heights_failed = terrain_patches_.take_failure();
 	for (const std::vector<std::string> &missing : layer_missing_)
 		report.missing.insert(report.missing.end(), missing.begin(), missing.end());
 	report.surface = terrain_built_ && terrain_data_.is_valid();
 	if (stamped_) report.files = stamped_->stamps();
 	report.drawn = drawn_json_();
+	report.maps_taken = terrain_patches_.maps_taken();
+	report.maps_refused = terrain_patches_.take_maps_refused();
 	if (build_) return;
 	apply_state_(terrain_of(viewport));
 }
@@ -563,6 +591,8 @@ opennova::io::JsonValue TerrainViewportApplier::drawn_json_() const {
 
 void TerrainViewportApplier::tick(const opennova::editor::ViewportModel &, const opennova::editor::PreviewClock &clock) {
 	clock_ms_ = int64_t(clock.ms());
+	// A paint's colour map, once its strokes pause, into the texture the foliage's tint reads (S25).
+	if (terrain_built_ && terrain_ != nullptr) terrain_patches_.settle_colour(*terrain_, Time::get_singleton()->get_ticks_msec());
 	// No mirror pass unless this frame presents the picture.
 	water_->set_mirror_enabled(false);
 	// The weather's wave on the preview clock (the foliage's sway): the oscillator alone (env::WeatherOscillator,

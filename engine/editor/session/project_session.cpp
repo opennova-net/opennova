@@ -32,6 +32,8 @@
 #include <editor/session/view/session_view.h>
 #include <editor/session/unsaved_guard.h>
 #include <editor/session/workspace_parts.h>
+#include <editor/session/terrain_sculpt.h>
+#include <editor/session/terrain_stroke.h>
 
 namespace opennova::editor {
 
@@ -56,8 +58,9 @@ struct ProjectSession::Impl {
 			guard(core),
 			disk(core),
 			navigation(core),
-			chores(core) {
-		core.bind({&documents, &problems, &play, &imports, &renames, &guard, &disk, &navigation, &chores});
+			chores(core),
+			sculpt(core) {
+		core.bind({&documents, &problems, &play, &imports, &renames, &guard, &disk, &navigation, &chores, &sculpt});
 	}
 
 	EditorPreferences preferences;
@@ -71,6 +74,7 @@ struct ProjectSession::Impl {
 	DiskWatch disk;
 	NavigationController navigation;
 	FileChores chores;
+	TerrainSculpt sculpt;
 	uint64_t handle_entries = 0;
 };
 
@@ -188,6 +192,13 @@ io::JsonValue ProjectSession::handle_json(const io::JsonValue &json, EditorReque
 		// A drag in a viewport names its gesture, which the gesture's next drag passes back (S13 V7).
 		if (request.kind == EditorRequestKind::EditInViewport && request.drag != ViewportDrag())
 			came.set("gesture", io::json_number(double(outcome.gesture)));
+		// S25: a terrain stroke names its gesture and what it came to; an undo or a redo the documents it took a step in.
+		if (request.kind == EditorRequestKind::TerrainStroke) {
+			came.set("gesture", io::json_number(double(outcome.gesture)));
+			came.set("stroke", terrain_stroke_answer_to_json(outcome.stroke));
+		}
+		if (request.kind == EditorRequestKind::Undo || request.kind == EditorRequestKind::Redo)
+			came.set("documents", io::json_string_array(outcome.stepped));
 		answer.set("outcome", std::move(came));
 	}
 	answer.set("status", io::json_string(view().activity.status));
@@ -233,6 +244,8 @@ void ProjectSession::poll() {
 	if (budget.ms > 0) rest.ms = std::max<int64_t>(0, budget.ms - (steady_clock_ms() - started));
 	session.core.step_operation(rest);
 	session.play.poll();
+	// S25: a bake that finished lands in its stroke's step; a stroke that ended starts its file's bake.
+	session.sculpt.poll();
 	if (session.core.operations().done()) session.core.finish_operation();
 	// The sweep a focus-in began over every file (ADR 0046 DI-01), while no operation runs.
 	session.disk.step(rest);

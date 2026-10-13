@@ -37,7 +37,9 @@ SelectMode select_mode(CanvasJoin join);
 // repeat included, -1, 0 or 1 on each axis, and whether one is held down; Esc and F pressed. The
 // keys a camera flies by, held, -1, 0 or 1 on each of its axes (A and D: left and right; Q and E:
 // down and up; S and W: back and forward), Shift held with them (fast; with the arrows, fine);
-// Delete pressed; PgUp and PgDn pressed, their key repeat included (1 up, -1 down); Ctrl+D pressed.
+// Delete pressed; PgUp and PgDn pressed, their key repeat included (1 up, -1 down); Ctrl+D pressed. The terrain
+// brush's (S25, read only while a view's brush is live): [ and ] pressed, their key repeat included (-1 [, 1 ]; the
+// radius, or with Shift the strength), R (a tile turned; Shift the other way), H and V (a tile flipped).
 struct CanvasKeyboard {
 	bool focused = false;
 	int arrow_x = 0;
@@ -52,6 +54,10 @@ struct CanvasKeyboard {
 	bool remove = false; // Delete
 	int page = 0;
 	bool duplicate = false; // Ctrl+D
+	int bracket = 0;
+	bool rotate = false; // R
+	bool flip_h = false; // H
+	bool flip_v = false; // V
 };
 
 // One frame of the pointer and the keyboard over a canvas's picture: the editor's canvas reads it
@@ -157,8 +163,11 @@ public:
 	void sent() { sent_ = true; }
 	// The button let go: true for a click (a press that never became a drag). The gesture ends.
 	bool release(CanvasRequests &out);
-	// The gesture ends: its end raised once, for its document, when a step went out.
+	// The gesture ends: its end raised once, for its document and its token (S25: every document its steps went
+	// to), when a step went out.
 	void end(CanvasRequests &out);
+	// The gesture cancelled (S25: Esc mid-stroke): its end raised with `cancel`, its steps dropped wherever they went.
+	void cancel(CanvasRequests &out);
 
 	// The frame bracket. frame(): the canvas draws this frame, showing `subject` (a gesture begun
 	// on another subject ends: another document, a reload of it, another screen of a menu).

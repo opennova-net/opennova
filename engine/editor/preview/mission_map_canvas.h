@@ -8,6 +8,7 @@
 #include <editor/preview/mission_handle_edit.h>
 #include <editor/preview/mission_link_shapes.h>
 #include <editor/preview/mission_map.h>
+#include <editor/preview/terrain_brush_canvas.h>
 
 namespace opennova::editor {
 
@@ -39,6 +40,7 @@ public:
 	OverlayList shapes(const ViewportContext &context, const CanvasInput &in) const override;
 	CanvasCursor cursor(const ViewportContext &context, const CanvasInput &in) const override;
 	std::string hover_tip(const ViewportContext &context, const CanvasInput &in) const override;
+	bool brush_ground(const ViewportContext &context, const CanvasInput &in, double &x, double &y) const override;
 
 private:
 	// The camera moved to `camera`, raised as a SetViewport once a frame at most.
@@ -52,6 +54,7 @@ private:
 			MissionPressed &area) const;
 
 	CanvasGesture gesture_;
+	TerrainBrushHalf brush_{ViewportKind::Map}; // S25: the terrain brush, while live, before the map's own grammar
 	const MissionMapViewport *viewport_ = nullptr; // the frame's, from follow
 	std::vector<MissionMapMark> marks_; // the frame's, at its picture's size
 	std::vector<int> selected_; // the frame's selected marks

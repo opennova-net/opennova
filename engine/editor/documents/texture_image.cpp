@@ -342,6 +342,33 @@ const TextureFact *TextureImage::fact(const std::string &key) const {
 	return nullptr;
 }
 
+std::shared_ptr<const TextureImage> retexel_texture(const TextureImage &as_read, std::vector<uint8_t> rgba,
+                                                    std::vector<uint8_t> indices, std::vector<uint8_t> luminance) {
+	if (!as_read.decoded || as_read.levels.size() != 1) return nullptr;
+	const TextureLevel &level = as_read.levels.front();
+	if (rgba.size() != size_t(level.width) * size_t(level.height) * 4) return nullptr;
+	auto image = std::make_shared<TextureImage>(as_read);
+	image->levels.front().rgba = std::move(rgba);
+	if (!as_read.indices.empty()) image->indices = std::move(indices);
+	if (!as_read.luminance.empty()) image->luminance = std::move(luminance);
+	// The alpha classed again, its fact where it was.
+	size_t at = image->facts.size();
+	for (size_t i = 0; i < image->facts.size(); ++i)
+		if (image->facts[i].key == "alpha") at = i;
+	if (at < image->facts.size()) image->facts.erase(image->facts.begin() + std::ptrdiff_t(at));
+	const size_t before = image->facts.size();
+	classify_alpha(*image);
+	if (image->facts.size() == before + 1 && at < before) {
+		TextureFact made = std::move(image->facts.back());
+		image->facts.pop_back();
+		image->facts.insert(image->facts.begin() + std::ptrdiff_t(at), std::move(made));
+	}
+	// The file's size is the bytes read: a save writes the texels again (a compressed form's size moves with them).
+	for (TextureFact &fact : image->facts)
+		if (fact.key == "file_size") fact.words += " as read; a save writes it again";
+	return image;
+}
+
 std::shared_ptr<const TextureImage> decode_texture(const std::string &name, const std::vector<uint8_t> &bytes,
                                                    bool first_level_only) {
 	auto image = std::make_shared<TextureImage>();

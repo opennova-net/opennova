@@ -303,6 +303,28 @@ constexpr RequestField kFields[] = {
 			"(game_debug's set_mission_variable)." },
 	{ F::Value, "value", J::Integer,
 			"play_debug's value for variable: a 32-bit whole number, negative too (0 when left out)." },
+	{ F::Stroke, "stroke", J::Object,
+			"terrain_stroke's stroke (S25): {plane: heights, surface, foliage, colour or blend; brush: the members it "
+			"strokes with of its own (tool, radius, strength, falloff, spacing, height, surface, foliage, colour, layer; "
+			"the rest the workspace's terrain_brush); points: [[x, y], ...], 1 to 256, mission metres east and north "
+			"in the order the pointer went; gesture: 0 begins one (the outcome names its token), a token the stroke "
+			"goes on with; end: it ends with this sample (true when left out); cancel: it ends dropping what it did; "
+			"add: no points, the plane's map made where the terrain has none its brush paints (surface, foliage or "
+			"blend: beside an authored .trn in the game's form and named by its field, an edit of the view; beside an "
+			"imported terrain's set as a PNG named by its key, the set imported again)}." },
+	{ F::Gesture, "gesture", J::Integer,
+			"end_edit's gesture (S25): every open gesture carrying this token ends, in whatever document its batches "
+			"changed (a terrain stroke's file, the missions that followed it); 0 when left out (the document at path's)." },
+	{ F::Cancel, "cancel", J::Boolean,
+			"end_edit's cancel (S25: Esc mid-stroke): the gesture ends dropping its step in each document, the documents "
+			"as it found them, no redo left of it." },
+	{ F::TerrainView, "terrain_view", J::String,
+			"edit_record's terrain_view (S25 B2: a batch of the Tiles tools): the mission or terrain whose view made it. "
+			"Its edits go to the tile placement that view's tiles go to (a mission's <mission>.til, made at the first "
+			"edit where the project has none, seeded with what the game draws for the mission now through the project's "
+			"files and then the game install's: the mission's own .til, else the terrain's own; a terrain's own under no "
+			"mission), opened quietly; path, when given, must name that file. The batch is a step of the view's undo, save "
+			"and close scope; an empty batch opens the file alone, and makes nothing where it is not made yet." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");

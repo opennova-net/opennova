@@ -19,6 +19,7 @@
 #include <editor/preview/mission_shots.h>
 #include <editor/preview/viewport_follow.h>
 
+#include "authoring/terrain_patch_applier.h"
 #include "authoring/preview_effects.h"
 #include "authoring/preview_sound_player.h"
 #include "authoring/viewport_applier.h"
@@ -377,6 +378,10 @@ private:
 	Water *water_ = nullptr;
 	Terrain *terrain_ = nullptr;
 	uint64_t terrain_id_ = 0;
+	// S25 (the heights): the sculpt's patches taken into the terrain built (terrain_patch_applier.h).
+	TerrainPatchApplier terrain_patches_;
+	// A file a device patch accounts for holds `stamp` in what the device read (S25): its move builds nothing again.
+	void took_patched_(const std::string &name, uint64_t stamp);
 	// The entities' moving ground shadows (S23 C): the game's SlotShadow, its silhouette captures on the clear's
 	// compositor and its drape over the terrain, run in the frame's slot-shadow leg while the shadows show.
 	SlotShadow *slot_shadow_ = nullptr;

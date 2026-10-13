@@ -74,6 +74,21 @@ inline bool operator!=(const Edit &a, const Edit &b) { return !(a == b); }
 // A gesture token no edit has carried yet in this process.
 uint64_t next_edit_gesture();
 
+// One step of a document's history as the undo across documents reads it (ADR 0046 S25, the shared
+// seams): its serial, a process-wide count every history takes anew for each step it makes or folds a
+// batch into (next_step_serial), so the step made last of several documents' has the largest; and its
+// link, the gesture token its batches carried (0 none), which every document a gesture changed shares
+// (a terrain stroke, the bake that lands in it and the entities that followed it: one Ctrl+Z). Both 0
+// for no step, and for a kind whose history keeps none.
+struct StepMark {
+	uint64_t serial = 0;
+	uint64_t link = 0;
+	bool operator==(const StepMark &other) const { return serial == other.serial && link == other.link; }
+	bool operator!=(const StepMark &other) const { return !(*this == other); }
+};
+// A step serial no history has given yet in this process (never 0).
+uint64_t next_step_serial();
+
 // Inside one batch (Document::apply), what an earlier edit of that batch made: batch_made(i)
 // names what the batch's i-th edit made (an Add's row or record, a Duplicate's copy, a Paste's
 // first), as a later edit's row, record (address.child) or owner (parent); a made row named as

@@ -371,9 +371,9 @@ int test_show_use() {
 		opennova::TilFile placed;
 		opennova::TilOverlayEntry a, b;
 		a.x_fixed = 32 << 16;
-		a.z_fixed = -(48 << 16);
+		a.z_fixed = 64 << 16; // the stored z is the drawn square's north edge (til-re.md)
 		b.x_fixed = 96 << 16;
-		b.z_fixed = -(80 << 16);
+		b.z_fixed = 96 << 16;
 		b.tile_index = 1;
 		placed.entries = {a, b};
 		std::vector<uint8_t> til;

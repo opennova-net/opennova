@@ -104,6 +104,13 @@ void DocumentBase::redo() {
 	if (revision() != before && !redo_revisions_.empty()) redo_revisions_.pop_back();
 }
 
+bool DocumentBase::cancel_gesture(uint64_t gesture) {
+	if (snapshot_ || blocked_ || !gesture) return false;
+	if (!cancel_gesture_step(gesture)) return false;
+	run_gesture_ = 0;
+	return true;
+}
+
 void DocumentBase::name_step(std::string words) {
 	if (snapshot_) return;
 	// A long session's words for steps the history gave up are let go with the oldest.

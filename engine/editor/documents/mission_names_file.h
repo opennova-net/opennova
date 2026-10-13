@@ -29,6 +29,12 @@
 // one id: the original's .mis has a slot per zone id 1..99 alone) and what the file system refuses are listed
 // (mission.names_unwritten), never a failed save of the mission.
 //
+// Each entity's height lock (S25: the field height_lock, bms::Entity::mis_height_lock) is the .mis's height_lock,
+// which the .bms has no room for: read with the names from a matching .mis, each locked item of the file given to the
+// mission's entity of its pool and SSN (one the mission has none of listed, mission.names_refused, and left
+// unlocked), and written by its save. A lock alone makes the .mis due where the project has none, and a lock the file
+// does not hold stays unsaved where the save leaves it, as a name does.
+//
 // Each entity's heights are written as the original editor's save writes them over the terrain's height under it,
 // which the session samples at the save (MissionDocument::set_base_heights), every entity's, a marker's and an
 // itemless one's too: the original editor keeps an item's height and its base relative to the terrain and writes a
@@ -84,6 +90,19 @@ struct MissionNamesFile {
 	std::array<std::string, bms::kGroupRecordCount> kept_groups{};
 	// What it names that the mission does not take, in words ("event 3's name: A name holds 59 bytes at most").
 	std::vector<std::string> refused;
+	// Its items' height locks (S25), each its pool (0 items, 1 buildings, 2 markers, 3 organics, as the reader sorts
+	// an item by its type), its SSN and its lock, in the file's order; and what the mission takes of them (Matched;
+	// else none): each of the mission's entities' lock in the writer's order (items, buildings, markers, organics),
+	// the one the .mis gives the entity of its pool and SSN, else 0 (mission_locks' form). The locks the rows are
+	// measured against, as `kept` is for the names. A lock is the int the file holds, any nonzero one a lock, kept as
+	// read and written back so (the original editor's atol, tested nonzero: mission_mis.h).
+	struct Lock {
+		int pool = 0;
+		int32_t id = 0;
+		int32_t lock = 0;
+	};
+	std::vector<Lock> locks;
+	std::vector<int32_t> kept_locks;
 };
 
 // What the last save made of the .mis where it left it as it is (MissionDocument::names_left).
@@ -96,6 +115,12 @@ struct MissionNamesLeft {
 	// Why the file it left as it is no longer matches the mission (names_file_stale), "" where it does: the next open
 	// of the mission takes none of its names (mission.names_unmatched, with Write it from the mission).
 	std::string stale;
+	// The unlocked entities the last write wrote height locked at their heights: how many, and the first
+	// kLockedNamed's titles ("Item #12"): the terrain's height under them was not known, the mission's terrain not
+	// reading (D-MIS-17; mission.names_locked).
+	static constexpr size_t kLockedNamed = 12;
+	size_t locked_count = 0;
+	std::vector<std::string> locked;
 };
 
 // The file-wide values a mission document holds of its .mis (Edit::field, SetFileValue), each the fingerprint of
@@ -133,6 +158,12 @@ mission::MisNames mission_names(const MissionDocument &document);
 bool same_names(const mission::MisNames &a, const mission::MisNames &b);
 // Whether the mission holds a name the .mis carries: an event's, an area's or a path's, a group's, a variable's.
 bool mission_holds_names(const MissionDocument &document);
+// The height locks the mission's entities hold (S25), each as it stands (0 unlocked, any other a lock), in the
+// writer's order (items, buildings, markers, organics); whether two such lists agree (an entity past one's list
+// unlocked); whether the mission locks any.
+std::vector<int32_t> mission_locks(const MissionDocument &document);
+bool same_locks(const std::vector<int32_t> &a, const std::vector<int32_t> &b);
+bool mission_holds_locks(const MissionDocument &document);
 // The .mis a save writes from the mission (its file as the writer takes it, its names, each entity's base height
 // from `base_heights` where it has one, in the writer's order: mission::write_mis_text): false with the writer's
 // refusal.

@@ -55,6 +55,14 @@ public:
 	// mouse): the Shell hands the frame's to the session (ProjectSession::canvas_mice). No request: it is the
 	// frame's input, as the clock's time is.
 	virtual void canvas_mouse(const ViewportMouse &mouse) { (void)mouse; }
+	// Where the terrain brush meets the ground under the pointer in a view of the document at `path` (S25: mission
+	// metres, x east and y north): a canvas's view notes it as it draws (ViewportView::canvas), the Terrain pane's lock
+	// line reads it, this frame's or the frame before's (a view drawn after the pane). None by default.
+	virtual void note_brush_ground(const std::string &path, double x, double y) { (void)path, (void)x, (void)y; }
+	virtual bool brush_ground(const std::string &path, double &x, double &y) const {
+		(void)path, (void)x, (void)y;
+		return false;
+	}
 };
 
 } // namespace opennova::editor
