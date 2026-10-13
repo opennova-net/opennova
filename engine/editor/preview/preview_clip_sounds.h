@@ -140,12 +140,12 @@ struct ClipEventDue {
 // the Shell was held up), going on from where the clock is.
 inline constexpr int32_t kClipSoundCatchUpTicks = 62;
 // The words read on each tick in (`from`, `to`] of the clock, in order: each tick the body's sound block
-// reads (world::anim_sound_tick), the clip's channel at its own tick there (the clock's tick; a repeated
-// one-shot's taken again from 0 every `period` ticks, 0 none, whose start reads nothing, as a channel
-// started reads nothing before its first step) reading a word (anim::clip_trigger_at). `catch_up` false reads
+// reads (world::anim_sound_tick), the clip's channel at its own tick there (the clock's tick; its start
+// reads nothing, as a channel started reads nothing before its first step) reading a word
+// (anim::clip_trigger_at). `catch_up` false reads
 // every tick of a longer run (a clip's fire schedule, DI-24, which the range runs from tick 0).
-std::vector<ClipEventDue> clip_events_due(const anim::ClipTimeline &clock, const ClipSoundTrack &track, int32_t period,
-                                          int32_t from, int32_t to, bool player_body, bool catch_up = true);
+std::vector<ClipEventDue> clip_events_due(const anim::ClipTimeline &clock, const ClipSoundTrack &track, int32_t from, int32_t to,
+                                          bool player_body, bool catch_up = true);
 
 // One sound an event fired: what the editor's wire and the Shell read of it. `seq` the session's order of
 // every clip sound fired (moves with each), the animation document's path, the clock's tick and the

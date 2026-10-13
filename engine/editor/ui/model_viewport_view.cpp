@@ -479,7 +479,7 @@ void ModelViewportView::Tools::first_person(Workspace &workspace, ui_kit::WrapRo
 }
 
 // The clip the selection plays (ADR 0046 S17): its transport (Run or Pause, Space; the first
-// frame, Home; a frame back and on, the arrows; Repeat for a one-shot; the speed), the frame and the
+// frame, Home; a frame back and on, the arrows; the speed), the frame and the
 // time shown, then a track the mouse scrubs with its frames ruled and its events marked by what
 // they do (a footstep L or R, a shot F, a sound S; hovered, the event in words; clicked, the clock
 // held there and, in the clip's own document, the event selected), and the marks' legend.
@@ -524,19 +524,6 @@ void ModelViewportView::Tools::timeline(Workspace &workspace, const ModelViewpor
 	ImGui::TextUnformatted(where);
 	ui_kit::tooltip("The frame the clip shows (from 0) and the time, as the game's ticks pass (62.5 a "
 	                "second; tick " + std::to_string(shown) + " of " + std::to_string(length) + ").");
-	ModelViewportOptions options = model.options();
-	row.next(ui_kit::checkbox_width("Repeat"));
-	ImGui::BeginDisabled(model.clip_loops());
-	bool repeat = model.clip_loops() || options.repeat;
-	if (ImGui::Checkbox("Repeat", &repeat)) {
-		options.repeat = repeat;
-		set_options(workspace, model, options);
-	}
-	ImGui::EndDisabled();
-	ui_kit::tooltip(model.clip_loops()
-	                        ? "This clip loops (its Loops flag): it plays again from its start as the game plays it."
-	                        : "Play this one-shot again from its start after a moment. The game plays a one-shot "
-	                          "once and holds its last frame.");
 	int rate = 3;
 	for (int i = 0; i < int(std::size(kRates)); ++i)
 		if (std::fabs(clock.rate() - kRates[i]) < 1e-6) rate = i;
@@ -880,7 +867,7 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 						                                              AssetKind::AnimationMap, std::string());
 						if (!strutil::iequals(paired.model, here)) {
 							// The model alone: the map's viewport keeps its own options (its level, its overlays,
-							// Repeat, Bones).
+							// Bones).
 							io::JsonValue chosen = io::JsonValue::make_object();
 							chosen.set("rig_model", io::json_string(here));
 							workspace.request(request::set_viewport(

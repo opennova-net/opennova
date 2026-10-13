@@ -176,12 +176,12 @@ bool read_options(const JsonValue &json, ModelViewportOptions &held, std::string
 				return false;
 			}
 			options.rig_model = value.string;
-		} else if (key == "repeat" || key == "bones") {
+		} else if (key == "bones") {
 			if (!value.is_bool()) {
-				error = "options." + key + " is true or false.";
+				error = "options.bones is true or false.";
 				return false;
 			}
-			(key == "repeat" ? options.repeat : options.bones) = value.boolean;
+			options.bones = value.boolean;
 		} else if (key == "snap") {
 			float snap = 0.0f;
 			if (!io::json_float(value, snap) || snap < 0.0f || snap > 100.0f) {
@@ -199,7 +199,7 @@ bool read_options(const JsonValue &json, ModelViewportOptions &held, std::string
 			if (!read_clip_fire_options(value, options.fire, error)) return false;
 		} else {
 			error = "Unknown model option \"" + key +
-			        "\" (it takes lod, ctrl, overlays, rig_model, repeat, bones, snap, sound, damage, first_person, fire).";
+			        "\" (it takes lod, ctrl, overlays, rig_model, bones, snap, sound, damage, first_person, fire).";
 			return false;
 		}
 	}
@@ -314,7 +314,6 @@ io::JsonValue model_options_to_json(const ModelViewportOptions &held) {
 		          JsonValue::make_bool(model_collision_layer_on(held.overlays, ModelCollisionLayer(l))));
 	options.set("overlays", std::move(marks));
 	options.set("rig_model", json_string(held.rig_model));
-	options.set("repeat", JsonValue::make_bool(held.repeat));
 	options.set("bones", JsonValue::make_bool(held.bones));
 	options.set("snap", json_number(held.snap));
 	options.set("sound", clip_sound_options_to_json(held.sound));
@@ -561,21 +560,8 @@ uint32_t ModelViewport::clip_fps() const {
 	return clip ? clip->clip.fps : 0u;
 }
 
-int32_t ModelViewport::repeat_period_() const {
-	const int32_t length = clip_length_ticks();
-	if (!options_.repeat || length <= 0 || clip_loops()) return 0;
-	// A first-person action's leg past the clip's end (DI-13: a finish the counter holds beyond it) is
-	// reached before the clip plays again.
-	int32_t reach = length;
-	if (const WeaponActionRun *run = first_person_action())
-		for (const WeaponActionLeg &leg : run->legs) reach = std::max(reach, leg.tick + 1);
-	return reach + kClipRepeatHoldTicks;
-}
-
 int32_t ModelViewport::clip_ticks(const PreviewClock &clock) const {
-	const int32_t ticks = clock.ticks();
-	const int32_t period = repeat_period_();
-	return period > 0 ? ticks % period : ticks;
+	return clock.ticks();
 }
 
 double ModelViewport::clip_frame(const PreviewClock &clock) const {
@@ -694,18 +680,16 @@ std::vector<ClipSoundFired> ModelViewport::fire_sounds(const PreviewClock &clock
 	// A run longer than kClipSoundCatchUpTicks since the last (the viewport not the one previewed meanwhile,
 	// the Shell held up) fires nothing either: the sounds go on from here rather than in a burst.
 	if (!clip || from < 0 || now <= from || now - from > kClipSoundCatchUpTicks) return out;
-	// The clip's own tick of each clock tick (clip_ticks): a repeated one-shot's taken again from 0.
-	const int32_t period = repeat_period_();
+	// The clip's own tick of each clock tick (clip_ticks).
 	if (first_person_.active()) {
 		// A weapon's first-person clip (DI-13): nothing reads its events; the action playing the row plays
 		// its sets on the ticks the game's pump plays them, each heard as the clock leaves its tick (the
 		// clip's start among them) [from, now).
 		if (const WeaponActionRun *run = first_person_action())
 			for (int32_t tick = from; tick < now; ++tick) {
-				const int32_t clip_tick = period > 0 ? tick % period : tick;
 				for (const WeaponActionLeg &leg : run->legs) {
-					if (leg.tick != clip_tick) continue;
-					ClipSoundFired fired = plan_leg_(*run, leg, tick, clip_tick, selector, scan);
+					if (leg.tick != tick) continue;
+					ClipSoundFired fired = plan_leg_(*run, leg, tick, tick, selector, scan);
 					fired.seq = ++next_seq;
 					fired_.push_back(fired);
 					out.push_back(std::move(fired));
@@ -715,7 +699,7 @@ std::vector<ClipSoundFired> ModelViewport::fire_sounds(const PreviewClock &clock
 		return out;
 	}
 	for (const ClipEventDue &due :
-			clip_events_due(clip->clip.playback(), clip_track_, period, from, now, sound_binding_.player))
+			clip_events_due(clip->clip.playback(), clip_track_, from, now, sound_binding_.player))
 		for (ClipSoundFired &fired : plan_clip_event(due, options_.sound, sound_binding_, sound_sources_,
 				     camera().eye(), selector)) {
 			fired.seq = ++next_seq;
@@ -1291,7 +1275,7 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 			skeleton_ && !clip_key_.empty() && !first_person_.active() ? skeleton_->find_clip_variant(clip_key_, clip_variant_)
 			                                                           : nullptr;
 	clip_fire_.refresh(view, sound_sources_.item(), sound_binding_, model_, skeleton_, clip_key_, clip_variant_,
-	                   playing ? &playing->clip.playback() : nullptr, clip_track_, repeat_period_(), options_.fire);
+	                   playing ? &playing->clip.playback() : nullptr, clip_track_, options_.fire);
 	clip_fire_.run_to(clock.ticks());
 	// An event selected in the clip seeks the clock to the tick the clip first samples it, and
 	// holds it there (as a scrub does).
@@ -1831,8 +1815,8 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 	animation.set("file", json_string(clip_file_));
 	animation.set("note", json_string(clip_note_));
 	animation.set("ticks", json_number(input.clock.ticks()));
-	// The clip's own clock (S17): the tick it plays (a repeated one-shot's taken again from 0), its
-	// frame, and both in seconds as the game's ticks pass.
+	// The clip's own clock (S17): the tick it plays, its frame, and both in seconds as the game's ticks
+	// pass.
 	const int32_t played = clip_ticks(input.clock);
 	const int32_t length = clip_length_ticks();
 	animation.set("clip_ticks", json_number(played));
@@ -1843,7 +1827,6 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 	animation.set("length_ticks", json_number(length));
 	animation.set("length_seconds", json_number(length > 0 ? length / io::kTickHz : 0.0));
 	animation.set("loops", JsonValue::make_bool(clip_loops()));
-	animation.set("repeat", JsonValue::make_bool(options_.repeat));
 	JsonValue events = JsonValue::make_array();
 	for (const PreviewClipEvent &event : clip_events_) {
 		JsonValue row = JsonValue::make_object();

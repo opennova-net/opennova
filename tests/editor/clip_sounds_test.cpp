@@ -6,9 +6,9 @@
 //
 // Pinned: the NPC body's odd ticks and the player body's even ones (a 30 fps clip of 8 frames: frame 2
 // first read on tick 5, frame 6 on tick 13); a loop's second pass; the Surface's slots (ground, snow, an
-// object, water); foley before the foot in one word; a repeated one-shot's start reading nothing and its
-// next pass firing again; nothing over a seek, a frame step or a pause; ticks passed several at a time, the
-// first run after a seek heard whole from where the seek put the clock;
+// object, water); foley before the foot in one word; a one-shot played once; nothing over a seek, a frame
+// step or a pause; ticks passed several at a time, the first run after a seek heard whole from where the
+// seek put the clock;
 // the item's profile and body (sound_profile, sound_profileFemale for a female player, move_function
 // org2), a profile picked, an empty slot; Mute; the camera's distance (a volume by the falloff, a set out
 // of range); the envelope's options, sound_profile, sound_body, each event's plays and sounds_fired; what
@@ -320,14 +320,11 @@ int test_crawl_and_one_shot() {
 	TEST_EXPECT(ticks_slots(fired) == TS({{3, audio::kSlotAudio1 + 4}, {7, audio::kSlotAudio1 + 4}, {7, audio::kSlotFootLGround}}));
 	if (fired.size() == 3) TEST_EXPECT(fired[0].set == "FS_PRONE" && fired[0].foot == -1 && fired[2].foot == 0);
 
-	// A one-shot of 9 ticks repeated after the hold (31): its frame 1 on tick 3, then on 40 + 3; its start
-	// (tick 40) reads nothing. With Repeat off it fires once.
+	// A one-shot of 9 ticks plays once, as the game plays it: its frame 1 on tick 3, nothing after.
 	TEST_EXPECT(project.select("anim_idle"));
 	project.json(); // followed: the clip the selection plays
 	const ModelViewport *model = project.viewport();
 	TEST_EXPECT(model && !model->clip_loops() && model->clip_length_ticks() == 9);
-	TEST_EXPECT(ticks_slots(project.run(45)) == TS({{3, audio::kSlotFootRGround}, {43, audio::kSlotFootRGround}}));
-	TEST_EXPECT(project.set(R"({"options": {"repeat": false}})"));
 	TEST_EXPECT(ticks_slots(project.run(45)) == TS({{3, audio::kSlotFootRGround}}));
 	return 0;
 }

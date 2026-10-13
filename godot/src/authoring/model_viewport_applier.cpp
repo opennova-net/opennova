@@ -338,7 +338,7 @@ void ModelViewportApplier::bind_rig_(const opennova::editor::ViewportModel &view
 
 void ModelViewportApplier::play_clip_(const opennova::editor::ViewportModel &viewport, const opennova::editor::PreviewClock &clock) {
 	const opennova::editor::ModelViewport &model = model_of(viewport);
-	// The clip's own tick (a repeated one-shot's taken again from its start): the portable half's.
+	// The clip's own tick: the portable half's.
 	if (model.skeleton() && !model.clip_key().empty() && data_.is_valid()) {
 		object_->play_body_clip_at(opennova::to_gd(model.clip_key()), int(model.clip_ticks(clock)), model.clip_variant());
 		// The first-person arms pose by the same clip on the gun's rig (DI-13).

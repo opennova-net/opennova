@@ -995,8 +995,8 @@ struct RecordedRequests final : CanvasRequests {
 // The clip's preview made a modder's (ADR 0046 S17): a row whose one clip the project lacks plays
 // what the game plays in its place, the reset clip, and says so; a map names who plays it and what
 // the game does with the selected row, a clip the rows that play it, a model the maps it plays; the
-// timeline steps frame by frame and tells frames and seconds; a one-shot repeats after its hold when
-// asked; the rig's bones pose with the clip, each named, a point on a bone riding it, and a click on
+// timeline steps frame by frame and tells frames and seconds; a one-shot plays once and holds its end;
+// the rig's bones pose with the clip, each named, a point on a bone riding it, and a click on
 // a joint in the clip's own document selects its bone; an item is found by its catalog's name.
 static int test_clip_preview() {
 	editor_test::TempProjectDir dir("opennova_editor_model_viewport_clip_preview");
@@ -1119,19 +1119,19 @@ static int test_clip_preview() {
 			session.handle(request::undo(step_clip->path()));
 		}
 	}
-	// A one-shot repeats from its start after its length and the hold; with Repeat off it holds its end.
+	// A one-shot plays once, as the game plays it: past its length its frame holds its end.
 	TEST_EXPECT(rig.set(R"({"options": {"rig_model": "skinned.3di"}})"));
 	rig.pump();
 	const ModelViewport *step = rig.viewport();
-	TEST_EXPECT(step && !step->clip_loops() && step->clip_length_ticks() == 2 && step->options().repeat);
+	TEST_EXPECT(step && !step->clip_loops() && step->clip_length_ticks() == 2);
 	PreviewClock clock;
 	clock.seek_ticks(1);
 	TEST_EXPECT(step->clip_ticks(clock) == 1);
-	clock.seek_ticks(2 + kClipRepeatHoldTicks + 1);
-	TEST_EXPECT(step->clip_ticks(clock) == 1);
-	TEST_EXPECT(rig.set(R"({"options": {"repeat": false}})"));
-	rig.pump();
-	TEST_EXPECT(!step->options().repeat && step->clip_ticks(clock) == 2 + kClipRepeatHoldTicks + 1);
+	clock.seek_ticks(2);
+	const double end_frame = step->clip_frame(clock);
+	clock.seek_ticks(40);
+	TEST_EXPECT(step->clip_ticks(clock) == 40 && step->clip_frame(clock) == end_frame);
+	TEST_EXPECT(!rig.set(R"({"options": {"repeat": false}})"));
 
 	// The bones: the rest pose's on the axis, the bend's frame 1 swinging the spine a quarter turn off
 	// it; a point on the spine at rest carried to the spine's joint; the bones on the wire by name.

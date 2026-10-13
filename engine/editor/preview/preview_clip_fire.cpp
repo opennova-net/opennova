@@ -122,7 +122,6 @@ void ClipFire::clear() {
 	timeline_ = anim::ClipTimeline();
 	has_clip_ = false;
 	track_ = ClipSoundTrack();
-	period_ = 0;
 	height_ = 0.0f;
 	inputs_ = 0;
 	shots_.clear();
@@ -138,7 +137,7 @@ void ClipFire::clear() {
 
 void ClipFire::refresh(const SessionView &view, const ClipSoundItem &item, const ClipSoundBinding &binding,
 		const assets::Model &model, const std::shared_ptr<const anim::SkeletalClips> &rig, const std::string &key,
-		int variant, const anim::ClipTimeline *timeline, const ClipSoundTrack &track, int32_t period,
+		int variant, const anim::ClipTimeline *timeline, const ClipSoundTrack &track,
 		const ClipFireOptions &options) {
 	active_ = true;
 	item_ = item;
@@ -149,7 +148,6 @@ void ClipFire::refresh(const SessionView &view, const ClipSoundItem &item, const
 	has_clip_ = timeline != nullptr && !key.empty();
 	timeline_ = timeline ? *timeline : anim::ClipTimeline();
 	track_ = track;
-	period_ = period;
 	// The body: an NPC's has the fire block, a player's none (DI-04's binding, the item's move_function or chosen).
 	reads_ = !binding.player;
 	bool fire_bits = false;
@@ -209,7 +207,7 @@ void ClipFire::refresh(const SessionView &view, const ClipSoundItem &item, const
 		break;
 	}
 	// What the shots are made of: another starts the schedule (and the run) again.
-	std::string key_text = key + '\n' + std::to_string(variant) + '\n' + std::to_string(period) + '\n' +
+	std::string key_text = key + '\n' + std::to_string(variant) + '\n' +
 	                       std::to_string(reinterpret_cast<uintptr_t>(rig.get())) + '\n' +
 	                       std::to_string(reinterpret_cast<uintptr_t>(model.get())) + '\n' + (armed_ ? "1" : "0") +
 	                       std::to_string(height_) + '\n';
@@ -333,7 +331,7 @@ void ClipFire::schedule_to_(int32_t tick) {
 	const int32_t to = std::min(tick, kWeaponRangeMostTicks);
 	if (to <= scheduled_to_) return;
 	// Every tick the NPC body reads (its odd ticks) in (scheduled, to], the word its channel stands on there.
-	const std::vector<ClipEventDue> due = clip_events_due(timeline_, track_, period_, scheduled_to_, to, false, false);
+	const std::vector<ClipEventDue> due = clip_events_due(timeline_, track_, scheduled_to_, to, false, false);
 	scheduled_to_ = to;
 	int number = 0;
 	for (const ClipFireShot &shot : shots_) number = std::max(number, shot.number);

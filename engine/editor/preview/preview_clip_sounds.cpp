@@ -242,14 +242,14 @@ ClipSoundBinding clip_sound_binding(const std::vector<audio::SoundProfile> &prof
 
 // --- the schedule --------------------------------------------------------------------------------------
 
-std::vector<ClipEventDue> clip_events_due(const anim::ClipTimeline &clock, const ClipSoundTrack &track, int32_t period,
-                                          int32_t from, int32_t to, bool player_body, bool catch_up) {
+std::vector<ClipEventDue> clip_events_due(const anim::ClipTimeline &clock, const ClipSoundTrack &track, int32_t from, int32_t to,
+                                          bool player_body, bool catch_up) {
 	std::vector<ClipEventDue> out;
 	if (track.triggers.empty() || to <= from) return out;
 	if (catch_up && to - from > kClipSoundCatchUpTicks) from = to - kClipSoundCatchUpTicks;
 	for (int32_t tick = from + 1; tick <= to; ++tick) {
 		if (!world::anim_sound_tick(uint32_t(tick), player_body)) continue;
-		const int32_t clip_tick = period > 0 ? tick % period : tick;
+		const int32_t clip_tick = tick;
 		if (clip_tick <= 0) continue;
 		const uint32_t word = anim::clip_trigger_at(clock, track.triggers, clip_tick);
 		if (word == 0) continue;
