@@ -77,7 +77,7 @@ struct MissionSoundChannel {
 	std::string path; // the project's file of the wave ("" none: refused by the pool)
 	int layer = 0;
 	int32_t volume = 0;          // the mix's, 0..255
-	uint32_t pitch_q16 = 0x10000; // the member's times the registration's
+	uint32_t pitch_q16 = 0x10000; // the emitter's word (audio::emitter_play_word)
 	PreviewVec3 at;
 	float distance = 0.0f;
 };
@@ -180,7 +180,6 @@ private:
 		const char *kind = "marker";
 		std::string set, bank, wave, path;
 		int layer = 0;
-		uint32_t pitch_q16 = 0x10000;
 	};
 	struct Item {
 		bool defined = false;
