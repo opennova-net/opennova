@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "authoring/preview_effects.h"
+#include "authoring/preview_frame_effects.h"
 #include "authoring/preview_model.h"
 #include "authoring/preview_range_draw.h"
 #include "authoring/viewport_applier.h"
@@ -85,6 +86,7 @@ private:
 	std::unique_ptr<PreviewModel> model_;
 	std::unique_ptr<PreviewModel> arms_;
 	std::unique_ptr<PreviewEffects> effects_;
+	std::unique_ptr<PreviewFrameEffects> frame_effects_; // the view's FrameFX: its decode, the heat haze's row
 	bool mounted_ = false; // the project's files are mounted for the effects (a Rebuild) and not cleared since
 	std::unique_ptr<PreviewRangeDraw> range_;
 	int applied_team_ = INT32_MIN + 1;

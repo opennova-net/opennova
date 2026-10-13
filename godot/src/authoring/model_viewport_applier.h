@@ -15,6 +15,7 @@
 #include <editor/preview/viewport_follow.h>
 
 #include "authoring/preview_effects.h"
+#include "authoring/preview_frame_effects.h"
 #include "authoring/preview_model.h"
 #include "authoring/preview_range_draw.h"
 #include "authoring/viewport_applier.h"
@@ -151,6 +152,7 @@ private:
 	uint64_t applied_skeleton_ = UINT64_MAX; // the rig serial the model holds
 	std::unique_ptr<Build> build_; // the build in flight (null: none)
 	std::unique_ptr<PreviewEffects> effects_;
+	std::unique_ptr<PreviewFrameEffects> frame_effects_; // the view's FrameFX: its decode, the heat haze's row
 	std::unique_ptr<PreviewRangeDraw> range_;
 	std::shared_ptr<const opennova::editor::ProjectAssetSource> fire_files_; // an animation's project files
 	bool mounted_ = false; // the project's files are mounted for the clip fire's effects

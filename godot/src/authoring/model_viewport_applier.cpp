@@ -47,9 +47,10 @@ ModelViewportApplier::ModelViewportApplier(SubViewport &viewport) : viewport_(&v
 	Node3D *root = memnew(Node3D);
 	viewport.add_child(root);
 	root_ = root;
-	// Retail shaders write gamma-domain values and rely on one terminal display decode per
-	// 3D view; the environment with no .env lights like the retail noon.
-	root->add_child(memnew(DisplayDecode));
+	// Retail shaders write gamma-domain values and rely on one terminal display decode per 3D view: the game's
+	// FrameFx's (with the distortion row a clip's class-7 particles draw on); the environment with no .env lights like
+	// the retail noon.
+	frame_effects_ = std::make_unique<PreviewFrameEffects>(*root, viewport, false);
 	environment_ = memnew(MissionEnvironment);
 	root->add_child(environment_);
 	camera_ = memnew(Camera3D);
@@ -398,8 +399,10 @@ void ModelViewportApplier::tick(const opennova::editor::ViewportModel &viewport,
 	}
 	// A model with live part animations or a dynamic material stays awake and reads it.
 	clock_->sample(int64_t(clock.ms()), ++frame_);
-	// The clip fire's effects as the viewport stepped them (DI-24).
-	if (mounted_ && effects_->scene()) effects_->render(int64_t(clock.ms()));
+	// The clip fire's effects as the viewport stepped them (DI-24), then the frame's FrameFX.
+	const bool fired = mounted_ && effects_ && effects_->scene();
+	if (fired) effects_->render(int64_t(clock.ms()));
+	frame_effects_->present(fired ? effects_->renderer() : nullptr);
 }
 
 } // namespace godot

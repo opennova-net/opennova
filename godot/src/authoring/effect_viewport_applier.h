@@ -10,6 +10,7 @@
 #include <runtime/particle/effect_scene.h>
 
 #include "authoring/preview_effects.h"
+#include "authoring/preview_frame_effects.h"
 #include "authoring/viewport_applier.h"
 
 namespace godot {
@@ -56,6 +57,7 @@ private:
 	MeshInstance3D *backdrop_ = nullptr;
 	MissionEnvironment *environment_ = nullptr;
 	std::unique_ptr<PreviewEffects> effects_;
+	std::unique_ptr<PreviewFrameEffects> frame_effects_; // the view's FrameFX: its decode, the heat haze's row
 	bool shows_ = false; // a scene was taken (a Rebuild) and not cleared since
 };
 

@@ -47,9 +47,10 @@ EffectViewportApplier::EffectViewportApplier(SubViewport &viewport) {
 	viewport.add_child(backdrop_);
 	Node3D *root = memnew(Node3D);
 	viewport.add_child(root);
-	// One terminal display decode for the view, and the environment with no .env, which lights like the
-	// retail noon: the particle tints a mission's light gives (the model preview's recipe).
-	root->add_child(memnew(DisplayDecode));
+	// The game's FrameFx for the view (its one terminal display decode, and the distortion row a class-7 particle draws
+	// on), and the environment with no .env, which lights like the retail noon: the particle tints a mission's light
+	// gives (the model preview's recipe).
+	frame_effects_ = std::make_unique<PreviewFrameEffects>(*root, viewport, false);
 	environment_ = memnew(MissionEnvironment);
 	root->add_child(environment_);
 	camera_ = memnew(Camera3D);
@@ -123,6 +124,7 @@ void EffectViewportApplier::tick(const opennova::editor::ViewportModel &viewport
 	// next one's to take).
 	(void)viewport;
 	effects_->render(int64_t(clock.ms()));
+	frame_effects_->present(effects_->renderer());
 }
 
 } // namespace godot
