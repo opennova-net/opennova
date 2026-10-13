@@ -296,13 +296,9 @@ bool PlayerProfiles::rename(const std::string &text) {
 	return true;
 }
 
-std::string PlayerProfiles::set_name_edit(std::string text) {
-	// The set is the label's: its first {hot} marker goes before the notice
-	// carries the label to the name rule [orig: CEditWnd_SetText @0x661900 -
-	// CButtonWnd_SetLabel @0x661912, strstr @0x657451, the tail shift
-	// @0x657476..0x657480; the notice's label @0x66195c].
-	int hotkey = -1;
-	text = rtxt::strip_hotkey(text, hotkey);
+std::string PlayerProfiles::name_changed(std::string text) {
+	// The notice carries the label the set left [orig: the notice's label
+	// @0x66195c].
 	if (rename(text)) return text;
 	// One character off the edit and nothing more: the cut's set finds the
 	// chain detached [orig: @0x55fc4d, the set @0x55fc6d; @0x6469a2]. Retail's
@@ -313,8 +309,7 @@ std::string PlayerProfiles::set_name_edit(std::string text) {
 	const auto b = static_cast<unsigned char>(text[lead]);
 	const size_t seq = b >= 0xF0 && b < 0xF8 ? 4 : b >= 0xE0 ? 3 : b >= 0xC0 ? 2 : 1;
 	text.resize(seq == text.size() - lead ? lead : text.size() - 1);
-	// The cut's set is the same SetText, so it strips the next marker.
-	return rtxt::strip_hotkey(text, hotkey);
+	return text;
 }
 
 void PlayerProfiles::commit_name(const std::string &text) {

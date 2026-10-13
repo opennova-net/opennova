@@ -283,51 +283,43 @@ int test_name_rules() {
     TEST_EXPECT(p.current().name.empty() && p.current().flags == playersav::kRecordFlagNoName);
     p.commit_name("ABCDEFGHIJKLMNOPQRS");
     TEST_EXPECT(p.current().name == "ABCDEFGHIJKLMNO");
-    // The PLAYERNAME set's notice runs the rule once: a kept text (or none)
-    // names the record and clears the no-name bit, a refused last character
-    // is cut from the edit alone, the cut's own set reaching no handler
-    // [orig: CEditWnd_SetText @0x661900 -> PlayerInfo_HandlePlayerNameChange
-    // @0x55fc35..0x55fc6d, @0x55fc91, @0x55fc9b;
-    // CWnd_EmitEventToNamedHandlerAndCallbacks @0x646990..0x6469a2].
+    // The PLAYERNAME edit's notice runs the rule over the label once: a kept
+    // text (or none) names the record and clears the no-name bit, a refused
+    // last character is cut and returned for the edit's set, the cut's own set
+    // reaching no handler [orig: CEditWnd_SetText @0x661900 ->
+    // PlayerInfo_HandlePlayerNameChange @0x55fc35..0x55fc6d, @0x55fc91,
+    // @0x55fc9b; CWnd_EmitEventToNamedHandlerAndCallbacks @0x646990..0x6469a2].
     p.current().name = "Ghost";
     p.current().flags = playersav::kRecordFlagNoName;
-    TEST_EXPECT(p.set_name_edit("Ghost") == "Ghost");
+    TEST_EXPECT(p.name_changed("Ghost") == "Ghost");
     TEST_EXPECT(p.current().name == "Ghost" && p.current().flags == 0);
     p.current().flags = playersav::kRecordFlagNoName;
-    TEST_EXPECT(p.set_name_edit("") == "");
+    TEST_EXPECT(p.name_changed("") == "");
     TEST_EXPECT(p.current().name.empty() && p.current().flags == 0);
     p.current().name = "Bob";
     p.current().flags = playersav::kRecordFlagNoName;
-    TEST_EXPECT(p.set_name_edit("Bob!?") == "Bob!");
+    TEST_EXPECT(p.name_changed("Bob!?") == "Bob!");
     TEST_EXPECT(p.current().name == "Bob" && p.current().flags == playersav::kRecordFlagNoName);
     // A refused non-ASCII last character goes whole: "José" cuts to "Jos".
-    TEST_EXPECT(p.set_name_edit("Jos\xC3\xA9") == "Jos");
-    TEST_EXPECT(p.set_name_edit("A\xE2\x82\xAC") == "A");
+    TEST_EXPECT(p.name_changed("Jos\xC3\xA9") == "Jos");
+    TEST_EXPECT(p.name_changed("A\xE2\x82\xAC") == "A");
     TEST_EXPECT(p.current().name == "Bob");
     p.current().name.clear();
     p.current().flags = 0;
-    TEST_EXPECT(p.set_name_edit("!#") == "!");
+    TEST_EXPECT(p.name_changed("!#") == "!");
     TEST_EXPECT(p.current().name.empty() && p.current().flags == 0);
-    // The set strips the first {hot} marker, case-sensitively, before the
-    // notice carries the label to the rule [orig: CEditWnd_SetText @0x661900
-    // -> CButtonWnd_SetLabel @0x661912, strstr @0x657451, the shift
-    // @0x657476..0x657480].
+    // The rule reads the label as the edit's text set left it: the set cut
+    // the first {hot} marker (menu::MenuRuntime::set_widget_text, ctest
+    // menu_runtime), so a later marker is name text, and the cut is returned
+    // whole for the set to cut its next marker [orig: CButtonWnd_SetLabel
+    // @0x661912 from CEditWnd_SetText; the cut's set @0x55fc6d].
     p.current().flags = playersav::kRecordFlagNoName;
-    TEST_EXPECT(p.set_name_edit("Gh{hot}ost") == "Ghost");
-    TEST_EXPECT(p.current().name == "Ghost" && p.current().flags == 0);
-    TEST_EXPECT(p.set_name_edit("A{hot}B{hot}C") == "AB{hot}C");
-    TEST_EXPECT(p.current().name == "AB{hot}C");
+    TEST_EXPECT(p.name_changed("AB{hot}C") == "AB{hot}C");
+    TEST_EXPECT(p.current().name == "AB{hot}C" && p.current().flags == 0);
     // "{HOT}" is literal: its '}' is refused and cut, the record kept.
-    TEST_EXPECT(p.set_name_edit("{HOT}") == "{HOT");
+    TEST_EXPECT(p.name_changed("{HOT}") == "{HOT");
+    TEST_EXPECT(p.name_changed("AB{hot}!") == "AB{hot}");
     TEST_EXPECT(p.current().name == "AB{hot}C");
-    // The cut's set strips the next marker [orig: the set @0x55fc6d].
-    TEST_EXPECT(p.set_name_edit("A{hot}B{hot}!") == "AB");
-    TEST_EXPECT(p.current().name == "AB{hot}C");
-    // A lone marker strips to no text, which the rule accepts: the record
-    // is named "" and its no-name flag cleared.
-    p.current().flags = playersav::kRecordFlagNoName;
-    TEST_EXPECT(p.set_name_edit("{hot}").empty());
-    TEST_EXPECT(p.current().name.empty() && p.current().flags == 0);
     // [orig: sub_561400 @0x561400]
     p.current().sp_no_scope_drift = 1;
     p.current_weapons().red.player_class = 5;

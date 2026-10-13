@@ -158,8 +158,8 @@ public:
 	void set_widget_checked(int index, bool checked) override {
 		if (MenuFrame *f = frame()) f->set_widget_checked(index, checked);
 	}
-	void set_widget_text(int index, const std::string &text) override {
-		if (MenuFrame *f = frame()) f->set_widget_text(index, to_gd(text));
+	void set_widget_text(int index, const std::string &text, int hotkey_pos) override {
+		if (MenuFrame *f = frame()) f->set_widget_text(index, to_gd(text), hotkey_pos);
 	}
 	void set_widget_items(int index, const std::vector<std::string> &items) override {
 		// The items as the runtime holds them, bytes and all: a round trip
@@ -579,8 +579,8 @@ void MenuDriver::set_widget_checked(int p_id, bool p_checked) {
 	runtime_.set_widget_checked(p_id, p_checked);
 }
 bool MenuDriver::is_widget_checked(int p_id) const { return runtime_.is_widget_checked(p_id); }
-void MenuDriver::set_widget_text(int p_id, const String &p_text) {
-	runtime_.set_widget_text(p_id, to_std(p_text));
+String MenuDriver::set_widget_text(int p_id, const String &p_text) {
+	return to_gd(runtime_.set_widget_text(p_id, to_std(p_text)));
 }
 String MenuDriver::get_widget_text(int p_id) const {
 	return menu_text_to_gd(runtime_.get_widget_text(p_id));

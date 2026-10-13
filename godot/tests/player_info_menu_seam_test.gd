@@ -107,6 +107,19 @@ func _make_avatar_driver(include_preview := false) -> MenuDriver:
 	return MenuDriverFixture.driver_over(self, MenuDriverFixture.doc_from_xml(self, _avatar_screen_xml(include_preview)), "player.mnu")
 
 
+# The same screen over a real MenuFrame: the runtime's read-backs go through the
+# frame's bytes (MenuFrame.get_widget_text), as the live screen's do.
+func _make_framed_avatar_driver() -> MenuDriver:
+	var frame := MenuFrame.new()
+	add_child_autofree(frame)
+	frame.size = Vector2(800, 600)
+	var driver := MenuDriver.new()
+	driver.attach(frame, null)
+	assert_true(driver.open_document(MenuDriverFixture.doc_from_xml(self, _avatar_screen_xml()),
+			null, null, null, "player.mnu"), "the document opens on the frame")
+	return driver
+
+
 func _character_ids(profile: CharacterJoinProfile) -> Array[int]:
 	return [profile.get_character_id(0), profile.get_character_id(1)]
 
@@ -522,6 +535,65 @@ func test_populate_cuts_one_refused_last_character_from_the_edit() -> void:
 	driver.widget_activated.emit(red_radio, "SIDE_RED")
 	assert_eq(driver.get_widget_text(edit), "Ann", "the side switch's populate cuts it")
 	assert_eq(store.get_player_name(), "Ann#", "and the record keeps the saved name")
+
+
+# The populate's set and a refused key's cut are both the edit's text set,
+# which cuts the text's first {hot} marker: a record named "A{hot}B{hot}C"
+# leaves "AB{hot}C" in the edit and names the record so, and a refused key's
+# cut then cuts the second marker; a refused last character at the populate is
+# cut and set again, which cuts the next marker too.
+# [orig: PlayerInfo_PopulateAllControls @0x5608d5 -> CEditWnd_SetText @0x661900
+#  -> CButtonWnd_SetLabel @0x661912 (strstr @0x657451); the cut's set
+#  @0x55fc6d]
+func test_the_name_sets_cut_one_hot_marker_each() -> void:
+	var store := PlayerProfile.store()
+	store.commit_name("A{hot}B{hot}C")
+	var companion := PlayerInfoMenuCompanion.new()
+	companion.set_database(_load_db())
+	var driver := _make_avatar_driver()
+	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
+	var edit := driver.widget_id("PLAYERNAME")
+	assert_eq(driver.get_widget_text(edit), "AB{hot}C", "the populate's set cuts the first marker")
+	assert_eq(store.get_player_name(), "AB{hot}C", "and its notice names the record with the label")
+	# A refused key: the edit's change carries it, the rule cuts it and sets the
+	# cut, which cuts the next marker; the record keeps its name.
+	driver.widget_value_changed.emit("PLAYERNAME", "edit", 0, "AB{hot}C!")
+	assert_eq(driver.get_widget_text(edit), "ABC", "the cut's set cuts the second marker")
+	assert_eq(store.get_player_name(), "AB{hot}C", "the refused key renames nothing")
+	# The populate's refused last character: the set cuts the first marker, the
+	# rule cuts the character, the cut's set the next marker.
+	store.commit_name("A{hot}B{hot}!")
+	var reopened := PlayerInfoMenuCompanion.new()
+	reopened.set_database(_load_db())
+	var again := _make_avatar_driver()
+	reopened.on_menu_built(again, "player.mnu", "PLAYER_INFO", null)
+	assert_eq(again.get_widget_text(again.widget_id("PLAYERNAME")), "AB")
+	assert_eq(store.get_player_name(), "A{hot}B{hot}!", "the record keeps the saved name")
+
+
+# Over a real frame the populate's notice carries the label the set stored, not
+# the frame's read-back of it (which decodes the frame's bytes as cp1252,
+# D-MNU-49): a record named "José" refuses its last character and leaves "Jos"
+# in the edit with the record kept, and a "Zoë Smith" is kept and names the
+# record as it is, not double-encoded.
+# [orig: CEditWnd_SetText @0x661900 - the label +732 @0x66195c into the
+#  0x7000001 notice @0x661986; PlayerInfo_HandlePlayerNameChange @0x55fbb0]
+func test_the_populate_rule_reads_the_set_label_over_a_frame() -> void:
+	var store := PlayerProfile.store()
+	store.commit_name("José")
+	var companion := PlayerInfoMenuCompanion.new()
+	companion.set_database(_load_db())
+	var driver := _make_framed_avatar_driver()
+	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
+	assert_eq(driver.get_widget_text(driver.widget_id("PLAYERNAME")), "Jos",
+			"the refused last character comes off the edit")
+	assert_eq(store.get_player_name(), "José", "and the record keeps its name")
+	store.commit_name("Zoë Smith")
+	var reopened := PlayerInfoMenuCompanion.new()
+	reopened.set_database(_load_db())
+	var again := _make_framed_avatar_driver()
+	reopened.on_menu_built(again, "player.mnu", "PLAYER_INFO", null)
+	assert_eq(store.get_player_name(), "Zoë Smith", "a kept name renames the record as it is")
 
 
 # The rule's kept text, a name or none, clears the record's no-name bit at the

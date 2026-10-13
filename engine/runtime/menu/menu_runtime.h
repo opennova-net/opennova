@@ -118,7 +118,9 @@ public:
 	virtual void set_widget_shown_override(int index, bool shown) = 0;
 	virtual void set_widget_disabled(int index, bool disabled) = 0;
 	virtual void set_widget_checked(int index, bool checked) = 0;
-	virtual void set_widget_text(int index, const std::string &text) = 0;
+	// The label as the label set left it: `hotkey_pos` is where it cut the
+	// first {hot} marker, -1 for none (MenuWidgetState::text_hotkey_pos).
+	virtual void set_widget_text(int index, const std::string &text, int hotkey_pos) = 0;
 	virtual void set_widget_items(int index, const std::vector<std::string> &items) = 0;
 	virtual void set_widget_selection(int index, int selected, int hover, int scroll_row) = 0;
 	virtual void set_widget_scroll_range(int index, int minimum, int maximum, int page,
@@ -281,6 +283,7 @@ struct MenuWidgetRuntimeState {
 	bool has_checked = false, checked = false;
 	bool has_text = false;
 	std::string text;
+	int text_hotkey_pos = -1; // the label set's cut marker (MenuWidgetState)
 	bool has_items = false;
 	std::vector<std::string> items;
 	bool has_selected_item = false;
@@ -429,7 +432,11 @@ public:
 	bool is_widget_disabled(int id) const;
 	void set_widget_checked(int id, bool checked);
 	bool is_widget_checked(int id) const;
-	void set_widget_text(int id, const std::string &text);
+	// The window's text set: a class that has one cuts the text's first {hot}
+	// marker and keeps its offset for the draw; one with none keeps the text
+	// as given (menu_runtime.cpp has_label_set). Returns the label it stored,
+	// the text an edit's change notice carries.
+	std::string set_widget_text(int id, const std::string &text);
 	std::string get_widget_text(int id) const;
 	// Move a widget: its own rect (relative to its parent's origin, design
 	// units) replaced until the document reopens [orig: CWnd_SetRect @0x646560,

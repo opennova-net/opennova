@@ -231,6 +231,10 @@ struct MenuWidgetState {
 	int32_t caret = -1;       // edit caret char index into the value text
 	bool has_text = false;    // runtime text override (edit value, ...)
 	std::string text;
+	// Where the label set found the text's first {hot} marker, which it cut,
+	// -1 for none: the draw's mnemonic offset [orig: CButtonWnd_SetLabel
+	// @ 0x6572F0 - widget+740 @ 0x65746c; CStaticWnd_DrawLabel @ 0x657270].
+	int32_t text_hotkey_pos = -1;
 	int32_t selected_item = 0;  // spinlist/combo/list selected row
 	int32_t hover_item = -1;    // list hover row (row style 2)
 	int32_t scroll_row = 0;     // list first visible row

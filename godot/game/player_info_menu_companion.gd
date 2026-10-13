@@ -897,27 +897,31 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int, val
 
 
 # The PLAYERNAME edit set from the current record's name, as every populate
-# sets it: the set's change notice runs the name rule on it once, so a kept name
-# renames the record and clears its no-name flag, and a refused last character
-# is cut from the edit alone (engine: PlayerProfiles::set_name_edit). An
+# sets it: the edit's text set cuts the name's first {hot} marker (engine
+# MenuRuntime::set_widget_text), then its change notice runs the name rule once
+# on the label the set stored, so a kept name renames the record and clears its
+# no-name flag, and a refused last character is cut from the edit alone. The
+# label is the set's own, never the frame's read-back (D-MNU-49). An
 # unauthored edit sets nothing.
 func _populate_name() -> void:
 	var id := _id("PLAYERNAME")
 	if id >= 0:
-		_driver.set_widget_text(id,
-				PlayerProfile.store().set_name_edit(PlayerProfile.store().get_player_name()))
+		_on_player_name_changed(
+				_driver.set_widget_text(id, PlayerProfile.store().get_player_name()))
 
 
-# The PLAYERNAME edit's change names the current profile record as the player
-# types: text whose last character the edit keeps (or no text) renames it and
-# clears its no-name flag, a refused last character is cut from the edit
-# (engine: PlayerProfiles::rename).
+# The PLAYERNAME edit's change notice names the current profile record as the
+# player types (and once at each populate): a label whose last character the
+# edit keeps (or no text) renames it and clears its no-name flag, a refused
+# last character is cut and the edit set to the cut, a text set again whose
+# notice reaches no handler (engine: PlayerProfiles::name_changed).
 func _on_player_name_changed(text: String) -> void:
-	if PlayerProfile.store().rename(text):
+	var kept := PlayerProfile.store().name_changed(text)
+	if kept == text:
 		return
 	var id := _id("PLAYERNAME")
 	if id >= 0:
-		_driver.set_widget_text(id, text.left(text.length() - 1))
+		_driver.set_widget_text(id, kept)
 
 
 func _radio_checked(name: String) -> bool:

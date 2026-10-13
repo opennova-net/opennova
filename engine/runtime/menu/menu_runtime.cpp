@@ -7,6 +7,7 @@
 #include <base/gameprofile/gameprofile.h>
 #include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
+#include <formats/rtxt/rtxt.h>
 #include <runtime/menu/menu_edit.h>
 #include <runtime/menu/options_policy.h>
 
@@ -424,7 +425,7 @@ void MenuRuntime::replay_state_() {
 		if (state->has_shown) frame_->set_widget_shown_override(index, state->shown);
 		if (state->has_disabled) frame_->set_widget_disabled(index, state->disabled);
 		if (state->has_checked) frame_->set_widget_checked(index, state->checked);
-		if (state->has_text) frame_->set_widget_text(index, state->text);
+		if (state->has_text) frame_->set_widget_text(index, state->text, state->text_hotkey_pos);
 		if (state->has_items) frame_->set_widget_items(index, state->items);
 		if (state->has_selected_item || state->has_scroll_row)
 			frame_->set_widget_selection(index, state->selected_item, -1, state->scroll_row);
@@ -585,12 +586,57 @@ bool MenuRuntime::is_widget_checked(int id) const {
 	return w != nullptr && w->checked;
 }
 
-void MenuRuntime::set_widget_text(int id, const std::string &text) {
+namespace {
+
+// The classes whose vtable has the text set, slot +0x4C: each is the label set
+// or runs it first; the other classes' vtables end before the slot.
+// [orig: CButtonWnd_SetLabel @ 0x6572F0 on ??_7_StaticWnd 0x7E1C14 (+0x4C
+//  @ 0x7E1C60), _ButtonWnd 0x7E1CA4, _CheckWnd 0x7E128C, the radio's 0x7E1BA4,
+//  _SpinListWnd 0x7E131C, the list's 0x7E0D04, _LanWnd 0x7E204C, _ComboWnd
+//  0x7E2104, _TableWnd 0x7E08D4 (@ 0x7E0920); CEditWnd_SetText @ 0x661900
+//  (SetLabel @ 0x661912) on _EditWnd 0x7E2614; CMEditWnd_SetText @ 0x6612D0
+//  (SetLabel @ 0x6612df) on _MEditWnd 0x7E259C; ??_7_Window 0x7E0E0C,
+//  _ScrollWnd 0x7E13C4, _MarqueeWnd 0x7E21A4, _GLBTableWnd 0x7E2414,
+//  _RadioEditWnd 0x7E2244 and _GopherWnd 0x7E1F54 hold text at +0x4C]
+bool has_label_set(mnu::WindowType type) {
+	switch (type) {
+		case mnu::WindowType::Static:
+		case mnu::WindowType::Button:
+		case mnu::WindowType::CheckBox:
+		case mnu::WindowType::Radio:
+		case mnu::WindowType::SpinList:
+		case mnu::WindowType::List:
+		case mnu::WindowType::LanList:
+		case mnu::WindowType::Combo:
+		case mnu::WindowType::Table:
+		case mnu::WindowType::Edit:
+		case mnu::WindowType::MultilineEdit:
+			return true;
+		default:
+			return false;
+	}
+}
+
+} // namespace
+
+std::string MenuRuntime::set_widget_text(int id, const std::string &text) {
+	// The label set cuts the first {hot} marker, case-sensitively, and keeps
+	// where it stood; the rest of the text, later markers included, is the
+	// label [orig: CButtonWnd_SetLabel @ 0x6572F0 - strstr @ 0x657451, the
+	// offset @ 0x65746c, the tail shift @ 0x657476..0x657480]. The label is
+	// what an edit's notice carries [orig: CEditWnd_SetText @ 0x661900 - the
+	// label +732 @ 0x66195c into the 0x7000001 notice @ 0x661986].
+	const mnu::Window *w = index_.window(id);
+	int hotkey_pos = -1;
+	const std::string label =
+			w != nullptr && has_label_set(w->type) ? rtxt::strip_hotkey(text, hotkey_pos) : text;
 	MenuWidgetRuntimeState &state = state_of_(id);
-	state.text = text;
+	state.text = label;
+	state.text_hotkey_pos = hotkey_pos;
 	state.has_text = true;
 	const int index = frame_index(id);
-	if (index >= 0) frame_->set_widget_text(index, text);
+	if (index >= 0) frame_->set_widget_text(index, label, hotkey_pos);
+	return label;
 }
 
 void MenuRuntime::set_widget_rect(int id, int left, int top, int right, int bottom) {
