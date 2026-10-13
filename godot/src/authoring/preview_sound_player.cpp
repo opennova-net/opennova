@@ -188,6 +188,13 @@ int PreviewSoundVoices::playing() const {
 
 // --- PreviewSoundLoops -------------------------------------------------------------------------------
 
+namespace {
+
+// The bus the game's ambient channels play on (MissionAudio binds each ambient candidate to it).
+constexpr const char *kAmbientBus = "Ambient";
+
+} // namespace
+
 PreviewSoundLoops::~PreviewSoundLoops() {
 	// The players are the parent's children, freed with it; a decode in flight is let finish.
 	voices_.clear();
@@ -226,11 +233,10 @@ void PreviewSoundLoops::follow(const std::string &p_root, const std::vector<Chan
 			if (decoded.is_null()) continue;
 			AudioStreamPlayer3D *player = memnew(AudioStreamPlayer3D);
 			player->set_name(String("ListenChannel") + String::num_int64(int64_t(i)));
-			// Its own looping copy of the whole wave (the cached stream stays a one-shot's) [the native ambient loop,
-			// D-SND-6: a channel's descriptor loops].
-			player->set_stream(SoundBank::loop_copy(decoded));
-			// The mix owns the volume: no attenuation on top, only the panner (the game's ambient channels, D-SND-8).
-			SoundBank::configure_unattenuated_3d(player);
+			// Set up as the game's ambient channel is (MissionAudio's bind): its own looping copy of the whole wave
+			// (the cached stream stays a one-shot's) [the native ambient loop, D-SND-6: a channel's descriptor loops],
+			// no attenuation on top of the mix's volume, only the panner (D-SND-8), on the game's ambient bus.
+			SoundBank::configure_ambient_player(player, decoded, StringName(kAmbientBus));
 			parent_->add_child(player);
 			voice.player = player;
 			// Started once from its wave's beginning; held and let go by the pause alone after.

@@ -130,7 +130,8 @@ private:
 // The Listen's channels (DI-36): the device half of a mission view's MissionListen. Each channel its mix binds plays its
 // wave looping on an AudioStreamPlayer3D of its own at the channel's place in the device's world, whose camera is the
 // listener, so Godot's panner pans it as the game's own ambient channels are panned (D-SND-8), unattenuated (the volume
-// is the mix's, through the engine's volume law); its pitch the member's times the registration's.
+// is the mix's, through the engine's volume law), on the game's ambient bus (SoundBank::configure_ambient_player, as
+// MissionAudio binds a channel); its pitch the member's times the registration's.
 // A channel another candidate took (its `started` moved) starts its wave again from its beginning, as the game's
 // channel opened anew does (D-SND-6); a free one stops. The picks, the places and the volumes are the session's; this
 // only sounds them.

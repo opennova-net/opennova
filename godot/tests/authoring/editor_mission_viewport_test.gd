@@ -1841,6 +1841,7 @@ func test_the_listen_plays_the_mixs_channels() -> void:
 	for voice: Node in voices:
 		var player := voice as AudioStreamPlayer3D
 		assert_eq(player.attenuation_model, AudioStreamPlayer3D.ATTENUATION_DISABLED)
+		assert_eq(player.bus, &"Ambient", "the game's ambient bus")
 		assert_eq((player.stream as AudioStreamWAV).loop_mode, AudioStreamWAV.LOOP_FORWARD)
 		assert_true(player.volume_db <= 0.0, "the mix's volume, the game's")
 	var near := 0
