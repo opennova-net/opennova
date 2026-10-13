@@ -296,7 +296,6 @@ void LwfData::build_file_from_tree(opennova::lwf::File &r_file) const {
 		single.name = name;
 		single.path = path;
 		single.value_hi = static_cast<uint16_t>(static_cast<int>(member.get("value_hi", 0)));
-		single.path_offset = 0; // encode_lwf recomputes.
 		f.singles.push_back(std::move(single));
 		return idx;
 	};

@@ -150,6 +150,9 @@ int main() {
 		put(multi_table + 16, "ZZ"); // the first set's name past its NUL
 		const uint32_t junk = 0xDEADBEEFu;
 		std::memcpy(stale.data() + multi_table + 40 + 7 * 4, &junk, 4); // its last playlist slot
+		const uint32_t layers = multi_table + 3 * 80;
+		std::memcpy(stale.data() + layers + 12, &junk, 4); // the first layer's scratch dword
+		std::memcpy(stale.data() + layers + 16 + 7 * 4, &junk, 4); // its last member slot
 		put(pool + 200, "stale path"); // the first file slot past its path
 		opennova::lwf::File read;
 		TEST_EXPECT(opennova::lwf::parse_lwf_buffer(stale.data(), stale.size(), read, error));
@@ -171,6 +174,46 @@ int main() {
 		opennova::lwf::File again;
 		TEST_EXPECT(opennova::lwf::parse_lwf_buffer(written.data(), written.size(), again, error) &&
 				again.singles.size() == 3 && again.singles[0].entry_word28 == word);
+	}
+
+	// The game's lookup in a bank of another magic tests the whole dword at +28: a name of 29
+	// characters or more always finds (its 29th byte is a character's), one of 28 by the three
+	// bytes after its terminator. A name as wide as its field (32 characters, no terminator), a
+	// set's of 24 and a path of 256 come back as they went.
+	{
+		opennova::lwf::File wide = file;
+		wide.header.magic = 0x4C574630u;
+		wide.singles[0].name = std::string(28, 'N');
+		wide.singles[0].entry_word28 = 0x01020300u;
+		wide.singles[1].name = std::string(29, 'M');
+		wide.singles[1].entry_word28 = 0x55u; // no room: the name's own bytes
+		std::vector<uint8_t> written;
+		TEST_EXPECT(
+				opennova::lwf::encode_lwf(wide, written, error) && written.size() > 28 + 2 * 52);
+		uint32_t at28 = 0, at28_next = 0;
+		if (written.size() > 28 + 2 * 52) {
+			std::memcpy(&at28, written.data() + 28 + 28, 4);
+			std::memcpy(&at28_next, written.data() + 28 + 52 + 28, 4);
+		}
+		TEST_EXPECT(at28 == 0x01020300u && (at28_next & 0xFFu) == 'M');
+		opennova::lwf::File back;
+		TEST_EXPECT(opennova::lwf::parse_lwf_buffer(written.data(), written.size(), back, error) &&
+				back.singles.size() == 3 && back.singles[0].name == std::string(28, 'N') &&
+				back.singles[0].entry_word28 == 0x01020300u && back.singles[1].entry_word28 == 0);
+
+		opennova::lwf::File full = file;
+		full.singles[0].name = std::string(32, 'F');
+		full.multis[0].name = std::string(24, 'S');
+		full.singles[0].path = std::string(256, 'p');
+		TEST_EXPECT(opennova::lwf::encode_lwf(full, written, error));
+		opennova::lwf::File full_back;
+		std::vector<uint8_t> twice;
+		TEST_EXPECT(
+				opennova::lwf::parse_lwf_buffer(written.data(), written.size(), full_back, error) &&
+				full_back.singles[0].name == std::string(32, 'F') &&
+				full_back.multis[0].name == std::string(24, 'S') &&
+				full_back.singles[0].path == std::string(256, 'p'));
+		TEST_EXPECT(opennova::lwf::encode_lwf(full_back, twice, error) && twice == written);
 	}
 
 	// A nonzero trigger count: the engine reads 12 * count bytes after the singles and nothing
@@ -212,14 +255,14 @@ int main() {
 
 		opennova::lwf::File parsed;
 		TEST_EXPECT(opennova::lwf::parse_lwf_buffer(triggered.data(), triggered.size(), parsed, error));
-		TEST_EXPECT(parsed.header.trigger_count == 2);
-		TEST_EXPECT(parsed.triggers.size() == 2 &&
-		            parsed.triggers[0] == (opennova::lwf::TriggerRecord{1, 2, 3}) &&
-		            parsed.triggers[1] == (opennova::lwf::TriggerRecord{0xAA, 0xBB, 0xCC}));
+		TEST_EXPECT(parsed.header.trigger_count == 2 && parsed.trigger_count == 2);
 		TEST_EXPECT(parsed.multis.size() == 3 && parsed.singles.size() == 3 && parsed.playlists.size() == 3);
 		TEST_EXPECT(parsed.singles.size() == 3 && parsed.singles[2].path == "tone.wav");
+		// Written back: the count kept, the records zero (no reader interprets one).
 		std::vector<uint8_t> again;
-		TEST_EXPECT(opennova::lwf::encode_lwf(parsed, again, error) && again == triggered);
+		std::vector<uint8_t> zeroed = triggered;
+		std::fill(zeroed.begin() + at, zeroed.begin() + at + kInserted, uint8_t{ 0 });
+		TEST_EXPECT(opennova::lwf::encode_lwf(parsed, again, error) && again == zeroed);
 	}
 
 	// Both minted through the writer: a bank of another magic keeps it, and trigger records
@@ -227,7 +270,7 @@ int main() {
 	{
 		opennova::lwf::File minted = file;
 		minted.header.magic = 0x4C574630u; // 'LWF0', in kMagic's convention
-		minted.triggers = {{7, 8, 9}};
+		minted.trigger_count = 1;
 		std::vector<uint8_t> written;
 		TEST_EXPECT(opennova::lwf::encode_lwf(minted, written, error));
 		uint32_t magic = 0, count = 0, multi_header = 0;
@@ -240,8 +283,7 @@ int main() {
 		TEST_EXPECT(magic == 0x4C574630u && count == 1 && multi_header == 28 + 3 * 52 + 12);
 		opennova::lwf::File back;
 		TEST_EXPECT(opennova::lwf::parse_lwf_buffer(written.data(), written.size(), back, error));
-		TEST_EXPECT(back.header.magic == 0x4C574630u && back.triggers.size() == 1 &&
-		            back.triggers[0] == (opennova::lwf::TriggerRecord{7, 8, 9}));
+		TEST_EXPECT(back.header.magic == 0x4C574630u && back.trigger_count == 1);
 		TEST_EXPECT(back.multis.size() == 3 && back.sndparms.size() == 3);
 		for (const auto &single : back.singles) TEST_EXPECT(single.path.empty());
 		// A File built from scratch writes the 'LWF1' every shipped bank carries.

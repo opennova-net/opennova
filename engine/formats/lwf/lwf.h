@@ -15,11 +15,13 @@
 // (docs/audio/lwf-dbf-sound-re.md).
 //
 // The writer writes every record from its fields (ADR 0003): the bytes a name's
-// field or a file's slot holds past its terminator, and a set's or a layer's
-// offset slots past its count, are written zero where the authoring tools left
-// stale memory, and the string pool is a 256-byte slot per single made from its
-// path; a shipped bank written back reads as it was read, its bytes otherwise
-// (docs/audio/lwf-dbf-sound-re.md).
+// field or a file's slot holds past its terminator, a set's or a layer's offset
+// slots past its count, a layer's scratch dword and the trigger records (which no
+// reader interprets) are written zero where the authoring tools left stale memory,
+// and the string pool is a 256-byte slot per single made from its path; a shipped
+// bank written back reads as it was read, its bytes otherwise
+// (docs/audio/lwf-dbf-sound-re.md). A name or a path as wide as its field is
+// written without a terminator, as read.
 #pragma once
 
 #include <array>
@@ -76,10 +78,10 @@ struct Header {
   // name no file (Single::path empty). Written back as read.
   uint32_t magic = kMagic;
   uint32_t single_count = 0;
-  // Count of 12-byte trigger records following the singles table (File::triggers).
+  // Count of 12-byte trigger records following the singles table (File::trigger_count).
   // The engine allocates and reads 12 * trigger_count bytes ("SNDTRIG TRIGGERS")
   // and nothing reads them again [orig: SoundBank_OpenFile @ 0x75cb63 / 0x75cb7a];
-  // every known JO-era bank ships 0. The writer derives it from File::triggers.
+  // every known JO-era bank ships 0. The writer derives it from File::trigger_count.
   uint32_t trigger_count = 0;
   uint32_t multi_header_off = 0;  // offset to MultiHeader
   uint32_t string_pool_off = 0;   // offset to start of string pool
@@ -97,12 +99,16 @@ struct MultiHeader {
 struct Single {
   std::string name;
   uint16_t value_hi = 0;          // high byte carries the numeric field
-  uint32_t path_offset = 0;       // relative offset into string pool
-  std::string path;               // parsed from string pool (256-byte slots); empty in a non-'LWF1' bank
+  // The single's file: string pool slot i, the one the engine binds single i to
+  // whatever the entry's +48 offset says [orig: SoundBank_LoadTriggerSets @
+  // 0x75c6e1..0x75c711]; empty in a non-'LWF1' bank, which binds none [orig: @ 0x75c671].
+  std::string path;
   // The dword at +28 of the 52-byte entry, inside the name's 32 bytes: a bank not
-  // of the 'LWF1' magic finds a single by its name only where this is set [orig:
-  // SoundBank_FindEntryByName @ 0x75bba0, the magic test @ 0x75bbdf]. Read and
-  // written in such a bank where the name ends before it; zero otherwise.
+  // of the 'LWF1' magic finds a single by its name only where the whole dword is
+  // not zero [orig: SoundBank_FindEntryByName @ 0x75bba0, the magic test @
+  // 0x75bbdf], so a name past 28 characters always finds (its 29th byte is a
+  // character's). Read and written in such a bank where the name is 28
+  // characters or fewer, its low byte the terminator at 28; zero otherwise.
   uint32_t entry_word28 = 0;
   uint16_t pad0 = 0;
   std::array<uint32_t, 3> reserved0{};
@@ -164,9 +170,10 @@ struct Playlist {
   uint16_t min_distance = 0;
   uint32_t flags = 0;                       // PlaylistFlags bitmask
   std::vector<uint32_t> sndparm_indices;    // indices into sndparm table
-  // As read: the engine overwrites it at runtime with the random-sequential
-  // cycle anchor.
-  uint32_t reserved0 = 0;
+  // (The dword at +12 is no field: the engine reads its low 16 bits as the
+  // random-sequential anchor only after it has set flag 0x100 itself
+  // [orig: SoundBank_SelectTriggerEntryFromBank @ 0x75bf20]; no shipped layer
+  // holds 0x100, and the writer writes it zero.)
 };
 
 struct Sndparm {
@@ -178,16 +185,16 @@ struct Sndparm {
   std::array<uint32_t, 2> reserved{};       // trailing dwords; unread by the engine player
 };
 
-// One 12-byte trigger record, kept as its three raw dwords: the engine reads the
-// table and never interprets it [orig: SoundBank_OpenFile @ 0x75cb7a], so no field
-// meaning is witnessed.
-using TriggerRecord = std::array<uint32_t, 3>;
+// The 12-byte trigger records' width: the engine reads the table and never
+// interprets it [orig: SoundBank_OpenFile @ 0x75cb7a], so no field meaning is
+// witnessed and the writer writes each zero.
+inline constexpr size_t kTriggerRecordBytes = 12;
 
 struct File {
   Header header;
   MultiHeader multi_header;
   std::vector<Single> singles;
-  std::vector<TriggerRecord> triggers;     // after the singles, before the multi header
+  uint32_t trigger_count = 0;              // records after the singles, before the multi header
   std::vector<Multi> multis;
   std::vector<Playlist> playlists;
   std::vector<Sndparm> sndparms;

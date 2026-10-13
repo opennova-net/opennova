@@ -85,7 +85,7 @@ struct Line {
 struct Group {
 	std::string group_name;
 	uint32_t idlist_count = 0;
-	std::vector<uint8_t> def_id_indices;
+	std::vector<uint8_t> def_id_indices; // the id list, idlist_count entries (at most 16)
 	std::vector<Line> lines;
 };
 

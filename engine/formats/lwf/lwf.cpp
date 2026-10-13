@@ -69,7 +69,7 @@ struct DiskSndparm {
 };
 #pragma pack(pop)
 
-static_assert(sizeof(TriggerRecord) == 12, "a trigger record is 12 bytes on disk");
+
 
 template <typename T>
 bool read_struct(const std::vector<uint8_t> &buf, size_t offset, T &out) {
@@ -128,16 +128,12 @@ bool parse_lwf_buffer(const uint8_t *data, size_t size, File &out, std::string &
   // The trigger records follow the singles: read, kept, never interpreted
   // [orig: SoundBank_OpenFile @ 0x75cb63 / 0x75cb7a].
   const size_t triggers_off = singles_off + singles_size;
-  const size_t triggers_size = static_cast<size_t>(raw_header.trigger_count) * sizeof(TriggerRecord);
+  const size_t triggers_size = static_cast<size_t>(raw_header.trigger_count) * kTriggerRecordBytes;
   if (triggers_off + triggers_size > file_size) {
     error = "trigger table overruns file";
     return false;
   }
-  out.triggers.resize(raw_header.trigger_count);
-  for (uint32_t i = 0; i < raw_header.trigger_count; ++i) {
-    std::memcpy(out.triggers[i].data(), buffer.data() + triggers_off + i * sizeof(TriggerRecord),
-                sizeof(TriggerRecord));
-  }
+  out.trigger_count = raw_header.trigger_count;
 
   DiskMultiHeader raw_multi_header{};
   if (!read_struct(buffer, raw_header.multi_header_off, raw_multi_header)) {
@@ -225,8 +221,7 @@ bool parse_lwf_buffer(const uint8_t *data, size_t size, File &out, std::string &
     Single s{};
     s.name = fixed_string(ds.name, sizeof(ds.name));
     s.value_hi = ds.value_hi;
-    s.path_offset = ds.path_offset;
-    if (!has_filenames && s.name.size() < 28) {
+    if (!has_filenames && s.name.size() <= 28) {
       std::memcpy(&s.entry_word28, ds.name + 28, sizeof(s.entry_word28));
     }
     s.pad0 = ds.pad0;
@@ -237,23 +232,10 @@ bool parse_lwf_buffer(const uint8_t *data, size_t size, File &out, std::string &
       out.singles.push_back(std::move(s));
       continue;
     }
-    size_t path_abs = static_cast<size_t>(ds.path_offset);
-    if (path_abs >= file_size) {
-      error = "path offset out of range";
-      return false;
-    }
-    if (path_abs < string_pool_off) {
-      error = "path offset not within string pool";
-      return false;
-    }
-    const size_t path_rel = path_abs - string_pool_off;
-    if (path_rel >= string_pool_size) {
-      error = "path offset not within string pool";
-      return false;
-    }
-    const char *path_ptr = reinterpret_cast<const char *>(buffer.data() + path_abs);
-    const size_t remaining = string_pool_size - path_rel;
-    s.path = fixed_string(path_ptr, std::min<size_t>(remaining, kPathSlotBytes));
+    // Slot i of the pool, whatever the entry's offset says [orig: @ 0x75c6e1..0x75c711]
+    // (the pool's size checked above).
+    s.path = fixed_string(reinterpret_cast<const char *>(buffer.data() + string_pool_off) + i * kPathSlotBytes,
+                          kPathSlotBytes);
 
     out.singles.push_back(std::move(s));
   }
@@ -300,7 +282,6 @@ bool parse_lwf_buffer(const uint8_t *data, size_t size, File &out, std::string &
     p.falloff_radius = dp.falloff_radius;
     p.min_distance = dp.min_distance;
     p.flags = dp.flags;
-    p.reserved0 = dp.reserved0;
 
     for (uint32_t j = 0; j < dp.member_count && j < kMaxSndparmsPerPlaylist; ++j) {
       const uint32_t raw = dp.member_offsets[j];
@@ -376,9 +357,9 @@ bool encode_lwf(const File &file, std::vector<uint8_t> &out, std::string &error)
 
   // Calculate offsets.
   const uint32_t singles_off = header_size;
-  const uint32_t trigger_count = static_cast<uint32_t>(file.triggers.size());
+  const uint32_t trigger_count = file.trigger_count;
   const uint32_t triggers_off = singles_off + single_count * single_entry_size;
-  const uint32_t multi_header_off = triggers_off + trigger_count * static_cast<uint32_t>(sizeof(TriggerRecord));
+  const uint32_t multi_header_off = triggers_off + trigger_count * static_cast<uint32_t>(kTriggerRecordBytes);
   const uint32_t multi_table_off = multi_header_off + multi_header_size;
   const uint32_t playlists_off = multi_table_off + multi_count * multi_entry_size;
   const uint32_t sndparms_off = playlists_off + playlist_count * playlist_entry_size;
@@ -388,7 +369,7 @@ bool encode_lwf(const File &file, std::vector<uint8_t> &out, std::string &error)
   std::vector<uint8_t> string_pool;
   for (const auto &s : file.singles) {
     for (size_t i = 0; i < kPathSlotBytes; ++i) {
-      string_pool.push_back(i < s.path.size() && i + 1 < kPathSlotBytes ? static_cast<uint8_t>(s.path[i]) : 0);
+      string_pool.push_back(i < s.path.size() ? static_cast<uint8_t>(s.path[i]) : 0);
     }
   }
 
@@ -407,9 +388,11 @@ bool encode_lwf(const File &file, std::vector<uint8_t> &out, std::string &error)
   for (uint32_t i = 0; i < single_count; ++i) {
     const auto &s = file.singles[i];
     DiskSingle ds{};
-    std::memcpy(ds.name, s.name.c_str(), std::min(s.name.size(), sizeof(ds.name) - 1));
-    if (file.header.magic != kMagic && s.name.size() < 28) {
-      std::memcpy(ds.name + 28, &s.entry_word28, sizeof(s.entry_word28));
+    std::memcpy(ds.name, s.name.c_str(), std::min(s.name.size(), sizeof(ds.name)));
+    if (file.header.magic != kMagic && s.name.size() <= 28) {
+      // At 28 characters the word's low byte is the name's terminator.
+      const uint32_t word = s.name.size() == 28 ? s.entry_word28 & ~0xFFu : s.entry_word28;
+      std::memcpy(ds.name + 28, &word, sizeof(word));
     }
     ds.value_hi = s.value_hi;
     ds.pad0 = s.pad0;
@@ -420,12 +403,11 @@ bool encode_lwf(const File &file, std::vector<uint8_t> &out, std::string &error)
     write_val(out, ds);
   }
 
-  // Write the trigger records (after the singles, before the multi header).
-  for (const TriggerRecord &record : file.triggers) {
-    write_val(out, record);
-  }
+  // The trigger records (after the singles, before the multi header): their count
+  // kept, each written zero (no reader interprets one).
+  out.insert(out.end(), static_cast<size_t>(trigger_count) * kTriggerRecordBytes, uint8_t{0});
 
-  // Write multi header (preserve original reserved fields for byte-perfect round-trip).
+  // Write the multi header, its reserved words as read.
   DiskMultiHeader mhdr{};
   mhdr.header_size = multi_header_size;
   mhdr.multi_count = multi_count;
@@ -438,7 +420,7 @@ bool encode_lwf(const File &file, std::vector<uint8_t> &out, std::string &error)
   for (const auto &m : file.multis) {
     DiskMulti dm{};
     dm.entry_size = multi_entry_size;
-    std::memcpy(dm.name, m.name.c_str(), std::min(m.name.size(), sizeof(dm.name) - 1));
+    std::memcpy(dm.name, m.name.c_str(), std::min(m.name.size(), sizeof(dm.name)));
     dm.pitch_base = m.pitch_base;
     dm.pitch_random_range = m.pitch_random_range;
     dm.playlist_count = static_cast<uint32_t>(m.playlist_indices.size());
@@ -457,7 +439,6 @@ bool encode_lwf(const File &file, std::vector<uint8_t> &out, std::string &error)
     dp.falloff_radius = pl.falloff_radius;
     dp.min_distance = pl.min_distance;
     dp.flags = pl.flags;
-    dp.reserved0 = pl.reserved0;
     for (size_t i = 0; i < pl.sndparm_indices.size() && i < kMaxSndparmsPerPlaylist; ++i) {
       dp.member_offsets[i] = sndparms_off + pl.sndparm_indices[i] * sndparm_entry_size;
     }

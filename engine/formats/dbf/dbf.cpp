@@ -68,8 +68,11 @@ bool parse_dbf_memory(const uint8_t *data, size_t size, File &out, std::string &
 		Group group;
 		group.group_name = fixed_string(raw_group.group_name, sizeof(raw_group.group_name));
 		group.idlist_count = raw_group.idlist_count;
+		// The id list's entries up to its count; the bytes past them are the tools' stale memory, which the
+		// writer writes zero (ADR 0003).
 		group.def_id_indices.assign(raw_group.def_id_indices,
-				raw_group.def_id_indices + sizeof(raw_group.def_id_indices));
+				raw_group.def_id_indices +
+						std::min<size_t>(raw_group.idlist_count, sizeof(raw_group.def_id_indices)));
 
 		for (uint32_t j = 0; j < raw_group.line_count; ++j) {
 			if (offset + sizeof(RawLineRecord) > size) {

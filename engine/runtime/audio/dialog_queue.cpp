@@ -35,7 +35,7 @@ const lwf::Single *find_dialog_wave(const lwf::File &sounds, const std::string &
 		if (!strutil::iequals(single.name, name)) continue;
 		// The first of the name is the one: another magic's needs its dword +28 set, else none.
 		if (sounds.header.magic == lwf::kMagic) return &single;
-		return single.entry_word28 != 0 ? &single : nullptr;
+		return single.name.size() > 28 || single.entry_word28 != 0 ? &single : nullptr;
 	}
 	return nullptr;
 }
