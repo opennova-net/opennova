@@ -211,6 +211,14 @@ void ClientRuntime::apply_zone_timer_window(const ZoneTimerWindow &window) {
 	adopt_tracked_window(window);
 }
 
+void ClientRuntime::set_local_player_position(const world::World &world) {
+	const world::Entity *player = world.registry.get(world.cached.local_player);
+	if (player == nullptr) return;
+	local_player_position_[0] = world::to_fixed(player->position.x);
+	local_player_position_[1] = world::to_fixed(player->position.y);
+	local_player_position_[2] = world::to_fixed(player->position.z);
+}
+
 void ClientRuntime::adopt_tracked_window(const ZoneTimerWindow &window) {
 	// [orig: NapiNPClientMsg_ZoneTimerWindow @0x428ae0, the cluster arm
 	//  @0x428c39..0x428d60]
@@ -227,15 +235,18 @@ void ClientRuntime::adopt_tracked_window(const ZoneTimerWindow &window) {
 		adopt = true; // nothing tracked: take it, progress untouched
 	} else {
 		// Another entity: adopted only when at least as near as the tracked one
-		// and within 20.0 u of the local player. The local position is the
-		// recipient's 0x0A anchor (retail reads g_LocalPlayerEntity->Position).
+		// and within 20.0 u of the local player's Position, never the 0x0A
+		// anchor, which sits at its eye (D-NET-518)
+		// [orig: g_LocalPlayerEntity->Position @0x428C19 / @0x428C2D / @0x428C42,
+		//  @0x428C93 / @0x428CA2 / @0x428CB1].
 		const replication::ClientState &cs = view_.state();
+		const int32_t *local = local_player_position_;
 		auto dist_to = [&](uint16_t handle) -> double {
 			const replication::ClientEntityState *row = cs.find(handle);
 			if (row == nullptr) return 1.0e18;
-			const double dx = std::fabs(static_cast<double>(cs.anchor_x) - row->x);
-			const double dy = std::fabs(static_cast<double>(cs.anchor_y) - row->y);
-			const double dz = std::fabs(static_cast<double>(cs.anchor_z) - row->z);
+			const double dx = std::fabs(static_cast<double>(local[0]) - row->x);
+			const double dy = std::fabs(static_cast<double>(local[1]) - row->y);
+			const double dz = std::fabs(static_cast<double>(local[2]) - row->z);
 			return std::sqrt(dx * dx + dy * dy + dz * dz);
 		};
 		const double old_dist = dist_to(tracked_window_.zone);

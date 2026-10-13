@@ -584,6 +584,7 @@ void HostRole::run_tick(const TickInput &input) {
 		// [orig: Game_ProcessMainFrame — CNetQuality_SetLevel @0x52659b,
 		//  CNetQuality_UpdateIndicators @0x52668d, Server_TickUpdate @0x5266b6].
 		state.client_runtime->set_net_quality_level(ctx.net_quality_level);
+		state.client_runtime->set_local_player_position(kernel.world);
 		state.client_runtime->Client_ProcessNetworkFrame(now);
 		state.client_runtime->apply_received_effects(kernel.world);
 		state.client_runtime->flush_host_sends(); // the receive handlers' own sends

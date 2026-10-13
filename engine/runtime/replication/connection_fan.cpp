@@ -471,11 +471,22 @@ const world::Entity *owned_entity_for_emit(const world::World &w,
 	return entity;
 }
 
+// The anchor is the recipient's EYE: its Position plus its CameraOffset
+// (entity+0x6C/+0x70/+0x74, ours's eye_offset mirror the body tick stamps),
+// stored as the priority refs ahead of the header, the priority list's
+// distance and angles and every compact record (the round events' origins
+// included), so the recipient's own record encodes -CameraOffset. The round
+// events' score and the list's LOS ray read the body instead (build_connection_s2c).
+// [orig: Server_SendEntityStateToPlayer @0x517BEF..0x517C13 (g_PriorityRefX/Y/Z
+//  = Position + [+0x6C/+0x70/+0x74]); the list @0x517C1E]
 PlayerReplicationState anchor_for_owned_entity(const world::Entity &entity) {
 	PlayerReplicationState anchor;
-	anchor.spawn_x = static_cast<uint32_t>(world::to_fixed(entity.position.x));
-	anchor.spawn_y = static_cast<uint32_t>(world::to_fixed(entity.position.y));
-	anchor.spawn_z = static_cast<uint32_t>(world::to_fixed(entity.position.z));
+	anchor.spawn_x = static_cast<uint32_t>(world::to_fixed(entity.position.x)) +
+			static_cast<uint32_t>(entity.eye_offset_x);
+	anchor.spawn_y = static_cast<uint32_t>(world::to_fixed(entity.position.y)) +
+			static_cast<uint32_t>(entity.eye_offset_y);
+	anchor.spawn_z = static_cast<uint32_t>(world::to_fixed(entity.position.z)) +
+			static_cast<uint32_t>(entity.eye_offset_z);
 	return anchor;
 }
 
@@ -550,6 +561,7 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
                                                       Connection &conn,
                                                       const std::vector<GameEntitySnapshot> &entities,
                                                       const PlayerReplicationState &anchor,
+                                                      const int32_t (&body)[3],
                                                       std::size_t header_bytes,
                                                       std::size_t hard_frame_limit,
                                                       std::size_t frame_budget) {
@@ -622,9 +634,8 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 
 		// distanceTiles = (sqrt(dx^2 + dy^2 + (dz/2)^2) - boundRadius) >> 16 against the
 		// recipient anchor [orig: @0x50e925; z half-weighted]. boundRadius (entity+0) is
-		// unmodeled (0). The original anchor is the recipient EYE pos (entity pos + camera
-		// offset entity+0x6C..); ours is the owned entity's position — the header carries
-		// whichever anchor was used, so decompression stays exact either way.
+		// unmodeled (0). The anchor is the recipient EYE pos (entity pos + camera
+		// offset entity+0x6C..), as the header carries it (anchor_for_owned_entity).
 		// Squared in double like retail's fild/fmul — the int64 product can
 		// overflow at map-corner separations.
 		const int64_t dx = int64_t(e.x) - ax;
@@ -717,8 +728,11 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 				// (@0x53b130's own endpoint recipe is the tracked follow-up above)
 				// — explicit at the call site since line_of_sight_clear takes
 				// exact endpoints (2026-08-13).
+				// The ray starts at the recipient's body Position, not the eye
+				// refs [orig: `lea edx, [ecx+4]` @0x50EACD (pool 0), @0x50EFA1..
+				// 0x50EFA4 (pool 1), heightOffset 0].
 				constexpr int32_t kSightLift = 0xE666; // 0.9 u
-				const int32_t a3[3] = {int32_t(ax), int32_t(ay), int32_t(az) + kSightLift};
+				const int32_t a3[3] = {body[0], body[1], body[2] + kSightLift};
 				const int32_t b3[3] = {e.x, e.y, e.z + kSightLift};
 				// The ray's collision scratch is write-only bookkeeping; the world is
 				// otherwise untouched (the AiSystem method itself is const).
@@ -818,6 +832,7 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 // ---------------------------------------------------------------------------
 std::vector<RoundEventRecord> select_round_events(const world::World &w, Connection &conn,
                                                   const PlayerReplicationState &anchor,
+                                                  const int32_t (&body)[3],
                                                   std::size_t budget_left,
                                                   std::size_t hard_budget_left) {
 	std::vector<RoundEventRecord> out;
@@ -871,9 +886,13 @@ std::vector<RoundEventRecord> select_round_events(const world::World &w, Connect
 		const int64_t fwd_y = ((cy * cp) >> 22) >> 6;
 		const int64_t fwd_z = sp >> 6;
 
-		const int64_t dx = ax - ev.origin_x; // recipient - fire origin [orig: @0x500015]
-		const int64_t dy = ay - ev.origin_y;
-		const int64_t dz = az - ev.origin_z;
+		// The recipient's body Position, never the eye refs: the score loads
+		// the slot's entity and reads its Position [orig: `mov eax, [edi]`
+		// @0x50000A, Position @0x50000C..0x500012; recipient - fire origin
+		// @0x500015..0x50001B].
+		const int64_t dx = int64_t(body[0]) - ev.origin_x;
+		const int64_t dy = int64_t(body[1]) - ev.origin_y;
+		const int64_t dz = int64_t(body[2]) - ev.origin_z;
 
 		// Projection of the recipient onto the fire line, clamped to [0, 1000u]
 		// [orig: @0x500072 rounding-summed dot; clamp @0x500081].
@@ -1105,6 +1124,12 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 	// recipient entity before ++playerSlot+100566 @0x517BE8]
 	conn.owned_entity_spawn_id = owned->registry_spawn_id;
 	const PlayerReplicationState anchor = anchor_for_owned_entity(*owned);
+	// The recipient's body Position, which the round-event score and the
+	// priority list's LOS start read where the rest reads the eye anchor
+	// [orig: Server_BuildRoundEventListForPlayer @0x50000A..0x500012;
+	//  Server_BuildEntityPriorityList @0x50EACD / @0x50EFA1..0x50EFA4].
+	const int32_t body[3] = {world::to_fixed(owned->position.x),
+			world::to_fixed(owned->position.y), world::to_fixed(owned->position.z)};
     // The retail temporary global is restored after this recipient's write.
     // Keep that budget local so one peer's NAK cannot affect another peer.
     // [orig: Server_SendEntityStateToPlayer @0x517c58..0x517c9a; halving @0x517c62]
@@ -1262,7 +1287,7 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 	// tag-driven either way. (D-NET-152/154)
 	std::vector<RoundEventRecord> rounds =
 			select_round_events(
-					w, conn, anchor,
+					w, conn, anchor, body,
 					frame_budget > header_bytes ? frame_budget - header_bytes : 0,
 					hard_event_bytes);
 	std::size_t rounds_bytes = 0;
@@ -1271,7 +1296,7 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 	lap.mark(devtools::Slot::SIM_REPLICATION_ROUNDS);
 	const std::vector<GameEntitySnapshot> selected =
 			select_frame_entities(
-					w, conn, ents, anchor, header_bytes + rounds_bytes,
+					w, conn, ents, anchor, body, header_bytes + rounds_bytes,
 					max_frame_body_bytes, frame_budget);
 	lap.mark(devtools::Slot::SIM_REPLICATION_ENTITIES);
 

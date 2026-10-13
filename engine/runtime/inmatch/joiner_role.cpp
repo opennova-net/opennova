@@ -1192,6 +1192,7 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 			rt.is_deployed() && e != nullptr && ae != nullptr &&
 			e->alive && e->health > 0 && (e->flags & 2u) == 0u &&
 			!redeploy_release_pending_;
+	rt.set_local_player_position(world); // L, the receive handlers' local player
 	if (can_offer_uplink) {
 		// The interest list scores the decoded entities against L; the HUD
 		// target cursor is the aim acquisition's combat target, else its
