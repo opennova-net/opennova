@@ -9,6 +9,7 @@
 #include <editor/preview/mission_ground_overlay.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/model_preview_camera.h>
+#include <editor/preview/terrain_brush_overlay.h>
 #include <editor/preview/terrain_heights_patch.h>
 #include <editor/preview/terrain_maps_patch.h>
 #include <editor/preview/terrain_patch.h>
@@ -37,20 +38,21 @@ inline constexpr const char *kTerrainNeutral = "none";
 
 // How a terrain viewport draws (its options): the using mission whose environment, tile set, tiles and clock
 // it is drawn with ("" the first that runs on it; kTerrainNeutral none: the engine's own environment and the
-// terrain's own tiles), what it tints the terrain with (DI-29's overlay), and the layers drawn (the foliage, the
-// water).
+// terrain's own tiles), what it tints the terrain with (DI-29's overlay) and whether the overlay's legend is open over
+// the picture's corner (S25, the painting feedback: the canvas's alone), and the layers drawn (the foliage, the water).
 struct TerrainViewportOptions {
 	std::string mission;
 	MissionGroundOverlay overlay = MissionGroundOverlay::None;
+	bool legend = true;
 	bool foliage = true;
 	bool water = true;
 	bool operator==(const TerrainViewportOptions &o) const {
-		return mission == o.mission && overlay == o.overlay && foliage == o.foliage && water == o.water;
+		return mission == o.mission && overlay == o.overlay && legend == o.legend && foliage == o.foliage && water == o.water;
 	}
 	bool operator!=(const TerrainViewportOptions &o) const { return !(*this == o); }
 };
 
-// The options on the wire (the envelope's `options`, a SetViewport's): {mission, overlay, show {foliage, water}}.
+// The options on the wire (the envelope's `options`, a SetViewport's): {mission, overlay, legend, show {foliage, water}}.
 io::JsonValue terrain_options_to_json(const TerrainViewportOptions &options);
 // The change a SetViewport makes to set the options to `options`, and to set the camera.
 std::string terrain_options_change(const TerrainViewportOptions &options);
@@ -212,6 +214,8 @@ private:
 	MissionOverlayImage overlay_;
 	uint64_t overlay_ground_ = UINT64_MAX;
 	uint64_t overlay_serial_ = 0;
+	// The overlay option as the terrain brush sets it while it paints a map here (S25, the painting feedback).
+	BrushOverlay brush_overlay_;
 	bool surface_ = false;
 	io::JsonValue drawn_;
 	float fog_reach_ = 0.0f;

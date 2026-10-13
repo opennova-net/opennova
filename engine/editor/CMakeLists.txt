@@ -245,6 +245,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/terrain_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/terrain_brush.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/terrain_brush_canvas.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/terrain_brush_overlay.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/terrain_brush_shapes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/terrain_brush_spaces.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/terrain_canvas.cpp
@@ -433,6 +434,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/editor_windows.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/environment_inspector.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/terrain_inspector.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/overlay_legend.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/terrain_palettes.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/terrain_pane.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/terrain_sculpt_parts.cpp

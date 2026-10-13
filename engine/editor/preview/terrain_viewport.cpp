@@ -53,7 +53,7 @@ std::string stem_of(const std::string &path) {
 // mission named must be one, or kTerrainNeutral).
 bool read_options(const JsonValue &json, const TerrainUses &uses, TerrainViewportOptions &held, std::string &error) {
 	if (!json.is_object()) {
-		error = "options is an object {mission, overlay, show}.";
+		error = "options is an object {mission, overlay, legend, show}.";
 		return false;
 	}
 	TerrainViewportOptions options = held;
@@ -85,6 +85,13 @@ bool read_options(const JsonValue &json, const TerrainUses &uses, TerrainViewpor
 				        "terrain.";
 				return false;
 			}
+		} else if (key == "legend") {
+			if (!value.is_bool()) {
+				error = "options.legend is true (the overlay's legend open over the picture's corner) or false (folded to its "
+				        "title).";
+				return false;
+			}
+			options.legend = value.boolean;
 		} else if (key == "show") {
 			if (!value.is_object()) {
 				error = "options.show is {foliage, water}.";
@@ -98,7 +105,7 @@ bool read_options(const JsonValue &json, const TerrainUses &uses, TerrainViewpor
 				(shown.key == "foliage" ? options.foliage : options.water) = shown.value.boolean;
 			}
 		} else {
-			error = "Unknown terrain option \"" + key + "\" (it takes mission, overlay, show).";
+			error = "Unknown terrain option \"" + key + "\" (it takes mission, overlay, legend, show).";
 			return false;
 		}
 	}
@@ -123,6 +130,7 @@ io::JsonValue terrain_options_to_json(const TerrainViewportOptions &options) {
 	JsonValue out = JsonValue::make_object();
 	out.set("mission", json_string(options.mission));
 	out.set("overlay", json_string(mission_ground_overlay_token(options.overlay)));
+	out.set("legend", JsonValue::make_bool(options.legend));
 	JsonValue show = JsonValue::make_object();
 	show.set("foliage", JsonValue::make_bool(options.foliage));
 	show.set("water", JsonValue::make_bool(options.water));
@@ -244,7 +252,11 @@ bool TerrainViewport::place_(const SessionView &view) {
 
 void TerrainViewport::follow_ground_(const SessionView &view) const {
 	if (!view.findings.assets) return;
+	const int reads = ground_.reads();
 	ground_.follow(view.findings.assets, view.findings.assets->generation(), header_, mission_name_);
+	// S25, the painting feedback: read whole, it holds an imported terrain's maps as last imported; the paint of their
+	// open sources laid over them.
+	if (ground_.reads() != reads) lay_open_sources(view, path(), ground_);
 }
 
 bool TerrainViewport::follow_overlay_(const SessionView &view) {
@@ -260,6 +272,7 @@ bool TerrainViewport::follow_overlay_(const SessionView &view) {
 	overlay_ = mission_ground_overlay(ground_, kind);
 	overlay_ground_ = ground_.revision();
 	++overlay_serial_;
+	overlay_.made = overlay_serial_;
 	return true;
 }
 
@@ -325,6 +338,9 @@ ViewportAction TerrainViewport::follow_(const ViewportInput &input, PreviewClock
 	}
 	reason_ = TerrainViewStatus::Ready;
 	detail_.clear();
+	// S25, the painting feedback: the overlay of the map the terrain brush paints here, while it paints it (a stroke of
+	// the surface or foliage map changes nothing the device draws), the person's own again after.
+	if (brush_overlay_.follow(terrain_brush_overlay(view, path()), options_.overlay)) state_moved();
 	const bool placed = place_(view);
 	const float reach = fog_reach_;
 	if (placed || fog_reach_ <= 0.0f) {
@@ -485,6 +501,8 @@ void TerrainViewport::apply_(const io::JsonValue &json, PreviewClock &) {
 			if (options.foliage != options_.foliage || options.water != options_.water || options.overlay != options_.overlay)
 				options_moved_ = true;
 			options_ = options;
+			// S25: an overlay the person names is theirs over the brush's (BrushOverlay::chosen).
+			if (member->get("overlay")) brush_overlay_.chosen();
 		}
 	}
 	if (const JsonValue *member = json.get("camera")) mission_camera_from_json(*member, camera_, error);
@@ -667,6 +685,8 @@ io::JsonValue TerrainViewport::body_json(const ViewportInput &) const {
 	out.set("fog_reach", json_number(double(fog_reach_)));
 	// The ground overlay the options ask (DI-29): its legend and extent, null with none asked.
 	out.set("overlay", options_.overlay == MissionGroundOverlay::None ? JsonValue::make_null() : mission_overlay_to_json(overlay_));
+	// S25: why it shows, while the terrain brush shows it ({overlay, returns_to}; null when the person's own).
+	out.set("brush_overlay", brush_overlay_.to_json());
 	JsonValue missing = JsonValue::make_array();
 	for (const std::string &name : missing_) missing.push(json_string(name));
 	out.set("missing", std::move(missing));
