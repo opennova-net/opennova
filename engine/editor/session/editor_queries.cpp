@@ -57,6 +57,7 @@
 #include <editor/session/texture_use_index.h>
 #include <editor/session/view_json.h>
 #include <editor/session/workspace_parts.h>
+#include <editor/session/row_table.h>
 
 namespace opennova::editor {
 
@@ -299,14 +300,6 @@ constexpr QueryParam kImportPreviewParams[] = {
 };
 
 // --- helpers -------------------------------------------------------------------------------------
-
-constexpr bool same_text(const char *a, const char *b) {
-	while (*a && *a == *b) {
-		++a;
-		++b;
-	}
-	return *a == *b;
-}
 
 std::string no_document(const std::string &path) {
 	return path.empty() ? std::string("no document is open.") : "no open document " + path + ".";
@@ -1890,13 +1883,7 @@ constexpr EditorQueryRow kRows[] = {
 
 static_assert(std::size(kRows) == kEditorQueryKindCount, "every query kind has exactly one row");
 
-constexpr bool rows_in_order() {
-	for (size_t i = 0; i < kEditorQueryKindCount; ++i)
-		if (kRows[i].kind != static_cast<EditorQueryKind>(i))
-			return false;
-	return true;
-}
-static_assert(rows_in_order(), "the query rows follow the enum's order");
+static_assert(rows_follow(kRows, &EditorQueryRow::kind), "the query rows follow the enum's order");
 
 // Every row a token of its own, a handler, a doc and a concern it reads at least; every param a
 // name of its own in its row and a doc; a paged row takes a limit and an offset or a cursor.
@@ -2228,13 +2215,7 @@ const EditorQueryRow &editor_query_row(EditorQueryKind kind) {
 }
 
 bool editor_query_from_token(std::string_view token, EditorQueryKind &out) {
-	for (const EditorQueryRow &row : kRows) {
-		if (token == row.token) {
-			out = row.kind;
-			return true;
-		}
-	}
-	return false;
+	return row_from_token(kRows, &EditorQueryRow::kind, &EditorQueryRow::token, token, out);
 }
 
 const char *query_json_token(QueryJson type) {

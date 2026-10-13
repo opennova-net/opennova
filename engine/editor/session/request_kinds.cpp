@@ -23,6 +23,7 @@
 #include <editor/session/texture_show_use.h>
 #include <editor/session/unsaved_guard.h>
 #include <editor/session/workspace_parts.h>
+#include <editor/session/row_table.h>
 
 namespace opennova::editor {
 
@@ -1367,21 +1368,7 @@ constexpr RequestKindRow kRows[] = {
 static_assert(
 		std::size(kRows) == kEditorRequestKindCount, "every request kind has exactly one row");
 
-constexpr bool rows_in_order() {
-	for (size_t i = 0; i < kEditorRequestKindCount; ++i)
-		if (kRows[i].kind != static_cast<EditorRequestKind>(i))
-			return false;
-	return true;
-}
-static_assert(rows_in_order(), "the request kind rows follow the enum's order");
-
-constexpr bool same_text(const char *a, const char *b) {
-	while (*a && *a == *b) {
-		++a;
-		++b;
-	}
-	return *a == *b;
-}
+static_assert(rows_follow(kRows, &RequestKindRow::kind), "the request kind rows follow the enum's order");
 
 // Every row has a token of its own and says what it does.
 constexpr bool rows_named() {
@@ -1544,13 +1531,7 @@ const RequestKindRow &request_kind_row(EditorRequestKind kind) {
 }
 
 bool request_kind_from_token(const std::string &token, EditorRequestKind &out) {
-	for (const RequestKindRow &row : kRows) {
-		if (token == row.token) {
-			out = row.kind;
-			return true;
-		}
-	}
-	return false;
+	return row_from_token(kRows, &RequestKindRow::kind, &RequestKindRow::token, token, out);
 }
 
 GateAnswer gate_answer(EditorRequestKind kind, const OperationStatus &running) {

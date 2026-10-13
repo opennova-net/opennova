@@ -22,6 +22,7 @@
 #include <editor/session/session_json.h>
 #include <editor/session/session_operation.h>
 #include <editor/session/view/session_view.h>
+#include <editor/session/row_table.h>
 
 namespace opennova::project {
 
@@ -1308,14 +1309,6 @@ constexpr bool rows_in_order() {
 }
 static_assert(rows_in_order(), "the verb rows follow the enum's order");
 
-constexpr bool same_text(const char *a, const char *b) {
-	while (*a && *a == *b) {
-		++a;
-		++b;
-	}
-	return *a == *b;
-}
-
 // Every verb a token of its own, its usage, a doc and what runs it; the project's directory its
 // first argument, its arguments by place required before optional.
 constexpr bool verbs_named() {
@@ -1324,8 +1317,8 @@ constexpr bool verbs_named() {
 		if (!row.cli.token[0] || !row.cli.synopsis[0] || !row.cli.doc[0] || !row.run || row.positional_count == 0)
 			return false;
 		for (size_t j = i + 1; j < kCliVerbCount; ++j)
-			if (same_text(row.cli.token, kRows[j].cli.token)) return false;
-		if (!same_text(row.positionals[0].words, "a project directory") || !row.positionals[0].required) return false;
+			if (editor::same_text(row.cli.token, kRows[j].cli.token)) return false;
+		if (!editor::same_text(row.positionals[0].words, "a project directory") || !row.positionals[0].required) return false;
 		for (size_t p = 1; p < row.positional_count; ++p)
 			if (row.positionals[p].required && !row.positionals[p - 1].required) return false;
 		// One argument of many at most, and one that is required: the arguments after it are counted from the end.
@@ -1375,9 +1368,9 @@ constexpr bool options_named() {
 	for (const VerbRow &row : kRows) {
 		for (size_t i = 0; i < row.option_count; ++i) {
 			for (size_t j = i + 1; j < row.option_count; ++j)
-				if (same_text(row.options[i].name, row.options[j].name)) return false;
+				if (editor::same_text(row.options[i].name, row.options[j].name)) return false;
 			for (const CliOption &common : kCommonOptions)
-				if (same_text(row.options[i].name, common.name)) return false;
+				if (editor::same_text(row.options[i].name, common.name)) return false;
 		}
 	}
 	return true;

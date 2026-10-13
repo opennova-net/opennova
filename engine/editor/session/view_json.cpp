@@ -20,6 +20,7 @@
 #include <editor/requirements/requirements.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/workspace_parts.h>
+#include <editor/session/row_table.h>
 
 namespace opennova::editor {
 
@@ -641,21 +642,7 @@ constexpr ViewSectionRow kSections[] = {
 
 static_assert(std::size(kSections) == kViewSectionCount, "every view section has exactly one row");
 
-constexpr bool sections_in_order() {
-	for (size_t i = 0; i < kViewSectionCount; ++i)
-		if (kSections[i].section != static_cast<ViewSection>(i))
-			return false;
-	return true;
-}
-static_assert(sections_in_order(), "the view section rows follow the enum's order");
-
-constexpr bool same_text(const char *a, const char *b) {
-	while (*a && *a == *b) {
-		++a;
-		++b;
-	}
-	return *a == *b;
-}
+static_assert(rows_follow(kSections, &ViewSectionRow::section), "the view section rows follow the enum's order");
 
 // Every section a token of its own, a writer, a concern it follows and a doc.
 constexpr bool sections_named() {
@@ -762,13 +749,7 @@ const ViewSectionRow &view_section_row(ViewSection section) {
 }
 
 bool view_section_from_token(const std::string &token, ViewSection &out) {
-	for (const ViewSectionRow &row : kSections) {
-		if (token == row.token) {
-			out = row.section;
-			return true;
-		}
-	}
-	return false;
+	return row_from_token(kSections, &ViewSectionRow::section, &ViewSectionRow::token, token, out);
 }
 
 JsonValue view_section_to_json(const SessionView &view, ViewSection section) {

@@ -1,4 +1,5 @@
 #include <editor/session/request_fields.h>
+#include <editor/session/row_table.h>
 
 #include <iterator>
 
@@ -329,21 +330,7 @@ constexpr RequestField kFields[] = {
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");
 
-constexpr bool fields_in_order() {
-	for (size_t i = 0; i < kRequestFieldCount; ++i)
-		if (kFields[i].id != static_cast<RequestFieldId>(i))
-			return false;
-	return true;
-}
-static_assert(fields_in_order(), "the request field rows follow the enum's order");
-
-constexpr bool same_text(const char *a, const char *b) {
-	while (*a && *a == *b) {
-		++a;
-		++b;
-	}
-	return *a == *b;
-}
+static_assert(rows_follow(kFields, &RequestField::id), "the request field rows follow the enum's order");
 
 // Every token its own, never the request's "kind", and every field says what it means.
 constexpr bool fields_named() {
@@ -366,13 +353,7 @@ const RequestField &request_field(RequestFieldId id) {
 }
 
 bool request_field_from_token(const std::string &token, RequestFieldId &out) {
-	for (const RequestField &row : kFields) {
-		if (token == row.token) {
-			out = row.id;
-			return true;
-		}
-	}
-	return false;
+	return row_from_token(kFields, &RequestField::id, &RequestField::token, token, out);
 }
 
 const char *request_json_token(RequestJson json) {
