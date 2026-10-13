@@ -150,8 +150,11 @@ func test_a_sculpt_is_an_update_of_the_missions_view() -> void:
 	# The stroke ends; its bake lands in the background: its tiles put in place, still nothing built.
 	var last := _stroke([[AT.x + 4.0, AT.y]], true)
 	assert_true(bool(last.get("outcome", {}).get("done", false)), str(last.get("outcome")))
+	# The seed and the region bake run on the bake's threads: a deadline in time, not frames (a CI runner's
+	# few cores take far longer than a desktop's).
 	var landed := false
-	for _frame in 2400:
+	var deadline := Time.get_ticks_msec() + 180_000
+	while Time.get_ticks_msec() < deadline:
 		_app.pump()
 		await get_tree().process_frame
 		var heights: Dictionary = _seam.query("terrain", {"op": "bake", "path": MISSION})
