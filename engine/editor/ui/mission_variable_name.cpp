@@ -11,6 +11,7 @@
 
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_variable_names.h>
+#include <formats/mission/mission_mis.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
@@ -24,7 +25,7 @@ const ImVec4 kWarn(0.95f, 0.75f, 0.35f, 1.0f);
 
 // What a field holds while it is typed in, and the refusal its last commit met, by document and variable.
 struct FieldState {
-	char text[32] = {};
+	char text[mission::kMisDescriptionChars + 1] = {};
 	bool typing = false; // the field was active last frame: its text is the person's
 	std::string refusal;
 	int value = 0;            // the value typed for Set
@@ -42,7 +43,6 @@ std::map<std::pair<uint64_t, int64_t>, FieldState> &field_states() {
 void draw_variable_name_field(Workspace &workspace, const MissionDocument &mission, int64_t index, bool editable) {
 	FieldState &state = field_states()[{mission.identity(), index}];
 	const std::string name = mission_variable_name(mission, index);
-	const bool layers = mission_variable_table(mission) == mission::LayerTable::LayerNames;
 	// Past V255: the script's own VAR words, which the script names itself (no name is kept for them).
 	const bool past = index > mission::kVariableNameIndexMax;
 	ImGui::PushID("variable_name");
@@ -52,19 +52,17 @@ void draw_variable_name_field(Workspace &workspace, const MissionDocument &missi
 	ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14.0f);
 	// The mission's name while the field is not being typed in.
 	if (!state.typing) std::snprintf(state.text, sizeof(state.text), "%s", name.c_str());
-	ImGui::BeginDisabled(!editable || layers || past);
+	ImGui::BeginDisabled(!editable || past);
 	const bool entered = ImGui::InputText("##name", state.text, sizeof(state.text), ImGuiInputTextFlags_EnterReturnsTrue);
 	state.typing = ImGui::IsItemActive();
 	ImGui::EndDisabled();
-	const size_t room = mission::variable_name_room(int32_t(index));
-	ui_kit::tooltip(past     ? std::string("A word past V255 holds one of the mission's script's own VAR declarations, "
-	                                       "which the script names itself: no name is kept for it.")
-	                : layers ? std::string("The mission's layer table holds the original editor's layer names: no "
-	                                     "variable name is written over them.")
-	                       : "What the editor calls V" + std::to_string(index) + " in this mission, up to " +
-	                                 std::to_string(room) + " characters. The game never reads it: it is kept in the "
-	                                 "mission's layer table, which the game reads and drops. Empty takes the name away.");
-	if ((entered || ImGui::IsItemDeactivatedAfterEdit()) && editable && !layers && !past && name != state.text) {
+	ui_kit::tooltip(past ? std::string("A word past V255 holds one of the mission's script's own VAR declarations, "
+	                                   "which the script names itself: no name is kept for it.")
+	                     : "What the editor calls V" + std::to_string(index) + " in this mission, up to " +
+	                               std::to_string(mission::kMisDescriptionChars) +
+	                               " characters. The game never reads it: it is kept in the .mis beside the mission, on "
+	                               "a line both original readers skip. Empty takes the name away.");
+	if ((entered || ImGui::IsItemDeactivatedAfterEdit()) && editable && !past && name != state.text) {
 		std::vector<Edit> edits;
 		state.refusal.clear();
 		if (!mission_variable_name_edits(mission, index, state.text, edits, state.refusal)) {
@@ -108,13 +106,9 @@ void draw_variable_live(Workspace &workspace, const MissionDocument &mission, in
 }
 
 void draw_variable_names_left(const MissionDocument &mission) {
-	if (mission_variable_table(mission) == mission::LayerTable::LayerNames) {
-		ImGui::TextDisabled("Variables take no name here: the layer table holds the original editor's layer names.");
-		return;
-	}
 	const size_t left = mission_variable_names_left(mission);
 	ImGui::TextDisabled("%zu more variable%s can take a name (%zu at most).", left, left == 1 ? "" : "s",
-	                    mission::kMaxVariableNames);
+	                    mission::kVariableNameCount);
 }
 
 } // namespace opennova::editor
