@@ -179,12 +179,12 @@ int written_items() {
 	{
 		Items read(kItems);
 		read.file.entries[0].hp = 2500;
-		failures += reads_back("items.def", "items: hp", read.save(), " hp 2500\r\n");
+		failures += reads_back("items.def", "items: hp", read.save(), "\thp 2500\r\n");
 	}
 	{
 		Items read(kItems);
 		read.file.entries[0].attrib &= ~DEF_ITEM_ATTRIB_PLAYERCONTROL;
-		failures += reads_back("items.def", "items: an attribute cleared", read.save(), " attrib: aidata\r\n");
+		failures += reads_back("items.def", "items: an attribute cleared", read.save(), "\tattrib: aidata\r\n");
 	}
 	{
 		Items read(kItems);
@@ -194,7 +194,7 @@ int written_items() {
 	{
 		Items read(kItems);
 		read.file.entries[0].shadow_width = 5.0f;
-		failures += reads_back("items.def", "items: a shadow's width", read.save(), " shadow shadow8.tga 5 8.9 0 -0.14\r\n");
+		failures += reads_back("items.def", "items: a shadow's width", read.save(), "\tshadow shadow8.tga 5 8.9 0 -0.14\r\n");
 	}
 	{
 		Items read(kItems);

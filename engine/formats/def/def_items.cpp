@@ -153,7 +153,6 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
     def_init_item(current);
     int in_block = 0;
     bool powerup_branch = false, numeric_branch = false;
-    bool indent_noted = false;
     size_t emplacement_attachments_cap = 0;
     size_t number = 0; // the line a finding names, counting from 1
 
@@ -936,9 +935,6 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
 
         if (parsed) {
             validate_property(DefRecordKind::Item, as_read.c_str(), as_read.size(), current.unmodeled_count, report, number, current.display_name);
-            // What a writer keeps of the line: its place in the record's order, the file's indentation.
-            def_note_line(DefRecordKind::Item, current.line_order, key, strlen(key));
-            def_note_indent(out->layout, indent_noted, line, line_len);
         }
         if (!parsed) {
             authoring_issue(current.unmodeled_count, report, number, current.display_name, as_read.c_str(), as_read.size());

@@ -77,63 +77,6 @@ DefWriteResult finish(DefRecordWriter &writer) {
 	return std::move(writer.result);
 }
 
-// How each record of a write is put down (its lines in the order it was read in, or in the table's:
-// `tabled`); the records whose write the reparse check refused (`refused`, out); and whether a record written in
-// the table's order though it has an order of its own is said (`report`, into DefWriteResult::reordered).
-struct WriteOrder {
-	bool keep = true; // false: the whole file in the table's order
-	std::vector<bool> table;
-	std::vector<size_t> refused;
-	bool report = false;
-	bool tabled(size_t record) const { return record < table.size() && table[record]; }
-};
-
-// A writer over a file's layout (DefLayout): its indentation.
-DefRecordWriter writer_for(const DefLayout &layout) {
-	DefRecordWriter writer;
-	if (layout.indent[0]) writer.indent = layout.indent;
-	return writer;
-}
-
-// Record `i`'s lines in the order it keeps, saying so where a record with an order of its own is written
-// in the table's.
-void order_record(DefRecordWriter &writer, const WriteOrder &order, size_t i, const DefLineOrder &own, const char *name) {
-	writer.keep_order = !order.tabled(i);
-	if (order.report && !writer.keep_order && own.count) writer.result.reordered.push_back(name);
-}
-
-// The reparse check of record `i`, which marks it refused where it added a failure.
-template <class Check> void check_one(DefRecordWriter &writer, WriteOrder &order, size_t i, Check check) {
-	const size_t before = writer.result.diagnostics.size();
-	check();
-	if (writer.result.diagnostics.size() != before) order.refused.push_back(i);
-}
-
-// A file's records each in the order it was read in; where the reparse check refuses a record (an order its
-// lines cannot carry: a deceleration before the acceleration that defaults it), that record in the table's
-// order (reordered), the rest as they were; else the whole file in the table's.
-template <class File, class Write> DefWriteResult write_in_order(const File &file, Write write) {
-	WriteOrder order;
-	order.table.assign(file.count, false);
-	for (int round = 0; round < 2; ++round) {
-		order.refused.clear();
-		DefWriteResult result = write(file, order);
-		if (result.ok()) return result;
-		if (order.refused.empty()) break;
-		for (size_t i : order.refused) order.table[i] = true;
-		order.report = true;
-	}
-	WriteOrder table;
-	table.keep = false;
-	table.table.assign(file.count, true);
-	table.report = true;
-	DefWriteResult all = write(file, table);
-	if (all.ok()) return all;
-	WriteOrder kept;
-	kept.table.assign(file.count, false);
-	return write(file, kept);
-}
-
 // Whether the items' own `pcvehicle_spawnlist` lines, each listing its mask's ids in slot order, build
 // the file's registry as it is: the parser gives each id a slot as a line first names it [orig: @0x4A0253;
 // @0x49DFC0], so they do when every slot's id is first named by the item that first named it (a file read
@@ -160,7 +103,7 @@ uint8_t step_of(DefRecordKind kind, DefEncoding encoding) {
 
 // --- the lines each family puts down --------------------------------------------------------------------
 
-void put_items(DefRecordWriter &writer, const DefItemsFile &file, const WriteOrder &order) {
+void put_items(DefRecordWriter &writer, const DefItemsFile &file) {
 	writer.put("// Item definitions\r\n");
 	writer.put("\r\n");
 	writer.items = &file;
@@ -168,10 +111,9 @@ void put_items(DefRecordWriter &writer, const DefItemsFile &file, const WriteOrd
 	if (file.vehicle_spawn_id_count < 0 || file.vehicle_spawn_id_count > DEF_VEHICLE_SPAWN_SLOTS ||
 		(file.vehicle_spawn_id_count && !file.count))
 		writer.fail("", "pcvehicle_spawnlist", "The vehicle spawn registry cannot be represented.");
-	const bool own_lines = order.keep && lines_build_registry(file);
+	const bool own_lines = lines_build_registry(file);
 	for (size_t i = 0; i < file.count; ++i) {
 		const auto &item = file.entries[i];
-		order_record(writer, order, i, item.line_order, item.display_name);
 		if (!header(writer, "begin", item.display_name, 47, true)) {
 			continue;
 		}
@@ -196,7 +138,7 @@ void put_items(DefRecordWriter &writer, const DefItemsFile &file, const WriteOrd
 			if (!item.vehicle_spawn_mask) writer.line("pcvehicle_spawnlist", {});
 		}
 		writer.record(DefRecordKind::Item, &item, item.display_name, [&](uint8_t step) {
-			if (step != DEF_LINE_ORDER_ROWS) return;
+			if (step != kDefStepRows) return;
 			for (size_t j = 0; j < item.emplacement_attachments_count; ++j) {
 				writer.record(DefRecordKind::Attachment, &item.emplacement_attachments[j], item.display_name);
 			}
@@ -205,9 +147,9 @@ void put_items(DefRecordWriter &writer, const DefItemsFile &file, const WriteOrd
 	}
 }
 
-DefWriteResult write_items(const DefItemsFile &file, WriteOrder &order) {
-	DefRecordWriter writer = writer_for(file.layout);
-	put_items(writer, file, order);
+DefWriteResult write_items(const DefItemsFile &file) {
+	DefRecordWriter writer;
+	put_items(writer, file);
 	if (!writer.result.ok()) return finish(writer);
 	DefItemsFile parsed{};
 	DefParseReport issues;
@@ -217,12 +159,12 @@ DefWriteResult write_items(const DefItemsFile &file, WriteOrder &order) {
 	if (file.count != parsed.count) writer.fail("", "", "Record count changed during serialization.");
 	for (size_t i = 0; i < std::min(file.count, parsed.count); ++i) {
 		const auto &a = file.entries[i]; const auto &b = parsed.entries[i];
-		check_one(writer, order, i, [&] {
+		{
 			check_record(writer, DefRecordKind::Item, &a, &b, a.display_name);
 			check_count(writer, a.emplacement_attachments_count, b.emplacement_attachments_count, a.display_name, "addeweap");
 			for (size_t j = 0; j < std::min(a.emplacement_attachments_count, b.emplacement_attachments_count); ++j)
 				check_record(writer, DefRecordKind::Attachment, &a.emplacement_attachments[j], &b.emplacement_attachments[j], a.display_name);
-		});
+		}
 	}
 	if (file.vehicle_spawn_id_count != parsed.vehicle_spawn_id_count ||
 		std::memcmp(file.vehicle_spawn_ids, parsed.vehicle_spawn_ids, sizeof(file.vehicle_spawn_ids)))
@@ -231,11 +173,11 @@ DefWriteResult write_items(const DefItemsFile &file, WriteOrder &order) {
 	return finish(writer);
 }
 
-void put_weapon(DefRecordWriter &writer, const DefWeaponsFile &file, const WriteOrder &order, size_t i);
+void put_weapon(DefRecordWriter &writer, const DefWeaponsFile &file, size_t i);
 
 // The carry limits first, then the weapons: the two read into tables of their own, so the order between
 // them is no part of either.
-void put_weapons(DefRecordWriter &writer, const DefWeaponsFile &file, const WriteOrder &order) {
+void put_weapons(DefRecordWriter &writer, const DefWeaponsFile &file) {
 	writer.put("// Weapon definitions\r\n");
 	writer.put("\r\n");
 	incomplete(writer, file.unmodeled_count, "");
@@ -244,13 +186,12 @@ void put_weapons(DefRecordWriter &writer, const DefWeaponsFile &file, const Writ
 	for (size_t i = 0; i < file.ammo_classes_count; ++i)
 		writer.record(DefRecordKind::Carry, &file.ammo_classes[i], file.ammo_classes[i].name);
 	writer.depth = 1;
-	for (size_t i = 0; i < file.count; ++i) put_weapon(writer, file, order, i);
+	for (size_t i = 0; i < file.count; ++i) put_weapon(writer, file, i);
 }
 
 // A weapon block: its lines, its sights and its action blocks.
-void put_weapon(DefRecordWriter &writer, const DefWeaponsFile &file, const WriteOrder &order, size_t i) {
+void put_weapon(DefRecordWriter &writer, const DefWeaponsFile &file, size_t i) {
 	const auto &weapon = file.entries[i];
-	order_record(writer, order, i, weapon.line_order, weapon.weapon_name);
 	// The name is copied 32 bytes into def+0x14 [orig: WeaponDefs_ParseLineCallback,
 	// strncpy(def+0x14, tokens[2], 0x20) @0x543737], right ahead of `sameas` at def+0x34 [orig:
 	// strncpy(def+0x34, value, 0x20) @0x544056..0x544072]: a 32-character name keeps no terminator,
@@ -261,7 +202,7 @@ void put_weapon(DefRecordWriter &writer, const DefWeaponsFile &file, const Write
 	}
 	incomplete(writer, weapon.unmodeled_count, weapon.weapon_name);
 	writer.record(DefRecordKind::Weapon, &weapon, weapon.weapon_name, [&](uint8_t step) {
-		if (step == DEF_LINE_ORDER_ROWS) {
+		if (step == kDefStepRows) {
 			for (size_t j = 0; j < weapon.sights_count; ++j) {
 				writer.record(DefRecordKind::Sight, &weapon.sights[j], weapon.weapon_name);
 			}
@@ -283,9 +224,9 @@ void put_weapon(DefRecordWriter &writer, const DefWeaponsFile &file, const Write
 	close(writer, std::string(), true);
 }
 
-DefWriteResult write_weapons(const DefWeaponsFile &file, WriteOrder &order) {
-	DefRecordWriter writer = writer_for(file.layout);
-	put_weapons(writer, file, order);
+DefWriteResult write_weapons(const DefWeaponsFile &file) {
+	DefRecordWriter writer;
+	put_weapons(writer, file);
 	if (!writer.result.ok()) return finish(writer);
 	DefWeaponsFile parsed{};
 	DefParseReport issues;
@@ -298,7 +239,7 @@ DefWriteResult write_weapons(const DefWeaponsFile &file, WriteOrder &order) {
 		check_record(writer, DefRecordKind::Carry, &file.ammo_classes[i], &parsed.ammo_classes[i], file.ammo_classes[i].name);
 	for (size_t i = 0; i < std::min(file.count, parsed.count); ++i) {
 		const auto &a = file.entries[i]; const auto &b = parsed.entries[i];
-		check_one(writer, order, i, [&] {
+		{
 			check_record(writer, DefRecordKind::Weapon, &a, &b, a.weapon_name);
 			check_count(writer, a.actions_count, b.actions_count, a.weapon_name, "action");
 			check_count(writer, a.sights_count, b.sights_count, a.weapon_name, "sights");
@@ -306,25 +247,24 @@ DefWriteResult write_weapons(const DefWeaponsFile &file, WriteOrder &order) {
 				check_record(writer, DefRecordKind::Action, &a.actions[j], &b.actions[j], a.weapon_name);
 			for (size_t j = 0; j < std::min(a.sights_count, b.sights_count); ++j)
 				check_record(writer, DefRecordKind::Sight, &a.sights[j], &b.sights[j], a.weapon_name);
-		});
+		}
 	}
 	def_free_weapons(&parsed);
 	return finish(writer);
 }
 
-void put_ammo(DefRecordWriter &writer, const DefAmmoFile &file, const WriteOrder &order) {
+void put_ammo(DefRecordWriter &writer, const DefAmmoFile &file) {
 	writer.put("// Ammo definitions\r\n");
 	writer.put("\r\n");
 	incomplete(writer, file.unmodeled_count, "");
 	for (size_t i = 0; i < file.count; ++i) {
 		const auto &ammo = file.entries[i];
-		order_record(writer, order, i, ammo.line_order, ammo.name);
 		if (!header(writer, "ammo", ammo.name, 32, false)) {
 			continue;
 		}
 		incomplete(writer, ammo.unmodeled_count, ammo.name);
 		writer.record(DefRecordKind::Ammo, &ammo, ammo.name, [&](uint8_t step) {
-			if (step != DEF_LINE_ORDER_ROWS || !ammo.effects_table_count) return;
+			if (step != kDefStepRows || !ammo.effects_table_count) return;
 			// The table a level in, its rows a level further: the table's own lines its rows' step.
 			writer.line("effects_table", {});
 			writer.depth = 2;
@@ -338,9 +278,9 @@ void put_ammo(DefRecordWriter &writer, const DefAmmoFile &file, const WriteOrder
 	}
 }
 
-DefWriteResult write_ammo(const DefAmmoFile &file, WriteOrder &order) {
-	DefRecordWriter writer = writer_for(file.layout);
-	put_ammo(writer, file, order);
+DefWriteResult write_ammo(const DefAmmoFile &file) {
+	DefRecordWriter writer;
+	put_ammo(writer, file);
 	if (!writer.result.ok()) return finish(writer);
 	DefAmmoFile parsed{};
 	DefParseReport issues;
@@ -350,12 +290,12 @@ DefWriteResult write_ammo(const DefAmmoFile &file, WriteOrder &order) {
 	if (file.count != parsed.count) writer.fail("", "", "Record count changed during serialization.");
 	for (size_t i = 0; i < std::min(file.count, parsed.count); ++i) {
 		const auto &a = file.entries[i]; const auto &b = parsed.entries[i];
-		check_one(writer, order, i, [&] {
+		{
 			check_record(writer, DefRecordKind::Ammo, &a, &b, a.name);
 			check_count(writer, a.effects_table_count, b.effects_table_count, a.name, "effects_table");
 			for (size_t j = 0; j < std::min(a.effects_table_count, b.effects_table_count); ++j)
 				check_record(writer, DefRecordKind::Effect, &a.effects_table[j], &b.effects_table[j], a.name);
-		});
+		}
 	}
 	def_free_ammo(&parsed);
 	return finish(writer);
@@ -368,7 +308,7 @@ std::array<std::pair<const char *, const DefPowerupAction *>, 2> powerup_actions
 	return {{{"pickup", &row.pickup}, {"respawn", &row.respawn}}};
 }
 
-void put_powerup(DefRecordWriter &writer, const DefPowerupFile &file, const WriteOrder &order) {
+void put_powerup(DefRecordWriter &writer, const DefPowerupFile &file) {
 	writer.put("// Powerup definitions\r\n");
 	writer.put("\r\n");
 	incomplete(writer, file.unmodeled_count, "");
@@ -394,9 +334,9 @@ void put_powerup(DefRecordWriter &writer, const DefPowerupFile &file, const Writ
 	}
 }
 
-DefWriteResult write_powerup(const DefPowerupFile &file, WriteOrder &order) {
+DefWriteResult write_powerup(const DefPowerupFile &file) {
 	DefRecordWriter writer;
-	put_powerup(writer, file, order);
+	put_powerup(writer, file);
 	if (!writer.result.ok()) return finish(writer);
 	DefPowerupFile parsed{};
 	DefParseReport issues;
@@ -407,7 +347,7 @@ DefWriteResult write_powerup(const DefPowerupFile &file, WriteOrder &order) {
 	if (file.count != parsed.count) writer.fail("", "", "Record count changed during serialization.");
 	for (size_t i = 0; i < std::min(file.count, parsed.count); ++i) {
 		const DefPowerupDef &a = file.entries[i], &b = parsed.entries[i];
-		check_one(writer, order, i, [&] {
+		{
 			check_record(writer, DefRecordKind::Powerup, &a, &b, a.name);
 			if (a.ammo_count != b.ammo_count) writer.fail(a.name, "ammo", "Ammo rows changed during serialization.");
 			for (size_t j = 0; j < std::min(a.ammo_count, b.ammo_count); ++j)
@@ -419,7 +359,7 @@ DefWriteResult write_powerup(const DefPowerupFile &file, WriteOrder &order) {
 				else if (before[k].second->present)
 					check_record(writer, DefRecordKind::PowerupAction, before[k].second, after[k].second, a.name);
 			}
-		});
+		}
 	}
 	def_free_powerup(&parsed);
 	return finish(writer);
@@ -427,9 +367,9 @@ DefWriteResult write_powerup(const DefPowerupFile &file, WriteOrder &order) {
 
 } // namespace
 
-DefWriteResult def_write_items(const DefItemsFile &file) { return write_in_order(file, write_items); }
-DefWriteResult def_write_weapons(const DefWeaponsFile &file) { return write_in_order(file, write_weapons); }
-DefWriteResult def_write_ammo(const DefAmmoFile &file) { return write_in_order(file, write_ammo); }
-DefWriteResult def_write_powerup(const DefPowerupFile &file) { return write_in_order(file, write_powerup); }
+DefWriteResult def_write_items(const DefItemsFile &file) { return write_items(file); }
+DefWriteResult def_write_weapons(const DefWeaponsFile &file) { return write_weapons(file); }
+DefWriteResult def_write_ammo(const DefAmmoFile &file) { return write_ammo(file); }
+DefWriteResult def_write_powerup(const DefPowerupFile &file) { return write_powerup(file); }
 
 } // namespace opennova::def

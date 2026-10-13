@@ -71,7 +71,6 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_hudpos_write.cpp # HUDPOS.DEF's writer
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_hudpos_text.cpp # HUDPOS.DEF's lines as the parser is handed them
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_items.cpp    # ITEMS.DEF
-    ${CMAKE_CURRENT_SOURCE_DIR}/def/def_layout.cpp   # the order and indentation a file was read with
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_powerup.cpp  # POWERUP.DEF
     ${CMAKE_CURRENT_SOURCE_DIR}/def/reserved_items.cpp # the ids and rows the engine fixes
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_scan.cpp     # the shared .def text scanner
