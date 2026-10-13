@@ -896,7 +896,23 @@ bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zone
 		const world::Entity *e = w.registry.get(handle);
 		if (e == nullptr) continue;
 		const int index = world::spawn_zone_index_of(zones, handle);
-		uint8_t effective_team = e->team;
+		// Both loops compare the zone entity's own Team byte (+0x162) with the
+		// local entity's, never a timer entry's mode: the 0x6F handler stores
+		// only +544/+545 on the zone. The authority reads its own entity; a
+		// joiner's copy of the byte is its replica row once a 0x50 / 0x51
+		// team store or a world-stream team byte has landed (retail's
+		// non-authority store), else the placed team.
+		// [orig: UI_UpdateDeathScreenContent `mov dl, [esi+162h]; cmp dl,
+		//  [eax+162h]` @0x553BB5..0x553BC0 and the second loop's
+		//  @0x553C5F..0x553DE3 team test; NapiNPClientMsg_ZoneTimerValue
+		//  @0x428D60 (entity[544] / entity[545] only);
+		//  NapiNPClientMsg_TeamAssign @0x4319EE; NapiNPClientMsg_HandlePlayerSpawn
+		//  @0x431C6D]
+		uint8_t zone_team = e->team;
+		if (view.joiner) {
+			const replication::ClientEntityState *row = cs.find(e->handle.packed);
+			if (row != nullptr && row->team_known) zone_team = row->team;
+		}
 		// The first-loop gate reads the zone's shared timer-list entry alone: no
 		// entry lists the zone, and an entry lists it once its DWORD 9 (the value
 		// target) reaches its DWORD 10 (the limit), a signed compare. Only the
@@ -910,14 +926,9 @@ bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zone
 		//  NapiNPClientMsg_ZoneTimerValue @0x428e6b]
 		bool secured = true;
 		const auto live = runtime.zone_states().find(e->handle.packed);
-		if (live != runtime.zone_states().end()) {
-			// The value entry's team; 0x53 is the separate timed-capture window,
-			// and an old window kept after a later 0x6F never overwrites this
-			// ownership channel [§5.49/§5.61].
-			if (live->second.has_value) effective_team = live->second.value.mode;
+		if (live != runtime.zone_states().end())
 			secured = !(live->second.entry.value_target < live->second.entry.value_limit);
-		}
-		if (effective_team != team) continue;
+		if (zone_team != team) continue;
 		world::DeployZoneRow row;
 		// No -1 guard in the first loop: an unregistered zone lists as '@'
 		// with STRWPNAME000 and value 0 [orig: @0x553bd6..0x553c1f].
