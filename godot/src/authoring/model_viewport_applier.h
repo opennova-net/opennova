@@ -81,10 +81,9 @@ public:
 	ObjectModel *object_model() const { return object_; }
 	ObjectModel *arms_model() const { return arms_; }
 	// A clip's fire (DI-24): the effects drawn and the range's target, tracers and scars (null until a clip fires
-	// here), the view's multisampling.
+	// here).
 	PreviewEffects *effects() const { return effects_.get(); }
 	PreviewRangeDraw *range() const { return range_.get(); }
-	bool single_sampled() const { return single_sampled_; }
 
 private:
 	// A build in flight: the data the scene will hold (and the first-person arms', null: none), the files
@@ -155,7 +154,6 @@ private:
 	std::unique_ptr<PreviewRangeDraw> range_;
 	std::shared_ptr<const opennova::editor::ProjectAssetSource> fire_files_; // an animation's project files
 	bool mounted_ = false; // the project's files are mounted for the clip fire's effects
-	bool single_sampled_ = false;
 };
 
 } // namespace godot

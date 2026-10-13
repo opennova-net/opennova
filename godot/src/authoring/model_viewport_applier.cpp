@@ -38,7 +38,9 @@ const opennova::editor::ModelViewport &model_of(const opennova::editor::Viewport
 } // namespace
 
 ModelViewportApplier::ModelViewportApplier(SubViewport &viewport) : viewport_(&viewport) {
-	viewport.set_msaa_3d(Viewport::MSAA_4X);
+	// Single-sampled, as the game's own view draws: the particle renderer's passes a clip's fire draws through
+	// bind the view's depth (DI-14's rule: under MSAA every particle went undrawn).
+	viewport.set_msaa_3d(Viewport::MSAA_DISABLED);
 	// The editor's preview background, behind everything the picture draws.
 	backdrop_ = make_preview_backdrop_3d();
 	viewport.add_child(backdrop_);
@@ -266,10 +268,6 @@ void ModelViewportApplier::clear() {
 	applied_team_ = INT32_MIN + 1;
 	release_fire_();
 	fire_files_.reset();
-	if (single_sampled_) {
-		viewport_->set_msaa_3d(Viewport::MSAA_4X);
-		single_sampled_ = false;
-	}
 }
 
 // The CTRL registers the picture reads at the clock (a register let go reads 0 again), and the sections
@@ -356,10 +354,6 @@ void ModelViewportApplier::apply_fire_(const opennova::editor::ViewportModel &vi
 		effects_->mount(fire_files_);
 		range_->set_resource_root(effects_->root());
 		mounted_ = true;
-	}
-	if (firing != single_sampled_) {
-		viewport_->set_msaa_3d(firing ? Viewport::MSAA_DISABLED : Viewport::MSAA_4X);
-		single_sampled_ = firing;
 	}
 	if (!firing) {
 		if (!effects_) return;

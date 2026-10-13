@@ -1373,7 +1373,7 @@ func test_a_clip_s_fire_events_fire_the_item_s_ammo() -> void:
 	assert_gt(int(fire.get("scars", 0)), 0, "the stops scar the target")
 	assert_gt(scars.get_stats_record().world_surfaces, 0, "the game's ScarPresenter draws them")
 	assert_gt(_app.get_clip_voices_started(), started_before, "the Shell started the ai_launch's wave")
-	assert_eq(device.msaa_3d, Viewport.MSAA_DISABLED, "single-sampled while it fires, as the particle passes need")
+	assert_eq(device.msaa_3d, Viewport.MSAA_DISABLED, "single-sampled, as the game's view and the particle passes need")
 	for shot: Variant in fire.get("shots", []):
 		assert_eq(int(shot.get("tick", 0)) % 2, 1, "an NPC's body fires on odd ticks: %s" % str(shot))
 		assert_eq(String(shot.get("point", "")), "MFlash01", str(shot))
@@ -1381,14 +1381,14 @@ func test_a_clip_s_fire_events_fire_the_item_s_ammo() -> void:
 	for effect: Variant in fire.get("effects", []):
 		sources[String(effect.get("source", ""))] = true
 	assert_true(sources.has("launch") and sources.has("impact"), str(sources.keys()))
-	# A player's body fires nothing: the range let go, the view multisampled again.
+	# A player's body fires nothing: the range let go, the view single-sampled still.
 	assert_true(_change({"clock": {"playing": false}, "options": {"sound": {"body": "player"}}}))
 	await get_tree().process_frame
 	_app.pump()
 	await get_tree().process_frame
 	assert_false(bool(_state().get("body", {}).get("animation", {}).get("fire", {}).get("armed", true)))
 	assert_false(target.visible, "no range while nothing fires")
-	assert_eq(device.msaa_3d, Viewport.MSAA_4X)
+	assert_eq(device.msaa_3d, Viewport.MSAA_DISABLED)
 	assert_true(_change({"options": {"sound": {"body": "auto"}}}))
 
 ## DI-13: a weapon's map in first person. The device draws the gun the weapon names with the character's

@@ -40,7 +40,7 @@ Vector3 to_godot(const opennova::editor::PreviewVec3 &v) {
 EffectViewportApplier::EffectViewportApplier(SubViewport &viewport) {
 	// No multisampling, as the game's own view draws: the particle renderer's compositor passes draw over
 	// the view's single-sampled colour and depth (a multisampled view's resolved depth is no attachment
-	// they can bind; the model and mission devices' MSAA_4X would leave every particle undrawn).
+	// they can bind; under MSAA every particle would go undrawn).
 	viewport.set_msaa_3d(Viewport::MSAA_DISABLED);
 	// The editor's preview background, behind everything the picture draws.
 	backdrop_ = make_preview_backdrop_3d();
