@@ -791,7 +791,13 @@ void test_table_row_operations() {
 	// zeroing @0x641dd5].
 	CHECK(rows[0].cell_text(1) == nullptr && rows[0].cell_text(0) != nullptr);
 	CHECK(!table_set_cell_value(rows, 5, 0, 3, 1) && table_set_cell_value(rows, 1, 1, 3, 9) &&
-			table_cell_value(rows, 1, 1) == 9 && table_cell_value(rows, 1, 0) == 5);
+			table_cell_record(rows, 1, 1, 3) == std::optional<int32_t>(9) &&
+			table_cell_record(rows, 1, 0, 3) == std::optional<int32_t>(5));
+	// The record lookup's bounds: the rows and the COLUMN COUNT (D-MNU-55); a zeroed
+	// record in range reads 0 [orig: CTableWnd_GetCellRecord @0x63f400].
+	CHECK(!table_cell_record(rows, 1, 1, 1).has_value() && !table_cell_record(rows, 3, 0, 3) &&
+			!table_cell_record(rows, 1, -1, 3) &&
+			table_cell_record(rows, 1, 2, 3) == std::optional<int32_t>(0));
 	// Single select: the non-locked rows clear; a locked row keeps its state.
 	rows[2].state = kTableRowLocked;
 	CHECK(table_set_row_selected(rows, 0, true, false));
@@ -2103,6 +2109,30 @@ void test_table_column_shrink_frees_cells() {
 	CHECK(rt.table_cell_text(14, 0, 2) == "d");
 }
 
+// A cell record past the table's column count is no record (D-MNU-55): the game's
+// lookup answers none once the column reaches the count (+796), so between a shrink
+// and a regrow the value the shrink kept reads as none, and the regrow hands it back.
+// Ours read the kept value through any count.
+// [orig: CTableWnd_GetCellRecord @0x63f400 - the row bound @0x63f408, the column bound
+//  @0x63f418, none @0x63f433; CTableWnd_GetRowValue @0x63f3d0, column 0]
+void test_table_cell_record_bounded_by_count() {
+	const mnu::Document doc = make_document();
+	MenuRuntime rt;
+	rt.open_document(&doc, "main.mnu", "");
+	CHECK(rt.table_set_column_count(14, 3));
+	CHECK(rt.table_insert_row(14, "a", 4, 0, -1) == 0);
+	rt.table_set_cell_value(14, 0, 2, 7);
+	CHECK(rt.table_cell_value(14, 0, 2) == 7);
+	CHECK(rt.table_set_column_count(14, 2));
+	CHECK(rt.table_cell_value(14, 0, 2) == 0 && !rt.table_cell_record(14, 0, 2).has_value());
+	CHECK(rt.table_row_value(14, 0) == 4 &&
+			rt.table_cell_record(14, 0, 1) == std::optional<int32_t>(0));
+	CHECK(!rt.table_cell_record(14, 1, 0).has_value());
+	CHECK(rt.table_set_column_count(14, 3));
+	CHECK(rt.table_cell_value(14, 0, 2) == 7 &&
+			rt.table_cell_record(14, 0, 2) == std::optional<int32_t>(7));
+}
+
 // The stat table's fill [orig: StatScreen_PopulateStatResultsList @ 0x562240]: installed
 // columns, rows with a colour override and a selection, then the sort on a
 // numeric column, descending [orig: CTableWnd_SortByColumn @ 0x640900 ->
@@ -2256,6 +2286,7 @@ int main() {
 	test_table_runtime_columns();
 	test_table_column_records();
 	test_table_column_shrink_frees_cells();
+	test_table_cell_record_bounded_by_count();
 	test_mouse();
 	test_sound_edges();
 	test_messages_then_the_pump();

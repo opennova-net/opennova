@@ -6,6 +6,7 @@
 
 #include <cstdio>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace opennova::inmatch {
@@ -162,12 +163,15 @@ void fill_stat_results(menu::MenuRuntime &menu, int table,
 	menu.table_sort_by_column(table, kStatScreenSortColumn);
 	// After it, the first row whose column-1 value (the slot) is the local
 	// player entity's slot id (+0x154) is selected, through the table's
-	// MULTISELECT rule; no match selects nothing [orig: the row walk
-	// @0x562700..0x562754 over CTableWnd_GetCellRecord(row, 1) @0x562715, the compare
-	// @0x56271e..0x56272e, CTableWnd_SetRowSelected @0x562754] (D-MNU-51).
+	// MULTISELECT rule; a row with no record is passed over, and no match
+	// selects nothing [orig: the row walk @0x562700..0x562754 over
+	// CTableWnd_GetCellRecord(row, 1) @0x562715, the no-record test
+	// @0x56271a..0x56271c, the compare @0x56271e..0x56272e,
+	// CTableWnd_SetRowSelected @0x562754] (D-MNU-51).
 	const int count = menu.table_row_count(table);
 	for (int r = 0; r < count; ++r) {
-		if (menu.table_cell_value(table, r, 1) == local_slot) {
+		const std::optional<int32_t> slot = menu.table_cell_record(table, r, 1);
+		if (slot.has_value() && *slot == local_slot) {
 			menu.table_set_row_selected(table, r, true);
 			break;
 		}

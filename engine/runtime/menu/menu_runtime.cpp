@@ -998,9 +998,15 @@ void MenuRuntime::table_set_cell_value(int id, int row, int col, int32_t value) 
 		push_table_rows_(id);
 }
 
-int32_t MenuRuntime::table_cell_value(int id, int row, int col) const {
+std::optional<int32_t> MenuRuntime::table_cell_record(int id, int row, int col) const {
 	const MenuWidgetRuntimeState *state = saved_state_(id);
-	return state != nullptr ? menu::table_cell_value(state->table_rows, row, col) : 0;
+	if (state == nullptr)
+		return std::nullopt;
+	return menu::table_cell_record(state->table_rows, row, col, table_column_count_(id));
+}
+
+int32_t MenuRuntime::table_cell_value(int id, int row, int col) const {
+	return table_cell_record(id, row, col).value_or(0);
 }
 
 void MenuRuntime::table_remove_row(int id, int row) {

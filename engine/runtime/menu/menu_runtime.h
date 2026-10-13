@@ -498,6 +498,10 @@ public:
 			int insert_index);
 	void table_set_cell_text(int id, int row, int col, const std::string &text);
 	void table_set_cell_value(int id, int row, int col, int32_t value);
+	// The cell record's value, none past the rows or the COLUMN COUNT
+	// (menu_table_row.h table_cell_record, D-MNU-55); table_cell_value reads
+	// none as 0.
+	std::optional<int32_t> table_cell_record(int id, int row, int col) const;
 	int32_t table_cell_value(int id, int row, int col) const;
 	// CTableWnd_GetRowValue: column 0's cell value.
 	int32_t table_row_value(int id, int row) const { return table_cell_value(id, row, 0); }
