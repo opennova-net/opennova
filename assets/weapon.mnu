@@ -1,36 +1,691 @@
+<!-- OpenNova's armory, authored from scratch: the WEAPON screen the game opens
+     in a mission (the use key inside an armory's volume, docs/mnu/menu-re.md
+     "In-game armory"). The game fills its controls by name: the class spin
+     (PLAYER_CLASS, live only in a network session), the weapon lists by
+     category (PRIMARY, SECONDARY, ACCESSORY, each with its clip-count, round-type
+     and second-ammo combos), the grenade counts (GRENADE_AMMO1..3), the picked
+     weapons' loadout_menu_icon pictures over the blank *_ICON windows, and the
+     weight line (STATIC_TOTAL_WEIGHT); ACCEPT applies the kit, CANCEL leaves
+     it. Every control the game registers is here, so it finds each one it
+     reads. Literal strings, hex colors and opennova.fnt, as sp.mnu. -->
 <SCREEN>
-  <NAME>WEAPON</NAME>
-  <WINDOW type="window" name="MAIN">
-    <POSITION>
-      <LEFT>0</LEFT>
-      <TOP>0</TOP>
-      <RIGHT>800</RIGHT>
-      <BOTTOM>600</BOTTOM>
-    </POSITION>
-    <APPEARANCE type="custom" state="default"></APPEARANCE>
-    <CURSOR>
-      <FILE>newarow1.tga</FILE>
-      <FLAGS>STANDARD_TRANSPARENT</FLAGS>
-    </CURSOR>
-    <FONT>
-      <NAME>%DEF_FONTNAME_LG%</NAME>
-      <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
-      <MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
-      <SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
-      <DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
-    </FONT>
-    <WINDOW type="button" name="CANCEL">
-      <HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
-      <POSITION>
-        <LEFT>340</LEFT>
-        <TOP>540</TOP>
-        <RIGHT>460</RIGHT>
-      </POSITION>
-      <APPEARANCE state="default"></APPEARANCE>
-      <APPEARANCE state="mouseover"></APPEARANCE>
-      <APPEARANCE state="selected"></APPEARANCE>
-      <APPEARANCE state="disabled"></APPEARANCE>
-      <STRING justify="CENTER">Cancel</STRING>
-    </WINDOW>
-  </WINDOW>
+	<NAME>WEAPON</NAME>
+	<WINDOW type="window" name="MAIN">
+		<POSITION>
+			<LEFT>0</LEFT>
+			<TOP>0</TOP>
+			<RIGHT>800</RIGHT>
+			<BOTTOM>600</BOTTOM>
+		</POSITION>
+		<FONT>
+			<NAME>opennova.fnt</NAME>
+			<DEFAULT_FG>FFD8DEE4</DEFAULT_FG>
+			<MOUSEOVER_FG>FFFFC040</MOUSEOVER_FG>
+			<SELECTED_FG>FFFF8000</SELECTED_FG>
+			<DISABLED_FG>FF545252</DISABLED_FG>
+		</FONT>
+		<CURSOR>
+			<FILE>newarow1.tga</FILE>
+			<FLAGS>STANDARD_TRANSPARENT</FLAGS>
+		</CURSOR>
+		<WINDOW type="window" name="WEAPON_FRAME">
+			<APPEARANCE type="color" state="default">FF0B1015</APPEARANCE>
+			<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+			<POSITION>
+				<LEFT>140</LEFT>
+				<TOP>50</TOP>
+				<RIGHT>660</RIGHT>
+				<BOTTOM>550</BOTTOM>
+			</POSITION>
+			<WINDOW type="static" name="TITLE">
+				<FONT>
+					<NAME>opennova.fnt</NAME>
+					<DEFAULT_FG>FFFFC040</DEFAULT_FG>
+				</FONT>
+				<POSITION>
+					<LEFT>0</LEFT>
+					<TOP>10</TOP>
+					<RIGHT>520</RIGHT>
+					<BOTTOM>30</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">ARMORY</STRING>
+			</WINDOW>
+			<WINDOW type="static" name="STATIC_PLAYER_CLASS">
+				<POSITION>
+					<LEFT>20</LEFT>
+					<TOP>42</TOP>
+					<RIGHT>160</RIGHT>
+					<BOTTOM>64</BOTTOM>
+				</POSITION>
+				<STRING justify="LEFT" vjustify="CENTER">CLASS</STRING>
+			</WINDOW>
+			<WINDOW type="spinlist" name="PLAYER_CLASS">
+				<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+				<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
+				<POSITION>
+					<LEFT>290</LEFT>
+					<TOP>42</TOP>
+					<RIGHT>480</RIGHT>
+					<BOTTOM>64</BOTTOM>
+				</POSITION>
+				<ITEMS justify="CENTER" vjustify="CENTER"></ITEMS>
+				<SPINUP>
+					<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+					<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
+					<POSITION>
+						<LEFT>194</LEFT>
+						<RIGHT>212</RIGHT>
+						<BOTTOM>22</BOTTOM>
+					</POSITION>
+				</SPINUP>
+				<SPINDOWN>
+					<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+					<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
+					<POSITION>
+						<LEFT>-22</LEFT>
+						<RIGHT>-4</RIGHT>
+						<BOTTOM>22</BOTTOM>
+					</POSITION>
+				</SPINDOWN>
+			</WINDOW>
+			<WINDOW type="static" name="STATIC_PRIMARY">
+				<POSITION>
+					<LEFT>20</LEFT>
+					<TOP>78</TOP>
+					<RIGHT>250</RIGHT>
+					<BOTTOM>96</BOTTOM>
+				</POSITION>
+				<STRING justify="LEFT" vjustify="CENTER">PRIMARY</STRING>
+			</WINDOW>
+			<WINDOW type="window" name="PRIMARY_OUTLINE">
+				<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+				<POSITION>
+					<LEFT>20</LEFT>
+					<TOP>98</TOP>
+					<RIGHT>250</RIGHT>
+					<BOTTOM>246</BOTTOM>
+				</POSITION>
+				<WINDOW type="window" name="PRIMARY_ICON">
+					<POSITION>
+						<LEFT>5</LEFT>
+						<TOP>5</TOP>
+						<RIGHT>225</RIGHT>
+						<BOTTOM>69</BOTTOM>
+					</POSITION>
+				</WINDOW>
+				<WINDOW type="combobox" name="PRIMARY">
+					<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+					<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
+					<APPEARANCE type="outline" state="selected">FFFFC040</APPEARANCE>
+					<APPEARANCE type="outline" state="disabled">FF3A4550</APPEARANCE>
+					<POSITION>
+						<LEFT>5</LEFT>
+						<TOP>74</TOP>
+						<RIGHT>225</RIGHT>
+						<BOTTOM>94</BOTTOM>
+					</POSITION>
+					<STRING edge="5" vjustify="CENTER" justify="LEFT"></STRING>
+					<LIST_BOX>
+						<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="mouseover">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="selected">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="disabled">FF3A4550</APPEARANCE>
+						<APPEARANCE type="color" state="default">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="mouseover">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="selected">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="disabled">FF0B1015</APPEARANCE>
+						<POSITION>
+							<LEFT>0</LEFT>
+							<TOP>20</TOP>
+							<RIGHT>220</RIGHT>
+							<BOTTOM>120</BOTTOM>
+						</POSITION>
+						<ITEMS justify="LEFT" vjustify="CENTER">
+							<APPEARANCE type="color" state="selected">80FF8000</APPEARANCE>
+						</ITEMS>
+						<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+					</LIST_BOX>
+				</WINDOW>
+				<WINDOW type="combobox" name="PRIMARY_AMMO1">
+					<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+					<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
+					<APPEARANCE type="outline" state="selected">FFFFC040</APPEARANCE>
+					<APPEARANCE type="outline" state="disabled">FF3A4550</APPEARANCE>
+					<POSITION>
+						<LEFT>5</LEFT>
+						<TOP>98</TOP>
+						<RIGHT>225</RIGHT>
+						<BOTTOM>118</BOTTOM>
+					</POSITION>
+					<STRING edge="5" vjustify="CENTER" justify="LEFT"></STRING>
+					<LIST_BOX>
+						<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="mouseover">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="selected">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="disabled">FF3A4550</APPEARANCE>
+						<APPEARANCE type="color" state="default">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="mouseover">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="selected">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="disabled">FF0B1015</APPEARANCE>
+						<POSITION>
+							<LEFT>0</LEFT>
+							<TOP>20</TOP>
+							<RIGHT>220</RIGHT>
+							<BOTTOM>220</BOTTOM>
+						</POSITION>
+						<ITEMS justify="LEFT" vjustify="CENTER">
+							<APPEARANCE type="color" state="selected">80FF8000</APPEARANCE>
+						</ITEMS>
+						<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+					</LIST_BOX>
+				</WINDOW>
+				<WINDOW type="combobox" name="PRIMARY_AMMO1_TYPE">
+					<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+					<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
+					<APPEARANCE type="outline" state="selected">FFFFC040</APPEARANCE>
+					<APPEARANCE type="outline" state="disabled">FF3A4550</APPEARANCE>
+					<POSITION>
+						<LEFT>5</LEFT>
+						<TOP>122</TOP>
+						<RIGHT>113</RIGHT>
+						<BOTTOM>142</BOTTOM>
+					</POSITION>
+					<STRING edge="5" vjustify="CENTER" justify="LEFT"></STRING>
+					<LIST_BOX>
+						<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="mouseover">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="selected">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="disabled">FF3A4550</APPEARANCE>
+						<APPEARANCE type="color" state="default">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="mouseover">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="selected">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="disabled">FF0B1015</APPEARANCE>
+						<POSITION>
+							<LEFT>0</LEFT>
+							<TOP>20</TOP>
+							<RIGHT>108</RIGHT>
+							<BOTTOM>120</BOTTOM>
+						</POSITION>
+						<ITEMS justify="LEFT" vjustify="CENTER">
+							<APPEARANCE type="color" state="selected">80FF8000</APPEARANCE>
+						</ITEMS>
+						<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+					</LIST_BOX>
+				</WINDOW>
+				<WINDOW type="combobox" name="PRIMARY_AMMO2">
+					<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+					<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
+					<APPEARANCE type="outline" state="selected">FFFFC040</APPEARANCE>
+					<APPEARANCE type="outline" state="disabled">FF3A4550</APPEARANCE>
+					<POSITION>
+						<LEFT>117</LEFT>
+						<TOP>122</TOP>
+						<RIGHT>225</RIGHT>
+						<BOTTOM>142</BOTTOM>
+					</POSITION>
+					<STRING edge="5" vjustify="CENTER" justify="LEFT"></STRING>
+					<LIST_BOX>
+						<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="mouseover">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="selected">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="disabled">FF3A4550</APPEARANCE>
+						<APPEARANCE type="color" state="default">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="mouseover">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="selected">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="disabled">FF0B1015</APPEARANCE>
+						<POSITION>
+							<LEFT>0</LEFT>
+							<TOP>20</TOP>
+							<RIGHT>108</RIGHT>
+							<BOTTOM>120</BOTTOM>
+						</POSITION>
+						<ITEMS justify="LEFT" vjustify="CENTER">
+							<APPEARANCE type="color" state="selected">80FF8000</APPEARANCE>
+						</ITEMS>
+						<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+					</LIST_BOX>
+				</WINDOW>
+			</WINDOW>
+			<WINDOW type="static" name="STATIC_SECONDARY">
+				<POSITION>
+					<LEFT>270</LEFT>
+					<TOP>78</TOP>
+					<RIGHT>500</RIGHT>
+					<BOTTOM>96</BOTTOM>
+				</POSITION>
+				<STRING justify="LEFT" vjustify="CENTER">SECONDARY</STRING>
+			</WINDOW>
+			<WINDOW type="window" name="SECONDARY_OUTLINE">
+				<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+				<POSITION>
+					<LEFT>270</LEFT>
+					<TOP>98</TOP>
+					<RIGHT>500</RIGHT>
+					<BOTTOM>246</BOTTOM>
+				</POSITION>
+				<WINDOW type="window" name="SECONDARY_ICON">
+					<POSITION>
+						<LEFT>5</LEFT>
+						<TOP>5</TOP>
+						<RIGHT>225</RIGHT>
+						<BOTTOM>69</BOTTOM>
+					</POSITION>
+				</WINDOW>
+				<WINDOW type="combobox" name="SECONDARY">
+					<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+					<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
+					<APPEARANCE type="outline" state="selected">FFFFC040</APPEARANCE>
+					<APPEARANCE type="outline" state="disabled">FF3A4550</APPEARANCE>
+					<POSITION>
+						<LEFT>5</LEFT>
+						<TOP>74</TOP>
+						<RIGHT>225</RIGHT>
+						<BOTTOM>94</BOTTOM>
+					</POSITION>
+					<STRING edge="5" vjustify="CENTER" justify="LEFT"></STRING>
+					<LIST_BOX>
+						<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="mouseover">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="selected">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="disabled">FF3A4550</APPEARANCE>
+						<APPEARANCE type="color" state="default">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="mouseover">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="selected">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="disabled">FF0B1015</APPEARANCE>
+						<POSITION>
+							<LEFT>0</LEFT>
+							<TOP>20</TOP>
+							<RIGHT>220</RIGHT>
+							<BOTTOM>120</BOTTOM>
+						</POSITION>
+						<ITEMS justify="LEFT" vjustify="CENTER">
+							<APPEARANCE type="color" state="selected">80FF8000</APPEARANCE>
+						</ITEMS>
+						<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+					</LIST_BOX>
+				</WINDOW>
+				<WINDOW type="combobox" name="SECONDARY_AMMO1">
+					<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+					<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
+					<APPEARANCE type="outline" state="selected">FFFFC040</APPEARANCE>
+					<APPEARANCE type="outline" state="disabled">FF3A4550</APPEARANCE>
+					<POSITION>
+						<LEFT>5</LEFT>
+						<TOP>98</TOP>
+						<RIGHT>225</RIGHT>
+						<BOTTOM>118</BOTTOM>
+					</POSITION>
+					<STRING edge="5" vjustify="CENTER" justify="LEFT"></STRING>
+					<LIST_BOX>
+						<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="mouseover">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="selected">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="disabled">FF3A4550</APPEARANCE>
+						<APPEARANCE type="color" state="default">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="mouseover">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="selected">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="disabled">FF0B1015</APPEARANCE>
+						<POSITION>
+							<LEFT>0</LEFT>
+							<TOP>20</TOP>
+							<RIGHT>220</RIGHT>
+							<BOTTOM>220</BOTTOM>
+						</POSITION>
+						<ITEMS justify="LEFT" vjustify="CENTER">
+							<APPEARANCE type="color" state="selected">80FF8000</APPEARANCE>
+						</ITEMS>
+						<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+					</LIST_BOX>
+				</WINDOW>
+				<WINDOW type="combobox" name="SECONDARY_AMMO1_TYPE">
+					<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+					<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
+					<APPEARANCE type="outline" state="selected">FFFFC040</APPEARANCE>
+					<APPEARANCE type="outline" state="disabled">FF3A4550</APPEARANCE>
+					<POSITION>
+						<LEFT>5</LEFT>
+						<TOP>122</TOP>
+						<RIGHT>113</RIGHT>
+						<BOTTOM>142</BOTTOM>
+					</POSITION>
+					<STRING edge="5" vjustify="CENTER" justify="LEFT"></STRING>
+					<LIST_BOX>
+						<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="mouseover">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="selected">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="disabled">FF3A4550</APPEARANCE>
+						<APPEARANCE type="color" state="default">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="mouseover">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="selected">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="disabled">FF0B1015</APPEARANCE>
+						<POSITION>
+							<LEFT>0</LEFT>
+							<TOP>20</TOP>
+							<RIGHT>108</RIGHT>
+							<BOTTOM>120</BOTTOM>
+						</POSITION>
+						<ITEMS justify="LEFT" vjustify="CENTER">
+							<APPEARANCE type="color" state="selected">80FF8000</APPEARANCE>
+						</ITEMS>
+						<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+					</LIST_BOX>
+				</WINDOW>
+				<WINDOW type="combobox" name="SECONDARY_AMMO2">
+					<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+					<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
+					<APPEARANCE type="outline" state="selected">FFFFC040</APPEARANCE>
+					<APPEARANCE type="outline" state="disabled">FF3A4550</APPEARANCE>
+					<POSITION>
+						<LEFT>117</LEFT>
+						<TOP>122</TOP>
+						<RIGHT>225</RIGHT>
+						<BOTTOM>142</BOTTOM>
+					</POSITION>
+					<STRING edge="5" vjustify="CENTER" justify="LEFT"></STRING>
+					<LIST_BOX>
+						<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="mouseover">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="selected">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="disabled">FF3A4550</APPEARANCE>
+						<APPEARANCE type="color" state="default">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="mouseover">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="selected">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="disabled">FF0B1015</APPEARANCE>
+						<POSITION>
+							<LEFT>0</LEFT>
+							<TOP>20</TOP>
+							<RIGHT>108</RIGHT>
+							<BOTTOM>120</BOTTOM>
+						</POSITION>
+						<ITEMS justify="LEFT" vjustify="CENTER">
+							<APPEARANCE type="color" state="selected">80FF8000</APPEARANCE>
+						</ITEMS>
+						<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+					</LIST_BOX>
+				</WINDOW>
+			</WINDOW>
+			<WINDOW type="static" name="STATIC_ACCESSORY">
+				<POSITION>
+					<LEFT>20</LEFT>
+					<TOP>254</TOP>
+					<RIGHT>250</RIGHT>
+					<BOTTOM>272</BOTTOM>
+				</POSITION>
+				<STRING justify="LEFT" vjustify="CENTER">ACCESSORY</STRING>
+			</WINDOW>
+			<WINDOW type="window" name="ACCESSORY_OUTLINE">
+				<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+				<POSITION>
+					<LEFT>20</LEFT>
+					<TOP>274</TOP>
+					<RIGHT>250</RIGHT>
+					<BOTTOM>422</BOTTOM>
+				</POSITION>
+				<WINDOW type="window" name="ACCESSORY_ICON">
+					<POSITION>
+						<LEFT>5</LEFT>
+						<TOP>5</TOP>
+						<RIGHT>225</RIGHT>
+						<BOTTOM>69</BOTTOM>
+					</POSITION>
+				</WINDOW>
+				<WINDOW type="combobox" name="ACCESSORY">
+					<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+					<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
+					<APPEARANCE type="outline" state="selected">FFFFC040</APPEARANCE>
+					<APPEARANCE type="outline" state="disabled">FF3A4550</APPEARANCE>
+					<POSITION>
+						<LEFT>5</LEFT>
+						<TOP>74</TOP>
+						<RIGHT>225</RIGHT>
+						<BOTTOM>94</BOTTOM>
+					</POSITION>
+					<STRING edge="5" vjustify="CENTER" justify="LEFT"></STRING>
+					<LIST_BOX>
+						<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="mouseover">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="selected">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="disabled">FF3A4550</APPEARANCE>
+						<APPEARANCE type="color" state="default">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="mouseover">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="selected">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="disabled">FF0B1015</APPEARANCE>
+						<POSITION>
+							<LEFT>0</LEFT>
+							<TOP>20</TOP>
+							<RIGHT>220</RIGHT>
+							<BOTTOM>120</BOTTOM>
+						</POSITION>
+						<ITEMS justify="LEFT" vjustify="CENTER">
+							<APPEARANCE type="color" state="selected">80FF8000</APPEARANCE>
+						</ITEMS>
+						<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+					</LIST_BOX>
+				</WINDOW>
+				<WINDOW type="combobox" name="ACCESSORY_AMMO1">
+					<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+					<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
+					<APPEARANCE type="outline" state="selected">FFFFC040</APPEARANCE>
+					<APPEARANCE type="outline" state="disabled">FF3A4550</APPEARANCE>
+					<POSITION>
+						<LEFT>5</LEFT>
+						<TOP>98</TOP>
+						<RIGHT>225</RIGHT>
+						<BOTTOM>118</BOTTOM>
+					</POSITION>
+					<STRING edge="5" vjustify="CENTER" justify="LEFT"></STRING>
+					<LIST_BOX>
+						<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="mouseover">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="selected">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="disabled">FF3A4550</APPEARANCE>
+						<APPEARANCE type="color" state="default">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="mouseover">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="selected">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="disabled">FF0B1015</APPEARANCE>
+						<POSITION>
+							<LEFT>0</LEFT>
+							<TOP>20</TOP>
+							<RIGHT>220</RIGHT>
+							<BOTTOM>220</BOTTOM>
+						</POSITION>
+						<ITEMS justify="LEFT" vjustify="CENTER">
+							<APPEARANCE type="color" state="selected">80FF8000</APPEARANCE>
+						</ITEMS>
+						<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+					</LIST_BOX>
+				</WINDOW>
+				<WINDOW type="combobox" name="ACCESSORY_AMMO2">
+					<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+					<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
+					<APPEARANCE type="outline" state="selected">FFFFC040</APPEARANCE>
+					<APPEARANCE type="outline" state="disabled">FF3A4550</APPEARANCE>
+					<POSITION>
+						<LEFT>5</LEFT>
+						<TOP>122</TOP>
+						<RIGHT>113</RIGHT>
+						<BOTTOM>142</BOTTOM>
+					</POSITION>
+					<STRING edge="5" vjustify="CENTER" justify="LEFT"></STRING>
+					<LIST_BOX>
+						<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="mouseover">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="selected">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="disabled">FF3A4550</APPEARANCE>
+						<APPEARANCE type="color" state="default">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="mouseover">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="selected">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="disabled">FF0B1015</APPEARANCE>
+						<POSITION>
+							<LEFT>0</LEFT>
+							<TOP>20</TOP>
+							<RIGHT>108</RIGHT>
+							<BOTTOM>220</BOTTOM>
+						</POSITION>
+						<ITEMS justify="LEFT" vjustify="CENTER">
+							<APPEARANCE type="color" state="selected">80FF8000</APPEARANCE>
+						</ITEMS>
+						<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+					</LIST_BOX>
+				</WINDOW>
+			</WINDOW>
+			<WINDOW type="static" name="STATIC_GRENADES">
+				<POSITION>
+					<LEFT>270</LEFT>
+					<TOP>254</TOP>
+					<RIGHT>500</RIGHT>
+					<BOTTOM>272</BOTTOM>
+				</POSITION>
+				<STRING justify="LEFT" vjustify="CENTER">GRENADES</STRING>
+			</WINDOW>
+			<WINDOW type="window" name="GRENADE_OUTLINE">
+				<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+				<POSITION>
+					<LEFT>270</LEFT>
+					<TOP>274</TOP>
+					<RIGHT>500</RIGHT>
+					<BOTTOM>422</BOTTOM>
+				</POSITION>
+				<WINDOW type="window" name="GRENADE_ICON">
+					<POSITION>
+						<LEFT>5</LEFT>
+						<TOP>5</TOP>
+						<RIGHT>225</RIGHT>
+						<BOTTOM>69</BOTTOM>
+					</POSITION>
+				</WINDOW>
+				<WINDOW type="combobox" name="GRENADE_AMMO1">
+					<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+					<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
+					<APPEARANCE type="outline" state="selected">FFFFC040</APPEARANCE>
+					<APPEARANCE type="outline" state="disabled">FF3A4550</APPEARANCE>
+					<POSITION>
+						<LEFT>5</LEFT>
+						<TOP>74</TOP>
+						<RIGHT>225</RIGHT>
+						<BOTTOM>94</BOTTOM>
+					</POSITION>
+					<STRING edge="5" vjustify="CENTER" justify="LEFT"></STRING>
+					<LIST_BOX>
+						<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="mouseover">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="selected">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="disabled">FF3A4550</APPEARANCE>
+						<APPEARANCE type="color" state="default">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="mouseover">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="selected">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="disabled">FF0B1015</APPEARANCE>
+						<POSITION>
+							<LEFT>0</LEFT>
+							<TOP>20</TOP>
+							<RIGHT>220</RIGHT>
+							<BOTTOM>220</BOTTOM>
+						</POSITION>
+						<ITEMS justify="LEFT" vjustify="CENTER">
+							<APPEARANCE type="color" state="selected">80FF8000</APPEARANCE>
+						</ITEMS>
+						<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+					</LIST_BOX>
+				</WINDOW>
+				<WINDOW type="combobox" name="GRENADE_AMMO2">
+					<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+					<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
+					<APPEARANCE type="outline" state="selected">FFFFC040</APPEARANCE>
+					<APPEARANCE type="outline" state="disabled">FF3A4550</APPEARANCE>
+					<POSITION>
+						<LEFT>5</LEFT>
+						<TOP>98</TOP>
+						<RIGHT>225</RIGHT>
+						<BOTTOM>118</BOTTOM>
+					</POSITION>
+					<STRING edge="5" vjustify="CENTER" justify="LEFT"></STRING>
+					<LIST_BOX>
+						<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="mouseover">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="selected">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="disabled">FF3A4550</APPEARANCE>
+						<APPEARANCE type="color" state="default">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="mouseover">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="selected">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="disabled">FF0B1015</APPEARANCE>
+						<POSITION>
+							<LEFT>0</LEFT>
+							<TOP>20</TOP>
+							<RIGHT>220</RIGHT>
+							<BOTTOM>220</BOTTOM>
+						</POSITION>
+						<ITEMS justify="LEFT" vjustify="CENTER">
+							<APPEARANCE type="color" state="selected">80FF8000</APPEARANCE>
+						</ITEMS>
+						<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+					</LIST_BOX>
+				</WINDOW>
+				<WINDOW type="combobox" name="GRENADE_AMMO3">
+					<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+					<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
+					<APPEARANCE type="outline" state="selected">FFFFC040</APPEARANCE>
+					<APPEARANCE type="outline" state="disabled">FF3A4550</APPEARANCE>
+					<POSITION>
+						<LEFT>5</LEFT>
+						<TOP>122</TOP>
+						<RIGHT>225</RIGHT>
+						<BOTTOM>142</BOTTOM>
+					</POSITION>
+					<STRING edge="5" vjustify="CENTER" justify="LEFT"></STRING>
+					<LIST_BOX>
+						<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="mouseover">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="selected">FF3A4550</APPEARANCE>
+						<APPEARANCE type="outline" state="disabled">FF3A4550</APPEARANCE>
+						<APPEARANCE type="color" state="default">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="mouseover">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="selected">FF0B1015</APPEARANCE>
+						<APPEARANCE type="color" state="disabled">FF0B1015</APPEARANCE>
+						<POSITION>
+							<LEFT>0</LEFT>
+							<TOP>20</TOP>
+							<RIGHT>220</RIGHT>
+							<BOTTOM>220</BOTTOM>
+						</POSITION>
+						<ITEMS justify="LEFT" vjustify="CENTER">
+							<APPEARANCE type="color" state="selected">80FF8000</APPEARANCE>
+						</ITEMS>
+						<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+					</LIST_BOX>
+				</WINDOW>
+			</WINDOW>
+			<WINDOW type="static" name="STATIC_TOTAL_WEIGHT">
+				<POSITION>
+					<LEFT>20</LEFT>
+					<TOP>432</TOP>
+					<RIGHT>500</RIGHT>
+					<BOTTOM>452</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">WEIGHT</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="CANCEL">
+				<HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+				<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+				<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
+				<POSITION>
+					<LEFT>20</LEFT>
+					<TOP>462</TOP>
+					<RIGHT>250</RIGHT>
+					<BOTTOM>490</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">CANCEL</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="ACCEPT">
+				<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+				<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
+				<POSITION>
+					<LEFT>270</LEFT>
+					<TOP>462</TOP>
+					<RIGHT>500</RIGHT>
+					<BOTTOM>490</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">ACCEPT</STRING>
+			</WINDOW>
+		</WINDOW>
+	</WINDOW>
 </SCREEN>
