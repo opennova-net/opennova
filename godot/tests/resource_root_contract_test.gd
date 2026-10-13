@@ -569,6 +569,51 @@ func _normal_test_tga(blue: int) -> PackedByteArray:
 	return TestFs.tga_bytes(Vector2i(4, 4), Color8(90, 70, blue, 128))
 
 
+func test_dds_reader_takes_what_d3dx_takes_by_its_own_header_tests() -> void:
+	# The DDS reader's content walk (renderer::dds_read_by_content). A grey TGA must be
+	# 8 bits deep for D3DX's TGA codec, so a 32-bit one under a .dds name decodes as
+	# nothing: the checkerboard. The JPEG codec tests the SOI marker's two bytes, so a
+	# JPEG goes to the decoder by them alone.
+	var root := _make_flat_root("dds_content_gates")
+	var grey := TestFs.tga_bytes(Vector2i(4, 4), Color.WHITE)
+	grey[2] = 3
+	var source := Image.create(4, 4, false, Image.FORMAT_RGB8)
+	source.fill(Color.RED)
+	var jpeg := source.save_jpg_to_buffer()
+	var stray := PackedByteArray([0xFF, 0xD8, 0x00])
+	stray.append_array(jpeg.slice(2))
+	var files := [
+		{"name": "grey.dds", "bytes": grey},
+		{"name": "photo.dds", "bytes": jpeg},
+		{"name": "stray.dds", "bytes": stray},
+	]
+	WorldFixture.write_pff(self, root.path_join("resource.pff"), files)
+	var resources := ResourceRoot.new()
+	assert_eq(resources.mount_runtime(root, "", false), OK)
+	assert_eq(
+		resources.load_material_texture("grey.dds", 0).get_width(),
+		128,
+		"a 32-bit grey TGA passes no codec's test: the checkerboard [orig: CImage_LoadTGA @0x6DCAFD]"
+	)
+	assert_eq(
+		resources.load_material_texture("photo.dds", 0).get_width(),
+		4,
+		"a JPEG under a .dds name decodes [orig: D3DX_JPEG_ReadSOI @0x71BF57]"
+	)
+	# A stray byte after the SOI: D3DX's libjpeg skips it with a warning it never makes
+	# fatal and decodes the image [orig: D3DX_JPEG_SkipToNextMarker @0x71BEA7..0x71BEBA,
+	# emit_message @0x71C550]; Godot's decoder refuses it, so the port binds the
+	# checkerboard (D-RMAT-S26B1).
+	assert_eq(
+		resources.load_material_texture("stray.dds", 0).get_width(),
+		128,
+		"Godot's decoder refuses the stray byte D3DX skips: the checkerboard (D-RMAT-S26B1)"
+	)
+	# Godot's JPEG decoder reports its refusal.
+	assert_engine_error('Condition "err" is true')
+	assert_engine_error('Condition "image.is_null()" is true')
+
+
 func test_material_normals_choose_exact_sources_and_preserve_blue_as_alpha() -> void:
 	var root := _make_flat_root("normal_sources")
 	var source := Image.create(4, 4, false, Image.FORMAT_RGBA8)
@@ -607,7 +652,7 @@ func test_material_normals_choose_exact_sources_and_preserve_blue_as_alpha() -> 
 	assert_eq(resources.load_material_texture("w.tga.dds", 1).get_width(), 128,
 			"the same file through the TGA reader fails: no DDS image reused from the cache")
 	# The DDS reader hands its file whole to D3DX, which takes an image by its
-	# content (renderer::dds_reader_format): plate.tga's sibling plate.dds holds
+	# content (renderer::dds_read_by_content): plate.tga's sibling plate.dds holds
 	# a TGA, and the normal map is made from it.
 	assert_eq(resources.load_material_texture("plate.tga", 4).get_image().get_pixel(0, 0),
 			Color8(127, 127, 255, 99), "a TGA under the DDS sibling's name decodes")
