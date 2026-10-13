@@ -14,9 +14,9 @@
 #include <editor/preview/mission_options.h>
 #include <editor/preview/mission_script_run.h>
 #include <editor/preview/model_preview_camera.h>
+#include <editor/preview/preview_ambient_mix.h>
 #include <editor/preview/preview_clip_sounds.h>
 #include <editor/preview/viewport_overlay.h>
-#include <runtime/audio/ambient_channel_pool.h>
 #include <runtime/audio/ambient_mixer.h>
 #include <runtime/audio/sound_selector.h>
 
@@ -63,25 +63,6 @@ struct MissionSoundSource {
 	const char *status = "";
 };
 
-// One of the channels the loudest-first mix binds (at most audio::kAmbientMixChannels [orig:
-// SoundEmitter_UpdateAndMixTop8 @ 0x5284a0, the channel table @ 0x24D6688]): what it plays (-1: free), and from what.
-// `started` moves each time a candidate takes it, as a channel opened again starts its wave from its beginning
-// (D-SND-6's transient channels): the device restarts its voice then.
-struct MissionSoundChannel {
-	int channel = 0;
-	int32_t candidate = -1;
-	uint64_t started = 0;
-	const char *source = ""; // "marker" (an ambient source), "rain" (the rain beside the listener)
-	NodeId row = 0;
-	std::string set, bank, wave;
-	std::string path; // the project's file of the wave ("" none: refused by the pool)
-	int layer = 0;
-	int32_t volume = 0;          // the mix's, 0..255
-	uint32_t pitch_q16 = 0x10000; // the emitter's word (audio::emitter_play_word)
-	PreviewVec3 at;
-	float distance = 0.0f;
-};
-
 // What a mission sounds like where its camera stands, as the game plays it (ADR 0046 DI-36): the mission's ambient
 // sources (its env-sound entities), the rain beside the listener while the script's weather rains, the thunder of
 // the weather's lightning and the script's own sounds, through the runtime's own audio rules over the project's
@@ -94,7 +75,8 @@ struct MissionSoundChannel {
 //   runtime's AmbientChannelPool binds the loudest eight to channels (incumbents keep theirs, a dropout's stops, an
 //   entrant starts its wave anew). Each source's layers as audio::emitter_layers reads them; the sources in the
 //   order resolve_envs_markers walks them (markers, items, buildings, people), each resolved one staggered by its
-//   place among them (audio::envs_stagger_slot), as MissionAudio registers them in the game.
+//   place among them (audio::envs_stagger_slot), as MissionAudio registers them in the game. The candidates, the
+//   table and the channels are the one PreviewAmbientMix the environment view's Listen hears too.
 // - The weather, the rain loops and the script's sounds are MissionScriptRun's: the mission's start and its script
 //   run by the engine's own kernel on the clock. While it rains, the rain's two loops register beside the listener as
 //   the local player's body registers them (world::rain_ambient_emitters: LPNV_RAIN_L and LPNV_RAIN_R two metres
@@ -145,7 +127,7 @@ public:
 	const std::vector<MissionSoundSource> &sources() const { return sources_; }
 	const MissionSoundSource *source(NodeId row) const;
 	// Every channel the pool holds, free or not, by its index.
-	const std::vector<MissionSoundChannel> &channels() const { return channels_; }
+	const std::vector<MissionSoundChannel> &channels() const { return mix_.channels(); }
 	const MissionScriptRun &script() const { return script_; }
 	const std::vector<ClipSoundFired> &sounds_fired() const { return fired_; }
 	// A one-shot the view heard beside the Listen's own (S23 C: its people's footsteps and foley), kept with them.
@@ -154,7 +136,7 @@ public:
 	double hours() const { return hours_; }
 	const PreviewVec3 &listener() const { return listener_; }
 	// Moves whenever what plays changes (a channel bound, released, its volume moved): the device's cue.
-	uint64_t serial() const { return serial_; }
+	uint64_t serial() const { return mix_.serial(); }
 	// What the last play cost (microseconds).
 	int64_t step_us() const { return step_us_; }
 
@@ -165,7 +147,7 @@ public:
 
 	// What a source does in words, a line each (the hover's): what it is, its sets for the hours, what plays now.
 	std::vector<std::string> source_words(NodeId row) const;
-	// The body's `listen` (its options' with it): {on, volume, hours, tick, budget, sources {count, playing, ...},
+	// The body's `listen` (its options' with it): {on, hours, tick, budget, sources {count, playing, ...},
 	// channels, rain, overcast, script, music, sounds_fired, step_us}.
 	io::JsonValue to_json(const MissionListenOptions &options) const;
 	// An entity's `sound` in the items: {slots, banks, region, set, bank, falloff, min, distance, volume, channel,
@@ -173,13 +155,6 @@ public:
 	io::JsonValue source_json(NodeId row) const;
 
 private:
-	// One layer that may take a channel: a source's set's layer, or a rain loop's.
-	struct Candidate {
-		int source = -1; // index into sources_ (-1: the rain)
-		const char *kind = "marker";
-		std::string set, bank, wave, path;
-		int layer = 0;
-	};
 	struct Item {
 		bool defined = false;
 		bool envs = false;
@@ -190,14 +165,8 @@ private:
 		std::unordered_map<int64_t, Item> items;
 	};
 	const Catalog &catalog_(const SessionView &view, const std::string &file);
-	// The set `name` in the game's bank order: its bank (null none) and index.
-	const PreviewBank *find_set_(const std::string &name, int32_t &index) const;
-	// The layers of a set as candidates, ids from next_candidate_ on (none for a set no bank holds).
-	std::vector<audio::AmbientMixer::LayerDesc> describe_(const std::string &set, int source, const char *kind,
-			const SessionView &view);
 	// The mixer made again over the sources (each resolved one a marker), its clock at the start.
 	void remix_();
-	void apply_plan_(const audio::AmbientChannelPlan &plan);
 	// The dialog `number` (dlg%03i) a Play dialog registers: the dialog of the name in the mission's dialog bank, its
 	// lines with their waves (audio::resolve_dialog_lines), onto the channel (DI-32) [orig: Dialog_PlayByIndex
 	// @ 0x527ae0 -> Dialog_PlayByName @ 0x44d9f0 -> Dialog_Register @ 0x44d980].
@@ -222,21 +191,14 @@ private:
 	bool followed_ = false;
 	std::vector<MissionSoundSource> sources_;
 	std::unordered_map<NodeId, size_t> source_index_;
-	std::unordered_map<int32_t, Candidate> candidates_;
 	std::vector<std::vector<std::vector<audio::AmbientMixer::LayerDesc>>> marker_sets_; // per source, its sets' layers
 	std::vector<std::array<int32_t, 4>> marker_keys_; // per source, its slots' sets by index (-1 none)
-	std::vector<audio::AmbientMixer::LayerDesc> rain_layers_[2];
-	int32_t next_candidate_ = 1;
-	std::unique_ptr<audio::AmbientMixer> mixer_;
-	audio::AmbientChannelPool pool_;
-	std::vector<MissionSoundChannel> channels_;
+	PreviewAmbientMix mix_;
 	std::vector<ClipSoundFired> fired_;
 	PreviewVec3 listener_;
 	double hours_ = 12.0;
 	int32_t tick_ = -1;
 	int32_t mixed_tick_ = -1;
-	uint64_t serial_ = 0;
-	uint64_t started_ = 0;
 	int64_t step_us_ = 0;
 	// The dialog channel (DI-32): the project's files as the game reads them, the mission's dialog bank and its text,
 	// what was read of them and at which stamps, the waves as the device loads them, the channel and its next tick.
