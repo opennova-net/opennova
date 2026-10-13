@@ -612,6 +612,35 @@ func test_the_populate_rule_reads_the_set_label_over_a_frame() -> void:
 	assert_eq(store.get_player_name(), "Zoë Smith", "a kept name renames the record as it is")
 
 
+# The record keeps its name as the game's code-page bytes (D-NET-661): "Jörg"
+# is J, 0xF6, r, g in player.sav, not the UTF-8 C3 B6, and reads back as the
+# same text; a character cp1252 has no byte for is stored as '?'. The ACCEPT's
+# 15-character cut then counts characters, one byte each.
+# [orig: the ACCEPT's copy into the 16-byte field @0x55efc8; the record's name
+#  +4, its readers the session copy @0x551695 and CNapiNPConnection_SendClientJoin's
+#  NA @0x620162]
+func test_the_record_keeps_the_name_as_code_page_bytes() -> void:
+	var store := PlayerProfile.store()
+	store.commit_name("Jörg")
+	var bytes := store.player_sav_bytes()
+	var record := 16
+	var stored := PackedByteArray()
+	for i in 5:
+		stored.append(bytes[record + 4 + i])
+	assert_eq(
+		stored,
+		PackedByteArray([0x4A, 0xF6, 0x72, 0x67, 0]),
+		"the name is its cp1252 bytes, NUL-ended"
+	)
+	assert_eq(store.get_player_name(), "Jörg", "and reads back as the same text")
+	store.commit_name("Ł1")
+	assert_eq(store.get_player_name(), "?1", "a character cp1252 has no byte for is '?'")
+	store.commit_name("ééééééééééééééééé")
+	assert_eq(
+		store.get_player_name(), "ééééééééééééééé", "the ACCEPT keeps 15 characters, one byte each"
+	)
+
+
 # The rule's kept text, a name or none, clears the record's no-name bit at the
 # populate [orig: PlayerInfo_HandlePlayerNameChange @0x55fc9b], so opening the
 # screen on a nameless record clears the bit without an ACCEPT.

@@ -351,7 +351,8 @@ std::vector<Simulation::HostPeerSlot> Simulation::host_peer_slots() const {
 		HostPeerSlot s;
 		s.slot = c.reply.player_slot;
 		s.own = c.type == opennova::inmatch::NapiNPConnection::kTypeClientSide;
-		s.player_name = opennova::to_gd(c.player_name);
+		// The roster's name is the joiner's NA bytes, the page's (D-NET-661).
+		s.player_name = opennova::cp1252_to_gd(c.player_name);
 		s.ip_and_port = opennova::to_gd(opennova::peer_addr_to_string(c.peer));
 		s.pcid = opennova::to_gd(c.account.pcid);
 		s.team = String::num_int64(c.player_list_team);
@@ -572,7 +573,11 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	joiner_role_->set_socket(net_.pump_socket.get(), net_.pump->dialed_host());
 	// Build the Joiner runtime now so get_joiner_phase reads Idle before the first load (the contract
 	// the legacy joiner_session_ held); the role retains the request for a load that rebuilds it.
-	runtime_ = &joiner_role_->create_runtime(opennova::to_std(p_player_name),
+	// The callsign goes out as the profile name's code-page bytes, the NA TLV and the host's
+	// roster carrying them [orig: CNapiNPConnection_SendClientJoin @0x61fe20, NA @0x620162]
+	// (D-NET-661).
+	runtime_ = &joiner_role_->create_runtime(
+			opennova::utf8_to_retail_text(opennova::to_std(p_player_name)),
 			p_join_role == static_cast<int>(opennova::inmatch::JoinRole::Spectator)
 					? opennova::inmatch::JoinRole::Spectator
 					: opennova::inmatch::JoinRole::Player,

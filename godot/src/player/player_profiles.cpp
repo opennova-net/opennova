@@ -124,6 +124,17 @@ bool avatar_selection_from_dictionary(const Dictionary &profile, int side,
 	return true;
 }
 
+// A name crosses into the profile as the game's code-page bytes, the bytes the
+// PLAYERNAME edit and GetUserNameA hand the game and player.sav keeps: cp1252,
+// '?' for a character the page has no byte for (utf8_to_retail_text); it reads
+// back through cp1252 (D-NET-661). The record's 16-byte field and the ACCEPT's
+// 15 then cut at the game's character count.
+// [orig: the PLAYERNAME change strncpy(+4, name, 0x10) @0x55fc91; the ACCEPT
+//  @0x55efc8; GetUserNameA(+4, 16) @0x54f535]
+std::string profile_text(const String &p_text) {
+	return opennova::utf8_to_retail_text(opennova::to_std(p_text));
+}
+
 } // namespace
 
 PlayerProfiles::PlayerProfiles() {
@@ -165,7 +176,7 @@ Error PlayerProfiles::load(const String &p_dir, const String &p_expansion) {
 	opennova::profile::PlayerProfiles::LoadInput input;
 	input.player_sav = has_player ? &player_sav : nullptr;
 	input.weapon_sav = has_weapon ? &weapon_sav : nullptr;
-	input.user_name = opennova::to_std(account_name());
+	input.user_name = profile_text(account_name());
 	store_.load(input, defaults_);
 	return error;
 }
@@ -177,7 +188,7 @@ void PlayerProfiles::load_bytes(const PackedByteArray &p_player_sav, bool p_has_
 	opennova::profile::PlayerProfiles::LoadInput input;
 	input.player_sav = p_has_player_sav ? &player_sav : nullptr;
 	input.weapon_sav = p_has_weapon_sav ? &weapon_sav : nullptr;
-	input.user_name = opennova::to_std(p_user_name);
+	input.user_name = profile_text(p_user_name);
 	store_.load(input, defaults_);
 }
 
@@ -210,7 +221,7 @@ String PlayerProfiles::account_name() {
 
 String PlayerProfiles::get_slot_name(int p_slot) const {
 	if (p_slot < 0 || p_slot >= static_cast<int>(playersav::kProfileSlots)) return String();
-	return opennova::to_gd(store_.player_sav().slots[static_cast<size_t>(p_slot)].name);
+	return opennova::cp1252_to_gd(store_.player_sav().slots[static_cast<size_t>(p_slot)].name);
 }
 
 bool PlayerProfiles::is_slot_nameless(int p_slot) const {
@@ -220,19 +231,23 @@ bool PlayerProfiles::is_slot_nameless(int p_slot) const {
 }
 
 String PlayerProfiles::get_player_name() const {
-	return opennova::to_gd(store_.current().name);
+	return opennova::cp1252_to_gd(store_.current().name);
 }
 
 bool PlayerProfiles::is_nameless() const {
 	return (store_.current().flags & playersav::kRecordFlagNoName) != 0;
 }
 
+bool PlayerProfiles::rename(const String &p_text) {
+	return store_.rename(profile_text(p_text));
+}
+
 String PlayerProfiles::name_changed(const String &p_label) {
-	return opennova::to_gd(store_.name_changed(p_label.utf8().get_data()));
+	return opennova::cp1252_to_gd(store_.name_changed(profile_text(p_label)));
 }
 
 void PlayerProfiles::commit_name(const String &p_text) {
-	store_.commit_name(p_text.utf8().get_data());
+	store_.commit_name(profile_text(p_text));
 }
 
 PackedStringArray PlayerProfiles::word_names() {
