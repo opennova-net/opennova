@@ -16,12 +16,14 @@
 #     service's security group alone, and the service's security group
 #     admitting the machines on its HTTP port (their bootstrap fetch, over the
 #     private network);
-#   - the machine role: SSM Session Manager for break-glass, nothing else (no
-#     machine has an SSH key);
+#   - the machine role: the five actions SSM Session Manager needs for
+#     break-glass, nothing else (no machine has an SSH key);
 #   - the service role's policy (the one instance profile the service instance
-#     carries, aws_iam_role.backup): launch only from this template with this
-#     deployment's tags, tag only at launch, end only machines carrying both
-#     tags, describe, and pass the machine role.
+#     carries, aws_iam_role.backup): launch only from this template, only the
+#     template's machine type with IMDSv2 required, gp3 volumes of at most
+#     hosted_max_volume_gb and Canonical's images, with this deployment's tags;
+#     tag only at launch, end only machines carrying both tags, describe, and
+#     pass the machine role.
 #
 # All of it exists only while var.hosted_data_snapshot_id names the snapshot.
 # Empty (the default), this file creates nothing and changes nothing: the plan
@@ -39,6 +41,12 @@ locals {
   hosted_admin_port = 32800
   # The only tags a launch may carry (the service's run-instances names these).
   hosted_tag_keys = ["opennova:hosted", "opennova:deployment", "opennova:server-id", "Name"]
+  # The largest volume a launch may make: the root volume, and the data volume
+  # (the snapshot's size, 2 GiB for a JO:CA install).
+  hosted_max_volume_gb = max(16, var.hosted_root_volume_gb)
+  # Canonical, the stock Ubuntu images' owner; var.hosted_ami_id's own owner
+  # when one is named.
+  hosted_image_owner = "099720109477"
 }
 
 data "aws_caller_identity" "hosted" {
@@ -156,12 +164,33 @@ resource "aws_iam_role" "hosted_machine" {
   })
 }
 
-# Session Manager for break-glass (aws ssm start-session); the machine role
-# holds nothing else.
-resource "aws_iam_role_policy_attachment" "hosted_machine_ssm" {
-  count      = local.hosted_enabled ? 1 : 0
-  role       = aws_iam_role.hosted_machine[0].name
-  policy_arn = "arn:${data.aws_partition.hosted[0].partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
+# Session Manager for break-glass (aws ssm start-session): the agent's
+# registration and its session channels, and nothing else. Not the managed
+# AmazonSSMManagedInstanceCore, which also reads every SSM parameter and runs
+# the agent's other channels. (The machine also fences the server's UID off
+# the metadata service, so the server never holds even these.)
+data "aws_iam_policy_document" "hosted_machine_ssm" {
+  count = local.hosted_enabled ? 1 : 0
+
+  statement {
+    sid    = "SessionManagerOnly"
+    effect = "Allow"
+    actions = [
+      "ssm:UpdateInstanceInformation",
+      "ssmmessages:CreateControlChannel",
+      "ssmmessages:CreateDataChannel",
+      "ssmmessages:OpenControlChannel",
+      "ssmmessages:OpenDataChannel",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "hosted_machine_ssm" {
+  count  = local.hosted_enabled ? 1 : 0
+  name   = "${local.name}-hosted-machine-ssm"
+  role   = aws_iam_role.hosted_machine[0].id
+  policy = data.aws_iam_policy_document.hosted_machine_ssm[0].json
 }
 
 resource "aws_iam_instance_profile" "hosted_machine" {
@@ -239,8 +268,9 @@ locals {
 data "aws_iam_policy_document" "hosted_service" {
   count = local.hosted_enabled ? 1 : 0
 
-  # A machine launches only from this template, with this deployment's tags
-  # and no other tag.
+  # A machine launches only from this template, as the template's machine type
+  # with IMDSv2 required (a caller's own --instance-type or metadata options
+  # are refused), with this deployment's tags and no other tag.
   statement {
     sid       = "LaunchHostedMachines"
     effect    = "Allow"
@@ -251,6 +281,16 @@ data "aws_iam_policy_document" "hosted_service" {
       test     = "ArnEquals"
       variable = "ec2:LaunchTemplate"
       values   = [aws_launch_template.hosted[0].arn]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:InstanceType"
+      values   = [var.hosted_instance_type]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:MetadataHttpTokens"
+      values   = ["required"]
     }
     condition {
       test     = "StringEquals"
@@ -269,24 +309,54 @@ data "aws_iam_policy_document" "hosted_service" {
     }
   }
 
-  # What such a launch touches besides the machine: its volumes and network
-  # interface, and the template's own subnet, security group, image and
-  # snapshot. RunInstances on these creates nothing without the machine
-  # statement above. The snapshot is encrypted with the AWS-managed aws/ebs
-  # key, whose key policy admits every principal of the account through EBS:
-  # no KMS grant here (a customer-managed key would need kms:CreateGrant,
-  # kms:Decrypt and kms:GenerateDataKeyWithoutPlaintext on it).
+  # What such a launch touches besides the machine: its volumes (gp3, no
+  # larger than the template's), its network interface, the template's own
+  # subnet, security group and snapshot, and a Canonical image. RunInstances
+  # on these creates nothing without the machine statement above. The snapshot
+  # is encrypted with the AWS-managed aws/ebs key, whose key policy admits
+  # every principal of the account through EBS: no KMS grant here (a
+  # customer-managed key would need kms:CreateGrant, kms:Decrypt and
+  # kms:GenerateDataKeyWithoutPlaintext on it).
+  statement {
+    sid       = "LaunchHostedMachineVolumes"
+    effect    = "Allow"
+    actions   = ["ec2:RunInstances"]
+    resources = ["${local.hosted_arn_prefix}:${local.hosted_account}:volume/*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:VolumeType"
+      values   = ["gp3"]
+    }
+    condition {
+      test     = "NumericLessThanEquals"
+      variable = "ec2:VolumeSize"
+      values   = [tostring(local.hosted_max_volume_gb)]
+    }
+  }
+
+  statement {
+    sid       = "LaunchHostedMachineImage"
+    effect    = "Allow"
+    actions   = ["ec2:RunInstances"]
+    resources = ["${local.hosted_arn_prefix}::image/*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:Owner"
+      values   = [var.hosted_ami_id != "" ? data.aws_ami.hosted[0].owner_id : local.hosted_image_owner]
+    }
+  }
+
   statement {
     sid     = "LaunchHostedMachineResources"
     effect  = "Allow"
     actions = ["ec2:RunInstances"]
     resources = [
-      "${local.hosted_arn_prefix}:${local.hosted_account}:volume/*",
       "${local.hosted_arn_prefix}:${local.hosted_account}:network-interface/*",
       "${local.hosted_arn_prefix}:${local.hosted_account}:subnet/${local.target_subnet}",
       "${local.hosted_arn_prefix}:${local.hosted_account}:security-group/${aws_security_group.hosted[0].id}",
       "${local.hosted_arn_prefix}:${local.hosted_account}:launch-template/${aws_launch_template.hosted[0].id}",
-      "${local.hosted_arn_prefix}::image/*",
       "${local.hosted_arn_prefix}::snapshot/${var.hosted_data_snapshot_id}",
     ]
   }

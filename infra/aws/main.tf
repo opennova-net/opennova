@@ -214,7 +214,7 @@ resource "aws_security_group" "server" {
   dynamic "ingress" {
     for_each = aws_security_group.hosted[*].id
     content {
-      description     = "Hosted machines' bootstrap fetch (private)"
+      description     = "Hosted machines bootstrap fetch (private)"
       from_port       = var.game_http_port
       to_port         = var.game_http_port
       protocol        = "tcp"

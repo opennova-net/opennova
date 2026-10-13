@@ -11,8 +11,10 @@ standard input. It
      every machine mounts it read-only), checked with e2fsck;
   4. writes the image's non-zero blocks straight into a new snapshot through the EBS
      direct APIs (StartSnapshot, PutSnapshotBlock, CompleteSnapshot), encrypted with
-     the account's default EBS key (aws/ebs unless the account set another), tagged
-     opennova:hosted-data=1 and the deployment;
+     the account's default EBS key, tagged opennova:hosted-data=1 and the deployment.
+     That key must be the AWS-managed aws/ebs one, which infra/aws/hosted.tf's launch
+     policy relies on (it grants no KMS action): another is refused before a block is
+     written, and a key it cannot read (no kms:DescribeKey) is a warning;
   5. waits until EC2 reports the snapshot completed, and prints its id on standard
      output, the one line there (everything else goes to standard error).
 
@@ -139,6 +141,30 @@ def upload(ebs, image: str, snapshot_id: str, block_size: int) -> int:
     return changed
 
 
+def check_key(kms, key_arn: str | None) -> None:
+    """Refuses a snapshot encrypted with any key but the AWS-managed aws/ebs one.
+
+    hosted.tf's service policy grants no KMS action: a launch from a snapshot under
+    a customer-managed key would fail. Reading the aws/ebs key needs kms:DescribeKey;
+    without it the check is a warning, not a refusal.
+    """
+    if not key_arn:
+        log("warning: StartSnapshot named no key; check the snapshot's key is aws/ebs")
+        return
+    try:
+        managed = kms.describe_key(KeyId="alias/aws/ebs")["KeyMetadata"]["Arn"]
+    except Exception as error:  # noqa: BLE001 - any failure to read it is the warning
+        log(f"warning: could not read the aws/ebs key to compare ({error}); the snapshot's key is "
+            f"{key_arn}: if that is a customer-managed key, launches need a KMS grant (infra/aws/hosted.tf)")
+        return
+    if key_arn != managed:
+        raise SystemExit(
+            f"the snapshot's key {key_arn} is not the AWS-managed aws/ebs key ({managed}): the account's "
+            "default EBS key is another, and hosted.tf's launch policy grants no KMS action for it. "
+            "Reset the default (aws ec2 reset-ebs-default-kms-key-id) or extend hosted.tf first")
+    log("the snapshot's key is aws/ebs")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--deployment", required=True, help="the opennova:deployment tag")
@@ -151,6 +177,7 @@ def main() -> int:
     config = Config(retries={"max_attempts": 8, "mode": "standard"})
     ebs = boto3.client("ebs", region_name=args.region, config=config)
     ec2 = boto3.client("ec2", region_name=args.region, config=config)
+    kms = boto3.client("kms", region_name=args.region, config=config)
 
     with tempfile.TemporaryDirectory(prefix="opennova-hosted-data-") as work:
         stage = os.path.join(work, "stage")
@@ -181,6 +208,7 @@ def main() -> int:
                 ])
             snapshot_id = started["SnapshotId"]
             log(f"snapshot {snapshot_id} started (key {started.get('KmsKeyArn', 'the default EBS key')})")
+            check_key(kms, started.get("KmsKeyArn"))
             changed = upload(ebs, image, snapshot_id, started["BlockSize"])
             ebs.complete_snapshot(SnapshotId=snapshot_id, ChangedBlocksCount=changed)
             log(f"{changed} blocks written; waiting for EC2 to complete {snapshot_id}")

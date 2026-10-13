@@ -5,8 +5,11 @@
 # Hosting off (no snapshot) plans nothing of it and leaves the server's security
 # group its six rules; hosting on plans the launch template (terminate on
 # shutdown, IMDSv2, the encrypted data volume from the snapshot), the game and
-# admin ports, the service role's policy and the outputs app deploy reads; a
-# burstable machine type is refused.
+# admin ports, the service role's policy and the outputs app deploy reads; the
+# policy pins a launch to the template's machine type, IMDSv2, gp3 volumes of at
+# most 16 GiB and Canonical's images, and the machine role holds Session
+# Manager's five actions alone (applied against the mocks, so the template's
+# ARN the policy names is known); a burstable machine type is refused.
 
 mock_provider "aws" {
   mock_data "aws_availability_zones" {
@@ -26,6 +29,20 @@ mock_provider "aws" {
   }
   mock_data "aws_iam_policy_document" {
     defaults = { json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}" }
+  }
+  # Well-formed ARNs for what an applied run hands to an ARN argument (the
+  # provider's own validation reads them).
+  mock_resource "aws_iam_instance_profile" {
+    defaults = { arn = "arn:aws:iam::123456789012:instance-profile/mock" }
+  }
+  mock_resource "aws_iam_policy" {
+    defaults = { arn = "arn:aws:iam::123456789012:policy/mock" }
+  }
+  mock_resource "aws_iam_role" {
+    defaults = { arn = "arn:aws:iam::123456789012:role/mock" }
+  }
+  mock_resource "aws_launch_template" {
+    defaults = { arn = "arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0123456789abcdef0", id = "lt-0123456789abcdef0" }
   }
 }
 
@@ -47,7 +64,7 @@ run "hosting_off" {
     error_message = "hosting off must create no launch template or security group"
   }
   assert {
-    condition     = length(aws_iam_role.hosted_machine) == 0 && length(aws_iam_policy.hosted_service) == 0 && length(aws_iam_role_policy_attachment.hosted_service) == 0
+    condition     = length(aws_iam_role.hosted_machine) == 0 && length(aws_iam_policy.hosted_service) == 0 && length(aws_iam_role_policy_attachment.hosted_service) == 0 && length(aws_iam_role_policy.hosted_machine_ssm) == 0
     error_message = "hosting off must create no IAM"
   }
   assert {
@@ -104,6 +121,63 @@ run "hosting_on" {
   assert {
     condition     = length(aws_iam_role_policy_attachment.hosted_service) == 1
     error_message = "the service role takes the hosted policy"
+  }
+}
+
+run "hosted_policy" {
+  command = apply
+
+  variables {
+    hosted_data_snapshot_id = "snap-0123456789abcdef0"
+    vpc_id                  = "vpc-0123456789abcdef0"
+    subnet_id               = "subnet-0123456789abcdef0"
+  }
+
+  assert {
+    condition = length([
+      for st in data.aws_iam_policy_document.hosted_service[0].statement : st
+      if st.sid == "LaunchHostedMachines" && length([
+        for c in st.condition : c
+        if(c.test == "StringEquals" && c.variable == "ec2:InstanceType" && contains(c.values, "c7a.medium")) ||
+        (c.test == "StringEquals" && c.variable == "ec2:MetadataHttpTokens" && contains(c.values, "required"))
+      ]) == 2
+    ]) == 1
+    error_message = "a launch must be pinned to the template's machine type and IMDSv2"
+  }
+  assert {
+    condition = length([
+      for st in data.aws_iam_policy_document.hosted_service[0].statement : st
+      if st.sid == "LaunchHostedMachineVolumes" && length([
+        for c in st.condition : c
+        if(c.test == "StringEquals" && c.variable == "ec2:VolumeType" && contains(c.values, "gp3")) ||
+        (c.test == "NumericLessThanEquals" && c.variable == "ec2:VolumeSize" && contains(c.values, "16"))
+      ]) == 2
+    ]) == 1
+    error_message = "a launch's volumes must be gp3 of at most 16 GiB"
+  }
+  assert {
+    condition = length([
+      for st in data.aws_iam_policy_document.hosted_service[0].statement : st
+      if st.sid == "LaunchHostedMachineImage" && length([
+        for c in st.condition : c
+        if c.test == "StringEquals" && c.variable == "ec2:Owner" && contains(c.values, "099720109477")
+      ]) == 1
+    ]) == 1
+    error_message = "a launch's image must be Canonical's"
+  }
+  assert {
+    condition     = length(aws_iam_role_policy.hosted_machine_ssm) == 1
+    error_message = "the machine role takes the Session Manager policy"
+  }
+  assert {
+    condition = toset(flatten([for st in data.aws_iam_policy_document.hosted_machine_ssm[0].statement : st.actions])) == toset([
+      "ssm:UpdateInstanceInformation",
+      "ssmmessages:CreateControlChannel",
+      "ssmmessages:CreateDataChannel",
+      "ssmmessages:OpenControlChannel",
+      "ssmmessages:OpenDataChannel",
+    ])
+    error_message = "the machine role holds Session Manager's five actions alone"
   }
 }
 

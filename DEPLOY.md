@@ -290,8 +290,12 @@ How the service launches, watches and ends the machines, the bootstrap route and
 machine script are in `apps/novaworld_server/README.md`, "Hosted servers".
 
 Hosting stays off until a data snapshot exists: with no `hosted` item in the vault,
-`infra apply` creates nothing for it and changes nothing, and `app deploy` runs the
-service with `ONNET_HOSTED_PROVIDER=none`.
+`infra apply` creates nothing for it and changes nothing but its outputs, and `app
+deploy` runs the service with `ONNET_HOSTED_PROVIDER=none`. `app deploy` reads the
+infra's `hosted_enabled` output (it pulls the state first), so after this lands run
+`./deploy/run.sh infra apply` once before the next deploy: with hosting off it only adds
+the outputs. A state without them stops the deploy rather than guess hosting off;
+`--no-hosting` deploys without reading them.
 
 ### The game data
 
@@ -334,14 +338,38 @@ players never reach it (the machines mount it read-only and run nothing but the 
    the copy of the files lives only in the helper's container, which goes when it ends.
    It prints the snapshot id (`snap-...`). The vault's AWS credentials need
    `ebs:StartSnapshot`, `ebs:PutSnapshotBlock`, `ebs:CompleteSnapshot`,
-   `ec2:DescribeSnapshots` and `ec2:DeleteSnapshot`.
+   `ec2:DescribeSnapshots` and `ec2:DeleteSnapshot`, and `kms:DescribeKey`, with which
+   the helper confirms the snapshot's key is the AWS-managed `aws/ebs` (without it, it
+   warns). It refuses any other key, because the service's launch policy grants no KMS
+   action: an account whose default EBS key is customer-managed resets it first
+   (`aws ec2 reset-ebs-default-kms-key-id`). The `aws/ebs` key's own policy admits the
+   account's principals through EBS, so an admin deploy user needs nothing more. A
+   deploy user restricted by an SCP or a key policy without that statement would also
+   need `kms:GenerateDataKeyWithoutPlaintext`, `kms:Decrypt` and `kms:CreateGrant` on
+   the key, as AWS's EBS direct APIs guide lists. This is untested here.
 
 2. **Record it in the vault.** Create an item `hosted` in the deploy vault with a field
    `data_snapshot_id` holding the id. Every `infra` run reads it as
    `TF_VAR_hosted_data_snapshot_id`; with no `hosted` item hosting is off, and any other
    failure to read it stops the run, so a vault error never plans hosting away.
 
-3. **Plan, then apply.**
+3. **Check the vCPU quota.** The machines and the server instance share the account's
+   On-Demand Standard instances quota: 5 `c7a.medium` (1 vCPU each) beside the
+   `c7i.large` server (2) is 7 vCPUs, and a new account's quota can be lower.
+
+   ```bash
+   ./deploy/run.sh aws service-quotas get-service-quota --service-code ec2 --quota-code L-1216C47A
+   ```
+
+   `Quota.Value` must be at least 2 + `ONNET_HOSTED_CAP` (7 at the default cap);
+   request more in the Service Quotas console if it is not. A launch past it fails with
+   `VcpuLimitExceeded`, which the server's timeline shows as a failed launch.
+
+   While you are in the console, an [AWS Budgets](https://console.aws.amazon.com/billing/home#/budgets)
+   cost alarm (say at the monthly figure under "Cost" below) is the AWS-side backstop
+   to the service's own cap.
+
+4. **Plan, then apply.**
 
    ```bash
    ./deploy/run.sh infra plan
@@ -349,13 +377,14 @@ players never reach it (the machines mount it read-only and run nothing but the 
 
    The plan must create the hosted resources alone: `aws_launch_template.hosted`,
    `aws_security_group.hosted` and its three rules, `aws_iam_role.hosted_machine` with
-   its SSM attachment and instance profile, and `aws_iam_policy.hosted_service` with
-   its attachment to the existing service role; update `aws_security_group.server` in
+   its Session Manager policy (`aws_iam_role_policy.hosted_machine_ssm`) and instance
+   profile, and `aws_iam_policy.hosted_service` with its attachment to the existing
+   service role; update `aws_security_group.server` in
    place (one ingress rule: the machines' bootstrap fetch on 8080, from their security
    group); and add outputs. It must not touch `aws_instance.server` (it holds the
    database). Then `./deploy/run.sh infra apply`.
 
-4. **Deploy the app.**
+5. **Deploy the app.**
 
    ```bash
    ./deploy/run.sh app deploy --tag sha-<server> --serve-tag sha-<serve>
@@ -366,15 +395,19 @@ players never reach it (the machines mount it read-only and run nothing but the 
    outputs: the region, the launch template, the subnet and its range (the only peers
    the bootstrap route answers), the deployment tag, the server instance's private
    address, and the serve image pinned to the digest `--serve-tag` names at that moment
-   (default `latest`; pick a tag from the "Serve image" workflow). The server logs
-   `[boot] hosted servers: ec2 in <region>, ...`; a setting it lacks turns hosting off
-   with a boot warning naming it. `app reset-db` sets the same.
+   (default `latest`; pick a tag from the "Serve image" workflow). The digest lookup and
+   every machine's pull are anonymous, so the `opennova-serve` GHCR package must be
+   public and stay public: a private package fails the deploy here, and a package made
+   private later fails every launch at its pull. The server logs
+   `[boot] hosted servers: ec2 in <region>, ...` and the ranges its bootstrap route
+   answers; a setting it lacks turns hosting off with a boot warning naming it. `app
+   reset-db` sets the same.
 
    Optional, in `deploy/env/app.prod.env`: `ONNET_HOSTED_CAP` (the most servers at once,
    default 5) and `ONNET_HOSTED_MISSIONS` (the rotation a start takes when it names none,
    and the maps the site's picker offers).
 
-5. **Approve the first account** (the admin users page, `can_host`) and run the smoke
+6. **Approve the first account** (the admin users page, `can_host`) and run the smoke
    test below.
 
 ### The smoke test
@@ -382,7 +415,10 @@ players never reach it (the machines mount it read-only and run nothing but the 
 1. Start a server from My server. Its timeline runs `requested`, `provisioning`,
    `booting` (the machine boots, installs docker, mounts the data and fetches its
    bundle: a few minutes), `listing`, then `running`.
-   `./deploy/run.sh hosted status` lists the machine.
+   `./deploy/run.sh hosted status` lists the machine. Note how long `booting` and
+   `listing` took (the timeline's times): the service gives a machine 10 minutes to
+   boot and 5 to list (`Ec2Provider::kBootTimeoutMs`, `kListingTimeoutMs`), and real
+   times near either want those raised.
 2. The server shows in the OpenNova and the retail server browsers, at the machine's
    public address. A retail client and an OpenNova client both join. Run `/PROFILE` to
    check the tick holds on the machine type.
@@ -397,6 +433,10 @@ players never reach it (the machines mount it read-only and run nothing but the 
    `shutting-down`, then nothing).
 7. The bootstrap route answers no one outside the VPC:
    `curl -i -X POST http://<EIP>:8080/hosted/bootstrap/1` answers 404.
+8. The server cannot read the machine role: on the machine (SSM),
+   `sudo setpriv --reuid=10001 --regid=10001 --clear-groups curl -sS -m 3 http://169.254.169.254/`
+   fails to connect (the machine script checks the same before the server starts, and
+   ends the machine when it does not hold).
 
 ### Cost
 
@@ -433,19 +473,27 @@ you delete it (`./deploy/run.sh aws ec2 delete-snapshot --snapshot-id <id>`).
   apply` (the template moves to it), and delete the old snapshot. New machines take it.
 - **A machine's logs.** `aws ec2 get-console-output --instance-id <machine> --latest`
   (through `./deploy/run.sh aws`) shows the bootstrap's steps and the server's end, also
-  after the machine is gone; on a live machine, over SSM, `journalctl -u opennova-serve`
-  and `/var/log/cloud-init-output.log`.
+  after the machine is gone, but only while EC2 still lists the terminated machine
+  (about an hour): read a crash's console soon. On a live machine, over SSM,
+  `journalctl -u opennova-serve` and `/var/log/cloud-init-output.log`.
 - **A refused call.** The service logs each AWS CLI failure with its message (`app logs
   novaworld`, lines `[hosted] ...`); the timeline the owner sees says only "the launch
   failed". For an `UnauthorizedOperation`,
   `./deploy/run.sh aws sts decode-authorization-message --encoded-message <message>`
   names the statement or condition that refused it.
-- **The machine side never restarts the server.** Whatever ends `opennova-serve` ends the
-  machine; the service makes and counts every crash restart (3, forgiven after an hour of
+- **The machine side never restarts the server.** The unit has `Restart=no`, and
+  `SuccessAction`/`FailureAction=poweroff`: whatever ends `opennova-serve` (any exit
+  code, a signal) ends the machine, and the machine gives the code no meaning. The
+  service alone makes and counts every crash restart (3, forgiven after an hour of
   running), each on a new machine with new credentials.
-- **The offline infra check.** `infra/aws/tests/hosted.tftest.hcl` plans the hosted
-  resources against mock providers (no credentials, nothing reaches AWS); the file says
-  how to run it.
+- **The machine role.** It holds the five actions Session Manager needs and nothing
+  else, and the server (UID 10001, on the machine's own network) is fenced off the
+  instance metadata service by an `iptables` rule, so it never holds even those.
+- **The offline infra check.** `infra/aws/tests/hosted.tftest.hcl` plans and applies the
+  hosted resources against mock providers (no credentials, nothing reaches AWS); the
+  file says how to run it, and the "Infra" workflow runs it, with `terraform fmt` and
+  `validate` and shellcheck on the toolbox and the machine script, on every change
+  under `infra/` or `deploy/`.
 
 ## Resetting the service database
 

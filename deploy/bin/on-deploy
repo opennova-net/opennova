@@ -12,7 +12,8 @@
 #   infra output|list [args...]   terraform output / state list
 #   aws <args...>                 run the AWS CLI with vault credentials
 #   app deploy [--tag SHA] [--game-tag SHA] [--serve-tag TAG] [--no-hosting]
-#                                 pull GHCR images + compose up on the target;
+#                                 pull the Terraform state, then GHCR images +
+#                                 compose up on the target;
 #                                 with hosted game servers set up (infra output
 #                                 hosted_enabled), the service gets every
 #                                 ONNET_HOSTED_* ec2 setting from the Terraform
@@ -96,12 +97,21 @@ cmd_secrets() {
     check)
       log "checking vault '$VAULT' references (dry run)…"
       local rc=0
-      op inject -f -i "$TF_ENV_TPL"   -o /dev/null >/dev/null \
-        && log "  terraform.env.tpl    OK" || { err "  terraform.env.tpl    FAILED"; rc=1; }
-      op inject -f -i "$APP_ENV_TPL"  -o /dev/null >/dev/null \
-        && log "  app.prod.env.tpl     OK" || { err "  app.prod.env.tpl     FAILED"; rc=1; }
-      op read "op://$VAULT/ssh/private key?ssh-format=openssh" >/dev/null \
-        && log "  ssh private key      OK" || { err "  ssh private key      FAILED"; rc=1; }
+      if op inject -f -i "$TF_ENV_TPL" -o /dev/null >/dev/null; then
+        log "  terraform.env.tpl    OK"
+      else
+        err "  terraform.env.tpl    FAILED"; rc=1
+      fi
+      if op inject -f -i "$APP_ENV_TPL" -o /dev/null >/dev/null; then
+        log "  app.prod.env.tpl     OK"
+      else
+        err "  app.prod.env.tpl     FAILED"; rc=1
+      fi
+      if op read "op://$VAULT/ssh/private key?ssh-format=openssh" >/dev/null; then
+        log "  ssh private key      OK"
+      else
+        err "  ssh private key      FAILED"; rc=1
+      fi
       # Optional: hosted game servers are off without it (DEPLOY.md, "Hosted game servers").
       if op read "op://$VAULT/hosted/data_snapshot_id" >/dev/null 2>&1; then
         log "  hosted data snapshot OK"
@@ -203,7 +213,8 @@ SSHCFG
   # and every compose invocation parses it — so resolve it for ALL app actions
   # (deploy/status/logs/...), not just `backup`. From the AWS tf output; the
   # state file is on the mounted disk from `infra apply`.
-  export BACKUP_BUCKET="$(terraform -chdir="$TF_DIR" output -raw backup_bucket_name 2>/dev/null || true)"
+  BACKUP_BUCKET="$(terraform -chdir="$TF_DIR" output -raw backup_bucket_name 2>/dev/null || true)"
+  export BACKUP_BUCKET
   # The prod overlay requires SERVER_IMAGE/WEB_IMAGE/GAME_IMAGE to interpolate for EVERY
   # compose action (status/logs/down parse them too), but only `deploy` sets
   # them from --tag. Default the rest so those actions work; `ps`/`logs` match
@@ -241,22 +252,29 @@ app_images() {
 # README.md, "Hosted servers"), from the Terraform outputs, so nobody copies an
 # id by hand: while hosted_data_snapshot_id is set (output hosted_enabled),
 # ONNET_HOSTED_PROVIDER=ec2 and every ec2 setting, and the serve image pinned to
-# the digest `serve_tag` names right now; else, or with --no-hosting (`hosting`
-# 0), ONNET_HOSTED_PROVIDER=none. Exported for compose's interpolation
-# (docker-compose.yml passes them to the server); the shell's values win over
-# the env files'.
+# the digest `serve_tag` names right now; with an explicit false, or with
+# --no-hosting (`hosting` 0), ONNET_HOSTED_PROVIDER=none. A state with no
+# hosted_enabled output at all (one the infra was not applied to since hosted.tf
+# came) is no answer: the deploy stops, never reading it as off. The caller has
+# pulled the state. Exported for compose's interpolation (docker-compose.yml
+# passes them to the server); the shell's values win over the env files'.
 hosted_app_env() {
   local serve_tag="$1" hosting="$2" enabled owner ref digest
-  enabled="$(terraform -chdir="$TF_DIR" output -raw hosted_enabled 2>/dev/null || echo false)"
-  if [ "$hosting" -eq 0 ] || [ "$enabled" != "true" ]; then
+  if [ "$hosting" -eq 0 ]; then
     export ONNET_HOSTED_PROVIDER=none
-    if [ "$hosting" -eq 0 ]; then
-      log "hosted game servers: off (--no-hosting)"
-    else
-      log "hosted game servers: off (no data snapshot in the infra; DEPLOY.md, \"Hosted game servers\")"
-    fi
+    log "hosted game servers: off (--no-hosting)"
     return
   fi
+  enabled="$(terraform -chdir="$TF_DIR" output -raw hosted_enabled 2>/dev/null)" \
+    || die "no 'hosted_enabled' infra output: run 'infra apply' first (with hosting off it only adds outputs), or deploy with --no-hosting"
+  case "$enabled" in
+    true) ;;
+    false)
+      export ONNET_HOSTED_PROVIDER=none
+      log "hosted game servers: off (no data snapshot in the infra; DEPLOY.md, \"Hosted game servers\")"
+      return ;;
+    *) die "the 'hosted_enabled' infra output reads '$enabled', neither true nor false" ;;
+  esac
   tf_output() {
     terraform -chdir="$TF_DIR" output -raw "$1" 2>/dev/null \
       || die "no '$1' output; run 'infra apply' (hosted_data_snapshot_id is set, its resources are not)"
@@ -348,6 +366,8 @@ app_reset_db() {
   done
   [ -n "$tag" ] || die "app reset-db needs --tag SHA: the server image carrying the edited migration, deployed onto the empty database"
 
+  # The target and the hosted settings come from the Terraform state.
+  cmd_state pull
   app_images "$tag" "$game_tag"
   remote_compose
   # The deploy below recreates the server: with the same hosted settings as
@@ -447,6 +467,8 @@ cmd_app() {
           *) die "unknown: app deploy $1 (try: --tag SHA, --game-tag SHA, --serve-tag TAG, --no-hosting)" ;;
         esac
       done
+      # The target and the hosted settings come from the Terraform state.
+      cmd_state pull
       app_images "$tag" "$game_tag"
       remote_compose
       hosted_app_env "$serve_tag" "$hosting"
@@ -496,8 +518,11 @@ cmd_state() {
           # `op document get --out-file` echoes the path to STDOUT — redirect it
           # so it can't pollute captured output (e.g. `$(... infra output -raw)`,
           # which runs a state pull first). All progress goes via log() to stderr.
-          op document get "$doc" --vault "$VAULT" --out-file "$statefile" --force >/dev/null 2>&1 \
-            && log "wrote $statefile" || log "no remote state yet (first run)" ;;
+          if op document get "$doc" --vault "$VAULT" --out-file "$statefile" --force >/dev/null 2>&1; then
+            log "wrote $statefile"
+          else
+            log "no remote state yet (first run)"
+          fi ;;
     push) log "pushing state to vault document '$doc'…"
           [ -f "$statefile" ] || die "no local state at $statefile"
           if op document get "$doc" --vault "$VAULT" >/dev/null 2>&1; then
