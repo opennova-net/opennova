@@ -78,6 +78,12 @@ inline void edit(Workspace &workspace, const Document &document, const Edit &cha
 }
 
 // A batch over any rows, one undo step (a drag's step: the edges it writes).
+inline void edits(Workspace &workspace, const Document &document, std::vector<Edit> batch);
+// An op's planned edits raised as one batch (one undo step) where it planned any (`ok`); its refusal is told
+// by the op.
+inline void edits_if(Workspace &workspace, const Document &document, bool ok, std::vector<Edit> batch) {
+	if (ok && !batch.empty()) edits(workspace, document, std::move(batch));
+}
 inline void edits(Workspace &workspace, const Document &document, std::vector<Edit> batch) {
 	workspace.request(request::edit_record(document.path(), std::move(batch)));
 }

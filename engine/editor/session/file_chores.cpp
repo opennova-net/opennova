@@ -45,11 +45,6 @@ bool within(const std::string &path, const std::string &folder) {
 	return path.size() > folder.size() && path[folder.size()] == '/' && strutil::iequals(path.substr(0, folder.size()), folder);
 }
 
-// A folder in words: "the top level", else its path with a slash.
-std::string folder_words(const std::string &folder) {
-	return folder.empty() ? std::string("the top level") : folder + "/";
-}
-
 // The paths of a side of a step that are the project's files (not a folder under the cache): what a scan reads
 // again.
 std::vector<std::string> project_files_of(const std::vector<std::string> &paths) {
@@ -72,14 +67,6 @@ std::vector<std::string> chore_files(const EditorRequest &request) {
 	return out;
 }
 
-// Names in words: "a", "a and b", "a, b and c".
-std::string names_in_words(const std::vector<std::string> &names) {
-	std::string out;
-	for (size_t i = 0; i < names.size(); ++i)
-		out += (i == 0 ? "" : i + 1 == names.size() ? " and " : ", ") + names[i];
-	return out;
-}
-
 // The delete plans `plans` with those whose file another plan takes with it (a mission's companion, an import
 // source's record) left out, so each file goes once.
 std::vector<DeletePlan> taken_once(std::vector<DeletePlan> plans) {
@@ -96,6 +83,19 @@ std::vector<DeletePlan> taken_once(std::vector<DeletePlan> plans) {
 }
 
 } // namespace
+
+std::string names_in_words(const std::vector<std::string> &names) {
+	std::string out;
+	for (size_t i = 0; i < names.size(); ++i)
+		out += (i == 0 ? "" : i + 1 == names.size() ? " and " : ", ") + names[i];
+	return out;
+}
+
+std::string folder_words(const std::string &folder) {
+	std::string normal, why;
+	if (!normalize_project_folder(folder, normal, why)) return folder;
+	return normal.empty() ? std::string("the top level") : normal + "/";
+}
 
 size_t deleted_uses(const SessionView &view, const std::vector<DeletePlan> &plans, std::vector<std::string> &places,
                     size_t most) {

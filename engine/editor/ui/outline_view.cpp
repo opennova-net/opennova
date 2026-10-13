@@ -38,14 +38,6 @@ namespace {
 using window_requests::edit;
 using window_requests::select;
 
-// The first kind of row the file holds (RecordKindRow::top): the rows the master column lists and
-// adds.
-const RecordKindRow *own_kind(const Document &document) {
-	for (const RecordKindRow &row : document.kinds())
-		if (row.top) return &row;
-	return nullptr;
-}
-
 // A record's tooltip in a tree: the token its type words where its title words it otherwise
 // ("anim_walk_forward" under "walk forward"), then whether it changed since the last save.
 std::string record_tip(const OutlineLine &line, Document::RecordChange change) {

@@ -42,7 +42,6 @@ static std::vector<ScriptUse> script_event_uses(const SessionView &view, const M
 
 namespace {
 
-constexpr NodeKind k(MissionKind kind) { return node_kind(kind); }
 
 const ImVec4 kMuted(0.62f, 0.62f, 0.62f, 1.0f);
 const ImVec4 kWarn(0.95f, 0.75f, 0.35f, 1.0f);
@@ -353,7 +352,7 @@ void drop_line(CardContext &context, const BoardCard &card, bool actions, size_t
 	if (held && held->IsDataType(kLogicLineDragPayload) && held->Data && size_t(held->DataSize) == sizeof(LogicLineDrag)) {
 		const LogicLineDrag drag = *static_cast<const LogicLineDrag *>(held->Data);
 		const bool fits = drag.document == context.mission.identity() &&
-		                  drag.record.kind == k(actions ? MissionKind::Action : MissionKind::Trigger);
+		                  drag.record.kind == node_kind(actions ? MissionKind::Action : MissionKind::Trigger);
 		// Within its own list, the place it takes once it has left its own.
 		size_t to = position;
 		if (fits && drag.record.row == card.event.row && position != SIZE_MAX) {
@@ -383,7 +382,7 @@ void drop_line(CardContext &context, const BoardCard &card, bool actions, size_t
 					ImGui::TextUnformatted(left.c_str());
 					if (untriggered) {
 						const Node *row = context.mission.row(drag.record.row);
-						const bool waits = row && row->kind == k(MissionKind::Event) &&
+						const bool waits = row && row->kind == node_kind(MissionKind::Event) &&
 						                   static_cast<const EventRow *>(row)->native.event.delay > 0;
 						ImGui::TextColored(kWarn, "%s is left with no trigger: it %s, as the mission runs.", title.c_str(),
 						                   waits ? "acts after its wait" : "fires right away");
@@ -765,7 +764,7 @@ static bool draw_type_picker(CardContext &context, bool actions) {
 		// Show text: its chip opens on New text once its line is there.
 		if (raised && chosen->action && chosen->type == int32_t(bms::ActionType::OutputText)) {
 			const Node *row = context.mission.row(state.add_event);
-			const auto *event = row && row->kind == k(MissionKind::Event) ? static_cast<const EventRow *>(row) : nullptr;
+			const auto *event = row && row->kind == node_kind(MissionKind::Event) ? static_cast<const EventRow *>(row) : nullptr;
 			const size_t count = event ? event->native.actions.size() : 0;
 			state.open_event = state.add_event;
 			state.open_revision = context.mission.revision();
@@ -850,7 +849,7 @@ CardAsked draw_mission_card(CardContext &context, const BoardCard &card) {
 		draw_card_live(context.workspace, mission.path(), view.activity.live_logic, CardLiveSpot{card.index, card.event.row, -1, 0});
 	}
 	const Node *row = mission.row(card.event.row);
-	const uint32_t flags = row && row->kind == k(MissionKind::Event) ? uint32_t(static_cast<const EventRow *>(row)->native.event.flags) : 0;
+	const uint32_t flags = row && row->kind == node_kind(MissionKind::Event) ? uint32_t(static_cast<const EventRow *>(row)->native.event.flags) : 0;
 	ui_kit::WrapRow flags_row;
 	flags_row.next(0.0f);
 	const auto flag = [&](const char *label, bms::EventFlags bit, bool on, const char *tip) {

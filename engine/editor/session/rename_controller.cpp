@@ -14,6 +14,7 @@
 #include <editor/model/field_text.h>
 #include <editor/project/project_files.h>
 #include <editor/session/document_set.h>
+#include <editor/session/file_chores.h>
 #include <editor/session/navigation_controller.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/rename_operation.h>
@@ -25,18 +26,6 @@
 namespace opennova::editor {
 
 RenameController::RenameController(SessionCore &core) : core_(core), view_(core.view()), paths_(core.paths()) {}
-
-namespace {
-
-// A project folder in words: "the top level", else its path with a slash ("defs/"); as asked when it is
-// no folder of the project (the move says why).
-std::string folder_words(const std::string &folder) {
-	std::string normal, why;
-	if (!normalize_project_folder(folder, normal, why)) return folder;
-	return normal.empty() ? std::string("the top level") : normal + "/";
-}
-
-} // namespace
 
 // A file renamed with every reference rewritten (graph/rename_transaction), or refused with the
 // reasons as findings: an operation (RenameOperation) that joins the validation left due, plans

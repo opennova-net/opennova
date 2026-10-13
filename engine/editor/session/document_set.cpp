@@ -1800,10 +1800,7 @@ std::string DocumentSet::edit_words(const Document &document, const std::vector<
 				if (field.id == edit.field) title = field_title(document.field_on(edit.address, field));
 			if (std::find(titles.begin(), titles.end(), title) == titles.end()) titles.push_back(title);
 		}
-		std::string joined;
-		for (size_t i = 0; i < titles.size(); ++i)
-			joined += (i == 0 ? "" : i + 1 == titles.size() ? " and " : ", ") + titles[i];
-		return "Set " + joined + " of " + named + ".";
+		return "Set " + names_in_words(titles) + " of " + named + ".";
 	}
 	if (edits.size() == 1 && first.operation == EditOperation::Add && document.last_added())
 		return "Added " + record_display(document, document.address_of(document.last_added()), source) + ".";

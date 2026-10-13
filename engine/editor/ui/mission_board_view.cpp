@@ -30,11 +30,10 @@ namespace opennova::editor {
 
 namespace {
 
-constexpr NodeKind k(MissionKind kind) { return node_kind(kind); }
 
 bool logic_record(const NodeAddress &address) {
-	return (!address.child && address.kind == k(MissionKind::Event)) ||
-	       (address.child && (address.kind == k(MissionKind::Trigger) || address.kind == k(MissionKind::Action)));
+	return (!address.child && address.kind == node_kind(MissionKind::Event)) ||
+	       (address.child && (address.kind == node_kind(MissionKind::Trigger) || address.kind == node_kind(MissionKind::Action)));
 }
 
 // What the board was built over, so it is built again only when one of them moves: the document (its
@@ -262,7 +261,7 @@ void MissionBoardPane::keys(Workspace &workspace, const MissionDocument &mission
 	if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_D)) window_requests::clipboard(workspace, mission, EditorRequestKind::Duplicate);
 	if (ImGui::Shortcut(ImGuiKey_Delete)) window_requests::edit(workspace, mission, EditOperation::Remove, selected);
 	if (selected.child) {
-		const bool action = selected.kind == k(MissionKind::Action);
+		const bool action = selected.kind == node_kind(MissionKind::Action);
 		const std::vector<BoardLine> &lines = action ? card->actions : card->triggers;
 		for (const BoardLine &line : lines) {
 			if (line.record != selected) continue;

@@ -8,6 +8,7 @@
 #include <editor/graph/reference_kinds.h>
 #include <editor/model/field_text.h>
 #include <editor/project_build/build_plan.h>
+#include <editor/session/file_chores.h>
 
 namespace opennova::editor {
 
@@ -98,13 +99,9 @@ std::string refused_words(const BuildReport &report) {
 std::string build_result_line(const BuildResult &result) {
 	std::string line = result.headline;
 	if (!line.empty() && line.back() == '.') line.pop_back();
-	std::string files;
-	for (size_t i = 0; i < result.files.size(); ++i) {
-		const std::string &words = result.files[i].words;
-		files += (i == 0 ? "" : i + 1 == result.files.size() ? " and " : ", ") + result.files[i].name + " " +
-		         words.substr(0, words.find(','));
-	}
-	if (!files.empty()) line += ": " + files;
+	std::vector<std::string> files;
+	for (const auto &file : result.files) files.push_back(file.name + " " + file.words.substr(0, file.words.find(',')));
+	if (!files.empty()) line += ": " + names_in_words(files);
 	return line + (result.where.empty() ? std::string(".") : ", in " + result.where + ".");
 }
 

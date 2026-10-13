@@ -12,6 +12,12 @@
 
 namespace opennova::editor {
 
+// Names in words: "a", "a and b", "a, b and c".
+std::string names_in_words(const std::vector<std::string> &names);
+// A project folder in words: "the top level", else its path with a slash ("defs/"); as asked when it is no folder
+// of the project (a move says why).
+std::string folder_words(const std::string &folder);
+
 class SessionCore;
 struct ProjectPaths;
 struct SessionView;

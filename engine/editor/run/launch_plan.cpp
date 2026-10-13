@@ -152,11 +152,6 @@ std::string file_named(const std::string &folder, const char *name) {
 // with the size and last write of the install's file it was copied from.
 constexpr const char *kInstallCopyRecordFileName = "install_copy.json";
 
-// A file's last write, as two reads of the same file compare it (0 when it cannot be read).
-int64_t last_write_of(const std::string &path) {
-	return io::file_modified_ticks(system_path(path));
-}
-
 // The install's files a run's copy cache keeps for it, by name: the size and last write each was
 // copied at. A copy is trusted by those alone only when the install file's last write had settled when
 // it was made (io::file_stamp_settled, git's racy rule: a rewrite of the same size in the same clock tick
@@ -193,7 +188,7 @@ bool stage_install_file(const fs::path &install, const std::string &name, const 
 		reason = ec.message();
 		return false;
 	}
-	const int64_t written = last_write_of(from);
+	const int64_t written = io::file_modified_ticks(system_path(from));
 	const std::string cached = join_path(copies.dir, name);
 	const io::JsonValue *was = copies.record.get(strutil::to_lower(name));
 	const bool fresh = was && was->is_object() && uint64_t(was->get_number("size", -1.0)) == size &&
