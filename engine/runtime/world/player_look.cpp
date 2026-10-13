@@ -4,6 +4,25 @@
 
 namespace opennova::world {
 
+void player_look_flip_mouse(PlayerLookSettings &s) {
+    s.invert_y = !s.invert_y; // [orig: `xor g_MouseInvertY, 1` @0x49afbb]
+}
+
+int32_t player_look_mouse_scale(PlayerLookSettings &s, int32_t param_value, bool negative) {
+    // [orig: @0x49b185 -- a nonzero param is the new word as given]
+    int32_t v = param_value;
+    // The step wraps as the 32-bit add/sub does (the profile copies the word
+    // unclamped) [orig: `add esi, 10h` @0x49b193 / `sub esi, 10h` @0x49b198].
+    if (v == 0) {
+        const uint32_t word = static_cast<uint32_t>(s.sensitivity);
+        v = static_cast<int32_t>(negative ? word - 16u : word + 16u);
+    }
+    if (v >= 0x200) v = kMouseSensitivityMax;    // [orig: @0x49b19b..0x49b1a9]
+    else if (v <= 0) v = kMouseSensitivityMin;   // [orig: @0x49b1b0..0x49b1b4]
+    s.sensitivity = v;                           // [orig: @0x49b1a1 / @0x49b1b9]
+    return v;
+}
+
 PlayerLookDelta player_look_delta(const PlayerLookSettings &s,
         int32_t dx_px, int32_t dy_px, int32_t scoped_zoom) {
     // Y sense: the raw center-lock delta is +down; the default (flipmouse OFF) negates

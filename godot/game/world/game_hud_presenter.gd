@@ -704,11 +704,15 @@ func tick(gameplay_input_active: bool = false) -> void:
 		if ControlsBindings.pressed(HudToggles.row_token(row)):
 			rows_down |= 1 << row
 	var both_hud_rows := (1 << HudToggles.ROW_HUD_DETAIL) | (1 << HudToggles.ROW_HUD_COLOR)
+	# The mousescale row's step direction is its fire's sign bit (Shift on a
+	# modifier-less key or a held mouse button; engine BindingSet::fire_signed).
 	var toggle_events := _toggles.poll(rows_down,
 			(rows_down & both_hud_rows) == both_hud_rows and _hud_rows_share_key(),
 			hud_keys_chorded, gameplay_input_active, sim.is_mp_session(),
 			(sim.get_session_game_type() & GAME_TYPE_OBJECTIVE_BIT) != 0,
-			not bool(sim.is_local_player_dead()), _authority(sim), _mp_session_peer(sim))
+			not bool(sim.is_local_player_dead()), _authority(sim), _mp_session_peer(sim),
+			ControlsBindings.model().is_token_fire_signed(
+					HudToggles.row_token(HudToggles.ROW_MOUSE_SCALE)))
 	# The window actions' respawn init also closes the sim's map overlay (the
 	# witness rides hud_toggles.h kOverlayWindowsCleared).
 	if toggle_events & HudToggles.EVENT_OVERLAY_WINDOWS_CLEARED:
@@ -1269,6 +1273,17 @@ func _apply_toggle_events(events: int) -> void:
 		_post_misc_toast(_toggles.friendly_tag_toast_key())
 	if events & HudToggles.EVENT_VERBOSE_TOGGLED:
 		_post_misc_toast(_toggles.verbose_toast_key())
+	# The look rows act on the session's live words (the profile record keeps
+	# its own); the scale step posts its toast (engine hud_toggles.h).
+	var look_sim: Simulation = _world.get_sim() if _world != null else null
+	if events & HudToggles.EVENT_MOUSE_FLIPPED and look_sim != null:
+		look_sim.flip_local_player_mouse()
+	if events & HudToggles.EVENT_MOUSE_SCALE_STEPPED and look_sim != null:
+		var scale := look_sim.step_local_player_mouse_scale(0,
+				(events & HudToggles.EVENT_MOUSE_SCALE_NEGATIVE) != 0)
+		var line := HudToggles.mouse_scale_toast(Strings.get_table(Strings.TABLE_GAMETEXT), scale)
+		if _game_hud != null and not line.is_empty():
+			_game_hud.push_message(line)
 	if events & HudToggles.EVENT_BRIEFING_PAGES_RESET and _game_hud != null:
 		_game_hud.cycle_briefing_page(0, false)
 	if events & HudToggles.EVENT_SCOREBOARD_PAGE_RESET and _game_hud != null:
@@ -1325,6 +1340,15 @@ func _hud_rows_share_key() -> bool:
 		if key != 0 and detail_keys.has(key):
 			return true
 	return false
+
+
+## One flipmouse + mousescale poll step over pre-sampled device state with the
+## mousescale fire's sign (the seam the tests drive); every other row idle.
+func poll_look_rows(flip_down: bool, scale_down: bool, negative: bool, active: bool) -> void:
+	var rows_down := ((1 << HudToggles.ROW_FLIP_MOUSE) if flip_down else 0) \
+			| ((1 << HudToggles.ROW_MOUSE_SCALE) if scale_down else 0)
+	_apply_toggle_events(_toggles.poll(rows_down, false, false, active, false, false, true,
+			false, false, negative))
 
 
 ## One huddetail poll step (the seam the tests drive); every other row idle.

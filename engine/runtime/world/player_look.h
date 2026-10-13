@@ -19,9 +19,10 @@
 
 namespace opennova::world {
 
-// [orig: dword_24D207C default 128; the 1..0x1FF clamp is the +/- ADJUST's
-//  @ 0x49b19b-0x49b1b9 — neither the profile apply @0x55161e nor the per-frame
-//  read @0x4996dd clamps, so the range is documentation here, not a gate]
+// [orig: g_MouseSensitivity default 128; the 1..0x1FF clamp is the +/- ADJUST's
+//  @ 0x49b19b-0x49b1b9 (player_look_mouse_scale); neither the profile apply
+//  @0x55161e nor the per-frame read @0x4996dd clamps, so the range gates the
+//  adjust alone]
 constexpr int32_t kMouseSensitivityDefault = 128;
 constexpr int32_t kMouseSensitivityMin = 1;
 constexpr int32_t kMouseSensitivityMax = 0x1FF;
@@ -32,9 +33,30 @@ constexpr int32_t kLookPitchMin = -0x38E38E00;        // -80 deg (= 0xC71C7200)
 constexpr int32_t kLookPitchProneMax = 0x1C71C700;    // +40 deg while prone
 
 struct PlayerLookSettings {
-    int32_t sensitivity = kMouseSensitivityDefault; // [orig: dword_24D207C]
-    bool invert_y = false; // flipmouse [orig: dword_24D2078; default OFF = push-forward looks up]
+    int32_t sensitivity = kMouseSensitivityDefault; // [orig: g_MouseSensitivity]
+    bool invert_y = false; // flipmouse [orig: g_MouseInvertY; default OFF = push-forward looks up]
 };
+
+// The flipmouse row (catalog 79, dispatch 9): the LIVE Y invert flips. The
+// profile record keeps its word, so the next mission start's session copy
+// (or the in-game options Accept) writes the record's back.
+// [orig: Input_HandleActionBinding case 9 `xor g_MouseInvertY, 1` @0x49afbb]
+void player_look_flip_mouse(PlayerLookSettings &s);
+
+// The mousescale row (catalog 82, dispatch 17) on the LIVE sensitivity, the
+// record untouched as above: a nonzero `param_value` (the console's
+// `mousescale <n>` line) sets the word outright, else it steps by 16, down
+// when the event carries the sign bit (`negative`: bit 31 of the queued
+// binding id, Shift held on the keyboard fallback pass or the mouse dispatch),
+// then clamps to 1..0x1FF. Returns the new word, which the embedder posts in
+// the STRMISC_MOUSESCALE toast (hud::mouse_scale_toast).
+// [orig: Input_HandleActionBinding case 17 @0x49b185..0x49b1b9 (`test esi,
+//  esi` the param @0x49b185, `test ebp, ebp` the sign @0x49b189, +16
+//  @0x49b193, -16 @0x49b198, >= 0x200 -> 0x1FF @0x49b19b..0x49b1a9, <= 0 -> 1
+//  @0x49b1b0..0x49b1b4); the sign Input_DequeueEvent @0x497f7d (outFlags =
+//  id >> 31) from Input_ProcessKeyboardEvents @0x49d452..0x49d483 and
+//  Input_TryDispatchBindingByWeaponType @0x499180..0x4991a4]
+int32_t player_look_mouse_scale(PlayerLookSettings &s, int32_t param_value, bool negative);
 
 struct PlayerLookDelta { int32_t yaw = 0, pitch = 0; };
 // Shared scaling before human-view or AbsorbPitch bounds are applied.

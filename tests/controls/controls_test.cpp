@@ -554,6 +554,51 @@ bool test_pressed_key_two_passes() {
   return true;
 }
 
+// The sign bit a fire carries (the mousescale step's direction): the
+// keyboard fallback pass and the mouse dispatch put it on while Shift is
+// held, the modifier pass and a joystick button never do
+// [orig: Input_ProcessKeyboardEvents @0x49d452..0x49d483 vs @0x49d42f;
+//  Input_TryDispatchBindingByWeaponType @0x499180; Input_TryTriggerJoystickButton
+//  @0x497b30].
+bool test_fire_sign() {
+  BindingSet set;
+  const int scale = set.index_of_token("mousescale");
+  CHECK(scale >= 0, "the mousescale row exists");
+  std::set<int> down;
+  const auto key_down = [&](int vk) { return down.count(vk) != 0; };
+  BindingRecord rec;
+  rec.primary = 0x4B; // K
+  CHECK(set.set_record(scale, rec), "a bare K binding installs");
+  down = {0x4B};
+  CHECK(!set.fire_signed(scale, 0, key_down), "a bare K fires unsigned");
+  down = {0x10, 0x4B};
+  CHECK(set.pressed_key(scale, key_down) == 0x4B, "Shift+K still fires the bare row");
+  CHECK(set.fire_signed(scale, 0, key_down), "Shift+K: the fallback pass signs it");
+  CHECK(!set.fire_signed(-1, 0, key_down), "an unknown row carries no sign");
+  rec.primary_mod = 17;
+  CHECK(set.set_record(scale, rec), "a Ctrl+K binding installs");
+  down = {0x10, 0x11, 0x4B};
+  CHECK(set.pressed_key(scale, key_down) == 0x4B, "Ctrl+Shift+K fires the Ctrl row");
+  CHECK(!set.fire_signed(scale, 0, key_down), "the modifier pass queues no sign");
+  BindingRecord mouse;
+  mouse.mouse_mask = kMouseMiddle;
+  CHECK(set.set_record(scale, mouse), "a middle-button binding installs");
+  // The stock Prone row holds the middle button too; drop it so the
+  // first-match walk reaches mousescale.
+  CHECK(set.set_record(set.index_of_token("Prone"), BindingRecord{}), "Prone unbinds");
+  down = {0x10};
+  CHECK(set.pressed_mouse(scale, kMouseMiddle, key_down), "the middle button fires the row");
+  CHECK(set.fire_signed(scale, kMouseMiddle, key_down), "Shift+MMB: the mouse dispatch signs it");
+  down = {};
+  CHECK(!set.fire_signed(scale, kMouseMiddle, key_down), "a bare MMB fires unsigned");
+  BindingRecord joy;
+  joy.joy_button = 3;
+  CHECK(set.set_record(scale, joy), "a joystick binding installs");
+  down = {0x10};
+  CHECK(!set.fire_signed(scale, 0, key_down), "a joystick button queues no sign");
+  return true;
+}
+
 bool test_joystick_pov_dispatch() {
   BindingSet bindings;
   const std::array<int, 8> boundaries{2200, 6800, 11200, 15000, 20200, 24800, 29200, 33800};
@@ -715,6 +760,7 @@ int main() {
   RUN_TEST(test_binding_set_assignment);
   RUN_TEST(test_format_display_string);
   RUN_TEST(test_pressed_key_two_passes);
+  RUN_TEST(test_fire_sign);
   RUN_TEST(test_action_codes);
   RUN_TEST(test_head_gate_by_code);
   RUN_TEST(test_binding_revision);

@@ -1408,6 +1408,9 @@ public:
 	// apply — the [1,511] range is the +/- adjust's); Y invert (flipmouse, default off).
 	// (engine: runtime/world/player_look.h)
 	void set_local_player_mouse(int p_sensitivity, bool p_invert_y);
+	// The flipmouse / mousescale rows on those live words (the step returns the new word).
+	void flip_local_player_mouse();
+	int step_local_player_mouse_scale(int p_param_value, bool p_negative);
 	// Stance SELECT request (0 stand / 1 crouch / 2 prone) — the 3-key semantics: each
 	// key selects its stance, mutual exclusion at apply, REFUSED while the equipped
 	// weapon has ForceCrouch (0x40000). Returns whether the stance changed. (engine: runtime/inmatch/client_runtime.h)

@@ -425,6 +425,22 @@ int BindingSet::pressed_key(int index,
   return 0;
 }
 
+bool BindingSet::fire_signed(int index, uint16_t held_mouse_mask,
+                             const std::function<bool(int)> &key_down) const {
+  const BindingRecord *r = record(index);
+  // [orig: `cmp g_InputState.keyState+10h, 0` @0x49d452 / @0x499180 -- VK_SHIFT]
+  if (r == nullptr || !key_down(0x10)) {
+    return false;
+  }
+  // A keyboard fire: the fallback (both modifier words zero) is signed, the
+  // modifier pass is not [orig: @0x49d3ed..0x49d3f8 vs @0x49d42f].
+  if (pressed_key(index, key_down) != 0) {
+    return r->primary_mod == 0 && r->secondary_mod == 0;
+  }
+  // A held mouse button: the mouse dispatch's sign; a joystick fire is bare.
+  return pressed_mouse(index, held_mouse_mask, key_down);
+}
+
 const BindingRecord *BindingSet::record(int index) const {
   if (index < 0 || index >= static_cast<int>(records_.size())) {
     return nullptr;
