@@ -61,7 +61,7 @@ weapon "WPN_ON_AR15"
 	action "reload"
 		anim anim_wpn_reload
 		soundset GF_ONAR15_RL
-		delaystart 228
+		delaystart 164
 		function wpn_std_reload
 	end
 	action "empty"

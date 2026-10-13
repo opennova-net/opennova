@@ -16,7 +16,9 @@ scratch folder outside the repo, measured and never committed or imported.
 
 ## Rules
 
-- **CC0 1.0 only**, recorded per file in `SOURCES.md`.
+- **CC0 1.0 only**, recorded per file in `SOURCES.md`. The one exception is the carbine's six
+  sounds (`onar15*.wav`), mixed from the Infima Games pack the carbine itself comes from
+  (`art/on_ar15/README.md`), at each montage's cue times and volumes; `SOURCES.md` names their files.
 - **Modelled on the original, never taken from it.** The reference is Joint
   Operations: Combined Arms (Steam). Its sets, formats, lengths, loudness and
   variation counts are measured; its audio never enters the repo.
@@ -309,10 +311,10 @@ member's base, "jitter" its random range, both Q16.
 | | 900 | `onar15f2` (clamp 110) | 0xFFFF | 0 | 130 |
 | `GS_ONAR15AI` | 80 | `onar15f1` | 0x11998 | 0 | 195 |
 | | 800 | `onar15f2` (clamp 110) | 0xFFFF | 0 | 130 |
-| `GF_ONAR15_RL` | 25 | `onar15rl` (clamp 230) | 0xFFFF | 0 | 125 |
+| `GF_ONAR15_RL` | 25 | `onar15rl` (clamp 230) | 0xFFFF | 0 | 207 |
 | `DRY_ONAR15` | 25 | `onar15dry` (clamp 180) | 0xFFFF | 0 | 225 |
-| `GF_ONAR15_ST` | 25 | `onar15st` | 0xFFFF | 0 | 70 |
-| `GF_ONAR15_SF` | 25 | `onar15sf` | 0xFFFF | 0 | 70 |
+| `GF_ONAR15_ST` | 25 | `onar15st` | 0xFFFF | 0 | 91 |
+| `GF_ONAR15_SF` | 25 | `onar15sf` | 0xFFFF | 0 | 107 |
 | `BM1_DEATH` | 150 | `ondeath1` to `8` | 0xE3D6 | 0x1EB8 | 201 |
 | `BM1_DEATH_K` | 140 | `ondeathk1` to `3` (clamp 200) | 0xFFFF | 0 | 202 |
 | `ON_FALLDEAD` | 100 | `onfldead1` to `3` | 0xFFFF | 0 | 188 |
