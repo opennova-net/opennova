@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 
+#include <base/io/os_path.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/terrain_document.h>
@@ -40,14 +41,8 @@ constexpr ViewportState kHeadlessSize{ 1024, 768 };
 // The framing: looking down from the south at this pitch (radians, the orbit's: above the target).
 constexpr float kFramePitch = 0.75f;
 
-std::string base_of(const std::string &path) {
-	std::string name = path;
-	if (const size_t slash = name.find_last_of("/\\"); slash != std::string::npos) name.erase(0, slash + 1);
-	return name;
-}
-
 std::string stem_of(const std::string &path) {
-	std::string name = base_of(path);
+	std::string name = io::utf8_file_name(path);
 	if (const size_t dot = name.find_last_of('.'); dot != std::string::npos) name.erase(dot);
 	return name;
 }
@@ -172,7 +167,7 @@ std::string TerrainViewport::message() const {
 
 std::string TerrainViewport::caption() const {
 	if (reason_ != TerrainViewStatus::Ready) return std::string();
-	if (const TerrainMissionUse *use = mission()) return " under " + base_of(use->mission) + "'s environment";
+	if (const TerrainMissionUse *use = mission()) return " under " + io::utf8_file_name(use->mission) + "'s environment";
 	return " under the engine's own environment";
 }
 
@@ -709,7 +704,7 @@ io::JsonValue TerrainViewport::notes_json(const ViewportInput &) const {
 			                                         : "No mission runs on it: drawn under the engine's own environment "
 			                                           "(a mission's header names its terrain).");
 	} else if (const TerrainMissionUse *use = mission(); use->environment_file.empty() && !use->environment.empty()) {
-		note("terrain.no_environment", base_of(use->mission) + " names the environment " + use->environment +
+		note("terrain.no_environment", io::utf8_file_name(use->mission) + " names the environment " + use->environment +
 		                                       ", which the project does not have: the engine's own environment.");
 	}
 	for (const std::string &name : missing_) {

@@ -16,7 +16,9 @@ CanvasSubject subject_of(const ViewportModel &viewport) {
 	return subject;
 }
 
-io::JsonValue vec3(const PreviewVec3 &v) {
+} // namespace
+
+io::JsonValue preview_point_json(const PreviewVec3 &v) {
 	io::JsonValue out = io::JsonValue::make_array();
 	out.array.push_back(io::json_number(v.x));
 	out.array.push_back(io::json_number(v.y));
@@ -24,11 +26,9 @@ io::JsonValue vec3(const PreviewVec3 &v) {
 	return out;
 }
 
-} // namespace
-
 io::JsonValue orbit_camera_to_json(const OrbitCamera &camera) {
 	io::JsonValue out = io::JsonValue::make_object();
-	out.set("target", vec3(camera.target));
+	out.set("target", preview_point_json(camera.target));
 	out.set("yaw", io::json_number(camera.yaw));
 	out.set("pitch", io::json_number(camera.pitch));
 	out.set("distance", io::json_number(camera.distance));

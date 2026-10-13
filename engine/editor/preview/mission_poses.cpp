@@ -4,6 +4,7 @@
 
 #include <base/io/bam.h>
 #include <base/io/fixed.h>
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/graph/asset_graph.h>
@@ -27,12 +28,6 @@ namespace {
 using io::JsonValue;
 using io::json_number;
 using io::json_string;
-
-// A project file by the name the asset source serves it by (a path's file name).
-std::string served_name(const std::string &file) {
-	const size_t slash = file.find_last_of('/');
-	return slash == std::string::npos ? file : file.substr(slash + 1);
-}
 
 // The record's field that chose the init's request.
 const char *because_of(const world::OrganicSpawnFacts &facts, int state) {
@@ -86,7 +81,7 @@ size_t MissionPoses::posed() const {
 
 const MissionPoses::Catalog &MissionPoses::catalog_(const std::string &file) {
 	Catalog &catalog = catalogs_[file];
-	const std::string name = served_name(file);
+	const std::string name = io::utf8_file_name(file);
 	const uint64_t stamp = files_->stamp(name);
 	if (catalog.stamp == stamp && stamp != 0) return catalog;
 	catalog = Catalog();

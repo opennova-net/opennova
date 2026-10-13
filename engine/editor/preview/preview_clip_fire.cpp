@@ -8,6 +8,7 @@
 #include <editor/assets/project_asset_source.h>
 #include <editor/preview/effect_playback.h>
 #include <editor/preview/mission_poses.h>
+#include <editor/preview/orbit_canvas.h>
 #include <editor/preview/sound_preview.h>
 #include <editor/session/view/session_view.h>
 #include <formats/threedi/threedi_3di3.h>
@@ -27,14 +28,6 @@ using io::json_string;
 // The envelope carries the last of a long run's shots and events.
 constexpr size_t kShotsShown = 32;
 constexpr size_t kEventsShown = 64;
-
-JsonValue vec3(const PreviewVec3 &v) {
-	JsonValue out = JsonValue::make_array();
-	out.push(json_number(v.x));
-	out.push(json_number(v.y));
-	out.push(json_number(v.z));
-	return out;
-}
 
 const char *tag_name(int tag) {
 	return tag >= 0 && tag < world::kImpactEffectTagCount ? world::kImpactEffectTagNames[tag] : "";
@@ -553,14 +546,14 @@ io::JsonValue ClipFire::to_json(const ClipFireOptions &options) const {
 	JsonValue range = JsonValue::make_object();
 	range.set("ready", JsonValue::make_bool(range_.ready()));
 	range.set("why", json_string(range_.why()));
-	range.set("origin", vec3(to_preview(world::Vec3{0.0f, 0.0f, 0.0f})));
-	range.set("forward", vec3(PreviewVec3{0.0f, 0.0f, 1.0f}));
+	range.set("origin", preview_point_json(to_preview(world::Vec3{0.0f, 0.0f, 0.0f})));
+	range.set("forward", preview_point_json(PreviewVec3{0.0f, 0.0f, 1.0f}));
 	range.set("tick", json_number(range_.tick()));
 	JsonValue target = clip_fire_options_to_json(options);
 	PreviewVec3 corners[4];
 	if (target_corners(corners)) {
 		JsonValue points = JsonValue::make_array();
-		for (const PreviewVec3 &corner : corners) points.push(vec3(corner));
+		for (const PreviewVec3 &corner : corners) points.push(preview_point_json(corner));
 		target.set("corners", std::move(points));
 	}
 	range.set("target", std::move(target));
@@ -580,8 +573,8 @@ io::JsonValue ClipFire::to_json(const ClipFireOptions &options) const {
 		row.set("ammo", json_string(shot.ammo_name));
 		row.set("byte", json_number(shot.ammo));
 		row.set("point", json_string(shot.point));
-		row.set("at", vec3(shot.at));
-		row.set("direction", vec3(shot.direction));
+		row.set("at", preview_point_json(shot.at));
+		row.set("direction", preview_point_json(shot.direction));
 		row.set("number", json_number(shot.number));
 		row.set("words", json_string(shot.words));
 		shots.push(std::move(row));
@@ -599,7 +592,7 @@ io::JsonValue ClipFire::to_json(const ClipFireOptions &options) const {
 		if (!event.set.empty()) row.set("set", json_string(event.set));
 		if (!event.effect.empty()) row.set("effect", json_string(event.effect));
 		if (event.kind == Kind::Fired || event.kind == Kind::Impact || event.kind == Kind::Sound || event.kind == Kind::Launch)
-			row.set("at", vec3(to_preview(event.at)));
+			row.set("at", preview_point_json(to_preview(event.at)));
 		if (event.kind == Kind::Impact) {
 			row.set("tag", json_number(event.tag));
 			row.set("row", json_string(tag_name(event.tag)));
@@ -614,7 +607,7 @@ io::JsonValue ClipFire::to_json(const ClipFireOptions &options) const {
 	JsonValue rounds = JsonValue::make_array();
 	for (const WeaponRangeRound &round : range_.rounds()) {
 		JsonValue row = JsonValue::make_object();
-		row.set("at", vec3(to_preview(round.at)));
+		row.set("at", preview_point_json(to_preview(round.at)));
 		row.set("tracer", JsonValue::make_bool(round.tracer));
 		rounds.push(std::move(row));
 	}
@@ -624,7 +617,7 @@ io::JsonValue ClipFire::to_json(const ClipFireOptions &options) const {
 		JsonValue row = JsonValue::make_object();
 		row.set("style", json_number(trail.style));
 		row.set("points", json_number(double(trail.points.size())));
-		if (!trail.points.empty()) row.set("newest", vec3(trail.points.back()));
+		if (!trail.points.empty()) row.set("newest", preview_point_json(trail.points.back()));
 		tracers.push(std::move(row));
 	}
 	out.set("tracers", std::move(tracers));

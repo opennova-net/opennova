@@ -5,6 +5,7 @@
 #include <cmath>
 
 #include <base/io/fixed.h>
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <base/io/tick_rate.h>
 #include <editor/assets/project_asset_source.h>
@@ -29,14 +30,8 @@ using io::json_number;
 using io::json_string;
 using io::JsonValue;
 
-// A project file by its name as the asset source serves it (a path's file name).
-std::string served_name(const std::string &file) {
-	const size_t slash = file.find_last_of('/');
-	return slash == std::string::npos ? file : file.substr(slash + 1);
-}
-
 uint64_t stamp_of(const SessionView &view, const std::string &file) {
-	return view.findings.assets && !file.empty() ? view.findings.assets->stamp(served_name(file)) : 0;
+	return view.findings.assets && !file.empty() ? view.findings.assets->stamp(io::utf8_file_name(file)) : 0;
 }
 
 // The game's entity kind of a scene pool (the kind the start's pool gates read).
@@ -136,7 +131,7 @@ const MissionEffects::Catalog &MissionEffects::catalog_(const SessionView &view,
 	catalog = Catalog();
 	catalog.stamp = stamp;
 	std::vector<uint8_t> bytes;
-	if (!view.findings.assets || !view.findings.assets->read(served_name(file), bytes) || bytes.empty()) return catalog;
+	if (!view.findings.assets || !view.findings.assets->read(io::utf8_file_name(file), bytes) || bytes.empty()) return catalog;
 	def::DefItemsFile items{};
 	if (def::def_parse_items_memory(bytes.data(), bytes.size(), &items) == 0) {
 		// A type id resolves to its first row (mission::item_defs_by_id).
@@ -162,7 +157,7 @@ const assets::Model &MissionEffects::model_(const SessionView &view, const std::
 	model = Model();
 	model.stamp = stamp;
 	std::vector<uint8_t> bytes;
-	if (!file.empty() && view.findings.assets && view.findings.assets->read(served_name(file), bytes) && !bytes.empty())
+	if (!file.empty() && view.findings.assets && view.findings.assets->read(io::utf8_file_name(file), bytes) && !bytes.empty())
 		model.model = assets::parse_model(bytes.data(), bytes.size());
 	return model.model;
 }

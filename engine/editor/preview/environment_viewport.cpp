@@ -6,6 +6,7 @@
 #include <sstream>
 
 #include <base/io/fixed.h>
+#include <base/io/os_path.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/environment_document.h>
@@ -42,14 +43,8 @@ constexpr ViewportState kHeadlessSize{ 1024, 768 };
 constexpr float kEyeDistance = 1.0f;
 constexpr float kEyePitch = -0.08f;
 
-std::string base_of(const std::string &path) {
-	std::string name = path;
-	if (const size_t slash = name.find_last_of("/\\"); slash != std::string::npos) name.erase(0, slash + 1);
-	return name;
-}
-
 std::string stem_of(const std::string &path) {
-	std::string name = base_of(path);
+	std::string name = io::utf8_file_name(path);
 	if (const size_t dot = name.find_last_of('.'); dot != std::string::npos) name.erase(dot);
 	return name;
 }
@@ -279,7 +274,7 @@ std::string EnvironmentViewport::message() const {
 std::string EnvironmentViewport::caption() const {
 	if (reason_ != EnvironmentViewStatus::Ready) return std::string();
 	std::string out = " at " + environment_clock_words(hours());
-	if (const EnvironmentMissionUse *use = mission()) out += ", over " + base_of(use->mission);
+	if (const EnvironmentMissionUse *use = mission()) out += ", over " + io::utf8_file_name(use->mission);
 	return out;
 }
 
@@ -327,7 +322,7 @@ bool EnvironmentViewport::read_(const SessionView &view, const DocumentBase &doc
 		return false;
 	}
 	const AssetEntry *entry = view.project.scan ? view.project.scan->at_path(path()) : nullptr;
-	file_name_ = entry ? entry->logical_name : base_of(path());
+	file_name_ = entry ? entry->logical_name : io::utf8_file_name(path());
 	// As the drawn mission's load reads it (env::read_mission_env): its terrain's .trn, then overcast.def (the
 	// overcast table, by the runtime's own name), then this file over them.
 	bool overcast_read = false;
@@ -856,15 +851,15 @@ io::JsonValue EnvironmentViewport::notes_json(const ViewportInput &) const {
 		                                              : "No mission runs on it: its sky over no ground (a mission's header "
 		                                                "names its environment).");
 	else if (use->terrain_file.empty() && !use->terrain.empty())
-		note("environment.no_terrain", base_of(use->mission) + " names the terrain " + use->terrain +
+		note("environment.no_terrain", io::utf8_file_name(use->mission) + " names the terrain " + use->terrain +
 		                                       ", which the project does not have: the sky over no ground.");
 	if (use && !options_.header && !environment_overrides(*use).empty())
-		note("environment.header_overrides", base_of(use->mission) +
+		note("environment.header_overrides", io::utf8_file_name(use->mission) +
 		                                             "'s header sets its own fog or water over this environment: "
 		                                             "Mission header shows them.");
 	if (advance_ == 0)
 		note("environment.clock_stands", "The clock stands: " +
-		                                         (use ? base_of(use->mission) + "'s day length is 0"
+		                                         (use ? io::utf8_file_name(use->mission) + "'s day length is 0"
 		                                              : std::string("its day length is 0")) +
 		                                         ", as the game runs it. A day length runs it.");
 	for (const std::string &name : missing_) {

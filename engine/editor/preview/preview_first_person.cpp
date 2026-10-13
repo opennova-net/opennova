@@ -6,6 +6,7 @@
 #include <cstdio>
 
 #include <base/io/fixed.h>
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <base/io/tick_rate.h>
 #include <base/resource_index/resource_index.h>
@@ -36,8 +37,6 @@ using io::JsonValue;
 using io::json_number;
 using io::json_string;
 namespace wa = world::weapon_action;
-
-std::string file_of(const std::string &path) { return path.substr(path.find_last_of("/\\") + 1); }
 
 std::string upper(const std::string &text) {
 	std::string out = text;
@@ -382,7 +381,7 @@ bool FirstPersonSources::refresh(const std::shared_ptr<const FileSource> &source
 	}
 	const FileSource &files = *source;
 	bool moved = false;
-	const std::string catalog = file_of(rig.record_file);
+	const std::string catalog = io::utf8_file_name(rig.record_file);
 	const uint64_t stamp = files.stamp(catalog);
 	if (!weapon_read_ || catalog != catalog_ || rig.record != record_ || stamp != catalog_stamp_ || bake_read_.moved(files)) {
 		catalog_ = catalog;

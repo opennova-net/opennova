@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <editor/assets/project_asset_source.h>
 #include <formats/def/def.h>
@@ -18,8 +19,6 @@ namespace {
 using io::JsonValue;
 using io::json_number;
 using io::json_string;
-
-std::string file_of(const std::string &path) { return path.substr(path.find_last_of("/\\") + 1); }
 
 // What one sound of an event is in words: "left footstep", "right footstep", "sound 5".
 std::string sound_words(const world::AnimEventSound &sound) {
@@ -145,7 +144,7 @@ bool ClipSoundSources::refresh(const ProjectAssetSource &files, const std::strin
 	}
 	// The item pairing the clip: an item's anim_def (a weapon's animadm names no profile).
 	const bool item_pairs = !rig.record_file.empty() && rig.record_field == "anim_def";
-	const std::string catalog = item_pairs ? file_of(rig.record_file) : std::string();
+	const std::string catalog = item_pairs ? io::utf8_file_name(rig.record_file) : std::string();
 	const uint64_t stamp = item_pairs ? files.stamp(catalog) : 0;
 	if (catalog != item_file_ || rig.record != item_record_ || stamp != item_stamp_) {
 		moved = true;

@@ -5,6 +5,7 @@
 
 #include <base/io/fixed.h>
 #include <base/io/hash.h>
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/def_catalog_document.h>
@@ -52,10 +53,6 @@ using io::json_string;
 constexpr ViewportState kHeadlessSize{800, 600};
 // The highest record id a person's warmup reads (the record's SSN is a word).
 constexpr int kMostSsn = 65535;
-
-std::string file_of(const std::string &path) {
-	return path.substr(path.find_last_of("/\\") + 1);
-}
 
 // A name as a fixed char field holds it.
 template <size_t N> std::string text_of(const char (&field)[N]) {
@@ -313,7 +310,7 @@ bool DefinitionViewport::subject_(const ViewportInput &input, const DefCatalogDo
 		drawn_.kind = "item";
 		const auto &def = row.native.as<def::DefItemDef>();
 		item_record_ = true;
-		item_ = damage_item_of(def, file_of(document.path()));
+		item_ = damage_item_of(def, io::utf8_file_name(document.path()));
 		anim_def_ = def.anim_def;
 		attrib_ = def.attrib;
 		type_ = def.type;

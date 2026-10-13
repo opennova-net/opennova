@@ -8,6 +8,7 @@
 
 #include <base/io/fixed.h>
 #include <base/io/hash.h>
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <base/io/tick_rate.h>
 #include <editor/assets/project_asset_source.h>
@@ -42,14 +43,6 @@ using io::json_whole_in;
 bool same_camera(const OrbitCamera &a, const OrbitCamera &b) {
 	return a.target.x == b.target.x && a.target.y == b.target.y && a.target.z == b.target.z && a.yaw == b.yaw &&
 	       a.pitch == b.pitch && a.distance == b.distance;
-}
-
-JsonValue vec3(const PreviewVec3 &v) {
-	JsonValue out = JsonValue::make_array();
-	out.push(json_number(v.x));
-	out.push(json_number(v.y));
-	out.push(json_number(v.z));
-	return out;
 }
 
 // The hash of a model as it draws, its user points aside: its bytes written without them (a user
@@ -93,10 +86,6 @@ assets::Model with_user_points(const assets::Model &read, const std::vector<thre
 bool same_rig(const PreviewRig &a, const PreviewRig &b) {
 	return a.model == b.model && a.table == b.table && a.clip == b.clip && a.source == b.source &&
 	       a.pairing.file == b.pairing.file && a.pairing.locator == b.pairing.locator;
-}
-
-std::string file_of(const std::string &path) {
-	return path.substr(path.find_last_of("/\\") + 1);
 }
 
 // A colour on the wire: "RRGGBB".
@@ -912,7 +901,7 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 		clip_track_ = ClipSoundTrack();
 		return stop_(ModelViewStatus::Unserializable, unwritable_, true);
 	}
-	const std::string file = file_of(document.path());
+	const std::string file = io::utf8_file_name(document.path());
 	PreviewRig rig = view.findings.graph
 			? resolve_preview_rig(*view.findings.graph, *view.project.scan, file, document.kind(), options_.rig_model)
 			: PreviewRig();
@@ -1430,7 +1419,7 @@ io::JsonValue ModelViewport::options_json() const {
 
 io::JsonValue ModelViewport::camera_json() const {
 	JsonValue view = JsonValue::make_object();
-	view.set("target", vec3(camera_.target));
+	view.set("target", preview_point_json(camera_.target));
 	view.set("yaw", json_number(camera_.yaw));
 	view.set("pitch", json_number(camera_.pitch));
 	view.set("distance", json_number(camera_.distance));
@@ -1440,10 +1429,10 @@ io::JsonValue ModelViewport::camera_json() const {
 	view.set("view", json_string(eye_ ? "eye" : "orbit"));
 	if (eye_) {
 		JsonValue eye = JsonValue::make_object();
-		eye.set("eye", vec3(eye_camera_.pose.eye));
-		eye.set("right", vec3(eye_camera_.pose.right));
-		eye.set("up", vec3(eye_camera_.pose.up));
-		eye.set("back", vec3(eye_camera_.pose.back));
+		eye.set("eye", preview_point_json(eye_camera_.pose.eye));
+		eye.set("right", preview_point_json(eye_camera_.pose.right));
+		eye.set("up", preview_point_json(eye_camera_.pose.up));
+		eye.set("back", preview_point_json(eye_camera_.pose.back));
 		eye.set("near", json_number(eye_camera_.near_plane));
 		view.set("pose", std::move(eye));
 	}
@@ -1468,7 +1457,7 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 		float radius = 0.0f;
 		model_preview_sphere(shown, center, radius);
 		JsonValue sphere = JsonValue::make_object();
-		sphere.set("center", vec3(center));
+		sphere.set("center", preview_point_json(center));
 		sphere.set("radius", json_number(radius));
 		body.set("sphere", std::move(sphere));
 		// The collision layers (S17): each with its words, colour, count and whether it is shown, and the
@@ -1619,7 +1608,7 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 		row.set("bone", json_number(joint.bone));
 		row.set("name", json_string(joint.name));
 		row.set("parent", json_number(joint.parent));
-		row.set("position", vec3(joint.at));
+		row.set("position", preview_point_json(joint.at));
 		float x = 0.0f, y = 0.0f;
 		if (camera().project(joint.at, size().width, size().height, x, y)) {
 			JsonValue screen = JsonValue::make_array();
@@ -1761,7 +1750,7 @@ io::JsonValue ModelViewport::items_json(const ViewportInput &input) const {
 		row.set("id", json_number(double(record_of(input, overlay).child)));
 		row.set("name", json_string(overlay.name));
 		row.set("part", json_number(overlay.part));
-		row.set("position", vec3(overlay.at));
+		row.set("position", preview_point_json(overlay.at));
 		float x = 0.0f, y = 0.0f;
 		if (camera().project(overlay.at, size().width, size().height, x, y)) {
 			JsonValue screen = JsonValue::make_array();
@@ -1771,7 +1760,7 @@ io::JsonValue ModelViewport::items_json(const ViewportInput &input) const {
 		} else {
 			row.set("screen", JsonValue());
 		}
-		if (overlay.has_direction) row.set("direction", vec3(overlay.direction));
+		if (overlay.has_direction) row.set("direction", preview_point_json(overlay.direction));
 		if (overlay.kind == ModelOverlayKind::Light) {
 			row.set("radius", json_number(overlay.radius));
 			row.set("cone", json_number(overlay.cone));
@@ -1800,7 +1789,7 @@ io::JsonValue ModelViewport::items_json(const ViewportInput &input) const {
 		row.set("section", json_number(shape.section));
 		row.set("color", json_string(rgb_hex(shape.rgb)));
 		if (shape.sphere) {
-			row.set("center", vec3(shape.center));
+			row.set("center", preview_point_json(shape.center));
 			row.set("radius", json_number(shape.radius));
 		}
 		// Its corners once each (a face's three, a solid's), in the order first drawn.
@@ -1812,7 +1801,7 @@ io::JsonValue ModelViewport::items_json(const ViewportInput &input) const {
 				again = again || (std::fabs(p.x - q.x) < 1e-5f && std::fabs(p.y - q.y) < 1e-5f && std::fabs(p.z - q.z) < 1e-5f);
 			if (again) continue;
 			seen.push_back(p);
-			points.push(vec3(p));
+			points.push(preview_point_json(p));
 		}
 		row.set("points", std::move(points));
 		// A pixel on it (where a hit takes it, nothing nearer in the way): a sphere's centre, else the

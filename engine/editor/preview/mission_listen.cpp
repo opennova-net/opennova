@@ -6,6 +6,7 @@
 #include <cstdio>
 
 #include <base/io/fixed.h>
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <base/io/tick_rate.h>
 #include <editor/assets/asset_registry.h>
@@ -52,12 +53,6 @@ int32_t script_voice_volume_at_listener() {
 	return audio::calc_distance_volume(0, int64_t(100) * io::kFp16OneInt, (world::kScriptVoiceVolume * 255 + 128) >> 8, 255);
 }
 
-// A project file by its name as the asset source serves it (a path's file name).
-std::string served_name(const std::string &file) {
-	const size_t slash = file.find_last_of("/\\");
-	return slash == std::string::npos ? file : file.substr(slash + 1);
-}
-
 std::string metres(float value) {
 	char text[32];
 	std::snprintf(text, sizeof(text), "%.0f m", double(value));
@@ -89,12 +84,12 @@ const MissionSoundSource *MissionListen::source(NodeId row) const {
 
 const MissionListen::Catalog &MissionListen::catalog_(const SessionView &view, const std::string &file) {
 	Catalog &catalog = catalogs_[file];
-	const uint64_t stamp = view.findings.assets && !file.empty() ? view.findings.assets->stamp(served_name(file)) : 0;
+	const uint64_t stamp = view.findings.assets && !file.empty() ? view.findings.assets->stamp(io::utf8_file_name(file)) : 0;
 	if (catalog.stamp == stamp && stamp != 0) return catalog;
 	catalog = Catalog();
 	catalog.stamp = stamp;
 	std::vector<uint8_t> bytes;
-	if (!view.findings.assets || !view.findings.assets->read(served_name(file), bytes) || bytes.empty()) return catalog;
+	if (!view.findings.assets || !view.findings.assets->read(io::utf8_file_name(file), bytes) || bytes.empty()) return catalog;
 	def::DefItemsFile items{};
 	if (def::def_parse_items_memory(bytes.data(), bytes.size(), &items) == 0) {
 		// A type id resolves to its first row (mission::item_defs_by_id).
@@ -405,9 +400,9 @@ std::vector<ClipSoundFired> MissionListen::fire_sounds(const AssetScan *scan, au
 		              dialog_bank_ + ", line " + std::to_string(line.line) + "): " +
 		              (line.wave.empty() ? std::string("(no wave)") : line.wave) +
 		              (line.file.empty() ? std::string(", which the dialog bank's sounds lack: \"EX Cannot load audio\"")
-		                                 : " (" + served_name(line.file) + ")") +
+		                                 : " (" + io::utf8_file_name(line.file) + ")") +
 		              (text.empty() ? std::string() : " \"" + text + "\"");
-		if (!line.file.empty()) fired.voices.push_back({line.wave, served_name(line.file), std::string(), 0x10000u, line.volume});
+		if (!line.file.empty()) fired.voices.push_back({line.wave, io::utf8_file_name(line.file), std::string(), 0x10000u, line.volume});
 		if (scan) find_clip_sound_waves(fired, *scan);
 		fired_.push_back(fired);
 		out.push_back(std::move(fired));

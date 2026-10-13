@@ -4,9 +4,11 @@
 #include <cmath>
 #include <cstdio>
 
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/preview/effect_playback.h>
+#include <editor/preview/orbit_canvas.h>
 #include <editor/preview/sound_preview.h>
 #include <editor/session/view/session_view.h>
 #include <formats/def/def.h>
@@ -27,8 +29,6 @@ using io::json_string;
 // A long hold or a long run is many events: the envelope carries the last of them.
 constexpr size_t kEventsShown = 64;
 
-std::string file_of(const std::string &path) { return path.substr(path.find_last_of("/\\") + 1); }
-
 template <size_t N> std::string text_of(const char (&field)[N]) { return strutil::fixed_string(field, N); }
 
 PreviewVec3 add(const PreviewVec3 &a, const PreviewVec3 &b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
@@ -43,14 +43,6 @@ PreviewVec3 unit(const PreviewVec3 &a) {
 }
 particle::Vec3 particle_of(const PreviewVec3 &v) { return particle::Vec3{v.x, v.y, v.z}; }
 
-JsonValue vec3(const PreviewVec3 &v) {
-	JsonValue out = JsonValue::make_array();
-	out.push(json_number(v.x));
-	out.push(json_number(v.y));
-	out.push(json_number(v.z));
-	return out;
-}
-
 const char *tag_name(int tag) {
 	return tag >= 0 && tag < world::kImpactEffectTagCount ? world::kImpactEffectTagNames[tag] : "";
 }
@@ -59,7 +51,7 @@ const char *tag_name(int tag) {
 // it [orig: AnimMap_LoadAdmFile @0x40CC40]); "" none.
 std::string adm_file(const AssetScan *scan, const std::string &name) {
 	if (!scan || name.empty()) return std::string();
-	const std::string file = anim::adm_load_name(file_of(name), [&](const std::string &adm) { return scan->find(adm) != nullptr; });
+	const std::string file = anim::adm_load_name(io::utf8_file_name(name), [&](const std::string &adm) { return scan->find(adm) != nullptr; });
 	const AssetEntry *entry = scan->find(file);
 	return entry ? entry->logical_name : std::string();
 }
@@ -239,7 +231,7 @@ bool DefinitionWeapon::refresh(const SessionView &view, const std::string &catal
 	// The range: the project's weapon table and ammo, the shots in the view the picture shows.
 	WeaponRangeSetup setup;
 	setup.files = files;
-	setup.catalog = file_of(catalog);
+	setup.catalog = io::utf8_file_name(catalog);
 	setup.weapon = record_;
 	setup.view = first ? WeaponShotView::Own : options.shooter;
 	setup.enemy = enemy;
@@ -589,9 +581,9 @@ io::JsonValue DefinitionWeapon::to_json(const DefinitionFireOptions &options) co
 	out.set("ammo", json_string(range_.ammo()));
 	// The range: its frame in the preview, and the target.
 	JsonValue range = JsonValue::make_object();
-	range.set("origin", vec3(origin_));
-	range.set("forward", vec3(forward_));
-	range.set("up", vec3(up_));
+	range.set("origin", preview_point_json(origin_));
+	range.set("forward", preview_point_json(forward_));
+	range.set("up", preview_point_json(up_));
 	JsonValue target = JsonValue::make_object();
 	target.set("shown", JsonValue::make_bool(range_.target().shown));
 	target.set("surface", json_string(tag_name(range_.target().tag)));
@@ -601,7 +593,7 @@ io::JsonValue DefinitionWeapon::to_json(const DefinitionFireOptions &options) co
 	PreviewVec3 corners[4];
 	if (target_corners(corners)) {
 		JsonValue points = JsonValue::make_array();
-		for (const PreviewVec3 &corner : corners) points.push(vec3(corner));
+		for (const PreviewVec3 &corner : corners) points.push(preview_point_json(corner));
 		target.set("corners", std::move(points));
 	}
 	range.set("target", std::move(target));
@@ -673,7 +665,7 @@ io::JsonValue DefinitionWeapon::to_json(const DefinitionFireOptions &options) co
 			row.set("variant", json_number(event.clip_variant));
 		}
 		if (event.kind == Kind::Fired || event.kind == Kind::Impact || event.kind == Kind::Sound || event.kind == Kind::Launch)
-			row.set("at", vec3(to_preview(event.at)));
+			row.set("at", preview_point_json(to_preview(event.at)));
 		if (event.kind == Kind::Impact) {
 			row.set("tag", json_number(event.tag));
 			row.set("row", json_string(tag_name(event.tag)));
@@ -693,7 +685,7 @@ io::JsonValue DefinitionWeapon::to_json(const DefinitionFireOptions &options) co
 	JsonValue rounds = JsonValue::make_array();
 	for (const WeaponRangeRound &round : range_.rounds()) {
 		JsonValue row = JsonValue::make_object();
-		row.set("at", vec3(to_preview(round.at)));
+		row.set("at", preview_point_json(to_preview(round.at)));
 		row.set("tracer", JsonValue::make_bool(round.tracer));
 		rounds.push(std::move(row));
 	}
@@ -703,7 +695,7 @@ io::JsonValue DefinitionWeapon::to_json(const DefinitionFireOptions &options) co
 		JsonValue row = JsonValue::make_object();
 		row.set("style", json_number(trail.style));
 		row.set("points", json_number(double(trail.points.size())));
-		if (!trail.points.empty()) row.set("newest", vec3(trail.points.back()));
+		if (!trail.points.empty()) row.set("newest", preview_point_json(trail.points.back()));
 		tracers.push(std::move(row));
 	}
 	out.set("tracers", std::move(tracers));
