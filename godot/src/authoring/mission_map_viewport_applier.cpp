@@ -332,9 +332,8 @@ Transform2D MissionMapViewportApplier::map_transform_(const opennova::editor::Mi
 void MissionMapViewportApplier::draw_tiles_(const opennova::editor::MissionMapViewport &map) {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	rs->canvas_item_set_transform(tiles_item_, map_transform_(map));
-	// The tile set as the terrain loaded it, made once a load: each texel's alpha 0 (not drawn) or opaque, as MED's 2D
-	// view writes a texel whose alpha byte is not 0 with its alpha cleared [orig: JOTACmed sub_417D30, the texel test
-	// and the & 0x00FFFFFF; docs/tiles/til-re.md "The editors' tile tools"].
+	// The tile set as the terrain loaded it, made once a load, its texels as MED's 2D view draws a placed tile
+	// (editor::mission_map_tile_texels: an alpha byte not 0 drawn opaque, 0 not drawn).
 	const uint64_t from = terrain_data_.is_valid() ? terrain_data_->get_instance_id() : 0;
 	bool remade = false;
 	if (from != tile_set_from_) {
@@ -343,7 +342,7 @@ void MissionMapViewportApplier::draw_tiles_(const opennova::editor::MissionMapVi
 		tile_set_width_ = tile_set_height_ = 0;
 		opennova::terrain::Rgba8Image texels;
 		if (terrain_data_.is_valid() && texture_to_rgba8(terrain_data_->get_tilestrip_tex(), texels)) {
-			for (size_t i = 3; i < texels.pixels.size(); i += 4) texels.pixels[i] = texels.pixels[i] ? 255 : 0;
+			opennova::editor::mission_map_tile_texels(texels.pixels);
 			PackedByteArray bytes;
 			bytes.resize(int64_t(texels.pixels.size()));
 			std::memcpy(bytes.ptrw(), texels.pixels.data(), texels.pixels.size());
