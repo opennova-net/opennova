@@ -67,7 +67,6 @@ private:
 	struct Candidate {
 		std::string set, bank, wave, path;
 		int layer = 0;
-		uint32_t pitch_q16 = 0x10000;
 	};
 	std::vector<audio::AmbientMixer::LayerDesc> describe_(const std::string &set, const SessionView &view);
 	void apply_plan_(const audio::AmbientChannelPlan &plan);
