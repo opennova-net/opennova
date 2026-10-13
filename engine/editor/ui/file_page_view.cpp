@@ -98,25 +98,6 @@ void definitions(Workspace &workspace, const FileCard &card, bool reveal) {
 	ImGui::PopID();
 }
 
-// A wave's Play and Stop (DI-17: the page plays what it is), and how the sound goes as the Shell reports it.
-void wave_tools(Workspace &workspace, const FileCard &card) {
-	ImGui::SameLine();
-	if (ImGui::SmallButton("Play")) workspace.request(request::play_sound(card.path));
-	ui_kit::tooltip("Play it as the game decodes it.");
-	ImGui::SameLine();
-	if (ImGui::SmallButton("Stop")) workspace.request(request::stop_sound());
-	const WorkspaceView::Sound &sound = workspace.view().workspace.sound;
-	using State = WorkspaceView::SoundState;
-	if (sound.path != card.path || sound.state == State::Idle) return;
-	const std::string said = sound.state == State::Starting  ? std::string("Starting...")
-	                         : sound.state == State::Playing ? std::string("Playing")
-	                         : sound.state == State::Ended   ? std::string("Played")
-	                         : sound.state == State::Stopped ? std::string("Stopped")
-	                                                         : "Does not play: " + sound.error;
-	ImGui::SameLine();
-	ImGui::TextDisabled("%s", said.c_str());
-}
-
 } // namespace
 
 void draw_file_page(Workspace &workspace, const std::string &path, FilePageCache &cache, bool reveal) {
@@ -129,9 +110,7 @@ void draw_file_page(Workspace &workspace, const std::string &path, FilePageCache
 	const bool reading = !view.activity.validation.read || view.activity.validation.files_unread; // file_card's
 	if (!cache.made || cache.path != path || cache.locator != locator || cache.field != field || !(cache.key == key) ||
 	    cache.card.reading != reading) {
-		// A wave's sound as it was read, while its file stands (file_card reads it again when it moved).
-		const FileCard::Sound *known = cache.made && cache.path == path && cache.card.wave ? &cache.card.sound : nullptr;
-		FileCard card = file_card(view, path, known, locator, field);
+		FileCard card = file_card(view, path, nullptr, locator, field);
 		cache.card = std::move(card);
 		cache.path = path;
 		cache.locator = locator;
@@ -159,7 +138,6 @@ void draw_file_page(Workspace &workspace, const std::string &path, FilePageCache
 	if (ImGui::SmallButton("Show in Files")) workspace.request(request::show_in_files(card.path));
 	ImGui::SameLine();
 	if (ImGui::SmallButton("Show in folder")) workspace.request(request::reveal_path(join_path(view.project.root, card.path)));
-	if (card.wave) wave_tools(workspace, card);
 	definitions(workspace, card, reveal);
 	lines(workspace, "Used by", card.used_by, "No file of the project names it.", false);
 	lines(workspace, "Names", card.names, "It names no other file or name the editor follows.", reveal);
