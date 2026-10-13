@@ -19,6 +19,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <base/io/strutil.h>
+#include <editor/preview/option_reads.h>
 #include <formats/mns/mns.h>
 #include <formats/rtxt/rtxt.h>
 #include <runtime/menu/menu_state_frame.h>
@@ -105,17 +106,12 @@ bool read_options(const JsonValue &json, MenuViewportOptions &held, MenuCanvasSh
 		} else if (key == "pointer_down") {
 			// The game's left button held where the pointer is (DI-34): its press and its release over one
 			// window are the game's click.
-			if (!value.is_bool()) {
-				error = "options.pointer_down is true or false.";
+			if (!read_json_bool(
+						value, pointed.down, error, "options.pointer_down is true or false."))
 				return false;
-			}
-			pointed.down = value.boolean;
 		} else if (key == "pointer") {
-			if (!value.is_bool()) {
-				error = "options.pointer is true or false.";
+			if (!read_json_bool(value, pointed.shown, error, "options.pointer is true or false."))
 				return false;
-			}
-			pointed.shown = value.boolean;
 		} else if (key == "pointer_at") {
 			// A point of the picture in design units, where the mouse can be on the game's screen; null lets
 			// go of it.
@@ -133,10 +129,9 @@ bool read_options(const JsonValue &json, MenuViewportOptions &held, MenuCanvasSh
 			pointed.x = x;
 			pointed.y = y;
 		} else if (key == "zoom") {
-			if (!value.is_string() || !menu_zoom_from_token(value.string, shown.zoom)) {
-				error = "options.zoom is fit, scale (with scale) or device.";
+			if (!read_json_token(value, menu_zoom_from_token, shown.zoom, error,
+						"options.zoom is fit, scale (with scale) or device."))
 				return false;
-			}
 		} else if (key == "scale") {
 			if (!value.is_number() || !(value.number >= kMenuScaleMin && value.number <= kMenuScaleMax)) {
 				error = "options.scale is the design's scale, 0.1 to 8 (1 its own size).";
@@ -144,11 +139,8 @@ bool read_options(const JsonValue &json, MenuViewportOptions &held, MenuCanvasSh
 			}
 			shown.scale = float(value.number);
 		} else if (key == "snap") {
-			if (!value.is_bool()) {
-				error = "options.snap is true or false.";
+			if (!read_json_bool(value, shown.snap, error, "options.snap is true or false."))
 				return false;
-			}
-			shown.snap = value.boolean;
 		} else if (key == "force_id") {
 			if (!json_whole_in(value, 0.0, 9007199254740992.0, number)) {
 				error = "options.force_id is a window's record id (0: none).";
@@ -156,10 +148,9 @@ bool read_options(const JsonValue &json, MenuViewportOptions &held, MenuCanvasSh
 			}
 			out.force_window = NodeId(number);
 		} else if (key == "force_state") {
-			if (!value.is_string() || !menu_force_state_from_token(value.string, out.force_state)) {
-				error = "options.force_state is normal, mouseover, selected or disabled.";
+			if (!read_json_token(value, menu_force_state_from_token, out.force_state, error,
+						"options.force_state is normal, mouseover, selected or disabled."))
 				return false;
-			}
 		} else if (key == "show_hidden" || key == "checked" || key == "popup_open" || key == "focus") {
 			if (!value.is_bool()) {
 				error = "options." + key + " is true or false.";

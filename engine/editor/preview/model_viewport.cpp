@@ -20,6 +20,7 @@
 #include <editor/preview/animation_uses.h>
 #include <editor/preview/model_canvas.h>
 #include <editor/preview/model_placement.h>
+#include <editor/preview/option_reads.h>
 #include <editor/preview/orbit_canvas.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/project/project_document.h>
@@ -168,11 +169,8 @@ bool read_options(const JsonValue &json, ModelViewportOptions &held, std::string
 			}
 			options.rig_model = value.string;
 		} else if (key == "bones") {
-			if (!value.is_bool()) {
-				error = "options.bones is true or false.";
+			if (!read_json_bool(value, options.bones, error, "options.bones is true or false."))
 				return false;
-			}
-			options.bones = value.boolean;
 		} else if (key == "snap") {
 			float snap = 0.0f;
 			if (!io::json_float(value, snap) || snap < 0.0f || snap > 100.0f) {

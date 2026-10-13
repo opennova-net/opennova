@@ -4,6 +4,7 @@
 #include <iterator>
 #include <string>
 
+#include <editor/preview/option_reads.h>
 #include <editor/session/view/workspace_view.h>
 #include <formats/mission/mission_params.h>
 
@@ -57,11 +58,9 @@ bool read_flags(const JsonValue &json, const char *group, const Flag (&flags)[N]
 			error = std::string("Unknown options.") + group + " member \"" + member.key + "\" (it takes " + takes + ").";
 			return false;
 		}
-		if (!member.value.is_bool()) {
-			error = std::string("options.") + group + "." + member.key + " is true or false.";
+		if (!read_json_bool(member.value, held.*found->member, error,
+					std::string("options.") + group + "." + member.key + " is true or false."))
 			return false;
-		}
-		held.*found->member = member.value.boolean;
 	}
 	return true;
 }
@@ -144,10 +143,9 @@ bool mission_options_from_json(const JsonValue &json, MissionViewportOptions &he
 		} else if (member.key == "marks") {
 			if (!read_flags(value, "marks", kMarks, read, error)) return false;
 		} else if (member.key == "color_by") {
-			if (!value.is_string() || !mission_color_by_from_token(value.string, read.color_by)) {
-				error = "options.color_by is team or group.";
+			if (!read_json_token(value, mission_color_by_from_token, read.color_by, error,
+						"options.color_by is team or group."))
 				return false;
-			}
 		} else if (member.key == "mark_range") {
 			float range = 0.0f;
 			if (!io::json_float(value, range) || range < 0.0f) {
@@ -156,11 +154,8 @@ bool mission_options_from_json(const JsonValue &json, MissionViewportOptions &he
 			}
 			read.mark_range = range;
 		} else if (member.key == "stick") {
-			if (!value.is_bool()) {
-				error = "options.stick is true or false.";
+			if (!read_json_bool(value, read.stick, error, "options.stick is true or false."))
 				return false;
-			}
-			read.stick = value.boolean;
 		} else if (member.key == "time") {
 			if (value.is_null()) {
 				read.time = -1.0;
@@ -171,10 +166,9 @@ bool mission_options_from_json(const JsonValue &json, MissionViewportOptions &he
 				read.time = value.number;
 			}
 		} else if (member.key == "tool") {
-			if (!value.is_string() || !mission_tool_from_token(value.string, read.tool)) {
-				error = "options.tool is select, place, path, area or shoot.";
+			if (!read_json_token(value, mission_tool_from_token, read.tool, error,
+						"options.tool is select, place, path, area or shoot."))
 				return false;
-			}
 		} else if (member.key == "item") {
 			if (!value.is_number() || value.number < 0.0 || value.number != std::floor(value.number) || value.number > 2147483647.0) {
 				error = "options.item is an item's id, a whole number (0: none picked).";
@@ -211,18 +205,17 @@ bool mission_options_from_json(const JsonValue &json, MissionViewportOptions &he
 		} else if (member.key == "listen") {
 			if (!mission_listen_options_from_json(value, read.listen, error)) return false;
 		} else if (member.key == "overlay") {
-			if (!value.is_string() || !mission_ground_overlay_from_token(value.string, read.overlay)) {
-				error = "options.overlay is none, surfaces (the surface classes the game reads) or foliage (what the "
-						"terrain's foliage map grows).";
+			if (!read_json_token(value, mission_ground_overlay_from_token, read.overlay, error,
+						"options.overlay is none, surfaces (the surface classes the game reads) or "
+						"foliage (what the "
+						"terrain's foliage map grows)."))
 				return false;
-			}
 		} else if (member.key == "legend") {
-			if (!value.is_bool()) {
-				error = "options.legend is true (the overlay's legend open over the picture's corner) or false (folded to "
-						"its title).";
+			if (!read_json_bool(value, read.legend, error,
+						"options.legend is true (the overlay's legend open over the picture's "
+						"corner) or false (folded to "
+						"its title)."))
 				return false;
-			}
-			read.legend = value.boolean;
 		} else if (member.key == "ammo") {
 			if (!value.is_string() || value.string.size() >= kWorkspaceText) {
 				error = "options.ammo is the ammo the Shoot tool fires, an ammo.def record by name (\"\" none picked).";
@@ -254,11 +247,9 @@ bool mission_listen_options_from_json(const io::JsonValue &json, MissionListenOp
 	MissionListenOptions read = held;
 	for (const io::JsonMember &member : json.object) {
 		if (member.key == "on") {
-			if (!member.value.is_bool()) {
-				error = "options.listen.on is true or false.";
+			if (!read_json_bool(
+						member.value, read.on, error, "options.listen.on is true or false."))
 				return false;
-			}
-			read.on = member.value.boolean;
 		} else {
 			error = "Unknown options.listen member \"" + member.key + "\" (it takes on).";
 			return false;

@@ -8,6 +8,7 @@
 #include <base/io/strutil.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/preview/effect_playback.h>
+#include <editor/preview/option_reads.h>
 #include <editor/preview/orbit_canvas.h>
 #include <editor/preview/sound_preview.h>
 #include <editor/session/view/session_view.h>
@@ -96,11 +97,10 @@ bool read_definition_fire_options(const io::JsonValue &json, DefinitionFireOptio
 			options.eye = value.string == "eye";
 		} else if (key == "character") {
 			int64_t id = 0;
-			if (!io::json_whole_in(value, -1.0, 65535.0, id)) {
-				error = "options.fire.character is a character's id, 0 to 65535 (-1 the one a fresh profile seeds).";
+			if (!read_json_whole(value, -1.0, 65535.0, options.character, error,
+						"options.fire.character is a character's id, 0 to 65535 (-1 the one a "
+						"fresh profile seeds)."))
 				return false;
-			}
-			options.character = int32_t(id);
 		} else if (key == "shooter") {
 			if (!value.is_string() || (value.string != "soldier" && value.string != "player")) {
 				error = "options.fire.shooter is soldier (the ammo's ai_launch and ai_launcheffect) or player (the "
@@ -123,11 +123,10 @@ bool read_definition_fire_options(const io::JsonValue &json, DefinitionFireOptio
 			}
 			options.target.range = float(value.number);
 		} else if (key == "target") {
-			if (!value.is_bool()) {
-				error = "options.fire.target is true or false (the target stands, or the rounds fly on).";
+			if (!read_json_bool(value, options.target.shown, error,
+						"options.fire.target is true or false (the target stands, or the rounds "
+						"fly on)."))
 				return false;
-			}
-			options.target.shown = value.boolean;
 		} else {
 			error = "Unknown fire option \"" + key + "\" (it takes view, character, shooter, surface, range, target).";
 			return false;

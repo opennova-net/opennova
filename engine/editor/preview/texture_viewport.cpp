@@ -5,6 +5,7 @@
 #include <iterator>
 #include <sstream>
 
+#include <editor/preview/option_reads.h>
 #include <runtime/renderer/texture_dxt.h>
 #include <formats/til/til.h>
 #include <formats/trn/trn_io.h>
@@ -78,10 +79,9 @@ bool read_options(const JsonValue &json, TextureViewportOptions &held, std::stri
 	TextureViewportOptions options = held;
 	for (const io::JsonMember &member : json.object) {
 		if (member.key == "channels") {
-			if (!member.value.is_string() || !texture_channels_from_token(member.value.string, options.channels)) {
-				error = "options.channels is one of rgb, red, green, blue, alpha, rgba, normals.";
+			if (!read_json_token(member.value, texture_channels_from_token, options.channels, error,
+						"options.channels is one of rgb, red, green, blue, alpha, rgba, normals."))
 				return false;
-			}
 		} else if (member.key == "level") {
 			if (!member.value.is_number() || member.value.number < 0 || member.value.number > 31 ||
 			    std::floor(member.value.number) != member.value.number) {
@@ -129,11 +129,8 @@ bool read_camera(const JsonValue &json, TextureCamera &held, std::string &error)
 	bool fit_given = false;
 	for (const io::JsonMember &member : json.object) {
 		if (member.key == "fit") {
-			if (!member.value.is_bool()) {
-				error = "camera.fit is true or false.";
+			if (!read_json_bool(member.value, camera.fit, error, "camera.fit is true or false."))
 				return false;
-			}
-			camera.fit = member.value.boolean;
 			fit_given = true;
 		} else if (member.key == "scale" || member.key == "x" || member.key == "y") {
 			if (!member.value.is_number() || !std::isfinite(member.value.number)) {

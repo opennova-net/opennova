@@ -12,6 +12,7 @@
 #include <editor/assets/project_asset_source.h>
 #include <editor/model/text_document.h>
 #include <editor/preview/hud_canvas.h>
+#include <editor/preview/option_reads.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <formats/def/def.h>
@@ -199,10 +200,9 @@ bool read_options(const JsonValue &json, HudViewportOptions &held, std::string &
 				return false;
 			}
 		} else if (key == "view") {
-			if (!value.is_string() || !hud_preview_view_from_token(value.string, options.view)) {
-				error = "options.view is normal, binoculars or night_vision.";
+			if (!read_json_token(value, hud_preview_view_from_token, options.view, error,
+						"options.view is normal, binoculars or night_vision."))
 				return false;
-			}
 		} else if (key == "damage") {
 			if (!whole(value, 0, kHudDamageMost, options.damage)) {
 				error = "options.damage is the damage vignette's alpha, 0 (none) to 192 (its cap).";
@@ -233,11 +233,11 @@ bool read_options(const JsonValue &json, HudViewportOptions &held, std::string &
 			}
 			(key == "board" ? options.board : options.sights) = value.boolean;
 		} else if (key == "game_type") {
-			if (!value.is_string() || !hud_board_game_type_from_token(value.string, options.game_type)) {
-				error = "options.game_type is a session game type: DM, TDM, KOTH, TKOTH, CTF, SD, AD, FB, FM, AAS, CAC or "
-				        "COOP.";
+			if (!read_json_token(value, hud_board_game_type_from_token, options.game_type, error,
+						"options.game_type is a session game type: DM, TDM, KOTH, TKOTH, CTF, SD, "
+						"AD, FB, FM, AAS, CAC or "
+						"COOP."))
 				return false;
-			}
 		} else if (key == "range") {
 			if (!whole(value, kHudSightsRangeLeast, kHudSightsRangeMost, options.range)) {
 				error = "options.range is the metres the sights' aim rests at, 2 to 1000.";

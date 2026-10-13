@@ -15,6 +15,7 @@
 #include <editor/preview/mission_map_canvas.h>
 #include <editor/preview/mission_overlay.h>
 #include <editor/preview/mission_source.h>
+#include <editor/preview/option_reads.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
@@ -274,22 +275,18 @@ bool mission_map_options_from_json(const io::JsonValue &json, MissionMapOptions 
 					        mark.key + ".";
 					return false;
 				}
-				if (!mark.value.is_bool()) {
-					error = "options.marks." + mark.key + " is true or false.";
+				if (!read_json_bool(mark.value, *into, error,
+							"options.marks." + mark.key + " is true or false."))
 					return false;
-				}
-				*into = mark.value.boolean;
 			}
 		} else if (name == "color_by") {
-			if (!member.value.is_string() || !mission_color_by_from_token(member.value.string, out.color_by)) {
-				error = "options.color_by is team or group.";
+			if (!read_json_token(member.value, mission_color_by_from_token, out.color_by, error,
+						"options.color_by is team or group."))
 				return false;
-			}
 		} else if (name == "background") {
-			if (!member.value.is_string() || !mission_map_background_from_token(member.value.string, out.background)) {
-				error = "options.background is colour, height, delta, flatness or none.";
+			if (!read_json_token(member.value, mission_map_background_from_token, out.background,
+						error, "options.background is colour, height, delta, flatness or none."))
 				return false;
-			}
 		} else if (name == "grid" || name == "text" || name == "stick" || name == "water") {
 			bool &into = name == "grid" ? out.grid : name == "text" ? out.text : name == "stick" ? out.stick : out.water;
 			if (!read_bool(json, name.c_str(), into, error)) return false;

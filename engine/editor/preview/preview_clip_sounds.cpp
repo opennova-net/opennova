@@ -5,6 +5,7 @@
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <editor/assets/project_asset_source.h>
+#include <editor/preview/option_reads.h>
 #include <formats/def/def.h>
 #include <formats/lwf/lwf.h>
 #include <runtime/anim/anim_event_bits.h>
@@ -79,10 +80,9 @@ bool read_clip_sound_options(const io::JsonValue &json, ClipSoundOptions &held, 
 			}
 			(key == "mute" ? options.mute : options.female) = value.boolean;
 		} else if (key == "surface") {
-			if (!value.is_string() || !foot_surface_of(value.string, options.surface)) {
-				error = "options.sound.surface is ground, snow, object or water.";
+			if (!read_json_token(value, foot_surface_of, options.surface, error,
+						"options.sound.surface is ground, snow, object or water."))
 				return false;
-			}
 		} else if (key == "body") {
 			if (value.is_string() && value.string == "auto") options.body = ClipSoundBody::Auto;
 			else if (value.is_string() && value.string == "npc") options.body = ClipSoundBody::Npc;

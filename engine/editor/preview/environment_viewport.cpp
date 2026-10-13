@@ -11,6 +11,7 @@
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/environment_document.h>
 #include <editor/preview/mission_camera.h>
+#include <editor/preview/option_reads.h>
 #include <editor/preview/orbit_canvas.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/session/request_factories.h>
@@ -75,20 +76,16 @@ bool read_command(const JsonValue &json, const char *name, EnvironmentWeatherCom
 	}
 	EnvironmentWeatherCommand command = out;
 	for (const io::JsonMember &member : json.object) {
-		int64_t whole = 0;
 		if (member.key == "percent") {
-			if (!io::json_whole_in(member.value, 0, 100, whole)) {
-				error = what + ".percent is a whole percent from 0 to 100.";
+			if (!read_json_whole(member.value, 0, 100, command.percent, error,
+						what + ".percent is a whole percent from 0 to 100."))
 				return false;
-			}
-			command.percent = int(whole);
 		} else if (member.key == "seconds") {
-			if (!io::json_whole_in(member.value, 0, kEnvironmentCommandSecondsMost, whole)) {
-				error = what + ".seconds is the whole seconds it takes to get there, 0 to " +
-				        std::to_string(kEnvironmentCommandSecondsMost) + ".";
+			if (!read_json_whole(member.value, 0, kEnvironmentCommandSecondsMost, command.seconds,
+						error,
+						what + ".seconds is the whole seconds it takes to get there, 0 to " +
+								std::to_string(kEnvironmentCommandSecondsMost) + "."))
 				return false;
-			}
-			command.seconds = int(whole);
 		} else {
 			error = "Unknown member \"" + member.key + "\" of " + what + " (it takes percent, seconds).";
 			return false;
@@ -122,12 +119,10 @@ bool read_options(const JsonValue &json, const EnvironmentUses &uses, Environmen
 			}
 			options.time = value.number;
 		} else if (key == "day_seconds") {
-			int64_t whole = 0;
-			if (!io::json_whole_in(value, 0, 24 * 60 * 60, whole)) {
-				error = "options.day_seconds is a day's length in seconds, 0 (the game's) to 86400.";
+			if (!read_json_whole(value, 0, 24 * 60 * 60, options.day_seconds, error,
+						"options.day_seconds is a day's length in seconds, 0 (the game's) to "
+						"86400."))
 				return false;
-			}
-			options.day_seconds = int(whole);
 		} else if (key == "mission") {
 			if (!value.is_string()) {
 				error = "options.mission is the path of a mission that runs on the environment (\"\" the first).";
@@ -146,11 +141,10 @@ bool read_options(const JsonValue &json, const EnvironmentUses &uses, Environmen
 			}
 			options.mission = value.string;
 		} else if (key == "header") {
-			if (!value.is_bool()) {
-				error = "options.header is true or false: the mission header's fog and water over the environment.";
+			if (!read_json_bool(value, options.header, error,
+						"options.header is true or false: the mission header's fog and water over "
+						"the environment."))
 				return false;
-			}
-			options.header = value.boolean;
 		} else if (key == "rain") {
 			if (!read_command(value, "rain", options.rain, error)) return false;
 			named_rain = true;

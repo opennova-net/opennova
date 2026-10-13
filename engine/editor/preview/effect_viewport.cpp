@@ -8,6 +8,7 @@
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/particle_type.h>
 #include <editor/model/text_document.h>
+#include <editor/preview/option_reads.h>
 #include <editor/preview/orbit_canvas.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/session/request_factories.h>
@@ -71,20 +72,17 @@ bool read_options(const JsonValue &json, const std::vector<EffectViewportEffect>
 			}
 			options.effect = defined != effects.end() ? defined->id : value.string;
 		} else if (key == "grid") {
-			if (!value.is_bool()) {
-				error = "options.grid is true or false.";
+			if (!read_json_bool(value, options.grid, error, "options.grid is true or false."))
 				return false;
-			}
-			options.grid = value.boolean;
 		} else if (key == "wind_speed" || key == "wind_direction") {
-			int64_t whole = 0;
 			const bool speed = key == "wind_speed";
-			if (!io::json_whole_in(value, speed ? 0 : -360, speed ? kMostWindSpeed : 360, whole)) {
-				error = speed ? "options.wind_speed is the mission header's wind speed, a whole number from 0 (none) to 1000."
-				              : "options.wind_direction is the mission header's wind heading, whole degrees from -360 to 360.";
+			if (!read_json_whole(value, speed ? 0 : -360, speed ? kMostWindSpeed : 360,
+						(speed ? options.play.wind_speed : options.play.wind_direction), error,
+						speed ? "options.wind_speed is the mission header's wind speed, a whole "
+								"number from 0 (none) to 1000."
+							  : "options.wind_direction is the mission header's wind heading, "
+								"whole degrees from -360 to 360."))
 				return false;
-			}
-			(speed ? options.play.wind_speed : options.play.wind_direction) = int(whole);
 		} else {
 			error = "Unknown effect option \"" + key + "\" (it takes effect, wind_speed, wind_direction, grid).";
 			return false;

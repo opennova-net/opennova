@@ -10,6 +10,7 @@
 #include <base/io/strutil.h>
 #include <base/io/tick_rate.h>
 #include <base/resource_index/resource_index.h>
+#include <editor/preview/option_reads.h>
 #include <formats/avatars/avatars.h>
 #include <formats/def/def.h>
 #include <runtime/anim/adm_clip_index.h>
@@ -109,11 +110,10 @@ bool read_first_person_options(const io::JsonValue &json, FirstPersonOptions &he
 			options.eye = value.string == "eye";
 		} else if (key == "character") {
 			int64_t id = 0;
-			if (!io::json_whole_in(value, -1.0, 65535.0, id)) {
-				error = "options.first_person.character is a character's id, 0 to 65535 (-1 the one a fresh profile seeds).";
+			if (!read_json_whole(value, -1.0, 65535.0, options.character, error,
+						"options.first_person.character is a character's id, 0 to 65535 (-1 the "
+						"one a fresh profile seeds)."))
 				return false;
-			}
-			options.character = int32_t(id);
 		} else if (key == "action") {
 			bool known = value.is_string() && value.string.empty();
 			for (int32_t i = 0; value.is_string() && !known && i < wa::kCount; ++i)

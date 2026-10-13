@@ -12,6 +12,7 @@
 #include <editor/preview/mission_handle_edit.h>
 #include <editor/session/terrain_family.h>
 #include <editor/preview/mission_viewport.h>
+#include <editor/preview/option_reads.h>
 #include <editor/preview/orbit_canvas.h>
 #include <editor/preview/terrain_canvas.h>
 #include <editor/preview/viewport_device.h>
@@ -78,18 +79,17 @@ bool read_options(const JsonValue &json, const TerrainUses &uses, TerrainViewpor
 			}
 			options.mission = value.string;
 		} else if (key == "overlay") {
-			if (!value.is_string() || !mission_ground_overlay_from_token(value.string, options.overlay)) {
-				error = "options.overlay is none, surfaces or foliage: what the game reads at each point, tinted over the "
-				        "terrain.";
+			if (!read_json_token(value, mission_ground_overlay_from_token, options.overlay, error,
+						"options.overlay is none, surfaces or foliage: what the game reads at each "
+						"point, tinted over the "
+						"terrain."))
 				return false;
-			}
 		} else if (key == "legend") {
-			if (!value.is_bool()) {
-				error = "options.legend is true (the overlay's legend open over the picture's corner) or false (folded to its "
-				        "title).";
+			if (!read_json_bool(value, options.legend, error,
+						"options.legend is true (the overlay's legend open over the picture's "
+						"corner) or false (folded to its "
+						"title)."))
 				return false;
-			}
-			options.legend = value.boolean;
 		} else if (key == "show") {
 			if (!value.is_object()) {
 				error = "options.show is {foliage, water}.";
