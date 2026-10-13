@@ -60,7 +60,7 @@ void test_rows() {
 		{3, 1, "Ace", "ALPHA"}, {5, 2, "Bee", ""}, {7, 1, "NoRow", ""}, {9, 0, "Spectator", ""}};
 	const std::vector<StatScreenRow> rows = stat_screen_rows(make_board(), players, false, 5);
 	CHECK(rows.size() == 2); // team 0 skipped, no board row skipped
-	CHECK(rows[0].name == "Ace" && rows[0].squad == "ALPHA" && rows[0].color_argb == 0xFF00BFFFu);
+	CHECK(rows[0].name == "Ace" && rows[0].squad == "ALPHA" && rows[0].color_argb == 0xFF00AFFFu);
 	CHECK(!rows[0].selected);
 	// field 1 -> "7", field 5 -> "%2i:%02i" of 125 s = " 2:05", field 31 (-1)
 	// -> "-", field 99 -> "??".

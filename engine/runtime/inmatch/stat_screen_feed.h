@@ -66,7 +66,7 @@ struct StatScreenRow {
 	std::string name;   // the player-slot table's name
 	std::string squad;  // the slot's squad tag or "-"
 	std::vector<std::string> cells; // one per field column, formatted
-	uint32_t color_argb = 0xFFFFFFFFu; // team 1 0xFF00BFFF, team 2 0xFFFF0000
+	uint32_t color_argb = 0xFFFFFFFFu; // team 1 0xFF00AFFF, team 2 0xFFFF0000
 	bool selected = false; // the local player's row
 };
 
@@ -83,7 +83,7 @@ struct StatScreenPlayer {
 // The rows [orig: @0x5624a3..0x5626fa]: per player with team != 0 whose slot
 // has a board row: name, squad or "-", then per listed field the row's
 // positional value — field 5 "%2i:%02i", -1 "-", ids 1..4/6..18/20..32 "%i",
-// 19 always "%i", anything else "??"; row colour team 1 0xFF00BFFF, team 2
+// 19 always "%i", anything else "??"; row colour team 1 0xFF00AFFF, team 2
 // 0xFFFF0000; the local slot's row is selected.
 std::vector<StatScreenRow> stat_screen_rows(const EndRoundStats &board,
 		const std::vector<StatScreenPlayer> &players, bool show_disabled,

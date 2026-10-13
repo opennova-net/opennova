@@ -2099,7 +2099,7 @@ void test_table_columns_and_sort() {
 	rt.table_add_row(table, { "bob", "-", "12" });
 	rt.table_add_row(table, { "cat", "-", "x" });
 	rt.table_add_row(table, { "dan", "-", "" });
-	rt.table_set_row_color(table, 1, true, 0xFF00BFFFu);
+	rt.table_set_row_color(table, 1, true, 0xFF00AFFFu);
 	rt.table_select_row(table, 0, false);
 	rt.table_set_column_ascending(table, 2, false);
 	rt.table_sort_by_column(table, 2);
@@ -2113,7 +2113,7 @@ void test_table_columns_and_sort() {
 	CHECK(frame.saw("columns " + std::to_string(index) + " 1 3 2"));
 	const std::vector<MenuTableRow> &rows = frame.table_rows[index];
 	CHECK(rows.size() == 4 && (rows[1].flags & kTableRowFlagColor) != 0 &&
-			rows[1].color == 0xFF00BFFFu && (rows[0].flags & kTableRowFlagColor) == 0);
+			rows[1].color == 0xFF00AFFFu && (rows[0].flags & kTableRowFlagColor) == 0);
 	// A text column sorts by stricmp, ascending.
 	rt.table_sort_by_column(table, 0);
 	CHECK(rt.table_cell_text(table, 0, 0) == "ann" && rt.table_cell_text(table, 3, 0) == "dan");

@@ -78,8 +78,11 @@ std::vector<StatScreenRow> stat_screen_rows(const EndRoundStats &board,
 		sr.team = p.team;
 		sr.name = p.name;
 		sr.squad = p.squad.empty() ? "-" : p.squad;
-		if (p.team == 1) sr.color_argb = 0xFF00BFFFu;      // -16732161 @0x562564
-		else if (p.team == 2) sr.color_argb = 0xFFFF0000u; // -65536 @0x562579
+		// The row colour by the slot's team: 1 blue, 2 red, any other the table's
+		// [orig: the team switch @0x56258a..0x562596, push 0FF00AFFFh @0x56259f,
+		// push 0FFFF0000h @0x562598, then sub_640110 @0x5625a9].
+		if (p.team == 1) sr.color_argb = 0xFF00AFFFu;
+		else if (p.team == 2) sr.color_argb = 0xFFFF0000u;
 		for (size_t i = 0; i < board.team_fields.size(); ++i) {
 			const int field_id = board.team_fields[i].first;
 			if (!show_disabled && board.team_fields[i].second == 0) continue;
