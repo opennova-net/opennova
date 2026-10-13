@@ -75,6 +75,25 @@ target_compile_features(os_random_test PRIVATE cxx_std_17)
 target_include_directories(os_random_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME os_random COMMAND os_random_test)
 
+# The child-process seam (base/proc): a child from an argv array with no shell, run
+# against the test binary itself (its path is the argument; `--child <mode>` makes it
+# the child): exit codes (unsigned on Windows), every argument whole, the working
+# directory, stdin and the output file, terminate and kill, the refusals, the
+# environment, the identity and process_liveness, release (past the starter's
+# kill-on-close job), on Windows the polite stop of a window child started behind and
+# the paths past MAX_PATH, and on POSIX the released child's own session and no
+# inherited descriptor.
+add_executable(child_process_test proc/child_process_test.cpp)
+target_link_libraries(child_process_test PRIVATE opennova_base)
+if(WIN32)
+    # The window child (CreateWindowExW, the message loop) and the job query.
+    target_link_libraries(child_process_test PRIVATE user32)
+endif()
+target_compile_features(child_process_test PRIVATE cxx_std_17)
+target_include_directories(child_process_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME child_process COMMAND child_process_test $<TARGET_FILE:child_process_test>)
+set_tests_properties(child_process PROPERTIES TIMEOUT 120)
+
 # Roundtrip test
 add_executable(threedi_roundtrip_test threedi/roundtrip_test.cpp)
 target_link_libraries(threedi_roundtrip_test PRIVATE opennova_formats)
