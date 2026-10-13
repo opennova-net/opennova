@@ -679,16 +679,16 @@ func tick(gameplay_input_active: bool = false) -> void:
 				_game_hud.set_minimap_footprints(footprints)
 	# The HUD binding rows. hudcolor (row 76) defaults to Ctrl+F6 beside
 	# huddetail's bare F6 (row 50): the binding sampler's two passes keep them
-	# apart (Ctrl+F6 fires only hudcolor, F6 only huddetail), and when a remap
-	# lands both rows on one modifier-less key retail's first-match scan fires
-	# only huddetail (row 50 < 76) -- poll_hud_keys carries that shadowing
-	# (D-CTRL-4). showhud (row 27) ships unbound. Ctrl is a binding modifier,
-	# never a chord guard here; Shift/Alt chords stay ours (the debug pick
-	# rides Shift+F6).
+	# apart (Ctrl+F6 fires only hudcolor, F6 only huddetail), and its first
+	# match gives a key both rows carry to hudcolor alone (code 10 before 19;
+	# engine BindingSet::pressed_key). showhud (row 27) ships unbound. Ctrl is a
+	# binding modifier, never a chord guard here; Shift/Alt chords stay ours
+	# (the debug pick rides Shift+F6).
 	# [orig: the key scan's fire @0x49d42f (the modifier pass) and @0x49d488
 	#  (the fallback); huddetail dispatch @0x4E0601; showhud dispatch @0x4E0561]
-	# The key sampling is this presenter's; the edge latches, the cycles, the
-	# window toggles and the shared-key shadowing are the engine's poll.
+	# The key sampling is this presenter's (a shared key's first match is the
+	# sampler's, engine BindingSet::pressed_key); the edge latches, the cycles
+	# and the window toggles are the engine's poll.
 	var hud_keys_chorded := Input.is_key_pressed(KEY_SHIFT) or Input.is_key_pressed(KEY_ALT)
 	# The talk rows ride the same sampler; the dispatch gates, the capture and
 	# the line editor are the engine's chat entry.
@@ -703,11 +703,9 @@ func tick(gameplay_input_active: bool = false) -> void:
 	for row in HudToggles.ROW_COUNT:
 		if ControlsBindings.pressed(HudToggles.row_token(row)):
 			rows_down |= 1 << row
-	var both_hud_rows := (1 << HudToggles.ROW_HUD_DETAIL) | (1 << HudToggles.ROW_HUD_COLOR)
 	# The mousescale row's step direction is its fire's sign bit (Shift on a
 	# modifier-less key or a held mouse button; engine BindingSet::fire_signed).
 	var toggle_events := _toggles.poll(rows_down,
-			(rows_down & both_hud_rows) == both_hud_rows and _hud_rows_share_key(),
 			hud_keys_chorded, gameplay_input_active, sim.is_mp_session(),
 			(sim.get_session_game_type() & GAME_TYPE_OBJECTIVE_BIT) != 0,
 			not bool(sim.is_local_player_dead()), _authority(sim), _mp_session_peer(sim),
@@ -1312,7 +1310,7 @@ func set_menu_pause(paused: bool) -> void:
 ## drive); every other row idle.
 func poll_hud_color_edge(color_down: bool, chorded: bool, active: bool) -> void:
 	_apply_toggle_events(_toggles.poll(
-			(1 << HudToggles.ROW_HUD_COLOR) if color_down else 0, false, chorded, active,
+			(1 << HudToggles.ROW_HUD_COLOR) if color_down else 0, chorded, active,
 			false, false))
 
 
@@ -1321,40 +1319,19 @@ func cycle_hud_color() -> void:
 	_apply_toggle_events(HudToggles.EVENT_HUD_COLOR_CYCLED)
 
 
-## One poll step over the pre-sampled huddetail + hudcolor key states with the
-## live shared-key shadowing (D-CTRL-4) -- the seam the tests drive.
-func poll_hud_keys(detail_down: bool, color_down: bool, chorded: bool,
-		active: bool) -> void:
-	var rows_down := ((1 << HudToggles.ROW_HUD_DETAIL) if detail_down else 0) \
-			| ((1 << HudToggles.ROW_HUD_COLOR) if color_down else 0)
-	_apply_toggle_events(_toggles.poll(rows_down, _hud_rows_share_key(), chorded, active,
-			false, false))
-
-
-# Whether the huddetail and hudcolor rows currently resolve to a common bound
-# key (the D-CTRL-4 shadowing predicate the engine poll applies; both default F6).
-func _hud_rows_share_key() -> bool:
-	var detail_keys: PackedInt32Array = \
-			ControlsBindings.model().godot_keys_for_token("huddetail")
-	for key in ControlsBindings.model().godot_keys_for_token("hudcolor"):
-		if key != 0 and detail_keys.has(key):
-			return true
-	return false
-
-
 ## One flipmouse + mousescale poll step over pre-sampled device state with the
 ## mousescale fire's sign (the seam the tests drive); every other row idle.
 func poll_look_rows(flip_down: bool, scale_down: bool, negative: bool, active: bool) -> void:
 	var rows_down := ((1 << HudToggles.ROW_FLIP_MOUSE) if flip_down else 0) \
 			| ((1 << HudToggles.ROW_MOUSE_SCALE) if scale_down else 0)
-	_apply_toggle_events(_toggles.poll(rows_down, false, false, active, false, false, true,
+	_apply_toggle_events(_toggles.poll(rows_down, false, active, false, false, true,
 			false, false, negative))
 
 
 ## One huddetail poll step (the seam the tests drive); every other row idle.
 func poll_hud_detail_edge(detail_down: bool, chorded: bool, active: bool) -> void:
 	_apply_toggle_events(_toggles.poll(
-			(1 << HudToggles.ROW_HUD_DETAIL) if detail_down else 0, false, chorded, active,
+			(1 << HudToggles.ROW_HUD_DETAIL) if detail_down else 0, chorded, active,
 			false, false))
 
 

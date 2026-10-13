@@ -107,6 +107,38 @@ func test_is_token_pressed_follows_the_two_passes() -> void:
 	assert_false(model.is_token_pressed("Knife"), "released")
 
 
+# One key event fires one row: the scan walks the rows by action code and
+# gives the key to the first that passes its gates [orig:
+# KeyBinding_SortBySequentialId @0x498260; Input_ProcessKeyboardEvents -- the
+# fallback's queue @0x49d488 and its jump to the next event @0x49d490, the
+# 0x1 / 0x40 gates @0x49d3c4..0x49d3da]. radarout moved onto the 7 yields it
+# to Accessory (code 207 before 361); the stock bare 9 is the medpack (209)
+# while the scan word is clear, and the medic call (217, a 0x40 row) once the
+# local body is dead.
+func test_a_shared_key_fires_the_first_eligible_row() -> void:
+	var model := ControlsModel.new()
+	var radarout := -1
+	var rows: Array = model.get_rows(ControlsModel.DEVICE_KEYBOARD)
+	for i in rows.size():
+		if (rows[i] as PackedStringArray)[1] == "Radar Zoom Out":
+			radarout = model.action_index_for_row(i)
+	assert_gte(radarout, 0, "the Radar Zoom Out row is visible")
+	assert_true(model.assign_godot_key(radarout, KEY_7, false), "radarout takes 7")
+	_press(KEY_7, true)
+	assert_true(model.is_token_pressed("Accessory"), "the 7 is the Accessory's")
+	assert_false(model.is_token_pressed("radarout"), "radarout's 7 is shadowed")
+	_press(KEY_7, false)
+
+	_press(KEY_9, true)
+	assert_true(model.is_token_pressed("medpack"), "alive: the bare 9 is the medpack")
+	assert_false(model.is_token_pressed("MedicReq"), "alive: the medic row is skipped")
+	model.set_scan_gates(false, true)
+	assert_false(model.is_token_pressed("medpack"), "dead: the medpack row is skipped")
+	assert_true(model.is_token_pressed("MedicReq"), "dead: the 9 calls the medic")
+	model.set_scan_gates(false, false)
+	_press(KEY_9, false)
+
+
 # An open chat line owns the keyboard, not the mouse: a captured model fires no
 # keyboard slot, while a held mouse button still fires its row [orig:
 # Input_ProcessPlayerFrame @0x49d4c0 -- the mouse pass gated only on the

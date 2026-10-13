@@ -273,7 +273,7 @@ func test_plain_f6_reaches_the_binding_rows_while_shift_f6_is_debug_pick() -> vo
 	assert_eq(hud.get_game_hud().get_hud_detail_level(), hud.hud_detail_level(),
 			"the cycle restamps the built overlay")
 	assert_eq(hud.hud_color_index(), color_before,
-			"hudcolor shares F6 and ships shadowed by the huddetail row (D-CTRL-4)")
+			"hudcolor's Ctrl+F6 wants Ctrl: the bare F6 is huddetail's")
 	assert_null(shell.find_child("PickToast", true, false),
 			"the bare key never reaches the debug picker")
 

@@ -1579,7 +1579,7 @@ target_link_libraries(hud_config_tokens_test PRIVATE opennova_runtime)
 add_test(NAME hud_config_tokens COMMAND hud_config_tokens_test)
 
 # The HUD's key-driven toggles (hud/hud_toggles.h): the gated down-edge latch,
-# the shared-key cycles, the view actions, the overlay windows and the resets.
+# the cycles, the view actions, the overlay windows and the resets.
 add_executable(hud_toggles_test hud/hud_toggles_test.cpp)
 target_link_libraries(hud_toggles_test PRIVATE opennova_runtime)
 target_compile_features(hud_toggles_test PRIVATE cxx_std_17)

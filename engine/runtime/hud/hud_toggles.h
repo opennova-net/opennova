@@ -120,11 +120,11 @@ struct HudToggleState {
 // The briefing window's open value [orig: `mov eax, 2` @0x49b615].
 inline constexpr int kBriefingModeOpen = 2;
 
-// One frame's sampled key states for the poll: each bound row's down state,
-// whether the huddetail and hudcolor rows currently resolve to a common key
-// (retail's scan is FIRST-MATCH-WINS by catalog row, huddetail 50 before
-// hudcolor 76, so a shared key lets huddetail consume the edge — the D-CTRL-4
-// adjudication), the chord and gate bits, and whether an MP session is live
+// One frame's sampled key states for the poll: each bound row's down state
+// as the binding sampler resolves it (one key event fires one row: retail's
+// scan is first-match by action code, so a key huddetail and hudcolor share
+// reaches hudcolor, code 10, alone; controls::BindingSet::pressed_key), the
+// chord and gate bits, and whether an MP session is live
 // (the ShowScore toggle is SP-only [orig: the !is_in_session gate @0x49bd29];
 // the respawn init closes the player list only for a session peer
 // [orig: is_in_session && is_mp_session_peer @0x4993a4..0x4993ae] — every
@@ -135,7 +135,6 @@ inline constexpr int kBriefingModeOpen = 2;
 struct HudKeyPoll {
 	bool huddetail = false;
 	bool hudcolor = false;
-	bool rows_share_key = false;
 	bool showhud = false;
 	bool dotsize = false;
 	bool goals = false;

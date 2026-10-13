@@ -1,6 +1,7 @@
 #include <runtime/controls/binding_set.h>
 #include <runtime/controls/key_strings.h>
 #include <base/io/strutil.h>
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -381,6 +382,59 @@ std::vector<int> BindingSet::keys_for_token(const std::string &token) const {
   return keys;
 }
 
+namespace {
+
+// The key scan's walk: the catalog rows by action code, as the boot's sort
+// lays the binding table (record i is the row whose code is i; the static
+// rows' codes are unique) [orig: KeyBinding_SortBySequentialId @0x498260].
+const std::vector<int> &scan_order() {
+  static const std::vector<int> order = [] {
+    std::size_t n = 0;
+    const ActionDef *cat = catalog(&n);
+    std::vector<int> rows(n);
+    for (std::size_t i = 0; i < n; ++i) rows[i] = static_cast<int>(i);
+    std::sort(rows.begin(), rows.end(), [cat](int a, int b) {
+      return action_code(cat[a].id) < action_code(cat[b].id);
+    });
+    return rows;
+  }();
+  return order;
+}
+
+}  // namespace
+
+bool BindingSet::scan_eligible(int index) const {
+  std::size_t n = 0;
+  const ActionDef &def = catalog(&n)[index];
+  // [orig: Input_ProcessKeyboardEvents -- `test dl, 1` / `test dl, 40h`
+  //  against the scan word @0x49d332..0x49d348 (the fallback's @0x49d3c4..
+  //  0x49d3da); release-only 0x800000 @0x49d34a / @0x49d3dc; the held flag 4
+  //  @0x49d362 / @0x49d40a; the mode bit, 2 on the death screen else 1,
+  //  @0x49d380..0x49d393 / @0x49d40f..0x49d43d. The class filter between
+  //  them (g_InputBindingClassFilter @0x49d352..0x49d359) is never written,
+  //  so it passes every row.]
+  if ((def.flags & 0x1u) != 0 && scan_word_) return false;
+  if ((def.flags & 0x40u) != 0 && !scan_word_) return false;
+  if ((def.flags & 0x800000u) != 0 || (def.flags & 0x4u) != 0) return false;
+  return (def.modes & (scan_death_screen_ ? 2u : 1u)) != 0;
+}
+
+int BindingSet::scan_first_row(int vk, bool modified,
+                               const std::function<bool(int)> &key_down) const {
+  auto slot_down = [&](uint16_t mod) { return mod != 0 && key_down(mod); };
+  for (const int i : scan_order()) {
+    const BindingRecord &rec = records_[static_cast<std::size_t>(i)];
+    if (rec.primary != vk && rec.secondary != vk) continue;
+    // The modifier pass wants either modifier word held [orig: @0x49d367..
+    // 0x49d37e]; the fallback both words zero [orig: @0x49d3ed / @0x49d3f3].
+    if (modified ? !(slot_down(rec.primary_mod) || slot_down(rec.secondary_mod))
+                 : (rec.primary_mod != 0 || rec.secondary_mod != 0))
+      continue;
+    if (scan_eligible(i)) return i;
+  }
+  return -1;
+}
+
 int BindingSet::pressed_key(int index,
                             const std::function<bool(int)> &key_down) const {
   const BindingRecord *r = record(index);
@@ -392,6 +446,27 @@ int BindingSet::pressed_key(int index,
     return slot_down(rec.primary_mod) || slot_down(rec.secondary_mod);
   };
   const uint16_t keys[2] = {r->primary, r->secondary};
+  std::size_t n = 0;
+  if ((catalog(&n)[index].flags & 0x4u) == 0) {
+    // An event row: each held key is a key event the scan gives to the
+    // first eligible row of the walk, the modifier pass first; the fallback
+    // sees only an event no modifier-pass row took [orig: the queue
+    // @0x49d42f and its jump past the fallback @0x49d437; the fallback's
+    // queue @0x49d488 and jump @0x49d490].
+    const bool modified = row_mod_down(*r);
+    if (!modified && (r->primary_mod != 0 || r->secondary_mod != 0)) return 0;
+    for (const uint16_t key : keys) {
+      if (!slot_down(key)) continue;
+      if (modified) {
+        if (scan_first_row(key, true, key_down) == index) return key;
+      } else if (scan_first_row(key, true, key_down) < 0 &&
+                 scan_first_row(key, false, key_down) == index) {
+        return key;
+      }
+    }
+    return 0;
+  }
+  // A held row keeps the two passes over every row's claim (D-CTRL-8).
   // Pass 1: the row's modifier is held and one of its keys is down
   // [orig: @0x49d35b..0x49d3a7].
   if (row_mod_down(*r)) {

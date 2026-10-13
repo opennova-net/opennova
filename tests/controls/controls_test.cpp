@@ -548,9 +548,124 @@ bool test_pressed_key_two_passes() {
   down = {0x5A};
   CHECK(set.pressed_key(binoculars, key_down) == 0,
         "a bare Z never fires: the fallback wants both modifier words zero");
+  // Two Ctrl+1 rows: the modifier pass queues the first in the walk, which
+  // runs by action code (binoculars 26 before seat1 182), and skips the rest.
   down = {0x11, 0x31};
-  CHECK(set.pressed_key(binoculars, key_down) == 0x31 && set.pressed_key(seat1, key_down) == 0x31,
-        "two Ctrl+1 rows both fire in poll form (retail queues both events)");
+  CHECK(set.pressed_key(binoculars, key_down) == 0x31,
+        "two Ctrl+1 rows: the lower code (binoculars, 26) takes the key");
+  CHECK(set.pressed_key(seat1, key_down) == 0, "and seat1 (182) stays silent");
+  return true;
+}
+
+// One key event fires one row: the key scan walks the binding table in
+// action-code order (the boot's sort makes record i the row whose code is i)
+// and queues the first row that passes its gates in the modifier pass, else
+// the first in the fallback, then takes the next key event.
+// [orig: KeyBinding_SortBySequentialId @0x498260 (Game_InitSubsystems
+//  @0x4a6de7); Input_ProcessKeyboardEvents @0x49d1f0 -- the modifier pass's
+//  queue @0x49d42f and jump @0x49d437, the fallback's queue @0x49d488 and jump
+//  @0x49d490]
+bool test_key_scan_first_match() {
+  BindingSet set;
+  std::set<int> down;
+  const auto key_down = [&](int vk) { return down.count(vk) != 0; };
+  const int flip = set.index_of_token("flipmouse");
+  const int scale = set.index_of_token("mousescale");
+  const int accessory = set.index_of_token("Accessory");
+  const int radarout = set.index_of_token("radarout");
+  const int huddetail = set.index_of_token("huddetail");
+  const int hudcolor = set.index_of_token("hudcolor");
+  CHECK(flip >= 0 && scale >= 0 && accessory >= 0 && radarout >= 0 && huddetail >= 0 &&
+            hudcolor >= 0,
+        "the rows exist");
+  CHECK(action_code(catalog(nullptr)[flip].id) == 9 &&
+            action_code(catalog(nullptr)[scale].id) == 17,
+        "flipmouse is code 9, mousescale 17");
+
+  // flipmouse and mousescale on one bare K: the press flips the invert only.
+  BindingRecord k;
+  k.primary = 0x4B;
+  CHECK(set.set_record(flip, k) && set.set_record(scale, k), "both rows take K");
+  down = {0x4B};
+  CHECK(set.pressed_key(flip, key_down) == 0x4B, "flipmouse (9) takes the bare K");
+  CHECK(set.pressed_key(scale, key_down) == 0, "mousescale (17) never steps on it");
+  down = {0x10, 0x4B};
+  CHECK(set.pressed_key(flip, key_down) == 0x4B && !set.fire_signed(scale, 0, key_down),
+        "Shift+K: the shadowed mousescale carries no signed step either");
+
+  // radarout remapped onto the bare 7 beside Accessory: Accessory (207)
+  // precedes radarout (361).
+  CHECK(set.assign_key(radarout, '7', false, false, false, false), "radarout takes 7");
+  down = {'7'};
+  CHECK(set.pressed_key(accessory, key_down) == '7', "Accessory takes the bare 7");
+  CHECK(set.pressed_key(radarout, key_down) == 0, "radarout's 7 is shadowed");
+  down = {0xBD};
+  CHECK(set.pressed_key(radarout, key_down) == 0xBD, "its own '-' still fires it");
+
+  // hudcolor moved onto huddetail's bare F6: hudcolor (code 10) precedes
+  // huddetail (19), so the shared key cycles the color scheme.
+  BindingRecord f6;
+  f6.primary = 0x75;
+  CHECK(set.set_record(hudcolor, f6), "hudcolor takes the bare F6");
+  down = {0x75};
+  CHECK(set.pressed_key(hudcolor, key_down) == 0x75, "hudcolor takes the shared F6");
+  CHECK(set.pressed_key(huddetail, key_down) == 0, "huddetail stays silent on it");
+  return true;
+}
+
+// The first match is the first ELIGIBLE row: the scan's gates skip a row
+// before it can take the key. The stock bare 9 is medpack (code 209, flags
+// 0x0C000801) and MedicReq (217, 0x04000040): while the scan word is clear
+// medpack takes it and MedicReq's 0x40 skips it; once the local body is dead
+// (the word set) medpack's 0x1 skips it and the 9 calls the medic. The death
+// screen admits only mode-2 rows; a held (flag 4) row never takes an event.
+// [orig: Input_ProcessKeyboardEvents @0x49d1f3..0x49d222 (the word),
+//  @0x49d332..0x49d348 / @0x49d3c4..0x49d3da (0x1 / 0x40), @0x49d362 /
+//  @0x49d40a (flag 4), @0x49d380..0x49d393 / @0x49d40f..0x49d43d (the mode
+//  bit)]
+bool test_key_scan_gates() {
+  BindingSet set;
+  std::set<int> down;
+  const auto key_down = [&](int vk) { return down.count(vk) != 0; };
+  const int medpack = set.index_of_token("medpack");
+  const int medic = set.index_of_token("MedicReq");
+  const int seat1 = set.index_of_token("seat1");
+  const int spectate = set.index_of_token("CycleSpectatorMode");
+  const int forward = set.index_of_token("move_forward");
+  const int binoculars = set.index_of_token("binoculars");
+  CHECK(medpack >= 0 && medic >= 0 && seat1 >= 0 && spectate >= 0 && forward >= 0 &&
+            binoculars >= 0,
+        "the rows exist");
+
+  down = {0x39};
+  CHECK(set.pressed_key(medpack, key_down) == 0x39, "alive: the bare 9 is the medpack");
+  CHECK(set.pressed_key(medic, key_down) == 0, "alive: MedicReq's 0x40 skips it");
+  set.set_scan_gates(false, true);
+  CHECK(set.pressed_key(medpack, key_down) == 0, "dead: medpack's 0x1 skips it");
+  CHECK(set.pressed_key(medic, key_down) == 0x39, "dead: the 9 calls the medic");
+  set.set_scan_gates(false, false);
+
+  // Ctrl+1 on seat1 (mode 1, code 182) and CycleSpectatorMode (mode 2, 500).
+  BindingRecord ctrl1;
+  ctrl1.primary = 0x31;
+  ctrl1.primary_mod = 17;
+  CHECK(set.set_record(spectate, ctrl1), "the spectator row takes Ctrl+1");
+  down = {0x11, 0x31};
+  CHECK(set.pressed_key(seat1, key_down) == 0x31, "alive: seat1 takes Ctrl+1");
+  CHECK(set.pressed_key(spectate, key_down) == 0, "alive: the mode-2 row is skipped");
+  set.set_scan_gates(true, true);
+  CHECK(set.pressed_key(seat1, key_down) == 0, "the death screen skips the mode-1 seat row");
+  CHECK(set.pressed_key(spectate, key_down) == 0x31, "and the mode-2 row takes the key");
+  set.set_scan_gates(false, false);
+
+  // binoculars moved onto W beside the held move_forward: the held row takes
+  // no event, so the binoculars fire, and the held row still reads its key.
+  BindingRecord w;
+  w.primary = 0x57;
+  CHECK(set.set_record(binoculars, w), "binoculars take W");
+  down = {0x57};
+  CHECK(set.pressed_key(binoculars, key_down) == 0x57, "the event row takes W");
+  CHECK(set.pressed_key(forward, key_down) == 0x57, "the held row walks on W");
   return true;
 }
 
@@ -760,6 +875,8 @@ int main() {
   RUN_TEST(test_binding_set_assignment);
   RUN_TEST(test_format_display_string);
   RUN_TEST(test_pressed_key_two_passes);
+  RUN_TEST(test_key_scan_first_match);
+  RUN_TEST(test_key_scan_gates);
   RUN_TEST(test_fire_sign);
   RUN_TEST(test_action_codes);
   RUN_TEST(test_head_gate_by_code);

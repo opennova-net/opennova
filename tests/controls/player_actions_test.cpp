@@ -268,8 +268,11 @@ bool test_live_binding_modifier_remap_and_use_stream() {
 	BoundKeys keys;
 	const int radar = keys.bindings.index_of_token("radarout");
 	CHECK(keys.bindings.assign_key(radar, '7', false, false, false, false));
+	// One key event fires one row: Accessory (code 207) precedes radarout
+	// (361) in the scan's walk, so the bare 7 takes the weapon alone
+	// [orig: Input_ProcessKeyboardEvents @0x49d488 / @0x49d490].
 	keys.down = {'7'};
-	CHECK(requests_are(actions.poll(keys, kLive), {{Action::WeaponCategory, 7}, {Action::RadarZoom, 1}}));
+	CHECK(requests_are(actions.poll(keys, kLive), {{Action::WeaponCategory, 7}}));
 	keys.down.clear(); actions.poll(keys, kLive);
 	keys.down = {17, '7'}; // Ctrl's modified seat row claims the digit from both bare rows
 	CHECK(requests_are(actions.poll(keys, kLive), {{Action::SelectSeat, 6}}));
@@ -280,7 +283,9 @@ bool test_live_binding_modifier_remap_and_use_stream() {
 	keys.down.clear();
 	CHECK(actions.poll(keys, kLive).requests.empty());
 	keys.down = {'7'};
-	CHECK(requests_are(actions.poll(keys, kLive), {{Action::WeaponCategory, 7}, {Action::RadarZoom, 1}}));
+	CHECK(requests_are(actions.poll(keys, kLive), {{Action::WeaponCategory, 7}}));
+	keys.down = {0xBD}; // radarout's own '-' still zooms
+	CHECK(requests_are(actions.poll(keys, kLive), {{Action::RadarZoom, 1}}));
 	return true;
 }
 

@@ -149,7 +149,7 @@ class BindingSet {
   // g_input_key_down_states[vk], indexed by VK). Pass 1 fires a row whose
   // modifier word (either slot) is held together with either of its keys;
   // the fallback fires a row with BOTH modifier words zero, and only for a
-  // key no pass-1 row claims -- retail runs the fallback for a key event only
+  // key no pass-1 row takes -- retail runs the fallback for a key event only
   // when the modifier pass matched nothing. So Ctrl+1 fires seat1 and never
   // Knife, a bare 1 fires Knife, and Ctrl+B still fires binoculars (no row
   // claims B). A mixed record (Ctrl+1 primary, bare Z secondary) fires on
@@ -159,8 +159,45 @@ class BindingSet {
   //  (modifier held @0x49d36a/@0x49d377, key match @0x49d3a7, fire and skip
   //  the fallback @0x49d42f..0x49d437); fallback @0x49d3ba..0x49d488 (both
   //  modifier words zero @0x49d3c1.., key match, fire @0x49d488)]
+  //
+  // An event row (no flag 4) fires FIRST MATCH: each pass queues the first
+  // row of the walk that passes the scan's gates and matches the key, then
+  // takes the next key event, so one key event fires one row at most. The
+  // walk runs by action code (the boot's sort lays record i as the row whose
+  // code is i): of two rows on one key the lower code fires (flipmouse 9
+  // over mousescale 17, hudcolor 10 over huddetail 19, binoculars 26 over
+  // seat1 182). The gates, for the row itself and for every row that could
+  // take its key first: a 0x1 row is skipped while the scan word is set and
+  // a 0x40 row while it is clear, a release-only 0x800000 row and a held
+  // (flag 4) row always, and a row whose mode word lacks the live mode's bit
+  // (bit 2 on the death screen, else bit 1). The class filter beside them,
+  // `g_InputBindingClassFilter` against the row's class byte, is never
+  // written (no store in the image), so it passes every row.
+  // [orig: KeyBinding_SortBySequentialId @0x498260 (Game_InitSubsystems
+  //  @0x4a6de7); Input_ProcessKeyboardEvents -- the scan word
+  //  @0x49d1f3..0x49d222, the 0x1 / 0x40 gates @0x49d332..0x49d348 and
+  //  @0x49d3c4..0x49d3da, 0x800000 @0x49d34a / @0x49d3dc, the class filter
+  //  @0x49d352..0x49d359 / @0x49d3e4..0x49d3eb (g_InputBindingClassFilter,
+  //  ex byte_B3B768, read @0x49d321), flag 4 @0x49d362 / @0x49d40a, the mode
+  //  bit @0x49d380..0x49d393 / @0x49d40f..0x49d43d, the jumps to the next
+  //  event @0x49d437 / @0x49d490 (no match @0x49d450)]
+  // A held (flag 4) row keeps the two passes alone, with no first match and
+  // no gate (D-CTRL-8: retail's held pass reads its keys and its mode bit).
   // 0 while the keyboard is captured (below).
   int pressed_key(int index, const std::function<bool(int)> &key_down) const;
+
+  // The key scan's two live gates, which the embedder sets once a frame
+  // ahead of the polls: the death screen (g_DeathScreenActive) selects the
+  // mode bit, and the scan word is set on a dedicated authority (in a
+  // session, the authority, not a session peer) and otherwise while the
+  // local body's dead bit (Flags & 2) is up.
+  // [orig: Input_ProcessKeyboardEvents @0x49d1f3..0x49d222 (the word: 2, else
+  //  g_LocalPlayerEntity +0x24 & 2), @0x49d380 / @0x49d40f
+  //  (g_DeathScreenActive)]
+  void set_scan_gates(bool death_screen, bool scan_word) {
+    scan_death_screen_ = death_screen;
+    scan_word_ = scan_word;
+  }
 
   // Whether the record's fire RIGHT NOW carries the sign bit (bit 31 of the
   // queued binding id, which steps mousescale down): the keyboard fallback
@@ -244,8 +281,17 @@ class BindingSet {
   uint32_t revision() const { return revision_; }
 
  private:
+  // Whether catalog row `index` passes the key scan's gates (pressed_key).
+  bool scan_eligible(int index) const;
+  // The catalog row the key event `vk` fires in the modifier pass (`modified`)
+  // or the fallback, -1 for none: the first eligible row by action code.
+  int scan_first_row(int vk, bool modified,
+                     const std::function<bool(int)> &key_down) const;
+
   std::vector<BindingRecord> records_;  // catalog order
   bool keyboard_captured_ = false;
+  bool scan_death_screen_ = false;  // g_DeathScreenActive
+  bool scan_word_ = false;          // the scan word nonzero
   bool joystick_enabled_ = false;  // dword_24D2088, 0 until a profile enables it
   uint32_t revision_ = 0;
 };

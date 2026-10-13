@@ -7,15 +7,14 @@ const HudHiddenCaptureWitness := preload(
 # LIVE hud_detail level with wrap, the death screen forces level 3 through the
 # same live seam, neither write reaches the persisted config value (which only
 # the settings path owns), every mission start re-seeds the live level from
-# that config value, and a shared physical key fires huddetail — not hudcolor
-# — modeling retail's first-match catalog order (rows 50 < 76; D-CTRL-4 keeps
-# hudcolor live on its own key). The capture case runs over a REAL HudOverlay
-# (HudFixture).
+# that config value (a key both huddetail and hudcolor carry reaches one row
+# in the binding sampler, controls_model_test.gd). The capture case runs over a
+# REAL HudOverlay (HudFixture).
 # [orig: the huddetail cycle Input_HandleActionBinding_0 @0x4E0601..0x4E0624
 #  (the layer global only); the death force NapiNPClientMsg_0x00F
 #  @0x42E410..0x42E41C (the layer global only); the mission-start apply
 #  Game_ApplySessionSettingsToGlobals @0x55154d from the config struct that
-#  Game_SaveConfig @0x54c80d persists; the first-match key scan @0x49d42f]
+#  Game_SaveConfig @0x54c80d persists]
 #
 # The config value is the process's cfg block word (GameCfgStore); every test
 # wraps its cycles back to the starting value (the hud_color tests' pattern).
@@ -155,45 +154,6 @@ func test_hud_hidden_capture_is_scoped_non_persisting_and_keeps_effects_active()
 	presenter.set_hud_detail_level(persisted_start)
 	assert_eq(_persisted_hud_detail(), persisted_start,
 			"the test leaves the persisted level where it started")
-
-
-func test_shared_key_fires_huddetail_not_hudcolor() -> void:
-	# Pin the catalog default rows (huddetail F6 / hudcolor F6) so the
-	# shared-key predicate holds regardless of an earlier profile's apply. In-memory
-	# only — no player.sav is written here.
-	ControlsBindings.model().restore_defaults()
-	var presenter: GameHudPresenter = autofree(GameHudPresenter.new())
-	var detail_start := presenter.hud_detail_level()
-	var color_start := presenter.hud_color_index()
-
-	# Both catalog rows default to F6: one shared physical press fires the
-	# earlier huddetail row only (first-match-wins, rows 50 < 76).
-	presenter.poll_hud_keys(true, true, false, true)
-	assert_eq(presenter.hud_detail_level(), (detail_start + 1) % 4,
-			"the shared key cycles the declutter level")
-	assert_eq(presenter.hud_color_index(), color_start,
-			"the shadowed hudcolor row does not fire")
-	presenter.poll_hud_keys(false, false, false, true)
-
-	# A hudcolor edge without a huddetail press stays a live row (the
-	# D-CTRL-4 adjudication: shadow only a SHARED key's edge).
-	presenter.poll_hud_keys(false, true, false, true)
-	assert_eq(presenter.hud_color_index(), (color_start + 1) % 6,
-			"hudcolor stays live on its own edge")
-	assert_eq(presenter.hud_detail_level(), (detail_start + 1) % 4,
-			"the hudcolor edge leaves the declutter level alone")
-	presenter.poll_hud_keys(false, false, false, true)
-
-	# Wrap the live level and the persisted color token back to their
-	# starting values.
-	for i in range(3):
-		presenter.cycle_hud_detail()
-	for i in range(5):
-		presenter.cycle_hud_color()
-	assert_eq(presenter.hud_detail_level(), detail_start,
-			"the test leaves the live level where it started")
-	assert_eq(presenter.hud_color_index(), color_start,
-			"the test leaves the persisted scheme where it started")
 
 
 func test_kill_banner_retains_text_after_expiry() -> void:

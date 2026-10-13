@@ -2,12 +2,11 @@
 
 using namespace godot;
 
-int HudToggles::poll(int p_rows_down, bool p_rows_share_key, bool p_chorded, bool p_active,
+int HudToggles::poll(int p_rows_down, bool p_chorded, bool p_active,
 		bool p_in_session, bool p_objective_game, bool p_local_alive, bool p_authority,
 		bool p_mp_session_peer, bool p_mouse_scale_negative) {
 	opennova::hud::HudKeyPoll keys;
 	opennova::hud::hud_key_poll_set_rows(keys, static_cast<uint32_t>(p_rows_down));
-	keys.rows_share_key = p_rows_share_key;
 	keys.chorded = p_chorded;
 	keys.active = p_active;
 	keys.in_session = p_in_session;
@@ -128,7 +127,7 @@ int HudToggles::get_tip_countdown() const { return state_.tips.countdown; }
 bool HudToggles::is_tip_showing() const { return opennova::hud::tip_is_showing(state_.tips); }
 
 void HudToggles::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("poll", "rows_down", "rows_share_key", "chorded", "active",
+	ClassDB::bind_method(D_METHOD("poll", "rows_down", "chorded", "active",
 								 "in_session", "objective_game", "local_alive", "authority",
 								 "mp_session_peer", "mouse_scale_negative"),
 			&HudToggles::poll, DEFVAL(true), DEFVAL(false), DEFVAL(false), DEFVAL(false));
