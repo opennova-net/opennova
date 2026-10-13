@@ -142,6 +142,12 @@ std::string weapons() {
 	       "\tround_type AMMO_TEST\n\tflags scoped\n\tscope_max_mag 4 0\n"
 	       "\tpos 25 -5 -145 0 0 0\n\ttpos -1 12 -138 0 0 0\n"
 	       "\taction \"fire\"\n\t\tanim anim_wpn_fire\n\t\tsoundsetend GS_TEST\n\t\tdelayend 4\n\t\tparticle Flash\n"
+	       "\t\tparticleuserpoint muzzle\n\t\tfunction wpn_std_fire\n\tend\nend\n"
+	       // A sighted rifle that keeps its gun (no card): aiming eases the view model to tpos and its turn.
+	       "weapon \"WPN_SIGHTED\"\n\tclipsize 5\n\tstartrounds 10\n\tanimadm gun\n\tgfx1 gun\n\tgfx3 gun\n"
+	       "\tround_type AMMO_TEST\n\tflags sighted\n\tflags nocardswitch\n\tscope_max_mag 2 0\n"
+	       "\tpos 25 -5 -145 0 0 0\n\ttpos -1 12 -138 2 359 9\n"
+	       "\taction \"fire\"\n\t\tanim anim_wpn_fire\n\t\tsoundsetend GS_TEST\n\t\tdelayend 4\n\t\tparticle Flash\n"
 	       "\t\tparticleuserpoint muzzle\n\t\tfunction wpn_std_fire\n\tend\nend\n";
 }
 
@@ -467,6 +473,194 @@ int test_scope() {
 	return 0;
 }
 
+// A sighted weapon that keeps its gun (nocardswitch): aiming eases the view model from the hip to tpos and its
+// turn while the camera stays at the hip's, as the game's presenter moves the model before its eye; the hip's
+// camera sees the gun where an eye at the aimed view sees it, its field of view the renderfov (no card, no zoom).
+// Lowered, the gun stands at the hip again.
+int test_aim_down_sights() {
+	WeaponProject project;
+	TEST_EXPECT(project.made && project.select("WPN_SIGHTED"));
+	TEST_EXPECT(project.options(R"({"weapon": "first"})"));
+	TEST_EXPECT(project.perform(R"([{"tick": 2, "gesture": "scope"}])", 60));
+	const DefinitionViewport *viewport = project.viewport();
+	TEST_EXPECT(viewport != nullptr && viewport->weapon_record());
+	if (!viewport) return 1;
+	const DefinitionWeapon &weapon = viewport->weapon();
+	TEST_EXPECT(weapon.range().scoped() && !weapon.card_up());
+	TEST_EXPECT(std::fabs(viewport->camera().pose.fov_degrees - 80.0f) < 1e-3f);
+	float units[3], turn[3];
+	weapon.range().viewmodel_bias(units, turn);
+	// Settled: the offset is tpos - pos over the def's scale, the turn tpos's less pos's.
+	const float want_units[3] = {-26.0f / 256.0f, 17.0f / 256.0f, 7.0f / 256.0f};
+	const float want_turn[3] = {2.0f, -1.0f, 9.0f};
+	for (int i = 0; i < 3; ++i) {
+		TEST_EXPECT(std::fabs(units[i] - want_units[i]) < 1e-3f);
+		TEST_EXPECT(std::fabs(turn[i] - want_turn[i]) < 1e-3f);
+	}
+	// The hip's camera sees the moved model where the aimed eye sees the model unmoved.
+	const FirstPersonSources &sources = weapon.first_person();
+	const FirstPersonRoot &root = weapon.viewmodel_root();
+	float hip[3], aimed[3], aimed_turn[3];
+	first_person_view_units(sources, 0, 0, hip);
+	for (int i = 0; i < 3; ++i) {
+		aimed[i] = hip[i] + units[i];
+		aimed_turn[i] = sources.rot_bias_deg()[i] + turn[i];
+	}
+	const float rig[3] = {0.0f, renderer::kViewmodelRigYawDeg, 0.0f};
+	const renderer::FpViewmodelPose at_hip = renderer::fp_viewmodel_pose(hip, sources.rot_bias_deg(), rig);
+	const renderer::FpViewmodelPose at_aim = renderer::fp_viewmodel_pose(aimed, aimed_turn, rig);
+	const auto seen = [](const renderer::FpViewmodelPose &pose, const PreviewVec3 &p) {
+		const float *b = pose.basis;
+		return PreviewVec3{b[0] * p.x + b[1] * p.y + b[2] * p.z + pose.origin[0],
+		                   b[3] * p.x + b[4] * p.y + b[5] * p.z + pose.origin[1],
+		                   b[6] * p.x + b[7] * p.y + b[8] * p.z + pose.origin[2]};
+	};
+	for (const PreviewVec3 &p : {PreviewVec3{0.0f, 0.0f, 0.0f}, PreviewVec3{0.1f, -0.2f, 0.6f}}) {
+		const PreviewVec3 a = seen(at_hip, root.point(p)), b = seen(at_aim, p);
+		TEST_EXPECT(std::fabs(a.x - b.x) < 1e-4f && std::fabs(a.y - b.y) < 1e-4f && std::fabs(a.z - b.z) < 1e-4f);
+	}
+	TEST_EXPECT(std::fabs(root.origin.x) + std::fabs(root.origin.y) + std::fabs(root.origin.z) > 1e-3f);
+	// Lowered: back at the hip, the root the identity.
+	TEST_EXPECT(project.perform(R"([{"tick": 2, "gesture": "scope"}, {"tick": 60, "gesture": "scope"}])", 120));
+	viewport = project.viewport();
+	const FirstPersonRoot &rest = viewport->weapon().viewmodel_root();
+	TEST_EXPECT(!viewport->weapon().range().scoped());
+	TEST_EXPECT(std::fabs(rest.origin.x) + std::fabs(rest.origin.y) + std::fabs(rest.origin.z) < 1e-4f);
+	TEST_EXPECT(std::fabs(rest.x.x - 1.0f) < 1e-4f && std::fabs(rest.y.y - 1.0f) < 1e-4f &&
+	            std::fabs(rest.z.z - 1.0f) < 1e-4f);
+	return 0;
+}
+
+// The eyes (seen from the orbit in first person): the hip's stands where the eye's view stands its camera, each
+// placed by its view record; a drag of one (the editor MCP's, then the canvas's) writes that record's place, the
+// eye then under the pointer, the canvas's steps one gesture.
+int test_the_eyes() {
+	WeaponProject project;
+	TEST_EXPECT(project.made && project.select("WPN_SIGHTED"));
+	TEST_EXPECT(project.options(R"({"weapon": "first"})"));
+	const DefinitionViewport *viewport = project.viewport();
+	TEST_EXPECT(viewport && viewport->eyes(800, 600).empty()); // the eye's own view shows none
+	if (!viewport) return 1;
+	const PreviewVec3 hip_camera = viewport->camera().pose.eye;
+	TEST_EXPECT(project.options(R"({"fire": {"view": "orbit"}})"));
+	viewport = project.viewport();
+	const ViewportContext context = viewport_context(project.session.view(), *viewport);
+	std::vector<DefinitionViewport::Eye> eyes = viewport->eyes(context.width, context.height);
+	TEST_EXPECT(eyes.size() == 2 && std::string(eyes[0].handle) == "pos" && std::string(eyes[1].handle) == "tpos");
+	if (eyes.size() != 2) return 1;
+	TEST_EXPECT(std::fabs(eyes[0].at.x - hip_camera.x) < 1e-4f && std::fabs(eyes[0].at.y - hip_camera.y) < 1e-4f &&
+	            std::fabs(eyes[0].at.z - hip_camera.z) < 1e-4f);
+	// An eye at its own place writes nothing.
+	std::vector<Edit> edits;
+	TEST_EXPECT(viewport->eye_edits(*context.input.document, "tpos", eyes[1].at, context.width, context.height, 1, edits) &&
+	            edits.empty());
+	TEST_EXPECT(!viewport->eye_edits(*context.input.document, "spos", eyes[1].at, context.width, context.height, 1, edits));
+	// The MCP's drag of the aimed eye by 20 pixels right: tpos written, the eye then 20 pixels on.
+	float x0 = 0.0f, y0 = 0.0f;
+	std::string error;
+	TEST_EXPECT(viewport->handle_point(context, viewport->record_row(), "tpos", x0, y0, error));
+	ViewportDrag drag;
+	drag.id = viewport->record_row();
+	drag.handle = "tpos";
+	drag.x = 20.0f;
+	editor_test::Gathered dragged;
+	TEST_EXPECT(viewport->drag(context, drag, dragged, error));
+	TEST_EXPECT(dragged.requests.size() == 2 && dragged.requests[0].kind == EditorRequestKind::EditRecord &&
+	            dragged.requests[1].kind == EditorRequestKind::EndEdit);
+	TEST_EXPECT(editor_test::serve(project.session, dragged.requests));
+	TEST_EXPECT(project.hold(0));
+	viewport = project.viewport();
+	const ViewportContext moved = viewport_context(project.session.view(), *viewport);
+	float x1 = 0.0f, y1 = 0.0f;
+	TEST_EXPECT(viewport->handle_point(moved, viewport->record_row(), "tpos", x1, y1, error));
+	TEST_EXPECT(std::fabs(x1 - (x0 + 20.0f)) < 0.5f && std::fabs(y1 - y0) < 0.5f);
+	TEST_EXPECT(viewport->weapon().first_person().tpos_units()[1] != 12.0f ||
+	            viewport->weapon().first_person().tpos_units()[0] != -1.0f ||
+	            viewport->weapon().first_person().tpos_units()[2] != -138.0f);
+	// The canvas: a press on the hip eye and a drag writes pos, one gesture's steps, its end on release.
+	float hx = 0.0f, hy = 0.0f;
+	TEST_EXPECT(viewport->handle_point(moved, viewport->record_row(), "pos", hx, hy, error));
+	const std::unique_ptr<CanvasHalf> canvas = viewport->make_canvas();
+	editor_test::Gathered out;
+	canvas->follow(*viewport, moved, out);
+	CanvasInput in;
+	in.width = moved.width;
+	in.height = moved.height;
+	in.hovered = true;
+	in.pressed = in.down = true;
+	in.mouse = in.screen = CanvasPoint{hx, hy};
+	canvas->input(moved, in, out);
+	in.pressed = false;
+	in.mouse = in.screen = CanvasPoint{hx, hy - 15.0f};
+	in.delta = CanvasPoint{0.0f, -15.0f};
+	canvas->input(moved, in, out);
+	in.down = false;
+	canvas->input(moved, in, out);
+	size_t edited = 0, ended = 0;
+	for (const EditorRequest &request : out.requests) {
+		edited += request.kind == EditorRequestKind::EditRecord ? 1 : 0;
+		ended += request.kind == EditorRequestKind::EndEdit ? 1 : 0;
+	}
+	TEST_EXPECT(edited == 1 && ended == 1);
+	const float pos_up = viewport->weapon().first_person().pos_units()[2];
+	TEST_EXPECT(editor_test::serve(project.session, out.requests));
+	TEST_EXPECT(project.hold(0));
+	TEST_EXPECT(project.viewport()->weapon().first_person().pos_units()[2] != pos_up);
+	return 0;
+}
+
+// Aiming seen from the orbit: the gun stays still and the game's camera moves against it, from the hip's eye to
+// the aimed one (the same motion the eye's view shows as the gun coming up to a still camera); its frustum is drawn.
+int test_the_game_camera() {
+	WeaponProject project;
+	TEST_EXPECT(project.made && project.select("WPN_SIGHTED"));
+	TEST_EXPECT(project.options(R"({"weapon": "first", "fire": {"view": "orbit"}})"));
+	const DefinitionViewport *viewport = project.viewport();
+	TEST_EXPECT(viewport != nullptr);
+	if (!viewport) return 1;
+	const ViewportContext context = viewport_context(project.session.view(), *viewport);
+	const std::vector<DefinitionViewport::Eye> eyes = viewport->eyes(context.width, context.height);
+	TEST_EXPECT(eyes.size() == 2);
+	if (eyes.size() != 2) return 1;
+	const auto near = [](const PreviewVec3 &a, const PreviewVec3 &b) {
+		return std::fabs(a.x - b.x) < 1e-3f && std::fabs(a.y - b.y) < 1e-3f && std::fabs(a.z - b.z) < 1e-3f;
+	};
+	DefinitionViewport::Eye now;
+	float fov = 0.0f;
+	TEST_EXPECT(viewport->game_camera(context.width, context.height, now, fov));
+	TEST_EXPECT(near(now.at, eyes[0].at) && near(now.look, eyes[0].look) && near(now.up, eyes[0].up));
+	TEST_EXPECT(std::fabs(fov - 80.0f) < 1e-3f);
+	// Aimed: the camera on the aimed eye, the gun where it was.
+	TEST_EXPECT(project.perform(R"([{"tick": 2, "gesture": "scope"}])", 60));
+	viewport = project.viewport();
+	TEST_EXPECT(viewport->weapon().range().scoped());
+	TEST_EXPECT(viewport->game_camera(context.width, context.height, now, fov));
+	TEST_EXPECT(near(now.at, eyes[1].at) && near(now.look, eyes[1].look) && near(now.up, eyes[1].up));
+	const FirstPersonRoot &root = viewport->weapon().viewmodel_root();
+	TEST_EXPECT(std::fabs(root.origin.x) + std::fabs(root.origin.y) + std::fabs(root.origin.z) < 1e-6f);
+	TEST_EXPECT(root.x.x == 1.0f && root.y.y == 1.0f && root.z.z == 1.0f);
+	// The canvas draws it: the frustum's eight lines and its roof's three beside the eyes' own.
+	const std::unique_ptr<CanvasHalf> canvas = viewport->make_canvas();
+	editor_test::Gathered out;
+	const ViewportContext aimed = viewport_context(project.session.view(), *viewport);
+	canvas->follow(*viewport, aimed, out);
+	CanvasInput in;
+	in.width = aimed.width;
+	in.height = aimed.height;
+	const OverlayList shapes = canvas->shapes(aimed, in);
+	size_t white = 0;
+	for (const OverlayShape &shape : shapes.shapes)
+		white += shape.kind == OverlayKind::Line && shape.rgb == 0xFFFFFF ? 1 : 0;
+	TEST_EXPECT(white == 11);
+	// Through the eye the gun moves instead, the camera at the hip.
+	TEST_EXPECT(project.options(R"({"fire": {"view": "eye"}})"));
+	viewport = project.viewport();
+	const FirstPersonRoot &moved = viewport->weapon().viewmodel_root();
+	TEST_EXPECT(std::fabs(moved.origin.x) + std::fabs(moved.origin.y) + std::fabs(moved.origin.z) > 1e-3f);
+	TEST_EXPECT(!viewport->game_camera(context.width, context.height, now, fov));
+	return 0;
+}
+
 // The run is a function of its gestures: stepped back, it runs again to the same events; a gesture added on the
 // clock's tick drops those after it.
 int test_the_run_again() {
@@ -705,6 +899,9 @@ int main() {
 	TEST_EXPECT(test_hold_reload_scope_switch() == 0);
 	TEST_EXPECT(test_the_run_again() == 0);
 	TEST_EXPECT(test_scope() == 0);
+	TEST_EXPECT(test_aim_down_sights() == 0);
+	TEST_EXPECT(test_the_eyes() == 0);
+	TEST_EXPECT(test_the_game_camera() == 0);
 	TEST_EXPECT(test_the_sounds() == 0);
 	TEST_EXPECT(test_third_person() == 0);
 	TEST_EXPECT(test_wire() == 0);
