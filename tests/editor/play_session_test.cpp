@@ -190,6 +190,8 @@ static int test_lifecycle() {
 	platform.spawn_fails = true;
 	TEST_EXPECT(!session.start(plan, error));
 	TEST_EXPECT(error.code() == "play.spawn");
+	// Why the spawn failed is said after the program (S26 C13).
+	TEST_EXPECT(error.message.find("(the program is not there)") != std::string::npos);
 	TEST_EXPECT(session.state() == PlayState::Stopped);
 	TEST_EXPECT(std::string(play_state_label(PlayState::Stopping)) == "stopping");
 	return 0;

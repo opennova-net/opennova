@@ -161,12 +161,14 @@ bool ChildProcessPlatform::can_spawn() const {
 #endif
 }
 
-int64_t ChildProcessPlatform::spawn(const opennova::editor::LaunchPlan &plan) {
+int64_t ChildProcessPlatform::spawn(const opennova::editor::LaunchPlan &plan, std::string &error) {
 #ifdef _WIN32
 	// A run directory or an image under a deep project, past what the call takes, in its short form.
 	const std::wstring exe = within(native_path(plan.executable), MAX_PATH - 1);
 	const std::wstring cwd = within(native_path(plan.working_dir), MAX_PATH - 2);
 	if (exe.empty() || (!plan.working_dir.empty() && cwd.empty())) {
+		error = std::string(exe.empty() ? "the program's" : "the run directory's") +
+		        " path is too long, and its volume keeps no short form of it";
 		return -1;
 	}
 	std::wstring command = quote_arg(exe);
@@ -191,6 +193,7 @@ int64_t ChildProcessPlatform::spawn(const opennova::editor::LaunchPlan &plan) {
 	const BOOL ok = CreateProcessW(exe.c_str(), buffer.data(), nullptr, nullptr, FALSE, 0, nullptr,
 			cwd.empty() ? nullptr : cwd.c_str(), &startup, &info);
 	if (!ok) {
+		error = "CreateProcessW failed with error " + std::to_string(GetLastError());
 		// Nothing started: a lock taken for it goes at once, unless another child still starts behind.
 		std::lock_guard<std::mutex> lock(mutex_);
 		if (locked_ && !behind_.lock_wanted(static_cast<int64_t>(Time::get_singleton()->get_ticks_msec()))) {
@@ -213,6 +216,7 @@ int64_t ChildProcessPlatform::spawn(const opennova::editor::LaunchPlan &plan) {
 	return pid;
 #else
 	(void)plan;
+	error = no_spawn_reason();
 	return -1;
 #endif
 }

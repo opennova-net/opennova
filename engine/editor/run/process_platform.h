@@ -37,8 +37,9 @@ public:
 	virtual std::string no_spawn_reason() const {
 		return "Play is Windows-only for now: the editor cannot start the game on this system.";
 	}
-	// The child's id, or -1 when it could not be started.
-	virtual int64_t spawn(const LaunchPlan &plan) = 0;
+	// The child's id, or -1 when it could not be started, with why in `error` (the OS's own words where it
+	// has them: the program missing, the directory gone, a path too long).
+	virtual int64_t spawn(const LaunchPlan &plan, std::string &error) = 0;
 	virtual bool is_running(int64_t pid) = 0;
 	// Ask the child to exit (close its window / SIGTERM); true when the request was delivered
 	// or the child had already exited.

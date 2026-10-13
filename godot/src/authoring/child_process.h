@@ -27,7 +27,7 @@ public:
 	~ChildProcessPlatform() override;
 
 	bool can_spawn() const override;
-	int64_t spawn(const opennova::editor::LaunchPlan &plan) override;
+	int64_t spawn(const opennova::editor::LaunchPlan &plan, std::string &error) override;
 	bool is_running(int64_t pid) override;
 	// Asks the child to close its window (the game's orderly quit); false when the
 	// request could not be delivered to a child that still runs.

@@ -8,10 +8,11 @@ bool PlaySession::start(const LaunchPlan &plan, Diagnostic &error) {
 		                     "The game is already running; stop it before starting it again.");
 		return false;
 	}
-	const int64_t pid = platform_.spawn(plan);
+	std::string why;
+	const int64_t pid = platform_.spawn(plan, why);
 	if (pid < 0) {
 		error = make_finding(CoreFinding::PlaySpawn, DiagnosticSeverity::Error,
-		                     "The game could not be started: " + plan.executable);
+		                     "The game could not be started: " + plan.executable + (why.empty() ? "" : " (" + why + ")"));
 		return false;
 	}
 	pid_ = pid;

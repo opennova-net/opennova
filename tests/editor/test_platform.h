@@ -29,8 +29,9 @@ struct NoProcess : opennova::editor::NullProcessPlatform {
 	int spawns = 0; // the children Play tried to start
 
 	bool can_spawn() const override { return true; }
-	int64_t spawn(const opennova::editor::LaunchPlan &) override {
+	int64_t spawn(const opennova::editor::LaunchPlan &, std::string &error) override {
 		++spawns;
+		error = "the test starts no process";
 		return -1;
 	}
 };
@@ -59,10 +60,13 @@ struct FakePlatform : opennova::editor::ProcessPlatform {
 	int spawns = 0;
 
 	bool can_spawn() const override { return spawn_supported; }
-	int64_t spawn(const opennova::editor::LaunchPlan &plan) override {
+	int64_t spawn(const opennova::editor::LaunchPlan &plan, std::string &error) override {
 		last_plan = plan;
 		++spawns;
-		if (spawn_fails) return -1;
+		if (spawn_fails) {
+			error = "the program is not there";
+			return -1;
+		}
 		running.push_back(next_pid);
 		log.push_back("spawn " + std::to_string(next_pid));
 		return next_pid++;
