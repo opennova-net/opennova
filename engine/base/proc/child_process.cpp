@@ -139,11 +139,15 @@ std::string creation_stamp(HANDLE handle) {
 			(static_cast<uint64_t>(created.dwHighDateTime) << 32) | created.dwLowDateTime);
 }
 
+// The longest path Windows names (a UNICODE_STRING's 32767 characters and the
+// terminator): room for any image path.
+constexpr DWORD kLongestPath = 32768;
+
 // The process's identity read through `handle` now. The image query fails once
 // the process has exited, so the spawn reads it while the child is there.
 ProcessIdentity read_identity(HANDLE handle) {
 	ProcessIdentity out;
-	std::wstring image(32768, L'\0');
+	std::wstring image(kLongestPath, L'\0');
 	DWORD length = static_cast<DWORD>(image.size());
 	if (QueryFullProcessImageNameW(handle, 0, image.data(), &length) != 0) {
 		image.resize(length);
