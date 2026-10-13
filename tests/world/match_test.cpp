@@ -635,6 +635,96 @@ void test_retail_objective_proximity_state_and_kill_bonuses() {
     }
 }
 
+// D-NET-672: the proximity pass's zone-time split tests the mask bit of the
+// slot's own team byte (+416), not its body's: a split slot (a script team
+// write to the body, which stores the entity byte alone) scores hostile time
+// in a zone its body's team owns and friendly time in one its slot team owns.
+// Both events credit the body's team row, with hostile time.
+// [orig: Server_UpdateCaptureZoneProximity `movzx ecx, byte ptr [esi+1A0h]`
+//  @0x508C95 / @0x508CBE, the tests @0x508C9E..0x508CA7 /
+//  @0x508CCC..0x508CD5, event 19 @0x508CB1, event 20 @0x508CEA; the zone's
+//  bit `mov cl, [edi+162h]` @0x508C16; GameEvent_ProcessScoring
+//  `movsx esi, byte ptr [ebx+162h]` @0x52F65F, case 20's team split
+//  @0x530890..0x5308F9; Entity_SetTeamByNetId @0x43C680]
+void test_zone_time_split_reads_the_slot_team() {
+    for (const uint8_t zone_team : {uint8_t{2}, uint8_t{1}}) {
+        auto world = std::make_unique<World>();
+        world->registry.configure_pool(0, 4);
+        world->registry.configure_pool(1, 4);
+        MatchRules aas;
+        aas.game_type = gt::kAdvanceAndSecure;
+        aas.score_values = default_match_score_values(aas.game_type);
+        (*aas.score_values)[32] = 3;
+        world->match.configure(aas);
+        // Slot team 1, its body moved to team 2.
+        const EntityHandle split = player(*world, 0, 1, "Split");
+        world->registry.get(split)->team = 2;
+        world->registry.get(split)->position = {0.0f, 0.0f, 0.0f};
+
+        Entity numbered;
+        numbered.kind = EntityKind::Item;
+        numbered.has_item_def = true;
+        numbered.item_attrib = kItemAttribSpawnPoint;
+        numbered.zone_number = 1;
+        numbered.zone_radius = 10;
+        numbered.team = zone_team;
+        numbered.position = {0.0f, 0.0f, 0.0f};
+        numbered.alive = true;
+        world->registry.spawn(1, numbered);
+
+        advance_initial_periodic_passes(*world, 5);
+        const bool slot_team_zone = zone_team == 1;
+        const MatchPlayer *row = world->match.player(split);
+        CHECK(row->stats[MatchStats::kHostileZoneTime] == (slot_team_zone ? 0 : 5));
+        CHECK(row->stats[MatchStats::kFriendlyZoneTime] == (slot_team_zone ? 5 : 0));
+        CHECK(row->stats[MatchStats::kPoints] == (slot_team_zone ? 3 : 1));
+        CHECK(world->match.team_stats(2)[MatchStats::kHostileZoneTime] == 5);
+        CHECK(world->match.team_stats(1)[MatchStats::kHostileZoneTime] == 0);
+    }
+}
+
+// The proximity mask's zone and hill bits are a byte `shl` by the zone's team
+// byte, its count taken mod 32, so a team of 32 and up wraps onto the low bits
+// and 8..31 sets none; outside the team modes a hill sets bit 0 whatever its
+// team. (A team byte is the mission record's or a script's, any byte.)
+// [orig: Server_UpdateCaptureZoneProximity - the hill's `mov cl, [edi+162h]` /
+//  `shl dl, cl` @0x508A7D..0x508A87 and its non-team `or ..., 1` @0x508ABB;
+//  the capturable's @0x508C16..0x508C1E]
+void test_proximity_bits_shift_as_bytes() {
+    auto pass = [](uint32_t game_type, int pool, uint8_t team) {
+        auto world = std::make_unique<World>();
+        world->registry.configure_pool(0, 4);
+        world->registry.configure_pool(pool, 4);
+        MatchRules match_rules;
+        match_rules.game_type = game_type;
+        world->match.configure(match_rules);
+        const EntityHandle body = player(*world, 0, 1, "Body");
+        world->registry.get(body)->position = {0.0f, 0.0f, 0.0f};
+        Entity site;
+        site.kind = EntityKind::Item;
+        site.has_item_def = true;
+        site.team = team;
+        site.position = {0.0f, 0.0f, 0.0f};
+        site.alive = true;
+        if (pool == 3) {
+            site.item_id = 6006;
+            site.bound_radius = 10.0f;
+        } else {
+            site.item_attrib = kItemAttribSpawnPoint;
+            site.zone_number = 1;
+            site.zone_radius = 10;
+        }
+        world->registry.spawn(pool, site);
+        advance_initial_periodic_passes(*world, 1);
+        return world->match.player(body)->objective_proximity_mask;
+    };
+    CHECK(pass(gt::kTeamKingOfTheHill, 3, 33) == 0x02);
+    CHECK(pass(gt::kTeamKingOfTheHill, 3, 9) == 0x00);
+    CHECK(pass(gt::kKingOfTheHill, 3, 9) == 0x01);
+    CHECK(pass(gt::kAdvanceAndSecure, 1, 34) == 0x04);
+    CHECK(pass(gt::kAdvanceAndSecure, 1, 2) == 0x04);
+}
+
 void test_retail_objective_proximity_scoring_events() {
     {
         auto world = std::make_unique<World>();
@@ -1624,6 +1714,8 @@ int main() {
     test_deathmatch_and_hill_outcomes();
     test_retail_objective_proximity_state_and_kill_bonuses();
     test_retail_objective_proximity_scoring_events();
+    test_zone_time_split_reads_the_slot_team();
+    test_proximity_bits_shift_as_bytes();
     test_retail_zone_and_tkoth_win_quirks();
     test_demolition_flag_and_flagball_gameplay();
     test_target_destroyed_shares_through_both_occupant_links();

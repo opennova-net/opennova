@@ -1480,9 +1480,14 @@ void Match::update_objective_proximity(const World &world) {
             if (!within_2d(player_entity->position, hill->position,
                            hill->bound_radius))
                 continue;
-            if (live && hill->team < 8u)
-                match_player.objective_proximity_mask |=
-                    team_mode ? static_cast<uint8_t>(1u << hill->team) : 0x01u;
+            // The team modes OR the hill team's bit through a byte `shl`, its
+            // count taken mod 32; the others set bit 0 whatever the team.
+            // [orig: Server_UpdateCaptureZoneProximity `mov cl, [edi+162h]` /
+            //  `shl dl, cl` @0x508A7D..0x508A87; `or byte ptr [esi+15F0Ch], 1`
+            //  @0x508ABB]
+            if (live)
+                match_player.objective_proximity_mask |= team_mode
+                    ? static_cast<uint8_t>(1u << (hill->team & 31u)) : uint8_t{0x01};
             if (!team_mode || hill->team == 0)
                 in_hill = true;
         }
@@ -1498,9 +1503,10 @@ void Match::update_objective_proximity(const World &world) {
                 !world.zones.is_capturable(2, *zone))
                 continue;
             in_capturable_entity = true;
-            if (live && team_mode && zone->team < 8u)
+            // [orig: `mov cl, [edi+162h]` / `shl dl, cl` @0x508C16..0x508C1E]
+            if (live && team_mode)
                 match_player.objective_proximity_mask |=
-                    static_cast<uint8_t>(1u << zone->team);
+                    static_cast<uint8_t>(1u << (zone->team & 31u));
         }
 
         // A numbered capturable entity anywhere in the mission globally wins
@@ -1540,9 +1546,17 @@ void Match::update_objective_proximity(const World &world) {
                     add_team_event(player_entity->team, MatchStats::kHillTime,
                                    score_value(33), raw_delta);
             } else {
-                const bool friendly_zone = player_entity->team < 8u &&
+                // The owner bit tested is the slot's own team byte's (+416),
+                // not its body's (D-NET-672), shifted as a dword; the team
+                // rows below stay the body's (the scorer's entity+0x162).
+                // [orig: `movzx ecx, byte ptr [esi+1A0h]` @0x508C95 /
+                //  @0x508CBE, `shl edx, cl` @0x508C9C / @0x508CCA, the mask
+                //  byte test @0x508C9E..0x508CA7 / @0x508CCC..0x508CD5;
+                //  GameEvent_ProcessScoring `movsx esi, byte ptr [ebx+162h]`
+                //  @0x52F65F]
+                const bool friendly_zone =
                     (match_player.objective_proximity_mask &
-                     static_cast<uint8_t>(1u << player_entity->team)) != 0;
+                     (1u << (match_player.slot_team & 31u))) != 0;
                 if (friendly_zone) {
                     // Event 20 writes friendly time to the player, but retail
                     // writes hostile time to the team row. The mismatch is in
