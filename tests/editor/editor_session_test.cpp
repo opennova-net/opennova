@@ -3803,6 +3803,7 @@ static int test_rescan_keeps_what_did_not_change() {
 	TEST_EXPECT(
 			finding_in(v.findings.diagnostics, "document.conflict", project.items_path) != nullptr);
 	// The fix asks about the edits first; Don't save reads the file.
+	const std::string marker_at = items->locator(v.documents.selection.primary);
 	session.handle(reload.request);
 	TEST_EXPECT(v.dialogs.unsaved_prompt.open && v.dialogs.unsaved_prompt.action == EditorRequestKind::ReloadDocument &&
 	            v.dialogs.unsaved_prompt.can_discard);
@@ -3817,6 +3818,28 @@ static int test_rescan_keeps_what_did_not_change() {
 	TEST_EXPECT(!has_code(v.findings.diagnostics, "document.conflict"));
 	if (fresh && !fresh->rows().empty())
 		TEST_EXPECT(static_cast<const CatalogRow &>(*fresh->rows()[0]).native.as<opennova::def::DefItemDef>().hp == 50);
+	// S26 C4: the Reload read the document it replaces (a Discard drops nothing first), so its selection is
+	// found again by place in the new read; discarded first, the selection kept the old read's identities,
+	// which name other records once the file changed above them.
+	if (fresh) TEST_EXPECT(!marker_at.empty() && v.documents.selection.primary == fresh->address_at(marker_at));
+	// S26 C3: a Discard ahead of a switch its own checks refuse (a folder with no project) drops nothing: the
+	// documents stay open with their edits, the project open (every document was closed and the edits lost).
+	Document *again = session.document_for(project.items_path);
+	TEST_EXPECT(again != nullptr);
+	if (!again) return 1;
+	EditorRequest change = request::edit_record(project.items_path, Edit());
+	change.edits[0].address = again->address_at(marker_at);
+	change.edits[0].field = "hp";
+	change.edits[0].value = int64_t(40);
+	session.handle(change);
+	TEST_EXPECT(again->dirty());
+	const size_t open = v.documents.open.size();
+	session.handle(request::open_project(project.root + "/no-project-here"));
+	TEST_EXPECT(v.dialogs.unsaved_prompt.open && v.dialogs.unsaved_prompt.action == EditorRequestKind::OpenProject);
+	session.handle(request::resolve_unsaved(UnsavedChoice::Discard));
+	session.run_operations();
+	TEST_EXPECT(!session.outcome().done() && v.project.open && v.documents.open.size() == open &&
+	            session.document_for(project.items_path) == again && again->dirty());
 	return 0;
 }
 

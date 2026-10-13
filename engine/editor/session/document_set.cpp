@@ -358,6 +358,7 @@ void DocumentSet::reload_changed() {
 		forget_file_state(path);
 		keep_selection(*document, *loaded);
 		document = loaded;
+		read_again(path);
 		changed = true;
 		core_.note("Reloaded " + path + ": it changed outside the editor.");
 	}
@@ -416,6 +417,18 @@ void DocumentSet::keep_selection(const DocumentBase &before, const DocumentBase 
 	if (was && now) relocate(*now, path, locate(*was, kept->second), again);
 	if (again.empty()) remembered_.erase(kept);
 	else kept->second = std::move(again);
+}
+
+void DocumentSet::read_again(const std::string &path) {
+	end_gesture_in(path, true);
+	const auto shown = view_.workspace.documents.find(path);
+	if (shown == view_.workspace.documents.end()) return;
+	WorkspaceView::DocumentView &view = shown->second;
+	if (!view.remove_screen && !view.pick.active() && view.logic_folded.empty()) return;
+	view.remove_screen = 0;
+	view.pick = WorkspaceView::Pick();
+	view.logic_folded.clear();
+	core_.touch(ViewConcern::Workspace);
 }
 
 // The Problems rows of the open documents whose file changed outside the editor and was not
@@ -765,13 +778,7 @@ void DocumentSet::open_document(const EditorRequest &request) {
 			}
 		if (!keep) remembered_.erase(asset.relative_path); // read again: its records have new identities
 		forget_file_state(asset.relative_path);
-		end_gesture_in(asset.relative_path, true); // and a gesture open in it is over
-		// A screen whose Remove waited on its prompt is named by an id of the old read: the prompt goes.
-		if (const auto shown = view_.workspace.documents.find(asset.relative_path);
-		    shown != view_.workspace.documents.end() && shown->second.remove_screen) {
-			shown->second.remove_screen = 0;
-			core_.touch(ViewConcern::Workspace);
-		}
+		read_again(asset.relative_path); // a gesture open in it is over, and what the workspace named of the old read
 		hand_item_classes(*document);
 		documents_.push_back(document);
 		activate(document->path());
@@ -1464,11 +1471,6 @@ void DocumentSet::discard(const std::string &path) {
 	forget_file_state(path);
 	end_gesture_in(path, true);
 	release_scope(path); // S25: the terrain files its view edited stay open with their edits; clean quiet ones close
-	update_view();
-}
-
-void DocumentSet::discard_all() {
-	close_all();
 	update_view();
 }
 

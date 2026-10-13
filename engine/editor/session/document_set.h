@@ -155,10 +155,9 @@ public:
 	// document ends first; one in another document stays open).
 	void open_gesture(const std::string &path, uint64_t token, int64_t sampled_ms = -1);
 
-	// The unsaved-changes prompt's Discard: the document at `path` dropped unsaved (a Close or a
-	// Reload waited on it), or every document (a project switch, Quit).
+	// The document at `path` dropped unsaved (the terrain tools' quiet mission, terrain_follow). The prompt's
+	// Discard drops nothing itself: what waited runs, and drops what it replaces or closes (S26 C3, C4).
 	void discard(const std::string &path);
-	void discard_all();
 	// The project closes: every document goes, with the selections they kept and their files' states.
 	void close_all();
 
@@ -240,6 +239,11 @@ private:
 	// selection or the one it kept while another is active, selected again in `after` by their places
 	// (Document::locator, as a project reopens them: ADR 0046 DI-01); those it no longer has drop out.
 	void keep_selection(const DocumentBase &before, const DocumentBase &after);
+	// The document at `path` read again (a Reload, or reload_changed's read of a file changed outside): what
+	// the workspace keeps of it by record identity (a Remove screen prompt, a pick, the board's folds) names
+	// the old read's records, and goes (S26 C7: reload_changed kept them, and a prompt could name another
+	// screen once the ids were renumbered).
+	void read_again(const std::string &path);
 	// The gesture open in the document at `path` ends (none open there: nothing), and with
 	// `validate` the validation its edits left waiting is due: an EndEdit, an Undo or a Redo of the
 	// document, a Save of it, the document closed, discarded or read again.

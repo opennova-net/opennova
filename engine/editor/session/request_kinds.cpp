@@ -173,8 +173,10 @@ void serve_undo_redo(SessionCore &core, const EditorRequest &request) {
 // The prompt's answer runs what waited on it through its own row again (serve_request), never
 // through handle(): a request from outside is one entry and one outcome.
 void serve_resolve_unsaved(SessionCore &core, const EditorRequest &request) {
-	if (const std::optional<EditorRequest> waited = core.guard().resolve(request.choice))
+	if (const std::optional<EditorRequest> waited = core.guard().resolve(request.choice)) {
 		serve_request(core, *waited);
+		core.guard().end_discard();
+	}
 }
 void serve_rename_asset(SessionCore &core, const EditorRequest &request) {
 	core.renames().rename_asset(request.path, request.new_name);

@@ -1382,6 +1382,12 @@ void SessionCore::quit() {
 		refuse_busy(std::string());
 		return;
 	}
+	// Past the unsaved-changes prompt's Discard, the documents go before the workspace is remembered: the
+	// project reopens without them, their edits dropped (UnsavedGuard::resolve lets a Quit through).
+	if (guard().discarding()) {
+		documents().close_all();
+		documents().update_view();
+	}
 	save_recent_items();
 	remember_workspace(); // what the project reopens with (the UX round's project lane)
 	view_.dialogs.quit_requested = true;

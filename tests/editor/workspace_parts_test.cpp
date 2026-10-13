@@ -452,6 +452,20 @@ int test_document_views() {
 	reload.path = menu_path;
 	TEST_EXPECT(session.handle(reload));
 	TEST_EXPECT(w.document(menu_path).remove_screen == 0 && w.document(menu_path).new_window_type == "button");
+	// S26 C7: read again because another program changed the file (reload_changed, a rescan's), the prompt goes
+	// too: it named a screen of the old read by its id, which the new read gives another screen.
+	const Document *now = session.document_for(menu_path);
+	TEST_EXPECT(now && now->rows().size() == 2);
+	if (!now || now->rows().size() != 2) return 1;
+	TEST_EXPECT(session.handle(request::set_workspace("{\"document\": {\"remove_screen\": " +
+	                                                  std::to_string(now->rows()[1]->id) + "}}")) &&
+	            w.document(menu_path).remove_screen == now->rows()[1]->id);
+	TEST_EXPECT(editor_test::write_text(v.project.root + "/menus/two.mnu",
+	                                    "<SCREEN>\r\n<NAME>ZERO</NAME>\r\n</SCREEN>\r\n<SCREEN>\r\n<NAME>FIRST</NAME>\r\n</SCREEN>\r\n"
+	                                    "<SCREEN>\r\n<NAME>SECOND</NAME>\r\n</SCREEN>\r\n"));
+	session.handle(request::rescan());
+	session.run_operations();
+	TEST_EXPECT(session.document_for(menu_path) != now && w.document(menu_path).remove_screen == 0);
 	return 0;
 }
 
