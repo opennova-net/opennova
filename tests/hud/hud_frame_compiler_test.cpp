@@ -2489,18 +2489,28 @@ void test_char_extent(const fnt_font_t *font) {
 	// Spacing 0 (Serpen24): floor((8 - 1) + 0.5) = 7.
 	tight.glyph_spacing = 0;
 	CHECK(gt.char_width('a', 1.0f) == 7, "spacing 0: the pad is -1");
-	// The fold alone, as the editor's font view measures a glyph: a 4-texel glyph of a 1024-wide
-	// design, floor((4 + 1 - 1) * 0.78125 + 0.5) = floor(3.625) = 3; the same at 800 with spacing 3
-	// is 6; the scale multiplies into the fold before the round.
+	// The fold alone, as the editor's font view measures a glyph, each step in single precision
+	// (24-bit precision control): a 4-texel glyph of a 1024-wide design, floor((4 + 1 - 1) *
+	// 0.78125
+	// + 0.5) = 3; spacing 3 at scale 1 is 6; scale_x multiplies before the round. A 6-texel glyph
+	// of a 1920-wide design rounds to 2.5 in single precision and measures 3 (2 in double); a
+	// 12-texel glyph of a 768-wide design to 12.5 and measures 13.
 	fnt_uv_t uv{};
 	uv.u0 = 3.0f / 256.0f;
 	uv.u1 = 7.0f / 256.0f;
-	CHECK(opennova::hud::glyph_extent(uv, 1, 1024) == 3,
+	CHECK(opennova::hud::glyph_extent(uv, 1, fnt_design_scale(1024)) == 3,
 			"the design width scales the padded extent");
-	CHECK(opennova::hud::glyph_extent(uv, 3, 800) == 6, "a spacing of 3 pads 2");
-	CHECK(opennova::hud::glyph_extent(uv, 1, 800, 2.0f) == 8,
+	CHECK(opennova::hud::glyph_extent(uv, 3, 1.0f) == 6, "a spacing of 3 pads 2");
+	CHECK(opennova::hud::glyph_extent(uv, 1, 1.0f, 2.0f) == 8,
 			"the scale multiplies the padded extent");
-	CHECK(opennova::hud::glyph_extent(uv, 1, 0) == 4, "a design width of 0 scales by 1");
+	fnt_uv_t six{};
+	six.u1 = 6.0f / 256.0f;
+	CHECK(opennova::hud::glyph_extent(six, 1, fnt_design_scale(1920)) == 3,
+			"each step rounds to single precision: 2.5 at a 1920 design");
+	fnt_uv_t twelve{};
+	twelve.u1 = 12.0f / 256.0f;
+	CHECK(opennova::hud::glyph_extent(twelve, 1, fnt_design_scale(768)) == 13,
+			"each step rounds to single precision: 12.5 at a 768 design");
 }
 
 // The chat wrap + display-buffer slots: the test font's glyphs are 8 px with
