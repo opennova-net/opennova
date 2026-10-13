@@ -6,7 +6,9 @@
 #include <utility>
 
 #include <base/gameprofile/game_type.h>
+#include <base/io/fixed.h>
 #include <base/io/strutil.h>
+#include <base/io/tick_rate.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/model/text_document.h>
 #include <editor/preview/hud_canvas.h>
@@ -437,7 +439,7 @@ void HudViewport::follow_scope_(const SessionView &view) {
 	// Entity_UpdateInfantryPlayerBody @0x4B4E9B..0x4B5215]).
 	range_->set_gestures({ WeaponGestureAt{ 0, WeaponGesture::Scope } });
 	constexpr int32_t kAimTicks = 16;
-	constexpr int32_t kMostTicks = 62 * 5;
+	constexpr int32_t kMostTicks = io::kTicksPerSecondInt * 5;
 	if (range_->tick() == 0) {
 		int32_t settled = -1;
 		for (int32_t tick = 1; tick <= kMostTicks; ++tick) {
@@ -937,7 +939,7 @@ io::JsonValue HudViewport::body_json(const ViewportInput &) const {
 		sights.set("scoped", JsonValue::make_bool(frame->frame_fx.scoped_selector));
 		sights.set("sighted", JsonValue::make_bool(frame->frame_fx.sighted_selector));
 		sights.set("readouts", JsonValue::make_bool(frame->scope_details_active));
-		sights.set("range", json_number(double(frame->aim_range_q16) / 65536.0));
+		sights.set("range", json_number(double(frame->aim_range_q16) / io::kFp16OneD));
 		sights.set("zero", json_number(frame->scope_zero_word));
 		sights.set("magnification", json_number(frame->scope_magnification));
 		sights.set("fov", json_number(frame->fov_h_deg));

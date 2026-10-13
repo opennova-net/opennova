@@ -2,6 +2,7 @@
 
 #include <cstdio>
 
+#include <base/io/fixed.h>
 #include <editor/preview/mission_ground_facts.h>
 #include <formats/def/def.h>
 #include <formats/til/til_tsd.h>
@@ -42,7 +43,7 @@ void scar_of(int scar_type, int surface, AmmoImpactRow &row) {
 		return;
 	}
 	row.scar = world::scar_id_for_surface(surface);
-	row.scar_radius = float(world::scar_radius_q16(row.scar)) / 65536.0f;
+	row.scar_radius = float(world::scar_radius_q16(row.scar)) / io::kFp16One;
 	if (row.scar == world::kScarIdGlassFallback) {
 		row.scar_textures.push_back(world::scar_texture_strip_name(world::kScarGlassFallbackTextureStrip));
 	} else {

@@ -179,7 +179,7 @@ void MissionMapView::unproject(float px, float py, double &x, double &y) const {
 float mission_map_zoom_for(double metres, int width) {
 	(void)width;
 	// Across the picture the map shows zoom x 65536 / 200 metres, whatever its width (the scale's law).
-	return std::clamp(float(metres * 200.0 / 65536.0), kMissionMapZoomMin, kMissionMapZoomMax);
+	return std::clamp(float(metres * 200.0 / io::kFp16OneD), kMissionMapZoomMin, kMissionMapZoomMax);
 }
 
 // --- the options -----------------------------------------------------------------------------------
@@ -782,7 +782,7 @@ bool MissionMapViewport::follow_terrain_view_(const SessionView &view) {
 			atlas = field->heightmap;
 			revision = ground.heights_revision();
 		}
-		if (ground.water()) water = int32_t(ground.water_height() * 65536.0);
+		if (ground.water()) water = int32_t(ground.water_height() * io::kFp16OneD);
 	}
 	terrain_view_.follow(background, options_.water, atlas, revision, water);
 	return terrain_view_.serial() != before;

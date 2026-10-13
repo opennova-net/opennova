@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <variant>
 
+#include <base/io/fixed.h>
 #include <base/io/hash.h>
 #include <base/io/strutil.h>
 #include <base/io/tick_rate.h>
@@ -1713,7 +1714,7 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 		lod_json.set("shown", json_number(lod()));
 		lod_json.set("auto", json_number(auto_lod(&projected)));
 		lod_json.set("count", json_number(double(shown.lod_count)));
-		lod_json.set("projected_px", json_number(projected / 65536.0));
+		lod_json.set("projected_px", json_number(projected / io::kFp16OneD));
 		JsonValue thresholds = JsonValue::make_array();
 		for (size_t i = 0; i < shown.lod_count; ++i) thresholds.push(json_number(shown.lods[i].lod_threshold));
 		lod_json.set("thresholds", std::move(thresholds));

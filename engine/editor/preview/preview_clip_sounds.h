@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <base/io/json.h>
+#include <base/io/tick_rate.h>
 #include <editor/preview/model_preview_camera.h>
 #include <editor/preview/model_preview_rig.h>
 #include <editor/preview/sound_preview.h>
@@ -138,7 +139,7 @@ struct ClipEventDue {
 // How far behind a run of the clock fires: clip_events_due reads the last this many ticks of a longer run,
 // and a model viewport fires nothing for a run longer than it (it was not the one previewed meanwhile, or
 // the Shell was held up), going on from where the clock is.
-inline constexpr int32_t kClipSoundCatchUpTicks = 62;
+inline constexpr int32_t kClipSoundCatchUpTicks = io::kTicksPerSecondInt;
 // The words read on each tick in (`from`, `to`] of the clock, in order: each tick the body's sound block
 // reads (world::anim_sound_tick), the clip's channel at its own tick there (the clock's tick; its start
 // reads nothing, as a channel started reads nothing before its first step) reading a word

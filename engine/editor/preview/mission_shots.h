@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <base/io/json.h>
+#include <base/io/tick_rate.h>
 #include <base/vfs/file_source.h>
 #include <editor/model/node.h>
 #include <editor/preview/mission_ground_facts.h>
@@ -51,7 +52,7 @@ inline constexpr double kMissionShotStandoff = 2.0;
 inline constexpr double kMissionShotReach = 20.0;
 // How long a run is followed from its first shot: ten minutes of the game's ticks (the shots stand on the preview
 // clock's ticks, the run's world counting from the first).
-inline constexpr int32_t kMissionShotsMostTicks = 62 * 600;
+inline constexpr int32_t kMissionShotsMostTicks = io::kTicksPerSecondInt * 600;
 inline constexpr int32_t kMissionShotLastTick = 0x3FFFFFFF;
 
 // A shot of the tool: the clock's tick it fires on, the ammo (an ammo.def record), the point the click met (mission

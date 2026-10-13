@@ -6,6 +6,7 @@
 #include <limits>
 #include <set>
 
+#include <base/io/fixed.h>
 #include <editor/documents/til_document.h>
 
 namespace opennova::editor {
@@ -46,8 +47,8 @@ Edit set_edit(const NodeAddress &address, const char *field, const Value &value,
 void sets_to(const TilRow &row, const TilOverlayEntry &to, std::vector<Edit> &out, uint64_t gesture = 0) {
 	const TilOverlayEntry &from = row.entry;
 	const NodeAddress at = address_of_row(row);
-	if (to.x_fixed != from.x_fixed) out.push_back(set_edit(at, "x", double(to.x_fixed) / 65536.0, gesture));
-	if (to.z_fixed != from.z_fixed) out.push_back(set_edit(at, "y", double(to.z_fixed) / 65536.0, gesture));
+	if (to.x_fixed != from.x_fixed) out.push_back(set_edit(at, "x", double(to.x_fixed) / io::kFp16OneD, gesture));
+	if (to.z_fixed != from.z_fixed) out.push_back(set_edit(at, "y", double(to.z_fixed) / io::kFp16OneD, gesture));
 	if (to.flags != from.flags) out.push_back(set_edit(at, "orientation", int64_t(to.flags), gesture));
 	if (to.tile_index != from.tile_index) out.push_back(set_edit(at, "tile", int64_t(to.tile_index), gesture));
 }
@@ -74,7 +75,7 @@ TileSquare tile_square(const TilOverlayEntry &entry) {
 }
 
 size_t tile_at(const TilFile &file, double x, double y) {
-	const double px = x * 65536.0, py = y * 65536.0;
+	const double px = x * io::kFp16OneD, py = y * io::kFp16OneD;
 	for (size_t i = file.entries.size(); i-- > 0;) {
 		const TileSquare s = tile_square(file.entries[i]);
 		// PtInRect over the plane's (x, y): left <= x < right, top <= y < bottom, the rectangle's top the square's
@@ -86,8 +87,8 @@ size_t tile_at(const TilFile &file, double x, double y) {
 
 std::vector<size_t> tiles_in_box(const TilFile &file, double x0, double y0, double x1, double y1) {
 	// The box over the stored frame (its second axis the plane's y negated), its corners in either order.
-	const double left = std::min(x0, x1) * 65536.0, right = std::max(x0, x1) * 65536.0;
-	const double top = -std::max(y0, y1) * 65536.0, bottom = -std::min(y0, y1) * 65536.0;
+	const double left = std::min(x0, x1) * io::kFp16OneD, right = std::max(x0, x1) * io::kFp16OneD;
+	const double top = -std::max(y0, y1) * io::kFp16OneD, bottom = -std::min(y0, y1) * io::kFp16OneD;
 	std::vector<size_t> out;
 	for (size_t i = 0; i < file.entries.size(); ++i) {
 		const TilOverlayEntry &e = file.entries[i];
@@ -171,15 +172,15 @@ bool tile_corner_at(double x, double y, bool grid, int32_t &x_fixed, int32_t &z_
 		const double west = std::floor(x / 16.0) * 16.0;
 		const double north = std::floor(y / 16.0) * 16.0 + 16.0;
 		if (!fits(west) || !fits(north)) return false;
-		x_fixed = int32_t(int64_t(west) * 65536);
-		z_fixed = int32_t(int64_t(north) * 65536);
+		x_fixed = int32_t(int64_t(west) * io::kFp16OneInt);
+		z_fixed = int32_t(int64_t(north) * io::kFp16OneInt);
 		return true;
 	}
 	// Nile's stamp: the point's 16.16 words, truncated, plus 0x7FFF, the fraction cleared [orig: gobj sub_1000B4A1 @
 	// 0x1000B4C8..0x1000B542]; the stored z is the plane's y.
 	if (!std::isfinite(x) || !std::isfinite(y) || std::abs(x) > 65536.0 || std::abs(y) > 65536.0) return false;
-	const int64_t px = int64_t(std::trunc(x * 65536.0));
-	const int64_t pz = int64_t(std::trunc(y * 65536.0));
+	const int64_t px = int64_t(std::trunc(x * io::kFp16OneD));
+	const int64_t pz = int64_t(std::trunc(y * io::kFp16OneD));
 	const int64_t cx = (px + 0x7FFF) & ~int64_t(0xFFFF);
 	const int64_t cz = (pz + 0x7FFF) & ~int64_t(0xFFFF);
 	constexpr int64_t lo = std::numeric_limits<int32_t>::min(), hi = std::numeric_limits<int32_t>::max();
@@ -331,8 +332,8 @@ std::vector<Edit> plan_tile_duplicate(const TilDocument &document, const std::ve
 		if (dx || dy) {
 			const NodeAddress at{batch_made(made), kTile, 0};
 			const TilOverlayEntry &e = picked[i]->entry;
-			if (dx) out.push_back(set_edit(at, "x", double(int64_t(e.x_fixed) + int64_t(dx) * 65536) / 65536.0));
-			if (dy) out.push_back(set_edit(at, "y", double(int64_t(e.z_fixed) + int64_t(dy) * 65536) / 65536.0));
+			if (dx) out.push_back(set_edit(at, "x", double(int64_t(e.x_fixed) + int64_t(dx) * io::kFp16OneInt) / io::kFp16OneD));
+			if (dy) out.push_back(set_edit(at, "y", double(int64_t(e.z_fixed) + int64_t(dy) * io::kFp16OneInt) / io::kFp16OneD));
 		}
 	}
 	return out;
@@ -350,8 +351,8 @@ std::vector<Edit> plan_tile_stamp(int cell, uint8_t flags, double x, double y, b
 	add.value = int64_t(cell);
 	out.push_back(add);
 	const NodeAddress at{batch_made(0), kTile, 0};
-	out.push_back(set_edit(at, "x", double(x_fixed) / 65536.0));
-	out.push_back(set_edit(at, "y", double(z_fixed) / 65536.0));
+	out.push_back(set_edit(at, "x", double(x_fixed) / io::kFp16OneD));
+	out.push_back(set_edit(at, "y", double(z_fixed) / io::kFp16OneD));
 	if (flags) out.push_back(set_edit(at, "orientation", int64_t(flags)));
 	return out;
 }

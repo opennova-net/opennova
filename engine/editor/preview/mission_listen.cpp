@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 
+#include <base/io/fixed.h>
 #include <base/io/strutil.h>
 #include <base/io/tick_rate.h>
 #include <editor/assets/asset_registry.h>
@@ -51,7 +52,7 @@ constexpr size_t kFiredKept = 16;
 // distance 0 [orig: Wac_PlayScriptedVoiceWave @ 0x4ed688; Audio_Play3DPositionalSound @ 0x4ecc90..0x4ecc96;
 // Audio_UpdateAmbientStream @ 0x4edb22] (world::ScriptVoiceChannel::frame's, the runtime's own).
 int32_t script_voice_volume_at_listener() {
-	return audio::calc_distance_volume(0, int64_t(100) * 65536, (world::kScriptVoiceVolume * 255 + 128) >> 8, 255);
+	return audio::calc_distance_volume(0, int64_t(100) * io::kFp16OneInt, (world::kScriptVoiceVolume * 255 + 128) >> 8, 255);
 }
 
 // A project file by its name as the asset source serves it (a path's file name).
@@ -704,7 +705,7 @@ io::JsonValue MissionListen::to_json(const MissionListenOptions &options) const 
 		row.set("wave", json_string(channel.wave));
 		row.set("path", json_string(channel.path));
 		row.set("volume", json_number(channel.volume));
-		row.set("pitch", json_number(std::round(double(channel.pitch_q16) / 65536.0 * 1000.0) / 1000.0));
+		row.set("pitch", json_number(std::round(double(channel.pitch_q16) / io::kFp16OneD * 1000.0) / 1000.0));
 		row.set("at", point_json(channel.at));
 		row.set("distance", json_number(std::round(double(channel.distance) * 100.0) / 100.0));
 		row.set("started", json_number(double(channel.started)));

@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <sstream>
 
+#include <base/io/fixed.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/environment_document.h>
@@ -34,7 +35,6 @@ constexpr ViewportState kHeadlessSize{ 1024, 768 };
 // A new camera: a person's eye a metre behind the point it orbits, looking a little up at the horizon.
 constexpr float kEyeDistance = 1.0f;
 constexpr float kEyePitch = -0.08f;
-constexpr double kFixed24PerHour = 16777216.0;
 
 std::string base_of(const std::string &path) {
 	std::string name = path;
@@ -56,7 +56,7 @@ std::string hex_of(const env::Rgb &rgb) {
 }
 
 double percent_of(int32_t q16) {
-	return double(q16) * 100.0 / 65536.0;
+	return double(q16) * 100.0 / io::kFp16OneD;
 }
 
 JsonValue command_json(const EnvironmentWeatherCommand &command) {
@@ -299,7 +299,7 @@ const EnvironmentMissionUse *EnvironmentViewport::mission() const {
 }
 
 double EnvironmentViewport::hours() const {
-	return double(weather_.tod_fixed24) / kFixed24PerHour;
+	return double(weather_.tod_fixed24) / double(env::kTodFixed24OneHour);
 }
 
 ViewportAction EnvironmentViewport::stop_(EnvironmentViewStatus reason, const std::string &detail) {
@@ -774,7 +774,7 @@ io::JsonValue EnvironmentViewport::body_json(const ViewportInput &) const {
 	clock.set("time", json_string(environment_clock_words(hours())));
 	clock.set("hours", json_number(hours()));
 	clock.set("fixed24", json_number(double(weather_.tod_fixed24)));
-	clock.set("start", json_string(environment_clock_words(double(start_fixed24_) / kFixed24PerHour)));
+	clock.set("start", json_string(environment_clock_words(double(start_fixed24_) / double(env::kTodFixed24OneHour))));
 	clock.set("start_from", json_string(environment_clock_from_token(start_from_)));
 	clock.set("advance_per_tick", json_number(double(advance_)));
 	clock.set("rate_from", json_string(environment_clock_from_token(rate_from_)));
@@ -792,8 +792,8 @@ io::JsonValue EnvironmentViewport::body_json(const ViewportInput &) const {
 	const std::vector<int> times = keyframe_times();
 	tod.set("keyframes", json_number(double(times.size())));
 	if (at.from >= 0) {
-		tod.set("from", json_string(environment_clock_words(double(env::hhmm_to_hours_fp(float(times[size_t(at.from)]))) / 65536.0)));
-		tod.set("to", json_string(environment_clock_words(double(env::hhmm_to_hours_fp(float(times[size_t(at.to)]))) / 65536.0)));
+		tod.set("from", json_string(environment_clock_words(double(env::hhmm_to_hours_fp(float(times[size_t(at.from)]))) / io::kFp16OneD)));
+		tod.set("to", json_string(environment_clock_words(double(env::hhmm_to_hours_fp(float(times[size_t(at.to)]))) / io::kFp16OneD)));
 		tod.set("fraction", json_number(at.fraction));
 		const float time = float(weather_.tod_hhmm());
 		const env::TodState state =
@@ -816,7 +816,7 @@ io::JsonValue EnvironmentViewport::body_json(const ViewportInput &) const {
 	overcast.set("percent", json_number(percent_of(channels.overcast_fp)));
 	overcast.set("target", json_number(percent_of(channels.overcast_target_fp)));
 	weather.set("overcast", std::move(overcast));
-	weather.set("fog", json_number(double(channels.fog_dist_fp) / 65536.0));
+	weather.set("fog", json_number(double(channels.fog_dist_fp) / io::kFp16OneD));
 	out.set("weather", std::move(weather));
 	// What the weather sounds like at the camera while the options listen (S23 C).
 	out.set("listen", options_.listen.on ? listen_.to_json(options_.listen) : JsonValue::make_null());
@@ -841,9 +841,9 @@ io::JsonValue EnvironmentViewport::items_json(const ViewportInput &) const {
 	for (size_t i = 0; i < times.size(); ++i) {
 		JsonValue item = JsonValue::make_object();
 		item.set("index", json_number(double(i)));
-		item.set("name", json_string(environment_clock_words(double(env::hhmm_to_hours_fp(float(times[i]))) / 65536.0)));
+		item.set("name", json_string(environment_clock_words(double(env::hhmm_to_hours_fp(float(times[i]))) / io::kFp16OneD)));
 		item.set("kind", json_string("keyframe"));
-		item.set("hours", json_number(double(env::hhmm_to_hours_fp(float(times[i]))) / 65536.0));
+		item.set("hours", json_number(double(env::hhmm_to_hours_fp(float(times[i]))) / io::kFp16OneD));
 		item.set("current", JsonValue::make_bool(int(i) == at.from));
 		out.push(std::move(item));
 	}

@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include <base/io/tick_rate.h>
 #include <runtime/world/weather_state.h>
 
 namespace opennova::mission {
@@ -128,6 +129,6 @@ private:
 
 // How many game ticks one run takes at most (a minute of the game's): a longer run (a jump of the clock) goes on at
 // the next call.
-inline constexpr int32_t kMissionScriptCatchUpTicks = 62 * 60;
+inline constexpr int32_t kMissionScriptCatchUpTicks = io::kTicksPerSecondInt * 60;
 
 } // namespace opennova::editor

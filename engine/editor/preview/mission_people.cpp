@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include <base/io/fixed.h>
 #include <editor/preview/mission_poses.h>
 #include <editor/preview/model_preview_rig.h>
 #include <runtime/world/infantry_sound.h>
@@ -133,7 +134,7 @@ std::vector<ClipSoundFired> mission_people_sounds(const MissionPeople &people, i
 		due.clip_tick = event.phase;
 		due.frame = event.phase;
 		due.word = event.word;
-		due.bottom = float(double(event.bottom) / 65536.0);
+		due.bottom = float(double(event.bottom) / io::kFp16OneD);
 		// The body at the preview's origin as plan_clip_event hears it: the listener where it stands from the person.
 		const PreviewVec3 from_person{ listener.x - person.origin.x, listener.y - person.origin.y,
 			listener.z - person.origin.z };

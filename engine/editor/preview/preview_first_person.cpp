@@ -7,6 +7,7 @@
 
 #include <base/io/fixed.h>
 #include <base/io/strutil.h>
+#include <base/io/tick_rate.h>
 #include <base/resource_index/resource_index.h>
 #include <formats/avatars/avatars.h>
 #include <formats/def/def.h>
@@ -35,7 +36,7 @@ std::string upper(const std::string &text) {
 }
 
 // How long a run of an action is followed: a minute of the game's ticks.
-constexpr int32_t kRunTicks = 62 * 60;
+constexpr int32_t kRunTicks = io::kTicksPerSecondInt * 60;
 
 const char *handler_name(const world::WeaponFsmAction &desc, int32_t action) {
 	const int8_t handler = desc.handler == world::weapon_handler::kPlaceholder ? world::weapon_action_default_handler(action)

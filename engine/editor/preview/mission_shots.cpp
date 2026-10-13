@@ -495,7 +495,7 @@ void MissionShots::step_() {
 			for (const Written &scar : scars)
 				if (scar.owner == entity->handle.packed) {
 					event.scar = world::scar_texture_strip_name(scar.texture);
-					event.scar_radius = float(scar.radius) / 65536.0f;
+					event.scar_radius = float(scar.radius) / io::kFp16One;
 				}
 		}
 		const std::string row = tag_name(event.pick.tag);

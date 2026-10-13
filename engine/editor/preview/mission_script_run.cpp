@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 
+#include <base/io/fixed.h>
 #include <base/io/tick_rate.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/mission_document.h>
@@ -260,7 +261,7 @@ void MissionScriptRun::step_() {
 		heard.set = sound.set_name;
 		if (sound.slot >= audio::kSlotShotDawn && sound.slot < audio::kSlotShotDawn + 4)
 			heard.shot = int(sound.slot) - int(audio::kSlotShotDawn);
-		for (int axis = 0; axis < 3; ++axis) heard.at[axis] = double(sound.pos[axis]) / 65536.0;
+		for (int axis = 0; axis < 3; ++axis) heard.at[axis] = double(sound.pos[axis]) / io::kFp16OneD;
 		sounds_.push_back(std::move(heard));
 	}
 	out.slot_sounds.clear();

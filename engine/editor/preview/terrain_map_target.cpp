@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <unordered_map>
 
+#include <base/io/fixed.h>
 #include <formats/trn/trn_io.h>
 #include <runtime/terrain_query/atlas_routing.h>
 
@@ -23,7 +24,7 @@ terrain::TerrainAtlasRouting routing_of(const TerrainMapTarget &target) {
 }
 
 int32_t fixed_of(double metres) {
-	const double scaled = std::floor(metres * 65536.0);
+	const double scaled = std::floor(metres * io::kFp16OneD);
 	return scaled <= -2147483648.0 ? INT32_MIN : scaled >= 2147483647.0 ? INT32_MAX : int32_t(scaled);
 }
 

@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstring>
 
+#include <base/io/fixed.h>
 #include <base/vfs/file_stamps.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/preview/viewport_device.h>
@@ -369,7 +370,7 @@ void MissionMapViewportApplier::draw_tiles_(const opennova::editor::MissionMapVi
 				opennova::til_build_entry_uv_quad(entry.tile_index, entry.flags, tile_set_width_, tile_set_height_);
 		if (!quad.valid) continue;
 		// The square's north-west corner the record's (x, stored z), its first texel's (preview/tile_tools.h).
-		const float x0 = float(double(entry.x_fixed) / 65536.0), north = float(double(entry.z_fixed) / 65536.0);
+		const float x0 = float(double(entry.x_fixed) / opennova::io::kFp16OneD), north = float(double(entry.z_fixed) / opennova::io::kFp16OneD);
 		const float side = float(opennova::TIL_CELL_WORLD_UNITS);
 		const PackedVector2Array points = PackedVector2Array({ Vector2(x0, north), Vector2(x0 + side, north),
 				Vector2(x0 + side, north - side), Vector2(x0, north - side) });

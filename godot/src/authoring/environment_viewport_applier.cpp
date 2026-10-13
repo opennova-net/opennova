@@ -639,7 +639,7 @@ void EnvironmentViewportApplier::run_weather_() {
 int32_t EnvironmentViewportApplier::floor_height_(void *ctx, int32_t x, int32_t y) {
 	const auto *self = static_cast<const EnvironmentViewportApplier *>(ctx);
 	if (!self->terrain_built_ || self->terrain_data_.is_null()) return 0;
-	const Vector3 at = MissionObjectPlacer::bms_to_godot_position(Vector3(float(x) / 65536.0f, float(y) / 65536.0f, 0.0f));
+	const Vector3 at = MissionObjectPlacer::bms_to_godot_position(Vector3(float(x) / opennova::io::kFp16One, float(y) / opennova::io::kFp16One, 0.0f));
 	const float height = self->terrain_data_->get_height_world_bilinear(at);
 	return std::isfinite(height) ? opennova::io::float_to_fp16_16_round_sat(height) : 0;
 }

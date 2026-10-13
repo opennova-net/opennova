@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <base/io/json.h>
+#include <base/io/tick_rate.h>
 #include <editor/model/node.h>
 #include <editor/preview/preview_clip_sounds.h>
 #include <runtime/world/infantry.h>
@@ -27,7 +28,7 @@ class MissionPeople {
 public:
 	// A jump of the clock longer than this many ticks (a seek, the Shell held up, a clock gone back) starts the people
 	// again from their spawn at the clock rather than playing the jump through.
-	static constexpr int32_t kCatchUpTicks = 62;
+	static constexpr int32_t kCatchUpTicks = io::kTicksPerSecondInt;
 
 	// An event word a body's channel read on a tick: whose, on which of the clock's ticks, the word, the body's playhead
 	// (its clip's tick) and the capsule's bottom under its origin (16.16, its footsteps' height below it).

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include <base/io/fixed.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/preview/mission_camera.h>
@@ -252,7 +253,7 @@ io::JsonValue EnvironmentListen::to_json(const MissionListenOptions &options) co
 		row.set("wave", json_string(channel.wave));
 		row.set("path", json_string(channel.path));
 		row.set("volume", json_number(channel.volume));
-		row.set("pitch", json_number(std::round(double(channel.pitch_q16) / 65536.0 * 1000.0) / 1000.0));
+		row.set("pitch", json_number(std::round(double(channel.pitch_q16) / io::kFp16OneD * 1000.0) / 1000.0));
 		row.set("distance", json_number(std::round(double(channel.distance) * 100.0) / 100.0));
 		channels.push(std::move(row));
 	}

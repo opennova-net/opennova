@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 
+#include <base/io/fixed.h>
 #include <base/io/json.h>
 #include <editor/documents/til_document.h>
 #include <editor/model/document_base.h>
@@ -46,7 +47,7 @@ std::string metres(double value) {
 // A placed tile's square's south-west corner on the mission's plane (x east, y north): the record's corner is its
 // north-west (preview/tile_tools.h), the square spanning 16 units south of it.
 TerrainPoint tile_corner(const TilOverlayEntry &entry) {
-	return TerrainPoint{double(entry.x_fixed) / 65536.0, double(entry.z_fixed) / 65536.0 - double(kTerrainTileUnits)};
+	return TerrainPoint{double(entry.x_fixed) / io::kFp16OneD, double(entry.z_fixed) / io::kFp16OneD - double(kTerrainTileUnits)};
 }
 
 // The quarter turns and the flip across a tile's orientation bits are, as a stamp makes them (tile_stamp_flags), for

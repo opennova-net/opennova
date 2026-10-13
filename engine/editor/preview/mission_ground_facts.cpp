@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 
+#include <base/io/fixed.h>
 #include <base/io/strutil.h>
 #include <editor/documents/terrain_heights_document.h>
 #include <editor/project/project_files.h>
@@ -285,11 +286,11 @@ void MissionGround::read_(const std::shared_ptr<const FileSource> &files, const 
 			env::mission_water_rungs(overrides, loaded ? float(trn.water_height) * 0.5f : 0.0f, loaded);
 	const float height = env::resolve_water_height(rungs, env_loaded ? &state : nullptr, 0.0f);
 	// As the game's world takes it (Simulation::set_water_z): the plane in 16.16, 0 none.
-	water_z_ = static_cast<int32_t>(double(height) * 65536.0);
+	water_z_ = static_cast<int32_t>(double(height) * io::kFp16OneD);
 	stamps_ = stamped->stamps();
 }
 
-double MissionGround::water_height() const { return double(water_z_) / 65536.0; }
+double MissionGround::water_height() const { return double(water_z_) / io::kFp16OneD; }
 
 terrain::SurfaceTypeMap MissionGround::surface_sampler() const {
 	if (!terrain()) return terrain::SurfaceTypeMap();
