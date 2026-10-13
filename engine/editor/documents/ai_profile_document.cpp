@@ -148,9 +148,19 @@ Value value_of(const aip::KeyRow &row, const aip::Profile &p) {
 // A value set: the number written as the file writes it and read through the key's arm, as the game reads it (so
 // the field then shows what the game holds: 0.25 seconds read as 15 ticks shows 0.24).
 bool set_key(const aip::KeyRow &row, aip::Profile &p, const Value &value, std::string &error) {
+	// A key the profile's type does not read stays as the reader left it, which no line of the writer's puts down
+	// (aip::write_profile writes a key of the type alone): only HELO reads the helicopter keys, GROUND its own, and
+	// ORGANIC none but the type [orig: AIProfile_ParseProperty @ 0x45DF15..0x45DF2F, the type dispatch]. Setting
+	// it back to the zeroed record's value is the one edit it takes.
+	const bool unread = row.unit != aip::Unit::Type && !aip::reads(row, p.type);
+	const auto refuse_unread = [&]() {
+		error = std::string("The game reads ") + row.key + " only in a profile of another type, so this one keeps none.";
+		return false;
+	};
 	if (row.unit == aip::Unit::Weapon) {
 		const auto *text = std::get_if<std::string>(&value);
 		if (!text) return error = "A weapon is an ammo's name.", false;
+		if (unread && !text->empty()) return refuse_unread();
 		if (text->find_first_of(" \t,\";\r\n") != std::string::npos || text->find("//") != std::string::npos)
 			return error = "A weapon's name is one word of the walk: no blank, comma, quote, ';' or '//'.", false;
 		(p.*(row.block)).*(row.name) = *text;
@@ -158,6 +168,7 @@ bool set_key(const aip::KeyRow &row, aip::Profile &p, const Value &value, std::s
 	}
 	double number = 0.0;
 	if (!number_of(value, number)) return error = "The value is a number.", false;
+	if (unread && number != 0.0) return refuse_unread();
 	int32_t stored = 0;
 	if (choice_unit(row.unit) || row.unit == aip::Unit::Flags || row.unit == aip::Unit::HuntFlags) {
 		if (number != std::floor(number) || number < 0 || number > 0xFFFFFFFF) return error = "The value is a choice.", false;
@@ -178,6 +189,19 @@ bool set_key(const aip::KeyRow &row, aip::Profile &p, const Value &value, std::s
 			return error = "No number the file can hold reads back as that.", false;
 	}
 	row.set(p, stored);
+	// A new type's reader reads none of another type's keys, and keeps none of a subtype word of the other type
+	// [orig: AIProfile_ParseProperty @ 0x45DF15..0x45DF2F; the subtype words @ 0x45E887 (GROUND), @ 0x45FA63 (HELO)]:
+	// the profile holds what the file then holds as the game reads it, which the writer puts down.
+	if (row.unit == aip::Unit::Type)
+		for (const aip::KeyRow &other : aip::key_rows()) {
+			if (other.unit == aip::Unit::Type) continue;
+			if (other.unit == aip::Unit::Weapon) {
+				if (!aip::reads(other, stored)) ((p.*(other.block)).*(other.name)).clear();
+				continue;
+			}
+			const int32_t held = other.get ? other.get(p) : 0;
+			if (held != 0 && (!aip::reads(other, stored) || aip::value_words(other, stored, held).empty())) other.set(p, 0);
+		}
 	return true;
 }
 
