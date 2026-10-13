@@ -299,8 +299,11 @@ void VehicleSystem::respawn(Entity &e) {
 	e.health = e.health_max;
 	e.mana = e.mana_max;
 	e.alive = e.health > 0;
+	// The def's own update callback goes back [orig: +0x1C4 = def+0x158
+	//  @0x460068].
 	e.death_motion = DeathMotionMode::None;
 	e.motor_suspended = false;
+	e.drop_motion = def_update_drop_motion(e);
 	e.attach_parent = {};
 	e.attach_bone = 0;
 	e.death_tick = 0;

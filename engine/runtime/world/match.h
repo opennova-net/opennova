@@ -603,9 +603,10 @@ DropCarrierPose drop_carrier_pose(const World &world, const Entity &carrier);
 //  NapiNPClientMsg_0x02F @0x43105c / @0x4310dc]
 void drop_object_from_carrier(World &world, Entity &object, const DropCarrierPose &carrier);
 
-// One pool-1 visit of a dropped object's installed callback (Entity::
-// drop_motion): the fall until the clamped ground stops it, then the ride on
-// the entity it landed on, which falls again when that entity dies.
+// One visit of an entity's installed drop motion (Entity::drop_motion; every
+// pool-1 visit, a pool-2/3 row's cohort): a dropped object's fall until the
+// clamped ground stops it, then the ride on the entity it landed on, which
+// falls again when that entity dies; or a genx def's own ride.
 // [orig: Entity_UpdatePositionAndTransform @0x4adef0;
 //  Entity_UpdateParentTransform @0x4a88b0; Entity_InterpolateFromParentDelta
 //  @0x4a8d60]

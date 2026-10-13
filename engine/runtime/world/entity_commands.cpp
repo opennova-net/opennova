@@ -2233,10 +2233,12 @@ bool apply_entity_ai_command(World &world, Entity &entity, int sub_type, int32_t
             set_mask(entity.engine_flags, kEntityFlagIndestructible, p2 != 0);
             return true;
         case EntityCommands::kAiNodePath:
-            // Both writes replace the current callback, including a death callback.
+            // Both writes replace the current callback, including a death callback
+            // and a drop's fall or ride: nullsub_28, or the def's own.
             // [orig: Entity_ApplyCommand @0x43B22A..0x43B24E]
             entity.motor_suspended = p2 != 0;
             entity.death_motion = DeathMotionMode::None;
+            entity.drop_motion = p2 != 0 ? DropMotion::None : def_update_drop_motion(entity);
             return true;
         case EntityCommands::kFindAndUse: {
             const AiEntity *ai = world.ai.for_handle(entity.handle);

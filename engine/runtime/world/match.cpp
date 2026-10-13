@@ -702,7 +702,7 @@ void Match::record_flag_pickup(World &world, EntityHandle player_handle,
     flag->flags |= kEntityFlagCarried;
     // The attach puts back the def's own update callback, ending a drop's
     // fall or ride. [orig: Entity_AttachCarriedObject @0x43c191]
-    flag->drop_motion = DropMotion::None;
+    flag->drop_motion = def_update_drop_motion(*flag);
     state->return_ticks = static_cast<int32_t>(rules_.flag_return_ticks);
     add_event(world, *scorer, MatchStats::kFlagPickups, score_value(11));
     add_team_event(carrier->team, MatchStats::kFlagPickups, score_value(11));
@@ -1736,7 +1736,8 @@ void fall_step(World &world, Entity &object) {
                                                                              : DropMotion::Ride;
 }
 
-// The landed object's parent follow: its own pose saved, then the ground
+// The parent follow of a landed object or a genx def's entity (the genx
+// row's own callback, def_update_drop_motion): its own pose saved, then the ground
 // entity's per-tick delta applied, the translation and the rotation about the
 // ground entity with the attitude adopted (the one arithmetic both callbacks
 // share, world/carrier_motion.h). The ride alone drops back into the fall
