@@ -32,6 +32,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <formats/dds/dds.h>
+#include <formats/pcx/pcx_io.h>
 #include <formats/tga/tga.h>
 #include <formats/trn/trn_io.h>
 
@@ -165,9 +166,23 @@ int test_checks() {
 		TEST_EXPECT(editor_test::write_bytes(t + "dotskin.pcx", pcx(8, 8, 8)) && editor_test::write_bytes(t + "dotdet.tga", tga(8, 8)) &&
 		            editor_test::write_bytes(t + "dotnorm.mdt", rgb));
 	}
+	// A char map holding classes past the twenty the tile set tables name (S25): listed, the build going on.
+	{
+		opennova::IndexedImage8 classes;
+		classes.width = classes.height = 64;
+		classes.indices.assign(size_t(64) * 64, 1);
+		classes.indices[0] = 22;
+		classes.indices[1] = 30;
+		classes.indices[70] = 22;
+		std::vector<uint8_t> bytes;
+		std::string error;
+		TEST_EXPECT(opennova::encode_pcx_indexed(classes, bytes, error) && editor_test::write_bytes(t + "classes.pcx", bytes) &&
+		            editor_test::write_text(root + "/terrains/l.trn",
+		                                    trn("polytrn_colormap colour.tga\npolytrn_charmap classes.pcx\n")));
+	}
 	TEST_EXPECT(editor_test::write_text(root + "/terrains/a.trn", trn("polytrn_colormap small.tga\n")) &&
-	            editor_test::write_text(root + "/terrains/b.trn", trn("polytrn_colormap wide.tga\npolytrn_foliagemap fol.pcx\n")) &&
-	            editor_test::write_text(root + "/terrains/c.trn", trn("polytrn_colormap tall.tga\npolytrn_foliagemap fol48.pcx\n")) &&
+	            editor_test::write_text(root + "/terrains/b.trn", trn("polytrn_colormap wide.tga\npolytrn_foliagemap fol.pcx\npolytrn_charmap fol.pcx\n")) &&
+	            editor_test::write_text(root + "/terrains/c.trn", trn("polytrn_colormap tall.tga\npolytrn_foliagemap fol48.pcx\npolytrn_charmap fol48.pcx\n")) &&
 	            editor_test::write_text(root + "/terrains/d.trn", trn("polytrn_colormap map.pcx\npolytrn_tilestrip tiles.tga\n")) &&
 	            editor_test::write_text(root + "/terrains/e.trn", trn("polytrn_colormap colour.tga\n")) &&
 	            editor_test::write_text(root + "/terrains/f.trn", trn("polytrn_colormap colour.tga\npolytrn_detailblendmap blendw.tga\n"
@@ -245,6 +260,14 @@ int test_checks() {
 			TEST_EXPECT(f.message.find("loads the terrain without one") != std::string::npos);
 	TEST_EXPECT(has("texture.foliage_map_overrun", "terrains/b.trn", S::Error, true));
 	TEST_EXPECT(has("texture.foliage_map_shape", "terrains/c.trn", S::Warning, false));
+	// A char map is sampled as the foliage map is (S25 B5): the same files as char maps, the same rule.
+	TEST_EXPECT(has("texture.char_map_overrun", "terrains/b.trn", S::Error, true));
+	TEST_EXPECT(has("texture.char_map_shape", "terrains/c.trn", S::Warning, false));
+	// Classes past the twenty .TSD names: the game reads them as they stand, so a warning (S25).
+	TEST_EXPECT(has("texture.char_map_class", "terrains/l.trn", S::Warning, false));
+	for (const Found &f : found)
+		if (f.code == "texture.char_map_class")
+			TEST_EXPECT(f.message.find("holds 3 texels of a class at or past 20 (the highest 30)") != std::string::npos);
 	// A foliage map wider than 1024 reads its first texel everywhere: its shape, no overrun.
 	TEST_EXPECT(has("texture.foliage_map_shape", "terrains/f.trn", S::Warning, false));
 	// A blend map wider than tall overruns the split; a taller one does not.

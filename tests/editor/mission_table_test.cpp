@@ -244,10 +244,11 @@ int coverage(MissionKind kind, size_t index, const std::set<size_t> &excluded, c
 	int failures = 0;
 	const TableKind &table = *T().kind(k(kind));
 	for (const FieldSchema &field : table.fields()) {
-		// A field no byte holds: one derived, and the name the .bms has no room for (S24 Names: the row's own,
-		// written to the .mis beside it).
+		// A field no byte holds: one derived, and the name and the height lock the .bms has no room for (S24 Names:
+		// the row's own; S25: an entity's height lock; each written to the .mis beside it).
 		if (field.read_only) continue;
 		if (const char *name = mission_name_field(k(kind)); name && field.id == name) continue;
+		if (field.id == "height_lock") continue;
 		Loaded edited;
 		TEST_EXPECT(load(edited));
 		if (prepare) prepare(edited);

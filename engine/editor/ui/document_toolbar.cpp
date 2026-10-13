@@ -50,11 +50,14 @@ void draw_document_toolbar(Workspace &workspace, const DocumentBase &document, c
 	if (ui_kit::tool(row, "Reload", view.allows(EditorRequestKind::ReloadDocument),
 	                 "Read the file again (asks first when it has unsaved changes)."))
 		workspace.request(request::reload_document(document.path()));
-	if (ui_kit::tool(row, "Undo", document.can_undo() && view.allows(EditorRequestKind::Undo),
-	                 document.can_undo() ? "Undo the last change to this file (Ctrl+Z)." : "Nothing to undo in this file."))
+	// S25: in this view, its own step or one its terrain tools made in another file (DocumentsView::undo_next).
+	const bool undoes = document.can_undo() || (view.documents.active == document.path() && view.documents.undo_next.any());
+	const bool redoes = document.can_redo() || (view.documents.active == document.path() && view.documents.redo_next.any());
+	if (ui_kit::tool(row, "Undo", undoes && view.allows(EditorRequestKind::Undo),
+	                 undoes ? "Undo the last change in this view (Ctrl+Z)." : "Nothing to undo in this file."))
 		workspace.request(request::undo(document.path()));
-	if (ui_kit::tool(row, "Redo", document.can_redo() && view.allows(EditorRequestKind::Redo),
-	                 document.can_redo() ? "Redo what Undo took back (Ctrl+Y)." : "Nothing to redo in this file."))
+	if (ui_kit::tool(row, "Redo", redoes && view.allows(EditorRequestKind::Redo),
+	                 redoes ? "Redo what Undo took back (Ctrl+Y)." : "Nothing to redo in this file."))
 		workspace.request(request::redo(document.path()));
 	// Who names this file (the deep-integration plan's DI-05): its uses, in the Inspector with nothing
 	// selected, one hop further where a use is a definition itself (an item naming a model: the missions

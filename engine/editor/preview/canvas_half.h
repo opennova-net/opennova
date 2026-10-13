@@ -37,6 +37,12 @@ public:
 	virtual OverlayList shapes(const ViewportContext &context, const CanvasInput &in) const = 0;
 	virtual CanvasCursor cursor(const ViewportContext &context, const CanvasInput &in) const = 0;
 	virtual std::string hover_tip(const ViewportContext &context, const CanvasInput &in) const = 0;
+	// Where the terrain brush meets the ground under the pointer this frame (S25: mission metres, x east and y north),
+	// while it is live over the picture: false otherwise, and for a kind with no brush.
+	virtual bool brush_ground(const ViewportContext &context, const CanvasInput &in, double &x, double &y) const {
+		(void)context, (void)in, (void)x, (void)y;
+		return false;
+	}
 };
 
 } // namespace opennova::editor

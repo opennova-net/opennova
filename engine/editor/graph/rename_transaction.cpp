@@ -919,10 +919,10 @@ bool stage_symbol_file(const ProjectPaths &paths, const ProjectDocument &project
 	const AssetEntry *asset = find_asset(scan, file);
 	const DocumentType *type = asset ? document_type_for(asset->kind) : nullptr;
 	const DocumentContent content = type ? document_content(*type) : DocumentContent::Other;
-	// A file held whole (a texture, S18; a wave, S23) names nothing either, nor a text whose type reads no names from its text
+	// A file held whole (a texture, S18; a wave, S23) or as planes (a raster, S25) names nothing either, nor a text whose type reads no names from its text
 	// (a native kind held as a text, DI-06's and the particle file's of DI-14: its engine reader keeps
 	// no places).
-	if (content == DocumentContent::Other || content == DocumentContent::Bytes ||
+	if (content == DocumentContent::Other || content == DocumentContent::Bytes || content == DocumentContent::Raster ||
 	    (content == DocumentContent::Text && !type->references)) {
 		findings.push_back(cannot_rewrite(type, file));
 		return false;

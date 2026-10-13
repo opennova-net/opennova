@@ -74,6 +74,8 @@ constexpr GroupRow kGroups[] = {
 	{ G::HudEffects, "hudfx", "HUD effects" },
 	{ G::ScoreTables, "score", "Score tables" },
 	{ G::AvatarTables, "avatars", "Avatar tables" },
+	{ G::TilePlacements, "til", "Tile placements" },
+	{ G::TerrainHeights, "terrain_heights", "Terrain heights" },
 };
 
 constexpr bool groups_well_formed() {
@@ -140,6 +142,7 @@ const char *finding_fix_token(FindingFix fixes) {
 	case F::SetAsideUnread: return "set_aside_unread";
 	case F::EditRecord: return "edit_record";
 	case F::UnusedVariable: return "unused_variable";
+	case F::DeleteFile: return "delete_file";
 	}
 	return "none";
 }

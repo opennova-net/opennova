@@ -629,7 +629,9 @@ constexpr ViewSectionRow kSections[] = {
 			"apply_confirmation raises}, confirm_serial}) and each open document's views "
 			"(documents [{path, active, filter, kinds, all_rows, sort, every, inspector_filter, new_window_type, "
 			"remove_screen, remap_from, remap_to, map; a mission's logic, logic_split, logic_filter, logic_folded, "
-			"logic_attention and pick {record, slot} or null, S24}])." },
+			"logic_attention and pick {record, slot} or null, S24; a mission's or a terrain's terrain and tiles, S25}]), "
+			"and the terrain brush every view strokes with (terrain_brush {tool, radius, strength, falloff, spacing, "
+			"height, surface, foliage, colour, layer, cell, rotation, flip_h, flip_v, cursor, fill, erase}, S25)." },
 	{ S::Navigation, "navigation", concern_set({ C::Navigation }), navigation_section,
 			"The navigation history (Back and Forward: navigate_back, navigate_forward): can_back, can_forward, "
 			"and the places each goes to, nearest first (back, forward: [{pane: document, page or files, path, "

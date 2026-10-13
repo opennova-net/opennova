@@ -292,6 +292,16 @@ static int test_request_round_trip() {
 	const EditorRequest batch = request::edit_record(path, std::vector<Edit>{move, left, clear}, true);
 	TEST_EXPECT(parse(opennova::io::json_write(editor_request_to_json(batch, &menu)).c_str(), parsed));
 	TEST_EXPECT(editor_request_from_json(parsed, back, error, &names) && back == batch && back.open_first);
+	// An edit_record's empty batch with a terrain_view reads (it opens the view's tile placement alone, S25); without
+	// one, and another kind's, it is refused.
+	EditorRequest opened;
+	TEST_EXPECT(request_error(R"({"kind": "edit_record", "path": "missions/m01.til", "edits": [], )"
+	                          R"("terrain_view": "missions/m01.bms"})",
+	                          opened).empty() &&
+	            opened.edits.empty() && opened.terrain_view == "missions/m01.bms");
+	TEST_EXPECT(!request_error(R"({"kind": "revert_to_saved", "path": "a.def", "edits": []})", opened).empty());
+	TEST_EXPECT(request_error(R"({"kind": "edit_record", "path": "missions/m01.til", "edits": []})", opened)
+	                    .find("terrain_view") != std::string::npos);
 	TEST_EXPECT(back.edits.size() == 3 && back.edits[0].parent == open.main.child && back.edits[0].position == 2 &&
 	            back.edits[1].field == "position.left" && std::get<int64_t>(back.edits[1].value) == 40 &&
 	            back.edits[1].gesture == 5 && back.edits[2].operation == EditOperation::Clear &&
@@ -845,6 +855,17 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::Event: out.event = 3; break;
 		case F::Variable: out.variable = 12; break;
 		case F::Value: out.value = -5; break;
+		case F::Stroke:
+			out.stroke.plane = TerrainPlane::Foliage;
+			out.stroke.brush.foliage = 253;
+			out.stroke.brush_named = kBrushFoliage;
+			out.stroke.points = {{12.5, -40.0}, {13.0, -41.5}};
+			out.stroke.gesture = 4;
+			out.stroke.end = false;
+			break;
+		case F::Gesture: out.gesture = 6; break;
+		case F::Cancel: out.cancel = true; break;
+		case F::TerrainView: out.terrain_view = "missions/m01.mis"; break;
 		case F::kCount: break;
 		}
 	}

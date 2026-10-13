@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -99,6 +100,10 @@ struct DocumentsView {
 	// batches and its end are served (no concern moves with them: the viewports read them as they
 	// follow, S13 V8, the Shell's pump each frame).
 	std::vector<OpenGesture> gestures;
+	// The heights file whose bake runs now (S25: the session's terrain sculpt, on its own thread), "" none: the
+	// Terrain pane's bake line; and the one being prepared for sculpting (its bake state seeded in the background).
+	std::string baking;
+	std::string preparing;
 	// The gesture open in the document at `path` (one whose token is 0 for none).
 	const OpenGesture &gesture_in(const std::string &path) const {
 		static const OpenGesture kNone;
@@ -141,6 +146,22 @@ struct DocumentsView {
 	// What uses each texture (session/texture_use_index.h, ADR 0046 S18), kept while the graph, the files
 	// and the open documents stand: the texture view's Used as and the texture_uses query read it.
 	std::shared_ptr<const TextureUseIndex> texture_uses;
+	// What Undo and Redo in the active document's view take next (S25, the undo across documents: the Edit menu's
+	// words, its toolbar's and Ctrl+Z's): the document whose step it is ("" none), its words ("" none given), and the
+	// other documents whose top step carries its link, taken with it.
+	struct StepNext {
+		std::string path;
+		std::string words;
+		std::vector<std::string> linked;
+		bool any() const { return !path.empty(); }
+	};
+	StepNext undo_next, redo_next;
+	// The files each view's terrain tools edited (S25: by the view document's path, in the order they were noted),
+	// open: what its Terrain pane lists unsaved and what its Save and Close take with it.
+	std::map<std::string, std::vector<std::string>> edited_from;
+	// S25: the files a Save of the active document writes beside it, unsaved now (its view's terrain files and the
+	// documents a gesture of theirs changed: DocumentSet::save_scope), what the Terrain pane lists.
+	std::vector<std::string> active_scope_unsaved;
 };
 
 } // namespace opennova::editor

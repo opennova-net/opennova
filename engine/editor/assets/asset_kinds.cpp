@@ -133,10 +133,12 @@ constexpr AssetKindRow kRows[] = {
 	        .folder("terrain")
 	        .row,
 	Kind(AssetKind::TerrainPolyData, "terrain_polydata", "Terrain height data")
+	        .edited_by(DocumentTypeId::TerrainHeights)
 	        .folder("terrain")
 	        .row,
 	// Beside the missions: the game finds a mission's by its name (mission::sidecars).
 	Kind(AssetKind::TileInfo, "tile_info", "Tile placement")
+	        .edited_by(DocumentTypeId::TilePlacement)
 	        .folder("missions")
 	        .new_name("newmission.til")
 	        .row,
@@ -294,7 +296,17 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	// The scan gives it to a file an import record lists among its inputs (S20: a terrain set's
 	// heightmap and images), whatever its name would make it. It never packs: its import's outputs do.
+	// S25 B3: an image of a terrain set opens as a texture, the terrain brush painting the maps it makes
+	// (a true-colour image's texels; a heightmap's grey is no plane a texture's brush paints).
 	Kind(AssetKind::ImportInput, "import_input", "Import input")
+	        .edited_by(DocumentTypeId::Texture)
+	        .row,
+	// The scan gives it to the input a terrain set's import record reads as the set's `heightmap` (S25), whatever
+	// its name would make it: the terrain's heights before its import bakes them. It never packs: its import's
+	// .cpt does. S25 A2b: it opens as the terrain's heights, the brushes sculpting it and the editor's bake standing
+	// in for the .cpt until the import runs again.
+	Kind(AssetKind::HeightmapInput, "heightmap_input", "Heightmap input")
+	        .edited_by(DocumentTypeId::TerrainHeights)
 	        .row,
 };
 

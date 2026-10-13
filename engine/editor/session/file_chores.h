@@ -87,6 +87,13 @@ public:
 	// made for them: one step, which Undo file takes to the trash, the folders with it once empty.
 	void made(const std::string &words, const std::vector<std::string> &files,
 	          const std::vector<std::string> &folders = {});
+	// Files written as one step (S25, Add a map on an imported terrain: the set's key and its new image): each of
+	// `replace` (a project-relative path and its new bytes) written over the file there, whose bytes as they were go
+	// to the trash, and each of `make` written new. Undo file takes what it wrote to the trash and puts the replaced
+	// files back, Redo file the other way; each import source among `replace` stays in the project's import list and
+	// is imported again after each (and now). False, refused with why (file.write), nothing changed.
+	bool write_files(const std::string &words, const std::vector<std::pair<std::string, std::vector<uint8_t>>> &replace,
+	                 const std::vector<std::pair<std::string, std::vector<uint8_t>>> &make);
 	// The documents with unsaved edits a DeleteAsset, a DuplicateAsset (each copied as saved), a MoveAsset of
 	// several files, a DeleteFolder, a RenameFolder, an UndoFile or a RedoFile would take away, copy or move (the
 	// unsaved guard's PlannedWrites); none where the request is refused anyway.
@@ -108,6 +115,8 @@ private:
 		std::string from, to;
 		std::vector<std::pair<std::string, std::string>> moves;
 		std::vector<ImportedSource> sources;
+		// The import sources it rewrote in place (write_files): imported again after each way.
+		std::vector<std::string> reimport;
 	};
 	// The step taken back (`back`) or done again; false, refused with why, nothing changed.
 	bool take(Step &step, bool back);

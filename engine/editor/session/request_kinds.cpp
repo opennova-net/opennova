@@ -18,6 +18,8 @@
 #include <editor/session/rename_controller.h>
 #include <editor/session/session_core.h>
 #include <editor/session/sound_play.h>
+#include <editor/session/terrain_stroke.h>
+#include <editor/session/terrain_tiles.h>
 #include <editor/session/texture_show_use.h>
 #include <editor/session/unsaved_guard.h>
 #include <editor/session/workspace_parts.h>
@@ -134,6 +136,8 @@ void serve_navigate_forward(SessionCore &core, const EditorRequest &request) {
 	core.navigation().go(false, request.steps);
 }
 void serve_edit_record(SessionCore &core, const EditorRequest &request) {
+	// A batch of the Tiles tools goes to the view's tile placement (S25 B2).
+	if (!request.terrain_view.empty()) return serve_terrain_tiles_edit(core, request);
 	core.documents().edit_record(request);
 }
 void serve_set_string_text(SessionCore &core, const EditorRequest &request) {
@@ -144,7 +148,7 @@ void serve_revert_to_saved(SessionCore &core, const EditorRequest &request) {
 	core.documents().revert_to_saved(request);
 }
 void serve_end_edit(SessionCore &core, const EditorRequest &request) {
-	core.documents().end_edit(request.path);
+	core.documents().end_edit(request.path, request.gesture, request.cancel);
 }
 // Copy and Cut.
 void serve_copy(SessionCore &core, const EditorRequest &request) {
@@ -686,8 +690,9 @@ constexpr RequestKindRow kRows[] = {
 			"The edits, a batch over any rows (records, rows and file-wide values), applied to the "
 			"document at path as one undo step (batches sharing a nonzero gesture fold into one "
 			"until end_edit); open_first: the document opened first when it is not (a fix's "
-			"edit); keep_selection: what it adds left unselected, the selection as it was (S24).")
-			.takes(request_params({ F::Edits }, { F::Path, F::OpenFirst, F::KeepSelection }))
+			"edit); keep_selection: what it adds left unselected, the selection as it was (S24); "
+			"terrain_view: a batch of the Tiles tools, to the tile placement of that view (S25).")
+			.takes(request_params({ F::Edits }, { F::Path, F::OpenFirst, F::KeepSelection, F::TerrainView }))
 			.holds(kFiles, kDocuments)
 			.names_active()
 			.row,
@@ -716,8 +721,10 @@ constexpr RequestKindRow kRows[] = {
 			.row,
 	Request(K::EndEdit, "end_edit", serve_end_edit,
 			"The coalesced edit group, or the gesture, of the document at path (left out, the active "
-			"document) ends; a gesture open in another document stays open.")
-			.takes(request_params({}, { F::Path }))
+			"document) ends; a gesture open in another document stays open. gesture (S25): every open gesture "
+			"carrying that token ends too, in whatever document its batches changed (a terrain stroke's file and the "
+			"missions that followed it); cancel: it ends dropping its step in each, the documents as it found them.")
+			.takes(request_params({}, { F::Path, F::Gesture, F::Cancel }))
 			.names_active()
 			.row,
 	// It reads the documents as they stand, which an operation writes only as it finishes (in one
@@ -1041,7 +1048,8 @@ constexpr RequestKindRow kRows[] = {
 			"codes, 0 none) with foliage, the definitions the .trn's foliage blocks hold (up to four, split "
 			"by |, each the block's keys and values in a row: graphic <model> match <1 to 4 codes, 1..255> "
 			"[color_lower 0..2] [color_upper 0..2] [attrib forceon|shadow]): a definition grows where the "
-			"map holds one of its codes. "
+			"map holds one of its codes; and <name>_d1.tga, the detail blend map, 32-bit, from a blendmap image "
+			"(RGBA, at least as tall as it is wide: the detail layers' weights; none, the first layer everywhere). "
 			"Refused, nothing written (import.terrain): a name taken or that does not fit, a value of no "
 			"key it takes, an image that does not read or does not fit its role (a surface texel of no "
 			"class named by its column and row, a foliage texel of colour), a foliage definition the game "
@@ -1326,6 +1334,22 @@ constexpr RequestKindRow kRows[] = {
 			"changed (wave.operation): a file an import makes (its import's options make it), an operation it does not "
 			"take, a wave of no sample, a trim that keeps none, a silent wave normalised.")
 			.takes(request_params({ F::Operation }, { F::Path, F::Values, F::OpenFirst }))
+			.holds(kFiles, kDocuments)
+			.names_active()
+			.row,
+	// S25 (session/terrain_stroke.h).
+	Request(K::TerrainStroke, "terrain_stroke", serve_terrain_stroke,
+			"A stroke of the terrain brush in the view of the mission or the terrain at path (left out, the active "
+			"one): the stroke's dabs laid on its plane's file as the game resolves it for that view (the heights' "
+			".cpt, or an imported terrain's heightmap image; the char, foliage, colour or blend map, or an import's "
+			"source image in its output's place), the file opened quietly where it is not (a tab with its dirty dot), "
+			"one undo step a gesture (its samples, consecutive strokes naming its token, fold into it; a token not open "
+			"begins its gesture; end ends it, cancel drops it), which Undo in the view takes with what it linked. The outcome names the gesture and "
+			"what the stroke came to (stroke {changed [{path, plane, region}], followed [{path, entities}], opened, "
+			"bake}). Refused, nothing changed (terrain.stroke): a view with no terrain, a plane whose file does not "
+			"resolve or is refused (a base layer's file: copy it into the project first), a stroke its plane's planner "
+			"refuses.")
+			.takes(request_params({ F::Stroke }, { F::Path }))
 			.holds(kFiles, kDocuments)
 			.names_active()
 			.row,

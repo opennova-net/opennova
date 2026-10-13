@@ -32,7 +32,7 @@ constexpr int kSide = trngen::kDepthSide; // 1024: the colour map's and the heig
 constexpr int kDetailSide = 512;          // a made detail's side (the shipped Det_*.tga's)
 constexpr uint8_t kNeutralGrey = 128;     // the detail's modulate x2 leaves a colour as it is at 128
 
-const char *const kSetKeys[] = {"heightmap", "colormap", "detail", "tiles", "surface", "foliagemap"};
+const char *const kSetKeys[] = {"heightmap", "colormap", "detail", "tiles", "surface", "foliagemap", "blendmap"};
 constexpr size_t kSetKeyCount = sizeof(kSetKeys) / sizeof(kSetKeys[0]);
 // A foliage block's keys, the .trn's own (formats/trn trn_parser_key's block arms, `end` aside) [orig:
 // Terrain_ParseConfigCallback @ 0x60F330]. A definition holds graphic, match, color_lower, color_upper and
@@ -254,10 +254,11 @@ bool parse_terrain_set(const std::vector<uint8_t> &bytes, TerrainSet &out, std::
 		                    : key == "tiles"      ? &out.tiles
 		                    : key == "surface"    ? &out.surface
 		                    : key == "foliagemap" ? &out.foliagemap
+		                    : key == "blendmap"   ? &out.blendmap
 		                                          : nullptr;
 		if (!slot) {
 			why = at + " names '" + key + "', which a terrain set does not take (it takes heightmap, colormap, detail, " +
-			      "tiles, surface, foliagemap and foliage blocks)";
+			      "tiles, surface, foliagemap, blendmap and foliage blocks)";
 			return false;
 		}
 		if (value.empty()) {
@@ -279,13 +280,73 @@ bool parse_terrain_set(const std::vector<uint8_t> &bytes, TerrainSet &out, std::
 
 std::vector<uint8_t> write_terrain_set(const TerrainSet &set) {
 	std::string text = "; A terrain set: the images the editor's terrain importer makes a terrain from (ADR 0046 S20).\r\n";
-	const std::string *values[] = {&set.heightmap, &set.colormap, &set.detail, &set.tiles, &set.surface, &set.foliagemap};
+	const std::string *values[] = {&set.heightmap, &set.colormap, &set.detail, &set.tiles, &set.surface, &set.foliagemap,
+	                               &set.blendmap};
 	static_assert(sizeof(values) / sizeof(values[0]) == kSetKeyCount, "a value per set key");
 	for (size_t i = 0; i < kSetKeyCount; ++i)
 		if (!values[i]->empty()) text += std::string(kSetKeys[i]) + " " + *values[i] + "\r\n";
 	// Each definition as the .trn writes its block (formats/trn trn_foliage_block_text).
 	for (const FoliageDef &def : set.foliage) text += trn_foliage_block_text(def);
 	return text_bytes(text);
+}
+
+std::vector<uint8_t> terrain_set_with_key(const std::vector<uint8_t> &bytes, const std::string &key,
+                                          const std::string &value) {
+	const std::string text(bytes.begin(), bytes.end());
+	const std::string eol = text.find("\r\n") != std::string::npos ? "\r\n" : "\n";
+	// The lines, each with its own ending.
+	std::vector<std::string> lines;
+	for (size_t start = 0; start < text.size();) {
+		const size_t end = text.find('\n', start);
+		const size_t next = end == std::string::npos ? text.size() : end + 1;
+		lines.push_back(text.substr(start, next - start));
+		start = next;
+	}
+	const auto key_of = [](const std::string &line, std::string &comment) {
+		const size_t at = line.find(';');
+		comment = at == std::string::npos ? std::string() : line.substr(at);
+		while (!comment.empty() && (comment.back() == '\n' || comment.back() == '\r')) comment.pop_back();
+		const std::string body = strutil::trim(at == std::string::npos ? line : line.substr(0, at));
+		return strutil::to_lower(body.substr(0, body.find_first_of(" \t")));
+	};
+	const auto ending_of = [&](const std::string &line) {
+		return line.size() >= 2 && line.compare(line.size() - 2, 2, "\r\n") == 0 ? std::string("\r\n")
+		       : !line.empty() && line.back() == '\n'                            ? std::string("\n")
+		                                                                           : std::string();
+	};
+	bool block = false;
+	size_t last_image = std::string::npos;
+	for (size_t i = 0; i < lines.size(); ++i) {
+		std::string comment;
+		const std::string found = key_of(lines[i], comment);
+		if (block) {
+			if (found == "end") block = false;
+			continue;
+		}
+		if (found == "foliage") {
+			block = true;
+			continue;
+		}
+		if (std::find(std::begin(kSetKeys), std::end(kSetKeys), found) == std::end(kSetKeys)) continue;
+		if (found == key) {
+			lines[i] = key + " " + value + (comment.empty() ? std::string() : " " + comment) + ending_of(lines[i]);
+			std::string out;
+			for (const std::string &line : lines) out += line;
+			return std::vector<uint8_t>(out.begin(), out.end());
+		}
+		last_image = i;
+	}
+	const std::string added = key + " " + value + eol;
+	if (last_image == std::string::npos) {
+		if (!lines.empty() && ending_of(lines.back()).empty()) lines.back() += eol;
+		lines.push_back(added);
+	} else {
+		if (ending_of(lines[last_image]).empty()) lines[last_image] += eol;
+		lines.insert(lines.begin() + std::ptrdiff_t(last_image + 1), added);
+	}
+	std::string out;
+	for (const std::string &line : lines) out += line;
+	return std::vector<uint8_t>(out.begin(), out.end());
 }
 
 bool parse_foliage_definitions(const std::string &text, std::vector<FoliageDef> &out, std::string &why) {
@@ -437,6 +498,13 @@ bool decode_terrain_image(const std::string &key, const std::string &name, const
 		why = sides + ": the game makes a detail's coefficients over sides that are powers of two";
 		return false;
 	}
+	// Loaded whole, then split in quadrants at its width into a buffer of its own size [orig: PolyTrn_InitTextures @
+	// 0x60B1B8, @ 0x60B29C, @ 0x60B2C1]: a map wider than tall runs past both.
+	if (key == "blendmap" && w > h) {
+		why = sides + ": the game splits a detail blend map in quadrants of half its width into a buffer of its own size, "
+		              "so it is at least as tall as it is wide";
+		return false;
+	}
 	if (key == "tiles" && (w < 64 || h < 64 || w % 64 || h % 64)) {
 		why = sides + ": the game cuts a tile set's atlas in 64-texel cells, so its sides are multiples of 64";
 		return false;
@@ -514,6 +582,13 @@ bool run_terrain_import(ImportContext &context, ImportProduct &out) {
 		if (!terrain::decode_charmap_source(set.surface, bytes, surface, why)) return refuse(why + ".");
 	}
 
+	// The detail blend map's weights (S25 B4), else the first layer everywhere.
+	RgbaImage blend = flat_image(kSide, 255, 0, 0);
+	if (!set.blendmap.empty()) {
+		if (!context.read(set.blendmap, bytes)) return false;
+		if (!decode_terrain_image("blendmap", set.blendmap, bytes, blend, why)) return refuse(why + ".");
+	}
+
 	IndexedImage8 foliage;
 	if (!set.foliagemap.empty()) {
 		if (!context.read(set.foliagemap, bytes)) return false;
@@ -574,7 +649,7 @@ bool run_terrain_import(ImportContext &context, ImportProduct &out) {
 	if (!tga(stem + "_c.tga", colour, false)) return false;
 	if (!tga(stem + "_dt.tga", detail, false)) return false;
 	if (!tga(stem + "_dm.tga", detail, false)) return false;
-	if (!tga(stem + "_d1.tga", flat_image(kSide, 255, 0, 0), true)) return false;
+	if (!tga(stem + "_d1.tga", blend, true)) return false;
 	if (!tiles.empty() && !tga(stem + "_t.tga", tiles, true)) return false;
 
 	ImportOutput til;

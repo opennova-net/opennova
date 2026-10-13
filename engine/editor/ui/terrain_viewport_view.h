@@ -32,6 +32,8 @@ private:
 	};
 	Asked asked_;
 	std::string ground_;
+	// The terrain brush's line while it is live (S25: TerrainCanvas::hint), "" otherwise.
+	std::string brush_hint_;
 	int ground_surface_ = -1;
 };
 

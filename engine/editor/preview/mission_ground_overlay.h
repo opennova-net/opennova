@@ -9,6 +9,7 @@
 namespace opennova::editor {
 
 class MissionGround;
+struct TerrainPatches;
 
 // What the mission view tints its terrain with (DI-29): nothing, the surface classes the game reads at each
 // point, or the foliage the terrain's foliage map grows there.
@@ -44,7 +45,20 @@ struct MissionOverlayImage {
 	std::string title;
 	std::vector<MissionOverlayRow> legend;
 	std::string words;
+	// What each texel shows, for a patch of a region (mission_ground_overlay_patch, S25): the surfaces' class; the
+	// foliage's grown mask (1..15), kKeptOffKey for kept off, kNothingKey for nothing grown. And how many texels show
+	// each (256), and the surfaces' tiles outlined.
+	std::vector<uint8_t> keys;
+	std::vector<size_t> counts;
+	size_t deciding = 0;
 	bool empty() const { return width <= 0 || height <= 0; }
+};
+inline constexpr uint8_t kKeptOffKey = 16;
+inline constexpr uint8_t kNothingKey = 17;
+
+// A rectangle of the mission's plane (x east, y north, units), half-open.
+struct MissionOverlayRect {
+	double x0 = 0.0, y0 = 0.0, x1 = 0.0, y1 = 0.0;
 };
 
 // The texels an overlay holds at most a side: a finer one is made coarser, a power of two of the map's own
@@ -63,6 +77,18 @@ inline constexpr uint8_t kMissionOverlayAlpha = 170;
 // codes it matches. The extent: the sector grid's mapped cells and the placed tiles (the whole grid on an axis
 // that wraps), a texel the map's own (1024 / its side) until the picture would pass kMissionOverlayMaxSide.
 MissionOverlayImage mission_ground_overlay(const MissionGround &ground, MissionGroundOverlay kind);
+
+// The overlay `image` (mission_ground_overlay's over `ground`, of its kind) made again over `rects` alone (S25: what a
+// paint of its map changed, not the whole picture per dab), its legend's shares with it; a surfaces overlay's placed
+// tiles outlined again. False where it cannot be (no picture, no keys, no terrain): the caller makes it whole.
+bool mission_ground_overlay_patch(const MissionGround &ground, MissionOverlayImage &image,
+                                  const std::vector<MissionOverlayRect> &rects);
+
+// The plane's rects a frame's map patches changed for an overlay of `kind` (the surface map's regions for Surfaces, the
+// foliage map's for Foliage), each map region through the terrain's routing (every sector drawing the quadrant:
+// terrain_atlas_world_rects); none for another plane's patch.
+std::vector<MissionOverlayRect> mission_overlay_patch_rects(const MissionGround &ground, MissionGroundOverlay kind,
+                                                            const TerrainPatches &patches);
 
 // On the wire (the mission viewport's body): {kind, title, legend: [{key, rgb, share, words}], words, west,
 // north, texel, width, height, outside (the rgba past the picture, or null)}; no texels.

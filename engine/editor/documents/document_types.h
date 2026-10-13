@@ -149,8 +149,10 @@ bool is_editable_kind(AssetKind kind);
 // reads and which the validation reads through its type's validate_file where the type has finding
 // codes or a validate_file, its file left unread where it has neither), or content of another kind,
 // which the graph's extraction, the validation and the rename read nothing of until it has hooks of its
-// own (a test's blob; a raster to come). Asked of a document the type makes, once per registered type.
-enum class DocumentContent { Records, Text, Bytes, Other };
+// own (a test's blob), or planes of texels (DocumentBase::as_raster, S25: a terrain's heights), which
+// name nothing the graph reads and which the validation reads through its type's validate_file. Asked
+// of a document the type makes, once per registered type.
+enum class DocumentContent { Records, Text, Bytes, Raster, Other };
 DocumentContent document_content(const DocumentType &type);
 // Whether the validation reads a type's files: every type's but a whole-file type's with neither finding
 // codes nor a validate_file, which could make no finding of a file.
