@@ -239,8 +239,9 @@ int test_references() {
 					if (e.field != "param1" || e.scope_alternate != "MEDMSSN.BIN" || e.rewritable) return Keys{"bad"};
 					keys.push_back(e.scope + " " + e.value);
 				}
-			// The location's, the person's and the win row's names, and the four waypoint markers'.
-			if (count_edges(read, ReferenceKind::TextId) != 7 + keys.size() || edge(read, ReferenceKind::TextId, "STRWINCOND007"))
+			// The location marker's two (its LOCATION and its STRNAME), the person's and the win row's
+			// names, and the four waypoint markers'.
+			if (count_edges(read, ReferenceKind::TextId) != 8 + keys.size() || edge(read, ReferenceKind::TextId, "STRWINCOND007"))
 				return Keys{"bad"};
 			return keys;
 		};
