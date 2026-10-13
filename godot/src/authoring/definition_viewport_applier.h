@@ -9,17 +9,14 @@
 #include <memory>
 #include <vector>
 
-#include <runtime/renderer/tracer_frame.h>
-
 #include "authoring/preview_effects.h"
 #include "authoring/preview_model.h"
+#include "authoring/preview_range_draw.h"
 #include "authoring/viewport_applier.h"
-#include "render/tracer_ribbon_surfaces.h"
 
 namespace godot {
 
 class MissionEnvironment;
-class ScarPresenter;
 
 // A definition viewport's device work (ADR 0046 DI-21): the record's picture as the viewport makes it
 // (editor/preview/definition_viewport): the model it draws as the runtime's ObjectModel (authoring/preview_model,
@@ -68,9 +65,7 @@ public:
 	ObjectModel *object_model() const { return model_->object(); }
 	PreviewEffects &effects() { return *effects_; }
 	ObjectModel *arms_model() const { return arms_->object(); }
-	Ref<ArrayMesh> tracer_mesh() const { return tracer_mesh_; }
-	ScarPresenter *scars() const { return scars_; }
-	MeshInstance3D *target() const { return target_; }
+	PreviewRangeDraw *range() const { return range_.get(); }
 
 private:
 	// The viewport's state over the scene that stands: the registers, the hidden sections, the level, a person's
@@ -91,15 +86,7 @@ private:
 	std::unique_ptr<PreviewModel> arms_;
 	std::unique_ptr<PreviewEffects> effects_;
 	bool mounted_ = false; // the project's files are mounted for the effects (a Rebuild) and not cleared since
-	MeshInstance3D *tracers_ = nullptr;
-	Ref<ArrayMesh> tracer_mesh_;
-	TracerRibbonSurfaces ribbons_;
-	opennova::renderer::TracerRibbonFrame tracer_frame_;
-	std::vector<float> tracer_points_;
-	ScarPresenter *scars_ = nullptr;
-	uint64_t scars_shown_ = UINT64_MAX; // the range's serial the scars were last drawn at
-	MeshInstance3D *target_ = nullptr;
-	Ref<ArrayMesh> target_mesh_;
+	std::unique_ptr<PreviewRangeDraw> range_;
 	int applied_team_ = INT32_MIN + 1;
 };
 
