@@ -120,10 +120,11 @@ public:
 	const std::string &words() const { return words_; }
 	const renderer::FpViewmodelSpec &spec() const { return spec_; }
 	uint32_t flags() const { return flags_; }
-	// The weapon.def view record: `pos` (raw units), its cant (degrees), `tpos`, renderfov.
+	// The weapon.def view record: `pos` (raw units), its cant (degrees), `tpos` and its turn (degrees), renderfov.
 	const float *pos_units() const { return pos_units_; }
 	const float *rot_bias_deg() const { return rot_bias_deg_; }
 	const float *tpos_units() const { return tpos_units_; }
+	const float *tpos_rot_deg() const { return tpos_rot_deg_; }
 	float renderfov() const { return renderfov_; }
 	// The characters, and the one whose arms draw (null: Avatars.def holds none).
 	const std::vector<FirstPersonCharacter> &characters() const { return characters_; }
@@ -162,6 +163,7 @@ private:
 	float pos_units_[3] = {0.0f, 0.0f, 0.0f};
 	float rot_bias_deg_[3] = {0.0f, 0.0f, 0.0f};
 	float tpos_units_[3] = {0.0f, 0.0f, 0.0f};
+	float tpos_rot_deg_[3] = {0.0f, 0.0f, 0.0f};
 	float renderfov_ = renderer::kWeaponRenderFovHDegDefault;
 	std::string gfx1_;
 	std::string animadm_;
@@ -200,6 +202,22 @@ void first_person_view_units(const FirstPersonSources &sources, int width, int h
 // weapon's renderfov and the view model pass's near plane [orig: Render_SwapProjectionNearZ(0.05)
 // @0x4dee29; fov = WeaponDef+0x148 @0x4dee71].
 OrbitCamera first_person_eye(const FirstPersonSources &sources, const OrbitCamera &orbit, int width, int height);
+
+// Where the view model stands in the preview's space while the scope eases it toward the aimed view: the game's
+// presenter stands it at the camera by renderer::fp_viewmodel_pose of the view units (the def's `pos` plus the
+// published offset, world::player_view_bias_view_units) and the cant plus the published turn [orig:
+// Player_UpdateFirstPersonCamera @0x4dd380, rot = view_rot + Def.Bone.rot @0x4dd444; the view-local rotate
+// @0x4dd5d8], where first_person_eye stands the preview's camera at the hip's; so the model moves by the hip's
+// pose inverted times the eased one, the identity at the hip. `bias_units` (view units) and `bias_rot_deg` are the
+// offsets from the hip (WeaponRange::viewmodel_bias).
+struct FirstPersonRoot {
+	PreviewVec3 x{1.0f, 0.0f, 0.0f}, y{0.0f, 1.0f, 0.0f}, z{0.0f, 0.0f, 1.0f}; // the model's axes
+	PreviewVec3 origin;
+	PreviewVec3 point(const PreviewVec3 &p) const;     // a point of the model's frame in the preview's
+	PreviewVec3 direction(const PreviewVec3 &d) const; // a direction likewise
+};
+FirstPersonRoot first_person_root(const FirstPersonSources &sources, int width, int height, const float bias_units[3],
+                                  const float bias_rot_deg[3]);
 
 // The envelope's `first_person` (null where the map is no weapon's): the weapon, the view, the gun and
 // the arms, the characters and the chosen one, the view record, the actions and their runs, and the

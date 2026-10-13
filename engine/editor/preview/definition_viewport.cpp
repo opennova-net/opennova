@@ -3,12 +3,14 @@
 #include <algorithm>
 #include <cmath>
 
+#include <base/io/fixed.h>
 #include <base/io/hash.h>
 #include <base/io/strutil.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/graph_edge.h>
+#include <editor/preview/definition_canvas.h>
 #include <editor/preview/effect_playback.h>
 #include <editor/preview/model_placement.h>
 #include <editor/preview/model_preview_rig.h>
@@ -24,8 +26,10 @@
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <runtime/anim/adm_root_motion.h>
 #include <runtime/mission/placement_traits.h>
+#include <runtime/renderer/fp_viewmodel_spec.h>
 #include <runtime/world/destruction.h>
 #include <runtime/world/item_effects.h>
+#include <runtime/world/player_view.h>
 #include <runtime/world/present_passes.h>
 #include <runtime/world/throwables.h>
 
@@ -866,32 +870,166 @@ void DefinitionViewport::frame_() {
 }
 
 std::unique_ptr<CanvasHalf> DefinitionViewport::make_canvas() const {
-	OrbitCanvasHooks hooks;
-	hooks.camera = [](const ViewportModel &viewport) -> const OrbitCamera & {
-		return static_cast<const DefinitionViewport &>(viewport).camera();
-	};
-	hooks.framed = [](const ViewportModel &viewport, int width, int height) {
-		return static_cast<const DefinitionViewport &>(viewport).framed(width, height);
-	};
-	hooks.change = definition_camera_change;
-	return std::make_unique<OrbitCanvas>(hooks);
+	return std::make_unique<DefinitionCanvas>();
 }
 
-ViewportHit DefinitionViewport::hit(const ViewportContext &context, float, float) const {
-	ViewportHit out;
-	out.current = current(context.input);
+namespace {
+
+// A view record's view units (the def's raw units over its scale, the 4:3 framing drop on a picture no wider than
+// 4:3, as first_person_view_units takes `pos`).
+void eye_units(const float raw[3], int width, int height, float out[3]) {
+	for (int i = 0; i < 3; ++i) out[i] = raw[i] / world::kWeaponDefPosScale;
+	if (world::player_view_narrow_aspect(width, height))
+		out[2] -= static_cast<float>(world::kFpNarrowAspectDropQ16) / io::kFp16One;
+}
+
+// The eye of the camera renderer::fp_viewmodel_pose stands the model before, in the preview's space: the root's
+// origin taken back through its basis, -(cant . rig)^T (cant . c(u)) = -rig^T c(u), the view units' alone (c the
+// view frame on the camera's axes, rig the yaw-180), as first_person_eye places its camera.
+PreviewVec3 eye_at(const float units[3]) { return PreviewVec3{-units[1], -units[2], -units[0]}; }
+
+// The eye of the view units `units` turned by `turn` (degrees).
+DefinitionViewport::Eye eye_of(const char *handle, const float units[3], const float turn[3]) {
+	const float rig[3] = {0.0f, renderer::kViewmodelRigYawDeg, 0.0f};
+	const renderer::FpViewmodelPose pose = renderer::fp_viewmodel_pose(units, turn, rig);
+	DefinitionViewport::Eye eye;
+	eye.handle = handle;
+	eye.at = eye_at(units);
+	// The camera's axes are the root's rows: it looks along -back.
+	eye.look = PreviewVec3{-pose.basis[6], -pose.basis[7], -pose.basis[8]};
+	eye.up = PreviewVec3{pose.basis[3], pose.basis[4], pose.basis[5]};
+	return eye;
+}
+
+} // namespace
+
+std::vector<DefinitionViewport::Eye> DefinitionViewport::eyes(int width, int height) const {
+	std::vector<Eye> out;
+	if (!weapon_record() || !weapon_.first() || eye_) return out;
+	const FirstPersonSources &sources = weapon_.first_person();
+	if (!sources.active() || sources.spec().gun.empty()) return out;
+	struct Row {
+		const char *handle;
+		const float *raw;
+		const float *turn;
+	};
+	const Row rows[] = {{"pos", sources.pos_units(), sources.rot_bias_deg()},
+	                    {"tpos", sources.tpos_units(), sources.tpos_rot_deg()}};
+	for (const Row &row : rows) {
+		float units[3];
+		eye_units(row.raw, width, height, units);
+		out.push_back(eye_of(row.handle, units, row.turn));
+	}
 	return out;
 }
 
-bool DefinitionViewport::handle_point(const ViewportContext &, NodeId, const std::string &, float &, float &,
-		std::string &error) const {
-	error = "A definition's picture has no handles: the table's fields are edited in the Inspector.";
+bool DefinitionViewport::game_camera(int width, int height, Eye &out, float &fov_deg) const {
+	if (eyes(width, height).empty()) return false;
+	// The view units and turn the presenter stands the model by now; against the still gun, its camera's eye.
+	float units[3], turn[3];
+	weapon_.view_now(units, turn);
+	out = eye_of("", units, turn);
+	fov_deg = weapon_.eye_camera().fov_degrees();
+	return true;
+}
+
+bool DefinitionViewport::eye_edits(const DocumentBase &document, const std::string &handle, const PreviewVec3 &to,
+		int width, int height, uint64_t gesture, std::vector<Edit> &out) const {
+	out.clear();
+	if (handle != "pos" && handle != "tpos") return false;
+	const Document *records = records_of(document);
+	if (!records || !row_ || !records->row(row_)) return false;
+	const FirstPersonSources &sources = weapon_.first_person();
+	const float *now = handle == "pos" ? sources.pos_units() : sources.tpos_units();
+	// The eye's view units, then the file's: the inverse of eye_at, the framing drop given back.
+	float units[3] = {-to.z, -to.x, -to.y};
+	if (world::player_view_narrow_aspect(width, height))
+		units[2] += static_cast<float>(world::kFpNarrowAspectDropQ16) / io::kFp16One;
+	const NodeAddress record = records->address_of(row_);
+	for (int i = 0; i < 3; ++i) {
+		const double raw = std::round(double(units[i]) * world::kWeaponDefPosScale * 1000.0) / 1000.0;
+		if (std::fabs(raw - double(now[i])) < 0.0005) continue;
+		Edit edit;
+		edit.address = record;
+		edit.field = handle + "[" + std::to_string(i) + "]";
+		edit.value = raw;
+		edit.gesture = gesture;
+		out.push_back(edit);
+	}
+	return true;
+}
+
+ViewportHit DefinitionViewport::hit(const ViewportContext &context, float x, float y) const {
+	ViewportHit out;
+	out.current = current(context.input);
+	const std::vector<Eye> marks = eyes(context.width, context.height);
+	for (size_t i = 0; i < marks.size(); ++i) {
+		float px = 0.0f, py = 0.0f;
+		if (!camera().project(marks[i].at, context.width, context.height, px, py)) continue;
+		if (std::hypot(px - x, py - y) > kDefinitionEyeSlop) continue;
+		out.index = int(i);
+		out.id = row_;
+		out.name = marks[i].handle;
+		out.kind = "eye";
+		break;
+	}
+	return out;
+}
+
+bool DefinitionViewport::handle_point(const ViewportContext &context, NodeId id, const std::string &handle, float &x,
+		float &y, std::string &error) const {
+	if (id != row_ || (handle != "pos" && handle != "tpos")) {
+		error = "A weapon's picture has the handles pos (the hip's eye) and tpos (the aimed eye) of the record shown (" +
+		        std::to_string(row_) + "), in first person seen from the orbit.";
+		return false;
+	}
+	for (const Eye &eye : eyes(context.width, context.height)) {
+		if (handle != eye.handle) continue;
+		if (camera().project(eye.at, context.width, context.height, x, y)) return true;
+		error = "The eye is not on the picture: drag it to a point of the picture (to).";
+		return false;
+	}
+	error = "The eyes show in first person seen from the orbit (the eye's own view stands at the hip's): set the "
+	        "options weapon first and fire.view orbit.";
 	return false;
 }
 
-bool DefinitionViewport::drag(const ViewportContext &, const ViewportDrag &, CanvasRequests &, std::string &error) const {
-	error = "Nothing is dragged in a definition's picture: its camera is set with set_viewport.";
-	return false;
+bool DefinitionViewport::drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
+		std::string &error) const {
+	float x = 0.0f, y = 0.0f;
+	if (!handle_point(context, drag.id, drag.handle, x, y, error)) return false;
+	if (!context.editable()) {
+		error = context.not_editable();
+		return false;
+	}
+	const DocumentBase &document = *context.input.document;
+	// A step that moves nothing plans no batch; the gesture its sample names ends with it all the same.
+	if (drag.by && drag.x == 0.0f && drag.y == 0.0f) {
+		if (drag.end && drag.gesture) out.request(request::end_edit(document.path()));
+		return true;
+	}
+	if (drag.by) {
+		x += drag.x;
+		y += drag.y;
+	} else {
+		x = drag.x;
+		y = drag.y;
+	}
+	PreviewVec3 through;
+	for (const Eye &eye : eyes(context.width, context.height))
+		if (drag.handle == eye.handle) through = eye.at;
+	PreviewVec3 to;
+	if (!camera().on_view_plane(x, y, context.width, context.height, through, to)) {
+		error = "The point is not on the picture.";
+		return false;
+	}
+	std::vector<Edit> edits;
+	eye_edits(document, drag.handle, to, context.width, context.height,
+	          drag.gesture ? drag.gesture : next_edit_gesture(), edits);
+	const bool planned = !edits.empty();
+	if (planned) out.request(request::edit_record(document.path(), std::move(edits)));
+	if (drag.end && (planned || drag.gesture)) out.request(request::end_edit(document.path()));
+	return true;
 }
 
 bool DefinitionViewport::command(const ViewportContext &context, const std::string &name, const std::vector<NodeId> &ids,

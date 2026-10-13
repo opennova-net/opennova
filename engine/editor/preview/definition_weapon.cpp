@@ -163,6 +163,7 @@ void DefinitionWeapon::clear() {
 	rig_serial_ = rig_serial;
 	rig_read_.clear();
 	eye_ = false;
+	viewmodel_root_ = FirstPersonRoot();
 	spawns_.clear();
 	notes_.clear();
 	planned_runs_ = UINT64_MAX;
@@ -181,6 +182,11 @@ bool DefinitionWeapon::refresh(const SessionView &view, const std::string &catal
 	record_ = text_of(row.weapon_name);
 	gun_ = gun;
 	gun_file_ = gun_file;
+	width_ = width;
+	height_ = height;
+	// Through the eye the effects stand on the moved gun, from the orbit on the still one: placed again.
+	if (options.eye != through_eye_) moved = true;
+	through_eye_ = options.eye;
 	notes_.clear();
 	const std::shared_ptr<const FileSource> files = view.findings.assets;
 	const AssetScan *scan = view.project.scan.get();
@@ -295,6 +301,7 @@ void DefinitionWeapon::frame_(const def::DefWeaponDef &row, const OrbitCamera &o
 	if (first_ && first_person_.active() && !first_person_.spec().gun.empty()) {
 		// The eye the game stands the view model before: the shooter's eye, the round's origin.
 		eye_camera_ = first_person_eye(first_person_, orbit, width, height);
+		eye_fov_ = eye_camera_.pose.fov_degrees;
 		origin_ = eye_camera_.pose.eye;
 		forward_ = unit(scale(eye_camera_.pose.back, -1.0f));
 		up_ = unit(eye_camera_.pose.up);
@@ -376,6 +383,18 @@ bool DefinitionWeapon::first_person_point_(const std::string &name, const std::s
 
 void DefinitionWeapon::run_to(int32_t tick) {
 	range_.run_to(tick);
+	// Through the eye, the view model where the scope's ease stands it; the camera stays at the hip, as the game's
+	// stays at the eye while the presenter moves the model. From the orbit the gun is held still (the camera's mark
+	// moves). The SIGHTS card draws in its place with the frame's field of view [orig: Render_ProcessMainSceneFrame
+	// @0x5ca452..0x5ca4a0].
+	viewmodel_root_ = FirstPersonRoot();
+	if (eye_) {
+		float units[3], turn[3];
+		range_.viewmodel_bias(units, turn);
+		if (through_eye_) viewmodel_root_ = first_person_root(first_person_, width_, height_, units, turn);
+		const float card_fov = range_.view_frame().fov_h_deg;
+		eye_camera_.pose.fov_degrees = card_up() && card_fov > 0.0f ? card_fov : eye_fov_;
+	}
 	// The spawns the run's new events make, placed once; every one again after the run starts over or the frame
 	// moved.
 	if (range_.runs() != planned_runs_) {
@@ -384,6 +403,16 @@ void DefinitionWeapon::run_to(int32_t tick) {
 		planned_runs_ = range_.runs();
 	}
 	if (planned_events_ != range_.events().size()) plan_spawns_();
+}
+
+void DefinitionWeapon::view_now(float units[3], float turn_deg[3]) const {
+	float bias[3] = {0.0f, 0.0f, 0.0f}, bias_turn[3] = {0.0f, 0.0f, 0.0f};
+	if (eye_) range_.viewmodel_bias(bias, bias_turn);
+	first_person_view_units(first_person_, width_, height_, units);
+	for (int i = 0; i < 3; ++i) {
+		units[i] += bias[i];
+		turn_deg[i] = first_person_.rot_bias_deg()[i] + bias_turn[i];
+	}
 }
 
 void DefinitionWeapon::plan_spawns_() {
@@ -406,6 +435,12 @@ void DefinitionWeapon::plan_spawns_() {
 			if (!first_person_point_(event.point, event.clip, event.clip_variant, event.clip_ticks, at, direction)) {
 				at = origin_;
 				direction = forward_;
+			} else if (eye_ && through_eye_) {
+				// On the gun where the scope's ease stood it at the event's tick.
+				const FirstPersonRoot root =
+						first_person_root(first_person_, width_, height_, event.view_units, event.view_rot_deg);
+				at = root.point(at);
+				direction = root.direction(direction);
 			}
 			// The begin leg's group is owner-bound at the action's transform; the direct effect a transient
 			// descriptor [orig: ActionSlot_SpawnEffect @0x401F20; WeaponAction_Recoil @0x542F64].
@@ -586,6 +621,22 @@ io::JsonValue DefinitionWeapon::to_json(const DefinitionFireOptions &options) co
 	state.set("heat", json_number(held.heat));
 	state.set("scoped", JsonValue::make_bool(range_.scoped()));
 	state.set("card", JsonValue::make_bool(card_up()));
+	// The scope's ease and the view model's offset from the hip it stands at (view units, degrees).
+	state.set("scope_fraction", json_number(range_.view_frame().scope_fraction));
+	{
+		float units[3], turn[3];
+		range_.viewmodel_bias(units, turn);
+		JsonValue bias = JsonValue::make_object();
+		JsonValue u = JsonValue::make_array(), r = JsonValue::make_array();
+		for (int i = 0; i < 3; ++i) {
+			u.push(json_number(units[i]));
+			r.push(json_number(turn[i]));
+		}
+		bias.set("units", std::move(u));
+		bias.set("rot", std::move(r));
+		state.set("viewmodel_bias", std::move(bias));
+	}
+	state.set("fov", json_number(eye_ ? eye_camera_.pose.fov_degrees : 0.0f));
 	JsonValue channel = JsonValue::make_object();
 	const DefinitionWeaponClip pose = clip();
 	channel.set("clip", json_string(pose.key));
