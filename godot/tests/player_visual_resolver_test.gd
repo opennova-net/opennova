@@ -20,7 +20,7 @@ func test_non_default_character_identity_does_not_collapse_to_us01() -> void:
 			{},
 		],
 	}
-	var profile := avatar_db.character_join_profile(selected)
+	var profile := avatar_db.character_join_profile(selected, true)
 	var character_id := profile.get_character_id(0)
 	var combo := avatar_db.get_combo(0, 0, 1)
 

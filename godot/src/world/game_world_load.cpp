@@ -429,8 +429,8 @@ void GameWorld::place_mission_objects(const Ref<MissionData> &p_mission) {
 		sim->set_character_avatar_database(avatar_db);
 	}
 	if (avatar_db.is_valid()) {
-		local_character_profile_ =
-				avatar_db->character_join_profile_from_loadout(player_visuals_->spawn_loadout());
+		local_character_profile_ = avatar_db->character_join_profile_from_loadout(
+				player_visuals_->spawn_loadout(), drive_.pending_session());
 	} else {
 		UtilityFunctions::push_warning("GameWorld: Avatars.def unavailable; players draw their item model");
 		if (!resource_root_->has_file("Avatars.def")) {
@@ -441,7 +441,7 @@ void GameWorld::place_mission_objects(const Ref<MissionData> &p_mission) {
 		// The empty table still projects the record's voice override (engine
 		// join_character_profile_without_table).
 		local_character_profile_ = AvatarDatabase::character_join_profile_without_table(
-				player_visuals_->spawn_loadout());
+				player_visuals_->spawn_loadout(), drive_.pending_session());
 	}
 	panm_clock_->sample(get_frame_clock_ms(),
 			static_cast<int64_t>(Engine::get_singleton()->get_process_frames()));

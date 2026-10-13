@@ -77,7 +77,7 @@ int main() {
 	// selected combos' head voices.
 	{
 		JoinSideSelection none[2];
-		const JoinCharacterProfile p = join_character_profile(registry, none);
+		const JoinCharacterProfile p = join_character_profile(registry, none, true);
 		check(p.character_ids[0] == 0x0200 && p.character_ids[1] == 0x8207, "fresh ids");
 		check(p.player_classes[0] == 8 && p.player_classes[1] == 8, "fresh classes 8/8");
 		check(p.avatars[0] == 1 && p.avatars[1] == 10, "fresh avatars = head voices");
@@ -93,29 +93,57 @@ int main() {
 		saved[0].player_class = 6;
 		saved[1].present = true;
 		saved[1].player_class = 6;
-		const JoinCharacterProfile p = join_character_profile(registry, saved);
+		const JoinCharacterProfile p = join_character_profile(registry, saved, true);
 		check(p.character_ids[0] == 0x0400, "side A takes the saved combo");
 		check(p.character_ids[1] == 0x8207, "side B keeps its default");
 		check(p.avatars[0] == 3, "side A avatar = the saved combo's head voice");
 		check(p.player_classes[0] == 6 && p.player_classes[1] == 6, "class 6 on both blocks");
 	}
-	// A saved selection of the wrong alignment or out of range falls back; a
-	// class outside 5..9 keeps the default.
+	// A saved selection of the wrong alignment or out of range falls back.
 	{
 		JoinSideSelection saved[2];
 		saved[0].present = true;
 		saved[0].nationality_index = 1; // the evil nationality on side A
 		saved[0].division_index = 0;
 		saved[0].combo_index = 0;
-		saved[0].player_class = 4;
+		saved[0].player_class = 6;
 		saved[1].present = true;
 		saved[1].nationality_index = 9;
 		saved[1].player_class = 9;
-		const JoinCharacterProfile p = join_character_profile(registry, saved);
+		const JoinCharacterProfile p = join_character_profile(registry, saved, true);
 		check(p.character_ids[0] == 0x0200, "wrong-alignment selection falls back");
 		check(p.character_ids[1] == 0x8207, "out-of-range selection falls back");
-		check(p.player_classes[0] == 8, "class 4 keeps the default");
-		check(p.player_classes[1] == 9, "class 9 is kept");
+		check(p.player_classes[0] == 6 && p.player_classes[1] == 9, "classes 6 / 9 are kept");
+	}
+	// A class byte outside 5..9: the session start clamps it in a session, below
+	// 5 to 5 and above 9 to 9 by an unsigned byte compare, so a 4 goes up as 5
+	// and a 0xFF as 9 (the wire's CTA / CTB too); out of a session the record
+	// gives no class and the byte keeps the default 8
+	// [orig: Game_ApplySessionSettingsToGlobals @0x5516ab (the session gate),
+	//  @0x5516d0..0x5516ec (the clamp); UI_JoinSelectedSession @0x569c1c /
+	//  @0x569c39].
+	{
+		JoinSideSelection saved[2];
+		saved[0].present = true;
+		saved[0].player_class = 4;
+		saved[1].present = true;
+		saved[1].player_class = 0xFF;
+		JoinCharacterProfile p = join_character_profile(registry, saved, true);
+		check(p.player_classes[0] == 5 && p.player_classes[1] == 9,
+				"in a session 4 clamps to 5 and 0xFF to 9");
+		const opennova::inmatch::CharacterJoinVars vars = character_join_vars(p);
+		check(vars.char_class[0] == 5 && vars.char_class[1] == 9, "the clamped bytes ride as CTA / CTB");
+		saved[0].player_class = 0;
+		saved[1].player_class = 10;
+		p = join_character_profile_without_table(saved, true);
+		check(p.player_classes[0] == 5 && p.player_classes[1] == 9,
+				"the empty table clamps the same: 0 to 5, 10 to 9");
+		p = join_character_profile(registry, saved, false);
+		check(p.player_classes[0] == 8 && p.player_classes[1] == 8,
+				"out of a session a byte outside 5..9 keeps the default 8");
+		saved[0].player_class = 7;
+		p = join_character_profile(registry, saved, false);
+		check(p.player_classes[0] == 7, "out of a session a 5..9 byte stands");
 	}
 
 	// The record's voice override pair: a nonzero byte is the side's avatar
@@ -129,13 +157,13 @@ int main() {
 		saved[0].division_index = 0;
 		saved[0].combo_index = 1;
 		saved[0].voice_override = 7;
-		JoinCharacterProfile p = join_character_profile(registry, saved);
+		JoinCharacterProfile p = join_character_profile(registry, saved, true);
 		check(p.character_ids[0] == 0x0400, "the override leaves the saved character");
 		check(p.avatars[0] == 7, "side A's nonzero override is its avatar byte");
 		check(p.avatars[1] == 10, "side B's zero override keeps the head voice");
 		saved[0].voice_override = 0;
 		saved[1].voice_override = 11;
-		p = join_character_profile(registry, saved);
+		p = join_character_profile(registry, saved, true);
 		check(p.avatars[0] == 3, "side A's zero override keeps the saved combo's head voice");
 		check(p.avatars[1] == 11, "an unsaved side's nonzero override is its avatar byte");
 		check(character_join_vars(p).avatar[1] == 11, "the override rides as VCB");
@@ -150,7 +178,7 @@ int main() {
 	//  Avatars_ResolveSelectionIndex @0x57ae60 - the miss @0x57ae85].
 	{
 		JoinSideSelection none[2];
-		JoinCharacterProfile p = join_character_profile_without_table(none);
+		JoinCharacterProfile p = join_character_profile_without_table(none, true);
 		check(p.avatars[0] == 1 && p.avatars[1] == 1, "no table: a zero override is 1 on both sides");
 		check(p.character_ids[0] == 0 && p.character_ids[1] == 0, "no table: no character id");
 		check(p.player_classes[0] == 8 && p.player_classes[1] == 8, "no table: the default classes");
@@ -161,7 +189,7 @@ int main() {
 		saved[1].division_index = 0;
 		saved[1].combo_index = 0;
 		saved[1].player_class = 6;
-		p = join_character_profile_without_table(saved);
+		p = join_character_profile_without_table(saved, true);
 		check(p.avatars[0] == 7, "no table: a nonzero override is the avatar byte");
 		check(p.avatars[1] == 1, "no table: a saved side's zero override is 1");
 		check(p.character_ids[1] == 0 && p.player_classes[1] == 6,

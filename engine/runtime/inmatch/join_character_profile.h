@@ -71,8 +71,30 @@ inline bool join_side_character(const CharacterRegistry &registry, int side,
 	return true;
 }
 
+// `in_session`: the session start takes the side blocks' class bytes only in
+// a session's first round, each clamped in place, below 5 to 5 and above 9 to
+// 9 (an unsigned byte compare), so a saved 4 goes up as 5 and a 200 as 9; a
+// join's apply and a listen host's run in a session (the pre-game screens set
+// the network type, CNapiNetwork_SetNetworkType's is_in_session = type != 0,
+// and the LAN pick zeroes the round count), single player's does not. Out of a
+// session the record gives no class (the mission's word does, D-PLAYERINFO-33),
+// and a byte outside 5..9 keeps the default 8 here. The round gate is NOT
+// ported as a gate: this gates on `in_session` alone, which matches only
+// because the projection is consumed at a session's first round (the host's
+// loopback char vars at start_host_session, host_session.cpp; the joiner's
+// ClientAuth, JoinerConnection::build_client_auth). A later round in retail
+// keeps the globals from round 1 or from the server's class sync, and a join
+// whose round count was not zeroed skips the clamp (D-PLAYERINFO-34).
+// [orig: Game_ApplySessionSettingsToGlobals @0x5516ab (the session gate),
+//  @0x5516b3 (the first-round gate, g_SessionRoundCount == 0),
+//  @0x5516d0..0x5516ec (the clamp, the stores @0x5516d7 / @0x5516e1),
+//  @0x5516f8 / @0x5516fd (the class globals); NapiNPClientMsg_HandleWeaponLoadoutSync
+//  @0x429427 / @0x42941f (the server's class sync); CNapiNetwork_SetNetworkType
+//  @0x4c4a50; UI_ProcessLANSessionStateMachine @0x558e8c;
+//  UI_HandleLANGameListEvent @0x556c26; UI_JoinSelectedSession @0x569b07 (the
+//  join's apply), @0x569c1c / @0x569c39 (CTA / CTB)]
 inline JoinCharacterProfile join_character_profile(
-		const CharacterRegistry &registry, const JoinSideSelection saved[2]) {
+		const CharacterRegistry &registry, const JoinSideSelection saved[2], bool in_session) {
 	JoinCharacterProfile profile;
 	for (int side = 0; side < 2; ++side) {
 		// The retail default: the first combo of the side's alignment.
@@ -91,9 +113,13 @@ inline JoinCharacterProfile join_character_profile(
 				profile.character_ids[side] = packed;
 				profile.avatars[side] = avatar;
 			}
-			if (saved[side].player_class >= kJoinPlayerClassMin &&
-					saved[side].player_class <= kJoinPlayerClassMax)
-				profile.player_classes[side] = saved[side].player_class;
+			const uint8_t cls = static_cast<uint8_t>(saved[side].player_class);
+			if (in_session)
+				profile.player_classes[side] = cls < kJoinPlayerClassMin ? kJoinPlayerClassMin
+						: cls > kJoinPlayerClassMax ? kJoinPlayerClassMax
+						: cls;
+			else if (cls >= kJoinPlayerClassMin && cls <= kJoinPlayerClassMax)
+				profile.player_classes[side] = cls;
 		}
 		// The session start's avatar byte: the record's voice override where
 		// nonzero, else the side's character's own voice. A join uploads the
@@ -118,8 +144,9 @@ inline JoinCharacterProfile join_character_profile(
 // [orig: CAvatarDefs_Init @0x57b180 - the clears @0x57b1ae / @0x57b1c1 before
 //  the parse call @0x57b1d5; Game_ApplySessionSettingsToGlobals @0x551735..0x5517a2;
 //  Avatars_ResolveSelectionIndex @0x57ae60 - the miss @0x57ae85]
-inline JoinCharacterProfile join_character_profile_without_table(const JoinSideSelection saved[2]) {
-	return join_character_profile(CharacterRegistry(), saved);
+inline JoinCharacterProfile join_character_profile_without_table(const JoinSideSelection saved[2],
+		bool in_session) {
+	return join_character_profile(CharacterRegistry(), saved, in_session);
 }
 
 // The profile as the ClientAuth tag block carries it (CharacterJoinVars): the
