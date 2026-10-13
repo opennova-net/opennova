@@ -1213,9 +1213,9 @@ const char *transform_choice(size_t index) {
 constexpr QueryParam kThumbnailParams[] = {
 	{ "path", J::String, true, nullptr,
 			"A texture file of the project, by its project-relative path or its logical name." },
-	{ "transform", J::String, false, "\"none\"",
+	{ "transform", J::String, false, "none",
 			"What the use's loader makes of the texels first (a texture reference's texture.transform): none, "
-			"luminance_alpha, white_alpha_from_blue, alpha_only or normal_from_height." },
+			"luminance_alpha, white_alpha_from_blue, alpha_only, normal_from_height or blue_alpha_only." },
 };
 constexpr QueryChoices kThumbnailChoices[] = { { "transform", transform_choice } };
 

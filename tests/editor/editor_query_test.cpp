@@ -15,6 +15,7 @@
 // of its own, a copy naming no place right after its record as the edits before it left it, and
 // what a batch made and removed again neither added nor made.
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -1000,6 +1001,19 @@ static int test_catalog() {
 					item.get_bool("required", !param.required) == param.required &&
 					item.get_string("doc", "") == param.doc);
 			TEST_EXPECT((item.get("default") != nullptr) == (param.default_value != nullptr));
+			// S26 C6: a default the catalog advertises for a param with choices is one of them, and the
+			// query takes it back as it is (texture_thumbnail's transform read "\"none\"" and was refused).
+			const JsonValue *choices = item.get("enum");
+			const JsonValue *fallback = item.get("default");
+			if (choices && fallback) {
+				TEST_EXPECT(std::any_of(choices->array.begin(), choices->array.end(),
+				                        [&](const JsonValue &choice) { return choice.string == fallback->string; }));
+				JsonValue args = JsonValue::make_object();
+				args.set(param.name, *fallback);
+				std::string refused;
+				session.query(row.token, args, refused);
+				TEST_EXPECT(refused.find("is one of") == std::string::npos);
+			}
 		}
 		// Every query the catalog names answers (or asks for what it needs) by that name.
 		std::string error;
