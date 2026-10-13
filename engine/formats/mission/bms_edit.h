@@ -78,9 +78,8 @@ bool set_entity_transform(bms::File &file, EntityKind kind, size_t index,
 // A new record of `kind` naming `item_id`, with the SSN `id`: what the original editor's initializer
 // gives an item it places (bms_edit.cpp, D-MIS-10); its position the origin.
 bms::Entity new_entity(EntityKind kind, int item_id, int id);
-// The SSN a new entity takes beside the file's: one past the largest any holds, the players' net ids
-// skipped (mission_params.h ssn_after; the original editor's allocator takes one past the largest with
-// no skip, D-MIS-10).
+// The SSN a new entity takes beside the file's: one past the largest any holds, as the original
+// editor's allocator takes it (mission_params.h ssn_after).
 int next_entity_ssn(const bms::File &file);
 // Append new_entity for `item_id` at `transform`, its SSN the next; returns its index.
 size_t add_entity(bms::File &file, EntityKind kind, int item_id, const EntityTransform &transform);

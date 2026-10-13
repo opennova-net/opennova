@@ -5,6 +5,7 @@
 
 #include "mission_detail.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <string>
@@ -46,15 +47,102 @@ HeldCounts held_counts(const bms::File &file) {
 	return held;
 }
 
+// The box a zone's area markers span, and the marker of the least x, the first of a tie (null: the
+// zone has none), as the original editor's rebuild makes an area [orig: JOTACmed.exe sub_44D240 @
+// 0x44d240, the box set by the first @ 0x44d2d8 and widened after, the least x's item kept @
+// 0x44d3a8].
+const bms::MisAreaMarker *zone_box(
+		const std::vector<bms::MisAreaMarker> &markers, int32_t zone, bms::AreaTrigger &box) {
+	const bms::MisAreaMarker *least = nullptr;
+	for (const bms::MisAreaMarker &m : markers) {
+		if (m.zone != zone)
+			continue;
+		if (least == nullptr) {
+			box.x_min = box.x_max = m.x;
+			box.y_min = box.y_max = m.y;
+			box.z_min = box.z_max = m.z;
+			least = &m;
+			continue;
+		}
+		if (m.x < box.x_min) {
+			box.x_min = m.x;
+			least = &m;
+		}
+		box.x_max = std::max(box.x_max, m.x);
+		box.y_min = std::min(box.y_min, m.y);
+		box.y_max = std::max(box.y_max, m.y);
+		box.z_min = std::min(box.z_min, m.z);
+		box.z_max = std::max(box.z_max, m.z);
+	}
+	return least;
+}
+
+// The area markers the .mis writes after the entities (D-MIS-14), the items of type 6013 the
+// original editor makes its areas of (rebuild_mis_areas). A zone's markers as read stand where they
+// still make its area: an area of its id whose box is theirs, or, a zone the export makes no area
+// of (its least-x marker's extra_valmode not 0), no area of its id; a marker of no zone 1..99
+// stands as read. Any other area (made, or its box edited) is written as two markers at its box's
+// least and greatest corners, its zone id their wpnumber and an extra_valmode of 0, so the export
+// keeps it; in the .bms's frame locked (their z absolute, which the original reads exact over
+// whatever terrain it loads [orig: JOTACmed.exe sub_44E6A0 @ 0x44e6a0, the lock tested nonzero]);
+// in the .mis's, as the zone's least-x marker was (its box's z in that marker's frame), locked for
+// a zone of none. A corner's base is 0: Nile stands a locked item at its z less its base [orig:
+// misldr.dll MisLdr_WriteNileProjectXml @ 0x10004930, the 6013 branch], so the corner stands at its
+// z. A zone's markers no area takes (the area gone) go.
+std::vector<bms::MisAreaMarker> mis_area_markers_written(const bms::File &file) {
+	const auto area_of = [&file](int32_t zone) -> const bms::AreaTrigger * {
+		for (const bms::AreaTrigger &area : file.area_triggers)
+			if (area.id == zone)
+				return &area;
+		return nullptr;
+	};
+	const auto in_slot = [](int32_t zone) {
+		return zone >= 1 && zone < static_cast<int32_t>(kMisAreaSlots);
+	};
+	std::array<bool, kMisAreaSlots> kept{};
+	std::array<int32_t, kMisAreaSlots> lock{};
+	for (int32_t zone = 1; zone < static_cast<int32_t>(kMisAreaSlots); ++zone) {
+		bms::AreaTrigger box = {};
+		const bms::MisAreaMarker *least = zone_box(file.mis_area_markers, zone, box);
+		const bms::AreaTrigger *area = area_of(zone);
+		lock[static_cast<size_t>(zone)] =
+				least != nullptr && file.mis_frame == bms::MisFrame::Mis ? least->height_lock : 1;
+		if (least == nullptr)
+			continue;
+		kept[static_cast<size_t>(zone)] = least->extra_valmode != 0
+				? area == nullptr
+				: area != nullptr && area->x_min == box.x_min && area->x_max == box.x_max &&
+						area->y_min == box.y_min && area->y_max == box.y_max &&
+						area->z_min == box.z_min && area->z_max == box.z_max;
+	}
+	std::vector<bms::MisAreaMarker> out;
+	for (const bms::MisAreaMarker &m : file.mis_area_markers)
+		if (!in_slot(m.zone) || kept[static_cast<size_t>(m.zone)])
+			out.push_back(m);
+	for (const bms::AreaTrigger &area : file.area_triggers) {
+		if (!in_slot(area.id) || kept[static_cast<size_t>(area.id)])
+			continue;
+		const int32_t corner_lock = lock[static_cast<size_t>(area.id)];
+		out.push_back({ area.id, area.x_min, area.y_min, area.z_min, corner_lock, 0, 0 });
+		out.push_back({ area.id, area.x_max, area.y_max, area.z_max, corner_lock, 0, 0 });
+	}
+	return out;
+}
+
 void write_mis_general_information(const bms::File &file, std::string &out) {
 	const bms::Header &header = file.header;
 	const uint8_t *raw = header_bytes(header);
-	const size_t item_total = file.items.size() + file.buildings.size() + file.markers.size() + file.organics.size();
+	// Every item section, the area markers among them: the original editor takes its item count
+	// from num_items alone and walks that many, its rebuild of the areas and Nile's import too.
+	const size_t item_total = file.items.size() + file.buildings.size() + file.markers.size() +
+			file.organics.size() + mis_area_markers_written(file).size();
 
 	append_line(out, "begin general_information");
 	append_kv(out, "  file_version ", static_cast<int>(static_cast<uint8_t>(header.magic[3])));
-	append_kv(out, "  name \"", mis_string(fixed_string(header.mission_name, sizeof(header.mission_name))), "\"");
-	append_kv(out, "  designer \"", mis_string(fixed_string(header.designer, sizeof(header.designer))), "\"");
+	append_kv(out, "  name \"",
+			mis_string(fixed_string(header.mission_name, sizeof(header.mission_name))), "\"");
+	append_kv(out, "  designer \"",
+			mis_string(fixed_string(header.designer, sizeof(header.designer))), "\"");
 	append_kv(out, "  terrain ", fixed_string(header.terrain, 16));
 	append_kv(out, "  cnv_file ", fixed_string(header.terrain + 16, 16));
 	append_kv(out, "  tt_file ", fixed_string(header.terrain + 32, 16));
@@ -146,16 +234,18 @@ void write_mis_briefing(const bms::File &file, std::string &out) {
 	append_line(out);
 }
 
-// The original editor keeps an area in the slot its zone id names and writes slots 1..99 in order: an area its
-// type-6013 markers make (the slot's id word, which its rebuild sets from a marker's wpnumber of 1..99 alone),
-// its description, then its color and its attrib, the area's flags (MISSION_AREA 1, constrain-Z 2: the area
-// dialog's 1175 and 1169, the word its .bms writer stores at @28), each when not zero [orig: JOTACmed.exe
-// MIS_SaveDocument @0x454630, the loop @0x454d11..0x454daf; sub_44D240 @0x44d240, the range @0x44d2a9;
-// sub_40F360 @0x40f360; sub_44F920 @0x44f920, the area @0x450a16..0x450ab3]. So an area is written under its
-// zone id, in id order, and the .bms holds no color. An area whose id is outside 1..99, or a second area of an
-// id, has no slot in the original's .mis: the write is refused, naming it, rather than leaving it out. The
-// original also writes slot i when path i has a description, testing the path table where it means the
-// area's (@0x454d20..0x454d3f); this writer writes the areas there are (D-MIS-15).
+// The original editor keeps an area in the slot its zone id names and writes slots 1..99 in order:
+// an area its type-6013 markers make (the slot's id word, which its rebuild sets from a marker's
+// wpnumber of 1..99 alone; the box they span is the area's bounds, which the section holds none of:
+// write_mis_area_markers), its description, then its color and its attrib, the area's flags
+// (MISSION_AREA 1, constrain-Z 2: the area dialog's 1175 and 1169, the word its .bms writer stores
+// at @28), each when not zero [orig: JOTACmed.exe MIS_SaveDocument @0x454630, the loop
+// @0x454d11..0x454daf; sub_44D240 @0x44d240, the range @0x44d2a9; sub_40F360 @0x40f360; sub_44F920
+// @0x44f920, the area @0x450a16..0x450ab3]. So an area is written under its zone id, in id order,
+// and the .bms holds no color. An area whose id is outside 1..99, or a second area of an id, has no
+// slot in the original's .mis: the write is refused, naming it, rather than leaving it out. The
+// original also writes slot i when path i has a description, testing the path table where it means
+// the area's (@0x454d20..0x454d3f); this writer writes the areas there are (D-MIS-15).
 bool write_mis_area_triggers(const bms::File &file, std::string &out, const MisNames *names, std::string &error) {
 	std::array<const bms::AreaTrigger *, kMisAreaSlots> slots{};
 	std::array<size_t, kMisAreaSlots> first{};
@@ -241,17 +331,42 @@ void write_mis_groups(const bms::File &file, const HeldCounts &held, std::string
 	}
 }
 
-void write_mis_layers(const bms::File &file, std::string &out) {
-	for (size_t i = 0; i < file.layer_records.size(); ++i) {
-		const std::string description = fixed_string(file.layer_records[i].name, bms::kLayerRecordSize);
-		if (description.empty()) {
+// The original editor writes its wav list's slots 1..31, each that holds a file name or a
+// description: the section, the description, the file name [orig: JOTACmed.exe MIS_SaveDocument @
+// 0x454630, the loop
+// @ 0x454f89..0x455012, the test @ 0x454fa9 / @ 0x454fcf, the lines @ 0x454fd8, @ 0x454fea, @
+// 0x454ff6, @ 0x455001]; its slot 0 it never writes. The .bms holds a slot's file name alone (bms.h
+// WavListRecord), so the description is written empty. Its editor layers (`begin layer N`) hold
+// nothing the .bms holds: none written.
+void write_mis_wav_list(const bms::File &file, std::string &out) {
+	for (size_t i = 1; i < file.wav_list_records.size(); ++i) {
+		const std::string name =
+				fixed_string(file.wav_list_records[i].file_name, bms::kWavListNameSize);
+		if (name.empty())
 			continue;
-		}
-		append_kv(out, "begin layer ", i);
-		append_kv(out, "  description \"", mis_string(description), "\"");
-		append_line(out, "end layer");
+		append_kv(out, "begin wav_list ", i);
+		append_line(out, "  description \"\"");
+		append_kv(out, "  file_name \"", mis_string(name), "\"");
+		append_line(out, "end wav_list");
 		append_line(out);
 	}
+}
+
+// The variables' names (mission_mis.h kMisVariableLine), lines both original readers skip, each one
+// a name.
+void write_mis_variable_names(const MisNames *names, std::string &out) {
+	if (names == nullptr)
+		return;
+	bool any = false;
+	for (size_t i = 0; i < names->variables.size(); ++i) {
+		const std::string name = mis_name(names->variables[i], kMisDescriptionChars);
+		if (name.empty())
+			continue;
+		append_kv(out, std::string(kMisVariableLine) + " ", i, " \"", name, "\"");
+		any = true;
+	}
+	if (any)
+		append_line(out);
 }
 
 void write_mis_events(const bms::File &file, std::string &out, const MisNames *names) {
@@ -323,19 +438,27 @@ MisHeights mis_heights(const bms::Entity &entity, bms::MisFrame frame, const int
 	// its terrain.
 	if (terrain == nullptr)
 		return {entity.z, entity.mis_extra_bheight, entity.mis_height_lock != 0 ? entity.mis_height_lock : 1};
-	// The .bms's frame over the terrain: the original's document frame is the .bms's z less the terrain's height, as
-	// its .bms export's undo takes it [orig: JOTACmed.exe sub_44E5F0 @ 0x44e5f0, from @ 0x450cf2] (the base, which
-	// our frame keeps the editor's, untouched); its save then adds the height back to a locked item's z and base
-	// [orig: sub_44E640 @ 0x44e640, from MIS_SaveDocument @ 0x4546b5].
+	// The .bms's frame over the terrain: the original's document frame is the .bms's z less the
+	// terrain's height, as its .bms export's undo takes it [orig: JOTACmed.exe sub_44E5F0 @
+	// 0x44e5f0, from @ 0x450cf2] (an unlocked base, relative, untouched); its save then adds the
+	// height back to a locked item's z and base [orig: sub_44E640 @ 0x44e640, from MIS_SaveDocument
+	// @ 0x4546b5], whose base our frame carries absolute already.
 	if (entity.mis_height_lock != 0)
-		return {entity.z, wrapped_add(entity.mis_extra_bheight, *terrain), entity.mis_height_lock};
+		return { entity.z, entity.mis_extra_bheight, entity.mis_height_lock };
 	return {wrapped_sub(entity.z, *terrain), entity.mis_extra_bheight, 0};
 }
 
-// `base_height` (optional) is the terrain's height under the entity, 16.16 fixed-point; `frame` the file's
-// (mission_mis.h's frames).
+// `base_height` (optional) is the terrain's height under the entity, 16.16 fixed-point; `frame` the
+// file's (mission_mis.h's frames). The keys in the original editor's order [orig: JOTACmed.exe
+// MIS_SaveDocument @ 0x454630, the item keys @ 0x455228..0x4558c1: grenades after sweapon_type @
+// 0x455453; extra_mlink, the extra values, extra_bheight and gen_string unconditional @
+// 0x4557a3..0x455836; then next_ssn, lfp_group, mission_critical, height_lock and color_override,
+// each when not zero]; its `attributes`, `layer` and `blink_*` keys (@ 0x45558c, @ 0x4555a5, @
+// 0x45573a..0x45578e) print editor fields no .bms record holds, zero here, which it writes none of.
+// The keys it writes when not zero whose parse default here is not zero are written always
+// (D-MIS-5).
 void write_mis_entity(const bms::Entity &entity, size_t index, std::string &out, bms::MisFrame frame,
-                      const int32_t *base_height) {
+                      const int32_t *base_height, int32_t extra_valmode = 0) {
 	const uint16_t crouch_timer = combined_u16(entity.crouch_timer, entity.unk15a);
 	const int32_t group_rel = combined_i32_from_i16(entity.group_rel_lo, entity.group_rel_hi);
 	const std::string gen_string = fixed_string(entity.gen_string, sizeof(entity.gen_string));
@@ -367,6 +490,8 @@ void write_mis_entity(const bms::Entity &entity, size_t index, std::string &out,
 	append_kv(out, "  nomorethan ", static_cast<int>(entity.no_more_than));
 	if (byte_from_i16(entity.weapon_types, 0) != 0) append_kv(out, "  weapon_type ", byte_from_i16(entity.weapon_types, 0));
 	if (byte_from_i16(entity.weapon_types, 1) != 0) append_kv(out, "  sweapon_type ", byte_from_i16(entity.weapon_types, 1));
+	if (entity.grenades != 0)
+		append_kv(out, "  grenades ", static_cast<int>(entity.grenades));
 	if (entity.group_id != 0) append_kv(out, "  group_id ", static_cast<int>(entity.group_id));
 	if (group_rel != 0) append_kv(out, "  group_rel ", group_rel);
 	if (entity.waypoint_id != 0) append_kv(out, "  waypoint_id ", static_cast<int>(entity.waypoint_id));
@@ -392,34 +517,40 @@ void write_mis_entity(const bms::Entity &entity, size_t index, std::string &out,
 	append_kv(out, "  attention ", entity.attention);
 	append_kv(out, "  advancetimer ", entity.advancetimer);
 	append_kv(out, "  max_attack_distance ", entity.max_attack_distance);
-	append_kv(out, "  edistances ", entity.min_engagement_distance, " ", entity.max_engagement_distance);
-	if (entity.next_ssn != 0) append_kv(out, "  next_ssn ", entity.next_ssn);
-	if (entity.color_override != 0) append_kv(out, "  color_override ", static_cast<int>(entity.color_override));
-	if (entity.grenades != 0) append_kv(out, "  grenades ", static_cast<int>(entity.grenades));
-	if (entity.mission_critical != 0) append_kv(out, "  mission_critical ", static_cast<int>(entity.mission_critical));
-	if (entity.lfp_group != 0) append_kv(out, "  lfp_group ", static_cast<int>(entity.lfp_group));
+	append_kv(out, "  edistances ", entity.min_engagement_distance, " ",
+			entity.max_engagement_distance);
 	append_line(out, "  extra_mlink \"\"");
 	append_line(out, "  extra_val1 0");
 	append_line(out, "  extra_val2 0");
 	append_line(out, "  extra_val3 0");
 	append_line(out, "  extra_val4 0");
 	append_line(out, "  extra_val5 0");
-	append_line(out, "  extra_valmode 0");
+	append_kv(out, "  extra_valmode ", extra_valmode);
 	// The base in the frame its lock gives it (above), and the lock, written for a lock alone as the original editor
 	// writes it [orig: MIS_SaveDocument @ 0x455824 (extra_bheight), @ 0x455889..0x45589a (height_lock, JOTACmed.exe)];
 	// the Nile reader takes the same pair [orig: MisLdr_ParseMisLine @ 0x100017b0 (extra_bheight->rec+292,
 	// height_lock->rec+356); MisLdr_WriteNileProjectXml @ 0x10004930 (scene Y = z/65536 - (lock ? bheight/65536 :
 	// 0)); both misldr.dll].
 	append_kv(out, "  extra_bheight ", heights.extra_bheight);
-	if (heights.height_lock != 0) append_kv(out, "  height_lock ", heights.height_lock);
 	append_kv(out, "  gen_string \"", mis_string(gen_string.empty() ? std::string("null") : gen_string), "\"");
+	if (entity.next_ssn != 0)
+		append_kv(out, "  next_ssn ", entity.next_ssn);
+	if (entity.lfp_group != 0)
+		append_kv(out, "  lfp_group ", static_cast<int>(entity.lfp_group));
+	if (entity.mission_critical != 0)
+		append_kv(out, "  mission_critical ", static_cast<int>(entity.mission_critical));
+	if (heights.height_lock != 0)
+		append_kv(out, "  height_lock ", heights.height_lock);
+	if (entity.color_override != 0)
+		append_kv(out, "  color_override ", static_cast<int>(entity.color_override));
 	append_line(out, "end item");
 	append_line(out);
 }
 
 // `base_heights` (optional): the terrain's heights under the entities (16.16 fixed-point), FLAT and in WRITE
 // ORDER — items, buildings, markers, organics — one per entity; an entity past them has none known.
-void write_mis_items(const bms::File &file, std::string &out, const std::vector<int32_t> *base_heights) {
+size_t write_mis_items(
+		const bms::File &file, std::string &out, const std::vector<int32_t> *base_heights) {
 	size_t index = 0;
 	const auto height_at = [base_heights](size_t i) -> const int32_t * {
 		return (base_heights != nullptr && i < base_heights->size()) ? &(*base_heights)[i] : nullptr;
@@ -429,6 +560,29 @@ void write_mis_items(const bms::File &file, std::string &out, const std::vector<
 			write_mis_entity(entity, index, out, file.mis_frame, height_at(index));
 			++index;
 		}
+	return index;
+}
+
+// The area markers (mis_area_markers_written), after the entities; their SSNs follow the largest
+// the entities hold, no .bms byte keeping them.
+void write_mis_area_markers(const bms::File &file, size_t index, std::string &out) {
+	int32_t ssn = 0;
+	for (const std::vector<bms::Entity> *pool :
+			{ &file.items, &file.buildings, &file.markers, &file.organics })
+		for (const bms::Entity &entity : *pool)
+			ssn = std::max(ssn, entity.id);
+	for (const bms::MisAreaMarker &m : mis_area_markers_written(file)) {
+		bms::Entity entity = {};
+		entity.type_id = kMisAreaMarkerType;
+		entity.id = ++ssn;
+		entity.x = m.x;
+		entity.y = m.y;
+		entity.z = m.z;
+		entity.wp_number = m.zone;
+		entity.mis_height_lock = m.height_lock;
+		entity.mis_extra_bheight = m.extra_bheight;
+		write_mis_entity(entity, index++, out, bms::MisFrame::Mis, nullptr, m.extra_valmode);
+	}
 }
 
 // Starting size for the emitted text. A shipped mission lands in the tens of
@@ -446,6 +600,7 @@ bool write_mis_text(const bms::File &file, std::string &out, std::string &error,
 	out.reserve(kMisTextReserveBytes);
 	append_line(out, "// mission metafile");
 	append_line(out);
+	write_mis_variable_names(names, out);
 	write_mis_general_information(file, out);
 	write_mis_weapon_availability(out);
 	write_mis_briefing(file, out);
@@ -456,9 +611,9 @@ bool write_mis_text(const bms::File &file, std::string &out, std::string &error,
 	const HeldCounts held = held_counts(file);
 	write_mis_waypoints(file, held, out, names);
 	write_mis_groups(file, held, out);
-	write_mis_layers(file, out);
+	write_mis_wav_list(file, out);
 	write_mis_events(file, out, names);
-	write_mis_items(file, out, base_heights);
+	write_mis_area_markers(file, write_mis_items(file, out, base_heights), out);
 	return true;
 }
 
@@ -479,17 +634,56 @@ template <typename Fn> void each_entity_over(bms::File &file, const MisTerrain &
 void mis_items_to_bms_frame(bms::File &file, const MisTerrain &terrain) {
 	if (file.mis_frame == bms::MisFrame::Bms || terrain.heights == nullptr || terrain.sectors == nullptr) return;
 	each_entity_over(file, terrain, [](bms::Entity &entity, int32_t height) {
-		// The original's read: a locked item's z and base less the terrain's height under it, the point its x and y
-		// [orig: JOTACmed.exe sub_44E6A0 @ 0x44e6a0, from MIS_LoadDocument @ 0x45460e; the lock tested nonzero].
-		if (entity.mis_height_lock != 0) {
-			entity.z = detail::wrapped_sub(entity.z, height);
-			entity.mis_extra_bheight = detail::wrapped_sub(entity.mis_extra_bheight, height);
-		}
-		// Its .bms export: every item's z plus it [orig: sub_44E5A0 @ 0x44e5a0, from sub_44F920 @ 0x44fa4e]; the
-		// export adds it to the base too, which reaches no .bms byte, so the base stays the editor's.
-		entity.z = detail::wrapped_add(entity.z, height);
+		// The original's read takes a locked item's z and base less the terrain's height under it,
+		// the point its x and y [orig: JOTACmed.exe sub_44E6A0 @ 0x44e6a0, from MIS_LoadDocument @
+		// 0x45460e; the lock tested nonzero], and its .bms export adds the height back to every
+		// item's z and base [orig: sub_44E5A0 @ 0x44e5a0, from sub_44F920 @ 0x44fa4e]: a locked
+		// item's both stand absolute, as read; an unlocked one's z takes the height, its base
+		// (which reaches no .bms byte) staying relative.
+		if (entity.mis_height_lock == 0)
+			entity.z = detail::wrapped_add(entity.z, height);
 	});
+	// The area markers likewise, then the areas the export makes of them over the terrain [orig:
+	// sub_44F920 @ 0x44fa4e, then the rebuild @ 0x44fbeb]: their z absolute. A zone it makes no
+	// area of keeps its markers as read, in the .mis's frame, which the writer writes back as they
+	// were.
+	const std::vector<bms::MisAreaMarker> as_read = file.mis_area_markers;
+	for (bms::MisAreaMarker &marker : file.mis_area_markers)
+		if (marker.height_lock == 0)
+			marker.z =
+					detail::wrapped_add(marker.z, mis_terrain_height(terrain, marker.x, marker.y));
+	rebuild_mis_areas(file);
+	file.mis_area_markers.clear();
+	for (const bms::MisAreaMarker &marker : as_read) {
+		bool made = false;
+		for (const bms::AreaTrigger &area : file.area_triggers)
+			made = made || area.id == marker.zone;
+		if (!made)
+			file.mis_area_markers.push_back(marker);
+	}
 	file.mis_frame = bms::MisFrame::Bms;
+}
+
+// [orig: JOTACmed.exe sub_44D240 @ 0x44d240: every slot's id cleared @ 0x44d250, each 6013 item of
+// a wpnumber of 1..99 @ 0x44d296..0x44d2a9 setting its slot's box on the first @ 0x44d2d8 and
+// widening it after, the least x's item kept @ 0x44d3a8; sub_44F920 @ 0x450a16..0x450ab3, the slots
+// in order, written where the least-x item's extra_valmode is 0 @ 0x450a3a]
+void rebuild_mis_areas(bms::File &file) {
+	std::array<uint32_t, kMisAreaSlots> flags{};
+	for (const bms::AreaTrigger &area : file.area_triggers)
+		if (area.id >= 1 && area.id < static_cast<int32_t>(kMisAreaSlots))
+			flags[static_cast<size_t>(area.id)] = area.flags;
+	std::vector<bms::AreaTrigger> areas;
+	for (int32_t zone = 1; zone < static_cast<int32_t>(kMisAreaSlots); ++zone) {
+		bms::AreaTrigger area = {};
+		const bms::MisAreaMarker *least = detail::zone_box(file.mis_area_markers, zone, area);
+		if (least == nullptr || least->extra_valmode != 0)
+			continue;
+		area.id = zone;
+		area.flags = flags[static_cast<size_t>(zone)];
+		areas.push_back(area);
+	}
+	file.area_triggers = std::move(areas);
 }
 
 // [orig: JOTACmed.exe sub_4226D0 @ 0x4226d0, the original editor's terrain height, reached through sub_433690 @
