@@ -1078,8 +1078,10 @@ int main() {
 			w::Entity *zone_entity = kernel.world.registry.get(zone_handle);
 			CHECK(zone_entity != nullptr);
 			if (zone_entity == nullptr) continue;
+			// An unnumbered zone (control 0) no capture event touches: it has no
+			// timer entry, so it lists [orig: UI_UpdateDeathScreenContent
+			// @0x553bd3..0x553bd5].
 			zone_entity->team = player->team;
-			zone_entity->zone_control = 0x10000; // a secured zone
 			w::Entity *body = kernel.world.registry.get(own->link.owned_entity);
 			body->alive = false;
 			body->health = 0;

@@ -382,9 +382,10 @@ int main() {
 	// banks hold (transient, persistent, special in that order; a 0x40 slot
 	// skipped), each zone's local BMS facts (team, control) and SpawnZoneList
 	// index (-1 lists as '@' / STRWPNAME000), with the 0x6E wave group's
-	// occupants named through the roster; the authority's own client lists
-	// the same way by its body's team [orig: UI_UpdateDeathScreenContent
-	// @0x553b53..0x553c4e].
+	// occupants named through the roster. A zone with no timer entry lists
+	// whatever its entity's control word holds; the authority's own client
+	// lists the same way by its body's team [orig: UI_UpdateDeathScreenContent
+	// @0x553b53..0x553c4e; the entry gate @0x553bce..0x553bdd].
 	{
 		mission::MissionKernel kernel;
 		kernel.world.registry.configure_pool(2, 8);
@@ -440,8 +441,8 @@ int main() {
 		CHECK(rows.size() == 3); // the other team's zone is not a row, the 0x40 slot is skipped
 		CHECK(rows.size() == 3 && rows[0].index == -1 && rows[0].letter == '@' &&
 				rows[0].name_key == "STRWPNAME000" && rows[0].secured);
-		CHECK(rows.size() == 3 && rows[1].index == 1 && rows[1].letter == 'B' && !rows[1].secured &&
-				rows[1].occupants.empty());
+		CHECK(rows.size() == 3 && rows[1].index == 1 && rows[1].letter == 'B' && rows[1].secured &&
+				rows[1].occupants.empty()); // no entry: its 0x8000 control is never read
 		CHECK(rows.size() == 3 && rows[2].index == 0 && rows[2].letter == 'A' &&
 				rows[2].name_key == "STRWPNAME001" && rows[2].secured);
 		CHECK(rows.size() == 3 && rows[2].wave_countdown == 42 && rows[2].occupants.size() == 2);
