@@ -272,7 +272,8 @@ func test_the_handles_write_its_lines_and_the_picture_follows() -> void:
 	assert_false(health.is_empty())
 	if not health.is_empty():
 		assert_eq(int(health["rect"][0]), (45 * 1600 + 512) / 1024, "drawn where its line now puts it")
-		assert_eq(String(health["lines"][0]["text"]), "HUDHEALTH 45,701,197,711", "its line rewritten in place")
+		assert_eq(String(health["lines"][0]["text"]), "HUDHEALTH\t45,701,197,711",
+				"its line made again from the model, as the writer writes it")
 	# Its bottom right corner 30 units further right: the bar wider, its left edge where it was.
 	assert_true(_seam.done({"kind": "edit_in_viewport", "path": LAYOUT,
 			"command": {"name": "resize", "item": "health", "handle": "bottom_right", "by": [30, 0]}}))
