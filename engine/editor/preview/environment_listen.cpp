@@ -80,7 +80,6 @@ std::vector<audio::AmbientMixer::LayerDesc> EnvironmentListen::describe_(const s
 		candidate.bank = bank->name;
 		candidate.wave = single ? single->name : std::string();
 		candidate.layer = layer++;
-		candidate.pitch_q16 = each.pitch_q16;
 		// A layer the project has no wave for takes no channel (the mission Listen's rule, MissionAudio's describe).
 		const AssetEntry *entry = single && view.project.scan ? view.project.scan->find(served_name(single->path)) : nullptr;
 		if (!entry || entry->kind != AssetKind::Wave) continue;
@@ -140,9 +139,8 @@ void EnvironmentListen::apply_plan_(const audio::AmbientChannelPlan &plan) {
 	}
 	const auto fill = [&](MissionSoundChannel &channel, const audio::AmbientCandidate &row) {
 		const PreviewVec3 at{ row.pos[0], row.pos[1], row.pos[2] };
-		const auto found = candidates_.find(row.candidate_id);
-		const uint32_t member = found != candidates_.end() ? found->second.pitch_q16 : 0x10000u;
-		const uint32_t pitch = uint32_t((uint64_t(member) * uint32_t(row.pitch_q16)) >> 16);
+		// The channel plays the emitter's word alone, no member pitch in it (D-SND-56).
+		const uint32_t pitch = audio::emitter_play_word(int32_t(row.pitch_q16));
 		if (channel.volume != row.vol || channel.pitch_q16 != pitch || channel.at.x != at.x || channel.at.y != at.y ||
 				channel.at.z != at.z)
 			++serial_;
