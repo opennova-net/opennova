@@ -554,7 +554,9 @@ io::JsonValue menu_try_widgets_json(const MenuTry &menu_try) {
 				JsonValue table = JsonValue::make_array();
 				for (const menu::MenuTableRow &held : row->table_rows) {
 					JsonValue cells = JsonValue::make_array();
-					for (const std::string &cell : held.cells) cells.push(json_string(retail_text_to_utf8(cell)));
+					// A missing cell draws no text (MenuTableRow::cell reads it as empty, D-MNU-43).
+					for (size_t column = 0; column < held.cells.size(); ++column)
+						cells.push(json_string(retail_text_to_utf8(held.cell(int(column)))));
 					table.push(std::move(cells));
 				}
 				widget.set("rows", std::move(table));
