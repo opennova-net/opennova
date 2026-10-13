@@ -463,7 +463,22 @@ int main() {
 		retarget.team_known = true;
 		cs.entities.push_back(retarget);
 		CHECK(deploy_zone_rows(jv, reg, rows) && rows.size() == 4 && rows[3].index == 2);
+		// The DEATH map reads the same byte [orig: MapOverlay_DrawView `v12[354]`
+		// @0x5a5ae9].
+		auto map_zone = [](const hud::DeathMapFacts &f,
+								world::EntityHandle h) -> const hud::DeathMapZone * {
+			for (const hud::DeathMapZone &z : f.zones)
+				if (z.handle == h.packed) return &z;
+			return nullptr;
+		};
+		hud::DeathMapFacts map_facts;
+		CHECK(death_map_facts(jv, reg, map_facts));
+		const hud::DeathMapZone *moved = map_zone(map_facts, theirs);
+		CHECK(moved != nullptr && moved->team == 0 && moved->timer_ready);
 		cs.entities.pop_back();
+		CHECK(death_map_facts(jv, reg, map_facts));
+		moved = map_zone(map_facts, theirs);
+		CHECK(moved != nullptr && moved->team == 1); // the placed team again
 		// The authority's view (the listen host, the single player): its own
 		// client's banks, by its own body's team byte, the body marked as self
 		// in a wave group. The zone's own entity team decides, never a 0x6F
@@ -510,6 +525,17 @@ int main() {
 		CHECK(rows.size() == 3 && rows[1].index == 0 && rows[1].secured);
 		CHECK(rows.size() == 3 && rows[2].index == 2 && rows[2].letter == 'C' && rows[2].secured);
 		CHECK(rows.size() == 3 && rows[2].occupants.size() == 1 && rows[2].occupants[0].self);
+		// The authority's DEATH map: each zone's own entity team under 0x6F
+		// entries whose mode names the other team, and the entry's ready gate
+		// [orig: MapOverlay_DrawView `v12[354]` @0x5a5ae9; the entry gate
+		//  @0x5a5b6e..0x5a5b7f].
+		CHECK(death_map_facts(hv, reg, map_facts));
+		const hud::DeathMapZone *taking = map_zone(map_facts, contested);
+		const hud::DeathMapZone *held = map_zone(map_facts, secured);
+		const hud::DeathMapZone *untouched = map_zone(map_facts, theirs);
+		CHECK(taking != nullptr && taking->team == 1 && !taking->timer_ready);
+		CHECK(held != nullptr && held->team == 1 && held->timer_ready);
+		CHECK(untouched != nullptr && untouched->team == 1 && untouched->timer_ready);
 		// Without a replica runtime there is nothing to walk.
 		hv.runtime = nullptr;
 		CHECK(!deploy_zone_rows(hv, reg, rows) && rows.empty());
