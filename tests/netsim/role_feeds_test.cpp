@@ -382,9 +382,10 @@ int main() {
 	// banks hold (transient, persistent, special in that order; a 0x40 slot
 	// skipped), each zone's local BMS facts (team, control) and SpawnZoneList
 	// index (-1 lists as '@' / STRWPNAME000), with the 0x6E wave group's
-	// occupants named through the roster; the authority's own client lists
-	// the same way by its body's team [orig: UI_UpdateDeathScreenContent
-	// @0x553b53..0x553c4e].
+	// occupants named through the roster. A zone with no timer entry lists
+	// whatever its entity's control word holds; the authority's own client
+	// lists the same way by its body's team [orig: UI_UpdateDeathScreenContent
+	// @0x553b53..0x553c4e; the entry gate @0x553bce..0x553bdd].
 	{
 		mission::MissionKernel kernel;
 		kernel.world.registry.configure_pool(2, 8);
@@ -440,8 +441,8 @@ int main() {
 		CHECK(rows.size() == 3); // the other team's zone is not a row, the 0x40 slot is skipped
 		CHECK(rows.size() == 3 && rows[0].index == -1 && rows[0].letter == '@' &&
 				rows[0].name_key == "STRWPNAME000" && rows[0].secured);
-		CHECK(rows.size() == 3 && rows[1].index == 1 && rows[1].letter == 'B' && !rows[1].secured &&
-				rows[1].occupants.empty());
+		CHECK(rows.size() == 3 && rows[1].index == 1 && rows[1].letter == 'B' && rows[1].secured &&
+				rows[1].occupants.empty()); // no entry: its 0x8000 control is never read
 		CHECK(rows.size() == 3 && rows[2].index == 0 && rows[2].letter == 'A' &&
 				rows[2].name_key == "STRWPNAME001" && rows[2].secured);
 		CHECK(rows.size() == 3 && rows[2].wave_countdown == 42 && rows[2].occupants.size() == 2);
@@ -452,12 +453,26 @@ int main() {
 		cs.minimap = replication::ClientMinimapState();
 		CHECK(deploy_zone_rows(jv, reg, rows) && rows.empty());
 		cs.minimap = banks;
+		// A zone's team is its entity's Team byte as this client holds it: on a
+		// joiner the replica row once a team store lands (here a 0x50 moving
+		// `theirs` to team 0), over the placed team [orig: the team compare
+		// @0x553bb5..0x553bc0; NapiNPClientMsg_TeamAssign @0x4319ee].
+		replication::ClientEntityState retarget;
+		retarget.handle = theirs.packed;
+		retarget.team = 0;
+		retarget.team_known = true;
+		cs.entities.push_back(retarget);
+		CHECK(deploy_zone_rows(jv, reg, rows) && rows.size() == 4 && rows[3].index == 2);
+		cs.entities.pop_back();
 		// The authority's view (the listen host, the single player): its own
 		// client's banks, by its own body's team byte, the body marked as self
-		// in a wave group. A 0x6F entry carries the zone's team, and one whose
+		// in a wave group. The zone's own entity team decides, never a 0x6F
+		// entry's mode (the handler stores only +544/+545), and an entry whose
 		// value sits below its limit keeps the zone off the list.
-		// [orig: the team compare @0x553bb5..0x553bc6; the entry gate
-		//  @0x553bce..0x553bdd; the self compare @0x553d64]
+		// [orig: the team compare @0x553bb5..0x553bc6; NapiNPClientMsg_ZoneTimerValue
+		//  @0x428d60; the entry gate @0x553bce..0x553bdd; the self compare @0x553d64]
+		kernel.world.registry.get(contested)->team = 1;
+		kernel.world.registry.get(secured)->team = 1;
 		kernel.world.registry.configure_pool(0, 4);
 		world::Entity body;
 		body.kind = world::EntityKind::Organic;
@@ -475,8 +490,8 @@ int main() {
 			b.insert(b.end(), { 0, 0, 0, 0 }); // rate, +544, +545
 			host_loop.host_send(0x6F, b);
 		};
-		zone_value(contested, 1, 0x8000, 0x10000);
-		zone_value(secured, 1, 0x10000, 0x10000);
+		zone_value(contested, 0, 0x8000, 0x10000); // a mode the list never reads
+		zone_value(secured, 0, 0x10000, 0x10000);
 		host_view.Client_ProcessNetworkFrame();
 		replication::ClientState &hs = host_view.state();
 		hs.minimap = banks;

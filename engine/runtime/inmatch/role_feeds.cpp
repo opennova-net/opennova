@@ -896,22 +896,39 @@ bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zone
 		const world::Entity *e = w.registry.get(handle);
 		if (e == nullptr) continue;
 		const int index = world::spawn_zone_index_of(zones, handle);
-		uint8_t effective_team = e->team;
-		int32_t effective_control = e->zone_control;
-		int32_t effective_limit = 0x10000;
-		const auto live = runtime.zone_states().find(e->handle.packed);
-		if (live != runtime.zone_states().end()) {
-			// The DEATH list reads the value entry's team and exact value >= limit
-			// gate. 0x53 is the separate timed-capture window; retaining an old
-			// window after a later 0x6F must not overwrite this ownership channel.
-			// [orig: UI_UpdateDeathScreenContent @0x5536a0; §5.49/§5.61]
-			if (live->second.has_value) {
-				effective_team = live->second.value.mode;
-				effective_control = live->second.value.value_s;
-				effective_limit = live->second.value.limit_s;
-			}
+		// Both loops compare the zone entity's own Team byte (+0x162) with the
+		// local entity's, never a timer entry's mode: the 0x6F handler stores
+		// only +544/+545 on the zone. The authority reads its own entity; a
+		// joiner's copy of the byte is its replica row once a 0x50 / 0x51
+		// team store or a world-stream team byte has landed (retail's
+		// non-authority store), else the placed team.
+		// [orig: UI_UpdateDeathScreenContent `mov dl, [esi+162h]; cmp dl,
+		//  [eax+162h]` @0x553BB5..0x553BC0 and the second loop's
+		//  @0x553C5F..0x553DE3 team test; NapiNPClientMsg_ZoneTimerValue
+		//  @0x428D60 (entity[544] / entity[545] only);
+		//  NapiNPClientMsg_TeamAssign @0x4319EE; NapiNPClientMsg_HandlePlayerSpawn
+		//  @0x431C6D]
+		uint8_t zone_team = e->team;
+		if (view.joiner) {
+			const replication::ClientEntityState *row = cs.find(e->handle.packed);
+			if (row != nullptr && row->team_known) zone_team = row->team;
 		}
-		if (effective_team != team) continue;
+		// The first-loop gate reads the zone's shared timer-list entry alone: no
+		// entry lists the zone, and an entry lists it once its DWORD 9 (the value
+		// target) reaches its DWORD 10 (the limit), a signed compare. Only the
+		// client's 0x53 / 0x6F folds create entries, so a zone no capture event
+		// ever touched (an unnumbered zone, whose entity control stays 0) lists;
+		// the entity's own control word is never read here.
+		// [orig: UI_UpdateDeathScreenContent -- CProximityList_FindEntryById
+		//  @0x553bce, `test eax, eax; jz` @0x553bd3..0x553bd5, `cmp [eax+24h],
+		//  [eax+28h]; jl` @0x553bd7..0x553bdd; the entry creators
+		//  NapiNPClientMsg_ZoneTimerWindow @0x428bd4 and
+		//  NapiNPClientMsg_ZoneTimerValue @0x428e6b]
+		bool secured = true;
+		const auto live = runtime.zone_states().find(e->handle.packed);
+		if (live != runtime.zone_states().end())
+			secured = !(live->second.entry.value_target < live->second.entry.value_limit);
+		if (zone_team != team) continue;
 		world::DeployZoneRow row;
 		// No -1 guard in the first loop: an unregistered zone lists as '@'
 		// with STRWPNAME000 and value 0 [orig: @0x553bd6..0x553c1f].
@@ -920,13 +937,10 @@ bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zone
 		char name_key[32];
 		std::snprintf(name_key, sizeof(name_key), "STRWPNAME%03d", index + 1);
 		row.name_key = name_key;
-		// The first-loop gate: a zone whose live timer entry sits below its limit
-		// is NOT listed; no entry (or level >= limit) lists it. There is no zone-
-		// number term (an earlier port carried one) — the retail list walk tests
-		// only the timer entry's level against its limit and then the def's
-		// spawn-zone attribute (engine record: deploy_screen_feed.h cites the
-		// UI_UpdateDeathScreenContent list loop).
-		row.secured = !(effective_control < effective_limit);
+		// There is no zone-number term (an earlier port carried one): the walk
+		// tests only the timer entry above and then the def's spawn-zone
+		// attribute (engine record: deploy_screen_feed.h cites the list loop).
+		row.secured = secured;
 		// The 0x6E wave group on this zone: its countdown (entity+548) and the
 		// queued members, named through the roster the way retail reads the
 		// member entity's Name (the player entity's name IS the roster name)
