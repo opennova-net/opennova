@@ -31,7 +31,6 @@
 #include <vector>
 
 #include <base/io/strutil.h>
-#include <base/resource_index/texture_folder.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_build.h>
 #include <formats/threedi/threedi_panm.h>
@@ -76,11 +75,33 @@ struct Writer {
 	}
 };
 
+// One folder's files as the scene looks a model's textures up in them: every regular file keyed by
+// its lower-case name, its path in UTF-8 (a scene text is read as UTF-8). Listed once per scene: a
+// retail asset folder holds some 10,000 files. A name UTF-8 cannot carry (an unpaired surrogate) is
+// no texture, so it is skipped, never fatal. Tooling, not a port: the game never lists a folder,
+// each retail loader opening exactly the file its own rule names
+// (runtime/renderer/texture_load_rules.h).
+using TextureFolder = std::map<std::string, std::string>;
+TextureFolder list_texture_folder(const std::filesystem::path &dir) {
+	TextureFolder listing;
+	std::error_code ec;
+	for (std::filesystem::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
+		try {
+			if (!it->is_regular_file(ec))
+				continue;
+			listing.emplace(opennova::strutil::to_lower(it->path().filename().u8string()),
+					it->path().u8string());
+		} catch (const std::exception &) {
+		}
+	}
+	return listing;
+}
+
 // The file a texture row loads beside the model: the one file the loader the row's type picks
 // opens (renderer::material_texture_source over the runtime type the loader stores), matched
 // in the folder without case. The folder is loose files alone, so no name is a loose-first
 // hit. "" when that loader opens no file or the folder lacks it.
-std::string row_texture_file(const opennova::TextureFolder &folder, const char *name, uint8_t type) {
+std::string row_texture_file(const TextureFolder &folder, const char *name, uint8_t type) {
 	namespace renderer = opennova::renderer;
 	const auto held = [&folder](const std::string &file) { return folder.count(opennova::strutil::to_lower(file)) != 0; };
 	const renderer::MaterialTextureSource source =
@@ -90,7 +111,7 @@ std::string row_texture_file(const opennova::TextureFolder &folder, const char *
 	return it == folder.end() ? std::string() : it->second;
 }
 
-void write_materials(Writer &w, const Threedi3di3 &m, const opennova::TextureFolder &folder) {
+void write_materials(Writer &w, const Threedi3di3 &m, const TextureFolder &folder) {
 	// One record per name and type: one name under two types can load two files.
 	std::set<std::pair<std::string, uint8_t>> resolved;
 	for (uint32_t i = 0; i < m.material_count; ++i) {
@@ -533,7 +554,8 @@ int cmd_scene(const char *model_path, const char *out_path) {
 	}
 	Writer w;
 	std::error_code ec;
-	const opennova::TextureFolder folder = opennova::list_texture_folder(std::filesystem::absolute(std::filesystem::path(model_path), ec).parent_path());
+	const TextureFolder folder = list_texture_folder(
+			std::filesystem::absolute(std::filesystem::path(model_path), ec).parent_path());
 	w.line("o3d 2");
 	w.line(std::string("# scene of ") + model_path + " (opennova-3di scene)");
 	w.line("model " + name_field(w, m.header.name[0] != '\0' ? m.header.name : "MODEL"));

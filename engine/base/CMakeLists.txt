@@ -21,7 +21,6 @@ add_library(opennova_base STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/resource_index/resource_kind.cpp # the kind classifier, shared with the editor
     ${CMAKE_CURRENT_SOURCE_DIR}/resource_index/file_kind.cpp # the typed kinds and their loader facts
     ${CMAKE_CURRENT_SOURCE_DIR}/resource_index/boot_policy.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/resource_index/texture_folder.cpp
     # vfs — the engine-faithful PFF+loose+expansion mount stack
     ${CMAKE_CURRENT_SOURCE_DIR}/vfs/vfs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/vfs/vfs_decode.cpp
