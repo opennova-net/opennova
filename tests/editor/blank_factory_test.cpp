@@ -415,7 +415,7 @@ public:
 	void set_widget_disabled(int, bool) override {}
 	void set_widget_disabled_items(int, const std::vector<uint8_t> &) override {}
 	void set_widget_checked(int, bool) override {}
-	void set_widget_text(int, const std::string &) override {}
+	void set_widget_text(int, const std::string &, int) override {}
 	void set_widget_items(int, const std::vector<std::string> &) override {}
 	void set_widget_selection(int, int, int, int) override {}
 	void set_widget_scroll_range(int, int, int, int, int) override {}

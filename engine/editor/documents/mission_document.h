@@ -169,7 +169,6 @@ public:
 	// group.
 	const Node *row_of(MissionKind kind, size_t index) const;
 	size_t index_of(const Node &row) const;
-	int location_of(const Node &row) const;
 	size_t count_of(MissionKind kind) const;
 	size_t group_members(int64_t group) const;
 	// Whether a marker is a stop of the player's route: the first path with the player-route flag
@@ -310,7 +309,6 @@ private:
 		std::unordered_map<int32_t, NodeId> ssns, zones;
 		std::vector<std::vector<const Node *>> by_kind;
 		std::unordered_map<NodeId, size_t> places;
-		std::unordered_map<NodeId, int> locations;
 		std::vector<size_t> groups;
 		std::unordered_set<NodeId> route; // the markers the player's route stops at
 		std::unordered_map<int32_t, NodeId> numbered; // the first type-6088 marker of each wp_number
