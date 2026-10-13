@@ -124,8 +124,6 @@ protected:
 	void after_add(Node &row, const ListChange &change, const RecordHandle &made) override;
 };
 
-bool is_sound_bank_kind(AssetKind kind);
-
 // The scope a bank's own names live in (its waves'): its file name, upper case ("GAME.LWF").
 std::string sound_bank_scope(const std::string &path);
 

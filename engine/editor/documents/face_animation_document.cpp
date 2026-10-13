@@ -374,8 +374,6 @@ const RecordTable &face_animation_table() {
 	return table;
 }
 
-bool is_face_animation_kind(AssetKind kind) { return asset_kind_row(kind).document == DocumentTypeId::FaceAnimation; }
-
 // --- the row -------------------------------------------------------------------------------------
 
 FaceAnimationRow::FaceAnimationRow() { kind = kFace; }
@@ -435,11 +433,6 @@ std::string FaceAnimationDocument::record_title(const NodeAddress &address) cons
 
 bool FaceAnimationDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                                   std::shared_ptr<const FileState> &, std::vector<SourceIssue> &issues, Diagnostic &error) {
-	if (!is_face_animation_kind(kind())) {
-		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not a face animation.",
-		                     path());
-		return false;
-	}
 	auto row = std::make_shared<FaceAnimationRow>();
 	std::string message;
 	if (!grm::parse(bytes.data(), bytes.size(), row->file, message)) {

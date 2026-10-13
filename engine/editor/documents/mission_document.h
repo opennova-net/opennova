@@ -330,8 +330,6 @@ private:
 	std::shared_ptr<const MissionItemClasses> item_classes_;
 };
 
-bool is_mission_kind(AssetKind kind);
-
 // The SSN a new entity takes over `rows` (an Add, a Duplicate, a paste's copy told apart): one past
 // the largest the rows hold, skipping none, as the original editor allocates (mission::ssn_after,
 // D-MIS-10).

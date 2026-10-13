@@ -196,8 +196,6 @@ const RecordTable &font_table() {
 	return table;
 }
 
-bool is_font_kind(AssetKind kind) { return asset_kind_row(kind).document == DocumentTypeId::Font; }
-
 FontGlyphRect font_glyph_rect(const FontGlyph &glyph) {
 	int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
 	fnt_uv_to_pixels(&glyph.uv, &x0, &y0, &x1, &y1);
@@ -263,10 +261,6 @@ bool FontDocument::font(fnt_font_t &out, std::string &why) const {
 
 bool FontDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                          std::shared_ptr<const FileState> &, std::vector<SourceIssue> &issues, Diagnostic &error) {
-	if (!is_font_kind(kind())) {
-		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not a font.", path());
-		return false;
-	}
 	fnt_font_t read{};
 	const fnt_error_t parsed = fnt_parse(bytes.data(), bytes.size(), &read);
 	if (parsed != FNT_OK) {

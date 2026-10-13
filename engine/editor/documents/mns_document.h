@@ -121,8 +121,6 @@ private:
 	mutable GameSheet game_sheet_;
 };
 
-bool is_style_kind(AssetKind kind);
-
 // The stylesheet document type's validator over one .mns (DocumentType::validate_file), an
 // open document standing in for its file, in one pass over its rows. What the game does with
 // each odd line (the format's diagnostics: an error where it stops reading or would stop

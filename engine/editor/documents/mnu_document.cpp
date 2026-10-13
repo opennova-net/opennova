@@ -725,10 +725,6 @@ std::string MnuDocument::copy(const std::vector<NodeAddress> &records) const {
 
 bool MnuDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                         std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues, Diagnostic &error) {
-	if (!is_menu_kind(kind())) {
-		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not a menu.", path());
-		return false;
-	}
 	mnu::Document document;
 	std::string message;
 	std::vector<mnu::ParseNote> notes;

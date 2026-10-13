@@ -360,8 +360,6 @@ const RecordTable &sound_bank_table() {
 	return table;
 }
 
-bool is_sound_bank_kind(AssetKind kind) { return asset_kind_row(kind).document == DocumentTypeId::SoundBank; }
-
 std::string sound_bank_scope(const std::string &path) { return strutil::to_upper(basename_of(path)); }
 
 const char *layer_selection_words(uint32_t flags) {
@@ -431,10 +429,6 @@ std::string SoundBankDocument::record_title(const NodeAddress &address) const {
 bool SoundBankDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                               std::shared_ptr<const FileState> &, std::vector<SourceIssue> &issues,
                               Diagnostic &error) {
-	if (!is_sound_bank_kind(kind())) {
-		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not a sound bank.", path());
-		return false;
-	}
 	lwf::File file;
 	std::string message;
 	if (!lwf::parse_lwf_buffer(bytes.data(), bytes.size(), file, message)) {

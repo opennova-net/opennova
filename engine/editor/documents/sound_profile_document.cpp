@@ -226,10 +226,6 @@ const RecordTable &sound_profile_table() {
 	return table;
 }
 
-bool is_sound_profile_kind(AssetKind kind) {
-	return asset_kind_row(kind).document == DocumentTypeId::SoundProfiles;
-}
-
 const char *sound_profile_slot_words(int slot) {
 	return slot >= 0 && slot < audio::kSoundProfileSlotCount ? kSlotWords[slot].words : "";
 }
@@ -265,10 +261,6 @@ std::string SoundProfileDocument::record_title(const NodeAddress &address) const
 
 bool SoundProfileDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                                  std::shared_ptr<const FileState> &, std::vector<SourceIssue> &, Diagnostic &error) {
-	if (!is_sound_profile_kind(kind())) {
-		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not SndProf.def.", path());
-		return false;
-	}
 	// The game's own walk of the file, every line it reads as it reads it [orig: SoundProfile_LoadAll @
 	// 0x527490 -> File_ParseASCIIFile @ 0x5274DD].
 	audio::SoundProfileTable table;

@@ -152,8 +152,6 @@ const RecordTable &music_bank_table() {
 	return table;
 }
 
-bool is_music_bank_kind(AssetKind kind) { return asset_kind_row(kind).document == DocumentTypeId::MusicBank; }
-
 bool music_stream_pcm(const std::vector<uint8_t> &bytes, int place, lwf::WavPcm &out, std::string &error) {
 	SbfFile bank;
 	if (!sbf_read_bank(bytes.data(), bytes.size(), bank, error)) return false;
@@ -241,10 +239,6 @@ int MusicBankDocument::stream_index(const std::string &place) const {
 
 bool MusicBankDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                               std::shared_ptr<const FileState> &, std::vector<SourceIssue> &issues, Diagnostic &error) {
-	if (!is_music_bank_kind(kind())) {
-		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not a music bank.", path());
-		return false;
-	}
 	SbfFile read;
 	SbfFileLayout layout;
 	std::string message;

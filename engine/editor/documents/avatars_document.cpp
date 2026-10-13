@@ -343,8 +343,6 @@ const RecordTable &avatars_table() {
 	return table;
 }
 
-bool is_avatars_kind(AssetKind kind) { return asset_kind_row(kind).document == DocumentTypeId::Avatars; }
-
 std::string avatar_part_scope(const std::string &path, int kind) {
 	static const char *const kKinds[] = {"HEAD", "BODY", "ARMS"};
 	if (kind < 0 || kind > 2) return std::string();
@@ -459,10 +457,6 @@ std::string AvatarsDocument::record_title(const NodeAddress &address) const {
 
 bool AvatarsDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                             std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues, Diagnostic &error) {
-	if (!is_avatars_kind(kind())) {
-		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not an avatars table.", path());
-		return false;
-	}
 	auto notes = std::make_shared<textlayout::Notes>();
 	avatars::AvatarsFile read{};
 	reader_stops_line_ = 0;

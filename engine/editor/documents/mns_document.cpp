@@ -222,10 +222,6 @@ std::string StyleRow::name() const {
 	}
 }
 
-bool is_style_kind(AssetKind kind) {
-	return asset_kind_row(kind).document == DocumentTypeId::Styles;
-}
-
 const std::vector<RecordKindRow> &MnsDocument::kinds() const {
 	static const std::vector<RecordKindRow> table = {
 	        {kVariable, "variable", "Variable", "Add variable", true},
@@ -382,10 +378,6 @@ bool MnsDocument::frozen(const Node &row) const {
 bool MnsDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                         std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &,
                         Diagnostic &error) {
-	if (!is_style_kind(kind())) {
-		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not a menu stylesheet.", path());
-		return false;
-	}
 	// The loader hands a single NUL for an empty file: an empty stylesheet.
 	const bool empty = bytes.size() == 1 && bytes[0] == 0;
 	const mns::Document doc = empty ? mns::Document()

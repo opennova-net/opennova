@@ -78,8 +78,6 @@ protected:
 	                         std::string &error) const override;
 };
 
-bool is_face_animation_kind(AssetKind kind);
-
 // The face animation type's references that no field's value is (DocumentType::record_references): the base
 // texture's .MDT twin, which the stage loader opens beside its .TGA [orig: Shadow_DecalLoadTextures @ 0x588117].
 void face_animation_references(const Document &document, Extracted &out);

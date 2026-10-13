@@ -81,8 +81,6 @@ protected:
 	bool accept_step(const EditStep &step, const StagedRows &rows, StepRefusal &refusal) const override;
 };
 
-bool is_music_bank_kind(AssetKind kind);
-
 // The stream at `place` of the bank `bytes` hold as the preview player sounds it: its chunks decoded (each byte a
 // sample at its channel's shift, left and right in turn [orig: AudioChannel_ComputeMixCoefficients @ 0x7BD4B0;
 // Audio_SubmitStereoSampleSplit @ 0x7BD252]) as interleaved 16-bit stereo at 22050 a second. False, with `error`, for

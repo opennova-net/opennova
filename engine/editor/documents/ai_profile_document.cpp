@@ -272,8 +272,6 @@ const RecordTable &ai_profile_table() {
 	return table;
 }
 
-bool is_ai_profile_kind(AssetKind kind) { return asset_kind_row(kind).document == DocumentTypeId::AiProfile; }
-
 size_t AiProfileRow::footprint() const {
 	return sizeof(AiProfileRow) + footprint_of(profile.primary.weapon) + footprint_of(profile.secondary.weapon) +
 	       ids_footprint();
@@ -297,10 +295,6 @@ std::string AiProfileDocument::record_title(const NodeAddress &address) const {
 bool AiProfileDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                               std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues,
                               Diagnostic &error) {
-	if (!is_ai_profile_kind(kind())) {
-		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not an AI profile.", path());
-		return false;
-	}
 	auto notes = std::make_shared<textlayout::Notes>();
 	std::vector<aip::UnreadLine> unread;
 	auto row = std::make_shared<AiProfileRow>();

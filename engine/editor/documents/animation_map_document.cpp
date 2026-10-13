@@ -252,10 +252,6 @@ SerializeResult AnimationMapDocument::serialize() const {
 
 bool AnimationMapDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                                  std::shared_ptr<const FileState> &, std::vector<SourceIssue> &issues, Diagnostic &error) {
-	if (!is_animation_map_kind(kind())) {
-		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not an animation map.", path());
-		return false;
-	}
 	adm::AdmFile file{};
 	std::vector<adm::AdmDroppedLine> dropped;
 	if (adm::adm_parse_buffer(reinterpret_cast<const char *>(bytes.data()), bytes.size(), &file, &dropped) != 0) {

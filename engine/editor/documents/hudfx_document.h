@@ -59,8 +59,6 @@ protected:
 	void refine_field(const NodeAddress &address, FieldUse &use) const override;
 };
 
-bool is_hudfx_kind(AssetKind kind);
-
 // The HUD effects' validator: a line after the first (never read), a first line of no model, a first model's name
 // running into the next slots, a first line that is a power slot's (loaded, never drawn), and a first line that is
 // the HUD model's (the power slots' draw reads a slot with no model: the game fails, which the build gates on).

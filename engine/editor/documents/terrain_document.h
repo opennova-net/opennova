@@ -96,8 +96,6 @@ protected:
 	bool accept_step(const EditStep &step, const StagedRows &rows, StepRefusal &refusal) const override;
 };
 
-bool is_terrain_kind(AssetKind kind);
-
 // The admission gate over a record (formats/trn trn_refusal, the rows the writer writes: max(1, sector_rows))
 // [orig: Terrain_LoadEnvironmentConfig @ 0x610940, its tail]: "" where the game takes it, else its words.
 std::string terrain_refusal(const TrnConfig &config);

@@ -206,8 +206,6 @@ protected:
 	                 StepRefusal &refusal) const override;
 };
 
-bool is_model_kind(AssetKind kind);
-
 // The model document type's validator over one model (DocumentType::validate_file), an open
 // document standing in for its file. More than 8 `sitex` seats, a register or
 // frame named that the model lacks, a light on a part LOD 0 lacks are errors; duplicate

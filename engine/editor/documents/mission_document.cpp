@@ -248,8 +248,6 @@ const char *mission_name_field(NodeKind kind) {
 	}
 }
 
-bool is_mission_kind(AssetKind kind) { return asset_kind_row(kind).document == DocumentTypeId::Mission; }
-
 int32_t next_free_ssn(const std::vector<std::shared_ptr<const Node>> &rows) {
 	int32_t largest = 0;
 	for (const auto &row : rows)
@@ -455,10 +453,6 @@ SerializeResult MissionDocument::serialize() const {
 bool MissionDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                             std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues,
                             Diagnostic &error) {
-	if (!is_mission_kind(kind())) {
-		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not a mission.", path());
-		return false;
-	}
 	bms::File file;
 	std::string message;
 	if (!bms::parse(bytes.data(), bytes.size(), file, message)) {

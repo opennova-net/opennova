@@ -151,8 +151,6 @@ const RecordTable &til_table() {
 	return table;
 }
 
-bool is_til_kind(AssetKind kind) { return asset_kind_row(kind).document == DocumentTypeId::TilePlacement; }
-
 TilFile TilDocument::file() const {
 	TilFile out;
 	out.entries.reserve(rows().size());
@@ -170,10 +168,6 @@ std::string TilDocument::record_title(const NodeAddress &address) const {
 
 bool TilDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                         std::shared_ptr<const FileState> &, std::vector<SourceIssue> &issues, Diagnostic &error) {
-	if (!is_til_kind(kind())) {
-		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not a tile placement.", path());
-		return false;
-	}
 	unread_.clear();
 	as_read_ = false;
 	read_bytes_.clear();

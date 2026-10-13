@@ -809,8 +809,6 @@ const FieldSchema *terrain_key_field(const std::string &key, int32_t *loader_arg
 	return nullptr;
 }
 
-bool is_terrain_kind(AssetKind kind) { return asset_kind_row(kind).document == DocumentTypeId::Terrain; }
-
 std::string terrain_refusal(const TrnConfig &config) {
 	// The gate (formats/trn trn_refusal) over the rows the writer writes: one where the record holds none.
 	const int rows = std::max(1, config.sector_rows);
@@ -871,10 +869,6 @@ void TerrainDocument::refine_field(const NodeAddress &address, FieldUse &use) co
 
 bool TerrainDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                             std::shared_ptr<const FileState> &, std::vector<SourceIssue> &issues, Diagnostic &error) {
-	if (!is_terrain_kind(kind())) {
-		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not a terrain.", path());
-		return false;
-	}
 	const std::string text(bytes.begin(), bytes.end());
 	auto row = std::make_shared<TerrainRow>();
 	std::istringstream input(text);
