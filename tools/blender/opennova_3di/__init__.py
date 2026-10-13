@@ -1507,8 +1507,11 @@ class O3D_PT_action(bpy.types.Panel):
         wanted = set()
         for suffix in suffixes:
             wanted |= weapon.TIMED_BY.get(suffix, {weapon.ACTIVE, weapon.READY})
-        if suffixes & weapon.SWITCHES:
-            box.label(text="Draw and holster pace themselves on the switch timer")
+        if "switchfrom" in suffixes:
+            box.label(text="The holster paces itself on the switch timer")
+        if "switchto" in suffixes:
+            box.label(text="No marker: the draw takes the switch timer's half second")
+            box.label(text="Active End: the draw runs its clip (wpn_std_idle)")
         for name in weapon.MARKERS:
             if name not in wanted:
                 continue

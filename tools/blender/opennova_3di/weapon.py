@@ -20,12 +20,17 @@
 #                  recovery is each entry's, from its target rate.
 #   ON:Eject       recoil: the casing and refire decision (none: the first
 #                  frame).
-#   ON:Active End  reload, empty, switchrank, scopeup, scopedown: the end of
-#                  the action's active phase (none: Ready, else the clip's end).
+#   ON:Active End  reload, empty, switchrank, scopeup, scopedown, and a draw
+#                  timed by its clip: the end of the action's active phase
+#                  (none: Ready, else the clip's end).
 #   ON:Ready       the end of the recovery after that boundary, and an idle's
 #                  reseed window (none: the clip's end).
-# Draw and holster take none: their handlers pace themselves on the switch
-# timer. Every clip of one action must time alike: a ring serves its LAST clip
+# The holster takes none: its handler paces itself on the switch timer, which
+# swaps the next weapon in [orig: WeaponAction_SwitchFrom @0x5433b0]. A draw
+# with none does too, about half a second; a draw with markers is timed by its
+# clip, its row naming wpn_std_idle, which runs on its delays where the switch
+# handler ignores them [orig: WeaponAction_SwitchTo @0x5431d0, the timer
+# @0x543207 / @0x54327b]. Every clip of one action must time alike: a ring serves its LAST clip
 # first and steps on every play and loop wrap [orig: AnimMap_RegisterBoneNode
 # @0x40c385; AnimMap_AdvanceToNextAnim @0x40bdf0], so any may be playing.
 
@@ -46,7 +51,7 @@ IDLES = {"idle", "emptyidle"}
 # The markers that time each action; any other action takes Active End and
 # Ready.
 TIMED_BY = {"fire": {SHOT}, "recoil": {EJECT, READY}, "idle": {READY}, "emptyidle": {READY},
-            "switchto": set(), "switchfrom": set()}
+            "switchfrom": set()}
 # An entry name fits the def's 32-byte name field [orig:
 # WeaponDefs_ParseLineCallback, strncpy 32 @0x543737].
 ENTRY_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,31}$")
@@ -118,10 +123,10 @@ def phase_times(action, suffix):
     allowed = TIMED_BY.get(suffix, {ACTIVE, READY})
     extra = sorted(points.keys() - allowed)
     if extra:
-        why = " (draw and holster pace themselves on the switch timer)" if suffix in SWITCHES else \
+        why = " (the holster paces itself on the switch timer)" if suffix == "switchfrom" else \
             " (fire's recovery is each weapon entry's target rate)" if suffix == "fire" and READY in extra else ""
         raise ExportError(f"{action.name}: {', '.join(extra)} do not time {suffix}{why}")
-    if suffix in SWITCHES:
+    if suffix == "switchfrom" or (suffix == "switchto" and not points):
         return 0.0, 0.0
     if suffix == "fire":
         boundary = points.get(SHOT, start)
