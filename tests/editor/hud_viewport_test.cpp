@@ -332,7 +332,7 @@ int test_layout_edit() {
 	const std::string text = kLayout;
 	Model model(text);
 	const DefHudPosDef &hud = model.file.hud;
-	// A move of the ammo count: its two numbers' tokens rewritten in place, the rest of its line as written.
+	// A move of the ammo count: its line made again from the model as the writer writes it.
 	HudDragStart start;
 	TEST_EXPECT(hud_drag_start(HudElement::AmmoCount, hud, start) && start.values == std::vector<int>({ 168, 616 }));
 	std::vector<HudValueChange> changes;
@@ -368,12 +368,13 @@ int test_layout_edit() {
 	            hud_drag_changes(start, HudHandle::BottomRight, 4.0f, 70.0f, 1, changes, error));
 	after = edited(text, changes);
 	TEST_EXPECT(after.size() > text.size() && after.compare(text.size(), std::string::npos, "HUDHEAT\t0,0,4,70\r\n") == 0);
-	// A line shorter than the value set: the values it lacks added after its last.
+	// A line shorter than the value set, in its own spelling with a comment: made again from the model, the values
+	// it lacks written, its spelling and its comment gone (nothing of it spliced: the S26 ruling).
 	const std::string short_line = "HUDWEAPONNAME 14,588 // the name\r\n";
 	Model short_model(short_line);
 	HudValueChange align;
 	TEST_EXPECT(hud_field_change(HudElement::WeaponName, short_model.file.hud, "hudweaponname.align", "Center", align, error));
-	TEST_EXPECT(edited(short_line, { align }) == "HUDWEAPONNAME 14,588,0,center // the name\r\n");
+	TEST_EXPECT(edited(short_line, { align }) == "HUDWEAPONNAME\t14,588,0,center\r\n");
 
 	// The fields: the place, the hidden value and the anchor, the fonts, the colour, the detail level.
 	const std::vector<HudField> fields = hud_element_fields(HudElement::AmmoCount, hud);
