@@ -192,8 +192,7 @@ void authoring_issue(size_t &count, opennova::def::DefParseReport *report,
     while (end < key_len && !isspace(static_cast<unsigned char>(key[end]))) ++end;
     std::string message;
     switch (code) {
-    // What the game makes of the input, which an authoring tool keeps as the file has it (def_notes.h: a
-    // save puts the file back as it was read, the words the game skips and a number's own spelling included).
+    // What the game makes of the input (the writer puts down what the game reads, no more).
     case DefIssueCode::UnknownProperty:
         message = detail ? "The game ignores the '" + std::string(detail) + "' token here."
                          : "The game ignores this line.";

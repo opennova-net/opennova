@@ -4,7 +4,7 @@
 
 // AMMO.DEF: one record per ammunition type.
 
-#include "def_notes.h"
+#include "def_schema.h"
 #include "def_scan.h"
 
 #include <stdio.h>
@@ -171,9 +171,7 @@ static void inherit_ammo_defaults(DefAmmoDef *d, const DefAmmoFile *out) {
    [orig: AmmoDef_InitEffectsTable @0x409F20, called only @0x40A433, installs
    when def+0x68 and word +0x6C are both 0]: a second table in one def, and a
    table the file never closes, give the def nothing. */
-static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out, DefParseReport *report,
-                             DefTextNotes *notes) {
-    DefTextNoter noter(buf, file_len, notes);
+static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out, DefParseReport *report) {
     size_t entries_cap = 0;
     DefAmmoDef current;
     memset(&current, 0, sizeof(current));
@@ -192,7 +190,7 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out,
     io::ConfigTokens tokens_state;
     for_each_def_line(buf, file_len, tokens_state,
                       [](const io::ConfigTokens &, const char *, size_t, size_t) {});
-    for_each_def_line_noted(buf, file_len, tokens_state, [&](const char *at) { noter.line(at); },
+    for_each_def_line(buf, file_len, tokens_state,
                             [&](const io::ConfigTokens &tokens, const char *line, size_t line_len,
                                 size_t line_index) {
         const char *key = tokens.tokens[0];
@@ -214,7 +212,6 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out,
             table_installed = 0;
             copy_token(current.name, 32, tokens, 1);
             validate_header(as_read.c_str(), as_read.size(), 4, 32, current.unmodeled_count, report, number, current.name);
-            current.note = noter.open(DefRecordKind::Ammo);
             in_block = 1;
             return false;
         }
@@ -230,13 +227,11 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out,
                     for (const DefEffectTableEntry &e : staged)
                         DA_PUSH(current.effects_table, current.effects_table_count, eff_cap, e);
                     table_installed = 1;
-                    noter.property(DEF_LINE_ORDER_ROWS); // the table's end, a line of its rows' step
                 }
                 staged.clear();
                 return false;
             }
             inherit_ammo_defaults(&current, out);
-            noter.close();
             DA_PUSH(out->entries, out->count, entries_cap, current);
             memset(&current, 0, sizeof(current));
             eff_cap = 0;
@@ -268,8 +263,6 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out,
                 copy_token(e.hit_effect, sizeof(e.hit_effect), tokens, 1);
                 copy_token(e.impact_sound, sizeof(e.impact_sound), tokens, 2);
                 e.value = io::retail_atol(tokens.token(3));
-                // A row of the ammo's table, one line (its notes its own).
-                e.note = noter.open_nested(DefRecordKind::Effect, DEF_LINE_ORDER_ROWS, false, 0);
                 staged.push_back(e);
             }
             return false;
@@ -283,7 +276,6 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out,
                 authoring_issue(current.unmodeled_count, report, number, current.name, as_read.c_str(), as_read.size());
             in_effects = 1;
             def_note_line(DefRecordKind::Ammo, current.line_order, key, strlen(key)); // where its table stands
-            if (!table_installed) noter.property(DEF_LINE_ORDER_ROWS);
             staged.clear();
             return false;
         }
@@ -506,14 +498,12 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out,
             // What a writer keeps of the line: its place in the ammo's order, the file's indentation.
             def_note_line(DefRecordKind::Ammo, current.line_order, key, strlen(key));
             def_note_indent(out->layout, indent_noted, line, line_len);
-            noter.property(def_line_step(DefRecordKind::Ammo, key, strlen(key)));
         }
         if (!parsed) {
             authoring_issue(current.unmodeled_count, report, number, current.name, as_read.c_str(), as_read.size());
         }
         return false;
     });
-    noter.finish();
 
     /* The def the walk stopped in, or that the file never closes, was allocated
        at its `ammo` line and stays in the table [orig: AmmoDef_AllocateSlot
@@ -533,7 +523,7 @@ int def_parse_ammo(const char *path, DefAmmoFile *out, DefParseReport *report) {
     size_t file_len;
     char *buf = read_file(path, &file_len);
     if (!buf) return -1;
-    int rc = parse_ammo_buffer(buf, file_len, out, report, nullptr);
+    int rc = parse_ammo_buffer(buf, file_len, out, report);
     free(buf);
     return rc;
 }
@@ -541,17 +531,7 @@ int def_parse_ammo(const char *path, DefAmmoFile *out, DefParseReport *report) {
 int def_parse_ammo_memory(const uint8_t *data, size_t size, DefAmmoFile *out, DefParseReport *report) {
     memset(out, 0, sizeof(*out));
     if (!data) return -1;
-    return parse_ammo_buffer((const char *)data, size, out, report, nullptr);
-}
-
-int def_parse_ammo_memory(const uint8_t *data, size_t size, DefAmmoFile *out, DefParseReport *report,
-                          DefTextNotes &notes) {
-    memset(out, 0, sizeof(*out));
-    notes = DefTextNotes();
-    if (!data) return -1;
-    const int rc = parse_ammo_buffer((const char *)data, size, out, report, &notes);
-    def_note_baseline(*out, notes);
-    return rc;
+    return parse_ammo_buffer((const char *)data, size, out, report);
 }
 
 void def_free_ammo(DefAmmoFile *f) {

@@ -21,7 +21,6 @@
 #include <string.h>
 
 #include <initializer_list>
-#include <set>
 #include <string>
 
 namespace opennova::avatars {
@@ -212,7 +211,7 @@ enum ParseState { ST_TOP = 0, ST_HEAD = 1, ST_BODY = 2, ST_ARMS = 3, ST_NAT = 4,
  * (above depth 0) and one beginning `{` pushes, whatever follows the brace;
  * every other line first checks the part count, which at 512 ends the walk with
  * "ComboObj Parse Error" (D-PLAYERINFO-2). */
-static int parse_buffer(const char *buf, size_t buf_len, AvatarsFile *out, textlayout::Notes *notes) {
+static int parse_buffer(const char *buf, size_t buf_len, AvatarsFile *out) {
     memset(out, 0, sizeof(*out));
 
     size_t parts_cap = 0, nats_cap = 0, diag_cap = 0;
@@ -227,29 +226,8 @@ static int parse_buffer(const char *buf, size_t buf_len, AvatarsFile *out, textl
     int error = 0;
     size_t line_no = 0;
 
-    /* The file's layout (textlayout): each scope's record (0: none, its lines read for nothing), the record
-       the next `{` at a depth enters, and the records whose `{` and `}` came (a `{` never enters a record
-       again once its `}` closed it; a record never entered closes at the next opener of its depth). */
-    textlayout::Noter noter(buf, buf_len, notes, textlayout::cut_ascii_walk);
-    out->note = noter.root();
-    uint64_t rec[kMaxDepth + 2] = {noter.root()};
-    uint64_t pending_rec[kMaxDepth + 2] = {0};
-    std::set<uint64_t> entered, closed;
-    const auto open_record = [&](uint64_t parent) -> uint64_t {
-        const uint64_t prior = pending_rec[depth + 1];
-        if (prior && !entered.count(prior) && !closed.count(prior)) {
-            noter.close(prior);
-            closed.insert(prior);
-        }
-        const uint64_t note = parent ? noter.open(parent) : 0;
-        pending_rec[depth + 1] = note;
-        return note;
-    };
-
-    io::for_each_config_line_span(buf, buf_len, [&](const io::ConfigTokens &t,
-                                                    const io::ConfigLineSpan &span) {
+    io::for_each_config_line_span(buf, buf_len, [&](const io::ConfigTokens &t, const io::ConfigLineSpan &) {
         ++line_no;
-        noter.line(span.begin, span.end + 2);
         if (error) return;
         /* The walk's gate: no token, or a first token starting '/' [orig:
            File_ParseASCIIFile @0x53D915 / @0x53D91E]. */
@@ -258,24 +236,12 @@ static int parse_buffer(const char *buf, size_t buf_len, AvatarsFile *out, textl
 
         /* [orig: the `}` test @ 0x57a40f, the `{` test @ 0x57a430] */
         if (first[0] == '}' && depth > 0) {
-            if (rec[depth]) {
-                noter.entry(rec[depth], "}");
-                noter.close(rec[depth]);
-                closed.insert(rec[depth]);
-            }
             --depth;
             return;
         }
         if (first[0] == '{') {
             if (depth + 2 < kMaxDepth + 2) {
                 state[depth + 2] = state[depth + 1];
-                const uint64_t entering = pending_rec[depth + 1];
-                rec[depth + 1] = entering && !closed.count(entering) ? entering : 0;
-                pending_rec[depth + 2] = 0;
-                if (rec[depth + 1]) {
-                    noter.entry(rec[depth + 1], "{");
-                    entered.insert(rec[depth + 1]);
-                }
                 ++depth;
             }
             return;
@@ -300,8 +266,6 @@ static int parse_buffer(const char *buf, size_t buf_len, AvatarsFile *out, textl
                 memset(&fresh, 0, sizeof(fresh));
                 fresh.kind = kind;
                 tok_copy(tok(t, 2), fresh.name, sizeof(fresh.name)); /* [orig @ 0x57a4ed] */
-                fresh.note = open_record(rec[depth]);
-                if (fresh.note) noter.entry(fresh.note, "define");
                 DA_PUSH(out->parts, out->parts_count, parts_cap, fresh);
                 part = (long)out->parts_count - 1;
             } else if (tok_ieq(first, "nationality")) {
@@ -309,14 +273,12 @@ static int parse_buffer(const char *buf, size_t buf_len, AvatarsFile *out, textl
                 const unsigned id = (unsigned)tok_lenient_id(tok(t, 1));
                 if (id > 31) { /* error state 7 */
                     state[depth + 1] = ST_BAD_NAT;
-                    open_record(0);
                     return;
                 }
                 if (has_nationality_slot(out, (int)id)) {
                     push_diag(out, &diag_cap, line_no, AVATAR_DIAG_WARNING,
                               "duplicate_nationality", "duplicate nationality slot ignored");
                     state[depth + 1] = ST_BAD_NAT;
-                    open_record(0);
                     return;
                 }
                 AvatarNationality fresh;
@@ -325,8 +287,6 @@ static int parse_buffer(const char *buf, size_t buf_len, AvatarsFile *out, textl
                 tok_copy(tok(t, 1), fresh.raw_id, sizeof(fresh.raw_id));
                 tok_copy(tok(t, 2), fresh.name_key, sizeof(fresh.name_key));
                 join_flags(t, 3, fresh.flags, sizeof(fresh.flags));
-                fresh.note = open_record(rec[depth]);
-                if (fresh.note) noter.entry(fresh.note, "nationality");
                 DA_PUSH(out->nationalities, out->nationalities_count, nats_cap, fresh);
                 nat = (long)out->nationalities_count - 1;
                 div = -1;
@@ -340,37 +300,24 @@ static int parse_buffer(const char *buf, size_t buf_len, AvatarsFile *out, textl
             /* [orig @ 0x57aaf8..] the part fields, written to the current part
                whatever its kind */
             AvatarPart *pp = &out->parts[part];
-            /* A line of the part's own block is its entry; one that writes the current part from another
-               block (a `{` re-entering its state) is read for nothing where it stands, as the layout goes. */
-            const uint64_t own = rec[depth] && rec[depth] == pp->note ? pp->note : 0;
-            const auto mark = [&](const char *key) {
-                if (own) noter.entry(own, key);
-            };
             if (tok_ieq(first, "name")) {
                 tok_copy(tok(t, 1), pp->display_name, sizeof(pp->display_name));
-                mark("name");
             } else if (tok_ieq(first, "graphic") || tok_ieq(first, "graphic_d")) {
                 tok_copy(tok(t, 1), pp->graphic, sizeof(pp->graphic)); /* D-PLAYERINFO-3 */
-                mark("graphic");
             } else if (tok_ieq(first, "graphic_j")) {
                 tok_copy(tok(t, 1), pp->graphic_j, sizeof(pp->graphic_j));
-                mark("graphic_j");
             } else if (tok_ieq(first, "graphic_s")) {
                 tok_copy(tok(t, 1), pp->graphic_s, sizeof(pp->graphic_s));
-                mark("graphic_s");
             } else if (tok_ieq(first, "camo")) {
                 pp->camo[0] = tok_byte(tok(t, 1));
                 pp->camo[1] = tok_byte(tok(t, 2));
                 pp->camo[2] = tok_byte(tok(t, 3));
-                mark("camo");
             } else if (tok_ieq(first, "voice")) {
                 pp->voice = tok_byte(tok(t, 1));
-                mark("voice");
             } else if (tok_ieq(first, "sex")) {
                 pp->sex = tok_ieq(tok(t, 1), "F") ? AVATAR_SEX_FEMALE : AVATAR_SEX_MALE;
-                mark("sex");
             }
-            /* Any other line the walk reads nothing of: the layout keeps it (a line read for nothing). */
+            /* Any other line the walk reads nothing of. */
             return;
         }
 
@@ -385,21 +332,17 @@ static int parse_buffer(const char *buf, size_t buf_len, AvatarsFile *out, textl
                     np->alignment = AVATAR_ALIGN_EVIL;
                     np->has_alignment = 1;
                 }
-                if (rec[depth] && rec[depth] == np->note && (tok_ieq(tok(t, 1), "good") || tok_ieq(tok(t, 1), "evil")))
-                    noter.entry(np->note, "alignment");
             } else if (tok_ieq(first, "division")) {
                 /* [orig @ 0x57a73b] */
                 const unsigned id = (unsigned)tok_lenient_id(tok(t, 1));
                 if (id > 15) { /* error state 8 */
                     state[depth + 1] = ST_BAD_DIV;
-                    open_record(0);
                     return;
                 }
                 if (has_division_slot(np, (int)id)) {
                     push_diag(out, &diag_cap, line_no, AVATAR_DIAG_WARNING,
                               "duplicate_division", "duplicate division slot ignored");
                     state[depth + 1] = ST_BAD_DIV;
-                    open_record(0);
                     return;
                 }
                 AvatarDivision fresh;
@@ -408,8 +351,6 @@ static int parse_buffer(const char *buf, size_t buf_len, AvatarsFile *out, textl
                 tok_copy(tok(t, 1), fresh.raw_id, sizeof(fresh.raw_id));
                 tok_copy(tok(t, 2), fresh.name_key, sizeof(fresh.name_key));
                 join_flags(t, 3, fresh.flags, sizeof(fresh.flags));
-                fresh.note = open_record(rec[depth] && rec[depth] == np->note ? np->note : 0);
-                if (fresh.note) noter.entry(fresh.note, "division");
                 size_t cap = np->divisions_count;
                 np->divisions = (AvatarDivision *)realloc(np->divisions,
                                                           (cap + 1) * sizeof(*np->divisions));
@@ -417,14 +358,14 @@ static int parse_buffer(const char *buf, size_t buf_len, AvatarsFile *out, textl
                 div = (long)np->divisions_count - 1;
                 state[depth + 1] = ST_DIV;
             }
-            /* Any other line the walk reads nothing of: the layout keeps it (a line read for nothing). */
+            /* Any other line the walk reads nothing of. */
             return;
         }
 
         case ST_DIV: {
             if (div < 0) return; /* a division of an earlier nationality: no slot here */
             AvatarDivision *dp = &out->nationalities[nat].divisions[div];
-            if (!tok_ieq(first, "combo")) return; /* read for nothing: the layout keeps the line */
+            if (!tok_ieq(first, "combo")) return; /* read for nothing */
             /* [orig @ 0x57a7ed]: the LAST part of each kind named by tokens 2..4
                (the search keeps the last match), the arms optional; the id a plain
                atol (@ 0x57a90d), the lenient skip being the nationality's and the
@@ -469,11 +410,6 @@ static int parse_buffer(const char *buf, size_t buf_len, AvatarsFile *out, textl
                               "combo kept without arms because its arms part is not defined yet");
                 }
             }
-            if (rec[depth] && rec[depth] == dp->note) {
-                c.note = noter.open(dp->note);
-                noter.entry(c.note, "combo");
-                noter.close(c.note);
-            }
             size_t cap = dp->combos_count;
             dp->combos = (AvatarCombo *)realloc(dp->combos, (cap + 1) * sizeof(*dp->combos));
             dp->combos[dp->combos_count++] = c;
@@ -486,7 +422,6 @@ static int parse_buffer(const char *buf, size_t buf_len, AvatarsFile *out, textl
         }
     });
 
-    noter.finish();
     if (error) {
         avatars_free(out);
         return error;
@@ -494,22 +429,9 @@ static int parse_buffer(const char *buf, size_t buf_len, AvatarsFile *out, textl
     return 0;
 }
 
-static void records_of(const AvatarsFile *file, textlayout::OutRecord &root);
-
 int avatars_parse_memory(const void *data, size_t size, AvatarsFile *out) {
     if (!data || !out) return 1;
-    return parse_buffer((const char *)data, size, out, nullptr);
-}
-
-int avatars_parse_memory(const void *data, size_t size, AvatarsFile *out, textlayout::Notes &notes) {
-    if (!data || !out) return 1;
-    const int rc = parse_buffer((const char *)data, size, out, &notes);
-    if (rc != 0) return rc;
-    /* Each record's lines modeled against what the writer puts down for it as read. */
-    textlayout::OutRecord as_read;
-    records_of(out, as_read);
-    textlayout::model(notes, as_read, textlayout::cut_ascii_walk);
-    return 0;
+    return parse_buffer((const char *)data, size, out);
 }
 
 int avatars_parse(const char *path, AvatarsFile *out) {
@@ -517,7 +439,7 @@ int avatars_parse(const char *path, AvatarsFile *out) {
     size_t len = 0;
     char *buf = read_file(path, &len);
     if (!buf) { memset(out, 0, sizeof(*out)); return 1; }
-    int rc = parse_buffer(buf, len, out, nullptr);
+    int rc = parse_buffer(buf, len, out);
     free(buf);
     return rc;
 }
@@ -573,80 +495,61 @@ static std::string value_of(const char *v) {
     return out;
 }
 
-/* The records the writer puts down (textlayout): the file's header comment, each part (its `define` line, its
+/* The text the writer puts down: the file's header comment and a blank line, each part (its `define` line, its
  * braces, its keys, a blank line after it), then each nationality (its line, its braces, its alignment, each
- * division after a blank line, its combos one line each). The blank lines and the header are its form's
- * separators. */
-static void records_of(const AvatarsFile *file, textlayout::OutRecord &root) {
-    root = textlayout::OutRecord();
-    root.note = file->note;
-    root.lines.push_back({"", "// Avatars.def - generated by OpenNova engine/formats/avatars (do not hand-edit formatting)"});
-    root.lines.push_back({"", ""});
+ * division after a blank line, its combos one line each, a blank line after it), every line ending CR LF, the
+ * one break the game's walk splits at [orig: File_ParseASCIIFile @ 0x53d810]. */
+static std::string text_of(const AvatarsFile *file) {
+    std::string out;
+    const auto line = [&out](const std::string &text) { out += text + "\r\n"; };
+    line("// Avatars.def - generated by OpenNova engine/formats/avatars (do not hand-edit formatting)");
+    line("");
     char num[32];
     for (size_t i = 0; i < file->parts_count; ++i) {
         const AvatarPart *p = &file->parts[i];
         int k = (p->kind >= 0 && p->kind <= 2) ? p->kind : 0;
-        textlayout::OutRecord part;
-        part.note = p->note;
-        part.kind = "part";
-        part.lines.push_back({"define", std::string("define ") + kKindKeyword[k] + " " + value_of(p->name)});
-        part.lines.push_back({"{", "{"});
-        if (p->display_name[0]) part.lines.push_back({"name", "\tname\t\t" + value_of(p->display_name)});
-        if (p->graphic[0]) part.lines.push_back({"graphic", "\tgraphic\t\t" + value_of(p->graphic)});
-        if (p->graphic_j[0]) part.lines.push_back({"graphic_j", "\tgraphic_j\t" + value_of(p->graphic_j)});
-        if (p->graphic_s[0]) part.lines.push_back({"graphic_s", "\tgraphic_s\t" + value_of(p->graphic_s)});
+        line(std::string("define ") + kKindKeyword[k] + " " + value_of(p->name));
+        line("{");
+        if (p->display_name[0]) line("\tname\t\t" + value_of(p->display_name));
+        if (p->graphic[0]) line("\tgraphic\t\t" + value_of(p->graphic));
+        if (p->graphic_j[0]) line("\tgraphic_j\t" + value_of(p->graphic_j));
+        if (p->graphic_s[0]) line("\tgraphic_s\t" + value_of(p->graphic_s));
         snprintf(num, sizeof(num), "%d %d %d", p->camo[0], p->camo[1], p->camo[2]);
-        part.lines.push_back({"camo", std::string("\tcamo\t\t") + num});
+        line(std::string("\tcamo\t\t") + num);
         snprintf(num, sizeof(num), "%d", p->voice);
-        part.lines.push_back({"voice", std::string("\tvoice\t\t") + num});
-        part.lines.push_back({"sex", std::string("\tsex\t\t") + ((p->sex == AVATAR_SEX_FEMALE) ? "f" : "m")});
-        part.lines.push_back({"}", "}"});
-        part.lines.push_back({"", ""});
-        root.lines.push_back({"", "", int(root.children.size())});
-        root.children.push_back(std::move(part));
+        line(std::string("\tvoice\t\t") + num);
+        line(std::string("\tsex\t\t") + ((p->sex == AVATAR_SEX_FEMALE) ? "f" : "m"));
+        line("}");
+        line("");
     }
     for (size_t i = 0; i < file->nationalities_count; ++i) {
         const AvatarNationality *nat = &file->nationalities[i];
-        textlayout::OutRecord record;
-        record.note = nat->note;
-        record.kind = "nationality";
-        std::string line = "nationality " + value_of(nat->raw_id) + " " + value_of(nat->name_key);
-        if (nat->flags[0]) line += std::string(" ") + nat->flags;
-        record.lines.push_back({"nationality", line});
-        record.lines.push_back({"{", "{"});
+        std::string head = "nationality " + value_of(nat->raw_id) + " " + value_of(nat->name_key);
+        if (nat->flags[0]) head += std::string(" ") + nat->flags;
+        line(head);
+        line("{");
         if (nat->has_alignment)
-            record.lines.push_back({"alignment", std::string("\talignment\t") + ((nat->alignment == AVATAR_ALIGN_EVIL) ? "evil" : "good")});
+            line(std::string("\talignment\t") + ((nat->alignment == AVATAR_ALIGN_EVIL) ? "evil" : "good"));
         for (size_t j = 0; j < nat->divisions_count; ++j) {
             const AvatarDivision *d = &nat->divisions[j];
-            textlayout::OutRecord division;
-            division.note = d->note;
-            division.kind = "division";
-            division.lines.push_back({"", ""});
-            std::string head = "\tdivision " + value_of(d->raw_id) + " " + value_of(d->name_key);
-            if (d->flags[0]) head += std::string(" ") + d->flags;
-            division.lines.push_back({"division", head});
-            division.lines.push_back({"{", "\t{"});
+            line("");
+            std::string division = "\tdivision " + value_of(d->raw_id) + " " + value_of(d->name_key);
+            if (d->flags[0]) division += std::string(" ") + d->flags;
+            line(division);
+            line("\t{");
             for (size_t c = 0; c < d->combos_count; ++c) {
                 const AvatarCombo *cm = &d->combos[c];
-                textlayout::OutRecord combo;
-                combo.note = cm->note;
-                combo.kind = "combo";
-                std::string text = "\t\tcombo " + value_of(cm->raw_id) + " " + value_of(cm->head_name) + " " +
-                                   value_of(cm->body_name);
-                if (cm->arms_name[0]) text += " " + value_of(cm->arms_name);
-                combo.lines.push_back({"combo", text});
-                division.lines.push_back({"", "", int(division.children.size())});
-                division.children.push_back(std::move(combo));
+                std::string combo = "\t\tcombo " + value_of(cm->raw_id) + " " + value_of(cm->head_name) + " " +
+                                    value_of(cm->body_name);
+                if (cm->arms_name[0]) combo += " " + value_of(cm->arms_name);
+                line(combo);
             }
-            division.lines.push_back({"}", "\t}"});
-            record.lines.push_back({"", "", int(record.children.size())});
-            record.children.push_back(std::move(division));
+            line("\t}");
         }
-        record.lines.push_back({"}", "}"});
-        record.lines.push_back({"", ""});
-        root.lines.push_back({"", "", int(root.children.size())});
-        root.children.push_back(std::move(record));
+        line("}");
+        line("");
     }
+    return out;
 }
 
 static int fields_refused(const AvatarsFile *file) {
@@ -677,31 +580,9 @@ static int hand_out(const std::string &text, char **out_data, size_t *out_size) 
     }
 
 int avatars_write(const AvatarsFile *file, char **out_data, size_t *out_size) {
-    return avatars_write(file, nullptr, out_data, out_size, nullptr);
-}
-
-int avatars_write(const AvatarsFile *file, const textlayout::Notes *notes, char **out_data, size_t *out_size,
-                  bool *rewritten) {
-    if (rewritten) *rewritten = false;
     if (!file || !out_data || !out_size) return 1;
     if (const int refused = fields_refused(file)) return refused;
-    textlayout::OutRecord root;
-    records_of(file, root);
-    /* Every line ends in CR LF, the one break the game's walk splits at
-       [orig: File_ParseASCIIFile @ 0x53d810]. */
-    const std::string eol = notes ? textlayout::file_eol(*notes, "\r\n") : std::string("\r\n");
-    std::string text = textlayout::compose(notes, root, textlayout::cut_ascii_walk, eol);
-    if (notes) {
-        AvatarsFile again;
-        const int rc = avatars_parse_memory(text.data(), text.size(), &again);
-        const bool same = rc == 0 && avatars_equal(again, *file);
-        if (rc == 0) avatars_free(&again);
-        if (!same) {
-            text = textlayout::compose(nullptr, root, textlayout::cut_ascii_walk, "\r\n");
-            if (rewritten) *rewritten = true;
-    }
-    }
-    return hand_out(text, out_data, out_size);
+    return hand_out(text_of(file), out_data, out_size);
 }
 
 bool avatars_equal(const AvatarsFile &a, const AvatarsFile &b) {

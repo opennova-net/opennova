@@ -1,25 +1,24 @@
 // engine/formats/score — score.ini read as ScoreConfig_LoadFile reads it, written as ScoreConfig_SaveFile
-// writes it, over the file's modeled layout (textlayout), and the witnessed row-index ladder.
+// writes it from the model alone, and the witnessed row-index ladder.
 //
 // Committed fixture: fixtures/score/score_sample.ini, AUTHORED for this test
 // (not retail data). It carries three GAMETYPE blocks in the shipped file's
 // index order so the block-order-is-the-row-index rule and the index-0 -> 2
 // remap are both exercised, with the retail Co-op row's witnessed ENEMYKILL 5 /
-// MEDICSAVE 2. Read with its layout and written again it is itself, byte for
-// byte (its comments, its blank lines, its LF endings); a value changed changes
-// its one line.
+// MEDICSAVE 2. Written from its model and read again it is the same model; a
+// value changed reads back changed.
 //
 // The reader's lines: a line whose first or second character is '/' is read for
 // nothing, every other line's tokens split at white space with quotes dropped,
 // FIELD / VAR / EXP_FANFARE taking three tokens and a name of their tables, so a
 // line the game reads nothing of is never an error. A minted file (no source
-// text) is ScoreConfig_SaveFile's form.
+// text) is ScoreConfig_SaveFile's form byte for byte, and reads back as itself.
 //
 // The retail leg (--retail) reads <OPENNOVA_JO_DIR>/score.ini: its 12 blocks, its
 // Co-op row 2's ENEMYKILL 5 (the value the S2C 0x81 score mirror reproduces in the
 // retail capture: 5, 10, 20, ... 220), and the writer's own form of it IS the
-// shipped file byte for byte (the game wrote it with these defaults), as is the
-// noted write.
+// shipped file byte for byte (the game wrote it with these defaults), and reads
+// back as the same model.
 #include <formats/score/score.h>
 
 #include "common/file_io.h"
@@ -46,22 +45,12 @@ score::File parsed(const std::string &text) {
 
 std::string text_of(const std::vector<uint8_t> &bytes) { return std::string(bytes.begin(), bytes.end()); }
 
-int lines_changed(const std::string &a, const std::string &b) {
-	const auto split = [](const std::string &t) {
-		std::vector<std::string> out;
-		size_t at = 0;
-		while (at < t.size()) {
-			const size_t end = t.find('\n', at);
-			out.push_back(t.substr(at, end == std::string::npos ? std::string::npos : end - at));
-			at = end == std::string::npos ? t.size() : end + 1;
-		}
-		return out;
-	};
-	const std::vector<std::string> x = split(a), y = split(b);
-	if (x.size() != y.size()) return -1;
-	int n = 0;
-	for (size_t i = 0; i < x.size(); ++i) n += x[i] != y[i];
-	return n;
+// The model written and read again.
+score::File round_trip(const score::File &file) {
+	std::vector<uint8_t> out;
+	std::string error;
+	if (!score::write(file, out, error)) return score::File{};
+	return parsed(text_of(out));
 }
 
 } // namespace
@@ -77,7 +66,7 @@ int main(int argc, char **argv) {
 	std::string error;
 	TEST_EXPECT(score::parse(bytes.data(), bytes.size(), file, error));
 	TEST_EXPECT(file.version == 40);
-	TEST_EXPECT(file.has_exp_fanfare && file.exp_fanfare[0] == 0 && file.exp_fanfare[1] == 0 && !score::exp_fanfare_kept(file));
+	TEST_EXPECT(file.exp_fanfare[0] == 0 && file.exp_fanfare[1] == 0 && !score::exp_fanfare_kept(file));
 	TEST_EXPECT(file.blocks.size() == 3);
 
 	// Block ORDER is the engine's row index [orig: ScoreConfig_LoadScoringTableForGameType
@@ -129,26 +118,13 @@ int main(int argc, char **argv) {
 	TEST_EXPECT(form.find("\r\n\r\n\r\nGAMETYPE \"COOP\"\r\n\r\nFIELD \"NUMENEMYKILLS\" 1\r\n\r\nVAR \"ENEMYKILL\" 5\r\nVAR \"MEDICSAVE\" 2\r\n") !=
 	            std::string::npos);
 
-	// The fixture read with its layout and written again is itself; one value changed, one line.
+	// The model written and read again is the same model: one value changed, a FIELD added.
 	{
-		textlayout::Notes notes;
-		score::File noted;
-		TEST_EXPECT(score::parse(bytes.data(), bytes.size(), noted, error, notes));
-		std::vector<uint8_t> out;
-		bool rewritten = true;
-		TEST_EXPECT(score::write(noted, &notes, out, error, &rewritten) && !rewritten);
-		TEST_EXPECT(out == bytes);
-		noted.blocks[2].vars[0].value = 7;
-		TEST_EXPECT(score::write(noted, &notes, out, error, &rewritten));
-		TEST_EXPECT(!rewritten);
-		TEST_EXPECT(lines_changed(text_of(bytes), text_of(out)) == 1);
-		TEST_EXPECT(score::var_value(parsed(text_of(out)).blocks[2], "ENEMYKILL", -1) == 7);
-		// A FIELD added: its line after the block's last FIELD, in the writer's form and the file's ending.
-		noted.blocks[1].fields.push_back({"NUMDEATHS", 1, 0});
-		TEST_EXPECT(score::write(noted, &notes, out, error, &rewritten));
-		TEST_EXPECT(!rewritten);
-		TEST_EXPECT(text_of(out).find("GAMETYPE \"TDM\"\n\nFIELD \"NUMENEMYKILLS\" 1\nFIELD \"NUMDEATHS\" 1\n") != std::string::npos);
-		TEST_EXPECT(score::equal(parsed(text_of(out)), noted));
+		score::File edited = file;
+		edited.blocks[2].vars[0].value = 7;
+		TEST_EXPECT(score::equal(round_trip(edited), edited) && score::var_value(round_trip(edited).blocks[2], "ENEMYKILL", -1) == 7);
+		edited.blocks[1].fields.push_back({"NUMDEATHS", 1});
+		TEST_EXPECT(score::equal(round_trip(edited), edited) && round_trip(edited).blocks[1].fields.size() == 2);
 	}
 
 	// What the reader reads nothing of is no error: a FIELD outside any GAMETYPE, a VAR of two tokens, a name
@@ -157,15 +133,14 @@ int main(int argc, char **argv) {
 		const score::File none = parsed("VERSION 40\nFIELD \"NUMDEATHS\" 1\nGAMETYPE \"A\"\nVAR \"FIRE\"\nVAR \"NOPE\" 3\n /VAR \"FIRE\" 2\n");
 		TEST_EXPECT(none.blocks.size() == 1 && none.blocks[0].name == "A" && none.blocks[0].fields.empty() &&
 		            none.blocks[0].vars.empty());
-		// A VAR read twice keeps its last value; a FIELD of a byte keeps its byte; a fanfare of 1 2 is kept (a
-		// block's line, after the fanfare line's place).
+		// A VAR read twice keeps its last value; a FIELD of a byte keeps its byte; a fanfare of 1 2 is stored (a
+		// block's line).
 		const score::File twice = parsed("VERSION 40\r\nGAMETYPE \"DM\"\r\nVAR \"FIRE\" 1\r\nVAR \"fire\" 4\r\nFIELD \"NUMDEATHS\" 300\r\nEXP_FANFARE 1 2\r\n");
 		TEST_EXPECT(twice.blocks[0].vars.size() == 1 && twice.blocks[0].vars[0].value == 4);
-		int32_t stored[2] = {0, 0};
-		TEST_EXPECT(twice.blocks[0].fields[0].value == 44 && !twice.has_exp_fanfare && twice.fanfare_after.kept &&
-		            score::kept_fanfare(twice, stored) && stored[0] == 1 && stored[1] == 2);
+		TEST_EXPECT(twice.blocks[0].fields[0].value == 44 && twice.exp_fanfare[0] == 1 && twice.exp_fanfare[1] == 2);
+		TEST_EXPECT(score::equal(round_trip(twice), twice));
 		score::File refused = twice;
-		refused.blocks[0].fields.push_back({"NOPE", 1, 0});
+		refused.blocks[0].fields.push_back({"NOPE", 1});
 		TEST_EXPECT(!score::write(refused, encoded, error) && error.find("NOPE") != std::string::npos);
 		// A file of another version keeps it (the game reads it for nothing, and writes its own over it).
 		score::File old = twice;
@@ -175,74 +150,55 @@ int main(int argc, char **argv) {
 
 	// The review's cases (#987). A File built in code is the game's version 40 [orig: ScoreConfig_SaveFile @
 	// 0x52CE66]; a file read at another version reads to no block (the game reads none of it [orig: @ 0x52DA8A]),
-	// and its noted write is the file; the line cut at 2047 characters, the byte after it stepped over [orig:
+	// and its write reads back so; the line cut at 2047 characters, the byte after it stepped over [orig:
 	// Text_ReadLine @ 0x52D110]; the fanfare stored only through its gate [orig: @ 0x52DC75..0x52DC9F].
 	{
 		score::File minted;
 		score::GameTypeBlock dm;
 		dm.name = "DM";
-		dm.vars.push_back({"FIRE", 1, 0});
+		dm.vars.push_back({"FIRE", 1});
 		minted.blocks.push_back(dm);
 		TEST_EXPECT(score::write(minted, encoded, error) && text_of(encoded).find("\r\nVERSION 40\r\n") != std::string::npos &&
 		            text_of(encoded).find("\r\nEXP_FANFARE 0 0\r\n") != std::string::npos);
-		TEST_EXPECT(parsed(text_of(encoded)).blocks.size() == 1);
+		TEST_EXPECT(parsed(text_of(encoded)).blocks.size() == 1 && score::equal(parsed(text_of(encoded)), minted));
 
 		const std::string v39 = "VERSION 39\r\nGAMETYPE \"DM\"\r\nVAR \"FIRE\" 5\r\nEXP_FANFARE 1 2\r\n";
-		textlayout::Notes notes;
-		score::File old;
-		TEST_EXPECT(score::parse(reinterpret_cast<const uint8_t *>(v39.data()), v39.size(), old, error, notes));
-		TEST_EXPECT(old.version == 39 && old.blocks.empty() && !old.has_exp_fanfare);
-		std::vector<uint8_t> out;
-		bool rewritten = true;
-		TEST_EXPECT(score::write(old, &notes, out, error, &rewritten) && !rewritten && text_of(out) == v39);
+		const score::File old = parsed(v39);
+		TEST_EXPECT(old.version == 39 && old.blocks.empty() && old.exp_fanfare[0] == 0 && old.exp_fanfare[1] == 0);
+		TEST_EXPECT(score::equal(round_trip(old), old));
 		TEST_EXPECT(parsed("GAMETYPE \"DM\"\r\nVAR \"FIRE\" 5\r\n").version == 0 &&
 		            parsed("GAMETYPE \"DM\"\r\nVAR \"FIRE\" 5\r\n").blocks.empty());
 
 		const std::string longer = "VERSION 40\r\nGAMETYPE \"DM\"\r\n" + std::string(2047, ' ') + "XVAR \"FIRE\" 5\r\n";
 		const score::File cut = parsed(longer);
 		TEST_EXPECT(cut.blocks.size() == 1 && cut.blocks[0].vars.size() == 1 && cut.blocks[0].vars[0].value == 5);
-		textlayout::Notes long_notes;
-		score::File long_file;
-		TEST_EXPECT(score::parse(reinterpret_cast<const uint8_t *>(longer.data()), longer.size(), long_file, error, long_notes));
-		TEST_EXPECT(score::write(long_file, &long_notes, out, error, &rewritten) && !rewritten && text_of(out) == longer);
+		TEST_EXPECT(score::equal(round_trip(cut), cut));
 
-		// The fanfare line is the last before the first block, its pair whatever it holds; the game stores the last
-		// pair past the gate, an earlier line's where the fanfare line's fails, a block's line's after it.
-		int32_t kept[2] = {-1, -1};
+		// The game stores the last pair past the gate, an earlier line's where a later one fails it, a block's line's
+		// after the lines before it; the defaults' 0 0 where none passes. Written, the stored pair reads back.
 		const score::File fanfare = parsed("VERSION 40\r\nEXP_FANFARE 1 2\r\nEXP_FANFARE 0 0\r\n");
-		TEST_EXPECT(fanfare.has_exp_fanfare && fanfare.exp_fanfare[0] == 0 && fanfare.exp_fanfare[1] == 0 &&
-		            !score::exp_fanfare_kept(fanfare) && fanfare.fanfare_before.kept && !fanfare.fanfare_after.kept);
-		TEST_EXPECT(score::kept_fanfare(fanfare, kept) && kept[0] == 1 && kept[1] == 2);
+		TEST_EXPECT(fanfare.exp_fanfare[0] == 1 && fanfare.exp_fanfare[1] == 2 && score::exp_fanfare_kept(fanfare));
+		TEST_EXPECT(score::equal(round_trip(fanfare), fanfare));
 		const score::File unkept = parsed("VERSION 40\r\nEXP_FANFARE 2 1\r\n");
-		TEST_EXPECT(unkept.has_exp_fanfare && unkept.exp_fanfare[0] == 2 && unkept.exp_fanfare[1] == 1 &&
-		            !score::kept_fanfare(unkept, kept) && kept[0] == 0 && kept[1] == 0);
+		TEST_EXPECT(unkept.exp_fanfare[0] == 0 && unkept.exp_fanfare[1] == 0 && !score::exp_fanfare_kept(unkept));
+		TEST_EXPECT(score::equal(round_trip(unkept), unkept));
 		const score::File after = parsed("VERSION 40\r\nEXP_FANFARE 1 2\r\nGAMETYPE \"DM\"\r\nEXP_FANFARE 3 4\r\n");
-		TEST_EXPECT(after.exp_fanfare[0] == 1 && after.fanfare_after.kept && score::kept_fanfare(after, kept) &&
-		            kept[0] == 3 && kept[1] == 4);
+		TEST_EXPECT(after.exp_fanfare[0] == 3 && after.exp_fanfare[1] == 4 && score::equal(round_trip(after), after));
 		std::printf("review cases: a minted File at 40, a version-39 file read to nothing and kept, the 2047 cut, "
-		            "the fanfare's gate\n");
+		            "the fanfare's gate, each written and read back\n");
 	}
 
-	// The #997 review's case: the game's own 0 0 line is the file's fanfare line, so a set rewrites it in place (one
-	// line, no second EXP_FANFARE), and setting it back gives the file again.
+	// The #997 review's case: a pair set is the writer's one EXP_FANFARE line, and reads back.
 	{
-		const std::string shipped = "VERSION 40\r\n\r\nEXP_FANFARE 0 0\r\n\r\nGAMETYPE \"DM\"\r\n\r\nVAR \"FIRE\" 5\r\n";
-		textlayout::Notes notes;
-		score::File noted;
-		TEST_EXPECT(score::parse(reinterpret_cast<const uint8_t *>(shipped.data()), shipped.size(), noted, error, notes));
-		TEST_EXPECT(noted.has_exp_fanfare);
-		noted.exp_fanfare[0] = 2;
-		noted.exp_fanfare[1] = 5;
+		score::File set = parsed("VERSION 40\r\n\r\nEXP_FANFARE 0 0\r\n\r\nGAMETYPE \"DM\"\r\n\r\nVAR \"FIRE\" 5\r\n");
+		set.exp_fanfare[0] = 2;
+		set.exp_fanfare[1] = 5;
 		std::vector<uint8_t> out;
-		bool rewritten = true;
-		TEST_EXPECT(score::write(noted, &notes, out, error, &rewritten) && !rewritten);
-		const std::string set = text_of(out);
-		TEST_EXPECT(lines_changed(shipped, set) == 1 && set.find("\r\nEXP_FANFARE 2 5\r\n") != std::string::npos &&
-		            set.find("EXP_FANFARE") == set.rfind("EXP_FANFARE"));
-		noted.exp_fanfare[0] = 0;
-		noted.exp_fanfare[1] = 0;
-		TEST_EXPECT(score::write(noted, &notes, out, error, &rewritten) && !rewritten && text_of(out) == shipped);
-		std::printf("fanfare line: a set rewrites the file's own line in place\n");
+		TEST_EXPECT(score::write(set, out, error));
+		const std::string text = text_of(out);
+		TEST_EXPECT(text.find("\r\nEXP_FANFARE 2 5\r\n") != std::string::npos && text.find("EXP_FANFARE") == text.rfind("EXP_FANFARE"));
+		TEST_EXPECT(score::equal(parsed(text), set));
+		std::printf("fanfare: a pair set is the one EXP_FANFARE line, read back\n");
 	}
 
 	// --- retail: <OPENNOVA_JO_DIR>/score.ini, the score table the install
@@ -276,15 +232,13 @@ int main(int argc, char **argv) {
 			std::vector<uint8_t> renc;
 			TEST_EXPECT(score::write(rfile, renc, error));
 		TEST_EXPECT(renc == rbytes);
-		textlayout::Notes notes;
-		score::File noted;
-		TEST_EXPECT(score::parse(rbytes.data(), rbytes.size(), noted, error, notes));
-		bool rewritten = true;
-		TEST_EXPECT(score::write(noted, &notes, renc, error, &rewritten) && !rewritten && renc == rbytes);
-		noted.blocks[3].vars[0].value += 1;
-		TEST_EXPECT(score::write(noted, &notes, renc, error, &rewritten) && !rewritten);
-		TEST_EXPECT(lines_changed(text_of(rbytes), text_of(renc)) == 1);
-		std::printf("retail: score.ini is the writer's own form byte for byte, and its noted write too; one VAR one line\n");
+		// The game's reader takes the written file as the shipped one: the same fields.
+		TEST_EXPECT(score::equal(parsed(text_of(renc)), rfile));
+		score::File edited = rfile;
+		edited.blocks[3].vars[0].value += 1;
+		TEST_EXPECT(score::equal(round_trip(edited), edited));
+		std::printf("retail: score.ini is the writer's own form byte for byte, read back as the same fields; an edit "
+		            "reads back\n");
 	}
 
 	std::printf("score roundtrip tests passed\n");

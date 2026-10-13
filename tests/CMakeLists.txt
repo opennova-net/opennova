@@ -667,20 +667,13 @@ target_link_libraries(score_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(score_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(score_roundtrip COMMAND score_roundtrip_test)
 
-# The modeled layout of a line-oriented text file (formats/textlayout): a line's parts, a file generated
-# over its notes (a value, a set, a key anew, records swapped, gone and added), the writer's form without.
-add_executable(text_layout_test textlayout/text_layout_test.cpp)
-target_link_libraries(text_layout_test PRIVATE opennova_formats)
-target_include_directories(text_layout_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME text_layout COMMAND text_layout_test)
-
-# The AI profiles' writer over the file's modeled layout (formats/aip, textlayout): a minted profile in
-# the writer's form, an authored file written again as it was, one value one line; --retail: every
-# shipped profile byte for byte.
-add_executable(aip_noted_test aip/aip_noted_test.cpp)
-target_link_libraries(aip_noted_test PRIVATE opennova_base opennova_formats)
-target_include_directories(aip_noted_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(aip_noted COMMAND aip_noted_test)
+# The AI profiles' writer (formats/aip): a minted profile in the writer's form byte for byte, written and
+# read again the same profile, each unit's shortest word; --retail: every shipped profile written from its
+# model reads back as that model.
+add_executable(aip_write_test aip/aip_write_test.cpp)
+target_link_libraries(aip_write_test PRIVATE opennova_base opennova_formats)
+target_include_directories(aip_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(aip_write COMMAND aip_write_test)
 
 # game.cfg: the minted fixtures/gamecfg/synth_game.cfg (Game_SaveConfig's
 # layout through gamecfg::write), its byte-exact load/write round trip, and the
@@ -5071,10 +5064,13 @@ target_link_libraries(def_write_hudpos_test PRIVATE opennova_base opennova_forma
 target_include_directories(def_write_hudpos_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(def_write_hudpos COMMAND def_write_hudpos_test)
 
-add_executable(def_noted_write_test def/def_noted_write_test.cpp)
-target_link_libraries(def_noted_write_test PRIVATE opennova_base opennova_formats)
-target_include_directories(def_noted_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(def_noted_write COMMAND def_noted_write_test)
+# The def writers' own form (formats/def): a minted record byte for byte and read back as itself, the
+# writer's reals the shortest that read back; --retail: every catalog written from its model reads back as
+# that model, one field changed changes one line, and its reals are the shortest.
+add_executable(def_write_form_test def/def_write_form_test.cpp)
+target_link_libraries(def_write_form_test PRIVATE opennova_base opennova_formats)
+target_include_directories(def_write_form_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(def_write_form COMMAND def_write_form_test)
 
 # The capture-point labels: the map-overlay slot walk and the marker types 8/9.
 add_executable(hud_capture_labels_test hud/hud_capture_labels_test.cpp)

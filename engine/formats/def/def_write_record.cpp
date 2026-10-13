@@ -316,45 +316,10 @@ std::string DefRecordWriter::margin(int levels) const {
 void DefRecordWriter::line(const std::string &key, const std::vector<std::string> &values) {
 	std::string text = margin(depth) + key;
 	for (const auto &value : values) text += (key.empty() && &value == &values.front() ? "" : " ") + value;
-	put(text + "\r\n", put_role);
+	put(text + "\r\n");
 }
 
-int DefRecordWriter::begin_record(uint64_t note, DefRecordKind kind, uint8_t step, bool plain) {
-	const int slot = int(slots.size());
-	const int parent = open_.empty() ? -1 : open_.back().slot;
-	slots.push_back({note, kind, parent, plain || (parent >= 0 && slots[size_t(parent)].plain)});
-	if (parent >= 0) {
-		Written at;
-		at.slot = parent;
-		at.role = DefNotedRole::Nested;
-		at.step = step;
-		at.nested = slot;
-		at.begin = at.end = result.text.size();
-		written.push_back(at);
-	}
-	open_.push_back({slot, put_role, put_step});
-	put_role = DefNotedRole::Line;
-	put_step = 0;
-	return slot;
-}
-
-void DefRecordWriter::end_record() {
-	if (open_.empty()) return;
-	put_role = open_.back().role;
-	put_step = open_.back().step;
-	open_.pop_back();
-}
-
-void DefRecordWriter::put(const std::string &text, DefNotedRole role) {
-	Written line;
-	line.slot = open_.empty() ? -1 : open_.back().slot;
-	line.role = role;
-	line.step = put_step;
-	line.begin = result.text.size();
-	result.text += text;
-	line.end = result.text.size();
-	written.push_back(line);
-}
+void DefRecordWriter::put(const std::string &text) { result.text += text; }
 
 void DefRecordWriter::record(DefRecordKind kind, const void *value, const std::string &name,
                              const std::function<void(uint8_t step)> &nested) {
@@ -411,9 +376,6 @@ void DefRecordWriter::record(DefRecordKind kind, const void *value, const std::s
 	AliasCover cover;
 	for (size_t at = 0; at < steps.size(); ++at) {
 		const uint8_t step = steps[at];
-		// What each line put down for this step is: a line of the record's at it (def_notes.h).
-		put_role = DefNotedRole::Line;
-		put_step = step;
 		if (step == DEF_LINE_ORDER_ROWS || step == DEF_LINE_ORDER_BLOCKS) {
 			if (nested) nested(step);
 			continue;

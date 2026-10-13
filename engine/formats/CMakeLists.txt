@@ -13,7 +13,7 @@ add_library(opennova_formats STATIC
     # retail never writes it)
     ${CMAKE_CURRENT_SOURCE_DIR}/admincfg/admin_cfg.cpp
     # aip — AI profile text: every key of AIProfile_ParseProperty read, and the
-    # profile written from scratch over the file's modeled layout (textlayout)
+    # profile written from scratch
     ${CMAKE_CURRENT_SOURCE_DIR}/aip/aip.cpp
     # avatars — Avatars.def
     ${CMAKE_CURRENT_SOURCE_DIR}/avatars/avatars.cpp
@@ -66,14 +66,12 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def.cpp          # the .def umbrella + loadout weight/encumbrance
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_ammo.cpp     # AMMO.DEF
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_authored.cpp  # a member in the units its line writes
-    ${CMAKE_CURRENT_SOURCE_DIR}/def/def_compose.cpp  # a file generated over its modeled layout
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_hudfx.cpp    # HUDFX.DEF: the HUD's 3D models' names
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_hudpos.cpp   # HUDPOS.DEF
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_hudpos_write.cpp # HUDPOS.DEF's writer
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_hudpos_text.cpp # HUDPOS.DEF's lines as the parser is handed them
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_items.cpp    # ITEMS.DEF
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_layout.cpp   # the order and indentation a file was read with
-    ${CMAKE_CURRENT_SOURCE_DIR}/def/def_notes.cpp    # what a save needs to put a file back as it was read
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_powerup.cpp  # POWERUP.DEF
     ${CMAKE_CURRENT_SOURCE_DIR}/def/reserved_items.cpp # the ids and rows the engine fixes
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_scan.cpp     # the shared .def text scanner
@@ -176,10 +174,6 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/tga/tga_read.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/tga/tga.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/tga/tga_source.cpp
-    # textlayout — the modeled layout of a line-oriented text file, which the
-    # noted writers of Avatars.def, charattr.def, score.ini and the AI profiles
-    # generate every byte from (ADR 0003, "model it, generate it")
-    ${CMAKE_CURRENT_SOURCE_DIR}/textlayout/text_layout.cpp
     # threedi — the .3di model format (3DI3 first-class, ADR 0027)
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_3di3_read.cpp   # 3DI3 -> Threedi3di3

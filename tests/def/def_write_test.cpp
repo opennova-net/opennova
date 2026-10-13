@@ -17,7 +17,6 @@
 // 0046 S12 D5) read as the saved line's arguments, and a set of what one shows leaves its
 // record byte for byte as it was, directly and after another number went through the line,
 // over the inline catalogs, the items fixture and the three retail catalogs.
-#include <formats/def/def_notes.h>
 #include <formats/def/def_scan.h>
 #include <formats/def/def_write.h>
 #include <formats/def/def_write_record.h>
@@ -355,28 +354,7 @@ int mission_editor_keys() {
 		std::printf("FAIL mission editor seeds\n");
 		++failures;
 	}
-	// The file written again over its modeled layout as it was, byte for byte, a value changed on its own line;
-	// and from nothing: each key and word where the record holds one, none where it holds the seed.
-	{
-		DefItemsFile noted{};
-		DefTextNotes notes;
-		DefParseReport report;
-		def_parse_items_memory(reinterpret_cast<const uint8_t *>(text), std::strlen(text), &noted, &report, notes);
-		const DefWriteResult kept = def_write_items(noted, &notes);
-		if (!kept.ok() || kept.text != text) {
-			std::printf("FAIL mission editor keys kept:\n%s\n", kept.text.c_str());
-			++failures;
-		}
-		if (noted.count == 2) noted.entries[0].max_engagement_dist = 450;
-		const DefWriteResult edited = def_write_items(noted, &notes);
-		std::string expected = text;
-		expected.replace(expected.find("max_engagement_dist 400"), 23, "max_engagement_dist 450");
-		if (!edited.ok() || edited.text != expected) {
-			std::printf("FAIL mission editor keys edited:\n%s\n", edited.text.c_str());
-			++failures;
-		}
-		def_free_items(&noted);
-	}
+	// Written from nothing: each key and word where the record holds one, none where it holds the seed.
 	const DefWriteResult made = def_write_items(file);
 	const size_t crate_at = made.text.find("Crate");
 	if (!made.ok() || made.text.find("max_attack_dist 30") == std::string::npos ||

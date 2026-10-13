@@ -1,7 +1,6 @@
 // The order and the indentation a def file was read with (def.h's DefLineOrder and DefLayout), which
 // an authoring writer keeps: no text of the file, a place in the property table per line and the
 // blanks one level of a block takes.
-#include "def_notes.h"
 #include "def_schema.h"
 
 #include <array>
@@ -79,6 +78,20 @@ const std::unordered_map<std::string, uint8_t> &steps_of(DefRecordKind kind) {
 
 bool blank(char c) { return c == ' ' || c == '\t'; }
 
+// The step a line of `kind` names by its key, or -1 for none.
+int line_step(DefRecordKind kind, const char *line, size_t length) {
+	size_t start = 0;
+	while (start < length && blank(line[start])) ++start;
+	size_t end = start;
+	while (end < length && !blank(line[end]) && line[end] != '\r' && line[end] != '\n' && line[end] != '"' &&
+	       line[end] != ',')
+		++end;
+	if (end == start) return -1;
+	const auto &steps = steps_of(kind);
+	const auto found = steps.find(lower(line + start, end - start));
+	return found == steps.end() ? -1 : int(found->second);
+}
+
 } // namespace
 
 DefLineOrder *def_line_order(DefRecordKind kind, void *record) {
@@ -95,21 +108,8 @@ const DefLineOrder *def_line_order(DefRecordKind kind, const void *record) {
 	return def_line_order(kind, const_cast<void *>(record));
 }
 
-int def_line_step(DefRecordKind kind, const char *line, size_t length) {
-	size_t start = 0;
-	while (start < length && blank(line[start])) ++start;
-	size_t end = start;
-	while (end < length && !blank(line[end]) && line[end] != '\r' && line[end] != '\n' && line[end] != '"' &&
-	       line[end] != ',')
-		++end;
-	if (end == start) return -1;
-	const auto &steps = steps_of(kind);
-	const auto found = steps.find(lower(line + start, end - start));
-	return found == steps.end() ? -1 : int(found->second);
-}
-
 void def_note_line(DefRecordKind kind, DefLineOrder &order, const char *line, size_t length) {
-	const int step = def_line_step(kind, line, length);
+	const int step = line_step(kind, line, length);
 	if (step < 0) return;
 	for (size_t i = 0; i < order.count; ++i)
 		if (order.steps[i] == uint8_t(step)) return;

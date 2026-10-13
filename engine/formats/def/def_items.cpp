@@ -3,7 +3,7 @@
 
 // ITEMS.DEF: one record per world item, the largest of the families.
 
-#include "def_notes.h"
+#include "def_schema.h"
 #include "def_scan.h"
 
 #include <base/io/strutil.h>
@@ -147,8 +147,7 @@ void def_init_item(DefItemDef &value) {
    `end` @0x49EB1D clears the open flag]: a `begin` inside an open block keeps the open
    record and starts the next, and a block the file never closes is still an item. Lines
    outside a block are ignored (the open-flag test @0x49EC1A). */
-static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, DefParseReport *report,
-                           DefTextNoter &noter) {
+static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, DefParseReport *report) {
     size_t entries_cap = 0;
     DefItemDef current;
     def_init_item(current);
@@ -159,7 +158,7 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
     size_t number = 0; // the line a finding names, counting from 1
 
     io::ConfigTokens tokens_state;
-    for_each_def_line_noted(buf, file_len, tokens_state, [&](const char *at) { noter.line(at); },
+    for_each_def_line(buf, file_len, tokens_state,
                             [&](io::ConfigTokens &tokens, const char *line, size_t line_len,
                                 size_t line_index) {
         const char *key = tokens.tokens[0];
@@ -191,7 +190,6 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
                 }
                 DA_PUSH(out->entries, out->count, entries_cap, current);
                 def_init_item(current);
-                noter.close();
                 emplacement_attachments_cap = 0;
                 in_block = 0;
             }
@@ -207,7 +205,6 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
             }
             def_init_item(current); /* [orig: the begin arm calls
                 ItemDef_AllocateWithDefaults @0x49E3B0 from ItemDef_ParseProperty @0x49EB00] */
-            current.note = noter.open(DefRecordKind::Item);
             emplacement_attachments_cap = 0;
             powerup_branch = numeric_branch = false;
             /* The name is token 1, cut to 46 characters in the line buffer
@@ -235,7 +232,6 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
                 "rotor_parts", "aux_parts", "door_open_sound_id", "door_close_sound_id"})
             numeric_branch |= key_is(key, numeric);
         int parsed = 0;
-        bool row_line = false; // a row of its own (an attachment), noted as one
 
         if (key_is(key, "graphicenemy")) {
             copy_token(current.graphic_enemy, sizeof(current.graphic_enemy), tokens, 1);
@@ -551,11 +547,6 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
                 attachment.item_id = parse_int_n(tok[1].s, tok[1].len);
                 attachment.kind = kind;
                 attachment.angle_count = n >= 6 ? 4 : 0;
-                // A row of the item's, one line (its notes its own).
-                const int row_step = def_line_step(DefRecordKind::Attachment, key, strlen(key));
-                attachment.note = noter.open_nested(DefRecordKind::Attachment, DEF_LINE_ORDER_ROWS, false,
-                                                    uint8_t(row_step < 0 ? 0 : row_step));
-                row_line = true;
                 if (n >= 6) {
                     constexpr int kBamPerDegree = 11930464;
                     attachment.down_angle = parse_int_n(tok[2].s, tok[2].len) * kBamPerDegree;
@@ -948,13 +939,11 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
             // What a writer keeps of the line: its place in the record's order, the file's indentation.
             def_note_line(DefRecordKind::Item, current.line_order, key, strlen(key));
             def_note_indent(out->layout, indent_noted, line, line_len);
-            if (!row_line) noter.property(def_line_step(DefRecordKind::Item, key, strlen(key)));
         }
         if (!parsed) {
             authoring_issue(current.unmodeled_count, report, number, current.display_name, as_read.c_str(), as_read.size());
         }
     });
-    noter.finish();
 
     /* A block the file never closes was allocated at its `begin` and stays an
        item [orig: the begin arm @0x49EBA8]; its `end` is missing, which the
@@ -972,8 +961,7 @@ int def_parse_items(const char *path, DefItemsFile *out, DefParseReport *report)
     size_t file_len;
     char *buf = read_file(path, &file_len);
     if (!buf) return -1;
-    DefTextNoter none(buf, file_len, nullptr);
-    int rc = parse_items_buf(buf, file_len, out, report, none);
+    int rc = parse_items_buf(buf, file_len, out, report);
     free(buf);
     return rc;
 }
@@ -981,19 +969,7 @@ int def_parse_items(const char *path, DefItemsFile *out, DefParseReport *report)
 int def_parse_items_memory(const uint8_t *data, size_t size, DefItemsFile *out, DefParseReport *report) {
     memset(out, 0, sizeof(*out));
     if (!data) return -1;
-    DefTextNoter none((const char *)data, size, nullptr);
-    return parse_items_buf((const char *)data, size, out, report, none);
-}
-
-int def_parse_items_memory(const uint8_t *data, size_t size, DefItemsFile *out, DefParseReport *report,
-                           DefTextNotes &notes) {
-    memset(out, 0, sizeof(*out));
-    notes = DefTextNotes();
-    if (!data) return -1;
-    DefTextNoter noter((const char *)data, size, &notes);
-    const int rc = parse_items_buf((const char *)data, size, out, report, noter);
-    def_note_baseline(*out, notes);
-    return rc;
+    return parse_items_buf((const char *)data, size, out, report);
 }
 
 void def_free_items(DefItemsFile *f) {

@@ -1,9 +1,9 @@
 // hudfx.def (formats/def/def_hudfx.h; docs/interface/hud-re.md "hudfx.def"): the tagged lines the HUD's init
 // walk would take (a tag any case, its model the second token, a line opening '/' or of no token skipped), the
 // one the game reads (the first: its callback ends the walk), the names its slots hold (a long name running into
-// the next slots, the last slot's run cleared); the writer's form of a minted file; a file read with its layout
-// and written again as it was (its comment, its spacing, a line of no tag); one model changed its one line; a
-// line added after the last, the lines swapped; a model no one token holds refused. JO ships no hudfx.def.
+// the next slots, the last slot's run cleared); the writer's form of a minted file byte for byte, read back as
+// itself; an authored file (a comment, odd spacing, a tag's case, a line of no tag) written from its lines and
+// read back as those lines; a model no one token holds refused. JO ships no hudfx.def.
 #include <formats/def/def_hudfx.h>
 
 #include "common/test_expect.h"
@@ -39,39 +39,30 @@ int tags() {
 
 int written() {
 	HudFxFile minted;
-	minted.lines.push_back({0, "hud.3di", 0});
-	minted.lines.push_back({3, "p3.3di", 0});
+	minted.lines.push_back({0, "hud.3di"});
+	minted.lines.push_back({3, "p3.3di"});
 	std::string text, error;
-	TEST_EXPECT(hudfx_write(minted, nullptr, text, error) && text == "3DIHud\thud.3di\r\n3DIPower3\tp3.3di\r\n");
+	TEST_EXPECT(hudfx_write(minted, text, error) && text == "3DIHud\thud.3di\r\n3DIPower3\tp3.3di\r\n");
 	HudFxFile again = parsed(text);
 	TEST_EXPECT(again.lines.size() == 2 && again.lines[1].slot == 3 && again.lines[1].model == "p3.3di");
 	// A line of no model is its tag alone, read back so.
 	HudFxFile bare;
-	bare.lines.push_back({5, "", 0});
-	TEST_EXPECT(hudfx_write(bare, nullptr, text, error) && text == "3DIPower5\r\n");
+	bare.lines.push_back({5, ""});
+	TEST_EXPECT(hudfx_write(bare, text, error) && text == "3DIPower5\r\n");
 	again = parsed(text);
 	TEST_EXPECT(again.lines.size() == 1 && again.lines[0].slot == 5 && again.lines[0].model.empty());
 	minted.lines[0].model = "two words";
-	TEST_EXPECT(!hudfx_write(minted, nullptr, text, error) && error.find("two words") != std::string::npos);
+	TEST_EXPECT(!hudfx_write(minted, text, error) && error.find("two words") != std::string::npos);
 
 	const std::string file = "// the HUD's models\r\n3dihud   hud.3di   // the frame\r\nnot a tag\r\n\r\n3DIPower1 p1.3di\r\n";
-	textlayout::Notes notes;
-	HudFxFile noted = hudfx_parse(reinterpret_cast<const uint8_t *>(file.data()), file.size(), notes);
-	bool rewritten = true;
-	TEST_EXPECT(hudfx_write(noted, &notes, text, error, &rewritten) && !rewritten && text == file);
-	noted.lines[0].model = "frame2.3di";
-	TEST_EXPECT(hudfx_write(noted, &notes, text, error, &rewritten) && !rewritten);
-	TEST_EXPECT(text == "// the HUD's models\r\n3dihud   frame2.3di   // the frame\r\nnot a tag\r\n\r\n3DIPower1 p1.3di\r\n");
-	noted.lines[0].model = "hud.3di";
-	noted.lines.push_back({4, "p4.3di", 0});
-	TEST_EXPECT(hudfx_write(noted, &notes, text, error, &rewritten) && !rewritten && text == file + "3DIPower4\tp4.3di\r\n");
-	noted.lines.pop_back();
-	std::swap(noted.lines[0], noted.lines[1]);
-	TEST_EXPECT(hudfx_write(noted, &notes, text, error, &rewritten) && !rewritten);
+	// An authored file: written from its lines in the writer's form, read back as those lines.
+	const HudFxFile authored = parsed(file);
+	TEST_EXPECT(authored.lines.size() == 2 && hudfx_write(authored, text, error));
+	TEST_EXPECT(text == "3DIHud\thud.3di\r\n3DIPower1\tp1.3di\r\n");
 	again = parsed(text);
-	TEST_EXPECT(again.lines.size() == 2 && again.lines[0].slot == 1 && again.lines[1].slot == 0);
-	std::printf("written: a minted file in the writer's form; an authored one again as it was, a model, a line "
-	            "added and a swap\n");
+	TEST_EXPECT(again.lines.size() == 2 && again.lines[0].slot == 0 && again.lines[0].model == "hud.3di" &&
+	            again.lines[1].slot == 1 && again.lines[1].model == "p1.3di");
+	std::printf("written: a minted file in the writer's form; an authored one from its lines, read back as them\n");
 	return 0;
 }
 

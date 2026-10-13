@@ -92,45 +92,6 @@ std::vector<std::string> split_tokens(const std::string &line) {
 	return out;
 }
 
-// A line cut into its layout's parts (textlayout) by the reader's own split [orig: Text_ReadLine @ 0x52D110,
-// Text_SplitIntoTokens @ 0x52D1B0]: its ending a CR LF, an LF or a CR; its words the tokens (a quoted run
-// with its quotes, a quote toggling the run whatever stands around it); white space between them. The reader
-// has no comment in a line (a line opening `/` is one whole); its trailing blanks are the tail.
-textlayout::Line cut_line(const char *text, size_t length) {
-	textlayout::Line out;
-	size_t end = length;
-	if (end >= 2 && text[end - 2] == '\r' && text[end - 1] == '\n') end -= 2;
-	else if (end >= 1 && (text[end - 1] == '\n' || text[end - 1] == '\r')) end -= 1;
-	out.eol.assign(text + end, length - end);
-	const auto space = [](char c) { return std::isspace(static_cast<unsigned char>(c)) != 0; };
-	size_t at = 0;
-	while (at < end && space(text[at])) ++at;
-	out.indent.assign(text, at);
-	bool quoted = false;
-	size_t word = SIZE_MAX;
-	std::string gap;
-	for (size_t i = at; i < end; ++i) {
-		const char c = text[i];
-		if (!quoted && space(c)) {
-			if (word != SIZE_MAX) {
-				out.words.emplace_back(text + word, i - word);
-				word = SIZE_MAX;
-			}
-			gap += c;
-			continue;
-		}
-		if (c == '"') quoted = !quoted;
-		if (word == SIZE_MAX) {
-			if (!out.words.empty()) out.gaps.push_back(gap);
-			gap.clear();
-			word = i;
-		}
-	}
-	if (word != SIZE_MAX) out.words.emplace_back(text + word, end - word);
-	out.tail = gap;
-	return out;
-}
-
 // One line as Text_ReadLine @ 0x52D110 cuts it, its buffer 2048 bytes at both calls: [begin, end) its text,
 // [end, next) its ending (a CR LF, an LF or a lone CR; a NUL ends the line and is stepped over). A line of more
 // than 2047 characters is cut there and the byte after the cut stepped over, whatever it is, the rest read as
@@ -159,58 +120,36 @@ std::vector<Span> lines_of(const char *text, size_t size) {
 	return out;
 }
 
-bool read_file(const uint8_t *data, size_t size, File &out, textlayout::Notes *notes) {
+bool read_file(const uint8_t *data, size_t size, File &out) {
 	out = File{};
 	out.version = 0; // no VERSION line reads as none
 	if (data == nullptr) return false;
 	const char *text = reinterpret_cast<const char *>(data);
 	const std::vector<Span> lines = lines_of(text, size);
-	// The first pass: VERSION, the last [orig: ScoreConfig_LoadFile @ 0x52DA45..0x52DA5E]. With it, the fanfare line
-	// the model holds: the last EXP_FANFARE line before the first GAMETYPE, the writer's place for its one.
-	size_t fanfare_line = SIZE_MAX;
-	bool in_block = false;
-	for (size_t at = 0; at < lines.size(); ++at) {
-		const Span &span = lines[at];
+	// The first pass: VERSION, the last [orig: ScoreConfig_LoadFile @ 0x52DA45..0x52DA5E].
+	for (const Span &span : lines) {
 		const std::string line(text + span.begin, span.end - span.begin);
 		if (!line.empty() && (line[0] == '/' || (line.size() > 1 && line[1] == '/'))) continue;
 		const std::vector<std::string> tokens = split_tokens(line);
 		if (tokens.size() >= 2 && strutil::iequals(tokens[0], "VERSION")) out.version = io::retail_atol(tokens[1].c_str());
-		in_block = in_block || (tokens.size() > 1 && strutil::iequals(tokens[0], "GAMETYPE"));
-		if (!in_block && tokens.size() > 2 && strutil::iequals(tokens[0], "EXP_FANFARE")) fanfare_line = at;
 	}
-	textlayout::Noter noter(text, size, notes, cut_line);
-	out.note = noter.root();
-	uint64_t block_note = 0;
 	// The second pass, run only at version 40 [orig: `if (version == 40)` @ 0x52DA8A; any other version writes
-	// the defaults over the file instead, @ 0x52DA9E]: a file of another version reads to no block, its lines
-	// read for nothing but its VERSION line (the layout's entry, for the version the model holds).
+	// the defaults over the file instead, @ 0x52DA9E]: a file of another version reads to no block.
 	const bool read = out.version == kVersion;
-	for (size_t at = 0; at < lines.size(); ++at) {
-		const Span &span = lines[at];
-		noter.line(span.begin, span.next);
+	for (const Span &span : lines) {
 		const std::string line(text + span.begin, span.end - span.begin);
 		// A line whose first or second character is '/' is read for nothing [orig: @ 0x52DAF6].
 		if (!line.empty() && (line[0] == '/' || (line.size() > 1 && line[1] == '/'))) continue;
 		const std::vector<std::string> tokens = split_tokens(line);
 		if (tokens.empty()) continue;
-		if (!read) {
-			if (tokens.size() >= 2 && strutil::iequals(tokens[0], "VERSION")) noter.entry(noter.root(), "VERSION");
-			continue;
-		}
+		if (!read) continue;
 		if (tokens.size() > 1 && strutil::iequals(tokens[0], "GAMETYPE")) {
 			GameTypeBlock block;
 			block.name = tokens[1];
-			if (block_note) noter.end_before(block_note);
-			block_note = noter.open(noter.root());
-			block.note = block_note;
-			noter.entry(block_note, "GAMETYPE");
 			out.blocks.push_back(std::move(block));
 			continue;
 		}
-		if (tokens.size() >= 2 && strutil::iequals(tokens[0], "VERSION")) {
-			if (!block_note) noter.entry(noter.root(), "VERSION");
-			continue;
-		}
+		if (tokens.size() >= 2 && strutil::iequals(tokens[0], "VERSION")) continue;
 		if (tokens.size() <= 2) continue;
 		if (strutil::iequals(tokens[0], "FIELD")) {
 			if (out.blocks.empty() || id_in(kFields, tokens[1]) < 0) continue;
@@ -218,9 +157,6 @@ bool read_file(const uint8_t *data, size_t size, File &out, textlayout::Notes *n
 			entry.name = tokens[1];
 			// The value is a byte [orig: `optionLookup = atol(token2)` @ 0x52DBD9 -> sub_52CD70's char].
 			entry.value = int32_t(uint8_t(io::retail_atol(tokens[2].c_str())));
-			entry.note = noter.open(block_note);
-			noter.entry(entry.note, "FIELD");
-			noter.close(entry.note);
 			out.blocks.back().fields.push_back(std::move(entry));
 		} else if (strutil::iequals(tokens[0], "VAR")) {
 			if (out.blocks.empty() || id_in(kVars, tokens[1]) < 0) continue;
@@ -229,29 +165,19 @@ bool read_file(const uint8_t *data, size_t size, File &out, textlayout::Notes *n
 			const auto same = std::find_if(vars.begin(), vars.end(),
 			                               [&](const Entry &e) { return strutil::iequals(e.name, tokens[1]); });
 			if (same != vars.end()) same->value = value;
-			else vars.push_back({tokens[1], value, 0});
-			noter.entry(block_note, "VAR " + strutil::to_upper(tokens[1]));
+			else vars.push_back({tokens[1], value});
 		} else if (strutil::iequals(tokens[0], "EXP_FANFARE")) {
 			// Two bytes [orig: @ 0x52DC75 / @ 0x52DC7C], stored only when both are other than 0 and the second is
 			// the greater [orig: @ 0x52DC75..0x52DC9F]: a line failing the gate leaves the pair as it was (the
-			// defaults', or an earlier line's). The fanfare line is the model's, its pair whatever it holds (the
-			// layout's entry, which a set rewrites); every other line stores what it stores, read for nothing.
+			// defaults', or an earlier line's).
 			const int32_t a = int32_t(uint8_t(io::retail_atol(tokens[1].c_str())));
 			const int32_t b = int32_t(uint8_t(io::retail_atol(tokens[2].c_str())));
-			if (at == fanfare_line) {
+			if (a != 0 && b != 0 && b > a) {
 				out.exp_fanfare[0] = a;
 				out.exp_fanfare[1] = b;
-				out.has_exp_fanfare = true;
-				noter.entry(noter.root(), "EXP_FANFARE");
-			} else if (a != 0 && b != 0 && b > a) {
-				StoredFanfare &stored = out.blocks.empty() ? out.fanfare_before : out.fanfare_after;
-				stored.pair[0] = a;
-				stored.pair[1] = b;
-				stored.kept = true;
 			}
 		}
 	}
-	noter.finish();
 	return true;
 }
 
@@ -259,63 +185,54 @@ bool read_file(const uint8_t *data, size_t size, File &out, textlayout::Notes *n
 // the quoted run, and a name of no character is no token.
 bool quotable(const std::string &name) { return !name.empty() && name.find_first_of("\"\r\n") == std::string::npos && name.find('\0') == std::string::npos; }
 
-// The records ScoreConfig_SaveFile @ 0x52CDD0 puts down for the file (textlayout): the header, the version and
-// the fanfare, the FIELD names' comments, then each block. The lines the writer's form alone has (the header,
-// the comments, the blank lines) are its separators.
-bool records_of(const File &file, textlayout::OutRecord &root, std::string &error, bool noted = false) {
-	root = textlayout::OutRecord();
-	root.note = file.note;
+// The text ScoreConfig_SaveFile @ 0x52CDD0 puts down for the file: the header, the version and the fanfare, the
+// FIELD names' comments, then each block; each line ending CR LF [orig: File_WriteLineToHandle @ 0x437010 over
+// g_FileLineEnding]. False with the reason for a block or an entry no line of the reader's reads.
+bool text_of(const File &file, std::string &text, std::string &error) {
+	text.clear();
+	const auto line = [&text](const std::string &line) { text += line + "\r\n"; };
 	char buffer[512];
-	root.lines.push_back({"", kSeparator});
-	root.lines.push_back({"", "// NovaLogic Score INI file"});
-	root.lines.push_back({"", kSeparator});
-	root.lines.push_back({"", ""});
+	line(kSeparator);
+	line("// NovaLogic Score INI file");
+	line(kSeparator);
+	line("");
 	// The game writes its own version, 40 [orig: @ 0x52CE66]; a file read at another keeps its own (the reader takes
 	// only 40, so it reads the same).
 	std::snprintf(buffer, sizeof buffer, "VERSION %ld", long(file.version));
-	root.lines.push_back({"VERSION", buffer});
-	root.lines.push_back({"", ""});
-	// The fanfare: the game writes its pair always (the defaults' 0 0 [orig: @ 0x52CE9C]); over a file's layout
-	// the file's fanfare line, or one set anew (has_exp_fanfare), and none where the file has none.
+	line(buffer);
+	line("");
+	// The fanfare: the game writes the pair it stores always (the defaults' 0 0 [orig: @ 0x52CE9C]).
 	std::snprintf(buffer, sizeof buffer, "EXP_FANFARE %d %d", file.exp_fanfare[0] & 0xFF, file.exp_fanfare[1] & 0xFF);
-	if (!noted || file.has_exp_fanfare) root.lines.push_back({"EXP_FANFARE", buffer});
-	root.lines.push_back({"", ""});
+	line(buffer);
+	line("");
 	// Each FIELD name a comment, by its id from 1 to 33 [orig: @ 0x52CEC5..0x52CF0F].
 	for (int32_t id = 1; id <= 33; ++id)
 		for (const Name &row : kFields)
 			if (row.id == id) {
 				std::snprintf(buffer, sizeof buffer, "// FIELD \"%s\"", row.name);
-				root.lines.push_back({"", buffer});
+				line(buffer);
 			}
-	root.lines.push_back({"", ""});
+	line("");
 	for (const GameTypeBlock &block : file.blocks) {
 		if (!quotable(block.name)) {
 			error = "A GAMETYPE's name \"" + block.name + "\" is none the reader reads back as one token.";
 			return false;
 		}
-		textlayout::OutRecord record;
-		record.note = block.note;
-		record.kind = "block";
-		record.lines.push_back({"", ""});
-		record.lines.push_back({"", ""});
+		line("");
+		line("");
 		std::snprintf(buffer, sizeof buffer, "GAMETYPE \"%s\"", block.name.c_str()); // [orig: @ 0x52CF8F]
-		record.lines.push_back({"GAMETYPE", buffer});
-		record.lines.push_back({"", ""});
+		line(buffer);
+		line("");
 		for (const Entry &field : block.fields) {
 			if (id_in(kFields, field.name) < 0) {
 				error = "FIELD \"" + field.name + "\" is no name of the FIELD table: the reader reads it for nothing.";
 				return false;
 			}
-			textlayout::OutRecord line;
-			line.note = field.note;
-			line.kind = "field";
 			// [orig: @ 0x52CFF5, "FIELD \"%s\" %ld" of the byte]
 			std::snprintf(buffer, sizeof buffer, "FIELD \"%s\" %ld", field.name.c_str(), long(uint8_t(field.value)));
-			line.lines.push_back({"FIELD", buffer});
-			record.lines.push_back({"", "", int(record.children.size())});
-			record.children.push_back(std::move(line));
+			line(buffer);
 		}
-		record.lines.push_back({"", ""});
+		line("");
 		// The VARs in their ids' order [orig: @ 0x52D029..0x52D07A, j from 0 to 38].
 		std::vector<const Entry *> vars;
 		for (const Entry &var : block.vars) {
@@ -329,10 +246,8 @@ bool records_of(const File &file, textlayout::OutRecord &root, std::string &erro
 		                 [](const Entry *a, const Entry *b) { return id_in(kVars, a->name) < id_in(kVars, b->name); });
 		for (const Entry *var : vars) {
 			std::snprintf(buffer, sizeof buffer, "VAR \"%s\" %ld", var->name.c_str(), long(var->value)); // [orig: @ 0x52D06B]
-			record.lines.push_back({"VAR " + strutil::to_upper(var->name), buffer});
+			line(buffer);
 		}
-		root.lines.push_back({"", "", int(root.children.size())});
-		root.children.push_back(std::move(record));
 	}
 	return true;
 }
@@ -398,57 +313,19 @@ bool exp_fanfare_kept(const File &file) {
 	return high != 0 && low != 0 && low > high;
 }
 
-bool kept_fanfare(const File &file, int32_t out[2]) {
-	const int32_t *pair = file.fanfare_after.kept ? file.fanfare_after.pair
-	                      : file.has_exp_fanfare && exp_fanfare_kept(file) ? file.exp_fanfare
-	                      : file.fanfare_before.kept ? file.fanfare_before.pair : nullptr;
-	out[0] = pair ? pair[0] & 0xFF : 0;
-	out[1] = pair ? pair[1] & 0xFF : 0;
-	return pair != nullptr;
-}
-
 bool parse(const uint8_t *data, size_t size, File &out, std::string &error) {
-	if (!read_file(data, size, out, nullptr)) {
+	if (!read_file(data, size, out)) {
 		error = "score.ini: no data";
 		return false;
 	}
 	return true;
 }
 
-bool parse(const uint8_t *data, size_t size, File &out, std::string &error, textlayout::Notes &notes) {
-	if (!read_file(data, size, out, &notes)) {
-		error = "score.ini: no data";
-		return false;
-	}
-	textlayout::OutRecord as_read;
-	std::string ignored;
-	if (records_of(out, as_read, ignored, true)) textlayout::model(notes, as_read, cut_line);
-	return true;
-}
-
-bool write(const File &file, std::vector<uint8_t> &out, std::string &error) { return write(file, nullptr, out, error); }
-
-bool write(const File &file, const textlayout::Notes *notes, std::vector<uint8_t> &out, std::string &error,
-           bool *rewritten) {
+bool write(const File &file, std::vector<uint8_t> &out, std::string &error) {
 	error.clear();
 	out.clear();
-	if (rewritten) *rewritten = false;
-	textlayout::OutRecord root;
-	if (!records_of(file, root, error, notes != nullptr)) return false;
-	// Each line ends CR LF [orig: File_WriteLineToHandle @ 0x437010 over g_FileLineEnding].
-	const std::string eol = notes ? textlayout::file_eol(*notes, "\r\n") : "\r\n";
-	std::string text = textlayout::compose(notes, root, cut_line, eol);
-	if (notes) {
-		File again;
-		std::string ignored;
-		read_file(reinterpret_cast<const uint8_t *>(text.data()), text.size(), again, nullptr);
-		if (!equal(again, file)) {
-			if (!records_of(file, root, error)) return false;
-			root.note = 0;
-			text = textlayout::compose(nullptr, root, cut_line, "\r\n");
-			if (rewritten) *rewritten = true;
-		}
-	}
+	std::string text;
+	if (!text_of(file, text, error)) return false;
 	out.assign(text.begin(), text.end());
 	return true;
 }
@@ -469,15 +346,8 @@ int32_t field_value(const GameTypeBlock &block, std::string_view name, int32_t f
 }
 
 bool equal(const File &a, const File &b) {
-	// The fanfare the game keeps (a pair it stores, or none: the defaults stand), and the fanfare line as the file
-	// holds it.
-	int32_t pair_a[2], pair_b[2];
-	const bool kept_a = kept_fanfare(a, pair_a), kept_b = kept_fanfare(b, pair_b);
-	if (a.version != b.version || kept_a != kept_b || (kept_a && (pair_a[0] != pair_b[0] || pair_a[1] != pair_b[1])) ||
-			a.has_exp_fanfare != b.has_exp_fanfare ||
-			(a.has_exp_fanfare && ((a.exp_fanfare[0] & 0xFF) != (b.exp_fanfare[0] & 0xFF) ||
-			                       (a.exp_fanfare[1] & 0xFF) != (b.exp_fanfare[1] & 0xFF))) ||
-			a.blocks.size() != b.blocks.size())
+	if (a.version != b.version || (a.exp_fanfare[0] & 0xFF) != (b.exp_fanfare[0] & 0xFF) ||
+	    (a.exp_fanfare[1] & 0xFF) != (b.exp_fanfare[1] & 0xFF) || a.blocks.size() != b.blocks.size())
 		return false;
 	for (size_t i = 0; i < a.blocks.size(); ++i) {
 		if (a.blocks[i].name != b.blocks[i].name) return false;

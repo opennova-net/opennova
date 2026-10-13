@@ -5,7 +5,6 @@
 #include <string>
 #include <vector>
 
-#include <formats/textlayout/text_layout.h>
 
 namespace opennova::aip {
 
@@ -134,14 +133,8 @@ struct Profile {
 	int32_t use_waypoint_z = 0; // +56  [orig: "use_waypoint_z" atol]
 	int32_t min_agl = 0;               // +232 [orig: "min_agl" atof -> 16.16]
     int32_t min_speed = 0;             // +236 [orig: "min_speed" km/h -> 16.16 u/tick]
-
-	// The file's modeled layout this profile was read with (textlayout: its note there, the file's own
-	// record); 0 for a profile no file's layout names (written in the writer's form).
-	uint64_t note = 0;
 };
 
-// Line-oriented, whitespace-tokenized, case-insensitive property parser.
-Profile parse_profile(const uint8_t *text, size_t size);
 // A line the reader reads nothing of (none of the walk's skipped lines: no token, or opening '/'): before any
 // `type` (the profile of no type takes no key), under ORGANIC (which takes none), a key only the other type's set
 // holds, or a key no arm has (every shipped file's `description`).
@@ -151,11 +144,9 @@ struct UnreadLine {
 	size_t offset = 0; // the line's first byte
 	std::string key;   // its first token
 };
-// The same parse with the file's layout modeled (`notes` filled: each line the arm that read it, as the
-// writer's entry of its key, or none; the profile's note the file's own record), and, with `unread`, the lines
-// it reads nothing of.
-Profile parse_profile(const uint8_t *text, size_t size, textlayout::Notes &notes,
-                      std::vector<UnreadLine> *unread = nullptr);
+// Line-oriented, whitespace-tokenized, case-insensitive property parser; with `unread`, the lines it reads
+// nothing of.
+Profile parse_profile(const uint8_t *text, size_t size, std::vector<UnreadLine> *unread = nullptr);
 
 // What a key's value is in the file, the unit its arm reads it in [orig: AIProfile_ParseProperty @
 // 0x45DE70's arms, cited per key in aip.cpp].
@@ -217,18 +208,14 @@ int32_t read_value(const KeyRow &row, int32_t type, const std::vector<std::strin
 // to it (a BAM no decimal reaches, a state id no name has).
 std::vector<std::string> value_words(const KeyRow &row, int32_t type, int32_t value);
 
-// The profile as the reader reads it again: the same type, every value the same (the layout aside).
+// The profile as the reader reads it again: the same type, every value the same.
 bool same_profile(const Profile &a, const Profile &b);
 
 // The profile's text from scratch (ADR 0003): `type` and then each key of its type whose value is other than
 // the zeroed record's (the loader clears the slot first, AIProfile_LoadOrFind @ 0x45FE09), each `key<TAB>value`
-// with CR LF after it (the walk splits at a CR LF pair alone), over the file's modeled layout where the
-// profile has one (each line as the file had it but for the words of a changed value; a key put down anew
-// after the key before it in the writer's order). The text is read again: one that would not read back as
-// the profile is written in the writer's form, `rewritten` set. False with the reason for a value no word
-// reads back to.
-bool write_profile(const Profile &profile, const textlayout::Notes *notes, std::string &text, std::string &error,
-                   bool *rewritten = nullptr);
+// with CR LF after it (the walk splits at a CR LF pair alone), in the key table's order. The text is read again:
+// false with the reason for a value no word reads back to, or a text that does not read back as the profile.
+bool write_profile(const Profile &profile, std::string &text, std::string &error);
 
 // The two words a class init copies into brain[49]/brain[50], read at the
 // profile offsets that init hard-codes, whatever key the profile's own type
