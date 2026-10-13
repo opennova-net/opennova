@@ -62,13 +62,21 @@ bool CanvasGesture::release(CanvasRequests &out) {
 
 void CanvasGesture::end(CanvasRequests &out) {
 	if (mode_ != Mode::None && sent_)
-		out.request(request::end_edit(subject_.path));
+		out.request(request::end_edit(subject_.path, token_));
 	mode_ = Mode::None;
 	dragging_ = false;
 	sent_ = false;
 	from_ = CanvasPoint();
 	token_ = 0;
 	subject_ = CanvasSubject();
+}
+
+void CanvasGesture::cancel(CanvasRequests &out) {
+	if (mode_ != Mode::None && sent_) {
+		out.request(request::end_edit(subject_.path, token_, true));
+		sent_ = false;
+	}
+	end(out);
 }
 
 void CanvasGesture::frame(const CanvasSubject &subject, CanvasRequests &out) {

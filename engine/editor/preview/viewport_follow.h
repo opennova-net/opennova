@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <base/vfs/file_source.h>
+#include <base/io/strutil.h>
 #include <base/vfs/file_stamps.h>
 
 namespace opennova::editor {
@@ -84,6 +85,17 @@ public:
 	// the picture does not name, S13 V8): each takes the stamp it has now, so the move is not found
 	// again.
 	void restamp(const FileSource &files) { files_.restamp(files); }
+	// The same for the files `names` names alone (S25: a terrain file a stroke patches in place, its picture following
+	// it by region patches, never read again whole per dab).
+	void restamp(const FileSource &files, const std::vector<std::string> &names) {
+		FileStamps kept;
+		for (const FileStamp &file : files_.files()) {
+			bool named = false;
+			for (const std::string &name : names) named = named || strutil::iequals(name, file.name);
+			kept.note(file.name, named ? files.stamp(file.name) : file.stamp);
+		}
+		files_ = std::move(kept);
+	}
 	// True when a file its picture read moved its stamp since the files' generation it last read
 	// (`generation` the source's now), or since it was read when it was not compared yet: what a
 	// caller making its state anew over a picture that stands asks before show(), a model's texture

@@ -62,6 +62,7 @@
 #include <editor/preview/model_canvas.h>
 #include <editor/preview/model_overlay.h>
 #include <editor/preview/model_viewport.h>
+#include <editor/preview/terrain_brush_shapes.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/preview/viewport_overlay.h>
@@ -2383,6 +2384,37 @@ int test_mission_tools() {
 	return 0;
 }
 
+// S25: the terrain brush over the 3D view: while the mission's Terrain pane shows and a tool is picked, its ring (at
+// its cursor, an MCP client's, with no pointer over the picture) is drawn with the marks; put down, none.
+int test_mission_terrain_ring() {
+	MissionRig rig;
+	TEST_EXPECT(rig.open());
+	double target[3];
+	preview_to_mission(rig.follow()->camera().target, target);
+	const auto rim = [&rig]() {
+		CanvasInput away = MissionRig::at(1.0f, 1.0f);
+		away.hovered = false;
+		rig.step(away);
+		rig.out.take();
+		size_t lines = 0;
+		for (const OverlayShape &shape : rig.canvas.shapes(rig.context(), away).shapes)
+			lines += shape.kind == OverlayKind::Line && shape.rgb == kTerrainBrushRgb ? 1 : 0;
+		return lines;
+	};
+	TEST_EXPECT(rim() == 0);
+	char change[256];
+	std::snprintf(change, sizeof change,
+	              R"({"document": {"terrain": true}, "terrain_brush": {"tool": "raise", "radius": 20, "cursor": [%.3f, %.3f]}})",
+	              target[0], target[1]);
+	rig.session.handle(request::set_workspace(change));
+	TEST_EXPECT(rig.session.outcome().done());
+	TEST_EXPECT(rim() >= size_t(kTerrainRingPoints));
+	rig.session.handle(request::set_workspace(R"({"terrain_brush": {"tool": "none"}})"));
+	TEST_EXPECT(rim() == 0);
+	std::printf("test_mission_terrain_ring passed\n");
+	return 0;
+}
+
 // The polish's labels in the Shell's frame order (the view follows, takes the pointer and draws the
 // overlay; the session then serves what the canvas raised and the viewport follows), the labels option
 // on and three entities selected: frames over nothing lay the labels out and word each title once, at
@@ -2535,6 +2567,8 @@ int main() {
 	if (test_mission_delete() != 0)
 		return 1;
 	if (test_mission_place() != 0)
+		return 1;
+	if (test_mission_terrain_ring() != 0)
 		return 1;
 	std::printf("editor_canvas: all tests passed\n");
 	return 0;

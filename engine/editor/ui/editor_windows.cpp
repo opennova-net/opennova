@@ -78,6 +78,14 @@ void draw_unsaved_prompt(Workspace &workspace, const DialogsView::UnsavedPrompt 
 	ImGui::TextUnformatted(sentence.c_str());
 	for (const std::string &file : prompt.files) ImGui::BulletText("%s", file.c_str());
 	const bool one_file = row.guard == GuardScope::Document;
+	// S25: a Close whose list holds the files its view's terrain tools edited: Don't save drops the closed file's own
+	// edits alone, the others staying open with theirs (never dropped silently).
+	const bool others = one_file && prompt.action == EditorRequestKind::CloseDocument &&
+	                    std::any_of(prompt.files.begin(), prompt.files.end(),
+	                                [&](const std::string &file) { return file != prompt.target; });
+	if (others && prompt.can_discard)
+		ImGui::TextWrapped("Don't save closes %s without its own edits; the other files stay open with theirs.",
+		                   basename_of(prompt.target).c_str());
 	const char *save = row.save_label ? row.save_label : "Save all";
 	const auto answer = [&](UnsavedChoice choice) {
 		workspace.request(request::resolve_unsaved(choice));
@@ -232,11 +240,27 @@ void EditorWindows::canvas_mouse(const ViewportMouse &mouse) {
 	canvas_mice_.push_back(mouse);
 }
 
+void EditorWindows::note_brush_ground(const std::string &path, double x, double y) {
+	brush_ground_ = BrushGround{path, x, y};
+}
+
+bool EditorWindows::brush_ground(const std::string &path, double &x, double &y) const {
+	for (const BrushGround *at : {&brush_ground_, &brush_ground_before_})
+		if (!at->path.empty() && at->path == path) {
+			x = at->x;
+			y = at->y;
+			return true;
+		}
+	return false;
+}
+
 void EditorWindows::float_window(const std::string &title, float x, float y) {
 	floating_ = Floating{ title, x, y };
 }
 
 void EditorWindows::begin_frame() {
+	brush_ground_before_ = brush_ground_;
+	brush_ground_ = BrushGround();
 	// A test's undock: off its dock (Dear ImGui's queued undock, served at the next frame's start), then placed.
 	if (!floating_.title.empty()) {
 		if (ImGuiWindow *window = ImGui::FindWindowByName(floating_.title.c_str())) {
@@ -584,12 +608,23 @@ void EditorWindows::draw_edit_menu(const SessionView &v, const DocumentBase *doc
 		ui_kit::tooltip(words);
 		ImGui::Unindent();
 	};
-	if (menu_item("Undo", "Ctrl+Z", document && document->can_undo() && v.allows(EditorRequestKind::Undo)))
+	// S25: in the view of the active document, its own step or one its terrain tools made in another file (a view no
+	// session made holds no next step: the document's own then).
+	const DocumentsView::StepNext &undo = v.documents.undo_next, &redo = v.documents.redo_next;
+	const bool undoes = document && (undo.any() || document->can_undo());
+	const bool redoes = document && (redo.any() || document->can_redo());
+	// The step's own words, and the other files it takes with it (a stroke's followers and its bake's file).
+	const auto with_linked = [](const DocumentsView::StepNext &next) {
+		if (next.linked.empty()) return next.words;
+		return next.words + " (and " + std::to_string(next.linked.size()) +
+		       (next.linked.size() == 1 ? " linked file)" : " linked files)");
+	};
+	if (menu_item("Undo", "Ctrl+Z", undoes && v.allows(EditorRequestKind::Undo)))
 		request(request::undo());
-	if (document) step_words(document->undo_words());
-	if (menu_item("Redo", "Ctrl+Y", document && document->can_redo() && v.allows(EditorRequestKind::Redo)))
+	if (document) step_words(undo.any() ? with_linked(undo) : document->undo_words());
+	if (menu_item("Redo", "Ctrl+Y", redoes && v.allows(EditorRequestKind::Redo)))
 		request(request::redo());
-	if (document) step_words(document->redo_words());
+	if (document) step_words(redo.any() ? with_linked(redo) : document->redo_words());
 	// A rename is no step of a document's history: it rewrites files. Its way back is its true inverse (only
 	// the sites it rewrote), shown before it commits, offered while its name is still where it put it.
 	if (v.activity.last_rename.made && rename_back_offered(v)) {
@@ -690,6 +725,14 @@ void EditorWindows::draw_windows_items(const SessionView &v, const DocumentBase 
 	ui_kit::tooltip(mission ? std::string("The mission's Logic pane beside its 3D view: its events as cards that read as their "
 	                                      "sentences.")
 	                        : std::string("Make a mission the active document: its Logic pane shows beside its 3D view."));
+	// S25: the Terrain pane, a mission's or a terrain's.
+	const bool terrain = document && (document->kind() == AssetKind::Mission || document->kind() == AssetKind::Terrain);
+	bool brushing = terrain && v.workspace.document(document->path()).terrain;
+	if (ImGui::MenuItem("Terrain", "Ctrl+E", &brushing, terrain)) window_requests::show_terrain(*this, document->path(), brushing);
+	ui_kit::tooltip(terrain ? std::string("The Terrain pane beside the 3D view: sculpt the ground, paint its maps and lay its "
+	                                      "tiles there and on the map.")
+	                        : std::string("Make a mission or a terrain the active document: its Terrain pane shows beside its 3D "
+	                                      "view."));
 	ImGui::Separator();
 	ImGui::EndMenu();
 }
@@ -917,7 +960,7 @@ void EditorWindows::draw_new_project() {
 // request()); Undo and Redo, and Alt+Left and Alt+Right, are the field's own then. Ctrl+Shift+Z is
 // Redo, as Ctrl+Y is. None of them while the unsaved prompt is open: an Undo behind it would make a
 // file it does not list unsaved. No two share keys: Ctrl+S, Ctrl+Shift+S, Ctrl+W, Ctrl+B, Ctrl+P, Ctrl+T,
-// Ctrl+L, Ctrl+Shift+F, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y, F5, Ctrl+F5, Alt+F5, Shift+F5, F12, Shift+F12, Alt+Left and
+// Ctrl+L, Ctrl+E, Ctrl+Shift+F, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y, F5, Ctrl+F5, Alt+F5, Shift+F5, F12, Shift+F12, Alt+Left and
 // Alt+Right here; Ctrl+F, Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+D, F2, Delete, F and the arrows the windows' own, and the Event
 // board's Space, Enter, Alt+Up, Alt+Down, Ctrl+Shift+T and Ctrl+Shift+A (S24) while it has the keyboard.
 void EditorWindows::shortcuts(const SessionView &v, const DocumentBase *document) {
@@ -946,6 +989,10 @@ void EditorWindows::shortcuts(const SessionView &v, const DocumentBase *document
 	if (plain_ctrl && ImGui::IsKeyPressed(ImGuiKey_L, false) && document && document->kind() == AssetKind::Mission &&
 	    modal == HeldModal::None)
 		window_requests::show_logic(*this, document->path(), !v.workspace.document(document->path()).logic);
+	// The active mission's or terrain's Terrain pane (S25) shown or hidden.
+	if (plain_ctrl && ImGui::IsKeyPressed(ImGuiKey_E, false) && document &&
+	    (document->kind() == AssetKind::Mission || document->kind() == AssetKind::Terrain) && modal == HeldModal::None)
+		window_requests::show_terrain(*this, document->path(), !v.workspace.document(document->path()).terrain);
 	if (ImGui::IsKeyPressed(ImGuiKey_F12, false) && !io.KeyCtrl && !io.KeyAlt && modal == HeldModal::None) {
 		if (io.KeyShift) find_usages(v, jump_subject());
 		else go_to_definition(jump_subject());

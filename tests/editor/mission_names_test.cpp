@@ -1605,6 +1605,19 @@ int test_names_base_heights() {
 	for (size_t at = 0; (at = text.find("\n  height_lock 1\r", at)) != std::string::npos; ++at) ++locks;
 	TEST_EXPECT(zs.size() == 4 && locks == 4);
 	for (size_t i = 0; i < zs.size(); ++i) TEST_EXPECT(zs[i] == bms::to_fixed_16_16(1.0) && bases[i] == 0);
+	// Listed, a note naming them (S25): the save stands.
+	const Diagnostic *noted = finding_of(p.view(), "mission.names_locked", "missions/heights.bms");
+	TEST_EXPECT(noted && noted->severity == DiagnosticSeverity::Info && noted->message.find("4 entities") != std::string::npos &&
+	            noted->message.find("#1") != std::string::npos && noted->message.find("#4") != std::string::npos);
+	if (noted) std::printf("  %s\n", noted->message.c_str());
+	// The terrain back: the next save writes them unlocked again, no note.
+	TEST_EXPECT(p.put("Tmap.trn", trn));
+	p.run(request::rescan());
+	p.name_event("missions/heights.bms", 0, "Start");
+	p.run(request::save("missions/heights.bms"));
+	text = p.text("missions/heights.mis");
+	TEST_EXPECT(text.find("height_lock") == std::string::npos &&
+	            !finding_of(p.view(), "mission.names_locked", "missions/heights.bms"));
 	return 0;
 }
 

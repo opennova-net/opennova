@@ -76,8 +76,15 @@ void MissionGroundCheck::check_(Mission &mission, const MissionDocument *documen
 		const std::string title = !verdict.name.empty() && entity
 				? verdict.name + " #" + std::to_string(entity->ssn)
 				: document->record_title(address);
+		// A height-locked entity keeps its height as the ground under it is sculpted (S25): said beside the rule's words.
+		const Node *row = document->row(verdict.row);
+		const bool locked = row && (verdict.kind == node_kind(MissionKind::Item) || verdict.kind == node_kind(MissionKind::Building) ||
+		                            verdict.kind == node_kind(MissionKind::Marker) || verdict.kind == node_kind(MissionKind::Organic)) &&
+		                    static_cast<const EntityRow &>(*row).native.mis_height_lock != 0;
 		Diagnostic d = make_finding(MissionFinding::OffGround, DiagnosticSeverity::Warning,
-				mission_ground_message(verdict, title), document->path(), "z");
+				mission_ground_message(verdict, title) +
+						(locked ? " (Height locked: it keeps its height as the ground under it is sculpted.)" : ""),
+				document->path(), "z");
 		d.record = document->record_name(address);
 		d.record_title = title;
 		d.record_key = document->record_identity(address);

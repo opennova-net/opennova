@@ -14,6 +14,7 @@
 #include <editor/import/import_run.h>
 #include <editor/import/importer.h>
 #include <editor/import/sidecar.h>
+#include <editor/import/terrain_import.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 #include <runtime/renderer/material_texture.h>
@@ -148,6 +149,17 @@ void visit_file(const ProjectPaths &paths, const fs::path &root, const fs::path 
 			std::string file, relative;
 			if (ImportContext::resolve(join_path(paths.root, source_folder), paths.root, input, file, relative))
 				out.inputs.push_back(relative);
+		}
+		// A terrain set's heightmap (S25): the input its `heightmap` key names, the terrain's heights.
+		if (sidecar.importer == kTerrainImporterId) {
+			std::vector<uint8_t> set_bytes;
+			std::string unread;
+			TerrainSet set;
+			std::string file, relative;
+			if (io::read_file_bytes(utf8_of(under(root, source_relative)), set_bytes, unread) &&
+			    parse_terrain_set(set_bytes, set, unread) && !set.heightmap.empty() &&
+			    ImportContext::resolve(join_path(paths.root, source_folder), paths.root, set.heightmap, file, relative))
+				out.heightmap_inputs.push_back(relative);
 		}
 		const std::string output_dir = import_output_dir(paths, source_relative);
 		for (const std::string &output : sidecar.outputs) {

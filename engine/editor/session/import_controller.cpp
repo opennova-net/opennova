@@ -280,7 +280,7 @@ void ImportController::new_terrain(const EditorRequest &request) {
 
 	// The values: the images by their set keys, the foliage definitions (`foliage`, on one line), the
 	// importer's options by theirs.
-	static const char *const kImageKeys[] = {"heightmap", "colormap", "detail", "tiles", "surface", "foliagemap"};
+	static const char *const kImageKeys[] = {"heightmap", "colormap", "detail", "tiles", "surface", "foliagemap", "blendmap"};
 	std::map<std::string, std::string> images;
 	ImportOptions options;
 	TerrainSet set;
@@ -297,7 +297,7 @@ void ImportController::new_terrain(const EditorRequest &request) {
 		} else {
 			return core_.refuse_now(CoreFinding::ImportTerrain,
 			                        "No terrain made: a new terrain takes heightmap, colormap, detail, tiles, surface, "
-			                        "foliagemap, foliage, top, water and layout; '" + key + "' is none of them.");
+			                        "foliagemap, blendmap, foliage, top, water and layout; '" + key + "' is none of them.");
 		}
 	}
 	if (!images.count("heightmap") || !images.count("colormap"))
@@ -359,7 +359,8 @@ void ImportController::new_terrain(const EditorRequest &request) {
 		else if (std::string(key) == "detail") set.detail = named;
 		else if (std::string(key) == "tiles") set.tiles = named;
 		else if (std::string(key) == "surface") set.surface = named;
-		else set.foliagemap = named;
+		else if (std::string(key) == "foliagemap") set.foliagemap = named;
+		else set.blendmap = named;
 	}
 
 	// Written: the copies, the set, its record; what was written taken away again should one fail.

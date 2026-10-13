@@ -168,6 +168,14 @@ inline void show_logic(Workspace &workspace, const std::string &path, bool shown
 	set_workspace(workspace, "document", std::move(members));
 }
 
+// A mission's or a terrain's Terrain pane (S25) shown or hidden (shown, its Logic pane hides).
+inline void show_terrain(Workspace &workspace, const std::string &path, bool shown) {
+	io::JsonValue members = io::JsonValue::make_object();
+	members.set("path", io::JsonValue::make_string(path));
+	members.set("terrain", io::JsonValue::make_bool(shown));
+	set_workspace(workspace, "document", std::move(members));
+}
+
 // Pick in view (S24): what is clicked next in the mission's 3D view or its map is picked for `record`'s parameter
 // `slot` (0 to 3, a trigger's or an action's); a record of row 0 ends the pick.
 inline void pick_in_view(Workspace &workspace, const std::string &path, const NodeAddress &record, int slot) {

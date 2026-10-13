@@ -124,6 +124,7 @@ void EditHistory::reset() {
 	revision_ = saved_revision_ = 0;
 	next_revision_ = 1;
 	key_.clear();
+	link_ = 0;
 	bytes_ = 0;
 	reopened_ = false;
 }
@@ -145,7 +146,7 @@ void EditHistory::forget_redo() {
 	steps_.erase(steps_.begin() + std::ptrdiff_t(cursor_), steps_.end());
 }
 
-void EditHistory::commit(EditStep step, const std::string &key) {
+void EditHistory::commit(EditStep step, const std::string &key, uint64_t link) {
 	if (!std::is_sorted(step.swaps.begin(), step.swaps.end(), by_id))
 		std::sort(step.swaps.begin(), step.swaps.end(), by_id);
 	const bool changes_rows = step.changes_rows();
@@ -195,6 +196,7 @@ void EditHistory::commit(EditStep step, const std::string &key) {
 		last.step.after_state = step.after_state;
 		last.after_revision = revision;
 		last.marks.push_back(std::move(mark));
+		last.mark.serial = next_step_serial();
 		last.bytes = bytes_of(last);
 		bytes_ += last.bytes;
 	} else {
@@ -204,6 +206,7 @@ void EditHistory::commit(EditStep step, const std::string &key) {
 		entry.marks = std::move(carried);
 		entry.marks.push_back(std::move(mark));
 		entry.changes_rows = changes_rows;
+		entry.mark = StepMark{ next_step_serial(), link };
 		entry.step = std::move(step);
 		entry.bytes = bytes_of(entry);
 		bytes_ += entry.bytes;
@@ -211,6 +214,7 @@ void EditHistory::commit(EditStep step, const std::string &key) {
 		++cursor_;
 	}
 	key_ = changes_rows ? std::string() : key;
+	link_ = changes_rows ? 0 : link;
 	trim();
 }
 
@@ -239,6 +243,7 @@ void EditHistory::resume() {
 void EditHistory::drop() {
 	forget_redo();
 	key_.clear();
+	link_ = 0;
 	reopened_ = false;
 }
 

@@ -13,6 +13,8 @@
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/viewport_follow.h>
 #include <editor/preview/viewport_model.h>
+#include <editor/preview/mission_map_terrain_view.h>
+#include <editor/preview/terrain_patch.h>
 
 namespace opennova::editor {
 
@@ -79,6 +81,7 @@ float mission_map_zoom_for(double metres, int width);
 // commander map's GRID and TEXT, which the device's compile draws), stick (a moved entity keeps its height over the
 // ground) and the grid a drag snaps to (metres; 0 free). S24: the selected event's links, the reaches and the
 // badges (the 3D view's links).
+
 struct MissionMapOptions {
 	bool items = true, buildings = true, markers = true, organics = true;
 	bool areas = true, paths = true, labels = false, links = true;
@@ -86,11 +89,13 @@ struct MissionMapOptions {
 	bool grid = true, text = true;
 	bool stick = true;
 	float snap = 1.0f;
+	MissionMapBackground background = MissionMapBackground::Colour;
+	bool water = false;
 	bool operator==(const MissionMapOptions &o) const;
 	bool operator!=(const MissionMapOptions &o) const { return !(*this == o); }
 };
 // {marks: {items, buildings, markers, organics, areas, paths, labels, links}, color_by (team or group), grid, text,
-// stick, snap}.
+// stick, snap, background (colour, height, delta, flatness or none), water}.
 io::JsonValue mission_map_options_to_json(const MissionMapOptions &options);
 bool mission_map_options_from_json(const io::JsonValue &json, MissionMapOptions &held, std::string &error);
 
@@ -163,6 +168,11 @@ public:
 	const MissionMapCamera &camera() const { return camera_; }
 	const MissionScene &scene() const { return scene_; }
 	const MissionMapGround &ground() const { return ground_; }
+	// S25: the background its options ask in place of the colour map (MissionMapTerrainView: Nile's Height and Delta
+	// maps, the original editor's flatness and water), made from the mission's ground as the game reads it; and that
+	// ground followed over the project's files (the terrain brush's hints and eyedropper).
+	const MissionMapTerrainView &terrain_view() const { return terrain_view_; }
+	const MissionGround &followed_terrain(const SessionView &view) const;
 	// The entities' models placed seen from above, by the scene's entities' order (an entity with no model, or one not
 	// read yet, has an empty footprint); and their wireframes as the device draws them: the edges of every shown
 	// entity's footprint, four mission metres (x0, y0, x1, y1) an edge, each edge's colour (0xRRGGBB, mission_map_rgb),
@@ -208,6 +218,13 @@ public:
 	std::string message() const override;
 	const std::string &detail() const override { return detail_; }
 	const FileStamps *picture_reads() const override { return &picture_.files(); }
+	// S25: the map's last follow's patches of the terrain files it reads, during a stroke (TerrainStrokeFollow).
+	const TerrainPatches &terrain_patches() const { return stroke_.patches(); }
+	// S25 (the maps and the tiles): the placed tiles the game reads for the mission (its <mission>.til, else the
+	// terrain's own: its ground's read), in file order, which the device draws over the map as MED's 2D view draws
+	// them; and a serial that moves when they do (an Update).
+	const TilFile &placed_tiles() const { return terrain_.placed(); }
+	uint64_t tiles_serial() const { return tiles_serial_; }
 	const char *units() const override { return "pixels"; }
 	ViewportLayout layout() const override { return ViewportLayout(); }
 	std::unique_ptr<CanvasHalf> make_canvas() const override;
@@ -229,6 +246,8 @@ public:
 			CanvasRequests &out, std::string &error) const override;
 	// `new_event {ids: [record], value: recipe}` (S24): the 3D view's (mission_new_event_command); the rest as
 	// command() takes them.
+	// S25: a tile's drop (the Stamp's), the terrain tools' (terrain_view_commands.h).
+	bool drop(const ViewportContext &context, const ViewportDrop &drop, CanvasRequests &out, std::string &error) const override;
 	bool command_of(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
 			std::string &error) const override;
 	io::JsonValue options_json() const override;
@@ -238,6 +257,9 @@ public:
 
 protected:
 	ViewportAction follow_(const ViewportInput &input, PreviewClock &clock) override;
+	// S25: a gesture in its own document or in a file its picture or its ground read (a terrain stroke's) holds its
+	// Rebuild.
+	uint64_t gesture_held_(const ViewportInput &input) const override;
 	bool takes_(const std::string &member) const override;
 	bool check_(const io::JsonValue &json, std::string &error) const override;
 	void apply_(const io::JsonValue &json, PreviewClock &clock) override;
@@ -247,6 +269,8 @@ private:
 	enum class Reason : uint8_t { NoProject, NoMission, Ready };
 	ViewportAction stop_(Reason reason);
 	void follow_ground_(const SessionView &view);
+	// The background made again where its option, the ground or the water moved; true when it was.
+	bool follow_terrain_view_(const SessionView &view);
 	// The items' outlines read within `budget_us`, and the footprints and wireframes placed again where the outlines,
 	// the scene or the kinds shown moved; true when the wireframes moved.
 	bool follow_outlines_(const SessionView &view, int64_t budget_us);
@@ -259,8 +283,17 @@ private:
 	MissionMapCamera camera_;
 	bool framed_ = false;
 	bool moved_ = false; // what the device draws moved since the last follow (an Update)
-	MissionGround reader_; // the terrain and water as the game reads them (DI-07)
 	MissionMapGround ground_;
+	// The terrain and water as the game reads them (DI-07), which the brush and the background read too.
+	mutable MissionGround terrain_;
+	MissionMapTerrainView terrain_view_;
+	// S25: the ground patched in place during a stroke: the heights (its backgrounds patched with them), and the planes
+	// it does not draw (the surface, foliage and blend maps: nothing of its picture to make again); a colour stroke
+	// makes the commander map's colours again at its end.
+	TerrainStrokeFollow stroke_{terrain_plane_bit(TerrainPlane::Heights) | terrain_plane_bit(TerrainPlane::Surface) |
+	                            terrain_plane_bit(TerrainPlane::Foliage) | terrain_plane_bit(TerrainPlane::Blend)};
+	uint64_t tiles_serial_ = 0;  // S25: moves with the placed tiles drawn
+	uint64_t tiles_hash_ = 0;    // what they were when it last moved
 	MissionOutlineCache outlines_;
 	std::vector<MissionMapFootprint> footprints_;
 	std::vector<float> lines_;
