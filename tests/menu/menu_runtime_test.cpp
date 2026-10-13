@@ -2071,6 +2071,38 @@ void test_table_column_records() {
 	CHECK(none_frame.table_columns_seen.empty());
 }
 
+// A smaller column count frees every row's cells from it up to the old count: each
+// text freed and NULLed and its image zeroed, so the cell is missing (the store and
+// the frame's rows), and a later growth, whose arrays take the old count's cells
+// alone, reads it missing; the cell records stay, so a value survives (D-MNU-47).
+// Ours resized the records alone and a cell past the smaller count came back.
+// [orig: CTableWnd_ResizeColumnCount @0x63f6c0 - the row walk @0x63f90d..0x63f98d:
+//  the free @0x63f945, the NULL @0x63f956, the image @0x63f967; the grow's copies
+//  @0x63f79b / @0x63f80b]
+void test_table_column_shrink_frees_cells() {
+	const mnu::Document doc = make_document();
+	FakeFrame frame;
+	MenuRuntime rt;
+	seed_counts(frame);
+	rt.set_frame(&frame);
+	rt.open_document(&doc, "main.mnu", "");
+	CHECK(rt.table_set_column_count(14, 3));
+	CHECK(rt.table_insert_row(14, "a", 0, 0, -1) == 0);
+	rt.table_set_cell_text(14, 0, 1, "b");
+	rt.table_set_cell_text(14, 0, 2, "c");
+	rt.table_set_cell_value(14, 0, 2, 7);
+	CHECK(rt.table_cell_text(14, 0, 2) == "c");
+	CHECK(rt.table_set_column_count(14, 2));
+	const std::vector<MenuTableRow> &shown = frame.table_rows[rt.frame_index(14)];
+	CHECK(shown.size() == 1 && shown[0].cell_text(2) == nullptr && shown[0].cell(1) == "b" &&
+			shown[0].cell(0) == "a");
+	CHECK(rt.table_set_column_count(14, 3));
+	CHECK(rt.table_cell_text(14, 0, 2).empty() && rt.table_cell_text(14, 0, 1) == "b");
+	CHECK(rt.table_cell_value(14, 0, 2) == 7);
+	rt.table_set_cell_text(14, 0, 2, "d");
+	CHECK(rt.table_cell_text(14, 0, 2) == "d");
+}
+
 // The stat table's fill [orig: StatScreen_PopulateStatResultsList @ 0x562240]: installed
 // columns, rows with a colour override and a selection, then the sort on a
 // numeric column, descending [orig: CTableWnd_SortByColumn @ 0x640900 ->
@@ -2223,6 +2255,7 @@ int main() {
 	test_table_row_operations();
 	test_table_runtime_columns();
 	test_table_column_records();
+	test_table_column_shrink_frees_cells();
 	test_mouse();
 	test_sound_edges();
 	test_messages_then_the_pump();

@@ -478,8 +478,10 @@ public:
 	// ---- tables (the CTableWnd operations, menu_table_row.h) ----
 	// The column count a populate sets before it defines its columns: false
 	// below 1 (the resize fails). A count that does not grow the table keeps
-	// its records (the authored columns); one that grows it starts every record
-	// over, zeroed (menu_table.h MenuTableColumn::kept).
+	// its records (the authored columns), and a smaller one makes every row's
+	// cells from it up to the old count missing, their values kept (D-MNU-47);
+	// one that grows it starts every record over, zeroed (menu_table.h
+	// MenuTableColumn::kept).
 	// [orig: CTableWnd vtable +0x6C -> CTableWnd_ResizeColumnCount @0x63f6c0]
 	bool table_set_column_count(int id, int count);
 	// CTableWnd_InitRow(column, 0, width, label, justify, vjustify) on one record

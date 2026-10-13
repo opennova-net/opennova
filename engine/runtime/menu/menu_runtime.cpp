@@ -901,8 +901,6 @@ void init_record(MenuTableColumn &record, int column, bool numeric_sort, int wid
 // The count over the records the table holds (menu_table.h): the authored ones
 // until code set a count, kept by a count that does not grow the table, every one
 // started over by one that does. [orig: CTableWnd_ResizeColumnCount @0x63f6c0]
-// A smaller count also frees every row's cells at or past it in the game, which
-// ours leaves in the rows (D-MNU-47) [orig: the row walk @0x63f90d..0x63f98d].
 void MenuRuntime::table_resize_records_(int id, int count) {
 	const int current = table_column_count_(id);
 	MenuWidgetRuntimeState &state = state_of_(id);
@@ -917,10 +915,28 @@ void MenuRuntime::table_resize_records_(int id, int count) {
 				if (h.set_up && h.column < current)
 					state.table_columns[static_cast<size_t>(h.column)].sort_cell = h.column;
 	}
-	if (count > current)
+	if (count > current) {
 		state.table_columns.assign(static_cast<size_t>(count), zeroed_record());
-	else
+	} else {
 		state.table_columns.resize(static_cast<size_t>(count));
+		// A smaller count frees every row's cells from it up to the old count: the
+		// text freed and NULLed, the image zeroed, so the cell is missing (D-MNU-43)
+		// and a later growth, which copies the old count's cells alone, reads it
+		// missing; the cell records (the values) stay [orig: the row walk
+		// @0x63f90d..0x63f98d - the free @0x63f945, the NULL @0x63f956, the image
+		// @0x63f967; the grow's copies @0x63f79b / @0x63f80b] (D-MNU-47).
+		bool freed = false;
+		for (MenuTableRow &row : state.table_rows) {
+			const int end = std::min(current, static_cast<int>(row.cells.size()));
+			for (int c = count; c < end; ++c) {
+				std::optional<std::string> &cell = row.cells[static_cast<size_t>(c)];
+				freed = freed || cell.has_value();
+				cell.reset();
+			}
+		}
+		if (freed)
+			push_table_rows_(id);
+	}
 	state.has_table_columns = true;
 }
 
