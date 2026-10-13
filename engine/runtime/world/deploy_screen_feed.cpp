@@ -1,5 +1,7 @@
 #include <runtime/world/deploy_screen_feed.h>
 
+#include <base/io/cp1252.h>
+#include <runtime/hud/feed_format.h>
 #include <runtime/menu/list_sort.h>
 
 #include <algorithm>
@@ -11,19 +13,28 @@ namespace opennova::world {
 
 std::vector<DeployListRow> build_deploy_rows(const DeployListInput &in) {
     std::vector<DeployListRow> rows;
-    // Row 0: "<color>'<key>' <home>", value 0 [orig: @0x553b6b..0x553b8a].
+    // The rows are the game's code-page bytes throughout: its sprintfs join the
+    // colour tag, the gametext's strings (the page's bytes) and a zone's letter,
+    // the byte index + 0x41, which past 'Z' is a high byte (index 63 is 0x80).
+    // The embedder's key, home and zone names are UTF-8, so each is encoded
+    // (utf8_to_retail_text) before it joins a row (D-MNU-46).
+    // Row 0: "<color>'<key>' <home>", value 0 [orig: sprintf("%s'%s' %s")
+    // @0x553b30..0x553b36, the UIList_AddRow call @0x553b4e].
     {
         DeployListRow def;
-        def.text = in.team_color_tag + "'" + in.default_key + "' " + in.default_home;
+        def.text = in.team_color_tag + "'" + utf8_to_retail_text(in.default_key) + "' " +
+                utf8_to_retail_text(in.default_home);
         def.value = 0;
         rows.push_back(def);
     }
     // The first loop: one row per SECURED team zone, "<color>'<letter>' <name>",
-    // value index + 1 [orig: @0x553aef..0x553c55].
+    // value index + 1 [orig: @0x553aef..0x553c55; GameText_GetString("WPNames")
+    // @0x553c10, the letter's add @0x553c16, sprintf("%s'%c' %s") @0x553c1f..0x553c25].
     for (const DeployZoneRow &z : in.zones) {
         if (!z.secured) continue;
         DeployListRow row;
-        const std::string name = in.zone_name ? in.zone_name(z.name_key) : z.name_key;
+        const std::string name =
+                utf8_to_retail_text(in.zone_name ? in.zone_name(z.name_key) : z.name_key);
         row.text = in.team_color_tag + "'" + std::string(1, z.letter) + "' " + name;
         row.value = z.index + 1;
         rows.push_back(row);
@@ -67,7 +78,8 @@ std::vector<DeployListRow> build_deploy_rows(const DeployListInput &in) {
             row.text = buf;
             row.value = -1;
             // UIList_AddRow(text, -1, 0, insert_pos + 1) returns the row it
-            // landed on; the next member follows it [orig: @0x553d8b].
+            // landed on; the next member follows it [orig: the sprintf
+            // @0x553d8e, the UIList_AddRow call @0x553da5].
             ++insert_pos;
             rows.insert(rows.begin() + std::min<int>(insert_pos, static_cast<int>(rows.size())), row);
         }
@@ -77,6 +89,14 @@ std::vector<DeployListRow> build_deploy_rows(const DeployListInput &in) {
         rows.insert(rows.begin() + std::min<int>(insert_pos, static_cast<int>(rows.size())), blank);
     }
     return rows;
+}
+
+std::vector<std::string> deploy_list_items(const std::vector<DeployListRow> &rows) {
+    std::vector<std::string> items;
+    items.reserve(rows.size());
+    for (const DeployListRow &row : rows)
+        items.push_back(hud::strip_inline_tags(row.text));
+    return items;
 }
 
 DeployStatusLine build_deploy_status(const DeployStatusInput &in) {
@@ -112,7 +132,8 @@ std::string deploy_status_text(const DeployStatusLine &line,
             // [orig: sprintf("'%s':  <cFF4040>%d", WPNames name, countdown)]
             std::snprintf(buf, sizeof buf, "'%s':  <cFF4040>%d", zone_name.c_str(), line.seconds);
         } else {
-            // [orig: sprintf("%c:  <cFF4040>%d", 'A' + index, countdown) @0x553a5b]
+            // [orig: sprintf("%c:  <cFF4040>%d", 'A' + index, countdown)
+            // @0x553a56..0x553a64]
             std::snprintf(buf, sizeof buf, "%c:  <cFF4040>%d",
                           static_cast<char>('A' + line.zone_index), line.seconds);
         }

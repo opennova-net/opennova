@@ -170,16 +170,21 @@ void LocalPlayer::update_aim_target() {
                     if (distance >= 75.0f && distance <= 1500.0f) {
                         // A mountable gun (Entity_IsMountableGun: itemdef && type
                         // != 1 && attrib & 0x20) redirects to its groundEntity,
-                        // and the lock stores the REDIRECTED entity.
+                        // and the lock stores the REDIRECTED entity. The switch
+                        // keys on the def's unitType byte (def+0x196), not its
+                        // type: unitTypes 1, 2, 6, 7, 8 and 10 lock, a helicopter
+                        // (3) or any entity of unitType 0 does not.
                         // [orig: Entity_IsMountableGun @0x434240 -> groundEntity
-                        //  @0x4b51bd..0x4b51c9; the type switch @0x4b51d0, the
-                        //  cases 1,2,6-8,10 store @0x4b51e6..0x4b51e9]
+                        //  @0x4b51bd..0x4b51c9; the unitType reads @0x4B51AB /
+                        //  @0x4B51C9, the switch @0x4b51d0 over byte_4B83BC, the
+                        //  cases 1,2,6-8,10 store @0x4b51e6..0x4b51e9, the rest
+                        //  clear @0x4B51EE..0x4B51F1]
                         const Entity *typed = candidate;
                         if (candidate->has_item_def && candidate->item_type != 1 &&
                                 (candidate->item_attrib & kItemAttribEweap) != 0) {
                             if (const Entity *parent = world_.registry.get(candidate->ground_target)) typed = parent;
                         }
-                        switch (typed->item_type) {
+                        switch (typed->item_unit_type) {
                             case 1: case 2: case 6: case 7: case 8: case 10: target = typed->handle; break;
                         }
                     }

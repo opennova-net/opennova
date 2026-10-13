@@ -278,11 +278,17 @@ NapiMessage make_client_host_request(int currently_hosting,
                                      const std::vector<ClientVar> &host,
                                      const std::vector<ClientVar> &player_list);
 
-// ClientHostUpdate: the Host and PlayerList var-lists only — no params, no
-// Cookie/HostSetup (the heartbeat refresh). [orig: CNapiGameSession_SendHostUpdate
-// @ 0x4d3860 — NapiStatement_SerializeVarList for "Host"(this+532) / "PlayerList"(+604)]
-NapiMessage make_client_host_update(const std::vector<ClientVar> &host,
-                                    const std::vector<ClientVar> &player_list);
+// ClientHostUpdate: the Host and PlayerList var-lists only (no params, no
+// Cookie/HostSetup: the heartbeat refresh), each list's container only when the
+// update writes it: a list neither included whole nor changed since the last
+// update writes none, and a changed list writes its container even with no var
+// to carry (a removal's). The caller decides both (ClientSession::send_host_update).
+// [orig: CNapiGameSession_SendHostUpdate @ 0x4d3860: NapiStatement_SerializeVarList
+// for "Host"(this+532) / "PlayerList"(+604), which returns ahead of the container
+// when !includeAll && !list+0x44 @0x4d06b6]
+NapiMessage make_client_host_update(const std::vector<ClientVar> &host, bool write_host,
+                                    const std::vector<ClientVar> &player_list,
+                                    bool write_player_list);
 
 // ClientHostPlayerAdded: the host's per-player roster notification — PlayerNumber (the
 // slot index), PlayerName, PlayerIpAndPort ("a.b.c.d:port" of the player's game endpoint),

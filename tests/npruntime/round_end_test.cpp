@@ -961,7 +961,19 @@ void test_aas_capture_events_carry_zone_numbers() {
 			"A&S authority body fixture attaches");
 	prime_collision_tables(world, collision);
 
-	ns::LoopbackChannel wire;
+	// Two split slots far from the zone: a script team write moved each body
+	// alone [orig: Entity_SetTeamByNetId @0x43C680]. The pair's filters are
+	// the capturer ENTITY's team and its enemy, matched against each
+	// candidate's slot team byte, so the split slots hear the pair by their
+	// slot teams (D-NET-636). [orig: GameEvent_FlagCapture: `movsx ecx,
+	//  [esi+162h]` @0x50F7D6, the filters @0x50F7E1 / @0x50F851 / @0x50F8D9;
+	//  NapiNPServer_SendFiltered @0x4C896A..0x4C8977]
+	const w::EntityHandle split_blue = match_player(world, 4, 2, "SplitBlue");
+	world.registry.get(split_blue)->position = {-2000.0f, 0.0f, 0.0f};
+	const w::EntityHandle split_red = match_player(world, 5, 1, "SplitRed");
+	world.registry.get(split_red)->position = {-2000.0f, 50.0f, 0.0f};
+
+	ns::LoopbackChannel wire, split_blue_wire, split_red_wire;
 	inmatch::NapiNPServerCtx ctx;
 	ctx.world = &world;
 	ctx.is_authority = 1;
@@ -969,7 +981,18 @@ void test_aas_capture_events_carry_zone_numbers() {
 	ctx.config.game_type = rules.game_type;
 	ctx.np_protocol.connection_list.push_back(
 			make_conn(1, 1, &wire, ns::TransportMode::Client, blue, true));
+	ctx.np_protocol.connection_list.push_back(
+			make_conn(2, 1, &split_blue_wire, ns::TransportMode::Client, split_blue, true));
+	ctx.np_protocol.connection_list.push_back(
+			make_conn(3, 1, &split_red_wire, ns::TransportMode::Client, split_red, true));
 	ready_mp_connection(ctx.np_protocol.connection_list[0], 3);
+	ready_mp_connection(ctx.np_protocol.connection_list[1], 4);
+	ready_mp_connection(ctx.np_protocol.connection_list[2], 5);
+	const uint8_t slot_teams[] = {1, 1, 2};
+	for (size_t i = 0; i < 3; ++i) {
+		ctx.np_protocol.connection_list[i].assigned_team = slot_teams[i];
+		ctx.np_protocol.connection_list[i].assigned_team_valid = true;
+	}
 	// The body already stands in the box: the first frame's entity update
 	// records the contact after that frame's one-second service, the next
 	// server tick turns it into a request, and the next one-second service
@@ -1002,6 +1025,18 @@ void test_aas_capture_events_carry_zone_numbers() {
 	}
 	expect(world.registry.get(target)->team == 1 && saw_pair && saw_banner,
 			"A&S authority flips the target and emits its capture event family");
+	const auto pair_events = [](ns::LoopbackChannel &channel) {
+		std::vector<uint8_t> events;
+		ns::Datagram d;
+		while (channel.client_recv(d))
+			if (d.tag == 0x1E && d.body.size() == 8 && d.body[0] >= 50 && d.body[0] <= 53)
+				events.push_back(d.body[0]);
+		return events;
+	};
+	expect(pair_events(split_blue_wire) == std::vector<uint8_t>{53},
+			"A&S pair: a split slot of the capturer's slot team hears the own-team 53");
+	expect(pair_events(split_red_wire) == std::vector<uint8_t>{52},
+			"A&S pair: a split slot of the enemy slot team hears the enemy 52");
 }
 
 void test_ctf_pickup_and_capture_wire_transaction() {

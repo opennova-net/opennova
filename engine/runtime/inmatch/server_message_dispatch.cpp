@@ -461,11 +461,13 @@ std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
 	std::vector<ScoredPlayerListEntry> rows;
 	for (const NapiNPConnection &c : roster) {
 		if (c.phase < ConnectionPhase::PlayerAdded || !c.link.owned_entity.valid()) continue;
-		// Rows carry slots in state 6 with a bound entity, so a still-loading joiner (mid
-		// world-stream) is no row until its burst completes (the golden 31 B -> 39 B grow);
-		// the row's +100579 test is dead, the byte never set [orig:
-		// Server_BuildAndBroadcastScoreboard @0x50D960 - state 6 @0x50d9f6, +100579 @0x50da73].
-		if (!is_in_match(c)) continue;
+		// Rows carry slots in state 6 exactly with a bound entity: a loading joiner is no row
+		// until its burst completes (the golden 31 B -> 39 B grow), a punted slot stays one
+		// until its teardown, and the round end's 6 -> 7 store (Match's outcome latch) leaves
+		// none; +100579 is never set [orig: Server_BuildAndBroadcastScoreboard @0x50D960 -
+		// state 6 @0x50d9f6, +100579 @0x50da73; a punt writes no slot byte,
+		// Server_LogCRCMismatchPunt @0x517ED0; Server_ProcessRoundEnd @0x51685E].
+		if (!c.burst.spawned || (world != nullptr && world->match.outcome().ended)) continue;
 		// team @entity+344 read THROUGH owned_entity (D-NET-132); the World-less path defaults to 1.
 		uint8_t team = 1;
 		if (world != nullptr)

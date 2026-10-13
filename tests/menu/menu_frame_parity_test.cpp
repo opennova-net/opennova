@@ -600,12 +600,12 @@ void test_table_columns(const fnt_font_t *font) {
 	rs.widgets[0].has_table_columns = true;
 	rs.widgets[0].table_columns = { name, kills };
 	rs.widgets[0].table_rows[0].flags |= opennova::menu::kTableRowFlagColor;
-	rs.widgets[0].table_rows[0].color = 0xFF00BFFFu;
+	rs.widgets[0].table_rows[0].color = 0xFF00AFFFu;
 	const MenuDrawList &rl = r.compile(rs, 1.0f, 1.0f);
 	CHECK(rl.glyphs.size() == 4 + 1 + 3 + 1, "the installed columns draw their labels and cells");
 	bool team = false;
 	for (const auto &g : rl.glyphs) {
-		if ((g.color & 0xFFFFFFu) == text_rgb(0x00BFFFu)) team = true;
+		if ((g.color & 0xFFFFFFu) == text_rgb(0x00AFFFu)) team = true;
 	}
 	CHECK(team, "a row's colour override colours its cells");
 }

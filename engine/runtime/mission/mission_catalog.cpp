@@ -9,6 +9,7 @@
 #include <unordered_set>
 
 #include <base/gameprofile/game_type.h>
+#include <base/io/cp1252.h>
 #include <base/io/log.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
@@ -23,9 +24,13 @@ namespace {
 namespace fs = std::filesystem;
 
 // Retail's list order comparator [orig: Mission_CompareMapNames @ 0x5628e0 —
-// stricmp over the two filenames].
+// stricmp over the two filenames]: its tail jump to _stricmp (@0x5628f8) folds
+// through the ".ACP" locale, over the names' bytes in that page; ours runs it
+// over each name's cp1252 bytes (an archive entry's name is its bytes, read as
+// the page's unless they happen to form UTF-8; a loose file's name is the UTF-8
+// the scan made of it) (D-MNU-39).
 bool file_less(const Row &a, const Row &b) {
-	return strutil::iless(a.file, b.file);
+	return cp1252_stricmp(utf8_to_retail_text(a.file), utf8_to_retail_text(b.file)) < 0;
 }
 
 // [orig: Path_ReplaceOrAppendExtension @ 0x53c780, called with "bin" @ 0x56345b and

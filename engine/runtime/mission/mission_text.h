@@ -12,9 +12,6 @@
 #include <cstdint>
 #include <string>
 #include <unordered_map>
-#include <vector>
-
-#include <formats/mission/bms.h>
 
 namespace opennova::mission {
 
@@ -25,24 +22,25 @@ struct MissionText {
 	// fallback signal).
 	std::string briefing2;
 	// Numeric suffix -> [Locations] LOCATION%03i value; the host bring-up
-	// resolves these against the type-2044 markers in spawn order.
+	// resolves each admitted type-2044 marker's name_index against these.
 	std::unordered_map<int32_t, std::string> location_texts;
 	// Numeric suffix -> [PeopleNames] STRNAME%03i value.
 	std::unordered_map<int32_t, std::string> people_names;
 
 	// The authored display name for a record's name_index; empty = none.
 	std::string people_name(int32_t index) const;
+	// The deploy-map name a type-2044 marker registers as it spawns: the
+	// [Locations] value keyed by the record's own name_index (its +4 dword;
+	// 0 keys LOCATION000 like any other number), else the LOCATION%03i key
+	// string itself. [orig: Entity_SpawnFromBMSRecord: sprintf("LOCATION%03i",
+	// [edi+4]) @0x40F196..0x40F1A4, the Locations lookup @0x40F1B8, the
+	// key-string fallback @0x40F1E3..0x40F20A]
+	std::string location_name(int32_t name_index) const;
 };
 
 // Harvests the RTXT bytes into `out` (reset first). False with `error` on a
 // rejected table; `out` then stays unloaded.
 bool parse_mission_text(const uint8_t *bytes, std::size_t size, MissionText &out,
 		std::string &error);
-
-// The [Locations] number of each of a mission's markers, in the pool's order:
-// each named-location marker (def type 2044) registers the next location name
-// as it spawns, from 1, in spawn order (its LOCATION%03i key); 0 for any other
-// marker. [orig: Entity_SpawnFromBMSRecord @0x40f182..0x40f221]
-std::vector<int32_t> location_numbers(const std::vector<bms::Entity> &markers);
 
 } // namespace opennova::mission

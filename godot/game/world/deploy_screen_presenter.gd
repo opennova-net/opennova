@@ -334,24 +334,27 @@ func _populate_spawn_list(sim: Simulation) -> void:
 	# marker; the compiled list renders the tags through its own markup.
 	# [orig: UI_UpdateDeathScreenContent @0x553aef..0x553de3]
 	_spawn_rows = []
-	var labels := PackedStringArray()
 	var zone_names := {}
 	for zone: DeployZoneRow in sim.get_deploy_spawn_zones():
 		var key := zone.name_key
 		zone_names[key] = _game_text(Strings.SECTION_WPNAMES, key, "Spawn Point")
-	for row: DeployListRow in sim.get_deploy_list_rows(Strings.menu_text("DEFAULT_SPAWN_KEY", "D"),
-			Strings.menu_text("HOME", "Home Base"), zone_names):
+	var list_rows: Array[DeployListRow] = sim.get_deploy_list_rows(
+			Strings.menu_text("DEFAULT_SPAWN_KEY", "D"), Strings.menu_text("HOME", "Home Base"),
+			zone_names)
+	for row: DeployListRow in list_rows:
 		# The compiled list has no inline markup channel yet (the row-style
 		# residue in D-HUD-19): the engine text keeps retail's <cRRGGBB>/<b>
 		# tags, the list shows them stripped. The sort already ran over the
 		# tagged text, so the row order is retail's. The stripper is retail's own
 		# (the engine's hud::strip_inline_tags [orig: Chat_StripHtmlTags @0x4983f0]).
 		var label := Simulation.strip_inline_tags(row.text)
-		labels.append(label)
 		_spawn_rows.append(SpawnRow.new(label, row.value))
-	# set_widget_items resets the selection to row 0; restore the previous pick by
-	# parameter without emitting (picks ride user clicks only, never the refill).
-	_driver.set_widget_items(list_id, labels)
+	# The list takes the engine's items (MenuDriver.set_deploy_list_items: the same
+	# stripped texts in the menu's code page, a member's roster name as its bytes);
+	# the spawn rows' labels are the script's own view of them. The fill resets the
+	# selection to row 0; restore the previous pick by parameter without emitting
+	# (picks ride user clicks only, never the refill).
+	_driver.set_deploy_list_items(list_id, list_rows)
 	if keep_param >= 0:
 		for row in _spawn_rows.size():
 			if _spawn_rows[row].param == keep_param:

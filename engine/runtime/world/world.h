@@ -570,6 +570,9 @@ struct MissionTables {
 // The session/game-option bits the host stamps at bring-up; the SP defaults
 // hold otherwise.
 struct SessionRules {
+	// The live rules word. A role stamps it (HostRole: the config word in a
+	// session, 0x4204 out of one; a joiner its S2C 0x64 word); a world no
+	// role brings up keeps 0, which is no SP default.
 	uint32_t mpattrib = 0; // [orig: g_RulesFlags @0x24D1E34, HUD target gates @0x5926DC]
 	bool hit_feedback = true; // [orig: Config_SetDefaults @0x54D18B]
     // Session + game-option state the BMS Teammate trigger family reads. Hosts

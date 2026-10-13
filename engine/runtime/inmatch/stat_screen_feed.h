@@ -17,6 +17,10 @@
 #include <string>
 #include <vector>
 
+namespace opennova::menu {
+class MenuRuntime;
+}
+
 namespace opennova::inmatch {
 
 struct StatScreenColumn {
@@ -62,7 +66,7 @@ struct StatScreenRow {
 	std::string name;   // the player-slot table's name
 	std::string squad;  // the slot's squad tag or "-"
 	std::vector<std::string> cells; // one per field column, formatted
-	uint32_t color_argb = 0xFFFFFFFFu; // team 1 0xFF00BFFF, team 2 0xFFFF0000
+	uint32_t color_argb = 0xFFFFFFFFu; // team 1 0xFF00AFFF, team 2 0xFFFF0000
 	bool selected = false; // the local player's row
 };
 
@@ -79,7 +83,7 @@ struct StatScreenPlayer {
 // The rows [orig: @0x5624a3..0x5626fa]: per player with team != 0 whose slot
 // has a board row: name, squad or "-", then per listed field the row's
 // positional value — field 5 "%2i:%02i", -1 "-", ids 1..4/6..18/20..32 "%i",
-// 19 always "%i", anything else "??"; row colour team 1 0xFF00BFFF, team 2
+// 19 always "%i", anything else "??"; row colour team 1 0xFF00AFFF, team 2
 // 0xFFFF0000; the local slot's row is selected.
 std::vector<StatScreenRow> stat_screen_rows(const EndRoundStats &board,
 		const std::vector<StatScreenPlayer> &players, bool show_disabled,
@@ -88,6 +92,21 @@ std::vector<StatScreenRow> stat_screen_rows(const EndRoundStats &board,
 // The tab filter [orig: StatScreen_StatFilterTabHandler @0x562140]: tab 0 shows every
 // row, tab 1 only team 2, tab 2 only team 1.
 bool stat_screen_row_visible(int tab_index, uint8_t team);
+
+// The fill over the menu's table: the column count and one init per column
+// (the header, the width, the justification, the compare: NAME and Squad as
+// text, a stat field numerically), the rows with their team colours, the sort on
+// the first stat column, descending, and the local row selected (the game
+// selects it after the sort, ours before, D-MNU-51). The NAME
+// and Squad cells are the player slot's name and squad tag as the roster holds
+// them, its bytes in the code page, as the game's table holds, draws and sorts
+// them [orig: the Napi_CopyString calls of the squad @0x56252c and the name
+// @0x562548, the CTableWnd_AddRow call with the name @0x562565, the column-1
+// CTableWnd_SetCellText with the squad @0x562585]: a code-page menu draws a
+// cell's bytes as glyph indices. The headers, which the embedder resolved as
+// UTF-8 text, go in as the page's bytes (utf8_to_retail_text) (D-MNU-46).
+void fill_stat_results(menu::MenuRuntime &menu, int table,
+		const std::vector<StatScreenColumn> &columns, const std::vector<StatScreenRow> &rows);
 
 
 // The end-of-round SESSION facts the shell flow keys on (net-re 5.68), as one

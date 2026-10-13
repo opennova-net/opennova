@@ -58,9 +58,19 @@ struct RoleView {
 	const NapiNPServerCtx *host = nullptr;
 	bool joiner = false;
 	// The host option word the embedder staged (GameConfig::mp_attributes) —
-	// the session rules word of every role that is not a joiner.
+	// the deploy screen's team-button word on a hosting process (its ctx+0x68
+	// pick, deploy_screen_status); the in-match rules word is
+	// session_rules_word's.
 	uint32_t staged_mp_attributes = 0;
 };
+
+// The session rules word the role's HUD gates test (g_RulesFlags, the
+// mission-data block's +0x2C dword): a joiner's S2C 0x64 fixed-block word, any
+// other role's live World::rules.mpattrib (the host config's word in a session,
+// 0x4204 out of one, as an admin SET moves it); 0 with no kernel.
+// [orig: g_RulesFlags @0x24D1E34 -- HUD_DrawFriendlyTagsPass @0x5A4480,
+//  Entity_GetDisplayName @0x59BF70; the FriendlyTags SET @0x405EF6 / @0x405F05]
+uint32_t session_rules_word(const RoleView &view);
 
 // The client-local death-screen latch: the 0x0A flags1 bit-0 edges every
 // role's view folds (the listen host's own loopback included)

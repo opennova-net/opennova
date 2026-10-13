@@ -502,7 +502,10 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
         }
     };
 
-    // Ammo flag 0x80 is the recovered NoCollide terrain bypass.
+    // Ammo flag 0x80 is the recovered NoCollide terrain bypass; the round's
+    // +0x114 copy of it also carries the spawn's Indoors stamp, which the
+    // round motor folds into walk_terrain [orig: Projectile_UpdatePhysics
+    // @0x4EA375].
     if (trace.walk_terrain && (trace.ammo_flags & 0x80u) == 0 &&
         terrain != nullptr && terrain->valid()) {
         const int32_t start[3] = {trace.start.x, trace.start.y, trace.start.z};
@@ -1262,9 +1265,19 @@ void CollisionWorld::refresh_blink(World &world, Entity &ent) {
     pt.z = to_fixed(ent.position.z);
     const int32_t radius = 0x8000; // [orig: searchRadius_fp = 0x8000]
 
-    if (ent.kind == EntityKind::Organic) {
-        // Persons walk their own candidate list testing building-kind entries
-        // with no distance prefilter. [orig: the def type 1/3 branch
+    // The def's type picks the walk: a vehicle or a person (1 / 3) its own
+    // candidate slice, a building (5) none, any other type the static
+    // prefix. Retail's no-def branch walks the static prefix with no
+    // self-skip; ours keeps a def-less row on its kind (an organic walks its
+    // slice), the stand-in synthetic worlds rely on. [orig:
+    // Entity_BuildProximityList - the def test @0x4B3E41 -> @0x4B3F9A..0x4B4060,
+    // the def+0x5C read @0x4B3E47, the type-5 test @0x4B3E4A..0x4B3E4D, the
+    // 1 / 3 tests @0x4B3E53..0x4B3E5F]
+    const bool candidate_walk = ent.has_item_def ? ent.item_type == 1 || ent.item_type == 3
+                                                 : ent.kind == EntityKind::Organic;
+    if (candidate_walk) {
+        // Its own candidate list, testing building-kind entries with no
+        // distance prefilter. [orig: the def type 1/3 branch
         // @ 0x4b3e5f-0x4b3f93]
         const int32_t point[3] = {pt.x, pt.y, pt.z};
         query_candidate_blink_boxes_at_point(world, ent.handle, point, accum);

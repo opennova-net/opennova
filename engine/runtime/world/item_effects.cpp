@@ -262,7 +262,7 @@ void spawn_item_explosion(World &world, const Entity *source, const FixedVec3 &p
             world.throwables.fan_prng(); // pitch (first half <<15, second <<16)
             world.throwables.fan_prng(); // speed
             // Weapon_SpawnSingleProjectile @0x4EBE80 returns immediately:
-            // dword_A2ECF4 is zero-filled PE data with no direct/address-table
+            // g_SingleProjectileAmmoIndex is zero-filled PE data with no direct/address-table
             // writer in this retail image. Its caller still consumes the draws.
         }
     }

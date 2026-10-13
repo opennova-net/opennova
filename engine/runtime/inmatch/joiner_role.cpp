@@ -2443,6 +2443,9 @@ void JoinerRole::apply_round_event(const replication::ClientRoundEvent &ev) {
 		source.scope_raised =
 				(shooter_row->state_flags &
 				 world::kEntityFlagScopeRaised) != 0;
+		// The spawn's Indoors stamp reads the resolved shooter's live Flags
+		// (client_weapon_replay.cpp) [orig: RoundData_SpawnRound @0x4EC830].
+		source.indoors = replica_shooter_indoors(kernel, *shooter_row);
 		source.recoil_pitch = &shooter_row->recoil_pitch;
 		// The zero-elevation row keys on the shooter's equipped AdmDef, the
 		// replica's 0x0A off-16 echo [orig: RoundData_SpawnRound entity+0x2B0

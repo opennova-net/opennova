@@ -165,42 +165,48 @@ public:
         wac.dornd_seed = kDorndSeed;
     }
 
-    // The per-load clear: V0..V255 only. The declared half (256..511) and
-    // the globals are untouched, as in the original's load.
+    // The per-load clear: V0..V255 only. The declared half (256..511) is
+    // untouched, as in the original's load; the G bank has its own clear
+    // (clear_global_vars).
     // [orig: WacScript_InitAndLoad memset(g_WacMissionVars, 0, 0x400) @0x4f95ee]
     void clear_numbered_mission_vars() {
         for (int i = 0; i < kNumberedMissionVars; ++i) mission_[i] = 0;
     }
+    // The same load's G clear, on every mission start: its skip for exit
+    // reason 8 is unreachable from the load's one caller, which zeroes the
+    // reason ahead of the PreMission pass and the load.
+    // [orig: WacScript_InitAndLoad - the reason test @0x4F9636, the
+    //  memset(0xC6BA40, 0, 0x400) called @0x4F964A; Game_StartMission -
+    //  `mov g_MissionExitReason, ebx` (ebx 0) @0x525B16, the load's call
+    //  @0x525CB3]
+    void clear_global_vars() { global_.fill(0); }
     // Process-start state: every bank zero.
     void clear_all() { mission_.fill(0); global_.fill(0); }
 
-    // Carry the declared half (256..511) of a previous mission's store into
-    // this one: the retail bank is process-global and no load path zeroes
-    // those slots, so a rebuilt kernel reads slot n at the value the previous
-    // compile's slot n held. V# (zeroed per load) and G# (zeroed on every
-    // reachable load) are NOT carried.
-    // [orig: Script_Compile declaration arm @0x4f3812..0x4f3964 -- valueAddress
-    //  = 0xC6B640 + 4n, slot never initialised; no zeroing writer in the image]
-    void carry_declared_from(const ScriptVarStore &prev) {
-        for (int i = kNumberedMissionVars; i < kMissionVars; ++i) mission_[i] = prev.mission_[i];
-    }
-
-    // Carry the previous mission's DO choices and RND: no mission load stores to
-    // either (the mission start's WAC load clears the IF state and the DO
-    // counters and seeds DORND, reset_wac_load_state), so the next mission
-    // reads both at the previous run's values until it writes them. A
-    // save-game load copies the choices from its file but not RND, which lies
-    // below the copied run (unported). The restart's rewind restores the
-    // sealed start instead (D-EVT-15).
-    // [orig: g_WacLoopChoices @0xC6E640, written by WacScript_ExecuteBytecode
-    //  alone (@0x4F5A48 / @0x4F5AD0 / @0x4F5AF0) and the bank words;
-    //  g_WacVarRND @0xC6B23C, stored by WacCmd_Random @0x4ED2C8;
-    //  WacScript_LoadVarState @0x4EE520, the 0x38AC-byte copy to 0xC6B240
-    //  called @0x4EE52F]
-    void carry_wac_kept_from(const ScriptVarStore &prev) {
-        wac.do_choice = prev.wac.do_choice;
-        wac.rnd = prev.wac.rnd;
-    }
+    // Carry a previous mission's whole store into this one: every word lies
+    // in a process global that no load rebuilds, and the mission start runs
+    // its PreMission pass ahead of the WAC load, so that pass reads each word
+    // at the previous run's value (in a process's first mission, BSS zero).
+    // The load's clears then run (clear_numbered_mission_vars,
+    // clear_global_vars, reset_wac_load_state: V0..V255, the G bank, the IF
+    // state and the DO counters, the DORND seed) and the rest stays for the
+    // whole of the next mission (D-EVT-15, D-EVT-17):
+    // - the declared half (256..511): Script_Compile's declaration arm
+    //   stores name, address and type and never the slot, and no writer in
+    //   the image zeroes it, so slot n reads the previous compile's slot n;
+    // - the DO choices and RND: no mission load stores to either. A save-game
+    //   load copies the choices from its file but not RND, which lies below
+    //   the copied run (unported).
+    // The restart's rewind restores the sealed start instead (D-EVT-15).
+    // [orig: Game_StartMission - the EventTrigger_UpdateAllWithFlag2 call
+    //  @0x525B86 ahead of the WacScript_InitAndLoad call @0x525CB3;
+    //  Script_Compile declaration arm @0x4f3812..0x4f3964 -- valueAddress =
+    //  0xC6B640 + 4n, slot never initialised; g_WacLoopChoices @0xC6E640,
+    //  written by WacScript_ExecuteBytecode alone (@0x4F5A48 / @0x4F5AD0 /
+    //  @0x4F5AF0) and the bank words; g_WacVarRND @0xC6B23C, stored by
+    //  WacCmd_Random @0x4ED2C8; WacScript_LoadVarState @0x4EE520, the
+    //  0x38AC-byte copy to 0xC6B240 called @0x4EE52F]
+    void carry_from(const ScriptVarStore &prev) { *this = prev; }
 
 private:
     static bool in_range(int i, int n) { return i >= 0 && i < n; }

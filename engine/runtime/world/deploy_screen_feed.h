@@ -81,17 +81,31 @@ struct DeployZoneRow {
 // not secured — the second loop has no secured gate) inserts at position 0,
 // i.e. right after the Default row: the witnessed quirk, kept.
 // [orig: the search @0x553c9c..0x553cbd, `insert_pos = 0` default @0x553c8e,
-//  UIList_AddRow(text, -1, 0, insert_pos + 1) @0x553d8b, the empty row
+//  the member's sprintf of the entity's name (+0xF4) @0x553d8e, its
+//  UIList_AddRow(text, -1, 0, insert_pos + 1) @0x553da5, the empty row
 //  @0x553dbb]
 struct DeployListRow {
     std::string text;
     int value = 0; // 0 default, index+1 zone, -1 occupant/blank (never a pick)
 };
 
+// The rows as the death screen's code-page list holds them: each text with
+// its inline tags stripped (the compiled list has no markup channel yet,
+// D-HUD-19). The rows are the page's bytes already (build_deploy_rows), as the
+// game's list draws them (a glyph per byte): an occupant's row (value -1)
+// carries the member's roster name as the roster holds it [orig: the sprintf
+// of the member entity's name @0x553d8e, the UIList_AddRow call @0x553da5]
+// (D-MNU-46).
+std::vector<std::string> deploy_list_items(const std::vector<DeployListRow> &rows);
+
 // The zone-row text before the sort: "<color>'<letter>' <name>" [orig:
-// sprintf("%s'%c' %s") @0x553c1f]; the Default row "<color>'<key>' <home>"
-// [orig: @0x553b6b]. `team_color_tag` is "<c4040FF>" or "<cFF2020>" for team 2
-// [orig: @0x553b1e..0x553b38].
+// sprintf("%s'%c' %s") @0x553c1f, the letter index + 0x41 @0x553c16]; the
+// Default row "<color>'<key>' <home>" [orig: sprintf("%s'%s' %s")
+// @0x553b30..0x553b36]. Each row is the code page's bytes throughout, as the
+// game's: the builder encodes the embedder's UTF-8 key, home and zone names
+// (utf8_to_retail_text) before it joins them to the tag and the letter, a raw
+// byte past 'Z' (D-MNU-46). `team_color_tag` is "<c4040FF>" or "<cFF2020>"
+// for team 2 [orig: the team test and the tag @0x553adb..0x553af1].
 struct DeployListInput {
     std::string team_color_tag;
     std::string default_key;  // Menu/DEFAULT_SPAWN_KEY
@@ -129,7 +143,7 @@ DeployStatusLine build_deploy_status(const DeployStatusInput &in);
 // [orig: @0x5538e7..0x553a7b: penalty "%s  <cFF4040>%i" over the
 // Overlays/STROVER_PENALTYTIMER label; numbered wave "'%s':  <cFF4040>%d" over
 // the WPNames name; lettered wave "%c:  <cFF4040>%d" with 'A' + index
-// @0x553a5b]. `penalty_label` and `zone_name` are the embedder-resolved
+// @0x553a56..0x553a64]. `penalty_label` and `zone_name` are the embedder-resolved
 // strings (with their fallbacks already applied); "" for Kind::None.
 std::string deploy_status_text(const DeployStatusLine &line,
                                const std::string &penalty_label,
