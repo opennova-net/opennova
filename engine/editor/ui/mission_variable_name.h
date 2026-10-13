@@ -12,10 +12,10 @@ namespace opennova::editor {
 
 class MissionDocument;
 
-// The name field of variable `index` of `mission` ("" takes its name away). Disabled when not `editable`, and
-// where the mission's layer table holds the original editor's layer names, which no name is written over.
+// The name field of variable `index` of `mission` ("" takes its name away). Disabled when not `editable`, and past
+// V255 (the script's own VAR words).
 void draw_variable_name_field(Workspace &workspace, const MissionDocument &mission, int64_t index, bool editable);
-// One line: how many more variables can take a name (31 at most), or why none can.
+// One line: how many more of V0..V255 can take a name.
 void draw_variable_names_left(const MissionDocument &mission);
 // While the game Play runs reports this mission (S24 Live): the variable's value there, and a value typed and Set
 // asks the game to take it (play_debug). Nothing otherwise.
