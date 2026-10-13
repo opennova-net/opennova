@@ -154,6 +154,13 @@ public:
 	// (0..40 — the world's veil leg forwards it to
 	// Weather.set_sun_veil_stopdown).
 	float get_sun_veil_alpha() const;
+	// The hold (ADR 0046 S14, E13), as MissionEnvironment's: while held, the
+	// bodies write no opennova_sun_veil_alpha (the veil pair still moves);
+	// republish_globals writes this Celestial's alpha whatever the hold. The
+	// game never holds.
+	void set_globals_held(bool p_held) { globals_held_ = p_held; }
+	bool is_globals_held() const { return globals_held_; }
+	void republish_globals();
 	int get_sun_veil_stopdown() const;
 
 	void _ready() override;
@@ -247,6 +254,7 @@ private:
 	void _apply_sky_pass_gates();
 	// The last advanced frame's sun-veil pair (env_celestial.h SunVeil).
 	int sun_veil_glare_ = 0;
+	bool globals_held_ = false;
 	int sun_veil_stopdown_ = 0;
 	// The water-reflected sun glint accumulator
 	// [orig: Environment_UpdateSunGlare @ 0x5ad130, see docs/env/env-tod-re.md].

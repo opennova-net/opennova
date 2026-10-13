@@ -183,6 +183,17 @@ void Water::publish_absent() {
 	ObjectShaderCache::get_singleton()->clear_water_plane();
 }
 
+void Water::republish_globals() {
+	if (!built_ || !is_inside_tree()) {
+		publish_absent();
+		return;
+	}
+	const bool held = globals_held_;
+	globals_held_ = false;
+	_push_water_split_height();
+	globals_held_ = held;
+}
+
 void Water::release_runtime_renderer_resources() {
 	world_rendering_enabled_ = false;
 	RenderingServer *server = RenderingServer::get_singleton();

@@ -67,6 +67,17 @@ public:
 	PackedVector3Array get_face_directions() const;
 	PackedVector3Array get_face_up_vectors() const;
 
+	// The hold (ADR 0046 S14, E13), as MissionEnvironment's: while held, the
+	// capture writes neither shader global (the cube, its ready flag); it still
+	// captures and publishes its own cube. republish_globals writes this
+	// capture's pair whatever the hold; publish_absent leaves the pair as a
+	// process has it with no capture (not ready, no cube). The game never
+	// holds.
+	void set_globals_held(bool p_held) { globals_held_ = p_held; }
+	bool is_globals_held() const { return globals_held_; }
+	void republish_globals();
+	static void publish_absent();
+
 	void _notification(int p_what);
 
 protected:
@@ -98,6 +109,7 @@ private:
 	bool cube_ready_ = false;
 	bool force_pending_ = true;
 	bool warned_device_failure_ = false;
+	bool globals_held_ = false;
 };
 
 } // namespace godot

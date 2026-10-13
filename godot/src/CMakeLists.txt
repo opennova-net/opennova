@@ -251,6 +251,7 @@ add_library(${TARGET_NAME} SHARED
     world/game_world_frame.cpp
     world/game_world_load.cpp
     world/game_world_effects.cpp
+    world/world_scene.cpp
     world/session_drive.cpp
     world/world_view.cpp
     world/load_timeline.cpp

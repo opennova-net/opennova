@@ -102,6 +102,7 @@ void Celestial::_bind_methods() {
 			&Celestial::settle_glare_occlusion, DEFVAL(64));
 	ClassDB::bind_method(D_METHOD("get_diagnostics"),
 			&Celestial::get_diagnostics);
+	ClassDB::bind_method(D_METHOD("is_globals_held"), &Celestial::is_globals_held);
 	ClassDB::bind_method(D_METHOD("get_sun_veil_alpha"),
 			&Celestial::get_sun_veil_alpha);
 	ClassDB::bind_method(D_METHOD("get_overlay_body_node", "body"),
@@ -417,8 +418,14 @@ void Celestial::_publish_idle_veil() {
 	sun_veil_glare_ = 0;
 	sun_veil_stopdown_ = 0;
 	RenderingServer *rs = RenderingServer::get_singleton();
-	if (rs != nullptr) {
+	if (rs != nullptr && !globals_held_) {
 		rs->global_shader_parameter_set("opennova_sun_veil_alpha", 0.0f);
+	}
+}
+
+void Celestial::republish_globals() {
+	if (RenderingServer *rs = RenderingServer::get_singleton()) {
+		rs->global_shader_parameter_set("opennova_sun_veil_alpha", get_sun_veil_alpha());
 	}
 }
 
@@ -565,7 +572,7 @@ void Celestial::advance_frame(double p_delta) {
 		sun_veil_stopdown_ = veil.stopdown;
 	}
 	RenderingServer *rs = RenderingServer::get_singleton();
-	if (rs != nullptr) {
+	if (rs != nullptr && !globals_held_) {
 		rs->global_shader_parameter_set("opennova_sun_veil_alpha",
 				get_sun_veil_alpha());
 	}

@@ -98,6 +98,9 @@ public:
 	// still moves. The editor's mission device releases it to publish and to present its own frame.
 	void set_globals_held(bool p_held) { globals_held_ = p_held; }
 	bool is_globals_held() const { return globals_held_; }
+	// This water's globals written again from its state whatever the hold
+	// (its render activity untouched); an unbuilt water writes the absent set.
+	void republish_globals();
 	// How many times a water wrote its process-wide globals since the process began (a read-back for
 	// the hold's tests: a headless renderer keeps no global to read back).
 	static int64_t get_global_writes() { return global_writes_; }
