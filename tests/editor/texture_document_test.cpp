@@ -185,6 +185,17 @@ int test_decode() {
 	image = decode_texture("odd.dds", test_png::gradient_png(5, 3));
 	TEST_EXPECT(image->loads && image->decoded && image->width() == 5 && fact(*image, "reader").find("D3DX") == 0 &&
 	            fact(*image, "format").find("PNG") == 0);
+	// A PPM under a .dds name: D3DX's walk reaches its PPM codec (renderer::dds_read_by_content,
+	// the engine's port of it), so it loads and shows.
+	const std::string ppm_header = "P6\n2 1\n255\n";
+	std::vector<uint8_t> ppm(ppm_header.begin(), ppm_header.end());
+	for (const uint8_t byte : { 255, 0, 0, 0, 255, 0 })
+		ppm.push_back(byte);
+	image = decode_texture("sky.dds", ppm);
+	TEST_EXPECT(image->loads && image->decoded && image->width() == 2 &&
+			fact(*image, "format").find("PPM") == 0);
+	TEST_EXPECT(texture_texel(*image, 0, 1, 0, texel) && texel[0] == 0 && texel[1] == 255 &&
+			texel[2] == 0);
 	// A name no reader takes.
 	image = decode_texture("art.bmp", argb);
 	TEST_EXPECT(image->reader == TextureReader::None && !image->loads);
