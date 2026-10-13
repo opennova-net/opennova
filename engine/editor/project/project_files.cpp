@@ -66,6 +66,10 @@ std::string basename_of(const std::string &path) {
 	return utf8_of(path_of(path).filename());
 }
 
+std::string file_stem(const std::string &path) {
+	return utf8_of(path_of(path).stem());
+}
+
 bool check_file_name(const std::string &name, AssetKind kind, FileNameProblem &problem, std::string &message) {
 	if (name.empty() || name == "." || name == ".." || name.find_first_of("/\\:") != std::string::npos) {
 		problem = FileNameProblem::Name;

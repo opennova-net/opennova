@@ -42,5 +42,7 @@ bool written(const Document &document, const NodeAddress &address, const FieldSc
 // A count with its noun, plural but for one ("1 file", "3 files", "2,237 files"): the windows' and the
 // fixes' numbers in words (its thousands grouped by strutil::grouped, as the windows write one).
 std::string counted(size_t count, const char *noun);
+// The same with the noun's two forms given ("1 entity", "2 entities").
+std::string counted(size_t count, const char *one, const char *many);
 
 } // namespace opennova::editor

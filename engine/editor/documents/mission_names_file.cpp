@@ -10,6 +10,7 @@
 
 #include <base/io/hash.h>
 #include <editor/documents/mission_document.h>
+#include <editor/model/field_text.h>
 #include <editor/project/project_files.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
@@ -49,10 +50,6 @@ bool name_bytes_empty(const bms::GroupRecord &record) {
 	for (const char byte : record.name)
 		if (byte != 0) return false;
 	return true;
-}
-
-std::string counted(size_t count, const char *one, const char *many) {
-	return std::to_string(count) + " " + (count == 1 ? one : many);
 }
 
 // A reason as a sentence: its full stop where it has none.
