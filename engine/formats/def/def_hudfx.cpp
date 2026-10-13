@@ -34,6 +34,8 @@ HudFxFile hudfx_parse(const uint8_t *data, size_t size) {
 	const char *text = reinterpret_cast<const char *>(data);
 	io::ConfigTokens tokens;
 	io::for_each_config_line_span(text, size, tokens, [&](io::ConfigTokens &line, const io::ConfigLineSpan &) {
+		// The walk ended at the first tagged line [orig: File_ParseASCIIFile @ 0x53D942].
+		if (file.line) return;
 		// The walk's gate [orig: File_ParseASCIIFile @0x53D915 / @0x53D91E].
 		if (line.count == 0 || line.tokens[0][0] == '/') return;
 		const int slot = hudfx_slot_of(line.tokens[0]);
@@ -41,17 +43,17 @@ HudFxFile hudfx_parse(const uint8_t *data, size_t size) {
 		HudFxLine row;
 		row.slot = uint8_t(slot);
 		row.model = line.token(1); // params[2], the reset token's "" past the count
-		file.lines.push_back(std::move(row));
+		file.line = std::move(row);
 	});
 	return file;
 }
 
 std::array<std::string, kHudFxSlots> hudfx_slot_names(const HudFxFile &file) {
 	std::array<std::string, kHudFxSlots> names;
-	if (file.lines.empty()) return names;
-	// The first tagged line's model copied with its terminator from its slot on [orig: @ 0x58F992..0x58FB42].
+	if (!file.line) return names;
+	// The line's model copied with its terminator from its slot on [orig: @ 0x58F992..0x58FB42].
 	std::string bytes(kHudFxSlots * kHudFxNameBytes, '\0');
-	const HudFxLine &read = file.lines.front();
+	const HudFxLine &read = *file.line;
 	const size_t at = size_t(read.slot) * kHudFxNameBytes;
 	for (size_t i = 0; i < read.model.size() && at + i < bytes.size(); ++i) bytes[at + i] = read.model[i];
 	for (size_t slot = 0; slot < kHudFxSlots; ++slot) {
@@ -65,21 +67,20 @@ std::array<std::string, kHudFxSlots> hudfx_slot_names(const HudFxFile &file) {
 
 bool hudfx_write(const HudFxFile &file, std::string &text, std::string &error) {
 	text.clear();
-	for (const HudFxLine &line : file.lines) {
-		if (line.slot >= kHudFxSlots) {
-			error = "A line's slot " + std::to_string(line.slot) + " is no tag of the nine.";
-			return false;
-		}
-		if (!one_token(line.model)) {
-			error = std::string(kTags[line.slot]) + "'s model \"" + line.model +
-			        "\" is no one word the walk reads: a name with no blank, comma, quote, `;` or `//`.";
-			return false;
-		}
+	if (!file.line) return true;
+	const HudFxLine &line = *file.line;
+	if (line.slot >= kHudFxSlots) {
+		error = "The line's slot " + std::to_string(line.slot) + " is no tag of the nine.";
+		return false;
 	}
-	// A line of no model is its tag alone: the slot's name the reset token's "", nothing loaded. CR LF after
-	// each line, the one break the walk splits at [orig: File_ParseASCIIFile @ 0x53D8C7].
-	for (const HudFxLine &line : file.lines)
-		text += std::string(kTags[line.slot]) + (line.model.empty() ? "" : "\t" + line.model) + "\r\n";
+	if (!one_token(line.model)) {
+		error = std::string(kTags[line.slot]) + "'s model \"" + line.model +
+		        "\" is no one word the walk reads: a name with no blank, comma, quote, `;` or `//`.";
+		return false;
+	}
+	// A line of no model is its tag alone: the slot's name the reset token's "", nothing loaded. CR LF after it,
+	// the one break the walk splits at [orig: File_ParseASCIIFile @ 0x53D8C7].
+	text = std::string(kTags[line.slot]) + (line.model.empty() ? "" : "\t" + line.model) + "\r\n";
 	return true;
 }
 
