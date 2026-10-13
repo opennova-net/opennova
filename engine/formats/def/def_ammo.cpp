@@ -1,6 +1,7 @@
 #include <formats/def/def.h>
 #include <base/io/crt_ftol.h>
 #include <base/io/tick_rate.h>
+#include <base/io/strutil.h>
 
 // AMMO.DEF: one record per ammunition type.
 
@@ -23,31 +24,33 @@ namespace opennova::def {
 /* ========================================================================= */
 
 /* `flag <name>` -> bit, matched first-name-wins in TABLE ORDER (three 'internal' names
- * exist; a data file writing "internal" hits 0x40000 first, faithfully).
+ * exist; a data file writing "internal" hits 0x40000 first, faithfully), each name spelled as the
+ * game's table spells it (the writer puts that spelling down; the compare ignores case).
  * [orig: the 30-entry table @0x813500; AmmoDef_ParseProperty @0x40a2d0] */
 static const struct { const char *name; unsigned int bit; } k_ammo_flag_names[] = {
     {"ignoredmg", DEF_AMMO_FLAG_IGNOREDMG},        {"ignore", DEF_AMMO_FLAG_IGNORE},
     {"shrapnel", DEF_AMMO_FLAG_SHRAPNEL},         {"silenced", DEF_AMMO_FLAG_SILENCED},
-    {"water", DEF_AMMO_FLAG_WATER},           {"detonatesatchels", DEF_AMMO_FLAG_DETONATESATCHELS},
+    {"water", DEF_AMMO_FLAG_WATER},           {"Detonatesatchels", DEF_AMMO_FLAG_DETONATESATCHELS},
     {"nosmoke", DEF_AMMO_FLAG_NOSMOKE},         {"nocollide", DEF_AMMO_FLAG_NOCOLLIDE},
     {"nogravity", DEF_AMMO_FLAG_NOGRAVITY},      {"hasitem", DEF_AMMO_FLAG_HASITEM},
     {"instantkillzone", DEF_AMMO_FLAG_INSTANTKILLZONE},{"ownerimmune", DEF_AMMO_FLAG_OWNERIMMUNE},
     {"useownmove", DEF_AMMO_FLAG_USEOWNMOVE},    {"noage", DEF_AMMO_FLAG_NOAGE},
     {"forcetracer", DEF_AMMO_FLAG_FORCETRACER},   {"shotgun", DEF_AMMO_FLAG_SHOTGUN},
-    {"claymore", DEF_AMMO_FLAG_CLAYMORE},     {"nooitems", DEF_AMMO_FLAG_NOOITEMS},
-    {"nomitems", DEF_AMMO_FLAG_NOMITEMS},    {"noditems", DEF_AMMO_FLAG_NODITEMS},
-    {"ignorfoilage", DEF_AMMO_FLAG_IGNORFOILAGE},{"priority", DEF_AMMO_FLAG_PRIORITY},
-    {"clipwater", DEF_AMMO_FLAG_CLIPWATER},  {"clipwaterfx", DEF_AMMO_FLAG_CLIPWATERFX},
-    {"designatetarget", DEF_AMMO_FLAG_DESIGNATETARGET}, {"lawr", DEF_AMMO_FLAG_LAWR},
+    {"claymore", DEF_AMMO_FLAG_CLAYMORE},     {"NoOItems", DEF_AMMO_FLAG_NOOITEMS},
+    {"NoMItems", DEF_AMMO_FLAG_NOMITEMS},    {"NoDItems", DEF_AMMO_FLAG_NODITEMS},
+    {"IgnorFoilage", DEF_AMMO_FLAG_IGNORFOILAGE},{"Priority", DEF_AMMO_FLAG_PRIORITY},
+    {"ClipWater", DEF_AMMO_FLAG_CLIPWATER},  {"ClipWaterFx", DEF_AMMO_FLAG_CLIPWATERFX},
+    {"DesignateTarget", DEF_AMMO_FLAG_DESIGNATETARGET}, {"lawr", DEF_AMMO_FLAG_LAWR},
     {"fgrenade", DEF_AMMO_FLAG_FGRENADE},  {"internal", 0x40000u},
     {"internal", 0x1000u},      {"internal", 0x400000u},
 };
 
 /* `kztype rounds_kz_<X>` -> index 1..7; 0/unknown rejected like the original's
- * "bad kill zone type" warning path. [orig: 8-name table @0x8133E0] */
+ * "bad kill zone type" warning path; each name spelled as the game's table spells it.
+ * [orig: 8-name table @0x8133E0, 8-B rows {name, index}] */
 static const char *k_ammo_kz_names[8] = {
-    "rounds_kz_null",   "rounds_kz_knife", "rounds_kz_standard", "rounds_kz_medic",
-    "rounds_kz_radiusblast", "rounds_kz_c4", "rounds_kz_bullets", "rounds_kz_slash",
+    "rounds_kz_null",   "rounds_kz_Knife", "rounds_kz_Standard", "rounds_kz_Medic",
+    "rounds_kz_RadiusBlast", "rounds_kz_C4", "rounds_kz_Bullets", "rounds_kz_Slash",
 };
 
 /* `tracer_type` style name -> engine id; unknown names fall back to atol like the
@@ -339,7 +342,7 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out,
             to_lower_buf(fl, v, fn);
             for (size_t fi = 0; fi < sizeof(k_ammo_flag_names) / sizeof(k_ammo_flag_names[0]); ++fi) {
                 if (strlen(k_ammo_flag_names[fi].name) == fn &&
-                    memcmp(k_ammo_flag_names[fi].name, fl, fn) == 0) {
+                    strutil::iequals(std::string_view(fl, fn), k_ammo_flag_names[fi].name)) {
                     current.flags |= k_ammo_flag_names[fi].bit;
                     break;
                 }
@@ -370,7 +373,7 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out,
             size_t kn = vl < sizeof(kz) - 1 ? vl : sizeof(kz) - 1;
             to_lower_buf(kz, v, kn);
             for (int ki = 1; ki < 8; ++ki) {
-                if (strlen(k_ammo_kz_names[ki]) == kn && memcmp(k_ammo_kz_names[ki], kz, kn) == 0) {
+                if (strlen(k_ammo_kz_names[ki]) == kn && strutil::iequals(std::string_view(kz, kn), k_ammo_kz_names[ki])) {
                     current.kztype = ki;
                     break;
                 }

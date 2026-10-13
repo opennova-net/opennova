@@ -144,14 +144,8 @@ static int failures = 0;
 	do { if (!(c)) { std::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #c); ++failures; } } while (0)
 
 // The keyword-table accessor (def.h) projects the parser's own tables: one
-// entry per macro, single-bit, lowercase, and nothing beyond the last row.
-static bool lowercase_token(const char *s) {
-	if (s == NULL || s[0] == '\0') return false;
-	for (; *s != '\0'; ++s) {
-		if (*s >= 'A' && *s <= 'Z') return false;
-	}
-	return true;
-}
+// entry per macro, single-bit, a name, and nothing beyond the last row.
+static bool named_token(const char *s) { return s != NULL && s[0] != '\0'; }
 
 int main() {
 	const uint32_t attrib_all = DEF_ITEM_ATTRIB_MOVECB | DEF_ITEM_ATTRIB_POWERUP |
@@ -180,7 +174,7 @@ int main() {
 		CHECK(bit != 0 && (bit & (bit - 1)) == 0);
 		CHECK((seen & bit) == 0);
 		seen |= bit;
-		CHECK(lowercase_token(def_item_attrib_keyword(i)));
+		CHECK(named_token(def_item_attrib_keyword(i)));
 	}
 	CHECK(seen == attrib_all);
 	seen = 0;
@@ -189,19 +183,25 @@ int main() {
 		CHECK(bit != 0 && (bit & (bit - 1)) == 0);
 		CHECK((seen & bit) == 0);
 		seen |= bit;
-		CHECK(lowercase_token(def_item_attrib2_keyword(i)));
+		CHECK(named_token(def_item_attrib2_keyword(i)));
 	}
 	CHECK(seen == attrib2_all);
 	CHECK(def_item_attrib_keyword(-1) == NULL && def_item_attrib_keyword_bit(-1) == 0);
 	CHECK(def_item_attrib_keyword(30) == NULL && def_item_attrib_keyword_bit(30) == 0);
 	CHECK(def_item_attrib2_keyword(13) == NULL && def_item_attrib2_keyword_bit(13) == 0);
-	// The parser's spelling is what the accessor hands out.
-	bool nodismember_named = false;
+	// The game's spelling is what the accessor hands out [orig: ItemDef_ParseProperty, "NoDismember" @
+	// 0x4A0A48, "Aidata" @ 0x4A06F3; "LandMine" @ 0x4A0F18].
+	bool nodismember_named = false, aidata_named = false, landmine_named = false;
 	for (int i = 0; i < def_item_attrib_keyword_count(); ++i) {
 		if (def_item_attrib_keyword_bit(i) == DEF_ITEM_ATTRIB_NODISMEMBER)
-			nodismember_named = std::strcmp(def_item_attrib_keyword(i), "nodismember") == 0;
+			nodismember_named = std::strcmp(def_item_attrib_keyword(i), "NoDismember") == 0;
+		if (def_item_attrib_keyword_bit(i) == DEF_ITEM_ATTRIB_AIDATA)
+			aidata_named = std::strcmp(def_item_attrib_keyword(i), "Aidata") == 0;
 	}
-	CHECK(nodismember_named);
+	for (int i = 0; i < def_item_attrib2_keyword_count(); ++i)
+		if (def_item_attrib2_keyword_bit(i) == DEF_ITEM_ATTRIB2_LANDMINE)
+			landmine_named = std::strcmp(def_item_attrib2_keyword(i), "LandMine") == 0;
+	CHECK(nodismember_named && aidata_named && landmine_named);
 
 	std::printf("def flag/attrib macros pinned to witnessed values: %s\n",
 			failures == 0 ? "OK" : "FAILED");

@@ -381,10 +381,12 @@ void DefRecordWriter::record(DefRecordKind kind, const void *value, const std::s
 					tokens.push_back(def_item_attrib2_keyword(i));
 					second &= ~def_item_attrib2_keyword_bit(i);
 				}
-			if (item.attrib_parent) tokens.push_back("parent");
-			// The mission editor's side words, which the game matches and keeps nothing of (DefItemDef::attrib_good).
-			if (item.attrib_good) tokens.push_back("good");
-			if (item.attrib_evil) tokens.push_back("evil");
+			// Each word as the game's chain spells it (the tables' names; Parent [orig: @ 0x4A0CC4]).
+			if (item.attrib_parent) tokens.push_back("Parent");
+			// The mission editor's side words, which the game matches and keeps nothing of (DefItemDef::attrib_good)
+			// [orig: "Good" @ 0x4A06C3, "Evil" @ 0x4A06DB].
+			if (item.attrib_good) tokens.push_back("Good");
+			if (item.attrib_evil) tokens.push_back("Evil");
 			if (first || second) fail(name, property.key, "Attributes contain bits without an authored token.");
 			for (size_t from = 0; from < tokens.size(); from += kDefAttribTokensPerLine)
 				line("attrib:", std::vector<std::string>(tokens.begin() + std::ptrdiff_t(from),
@@ -433,6 +435,7 @@ void DefRecordWriter::record(DefRecordKind kind, const void *value, const std::s
 			continue;
 		}
 		case DefEncoding::ClassRounds: {
+			// The class names by their values, as the game's table holds them [orig: @ 0x830EE8].
 			const char *names[] = {"", "medic", "sniper", "gunner", "", "rifleman", "engineer"};
 			for (size_t i = 0; i < values.size(); ++i) if (n(i)) {
 				if (!*names[i]) fail(name, key, "Class slot has no authored name.");
@@ -648,6 +651,7 @@ bool DefRecordWriter::property_args(DefRecordKind kind, const DefProperty &prope
 	case DefEncoding::Sight: {
 		const auto &sight = *static_cast<const DefSightEntry *>(value);
 		for (size_t i = 0; i < 5; ++i) args.push_back(word(values[i]));
+		// The names the material maker compares [orig: WeaponDef_CreateBlendNamedMaterial @ 0x5401ca..0x540240].
 		const char *blend[] = {"blend", "add", "blendat", "multiply", "addat", "multiplyat"};
 		if (sight.blend < 0 || sight.blend > 5) { fail(name, key, "Unknown sight blend mode."); return false; }
 		args.push_back(blend[sight.blend]);
@@ -674,7 +678,20 @@ bool DefRecordWriter::property_args(DefRecordKind kind, const DefProperty &prope
 	case DefEncoding::TeamFilter: case DefEncoding::ClassRounds: case DefEncoding::Switch:
 	case DefEncoding::PowerupWeapon:
 		return false; // a line per flag or entry, or one record words itself: record writes them
-	default: for (const auto &v : values) args.push_back(word(v)); break;
+	default:
+		// A tracer type the game's name table names is written by that name, else its number [orig:
+		// AmmoDef_ParseTypeName @ 0x409b90, the stricmp chain @ 0x409b9b..0x409c95, atol past it].
+		if (kind == DefRecordKind::Ammo && key == "tracer_type") {
+			for (size_t i = 0; i < values.size(); ++i) {
+				const char *named = nullptr;
+				for (size_t t = 0; const char *tracer = def_ammo_tracer_keyword(t); ++t)
+					if (def_ammo_tracer_value(t) == n(i)) named = tracer;
+				args.push_back(named ? std::string(named) : std::to_string(n(i)));
+			}
+			break;
+		}
+		for (const auto &v : values) args.push_back(word(v));
+		break;
 	}
 	return true;
 }

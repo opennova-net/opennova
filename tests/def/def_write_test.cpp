@@ -359,8 +359,8 @@ int mission_editor_keys() {
 	const size_t crate_at = made.text.find("Crate");
 	if (!made.ok() || made.text.find("max_attack_dist 30") == std::string::npos ||
 	    made.text.find("max_engagement_dist 400") == std::string::npos || made.text.find("min_engagement_dist 20") == std::string::npos ||
-	    made.text.find("fire_timer 5") == std::string::npos || made.text.find("evil") == std::string::npos ||
-	    made.text.find("good") == std::string::npos || crate_at == std::string::npos ||
+	    made.text.find("fire_timer 5") == std::string::npos || made.text.find("attrib: Aidata Good Evil\r\n") == std::string::npos ||
+	    crate_at == std::string::npos ||
 	    made.text.find("_dist", crate_at) != std::string::npos || made.text.find("fire_timer", crate_at) != std::string::npos) {
 		std::printf("FAIL mission editor keys written:\n%s\n", made.text.c_str());
 		++failures;
@@ -394,8 +394,7 @@ int ignored_input() {
 	}
 	const std::string &text = items.written.text;
 	if (text.find("subtype") != std::string::npos || text.find("exp1") != std::string::npos ||
-	    text.find("good") == std::string::npos || text.find("plain") != std::string::npos ||
-	    text.find("nodie") == std::string::npos || text.find("aidata") == std::string::npos) {
+	    text.find("plain") != std::string::npos || text.find("attrib: Aidata NoDie Good\r\n") == std::string::npos) {
 		std::printf("FAIL ignored items output:\n%s\n", text.c_str());
 		++failures;
 	}
@@ -935,7 +934,7 @@ int writer_form() {
 	        "\thp 3000\r\n"
 	        "\tsound_profile SP_DuneBuggy\r\n"
 	        "\ttype vehicle\r\n"
-	        "\tattrib: playercontrol aidata noscar dynamicshadow\r\n"
+	        "\tattrib: PlayerControl Aidata NoScar DynamicShadow\r\n"
 	        "\tpcvehicle_spawnlist 101291\r\n"
 	        "\taddeweap ewep01 101419\r\n"
 	        "end\r\n\r\n"
@@ -1110,6 +1109,64 @@ int writer_form_edits() {
 			std::printf("FAIL kind %zu's property table reaches the rows' step\n", k);
 			++failures;
 		}
+	return failures;
+}
+
+// The writer's words are the game's (S26, 2026-10-13): each attribute, flag and kill zone as the game's own
+// table spells it, whatever spelling the file had [orig: ItemDef_ParseProperty, "Aidata" @ 0x4A06F3,
+// "VehicleBay" @ 0x4A0CEC; the weapon flag table @ 0x830BF0; the ammo flag table @ 0x813500; the kill zone
+// table @ 0x8133E0]; a tracer type the game's name table names by its name, a number it names none of as
+// that number [orig: AmmoDef_ParseTypeName @ 0x409b90]. Each reads back as it was.
+int retail_words() {
+	int failures = 0;
+	const char *items = "begin \"Truck\"\r\n\tid 100100\r\n\ttype vehicle\r\n\tattrib: AIDATA vehiclebay noscar parent good\r\nend\r\n";
+	DefItemsFile file{};
+	def_parse_items_memory(reinterpret_cast<const uint8_t *>(items), std::strlen(items), &file, nullptr);
+	const DefWriteResult item = def_write_items(file);
+	DefItemsFile item_back{};
+	def_parse_items_memory(reinterpret_cast<const uint8_t *>(item.text.data()), item.text.size(), &item_back, nullptr);
+	if (!item.ok() || item.text.find("\tattrib: Aidata NoScar VehicleBay Parent Good\r\n") == std::string::npos ||
+	    item_back.count != 1 || item_back.entries[0].attrib != file.entries[0].attrib ||
+	    item_back.entries[0].attrib2 != file.entries[0].attrib2 || !item_back.entries[0].attrib_parent ||
+	    !item_back.entries[0].attrib_good) {
+		std::printf("FAIL the game's words, items:\n%s\n", item.text.c_str());
+		++failures;
+	}
+	def_free_items(&item_back);
+	def_free_items(&file);
+
+	const char *weapons = "weapon \"WPN_A\"\r\n\tcategory 2\r\n\tflags SCOPED\r\n\tflags NoRangeCheck\r\n\tflags inset\r\nend\r\n";
+	DefWeaponsFile guns{};
+	def_parse_weapons_memory(reinterpret_cast<const uint8_t *>(weapons), std::strlen(weapons), &guns, nullptr);
+	const DefWriteResult gun = def_write_weapons(guns);
+	DefWeaponsFile gun_back{};
+	def_parse_weapons_memory(reinterpret_cast<const uint8_t *>(gun.text.data()), gun.text.size(), &gun_back, nullptr);
+	if (!gun.ok() || gun.text.find("\tflags Scoped\r\n\tflags norangecheck\r\n\tflags Inset\r\n") == std::string::npos ||
+	    gun_back.count != 1 || gun_back.entries[0].flags != guns.entries[0].flags ||
+	    gun_back.entries[0].flags2 != guns.entries[0].flags2) {
+		std::printf("FAIL the game's words, weapons:\n%s\n", gun.text.c_str());
+		++failures;
+	}
+	def_free_weapons(&gun_back);
+	def_free_weapons(&guns);
+
+	const char *ammo = "ammo ROUND\r\ntracer_type 5 8\r\nkztype ROUNDS_KZ_RADIUSBLAST\r\nflag nooitems\r\nflag water\r\nend\r\n";
+	DefAmmoFile rounds{};
+	def_parse_ammo_memory(reinterpret_cast<const uint8_t *>(ammo), std::strlen(ammo), &rounds, nullptr);
+	const DefWriteResult round = def_write_ammo(rounds);
+	DefAmmoFile round_back{};
+	def_parse_ammo_memory(reinterpret_cast<const uint8_t *>(round.text.data()), round.text.size(), &round_back, nullptr);
+	if (!round.ok() || round.text.find("tracer_type grenade 8\r\n") == std::string::npos ||
+	    round.text.find("kztype rounds_kz_RadiusBlast\r\n") == std::string::npos ||
+	    round.text.find("flag water\r\n") == std::string::npos || round.text.find("flag NoOItems\r\n") == std::string::npos ||
+	    round_back.count != 1 || round_back.entries[0].tracer_type_friendly != 5 ||
+	    round_back.entries[0].tracer_type_enemy != 8 || round_back.entries[0].kztype != rounds.entries[0].kztype ||
+	    round_back.entries[0].flags != rounds.entries[0].flags) {
+		std::printf("FAIL the game's words, ammo:\n%s\n", round.text.c_str());
+		++failures;
+	}
+	def_free_ammo(&round_back);
+	def_free_ammo(&rounds);
 	return failures;
 }
 
@@ -1301,6 +1358,7 @@ int main(int argc, char **argv) {
 	failures += authored_units();
 	failures += writer_form();
 	failures += writer_form_edits();
+	failures += retail_words();
 	failures += numbers_at_both_precisions();
 	failures += scaled_defaults();
 	{

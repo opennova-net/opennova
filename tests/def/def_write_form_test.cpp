@@ -174,7 +174,7 @@ int written_items() {
 	int failures = 0;
 	{
 		Items read(kItems);
-		failures += authored("items.def", "items", kItems, read.save(), {"made by hand", "tough", "neutral", "exp1", "unknownkey"});
+		failures += authored("items.def", "items", kItems, read.save(), {"made by hand", "tough", "neutral", "exp1", "unknownkey", "AIData"});
 	}
 	{
 		Items read(kItems);
@@ -184,7 +184,7 @@ int written_items() {
 	{
 		Items read(kItems);
 		read.file.entries[0].attrib &= ~DEF_ITEM_ATTRIB_PLAYERCONTROL;
-		failures += reads_back("items.def", "items: an attribute cleared", read.save(), "\tattrib: aidata\r\n");
+		failures += reads_back("items.def", "items: an attribute cleared", read.save(), "\tattrib: Aidata\r\n");
 	}
 	{
 		Items read(kItems);
@@ -241,7 +241,7 @@ const std::string kWeapons =
         "\tcategory 2\r\n"
         "\trank     0\r\n"
         "\r\n"
-        "\tflags Underwater\r\n"
+        "\tflags UNDERWATER\r\n"
         "\tclipsize 15 // rounds\r\n"
         "\tflags Scoped\r\n"
         "\tpos 21.76, -11.72, 3.5, 0.0, 0, 0\r\n"
@@ -261,7 +261,7 @@ int written_weapons() {
 	int failures = 0;
 	{
 		Weapons read(kWeapons);
-		failures += authored("weapon.def", "weapons", kWeapons, read.save(), {"rounds", "Underwater", ", "});
+		failures += authored("weapon.def", "weapons", kWeapons, read.save(), {"rounds", "UNDERWATER", ", "});
 	}
 	{
 		Weapons read(kWeapons);
@@ -276,14 +276,14 @@ int written_weapons() {
 	{
 		Weapons read(kWeapons);
 		read.file.entries[0].flags |= DEF_WEAPON_FLAG_AUTO;
-		failures += reads_back("weapon.def", "weapons: a flag set", read.save(), "flags auto\r\n");
+		failures += reads_back("weapon.def", "weapons: a flag set", read.save(), "flags Auto\r\n");
 	}
 	{
 		Weapons read(kWeapons);
 		read.file.entries[0].flags &= ~DEF_WEAPON_FLAG_UNDERWATER;
 		const DefWriteResult written = read.save();
 		failures += reads_back("weapon.def", "weapons: a flag cleared", written);
-		if (written.text.find("underwater") != std::string::npos) {
+		if (written.text.find("Underwater") != std::string::npos) {
 			std::printf("FAIL weapons: a flag cleared is still written\n");
 			++failures;
 		}
@@ -397,7 +397,7 @@ int minted_parity() {
 	file.count = 1;
 	const DefWriteResult written = def_write_items(file);
 	const std::string expected = "// Item definitions\r\n\r\nbegin \"Minted Truck\"\r\n\tid 100500\r\n\thp 250\r\n"
-	                             "\ttype vehicle\r\n\tattrib: playercontrol landable\r\nend\r\n\r\n";
+	                             "\ttype vehicle\r\n\tattrib: PlayerControl Landable\r\nend\r\n\r\n";
 	if (!written.ok() || written.text != expected || plain_form("items.def", written.text) != expected) {
 		std::printf("FAIL a minted item: the writer's own form is not\n%s\nbut\n%s\n", expected.c_str(), written.text.c_str());
 		print_failures(written);

@@ -16,7 +16,8 @@ struct DefWriteResult {
 
 // A family's file in the writer's form from its records alone: each record's lines in its kind's property
 // table's order, a tab a level, read back through the family's parser and compared, field by field (no original
-// tool writes the catalogs: the form is OpenNova's).
+// tool writes the catalogs: the form is OpenNova's). Its words are the game's: an attribute, a flag, a kill zone
+// or a tracer type as the game's own name table spells it, a value no table names as its number.
 DefWriteResult def_write_items(const DefItemsFile &file);
 DefWriteResult def_write_weapons(const DefWeaponsFile &file);
 DefWriteResult def_write_ammo(const DefAmmoFile &file);

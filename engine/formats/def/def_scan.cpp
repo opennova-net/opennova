@@ -126,55 +126,56 @@ void copy_token(char *dst, size_t dst_size, const io::ConfigTokens &tokens, int 
     safe_copy(dst, dst_size, token, strlen(token));
 }
 
-/* Weapon flags table — the FULL witnessed token set, both flag dwords.
+/* Weapon flags table — the FULL witnessed token set, both flag dwords, each name spelled as the
+   game's table spells it (the writer puts that spelling down).
    [orig: the 16-B-stride {name, 0, flags1 bit, flags2 bit} table @ 0x830bf0;
    tokens compare case-insensitively]. The previous 7-entry table aliased
    whileswimming onto Underwater's 0x4 — corrected to the witnessed 0x1000000. */
 static const FlagEntry flag_table[] = {
-    {"scoped",          6, DEF_WEAPON_FLAG_SCOPED, 0},
-    {"sighted",         7, DEF_WEAPON_FLAG_SIGHTED, 0},
-    {"underwater",     10, DEF_WEAPON_FLAG_UNDERWATER, 0},
-    {"showcomander",   12, DEF_WEAPON_FLAG_SHOWCOMANDER, 0},
-    {"noclipsnodraw",  13, DEF_WEAPON_FLAG_NOCLIPSNODRAW, 0},
-    {"burst",           5, DEF_WEAPON_FLAG_BURST, 0},
-    {"notdropable",    11, DEF_WEAPON_FLAG_NOTDROPABLE, 0},
-    {"emplaced",        8, DEF_WEAPON_FLAG_EMPLACED, 0},
-    {"auto",            4, DEF_WEAPON_FLAG_AUTO, 0},
+    {"Scoped",          6, DEF_WEAPON_FLAG_SCOPED, 0},
+    {"Sighted",         7, DEF_WEAPON_FLAG_SIGHTED, 0},
+    {"Underwater",     10, DEF_WEAPON_FLAG_UNDERWATER, 0},
+    {"ShowComander",   12, DEF_WEAPON_FLAG_SHOWCOMANDER, 0},
+    {"NoClipsNoDraw",  13, DEF_WEAPON_FLAG_NOCLIPSNODRAW, 0},
+    {"Burst",           5, DEF_WEAPON_FLAG_BURST, 0},
+    {"NotDropable",    11, DEF_WEAPON_FLAG_NOTDROPABLE, 0},
+    {"Emplaced",        8, DEF_WEAPON_FLAG_EMPLACED, 0},
+    {"Auto",            4, DEF_WEAPON_FLAG_AUTO, 0},
     {"norangecheck",   12, DEF_WEAPON_FLAG_NORANGECHECK, 0},
-    {"showrange",       9, DEF_WEAPON_FLAG_SHOWRANGE, 0},
-    {"showelevation",  13, DEF_WEAPON_FLAG_SHOWELEVATION, 0},
-    {"armor",           5, DEF_WEAPON_FLAG_ARMOR, 0},
-    {"okwhilejumping", 14, DEF_WEAPON_FLAG_OKWHILEJUMPING, 0},
-    {"onlyfirescoped", 14, DEF_WEAPON_FLAG_ONLYFIRESCOPED, 0},
-    {"lollypop",        8, DEF_WEAPON_FLAG_LOLLYPOP, 0},
-    {"absorbpitch",    11, DEF_WEAPON_FLAG_ABSORBPITCH, 0},
-    {"nomove",          6, DEF_WEAPON_FLAG_NOMOVE, 0},
-    {"forcecrouch",    11, DEF_WEAPON_FLAG_FORCECROUCH, 0},
-    {"onlyscoped",     10, DEF_WEAPON_FLAG_ONLYSCOPED, 0},
-    {"2dimpact",        8, DEF_WEAPON_FLAG_2DIMPACT, 0},
-    {"usedesignator",  13, DEF_WEAPON_FLAG_USEDESIGNATOR, 0},
-    {"usespreadtwo",   12, DEF_WEAPON_FLAG_USESPREADTWO, 0},
-    {"showimpactdist", 14, DEF_WEAPON_FLAG_SHOWIMPACTDIST, 0},
-    {"whileswimming",  13, DEF_WEAPON_FLAG_WHILESWIMMING, 0},
-    {"nocardswitch",   12, DEF_WEAPON_FLAG_NOCARDSWITCH, 0},
-    {"handgunup",       9, DEF_WEAPON_FLAG_HANDGUNUP, 0},
-    {"quickswitch",    11, DEF_WEAPON_FLAG_QUICKSWITCH, 0},
-    {"onlyfirelocked", 14, DEF_WEAPON_FLAG_ONLYFIRELOCKED, 0},
-    {"forcescoped",    11, DEF_WEAPON_FLAG_FORCESCOPED, 0},
-    {"laserbeam",       9, DEF_WEAPON_FLAG_LASERBEAM, 0},
-    {"powerthrow",     10, (int)DEF_WEAPON_FLAG_POWERTHROW, 0},
-    {"noselect",        8, 0, DEF_WEAPON_FLAG2_NOSELECT},
-    {"parachute",       9, 0, DEF_WEAPON_FLAG2_PARACHUTE},
-    {"thermal",         7, 0, DEF_WEAPON_FLAG2_THERMAL},
-    {"monitor",         7, 0, DEF_WEAPON_FLAG2_MONITOR},
-    {"viewlock",        8, 0, DEF_WEAPON_FLAG2_VIEWLOCK},
+    {"ShowRange",       9, DEF_WEAPON_FLAG_SHOWRANGE, 0},
+    {"ShowElevation",  13, DEF_WEAPON_FLAG_SHOWELEVATION, 0},
+    {"Armor",           5, DEF_WEAPON_FLAG_ARMOR, 0},
+    {"OkWhileJumping", 14, DEF_WEAPON_FLAG_OKWHILEJUMPING, 0},
+    {"OnlyFireScoped", 14, DEF_WEAPON_FLAG_ONLYFIRESCOPED, 0},
+    {"LollyPop",        8, DEF_WEAPON_FLAG_LOLLYPOP, 0},
+    {"AbsorbPitch",    11, DEF_WEAPON_FLAG_ABSORBPITCH, 0},
+    {"NoMove",          6, DEF_WEAPON_FLAG_NOMOVE, 0},
+    {"ForceCrouch",    11, DEF_WEAPON_FLAG_FORCECROUCH, 0},
+    {"OnlyScoped",     10, DEF_WEAPON_FLAG_ONLYSCOPED, 0},
+    {"2DImpact",        8, DEF_WEAPON_FLAG_2DIMPACT, 0},
+    {"UseDesignator",  13, DEF_WEAPON_FLAG_USEDESIGNATOR, 0},
+    {"UseSpreadTwo",   12, DEF_WEAPON_FLAG_USESPREADTWO, 0},
+    {"ShowImpactDist", 14, DEF_WEAPON_FLAG_SHOWIMPACTDIST, 0},
+    {"WhileSwimming",  13, DEF_WEAPON_FLAG_WHILESWIMMING, 0},
+    {"NoCardSwitch",   12, DEF_WEAPON_FLAG_NOCARDSWITCH, 0},
+    {"HandGunUp",       9, DEF_WEAPON_FLAG_HANDGUNUP, 0},
+    {"QuickSwitch",    11, DEF_WEAPON_FLAG_QUICKSWITCH, 0},
+    {"OnlyFireLocked", 14, DEF_WEAPON_FLAG_ONLYFIRELOCKED, 0},
+    {"ForceScoped",    11, DEF_WEAPON_FLAG_FORCESCOPED, 0},
+    {"LaserBeam",       9, DEF_WEAPON_FLAG_LASERBEAM, 0},
+    {"PowerThrow",     10, (int)DEF_WEAPON_FLAG_POWERTHROW, 0},
+    {"NoSelect",        8, 0, DEF_WEAPON_FLAG2_NOSELECT},
+    {"Parachute",       9, 0, DEF_WEAPON_FLAG2_PARACHUTE},
+    {"Thermal",         7, 0, DEF_WEAPON_FLAG2_THERMAL},
+    {"Monitor",         7, 0, DEF_WEAPON_FLAG2_MONITOR},
+    {"ViewLock",        8, 0, DEF_WEAPON_FLAG2_VIEWLOCK},
     {"onlylockscoped", 14, 0, DEF_WEAPON_FLAG2_ONLYLOCKSCOPED},
-    {"noammotypes",    11, 0, DEF_WEAPON_FLAG2_NOAMMOTYPES},
+    {"NoAmmoTypes",    11, 0, DEF_WEAPON_FLAG2_NOAMMOTYPES},
     {"showhudpip",     10, 0, DEF_WEAPON_FLAG2_SHOWHUDPIP},
-    {"fixverticalofst",15, 0, DEF_WEAPON_FLAG2_FIXVERTICALOFST},
-    {"inset",           5, 0, DEF_WEAPON_FLAG2_INSET},
-    {"noautozero",     10, 0, DEF_WEAPON_FLAG2_NOAUTOZERO},
-    {"invisible",       9, 0, DEF_WEAPON_FLAG2_INVISIBLE},
+    {"FixVerticalOfst",15, 0, DEF_WEAPON_FLAG2_FIXVERTICALOFST},
+    {"Inset",           5, 0, DEF_WEAPON_FLAG2_INSET},
+    {"NoAutoZero",     10, 0, DEF_WEAPON_FLAG2_NOAUTOZERO},
+    {"Invisible",       9, 0, DEF_WEAPON_FLAG2_INVISIBLE},
 };
 static const int flag_table_count = sizeof(flag_table) / sizeof(flag_table[0]);
 
@@ -225,66 +226,68 @@ std::string line_as_read(const io::ConfigTokens &tokens) {
 
 const FlagEntry *lookup_flag(const char *name, size_t len) {
     for (int i = 0; i < flag_table_count; ++i) {
-        if (len == flag_table[i].name_len && memcmp(name, flag_table[i].name, len) == 0)
+        if (len == flag_table[i].name_len && strutil::iequals(std::string_view(name, len), flag_table[i].name))
             return &flag_table[i];
     }
     return NULL;
 }
 
-/* items.def `attrib:` tokens -> ItemDefAttrib (+0x54) bits. Token names lowercased (the
-   parser lowercases before compare). Full witnessed map: docs/world/itemdef-re.md:147-155.
+/* items.def `attrib:` tokens -> ItemDefAttrib (+0x54) bits, each spelled as the game's _stricmp chain
+   spells it (the writer puts that spelling down; the compare ignores case) [orig: the strings pushed @
+   0x4A06F3 Aidata .. @ 0x4A0C8D Door]. Full witnessed map: docs/world/itemdef-re.md:147-155.
    `Door` also defaults the door count and `Parent` is a byte, not a bit: both side
    effects live in def_items.cpp's attrib arm. [orig: ItemDef_ParseProperty @0x49eb00] */
 static const FlagEntry item_attrib_table[] = {
-    {"movecb",       6, DEF_ITEM_ATTRIB_MOVECB},
-    {"powerup",      7, DEF_ITEM_ATTRIB_POWERUP},
-    {"nomoveshoot",  11, DEF_ITEM_ATTRIB_NOMOVESHOOT},
-    {"notool",       6, DEF_ITEM_ATTRIB_NOTOOL},
-    {"snap",         4, DEF_ITEM_ATTRIB_SNAP},
-    {"eweap",        5, DEF_ITEM_ATTRIB_EWEAP},
-    {"playercontrol",13, DEF_ITEM_ATTRIB_PLAYERCONTROL},
-    {"door",         4, DEF_ITEM_ATTRIB_DOOR},
-    {"notarget",     8, DEF_ITEM_ATTRIB_NOTARGET},
-    {"landable",     8, DEF_ITEM_ATTRIB_LANDABLE},
-    {"missile",      7, DEF_ITEM_ATTRIB_MISSILE},
-    {"tire",         4, DEF_ITEM_ATTRIB_TIRE},
-    {"fastrope",     8, DEF_ITEM_ATTRIB_FASTROPE},
-    {"takeable",     8, DEF_ITEM_ATTRIB_TAKEABLE},
-    {"easy",         4, DEF_ITEM_ATTRIB_EASY},
-    {"s&d",          3, DEF_ITEM_ATTRIB_SD},      /* the S&D/A&D objective target [orig: @0x4a084e..0x4a086d] */
-    {"4team",        5, DEF_ITEM_ATTRIB_4TEAM},
-    {"changeteam",   10, DEF_ITEM_ATTRIB_CHANGETEAM},
-    {"spawnpoint",   10, DEF_ITEM_ATTRIB_SPAWNPOINT},
-    {"armory",       6, DEF_ITEM_ATTRIB_ARMORY},
-    {"aidata",       6, DEF_ITEM_ATTRIB_AIDATA},   /* the §5.6 AI-class flag — gates the 0x0D AI-trailer */
-    {"leavecorpse",  11, DEF_ITEM_ATTRIB_LEAVECORPSE},
-    {"nodismember",  11, DEF_ITEM_ATTRIB_NODISMEMBER},
-    {"noweapon",     8, DEF_ITEM_ATTRIB_NOWEAPON},
-    {"reflect",      7, DEF_ITEM_ATTRIB_REFLECT},
-    {"noshadow",     8, DEF_ITEM_ATTRIB_NOSHADOW},
-    {"concave",      7, DEF_ITEM_ATTRIB_CONCAVE},
-    {"noscar",       6, DEF_ITEM_ATTRIB_NOSCAR},
-    {"nohud",        5, DEF_ITEM_ATTRIB_NOHUD},
-    {"nodie",        5, DEF_ITEM_ATTRIB_NODIE},
+    {"Movecb",       6, DEF_ITEM_ATTRIB_MOVECB},
+    {"Powerup",      7, DEF_ITEM_ATTRIB_POWERUP},
+    {"NoMoveShoot",  11, DEF_ITEM_ATTRIB_NOMOVESHOOT},
+    {"NoTool",       6, DEF_ITEM_ATTRIB_NOTOOL},
+    {"Snap",         4, DEF_ITEM_ATTRIB_SNAP},
+    {"EWeap",        5, DEF_ITEM_ATTRIB_EWEAP},
+    {"PlayerControl",13, DEF_ITEM_ATTRIB_PLAYERCONTROL},
+    {"Door",         4, DEF_ITEM_ATTRIB_DOOR},
+    {"NoTarget",     8, DEF_ITEM_ATTRIB_NOTARGET},
+    {"Landable",     8, DEF_ITEM_ATTRIB_LANDABLE},
+    {"Missile",      7, DEF_ITEM_ATTRIB_MISSILE},
+    {"Tire",         4, DEF_ITEM_ATTRIB_TIRE},
+    {"FastRope",     8, DEF_ITEM_ATTRIB_FASTROPE},
+    {"Takeable",     8, DEF_ITEM_ATTRIB_TAKEABLE},
+    {"Easy",         4, DEF_ITEM_ATTRIB_EASY},
+    {"S&D",          3, DEF_ITEM_ATTRIB_SD},      /* the S&D/A&D objective target [orig: @0x4a084e..0x4a086d] */
+    {"4Team",        5, DEF_ITEM_ATTRIB_4TEAM},
+    {"ChangeTeam",   10, DEF_ITEM_ATTRIB_CHANGETEAM},
+    {"SpawnPoint",   10, DEF_ITEM_ATTRIB_SPAWNPOINT},
+    {"Armory",       6, DEF_ITEM_ATTRIB_ARMORY},
+    {"Aidata",       6, DEF_ITEM_ATTRIB_AIDATA},   /* the §5.6 AI-class flag — gates the 0x0D AI-trailer */
+    {"LeaveCorpse",  11, DEF_ITEM_ATTRIB_LEAVECORPSE},
+    {"NoDismember",  11, DEF_ITEM_ATTRIB_NODISMEMBER},
+    {"NoWeapon",     8, DEF_ITEM_ATTRIB_NOWEAPON},
+    {"Reflect",      7, DEF_ITEM_ATTRIB_REFLECT},
+    {"NoShadow",     8, DEF_ITEM_ATTRIB_NOSHADOW},
+    {"Concave",      7, DEF_ITEM_ATTRIB_CONCAVE},
+    {"NoScar",       6, DEF_ITEM_ATTRIB_NOSCAR},
+    {"NoHud",        5, DEF_ITEM_ATTRIB_NOHUD},
+    {"NoDie",        5, DEF_ITEM_ATTRIB_NODIE},
 };
 static const int item_attrib_table_count =
     sizeof(item_attrib_table) / sizeof(item_attrib_table[0]);
 
-/* items.def `attrib:` tokens -> ItemDefAttrib2 (+0x58) bits. docs/world/itemdef-re.md:157-160. */
+/* items.def `attrib:` tokens -> ItemDefAttrib2 (+0x58) bits, spelled as the chain spells them [orig: the
+   strings pushed @ 0x4A0CEC VehicleBay .. @ 0x4A0F18 LandMine]. docs/world/itemdef-re.md:157-160. */
 static const FlagEntry item_attrib2_table[] = {
-    {"vehiclebay",      10, DEF_ITEM_ATTRIB2_VEHICLEBAY},
-    {"autoinheritteam", 15, DEF_ITEM_ATTRIB2_AUTOINHERITTEAM},
-    {"vehiclespawn",    12, DEF_ITEM_ATTRIB2_VEHICLESPAWN},
-    {"dynamicshadow",   13, DEF_ITEM_ATTRIB2_DYNAMICSHADOW},
-    {"staticshadow",    12, DEF_ITEM_ATTRIB2_STATICSHADOW},
-    {"tunnelpiece",     11, DEF_ITEM_ATTRIB2_TUNNELPIECE},
-    {"usevk",           5, DEF_ITEM_ATTRIB2_USEVK},
-    {"staticdeath",     11, DEF_ITEM_ATTRIB2_STATICDEATH},
-    {"onturret",        8, DEF_ITEM_ATTRIB2_ONTURRET},
-    {"hasturret",       9, DEF_ITEM_ATTRIB2_HASTURRET},
-    {"isturret",        8, DEF_ITEM_ATTRIB2_ISTURRET},
-    {"farp",            4, DEF_ITEM_ATTRIB2_FARP},
-    {"landmine",        8, DEF_ITEM_ATTRIB2_LANDMINE},
+    {"VehicleBay",      10, DEF_ITEM_ATTRIB2_VEHICLEBAY},
+    {"AutoInheritTeam", 15, DEF_ITEM_ATTRIB2_AUTOINHERITTEAM},
+    {"VehicleSpawn",    12, DEF_ITEM_ATTRIB2_VEHICLESPAWN},
+    {"DynamicShadow",   13, DEF_ITEM_ATTRIB2_DYNAMICSHADOW},
+    {"StaticShadow",    12, DEF_ITEM_ATTRIB2_STATICSHADOW},
+    {"TunnelPiece",     11, DEF_ITEM_ATTRIB2_TUNNELPIECE},
+    {"UseVK",           5, DEF_ITEM_ATTRIB2_USEVK},
+    {"StaticDeath",     11, DEF_ITEM_ATTRIB2_STATICDEATH},
+    {"OnTurret",        8, DEF_ITEM_ATTRIB2_ONTURRET},
+    {"HasTurret",       9, DEF_ITEM_ATTRIB2_HASTURRET},
+    {"IsTurret",        8, DEF_ITEM_ATTRIB2_ISTURRET},
+    {"Farp",            4, DEF_ITEM_ATTRIB2_FARP},
+    {"LandMine",        8, DEF_ITEM_ATTRIB2_LANDMINE},
 };
 static const int item_attrib2_table_count =
     sizeof(item_attrib2_table) / sizeof(item_attrib2_table[0]);
@@ -292,7 +295,7 @@ static const int item_attrib2_table_count =
 int lookup_item_attrib(const char *name, size_t len) {
     for (int i = 0; i < item_attrib_table_count; ++i) {
         if (len == item_attrib_table[i].name_len &&
-            memcmp(name, item_attrib_table[i].name, len) == 0)
+            strutil::iequals(std::string_view(name, len), item_attrib_table[i].name))
             return item_attrib_table[i].bit;
     }
     return 0;
@@ -301,7 +304,7 @@ int lookup_item_attrib(const char *name, size_t len) {
 int lookup_item_attrib2(const char *name, size_t len) {
     for (int i = 0; i < item_attrib2_table_count; ++i) {
         if (len == item_attrib2_table[i].name_len &&
-            memcmp(name, item_attrib2_table[i].name, len) == 0)
+            strutil::iequals(std::string_view(name, len), item_attrib2_table[i].name))
             return item_attrib2_table[i].bit;
     }
     return 0;
@@ -420,9 +423,9 @@ void validate_property(opennova::def::DefRecordKind kind, const char *line, size
             const auto text = word(0); valid = false;
             if (encoding == DefEncoding::WeaponFlags) valid = lookup_flag(text.data(), text.size()) != nullptr;
             if (encoding == DefEncoding::AmmoFlags)
-                for (size_t i = 0; const char *name = def_ammo_flag_keyword(i); ++i) if (text == name) valid = true;
+                for (size_t i = 0; const char *name = def_ammo_flag_keyword(i); ++i) if (strutil::iequals(text, name)) valid = true;
             if (encoding == DefEncoding::AmmoKillZone)
-                for (size_t i = 1; const char *name = def_ammo_kz_keyword(i); ++i) if (text == name) valid = true;
+                for (size_t i = 1; const char *name = def_ammo_kz_keyword(i); ++i) if (strutil::iequals(text, name)) valid = true;
         }
         if (!valid) invalid();
         return;
