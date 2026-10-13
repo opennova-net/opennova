@@ -262,8 +262,6 @@ bool DialogBankDocument::parse(const std::vector<uint8_t> &bytes, std::vector<st
 			l.flags = line.line_flags;
 			l.def_id_index = line.def_id_index;
 			l.param = line.param;
-			l.resd0 = line.resd0;
-			l.resd1 = line.resd1;
 			d.lines.push_back(std::move(l));
 		}
 		shape(*row);
@@ -290,8 +288,6 @@ dbf::File DialogBankDocument::bank() const {
 			line.line_flags = l.flags;
 			line.def_id_index = l.def_id_index;
 			line.param = l.param;
-			line.resd0 = l.resd0;
-			line.resd1 = l.resd1;
 			group.lines.push_back(std::move(line));
 		}
 		file.groups.push_back(std::move(group));
