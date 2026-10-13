@@ -194,6 +194,10 @@ std::vector<uint8_t> ClientSession::start() {
 	reconnect_ = Reconnect{};
 	dcnt_ = 0;
 	rcnt_ = 0;
+	jfc_ = 0;
+	jfp_ = 0;
+	jfs_.clear();
+	connection_down_ = false;
 	host_setup_.clear();
 	host_list_.clear();
 	player_list_.clear();
@@ -462,6 +466,7 @@ void ClientSession::on_server_hello(const std::vector<uint8_t> &body,
 		//  @0x626320 — the keys @0x6263fb/@0x626401, the cs_dir copies @0x626449/@0x62645c,
 		//  state 3 @0x626496]
 		reconnect_.probing = false;
+		connection_down_ = false;
 		cfg_.client_key = make_session_key(cfg_.next_client_key);
 		client_scrk_ = cfg_.next_scrk ? cfg_.next_scrk() : make_dev_scrk();
 		server_hk_ = sh.hk;
@@ -492,13 +497,26 @@ void ClientSession::on_server_auth(const std::vector<uint8_t> &body) {
 	// [orig: NapiNP_HandleServerJoinResponse @0x629840 - the CI / CK match
 	//  @0x629CAC..0x629CBF, the CR split @0x629CD2..0x629CD6]
 	if (sa.ci != cfg_.client_index || sa.ck != cfg_.client_key) return;
-	// The 0x82's reconnect count is kept (0 when absent) and rides the next re-join.
-	// [orig: NapiNP_HandleServerJoinResponse @0x629e2e]
-	rcnt_ = sa.rcnt;
+	// A zero CR rejects: the connection keeps its JFC, JFP and JFS (64 bytes) and drops straight
+	// to its down state, with no teardown and no state-change callback; RCNT is not read. A first
+	// connect's periodic update then gives the connect up (NwuLobbySession), and a re-join's
+	// reconnect goes on probing (pump_reconnect's tail).
+	// [orig: NapiNP_HandleServerJoinResponse @0x629840 - JFP / JFC @0x629CD8..0x629CF0, JFS
+	//  through CNapiSessionConfig_SetServerPassword @0x4CACE0 (the call @0x629CF6), the state
+	//  switch @0x629D1B (a connecting connection's state 3 -> 4 with no teardown, the store
+	//  @0x629F95)]
 	if (sa.cr == 0) {
-		fail("ServerAuth rejected (cr=" + std::to_string(sa.cr) + ")");
+		jfc_ = sa.jfc;
+		jfp_ = sa.jfp;
+		jfs_ = copy_capped(sa.jfs, 64);
+		state_ = State::Closed;
+		connection_down_ = true;
 		return;
 	}
+	// The accepting 0x82's reconnect count is kept (0 when absent) and rides the next re-join.
+	// [orig: NapiNP_HandleServerJoinResponse @0x629e2e]
+	rcnt_ = sa.rcnt;
+	connection_down_ = false;
 	server_sk_ = sa.sk;         // session_id for our outbound 0x43s
 	server_scrk_ = sa.scrk;     // decrypts inbound 0x83 inner streams
 	state_ = State::Verifying;
@@ -616,6 +634,9 @@ void ClientSession::abort_connect(std::vector<std::vector<uint8_t>> &out) {
 	request_disconnect(out);
 	first_probe_stopped_ = true;
 	reconnect_.probing = false;
+	// A down connection leaves its state 4: the periodic update's leg moves it to 2 before its
+	// abort. [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 - SetState(2) @0x4D4477]
+	connection_down_ = false;
 }
 
 // The disconnect callback drops the session to state 0 (so neither the host nor the play leg
@@ -885,7 +906,13 @@ void ClientSession::pump_reconnect(std::vector<std::vector<uint8_t>> &out) {
 	//  the timeout @0x629525..0x629564]
 	if (state_ == State::Auth) {
 		if (clock_ms_ - reconnect_.join_started_ms > SESSION_JOIN_TIMEOUT_MS) {
+			// The give-up keeps JFC 2, JFP 0 and an empty JFS on the connection.
+			// [orig: @0x629525..0x629539; the state switch to 4 @0x629556..0x629564]
+			jfc_ = 2;
+			jfp_ = 0;
+			jfs_.clear();
 			state_ = State::Closed;
+			connection_down_ = true;
 		} else if (clock_ms_ - reconnect_.join_last_send_ms > SESSION_CONNECT_RETRANSMIT_MS) {
 			reconnect_.join_last_send_ms = clock_ms_;
 			out.push_back(build_client_auth());

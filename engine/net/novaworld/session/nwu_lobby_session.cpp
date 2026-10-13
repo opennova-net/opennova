@@ -207,8 +207,9 @@ constexpr int kConnectNotVerifying = -20;
 constexpr int kConnectVerifyTimedOut = -21;
 constexpr int kConnectNotConnected = -23;
 
-// The give-up word's values (session+0x12C) the periodic update sets: 1 the state-1 give-up.
-// [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 - 1 @0x4D44B1]
+// The give-up word's values (session+0x12C) the periodic update sets: 1 the state-1 give-up, 2
+// a connection down. [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 - 1 @0x4D44B1, 2
+//  @0x4D446D]
 constexpr int kGiveUpStateOne = 1;
 constexpr int kGiveUpConnectionDown = 2;
 
@@ -257,14 +258,21 @@ void NwuLobbySession::tick(uint32_t now_ms) {
 	}
 }
 
-// The periodic update's give-up: a first connect (the hosting/playing word 0) still in state 1
-// SESSION_PERIODIC_UPDATE_TIMEOUT_MS after the state's entry is aborted, the word set to 1.
-// [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 - the word test @0x4D4483, the state-1
+// The periodic update's give-ups of a first connect (the hosting/playing word 0): its connection
+// down (a rejecting 0x82) aborts it with the word set to 2; still in state 1
+// SESSION_PERIODIC_UPDATE_TIMEOUT_MS after the state's entry aborts it with the word set to 1.
+// [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 - the connection's state 4
+//  @0x4D4436..0x4D4441 and the word @0x4D4462, +0x12C = 2 @0x4D446D, CNapiNPConnection_SetState(2)
+//  @0x4D4477, CNapiGameSession_ProcessNetwork @0x4D447E; the word test @0x4D4483, the state-1
 //  test @0x4D4493, the 0x4E20 compare @0x4D44A3, CNapiGameSession_ProcessNetwork @0x4D44AC,
 //  +0x12C = 1 @0x4D44B1]
 void NwuLobbySession::give_up_stalled_connect() {
 	if (session_->session_role() != ClientSession::kSessionRoleNone)
 		return;
+	if (session_->connection_down()) {
+		abort_connect();
+		give_up_ = kGiveUpConnectionDown;
+	}
 	if (session_->lobby_state() != 1)
 		return;
 	if (clock_ms_ - session_->lobby_state_entered_ms() <= SESSION_PERIODIC_UPDATE_TIMEOUT_MS)

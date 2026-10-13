@@ -152,6 +152,22 @@ std::vector<uint8_t> server_auth_to(const std::vector<uint8_t> &auth_dg) {
 	return nw_encode_outbound(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(accept));
 }
 
+// The service's rejecting 0x82 (CR 0) to the session's 0x42 `auth_dg`, carrying JFC / JFP.
+std::vector<uint8_t> server_reject_to(
+		const std::vector<uint8_t> &auth_dg, uint32_t jfc, uint32_t jfp) {
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	ClientAuth auth;
+	if (!decode(auth_dg, opcode, body) || opcode != SESSION_OPCODE_CLIENT_AUTH ||
+			!parse_client_auth(body.data(), body.size(), auth))
+		return {};
+	ServerAuth reject = build_server_auth(auth, 0x7F000001u, 40000, 0, "");
+	reject.cr = 0;
+	reject.jfc = jfc;
+	reject.jfp = jfp;
+	return nw_encode_outbound(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(reject));
+}
+
 // The menu's map over the connect legs' codes: -23..-1 show NWEC(25 - code), anything else
 // NWEC17. [orig: UI_ShowNovaWorldConnectError @0x5584A0 - @0x5584A4, the table @0x5586F8, the
 //  default @0x5586DF]
@@ -264,12 +280,50 @@ void check_verify_give_up() {
 	rig.lobby.close();
 }
 
+// D-NET-453: a first connect the service rejects (CR 0) is not a session error. The connection
+// keeps the 0x82's JFC / JFP and drops to its down state with no teardown (no 0x46), and the
+// periodic update gives the first connect (the word 0) up on it with the give-up word 2: the
+// probe stays stopped, the 0x42 leg sends nothing more, and the validation wait reports NWEC43.
+// [orig: NapiNP_HandleServerJoinResponse @0x629840 - @0x629CD8..0x629CF6, the store @0x629F95;
+//  CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 - the state-4 test @0x4D4436..0x4D4441,
+//  +0x12C = 2 @0x4D446D, CNapiGameSession_ProcessNetwork @0x4D447E;
+//  CGameSession_WaitForNWUValidation @0x4D0F20 - -18 @0x4D10FF]
+void check_rejected_connect() {
+	Rig rig;
+	rig.start(10);
+	CHECK(rig.lobby.session() != nullptr);
+	if (rig.lobby.session() == nullptr)
+		return;
+	const ClientSession &session = *rig.lobby.session();
+	rig.session.inbound.push_back(
+			{ kServer, server_hello_to(rig.last(SESSION_OPCODE_CLIENT_HELLO)) });
+	rig.lobby.tick(100);
+	CHECK(session.state() == ClientSession::State::Auth);
+	const std::vector<uint8_t> auth = rig.last(SESSION_OPCODE_CLIENT_AUTH);
+	CHECK(!auth.empty());
+	rig.session.inbound.push_back({ kServer, server_reject_to(auth, 14, 2) });
+	rig.lobby.tick(200);
+	CHECK(rig.fatals == std::vector<std::string>{ "NWEC43" });
+	CHECK(session.join_fail_code() == 14 && session.join_fail_param() == 2);
+	CHECK(session.state() == ClientSession::State::Closed && session.lobby_state() == 0);
+	CHECK(rig.count(SESSION_OPCODE_CLIENT_GOODBYE) == 0);
+	const std::size_t hellos = rig.count(SESSION_OPCODE_CLIENT_HELLO);
+	const std::size_t auths = rig.count(SESSION_OPCODE_CLIENT_AUTH);
+	rig.lobby.tick(200 + 2 * SESSION_CONNECT_RETRANSMIT_MS + 2);
+	rig.lobby.tick(200 + 4 * SESSION_CONNECT_RETRANSMIT_MS + 4);
+	CHECK(rig.count(SESSION_OPCODE_CLIENT_HELLO) == hellos);
+	CHECK(rig.count(SESSION_OPCODE_CLIENT_AUTH) == auths);
+	CHECK(rig.fatals.size() == 1);
+	rig.lobby.close();
+}
+
 } // namespace
 
 int main() {
 	check_connect_error_tags();
 	check_state_one_give_up();
 	check_verify_give_up();
+	check_rejected_connect();
 	if (failures != 0) {
 		std::printf("nwu_lobby_connect: %d failure(s)\n", failures);
 		return 1;

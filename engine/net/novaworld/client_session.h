@@ -423,6 +423,20 @@ public:
 	// (RCNT, +0x738): both ride the re-join's 0x42.
 	uint32_t disconnect_count() const { return dcnt_; }
 	uint32_t reconnect_count() const { return rcnt_; }
+	// The connection's join failure (JFC +0x5F0, JFP +0x5F4, JFS +0x5F8, 64 bytes): what the last
+	// rejecting 0x82 carried (JFC reads 1 when absent), or JFC 2 / JFP 0 / an empty JFS from a
+	// re-join's 0x42 leg that gave up. [orig: NapiNP_HandleServerJoinResponse @0x629840 -
+	//  @0x629CD8..0x629CF6 (JFS through CNapiSessionConfig_SetServerPassword @0x4CACE0);
+	//  CNapiNPConnection_PumpStateMachine @0x6292E0 - @0x629525..0x629539]
+	uint32_t join_fail_code() const { return jfc_; }
+	uint32_t join_fail_param() const { return jfp_; }
+	const std::string &join_fail_string() const { return jfs_; }
+	// The NP connection dropped to its down state (4) with no teardown: a rejecting 0x82, or a
+	// re-join's 0x42 leg that gave up. A first connect's periodic update gives the connect up on
+	// it (NwuLobbySession); a reconnect's pump goes on probing from it.
+	// [orig: NapiNP_HandleServerJoinResponse @0x629840 - the store @0x629F95;
+	//  CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 - the state-4 test @0x4D4436..0x4D4441]
+	bool connection_down() const { return connection_down_; }
 	// The HostSetup ReconnectCounter (session+0x500): 0 on a fresh host request, one up per
 	// re-host. The host result's republish runs only while it is above 0 (NwuHostRole).
 	// [orig: CNapiGameSession_BuildHostVarLists @0x4d0b50 (the zero @0x4d0b7b);
@@ -619,6 +633,10 @@ private:
 	Reconnect reconnect_;
 	uint32_t dcnt_ = 0;                  // conn+0x734
 	uint32_t rcnt_ = 0;                  // conn+0x738
+	uint32_t jfc_ = 0; // conn+0x5F0
+	uint32_t jfp_ = 0; // conn+0x5F4
+	std::string jfs_; // conn+0x5F8 (64 bytes)
+	bool connection_down_ = false; // conn state 4 with no teardown
 
 	// The 0-default is deliberately preserved (start() resets it to 1 — see Risk #1 / capture frame 9739).
 	SessionSequencing seq_{0, 0}; // outbound seq + last inbound ack [ADR 0013 shared framing]
