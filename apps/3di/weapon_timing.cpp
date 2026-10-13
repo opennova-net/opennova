@@ -278,9 +278,21 @@ bool plan_weapon_timing(const WeaponTimingRequest &request, WeaponTimingPlan &ou
 		// positive boundaries need one extra counter tick (begin_active).
 		row.delaystart = a.active_seconds == 0 ? 0 : int(std::lround(a.active_seconds * kClipTicksPerSecond)) + 1;
 		row.delayend = int(std::lround(a.recovery_seconds * io::kTickHz));
-		if (a.action == wa::kSwitchTo || a.action == wa::kSwitchFrom) {
-			if (a.active_seconds != 0 || a.recovery_seconds != 0)
-				return fail(error, suffix + ": draw and holster use the fixed switch timer; they take no phase times");
+		const bool timed = a.active_seconds != 0 || a.recovery_seconds != 0;
+		if (a.action == wa::kSwitchFrom && timed)
+			return fail(error, suffix + ": the holster runs on the fixed switch timer, which swaps the next weapon "
+			                            "in; it takes no phase times");
+		if (a.action == wa::kSwitchTo && timed) {
+			// A draw timed by its clip. The switch handler paces itself on its
+			// timer, -900 by +30 a tick, whatever the delays say, so the row
+			// names the idle handler, which runs on DELAYSTART and then hands
+			// the slot to IDLE (the pump's transition sets next = IDLE). An
+			// action runs the handler its FUNCTION names, as REVX02's AT4 draw
+			// names wpn_std_reload. [orig: WeaponAction_SwitchTo @ 0x5431d0, the
+			//  timer @ 0x543207 / @ 0x54327b; WeaponAction_Idle @ 0x542920; the
+			//  transition @ 0x5413ea; Anim_InitActions @ 0x542117..0x542139]
+			std::strcpy(row.function, kWeaponHandlerNames[weapon_handler::kIdle]);
+		} else if (a.action == wa::kSwitchTo || a.action == wa::kSwitchFrom) {
 			// Enter the timer leg on the entry tick. A two-tick counter keeps
 			// the channel advancing when the pump decrements it, while the
 			// switch handler itself refreshes that counter each tick.
@@ -297,7 +309,7 @@ bool plan_weapon_timing(const WeaponTimingRequest &request, WeaponTimingPlan &ou
 		}
 		if (a.action == wa::kRecoil) recoil_row = int(rows.size());
 		rows.push_back(row);
-		authored.push_back({a.action, row.anim, row.delaystart, row.delayend});
+		authored.push_back({a.action, row.anim, row.delaystart, row.delayend, row.function});
 	}
 	if (fire_row < 0) return fail(error, "author a fire action: every entry's shot period is solved on it");
 	// The firing cycle runs through the recoil decision, so its delays are
@@ -434,6 +446,7 @@ std::string weapon_edits_text(const WeaponTimingPlan &plan) {
 			if (!r.anim.empty()) s << "action " << suffix << " anim " << r.anim << "\n";
 			s << "action " << suffix << " delaystart " << r.delaystart << "\n"
 			  << "action " << suffix << " delayend " << r.delayend << "\n";
+			if (!r.function.empty()) s << "action " << suffix << " function " << r.function << "\n";
 		}
 	}
 	return s.str();
