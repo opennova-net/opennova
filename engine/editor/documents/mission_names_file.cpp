@@ -13,7 +13,6 @@
 #include <editor/project/project_files.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
-#include <formats/mission/mission_var_names.h>
 #include <runtime/mission/mission_sidecars.h>
 
 namespace opennova::editor {
@@ -107,6 +106,12 @@ void take_kept(const bms::File &mission, size_t event_count, MissionNamesFile &o
 		if (mission::mis_name_allowed(name, mission::kMisDescriptionChars, why)) out.kept.paths[n] = name;
 		else out.refused.push_back("path " + std::to_string(n) + "'s description (" + why + ")");
 	}
+	for (size_t v = 0; v < out.names.variables.size(); ++v) {
+		const std::string &name = out.names.variables[v];
+		if (name.empty()) continue;
+		if (mission::mis_name_allowed(name, mission::kMisDescriptionChars, why)) out.kept.variables[v] = name;
+		else out.refused.push_back("V" + std::to_string(v) + "'s name (" + why + ")");
+	}
 	for (size_t g = 1; g < out.groups.size() && g < mission.group_records.size(); ++g) {
 		const std::string &name = out.groups[g];
 		bms::GroupRecord probe = mission.group_records[g];
@@ -127,6 +132,7 @@ void take_locks(const bms::File &mission, MissionNamesFile &out) {
 	for (const std::vector<bms::Entity> *pool : {&mission.items, &mission.buildings, &mission.markers, &mission.organics})
 		for (const bms::Entity &entity : *pool) ids.push_back(entity.id);
 	out.kept_locks.assign(ids.size(), 0);
+	out.kept_bases.assign(ids.size(), 0);
 	std::vector<bool> given(ids.size(), false);
 	for (const MissionNamesFile::Lock &lock : out.locks) {
 		if (!lock.lock) continue;
@@ -135,6 +141,7 @@ void take_locks(const bms::File &mission, MissionNamesFile &out) {
 			if (ids[i] == lock.id && !given[i]) {
 				given[i] = true;
 				out.kept_locks[i] = lock.lock;
+				out.kept_bases[i] = lock.base;
 				found = true;
 			}
 		if (!found)
@@ -203,7 +210,8 @@ MissionNamesFile read_names_file(const bms::File &mission, const std::vector<mis
 	{
 		int pool = 0;
 		for (const std::vector<bms::Entity> *entities : {&read.items, &read.buildings, &read.markers, &read.organics}) {
-			for (const bms::Entity &entity : *entities) out.locks.push_back({pool, entity.id, entity.mis_height_lock});
+			for (const bms::Entity &entity : *entities)
+				out.locks.push_back({pool, entity.id, entity.mis_height_lock, entity.mis_extra_bheight});
 			++pool;
 		}
 	}
@@ -282,6 +290,7 @@ mission::MisNames mission_names(const MissionDocument &document) {
 				out.paths[size_t(path.native.number)] = path.description;
 		}
 	}
+	if (const auto *state = dynamic_cast<const MissionFileState *>(document.file_state())) out.variables = state->variables;
 	return out;
 }
 
@@ -292,7 +301,7 @@ bool same_names(const mission::MisNames &a, const mission::MisNames &b) {
 		const std::string &x = i < a.events.size() ? a.events[i] : empty, &y = i < b.events.size() ? b.events[i] : empty;
 		if (x != y) return false;
 	}
-	return a.areas == b.areas && a.paths == b.paths;
+	return a.areas == b.areas && a.paths == b.paths && a.variables == b.variables;
 }
 
 bool mission_holds_names(const MissionDocument &document) {
@@ -300,11 +309,10 @@ bool mission_holds_names(const MissionDocument &document) {
 	const auto any = [](const auto &list) {
 		return std::any_of(list.begin(), list.end(), [](const std::string &name) { return !name.empty(); });
 	};
-	if (any(names.events) || any(names.areas) || any(names.paths)) return true;
+	if (any(names.events) || any(names.areas) || any(names.paths) || any(names.variables)) return true;
 	if (const MissionRow *mission = document.mission_row()) {
 		for (const bms::GroupRecord &group : mission->native.group_records)
 			if (!bms::group_name(group).empty()) return true;
-		if (!mission::variable_names(mission->native).empty()) return true;
 	}
 	return false;
 }
@@ -335,8 +343,41 @@ bool mission_names_text(const MissionDocument &document, const std::vector<int32
 		return false;
 	}
 	const mission::MisNames names = mission_names(document);
+	// A locked entity whose base no .mis gave it (locked in the editor since its last write) takes the ground under
+	// it as its base, the height handed at this save; from then on its base is what the .mis keeps, which a
+	// sculpt leaves (D-MIS-4: the original editor keeps a locked item's base absolute [orig: JOTACmed.exe
+	// sub_402770 @ 0x402c9f..0x402ccd]).
+	if (base_heights) {
+		size_t at = 0;
+		for (std::vector<bms::Entity> *pool : {&file.items, &file.buildings, &file.markers, &file.organics})
+			for (bms::Entity &entity : *pool) {
+				if (entity.mis_height_lock != 0 && entity.mis_extra_bheight == 0 && at < base_heights->size())
+					entity.mis_extra_bheight = (*base_heights)[at];
+				++at;
+			}
+	}
 	return mission::write_mis_text(file, text, error, base_heights, &names);
 }
+
+namespace {
+
+// The edit that gives V`index` the name `name` ("" none): a file-wide value (kMisVariableField).
+Edit variable_edit(size_t index, const std::string &name) {
+	Edit edit;
+	edit.operation = EditOperation::SetFileValue;
+	edit.field = kMisVariableField;
+	edit.position = index;
+	edit.value = name;
+	return edit;
+}
+
+// The variables' names as the document holds them (none where it holds no file state).
+std::array<std::string, mission::kVariableNameCount> held_variables(const MissionDocument &document) {
+	if (const auto *state = dynamic_cast<const MissionFileState *>(document.file_state())) return state->variables;
+	return {};
+}
+
+} // namespace
 
 std::vector<Edit> take_matching_names(const MissionDocument &document, const MissionNamesFile &file) {
 	std::vector<Edit> out;
@@ -383,6 +424,14 @@ std::vector<Edit> take_matching_names(const MissionDocument &document, const Mis
 			}
 		}
 	}
+	// A variable's name (its number is the mission's own, whatever its events).
+	const auto held = held_variables(document);
+	for (size_t v = 0; v < file.names.variables.size(); ++v) {
+		const std::string &name = file.names.variables[v];
+		if (name.empty() || name == held[v] || !mission::mis_name_allowed(name, mission::kMisDescriptionChars, refused))
+			continue;
+		out.push_back(variable_edit(v, name));
+	}
 	return out;
 }
 
@@ -425,6 +474,9 @@ std::vector<Edit> read_again_edits(const MissionDocument &document, const Missio
 					out.push_back(set_name({mission->id, k(K::Group), collection.ids[g]}, "name", file.kept_groups[g]));
 		}
 	}
+	const auto held = held_variables(document);
+	for (size_t v = 0; v < held.size(); ++v)
+		if (file.kept.variables[v] != held[v]) out.push_back(variable_edit(v, file.kept.variables[v]));
 	changed = out.size();
 	out.push_back(file_value(kMisKnownField, file.fingerprint));
 	return out;

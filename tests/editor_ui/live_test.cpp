@@ -119,7 +119,8 @@ const ImGuiWindow *pane_window() {
 
 // A variable's name in the board's Variables fold (S24 C3): a variable the mission names is listed though no event
 // uses it, with its name field and how many more take a name; a name typed and Enter is one edit_record of the
-// layer table's records; a name too long for its record is refused in words, nothing raised.
+// mission's file-wide value (the .mis's `//var` line); a name the .mis cannot carry is refused in words, nothing
+// raised.
 void test_variable_name_field() {
 	MissionRun run("opennova_editor_ui_live_names");
 	CHECK(run.open(), "the mission open, its 3D view drawn");
@@ -143,7 +144,7 @@ void test_variable_name_field() {
 	run.ui.activate(item_id(pushed(pane->ID, 12), {"alarm_raised (0 uses)###variable"}));
 	run.ui.away();
 	std::string text = logged_frame(run.ui);
-	CHECK(in_order(text, {"alarm_raised (0 uses)", "Name", "30 more variables can take a name (31 at most)."}),
+	CHECK(in_order(text, {"alarm_raised (0 uses)", "Name", "255 more variables can take a name (256 at most)."}),
 	      "the named variable listed, its name field, how many more take a name");
 	const ImGuiID field = item_id(pushed(pane->ID, 12), {"###variable", "variable_name", "##name"});
 	run.ui.activate(field);
@@ -152,24 +153,24 @@ void test_variable_name_field() {
 	run.ui.frames(1);
 	std::vector<EditorRequest> raised = run.ui.chord({ImGuiKey_Enter});
 	const EditorRequest *named = only(raised, EditorRequestKind::EditRecord);
-	CHECK(named && named->edits.size() == 1 && named->edits[0].field == "name" &&
-	              named->edits[0].value == Value(std::string("V12 alarm")),
-	      "Enter: one edit_record of the record that holds V12's name");
+	CHECK(named && named->edits.size() == 1 && named->edits[0].field == kMisVariableField &&
+	              named->edits[0].position == 12 && named->edits[0].value == Value(std::string("alarm")),
+	      "Enter: one edit_record of V12's name");
 	for (const EditorRequest &request : raised) run.session.handle(request);
 	run.settle();
 	run.take();
 	CHECK(mission_variable_name(*mission, 12) == "alarm", "V12 renamed");
-	// Too long for V12's record (16 characters): refused in words, nothing raised, the name as it was; the
-	// variable stays open under its new name.
+	// A ';' the .mis cannot carry: refused in words, nothing raised, the name as it was; the variable stays open
+	// under its new name.
 	run.ui.activate(field);
 	run.ui.chord({ImGuiMod_Ctrl, ImGuiKey_A});
-	ImGui::GetIO().AddInputCharactersUTF8("seventeen chars..");
+	ImGui::GetIO().AddInputCharactersUTF8("alarm;raised");
 	run.ui.frames(1);
 	raised = run.ui.chord({ImGuiKey_Enter});
-	CHECK(raised.empty(), "a name too long raises nothing");
+	CHECK(raised.empty(), "a name the .mis cannot carry raises nothing");
 	run.ui.away();
 	text = logged_frame(run.ui);
-	CHECK(in_order(text, {"alarm (0 uses)", "V12's name holds 16 characters"}), "the refusal said beside the field");
+	CHECK(in_order(text, {"alarm (0 uses)", "A name takes no control character"}), "the refusal said beside the field");
 	CHECK(mission_variable_name(*mission, 12) == "alarm", "the name as it was");
 	CHECK(overflowing().empty(), "nothing runs past its room");
 	// While the game reports the mission: V12's value there, and Set asks it to take the one typed.

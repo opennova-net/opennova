@@ -96,13 +96,18 @@ struct MissionNamesFile {
 	// the one the .mis gives the entity of its pool and SSN, else 0 (mission_locks' form). The locks the rows are
 	// measured against, as `kept` is for the names. A lock is the int the file holds, any nonzero one a lock, kept as
 	// read and written back so (the original editor's atol, tested nonzero: mission_mis.h).
+	// A locked item's base comes with its lock: absolute, as the original editor keeps it through a terrain change
+	// [orig: JOTACmed.exe sub_402770 @ 0x402c9f..0x402ccd] and writes it (master #1095, D-MIS-4); kept_bases each
+	// entity's in the writer's order, 0 for one the .mis gives no lock.
 	struct Lock {
 		int pool = 0;
 		int32_t id = 0;
 		int32_t lock = 0;
+		int32_t base = 0;
 	};
 	std::vector<Lock> locks;
 	std::vector<int32_t> kept_locks;
+	std::vector<int32_t> kept_bases;
 };
 
 // What the last save made of the .mis where it left it as it is (MissionDocument::names_left).
@@ -130,11 +135,19 @@ struct MissionNamesLeft {
 // the names were taken from, which a save then measures the file against).
 inline constexpr const char *kMisOverwriteField = "mis_overwrite";
 inline constexpr const char *kMisKnownField = "mis_known";
+// The variables' names (ADR 0046 S24 Names; master #1095, D-MIS-13): the .mis's `//var` lines, which no .bms byte
+// holds, a file-wide value each (Edit::position V0..V255, the value its name, "" none), read from a matching .mis.
+inline constexpr const char *kMisVariableField = "variable_name";
 struct MissionFileState : FileState {
 	uint64_t mis_overwrite = 0;
 	uint64_t mis_known = 0;
+	std::array<std::string, mission::kVariableNameCount> variables{};
 	std::shared_ptr<FileState> clone() const override { return std::make_shared<MissionFileState>(*this); }
-	size_t footprint() const override { return sizeof(MissionFileState); }
+	size_t footprint() const override {
+		size_t bytes = sizeof(MissionFileState);
+		for (const std::string &name : variables) bytes += name.capacity();
+		return bytes;
+	}
 };
 std::string fingerprint_hex(uint64_t fingerprint);
 // 16 hex digits, either case; false for anything else.
