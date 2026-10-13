@@ -26,7 +26,16 @@ PreviewFrameEffects::PreviewFrameEffects(Node3D &root, SubViewport &viewport, bo
 	frame_fx->set_name("FrameFx");
 	root.add_child(frame_fx);
 	frame_fx_id_ = frame_fx->get_instance_id();
-	if (!veil_drawn) return;
+	if (veil_drawn)
+		add_veil_(viewport);
+}
+
+PreviewFrameEffects::PreviewFrameEffects(FrameFx &frame_fx, SubViewport &viewport) :
+		frame_fx_id_(frame_fx.get_instance_id()) {
+	add_veil_(viewport);
+}
+
+void PreviewFrameEffects::add_veil_(SubViewport &viewport) {
 	ColorRect *veil = memnew(ColorRect);
 	veil->set_name("SunVeil");
 	veil->set_color(Color(1.0f, 1.0f, 1.0f, 1.0f));

@@ -75,6 +75,9 @@ func _open_mission() -> bool:
 				TestFs.tga_bytes(Vector2i(2048, 2048) if name == "mnml_c" or name == "mnml_d1" else Vector2i(32, 32)))
 	for name in ["synth_full.env", "cloud01.pcx", "cloud01b.pcx"]:
 		_copy_fixture("env/" + name, root.path_join("env").path_join(name))
+	# The overcast table every mission's environment load reads (env::kOvercastFile; the game notes it
+	# missing where a project lacks it), here present and empty: no keyframe, as the load with none.
+	_write(root.path_join("env").path_join("overcast.def"), PackedByteArray())
 	_app.request_json(JSON.stringify({"kind": "rescan"}))
 	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
 	return _seam.open_document(MISSION)

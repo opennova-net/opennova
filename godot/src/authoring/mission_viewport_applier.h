@@ -3,7 +3,6 @@
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/sub_viewport.hpp>
-#include <godot_cpp/classes/world_environment.hpp>
 
 #include <cstdint>
 #include <map>
@@ -23,11 +22,10 @@
 #include "authoring/ground_overlay_upload.h"
 #include "authoring/terrain_patch_applier.h"
 #include "authoring/preview_effects.h"
+#include "authoring/preview_scene_layers.h"
 #include "authoring/preview_sound_player.h"
 #include "authoring/viewport_applier.h"
-#include "env/env_file.h"
 #include "env/mission_environment.h"
-#include "env/sky_dome.h"
 #include "env/slot_shadow.h"
 #include "env/water.h"
 #include "env/weather.h"
@@ -36,11 +34,9 @@
 #include "mission/mission_placement_run.h"
 #include "mission/static_source_provider.h"
 #include "object/object_model.h"
-#include "resource_index/resource_root.h"
 #include "simulation/husk_swap.h"
 #include "terrain/foliage_dispatcher.h"
 #include "terrain/terrain.h"
-#include "terrain/terrain_data.h"
 #include "world/scar_presenter.h"
 
 namespace opennova::editor {
@@ -50,75 +46,80 @@ class ProjectAssetSource;
 
 namespace godot {
 
-// A mission viewport's device work (ADR 0046 S14): the game's own nodes under the device's
-// SubViewport, drawn as the game draws a mission without a simulation: the environment
-// (MissionEnvironment over the mission's .env with the header's overrides, its clock at the start
-// time), the sky, the water, the terrain (Terrain over TerrainData), the entities placed by the
-// game's placer (MissionObjectPlacer: the static populations, the individual models), all read
-// through a ResourceRoot mounted over the project's files, and the camera where the viewport's
-// orbit camera is. The frame's legs run in the game's order (godot/src/world/game_world_frame.cpp's
-// frame-leg table, no simulation): the camera, the render eye, the clear colour, the sky, the
-// terrain, the water, the static and the individual models' levels. The mission's marks are the
-// canvas's, drawn over the picture by the viewport's portable half on the pixels this camera
-// projects them to.
+// A mission viewport's device work (ADR 0046 S14): a mission as the game draws it without a
+// simulation, its world the layers' (PreviewSceneLayers over WorldScene's rows, S26: the
+// environment over the mission's .env with the header's overrides and its clock, its weather from
+// the mission start's settle, the sky, the sun, moon, glare and glint, the drops, the water, the
+// terrain and its foliage, the environment cube, FrameFx), the entities placed by the game's placer
+// (MissionObjectPlacer: the static populations, the individual models), all read through a
+// ResourceRoot mounted over the project's files, and the camera where the viewport's orbit camera
+// is. The frame's legs run in the game's order (godot/src/world/game_world_frame.cpp's frame-leg
+// table, no simulation): the scene environment and the environment nodes, the terrain, the water,
+// the foliage, the sun veil's feed, the lights, the static and the individual models' levels, the
+// slot shadows, the particles, the drops, the overlay tail, the frame effects, the clear colour and
+// the cube. The mission's marks are the canvas's, drawn over the picture by the viewport's portable
+// half on the pixels this camera projects them to.
 //
-// It builds over the Shell's frames (S13 V6), a unit a step, in three layers: the environment (its
-// file); the terrain (its files a unit each, the mission's .til with the last, and its build a tile
-// a step, TerrainData::begin_load_from_resource_root and Terrain::build_begin; the sky and the water
-// bound to it); the entities (the item table; each distinct graphic the entities name, its model
-// parsed, its batches warmed where a placement batches it and its terrain shadow geometry resolved;
-// the placement, MissionPlacementRun's units; the static shadows bound; the added entities lifted,
-// eight a unit); then the pose. A Rebuild plans only the units of what differs from what it holds
-// (each layer's key, the entities by row: their item, group and attributes), and one whose plan is
-// the pose alone, or the pose after one unit of lifts over warm graphics, is made whole as it is
-// taken. Nothing a unit replaces leaves the picture as the Rebuild is taken: the frame that takes it
-// may still render the last whole scene (ViewportDevice::take), so what goes (the entities of a moved
+// It builds over the Shell's frames (S13 V6), a unit a step, in three layers: the environment and
+// the terrain (the layers' units: the .env and its clock, the terrain's files a unit each, the
+// mission's .til with the last, its build a tile a step; the sky and the water bound to them); the
+// entities (the item table; each distinct graphic the entities name, its model parsed, its batches
+// warmed where a placement batches it and its terrain shadow geometry resolved; the placement,
+// MissionPlacementRun's units; the static shadows bound; the added entities lifted, eight a unit);
+// then the pose. A Rebuild plans only the units of what differs from what it holds (each layer's
+// key, the entities by row: their item, group and attributes), and one whose plan is the pose
+// alone, or the pose after one unit of lifts over warm graphics, is made whole as it is taken.
+// Nothing a unit replaces leaves the picture as the Rebuild is taken: the frame that takes it may
+// still render the last whole scene (ViewportDevice::take), so what goes (the entities of a moved
 // file, a terrain the mission no longer names) goes in a unit. A Rebuild that comes while the
 // terrain loads or builds under a key that stands carries that work on. An entity's transform is
 // moved in place (an Update: move_static_instance, or the individual model's node), its terrain
 // shadow source following at the gesture's end; an entity added since the placement, or given
 // another item, group or attributes, is lifted (an individual ObjectModel under "Lifted", built as
 // the placement builds an entity's model: MissionObjectPlacer::build_entity_model, its terrain
-// shadow source keyed apart); one given back what was placed shows the placed one again; one removed
-// is hidden with its terrain shadow (shown again when it comes back, an undo); the lifted set folds
-// back into a whole placement past 256 rows. A terrain whose files do not load or build is a layer
-// with no terrain and a note, never a failed picture. The root notes every file it is asked for
-// (StampedFiles), each layer the names its units read: a file the picture read that moved (the
-// viewport's Rebuild) mounts the root afresh, and only the layers that read what moved are built
-// again. Its scene state is its own (E13): the environment and the water hold their process-wide
-// shader globals (set_globals_held), as does the retained statics' light atlas (each row's lighting
-// lane, no lights), but while it publishes them (publish_scene_state, whenever
+// shadow source keyed apart); one given back what was placed shows the placed one again; one
+// removed is hidden with its terrain shadow (shown again when it comes back, an undo); the lifted
+// set folds back into a whole placement past 256 rows. A terrain whose files do not load or build
+// is a layer with no terrain and a note, never a failed picture. The root notes every file it is
+// asked for (StampedFiles), each layer the names its units read: a file the picture read that moved
+// (the viewport's Rebuild) mounts the root afresh, and only the layers that read what moved are
+// built again. Its scene state is its own (E13): the environment and the water hold their
+// process-wide shader globals (set_globals_held), as does the retained statics' light atlas (each
+// row's lighting lane, no lights), but while it publishes them (publish_scene_state, whenever
 // another state was published last or its own moved: a new scene state each time its environment,
 // its water or its time changes) and while it presents its frame; its frame's legs run only in a
 // frame it renders (present), and the water's mirror pass is on only in such a frame (off from each
 // frame's tick until its present).
 //
-// DI-31: the game's foliage, effects and lights over it, each a layer its options switch. The foliage is the
-// game's FoliageDispatcher beside the terrain, configured from the terrain's foliage definitions as its build
-// ends (their models and :fd textures read through the root, noted as the terrain layer's) and drawn each
-// presented frame from the terrain's detail cells around the camera, as the game's foliage leg draws them.
-// The effects are the scene the viewport's MissionEffects steps (each placed item's particle slot as the
-// mission's start attaches it), drawn by the game's particle renderer (PreviewEffects, DI-14's helper) under
-// the environment; the device draws single-sampled, as the game's view does and the renderer's passes need
-// (DI-14's rule). The lights are the game's EffectLightDirector over the placer's statics, as the picture
-// stands them (moved where their rows stand, a removed one's dropped: PictureSources), and the entities'
-// individual models: every LGHT record spawned as the mission's start spawns it, each frame's selection
-// written to the models and the statics' light atlas, the terrain's projected pass fed the same pool, the
-// coronas drawn in the overlay tail; spawned again when the placement, a lift, a hide or a move's gesture
-// end moves what stands. The FLICKER ring and the detail tier's sway read the weather's oscillator, whose
-// wave alone the device runs on the preview clock (the mission's start settle first); no other weather runs.
+// DI-31: the game's foliage, effects and lights over it, each a layer its options switch. The
+// foliage is the game's FoliageDispatcher beside the terrain, configured from the terrain's foliage
+// definitions as its build ends (their models and :fd textures read through the root, noted as the
+// terrain layer's) and drawn each presented frame from the terrain's detail cells around the
+// camera, as the game's foliage leg draws them. The effects are the scene the viewport's
+// MissionEffects steps (each placed item's particle slot as the mission's start attaches it), drawn
+// by the game's particle renderer (PreviewEffects, DI-14's helper) under the environment; the
+// device draws single-sampled, as the game's view does and the renderer's passes need (DI-14's
+// rule). The lights are the game's EffectLightDirector over the placer's statics, as the picture
+// stands them (moved where their rows stand, a removed one's dropped: PictureSources), and the
+// entities' individual models: every LGHT record spawned as the mission's start spawns it, each
+// frame's selection written to the models and the statics' light atlas, the terrain's projected
+// pass fed the same pool, the coronas drawn in the overlay tail; spawned again when the placement,
+// a lift, a hide or a move's gesture end moves what stands. The FLICKER ring and the detail tier's
+// sway read the weather's oscillator: the whole weather runs on the preview clock's game ticks (the
+// mission's start settle first), its clock standing at the hour the options show.
 //
-// S23 C: the shadows as the game casts them, one layer: the terrain's static shadows (the placer's casters composed
-// into its pages) and the entities' moving ground shadows, the game's render-slot device (SlotShadow) over the
-// picture's casters (the placer flags a person's and a DynamicShadow item's model, as the game's presenter does),
-// its captures on the clear's compositor and its drape over the terrain, planned in the frame's slot-shadow leg
-// (after the lights, before the particles: game_world_frame.cpp's order) with the light director's pool and gain.
-// With the layer off nothing plans and the drape hides with the terrain's pass.
+// S23 C: the shadows as the game casts them, one layer: the terrain's static shadows (the placer's
+// casters composed into its pages) and the entities' moving ground shadows, the game's render-slot
+// device (SlotShadow) over the picture's casters (the placer flags a person's and a DynamicShadow
+// item's model, as the game's presenter does), its captures on the clear's compositor and its drape
+// over the terrain, planned in the frame's slot-shadow leg (after the lights, before the particles:
+// game_world_frame.cpp's order) with the light director's pool and gain. With the layer off nothing
+// plans and the drape hides with the terrain's pass.
 //
-// DI-36: the Listen. While the options listen, each channel the viewport's MissionListen binds plays its wave looping
-// at its place (PreviewSoundLoops, DI-02's player), the SubViewport's camera the 3D listener, as the game's ambient
-// channels play; heard while the picture is drawn (held paused once it has not been for PreviewSoundLoops::kHeldFrames
-// frames).
+// DI-36: the Listen. While the options listen, each channel the viewport's MissionListen binds
+// plays its wave looping at its place (PreviewSoundLoops, DI-02's player), the SubViewport's camera
+// the 3D listener, as the game's ambient channels play; heard while the picture is drawn (held
+// paused once it has not been for PreviewSoundLoops::kHeldFrames frames).
 class MissionViewportApplier final : public ViewportApplier {
 public:
 	explicit MissionViewportApplier(SubViewport &viewport);
@@ -144,7 +145,7 @@ public:
 	// model's meshes through its nodes'), the nearer first, before the terrain; the terrain; nothing.
 	// Unknown until the placement stands.
 	opennova::editor::ViewportRayHit ray_between(const double from[3], const double to[3]) const override;
-	uint64_t scene_state() const override { return scene_state_; }
+	uint64_t scene_state() const override { return layers_->scene_state(); }
 	void publish_scene_state() override;
 	void present(double dt) override;
 
@@ -162,7 +163,7 @@ public:
 	FoliageDispatcher *foliage() const { return foliage_; }
 	// DI-36's: the Listen's channels' player.
 	const PreviewSoundLoops &listen() const { return *listen_; }
-	PreviewEffects &effects() { return *effects_; }
+	PreviewEffects &effects() { return layers_->effects(); }
 	Ref<EffectLightDirector> lights() const { return lights_; }
 	// How the entities stand: placed by the last whole placement and shown, lifted since and shown,
 	// hidden; how many whole placements ran and what the last one cost (microseconds).
@@ -178,7 +179,7 @@ public:
 	// triangle) and their box.
 	struct PickShape {
 		std::vector<opennova::editor::PreviewVec3> faces; // three points a triangle
-		opennova::editor::PreviewVec3 low, high;           // their box
+		opennova::editor::PreviewVec3 low, high; // their box
 		bool any = false;
 	};
 
@@ -202,15 +203,12 @@ private:
 	// One unit of a build, in the order they run.
 	struct Unit {
 		enum class Kind : uint8_t {
-			DropEntities, // the placement and the lifted models of a moved file dropped, the placer with them
-			Environment, // the .env file, the header's overrides, the clock
-			TerrainFile, // one file of the terrain's load (TerrainData::load_step); the .til with the last
-			TerrainBuild, // one step of the terrain's build (Terrain::build_step)
-			NoTerrain, // the terrain the mission names is none the project holds: the layer empty
-			Sky, // the sky dome bound to the environment
-			Water, // the water bound to the terrain and the environment
+			DropEntities, // the placement and the lifted models of a moved file dropped, the placer
+						  // with them
+			Layers, // the environment's and the terrain's units (PreviewSceneLayers), one a step
 			Items, // items.def, through a placer made over the root
-			Model, // a graphic's model parsed, its static batches warmed, its shadow geometry resolved
+			Model, // a graphic's model parsed, its static batches warmed, its shadow geometry
+				   // resolved
 			Place, // one unit of the placement run
 			Shadows, // the placement's static shadows bound to the terrain
 			Lift, // up to kLiftPerUnit added entities lifted
@@ -221,30 +219,6 @@ private:
 		std::vector<int64_t> items; // Model: the items the entities draw it for
 		size_t first = 0; // Lift: the first of its rows among the adds
 	};
-	// The layers a build makes, each with the files its units read.
-	enum Layer : uint8_t { kEnvironment, kTerrain, kEntities, kLayers };
-	static int layer_of_(Unit::Kind kind);
-	// The keys the layers were built from: the terrain's name and tile set, the mission whose .til the game reads
-	// beside it, and the .env the terrain's load reads after its .trn and overcast.def with the lines of the two
-	// its parser can take (D-TERRAIN-18, editor::mission_terrain_later_lines): an edit of either that sets nothing
-	// of the terrain loads it not again.
-	struct TerrainKey {
-		std::string terrain, tile_set, mission, environment, later;
-		bool operator==(const TerrainKey &o) const {
-			return terrain == o.terrain && tile_set == o.tile_set && mission == o.mission &&
-					environment == o.environment && later == o.later;
-		}
-	};
-	TerrainKey terrain_key_of_(const opennova::editor::MissionViewport &mission) const;
-	struct EnvironmentKey {
-		std::string environment, terrain; // the .env, and the .trn the load reads ahead of it
-		int start_time = 0, minutes_per_day = 0;
-		uint32_t attrib_flags = 0;
-		int water_override = 0, fog_override = 0, water_murk = 0;
-		int fog_color[3] = { 0, 0, 0 }, water_color[3] = { 0, 0, 0 };
-		bool operator==(const EnvironmentKey &o) const;
-	};
-	static EnvironmentKey environment_key_of_(const opennova::editor::MissionSceneHeader &header);
 	// What one entity is to the device: placed (a static's key, or an individual model) or lifted,
 	// shown or hidden, and the item and stamp it stands for.
 	struct Placed {
@@ -266,39 +240,31 @@ private:
 	static bool places_alike_(const Placed &placed, const opennova::editor::MissionEntityMark &entity) {
 		return placed.item == entity.item && placed.group == entity.group && placed.attributes == entity.attributes;
 	}
-	// A build in flight: what it brings the layers to, and its units.
+	// A build in flight: whether it places whole, and its units.
 	struct Build {
-		bool environment = false, terrain = false, place = false;
+		bool place = false;
 		std::vector<Unit> units;
 		size_t next = 0;
 		std::vector<opennova::editor::NodeId> adds; // the rows the Lift units lift
 		Ref<MissionPlacementRun> place_run; // the placement in flight (the Place units step it)
-		TerrainKey terrain_key; // the terrain it loads or builds
 	};
 
 	static constexpr size_t kLiftPerUnit = 8;
 	static constexpr size_t kLiftedMost = 256;
 
-	// The root mounted over the session's files afresh when the source is another or a file the
-	// picture read moved: the layers that read what moved left to build again (their built flags
-	// down; the entities dropped by the build's first unit, drop_pending_), the others keeping their
-	// files noted. Whether the terrain's files moved.
-	bool mount_(const opennova::editor::SessionView &view);
-	// The files noted since `from` given to `layer`.
-	void note_reads_(int layer, size_t from);
-	size_t reads_() const;
-	void note_missing_(int layer, const String &name);
-	// `carried`: the units of a terrain load or build in flight under the key that stands (m6).
-	void plan_(Build &build, const opennova::editor::MissionViewport &mission, std::vector<Unit> carried);
-	std::vector<Unit> model_units_(const std::vector<const opennova::editor::MissionEntityMark *> &entities);
-	// One unit run, its reads given to its layer: false when the build failed (`failure` says why).
-	bool run_(Build &build, const Unit &unit, const opennova::editor::ViewportModel &model, std::string &failure);
-	void run_environment_(const opennova::editor::MissionScene &scene);
-	void run_terrain_file_(Build &build, const opennova::editor::MissionViewport &mission);
-	void run_terrain_build_(Build &build);
-	// The terrain layer made empty (no terrain the project holds, or one that does not load or
-	// build): the held one dropped, the layer built from its key.
-	void terrain_empty_(const TerrainKey &key);
+	// The layers' root mounted over the session's files (PreviewSceneLayers::mount), a move no
+	// layer read the entities': the entities of a moved file dropped by the build's first unit
+	// (drop_pending_), the waves the Listen decoded read again.
+	void mount_(const opennova::editor::SessionView &view);
+	// The entities' units after the layers' (whose own plan carries a terrain load or build in
+	// flight, m6).
+	void plan_(Build &build, const opennova::editor::MissionViewport &mission);
+	std::vector<Unit> model_units_(
+			const std::vector<const opennova::editor::MissionEntityMark *> &entities);
+	// One of the entities' units run, its reads the entities': false when the build failed
+	// (`failure` says why).
+	bool run_(Build &build, const Unit &unit, const opennova::editor::ViewportModel &model,
+			std::string &failure);
 	void run_items_();
 	void run_model_(const Unit &unit);
 	// The placement as a run (MissionPlacementRun): begun at the first Place unit, one unit of it
@@ -316,9 +282,6 @@ private:
 	void show_(Placed &placed, bool shown);
 	// The placement and the lifted models dropped, the placer with them.
 	void drop_entities_();
-	// A new scene state: the environment, the water or the time moved (the next arbitration
-	// publishes it again).
-	void touch_scene_state_();
 	// The state over the picture that stands: the entities moved, shown or hidden; the layers'
 	// visibility, the time of day, the camera.
 	void apply_state_(const opennova::editor::ViewportModel &model);
@@ -335,16 +298,12 @@ private:
 	uint64_t people_serial_ = UINT64_MAX; // the viewport's people's serial last posed
 	// The moved entities' terrain shadow sources moved too, once no gesture is open.
 	void flush_shadows_(const opennova::editor::MissionScene &scene);
-	// The terrain's foliage definitions configured as the game's load configures them (DI-31,
-	// GameWorld::configure_foliage): the slots' models and :fd textures through the root.
-	void configure_foliage_();
 	// The lights spawned again over the entities as they stand (DI-31): the director's scene the shown
 	// individual models, its statics the placer's as the picture stands them; none while the layer is off
 	// (the statics' atlas lanes still published).
 	void relight_();
-	// The overlay tail's coronas published through the effects' renderer.
-	void publish_overlay_();
-	// What the last presented frame drew of the foliage, the lights and the effects (the report's `drawn`).
+	// What the last presented frame drew of the foliage, the lights, the effects and the
+	// environment (the report's `drawn`).
 	opennova::io::JsonValue drawn_json_() const;
 	void place_camera_(const opennova::editor::ViewportModel &model);
 	String graphic_of_(int64_t item);
@@ -356,15 +315,15 @@ private:
 
 	// The Shoot tool's scars (DI-23), presented where the shots' run moved, cleared with no shot.
 	void apply_shots_(const opennova::editor::MissionViewport &mission);
-	// S23 C: the husks of the items the shots destroyed, at the clock's tick (the run's deaths through
-	// editor::mission_husk_frame): swapped in through the game's destruction presenter's own swap
-	// (simulation/husk_swap: a placed individual model's husk built under it, its own parts hidden; a retained static
-	// carved out of its batches, the husk grafted at its placed transform), the destroy fade's registers and the
-	// sections the pieces left written each frame; let go (the item shown again) where the clock steps back past the
-	// swap or the shots clear.
+	// S23 C: the husks of the items the shots destroyed, at the clock's tick (the run's deaths
+	// through editor::mission_husk_frame): swapped in through the game's destruction presenter's
+	// own swap (simulation/husk_swap: a placed individual model's husk built under it, its own
+	// parts hidden; a retained static carved out of its batches, the husk grafted at its placed
+	// transform), the destroy fade's registers and the sections the pieces left written each frame;
+	// let go (the item shown again) where the clock steps back past the swap or the shots clear.
 	struct Husk {
 		std::string husk;
-		HuskGraft graft;     // what the swap changed (simulation/husk_swap), the husk model with it
+		HuskGraft graft; // what the swap changed (simulation/husk_swap), the husk model with it
 		uint64_t intact = 0; // the intact individual model it hangs under (0: a static's graft)
 		std::map<std::string, int64_t> ctrl;
 		uint32_t sections = 0;
@@ -375,38 +334,26 @@ private:
 	ScarPresenter *shot_scars_ = nullptr;
 	uint64_t shot_scars_shown_ = UINT64_MAX;
 
-	Node3D *root_ = nullptr;
-	WorldEnvironment *clear_ = nullptr;
+	// The world the picture stands in (the scene stack, the environment and terrain layers, the
+	// camera, the effects' renderer, the frame effects), and its nodes the device's legs read.
+	std::unique_ptr<PreviewSceneLayers> layers_;
 	MissionEnvironment *environment_ = nullptr;
-	SkyDome *sky_ = nullptr;
 	Water *water_ = nullptr;
 	Terrain *terrain_ = nullptr;
 	uint64_t terrain_id_ = 0;
 	// S25 (the heights): the sculpt's patches taken into the terrain built (terrain_patch_applier.h).
 	TerrainPatchApplier terrain_patches_;
-	// A file a device patch accounts for holds `stamp` in what the device read (S25): its move builds nothing again.
-	void took_patched_(const std::string &name, uint64_t stamp);
 	// The entities' moving ground shadows (S23 C): the game's SlotShadow, its silhouette captures on the clear's
 	// compositor and its drape over the terrain, run in the frame's slot-shadow leg while the shadows show.
 	SlotShadow *slot_shadow_ = nullptr;
 	Camera3D *camera_ = nullptr;
 	Node3D *objects_ = nullptr;
 	Node3D *lifted_root_ = nullptr;
-	Ref<ResourceRoot> root_files_;
-	std::shared_ptr<const opennova::editor::ProjectAssetSource> mounted_; // the source the root is mounted over
-	std::shared_ptr<opennova::StampedFiles> stamped_; // what the root was asked for
-	opennova::FileStamps layer_files_[kLayers];
-	std::vector<std::string> layer_missing_[kLayers];
-	Ref<TerrainData> terrain_data_;
-	Ref<TerrainData> loading_; // the terrain data a build loads
-	Ref<EnvFile> env_file_;
 	Ref<MissionObjectPlacer> placer_;
 	Ref<PanmClock> clock_;
 	int64_t frame_ = 0;
-	// What the layers hold.
-	bool environment_built_ = false, terrain_built_ = false, placed_ = false;
-	TerrainKey terrain_key_;
-	EnvironmentKey environment_key_;
+	// Whether the entities stand placed.
+	bool placed_ = false;
 	std::unordered_map<opennova::editor::NodeId, Placed> entities_;
 	// The placed records of rows lifted since (another item, group or attributes): shown again when
 	// the row is given back what was placed (an undo).
@@ -422,17 +369,14 @@ private:
 	int64_t place_started_us_ = 0;
 	int place_units_planned_ = 0;
 	std::unique_ptr<Build> build_;
-	uint64_t scene_state_ = 0;
-	// DI-31: the foliage beside the terrain, the TerrainData it was configured over; the effects (the
-	// project's files mounted for their graphics since the last Rebuild); the weather whose oscillator the
-	// lights and the foliage read, the clock's tick it was run to (-1: not settled yet); the light director
-	// and its statics; the layers shown; the clock's milliseconds the frame draws at.
+	// DI-31: the foliage beside the terrain; the effects (the project's files mounted for their
+	// graphics since the last Rebuild); the weather whose oscillator the lights and the foliage
+	// read; the light director and its statics; the layers shown; the clock's milliseconds the
+	// frame draws at.
 	FoliageDispatcher *foliage_ = nullptr;
-	Ref<TerrainData> foliage_data_;
-	std::unique_ptr<PreviewEffects> effects_;
+	PreviewEffects *effects_ = nullptr;
 	bool effects_mounted_ = false;
 	Weather *weather_ = nullptr;
-	int32_t wave_tick_ = -1;
 	// The retained statics' light atlas (opennova_static_point_light_rows, a scene-state global) is the
 	// director's scene's: a static row reads its lighting lane there, as no MultiMesh instance carries one,
 	// so a picture without it draws every static as if the sun were blocked.
@@ -443,7 +387,6 @@ private:
 	uint64_t lit_rows_revision_ = UINT64_MAX; // the statics' rows the last light pass read
 	bool shown_foliage_ = true, shown_effects_ = true, shown_lights_ = true;
 	int64_t clock_ms_ = 0;
-	uint64_t overlay_frame_id_ = 0;
 	// DI-36: the Listen's channels and the project's root its waves are read under. apply_listen_ binds the channels as
 	// the viewport's mix holds them now.
 	void apply_listen_(const opennova::editor::MissionViewport &mission);

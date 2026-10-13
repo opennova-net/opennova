@@ -68,6 +68,9 @@ func _open_mission() -> bool:
 		_copy_fixture("terrain/tmap/" + name, root.path_join("terrain").path_join(name))
 	for name in ["synth_full.env", "cloud01.pcx", "cloud01b.pcx"]:
 		_copy_fixture("env/" + name, root.path_join("env").path_join(name))
+	# The overcast table every mission's environment load reads (env::kOvercastFile; the game notes it
+	# missing where a project lacks it), here present and empty: no keyframe, as the load with none.
+	_write(root.path_join("env").path_join("overcast.def"), PackedByteArray())
 	_app.request_json(JSON.stringify({"kind": "rescan"}))
 	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
 	return _seam.open_document(MISSION)

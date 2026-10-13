@@ -107,14 +107,13 @@ func _device_node(state: Dictionary, type: String) -> Node:
 	return found[0] if not found.is_empty() else null
 
 
-## The device's own camera, "Camera" under its Mission root (the water's mirror has a camera of its
-## own under it).
+## The device's own camera, "Camera" under its Mission root (the water's mirror and the
+## environment cube's capture have cameras of their own under them).
 func _camera(state: Dictionary) -> Camera3D:
 	var device := _device(state)
 	if device == null:
 		return null
-	var found := device.find_children("Camera", "Camera3D", true, false)
-	return found[0] as Camera3D if not found.is_empty() else null
+	return device.get_node_or_null("Mission/Camera") as Camera3D
 
 
 func _write(path: String, bytes: PackedByteArray) -> void:
@@ -172,6 +171,9 @@ func _mint_project(root: String, skip: PackedStringArray = PackedStringArray(), 
 		_write(root.path_join("terrain").path_join(name + ".tga"), _tga(2048 if name == "mnml_c" or name == "mnml_d1" else 32))
 	for name in ["synth_full.env", "cloud01.pcx", "cloud01b.pcx"]:
 		_copy_fixture("env/" + name, root.path_join("env").path_join(name))
+	# The overcast table every mission's environment load reads (env::kOvercastFile; the game notes it
+	# missing where a project lacks it), here present and empty: no keyframe, as the load with none.
+	_write(root.path_join("env").path_join("overcast.def"), PackedByteArray())
 	# The item table, its pump drawn by the synth crate (one box, no live PANM, no occlusion records):
 	# a model the placer batches, so the mission's items are retained statics beside its individual
 	# models (the armory's buildings, the persons).
@@ -1544,6 +1546,48 @@ func test_the_device_draws_the_games_foliage_effects_and_lights() -> void:
 	assert_eq(int(drawn.get("foliage", {}).get("slots", 0)), 2, "Tmap's two definitions configured: %s" % str(drawn))
 
 
+## S26 (B1-B7, B12): the device draws the mission's world as the game's scene stack holds
+## it (WorldScene's rows under game_world.tscn's names: the sun, moon, glare and glint, the
+## weather bound to the environment, the drops, the cube, FrameFx the one display decode; no
+## SunShadow), its weather started as a mission's start starts it and ticked on the preview
+## clock, the clock standing at the hour shown, and the body words the environment it draws.
+func test_the_device_draws_the_games_world() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission())
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	var rows := ["Celestial", "Weather", "Precipitation", "EnvironmentCubeCapture", "FrameFx"]
+	for type in rows + ["SlotShadow"]:
+		assert_not_null(_device_node(state, type), "the device holds the game's %s" % type)
+	assert_null(_device_node(state, "SunShadow"), "no simulation drives a sun shadow here")
+	assert_null(_device_node(state, "DisplayDecode"), "FrameFx is the one decode")
+	var weather: Weather = _device_node(state, "Weather")
+	assert_not_null(weather)
+	if weather != null:
+		assert_eq(
+			String(weather.environment_path),
+			"../MissionEnvironment",
+			"the weather reads the scene's environment"
+		)
+	var clock := {"playing": true, "rate": 20}
+	assert_true(_change({"kind": "mission", "options": {"time": 6.5}, "clock": clock}))
+	for _frame in 30:
+		_app.pump()
+		await get_tree().process_frame
+	var drawn: Dictionary = _state().get("body", {}).get("drawn", {})
+	var environment: Dictionary = drawn.get("environment", {})
+	assert_true(bool(environment.get("loaded", false)), str(drawn))
+	assert_almost_eq(
+		float(environment.get("mission_minute_of_day", 0.0)),
+		390.0,
+		0.5,
+		"the clock stands at the hour shown"
+	)
+	var ticks := int(environment.get("weather", {}).get("ticks", 0))
+	assert_gt(ticks, 0, "the weather ticks on the preview clock")
+
+
 ## DI-31: each placed item's particle slot as the mission's start attaches it: the pumps author Puff at their
 ## model's ground point, the viewport plays the scene and the device's particle renderer draws it; the layer off
 ## closes the scene.
@@ -1764,11 +1808,13 @@ func test_a_shot_swaps_in_the_husk() -> void:
 			"eye": [at.x, at.y, at.z + 60.0]}, "clock": {"playing": true}}))
 	var husk: ObjectModel = null
 	var deaths: Array = []
+	# The carved static's husk, named by its placer key (simulation/husk_swap).
+	var husk_name := "HuskModel_%d" % key
 	for _frame in 300:
 		_app.pump()
 		await get_tree().process_frame
 		deaths = _state().get("body", {}).get("shots", {}).get("deaths", [])
-		var found := _device(_state()).find_children("HuskModel_%d" % key, "ObjectModel", true, false)
+		var found := _device(_state()).find_children(husk_name, "ObjectModel", true, false)
 		if not found.is_empty():
 			husk = found[0]
 			break
@@ -1790,8 +1836,10 @@ func test_a_shot_swaps_in_the_husk() -> void:
 		_app.pump()
 		await get_tree().process_frame
 	assert_false(placer.is_static_instance_hidden(key), "the pump shown again")
-	assert_true(_device(_state()).find_children("HuskModel_%d" % key, "ObjectModel", true, false).is_empty()
-			or not is_instance_valid(husk) or husk.is_queued_for_deletion(), "the husk let go")
+	var gone := _device(_state()).find_children(husk_name, "ObjectModel", true, false).is_empty()
+	assert_true(
+		gone or not is_instance_valid(husk) or husk.is_queued_for_deletion(), "the husk let go"
+	)
 
 
 ## DI-36: the Listen. The fixture's four waypoint markers made the game's env-sound emitters of a set the

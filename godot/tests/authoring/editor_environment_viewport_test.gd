@@ -86,6 +86,9 @@ func _open_environment() -> bool:
 		_write(root.path_join("terrain").path_join(name + ".tga"), _tga(32))
 	for name in ["synth_full.env", "cloud01.pcx", "cloud01b.pcx"]:
 		_copy_fixture("env/" + name, root.path_join("env").path_join(name))
+	# The overcast table every mission's environment load reads (env::kOvercastFile; the game notes it
+	# missing where a project lacks it), here present and empty: no keyframe, as the load with none.
+	_write(root.path_join("env").path_join("overcast.def"), PackedByteArray())
 	# The terrain's foliage definitions grow bush1 and bush2 (the synth crate under both names, as the mission
 	# view's tests stage them).
 	for name in ["bush1.3di", "bush2.3di"]:

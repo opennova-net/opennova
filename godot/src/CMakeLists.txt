@@ -411,11 +411,11 @@ if(OPENNOVA_EDITOR)
         authoring/hud_viewport_applier.cpp
         authoring/menu_viewport_applier.cpp
         authoring/mission_map_viewport_applier.cpp
-        authoring/mission_placed_tiles.cpp
         authoring/mission_viewport_applier.cpp
         authoring/model_viewport_applier.cpp
         authoring/play_logic_link.cpp
         authoring/preview_backdrop.cpp
+        authoring/preview_scene_layers.cpp
         authoring/preview_sound_player.cpp
         authoring/script_device.cpp
         authoring/ground_overlay_upload.cpp

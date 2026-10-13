@@ -29,6 +29,7 @@
 #include "render/d3d9_raster_device.h"
 #include "terrain/terrain_image_convert.h"
 #include "util/string_convert.h"
+#include "world/world_scene.h"
 
 namespace godot {
 
@@ -127,8 +128,10 @@ void MissionMapViewportApplier::rebuild(const opennova::editor::ViewportModel &m
 	const String trn = opennova::to_gd(terrain) + ".trn";
 	if (!terrain.empty() && root_->has_file(trn)) {
 		loading_.instantiate();
-		loading_->set_mission_tile_set(opennova::to_gd(map.scene().header().tile_set));
-		loading_->set_mission_environment(opennova::to_gd(map.scene().header().environment));
+		// As every load of a mission's terrain is prepared (world/world_scene.h): its tile set, and
+		// its .env by the header's name with the extension the time-of-day load opens it by.
+		prepare_terrain_load(**loading_, opennova::to_gd(map.scene().header().tile_set),
+				opennova::to_gd(map.scene().header().environment));
 		if (loading_->begin_load_from_resource_root(root_, trn) != OK) loading_.unref();
 	}
 	ground_ = map.ground();

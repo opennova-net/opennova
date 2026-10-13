@@ -25,6 +25,9 @@ public:
 	// over `viewport`'s picture where `veil` (a picture with a sky whose Celestial pushes it: a model's, an effect's or
 	// a definition's has none).
 	PreviewFrameEffects(Node3D &root, SubViewport &viewport, bool veil = true);
+	// Over a world's own FrameFx (the WorldScene row a mission's preview draws: its load's
+	// post-step draws the mission texture into it), the veil over `viewport`'s picture.
+	PreviewFrameEffects(FrameFx &frame_fx, SubViewport &viewport);
 	// A presented frame's legs, after the environment nodes advanced (the Celestial's veil and glare are this
 	// frame's): the Q3 frame compiled at the view's camera, the distortion row drawn by `distortion`'s effects device
 	// (its class-7 particles, as the game's frame hands FrameFx the EffectWorld's; null none), the screen effects
@@ -33,6 +36,7 @@ public:
 	FrameFx *frame_fx() const;
 
 private:
+	static void add_veil_(SubViewport &viewport);
 	uint64_t frame_fx_id_ = 0;
 };
 
