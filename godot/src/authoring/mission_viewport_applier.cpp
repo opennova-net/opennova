@@ -1209,26 +1209,10 @@ void MissionViewportApplier::apply_state_(const opennova::editor::ViewportModel 
 	// The ground overlay (DI-29): the picture the viewport made of what the game reads at each point, laid
 	// over the terrain from above (presentation x east, z the negated mission y), past it the one value the
 	// game reads all round where there is one.
+	// S25: a stroke's patch of it the rows it changed alone, the terrain's texture taken in place (GroundOverlayUpload).
 	if (mission.overlay_serial() != overlay_serial_) {
 		overlay_serial_ = mission.overlay_serial();
-		const opennova::editor::MissionOverlayImage &overlay = mission.overlay();
-		if (overlay.kind == opennova::editor::MissionGroundOverlay::None) {
-			terrain_->clear_ground_overlay();
-		} else {
-			Ref<Image> picture;
-			if (!overlay.empty()) {
-				PackedByteArray bytes;
-				bytes.resize(int64_t(overlay.rgba.size()));
-				std::copy(overlay.rgba.begin(), overlay.rgba.end(), bytes.ptrw());
-				picture = Image::create_from_data(overlay.width, overlay.height, false, Image::FORMAT_RGBA8, bytes);
-			}
-			const Rect2 rect(float(overlay.west), float(-overlay.north), float(overlay.width * overlay.texel),
-					float(overlay.height * overlay.texel));
-			const uint8_t *outside = overlay.outside_rgba;
-			terrain_->set_ground_overlay(picture, rect,
-					Color(outside[0] / 255.0f, outside[1] / 255.0f, outside[2] / 255.0f, outside[3] / 255.0f),
-					overlay.outside);
-		}
+		overlay_upload_.apply(*terrain_, mission.overlay());
 	}
 	// The time of day: the mission's start time, or the option's hour.
 	if (options.time != applied_time_ && environment_built_) {
@@ -1319,6 +1303,8 @@ opennova::io::JsonValue MissionViewportApplier::drawn_json_() const {
 	legs.set("lights", json_number(double(leg_us_[1])));
 	legs.set("effects", json_number(double(leg_us_[2])));
 	out.set("leg_us", std::move(legs));
+	// S25: the ground overlay's last upload (its rows and its cost: the painting's frame cost).
+	out.set("overlay", overlay_upload_.to_json());
 	// The foliage the last presented frame drew: its definitions' slots that draw, the detail cells about the
 	// eye, the instances and vertices, the batches.
 	JsonValue foliage = JsonValue::make_object();

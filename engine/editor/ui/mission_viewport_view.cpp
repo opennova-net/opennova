@@ -30,6 +30,7 @@
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/mission_mark_menu.h>
 #include <editor/ui/mission_palette_view.h>
+#include <editor/ui/overlay_legend.h>
 #include <editor/ui/project_find.h>
 #include <editor/ui/reference_picker.h>
 #include <editor/ui/ui_kit.h>
@@ -41,9 +42,19 @@ namespace opennova::editor {
 
 namespace {
 
+// The options set, the members that moved alone: a whole set would name the overlay the toolbar read, which the
+// terrain brush may have moved since, and an overlay named is the person's choice over the brush's (S25,
+// BrushOverlay::chosen).
 void set_options(Workspace &workspace, const MissionViewport &mission, const MissionViewportOptions &options) {
-	workspace.request(request::set_viewport(
-			mission.path(), viewport_change(ViewportKind::Mission, "options", mission_options_to_json(options))));
+	const io::JsonValue held = mission_options_to_json(mission.options());
+	io::JsonValue changed = io::JsonValue::make_object();
+	for (const io::JsonMember &member : mission_options_to_json(options).object) {
+		const io::JsonValue *was = held.get(member.key);
+		if (!was || io::json_write(*was) != io::json_write(member.value)) changed.set(member.key, member.value);
+	}
+	if (changed.object.empty()) return;
+	workspace.request(
+			request::set_viewport(mission.path(), viewport_change(ViewportKind::Mission, "options", std::move(changed))));
 }
 
 // A command (frame, top, ground, duplicate, select_same, paste, play_from_here) over the selection, as an
@@ -141,7 +152,6 @@ struct MissionViewportView::Tools {
 			const MissionEntityMark &entity);
 	void notes(const MissionViewport &mission);
 	void ground_line();
-	void legend(ViewportCanvas &ui, const MissionViewport &mission);
 	float snap_metres() const { return snap; }
 };
 
@@ -243,8 +253,10 @@ void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 			[&](const CanvasInput &in) {
 				tools.mouse = in.mouse;
 				tools.mouse_on_picture = in.hovered;
-				// The ground overlay's legend over the picture's corner (DI-29).
-				if (mission.options().overlay != MissionGroundOverlay::None) tools.legend(canvas_ui(), mission);
+				// The ground overlay's legend over the picture's corner (DI-29; S25: a compact panel, the brush's value
+				// outlined).
+				draw_overlay_legend(workspace, canvas_ui(), path, ViewportKind::Mission, mission.overlay(),
+				                    mission.ground_reader().foliage_defs(), mission.options().legend);
 				if (canvas) {
 					tools.hint = canvas->hint(context, in);
 					const MissionGroundFacts &ground = canvas->ground(context, in);
@@ -953,22 +965,6 @@ void MissionViewportView::Tools::ground_line() {
 		ImGui::SameLine();
 	}
 	ui_kit::clipped_text("Ground: " + ground);
-}
-
-void MissionViewportView::Tools::legend(ViewportCanvas &ui, const MissionViewport &mission) {
-	const MissionOverlayImage &overlay = mission.overlay();
-	std::vector<ViewportCanvas::LegendRow> rows;
-	for (const MissionOverlayRow &row : overlay.legend) {
-		ViewportCanvas::LegendRow line;
-		std::copy(std::begin(row.rgb), std::end(row.rgb), line.rgb);
-		char share[16] = "";
-		if (row.share > 0.0) std::snprintf(share, sizeof(share), " (%.1f%%)", row.share * 100.0);
-		line.text = row.key + ": " + ui_kit::fit(row.words, ImGui::GetFontSize() * 30.0f) + share;
-		rows.push_back(std::move(line));
-	}
-	std::string title = overlay.title;
-	if (!overlay.words.empty()) title += (title.empty() ? "" : "\n") + overlay.words;
-	ui.legend(title, rows);
 }
 
 void MissionViewportView::Tools::notes(const MissionViewport &mission) {
