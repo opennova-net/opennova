@@ -880,7 +880,8 @@ void JoinerRole::pump() {
 			effect.positioned = true;
 			world.out.destruction.effects.push_back(std::move(effect));
 		}
-		tick_replica_emplaced_channels(rt.state(), kernel.seat_specs, world, self_wire_handle());
+		tick_replica_emplaced_channels(rt.state(), kernel.seat_specs, world, self_wire_handle(),
+				&materializer_, kernel.wire_header_world);
 		rt.tick_remote_recoil();
 	}
 	lp.sync_local_mounted_input_heading();
@@ -1817,9 +1818,11 @@ void JoinerRole::apply_mounted_ammo_update() {
 // world stay truthful on a joiner: the occlusion frame evaluates entity
 // visibility from registry positions (a driven-off vehicle must occlude at its
 // live position, not its spawn point), and the collision tick tables pick up the
-// same fix. Type-guarded against the row materialized at that exact streamed
-// identity; synthetic children (spawn_origin sentinel) are skipped except
-// for rows deliberately materialized from a true wire-header mission. Those rows
+// same fix. Type-guarded against the row the replica rule gives that exact
+// streamed identity: a wire-header mission's materialized row, or a full-BMS
+// join's promoted one, the records and the promote's addeweap children (no
+// spawn origin, riding their carrier's attachment row) alike; the joiner's own
+// spawns (the spawn-origin sentinel, no attachment) are skipped. Those rows
 // also mirror orientation/team because collision and seat consumers observe them.
 void JoinerRole::mirror_mission_entities() {
 	mission::MissionKernel &kernel = *kernel_;

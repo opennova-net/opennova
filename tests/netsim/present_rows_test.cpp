@@ -625,6 +625,184 @@ bool test_joiner_bldg_offset_reads_the_owned_lifetime() {
 	return ok;
 }
 
+// Every joiner read of a decoded row's native row takes the replica rule's
+// lifetime (D-NET-620): the husk, the destroy phases, the motion controls,
+// the gun words and the placed identity of a header-only world's owned row
+// reach its present row, and a same-type newcomer spawned at the handle after
+// that lifetime ends lends the retained row none of them. A full-BMS join's
+// promoted (spawn-origin) row keeps its motion controls under the same rule.
+bool test_joiner_native_reads_take_the_owned_lifetime() {
+	opennova::mission::MissionKernel kernel;
+	kernel.world.registry.configure_pool(1, 2);
+	kernel.wire_header_world = true;
+	im::ClientRuntime runtime("NativeReuse");
+	w::VehicleTraits traits;
+	traits.family = w::VehicleFamily::Tank;
+	traits.render_family = w::VehicleRenderFamily::Tank;
+	kernel.world.vehicles.traits.set(1296, traits);
+	opennova::replication::ClientEntityState decoded;
+	decoded.handle = w::EntityHandle::make(1, 0).packed;
+	decoded.type_id = 1296;
+	decoded.spawn_revision = 1;
+	decoded.cls = opennova::EntityClass::Vehicle;
+	decoded.carried_gun_words_valid = true;
+	decoded.carried_gun_yaw_word = 0x1111;
+	decoded.carried_gun_pitch_word = 0x2222;
+	runtime.state().upsert(decoded.handle) = decoded;
+	opennova::replication::ClientWorldMaterializer materializer;
+	materializer.sync(runtime.state(), kernel.world);
+	const w::EntityHandle h{decoded.handle};
+	w::Entity *mine = kernel.world.registry.get(h);
+	if (!expect(mine != nullptr && materializer.owned(kernel.world, h) == mine,
+			"the materializer owns the decoded tank's lifetime"))
+		return false;
+	mine->veh.track_phase[0] = 0x12340000;
+	mine->engine_flags |= w::kEntityFlagHusk;
+	mine->destroy_phases_q16[2] = 0x8000;
+	mine->spawn_origin = (1u << 24) | 3u;
+	mine->bms_id = 77;
+	im::PresentRowsContext context{kernel, &runtime, true};
+	context.materializer = &materializer;
+	im::PoolPresentLifecycleMap lifecycle;
+	std::vector<float> rows;
+	im::DoorPhaseTable doors;
+	im::build_client_replica_present_rows(context, lifecycle, rows, doors);
+	bool ok = expect(rows.size() == w::PF_STRIDE, "one joiner tank row");
+	if (!ok) return false;
+	const float *row = row_at(rows, 0);
+	ok = expect(row[w::PF_VEHICLE_MOTION_VALID] == 1.0f &&
+					row[w::PF_VEHICLE_TRACK_LEFT] == float(0x1234) &&
+					row[w::PF_VEHICLE_GUN_YAW] == float(0x1111) && row[w::PF_HUSK] == 1.0f &&
+					row[w::PF_OBJECT_DESTROY + 2] == float(0x8000) && row[w::PF_BMS_ID] == 77.0f,
+			"the owned lifetime's native state reaches the row") && ok;
+
+	kernel.world.registry.despawn(h);
+	w::Entity newcomer;
+	newcomer.item_id = 1296;
+	newcomer.alive = true;
+	newcomer.veh.track_phase[0] = 0x56780000;
+	newcomer.engine_flags = w::kEntityFlagHusk;
+	newcomer.destroy_phases_q16[2] = 0x4000;
+	newcomer.spawn_origin = (1u << 24) | 5u;
+	newcomer.bms_id = 88;
+	if (!expect(kernel.world.registry.spawn_at(h, newcomer) == h &&
+					materializer.owned(kernel.world, h) == nullptr,
+			"a same-type newcomer at the handle is not the owned lifetime"))
+		return false;
+	im::build_client_replica_present_rows(context, lifecycle, rows, doors);
+	row = row_at(rows, 0);
+	ok = expect(rows.size() == w::PF_STRIDE && row[w::PF_VEHICLE_MOTION_VALID] == 0.0f &&
+					row[w::PF_VEHICLE_TRACK_LEFT] == 0.0f && row[w::PF_VEHICLE_GUN_YAW] == 0.0f &&
+					row[w::PF_HUSK] == 0.0f && row[w::PF_OBJECT_DESTROY + 2] == 0.0f &&
+					row[w::PF_BMS_ID] != 88.0f,
+			"the slot's same-type newcomer lends the retained row nothing") && ok;
+
+	// A full-BMS join: the promoted row (its spawn origin set) is the rule's row.
+	kernel.wire_header_world = false;
+	im::build_client_replica_present_rows(context, lifecycle, rows, doors);
+	row = row_at(rows, 0);
+	ok = expect(rows.size() == w::PF_STRIDE && row[w::PF_VEHICLE_MOTION_VALID] == 1.0f &&
+					row[w::PF_VEHICLE_TRACK_LEFT] == float(0x5678) && row[w::PF_BMS_ID] == 88.0f,
+			"a full-BMS join's promoted row keeps its motion controls") && ok;
+	return ok;
+}
+
+// A full-BMS join's promote spawns each carrier's addeweap children as the
+// host's does, with no spawn origin: the replica rule takes such a child (it
+// rides its carrier's attachment row) as the decoded slot's own entity, so a
+// destroyable child's husk (the 0x13 kill's land_class_husk) reaches its row;
+// a row with no origin and no attachment (the joiner's own spawn) lends none.
+// [orig: NapiNPClientMsg_EntityDeath @0x42EBC6; Entity_SpawnWeaponOverlays: the
+//  child's pool-1 slot, the Pool_AllocEntry call @0x40F393, its spawn @0x40F3FF]
+bool test_full_bms_child_husk_reaches_its_row() {
+	opennova::mission::MissionKernel kernel;
+	kernel.world.registry.configure_pool(1, 4);
+	kernel.wire_header_world = false;
+	im::ClientRuntime runtime("ChildHusk");
+	w::Entity *bunker = spawn_pool_row(kernel, 1, 0, 1889);
+	w::Entity *child = spawn_pool_row(kernel, 1, 1, 1887);
+	w::Entity *local = spawn_pool_row(kernel, 1, 2, 1887);
+	if (!expect(bunker != nullptr && child != nullptr && local != nullptr, "the three rows spawn"))
+		return false;
+	child->spawn_origin = w::kSpawnOriginNone;
+	child->emplacement_parent = bunker->handle;
+	child->emplacement_pose_metadata_resolved = true;
+	child->engine_flags |= w::kEntityFlagHusk;
+	local->spawn_origin = w::kSpawnOriginNone;
+	local->engine_flags |= w::kEntityFlagHusk;
+	for (const w::Entity *e : {child, local}) {
+		opennova::replication::ClientEntityState decoded;
+		decoded.handle = e->handle.packed;
+		decoded.type_id = 1887;
+		decoded.cls = opennova::EntityClass::NoNetworkCallback;
+		runtime.state().upsert(decoded.handle) = decoded;
+	}
+	opennova::replication::ClientWorldMaterializer materializer;
+	im::PresentRowsContext context{kernel, &runtime, true};
+	context.materializer = &materializer;
+	im::PoolPresentLifecycleMap lifecycle;
+	std::vector<float> rows;
+	im::DoorPhaseTable doors;
+	im::build_client_replica_present_rows(context, lifecycle, rows, doors);
+	if (!expect(rows.size() == 2 * w::PF_STRIDE, "two joiner rows")) return false;
+	const float *child_row = nullptr;
+	const float *local_row = nullptr;
+	for (size_t i = 0; i < 2; ++i) {
+		const float wire = row_at(rows, i)[w::PF_WIRE_HANDLE];
+		if (wire == static_cast<float>(child->handle.packed)) child_row = row_at(rows, i);
+		if (wire == static_cast<float>(local->handle.packed)) local_row = row_at(rows, i);
+	}
+	if (!expect(child_row != nullptr && local_row != nullptr, "each row by its wire handle"))
+		return false;
+	return expect(child_row[w::PF_HUSK] == 1.0f && local_row[w::PF_HUSK] == 0.0f,
+			"a full-BMS join's addeweap child draws its husk; an unattached no-origin row lends none");
+}
+
+// The emplaced channels read the same rule: an owned mount's spin phase and
+// its 'ewep' publisher reach its replica row, a same-type newcomer at the
+// handle after that lifetime forwards neither (D-NET-620).
+// [orig: HUD_CacheWeaponSlotInfo @0x440930]
+bool test_emplaced_channels_take_the_owned_lifetime() {
+	opennova::mission::MissionKernel kernel;
+	kernel.world.registry.configure_pool(1, 2);
+	kernel.wire_header_world = true;
+	im::ClientRuntime runtime("EmplacedReuse");
+	opennova::replication::ClientEntityState decoded;
+	decoded.handle = w::EntityHandle::make(1, 0).packed;
+	decoded.type_id = 1881;
+	decoded.spawn_revision = 1;
+	decoded.cls = opennova::EntityClass::NoNetworkCallback;
+	runtime.state().upsert(decoded.handle) = decoded;
+	opennova::replication::ClientWorldMaterializer materializer;
+	materializer.sync(runtime.state(), kernel.world);
+	const w::EntityHandle h{decoded.handle};
+	w::Entity *mine = kernel.world.registry.get(h);
+	if (!expect(mine != nullptr && materializer.owned(kernel.world, h) == mine,
+			"the materializer owns the decoded mount's lifetime"))
+		return false;
+	mine->emplaced_spin_phase = 77;
+	mine->emplaced_ctrl_publisher = true;
+	im::tick_replica_emplaced_channels(runtime.state(), kernel.seat_specs, kernel.world, 0xFFFF,
+			&materializer, kernel.wire_header_world);
+	const opennova::replication::ClientEntityState *row = runtime.state().find(decoded.handle);
+	bool ok = expect(row != nullptr && row->emplaced_spin_phase == 77 && row->emplaced_controls_valid,
+			"the owned mount's spin phase and publisher reach its row");
+	kernel.world.registry.despawn(h);
+	w::Entity newcomer;
+	newcomer.item_id = 1881;
+	newcomer.alive = true;
+	newcomer.emplaced_spin_phase = 99;
+	newcomer.emplaced_ctrl_publisher = true;
+	if (!expect(kernel.world.registry.spawn_at(h, newcomer) == h, "a same-type newcomer spawns"))
+		return false;
+	im::tick_replica_emplaced_channels(runtime.state(), kernel.seat_specs, kernel.world, 0xFFFF,
+			&materializer, kernel.wire_header_world);
+	row = runtime.state().find(decoded.handle);
+	ok = expect(row != nullptr && row->emplaced_spin_phase == 0 && !row->emplaced_controls_valid,
+			"the newcomer forwards neither its phase nor its publisher") && ok;
+	return ok;
+}
+
 // The callback turns the translation with the entity's one matrix: on a
 // joiner the row renders the decoded heading (here 90.45 degrees, where the
 // materialized row keeps a whole-degree 90), so the offset turns with it.
@@ -781,7 +959,8 @@ bool test_joiner_hull_gun_words_follow_the_turret_child() {
 	turret_row.parent_handle = 0x0000;
 	turret_row.emplaced_gun_yaw_word = 0x1234;
 	runtime.state().upsert(turret_row.handle) = turret_row;
-	im::tick_replica_emplaced_channels(runtime.state(), kernel.seat_specs, kernel.world, 0xFFFF);
+	im::tick_replica_emplaced_channels(runtime.state(), kernel.seat_specs, kernel.world, 0xFFFF,
+			nullptr, false);
 	const im::PresentRowsContext context{ kernel, &runtime, true };
 	im::PoolPresentLifecycleMap lifecycle;
 	std::vector<float> rows;
@@ -795,7 +974,8 @@ bool test_joiner_hull_gun_words_follow_the_turret_child() {
 					hull_present[w::PF_VEHICLE_GUN_YAW] == static_cast<float>(0x1234),
 			"the turret's yaw word drives the joiner hull's VEHICLE_GUNYAW");
 	runtime.state().find(turret_row.handle)->target_handle = w::EntityHandle::kInvalid;
-	im::tick_replica_emplaced_channels(runtime.state(), kernel.seat_specs, kernel.world, 0xFFFF);
+	im::tick_replica_emplaced_channels(runtime.state(), kernel.seat_specs, kernel.world, 0xFFFF,
+			nullptr, false);
 	im::build_client_replica_present_rows(context, lifecycle, rows, doors);
 	ok = expect(row_at(rows, 0)[w::PF_VEHICLE_GUN_YAW] == static_cast<float>(0x1234),
 			"the hull keeps the last published word, like the brain") && ok;
@@ -814,7 +994,8 @@ bool test_joiner_hull_gun_words_follow_the_turret_child() {
 	turret_row.target_handle = hull_row.handle;
 	plain_runtime.state().upsert(hull_row.handle) = hull_row;
 	plain_runtime.state().upsert(turret_row.handle) = turret_row;
-	im::tick_replica_emplaced_channels(plain_runtime.state(), plain.seat_specs, plain.world, 0xFFFF);
+	im::tick_replica_emplaced_channels(plain_runtime.state(), plain.seat_specs, plain.world, 0xFFFF,
+			nullptr, false);
 	const im::PresentRowsContext plain_context{ plain, &plain_runtime, true };
 	im::PoolPresentLifecycleMap plain_lifecycle;
 	im::build_client_replica_present_rows(plain_context, plain_lifecycle, rows, doors);
@@ -1316,6 +1497,9 @@ int main() {
     test_attached_rows_retain_subdegree_frame();
     test_joiner_bldg_section_offset_reaches_present_rows();
     test_joiner_bldg_offset_reads_the_owned_lifetime();
+    test_joiner_native_reads_take_the_owned_lifetime();
+    test_full_bms_child_husk_reaches_its_row();
+    test_emplaced_channels_take_the_owned_lifetime();
     test_joiner_bldg_offset_turns_with_the_rendered_heading();
     test_joiner_palm_source_and_local_fragment();
     test_door_phases_reach_present_rows();
