@@ -1,0 +1,12 @@
+{
+  "importer": "image",
+  "options": {
+    "format": "dds"
+  },
+  "outputs": [
+    "on_pist_0_c.dds"
+  ],
+  "schema_version": 1,
+  "source_hash": "f073d749f832ba11",
+  "version": 3
+}

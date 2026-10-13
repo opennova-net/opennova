@@ -18,7 +18,9 @@ scratch folder outside the repo, measured and never committed or imported.
 
 - **CC0 1.0 only**, recorded per file in `SOURCES.md`. The one exception is the carbine's six
   sounds (`onar15*.wav`), mixed from the Infima Games pack the carbine itself comes from
-  (`art/on_ar15/README.md`), at each montage's cue times and volumes; `SOURCES.md` names their files.
+  (`art/on_ar15/README.md`), at each montage's cue times and volumes; and the pistol's five
+  (`onpist*.wav`), cut from the KINEMATION pack the pistol comes from (`art/on_pist/README.md`).
+  `SOURCES.md` names their files.
 - **Modelled on the original, never taken from it.** The reference is Joint
   Operations: Combined Arms (Steam). Its sets, formats, lengths, loudness and
   variation counts are measured; its audio never enters the repo.
@@ -315,6 +317,14 @@ member's base, "jitter" its random range, both Q16.
 | `DRY_ONAR15` | 25 | `onar15dry` (clamp 180) | 0xFFFF | 0 | 225 |
 | `GF_ONAR15_ST` | 25 | `onar15st` | 0xFFFF | 0 | 89 |
 | `GF_ONAR15_SF` | 25 | `onar15sf` | 0xFFFF | 0 | 107 |
+| `GS_ONPIST` | 150 | `onpistf1` | 0xFFFF | 0 | 243 |
+| | 900 | `onpistf2` (clamp 110) | 0xFFFF | 0 | 130 |
+| `GS_ONPISTAI` | 80 | `onpistf1` | 0x11998 | 0 | 193 |
+| | 800 | `onpistf2` (clamp 110) | 0xFFFF | 0 | 130 |
+| `GF_ONPIST_RL` | 25 | `onpistrl` (clamp 230) | 0xFFFF | 0 | 255 |
+| `DRY_ONPIST` | 25 | `onar15dry` (clamp 180) | 0x11998 | 0 | 225 |
+| `GF_ONPIST_ST` | 25 | `onpistst` | 0xFFFF | 0 | 125 |
+| `GF_ONPIST_SF` | 25 | `onpistsf` | 0xFFFF | 0 | 139 |
 | `BM1_DEATH` | 150 | `ondeath1` to `8` | 0xE3D6 | 0x1EB8 | 201 |
 | `BM1_DEATH_K` | 140 | `ondeathk1` to `3` (clamp 200) | 0xFFFF | 0 | 202 |
 | `ON_FALLDEAD` | 100 | `onfldead1` to `3` | 0xFFFF | 0 | 188 |
@@ -356,6 +366,10 @@ nothing (a ricochet on 3 of 8 dirt hits, as retail). The carbine's sets are
 the ones its `weapon.def` row names (`GS_ONAR15` fire, `GF_ONAR15_RL` reload,
 `DRY_ONAR15` dry fire, `GF_ONAR15_ST` and `GF_ONAR15_SF` switch to and from);
 `GS_ONAR15AI` is for `AMMO_ON_556`'s `ai_launch`, the fire others hear.
+The pistol's sets are laid out as the carbine's (`GS_ONPIST`, `GF_ONPIST_RL`, `DRY_ONPIST`,
+`GF_ONPIST_ST`, `GF_ONPIST_SF`; `GS_ONPISTAI` for `AMMO_ON_9MM`'s `ai_launch`). Its shot sits 1.5 dB
+under the carbine's; its dry fire is the carbine's click played at 1.1; the reload's volume is held at
+255, about 2 dB under the carbine's reload.
 The rain's two sets keep the engine's names, which it plays by name while a
 mission rains; their volume and falloff are the original's, the loops matched
 to its loudness.

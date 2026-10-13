@@ -12,4 +12,15 @@ powerup "PU_ONAR15"
 	function powerup_respawn
 	end
 end
+powerup "PU_ONPIST"
+	respawn_time 120
+	weapon WPN_ON_PISTOL
+	action "pickup"
+	function powerup_pickup
+	soundset GF_ONPIST_ST
+	end
+	action "respawn"
+	function powerup_respawn
+	end
+end
 

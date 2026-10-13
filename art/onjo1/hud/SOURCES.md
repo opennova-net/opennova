@@ -12,7 +12,8 @@ drawing mode only (in a scratch folder outside the repo); nothing of theirs is h
   soldier (a skin-modifier mannequin with helmet, pack and carbine, a bench for sitting, a tripod gun for
   emplaced, a canopy for the parachute), each framed by an orthographic camera at 1024 x 544; the scene
   `weapon_on_ar15` holds our AR-15's parts (copied from `art/on_ar15/on_ar15.blend` with their placement
-  baked, the reload's spare magazine left out) under a side camera at 1024 x 320. All render with
+  baked, the reload's spare magazine left out) under a side camera at 1024 x 320, and `weapon_on_pist`
+  our pistol's (from `art/on_pist/on_pist.blend` the same way, at rest) under a side camera at 1024 x 512. All render with
   Workbench (studio light, one white colour, the object outline, a transparent film).
 - **`src/<group>/<name>.png`**: each texture's master, two or four times the texture's size (one 1:1
   where the texture is already large): the texels as the game reads them, so a master is the texture at
@@ -66,6 +67,8 @@ The HUD draws by rules the original engine's HUD loader and its materials fix
 | `h_onclip.tga`, `h_onrnd.tga` | 131 x 16, 4 x 16, 32-bit | alpha | `src/weapon/` | The AR-15's magazine window and one round (its weapon.def `hudclipgfx 0 0` and `hudrndgfx 6 0 4 0 1`: thirty rounds from x 6, a notch every ten). |
 | `onxhair.tga` | 64 x 64, 32-bit | alpha | `src/weapon/onxhair.png` | The AR-15's own reticle (its weapon.def `crosshair`): a fine open cross. |
 | `m_onar15.tga` | 310 x 90, 32-bit | alpha | `src/weapon/m_onar15.png` | The AR-15 in the armory (its weapon.def `loadout_menu_icon`), rendered from our model. |
+| `h_onpist.tga` | 122 x 65, 32-bit | alpha | `src/weapon/h_onpist.png` | The pistol's side silhouette (its weapon.def `hudicon`), rendered from our model, in the box the original's `H_bereta` fills (22, 13 to 81, 52 of the same 122 x 65 canvas). It shares the AR-15's magazine window, round and reticle (`hudclipgfx 0 0 h_onclip.tga`, `hudrndgfx 7 0 8 0 1 h_onrnd.tga`: fifteen rounds from x 7, 8 texels apart), as the original's `WPN_M9Beretta` shares `WPN_M4AUTO`'s. |
+| `m_onpist.tga` | 310 x 90, 32-bit | alpha | `src/weapon/m_onpist.png` | The pistol in the armory (its weapon.def `loadout_menu_icon`), rendered from our model, the canvas's full height, centred. |
 | `onhstnc0.tga` .. `onhstnc5.tga` | 256 x 136, 32-bit | alpha | `src/stance/` | The stance icons: stand, crouch, prone, sitting, emplaced, parachute. |
 | `border.tga` | 128 x 128, 32-bit | colour | `src/box/border.png` | The window box (the scoreboard, objectives, help, briefing, message log): a bevelled frame centred on the fill's inset edge, the title tab on row 3, the scan-lined dark fill in cell (3,0). |
 | `boxtile.tga` | 256 x 256, 24-bit | colour | `src/box/boxtile.png` | Our four-colour woodland camouflage, tiling, which the box frame is printed with. |
