@@ -535,13 +535,16 @@ An account an admin approved (`players.can_host`) can have the service run one
   server), the data volume (label `opennova-jo`) mounted read-only at `/opt/jo`, the
   bundle fetched, `/srv/serve` written (`0700`, owned by UID 10001), the image pulled, and
   `opennova-serve.service` started: the serve image as UID 10001 with `--network host`,
-  the data read-only, the working directory, the bundle's arguments, its output in the
-  journal. The host network shares the machine's instance metadata service, so before
-  the server starts (the unit's `ExecStartPre`, again at any start) an `iptables` rule,
-  and its `ip6tables` twin for `fd00:ec2::254`, refuses UID 10001 any packet to
-  `169.254.169.254`: the internet-facing server never reads the machine role's
-  credentials. Docker runs with no user-namespace remapping (the script checks), so the
-  container's UID is the host's and the owner match holds.
+  no capability and no way to gain one (`--cap-drop ALL`, `no-new-privileges`; it binds
+  only ports above 1024), the data read-only, the working directory, the bundle's
+  arguments, its output in the journal. The host network shares the machine's instance
+  metadata service, so before the server starts (the unit's `ExecStartPre`, again at any
+  start) an `iptables` rule, and its `ip6tables` twin for `fd00:ec2::254` where the
+  kernel has IPv6, refuses UID 10001 any packet to `169.254.169.254`: the
+  internet-facing server never reads the machine role's credentials. The script checks
+  the refusal before the first start (curl's exit 7, not a timeout). Docker runs with no
+  user-namespace remapping (the script checks), so the container's UID is the host's and
+  the owner match holds; the process can never change it.
   Whatever ends `opennova-serve` (0, 3, any other code, a signal) powers the machine off
   (`SuccessAction` and `FailureAction`), and the shutdown behaviour terminates it; a
   bootstrap step that fails does the same. Nothing on the machine restarts the server:

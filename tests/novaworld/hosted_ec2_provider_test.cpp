@@ -338,11 +338,17 @@ int test_machine_script() {
 	// metadata addresses at every start of its unit, and checked before the first.
 	TEST_EXPECT(runs_line(script, "readonly SERVE_UID=10001"));
 	TEST_EXPECT(runs_line(script, "--network host --user 10001:10001"));
+	// No capability and no way to gain one: the process never leaves the UID the fence matches.
+	TEST_EXPECT(runs_line(script, "--cap-drop ALL --security-opt no-new-privileges"));
 	TEST_EXPECT(runs_line(script, "iptables -I OUTPUT -d 169.254.169.254 -m owner --uid-owner 10001 -j REJECT"));
 	TEST_EXPECT(runs_line(script, "ip6tables -I OUTPUT -d fd00:ec2::254 -m owner --uid-owner 10001 -j REJECT"));
+	TEST_EXPECT(runs_line(script, "if [ -e /proc/net/if_inet6 ]; then"));
 	TEST_EXPECT(runs_line(script, "ExecStartPre=/usr/local/sbin/opennova-serve-fence"));
 	TEST_EXPECT(runs_line(script, "install --no-install-recommends docker.io iptables"));
-	const size_t fence_check = script.find("still reaches the metadata service\"");
+	// The check wants the REJECT's refusal (curl's exit 7), so a metadata service that
+	// merely does not answer cannot pass it.
+	TEST_EXPECT(runs_line(script, "[ \"$imds_rc\" -eq 7 ] || end_machine"));
+	const size_t fence_check = script.find("still reaches the metadata service");
 	const size_t first_start = script.find("systemctl start --no-block opennova-serve.service");
 	TEST_EXPECT(fence_check != std::string::npos && first_start != std::string::npos && fence_check < first_start);
 	TEST_EXPECT(!runs_line("# iptables -I OUTPUT -d 169.254.169.254\n", "iptables -I OUTPUT"));
