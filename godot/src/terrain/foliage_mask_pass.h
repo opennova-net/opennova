@@ -166,6 +166,13 @@ public:
 	void set_globals_held(bool p_held) { globals_held_ = p_held; }
 	bool is_globals_held() const { return globals_held_; }
 	void republish_globals();
+	// The masks as a process has them with no foliage: no target, neither view
+	// active, both eyes at the origin (a picture with no foliage after one that
+	// published its own, E13).
+	static void publish_absent();
+	// How many times the absent masks were written since the process began (a
+	// read-back for the tests).
+	static int64_t get_absent_writes() { return absent_writes_; }
 
 private:
 	std::shared_ptr<FoliageMaskFrame> _build_frame(
@@ -201,6 +208,7 @@ private:
 	bool eye_written_ = false;
 	bool texture_bound_ = false;
 	bool globals_held_ = false;
+	static inline int64_t absent_writes_ = 0;
 	int64_t last_draws_ = 0;
 	int64_t last_instances_ = 0;
 	// Whether the main / Inset frame carries masks (each view's active global).

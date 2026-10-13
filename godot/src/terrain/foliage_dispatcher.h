@@ -291,6 +291,8 @@ public:
 	void set_globals_held(bool p_held) { mask_pass_.set_globals_held(p_held); }
 	bool is_globals_held() const { return mask_pass_.is_globals_held(); }
 	void republish_globals() { mask_pass_.republish_globals(); }
+	static void publish_absent() { FoliageMaskPass::publish_absent(); }
+	static int64_t get_absent_writes() { return FoliageMaskPass::get_absent_writes(); }
 
 protected:
   static void _bind_methods();

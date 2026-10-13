@@ -178,3 +178,15 @@ func test_each_world_owns_its_clear_colour_environment() -> void:
 		"a second world starts on the scene's clear"
 	)
 	assert_eq(second.get_current_frame_clear_color(), idle, "its idle clear is the scene's")
+
+
+func test_publishing_the_absent_scene_writes_every_rows_absent_set() -> void:
+	# A picture with no world (the editor's model view) renders under the absent set
+	# after one that published its own: the water's write is the observable one headless.
+	var water_writes := Water.get_global_writes()
+	var veil_writes := Celestial.get_absent_writes()
+	var mask_writes := FoliageDispatcher.get_absent_writes()
+	WorldSceneTable.publish_absent()
+	assert_gt(Water.get_global_writes(), water_writes, "the water's absent set is written")
+	assert_gt(Celestial.get_absent_writes(), veil_writes, "the absent veil is written")
+	assert_gt(FoliageDispatcher.get_absent_writes(), mask_writes, "the absent masks are written")

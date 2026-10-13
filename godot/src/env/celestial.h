@@ -161,6 +161,12 @@ public:
 	void set_globals_held(bool p_held) { globals_held_ = p_held; }
 	bool is_globals_held() const { return globals_held_; }
 	void republish_globals();
+	// The veil alpha as a process has it with no bodies: 0 (a picture with no
+	// Celestial after one that published its own, E13).
+	static void publish_absent();
+	// How many times the absent veil was written since the process began (a
+	// read-back for the tests: a headless renderer keeps no global to read).
+	static int64_t get_absent_writes() { return absent_writes_; }
 	int get_sun_veil_stopdown() const;
 
 	void _ready() override;
@@ -255,6 +261,7 @@ private:
 	// The last advanced frame's sun-veil pair (env_celestial.h SunVeil).
 	int sun_veil_glare_ = 0;
 	bool globals_held_ = false;
+	static inline int64_t absent_writes_ = 0;
 	int sun_veil_stopdown_ = 0;
 	// The water-reflected sun glint accumulator
 	// [orig: Environment_UpdateSunGlare @ 0x5ad130, see docs/env/env-tod-re.md].
