@@ -83,6 +83,16 @@ struct TerrainUses {
 };
 TerrainUses terrain_uses(const SessionView &view, const std::string &path);
 
+// The import a heightmap image is the input of (S25 A2b): the terrain set whose `heightmap` it is, the .cpt its import
+// makes from it, and the white its record's `top` holds (the option's own fallback, 127.5, where it holds none).
+struct HeightmapImport {
+	std::string source; // the set, project-relative
+	std::string cpt;    // project-relative ("" where the scan lists none)
+	double top = 127.5;
+};
+// False where no terrain import of the project names `image` (project-relative) as its heightmap.
+bool heightmap_import_of(const SessionView &view, const std::string &image, HeightmapImport &out);
+
 // The terrain_uses query's answer: {path, found, reading?, overcast?, missions [{mission, name, title, read, locator,
 // field, environment {name, file?}, tile_set, tiles, start_time, minutes_per_day, later [{file, line, index, key, value}]}],
 // import: null or {source, record, error?, images [{key, name, file?}], foliage, options [{key, label, value, set,

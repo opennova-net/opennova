@@ -2209,7 +2209,8 @@ static int test_ground_facts() {
 	// TSD_NULL (D-SND-15), the char map's snow under it.
 	files->put("pad.til", tile_at(sx - 2.0, sy - 2.0, 5));
 	ground.follow(files, 3, header, "pad");
-	TEST_EXPECT(ground.reads() == 2 && ground.tiles() == 1);
+	// The placed tiles alone moved: read again in place (S25), the terrain read standing.
+	TEST_EXPECT(ground.reads() == 1 && ground.tiles() == 1);
 	MissionGroundFacts tiled = ground.terrain_at(sx, sy, 20.0);
 	TEST_EXPECT(tiled.surface == 0 && tiled.from == MissionSurfaceFrom::Tile && tiled.tile == 5 && tiled.map_surface == 3 &&
 			tiled.impact_row == 4 && tiled.footstep[0] == audio::kSlotFootLGround);
@@ -2221,11 +2222,11 @@ static int test_ground_facts() {
 	files->put_text("mnml_t.tsd", "INDEX_5 TSD_WOOD\r\n");
 	ground.follow(files, 4, header, "pad");
 	tiled = ground.terrain_at(sx, sy, 20.0);
-	TEST_EXPECT(ground.reads() == 3 && tiled.surface == 13 && tiled.from == MissionSurfaceFrom::Tile && tiled.impact_row == 17);
+	TEST_EXPECT(ground.reads() == 2 && tiled.surface == 13 && tiled.from == MissionSurfaceFrom::Tile && tiled.impact_row == 17);
 	// The mission's tile set names another strip, whose .tsd the project lacks: TSD_NULL again.
 	header.tile_set = "other_t";
 	ground.follow(files, 4, header, "pad");
-	TEST_EXPECT(ground.reads() == 4 && ground.terrain_at(sx, sy, 20.0).surface == 0);
+	TEST_EXPECT(ground.reads() == 3 && ground.terrain_at(sx, sy, 20.0).surface == 0);
 	header.tile_set.clear();
 	files->drop("pad.til");
 

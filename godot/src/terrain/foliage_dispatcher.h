@@ -25,6 +25,7 @@
 #include "terrain/foliage_mask_pass.h"
 
 #include <formats/foliage/runtime.h>
+#include <formats/til/til.h>
 #include <runtime/renderer/foliage_frame.h>
 
 #include <array>
@@ -386,6 +387,8 @@ private:
   bool detail_passes_drawn_ = true;
   Ref<TerrainData> terrain_data_;
   Ref<TerrainTileInfo> tile_info_;
+  // The placed tiles as the cells were grown over them: what a change of the tile info is compared with.
+  std::vector<opennova::TilOverlayEntry> tile_entries_;
   Ref<TerrainData> colormap_source_;
   Callable height_sampler_;
   Callable detail_foliage_sampler_;

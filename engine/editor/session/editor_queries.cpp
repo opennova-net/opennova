@@ -36,6 +36,7 @@
 #include <editor/session/catalog_json.h>
 #include <editor/session/document_set.h>
 #include <editor/session/particle_keys_query.h>
+#include <editor/session/terrain_queries.h>
 #include <editor/session/environment_uses.h>
 #include <editor/session/terrain_uses.h>
 #include <editor/session/file_card.h>
@@ -1460,6 +1461,8 @@ constexpr ConcernSet kFileCardReads =
 // the project, and the render check's findings (render's screen).
 constexpr ConcernSet kViewportConcerns = concern_set({ C::Viewports, C::Documents, C::Selection,
 		C::DocumentSet, C::ActiveDocument, C::Files, C::Graph, C::Project, C::Findings });
+// The terrain query's (S25): its view document, the files its family resolves to, the brush and the panes.
+constexpr ConcernSet kTerrainReads = concern_set({ C::Documents, C::DocumentSet, C::ActiveDocument, C::Files, C::Workspace });
 
 constexpr EditorQueryRow kRows[] = {
 	Query(K::State, "state", answer_state, kStateParams, kEveryConcern,
@@ -1882,6 +1885,7 @@ constexpr EditorQueryRow kRows[] = {
 			"lines, and its keys: each key's value as the reader takes it, its place (line, column, length: a span "
 			"edit there sets it), whether the block writes it, and what the reader takes it as.")
 			.row,
+	Query(K::Terrain, "terrain", answer_terrain, kTerrainParams, kTerrainReads, kTerrainDoc).chooses(kTerrainChoices).row, // S25
 };
 
 static_assert(std::size(kRows) == kEditorQueryKindCount, "every query kind has exactly one row");

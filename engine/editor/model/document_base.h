@@ -16,6 +16,7 @@
 namespace opennova::editor {
 
 class Document;
+class RasterDocument;
 class TextDocument;
 
 // A file beside a document as the session found it (DocumentType::companions): none there, its bytes, or there
@@ -59,8 +60,8 @@ bool is_line_ends_restore(const Edit &edit);
 // What a document holds is its kind's. The record document (Document, model/document.h) holds
 // rows of records that every edit addresses by identity and field (as_records() is it; null for
 // any other kind of document); the text document (TextDocument, model/text_document.h, S13 D9)
-// holds a text whose spans its edits replace (as_text()); a raster (a terrain's depth map) will
-// hold its own content. A document of another kind than records takes its changes as Apply edits
+// holds a text whose spans its edits replace (as_text()); the raster document (RasterDocument,
+// model/raster_document.h, S25) holds planes of texels its edits write (as_raster()). A document of another kind than records takes its changes as Apply edits
 // whose payload its type made (EditPayload), implementing apply_edits, the history, serialize and
 // read_source. The base keeps the rules every kind obeys: a snapshot and a blocked document take
 // no edit, undo or redo, and a blocked one no save.
@@ -123,6 +124,32 @@ public:
 	// The open edit group (a coalesced burst of typing, a gesture) ends: the next edit is a step
 	// of its own.
 	virtual void end_edit_group() = 0;
+	// The gesture `gesture` cancelled (S25: Esc mid-stroke, an EndEdit's cancel): while its group is
+	// open, the step it made dropped, the document as the gesture found it and no redo left of it;
+	// false, nothing changed, when no group of it is open (a snapshot's, a blocked document's, a
+	// kind whose history keeps no gestures).
+	bool cancel_gesture(uint64_t gesture);
+	// The marks of the steps undo() and redo() would take (S25, the undo across documents: StepMark's
+	// serial and link); {} for none, and by default (a kind whose history keeps no marks).
+	virtual StepMark undo_mark() const { return StepMark(); }
+	virtual StepMark redo_mark() const { return StepMark(); }
+	// The files the document stands in for besides its own (S25: a heightmap image's document for the .cpt its
+	// import bakes, once the editor baked it): what reads the project's files (ProjectAssetSource) reads each from
+	// the document, serialize_stand_in's bytes, not from its file. None by default.
+	virtual std::vector<std::string> stand_in_paths() const { return {}; }
+	// The bytes the document stands in for the file at `path` with (one of stand_in_paths()); false, the file read
+	// as it is, where it cannot make them.
+	virtual bool serialize_stand_in(const std::string &path, std::vector<uint8_t> &out) const {
+		(void)path;
+		(void)out;
+		return false;
+	}
+	// Whether a step the history keeps, to undo or to redo, carries the link `link` (a document a gesture opened in
+	// but changed nothing of holds none).
+	virtual bool holds_link(uint64_t link) const {
+		(void)link;
+		return false;
+	}
 	// What each step did, in words (the UX round's problems lane): the session names the step an edit
 	// made with the status line's words for it ("Set hp of Drivable Dune Buggy to 120"), a fold of the
 	// same group renaming it; what Undo and Redo then say they did, and what the Edit menu's items name.
@@ -212,6 +239,10 @@ public:
 	// caller that reads lines and spans asks first (text_of).
 	virtual const TextDocument *as_text() const { return nullptr; }
 	virtual TextDocument *as_text() { return nullptr; }
+	// The raster document this is (model/raster_document.h, S25: a terrain's heights, a painted map), null
+	// for another kind of document.
+	virtual const RasterDocument *as_raster() const { return nullptr; }
+	virtual RasterDocument *as_raster() { return nullptr; }
 	// Whether it holds its file's bytes whole, edited a whole file at a time (ADR 0046 S18: a texture's
 	// texels; round S23: a wave's samples), which its type's own hooks read (documents/document_types.h,
 	// DocumentContent::Bytes).
@@ -229,6 +260,11 @@ protected:
 	virtual bool apply_edits(const std::vector<Edit> &edits, Diagnostic &error) = 0;
 	virtual void undo_step() = 0;
 	virtual void redo_step() = 0;
+	// The kind's part of cancel_gesture: false where no group of the gesture is open (the default).
+	virtual bool cancel_gesture_step(uint64_t gesture) {
+		(void)gesture;
+		return false;
+	}
 	// What a blocked document takes all the same: a batch that reads its source again, whose content
 	// keeps nothing of the one it replaces (a record document's LineEndsRestore), and the redo of
 	// such a step. None by default.

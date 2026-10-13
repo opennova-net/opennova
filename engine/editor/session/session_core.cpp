@@ -28,6 +28,7 @@
 #include <editor/project/expansion_name.h>
 #include <editor/project/project_files.h>
 #include <editor/preview/texture_thumbnails.h>
+#include <editor/preview/terrain_viewport.h>
 #include <editor/session/texture_use_index.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/preview/viewports.h>
@@ -1143,6 +1144,12 @@ void SessionCore::set_viewport(const std::string &path, const std::string &chang
 		if (viewports_->set_clock(*json.get("clock"), error)) touch(ViewConcern::Viewports);
 	} else if (viewports_->set(view_, at, json, error)) {
 		touch(ViewConcern::Viewports);
+		// S25: the mission a terrain's viewport draws it under, which its brush's files follow (session/terrain_family).
+		if (const auto *terrain = dynamic_cast<const TerrainViewport *>(viewports_->find(at, ViewportKind::Terrain)))
+			if (view_.workspace.document(at).terrain_mission != terrain->options().mission) {
+				view_.workspace.documents[at].terrain_mission = terrain->options().mission;
+				touch(ViewConcern::Workspace);
+			}
 		// A menu's game mouse moved, pressed or let go is heard at once (DI-34).
 		fire_menu_sounds(*this, at);
 	}
@@ -1161,8 +1168,44 @@ SessionCore::WireDrag *SessionCore::wire_drag(const std::string &path) {
 
 void SessionCore::end_wire_gesture(const std::string &path) {
 	wire_drags_.erase(path);
-	documents().end_edit(path);
+	// By its token (S25): a terrain stroke's gesture ends in every document its samples changed.
+	documents().end_edit(path, open_gesture(path).token);
 }
+
+namespace {
+
+// A brush drag's stroke samples laid along the dab path `path` carries (S25): each one-point sample the planner made
+// takes the dabs the path lays from the last sample's ground point to its own (the first sample's point the press's
+// dab, then one every spacing x radius, TerrainDabPath), as the canvas lays a person's drag; a sample's dabs past a
+// stroke's points go as the gesture's next samples; one that lays none ends the gesture alone where it ends it.
+void lay_dab_path(std::vector<EditorRequest> &requests, TerrainDabPath &path, const TerrainBrush &brush) {
+	std::vector<EditorRequest> out;
+	for (EditorRequest &each : requests) {
+		if (each.kind != EditorRequestKind::TerrainStroke || each.stroke.points.size() != 1) {
+			out.push_back(std::move(each));
+			continue;
+		}
+		const TerrainPoint at{each.stroke.points[0].first, each.stroke.points[0].second};
+		std::vector<TerrainPoint> dabs;
+		if (!path.started()) path.begin(at, dabs);
+		else path.to(at, terrain_dab_step(terrain_stroke_brush(brush, each.stroke), 1.0), dabs);
+		if (dabs.empty()) {
+			if (each.stroke.end && each.stroke.gesture) out.push_back(request::end_edit(each.path, each.stroke.gesture));
+			continue;
+		}
+		for (size_t from = 0; from < dabs.size(); from += kTerrainStrokePoints) {
+			EditorRequest part = each;
+			part.stroke.points.clear();
+			for (size_t i = from; i < dabs.size() && i < from + kTerrainStrokePoints; ++i)
+				part.stroke.points.emplace_back(dabs[i].x, dabs[i].y);
+			part.stroke.end = each.stroke.end && from + kTerrainStrokePoints >= dabs.size();
+			out.push_back(std::move(part));
+		}
+	}
+	requests = std::move(out);
+}
+
+} // namespace
 
 void SessionCore::edit_in_viewport(const EditorRequest &request) {
 	// What the viewport plans, as its canvas would raise it.
@@ -1239,6 +1282,10 @@ void SessionCore::edit_in_viewport(const EditorRequest &request) {
 			}
 		}
 	}
+	// S25: a brush drag strokes the canvas's dab path, not a dab per sample, so the wire's drag over a picture's pixels
+	// lays what a person's drag over them does.
+	TerrainDabPath dabs = going ? going->dabs : TerrainDabPath();
+	if (error.empty() && drag && asked.handle == "brush") lay_dab_path(planned.requests, dabs, view_.workspace.terrain_brush);
 	if (!error.empty()) {
 		refuse_request(CoreFinding::ViewportRefused, error, at, DiagnosticSeverity::Error);
 		// A refused last sample of an open gesture ends it all the same.
@@ -1295,10 +1342,11 @@ void SessionCore::edit_in_viewport(const EditorRequest &request) {
 	}
 	WireDrag &kept = wire_drags_[at];
 	if (!going) {
-		kept = WireDrag{ sample.gesture, shown, asked.id, asked.handle, x, y };
+		kept = WireDrag{ sample.gesture, shown, asked.id, asked.handle, x, y, dabs };
 	} else if (!outcome_.refused) {
 		kept.x = x;
 		kept.y = y;
+		kept.dabs = dabs;
 	}
 	documents().open_gesture(at, kept.token, platform_.now_ms());
 }
@@ -1308,8 +1356,9 @@ void SessionCore::request_arrives(const EditorRequest &request) {
 			: request_kind_row(request.kind).names_active ? view_.documents.active
 			: std::string();
 	if (on.empty() || !open_gesture(on).wire()) return;
-	const bool goes_on = request.kind == EditorRequestKind::EditInViewport && request.drag != ViewportDrag() &&
-			request.drag.gesture == open_gesture(on).token;
+	const bool goes_on = (request.kind == EditorRequestKind::EditInViewport && request.drag != ViewportDrag() &&
+			request.drag.gesture == open_gesture(on).token) ||
+			(request.kind == EditorRequestKind::TerrainStroke && request.stroke.gesture == open_gesture(on).token);
 	if (!goes_on) end_wire_gesture(on);
 }
 

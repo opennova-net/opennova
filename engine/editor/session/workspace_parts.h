@@ -23,9 +23,10 @@ struct SessionView;
 // `focus` is no part but an ask, the window it names brought forward (a focus_window view event; shown where it
 // stands aside, as the Windows menu's tick shows it).
 // The catalog query lists the table, from which the editor MCP makes the request's schema.
-enum class WorkspaceJson : uint8_t { String, Boolean, Integer, Strings, Integers, Object, Number };
+enum class WorkspaceJson : uint8_t { String, Boolean, Integer, Strings, Integers, Object, Number, Numbers };
 
-// A JSON type's word: "string", "boolean", "integer", "string[]", "integer[]", "object", "number" (a finite one).
+// A JSON type's word: "string", "boolean", "integer", "string[]", "integer[]", "object", "number" (a finite one),
+// "number[]" (finite ones).
 const char *workspace_json_token(WorkspaceJson json);
 
 // `longest` (the window's field's buffer, workspace_view.h's kWorkspaceText and the rest, less its

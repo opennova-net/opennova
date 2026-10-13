@@ -834,6 +834,16 @@ void collect(const Diagnostic &d, const SessionView &view, const ProblemFixIndex
 			for (const PlannedFix &planned : d.planned) out.push_back(edit_fix(d.asset, planned));
 		return;
 	case FindingFix::UnusedVariable: unused_variable_fix(d, view, out); return;
+	case FindingFix::DeleteFile: {
+		// A file whose presence hides what the game reads in its place (an empty <mission>.til): to the trash.
+		const AssetEntry *file = view.project.scan ? view.project.scan->at_path(d.asset) : nullptr;
+		if (!file || !file->imported_from.empty()) return;
+		out.push_back({"Delete " + file->logical_name,
+		               "Moves " + file->relative_path + " to the project's trash: the game then reads what it hid in its "
+		               "place. Undo file brings it back.",
+		               request::delete_asset(file->relative_path), false});
+		return;
+	}
 	}
 }
 

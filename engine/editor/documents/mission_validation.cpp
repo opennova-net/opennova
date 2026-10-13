@@ -88,6 +88,7 @@ constexpr FindingCodeEntry<MissionFinding> kFindingEntries[] = {
 	{ MissionFinding::NamesUnwritten, listed_code("mission.names_unwritten") },
 	{ MissionFinding::NamesForeign, listed_code("mission.names_foreign", FindingFix::EditRecord) },
 	{ MissionFinding::NamesRefused, listed_code("mission.names_refused") },
+	{ MissionFinding::NamesLocked, listed_code("mission.names_locked") },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(MissionFinding::kCount),
               "every MissionFinding has exactly one row");

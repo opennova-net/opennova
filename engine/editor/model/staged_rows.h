@@ -55,6 +55,10 @@ public:
 	bool move(NodeId id, size_t position);
 	// The file-wide state as the batch leaves it (an edit replaces it with a changed copy).
 	std::shared_ptr<const FileState> &state() { return state_; }
+	// The rows the batch added (a new row, a copy, a pasted row) or moved, in their order among the
+	// rows as the batch leaves them: what the document's type settles before the step
+	// (Document::settle_placed_rows).
+	std::vector<NodeId> placed() const;
 	// Each row an edit changed, touched or added: what the document's type refreshes before the
 	// step (Document::after_edit).
 	void for_each_changed(const std::function<void(Node &)> &fn);

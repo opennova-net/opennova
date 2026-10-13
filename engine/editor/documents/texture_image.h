@@ -92,6 +92,14 @@ struct TextureImage {
 std::shared_ptr<const TextureImage> decode_texture(const std::string &name, const std::vector<uint8_t> &bytes,
                                                    bool first_level_only = false);
 
+// The image `as_read` describes with its first level's texels replaced (S25: a painted texture shown per dab, no codec
+// round trip): `rgba` the new first level (as_read's sides), `indices` an indexed texture's new indices (as_read's
+// palette; empty where as_read holds none), `luminance` an 8-bit PCX's new archive alpha (empty where it holds none);
+// the alpha classed again, its fact in its place; its file size fact the size read (a save writes it again). Null where
+// as_read holds no single decoded level of those sides.
+std::shared_ptr<const TextureImage> retexel_texture(const TextureImage &as_read, std::vector<uint8_t> rgba,
+                                                    std::vector<uint8_t> indices, std::vector<uint8_t> luminance);
+
 // The texel at (x, y) of `level`, R, G, B, A; false off the level.
 bool texture_texel(const TextureImage &image, size_t level, uint32_t x, uint32_t y, uint8_t rgba[4]);
 

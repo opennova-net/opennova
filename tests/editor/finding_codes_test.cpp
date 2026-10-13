@@ -276,7 +276,8 @@ static int test_columns() {
 	TEST_EXPECT(fixed_by(FindingFix::TextureRows) == Tokens({ "texture.tga_upside_down" }));
 	TEST_EXPECT(fixed_by(FindingFix::SetAsideUnread) == Tokens({ "texture.not_read" }));
 	TEST_EXPECT(fixed_by(FindingFix::ImportFitsUse) ==
-	            Tokens({ "texture.alpha_not_loaded", "texture.blend_map_size", "texture.colormap_size", "texture.foliage_map_overrun",
+	            Tokens({ "texture.alpha_not_loaded", "texture.blend_map_size", "texture.char_map_overrun", "texture.char_map_shape",
+	                     "texture.colormap_size", "texture.foliage_map_overrun",
 	                     "texture.foliage_map_shape", "texture.height_wrap", "texture.loading_screen_size", "texture.memory",
 	                     "texture.mfd_not_pow2", "texture.normal_map_halved", "texture.particle_too_big",
 	                     "texture.tile_atlas_cells", "texture.wrong_reader" }));
@@ -297,6 +298,8 @@ static int test_columns() {
 	                     "mission.ssn_duplicate", "mission.zone_duplicate",
 	                     "strings.key_duplicate", "terrain.foliage_inert", "terrain.no_width", "terrain.refused" }));
 	TEST_EXPECT(fixed_by(FindingFix::UnusedVariable) == Tokens({ "style.unused" }));
+	// S25: an empty <mission>.til hiding the terrain's tiles: Delete it.
+	TEST_EXPECT(fixed_by(FindingFix::DeleteFile) == Tokens({ "til.empty" }));
 	TEST_EXPECT(fixed_by(FindingFix::FallbackRow) == Tokens({ "catalog.first_row" }));
 	// A finished normal map a normal-map slot's row loads as a diffuse: its row given type 4.
 	TEST_EXPECT(fixed_by(FindingFix::NormalRowType) == Tokens({ "texture.normal_slot_loader" }));
@@ -307,7 +310,7 @@ static int test_columns() {
 	                     "face_animation.ignored_input", "font.ignored_input", "mission.event_order",
 	                     "mission.rewrite_differs", "music_bank.ignored_input", "script.line_ending",
 	                     "shader.form", "sound_bank.ignored_input", "strings.regrouped", "style.line_ending",
-	                     "terrain.ignored_input" }));
+	                     "terrain.ignored_input", "til.ignored_input" }));
 	const std::map<std::string, std::string> rewrites = {
 		{ "animation_map.ignored_input", "without the input the game ignores" },
 		{ "dialog_bank.ignored_input", "without the input the game ignores" },
@@ -323,6 +326,7 @@ static int test_columns() {
 		{ "strings.regrouped", "with its strings grouped by section the way the game reads them" },
 		{ "style.line_ending", "with every line ending CR LF" },
 		{ "terrain.ignored_input", "with each line as the game reads it" },
+		{ "til.ignored_input", "without the input the game ignores" },
 	};
 	for (const auto &[token, does] : rewrites) {
 		const FindingCodeRow *row = finding_row(token);
@@ -338,7 +342,7 @@ static int test_columns() {
 	                     "mission.unserializable",
 	                     "music_bank.invalid_input", "music_script.invalid_input", "music_script.unserializable", "sound_bank.invalid_input",
 	                     "sound_bank.unserializable", "sound_profiles.unserializable", "strings.invalid_input",
-	                     "terrain.invalid_input" }));
+	                     "terrain.invalid_input", "til.invalid_input" }));
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.place == FindingPlace::File; }) ==
 	            Tokens({ "asset.name.duplicate", "asset.name.empty", "asset.name.too_long", "build.archive_in_project",
 	                     "build.expansion.mission_twice", "build.expansion.mission_untitled", "build.expansion.root_only",
@@ -366,7 +370,8 @@ static int test_columns() {
 	                     "font.glyph_height", "font.glyph_outside", "hudfx.name_runs", "hudfx.never_read",
 	                     "hudfx.no_model", "hudfx.power_unseen",
 	                     "menu.variable_number", "mission.event_missing",
-	                     "mission.group_range", "mission.invalid_input", "mission.names_foreign", "mission.names_outside",
+	                     "mission.group_range", "mission.invalid_input", "mission.names_foreign", "mission.names_locked",
+	                     "mission.names_outside",
 	                     "mission.names_refused", "mission.names_unmatched", "mission.names_unwritten", "mission.path_rebuilt",
 	                     "model.frame_missing", "model.light_part", "model.register_missing",
 	                     "music_bank.stream_silent",
@@ -380,7 +385,9 @@ static int test_columns() {
 	                     "style.directive_form", "style.directive_tail", "style.if_without_argument",
 	                     "style.invalid_name_char", "style.missing_value_delimiter", "style.nul_byte", "style.stops",
 	                     "style.value_is_directive", "terrain.foliage_inert", "terrain.invalid_input", "terrain.no_width",
-	                     "texture.tga_unfilled" }));
+	                     "terrain_heights.bake_refused", "terrain_heights.multiplayer", "terrain_heights.over_rasterizer", "terrain_heights.steep_block",
+	                     "terrain_heights.unread", "texture.tga_unfilled", "til.empty", "til.ignored_input", "til.index_past_atlas",
+	                     "til.invalid_input", "til.layer_order", "til.med_cap", "til.unread" }));
 	TEST_EXPECT(finding_row("model.light_no_registers") && finding_row("model.light_no_registers")->gates_build &&
 	            finding_row("style.hangs")->gates_build && finding_row("style.line_ending")->gates_build);
 	// A ConfigFile past its reader's pool gates, the game's own failure, which its row says and cites: the reader

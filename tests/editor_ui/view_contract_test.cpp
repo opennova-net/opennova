@@ -49,6 +49,7 @@
 #include <editor/ui/text_view.h>
 #include <formats/rtxt/rtxt.h>
 #include <formats/tga/tga.h>
+#include <formats/til/til_io.h>
 #include "../editor/pool_document.h"
 #include "editor_ui_test_support.h"
 
@@ -87,6 +88,16 @@ std::vector<uint8_t> minted_tga() {
 	std::vector<uint8_t> out;
 	std::string error;
 	opennova::tga::tga_write_rgba32(rgba.data(), 4, 4, out, error);
+	return out;
+}
+
+// A tile placement of two tiles as our writer mints it.
+std::vector<uint8_t> minted_til() {
+	opennova::TilFile file;
+	file.entries = {opennova::make_til_entry(16 << 16, -(32 << 16), 7, 0x05, 0), opennova::make_til_entry(0, 0, 19, 0, 1)};
+	std::vector<uint8_t> out;
+	std::string why;
+	opennova::save_til(file, out, why);
 	return out;
 }
 
@@ -153,8 +164,12 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        // The terrain (DI-30): its row, its grid rows and its foliage definitions as a tree, the import that
 	        // makes it and the missions that run on it heading the Inspector.
 	        {AssetKind::Terrain, "Tmap.trn", file("terrain/tmap/Tmap.trn")},
+	        // The terrain's heights (S25): their file page.
+	        {AssetKind::TerrainPolyData, "Tmap.cpt", file("terrain/tmap/Tmap.cpt")},
 	        // The dialog bank (DI-32): its dialogs and their lines as a tree, a dialog's Play heading the Inspector.
 	        {AssetKind::DialogBank, "synth_bank.dbf", file("dbf/synth_bank.dbf")},
+	        // A tile placement (S25 B1): its tiles as a tree, in draw order.
+	        {AssetKind::TileInfo, "m.til", minted_til()},
 	};
 }
 
@@ -206,8 +221,9 @@ void draw_frames(TestWorkspace &workspace, DocumentView &view, const DocumentBas
 // items, a stylesheet's variables rather than its comments): what its view shows first; a text's
 // first line that is not blank.
 std::string first_title(const DocumentBase &document) {
-	// A file held whole (S18 a texture, S23 a wave): its file's name, which heads its facts.
-	if (document.holds_bytes()) return document.path().substr(document.path().find_last_of('/') + 1);
+	// A file held whole (S18 a texture, S23 a wave) or as planes (S25 a terrain's heights): its file's name, which
+	// heads its facts.
+	if (document.holds_bytes() || document.as_raster()) return document.path().substr(document.path().find_last_of('/') + 1);
 	if (const TextDocument *text = text_of(document)) {
 		for (size_t line = 1; line <= text->line_count(); ++line)
 			if (text->line(line).find_first_not_of(" \t") != std::string_view::npos) return std::string(text->line(line));

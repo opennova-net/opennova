@@ -70,7 +70,7 @@ bool MissionViewport::follow_shots_(const ViewportInput &input, const Document &
 	follow_ground_(view);
 	uint64_t key = io::kFnv1a64Offset;
 	key = mix(key, scene_.serial());
-	key = mix(key, uint64_t(terrain_ground_.reads()));
+	key = mix(key, terrain_ground_.revision());
 	key = mix(key, bounds_graph_);
 	if (!gesture_open_ && (key != shots_key_ || shots_.files_moved())) {
 		MissionShotsSetup setup;

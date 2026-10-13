@@ -66,6 +66,8 @@ namespace opennova::editor {
 // codes it compares; Foliage_GenerateInstances_0 @ 0x6002DB..0x60030A, the colour overwritten].
 
 inline constexpr int kTerrainImporterVersion = 1;
+// The terrain importer's id (the import record's `importer`).
+inline constexpr const char *kTerrainImporterId = "terrain";
 inline constexpr const char *kTerrainSetExtension = ".tset";
 // The longest stem a terrain set may have: its longest output, `<stem>_dt.tga`, fits an archive's 16
 // characters.
@@ -78,6 +80,9 @@ struct TerrainSet {
 	std::string tiles;
 	std::string surface;
 	std::string foliagemap;
+	// S25 B4: the detail blend map's image, its RGBA the detail layers' weights (`<stem>_d1.tga`, 32-bit; none: the
+	// first layer everywhere, as before).
+	std::string blendmap;
 	std::vector<FoliageDef> foliage; // the .trn's foliage blocks, in their order (their slots)
 };
 
@@ -88,6 +93,11 @@ struct TerrainSet {
 bool parse_terrain_set(const std::vector<uint8_t> &bytes, TerrainSet &out, std::string &why);
 // The set as a file (CRLF lines, a comment heading it).
 std::vector<uint8_t> write_terrain_set(const TerrainSet &set);
+// The set's own text with one image key set to `value` (S25, Add a map): the key's line, outside the foliage blocks,
+// rewritten to `key value` with its comment kept, else a new line after the last image key's (the file's line ending);
+// every other byte as it was, comments, blank lines and foliage blocks included.
+std::vector<uint8_t> terrain_set_with_key(const std::vector<uint8_t> &bytes, const std::string &key,
+                                          const std::string &value);
 
 // Foliage definitions on one line, as the new_terrain request takes them: each the foliage block's keys and
 // their values in a row (`graphic onfern1.3di match 253 color_upper 2`), several split by `|`. False, with

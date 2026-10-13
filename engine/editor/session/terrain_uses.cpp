@@ -79,7 +79,8 @@ void read_import(const SessionView &view, const AssetEntry &entry, TerrainImport
 	                                {"detail", &set.detail},
 	                                {"tiles", &set.tiles},
 	                                {"surface", &set.surface},
-	                                {"foliagemap", &set.foliagemap}}) {
+	                                {"foliagemap", &set.foliagemap},
+	                                {"blendmap", &set.blendmap}}) {
 		if (name->empty()) continue;
 		TerrainSetImage image;
 		image.key = key;
@@ -92,6 +93,27 @@ void read_import(const SessionView &view, const AssetEntry &entry, TerrainImport
 }
 
 } // namespace
+
+bool heightmap_import_of(const SessionView &view, const std::string &image, HeightmapImport &out) {
+	out = HeightmapImport();
+	if (!view.project.open || !view.project.scan || image.empty()) return false;
+	for (const AssetEntry &entry : view.project.scan->entries) {
+		if (entry.kind != AssetKind::TerrainPolyData || entry.imported_from.empty()) continue;
+		TerrainImport import;
+		read_import(view, entry, import);
+		bool named = false;
+		for (const TerrainSetImage &each : import.images)
+			named = named || (each.key == "heightmap" && strutil::iequals(each.file, image));
+		if (!named) continue;
+		out.source = import.source;
+		out.cpt = entry.relative_path;
+		for (const TerrainImportOption &option : import.options)
+			if (option.key == "top")
+				if (const std::optional<double> top = strutil::parse_double(option.value); top && *top > 0.0) out.top = *top;
+		return true;
+	}
+	return false;
+}
 
 TerrainUses terrain_uses(const SessionView &view, const std::string &path) {
 	TerrainUses uses;

@@ -15,6 +15,7 @@
 #include <editor/model/edit.h>
 #include <editor/session/editor_request.h>
 #include <editor/session/selection.h>
+#include <editor/session/view/documents_view.h>
 
 namespace opennova::editor {
 
@@ -118,18 +119,28 @@ public:
 	void copy(const EditorRequest &request);
 	void paste(const EditorRequest &request);
 	void duplicate(const EditorRequest &request);
-	// Undo and Redo.
+	// Undo and Redo (S25: across documents, document_set_scope.cpp): in the view of the document at `path` ("" the
+	// active one), the step made last among it and the files its terrain tools edited (the highest serial, StepMark),
+	// and with it the top step of every other document that carries the same link (a stroke, its bake landing and the
+	// entities that followed it: one Ctrl+Z); a linked document edited since keeps its later edit and is named, a
+	// closed one is skipped and named. Redo the same, the lowest serial first. Never refused for what it leaves.
 	void undo_redo(const EditorRequest &request);
-	void end_edit(const std::string &path);
+	// The coalesced group, or the gesture, of the document at `path` ends ("" the active one); `gesture` (S25): every
+	// open gesture carrying that token ends too, in whatever document its batches changed; `cancel`: it ends dropping
+	// its step in each (DocumentBase::cancel_gesture), the documents as it found them.
+	void end_edit(const std::string &path, uint64_t gesture = 0, bool cancel = false);
 	// Save: `over` writes over a file changed outside the editor (ADR 0046 DI-01: document.conflict's Keep my
-	// edits), what the other program saved there lost.
+	// edits), what the other program saved there lost. S25: the document's scope with it (the terrain files its view
+	// edited and the documents a step of theirs links, the missions that followed a stroke: save_scope), one status
+	// line naming them.
 	void save(const std::string &path, bool over = false);
 	void save_all();
 
 	// Writes each open document at `paths` that has unsaved edits (`rewrite`: an explicit Save,
 	// which also writes one with none whose file holds other bytes than it would write), past a
 	// failure, then one refresh; false when one could not be written. `over`: as save's.
-	bool save_documents(const std::vector<std::string> &paths, bool rewrite, bool over = false);
+	bool save_documents(const std::vector<std::string> &paths, bool rewrite, const std::string &over = std::string(),
+	                    bool name_files = false);
 	// What a document's last save said beyond writing, an Output line each; how many lines.
 	size_t note_save(const DocumentBase &document);
 	// EndEdit on every open document: the coalesced groups and the gestures end, and the validation
@@ -150,6 +161,35 @@ public:
 	void discard_all();
 	// The project closes: every document goes, with the selections they kept and their files' states.
 	void close_all();
+
+	// --- S25: the terrain tools' documents (document_set_scope.cpp) -------------------------------------------
+
+	// The document at `path` opened for an edit another view makes (a terrain stroke's file, a mission that follows the
+	// ground), the active document kept: a tab with its dirty dot, a status line and an Output line naming `why`. The
+	// open document (one open already as it is), null where it does not open (the refusal reported).
+	DocumentBase *open_quietly(const std::string &path, const std::string &why);
+	// The document at `edited` was edited from the view of the document at `view` (a terrain stroke, a tile tool): it
+	// joins the view's undo, save and close scope.
+	void note_edited_from(const std::string &view, const std::string &edited);
+	// The open documents of a view's scope: the view's own first, then those edited from it, in the order noted.
+	std::vector<std::string> scope_of(const std::string &view) const;
+	// What a Save in a view writes: its document, the documents of its scope with unsaved edits, and those a gesture
+	// of theirs changed with unsaved edits too (the missions that followed a stroke).
+	std::vector<std::string> save_scope(const std::string &view) const;
+	// What a Close of the document at `path` lists beside it: the documents of its scope with unsaved edits.
+	std::vector<std::string> scope_unsaved(const std::string &path) const;
+	// A batch the terrain tools planned applied to `document` as edit_record applies one (refused as it refuses one:
+	// an import's output, a blocked document), nothing selected, the document noted as edited from `view`; `words`
+	// name its step (what Undo says). False when refused.
+	bool apply_terrain_edits(DocumentBase &document, const std::vector<Edit> &edits, const std::string &view,
+	                         const std::string &words);
+	// A heights bake's landing (session/terrain_sculpt, S25): its edit applied to the heights document as part of the
+	// stroke's step it bakes (it amends that step, keeping its words), or a step of its own named `alone_words` where
+	// that step cannot take it; the status line kept; false where the document refuses it.
+	bool apply_bake_landing(DocumentBase &document, const std::vector<Edit> &edits, const std::string &alone_words);
+	// The documents the batches of the gesture `gesture` changed, in the order they did (S25: a link's), open as the
+	// instances it changed (`gone`: those closed or read again since, which hold none of its steps).
+	std::vector<std::string> linked(uint64_t gesture, std::vector<std::string> *gone = nullptr) const;
 
 	// The one position rule (S13 A2): where a record placed right after `record` goes, as Paste
 	// after the selection and Duplicate place it. A nested record: its owner's collection
@@ -206,6 +246,12 @@ private:
 	void end_gesture_in(const std::string &path, bool validate);
 	// Every open gesture ends (every edit group ended, the project closed).
 	void end_gestures(bool validate);
+	// S25 (document_set_scope.cpp): what Undo or Redo in the view of `view` takes next; the view's undo_next and
+	// redo_next made again for the active document; a document closed or discarded let go of the scopes (the clean
+	// files opened quietly for its view closed with it unless another view's scope holds them) and of the links.
+	DocumentsView::StepNext next_step(const std::string &view, bool undo) const;
+	void update_step_next();
+	void release_scope(const std::string &path);
 
 	// A mission's records of an item take its catalog row (D-MIS-10): the AI class a save writes handed to the
 	// document, before an edit and a save (MissionDocument::set_item_classes); the rows read through `rows_`.
@@ -217,6 +263,9 @@ private:
 	// document says to, `written` taking its path (write_companion: never failing the document's save).
 	std::string companion_path(AssetKind kind, const std::string &relative) const;
 	void read_companion(DocumentBase &document, AssetKind kind, const std::string &relative) const;
+	// A terrain's heightmap image (S25 A2b) handed its import before it reads: the white its record's top holds, which
+	// it decodes the image by, and the .cpt the import makes, which it stands in for once the editor baked it.
+	void hand_heights_import(DocumentBase &document, AssetKind kind, const std::string &relative) const;
 	void write_companion(DocumentBase &document, std::vector<std::string> &written);
 	// A mission's base heights for its .mis, handed to the document before the write (MissionDocument::
 	// set_base_heights): each entity's, in the writer's order, the terrain's height under it as the original editor
@@ -244,6 +293,19 @@ private:
 	std::map<std::string, Diagnostic> stale_;
 	std::set<std::string> conflicts_;
 	bool last_edit_ok_ = false;
+	// S25: the documents each view's terrain tools edited (by the view document's path), the documents each gesture's
+	// batches changed (by its token: its link), and the documents opened quietly for a view and not shown since.
+	std::map<std::string, std::vector<std::string>> edited_from_;
+	// A link's documents keep the instance it changed: one closed or read again since holds none of its steps.
+	struct LinkedDocument {
+		std::string path;
+		uint64_t identity = 0;
+	};
+	std::map<uint64_t, std::vector<LinkedDocument>> links_;
+	// The documents each link's undo took a step back in, together: its redo makes them again together, and is refused
+	// where one of them no longer holds the step (an edit after the undo dropped its redo).
+	std::map<uint64_t, std::vector<LinkedDocument>> undone_;
+	std::set<std::string> quiet_;
 };
 
 } // namespace opennova::editor

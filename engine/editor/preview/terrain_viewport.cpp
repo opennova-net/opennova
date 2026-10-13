@@ -9,11 +9,15 @@
 #include <editor/documents/terrain_document.h>
 #include <editor/preview/mission_camera.h>
 #include <editor/preview/mission_handle_edit.h>
+#include <editor/session/terrain_family.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/orbit_canvas.h>
+#include <editor/preview/terrain_canvas.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <editor/preview/terrain_brush_spaces.h>
+#include <editor/preview/terrain_view_commands.h>
 #include <formats/env/env.h>
 #include <formats/env/env_weather.h>
 #include <runtime/environment/environment_state.h>
@@ -252,9 +256,9 @@ bool TerrainViewport::follow_overlay_(const SessionView &view) {
 		return true;
 	}
 	follow_ground_(view);
-	if (overlay_.kind == kind && overlay_reads_ == ground_.reads()) return false;
+	if (overlay_.kind == kind && overlay_ground_ == ground_.revision()) return false;
 	overlay_ = mission_ground_overlay(ground_, kind);
-	overlay_reads_ = ground_.reads();
+	overlay_ground_ = ground_.revision();
 	++overlay_serial_;
 	return true;
 }
@@ -348,7 +352,32 @@ ViewportAction TerrainViewport::follow_(const ViewportInput &input, PreviewClock
 	terrain_identity_ = terrain->identity();
 	terrain_load_ = terrain->load_generation();
 	terrain_revision_ = terrain->revision();
+	// S25: a stroke in a terrain file the picture or its ground reads: the ground patched in place and the files' new
+	// stamps taken (no read of them again whole per dab, no Rebuild), the device's patches kept; one that cannot be
+	// patched is read again below as before, its Rebuild held to the stroke's end. A stroke's end over a picture its
+	// device did not patch makes it again.
+	const bool stroking = gesture_held_(input) != 0;
+	std::vector<std::string> patched;
+	const uint64_t ground_before = ground_.revision();
+	if (stroke_.follow(view, *terrain, stroking, ground_, *view.findings.assets, patched) && !patched.empty())
+		picture_.restamp(*view.findings.assets, patched);
+	// S25: an overlay current before the stroke's patches takes their regions of its map in place.
+	if (!overlay_.empty() && overlay_ground_ == ground_before && ground_.revision() != ground_before) {
+		const std::vector<MissionOverlayRect> rects = mission_overlay_patch_rects(ground_, overlay_.kind, stroke_.patches());
+		if (rects.empty() || mission_ground_overlay_patch(ground_, overlay_, rects)) {
+			overlay_ground_ = ground_.revision();
+			if (!rects.empty()) ++overlay_serial_;
+		}
+	}
+	// The heights the follow patched (a stroke's samples, a bake's landing, an undo or redo of them), queued for the
+	// device with the tiles a landing replaced: an Update, the device patching its terrain (the mission view's leg).
+	const bool sculpted = take_heights_(view);
 	follow_ground_(view);
+	// S25 (the maps and the tiles): the colour, blend and surface maps the follow patched and the placed tiles' move,
+	// queued for the device with their files' stamps, the picture taking them: an Update.
+	std::vector<std::string> mapped;
+	const bool painted = maps_.take(view, *terrain, stroke_.patches(), tiles_read_(), ground_, mapped);
+	if (!mapped.empty()) picture_.restamp(*view.findings.assets, mapped);
 	const bool overlaid = follow_overlay_(view);
 	// Framed once the ground is read; framed again where the fog it was framed in moved (the project's references
 	// read after the first follow name the mission and its environment) while no one moved the camera since.
@@ -366,10 +395,17 @@ ViewportAction TerrainViewport::follow_(const ViewportInput &input, PreviewClock
 	const uint64_t generation = view.findings.assets->generation();
 	const PreviewFollow::Key key{ 0, layout_serial_ };
 	const bool moved = input.change != ChangeClass::None || edited;
+	// The stroke ended over a picture its device did not patch, or the device could not take a patch: made again now.
+	if (!stroking && (stroke_.patched() || maps_.stale() || heights_stale_)) {
+		made_(view, *terrain);
+		options_moved_ = false;
+		missing_.clear();
+		return picture_.built(FileStamps());
+	}
 	switch (picture_.follow(key, moved, files, generation)) {
 	case PreviewFollow::Found::Same:
 		shown(*terrain);
-		if (options_moved_ || overlaid) {
+		if (options_moved_ || overlaid || painted || sculpted) {
 			options_moved_ = false;
 			return ViewportAction::Update;
 		}
@@ -377,14 +413,54 @@ ViewportAction TerrainViewport::follow_(const ViewportInput &input, PreviewClock
 	case PreviewFollow::Found::Files:
 		options_moved_ = false;
 		missing_.clear();
+		made_(view, *terrain);
 		return picture_.built(FileStamps());
 	case PreviewFollow::Found::Anew: break;
 	}
 	picture_.show(key, generation);
 	shown(*terrain);
+	made_(view, *terrain);
 	options_moved_ = false;
 	missing_.clear();
 	return picture_.built(FileStamps());
+}
+
+void TerrainViewport::made_(const SessionView &view, const DocumentBase &document) {
+	stroke_.made();
+	maps_.built(view, tiles_read_());
+	heights_built_(view, document);
+}
+
+bool TerrainViewport::take_heights_(const SessionView &view) {
+	bool any = false;
+	for (const TerrainPatch &patch : stroke_.patches().patches) {
+		if (patch.plane != TerrainPlane::Heights) continue;
+		const DocumentBase *open = nullptr;
+		for (const auto &each : view.documents.open)
+			if (each && each->path() == patch.path) open = each.get();
+		HeightsDevicePatch device;
+		if (!open || !heights_tiles_.take(patch, *open, device)) {
+			// A heights document the picture did not show as it is (read again): the picture made again from its file.
+			heights_stale_ = true;
+			continue;
+		}
+		device.serial = ++heights_serial_;
+		heights_patches_.push_back(std::move(device));
+		any = true;
+	}
+	return any;
+}
+
+void TerrainViewport::heights_built_(const SessionView &view, const DocumentBase &document) {
+	const DocumentBase *open = nullptr;
+	TerrainFamily family;
+	if (resolve_terrain_family(view, document, family) && !family.plane(TerrainPlane::Heights).path.empty())
+		for (const auto &each : view.documents.open)
+			if (each && each->path() == family.plane(TerrainPlane::Heights).path) open = each.get();
+	heights_tiles_.shown(open);
+	heights_patches_.clear();
+	heights_built_serial_ = heights_serial_;
+	heights_stale_ = false;
 }
 
 bool TerrainViewport::takes_(const std::string &member) const {
@@ -416,7 +492,18 @@ void TerrainViewport::apply_(const io::JsonValue &json, PreviewClock &) {
 
 bool TerrainViewport::report_(const ViewportDeviceReport &report) {
 	picture_.read(report.files);
+	// The maps' and the tiles' patches the device took (S25); one it could not take makes the picture again.
+	maps_.taken(report.maps_taken, report.maps_refused);
+	// The heights patches the device took.
+	heights_patches_.erase(std::remove_if(heights_patches_.begin(), heights_patches_.end(),
+			[&](const HeightsDevicePatch &patch) { return patch.serial <= report.heights_taken; }),
+			heights_patches_.end());
 	bool moved = surface_ != report.surface;
+	// One it could not take: the picture made again at the next follow.
+	if (report.heights_failed) {
+		heights_stale_ = true;
+		moved = true;
+	}
 	surface_ = report.surface;
 	drawn_ = report.drawn;
 	for (const std::string &name : report.missing)
@@ -436,7 +523,7 @@ std::unique_ptr<CanvasHalf> TerrainViewport::make_canvas() const {
 		return static_cast<const TerrainViewport &>(viewport).framed(width, height);
 	};
 	hooks.change = terrain_camera_change;
-	return std::make_unique<OrbitCanvas>(hooks);
+	return std::make_unique<TerrainCanvas>(hooks); // S25: the orbit camera, and the terrain brush while it is live
 }
 
 MissionGroundFacts TerrainViewport::ground_under(const ViewportContext &context, float x, float y) const {
@@ -476,9 +563,39 @@ bool TerrainViewport::handle_point(const ViewportContext &, NodeId, const std::s
 	return false;
 }
 
-bool TerrainViewport::drag(const ViewportContext &, const ViewportDrag &, CanvasRequests &, std::string &error) const {
-	error = "Nothing is dragged in a terrain's picture: its camera is set with set_viewport.";
+bool TerrainViewport::drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
+		std::string &error) const {
+	// S25: the terrain tools' (terrain_view_commands.h).
+	const CameraBrushSpace terrain_space(context, camera_, &followed_ground(context.input.view));
+	const TerrainViewContext terrain{context, terrain_space, path(), ViewportKind::Terrain, &ground_};
+	bool terrain_handled = false;
+	const bool terrain_done = terrain_view_drag(terrain, drag, out, error, terrain_handled);
+	if (terrain_handled) return terrain_done;
+	error = "Nothing but the terrain brush (handle \"brush\") and a tile (handle \"tile\") is dragged in a terrain's "
+	        "picture: its camera is set with set_viewport.";
 	return false;
+}
+
+bool TerrainViewport::drop(const ViewportContext &context, const ViewportDrop &drop, CanvasRequests &out,
+		std::string &error) const {
+	// S25: the terrain tools' (terrain_view_commands.h).
+	const CameraBrushSpace terrain_space(context, camera_, &followed_ground(context.input.view));
+	const TerrainViewContext terrain{context, terrain_space, path(), ViewportKind::Terrain, &ground_};
+	bool terrain_handled = false;
+	const bool terrain_done = terrain_view_drop(terrain, drop, out, error, terrain_handled);
+	if (terrain_handled) return terrain_done;
+	return ViewportModel::drop(context, drop, out, error);
+}
+
+bool TerrainViewport::command_of(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
+		std::string &error) const {
+	// S25: the terrain tools' (terrain_view_commands.h).
+	const CameraBrushSpace terrain_space(context, camera_, &followed_ground(context.input.view));
+	const TerrainViewContext terrain{context, terrain_space, path(), ViewportKind::Terrain, &ground_};
+	bool terrain_handled = false;
+	const bool terrain_done = terrain_view_command(terrain, command, out, error, terrain_handled);
+	if (terrain_handled) return terrain_done;
+	return ViewportModel::command_of(context, command, out, error);
 }
 
 bool TerrainViewport::command(const ViewportContext &context, const std::string &name, const std::vector<NodeId> &,

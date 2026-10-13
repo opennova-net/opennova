@@ -1531,7 +1531,8 @@ void test_files_window() {
 	CHECK(modal_open("New file") && ui.drain().empty(), "a terrain's name asked first");
 	text = logged_frame(ui);
 	CHECK(in_order(text, {"New terrain from images", "Heightmap", "Colour map", "Detail", "Tile set", "Surface map",
-	                      "Foliage map", "Foliage (graphic", "Height of white", "Water level", "Layout", "Create"}),
+	                      "Foliage map", "Detail blend map", "Foliage (graphic", "Height of white", "Water level", "Layout",
+	                      "Create"}),
 	      "the terrain's images and numbers asked");
 	type_into(ui, item_id(prompt, {"Name"}), "isle");
 	ui.activate(item_id(prompt, {"Create"}));
@@ -1540,9 +1541,9 @@ void test_files_window() {
 	type_into(ui, item_id(pushed(prompt, 1), {"Colour map (1024 x 1024 image)"}), "C:/art/c.png");
 	type_into(ui, item_id(pushed(prompt, 4), {"Surface map (optional, square 256..1024)"}), "C:/art/m.png");
 	type_into(ui, item_id(pushed(prompt, 5), {"Foliage map (optional, square, indexed or grey: its codes)"}), "C:/art/f.png");
-	type_into(ui, item_id(pushed(prompt, 6), {"Foliage (graphic <model> match <codes>, | between)"}),
+	type_into(ui, item_id(pushed(prompt, 7), {"Foliage (graphic <model> match <codes>, | between)"}),
 	          "graphic grass.3di match 253");
-	type_into(ui, item_id(pushed(prompt, 8), {"Water level (world units, 0 none)"}), "12");
+	type_into(ui, item_id(pushed(prompt, 9), {"Water level (world units, 0 none)"}), "12");
 	ui.frames(2);
 	ui.activate(item_id(prompt, {"Create"}));
 	requests = ui.drain();

@@ -38,6 +38,7 @@
 #include <runtime/mission/mission_sidecars.h>
 #include <runtime/mission/placement_traits.h>
 #include <godot_cpp/variant/packed_vector4_array.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
 
 #include "env/mission_environment_overrides.h"
 #include "lights/effect_light_report.h"
@@ -405,6 +406,10 @@ void MissionViewportApplier::plan_(Build &build, const MissionViewport &mission,
 		// The .trn parsed as the load begins (its units planned then): one unit per file here, as many
 		// as the load will have; a terrain the project lacks is a note, the picture standing without.
 		layer_missing_[kTerrain].clear();
+		// The heights it reads hold every sculpt patch the viewport made so far (S25), and its maps and tiles every
+		// paint's and tile edit's.
+		terrain_patches_.built(mission.heights_built_serial());
+		terrain_patches_.maps_built(mission.maps_built_serial());
 		loading_.instantiate();
 		loading_->set_mission_tile_set(opennova::to_gd(header.tile_set));
 		loading_->set_mission_environment(opennova::to_gd(terrain_key.environment));
@@ -1024,7 +1029,27 @@ opennova::editor::OperationProgress MissionViewportApplier::progress() const {
 
 void MissionViewportApplier::update(const opennova::editor::ViewportModel &viewport, const opennova::editor::PreviewClock &) {
 	picture_moved_();
+	// S25 (the heights): a stroke's regions and a landing's tiles into the terrain built, never building it again;
+	// taken once the terrain is built where a build runs.
+	if (terrain_built_ && !build_ && terrain_data_.is_valid() && !terrain_->is_building() &&
+			!terrain_patches_.apply(mission_of(viewport).heights_patches(), **terrain_data_, *terrain_))
+		UtilityFunctions::push_warning("The mission view's terrain did not take a sculpt's patch: it builds again.");
+	// S25 (the maps and the tiles): a paint's regions and the placed tiles into the terrain built, in place, each
+	// file's read taking the stamp it was patched at (so its move does not build the terrain again); one not taken is
+	// reported and the picture made again.
+	if (terrain_built_ && !build_ && terrain_data_.is_valid() && !terrain_->is_building()) {
+		terrain_patches_.apply_maps(mission_of(viewport).maps_patches(), *terrain_, foliage_data_.is_valid() ? foliage_ : nullptr,
+				[this](const std::string &name, uint64_t stamp) { took_patched_(name, stamp); });
+		// The foliage keeps candidates off the tiles the terrain draws (a new override where it held none).
+		if (foliage_data_.is_valid() && foliage_->get_tile_info() != terrain_->get_tile_info_override())
+			foliage_->set_tile_info(terrain_->get_tile_info_override());
+	}
 	apply_state_(viewport);
+}
+
+void MissionViewportApplier::took_patched_(const std::string &name, uint64_t stamp) {
+	if (stamped_) stamped_->restamp(name, stamp);
+	for (opennova::FileStamps &files : layer_files_) files.restamp(name, stamp);
 }
 
 namespace {
@@ -1268,6 +1293,10 @@ void MissionViewportApplier::apply(const opennova::editor::ViewportModel &viewpo
 				report.missing.push_back(name);
 	}
 	report.drawn = drawn_json_();
+	report.heights_taken = terrain_patches_.taken();
+	report.maps_taken = terrain_patches_.maps_taken();
+	report.maps_refused = terrain_patches_.take_maps_refused();
+	report.heights_failed = terrain_patches_.take_failure();
 	if (build_) return;
 	apply_state_(viewport);
 	// A moved entity's terrain shadow follows once its gesture ended (not each sample: the terrain
@@ -1348,6 +1377,8 @@ opennova::io::JsonValue MissionViewportApplier::drawn_json_() const {
 void MissionViewportApplier::tick(const opennova::editor::ViewportModel &viewport, const opennova::editor::PreviewClock &clock) {
 	// The models' part animations on the preview clock.
 	clock_->sample(int64_t(clock.ms()), ++frame_);
+	// A paint's colour map, once its strokes pause, into the texture the foliage's tint reads (S25).
+	if (terrain_built_ && terrain_ != nullptr) terrain_patches_.settle_colour(*terrain_, Time::get_singleton()->get_ticks_msec());
 	clock_ms_ = int64_t(clock.ms());
 	// The frame's start (the Shell ticks before it arbitrates): no mirror pass unless this frame
 	// presents the picture.
