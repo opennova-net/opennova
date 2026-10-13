@@ -21,7 +21,6 @@ struct AnimSlotFamily {
 
 // The family of slot `slot` (0..251); -1 past the table (a key naming no slot).
 int animation_slot_family(int slot);
-size_t animation_slot_family_count();
 const AnimSlotFamily &animation_slot_family_row(int family);
 // The heading of the rows whose key names no slot: the game skips them.
 const AnimSlotFamily &animation_slot_unknown_family();

@@ -576,15 +576,6 @@ RenamePlan plan_split(const ProjectPaths &paths, const AssetScan &scan, const As
 	return plan;
 }
 
-bool apply_rename(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
-                  const AssetGraph &graph, const RenamePlan &plan, std::vector<Diagnostic> &findings) {
-	RenameTransaction transaction(paths, project, scan, graph, plan);
-	while (!transaction.step()) {
-	}
-	findings.insert(findings.end(), transaction.findings().begin(), transaction.findings().end());
-	return transaction.ok();
-}
-
 SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGraph &graph, const GraphSymbol &symbol,
                                             const std::string &typed) {
 	SymbolRenamePlan plan;

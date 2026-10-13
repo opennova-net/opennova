@@ -248,15 +248,6 @@ const char *mission_name_field(NodeKind kind) {
 	}
 }
 
-size_t mission_name_width(NodeKind kind) {
-	switch (static_cast<K>(kind)) {
-	case K::Event: return mission::kMisEventNameChars;
-	case K::Area:
-	case K::WaypointPath: return mission::kMisDescriptionChars;
-	default: return 0;
-	}
-}
-
 bool is_mission_kind(AssetKind kind) { return asset_kind_row(kind).document == DocumentTypeId::Mission; }
 
 int32_t next_free_ssn(const std::vector<std::shared_ptr<const Node>> &rows) {

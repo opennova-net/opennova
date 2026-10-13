@@ -103,9 +103,6 @@ std::string *mission_row_name(Node &row);
 // The field a kind's name is ("name" an event's, "description" a path's and an area's), null for a kind
 // with none.
 const char *mission_name_field(NodeKind kind);
-// The most bytes a kind's name holds (kMisEventNameChars an event's, kMisDescriptionChars a path's and an
-// area's, formats/mission/mission_mis.h: the original editor's dialogs), 0 for a kind with none.
-size_t mission_name_width(NodeKind kind);
 
 // The AI class each item's records are written with, by item id (MissionDocument::set_item_classes).
 using MissionItemClasses = std::unordered_map<int64_t, std::string>;
