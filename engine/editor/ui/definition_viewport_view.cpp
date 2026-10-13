@@ -94,10 +94,10 @@ void target_options(DefinitionFireOptions &fire, ui_kit::WrapRow &row) {
 	                "rounds fly on until they age out.");
 	if (fire.target.shown) {
 		const float width = ImGui::GetFontSize() * 7.0f;
-		row.next(ui_kit::field_width(width, "##surface"));
+		row.next(ui_kit::field_width(width, "##target_surface"));
 		ImGui::SetNextItemWidth(width);
 		const int tag = std::clamp(fire.target.tag, kWeaponRangeFirstTag, world::kImpactEffectTagCount - 1);
-		if (ImGui::BeginCombo("##surface", world::kImpactEffectTagWords[tag])) {
+		if (ImGui::BeginCombo("##target_surface", world::kImpactEffectTagWords[tag])) {
 			for (int i = kWeaponRangeFirstTag; i < world::kImpactEffectTagCount; ++i)
 				if (ImGui::Selectable(world::kImpactEffectTagWords[i], i == tag)) fire.target.tag = i;
 			ImGui::EndCombo();
@@ -163,7 +163,8 @@ void weapon_row(Workspace &workspace, const DefinitionViewport &model, const Pre
 			gesture(workspace, model, held ? "release" : "hold");
 		if (ui_kit::tool(row, "Reload", ready, "The reload key: the game refuses it on a full clip or an empty reserve."))
 			gesture(workspace, model, "reload");
-		if (ui_kit::tool(row, "Scope", ready, "The scope toggle: a scoped or sighted weapon raises or lowers its sight."))
+		if (ui_kit::tool(row, "Aim", ready, "The game's scope key: a sighted weapon aims down its sights (the view model "
+		                                       "eases from pos to tpos), a scoped one raises its scope; again, lowers it."))
 			gesture(workspace, model, "scope");
 		if (ui_kit::tool(row, "Switch", ready, "The weapon put away and drawn again (SWITCHFROM, then SWITCHTO)."))
 			gesture(workspace, model, "switch");
@@ -181,9 +182,12 @@ void weapon_row(Workspace &workspace, const DefinitionViewport &model, const Pre
 		return id >= 0 && id < world::weapon_action::kCount ? world::kWeaponActionSuffixes[id] : "";
 	};
 	char line[160];
+	// The scope's ease: how far the view model stands from the hip toward the aimed view (tpos).
+	char aimed[32] = "";
+	const float fraction = range.view_frame().scope_fraction;
+	if (range.scoped() || fraction > 0.0f) std::snprintf(aimed, sizeof(aimed), "; aimed %d%%", int(fraction * 100.0f + 0.5f));
 	std::snprintf(line, sizeof(line), "%s, then %s; clip %d, reserve %d; %d shot%s%s", action(held.current_action),
-	              action(held.next_action), held.clip, held.reserve, range.shots(), range.shots() == 1 ? "" : "s",
-	              range.scoped() ? "; scoped" : "");
+	              action(held.next_action), held.clip, held.reserve, range.shots(), range.shots() == 1 ? "" : "s", aimed);
 	if (!range.ammo_alone())
 		ui_kit::clipped_text(std::string(line) + (range.ammo().empty() ? std::string() : " of " + range.ammo()));
 	if (weapon.card_up())

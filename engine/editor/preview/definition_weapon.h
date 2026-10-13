@@ -122,7 +122,12 @@ public:
 	uint64_t rig_serial() const { return rig_serial_; }
 	const FileStamps &rig_reads() const { return rig_read_; }
 	bool eye() const { return eye_; }
+	// The eye at the hip, seeing with the weapon's renderfov, or with the game's sighted or scoped field of view
+	// while the SIGHTS card is up (the frame's: 80, or the world's, over the slot's zoom).
 	const OrbitCamera &eye_camera() const { return eye_camera_; }
+	// Where the first person's gun and arms stand at the run's tick: the identity at the hip, eased toward the
+	// aimed view (tpos) while the scope is up (first_person_root over WeaponRange::viewmodel_bias).
+	const FirstPersonRoot &viewmodel_root() const { return viewmodel_root_; }
 	// The first person's SIGHTS card is up: the game draws the card, not the gun and the arms (WeaponRange::card).
 	bool card_up() const { return first_ && range_.card(); }
 
@@ -170,6 +175,9 @@ private:
 	FileStamps rig_read_;
 	bool eye_ = false;
 	OrbitCamera eye_camera_;
+	float eye_fov_ = 0.0f; // the eye's renderfov
+	int width_ = 0, height_ = 0;
+	FirstPersonRoot viewmodel_root_;
 	// The range's frame in the preview: its origin, its forward (+x), left (+y) and up (+z).
 	PreviewVec3 origin_;
 	PreviewVec3 forward_{0.0f, 0.0f, 1.0f};
