@@ -258,10 +258,17 @@ bool remove_build_dir(const fs::path &dir) {
 		kept = kept || removed || fs::exists(entry.path(), removed);
 	}
 	if (kept) return false;
+	// The directory itself may stay (a shell or a file manager has it as its working directory): then the
+	// proof goes back, so it still proves itself and a later build prunes it (S26 C11: one left empty with
+	// no proof was refused forever as "not a build directory").
+	std::string proof_text, io_error;
+	const bool read = io::read_file_text(utf8_of(proof), proof_text, io_error);
 	std::error_code removed;
 	fs::remove(proof, removed);
 	fs::remove(dir, removed);
-	return !fs::exists(dir, removed);
+	if (!fs::exists(dir, removed)) return true;
+	if (read) io::write_file_atomic(utf8_of(proof), proof_text, io_error);
+	return false;
 }
 
 void remove_staging(const std::string &dir) {
@@ -889,12 +896,9 @@ void BuildRun::settle() {
 		const std::string candidate = join_path(output_root_, staging_name(report_.build_id, attempt));
 		const fs::path staging = system_path(candidate);
 		if (fs::exists(staging, ec)) {
-			// Another project's staging (its build may be under way): its name passed by.
-			if (is_prunable_build_dir(staging) && !of_project(staging, plan_)) continue;
-			if (!is_prunable_build_dir(staging)) {
-				return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error,
-				                         "cannot stage the build: " + candidate + " exists and is not a build directory"));
-			}
+			// Another project's staging (its build may be under way), or a name that is no staging directory
+			// (never written into): passed by for the next (S26 C11: such a name failed the build).
+			if (!is_prunable_build_dir(staging) || !of_project(staging, plan_)) continue;
 			if (!remove_build_dir(staging)) continue;
 		}
 		tmp_dir = candidate;
@@ -975,9 +979,19 @@ void BuildRun::pack(uint64_t budget) {
 				std::vector<pff::PffWriteStreamEntry> entries;
 				entries.reserve(archive.entries.size());
 				for (size_t i = 0; i < archive.entries.size(); ++i) {
+					const uint64_t size = stamps_[stamp_index(archive_index_, i)].size;
+					// An archive entry's size is 32 bits: a larger file wrapped and packed its prefix as
+					// if whole (S26 C9).
+					if (size > UINT32_MAX) {
+						return fail(make_finding(CoreFinding::BuildArchive, DiagnosticSeverity::Error,
+						                         archive.file_name + ": " + archive.entries[i].logical_name +
+						                                 " is too large for an archive (" + std::to_string(size) +
+						                                 " bytes; an entry holds at most 4 GiB)",
+						                         archive.entries[i].logical_name));
+					}
 					pff::PffWriteStreamEntry e{};
 					e.name = archive.entries[i].logical_name.c_str();
-					e.size = static_cast<uint32_t>(stamps_[stamp_index(archive_index_, i)].size);
+					e.size = static_cast<uint32_t>(size);
 					e.flags = 0;
 					// Never 0: the effect loaders skip such an entry (pff::PFF_NEW_ENTRY_TIMESTAMP, D-VFS-12).
 					e.timestamp = pff::PFF_NEW_ENTRY_TIMESTAMP;
@@ -1177,9 +1191,11 @@ void BuildRun::list_built() {
 		report_.built.push_back(std::move(file));
 	}
 	for (const BuildEntry &entry : plan_.loose) {
+		// Where it landed, as an archive's name says where it is (an expansion's loose files sit under
+		// expansion/<b>/: sized by the logical name, they read 0 B; S26 C10).
 		BuiltFile file;
-		file.name = entry.logical_name;
-		file.bytes = size_of(entry.logical_name);
+		file.name = entry.build_path.empty() ? entry.logical_name : entry.build_path;
+		file.bytes = size_of(file.name);
 		report_.built.push_back(std::move(file));
 	}
 }

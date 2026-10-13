@@ -641,6 +641,10 @@ static int test_expansion_layout() {
 	TEST_EXPECT(fs::is_regular_file(dir / "expansion/jxm/jxmL.pff") && fs::is_regular_file(dir / "expansion/jxm/jxm.pff"));
 	TEST_EXPECT(fs::is_regular_file(dir / "expansion/jxm/version.txt") && fs::is_regular_file(dir / "expansion/jxm/jxm.bin"));
 	TEST_EXPECT(!fs::exists(dir / "language.pff") && !fs::exists(dir / "header.bik") && !fs::exists(dir / "cc.bin"));
+	// S26 C10: the build's list names each loose file where it landed, with its size (they read 0 B).
+	for (const BuiltFile &file : report.built)
+		if (!file.archive)
+			TEST_EXPECT(file.name.rfind("expansion/jxm/", 0) == 0 && file.bytes > 0);
 	{
 		opennova::Vfs vfs;
 		opennova::LaunchFlags flags;
@@ -1262,6 +1266,40 @@ static int test_cancel_publishes_nothing() {
 	return 0;
 }
 
+// S26 C11: a build directory that will not go keeps the proof that it is one, so a later build prunes
+// it (it was left empty with no proof, a later build of its content refused as "not a build directory");
+// and a staging name taken by a directory that is no staging (no marker) is passed by, not a failure.
+static int test_cleanup_keeps_its_proof() {
+	Project p("opennova_editor_build_cleanup_test");
+	TEST_EXPECT(p.create());
+	TEST_EXPECT(p.fill());
+	const BuildReport first = run_build(p.plan(), p.output_root());
+	TEST_EXPECT(first.ok);
+	// The first build's directory held as a working directory (Windows will not remove it then) while a
+	// build of other content prunes it.
+	const fs::path was = fs::current_path();
+	fs::current_path(first.build_dir);
+	TEST_EXPECT(write_table(p.root + "/strings/menutxt.bin", "a change"));
+	const BuildReport second = run_build(p.plan(), p.output_root());
+	fs::current_path(was);
+	TEST_EXPECT(second.ok);
+	if (fs::exists(first.build_dir))
+		TEST_EXPECT(fs::is_regular_file(fs::path(first.build_dir) / kBuildRecordFileName));
+	// Its content again, once it can go: pruned and built again, not refused.
+	TEST_EXPECT(write_table(p.root + "/strings/menutxt.bin", "a change, then another"));
+	const BuildReport third = run_build(p.plan(), p.output_root());
+	TEST_EXPECT(third.ok);
+	// A staging name taken by what is no staging directory: the next name, the foreign one left as it is.
+	const std::string foreign = p.output_root() + "/" + third.build_id + kBuildStagingSuffix;
+	fs::remove_all(third.build_dir);
+	fs::create_directories(foreign);
+	TEST_EXPECT(editor_test::write_text(foreign + "/mine.txt", "not a build"));
+	const BuildReport again = run_build(p.plan(), p.output_root());
+	for (const Diagnostic &d : again.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(again.ok && again.build_id == third.build_id && fs::is_regular_file(foreign + "/mine.txt"));
+	return 0;
+}
+
 // Rewrites `path` in place through a handle of its own (a build's read of it stays open) with
 // other bytes of the same size, dated two seconds after its last write: a read of the file over
 // several steps sees both, and neither its size nor its end tells.
@@ -1823,6 +1861,7 @@ int main() {
 	failures += test_shared_folder();
 	failures += test_steps_are_bounded();
 	failures += test_cancel_publishes_nothing();
+	failures += test_cleanup_keeps_its_proof();
 	failures += test_file_rewritten_mid_read_fails();
 	failures += test_archives_match_the_single_call_writer();
 	failures += test_routing();
