@@ -345,7 +345,7 @@ bool MissionShots::build_(Run &run) {
 	}
 	mission::promote_mission(mission, world, options);
 	world.ai.is_authority = true;
-	if (run.items_read) mission::resolve_item_traits(world, run.items, [](int32_t) -> uint8_t { return 0; });
+	if (run.items_read) mission::resolve_item_traits(world, run.items, [](int32_t) -> uint8_t { return 0; }, run.store.get());
 	run.terrain = setup_.ground->height_field();
 	run.water_height = setup_.ground->water() ? float(setup_.ground->water_height()) : 0.0f;
 	world.tables.surface_map = setup_.ground->surface_sampler();
