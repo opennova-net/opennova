@@ -685,13 +685,15 @@ const MissionField kGroupFields[] = {
 	 get_number<G, int32_t, &G::value>, set_cast<G, int32_t, &G::value>},
 };
 
-using L = bms::LayerRecord;
+using L = bms::WavListRecord;
 
-// [orig editor: Med_WriteBmsFile @0x44f920 copies the editor LAYER NAME into the 20-byte record] a
-// fixed-width name JO reads and discards.
-const MissionField kLayerFields[] = {
-	{MissionRecord::Layer, "name", MissionFieldType::Text, bms::kLayerRecordSize, 0, 0, nullptr, 0, false,
-	 get_slot<L, bms::kLayerRecordSize, &L::name>, set_slot<L, bms::kLayerRecordSize, &L::name>},
+// A wav list slot's file name, at most 15 characters (the original editor's dialog takes 16 bytes
+// [orig: JOTACmed.exe sub_412FB0 @ 0x413158], its .bms export copying the name into the record's
+// 16), which the game reads and discards (bms.h WavListRecord).
+const MissionField kWavListFields[] = {
+	{ MissionRecord::WavList, "file_name", MissionFieldType::Text, bms::kWavListNameSize, 0, 0,
+			nullptr, 0, false, get_slot<L, bms::kWavListNameSize, &L::file_name>,
+			set_slot<L, bms::kWavListNameSize, &L::file_name> },
 };
 
 using A = bms::AreaTrigger;
@@ -934,19 +936,19 @@ const MissionField kBoundingBoxFields[] = {
 
 // Every record's rows, in MissionRecord's order.
 const MissionFields kRecords[] = {
-	{kHeaderFields, std::size(kHeaderFields)},
-	{kEntityFields, std::size(kEntityFields)},
-	{kWaypointPathFields, std::size(kWaypointPathFields)},
-	{kStopFields, std::size(kStopFields)},
-	{kGroupFields, std::size(kGroupFields)},
-	{kLayerFields, std::size(kLayerFields)},
-	{kAreaFields, std::size(kAreaFields)},
-	{kEventFields, std::size(kEventFields)},
-	{kTriggerFields, std::size(kTriggerFields)},
-	{kActionFields, std::size(kActionFields)},
-	{kLoadoutFields, std::size(kLoadoutFields)},
-	{kAvailabilityFields, std::size(kAvailabilityFields)},
-	{kBoundingBoxFields, std::size(kBoundingBoxFields)},
+	{ kHeaderFields, std::size(kHeaderFields) },
+	{ kEntityFields, std::size(kEntityFields) },
+	{ kWaypointPathFields, std::size(kWaypointPathFields) },
+	{ kStopFields, std::size(kStopFields) },
+	{ kGroupFields, std::size(kGroupFields) },
+	{ kWavListFields, std::size(kWavListFields) },
+	{ kAreaFields, std::size(kAreaFields) },
+	{ kEventFields, std::size(kEventFields) },
+	{ kTriggerFields, std::size(kTriggerFields) },
+	{ kActionFields, std::size(kActionFields) },
+	{ kLoadoutFields, std::size(kLoadoutFields) },
+	{ kAvailabilityFields, std::size(kAvailabilityFields) },
+	{ kBoundingBoxFields, std::size(kBoundingBoxFields) },
 };
 static_assert(std::size(kRecords) == kMissionRecordCount, "one row set per mission record");
 

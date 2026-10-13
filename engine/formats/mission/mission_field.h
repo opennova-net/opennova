@@ -27,13 +27,25 @@
 namespace opennova::mission {
 
 // The records a mission's fields are fields of, each its own struct: the header (bms::Header), an
-// entity of any of the four pools (bms::Entity), a waypoint path (bms::WaypointRecord) and one of its
-// stops (the marker index it holds, a uint32_t), a group (bms::GroupRecord), a layer
-// (bms::LayerRecord), an area trigger (bms::AreaTrigger), an event (bms::Event), a trigger
-// (bms::Trigger), an action (bms::Action), a weapon loadout entry (bms::WeaponLoadoutRecord), an item
-// availability rule (bms::ItemAvailabilityEntry) and a bounding box (bms::BoundingBox).
+// entity of any of the four pools (bms::Entity), a waypoint path (bms::WaypointRecord) and one of
+// its stops (the marker index it holds, a uint32_t), a group (bms::GroupRecord), a wav list slot
+// (bms::WavListRecord), an area trigger (bms::AreaTrigger), an event (bms::Event), a trigger
+// (bms::Trigger), an action (bms::Action), a weapon loadout entry (bms::WeaponLoadoutRecord), an
+// item availability rule (bms::ItemAvailabilityEntry) and a bounding box (bms::BoundingBox).
 enum class MissionRecord {
-	Header, Entity, WaypointPath, Stop, Group, Layer, Area, Event, Trigger, Action, Loadout, Availability, BoundingBox,
+	Header,
+	Entity,
+	WaypointPath,
+	Stop,
+	Group,
+	WavList,
+	Area,
+	Event,
+	Trigger,
+	Action,
+	Loadout,
+	Availability,
+	BoundingBox,
 	kCount,
 };
 inline constexpr size_t kMissionRecordCount = size_t(MissionRecord::kCount);

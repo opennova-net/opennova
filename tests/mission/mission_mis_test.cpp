@@ -205,10 +205,11 @@ int main() {
 	TEST_EXPECT(parsed.items[0].mis_extra_bheight == 0);
 	TEST_EXPECT(parsed.items[0].z == authored.items[0].z);
 
-	// The terrain's heights under the entities (flat, in write order): an unlocked entity's z is written relative to
-	// the terrain, less its height, its base as it stands; a locked one's z as it stands and its base plus the
-	// terrain's height, height_lock 1 [orig: JOTACmed.exe sub_44E640 @ 0x44e640, from MIS_SaveDocument @ 0x4546b5].
-	// The writer changes nothing of the document.
+	// The terrain's heights under the entities (flat, in write order): an unlocked entity's z is
+	// written relative to the terrain, less its height, its base as it stands; a locked one's z and
+	// its base, which the .bms's frame carries absolute (D-MIS-4), as they stand, height_lock 1
+	// [orig: JOTACmed.exe sub_44E640 @ 0x44e640, from MIS_SaveDocument @ 0x4546b5]. The writer
+	// changes nothing of the document.
 	{
 		const std::string baked_path = temp_path("mission_mis_baked_heights.mis");
 		const std::vector<int32_t> base_heights = {25 * 65536};
@@ -223,7 +224,8 @@ int main() {
 
 		bms::File locked = authored;
 		locked.items[0].mis_height_lock = 1;
-		locked.items[0].mis_extra_bheight = 2 * 65536; // its base, two units above the ground (the editor's frame)
+		locked.items[0].mis_extra_bheight =
+				27 * 65536; // its base, absolute: two units above the 25-unit ground
 		std::string locked_text;
 		TEST_EXPECT(write_mis_text(locked, locked_text, error, &base_heights));
 		TEST_EXPECT(locked_text.find(at + std::to_string(z) + "\r\n") != std::string::npos);
@@ -236,11 +238,13 @@ int main() {
 		TEST_EXPECT(locked_text.find(at + std::to_string(z) + "\r\n") != std::string::npos);
 	}
 
-	// A .mis as the original editor writes it (authored): an unlocked item (z 3 units above the ground, base 1) and a
-	// locked one (z 70 absolute, base 52 absolute), over a flat terrain 50 units high. The parse reads the file's own
-	// frame; mis_items_to_bms_frame (the original's read, sub_44E6A0 @ 0x44e6a0, then its .bms export, sub_44E5A0 @
-	// 0x44e5a0) takes it to the .bms's: both z absolute (53, 70), both bases the editor's (1, 2); and the writer over
-	// the same terrain gives the original's text back.
+	// A .mis as the original editor writes it (authored): an unlocked item (z 3 units above the
+	// ground, base 1) and a locked one (z 70 absolute, base 52 absolute), over a flat terrain 50
+	// units high. The parse reads the file's own frame; mis_items_to_bms_frame (the original's
+	// read, sub_44E6A0 @ 0x44e6a0, then its .bms export, sub_44E5A0 @ 0x44e5a0) takes it to the
+	// .bms's: both z absolute (53, 70), the unlocked base relative (1) and the locked one absolute
+	// (52), as the original keeps a locked item's through a terrain change (D-MIS-4); and the
+	// writer over the same terrain gives the original's text back.
 	{
 		std::vector<uint16_t> atlas(1024 * 1024, 0);
 		std::vector<int> sectors(256, 1);
@@ -256,7 +260,8 @@ int main() {
 				"begin item 0\r\n  type_id 1\r\n  id 1\r\n  position 655360 -655360 196608\r\n"
 				"  extra_bheight 65536\r\nend item\r\n\r\n"
 				"begin item 1\r\n  type_id 1\r\n  id 2\r\n  position 655360 -655360 4587520\r\n"
-				"  extra_bheight 3407872\r\n  height_lock 1\r\nend item\r\n\r\n";
+				"  extra_bheight 3407872\r\n  gen_string \"null\"\r\n  height_lock 1\r\nend "
+				"item\r\n\r\n";
 		bms::File read;
 		TEST_EXPECT(parse_mis_text(med, {}, read, error) && read.items.size() == 2);
 		TEST_EXPECT(read.items[0].z == 3 * 65536 && read.items[0].mis_extra_bheight == 65536 && read.items[0].mis_height_lock == 0);
@@ -268,7 +273,8 @@ int main() {
 		std::string as_read;
 		TEST_EXPECT(write_mis_text(read, as_read, error, &under));
 		TEST_EXPECT(as_read.find("  position 655360 -655360 196608\r\n") != std::string::npos);
-		TEST_EXPECT(as_read.find("  extra_bheight 3407872\r\n  height_lock 1\r\n") != std::string::npos);
+		TEST_EXPECT(as_read.find("  extra_bheight 3407872\r\n  gen_string \"null\"\r\n  "
+								 "height_lock 1\r\n") != std::string::npos);
 		// No terrain leaves it in the file's frame.
 		bms::File untaken = read;
 		mis_items_to_bms_frame(untaken, MisTerrain{});
@@ -276,10 +282,11 @@ int main() {
 		mis_items_to_bms_frame(read, flat);
 		TEST_EXPECT(read.mis_frame == bms::MisFrame::Bms && !bms::equal(untaken, read));
 		TEST_EXPECT(read.items[0].z == 53 * 65536 && read.items[0].mis_extra_bheight == 65536);
-		TEST_EXPECT(read.items[1].z == 70 * 65536 && read.items[1].mis_extra_bheight == 2 * 65536);
+		TEST_EXPECT(read.items[1].z == 70 * 65536 && read.items[1].mis_extra_bheight == 52 * 65536);
 		// A file in the .bms's frame is left as it is: the terrain's height is never added twice.
 		mis_items_to_bms_frame(read, flat);
-		TEST_EXPECT(read.items[0].z == 53 * 65536 && read.items[1].z == 70 * 65536 && read.items[1].mis_extra_bheight == 2 * 65536);
+		TEST_EXPECT(read.items[0].z == 53 * 65536 && read.items[1].z == 70 * 65536 &&
+				read.items[1].mis_extra_bheight == 52 * 65536);
 		std::string back;
 		TEST_EXPECT(write_mis_text(read, back, error, &under));
 		TEST_EXPECT(back.find("  position 655360 -655360 196608\r\n") != std::string::npos);
@@ -290,24 +297,88 @@ int main() {
 		for (size_t at = back.find("height_lock"); at != std::string::npos; at = back.find("height_lock", at + 1)) ++locks;
 		TEST_EXPECT(locks == 1);
 
-		// A lock is any nonzero value, read as the original reads it, an int tested nonzero [orig: MIS_ParseToken @
-		// 0x4536c9; sub_44E640 @ 0x44e657]: -1 is a lock, taken off the terrain on the read and written back as -1;
-		// 300 likewise.
+		// A lock is any nonzero value, read as the original reads it, an int tested nonzero [orig:
+		// MIS_ParseToken @ 0x4536c9; sub_44E640 @ 0x44e657]: -1 is a lock, its z and base kept
+		// absolute through the read and written back as -1; 300 likewise.
 		bms::File odd;
 		TEST_EXPECT(parse_mis_text(
 				"begin item 0\r\n  type_id 1\r\n  id 1\r\n  position 655360 -655360 4587520\r\n"
-				"  extra_bheight 3407872\r\n  height_lock -1\r\nend item\r\n\r\n"
+				"  extra_bheight 3407872\r\n  gen_string \"null\"\r\n  height_lock -1\r\nend "
+				"item\r\n\r\n"
 				"begin item 1\r\n  type_id 1\r\n  id 2\r\n  position 655360 -655360 4587520\r\n"
-				"  extra_bheight 3407872\r\n  height_lock 300\r\nend item\r\n\r\n",
+				"  extra_bheight 3407872\r\n  gen_string \"null\"\r\n  height_lock 300\r\nend "
+				"item\r\n\r\n",
 				{}, odd, error));
 		TEST_EXPECT(odd.items.size() == 2 && odd.items[0].mis_height_lock == -1 && odd.items[1].mis_height_lock == 300);
 		mis_items_to_bms_frame(odd, flat);
-		TEST_EXPECT(odd.items[0].z == 70 * 65536 && odd.items[0].mis_extra_bheight == 2 * 65536);
-		TEST_EXPECT(odd.items[1].z == 70 * 65536 && odd.items[1].mis_extra_bheight == 2 * 65536);
+		TEST_EXPECT(odd.items[0].z == 70 * 65536 && odd.items[0].mis_extra_bheight == 52 * 65536);
+		TEST_EXPECT(odd.items[1].z == 70 * 65536 && odd.items[1].mis_extra_bheight == 52 * 65536);
 		std::string odd_text;
 		TEST_EXPECT(write_mis_text(odd, odd_text, error, &under));
-		TEST_EXPECT(odd_text.find("  extra_bheight 3407872\r\n  height_lock -1\r\n") != std::string::npos);
-		TEST_EXPECT(odd_text.find("  extra_bheight 3407872\r\n  height_lock 300\r\n") != std::string::npos);
+		TEST_EXPECT(odd_text.find("  extra_bheight 3407872\r\n  gen_string \"null\"\r\n  "
+								  "height_lock -1\r\n") != std::string::npos);
+		TEST_EXPECT(odd_text.find("  extra_bheight 3407872\r\n  gen_string \"null\"\r\n  "
+								  "height_lock 300\r\n") != std::string::npos);
+
+		// The areas the original editor makes of its type-6013 items (D-MIS-14) [orig: JOTACmed.exe
+		// sub_44D240 @ 0x44d240; sub_44F920 @ 0x450a16..0x450ab3]: zone 3's three unlocked markers
+		// span its box, its flags its areatrig's; zone 5's areatrig has no marker, so no area; zone
+		// 7's least-x marker holds an extra_valmode, so the export keeps none. The markers are none
+		// of the pools. Over the 50-unit terrain the box's z is the markers' absolute z.
+		{
+			const std::string areas_med =
+					"begin areatrig 3\r\n  description \"Bridge\"\r\n  attrib 1\r\nend "
+					"areatrig\r\n\r\n"
+					"begin areatrig 5\r\n  description \"Empty\"\r\nend areatrig\r\n\r\n"
+					"begin item 0\r\n  type_id 1\r\n  id 1\r\n  position 655360 -655360 "
+					"196608\r\nend item\r\n\r\n"
+					"begin item 1\r\n  type_id 6013\r\n  id 2\r\n  position 1310720 -1310720 "
+					"65536\r\n  wpnumber 3\r\nend item\r\n\r\n"
+					"begin item 2\r\n  type_id 6013\r\n  id 3\r\n  position 655360 -2621440 "
+					"131072\r\n  wpnumber 3\r\nend item\r\n\r\n"
+					"begin item 3\r\n  type_id 6013\r\n  id 4\r\n  position 1966080 -655360 0\r\n  "
+					"wpnumber 3\r\nend item\r\n\r\n"
+					"begin item 4\r\n  type_id 6013\r\n  id 5\r\n  position 65536 0 0\r\n  "
+					"wpnumber 7\r\n  extra_valmode 1\r\nend item\r\n\r\n"
+					"begin item 5\r\n  type_id 6013\r\n  id 6\r\n  position 131072 0 0\r\n  "
+					"wpnumber 7\r\nend item\r\n\r\n";
+			bms::File areas_read;
+			TEST_EXPECT(parse_mis_text(areas_med, {}, areas_read, error));
+			TEST_EXPECT(areas_read.items.size() == 1 && areas_read.mis_area_markers.size() == 5);
+			TEST_EXPECT(areas_read.area_triggers.size() == 1);
+			if (areas_read.area_triggers.size() == 1) {
+				const bms::AreaTrigger &a = areas_read.area_triggers[0];
+				TEST_EXPECT(a.id == 3 && a.flags == 1 && a.x_min == 655360 && a.x_max == 1966080 &&
+						a.y_min == -2621440 && a.y_max == -655360 && a.z_min == 0 &&
+						a.z_max == 131072);
+			}
+			mis_items_to_bms_frame(areas_read, flat);
+			TEST_EXPECT(
+					areas_read.area_triggers.size() == 1 && areas_read.mis_area_markers.empty());
+			if (areas_read.area_triggers.size() == 1)
+				TEST_EXPECT(areas_read.area_triggers[0].z_min == 50 * 65536 &&
+						areas_read.area_triggers[0].z_max == 52 * 65536);
+			// Written as two locked markers at the box's corners, its zone their wpnumber; read
+			// back, the same area.
+			std::string corners;
+			TEST_EXPECT(write_mis_text(areas_read, corners, error));
+			TEST_EXPECT(corners.find("  type_id 6013\r\n") != std::string::npos);
+			TEST_EXPECT(
+					corners.find("  position 655360 -2621440 3276800\r\n") != std::string::npos);
+			TEST_EXPECT(
+					corners.find("  position 1966080 -655360 3407872\r\n") != std::string::npos);
+			bms::File corners_read;
+			TEST_EXPECT(parse_mis_text(corners, {}, corners_read, error));
+			mis_items_to_bms_frame(corners_read, flat);
+			TEST_EXPECT(corners_read.area_triggers.size() == 1 && corners_read.items.size() == 1);
+			if (corners_read.area_triggers.size() == 1 && areas_read.area_triggers.size() == 1) {
+				const bms::AreaTrigger &a = corners_read.area_triggers[0],
+									   &b = areas_read.area_triggers[0];
+				TEST_EXPECT(a.id == b.id && a.flags == b.flags && a.x_min == b.x_min &&
+						a.x_max == b.x_max && a.y_min == b.y_min && a.y_max == b.y_max &&
+						a.z_min == b.z_min && a.z_max == b.z_max);
+			}
+		}
 	}
 
 	// Over a sloped terrain, every pool, each entity at a point of its own: an atlas whose four 512-texel quadrants
@@ -383,8 +454,9 @@ int main() {
 
 		std::string sloped_text;
 		TEST_EXPECT(write_mis_text(source, sloped_text, error, &heights));
-		// The KOTH centres' lines: the unlocked one's z less the height and its base as it stands, the locked one's z
-		// as it stands, its base plus the height and its lock as it stands.
+		// The KOTH centres' lines: the unlocked one's z less the height and its base as it stands,
+		// the locked one's z as it stands, its base (carried absolute, D-MIS-4) and its lock as
+		// they stand.
 		const bms::Entity &koth = source.markers[0];
 		const bms::Entity &koth_locked = source.markers[1];
 		TEST_EXPECT(sloped_text.find("  position " + std::to_string(koth.x) + " " + std::to_string(koth.y) + " " +
@@ -393,8 +465,9 @@ int main() {
 		                             " " + std::to_string(koth_locked.z) + "\r\n") != std::string::npos);
 		TEST_EXPECT(sloped_text.find("  extra_bheight " + std::to_string(5 * 65536) + "\r\n  gen_string") !=
 		            std::string::npos);
-		TEST_EXPECT(sloped_text.find("  extra_bheight " + std::to_string(3 * 65536 + heights[5]) +
-		                             "\r\n  height_lock -1\r\n") != std::string::npos);
+		TEST_EXPECT(
+				sloped_text.find("  extra_bheight " + std::to_string(3 * 65536) +
+						"\r\n  gen_string \"null\"\r\n  height_lock -1\r\n") != std::string::npos);
 
 		const MisItemTypeResolver resolver = [](int def_item_id) {
 			switch (def_item_id) {
@@ -678,13 +751,17 @@ int main() {
 		std::string twice_text, twice_why;
 		TEST_EXPECT(!write_mis_text(twice, twice_text, twice_why));
 		TEST_EXPECT(twice_why.find("Area triggers 0 and 1 share zone id 4") != std::string::npos);
-		// The readers agree on 1..99: a number outside makes no area and no name, a second section of a number
-		// goes to the first's slot (its lines to the first's area, its description replacing the first's), each
-		// reported, never dropped in silence.
-		const std::string odd_areas = "begin areatrig 0\r\n  description \"zero\"\r\nend areatrig\r\n"
-		                              "begin areatrig 100\r\n  description \"past\"\r\nend areatrig\r\n"
-		                              "begin areatrig 7\r\n  description \"first\"\r\nend areatrig\r\n"
-		                              "begin areatrig 7\r\n  description \"second\"\r\n  attrib 2\r\nend areatrig\r\n";
+		// The readers agree on 1..99: a number outside makes no area and no name, a second section
+		// of a number goes to the first's slot (its lines to the first's area, its description
+		// replacing the first's), each reported, never dropped in silence; zone 7's area is its
+		// marker's (D-MIS-14).
+		const std::string odd_areas =
+				"begin areatrig 0\r\n  description \"zero\"\r\nend areatrig\r\n"
+				"begin areatrig 100\r\n  description \"past\"\r\nend areatrig\r\n"
+				"begin areatrig 7\r\n  description \"first\"\r\nend areatrig\r\n"
+				"begin areatrig 7\r\n  description \"second\"\r\n  attrib 2\r\nend areatrig\r\n"
+				"begin item 0\r\n  type_id 6013\r\n  id 1\r\n  position 0 0 0\r\n  wpnumber "
+				"7\r\nend item\r\n";
 		bms::File odd;
 		std::vector<MisIssue> odd_issues;
 		TEST_EXPECT(parse_mis_text(odd_areas, {}, odd, error, &odd_issues));
@@ -724,10 +801,11 @@ int main() {
 		TEST_EXPECT(!mis_name_allowed("two\nlines", kMisEventNameChars, why));
 	}
 
-	// --- What the reader does not keep is reported: a key the original editor's reader refuses in its
-	// section (the old group keys among them), and the original's teleport_target, wav_list and wind
-	// sections, walked. Keys and section names read without case, as both originals match them; the
-	// original's aliases (noloop, alignment, perception, perfectionist) read as its words. -------------
+	// --- What the reader does not keep is reported: a key the original editor's reader refuses in
+	// its section (the old group keys among them), and the original's teleport_target and wind
+	// sections, walked; its wav_list read into the table after the groups (D-MIS-13). Keys and
+	// section names read without case, as both originals match them; the original's aliases
+	// (noloop, alignment, perception, perfectionist) read as its words. -------------
 	{
 		const std::string text =
 		    "BEGIN Group 2\r\n  Description \"Bravo\"\r\n  flags 1\r\n  value 2\r\n  ATTRIB 1\r\n  color 3\r\nEND GROUP\r\n"
@@ -746,14 +824,17 @@ int main() {
 		TEST_EXPECT(read.group_records[2].flags == 1 && read.group_records[2].value == 0 &&
 		            bms::group_name(read.group_records[2]) == "Bravo");
 		TEST_EXPECT(static_cast<uint32_t>(read.waypoint_records[4].flags) == 1);
-		TEST_EXPECT(read.area_triggers.size() == 1 && read.area_triggers[0].id == 5);
+		// An areatrig section of no 6013 marker makes no area (D-MIS-14); the wav list slot's file
+		// name is read.
+		TEST_EXPECT(read.area_triggers.empty());
+		TEST_EXPECT(std::string(read.wav_list_records[1].file_name) == "f.wav");
 		TEST_EXPECT(read.items.size() == 1 && read.items[0].team == 2 && read.items[0].perception2 == 70 &&
 		            read.items[0].perfectionist2 == 60);
-		// Reported: the group's flags and value, the waypoint's, area's, layer's, event's and item's bogus key,
-		// and the three sections.
+		// Reported: the group's flags and value, the waypoint's, area's, layer's, event's and
+		// item's bogus key, and the two sections.
 		std::vector<size_t> lines;
 		for (const MisIssue &issue : issues) lines.push_back(issue.line);
-		TEST_EXPECT((lines == std::vector<size_t>{3, 4, 12, 17, 22, 24, 27, 31, 36, 45}));
+		TEST_EXPECT((lines == std::vector<size_t>{ 3, 4, 12, 17, 22, 24, 31, 36, 45 }));
 		TEST_EXPECT(issues[0].message.find("group 2's key 'flags'") != std::string::npos);
 		TEST_EXPECT(issues[5].message.find("teleport_target") != std::string::npos);
 		MisNames names;

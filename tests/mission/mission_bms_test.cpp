@@ -16,7 +16,6 @@
 #include <formats/mission/mission.h>
 #include <formats/mission/mission_field.h>
 #include <formats/mission/mission_mis.h>
-#include <formats/mission/mission_var_names.h>
 
 #include "common/file_io.h"
 
@@ -206,7 +205,7 @@ int main() {
 	TEST_EXPECT(bms_file.organics.size() == bms_file.header.num_people);
 	TEST_EXPECT(bms_file.waypoint_records.size() == opennova::bms::kWaypointRecordCount);
 	TEST_EXPECT(bms_file.group_records.size() == opennova::bms::kGroupRecordCount);
-	TEST_EXPECT(bms_file.layer_records.size() == opennova::bms::kLayerRecordCount);
+	TEST_EXPECT(bms_file.wav_list_records.size() == opennova::bms::kWavListRecordCount);
 
 	// A Mission box's name over its two words, the second its last four characters: written and read back as
 	// it stands, as the game loads a box's 36 bytes whole and reads the word with ref_id [orig:
@@ -335,8 +334,8 @@ int main() {
 		TEST_EXPECT(marker.type == opennova::bms::ItemType::Marker && marker.id == 77 && marker.type_id == 1 &&
 		            marker.x == 0 && marker.attention == 30);
 	}
-	// A new entity takes one past the largest, a player's net id among them, as the original editor's
-	// allocator skips none (D-MIS-10): past a largest of 9999 the next is 10000.
+	// A new entity takes one past the largest, a player's net id among them, as the original
+	// editor's allocator skips none (D-MIS-10): past a largest of 9999 the next is 10000.
 	{
 		opennova::bms::File below_player;
 		make_default(below_player);
@@ -727,86 +726,24 @@ int main() {
 		TEST_EXPECT(!opennova::bms::parse(bad_constant.data(), bad_constant.size(), rejected_group, group_error));
 	}
 
-	// --- The mission's variable names (formats/mission/mission_var_names.h): a TAGGED layer table, the
-	// tag record then `V<index> <name>` per record; the game reads and drops the table, the original
-	// editor's layer names are never written over. ---
+	// --- The table after the groups: the original editor's wav list (bms.h WavListRecord,
+	// D-MIS-13), a record per slot, the file name at +4; the bytes, the head's among them,
+	// round-trip as read. ---
 	{
-		using opennova::mission::LayerTable;
-		using opennova::mission::VariableName;
-		std::string names_error;
-		opennova::bms::File named;
-		TEST_EXPECT(opennova::bms::parse(original.data(), original.size(), named, names_error));
-		TEST_EXPECT(opennova::mission::layer_table(named) == LayerTable::Empty);
-		TEST_EXPECT(opennova::mission::variable_names(named).empty());
-		TEST_EXPECT(opennova::mission::variable_name_room(5) == 17 && opennova::mission::variable_name_room(12) == 16 &&
-		            opennova::mission::variable_name_room(255) == 15);
-		const std::vector<VariableName> wanted = {{12, "alarm_raised"}, {3, "bridge blown"}, {255, "fifteen chars.."}};
-		TEST_EXPECT(opennova::mission::set_variable_names(named, wanted, names_error));
-		TEST_EXPECT(opennova::mission::layer_table(named) == LayerTable::VariableNames);
-		TEST_EXPECT(std::memcmp(named.layer_records[0].name, "OPENNOVA-VAR-NAMES-1", 20) == 0);
-		TEST_EXPECT(std::memcmp(named.layer_records[1].name, "V3 bridge blown\0\0\0\0\0", 20) == 0);
-		TEST_EXPECT(std::memcmp(named.layer_records[2].name, "V12 alarm_raised\0\0\0\0", 20) == 0);
-		TEST_EXPECT(std::memcmp(named.layer_records[3].name, "V255 fifteen chars..", 20) == 0); // full width
-		const std::vector<VariableName> read = opennova::mission::variable_names(named);
-		TEST_EXPECT(read.size() == 3 && read[0].index == 3 && read[0].name == "bridge blown" && read[1].index == 12 &&
-		            read[1].name == "alarm_raised" && read[2].index == 255 && read[2].name == "fifteen chars..");
-		// The bytes round-trip through the .bms writer; only the layer table changed.
-		std::vector<uint8_t> named_bytes;
-		TEST_EXPECT(opennova::bms::write(named, named_bytes, names_error));
-		opennova::bms::File named_back;
-		TEST_EXPECT(opennova::bms::parse(named_bytes.data(), named_bytes.size(), named_back, names_error));
-		TEST_EXPECT(opennova::bms::equal(named_back, named));
-		TEST_EXPECT(opennova::mission::variable_names(named_back).size() == 3);
-		// Refused, the table untouched: an index past the bank, twice, a name past its room, empty, a quote,
-		// a ';', an edge space, 32 names.
-		const opennova::bms::File before = named;
-		TEST_EXPECT(!opennova::mission::set_variable_names(named, {{256, "x"}}, names_error)); // the script's VAR words
-		TEST_EXPECT(names_error.find("V0..V255") != std::string::npos);
-		TEST_EXPECT(!opennova::mission::set_variable_names(named, {{4, "eighteen character"}}, names_error)); // 18 > 17
-		TEST_EXPECT(!opennova::mission::set_variable_names(named, {{-1, "x"}}, names_error));
-		TEST_EXPECT(!opennova::mission::set_variable_names(named, {{4, "a"}, {4, "b"}}, names_error));
-		TEST_EXPECT(!opennova::mission::set_variable_names(named, {{4, "eighteen characters"}}, names_error));
-		TEST_EXPECT(!opennova::mission::set_variable_names(named, {{4, ""}}, names_error));
-		TEST_EXPECT(!opennova::mission::set_variable_names(named, {{4, "say \"hi\""}}, names_error));
-		TEST_EXPECT(!opennova::mission::set_variable_names(named, {{4, "a;b"}}, names_error));
-		TEST_EXPECT(!opennova::mission::set_variable_names(named, {{4, " lead"}}, names_error));
-		std::vector<VariableName> too_many;
-		for (int32_t i = 0; i < 32; ++i) too_many.push_back({i, "n"});
-		TEST_EXPECT(!opennova::mission::set_variable_names(named, too_many, names_error));
-		too_many.pop_back();
-		TEST_EXPECT(opennova::bms::equal(named, before));
-		TEST_EXPECT(opennova::mission::set_variable_names(named, too_many, names_error)); // 31 fit
-		TEST_EXPECT(opennova::mission::variable_names(named).size() == 31);
-		// No names empties the table again: the shipped zeros.
-		TEST_EXPECT(opennova::mission::set_variable_names(named, {}, names_error));
-		TEST_EXPECT(opennova::mission::layer_table(named) == LayerTable::Empty);
-		TEST_EXPECT(opennova::bms::equal(named, bms_file));
-		// A table holding layer names (untagged, not empty) is the original editor's: read as no variable
-		// names, never written over.
-		opennova::bms::File layered = bms_file;
-		std::memcpy(layered.layer_records[0].name, "Enemies", 7);
-		TEST_EXPECT(opennova::mission::layer_table(layered) == LayerTable::LayerNames);
-		TEST_EXPECT(opennova::mission::variable_names(layered).empty());
-		TEST_EXPECT(!opennova::mission::set_variable_names(layered, {{1, "door"}}, names_error));
-		TEST_EXPECT(names_error.find("layer names") != std::string::npos);
-		// A record of a tagged table that is not `V<index> <name>` names nothing.
-		opennova::bms::File odd = bms_file;
-		TEST_EXPECT(opennova::mission::set_variable_names(odd, {{7, "seven"}}, names_error));
-		std::memcpy(odd.layer_records[2].name, "V07 leading zero", 16);
-		std::memcpy(odd.layer_records[3].name, "Vx junk", 7);
-		// Nor one the writer would refuse (an edge space, a control byte, past V255), nor a second record of an
-		// index: the first stands.
-		std::memcpy(odd.layer_records[4].name, "V3  edge", 8);
-		std::memcpy(odd.layer_records[5].name, "V5 tab\there", 11);
-		std::memcpy(odd.layer_records[6].name, "V300 past", 9);
-		std::memcpy(odd.layer_records[7].name, "V7 again", 8);
-		const std::vector<VariableName> odd_read = opennova::mission::variable_names(odd);
-		TEST_EXPECT(odd_read.size() == 1 && odd_read[0].index == 7 && odd_read[0].name == "seven");
-		// The room's edge for a one-digit index: 17 characters fit, 18 do not.
-		opennova::bms::File room = bms_file;
-		TEST_EXPECT(opennova::mission::variable_name_room(4) == 17);
-		TEST_EXPECT(opennova::mission::set_variable_names(room, {{4, "seventeen chars.."}}, names_error));
-		TEST_EXPECT(!opennova::mission::set_variable_names(room, {{4, "eighteen chars...."}}, names_error));
+		std::string wav_error;
+		opennova::bms::File wavs;
+		TEST_EXPECT(opennova::bms::parse(original.data(), original.size(), wavs, wav_error));
+		TEST_EXPECT(wavs.wav_list_records.size() == size_t(opennova::bms::kWavListRecordCount));
+		std::memcpy(wavs.wav_list_records[3].file_name, "alarm.wav", 9);
+		wavs.wav_list_records[5].head[1] = 0x7F; // another tool's byte, kept as read
+		std::memcpy(wavs.wav_list_records[5].file_name, "fifteen_chars.w", 15);
+		std::vector<uint8_t> wav_bytes;
+		TEST_EXPECT(opennova::bms::write(wavs, wav_bytes, wav_error));
+		opennova::bms::File wavs_back;
+		TEST_EXPECT(opennova::bms::parse(wav_bytes.data(), wav_bytes.size(), wavs_back, wav_error));
+		TEST_EXPECT(opennova::bms::equal(wavs_back, wavs));
+		TEST_EXPECT(std::string(wavs_back.wav_list_records[3].file_name) == "alarm.wav" &&
+				wavs_back.wav_list_records[5].head[1] == 0x7F);
 	}
 
 	// --- Phase 0: area-trigger 32-byte record is interleaved per axis (x_min,x_max,y_min,y_max,
@@ -849,14 +786,12 @@ int main() {
 	{
 		const size_t entity_total = bms_file.header.num_items + bms_file.header.num_buildings +
 		                            bms_file.header.num_markers + bms_file.header.num_people;
-		const size_t event_block = opennova::bms::kHeaderSize +
-		                           original_loadout_len +
-		                           original_secondary_len +
-		                           entity_total * opennova::bms::kEntitySize +
-		                           opennova::bms::kWaypointRecordCount * opennova::bms::kWaypointRecordSize +
-		                           opennova::bms::kGroupRecordCount * opennova::bms::kGroupRecordSize +
-		                           opennova::bms::kLayerRecordCount * opennova::bms::kLayerRecordSize +
-		                           bms_file.header.area_trigger_count * opennova::bms::kAreaTriggerSize;
+		const size_t event_block = opennova::bms::kHeaderSize + original_loadout_len +
+				original_secondary_len + entity_total * opennova::bms::kEntitySize +
+				opennova::bms::kWaypointRecordCount * opennova::bms::kWaypointRecordSize +
+				opennova::bms::kGroupRecordCount * opennova::bms::kGroupRecordSize +
+				opennova::bms::kWavListRecordCount * opennova::bms::kWavListRecordSize +
+				bms_file.header.area_trigger_count * opennova::bms::kAreaTriggerSize;
 		const int32_t events = static_cast<int32_t>(bms_file.events.size());
 		const int32_t triggers = static_cast<int32_t>(bms_file.triggers.size());
 		const size_t first_event = event_block + 12;
@@ -1213,7 +1148,7 @@ int main() {
 		TEST_EXPECT(opennova::bms::parse(fresh_bytes.data(), fresh_bytes.size(), fresh_parsed, fresh_err));
 		TEST_EXPECT(fresh_parsed.waypoint_records.size() == opennova::bms::kWaypointRecordCount);
 		TEST_EXPECT(fresh_parsed.group_records.size() == opennova::bms::kGroupRecordCount);
-		TEST_EXPECT(fresh_parsed.layer_records.size() == opennova::bms::kLayerRecordCount);
+		TEST_EXPECT(fresh_parsed.wav_list_records.size() == opennova::bms::kWavListRecordCount);
 		TEST_EXPECT(fresh_parsed.header.num_items == 0);
 		TEST_EXPECT(fresh_parsed.events.empty());
 		// Reparse + rewrite is byte-stable (the snapshot/restore parity the editor relies on).

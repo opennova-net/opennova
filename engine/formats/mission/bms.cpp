@@ -404,13 +404,15 @@ void write_group_record(io::ByteWriter& w, const GroupRecord& gr) {
     w.write_raw(gr.name + 4, kGroupNameSize - 4);
 }
 
-bool parse_layer_record(io::ByteReader& r, LayerRecord& lr, std::string& /*error*/) {
-    r.read_fixed_string(lr.name, kLayerRecordSize);
-    return true;
+bool parse_wav_list_record(io::ByteReader &r, WavListRecord &wl, std::string & /*error*/) {
+	r.read_bytes(wl.head, sizeof(wl.head));
+	r.read_fixed_string(wl.file_name, kWavListNameSize);
+	return true;
 }
 
-void write_layer_record(io::ByteWriter& w, const LayerRecord& lr) {
-    w.write_raw(lr.name, kLayerRecordSize);
+void write_wav_list_record(io::ByteWriter &w, const WavListRecord &wl) {
+	w.write_raw(reinterpret_cast<const char *>(wl.head), sizeof(wl.head));
+	w.write_raw(wl.file_name, kWavListNameSize);
 }
 
 bool parse_area_trigger(io::ByteReader& r, AreaTrigger& at, std::string& /*error*/) {
@@ -847,28 +849,28 @@ std::string first_differing_section(const File& file, const std::vector<uint8_t>
     static_assert(offsetof(Header, area_trigger_count) == 576 && offsetof(Header, weapon_loadout_chunk_len) == 578 &&
                           offsetof(Header, secondary_chunk_len) == 582,
                   "the header's count and chunk length words sit at bytes 576, 578 and 582");
-    const Section sections[] = {
-        {"header", kHeaderSize},
-        {"loadout chunk", word(loadout_length_at)},
-        {"availability chunk", word(availability_length_at)},
-        {"items", file.items.size() * kEntitySize},
-        {"buildings", file.buildings.size() * kEntitySize},
-        {"markers", file.markers.size() * kEntitySize},
-        {"organics", file.organics.size() * kEntitySize},
-        {"waypoint paths", size_t(kWaypointRecordCount) * kWaypointRecordSize},
-        {"groups", size_t(kGroupRecordCount) * kGroupRecordSize},
-        {"layers", size_t(kLayerRecordCount) * kLayerRecordSize},
-        {"area triggers", file.area_triggers.size() * kAreaTriggerSize},
-        {"event counts", 12},
-        {"events", file.events.size() * kEventSize},
-        {"triggers", file.triggers.size() * kTriggerSize},
-        {"actions", file.actions.size() * kActionSize},
-        {"bounding box count", 4},
-        {"bounding boxes", file.bounding_boxes.size() * kBoundingBoxSize},
-    };
-    // The header's words the chunks' and the tables' sizes decide: its area trigger count and the
-    // loadout chunk's length (bytes 576..579), the availability chunk's (582..583), the write's.
-    const auto derived = [&](size_t offset) {
+	const Section sections[] = {
+		{ "header", kHeaderSize },
+		{ "loadout chunk", word(loadout_length_at) },
+		{ "availability chunk", word(availability_length_at) },
+		{ "items", file.items.size() * kEntitySize },
+		{ "buildings", file.buildings.size() * kEntitySize },
+		{ "markers", file.markers.size() * kEntitySize },
+		{ "organics", file.organics.size() * kEntitySize },
+		{ "waypoint paths", size_t(kWaypointRecordCount) * kWaypointRecordSize },
+		{ "groups", size_t(kGroupRecordCount) * kGroupRecordSize },
+		{ "wav list", size_t(kWavListRecordCount) * kWavListRecordSize },
+		{ "area triggers", file.area_triggers.size() * kAreaTriggerSize },
+		{ "event counts", 12 },
+		{ "events", file.events.size() * kEventSize },
+		{ "triggers", file.triggers.size() * kTriggerSize },
+		{ "actions", file.actions.size() * kActionSize },
+		{ "bounding box count", 4 },
+		{ "bounding boxes", file.bounding_boxes.size() * kBoundingBoxSize },
+	};
+	// The header's words the chunks' and the tables' sizes decide: its area trigger count and the
+	// loadout chunk's length (bytes 576..579), the availability chunk's (582..583), the write's.
+	const auto derived = [&](size_t offset) {
         return (offset >= trigger_count_at && offset < loadout_length_at + sizeof(Header::weapon_loadout_chunk_len)) ||
                (offset >= availability_length_at && offset < availability_length_at + sizeof(Header::secondary_chunk_len));
     };
@@ -984,15 +986,15 @@ bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
     }
 
     // Parse layer records (fixed count: 32)
-    out.layer_records.resize(kLayerRecordCount);
-    for (int i = 0; i < kLayerRecordCount; i++) {
-        if (!parse_layer_record(r, out.layer_records[i], error)) {
-            return false;
-        }
-    }
+	out.wav_list_records.resize(kWavListRecordCount);
+	for (int i = 0; i < kWavListRecordCount; i++) {
+		if (!parse_wav_list_record(r, out.wav_list_records[i], error)) {
+			return false;
+		}
+	}
 
-    // Parse area triggers
-    if (!count_fits(r, out.header.area_trigger_count, kAreaTriggerSize, "area-trigger", error)) return false;
+	// Parse area triggers
+	if (!count_fits(r, out.header.area_trigger_count, kAreaTriggerSize, "area-trigger", error)) return false;
     out.area_triggers.resize(out.header.area_trigger_count);
     for (int16_t i = 0; i < out.header.area_trigger_count; i++) {
         if (!parse_area_trigger(r, out.area_triggers[i], error)) {
@@ -1203,17 +1205,17 @@ bool write(const File& file, std::vector<uint8_t>& out, std::string& error) {
         write_group_record(w, gr);
     }
 
-    // Write layer records (must be exactly 32)
-    if (file.layer_records.size() != kLayerRecordCount) {
-        error = "Layer record count must be " + std::to_string(kLayerRecordCount);
-        return false;
-    }
-    for (const auto& lr : file.layer_records) {
-        write_layer_record(w, lr);
-    }
+	// Write the wav list (must be exactly 32)
+	if (file.wav_list_records.size() != kWavListRecordCount) {
+		error = "Wav list record count must be " + std::to_string(kWavListRecordCount);
+		return false;
+	}
+	for (const auto &wl : file.wav_list_records) {
+		write_wav_list_record(w, wl);
+	}
 
-    // Write area triggers
-    for (const auto& at : file.area_triggers) {
+	// Write area triggers
+	for (const auto& at : file.area_triggers) {
         write_area_trigger(w, at);
     }
 
@@ -1337,14 +1339,21 @@ bool item_availability_equal(const std::vector<ItemAvailabilityEntry>& a,
 } // namespace
 
 bool equal(const File& a, const File& b) {
-    if (a.mis_frame != b.mis_frame) {
-        return false;
-    }
-    // Header is packed (static_assert sizeof == 616); a byte compare is exact and includes the
-    // count fields. The body comparisons below are over the actual vectors, so they detect a
-    // change even when a header count is momentarily out of sync with its vector (sync_counts runs
-    // only at write time) -- the comparison never depends on that.
-    if (std::memcmp(&a.header, &b.header, sizeof(Header)) != 0) {
+	if (a.mis_frame != b.mis_frame || a.mis_area_markers.size() != b.mis_area_markers.size()) {
+		return false;
+	}
+	for (size_t i = 0; i < a.mis_area_markers.size(); ++i) {
+		const MisAreaMarker &x = a.mis_area_markers[i], &y = b.mis_area_markers[i];
+		if (x.zone != y.zone || x.x != y.x || x.y != y.y || x.z != y.z ||
+				x.height_lock != y.height_lock || x.extra_valmode != y.extra_valmode) {
+			return false;
+		}
+	}
+	// Header is packed (static_assert sizeof == 616); a byte compare is exact and includes the
+	// count fields. The body comparisons below are over the actual vectors, so they detect a
+	// change even when a header count is momentarily out of sync with its vector (sync_counts runs
+	// only at write time) -- the comparison never depends on that.
+	if (std::memcmp(&a.header, &b.header, sizeof(Header)) != 0) {
         return false;
     }
     if (!weapon_loadout_equal(a.loadout, b.loadout) ||
@@ -1355,15 +1364,15 @@ bool equal(const File& a, const File& b) {
         !pod_vectors_equal(a.markers, b.markers) || !pod_vectors_equal(a.organics, b.organics)) {
         return false;
     }
-    if (!waypoint_records_equal(a.waypoint_records, b.waypoint_records) ||
-        !pod_vectors_equal(a.group_records, b.group_records) ||
-        !pod_vectors_equal(a.layer_records, b.layer_records)) {
-        return false;
-    }
-    if (!pod_vectors_equal(a.area_triggers, b.area_triggers)) {
-        return false;
-    }
-    if (a.events_count != b.events_count || a.trigger_count != b.trigger_count ||
+	if (!waypoint_records_equal(a.waypoint_records, b.waypoint_records) ||
+			!pod_vectors_equal(a.group_records, b.group_records) ||
+			!pod_vectors_equal(a.wav_list_records, b.wav_list_records)) {
+		return false;
+	}
+	if (!pod_vectors_equal(a.area_triggers, b.area_triggers)) {
+		return false;
+	}
+	if (a.events_count != b.events_count || a.trigger_count != b.trigger_count ||
         a.action_count != b.action_count || a.bounding_box_count != b.bounding_box_count) {
         return false;
     }

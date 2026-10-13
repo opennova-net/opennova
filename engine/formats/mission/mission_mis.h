@@ -37,24 +37,41 @@ inline constexpr size_t kMisDescriptionChars = 249;
 inline constexpr size_t kMisAreaSlots = 100;
 
 // The names the .mis gives a mission's records where the .bms has no room for them (ADR 0046 S24
-// "Names"): an event's `name` and an area trigger's and a waypoint path's `description`. An event by its
-// number (`begin event N`, its place among the events), an area by its zone id (`begin areatrig N`, the
-// original editor's slot, 1..99; slot 0 is never one), a path by its record index (`begin waypoint N`). An
-// empty name is none; an index past a list is none. A group's description is its name in the .bms record
-// (bms.h GroupRecord), so it is not here. A name is one mis_name_allowed takes; the writer writes at most
-// kMisEventNameChars of an event's name and kMisDescriptionChars of a description, cut before a UTF-8
-// character the width would split.
+// "Names"): an event's `name` and an area trigger's and a waypoint path's `description`. An event
+// by its number (`begin event N`, its place among the events), an area by its zone id (`begin
+// areatrig N`, the original editor's slot, 1..99; slot 0 is never one), a path by its record index
+// (`begin waypoint N`). An empty name is none; an index past a list is none. A group's description
+// is its name in the .bms record (bms.h GroupRecord), so it is not here. A name is one
+// mis_name_allowed takes; the writer writes at most kMisEventNameChars of an event's name and
+// kMisDescriptionChars of a description, cut before a UTF-8 character the width would split. The
+// variables a name may be given: V0..V255, the numbered words a script's V# reaches (the compiler
+// caps a V# at 255 [orig: WacScript_ResolveParameter @0x4F2AA4..0x4F2B06, "V# too big" @0x4f2ac5])
+// and the mission's variable trigger and action name by the same number. The bank's words past them
+// hold the script's own VAR declarations, which the script names itself
+// (runtime/world/var_store.h).
+inline constexpr int32_t kVariableNameIndexMax = 255;
+inline constexpr size_t kVariableNameCount = size_t(kVariableNameIndexMax) + 1;
+
+// A mission's variable names are the editor's alone (ADR 0046 S24 "Names"): neither the .bms, the
+// game nor the original editor holds one. They ride the .mis as lines both original readers skip,
+// the line's first token starting with '/' [orig: JOTACmed.exe sub_463A90 @ 0x463b3a; MisLdr's
+// tokenize_mis_text port, misldr.dll sub_10007E40 @ 0x10007e40], one a name: `//var <index>
+// "<name>"` (kMisVariableLine). The table after the groups, where they rode before S26, is the
+// original editor's wav list (bms.h WavListRecord, D-MIS-13).
+inline constexpr const char *kMisVariableLine = "//var";
 struct MisNames {
 	std::vector<std::string> events;
 	std::array<std::string, kMisAreaSlots> areas{};
 	std::array<std::string, bms::kWaypointRecordCount> paths{};
+	std::array<std::string, kVariableNameCount> variables{};
 };
 
-// Whether `name` is one the .mis carries as written in a slot of `width` bytes (kMisEventNameChars for an
-// event's name, kMisDescriptionChars for an area's or a path's description): no longer than `width` and no
-// character bms::mis_value_char refuses (a control character, a double quote, a ';'), the rule a group's and
-// a variable's name keep. A byte past 0x7F (UTF-8) is taken: both readers keep bytes as read. Refused:
-// false, `error` says why. The editor's name setters refuse what this refuses; nothing rewrites a name.
+// Whether `name` is one the .mis carries as written in a slot of `width` bytes (kMisEventNameChars
+// for an event's name, kMisDescriptionChars for an area's or a path's description): no longer than
+// `width` and no character bms::mis_value_char refuses (a control character, a double quote, a
+// ';'), the rule a group's and a variable's name keep (a variable's at most kMisDescriptionChars).
+// A byte past 0x7F (UTF-8) is taken: both readers keep bytes as read. Refused: false, `error` says
+// why. The editor's name setters refuse what this refuses; nothing rewrites a name.
 inline bool mis_name_allowed(const std::string &name, size_t width, std::string &error) {
 	if (name.size() > width) {
 		error = "A name holds " + std::to_string(width) + " bytes at most (the original editor's dialog)";
@@ -163,22 +180,42 @@ struct MisTerrain {
 // 16-bit fractions, the height times scale / 128 truncated. 0 where the cell names no sector, and for no terrain.
 int32_t mis_terrain_height(const MisTerrain &terrain, int32_t x, int32_t y);
 
-// The original editor's two frames of an item's height (its z) and its base (extra_bheight). Its document keeps both
-// relative to the terrain under the item; its .mis save writes a height-locked item's both absolute, the terrain's
-// height added [orig: JOTACmed.exe sub_44E640 @ 0x44e640, from MIS_SaveDocument @ 0x4546b5], and its read takes it off
-// again [orig: sub_44E6A0 @ 0x44e6a0, from MIS_LoadDocument @ 0x45460e]; its .bms export adds it to every item's z and
-// base [orig: sub_44E5A0 @ 0x44e5a0, from sub_44F920 @ 0x44fa4e]; and a change of the terrain takes a locked item's
-// both to absolute over the old terrain and back to relative over the new [orig: sub_402770 @ 0x402c9f..0x402ccd], so
-// a locked item keeps its height and an unlocked one follows the ground. A bms::File's mis_frame names the frame
-// its entities are in (bms::MisFrame): the .bms's (a parsed .bms, a new file), each entity's z absolute (the game's),
-// its mis_extra_bheight the base in the editor's (relative) frame, its mis_height_lock 0 unless a .mis locked it; or
-// the .mis's as written (parse_mis_text's), an unlocked item's z and base relative, a locked one's absolute.
-// mis_items_to_bms_frame takes a file in the .mis's frame to the .bms's over `terrain`: the original's read (a
-// locked entity's z and base less the terrain's height under it, the point its x and y), then its .bms export (every
-// entity's z plus that height; the export adds it to the base too, which reaches no .bms byte, so the base stays the
-// editor's). A file already in the .bms's frame is left as it is, so the height is never added twice; so is one
-// given no terrain (the heights or the sectors null): it stays in the .mis's frame, which the writer writes back as
+// The original editor's two frames of an item's height (its z) and its base (extra_bheight). Its
+// document keeps both relative to the terrain under the item; its .mis save writes a height-locked
+// item's both absolute, the terrain's height added [orig: JOTACmed.exe sub_44E640 @ 0x44e640, from
+// MIS_SaveDocument @ 0x4546b5], and its read takes it off again [orig: sub_44E6A0 @ 0x44e6a0, from
+// MIS_LoadDocument @ 0x45460e]; its .bms export adds it to every item's z and base [orig:
+// sub_44E5A0 @ 0x44e5a0, from sub_44F920 @ 0x44fa4e]; and a change of the terrain takes a locked
+// item's both to absolute over the old terrain and back to relative over the new [orig: sub_402770
+// @ 0x402c9f..0x402ccd], so a locked item keeps its height and its base and an unlocked one follows
+// the ground. A bms::File's mis_frame names the frame its entities are in (bms::MisFrame): the
+// .bms's (a parsed .bms, a new file), each entity's z absolute (the game's), its mis_extra_bheight
+// a locked entity's base absolute (carried as the original carries it through a terrain change: a
+// sculpt under it moves it not) and an unlocked one's relative, its mis_height_lock 0 unless a .mis
+// locked it; or the .mis's as written (parse_mis_text's), an unlocked item's z and base relative, a
+// locked one's absolute. mis_items_to_bms_frame takes a file in the .mis's frame to the .bms's over
+// `terrain`: the original's read and its .bms export, which leave a locked entity's z and base
+// absolute and add the terrain's height under an unlocked one to its z (the export adds it to the
+// base too, which reaches no .bms byte, so an unlocked base stays relative). A file already in the
+// .bms's frame is left as it is, so the height is never added twice; so is one given no terrain
+// (the heights or the sectors null): it stays in the .mis's frame, which the writer writes back as
 // it stands.
 void mis_items_to_bms_frame(bms::File &file, const MisTerrain &terrain);
+
+// The original editor's areas (D-MIS-14): an area is no section of its .mis but the box its
+// type-6013 items of one zone id span, the item's wpnumber of 1..99 its zone id, the least x, y and
+// z and the greatest of every such item [orig: JOTACmed.exe sub_44D240 @ 0x44d240: the 6013 def @
+// 0x44d296, the range @ 0x44d2a9, the bounds
+// @ 0x44d2d8..0x44d444], the `areatrig` section of its id giving it its flags (`attrib`) and its
+// description; its .bms export writes the area where the item of the least x (the first of a tie)
+// holds an extra_valmode of 0 [orig: sub_44F920 @ 0x450a16..0x450ab3, the test @ 0x450a3a], in zone
+// id order, and leaves the 6013 items out of the markers [orig: @ 0x450785]. rebuild_mis_areas
+// makes `file`'s areas so from its mis_area_markers, each area's flags those an area of its id held
+// before (an `areatrig` section's); an area of no marker goes. parse_mis_text reads a 6013 item so
+// (none of the pools) and makes the areas in the file's frame; mis_items_to_bms_frame makes them
+// again once the markers stand in the .bms's. The writer writes an area as two 6013 items at the
+// box's least and greatest corners, locked (their z absolute), with its zone id.
+inline constexpr int32_t kMisAreaMarkerType = 6013;
+void rebuild_mis_areas(bms::File &file);
 
 } // namespace opennova::mission

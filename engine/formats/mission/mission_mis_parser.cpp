@@ -9,6 +9,8 @@
 
 #include <formats/mission/authoring.h> // entity_kind_for_item_type: items.def TYPE -> BMS pool
 
+#include <algorithm>
+#include <cstring>
 #include <array>
 #include <cstdint>
 #include <cstdlib>
@@ -193,7 +195,7 @@ void initialize_mis_file(bms::File &file) {
 	file.header.magic[3] = static_cast<char>(bms::kMinVersion);
 	file.waypoint_records.resize(bms::kWaypointRecordCount);
 	file.group_records.resize(bms::kGroupRecordCount);
-	file.layer_records.resize(bms::kLayerRecordCount);
+	file.wav_list_records.resize(bms::kWavListRecordCount);
 	for (bms::WaypointRecord &record : file.waypoint_records) {
 		resize_waypoint_padding(record, /*preserve_over_count=*/false);
 	}
@@ -440,15 +442,55 @@ bool parse_mis_group(const std::vector<MisLine> &lines, size_t &pos, bms::File &
 	return false;
 }
 
-bool parse_mis_layer(const std::vector<MisLine> &lines, size_t &pos, bms::File &file, std::string &error,
-                     std::vector<MisIssue> *issues) {
+// `begin wav_list N`: the original editor's wav list slot N, its `description` (no .bms byte holds
+// it) and its `file_name`, which its .bms export copies into the table's record N at +4 [orig:
+// JOTACmed.exe MIS_ParseToken
+// @0x450e50, the section @ 0x450faa -> @ 0x4510b3 (N unchecked), the description @ 0x453e61, the
+// file name
+// @ 0x453eb0, any other key failing the load @ 0x453e88; sub_44F920 @ 0x4509bc..0x450a14]. A slot
+// outside 0..31 is none of the table's (the original's copy runs past its 32), and a file name past
+// 15 characters past the record's 16 bytes (the original's export runs into its stack): each
+// reported, the one skipped, the other cut.
+bool parse_mis_wav_list(const std::vector<MisLine> &lines, size_t &pos, bms::File &file,
+		std::string &error, std::vector<MisIssue> *issues) {
 	int32_t index = 0;
 	if (!token_i32(lines[pos], 2, index, error)) return false;
-	if (index < 0 || index >= bms::kLayerRecordCount) {
-		error = "MIS layer index out of range in line " + std::to_string(lines[pos].line_no);
-		return false;
+	const bool slotted = index >= 0 && index < bms::kWavListRecordCount;
+	if (!slotted)
+		note(issues, lines[pos].line_no,
+				"wav_list " + std::to_string(index) + " is no slot of 0..31; skipped");
+	for (++pos; pos < lines.size(); ++pos) {
+		const MisLine &line = lines[pos];
+		const std::vector<std::string> &t = line.tokens;
+		if (t.size() >= 2 && t[0] == "end" && t[1] == "wav_list") {
+			++pos;
+			return true;
+		}
+		if (t.size() >= 2 && t[0] == "file_name") {
+			if (!slotted)
+				continue;
+			if (t[1].size() >= bms::kWavListNameSize)
+				note(issues, line.line_no,
+						"wav_list " + std::to_string(index) +
+								"'s file name is past 15 characters; cut");
+			copy_fixed_field(file.wav_list_records[static_cast<size_t>(index)].file_name,
+					bms::kWavListNameSize, t[1]);
+		} else if (t[0] != "description") {
+			unknown_key(issues, line, "wav_list " + std::to_string(index));
+		}
 	}
-	bms::LayerRecord &record = file.layer_records[static_cast<size_t>(index)];
+	error = "MIS wav_list section is missing its end marker";
+	return false;
+}
+
+// `begin layer N`: the original editor's own layer (its description and colour, an item's `layer`
+// naming it), which no .bms byte holds [orig: JOTACmed.exe MIS_ParseToken @0x450e50, the keys @
+// 0x453f12..0x453f37]: walked, its keys checked, nothing kept.
+bool parse_mis_layer(const std::vector<MisLine> &lines, size_t &pos, std::string &error,
+		std::vector<MisIssue> *issues) {
+	int32_t index = 0;
+	if (!token_i32(lines[pos], 2, index, error))
+		return false;
 	for (++pos; pos < lines.size(); ++pos) {
 		const MisLine &line = lines[pos];
 		const std::vector<std::string> &t = line.tokens;
@@ -456,23 +498,22 @@ bool parse_mis_layer(const std::vector<MisLine> &lines, size_t &pos, bms::File &
 			++pos;
 			return true;
 		}
-		if (t.size() >= 2 && t[0] == "description") {
-			copy_fixed_field(record.name, sizeof(record.name), t[1]);
-		} else if (t[0] != "color") {
+		if (t[0] != "description" && t[0] != "color")
 			unknown_key(issues, line, "layer " + std::to_string(index));
-		}
 	}
 	error = "MIS layer section is missing its end marker";
 	return false;
 }
 
-// `begin areatrig N`: N is the area's zone id, the original editor's slot, and `attrib` its flags (MISSION_AREA
-// 1, constrain-Z 2), which the original's .bms writer stores at @28; `color` is the editor's alone [orig:
-// JOTACmed.exe MIS_ParseToken @0x450e50, the section @0x4510a9, its keys @0x4540ac..0x454144; sub_44F920
-// @0x44f920, the area @0x450a16..0x450ab3]. The original's .mis has a slot per zone id 1..99 (its writer's
-// loop @0x454d11..0x454daf, its rebuild's range sub_44D240 @0x44d2a9): a number outside them makes no area,
-// and a second section of a number goes to the first's area, as the original's slot, each reported. The area
-// has no bounds: the original makes them from its 6013 items, which this reader does not (D-MIS-14).
+// `begin areatrig N`: N is the area's zone id, the original editor's slot, and `attrib` its flags
+// (MISSION_AREA 1, constrain-Z 2), which the original's .bms writer stores at @28; `color` is the
+// editor's alone [orig: JOTACmed.exe MIS_ParseToken @0x450e50, the section @0x4510a9, its keys
+// @0x4540ac..0x454144; sub_44F920
+// @0x44f920, the area @0x450a16..0x450ab3]. The original's .mis has a slot per zone id 1..99 (its
+// writer's loop @0x454d11..0x454daf, its rebuild's range sub_44D240 @0x44d2a9): a number outside
+// them makes no area, and a second section of a number goes to the first's area, as the original's
+// slot, each reported. The area has its bounds from the 6013 items of its id (rebuild_mis_areas,
+// D-MIS-14); one of none is made none.
 bool parse_mis_area_trigger(const std::vector<MisLine> &lines, size_t &pos, bms::File &file, std::string &error,
                             std::vector<MisIssue> *issues) {
 	const size_t begun = lines[pos].line_no;
@@ -624,6 +665,7 @@ bool parse_mis_item(const std::vector<MisLine> &lines, size_t &pos,
                     std::string &error, std::vector<MisIssue> *issues) {
 	const size_t begun = lines[pos].line_no;
 	bms::Entity entity = {};
+	int32_t extra_valmode = 0;
 	entity.type = bms::ItemType::Item;
 	entity.perception2 = 100;
 	entity.perfectionist2 = 100;
@@ -638,6 +680,14 @@ bool parse_mis_item(const std::vector<MisLine> &lines, size_t &pos,
 		const MisLine &line = lines[pos];
 		const std::vector<std::string> &t = line.tokens;
 		if (t.size() >= 2 && t[0] == "end" && t[1] == "item") {
+			// An area marker is no record of the pools: its box is its zone's area
+			// (rebuild_mis_areas).
+			if (entity.type_id == kMisAreaMarkerType) {
+				file.mis_area_markers.push_back({ entity.wp_number, entity.x, entity.y, entity.z,
+						entity.mis_height_lock, extra_valmode });
+				++pos;
+				return true;
+			}
 			if (entity.id == 0) {
 				entity.id = next_entity_id(file);
 			}
@@ -801,6 +851,11 @@ bool parse_mis_item(const std::vector<MisLine> &lines, size_t &pos,
 			// Raw, as the original editor reads it into an int and tests it nonzero (-1 is a lock)
 			// [orig: JOTACmed.exe MIS_ParseToken @ 0x4536c9 (atol); sub_44E640 @ 0x44e657].
 			if (!token_i32(line, 1, entity.mis_height_lock, error)) return false;
+		} else if (key == "extra_valmode") {
+			// An area marker's (the export's test of the least-x one); no .bms field of another
+			// item's.
+			if (!token_i32(line, 1, extra_valmode, error))
+				return false;
 		} else if (key == "gen_string") {
 			if (t.size() > 1 && t[1] != "null") {
 				copy_fixed_field(entity.gen_string, sizeof(entity.gen_string), t[1]);
@@ -841,12 +896,16 @@ bool parse_mis_text_to_bms(const std::string &text, const MisItemTypeResolver &r
 		} else if (section == "group") {
 			if (!parse_mis_group(lines, pos, out, error, issues)) return false;
 		} else if (section == "layer") {
-			if (!parse_mis_layer(lines, pos, out, error, issues)) return false;
+			if (!parse_mis_layer(lines, pos, error, issues))
+				return false;
+		} else if (section == "wav_list") {
+			if (!parse_mis_wav_list(lines, pos, out, error, issues))
+				return false;
 		} else if (section == "event") {
 			if (!parse_mis_event(lines, pos, out, error, issues)) return false;
 		} else if (section == "item") {
 			if (!parse_mis_item(lines, pos, resolve_item_type, out, error, issues)) return false;
-		} else if (section == "teleport_target" || section == "wav_list" || section == "wind") {
+		} else if (section == "teleport_target" || section == "wind") {
 			// Sections the original editor writes and reads that the .bms has no room for [orig: MIS_ParseToken
 			// @0x450e50, the sections @0x450faa, @0x451004, @0x451119; MIS_SaveDocument @0x454f28..0x455015].
 			note(issues, lines[pos].line_no, "the " + section + " section is the original editor's; not kept here");
@@ -856,11 +915,41 @@ bool parse_mis_text_to_bms(const std::string &text, const MisItemTypeResolver &r
 			return false;
 		}
 	}
+	rebuild_mis_areas(out);
 	return true;
 }
 
 bool parse_mis_names(const std::string &text, MisNames &out, std::string &error, std::vector<MisIssue> *issues) {
 	out = MisNames{};
+	// The variables' names: lines both original readers skip (mission_mis.h kMisVariableLine), read
+	// from the text before the tokenizer, which skips them too: `//var <index> "<name>"`, an index
+	// of 0..255, a second line of an index replacing the first's; any other such line reported.
+	{
+		size_t line_no = 0;
+		for (size_t at = 0; at <= text.size();) {
+			const size_t end = std::min(text.find('\n', at), text.size());
+			std::string line = text.substr(at, end - at);
+			at = end + 1;
+			++line_no;
+			if (!line.empty() && line.back() == '\r')
+				line.pop_back();
+			const size_t lead = line.find_first_not_of(" \t");
+			if (lead == std::string::npos ||
+					line.compare(lead, std::strlen(kMisVariableLine), kMisVariableLine) != 0)
+				continue;
+			const size_t open = line.find('"'), close = line.rfind('"');
+			char *digits_end = nullptr;
+			const char *digits = line.c_str() + lead + std::strlen(kMisVariableLine);
+			const long index = std::strtol(digits, &digits_end, 10);
+			if (open == std::string::npos || close <= open || digits_end == digits || index < 0 ||
+					index > kVariableNameIndexMax) {
+				note(issues, line_no,
+						"a variable's name line is none of `//var <0..255> \"<name>\"`; skipped");
+				continue;
+			}
+			out.variables[static_cast<size_t>(index)] = line.substr(open + 1, close - open - 1);
+		}
+	}
 	const std::vector<MisLine> lines = tokenize_mis_text(text);
 	// The section a line is in: the three that carry a name kept, any other walked to its end (an item's
 	// `name` and general_information's are not these). An event by its place in the file, an area by its
