@@ -40,6 +40,7 @@
 #include <net/novaworld/gate_probe.h>
 #include <net/novaworld/lobby_session.h>
 #include <net/npwire/lan_discovery.h>
+#include <net/npwire/peer_addr.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/server_admin_command.h>
 
@@ -185,7 +186,8 @@ int main() {
 		uint16_t browse_port = 0;
 		net::ScopedSocket browse(net::udp_bind(0, &browse_port));
 		const uint32_t ci = 0x4321;
-		const std::vector<uint8_t> probe = build_lan_discovery_probe(ci);
+		const std::vector<uint8_t> probe = build_lan_discovery_probe(
+				ci, peer_addr_from_octets(game_ep.ip, game_ep.port).ip, game_ep.port);
 		net::udp_send_to(browse.get(), game_ep, probe.data(), probe.size());
 		LanDiscoveryServer found;
 		bool answered = false;

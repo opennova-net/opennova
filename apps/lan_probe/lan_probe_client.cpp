@@ -1,5 +1,7 @@
 #include "lan_probe_client.h"
 
+#include <net/npwire/peer_addr.h>
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -21,7 +23,12 @@ Result wait_for_server(const Options &options) {
 		return result;
 	}
 
-	const std::vector<uint8_t> probe = opennova::build_lan_discovery_probe(options.client_index);
+	// The announce names its own destination as EIP / EPN, as a stock direct
+	// enumerator's does [orig: NapiNPSession_SendAnnouncePacket @0x61fa00 -
+	// @0x61fcf5..0x61fd47].
+	const std::vector<uint8_t> probe = opennova::build_lan_discovery_probe(options.client_index,
+			opennova::peer_addr_from_octets(options.endpoint.ip, options.endpoint.port).ip,
+			options.endpoint.port);
 	using Clock = std::chrono::steady_clock;
 	const auto deadline = Clock::now() + std::chrono::milliseconds(options.timeout_ms);
 	auto next_send = Clock::now();

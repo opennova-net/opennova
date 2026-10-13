@@ -39,7 +39,7 @@ struct ClientHello {
 	bool pg_present = false;
 	std::string pv1;  // Protocol Version 1 (e.g. "0.0.0 2/10/2004 EM")
 	std::string pv2;  // Protocol Version 2 (e.g. "1")
-	std::string pv3;  // Optional third version string
+	std::string pv3;  // Protocol Version 3, proto+0x1AC (JO: jointoperations_protocol_version3)
 	uint32_t ci = 0;  // Client/Connection Index
 	uint32_t pm = 0;  // transport player count; a NONZERO PM is also the host-side
 	                  // identity bypass (see client_hello_admits). An absent and a
@@ -48,8 +48,13 @@ struct ClientHello {
 	                  // @0x61fcca / @0x61fcda] and the reader keeps no presence
 	                  // marker [orig: NapiNPProtocol_HandleClientHello @0x6213B0 —
 	                  // PM dword @0x62173C, zero-initialised @0x621504]
-	uint32_t eip = 0; // External IP (as uint32, big-endian wire form per inet)
-	uint32_t epn = 0; // External Port Number
+	// The announce's own destination, each written only when nonzero: the address
+	// in PeerAddr's packing (inet_addr's dword; the LAN broadcast is 0xFFFFFFFF) and
+	// the port as a plain number. [orig: NapiNPSession_SendAnnouncePacket @0x61fa00 -
+	//  EIP @0x61fcf5..0x61fd19, EPN @0x61fd23..0x61fd47, the SendTo to the same pair
+	//  @0x61fdd3..0x61fdde]
+	uint32_t eip = 0;
+	uint32_t epn = 0;
 	uint32_t et = 0;  // optional extra parameter
 };
 
@@ -222,14 +227,23 @@ struct ClientAuth {
 	bool pg_present = false;
 	std::string pv1;  // Protocol Version 1 "0.0.0 2/10/2004 EM" (== proto+300; gate)
 	std::string pv2;  // Protocol Version 2 "1" (== proto+364; is_server-checked)
+	// Protocol Version 3, proto+0x1AC, written when non-empty; the host copies it and
+	// compares nothing. [orig: CNapiNPConnection_SendClientJoin @0x61fe20 - PV3
+	//  @0x620088..0x6200ba; NapiNPProtocol_HandleClientJoin @0x62B750 - @0x62BAA3..0x62BAC4]
+	std::string pv3;
 
 	uint32_t ci = 0;   // Client Index (echo from Hello)
 	uint32_t hk = 0;   // Host Key (echo from ServerHello; checked == proto+1332)
 	uint32_t ck = 0;   // Client Key (client-generated)
 	std::string na;    // gate/game identifier (e.g. "jop:cus2"); must be non-empty
 	std::string pw;    // optional server password, distinct from the spectator JSPP CU
-	uint32_t sip = 0;  // Source IP (retail omits the tag when 0)
-	uint32_t spn = 0;  // Source Port Number (retail omits the tag when 0)
+	// The discovered session's address and port, as the connect copies them from the
+	// session record (PeerAddr's packing, the port as a plain number); each tag only
+	// when nonzero. [orig: CNapiNPConnection_InitFromSession @0x626320 - session+0x18 /
+	//  +0x1C to conn+0x30 / +0x34 @0x6263ae..0x6263b7; SendClientJoin SIP @0x6201a9,
+	//  SPN after it]
+	uint32_t sip = 0;
+	uint32_t spn = 0;
 	std::string scrk;  // Client-side Session CRypto Key
 	std::vector<std::vector<uint8_t>> cu; // Custom/User blobs (raw bytes, unparsed)
 	// The reconnect trailer, each tag emitted only when nonzero: NF (the connection's byte
@@ -253,7 +267,7 @@ bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out);
 
 // Serialize a ClientAuth to flat-TLV bytes (inverse of parse_client_auth).
 // Field order mirrors retail's 0x42 builder CNapiNPConnection_SendClientJoin
-// @ 0x61fe20: the identity block NVS/CO/AP/BDAT/PN/PG/PV1/PV2 FIRST, then
+// @ 0x61fe20: the identity block NVS/CO/AP/BDAT/PN/PG/PV1/PV2/PV3 FIRST, then
 // CI/HK/CK/NA/PW, SIP/SPN (each omitted when 0, as retail does), the CU blobs
 // (only those whose type byte, the first, is 1 or 2, and of those one of
 // kCuSlotBytes or more left out, as retail's writer does), and SCRK last.
@@ -372,6 +386,26 @@ bool parse_disconnect_event(const uint8_t *data, size_t len, DisconnectEvent &ou
 // identity. `player_name` is the game ClientAuth NA/callsign.
 std::array<uint8_t, 16> jointoperations_protocol_guid();
 bool is_jointoperations_protocol_name(std::string_view protocol_name);
+
+// The JO protocol's PV3, proto+0x1AC: the build string the network init
+// assembles, "CONSUMER" " " "RELEASE" " ", then "%ld.%ld.%ld.%ld [%ld.%ld]" over
+// the version 1, 7, 5, 7 and the ADDRESSES of two string literals of this
+// image (so the bracket pair is the executable's own data layout, not a build
+// number), then " " and the build date, copied at 63 characters:
+// "CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42". The 0x41,
+// the 0x42 and the host's 0x81 write it.
+// [orig: CNapiNetwork_Init @0x4ca4a0 - "CONSUMER" @0x7ca6a4, " " @0x7c11e4 and
+//  "RELEASE" @0x7ca69c concatenated @0x4ca7e6..0x4ca835; the sprintf
+//  @0x4ca83d..0x4ca85b over "%ld.%ld.%ld.%ld [%ld.%ld]" @0x7ca680 with 1 (ebp
+//  @0x4ca5fc), 7, 5, 7 and the literal addresses pushed @0x4ca842 / @0x4ca83d;
+//  " " and the date @0x7ca6d8 @0x4ca877..0x4ca89a; Napi_CopyString to proto+0x1AC
+//  (64) @0x4ca8bb..0x4ca8c2]
+inline constexpr uint32_t kJoBuildTagAddressA = 0x7C9730u; // the "3" literal, 8165168
+inline constexpr uint32_t kJoBuildTagAddressB = 0x7C9714u; // the "2345" literal, 8165140
+std::string jointoperations_protocol_version3();
+
+// The JO identity's 0x41. Its EIP / EPN are the caller's: the announce writes
+// its own destination, each only when nonzero.
 ClientHello make_jointoperations_client_hello(uint32_t client_index);
 ClientAuth make_jointoperations_client_auth(uint32_t client_index, uint32_t client_key,
 		uint32_t host_key, std::string_view player_name, std::string_view client_scrk);

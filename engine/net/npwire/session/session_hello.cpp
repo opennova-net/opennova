@@ -86,6 +86,26 @@ bool is_jointoperations_protocol_name(std::string_view protocol_name) {
 	return strutil::iequals(protocol_name, "JOINTOPERATIONS");
 }
 
+std::string jointoperations_protocol_version3() {
+	// The version quad and the two literal addresses, printed `%ld` (all positive).
+	// [orig: CNapiNetwork_Init @0x4ca83d..0x4ca85b]
+	constexpr uint32_t kVersion[4] = {1u, 7u, 5u, 7u};
+	std::string out = "CONSUMER";
+	out += " ";
+	out += "RELEASE";
+	out += " ";
+	out += std::to_string(kVersion[0]) + "." + std::to_string(kVersion[1]) + "." +
+			std::to_string(kVersion[2]) + "." + std::to_string(kVersion[3]) + " [" +
+			std::to_string(kJoBuildTagAddressA) + "." + std::to_string(kJoBuildTagAddressB) + "]";
+	out += " ";
+	out += "Jul 21 2009 18:54:42";
+	// Napi_CopyString into the 64-byte proto+0x1AC keeps 63 characters (the string is
+	// exactly 63). [orig: @0x4ca8b4..0x4ca8c2]
+	constexpr std::size_t kPv3Chars = 63;
+	if (out.size() > kPv3Chars) out.resize(kPv3Chars);
+	return out;
+}
+
 ClientHello make_jointoperations_client_hello(uint32_t client_index) {
 	ClientHello hello;
 	hello.nvs = "NAPI NP Version 0.0.1 1/12/2004 - 2/20/2004 Milota Copyright 2004 NovaLogic";
@@ -97,6 +117,9 @@ ClientHello make_jointoperations_client_hello(uint32_t client_index) {
 	hello.pg_present = true;
 	hello.pv1 = "0.0.0 1/12/2004 EM";
 	hello.pv2 = "16";
+	// [orig: NapiNPSession_SendAnnouncePacket @0x61fa00 - PV3 from proto+0x1AC
+	//  @0x61fc68..0x61fc9a]
+	hello.pv3 = jointoperations_protocol_version3();
 	hello.ci = client_index;
 	return hello;
 }
@@ -114,6 +137,7 @@ ClientAuth make_jointoperations_client_auth(uint32_t client_index, uint32_t clie
 	auth.pg_present = true;
 	auth.pv1 = hello.pv1;
 	auth.pv2 = hello.pv2;
+	auth.pv3 = hello.pv3; // [orig: CNapiNPConnection_SendClientJoin @0x620088..0x6200ba]
 	auth.ci = client_index;
 	auth.hk = host_key;
 	auth.ck = client_key;
@@ -270,7 +294,7 @@ bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out) {
 		// The string fields copy whatever the field's length (load_value_string).
 		// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - NVS @0x62B933, CO
 		//  @0x62B961, AP @0x62B98F, BDAT @0x62B9BD, PN @0x62BA01, PV1 @0x62BA68, PV2
-		//  @0x62BA96, NA @0x62BB55, PW @0x62BB86, SCRK @0x62BC4B]
+		//  @0x62BA96, PV3 @0x62BAC4, NA @0x62BB55, PW @0x62BB86, SCRK @0x62BC4B]
 		const uint8_t *end = data + len;
 		const auto copy_string = [value, end](size_t buffer) {
 			return load_value_string(value, end, buffer);
@@ -286,6 +310,7 @@ bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out) {
 		}
 		else if (strutil::iequals(name, "PV1"))  out.pv1  = copy_string(kStringBuffer);
 		else if (strutil::iequals(name, "PV2"))  out.pv2  = copy_string(kStringBuffer);
+		else if (strutil::iequals(name, "PV3"))  out.pv3  = copy_string(kStringBuffer);
 		// Auth fields. The eight dwords load whatever the field's length
 		// (load_value_dword). [orig: NapiNPProtocol_HandleClientJoin @0x62B750 —
 		//  CI @0x62BAE7, HK @0x62BB08, CK @0x62BB29, SIP @0x62BBA9, SPN @0x62BBCA,
@@ -302,7 +327,8 @@ bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out) {
 		else if (strutil::iequals(name, "NF"))   out.nf   = load_value_dword(value, data + len);
 		else if (strutil::iequals(name, "DCNT")) out.dcnt = load_value_dword(value, data + len);
 		else if (strutil::iequals(name, "RCNT")) out.rcnt = load_value_dword(value, data + len);
-		// Unknown tags (DE/PV3/etc.) intentionally ignored.
+		// Unknown tags (DE, which the walk matches and stores nowhere @0x62B9CA..0x62B9DA)
+		// intentionally ignored.
 		pos = next;
 	}
 	// No field is required: a zero (or absent) CK is the connection's remote key
@@ -332,6 +358,7 @@ std::vector<uint8_t> client_auth_to_bytes(const ClientAuth &msg) {
 	if (msg.pg_present)    append_bytes_field(buf, "PG", msg.pg.data(), msg.pg.size());
 	if (!msg.pv1.empty())  append_string_field(buf, "PV1",  msg.pv1);
 	if (!msg.pv2.empty())  append_string_field(buf, "PV2",  msg.pv2);
+	if (!msg.pv3.empty())  append_string_field(buf, "PV3",  msg.pv3); // [orig: @0x620088..0x6200ba]
 	// Auth fields. Retail (CNapiNPConnection_SendClientJoin @ 0x61fe20) gates
 	// CI (node+20), HK (node+1488), CK (node+332), SIP (node+48) and SPN
 	// (node+52) each on non-zero — emit only when set, to byte-match the 0x42.

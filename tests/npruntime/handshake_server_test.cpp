@@ -383,7 +383,9 @@ bool run_lan_discovery_metadata_is_live_and_stateless() {
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Lan,
 	                        kHostKey, &loopback, config);
 
-	const std::vector<uint8_t> probe = opennova::build_lan_discovery_probe(0x11223344u);
+	// A LAN browse's announce to this port: the broadcast and the port as its EIP / EPN.
+	const std::vector<uint8_t> probe =
+			opennova::build_lan_discovery_probe(0x11223344u, 0xFFFFFFFFu, 32786u);
 	uint8_t probe_opcode = 0;
 	std::vector<uint8_t> probe_body;
 	if (!expect(nw_decode_inbound(probe.data(), probe.size(), probe_opcode, probe_body) &&
@@ -405,6 +407,12 @@ bool run_lan_discovery_metadata_is_live_and_stateless() {
 	            decoded_probe.pv1 == "0.0.0 1/12/2004 EM" && decoded_probe.pv2 == "16" &&
 	            decoded_probe.pg_present && decoded_probe.pg == direct_join_pg,
 	            "LAN discovery probe matches the exact retail JO identity")) return false;
+	// D-NET-520: the announce carries the JO build string as PV3 and names its own
+	// destination as EIP / EPN [orig: NapiNPSession_SendAnnouncePacket @0x61fa00 - PV3
+	//  @0x61fc68..0x61fc9a, EIP / EPN @0x61fcf5..0x61fd47; CNapiNetwork_Init @0x4ca8bb].
+	if (!expect(decoded_probe.pv3 == "CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42" &&
+	            decoded_probe.eip == 0xFFFFFFFFu && decoded_probe.epn == 32786u,
+	            "LAN discovery probe carries PV3 and its destination as EIP / EPN")) return false;
 
 	const PeerAddr scanner{0x0100007Fu, 32100};
 	const std::size_t before_scan = inmatch::connection_count(ctx);
@@ -440,6 +448,12 @@ bool run_lan_discovery_metadata_is_live_and_stateless() {
 	            "0x81 P2 carries the live retail BuildFlags value")) return false;
 	if (!expect(foreign.sus1.empty(),
 	            "LAN 0x81 omits SUS1 when no NovaWorld session user string exists")) return false;
+	// The host echoes the announce's EIP / EPN and writes its own PV3 (D-NET-520)
+	// [orig: NapiNPProtocol_HandleClientHello @0x621756 / @0x621774 ->
+	//  NapiNPProtocol_SendServerInfoPacket @0x620baa..0x620c0c; PV3 @0x620758..0x62078a].
+	if (!expect(foreign.eip == 0xFFFFFFFFu && foreign.epn == 32786u &&
+	            foreign.pv3 == "CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42",
+	            "the 0x81 echoes EIP / EPN and carries the host's PV3")) return false;
 	foreign.pn = "NOVAWORLDUDP";
 	const std::vector<uint8_t> foreign_reply = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(foreign));
@@ -2695,10 +2709,11 @@ bool run_reconnect_counters_echo_rcnt() {
 }
 
 // A game host's 0x81 writes its OWN protocol identity -- the JO identity the network init
-// installed (CO, AP "Jointops.exe", the 2009 build stamp, PN, PG, PV1, PV2 "16", and no PV3, an
-// empty string on the JO protocol) -- whatever the prober sent, plus UT, the host's uptime in ms,
-// whenever nonzero. [orig: NapiNPProtocol_SendServerInfoPacket @0x620583..0x62078a (the
-// protocol's identity strings, each gated on non-empty), UT @0x62064f..0x620683; the identity
+// installed (CO, AP "Jointops.exe", the 2009 build stamp, PN, PG, PV1, PV2 "16", and the PV3
+// build string, D-NET-520) -- whatever the prober sent, plus UT, the host's uptime in ms,
+// whenever nonzero, and echoes the announce's EIP / EPN. [orig:
+// NapiNPProtocol_SendServerInfoPacket @0x620583..0x62078a (the protocol's identity strings, each
+// gated on non-empty), UT @0x62064f..0x620683, EIP / EPN @0x620baa..0x620be6; the identity
 // CNapiNetwork_Init @0x4ca4a0 installs]
 bool run_host_server_hello_writes_its_own_identity() {
 	inmatch::NapiNPServerCtx ctx;
@@ -2714,6 +2729,8 @@ bool run_host_server_hello_writes_its_own_identity() {
 	probe.ap = "Prober.exe";
 	probe.bdat = "Jan  1 2030 00:00:00";
 	probe.pm = 1; // a host's own announce shape: bypasses the identity check
+	probe.eip = 0x0200A8C0u; // 192.168.0.2, the announce's destination
+	probe.epn = 32786u;
 	const auto dg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(probe));
 	auto r = inmatch::handle_server_datagram(ctx, PeerAddr{0x0100007Fu, 32110}, dg.data(), dg.size(), 1);
 	uint8_t op = 0;
@@ -2728,7 +2745,16 @@ bool run_host_server_hello_writes_its_own_identity() {
 	            "the 0x81 carries the host's own CO / AP / BDAT")) return false;
 	if (!expect(sh.pn == "JOINTOPERATIONS" && sh.pv1 == self.pv1 && sh.pv2 == "16" && sh.pg == self.pg,
 	            "the 0x81 carries the host's own PN / PG / PV1 / PV2, not the prober's")) return false;
-	if (!expect(sh.pv3.empty(), "the JO protocol has no PV3, so the 0x81 writes none")) return false;
+	// D-NET-520: the JO protocol's PV3 is the build string CNapiNetwork_Init installs, the
+	// host's own, not the prober's [orig: CNapiNetwork_Init @0x4ca7e6..0x4ca8c2;
+	//  NapiNPProtocol_SendServerInfoPacket @0x620758..0x62078a].
+	if (!expect(sh.pv3 == "CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42" &&
+	            sh.pv3 == self.pv3,
+	            "the 0x81 carries the host's own PV3 build string")) return false;
+	// The announce's EIP / EPN come back as the reply's [orig: NapiNPProtocol_HandleClientHello
+	//  @0x621756 / @0x621774; SendServerInfoPacket @0x620baa..0x620c0c].
+	if (!expect(sh.eip == 0x0200A8C0u && sh.epn == 32786u,
+	            "the 0x81 echoes the announce's EIP / EPN")) return false;
 	if (!expect(sh.ut == 123456u, "the 0x81 carries the host's uptime as UT")) return false;
 	return true;
 }
@@ -3145,7 +3171,8 @@ bool run_dedicated_host_advertises_and_admits_its_cap() {
 	            "0x64 +48 carries the cfg's unlimited-vehicles word")) return false;
 
 	const uint32_t ci = 0x00005150u;
-	const std::vector<uint8_t> probe = opennova::build_lan_discovery_probe(ci);
+	const std::vector<uint8_t> probe =
+			opennova::build_lan_discovery_probe(ci, 0x0100007Fu, 32768u);
 	auto scan = inmatch::handle_server_datagram(ctx, PeerAddr{0x0100007Fu, 32150},
 			probe.data(), probe.size(), 1);
 	opennova::LanDiscoveryServer found;

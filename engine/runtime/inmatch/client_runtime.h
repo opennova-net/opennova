@@ -497,6 +497,10 @@ public:
 	void set_discovered_session(JoinerConnection::DiscoveredSession session) {
 		if (joiner_) joiner_->set_discovered_session(std::move(session));
 	}
+	// The dialed host (JoinerConnection::set_host_address). Joiner only.
+	void set_host_address(const PeerAddr &host) {
+		if (joiner_) joiner_->set_host_address(host);
+	}
 	// The CD identity cookie (packed PUB* blob) for the 0x00 JOIN. Joiner only.
 	void set_join_cd_cookie(std::vector<uint8_t> cookie) {
 		if (joiner_) joiner_->set_cd_cookie(std::move(cookie));

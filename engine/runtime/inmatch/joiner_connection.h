@@ -239,6 +239,16 @@ public:
 		std::string expansion; // the 0x81 SUS2, echoed in the C2S JOIN EXP TLV
 	};
 	void set_discovered_session(DiscoveredSession session) { discovered_ = std::move(session); }
+	// The connection's peer, the host the connect sends to (the dialed endpoint; zero for a
+	// socketless joiner). A discovered session's record holds the reply's source, which the
+	// 0x42 writes as SIP / SPN; a dial without a row announces to it, and the 0x41 writes its
+	// own destination as EIP / EPN. Each tag only when nonzero. Configure before start().
+	// [orig: CNapiNPConnection_InitFromSession @0x626320 - session+0x18 / +0x1C to conn+0x30 /
+	//  +0x34 @0x6263ae..0x6263b7 (SendClientJoin's SIP / SPN @0x6201a9) and to the peer
+	//  conn+0x158 / +0x15C @0x6263c3..0x6263dc; NapiNPSession_SendAnnouncePacket @0x61fa00 -
+	//  EIP / EPN from its destination @0x61fcf5..0x61fd47; the direct join's resolved address
+	//  CNapiGameSession_InitTransportConnection @0x4c9eb5..0x4c9ec3]
+	void set_host_address(const PeerAddr &host) { host_address_ = host; }
 
 	// Feed one inbound datagram (off the socket, CRC envelope intact). Returns the reply datagrams +
 	// any surfaced 0x0A bodies + whether this datagram learned H.
@@ -904,6 +914,7 @@ private:
 
 	uint32_t server_hk_ = 0;    // ServerHello.hk — echoed in ClientAuth.hk (transient)
 	DiscoveredSession discovered_; // the browse row's 0x81 record (survives start())
+	PeerAddr host_address_{};      // the connection's peer (set_host_address; survives start())
 	// Pre-session UDP legs are reliable-by-retransmit in retail. Cache the already-framed bytes so
 	// retrying never regenerates identity/session material (especially ClientAuth CK/SCRK).
 	MonotonicMilliseconds monotonic_milliseconds_;

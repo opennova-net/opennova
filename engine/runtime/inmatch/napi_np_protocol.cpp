@@ -615,12 +615,19 @@ void handle_client_hello(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	}
 	// client_ip_net: the builders take the IP as the four payload octets in LE packing (so retail's
 	// positional TLV reader prints a.b.c.d) — pass peer.ip verbatim, matching nw_udp_listener.
+	// The hello's EIP / EPN / ET ride back as the reply's, each written when nonzero: a stock
+	// enumerator's 0x41 names its own destination there (the broadcast or the dialed address,
+	// and the port), and the 0x81 echoes it (build_server_hello).
+	// [orig: NapiNPProtocol_HandleClientHello @0x6213b0 - EIP @0x621756, EPN @0x621774, ET
+	//  @0x621792, passed to NapiNPProtocol_SendServerInfoPacket, which writes them
+	//  @0x620baa..0x620c0c]
 	ServerHello reply = build_server_hello(hello, peer.ip, peer.port);
 	// The host writes its OWN protocol identity, not the prober's: the JO identity the
-	// network init installed (no PV3 on the JO protocol, so none is written), and UT, the
+	// network init installed, its PV3 build string included (D-NET-520), and UT, the
 	// uptime, whenever nonzero (D-NET-265). [orig: NapiNPProtocol_SendServerInfoPacket
-	//  @0x620583..0x62078a (CO/AP/BDAT/PN/PG/PV1/PV2/PV3 from the protocol, each gated);
-	//  UT @0x62064f..0x620683; CNapiNetwork_Init @0x4ca4a0]
+	//  @0x620583..0x62078a (CO/AP/BDAT/PN/PG/PV1/PV2/PV3 from the protocol, each gated, PV3
+	//  @0x620758..0x62078a); UT @0x62064f..0x620683; CNapiNetwork_Init @0x4ca4a0, PV3 into
+	//  proto+0x1AC @0x4ca8bb..0x4ca8c2]
 	{
 		const ClientHello self = make_jointoperations_client_hello(0);
 		reply.co = self.co;

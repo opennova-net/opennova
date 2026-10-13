@@ -752,6 +752,43 @@ int test_client_auth_zero_ck_parses() {
 	return 0;
 }
 
+// D-NET-520: the JO protocol's PV3 is the build string the network init assembles, whose
+// bracket pair prints the addresses of two of the image's literals; the 0x41 and the 0x42 of
+// the JO identity carry it right after PV2, and the 0x42's reader keeps it.
+// [orig: CNapiNetwork_Init @0x4ca4a0 - the sprintf @0x4ca83d..0x4ca85b ("3" @0x7C9730,
+//  "2345" @0x7C9714), Napi_CopyString to proto+0x1AC @0x4ca8bb..0x4ca8c2;
+//  NapiNPSession_SendAnnouncePacket @0x61fc68..0x61fc9a; CNapiNPConnection_SendClientJoin
+//  @0x620088..0x6200ba; NapiNPProtocol_HandleClientJoin @0x62BAA3..0x62BAC4]
+int test_jointoperations_pv3_is_the_build_string() {
+	const std::string expected = "CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42";
+	TEST_EXPECT(opennova::kJoBuildTagAddressA == 8165168u && opennova::kJoBuildTagAddressB == 8165140u);
+	TEST_EXPECT(opennova::jointoperations_protocol_version3() == expected);
+	TEST_EXPECT(expected.size() == 63); // exactly the 64-byte field's capacity
+	const ClientHello hello = opennova::make_jointoperations_client_hello(3);
+	TEST_EXPECT(hello.pv3 == expected);
+	const auto hello_names = tlv_field_names(client_hello_to_bytes(hello));
+	const std::vector<std::string> hello_expected = {
+			"NVS", "CO", "AP", "BDAT", "PN", "PG", "PV1", "PV2", "PV3", "CI"};
+	TEST_EXPECT(hello_names == hello_expected);
+
+	const ClientAuth auth = opennova::make_jointoperations_client_auth(
+			3, 0x4667B839u, 0x0FE0E112u, "Builder", "SCRK");
+	TEST_EXPECT(auth.pv3 == expected);
+	const auto bytes = client_auth_to_bytes(auth);
+	const auto names = tlv_field_names(bytes);
+	const std::vector<std::string> expected_names = {
+			"NVS", "CO", "AP", "BDAT", "PN", "PG", "PV1", "PV2", "PV3",
+			"CI", "HK", "CK", "NA", "SCRK"};
+	TEST_EXPECT(names == expected_names);
+	ClientAuth round;
+	TEST_EXPECT(parse_client_auth(bytes.data(), bytes.size(), round));
+	TEST_EXPECT(round.pv3 == expected);
+	// PV3 is not an identity gate: the host compares NVS / PN / PG / PV1 (and PV2) only.
+	round.pv3 = "anything";
+	TEST_EXPECT(opennova::matches_jointoperations_identity(round));
+	return 0;
+}
+
 // A session key is drawn until it is nonzero: a draw of {0, 0, 9} keys 9 on the third draw,
 // and a nonzero first draw is kept as drawn.
 // [orig: NapiNP_GenerateSessionKey @0x61EA70 - jz @0x61EAC3]
@@ -1129,6 +1166,7 @@ int main() {
 	if (test_client_auth_minimum_for_acceptance() != 0) return 1;
 	if (test_client_auth_zero_ck_parses() != 0) return 1;
 	if (test_session_key_draws_until_nonzero() != 0) return 1;
+	if (test_jointoperations_pv3_is_the_build_string() != 0) return 1;
 	if (test_client_and_server_auth_tag_names_are_case_insensitive() != 0) return 1;
 	if (test_cs_field13_follows_the_mpmaxpacketsize_clamp() != 0) return 1;
 	if (test_server_auth_rejection_roundtrip() != 0) return 1;

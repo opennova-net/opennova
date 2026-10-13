@@ -290,14 +290,23 @@ std::vector<uint8_t> JoinerConnection::start() {
 std::vector<uint8_t> JoinerConnection::build_client_hello() {
 	// The browse and connect legs use the same retail JO identity. The callsign
 	// belongs in ClientAuth.NA (not CO) and is later echoed into the organic-spawn
-	// named organic record by the host.
-	return nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO,
-	                          client_hello_to_bytes(make_jointoperations_client_hello(client_index_)));
+	// named organic record by the host. A dial without a row announces to the dialed
+	// host, whose address and port the announce writes as its EIP / EPN.
+	// [orig: NapiNPSession_SendAnnouncePacket @0x61fa00 - @0x61fcf5..0x61fd47;
+	//  CNapiGameSession_InitTransportConnection @0x4c9ec3 (the resolved address)]
+	ClientHello hello = make_jointoperations_client_hello(client_index_);
+	hello.eip = host_address_.ip;
+	hello.epn = host_address_.port;
+	return nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 }
 
 std::vector<uint8_t> JoinerConnection::build_client_auth() {
 	ClientAuth auth = make_jointoperations_client_auth(
 			client_index_, client_key_, server_hk_, player_name_, conn_.client_scrk);
+	// The session record's address and port: the host the reply came from.
+	// [orig: CNapiNPConnection_InitFromSession @0x6263ae..0x6263b7]
+	auth.sip = host_address_.ip;
+	auth.spn = host_address_.port;
 	// [orig: CNapiNPConnection_SendClientJoin @0x61fe20, SF & 1 gates PW]
 	if (server_password_required_) auth.pw = server_password_;
 	// Lifecycle trace (kInfo -> MCP log ring): the APPID join token (decoded .joi

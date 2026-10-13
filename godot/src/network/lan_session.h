@@ -51,7 +51,6 @@ private:
 	Ref<PacketPeerUDP> socket_;
 	TypedArray<LanServerRow> servers_;
 	String browse_target_;
-	PackedByteArray probe_;
 };
 
 } // namespace godot

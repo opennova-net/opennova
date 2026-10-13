@@ -51,6 +51,10 @@ int main() {
 				!matches_jointoperations_identity(client_hello)) {
 			return;
 		}
+		// A stock direct announce names its destination as EIP / EPN (D-NET-520)
+		// [orig: NapiNPSession_SendAnnouncePacket @0x61fa00 - @0x61fcf5..0x61fd47].
+		if (client_hello.eip != 0x0100007Fu || client_hello.epn != host_port)
+			return;
 
 		ServerHello hello = build_server_hello(client_hello, 0x7F000001u, client.port);
 		hello.sn = "Expected Host";
