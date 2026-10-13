@@ -84,9 +84,6 @@ public:
 	// The Problems rows of the open documents whose file changed outside the editor and was not
 	// read again.
 	std::vector<Diagnostic> findings() const;
-	// The document at `path` was read again, saved or closed: what its file did outside the editor
-	// is no longer a row.
-	void forget_file_state(const std::string &path);
 
 	// --- the requests ------------------------------------------------------------------------
 
@@ -141,8 +138,6 @@ public:
 	// failure, then one refresh; false when one could not be written. `over`: as save's.
 	bool save_documents(const std::vector<std::string> &paths, bool rewrite, const std::string &over = std::string(),
 	                    bool name_files = false);
-	// What a document's last save said beyond writing, an Output line each; how many lines.
-	size_t note_save(const DocumentBase &document);
 	// EndEdit on every open document: the coalesced groups and the gestures end, and the validation
 	// a gesture's edits left waiting is due.
 	void end_edit_groups();
@@ -167,14 +162,6 @@ public:
 	// ground), the active document kept: a tab with its dirty dot, a status line and an Output line naming `why`. The
 	// open document (one open already as it is), null where it does not open (the refusal reported).
 	DocumentBase *open_quietly(const std::string &path, const std::string &why);
-	// The document at `edited` was edited from the view of the document at `view` (a terrain stroke, a tile tool): it
-	// joins the view's undo, save and close scope.
-	void note_edited_from(const std::string &view, const std::string &edited);
-	// The open documents of a view's scope: the view's own first, then those edited from it, in the order noted.
-	std::vector<std::string> scope_of(const std::string &view) const;
-	// What a Save in a view writes: its document, the documents of its scope with unsaved edits, and those a gesture
-	// of theirs changed with unsaved edits too (the missions that followed a stroke).
-	std::vector<std::string> save_scope(const std::string &view) const;
 	// What a Close of the document at `path` lists beside it: the documents of its scope with unsaved edits.
 	std::vector<std::string> scope_unsaved(const std::string &path) const;
 	// A batch the terrain tools planned applied to `document` as edit_record applies one (refused as it refuses one:
@@ -197,6 +184,19 @@ public:
 	static bool position_after(const Document &document, const NodeAddress &record, NodeId &parent, size_t &position);
 
 private:
+	// The document at `path` was read again, saved or closed: what its file did outside the editor
+	// is no longer a row.
+	void forget_file_state(const std::string &path);
+	// What a document's last save said beyond writing, an Output line each; how many lines.
+	size_t note_save(const DocumentBase &document);
+	// The document at `edited` was edited from the view of the document at `view` (a terrain stroke, a tile tool): it
+	// joins the view's undo, save and close scope.
+	void note_edited_from(const std::string &view, const std::string &edited);
+	// The open documents of a view's scope: the view's own first, then those edited from it, in the order noted.
+	std::vector<std::string> scope_of(const std::string &view) const;
+	// What a Save in a view writes: its document, the documents of its scope with unsaved edits, and those a gesture
+	// of theirs changed with unsaved edits too (the missions that followed a stroke).
+	std::vector<std::string> save_scope(const std::string &view) const;
 	// The name a file create_file made defines (its request's define, DI-33), added to its open document as
 	// its type's Add makes one (an edit_record of the type's batch, opened first, selecting it); false, said
 	// in Problems and on the status line, where the type defines no name of the kind there.

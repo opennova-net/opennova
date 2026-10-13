@@ -47,13 +47,13 @@ public:
 	void end_discard() { discarding_ = false; }
 	// A Discard's request is running past the prompt (a Quit drops the documents then).
 	bool discarding() const { return discarding_; }
-	// The prompt closed, the request it held dropped.
-	void close_prompt();
 	void close_prompt_if_open() {
 		if (pending_) close_prompt();
 	}
 
 private:
+	// The prompt closed, the request it held dropped.
+	void close_prompt();
 	// Play's own Save all, with save_before_play on (the Play's own, else the project's; DI-26): the files written without asking;
 	// true when it wrote (what it could not stays unsaved, for the prompt).
 	bool saved_first(const EditorRequest &request, const std::vector<std::string> &unsaved);
