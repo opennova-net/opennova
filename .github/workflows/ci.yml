@@ -219,7 +219,7 @@ jobs:
       - name: Build
         if: env.CODE == 'true'
         shell: bash
-        run: scripts/build.sh --no-godot --suite core --no-test
+        run: scripts/build.sh --no-godot --suite core --no-test --cmake-arg -DCMAKE_LINKER_TYPE=LLD
 
       # Right after the build, so the step's numbers are this build's hit rate.
       - name: sccache stats
@@ -245,29 +245,8 @@ jobs:
             build/Testing/
             build/.ninja_log
 
-      # The retail data the asset gates need (docs/asset-gated-tests.md): the
-      # composite action restores or checks out the two private reference
-      # repositories and exports the two roots.
-      - name: Mount the reference data
-        if: env.CODE == 'true' && env.RETAIL == 'true'
-        uses: ./.github/actions/mount-reference-data
-        with:
-          token: ${{ secrets.REFERENCE_ASSETS_TOKEN }}
-          enabled: ${{ env.RETAIL }}
-
-      - name: Test (retail)
-        if: env.CODE == 'true' && env.RETAIL == 'true'
-        shell: bash
-        run: scripts/build.sh --no-godot --suite retail
-
-      - name: Upload native retail test reports
-        if: always() && env.CODE == 'true' && env.RETAIL == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: native-retail-reports
-          if-no-files-found: warn
-          path: build/Testing/
-
+      # The one Windows leg that saves the win-root flavour: test-retail builds
+      # the same objects and only reads it.
       - name: Save the compiler cache
         if: env.CODE == 'true'
         uses: ./.github/actions/compiler-cache
