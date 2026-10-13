@@ -339,7 +339,7 @@ int main() {
 					"begin item 3\r\n  type_id 6013\r\n  id 4\r\n  position 1966080 -655360 0\r\n  "
 					"wpnumber 3\r\nend item\r\n\r\n"
 					"begin item 4\r\n  type_id 6013\r\n  id 5\r\n  position 65536 0 0\r\n  "
-					"wpnumber 7\r\n  extra_valmode 1\r\nend item\r\n\r\n"
+					"wpnumber 7\r\n  extra_valmode 1\r\n  extra_bheight 65536\r\nend item\r\n\r\n"
 					"begin item 5\r\n  type_id 6013\r\n  id 6\r\n  position 131072 0 0\r\n  "
 					"wpnumber 7\r\nend item\r\n\r\n";
 			bms::File areas_read;
@@ -377,7 +377,8 @@ int main() {
 				TEST_EXPECT(items_counted(as_read) &&
 						as_read.find("  num_items 6\r\n") != std::string::npos);
 				TEST_EXPECT(count_of(as_read, "  type_id 6013\r\n") == 5 &&
-						as_read.find("  extra_valmode 1\r\n") != std::string::npos);
+						as_read.find("  extra_valmode 1\r\n") != std::string::npos &&
+						as_read.find("  extra_bheight 65536\r\n") != std::string::npos);
 				bms::File again;
 				TEST_EXPECT(parse_mis_text(as_read, {}, again, error));
 				TEST_EXPECT(again.mis_area_markers.size() == 5 && again.area_triggers.size() == 1 &&
@@ -403,13 +404,27 @@ int main() {
 				edited.area_triggers.clear();
 				TEST_EXPECT(write_mis_text(edited, written, error));
 				TEST_EXPECT(items_counted(written) && count_of(written, "  type_id 6013\r\n") == 2);
+				// Zone 3's least-x marker locked: its edited box's corners are written locked, as
+				// it was.
+				bms::File locked = areas_read;
+				for (bms::MisAreaMarker &m : locked.mis_area_markers)
+					if (m.zone == 3 && m.x == 655360)
+						m.height_lock = 1;
+				locked.area_triggers[0].x_max += 65536;
+				TEST_EXPECT(write_mis_text(locked, written, error));
+				const size_t corner = written.find("  position 655360 -2621440 0\r\n");
+				TEST_EXPECT(corner != std::string::npos &&
+						written.find("  height_lock 1\r\n", corner) <
+								written.find("end item", corner));
 			}
 			mis_items_to_bms_frame(areas_read, flat);
-			// Zone 7, which the export makes no area of, keeps its markers as read.
+			// Zone 7, which the export makes no area of, keeps its markers as read, its least-x
+			// marker's base among them.
 			TEST_EXPECT(areas_read.area_triggers.size() == 1 &&
 					areas_read.mis_area_markers.size() == 2 &&
 					areas_read.mis_area_markers[0].zone == 7 &&
-					areas_read.mis_area_markers[0].extra_valmode == 1);
+					areas_read.mis_area_markers[0].extra_valmode == 1 &&
+					areas_read.mis_area_markers[0].extra_bheight == 65536);
 			if (areas_read.area_triggers.size() == 1)
 				TEST_EXPECT(areas_read.area_triggers[0].z_min == 50 * 65536 &&
 						areas_read.area_triggers[0].z_max == 52 * 65536);

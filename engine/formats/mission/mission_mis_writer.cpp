@@ -86,7 +86,9 @@ const bms::MisAreaMarker *zone_box(
 // keeps it; in the .bms's frame locked (their z absolute, which the original reads exact over
 // whatever terrain it loads [orig: JOTACmed.exe sub_44E6A0 @ 0x44e6a0, the lock tested nonzero]);
 // in the .mis's, as the zone's least-x marker was (its box's z in that marker's frame), locked for
-// a zone of none. A corner's base is 0: Nile stands a locked item at its z less its base [orig:
+// a zone of none. A zone whose markers' locks differ has a box of z read in two frames, which no
+// pair of corners keeps apart: its corners take the least-x marker's lock, the one the original's
+// rebuild keeps. A corner's base is 0: Nile stands a locked item at its z less its base [orig:
 // misldr.dll MisLdr_WriteNileProjectXml @ 0x10004930, the 6013 branch], so the corner stands at its
 // z. A zone's markers no area takes (the area gone) go.
 std::vector<bms::MisAreaMarker> mis_area_markers_written(const bms::File &file) {
