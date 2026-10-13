@@ -515,9 +515,9 @@ func _recompute_fit() -> void:
 
 # The show's RULELIST text, the RULES tab's read-only multiline edit (the
 # engine's command_map_rules_text: the session status, win conditions, rules,
-# briefing and scoring rules), its first line scrolled back to the top;
-# nothing built leaves the control's old text (hud-re D-HUD-19, "The windowed
-# map views").
+# briefing and scoring rules), the set itself scrolling it back to its first
+# line (engine MenuRuntime::set_widget_text); nothing built leaves the
+# control's old text (hud-re D-HUD-19, "The windowed map views").
 func _fill_rules_text() -> void:
 	var id := _driver.widget_id("RULELIST")
 	var sim: Simulation = _view.sim() if _view != null else null
@@ -527,4 +527,3 @@ func _fill_rules_text() -> void:
 	if text.is_empty():
 		return
 	_driver.set_widget_text(id, text)
-	_driver.set_scroll_row(id, 0)
