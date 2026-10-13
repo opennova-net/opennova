@@ -99,8 +99,9 @@ HostRegistration ServeListing::registration() const {
 }
 
 // One PlayerList slot per player the match added: a remote connection past its player add, at
-// its slot, with its UDP source as inet_ntoa:port, its cookie's PCID and its team. A mode-1 host
-// builds no local connection, so its own slot 0 is never published.
+// its slot, with its UDP source as inet_ntoa:port, its cookie's PCID and the PlayerTeam /
+// PlayerType the match keeps for it (NapiNPConnection::player_list_team / player_list_type). A
+// mode-1 host builds no local connection, so its own slot 0 is never published.
 // [orig: Server_PlayerAdd @0x51cbc0 — PlayerIpAndPort @0x51d3d1..0x51d3f2 (Napi_FormatAddress
 //  @0x62ded0), the five vars @0x51d441..0x51d4aa; CNapiGameSession_CreateSession @0x4c9b73]
 std::vector<HostPlayerSlot> ServeListing::wanted_roster(const std::map<int, HostPlayerSlot> &current) const {
@@ -115,8 +116,8 @@ std::vector<HostPlayerSlot> ServeListing::wanted_roster(const std::map<int, Host
 		slot.player_name = c.player_name;
 		slot.ip_and_port = peer_addr_to_string(c.peer);
 		slot.pcid = c.account.pcid;
-		if (c.assigned_team_valid) slot.team = std::to_string(c.assigned_team);
-		slot.type = "0";
+		slot.team = std::to_string(c.player_list_team);
+		slot.type = std::to_string(c.player_list_type);
 		out.push_back(std::move(slot));
 	}
 	return out;

@@ -685,7 +685,7 @@ int MenuDriver::table_sort_column(int p_id) const {
 // engine's fill (inmatch stat_screen_feed.h, where the witness lives) over the
 // records' own values, so the NAME and Squad cells take the roster's bytes.
 void MenuDriver::fill_stat_results(int p_id, const TypedArray<EndRoundColumn> &p_columns,
-		const TypedArray<EndRoundRow> &p_rows) {
+		const TypedArray<EndRoundRow> &p_rows, int p_local_slot) {
 	std::vector<opennova::inmatch::StatScreenColumn> columns;
 	columns.reserve(static_cast<size_t>(p_columns.size()));
 	for (int i = 0; i < p_columns.size(); ++i) {
@@ -698,7 +698,7 @@ void MenuDriver::fill_stat_results(int p_id, const TypedArray<EndRoundColumn> &p
 		const Ref<EndRoundRow> row = p_rows[i];
 		if (row.is_valid()) rows.push_back(row->value());
 	}
-	opennova::inmatch::fill_stat_results(runtime_, p_id, columns, rows);
+	opennova::inmatch::fill_stat_results(runtime_, p_id, columns, rows, p_local_slot);
 }
 
 // The death screen's SPAWNPOINTS_LIST from the compiled rows: the engine's items
@@ -1157,7 +1157,7 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("table_select_row", "id", "row", "additive"),
 			&MenuDriver::table_select_row, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("table_sort_column", "id"), &MenuDriver::table_sort_column);
-	ClassDB::bind_method(D_METHOD("fill_stat_results", "id", "columns", "rows"),
+	ClassDB::bind_method(D_METHOD("fill_stat_results", "id", "columns", "rows", "local_slot"),
 			&MenuDriver::fill_stat_results);
 	ClassDB::bind_method(D_METHOD("set_deploy_list_items", "id", "rows"),
 			&MenuDriver::set_deploy_list_items);

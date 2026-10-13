@@ -62,7 +62,8 @@ public:
 			const world::World &world, world::EntityHandle handle) const;
 	// A decoded handle's own native row, as every joiner per-row read takes
 	// it: a header-only world's owned row (this materializer's lifetime), a
-	// full-BMS join's promoted registry row (spawn-origin gated).
+	// full-BMS join's promoted registry row (spawn-origin gated, or one of the
+	// promote's addeweap children, which carry no spawn origin).
 	world::Entity *replica_world_entity(world::World &world, world::EntityHandle handle,
 			bool wire_header_world) const;
 	void clear() {
@@ -108,5 +109,15 @@ private:
 	// The next spawn_origin index per kind (Marker/Item/Building/Organic).
 	int placement_index_next_[4] = {0, 0, 0, 0};
 };
+
+// A decoded row's own native row while it is still the row's type: the
+// materializer's replica rule (replica_world_entity), or with no materializer
+// the handle's registry row. Retail keeps one entity per slot, the wire handle
+// naming the slot's entity, so a joiner's per-row reads never take another
+// lifetime's state [orig: NapiNPClientMsg_EntityDeath @0x42EBC6, the handle's
+// slot address in its pool].
+world::Entity *replica_row_entity(const ClientWorldMaterializer *materializer,
+		world::World &world, world::EntityHandle handle, uint16_t type_id,
+		bool wire_header_world);
 
 } // namespace opennova::replication

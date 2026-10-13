@@ -70,6 +70,7 @@ struct Rig {
         veh.bms_id = 11;
         veh.kind = EntityKind::Item;
         veh.has_item_def = true; // pool-1 sources need an ItemDef (retail gate)
+        veh.has_graphic_model = true;
         // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
         veh.item_attrib = kItemAttribPlayerControl;
         veh.item_id = 1294;
@@ -214,6 +215,7 @@ void test_usegun_attach_presnaps_local_look() {
     Entity gun;
     gun.kind = EntityKind::Item;
     gun.has_item_def = true; // seats need the def (D-NET-422)
+    gun.has_graphic_model = true;
     gun.health = 100;
     gun.alive = true;
     gun.yaw = 35;
@@ -391,6 +393,7 @@ void test_remote_player_control_seat_preserves_wire_look() {
         Entity vehicle;
         vehicle.kind = EntityKind::Item;
         vehicle.has_item_def = true; // seats need the def (D-NET-422)
+        vehicle.has_graphic_model = true;
         // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
         vehicle.item_attrib = kItemAttribPlayerControl;
         vehicle.position = {10.0f, 20.0f, 30.0f};
@@ -462,6 +465,7 @@ void test_live_pose_provider_and_static_fallback() {
         vehicle.net_id = 200;
         vehicle.kind = EntityKind::Item;
         vehicle.has_item_def = true; // seats need the def (D-NET-422)
+        vehicle.has_graphic_model = true;
         vehicle.position = {10.0f, 20.0f, 30.0f};
         vehicle.yaw = 90;
         vehicle.pitch = 4;
@@ -503,6 +507,7 @@ void test_live_pose_provider_and_static_fallback() {
         vehicle.net_id = 200;
         vehicle.kind = EntityKind::Item;
         vehicle.has_item_def = true; // seats need the def (D-NET-422)
+        vehicle.has_graphic_model = true;
         vehicle.health = 100;
         vehicle.alive = true;
         Seat seat;
@@ -563,6 +568,7 @@ void test_live_pose_provider_and_static_fallback() {
         vehicle.net_id = 200;
         vehicle.kind = EntityKind::Item;
         vehicle.has_item_def = true; // seats need the def (D-NET-422)
+        vehicle.has_graphic_model = true;
         vehicle.yaw = 90;
         vehicle.health = 100;
         vehicle.alive = true;
@@ -902,6 +908,7 @@ void test_binoculars_survive_all_but_the_camera_reset() {
         Entity carrier;
         carrier.kind = EntityKind::Item;
         carrier.has_item_def = true;
+        carrier.has_graphic_model = true;
         carrier.item_type = 1;
         carrier.item_attrib = kItemAttribEweap;
         carrier.primary_weapon = "WPN_HULL";
@@ -981,6 +988,7 @@ void test_best_seat_walks_vehicle_children() {
     Entity root;
     root.kind = EntityKind::Item;
     root.has_item_def = true; // seats need the def (D-NET-422)
+    root.has_graphic_model = true;
     root.health = 100;
     root.alive = true;
     Seat passenger;
@@ -992,6 +1000,7 @@ void test_best_seat_walks_vehicle_children() {
     Entity child;
     child.kind = EntityKind::Item;
     child.has_item_def = true; // seats need the def (D-NET-422)
+    child.has_graphic_model = true;
     child.health = 100;
     child.alive = true;
     child.ground_target = root_h;
@@ -1082,6 +1091,7 @@ void test_seat_gates_read_the_dead_bit_alone() {
     Entity child;
     child.kind = EntityKind::Item;
     child.has_item_def = true;
+    child.has_graphic_model = true;
     child.health = 0;
     child.alive = false;
     child.ground_target = r.veh_h;
@@ -1175,6 +1185,7 @@ void test_post_epoch_player_spawn_discovers_nearby_seat_immediately() {
     Entity vehicle;
     vehicle.kind = EntityKind::Item;
     vehicle.has_item_def = true; // seats need the def (D-NET-422)
+    vehicle.has_graphic_model = true;
     vehicle.position = {10.0f, 20.0f, 0.0f};
     vehicle.health = 100;
     vehicle.alive = true;
@@ -1217,6 +1228,7 @@ void test_restore_refreshes_completed_candidate_epoch() {
     Entity other;
     other.kind = EntityKind::Item;
     other.has_item_def = true; // seats need the def (D-NET-422)
+    other.has_graphic_model = true;
     other.position = {200.0f, 200.0f, 10.0f};
     other.health = 100;
     other.alive = true;
@@ -1481,6 +1493,7 @@ void test_enemy_on_carried_gun_blocks_root_and_sibling() {
 	Entity gun;
 	gun.kind = EntityKind::Item;
 	gun.has_item_def = true;
+	gun.has_graphic_model = true;
 	gun.item_type = 6;
 	gun.item_attrib = kItemAttribEweap;
 	gun.ground_target = r.veh_h;
@@ -1527,6 +1540,7 @@ void test_carrier_without_a_def_takes_no_rider() {
 		Entity ride;
 		ride.kind = EntityKind::Item;
 		ride.has_item_def = true;
+		ride.has_graphic_model = true;
 		ride.position = {140.0f, 200.0f, 10.0f};
 		ride.health = 500;
 		ride.health_max = 500;
@@ -1561,6 +1575,7 @@ void test_carrier_without_a_def_takes_no_rider() {
 
 		// A dead carrier or a dead requester: Flags & 2 alone refuses.
 		r.veh().has_item_def = true;
+		r.veh().has_graphic_model = true;
 		r.veh().flags |= kEntityFlagDead;
 		CHECK(!r.w.vehicles.process_attach(r.player_h, r.veh_h, 2));
 		still_riding();
@@ -1602,6 +1617,7 @@ void test_carrier_without_a_def_takes_no_rider() {
 		CHECK(!find_best_vehicle_seat(r.w, bare_h, r.player_h, hit));
 		// With its def the same seat wins the scan.
 		r.w.registry.get(bare_h)->has_item_def = true;
+		r.w.registry.get(bare_h)->has_graphic_model = true;
 		CHECK(r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
 		CHECK(hit.vehicle == bare_h);
 		CHECK(find_best_vehicle_seat(r.w, bare_h, r.player_h, hit));
@@ -1618,6 +1634,7 @@ void test_carrier_without_a_def_takes_no_rider() {
 		Entity root;
 		root.kind = EntityKind::Item;
 		root.has_item_def = true;
+		root.has_graphic_model = true;
 		root.health = 100;
 		root.alive = true;
 		Seat sit;
@@ -1644,8 +1661,143 @@ void test_carrier_without_a_def_takes_no_rider() {
 		CHECK(find_best_vehicle_seat(w, root_h, player_h, pick));
 		CHECK(pick.vehicle == root_h && pick.type == SeatType::Passenger);
 		w.registry.get(child_h)->has_item_def = true;
+		w.registry.get(child_h)->has_graphic_model = true;
 		CHECK(find_best_vehicle_seat(w, root_h, player_h, pick));
 		CHECK(pick.vehicle == child_h && pick.type == SeatType::Gunner);
+	}
+}
+
+// A candidate with its def but no graphic model (+0x30; a BMS marker, which
+// the mission start's model pass gives none, keeps its type's seat rows)
+// offers nothing: the use-key scan and the label pass skip it, so does the
+// best-seat search's per-entry walk, and the admission refuses such a carrier
+// before its walk. [orig: Entity_FindNearestSeatOrArmory @0x435E40..0x435E45;
+// HUD_DrawVehicleSeatAndArmoryLabels @0x5A3365..0x5A3369;
+// Entity_FindBestSeatSlot @0x4352DD..0x4352DF; Entity_CanEnterVehicle
+// @0x435498..0x43549A; Game_ReloadEntityModelsAndCallbacks @0x522830]
+void test_carrier_without_a_model_takes_no_rider() {
+	{
+		// The def-less test's geometry: the modelless carrier's sitex seat dead
+		// ahead at 1.5 u would outscore the truck's control seat.
+		Rig r(2.0f);
+		Entity bare;
+		bare.kind = EntityKind::Item;
+		bare.has_item_def = true;
+		bare.position = {102.0f, 201.5f, 10.0f};
+		bare.health = 500;
+		bare.health_max = 500;
+		bare.alive = true;
+		Seat sit;
+		sit.type = SeatType::Passenger;
+		sit.bone_index = 1;
+		sit.source_name = "sitex00";
+		sit.seat_local = {0.0f, 0.0f, -0.1875f};
+		bare.seats.push_back(sit);
+		const EntityHandle bare_h = r.w.registry.spawn(1, bare);
+		VehicleSeatSelection hit;
+		CHECK(r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
+		CHECK(hit.vehicle == r.veh_h && hit.seat_index == 0);
+		std::vector<AttachLabel> labels;
+		r.w.vehicles.collect_attach_labels(r.player(), false, false, labels);
+		CHECK(labels.size() == 2);
+		for (const AttachLabel &l : labels) CHECK(l.entity == r.veh_h);
+		CHECK(!find_best_vehicle_seat(r.w, bare_h, r.player_h, hit));
+		// With its model the same seat wins the scan and labels.
+		r.w.registry.get(bare_h)->has_graphic_model = true;
+		CHECK(r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
+		CHECK(hit.vehicle == bare_h);
+		labels.clear();
+		r.w.vehicles.collect_attach_labels(r.player(), false, false, labels);
+		bool saw_bare = false;
+		for (const AttachLabel &l : labels) saw_bare = saw_bare || l.entity == bare_h;
+		CHECK(saw_bare);
+		CHECK(find_best_vehicle_seat(r.w, bare_h, r.player_h, hit));
+	}
+	{
+		// An Armory crate with its def and an armory point but no model: armory
+		// mode finds nothing.
+		Rig r(2.0f);
+		Entity crate;
+		crate.kind = EntityKind::Item;
+		crate.has_item_def = true;
+		crate.item_id = 1125;
+		crate.position = {99.0f, 199.0f, 10.0f};
+		crate.health = 100;
+		crate.health_max = 100;
+		crate.alive = true;
+		crate.armory_points.push_back({0.0f, 0.0f, 1.0f});
+		const EntityHandle crate_h = r.w.registry.spawn(1, crate);
+		look_at(r.w, r.player_h, {99.0f, 199.0f, 11.0f});
+		VehicleSeatSelection hit;
+		CHECK(!r.w.vehicles.find_nearest_free_seat(r.player(), hit, true));
+		std::vector<AttachLabel> labels;
+		r.w.vehicles.collect_attach_labels(r.player(), true, false, labels);
+		CHECK(labels.empty());
+		r.w.registry.get(crate_h)->has_graphic_model = true;
+		CHECK(r.w.vehicles.find_nearest_free_seat(r.player(), hit, true));
+		CHECK(hit.vehicle == crate_h && hit.type == SeatType::ArmoryPoint);
+	}
+	{
+		// The best-seat search passes over a modelless child whose UseGun seat
+		// outweighs the root's sitex seat.
+		World w;
+		w.registry.configure_pool(0, 4);
+		w.registry.configure_pool(1, 4);
+		Entity root;
+		root.kind = EntityKind::Item;
+		root.has_item_def = true;
+		root.has_graphic_model = true;
+		root.health = 100;
+		root.alive = true;
+		Seat sit;
+		sit.type = SeatType::Passenger;
+		sit.bone_index = 1;
+		root.seats.push_back(sit);
+		const EntityHandle root_h = w.registry.spawn(1, root);
+		Entity child;
+		child.kind = EntityKind::Item;
+		child.has_item_def = true;
+		child.health = 100;
+		child.alive = true;
+		child.ground_target = root_h;
+		Seat gun;
+		gun.type = SeatType::Gunner;
+		gun.bone_index = 2;
+		child.seats.push_back(gun);
+		const EntityHandle child_h = w.registry.spawn(1, child);
+		Entity player;
+		player.kind = EntityKind::Organic;
+		player.health = 100;
+		player.alive = true;
+		const EntityHandle player_h = w.registry.spawn(0, player);
+		VehicleSeatSelection pick;
+		CHECK(find_best_vehicle_seat(w, root_h, player_h, pick));
+		CHECK(pick.vehicle == root_h && pick.type == SeatType::Passenger);
+		w.registry.get(child_h)->has_graphic_model = true;
+		CHECK(find_best_vehicle_seat(w, root_h, player_h, pick));
+		CHECK(pick.vehicle == child_h && pick.type == SeatType::Gunner);
+	}
+	{
+		// The admission: a modelless carrier at its spawn anchor, whose
+		// ground-attached child has its def, its model and a seat, is refused
+		// before the walk would find the child's seat.
+		Rig r;
+		r.veh().spawn_position = r.veh().position;
+		Entity child;
+		child.kind = EntityKind::Item;
+		child.has_item_def = true;
+		child.has_graphic_model = true;
+		child.health = 100;
+		child.alive = true;
+		child.ground_target = r.veh_h;
+		Seat sit;
+		sit.type = SeatType::Passenger;
+		sit.bone_index = 1;
+		child.seats.push_back(sit);
+		(void)r.w.registry.spawn(1, child);
+		CHECK(vehicle_can_enter(r.w, nullptr, r.veh()));
+		r.veh().has_graphic_model = false;
+		CHECK(!vehicle_can_enter(r.w, nullptr, r.veh()));
 	}
 }
 
@@ -1903,6 +2055,7 @@ void test_bms_mount_predicates() {
     gun.bms_id = 500;
     gun.kind = EntityKind::Item;
     gun.has_item_def = true; // seats need the def (D-NET-422)
+    gun.has_graphic_model = true;
     gun.item_id = 1800;
     gun.item_type_index = 7;
     gun.position = r.veh().position;
@@ -1977,6 +2130,7 @@ void test_mounted_ammo_slot_route() {
     Entity direct_only;
     direct_only.primary_weapon_slot_adm = 3;
     direct_only.has_item_def = true;
+    direct_only.has_graphic_model = true;
     direct_only.item_attrib = kItemAttribEweap;
     CHECK(w.vehicles.resolve_mounted_ammo_slot(direct_only) ==
           &direct_only.primary_weapon_slot);
@@ -1986,6 +2140,7 @@ void test_mounted_ammo_slot_route() {
     Entity parent;
     parent.kind = EntityKind::Item;
     parent.has_item_def = true;
+    parent.has_graphic_model = true;
     parent.item_type = 1;
     parent.item_attrib = kItemAttribEweap;
     parent.primary_weapon_slot.clip = 41;
@@ -1996,6 +2151,7 @@ void test_mounted_ammo_slot_route() {
     Entity child;
     child.kind = EntityKind::Item;
     child.has_item_def = true;
+    child.has_graphic_model = true;
     child.item_type = 2;
     child.item_attrib = kItemAttribEweap;
     child.emplacement_attachment_flags = 0x02; // designated G capability
@@ -2192,6 +2348,7 @@ void test_epilog_entity_update() {
     Entity prop;
     prop.kind = EntityKind::Item;
     prop.has_item_def = true;
+    prop.has_graphic_model = true;
     prop.item_id = 999;
     prop.position = {50.0f, 60.0f, 7.0f};
     prop.health = 100;
@@ -3423,6 +3580,7 @@ void test_attach_labels_can_fire_gate() {
     veh2.net_id = 12;
     veh2.kind = EntityKind::Item;
     veh2.has_item_def = true; // seats need the def (D-NET-422)
+    veh2.has_graphic_model = true;
     veh2.item_id = 1295;
     veh2.position = {103.0f, 200.0f, 10.0f}; // ~2 u from the player at 101,200
     veh2.health = 500;
@@ -3459,6 +3617,7 @@ void test_attach_labels_armory_mode() {
     crate.net_id = 21;
     crate.kind = EntityKind::Item;
     crate.has_item_def = true; // armory points need the def (D-NET-422)
+    crate.has_graphic_model = true;
     crate.item_id = 1125; // "Armory Version #1"
     crate.position = {99.0f, 199.0f, 10.0f};
     crate.health = 100;
@@ -3507,6 +3666,7 @@ void test_attach_labels_build_enemy_occupancy_once() {
         Entity vehicle;
         vehicle.kind = EntityKind::Item;
         vehicle.has_item_def = true; // seats need the def (D-NET-422)
+        vehicle.has_graphic_model = true;
         vehicle.position = {
             100.1f + 0.05f * static_cast<float>(i), 200.0f, 10.0f};
         vehicle.health = 100;
@@ -4115,6 +4275,7 @@ static void test_seat_bone_failure_runs_the_seat_tail() {
         vehicle.health = 100;
         vehicle.alive = true;
         vehicle.has_item_def = true;
+        vehicle.has_graphic_model = true;
         Seat seat;
         seat.type = SeatType::Passenger;
         seat.bone_index = 7;
@@ -4167,6 +4328,7 @@ static void test_board_pass_on_an_attached_gun_stays_on_foot() {
     carrier.net_id = 30;
     carrier.kind = EntityKind::Item;
     carrier.has_item_def = true;
+    carrier.has_graphic_model = true;
     carrier.health = 100;
     carrier.alive = true;
     const EntityHandle carrier_h = w.registry.spawn(1, carrier);
@@ -4174,6 +4336,7 @@ static void test_board_pass_on_an_attached_gun_stays_on_foot() {
     gun.net_id = 31;
     gun.kind = EntityKind::Item;
     gun.has_item_def = true;
+    gun.has_graphic_model = true;
     gun.item_type = 6;
     gun.item_attrib = kItemAttribEweap;
     gun.health = 100;
@@ -4270,6 +4433,7 @@ static void test_npc_seat_bone_failure_kills_boarders_and_detaches() {
         // The attach needs the def (D-NET-422); a def-less carrier loses it
         // after the boarding below.
         vehicle.has_item_def = true;
+        vehicle.has_graphic_model = true;
         // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
         vehicle.item_attrib = kItemAttribPlayerControl;
         vehicle.ground_target = deck_h;
@@ -4422,6 +4586,7 @@ int main() {
 	test_scan_uses_live_eye_offset();
 	test_enemy_on_carried_gun_blocks_root_and_sibling();
 	test_carrier_without_a_def_takes_no_rider();
+	test_carrier_without_a_model_takes_no_rider();
 	test_attach_yaw_snaps_at_the_request_alone();
 	test_vehicle_admission_stationary_threshold_and_deck();
 	test_seated_board_any_upgrades_on_64_tick_phase();

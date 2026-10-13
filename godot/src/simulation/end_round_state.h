@@ -30,6 +30,8 @@ public:
 	bool is_board_known() const { return value_.board_known; }
 	int64_t get_game_type() const { return static_cast<int64_t>(value_.game_type); }
 	bool is_team_mode() const { return value_.team_mode; }
+	// The local player entity's slot id the stat fill selects its row by.
+	int get_local_slot() const { return value_.local_slot; }
 	bool is_session_open() const { return value_.session_open; }
 
 	// The MCP boundary conversion only: the docs/mcp.md key set.

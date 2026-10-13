@@ -482,6 +482,11 @@ void Match::set_player_respawn_pending(EntityHandle entity, bool pending) {
         row->respawn_pending = pending;
 }
 
+void Match::set_player_slot_team(EntityHandle entity, uint8_t team) {
+    if (MatchPlayer *row = player(entity))
+        row->slot_team = team;
+}
+
 const MatchPlayer *Match::player(EntityHandle entity) const {
     const auto it = std::find_if(players_.begin(), players_.end(),
                                  [&](const MatchPlayer &p) { return p.identity.entity == entity; });

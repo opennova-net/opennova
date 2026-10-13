@@ -13,6 +13,17 @@
 
 namespace opennova {
 
+// What a roster sync does to the published roster: the slots to remove (gone, or now another
+// player's: its name, address or PCID differs), the players to add, and the kept players whose
+// PlayerTeam / PlayerType alone changed.
+struct RosterSync {
+	std::vector<int> removed;
+	std::vector<HostPlayerSlot> added;
+	std::vector<HostPlayerSlot> vars;
+};
+RosterSync plan_roster_sync(const std::map<int, HostPlayerSlot> &current,
+                            const std::vector<HostPlayerSlot> &wanted);
+
 // The hosting half of the NovaWorld UDP (NWU) game session. Retail runs ONE game session per
 // process: the session the player logs in, browses and joins with is the one ClientHostRequest
 // goes out on when they host, and it stays up through the hosted match. This is the role-specific
@@ -79,6 +90,14 @@ public:
 	// hosted match added, the host's own player included (Server_PlayerAdd's five per-slot vars).
 	void set_player_slot(const HostPlayerSlot &slot);
 	void clear_player_slot(int slot);
+	// A kept player's PlayerTeam and PlayerType, as the in-match handlers SetOrCreate them
+	// (a team change, a loadout's accept, a weapon-slot list): the vars alone change, with no
+	// ClientHostPlayerAdded, and ride the next update as its dirty delta. A slot not in the
+	// roster is left alone.
+	void set_player_vars(int slot, const std::string &team, const std::string &type);
+	// The roster onto `wanted` (plan_roster_sync): the removals, then the adds, then the kept
+	// players' vars.
+	void sync_roster(const std::vector<HostPlayerSlot> &wanted);
 	const std::map<int, HostPlayerSlot> &roster() const { return players_; }
 	// The live round clock the TimeLeft column reads at every refresh (-1 = untimed).
 	void set_round_time_remaining_ticks(int ticks) { cfg_.round_time_remaining_ticks = ticks; }

@@ -225,6 +225,13 @@ struct MatchPlayer {
     // [orig: Server_OnPlayerJoin @0x51A6F2; Server_DeployPlayer
     //  @0x517791; Server_UpdateCaptureZoneProximity @0x5087A2]
     bool respawn_pending = false;
+    // Player-slot +416 (+0x1A0), the slot's own team byte: 0 for a spectator,
+    // and left by a script team write to the body, which stores the entity
+    // byte alone. The numbered capture's scorers match it. The authority
+    // mirrors its connection's slot team here wherever that changes.
+    // [orig: CaptureZone_CheckProximityScoring @0x500CEE / @0x500CF4;
+    //  Entity_SetTeamByNetId @0x43C680]
+    uint8_t slot_team = 0;
 };
 
 // The match requests a disconnect without owning the transport. The authority
@@ -368,6 +375,10 @@ class Match {
     // Mirrors the player-slot undeployed bit (+89912 & 0x10) onto the row.
     // [orig: Server_OnPlayerJoin @0x51A6F2; Server_DeployPlayer @0x517791]
     void set_player_respawn_pending(EntityHandle entity, bool pending);
+    // Mirrors the player-slot team byte (+416) onto the row.
+    // [orig: Server_ChangeEntityTeam @0x518DEF; Server_ConvertPlayerToSpectator
+    //  @0x519E6E]
+    void set_player_slot_team(EntityHandle entity, uint8_t team);
     const MatchStats &team_stats(uint8_t team) const;
 
     // Script player operations validate the registered slot, not the Player

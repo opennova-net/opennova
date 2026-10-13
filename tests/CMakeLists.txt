@@ -4384,6 +4384,12 @@ add_executable(npruntime_initial_state_burst_test npruntime/initial_state_burst_
 target_link_libraries(npruntime_initial_state_burst_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_initial_state_burst COMMAND npruntime_initial_state_burst_test)
 
+# D-NET-659: the slot's PlayerList PlayerTeam / PlayerType, written where retail's in-match
+# handlers SetOrCreate them, and the NovaWorld roster sync's vars-only change.
+add_executable(npruntime_player_list_vars_test npruntime/player_list_vars_test.cpp)
+target_link_libraries(npruntime_player_list_vars_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_player_list_vars COMMAND npruntime_player_list_vars_test)
+
 # S10a (ADR 0028): the joiner world<->net bridge — the witnessed client-frame hook order
 # [orig: Game_ProcessMainFrame @0x5263f0; Client_ProcessNetworkFrame @0x42c180], the ClientHello
 # one-shot, the in-match spawn edge for L + the weapon-pump L-gate, and the per-session resets.

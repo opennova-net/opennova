@@ -69,10 +69,10 @@ world::Entity *slot_entity(const NapiNPServerCtx &ctx, const NapiNPConnection &c
 	return ctx.world != nullptr ? ctx.world->registry.get(conn.link.owned_entity) : nullptr;
 }
 
-// The slot's team byte (+416), read through its bound entity as the status page reads it
-// (D-NET-132), else the reserved assignment.
-uint8_t slot_team(const NapiNPServerCtx &ctx, const NapiNPConnection &conn) {
-	if (const world::Entity *e = slot_entity(ctx, conn)) return e->team;
+// The slot's own team byte (+416), as the status table reads it: a script team write to the
+// body leaves it (D-NET-651). [orig: CAdminServer_HandleStatus `movzx eax, byte ptr
+//  [ebx+158h]` @0x40316A over ebx = slot+0x48 @0x403139]
+uint8_t slot_team(const NapiNPConnection &conn) {
 	return conn.assigned_team_valid ? conn.assigned_team : uint8_t{0};
 }
 
@@ -92,7 +92,7 @@ std::string slot_row(const NapiNPServerCtx &ctx, const NapiNPConnection &conn) {
 	}
 	char line[160];
 	std::snprintf(line, sizeof(line), "%-16s\t%2d\t%2d\t%d\t%d\t%d\t%d\n", conn.reply.player_name.c_str(),
-			static_cast<int>(conn.reply.player_slot), static_cast<int>(slot_team(ctx, conn)),
+			static_cast<int>(conn.reply.player_slot), static_cast<int>(slot_team(conn)),
 			entity != nullptr ? static_cast<int>(entity->player_class) : 0, kills, deaths,
 			static_cast<int>(conn.reply.rtt_ms));
 	return line;

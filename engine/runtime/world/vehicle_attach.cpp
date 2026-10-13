@@ -351,15 +351,16 @@ bool find_best_vehicle_seat(
 
     int32_t best_weight = 65536000; // [orig: bestWeight sentinel @0x43520A]
     const auto consider = [&](const Entity &candidate, bool is_root) {
-        // An unmodeled model pointer manifests as an empty seat vector in the
-        // portable world. Each root/child entry has its own dead gate, the one
-        // Flags dword's bit in either view and nothing else (no Health read, so
-        // an entry at Health <= 0 before its class edge still offers its seats),
-        // and an entry with no ItemDef offers no seat (its seat table is the def's).
+        // Each root/child entry has its own dead gate, the one Flags dword's bit
+        // in either view and nothing else (no Health read, so an entry at
+        // Health <= 0 before its class edge still offers its seats); an entry
+        // with no ItemDef offers no seat (its seat table is the def's), nor one
+        // with no graphic model (+0x30). A model with no userpoints (+0xBC)
+        // offers none either: ours' seats are that model's userpoint rows.
         // [orig: Flags & 2 @0x4352c2..0x4352cd, the ItemDef @0x4352d3..0x4352d7,
-        //  the model @0x4352dd..0x4352ec]
+        //  the model @0x4352dd..0x4352df, its +0xBC @0x4352e5..0x4352ec]
         if (((candidate.flags | candidate.engine_flags) & kEntityFlagDead) != 0 ||
-            !candidate.has_item_def)
+            !candidate.has_item_def || !candidate.has_graphic_model)
             return;
         for (int i = 0; i < static_cast<int>(candidate.seats.size()); ++i) {
             const Seat &seat = candidate.seats[static_cast<size_t>(i)];
@@ -389,10 +390,12 @@ bool find_best_vehicle_seat(
 }
 
 bool vehicle_can_enter(const World &world, const Entity *rider, const Entity &carrier) {
-	// The dead bit in either view, then the def; no Health read (D-NET-580). The model
-	// test is not ported (D-NET-587) [orig: Entity_CanEnterVehicle @0x435485, @0x435492;
-	//  the model @0x435498..0x4354A3].
-	if (((carrier.flags | carrier.engine_flags) & kEntityFlagDead) != 0 || !carrier.has_item_def)
+	// The dead bit in either view, then the def and the graphic model; no Health
+	// read (D-NET-580). The model's userpoint-count test is not ported
+	// (D-NET-587) [orig: Entity_CanEnterVehicle @0x435485, @0x435492; the model
+	//  @0x435498..0x43549A, its +0xBC @0x43549C..0x4354A3].
+	if (((carrier.flags | carrier.engine_flags) & kEntityFlagDead) != 0 || !carrier.has_item_def ||
+			!carrier.has_graphic_model)
 		return false;
 	VehicleSeatSelection seat;
 	if (!find_best_vehicle_seat(
@@ -733,6 +736,13 @@ bool scan_entity_rejected(const World &world, const Entity &cand, const Entity &
 	// A candidate with no ItemDef offers nothing, seat or armory point [orig: the
 	// scan @0x435e35..0x435e3a, the labels @0x5a335a..0x5a335f].
 	if (!cand.has_item_def) return true;
+	// ... nor does one with no graphic model (+0x30) [orig: the scan
+	// @0x435E40..0x435E45, the labels @0x5A3365..0x5A3369]. The scan also
+	// skips a model whose userpoint count (model+0xBC, the +0xC0 table's;
+	// ModelGPM_FindUserpointByName @0x5B2170) is 0 [orig: @0x435E4B..0x435E52]:
+	// ours' seats and armory points are that model's userpoint rows
+	// (mission/seat_spec_extract.cpp), so such a model offers no point here.
+	if (!cand.has_graphic_model) return true;
 	if (hostile_mounts.blocks(cand.handle))
 		return true;
 	const Entity *ground = world.registry.get(cand.ground_target);

@@ -51,11 +51,19 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 // The deploy-map LOCATION labels for every type-2044 marker the promoted
 // `world` holds (the spawn's admitted records), in spawn order: the mission
 // text's [Locations] string keyed by the record's own name_index, else that
-// LOCATION%03i key itself, each clipped to retail's 64-byte location-name
-// slot. Every host embedder installs them at bring-up, after the promote; the
-// S2C 0x0F writer copies them onto a joining client.
+// LOCATION%03i key itself, each copied whole into its 64-byte slot of
+// g_LocationNames and kept as that slot reads (location_slot_strings). Every
+// host embedder installs them at bring-up, after the promote; the S2C 0x0F
+// writer copies them onto a joining client, and the host's own client's 0x0F
+// copy replaces them on a serve-and-play host (HostRole's frame).
 // [orig: Entity_SpawnFromBMSRecord @0x40f182-0x40f221]
 void install_mission_location_names(NapiNPServerCtx &ctx, const world::World &world,
                                     const bms::File &mission, const mission::MissionText &text);
+
+// What each slot of g_LocationNames reads to its NUL once the spawn has
+// copied `names` whole into consecutive 64-byte slots in order: a name of
+// fewer than 64 bytes (or the last) reads whole, a longer one as its first
+// 64 bytes and then the next slot's read.
+std::vector<std::string> location_slot_strings(const std::vector<std::string> &names);
 
 } // namespace opennova::inmatch

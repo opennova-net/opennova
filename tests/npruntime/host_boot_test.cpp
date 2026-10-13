@@ -247,6 +247,55 @@ int main() {
 		CHECK(kernel.world.out.terrain_scorches.pending_page_invalidations().empty());
 	}
 
+	// --- the mission text and the mount's override table (D-NET-657): every
+	// lookup of the mission's table searches the expansion's override table
+	// first, so its briefing page reaches the S2C 0x7E source and its
+	// location text the names, and the mission's own answers the rest.
+	// [orig: TextResource_FindEntryBySectionAndKey @0x75D250, @0x75D27B;
+	//  MissionText_GetString @0x51EB50; NetPacket_WriteBriefingText @0x506620]
+	{
+		// Section 0 [info], section 1 [Locations].
+		const auto table = [](const std::vector<rtxt::Entry> &rows) {
+			rtxt::File file;
+			file.sections.push_back({"info", 0});
+			file.sections.push_back({"Locations", 0});
+			for (const rtxt::Entry &row : rows) {
+				file.entries.push_back(row);
+				++file.sections[row.section_index].string_count;
+			}
+			file.normalize_grouping();
+			std::vector<uint8_t> out;
+			std::string error;
+			if (!rtxt::write(file, out, error)) std::printf("rtxt::write: %s\n", error.c_str());
+			return out;
+		};
+		Host host;
+		const std::vector<uint8_t> mission_bin = table({{"briefing3", "Mission three", {}, 0},
+				{"briefing2", "Mission two", {}, 0}, {"LOCATION001", "Harbor", {}, 1},
+				{"LOCATION002", "Ridge", {}, 1}});
+		host.files["synth.bin"] = bytes_string(mission_bin);
+		inmatch::HostBootRequest r = host.request(0);
+		r.text_override_table = table({{"BRIEFING3", "Override three", {}, 0},
+				{"location002", "Override ridge", {}, 1}});
+		std::string error;
+		CHECK(inmatch::boot_host_mission(std::move(r), host.boot, error));
+		const inmatch::NapiNPServerCtx &ctx = host.role.state.host_owner.ctx;
+		CHECK(host.boot.mission_text.loaded && host.boot.mission_text.override_table != nullptr);
+		CHECK(ctx.mission_text_loaded);
+		CHECK(ctx.mission_briefing3 == "Override three");
+		CHECK(ctx.mission_briefing2 == "Mission two");
+		CHECK(host.boot.mission_text.location_name(1) == "Harbor");
+		CHECK(host.boot.mission_text.location_name(2) == "Override ridge");
+
+		// No override table: the mission's own text.
+		Host plain;
+		plain.files["synth.bin"] = bytes_string(mission_bin);
+		CHECK(inmatch::boot_host_mission(plain.request(0), plain.boot, error));
+		CHECK(plain.boot.mission_text.override_table == nullptr);
+		CHECK(plain.role.state.host_owner.ctx.mission_briefing3 == "Mission three");
+		CHECK(plain.boot.mission_text.location_name(2) == "Ridge");
+	}
+
 	// --- the water rungs (env #44): the .env's line writes after the .trn's,
 	// so the .env's height (40 half units) beats the terrain's (30); with no
 	// .env line the terrain's stands -----------------------------------------

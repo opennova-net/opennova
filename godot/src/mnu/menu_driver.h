@@ -296,11 +296,12 @@ public:
 	void table_select_row(int p_id, int p_row, bool p_additive);
 	int table_sort_column(int p_id) const;
 	// The end-of-round stat table (StatScreen_PopulateStatResultsList, witnessed in
-	// inmatch stat_screen_feed.h): the engine's column set installed (the RESULTLIST authors no HEADER), the
-	// rows with their team colours, the sort on the first stat column,
-	// descending, and the local row selected (inmatch stat_screen_feed.h).
+	// inmatch stat_screen_feed.h): the engine's column set installed (the RESULTLIST authors no
+	// HEADER), the rows with their team colours, the sort on the first stat column, descending, and
+	// after it the first row whose slot is `p_local_slot` (the local player entity's slot id,
+	// EndRoundState.get_local_slot) selected (inmatch stat_screen_feed.h).
 	void fill_stat_results(int p_id, const TypedArray<EndRoundColumn> &p_columns,
-			const TypedArray<EndRoundRow> &p_rows);
+			const TypedArray<EndRoundRow> &p_rows, int p_local_slot);
 	// The death screen's SPAWNPOINTS_LIST items from its compiled rows (engine
 	// world deploy_screen_feed.h deploy_list_items), in the menu's code page.
 	void set_deploy_list_items(int p_id, const TypedArray<DeployListRow> &p_rows);

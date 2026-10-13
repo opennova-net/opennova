@@ -155,6 +155,8 @@ void HostRole::make_client_runtime(uint32_t game_type) {
 	mission::MissionKernel &kernel = *kernel_;
 	state.client_runtime = std::make_unique<inmatch::ClientRuntime>(state.host_loop);
 	state.host_owner.ctx.host_client = state.client_runtime.get();
+	// A fresh view counts its 0x0F / 0x50 folds from zero.
+	track_seen_ = ReplicaTrackSeen{};
 	state.client_runtime->set_profile(kernel.world.profile);
 	state.client_runtime->view().set_game_type(game_type);
 	state.client_runtime->view().set_mp_session(kernel.world.rules.mp_session);
@@ -228,8 +230,8 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	inmatch::set_server_text(ctx, bringup.server_text);
 	ctx.terrain_til_data = bringup.terrain_til_data; // S2C 0x45 terrain-tile load source (empty => skipped, §5.37)
 	ctx.mission_text_loaded = bringup.mission_text.loaded;
-	ctx.mission_briefing3 = bringup.mission_text.briefing3;
-	ctx.mission_briefing2 = bringup.mission_text.briefing2;
+	ctx.mission_briefing3 = bringup.mission_text.briefing3();
+	ctx.mission_briefing2 = bringup.mission_text.briefing2();
 	inmatch::install_mission_location_names(ctx, kernel.world, kernel.mission, bringup.mission_text);
 	// A host session's start zeroes the round count [orig: UI_HandleHostSessionStart
 	// @0x556EAB; HostDialog_StartSession @0x5587BD].
@@ -271,8 +273,8 @@ void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 	inmatch::set_server_text(ctx, bringup.server_text);
 	ctx.terrain_til_data = bringup.terrain_til_data;
 	ctx.mission_text_loaded = bringup.mission_text.loaded;
-	ctx.mission_briefing3 = bringup.mission_text.briefing3;
-	ctx.mission_briefing2 = bringup.mission_text.briefing2;
+	ctx.mission_briefing3 = bringup.mission_text.briefing3();
+	ctx.mission_briefing2 = bringup.mission_text.briefing2();
 	inmatch::install_mission_location_names(ctx, kernel.world, kernel.mission, bringup.mission_text);
 	inmatch::continue_host_session(state.host_owner, host_cfg);
 	map_change.torn_down = false;
@@ -586,6 +588,16 @@ void HostRole::run_tick(const TickInput &input) {
 		state.client_runtime->apply_received_effects(kernel.world);
 		state.client_runtime->flush_host_sends(); // the receive handlers' own sends
 		state.client_runtime->raise_net_quality_link_errors(ctx.net_quality_link_errors);
+		// The own client's 0x0F copies its location names, each cut to its
+		// slot, into the one g_LocationNames the spawn filled, so the host's
+		// later reads (a later joiner's 0x0F, the chat's location labels) read
+		// that copy [orig: NapiNPClientMsg_0x00F: the count @0x42e51b and the
+		// copy @0x42e526..0x42e5ad, no authority test on them (the handler's
+		// tests gate the spawn-position store @0x42e360..0x42e369 and the ack
+		// burst @0x42e5b7)].
+		const replication::ClientState &own = state.client_runtime->state();
+		if (own.world_state.revision != track_seen_.world_state_revision)
+			ctx.mission_location_names = own.location_names;
 		// The own client's 0x0F / 0x50 track legs: the map POI list outside
 		// the waypoint gametypes (the route stays the promotion's).
 		apply_replica_track(kernel.world, state.client_runtime->state(),

@@ -1163,6 +1163,7 @@ static void test_npc_wac_health_names_and_boarding_consumer() {
     soldier.item_id = 1001; soldier.item_type_index = 7;
     soldier.item_type = 3;
     soldier.has_item_def = true;
+    soldier.has_graphic_model = true;
     soldier.health = 20;
     soldier.health_max = 100;
     soldier.critical_hp = 25;
@@ -1172,6 +1173,7 @@ static void test_npc_wac_health_names_and_boarding_consumer() {
     carrier.item_id = 1002; carrier.item_type_index = 7;
     carrier.item_type = 1;
     carrier.has_item_def = true;
+    carrier.has_graphic_model = true;
     carrier.item_attrib = kItemAttribPlayerControl;
     Seat seat;
     seat.type = SeatType::Passenger;
@@ -1461,6 +1463,7 @@ static void test_ssnuse_mounts_cached_child_and_clears_failed_choice() {
     AiEntity &ai = *w.ai.for_handle(rider);
     e.net_id = 77; e.item_id = 2001; e.item_type_index = 7; e.item_type = 1;
     e.has_item_def = true; e.item_attrib = kItemAttribPlayerControl;
+    e.has_graphic_model = true;
     e.position = {100, 100, 0};
     Seat driver; driver.type = SeatType::Driver; driver.bone_index = 1;
     e.seats.push_back(driver);

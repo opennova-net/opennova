@@ -644,39 +644,40 @@ void SessionDrive::sync_nwu_session(const Ref<Simulation> &p_sim) {
 }
 
 // A retail host SetOrCreates the five per-slot PlayerList vars when a player is
-// added and sends ClientHostPlayerAdded / Removed on each roster change. The
-// PlayerPCID is the joiner's decrypted PUBPCID (the in-match host's account
-// fields) [orig: CNapiGameSession_SendPlayerAdded @0x4d006c]; PlayerType (the
-// player type id) has no in-match source on this seam and rides as "0".
-// The ClientPlayerEnterRequest is NOT sent from here: the in-match host's
-// join-phase watchdog announces a validating joiner itself (the hook bound in
-// bind_nw_host), before the player is ever added to this roster.
+// added and sends ClientHostPlayerAdded / Removed on each roster change; a team
+// change, a loadout's accept and a weapon-slot list rewrite the slot's
+// PlayerTeam / PlayerType alone, which the match keeps per connection
+// (NapiNPConnection::player_list_team / player_list_type) and the roster sync
+// carries as vars (NwuHostRole::sync_roster). The PlayerPCID is the joiner's
+// decrypted PUBPCID (the in-match host's account fields) [orig:
+// CNapiGameSession_SendPlayerAdded @0x4d006c]. The ClientPlayerEnterRequest is
+// NOT sent from here: the in-match host's join-phase watchdog announces a
+// validating joiner itself (the hook bound in bind_nw_host), before the player
+// is ever added to this roster.
 void SessionDrive::sync_nw_host_roster(opennova::NwuHostRole &p_host, const Ref<Simulation> &p_sim) {
-	std::map<int, std::string> live;
+	std::vector<opennova::HostPlayerSlot> wanted;
+	bool self_listed = false;
 	for (const Simulation::HostPeerSlot &slot : p_sim->host_peer_slots()) {
-		const std::string signature = opennova::to_std(slot.player_name) + "|" +
-				opennova::to_std(slot.ip_and_port) + "|" + opennova::to_std(slot.pcid) + "|" +
-				opennova::to_std(slot.team);
-		live[slot.slot] = signature;
-		auto sent = nw_roster_sent_.find(slot.slot);
-		if (sent != nw_roster_sent_.end() && sent->second == signature) {
-			continue;
-		}
 		opennova::HostPlayerSlot player;
-		player.slot = slot.slot;
-		player.player_name = opennova::to_std(slot.player_name);
-		player.ip_and_port = opennova::to_std(slot.ip_and_port);
-		player.pcid = opennova::to_std(slot.pcid);
-		player.team = opennova::to_std(slot.team);
-		player.type = "0";
-		p_host.set_player_slot(player);
-	}
-	for (const auto &sent : nw_roster_sent_) {
-		if (live.count(sent.first) == 0) {
-			p_host.clear_player_slot(sent.first);
+		if (slot.own) {
+			if (!nw_self_slot_set_) continue;
+			player = nw_self_slot_;
+			self_listed = true;
+		} else {
+			player.slot = slot.slot;
+			player.player_name = opennova::to_std(slot.player_name);
+			player.ip_and_port = opennova::to_std(slot.ip_and_port);
+			player.pcid = opennova::to_std(slot.pcid);
 		}
+		player.team = opennova::to_std(slot.team);
+		player.type = opennova::to_std(slot.type);
+		wanted.push_back(std::move(player));
 	}
-	nw_roster_sent_ = std::move(live);
+	if (nw_self_slot_set_ && !self_listed) wanted.push_back(nw_self_slot_);
+	p_host.sync_roster(wanted);
+	for (const opennova::HostPlayerSlot &player : wanted) {
+		if (nw_self_slot_set_ && player.slot == nw_self_slot_.slot) nw_self_slot_ = player;
+	}
 }
 
 void SessionDrive::reset() {
@@ -823,9 +824,17 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 		self.player_name = opennova::to_std(p_opts->get_player_name());
 		self.ip_and_port = opennova::peer_addr_to_string(opennova::PeerAddr{});
 		self.pcid = login_pcid; // the host's own player's PCID is its login cookie
+		// Its PlayerTeam / PlayerType are the match's, as for any added player.
 		self.team = "0";
 		self.type = "0";
+		for (const Simulation::HostPeerSlot &slot : sim->host_peer_slots()) {
+			if (!slot.own) continue;
+			self.team = opennova::to_std(slot.team);
+			self.type = opennova::to_std(slot.type);
+		}
 		host.set_player_slot(self);
+		nw_self_slot_ = self;
+		nw_self_slot_set_ = true;
 	}
 	// The mission start's update, at every mission start of a hosting session, map changes
 	// included (NwuHostRole::publish_mission_start, which carries Game_StartMission's cite):
@@ -840,7 +849,8 @@ void SessionDrive::unbind_nw_host() {
 		return;
 	}
 	nw_host_bound_ = false;
-	nw_roster_sent_.clear();
+	nw_self_slot_ = opennova::HostPlayerSlot{};
+	nw_self_slot_set_ = false;
 	// The in-match host stops advertising the GSID and stops announcing joiners
 	// to a session it is leaving.
 	Ref<Simulation> sim = world_->get_sim();

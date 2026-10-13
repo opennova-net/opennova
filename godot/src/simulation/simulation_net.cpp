@@ -338,16 +338,15 @@ std::vector<Simulation::HostPeerSlot> Simulation::host_peer_slots() const {
 	const opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
 	if (ctx == nullptr) return out;
 	for (const opennova::inmatch::NapiNPConnection &c : ctx->np_protocol.connection_list) {
-		if (c.type != opennova::inmatch::NapiNPConnection::kTypeServerSide ||
-				c.phase < opennova::inmatch::ConnectionPhase::PlayerAdded) {
-			continue;
-		}
+		if (c.phase < opennova::inmatch::ConnectionPhase::PlayerAdded) continue;
 		HostPeerSlot s;
 		s.slot = c.reply.player_slot;
+		s.own = c.type == opennova::inmatch::NapiNPConnection::kTypeClientSide;
 		s.player_name = opennova::to_gd(c.player_name);
 		s.ip_and_port = opennova::to_gd(opennova::peer_addr_to_string(c.peer));
 		s.pcid = opennova::to_gd(c.account.pcid);
-		if (c.assigned_team_valid) s.team = String::num_int64(c.assigned_team);
+		s.team = String::num_int64(c.player_list_team);
+		s.type = String::num_int64(c.player_list_type);
 		out.push_back(std::move(s));
 	}
 	return out;

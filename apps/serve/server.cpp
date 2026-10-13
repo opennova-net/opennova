@@ -298,6 +298,12 @@ bool Server::mount(std::string &error) {
 		return false;
 	}
 	index_.set_scr_policy(gameprofile::gameprofile_scr_policy_for_code(game.c_str()));
+	// The expansion's text-override table, as the boot's Expansion_LoadAssets
+	// reads it with no archive open (vfs.h carries the witness).
+	text_override_table_.clear();
+	if (!vfs_expansion_override_table(options_.resource_dir, index_.mounted_expansion(),
+				ExpansionLoadPoint::ArchivesClosed, options_.loose_override, text_override_table_))
+		text_override_table_.clear();
 	assets_ = std::make_unique<assets::AssetStore>(&index_);
 	catalog_ = mission_catalog::build(index_);
 	// The avatar registry, which the admin console's PETERRABBIT SEXCHANGE walks; an install
@@ -444,6 +450,7 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	request.mission = std::move(doc);
 	request.mission_basename = basename;
 	request.files = mission::boot_files_from_index(index_);
+	request.text_override_table = text_override_table_;
 	request.assets = assets_.get();
 	request.session = session_.get();
 	request.role = role_.get();

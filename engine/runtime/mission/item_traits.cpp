@@ -251,9 +251,12 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 				}
 		}
 		e->item_type = static_cast<uint8_t>(def != nullptr ? def->type : 0);
-		// entity+0x30: the def's named graphic (the model Entity_InitFromModel
-		// attaches); a marker never carries one.
-		// [orig: Entity_InitFromModel @0x40df06; the persistent-bank gate
+		// entity+0x30: the def's named graphic model, which every mission
+		// start stores from the def for pools 1, 2 and 0 alone, so a marker
+		// (pool 3) carries none.
+		// [orig: Game_ReloadEntityModelsAndCallbacks @0x522830 (from
+		//  Game_StartMission @0x52550E) - the +0x30 stores @0x5229D7 /
+		//  @0x522B35 / @0x522CD1; the persistent-bank gate
 		//  MapOverlay_RenderAllByLayer @0x5BE6C4]
 		e->has_graphic_model = def != nullptr && def->graphic[0] != '\0' &&
 				e->kind != world::EntityKind::Marker;

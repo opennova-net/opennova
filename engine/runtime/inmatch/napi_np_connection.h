@@ -431,11 +431,12 @@ struct SessionReplyState {
 	// is bound yet (pose_for_conn prefers the live registry Entity once owned_entity binds).
 	PreSpawnJoinerPose pre_spawn_pose{};
 
-	// The reactive-reply ROSTER IDENTITY. D-NET-132 / ADR 0013 §6.9 COLLAPSED the cached team + entity
-	// handle onto link.owned_entity: `CAdminServer_HandleStatus @0x402e30` reads name/team/class OFF the
-	// pool-0 entity (team @entity+344), so the reply builders now read the handle from
-	// link.owned_entity.packed and the team from the live registry Entity through it — not a parallel
-	// cache. player_slot (roster ORDER, not stored on the entity) stays a field; player_name is the
+	// The reactive-reply ROSTER IDENTITY. D-NET-132 / ADR 0013 §6.9 COLLAPSED the cached entity
+	// handle onto link.owned_entity: the reply builders read the handle from link.owned_entity.packed,
+	// not a parallel cache. Their team byte (the 0x16 rows, the 0x46 field 0x0004, the 0x75 byte 1) is
+	// the slot's own, assigned_team (slot+416), as `CAdminServer_HandleStatus @0x402e30` reads it too
+	// (`movzx eax, [ebx+158h]` @0x40316A over slot+0x48), never the entity's (D-NET-651).
+	// player_slot (roster ORDER, not stored on the entity) stays a field; player_name is the
 	// echoed game ClientAuth.NA the entity does not carry in the reimpl. The pre-World reactive path
 	// (bind_session_reply_player) now stamps link.owned_entity with the bare wire handle instead of a
 	// separate handle cache, so a World-less session-responder host resolves the same way.
@@ -690,6 +691,27 @@ struct NapiNPConnection {
 	// [orig: playerSlot+416 is populated before NetPacket_WriteSlotAssignment @0x502b30]
 	bool assigned_team_valid = false;
 	uint8_t assigned_team = 0;
+
+	// The slot's PlayerTeam and PlayerType in the session's PlayerList (each
+	// "%ld" of the value), as the in-match handlers SetOrCreate them: both at
+	// the player add (the entity's team and class), PlayerTeam at a team
+	// change, PlayerType at the loadout's accept and at every weapon-slot list
+	// send (the slot's class); nothing else writes them: the map change's
+	// round init re-adds a kept slot with no write (after a side swap the slot
+	// keeps its previous PlayerTeam), and the other class stores (the own
+	// slot's profile init at a mission start, a C2S 0x1B class select) leave
+	// PlayerType. A NovaWorld host's roster mirrors them, each change riding
+	// the next ClientHostUpdate. [orig: dword_B6023C (the PlayerList);
+	// Server_PlayerAdd @0x51CBC0: the values @0x51D35C..0x51D3C3, the
+	// SetOrCreates @0x51D441..0x51D4AA; Server_ChangeEntityTeam @0x518D70: the
+	// SetOrCreate @0x518E22; NapiNPServerMsg_HandlePlayerLoadout @0x515790: the
+	// SetOrCreate @0x515AE2; Server_SendWeaponSlotListToPlayer @0x502550: the
+	// SetOrCreate @0x5025DB; Server_InitAllPlayerEntitiesForRound @0x516AA0
+	// (no SetOrCreate among its callees); the class stores PlayerSession_InitFromProfile
+	// @0x50CB7C (called from Game_StartMission @0x524F23) and
+	// NapiNPServerMsg_SetFarClip @0x501D90 (the 0x1B handler) @0x501DE7]
+	int32_t player_list_team = 0;
+	int32_t player_list_type = 0;
 
 	// The command map's squad bytes on the player slot: its leader's slot
 	// (+100576; 0xFF none) and its fireteam (+100577), seeded 0xFF / 0 by the

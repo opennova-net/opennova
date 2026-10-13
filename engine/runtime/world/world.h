@@ -436,8 +436,8 @@ struct PlayerTemplate {
     int32_t item_type_index = 0;
     // Whether the Player row names a graphic (entity+0x30 graphicModel), the
     // device sweeps' candidate gate; true for native harnesses like
-    // has_item_def [orig: Entity_InitFromModel @0x40df06; the gate
-    // @0x43CC19].
+    // has_item_def [orig: Entity_InitFromItemDef @0x49E550 - the +0x30
+    // store @0x49E598; the gate @0x43CC19].
     bool has_graphic_model = true;
     // The Player row's hp word (itemDef+0x17C healthMax), 0 a real word: unset
     // until the traits sweep stores it (or a harness seeds one), and while unset

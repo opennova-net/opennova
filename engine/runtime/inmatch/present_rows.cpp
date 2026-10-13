@@ -22,7 +22,7 @@
 #include <runtime/world/item_sections.h> // bldg_section_origin_q16
 #include <runtime/renderer/render_slot_shadow.h> // slot_march_start_offset
 #include <runtime/replication/client_state.h>
-#include <runtime/replication/client_world_materializer.h> // replica_world_entity
+#include <runtime/replication/client_world_materializer.h> // replica_row_entity
 #include <runtime/replication/entity_wire_bridge.h> // entity_class_of / player_wire_net_id (the host's own rows)
 #include <runtime/anim/aim_overlay.h> // the torso-bend overlay blends [orig: @0x4b1290]
 #include <formats/threedi/threedi_ctrl_catalog.h>
@@ -479,6 +479,13 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 		// remain wire-rendered through their remote-request-shaped body path.
 		const EntityHandle h{es.handle};
 		const Entity *ent = (!joiner) ? kernel.world.registry.get(h) : nullptr;
+		// A joiner's per-row reads below take the decoded row's own native row,
+		// never a later occupant of the handle, a same-type one included
+		// (replication::replica_row_entity; D-NET-620).
+		const Entity *owned = joiner
+				? replication::replica_row_entity(context.materializer, kernel.world, h,
+						es.type_id, kernel.wire_header_world)
+				: nullptr;
 		// Retail's terrain collector sends pool-1 model rows through
 		// Render_SectorEntity; pool-2 statics and pool-3 marker models join the
 		// same sector list through their dedicated collectors. Pool-0 skeletal
@@ -487,15 +494,12 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 		// placed node: a wire-fallback model still executes the same callback,
 		// while a failed model build has no CTRL surface on which to apply it.
 		const bool sector_model_row = h.pool() >= 1 && h.pool() <= 3;
-		if (joiner && h.pool() >= 1 && h.pool() <= 3) {
-			const Entity *local = kernel.world.registry.get(h);
-			if (local != nullptr && local->spawn_origin != kSpawnOriginNone &&
-					static_cast<uint16_t>(local->item_id) == es.type_id) {
-				r[PF_KIND] = static_cast<float>(local->spawn_origin >> 24);
-				r[PF_INDEX] = static_cast<float>(spawn_origin_index(local->spawn_origin));
-				r[PF_BMS_ID] = static_cast<float>(local->bms_id);
-				r[PF_NET_ID] = static_cast<float>(local->net_id);
-			}
+		if (owned != nullptr && h.pool() >= 1 && h.pool() <= 3 &&
+				owned->spawn_origin != kSpawnOriginNone) {
+			r[PF_KIND] = static_cast<float>(owned->spawn_origin >> 24);
+			r[PF_INDEX] = static_cast<float>(spawn_origin_index(owned->spawn_origin));
+			r[PF_BMS_ID] = static_cast<float>(owned->bms_id);
+			r[PF_NET_ID] = static_cast<float>(owned->net_id);
 		}
 		if (ent) {
 			r[PF_KIND] = static_cast<float>(ent->spawn_origin >> 24);
@@ -712,11 +716,12 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 		// [orig: palm @ 0x53C4C0; cran @ 0x43FC70]
 		if (joiner) {
 			write_present_replica_slot_march(r, kernel, es);
-			const Entity *local = kernel.world.registry.get(h);
-			if (local && static_cast<uint16_t>(local->item_id) == es.type_id) {
-				r[PF_HUSK] = (local->engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
+			// Every read below takes that row: the husk, the destroy phases, the
+			// doors, the motion controls, the gun words and the section draws.
+			if (owned) {
+				r[PF_HUSK] = (owned->engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
 				for (int phase = 0; phase < 6; ++phase)
-					r[PF_OBJECT_DESTROY + phase] = float(local->destroy_phases_q16[phase]);
+					r[PF_OBJECT_DESTROY + phase] = float(owned->destroy_phases_q16[phase]);
 				// The door records advance on every peer (the per-frame entity
 				// update calls the door tick at the pool-2 loop exit with no
 				// authority test) and the door render/bone callbacks copy each
@@ -728,7 +733,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 				//  loop exit @0x4c2278); BoneCallback_BuildBoneTransforms @0x4E3070 (the
 				//  loop @0x4e312a..0x4e3145); BoneCallback_AnimatedBones_World
 				//  @0x4E3180 (@0x4e3201..0x4e3218)]
-				write_present_doors(r, i, kernel.world, *local, door_phases);
+				write_present_doors(r, i, kernel.world, *owned, door_phases);
 				// The vehicle render callbacks run on every peer against the
 				// client's own mover state (the joiner's world-side prediction
 				// advances the same tracks, wheel phase and springs), so a
@@ -738,25 +743,14 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 				//  @0x449C3C..0x449C69); Entity_CacheVehicleHUDStats @0x4929B0;
 				//  the client mover's track phase Entity_UpdateTankVehiclePhysics
 				//  @0x489F98 / @0x489FA0]
-				write_present_vehicle_motion_controls(r, kernel.world, *local);
+				write_present_vehicle_motion_controls(r, kernel.world, *owned);
 				// A joiner runs no brains: the gun words this carrier's ewep
 				// children published on its replica row stand for the brain
 				// words its tank/helo render callback reads.
 				// [orig: Entity_UpdateTransformAndTurret @0x440F70..0x441020;
 				//  HUD_CacheEntityDebugStats @0x449ECF..0x449EE2]
-				write_present_replica_vehicle_gun(r, kernel.world, *local, es);
+				write_present_replica_vehicle_gun(r, kernel.world, *owned, es);
 			}
-			// The section and bldg draws below read the decoded row's own
-			// native row by the joiner's replica rule (a header-only world's
-			// owned lifetime, a full-BMS join's spawn-origin gated row), never
-			// a later occupant of the same handle; the reads above still take
-			// the handle and the type (D-NET-620).
-			const Entity *owned = context.materializer != nullptr
-					? context.materializer->replica_world_entity(
-							kernel.world, h, kernel.wire_header_world)
-					: local;
-			if (owned != nullptr && static_cast<uint16_t>(owned->item_id) != es.type_id)
-				owned = nullptr;
 			const auto *item = owned ? kernel.world.tables.item_death_traits.get(owned->item_id) : nullptr;
 			if (owned && (owned->palm_sections || owned->item_section_piece ||
 					 (item && item->death_class == ItemDeathClass::kTower) ||

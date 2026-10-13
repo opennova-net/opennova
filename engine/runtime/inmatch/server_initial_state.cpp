@@ -18,6 +18,7 @@
 #include <formats/def/reserved_items.h>           // DEF_TYPE_NAMED_LOCATION (the 0x0F location names)
 #include <formats/mission/bms.h>                  // bms::File, bms::encode_loaded_header_blob (0x0B body)
 #include <runtime/mission/mission_text.h>         // MissionText::location_name (the 0x0F location names)
+#include <runtime/replication/client_state.h>     // kLocationNameSlotBytes (g_LocationNames' stride)
 #include <runtime/replication/entity_wire_bridge.h>    // build_pool0_organic_batch / build_pool3_spawn_marker_batch
 #include <base/gameprofile/game_type.h>          // is_waypoint_family (the §5.32 selector)
 #include <net/npwire/ingame_encode.h>      // encode_organic_spawn_batch / encode_pool3_sync_batch
@@ -826,15 +827,35 @@ void install_mission_location_names(NapiNPServerCtx &ctx, const world::World &wo
 	//  epilogue @0x40EB07..0x40EB1B: the attribute gates @0x40EA94..0x40EAC2,
 	//  the def attrib 0x10000 gate @0x40EAD2..0x40EB05, the team-3/4 gate
 	//  @0x40EB1C..0x40EB2E]
+	std::vector<std::string> names;
 	for (std::size_t slot = 0; slot < mission.markers.size(); ++slot) {
 		if (mission.markers[slot].type_id != def::DEF_TYPE_NAMED_LOCATION) continue;
 		if (world.registry.get(world::EntityHandle::make(3, static_cast<int>(slot))) == nullptr)
 			continue;
-		std::string label = text.location_name(mission.markers[slot].name_index);
-		// Retail stores the resolved text in a 64-byte location-name slot.
-		if (label.size() > 63) label.resize(63);
-		ctx.mission_location_names.push_back(std::move(label));
+		names.push_back(text.location_name(mission.markers[slot].name_index));
 	}
+	ctx.mission_location_names = location_slot_strings(names);
+}
+
+std::vector<std::string> location_slot_strings(const std::vector<std::string> &names) {
+	// Each copy runs to the name's NUL wherever that lands, so one of a slot
+	// or more runs on into the next slot, whose own copy then overwrites it
+	// from that slot's start; a slot read to its NUL is its first 64 bytes
+	// followed by the next slot's read, and the last name stays whole.
+	// [orig: Entity_SpawnFromBMSRecord: the text's copy @0x40F1D3..0x40F1DF,
+	//  the key's @0x40F200..0x40F20A, neither bounded; the readers to the NUL:
+	//  NetPacket_WriteWorldStateLoad0x0F's strlen @0x502EA0..0x502EAC and copy
+	//  @0x502EC2..0x502ECC, NapiNPServer_HandleChatMessage's String_AppendN of
+	//  g_LocationNames + 64 * index @0x5139F1..0x513A0A]
+	const std::size_t slot_bytes = replication::kLocationNameSlotBytes;
+	std::vector<std::string> slots(names.size());
+	for (std::size_t k = names.size(); k-- > 0;) {
+		if (names[k].size() < slot_bytes || k + 1 == names.size())
+			slots[k] = names[k];
+		else
+			slots[k] = names[k].substr(0, slot_bytes) + slots[k + 1];
+	}
+	return slots;
 }
 
 } // namespace opennova::inmatch

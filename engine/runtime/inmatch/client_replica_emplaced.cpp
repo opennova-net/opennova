@@ -1,5 +1,6 @@
 #include <runtime/inmatch/client_replica_emplaced.h>
 #include <runtime/replication/client_state.h>
+#include <runtime/replication/client_world_materializer.h> // replica_row_entity
 #include <runtime/mission/seat_spec_extract.h>
 #include <runtime/world/mount_controls.h>
 #include <runtime/world/present_rows.h>
@@ -62,13 +63,15 @@ int32_t replica_parent_profile_type(const world::World &world, const world::Enti
 //  @0x440f65..0x440f6b, values @0x440f70..0x441020; groundEntity carrier read
 //  @0x440CBF; NapiNPClientMsg_0x00D target store @0x4332D7]
 void publish_replica_gun_words(replication::ClientState &state,
-		const std::vector<mission::ItemSeatSpec> &specs, const world::World &world) {
+		const std::vector<mission::ItemSeatSpec> &specs, world::World &world,
+		const replication::ClientWorldMaterializer *materializer, bool wire_header_world) {
 	for (const replication::ClientEntityState &child : state.entities) {
 		const uint16_t carrier_handle = replication::persistent_carrier_handle(child);
 		if (carrier_handle == wire_handle::kInvalid) continue;
-		const world::Entity *child_twin = world.registry.get(world::EntityHandle{child.handle});
-		if (child_twin == nullptr || static_cast<uint16_t>(child_twin->item_id) != child.type_id ||
-				!child_twin->emplaced_update || world::emplaced_slot_def(world, *child_twin) == nullptr)
+		const world::Entity *child_twin = replication::replica_row_entity(materializer, world,
+				world::EntityHandle{child.handle}, child.type_id, wire_header_world);
+		if (child_twin == nullptr || !child_twin->emplaced_update ||
+				world::emplaced_slot_def(world, *child_twin) == nullptr)
 			continue;
 		replication::ClientEntityState *carrier = state.find(carrier_handle);
 		if (carrier == nullptr) continue;
@@ -86,10 +89,9 @@ void publish_replica_gun_words(replication::ClientState &state,
 		if (ambiguous || attachment == nullptr || !attachment->anchor_found ||
 				attachment->anchor.bone_index == 0 || attachment->anchor_subobject != 0)
 			continue;
-		const world::Entity *carrier_twin =
-				world.registry.get(world::EntityHandle{carrier->handle});
-		if (carrier_twin == nullptr ||
-				static_cast<uint16_t>(carrier_twin->item_id) != carrier->type_id)
+		const world::Entity *carrier_twin = replication::replica_row_entity(materializer, world,
+				world::EntityHandle{carrier->handle}, carrier->type_id, wire_header_world);
+		if (carrier_twin == nullptr)
 			continue;
 		const world::EmplacedParentGunWords words = world::emplaced_parent_gun_words(world,
 				*carrier_twin, replica_parent_profile_type(world, *carrier_twin),
@@ -135,13 +137,16 @@ void write_present_replica_vehicle_gun(float *record, const world::World &world,
 //  Entity_UpdateTransformAndTurret @0x440CA0]
 void tick_replica_emplaced_channels(replication::ClientState &state,
 		const std::vector<mission::ItemSeatSpec> &specs, world::World &world,
-		uint16_t self_handle) {
+		uint16_t self_handle, const replication::ClientWorldMaterializer *materializer,
+		bool wire_header_world) {
 	for (auto &mount : state.entities) {
-		// The materialized world row's phase, only while that row is still this
-		// wire entity's type (a reused handle must not forward a foreign phase).
-		const auto *spin_source = world.registry.get(world::EntityHandle{mount.handle});
-		const bool same_type = spin_source != nullptr &&
-				static_cast<uint16_t>(spin_source->item_id) == mount.type_id;
+		// The row's own native row, by the replica rule while it is still this
+		// wire entity's type: a reused handle, a same-type newcomer included,
+		// must not forward a foreign phase (D-NET-620).
+		world::Entity *const local_mount = replication::replica_row_entity(materializer, world,
+				world::EntityHandle{mount.handle}, mount.type_id, wire_header_world);
+		const world::Entity *spin_source = local_mount;
+		const bool same_type = spin_source != nullptr;
 		mount.emplaced_spin_phase = same_type ? spin_source->emplaced_spin_phase : 0;
 		// An 'ewep' render class publishes its held words whether or not a
 		// gunner is seated: an emptied turret keeps its last traverse.
@@ -161,7 +166,6 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 					gunner_seat = true;
 			if (!gunner_seat)
 				continue;
-			auto *local_mount = world.registry.get(world::EntityHandle{ mount.handle });
 			const auto *local_gunner = world.ai.for_handle(world.cached.local_player);
 			if (occupant.handle == self_handle && local_mount != nullptr &&
 					local_gunner != nullptr &&
@@ -198,6 +202,6 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 			break;
 		}
 	}
-	publish_replica_gun_words(state, specs, world);
+	publish_replica_gun_words(state, specs, world, materializer, wire_header_world);
 }
 } //namespace opennova::inmatch

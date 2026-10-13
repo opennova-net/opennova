@@ -75,8 +75,10 @@ bool table_set_cell_value(std::vector<MenuTableRow> &rows, int row, int column, 
 	return true;
 }
 
-int32_t table_cell_value(const std::vector<MenuTableRow> &rows, int row, int column) {
-	if (!row_in_range(rows, row)) return 0;
+std::optional<int32_t> table_cell_record(
+		const std::vector<MenuTableRow> &rows, int row, int column, int column_count) {
+	if (!row_in_range(rows, row) || column < 0 || column >= column_count)
+		return std::nullopt;
 	return rows[static_cast<size_t>(row)].value(column);
 }
 

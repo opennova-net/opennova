@@ -24,6 +24,8 @@
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/squad_messages.h>
 #include <runtime/mission/mission_kernel.h>
+#include <runtime/mission/mission_text.h>
+#include <formats/def/reserved_items.h>
 #include <formats/playersav/player_sav.h>
 
 #include <runtime/inmatch/null_datagram_socket.h>
@@ -120,6 +122,75 @@ void check_shell_single_player_rules_word(std::map<std::string, std::string> &fi
 		}
 		CHECK(kernel.world.rules.no_friendly_fire);
 		CHECK(!kernel.world.rules.auto_scope_zero);
+	}
+}
+
+// The listen host's own 0x0F rewrites its location names (D-NET-657).
+// The spawn copies each name whole into its 64-byte slot of the one
+// g_LocationNames, so a 70-byte name reads on into the next name; the
+// host's own client's 0x0F copies every name back into the same slots,
+// cut to 63 bytes, so from then on the host's own list (a later joiner's
+// 0x0F, the chat's labels) reads the cut names.
+// [orig: Entity_SpawnFromBMSRecord @0x40F1D3..0x40F1DF; NapiNPClientMsg_0x00F
+//  @0x42e51b..0x42e5ad, ahead of the ack burst's is_authority test @0x42e5b7]
+// Its own frame, the kernel and role on the heap: main is near the stack limit.
+void check_own_world_state_location_names(std::map<std::string, std::string> &files) {
+	auto kernel_storage = std::make_unique<ms::MissionKernel>();
+	ms::MissionKernel &kernel = *kernel_storage;
+	auto role_storage = std::make_unique<inmatch::HostRole>();
+	inmatch::HostRole &role = *role_storage;
+	role.bind(kernel);
+	inmatch::ListenHostState &host = role.state;
+	bms::File mission = two_entity_mission();
+	for (const int32_t name_index : {0, 1}) {
+		bms::Entity marker{};
+		marker.type = bms::ItemType::Marker;
+		marker.type_id = def::DEF_TYPE_NAMED_LOCATION;
+		marker.name_index = name_index;
+		marker.x = (40 + name_index) << 16;
+		marker.y = 20 << 16;
+		mission.markers.push_back(marker);
+	}
+	kernel.open_document(mission, "location_names", source_over(&files));
+	const std::string long_name = "North " + std::string(64, 'x'); // 70 bytes
+	ms::MissionText text;
+	text.loaded = true;
+	text.table.sections.push_back({"Locations", 2});
+	text.table.entries.push_back({"LOCATION000", long_name, {}, 0});
+	text.table.entries.push_back({"LOCATION001", "Ridge", {}, 0});
+	ms::KernelBootOptions options;
+	options.mp_session = true;
+	options.game_type = mission_game_type(kernel.mission);
+	options.bringup_net_session = [&] {
+		inmatch::HostConfig cfg;
+		cfg.config.server_name = "location_names";
+		cfg.config.max_players = 4;
+		cfg.config.game_type = options.game_type;
+		cfg.socket_mode = inmatch::SocketMode::Lan;
+		cfg.serve_and_play = true;
+		inmatch::HostBringup bringup;
+		bringup.host_cfg = cfg;
+		bringup.mission_text = text;
+		role.bring_up(bringup);
+	};
+	std::string error;
+	CHECK(kernel.boot(options, error));
+	opennova::inmatch::NullDatagramSocket socket;
+	role.set_socket(&socket);
+	const std::vector<std::string> spawned = {long_name.substr(0, 64) + "Ridge", "Ridge"};
+	CHECK(host.host_owner.ctx.mission_location_names == spawned);
+	CHECK(host.client_runtime != nullptr);
+	if (host.client_runtime != nullptr) {
+		int landed_at = -1;
+		for (int frame = 1; frame <= 200 && landed_at < 0; ++frame) {
+			role.run_tick(tick_input(0));
+			if (host.client_runtime->state().world_state.revision != 0) landed_at = frame;
+		}
+		std::printf("host_role: the host's own 0x0F landed at frame %d\n", landed_at);
+		const std::vector<std::string> cut = {long_name.substr(0, 63), "Ridge"};
+		CHECK(landed_at > 0);
+		CHECK(host.client_runtime->state().location_names == cut);
+		CHECK(host.host_owner.ctx.mission_location_names == cut);
 	}
 }
 
@@ -1083,6 +1154,8 @@ int main() {
 			CHECK(host.client_runtime->state().roster[slot].quality == 1);
 		}
 	}
+
+	check_own_world_state_location_names(files);
 
 	// The window's CPU share reaches the server context before the drain, where
 	// every tick's 0x0A server-status block copies it (capped in the fan)

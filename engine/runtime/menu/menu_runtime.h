@@ -478,8 +478,10 @@ public:
 	// ---- tables (the CTableWnd operations, menu_table_row.h) ----
 	// The column count a populate sets before it defines its columns: false
 	// below 1 (the resize fails). A count that does not grow the table keeps
-	// its records (the authored columns); one that grows it starts every record
-	// over, zeroed (menu_table.h MenuTableColumn::kept).
+	// its records (the authored columns), and a smaller one makes every row's
+	// cells from it up to the old count missing, their values kept (D-MNU-47);
+	// one that grows it starts every record over, zeroed (menu_table.h
+	// MenuTableColumn::kept).
 	// [orig: CTableWnd vtable +0x6C -> CTableWnd_ResizeColumnCount @0x63f6c0]
 	bool table_set_column_count(int id, int count);
 	// CTableWnd_InitRow(column, 0, width, label, justify, vjustify) on one record
@@ -496,6 +498,10 @@ public:
 			int insert_index);
 	void table_set_cell_text(int id, int row, int col, const std::string &text);
 	void table_set_cell_value(int id, int row, int col, int32_t value);
+	// The cell record's value, none past the rows or the COLUMN COUNT
+	// (menu_table_row.h table_cell_record, D-MNU-55); table_cell_value reads
+	// none as 0.
+	std::optional<int32_t> table_cell_record(int id, int row, int col) const;
 	int32_t table_cell_value(int id, int row, int col) const;
 	// CTableWnd_GetRowValue: column 0's cell value.
 	int32_t table_row_value(int id, int row) const { return table_cell_value(id, row, 0); }

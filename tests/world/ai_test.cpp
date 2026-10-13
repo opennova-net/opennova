@@ -147,6 +147,7 @@ void test_vehicle_death_states_send_kill_record() {
         seed.team = 1;
         seed.health = 0;
         seed.has_item_def = true;
+        seed.has_graphic_model = true;
         const EntityHandle h = w.registry.spawn(1, seed);
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
@@ -370,6 +371,7 @@ static void test_aim_origin_takes_the_non_person_leg() {
     Entity veh_seed{};
     veh_seed.kind = EntityKind::Item;
     veh_seed.has_item_def = true;
+    veh_seed.has_graphic_model = true;
     veh_seed.item_type = 1; // not def type 3: the non-person leg
     veh_seed.alive = true;
     veh_seed.position = Vec3{10.0f, 20.0f, 0.0f};
@@ -404,6 +406,7 @@ static void test_aim_origin_takes_the_non_person_leg() {
     Entity person_seed{};
     person_seed.kind = EntityKind::Organic;
     person_seed.has_item_def = true;
+    person_seed.has_graphic_model = true;
     person_seed.item_type = 3;
     person_seed.net_id = 0;
     person_seed.alive = true;
@@ -473,6 +476,7 @@ static void test_aim_solution_uses_muzzle_stamp() {
     player_seed.kind = EntityKind::Organic;
     player_seed.item_id = 1001;
     player_seed.has_item_def = true;
+    player_seed.has_graphic_model = true;
     player_seed.item_type = 3;
     player_seed.team = 2;
     player_seed.health = 100;
@@ -865,6 +869,7 @@ static void test_round_hit_reaches_the_same_pass_body_update() {
     Entity victim_seed;
     victim_seed.kind = EntityKind::Organic;
     victim_seed.has_item_def = true;
+    victim_seed.has_graphic_model = true;
     victim_seed.item_type = 3;
     victim_seed.team = 2;
     victim_seed.health = 1000;
@@ -915,6 +920,7 @@ static void test_lethal_hit_blends_into_death_animation_without_position_jump() 
     Entity victim_seed;
     victim_seed.kind = EntityKind::Organic;
     victim_seed.has_item_def = true;
+    victim_seed.has_graphic_model = true;
     victim_seed.item_type = 3;
     victim_seed.team = 2;
     victim_seed.health = 10;
@@ -1033,6 +1039,7 @@ static void test_world_feed_never_engages_same_team() {
     Entity ally_seed{};
     ally_seed.kind = EntityKind::Organic;
     ally_seed.has_item_def = true;
+    ally_seed.has_graphic_model = true;
     ally_seed.item_type = 3;
     ally_seed.team = 1;
     ally_seed.health = 100;
@@ -1347,6 +1354,7 @@ static void test_mounted_gunner_acquires_and_fires() {
     enemy_seed.kind = EntityKind::Organic;
     enemy_seed.item_id = 1001;
     enemy_seed.has_item_def = true;
+    enemy_seed.has_graphic_model = true;
     enemy_seed.item_type = 3;
     enemy_seed.team = 2;
     enemy_seed.health = 100;
@@ -1358,6 +1366,7 @@ static void test_mounted_gunner_acquires_and_fires() {
     Entity gun{};
     gun.kind = EntityKind::Item;
     gun.has_item_def = true; // seats need the def (D-NET-422)
+    gun.has_graphic_model = true;
     gun.team = 1;
     gun.net_id = 0x31;
     gun.yaw = 90; // engine heading 0: faces the enemy on +X.
@@ -1454,6 +1463,7 @@ static void test_mounted_gunner_fires_from_the_slot_barrel() {
         enemy_seed.kind = EntityKind::Organic;
         enemy_seed.item_id = 1001;
         enemy_seed.has_item_def = true;
+        enemy_seed.has_graphic_model = true;
         enemy_seed.item_type = 3;
         enemy_seed.team = 2;
         enemy_seed.health = 100;
@@ -1465,6 +1475,7 @@ static void test_mounted_gunner_fires_from_the_slot_barrel() {
         Entity gun{};
         gun.kind = EntityKind::Item;
         gun.has_item_def = true; // the boarding needs the def (D-NET-422); the fixture,
+        gun.has_graphic_model = true;
                                  // built around a def-less gun, drops it below
         gun.team = 1;
         gun.net_id = 0x31;
@@ -1564,6 +1575,7 @@ static void test_weapon_fire_position_legs() {
     Entity veh_seed{};
     veh_seed.kind = EntityKind::Item;
     veh_seed.has_item_def = true;
+    veh_seed.has_graphic_model = true;
     veh_seed.item_type = 1;
     const EntityHandle veh_h = w->registry.spawn(1, veh_seed);
     const int person_index = sys.attach(person_h);
@@ -1582,6 +1594,7 @@ static void test_weapon_fire_position_legs() {
 
     // A person: position plus CameraOffset, the same on either aim phase.
     w->registry.get(person_h)->has_item_def = true;
+    w->registry.get(person_h)->has_graphic_model = true;
     w->registry.get(person_h)->item_type = 3;
     for (const uint32_t tick : {0u, 128u}) {
         w->logic_tick = tick;
@@ -1597,6 +1610,7 @@ static void test_weapon_fire_position_legs() {
     gun.team = 1;
     gun.net_id = 0x31;
     gun.has_item_def = true;
+    gun.has_graphic_model = true;
     gun.item_attrib = kItemAttribEweap;
     gun.primary_weapon.assign(1, 'x');
     for (int barrel = 0; barrel < 4; ++barrel)
@@ -1687,6 +1701,7 @@ static void test_turret_gunners_scan_from_the_gun_point() {
         enemy_seed.kind = EntityKind::Item;
         enemy_seed.item_id = 1002;
         enemy_seed.has_item_def = true;
+        enemy_seed.has_graphic_model = true;
         enemy_seed.item_type = 1;
         enemy_seed.team = 2;
         enemy_seed.health = 1000;
@@ -1699,6 +1714,7 @@ static void test_turret_gunners_scan_from_the_gun_point() {
         gun.kind = EntityKind::Item;
         gun.item_id = cannon ? 100166 : 100182;
         gun.has_item_def = true;
+        gun.has_graphic_model = true;
         gun.team = 1;
         gun.net_id = 0x31;
         gun.yaw = 90; // engine heading 0: faces the enemy on +X.
@@ -1732,6 +1748,7 @@ static void test_turret_gunners_scan_from_the_gun_point() {
         npc_seed.kind = EntityKind::Organic;
         npc_seed.item_id = 1001;
         npc_seed.has_item_def = true;
+        npc_seed.has_graphic_model = true;
         npc_seed.item_type = 3;
         npc_seed.team = 1;
         npc_seed.health = 100;
@@ -1902,6 +1919,7 @@ static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
     Entity gun{};
     gun.kind = EntityKind::Item;
     gun.has_item_def = true; // the boarding needs the def (D-NET-422); the fixture,
+    gun.has_graphic_model = true;
                              // built around a def-less gun, drops it below
     gun.team = 1;
     gun.net_id = 0x31;
@@ -2033,6 +2051,7 @@ static void test_weapon_walk_pumps_hot_unoccupied_guns() {
         Entity gun{};
         gun.kind = EntityKind::Item;
         gun.has_item_def = true;
+        gun.has_graphic_model = true;
         gun.item_attrib = attrib;
         gun.primary_weapon_slot_adm = 1;
         gun.primary_weapon_slot.kick = 3;
@@ -2083,6 +2102,7 @@ static void test_weapon_walk_visits_pool0_in_slot_order() {
         Entity gun{};
         gun.kind = EntityKind::Item;
         gun.has_item_def = true; // seats need the def (D-NET-422)
+        gun.has_graphic_model = true;
         gun.team = 1;
         gun.net_id = net_id;
         gun.yaw = 90;
@@ -2138,6 +2158,7 @@ static void test_mounted_request_copies_the_parent_adm_byte() {
     Entity gun{};
     gun.kind = EntityKind::Item;
     gun.has_item_def = true; // seats need the def (D-NET-422)
+    gun.has_graphic_model = true;
     gun.team = 1;
     gun.net_id = 0x31;
     gun.yaw = 90;
@@ -2202,6 +2223,7 @@ static void test_mounted_gunner_runs_the_anim_event_fire_block() {
     Entity gun{};
     gun.kind = EntityKind::Item;
     gun.has_item_def = true; // seats need the def (D-NET-422)
+    gun.has_graphic_model = true;
     gun.team = 1;
     gun.net_id = 0x31;
     gun.yaw = 90;
@@ -2269,6 +2291,7 @@ static void test_mounted_request_runs_for_a_passenger() {
         Entity truck{};
         truck.kind = EntityKind::Item;
         truck.has_item_def = true; // seats need the def (D-NET-422)
+        truck.has_graphic_model = true;
         truck.team = 1;
         truck.net_id = 0x31;
         truck.yaw = 90;
@@ -2333,6 +2356,7 @@ static void test_mounted_request_copies_the_parents_live_byte() {
     Entity gun{};
     gun.kind = EntityKind::Item;
     gun.has_item_def = true; // seats need the def (D-NET-422)
+    gun.has_graphic_model = true;
     gun.team = 1;
     gun.net_id = 0x31;
     gun.yaw = 90;
@@ -2384,6 +2408,7 @@ static void test_mounted_look_traverses_before_fire_request() {
     Entity gun{};
     gun.kind = EntityKind::Item;
     gun.has_item_def = true; // seats need the def (D-NET-422)
+    gun.has_graphic_model = true;
     gun.team = 1;
     gun.net_id = 0x31;
     gun.yaw = 90;
@@ -2439,6 +2464,7 @@ static void test_mounted_gunner_dismounts_into_death_animation() {
     Entity gun{};
     gun.kind = EntityKind::Item;
     gun.has_item_def = true; // seats need the def (D-NET-422)
+    gun.has_graphic_model = true;
     gun.net_id = 0x31;
     Seat seat{};
     seat.type = SeatType::Gunner;
@@ -2497,6 +2523,7 @@ static void test_mounted_collision_tail_uses_retail_eight_tick_phase_without_mod
     Entity gun{};
     gun.kind = EntityKind::Item;
     gun.has_item_def = true; // the boarding needs the def (D-NET-422); the
+    gun.has_graphic_model = true;
                              // test's subject, a def-less parent, drops it below
     gun.net_id = 0x20;
     Seat seat{};
@@ -4699,6 +4726,7 @@ int main() {
         player_seed.kind = EntityKind::Organic;
         player_seed.item_id = 1001;
     player_seed.has_item_def = true;
+    player_seed.has_graphic_model = true;
         player_seed.item_type = 3;
         player_seed.team = 2;
         player_seed.health = 100;

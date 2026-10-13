@@ -14,6 +14,14 @@
 
 namespace opennova::replication {
 
+// The stride of g_LocationNames, one slot per registered location: the spawn
+// copies a name into its count's slot whole, the S2C 0x0F handler at most one
+// byte short of a slot and the NUL [orig: g_LocationNames @0xA2ED10;
+// Entity_SpawnFromBMSRecord `shl eax, 6` @0x40F1CB; NetPacket_WriteWorldStateLoad0x0F
+// `add ebx, 40h` @0x502ED1; NapiNPClientMsg_0x00F `mov esi, 40h` @0x42E538,
+// `add ebp, 40h` @0x42E5A5].
+inline constexpr std::size_t kLocationNameSlotBytes = 64;
+
 // One connection-slot roster binding, folded from S2C 0x46 player-sync. This
 // is the scoreboard's NAME-JOIN table, keyed by CONNECTION SLOT — a different
 // key from the entity handle the feed resolves names by; entity_slot is the
@@ -1265,6 +1273,8 @@ struct ClientState {
 	std::vector<ClientVisiblePlayer> visible_players;
 	// The 0x22 + 0x23 refresh pairs the 0x4D / 0x50 folds queue.
 	std::vector<ClientVisiblePlayersRefresh> pending_visible_refreshes;
+	// The S2C 0x0F's location names as its handler copies them into
+	// g_LocationNames: each cut to its slot's kLocationNameSlotBytes - 1 bytes.
 	std::vector<std::string> location_names;
 	// The map's tracked target (the retail globals g_HUDTrackedTarget and
 	// dword_2721EBC..dword_2721ED0), set by HUD_SetTrackedEntityTarget from
