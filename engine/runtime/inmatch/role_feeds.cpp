@@ -866,15 +866,27 @@ bool joiner_in_match_ready(const RoleView &view, bool auto_deploy) {
 			(!auto_deploy || !runtime.deployment_pick_pending());
 }
 
+uint8_t deploy_list_team(const RoleView &view) {
+	if (view.joiner) return view.runtime != nullptr ? view.runtime->assigned_team() : 0;
+	const world::Entity *player = view.kernel != nullptr ? view.kernel->local.player() : nullptr;
+	return player != nullptr ? player->team : 0;
+}
+
 bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zones,
 		std::vector<world::DeployZoneRow> &out) {
 	out.clear();
-	if (view.kernel == nullptr || !view.joiner || view.runtime == nullptr) return false;
+	if (view.kernel == nullptr || view.runtime == nullptr) return false;
 	const ClientRuntime &runtime = *view.runtime;
 	const world::World &w = view.kernel->world;
-	const uint8_t team = runtime.assigned_team();
+	const uint8_t team = deploy_list_team(view);
 	const replication::ClientState &cs = runtime.state();
-	const uint16_t self_handle = runtime.has_self_handle() ? runtime.self_handle() : 0xFFFFu;
+	// The self marker compares the member with the local player entity
+	// [orig: `cmp eax, g_LocalPlayerEntity` @0x553d64]: the
+	// authority's own body, a joiner's bound self record.
+	const world::EntityHandle local = w.cached.local_player;
+	const uint16_t self_handle = view.joiner
+			? (runtime.has_self_handle() ? runtime.self_handle() : 0xFFFFu)
+			: (local.valid() ? local.packed : 0xFFFFu);
 	// The zone walk is the minimap banks' (banked_spawn_zones): a zone the
 	// server never sent is not listed, the rows follow first arrival, and a
 	// banked zone outside the SpawnZoneList lists as index -1.

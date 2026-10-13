@@ -8,6 +8,7 @@
 //  @0x562240; UI_UpdateDeathScreenContent @0x5536a0]
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/effect_pose_index.h>
+#include <runtime/inmatch/loopback_channel.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/role_feeds.h>
 #include <runtime/replication/client_world_materializer.h>
@@ -381,8 +382,9 @@ int main() {
 	// banks hold (transient, persistent, special in that order; a 0x40 slot
 	// skipped), each zone's local BMS facts (team, control) and SpawnZoneList
 	// index (-1 lists as '@' / STRWPNAME000), with the 0x6E wave group's
-	// occupants named through the roster; every other role emits nothing
-	// [orig: UI_UpdateDeathScreenContent @0x553b53..0x553c4e].
+	// occupants named through the roster; the authority's own client lists
+	// the same way by its body's team [orig: UI_UpdateDeathScreenContent
+	// @0x553b53..0x553c4e].
 	{
 		mission::MissionKernel kernel;
 		kernel.world.registry.configure_pool(2, 8);
@@ -450,10 +452,51 @@ int main() {
 		cs.minimap = replication::ClientMinimapState();
 		CHECK(deploy_zone_rows(jv, reg, rows) && rows.empty());
 		cs.minimap = banks;
-		// The authority's view (the listen host) lists nothing through this feed.
+		// The authority's view (the listen host, the single player): its own
+		// client's banks, by its own body's team byte, the body marked as self
+		// in a wave group. A 0x6F entry carries the zone's team, and one whose
+		// value sits below its limit keeps the zone off the list.
+		// [orig: the team compare @0x553bb5..0x553bc6; the entry gate
+		//  @0x553bce..0x553bdd; the self compare @0x553d64]
+		kernel.world.registry.configure_pool(0, 4);
+		world::Entity body;
+		body.kind = world::EntityKind::Organic;
+		body.team = 1;
+		kernel.world.cached.local_player = kernel.world.registry.spawn(0, body);
+		replication::LoopbackChannel host_loop;
+		ClientRuntime host_view(host_loop);
+		auto zone_value = [&host_loop](world::EntityHandle h, uint8_t team, int32_t value,
+								  int32_t limit) {
+			std::vector<uint8_t> b = { static_cast<uint8_t>(h.packed),
+				static_cast<uint8_t>(h.packed >> 8), team };
+			for (const int32_t word : { value, limit })
+				for (int shift = 0; shift < 32; shift += 8)
+					b.push_back(static_cast<uint8_t>(static_cast<uint32_t>(word) >> shift));
+			b.insert(b.end(), { 0, 0, 0, 0 }); // rate, +544, +545
+			host_loop.host_send(0x6F, b);
+		};
+		zone_value(contested, 1, 0x8000, 0x10000);
+		zone_value(secured, 1, 0x10000, 0x10000);
+		host_view.Client_ProcessNetworkFrame();
+		replication::ClientState &hs = host_view.state();
+		hs.minimap = banks;
+		SpawnWaveGroup ours;
+		ours.zone_handle = theirs.packed;
+		ours.members = { kernel.world.cached.local_player.packed };
+		hs.spawn_waves.known = true;
+		hs.spawn_waves.value.groups = { ours };
 		RoleView hv;
 		hv.kernel = &kernel;
-		hv.runtime = &runtime;
+		hv.runtime = &host_view;
+		CHECK(deploy_list_team(hv) == 1 && deploy_list_team(jv) == runtime.assigned_team());
+		CHECK(deploy_zone_rows(hv, reg, rows));
+		CHECK(rows.size() == 3); // the team-0 transient zone is not a row
+		CHECK(rows.size() == 3 && rows[0].index == 1 && !rows[0].secured);
+		CHECK(rows.size() == 3 && rows[1].index == 0 && rows[1].secured);
+		CHECK(rows.size() == 3 && rows[2].index == 2 && rows[2].letter == 'C' && rows[2].secured);
+		CHECK(rows.size() == 3 && rows[2].occupants.size() == 1 && rows[2].occupants[0].self);
+		// Without a replica runtime there is nothing to walk.
+		hv.runtime = nullptr;
 		CHECK(!deploy_zone_rows(hv, reg, rows) && rows.empty());
 		cs.spawn_waves = replication::ClientSpawnWaveStatus();
 		cs.roster[0] = replication::ClientRosterSlot();
