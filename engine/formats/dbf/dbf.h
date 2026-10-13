@@ -78,14 +78,14 @@ struct Line {
 	uint8_t def_id_index = 0xFF;
 	uint8_t delay = 0;
 	uint32_t param = 0;
-	uint32_t resd0 = 0;
-	uint32_t resd1 = 0;
+	// (+0x3C and +0x40 are no fields: Dialog_LoadAudioClip copies them, as it does +0x34 and +0x38, to globals
+	// nothing reads [orig: @ 0x44dd2e, @ 0x44dd37: dword_A8A210, dword_A8A214]; written zero.)
 };
 
 struct Group {
 	std::string group_name;
 	uint32_t idlist_count = 0;
-	std::vector<uint8_t> def_id_indices;
+	std::vector<uint8_t> def_id_indices; // the id list, idlist_count entries (at most 16)
 	std::vector<Line> lines;
 };
 

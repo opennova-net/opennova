@@ -8,7 +8,6 @@
 
 #include "common/test_expect.h"
 
-#include <cstring>
 #include <initializer_list>
 #include <set>
 #include <string>
@@ -28,7 +27,7 @@ lwf::File sounds_with(const std::vector<std::pair<std::string, int>> &waves) {
 		lwf::Single single;
 		single.name = name;
 		single.path = name + ".wav";
-		single.value_hi = uint16_t(volume << 8);
+		single.volume = uint8_t(volume);
 		file.singles.push_back(single);
 		lwf::Multi set;
 		set.name = "SET_" + name;
@@ -171,9 +170,14 @@ int test_a_wave_found_as_the_bank_finds_it() {
 	TEST_EXPECT(find_dialog_wave(sounds, "z01r100") == &sounds.singles[0]);
 	sounds.header.magic = 0;
 	TEST_EXPECT(find_dialog_wave(sounds, "Z01R100") == nullptr);
-	const uint32_t word = 1;
-	std::memcpy(sounds.singles[0].raw_name.data() + 28, &word, sizeof(word));
+	sounds.singles[0].entry_word28 = 1;
 	TEST_EXPECT(find_dialog_wave(sounds, "Z01R100") == &sounds.singles[0]);
+	// A name past 28 characters: its 29th byte sits in the dword the lookup tests, so it always
+	// finds.
+	const std::string long_name(29, 'L');
+	sounds.singles[1].name = long_name;
+	sounds.singles[1].entry_word28 = 0;
+	TEST_EXPECT(find_dialog_wave(sounds, long_name) == &sounds.singles[1]);
 	return 0;
 }
 

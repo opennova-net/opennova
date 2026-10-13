@@ -1,5 +1,5 @@
-// Parse + byte-exact round-trip for opennova::dbf, and the dlg-id -> def-id
-// (LWF set) mapping the runtime uses. Mirrors lwf_roundtrip_test.
+// Parse + byte-exact round-trip for opennova::dbf (a group's stale id-list bytes written zero), and
+// the dlg-id -> def-id (LWF set) mapping the runtime uses. Mirrors lwf_roundtrip_test.
 //
 // Two legs: the minted fixtures/dbf/synth_bank.dbf (tests/fixtures/
 // minimal_dbf_gen.cpp) runs unconditionally; the shipped 00TRg.DBF, read from
@@ -60,6 +60,38 @@ int main(int argc, char **argv) {
     retail::configure_mixed(argc, argv);
 	const std::string root = test_paths_repo_root(__FILE__);
 	if (check_bank(root + "/fixtures/dbf/synth_bank.dbf", 11, "SynR100") != 0) return 1;
+
+	// A group's id list is its count's entries: the bytes past them, the tools' stale memory in a
+	// shipped bank (04TR.DBF), are written zero (ADR 0003), the list itself as read.
+	{
+		std::vector<uint8_t> stale = read_file(root + "/fixtures/dbf/synth_bank.dbf");
+		TEST_EXPECT(stale.size() > 28 + 52);
+		if (stale.size() <= 28 + 52)
+			return 1;
+		const uint32_t count = 2;
+		std::memcpy(stale.data() + 28 + 0x20, &count, 4);
+		const uint8_t ids[16] = { 7, 9, 0xAB, 0xCD, 0xEF, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 };
+		std::memcpy(stale.data() + 28 + 0x24, ids, sizeof(ids));
+		opennova::dbf::File read;
+		std::string error;
+		TEST_EXPECT(opennova::dbf::parse_dbf_memory(stale.data(), stale.size(), read, error));
+		TEST_EXPECT(!read.groups.empty() && read.groups[0].idlist_count == 2 &&
+				read.groups[0].def_id_indices == std::vector<uint8_t>({ 7, 9 }));
+		std::vector<uint8_t> written;
+		TEST_EXPECT(
+				opennova::dbf::encode_dbf(read, written, error) && written.size() == stale.size());
+		if (written.size() == stale.size()) {
+			TEST_EXPECT(written[28 + 0x24] == 7 && written[28 + 0x25] == 9);
+			for (size_t i = 2; i < 16; ++i)
+				TEST_EXPECT(written[28 + 0x24 + i] == 0);
+		}
+		// A name as wide as its 24-byte field comes back as it went (no terminator).
+		read.groups[0].group_name = std::string(24, 'G');
+		TEST_EXPECT(opennova::dbf::encode_dbf(read, written, error));
+		opennova::dbf::File back;
+		TEST_EXPECT(opennova::dbf::parse_dbf_memory(written.data(), written.size(), back, error) &&
+				!back.groups.empty() && back.groups[0].group_name == std::string(24, 'G'));
+	}
 
 	// The retail leg: 00TRg's bank (11 dialogs; dlg001 -> Z00gR100).
 	const std::string retail_bank = retail::reference_fixture("dbf/00TRg.DBF");

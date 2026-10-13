@@ -974,9 +974,11 @@ struct File {
 
     // The frame the entities' heights are in (MisFrame).
     MisFrame mis_frame = MisFrame::Bms;
-	// A .mis's area markers as read (MisAreaMarker), in the .mis's frame: until mis_items_to_bms_frame
-	// makes the areas of them over a terrain, which keeps those of a zone the export makes no area
-	// of (its least-x marker's extra_valmode not 0); none in a parsed .bms.
+	// A .mis's area markers (MisAreaMarker), each in the .mis's frame as read: parse_mis_text keeps
+	// them; mis_items_to_bms_frame makes the areas of them over a terrain and keeps only those of a
+	// zone the export makes no area of (its least-x marker's extra_valmode not 0); write_mis_text
+	// writes a zone's back where they still make its area (or, such a zone, none). None in a parsed
+	// .bms.
 	std::vector<MisAreaMarker> mis_area_markers;
 
     // Get mission name as string

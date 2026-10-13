@@ -3,7 +3,6 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <utility>
 
 #include <base/io/crt_ftol.h>
@@ -36,15 +35,13 @@ const lwf::Single *find_dialog_wave(const lwf::File &sounds, const std::string &
 		if (!strutil::iequals(single.name, name)) continue;
 		// The first of the name is the one: another magic's needs its dword +28 set, else none.
 		if (sounds.header.magic == lwf::kMagic) return &single;
-		uint32_t word = 0;
-		std::memcpy(&word, single.raw_name.data() + 28, sizeof(word));
-		return word != 0 ? &single : nullptr;
+		return single.name.size() > 28 || single.entry_word28 != 0 ? &single : nullptr;
 	}
 	return nullptr;
 }
 
 int dialog_wave_volume(const lwf::Single &wave) {
-	const int byte = int(wave.value_hi >> 8);
+	const int byte = int(wave.volume);
 	return byte == 0 ? 255 : byte;
 }
 
