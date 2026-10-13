@@ -110,6 +110,38 @@ int main() {
 	// A negative round clock reads as 0 (the untimed arm).
 	cs.round_time_remaining_ticks = -1;
 	CHECK(end_round_session_state(joiner).round_ticks == 0);
+	// The stat fill's local slot is the local player entity's slot id (+0x154:
+	// the runtime's latched roster slot), not the 0x1D header's board index,
+	// which here names board row 1 (slot 5) where the local slot is 3; the rows
+	// carry no local flag (D-MNU-51).
+	// [orig: StatScreen_PopulateStatResultsList @0x562240 - g_LocalPlayerEntity
+	//  +0x154 read @0x562724]
+	{
+		ClientRuntime local("StatLocal");
+		replication::ClientState &ls = local.state();
+		ls.end_round = cs.end_round;
+		ls.end_round.board.team_fields = { { 1, 1 } };
+		EndRoundPlayerRow three;
+		three.slot = 3;
+		three.per_team = { 4 };
+		EndRoundPlayerRow five;
+		five.slot = 5;
+		five.per_team = { 9 };
+		ls.end_round.board.players = { three, five };
+		ls.end_round.header.player_index = 1;
+		for (const int slot : { 3, 5 }) {
+			ls.roster[static_cast<size_t>(slot)].bound = true;
+			ls.roster[static_cast<size_t>(slot)].team = 1;
+		}
+		local.view().set_local_player_slot(3);
+		RoleView v;
+		v.runtime = &local;
+		v.joiner = true;
+		CHECK(end_round_session_state(v).local_slot == 3);
+		CHECK(end_round_session_state(RoleView{}).local_slot == -1);
+		const std::vector<StatScreenRow> rows = end_round_rows(v, 0);
+		CHECK(rows.size() == 2 && rows[0].slot == 3 && rows[1].slot == 5);
+	}
 	// The joiner's local team is the S2C 0x04 latch; a listen host never
 	// receives that record, so the authority reads its own player entity
 	// [orig: g_LocalTeam @0x5b7f56, latched on the host from its loopback

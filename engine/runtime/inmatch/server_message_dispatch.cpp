@@ -37,7 +37,7 @@
 #include <net/npwire/session_vars.h>     // the 0x60 server-info stream
 #include <net/npwire/replication_model.h> // PlayerReplicationState (POD) — the reply builders' input
 
-#include <runtime/world/entity.h> // world::Entity / EntityHandle — team @entity+344 read through owned_entity
+#include <runtime/world/entity.h> // world::Entity / EntityHandle: the bound entity read through owned_entity
 #include <runtime/world/local_player.h>
 #include <runtime/world/entity_spawn.h>  // entity_reset_to_spawn_state — the deploy revive (§5.61)
 #include <runtime/world/spawn_select.h>  // deploy target validation + one spawn-pose resolver
@@ -468,10 +468,10 @@ std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
 		// state 6 @0x50d9f6, +100579 @0x50da73; a punt writes no slot byte,
 		// Server_LogCRCMismatchPunt @0x517ED0; Server_ProcessRoundEnd @0x51685E].
 		if (!c.burst.spawned || (world != nullptr && world->match.outcome().ended)) continue;
-		// team @entity+344 read THROUGH owned_entity (D-NET-132); the World-less path defaults to 1.
-		uint8_t team = 1;
-		if (world != nullptr)
-			if (const world::Entity *e = world->registry.get(c.link.owned_entity)) team = e->team;
+		// The row's team is the slot's own byte (+0x1A0), never its entity's: a script team
+		// write to the body leaves it (D-NET-651) [orig: Server_BuildAndBroadcastScoreboard
+		// `mov dl, [esi+1A0h]` @0x50DAF2, stored @0x50DAFB; Entity_SetTeamByNetId @0x43C680].
+		const uint8_t team = c.assigned_team_valid ? c.assigned_team : uint8_t{0};
 		PlayerListEntry row;
 		int32_t computed_score = 0;
 		row.slot = c.reply.player_slot;
@@ -599,12 +599,13 @@ PlayerReplicationState make_rep_state(const GameConfig &cfg, const NapiNPConnect
 		if (!cfg.mission_name.empty()) ctx.spawn_names.push_back(cfg.mission_name);
 		else if (!cfg.mission_file.empty()) ctx.spawn_names.push_back(cfg.mission_file);
 	}
-	// D-NET-132 / §6.9: the roster identity is read THROUGH link.owned_entity (the single binding) — the
-	// wire handle off owned_entity.packed and the team off the live registry Entity (team @entity+344).
+	// D-NET-132 / §6.9: the wire handle is read THROUGH link.owned_entity (the single binding); the
+	// field-0x0004 team is the slot's own byte, 0 for an inactive slot (D-NET-651) [orig:
+	// NetPacket_SerializePlayerSync0x46 - slot+4 @0x5060B9, `mov cl, [ebx+1A0h]` @0x5060D1].
 	// player_slot / player_name stay on conn.reply (roster order + the echoed ClientAuth.NA). A
-	// World-less bind (bind_session_reply_player) stamps owned_entity with the bare wire handle, so the
-	// handle resolves here and the team keeps its default.
+	// World-less bind (bind_session_reply_player) stamps owned_entity with the bare wire handle.
 	if (conn.link.owned_entity.valid()) {
+		ctx.team = player_slot_active(conn) && conn.assigned_team_valid ? conn.assigned_team : 0;
 		ctx.player_name = conn.reply.player_name;
 		ctx.player_slot = conn.reply.player_slot;
 		ctx.entity_handle = conn.link.owned_entity.packed;
@@ -620,7 +621,6 @@ PlayerReplicationState make_rep_state(const GameConfig &cfg, const NapiNPConnect
 		ctx.spectator_in_game = conn.link.spectator && player_slot_active(conn) ? 1 : 0;
 		if (world != nullptr) {
 			if (const world::Entity *e = world->registry.get(conn.link.owned_entity)) {
-				ctx.team = e->team;
 				// Field 0x0008 is present only when the requester asks for it.
 				// Its value is nonzero only for a dead player whose automatic
 				// preference or explicit request exposes the revive window.
@@ -664,16 +664,12 @@ std::vector<uint8_t> build_tag04_slot_assignment(uint8_t difficulty, uint8_t pla
 
 // S2C 0x75 is the requesting player's live slot state, not a fixed
 // "spectator flags" fixture. Byte 0 is the spectator/death-screen bit and byte
-// 1 is playerSlot+416 (team), written straight into the retail client's
-// g_LocalTeam loadout selector. [orig: NetPacket_SerializeHostEntityState (ex sub_510890) @0x510890;
-// NapiNPClientMsg_SetSpectatorMode @0x4259E0]
-std::vector<uint8_t> build_tag75_player_state(
-		const NapiNPConnection &conn, const world::World *world) {
-	uint8_t team = conn.assigned_team_valid ? conn.assigned_team : 0;
-	if (world != nullptr && conn.link.owned_entity.valid()) {
-		if (const world::Entity *entity = world->registry.get(conn.link.owned_entity))
-			team = entity->team;
-	}
+// 1 is playerSlot+416 (team), the slot's own byte whatever its body's team
+// (D-NET-651), written straight into the retail client's g_LocalTeam loadout
+// selector. [orig: NetPacket_SerializeHostEntityState (ex sub_510890) @0x510890
+// - `mov dl, [eax+1A0h]` @0x5108D0; NapiNPClientMsg_SetSpectatorMode @0x4259E0]
+std::vector<uint8_t> build_tag75_player_state(const NapiNPConnection &conn) {
+	const uint8_t team = conn.assigned_team_valid ? conn.assigned_team : 0;
 	return {static_cast<uint8_t>(conn.link.spectator ? 0x01u : 0x00u), team};
 }
 
@@ -1036,9 +1032,7 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	// respawn edge (D-NET-379), nor out of a session (world.rules.mp_session)
 	// [orig: @0x5178F2, under the @0x5178C5 test and is_in_session @0x5178E9 / @0x5178EF].
 	if (!revive_deploy && world.rules.mp_session)
-		replies.push_back(make_protocol_message(
-				0x5A, build_current_loadout_reply(
-						conn.reply.last_loadout_reply, player->player_class)));
+		replies.push_back(make_protocol_message(0x5A, current_weapon_slot_list(conn, &world)));
 	replies.push_back(make_protocol_message(0x61, Server_RerollPlayerTickSeed(conn)));
 	// The slot team's frontier (D-NET-583) [orig: @0x5179BA, the call @0x5179D9]
 	const uint8_t frontier = world.zones.frontier_zone(conn.assigned_team);
@@ -1404,7 +1398,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 			case c2s::PING: // re-broadcast entity-state request -> 0x75 [orig: handler @0x510ED0]
 				replies.push_back(make_protocol_message(
 						s2c::SPECTATOR_FLAGS,
-						build_tag75_player_state(conn, world)));
+						build_tag75_player_state(conn)));
 				break;
 			case c2s::FILE_CHUNK_REQUEST: // server-info request -> 0x60 chunk [orig: NapiNPServerMsg_HandleReplayRequest (0x33) @0x515230]
 				replies.push_back(make_protocol_message(
@@ -1458,10 +1452,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				    ((loadout_player->flags | loadout_player->engine_flags) &
 				     (world::kEntityFlagDead | world::kEntityFlagArmoryZone)) == 0u &&
 				    world->preround_delay_seconds == 0) {
-					replies.push_back(make_protocol_message(
-							0x5A, build_current_loadout_reply(
-										  st.last_loadout_reply,
-										  current_player_class(conn, world))));
+					replies.push_back(make_protocol_message(0x5A, current_weapon_slot_list(conn, world)));
 					break;
 				}
 				// The decoder owns the framing contract: header, whole 4-byte entries, and one
@@ -1476,12 +1467,12 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// slot list and NO state write — no class stamp, no damage-class table, no
 				// phase-8 gate, no retained body [orig: @0x5158a9 / @0x515fa5, both
 				// `return Server_SendWeaponSlotListToPlayer(player)`].
+				// Retail reaches these sends only with the slot's entity, whose
+				// absence returns ahead of them [orig: @0x5157E1..0x5157E5].
 				if (!conn.link.spectator &&
 				    !loadout_envelope_accepted(req, config.game_type)) {
-					replies.push_back(make_protocol_message(
-							0x5A, build_current_loadout_reply(
-										  st.last_loadout_reply,
-										  current_player_class(conn, world))));
+					if (loadout_player != nullptr)
+						replies.push_back(make_protocol_message(0x5A, current_weapon_slot_list(conn, world)));
 					break;
 				}
 				// The armory-reuse cooldown: a nonzero soldier type is accepted only while
@@ -1491,10 +1482,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				if (!conn.link.spectator && req.player_class != 0 &&
 				    conn.link.armory_reuse_seconds > 0 &&
 				    (world == nullptr || world->preround_delay_seconds == 0)) {
-					replies.push_back(make_protocol_message(
-							0x5A, build_current_loadout_reply(
-										  st.last_loadout_reply,
-										  current_player_class(conn, world))));
+					if (loadout_player != nullptr)
+						replies.push_back(make_protocol_message(0x5A, current_weapon_slot_list(conn, world)));
 					break;
 				}
 				const GrantedWeaponLoadout grant = conn.link.spectator
@@ -1526,6 +1515,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					}
 				}
 				replies.push_back(make_protocol_message(s2c::WEAPON_LOADOUT, st.last_loadout_reply));
+				// The accepted class is the slot's PlayerType, at its store and its list send
+				// [orig: @0x515AE2; the Server_SendWeaponSlotListToPlayer call @0x515F95].
+				if (!conn.link.spectator && loadout_player) conn.player_list_type = grant.reply.avatar_class;
 				// Accepted soldier type -> entity+660 playerClass [orig: @0x515ab0] — feeds the
 				// §5.10 field-17 class nibble and the 0x0C/0x18 spawn records for this player.
 				if (loadout_player != nullptr) {
@@ -1583,7 +1575,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				}
 				// Golden (f161-162): C 0x0A (empty) -> S 0x19 (4 B tick) ONLY. The prior
 				// emit_roster sent 0x46/0x16/0x19/0x1A — the unsolicited 0x1A re-sets
-				// dword_81474C (the deploy gate) via NapiClient_WaitForGameStart @0x42cc10,
+				// g_ClientDeployHold (the deploy gate) via NapiClient_WaitForGameStart @0x42cc10,
 				// re-blocking deploy after 0x0F cleared it. The 0x16 pushes are proactive
 				// (post-handshake + periodic during world-stream), not reactive to 0x0A.
 				// The body is the host's GetTickCount, the 0x28 window's floor.
@@ -1982,8 +1974,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				break;
 			}
 			case c2s::SPECTATOR_RESPAWN: { // [orig: Server_ProcessClientRequestSpectatorRespawn @0x51C840]
-				// Gates in order: no spawn gate, authority, permanent death on, a
-				// spectator capacity, a player, not already a spectator; then
+				// Gates in order: the round-over latch (where the convert runs), authority,
+				// permanent death, a spectator capacity, a player, not a spectator; then
 				// Server_ConvertPlayerToSpectator(player, packet i16, 1). The conversion
 				// needs the owning context, so it is staged for the host tick.
 				if (inputs.server_ctx == nullptr || !inputs.server_ctx->is_authority) break;

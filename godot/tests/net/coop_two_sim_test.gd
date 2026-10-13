@@ -706,7 +706,7 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	assert_true(joiner.send_deployment_pick(zone_param),
 			"the displaced non-default spawn-zone pick was queued")
 	# Deliberately do not step the host. Input case 12 has now queued C2S 0x0E
-	# and re-armed dword_81474C, but that gameplay hold is not a death signal.
+	# and re-armed g_ClientDeployHold, but that gameplay hold is not a death signal.
 	joiner.step()
 	joiner.step()
 	assert_true(joiner.is_join_deploy_pick_pending(),

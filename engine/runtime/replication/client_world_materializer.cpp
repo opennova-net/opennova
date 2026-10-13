@@ -256,8 +256,28 @@ world::Entity *ClientWorldMaterializer::replica_world_entity(world::World &world
 		world::EntityHandle handle, bool wire_header_world) const {
 	if (!handle.valid()) return nullptr;
 	if (wire_header_world) return owned(world, handle);
+	// A full-BMS join's promote spawned the rows the host's did: the records,
+	// with their spawn origins, and each carrier's addeweap children, which
+	// carry none but ride their carrier's attachment row. A row of neither is
+	// the joiner's own (a player, a piece) and no decoded row's.
+	// [orig: Entity_SpawnWeaponOverlays @0x40F300 - the child's pool-1 slot
+	//  Pool_AllocEntry @0x40F393, its spawn @0x40F3FF; the joiner keys a
+	//  decoded row on that slot alone, NapiNPClientMsg_EntityDeath @0x42EBC6]
 	world::Entity *entity = world.registry.get(handle);
-	return entity != nullptr && entity->spawn_origin != world::kSpawnOriginNone ? entity : nullptr;
+	if (entity == nullptr) return nullptr;
+	if (entity->spawn_origin != world::kSpawnOriginNone) return entity;
+	return entity->emplacement_parent.valid() && entity->emplacement_pose_metadata_resolved
+			? entity
+			: nullptr;
+}
+
+world::Entity *replica_row_entity(const ClientWorldMaterializer *materializer,
+		world::World &world, world::EntityHandle handle, uint16_t type_id,
+		bool wire_header_world) {
+	world::Entity *entity = materializer != nullptr
+			? materializer->replica_world_entity(world, handle, wire_header_world)
+			: world.registry.get(handle);
+	return entity != nullptr && static_cast<uint16_t>(entity->item_id) == type_id ? entity : nullptr;
 }
 
 // [orig: Entity_LandmineThink @ 0x441A40] Pool 0 lives in decoded state on a
@@ -344,7 +364,7 @@ void ClientWorldMaterializer::apply_objective_state(const ClientState &state,
 		// The attach hides the flag and puts back the def's own update
 		// callback. [orig: Entity_AttachCarriedObject @0x43c14a, @0x43c191]
 		child.flags |= world::kEntityFlagCarried;
-		child.drop_motion = world::DropMotion::None;
+		child.drop_motion = world::def_update_drop_motion(child);
 	}
 	tracked.objective_parent = next;
 	// A moved flag re-runs its proximity/blink query at the new position.

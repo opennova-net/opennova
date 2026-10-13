@@ -57,6 +57,7 @@ MatchRules rules(uint32_t game_type, uint32_t game_time_minutes, uint32_t score_
 EntityHandle player(World &world, uint8_t slot, uint8_t team, const char *name) {
     Entity entity;
     entity.kind = EntityKind::Organic;
+    entity.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     entity.item_id = 5305;
     entity.has_item_def = true;
     entity.player_class = 8;
@@ -71,6 +72,8 @@ EntityHandle player(World &world, uint8_t slot, uint8_t team, const char *name) 
     identity.slot = slot;
     identity.name = name;
     world.match.upsert_player(identity);
+    // The slot's team byte (+416) is the body's until a script splits them.
+    world.match.set_player_slot_team(handle, team);
     return handle;
 }
 
@@ -91,6 +94,7 @@ EntityHandle objective(World &world, int32_t item_id, uint8_t team, Vec3 positio
                        uint32_t item_attrib = kItemAttribMoveCallback) {
     Entity entity;
     entity.kind = EntityKind::Item;
+    entity.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     entity.item_id = item_id;
     entity.has_item_def = true;
     entity.item_attrib = item_attrib;
@@ -475,6 +479,7 @@ void test_deathmatch_and_hill_outcomes() {
     world->registry.get(solo)->position = {0.0f, 0.0f, 0.0f};
     Entity hill;
     hill.kind = EntityKind::Item;
+    hill.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     hill.item_id = 6006;
     hill.has_item_def = true;
     hill.position = {0.0f, 0.0f, 0.0f};
@@ -501,6 +506,7 @@ void test_deathmatch_and_hill_outcomes() {
     world->match.configure(tkoth);
     const EntityHandle red = player(*world, 1, 2, "Red");
     world->match.upsert_player({solo, 0, "Solo"});
+    world->match.set_player_slot_team(solo, 1); // the re-add stamps its slot team
     world->registry.get(solo)->position = {0.0f, 0.0f, 0.0f};
     world->registry.get(red)->position = {100.0f, 0.0f, 0.0f};
     // One minute is 60 service steps, not 60 simulation ticks.
@@ -606,6 +612,7 @@ void test_retail_objective_proximity_state_and_kill_bonuses() {
 
         Entity hill;
         hill.kind = EntityKind::Item;
+        hill.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
         hill.item_id = 6006;
         hill.has_item_def = true;
         hill.position = {0.0f, 0.0f, 0.0f};
@@ -615,6 +622,7 @@ void test_retail_objective_proximity_state_and_kill_bonuses() {
 
         Entity numbered;
         numbered.kind = EntityKind::Item;
+        numbered.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
         numbered.has_item_def = true;
         numbered.item_attrib = kItemAttribSpawnPoint;
         numbered.zone_number = 1;
@@ -632,6 +640,96 @@ void test_retail_objective_proximity_state_and_kill_bonuses() {
     }
 }
 
+// D-NET-672: the proximity pass's zone-time split tests the mask bit of the
+// slot's own team byte (+416), not its body's: a split slot (a script team
+// write to the body, which stores the entity byte alone) scores hostile time
+// in a zone its body's team owns and friendly time in one its slot team owns.
+// Both events credit the body's team row, with hostile time.
+// [orig: Server_UpdateCaptureZoneProximity `movzx ecx, byte ptr [esi+1A0h]`
+//  @0x508C95 / @0x508CBE, the tests @0x508C9E..0x508CA7 /
+//  @0x508CCC..0x508CD5, event 19 @0x508CB1, event 20 @0x508CEA; the zone's
+//  bit `mov cl, [edi+162h]` @0x508C16; GameEvent_ProcessScoring
+//  `movsx esi, byte ptr [ebx+162h]` @0x52F65F, case 20's team split
+//  @0x530890..0x5308F9; Entity_SetTeamByNetId @0x43C680]
+void test_zone_time_split_reads_the_slot_team() {
+    for (const uint8_t zone_team : {uint8_t{2}, uint8_t{1}}) {
+        auto world = std::make_unique<World>();
+        world->registry.configure_pool(0, 4);
+        world->registry.configure_pool(1, 4);
+        MatchRules aas;
+        aas.game_type = gt::kAdvanceAndSecure;
+        aas.score_values = default_match_score_values(aas.game_type);
+        (*aas.score_values)[32] = 3;
+        world->match.configure(aas);
+        // Slot team 1, its body moved to team 2.
+        const EntityHandle split = player(*world, 0, 1, "Split");
+        world->registry.get(split)->team = 2;
+        world->registry.get(split)->position = {0.0f, 0.0f, 0.0f};
+
+        Entity numbered;
+        numbered.kind = EntityKind::Item;
+        numbered.has_item_def = true;
+        numbered.item_attrib = kItemAttribSpawnPoint;
+        numbered.zone_number = 1;
+        numbered.zone_radius = 10;
+        numbered.team = zone_team;
+        numbered.position = {0.0f, 0.0f, 0.0f};
+        numbered.alive = true;
+        world->registry.spawn(1, numbered);
+
+        advance_initial_periodic_passes(*world, 5);
+        const bool slot_team_zone = zone_team == 1;
+        const MatchPlayer *row = world->match.player(split);
+        CHECK(row->stats[MatchStats::kHostileZoneTime] == (slot_team_zone ? 0 : 5));
+        CHECK(row->stats[MatchStats::kFriendlyZoneTime] == (slot_team_zone ? 5 : 0));
+        CHECK(row->stats[MatchStats::kPoints] == (slot_team_zone ? 3 : 1));
+        CHECK(world->match.team_stats(2)[MatchStats::kHostileZoneTime] == 5);
+        CHECK(world->match.team_stats(1)[MatchStats::kHostileZoneTime] == 0);
+    }
+}
+
+// The proximity mask's zone and hill bits are a byte `shl` by the zone's team
+// byte, its count taken mod 32, so a team of 32 and up wraps onto the low bits
+// and 8..31 sets none; outside the team modes a hill sets bit 0 whatever its
+// team. (A team byte is the mission record's or a script's, any byte.)
+// [orig: Server_UpdateCaptureZoneProximity - the hill's `mov cl, [edi+162h]` /
+//  `shl dl, cl` @0x508A7D..0x508A87 and its non-team `or ..., 1` @0x508ABB;
+//  the capturable's @0x508C16..0x508C1E]
+void test_proximity_bits_shift_as_bytes() {
+    auto pass = [](uint32_t game_type, int pool, uint8_t team) {
+        auto world = std::make_unique<World>();
+        world->registry.configure_pool(0, 4);
+        world->registry.configure_pool(pool, 4);
+        MatchRules match_rules;
+        match_rules.game_type = game_type;
+        world->match.configure(match_rules);
+        const EntityHandle body = player(*world, 0, 1, "Body");
+        world->registry.get(body)->position = {0.0f, 0.0f, 0.0f};
+        Entity site;
+        site.kind = EntityKind::Item;
+        site.has_item_def = true;
+        site.team = team;
+        site.position = {0.0f, 0.0f, 0.0f};
+        site.alive = true;
+        if (pool == 3) {
+            site.item_id = 6006;
+            site.bound_radius = 10.0f;
+        } else {
+            site.item_attrib = kItemAttribSpawnPoint;
+            site.zone_number = 1;
+            site.zone_radius = 10;
+        }
+        world->registry.spawn(pool, site);
+        advance_initial_periodic_passes(*world, 1);
+        return world->match.player(body)->objective_proximity_mask;
+    };
+    CHECK(pass(gt::kTeamKingOfTheHill, 3, 33) == 0x02);
+    CHECK(pass(gt::kTeamKingOfTheHill, 3, 9) == 0x00);
+    CHECK(pass(gt::kKingOfTheHill, 3, 9) == 0x01);
+    CHECK(pass(gt::kAdvanceAndSecure, 1, 34) == 0x04);
+    CHECK(pass(gt::kAdvanceAndSecure, 1, 2) == 0x04);
+}
+
 void test_retail_objective_proximity_scoring_events() {
     {
         auto world = std::make_unique<World>();
@@ -645,6 +743,7 @@ void test_retail_objective_proximity_scoring_events() {
 
         Entity hill;
         hill.kind = EntityKind::Item;
+        hill.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
         hill.item_id = 6006;
         hill.has_item_def = true;
         hill.position = {0.0f, 0.0f, 0.0f};
@@ -683,6 +782,7 @@ void test_retail_objective_proximity_scoring_events() {
 
         Entity numbered;
         numbered.kind = EntityKind::Item;
+        numbered.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
         numbered.has_item_def = true;
         numbered.item_attrib = kItemAttribSpawnPoint;
         numbered.zone_number = 1;
@@ -779,6 +879,7 @@ void test_retail_zone_and_tkoth_win_quirks() {
         world->registry.get(team4)->position = {0.0f, 0.0f, 0.0f};
         Entity hill;
         hill.kind = EntityKind::Item;
+        hill.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
         hill.item_id = 6006;
         hill.has_item_def = true;
         hill.position = {0.0f, 0.0f, 0.0f};
@@ -1315,6 +1416,7 @@ void test_end_round_team_row_count_rule() {
 EntityHandle spawn_hill(World &world) {
     Entity entity;
     entity.kind = EntityKind::Item;
+    entity.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
     entity.item_id = 6006;
     entity.has_item_def = true;
     entity.position = {0.0f, 0.0f, 0.0f};
@@ -1407,6 +1509,39 @@ void test_alive_readers_take_the_dead_bit_alone() {
     advance_initial_periodic_passes(*world, 2); // the next pass, 62 ticks on
     CHECK(world->match.team_hold_ticks(1) == 0);  // 3 - min(3, koth_delta 5)
     CHECK(world->match.live_scoreboard(*world).teams[1].alive_players == 0);
+}
+
+// D-NET-673: the alive-holder count indexes the team record by the slot's own
+// team byte (+416), not its body's: a split slot (a script team write to the
+// body, which stores the entity byte alone) holds the hill for its slot team,
+// in the hold timer and the TKOTH 0x16 byte alike.
+// [orig: Game_CountAlivePlayersPerTeam `movzx eax, byte ptr [ecx+1A0h]`
+//  @0x50021D, the count @0x50023E; Game_AccumulateTeamScores @0x508DAD;
+//  Server_BuildAndBroadcastScoreboard @0x50D9B5; Entity_SetTeamByNetId
+//  @0x43C680]
+void test_alive_count_reads_the_slot_team() {
+    auto world = std::make_unique<World>();
+    world->registry.configure_pool(0, 8);
+    world->registry.configure_pool(3, 4);
+    MatchRules tkoth;
+    tkoth.game_type = gt::kTeamKingOfTheHill;
+    tkoth.game_time_minutes = 10;
+    tkoth.hill_limit_minutes = 99;
+    world->match.configure(tkoth);
+    // Slot team 1, its body moved to team 2, in the hill.
+    const EntityHandle split = player(*world, 0, 1, "Split");
+    world->registry.get(split)->team = 2;
+    world->registry.get(split)->position = {0.0f, 0.0f, 0.0f};
+    const EntityHandle red = player(*world, 1, 2, "Red");
+    world->registry.get(red)->position = {100.0f, 0.0f, 0.0f};
+    spawn_hill(*world);
+    advance_initial_periodic_passes(*world, 3);
+    CHECK(world->match.player(split)->objective_ticks == 3);
+    CHECK(world->match.team_hold_ticks(1) == 3);
+    CHECK(world->match.team_hold_ticks(2) == 0);
+    const MatchLiveScoreboard board = world->match.live_scoreboard(*world);
+    CHECK(board.teams[1].alive_players == 1);
+    CHECK(board.teams[2].alive_players == 0);
 }
 
 // Non-team boards: the frozen order follows the game-type primary
@@ -1588,6 +1723,8 @@ int main() {
     test_deathmatch_and_hill_outcomes();
     test_retail_objective_proximity_state_and_kill_bonuses();
     test_retail_objective_proximity_scoring_events();
+    test_zone_time_split_reads_the_slot_team();
+    test_proximity_bits_shift_as_bytes();
     test_retail_zone_and_tkoth_win_quirks();
     test_demolition_flag_and_flagball_gameplay();
     test_target_destroyed_shares_through_both_occupant_links();
@@ -1601,6 +1738,7 @@ int main() {
     test_end_round_team_row_count_rule();
     test_end_result_freezes_team_hold_timer();
     test_alive_readers_take_the_dead_bit_alone();
+    test_alive_count_reads_the_slot_team();
     test_nonteam_board_order_draw_and_winner_marker();
     test_coop_remains_script_owned();
     if (failures != 0) {

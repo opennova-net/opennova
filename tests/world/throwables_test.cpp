@@ -1787,6 +1787,233 @@ void test_placed_device_cap_claymore_is_four_and_type_scoped() {
     CHECK(rig.w.throwables.events.removes.size() == 1);
 }
 
+// A level CFAC face 2 u square around its entity origin (the deck a dropped
+// grenade lands on). [orig: Entity_ComputeClampedDisplacement @0x4AD6A0 over
+// Projectile_RaycastProximitySlots @0x4E5340]
+CollisionModel level_floor_model() {
+    CollisionModel floor;
+    for (const auto &xy : {std::pair<int, int>{-2, -2}, {2, -2}, {0, 2}}) {
+        CollisionVertex vertex;
+        vertex.p[0] = xy.first * 65536;
+        vertex.p[1] = xy.second * 65536;
+        floor.vertices.push_back(vertex);
+    }
+    CollisionNormal normal;
+    normal.n[2] = 16384;
+    normal.dominant_axis = 1;
+    floor.normals.push_back(normal);
+    CollisionFace face;
+    face.normal_index = 0;
+    face.vertex_index[0] = 0;
+    face.vertex_index[1] = 1;
+    face.vertex_index[2] = 2;
+    face.min[0] = face.min[1] = -2 * 65536;
+    face.max[0] = face.max[1] = 2 * 65536;
+    floor.faces.push_back(face);
+    CollisionSection section;
+    section.vertex_count = 3;
+    section.normal_count = 1;
+    section.face_count = 1;
+    floor.sections.push_back(section);
+    return floor;
+}
+
+// A pool-2 building at `at` whose one BB volume (type 8, 5 u each way) sets
+// the Indoors bit, in a CollisionWorld over the rig's terrain.
+// [orig: Entity_BuildProximityList @0x4B3DC0, the set @0x4B40C5]
+EntityHandle add_blink_building(Rig &rig, CollisionWorld &cw, const Vec3 &at) {
+    Entity building;
+    building.kind = EntityKind::Building;
+    building.item_type = 5;
+    building.position = at;
+    building.bound_radius = 30.0f;
+    const EntityHandle h = rig.w.registry.spawn(2, building);
+    CollisionModel model;
+    CollisionVolume bb;
+    bb.type = 8;
+    bb.flags = 0; // flags ^ 6 includes the indoor bit
+    bb.min_x = bb.min_y = bb.min_z = -5 * 65536;
+    bb.max_x = bb.max_y = bb.max_z = 5 * 65536;
+    model.volumes.push_back(bb);
+    CollisionSection sec;
+    sec.volume_count = 1;
+    model.sections.push_back(sec);
+    cw.assign_entity(h, cw.add_model(std::move(model)));
+    return h;
+}
+
+// The throwable motors skip their terrain ground test on either Indoors bit,
+// and the grenade's floor query drops the terrain on the Flags bit alone,
+// which the round's own BB refresh rebuilds after each motor tick. A grenade
+// an indoors body throws over open ground: its first tick's floor (no face
+// below, the terrain dropped) is the saved point's Z plus 0x2000, so it rises
+// an eighth of a unit; the refresh then clears the Flags bit outside any BB,
+// so it lands on the terrain floor of its saved point and never bounces,
+// where an outdoors body's grenade bounces on the terrain.
+// [orig: Entity_UpdateGrenadePhysics - the tests @0x444299 / @0x4442A6, the
+//  no_limit @0x44445C, the call @0x44447B, the landing @0x444830..0x444846;
+//  Projectile_UpdatePhysics - the refresh call @0x4E9F21]
+void test_indoors_grenade_skips_the_terrain_test() {
+    for (const bool indoors : {false, true}) {
+        Rig rig(2560); // ground at 10
+        if (indoors) rig.w.registry.get(rig.thrower)->flags |= kEntityFlagIndoors;
+        const Vec3 from{10, 10, 11};
+        const int slot = rig.throw_ammo(kAmmoGrenade, from, 0, 0);
+        CHECK(slot >= 0);
+        if (slot < 0) return;
+        const LiveRound &r = rig.w.round_sim.rounds[size_t(slot)];
+        CHECK(r.indoors_word == indoors && r.indoors_flags == indoors);
+        rig.tick(1);
+        CHECK(r.indoors_word == indoors);
+        CHECK(!r.indoors_flags); // no BB here: the refresh clears it
+        if (indoors) CHECK(to_fixed(r.pos.z) == to_fixed(from.z) + 0x2000);
+        else CHECK(to_fixed(r.pos.z) < to_fixed(from.z));
+        rig.tick(80);
+        CHECK(r.active);
+        CHECK(r.pos.z >= 9.99f); // on the terrain floor either way
+        if (indoors) CHECK(r.bounce_count == 0);
+        else CHECK(r.bounce_count >= 1);
+    }
+}
+
+// The refresh: a round an outdoors body throws inside a BB takes the Flags
+// bit after its first motor tick, and loses it once it leaves; the +0x114
+// bit stays clear. [orig: Projectile_UpdatePhysics @0x4E9F1E / @0x4E9F21;
+// Entity_BuildProximityList @0x4B3DC0 - the clear @0x4B3E0C, the static walk
+// @0x4B3E65..0x4B3F39, the set @0x4B40C5]
+void test_throwable_round_refreshes_its_indoors_flag() {
+    Rig rig(0);
+    CollisionWorld cw;
+    cw.terrain = &rig.flat.field;
+    add_blink_building(rig, cw, Vec3{30, 30, 0});
+    cw.build_initial_tables(rig.w);
+    rig.w.collision = &cw;
+    const int slot = rig.throw_ammo(kAmmoSatchel, Vec3{30, 30, 2}, 0, 0);
+    CHECK(slot >= 0);
+    if (slot < 0) return;
+    LiveRound &r = rig.w.round_sim.rounds[size_t(slot)];
+    CHECK(!r.indoors_word && !r.indoors_flags);
+    rig.w.round_sim.tick(rig.w, &rig.flat.field, &cw);
+    CHECK(r.active);
+    CHECK(!r.indoors_word && r.indoors_flags);
+    r.pos = Vec3{50, 50, 2}; // outside the BB
+    rig.w.round_sim.tick(rig.w, &rig.flat.field, &cw);
+    CHECK(r.active);
+    CHECK(!r.indoors_word && !r.indoors_flags);
+    rig.w.collision = nullptr;
+}
+
+// The grenade's floor: a dropped grenade lands on the face below its saved
+// point and takes its entity as the groundEntity (no spins but the roll's,
+// lying flat, no vertical speed); with the terrain dropped (the Flags bit)
+// the face still holds it. [orig: Entity_ComputeClampedDisplacement
+// @0x4AD6A0; Entity_UpdateGrenadePhysics @0x44447B, the landing
+// @0x44483D..0x4448A8]
+void test_grenade_lands_on_the_face_below() {
+    for (const bool indoors : {false, true}) {
+        Rig rig(0);
+        CollisionWorld cw;
+        cw.terrain = &rig.flat.field;
+        Entity deck;
+        deck.kind = EntityKind::Item;
+        deck.position = Vec3{20, 20, 2};
+        deck.bound_radius = 4;
+        const EntityHandle deck_h = rig.w.registry.spawn(1, deck);
+        cw.assign_entity(deck_h, cw.add_model(level_floor_model()));
+        cw.build_tick_tables(rig.w);
+        rig.w.collision = &cw;
+        const int slot = rig.throw_ammo(kAmmoGrenade, Vec3{20, 20, 3}, 0, 0);
+        CHECK(slot >= 0);
+        if (slot < 0) return;
+        LiveRound &r = rig.w.round_sim.rounds[size_t(slot)];
+        r.vel = Vec3{0, 0, 0}; // a straight drop: no sweep leg
+        for (int i = 0; i < 80; ++i) {
+            if (indoors) r.indoors_flags = true; // a BB the rig does not model
+            rig.w.round_sim.tick(rig.w, &rig.flat.field, &cw);
+        }
+        CHECK(r.active);
+        CHECK(std::fabs(r.pos.z - 2.0f) < 0.01f);
+        CHECK(r.parent == deck_h);
+        CHECK(r.roll_bam == 0x3FFFFFC0);
+        CHECK(r.spin_yaw == 0 && r.spin_pitch == 0);
+        CHECK(r.vel.z == 0.0f);
+        rig.w.collision = nullptr;
+    }
+}
+
+// The satchel and claymore motors' terrain stop skips on either bit: an
+// indoors round over open ground drops through the terrain and rests nowhere.
+// [orig: Entity_UpdateSatchelPhysics @0x4485A1 / @0x4485AA;
+//  Entity_UpdateClaymorePhysics @0x447553 / @0x44755C]
+void test_indoors_charge_skips_the_terrain_stop() {
+    for (const bool claymore : {false, true}) {
+        for (const bool indoors : {false, true}) {
+            Rig rig(256); // ground at 1
+            if (indoors) rig.w.registry.get(rig.thrower)->flags |= kEntityFlagIndoors;
+            const int slot = rig.throw_ammo(claymore ? kAmmoClaymore : kAmmoSatchel,
+                                            Vec3{20, 20, 1.5f}, 0, 0);
+            CHECK(slot >= 0);
+            if (slot < 0) return;
+            rig.tick(120);
+            const LiveRound &r = rig.w.round_sim.rounds[size_t(slot)];
+            if (indoors) {
+                CHECK(r.active);
+                CHECK(r.pos.z < 1.0f);
+                CHECK(rig.w.throwables.devices.empty());
+            } else {
+                CHECK(!r.active);
+                CHECK(rig.w.throwables.devices.size() == 1);
+            }
+        }
+    }
+}
+
+// The conversion's copy carries the round's Flags 0x800000 into the device,
+// which keeps it until its first think visit rebuilds it.
+// [orig: Entity_ConvertRoundToPlacedEntity @0x5455D6; Entity_UpdatePool1Slot
+//  @0x4B8E1B..0x4B8E25]
+void test_placed_device_carries_the_rounds_indoors_flag() {
+    for (const bool indoors : {false, true}) {
+        Rig rig(0);
+        LiveRound round = make_satchel_round(rig, Vec3{20, 20, 1});
+        round.indoors_flags = indoors;
+        CHECK(rig.w.throwables.place_from_round(
+                rig.w, round, rig.w.tables.ammo.entries[kAmmoSatchel]));
+        CHECK(rig.w.throwables.devices.size() == 1);
+        if (rig.w.throwables.devices.empty()) return;
+        const Entity *e = rig.w.registry.get(rig.w.throwables.devices[0].entity);
+        CHECK(e != nullptr && ((e->flags & kEntityFlagIndoors) != 0) == indoors);
+    }
+}
+
+// A joiner's decoded throwable runs the same motor: its spawn's Indoors bits
+// come from the decoded shooter's state, the terrain test skips on them and
+// the refresh clears the Flags bit outside any BB.
+void test_visual_grenade_reads_the_indoors_bits() {
+    Rig rig(2560);
+    rig.w.rules.mp_session = true;
+    rig.w.rules.projectile_authority = false;
+    RoundSourceState source;
+    source.indoors = true;
+    RoundSpawnParams p;
+    p.shooter_handle = 0x0002;
+    p.shooter_team = 1;
+    p.origin = Vec3{10, 10, 11};
+    p.ammo_index = kAmmoGrenade;
+    p.source_state = &source;
+    const int slot = rig.w.round_sim.spawn(rig.w, p, RoundConsequenceMode::VisualOnly);
+    CHECK(slot >= 0);
+    if (slot < 0) return;
+    const LiveRound &r = rig.w.round_sim.rounds[size_t(slot)];
+    CHECK(r.motor == ThrowClass::kNade);
+    CHECK(r.indoors_word && r.indoors_flags);
+    rig.tick(1);
+    CHECK(!r.indoors_flags);
+    CHECK(to_fixed(r.pos.z) == to_fixed(11.0f) + 0x2000);
+    rig.tick(80);
+    CHECK(r.active && r.bounce_count == 0 && r.pos.z >= 9.99f);
+}
+
 // Once armed, the age keeps counting down past zero every tick.
 // [orig: Entity_UpdatePool1Slot's unconditional decrement @0x4b8ea0]
 void test_armed_device_age_keeps_falling() {
@@ -1847,6 +2074,12 @@ int main() {
     test_placed_device_cap_claymore_is_four_and_type_scoped();
     test_armed_device_age_keeps_falling();
     test_team_trigger_claymore_rule();
+    test_indoors_grenade_skips_the_terrain_test();
+    test_throwable_round_refreshes_its_indoors_flag();
+    test_grenade_lands_on_the_face_below();
+    test_indoors_charge_skips_the_terrain_stop();
+    test_placed_device_carries_the_rounds_indoors_flag();
+    test_visual_grenade_reads_the_indoors_bits();
     if (failures == 0) std::printf("throwables tests passed\n");
     return failures == 0 ? 0 : 1;
 }

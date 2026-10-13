@@ -2034,13 +2034,28 @@ void test_label_mnemonic(const fnt_font_t *font) {
 		CHECK(draw.glyphs[4].x_top_left == 13.5f,
 				"the '_' lands at the marked byte's prefix offset");
 	}
-	// A runtime relabel draws its own marker but registers nothing new.
+	// A runtime relabel is the label the set left (MenuRuntime::set_widget_text
+	// cut its marker): the draw takes the text as it is and the set's offset as
+	// the mnemonic, and registers nothing new [orig: CButtonWnd_SetLabel
+	// @ 0x6572F0 - widget+740 @ 0x65746c; CStaticWnd_DrawLabel @ 0x657270].
 	MenuWidgetState relabel;
 	relabel.index = 3;
 	relabel.has_text = true;
-	relabel.text = "E{hot}xit";
+	relabel.text = "Exit";
+	relabel.text_hotkey_pos = 1;
 	st.widgets.push_back(relabel);
 	CHECK(c.widget_mnemonic(3) == "a", "the parse-time mnemonic stays the registered one");
+	const MenuDrawList &relabeled = c.compile(st, 1.0f, 1.0f);
+	CHECK(relabeled.glyphs.size() == 5, "the four relabel glyphs plus the set's mnemonic '_'");
+	if (relabeled.glyphs.size() == 5) {
+		CHECK(relabeled.glyphs[4].x_top_left == 13.5f,
+				"the '_' lands at the set's offset");
+	}
+	// A later marker the set kept is text: the draw strips nothing.
+	st.widgets.back().text = "AB{hot}C";
+	st.widgets.back().text_hotkey_pos = -1;
+	const MenuDrawList &kept = c.compile(st, 1.0f, 1.0f);
+	CHECK(kept.glyphs.size() == 8, "the kept marker draws as its five glyphs, no '_'");
 }
 
 // The wrapped multiline-edit drawer [orig: CMEditWnd_Render @ 0x6608e0 ->

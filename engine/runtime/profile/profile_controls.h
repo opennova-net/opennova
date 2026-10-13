@@ -25,10 +25,10 @@ namespace opennova::profile {
 // the force-feedback effects' gate, sub_455910 @0x45591a) have no device leg
 // in the port.
 struct SessionInput {
-	// dword_24D2078 <- +1428: the look's Y delta is negated unless set
+	// g_MouseInvertY <- +1428: the look's Y delta is negated unless set
 	// [orig: @0x55160c..0x551612; Input_ProcessMouseAxisBindings @0x4996cf].
 	bool invert_mouse = false;
-	// dword_24D207C <- +1424, copied unclamped; the look scales by it << 11
+	// g_MouseSensitivity <- +1424, copied unclamped; the look scales by it << 11
 	// [orig: @0x551618..0x55161e; @0x4996dd].
 	int32_t mouse_sensitivity = 128;
 	// g_autoReloadEnabled <- +1524, forced 0 under `/noreload`
@@ -45,7 +45,7 @@ SessionInput session_input(const playersav::ProfileRecord &record, bool no_reloa
 // the mouse look's two words from the record it just wrote, at once; the
 // auto-reload global stands until the next mission start's session copy, its
 // one writer [orig: UI_IngameOptionsDialogEventHandler @0x555252..0x55525e
-// (dword_24D207C <- +1424), @0x555264..0x555271 (dword_24D2078 <- +1428);
+// (g_MouseSensitivity <- +1424), @0x555264..0x555271 (g_MouseInvertY <- +1428);
 // g_autoReloadEnabled written only @0x551a40/@0x551a48].
 SessionInput ingame_accept_input(const playersav::ProfileRecord &record, const SessionInput &live);
 

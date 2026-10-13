@@ -46,11 +46,6 @@ HostLobbyText english_lobby_text() {
 	return text;
 }
 
-bool same_player(const HostPlayerSlot &a, const HostPlayerSlot &b) {
-	return a.player_name == b.player_name && a.team == b.team && a.ip_and_port == b.ip_and_port &&
-	       a.pcid == b.pcid && a.type == b.type;
-}
-
 // The file source over the listing and the admin port, from the lister's own options.
 FileListingOptions file_listing_options(const ListerOptions &options) {
 	FileListingOptions out;
@@ -402,22 +397,12 @@ HostRegistration Lister::registration() const {
 	return r;
 }
 
-// ClientHostPlayerRemoved for every slot that left or changed, then ClientHostPlayerAdded for
-// every slot that arrived or changed (Server_PlayerRemove / Server_PlayerAdd per slot).
+// ClientHostPlayerRemoved for every slot that left or now holds another player, then
+// ClientHostPlayerAdded for every slot that arrived or changed player (Server_PlayerRemove /
+// Server_PlayerAdd per slot); a kept player's team or type changes its vars alone, as a team
+// change or a loadout does (NwuHostRole::sync_roster).
 void Lister::sync_roster() {
-	const std::vector<HostPlayerSlot> wanted = source_->wanted_roster(role_.roster());
-	std::vector<int> leaving;
-	for (const auto &entry : role_.roster()) {
-		bool kept = false;
-		for (const HostPlayerSlot &player : wanted) {
-			if (player.slot == entry.first && same_player(player, entry.second)) kept = true;
-		}
-		if (!kept) leaving.push_back(entry.first);
-	}
-	for (int slot : leaving) role_.clear_player_slot(slot);
-	for (const HostPlayerSlot &player : wanted) {
-		if (role_.roster().count(player.slot) == 0) role_.set_player_slot(player);
-	}
+	role_.sync_roster(source_->wanted_roster(role_.roster()));
 }
 
 void Lister::end(int code) {

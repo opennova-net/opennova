@@ -42,7 +42,7 @@ const PICK_KEY := KEY_F6
 # DEPLOY = the joiner's death.mnu DEATH screen over LIVE play, on the same terms
 # as ARMORY: the world (and therefore the session socket) keeps ticking, only the
 # mouse is released and player input idles. Retail's dead player has no gameplay
-# input anyway — the uplink is held by dword_81474C and the input legs gate on
+# input anyway — the uplink is held by g_ClientDeployHold and the input legs gate on
 # g_SpawnSuccessGate — so this state is what makes the spawn list clickable.
 enum State { MENU, WORLD, PAUSED, ARMORY, DEPLOY, END_ROUND, COMMAND_MAP }
 

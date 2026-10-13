@@ -239,17 +239,29 @@ int32_t ground_q16(const terrain::TerrainHeightField *terrain, int32_t x, int32_
     return to_fixed(h);
 }
 
+// The motors' terrain ground test runs only while bit 0x80 of the round's
+// +0x114 word (the ammo's NoCollide, or the Indoors stamp its spawn took from
+// the shooter) and its Flags 0x800000 (its BB state) are both clear.
+// [orig: Entity_UpdateGrenadePhysics @0x444299 / @0x4442A6;
+//  Entity_UpdateSatchelPhysics @0x4485A1 / @0x4485AA;
+//  Entity_UpdateClaymorePhysics @0x447553 / @0x44755C]
+bool motor_terrain_test_runs(const LiveRound &r, const AmmoTableEntry &ammo) {
+    return (ammo.flags & def::DEF_AMMO_FLAG_NOCOLLIDE) == 0 && !r.indoors_word &&
+           !r.indoors_flags;
+}
+
 // The swept item raycast the motors run — pools 2/1 only (no terrain, no
-// persons: a flying grenade passes through people) [orig: the two
-// Projectile_RaycastProximitySlots(2/1, ...) calls @ 0x444619..0x444667].
+// persons: a flying grenade passes through people), from the round's saved
+// pose to its moved one [orig: the two Projectile_RaycastProximitySlots(2/1,
+// ...) calls @ 0x444619..0x444667; the start is savedLivePose @0x44452D].
 bool motor_item_sweep(World &world, CollisionWorld *collision, const LiveRound &r,
-                      const MotorFrame &from_to, int32_t speed,
+                      const FixedVec3 &start, const MotorFrame &from_to, int32_t speed,
                       ProjectileHit &out) {
     if (collision == nullptr || speed <= 0) return false;
     const CollisionWorld::RayDebugScope ray_scope(
             collision, CollisionWorld::RayDebugCategory::kThrowable);
     ProjectileTrace trace;
-    trace.start = FixedVec3{to_fixed(r.pos.x), to_fixed(r.pos.y), to_fixed(r.pos.z)};
+    trace.start = start;
     trace.end = FixedVec3{from_to.px, from_to.py, from_to.pz};
     trace.owner = r.owner;
     trace.radius_q16 = 0;
@@ -379,9 +391,12 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
                        const AmmoTableEntry &ammo, CollisionWorld *collision,
                        const terrain::TerrainHeightField *terrain,
                        bool allow_consequences) {
-    if (r.parent.valid()) follow_parent(world, r);
     MotorFrame f;
     load_frame(r, f);
+    // The round's savedLivePose: its last tick's committed position, the
+    // sweep's start and the floor query's point [orig: the store
+    // @0x444A3B..0x444A4D; read @0x444443..0x444456 and @0x44452D..0x444539].
+    FixedVec3 saved{f.px, f.py, f.pz};
     const int32_t water = throwable_water_q16(world);
     bool bounce_eligible = true; // [orig: v91]
     bool ground_hit = false;     // [orig: v86]
@@ -439,8 +454,9 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
         f.vy = qmul(f.vy, 62259);
         f.vz = qmul(f.vz, 62259);
     }
-    // Terrain clamp + bounce [orig: @ 0x4442ad-0x444431; nocollide 0x80 skips].
-    if ((ammo.flags & 0x80u) == 0) {
+    // Terrain clamp + bounce [orig: @ 0x4442ad-0x444431], skipped on the
+    // round's NoCollide or Indoors bits.
+    if (motor_terrain_test_runs(r, ammo)) {
         const int32_t ground = ground_q16(terrain, f.px, f.py);
         if (ground != INT32_MIN && f.pz < ground) {
             f.pz = ground;
@@ -473,11 +489,40 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
             }
         }
     }
+    // The landed-on entity carries the round: the follow first backs the
+    // moved pose up as the saved one, then adds the parent's delta.
+    // [orig: the groundEntity test @0x444434, the call @0x44443B;
+    //  Entity_InterpolateFromParentDelta @0x4A8D60 - the backup
+    //  @0x4A8D7D..0x4A8DB4]
+    if (r.parent.valid()) {
+        saved = FixedVec3{f.px, f.py, f.pz};
+        store_frame(r, f);
+        follow_parent(world, r);
+        f.px = to_fixed(r.pos.x);
+        f.py = to_fixed(r.pos.y);
+        f.pz = to_fixed(r.pos.z);
+    }
+    // The floor under the saved point, queried 0x2000 above it: a pool-2/1
+    // face below, else the terrain, which the round's Flags 0x800000 (its BB
+    // state, not the +0x114 bit) drops; `landed` takes the entity whose face
+    // it was. The landing below reads it. The query's face walk is not yet
+    // retail's (D-COL-17).
+    // [orig: the query point @0x444443..0x444471, `and ecx, 800000h`
+    //  @0x44445C as no_limit, the Entity_ComputeClampedDisplacement call
+    //  @0x44447B]
+    EntityHandle landed;
+    const int32_t floor =
+            collision != nullptr
+                    ? collision->minefield_ground(
+                              world, EntityHandle{},
+                              FixedVec3{saved.x, saved.y, io::bam_add(saved.z, 0x2000)},
+                              r.indoors_flags, &landed)
+                    : INT32_MIN;
     // The swept item raycast [orig: @ 0x444522-0x444729].
     if (horiz != 0) {
         ProjectileHit hit;
         MotorFrame target = f;
-        if (motor_item_sweep(world, collision, r, target, speed3_q16(f), hit)) {
+        if (motor_item_sweep(world, collision, r, saved, target, speed3_q16(f), hit)) {
             // back the contact off 2048 Q16 [orig: v44 - 2048 @ 0x444694]
             f.px = hit.position_q16.x;
             f.py = hit.position_q16.y;
@@ -508,6 +553,26 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
                                static_cast<float>(from_fixed(f.py)),
                                static_cast<float>(from_fixed(f.pz))},
                           world.logic_tick, false, true);
+    }
+    // The landing: a falling round below the floor takes its height and its
+    // entity as the groundEntity (none on the terrain); on an entity it stops
+    // falling, lies flat and loses its yaw and pitch spins and a fifth of
+    // its horizontal speed. [orig: @0x444830..0x44483B, the Z store
+    // @0x44483D, the groundEntity store @0x444846, the entity leg
+    // @0x44484B..0x4448A8]
+    if (f.pz < floor && f.vz < 0) {
+        f.pz = floor;
+        const Entity *ground = world.registry.get(landed);
+        r.parent = ground != nullptr ? landed : EntityHandle{};
+        r.parent_spawn_id = ground != nullptr ? ground->registry_spawn_id : 0;
+        if (ground != nullptr) {
+            r.spin_pitch = 0;
+            r.spin_yaw = 0;
+            r.roll_bam = 0x3FFFFFC0;
+            f.vz = 0;
+            f.vx = qmul(f.vx, 52428);
+            f.vy = qmul(f.vy, 52428);
+        }
     }
     store_frame(r, f);
 
@@ -616,9 +681,10 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
     int32_t speed = speed3_q16(f);
     if (speed < 256) speed = 0; // [orig: @ 0x4484xx epsilon]
 
-    // Terrain: full stop, no bounce [orig: velocity zeroed, parent cleared].
+    // Terrain: full stop, no bounce [orig: velocity zeroed, parent cleared],
+    // skipped on the round's NoCollide or Indoors bits.
     int32_t ground = INT32_MIN;
-    if ((ammo.flags & 0x80u) == 0) {
+    if (motor_terrain_test_runs(r, ammo)) {
         ground = ground_q16(terrain, f.px, f.py);
         if (ground != INT32_MIN && f.pz < ground) {
             ++r.bounce_count;
@@ -638,7 +704,8 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
     // half the impact speed -> orient to the face + spins zeroed + parent].
     if (speed != 0) {
         ProjectileHit hit;
-        if (motor_item_sweep(world, collision, r, f, speed, hit)) {
+        const FixedVec3 start{to_fixed(r.pos.x), to_fixed(r.pos.y), to_fixed(r.pos.z)};
+        if (motor_item_sweep(world, collision, r, start, f, speed, hit)) {
             f.px = hit.position_q16.x;
             f.py = hit.position_q16.y;
             f.pz = hit.position_q16.z;
@@ -700,25 +767,60 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
     return true;
 }
 
+// The round's own BB refresh after its motor: its Flags 0x800000 clears and
+// is set again from the blink walk its def's type picks: none for a building
+// (type 5); for a vehicle or a person (1 / 3) its own candidate slice, which
+// a round never holds (the slot allocator zeroes all 0x30C bytes); the static
+// building prefix for any other type (every shipped throwable's def is
+// `type object`) or no def. The +0x114 bit stays as the spawn stamped it.
+// [orig: Projectile_UpdatePhysics - the motor call @0x4E9F1E, the
+//  Entity_BuildProximityList call @0x4E9F21; Entity_BuildProximityList
+//  @0x4B3DC0 - the clear @0x4B3E0C, the def+0x5C read @0x4B3E47, the type
+//  tests @0x4B3E4A..0x4B3E5F, the static walk @0x4B3E65..0x4B3F39, the set
+//  @0x4B40C5; CEntityManager_AllocateSlot @0x4EAAD0, the memset @0x4EABC8]
+static void refresh_round_indoors(World &world, LiveRound &round,
+                                  CollisionWorld *collision) {
+    round.indoors_flags = false;
+    if (collision == nullptr) return;
+    const ThrowableClassRow *row = world.throwables.classes.get(round.item_type_id);
+    const int32_t type = row != nullptr ? row->def_type : 0;
+    if (type == def::DEF_ITEM_TYPE_BUILDING || type == def::DEF_ITEM_TYPE_VEHICLE ||
+            type == def::DEF_ITEM_TYPE_PERSON)
+        return;
+    const int32_t at[3] = {to_fixed(round.pos.x), to_fixed(round.pos.y),
+                           to_fixed(round.pos.z)};
+    BlinkAccum accum;
+    collision->query_blink_boxes_at_point(world, at, accum);
+    round.indoors_flags = (accum.flags & kBlinkIndoorsBit) != 0;
+}
+
 bool throwable_motor_tick(World &world, RoundSim &sim, LiveRound &round,
                           const AmmoTableEntry &ammo, CollisionWorld *collision,
                           const terrain::TerrainHeightField *terrain,
                           bool allow_consequences) {
+    bool alive = true;
     switch (round.motor) {
     case ThrowClass::kNade:
-        return motor_nade(world, sim, round, ammo, collision, terrain,
-                          allow_consequences);
+        alive = motor_nade(world, sim, round, ammo, collision, terrain,
+                           allow_consequences);
+        break;
     case ThrowClass::kSatchel:
     case ThrowClass::kAVMine: // AT mine authors move_function schl
-        return motor_charge(world, sim, round, ammo, collision, terrain, false,
-                            allow_consequences);
+        alive = motor_charge(world, sim, round, ammo, collision, terrain, false,
+                             allow_consequences);
+        break;
     case ThrowClass::kClaymore:
-        return motor_charge(world, sim, round, ammo, collision, terrain, true,
-                            allow_consequences);
+        alive = motor_charge(world, sim, round, ammo, collision, terrain, true,
+                             allow_consequences);
+        break;
     default:
-        // no motor bound: the round drifts unmoved (retail leaves +452 null)
+        // no motor bound: the round drifts unmoved and takes no BB refresh,
+        // both sitting behind the +452 test (retail leaves +452 null)
+        // [orig: @0x4E9F0C..0x4E9F1B]
         return true;
     }
+    refresh_round_indoors(world, round, collision);
+    return alive;
 }
 
 // ----------------------------------------------------------------------------
@@ -760,6 +862,13 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
     seed.ground_target = parent_handle;
     seed.team = round.team;
     seed.item_id = item_id;
+    // The copy carries the round's Flags 0x800000, its BB state as the last
+    // tick's refresh left it (this tick's runs after the motor), which the
+    // device keeps until its first think visit rebuilds it; the +0x114 bit
+    // rides along too, read by no device leg.
+    // [orig: Entity_ConvertRoundToPlacedEntity @0x5455B0 - the memcpy
+    //  @0x5455D6; Entity_UpdatePool1Slot @0x4B8E1B..0x4B8E25]
+    if (round.indoors_flags) seed.flags |= kEntityFlagIndoors;
     if (const ThrowableClassRow *row = classes.get(item_id)) {
         seed.item_type_index = row->item_type_index; // the template's +0x1C
         // [orig: Entity_InitFromItemDef @ 0x49e550 — Health/Armor from the def]

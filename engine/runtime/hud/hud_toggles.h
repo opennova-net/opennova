@@ -25,13 +25,15 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 namespace opennova::hud {
 
 // One action row's down-edge latch with the witnessed gate: the row fires
 // on the press edge while gameplay input is active and no Shift/Alt chord is
 // held (our debug picks ride Shift+F6; Ctrl is a binding modifier the sampler
-// already resolved). The latch follows the UNGATED key state, so a press held
+// already resolved). Retail re-fires a held keyboard row on every auto-repeat
+// key-down (D-CTRL-6). The latch follows the UNGATED key state, so a press held
 // across an armory or F3 window cannot re-fire when the gate reopens.
 struct HudKeyEdge {
 	bool was_down = false;
@@ -112,6 +114,7 @@ struct HudToggleState {
 	HudKeyEdge commander;
 	HudKeyEdge pause, audio_emote, radio_macro;
 	HudKeyEdge toggle_server;
+	HudKeyEdge flipmouse, mousescale;
 };
 
 // The briefing window's open value [orig: `mov eax, 2` @0x49b615].
@@ -152,6 +155,19 @@ struct HudKeyPoll {
 	bool audio_emote = false;    // row 101 AudioEmote, dispatch 33
 	bool radio_macro = false;    // row 102 RadioMacro, dispatch 54
 	bool toggle_server = false;  // row 83 ToggleServer, dispatch 11
+	bool flipmouse = false;      // row 79 flipmouse, dispatch 9
+	bool mousescale = false;     // row 82 mousescale, dispatch 17
+	// Shift held: the sign bit (bit 31) the keyboard fallback pass and the
+	// mouse dispatch put on the queued binding id, which steps mousescale
+	// down. The modifier pass queues no sign, so a row whose modifier word is
+	// held fires unsigned whatever Shift says; the embedder hands the sign in
+	// as the row fired. The row flag 0x200, the sign's other source, rides no
+	// catalog row.
+	// [orig: Input_ProcessKeyboardEvents @0x49d452..0x49d483 (g_InputState
+	//  +0x1C shift_down, the row flags & 0x200); the modifier pass's unsigned
+	//  queue @0x49d41e..0x49d42f; Input_TryDispatchBindingByWeaponType
+	//  @0x499180..0x4991a4]
+	bool mouse_scale_negative = false;
 	bool chorded = false;
 	bool active = false;
 	bool in_session = false;
@@ -218,6 +234,14 @@ inline constexpr uint32_t kServerStatusScoreListToggled = 0x4000000;
 // The escape chain's tail opened the quit dialog on the view (the key is
 // consumed) [orig: @0x49b377..0x49b38f].
 inline constexpr uint32_t kQuitDialogOpened = 0x8000000;
+// The flipmouse row fired: the embedder flips the live Y invert
+// (world::player_look_flip_mouse) [orig: case 9 @0x49afbb].
+inline constexpr uint32_t kMouseFlipped = 0x10000000;
+// The mousescale row fired: the embedder steps the live sensitivity
+// (world::player_look_mouse_scale), down when kMouseScaleNegative rides with
+// it, and posts mouse_scale_toast [orig: case 17 @0x49b185].
+inline constexpr uint32_t kMouseScaleStepped = 0x20000000;
+inline constexpr uint32_t kMouseScaleNegative = 0x40000000;
 // The pause row flipped HudToggleState::paused: the embedder applies it to
 // the session pause (and, pausing, the audio stop) [orig: case 25 @0x49b520
 // — Audio_ShutdownChannelsAndDeviceTable @0x49b550 when the word is now set].
@@ -252,6 +276,8 @@ enum HudToggleRow : int {
 	kRowAudioEmote,   // 101 AudioEmote
 	kRowRadioMacro,   // 102 RadioMacro
 	kRowToggleServer, // 83 ToggleServer
+	kRowFlipMouse,    // 79 flipmouse
+	kRowMouseScale,   // 82 mousescale
 	kHudToggleRowCount,
 };
 // The row's catalog config token.
@@ -446,6 +472,16 @@ void hud_toggles_close_voice_menu(HudToggleState &state, bool radio);
 
 // The verbose toggle's toast key [orig: STRMISC_VERBOSE_ON / _OFF @0x49b78f].
 const char *verbose_toast_key(bool verbose);
+
+// The mousescale row's toast: gametext Misc/STRMISC_MOUSESCALE with the new
+// word, `%i`, as $A; "" (which posts nothing) when the string is missing. The
+// embedder posts it to the system ring as the verbose toast is posted
+// [orig: case 17 @0x49b1bf..0x49b1fe - sprintf("%i") @0x49b1ca,
+//  GameText_GetString("Misc", "STRMISC_MOUSESCALE") @0x49b1ec,
+//  Chat_FormatPlayerTokens(text, buffer, 0, 0) @0x49b1f5,
+//  Chat_AddMessageChannel2(line, -1, 930) @0x49b1fe; an empty line posts
+//  nothing, `if (*message)` @0x4987f8 in Chat_AddMessageChannel2 @0x4987f0].
+std::string mouse_scale_toast(const GameTextLookup &gametext, int32_t scale);
 
 // The friendly-tags cycle 0->1->2->3->0 with its retail toast key (gametext
 // Misc/STRMISC_FRIENDLYTAGS_*) [orig: Input_HandleActionBinding case 30

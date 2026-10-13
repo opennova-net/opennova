@@ -6,7 +6,15 @@
 namespace opennova::hud {
 
 bool HudKeyEdge::step(bool down, bool active, bool chorded) {
-	// [orig: the first-match key scan @0x49d42f fires once per press]
+	// Ours fires once per press edge. Retail's key scan fires a keyboard row on
+	// every key-down event it dequeues, Windows auto-repeat included: the queue
+	// marks a repeat 0x80 and the action dispatch never tests it, so a held
+	// key re-fires (D-CTRL-6).
+	// [orig: the scan's fires @0x49d42f / @0x49d488; WM_KEYDOWN ->
+	//  Input_HandleKeyPress @0x760c90 (called @0x76276a) -> Input_QueueKeyEvent
+	//  @0x760c10, the repeat bit @0x760c7b; the window procedure's pre-hook
+	//  g_WindowProcHook (read @0x7624c0), whose one setter
+	//  Game_SetWindowProcHook @0x761ec0 has no caller]
 	const bool edge = down && !was_down && active && !chorded;
 	was_down = down;
 	return edge;
@@ -73,7 +81,7 @@ constexpr const char *kRowTokens[kHudToggleRowCount] = {
 	"huddetail", "hudcolor", "showhud", "dotsize", "Goals", "view1st", "viewwithgun",
 	"viewchase", "playerlist_alt", "OldMessages", "ShowScore", "ShowFriendly", "help",
 	"helpmap", "Briefing", "Verbose", "commander_menu", "pause", "AudioEmote", "RadioMacro",
-	"ToggleServer",
+	"ToggleServer", "flipmouse", "mousescale",
 };
 
 } // namespace
@@ -105,6 +113,8 @@ void hud_key_poll_set_rows(HudKeyPoll &k, uint32_t rows) {
 	k.audio_emote = down(kRowAudioEmote);
 	k.radio_macro = down(kRowRadioMacro);
 	k.toggle_server = down(kRowToggleServer);
+	k.flipmouse = down(kRowFlipMouse);
+	k.mousescale = down(kRowMouseScale);
 }
 
 uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
@@ -294,6 +304,16 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 		s.server_status_view = !s.server_status_view;
 		events |= kServerStatusViewToggled;
 	}
+	// The look's two live words: flipmouse flips the Y invert, mousescale
+	// steps the sensitivity with the fire's sign; the embedder applies both
+	// to the session's look and posts the scale toast. Both rows ship unbound
+	// (flags 0x04000000: no gate bit, mode 3, alive or dead). Shift is the
+	// step's sign, so neither row takes the Shift/Alt chord guard.
+	// [orig: case 9 `xor g_MouseInvertY, 1` @0x49afbb; case 17
+	//  @0x49b185..0x49b1fe; catalog rows 79 @0x817AFC / 82 @0x817C40]
+	if (s.flipmouse.step(k.flipmouse, k.active, false)) events |= kMouseFlipped;
+	if (s.mousescale.step(k.mousescale, k.active, false))
+		events |= kMouseScaleStepped | (k.mouse_scale_negative ? kMouseScaleNegative : 0u);
 	return events;
 }
 
@@ -419,6 +439,14 @@ void hud_toggles_close_voice_menu(HudToggleState &s, bool radio) {
 
 const char *verbose_toast_key(bool verbose) {
 	return verbose ? "STRMISC_VERBOSE_ON" : "STRMISC_VERBOSE_OFF";
+}
+
+std::string mouse_scale_toast(const GameTextLookup &gametext, int32_t scale) {
+	// [orig: sprintf(buffer, "%i", scale) @0x49b1ca; the format and its $A
+	//  @0x49b1ec / @0x49b1f5]
+	const std::string word = std::to_string(scale);
+	return chat_format_player_tokens(game_text(gametext, "Misc", "STRMISC_MOUSESCALE", ""),
+			word.c_str());
 }
 
 void hud_toggles_reset_mission(HudToggleState &s) {

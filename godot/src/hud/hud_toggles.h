@@ -13,6 +13,8 @@
 
 #include <runtime/hud/hud_toggles.h>
 
+#include "rtxt/rtxt_string_file.h"
+
 namespace godot {
 
 class HudToggles : public RefCounted {
@@ -49,6 +51,9 @@ public:
 		EVENT_SERVER_STATUS_SCORE_LIST_TOGGLED =
 				opennova::hud::hud_toggle_event::kServerStatusScoreListToggled,
 		EVENT_QUIT_DIALOG_OPENED = opennova::hud::hud_toggle_event::kQuitDialogOpened,
+		EVENT_MOUSE_FLIPPED = opennova::hud::hud_toggle_event::kMouseFlipped,
+		EVENT_MOUSE_SCALE_STEPPED = opennova::hud::hud_toggle_event::kMouseScaleStepped,
+		EVENT_MOUSE_SCALE_NEGATIVE = opennova::hud::hud_toggle_event::kMouseScaleNegative,
 	};
 	// The special-key legs' result bits (engine hud_special_key).
 	enum SpecialKey {
@@ -87,6 +92,8 @@ public:
 		ROW_AUDIO_EMOTE = opennova::hud::kRowAudioEmote,
 		ROW_RADIO_MACRO = opennova::hud::kRowRadioMacro,
 		ROW_TOGGLE_SERVER = opennova::hud::kRowToggleServer,
+		ROW_FLIP_MOUSE = opennova::hud::kRowFlipMouse,
+		ROW_MOUSE_SCALE = opennova::hud::kRowMouseScale,
 		ROW_COUNT = opennova::hud::kHudToggleRowCount,
 	};
 
@@ -94,10 +101,13 @@ public:
 	// Event bits.
 	// `local_alive` feeds the commander_menu row's dead-player gate;
 	// `authority` / `mp_session_peer` are the connection mode's two bits (the
-	// ToggleServer row, the map-legend gate and the playerlist reroute).
+	// ToggleServer row, the map-legend gate and the playerlist reroute);
+	// `mouse_scale_negative` is the mousescale fire's sign bit
+	// (ControlsModel.is_token_fire_signed).
 	int poll(int p_rows_down, bool p_rows_share_key, bool p_chorded, bool p_active,
 			bool p_in_session, bool p_objective_game, bool p_local_alive = true,
-			bool p_authority = false, bool p_mp_session_peer = false);
+			bool p_authority = false, bool p_mp_session_peer = false,
+			bool p_mouse_scale_negative = false);
 	// The escape action's HUD-window close chain; returns the Event bits.
 	int escape(bool p_in_session, bool p_spawn_gate, bool p_authority = false);
 	// The session create / destroy's status-view rule (engine
@@ -124,6 +134,8 @@ public:
 	// The Misc toast key for the current friendly-tag mode / verbose flag.
 	String friendly_tag_toast_key() const;
 	String verbose_toast_key() const;
+	// The mousescale toast over the gametext table ("" posts nothing).
+	static String mouse_scale_toast(const Ref<RtxtStringFile> &p_gametext, int p_scale);
 	// The direct cycles (the action dispatch without a key: tests, the F3 seams).
 	void cycle_hud_color();
 	void cycle_hud_detail();

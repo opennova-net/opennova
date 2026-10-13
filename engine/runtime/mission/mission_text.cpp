@@ -2,80 +2,57 @@
 
 #include <runtime/mission/mission_text.h>
 
-#include <base/io/strutil.h>
-#include <formats/rtxt/rtxt.h>
 #include <runtime/hud/game_text_lookup.h>
-
-#include <string_view>
 
 namespace opennova::mission {
 
+const rtxt::Entry *MissionText::find(const std::string &section, const std::string &key) const {
+	// [orig: TextResource_FindEntryBySectionAndKey @0x75D250: the override
+	//  table first @0x75D27B (the mission's table is never it), then the
+	//  table asked; a null table finds nothing @0x75D27F]
+	if (override_table != nullptr) {
+		if (const rtxt::Entry *entry = override_table->find_in_section(section, key)) return entry;
+	}
+	return loaded ? table.find_in_section(section, key) : nullptr;
+}
+
+std::string MissionText::get_string(const std::string &section, const std::string &key) const {
+	if (!loaded) return std::string(); // [orig: @0x51EB57]
+	const rtxt::Entry *entry = find(section, key);
+	return entry != nullptr ? entry->text : std::string();
+}
+
+std::string MissionText::briefing3() const {
+	return get_string("info", "briefing3");
+}
+
+std::string MissionText::briefing2() const {
+	// An empty briefing2 is the signal to read briefing [orig: @0x506649..0x506660].
+	std::string page = get_string("info", "briefing2");
+	if (page.empty()) page = get_string("info", "briefing");
+	return page;
+}
+
 std::string MissionText::people_name(int32_t index) const {
-	const auto it = people_names.find(index);
-	return it != people_names.end() ? it->second : std::string();
+	if (!loaded) return std::string(); // [orig: `test ebx, ebx` @0x40ECCA]
+	const rtxt::Entry *entry =
+			find(hud::kPeopleNameKey.section, hud::text_key(hud::kPeopleNameKey, index));
+	return entry != nullptr ? entry->text : std::string();
 }
 
 std::string MissionText::location_name(int32_t name_index) const {
-	const auto it = location_texts.find(name_index);
-	return it != location_texts.end() ? it->second : hud::text_key(hud::kLocationKey, name_index);
+	const std::string key = hud::text_key(hud::kLocationKey, name_index);
+	const rtxt::Entry *entry = find(hud::kLocationKey.section, key);
+	return entry != nullptr ? entry->text : key;
 }
-
-namespace {
-
-// The numeric-key section harvest: raw cp1252 values with only the ASCII
-// section / key interpreted — the first section whose name is the form's
-// (ASCII case ignored), every entry whose key is the form's prefix (case
-// ignored) plus a decimal suffix; the first value per suffix wins.
-void harvest_indexed(const rtxt::File &table, const hud::TextKeyForm &form,
-		std::unordered_map<int32_t, std::string> &out_map) {
-	const std::string_view prefix(form.prefix);
-	const std::size_t prefix_len = prefix.size();
-	for (std::size_t section_index = 0; section_index < table.sections.size(); ++section_index) {
-		if (!strutil::iequals(table.sections[section_index].name, form.section)) continue;
-
-		for (const rtxt::Entry *entry :
-				table.get_section_entries(static_cast<uint32_t>(section_index))) {
-			if (entry == nullptr || entry->key.size() <= prefix_len) continue;
-			bool valid = strutil::iequals(std::string_view(entry->key).substr(0, prefix_len), prefix);
-			int32_t index = 0;
-			for (std::size_t i = prefix_len; valid && i < entry->key.size(); ++i) {
-				const char digit = entry->key[i];
-				// Stop one digit short of INT32_MAX: 214748364 * 10 + 8 overflows.
-				if (digit < '0' || digit > '9' || index > 214748364 ||
-						(index == 214748364 && digit > '7')) {
-					valid = false;
-					break;
-				}
-				index = index * 10 + (digit - '0');
-			}
-			if (valid) out_map.emplace(index, entry->text);
-		}
-		break;
-	}
-}
-
-} // namespace
 
 bool parse_mission_text(const uint8_t *bytes, std::size_t size, MissionText &out,
 		std::string &error) {
 	out = MissionText();
-	rtxt::File table;
-	if (!rtxt::parse(bytes, size, table, error)) return false;
-
-	// Preserve the table's raw cp1252 bytes. Retail uses an empty briefing2 as
-	// the signal to fall back to briefing [orig: @0x506649..0x506660].
-	if (const rtxt::Entry *e = table.find_in_section("info", "briefing3")) out.briefing3 = e->text;
-	if (const rtxt::Entry *e = table.find_in_section("info", "briefing2")) out.briefing2 = e->text;
-	if (out.briefing2.empty()) {
-		if (const rtxt::Entry *e = table.find_in_section("info", "briefing")) out.briefing2 = e->text;
+	if (!rtxt::parse(bytes, size, out.table, error)) {
+		out.table = rtxt::File();
+		return false;
 	}
-
-	// [Locations] LOCATION%03i (each type-2044 marker's by its name_index, the
-	// S2C 0x0F deploy-map labels) and [PeopleNames] STRNAME%03i (the D-HUD-20
-	// authored entity display names promote resolves from each record's
-	// name_index — the witnessed resolve is cited at the promote.cpp port site).
-	harvest_indexed(table, hud::kLocationKey, out.location_texts);
-	harvest_indexed(table, hud::kPeopleNameKey, out.people_names);
 	out.loaded = true;
 	return true;
 }

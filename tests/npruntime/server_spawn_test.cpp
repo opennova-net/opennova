@@ -117,6 +117,15 @@ int main() {
 	            "joiner player entity+0x78 == its dcb (3)")) return 1;
 	if (!expect(joiner_ent->handle != world.cached.local_player,
 	            "joiner is a distinct pool-0 entity from the host")) return 1;
+	// The add mirrors the slot's reserved team byte (+416) onto its roster row
+	// (D-NET-650).
+	{
+		const inmatch::NapiNPConnection &added = ctx.np_protocol.connection_list.back();
+		const w::MatchPlayer *row = world.match.player(joiner_ent->handle);
+		if (!expect(added.assigned_team_valid && added.assigned_team != 0 && row != nullptr &&
+		            row->slot_team == added.assigned_team,
+		            "the player add mirrors the slot team onto the roster row")) return 1;
+	}
 
 	// The same authority transition backs the F3 checkbox and host-side tooling:
 	// it mutates the real connection/entity/AI state, then respawns through the
@@ -154,6 +163,40 @@ int main() {
 			spectator_ai->team == 1,
 			"leaving spectator mode restores team, body, AI, and spawn pose")) {
 		return 1;
+	}
+	// The roster row mirrors the slot's team byte (+416) wherever the host
+	// writes it: the add, the spectator convert's clear and its restore, and a
+	// team change; a script team write to the body stores the entity byte
+	// alone and leaves it (D-NET-650).
+	// [orig: Server_ConvertPlayerToSpectator @0x519E6E; Server_ChangeEntityTeam
+	//  @0x518DEF; Entity_SetTeamByNetId @0x43C680]
+	{
+		const w::MatchPlayer *row = world.match.player(joiner_handle);
+		if (!expect(row != nullptr && joiner_conn.assigned_team == 1 && row->slot_team == 1,
+				"the roster row carries the restored slot team")) return 1;
+		inmatch::Server_SetPlayerSpectator(ctx, joiner_conn, world, true);
+		if (!expect(world.match.player(joiner_handle)->slot_team == 0,
+				"the spectator convert clears the mirrored slot team")) return 1;
+		inmatch::Server_SetPlayerSpectator(ctx, joiner_conn, world, false);
+		inmatch::Server_ChangeEntityTeam(ctx, world, joiner_handle, 2);
+		if (!expect(joiner_conn.assigned_team == 2 &&
+				world.match.player(joiner_handle)->slot_team == 2,
+				"a team change stamps the mirrored slot team")) return 1;
+		world.registry.get(joiner_handle)->team = 1; // a script team write
+		if (!expect(world.match.player(joiner_handle)->slot_team == 2,
+				"a script team write to the body leaves the slot team")) return 1;
+		// A team change to the body's own team returns at the entity compare,
+		// slot byte untouched [orig: @0x518D99..0x518DAA]; one to another team
+		// stamps it again.
+		inmatch::Server_ChangeEntityTeam(ctx, world, joiner_handle, 1);
+		if (!expect(joiner_conn.assigned_team == 2 &&
+				world.match.player(joiner_handle)->slot_team == 2,
+				"a team change to the body's own team leaves the slot team")) return 1;
+		world.registry.get(joiner_handle)->team = 2;
+		inmatch::Server_ChangeEntityTeam(ctx, world, joiner_handle, 1);
+		if (!expect(joiner_conn.assigned_team == 1 &&
+				world.match.player(joiner_handle)->slot_team == 1,
+				"a team change back stamps it again")) return 1;
 	}
 	{
 		inmatch::NapiNPConnection joining_spectator;

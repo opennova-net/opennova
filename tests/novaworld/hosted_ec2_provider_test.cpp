@@ -180,6 +180,7 @@ std::string listing(const std::vector<std::string> &instances) {
 std::string run_instances_reply(const std::string &id, const std::string &address) {
 	std::string instance = "{\"InstanceId\":\"" + id + "\",\"State\":{\"Code\":0,\"Name\":\"pending\"}";
 	if (!address.empty()) instance += ",\"PrivateIpAddress\":\"" + address + "\"";
+	instance += "}";
 	return "{\"Groups\":[],\"Instances\":[" + instance + "],\"OwnerId\":\"123456789012\",\"ReservationId\":\"r-9\"}";
 }
 
@@ -351,6 +352,7 @@ int test_launch(const std::string &scratch) {
 	rig.runner.replies.push_back(answered(run_instances_reply(kMachineA, "10.44.0.21")));
 	std::string error;
 	const auto machine = rig.provider.launch(spec_for(7), error);
+	if (!machine) std::fprintf(stderr, "  launch failed: %s\n", error.c_str());
 	TEST_EXPECT(machine && *machine == kMachineA);
 	TEST_EXPECT(rig.runner.calls.size() == 1);
 	const Call &call = rig.runner.calls[0];

@@ -185,10 +185,13 @@ enum class DeathMotionMode : uint8_t {
 // landing's successor: the fall until the clamped ground stops it; on a
 // ground entity the parent follow, which drops back into the fall when that
 // entity dies; a non-flag landing on a dead entity takes the plain follow.
+// The parent follow (Ride) is also the genx row's callback, which every
+// install of the def's own +0x1C4 puts on a genx def's entity
+// (def_update_drop_motion).
 // [orig: Entity_DropCarriedObject @0x439e95 -> Entity_UpdatePositionAndTransform
 //  @0x4adef0, the successor select @0x4adfc9..0x4ae00e;
-//  Entity_UpdateParentTransform @0x4a88b0; Entity_InterpolateFromParentDelta
-//  @0x4a8d60]
+//  Entity_UpdateParentTransform @0x4a88b0 (the genx row @0x82AC10);
+//  Entity_InterpolateFromParentDelta @0x4a8d60]
 enum class DropMotion : uint8_t {
     None = 0,
     Fall = 1,
@@ -1175,8 +1178,14 @@ struct Entity {
     // @0x439df0, the capture-zone clear @0x4ada07, Entity_Destroy @0x43ea03]
     EntityHandle mounted_child;         // kInvalid = carrying nothing
     // The +0x1C4 update callback a drop installs on the carried object and
-    // the landing's successor (Match::update_dropped_object).
+    // the landing's successor (Match::update_dropped_object), or a genx def's
+    // own parent follow (def_update_drop_motion).
     DropMotion drop_motion = DropMotion::None;
+    // The def's own +0x1C4 (def+0x158) is the physics table's genx row,
+    // Entity_UpdateParentTransform: stamped from the move_function on every
+    // def resolve. [orig: EntityDef_LookupPhysicsCallback @0x4a9240; the genx
+    //  row @0x82AC10 -> @0x4a88b0]
+    bool parent_follow_update = false;
 
     // The shooter's last claimed fire target (entity+104 -> +12): stamped per accepted
     // C2S 0x06 [orig: Server_ClientFiredRound @0x50c2ad stores the resolved target ptr],
@@ -1434,6 +1443,21 @@ inline void stamp_item_attrib(Entity &e, uint32_t attrib, uint32_t attrib2) {
     e.is_capture_trigger = (attrib & kItemAttribChangeTeam) != 0;
     e.is_spawn_point = (attrib & kItemAttribSpawnPoint) != 0;
     e.leave_corpse = (attrib & kItemAttribLeaveCorpse) != 0;
+}
+
+// The drop motion a store of the def's own +0x1C4 leaves: a genx def's parent
+// follow, none of the drop motions for any other def. Each store replaces the
+// callback it finds, so a fall or ride ends there.
+// [orig: the def+0x158 stores - Entity_SpawnFromBMSRecord @0x40EC7A,
+//  NapiNPClientMsg_0x00D @0x43331A, NapiNPClientMsg_0x010 @0x43367E,
+//  NapiNPClientMsg_FullEntitySpawn @0x433BF5, NapiNPClientMsg_0x020
+//  @0x425DE0, Entity_InitFromItemDef @0x49E58C,
+//  Entity_SpawnFromAnimSlotProperty @0x43C453, Entity_AttachCarriedObject
+//  @0x43C191, Entity_ApplyCommand @0x43B24E, Entity_RespawnVehicle @0x460068;
+//  NetPacket_HandleEntityCreate stores it only when def+0x158 is set
+//  (@0x42F1D2..0x42F1D9, the store @0x42F1E8)]
+inline DropMotion def_update_drop_motion(const Entity &e) {
+    return e.parent_follow_update ? DropMotion::Ride : DropMotion::None;
 }
 
 // Entity_GetWeaponSlotByte: the resolved userpoint byte for one weapon slot and

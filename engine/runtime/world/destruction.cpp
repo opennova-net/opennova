@@ -1328,6 +1328,10 @@ uint32_t spawn_death_pieces(World &world, Entity &target, bool silent) {
     }
     target.spawned_piece_mask = mask; // [orig: entity+0x138 @ 0x493983]
     target.motor_suspended = false; // installing a callback replaces nullsub_28
+    // ... and the def's own, a genx item's parent follow included; a death
+    // this gate refuses keeps it [orig: the +0x1C4 stores @0x493933 /
+    //  @0x49393F / @0x49394B].
+    target.drop_motion = DropMotion::None;
     target.death_motion = DeathMotionMode::Generic;
     if (traits->is_decoration)
         target.veh.slide_z -= 16182;
@@ -1441,7 +1445,11 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
         if (traits != nullptr && traits->husk_model_loaded) {
             mask = spawn_death_pieces(world, target, silent);
             if (target.veh.slide_z > 0) target.veh.slide_z = 0;
+            // The boat callback stores its +0x1C4 whether or not the piece
+            // spawn took the death, so a drop's fall or ride ends here too
+            // [orig: Entity_ProcessBuildingDeath @0x494420 - the store @0x49446F].
             target.motor_suspended = false;
+            target.drop_motion = DropMotion::None;
             target.death_motion = DeathMotionMode::Static;
             world.out.destruction.sounds.push_back(
                     DestructionSoundEvent{kShipExplosionSound, target.position});

@@ -10,6 +10,8 @@
 //   /mod <name>   the same flag (retail reads the two spellings in one arm).
 //   /game <code>  which game the data is from (e.g. "jo", "jodemo"); selects
 //                 the SCR decode key. Defaults to "jo" when absent.
+//   /LAN          every game.cfg read forces mpnovaworldhostlanonly on: a
+//                 NovaWorld host advertises LAN only.
 //   --resource-dir <absolute path>
 //                 the game-data directory for this process. Without the flag
 //                 the shell boots its bundled assets/ (ADR 0048); the flag
@@ -85,6 +87,7 @@ inline constexpr const char *kLaunchFlagMcpPort = "--mcp-port";
 inline constexpr const char *kLaunchFlagWorkingDir = "--working-dir";
 inline constexpr const char *kLaunchFlagNoHud = "/NOHUD";
 inline constexpr const char *kLaunchFlagNoReload = "/noreload";
+inline constexpr const char *kLaunchFlagLan = "/LAN";
 
 struct LaunchFlags {
     bool loose_override = false;   // /d
@@ -118,6 +121,12 @@ struct LaunchFlags {
     // `_stricmp(token, "/noreload")` @0x4A76DD -> dword_B4C4F4 = 1 @0x4A76E9;
     // Game_ApplySessionSettingsToGlobals @0x551a24..0x551a48].
     bool no_reload = false;
+    // /LAN: the whole token, any case: every game.cfg read forces
+    // mpnovaworldhostlanonly to 1 (inmatch::GameConfigBlock::set_lan_switch)
+    // [orig: Game_ParseCommandLineAndInit @0x4a7310 - `_stricmp(token, "/LAN")`
+    // @0x4A74D9..0x4A74E9 -> g_LanSwitch = 1 @0x4A74EB; Game_LoadConfig
+    // @0x5514B1..0x5514BA].
+    bool lan = false;
 };
 
 LaunchFlags parse_launch_flags(const std::vector<std::string> &args);

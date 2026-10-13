@@ -75,6 +75,7 @@ struct ServeOptions {
 	std::string game;         // /game <code>
 	bool loose_root = false;  // --loose-root: a directory with no archives mounts loose
 	std::string host_file;    // /HOST <file>
+	bool lan_switch = false;  // /LAN: every game.cfg read forces mpnovaworldhostlanonly
 	// The first port of the bind scan (--lan-port; 0 binds the OS's pick; unset, the cfg
 	// range's head: game.cfg mplanserverportmin, or mpnovaworldportmin on the NovaWorld
 	// network type).
@@ -222,6 +223,9 @@ private:
 
 	ServeOptions options_;
 	ResourceIndex index_;
+	// The mount's expansion text-override table, read once at the boot's
+	// mount (vfs_expansion_override_table); empty = none.
+	std::vector<uint8_t> text_override_table_;
 	std::unique_ptr<assets::AssetStore> assets_;
 	std::vector<mission_catalog::Row> catalog_;
 	// The process's cfg block: game.cfg in the working directory and the

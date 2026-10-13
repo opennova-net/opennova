@@ -299,8 +299,11 @@ void VehicleSystem::respawn(Entity &e) {
 	e.health = e.health_max;
 	e.mana = e.mana_max;
 	e.alive = e.health > 0;
+	// The def's own update callback goes back [orig: +0x1C4 = def+0x158
+	//  @0x460068].
 	e.death_motion = DeathMotionMode::None;
 	e.motor_suspended = false;
+	e.drop_motion = def_update_drop_motion(e);
 	e.attach_parent = {};
 	e.attach_bone = 0;
 	e.death_tick = 0;
@@ -321,6 +324,11 @@ void VehicleSystem::respawn(Entity &e) {
 			ai->brain.f[reg] = 0;
 		ai->brain.set_pend(ai->brain.f[AiBrain::kCurState] == 15 ? 14 : 22);
 	}
+	// Every source's candidate slice is rebuilt with the vehicle at its
+	// respawn point, the 17-tick phase restarted, ahead of the ground probe.
+	// [orig: Entity_RespawnVehicle - the Entity_BuildProximityListsFromPools
+	//  call @0x460133, ahead of Entity_RaycastGroundHeightAndObject @0x460145]
+	if (world_.ai.collision != nullptr) world_.ai.collision->rebuild_candidate_slices(world_);
 	const int32_t ground = respawn_ground(world_, e);
 	if (ground != INT32_MIN)
 		e.position.z =

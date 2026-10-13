@@ -107,7 +107,14 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 				game_type::is_waypoint_family(game_type_))) {
 			// [orig: NapiNPClientMsg_0x00F @ 0x42E200, flag store @ 0x42E314] This flag only sets here.
 			if (wsl.game_flags & 8u) state_.cease_fire = true;
-			state_.location_names = wsl.team_names;
+			// Each name into its g_LocationNames slot, the copy stopping at the
+			// name's NUL or one byte short of the slot, then the NUL; the read
+			// still steps past the whole wire string [orig: NapiNPClientMsg_0x00F:
+			// the count @0x42e51b, the bounded copy @0x42e538..0x42e584, the
+			// step @0x42e587..0x42e5a3].
+			state_.location_names.clear();
+			for (const std::string &name : wsl.team_names)
+				state_.location_names.push_back(name.substr(0, kLocationNameSlotBytes - 1));
 			state_.deploy_check_secured_spawn = (wsl.game_flags & 2u) != 0;
 			state_.deploy_overlay_active =
 					(wsl.game_flags & 0x01u) != 0 && !state_.death_screen_active;

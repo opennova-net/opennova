@@ -526,6 +526,13 @@ void test_player() {
 	          "the table");
 	const auto parsed = admin_parse_player_list(table);
 	expect(parsed.size() == 2 && parsed[1].name == "P2" && parsed[1].team == "2", "the client half parses it");
+	// The team column is the slot's own byte (+416): a script team write to the
+	// body leaves it (D-NET-651). [orig: CAdminServer_HandleStatus @0x40316A]
+	host.entity(0).team = 2;
+	const auto split = admin_parse_player_list(c.one("PLAYER LIST"));
+	expect(split.size() == 2 && split[0].name == "P1" && split[0].team == "1",
+	       "a split slot lists its slot team");
+	host.entity(0).team = 1;
 	expect_eq(c.one("PLAYER KILL 7"), "ERROR - Player Not Found.", "an unknown slot");
 	expect_eq(c.one("PLAYER PUNT 0"), "ERROR - Player Not Found.", "no slot 0 on this host (D-NET-352)");
 	expect_eq(c.one("PLAYER PUNT"), "USAGE -  PLAYER [LIST | PUNT | BAN | SWAPTEAM | KILL | ZEROSCORE] [# | ALL]",

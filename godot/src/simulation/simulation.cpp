@@ -634,8 +634,14 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	inmatch::HostBootRequest request;
 	request.mission = document;
 	request.mission_basename = opennova::to_std(p_mission_file_basename);
-	if (p_resource_root.is_valid())
+	if (p_resource_root.is_valid()) {
 		request.files = ms::boot_files_from_index(p_resource_root->native_index());
+		// The mount's expansion text-override table (the mission text's
+		// lookups search it first).
+		const PackedByteArray override_table = p_resource_root->get_expansion_override_table();
+		request.text_override_table.assign(override_table.ptr(),
+				override_table.ptr() + override_table.size());
+	}
 	request.assets = assets_.root.is_valid() ? &assets_.root->native_assets() : nullptr;
 	if (p_item_db.is_valid()) {
 		request.items = &p_item_db->native_items();

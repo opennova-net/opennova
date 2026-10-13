@@ -36,6 +36,8 @@
 #include <runtime/inmatch/udp_session_transport.h>
 
 #include <formats/def/def.h>
+#include <formats/lwf/lwf.h>
+#include <runtime/audio/oneshot_play.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/replication_model.h>
 #include <net/npwire/ingame_encode.h>
@@ -1388,6 +1390,16 @@ int main() {
 	ai.is_authority = true;
 	ai.root_motion = &death_clips;
 	world.tables.player.item_hp = 150; // items.def Player hp (D-NET-144)
+	// The loaded banks hold the help call's BM1 composite (D-NET-653).
+	opennova::audio::SoundSetIndex sound_sets;
+	{
+		opennova::lwf::File bank;
+		opennova::lwf::Multi set;
+		set.name = "BM1_MEDIC_REQUEST";
+		bank.multis.push_back(set);
+		sound_sets.add_bank(0, bank);
+	}
+	world.tables.sound_sets = &sound_sets;
 
 	// Host player down-range past the victim on the same +X line; shooter at the origin.
 	const w::EntityHandle ha = w::spawn_player(world, player_spawn(0xFFF0, 60.0f, 0.0f, 10.0f));
@@ -2226,7 +2238,7 @@ int main() {
 
 	// --- 5. The 0x0E deploy of a RESPAWN-PENDING joiner emits the DEPLOY-RELEASE bundle
 	// (0x5A + 0x61 + optional 0x1E) and clears the pending/hidden pair — the client's 0x5A
-	// apply resets its dword_81474C wait-gate (set by the pick) and resumes the C2S 0x0C
+	// apply resets its g_ClientDeployHold wait-gate (set by the pick) and resumes the C2S 0x0C
 	// uplink [orig: Server_DeployPlayer deploy tail: Server_SendWeaponSlotListToPlayer
 	// @0x502550 + Server_SendRandomSeedToPlayer @0x5101a0; client un-latch §5.30
 	// @0x4290E0; golden deploy frame 240018 = 0x5A + 0x61 + 0x1E one datagram; the v32

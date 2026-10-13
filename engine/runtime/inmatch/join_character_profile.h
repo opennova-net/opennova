@@ -110,6 +110,18 @@ inline JoinCharacterProfile join_character_profile(
 	return profile;
 }
 
+// The projection with no Avatars.def: an absent file leaves the avatar table
+// empty, and the session start still takes the record's voice override where
+// nonzero, else the resolve's miss, 1, on both sides; the projection over the
+// empty registry gives exactly that (no side resolves a character, so each
+// takes the default id, 0, and the class its selection gives it).
+// [orig: CAvatarDefs_Init @0x57b180 - the clears @0x57b1ae / @0x57b1c1 before
+//  the parse call @0x57b1d5; Game_ApplySessionSettingsToGlobals @0x551735..0x5517a2;
+//  Avatars_ResolveSelectionIndex @0x57ae60 - the miss @0x57ae85]
+inline JoinCharacterProfile join_character_profile_without_table(const JoinSideSelection saved[2]) {
+	return join_character_profile(CharacterRegistry(), saved);
+}
+
 // The profile as the ClientAuth tag block carries it (CharacterJoinVars): the
 // two packed ids, the two class bytes and the two avatar bytes narrowed to
 // their wire widths, and the side requirement's byte (0xFF, TR=-1).

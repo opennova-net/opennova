@@ -831,7 +831,7 @@ struct HudSessionState {
 	bool in_session = false;             // g_NapiNPCtx.is_in_session
 	uint32_t game_type = 0;              // g_GameType
 	int32_t round_time_remaining = -1;   // g_RoundTimeRemaining (-1 = untimed)
-	bool permanent_death = false;        // byte_A821EF
+	bool permanent_death = false;        // g_SessionPermanentDeath
 	int remaining_count = 0;             // g_ScoreboardDeadRowCount (the live count)
 	int row_count = 0;                   // g_ScoreboardRowCount
 	int spectator_count = 0;             // g_ScoreboardSpectatorCount

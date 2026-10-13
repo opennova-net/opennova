@@ -39,13 +39,15 @@ bool is_playing_player(const Entity &e) {
 
 uint32_t entity_flags(const Entity &e) { return e.flags | e.engine_flags; }
 
-// CaptureZone_CheckProximityScoring's gates: in-session team games only, a
-// registered capturer, and an owned zone. [orig: CaptureZone_CheckProximityScoring
-// @0x500C50 — @0x500C74 session, @0x500C87 team bit, @0x500C8E Entity_ValidatePtr,
+// CaptureZone_CheckProximityScoring's gates: in-session team games only (the
+// session's stand-in is world.rules.mp_session, so single player scores no
+// capture), a registered capturer, and an owned zone. [orig:
+// CaptureZone_CheckProximityScoring @0x500C50 - `cmp g_NapiNPCtx.is_in_session, 0`
+// @0x500C6D / @0x500C74 session, @0x500C87 team bit, @0x500C8E Entity_ValidatePtr,
 // @0x500CA2 zone team]
 bool capture_scoring_applies(const World &world, EntityHandle capturer,
                              const Entity &zone) {
-    return (world.match.rules().game_type & 0x10000u) != 0 &&
+    return world.rules.mp_session && (world.match.rules().game_type & 0x10000u) != 0 &&
            world.match.player(capturer) != nullptr && zone.team != 0;
 }
 
@@ -216,20 +218,33 @@ void ZoneSystem::capture_second_tick(ZoneCaptureEvents &out) {
     ZoneCaptureState &state = world.zones.capture;
     const MatchRules &rules = world.match.rules();
 
-    // The in-game census the delta walks: every registered Player whose body is
-    // neither carried nor dead. [orig: CaptureZone_CalculateControlDelta
-    // @0x501120 — slot active, `test byte [ent+24h], 3`, state 6 @0x501173..0x501199]
+    // The in-game census the delta walks: every slot in state 6 whose body is
+    // neither carried nor dead. Past the round end, which moves every active
+    // slot to state 7, it takes none, so every presence and every delta is 0.
+    // Ours's roster carries no slot state: the census takes every registered
+    // Player's row, none once the outcome is decided, and so still counts a
+    // joiner loading between its add and its join (D-NET-441).
+    // [orig: CaptureZone_CalculateControlDelta @0x501120 — slot active
+    //  @0x501169, its entity @0x501173..0x501178, `test byte [ent+24h], 3`
+    //  @0x50117E, state 6 @0x501188 / `jnz` @0x50118C; Server_ProcessRoundEnd's
+    //  state 7 @0x51685E; the zero-presence exit @0x501278]
+    // The team sizes count each census slot under its own team byte (+416)
+    // when below 5, not its body's (D-NET-671); the presence counts below
+    // compare the bodies' teams. [orig: `cmp byte ptr [ebp+1A0h], 5`
+    // @0x501192 / `jnb` @0x501199, `movzx eax, byte ptr [ebp+1A0h]` @0x50119B;
+    // the presence compare @0x50120D..0x501217]
     std::vector<const Entity *> census;
-    for (const MatchPlayer &row : world.match.players()) {
-        const Entity *e = world.registry.get(row.identity.entity);
-        if (e == nullptr ||
-                (entity_flags(*e) & (kEntityFlagCarried | kEntityFlagDead)) != 0)
-            continue;
-        census.push_back(e);
-    }
     std::array<int, 5> team_players{};
-    for (const Entity *e : census)
-        if (e->team < team_players.size()) ++team_players[e->team]; // [orig: @0x5011A2]
+    if (!world.match.outcome().ended) {
+        for (const MatchPlayer &row : world.match.players()) {
+            const Entity *e = world.registry.get(row.identity.entity);
+            if (e == nullptr ||
+                    (entity_flags(*e) & (kEntityFlagCarried | kEntityFlagDead)) != 0)
+                continue;
+            census.push_back(e);
+            if (row.slot_team < team_players.size()) ++team_players[row.slot_team]; // [orig: @0x5011A2]
+        }
+    }
 
     // The sorted SpawnZoneList's numbered ownership, read by every delta.
     // [orig: SpawnZoneList_GetCount @0x50134F; the census @0x501366..0x5013A7]
@@ -484,14 +499,23 @@ void ZoneSystem::capture_second_tick(ZoneCaptureEvents &out) {
             flip.numbered = zone->zone_number != 0;
             flip.announce = zone->is_spawn_point;
             // CaptureZone_CheckProximityScoring: a numbered zone scores event 24
-            // on every live roster Player of the capturer's team in its radius;
-            // an unnumbered one scores event 14 on the capturer.
-            // [orig: the call @0x53BC72; @0x500CAF..0x500DC5]
+            // on every live roster Player in its radius whose slot team is the
+            // capturer's slot's, the two slots' own team bytes, which a script
+            // team write to a body leaves (D-NET-650); an unnumbered one scores
+            // event 14 on the capturer.
+            // [orig: the call @0x53BC72; @0x500CAF..0x500DC5 - the capturer's
+            //  slot Entity_ValidatePtr @0x500C8E, each active slot +4 @0x500CE4,
+            //  `mov cl, [ebx+1A0h]` @0x500CEE / `cmp cl, [eax+1A0h]` @0x500CF4,
+            //  Flags & 2 @0x500D02, the radius @0x500D56..0x500D72, event 24
+            //  @0x500D84]
             if (capture_scoring_applies(world, request.capturer, *zone)) {
                 if (flip.numbered) {
+                    const uint8_t capturer_slot_team =
+                            world.match.player(request.capturer)->slot_team;
                     for (const MatchPlayer &row : world.match.players()) {
+                        if (row.slot_team != capturer_slot_team) continue;
                         const Entity *player = world.registry.get(row.identity.entity);
-                        if (player != nullptr && player->team == capturer->team &&
+                        if (player != nullptr &&
                                 (entity_flags(*player) & kEntityFlagDead) == 0 &&
                                 in_zone_radius(*player, *zone))
                             flip.scorers.push_back(player->handle);

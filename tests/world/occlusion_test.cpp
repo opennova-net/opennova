@@ -755,6 +755,7 @@ void test_indoor_masks_and_gate() {
     // The blink-hits entity render gate. [orig: @ 0x5c7022-0x5c708a]
     Entity npc;
     npc.kind = EntityKind::Organic;
+    npc.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     npc.net_id = 5;
     npc.position = {20.0f, 10.0f, 0.0f};
     npc.bound_radius = 1.5625f;
@@ -1161,6 +1162,7 @@ void test_render_wave_toc_skips_contained_entities() {
     auto spawn_person = [](Rig &rig, double x, uint16_t net_id) {
         Entity p;
         p.kind = EntityKind::Organic;
+        p.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         p.net_id = net_id;
         p.position = {static_cast<float>(x), 10.0f, 0.0f};
         p.bound_radius = 1.0f;
@@ -1218,6 +1220,7 @@ void test_render_wave_toc_skips_contained_entities() {
         const EntityHandle behind = spawn_person(rig, 40.0, 7);
         Entity beside_def;
         beside_def.kind = EntityKind::Organic;
+        beside_def.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
         beside_def.net_id = 8;
         beside_def.position = {40.0f, 60.0f, 0.0f};
         beside_def.bound_radius = 1.0f;

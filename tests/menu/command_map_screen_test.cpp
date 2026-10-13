@@ -42,7 +42,7 @@ struct Frame : MenuFrameSeam {
 	void set_widget_shown_override(int, bool) override {}
 	void set_widget_disabled(int, bool) override {}
 	void set_widget_checked(int, bool) override {}
-	void set_widget_text(int, const std::string &) override {}
+	void set_widget_text(int, const std::string &, int) override {}
 	void set_widget_items(int i, const std::vector<std::string> &v) override { items[i] = v; }
 	void set_widget_selection(int i, int sel, int, int) override { selection[i] = sel; }
 	void set_widget_scroll_range(int, int, int, int, int) override {}

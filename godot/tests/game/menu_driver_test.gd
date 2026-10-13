@@ -1018,19 +1018,32 @@ const STAT_XML := """
 
 
 # The stat RESULTLIST authors no COLUMN: fill_stat_results installs the feed's
-# columns, adds the rows and sorts by the third column descending, as
+# columns, adds the rows and sorts by the third column descending, then selects
+# the first row whose column-1 value (the slot) is the local slot, as
 # StatScreen_PopulateStatResultsList does [orig: StatScreen_PopulateStatResultsList @ 0x562240;
-# CTableWnd_SortByColumn(2) @ 0x5626f9]. The column draw is pinned in the
-# menu_frame_parity ctest.
+# CTableWnd_SortByColumn(2) @ 0x5626f9; the row walk @ 0x562700..0x562754]
+# (D-MNU-51). The column draw is pinned in the menu_frame_parity ctest.
 func test_stat_results_fill_installs_columns_and_sorts() -> void:
 	var driver := _framed_driver(STAT_XML, "stat.mnu")
 	var table := driver.widget_id("RESULTLIST")
 	assert_eq(driver.table_sort_column(table), -1, "an unfilled table is unsorted")
 	var columns: Array[EndRoundColumn] = [EndRoundColumn.new(), EndRoundColumn.new(), EndRoundColumn.new()]
-	var rows: Array[EndRoundRow] = [EndRoundRow.new(), EndRoundRow.new()]
-	driver.fill_stat_results(table, columns, rows)
+	var rows: Array[EndRoundRow] = [EndRoundRow.make(3, 1), EndRoundRow.make(5, 2)]
+	driver.fill_stat_results(table, columns, rows, 5)
 	assert_eq(driver.table_row_count(table), 2, "every feed row lands")
 	assert_eq(driver.table_sort_column(table), 2, "sorted by the third column")
+	# The rows' order after the sort is the sort's; read each row's values.
+	var slots := [driver.table_cell_value(table, 0, 1), driver.table_cell_value(table, 1, 1)]
+	slots.sort()
+	assert_eq(slots, [3, 5], "column 1 holds each row's slot")
+	var selected := driver.table_selected_rows(table)
+	assert_eq(selected.size(), 1, "one row is selected")
+	if selected.size() == 1:
+		assert_eq(driver.table_cell_value(table, selected[0], 1), 5,
+				"the row holding the local slot is selected")
+		assert_eq(driver.table_cell_value(table, selected[0], 0), 2, "column 0 holds its team")
+	driver.fill_stat_results(table, columns, rows, 7)
+	assert_eq(driver.table_selected_rows(table), PackedInt32Array(), "no row holds slot 7")
 	var none: Array[EndRoundRow] = []
-	driver.fill_stat_results(table, columns, none)
+	driver.fill_stat_results(table, columns, none, 0)
 	assert_eq(driver.table_row_count(table), 0, "a refill clears the old rows")

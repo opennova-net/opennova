@@ -1,7 +1,8 @@
 // The stat.mnu RESULTLIST feed (hud/stat_screen_feed.h): the column set with
 // the field->string map and the SMALL/disabled toggle, the width split, the
 // per-player rows joined by slot to the board, the cell formats, the team
-// colours, the local selection, and the tab filter
+// colours, the fill's cell values and its local selection after the sort, and
+// the tab filter
 // [orig: StatScreen_PopulateStatResultsList @0x562240; StatScreen_StatFilterTabHandler
 //  @0x562140].
 #include <cstdio>
@@ -58,20 +59,18 @@ void test_columns() {
 void test_rows() {
 	std::vector<StatScreenPlayer> players = {
 		{3, 1, "Ace", "ALPHA"}, {5, 2, "Bee", ""}, {7, 1, "NoRow", ""}, {9, 0, "Spectator", ""}};
-	const std::vector<StatScreenRow> rows = stat_screen_rows(make_board(), players, false, 5);
+	const std::vector<StatScreenRow> rows = stat_screen_rows(make_board(), players, false);
 	CHECK(rows.size() == 2); // team 0 skipped, no board row skipped
 	CHECK(rows[0].name == "Ace" && rows[0].squad == "ALPHA" && rows[0].color_argb == 0xFF00AFFFu);
-	CHECK(!rows[0].selected);
 	// field 1 -> "7", field 5 -> "%2i:%02i" of 125 s = " 2:05", field 31 (-1)
 	// -> "-", field 99 -> "??".
 	CHECK(rows[0].cells.size() == 4);
 	CHECK(rows[0].cells[0] == "7" && rows[0].cells[1] == " 2:05" && rows[0].cells[2] == "-" &&
 			rows[0].cells[3] == "??");
 	CHECK(rows[1].name == "Bee" && rows[1].squad == "-" && rows[1].color_argb == 0xFFFF0000u);
-	CHECK(rows[1].selected);
 	CHECK(rows[1].cells[0] == "2" && rows[1].cells[1] == " 1:01" && rows[1].cells[2] == "9");
 	// With the disabled field listed, field 19 always prints "%i" (even -1).
-	const std::vector<StatScreenRow> all = stat_screen_rows(make_board(), players, true, -1);
+	const std::vector<StatScreenRow> all = stat_screen_rows(make_board(), players, true);
 	CHECK(all[0].cells.size() == 5 && all[0].cells[2] == "-1");
 	// The tab filter.
 	CHECK(stat_screen_row_visible(0, 1) && stat_screen_row_visible(0, 2));
@@ -79,16 +78,8 @@ void test_rows() {
 	CHECK(stat_screen_row_visible(2, 1) && !stat_screen_row_visible(2, 2));
 }
 
-// The fill puts the roster's bytes into the NAME and Squad cells (D-MNU-46): the
-// game's table holds the slot's name and squad tag in the code page and draws a
-// glyph per byte, so a stock peer's "J\xF6rg" / "\xC9quipe" stay those bytes in
-// the cells (the binding's UTF-8 round trip left "J\xEF\xBF\xBDrg", which drew
-// three glyphs, and its decoded text "J\xC3\xB6rg" would draw two), and a sort
-// on NAME orders the bytes: "Jack" before "J\xF6rg".
-// [orig: StatScreen_PopulateStatResultsList @0x562240 - the CTableWnd_AddRow
-//  call with the name @0x562565, the column-1 SetCellText with the squad
-//  @0x562585; CTableWnd_SortByColumn @0x640900]
-void test_fill_puts_the_roster_bytes_in_the_cells() {
+// stat.mnu's STAT screen with its RESULTLIST (no COLUMN, no MULTISELECT).
+mnu::Document stat_document() {
 	mnu::Document doc;
 	mnu::Screen stat;
 	stat.name = "STAT";
@@ -101,6 +92,20 @@ void test_fill_puts_the_roster_bytes_in_the_cells() {
 	root.children.push_back(table);
 	stat.roots.push_back(root);
 	doc.screens.push_back(stat);
+	return doc;
+}
+
+// The fill puts the roster's bytes into the NAME and Squad cells (D-MNU-46): the
+// game's table holds the slot's name and squad tag in the code page and draws a
+// glyph per byte, so a stock peer's "J\xF6rg" / "\xC9quipe" stay those bytes in
+// the cells (the binding's UTF-8 round trip left "J\xEF\xBF\xBDrg", which drew
+// three glyphs, and its decoded text "J\xC3\xB6rg" would draw two), and a sort
+// on NAME orders the bytes: "Jack" before "J\xF6rg".
+// [orig: StatScreen_PopulateStatResultsList @0x562240 - the CTableWnd_AddRow
+//  call with the name @0x562565, the column-1 SetCellText with the squad
+//  @0x562585; CTableWnd_SortByColumn @0x640900]
+void test_fill_puts_the_roster_bytes_in_the_cells() {
+	const mnu::Document doc = stat_document();
 	menu::MenuRuntime rt;
 	rt.open_document(&doc, "stat.mnu", "");
 	const int id = rt.widget_id("RESULTLIST");
@@ -108,8 +113,8 @@ void test_fill_puts_the_roster_bytes_in_the_cells() {
 	std::vector<StatScreenColumn> columns = stat_screen_columns(make_board(), false, 750);
 	CHECK(columns.size() >= 3);
 	std::vector<StatScreenPlayer> players = { {3, 1, "J\xF6rg", "\xC9quipe"}, {5, 2, "Jack", ""} };
-	const std::vector<StatScreenRow> rows = stat_screen_rows(make_board(), players, false, -1);
-	fill_stat_results(rt, id, columns, rows);
+	const std::vector<StatScreenRow> rows = stat_screen_rows(make_board(), players, false);
+	fill_stat_results(rt, id, columns, rows, -1);
 	CHECK(rt.table_row_count(id) == 2);
 	// The stat sort ran (kills descending: 7 then 2), so row 0 is the slot-3 row.
 	CHECK(rt.table_cell_text(id, 0, 0) == "J\xF6rg" && rt.table_cell_text(id, 0, 1) == "\xC9quipe");
@@ -120,12 +125,47 @@ void test_fill_puts_the_roster_bytes_in_the_cells() {
 	CHECK(rt.table_cell_text(id, 0, 0) == "Jack" && rt.table_cell_text(id, 1, 0) == "J\xF6rg");
 }
 
+// The fill's cell values and its local row (D-MNU-51): each row goes in with the
+// slot's team as its column-0 value and its slot id as column 1's, and after the
+// sort the first row whose column-1 value is the local player entity's slot id
+// is selected; a slot no row holds selects none. Ours flagged a row before the
+// sort, by the 0x1D header's board index, and wrote neither value.
+// [orig: StatScreen_PopulateStatResultsList @0x562240 - the CTableWnd_AddRow
+//  call with the team @0x562565, the column-1 value call @0x562576, the sort
+//  @0x5626e6..0x5626f9, the row walk @0x562700..0x562754 comparing
+//  g_LocalPlayerEntity +0x154 @0x56271e..0x56272e, CTableWnd_SetRowSelected
+//  @0x562754]
+void test_fill_selects_the_local_slot_after_the_sort() {
+	const mnu::Document doc = stat_document();
+	menu::MenuRuntime rt;
+	rt.open_document(&doc, "stat.mnu", "");
+	const int id = rt.widget_id("RESULTLIST");
+	const std::vector<StatScreenColumn> columns = stat_screen_columns(make_board(), false, 750);
+	// The roster lists slot 5 first; the sort (kills descending, 7 then 2) puts
+	// slot 3's row first.
+	const std::vector<StatScreenPlayer> players = { { 5, 2, "Bee", "" }, { 3, 1, "Ace", "ALPHA" } };
+	const std::vector<StatScreenRow> rows = stat_screen_rows(make_board(), players, false);
+	fill_stat_results(rt, id, columns, rows, 5);
+	CHECK(rt.table_row_count(id) == 2);
+	CHECK(rt.table_cell_text(id, 0, 0) == "Ace" && rt.table_cell_text(id, 1, 0) == "Bee");
+	CHECK(rt.table_cell_text(id, 0, 1) == "ALPHA" && rt.table_cell_text(id, 1, 1) == "-");
+	CHECK(rt.table_cell_value(id, 0, 0) == 1 && rt.table_cell_value(id, 0, 1) == 3);
+	CHECK(rt.table_cell_value(id, 1, 0) == 2 && rt.table_cell_value(id, 1, 1) == 5);
+	CHECK(rt.table_selected_rows(id) == std::vector<int>{ 1 });
+	fill_stat_results(rt, id, columns, rows, 3);
+	CHECK(rt.table_selected_rows(id) == std::vector<int>{ 0 });
+	// Slot 9 holds no row: nothing is selected.
+	fill_stat_results(rt, id, columns, rows, 9);
+	CHECK(rt.table_selected_rows(id).empty());
+}
+
 } // namespace
 
 int main() {
 	test_columns();
 	test_rows();
 	test_fill_puts_the_roster_bytes_in_the_cells();
+	test_fill_selects_the_local_slot_after_the_sort();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;

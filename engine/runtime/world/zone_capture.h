@@ -196,7 +196,7 @@ struct ZoneCaptureEvents {
 struct ZoneCaptureDeltaInput {
     int presence = 0;                  // same-team minus capturable others in radius
     uint8_t zone_team = 0;             // entity+354
-    std::array<int, 5> team_players{}; // in-game Players by team
+    std::array<int, 5> team_players{}; // in-game Players by slot team (+416)
     int speed_setting = -1;            // g_CaptureSpeedSetting
     int spawn_zone_count = 0;          // SpawnZoneList_GetCount()
     int team1_zones = 0;               // numbered list entries owned by team 1

@@ -79,6 +79,7 @@ w::EntityHandle match_player(w::World &world, uint8_t slot, uint8_t team,
 		const char *name) {
 	w::Entity e;
 	e.kind = w::EntityKind::Organic;
+	e.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
 	e.player_class = 8;
 	e.team = team;
 	e.health = 100;
@@ -87,6 +88,8 @@ w::EntityHandle match_player(w::World &world, uint8_t slot, uint8_t team,
 	e.engine_flags = w::kEntityFlagPlayer;
 	const w::EntityHandle handle = world.registry.spawn(0, e);
 	world.match.upsert_player({handle, slot, name});
+	// The slot's team byte (+416) is the body's until a script splits them.
+	world.match.set_player_slot_team(handle, team);
 	return handle;
 }
 
@@ -992,6 +995,9 @@ void test_aas_capture_events_carry_zone_numbers() {
 	for (size_t i = 0; i < 3; ++i) {
 		ctx.np_protocol.connection_list[i].assigned_team = slot_teams[i];
 		ctx.np_protocol.connection_list[i].assigned_team_valid = true;
+		// The roster row's mirror of the slot team (D-NET-650).
+		world.match.set_player_slot_team(
+				ctx.np_protocol.connection_list[i].link.owned_entity, slot_teams[i]);
 	}
 	// The body already stands in the box: the first frame's entity update
 	// records the contact after that frame's one-second service, the next
@@ -1056,6 +1062,9 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 	const w::Vec3 bay_position{19.75f, -3.25f, 3.0f};
 	blue_entity->position = flag_position;
 	blue_entity->net_move_input |= w::Entity::kMoveOrderMoving;
+	// A person's model bound: the candidate slice built at the flag reaches
+	// the bay through it.
+	blue_entity->bound_radius = 1.0f;
 	const w::EntityHandle host = match_player(world, 1, 1, "Host");
 	world.registry.get(host)->position = {1000.0f, 1000.0f, 3.0f};
 

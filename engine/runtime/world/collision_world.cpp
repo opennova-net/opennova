@@ -753,6 +753,7 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
             ++it;
         }
     }
+    purge_stale_candidate_slices(world);
 
     // --- pool-2 statics: buildings first, then the rest. Built at mission
     // start / teleport / the instance and registry edges that arm
@@ -910,20 +911,48 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
     build_candidate_slices(world);
 }
 
+void CollisionWorld::purge_stale_candidate_slices(const World &world) {
+    // A slot's +0x1BC / +0x1C0 outlive every build that skips it, but a spawn
+    // into the slot clears them with the rest of the record: a new lifetime
+    // starts with no slice. [orig: the 0x2B4-byte memsets of
+    //  Entity_SpawnFromBMSRecord @0x40EA27 and NapiNPClientMsg_0x00D @0x432D23]
+    // A destroyed row's record is cleared at its destroy (the row gone from
+    // the registry). [orig: Entity_Destroy @0x43E810 - the 0x2B4-byte memset
+    //  @0x43EA70]
+    for (auto it = candidates_.begin(); it != candidates_.end();) {
+        const Entity *row = world.registry.get(EntityHandle{it->first});
+        if (row == nullptr || row->registry_spawn_id != it->second.lifetime)
+            it = candidates_.erase(it);
+        else
+            ++it;
+    }
+}
+
 void CollisionWorld::build_candidate_slices(World &world) {
+    // The counter and the arena's fill restart; the arena's entries and the
+    // slices of the rows the gates skip below stay as they are.
+    // [orig: Entity_BuildProximityListsFromPools @0x4B8EB0 - the counter
+    //  @0x4B8ECA, the fill @0x4B8ED0]
     slice_refresh_counter_ = 0;
     candidate_slices_built_ = true;
-    arena_.clear();
-    candidates_.clear();
+    if (arena_.size() < static_cast<size_t>(kCandidateArenaCap))
+        arena_.resize(static_cast<size_t>(kCandidateArenaCap));
+    arena_used_ = 0;
+    purge_stale_candidate_slices(world);
     auto build_for = [&](const Entity &e, int32_t pad) {
         int32_t p[3];
         entity_pos_fixed(e, p);
-        const int32_t source_radius =
-                e.bound_radius > 0.0f ? to_fixed(e.bound_radius) : 0x10000;
-        const int32_t range = source_radius + pad;
-        CandidateSlice slice;
-        slice.start = static_cast<int32_t>(arena_.size());
-        slice.count = 0;
+        // The source's own boundRadius word plus the pool's pad, a zero
+        // radius included. [orig: @0x4B8F02..0x4B8F0B (pool 0, +4.0u),
+        //  @0x4B9149..0x4B9152 (pool 1, +6.0u)]
+        const int32_t range = to_fixed(e.bound_radius) + pad;
+        // The slice pointer and a zero count, then each entry the fill has
+        // room for. [orig: the stores @0x4B8F10 / @0x4B8F16 and
+        //  @0x4B9157 / @0x4B915D]
+        CandidateSlice &slice = candidates_[e.handle.packed];
+        slice = CandidateSlice{};
+        slice.start = arena_used_;
+        slice.lifetime = e.registry_spawn_id;
         for (const DynSlot &d : dynamics_) {
             if (d.h == e.handle) continue;
             const int32_t total = range + d.radius;
@@ -931,8 +960,8 @@ void CollisionWorld::build_candidate_slices(World &world) {
                 abs32(d.z - p[2]) > total)
                 continue;
             if (vec_len_ftol(d.x - p[0], d.y - p[1], d.z - p[2]) > total) continue;
-            if (arena_.size() >= 3000) break;
-            arena_.push_back(d.h);
+            if (arena_used_ >= kCandidateArenaCap) break;
+            arena_[static_cast<size_t>(arena_used_++)] = d.h;
             ++slice.count;
         }
         for (int32_t i = 0; i < static_cast<int32_t>(statics_.size()); ++i) {
@@ -948,31 +977,31 @@ void CollisionWorld::build_candidate_slices(World &world) {
             if (abs32(sx - p[0]) > total || abs32(sy - p[1]) > total || abs32(sz - p[2]) > total)
                 continue;
             if (vec_len_ftol(sx - p[0], sy - p[1], sz - p[2]) > total) continue;
-            if (arena_.size() >= 3000) break;
-            arena_.push_back(s.h);
+            if (arena_used_ >= kCandidateArenaCap) break;
+            arena_[static_cast<size_t>(arena_used_++)] = s.h;
             ++slice.count;
         }
-        candidates_[e.handle.packed] = slice;
     };
     // Sources use their current live positions, including a direct teleport
-    // between pool-table publications. Keep the existing organic source gate;
-    // candidate target positions remain the published dynamics/statics.
+    // between pool-table publications; candidate target positions remain the
+    // published dynamics/statics. A pool-0 source needs its +0x1C word alone,
+    // whatever its kind or Flags. [orig: the pool-0 loop @0x4B8EE2, the +0x1C
+    //  test @0x4B8EF9..0x4B8F00]
     world.registry.for_each_in_pool(0, [&](const Entity &e) {
-        if (e.kind == EntityKind::Organic && (e.flags & 1u) == 0)
-            build_for(e, 0x40000); // [orig: pool-0 +4.0u]
+        if (e.item_type_index != 0) build_for(e, 0x40000);
     });
     // Pool-1 SOURCE slices for every retail-eligible active item, not merely
-    // motor-driven vehicles. A source needs an ItemDef; EWeap/attachable rows
-    // (attrib 0x20) are excluded unless the def's raw type is 1. This same
-    // slice drives vehicle contact, iris/sun rays, sound, and other candidate
-    // queries. [orig: Entity_BuildProximityListsFromPools @ 0x4b8eb0 — the
-    // pool-1 loop head @ 0x4b9110: in-use word +0x1C @ 0x4b9127, ItemDef
-    // +0x20 non-null @ 0x4b9130..0x4b9135, Flags bit 0 skip @ 0x4b9137..
-    // 0x4b913b, def attrib 0x20 (+0x54) excluded unless def type (+0x5C)
-    // == 1 @ 0x4b913d..0x4b9147; radius +6.0u (0x60000) @ 0x4b9152]
-    world.registry.for_each([&](const Entity &e) {
-        if (e.handle.pool() != 1 || (e.flags & 1u) != 0) return;
-        if (!e.has_item_def) return;
+    // motor-driven vehicles: the +0x1C word, an ItemDef, Flags bit 0 clear,
+    // and EWeap/attachable rows (attrib 0x20) excluded unless the def's raw
+    // type is 1. A row any gate skips keeps its last slice. This same slice
+    // drives vehicle contact, iris/sun rays, sound, and other candidate
+    // queries. [orig: the pool-1 loop head @0x4B9110: the +0x1C word
+    // @0x4B9127..0x4B912E, ItemDef +0x20 non-null @0x4B9130..0x4B9135, Flags
+    // bit 0 skip @0x4B9137..0x4B913B, def attrib 0x20 (+0x54) excluded unless
+    // def type (+0x5C) == 1 @0x4B913D..0x4B9147; radius +6.0u (0x60000)
+    // @0x4b9152]
+    world.registry.for_each_in_pool(1, [&](const Entity &e) {
+        if (e.item_type_index == 0 || !e.has_item_def || (e.flags & 1u) != 0) return;
         if ((e.item_attrib & kItemAttribEweap) != 0 && e.item_type != 1) return;
         build_for(e, 0x60000);
     });
@@ -990,9 +1019,10 @@ void CollisionWorld::build_candidate_slices(World &world) {
                                     const FixedVec3 &position_q16,
                                     int32_t bound_radius_q16, int32_t pad,
                                     EntityHandle registry_twin) {
-        const int32_t source_radius =
-                bound_radius_q16 > 0 ? bound_radius_q16 : 0x10000;
-        const int32_t range = source_radius + pad;
+        // The row's own boundRadius word, a zero one included, as the
+        // registry build reads it [orig: @0x4B8F02..0x4B8F0B /
+        //  @0x4B9149..0x4B9152].
+        const int32_t range = bound_radius_q16 + pad;
         CandidateSlice slice;
         slice.start = static_cast<int32_t>(wire_arena_.size());
         slice.count = 0;
@@ -1048,9 +1078,13 @@ void CollisionWorld::build_candidate_slices(World &world) {
 }
 
 void CollisionWorld::refresh_entity_proximity(World &world, Entity &entity) {
+    rebuild_candidate_slices(world);
+    refresh_blink(world, entity);
+}
+
+void CollisionWorld::rebuild_candidate_slices(World &world) {
     invalidate_trace_views();
     build_candidate_slices(world);
-    refresh_blink(world, entity);
 }
 
 void CollisionWorld::refresh_after_registry_change(World &world) {
