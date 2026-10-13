@@ -143,11 +143,11 @@ void MissionBoardPane::toolbar(Workspace &workspace, const MissionDocument &miss
 	if (ui_kit::checkbox_width(attention.c_str()) > ImGui::GetContentRegionAvail().x)
 		attention = "(" + std::to_string(board_.noted) + ")";
 	attention += "###attention";
-	row.next(ui_kit::checkbox_width(attention.c_str()));
 	bool attend = shown.logic_attention;
-	if (ImGui::Checkbox(attention.c_str(), &attend)) set_shown(workspace, mission, "logic_attention", io::JsonValue::make_bool(attend));
-	ui_kit::tooltip("Only the events the board notes something on (an event with no action whose firing nothing reads, a "
-	                "value not set, an area the game drops...): the editor's reading, never a build's refusal.");
+	if (ui_kit::check(row, attention.c_str(), &attend,
+	                  "Only the events the board notes something on (an event with no action whose firing nothing reads, "
+	                  "a value not set, an area the game drops...): the editor's reading, never a build's refusal."))
+		set_shown(workspace, mission, "logic_attention", io::JsonValue::make_bool(attend));
 	const bool all_folded = !board_.cards.empty() &&
 	                        std::all_of(board_.cards.begin(), board_.cards.end(), [](const BoardCard &card) { return card.folded; });
 	const char *fold = all_folded ? "Unfold all" : "Fold all";

@@ -269,13 +269,7 @@ void draw_mission_mark_items(Workspace &workspace, const MissionDocument &missio
 	ui_kit::tooltip("Select every entity of the mission placed from the same item.");
 	const std::string locator = row ? mission.locator(record) : std::string();
 	if (ImGui::MenuItem("Go to in outline", nullptr, false, !locator.empty())) {
-		ReferenceTarget target;
-		target.label = mission.path();
-		target.file = mission.path();
-		target.locator = locator;
-		target.field = entity ? "item" : "id";
-		target.editable = true;
-		window_requests::go_to(workspace, target);
+		window_requests::go_to(workspace, window_requests::target_at(mission.path(), locator, entity ? "item" : "id"));
 	}
 	const bool finds = view.findings.graph && !locator.empty();
 	if (ImGui::MenuItem("Find usages", "Shift+F12", false, finds) && finds)

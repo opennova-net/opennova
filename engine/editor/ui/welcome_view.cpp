@@ -25,27 +25,6 @@ template <size_t N> void copy_into(char (&buffer)[N], const std::string &text) {
 	buffer[n] = '\0';
 }
 
-// A path field with its label and Browse... beside it, under it when the row is narrow: whether Browse...
-// was pressed, the text edited this frame, and the field being typed in.
-struct PathField {
-	bool browse = false;
-	bool edited = false;
-	bool typing = false;
-};
-PathField path_field(const char *label, char *buffer, size_t size, const char *browse, bool enabled) {
-	PathField out;
-	ui_kit::WrapRow row;
-	row.next(ui_kit::field_width(ImGui::CalcItemWidth(), label));
-	ImGui::InputText(label, buffer, size);
-	out.edited = ImGui::IsItemEdited();
-	out.typing = ImGui::IsItemActive();
-	row.next(ui_kit::button_width(browse));
-	ImGui::BeginDisabled(!enabled);
-	out.browse = ImGui::Button(browse) && enabled;
-	ImGui::EndDisabled();
-	return out;
-}
-
 // The check's line under an install field: found in green, no game in red, none named (or not checked yet)
 // muted.
 void install_line(const std::string &words, bool ok, bool named) {
@@ -175,13 +154,13 @@ bool NewProjectForm::draw(Workspace &workspace) {
 	// install may be its own, or a session's); checked once it is not being typed.
 	install_.follow(form.install_named ? form.game_install : v.project.editor_install);
 	if (ImGui::InputText("Name", title_.text, sizeof(title_.text))) set("title", io::JsonValue::make_string(title_.sent()));
-	const PathField folder = path_field("Folder", folder_.text, sizeof(folder_.text), "Browse...##folder", allowed);
+	const ui_kit::PathField folder = ui_kit::path_field("Folder", folder_.text, sizeof(folder_.text), "Browse...##folder", 0.0f, allowed);
 	if (folder.edited) set("dir", io::JsonValue::make_string(folder_.sent()));
 	if (folder.browse) workspace.request(request::pick_directory(PickPurpose::NewProjectLocation));
 	ImGui::PushTextWrapPos(0.0f);
 	ImGui::TextDisabled("The folder is made if it does not exist; it must not hold a project already.");
 	ImGui::PopTextWrapPos();
-	const PathField field = path_field("Game install", install_.text, sizeof(install_.text), "Browse...##install", allowed);
+	const ui_kit::PathField field = ui_kit::path_field("Game install", install_.text, sizeof(install_.text), "Browse...##install", 0.0f, allowed);
 	if (field.edited) set("game_install", io::JsonValue::make_string(install_.sent()));
 	if (field.browse) workspace.request(request::pick_directory(PickPurpose::NewProjectInstall));
 	ui_kit::tooltip("The game's folder: the project imports its files from it and plays in it. Kept with the project.");

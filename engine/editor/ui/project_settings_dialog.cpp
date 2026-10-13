@@ -30,21 +30,6 @@ const char *game_display_name(const std::string &code) {
 	return profile != nullptr ? profile->display_name : code.c_str();
 }
 
-// A path field and its Browse..., the button under the field when the dialog is narrow;
-// true when Browse... was pressed; `typing`, when given, whether the field is being typed in, and
-// `edited` whether its text changed this frame.
-bool path_field(const char *label, char *buffer, size_t size, const char *browse, bool *typing = nullptr,
-                bool *edited = nullptr) {
-	ui_kit::WrapRow row;
-	row.next(ui_kit::field_width(field_width(), label));
-	ImGui::SetNextItemWidth(field_width());
-	const bool changed = ImGui::InputText(label, buffer, size);
-	if (edited) *edited = changed;
-	if (typing) *typing = ImGui::IsItemActive();
-	row.next(ui_kit::button_width(browse));
-	return ImGui::Button(browse);
-}
-
 // Whether no Apply was answered after the one the SettingsApplied event at `seq` answers: the
 // view's settings_result is then that Apply's (each answer replaces it). An answer the view no
 // longer holds is not known to be the last.
@@ -159,17 +144,17 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 		ImGui::TextDisabled("Apply renames the project's own expansion files to the new name.");
 
 	ImGui::SeparatorText("This computer");
-	bool typing = false, edited = false;
-	if (path_field("Game install folder", game_install_.text, sizeof(game_install_.text), "Browse...##install", &typing,
-	               &edited)) {
+	const ui_kit::PathField install =
+			ui_kit::path_field("Game install folder", game_install_.text, sizeof(game_install_.text), "Browse...##install", field_width());
+	if (install.browse) {
 		pick_ = PickPurpose::GameInstall;
 		workspace.request(request::pick_directory(PickPurpose::GameInstall));
 	}
-	if (edited) set("game_install", io::JsonValue::make_string(game_install_.sent()));
+	if (install.edited) set("game_install", io::JsonValue::make_string(game_install_.sent()));
 	ui_kit::tooltip(game_install_.text);
 	// What the folder holds, checked once it is not being typed (the UX round's project lane).
 	bool found = false;
-	const std::string words = check_.words(workspace, game_install_.text, typing, std::string(), found);
+	const std::string words = check_.words(workspace, game_install_.text, install.typing, std::string(), found);
 	ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + field_width() * 1.5f);
 	ImGui::PushStyleColor(ImGuiCol_Text, words.empty() || found ? ImVec4(0.55f, 0.85f, 0.55f, 1.0f) : ImVec4(0.95f, 0.55f, 0.45f, 1.0f));
 	ImGui::TextWrapped("%s", words.empty() ? "Checking the folder..." : words.c_str());
@@ -183,13 +168,13 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 		if (shown != runtime) ui_kit::tooltip(runtime);
 		ImGui::TextDisabled("A source run: Play runs the Godot binary at the checkout.");
 	} else {
-		bool runtime_edited = false;
-		if (path_field("OpenNova runtime", runtime_.text, sizeof(runtime_.text), "Browse...##runtime", nullptr,
-		               &runtime_edited)) {
+		const ui_kit::PathField runtime =
+				ui_kit::path_field("OpenNova runtime", runtime_.text, sizeof(runtime_.text), "Browse...##runtime", field_width());
+		if (runtime.browse) {
 			pick_ = PickPurpose::RuntimeExecutable;
 			workspace.request(request::pick_file(PickPurpose::RuntimeExecutable));
 		}
-		if (runtime_edited) set("runtime", io::JsonValue::make_string(runtime_.sent()));
+		if (runtime.edited) set("runtime", io::JsonValue::make_string(runtime_.sent()));
 		ImGui::TextDisabled("opennova.exe; left empty, the one packaged beside the editor.");
 		ui_kit::tooltip(v.activity.runtime_executable.empty() ? "No runtime is found now." : "Play runs " + v.activity.runtime_executable + ".");
 	}

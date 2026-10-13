@@ -296,10 +296,8 @@ void OutlineView::draw_kinds(const Document &document) {
 		model_.set_kinds(kinds);
 	}
 	if (spec_.row_listed) {
-		row.next(ui_kit::checkbox_width(spec_.unlisted));
 		bool all = model_.all_rows();
-		if (ImGui::Checkbox(spec_.unlisted, &all)) model_.set_all_rows(all);
-		ui_kit::tooltip("Lists the ones that hold nothing too.");
+		if (ui_kit::check(row, spec_.unlisted, &all, "Lists the ones that hold nothing too.")) model_.set_all_rows(all);
 	}
 }
 
@@ -314,10 +312,9 @@ void OutlineView::draw_list(Workspace &workspace, const Document &document) {
 		const float filter = ImGui::GetFontSize() * 14.0f;
 		row.next(filter);
 		filter_box("Filter records", filter, nullptr);
-		row.next(ui_kit::checkbox_width("Sort by name"));
 		bool sort = model_.sort();
-		if (ImGui::Checkbox("Sort by name", &sort)) model_.set_sort(sort);
-		ui_kit::tooltip("Lists the records by name; Up and Down still move them in the file's order.");
+		if (ui_kit::check(row, "Sort by name", &sort, "Lists the records by name; Up and Down still move them in the file's order."))
+			model_.set_sort(sort);
 	}
 	draw_kinds(document);
 	// The rows by the project's names where the type words them so (a weapon by its WepDes text, the

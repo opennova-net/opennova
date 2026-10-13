@@ -28,6 +28,18 @@ inline void go_to(Workspace &workspace, const ReferenceTarget &target) {
 	workspace.request(request::open_document(target.file, target.locator, target.field));
 }
 
+// A Go to's target in a file the editor edits: the record its locator names ("" for the file) with
+// `field` shown there.
+inline ReferenceTarget target_at(const std::string &file, const std::string &locator = std::string(),
+                                 const std::string &field = std::string()) {
+	ReferenceTarget target;
+	target.file = file;
+	target.locator = locator;
+	target.field = field;
+	target.editable = true;
+	return target;
+}
+
 // A project file itself gone to (DI-18: every jump a Go to, a step of the history): its document, or its page.
 inline void go_to_file(Workspace &workspace, const std::string &path) {
 	ReferenceTarget target;

@@ -73,7 +73,7 @@ void choice_combo(ui_kit::WrapRow &row, const char *label, const Choice<T> (&cho
 		widest = std::max(widest, ImGui::CalcTextSize(choice.label).x);
 		if (choice.value == value) current = choice.label;
 	}
-	const float width = widest + ImGui::GetFrameHeight() + ImGui::GetStyle().FramePadding.x * 2.0f;
+	const float width = ui_kit::combo_width(widest);
 	row.next(ui_kit::field_width(width, label));
 	ImGui::SetNextItemWidth(width);
 	const bool open = ImGui::BeginCombo(label, current);
@@ -81,12 +81,6 @@ void choice_combo(ui_kit::WrapRow &row, const char *label, const Choice<T> (&cho
 	for (const Choice<T> &choice : choices)
 		if (ImGui::Selectable(choice.label, choice.value == value)) value = choice.value;
 	ImGui::EndCombo();
-}
-
-void disabled_wrapped(const std::string &text) {
-	ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-	ImGui::TextWrapped("%s", text.c_str());
-	ImGui::PopStyleColor();
 }
 
 float line_height() { return ImGui::GetFrameHeight() + ImGui::GetStyle().CellPadding.y * 2.0f; }
@@ -255,9 +249,7 @@ const ProblemAnswer &ProblemsWindow::draw_filters(const SessionView &view) {
 	ImGui::PopStyleVar();
 	choice_combo(row, "Group", kGroupings, query.grouping,
 	             "Group the problems by file or by kind, or list them as one.");
-	row.next(ui_kit::checkbox_width("Only fixable"));
-	ImGui::Checkbox("Only fixable", &query.fixable);
-	ui_kit::tooltip("Only the problems the editor offers a fix for.");
+	ui_kit::check(row, "Only fixable", &query.fixable, "Only the problems the editor offers a fix for.");
 	// Blocks the build sends its own (set_blocking); any other filter changed goes to the workspace.
 	ProblemQuery changed = query;
 	changed.blocking = before.blocking;
@@ -441,13 +433,13 @@ void ProblemsWindow::draw_finding(const SessionView &view, const Line &line, boo
 	}
 	if (expanded) {
 		ImGui::TextWrapped("%s", d.message.c_str());
-		if (blocks) disabled_wrapped(blocker_reason(d));
+		if (blocks) ui_kit::note(blocker_reason(d));
 		// A file the game reads by name: the manifest's own record of it, the plain words' cited detail.
 		if (const RequirementSubject *requirement = requirement_subject(d))
 			if (const std::string witness = requirement_witness(requirement->role); !witness.empty())
-				disabled_wrapped("As the original was seen to do: " + witness);
+				ui_kit::note("As the original was seen to do: " + witness);
 		// A fix of the game's own data is marked as editing a file the game ships (S15).
-		if (!note.empty()) disabled_wrapped(note);
+		if (!note.empty()) ui_kit::note(note);
 		for (const ProblemFix &fix : fixes) {
 			ImGui::PushID(fix.label.c_str());
 			const float room = ImGui::GetContentRegionAvail().x;
@@ -460,7 +452,7 @@ void ProblemsWindow::draw_finding(const SessionView &view, const Line &line, boo
 			// What it does beside it when there is room for a few words, else under it.
 			if (room - ImGui::GetItemRectSize().x - ImGui::GetStyle().ItemSpacing.x >= ImGui::GetFontSize() * 12.0f)
 				ImGui::SameLine();
-			disabled_wrapped(fix.detail);
+			ui_kit::note(fix.detail);
 			ImGui::PopID();
 		}
 		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));

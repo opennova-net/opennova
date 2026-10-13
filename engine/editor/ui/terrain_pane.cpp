@@ -35,12 +35,10 @@ void draw_tools(Workspace &workspace, const TerrainBrush &brush, const TerrainTo
 	ui_kit::WrapRow row;
 	for (const TerrainTool tool : tools) {
 		const bool active = brush.tool == tool;
-		if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-		const bool pressed = ui_kit::tool(row, terrain_tool_label(tool), true,
-		                                  active ? std::string("Put the brush down (no tool): the view's own tools again.")
-		                                         : std::string("Brush with ") + terrain_tool_label(tool) + ".");
-		if (active) ImGui::PopStyleColor();
-		if (pressed) set_tool(workspace, active ? TerrainTool::None : tool);
+		if (ui_kit::toggle_tool(row, terrain_tool_label(tool), active, true,
+		                        active ? std::string("Put the brush down (no tool): the view's own tools again.")
+		                               : std::string("Brush with ") + terrain_tool_label(tool) + "."))
+			set_tool(workspace, active ? TerrainTool::None : tool);
 	}
 }
 

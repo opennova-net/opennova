@@ -86,10 +86,7 @@ bool draw_catalog_inspector(Workspace &workspace, const Document &document, cons
 	                                : "Open " + layout + "'s HUD preview with " + weapon +
 	                                          " held: its name, ammo count, clip and round art and icon as the game "
 	                                          "draws them.")) {
-		ReferenceTarget target;
-		target.file = layout;
-		target.editable = true;
-		window_requests::go_to(workspace, target);
+		window_requests::go_to(workspace, window_requests::target_at(layout));
 		io::JsonValue options = io::JsonValue::make_object();
 		options.set("weapon", io::json_string(weapon));
 		workspace.request(request::set_viewport(layout, viewport_change(ViewportKind::Hud, "options", std::move(options))));

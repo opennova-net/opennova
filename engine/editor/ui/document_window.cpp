@@ -258,12 +258,7 @@ void DocumentWindow::show_hit(const Document &document, size_t index) {
 	const DocumentHit *hit = find_.cursor.show(index);
 	if (!hit) return;
 	find_.scroll = true;
-	ReferenceTarget target;
-	target.file = document.path();
-	target.locator = hit->locator;
-	target.field = hit->field;
-	target.editable = true;
-	window_requests::go_to(workspace_, target);
+	window_requests::go_to(workspace_, window_requests::target_at(document.path(), hit->locator, hit->field));
 }
 
 // The find bar over the active tab's view (open_find): the text, Aa (case), previous and next, the

@@ -48,6 +48,24 @@ float text_width(const char *text);
 // not. Small: the tools of a list inside a panel (the inspector's, the outline's). A label
 // wider than the row's whole line is cut to it ("..."), the button then found by "###label".
 bool tool(WrapRow &row, const char *label, bool enabled, const std::string &tip, bool small = false);
+// A tool shown pressed while `on` (a mode, a pane shown): `tool` in the pressed button's colour.
+bool toggle_tool(WrapRow &row, const char *label, bool on, bool enabled, const std::string &tip);
+// A check box on `row`, its tooltip `tip`: true when it changed `value`.
+bool check(WrapRow &row, const char *label, bool *value, const std::string &tip);
+// How wide a combo is whose widest choice's text is `widest` wide: the text, the arrow's square and
+// the frame's padding.
+float combo_width(float widest);
+
+// A path's field with its label and Browse... beside it, under it when the row is narrow, `width` wide
+// (0: the item width): whether Browse... was pressed (never while not `enabled`), the text edited this
+// frame, and the field being typed in.
+struct PathField {
+	bool browse = false;
+	bool edited = false;
+	bool typing = false;
+};
+PathField path_field(const char *label, char *buffer, size_t size, const char *browse, float width = 0.0f,
+                     bool enabled = true);
 
 // The tools of a list's selected record: Add, Duplicate, Remove, Up and Down, each disabled
 // while it cannot act, with its tooltip saying what it does or why it cannot. A label may
@@ -199,6 +217,8 @@ ImVec4 reference_color(ReferenceStatus status);
 // What a view shows when it has nothing to list: a line of disabled text and, optionally,
 // a second saying what to do.
 void empty_state(const char *text, const char *hint = nullptr);
+// A sentence muted and wrapped (a type's notes in the Inspector, what a view has nothing of).
+void note(const std::string &text);
 
 // A rect (left, top, right, bottom, in the pass's pixels) of a window, and which window's it is (the
 // ID of its root window: a docked or child window's is the host's), kept to ask about again later in

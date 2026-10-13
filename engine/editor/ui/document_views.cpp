@@ -11,6 +11,7 @@
 #include <editor/session/view/session_view.h>
 #include <editor/ui/animation_inspector.h>
 #include <editor/ui/catalog_inspector_view.h>
+#include <editor/ui/editor_requests.h>
 #include <editor/ui/environment_inspector.h>
 #include <editor/ui/terrain_inspector.h>
 #include <editor/ui/hud_layout_inspector.h>
@@ -133,9 +134,7 @@ constexpr OutlineSpec kTreeOutline{OutlineMode::Tree, "", nullptr};
 // row titled by its slot's words and the clips it plays.
 constexpr OutlineSpec kAnimationMapOutline{OutlineMode::Tree, "", nullptr, false, nullptr, "", nullptr, nullptr,
                                            animation_map_row_headings};
-std::unique_ptr<DocumentView> make_menu_view() { return std::make_unique<MenuView>(); }
-std::unique_ptr<DocumentView> make_styles_view() { return std::make_unique<StylesView>(); }
-std::unique_ptr<DocumentView> make_script_view() { return std::make_unique<ScriptView>(); }
+template <class V> std::unique_ptr<DocumentView> make_view() { return std::make_unique<V>(); }
 
 // A view per document type, in DocumentTypeId's order: a catalog's rows as a list with its
 // spawn registry after them, a string table's sections and strings as master and detail, a menu's
@@ -147,8 +146,8 @@ constexpr DocumentViewRow kViews[] = {
 	{DocumentTypeId::Catalog, DocumentViewRole::Records, &kCatalogOutline, nullptr, draw_catalog_inspector},
 	{DocumentTypeId::Strings, DocumentViewRole::Records, &kStringsOutline, nullptr},
 	// What a window plays and when heads its Inspector (DI-34, ui/menu_inspector).
-	{DocumentTypeId::Menu, DocumentViewRole::Records, nullptr, make_menu_view, draw_menu_inspector},
-	{DocumentTypeId::Styles, DocumentViewRole::Records, nullptr, make_styles_view},
+	{DocumentTypeId::Menu, DocumentViewRole::Records, nullptr, make_view<MenuView>, draw_menu_inspector},
+	{DocumentTypeId::Styles, DocumentViewRole::Records, nullptr, make_view<StylesView>},
 	// A model's material heads the Inspector with its bullet faces' surface and flags, set on every face
 	// made from it (S17, ui/model_inspector_view).
 	{DocumentTypeId::Model, DocumentViewRole::Records, &kTreeOutline, nullptr, draw_model_inspector},
@@ -163,11 +162,11 @@ constexpr DocumentViewRow kViews[] = {
 	// the viewport's column (S24, ui/mission_board_view).
 	{DocumentTypeId::Mission, DocumentViewRole::MainViewport, &kMissionOutline, nullptr, draw_mission_inspector,
 	 draw_mission_uses, mission_logic_by_name, nullptr, make_mission_board_pane, make_terrain_pane},
-	{DocumentTypeId::Script, DocumentViewRole::MainViewport, nullptr, make_script_view},
-	{DocumentTypeId::MusicScript, DocumentViewRole::MainViewport, nullptr, make_script_view},
-	{DocumentTypeId::Credits, DocumentViewRole::MainViewport, nullptr, make_script_view},
-	{DocumentTypeId::Shader, DocumentViewRole::MainViewport, nullptr, make_script_view},
-	{DocumentTypeId::Text, DocumentViewRole::MainViewport, nullptr, make_script_view},
+	{DocumentTypeId::Script, DocumentViewRole::MainViewport, nullptr, make_view<ScriptView>},
+	{DocumentTypeId::MusicScript, DocumentViewRole::MainViewport, nullptr, make_view<ScriptView>},
+	{DocumentTypeId::Credits, DocumentViewRole::MainViewport, nullptr, make_view<ScriptView>},
+	{DocumentTypeId::Shader, DocumentViewRole::MainViewport, nullptr, make_view<ScriptView>},
+	{DocumentTypeId::Text, DocumentViewRole::MainViewport, nullptr, make_view<ScriptView>},
 	// A texture's picture fills the tab beside what it is and what uses it (S18, ui/texture_view).
 	{DocumentTypeId::Texture, DocumentViewRole::MainViewport, nullptr, make_texture_view},
 	// A bank's waves and sets as a tree (a set holding its layers, a layer its members), a profile's slots
@@ -176,7 +175,7 @@ constexpr DocumentViewRow kViews[] = {
 	{DocumentTypeId::SoundProfiles, DocumentViewRole::Records, &kTreeOutline, nullptr, draw_sound_profile_inspector},
 	// A particle file's text in the script device; the Preview window plays its effect (DI-14); a block's keys, each
 	// typed as the game's reader takes it, head the Inspector (S23 B, ui/particle_key_inspector).
-	{DocumentTypeId::Particles, DocumentViewRole::MainViewport, nullptr, make_script_view, nullptr, nullptr, nullptr,
+	{DocumentTypeId::Particles, DocumentViewRole::MainViewport, nullptr, make_view<ScriptView>, nullptr, nullptr, nullptr,
 	 draw_particle_key_inspector},
 	// An environment's row and its keyframes as a tree (DI-19a) beside its time-of-day viewport (DI-19b: the
 	// Main role, ui/main_viewport_view over the Environment viewport kind); the missions that run on it head
@@ -185,7 +184,7 @@ constexpr DocumentViewRow kViews[] = {
 	// The HUD layout's text in its script device (DI-20), its HUD the Preview window's; the element picked
 	// there heads the Inspector, its place, size, anchor, font, colour and detail level each a field (DI-37,
 	// ui/hud_layout_inspector).
-	{DocumentTypeId::HudLayout, DocumentViewRole::MainViewport, nullptr, make_script_view, nullptr, nullptr, nullptr,
+	{DocumentTypeId::HudLayout, DocumentViewRole::MainViewport, nullptr, make_view<ScriptView>, nullptr, nullptr, nullptr,
 	 draw_hud_layout_inspector},
 	// A terrain's row, its grid rows and its foliage definitions as a tree (DI-30a) beside its picture (DI-30b: the
 	// Main role, ui/main_viewport_view over the Terrain viewport kind); the import that makes it and the missions
@@ -236,6 +235,15 @@ static_assert(sizeof(kViews) / sizeof(kViews[0]) == kDocumentTypeCount,
 static_assert(views_in_order(), "the views follow DocumentTypeId's order, each an outline or its own make");
 
 } // namespace
+
+void inspector_jump_line(Workspace &workspace, const ReferenceTarget &target, const std::string &line,
+                         const std::string &id) {
+	ImGui::PushID(id.c_str());
+	const std::string shown = ui_kit::fit(line, ImGui::GetContentRegionAvail().x);
+	if (ImGui::Selectable((shown + "###jump").c_str())) window_requests::go_to(workspace, target);
+	ui_kit::tooltip(line + "\nClick to go there.");
+	ImGui::PopID();
+}
 
 const DocumentViewRow *document_view_row(DocumentTypeId type) {
 	const size_t index = static_cast<size_t>(type);
