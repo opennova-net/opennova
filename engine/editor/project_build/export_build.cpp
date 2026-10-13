@@ -105,10 +105,26 @@ struct ExportRun::Streams {
 	std::vector<char> buffer = std::vector<char>(kCopyChunk);
 };
 
+// Its record last (S26 C12): a folder half removed (a file of it held open by an indexer) still proves itself
+// this project's export, so the next export removes it first instead of refusing it as the person's.
 bool remove_tree(const std::string &dir, std::string &reason) {
+	const fs::path root = system_path(dir);
 	std::error_code ec, left;
-	fs::remove_all(system_path(dir), ec);
-	if (!ec && !fs::exists(system_path(dir), left)) return true;
+	if (!fs::exists(root, left)) return true;
+	for (const fs::directory_entry &entry : fs::directory_iterator(root, ec)) {
+		if (entry.path().filename() == kExportRecordFileName) continue;
+		std::error_code removed;
+		fs::remove_all(entry.path(), removed);
+		if (removed && !ec) ec = removed;
+	}
+	bool stayed = false;
+	for (const fs::directory_entry &entry : fs::directory_iterator(root, left))
+		stayed = stayed || entry.path().filename() != kExportRecordFileName;
+	if (!stayed) {
+		fs::remove(root / kExportRecordFileName, left);
+		fs::remove(root, left);
+		if (!fs::exists(root, left)) return true;
+	}
 	reason = ec ? ec.message() : std::string("a file of it is in use");
 	return false;
 }
@@ -156,8 +172,8 @@ void ExportRun::fail(CoreFinding code, const std::string &message) {
 // the person's, never touched).
 void ExportRun::remove_staging() {
 	if (!staged_) return;
-	std::error_code removed;
-	fs::remove_all(system_path(staging_), removed);
+	std::string left;
+	remove_tree(staging_, left);
 }
 
 void ExportRun::cancel() {
@@ -249,10 +265,9 @@ void ExportRun::check() {
 	// Staged afresh, its record first, so a staging folder an export cut short leaves proves itself the
 	// project's.
 	staged_ = true;
-	fs::remove_all(staging, ec);
-	if (ec || !io::ensure_directory(staging_, error))
-		return fail(CoreFinding::ExportWrite,
-		            "cannot stage the export in " + staging_ + ": " + (ec ? ec.message() : error));
+	std::string left;
+	if (!remove_tree(staging_, left) || !io::ensure_directory(staging_, error))
+		return fail(CoreFinding::ExportWrite, "cannot stage the export in " + staging_ + ": " + (left.empty() ? error : left));
 	if (!io::write_file_atomic(join_path(staging_, kExportRecordFileName), io::json_write(export_record(request_, {})), error))
 		return fail(CoreFinding::ExportWrite, error);
 	phase_ = Phase::Copy;
@@ -307,8 +322,9 @@ void ExportRun::swap() {
 	const fs::path staging = system_path(staging_);
 	const fs::path previous = system_path(previous_);
 	std::error_code ec;
-	fs::remove_all(previous, ec);
-	if (ec) return fail(CoreFinding::ExportWrite, "cannot replace " + request_.export_dir + ": " + ec.message());
+	std::string left;
+	if (!remove_tree(previous_, left))
+		return fail(CoreFinding::ExportWrite, "cannot replace " + request_.export_dir + ": " + left);
 	if (!io::ensure_directory(utf8_of(path_of(request_.export_dir).parent_path()), error))
 		return fail(CoreFinding::ExportWrite, error);
 	const bool had = fs::exists(target, ec);

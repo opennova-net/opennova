@@ -1699,6 +1699,30 @@ static int test_publish_waits_for_a_held_file() {
 // name (`<id>.1.tmp`), links the archive afresh, and the last good build keeps every byte (it was
 // written through before: its archive cut to nothing under the game). Its links go once the game
 // lets go. An archive whose size moved since its build recorded it is packed again, never linked.
+// S26 C12: an export folder half removed (a file of it held open) keeps its record, export.json, so it still
+// proves itself the project's and the next export removes it first (its record went first, and every later
+// export was refused: "holds files that are no export of this project").
+static int test_export_removal_keeps_its_record() {
+	editor_test::TempProjectDir dir("opennova_editor_export_removal_test");
+	const std::string folder = dir.file("game.old");
+	TEST_EXPECT(editor_test::write_text(folder + "/" + kExportRecordFileName, "{}") &&
+	            editor_test::write_text(folder + "/language.pff", "held") &&
+	            editor_test::write_text(folder + "/video/intro.bik", "gone"));
+	std::string reason;
+	bool removed = false;
+	{
+		HeldFile game(folder + "/language.pff");
+		TEST_EXPECT(game.held());
+		removed = remove_tree(folder, reason);
+		if (!removed)
+			TEST_EXPECT(fs::is_regular_file(folder + "/" + kExportRecordFileName) && !fs::exists(folder + "/video") &&
+			            !reason.empty());
+	}
+	TEST_EXPECT(removed || remove_tree(folder, reason));
+	TEST_EXPECT(!fs::exists(folder));
+	return 0;
+}
+
 static int test_held_archives_are_never_written_through() {
 	Project p("opennova_editor_build_held_test");
 	TEST_EXPECT(p.create());
@@ -1862,6 +1886,7 @@ int main() {
 	failures += test_steps_are_bounded();
 	failures += test_cancel_publishes_nothing();
 	failures += test_cleanup_keeps_its_proof();
+	failures += test_export_removal_keeps_its_record();
 	failures += test_file_rewritten_mid_read_fails();
 	failures += test_archives_match_the_single_call_writer();
 	failures += test_routing();
