@@ -51,10 +51,16 @@ FBX, which matches the clip to 0.005 mm), eased to rest over frames 74 to 79 as 
 
 The weapon.def entry is `flags sighted` and `flags nocardswitch`: the scope key eases the view from the
 `Hip view` eye to the `Aim view` eye (`pos` to `tpos`, 15 steps) and narrows it to 80° over the slot's
-zoom (`scope_max_mag 2`, so 40°), and the gun stays drawn instead of the 2D sights card. The game looks
-along the model's forward from the eye, so the `Aim view` stands on the rear peep sight's centre line:
-4.90 cm above and 0.80 cm beside the `MFLASH01` user point, 13.7 cm behind the peep (the peep's
-aperture is about 8 mm across; the front sight is folded). Its rotation is not used.
+zoom (`scope_max_mag 2`, so 40°), and the gun stays drawn instead of the 2D sights card.
+
+The sights are the pack's flip-up pair, both raised: the rear (its peep 10.7 mm across) and the front
+(`SM_TFA_AR_Sight_Front`, added on the handguard's front-sight socket, `SOCKET_Sight_Front_Default`, in
+the rear sight's material). In the idle pose the gun is canted about 9° and the sight line (the peep's
+centre to the post's tip, parallel to the bore) points along the view to within 0.05°. The `Aim view`
+camera stands on that line 13.95 cm behind the peep, looking down it with the gun's top up. The add-on
+writes only its place (`tpos` 0.791 11.839 -135.622); its turn is `tpos`'s rotation, set by hand: yaw
+0.018, pitch 0, roll 8.973. The game turns the whole view model about the eye by it, so the cant comes
+out and the post's tip stands in the peep's centre at the middle of the screen.
 
 ## Re-baking a clip
 
