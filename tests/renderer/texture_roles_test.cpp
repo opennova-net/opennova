@@ -101,9 +101,9 @@ void test_def_fields() {
 			"a field whose loader is not witnessed: none");
 }
 
-// The roles a terrain's and an environment's keys open their files in, the two maps that abort the mission, and the
-// sky maps made .pcx [orig: PolyTrn_InitTextures @ 0x60AAA0; sub_520AA0 @ 0x520B4E; TimeOfDay_ParseProperty
-// @ 0x57CC41..0x57CC4B].
+// The roles a terrain's and an environment's keys open their files in, the two maps that abort the
+// mission, and the sky maps made .pcx [orig: PolyTrn_InitTextures @ 0x60AAA0;
+// Game_ShowErrorLogAndAbortMission @ 0x520B4E; TimeOfDay_ParseProperty @ 0x57CC41..0x57CC4B].
 void test_config_keys() {
 	TextureRoleId role = TextureRoleId::kCount;
 	bool aborts = false;

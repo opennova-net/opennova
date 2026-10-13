@@ -450,7 +450,8 @@ static int parse_buffer(const char *buf, size_t buf_len, AvatarsFile *out, textl
                 return;
             }
             /* The 129th combo finds the 128-row table full and retail writes
-               through the null row (sub_579E10 @ 0x579e10); the parse fails. */
+               through the null row (CAvatarDefs_AllocComboObj @ 0x579e10); the parse
+               fails. */
             if (combo_count >= 128) {
                 error = 1;
                 return;
