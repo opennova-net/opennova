@@ -25,9 +25,9 @@
 #include "object/entity_index.h"
 #include "object/item_database.h"
 #include "object/object_model.h"
+#include "simulation/husk_swap.h"
 #include "simulation/present_stats.h"
 #include "world/item_effect_director.h"
-#include "simulation/husk_swap.h"
 
 namespace godot {
 

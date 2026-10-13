@@ -10,7 +10,8 @@
 // keeps what belongs to the entity, not its graphic: the static-caster role,
 // the mirror's reflect flag, the projection owner, the occlusion masks and,
 // for a carved static, the entity's light query and identity. The game's
-// DestructionPresenter and the editor's mission view swap through it alike.
+// DestructionPresenter swaps through it; the OpenNova Editor's mission view
+// (on the editor trunk) is its intended second caller.
 
 #include <utility>
 #include <vector>
