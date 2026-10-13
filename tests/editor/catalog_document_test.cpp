@@ -218,11 +218,11 @@ static int session_gate() {
 	auto answer = request::of(EditorRequestKind::ResolveUnsaved); answer.choice = UnsavedChoice::Save;
 	session.handle(answer); session.run_operations();
 	TEST_EXPECT(!document->dirty() && !prompt.open); // semantic errors do not prevent saving
-	// The graphic is missing: listed, an error still, and the build lands all the same (S14: a
-	// missing reference gates no build).
+	// The graphic is missing: listed, a warning (the game loads the item without it, S26 A8), and
+	// the build lands all the same (S14: a missing reference gates no build).
 	size_t missing_graphic = 0;
 	for (const Diagnostic &d : session.view().findings.diagnostics)
-		missing_graphic += d.code() == "reference.missing" && d.severity == DiagnosticSeverity::Error && d.field == "graphic" ? 1 : 0;
+		missing_graphic += d.code() == "reference.missing" && d.severity == DiagnosticSeverity::Warning && d.field == "graphic" ? 1 : 0;
 	TEST_EXPECT(session.view().activity.has_build && session.view().activity.last_build->ok && missing_graphic == 1);
 	request.edits = {field({id, node_kind(DefRecordKind::Item), 0}, "graphic", std::string(""))};
 	session.handle(request);

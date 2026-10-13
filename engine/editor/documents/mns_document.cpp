@@ -102,29 +102,37 @@ const std::vector<FieldSchema> &source_fields() {
 	return fields;
 }
 
+// What the game does on a stylesheet its reader hangs on: an iteration that moves nothing repeats forever [orig:
+// NapiConfigMap_ParseKeyValueBuffer @ 0x639870: a value ended by a lone LF or CR with text right after it, the CR /
+// LF arm @ 0x639c3b; an unknown directive, @ 0x639a11 not advancing; a value starting with '#', the '#' arm first].
+constexpr const char *kHangs =
+        "the game stops responding as it reads the stylesheet, its reader repeating a step that moves nothing [orig: "
+        "NapiConfigMap_ParseKeyValueBuffer @ 0x639c3b; @ 0x639a11]";
+
 constexpr FindingCodeEntry<StyleFinding> kFindingEntries[] = {
+	// A line ending in a lone CR or LF: the game hangs only where a value ends so with text right after it, which the
+	// read's own hang says (style.hangs); the line end alone is listed, the editor ending every line CR LF.
 	{ StyleFinding::LineEnding, { "style.line_ending", FindingFix::Rewrite, "with every line ending CR LF" } },
 	{ StyleFinding::NotLoaded, { "style.not_loaded" } },
 	{ StyleFinding::XmlChar, { "style.xml_char" } },
 	{ StyleFinding::NestedVar, { "style.nested_var" } },
 	{ StyleFinding::Backslash, { "style.backslash" } },
 	{ StyleFinding::ReadDifferently, { "style.read_differently" } },
-	// The reader's errors gate where the game stops responding on the stylesheet (a line end it does
-	// not take, an unknown directive, a value starting with '#', style.hangs) [orig:
-	// NapiConfigMap_ParseKeyValueBuffer @ 0x639c3b; @ 0x639a11]; one it reads otherwise or stops
-	// reading at (every variable after it undefined, the menus drawn with what it read) is listed:
-	// the game runs (the gate follows retail, ADR 0046 S14).
+	// The reader's errors gate where the game stops responding on the stylesheet (an unknown directive, a value
+	// starting with '#', a hang the read finds, style.hangs: kHangs); one it reads otherwise or stops reading at
+	// (every variable after it undefined, the menus drawn with what it read) is listed: the game runs (the gate
+	// follows retail, ADR 0046 S14).
 	{ StyleFinding::DirectiveForm, listed_code("style.directive_form") },
 	{ StyleFinding::IfWithoutArgument, listed_code("style.if_without_argument") },
 	{ StyleFinding::NoncanonicalIfArg, { "style.noncanonical_if_arg" } },
 	{ StyleFinding::UnbalancedElse, { "style.unbalanced_else" } },
 	{ StyleFinding::DuplicateElse, { "style.duplicate_else" } },
 	{ StyleFinding::UnbalancedEndif, { "style.unbalanced_endif" } },
-	{ StyleFinding::UnknownDirective, { "style.unknown_directive" } },
+	{ StyleFinding::UnknownDirective, game_fails_code("style.unknown_directive", kHangs) },
 	{ StyleFinding::DirectiveTail, listed_code("style.directive_tail") },
 	{ StyleFinding::LoneBackslash, { "style.lone_backslash" } },
 	{ StyleFinding::ValueIsDirective, listed_code("style.value_is_directive") },
-	{ StyleFinding::ValueStartsWithHash, { "style.value_starts_with_hash" } },
+	{ StyleFinding::ValueStartsWithHash, game_fails_code("style.value_starts_with_hash", kHangs) },
 	{ StyleFinding::ValueOnNextLine, { "style.value_on_next_line" } },
 	{ StyleFinding::DuplicateName, { "style.duplicate_name" } },
 	{ StyleFinding::ContinuedDuplicate, listed_code("style.continued_duplicate") },
@@ -134,7 +142,7 @@ constexpr FindingCodeEntry<StyleFinding> kFindingEntries[] = {
 	{ StyleFinding::NoValue, { "style.no_value" } },
 	{ StyleFinding::ContinuationAtEof, { "style.continuation_at_eof" } },
 	{ StyleFinding::UnterminatedIf, { "style.unterminated_if" } },
-	{ StyleFinding::Hangs, { "style.hangs" } },
+	{ StyleFinding::Hangs, game_fails_code("style.hangs", kHangs) },
 	{ StyleFinding::Stops, listed_code("style.stops") },
 	{ StyleFinding::OverriddenByBrand, { "style.overridden_by_brand" } },
 	{ StyleFinding::Unused, { "style.unused", FindingFix::UnusedVariable } },
@@ -386,11 +394,16 @@ bool MnsDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shar
 	file->has_bom = doc.has_bom();
 	// A line end the game does not read: remembered for Problems; the rows end CR LF, as
 	// Save writes them, so every check reads what the saved file will hold.
+	// The file as stored, as the game reads it: a value ended by a lone LF or CR with text right after it hangs the
+	// reader [orig: NapiConfigMap_ParseKeyValueBuffer @ 0x639c3b], which the rows, ending CR LF, no longer show.
+	if (!empty) {
+		mns::KeyValueList stored;
+		const char *text = reinterpret_cast<const char *>(bytes.data());
+		const mns::ReadResult read = mns::parse_key_value_buffer(text, bytes.size(), stored);
+		if (read.status == mns::ReadStatus::Hangs) file->stored_hang_line = mns::line_at_offset(text, bytes.size(), read.offset);
+	}
 	for (const mns::Diagnostic &d : doc.diagnostics())
-		if (d.code == mns::DiagnosticCode::LineEnding && !file->line_end_line) {
-			file->line_end_line = d.line;
-			file->line_end_message = d.message;
-		}
+		if (d.code == mns::DiagnosticCode::LineEnding && !file->line_end_line) file->line_end_line = d.line;
 	for (const mns::Node &native : doc.nodes()) {
 		auto row = std::make_shared<StyleRow>();
 		row->kind = kind_of(native.kind);
@@ -602,10 +615,18 @@ std::vector<Diagnostic> validate_styles_file(const DocumentBase &document) {
 	// The rows end CR LF; the file keeps the line ends it was read with until Save
 	// writes it (the build packs the file).
 	const auto *file = dynamic_cast<const StyleFileState *>(styles->file_state());
+	// The file as stored hangs the game's reader where its rows, ending CR LF, do not (a value ended by a lone LF or
+	// CR with text right after it): the hang, until a Save writes the rows.
+	if (file && file->stored_hang_line && !styles->wrote_file() && styles->read_by_game() && !evaluated.hangs)
+		on_line(DiagnosticSeverity::Error, StyleFinding::Hangs,
+				"The game stops responding reading this line as the file stores it: a value ends in a lone line end "
+				"with text right after it. Saving the file ends every line CR LF.",
+				file->stored_hang_line);
+	// A lone line end the game reads on: a warning (the hang, where there is one, is its own finding above).
 	if (file && file->line_end_line && !styles->wrote_file())
-		on_line(read_error, StyleFinding::LineEnding,
-				sentence(file->line_end_message) +
-						" The editor ends every line CR LF when it saves the file.",
+		on_line(DiagnosticSeverity::Warning, StyleFinding::LineEnding,
+				"This line ends in a lone LF or CR, which the game reads on but for a value ended so with text right "
+				"after it, where it stops responding. The editor ends every line CR LF when it saves the file.",
 				file->line_end_line);
 	// The game reads only the shell's two [orig: Menu_InitShellResources @ 0x552604, @ 0x552616].
 	if (!styles->read_by_game()) {

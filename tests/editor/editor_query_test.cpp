@@ -399,8 +399,8 @@ static int test_build_gate() {
 	}
 	gate = ask(session, "build_gate");
 	TEST_EXPECT(!gate.get_bool("blocked", true));
-	// S14: a missing reference (a particle's texture the project lacks: an error among the Problems
-	// rows) is listed and blocks nothing; the build then lands with the row still there.
+	// S14: a missing reference (a particle's texture the project lacks: a warning among the Problems
+	// rows, S26 A8) is listed and blocks nothing; the build then lands with the row still there.
 	TEST_EXPECT(editor_test::write_text(dir.file("project/fx.ptl"),
 			"[particledef]\n{\n\tid = puff;\n\tgraphic1 = nowhere.tga, additive;\n}\n"));
 	session.handle(request::rescan());
@@ -408,7 +408,7 @@ static int test_build_gate() {
 	const auto missing_references = [&session] {
 		size_t errors = 0;
 		for (const Diagnostic &d : session.view().findings.diagnostics)
-			errors += d.code() == "reference.missing" && d.severity == DiagnosticSeverity::Error ? 1 : 0;
+			errors += d.code() == "reference.missing" && d.severity == DiagnosticSeverity::Warning ? 1 : 0;
 		return errors;
 	};
 	gate = ask(session, "build_gate");
@@ -509,13 +509,13 @@ static int test_build_gate() {
 
 // ADR 0046 S16: a finding that a file does not serialize (a blocks_save row's) gates the build only
 // where the build must write the file. A fake install ships a weapon.def whose reader stops at a weapon
-// opened inside an open one (catalog.reader_stops, a blocks_save error the game's own stop gates); the
-// project holds it byte for byte, the game's own data, which the build packs as stored: the row is listed
-// and the gate is open. Changed by a byte on disk, the file is the modder's and the row gates; as shipped
-// again, it does not. The rule itself, for a document with unsaved edits (whose Save the build asks
-// first must write it): it gates. S23: input the model cannot carry where the game reads on
-// (catalog.invalid_input, an items.def value that is no number) gates no closed file, the modder's
-// included; only an open one with unsaved edits.
+// opened inside an open one (catalog.reader_stops, a blocks_save error); the project holds it byte for
+// byte, the game's own data, which the build packs as stored: the row is listed and the gate is open.
+// S26 (A6): the game runs on with what its reader read, so the row is listed over the modder's file too,
+// changed by a byte on disk, and the build lands. The rule itself, for a document with unsaved edits
+// (whose Save the build asks first must write it): it gates. S23: input the model cannot carry where the
+// game reads on (catalog.invalid_input, an items.def value that is no number) gates no closed file, the
+// modder's included; only an open one with unsaved edits.
 static int test_build_gate_shipped() {
 	editor_test::TempProjectDir dir("opennova_editor_query_build_gate_shipped");
 	const std::string shipped = "weapon Shipped\r\nweapon Second\r\nend\r\n";
@@ -553,30 +553,21 @@ static int test_build_gate_shipped() {
 			bytes.identical(install, *session.view().project.document, dir.file("project"), { relative });
 	TEST_EXPECT(invalid_rows() == 1 && original.count(relative) == 1 && bytes.reads() == 1);
 	TEST_EXPECT(!gate.get_bool("blocked", true) && gate.get_number("count", -1.0) == 0.0);
-	// Changed by a byte: the modder's file, which a blocks_save row gates.
+	// Changed by a byte: the modder's file, the row listed there too; the build lands.
 	TEST_EXPECT(editor_test::write_text(file, shipped + "\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	gate = ask(session, "build_gate");
-	TEST_EXPECT(invalid_rows() == 1 && gate.get_bool("blocked", false) && gate.get_number("count", 0.0) == 1.0 &&
-			gate.get("blocking")->array[0].get_string("code", "") == "catalog.reader_stops");
-	session.handle(request::build());
-	session.run_operations();
-	TEST_EXPECT(session.view().activity.last_operation.end == OperationEnd::Failed);
-	// As shipped again: listed, and the build lands.
-	TEST_EXPECT(editor_test::write_text(file, shipped));
-	editor_test::handle_to_end(session, request::rescan());
-	gate = ask(session, "build_gate");
-	TEST_EXPECT(invalid_rows() == 1 && !gate.get_bool("blocked", true));
+	TEST_EXPECT(invalid_rows() == 1 && !gate.get_bool("blocked", true) && gate.get_number("count", -1.0) == 0.0);
 	session.handle(request::build());
 	session.run_operations();
 	TEST_EXPECT(session.view().activity.last_operation.end == OperationEnd::Done && session.view().activity.last_build->ok);
-	// The same row over the same file held with unsaved edits, or with no shipped files known: it gates.
+	// The same row over the same file held with unsaved edits: the build's Save cannot write it, so it gates.
 	Diagnostic row;
 	for (const Diagnostic &d : session.view().findings.diagnostics)
 		if (d.code() == "catalog.reader_stops" && d.asset == relative) row = d;
 	ShippedFiles files;
 	files.original = original;
-	TEST_EXPECT(!blocks_build(row, nullptr, &files) && blocks_build(row, nullptr, nullptr));
+	TEST_EXPECT(!blocks_build(row, nullptr, &files) && !blocks_build(row, nullptr, nullptr));
 	files.unsaved.insert(relative);
 	TEST_EXPECT(blocks_build(row, nullptr, &files));
 

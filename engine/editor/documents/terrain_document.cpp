@@ -937,9 +937,11 @@ constexpr FindingCodeEntry<TerrainFinding> kFindingEntries[] = {
 	// Save refused).
 	{ TerrainFinding::InvalidInput, unwritable_code("terrain.invalid_input") },
 	{ TerrainFinding::IgnoredInput, { "terrain.ignored_input", FindingFix::Rewrite, "with each line as the game reads it" } },
-	// The gate's refusal aborts the mission's load [orig: Game_StartMission @ 0x524780..0x52479F, @ 0x524B30]: it
-	// gates the build.
-	{ TerrainFinding::Refused, { "terrain.refused", FindingFix::EditRecord } },
+	{ TerrainFinding::Refused,
+	  game_fails_code("terrain.refused",
+	                  "the terrain's load refuses the config, and the mission does not start [orig: Game_StartMission "
+	                  "@ 0x524780..0x52479F, @ 0x524B30]",
+	                  FindingFix::EditRecord) },
 	// What the game reads then is the config's own bytes, not a refusal: listed.
 	{ TerrainFinding::NoWidth, listed_code("terrain.no_width", FindingFix::EditRecord) },
 	{ TerrainFinding::FoliageInert, listed_code("terrain.foliage_inert", FindingFix::EditRecord) },

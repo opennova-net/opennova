@@ -138,25 +138,21 @@ enum class FindingProblem { None, Info, Warning };
 // the wire's `code`); `fixes` what Problems offers; `rewrite_does` a Rewrite's words, what writing
 // the file again does ("with every line ending CR LF"), set exactly on a Rewrite row;
 // `blocks_save` that the finding says the file does not serialize (its Save is refused, so no
-// Rewrite is offered for the file; such a row that is listed gates only where the build must write the
-// file, an open document with unsaved edits, unwritable_code); `place` where Problems takes it; `group` the group it shows
-// under; `source` what made it, when not its group's own part; `problem`, on a render check's row
+// Rewrite is offered for the file; such a listed row gates only where the build must write the file, an
+// open document with unsaved edits: unwritable_code); `place` where Problems takes it; `group` the group it
+// shows under; `source` what made it, when not its group's own part; `problem`, on a render check's row
 // alone, whether a finding of it is a Problems row and at what severity; `gates_build` whether an
 // error of the code, among the rows a build reads, refuses the build (blocks_build,
 // graph/reference_kinds.h). The build follows retail, one set of rules (ADR 0046 S14, "the gate"):
 // it is refused exactly where the built game would fail to load or run as retail does, each such row
-// citing the original's refusal, and where the editor cannot vouch for what it packs (a file it
-// cannot read or write, a name the archives cannot store; a file it cannot write gates only where the
-// build must write it, not over the game's own bytes packed as stored: graph/reference_kinds.h
-// ShippedFiles, S16; and a file the game reads on whose input the editor's model cannot carry gates only
-// as an open document with unsaved edits, a closed one packed as stored: unwritable_code, S23). Every
-// other code is listed (false): its
-// findings are shown, counted and fixable and refuse nothing. A listed code whose subject names the
-// witness gates where it does: a missing reference of a kind whose row cites the game's refusal
-// (ReferenceKindRow::gates_when_missing), a missing required file whose manifest row is the game's
-// refusal to boot (RES_FATAL). `game_refusal`, on a gating row whose refusal is the game's own rather
-// than the editor's integrity, says what the game does there, cited: why a build is refused for it
-// (project_build/build_plan.h's blocker_reason).
+// citing the original's refusal (`game_refusal`: game_fails_code, game_stops_code), and where the editor
+// cannot vouch for what it packs (a file it cannot read, a name the archives cannot store: the core table's
+// integrity rows). A row gates only so: every other code is listed, the default (false): its findings are
+// shown, counted and fixable and refuse nothing (S26: a row made without saying so never gates). A listed
+// code whose subject names the witness gates where it does: a missing reference of a kind whose row cites the
+// game's refusal (ReferenceKindRow::gates_when_missing), a missing required file whose manifest row is the
+// game's refusal to boot (RES_FATAL). `game_refusal` says what the game does there, cited: why a build is
+// refused for it (project_build/build_plan.h's blocker_reason).
 struct FindingCodeRow {
 	const char *token = nullptr;
 	FindingFix fixes = FindingFix::None;
@@ -166,19 +162,21 @@ struct FindingCodeRow {
 	FindingGroup group = FindingGroup::None;
 	FindingSource source = FindingSource::Own;
 	FindingProblem problem = FindingProblem::None;
-	bool gates_build = true;
+	bool gates_build = false;
 	const char *game_refusal = nullptr;
+	// A gating row of the editor's integrity rather than the game's refusal (a file it cannot read, a name the
+	// archives cannot store): the core table's alone; every other gating row says the game's refusal.
+	bool integrity = false;
 };
 
-// A document type's row of a code whose findings are listed and refuse no build (gates_build false):
-// what the game does with what it is about is no refusal of its load or its run, or is not witnessed.
+// A document type's row of a code whose findings are listed and refuse no build: what the game does with what
+// it is about is no refusal of its load or its run, or is not witnessed (the default; this names the fixes).
 constexpr FindingCodeRow listed_code(const char *token, FindingFix fixes = FindingFix::None,
 		const char *rewrite_does = nullptr) {
 	FindingCodeRow row;
 	row.token = token;
 	row.fixes = fixes;
 	row.rewrite_does = rewrite_does;
-	row.gates_build = false;
 	return row;
 }
 
@@ -191,7 +189,20 @@ constexpr FindingCodeRow unwritable_code(const char *token) {
 	FindingCodeRow row;
 	row.token = token;
 	row.blocks_save = true;
-	row.gates_build = false;
+	return row;
+}
+
+// A document type's row of a code whose finding is input the game fails on (a hang, an abort, a crash, a
+// refusal), witnessed: a build is refused, saying what the game does (`refusal`, cited: project_build/
+// build_plan.h's blocker_reason); the file serializes, so its Save is not refused.
+constexpr FindingCodeRow game_fails_code(const char *token, const char *refusal, FindingFix fixes = FindingFix::None,
+		const char *rewrite_does = nullptr) {
+	FindingCodeRow row;
+	row.token = token;
+	row.fixes = fixes;
+	row.rewrite_does = rewrite_does;
+	row.gates_build = true;
+	row.game_refusal = refusal;
 	return row;
 }
 
@@ -202,6 +213,7 @@ constexpr FindingCodeRow game_stops_code(const char *token, const char *refusal)
 	FindingCodeRow row;
 	row.token = token;
 	row.blocks_save = true;
+	row.gates_build = true;
 	row.game_refusal = refusal;
 	return row;
 }
@@ -260,8 +272,11 @@ constexpr bool finding_entries_well_formed(const FindingCodeEntry<Code> (&entrie
 		if (static_cast<size_t>(entries[i].code) != i || !row.token || !*row.token) return false;
 		if ((row.fixes == FindingFix::Rewrite) != (row.rewrite_does != nullptr)) return false;
 		if (row.blocks_save && row.fixes == FindingFix::Rewrite) return false;
-		// The game's refusal is said only on a row whose errors refuse a build.
+		// The game's refusal is said only on a row whose errors refuse a build, and a row refuses one only with
+		// the game's refusal or as the editor's integrity (S26: the gate follows retail).
 		if (row.game_refusal && !row.gates_build) return false;
+		if (row.gates_build && !row.game_refusal && !row.integrity) return false;
+		if (row.integrity && (row.game_refusal || !row.gates_build)) return false;
 		for (size_t j = 0; j < i; ++j)
 			if (same_finding_token(row.token, entries[j].row.token)) return false;
 	}

@@ -46,13 +46,34 @@ constexpr FindingCodeRow code(const char *token, FindingFix fixes = FindingFix::
 	return row;
 }
 
+// An indexed PCX whose rows run past its width, as the game's 32-bit PCX reader writes its last row: its bytes a
+// line of 4-byte texels from that row's start in a buffer of the image's 4 * width * height bytes from the FastMem
+// arena [orig: Texture_LoadPCXFromPFF32 @ 0x56EA30, the buffer @ 0x56EB1E, the row writes @ 0x56EDC0, @ 0x56EDDB],
+// whose blocks are rounded up to 64 bytes [orig: FastMem_Alloc @ 0x7697B0, @ 0x7697D7] and followed by a header
+// whose first dword is the pool pointer the next allocation and free dereference [orig: sub_7695C0 @ 0x7695D1;
+// @ 0x7695C4, @ 0x769664, @ 0x769709]. The bytes the row writes past the block's rounding, which reach that pointer
+// with a texel (0xFF its top byte) when any: the game faults at its next FastMem call. Within the rounding each
+// row's extra texels land on the next row's start, which its own row then writes: the image reads right.
+uint64_t pcx_overrun_past_block(const TextureHeader &header) {
+	const uint64_t texels = uint64_t(header.width) * header.height * 4;
+	const uint64_t slack = (64 - texels % 64) % 64;
+	const uint64_t spill = (uint64_t(header.pcx_bytes_per_line) - header.width) * 4;
+	return spill > slack ? spill - slack : 0;
+}
+
 constexpr FindingCodeEntry<F> kFindingEntries[] = {
 	{F::Unloadable, code("texture.unloadable")},
 	{F::TgaUnfilled, listed_code("texture.tga_unfilled")},
 	{F::TgaZeroed, code("texture.tga_zeroed")},
 	{F::TgaUpsideDown, code("texture.tga_upside_down", FindingFix::TextureRows)},
 	{F::TgaColourMapSkipped, code("texture.tga_colour_map_skipped")},
-	{F::PcxOverrun, code("texture.pcx_overrun")},
+	// An error of it alone gates: the last row written past its block (pcx_overrun_past_block); within the rounding
+	// it is a warning.
+	{F::PcxOverrun,
+	 game_fails_code("texture.pcx_overrun",
+	                 "the game's PCX reader writes the image's last row past its buffer's block, over the next block's "
+	                 "pool pointer, which the game's next allocation dereferences: the game faults loading it [orig: "
+	                 "Texture_LoadPCXFromPFF32 @ 0x56EA30, @ 0x56EDC0; FastMem_Alloc @ 0x7697B0, @ 0x769664]")},
 	{F::NotRead, code("texture.not_read", FindingFix::SetAsideUnread)},
 	{F::TgaTruncated, code("texture.tga_truncated")},
 	{F::PcxShortRows, code("texture.pcx_short_rows")},
@@ -263,12 +284,15 @@ std::vector<Diagnostic> validate_texture_file(const DocumentBase &document) {
 			            " entries, which the game's TGA reader does not skip: it reads the texels from the map's start, "
 			            "shifted. Save it without a colour map.");
 		// The reader copies every texel its header names with no bound on the file (tga::tga_reads_past_end).
+		// Listed (S26 A4): the readers read on past the file's bytes, no fault witnessed [orig:
+		// CTerrainTileData_LoadTGAFromArchive @ 0x56E7A5; CTextureData_LoadTGA @ 0x5F7D9D; CUIImage_LoadTGA @
+		// 0x664A8D].
 		if (header.tga_short)
 			add(F::TgaTruncated, DiagnosticSeverity::Error,
 			    std::string("It ends before its texels do: the game's TGA reader ") +
 			            (type == 10 ? "decodes its run-length packets" : "copies its " + std::to_string(header.width) + " x " +
 			                                                               std::to_string(header.height) + " texels") +
-			            " past the end of the file, into whatever memory follows it. Save it again whole.");
+			            " on past the end of the file, out of whatever memory follows it. Save it again whole.");
 		break;
 	}
 	case TextureReader::Pcx:
@@ -281,12 +305,15 @@ std::vector<Diagnostic> validate_texture_file(const DocumentBase &document) {
 			            std::to_string(header.pcx_bits) + " bits a plane).");
 		} else if (pcx_row_fit(pcx_fields(header)) == PcxRowFit::Overrun) {
 			const uint32_t extra = header.pcx_bytes_per_line - header.width;
-			add(F::PcxOverrun, DiagnosticSeverity::Error,
+			const uint64_t past = pcx_overrun_past_block(header);
+			add(F::PcxOverrun, past ? DiagnosticSeverity::Error : DiagnosticSeverity::Warning,
 			    "Its rows hold " + std::to_string(header.pcx_bytes_per_line) + " bytes for " + std::to_string(header.width) +
 			            " texels: the game's PCX reader writes each row's " + std::to_string(extra) +
-			            (extra == 1 ? " extra byte" : " extra bytes") +
-			            " into the next row and the last row's past its buffer. Save it with rows of exactly its width (its "
-			            "bytes a line " + std::to_string(header.width) + ").");
+			            (extra == 1 ? " extra texel" : " extra texels") + " into the next row, which that row writes again, and the last row's " +
+			            (past ? "past its buffer's block by " + std::to_string(past) +
+			                            " bytes, over the next block's header: the game faults loading it."
+			                  : std::string("into the spare bytes its buffer's block rounds up to.")) +
+			            " Save it with rows of exactly its width (its bytes a line " + std::to_string(header.width) + ").");
 		} else if (pcx_row_fit(pcx_fields(header)) == PcxRowFit::Short) {
 			add(F::PcxShortRows, DiagnosticSeverity::Warning,
 			    "Its rows hold " + std::to_string(header.pcx_bytes_per_line) + " bytes for " + std::to_string(header.width) +

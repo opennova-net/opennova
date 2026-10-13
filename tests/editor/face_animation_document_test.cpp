@@ -231,7 +231,7 @@ int test_findings() {
 	TEST_EXPECT(face.apply({stray, again}, error));
 	const std::vector<Diagnostic> findings = validate_face_animation_file(face);
 	TEST_EXPECT(has_code(findings, "face_animation.eye_texture_alone"));
-	TEST_EXPECT(has_code(findings, "face_animation.unserializable"));
+	TEST_EXPECT(has_code(findings, "face_animation.vertex_range"));
 	TEST_EXPECT(has_code(findings, "face_animation.gesture_unplayed"));
 	TEST_EXPECT(has_code(findings, "face_animation.gesture_repeated"));
 	TEST_EXPECT(has_code(findings, "face_animation.parameter_unmatched"));

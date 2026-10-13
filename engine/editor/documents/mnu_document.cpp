@@ -34,7 +34,13 @@ constexpr FindingCodeRow from_render_check(const char *token) {
 }
 
 constexpr FindingCodeEntry<MenuFinding> kFindingEntries[] = {
-	{ MenuFinding::InvalidInput, { "menu.invalid_input", FindingFix::None, nullptr, true } },
+	// What retail crashes or hangs on (docs/mnu/menu-re.md "Crash and hang cases"): the reader notes it fatal.
+	{ MenuFinding::InvalidInput,
+	  game_stops_code("menu.invalid_input",
+	                  "the game crashes or hangs reading it: a SCREEN action with no FILE copies a null name [orig: "
+	                  "PFF_FindEntry @ 0x7685f3], a table's MIN_ITEM_HEIGHT of 0 divides by zero [orig: "
+	                  "CTableWnd_RecalcLayout @ 0x63f26b], an empty value a consumer tokenizes reaches the CRT's invalid "
+	                  "parameter handler, a SCREEN with no NAME copies a null name [orig: @ 0x639791]") },
 	// Kept on save with the file's look (master's text layout, D-MNU-22), as a catalog's is: no Rewrite drops it.
 	{ MenuFinding::IgnoredInput, { "menu.ignored_input" } },
 	{ MenuFinding::Unserializable, { "menu.unserializable", FindingFix::None, nullptr, true } },

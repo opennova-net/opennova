@@ -42,13 +42,14 @@ struct StyleRow : Node {
 
 struct StyleFileState : FileState {
 	bool has_bom = false;
-	// The file as read: its first line that does not end CR LF (0 = every one does), and
-	// what the game does with such a file.
+	// The file as read: its first line that does not end CR LF (0 = every one does).
 	int line_end_line = 0;
-	std::string line_end_message;
+	// Where the game's reader hangs on the file as read (0 = it does not): the stored text, whose line ends the rows
+	// do not keep, read as the game reads it (mns::parse_key_value_buffer), until a Save writes the rows.
+	int stored_hang_line = 0;
 	std::shared_ptr<FileState> clone() const override { return std::make_shared<StyleFileState>(*this); }
 	size_t footprint() const override {
-		return sizeof(StyleFileState) + footprint_of(line_end_message);
+		return sizeof(StyleFileState);
 	}
 };
 

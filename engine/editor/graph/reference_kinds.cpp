@@ -447,9 +447,77 @@ std::string item_name_missing(const AssetGraph &, const GraphEdge &) {
 	return ", which no item of the project is named: the game warns that it finds none.";
 }
 
-// The game spawns the class's player as another item: a warning, the game runs on.
+// The game spawns the class's player as another item, and an ammo's tracer it finds by neither key it warns of and
+// keeps none of [orig: AmmoDef_ParseProperty @ 0x40A5DA..0x40A5FE; AmmoDef_LogParseWarning @ 0x40A603]: warnings,
+// the game runs on.
 DiagnosticSeverity item_severity(const GraphEdge &edge) {
-	return named_by_class_cammo(edge) ? DiagnosticSeverity::Warning : DiagnosticSeverity::Error;
+	return named_by_class_cammo(edge) || !edge.fallback.empty() ? DiagnosticSeverity::Warning : DiagnosticSeverity::Error;
+}
+
+// A texture's file the game's loader for its role finds none of: the role's own words say what the game does
+// without it (texture_roles.h's rows, each witnessed): a particle graphic never packed draws nothing [orig:
+// CParticleTextureEntry_ProbeSizeFromDisk @ 0x5DFB17..0x5DFB76; CParticleManager_BuildTextureAtlases @ 0x5E8E67],
+// a weapon's HUD art and its sight card draw nothing [orig: HUD_DrawTexturedQuadCentered @ 0x590ADF;
+// HUD_DrawWeaponSightOverlays @ 0x4DCE63], a model's stage the checkerboard. A warning, the game runs on; an error
+// only where the mission aborts without it (texture_gates), which refuses a build.
+DiagnosticSeverity texture_severity(const GraphEdge &edge) {
+	return texture_arg_gates(edge.loader_arg) ? DiagnosticSeverity::Error : DiagnosticSeverity::Warning;
+}
+
+// A menu image the texture manager finds no file of is not drawn: the load returns E_FAIL, its slot discarded and
+// its handle left 0, which no caller tests and the slot array rejects [orig: CTextureManager_LoadOrFindTexture @
+// 0x654D17, @ 0x654E07..0x654E26, @ 0x6549A3; callers @ 0x6485C8, @ 0x6488B1, @ 0x6495B0;
+// TextureSlotArray_LoadTextureAtIndex @ 0x654F50].
+std::string menu_texture_missing(const AssetGraph &graph, const GraphEdge &edge) {
+	return project_lacks(graph, edge) + " The menu draws no image there.";
+}
+
+// An animation map that does not load: the loader takes default.adm in its place [orig: AnimMap_LoadAdmFile @
+// 0x40CD00..0x40CD1D].
+std::string animation_map_missing(const AssetGraph &graph, const GraphEdge &edge) {
+	return project_lacks(graph, edge) + " The game loads default.adm in its place.";
+}
+
+// An item's model (its graphic, its husks, its enemy and its display models) that does not load: the item loads on
+// without it, each model's load taking a null [orig: EntityDef_LoadModelsAndCallbacks @ 0x439F50: ThreediGp_LoadModel
+// @ 0x439fdc (graphic), @ 0x43a0b6 (husk), @ 0x43a1c8 / @ 0x43a26e (huskfinal), @ 0x43a2fc (graphic_enemy),
+// @ 0x43a38a, @ 0x43a412; ThreediGp_LoadModel's null @ 0x5B624E], the game logging "Missing 3di(s) from" the item for
+// its graphic and its husk (@ 0x43A08E, @ 0x43A13B, @ 0x43A65A..0x43A664). Another model's reference (a weapon's,
+// a HUD effect's) is not witnessed so: an error.
+bool item_model(const GraphEdge &edge) { return strutil::iequals(basename_of(edge.source), "items.def"); }
+std::string model_missing(const AssetGraph &graph, const GraphEdge &edge) {
+	return project_lacks(graph, edge) +
+	       (item_model(edge) ? " The game loads the item without it." : std::string());
+}
+DiagnosticSeverity model_severity(const GraphEdge &edge) {
+	return item_model(edge) ? DiagnosticSeverity::Warning : DiagnosticSeverity::Error;
+}
+
+// An AI profile's weapon naming no ammo: the profile stores the lookup's 0, as a key it never read, so that weapon
+// holds no ammo and the AI never fires it [orig: AmmoDef_LookupByName's miss @ 0x409870..0x4098AE, stored @
+// 0x45EF6B and @ 0x45F269; the capacity @ 0x468882..0x4688B7, @ 0x468555..0x46858D; the idle dispatch @
+// 0x4581C4..0x4581F4, @ 0x4583D7..0x458402]. Another ammo reference is not witnessed so: an error.
+bool profile_weapon(const GraphEdge &edge) { return strutil::ends_with_icase(edge.source, ".aip"); }
+std::string ammo_missing(const AssetGraph &graph, const GraphEdge &edge) {
+	return project_lacks(graph, edge) +
+	       (profile_weapon(edge) ? " The profile's weapon holds no ammo and the AI never fires it." : std::string());
+}
+DiagnosticSeverity ammo_severity(const GraphEdge &edge) {
+	return profile_weapon(edge) ? DiagnosticSeverity::Warning : DiagnosticSeverity::Error;
+}
+
+// A mission's loadout entry naming no weapon: in a single-player load the entry is dropped, the kit falling back to
+// the knife when none is left [orig: Mission_LoadBMSFile @ 0x40F80E..0x40F830, @ 0x40F861, @ 0x40F86C..0x40F94B];
+// a session skips the chunk (@ 0x40F6A1..0x40F6EF). "-1" is no sentinel, a name matching none. Another weapon
+// reference is not witnessed so: an error.
+bool loadout_weapon(const GraphEdge &edge) { return strutil::ends_with_icase(edge.source, ".bms"); }
+std::string weapon_missing(const AssetGraph &graph, const GraphEdge &edge) {
+	return project_lacks(graph, edge) +
+	       (loadout_weapon(edge) ? " A single-player load drops the loadout entry; with none left the kit is the knife."
+	                             : std::string());
+}
+DiagnosticSeverity weapon_severity(const GraphEdge &edge) {
+	return loadout_weapon(edge) ? DiagnosticSeverity::Warning : DiagnosticSeverity::Error;
 }
 
 std::string item_alias_missing(const AssetGraph &, const GraphEdge &) {
@@ -600,12 +668,26 @@ struct Row {
 
 constexpr ReferenceKindRow kRows[] = {
 	Row(ReferenceKind::None, "none", "the reference", "reference").row,
-	Row(ReferenceKind::Model, "model", "the model", "model").loads(AssetKind::Model, kModel).row,
+	// The severity a missing name takes is what the game does without it (S26 A8): a warning where it runs on.
+	Row(ReferenceKind::Model, "model", "the model", "model")
+	        .loads(AssetKind::Model, kModel)
+	        .says(model_missing)
+	        .severity_by(model_severity)
+	        .row,
 	Row(ReferenceKind::AnimationMap, "animation_map", "the animation map", "animation map")
 	        .loads(AssetKind::AnimationMap, kAnimationMap)
+	        .tolerated(animation_map_missing)
 	        .row,
-	Row(ReferenceKind::Ammo, "ammo", "the ammo", "ammo").symbol(NameCase::FileName, AssetKind::AmmoDefs).row,
-	Row(ReferenceKind::Weapon, "weapon", "the weapon", "weapon").symbol(NameCase::FileName, AssetKind::WeaponDefs).row,
+	Row(ReferenceKind::Ammo, "ammo", "the ammo", "ammo")
+	        .symbol(NameCase::FileName, AssetKind::AmmoDefs)
+	        .says(ammo_missing)
+	        .severity_by(ammo_severity)
+	        .row,
+	Row(ReferenceKind::Weapon, "weapon", "the weapon", "weapon")
+	        .symbol(NameCase::FileName, AssetKind::WeaponDefs)
+	        .says(weapon_missing)
+	        .severity_by(weapon_severity)
+	        .row,
 	// An item by its id; a tracer's and a charattr class's camouflage by its type id (item_missing), the
 	// latter a warning (item_severity).
 	Row(ReferenceKind::Item, "item", "the item id", "item id")
@@ -618,6 +700,7 @@ constexpr ReferenceKindRow kRows[] = {
 	Row(ReferenceKind::Texture, "texture", "the texture", "texture")
 	        .loads(AssetKind::Texture, nullptr, texture_files)
 	        .fatal_for(texture_gates, texture_missing)
+	        .severity_by(texture_severity)
 	        .row,
 	// A set by name across the banks the game loads, the first bank's first set of the name, without
 	// case [orig: SoundBank_FindSetByNameAnyBank @ 0x5274f0 over SoundBank_FindTriggerByName @ 0x75be90].
@@ -668,6 +751,7 @@ constexpr ReferenceKindRow kRows[] = {
 	Row(ReferenceKind::MenuTexture, "menu_texture", "the texture", "texture")
 	        .loads(AssetKind::Texture, nullptr, menu_texture_files)
 	        .offers(ReferenceKind::StyleVar)
+	        .tolerated(menu_texture_missing)
 	        .row,
 	// Opened by the name as written [orig: SoundBank_OpenFile @ 0x75caa0; ConfigFile_LoadGlobal @
 	// 0x760ad0]; a sound bank or a credits file that does not open adds nothing [orig:
@@ -1023,12 +1107,16 @@ bool blocks_build(const Diagnostic &d) {
 	// A row whose file does not serialize may gate: where the build must write the file (ShippedFiles).
 	if (!d.row() || d.row()->gates_build || d.row()->blocks_save) return true;
 	// A listed code gates where its subject names the game's refusal: a reference (missing, or naming
-	// a file its loader does not load) of a kind whose row cites it; a required file whose manifest
+	// a file of a kind its loader does not load) of a kind whose row cites it; a required file whose manifest
 	// row is the boot's refusal [orig: Game_InitSubsystems @ 0x4a6fed, the string tables' MessageBox and
 	// exit; Menu_InitShellResources @ 0x552651, the main menu's dead end], missing, or holding a file of
 	// another kind, which the boot reads as its table with no check (its header's offsets made
-	// pointers unchecked [orig: TextResource_FixupPointers @ 0x75d050]).
+	// pointers unchecked [orig: TextResource_FixupPointers @ 0x75d050]). A texture use's finding carries its
+	// reference to reach the file by and gates by its own row alone (S26 A4).
 	if (const ReferenceSubject *reference = reference_subject(d)) {
+		if (d.row() != &finding_code(CoreFinding::ReferenceMissing) &&
+		    d.row() != &finding_code(CoreFinding::ReferenceWrongKind))
+			return false;
 		const ReferenceKindRow &row = reference_row(reference->kind);
 		return row.gates_when_missing != nullptr ||
 		       (row.gates_when_missing_for && row.gates_when_missing_for(reference->loader_arg) != nullptr);

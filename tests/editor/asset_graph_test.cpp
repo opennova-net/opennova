@@ -1723,7 +1723,9 @@ static int test_reference_kind_rows() {
 		                       kind == ReferenceKind::SoundProfile || kind == ReferenceKind::Shader ||
 		                       kind == ReferenceKind::Particle || kind == ReferenceKind::AnimationKey ||
 		                       kind == ReferenceKind::ItemAlias || kind == ReferenceKind::AvatarPart ||
-		                       kind == ReferenceKind::Dialog || kind == ReferenceKind::MusicStream || kind == ReferenceKind::ItemName;
+		                       kind == ReferenceKind::Dialog || kind == ReferenceKind::MusicStream || kind == ReferenceKind::ItemName ||
+		                       // The game runs on without one (S26 A8): default.adm in a map's place, a menu image undrawn.
+		                       kind == ReferenceKind::AnimationMap || kind == ReferenceKind::MenuTexture;
 		TEST_EXPECT(row.severity_when_missing == (tolerated ? DiagnosticSeverity::Warning : DiagnosticSeverity::Error));
 	}
 	ReferenceKind kind = ReferenceKind::None;

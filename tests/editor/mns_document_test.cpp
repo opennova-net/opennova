@@ -352,7 +352,7 @@ static int test_validation() {
 	for (const Diagnostic &d : view.findings.diagnostics) {
 		if (d.code() == "style.line_ending") {
 			line_ending = true;
-			TEST_EXPECT(d.severity == DiagnosticSeverity::Error && d.line == 1 && d.record == "A");
+			TEST_EXPECT(d.severity == DiagnosticSeverity::Warning && d.line == 1 && d.record == "A");
 		}
 	}
 	TEST_EXPECT(line_ending);

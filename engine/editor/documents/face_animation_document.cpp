@@ -593,7 +593,13 @@ constexpr FindingCodeEntry<FaceAnimationFinding> kFindingEntries[] = {
 	// The first eye texture named alone: the game reads the line as naming neither eye [orig: sub_587F20 @ 0x587F20];
 	// it refuses nothing: listed. (The second named alone is face_animation.unserializable.)
 	{ FaceAnimationFinding::EyeTextureAlone, listed_code("face_animation.eye_texture_alone") },
-	{ FaceAnimationFinding::Unserializable, { "face_animation.unserializable", FindingFix::None, nullptr, true } },
+	// The second eye texture named alone: the writer cannot write the line so (the game reads on): its Save refused.
+	{ FaceAnimationFinding::Unserializable, unwritable_code("face_animation.unserializable") },
+	// A triangle naming a vertex the face lacks: the game draws it over memory past the vertices.
+	{ FaceAnimationFinding::VertexRange,
+	  game_stops_code("face_animation.vertex_range",
+	                  "a triangle names a vertex the face lacks, and the game draws it over memory past the vertices "
+	                  "[orig: Render_ScarDebugOverlay @ 0x589301..0x58931D]") },
 	{ FaceAnimationFinding::GestureUnplayed, listed_code("face_animation.gesture_unplayed") },
 	{ FaceAnimationFinding::GestureRepeated, listed_code("face_animation.gesture_repeated") },
 	{ FaceAnimationFinding::ParameterUnmatched, listed_code("face_animation.parameter_unmatched") },
@@ -655,7 +661,7 @@ std::vector<Diagnostic> validate_face_animation_file(const DocumentBase &documen
 		for (int corner = 0; corner < 3; ++corner) {
 			const int32_t index = file.triangles[t][size_t(corner)];
 			if (index >= 0 && size_t(index) < file.vertices.size()) continue;
-			add(child(kTriangleList, t, kTriangle), DiagnosticSeverity::Error, FaceAnimationFinding::Unserializable,
+			add(child(kTriangleList, t, kTriangle), DiagnosticSeverity::Error, FaceAnimationFinding::VertexRange,
 			    kCornerIds[corner],
 			    "Triangle " + std::to_string(t) + " uses vertex " + std::to_string(index) + ", which the face has none of (" +
 			            std::to_string(file.vertices.size()) +

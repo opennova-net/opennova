@@ -118,7 +118,7 @@ int test_checks() {
 	TEST_EXPECT(editor_test::write_bytes(t + "top.tga", top) && editor_test::write_bytes(t + "grey16.tga", tga_header(3, 16, 0)) &&
 	            editor_test::write_bytes(t + "rle16.tga", tga_header(10, 16, 0)) &&
 	            editor_test::write_bytes(t + "mapped.tga", tga_header(2, 24, 0, 4)) &&
-	            editor_test::write_bytes(t + "odd.pcx", pcx(5, 4, 6)));
+	            editor_test::write_bytes(t + "odd.pcx", pcx(5, 4, 6)) && editor_test::write_bytes(t + "oddfull.pcx", pcx(5, 16, 6)));
 	std::vector<uint8_t> four = pcx(4, 4, 4);
 	four[3] = 4;
 	// A 24-bit one (three planes) the reader takes, its odd width no overrun: no finding.
@@ -232,10 +232,15 @@ int test_checks() {
 	TEST_EXPECT(has("texture.tga_unfilled", "textures/grey16.tga", S::Warning, false));
 	TEST_EXPECT(has("texture.tga_zeroed", "textures/rle16.tga", S::Warning, false));
 	TEST_EXPECT(has("texture.tga_colour_map_skipped", "textures/mapped.tga", S::Warning, false));
-	TEST_EXPECT(has("texture.pcx_overrun", "textures/odd.pcx", S::Error, true));
+	// An odd width's last row writes its extra texel into the 48 spare bytes its 80-byte buffer's block rounds up to:
+	// a warning. Sixteen rows fill the block (320 bytes): the texel lands on the next block's pool pointer, and the
+	// game faults (S26 A4).
+	TEST_EXPECT(has("texture.pcx_overrun", "textures/odd.pcx", S::Warning, false));
+	TEST_EXPECT(has("texture.pcx_overrun", "textures/oddfull.pcx", S::Error, true));
 	TEST_EXPECT(has("texture.pcx_short_rows", "textures/short.pcx", S::Warning, false));
-	TEST_EXPECT(has("texture.tga_truncated", "textures/cut.tga", S::Error, true));
-	TEST_EXPECT(has("texture.tga_truncated", "textures/cutrle.tga", S::Error, true));
+	// Read on past the file, no fault witnessed: listed (S26 A4).
+	TEST_EXPECT(has("texture.tga_truncated", "textures/cut.tga", S::Error, false));
+	TEST_EXPECT(has("texture.tga_truncated", "textures/cutrle.tga", S::Error, false));
 	TEST_EXPECT(has("texture.unloadable", "textures/four.pcx", S::Warning, false));
 	for (const Found &f : found) TEST_EXPECT(f.asset != "textures/rgb.pcx");
 	TEST_EXPECT(has("texture.dds_not_pow2", "textures/padded.dds", S::Warning, false));
@@ -247,21 +252,29 @@ int test_checks() {
 	}
 	// The odd width's words say how many bytes spill, not that the width is odd.
 	for (const Found &f : found)
-		if (f.code == "texture.pcx_overrun") TEST_EXPECT(f.message.find("each row's 1 extra byte") != std::string::npos);
+		if (f.code == "texture.pcx_overrun") TEST_EXPECT(f.message.find("each row's 1 extra texel") != std::string::npos);
+	for (const Found &f : found)
+		if (f.code == "texture.pcx_overrun" && f.asset == "textures/oddfull.pcx")
+			TEST_EXPECT(f.message.find("past its buffer's block by 4 bytes") != std::string::npos);
 	// The uses'. A colour map: read short (512 x 512), wider than tall (the quadrant split overruns it and its
-	// buffer), taller than wide (neither: only its first rows matter).
-	TEST_EXPECT(has("texture.colormap_size", "terrains/a.trn", S::Error, true));
-	TEST_EXPECT(has("texture.colormap_size", "terrains/b.trn", S::Error, true));
+	// buffer), taller than wide (neither: only its first rows matter). The overruns are listed, no failure of
+	// them witnessed (S26 A4).
+	TEST_EXPECT(has("texture.colormap_size", "terrains/a.trn", S::Error, false));
+	TEST_EXPECT(has("texture.colormap_size", "terrains/b.trn", S::Error, false));
 	TEST_EXPECT(has("texture.colormap_size", "terrains/c.trn", S::Warning, false));
-	TEST_EXPECT(has("texture.wrong_reader", "terrains/d.trn", S::Error, true));
+	// A colour map that is no TGA: the terrain's TGA reader fills it black and the terrain loads on (S26 A3).
+	TEST_EXPECT(has("texture.wrong_reader", "terrains/d.trn", S::Warning, false));
+	for (const Found &f : found)
+		if (f.code == "texture.wrong_reader" && f.asset == "terrains/d.trn")
+			TEST_EXPECT(f.message.find("takes it as black texels") != std::string::npos);
 	TEST_EXPECT(has("texture.wrong_reader", "terrains/k.trn", S::Warning, false));
 	for (const Found &f : found)
 		if (f.code == "texture.wrong_reader" && f.asset == "terrains/k.trn")
 			TEST_EXPECT(f.message.find("loads the terrain without one") != std::string::npos);
-	TEST_EXPECT(has("texture.foliage_map_overrun", "terrains/b.trn", S::Error, true));
+	TEST_EXPECT(has("texture.foliage_map_overrun", "terrains/b.trn", S::Error, false));
 	TEST_EXPECT(has("texture.foliage_map_shape", "terrains/c.trn", S::Warning, false));
 	// A char map is sampled as the foliage map is (S25 B5): the same files as char maps, the same rule.
-	TEST_EXPECT(has("texture.char_map_overrun", "terrains/b.trn", S::Error, true));
+	TEST_EXPECT(has("texture.char_map_overrun", "terrains/b.trn", S::Error, false));
 	TEST_EXPECT(has("texture.char_map_shape", "terrains/c.trn", S::Warning, false));
 	// Classes past the twenty .TSD names: the game reads them as they stand, so a warning (S25).
 	TEST_EXPECT(has("texture.char_map_class", "terrains/l.trn", S::Warning, false));
@@ -271,7 +284,7 @@ int test_checks() {
 	// A foliage map wider than 1024 reads its first texel everywhere: its shape, no overrun.
 	TEST_EXPECT(has("texture.foliage_map_shape", "terrains/f.trn", S::Warning, false));
 	// A blend map wider than tall overruns the split; a taller one does not.
-	TEST_EXPECT(has("texture.blend_map_size", "terrains/f.trn", S::Error, true));
+	TEST_EXPECT(has("texture.blend_map_size", "terrains/f.trn", S::Error, false));
 	for (const Found &f : found)
 		TEST_EXPECT(f.code != "texture.foliage_map_overrun" || f.asset != "terrains/f.trn");
 	for (const Found &f : found) TEST_EXPECT(f.asset != "terrains/g.trn");

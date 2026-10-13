@@ -95,6 +95,7 @@ enum class FaceAnimationFinding {
 	IgnoredInput,
 	EyeTextureAlone,
 	Unserializable,
+	VertexRange,
 	GestureUnplayed,
 	GestureRepeated,
 	ParameterUnmatched,

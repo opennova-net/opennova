@@ -344,9 +344,12 @@ namespace {
 constexpr FindingCodeEntry<FontFinding> kFindingEntries[] = {
 	{ FontFinding::InvalidInput, { "font.invalid_input", FindingFix::None, nullptr, true } },
 	{ FontFinding::IgnoredInput, { "font.ignored_input", FindingFix::Rewrite, kRewriteDropsIgnoredInput } },
-	// The drawer binds the glyph's page from the font's table past its pages [orig: CGameFont_DrawText @ 0x6752c0]:
-	// what it draws then is no texture of the font's; the writer refuses it.
-	{ FontFinding::Unserializable, { "font.unserializable", FindingFix::None, nullptr, true } },
+	// The drawer binds the glyph's page from the font's table past its pages: what it draws then is no texture of the
+	// font's; the writer refuses it, and a build is.
+	{ FontFinding::Unserializable,
+	  game_stops_code("font.unserializable",
+	                  "a glyph names a page the font lacks, and the game's drawer binds its texture from the font's "
+	                  "page table past its pages [orig: CGameFont_DrawText @ 0x6752c0]") },
 	// The page is sampled clamped [orig: GameFont_LoadFromBlob @ 0x674804, flags 0x140001]: the edge's texels
 	// stretched; no refusal witnessed, listed.
 	{ FontFinding::GlyphOutside, listed_code("font.glyph_outside") },
