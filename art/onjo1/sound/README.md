@@ -313,7 +313,7 @@ member's base, "jitter" its random range, both Q16.
 | | 800 | `onar15f2` (clamp 110) | 0xFFFF | 0 | 130 |
 | `GF_ONAR15_RL` | 25 | `onar15rl` (clamp 230) | 0xFFFF | 0 | 207 |
 | `DRY_ONAR15` | 25 | `onar15dry` (clamp 180) | 0xFFFF | 0 | 225 |
-| `GF_ONAR15_ST` | 25 | `onar15st` | 0xFFFF | 0 | 92 |
+| `GF_ONAR15_ST` | 25 | `onar15st` | 0xFFFF | 0 | 89 |
 | `GF_ONAR15_SF` | 25 | `onar15sf` | 0xFFFF | 0 | 107 |
 | `BM1_DEATH` | 150 | `ondeath1` to `8` | 0xE3D6 | 0x1EB8 | 201 |
 | `BM1_DEATH_K` | 140 | `ondeathk1` to `3` (clamp 200) | 0xFFFF | 0 | 202 |

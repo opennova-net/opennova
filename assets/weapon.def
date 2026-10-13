@@ -75,8 +75,8 @@ weapon "WPN_ON_AR15"
 	action "switchto"
 		anim anim_wpn_switchto
 		soundset GF_ONAR15_ST
-		delayend 2
-		function wpn_std_switchto
+		delaystart 98
+		function wpn_std_idle
 	end
 	action "switchfrom"
 		anim anim_wpn_switchfrom
