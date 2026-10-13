@@ -329,8 +329,12 @@ void MissionViewport::follow_ground_(const SessionView &view) const {
 	// The mission's own name: the game reads <mission>.til, the name cut at its first dot as the game's extension
 	// swap cuts it (mission::mission_base_name) [orig: Path_ReplaceOrAppendExtension @ 0x53c780, the scan
 	// @ 0x53c7c4].
+	const int reads = terrain_ground_.reads();
 	terrain_ground_.follow(view.findings.assets, view.findings.assets ? view.findings.assets->generation() : 0,
 			scene_.header(), mission::mission_base_name(path()));
+	// S25, the painting feedback: read whole, it holds an imported terrain's maps as last imported; the paint of their
+	// open sources laid over them.
+	if (terrain_ground_.reads() != reads) lay_open_sources(view, path(), terrain_ground_);
 }
 
 void MissionViewport::patch_overlay_(uint64_t ground_before) {
@@ -494,6 +498,9 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 	const uint64_t generation = view.findings.assets->generation();
 	const PreviewFollow::Key key;
 	reason_ = MissionViewStatus::Ready;
+	// S25, the painting feedback: the overlay of the map the terrain brush paints here, while it paints it (a stroke of
+	// the surface or foliage map changes nothing the device draws), the person's own again after.
+	if (brush_overlay_.follow(terrain_brush_overlay(view, path()), options_.overlay)) state_moved();
 	if (frame_ground_pending_) {
 		// The framed box's middle set down on the ground there, the terrain read now.
 		frame_ground_pending_ = false;
@@ -645,8 +652,8 @@ void MissionViewport::apply_(const io::JsonValue &json, PreviewClock &clock) {
 	MissionViewportOptions options = options_;
 	if (const JsonValue *member = json.get("options");
 			member && mission_options_from_json(*member, options, error) && options != options_) {
-		// The tool, its item and its path, the snaps and the palette's search are the canvas's alone: no
-		// Update of the device.
+		// The tool, its item and its path, the snaps, the palette's search and the legend folded are the canvas's
+		// alone: no Update of the device.
 		MissionViewportOptions drawn = options;
 		drawn.tool = options_.tool;
 		drawn.item = options_.item;
@@ -654,6 +661,7 @@ void MissionViewport::apply_(const io::JsonValue &json, PreviewClock &clock) {
 		drawn.snap = options_.snap;
 		drawn.turn = options_.turn;
 		drawn.palette = options_.palette;
+		drawn.legend = options_.legend;
 		drawn.ammo = options_.ammo;
 		// The Listen is played, not drawn: the device reads it each frame.
 		drawn.listen = options_.listen;
@@ -1596,6 +1604,8 @@ io::JsonValue MissionViewport::body_json(const ViewportInput &input) const {
 	// The ground overlay the options ask (DI-29): its legend and extent, null with none asked.
 	body.set("overlay", options_.overlay == MissionGroundOverlay::None ? JsonValue::make_null()
 	                                                                    : mission_overlay_to_json(overlay_));
+	// S25: why it shows, while the terrain brush shows it ({overlay, returns_to}; null when the person's own).
+	body.set("brush_overlay", brush_overlay_.to_json());
 	// The items' effects as the start attaches them (DI-31; null while the layer is off), and what the device
 	// last said it drew of the foliage and the lights.
 	body.set("effects", options_.effects ? effects_.to_json() : JsonValue::make_null());

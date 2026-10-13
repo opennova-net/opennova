@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <base/io/json.h>
+#include <formats/foliage/foliage.h>
 
 namespace opennova::editor {
 
@@ -18,13 +19,16 @@ enum class MissionGroundOverlay : uint8_t { None, Surfaces, Foliage };
 const char *mission_ground_overlay_token(MissionGroundOverlay overlay);
 bool mission_ground_overlay_from_token(const std::string &token, MissionGroundOverlay &out);
 
-// One row of an overlay's legend: its key ("3", "foliage 1"), its swatch, its share of the picture's texels and
-// what it means to the game in words.
+// One row of an overlay's legend: its key ("3", "foliage 1"), its swatch, its share of the picture's texels, a short
+// name ("Stone", "onfern1.3di") and what it means to the game in words; its value (S25: the surface class, or the
+// foliage's grown definitions as a mask of their slots; -1 for a row of neither: the placed tiles, what they keep off).
 struct MissionOverlayRow {
 	std::string key;
 	uint8_t rgb[3] = {};
 	double share = 0.0;
+	std::string name;
 	std::string words;
+	int value = -1;
 };
 
 // A ground overlay as a picture laid over the mission's terrain from above: a texel each `texel` metres from
@@ -90,7 +94,13 @@ bool mission_ground_overlay_patch(const MissionGround &ground, MissionOverlayIma
 std::vector<MissionOverlayRect> mission_overlay_patch_rects(const MissionGround &ground, MissionGroundOverlay kind,
                                                             const TerrainPatches &patches);
 
-// On the wire (the mission viewport's body): {kind, title, legend: [{key, rgb, share, words}], words, west,
+// The legend's row of the value the terrain brush lays on the overlay's map (S25, the painting feedback): a surface
+// class for Surfaces (its row as the legend makes one, share 0); a foliage code for Foliage, its value the slots of
+// the definitions `defs` whose match lists it as the game's load remaps the code [orig: Foliage_LoadFoliageMapPCX @
+// 0x605B73..0x605B8A] (0: it grows nothing), keyed "code N". A legend row of the same value is the brush's.
+MissionOverlayRow mission_overlay_brush_row(MissionGroundOverlay kind, int value, const std::vector<FoliageDef> &defs);
+
+// On the wire (the mission viewport's body): {kind, title, legend: [{key, rgb, share, name, words}], words, west,
 // north, texel, width, height, outside (the rgba past the picture, or null)}; no texels.
 io::JsonValue mission_overlay_to_json(const MissionOverlayImage &image);
 

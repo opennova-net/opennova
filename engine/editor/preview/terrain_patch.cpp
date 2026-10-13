@@ -5,6 +5,7 @@
 #include <base/io/strutil.h>
 #include <editor/documents/terrain_heights_document.h>
 #include <editor/model/document_base.h>
+#include <editor/model/raster_document.h>
 #include <editor/preview/mission_ground_facts.h>
 #include <editor/project/project_files.h>
 #include <editor/session/terrain_family.h>
@@ -99,6 +100,31 @@ bool TerrainStrokeFollow::follow(const SessionView &view, const DocumentBase &do
 	// The in-place planes' patches are the device's: only another's makes the picture again at the end.
 	if (maps) patched_ = true;
 	return true;
+}
+
+bool lay_open_sources(const SessionView &view, const std::string &view_path, MissionGround &ground) {
+	const DocumentBase *document = nullptr;
+	for (const auto &each : view.documents.open)
+		if (each && each->path() == view_path) document = each.get();
+	TerrainFamily family;
+	if (!document || !ground.terrain() || !resolve_terrain_family(view, *document, family)) return false;
+	bool laid = false;
+	for (const TerrainPlane plane : {TerrainPlane::Surface, TerrainPlane::Foliage}) {
+		const TerrainFamilyFile &file = family.plane(plane);
+		if (file.import_output.empty() || file.path.empty()) continue;
+		const DocumentBase *open = nullptr;
+		for (const auto &each : view.documents.open)
+			if (each && each->path() == file.path) open = each.get();
+		const RasterDocument *raster = open ? open->as_raster() : nullptr;
+		if (!raster || raster->plane_count() != 1) continue;
+		// The whole source, as one region of its texels (MissionGround::patch takes no whole map).
+		TerrainPatch patch;
+		patch.plane = plane;
+		patch.path = file.path;
+		patch.regions.push_back(RasterRegion{0, 0, raster->plane(0).width(), raster->plane(0).height(), 0});
+		laid = ground.patch(patch, *open, basename_of(file.import_output)) || laid;
+	}
+	return laid;
 }
 
 } // namespace opennova::editor

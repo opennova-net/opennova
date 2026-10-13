@@ -30,6 +30,7 @@
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/mission_mark_menu.h>
 #include <editor/ui/mission_palette_view.h>
+#include <editor/ui/overlay_legend.h>
 #include <editor/ui/project_find.h>
 #include <editor/ui/reference_picker.h>
 #include <editor/ui/ui_kit.h>
@@ -141,7 +142,6 @@ struct MissionViewportView::Tools {
 			const MissionEntityMark &entity);
 	void notes(const MissionViewport &mission);
 	void ground_line();
-	void legend(ViewportCanvas &ui, const MissionViewport &mission);
 	float snap_metres() const { return snap; }
 };
 
@@ -243,8 +243,10 @@ void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 			[&](const CanvasInput &in) {
 				tools.mouse = in.mouse;
 				tools.mouse_on_picture = in.hovered;
-				// The ground overlay's legend over the picture's corner (DI-29).
-				if (mission.options().overlay != MissionGroundOverlay::None) tools.legend(canvas_ui(), mission);
+				// The ground overlay's legend over the picture's corner (DI-29; S25: a compact panel, the brush's value
+				// outlined).
+				draw_overlay_legend(workspace, canvas_ui(), path, ViewportKind::Mission, mission.overlay(),
+				                    mission.ground_reader().foliage_defs(), mission.options().legend);
 				if (canvas) {
 					tools.hint = canvas->hint(context, in);
 					const MissionGroundFacts &ground = canvas->ground(context, in);
@@ -953,22 +955,6 @@ void MissionViewportView::Tools::ground_line() {
 		ImGui::SameLine();
 	}
 	ui_kit::clipped_text("Ground: " + ground);
-}
-
-void MissionViewportView::Tools::legend(ViewportCanvas &ui, const MissionViewport &mission) {
-	const MissionOverlayImage &overlay = mission.overlay();
-	std::vector<ViewportCanvas::LegendRow> rows;
-	for (const MissionOverlayRow &row : overlay.legend) {
-		ViewportCanvas::LegendRow line;
-		std::copy(std::begin(row.rgb), std::end(row.rgb), line.rgb);
-		char share[16] = "";
-		if (row.share > 0.0) std::snprintf(share, sizeof(share), " (%.1f%%)", row.share * 100.0);
-		line.text = row.key + ": " + ui_kit::fit(row.words, ImGui::GetFontSize() * 30.0f) + share;
-		rows.push_back(std::move(line));
-	}
-	std::string title = overlay.title;
-	if (!overlay.words.empty()) title += (title.empty() ? "" : "\n") + overlay.words;
-	ui.legend(title, rows);
 }
 
 void MissionViewportView::Tools::notes(const MissionViewport &mission) {

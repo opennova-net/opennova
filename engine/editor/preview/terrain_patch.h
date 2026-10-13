@@ -118,4 +118,13 @@ private:
 	bool patched_ = false;
 };
 
+// The open sources of an imported terrain's surface and foliage maps laid over `ground` (S25, the painting feedback):
+// an import's output moves only as its set is saved and imported again, so a ground read from the project's files holds
+// those maps as last imported while their source images, open, hold the paint since; each open source's texels written
+// over the map its import makes, through the import's translation, as a view's stroke follow writes a stroke's
+// (MissionGround::patch). The family is that of the open document at `view_path` (a mission or a terrain); true when
+// one was laid. A view lays them over its ground each time it reads it whole (its first read among them, which may come
+// after a stroke: its stroke follow then has no change to patch), so its ground holds them as the sources do.
+bool lay_open_sources(const SessionView &view, const std::string &view_path, MissionGround &ground);
+
 } // namespace opennova::editor

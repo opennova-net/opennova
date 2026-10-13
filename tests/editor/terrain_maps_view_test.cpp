@@ -16,6 +16,8 @@
 #include <editor/preview/mission_map.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/terrain_maps_patch.h>
+#include <editor/preview/terrain_patch.h>
+#include <editor/preview/terrain_viewport.h>
 #include <editor/preview/tile_tools.h>
 #include <editor/preview/viewports.h>
 #include <editor/session/preferences_store.h>
@@ -265,17 +267,12 @@ int test_view() {
 	return 0;
 }
 
-// An imported terrain (S25, the review's M5): its surface and foliage maps are painted in their source images, which
-// stand for the maps the import makes. A surface stroke on the source reaches the view's ground (its class there, an
-// Update), and a foliage stroke is an Update whose device patch holds the codes, nothing built again at its end.
-int test_imported() {
-	editor_test::TempProjectDir dir("opennova_editor_terrain_maps_view_import");
-	editor_test::NoProcess platform;
-	MemoryPreferencesStore preferences;
-	ProjectSession session{platform, preferences};
-	editor_test::FakeDevices devices;
-	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Isle"));
+// An imported island (S20's import of a terrain set's images: 8-bit grey heights, a colour map, a surface map of grass
+// (class 2) as a palette PNG, a foliage map of code 0 as a grey PNG) and a mission on it: the mission's path ("" where
+// a step failed).
+std::string isle_project(ProjectSession &session, editor_test::TempProjectDir &dir) {
 	const SessionView &v = session.view();
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Isle"));
 	const std::string images = dir.file("images");
 	constexpr int kSide = 1024, kMap = 512;
 	std::vector<uint8_t> heights(size_t(kSide) * kSide), colours(size_t(kSide) * kSide * 4, 120), classes(size_t(kMap) * kMap, 2),
@@ -285,23 +282,37 @@ int test_imported() {
 			heights[size_t(y) * kSide + x] = uint8_t(std::max(0.0, 200.0 * (1.0 - std::hypot(x - 512.0, y - 512.0) / 400.0)));
 	std::vector<uint8_t> ramp;
 	for (int i = 0; i < 256; ++i) ramp.insert(ramp.end(), 3, uint8_t(i));
-	TEST_EXPECT(editor_test::write_bytes(images + "/height.png", png::encode_png_gray(heights.data(), kSide, kSide)));
-	TEST_EXPECT(editor_test::write_bytes(images + "/colour.png", png::encode_png_rgba(colours.data(), kSide, kSide)));
-	TEST_EXPECT(editor_test::write_bytes(images + "/surface.png", png::encode_png_indexed(classes.data(), kMap, kMap, ramp.data(), 256)));
-	TEST_EXPECT(editor_test::write_bytes(images + "/foliage.png", png::encode_png_gray(codes.data(), kMap, kMap)));
+	bool written = editor_test::write_bytes(images + "/height.png", png::encode_png_gray(heights.data(), kSide, kSide));
+	written = editor_test::write_bytes(images + "/colour.png", png::encode_png_rgba(colours.data(), kSide, kSide)) && written;
+	written = editor_test::write_bytes(images + "/surface.png", png::encode_png_indexed(classes.data(), kMap, kMap, ramp.data(), 256)) &&
+	          written;
+	written = editor_test::write_bytes(images + "/foliage.png", png::encode_png_gray(codes.data(), kMap, kMap)) && written;
 	ActionOutcome outcome = editor_test::handle_to_end(session, request::new_terrain("isle",
 	        {{"heightmap", images + "/height.png"}, {"colormap", images + "/colour.png"}, {"surface", images + "/surface.png"},
 	         {"foliagemap", images + "/foliage.png"}}));
 	for (const Diagnostic &d : outcome.findings) std::fprintf(stderr, "  %s: %s\n", d.code().c_str(), d.message.c_str());
-	TEST_EXPECT(!outcome.refused);
+	if (!written || outcome.refused) return std::string();
 	editor_test::handle_to_end(session, request::create_file("isle.env", "environment"));
 	editor_test::set_missions(session, true);
 	outcome = editor_test::handle_to_end(session,
 	        request::create_file("isle1.bms", "mission", {{"terrain", "isle.trn"}, {"environment", "isle.env"}}));
 	const AssetEntry *entry = v.project.scan->find("isle1.bms");
-	TEST_EXPECT(entry != nullptr);
-	if (!entry) return 1;
-	const std::string m = entry->relative_path;
+	return entry ? entry->relative_path : std::string();
+}
+
+// An imported terrain (S25, the review's M5): its surface and foliage maps are painted in their source images, which
+// stand for the maps the import makes. A surface stroke on the source reaches the view's ground (its class there, an
+// Update), and a foliage stroke is an Update whose device patch holds the codes, nothing built again at its end.
+int test_imported() {
+	editor_test::TempProjectDir dir("opennova_editor_terrain_maps_view_import");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session{platform, preferences};
+	editor_test::FakeDevices devices;
+	const SessionView &v = session.view();
+	const std::string m = isle_project(session, dir);
+	TEST_EXPECT(!m.empty());
+	if (m.empty()) return 1;
 	session.handle(request::open_document(m));
 	devices.sync(session);
 	const auto *mission = static_cast<const MissionViewport *>(session.viewports().find(m, ViewportKind::Mission));
@@ -375,12 +386,214 @@ int test_imported() {
 	return 0;
 }
 
+// The ground at (x, y) as the terrain query's sample reads it for the view `path`: its surface class (-1: none) and
+// foliage code, and whose ground answered.
+struct Sampled {
+	int surface = -1;
+	int code = -1;
+	std::string from;
+};
+Sampled sample(ProjectSession &session, const std::string &path, double x, double y) {
+	JsonValue args = JsonValue::make_object();
+	args.set("path", io::json_string(path));
+	args.set("op", io::json_string("sample"));
+	args.set("x", io::json_number(x));
+	args.set("y", io::json_number(y));
+	std::string error;
+	const JsonValue answer = session.query("terrain", args, error);
+	Sampled out;
+	if (!error.empty()) std::fprintf(stderr, "  sample: %s\n", error.c_str());
+	const JsonValue *ground = answer.get("ground");
+	if (!ground) return out;
+	out.surface = int(ground->get_number("surface", -1.0));
+	if (const JsonValue *foliage = ground->get("foliage"); foliage && foliage->is_object())
+		out.code = int(foliage->get_number("code", -1.0));
+	out.from = answer.get_string("from", "");
+	return out;
+}
+
+// The painting feedback (2026-10-13): the terrain query's sample reads unsaved paint. On an imported terrain the maps
+// are painted in the set's source images, and the import's outputs move only as the set is saved and imported again: a
+// sample answers from the view's own ground, which holds the paint (patched in place, or laid over a ground read whole
+// after the stroke: a view first followed once the stroke is in), never from the outputs read again.
+int test_sample_unsaved() {
+	editor_test::TempProjectDir dir("opennova_editor_terrain_maps_view_sample");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session{platform, preferences};
+	const SessionView &v = session.view();
+	const std::string m = isle_project(session, dir);
+	TEST_EXPECT(!m.empty());
+	if (m.empty()) return 1;
+	session.handle(request::open_document(m));
+	// A class painted and a code painted, before any save (no Shell draws the view: its first follow, the sample's, comes
+	// after them).
+	TerrainStrokeAsk ask;
+	ask.plane = TerrainPlane::Surface;
+	ask.brush.tool = TerrainTool::Surface;
+	ask.brush.surface = 5;
+	ask.brush.foliage = 3;
+	ask.brush.radius = 0.0f;
+	ask.brush_named = kBrushTool | kBrushSurface | kBrushFoliage | kBrushRadius;
+	ask.points = {{8.0, 8.0}};
+	session.handle(request::terrain_stroke(m, ask));
+	TEST_EXPECT(session.outcome().done() && contains(session.outcome().stroke.changed.front().path, "isle_surface.png"));
+	ask.plane = TerrainPlane::Foliage;
+	ask.brush.tool = TerrainTool::Foliage;
+	session.handle(request::terrain_stroke(m, ask));
+	TEST_EXPECT(session.outcome().done() && contains(session.outcome().stroke.changed.front().path, "isle_foliage"));
+	const Sampled painted = sample(session, m, 8.0, 8.0);
+	if (painted.surface != 5 || painted.code != 3)
+		std::fprintf(stderr, "  sampled surface %d, code %d from %s\n", painted.surface, painted.code, painted.from.c_str());
+	TEST_EXPECT(painted.surface == 5 && painted.code == 3 && painted.from == "view");
+	TEST_EXPECT(sample(session, m, 40.0, 40.0).surface == 2);
+	// The outputs stand as imported: a ground read over the project's files alone reads the old class, and the open
+	// sources laid over it (the query's rule where no view holds a ground) read the paint.
+	const auto *mission = static_cast<const MissionViewport *>(session.viewports().find(m, ViewportKind::Mission));
+	TEST_EXPECT(mission != nullptr);
+	if (!mission) return 1;
+	MissionGround read;
+	read.follow(v.findings.assets, v.findings.assets->generation(), mission->scene().header(), "isle1");
+	TEST_EXPECT(read.terrain() && read.terrain_at(8.0, 8.0, 0.0).surface == 2);
+	TEST_EXPECT(lay_open_sources(v, m, read) && read.terrain_at(8.0, 8.0, 0.0).surface == 5 &&
+	            read.terrain_at(8.0, 8.0, 0.0).foliage_code == 3);
+	// Undone, the samples read the class as imported again.
+	session.handle(request::undo(m));
+	session.handle(request::undo(m));
+	const Sampled undone = sample(session, m, 8.0, 8.0);
+	TEST_EXPECT(undone.surface == 2 && undone.code == 0);
+	std::printf("sample: unsaved paint of an imported terrain's sources read from the view's ground, the outputs as imported\n");
+	return 0;
+}
+
+// The painting feedback (2026-10-13): while the brush paints the surface or the foliage map in a view (its Terrain pane
+// shown, its tool Surface or Foliage), the mission's 3D view and the terrain viewport show that map's overlay, the
+// person's own again as the tool moves away or the pane hides; an overlay the person picks meanwhile stays. The options
+// say what shows, the body's brush_overlay why; the legend's fold is an option of the canvas's alone (no Update).
+int test_brush_overlay() {
+	editor_test::TempProjectDir dir("opennova_editor_terrain_brush_overlay");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session{platform, preferences};
+	editor_test::FakeDevices devices;
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Overlay"));
+	const SessionView &v = session.view();
+	const std::string root = v.project.root;
+	for (const char *name : {"Tmap.trn", "Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx"})
+		TEST_EXPECT(editor_test::write_bytes(root + "/terrain/" + name, test_io::read_file(fixture(std::string("terrain/tmap/") + name))));
+	TEST_EXPECT(editor_test::write_text(root + "/day.env", "env"));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::set_missions(session, true);
+	editor_test::handle_to_end(session, request::create_file("m.bms", "mission", {{"terrain", "Tmap.trn"}, {"environment", "day.env"}}));
+	const std::string m = v.project.scan->find("m.bms")->relative_path;
+	session.handle(request::open_document(m));
+	devices.sync(session);
+	const auto *mission = static_cast<const MissionViewport *>(session.viewports().find(m, ViewportKind::Mission));
+	TEST_EXPECT(mission && mission->options().overlay == MissionGroundOverlay::None);
+	if (!mission) return 1;
+	const auto state = [&](const std::string &path, const char *kind) {
+		JsonValue args = JsonValue::make_object();
+		args.set("path", io::json_string(path));
+		args.set("kind", io::json_string(kind));
+		args.set("op", io::json_string("state"));
+		std::string error;
+		const JsonValue answer = session.query("viewport", args, error);
+		if (!error.empty()) std::fprintf(stderr, "  viewport state: %s\n", error.c_str());
+		return answer;
+	};
+	const auto shown = [&](const std::string &path, const char *kind) {
+		const JsonValue answer = state(path, kind);
+		const JsonValue *options = answer.get("options");
+		return options ? options->get_string("overlay", "") : std::string();
+	};
+	const auto brushed = [&](const std::string &path, const char *kind) {
+		const JsonValue answer = state(path, kind);
+		const JsonValue *body = answer.get("body");
+		const JsonValue *why = body ? body->get("brush_overlay") : nullptr;
+		return !why || why->is_null() ? std::string("null")
+		                              : why->get_string("overlay", "") + " then " + why->get_string("returns_to", "");
+	};
+	const auto brush = [&](const char *tool) {
+		session.handle(request::set_workspace(std::string(R"({"terrain_brush": {"tool": ")") + tool + "\"}}"));
+		const bool done = session.outcome().done();
+		devices.sync(session);
+		return done;
+	};
+	// The Surface tool with the pane hidden: nothing; the pane shown: the surface classes, a picture the device takes.
+	TEST_EXPECT(brush("surface"));
+	TEST_EXPECT(mission->options().overlay == MissionGroundOverlay::None);
+	session.handle(request::set_workspace(R"({"document": {"terrain": true}})"));
+	devices.sync(session);
+	TEST_EXPECT(mission->options().overlay == MissionGroundOverlay::Surfaces && mission->overlay().kind == MissionGroundOverlay::Surfaces &&
+	            !mission->overlay().empty());
+	TEST_EXPECT(shown(m, "mission") == "surfaces" && brushed(m, "mission") == "surfaces then none");
+	// Foliage: its overlay; a tool of another plane: the person's own (none) again.
+	TEST_EXPECT(brush("foliage"));
+	TEST_EXPECT(shown(m, "mission") == "foliage" && brushed(m, "mission") == "foliage then none");
+	TEST_EXPECT(brush("raise"));
+	TEST_EXPECT(shown(m, "mission") == "none" && brushed(m, "mission") == "null" &&
+	            mission->overlay().kind == MissionGroundOverlay::None);
+	// The pane hidden while painting: the person's own again.
+	TEST_EXPECT(brush("surface"));
+	TEST_EXPECT(shown(m, "mission") == "surfaces");
+	session.handle(request::set_workspace(R"({"document": {"terrain": false}})"));
+	devices.sync(session);
+	TEST_EXPECT(shown(m, "mission") == "none");
+	// The person's choice while painting stays: Foliage picked over the surface classes, kept as the tool moves away.
+	session.handle(request::set_workspace(R"({"document": {"terrain": true}})"));
+	devices.sync(session);
+	TEST_EXPECT(shown(m, "mission") == "surfaces");
+	session.handle(request::set_viewport(m, R"({"kind": "mission", "options": {"overlay": "foliage"}})"));
+	devices.sync(session);
+	TEST_EXPECT(shown(m, "mission") == "foliage");
+	TEST_EXPECT(brush("raise"));
+	TEST_EXPECT(shown(m, "mission") == "foliage" && brushed(m, "mission") == "null");
+	// The person's own overlay is what painting returns to.
+	TEST_EXPECT(brush("surface"));
+	TEST_EXPECT(shown(m, "mission") == "surfaces" && brushed(m, "mission") == "surfaces then foliage");
+	TEST_EXPECT(brush("none"));
+	TEST_EXPECT(shown(m, "mission") == "foliage");
+	// The legend folded and opened: the option on the wire, no Update of the device.
+	editor_test::FakeDevice *device = devices.held(m, ViewportKind::Mission);
+	TEST_EXPECT(device != nullptr);
+	const size_t taken = device ? device->taken.size() : 0;
+	session.handle(request::set_viewport(m, R"({"kind": "mission", "options": {"legend": false}})"));
+	devices.sync(session);
+	TEST_EXPECT(!mission->options().legend && device && std::none_of(device->taken.begin() + std::ptrdiff_t(taken), device->taken.end(),
+	                                                                   [](ViewportAction a) { return a != ViewportAction::Keep; }));
+	const JsonValue folded = state(m, "mission");
+	TEST_EXPECT(folded.get("options") && !folded.get("options")->get_bool("legend", true));
+	session.handle(request::set_viewport(m, R"({"kind": "mission", "options": {"legend": 1}})"));
+	TEST_EXPECT(!session.outcome().done());
+	session.handle(request::set_viewport(m, R"({"kind": "mission", "options": {"legend": true}})"));
+	TEST_EXPECT(mission->options().legend);
+
+	// The terrain viewport alike: its Terrain pane and the brush's Foliage tool show the foliage overlay.
+	const std::string t = v.project.scan->find("Tmap.trn")->relative_path;
+	session.handle(request::open_document(t));
+	devices.sync(session);
+	TEST_EXPECT(session.viewports().find(t, ViewportKind::Terrain) != nullptr && shown(t, "terrain") == "none");
+	session.handle(request::set_workspace(R"({"document": {"terrain": true}, "terrain_brush": {"tool": "foliage"}})"));
+	devices.sync(session);
+	TEST_EXPECT(shown(t, "terrain") == "foliage" && brushed(t, "terrain") == "foliage then none");
+	session.handle(request::set_viewport(t, R"({"kind": "terrain", "options": {"legend": false}})"));
+	const JsonValue terrain = state(t, "terrain");
+	TEST_EXPECT(terrain.get("options") && !terrain.get("options")->get_bool("legend", true));
+	TEST_EXPECT(brush("none"));
+	TEST_EXPECT(shown(t, "terrain") == "none" && brushed(t, "terrain") == "null");
+	std::printf("brush overlay: Surface and Foliage show their map's overlay in the mission view and the terrain view, the "
+	            "person's own after, theirs kept; the legend's fold an option\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	int failures = 0;
 	failures += test_view();
 	failures += test_imported();
+	failures += test_sample_unsaved();
+	failures += test_brush_overlay();
 	if (failures == 0) std::printf("editor_terrain_maps_view: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

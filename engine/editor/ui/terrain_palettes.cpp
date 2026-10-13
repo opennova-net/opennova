@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -11,6 +12,7 @@
 #include <editor/documents/til_document.h>
 #include <editor/model/document_base.h>
 #include <editor/preview/mission_ground_facts.h>
+#include <editor/preview/mission_ground_overlay.h>
 #include <editor/preview/texture_thumbnail_images.h>
 #include <editor/preview/texture_thumbnails.h>
 #include <editor/preview/tile_tools.h>
@@ -174,11 +176,82 @@ void draw_selected(TerrainPaneContext &context, const TilDocument *placement) {
 		tile_command(workspace, at, "tile_group_rotate", {-1.0});
 }
 
+// A value of the Paint palettes as a swatch: its value, its colour (the overlay's for it) and its words.
+struct Swatch {
+	int value = 0;
+	uint8_t rgb[3] = {};
+	std::string tip;
+};
+
+// The swatch of a surface class or a foliage code, from the legend row the overlay makes of it.
+Swatch swatch_of(MissionGroundOverlay kind, int value, const std::vector<FoliageDef> &defs) {
+	const MissionOverlayRow row = mission_overlay_brush_row(kind, value, defs);
+	Swatch out;
+	out.value = value;
+	std::copy(std::begin(row.rgb), std::end(row.rgb), out.rgb);
+	out.tip = std::to_string(value) + "  " + row.words + ". Click to paint it.";
+	return out;
+}
+
+// A palette of values as a grid of swatches as wide as the pane (S25, the painting feedback): its title's line, then
+// each value its colour with its number on it, its name and words in its tip, the brush's (`picked`) outlined; a
+// click picks one (`pick`). Each swatch's id is its value's ("##swatch" under PushID(value)).
+template <class Pick>
+void draw_swatches(const std::vector<Swatch> &swatches, int picked, const char *title, const char *tip, Pick &&pick) {
+	ImGui::TextUnformatted(title);
+	ui_kit::tooltip(tip);
+	const float side = std::max(ImGui::GetFrameHeight(), ImGui::CalcTextSize("000").x + 6.0f);
+	const float gap = std::floor(ImGui::GetStyle().ItemSpacing.x * 0.5f);
+	const int columns = std::max(1, int((ImGui::GetContentRegionAvail().x + gap) / (side + gap)));
+	ImDrawList &paint = *ImGui::GetWindowDrawList();
+	for (size_t i = 0; i < swatches.size(); ++i) {
+		const Swatch &swatch = swatches[i];
+		if (i % size_t(columns) != 0) ImGui::SameLine(0.0f, gap);
+		ImGui::PushID(swatch.value);
+		const bool pressed = ImGui::InvisibleButton("##swatch", ImVec2(side, side));
+		const ImVec2 from = ImGui::GetItemRectMin(), to = ImGui::GetItemRectMax();
+		paint.AddRectFilled(from, to, IM_COL32(swatch.rgb[0], swatch.rgb[1], swatch.rgb[2], 255));
+		// Its number in black on a light colour, in white on a dark one.
+		const int light = swatch.rgb[0] * 299 + swatch.rgb[1] * 587 + swatch.rgb[2] * 114;
+		const std::string number = std::to_string(swatch.value);
+		const ImVec2 size = ImGui::CalcTextSize(number.c_str());
+		paint.AddText(ImVec2(from.x + (side - size.x) * 0.5f, from.y + (side - size.y) * 0.5f),
+		              light > 140000 ? IM_COL32(0, 0, 0, 255) : IM_COL32(255, 255, 255, 255), number.c_str());
+		const bool chosen = swatch.value == picked;
+		if (chosen) {
+			paint.AddRect(ImVec2(from.x - 1.0f, from.y - 1.0f), ImVec2(to.x + 1.0f, to.y + 1.0f), IM_COL32(255, 255, 255, 255), 0.0f, 0, 3.0f);
+			paint.AddRect(from, to, IM_COL32(0, 0, 0, 255), 0.0f, 0, 1.0f);
+		} else {
+			paint.AddRect(from, to, ImGui::GetColorU32(ImGui::IsItemHovered() ? ImGuiCol_ButtonHovered : ImGuiCol_Border));
+		}
+		ui_kit::tooltip(swatch.tip);
+		if (pressed) pick(swatch.value);
+		ImGui::PopID();
+	}
+}
+
+// Fill and Erase, the Paint tools' modes, on `row`.
+void draw_fill_erase(TerrainPaneContext &context, ui_kit::WrapRow &row) {
+	const TerrainBrush &brush = context.brush;
+	bool fill = brush.fill;
+	row.next(ui_kit::checkbox_width("Fill"));
+	if (ImGui::Checkbox("Fill", &fill)) window_requests::set_workspace(context.workspace, "terrain_brush", "fill", io::JsonValue::make_bool(fill));
+	ui_kit::tooltip("A click fills the texels joined to the one under it that hold its value, wherever the terrain "
+	                "draws them (a drag fills where it was pressed).");
+	bool erase = brush.erase;
+	row.next(ui_kit::checkbox_width("Erase"));
+	if (ImGui::Checkbox("Erase", &erase)) window_requests::set_workspace(context.workspace, "terrain_brush", "erase", io::JsonValue::make_bool(erase));
+	ui_kit::tooltip("Lay the game's default in place of the brush's value: class 1 (dirt, the game's class where a "
+	                "terrain names no surface map), foliage code 0 (grows nothing), the first detail layer, the colour "
+	                "map as last saved.");
+}
+
 } // namespace
 
 // The Paint tools' values (S25 B4): the surface class from the char map's legend, in the game's words; the foliage
 // code from the terrain's definitions (0 grows nothing); the colour; the detail blend map's layer. Each a member of
-// the session's brush (set_workspace's terrain_brush).
+// the session's brush (set_workspace's terrain_brush). S25, the painting feedback: the classes and the codes a grid of
+// swatches (the pane under the 3D view holds the brush's sliders and its palette with no scrolling).
 void draw_paint_part(TerrainPaneContext &context) {
 	Workspace &workspace = context.workspace;
 	const TerrainBrush &brush = context.brush;
@@ -215,45 +288,58 @@ void draw_paint_part(TerrainPaneContext &context) {
 	}
 	switch (brush.tool) {
 	case TerrainTool::Surface: {
-		ImGui::TextUnformatted("Surface class");
-		ui_kit::tooltip("The class the game reads under a body or a round there: its footsteps, its impacts, its tyres.");
-		for (int surface = 0; surface < kCharmapLegendCount; ++surface) {
-			const CharmapLegendColour &c = kCharmapLegend[surface];
-			ImGui::PushID(surface);
-			ImGui::ColorButton("##legend", ImVec4(c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, 1.0f), ImGuiColorEditFlags_NoTooltip,
-			                   ImVec2(ImGui::GetFontSize(), ImGui::GetFontSize()));
-			ImGui::SameLine();
-			const std::string label = std::to_string(surface) + "  " + mission_surface_words(surface);
-			if (ImGui::Selectable(label.c_str(), brush.surface == surface)) set("surface", io::json_number(surface));
-			if (const char *name = mission_surface_name(surface); name && *name) ui_kit::tooltip(name);
-			ImGui::PopID();
-		}
+		// The twenty classes the tile set tables name, each its legend colour (the surfaces overlay's).
+		std::vector<Swatch> swatches;
+		for (int surface = 0; surface < kCharmapLegendCount; ++surface)
+			swatches.push_back(swatch_of(MissionGroundOverlay::Surfaces, surface, {}));
+		draw_swatches(swatches, brush.surface, "Surface class",
+		              "The class the game reads under a body or a round there: its footsteps, its impacts, its tyres.",
+		              [&](int value) { set("surface", io::json_number(value)); });
+		ui_kit::WrapRow row;
 		int held = brush.surface;
-		ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.0f);
+		row.next(ui_kit::field_width(ImGui::GetFontSize() * 7.0f, "Class"));
+		ImGui::SetNextItemWidth(ImGui::GetFontSize() * 7.0f);
 		ImGui::InputInt("Class", &held);
 		ui_kit::tooltip("Any class, 0 to 255: the tile set tables name the first 20. The game reads one past them as it "
 		                "stands: its footsteps and weather treat it as no class they name, and a round striking there "
 		                "takes an impact row no shipped table authors (20 to 23) or the ammo's obj row (24 and past).");
 		if (ImGui::IsItemDeactivatedAfterEdit()) set("surface", io::json_number(std::clamp(held, 0, 255)));
+		const std::string name = mission_surface_words(brush.surface);
+		row.next(ui_kit::text_width(name.c_str()));
+		ImGui::TextUnformatted(name.c_str());
+		if (const char *game = mission_surface_name(brush.surface); game && *game) ui_kit::tooltip(game);
+		draw_fill_erase(context, row);
 		break;
 	}
 	case TerrainTool::Foliage: {
-		ImGui::TextUnformatted("Foliage code");
-		if (ImGui::Selectable("0  grows nothing", brush.foliage == 0)) set("foliage", io::json_number(0));
-		if (context.family.trn)
-			for (const FoliageDef &def : context.family.trn->foliage_defs)
-				for (const int code : def.match) {
-					if (code == FOLIAGE_MATCH_UNSET || code < 0 || code > 255) continue;
-					const std::string label = std::to_string(code) + "  " + (def.graphic.empty() ? std::string("(no model)") : def.graphic);
-					ImGui::PushID(code);
-					if (ImGui::Selectable(label.c_str(), brush.foliage == code)) set("foliage", io::json_number(code));
-					ImGui::PopID();
-				}
+		// Code 0 (grows nothing), then the codes the terrain's definitions match, each the colour of what it grows (the
+		// foliage overlay's), and the brush's own where it is none of them.
+		static const std::vector<FoliageDef> kNone;
+		const std::vector<FoliageDef> &defs = context.family.trn ? context.family.trn->foliage_defs : kNone;
+		std::vector<int> codes{0};
+		for (const FoliageDef &def : defs)
+			for (const int code : def.match)
+				if (code != FOLIAGE_MATCH_UNSET && code >= 0 && code <= 255 &&
+				    std::find(codes.begin(), codes.end(), code) == codes.end())
+					codes.push_back(code);
+		if (std::find(codes.begin(), codes.end(), brush.foliage) == codes.end()) codes.push_back(brush.foliage);
+		std::vector<Swatch> swatches;
+		for (const int code : codes) swatches.push_back(swatch_of(MissionGroundOverlay::Foliage, code, defs));
+		draw_swatches(swatches, brush.foliage, "Foliage code",
+		              "The code the foliage map holds there: each definition whose match lists it grows its model there.",
+		              [&](int value) { set("foliage", io::json_number(value)); });
+		ui_kit::WrapRow row;
 		int held = brush.foliage;
-		ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.0f);
+		row.next(ui_kit::field_width(ImGui::GetFontSize() * 7.0f, "Code"));
+		ImGui::SetNextItemWidth(ImGui::GetFontSize() * 7.0f);
 		ImGui::InputInt("Code", &held);
 		ui_kit::tooltip("Any code, 0 to 255: a definition whose match lists it grows there.");
 		if (ImGui::IsItemDeactivatedAfterEdit()) set("foliage", io::json_number(std::clamp(held, 0, 255)));
+		const std::string grows = mission_overlay_brush_row(MissionGroundOverlay::Foliage, brush.foliage, defs).name;
+		const std::string name = "grows " + grows;
+		row.next(ui_kit::text_width(name.c_str()));
+		ImGui::TextUnformatted(name.c_str());
+		draw_fill_erase(context, row);
 		break;
 	}
 	case TerrainTool::Colour: {
@@ -280,17 +366,9 @@ void draw_paint_part(TerrainPaneContext &context) {
 	}
 	default: ImGui::TextDisabled("Pick a Paint tool: Surface, Foliage, Colour or Detail."); break;
 	}
-	if (terrain_tool_plane(brush.tool, plane) && plane != TerrainPlane::Heights) {
-		bool fill = brush.fill;
-		if (ImGui::Checkbox("Fill", &fill)) set("fill", io::JsonValue::make_bool(fill));
-		ui_kit::tooltip("A click fills the texels joined to the one under it that hold its value, wherever the terrain "
-		                "draws them (a drag fills where it was pressed).");
-		ImGui::SameLine();
-		bool erase = brush.erase;
-		if (ImGui::Checkbox("Erase", &erase)) set("erase", io::JsonValue::make_bool(erase));
-		ui_kit::tooltip("Lay the game's default in place of the brush's value: class 1 (dirt, the game's class where a "
-		                "terrain names no surface map), foliage code 0 (grows nothing), the first detail layer, the colour "
-		                "map as last saved.");
+	if (brush.tool == TerrainTool::Colour || brush.tool == TerrainTool::Detail) {
+		ui_kit::WrapRow row;
+		draw_fill_erase(context, row);
 	}
 }
 

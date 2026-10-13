@@ -13,6 +13,7 @@
 #include <editor/ui/ui_kit.h>
 
 #include <imgui.h>
+#include <imgui_internal.h>
 
 namespace opennova::editor {
 
@@ -36,6 +37,7 @@ constexpr ImU32 kHaloColor = IM_COL32(12, 12, 12, 190);
 constexpr float kHaloWidth = 2.0f;
 constexpr float kBadgeInset = 6.0f; // from the picture's corner
 constexpr float kBadgePad = 3.0f; // around its text
+constexpr float kLegendRowGap = 2.0f; // between a legend's lines
 
 // The next zoom step past `scale` in the wheel's direction (the last one at either end).
 float next_zoom(float scale, bool in) {
@@ -447,37 +449,113 @@ void ViewportCanvas::badge(const std::string &text) {
 	paint.PopClipRect();
 }
 
-void ViewportCanvas::legend(const std::string &title, const std::vector<LegendRow> &rows) {
-	if (title.empty() && rows.empty())
-		return;
-	ImDrawList &paint = *ImGui::GetWindowDrawList();
+bool ViewportCanvas::legend(const Legend &legend) {
+	if (legend.title.empty() && legend.rows.empty() && legend.empty.empty()) return false;
+	const ImGuiStyle &style = ImGui::GetStyle();
 	const float line = ImGui::GetTextLineHeight();
-	const float swatch = line * 0.8f;
+	const float swatch = std::floor(line * 0.8f);
 	const float gap = kBadgePad * 2.0f;
-	// The title may run to several lines.
-	const ImVec2 heading = title.empty() ? ImVec2(0.0f, 0.0f) : ImGui::CalcTextSize(title.c_str());
-	float width = heading.x;
-	for (const LegendRow &row : rows)
-		width = std::max(width, swatch + gap + ImGui::CalcTextSize(row.text.c_str()).x);
-	const float height = heading.y + line * float(rows.size());
-	const ImVec2 at(origin_.x + kBadgeInset, surface_max_.y - kBadgeInset - height);
-	paint.PushClipRect(
-			ImVec2(surface_min_.x, surface_min_.y), ImVec2(surface_max_.x, surface_max_.y), true);
-	paint.AddRectFilled(ImVec2(at.x - kBadgePad, at.y - kBadgePad),
-			ImVec2(at.x + width + kBadgePad, at.y + height + kBadgePad), kBadgeFill);
-	float y = at.y;
-	if (!title.empty()) {
-		paint.AddText(ImVec2(at.x, y), kBadgeText, title.c_str());
-		y += heading.y;
+	const float pad = kBadgePad * 2.0f;
+	// A third of the picture at most either way: no room for a line and its padding, no legend.
+	const float most_w = std::floor(float(input_.width) * kLegendShare);
+	const float most_h = std::floor(float(input_.height) * kLegendShare);
+	if (most_w < line * 4.0f || most_h < line + 2.0f * pad) return false;
+	// Each row a cell: its swatch, its key and its name (the outline's room round it).
+	std::vector<std::string> labels;
+	labels.reserve(legend.rows.size());
+	float cell = 0.0f;
+	for (const LegendRow &row : legend.rows) {
+		labels.push_back(row.name.empty() ? row.key : row.key + "  " + row.name);
+		cell = std::max(cell, swatch + gap + ImGui::CalcTextSize(labels.back().c_str()).x + 2.0f);
 	}
-	for (const LegendRow &row : rows) {
-		const float top = y + (line - swatch) * 0.5f;
-		paint.AddRectFilled(ImVec2(at.x, top), ImVec2(at.x + swatch, top + swatch),
-				IM_COL32(row.rgb[0], row.rgb[1], row.rgb[2], 255));
-		paint.AddText(ImVec2(at.x + swatch + gap, y), kBadgeText, row.text.c_str());
-		y += line;
+	const float header = line + gap + ImGui::CalcTextSize(legend.title.c_str()).x;
+	const int count = int(legend.rows.size());
+	// The rows in as many columns as the width holds, the scrollbar's room kept where they run past the height.
+	int columns = 1, lines = 0;
+	float inner = 0.0f, width = 0.0f, height = 0.0f;
+	for (const bool scrolls : {false, true}) {
+		inner = most_w - 2.0f * pad - (scrolls ? style.ScrollbarSize : 0.0f);
+		cell = std::min(cell, inner);
+		columns = count ? std::clamp(int((inner + gap) / (cell + gap)), 1, count) : 1;
+		lines = count ? (count + columns - 1) / columns : (legend.empty.empty() ? 0 : 1);
+		const float body = count ? float(columns) * cell + float(columns - 1) * gap
+		                         : ImGui::CalcTextSize(legend.empty.c_str()).x;
+		const float natural_w = std::max(header, legend.open ? body : 0.0f) + 2.0f * pad + (scrolls ? style.ScrollbarSize : 0.0f);
+		const float natural_h = line + 2.0f * pad + (legend.open && lines ? float(lines) * (line + kLegendRowGap) : 0.0f);
+		width = std::min(natural_w, most_w);
+		height = std::min(natural_h, most_h);
+		if (natural_h <= most_h) break;
 	}
-	paint.PopClipRect();
+	// A child window over the picture's corner: the surface takes no press under it, its rows scroll in it. The
+	// canvas's layout (the cursor, its extent, the last item: a drop target the picture's) is put back after it.
+	ImGuiWindow *host = ImGui::GetCurrentWindow();
+	const ImGuiWindowTempData &dc = host->DC;
+	const struct {
+		ImVec2 cursor, prev_line, max, ideal_max, curr_size, prev_size;
+		float curr_base, prev_base;
+		bool same_line, set_pos;
+	} kept{dc.CursorPos, dc.CursorPosPrevLine, dc.CursorMaxPos, dc.IdealMaxPos, dc.CurrLineSize, dc.PrevLineSize,
+	       dc.CurrLineTextBaseOffset, dc.PrevLineTextBaseOffset, dc.IsSameLine, dc.IsSetPos};
+	const ImGuiLastItemData last = GImGui->LastItemData;
+	ImGui::SetCursorScreenPos(ImVec2(origin_.x + kBadgeInset, origin_.y + float(input_.height) - kBadgeInset - height));
+	ImGui::PushStyleColor(ImGuiCol_ChildBg, kBadgeFill);
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(pad, pad));
+	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(gap, kLegendRowGap));
+	bool toggled = false;
+	if (ImGui::BeginChild("overlay_legend", ImVec2(width, height), ImGuiChildFlags_None, ImGuiWindowFlags_NoSavedSettings)) {
+		ImGui::PushStyleColor(ImGuiCol_Text, kBadgeText);
+		toggled = ImGui::ArrowButtonEx("##fold", legend.open ? ImGuiDir_Down : ImGuiDir_Right, ImVec2(line, line));
+		ui_kit::tooltip(legend.open ? "Fold the legend to its title." : "Open the legend: a row for each value the picture shows.");
+		ImGui::SameLine();
+		const std::string title = ui_kit::fit(legend.title, std::max(0.0f, ImGui::GetContentRegionAvail().x));
+		ImGui::TextUnformatted(title.c_str());
+		ui_kit::tooltip(legend.tip.empty() ? legend.title : legend.tip);
+		if (legend.open && count == 0 && !legend.empty.empty()) {
+			ImGui::TextUnformatted(ui_kit::fit(legend.empty, std::max(0.0f, ImGui::GetContentRegionAvail().x)).c_str());
+			ui_kit::tooltip(legend.empty);
+		}
+		ImDrawList &paint = *ImGui::GetWindowDrawList();
+		std::string marked;
+		for (int i = 0; legend.open && i < count; ++i) {
+			const LegendRow &row = legend.rows[size_t(i)];
+			if (i % columns) ImGui::SameLine();
+			ImGui::Dummy(ImVec2(cell, line));
+			const ImVec2 from = ImGui::GetItemRectMin(), to = ImGui::GetItemRectMax();
+			const float top = from.y + (line - swatch) * 0.5f;
+			paint.AddRectFilled(ImVec2(from.x + 1.0f, top), ImVec2(from.x + 1.0f + swatch, top + swatch),
+			                    IM_COL32(row.rgb[0], row.rgb[1], row.rgb[2], 255));
+			paint.PushClipRect(from, to, true);
+			paint.AddText(ImVec2(from.x + 1.0f + swatch + gap, from.y), row.marked ? kSelectedColor : kBadgeText,
+			              labels[size_t(i)].c_str());
+			paint.PopClipRect();
+			if (row.marked) {
+				paint.AddRect(ImVec2(from.x - 1.0f, from.y - 1.0f), ImVec2(to.x + 1.0f, to.y + 1.0f), kSelectedColor);
+				// Scrolled into sight as it comes to be the marked one (the brush's value picked), the person's own
+				// scroll kept after.
+				marked = row.key;
+				if (marked != legend_marked_) ImGui::SetScrollHereY(0.5f);
+			}
+			ui_kit::tooltip(row.tip);
+		}
+		if (legend.open) legend_marked_ = marked;
+		ImGui::PopStyleColor();
+	}
+	ImGui::EndChild();
+	ImGui::PopStyleVar(2);
+	ImGui::PopStyleColor();
+	// The child is the window's own (its child list keeps it); the layout around it is the canvas's.
+	host->DC.CursorPos = kept.cursor;
+	host->DC.CursorPosPrevLine = kept.prev_line;
+	host->DC.CursorMaxPos = kept.max;
+	host->DC.IdealMaxPos = kept.ideal_max;
+	host->DC.CurrLineSize = kept.curr_size;
+	host->DC.PrevLineSize = kept.prev_size;
+	host->DC.CurrLineTextBaseOffset = kept.curr_base;
+	host->DC.PrevLineTextBaseOffset = kept.prev_base;
+	host->DC.IsSameLine = kept.same_line;
+	host->DC.IsSetPos = kept.set_pos;
+	GImGui->LastItemData = last;
+	return toggled;
 }
 
 void ViewportCanvas::draw(const OverlayList &shapes, CanvasCursor cursor) {

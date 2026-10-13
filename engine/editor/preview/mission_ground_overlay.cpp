@@ -182,12 +182,15 @@ void surfaces_legend(MissionOverlayImage &image) {
 		row.key = std::to_string(surface);
 		class_rgb(surface, row.rgb);
 		row.share = double(image.counts[size_t(surface)]) / texels;
+		row.name = mission_surface_words(surface);
 		row.words = class_row_words(surface);
+		row.value = surface;
 		image.legend.push_back(std::move(row));
 	}
 	if (image.deciding) {
 		MissionOverlayRow row;
 		row.key = "tile";
+		row.name = "placed tiles";
 		std::copy(std::begin(kOutline), std::end(kOutline), row.rgb);
 		row.words = std::to_string(image.deciding) + " placed tile(s) of the mission's .til, outlined: each square's class "
 				"is its tile set's table entry (TSD_NULL with no .tsd), not the char map's";
@@ -210,7 +213,9 @@ void surfaces(MissionOverlayImage &image, const MissionGround &ground) {
 		row.key = "1";
 		class_rgb(1, row.rgb);
 		row.share = 1.0;
+		row.name = mission_surface_words(1);
 		row.words = class_row_words(1);
+		row.value = 1;
 		image.legend.push_back(std::move(row));
 		return;
 	}
@@ -273,6 +278,14 @@ std::string slots_words(const std::vector<FoliageDef> &defs, int mask) {
 	return out;
 }
 
+// The models a mask grows, short: "onfern1.3di", "onfern1.3di + ongrass2.3di".
+std::string slots_name(const std::vector<FoliageDef> &defs, int mask) {
+	std::string out;
+	for (size_t slot = 0; slot < defs.size() && slot < 4; ++slot)
+		if (mask & (1 << slot)) out += (out.empty() ? "" : " + ") + defs[slot].graphic;
+	return out;
+}
+
 void mask_rgb(int mask, uint8_t out[3]) {
 	int r = 0, g = 0, b = 0, n = 0;
 	for (int slot = 0; slot < 4; ++slot)
@@ -320,12 +333,15 @@ void foliage_legend(MissionOverlayImage &image, const std::vector<FoliageDef> &d
 			if (mask & (1 << slot)) row.key += (row.key.empty() ? "foliage " : " + ") + std::to_string(slot + 1);
 		mask_rgb(mask, row.rgb);
 		row.share = double(image.counts[size_t(mask)]) / texels;
+		row.name = slots_name(defs, mask);
 		row.words = "grows " + slots_words(defs, mask);
+		row.value = mask;
 		image.legend.push_back(std::move(row));
 	}
 	if (image.counts[kKeptOffKey]) {
 		MissionOverlayRow row;
 		row.key = "kept off";
+		row.name = "by tiles";
 		std::copy(std::begin(kKeptOff), std::end(kKeptOff), row.rgb);
 		row.share = double(image.counts[kKeptOffKey]) / texels;
 		row.words = "a placed tile's square (2 units round it) keeps every definition without forceon off";
@@ -456,6 +472,30 @@ std::vector<MissionOverlayRect> mission_overlay_patch_rects(const MissionGround 
 	return out;
 }
 
+MissionOverlayRow mission_overlay_brush_row(MissionGroundOverlay kind, int value, const std::vector<FoliageDef> &defs) {
+	MissionOverlayRow row;
+	if (kind == MissionGroundOverlay::Surfaces) {
+		row.key = std::to_string(value);
+		class_rgb(value, row.rgb);
+		row.name = mission_surface_words(value);
+		row.words = class_row_words(value);
+		row.value = value;
+	} else if (kind == MissionGroundOverlay::Foliage) {
+		const int mask = value >= 0 && value <= 255 ? int(foliage_remap_pixel_to_def_mask(defs, value) & 0xFu) : 0;
+		row.key = "code " + std::to_string(value);
+		row.value = mask;
+		if (mask) {
+			mask_rgb(mask, row.rgb);
+			row.name = slots_name(defs, mask);
+			row.words = "grows " + slots_words(defs, mask);
+		} else {
+			row.name = "nothing";
+			row.words = "grows nothing: no foliage definition of the terrain's matches it";
+		}
+	}
+	return row;
+}
+
 io::JsonValue mission_overlay_to_json(const MissionOverlayImage &image) {
 	JsonValue out = JsonValue::make_object();
 	out.set("kind", json_string(mission_ground_overlay_token(image.kind)));
@@ -468,6 +508,7 @@ io::JsonValue mission_overlay_to_json(const MissionOverlayImage &image) {
 		for (const uint8_t c : row.rgb) rgb.push(json_number(c));
 		one.set("rgb", std::move(rgb));
 		one.set("share", json_number(row.share));
+		one.set("name", json_string(row.name));
 		one.set("words", json_string(row.words));
 		legend.push(std::move(one));
 	}

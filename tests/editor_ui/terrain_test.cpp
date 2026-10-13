@@ -17,6 +17,7 @@
 #include <editor/preview/mission_camera.h>
 #include <editor/preview/mission_ground_facts.h>
 #include <editor/preview/mission_viewport.h>
+#include <editor/preview/terrain_viewport.h>
 #include <editor/ui/editor_requests.h>
 
 #include "editor_ui_test_support.h"
@@ -370,7 +371,7 @@ void test_ledger() {
 	      "2. the tank followed the raised ground as the bake landed");
 	std::printf("  the tank: z %.3f -> %.3f\n", tank_z, tank_followed);
 
-	// 3. Paint, then Stone (12) in its legend.
+	// 3. Paint, then Stone (12) in its palette (a swatch of the classes' grid, in sight with no scrolling).
 	const ImGuiWindow *pane = MissionRun::drawn_window("/terrain_pane_");
 	CHECK(pane != nullptr, "the Terrain pane drawn");
 	if (!pane) return;
@@ -378,13 +379,11 @@ void test_ledger() {
 	CHECK(run.ui.click_item(item_id(tabs, {"Paint"})), "3. the Paint tab clicked");
 	++clicks;
 	run.settle();
-	const std::string stone = "12  " + mission_surface_words(12);
 	const ImGuiWindow *body = tab_body();
 	CHECK(body != nullptr, "3. Paint's body drawn");
 	if (!body) return;
-	const ImGuiID stone_id = item_id(pushed(body->ID, 12), {stone.c_str()});
-	CHECK(wheel_to(run.ui, "/terrain_tab_body_", stone_id), "3. Stone in sight, the legend scrolled to it");
-	CHECK(run.ui.click_item(stone_id), "3. Stone clicked in the legend");
+	const ImGuiID stone_id = item_id(pushed(body->ID, 12), {"##swatch"});
+	CHECK(run.ui.click_item(stone_id), "3. Stone clicked in the palette, in sight as the tab shows");
 	++clicks;
 	run.settle();
 	run.take();
@@ -631,6 +630,135 @@ void test_lock_line() {
 	CHECK(line == "Under the brush in this mission: 0 entities follow the ground, 1 is height locked.", ("at the cursor: " + line).c_str());
 }
 
+// The painting feedback (2026-10-13), over the null-backend Ui at 1600 x 1000 as the editor first lays itself out: the
+// Paint tab (its Surface tool) shows the surface classes over the 3D view, a compact legend in the picture's corner (a
+// third of the picture at most either way, the brush's class among its rows) whose toggle folds it (a set_viewport of
+// the view's legend option); the Foliage tool the foliage, the Sculpt tab the person's own (none) again. The Paint tab's
+// brush sliders and its palette fit the pane under the 3D view with no scrolling, each class a swatch in sight.
+void test_painting_feedback() {
+	MissionRun run("opennova_editor_ui_terrain_painting");
+	ImGui::GetIO().DisplaySize = ImVec2(1600.0f, 1000.0f);
+	CHECK(open_on_terrain(run), "the mission open on its terrain");
+	const SessionView &v = run.session.view();
+	const auto *model = static_cast<const MissionViewport *>(run.session.viewports().find(run.path, ViewportKind::Mission));
+	CHECK(model != nullptr && model->options().overlay == MissionGroundOverlay::None, "the 3D view, no overlay");
+	if (!model) return;
+	// Every class the tile set tables name painted somewhere (the legend of twenty rows the feedback met).
+	for (int surface = 0; surface < 20; ++surface) {
+		TerrainStrokeAsk ask;
+		ask.plane = TerrainPlane::Surface;
+		ask.brush.tool = TerrainTool::Surface;
+		ask.brush.surface = surface;
+		ask.brush.radius = 3.0f;
+		ask.brush_named = kBrushTool | kBrushSurface | kBrushRadius;
+		ask.points = {{-320.0 + 12.0 * surface, 256.0}};
+		run.session.handle(request::terrain_stroke(run.path, ask));
+		CHECK(run.session.outcome().done(), "a class painted");
+	}
+	window_requests::show_terrain(run.ui.windows, run.path, true);
+	run.settle();
+	run.take();
+	const ImGuiWindow *pane = MissionRun::drawn_window("/terrain_pane_");
+	CHECK(pane != nullptr, "the Terrain pane drawn");
+	if (!pane) return;
+	const ImGuiID tabs = item_id(pane->ID, {"terrain_tools"});
+	CHECK(run.ui.click_item(item_id(tabs, {"Paint"})), "the Paint tab clicked");
+	run.settle();
+	run.take();
+	CHECK(v.workspace.terrain_brush.tool == TerrainTool::Surface, "Paint: the Surface tool");
+	// The surfaces overlay over the picture, the person's own none kept to go back to.
+	run.settle();
+	CHECK(model->options().overlay == MissionGroundOverlay::Surfaces, "the surfaces overlay shown while Surface paints");
+	DrawnDevice *device = run.devices.held(run.path, ViewportKind::Mission);
+	const ImGuiWindow *legend = MissionRun::drawn_window("/overlay_legend_");
+	CHECK(device != nullptr && legend != nullptr, "the overlay's legend drawn over the picture");
+	if (!device || !legend) return;
+	std::printf("  1600 x 1000: the picture %d x %d, its legend %.0f x %.0f, the pane %.0f x %.0f\n", device->width,
+	            device->height, double(legend->Size.x), double(legend->Size.y), double(pane->Size.x), double(pane->Size.y));
+	CHECK(legend->Size.x <= std::floor(float(device->width) / 3.0f) + 0.5f &&
+	              legend->Size.y <= std::floor(float(device->height) / 3.0f) + 0.5f,
+	      "the legend a third of the picture at most either way");
+	CHECK(model->overlay().legend.size() >= 20 && legend->ScrollMax.y > 0.0f,
+	      "twenty classes and more: the legend's rows scroll within its bound");
+	CHECK(legend->Pos.x >= device->origin.x && legend->Pos.y + legend->Size.y <= device->origin.y + float(device->height) + 0.5f,
+	      "the legend in the picture's corner");
+	// The Paint tab whole in the pane: its sliders and the classes' palette with no scrolling, Stone in sight.
+	const ImGuiWindow *body = tab_body();
+	CHECK(body != nullptr, "Paint's body drawn");
+	if (body) {
+		std::printf("  the Paint tab's body %.0f high, its content %.0f, scrolls %.0f\n", double(body->Size.y),
+		            double(body->ContentSize.y), double(body->ScrollMax.y));
+		CHECK(body->ScrollMax.y <= 0.0f, "the Paint tab's sliders and palette fit the pane with no scrolling");
+		ImRect stone;
+		CHECK(run.ui.locate(item_id(pushed(body->ID, 12), {"##swatch"}), stone) && body->InnerClipRect.Contains(stone),
+		      "Stone's swatch in sight");
+	}
+	// The legend's toggle: folded to its title, a set_viewport of the legend option; again, open.
+	legend = MissionRun::drawn_window("/overlay_legend_");
+	CHECK(legend && run.ui.click_item(item_id(legend->ID, {"##fold"})), "the legend's toggle clicked");
+	run.settle();
+	std::vector<EditorRequest> raised = run.take();
+	bool folded = false;
+	for (const EditorRequest &request : raised)
+		folded = folded || (request.kind == EditorRequestKind::SetViewport && request.viewport.find("\"legend\"") != std::string::npos);
+	CHECK(folded && !model->options().legend, "folded: the view's legend option off, as the wire sets it");
+	legend = MissionRun::drawn_window("/overlay_legend_");
+	CHECK(legend && legend->Size.y <= ImGui::GetTextLineHeight() + 16.0f, "folded to its title");
+	CHECK(legend && run.ui.click_item(item_id(legend->ID, {"##fold"})), "the legend's toggle clicked again");
+	run.settle();
+	run.take();
+	CHECK(model->options().legend, "open again");
+	// The brush's class past the legend's fold: its row scrolled into sight as the brush picks it.
+	legend = MissionRun::drawn_window("/overlay_legend_");
+	const float scrolled = legend ? legend->Scroll.y : 0.0f;
+	run.session.handle(request::set_workspace(R"({"terrain_brush": {"surface": 19}})"));
+	run.settle();
+	run.take();
+	legend = MissionRun::drawn_window("/overlay_legend_");
+	CHECK(legend && legend->Scroll.y > scrolled, "the legend scrolled to the brush's class");
+	// Foliage: the foliage overlay, the pane whole too.
+	body = tab_body();
+	CHECK(body && run.ui.click_item(item_id(body->ID, {"Foliage"})), "the Foliage tool clicked");
+	run.settle();
+	run.take();
+	CHECK(v.workspace.terrain_brush.tool == TerrainTool::Foliage && model->options().overlay == MissionGroundOverlay::Foliage,
+	      "the foliage overlay shown while Foliage paints");
+	body = tab_body();
+	CHECK(body && body->ScrollMax.y <= 0.0f, "the Foliage tab fits the pane with no scrolling");
+	// Sculpt: the person's own overlay (none) again, no legend.
+	CHECK(run.ui.click_item(item_id(tabs, {"Sculpt"})), "the Sculpt tab clicked");
+	run.settle();
+	run.take();
+	CHECK(v.workspace.terrain_brush.tool == TerrainTool::Raise && model->options().overlay == MissionGroundOverlay::None,
+	      "Sculpt: the overlay back to none");
+	CHECK(MissionRun::drawn_window("/overlay_legend_") == nullptr, "no legend with no overlay");
+}
+
+// The legend over the terrain viewport alike (S25, the painting feedback): a terrain's Terrain pane and the Foliage
+// tool show the foliage overlay with the compact legend, a third of the picture at most.
+void test_terrain_view_legend() {
+	MissionRun run("opennova_editor_ui_terrain_view_legend");
+	ImGui::GetIO().DisplaySize = ImVec2(1600.0f, 1000.0f);
+	CHECK(open_on_terrain(run), "the mission open on its terrain");
+	const std::string t = "terrain/Tmap.trn";
+	run.session.handle(request::open_document(t));
+	run.session.run_operations();
+	run.settle();
+	run.take();
+	run.session.handle(request::set_workspace(R"({"document": {"terrain": true}, "terrain_brush": {"tool": "foliage"}})"));
+	run.settle();
+	run.take();
+	const auto *model = static_cast<const TerrainViewport *>(run.session.viewports().find(t, ViewportKind::Terrain));
+	DrawnDevice *device = run.devices.held(t, ViewportKind::Terrain);
+	CHECK(model && model->options().overlay == MissionGroundOverlay::Foliage, "the terrain view shows the foliage overlay");
+	const ImGuiWindow *legend = MissionRun::drawn_window("/overlay_legend_");
+	CHECK(device && legend, "the terrain view's legend drawn");
+	if (!device || !legend) return;
+	CHECK(legend->Size.x <= std::floor(float(device->width) / 3.0f) + 0.5f &&
+	              legend->Size.y <= std::floor(float(device->height) / 3.0f) + 0.5f,
+	      "the terrain view's legend a third of the picture at most either way");
+}
+
 } // namespace
 
 void run_terrain_tests() {
@@ -640,6 +768,8 @@ void run_terrain_tests() {
 	test_ledger();
 	test_lock_line();
 	test_colour_picker();
+	test_painting_feedback();
+	test_terrain_view_legend();
 }
 
 } // namespace editor_ui_test
