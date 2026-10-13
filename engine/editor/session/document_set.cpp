@@ -866,10 +866,13 @@ void DocumentSet::close_document(const std::string &requested) {
 // are selected: one it does not hold, or of another kind than named, is left out (a repair after an
 // edit asks only about the rows the edit changed), and a primary it does not hold gives way to them.
 // A primary that names no record, with none of the others held, is refused, the selection and the
-// active document as they were (the review: done with nothing selected told the caller nothing).
+// active document as they were (the review: done with nothing selected told the caller nothing). A
+// path that names no open document is refused too (S26 C5: it was made the active document).
 void DocumentSet::select_record(const EditorRequest &request) {
 	const DocumentBase *document = document_for(request.path);
 	const std::string path = document ? document->path() : request.path.empty() ? view_.documents.active : request.path;
+	if (!document && !path.empty() && view_.project.open)
+		return core_.refuse_request(CoreFinding::DocumentNotOpen, "Open the file before selecting in it.", path);
 	const Document *records = document ? records_of(*document) : nullptr;
 	const auto held = [records](const NodeAddress &address) {
 		return records && has_record(*records, address);
