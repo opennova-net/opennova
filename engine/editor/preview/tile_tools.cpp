@@ -162,20 +162,31 @@ std::vector<TilOverlayEntry> tiles_turned_about_centroid(const std::vector<TilOv
 	return out;
 }
 
-void tile_corner_at(double x, double y, bool grid, int32_t &x_fixed, int32_t &z_fixed) {
+bool tile_corner_at(double x, double y, bool grid, int32_t &x_fixed, int32_t &z_fixed) {
+	// The record's words: whole 16.16 units in [-32768, 32767].
+	const auto fits = [](double units) { return std::isfinite(units) && units >= -32768.0 && units <= 32767.0; };
 	if (grid) {
 		// The grid square the point lies in: its west edge the multiple of 16 at or below x, its north edge the
 		// multiple of 16 above y.
-		x_fixed = int32_t(std::floor(x / 16.0) * 16.0) * 65536;
-		z_fixed = int32_t(std::floor(y / 16.0) * 16.0 + 16.0) * 65536;
-		return;
+		const double west = std::floor(x / 16.0) * 16.0;
+		const double north = std::floor(y / 16.0) * 16.0 + 16.0;
+		if (!fits(west) || !fits(north)) return false;
+		x_fixed = int32_t(int64_t(west) * 65536);
+		z_fixed = int32_t(int64_t(north) * 65536);
+		return true;
 	}
 	// Nile's stamp: the point's 16.16 words, truncated, plus 0x7FFF, the fraction cleared [orig: gobj sub_1000B4A1 @
 	// 0x1000B4C8..0x1000B542]; the stored z is the plane's y.
-	const int32_t px = int32_t(std::trunc(x * 65536.0));
-	const int32_t pz = int32_t(std::trunc(y * 65536.0));
-	x_fixed = int32_t(uint32_t(int64_t(px) + 0x7FFF) & 0xFFFF0000u);
-	z_fixed = int32_t(uint32_t(int64_t(pz) + 0x7FFF) & 0xFFFF0000u);
+	if (!std::isfinite(x) || !std::isfinite(y) || std::abs(x) > 65536.0 || std::abs(y) > 65536.0) return false;
+	const int64_t px = int64_t(std::trunc(x * 65536.0));
+	const int64_t pz = int64_t(std::trunc(y * 65536.0));
+	const int64_t cx = (px + 0x7FFF) & ~int64_t(0xFFFF);
+	const int64_t cz = (pz + 0x7FFF) & ~int64_t(0xFFFF);
+	constexpr int64_t lo = std::numeric_limits<int32_t>::min(), hi = std::numeric_limits<int32_t>::max();
+	if (cx < lo || cx > hi || cz < lo || cz > hi) return false;
+	x_fixed = int32_t(cx);
+	z_fixed = int32_t(cz);
+	return true;
 }
 
 uint8_t tile_stamp_flags(int rotation, bool flip_h, bool flip_v) {
@@ -273,7 +284,7 @@ std::vector<Edit> plan_tile_move(const TilDocument &document, const std::vector<
 		const int64_t z = int64_t(to.z_fixed) + dy;
 		if (x < std::numeric_limits<int32_t>::min() || x > std::numeric_limits<int32_t>::max() ||
 		    z <= std::numeric_limits<int32_t>::min() || z > std::numeric_limits<int32_t>::max())
-			continue;
+			return {};
 		to.x_fixed = int32_t(x);
 		to.z_fixed = int32_t(z);
 		sets_to(*row, to, out, gesture);
@@ -331,7 +342,7 @@ std::vector<Edit> plan_tile_stamp(int cell, uint8_t flags, double x, double y, b
 	std::vector<Edit> out;
 	if (cell < 0 || cell > 255) return out;
 	int32_t x_fixed = 0, z_fixed = 0;
-	tile_corner_at(x, y, grid, x_fixed, z_fixed);
+	if (!tile_corner_at(x, y, grid, x_fixed, z_fixed)) return out;
 	Edit add;
 	add.operation = EditOperation::Add;
 	add.address.kind = kTile;

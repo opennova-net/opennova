@@ -12,6 +12,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -104,6 +105,10 @@ int test_nudge_turn_corner() {
 	TEST_EXPECT(x == 0 && z == (32 << 16));
 	tile_corner_at(-0.5, -16.5, true, x, z);
 	TEST_EXPECT(x == -(16 << 16) && z == -(16 << 16));
+	// Past the record's 16.16 range (32767 units either way): no corner, the words as they were.
+	TEST_EXPECT(!tile_corner_at(40000.0, 0.0, true, x, z) && !tile_corner_at(0.0, -40000.0, false, x, z) &&
+	            !tile_corner_at(32767.6, 0.0, false, x, z) && x == -(16 << 16) && z == -(16 << 16));
+	TEST_EXPECT(tile_corner_at(-32768.0, 32767.4, false, x, z) && x == int32_t(0x80000000u) && z == (32767 << 16));
 	std::printf("nudge, group turn, corner: MED's steps and centroid, Nile's rounding\n");
 	return 0;
 }
@@ -189,6 +194,9 @@ int test_planners() {
 	TEST_EXPECT(document.serialize().text == std::string(bytes.begin(), bytes.end()));
 	// Nothing to do: no batch.
 	TEST_EXPECT(plan_tile_move(document, {id(0)}, 0, 0).empty() && plan_tile_turn(document, {}, 1).empty());
+	// A move carrying one of two past the record's range: refused whole, the group kept together.
+	TEST_EXPECT(plan_tile_move(document, {id(0), id(1)}, int64_t(std::numeric_limits<int32_t>::max()) - (8 << 16), 0).empty());
+	TEST_EXPECT(plan_tile_stamp(9, 0, 40000.0, 0.0, false).empty());
 	std::printf("planners: each a step, the layers settled, a stamp over the others, a duplicate, a delete\n");
 	return 0;
 }

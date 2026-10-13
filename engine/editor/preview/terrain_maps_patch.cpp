@@ -133,6 +133,16 @@ bool TerrainMapsFollow::take(const SessionView &view, const DocumentBase &docume
 				continue;
 			made.width = raster->plane(0).width();
 			made.height = raster->plane(0).height();
+			if (made.kind == MapsDevicePatch::Kind::Colour) {
+				// An imported terrain's colour source: its import writes the colour map at 24 bits (run_terrain_import,
+				// tga_write_rgb24), every texel opaque, so the device shows the source's texels at alpha 255 as the
+				// output holds them (the terrain's own map as it is).
+				TerrainFamily family;
+				const TerrainFamilyFile *file =
+				        resolve_terrain_family(view, document, family) ? &family.plane(TerrainPlane::Colour) : nullptr;
+				if (file && !file->import_output.empty() && !strutil::iequals(name, basename_of(file->name)))
+					for (size_t i = 3; i < made.rgba.size(); i += 4) made.rgba[i] = 255;
+			}
 		}
 		made.files.push_back({name, assets->stamp(name)});
 		made.serial = ++serial_;

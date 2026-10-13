@@ -18,8 +18,9 @@ namespace opennova::editor {
 // One row per tile in the file's order, which is the game's draw order: the last tile drawn over the others
 // [orig: PolyTrn_RenderTile @ 0x60DDD4..0x60DF1B], the first holding the point deciding the surface under it
 // [orig: Terrain_GetSurfaceTypeAtPosition @ 0x6065CC..0x60660C]. A tile's fields are its cell of the tile set,
-// its square's south-west corner in mission units (x the record's +0, y its +4 negated, exact to 1/65536; the
-// square spans 16 units east and north [orig: PolyTrn_RenderTile @ 0x60DE20..0x60DE60]) and its orientation
+// its square's north-west corner in mission units (x the record's +0, y its +4 as stored, exact to 1/65536; the
+// square spans 16 units east and south [orig: PolyTrn_RenderTile @ 0x60DE20..0x60DE60]; the game's surface sampler
+// tests the square north of it instead, D-TIL-9) and its orientation
 // (the flags byte: mirror across, mirror down, a quarter turn; its other bits carried). MED's layer (+10) is
 // carried and not shown: the game never reads it, and every edit keeps the rows ascending by it as MED writes
 // them (a tile put in takes the layer of the row before it), so MED's next save keeps the draw order.

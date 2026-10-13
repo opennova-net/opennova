@@ -231,7 +231,9 @@ void draw_paint_part(TerrainPaneContext &context) {
 		int held = brush.surface;
 		ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.0f);
 		ImGui::InputInt("Class", &held);
-		ui_kit::tooltip("Any class, 0 to 255: the game's table names the first 20 (one past them reads as its last).");
+		ui_kit::tooltip("Any class, 0 to 255: the tile set tables name the first 20. The game reads one past them as it "
+		                "stands: its footsteps and weather treat it as no class they name, and a round striking there "
+		                "takes an impact row no shipped table authors (20 to 23) or the ammo's obj row (24 and past).");
 		if (ImGui::IsItemDeactivatedAfterEdit()) set("surface", io::json_number(std::clamp(held, 0, 255)));
 		break;
 	}

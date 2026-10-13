@@ -54,7 +54,7 @@ uint8_t tile_flipped(uint8_t flags, bool across);
 
 // A record nudged (dx, dy) steps on the plane (each -1, 0 or 1), a step 1 unit or, `big`, 16: MED's arrow keys,
 // each coordinate snapped down to whole units after the move, a positive move rounding the coordinate up first
-// [orig: JOTACmed sub_43F0B0 @ 0x43F0DE..0x43F1A7, in its own frame, whose second axis runs south].
+// [orig: JOTACmed sub_43F0B0 @ 0x43F0DE..0x43F1A7, its second axis the stored z, the plane's y, positive north].
 TilOverlayEntry tile_nudged(const TilOverlayEntry &entry, int dx, int dy, bool big);
 // Records turned a quarter (positive counter-clockwise) about their tiles' centroid, each turned in place too:
 // MED's group turn over the tiles' centres, the centroid their integer mean, each centre's offset turned and the
@@ -62,8 +62,9 @@ TilOverlayEntry tile_nudged(const TilOverlayEntry &entry, int dx, int dy, bool b
 std::vector<TilOverlayEntry> tiles_turned_about_centroid(const std::vector<TilOverlayEntry> &entries, int direction);
 // The corner a stamp at (x, y) (mission units) places, the square's north-west: Nile's, the point to the nearest whole
 // unit [orig: gobj sub_1000B4A1 @ 0x1000B4C8..0x1000B542]; `grid` takes the north-west corner of the 16-unit grid
-// square the point lies in instead (the editor's own snap).
-void tile_corner_at(double x, double y, bool grid, int32_t &x_fixed, int32_t &z_fixed);
+// square the point lies in instead (the editor's own snap). False (the words untouched) where the corner lies past
+// the record's 16.16 range, beyond 32767 units either way.
+bool tile_corner_at(double x, double y, bool grid, int32_t &x_fixed, int32_t &z_fixed);
 
 // The tile set's palette: its cells as the game cuts them (the width over 64 columns, one at least; the height over
 // 64 rows; each cell a column's and a row's share of the set) [orig: Terrain_LoadTileSetAtlas @ 0x604B8A..0x604BC2],
@@ -90,7 +91,8 @@ std::vector<Edit> plan_tile_layer(const TilDocument &document, const std::vector
 // The selected tiles nudged (dx, dy) steps (MED's arrows).
 std::vector<Edit> plan_tile_nudge(const TilDocument &document, const std::vector<NodeId> &rows, int dx, int dy, bool big);
 // The selected tiles moved by (dx, dy), 16.16 units east and north (a drag's step), `gesture` folding a drag's
-// batches into one step; a tile the move would carry past the stored 16.16 range stays.
+// batches into one step; none where the move would carry a tile past the stored 16.16 range (refused whole, the
+// group kept together).
 std::vector<Edit> plan_tile_move(const TilDocument &document, const std::vector<NodeId> &rows, int64_t dx, int64_t dy,
                                  uint64_t gesture = 0);
 // The selected tiles turned a quarter together about their centroid (MED's group turn), `direction` its sign.

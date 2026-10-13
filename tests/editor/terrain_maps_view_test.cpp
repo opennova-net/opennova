@@ -349,7 +349,29 @@ int test_imported() {
 	const MapsDevicePatch *foliage = last_of(*mission, MapsDevicePatch::Kind::Foliage);
 	TEST_EXPECT(foliage && std::count(foliage->indices.begin(), foliage->indices.end(), uint8_t(3)) == 1 &&
 	            !foliage->world.empty());
-	std::printf("imported: a surface source's stroke reaches the ground, a foliage source's is an Update with its codes\n");
+	// A colour stroke on the source, whose texels' alpha is 120: the device patch shows them opaque, as the import's
+	// 24-bit colour map holds them (the review's NIT).
+	ask.plane = TerrainPlane::Colour;
+	ask.brush.tool = TerrainTool::Colour;
+	ask.brush.colour = 0x30A050;
+	ask.brush.strength = 1.0f;
+	ask.brush.radius = 4.0f;
+	ask.brush_named = kBrushTool | kBrushColour | kBrushStrength | kBrushRadius;
+	ask.gesture = 7474;
+	session.handle(request::terrain_stroke(m, ask));
+	for (const Diagnostic &d : session.outcome().findings) std::fprintf(stderr, "  %s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(session.outcome().done() && contains(session.outcome().stroke.changed.front().path, ".png"));
+	devices.sync(session);
+	devices.sync(session);
+	const MapsDevicePatch *colour = last_of(*mission, MapsDevicePatch::Kind::Colour);
+	bool opaque = colour && !colour->rgba.empty(), painted = false;
+	for (size_t i = 0; colour && i + 3 < colour->rgba.size(); i += 4) {
+		opaque = opaque && colour->rgba[i + 3] == 255;
+		painted = painted || (colour->rgba[i] == 0x30 && colour->rgba[i + 1] == 0xA0 && colour->rgba[i + 2] == 0x50);
+	}
+	TEST_EXPECT(opaque && painted);
+	std::printf("imported: a surface source's stroke reaches the ground, a foliage source's is an Update with its codes, a "
+	            "colour source's texels shown opaque\n");
 	return 0;
 }
 

@@ -388,7 +388,7 @@ void TerrainBrushHalf::shapes(const TerrainBrushSpace *space, const CanvasInput 
 	if (brush_.tool == TerrainTool::Stamp) {
 		// Where the stamp lays the tile: its corner as the click would place it (Shift the 16 grid).
 		int32_t x = 0, z = 0;
-		tile_corner_at(at.x, at.y, in.keys.shift, x, z);
+		if (!tile_corner_at(at.x, at.y, in.keys.shift, x, z)) return;
 		TilOverlayEntry corner;
 		corner.x_fixed = x;
 		corner.z_fixed = z;

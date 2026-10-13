@@ -202,6 +202,10 @@ bool plan_tile_drop(const TerrainViewContext &view, const ViewportDrop &drop, Ca
 	const TerrainBrush &brush = view.context.input.view.workspace.terrain_brush;
 	std::vector<Edit> edits = plan_tile_stamp(int(cell), tile_stamp_flags(brush.rotation, brush.flip_h, brush.flip_v), at.x,
 	                                          at.y, drop.snap > 0.0f);
+	if (edits.empty()) {
+		error = "A tile's corner there lies past the range a .til record holds (32767 units either way).";
+		return false;
+	}
 	out.request(tile_edit(view, path, std::move(edits)));
 	out.served("Stamped tile " + std::to_string(cell) + " in " + basename_of(path), 0);
 	return true;
@@ -247,7 +251,10 @@ bool plan_tile_drag(const TerrainViewContext &view, const ViewportDrag &drag, Ca
 	}
 	// Its corner to whole units as Nile's stamp rounds one (snapped: the grid square the point lies in).
 	int32_t x_fixed = 0, z_fixed = 0;
-	tile_corner_at(at.x, at.y, drag.snap > 0.0f, x_fixed, z_fixed);
+	if (!tile_corner_at(at.x, at.y, drag.snap > 0.0f, x_fixed, z_fixed)) {
+		error = "A tile's corner there lies past the range a .til record holds (32767 units either way).";
+		return false;
+	}
 	// The selection goes with it where it is among the selected; else it goes alone.
 	const std::vector<NodeId> &kept = kept_selection(view);
 	const std::vector<NodeId> moved =
