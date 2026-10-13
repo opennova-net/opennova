@@ -6,7 +6,9 @@
 // source out of range), the loudest layers take the game's eight channels (more within reach: the rest outranked), the
 // rain's two loops register beside the camera at the rain the script's start made, the lightning's thunder reaches the
 // Shell's clip voices as a one-shot planned at its distance, a seek back runs the script from its start again; the wire
-// carries the body's `listen`, each source's `sound` and the options' `listen`; the overlay rings each source.
+// carries the body's `listen`, each source's `sound` and the options' `listen`; the overlay rings each source. A
+// placed genx building far west hums its day loop: its update registers it on its cohort (the script run's entity
+// update), and the loop takes a channel of the same mix, an `item` one.
 #include <algorithm>
 #include <cmath>
 #include <string>
@@ -94,7 +96,7 @@ std::vector<uint8_t> bank_bytes() {
 
 // A day-and-night bed, a night-only bed, a bed naming a set no bank holds, a crate (no emitter), a pump among the
 // buildings that hums by day (an env-sound emitter in another pool), a bird tree that sings by day every second or
-// two (an item's time-of-day shot, no loop).
+// two (an item's time-of-day shot, no loop), and a generator whose genx update hums its loops (no env-sound class).
 const char *kItems =
 		"begin \"Ambient bed\"\nid 100800\ntype marker\nmove_function envs\nsoundloop_1 LP_DAY\nsoundloop_2 LP_DAY\n"
 		"soundloop_3 LP_DAY\nsoundloop_4 LP_NIGHT\nend\n"
@@ -103,7 +105,9 @@ const char *kItems =
 		"begin \"Crate\"\nid 100803\ntype object\nend\n"
 		"begin \"Pump\"\nid 100804\ntype building\nai_function envs\nsoundloop_1 LP_DAY\nsoundloop_2 LP_DAY\n"
 		"soundloop_3 LP_DAY\nend\n"
-		"begin \"Bird tree\"\nid 100805\ntype marker\nai_function envs\ndayshot BIRDS 1 1\nend\n";
+		"begin \"Bird tree\"\nid 100805\ntype marker\nai_function envs\ndayshot BIRDS 1 1\nend\n"
+		"begin \"Generator\"\nid 100806\ntype building\nmove_function upfx\nsoundloop_1 LP_DAY\nsoundloop_2 LP_DAY\n"
+		"soundloop_3 LP_DAY\nsoundloop_4 LP_DAY\nend\n";
 
 // The script: rain from the start, the lightning three seconds in.
 const char *kScript = "if never() then\n\train(100,1)\nendif\nif ontick(3) then\n\tflash()\nendif\n";
@@ -121,6 +125,8 @@ std::vector<Placed> placed() {
 		{ mission::EntityKind::Building, 100804, 400.0f, 0.0f }, { mission::EntityKind::Marker, 100805, 5.0f, 5.0f },
 	};
 	for (int i = 0; i < 10; ++i) out.push_back({ mission::EntityKind::Marker, 100800, float(i) * 3.0f, 800.0f });
+	// The generator far west, alone.
+	out.push_back({ mission::EntityKind::Building, 100806, -600.0f, 0.0f });
 	return out;
 }
 
@@ -287,8 +293,8 @@ static int test_sources_by_the_hour_and_the_reach() {
 	const std::vector<NodeAddress> markers = rig.rows(MissionKind::Marker);
 	const std::vector<NodeAddress> items = rig.rows(MissionKind::Item);
 	const std::vector<NodeAddress> buildings = rig.rows(MissionKind::Building);
-	TEST_EXPECT(markers.size() == 14 && items.size() == 1 && buildings.size() == 1);
-	TEST_EXPECT(listen.sources().size() == 15); // the fourteen markers and the pump
+	TEST_EXPECT(markers.size() == 14 && items.size() == 1 && buildings.size() == 2);
+	TEST_EXPECT(listen.sources().size() == 15); // the fourteen markers and the pump (the generator is no env-sound source)
 	TEST_EXPECT(status_of(listen, markers[0].row) == "playing");
 	TEST_EXPECT(status_of(listen, markers[1].row) == "quiet");
 	TEST_EXPECT(status_of(listen, markers[2].row) == "no_set");
@@ -540,6 +546,40 @@ static int test_the_dialogs() {
 	return 0;
 }
 
+// A placed genx building's loop: its update registers its hour's set at its cohort's visit, and the Listen hears it
+// through the same mix, an `item` channel at the generator, which is no source of its own.
+static int test_an_items_loop() {
+	Rig rig;
+	TEST_EXPECT(rig.open());
+	TEST_EXPECT(rig.look_from(-600.0, 0.0, 0.0));
+	TEST_EXPECT(rig.listen(true));
+	// A Shell frame a tick (a frame's last tick is the one an item's update registers on): its cohort's visits fall on
+	// frames' last ticks.
+	rig.set(R"({"clock": {"playing": true, "rate": 1}})");
+	while (rig.session.viewports().clock().ticks() < 40) {
+		rig.session.advance(1.0 / 62.5);
+		rig.devices.sync(rig.session);
+	}
+	const MissionListen &listen = rig.viewport()->listen();
+	TEST_EXPECT(listen.sources().size() == 15);
+	const MissionSoundChannel *hum = nullptr;
+	for (const MissionSoundChannel &channel : listen.channels())
+		if (channel.candidate >= 0 && std::string(channel.source) == "item") hum = &channel;
+	TEST_EXPECT(hum != nullptr);
+	if (!hum) return 1;
+	TEST_EXPECT(hum->set == "LP_DAY" && hum->volume > 0 && std::fabs(hum->at.x + 600.0f) < 2.0f && hum->distance < 5.0f);
+	// The wire names it.
+	const JsonValue json = rig.json();
+	const JsonValue *body = json.get("body");
+	const JsonValue *heard = body && body->get("listen") ? body->get("listen")->get("channels") : nullptr;
+	bool listed = false;
+	if (heard)
+		for (const JsonValue &channel : heard->array) listed = listed || channel.get_string("source", "") == "item";
+	TEST_EXPECT(listed);
+	std::printf("test_an_items_loop passed\n");
+	return 0;
+}
+
 int main() {
 	int failed = 0;
 	failed |= test_sources_by_the_hour_and_the_reach();
@@ -547,6 +587,7 @@ int main() {
 	failed |= test_the_scripts_weather();
 	failed |= test_the_wire_and_the_overlay();
 	failed |= test_the_dialogs();
+	failed |= test_an_items_loop();
 	if (failed) return 1;
 	std::printf("editor_mission_listen_test: OK\n");
 	return 0;
