@@ -87,11 +87,13 @@ void draw_lock_line(TerrainPaneContext &context) {
 	                "heights; a height-locked one keeps its height (its Height lock, beside its z).");
 }
 
-// One of the brush's numbers as a slider, set once as the drag lets go.
-void brush_slider(Workspace &workspace, const char *label, const char *member, float value, float least, float most,
-                  const char *format, const char *tip) {
+// One of the brush's numbers as a slider on `row` (as many to a line as the pane holds), set once as the drag lets go.
+void brush_slider(ui_kit::WrapRow &row, Workspace &workspace, const char *label, const char *member, float value, float least,
+                  float most, const char *format, const char *tip) {
 	float held = value;
-	ImGui::SetNextItemWidth(ImGui::GetFontSize() * 12.0f);
+	const float width = ImGui::GetFontSize() * 9.0f;
+	row.next(ui_kit::field_width(width, label));
+	ImGui::SetNextItemWidth(width);
 	ImGui::SliderFloat(label, &held, least, most, format);
 	ui_kit::tooltip(tip);
 	if (ImGui::IsItemDeactivatedAfterEdit())
@@ -188,13 +190,16 @@ private:
 
 void draw_brush_part(TerrainPaneContext &context) {
 	const TerrainBrush &brush = context.brush;
-	brush_slider(context.workspace, "Radius", "radius", brush.radius, 0.0f, kTerrainRadiusMost, "%.1f m",
+	// Side by side where the pane is wide enough (S25, the painting feedback: the brush's shape and a palette in the
+	// pane's room under the 3D view, no scrolling).
+	ui_kit::WrapRow row;
+	brush_slider(row, context.workspace, "Radius", "radius", brush.radius, 0.0f, kTerrainRadiusMost, "%.1f m",
 	             "The brush's radius, metres ([ and ] in the view; 0: one texel, the original editor's click).");
-	brush_slider(context.workspace, "Strength", "strength", brush.strength, 0.0f, 1.0f, "%.2f",
+	brush_slider(row, context.workspace, "Strength", "strength", brush.strength, 0.0f, 1.0f, "%.2f",
 	             "How much a dab changes (Shift+[ and Shift+] in the view).");
-	brush_slider(context.workspace, "Falloff", "falloff", brush.falloff, 0.0f, 1.0f, "%.2f",
+	brush_slider(row, context.workspace, "Falloff", "falloff", brush.falloff, 0.0f, 1.0f, "%.2f",
 	             "The share of the radius the brush fades over to its rim.");
-	brush_slider(context.workspace, "Spacing", "spacing", brush.spacing, kTerrainSpacingLeast, kTerrainSpacingMost, "%.2f",
+	brush_slider(row, context.workspace, "Spacing", "spacing", brush.spacing, kTerrainSpacingLeast, kTerrainSpacingMost, "%.2f",
 	             "A dab every spacing x radius along the pointer's path on the ground.");
 }
 

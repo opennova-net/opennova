@@ -19,8 +19,8 @@
 #include <editor/preview/mission_poses.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/mission_shots.h>
-#include <editor/preview/terrain_patch.h>
 #include <editor/preview/preview_clip_sounds.h>
+#include <editor/preview/terrain_brush_overlay.h>
 #include <editor/preview/terrain_heights_patch.h>
 #include <editor/preview/terrain_maps_patch.h>
 #include <editor/preview/terrain_patch.h>
@@ -381,6 +381,8 @@ private:
 	TerrainMapsFollow maps_; // S25: the maps' and the placed tiles' device patches
 	MissionOverlayImage overlay_;
 	uint64_t overlay_serial_ = 0;
+	// The overlay option as the terrain brush sets it while it paints a map here (S25, the painting feedback).
+	BrushOverlay brush_overlay_;
 	// The overlay over the regions the stroke follow patched since `ground_before` (the ground's revision before it), in
 	// place where it was current then.
 	void patch_overlay_(uint64_t ground_before);
