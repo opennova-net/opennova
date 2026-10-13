@@ -11,6 +11,8 @@
 
 #include <runtime/anim/anim_sample.h>
 
+#include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -68,5 +70,35 @@ void bind_rest_local(const ClipBone &bone, const ClipBone *parent,
 // Rotation quat -> row-major 3x3 (column-vector convention), the exact
 // counterpart of mat3_to_quat for composing evaluated poses into matrices.
 void quat_to_mat3_rows(const Quat &q, float r_rows[9]);
+
+// A person's hidden sections (entity+0x134, the dismemberment masks) as the
+// bone builder applies them, for a parent-linked skeleton. Retail zeroes the
+// clip matrix of every row whose bit (1 << row, x86 count) is set before the
+// overlay multiply, so the row's rotation is zero and the re-anchor leaves
+// only its joint: its vertices meet at the joint its parent places
+// (parentMatrix * pivot), and a child's joint lands there too, since a zero
+// row moves nothing by its pivot. The root re-anchors on its own zeroed row,
+// whose only translation is the overlay's, the model origin. The row at the
+// clip's bone count above 14 then copies row 14's finished matrix, so it
+// follows the head's bit instead of its own. Every other rotation is the
+// row's own clip/overlay rotation, never the parent's.
+// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 -- the bit test
+//  @0x4B1F10..0x4B1F23, the zeroed row @0x4B1F25..0x4B1F31, the overlay
+//  multiply @0x4B1F4A..0x4B1FE7, the head copy @0x4B2002..0x4B2018, the
+//  re-anchor on the parent row @0x4B201E..0x4B2162]
+// A Godot-style skeleton composes a child under its parent, so the rule maps
+// onto three per-bone flags:
+inline constexpr uint8_t kSectionRowHidden = 0x1u;   // the row's vertices meet at its joint
+inline constexpr uint8_t kSectionRowCollapse = 0x2u; // hidden with every descendant hidden:
+                                                     // the whole subtree meets at the joint
+inline constexpr uint8_t kSectionRowAnchored = 0x4u; // the joint moves onto the parent's
+                                                     // (a hidden parent, or the hidden root
+                                                     // onto the model origin)
+// `parents` is the skeleton's parent table (-1 = root); `clip_bones` the
+// playing clip's bone count, or a value >= parents.size() for no head copy
+// (a first-person view model, which the builder never sees). Returns false,
+// leaving r_rows all zero, when no row is hidden.
+bool section_mask_rows(const std::vector<int> &parents, uint32_t section_mask,
+                       size_t clip_bones, std::vector<uint8_t> &r_rows);
 
 } // namespace opennova::anim

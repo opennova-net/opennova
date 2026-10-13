@@ -1152,6 +1152,40 @@ EntityDetailSnapshot detail_for(uint16_t handle, uint32_t attrib, uint32_t attri
 // focuses the window, selects the row when the pushed directory has it and
 // otherwise waits for the push that carries it; the selection survives the
 // visibility close as a pending handle, and a push without it drops it.
+// The Entities window's world-wide row: the all-organics nodismember switch is
+// wanted while the window shows and draws over the board's pushed state.
+void test_entities_window_wants_the_organics_nodismember_row() {
+	using opennova::devtools::ControlArg;
+	using opennova::devtools::ControlState;
+	NullBackend backend;
+	GameDevTools tools;
+	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
+	tools.pass().set_open(true);
+	const auto wants = [&tools]() {
+		std::vector<const char *> wanted;
+		tools.wanted_control_ids(wanted);
+		for (const char *id : wanted)
+			if (std::strcmp(id, control_id::kOrganicsNoDismember) == 0) return true;
+		return false;
+	};
+	CHECK(!wants(), "a closed Entities window wants no row");
+	tools.entities_window().open = true;
+	CHECK(wants(), "the open Entities window wants the organics_nodismember row");
+	ControlState state;
+	state.id = control_id::kOrganicsNoDismember;
+	state.writable = true;
+	state.has_value = true;
+	state.value = ControlArg::boolean(true);
+	tools.set_control_states({state});
+	CHECK(tools.control_board().state(control_id::kOrganicsNoDismember)->value.b,
+			"the pushed all-organics state lands");
+	opennova::devtools::EntityDirectorySnapshot directory;
+	directory.valid = true;
+	directory.authority = true;
+	tools.set_entity_directory(directory);
+	CHECK(draw_once(tools, 1), "the Entities window draws the row over a pushed directory");
+}
+
 void test_entities_window_selects_the_picked_handle() {
 	NullBackend backend;
 	GameDevTools tools;
@@ -2205,6 +2239,7 @@ int main() {
 	test_window_registry_order_groups_and_defaults();
 	test_status_line_and_close_request();
 	test_control_board_catalog_states_and_wants();
+	test_entities_window_wants_the_organics_nodismember_row();
 	test_control_slider_recovers_after_hidden_drag();
 	test_game_toolbar_transport_and_status();
 	test_game_window_is_mandatory_and_detachable();

@@ -11,6 +11,7 @@
 #include <godot_cpp/core/math.hpp>
 
 #include <runtime/anim/aim_overlay.h> // kOverlayClassCount (the nine overlay classes)
+#include <runtime/anim/skeletal_pose.h> // section_mask_rows
 #include <runtime/world/infantry.h>
 
 #include <algorithm>
@@ -787,7 +788,38 @@ void ObjectModel::advance_body_animation(double p_delta, bool p_write_pose) {
 				use_overlay ? wpn_prev_key_ : String(), wpn_prev_time,
 				wpn_blend_weight_, wpn_variant_, wpn_prev_variant_, !viewmodel_rig_);
 	}
+	apply_section_rows();
 	body_pose_dirty_ = false;
+}
+
+// The destroyed sections over the pose just written (anim::section_mask_rows
+// carries the witness). A first-person view model never reaches the bone
+// builder, and a body with no hidden row writes nothing.
+void ObjectModel::apply_section_rows() {
+	if (viewmodel_rig_ || (destroyed_section_mask_ == 0 && section_rows_.empty())) {
+		return;
+	}
+	const int bone_count = skeleton_->get_bone_count();
+	std::vector<int> parents(static_cast<std::size_t>(bone_count));
+	for (int bone = 0; bone < bone_count; ++bone) {
+		parents[static_cast<std::size_t>(bone)] = skeleton_->get_bone_parent(bone);
+	}
+	if (!opennova::anim::section_mask_rows(parents, destroyed_section_mask_,
+				skeletal_->get_person_clip_bones(anim_key_, anim_variant_), section_rows_)) {
+		section_rows_.clear();
+	}
+	for (std::size_t bone = 0; bone < section_rows_.size(); ++bone) {
+		const uint8_t row = section_rows_[bone];
+		const int index = static_cast<int>(bone);
+		if ((row & opennova::anim::kSectionRowAnchored) != 0) {
+			skeleton_->set_bone_pose_position(index, Vector3());
+		}
+		if ((row & opennova::anim::kSectionRowCollapse) != 0) {
+			skeleton_->set_bone_pose_rotation(index, Quaternion());
+			skeleton_->set_bone_pose_scale(index, Vector3(0, 0, 0));
+		}
+	}
+	apply_section_binds();
 }
 
 } // namespace godot

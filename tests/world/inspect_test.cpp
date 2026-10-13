@@ -245,6 +245,34 @@ int main() {
         CHECK(!world.commands.set_entity_item_attrib(h, 0u, 0u));
     }
 
+    // --- the all-organics override (the dev tools' nodismember switch) -----
+    {
+        World world;
+        world.registry.configure_pool(0, 4);
+        world.registry.configure_pool(1, 2);
+        const EntityHandle a = spawn_entity(world, 0, 5311, 11, "a", Vec3{0, 0, 0});
+        const EntityHandle b = spawn_entity(world, 0, 5311, 12, "b", Vec3{1, 0, 0});
+        const EntityHandle crate = spawn_entity(world, 1, 1291, 13, "crate", Vec3{2, 0, 0});
+        world.registry.get(a)->kind = EntityKind::Organic;
+        world.registry.get(b)->kind = EntityKind::Organic;
+        CHECK(world.commands.set_entity_item_attrib(a, kItemAttribNoDismember | kItemAttribAIData, 0x40u));
+        CHECK(!world.commands.organics_carry_item_attrib(kItemAttribNoDismember));
+        // Only b changes; every other bit and the second word stay.
+        CHECK(world.commands.set_organics_item_attrib(kItemAttribNoDismember, true) == 1);
+        CHECK(world.commands.organics_carry_item_attrib(kItemAttribNoDismember));
+        CHECK(world.registry.get(a)->item_attrib == (kItemAttribNoDismember | kItemAttribAIData));
+        CHECK(world.registry.get(a)->item_attrib2 == 0x40u && world.registry.get(a)->is_ai_capable);
+        CHECK(world.registry.get(crate)->item_attrib == 0u);
+        CHECK(world.commands.set_organics_item_attrib(kItemAttribNoDismember, false) == 2);
+        CHECK(!world.commands.organics_carry_item_attrib(kItemAttribNoDismember));
+        CHECK(world.registry.get(a)->item_attrib == kItemAttribAIData);
+        CHECK(world.registry.get(b)->item_attrib == 0u);
+        // No organic at all reads unchecked.
+        world.registry.despawn(a);
+        world.registry.despawn(b);
+        CHECK(!world.commands.organics_carry_item_attrib(kItemAttribNoDismember));
+    }
+
     // --- the AI debug join (ai_debug_report) + the AiDetail brain block -----
     {
         World world;

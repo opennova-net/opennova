@@ -227,8 +227,12 @@ static void finish_entity_update(World &world, const TickContext &ctx, devtools:
     // table is Entity_BuildAllProximityLists @0x4c20f0 at mission start/teleport]
     if (world.ai.collision != nullptr) world.ai.collision->build_tick_tables(world);
     lap.mark(devtools::Slot::SIM_UPDATE_PROXIMITY);
-    // The pool-0 walk in slot order: each organic row's +0x1C4 body update.
-    const size_t pool0 = world.registry.pool_capacity(0);
+    // The pool-0 walk in slot order: each organic row's +0x1C4 body update,
+    // bounded by the used count read once ahead of it, so a row a motor
+    // allocates past that count (a dismemberment clone in a fresh row) first
+    // updates next tick. [orig: g_PoolList.used read @0x4C242C, the countdown
+    // @0x4C244C, the +0x1C4 call @0x4C2460..0x4C2472]
+    const size_t pool0 = world.registry.pool_used(0);
     for (size_t slot = 0; slot < pool0; ++slot) {
         const Entity *row = world.registry.get(EntityHandle::make(0, static_cast<int>(slot)));
         if (row == nullptr) continue;
@@ -240,6 +244,7 @@ static void finish_entity_update(World &world, const TickContext &ctx, devtools:
                     world.registry.get(EntityHandle::make(0, static_cast<int>(slot))))
             claim_standing_vehicle(world, *live);
     }
+    world.ai.sync_shared_anim_slots();
     lap.mark(devtools::Slot::SIM_UPDATE_WALKS);
     // The flag and bay touches the bodies' movement resolves recorded run
     // inline in retail's resolver, whose handler returns at once off the

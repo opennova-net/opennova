@@ -502,6 +502,9 @@ struct AiEntity {
     // by AiSystem::tick_infantry [orig: Entity_UpdateInfantryAI @0x4b9910] instead of the
     // vehicle state machine; promote routes BMS organics here. See world/infantry.h.
     InfantryState inf;
+    // The shared AnimMap slot pair this body's channels live in
+    // (AiSystem::shared_anim_slots_ index), -1 = its own (inf's channel side).
+    int32_t shared_anim_slot = -1;
 
     // Per-entity collision-resolver state (prev-position gating + the idle skip
     // throttle). [orig: entity savedLivePose + pad_370[3]; collision.h]
@@ -771,13 +774,18 @@ public:
     // Attach a brain to a world entity; returns its AI index (faithful to the
     // unk_AED380 array index used by AIEvent entity_index).
     int attach(EntityHandle h);
-    // Attach the synthetic half-corpse produced by dismemberment. The body
-    // keeps the source pose/AnimMap state and corpse motor, while all active
-    // combat/network inputs are cleared. impulse_q16 is round velocity >> 8,
-    // horizontal only — the original kicks the clone's X/Y velocity pair and
-    // leaves Z alone [orig: @0x4076b7/@0x4076c9].
-    int attach_dismemberment_piece(EntityHandle h, const AiEntity &source,
+    // Attach the body a dismemberment clone carries: the victim's (its
+    // +0x000..+0x2B3 words and AiSlot), with the tail its row's previous
+    // occupant left, health and the SSN key zeroed, and the victim's AnimMap
+    // slot pair shared (shared_anim_slots_; the victim joins it too).
+    // impulse_q16 is round velocity >> 8, horizontal only -- the original
+    // kicks the clone's X/Y velocity pair and leaves Z alone
+    // [orig: @0x4076b7/@0x4076c9].
+    int attach_dismemberment_piece(EntityHandle h, AiEntity &source,
                                    const int32_t impulse_q16[3]);
+    // After the pool-0 walk: every body sharing a slot pair reads the pair as
+    // its last sharer left it, so presentation draws the one channel state.
+    void sync_shared_anim_slots();
     // Free the brain bound to h: the slot is zeroed in place (index-stable, so
     // queued AIEvent entity indexes never re-point) and its owner word cleared,
     // which is exactly what Entity_Destroy does to the AI component
@@ -1318,6 +1326,30 @@ private:
     // Seat a piece's brain: its handle's stale brain released, then the
     // lowest free slot or a new one.
     int place_dismemberment_piece(EntityHandle h, AiEntity &&piece);
+    // The slot pairs two or more bodies share: a dismemberment clone copies
+    // the victim's +0x188/+0x18C pointers, so each half's motor advances the
+    // same channels (both play the clip at twice the rate, and a half whose
+    // request differs from the playing id re-inits it under the other). A
+    // sharer loads the record before its motor and stores it after. Retail
+    // frees the pair at the first half's destroy and the survivor plays on
+    // from the freed block; here the last sharer takes the record back as its
+    // own channels (D-AI-9). [orig: Entity_CloneFromTemplateByType @0x4398DC,
+    //  @0x439908; AnimMap_UpdateDualChannels @0x40B8C0 from
+    //  Entity_UpdateInfantryAI @0x4B9A48; Entity_Destroy ->
+    //  AnimMap_UnlinkEntitySlots @0x40BAA0]
+    struct SharedAnimSlot {
+        InfantryAnimSlot channels;
+        int sharers = 0;
+    };
+    std::vector<SharedAnimSlot> shared_anim_slots_;
+    void leave_shared_anim_slot(AiEntity &e);
+    // The motor state a pool-0 row's brain last carried when it was
+    // released, per registry slot: a clone allocated into that row reads its
+    // tail (everything past +0x2B4, which Entity_Destroy's memset leaves) from
+    // here. Cleared with the pools at a mission start. [orig: Entity_Destroy
+    // @0x43E810 memsets 0x2B4 bytes @0x43EA70; Pool_AllocEntry @0x442230
+    // writes nothing into the row; Pool_Clear @0x442060]
+    std::vector<InfantryState> released_tails_;
 
     std::vector<AiEntity> entities_;       // pool-relative; index == AIEvent entity_index
     // A body's own update holds references into entities_, and its org1

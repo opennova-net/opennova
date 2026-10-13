@@ -116,6 +116,9 @@ public:
 	String slot_to_key(int p_slot) const;
 
 	bool has_clip(const String &p_key) const { return find_clip(p_key) != nullptr; }
+	// The bone count of the .bad a key's variant plays, the rows the person
+	// bone builder copies from the clip (anim::SkeletalClips::clip_file_bones).
+	size_t get_person_clip_bones(const String &p_key, int p_variant) const;
 	// Variant surface: p_variant selects among same-key clips (0-based file order,
 	// wrapped). All getters/eval are non-consuming PEEKS — the consuming ring
 	// rotation (serve-then-advance on duration reads and play starts [orig:

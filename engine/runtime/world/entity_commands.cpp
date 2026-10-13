@@ -636,6 +636,30 @@ bool EntityCommands::set_entity_item_attrib(EntityHandle h, uint32_t attrib, uin
     return true;
 }
 
+int EntityCommands::set_organics_item_attrib(uint32_t bits, bool on) {
+    int changed = 0;
+    world_.registry.for_each_in_pool(0, [&](const Entity &row) {
+        if (row.kind != EntityKind::Organic) return;
+        Entity &entity = *world_.registry.get(row.handle);
+        const uint32_t attrib = on ? (entity.item_attrib | bits) : (entity.item_attrib & ~bits);
+        if (attrib == entity.item_attrib) return;
+        stamp_item_attrib(entity, attrib, entity.item_attrib2);
+        ++changed;
+    });
+    return changed;
+}
+
+bool EntityCommands::organics_carry_item_attrib(uint32_t bits) const {
+    bool any = false;
+    bool all = true;
+    world_.registry.for_each_in_pool(0, [&](const Entity &row) {
+        if (row.kind != EntityKind::Organic) return;
+        any = true;
+        if ((row.item_attrib & bits) != bits) all = false;
+    });
+    return any && all;
+}
+
 bool EntityCommands::set_ssn_respawns(EntityTarget ssn, int32_t count) {
     // [orig: WacCmd_SsnSpawn @0x4F7A80] No item, health or brain gate.
     Entity *entity = world_.registry.get(resolve_target(ssn));

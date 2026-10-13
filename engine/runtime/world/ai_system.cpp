@@ -203,41 +203,154 @@ int AiSystem::attach(EntityHandle h) {
     return index;
 }
 
+// A row unused since the mission's Pool_Clear holds zeros: its request words
+// are 0 (the slot-0 node), not our idle default.
+static const InfantryState &unused_row_tail() {
+    static const InfantryState zero = [] {
+        InfantryState tail;
+        tail.anim_state = 0;
+        tail.wpn_state = 0;
+        return tail;
+    }();
+    return zero;
+}
+
 void AiSystem::release(EntityHandle h) {
     const int index = index_for_handle(h);
     if (index < 0) return;
-    entities_[index] = AiEntity{}; // owner word 0 = free slot [orig: memset @0x43e995]
+    AiEntity &e = entities_[index];
+    leave_shared_anim_slot(e);
+    // The row's tail outlives the destroy (released_tails_).
+    if (h.pool() == 0 && h.slot() >= 0) {
+        const size_t row = static_cast<size_t>(h.slot());
+        if (released_tails_.size() <= row) released_tails_.resize(row + 1, unused_row_tail());
+        released_tails_[row] = e.inf;
+    }
+    e = AiEntity{}; // owner word 0 = free slot [orig: memset @0x43e995]
     handle_to_ai_index_[h.packed] = -1;
 }
 
+void AiSystem::leave_shared_anim_slot(AiEntity &e) {
+    if (e.shared_anim_slot < 0) return;
+    const int32_t shared = e.shared_anim_slot;
+    SharedAnimSlot &slot = shared_anim_slots_[static_cast<size_t>(shared)];
+    e.inf.set_anim_slot(slot.channels);
+    e.shared_anim_slot = -1;
+    if (--slot.sharers != 1) return;
+    // The last sharer plays on from the record as its own channels.
+    const auto own = [&](AiEntity &rest) {
+        if (rest.shared_anim_slot != shared) return;
+        rest.inf.set_anim_slot(slot.channels);
+        rest.shared_anim_slot = -1;
+    };
+    for (AiEntity &rest : entities_) own(rest);
+    for (auto &deferred : deferred_piece_brains_) own(deferred.second);
+    slot.sharers = 0;
+}
+
+// The tail of a clone's row: everything past +0x2B4 is the row's previous
+// occupant's, which Entity_Destroy's 0x2B4 memset left and Pool_AllocEntry
+// never clears (a row unused since the mission's Pool_Clear reads zero, the
+// default body). [orig: Entity_CloneFromTemplateByType @0x4398DC (memcpy
+// 0x2B4); Entity_Destroy @0x43EA70; Pool_AllocEntry @0x442230; Pool_Clear
+// @0x442060]
+static void take_recycled_tail(InfantryState &inf, const InfantryState &tail) {
+    inf.anim_pending = tail.anim_pending;            // +0x2B8
+    inf.anim_state = tail.anim_state;                // +0x2BC
+    inf.wpn_deferred = tail.wpn_deferred;            // +0x2C4
+    inf.wpn_state = tail.wpn_state;                  // +0x2C8
+    inf.aim_pitch = tail.aim_pitch;                  // +0x2D0
+    inf.leg_yaw[0] = tail.leg_yaw[0];                // +0x2D4
+    inf.leg_yaw[1] = tail.leg_yaw[1];                // +0x2D8
+    inf.torso_roll = tail.torso_roll;                // +0x2DC
+    inf.carrier_pitch_lag = tail.carrier_pitch_lag;  // +0x2E0
+    inf.leg_target[0] = tail.leg_target[0];          // +0x2E4
+    inf.leg_target[1] = tail.leg_target[1];          // +0x2E8
+    inf.aim_heading = tail.aim_heading;              // +0x2EC
+    inf.aim_ref0 = tail.aim_ref0;                    // +0x2F0
+    inf.last_attacker = tail.last_attacker;          // +0x2F4
+    inf.damage_timer = tail.damage_timer;            // +0x2F8
+    inf.alert_timer = tail.alert_timer;              // +0x2F8
+    inf.self_attach_point[0] = tail.self_attach_point[0]; // +0x2FC
+    inf.self_attach_point[1] = tail.self_attach_point[1]; // +0x300
+    inf.goal_z = tail.goal_z;                        // +0x304
+    inf.stance_sound_state = tail.stance_sound_state; // +0x304
+    for (int i = 0; i < 3; ++i) {
+        inf.aim_point[i] = tail.aim_point[i];        // +0x30C
+        inf.detour_target[i] = tail.detour_target[i]; // +0x324..+0x32C
+    }
+    inf.ai_focus = tail.ai_focus;                    // +0x338
+    inf.same_target_ticks = tail.same_target_ticks;  // +0x33C
+    inf.head_look_target = tail.head_look_target;    // +0x344
+    inf.last_look_target = tail.last_look_target;    // +0x348
+    inf.previous_look_target = tail.previous_look_target; // +0x34C
+    inf.magazine = tail.magazine;                    // +0x35C
+    inf.aim_valid = tail.aim_valid;                  // +0x360
+    inf.burn_state = tail.burn_state;                // +0x368
+    inf.path_state = tail.path_state;                // +0x369
+    inf.prev_move_mode = tail.prev_move_mode;        // +0x36A
+    inf.was_hit = tail.was_hit;                      // +0x36B
+    inf.combat_reaction = tail.combat_reaction;      // +0x36B
+    inf.pitch_kick_accum = tail.pitch_kick_accum;    // +0x36C
+    inf.arms_dip_ticks = tail.arms_dip_ticks;        // +0x371
+    inf.reload_anim_ticks = tail.reload_anim_ticks;  // +0x372
+    inf.loadout_weight_fp16 = tail.loadout_weight_fp16; // +0x37C
+    inf.recoil_pitch = tail.recoil_pitch;            // +0x380
+    inf.weapon_weight_spread = tail.weapon_weight_spread; // +0x384
+}
+
 int AiSystem::attach_dismemberment_piece(
-        EntityHandle h, const AiEntity &source, const int32_t impulse_q16[3]) {
+        EntityHandle h, AiEntity &source, const int32_t impulse_q16[3]) {
+    // The clone's first 0x2B4 bytes and its 0xAC AiSlot are the victim's, its
+    // tail the row's previous occupant's; the clone leg then zeroes the health
+    // (@0x407697) and the SSN key (+0x7C, @0x4076AB) and adds roundVel >> 8 to
+    // the X/Y velocity (@0x4076B7 / @0x4076C9). [orig:
+    // Entity_CloneFromTemplateByType @0x4398DC (memcpy 0x2B4), @0x439906
+    // (the AiSlot)]
     AiEntity piece = source;
+    const size_t row = h.pool() == 0 && h.slot() >= 0 ? static_cast<size_t>(h.slot())
+                                                      : released_tails_.size();
+    take_recycled_tail(piece.inf,
+            row < released_tails_.size() ? released_tails_[row] : unused_row_tail());
     piece.handle = h;
+    // A person carries no brain block (+0x64 is null and copies null); the
+    // owner word is this table's live-slot mark, which the pool-0 walk reads.
     piece.brain = AiBrain{};
     piece.brain.f[AiBrain::kOwner] = 1;
-    piece.slot = AiSlot{};
     piece.health = 0;
     piece.net_id = 0;
-    piece.relmat_id = 0;
-    piece.net_is_remote_peer = false;
-    piece.net_interp_progress = 0;
-    piece.net_interp_steps = 0;
+    // Port-side facts with no retail storage: the clone is neither the local
+    // player nor a wire peer.
     piece.inf.is_local_player = false;
-    piece.inf.player_moving = false;
-    piece.inf.move_mode = 0;
-    piece.inf.target_dist = 0;
-    piece.inf.combat_target = EntityHandle{};
-    piece.inf.last_attacker = EntityHandle{};
-    piece.inf.was_hit = false;
+    piece.net_is_remote_peer = false;
     piece.inf.vel[0] += impulse_q16 != nullptr ? impulse_q16[0] : 0;
     piece.inf.vel[1] += impulse_q16 != nullptr ? impulse_q16[1] : 0;
     piece.inf.vel[2] += impulse_q16 != nullptr ? impulse_q16[2] : 0;
+    // The copied +0x188/+0x18C: both halves drive the victim's channels.
+    if (source.shared_anim_slot < 0) {
+        size_t free = 0;
+        while (free < shared_anim_slots_.size() && shared_anim_slots_[free].sharers != 0) ++free;
+        if (free == shared_anim_slots_.size()) shared_anim_slots_.emplace_back();
+        shared_anim_slots_[free].channels = source.inf.anim_slot();
+        shared_anim_slots_[free].sharers = 1;
+        source.shared_anim_slot = static_cast<int32_t>(free);
+    }
+    piece.shared_anim_slot = source.shared_anim_slot;
+    SharedAnimSlot &shared = shared_anim_slots_[static_cast<size_t>(piece.shared_anim_slot)];
+    ++shared.sharers;
+    piece.inf.set_anim_slot(shared.channels);
     if (defer_piece_brains_) {
         deferred_piece_brains_.emplace_back(h, std::move(piece));
         return -1;
     }
     return place_dismemberment_piece(h, std::move(piece));
+}
+
+void AiSystem::sync_shared_anim_slots() {
+    for (AiEntity &e : entities_) {
+        if (e.shared_anim_slot >= 0)
+            e.inf.set_anim_slot(shared_anim_slots_[static_cast<size_t>(e.shared_anim_slot)].channels);
+    }
 }
 
 int AiSystem::place_dismemberment_piece(EntityHandle h, AiEntity &&piece) {
@@ -582,7 +695,12 @@ void AiSystem::update_organic(AiEntity &e, World &world, uint32_t logic_tick) {
     //  Entity_UpdateInfantryAI @0x4b9910 simulate-when entity==local.]
     // A piece its death edge cuts off gets its brain once the update returns.
     defer_piece_brains_ = true;
+    // A body sharing its slot pair runs its motor on the shared channels.
+    if (e.shared_anim_slot >= 0)
+        e.inf.set_anim_slot(shared_anim_slots_[static_cast<size_t>(e.shared_anim_slot)].channels);
     tick_infantry(e, world, logic_tick);
+    if (e.shared_anim_slot >= 0)
+        shared_anim_slots_[static_cast<size_t>(e.shared_anim_slot)].channels = e.inf.anim_slot();
     defer_piece_brains_ = false;
     for (auto &deferred : deferred_piece_brains_)
         place_dismemberment_piece(deferred.first, std::move(deferred.second));
@@ -996,6 +1114,9 @@ void AiSystem::on_load(World &) {
         anim_rings = spawn_baseline_rings_;
     }
     rebuild_handle_index();
+    // Pool_Clear: no row keeps a tail, no slot pair is shared.
+    shared_anim_slots_.clear();
+    released_tails_.clear();
     events.clear();
     relmat_calls.clear();
     rel_ops.clear();

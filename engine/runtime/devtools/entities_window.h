@@ -19,6 +19,7 @@
 // strings.
 #pragma once
 
+#include <runtime/devtools/control_board.h>
 #include <runtime/devtools/control_request.h>
 #include <runtime/devtools/entity_overlay.h>
 #include <runtime/devtools/imgui_pass.h>
@@ -38,6 +39,8 @@ public:
 	// window, held by the feeder (the window formats only when a push lands).
 	static constexpr double kRefreshSeconds = 0.5;
 
+	explicit EntitiesWindow(ControlBoard &board) : board_(board) {}
+
 	const char *title() const override { return "Entities"; }
 	MenuGroup menu_group() const override { return MenuGroup::World; }
 	InitialDockPlacement initial_dock_placement() const override {
@@ -45,6 +48,9 @@ public:
 	}
 	void draw(ImGuiPass &pass, uint64_t frame_index) override;
 	void on_visibility(bool visible) override;
+	// The world-wide entity rows drawn above the table (the all-organics
+	// nodismember switch).
+	void wanted_controls(std::vector<const char *> &out) const override;
 
 	// The pushed directory record, by value; an invalid snapshot clears the
 	// table (the world unloaded).
@@ -125,6 +131,7 @@ private:
 	void select_row(int snapshot_index);
 	int row_index_for_handle(uint16_t handle) const;
 
+	ControlBoard &board_;
 	EntityDirectorySnapshot snapshot_{};
 	std::vector<RowText> texts_;   // one per snapshot row
 	std::vector<int> filtered_;    // snapshot-row indices the table draws

@@ -1126,6 +1126,17 @@ Error Simulation::debug_set_entity_item_attrib(int p_handle, int64_t p_attrib,
 			: ERR_DOES_NOT_EXIST;
 }
 
+void Simulation::debug_set_organics_nodismember(bool p_on) {
+	// The joiner's rows are replicas the wire re-writes (the table refuses too).
+	if (!kernel_ || session_role() == ROLE_JOINER) return;
+	kernel_->world.commands.set_organics_item_attrib(opennova::world::kItemAttribNoDismember, p_on);
+}
+
+bool Simulation::debug_organics_nodismember() const {
+	return kernel_ != nullptr &&
+			kernel_->world.commands.organics_carry_item_attrib(opennova::world::kItemAttribNoDismember);
+}
+
 int Simulation::get_mission_variable(int index) const {
 	return kernel_ ? kernel_->world.script.vars.get_mission(index) : 0;
 }

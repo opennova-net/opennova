@@ -152,6 +152,60 @@ int main() {
     quat_to_mat3_rows(q, qrows);
     CHECK(quat_same_rotation(mat3_to_quat(qrows), q));
 
+    // ---- hidden sections (the dismemberment masks) ----
+    // The parent table of JO's EIndo01.3di (20 rows; 19 is the ground row
+    // past a 19-bone clip, which copies the head row).
+    const std::vector<int> person = {-1, 0, 1, 2, 2, 3, 4, 0, 0, 5,
+                                     6, 7, 8, 2, 13, 10, 9, 11, 12, 0};
+    std::vector<uint8_t> srows;
+    CHECK(!section_mask_rows(person, 0u, 19, srows));
+    CHECK(srows.size() == person.size());
+    for (uint8_t r : srows) CHECK(r == 0u);
+    // A forearm cut (bone 9: its own bit plus the hand, 0x10000) collapses
+    // both rows where the forearm joint stands; nothing else moves.
+    const uint32_t forearm = (1u << 9) | 0x10000u;
+    CHECK(section_mask_rows(person, forearm, 19, srows));
+    for (size_t row = 0; row < person.size(); ++row) {
+        uint8_t want = 0u;
+        if (row == 9) want = kSectionRowHidden | kSectionRowCollapse;
+        if (row == 16) want = kSectionRowHidden | kSectionRowCollapse | kSectionRowAnchored;
+        CHECK(srows[row] == want);
+    }
+    // The clone's complement: the hidden ancestors keep the visible forearm's
+    // rotations (no collapse) while its joint lands on the hidden chain, down
+    // to the model origin the hidden root takes; the copied head row follows
+    // the head's bit.
+    CHECK(section_mask_rows(person, ~forearm, 19, srows));
+    CHECK(srows[0] == (kSectionRowHidden | kSectionRowAnchored));
+    CHECK(srows[1] == (kSectionRowHidden | kSectionRowAnchored));
+    CHECK(srows[5] == (kSectionRowHidden | kSectionRowAnchored));
+    CHECK(srows[9] == kSectionRowAnchored);
+    CHECK(srows[16] == 0u);
+    CHECK(srows[7] == (kSectionRowHidden | kSectionRowCollapse | kSectionRowAnchored));
+    CHECK(srows[11] == (kSectionRowHidden | kSectionRowCollapse | kSectionRowAnchored));
+    CHECK(srows[19] == (kSectionRowHidden | kSectionRowCollapse | kSectionRowAnchored));
+    // A head cut hides the copied head row though its own bit is clear; the
+    // clone of a head cut shows it though its own bit is set.
+    CHECK(section_mask_rows(person, 1u << 14, 19, srows));
+    CHECK((srows[14] & kSectionRowCollapse) != 0 && (srows[19] & kSectionRowCollapse) != 0);
+    CHECK(section_mask_rows(person, ~(1u << 14), 19, srows));
+    CHECK((srows[14] & kSectionRowHidden) == 0 && (srows[19] & kSectionRowHidden) == 0);
+    CHECK(srows[14] == kSectionRowAnchored && srows[19] == kSectionRowAnchored);
+    // Without the head copy (a clip of 14 rows or fewer, or a view model) the
+    // row keeps its own bit.
+    CHECK(section_mask_rows(person, 1u << 19, person.size(), srows));
+    CHECK(srows[19] == (kSectionRowHidden | kSectionRowCollapse));
+    CHECK(section_mask_rows(person, 1u << 14, 14, srows));
+    CHECK((srows[14] & kSectionRowHidden) != 0 && (srows[19] & kSectionRowHidden) == 0);
+    // Rows past 31 test bit (row & 31), the shl count masking.
+    std::vector<int> long_chain(34);
+    for (size_t row = 0; row < long_chain.size(); ++row)
+        long_chain[row] = static_cast<int>(row) - 1;
+    CHECK(section_mask_rows(long_chain, 1u << 1, long_chain.size(), srows));
+    CHECK((srows[1] & kSectionRowHidden) != 0 && (srows[33] & kSectionRowHidden) != 0);
+    CHECK((srows[1] & kSectionRowCollapse) == 0); // rows 2..32 stay visible
+    CHECK(srows[2] == kSectionRowAnchored);
+
     if (failures == 0) std::printf("anim_skeletal_pose: OK\n");
     return failures == 0 ? 0 : 1;
 }

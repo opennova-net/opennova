@@ -719,6 +719,14 @@ void DebugControlTable::register_edit_actions() {
 					DebugArgSpec::integer("attrib2")->between(0, 4294967295.0)));
 	authoritative(item_attrib);
 	bind_action(item_attrib, &DebugControlTable::sim, &Simulation::debug_set_entity_item_attrib);
+
+	Entry &organics_nodismember = check(control_id::kOrganicsNoDismember, "Entities",
+			"nodismember on every organic",
+			"Set or clear the items.def nodismember attrib on every organic at once (checked when all carry it); bodies spawned later, and the next item-traits sweep, take their def's word.",
+			DebugControlRow::TARGET_SIM, DebugControlRow::OWNER_ENGINE);
+	authoritative(organics_nodismember);
+	bind_value(organics_nodismember, &DebugControlTable::sim,
+			&Simulation::debug_organics_nodismember, &Simulation::debug_set_organics_nodismember);
 }
 
 // Process-local audio knobs shared by F3 and runtime MCP: the AudioServer is

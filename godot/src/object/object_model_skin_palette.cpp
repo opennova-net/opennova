@@ -13,6 +13,7 @@
 #include "object/object_model.h"
 
 #include <formats/threedi/threedi_panm_pose.h>
+#include <runtime/anim/skeletal_pose.h> // the section row flags
 
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
@@ -274,6 +275,7 @@ void ObjectModel::apply_skeletal_panm() {
 				bind = composed;
 			}
 		}
+		bind = section_bind(bone, bind);
 		const int index = static_cast<int>(bone);
 		if (skeleton_skin_->get_bind_pose(index) != bind) {
 			skeleton_skin_->set_bind_pose(index, bind);
@@ -287,6 +289,47 @@ void ObjectModel::apply_skeletal_panm() {
 	if (changed) {
 		publish_skin_palette();
 	}
+}
+
+// A destroyed section whose row keeps a visible row below it: the row's own
+// vertices meet at its joint (the zeroed clip row of the bone builder), while
+// the skeleton keeps the rotation that visible row is posed under
+// (apply_section_rows).
+Transform3D ObjectModel::section_bind(std::size_t p_bone, const Transform3D &p_bind) const {
+	if (p_bone < section_zero_binds_.size() && section_zero_binds_[p_bone] != 0) {
+		return Transform3D(Basis(Vector3(), Vector3(), Vector3()), Vector3());
+	}
+	return p_bind;
+}
+
+// Land the zero binds the section rows ask for (the rest binds elsewhere).
+// While the PANM layer owns the binds its pass writes them every frame,
+// through section_bind.
+void ObjectModel::apply_section_binds() {
+	std::vector<uint8_t> zero(section_rows_.size(), 0u);
+	for (std::size_t bone = 0; bone < section_rows_.size(); ++bone) {
+		const uint8_t row = section_rows_[bone];
+		zero[bone] = (row & opennova::anim::kSectionRowHidden) != 0 &&
+				(row & opennova::anim::kSectionRowCollapse) == 0;
+	}
+	if (zero == section_zero_binds_) {
+		return;
+	}
+	section_zero_binds_ = std::move(zero);
+	if (skeleton_skin_.is_null() || skin_binds_layered_) {
+		return;
+	}
+	const int binds = std::min(static_cast<int>(skeleton_skin_->get_bind_count()),
+			static_cast<int>(skin_rest_binds_.size()));
+	for (int bone = 0; bone < binds; ++bone) {
+		const Transform3D bind = section_bind(static_cast<std::size_t>(bone),
+				skin_rest_binds_[static_cast<std::size_t>(bone)]);
+		skeleton_skin_->set_bind_pose(bone, bind);
+		if (static_cast<std::size_t>(bone) < skin_bind_poses_.size()) {
+			skin_bind_poses_[static_cast<std::size_t>(bone)] = bind;
+		}
+	}
+	publish_skin_palette();
 }
 
 Array ObjectModel::get_skin_palette() const {

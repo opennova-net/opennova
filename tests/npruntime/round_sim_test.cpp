@@ -1042,10 +1042,12 @@ struct DismembermentRig {
 		world.round_sim.tick(world, nullptr, &collision);
 	}
 
+	// The first clone: a pool-0 row beside the shooter and the victim.
 	const w::Entity *piece() const {
 		const w::Entity *found = nullptr;
-		world.registry.for_each([&](const w::Entity &entity) {
-			if (entity.dismemberment_piece) found = &entity;
+		world.registry.for_each_in_pool(0, [&](const w::Entity &entity) {
+			if (found == nullptr && entity.handle != shooter && entity.handle != victim)
+				found = &entity;
 		});
 		return found;
 	}
@@ -1200,10 +1202,16 @@ bool test_dismemberment_damage_path() {
 		if (!expect(piece->section_mask == (0x2000000u | ~kBone3Mask),
 				"clone keeps exactly the complementary cut sections"))
 			return false;
-		if (!expect(piece->health == 0 && !piece->alive &&
-					piece->damage_state == -1 && piece->net_id == 0 &&
+		// The clone leg severs health and the SSN key (+0x7C); the memcpy keeps
+		// everything else of the victim's, its stamped attacker and its
+		// damage state included [orig: @0x407697, @0x4076AB; the copy
+		// @0x4398DC].
+		if (!expect(piece->health == 0 && !piece->alive && piece->net_id == 0 &&
+					piece->damage_state == victim->damage_state &&
+					piece->last_attacker == rig.shooter &&
+					piece->item_id == victim->item_id &&
 					piece->spawn_origin == w::kSpawnOriginNone,
-				"corpse clone has no live gameplay or authored identity"))
+				"the clone keeps the victim's words but its health and SSN key"))
 			return false;
 
 		const w::AiEntity *victim_body = rig.ai.for_handle(rig.victim);
@@ -1212,6 +1220,12 @@ bool test_dismemberment_damage_path() {
 		// the clone memcpy-inherits the freshly written roll. The torso
 		// overlay channel (+0x2DC) is not the death roll's store.
 		// [orig: @0x407575; clone copy @0x4398dc]
+		// The copied +0x188/+0x18C: both halves drive one channel pair.
+		if (!expect(victim_body != nullptr && piece_body != nullptr &&
+					victim_body->shared_anim_slot >= 0 &&
+					piece_body->shared_anim_slot == victim_body->shared_anim_slot,
+				"the clone shares the victim's anim slot pair"))
+			return false;
 		if (!expect(victim_body != nullptr && piece_body != nullptr &&
 					victim_body->roll == -0x05B05B00 &&
 					piece_body->roll == -0x05B05B00 &&
@@ -1228,8 +1242,8 @@ bool test_dismemberment_damage_path() {
 
 		// The clone is an ordinary pool-0 slot on the wire: the 0x0A priority
 		// walk has no dead/connection filter [orig: @0x50e6cb-0x50e6da] and
-		// the join download serializes every pool-0 slot. Its net_id/name are
-		// our cleared stand-ins (D-AI-9); no record carries the section mask.
+		// the join download serializes every pool-0 slot. Its SSN key is the
+		// severed one; no record carries the section mask.
 		const auto snapshots = ns::snapshot_world(rig.world);
 		const GameEntitySnapshot *piece_snapshot = nullptr;
 		for (const auto &snapshot : snapshots) {
@@ -1248,7 +1262,31 @@ bool test_dismemberment_damage_path() {
 		}
 		if (!expect(piece_record != nullptr && piece_record->has_body() &&
 					piece_record->net_id == 0,
-				"corpse clone joins the pool-0 spawn batch with a cleared net id"))
+				"corpse clone joins the pool-0 spawn batch with its severed SSN key"))
+			return false;
+	}
+
+	{
+		// A body already at zero health whose death edge has not latched the
+		// dead bit yet is cut again by any later round, one that lands no
+		// damage included: here an earlier forearm cut (its sections drop out
+		// of the hit test), then a torso round adds the bits still showing.
+		// [orig: Projectile_ProcessDamageOnTarget callback @0x4E81FF..0x4E820E;
+		//  OrganicClass_HandleEvent gates @0x40759E..0x4075F0, newBoneBits
+		//  @0x407675; the clone mask @0x407691]
+		DismembermentRig rig(3);
+		w::Entity *victim = rig.world.registry.get(rig.victim);
+		const uint32_t forearm = w::dismemberment_mask_for_bone(9);
+		victim->health = 0;
+		victim->section_mask = forearm;
+		rig.fire();
+		const w::Entity *piece = rig.piece();
+		const uint32_t new_bits = kBone3Mask & ~forearm;
+		if (!expect(rig.world.round_sim.hits.size() == 1 &&
+					rig.world.round_sim.hits[0].damage == 0 && piece != nullptr &&
+					piece->section_mask == ~new_bits &&
+					victim->section_mask == (forearm | kBone3Mask),
+				"a later round cuts the dying body again, adding only the bits still showing"))
 			return false;
 	}
 
@@ -1263,12 +1301,15 @@ bool test_dismemberment_damage_path() {
 	}
 
 	{
+		// The victim commits its cut before the clone call; with the actor
+		// pool full retail's unchecked clone faults (@0x407691), the port
+		// stops with the cut committed (D-AI-9).
 		DismembermentRig rig(2); // shooter + victim fill the actor pool
 		rig.fire();
 		if (!expect(rig.piece() == nullptr &&
 					rig.world.registry.get(rig.victim)->section_mask ==
-							0x2000000u,
-				"pool exhaustion leaves the original section mask intact"))
+							(0x2000000u | kBone3Mask),
+				"a full pool still commits the victim's cut [orig: @0x407684]"))
 			return false;
 	}
 	return true;
@@ -1366,6 +1407,19 @@ bool test_person_hit_presentation_legs_run_on_every_hit() {
 		rig.fire();
 		if (!expect(body->roll == 0 && victim->death_anim_state == 0,
 		            "a dead body neither rolls nor re-stages [orig: @0x40772f]"))
+			return false;
+	}
+	{
+		// A body at zero health already flagged dead is never cut
+		// [orig: the Flags & 2 gate @0x4075ED].
+		DismembermentRig rig(3);
+		w::Entity *victim = rig.world.registry.get(rig.victim);
+		victim->health = 0;
+		victim->flags |= w::kEntityFlagDead;
+		victim->engine_flags |= w::kEntityFlagDead;
+		rig.fire();
+		if (!expect(rig.piece() == nullptr && victim->section_mask == 0x2000000u,
+		            "a dead body is not cut"))
 			return false;
 	}
 	return true;

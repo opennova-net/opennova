@@ -61,7 +61,8 @@ void infantry_death_edge(AiSystem &ai, AiEntity &e, World &world, Entity *ent, b
 // The death edge's scream leg, shared by the motor's edge and the authority's
 // remote-peer edge: a player body (org2) composes "<prefix>_DEATH" /
 // "_DEATH_K" from its anim slot, any other body plays its profile slot 7 / 8;
-// the section-bit-0 silent cleanup and a dismemberment piece play nothing.
+// the section-bit-0 silent cleanup plays nothing (every dismemberment clone
+// has bit 0: no cut mask includes it).
 // [orig: Entity_UpdateInfantryPlayerBody @0x4b4c19, @0x4b4c4a..0x4b4c6a;
 //  Entity_UpdateInfantryAI @0x4b9c68, @0x4b9ca3..0x4b9cc1]
 void infantry_death_scream(AiSystem &ai, const AiEntity &e, World &world, const Entity *ent);

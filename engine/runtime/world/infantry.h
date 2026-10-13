@@ -402,6 +402,36 @@ private:
     std::unordered_map<int64_t, int32_t> heads_;
 };
 
+// The AnimMap slot pair a body's +0x188/+0x18C point at: the channel side of
+// InfantryState (the playing ids, playheads, blends, served ring entries,
+// end-notify words and the root-motion bottom), as opposed to the per-body
+// request words (+0x2BC/+0x2B8, +0x2C8/+0x2C4). A dismemberment clone copies
+// the pointers, so its motor drives the victim's very channels
+// (AiSystem::shared_anim_slots_). [orig: Entity_CloneFromTemplateByType
+// @0x4398DC copies +0x188/+0x18C, no AnimMap_RegisterEntity while set
+// @0x439908; AnimMap_UpdateDualChannels @0x40B8C0 advances both on every call]
+struct InfantryAnimSlot {
+    int anim_playing_state = -1;
+    int32_t clip_phase = 0;
+    int32_t anim_pending_boundary = -1;
+    int anim_prev = 0;
+    int32_t anim_prev_clip_phase = 0;
+    float anim_blend_weight = 1.0f;
+    float anim_blend_step = 0.0f;
+    int32_t anim_variant = 0;
+    int32_t anim_prev_variant = 0;
+    int32_t prev_capsule_bottom = 0;
+    int wpn_playing_state = -1;
+    int32_t wpn_clip_phase = 0;
+    int32_t wpn_deferred_boundary = -1;
+    int wpn_prev = 0;
+    int32_t wpn_prev_clip_phase = 0;
+    float wpn_blend_weight = 1.0f;
+    float wpn_blend_step = 0.0f;
+    int32_t wpn_variant = 0;
+    int32_t wpn_prev_variant = 0;
+};
+
 struct InfantryState {
     ParachuteState parachute;
     bool active = false;
@@ -490,6 +520,36 @@ struct InfantryState {
 
     int body_clip_state() const {
         return anim_playing_state >= 0 ? anim_playing_state : anim_state;
+    }
+    // The channel side as one record (InfantryAnimSlot), read and written
+    // whole by a body sharing its slot pair.
+    InfantryAnimSlot anim_slot() const {
+        return InfantryAnimSlot{anim_playing_state, clip_phase, anim_pending_boundary,
+                anim_prev, anim_prev_clip_phase, anim_blend_weight, anim_blend_step,
+                anim_variant, anim_prev_variant, prev_capsule_bottom, wpn_playing_state,
+                wpn_clip_phase, wpn_deferred_boundary, wpn_prev, wpn_prev_clip_phase,
+                wpn_blend_weight, wpn_blend_step, wpn_variant, wpn_prev_variant};
+    }
+    void set_anim_slot(const InfantryAnimSlot &s) {
+        anim_playing_state = s.anim_playing_state;
+        clip_phase = s.clip_phase;
+        anim_pending_boundary = s.anim_pending_boundary;
+        anim_prev = s.anim_prev;
+        anim_prev_clip_phase = s.anim_prev_clip_phase;
+        anim_blend_weight = s.anim_blend_weight;
+        anim_blend_step = s.anim_blend_step;
+        anim_variant = s.anim_variant;
+        anim_prev_variant = s.anim_prev_variant;
+        prev_capsule_bottom = s.prev_capsule_bottom;
+        wpn_playing_state = s.wpn_playing_state;
+        wpn_clip_phase = s.wpn_clip_phase;
+        wpn_deferred_boundary = s.wpn_deferred_boundary;
+        wpn_prev = s.wpn_prev;
+        wpn_prev_clip_phase = s.wpn_prev_clip_phase;
+        wpn_blend_weight = s.wpn_blend_weight;
+        wpn_blend_step = s.wpn_blend_step;
+        wpn_variant = s.wpn_variant;
+        wpn_prev_variant = s.wpn_prev_variant;
     }
     void request_body_animation(int state) {
         anim_state = state;

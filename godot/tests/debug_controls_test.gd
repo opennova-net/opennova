@@ -31,6 +31,7 @@ const EXPECTED_IDS: Array[StringName] = [
 	&"set_entity_health",
 	&"set_entity_position",
 	&"set_entity_item_attrib",
+	&"organics_nodismember",
 	&"set_audio_bus_volume",
 	&"set_audio_bus_mute",
 	&"set_audio_bus_solo",
@@ -79,7 +80,7 @@ const WIRE_STATE_KEYS := ["id", "kind", "value", "desired_value", "available",
 		"writable", "authoritative", "reason"]
 # Engine rows end in a Simulation / Terrain / Weather / environment call;
 # device rows are viewport / audio / shell state.
-const ENGINE_ROWS := 46
+const ENGINE_ROWS := 47
 const DEVICE_ROWS := 14
 
 

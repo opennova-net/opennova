@@ -87,6 +87,12 @@ public:
     // to distinguish entities that reuse the same packed pool/slot handle.
     void restore_from(const EntityRegistry &snapshot);
 
+    // The row the next spawn(pool) writes, as its previous occupant left it (a
+    // despawned row keeps its words, an unused one is the default row), or
+    // null when the pool is full: Pool_AllocEntry clears nothing, so a clone
+    // reads its tail from here. [orig: Pool_AllocEntry @0x442230]
+    const Entity *next_spawn_row(int pool) const;
+
     // Faithful to EntityPool_FindByNetId @0x4f0a20: scans pool 0 first, then pools
     // 1..3 (mask &0xF), first match wins; returns (pool<<12)|slot, else invalid.
     EntityHandle find_by_net_id(uint16_t net_id) const;

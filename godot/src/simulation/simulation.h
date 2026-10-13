@@ -2045,14 +2045,14 @@ public:
 	// World-registry probe seam by SSN: mission-space teleport (the by-SSN
 	// entity card is entity_card_by_net_id above).
 	void debug_set_world_entity_position(int p_net_id, const Vector3 &p_mission_pos);
-	// Exact-slot parity probe: set the authoritative MountSlot words on a
-	// world entity so a real UDP phase-8 sample can prove receiver application.
-	Error debug_set_world_entity_weapon_ammo(int p_net_id, int p_clip,
-	                                         int p_reserve);
-	// Per-entity items.def attrib override by packed wire handle (brainless rows included):
-	// EntityCommands::set_entity_item_attrib. ERR_UNAVAILABLE without a kernel,
-	// ERR_INVALID_PARAMETER for a handle/word out of range, ERR_DOES_NOT_EXIST when nothing resolves.
+	// Exact-slot parity probe: the authoritative MountSlot words, for a real UDP phase-8 sample.
+	Error debug_set_world_entity_weapon_ammo(int p_net_id, int p_clip, int p_reserve);
+	// Per-entity items.def attrib override by packed wire handle (EntityCommands::set_entity_item_attrib):
+	// ERR_UNAVAILABLE / ERR_INVALID_PARAMETER (handle or word range) / ERR_DOES_NOT_EXIST.
 	Error debug_set_entity_item_attrib(int p_handle, int64_t p_attrib, int64_t p_attrib2);
+	// nodismember on every organic at once (EntityCommands::set_organics_item_attrib); the authority's.
+	void debug_set_organics_nodismember(bool p_on);
+	bool debug_organics_nodismember() const;
 	// Land the local player at an exact F3-dumped pose (probe seam). Returns
 	// ERR_UNAVAILABLE until the complete local-player subject exists.
 	// TEST SCAFFOLDING (host authority): kill a BMS command group outright so an

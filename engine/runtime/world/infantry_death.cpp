@@ -37,7 +37,7 @@ bool org1_owns_death_transaction(const World &world, EntityHandle victim) {
 // Section bit 0 (the silent, shortened cleanup) skips the scream in both
 // passes [orig: @0x4b4c19 / @0x4b9c68].
 void infantry_death_scream(AiSystem &ai, const AiEntity &e, World &world, const Entity *ent) {
-    if (ent != nullptr && ((ent->section_mask & 1u) != 0 || ent->dismemberment_piece)) return;
+    if (ent != nullptr && (ent->section_mask & 1u) != 0) return;
     const bool night_death =
         (world.tables.mission_attrib_flags & MissionTables::kMissionAttribEnableNVG) != 0;
     const bool player_body = e.inf.is_local_player || e.net_is_remote_peer ||

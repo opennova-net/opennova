@@ -1,5 +1,7 @@
 #include <runtime/devtools/entities_window.h>
 
+#include <runtime/devtools/debug_control_ids.h>
+
 #include <imgui.h>
 
 #include <cctype>
@@ -242,6 +244,10 @@ const char *EntitiesWindow::row_pos(int row) const {
 	return (row >= 0 && row < row_count()) ? texts_[static_cast<size_t>(filtered_[static_cast<size_t>(row)])].pos.data() : "";
 }
 
+void EntitiesWindow::wanted_controls(std::vector<const char *> &out) const {
+	out.push_back(control_id::kOrganicsNoDismember);
+}
+
 void EntitiesWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 	(void)pass;
 	(void)frame_index;
@@ -262,6 +268,7 @@ void EntitiesWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 	if (ImGui::InputText("Filter", filter_.data(), filter_.size())) {
 		apply_filter();
 	}
+	draw_control(board_, control_id::kOrganicsNoDismember, requests_);
 
 	const ImGuiTableFlags table_flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV |
 			ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp;

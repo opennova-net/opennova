@@ -934,6 +934,11 @@ static void test_lethal_hit_blends_into_death_animation_without_position_jump() 
     victim_seed.net_id = 0x21;
     victim_seed.group_id = 2;
     victim_seed.position = {20.0f, 0.0f, 0.0f};
+    // The persons JO ships author `nodismember` (37 of the 39 type-person
+    // rows): a cut clone would share this body's anim slot pair and advance
+    // its death blend a second time each tick (world-wac-ai-re §19.2), which
+    // this transition test is not about.
+    victim_seed.item_attrib = kItemAttribNoDismember;
     // The corpse timer's seed. JO persons author `deathtime 30` (37 of the 39
     // type-person rows in JOX ITEMS.DEF), parse-scaled to 30*62 + 62 ticks
     // [orig: ItemDef_ParseProperty @0x49fa6c-0x49faa0 -> def+0x890; the death
@@ -975,8 +980,6 @@ static void test_lethal_hit_blends_into_death_animation_without_position_jump() 
     CHECK(w.registry.get(victim_h)->health == 0);
     CHECK(!w.round_sim.deaths.empty());
 
-    // A dismemberment piece may attach a brain and move the AI array: re-read
-    // the victim's brain.
     AiEntity &corpse = *ai.for_handle(victim_h);
     const int32_t transition_x = corpse.pos[0];
     const int32_t transition_z = corpse.pos[2];

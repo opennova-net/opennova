@@ -91,6 +91,14 @@ struct Org1Rig {
     }
     AiEntity &e() { return *w->ai.for_handle(handle); }
     Entity &entity() { return *w->registry.get(handle); }
+    // Dismemberment clones: the pool-0 rows beside the body.
+    int clones() const {
+        int n = 0;
+        w->registry.for_each_in_pool(0, [&](const Entity &row) {
+            if (row.handle != handle) ++n;
+        });
+        return n;
+    }
     void airborne() {
         e().inf.airborne = true;
         entity().flags |= kEntityFlagInAir;
@@ -567,12 +575,58 @@ void test_org1_edge_reads_the_recorded_round() {
         CHECK(rig.e().inf.anim_state ==
               compute_death_anim_state(section, 2, death_cause::kBullet));
         CHECK(rig.w->round_sim.hits.size() == 1);
-        int pieces = 0;
-        rig.w->registry.for_each_in_pool(0, [&](const Entity &e) {
-            if (e.dismemberment_piece) ++pieces;
-        });
-        CHECK(pieces == (section > 0 ? 1 : 0));
+        CHECK(rig.clones() == (section > 0 ? 1 : 0));
     }
+}
+
+// The clone's own edge re-enters the cut: its +0x2C0 is its row's recycled
+// tail (zero for a row unused this mission), so its first update takes the
+// unstaged leg and the hit callback, whose gates still pass (zero health, the
+// dead bit not yet latched, the record still holding the round). Each
+// generation hides the bits it shows (the same cut adds them all) and copies
+// itself into the next free row, which the walk reaches on the next tick (its
+// bound is the used count read before the walk), until the record changes or
+// the pool is full, where retail's unchecked clone faults and the port stops
+// (D-AI-9). Every generation shares the victim's slot pair and dies silently
+// (its mask always holds bit 0).
+// [orig: Entity_UpdateInfantryAI @0x4B9CC9..0x4B9CF1 (the callback before the
+//  dead bit @0x4B9D18); OrganicClass_HandleEvent @0x40759E..0x4076C9;
+//  Entity_UpdateAllEntities used read @0x4C242C; the silent leg @0x4B9C68]
+void test_org1_clone_edge_cuts_again() {
+    Org1Rig rig;
+    arm_death(rig);
+    rig.entity().yaw = 90;
+    HitRecord &record = rig.w->round_sim.hit_record;
+    record.has_round = true;
+    record.round_vel_q16 = FixedVec3{10 << 16, 0, 0};
+    record.round_ammo_index = -1;
+    record.section = 3;
+    const uint32_t cut = dismemberment_mask_for_bone(3);
+    rig.tick(40);
+    CHECK(rig.clones() == 1);
+    CHECK(rig.entity().section_mask == cut);
+    rig.tick(41);
+    rig.tick(42);
+    CHECK(rig.clones() == 3); // the body and three generations fill the pool of 4
+    rig.tick(43);
+    CHECK(rig.clones() == 3); // the last generation's cut finds no row
+    int fully_hidden = 0;
+    int showing_the_cut = 0;
+    int32_t shared = -2;
+    bool one_pair = true;
+    rig.w->registry.for_each_in_pool(0, [&](const Entity &e) {
+        if (e.handle == rig.handle) return;
+        if (e.section_mask == 0xFFFFFFFFu) ++fully_hidden;
+        if (e.section_mask == ~cut) ++showing_the_cut;
+        CHECK((e.flags & kEntityFlagDead) != 0);
+        const AiEntity *body = rig.w->ai.for_handle(e.handle);
+        CHECK(body != nullptr);
+        if (body == nullptr) return;
+        if (shared == -2) shared = body->shared_anim_slot;
+        one_pair = one_pair && body->shared_anim_slot == shared && shared >= 0;
+    });
+    CHECK(fully_hidden == 3 && showing_the_cut == 0);
+    CHECK(one_pair && rig.e().shared_anim_slot == shared);
 }
 
 // The plyr class callback's waypoint tail: a team 1/2 player whose AI slot
@@ -808,6 +862,7 @@ int main() {
     test_org1_float_reads_this_ticks_eye();
     test_player_waypoint_tail();
     test_org1_edge_reads_the_recorded_round();
+    test_org1_clone_edge_cuts_again();
     test_org1_round_leaves_along_this_ticks_look();
     test_org1_fire_latch_is_a_pass_local();
     test_org1_airborne_body_skips_the_think();

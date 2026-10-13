@@ -33,6 +33,7 @@ inline constexpr const char *kCycleMapMode = "cycle_map_mode";
 inline constexpr const char *kSetEntityHealth = "set_entity_health";
 inline constexpr const char *kSetEntityPosition = "set_entity_position";
 inline constexpr const char *kSetEntityItemAttrib = "set_entity_item_attrib";
+inline constexpr const char *kOrganicsNoDismember = "organics_nodismember";
 // Audio page.
 inline constexpr const char *kSetAudioBusVolume = "set_audio_bus_volume";
 inline constexpr const char *kSetAudioBusMute = "set_audio_bus_mute";

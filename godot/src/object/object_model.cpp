@@ -638,12 +638,23 @@ void ObjectModel::set_occlusion_section_mask(int64_t p_raw_mask, int64_t p_force
 }
 
 void ObjectModel::set_destroyed_section_mask(int64_t p_hidden_mask) {
+	// A linked part (a body's head) draws through the same bone builder.
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->set_destroyed_section_mask(p_hidden_mask);
+	}
 	const uint32_t hidden = static_cast<uint32_t>(p_hidden_mask);
 	if (destroyed_section_mask_ == hidden) {
 		return;
 	}
 	destroyed_section_mask_ = hidden;
 	apply_section_visibility();
+	// A clip-posed body takes the mask in its bone builder: re-pose now, like
+	// the right-hand collapse, so the cut lands on the current pose.
+	if (skeleton_ != nullptr && !anim_key_.is_empty()) {
+		body_pose_dirty_ = true;
+		wake_runtime_frame();
+		advance_body_animation(0.0);
+	}
 }
 
 Array ObjectModel::get_surface_materials() const {

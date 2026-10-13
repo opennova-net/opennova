@@ -81,10 +81,11 @@ struct KillRig {
         r.target = npc;
     }
 
+    // The clones: pool-0 rows beside the shooter and the victim.
     int pieces() const {
         int n = 0;
         w->registry.for_each_in_pool(0, [&](const Entity &e) {
-            if (e.dismemberment_piece) ++n;
+            if (e.handle != shooter && e.handle != npc) ++n;
         });
         return n;
     }

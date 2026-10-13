@@ -59,6 +59,8 @@ void ObjectModel::rebuild_scene() {
 	skeleton_skin_.unref();
 	skin_rest_binds_.clear();
 	skin_binds_layered_ = false;
+	section_rows_.clear();
+	section_zero_binds_.clear();
 	clear_skin_palette();
 	muzzle_bone_ = -1;
 	surface_material_indices_.clear();

@@ -41,7 +41,7 @@ GameDevTools::GameDevTools() {
 	// Closed by default; a world pick or the "Windows" menu opens them. The
 	// Properties window reads the Entities window's selection, so the list
 	// registers first and outlives it (the pass owns both).
-	auto entities = std::make_unique<EntitiesWindow>();
+	auto entities = std::make_unique<EntitiesWindow>(control_board_);
 	entities_window_ = entities.get();
 	pass_.register_window(std::move(entities));
 	pass_.register_overlay(entities_window_->selection_layer());

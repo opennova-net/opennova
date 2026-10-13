@@ -902,16 +902,12 @@ struct Entity {
     //  @0x54274A]
     uint8_t powerup_weapon = 0;
     // Hidden/dismembered skeletal sections (entity+0x134): a set bit removes
-    // the matching ordinal bone from person collision and presentation.
+    // the matching ordinal bone from person collision and presentation. A
+    // dismemberment clone is an ordinary pool-0 row whose mask is the
+    // complement of its cut (round_sim try_spawn_dismemberment_piece); no
+    // wire record carries the mask (world-wac-ai-re §19.2).
     // Distinct from spawned_piece_mask at +0x138.
     uint32_t section_mask = 0;
-    // Host-local marker for the pool-0 corpse clone created by the person
-    // damage callback's dismemberment leg. The clone is an ordinary wire row
-    // (0x0A compacts / 0x0C join batch / 0x18 self-heal, none carrying the
-    // section mask — world-wac-ai-re §19.2); this flag only suppresses the
-    // clone's own death scream and keeps host bookkeeping honest. net_id and
-    // the names are cleared (D-AI-9 aliasing-safety divergence).
-    bool dismemberment_piece = false;
     // Husk sections that left as death pieces (entity+0x138): the husk renders
     // and collides WITHOUT these sections. Bit 0 (the hull) never sets.
     // [orig: Entity_SpawnDeathPieces @ 0x493983]

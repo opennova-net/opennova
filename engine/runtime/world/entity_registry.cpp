@@ -59,6 +59,14 @@ EntityHandle EntityRegistry::spawn_from(int pool, size_t first_slot, const Entit
     return EntityHandle{}; // pool full (faithful: spawn fails on a full fixed pool)
 }
 
+const Entity *EntityRegistry::next_spawn_row(int pool) const {
+    if (pool < 0 || pool >= kPoolCount) return nullptr;
+    const Pool &p = pools_[pool];
+    for (size_t s = 0; s < p.slots.size(); ++s)
+        if (!p.used[s]) return &p.slots[s];
+    return nullptr;
+}
+
 EntityHandle EntityRegistry::spawn_at(EntityHandle h, const Entity &seed) {
     if (!h.valid()) return EntityHandle{};
     const int pool = h.pool();

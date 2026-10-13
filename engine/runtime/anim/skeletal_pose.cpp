@@ -269,4 +269,47 @@ void quat_to_mat3_rows(const Quat &q, float r_rows[9]) {
     r_rows[8] = 1.0f - 2.0f * (xx + yy);
 }
 
+bool section_mask_rows(const std::vector<int> &parents, uint32_t section_mask,
+                       size_t clip_bones, std::vector<uint8_t> &r_rows) {
+    const size_t n = parents.size();
+    r_rows.assign(n, 0u);
+    // The row at the clip's count above 14 is overwritten with row 14's
+    // finished matrix after its own bit zeroed it [orig: @0x4B2002..0x4B2018].
+    constexpr size_t kHeadRow = 14;
+    const bool head_copy = clip_bones > kHeadRow && clip_bones < n;
+    const auto bit = [section_mask](size_t row) {
+        return ((section_mask >> (row & 31u)) & 1u) != 0; // shl edx, cl [orig: @0x4B1F1B]
+    };
+    bool any = false;
+    for (size_t row = 0; row < n; ++row) {
+        const bool hidden = head_copy && row == clip_bones ? bit(kHeadRow) : bit(row);
+        if (!hidden) continue;
+        r_rows[row] = kSectionRowHidden;
+        any = true;
+    }
+    if (!any) return false;
+    // A hidden row whose descendants are all hidden collapses its subtree; a
+    // visible row anywhere below keeps its ancestors' rotations alive.
+    std::vector<uint8_t> visible_below(n, 0u);
+    for (size_t row = 0; row < n; ++row) {
+        if ((r_rows[row] & kSectionRowHidden) != 0) continue;
+        // Walk up at most n links: a malformed table cannot loop.
+        int p = parents[row];
+        for (size_t guard = 0; p >= 0 && static_cast<size_t>(p) < n && guard < n; ++guard) {
+            if (visible_below[static_cast<size_t>(p)] != 0) break;
+            visible_below[static_cast<size_t>(p)] = 1u;
+            p = parents[static_cast<size_t>(p)];
+        }
+    }
+    for (size_t row = 0; row < n; ++row) {
+        const int p = parents[row];
+        const bool hidden = (r_rows[row] & kSectionRowHidden) != 0;
+        if (hidden && visible_below[row] == 0) r_rows[row] |= kSectionRowCollapse;
+        const bool parent_hidden = p >= 0 && static_cast<size_t>(p) < n &&
+                (r_rows[static_cast<size_t>(p)] & kSectionRowHidden) != 0;
+        if (parent_hidden || (p < 0 && hidden)) r_rows[row] |= kSectionRowAnchored;
+    }
+    return true;
+}
+
 } // namespace opennova::anim

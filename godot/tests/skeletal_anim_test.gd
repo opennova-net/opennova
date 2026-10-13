@@ -376,6 +376,69 @@ func test_mounted_hand_collapse_does_not_stretch_skinned_triangles() -> void:
 			"collapsing BN17 cannot balloon the character's skinned bounds")
 
 
+# The person's skin binds, from whichever path its strips draw through: the
+# Skin a skinned MeshInstance3D binds, else the effects palette (pose x bind).
+func _first_skin(model) -> Skin:
+	for node in model.find_children("*", "MeshInstance3D", true, false):
+		var instance := node as MeshInstance3D
+		if instance.skin != null:
+			return instance.skin
+	return null
+
+
+func test_destroyed_sections_collapse_the_bone_builder_rows() -> void:
+	# The dismemberment masks (entity+0x134): the bone builder zeroes a hidden
+	# row's clip matrix, so its vertices meet at the joint its parent places
+	# and a child's joint lands there too; the rotations are the rows' own.
+	# [orig: Entity_BuildBoneTransformMatrices @0x4B1F10..0x4B1F31; the
+	#  re-anchor @0x4B201E..0x4B2162; world-wac-ai-re.md §19.2]
+	var data := _open(PERSON)
+	var root := ResourceRoot.new()
+	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
+	var skeletal := SkeletalAnim.new()
+	assert_true(skeletal.load_from_resource_root(root, "soldier.adm",
+			data.get_bone_origins(), data.get_bone_parents()))
+	var forearm := (1 << 9) | 0x10000 # bone 9's cut: the forearm and the hand
+
+	# The victim: a collapsed subtree poses at zero scale.
+	var victim = _char_model_at(data, skeletal, Transform3D.IDENTITY, false)
+	victim.set_destroyed_section_mask(forearm)
+	var skel: Skeleton3D = victim.get_skeleton()
+	assert_eq(skel.get_bone_parent(9), 5, "the fixture keeps JO's arm chain")
+	assert_true(skel.get_bone_pose_scale(9).is_zero_approx(), "the cut forearm collapses")
+	assert_true(skel.get_bone_pose_scale(16).is_zero_approx(), "...with its hand")
+	assert_false(skel.get_bone_pose_scale(5).is_zero_approx(), "the upper arm stays")
+
+	# The clone: the hidden chain above the visible forearm keeps its rotations,
+	# the forearm's joint lands on it, down to the model origin the hidden root
+	# takes, and the hidden rows' own vertices take a zero bind.
+	var clone = _char_model_at(data, skeletal, Transform3D.IDENTITY, false)
+	clone.set_destroyed_section_mask(~forearm & 0xFFFFFFFF)
+	skel = clone.get_skeleton()
+	assert_false(skel.get_bone_pose_scale(9).is_zero_approx(), "the clone's forearm keeps its rotation")
+	assert_true(skel.get_bone_pose_position(9).is_zero_approx(), "...its joint on the hidden chain's")
+	assert_false(skel.get_bone_pose_scale(0).is_zero_approx(),
+			"a hidden root over a visible row keeps its rotation")
+	assert_true(skel.get_bone_pose_position(0).is_zero_approx(), "the hidden root sits at the model origin")
+	assert_true(skel.get_bone_pose_scale(7).is_zero_approx(), "a hidden leg (no visible row below) collapses")
+	var zero := Transform3D(Basis(Vector3.ZERO, Vector3.ZERO, Vector3.ZERO), Vector3.ZERO)
+	var skin := _first_skin(clone)
+	var palette: Array = clone.get_skin_palette()
+	assert_true(skin != null or not palette.is_empty(), "the person draws through a skin or a palette")
+	if skin != null:
+		assert_eq(skin.get_bind_pose(0), zero, "the hidden root's own vertices meet at its joint")
+		assert_ne(skin.get_bind_pose(9), zero, "the visible forearm keeps its bind")
+	if not palette.is_empty():
+		assert_true((palette[0] as Transform3D).basis == Basis(Vector3.ZERO, Vector3.ZERO, Vector3.ZERO),
+				"the palette row of the hidden root is zero")
+
+	# A cleared mask (a respawn) restores the authored pose and binds.
+	clone.set_destroyed_section_mask(0)
+	assert_false(skel.get_bone_pose_scale(7).is_zero_approx(), "the cleared mask restores the pose")
+	if skin != null:
+		assert_ne(skin.get_bind_pose(0), zero, "the cleared mask restores the bind")
+
+
 func test_model_collapses_right_hand_at_joint_without_aim_overlay() -> void:
 	# The evaluator's zero-scale BN17 pose is a clip marker, not a world-space
 	# destination. Exercise ObjectModel's no-overlay fallback at a non-zero

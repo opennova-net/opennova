@@ -169,6 +169,15 @@ public:
     // (mission load, net topology sync) re-stamps it from the def. False when
     // the handle resolves no registry row.
     bool set_entity_item_attrib(EntityHandle h, uint32_t attrib, uint32_t attrib2);
+    // The same override over every organic at once (pool 0, EntityKind::Organic,
+    // players and dismemberment clones included): set or clear `bits` in each
+    // row's ItemDefAttrib word through the same stamp, with the same lifetime
+    // (a body spawned later, or the next item-traits sweep, takes its def's
+    // word). Returns the rows it changed. The dev tools' all-organics
+    // nodismember switch.
+    int set_organics_item_attrib(uint32_t bits, bool on);
+    // True when an organic exists and every organic carries all of `bits`.
+    bool organics_carry_item_attrib(uint32_t bits) const;
 
     // --- the WAC weather handlers (world::WeatherState carries the cites) ---
     // Every environment command lands here: the VM's handlers, the BMS

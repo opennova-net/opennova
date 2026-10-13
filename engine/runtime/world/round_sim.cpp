@@ -240,130 +240,79 @@ void apply_hit_body_roll(AiEntity *body, int32_t bone, int quadrant) {
     }
 }
 
-Entity make_dismemberment_piece_seed(const Entity &victim, uint32_t cut_mask,
-                                     int32_t death_anim_state) {
-    // The original clones by memcpy of the first 0x2B4 entity bytes plus the
-    // 0xAC AI block (person -> pool 0), which INHERITS NetId/Ssn/Team and even
-    // the anim-slot pointer (the halves share one skeletal evaluation), while
-    // the tail past +0x2B4 keeps recycled-slot data. It then severs exactly:
-    // sectionMask (complement swap @0x407691), Health = 0 (@0x407697), the
-    // burn-emitter link +0x1CC (@0x40769e), shadowSlot0 +0x1B6 (@0x4076a4),
-    // and DcbId +0x7C (@0x4076ab). [orig: Entity_CloneFromTemplateByType
-    // @0x4398a0 person leg @0x4398c1-0x439924; the sever set above]
-    // Our registry/AI split cannot memcpy an entity row, so this seed keeps
-    // the authored/model traits and clears every runtime relationship a copied
-    // struct would otherwise alias (weapon slots, mounts, emplacement poses) —
-    // a superset of the original's sever list, same observable corpse.
-    // Deliberate divergence (D-AI-9): net_id and the names are CLEARED, where
-    // the original's memcpy duplicates the victim's — our forward-scanning
-    // slot allocator could put the clone BELOW the victim, and the ascending
-    // first-match find_by_net_id/find_by_name would then misroute scripted
-    // kill/target refs to the clone. The 0x0C/0x18 wire records carry 0/""
-    // for the clone instead of the duplicate.
+// The clone's world row: Entity_CloneFromTemplateByType copies the victim's
+// first 0x2B4 bytes into the lowest free pool-0 row, whose tail (everything
+// past +0x2B4) stays as the row's previous occupant left it, and the clone
+// leg then severs exactly sectionMask (+0x134 = ~newBoneBits), Health (+0x11E),
+// the burn-emitter link (+0x1CC @0x40769e, unported: D-ITEM-6), shadowSlot0
+// (+0x1B6 @0x4076a4, no port field) and the SSN key (+0x7C). Everything else -- team, group, Name,
+// the wire NetId, the player class, lastAttacker, the mount and carry links,
+// Flags -- is the victim's. [orig: Entity_CloneFromTemplateByType @0x4398A0,
+// person leg @0x4398C1..0x439924; OrganicClass_HandleEvent @0x407691..0x4076AB]
+Entity make_dismemberment_piece_seed(const Entity &victim, const Entity &row,
+                                     uint32_t new_bone_bits) {
     Entity piece = victim;
+    // The tail [orig: Entity_Destroy memsets 0x2B4 bytes @0x43EA70].
+    piece.ai_state = row.ai_state;                                 // +0x2B4
+    piece.death_anim_state = row.death_anim_state;                 // +0x2C0
+    piece.pre_use_gun_equipped_adm_index = row.pre_use_gun_equipped_adm_index; // +0x308
+    piece.spawn_position = row.spawn_position;                     // +0x318..+0x320
+    piece.spawn_heading = row.spawn_heading;                       // +0x330
+    piece.spawn_flags = row.spawn_flags;                           // +0x334
+    piece.dragger = row.dragger;                                   // +0x350
+    piece.npc_respawn_zone = row.npc_respawn_zone;                 // +0x354
+    piece.npc_respawns = row.npc_respawns;                         // +0x35E
+    piece.attach_bone = row.attach_bone;                           // +0x364
+    piece.anim_slot = row.anim_slot;                               // +0x374
+    piece.radio_request = row.radio_request;                       // +0x375
+    piece.radio_request_seconds = row.radio_request_seconds;       // +0x376
+    // The severed words [orig: @0x407691, @0x407697, @0x4076AB].
+    piece.section_mask = ~new_bone_bits;
+    piece.health = 0;
     piece.net_id = 0;
-    piece.bms_id = 0;
+    // Port-side keys with no retail storage: the registry's own lifetime, the
+    // BMS file id (retail's only copy is the severed +0x7C) and the spawn
+    // provenance (no BMS record made this row); alive follows health.
     piece.handle = EntityHandle{};
     piece.registry_spawn_id = 0;
-    piece.owner_connection_id = 0;
-    piece.minimap_net_id = 0;
-    piece.player_class = 0;
-    piece.display_name.clear();
-    piece.name.clear();
-    piece.group_id = 0;
-    piece.waypoint_id = 0;
-    piece.wp_number = 0;
-    piece.ai_state = 0;
-    piece.ai_target_refcount = 0;
-    piece.ammo_damage_class.clear();
-
-    piece.health = 0;
-    piece.alive = false;
-    piece.damage_state = -1;
-    piece.death_anim_state = death_anim_state;
-    piece.corpse_timer = 0;
-    piece.flags = 0;
-    piece.engine_flags = 0;
-    piece.net_move_input = 0;
-    piece.net_stance_bits = 0;
-    piece.net_analog_x = 0;
-    piece.net_analog_y = 0;
-    piece.net_analog_z = 0;
-	piece.analog_throttle = 0;
-	piece.equipped_adm_index = kAdmSlotNone;
-	piece.pre_use_gun_equipped_adm_index = kAdmSlotNone;
-    piece.use_gun_slot_swapped = false;
-    piece.hidden = false;
-    piece.last_attacker = EntityHandle{};
-    piece.death_blast_center = Vec3{};
-    piece.death_tick = 0;
-    // Equivalent to the original's ~newBoneBits, since ~(~old & cut) =
-    // old | ~cut. [orig: clone sectionMask store @0x407691]
-    piece.section_mask = victim.section_mask | ~cut_mask;
-    piece.dismemberment_piece = true;
-    piece.spawned_piece_mask = 0;
-    piece.death_motion = DeathMotionMode::None;
+    piece.bms_id = 0;
     piece.spawn_origin = kSpawnOriginNone;
-
-    piece.seats.clear();
-    piece.armory_points.clear();
-    piece.primary_weapon.clear();
-    piece.emplacement_parent = EntityHandle{};
-    piece.emplacement_parent_spawn_id = 0;
-    piece.emplacement_local = Vec3{};
-    piece.emplacement_yaw_offset = 0;
-    piece.emplacement_bone = 0;
-    piece.emplacement_kind = 0;
-    piece.emplacement_slot = 0;
-    piece.emplacement_attachment_flags = 0;
-    piece.emplacement_angle_count = 0;
-    piece.emplacement_down_limit_bam = 0;
-    piece.emplacement_up_limit_bam = 0;
-    piece.emplacement_right_limit_bam = 0;
-    piece.emplacement_left_limit_bam = 0;
-    piece.emplacement_pose_metadata_resolved = false;
-    piece.primary_weapon_slot = WeaponSlotState{};
-    piece.primary_weapon_slot_adm = kAdmSlotNone;
-    piece.primary_weapon_owner = EntityHandle{};
-    piece.primary_occupant = EntityHandle{};
-    piece.mount_target = EntityHandle{};
-    piece.mount_target_net_id = 0;
-    piece.mount_target_bms_id = 0;
-    piece.mount_target_spawn_origin = 0;
-    piece.mount_seat = -1;
-    piece.mount_type = SeatType::None;
-    piece.mounted = false;
-    piece.mounted_config_valid = false;
-    piece.mounted_config = 0;
-    piece.mount_bone = 0;
-    piece.ground_target = EntityHandle{};
-    piece.mounted_child = EntityHandle{};
-    piece.last_fire_target = EntityHandle{};
-    piece.spawn_position = piece.position;
+    piece.alive = false;
     return piece;
 }
 
 void try_spawn_dismemberment_piece(World &world, Entity &victim,
-                                   const FixedVec3 &round_velocity_q16,
-                                   int32_t bone, int32_t death_anim_state,
-                                   bool was_alive) {
-    const uint32_t cut_mask = dismemberment_mask_for_bone(bone);
-    if (!was_alive || cut_mask == 0 || victim.handle.pool() != 0 || victim.dismemberment_piece ||
-        (victim.flags & kEntityFlagPlayer) != 0 ||
-        (victim.engine_flags & kEntityFlagPlayer) != 0 ||
-        victim.player_class != 0 ||
-        (victim.item_attrib & kItemAttribNoDismember) != 0 ||
-        victim.health > 0 || victim.health > (victim.health_max >> 1))
+                                   const FixedVec3 &round_velocity_q16, int32_t bone) {
+    // A non-player body on a numbered section, without NoDismember, at or
+    // below zero health (and half its def's maximum), not yet flagged dead.
+    // [orig: OrganicClass_HandleEvent @0x40759E..0x4075F0; the plyr twin
+    //  Entity_HandleDamageAndTriggerZones @0x407941..0x407993]
+    const uint32_t flags = victim.flags | victim.engine_flags;
+    if ((flags & kEntityFlagPlayer) != 0 || bone <= 0 ||
+            (victim.item_attrib & kItemAttribNoDismember) != 0)
         return;
-
-    const AiEntity *source = world.ai.for_handle(victim.handle);
-    if (source == nullptr) return;
-
-    Entity piece = make_dismemberment_piece_seed(
-        victim, cut_mask, death_anim_state);
-    const EntityHandle piece_handle = world.registry.spawn(0, piece);
+    const int32_t health = retail_signed_i16(victim.health);
+    if (health > 0 || health > (retail_signed_i16(victim.health_max) >> 1) ||
+            (flags & kEntityFlagDead) != 0)
+        return;
+    // The victim hides the new bits before the clone exists.
+    // [orig: @0x407675..0x407684]
+    const uint32_t new_bone_bits = ~victim.section_mask & dismemberment_mask_for_bone(bone);
+    victim.section_mask |= new_bone_bits;
+    // Retail never checks the clone: a full actor pool returns null and the
+    // sectionMask store @0x407691 faults. The port stops here instead
+    // (D-AI-9), the victim's cut already committed.
+    const Entity *row = world.registry.next_spawn_row(0);
+    AiEntity *source = world.ai.for_handle(victim.handle);
+    if (row == nullptr || source == nullptr) return;
+    const EntityHandle piece_handle =
+            world.registry.spawn(0, make_dismemberment_piece_seed(victim, *row, new_bone_bits));
     if (!piece_handle.valid()) return;
-
+    // The facial slot (+0x1B8) is copied too: both halves drive one.
+    if (Entity *piece = world.registry.get(piece_handle)) {
+        piece->facial_slot = victim.facial_slot;
+        piece->facial_checked = victim.facial_checked;
+    }
     // The horizontal kick only: the original adds roundVel X/Y >> 8 to the
     // clone's velocity pair and leaves the vertical component alone.
     // [orig: +152 add @0x4076b7; +156 add @0x4076c9]
@@ -373,15 +322,6 @@ void try_spawn_dismemberment_piece(World &world, Entity &victim,
         0,
     };
     world.ai.attach_dismemberment_piece(piece_handle, *source, impulse_q16);
-
-    // Deliberate divergence (docs/divergence-ledger.md D-AI-9): the original
-    // commits the victim mask BEFORE the clone call (sectionMask |= newBoneBits
-    // @0x407684) and never null-checks the allocation (@0x407691 writes through
-    // the Entity_CloneFromTemplateByType return, so actor-pool exhaustion would
-    // fault). We commit after a successful allocation + AI attachment instead,
-    // so a full pool leaves the original body intact. The |= is equivalent to
-    // the original's ~old & boneMask two-step. [orig: @0x407675-0x407684]
-    victim.section_mask |= cut_mask;
 }
 
 struct DragBand {
@@ -938,13 +878,10 @@ void person_class_round_legs(World &world, Entity &victim, const HitRecord &reco
     // AI tail on the RoundHit drain [orig: the call @0x407588].
     entity_on_damage_received(world, victim, ammo);
     world.round_sim.hits.push_back(RoundHit{victim.handle, record.round_owner, 0});
-    // The authority cuts a non-player body on a numbered section.
-    // [orig: the gates @0x407598..0x4075F0, the clone @0x40768A..0x4076C9]
-    if (world.ai.is_authority && record.section > 0 && !dead &&
-            ((victim.flags | victim.engine_flags) & kEntityFlagPlayer) == 0)
-        try_spawn_dismemberment_piece(world, victim, record.round_vel_q16,
-                                      record.section, victim.death_anim_state,
-                                      /*was_alive=*/true);
+    // The authority's cut [orig: the authority test @0x407598, the clone
+    // @0x40768A..0x4076C9].
+    if (world.ai.is_authority)
+        try_spawn_dismemberment_piece(world, victim, record.round_vel_q16, record.section);
 }
 
 void RoundSim::reset() noexcept {
@@ -1631,6 +1568,14 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                             player_body_waypoint_visits(world, *target);
                         }
                     }
+                    // The callback's cut reads the health this hit left, on
+                    // every hit: the killing one, and any later one (a zero-
+                    // damage one included) until the death edge latches the
+                    // dead bit. [orig: Projectile_ProcessDamageOnTarget's
+                    // callback @0x4E81FF..0x4E820E; OrganicClass_HandleEvent
+                    // @0x407598..0x4076C9]
+                    if (authoritative)
+                        try_spawn_dismemberment_piece(world, *target, velocity_q16, death_section);
                     if (authoritative && damage != 0 && pre_hit_health > 0 &&
                         target->health <= 0) {
                         // A lethal player-flag hit counts on the ROUND; past the
@@ -1642,10 +1587,6 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                             ((target->flags | target->engine_flags) & kEntityFlagPlayer) != 0 &&
                             ++r.player_kills > 1)
                             target->cause_flags |= 0x100u;
-                        try_spawn_dismemberment_piece(
-                            world, *target, velocity_q16,
-                            death_section, target->death_anim_state,
-                            target_was_alive);
                         world.script.relations.group(target->group_id).alert =
                             TriggerRelations::kAlertRed;
 

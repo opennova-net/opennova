@@ -189,6 +189,10 @@ PackedFloat32Array SkeletalAnim::get_clip_variant_lengths(const String &p_key) c
 	return out;
 }
 
+size_t SkeletalAnim::get_person_clip_bones(const String &p_key, int p_variant) const {
+	return rig().clip_file_bones(opennova::to_std(p_key), p_variant);
+}
+
 int SkeletalAnim::get_clip_frame_count(const String &p_key, int p_variant) const {
 	const LoadedClip *c = find_clip_variant(p_key, p_variant);
 	return c != nullptr ? static_cast<int>(c->clip.frame_count) : 0;

@@ -800,6 +800,16 @@ private:
 	std::vector<Transform3D> skin_rest_binds_;
 	bool skin_binds_layered_ = false;
 	void apply_skeletal_panm();
+	// The destroyed sections on a clip-posed body (anim::section_mask_rows,
+	// the bone builder's zeroed rows): after every pose write a collapsed row
+	// takes zero scale and an anchored row's joint moves onto its parent's;
+	// a hidden row with a visible row below keeps its rotation for that row
+	// while its own vertices take a zero bind (section_bind).
+	std::vector<uint8_t> section_rows_;
+	std::vector<uint8_t> section_zero_binds_;
+	void apply_section_rows();
+	void apply_section_binds();
+	Transform3D section_bind(std::size_t p_bone, const Transform3D &p_bind) const;
 
 	// --- retained-scene construction (object_model_scene.cpp) ---
 	void rebuild_scene();
