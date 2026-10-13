@@ -219,6 +219,14 @@ static int test_projection() {
 
 // The map of the minted mission: ready, every entity and area a mark, the first framing showing them all; a hit at a
 // pin names its record, a box over the picture takes every shown one; the selection the 3D view's.
+// A tile set's texels as MED draws a tile: alpha not 0 opaque, 0 not drawn; the colour kept.
+static int test_tile_texels() {
+	std::vector<uint8_t> rgba = { 10, 20, 30, 0, 40, 50, 60, 1, 70, 80, 90, 255, 1, 2, 3, 128 };
+	mission_map_tile_texels(rgba);
+	TEST_EXPECT(rgba == std::vector<uint8_t>({ 10, 20, 30, 0, 40, 50, 60, 255, 70, 80, 90, 255, 1, 2, 3, 255 }));
+	return 0;
+}
+
 static int test_marks_hit_box() {
 	Rig rig("opennova_editor_mission_map_marks");
 	TEST_EXPECT(rig.open());
@@ -1099,6 +1107,7 @@ int main(int argc, char **argv) {
 	failed += test_kind_row();
 	failed += test_workspace_pins();
 	failed += test_projection();
+	failed += test_tile_texels();
 	failed += test_marks_hit_box();
 	failed += test_drag();
 	failed += test_links();

@@ -195,6 +195,10 @@ float mission_map_zoom_for(double metres, int width) {
 	return std::clamp(float(metres * 200.0 / io::kFp16OneD), kMissionMapZoomMin, kMissionMapZoomMax);
 }
 
+void mission_map_tile_texels(std::vector<uint8_t> &rgba) {
+	for (size_t i = 3; i < rgba.size(); i += 4) rgba[i] = rgba[i] ? 255 : 0;
+}
+
 // --- the options -----------------------------------------------------------------------------------
 
 bool MissionMapOptions::operator==(const MissionMapOptions &o) const {
