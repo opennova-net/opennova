@@ -57,8 +57,9 @@ FBX, which matches the clip to 0.005 mm), eased to rest over frames 74 to 79 as 
 ## Aiming
 
 The weapon.def entry is `flags sighted` and `flags nocardswitch`: the scope key eases the view from the
-`Hip view` eye to the `Aim view` eye (`pos` to `tpos`, 15 steps) and narrows it to 80° over the slot's
-zoom (`scope_max_mag 2`, so 40°), and the gun stays drawn instead of the 2D sights card.
+`Hip view` eye to the `Aim view` eye (`pos` to `tpos`, 15 steps), and the gun stays drawn instead of the
+2D sights card. The view stays at 80°: the game narrows it by the slot's zoom (`scope_max_mag 2`) only
+while the sights card is up, which `nocardswitch` never raises.
 
 The sights are the pack's flip-up pair, both raised: the rear (its peep 10.7 mm across) and the front
 (`SM_TFA_AR_Sight_Front`, added on the handguard's front-sight socket, `SOCKET_Sight_Front_Default`, in
