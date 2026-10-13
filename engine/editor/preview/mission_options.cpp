@@ -9,6 +9,8 @@
 
 namespace opennova::editor {
 
+bool mission_tool_from_token(const std::string &token, MissionTool &out);
+
 namespace {
 
 using io::JsonValue;

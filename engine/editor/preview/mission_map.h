@@ -53,10 +53,6 @@ struct MissionMapCamera {
 	}
 	bool operator!=(const MissionMapCamera &o) const { return !(*this == o); }
 };
-// On the wire: {center: [x, y], zoom, scale (read only: metres a pixel at the device's size)}.
-io::JsonValue mission_map_camera_to_json(const MissionMapCamera &camera, int width);
-// A SetViewport's camera member, {center?, zoom?}, over `camera`: false, nothing changed, with why.
-bool mission_map_camera_from_json(const io::JsonValue &json, MissionMapCamera &camera, std::string &error);
 
 // The map's view of a picture `width` x `height`: the CMAP's rect over the whole picture, its scale and its middle.
 struct MissionMapView {
@@ -97,7 +93,6 @@ struct MissionMapOptions {
 // {marks: {items, buildings, markers, organics, areas, paths, labels, links}, color_by (team or group), grid, text,
 // stick, snap, background (colour, height, delta, flatness or none), water}.
 io::JsonValue mission_map_options_to_json(const MissionMapOptions &options);
-bool mission_map_options_from_json(const io::JsonValue &json, MissionMapOptions &held, std::string &error);
 
 // A footprint narrower than this many pixels across its middle is drawn as its pin (its wireframe a speck there), and
 // picked and boxed as one.
@@ -124,10 +119,6 @@ struct MissionMapMark {
 	const MissionMapFootprint *footprint = nullptr;
 	bool outlined = false;
 };
-// Every entity (the scene's order) then every area, shown or not, so an index is stable within a frame; `footprints`
-// (the scene's entities' order, may be shorter) the entities' models placed.
-std::vector<MissionMapMark> mission_map_marks(const MissionScene &scene, const MissionMapOptions &options,
-		const MissionMapView &view, const std::vector<MissionMapFootprint> *footprints = nullptr);
 // The shown mark a press at (x, y) takes: a pin within kMissionPickSlop pixels, the nearest (the later drawn first
 // among equals); else a wireframe whose model the point falls on seen from above, else whose footprint is within the
 // slop, the smaller footprint first (a crate on a building's floor before the building); -1 none.

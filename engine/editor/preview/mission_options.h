@@ -16,7 +16,6 @@ namespace opennova::editor {
 enum class MissionTool : uint8_t { Select, Place, Path, Area, Shoot };
 // "select", "place", "path", "area", "shoot".
 const char *mission_tool_token(MissionTool tool);
-bool mission_tool_from_token(const std::string &token, MissionTool &out);
 
 // What the marks are coloured by (ADR 0046 S24, In the views): their team (the game's map colours, a ring in team
 // 1's or team 2's), or their group (the editor's palette, mission_group_rgb: a ring in each group's colour, group 0,

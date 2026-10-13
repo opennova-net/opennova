@@ -30,6 +30,12 @@
 
 namespace opennova::editor {
 
+// The char map legend's colour of a class, "#CCEFF4" (formats/trn/charmap_legend.h; "" past it).
+std::string mission_surface_colour(int surface);
+
+// "nothing", "terrain", "record".
+const char *mission_ground_on_token(MissionGroundOn on);
+
 using io::JsonValue;
 using io::json_number;
 using io::json_string;

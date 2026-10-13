@@ -73,8 +73,6 @@ bool hud_drag_start(opennova::hud::HudElement element, const def::DefHudPosDef &
 
 // A handle of an element: the element itself (a move) or one of its corners (a resize).
 enum class HudHandle : uint8_t { Move, TopLeft, TopRight, BottomLeft, BottomRight };
-// "move", "top_left", "top_right", "bottom_left", "bottom_right", and back (false for none).
-const char *hud_handle_token(HudHandle handle);
 bool hud_handle_from_token(const std::string &token, HudHandle &out);
 
 // The values a drag of `handle` (dx, dy) design units from where it began writes, each landing on the

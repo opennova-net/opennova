@@ -15,6 +15,9 @@
 
 namespace opennova::editor {
 
+// "move", "top_left", "top_right", "bottom_left", "bottom_right", and back (false for none).
+const char *hud_handle_token(HudHandle handle);
+
 namespace {
 
 using opennova::hud::HudAxis;

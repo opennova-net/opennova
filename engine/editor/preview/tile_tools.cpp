@@ -11,6 +11,8 @@
 
 namespace opennova::editor {
 
+TileSquare tile_square(const TilOverlayEntry &entry);
+
 namespace {
 
 constexpr NodeKind kTile = node_kind(TilKind::Tile);

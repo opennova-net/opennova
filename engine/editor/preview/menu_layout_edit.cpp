@@ -8,6 +8,10 @@
 
 namespace opennova::editor {
 
+// The window's POSITION as the document holds it: the four edges and whether each is
+// written. False when the record is not a window of the document.
+bool authored_position(const Document &document, const NodeAddress &window, mnu::Position &out);
+
 namespace {
 
 struct HandleToken {

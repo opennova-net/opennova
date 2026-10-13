@@ -54,8 +54,6 @@ struct TerrainViewportOptions {
 	bool operator!=(const TerrainViewportOptions &o) const { return !(*this == o); }
 };
 
-// The options on the wire (the envelope's `options`, a SetViewport's): {mission, overlay, legend, show {foliage, water}}.
-io::JsonValue terrain_options_to_json(const TerrainViewportOptions &options);
 // The change a SetViewport makes to set the camera.
 std::string terrain_camera_change(const OrbitCamera &camera);
 

@@ -44,6 +44,7 @@ const PreviewBank *bank_holding(const ClipSoundSources &sources, const std::stri
 
 } // namespace
 
+// "auto", "npc", "player".
 const char *clip_sound_body_token(ClipSoundBody body) {
 	switch (body) {
 	case ClipSoundBody::Npc: return "npc";

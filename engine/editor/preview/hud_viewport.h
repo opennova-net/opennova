@@ -37,9 +37,6 @@ inline constexpr const char *kHudViewStatusTokens[] = {"no_project", "no_layout"
 // The first-person view a HUD preview draws over: the plain view, the binoculars' or the night-vision
 // goggles' (their masks the game's own view effects, godot/game/world/player_view_effects.gd).
 enum class HudPreviewView : uint8_t { Normal, Binoculars, NightVision };
-// "normal", "binoculars", "night_vision", and the view a token names (false for none).
-const char *hud_preview_view_token(HudPreviewView view);
-bool hud_preview_view_from_token(const std::string &token, HudPreviewView &out);
 
 // The screens the toolbar offers, the game's own design size among them (the HUD's positions are
 // authored in 1024 x 768 and scaled to the screen; the label fonts change at the 640 and 800 widths
@@ -60,7 +57,6 @@ inline constexpr int kHudScreenMost = 4096;
 // the token a SetViewport names it by.
 const std::vector<uint32_t> &hud_board_game_types();
 const char *hud_board_game_type_token(uint32_t game_type);
-bool hud_board_game_type_from_token(const std::string &token, uint32_t &out);
 // The distances the sights' aim can rest at, metres: what a rangefinder reads.
 inline constexpr int kHudSightsRangeLeast = 2;
 inline constexpr int kHudSightsRangeMost = 1000;

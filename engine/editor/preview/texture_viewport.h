@@ -29,9 +29,6 @@ inline constexpr const char *kTextureViewStatusTokens[] = {"no_texture", "unload
 // transparent), or its colour read as a normal map and lit from the options' light (the relief a normal
 // map gives a surface).
 enum class TextureChannels : uint8_t { Rgb, Red, Green, Blue, Alpha, Rgba, Normals };
-// "rgb", "red", "green", "blue", "alpha", "rgba", "normals", and the token's channels (false for none).
-const char *texture_channels_token(TextureChannels channels);
-bool texture_channels_from_token(const std::string &token, TextureChannels &out);
 
 // How a texture viewport draws its texture: the channels, the mip level (0 the texture itself; a texture
 // built from pixels shows the chain the game builds of it, a DDS its own; a level past the last shows the
@@ -77,14 +74,6 @@ struct TextureShownUse {
 		       alpha == other.alpha && alpha_words == other.alpha_words && blend_mode == other.blend_mode;
 	}
 };
-// What a viewport shows of the use `use`, the texture's use at `index`.
-TextureShownUse texture_shown_use(const TextureUse &use, int index);
-// The texels a use shows of `image`: its loader's transform, then what its role's consumer makes of them
-// (texture_role_texels: a blend map's weights, a particle graphic as its atlas page holds it), then its cut-out (alpha 255 where the
-// material's test keeps a texel, 0 where it discards it), or for a model row whose alpha the game draws as no
-// transparency (a specular brightness, unused) every texel opaque; `image` itself where the use changes nothing.
-std::shared_ptr<const TextureImage> texture_as_used(const std::shared_ptr<const TextureImage> &image,
-                                                    const TextureShownUse &use);
 
 // Its camera: fitted to the picture (the whole texture, as large as the picture holds it), or a scale
 // (picture pixels a texel of the first level) with the texel at the picture's middle (x, y, in the

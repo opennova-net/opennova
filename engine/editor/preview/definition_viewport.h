@@ -47,8 +47,6 @@ inline constexpr const char *kDefinitionViewStatusTokens[] = {
 // swap done, the fade at its end, the Fire and Other banks burning on it [orig: Entity_UpdateDeadWreckEffects
 // @ 0x493140]); its final husk, the model the death pieces are cut from, whole.
 enum class DefinitionState : uint8_t { Alive, Destroying, Husk, HuskFinal };
-// "alive", "destroying", "husk", "husk_final".
-const char *definition_state_token(DefinitionState state);
 // A weapon drawn as the game draws it in a soldier's hands (its gfx3), or in the player's own view (its gfx1).
 enum class DefinitionWeaponView : uint8_t { Third, First };
 
@@ -72,9 +70,6 @@ struct DefinitionViewportOptions {
 	}
 	bool operator!=(const DefinitionViewportOptions &other) const { return !(*this == other); }
 };
-// On the wire (the envelope's `options`, a SetViewport's): {state, enemy, weapon ("third", "first"), occupied,
-// ssn, mute, grid, fire (definition_fire_options_to_json)}.
-io::JsonValue definition_options_to_json(const DefinitionViewportOptions &options);
 // The change a SetViewport makes to set a definition viewport's options to `options`, and its camera.
 std::string definition_options_change(const DefinitionViewportOptions &options);
 std::string definition_camera_change(const OrbitCamera &camera);

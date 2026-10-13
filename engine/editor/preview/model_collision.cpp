@@ -20,6 +20,9 @@
 
 namespace opennova::editor {
 
+// A volume's colour by its type's family, and a person's hit sphere's.
+uint32_t model_volume_rgb(int64_t type);
+
 namespace {
 
 using threedi::ThreediBuildVec3;

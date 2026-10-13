@@ -101,7 +101,6 @@ struct MissionShotEvent {
 	float scar_radius = 0.0f;
 	std::string words;
 };
-const char *mission_shot_event_token(MissionShotEvent::Kind kind);
 
 // An effect a run spawned: its name, where (mission metres) and its orientation, its tick.
 struct MissionShotSpawn {

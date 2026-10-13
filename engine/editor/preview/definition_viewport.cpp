@@ -35,6 +35,13 @@
 
 namespace opennova::editor {
 
+// On the wire (the envelope's `options`, a SetViewport's): {state, enemy, weapon ("third", "first"), occupied,
+// ssn, mute, grid, fire (definition_fire_options_to_json)}.
+io::JsonValue definition_options_to_json(const DefinitionViewportOptions &options);
+
+// "alive", "destroying", "husk", "husk_final".
+const char *definition_state_token(DefinitionState state);
+
 namespace {
 
 using io::JsonValue;

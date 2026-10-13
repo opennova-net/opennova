@@ -21,6 +21,12 @@
 
 namespace opennova::editor {
 
+// The line under a view's picture while the brush is live (S25): in Sculpt the original editor's depth-pixel readout,
+// "Depth Pixel X: 412 Y: 655" (its DEPTHPIXEL_MODE line, med_depth_pixel), with the height there; in Paint the value
+// it lays and the ground's there in the game's words; for Stamp where the click lays the tile; "" for none.
+std::string terrain_brush_hint(const TerrainBrush &brush, bool on_ground, TerrainPoint at, double height,
+                               const MissionGround *ground);
+
 namespace {
 
 // One member of the session's brush set (a set_workspace), as the pane's controls set it.

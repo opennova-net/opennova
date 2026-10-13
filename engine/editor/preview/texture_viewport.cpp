@@ -22,6 +22,21 @@
 
 namespace opennova::editor {
 
+// The texels a use shows of `image`: its loader's transform, then what its role's consumer makes of them
+// (texture_role_texels: a blend map's weights, a particle graphic as its atlas page holds it), then its cut-out (alpha 255 where the
+// material's test keeps a texel, 0 where it discards it), or for a model row whose alpha the game draws as no
+// transparency (a specular brightness, unused) every texel opaque; `image` itself where the use changes nothing.
+std::shared_ptr<const TextureImage> texture_as_used(const std::shared_ptr<const TextureImage> &image,
+                                                    const TextureShownUse &use);
+
+// What a viewport shows of the use `use`, the texture's use at `index`.
+TextureShownUse texture_shown_use(const TextureUse &use, int index);
+
+bool texture_channels_from_token(const std::string &token, TextureChannels &out);
+
+// "rgb", "red", "green", "blue", "alpha", "rgba", "normals", and the token's channels (false for none).
+const char *texture_channels_token(TextureChannels channels);
+
 namespace {
 
 using io::JsonValue;

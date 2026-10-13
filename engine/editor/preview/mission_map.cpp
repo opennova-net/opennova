@@ -28,6 +28,19 @@
 
 namespace opennova::editor {
 
+// A SetViewport's camera member, {center?, zoom?}, over `camera`: false, nothing changed, with why.
+bool mission_map_camera_from_json(const io::JsonValue &json, MissionMapCamera &camera, std::string &error);
+
+// On the wire: {center: [x, y], zoom, scale (read only: metres a pixel at the device's size)}.
+io::JsonValue mission_map_camera_to_json(const MissionMapCamera &camera, int width);
+
+// Every entity (the scene's order) then every area, shown or not, so an index is stable within a frame; `footprints`
+// (the scene's entities' order, may be shorter) the entities' models placed.
+std::vector<MissionMapMark> mission_map_marks(const MissionScene &scene, const MissionMapOptions &options,
+		const MissionMapView &view, const std::vector<MissionMapFootprint> *footprints = nullptr);
+
+bool mission_map_options_from_json(const io::JsonValue &json, MissionMapOptions &held, std::string &error);
+
 namespace {
 
 using io::JsonValue;

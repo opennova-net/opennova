@@ -26,6 +26,9 @@
 
 namespace opennova::editor {
 
+// The options on the wire (the envelope's `options`, a SetViewport's): {mission, overlay, legend, show {foliage, water}}.
+io::JsonValue terrain_options_to_json(const TerrainViewportOptions &options);
+
 namespace {
 
 using io::JsonValue;

@@ -18,6 +18,8 @@
 
 namespace opennova::editor {
 
+io::JsonValue font_options_json(const FontViewportOptions &options);
+
 using io::JsonValue;
 using io::json_number;
 using io::json_string;

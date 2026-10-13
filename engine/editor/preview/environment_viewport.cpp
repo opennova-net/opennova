@@ -24,6 +24,12 @@
 
 namespace opennova::editor {
 
+const char *environment_clock_from_token(EnvironmentClockFrom from);
+
+// The options on the wire (the envelope's `options`, a SetViewport's): {time (null: the start), day_seconds,
+// mission, header, rain {percent, seconds}, overcast {percent, seconds}, show {terrain, water}, listen {on}}.
+io::JsonValue environment_options_to_json(const EnvironmentViewportOptions &options);
+
 namespace {
 
 using io::JsonValue;

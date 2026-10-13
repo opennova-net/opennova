@@ -91,11 +91,6 @@ struct MenuTryInput {
 	float y = 0.0f;
 	menu::MenuKeyInput key;
 };
-// A SetViewport's Try members over the queue: `try` {on?, reset?}, `click` {at: [x, y]}, `key` {key: a name
-// menu_try_key_from_name takes, shift?} or {text: characters typed in turn}. `on` is whether Try is on as
-// the change finds it; it says whether Try is on after it. False, nothing queued, with why: a member of
-// another type, a point off the picture, a key no name gives, a click or a key while Try is off.
-bool read_menu_try(const io::JsonValue &json, bool &on, std::vector<MenuTryInput> &queue, std::string &error);
 
 // The options on the wire (the envelope's `options`, a SetViewport's): {show_hidden, force_id,
 // force_state, checked, popup_open, focus, zoom: fit, scale or device, scale, snap, pointer, pointer_at:
@@ -150,8 +145,6 @@ struct MenuPointer {
 MenuPointer menu_pointer_at(const MenuCanvasFrame &frame, float x, float y);
 // With the mouse over no window of the screen: the first root window's that loads (the screen's own).
 MenuPointer menu_screen_pointer(const MenuCanvasFrame &frame);
-// {drawn, file, width, height, window, name} (window the record's id, 0 none); {drawn: false} for none.
-io::JsonValue menu_pointer_to_json(const MenuPointer &pointer);
 
 // A window's TYPE as the factory matches it (the generic window for none), and what the options
 // can hold it in by its type: checked (a check box, a radio button), its list open (a combo box),

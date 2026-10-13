@@ -43,9 +43,6 @@ struct EffectViewportOptions {
 	bool operator!=(const EffectViewportOptions &other) const { return !(*this == other); }
 };
 
-// The options on the wire (the envelope's `options`, a SetViewport's): {effect, wind_speed,
-// wind_direction, grid}.
-io::JsonValue effect_options_to_json(const EffectViewportOptions &options);
 // The change a SetViewport makes to set an effect viewport's options to `options`, and its camera.
 std::string effect_options_change(const EffectViewportOptions &options);
 std::string effect_camera_change(const OrbitCamera &camera);

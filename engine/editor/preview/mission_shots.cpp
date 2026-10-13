@@ -32,6 +32,8 @@
 
 namespace opennova::editor {
 
+const char *mission_shot_event_token(MissionShotEvent::Kind kind);
+
 namespace {
 
 using io::JsonValue;

@@ -19,6 +19,13 @@
 
 namespace opennova::editor {
 
+bool hud_board_game_type_from_token(const std::string &token, uint32_t &out);
+
+bool hud_preview_view_from_token(const std::string &token, HudPreviewView &out);
+
+// "normal", "binoculars", "night_vision", and the view a token names (false for none).
+const char *hud_preview_view_token(HudPreviewView view);
+
 namespace {
 
 using io::JsonValue;

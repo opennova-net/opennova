@@ -17,6 +17,11 @@
 
 namespace opennova::editor {
 
+bool script_assist_op_from_token(const std::string &token, ScriptAssistOp &out);
+
+// "none", "complete", "hover": an op's token, and back (false for another).
+const char *script_assist_op_token(ScriptAssistOp op);
+
 namespace {
 
 using io::JsonValue;

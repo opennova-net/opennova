@@ -88,9 +88,6 @@ struct ScriptReveal {
 // A completion list's ask takes the caret there, as typing there would; a word's words leave the caret and the
 // selection as they are.
 enum class ScriptAssistOp : uint8_t { None, Complete, Hover };
-// "none", "complete", "hover": an op's token, and back (false for another).
-const char *script_assist_op_token(ScriptAssistOp op);
-bool script_assist_op_from_token(const std::string &token, ScriptAssistOp &out);
 struct ScriptAssistAsk {
 	ScriptAssistOp op = ScriptAssistOp::None;
 	size_t line = 0, column = 0;           // the document's, from 1

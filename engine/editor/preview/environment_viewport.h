@@ -72,9 +72,6 @@ inline constexpr int32_t kEnvironmentCatchUpTicks = 620;
 // The eye's height over the ground (metres), a person's standing there.
 inline constexpr float kEnvironmentEyeHeight = 1.8f;
 
-// The options on the wire (the envelope's `options`, a SetViewport's): {time (null: the start), day_seconds,
-// mission, header, rain {percent, seconds}, overcast {percent, seconds}, show {terrain, water}, listen {on}}.
-io::JsonValue environment_options_to_json(const EnvironmentViewportOptions &options);
 // The change a SetViewport makes to set the camera to `camera`.
 std::string environment_camera_change(const OrbitCamera &camera);
 // A time of day as "HH:MM" (hours 0..24).
@@ -83,7 +80,6 @@ std::string environment_clock_words(double hours);
 // Where the clock's start and its rate come from: the option, the using mission's header, the file
 // (curtime, tod_rate), or the engine's default (Environment_InitDefaults' advance of 75).
 enum class EnvironmentClockFrom : uint8_t { Option, Mission, Environment, Default };
-const char *environment_clock_from_token(EnvironmentClockFrom from);
 
 // An environment's viewport (DI-19b; ViewportKind::Environment, the Document tab's main view; CONTEXT.md
 // "Environment viewport"): the environment at its path as the game would read it were it saved now (the

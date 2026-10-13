@@ -63,10 +63,6 @@ mnu::RectEdges layout_drag_target(const LayoutStart &start, const LayoutDrag &dr
 // all four. An edge the file writes is never left out. False when the target has no area.
 bool plan_layout_drag(const LayoutStart &start, const LayoutDrag &drag, const LayoutSolve &solve, mnu::Position &out);
 
-// The window's POSITION as the document holds it: the four edges and whether each is
-// written. False when the record is not a window of the document.
-bool authored_position(const Document &document, const NodeAddress &window, mnu::Position &out);
-
 // The edits that bring `window` from `from` (the document's POSITION now) to `to`, each
 // carrying `gesture`: an edge written again (Write) and set, an edge set, and an edge `to`
 // leaves out that `from` writes (one an earlier step of the same drag wrote) left out

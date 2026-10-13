@@ -39,7 +39,6 @@ struct FontViewportOptions {
 inline constexpr int kFontZoomMost = 8;
 // The picture's margin round the text or the page, game pixels.
 inline constexpr float kFontPictureMargin = 8.0f;
-io::JsonValue font_options_json(const FontViewportOptions &options);
 // The change a SetViewport makes to set a font viewport's options to `options`.
 std::string font_options_change(const FontViewportOptions &options);
 

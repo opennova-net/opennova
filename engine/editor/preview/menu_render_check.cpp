@@ -15,6 +15,10 @@
 
 namespace opennova::editor {
 
+// A note as a finding on the record and the field it names.
+Diagnostic menu_note_diagnostic(const menu::MenuFrameNote &note, const MnuDocument &document, const Node &screen_row,
+                                DiagnosticSeverity severity);
+
 namespace {
 
 using Code = menu::MenuFrameNoteCode;

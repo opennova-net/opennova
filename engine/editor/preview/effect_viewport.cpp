@@ -16,6 +16,10 @@
 
 namespace opennova::editor {
 
+// The options on the wire (the envelope's `options`, a SetViewport's): {effect, wind_speed,
+// wind_direction, grid}.
+io::JsonValue effect_options_to_json(const EffectViewportOptions &options);
+
 namespace {
 
 using io::JsonValue;

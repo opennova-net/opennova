@@ -26,6 +26,15 @@
 
 namespace opennova::editor {
 
+// A SetViewport's Try members over the queue: `try` {on?, reset?}, `click` {at: [x, y]}, `key` {key: a name
+// menu_try_key_from_name takes, shift?} or {text: characters typed in turn}. `on` is whether Try is on as
+// the change finds it; it says whether Try is on after it. False, nothing queued, with why: a member of
+// another type, a point off the picture, a key no name gives, a click or a key while Try is off.
+bool read_menu_try(const io::JsonValue &json, bool &on, std::vector<MenuTryInput> &queue, std::string &error);
+
+// {drawn, file, width, height, window, name} (window the record's id, 0 none); {drawn: false} for none.
+io::JsonValue menu_pointer_to_json(const MenuPointer &pointer);
+
 namespace {
 
 using io::JsonValue;

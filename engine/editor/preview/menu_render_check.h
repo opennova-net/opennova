@@ -34,9 +34,6 @@ bool menu_note_problem(menu::MenuFrameNoteCode code, DiagnosticSeverity *severit
 // window's list the note names (an empty field when that record is not there).
 NodeAddress menu_note_address(const menu::MenuFrameNote &note, const MnuDocument &document, const Node &screen_row,
                               std::string *field);
-// A note as a finding on the record and the field it names.
-Diagnostic menu_note_diagnostic(const menu::MenuFrameNote &note, const MnuDocument &document, const Node &screen_row,
-                                DiagnosticSeverity severity);
 
 // What a step of the render check spends on a menu of the scan it does not render again (S13 A3);
 // a menu it renders ends the step.

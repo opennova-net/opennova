@@ -35,7 +35,6 @@ class ProjectAssetSource;
 // The body whose sound block reads the clip's events: Auto the one the paired item's move_function runs
 // (org2 the player body, any other an NPC's), else the one chosen.
 enum class ClipSoundBody : uint8_t { Auto, Npc, Player };
-const char *clip_sound_body_token(ClipSoundBody body); // "auto", "npc", "player"
 
 // The model viewport's sound options (its options' `sound`).
 struct ClipSoundOptions {
