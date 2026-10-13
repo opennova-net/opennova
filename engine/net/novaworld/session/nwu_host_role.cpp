@@ -87,8 +87,8 @@ void NwuHostRole::publish_mission_start() {
 
 // Retail marks every var of both lists changed, runs the server-info update (whose tail,
 // CPlayerManager_RebuildLists(0), sends the marked lists: the whole of both), then in state 6
-// sends both lists in full once more and clears the marks. Ours mark by emptying the dirty-delta
-// baselines, against which every var is dirty.
+// sends both lists in full once more and clears the marks. Ours mark the session's two list
+// flags and empty the dirty-delta baselines, against which every var is dirty.
 // [orig: Game_StartMission — the marks on the Host list (session+0x214) @0x5248e4 and the
 //  PlayerList (+0x25c) @0x5248ef, Lobby_UpdateServerInfo(0) @0x5248f5,
 //  CPlayerManager_RebuildLists @0x4d4590 called with 1 @0x524903: the state-6 test @0x4d4593,
@@ -97,6 +97,7 @@ void NwuHostRole::publish_mission_start() {
 //  @0x4d5c71, Lobby_UpdateServerInfo(0) @0x4d5c78, the state-6 test @0x4d5c80..0x4d5c87,
 //  CNapiGameSession_SendHostUpdate(1) @0x4d5c8c, the marks cleared @0x4d5c95 / @0x4d5c9e]
 void NwuHostRole::republish_lists() {
+	if (ClientSession *session = lobby_.session()) session->mark_host_lists();
 	last_sent_host_.clear();
 	last_sent_players_.clear();
 	update_server_info();
@@ -278,11 +279,14 @@ void NwuHostRole::send_host_request(uint32_t currently_hosting) {
 // Every update goes in state 6 alone: CPlayerManager_RebuildLists tests it ahead of its send (the
 // refresh's, the mission start's, the server-info update's tail) and the host result's includeAll
 // send has its own test, so with a re-host's request out (state 5) no update leaves until its
-// result. includeAll at a mission start and a re-host's result, else only the vars whose value
-// changed (dirty_client_vars), and nothing at all when none did.
-// [orig: CPlayerManager_RebuildLists @0x4d4590 — `cmp [esi+0x11c], 6` @0x4d4593;
-//  CNapiGameSession_HandleHostVerifyResponse @0x4d59d0 (the test @0x4d5c80..0x4d5c87);
-//  CNapiGameSession_SendHostUpdate @0x4d3860]
+// result. includeAll at a mission start and a re-host's result writes both lists whole; any
+// other update carries only the vars whose value changed (dirty_client_vars) and only a list
+// whose changed flag is set, a removal's empty container included, and nothing at all goes
+// when neither flag is (ClientSession::send_host_update).
+// [orig: CPlayerManager_RebuildLists @0x4d4590: `cmp [esi+0x11c], 6` @0x4d4593, the flag
+//  test @0x4d459c..0x4d45ac; CNapiGameSession_HandleHostVerifyResponse @0x4d59d0 (the test
+//  @0x4d5c80..0x4d5c87); CNapiGameSession_SendHostUpdate @0x4d3860 (updateFlag to both lists
+//  @0x4d38b0 / @0x4d38c5)]
 void NwuHostRole::send_host_update(bool full) {
 	ClientSession *session = lobby_.session();
 	if (session == nullptr || !session->is_verified() ||
@@ -290,11 +294,8 @@ void NwuHostRole::send_host_update(bool full) {
 		return;
 	const std::vector<ClientVar> host = make_host_var_list(host_cfg(), lobby_text_, /*full=*/true);
 	const std::vector<ClientVar> players = player_list_vars();
-	const std::vector<ClientVar> dirty_host = full ? host : dirty_client_vars(last_sent_host_, host);
-	const std::vector<ClientVar> dirty_players =
-			full ? players : dirty_client_vars(last_sent_players_, players);
-	if (dirty_host.empty() && dirty_players.empty()) return;
-	session->send_host_update(dirty_host, dirty_players);
+	session->send_host_update(full ? host : dirty_client_vars(last_sent_host_, host),
+	                          full ? players : dirty_client_vars(last_sent_players_, players), full);
 	last_sent_host_ = host;
 	last_sent_players_ = players;
 }

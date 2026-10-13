@@ -11,6 +11,7 @@
 
 #include <runtime/menu/menu_frame_internal.h>
 
+#include <base/io/cp1252.h>
 #include <base/io/strutil.h>
 
 #include <algorithm>
@@ -164,15 +165,26 @@ std::vector<MenuFrameCompiler::TableColumnSetup> MenuFrameCompiler::table_column
 
 // The image SetCellText puts beside a cell text: the column's SUBST rows,
 // last authored first, the first whose value matches (stricmp) — a FILE row
-// gives its texture, any other row none.
-// [orig: CTableWnd_SetCellText @ 0x63edf0 — the +164 walk, the texture load
-//  when the node's FILE / URL word is set]
+// gives its texture, any other row none. The match is the game's stricmp,
+// folded through the ".ACP" locale over the two texts' cp1252 bytes (D-MNU-39).
+// A missing cell has none: the game resolves the image only at a set, and the
+// insert's zeroed row holds NULL, so a SUBST with no VALUE (whose value is "")
+// gives its image to a cell set to "" and not to one no write reached; a set
+// with no text, which ours never makes, stops the walk at the list's head and
+// takes the head row's image whatever its value (D-MNU-43).
+// [orig: CTableWnd_SetCellText @ 0x63edf0 - the +164 walk, the stricmp
+//  @0x63ee50, the no-text break @0x63ee47..0x63ee49, the texture load when the
+//  node's FILE / URL word is set @0x63eefd; CTableWnd_InsertRow @0x641c30 -
+//  the image array's zeroing @0x641df2; CTableWnd_ParseXMLContentDefinition -
+//  the SUBST value's L"" default @0x64389d]
 int32_t MenuFrameCompiler::table_cell_image_(const std::vector<TableColumnSetup> &columns,
-		int column, const std::string &text) const {
-	if (column < 0 || column >= static_cast<int>(columns.size())) return kMenuTexNone;
+		int column, const std::string *text) const {
+	if (text == nullptr || column < 0 || column >= static_cast<int>(columns.size()))
+		return kMenuTexNone;
 	const std::vector<TableColumnSetup::Subst> &rows = columns[static_cast<size_t>(column)].subst;
+	const std::string cell = utf8_to_retail_text(*text);
 	for (auto it = rows.rbegin(); it != rows.rend(); ++it)
-		if (strutil::iequals(it->value, text)) return it->texture;
+		if (cp1252_stricmp(utf8_to_retail_text(it->value), cell) == 0) return it->texture;
 	return kMenuTexNone;
 }
 
@@ -578,7 +590,7 @@ void MenuFrameCompiler::emit_table_cell_(int index, const WidgetNode &node,
 	if (r == nullptr) return;
 	const std::string &text = r->cell(column);
 	int kind = col.cell_type;
-	const int32_t image = table_cell_image_(columns, column, text);
+	const int32_t image = table_cell_image_(columns, column, r->cell_text(column));
 	if (kind == kTableCellCustom) kind = image >= 0 ? kTableCellImage : kTableCellText;
 	const int align = col.body_justify | col.body_vjustify;
 	if (kind == kTableCellImage || kind == kTableCellImageText) {
@@ -687,7 +699,8 @@ void MenuFrameCompiler::emit_table(int index, const WidgetNode &node,
 								table_row_color_(node, row));
 						break;
 					case kTableCellImage:
-						emit_table_texture_(table_cell_image_(columns, static_cast<int>(c), text),
+						emit_table_texture_(table_cell_image_(columns, static_cast<int>(c),
+										row.cell_text(static_cast<int>(c))),
 								align, col.body_x, col.body_y, col.scale_bitmap, cell, s);
 						break;
 					case kTableCellCustom:
@@ -695,7 +708,8 @@ void MenuFrameCompiler::emit_table(int index, const WidgetNode &node,
 								row.value(static_cast<int>(c)), cell);
 						break;
 					case kTableCellImageText: {
-						const int32_t image = table_cell_image_(columns, static_cast<int>(c), text);
+						const int32_t image = table_cell_image_(columns, static_cast<int>(c),
+								row.cell_text(static_cast<int>(c)));
 						if (image >= 0)
 							emit_table_texture_(image, align, col.body_x, col.body_y,
 									col.scale_bitmap, cell, s);

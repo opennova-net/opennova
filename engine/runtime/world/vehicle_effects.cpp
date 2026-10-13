@@ -56,8 +56,9 @@ void set_parked(Entity &e, bool value) {
 // All six contact callbacks spawn this local effect AND fan the positioned
 // sound on their first submerged pad. The two resource-table bindings at
 // 849188/849298 are Effect_sboatwake / Effect_SmlSplash. The sound is the
-// crossing queue's: the host's fan sends it to every alive player, the
-// authority's own through its loopback leg (Server_RouteWaterCrossings).
+// crossing queue's: the host's fan sends it to every in-match player, dead or
+// alive (mask 128), the authority's own through its loopback leg
+// (Server_RouteWaterCrossings).
 // [orig: Entity_ProcessVehicleSuspension @0x463C60; Entity_ProcessTrackedVehiclePhysics
 // @0x47C1C0; Entity_ProcessPlatformPhysics @0x481870; Server_SendOverlayActionToAlive @0x50A1B0]
 void vehicle_water_entry(World &world, Entity &e, int32_t x, int32_t y, bool was_water) {

@@ -1,7 +1,8 @@
 // The local player's aim/target acquisition (world/local_player_targeting.cpp)
 // [orig: Entity_UpdateInfantryPlayerBody @0x4b4e9b..0x4b5288]: the weapon-view
 // ray's scope-zero term, the designator lock storing a mountable gun's
-// redirected hull, and the outer loop's catch-up gate on the locked tone.
+// redirected hull and keying on the unit type, and the outer loop's catch-up
+// gate on the locked tone.
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -163,6 +164,7 @@ void test_designator_lock_stores_the_mountable_guns_hull() {
     Entity hull;
     hull.kind = EntityKind::Item;
     hull.item_id = 3; hull.has_item_def = true; hull.item_type = 1;
+    hull.item_unit_type = 1; // a ground vehicle: the unit type keys the lock
     hull.item_attrib = kItemAttribEweap;
     hull.team = 2; hull.health = 100; hull.alive = true;
     hull.position = {110.0f, 40.0f, 3.0f};
@@ -189,6 +191,57 @@ void test_designator_lock_stores_the_mountable_guns_hull() {
     CHECK(lw.entity().last_fire_target == hull_handle);
     CHECK(body.slot.f[3] == static_cast<int32_t>(hull_handle.packed) + 1);
     CHECK((body.slot.f[2] & 1) != 0);
+}
+
+// The designator lock keys on the struck entity's unit type, not its def
+// type: a unitType-1 vehicle locks, a helicopter (type 1, unitType 3) and a
+// placed device (type 6, unitType 0) do not, and an object of unitType 6
+// does.
+// [orig: Entity_UpdateInfantryPlayerBody - the unitType reads @0x4B51AB /
+//  @0x4B51C9, the switch @0x4B51D0 over byte_4B83BC, the store
+//  @0x4B51E6..0x4B51E9, the clear @0x4B51EE..0x4B51F1]
+void test_designator_lock_keys_on_the_unit_type() {
+    struct Case {
+        uint8_t item_type;
+        int32_t unit_type;
+        bool locks;
+    };
+    static constexpr Case cases[] = {
+        {1, 1, true},  // a ground vehicle
+        {1, 3, false}, // a helicopter
+        {6, 0, false}, // a placed satchel, claymore or AT mine
+        {6, 6, true},  // the unit type alone decides
+    };
+    for (const Case &c : cases) {
+        LocalWorld lw;
+        CollisionWorld collision;
+        lw.w.collision = &collision;
+        AiEntity &body = lw.body();
+        body.team = 1; lw.entity().team = 1;
+        LocalPlayer local(lw.w);
+        local.weapon.active = true;
+        local.weapon.def.flags2 = 0x10; // the designator (ViewLock)
+        local.weapon.slot.clip = 1;
+        Entity struck;
+        struck.kind = EntityKind::Item;
+        struck.item_id = 3; struck.has_item_def = true;
+        struck.item_type = c.item_type;
+        struck.item_unit_type = c.unit_type;
+        struck.team = 2; struck.health = 100; struck.alive = true;
+        struck.position = {110.0f, 20.0f, 2.0f}; // 100 u down the +X ray
+        struck.bound_radius = 2.0f;
+        const EntityHandle struck_handle = lw.w.registry.spawn(1, struck);
+        collision.assign_entity(struck_handle, collision.add_model(vertical_quad_model()));
+        const int32_t pose[3] = {110 << 16, 20 << 16, 2 << 16};
+        CHECK(collision.publish_entity_section_matrices(
+                struck_handle, {collision_matrix_from_heading(0, pose)}));
+        collision.build_tick_tables(lw.w);
+        lw.w.logic_tick = 16;
+        local.update_aim_target();
+        CHECK(body.inf.head_look_target == struck_handle); // the ray hit it
+        CHECK((body.inf.combat_target == struck_handle) == c.locks);
+        CHECK(body.inf.combat_target.valid() == c.locks);
+    }
 }
 
 // THE CAMERA LEG: out of first person (or with no weapon) the far point is
@@ -349,6 +402,7 @@ void test_aim_ray_names_a_remote_persons_proxy() {
 int main() {
     test_weapon_view_ray_takes_the_scope_zero_back_out();
     test_designator_lock_stores_the_mountable_guns_hull();
+    test_designator_lock_keys_on_the_unit_type();
     test_locked_tone_waits_for_the_last_catch_up_tick();
     test_camera_leg_aims_the_fire_pose_from_the_composed_eye();
     test_aim_ray_names_a_remote_persons_proxy();

@@ -1218,10 +1218,11 @@ func test_control_mapping_remap_flow() -> void:
 	assert_eq(driver.table_cell_text(table, 0, 2), "W or Up",
 			"row 0 shows the Forward default")
 
-	# Double-click row 0: the capture arms and the Control cell clears.
+	# Double-click row 0: the capture arms and the Control cell reads "???"
+	# [orig: UI_ControlsRemapArmHandler @ 0x55d560, the push @ 0x55d5c8].
 	driver.list_activated.emit(table, 0)
-	assert_eq(driver.table_cell_text(table, 0, 2), "",
-			"the armed row's Control cell clears")
+	assert_eq(driver.table_cell_text(table, 0, 2), "???",
+			"the armed row's Control cell reads ???")
 
 	# The next key assigns (Y replaces the primary: both slots were full).
 	var key := InputEventKey.new()
@@ -1293,10 +1294,10 @@ func test_control_mapping_capture_dies_on_screen_change() -> void:
 			"row 0 shows the Forward default")
 
 	# Arm, then navigate: the screen change cancels the capture and restores
-	# the blanked cell.
+	# the armed cell.
 	driver.list_activated.emit(table, 0)
-	assert_eq(driver.table_cell_text(table, 0, 2), "",
-			"the armed row's Control cell clears")
+	assert_eq(driver.table_cell_text(table, 0, 2), "???",
+			"the armed row's Control cell reads ???")
 	assert_true(driver.navigate_to_screen("OPTIONS"), "navigation succeeds")
 	assert_eq(driver.table_cell_text(table, 0, 2), "W or Up",
 			"the canceled capture restores the Control cell")

@@ -196,10 +196,16 @@ bool check_scoreboard_projects_every_retail_mode_shape() {
 // The host's 0x16 rows, status words and trailer counts: no fallback row (an
 // empty pair list sends zero rows), every status word 0 (the recipient gate
 // slot+96481 is never set), the spectator bit and count off the latch, and
-// the in-game count as its own slot walk.
-// [orig: Server_BuildAndBroadcastScoreboard @0x50D960 -- the row loop
+// the in-game count as its own slot walk. The rows need slot state 6
+// exactly: a punted slot keeps its row (a punt writes no slot byte), and the
+// round end's 6 -> 7 store leaves none (D-NET-635).
+// [orig: Server_BuildAndBroadcastScoreboard @0x50D960 -- the row gate
+//  @0x50d9f0..0x50da0d (state 6 @0x50d9f6), the row loop
 //  @0x50da54..0x50db21, the in-game walk @0x50dd5b..0x50dda9;
-//  NetPacket_SerializeScoreboard0x16 @0x504bd6 / @0x504c30]
+//  NetPacket_SerializeScoreboard0x16 @0x504bd6 / @0x504c30;
+//  Server_LogCRCMismatchPunt @0x517ED0 -> CNapiNPConnection_SendChatMessage
+//  @0x4C7EF0, the connection's disconnect event alone; Server_ProcessRoundEnd
+//  @0x51685E]
 bool check_host_scoreboard_status_and_counts() {
 	opennova::inmatch::GameConfig config;
 	opennova::PlayerList empty;
@@ -244,9 +250,14 @@ bool check_host_scoreboard_status_and_counts() {
 	roster[4].phase = opennova::inmatch::ConnectionPhase::PendingSpawn;
 	roster[4].reply.player_slot = 4;
 	roster[4].reply.player_slot_reserved = true;
+	// A punted spectator in its flush window: the punt staged the connection's
+	// disconnect record and wrote no slot byte, so its row, and the spectator
+	// count it carries, stay until the teardown (D-NET-635).
 	roster[5].phase = opennova::inmatch::ConnectionPhase::InMatch;
 	roster[5].burst.spawned = true;
 	roster[5].reply.player_slot = 5;
+	roster[5].link.owned_entity = spawn_player(0);
+	roster[5].link.spectator = true;
 	roster[5].host_disconnect_sent = true;
 	const opennova::ProtocolMessage message =
 			opennova::inmatch::build_player_list_message(config, roster, &world);
@@ -255,9 +266,14 @@ bool check_host_scoreboard_status_and_counts() {
 	                    message.payload.data(), message.payload.size(), list),
 	            "host 0x16 decodes"))
 		return false;
-	if (!expect(list.players.size() == 2 && list.in_game_count == 5 &&
-	                    list.spectator_count == 1,
+	if (!expect(list.players.size() == 3 && list.in_game_count == 5 &&
+	                    list.spectator_count == 2,
 	            "the in-game count walks the active slots; the spectator count rides the rows"))
+		return false;
+	bool punted_row = false;
+	for (const opennova::PlayerListRow &row : list.players)
+		punted_row = punted_row || row.slot_id == 5;
+	if (!expect(punted_row, "a punted slot keeps its 0x16 row until its teardown"))
 		return false;
 	bool status_zero = true;
 	uint8_t spectator_flags = 0xFF;
@@ -265,9 +281,21 @@ bool check_host_scoreboard_status_and_counts() {
 		status_zero = status_zero && row.status_flags == 0;
 		if (row.slot_id == 1) spectator_flags = row.flags;
 	}
-	return expect(status_zero, "every host-sent status word is 0") &&
-	       expect(spectator_flags == 0x01,
-	              "the spectator row carries bit 0 over its zeroed team");
+	if (!expect(status_zero, "every host-sent status word is 0") ||
+			!expect(spectator_flags == 0x01,
+					"the spectator row carries bit 0 over its zeroed team"))
+		return false;
+	// The round end moves every slot to state 7 (Match's outcome latch stands
+	// for the store): no rows and no spectator count, the in-game walk as before.
+	world.match.latch_round_over();
+	const opennova::ProtocolMessage ended =
+			opennova::inmatch::build_player_list_message(config, roster, &world);
+	opennova::PlayerList after;
+	return expect(opennova::decode_player_list(
+	                      ended.payload.data(), ended.payload.size(), after) &&
+	                      after.players.empty() && after.spectator_count == 0 &&
+	                      after.in_game_count == 5,
+	              "past the round end (state 7) the 0x16 lists no rows");
 }
 
 void add_retail_game_environment(opennova::ClientAuth &auth) {
@@ -4330,6 +4358,9 @@ bool check_numbered_flip_pair_and_banner_wire() {
 		conn.link.mode = opennova::replication::TransportMode::Client;
 		conn.link.transport = &transports.back();
 		conn.link.owned_entity = owned;
+		// The slot team (+0x1A0) the pair's filters match (D-NET-636).
+		conn.assigned_team = world.registry.get(owned)->team;
+		conn.assigned_team_valid = true;
 		ctx.np_protocol.connection_list.push_back(std::move(conn));
 	}
 	auto events = [](Transport &transport) {
@@ -4916,6 +4947,8 @@ bool check_minimap_overlay_zone_capture_bits() {
 	conn.link.mode = opennova::replication::TransportMode::Client;
 	conn.link.transport = &transport;
 	conn.link.owned_entity = player_h;
+	conn.assigned_team = 1; // the slot team (+0x1A0), as the body's
+	conn.assigned_team_valid = true;
 	ctx.np_protocol.connection_list.push_back(std::move(conn));
 
 	opennova::inmatch::Server_TickUpdate(ctx);
@@ -4942,6 +4975,104 @@ bool check_minimap_overlay_zone_capture_bits() {
 			ok;
 	ok = expect(source_of(plain) == 0x00, "an unnumbered spawn point takes no capture bits") &&
 			ok;
+	return ok;
+}
+
+// The overlay visit reads the recipient SLOT's team byte, never its body's,
+// for the capture bits and for the occupied-vehicle filter (D-NET-636): a
+// split slot (slot team 1, its body moved to team 2 by a script team write)
+// gets team 1's bits and sees team 1's vehicle.
+// [orig: Server_BuildOverlayStateForPlayer - `movzx eax, [ebx+1A0h]`
+//  @0x51820C (pool 2), `movzx ecx, [ebx+1A0h]` @0x51835C (pool 1), the vehicle
+//  filter's `movzx edx, [ecx+1A0h]` @0x5184D7 against the vehicle's team
+//  @0x5184DE..0x5184E3; Entity_SetTeamByNetId @0x43C680]
+bool check_minimap_overlay_reads_the_slot_team() {
+	opennova::inmatch::NapiNPServerCtx ctx;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = opennova::game_type::kAdvanceAndSecure;
+	opennova::world::World world;
+	world.rules.mp_session = true;
+	ctx.world = &world;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(1, 8);
+	world.registry.configure_pool(2, 4);
+	opennova::world::MatchRules rules;
+	rules.game_type = opennova::game_type::kAdvanceAndSecure;
+	world.match.configure(rules);
+
+	// Pool 1 slot 0, the first visit's phase: team 1's vehicle.
+	opennova::world::Entity vehicle;
+	vehicle.kind = opennova::world::EntityKind::Item;
+	vehicle.has_item_def = true;
+	vehicle.item_type = 1;
+	vehicle.item_attrib2 = 0x00002000u; // a mapped class (icon 5)
+	vehicle.team = 1;
+	vehicle.health = 100;
+	vehicle.alive = true;
+	const auto vehicle_h = world.registry.spawn(1, vehicle);
+	auto zone = [&](uint8_t number, uint8_t team) {
+		opennova::world::Entity e;
+		e.kind = opennova::world::EntityKind::Item;
+		e.has_item_def = true;
+		e.item_attrib = opennova::world::kItemAttribSpawnPoint |
+				opennova::world::kItemAttribChangeTeam;
+		e.is_spawn_point = true;
+		e.is_capture_trigger = true;
+		e.zone_number = number;
+		e.team = team;
+		e.health = 1;
+		e.alive = true;
+		return world.registry.spawn(1, e);
+	};
+	// Team 1 holds 1 and team 2 holds 4; 2 and 3 are neutral, so team 1 may
+	// take 2 alone and team 2 may take 3 alone.
+	(void)zone(1, 1);
+	const auto z2 = zone(2, 0);
+	const auto z3 = zone(3, 0);
+	(void)zone(4, 2);
+	world.zones.build_chain_from_mission();
+
+	opennova::world::Entity player;
+	player.kind = opennova::world::EntityKind::Organic;
+	player.team = 2; // the split body
+	player.health = 100;
+	player.alive = true;
+	const auto player_h = world.registry.spawn(0, player);
+	opennova::replication::UdpSessionTransport transport(
+			opennova::replication::UdpSessionTransport::Role::Host);
+	opennova::inmatch::NapiNPConnection conn;
+	conn.type = 1;
+	conn.phase = opennova::inmatch::ConnectionPhase::InMatch;
+	conn.burst.spawned = true;
+	conn.link.mode = opennova::replication::TransportMode::Client;
+	conn.link.transport = &transport;
+	conn.link.owned_entity = player_h;
+	conn.assigned_team = 1;
+	conn.assigned_team_valid = true;
+	ctx.np_protocol.connection_list.push_back(std::move(conn));
+
+	opennova::inmatch::Server_TickUpdate(ctx);
+	std::vector<opennova::CaptureZoneOverlay> rows;
+	std::vector<uint8_t> raw;
+	while (transport.pop_outbound(raw)) {
+		if (raw.empty() || raw.front() != opennova::s2c::CAPTURE_ZONE_STATE) continue;
+		opennova::CaptureZoneOverlayBatch batch;
+		if (!opennova::decode_capture_zone_overlay(raw.data() + 1, raw.size() - 1, batch))
+			return expect(false, "the zone overlay batch decodes");
+		rows.insert(rows.end(), batch.entries.begin(), batch.entries.end());
+	}
+	auto source_of = [&](opennova::world::EntityHandle h) -> int {
+		for (const auto &row : rows)
+			if (row.handle == static_cast<uint16_t>(h.packed)) return row.source;
+		return -1;
+	};
+	bool ok = expect(source_of(z2) == 0x82,
+			"slot team 1 may take zone 2 (0x80), its enemy may not");
+	ok = expect(source_of(z3) == 0x43,
+			"slot team 1's enemy may take zone 3 (0x40), team 1 may not") && ok;
+	ok = expect(source_of(vehicle_h) != -1,
+			"team 1's vehicle is listed to the slot of team 1, whatever its body's team") && ok;
 	return ok;
 }
 
@@ -5107,6 +5238,7 @@ int main() {
 	ok = check_refused_touch_arms_the_nag() && ok;
 	ok = check_retail_minimap_overlay_stream_without_zone_chain() && ok;
 	ok = check_minimap_overlay_zone_capture_bits() && ok;
+	ok = check_minimap_overlay_reads_the_slot_team() && ok;
 	ok = check_preround_delay_phase_boundary() && ok;
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;

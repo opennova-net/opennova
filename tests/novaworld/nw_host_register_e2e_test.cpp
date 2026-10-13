@@ -424,8 +424,8 @@ int main() {
 
 		// A ClientHostUpdate refreshes the live occupancy on the same session.
 		auto upd = opennova::make_client_host_update(
-		    /*Host*/      {{0, "Players", "2"}},
-		    /*PlayerList*/{{0, "PlayerName", "Host"}, {1, "PlayerName", "Joiner"}});
+		    /*Host*/      {{0, "Players", "2"}}, true,
+		    /*PlayerList*/{{0, "PlayerName", "Host"}, {1, "PlayerName", "Joiner"}}, true);
 		session.queue_statement(upd);
 		flush_session();
 		int players = 0;
@@ -460,11 +460,11 @@ int main() {
 		};
 		service_session(200); // the update's ACK
 		const auto gap_datagram = built(opennova::make_client_host_update(
-		    /*Host*/      {{0, "Players", "4"}},
-		    /*PlayerList*/{}));
+		    /*Host*/      {{0, "Players", "4"}}, true,
+		    /*PlayerList*/{}, true));
 		const auto future_datagram = built(opennova::make_client_host_update(
-		    /*Host*/      {{0, "Players", "5"}},
-		    /*PlayerList*/{}));
+		    /*Host*/      {{0, "Players", "5"}}, true,
+		    /*PlayerList*/{}, true));
 		send(future_datagram);
 		std::this_thread::sleep_for(100ms);
 		{
@@ -485,12 +485,12 @@ int main() {
 		// Permanently omit the next sequence, then deliver its successor: the service asks for
 		// the lost one with a 0x84 and the client answers from its retained records.
 		const auto permanently_lost = built(opennova::make_client_host_update(
-				/*Host*/{{0, "Players", "6"}},
-				/*PlayerList*/{}));
+				/*Host*/{{0, "Players", "6"}}, true,
+				/*PlayerList*/{}, true));
 		(void)permanently_lost;
 		const auto after_loss = built(opennova::make_client_host_update(
-				/*Host*/{{0, "Players", "7"}},
-				/*PlayerList*/{}));
+				/*Host*/{{0, "Players", "7"}}, true,
+				/*PlayerList*/{}, true));
 		send(after_loss);
 		service_session(500);
 		expect(wait_players(7) == 7,

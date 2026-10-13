@@ -42,7 +42,8 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 // bit 7) to the 0x580 medic set; the chat goes reliably to that set minus the
 // requester, then to the requester alone (the chat is NOT preference-gated);
 // the once-only latch closes; and the MEDIC_REQUEST composite sound fans to
-// alive players. The listen host's own player runs this handler too.
+// every in-match player, dead or alive (mask 128 reads the slot state alone).
+// The listen host's own player runs this handler too.
 // [orig: Server_BroadcastMedicRequest @0x515390 — the GameText lookup
 //  @0x5153C9, gates @0x515406, SpawnWaveList_RemovePlayer @0x515412, sprintf
 //  @0x515421, 0x54 @0x515432..0x515484, 0x14 @0x5154AC..0x51550B, latch

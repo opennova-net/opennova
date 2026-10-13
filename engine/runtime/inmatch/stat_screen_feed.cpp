@@ -1,6 +1,8 @@
 #include <runtime/inmatch/stat_screen_feed.h>
 
+#include <base/io/cp1252.h>
 #include <runtime/hud/end_round_overlay.h> // stat_field_string_index
+#include <runtime/menu/menu_runtime.h>
 
 #include <cstdio>
 #include <cstdint>
@@ -76,8 +78,11 @@ std::vector<StatScreenRow> stat_screen_rows(const EndRoundStats &board,
 		sr.team = p.team;
 		sr.name = p.name;
 		sr.squad = p.squad.empty() ? "-" : p.squad;
-		if (p.team == 1) sr.color_argb = 0xFF00BFFFu;      // -16732161 @0x562564
-		else if (p.team == 2) sr.color_argb = 0xFFFF0000u; // -65536 @0x562579
+		// The row colour by the slot's team: 1 blue, 2 red, any other the table's
+		// [orig: the team switch @0x56258a..0x562596, push 0FF00AFFFh @0x56259f,
+		// push 0FFFF0000h @0x562598, then sub_640110 @0x5625a9].
+		if (p.team == 1) sr.color_argb = 0xFF00AFFFu;
+		else if (p.team == 2) sr.color_argb = 0xFFFF0000u;
 		for (size_t i = 0; i < board.team_fields.size(); ++i) {
 			const int field_id = board.team_fields[i].first;
 			if (!show_disabled && board.team_fields[i].second == 0) continue;
@@ -113,6 +118,51 @@ bool stat_screen_row_visible(int tab_index, uint8_t team) {
 	if (tab_index == 1) return team == 2;
 	if (tab_index == 2) return team == 1;
 	return true;
+}
+
+void fill_stat_results(menu::MenuRuntime &menu, int table,
+		const std::vector<StatScreenColumn> &columns, const std::vector<StatScreenRow> &rows) {
+	std::vector<menu::MenuTableColumn> set;
+	set.reserve(columns.size());
+	for (const StatScreenColumn &column : columns) {
+		menu::MenuTableColumn c;
+		c.label = utf8_to_retail_text(column.header);
+		c.width = column.width;
+		c.justify = kStatScreenColumnJustify;
+		c.vjustify = kStatScreenColumnVJustify;
+		c.body_justify = c.justify;
+		c.body_vjustify = c.vjustify;
+		// NAME and Squad compare as text; a stat field numerically (init_table_row's
+		// sort argument 0 / 1 @ 0x562346 / 0x56237a / 0x56242b).
+		c.numeric_sort = column.field_id != 0;
+		set.push_back(std::move(c));
+	}
+	menu.table_clear_rows(table);
+	menu.table_set_columns(table, set);
+	int selected = -1;
+	for (const StatScreenRow &row : rows) {
+		// The slot's name and squad tag as the roster's bytes [orig: @0x562565 /
+		// @0x562585], then the formatted fields.
+		std::vector<std::string> cells{ row.name, row.squad };
+		cells.insert(cells.end(), row.cells.begin(), row.cells.end());
+		menu.table_add_row(table, cells);
+		const int index = menu.table_row_count(table) - 1;
+		// A team row takes its colour; any other keeps the table's (the feed's
+		// white) [orig: sub_640110 @0x5625a9].
+		if (row.color_argb != 0xFFFFFFFFu) menu.table_set_row_color(table, index, true, row.color_argb);
+		if (row.selected) selected = index;
+	}
+	// The sort: the first stat column, descending [orig: sub_63EC30(table, 2, 0)
+	// then CTableWnd_SortByColumn(table, 2) @0x5626e6..0x5626f9]. The game
+	// selects after it: the first row whose column-1 cell value (the slot, which
+	// the fill writes beside the squad @0x562576) is the local player entity's
+	// slot id (+0x154) [orig: the row walk @0x562700..0x562754, the compare
+	// @0x56271e..0x56272e, CTableWnd_SetRowSelected @0x562754]. Ours selects the
+	// feed's flagged row before the sort, which carries it, and writes no
+	// column-1 value (D-MNU-51).
+	if (selected >= 0) menu.table_select_row(table, selected, false);
+	menu.table_set_column_ascending(table, kStatScreenSortColumn, kStatScreenSortAscending);
+	menu.table_sort_by_column(table, kStatScreenSortColumn);
 }
 
 } // namespace opennova::inmatch

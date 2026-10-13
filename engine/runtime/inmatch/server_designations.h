@@ -57,7 +57,8 @@ void Server_TickDesignations(ServerDesignationTable &table);
 // in table order, as [u16 handle][s16 x][s16 y][s16 z][u16 seconds][u8 mode]
 // [u8 radius] (whole units toward zero, seconds = ticks / 62 toward zero); an
 // empty batch sends nothing. Unreliable (msgClass 0). The overlay build runs
-// it first on each of its 14-tick visits; the team is the recipient slot's.
+// it first on each of its 14-tick visits; the team is the recipient slot's
+// (+0x1A0, zero-extended) against the owner entity's (+0x162, sign-extended).
 // [orig: Server_SendDesignationsToPlayer @0x517F70 (ex
 //  Server_SendOverlayStateToPlayer; mask 0x20, SendFiltered(0x6B, 0, 1) only
 //  when the length is positive) -> NetPacket_SerializeDesignations @0x5116A0

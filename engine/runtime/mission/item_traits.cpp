@@ -733,6 +733,12 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         row.def_type = def->type;
         row.radar_sig = def->radar_sig & 0xFFFF;
         row.heat_sig = def->heat_sig & 0xFFFF;
+        // ...and the attrib words and graphic the conversion's copy of the
+        // round carries into the device [orig: Entity_ConvertRoundToPlacedEntity
+        //  @0x5455D6].
+        row.attrib = def->attrib;
+        row.attrib2 = def->attrib2;
+        row.has_graphic_model = def->graphic[0] != '\0';
         world.throwables.classes.set(row);
     }
     // The AS zone-slot chain — built AFTER the trait stamp (zone registration keys on

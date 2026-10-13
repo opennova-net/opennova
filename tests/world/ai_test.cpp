@@ -4715,7 +4715,7 @@ int main() {
         npc_seed.health = 100;
         npc_seed.net_id = 0x11;
         npc_seed.group_id = 1;
-        npc_seed.position = Vec3{0.0f, 0.0f, 0.0f};
+        npc_seed.position = Vec3{0.0f, 0.0f, 40.0f};
         EntityHandle npc_h = w.registry.spawn(0, npc_seed);
         CHECK(npc_h.valid());
         // Headless: no models, so the rig's posed launch point is emulated at
@@ -4724,11 +4724,13 @@ int main() {
         // its eye point [orig: Entity_UpdateInfantryAI @0x4B9910 (the dead
         // Entity_ComputeWeaponFireOrigin calls @0x4BC720 / @0x4BCB23)], while
         // the unposed-person fallback sphere sits 0.9 u above that origin: only
-        // a steep shot crosses it, so the player stands in a pit 40 u below.
+        // a steep shot crosses it, so the NPC stands on a ledge 40 u above the
+        // player (a pit below the player would sit under the Z -1.0 floor,
+        // which releases an outdoors round [orig: Projectile_UpdatePhysics
+        // @0x4EA0C9..0x4EA0D0]).
         FakeMuzzleProvider provider;
-        w.registry.get(player_h)->position.z = -40.0f;
         w.registry.get(player_h)->eye_offset_z = static_cast<int32_t>(0.9 * 65536.0);
-        provider.points[npc_h.packed] = {0, 0, static_cast<int32_t>(0.9 * 65536.0)};
+        provider.points[npc_h.packed] = {0, 0, static_cast<int32_t>(40.9 * 65536.0)};
         w.pose_provider = &provider;
 
         AiSystem &sys = w.ai;
@@ -4739,7 +4741,7 @@ int main() {
         npc.inf.active = true;
         npc.team = 1;
         npc.net_id = 0x11;
-        npc.pos[0] = 0; npc.pos[1] = 0; npc.pos[2] = 0;
+        npc.pos[0] = 0; npc.pos[1] = 0; npc.pos[2] = 40 << 16;
         npc.profile.organic.ammo.fill(1); // -> w.tables.ammo[1]
         npc.profile.organic.launch = {1, 2, 3};
         npc.profile.clip_size = 30;

@@ -5,10 +5,11 @@
 // form, the armory's case-insensitive row order, and the weight readout with
 // its encumbrance band tokens.
 // [orig: PlayerInfo_PopulateWeaponSlotLists @0x560430; UI_UpdateWeaponWeightDisplay
-//  @0x565640; ListWidget_SortRows cmp @0x6448a0]
+//  @0x565640; ListWidget_SortRows cmp @0x6448a0 -> _stricmp_l @0x76fd23]
 #include <runtime/menu/loadout_labels.h>
 
 #include <formats/def/def.h>
+#include <runtime/menu/list_sort.h>
 
 #include <cstdio>
 #include <cstring>
@@ -78,6 +79,17 @@ int main() {
 	// above the Remington (row 1).
 	CHECK(armory_slot_order({ "M1911A1", "Shotgun", ".357 Magnum", "Glock 17", "Shotgun" }) ==
 			(std::vector<int>{ 2, 3, 0, 4, 1 }));
+	// The compare is stricmp under the ".ACP" locale, over the labels' cp1252
+	// bytes (D-MNU-39): "é" (0xE9) and "É" (0xC9, lowered to 0xE9) tie, and "Œ"
+	// (0x8C, lowered to 0x9C) sorts before "é", stricmp answering the bytes'
+	// distance; a character cp1252 has no byte for reads '?', and a label that is
+	// not UTF-8 is already the page's bytes.
+	// [orig: cmp @0x6448a0 -> _stricmp @0x76fdf6 -> _stricmp_l @0x76fd23]
+	CHECK(list_text_compare("\xC3\xA9", "\xC3\x89") == 0);
+	CHECK(list_text_compare("\xC5\x92", "\xC3\xA9") == 0x9C - 0xE9);
+	CHECK(armory_slot_order({ "\xC3\xA9", "\xC5\x92" }) == (std::vector<int>{ 1, 0 }));
+	CHECK(list_text_compare("\xE2\x9C\x93", "?") == 0);
+	CHECK(list_text_compare("\xC9t\xC9", "\xC3\xA9T\xC3\xA9") == 0);
 
 	// The weight readout with its band tokens and their fallbacks.
 	const opennova::hud::GameTextLookup menu = table_of({

@@ -100,16 +100,21 @@ int main() {
     CHECK(w.script.vars.get_mission(256) == 17);
     CHECK(w.script.vars.get_mission(511) == 18);
     CHECK(w.script.vars.get_global(3) == -7); // globals survive mission clear
-    // The carry into a rebuilt store copies ONLY the declared half.
+    // The carry into a rebuilt store copies the whole store, for the next
+    // mission's PreMission pass to read; the start's G clear then zeroes the
+    // G bank alone (D-EVT-17) [orig: WacScript_InitAndLoad - the memset called
+    // @0x4F964A].
     {
         ScriptVarStore fresh;
         fresh.set_mission(5, 1);
         fresh.set_global(3, 1);
-        fresh.carry_declared_from(w.script.vars);
+        fresh.carry_from(w.script.vars);
         CHECK(fresh.get_mission(256) == 17);
         CHECK(fresh.get_mission(511) == 18);
-        CHECK(fresh.get_mission(5) == 1);
-        CHECK(fresh.get_global(3) == 1);
+        CHECK(fresh.get_mission(5) == 0); // the clear above zeroed V5
+        CHECK(fresh.get_global(3) == -7);
+        fresh.clear_global_vars();
+        CHECK(fresh.get_global(3) == 0 && fresh.get_mission(256) == 17);
     }
 
     w.script.vars.clear_all();

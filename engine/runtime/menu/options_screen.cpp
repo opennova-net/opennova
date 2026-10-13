@@ -163,14 +163,17 @@ void OptionsScreen::accept_words(const MenuRuntime &menu, playersav::ProfileReco
 }
 
 // The table mirrors the screen's class/action/control rows. Capture
-// blanks only the armed cell, preserving the action's row identity.
+// writes "???" into the armed row's Control cell alone, preserving the
+// action's row identity (D-MNU-48).
 // [orig: UI_PopulateControlMappingList @0x55c0c0;
-// UI_UpdateControlMappingDisplay @0x55b700]
+// UI_UpdateControlMappingDisplay @0x55b700; UI_ControlsRemapArmHandler
+// @0x55d560 - asc_7CA0FC "???" pushed @0x55d5c8, the column-2
+// CTableWnd_SetCellText call @0x55d5d0]
 void OptionsScreen::fill(MenuRuntime &menu, int table, int blank) {
 	menu.table_clear_rows(table);
 	int i = 0;
 	for (const auto &row : bindings_.build_rows(device_)) {
-		menu.table_add_row(table, {row.cls, row.action, i++ == blank ? "" : row.control});
+		menu.table_add_row(table, {row.cls, row.action, i++ == blank ? "???" : row.control});
 	}
 }
 

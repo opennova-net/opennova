@@ -690,8 +690,14 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	}
 	// Compile the mission WAC scripts; absent files install an empty program. The
 	// numbered-variable reset belongs after PreMission, immediately before
-	// initial execution in complete_mission_start.
-	// [orig: WacScript_InitAndLoad @0x4F91F0, reset @0x4F95EE]
+	// initial execution in complete_mission_start. Retail compiles inside the
+	// same load, after the PreMission pass, so a GLOOP operand's load-time
+	// read there sees the pass's writes (D-EVT-20), and a named value's or the
+	// M# scratch word's as the previous run left it, which a rebuilt kernel
+	// holds fresh (D-EVT-21).
+	// [orig: WacScript_InitAndLoad @0x4F91F0, reset @0x4F95EE; the
+	//  Script_Compile calls @0x4F94A8 / @0x4F950E / @0x4F9597; the GLOOP read
+	//  @0x4F368A; g_WacVarTicks zeroed only after them @0x4F9665]
 	if (options.wac) {
 		step("wac");
 		// A non-authoritative load compiles no layer: it installs only the
@@ -824,9 +830,10 @@ void MissionKernel::carry_across_load_from(MissionKernel &previous) {
 	mounted_graphics = std::move(previous.mounted_graphics);
 	local.look_settings = previous.local.look_settings;
 	local.carry_process_globals_from(previous.local);
-	world.script.vars.carry_declared_from(previous.world.script.vars);
-	// ...and WAC's DO choices and RND, which no mission load clears (D-EVT-15).
-	world.script.vars.carry_wac_kept_from(previous.world.script.vars);
+	// The script banks whole: the PreMission pass reads the previous run's
+	// words, the start's WAC load clears its share after it (D-EVT-15,
+	// D-EVT-17).
+	world.script.vars.carry_from(previous.world.script.vars);
 	// [orig: g_EntityUpdateCounter, whose one writer is
 	// Entity_UpdateAllEntities @0x4C2639]
 	world.entity_update_counter = previous.world.entity_update_counter;
@@ -862,8 +869,8 @@ bool MissionKernel::complete_mission_start() {
 	if (!mission_start_pending) return false;
 	// PreMission actions share their numbered variables for the whole pass,
 	// then WAC initialization clears V0..V255 before its first execution.
-	// This reset also runs without script files; declared V256+ and globals
-	// retain their values. Keep it behind the once-per-load boundary guard.
+	// This reset also runs without script files; declared V256+ retain their
+	// values. Keep it behind the once-per-load boundary guard.
 	// [orig: Game_StartMission @0x525B86 (the EventTrigger_UpdateAllWithFlag2
 	// call, authority-gated @0x525B78) -> Game_StartMission @0x525CB3 (the
 	// WacScript_InitAndLoad call); WacScript_InitAndLoad @0x4F95EE (V0..V255
@@ -874,6 +881,9 @@ bool MissionKernel::complete_mission_start() {
 	// [orig: WacScript_InitAndLoad @0x4F95F9 / @0x4F9609 / @0x4F9619 /
 	//  @0x4F9629, @0x4F966B]
 	world.script.vars.reset_wac_load_state();
+	// ...and the G bank, on every mission start (D-EVT-17).
+	// [orig: WacScript_InitAndLoad - the memset called @0x4F964A]
+	world.script.vars.clear_global_vars();
 	// The environment has been seeded before this boundary. Initial WAC can
 	// change its targets and entity poses before the 255-tick settle and the
 	// first vehicle callback captures the respawn pose.

@@ -53,6 +53,7 @@ protected:
 
 public:
 	void assign(const opennova::world::DeployListRow &p_value) { value_ = p_value; }
+	const opennova::world::DeployListRow &value() const { return value_; }
 
 	String get_text() const;
 	int get_value() const { return value_.value; }

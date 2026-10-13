@@ -18,8 +18,16 @@ void DeployZoneRow::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(DeployZoneRow, Variant::INT, occupant_count)
 }
 
+// A row's text is the game's code-page bytes: the builder encodes the
+// embedder's UTF-8 names into a zone or Default row, and a queued member's row
+// carries the member's roster name as the roster holds it. The
+// list's items take the rows' bytes from the records themselves
+// (MenuDriver::set_deploy_list_items -> world::deploy_list_items, where the
+// witness lives); this getter is the script's view of the row, as text
+// (retail_text_to_utf8), where a UTF-8 parse made a lone high byte U+FFFD
+// (D-MNU-46).
 String DeployListRow::get_text() const {
-	return opennova::to_gd(value_.text);
+	return opennova::to_gd(opennova::retail_text_to_utf8(value_.text));
 }
 
 void DeployListRow::_bind_methods() {

@@ -769,6 +769,18 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
         }
         seed.armor_impact = row->armor_impact;
         seed.armor_kz = row->armor_kz;
+        // The copy carries the round's def pointer and graphic model (+0x20,
+        // +0x30), so the device reads its def's type and attrib words as a
+        // resolved entity does (the S2C 0x18 answer to a C2S 0x0F query takes
+        // the type from the def), and keeps the model only when the round
+        // kept it: a non-tracer shot's spawn cleared it (a later collision
+        // resolve restamps it here, D-ITEMDEF-30).
+        // [orig: Entity_ConvertRoundToPlacedEntity @0x5455B0 - the def test
+        //  @0x5455B5, the memcpy @0x5455D6; RoundData_SpawnRound @0x4EC900;
+        //  NetPacket_SerializeObjectToBuffer @0x504DB9]
+        seed.item_type = static_cast<uint8_t>(row->def_type);
+        stamp_item_attrib(seed, row->attrib, row->attrib2);
+        seed.has_graphic_model = row->has_graphic_model && round.tracer;
         // The conversion copies the round and runs the model init on the
         // placed entity, whose first leg ORs Flags 0x8000000 for a NoTarget
         // def (items.def 101891 "Satchel Charge"): the AI target walks and

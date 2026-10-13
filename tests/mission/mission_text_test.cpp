@@ -3,8 +3,8 @@
 // [orig: @0x506649..0x506660], the [Locations] LOCATION%03i and [PeopleNames]
 // STRNAME%03i numeric-key harvests (case-insensitive section / prefix, the
 // first value per suffix wins, non-numeric suffixes skipped, raw cp1252 bytes
-// kept), the people-name resolve, a rejected table, and the markers' location
-// numbers.
+// kept), the people-name resolve, a rejected table, and a location's name by
+// its record's name_index.
 #include <formats/rtxt/rtxt.h>
 #include <runtime/mission/mission_text.h>
 
@@ -110,18 +110,19 @@ int main() {
 		CHECK(!text.loaded && text.briefing3.empty());
 	}
 
-	// The location numbers: each named-location marker the next from 1, in the pool's order; any
-	// other marker 0.
+	// A location's name: the [Locations] value its record's name_index keys (0 keys LOCATION000
+	// like any other number), else the LOCATION%03i key string itself.
+	// [orig: Entity_SpawnFromBMSRecord @0x40F196..0x40F20A]
 	{
-		std::vector<bms::Entity> markers(5);
-		for (bms::Entity &marker : markers) marker = bms::Entity{};
-		markers[0].type_id = 2044;
-		markers[1].type_id = 6005;
-		markers[2].type_id = 2044;
-		markers[3].type_id = 2043;
-		markers[4].type_id = 2044;
-		CHECK(mission::location_numbers(markers) == std::vector<int32_t>({1, 0, 2, 0, 3}));
-		CHECK(mission::location_numbers({}).empty());
+		mission::MissionText text;
+		text.location_texts[0] = "SEA ANGEL Base";
+		text.location_texts[4] = "Ridge";
+		CHECK(text.location_name(0) == "SEA ANGEL Base");
+		CHECK(text.location_name(4) == "Ridge");
+		CHECK(text.location_name(6) == "LOCATION006");
+		CHECK(text.location_name(1234) == "LOCATION1234");
+		CHECK(text.location_name(-1) == "LOCATION-01");
+		CHECK(mission::MissionText().location_name(0) == "LOCATION000");
 	}
 
 	if (failures != 0) {

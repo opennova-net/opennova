@@ -121,6 +121,9 @@ struct HostFixture {
 					ns::TransportMode::Client, players[i], true);
 			conn.reply.player_slot = static_cast<uint8_t>(i + 1);
 			conn.reply.player_name = "P" + std::to_string(i + 1);
+			// The slot team (+0x1A0) the player add stores beside the body's.
+			conn.assigned_team = static_cast<uint8_t>(first_team + (i % 2));
+			conn.assigned_team_valid = true;
 			(void)inmatch::Server_RerollPlayerTickSeed(conn);
 			ctx.np_protocol.connection_list.push_back(std::move(conn));
 		}
@@ -1720,6 +1723,77 @@ bool check_radio_call_request() {
 	return ok;
 }
 
+// Both radio fans read slot teams (+0x1A0) on both sides, never the bodies'
+// (D-NET-636): the no-rule fan filters mask 0x180 by the sender's slot team
+// and reads no entity, the per-slot fan compares the two slot team bytes.
+// A split slot (a script team write moves the body alone [orig:
+// Entity_SetTeamByNetId @0x43C680]) still hears and calls by its slot team.
+// [orig: NapiNPServerMsg_HandleRadioCall: `movzx ecx, [ebx+1A0h]` @0x51449F,
+//  the filter @0x5144B1, mask 0x180 @0x5144BE; the per-slot compare
+//  @0x51451A / @0x514520; NapiNPServer_SendFiltered @0x4C896A..0x4C8977]
+bool check_radio_call_split_slots() {
+	HostFixture f(4); // slot and body teams 1, 2, 1, 2
+	for (ns::UdpSessionTransport &t : f.transports) (void)drain(t);
+	f.world.registry.get(f.players[2])->team = 2; // slot team 1, body team 2
+	f.world.registry.get(f.players[3])->team = 1; // slot team 2, body team 1
+	RadioCallRequest req;
+	bool ok = true;
+	const auto call = [&](int16_t value) {
+		req.value = value;
+		f.conn(0).link.radio_call_cooldown_seconds = 0;
+		return f.dispatch(0, c2s::RADIO_CALL_REQUEST, encode_radio_call_request(req));
+	};
+	for (const int16_t value : {int16_t{1}, int16_t{7}}) { // RAD_1 (no rule), RAD_7
+		const bool no_rule = value == 1;
+		ok = expect(call(value).size() == 1, "the sender hears its own call") && ok;
+		ok = expect(count_radio(f.transports[2]) == 1,
+				no_rule ? "no rule: the split slot of the sender's slot team hears it"
+						: "per slot: the split slot of the sender's slot team hears it") && ok;
+		ok = expect(count_radio(f.transports[1]) == 0 && count_radio(f.transports[3]) == 0,
+				no_rule ? "no rule: the other slot team does not, whatever its body's team"
+						: "per slot: the other slot team does not, whatever its body's team") && ok;
+	}
+	// The mode-3 mark RAD_7 left reads back the same way: each overlay visit's
+	// S2C 0x6B lists the marks whose owner ENTITY's team, sign-extended, is the
+	// recipient SLOT's team. [orig: Server_SendDesignationsToPlayer `movzx eax,
+	//  [eax+1A0h]` @0x517F83; NetPacket_SerializeDesignations `movsx edx,
+	//  [eax+162h]` @0x5116D5, the compare @0x5116DC]
+	for (inmatch::NapiNPConnection &conn : f.ctx.np_protocol.connection_list)
+		conn.reply.minimap_overlay_cooldown = 0;
+	inmatch::Server_TickUpdate(f.ctx);
+	const auto marks = [&](size_t i) {
+		size_t n = 0;
+		for (const ns::Datagram &d : drain(f.transports[i])) {
+			MinimapOverlayBatch batch;
+			if (d.tag == s2c::MINIMAP_OVERLAY &&
+					decode_minimap_overlay_batch(d.body.data(), d.body.size(), batch))
+				n += batch.entries.size();
+		}
+		return n;
+	};
+	ok = expect(marks(2) == 1, "the split slot of the marker's slot team sees the mark") && ok;
+	ok = expect(marks(3) == 0 && marks(1) == 0,
+			"the other slot team does not, whatever its body's team") && ok;
+	// A split sender: its body moves to team 2, its call stays on slot team 1.
+	f.world.registry.get(f.players[0])->team = 2;
+	f.world.registry.get(f.players[2])->team = 1;
+	f.world.registry.get(f.players[3])->team = 2;
+	for (const int16_t value : {int16_t{1}, int16_t{7}}) {
+		(void)call(value);
+		ok = expect(count_radio(f.transports[2]) == 1 && count_radio(f.transports[1]) == 0 &&
+						count_radio(f.transports[3]) == 0,
+				value == 1 ? "no rule: a split sender reaches its slot team alone"
+						   : "per slot: a split sender reaches its slot team alone") && ok;
+	}
+	// The no-rule fan reads no entity: a slot-team-1 slot without a player
+	// still hears it.
+	f.conn(2).link.owned_entity = w::EntityHandle{};
+	(void)call(1);
+	ok = expect(count_radio(f.transports[2]) == 1,
+			"no rule: a recipient with no bound player still hears it") && ok;
+	return ok;
+}
+
 } // namespace
 
 int main() {
@@ -1750,6 +1824,7 @@ int main() {
 	ok = check_emote_request() && ok;
 	ok = check_radio_call_rules() && ok;
 	ok = check_radio_call_request() && ok;
+	ok = check_radio_call_split_slots() && ok;
 	if (ok) std::printf("OK\n");
 	return ok ? 0 : 1;
 }

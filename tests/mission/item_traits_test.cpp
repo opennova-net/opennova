@@ -909,6 +909,12 @@ int main() {
         CHECK(mine->def_type == DEF_ITEM_TYPE_OBJECT); // `type powerup`, the same 6
         CHECK(mine->radar_sig == 40);
         CHECK(mine->heat_sig == 30);
+        // ...and the attrib words and graphic the conversion's copy of the
+        // round carries into the device [orig: Entity_ConvertRoundToPlacedEntity
+        // @0x5455D6].
+        CHECK(mine->attrib == DEF_ITEM_ATTRIB_NOTARGET);
+        CHECK(mine->attrib2 == 0);
+        CHECK(mine->has_graphic_model); // graphic atmine
     }
     CHECK(frag == nullptr || !frag->no_target);
     // vmne is an event row only: as a move_function it binds the physics

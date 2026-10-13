@@ -228,6 +228,26 @@ std::string assigned(const std::string &script, const std::string &name) {
 	return end == std::string::npos ? std::string() : script.substr(start, end - start);
 }
 
+// Whether a command line of `script` (comments aside) turns the shell's xtrace on:
+// a `set` whose short flags hold x, or `set -o xtrace`.
+bool traces_commands(const std::string &script) {
+	std::istringstream lines(script);
+	std::string line;
+	while (std::getline(lines, line)) {
+		const size_t start = line.find_first_not_of(" \t");
+		if (start == std::string::npos || line[start] == '#') continue;
+		std::istringstream words(line.substr(start));
+		std::string word;
+		if (!(words >> word) || word != "set") continue;
+		while (words >> word) {
+			if (word == "xtrace") return true;
+			if (word.size() > 1 && word[0] == '-' && word[1] != '-' && word.find('x') != std::string::npos)
+				return true;
+		}
+	}
+	return false;
+}
+
 bool is_alnum_text(const std::string &text) {
 	for (const char c : text) {
 		const bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
@@ -292,8 +312,10 @@ int test_machine_script() {
 	TEST_EXPECT(!script.empty());
 	TEST_EXPECT(script.find(hosted::Ec2Provider::kUrlBlank) != std::string::npos);
 	TEST_EXPECT(script.find(hosted::Ec2Provider::kTokenBlank) != std::string::npos);
-	// Nothing may trace the token to the console.
-	TEST_EXPECT(script.find("set -x") == std::string::npos && script.find("set -euxo") == std::string::npos);
+	// Nothing may trace the token to the console: no `set` command line turns xtrace on.
+	TEST_EXPECT(!traces_commands(script));
+	TEST_EXPECT(traces_commands("set -euxo pipefail\n") && traces_commands("  set -o xtrace\n"));
+	TEST_EXPECT(!traces_commands("# never set -x\nset -euo pipefail\n"));
 
 	const std::string url = hosted::Ec2Provider::bootstrap_url(kService, 8080, 7);
 	TEST_EXPECT(url == "http://10.44.0.10:8080/hosted/bootstrap/7");

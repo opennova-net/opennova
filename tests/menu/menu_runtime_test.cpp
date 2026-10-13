@@ -787,6 +787,9 @@ void test_table_row_operations() {
 	CHECK(!table_set_cell_text(rows, 0, 3, 3, "out")); // the column count bounds
 	CHECK(table_set_cell_text(rows, 0, 2, 3, "in") && rows[0].cell(2) == "in" &&
 			rows[0].cell(1).empty());
+	// The cell between stays missing (D-MNU-43) [orig: CTableWnd_InsertRow - the
+	// zeroing @0x641dd5].
+	CHECK(rows[0].cell_text(1) == nullptr && rows[0].cell_text(0) != nullptr);
 	CHECK(!table_set_cell_value(rows, 5, 0, 3, 1) && table_set_cell_value(rows, 1, 1, 3, 9) &&
 			table_cell_value(rows, 1, 1) == 9 && table_cell_value(rows, 1, 0) == 5);
 	// Single select: the non-locked rows clear; a locked row keeps its state.
@@ -1722,12 +1725,14 @@ void test_options_screen() {
 	CHECK(options.is_surface() && menu.table_row_count(table) > 40);
 	CHECK(menu.table_cell_text(table, 0, 2) == "W or Up");
 	options.arm(menu, table, 0);
-	CHECK(menu.table_cell_text(table, 0, 2).empty());
+	// The armed cell reads "???" (D-MNU-48) [orig: UI_ControlsRemapArmHandler
+	// @0x55d560 - the push @0x55d5c8, the SetCellText call @0x55d5d0].
+	CHECK(menu.table_cell_text(table, 0, 2) == "???");
 	RemapInput input;
 	input.kind = RemapInput::Kind::Key;
 	input.vk = 'Y';
 	CHECK(options.consume(menu, input) == OptionsScreen::Consumed);
-	CHECK(menu.table_cell_text(table, 0, 2).empty()); // key release keeps capture
+	CHECK(menu.table_cell_text(table, 0, 2) == "???"); // key release keeps capture
 	input.pressed = true;
 	input.vk = 0; // unmapped device key
 	CHECK(options.consume(menu, input) == OptionsScreen::Consumed);
@@ -1981,6 +1986,13 @@ void test_table_column_records() {
 	CHECK(authored.name == "TABLE");
 	authored.table_data.column.has_count = true;
 	authored.table_data.column.count = 3;
+	// A HEADER sets column 2 up [orig: CTableWnd_ParseXMLContentDefinition
+	// @0x6427d0 - the init @0x643578].
+	mnu::TableHeader header;
+	header.has_column = true;
+	header.column = 2;
+	header.text = "Score";
+	authored.table_data.column.headers.push_back(header);
 	FakeFrame frame;
 	MenuRuntime rt;
 	seed_counts(frame);
@@ -1994,6 +2006,10 @@ void test_table_column_records() {
 			seen[1].width == 80 && seen[1].justify == 1 && seen[1].vjustify == 16 &&
 			seen[1].body_justify == 1 && seen[1].body_vjustify == 16 && seen[1].ascending &&
 			!seen[1].numeric_sort);
+	// The sort's cell (+160, D-MNU-43): the init's own column; the authored record
+	// its HEADER's, 0 where no HEADER set it up [orig: CTableWnd_InitRow @0x63fb89].
+	CHECK(seen.size() == 3 && seen[0].sort_cell == 0 && seen[1].sort_cell == 1 &&
+			seen[2].sort_cell == 2);
 	// A smaller count and the same one keep the records.
 	CHECK(rt.table_set_column_count(14, 2));
 	CHECK(seen.size() == 2 && seen[0].kept && seen[1].kept && seen[1].defined && seen[1].label == "Kills");
@@ -2004,12 +2020,13 @@ void test_table_column_records() {
 	bool zeroed = seen.size() == 4;
 	for (const MenuTableColumn &c : seen)
 		zeroed = zeroed && !c.kept && !c.defined && c.label.empty() && c.width == 0 && c.justify == 0 &&
-				c.vjustify == 0 && c.cell_type == 0 && !c.ascending;
+				c.vjustify == 0 && c.cell_type == 0 && !c.ascending && c.sort_cell == 0;
 	CHECK(zeroed);
 	// An init over a started record defines it; the others stay zero.
 	CHECK(rt.table_init_column(14, 3, 75, "Score", -1, 0x20));
 	CHECK(seen.size() == 4 && !seen[3].kept && seen[3].defined && seen[3].label == "Score" &&
 			seen[3].width == 75 && !seen[2].defined);
+	CHECK(seen.size() == 4 && seen[3].sort_cell == 3 && seen[2].sort_cell == 0);
 
 	// The stat fill's set-up is the same two steps: a set as wide as the authored
 	// table sets the authored records up in place; a wider one starts them over. An
@@ -2082,7 +2099,7 @@ void test_table_columns_and_sort() {
 	rt.table_add_row(table, { "bob", "-", "12" });
 	rt.table_add_row(table, { "cat", "-", "x" });
 	rt.table_add_row(table, { "dan", "-", "" });
-	rt.table_set_row_color(table, 1, true, 0xFF00BFFFu);
+	rt.table_set_row_color(table, 1, true, 0xFF00AFFFu);
 	rt.table_select_row(table, 0, false);
 	rt.table_set_column_ascending(table, 2, false);
 	rt.table_sort_by_column(table, 2);
@@ -2096,7 +2113,7 @@ void test_table_columns_and_sort() {
 	CHECK(frame.saw("columns " + std::to_string(index) + " 1 3 2"));
 	const std::vector<MenuTableRow> &rows = frame.table_rows[index];
 	CHECK(rows.size() == 4 && (rows[1].flags & kTableRowFlagColor) != 0 &&
-			rows[1].color == 0xFF00BFFFu && (rows[0].flags & kTableRowFlagColor) == 0);
+			rows[1].color == 0xFF00AFFFu && (rows[0].flags & kTableRowFlagColor) == 0);
 	// A text column sorts by stricmp, ascending.
 	rt.table_sort_by_column(table, 0);
 	CHECK(rt.table_cell_text(table, 0, 0) == "ann" && rt.table_cell_text(table, 3, 0) == "dan");

@@ -851,7 +851,10 @@ int MenuRuntime::table_column_count_(int id) const {
 namespace {
 
 // A record the table had, which a count that does not grow the table leaves in
-// place (menu_table.h): the frame draws the authored column there.
+// place (menu_table.h): the frame draws the authored column there. Its sort
+// cell is the authored one (table_resize_records_); its cell type, compare and
+// direction stay these defaults where the game's are the authored BODY's and
+// HEADER's (D-MNU-44).
 MenuTableColumn kept_record() {
 	MenuTableColumn column;
 	column.kept = true;
@@ -872,19 +875,21 @@ MenuTableColumn zeroed_record() {
 
 // CTableWnd_InitRow(column, numeric_sort, width, label, justify, vjustify) on one
 // record: the label, the sort compare (+112), ascending (+120 = 1), the width
-// (+124), the header justification with -1 taking 1 / 16 (+128 / +132), the
-// cells' copied from it (+144 / +148). The record's cell type, cell offsets,
-// SUBST rows and bitmap scale stay (`kept`, `cell_type`).
-// [orig: CTableWnd_InitRow @0x63f9c0 — +112 @0x63fb5c, +120 @0x63fb75, +124
-//  @0x63fb7f, +128 / +132 @0x63fb98..0x63fbd8, +0x90 / +0x94 copied
-//  @0x63fbdf..0x63fc03]
-void init_record(MenuTableColumn &record, bool numeric_sort, int width, const std::string &label,
-		int justify, int vjustify) {
+// (+124), the sort's cell (+160 = the column), the header justification with -1
+// taking 1 / 16 (+128 / +132), the cells' copied from it (+144 / +148). The
+// record's cell type, cell offsets, SUBST rows and bitmap scale stay (`kept`,
+// `cell_type`).
+// [orig: CTableWnd_InitRow @0x63f9c0 - +112 @0x63fb5c, +120 @0x63fb75, +124
+//  @0x63fb7f, +160 @0x63fb89, +128 / +132 @0x63fb98..0x63fbd8, +0x90 / +0x94
+//  copied @0x63fbdf..0x63fc03]
+void init_record(MenuTableColumn &record, int column, bool numeric_sort, int width,
+		const std::string &label, int justify, int vjustify) {
 	record.defined = true;
 	record.label = label;
 	record.numeric_sort = numeric_sort;
 	record.ascending = true;
 	record.width = width;
+	record.sort_cell = column;
 	record.justify = justify == -1 ? 1 : justify;
 	record.vjustify = vjustify == -1 ? 16 : vjustify;
 	record.body_justify = record.justify;
@@ -896,11 +901,22 @@ void init_record(MenuTableColumn &record, bool numeric_sort, int width, const st
 // The count over the records the table holds (menu_table.h): the authored ones
 // until code set a count, kept by a count that does not grow the table, every one
 // started over by one that does. [orig: CTableWnd_ResizeColumnCount @0x63f6c0]
+// A smaller count also frees every row's cells at or past it in the game, which
+// ours leaves in the rows (D-MNU-47) [orig: the row walk @0x63f90d..0x63f98d].
 void MenuRuntime::table_resize_records_(int id, int count) {
 	const int current = table_column_count_(id);
 	MenuWidgetRuntimeState &state = state_of_(id);
-	if (!state.has_table_columns)
+	if (!state.has_table_columns) {
 		state.table_columns.assign(static_cast<size_t>(current), kept_record());
+		// An authored record's sort cell is the column its HEADER's init set up,
+		// 0 where no HEADER set one up (the XML's count zeroed it) [orig:
+		// CTableWnd_ParseXMLContentDefinition @0x6427d0 - the init @0x643578]
+		// (D-MNU-43).
+		if (const mnu::Window *w = index_.window(id))
+			for (const mnu::TableHeaderSetup &h : mnu::table_header_setup(w->table_data.column))
+				if (h.set_up && h.column < current)
+					state.table_columns[static_cast<size_t>(h.column)].sort_cell = h.column;
+	}
 	if (count > current)
 		state.table_columns.assign(static_cast<size_t>(count), zeroed_record());
 	else
@@ -929,8 +945,8 @@ bool MenuRuntime::table_init_column(int id, int column, int width, const std::st
 	if (column < 0 || column >= count) return false;
 	MenuWidgetRuntimeState &state = state_of_(id);
 	if (!state.has_table_columns) table_resize_records_(id, count); // the records as they stand
-	init_record(state.table_columns[static_cast<size_t>(column)], false, width, label, justify,
-			vjustify);
+	init_record(state.table_columns[static_cast<size_t>(column)], column, false, width, label,
+			justify, vjustify);
 	push_table_columns_(id);
 	return true;
 }
@@ -938,7 +954,7 @@ bool MenuRuntime::table_init_column(int id, int column, int width, const std::st
 void MenuRuntime::table_add_row(int id, const std::vector<std::string> &cells) {
 	MenuWidgetRuntimeState &state = state_of_(id);
 	MenuTableRow row;
-	row.cells = cells;
+	row.cells.assign(cells.begin(), cells.end());
 	state.table_rows.push_back(std::move(row));
 	state.has_table_rows = true;
 	push_table_rows_(id);
@@ -1044,7 +1060,8 @@ void MenuRuntime::table_set_columns(int id, const std::vector<MenuTableColumn> &
 	MenuWidgetRuntimeState &state = state_of_(id);
 	for (size_t i = 0; i < columns.size(); ++i) {
 		const MenuTableColumn &c = columns[i];
-		init_record(state.table_columns[i], c.numeric_sort, c.width, c.label, c.justify, c.vjustify);
+		init_record(state.table_columns[i], static_cast<int>(i), c.numeric_sort, c.width, c.label,
+				c.justify, c.vjustify);
 	}
 	state.table_sort_keys.assign(std::min<size_t>(std::max<size_t>(columns.size(), 1), 20), -1);
 	state.table_sort_column = -1;

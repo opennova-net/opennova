@@ -147,6 +147,26 @@ const HIDDEN_ONLY_XML := """
 </SCREEN>
 """
 
+# A code-page list: the '#' becomes the byte 0xE9 ("e" acute in cp1252) before
+# the parse, so the document has no byte order mark and its model holds the
+# page's bytes.
+const CODE_PAGE_LIST_XML := """
+<SCREEN>
+  <NAME>S</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <WINDOW type="list" name="PICKLIST">
+      <POSITION><LEFT>300</LEFT><TOP>10</TOP><RIGHT>400</RIGHT><BOTTOM>100</BOTTOM></POSITION>
+      <ITEMS>
+        <ITEM value="0">AAA</ITEM>
+        <ITEM value="1">Caf#</ITEM>
+      </ITEMS>
+      <LIST_BOX><MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT></LIST_BOX>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+"""
+
 
 func _doc(xml: String) -> MnuDocument:
 	var doc := MnuDocument.new()
@@ -528,6 +548,29 @@ func test_select_row_emits_list_kind() -> void:
 	assert_signal_emitted_with_parameters(driver, "widget_value_changed",
 			["PICKLIST", "list", 1, "BBB"])
 	assert_eq(driver.selected_row(list), 1, "selection tracked")
+
+
+# A code-page document's item holds the page's byte (0xE9), and every read the
+# script makes of it, the item's text, the list's items and the value-changed
+# text, decodes it as cp1252, where a UTF-8 parse made it U+FFFD and logged a
+# parse error (D-MNU-46: the death list's and the stat table's rows hold such bytes).
+func test_code_page_item_reads_back_as_text() -> void:
+	var bytes := CODE_PAGE_LIST_XML.to_utf8_buffer()
+	var at := bytes.find("#".unicode_at(0))
+	assert_gt(at, 0, "the fixture carries its marker")
+	bytes[at] = 0xE9
+	var doc := MnuDocument.new()
+	assert_eq(doc.load_from_bytes(bytes), OK, "the code-page fixture parses")
+	var driver := MenuDriver.new()
+	assert_true(driver.open_document(doc, null, null, null, "menu.mnu"), "document opens frameless")
+	var list := driver.widget_id("PICKLIST")
+	assert_eq(driver.item_text(list, 1), "Café", "the item's byte reads as its character")
+	assert_eq(driver.get_widget_items(list), PackedStringArray(["AAA", "Café"]),
+			"the list's items read the same way")
+	watch_signals(driver)
+	driver.select_row(list, 1)
+	assert_signal_emitted_with_parameters(driver, "widget_value_changed",
+			["PICKLIST", "list", 1, "Café"])
 
 
 func test_spin_cycle_wraps_and_emits_spinlist() -> void:
