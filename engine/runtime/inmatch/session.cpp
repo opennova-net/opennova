@@ -128,6 +128,30 @@ bool Role::request_respawn() {
 	return kernel.world.rules.mp_session && send_respawn_request();
 }
 
+bool Role::request_deployment_pick(uint16_t wire_value) {
+	mission::MissionKernel &kernel = *kernel_;
+	ClientRuntime *runtime = client_runtime();
+	if (runtime == nullptr) return false;
+	// a6 is the head's dead read the Respawn key's gate takes (the local
+	// entity's Flags & 2; a HostOnly host's constant 2 has no client here):
+	// the authority's own body, a joiner's replica read (D-NET-562's window).
+	// Under permanent death (the S2C 0x08 bit 15) a dead player does nothing
+	// with spectators off (bit 13) and otherwise queues the reliable 0x51
+	// [i16 0xFFFF] in place of the pick.
+	// [orig: Input_HandleActionBinding -- a6 @0x49AD52..0x49AD98; case 12
+	//  @0x49B024..0x49B03C, the convert @0x49B065..0x49B0B9, the pick from
+	//  @0x49B0C3; g_SessionPermanentDeath / g_SessionSpectatorsAllowed stored by
+	//  NapiNPClientMsg_HandleSessionConfig @0x428386 / @0x42838C]
+	const bool local_dead = kind() == RoleKind::Joiner ? runtime->local_player_dead()
+			: kernel.local.local_player_dead();
+	const replication::ClientState &cs = runtime->state();
+	if (local_dead && cs.permanent_death) {
+		if (!cs.spectators_allowed) return false;
+		return runtime->queue_spectator_convert();
+	}
+	return runtime->queue_deployment_pick(wire_value);
+}
+
 world::LocalViewSessionInputs Role::view_session_inputs_for(
 		const ClientRuntime *runtime, bool joiner, bool local_dead, bool in_session) {
 	// What the arbiter reads from the session: the net layer sits above the

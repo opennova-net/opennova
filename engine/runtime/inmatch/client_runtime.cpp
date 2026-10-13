@@ -587,6 +587,19 @@ bool ClientRuntime::queue_deployment_pick(uint16_t wire_value) {
 	return true;
 }
 
+bool ClientRuntime::queue_spectator_convert() {
+	// [orig: Input_HandleActionBinding case 12 -- g_ClientDeployHold = 1 @0x49B067
+	//  (both arms), the 0xFFFF word @0x49B085, NetPacket_WriteInt16 @0x49B09B,
+	//  CNapiNetwork_QueueReliableMessage(0x51, 1, 0) @0x49B0B9; handled by
+	//  Server_ProcessClientRequestSpectatorRespawn @0x51C840]
+	const std::vector<uint8_t> body = {0xFF, 0xFF};
+	if (queue_host_message(c2s::SPECTATOR_RESPAWN, body)) return true;
+	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_session()) return false;
+	send_queue_.push_back(make_protocol_message(c2s::SPECTATOR_RESPAWN, body));
+	deployed_ = false;
+	return true;
+}
+
 bool ClientRuntime::queue_medic_request() {
 	// The retail gate is is_in_session, not the deploy gate: a dead player is
 	// back in the deploy flow (Driving) and the call still ships. It rides the
@@ -736,7 +749,7 @@ bool ClientRuntime::queue_team_change_request() {
 //  62; if (is_in_session) { CNetQuality_UpdateMetrics(); CNetQuality_SetLevel
 //  (&g_NetQuality, level); } }`, ahead of the client net frame]. The peer
 // (RECEIVE) half of CNetQuality_UpdateMetrics @0x4C52C0: cleared while any of
-// g_NetSpawnSuspended / dword_81474C / g_SpawnSuccessGate /
+// g_NetSpawnSuspended / g_ClientDeployHold / g_SpawnSuccessGate /
 // g_PreRoundDelayTimer holds the peer, else one sample of frame pressure,
 // the ping ring's mean and the loss counter; the combined scalar is
 // max(host, client) and the host window never runs on a non-authority, so it
@@ -1153,7 +1166,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				// is the local respawn, whose Game_InitNewRound clears the deploy
 				// hold: the release of a deploy that sent no 0x5A, a medic revive's.
 				// [orig: NetPacket_SerializePlayerState @0x4C1109 -> Game_InitNewRound
-				//  @0x4C114C, dword_81474C = 0 @0x4227CE; D-NET-379]
+				//  @0x4C114C, g_ClientDeployHold = 0 @0x4227CE; D-NET-379]
 				if (self_row_before) {
 					const replication::ClientEntityState *self_after =
 							view_.state().find(joiner_->self_handle());
@@ -1237,7 +1250,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			// [orig: PlayerSlot_ClearAndUnlink @0x434730 via @0x431411..0x43144c]
 			for (uint8_t slot : pr.cleared_player_slots)
 				cleared_player_slots_.push_back(slot);
-			// WeaponLoadout_ApplyFromBuffer clears dword_81474C for EVERY valid
+			// WeaponLoadout_ApplyFromBuffer clears g_ClientDeployHold for EVERY valid
 			// S2C 0x5A. That is distinct from the causal spawn release below.
 			if (pr.gameplay_release_applied || pr.reached_in_match || respawn_release_in_poll)
 				deployed_ = true;
@@ -1453,7 +1466,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			send_queue_.pop_front();
 		}
 		// The witnessed deploy gate the 0x2C RTT ping and the 0x0C uplink share: is_in_session &&
-		// !is_authority && !dword_81474C && !g_SpawnSuccessGate. A Joiner is always !is_authority;
+		// !is_authority && !g_ClientDeployHold && !g_SpawnSuccessGate. A Joiner is always !is_authority;
 		// deployed_ and authoritative_spawn_released_ model those two independent gates.
 		const bool deployed_joiner =
 				joiner_->in_match() && is_deployed() && joiner_->has_self_handle();

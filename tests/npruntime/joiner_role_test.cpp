@@ -1947,6 +1947,68 @@ bool run_respawn_key_resets_input_and_sends_0x41() {
 	return ok;
 }
 
+// The deploy action on a joiner (dispatch 12) under permanent death (the S2C
+// 0x08 bit 15): a player killed by a 0x0A tail at Health 0 is back in the
+// deploy flow, owing a pick, and its press sends the reliable 0x51 [i16
+// 0xFFFF] when spectators are allowed (bit 13) and nothing when they are not;
+// the 0x0E pick it owes never ships (the listen host's own press, live and
+// dead: host_role).
+// [orig: Input_HandleActionBinding -- the dead bit @0x49AD7B, case 12
+//  @0x49B024..0x49B03C, the convert @0x49B085..0x49B0B9;
+//  NapiNPClientMsg_HandleSessionConfig @0x428386 / @0x42838C]
+bool run_deploy_action_converts_a_dead_permanent_death_player() {
+	bool ok = true;
+	for (const bool spectators : {true, false}) {
+		Harness h;
+		h.kernel->world.load_systems();
+		h.role.poll_preload();
+		h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+		                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+		h.role.run_tick(h.input);
+		h.kernel->world.rules.mp_session = true;
+		SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+		const auto deliver = [&](uint8_t tag, std::vector<uint8_t> body) {
+			std::vector<uint8_t> packet;
+			frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+					{make_protocol_message(tag, std::move(body))}, packet);
+			auto datagram =
+					nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+			h.role.runtime->receive(datagram.data(), datagram.size());
+			h.role.run_tick(h.input);
+		};
+		// The 0x08 record: 10 rule dwords, 7 bytes, the rules word.
+		std::vector<uint8_t> config(47, 0);
+		const uint32_t rules = 0x8000u | (spectators ? 0x2000u : 0u);
+		for (int i = 0; i < 4; ++i) config.push_back(static_cast<uint8_t>(rules >> (8 * i)));
+		deliver(s2c::SESSION_CONFIG, config);
+		const replication::ClientState &cs = h.role.runtime->state();
+		ok &= expect(cs.permanent_death && cs.spectators_allowed == spectators,
+				"deploy action: the 0x08 latches permanent death and the spectator bit");
+		// The death edge: a 0x0A tail at Health 0 returns the joiner to the
+		// deploy flow (JoinerConnection::begin_redeployment), owing a pick.
+		FrameUpdate fu;
+		fu.local_tail_present = true;
+		fu.health = 0;
+		fu.complete = true;
+		deliver(s2c::PER_FRAME_UPDATE, encode_frame_update(fu));
+		ok &= expect(h.role.runtime->local_player_dead() &&
+				h.role.runtime->awaiting_deploy_pick(),
+				"deploy action: the death edge reads dead and owes a pick");
+		ProtocolMessage m;
+		const bool queued = h.role.request_deployment_pick(0xFFFFu);
+		for (int i = 0; i < 3; ++i) h.role.run_tick(h.input);
+		const bool convert = h.socket.last_message(c2s::SPECTATOR_RESPAWN, m) &&
+				m.payload == std::vector<uint8_t>{0xFF, 0xFF};
+		ok &= expect(queued == spectators && convert == spectators,
+				spectators ? "deploy action: a dead player under permanent death sends 0x51 [0xFFFF]"
+				           : "deploy action: with spectators off a dead player sends nothing");
+		ok &= expect(!h.socket.last_message(c2s::RESPAWN_REQUEST, m) &&
+				h.role.runtime->awaiting_deploy_pick(),
+				"deploy action: the owed 0x0E pick never ships");
+	}
+	return ok;
+}
+
 } // namespace
 
 // A pool-1 shooter's round takes the Indoors bit retail's client keeps for the
@@ -2113,6 +2175,7 @@ int main() {
 	ok &= run_revive_deploy_respawns_l_on_its_record_edge();
 	ok &= run_proxy_rendezvous_pump();
 	ok &= run_respawn_key_resets_input_and_sends_0x41();
+	ok &= run_deploy_action_converts_a_dead_permanent_death_player();
 	ok &= run_pool1_shooter_round_takes_its_indoors_state();
 	if (!ok) return 1;
 	std::printf("joiner_role_test: OK\n");

@@ -203,7 +203,7 @@ struct DeployTeamButtonsInput {
     bool in_session = false;      // g_NapiNPCtx.is_in_session
     uint32_t game_type = 0;       // g_GameType
     uint8_t team = 0;             // g_LocalPlayerEntity->Team (+0x162)
-    bool permanent_death = false; // byte_A821EF
+    bool permanent_death = false; // g_SessionPermanentDeath
     bool dead = false;            // g_LocalPlayerEntity->Flags & 2
     uint32_t rules_word = 0;      // the host's mp_attributes / a joiner's 0x08 word
 };

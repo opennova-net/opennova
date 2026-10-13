@@ -277,7 +277,7 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 	if (view.runtime != nullptr) {
 		const replication::ClientState &cs = view.runtime->state();
 		const replication::ClientScoreboard &sb = cs.scoreboard;
-		s.permanent_death = cs.permanent_death;              // byte_A821EF
+		s.permanent_death = cs.permanent_death;              // g_SessionPermanentDeath
 		s.remaining_count = sb.alive_player_count;            // g_ScoreboardDeadRowCount
 		s.row_count = static_cast<int>(sb.rows.size());       // g_ScoreboardRowCount
 		s.spectator_count = sb.spectator_count;               // g_ScoreboardSpectatorCount

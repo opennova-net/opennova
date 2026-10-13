@@ -1479,7 +1479,7 @@ bool run_retail_post_auth_prelude() {
 		return false;
 	}
 
-	// Every retail 0x5A apply clears dword_81474C immediately. Split the first
+	// Every retail 0x5A apply clears g_ClientDeployHold immediately. Split the first
 	// grant from both the second grant and 0x0F policy to prove that gameplay
 	// release is independent from the later deploy-UI decision.
 	const std::vector<uint8_t> first_grant_datagram = frame_server_session(
@@ -5151,7 +5151,7 @@ bool run_unrelated_loadout_cannot_revive_dead_client() {
 		return false;
 
 	// WeaponLoadout_ApplyFromBuffer still performs its unconditional
-	// dword_81474C clear. That literal edge must remain incapable of reopening
+	// g_ClientDeployHold clear. That literal edge must remain incapable of reopening
 	// authoritative spawn or accepting the stale positive tail beside it.
 	FrameUpdate stale_positive;
 	stale_positive.carried_handle = 0xFFFF;
@@ -5184,7 +5184,7 @@ bool run_unrelated_loadout_cannot_revive_dead_client() {
 // Game_InitNewRound clears the deploy hold. Another player's respawn edge
 // releases nothing, and the self row's first alive sample is no edge.
 // [orig: NetPacket_SerializePlayerState @0x4C1109 -> Game_InitNewRound
-//  @0x4C114C, dword_81474C = 0 @0x4227CE; Server_DeployPlayer @0x5178C5]
+//  @0x4C114C, g_ClientDeployHold = 0 @0x4227CE; Server_DeployPlayer @0x5178C5]
 bool run_self_respawn_edge_releases_a_revive_deploy() {
 	const std::string client_scrk = "CLIENT-REVIVE-EDGE-SCRK";
 	const std::string server_scrk = "SERVER-REVIVE-EDGE-SCRK";
@@ -5251,7 +5251,7 @@ bool run_self_respawn_edge_releases_a_revive_deploy() {
 // PumpClientProtocolSend builds whatever is queued; only the 0x2C ping and the 0x0C uplink are
 // built behind the deploy gate, and nothing drains the list on death.
 // [orig: Client_ProcessNetworkFrame @0x42c3ee..0x42c4a3 (the 0x2C / 0x0C builds behind
-//  is_in_session && !is_authority && !dword_81474C && !g_SpawnSuccessGate), the tail
+//  is_in_session && !is_authority && !g_ClientDeployHold && !g_SpawnSuccessGate), the tail
 //  @0x42c4b1 -> PumpClientProtocolSend @0x42c4bc in every branch;
 //  CNapiNPConnection_DrainMessageQueues @0x625600 runs only at join @0x629dfc / @0x62c26f
 //  and destroy @0x62a50a]

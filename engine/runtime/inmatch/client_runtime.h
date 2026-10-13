@@ -111,7 +111,7 @@ public:
 	bool queue_door_request(uint16_t handle, int16_t state, uint8_t section);
 
 	// Effective gameplay readiness. Every C2S gameplay send (0x0C uplink,
-	// 0x06 fire, 0x2C ping) requires both retail's dword_81474C hold to be open
+	// 0x06 fire, 0x2C ping) requires both retail's g_ClientDeployHold hold to be open
 	// and the independent authoritative spawn/health latch to be released.
 	// Every valid 0x5A opens the literal gameplay gate even while a spawn-zone
 	// deploy screen remains pending; queuing C2S 0x0E closes only that gate. A
@@ -122,7 +122,7 @@ public:
 	bool is_deployed() const {
 		return deployed_ && authoritative_spawn_released_;
 	}
-	// The literal dword_81474C state. Every valid S2C 0x5A opens it, including
+	// The literal g_ClientDeployHold state. Every valid S2C 0x5A opens it, including
 	// an unrelated loadout echo while dead; that alone cannot resume gameplay.
 	bool gameplay_gate_open() const { return deployed_; }
     // Local Game_InitNewRound clears the medic latch and gameplay hold.
@@ -579,6 +579,11 @@ public:
 	// the deployment UI/state cannot accept a pick. The listen host's own client
 	// sends the same request over its loopback to its own server.
 	bool queue_deployment_pick(uint16_t wire_value);
+	// The deploy action's convert arm (Role::request_deployment_pick): one
+	// reliable C2S 0x51 [i16 0xFFFF], the stock client's (no target), closing
+	// the gameplay dword as the pick does. The listen host's own client sends
+	// it over its loopback to its own server. False out of a session.
+	bool queue_spectator_convert();
 
 	// Pre-load join seam. Handshake and admission traffic continue through terminal S2C 0x11 while
 	// false; only C2S 0x0A and the resulting world/deployment stream are held.
