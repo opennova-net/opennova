@@ -147,6 +147,8 @@ struct ListerRun {
 
 opennova::serve::ListerOptions lister_options(const Service &service, bool with_account) {
 	opennova::serve::ListerOptions options;
+	options.title = &kJo;
+	options.gate_tag = kJo.gate_tag;
 	options.master_host = "127.0.0.1";
 	options.master_gate_port = service.gate.bound_port();
 	if (with_account) {
