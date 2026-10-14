@@ -580,9 +580,8 @@ static int test_import() {
 	TEST_EXPECT(!fs::exists(dir.file("project/note.txt")));
 
 	// Import never writes over unsaved edits: replacing a catalog open with them waits on the
-	// unsaved prompt, which lists that file alone and offers no discard (its Save writes the
-	// edits, then the import replaces them). An import that replaces no edited file goes ahead.
-	// A clean open document reloads after replacement.
+	// unsaved prompt (what it lists and offers: unsaved_guard_test), the file as it was. An import
+	// that replaces no edited file goes ahead. A clean open document reloads after replacement.
 	const std::string items = dir.file("items.def");
 	TEST_EXPECT(editor_test::write_text(items, "begin \"Marker\"\nid 100001\ntype marker\nhp 10\nend\n"));
 	importing.imports = {{items, {}}};
@@ -603,9 +602,7 @@ static int test_import() {
 	session.handle(importing);
 	session.run_operations();
 	const DialogsView::UnsavedPrompt &prompt = session.view().dialogs.unsaved_prompt;
-	TEST_EXPECT(session.outcome().unsaved_prompt && prompt.open && prompt.action == EditorRequestKind::ImportFiles);
-	TEST_EXPECT(prompt.files == std::vector<std::string>({"defs/items.def"}) && !prompt.can_discard);
-	TEST_EXPECT(!has_code(session.view().findings.diagnostics, "import.unsaved"));
+	TEST_EXPECT(prompt.open && !has_code(session.view().findings.diagnostics, "import.unsaved"));
 	TEST_EXPECT(opennova::io::read_file_text(dir.file("project/defs/items.def"), text, error) && text.find("hp 10") != std::string::npos);
 	EditorRequest cancel = request::resolve_unsaved(UnsavedChoice::Cancel);
 	session.handle(cancel);
@@ -2169,10 +2166,11 @@ static int test_rewrite_closed_file() {
 	return 0;
 }
 
-// S11a, the unsaved prompt names what waits and the files: a Close lists its one file and
-// offers Discard; Quit lists every edited file; Build and Play list every one and offer no
-// Discard (one is refused, the prompt kept). A Save that cannot write a file keeps the
-// prompt open over the build (the other file written); saved, the build runs.
+// S11a, the unsaved prompt over two edited files: a Close lists its own file alone, Quit and Build
+// every edited file; Build's Discard is refused (its row offers none), the prompt kept. A Save that
+// cannot write a file keeps the prompt open over the build (the other file written); saved, the build
+// runs. Which kinds ask (Play with the project's save_before_play off among them), what waits and
+// whether Discard is offered is the request table's: unsaved_guard_test.
 static int test_unsaved_prompt() {
 	SaveProject project("opennova_editor_session_prompt");
 	TEST_EXPECT(project.open());
@@ -2189,29 +2187,16 @@ static int test_unsaved_prompt() {
 	const std::vector<std::string> both{project.items_path, project.strings_path};
 
 	session.handle(request::close_document("items.def"));
-	TEST_EXPECT(session.outcome().unsaved_prompt && prompt.open && prompt.action == EditorRequestKind::CloseDocument);
-	TEST_EXPECT(prompt.target == project.items_path && prompt.files == std::vector<std::string>{project.items_path} &&
-	            prompt.can_discard);
+	TEST_EXPECT(prompt.open && prompt.files == std::vector<std::string>{project.items_path});
 	answer(UnsavedChoice::Cancel);
 	TEST_EXPECT(!prompt.open && session.document_for(project.items_path) == project.items);
 
 	session.handle(request::quit());
-	TEST_EXPECT(prompt.open && prompt.action == EditorRequestKind::Quit && prompt.files == both && prompt.can_discard &&
-	            !v.dialogs.quit_requested);
+	TEST_EXPECT(prompt.open && prompt.files == both && !v.dialogs.quit_requested);
 	answer(UnsavedChoice::Cancel);
-
-	// Play asks as Build does with the project's save_before_play off (DI-26: on, it saves first).
-	ProjectSettingsChange asks;
-	asks.save_before_play = false;
-	session.handle(request::apply_project_settings(asks));
-	TEST_EXPECT(!v.project.save_before_play);
-	session.handle(request::play());
-	TEST_EXPECT(prompt.open && prompt.action == EditorRequestKind::Play && prompt.files == both && !prompt.can_discard);
-	answer(UnsavedChoice::Cancel);
-	TEST_EXPECT(!prompt.open && !session.view().activity.operation.running() && project.platform.spawns == 0);
 
 	session.handle(request::build());
-	TEST_EXPECT(prompt.open && prompt.action == EditorRequestKind::Build && prompt.files == both && !prompt.can_discard);
+	TEST_EXPECT(prompt.open && prompt.files == both);
 	TEST_EXPECT(!session.view().activity.operation.running() && !session.outcome().done());
 	answer(UnsavedChoice::Discard);
 	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "unsaved.discard"));
@@ -4754,65 +4739,6 @@ static int test_view_events() {
 	return 0;
 }
 
-// The unsaved prompt's words are the request table's (S13 A4: waiting_action and the Save
-// labels in editor_windows.cpp were switches): for every kind the prompt guards, what waits (the
-// file the request names for the rows whose words name one) and the Save button say what they
-// said; a kind it does not guard has none.
-static int test_prompt_words_from_the_table() {
-	struct Words {
-		EditorRequestKind kind;
-		const char *waiting;
-		const char *save;
-	};
-	const Words kOld[] = {
-		{EditorRequestKind::NewProject, "Create a new project", "Save all"},
-		{EditorRequestKind::OpenProject, "Open another project", "Save all"},
-		{EditorRequestKind::CloseProject, "Close the project", "Save all"},
-		{EditorRequestKind::ImportFiles, "Import", "Save all and import"},
-		{EditorRequestKind::Build, "Build", "Save all and build"},
-		{EditorRequestKind::Play, "Play", "Save all and play"},
-		{EditorRequestKind::Export, "Export", "Save all and export"},
-		{EditorRequestKind::ReloadDocument, "Reload main.mnu", "Save"},
-		{EditorRequestKind::CloseDocument, "Close main.mnu", "Save"},
-		{EditorRequestKind::RenameAsset, "Rename main.mnu", "Save all and rename"},
-		{EditorRequestKind::AssignRequirement, "Rename main.mnu", "Save all and rename"},
-		{EditorRequestKind::RenameSymbol, "Rename everywhere (defined in main.mnu)", "Save all and rename"},
-		{EditorRequestKind::RenameBack, "Rename back", "Save all and rename back"},
-		// S18: a texture's split rewrites its referrers as a rename does.
-		{EditorRequestKind::SplitTexture, "Split main.mnu", "Save all and split"},
-		{EditorRequestKind::Quit, "Quit", "Save all"},
-		// DI-03: a move closes and opens the moved file's document again, as a rename does.
-		{EditorRequestKind::MoveAsset, "Move main.mnu", "Save all and move"},
-		// DI-25: a delete takes the file to the trash and a duplicate copies it as saved; a folder's rename moves
-		// its files' documents, and the file history's steps take files away.
-		{EditorRequestKind::DeleteAsset, "Delete main.mnu", "Save all and delete"},
-		{EditorRequestKind::DuplicateAsset, "Duplicate main.mnu", "Save all and duplicate"},
-		{EditorRequestKind::RenameFolder, "Rename the folder", "Save all and rename"},
-		// A folder deleted with what it holds takes its files' documents away.
-		{EditorRequestKind::DeleteFolder, "Delete the folder", "Save all and delete"},
-		{EditorRequestKind::UndoFile, "Undo file", "Save all and undo"},
-		{EditorRequestKind::RedoFile, "Redo file", "Save all and redo"},
-	};
-	size_t guarded = 0;
-	for (size_t i = 0; i < kEditorRequestKindCount; ++i) {
-		const auto kind = static_cast<EditorRequestKind>(i);
-		const RequestKindRow &row = request_kind_row(kind);
-		const Words *old = nullptr;
-		for (const Words &words : kOld)
-			if (words.kind == kind) old = &words;
-		TEST_EXPECT((row.guard != GuardScope::None) == (old != nullptr));
-		if (!old) {
-			TEST_EXPECT(!row.waiting && !row.save_label && waiting_words(kind, "menus/main.mnu").empty());
-			continue;
-		}
-		++guarded;
-		TEST_EXPECT(waiting_words(kind, "menus/main.mnu") == old->waiting && row.save_label &&
-		            std::string(row.save_label) == old->save);
-	}
-	TEST_EXPECT(guarded == std::size(kOld));
-	return 0;
-}
-
 // No request runs the validation (S13 A3): an edit leaves it due, and a request after it leaves it
 // due too, whatever it is: a selection, a file rename's preview, set_import_dependencies with no
 // preview open and with one, import_files with none, assign_requirement refused before its
@@ -4898,7 +4824,6 @@ static int test_no_request_validates() {
 
 int main() {
 	int failures = 0;
-	failures += test_prompt_words_from_the_table();
 	failures += test_no_request_validates();
 	failures += test_play_launches_one_answer();
 	failures += test_quit_finishes_a_stop();
