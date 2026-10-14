@@ -30,9 +30,10 @@
 #                                 Takes a final backup first unless --no-backup;
 #                                 earlier backups stay in S3
 #   backup now|list               trigger / list the sqlite backups
-#   state push|pull [--force]     terraform state <-> 1Password document; a pull
-#                                 refuses to overwrite a newer local state
-#                                 unless --force
+#   state push|pull [--force]     terraform state <-> 1Password document; each
+#                                 refuses to replace a state that is not older
+#                                 than the one it brings, or one of another
+#                                 lineage, unless --force
 #   hosted status [--deployment NAME]
 #                                 this deployment's hosted game server machines
 #   hosted data-snapshot          the hosted servers' game data, once: the Joint
@@ -60,6 +61,22 @@ die()  { err "$*"; exit 1; }
 require_op() {
   [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] || die "OP_SERVICE_ACCOUNT_TOKEN is not set"
   op whoami >/dev/null 2>&1 || die "1Password auth failed (check OP_SERVICE_ACCOUNT_TOKEN)"
+}
+
+# Whether vault $VAULT holds an item titled $1 (of category $2, say Document,
+# when given). Asked by title in the vault's listing, never read off an error's
+# wording; a listing that fails, or one jq cannot read, stops the command.
+vault_has_item() {
+  local title="$1" category="${2:-}" list rc=0
+  local args=(item list --vault "$VAULT" --format json)
+  [ -z "$category" ] || args+=(--categories "$category")
+  list="$(op "${args[@]}")" || die "listing vault '$VAULT' failed. Refusing to go on with its items unknown (run again once the vault answers)"
+  printf '%s' "${list:-[]}" | jq -e --arg t "$title" 'any(.[]; .title==$t)' >/dev/null || rc=$?
+  case "$rc" in
+    0) return 0 ;;
+    1) return 1 ;;
+    *) die "vault '$VAULT' listing unreadable (jq exit $rc)" ;;
+  esac
 }
 
 # Render an op:// template to a tmpfs file (0600). Echoes the path.
@@ -115,10 +132,12 @@ cmd_secrets() {
         err "  ssh private key      FAILED"; rc=1
       fi
       # Optional: hosted game servers are off without it (DEPLOY.md, "Hosted game servers").
-      if op read "op://$VAULT/hosted/data_snapshot_id" >/dev/null 2>&1; then
+      if ! vault_has_item hosted; then
+        log "  hosted data snapshot absent (hosted game servers off)"
+      elif op read "op://$VAULT/hosted/data_snapshot_id" >/dev/null; then
         log "  hosted data snapshot OK"
       else
-        log "  hosted data snapshot absent (hosted game servers off)"
+        err "  hosted data snapshot FAILED"; rc=1
       fi
       [ "$rc" -eq 0 ] || die "one or more references did not resolve — create the missing vault items (DEPLOY.md §1)"
       log "all references resolved."
@@ -129,25 +148,30 @@ cmd_secrets() {
 
 # The hosted game servers' data snapshot (infra/aws/hosted.tf), from the vault:
 # item `hosted`, field `data_snapshot_id`, as TF_VAR_hosted_data_snapshot_id.
-# No `hosted` item means hosting is off (the variable stays empty, and hosted.tf
-# makes nothing). Any other failure to read it stops the run, so a vault hiccup
+# No item titled `hosted` in the vault's listing means hosting is off (the
+# variable stays empty, and hosted.tf makes nothing). Any other failure (the
+# listing, or reading an item that is there) stops the run, so a vault hiccup
 # never plans the hosting resources away.
 hosted_snapshot_var() {
-  local value errfile="$SECRETS_DIR/hosted-read.err" err
-  if value="$(op read "op://$VAULT/hosted/data_snapshot_id" 2>"$errfile")"; then
-    rm -f "$errfile"
-    export TF_VAR_hosted_data_snapshot_id="$value"
-    log "hosted game servers: data snapshot '${value:-<empty>}' (vault item 'hosted')"
+  local value
+  if ! vault_has_item hosted; then
+    export TF_VAR_hosted_data_snapshot_id=""
+    log "hosted game servers: off (no 'hosted' item in vault '$VAULT')"
     return
   fi
-  err="$(cat "$errfile" 2>/dev/null || true)"
-  rm -f "$errfile"
-  case "$err" in
-    *"isn't an item"*)
-      export TF_VAR_hosted_data_snapshot_id=""
-      log "hosted game servers: off (no 'hosted' item in vault '$VAULT')" ;;
-    *) die "reading op://$VAULT/hosted/data_snapshot_id failed: ${err:-no error text}. Refusing to run terraform with hosting unknown (fix the vault access, or delete the 'hosted' item to turn hosting off)" ;;
-  esac
+  value="$(op read "op://$VAULT/hosted/data_snapshot_id")"     || die "reading op://$VAULT/hosted/data_snapshot_id failed. Refusing to run terraform with hosting unknown (fix the vault access or the item's field, or delete the 'hosted' item to turn hosting off)"
+  export TF_VAR_hosted_data_snapshot_id="$value"
+  log "hosted game servers: data snapshot '${value:-<empty>}' (vault item 'hosted')"
+}
+
+# After `terraform apply|destroy` exited $2: push the state it left (a failed
+# run with no local state has none to push), then exit with terraform's code.
+tf_push_after() {
+  local action="$1" rc="$2"
+  if [ "$rc" -eq 0 ] || [ -f "$TF_DIR/terraform.tfstate" ]; then
+    cmd_state push
+  fi
+  [ "$rc" -eq 0 ] || { err "terraform $action exited $rc"; exit "$rc"; }
 }
 
 cmd_infra() {
@@ -161,13 +185,17 @@ cmd_infra() {
   log "terraform $action…"
   # op run injects AWS + Cloudflare + ssh pubkey as env for the terraform run.
   # plan and apply pass any further arguments on (say a -replace=ADDRESS).
+  # apply and destroy push whatever state terraform leaves, a failed run's too
+  # (it can have changed resources and written a newer serial), then exit with
+  # terraform's code.
   shift || true
+  local rc=0
   case "$action" in
     plan)    op run --env-file="$TF_ENV_TPL" -- terraform -chdir="$TF_DIR" plan -input=false "$@" ;;
-    apply)   op run --env-file="$TF_ENV_TPL" -- terraform -chdir="$TF_DIR" apply -input=false -auto-approve "$@"
-             cmd_state push ;;
-    destroy) op run --env-file="$TF_ENV_TPL" -- terraform -chdir="$TF_DIR" destroy -input=false -auto-approve
-             cmd_state push ;;
+    apply)   op run --env-file="$TF_ENV_TPL" -- terraform -chdir="$TF_DIR" apply -input=false -auto-approve "$@" || rc=$?
+             tf_push_after "$action" "$rc" ;;
+    destroy) op run --env-file="$TF_ENV_TPL" -- terraform -chdir="$TF_DIR" destroy -input=false -auto-approve || rc=$?
+             tf_push_after "$action" "$rc" ;;
     output)  terraform -chdir="$TF_DIR" output "$@" ;;
     list)    terraform -chdir="$TF_DIR" state list "$@" ;;
     *) die "unknown: infra $action (try: plan|apply|destroy|output|list)" ;;
@@ -517,65 +545,93 @@ state_serial() {
   esac
 }
 
+# A state file's lineage (the id terraform gives a state at its creation and
+# keeps through every serial); empty when the file has none or is no state.
+state_lineage() {
+  jq -r '.lineage // ""' "$1" 2>/dev/null || true
+}
+
 cmd_state() {
   require_op
   # Optional args let other stacks reuse this:
   #   state <pull|push> [--force] [doc] [tfdir]
-  # Defaults target the AWS stack (tfstate / infra/aws). A pull refuses to
-  # overwrite a local state newer (a higher serial) than the vault's, which an
-  # apply whose push never ran leaves behind, unless --force; and only a vault
-  # that has no such document reads as a first run: any other failure stops,
-  # so no command goes on with a state of unknown age.
+  # Defaults target the AWS stack (tfstate / infra/aws). Both directions fetch
+  # the vault's document to the tmpfs and compare it with the local state
+  # first; without --force each refuses to replace a state that is not older:
+  #   pull refuses a local state of a higher serial than the vault's (an apply
+  #     whose push never ran), or of the same serial and other content;
+  #   push refuses a vault state of the same or a higher serial (another
+  #     operator's newer apply) unless the two files are identical, when there
+  #     is nothing to push;
+  #   both refuse two states of different lineages.
+  # Only a vault with no document of that title reads as a first run (pull) or
+  # as one to create (push); any other failure stops, so no command goes on
+  # with a state of unknown age and no push makes a second document.
   local action="${1:-pull}" force=0
   shift || true
   if [ "${1:-}" = "--force" ]; then force=1; shift; fi
   local doc="${1:-tfstate}"
   local tfdir="${2:-$TF_DIR}"
   local statefile="$tfdir/terraform.tfstate"
-  local fetched="$SECRETS_DIR/state-pull.tfstate" errfile="$SECRETS_DIR/state.err" err local_serial remote_serial
+  local fetched="$SECRETS_DIR/state-vault.tfstate" local_serial remote_serial local_lineage remote_lineage
   case "$action" in
-    pull) log "pulling state '$doc' from vault…"
-          mkdir -p "$(dirname "$statefile")"
-          # `op document get --out-file` echoes the path to STDOUT — redirect it
-          # so it can't pollute captured output (e.g. `$(... infra output -raw)`,
-          # which runs a state pull first). All progress goes via log() to stderr.
-          # It lands on the tmpfs first, and replaces the local state only once
-          # it is known not to be older.
-          if ! op document get "$doc" --vault "$VAULT" --out-file "$fetched" --force >/dev/null 2>"$errfile"; then
-            err="$(cat "$errfile" 2>/dev/null || true)"
-            rm -f "$errfile" "$fetched"
-            case "$err" in
-              *"isn't an item"*) log "no remote state yet (first run)"; return ;;
-              *) die "pulling state '$doc' from vault '$VAULT' failed: ${err:-no error text}. Refusing to go on with a state of unknown age (run again once the vault answers)" ;;
-            esac
-          fi
-          rm -f "$errfile"
-          if [ -f "$statefile" ] && [ "$force" -eq 0 ]; then
-            local_serial="$(state_serial "$statefile")"
-            remote_serial="$(state_serial "$fetched")"
-            if [ "$local_serial" -gt "$remote_serial" ]; then
-              rm -f "$fetched"
-              die "the local $statefile (serial $local_serial) is newer than vault document '$doc' (serial $remote_serial): an apply whose push never ran? Push it (state push), or overwrite it (state pull --force)"
-            fi
-          fi
-          mv -f "$fetched" "$statefile"
-          log "wrote $statefile" ;;
-    push) log "pushing state to vault document '$doc'…"
-          [ -f "$statefile" ] || die "no local state at $statefile"
-          if op document get "$doc" --vault "$VAULT" >/dev/null 2>"$errfile"; then
-            rm -f "$errfile"
-            op document edit "$doc" "$statefile" --vault "$VAULT"
-          else
-            err="$(cat "$errfile" 2>/dev/null || true)"
-            rm -f "$errfile"
-            case "$err" in
-              *"isn't an item"*) op document create "$statefile" --title "$doc" --vault "$VAULT" ;;
-              *) die "reading vault document '$doc' failed: ${err:-no error text}. Not pushing (a second document would split the state); run state push again once the vault answers" ;;
-            esac
-          fi
-          log "state pushed." ;;
+    pull|push) ;;
     *) die "unknown: state $action (try: pull|push)" ;;
   esac
+  log "${action}ing state: vault document '$doc' / $statefile…"
+  [ "$action" = pull ] || [ -f "$statefile" ] || die "no local state at $statefile"
+  if ! vault_has_item "$doc" Document; then
+    if [ "$action" = pull ]; then
+      log "no remote state yet (first run)"
+    else
+      op document create "$statefile" --title "$doc" --vault "$VAULT" >/dev/null
+      log "state pushed (a new document)."
+    fi
+    return
+  fi
+  # `op document get --out-file` echoes the path to STDOUT; redirect it so it
+  # can't pollute captured output (e.g. `$(... infra output -raw)`, which runs
+  # a state pull first). All progress goes via log() to stderr.
+  rm -f "$fetched"
+  op document get "$doc" --vault "$VAULT" --out-file "$fetched" --force >/dev/null \
+    || { rm -f "$fetched"; die "reading vault document '$doc' failed. Refusing to go on with a state of unknown age (run again once the vault answers)"; }
+  if [ -f "$statefile" ] && cmp -s "$fetched" "$statefile"; then
+    rm -f "$fetched"
+    log "$statefile and vault document '$doc' are the same; nothing to $action."
+    return
+  fi
+  if [ -f "$statefile" ] && [ "$force" -eq 0 ]; then
+    local_serial="$(state_serial "$statefile")"
+    remote_serial="$(state_serial "$fetched")"
+    local_lineage="$(state_lineage "$statefile")"
+    remote_lineage="$(state_lineage "$fetched")"
+    # Two lineages (both named) that differ: two different states, never two
+    # versions of one. A file that names none is no state, and the serials decide.
+    if [ -n "$local_lineage" ] && [ -n "$remote_lineage" ] && [ "$local_lineage" != "$remote_lineage" ]; then
+      rm -f "$fetched"
+      die "$statefile (lineage $local_lineage) and vault document '$doc' (lineage $remote_lineage) are different states, not versions of one. Find out which is this stack's; then state $action --force"
+    fi
+    if [ "$action" = pull ] && [ "$local_serial" -ge "$remote_serial" ]; then
+      rm -f "$fetched"
+      if [ "$local_serial" -gt "$remote_serial" ]; then
+        die "the local $statefile (serial $local_serial) is newer than vault document '$doc' (serial $remote_serial): an apply whose push never ran? Push it (state push), or overwrite it (state pull --force)"
+      fi
+      die "the local $statefile and vault document '$doc' are both serial $local_serial with different content. Compare them; then state push --force or state pull --force"
+    fi
+    if [ "$action" = push ] && [ "$remote_serial" -ge "$local_serial" ]; then
+      rm -f "$fetched"
+      die "vault document '$doc' (serial $remote_serial) is not older than the local $statefile (serial $local_serial), and they differ: another operator's apply? Pull it (state pull), or overwrite it (state push --force)"
+    fi
+  fi
+  if [ "$action" = pull ]; then
+    mkdir -p "$(dirname "$statefile")"
+    mv -f "$fetched" "$statefile"
+    log "wrote $statefile"
+  else
+    rm -f "$fetched"
+    op document edit "$doc" "$statefile" --vault "$VAULT" >/dev/null
+    log "state pushed."
+  fi
 }
 
 # ---------------------------------------------------------------------------

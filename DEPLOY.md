@@ -99,12 +99,29 @@ Then plan and apply:
 ```
 
 Terraform state is stored as a 1Password document (`tfstate`), pulled before and
-pushed after each run, so any operator with vault access can deploy. A pull never
-overwrites a local state newer than the vault's (a higher serial, which an `infra
-apply` that failed before its push leaves): it stops and asks you to `./deploy/run.sh
-state push` it, or to discard it with `state pull --force`. A vault that does not
-answer stops the command too; only a vault with no `tfstate` document reads as a first
-run. Review the plan: after the first apply, pin `ami_id` in `infra/aws/terraform.tfvars` so AMI
+pushed after each run, so any operator with vault access can deploy. `infra apply` and
+`infra destroy` push whatever state Terraform leaves, a failed run's too (it can have
+changed resources and written a newer serial), then exit with Terraform's code.
+
+Both directions read the vault's copy first and compare it with
+`infra/aws/terraform.tfstate`. Identical files are left alone. Otherwise, without
+`--force`:
+
+- A pull refuses a local state with a higher serial than the vault's (an apply whose
+  push never ran: `./deploy/run.sh state push` it), or with the same serial and other
+  content.
+- A push refuses when the vault's serial is the same or higher (another operator's
+  apply: `state pull` it first).
+- Both refuse two states of different lineages (Terraform's id for one state, kept
+  through every serial): they are different states, not versions of one.
+
+`state pull --force` and `state push --force` overwrite the other side once you know
+which copy is right. The vault's document is found by its title in the vault's item
+listing; only a vault with no `tfstate` document reads as a first run (a pull) or as
+one to create (a push), and any other vault failure stops the command, so nothing runs
+on a state of unknown age and no push makes a second document.
+
+Review the plan: after the first apply, pin `ami_id` in `infra/aws/terraform.tfvars` so AMI
 drift never replaces your instance and releases the EIP.
 
 Set `ONNET_PUBLIC_HOST` in `deploy/env/app.prod.env` to the EIP that
@@ -354,8 +371,9 @@ players never reach it (the machines mount it read-only and run nothing but the 
 
 2. **Record it in the vault.** Create an item `hosted` in the deploy vault with a field
    `data_snapshot_id` holding the id. Every `infra` run reads it as
-   `TF_VAR_hosted_data_snapshot_id`; with no `hosted` item hosting is off, and any other
-   failure to read it stops the run, so a vault error never plans hosting away. The plan
+   `TF_VAR_hosted_data_snapshot_id`; with no item titled `hosted` in the vault's listing
+   hosting is off, and any other failure (the listing, or reading the item's field)
+   stops the run, so a vault error never plans hosting away. The plan
    reads the snapshot (its size becomes the data volume's), so a mistyped or deleted id
    fails at `infra plan`.
 
