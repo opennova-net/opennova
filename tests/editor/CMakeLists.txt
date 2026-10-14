@@ -808,6 +808,10 @@ opennova_add_editor_test(font_document MIXED)
 # install streams, byte for byte).
 opennova_add_editor_test(music_bank MIXED SOURCES music_bank_document_test.cpp)
 
+# A music bank stream's audio from a wave: a stream's audio replaced and a stream added over a session (a mono 44100 Hz
+# wave of the project, a stereo 22050 Hz one on disk), saved and decoded back within the codec's precision, undone.
+opennova_add_editor_test(music_stream_audio)
+
 # Waves (ADR 0046, round S23 lane A): a .wav as a document read as the game's loader reads it, its one finding, a
 # trim and a normalise through a session; a SKIP-LEG without OPENNOVA_JO_ASSETS (every shipped wave byte for byte,
 # DSkid.wav alone refused).

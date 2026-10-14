@@ -219,6 +219,14 @@ void EditorWindows::request(EditorRequest request) {
 		replace_target_ = request.path;
 		request.path.clear();
 	}
+	// A music bank stream's audio from a wave...: the bank and the stream's place ("" a new stream) kept likewise.
+	if (request.kind == EditorRequestKind::PickFile && request.purpose == PickPurpose::MusicStreamWave) {
+		stream_pick_ = StreamPick{request.path, std::string()};
+		for (const auto &[key, value] : request.values)
+			if (key == "stream") stream_pick_.place = value;
+		request.path.clear();
+		request.values.clear();
+	}
 	if (in_frame_ && row.acts_on_saved) deferred_.push_back(std::move(request));
 	else requests_.push_back(std::move(request));
 }
@@ -445,6 +453,10 @@ void EditorWindows::deliver_pick(PickPurpose purpose, const std::string &path) {
 		// Asked before it is done: the dialog shows what the Replace would change (S18).
 		if (!replace_target_.empty()) request(request::preview_texture_source(replace_target_, path));
 		replace_target_.clear();
+		break;
+	case PickPurpose::MusicStreamWave:
+		if (!stream_pick_.bank.empty()) request(request::music_stream_audio(stream_pick_.bank, path, stream_pick_.place));
+		stream_pick_ = StreamPick();
 		break;
 	case PickPurpose::None: break;
 	}

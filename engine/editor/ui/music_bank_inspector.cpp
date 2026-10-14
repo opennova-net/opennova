@@ -16,7 +16,15 @@ namespace opennova::editor {
 
 namespace {
 
-// A sentence, muted and wrapped.
+// The Shell's file dialog for the wave a stream is made from (the music_stream_audio its answer raises): for the
+// stream at `place`, or ("") a new stream at the end of the bank.
+void pick_wave(Workspace &workspace, const std::string &bank, const std::string &place) {
+	EditorRequest pick = request::pick_file(PickPurpose::MusicStreamWave);
+	pick.path = bank;
+	if (!place.empty()) pick.values = {{"stream", place}};
+	workspace.request(std::move(pick));
+}
+
 } // namespace
 
 bool draw_music_bank_inspector(Workspace &workspace, const Document &document, const NodeAddress &record,
@@ -31,6 +39,13 @@ bool draw_music_bank_inspector(Workspace &workspace, const Document &document, c
 		std::snprintf(total, sizeof(total), "%.0f", seconds);
 		ui_kit::note(std::to_string(row->streams.size()) + " streams, " + total + " s in all. The game streams the bank loose "
 		             "beside its archives, and its music script plays each stream by its place.");
+		ui_kit::WrapRow tools;
+		if (ui_kit::tool(tools, "Add a stream from a wave...", workspace.view().allows(EditorRequestKind::MusicStreamAudio),
+		                 "Adds a stream at the end of the bank, sound " + std::to_string(row->streams.size()) +
+		                         " to its music script, made from a wave of yours: its samples made the bank's byte-paired "
+		                         "stereo at 22050 a second (a mono wave on both sides, another rate resampled), named after it. "
+		                         "One undo step."))
+			pick_wave(workspace, document.path(), std::string());
 		return true;
 	}
 	int place = -1;
@@ -49,6 +64,12 @@ bool draw_music_bank_inspector(Workspace &workspace, const Document &document, c
 	                 true))
 		workspace.request(request::play_stream(document.path(), int(place)));
 	if (ui_kit::tool(tools, "Stop", true, "Stops the sound the editor plays.", true)) workspace.request(request::stop_sound());
+	ui_kit::WrapRow made;
+	if (ui_kit::tool(made, "Replace with a wave...", workspace.view().allows(EditorRequestKind::MusicStreamAudio),
+	                 "Makes " + stream.name + "'s audio from a wave of yours: its samples made the bank's byte-paired stereo "
+	                 "at 22050 a second (a mono wave on both sides, another rate resampled). Its name and its place stay. One "
+	                 "undo step; save the bank to hear it."))
+		pick_wave(workspace, document.path(), std::to_string(place));
 	const WorkspaceView::Sound &sound = workspace.view().workspace.sound;
 	if (!sound.voices.empty() && sound.voices.front().stream == place && sound.voices.front().path == document.path() &&
 	    !sound.words.empty())

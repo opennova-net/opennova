@@ -107,6 +107,13 @@ public:
 	// operation's. Refused, nothing changed (wave.operation): a file an import makes, an operation it does not take,
 	// one the wave cannot take.
 	void wave_operation(const EditorRequest &request);
+	// MusicStreamAudio: a stream of the music bank at path (opened first when open_first says so) made from a wave
+	// (documents/music_bank_document.h: values.wave a project file, as the editor holds it, or a file on disk), its
+	// audio replaced (values.stream, its place) or a new stream added at the end with it (selected), values.name its
+	// name, one step whose words say what the wave was made into. Refused, nothing changed (music_bank.stream_audio): a
+	// wave that does not read, holds no sample or has more than two channels, a stream the bank has not, a value of no
+	// key it takes, a file an import makes.
+	void music_stream_audio(const EditorRequest &request);
 	void revert_to_saved(const EditorRequest &request);
 	// The text of the string a field's string id names (SetStringText, the plain-words lane): the table
 	// that defines the id as the game's lookup reaches it (the graph's), opened in the background where it
@@ -222,8 +229,8 @@ private:
 	// refused (`code`, or DocumentNotOpen), where it is no `noun` (`is_kind`) or an import makes its file.
 	DocumentBase *operation_target(const EditorRequest &request, CoreFinding code, const char *noun,
 	                               bool (*is_kind)(const DocumentBase &));
-	// Its change applied as one step, named with its `words` and the file's name.
-	void apply_operation(DocumentBase &document, std::shared_ptr<const EditPayload> payload, const std::string &words);
+	// Its change (the batch its edits are) applied as one step, named with its `words` and the file's name.
+	void apply_operation(DocumentBase &document, const std::vector<Edit> &edits, const std::string &words);
 	// After `document` moved from the state (load_generation, revision) by an edit, an undo or a
 	// redo: the active selection repaired against the rows that changed since (changes_since; all
 	// of them when the document cannot say), a gone primary giving way to `owner`.
