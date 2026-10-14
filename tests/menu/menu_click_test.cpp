@@ -275,12 +275,12 @@ const char *kMenu = R"(<SCREEN>
 		</WINDOW>
 		<WINDOW type="combobox" name="NAT">
 			<POSITION><LEFT>650</LEFT><TOP>100</TOP><RIGHT>780</RIGHT><BOTTOM>120</BOTTOM></POSITION>
-			<ITEMS>
-				<ITEM value="0">US</ITEM>
-				<ITEM value="1">UK</ITEM>
-				<ITEM value="2">FR</ITEM>
-			</ITEMS>
 			<LIST_BOX>
+				<ITEMS>
+					<ITEM value="0">US</ITEM>
+					<ITEM value="1">UK</ITEM>
+					<ITEM value="2">FR</ITEM>
+				</ITEMS>
 				<POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>130</RIGHT><BOTTOM>80</BOTTOM></POSITION>
 				<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
 			</LIST_BOX>

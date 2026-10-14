@@ -292,12 +292,11 @@ const KeyRow *apply_line(Profile &prof, const std::vector<std::string> &toks) {
 	return row;
 }
 
-// The lines the writer puts down for a profile (textlayout): `type`, then each key of its type whose value is
-// other than the zeroed record's, `key<TAB>value`, a mask's words a set. False with the reason for a value no
-// word reads back to (`lenient`: such a key is left out instead, as the parse's model of a file does).
-bool records_of(const Profile &profile, textlayout::OutRecord &now, std::string &error, bool lenient) {
-	now = textlayout::OutRecord();
-	now.note = profile.note;
+// The lines the writer puts down for a profile: `type`, then each key of its type whose value is other than the
+// zeroed record's, `key<TAB>value`, each with CR LF after it. False with the reason for a value no word reads
+// back to.
+bool text_of(const Profile &profile, std::string &text, std::string &error) {
+	text.clear();
 	for (const KeyRow &row : key_rows()) {
 		if (row.unit != Unit::Type && !reads(row, profile.type)) continue;
 		std::vector<std::string> words;
@@ -307,7 +306,6 @@ bool records_of(const Profile &profile, textlayout::OutRecord &now, std::string 
 			// A name is one token of the walk: no blank, comma, quote, `;` or `//` [orig: Config_TokenizeLine
 			// @ 0x53CB60].
 			if (name.find_first_of(" \t,\";\r\n") != std::string::npos || name.find("//") != std::string::npos) {
-				if (lenient) continue;
 				error = std::string("The ") + row.key + " \"" + name + "\" is no one word the game's reader reads.";
 				return false;
 			}
@@ -322,7 +320,6 @@ bool records_of(const Profile &profile, textlayout::OutRecord &now, std::string 
 			if (value == 0 && !ground_speed) continue;
 			words = value_words(row, profile.type, value);
 			if (words.empty()) {
-				if (lenient) continue;
 				error = std::string("The ") + row.key + " value " + std::to_string(value) +
 				        " is one no word of the file reads back to.";
 				return false;
@@ -331,14 +328,12 @@ bool records_of(const Profile &profile, textlayout::OutRecord &now, std::string 
 		std::string form = row.key;
 		if (row.alias && profile.type == kTypeHelo) form = row.alias; // flight_skill, as the shipped HELO profiles write it
 		for (const std::string &word : words) form += "\t" + word;
-		textlayout::OutLine line{row.key, form};
-		if (row.unit == Unit::Flags || row.unit == Unit::HuntFlags) line.set_from = 1;
-		now.lines.push_back(std::move(line));
+		text += form + "\r\n"; // the one break the walk splits at [orig: File_ParseASCIIFile @ 0x53D8C7]
 	}
 	return true;
 }
 
-Profile parse(const uint8_t *text, size_t size, textlayout::Notes *notes, std::vector<UnreadLine> *unread) {
+Profile parse(const uint8_t *text, size_t size, std::vector<UnreadLine> *unread) {
     // AIProfile_LoadOrFind reads the .aip through File_ParseASCIIFile
     // (@ 0x45FE45), so the lines and tokens are the shared walk's
 	// (io::for_each_config_line_span: CR LF only, the tokenizer's quotes, commas and
@@ -349,10 +344,8 @@ Profile parse(const uint8_t *text, size_t size, textlayout::Notes *notes, std::v
     // [orig: AIProfile_ParseProperty @ 0x45de70]
     Profile prof;
 	const char *chars = reinterpret_cast<const char *>(text);
-	textlayout::Noter noter(chars, size, notes, textlayout::cut_ascii_walk);
 	io::ConfigTokens tokens;
 	io::for_each_config_line_span(chars, size, tokens, [&](io::ConfigTokens &line, const io::ConfigLineSpan &span) {
-		noter.line(span.begin, span.end + 2);
 		// The walk's gate: no token, or a first token starting '/' [orig: File_ParseASCIIFile @0x53D915 / @0x53D91E].
 		if (line.count == 0 || line.tokens[0][0] == '/') return;
         std::vector<std::string> toks;
@@ -360,10 +353,7 @@ Profile parse(const uint8_t *text, size_t size, textlayout::Notes *notes, std::v
 		// A value past the line's count reads the reset token's "".
 		if (toks.size() < 2) toks.emplace_back(line.token(1));
 		const int32_t type = prof.type;
-		if (const KeyRow *row = apply_line(prof, toks)) {
-			noter.entry(noter.root(), row->key);
-            return;
-        }
+		if (apply_line(prof, toks)) return;
 		if (!unread) return;
 		UnreadLine line_read;
 		line_read.offset = span.begin;
@@ -375,16 +365,6 @@ Profile parse(const uint8_t *text, size_t size, textlayout::Notes *notes, std::v
 		                                       : UnreadLine::Why::OtherType;
 		unread->push_back(std::move(line_read));
 	});
-	noter.finish();
-	if (notes) {
-		prof.note = notes->root();
-		// The writer's lines for the profile as read, which each line is modeled against (a value no word reads
-		// back to is left out of them: its line is kept as its tokens).
-		textlayout::OutRecord as_read;
-		std::string error;
-		records_of(prof, as_read, error, true);
-		textlayout::model(*notes, as_read, textlayout::cut_ascii_walk);
-	}
     return prof;
 }
 
@@ -572,10 +552,8 @@ std::vector<std::string> value_words(const KeyRow &row, int32_t type, int32_t va
 	return {word};
 }
 
-Profile parse_profile(const uint8_t *text, size_t size) { return parse(text, size, nullptr, nullptr); }
-
-Profile parse_profile(const uint8_t *text, size_t size, textlayout::Notes &notes, std::vector<UnreadLine> *unread) {
-	return parse(text, size, &notes, unread);
+Profile parse_profile(const uint8_t *text, size_t size, std::vector<UnreadLine> *unread) {
+	return parse(text, size, unread);
 }
 
 bool same_profile(const Profile &a, const Profile &b) {
@@ -605,22 +583,10 @@ bool same_profile(const Profile &a, const Profile &b) {
 	       a.min_speed == b.min_speed;
 }
 
-bool write_profile(const Profile &profile, const textlayout::Notes *notes, std::string &text, std::string &error,
-                   bool *rewritten) {
-	if (rewritten) *rewritten = false;
-	textlayout::OutRecord now;
-	if (!records_of(profile, now, error, false)) return false;
-	const std::string eol = "\r\n"; // the one break the walk splits at [orig: File_ParseASCIIFile @ 0x53D8C7]
-	text = textlayout::compose(notes, now, textlayout::cut_ascii_walk, notes ? textlayout::file_eol(*notes, eol) : eol);
+bool write_profile(const Profile &profile, std::string &text, std::string &error) {
+	if (!text_of(profile, text, error)) return false;
 	const Profile again = parse_profile(reinterpret_cast<const uint8_t *>(text.data()), text.size());
 	if (same_profile(again, profile)) return true;
-	if (notes && profile.note) {
-		Profile unnoted = profile;
-		unnoted.note = 0;
-		if (!write_profile(unnoted, nullptr, text, error)) return false;
-		if (rewritten) *rewritten = true;
-		return true;
-	}
 	error = "The profile does not read back as it is (a value no line of the writer's carries).";
 	return false;
 }

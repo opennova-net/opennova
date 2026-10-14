@@ -290,8 +290,8 @@
     "retail_script": "godot/tests/retail/mnu/mnu_document_test.gd",
     "retail_methods": [
       "test_mns_entries_expose_document_order",
-      "test_mns_set_variable_preserves_layout_and_emits_changed",
-      "test_mns_source_text_round_trip_byte_faithful"
+      "test_mns_set_variable_changes_one_line_and_emits_changed",
+      "test_mns_written_sheet_reads_back"
     ]
   },
   {

@@ -66,8 +66,7 @@ public:
 	void assign(const opennova::avatars::AvatarCombo &p_value, int p_alignment, int p_nationality_index,
 			int p_division_index, int p_combo_index, int p_character_id);
 
-	// The id token verbatim (e.g. "001") and its parsed number.
-	String get_raw_id() const;
+	// The id token's number.
 	int get_id() const { return value_.id; }
 	String get_head_name() const;
 	Ref<AvatarPartRow> get_head() const { return head_; }
@@ -85,14 +84,12 @@ public:
 	int get_character_id() const { return character_id_; }
 };
 
-// One `nationality <id> <name_key> [flags]` block header.
+// One `nationality <id> <name_key>` block header.
 class AvatarNationalityRow : public RefCounted {
 	GDCLASS(AvatarNationalityRow, RefCounted)
 
-	String raw_id_;
 	int id_ = 0;
 	String name_key_;
-	String flags_;
 	int alignment_ = 0;
 	int division_count_ = 0;
 
@@ -102,24 +99,19 @@ protected:
 public:
 	void assign(const opennova::avatars::AvatarNationality &p_value);
 
-	String get_raw_id() const { return raw_id_; }
 	int get_id() const { return id_; }
 	String get_name_key() const { return name_key_; }
-	// Trailing tokens after the name key (e.g. "skipdemo"); empty if none.
-	String get_flags() const { return flags_; }
 	// AvatarDatabase.ALIGN_GOOD / ALIGN_EVIL.
 	int get_alignment() const { return alignment_; }
 	int get_division_count() const { return division_count_; }
 };
 
-// One `division <id> <name_key> [flags]` block header.
+// One `division <id> <name_key>` block header.
 class AvatarDivisionRow : public RefCounted {
 	GDCLASS(AvatarDivisionRow, RefCounted)
 
-	String raw_id_;
 	int id_ = 0;
 	String name_key_;
-	String flags_;
 	int combo_count_ = 0;
 
 protected:
@@ -128,10 +120,8 @@ protected:
 public:
 	void assign(const opennova::avatars::AvatarDivision &p_value);
 
-	String get_raw_id() const { return raw_id_; }
 	int get_id() const { return id_; }
 	String get_name_key() const { return name_key_; }
-	String get_flags() const { return flags_; }
 	int get_combo_count() const { return combo_count_; }
 };
 

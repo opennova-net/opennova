@@ -1,8 +1,6 @@
 #include <formats/mns/mns.h>
 #include <base/io/strutil.h>
 
-#include <formats/mns/mns_document.h>
-
 // [orig: NapiXML_ExpandVariablesInText @0x63a000 — the %VAR% expansion over the table that
 //  Menu_InitShellResources @0x552500 loads via NapiConfigMap_LoadIncludeFile @0x63b970 ->
 //  NapiConfigMap_ParseKeyValueBuffer @0x639870; docs/mnu/menu-re.md]
@@ -10,7 +8,6 @@
 #include <algorithm>
 #include <cctype>
 #include <cstring>
-#include <sstream>
 #include <tuple>
 #include <vector>
 
@@ -360,48 +357,77 @@ int line_at_offset(const char *text, size_t size, size_t offset) {
 	return line;
 }
 
-// The flat API is the game's own read, reported through the lossless Document's
-// diagnostics (mns_document.cpp).
-bool parse(const char *data, size_t size, StyleSheet &out, std::string &error) {
-	const EvaluationResult result = Document::parse(data, size).evaluate();
-	out = result.sheet;
-	error.clear();
-	if (!result.success) {
-		for (const Diagnostic &diagnostic : result.diagnostics) {
-			if (diagnostic.severity != Severity::Error) continue;
-			error = "line " + std::to_string(diagnostic.line) + ": " +
-					diagnostic.message;
-			break;
-		}
-		if (error.empty()) error = "MNS evaluation failed";
+const char *stop_message(ReadStatus status) {
+	switch (status) {
+	case ReadStatus::Failed:
+		return "the game stops reading the stylesheet on this line, and every variable after it stays undefined";
+	case ReadStatus::Hangs: return "the game stops responding reading this line";
+	default: return "";
 	}
-	return result.success;
 }
 
-// Canonical lossy dump of the flat map (sorted, tab-separated, CRLF: the reader stops
-// responding on a value line ended by a lone LF [orig: NapiConfigMap_ParseKeyValueBuffer @ 0x639c3b]).
-// Lossless serialization of an authored file is Document::serialize().
-bool write(const StyleSheet &sheet, std::vector<uint8_t> &out, std::string &error) {
-	(void)error;
-	out.clear();
+bool parse(const char *data, size_t size, StyleSheet &out, std::string &error) {
+	KeyValueList list;
+	const ReadResult read = parse_key_value_buffer(data ? data : "", data ? size : 0, list);
+	out = list.sheet();
+	error.clear();
+	if (read.status == ReadStatus::Read) return true;
+	error = "line " + std::to_string(line_at_offset(data, size, read.offset)) + ": " + stop_message(read.status);
+	return false;
+}
 
-	std::ostringstream ss;
+bool is_valid_name(const std::string &name) {
+	if (name.empty()) return false;
+	for (char c : name)
+		if (c == '\0' || crt_isspace(c) || std::strchr("\\/%<>#", c)) return false;
+	return true;
+}
 
-	// Sort keys for consistent output.
-	std::vector<std::string> keys;
-	keys.reserve(sheet.variables.size());
-	for (const auto &kv : sheet.variables) {
-		keys.push_back(kv.first);
+bool is_valid_value(const std::string &value) {
+	if (value.empty() || value.front() == '#' || crt_isspace(value.front()) || crt_isspace(value.back())) return false;
+	if (value.find("//") != std::string::npos) return false;
+	for (size_t i = 0; i < value.size(); ++i) {
+		const char c = value[i];
+		if (c == '\0' || c == '\r' || c == '\n') return false;
+		if (c == '\\') {
+			if (i + 1 >= value.size() || value[i + 1] != '\\') return false;
+			++i;
+		}
 	}
-	std::sort(keys.begin(), keys.end());
+	return true;
+}
 
-	for (const auto &key : keys) {
-		const auto &value = sheet.variables.at(key);
-		ss << key << "\t" << value << "\r\n";
+bool write(const KeyValueList &list, std::string &text, std::string &error) {
+	text.clear();
+	error.clear();
+	for (size_t i = 0; i < list.nodes.size(); ++i) {
+		const KeyValue &node = list.nodes[i];
+		if (!is_valid_name(node.name)) {
+			error = "the name '" + node.name + "' is no name the reader reads whole (a blank, or one of \\ / % < > #)";
+			return false;
+		}
+		if (!is_valid_value(node.value)) {
+			error = node.name + "'s value '" + node.value + "' is no value the reader reads back as written";
+			return false;
+		}
+		for (size_t j = 0; j < i; ++j)
+			if (strutil::iequals(list.nodes[j].name, node.name)) {
+				error = "the names '" + list.nodes[j].name + "' and '" + node.name + "' are one name to the reader";
+				return false;
+			}
+		text += node.name + "\t" + node.value + "\r\n";
 	}
-
-	std::string s = ss.str();
-	out.assign(s.begin(), s.end());
+	// The text read again is the list.
+	KeyValueList again;
+	const ReadResult read = parse_key_value_buffer(text.data(), text.size(), again);
+	bool same = read.status == ReadStatus::Read && again.nodes.size() == list.nodes.size();
+	for (size_t i = 0; same && i < list.nodes.size(); ++i)
+		same = again.nodes[i].name == list.nodes[i].name && again.nodes[i].value == list.nodes[i].value;
+	if (!same) {
+		error = "the written stylesheet does not read back as the list";
+		text.clear();
+		return false;
+	}
 	return true;
 }
 

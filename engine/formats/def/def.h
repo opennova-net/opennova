@@ -14,51 +14,6 @@
 namespace opennova::def {
 
 /* ========================================================================= */
-/* The order and the indentation a file was read with                        */
-/* ========================================================================= */
-
-/* What an authoring tool keeps of a record's lines beside their values (ADR 0046, the UX round's
- * plain-words lane): the order the reader met its keys in, each step a property of its kind's
- * table by its place there (def_properties; the first line of it), or where its nested rows stood
- * (DEF_LINE_ORDER_ROWS: an item's attachments, a weapon's sights, an ammo's effects table) and
- * where its blocks did (DEF_LINE_ORDER_BLOCKS: a weapon's actions). A writer puts the record's lines
- * down in that order, the rest after them in the table's, so a file read and written again keeps its
- * order and a one-field change is a one-line change. No text of the file is kept: a step is a place
- * in the table, which a record made from nothing has none of (it is written in the table's order).
- * The order the game reads in decides nothing a writer's reparse check does not catch (an
- * acceleration's default deceleration): one it refuses is written in the table's order instead. */
-inline constexpr size_t DEF_LINE_ORDER_MAX = 160;
-inline constexpr uint8_t DEF_LINE_ORDER_ROWS = 254;
-inline constexpr uint8_t DEF_LINE_ORDER_BLOCKS = 255;
-/* An items.def line under one of the names the parser reads into the death, door and clip words they
- * share (the +0x890/+0x894 union and the door type; ItemDef_ParseProperty's squib, door and part
- * arms): a step of its own, so a writer puts it down under the name the file gave it, from the words as
- * they stand (def_write_record.cpp's alias lines). A property's place is below the first of them. */
-inline constexpr uint8_t DEF_LINE_ORDER_SQB_RATE = 240;
-inline constexpr uint8_t DEF_LINE_ORDER_NUM_DOORS = 241;
-inline constexpr uint8_t DEF_LINE_ORDER_FIRST_DOOR = 242;
-inline constexpr uint8_t DEF_LINE_ORDER_FIRST_SUBOBJECT = 243;
-inline constexpr uint8_t DEF_LINE_ORDER_ROTOR_PARTS = 244;
-inline constexpr uint8_t DEF_LINE_ORDER_AUX_PARTS = 245;
-inline constexpr uint8_t DEF_LINE_ORDER_SQB_ERROR = 246;
-inline constexpr uint8_t DEF_LINE_ORDER_SQB_DISTANCE = 247;
-inline constexpr uint8_t DEF_LINE_ORDER_DOOR_DIR = 248;
-inline constexpr bool def_line_order_alias(uint8_t step) {
-    return step >= DEF_LINE_ORDER_SQB_RATE && step <= DEF_LINE_ORDER_DOOR_DIR;
-}
-typedef struct DefLineOrder {
-    uint8_t steps[DEF_LINE_ORDER_MAX];
-    uint16_t count;
-} DefLineOrder;
-
-/* A file's indentation, which its writer indents its lines with: the blanks before its first
- * indented line inside a block, one level (a nested block's lines take two); "" for the writer's
- * own (a tab). Like the order, a choice of layout read from the file, never its text. */
-typedef struct DefLayout {
-    char indent[8];
-} DefLayout;
-
-/* ========================================================================= */
 /* Ammo Definitions                                                          */
 /* ========================================================================= */
 
@@ -67,8 +22,6 @@ typedef struct DefEffectTableEntry {
     char hit_effect[128];
     char impact_sound[128];
     int value;
-    /* What names the record's lines in its file's modeled layout (def_notes.h; 0: none, a record made from nothing or a copy). Appended (layout stability). */
-    uint64_t note;
 } DefEffectTableEntry;
 
 /* DefAmmoDef.flags bits — the ammo.def `flag <name>` OR-mask, record dword +0.
@@ -179,7 +132,6 @@ typedef struct DefAmmoDef {
     DefEffectTableEntry *effects_table;
     size_t effects_table_count;
     size_t unmodeled_count; // Blocking authoring findings (def_issue_blocks); no source text is retained.
-    DefLineOrder line_order; // the order its lines were read in (its effects table a step)
     /* Kill-zone blast geometry (appended; layout stability). The explosion
      * queue's blast radius is kz_maxradius (or the entry's float override); the
      * linear damage falloff starts at kz_minradius; kz_pieslice is the half-angle
@@ -220,15 +172,12 @@ typedef struct DefAmmoDef {
      * Projectile_ProcessExplosionQueue @0x4EB1DA..0x4EB292] */
     char secondary_effect[64];    /* +0x48 */
     char kz_sound[64];            /* +0x4C */
-    /* What names the record's lines in its file's modeled layout (def_notes.h; 0: none, a record made from nothing or a copy). Appended (layout stability). */
-    uint64_t note;
 } DefAmmoDef;
 
 typedef struct DefAmmoFile {
     DefAmmoDef *entries;
     size_t count;
     size_t unmodeled_count; // Blocking file-level or incomplete-block findings.
-    DefLayout layout;
 } DefAmmoFile;
 
 /* ========================================================================= */
@@ -251,8 +200,6 @@ typedef struct DefSightEntry {
     int scale;        /* boolean */
     int slide;        /* boolean */
     int slide_frames;
-    /* What names the record's lines in its file's modeled layout (def_notes.h; 0: none, a record made from nothing or a copy). Appended (layout stability). */
-    uint64_t note;
 } DefSightEntry;
 
 typedef struct DefWeaponAction {
@@ -286,9 +233,6 @@ typedef struct DefWeaponAction {
 	   them back onto the text and checks the retail reading of those lines. */
 	size_t open_line;
 	size_t end_line;
-	DefLineOrder line_order; // the order its lines were read in
-    /* What names the record's lines in its file's modeled layout (def_notes.h; 0: none, a record made from nothing or a copy). Appended (layout stability). */
-    uint64_t note;
 } DefWeaponAction;
 
 /* DefWeaponDef.flags bits — the weapon.def `flags <name>` OR-mask (dword 1 of the
@@ -431,7 +375,6 @@ typedef struct DefWeaponDef {
     DefSightEntry *sights;
     size_t sights_count;
     size_t unmodeled_count; // Blocking authoring findings (def_issue_blocks); no source text is retained.
-    DefLineOrder line_order; // the order its lines were read in (its sights and its actions steps)
     /* PLAYER_INFO loadout fields. [orig: WeaponDef_ParseProperty @ 0x54d730;
        consumer PlayerInfo_PopulateWeaponSlotLists @ 0x560430]. Appended to keep the leading
        struct offsets (and native layouts) stable. loadout_selectable (+32: a row
@@ -650,8 +593,6 @@ typedef struct DefWeaponDef {
        nothing. 1 = the option is on. Appended (layout stability). */
     int gfx1_nocheckdepth;
     int gfx3_nocheckdepth;
-    /* What names the record's lines in its file's modeled layout (def_notes.h; 0: none, a record made from nothing or a copy). Appended (layout stability). */
-    uint64_t note;
 } DefWeaponDef;
 
 /* The characters of a weapon's name the reader keeps as that name: the name is copied 32 bytes
@@ -673,8 +614,6 @@ inline size_t def_weapon_name_chars(const DefWeaponDef &weapon) { return weapon.
 typedef struct DefAmmoClassCarry {
     char name[64];
     int max_carry;
-    /* What names the record's lines in its file's modeled layout (def_notes.h; 0: none, a record made from nothing or a copy). Appended (layout stability). */
-    uint64_t note;
 } DefAmmoClassCarry;
 
 typedef struct DefWeaponsFile {
@@ -690,7 +629,6 @@ typedef struct DefWeaponsFile {
     int stopped;
     size_t stop_line;
     size_t unmodeled_count; // Blocking file-level or incomplete-block findings.
-    DefLayout layout;
 } DefWeaponsFile;
 
 /* ========================================================================= */
@@ -752,8 +690,6 @@ typedef struct DefItemEmplacementAttachment {
     int left_angle;
     int angle_count; /* 0 when limits are absent; packed retail records use 0 or 4 */
     int kind;        /* DefItemEmplacementAttachmentKind */
-    /* What names the record's lines in its file's modeled layout (def_notes.h; 0: none, a record made from nothing or a copy). Appended (layout stability). */
-    uint64_t note;
 } DefItemEmplacementAttachment;
 
 /* DefItemDef.attrib bits — items.def `attrib:` tokens (ItemDefAttrib, +0x54).
@@ -826,11 +762,10 @@ typedef struct DefItemDef {
     int type;  /* DefItemType — engine values at ItemDef+0x5C: 1=vehicle,
                   2=decoration/foliage, 3=person, 4=marker, 5=building,
                   6=powerup/object, 8=effect; 0=unset, 7 unused
-                  [orig: ItemDef_ParseProperty @ 0x49eb00] */
-    uint8_t type_word; /* the type line's word where the chain reads two for one value: 0 the first
-                  (decoration, powerup), 1 the other (foliage, object). The game keeps the value alone
-                  [orig: the type chain @0x4A02E4..0x4A04B7]; the word is the file's (retail's trees
-                  and bushes say foliage, its crates and objects object), which the writer writes. */
+                  [orig: ItemDef_ParseProperty @ 0x49eb00]. The game keeps the value alone, so
+                  the two words of 2 (decoration @0x4A03B1, foliage @0x4A03E2) and of 6 (powerup
+                  @0x4A0412, object @0x4A0476) read the same; the writer puts down the chain's first
+                  match of each, decoration and powerup [orig: the type chain @0x4A02E4..0x4A04B7]. */
     char graphic[128];
     char anim_def[128];
     char husk[128];
@@ -999,7 +934,6 @@ typedef struct DefItemDef {
     char particlefinale[32];   /* +0x4E4 [orig: @ 0x4a175b] */
     char particlespawn[32];    /* +0x506 [orig: @ 0x4a179d] */
     size_t unmodeled_count; // Blocking authoring findings (def_issue_blocks); no source text is retained.
-    DefLineOrder line_order; // the order its lines were read in (its attachments a step)
     /* Four organic fire ammo names; lndm also reads closeattack/marker3.
        [orig: ItemDef_ParseProperty @ 0x4A1823, def+0x56B..+0x5CB;
        Entity_InitOrganicAI @ 0x4BFCC0 -> entity+0x358..+0x35B] */
@@ -1155,8 +1089,6 @@ typedef struct DefItemDef {
        Entity_SetupGunnerAttachments (VehicleTraits::attrib_parent). Appended
        (layout stability). [orig: ItemDef_ParseProperty @0x4a0cd6..0x4a0ce2] */
     unsigned char attrib_parent;
-    /* What names the record's lines in its file's modeled layout (def_notes.h; 0: none, a record made from nothing or a copy). Appended (layout stability). */
-    uint64_t note;
     /* 1 when `sid` is the alias the `end` arm gave a record that named none, "S%06i" of its id
        [orig: ItemDef_ParseProperty, the `end` arm @0x49EB2F..0x49EB5F]: an authoring tool's id
        change carries it along (def_sync_derived), as the game would derive it again. 0 for an
@@ -1196,7 +1128,6 @@ typedef struct DefItemsFile {
 	int vehicle_spawn_ids[DEF_VEHICLE_SPAWN_SLOTS];
 	int vehicle_spawn_id_count;
     size_t unmodeled_count; // Blocking file-level or incomplete-block findings.
-    DefLayout layout;
 } DefItemsFile;
 
 /* ========================================================================= */
@@ -1428,8 +1359,6 @@ typedef struct DefPowerupAction {
     int delaystart;              /* ActionDef+36 (ticks; `auto` -> -1) */
     int delayend;                /* ActionDef+40 (`delay` aliases it) */
     int action_value;            /* ActionDef+52 */
-    /* What names the record's lines in its file's modeled layout (def_notes.h; 0: none, a record made from nothing or a copy). Appended (layout stability). */
-    uint64_t note;
 } DefPowerupAction;
 
 /* One `ammo <class> <count>` row; the class name resolves against the weapon
@@ -1439,8 +1368,6 @@ typedef struct DefPowerupAction {
 typedef struct DefPowerupAmmo {
     char class_name[64];
     int count; /* -1 = fill the class, else the amount added */
-    /* What names the record's lines in its file's modeled layout (def_notes.h; 0: none, a record made from nothing or a copy). Appended (layout stability). */
-    uint64_t note;
 } DefPowerupAmmo;
 
 /* One `powerup "<name>"` block (the 576-byte retail row). Every scalar
@@ -1462,8 +1389,6 @@ typedef struct DefPowerupDef {
     DefPowerupAction respawn; /* row+0x24 */
     size_t open_line;
     size_t end_line;
-    /* What names the record's lines in its file's modeled layout (def_notes.h; 0: none, a record made from nothing or a copy). Appended (layout stability). */
-    uint64_t note;
 } DefPowerupDef;
 
 typedef struct DefPowerupFile {

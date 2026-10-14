@@ -604,12 +604,12 @@ void test_combo_scrollbar_offsets_rows_and_hit(const fnt_font_t *font) {
     <FONT><NAME>f.fnt</NAME><DEFAULT_FG>FFFFFF</DEFAULT_FG></FONT>
     <WINDOW type="combobox" name="COMBO">
       <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>20</BOTTOM></POSITION>
-      <ITEMS>
-        <ITEM type="ID" value="0">ZERO</ITEM><ITEM type="ID" value="1">ONE</ITEM>
-        <ITEM type="ID" value="2">TWO</ITEM><ITEM type="ID" value="3">THREE</ITEM>
-        <ITEM type="ID" value="4">FOUR</ITEM><ITEM type="ID" value="5">FIVE</ITEM>
-      </ITEMS>
       <LIST_BOX>
+        <ITEMS>
+          <ITEM type="ID" value="0">ZERO</ITEM><ITEM type="ID" value="1">ONE</ITEM>
+          <ITEM type="ID" value="2">TWO</ITEM><ITEM type="ID" value="3">THREE</ITEM>
+          <ITEM type="ID" value="4">FOUR</ITEM><ITEM type="ID" value="5">FIVE</ITEM>
+        </ITEMS>
         <POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>100</RIGHT><BOTTOM>100</BOTTOM></POSITION>
         <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
         <SCROLLBAR>
@@ -1821,11 +1821,11 @@ void test_interaction_geometry(const fnt_font_t *font) {
     </WINDOW>
     <WINDOW type="combobox" name="C1">
       <POSITION><LEFT>200</LEFT><TOP>0</TOP><RIGHT>300</RIGHT><BOTTOM>20</BOTTOM></POSITION>
-      <ITEMS>
-        <ITEM type="ID" value="0">ONE</ITEM>
-        <ITEM type="ID" value="1">TWO</ITEM>
-      </ITEMS>
       <LIST_BOX>
+        <ITEMS>
+          <ITEM type="ID" value="0">ONE</ITEM>
+          <ITEM type="ID" value="1">TWO</ITEM>
+        </ITEMS>
         <POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>100</RIGHT><BOTTOM>80</BOTTOM></POSITION>
         <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
       </LIST_BOX>
@@ -2801,12 +2801,12 @@ void test_combo_popup_scrollbar_scrolls_through_pump(const fnt_font_t *font) {
     <FONT><NAME>f.fnt</NAME><DEFAULT_FG>FFFFFF</DEFAULT_FG></FONT>
     <WINDOW type="combobox" name="COMBO">
       <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>20</BOTTOM></POSITION>
-      <ITEMS>
-        <ITEM type="ID" value="0">ZERO</ITEM><ITEM type="ID" value="1">ONE</ITEM>
-        <ITEM type="ID" value="2">TWO</ITEM><ITEM type="ID" value="3">THREE</ITEM>
-        <ITEM type="ID" value="4">FOUR</ITEM><ITEM type="ID" value="5">FIVE</ITEM>
-      </ITEMS>
       <LIST_BOX>
+        <ITEMS>
+          <ITEM type="ID" value="0">ZERO</ITEM><ITEM type="ID" value="1">ONE</ITEM>
+          <ITEM type="ID" value="2">TWO</ITEM><ITEM type="ID" value="3">THREE</ITEM>
+          <ITEM type="ID" value="4">FOUR</ITEM><ITEM type="ID" value="5">FIVE</ITEM>
+        </ITEMS>
         <POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>100</RIGHT><BOTTOM>100</BOTTOM></POSITION>
         <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
         <SCROLLBAR>
@@ -2929,12 +2929,12 @@ void test_wheel_ticks_scroll_popup_and_row_owners(const fnt_font_t *font) {
     </WINDOW>
     <WINDOW type="combobox" name="COMBO">
       <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>20</BOTTOM></POSITION>
-      <ITEMS>
-        <ITEM type="ID" value="0">ZERO</ITEM><ITEM type="ID" value="1">ONE</ITEM>
-        <ITEM type="ID" value="2">TWO</ITEM><ITEM type="ID" value="3">THREE</ITEM>
-        <ITEM type="ID" value="4">FOUR</ITEM><ITEM type="ID" value="5">FIVE</ITEM>
-      </ITEMS>
       <LIST_BOX>
+        <ITEMS>
+          <ITEM type="ID" value="0">ZERO</ITEM><ITEM type="ID" value="1">ONE</ITEM>
+          <ITEM type="ID" value="2">TWO</ITEM><ITEM type="ID" value="3">THREE</ITEM>
+          <ITEM type="ID" value="4">FOUR</ITEM><ITEM type="ID" value="5">FIVE</ITEM>
+        </ITEMS>
         <POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>100</RIGHT><BOTTOM>100</BOTTOM></POSITION>
         <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
       </LIST_BOX>

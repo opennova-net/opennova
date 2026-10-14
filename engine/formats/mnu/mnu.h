@@ -54,6 +54,26 @@ WindowType parse_window_type(const std::string &type_str);
 // The factory token of a type ("window" for the generic one).
 const char *window_type_name(WindowType type);
 
+// The FLAGS word a texture loads with: the OR of the flag names sub_646CC0 finds in its token
+// list (split on " ,|+", each name compared without case, a name the table lacks adding nothing)
+// [orig: sub_646CC0 @ 0x646cc0 over g_UIMaterialFlagNames @ 0x84a5d0]; STANDARD_TRANSPARENT
+// (0x300651) where no FLAGS is authored [orig: CUIElement_ParseXMLDefinition @ 0x648120, the
+// APPEARANCE's and the CURSOR's 3147345; the same default in the LIST and TABLE parses].
+inline constexpr uint32_t kDefaultUiMaterialFlags = 0x300651;
+// One row of g_UIMaterialFlagNames: a name and the bits it ORs in.
+struct UiMaterialFlag {
+  const char *name;
+  uint32_t bits;
+};
+// The table, in its order (43 rows) [orig: g_UIMaterialFlagNames @ 0x84a5d0].
+const std::vector<UiMaterialFlag> &ui_material_flags();
+// sub_646CC0's read of a FLAGS text.
+uint32_t ui_material_flags_of(const std::string &text);
+// The writer's text of a FLAGS word: the table's names whose bits OR to it (the widest first, a
+// name only where all its bits are the word's), joined by '|'; AFUNC_NONE for 0; empty where the
+// table's names cover not every bit (the word is none a FLAGS text reads).
+std::string ui_material_flags_text(uint32_t flags);
+
 // Position rectangle with optional fields.
 struct Position {
   int left = 0;
@@ -71,18 +91,18 @@ struct Position {
 };
 
 // One APPEARANCE row (also SHUTTLE / SCROLLUP / SCROLLDOWN and the ITEMS rows).
-// Every attribute holds the token retail reads: STATE and TYPE the one its walk
-// keeps, spelled as authored.
+// Every attribute holds what retail reads: STATE and TYPE the token its walk keeps, as
+// its table spells it (kAppearanceStates, ...), a TYPE the parse does not know none (it
+// sets no type bit, as no TYPE does [orig: @ 0x648226]); FLAGS the word.
 struct Appearance {
   std::string state;     // DEFAULT / DISABLED / MOUSEOVER / SELECTED
-  std::string type;      // IMAGE / COLOR / CUSTOM / OUTLINE (IMAGEROW in a TABLE's ITEMS)
+  std::string type;      // IMAGE / COLOR / CUSTOM / OUTLINE (IMAGEROW in a TABLE's ITEMS); "" none
   std::string value;     // the element text: a texture name or a color
   bool has_map_state = false;
   int map_state = -1;    // Sprite sheet row index (-1 = not a sprite sheet)
   bool has_height = false;
   int height = 0;        // Height of each frame in sprite sheet
-  std::string flags;     // FLAGS (texture flags, e.g. STANDARD_TRANSPARENT); empty = none
-  uint64_t source = 0;   // the element it was read from (Document::text_layout); 0: made in code
+  uint32_t flags = kDefaultUiMaterialFlags; // FLAGS, the texture flags word
 };
 
 // Sound trigger definition.
@@ -90,25 +110,24 @@ struct Sound {
   std::string state;   // MOUSEIN / MOUSEOUT / SELECTED
   std::string trigger; // "MOUSE_OVER", "CLICK_SELECT"
   std::string file;    // the element text: a sound name (e.g., "menu.lwf")
-  uint64_t source = 0;   // the element it was read from (Document::text_layout); 0: made in code
 };
 
-// Action definition [orig: CUIElement_ParseXMLDefinition @ 0x648120, the ACTION arm].
+// Action definition [orig: CUIElement_ParseXMLDefinition @ 0x648120, the ACTION arm]. TYPE,
+// STATE and TEST hold the code the parse sets, as its table spells it: a token the table lacks
+// is the code no token sets (TYPE 0, ignored on every path; STATE 0; TEST 0, LT), held as none.
 struct Action {
-  std::string type;   // one of the sixteen codes; anything else is code 0 (ignored)
-  std::string state;  // HIDE / SHOW / ENABLE / DISABLE (WINDOW)
+  std::string type;   // one of the sixteen codes; "" code 0 (ignored)
+  std::string state;  // HIDE / SHOW / ENABLE / DISABLE (WINDOW); "" none
   std::string file;   // FILE (SCREEN)
-  // FIELD, SOURCE and NAME write one slot; the first authored wins. `field_attr` is
-  // the spelling it was authored with (empty writes FIELD).
+  // FIELD, SOURCE and NAME write one slot; the first authored wins. The writer puts it
+  // down as FIELD (kActionFieldAttributes' first).
   std::string field;
-  std::string field_attr;
   bool has_target_form = false;
   int target_form = 0;
   bool toggle = false;           // TOGGLE, presence
-  std::string test;              // LT/LE/EQ/GE/GT (LT when absent)
+  std::string test;              // LE/EQ/GE/GT; "" LT, the parse's 0 (none authored, or LT)
   std::string target;            // the element text, untrimmed
   bool external_browser = false; // EXTERNAL_BROWSER, presence
-  uint64_t source = 0;   // the element it was read from (Document::text_layout); 0: made in code
 };
 
 // The sixteen ACTION TYPE tokens in the parse's compare order, nullptr-ended: a token's
@@ -122,7 +141,8 @@ inline constexpr const char *kActionTypes[] = {
 inline constexpr const char *kActionStates[] = {"HIDE", "SHOW", "ENABLE", "DISABLE", nullptr};
 
 // The tokens each keyword attribute's parse recognizes, nullptr-ended, in the order the
-// reader compares them; any other token is left out of the model (a ParseNote says so).
+// reader compares them (without case: the model holds a known token as the table spells it);
+// any other token is left out of the model (a ParseNote says so).
 // An APPEARANCE's STATE and TYPE [orig: @ 0x648226], a TABLE's ITEMS rows also knowing
 // IMAGEROW [orig: @ 0x642816]; a SOUND's STATE, its sound state the index + 1
 // (runtime/menu/menu_sound.h) [orig: @ 0x648909]; an ACTION's TEST, and the three
@@ -140,9 +160,17 @@ inline constexpr const char *kJustify[] = {"LEFT", "CENTER", "RIGHT", nullptr};
 inline constexpr const char *kVJustify[] = {"TOP", "CENTER", "BOTTOM", nullptr};
 inline constexpr const char *kStringTypes[] = {"ID", nullptr};
 inline constexpr const char *kItemTypes[] = {"ID", "IMAGE", "COLOR", "BITMAP", nullptr};
+// The ITEM TYPEs each form's parse sets a kind by, another token none: a LIST's ID alone [orig:
+// CListWnd_ParseXMLDefinition @ 0x645770], a SPINLIST's ID, IMAGE and COLOR [orig:
+// CUISpinList_ParseXMLDefinition @ 0x64bd10], a TABLE cell's ID and BITMAP [orig:
+// CTableWnd_ParseXMLContentDefinition @ 0x6427d0]; the form a window of `type` reads (a cell
+// being a ROW's ITEM).
+inline constexpr const char *kListItemTypes[] = {"ID", nullptr};
+inline constexpr const char *kSpinListItemTypes[] = {"ID", "IMAGE", "COLOR", nullptr};
+inline constexpr const char *kCellItemTypes[] = {"ID", "BITMAP", nullptr};
+const char *const *item_types_for(WindowType type, bool cell);
 // A HEADER's primary sort key, one slot under either name [orig: @ 0x6431f2 / 0x643228];
-// the writer puts the first down when the model holds no spelling
-// (TableColumn::primary_sort_token).
+// the writer puts the first down.
 inline constexpr const char *kPrimarySortTokens[] = {"PRIMARY_SORT", "DEFAULT_SORT", nullptr};
 // A BODY's draw kinds (TableBody::display), in the order the writer puts them down.
 inline constexpr const char *kBodyDisplays[] = {"CUSTOM_DRAW", "BITMAP_DRAW", "BITMAP_TEXT", nullptr};
@@ -154,11 +182,15 @@ inline constexpr const char *kHorizontalOrientation = "HORIZONTAL";
 bool known_token(const std::string &token, const char *const *tokens);
 
 // STRING [orig: CUIButtonWidget_ParseXMLAttributes @ 0x657c30].
+// A JUSTIFY / VJUSTIFY keyword sets the justification, another token's wcstol the x / y offset, two
+// fields the parse keeps apart (@ 0x657d62..0x657eba), so each holds the first authored of its kind.
 struct String {
   bool present = false;
   std::string type;     // "ID" (a string-table key) or literal
-  std::string justify;  // "LEFT", "CENTER", "RIGHT"
-  std::string vjustify; // "TOP", "CENTER", "BOTTOM"
+  std::string justify;  // "LEFT", "CENTER", "RIGHT"; "" none
+  std::string vjustify; // "TOP", "CENTER", "BOTTOM"; "" none
+  std::string justify_offset;  // a JUSTIFY of another token: the x offset wcstol reads; "" none
+  std::string vjustify_offset; // a VJUSTIFY of another token: the y offset; "" none
   bool has_edge = false;
   int edge = 0;         // Padding from edge in pixels
   bool wrap = false;    // WRAP, presence
@@ -193,32 +225,40 @@ struct Font {
   }
 };
 
-// One ITEM: a list / spin list row, or a TABLE cell (in a ROW).
+// One ITEM: a list / spin list row, or a TABLE cell (in a ROW). TYPE holds the token its
+// parse sets a kind by (a LIST's ID; a SPINLIST's ID, IMAGE, COLOR; a cell's ID, BITMAP
+// [orig: CListWnd_ParseXMLDefinition @ 0x645770; CUISpinList_ParseXMLDefinition @ 0x64bd10;
+// CTableWnd_ParseXMLContentDefinition @ 0x6427d0]), any other none; VALUE the number
+// wcstol reads ("" for 0, the parses' default; a SUBST's VALUE is its token, matched as text);
+// JUSTIFY and VJUSTIFY a keyword and, apart, the number wcstol reads of another token (the x or y
+// offset), as a STRING's.
 struct Item {
-  std::string type;     // ID / IMAGE / COLOR (spin list) / BITMAP (table cell)
-  std::string value;    // VALUE
+  std::string type;     // ID / IMAGE / COLOR (spin list) / BITMAP (table cell); "" none
+  std::string value;    // VALUE, the decimal of the number read; "" 0
   std::string text;     // the element text: display text, a key or a texture name
-  std::string justify;  // JUSTIFY
-  std::string vjustify; // VJUSTIFY
+  std::string justify;  // JUSTIFY: LEFT / CENTER / RIGHT; "" none
+  std::string vjustify; // VJUSTIFY: TOP / CENTER / BOTTOM; "" none
+  std::string justify_offset;  // a JUSTIFY of another token: the x offset's decimal; "" none
+  std::string vjustify_offset; // a VJUSTIFY of another token: the y offset's decimal; "" none
   bool pairs_list = false; // PAIRS_LIST, presence (LIST)
   bool has_column = false; // COLUMN (a TABLE cell)
   int column = 0;
-  uint64_t source = 0;   // the element it was read from (Document::text_layout); 0: made in code
 };
 
 // A TABLE's ITEMS > ROW: one row of cells [orig: CTableWnd_ParseXMLContentDefinition
 // @ 0x6427d0].
 struct TableRow {
   std::vector<Item> cells;
-  uint64_t source = 0;   // the element it was read from (Document::text_layout); 0: made in code
 };
 
 // Items container for list-like widgets.
 struct Items {
   bool present = false;
   bool multiselect = false;  // MULTISELECT, presence
-  std::string justify;       // "LEFT", "CENTER", "RIGHT"
-  std::string vjustify;      // "TOP", "CENTER", "BOTTOM"
+  std::string justify;       // "LEFT", "CENTER", "RIGHT"; "" none
+  std::string vjustify;      // "TOP", "CENTER", "BOTTOM"; "" none
+  std::string justify_offset;  // the x offset's decimal (a JUSTIFY of another token); "" none
+  std::string vjustify_offset; // the y offset's decimal; "" none
   std::vector<Appearance> appearances;  // ordered, duplicates kept
   std::vector<Item> items;
   std::vector<TableRow> rows;           // TABLE only
@@ -246,7 +286,7 @@ struct Frame {
 // Cursor definition.
 struct Cursor {
   std::string file;  // Cursor image file (e.g., "newarow1.tga")
-  std::string flags; // Cursor flags (e.g., "STANDARD_TRANSPARENT")
+  uint32_t flags = kDefaultUiMaterialFlags; // FLAGS, the texture flags word [orig: @ 0x649586]
 };
 
 // Table column header definition. The COLUMN index is explicit in the model: a
@@ -254,23 +294,30 @@ struct Cursor {
 // element, which the reader writes in (so a save in any order reads the same).
 // WIDTH and SORT are as authored: one the HEADER leaves out carries over from the
 // HEADER before it (table_header_setup resolves them).
+// A HEADER [orig: CTableWnd_ParseXMLContentDefinition @ 0x6427d0, the HEADER walk]: its JUSTIFY and
+// VJUSTIFY a keyword (another token's wcstol is read for nothing, @ 0x643430), SORT '1' (numeric)
+// or 'A' (alphabetic, 'a' too; another first character keeps the carried one), TYPE ID or none.
 struct TableHeader {
-  std::string justify;   // "LEFT", "CENTER", "RIGHT"
-  std::string vjustify;  // "TOP", "CENTER", "BOTTOM"
+  std::string justify;   // "LEFT", "CENTER", "RIGHT"; "" none
+  std::string vjustify;  // "TOP", "CENTER", "BOTTOM"; "" none
   bool has_column = false;
   int column = 0;        // Column index
-  std::string sort;      // SORT ('1' numeric, 'A'/'a' alphabetic; other values keep the carried one)
+  std::string sort;      // SORT: "1", "A" or "" (keeps the carried one)
   bool has_width = false;
   int width = 0;         // WIDTH: the column width in pixels
-  std::string type;      // "id" = text is a string-table key (CUIStringTable_LookupString)
-  std::string text;      // Header text, or the string ID when type=="id"
-  uint64_t source = 0;   // the element it was read from (Document::text_layout); 0: made in code
+  std::string type;      // "ID" = text is a string-table key (CUIStringTable_LookupString); "" none
+  std::string text;      // Header text, or the string ID when type is ID
+  // FIELD: the filter field a GLB_TABLE's browser reads for the column (its GLB_TABLE and
+  // GLB_INFO_PLAYER_DETAILS tables alone [orig: @ 0x65dac0, the COLUMN / HEADER walk]).
+  std::string field;
 };
 
 // Table column body definition.
 struct TableBody {
-  std::string justify;   // "LEFT", "CENTER", "RIGHT"
-  std::string vjustify;  // "TOP", "CENTER", "BOTTOM"
+  std::string justify;   // "LEFT", "CENTER", "RIGHT"; "" none
+  std::string vjustify;  // "TOP", "CENTER", "BOTTOM"; "" none
+  std::string justify_offset;  // the x offset's decimal (a JUSTIFY of another token); "" none
+  std::string vjustify_offset; // the y offset's decimal; "" none
   bool has_column = false;
   int column = 0;        // Column index
   bool bitmap_draw = false;      // BITMAP_DRAW - render images in this column
@@ -279,9 +326,8 @@ struct TableBody {
   // The cell's draw kind is the first authored of CUSTOM_DRAW / BITMAP_DRAW /
   // BITMAP_TEXT (retail's walk keeps it); written first. Empty: none authored.
   std::string display;
-  std::string bitmap_flags;      // BITMAP_FLAGS (e.g., "STANDARD_TRANSPARENT")
+  uint32_t bitmap_flags = kDefaultUiMaterialFlags; // BITMAP_FLAGS, the texture flags word
   bool scale_bitmap = false;     // SCALE_BITMAP flag
-  uint64_t source = 0;   // the element it was read from (Document::text_layout); 0: made in code
 };
 
 // Value substitution for table cells (renders image based on value).
@@ -292,7 +338,6 @@ struct TableSubst {
   bool is_file = false;  // FILE attribute present (image substitution)
   bool is_url = false;   // URL attribute present (the image is fetched)
   std::string file;      // the element text: the image name or address
-  uint64_t source = 0;   // the element it was read from (Document::text_layout); 0: made in code
 };
 
 // Table column definition.
@@ -311,8 +356,7 @@ struct TableColumn {
   // walk runs last authored first, so a key authored after the HEADER's own COLUMN
   // takes the index before it); the last write wins. -1: no HEADER sets it. The
   // writer places each on a HEADER that reads back the same index.
-  int primary_sort = -1;
-  std::string primary_sort_token;  // DEFAULT_SORT or PRIMARY_SORT, as authored
+  int primary_sort = -1;            // DEFAULT_SORT or PRIMARY_SORT, written PRIMARY_SORT
   int secondary_sort = -1;
   int tertiary_sort = -1;
 };
@@ -345,38 +389,46 @@ struct TableData {
 };
 
 // One authored accelerator. A Window may carry several HOTKEY rows; order is
-// significant because the runtime chooses the first matching visible Widget.
+// significant because the runtime chooses the first matching visible Widget. The key the
+// parse reads [orig: CUIElement_ParseXMLDefinition @ 0x648120, the HOTKEY arm]: with
+// VIRTUAL one of the three names CWnd_ParseVirtualKeyNameW @ 0x6467f0 knows (VK_RETURN,
+// VK_ESCAPE, VK_SPACE), else the text's first character; a key of 0 (another name, an
+// empty text) registers nothing [orig: CWnd_RegisterHotkeysRecursive @ 0x649d90] and is
+// left out.
 struct Hotkey {
-  std::string value;        // the element text, untrimmed
+  std::string value;        // VIRTUAL: the key's name as the table spells it; else its one character
   bool virtual_key = false; // VIRTUAL, presence
-  uint64_t source = 0;   // the element it was read from (Document::text_layout); 0: made in code
 };
 
-// An element a type-specific parse reads that the model does not type (the
-// LAN_LIST buttons, the GLB_TABLE parts, the GOPHER targets and filters), kept as
-// read so it writes back the same.
-struct ElementAttribute {
-  std::string name;
-  std::string value;      // the token retail reads
-  bool has_value = false; // false: a bare attribute
-};
-struct Element {
-  std::string tag;
-  std::vector<ElementAttribute> attributes;
+// The GLB_INFO_SERVER_DETAILS's FIELDS [orig: CLanGameBrowser_ParseXMLFieldDefinitions @
+// 0x65d850]: the count of field slots (count, the last authored), the FORMAT text (the last;
+// its \r and \n pairs read as CR and LF) and each slot's FIELD text by its index (which,
+// one past the count reading as 0; the last FIELD of a slot kept).
+struct GlbFieldSlot {
+  int which = 0;
   std::string text;
-  std::vector<Element> children;
-  uint64_t source = 0;   // the element it was read from (Document::text_layout); 0: made in code
+};
+struct GlbFields {
+  bool present = false;
+  bool has_count = false;
+  int count = 0;
+  bool has_format = false;
+  std::string format; // as read: CR and LF where the file writes \r and \n
+  std::vector<GlbFieldSlot> fields; // one per slot, in the slots' first order
 };
 
-// The elements only the GLB_TABLE, GOPHER and LAN_LIST parses read, which a window keeps
-// at its top level as read [orig: CLanGameBrowser_ParseExtendedXMLDefinition @ 0x65dac0;
-// CGopherWnd_ParseXMLDefinition @ 0x65b130; CLanListWnd_ParseXMLDefinition @ 0x65b9d0],
-// and the attributes beside its own it keeps, read by presence with no value [orig:
-// CLanGameBrowser_ParseExtendedXMLDefinition @ 0x65dac0]; each nullptr-ended.
-inline constexpr const char *kExtraTags[] = {"JOIN_BUTTON", "SEARCH_BUTTON", "GLB_TABLE", "GLB_INFO_BUTTON",
-                                             "GLB_INFO_PLAYER_DETAILS", "GLB_INFO_SERVER_DETAILS", "GLB_NW_INFO",
-                                             "TARGET", "FILTERS", "GOPHER_BACK", nullptr};
-inline constexpr const char *kExtraAttributes[] = {"PLAYERLIST", "SERVERLIST", nullptr};
+// A GOPHER category's ITEM (a button) or INFO (a static) [orig: CGopherWnd_ParseCategoryXML
+// @ 0x65a540]: its NAME (GOPHER_BUTTON / GOPHER_INFO where none), an ITEM's TARGET, FILTER and
+// TABLE, an INFO's FILTER and TABLE, each the first authored with a token (the walk runs the
+// attribute list, last authored first, and skips one of no token), and the element text.
+struct GopherEntry {
+  bool info = false;
+  std::string name;
+  std::string target; // ITEM only
+  std::string filter;
+  std::string table;
+  std::string text;
+};
 
 struct Window;
 
@@ -416,14 +468,21 @@ private:
   bool shown_ = false;
 };
 
+// One CATEGORY of a GOPHER's FILTERS [orig: CGopherWnd_ParseCategoryXML @ 0x65a540]: its LEVEL
+// (the window the category attaches under; LEVEL0 where none), its LABEL (the category's static
+// parses the element's children; a repeat parses into the same widget) and its ITEM and INFO
+// rows in order.
+struct GopherCategory {
+  bool has_level = false;
+  std::string level;
+  WindowPart label;
+  std::vector<GopherEntry> entries;
+};
+
 // Window/widget node in the UI tree.
 struct Window {
   std::string name;
   WindowType type = WindowType::Window;
-  // The TYPE token as authored (its first token), written in preference to the
-  // canonical name so a token the factory does not match round-trips. Empty for
-  // windows created in code and for parts.
-  std::string type_token;
   // Flags are presence-only [orig: @ 0x648120 attribute walk]: HIDDEN="0" hides.
   bool hidden = false;
   bool disabled = false;    // DISABLE
@@ -500,13 +559,35 @@ struct Window {
   // Table-specific data.
   TableData table_data;
 
-  // What only the GLB_TABLE, GOPHER and LAN_LIST parses read, kept as read.
-  std::vector<Element> extras;
-  std::vector<ElementAttribute> extra_attributes; // PLAYERLIST / SERVERLIST
+  // LAN_LIST: its JOIN_BUTTON and SEARCH_BUTTON, each parsed by an embedded button
+  // [orig: CLanListWnd_ParseXMLDefinition @ 0x65b9d0, the CButtonWnds at +0x1000 / +0x1304].
+  WindowPart join_button;
+  WindowPart search_button;
+
+  // GLB_TABLE [orig: CLanGameBrowser_ParseExtendedXMLDefinition @ 0x65dac0; the embedded
+  // widgets of CLanWnd_Construct @ 0x65ec30]: PLAYERLIST (1) or SERVERLIST (0) on the WINDOW,
+  // the last authored; GLB_TABLE and GLB_INFO_PLAYER_DETAILS each parsed by an embedded
+  // table (their HEADERs' FIELD the browser's filter field, TableHeader::field),
+  // GLB_INFO_BUTTON by a button, GLB_INFO_SERVER_DETAILS by a multiline edit (its first
+  // FIELDS child the field slots), GLB_NW_INFO by a static; TARGET's text (the last).
+  bool glb_playerlist = false;
+  WindowPart glb_table;
+  WindowPart glb_info_button;
+  WindowPart glb_info_player_details;
+  WindowPart glb_info_server_details;
+  GlbFields glb_server_fields;
+  WindowPart glb_nw_info;
+  bool has_glb_target = false;
+  std::string glb_target;
+
+  // GOPHER [orig: CGopherWnd_ParseXMLDefinition @ 0x65b130]: every TARGET's text in order,
+  // every FILTERS' CATEGORYs in order, and GOPHER_BACK parsed by an embedded button.
+  std::vector<std::string> gopher_targets;
+  std::vector<GopherCategory> gopher_categories;
+  WindowPart gopher_back;
 
   // Child windows (nested hierarchy).
   std::vector<Window> children;
-  uint64_t source = 0;   // the element it was read from (Document::text_layout); 0: made in code
 };
 
 // Screen definition (top-level container) [orig: CUIScene_ParseNodeAttributes
@@ -516,7 +597,6 @@ struct Screen {
   bool has_music_var = false;
   int music_var = 0;           // Music track index
   std::vector<Window> roots;   // every root WINDOW, in document order
-  uint64_t source = 0;   // the element it was read from (Document::text_layout); 0: made in code
 };
 
 // The source encoding is document metadata, not opaque source passthrough
@@ -535,21 +615,10 @@ enum class SourceEncoding : uint8_t {
 void decode_source(const uint8_t *data, size_t size, SourceEncoding &encoding,
                    std::u32string &text);
 
-struct TextLayout;
-
 // Parsed MNU document containing one or more screens.
 struct Document {
   std::vector<Screen> screens;
   SourceEncoding source_encoding = SourceEncoding::CodePage;
-  // How the file it was read from looks (mnu_text_layout.h, D-MNU-22): the spelling and spacing
-  // of each of the writer's tokens, the comments and what the game reads nothing of, modeled
-  // beside the records (each record's `source` names its element). The writer generates every
-  // byte from the records and this data, so a menu read and written again comes back as it
-  // was, and an edit changes only its own tokens. Held only when the parse was asked for it
-  // (ParseLayout::Text); null for a document made in code or read without it (and a reset
-  // drops it): the writer then puts everything down in its own layout. Carried for the save
-  // alone; nothing shows it.
-  std::shared_ptr<const TextLayout> text_layout;
 
   // The screen a by-name lookup finds (case-insensitive): the LAST of that name,
   // as retail's newest-first walk does [orig: CUIScene_SelectNodeByName @ 0x63b6b0].
@@ -607,25 +676,24 @@ struct ParseNote {
   std::string locator;
 };
 
-// What a parse models beside the records: nothing more (the game's loads), or the file's text
-// layout too (Document::text_layout: an editor's load, so a save writes the file in its own look).
-enum class ParseLayout : uint8_t {
-  None,
-  Text,
-};
+// Whether two documents hold the same model, field by field (no text between them): the
+// screens, their windows, parts and rows, and the source encoding. `where`, when given, says
+// the first field that differs.
+bool equal(const Document &a, const Document &b, std::string *where = nullptr);
 
-// Parse MNU content from a string buffer.
-// Returns true on success, false on error with description in `error`.
+// Parse MNU content from a string buffer: each window holds what its type's parse reads
+// (an element, an attribute or a row its type does not read is left out, a ParseNote says
+// so). Returns true on success, false on error with description in `error`.
 bool parse(const std::string &content, Document &out, std::string &error,
-           std::vector<ParseNote> *notes = nullptr, ParseLayout layout = ParseLayout::None);
+           std::vector<ParseNote> *notes = nullptr);
 
 // Parse MNU content from a byte buffer.
 bool parse(const uint8_t *data, size_t size, Document &out, std::string &error,
-           std::vector<ParseNote> *notes = nullptr, ParseLayout layout = ParseLayout::None);
+           std::vector<ParseNote> *notes = nullptr);
 
 // Parse MNU file from disk.
 bool parse_file(const std::string &path, Document &out, std::string &error,
-                std::vector<ParseNote> *notes = nullptr, ParseLayout layout = ParseLayout::None);
+                std::vector<ParseNote> *notes = nullptr);
 
 // Strip the first {hot} marker from text for display; later markers remain
 // literal. Optionally returns the following hotkey byte and the marker's byte
@@ -656,11 +724,10 @@ std::vector<WriteIssue> write_issues(const Document &doc);
 // back, everything else as it is.
 std::string escape_text(const std::string &text);
 
-// Serialize MNU document back to XML-like text (the model's own bytes). With the document's
-// text layout (Document::text_layout, a ParseLayout::Text parse's), every element it holds
-// comes out in the file's own layout and a record it does not hold in the file's style beside
-// its neighbours; without one, the writer's own layout: when pretty is true, indented with
-// indent_size spaces, one element a line.
+// Serialize MNU document back to XML-like text, from the model alone (D-MNU-22: no original tool
+// writes a menu, so the form is OpenNova's own): when pretty is true, one element a line, each
+// level indented by indent_size spaces, every line ended by a line feed; else all on one line.
+// A file's comments and spacing are not kept.
 std::string serialize(const Document &doc, bool pretty = true,
                       int indent_size = 2);
 

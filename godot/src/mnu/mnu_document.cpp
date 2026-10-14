@@ -3,6 +3,7 @@
 
 #include "util/string_convert.h"
 
+#include <base/io/strutil.h>
 #include <runtime/menu/options_policy.h>
 
 #include <godot_cpp/classes/file_access.hpp>
@@ -20,8 +21,8 @@ using opennova::to_gd;
 using opennova::to_std;
 
 // The canonical item-row container of a list-like widget is the engine's
-// (runtime/menu menu_items_container: a combo's authored LIST_BOX rows, else
-// the window-level ITEMS block).
+// (runtime/menu menu_items_container: a combo's LIST_BOX rows, any other list's
+// own ITEMS block).
 using opennova::menu::menu_items_container;
 
 } // namespace
@@ -39,15 +40,15 @@ void MnuDocument::rebuild_ids() {
 const char *MnuDocument::state_for_slot(int slot) {
 	switch (slot) {
 		case TEX_DEFAULT:
-			return "default";
+			return "DEFAULT";
 		case TEX_MOUSEOVER:
-			return "mouseover";
+			return "MOUSEOVER";
 		case TEX_SELECTED:
-			return "selected";
+			return "SELECTED";
 		case TEX_DISABLED:
-			return "disabled";
+			return "DISABLED";
 		default:
-			return "default";
+			return "DEFAULT";
 	}
 }
 
@@ -266,7 +267,9 @@ String MnuDocument::get_item_value(int p_id, int p_index) const {
 	if (items == nullptr || p_index < 0 || p_index >= static_cast<int>(items->items.size())) {
 		return String();
 	}
-	return to_gd(items->items[p_index].value);
+	// The number the row holds: none is 0 (the parse's default).
+	const std::string &value = items->items[p_index].value;
+	return to_gd(value.empty() ? std::string("0") : value);
 }
 
 // --- M10: table column template (headers / bodies) ---
@@ -306,7 +309,7 @@ String MnuDocument::get_widget_texture(int p_id, int p_slot) const {
 	}
 	const char *state = state_for_slot(p_slot);
 	for (const auto &app : w->appearances) {
-		if (app.state == state) {
+		if (opennova::strutil::iequals(app.state, state)) {
 			return to_gd(app.value);
 		}
 	}

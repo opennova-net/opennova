@@ -60,7 +60,6 @@ func test_tree_and_resolve() -> void:
 	var d0 := db.get_division(0, 0)
 	assert_not_null(d0)
 	assert_eq(d0.name_key, "AV_DIV_SYNTH_0_0")
-	assert_eq(d0.flags, "skipdemo", "trailing flag preserved")
 	assert_eq(d0.combo_count, 4)
 
 	var resolved := db.get_combo(0, 0, 0)

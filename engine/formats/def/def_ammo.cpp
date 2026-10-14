@@ -1,10 +1,11 @@
 #include <formats/def/def.h>
 #include <base/io/crt_ftol.h>
 #include <base/io/tick_rate.h>
+#include <base/io/strutil.h>
 
 // AMMO.DEF: one record per ammunition type.
 
-#include "def_notes.h"
+#include "def_schema.h"
 #include "def_scan.h"
 
 #include <stdio.h>
@@ -23,31 +24,33 @@ namespace opennova::def {
 /* ========================================================================= */
 
 /* `flag <name>` -> bit, matched first-name-wins in TABLE ORDER (three 'internal' names
- * exist; a data file writing "internal" hits 0x40000 first, faithfully).
+ * exist; a data file writing "internal" hits 0x40000 first, faithfully), each name spelled as the
+ * game's table spells it (the writer puts that spelling down; the compare ignores case).
  * [orig: the 30-entry table @0x813500; AmmoDef_ParseProperty @0x40a2d0] */
 static const struct { const char *name; unsigned int bit; } k_ammo_flag_names[] = {
     {"ignoredmg", DEF_AMMO_FLAG_IGNOREDMG},        {"ignore", DEF_AMMO_FLAG_IGNORE},
     {"shrapnel", DEF_AMMO_FLAG_SHRAPNEL},         {"silenced", DEF_AMMO_FLAG_SILENCED},
-    {"water", DEF_AMMO_FLAG_WATER},           {"detonatesatchels", DEF_AMMO_FLAG_DETONATESATCHELS},
+    {"water", DEF_AMMO_FLAG_WATER},           {"Detonatesatchels", DEF_AMMO_FLAG_DETONATESATCHELS},
     {"nosmoke", DEF_AMMO_FLAG_NOSMOKE},         {"nocollide", DEF_AMMO_FLAG_NOCOLLIDE},
     {"nogravity", DEF_AMMO_FLAG_NOGRAVITY},      {"hasitem", DEF_AMMO_FLAG_HASITEM},
     {"instantkillzone", DEF_AMMO_FLAG_INSTANTKILLZONE},{"ownerimmune", DEF_AMMO_FLAG_OWNERIMMUNE},
     {"useownmove", DEF_AMMO_FLAG_USEOWNMOVE},    {"noage", DEF_AMMO_FLAG_NOAGE},
     {"forcetracer", DEF_AMMO_FLAG_FORCETRACER},   {"shotgun", DEF_AMMO_FLAG_SHOTGUN},
-    {"claymore", DEF_AMMO_FLAG_CLAYMORE},     {"nooitems", DEF_AMMO_FLAG_NOOITEMS},
-    {"nomitems", DEF_AMMO_FLAG_NOMITEMS},    {"noditems", DEF_AMMO_FLAG_NODITEMS},
-    {"ignorfoilage", DEF_AMMO_FLAG_IGNORFOILAGE},{"priority", DEF_AMMO_FLAG_PRIORITY},
-    {"clipwater", DEF_AMMO_FLAG_CLIPWATER},  {"clipwaterfx", DEF_AMMO_FLAG_CLIPWATERFX},
-    {"designatetarget", DEF_AMMO_FLAG_DESIGNATETARGET}, {"lawr", DEF_AMMO_FLAG_LAWR},
+    {"claymore", DEF_AMMO_FLAG_CLAYMORE},     {"NoOItems", DEF_AMMO_FLAG_NOOITEMS},
+    {"NoMItems", DEF_AMMO_FLAG_NOMITEMS},    {"NoDItems", DEF_AMMO_FLAG_NODITEMS},
+    {"IgnorFoilage", DEF_AMMO_FLAG_IGNORFOILAGE},{"Priority", DEF_AMMO_FLAG_PRIORITY},
+    {"ClipWater", DEF_AMMO_FLAG_CLIPWATER},  {"ClipWaterFx", DEF_AMMO_FLAG_CLIPWATERFX},
+    {"DesignateTarget", DEF_AMMO_FLAG_DESIGNATETARGET}, {"lawr", DEF_AMMO_FLAG_LAWR},
     {"fgrenade", DEF_AMMO_FLAG_FGRENADE},  {"internal", 0x40000u},
     {"internal", 0x1000u},      {"internal", 0x400000u},
 };
 
 /* `kztype rounds_kz_<X>` -> index 1..7; 0/unknown rejected like the original's
- * "bad kill zone type" warning path. [orig: 8-name table @0x8133E0] */
+ * "bad kill zone type" warning path; each name spelled as the game's table spells it.
+ * [orig: 8-name table @0x8133E0, 8-B rows {name, index}] */
 static const char *k_ammo_kz_names[8] = {
-    "rounds_kz_null",   "rounds_kz_knife", "rounds_kz_standard", "rounds_kz_medic",
-    "rounds_kz_radiusblast", "rounds_kz_c4", "rounds_kz_bullets", "rounds_kz_slash",
+    "rounds_kz_null",   "rounds_kz_Knife", "rounds_kz_Standard", "rounds_kz_Medic",
+    "rounds_kz_RadiusBlast", "rounds_kz_C4", "rounds_kz_Bullets", "rounds_kz_Slash",
 };
 
 /* `tracer_type` style name -> engine id; unknown names fall back to atol like the
@@ -171,9 +174,7 @@ static void inherit_ammo_defaults(DefAmmoDef *d, const DefAmmoFile *out) {
    [orig: AmmoDef_InitEffectsTable @0x409F20, called only @0x40A433, installs
    when def+0x68 and word +0x6C are both 0]: a second table in one def, and a
    table the file never closes, give the def nothing. */
-static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out, DefParseReport *report,
-                             DefTextNotes *notes) {
-    DefTextNoter noter(buf, file_len, notes);
+static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out, DefParseReport *report) {
     size_t entries_cap = 0;
     DefAmmoDef current;
     memset(&current, 0, sizeof(current));
@@ -181,7 +182,6 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out,
     size_t eff_cap = 0;
     std::vector<DefEffectTableEntry> staged;
     size_t number = 0; // the line a finding names, counting from 1
-    bool indent_noted = false; // the file's indentation read (DefLayout)
 
     /* The first load walks the file twice, a count of its `ammo` lines and
        then the parse, so the parse's first lines read the slots the count
@@ -192,7 +192,7 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out,
     io::ConfigTokens tokens_state;
     for_each_def_line(buf, file_len, tokens_state,
                       [](const io::ConfigTokens &, const char *, size_t, size_t) {});
-    for_each_def_line_noted(buf, file_len, tokens_state, [&](const char *at) { noter.line(at); },
+    for_each_def_line(buf, file_len, tokens_state,
                             [&](const io::ConfigTokens &tokens, const char *line, size_t line_len,
                                 size_t line_index) {
         const char *key = tokens.tokens[0];
@@ -214,7 +214,6 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out,
             table_installed = 0;
             copy_token(current.name, 32, tokens, 1);
             validate_header(as_read.c_str(), as_read.size(), 4, 32, current.unmodeled_count, report, number, current.name);
-            current.note = noter.open(DefRecordKind::Ammo);
             in_block = 1;
             return false;
         }
@@ -230,13 +229,11 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out,
                     for (const DefEffectTableEntry &e : staged)
                         DA_PUSH(current.effects_table, current.effects_table_count, eff_cap, e);
                     table_installed = 1;
-                    noter.property(DEF_LINE_ORDER_ROWS); // the table's end, a line of its rows' step
                 }
                 staged.clear();
                 return false;
             }
             inherit_ammo_defaults(&current, out);
-            noter.close();
             DA_PUSH(out->entries, out->count, entries_cap, current);
             memset(&current, 0, sizeof(current));
             eff_cap = 0;
@@ -268,8 +265,6 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out,
                 copy_token(e.hit_effect, sizeof(e.hit_effect), tokens, 1);
                 copy_token(e.impact_sound, sizeof(e.impact_sound), tokens, 2);
                 e.value = io::retail_atol(tokens.token(3));
-                // A row of the ammo's table, one line (its notes its own).
-                e.note = noter.open_nested(DefRecordKind::Effect, DEF_LINE_ORDER_ROWS, false, 0);
                 staged.push_back(e);
             }
             return false;
@@ -282,8 +277,6 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out,
             else if (table_installed)
                 authoring_issue(current.unmodeled_count, report, number, current.name, as_read.c_str(), as_read.size());
             in_effects = 1;
-            def_note_line(DefRecordKind::Ammo, current.line_order, key, strlen(key)); // where its table stands
-            if (!table_installed) noter.property(DEF_LINE_ORDER_ROWS);
             staged.clear();
             return false;
         }
@@ -349,7 +342,7 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out,
             to_lower_buf(fl, v, fn);
             for (size_t fi = 0; fi < sizeof(k_ammo_flag_names) / sizeof(k_ammo_flag_names[0]); ++fi) {
                 if (strlen(k_ammo_flag_names[fi].name) == fn &&
-                    memcmp(k_ammo_flag_names[fi].name, fl, fn) == 0) {
+                    strutil::iequals(std::string_view(fl, fn), k_ammo_flag_names[fi].name)) {
                     current.flags |= k_ammo_flag_names[fi].bit;
                     break;
                 }
@@ -380,7 +373,7 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out,
             size_t kn = vl < sizeof(kz) - 1 ? vl : sizeof(kz) - 1;
             to_lower_buf(kz, v, kn);
             for (int ki = 1; ki < 8; ++ki) {
-                if (strlen(k_ammo_kz_names[ki]) == kn && memcmp(k_ammo_kz_names[ki], kz, kn) == 0) {
+                if (strlen(k_ammo_kz_names[ki]) == kn && strutil::iequals(std::string_view(kz, kn), k_ammo_kz_names[ki])) {
                     current.kztype = ki;
                     break;
                 }
@@ -503,17 +496,12 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out,
 
         if (parsed) {
             validate_property(DefRecordKind::Ammo, as_read.c_str(), as_read.size(), current.unmodeled_count, report, number, current.name);
-            // What a writer keeps of the line: its place in the ammo's order, the file's indentation.
-            def_note_line(DefRecordKind::Ammo, current.line_order, key, strlen(key));
-            def_note_indent(out->layout, indent_noted, line, line_len);
-            noter.property(def_line_step(DefRecordKind::Ammo, key, strlen(key)));
         }
         if (!parsed) {
             authoring_issue(current.unmodeled_count, report, number, current.name, as_read.c_str(), as_read.size());
         }
         return false;
     });
-    noter.finish();
 
     /* The def the walk stopped in, or that the file never closes, was allocated
        at its `ammo` line and stays in the table [orig: AmmoDef_AllocateSlot
@@ -533,7 +521,7 @@ int def_parse_ammo(const char *path, DefAmmoFile *out, DefParseReport *report) {
     size_t file_len;
     char *buf = read_file(path, &file_len);
     if (!buf) return -1;
-    int rc = parse_ammo_buffer(buf, file_len, out, report, nullptr);
+    int rc = parse_ammo_buffer(buf, file_len, out, report);
     free(buf);
     return rc;
 }
@@ -541,17 +529,7 @@ int def_parse_ammo(const char *path, DefAmmoFile *out, DefParseReport *report) {
 int def_parse_ammo_memory(const uint8_t *data, size_t size, DefAmmoFile *out, DefParseReport *report) {
     memset(out, 0, sizeof(*out));
     if (!data) return -1;
-    return parse_ammo_buffer((const char *)data, size, out, report, nullptr);
-}
-
-int def_parse_ammo_memory(const uint8_t *data, size_t size, DefAmmoFile *out, DefParseReport *report,
-                          DefTextNotes &notes) {
-    memset(out, 0, sizeof(*out));
-    notes = DefTextNotes();
-    if (!data) return -1;
-    const int rc = parse_ammo_buffer((const char *)data, size, out, report, &notes);
-    def_note_baseline(*out, notes);
-    return rc;
+    return parse_ammo_buffer((const char *)data, size, out, report);
 }
 
 void def_free_ammo(DefAmmoFile *f) {

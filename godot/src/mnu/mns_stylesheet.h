@@ -7,7 +7,6 @@
 #include <godot_cpp/variant/string.hpp>
 
 #include <formats/mns/mns.h>
-#include <formats/mns/mns_document.h>
 #include <runtime/menu/menu_style.h>
 
 #include <unordered_map>
@@ -23,27 +22,36 @@ class ResourceRoot;
 // All format behavior lives in engine/formats/mns. Keys are case-insensitive (stored
 // uppercase in the flattened view).
 //
-// Document-backed (ADR 0014): the source of truth is a lossless opennova::mns::Document
-// (comments, grouping, alignment, conditionals, authored case all survive a
-// load -> save), and the StyleSheet the runtime substitutes through is the game's own
-// read of it (Document::evaluate: what the retail reader reads, up to where it stops).
-// Lookup/substitution serve that evaluated view; mutations and serialization go
-// through the document, so to_byte_array()/save_to_path() are byte-faithful for
-// untouched files and minimal-delta after edits.
+// The model is the reader's list (opennova::mns::KeyValueList): what the game reads of the
+// file, its directives decided and its comments, blanks and switched-off lines read as
+// nothing, up to where the reader stops. Lookup/substitution serve that list's flattened
+// view; mutations edit the list, and to_byte_array()/save_to_path() write it in the writer's
+// form (mns::write: `name<TAB>value` CR LF a line, in the list's order).
 //
 // The runtime loads the shell's stylesheets with load_shell (menu_style.mns, then
 // brand.mns onto it, as the game does): that sheet is a runtime view, its variables
-// the merged list and its document empty (nothing to edit or save).
+// the merged list and its own list empty (nothing to edit or save).
 class MnsStyleSheet : public Resource {
 	GDCLASS(MnsStyleSheet, Resource)
 
 private:
-	opennova::mns::Document doc_;
-	opennova::mns::StyleSheet sheet_; // the game's read (a runtime view: the shell's merged list)
-	std::vector<opennova::mns::Diagnostic> evaluation_diagnostics_;
+	// Where a read of the reader stopped, and what that means to the game.
+	struct Stop {
+		int line = 0;
+		bool hangs = false;
+		std::string message;
+	};
+
+	opennova::mns::KeyValueList list_;
+	opennova::mns::StyleSheet sheet_; // the flattened view (a runtime view: the shell's merged list)
+	std::vector<Stop> stops_;
 	bool runtime_valid_ = true;
 
 	void _refresh();
+	// The node of the name (case-blind), or -1.
+	int _find(const std::string &p_name) const;
+	// Read `p_text` as the game does into the list, the stop noted.
+	void _read(const std::string &p_text);
 
 protected:
 	static void _bind_methods();
@@ -71,27 +79,25 @@ public:
 	void set_variables(const Dictionary &p_variables);
 	void clear();
 
-	// --- Document view (native format inspection) ---
-	// Ordered active defines: {name, value, raw_value, inline_comment, line,
-	// node_index, multiline, group, preceding_comments}.
+	// --- The list (the model) ---
+	// The variables in the list's order: {name, value}.
 	Array get_entries() const;
-	// Number of entries (duplicates listed separately).
 	int get_entry_count() const;
-	// {line, severity: "error"|"warning", code, message}
-	Array get_diagnostics() const;
 	// True when the game reads the whole sheet (for a shell view: every sheet there);
 	// false when its reader stops, or would stop responding, part way.
 	bool is_runtime_valid() const { return runtime_valid_; }
+	// The reader's stop: {line, severity: "error", code: "stops"|"hangs", message}.
 	Array get_evaluation_diagnostics() const;
+	// The list in the writer's form ("" when the list has no form: a name or value the
+	// reader would read otherwise).
 	String get_source_text() const;
+	// Read `p_text` as the game does into the list.
 	void set_source_text(const String &p_text);
-	// p_after_name "" appends at the end of the document.
+	// p_after_name "" appends at the end of the list.
 	bool add_variable(const String &p_name, const String &p_value, const String &p_after_name = String());
 	bool rename_variable(const String &p_old_name, const String &p_new_name);
 	// p_to_entry_index is a position in entries() order; clamped to the end.
 	bool move_variable(const String &p_name, int p_to_entry_index);
-	// Plain text or a "//"-prefixed comment; empty clears.
-	bool set_inline_comment(const String &p_name, const String &p_comment);
 	bool is_valid_variable_name(const String &p_name) const;
 	bool is_valid_variable_value(const String &p_value) const;
 

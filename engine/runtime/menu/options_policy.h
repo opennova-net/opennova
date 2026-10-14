@@ -11,6 +11,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <string>
 #include <string_view>
 
 namespace opennova::menu {
@@ -176,9 +178,11 @@ inline constexpr OptionsForcedCheck kOptionsForcedChecks[] = {
 // [orig: SpinList_SelectItemByValue @0x64ba50 — the item+4 (stride 56)
 //  compare, the miss -> row 0 @0x64ba82; CSpinListWnd_GetSelectedValue
 //  @0x64baf0]
+// The item's value is the number its VALUE reads (the model holds none for 0, the parse's default).
 inline int spinlist_row_for_value(const mnu::Items &items, std::string_view value) {
+    const long wanted = std::strtol(std::string(value).c_str(), nullptr, 10);
     for (size_t i = 0; i < items.items.size(); ++i)
-        if (items.items[i].value == value) return static_cast<int>(i);
+        if (std::strtol(items.items[i].value.c_str(), nullptr, 10) == wanted) return static_cast<int>(i);
     return 0;
 }
 

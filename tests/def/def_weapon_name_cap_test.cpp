@@ -9,7 +9,6 @@
 // `sameas` as one a save cannot give back (blocking, on the `weapon` line, among that line's
 // findings), and leaves a name past 32 in a block with no `sameas` a reinterpretation, never a
 // blocker.
-#include <formats/def/def_notes.h>
 #include <formats/def/def_write.h>
 
 #include <cstdio>
@@ -103,23 +102,16 @@ int main() {
 		CHECK(refused_for_name(write_minted(kName40, "")), "a name past 32 is refused");
 	}
 
-	// A 32-character name in a block with no `sameas`: no finding, saved as the file has it.
+	// A 32-character name in a block with no `sameas`: no finding, saved in the writer's form, which reads back
+	// as the same name.
 	{
 		const std::string text = "weapon \"" + kName32 + "\"\r\ncategory 1\r\nend\r\n";
 		Parsed parsed(text);
 		CHECK(parsed.report.empty() && parsed.file.count == 1 && kName32 == parsed.file.entries[0].weapon_name &&
 		          parsed.file.entries[0].unmodeled_count == 0,
 		      "a 32-character name with no sameas parses whole and clean");
-		CHECK(def_write_weapons(parsed.file).ok(), "a parsed 32-character name with no sameas saves");
-
-		DefWeaponsFile noted{};
-		DefParseReport report;
-		DefTextNotes notes;
-		def_parse_weapons_memory(reinterpret_cast<const uint8_t *>(text.data()), text.size(), &noted, &report, notes);
-		const DefWriteResult kept = def_write_weapons(noted, &notes);
-		CHECK(report.empty() && kept.ok() && kept.text == text,
-		      "a 32-character name with no sameas saves over its layout as the file was");
-		def_free_weapons(&noted);
+		const DefWriteResult saved = def_write_weapons(parsed.file);
+		CHECK(saved.ok() && reads_back(saved, kName32, ""), "a parsed 32-character name with no sameas saves and reads back");
 	}
 
 	// A 32-character name in a block with `sameas`: the record keeps 32 characters and the sameas, as the

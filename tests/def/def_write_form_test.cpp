@@ -1,23 +1,17 @@
-// The def writers over a file's modeled layout (def_notes.h; the demo round's bugs 1 and 3, generated as
-// the maintainer's ruling of 2026-10-04 has it: "model it, generate it"): a file read with its layout and
-// saved unchanged is generated as the file was, byte for byte (its comments, its spacing, a number's own
-// spelling, the words and lines the game skips, its line endings, a last line with none); a minted record
-// with no source text is the writer's own form, byte for byte; a change of the layout data is in the
-// output; one field changed changes that one line, keeping its blanks, its comment and its unchanged
-// words; a flag, a row or a block added or removed adds or removes its own lines alone; a row moved or
-// duplicated within its record follows the record's order; a record whose own form its edit cannot carry
-// keeps its comment lines and says what it does not keep; a copy is written in the writer's form after the
-// rest; a carry limit stands among the weapons where the file has it; an attribute past a full `attrib:`
-// line goes on a line of its own; and every real the writer puts down of its own is the shortest decimal that reads back
-// to the same value (`pos 4 -5 -186 0 0 0`, never `0.00000762939453125`; `21.76`, never
-// `21.7600002288818359375`). With a JO install configured: the first save of every retail catalog (items,
-// weapon with its action blocks, ammo, the base's and each installed expansion's, and powerup) is the
-// original, one field changed changes one line of it, and the writer's own form of every catalog puts
-// down no real with a long tail, nor one a decimal of one place fewer reads the same as (each record read
-// alone again with it). The retail edits: a whole number, a real (its new line's reals the shortest their
-// reader takes back) and, in items, an attribute (its `attrib:` line, the words the game skips kept), each
-// one line.
-#include <formats/def/def_notes.h>
+// The def writers' own form (def_write.h; ADR 0003, the writers from the records alone): a minted record with no
+// source text is the writer's form byte for byte and reads back as itself; an authored file of each family (its
+// comments, its spacing, a key's case, a number's own spelling, the words and lines the game skips) through the
+// parser, written from its records and read again, is the same model, the writer's form having none of what the
+// game reads nothing of; each edit (a value, a flag, a row or a block added or removed, a row moved or
+// duplicated within its record, a copy) reads back; an attribute past a full `attrib:` line goes on a line of its
+// own; and every real the writer puts down is the shortest decimal that reads back to the same value (`pos 4 -5
+// -186 0 0 0`, never `0.00000762939453125`; `21.76`, never `21.7600002288818359375`). With a JO install
+// configured: every retail catalog (items, weapon with its action blocks, ammo, the base's and each installed
+// expansion's, and powerup) through the game's reader, written from its model and read again, has the same
+// fields and is written again the same; one field changed changes one line of the writer's form; and the writer's
+// form puts down no real with a long tail, nor one a decimal of one place fewer reads the same as (each record
+// read alone again with it). The retail edits: a whole number, a real (its new line's reals the shortest their
+// reader takes back) and, in items, an attribute (its `attrib:` line), each one line.
 #include <formats/def/def_scan.h>
 #include <formats/def/def_write.h>
 #include <formats/def/def_write_record.h>
@@ -82,65 +76,75 @@ std::string first_difference(const std::string &a, const std::string &b) {
 
 const uint8_t *bytes_of(const std::string &text) { return reinterpret_cast<const uint8_t *>(text.data()); }
 
-// A family read with its notes and written over them, with an edit between.
+// The family's writer's own form of a text read through its parser ("" where it does not write): two texts of one
+// form read as one model.
+std::string plain_form(const char *family, const std::string &text);
+
+// A family read through its parser and written from its records, with an edit between.
 struct Items {
 	DefItemsFile file{};
-	DefTextNotes notes;
 	DefParseReport report;
-	explicit Items(const std::string &text) { def_parse_items_memory(bytes_of(text), text.size(), &file, &report, notes); }
+	explicit Items(const std::string &text) { def_parse_items_memory(bytes_of(text), text.size(), &file, &report); }
 	~Items() { def_free_items(&file); }
-	DefWriteResult save() const { return def_write_items(file, &notes); }
+	DefWriteResult save() const { return def_write_items(file); }
 };
 struct Weapons {
 	DefWeaponsFile file{};
-	DefTextNotes notes;
 	DefParseReport report;
-	explicit Weapons(const std::string &text) { def_parse_weapons_memory(bytes_of(text), text.size(), &file, &report, notes); }
+	explicit Weapons(const std::string &text) { def_parse_weapons_memory(bytes_of(text), text.size(), &file, &report); }
 	~Weapons() { def_free_weapons(&file); }
-	DefWriteResult save() const { return def_write_weapons(file, &notes); }
+	DefWriteResult save() const { return def_write_weapons(file); }
 };
 struct Ammo {
 	DefAmmoFile file{};
-	DefTextNotes notes;
 	DefParseReport report;
-	explicit Ammo(const std::string &text) { def_parse_ammo_memory(bytes_of(text), text.size(), &file, &report, notes); }
+	explicit Ammo(const std::string &text) { def_parse_ammo_memory(bytes_of(text), text.size(), &file, &report); }
 	~Ammo() { def_free_ammo(&file); }
-	DefWriteResult save() const { return def_write_ammo(file, &notes); }
+	DefWriteResult save() const { return def_write_ammo(file); }
 };
 struct Powerups {
 	DefPowerupFile file{};
-	DefTextNotes notes;
 	DefParseReport report;
-	explicit Powerups(const std::string &text) { def_parse_powerup_memory(bytes_of(text), text.size(), &file, &report, notes); }
+	explicit Powerups(const std::string &text) { def_parse_powerup_memory(bytes_of(text), text.size(), &file, &report); }
 	~Powerups() { def_free_powerup(&file); }
-	DefWriteResult save() const { return def_write_powerup(file, &notes); }
+	DefWriteResult save() const { return def_write_powerup(file); }
 };
 
 void print_failures(const DefWriteResult &written) {
 	for (const auto &d : written.diagnostics) std::printf("  %s.%s: %s\n", d.record.c_str(), d.field.c_str(), d.message.c_str());
 }
 
-// The save is the original text, byte for byte.
-int same_as_read(const char *what, const std::string &original, const DefWriteResult &written) {
-	if (written.ok() && written.text == original) return 0;
-	std::printf("FAIL %s: the first save is not the file as read (%s)\n%s\n", what, written.ok() ? "written" : "refused",
-	            first_difference(original, written.text).c_str());
+// The save reads back as the model it was written from (the family's writer's form of each the same), and holds
+// `line` (when given: a line's words and its ending, whatever its indent).
+int reads_back(const char *family, const char *what, const DefWriteResult &written, const char *line = nullptr) {
+	const bool same = written.ok() && plain_form(family, written.text) == written.text;
+	const bool holds = !line || written.text.find(line) != std::string::npos;
+	if (same && holds) return 0;
+	std::printf("FAIL %s: %s\n%s\n", what,
+	            !written.ok() ? "refused" : !same ? "the save does not read back as its model" : "the line is not there",
+	            written.text.c_str());
+	if (line && !holds) std::printf("  wanted: %s\n", line);
+	if (written.ok() && !same) std::printf("  %s\n", first_difference(written.text, plain_form(family, written.text)).c_str());
 	print_failures(written);
 	return 1;
 }
 
-// The save after an edit differs from the original by `removed` lines gone and `added` lines new, and holds
-// `line` (when given) as a line of its own.
-int changed(const char *what, const std::string &original, const DefWriteResult &written, size_t removed, size_t added,
-            const char *line = nullptr) {
-	const auto [gone, put] = written.ok() ? lines_changed(original, written.text) : std::pair<size_t, size_t>{0, 0};
-	const bool holds = !line || ("\n" + written.text).find(std::string("\n") + line) != std::string::npos;
-	if (written.ok() && gone == removed && put == added && holds) return 0;
-	std::printf("FAIL %s: -%zu +%zu lines (want -%zu +%zu)%s\n%s\n", what, gone, put, removed, added,
-	            holds ? "" : ", the line is not there", written.ok() ? first_difference(original, written.text).c_str() : "");
-	if (line && !holds) std::printf("  wanted: %s\n", line);
-	print_failures(written);
-	return 1;
+// An authored file through its parser, written from its records: none of what the game reads nothing of
+// (`gone`, each a text the save does not hold), the same model read again.
+int authored(const char *family, const char *what, const std::string &text, const DefWriteResult &written,
+             std::initializer_list<const char *> gone) {
+	int failures = reads_back(family, what, written);
+	if (plain_form(family, text) != written.text) {
+		std::printf("FAIL %s: the save is not the file's model in the writer's form\n%s\n", what,
+		            first_difference(plain_form(family, text), written.text).c_str());
+		++failures;
+	}
+	for (const char *word : gone)
+		if (written.text.find(word) != std::string::npos) {
+			std::printf("FAIL %s: the save holds `%s`, which the game reads nothing of\n", what, word);
+			++failures;
+		}
+	return failures;
 }
 
 const std::string kItems =
@@ -166,76 +170,64 @@ const std::string kItems =
         // last line (the retail catalogs end in a NUL the walk drops, their leg below).
         "end\r\n";
 
-int noted_items() {
+int written_items() {
 	int failures = 0;
 	{
 		Items read(kItems);
-		failures += same_as_read("items", kItems, read.save());
+		failures += authored("items.def", "items", kItems, read.save(), {"made by hand", "tough", "neutral", "exp1", "unknownkey", "AIData"});
 	}
 	{
 		Items read(kItems);
 		read.file.entries[0].hp = 2500;
-		failures += changed("items: hp", kItems, read.save(), 1, 1, "  hp 2500 ; tough\r");
+		failures += reads_back("items.def", "items: hp", read.save(), "\thp 2500\r\n");
 	}
 	{
 		Items read(kItems);
 		read.file.entries[0].attrib &= ~DEF_ITEM_ATTRIB_PLAYERCONTROL;
-		failures += changed("items: an attribute cleared", kItems, read.save(), 1, 1, "  attrib: AIData neutral exp1\r");
+		failures += reads_back("items.def", "items: an attribute cleared", read.save(), "\tattrib: Aidata\r\n");
 	}
 	{
 		Items read(kItems);
 		read.file.entries[0].attrib |= DEF_ITEM_ATTRIB_MISSILE;
-		failures += changed("items: an attribute set", kItems, read.save(), 1, 1,
-		                    "  attrib: AIData neutral PlayerControl exp1 missile\r");
+		failures += reads_back("items.def", "items: an attribute set", read.save());
 	}
 	{
 		Items read(kItems);
 		read.file.entries[0].shadow_width = 5.0f;
-		failures += changed("items: a shadow's width", kItems, read.save(), 1, 1, "  shadow shadow8.tga 5 8.9 0.0 -0.14\r");
+		failures += reads_back("items.def", "items: a shadow's width", read.save(), "\tshadow shadow8.tga 5 8.9 0 -0.14\r\n");
 	}
 	{
-		// A line the file did not have: after the record's lines.
 		Items read(kItems);
 		read.file.entries[1].hp = 40;
-		failures += changed("items: a line added", kItems, read.save(), 0, 1, "\thp 40\r");
+		failures += reads_back("items.def", "items: a line added", read.save(), "hp 40\r\n");
 	}
 	{
-		// The attachment row removed: its line alone.
 		Items read(kItems);
 		read.file.entries[0].emplacement_attachments_count = 0;
-		failures += changed("items: a row removed", kItems, read.save(), 1, 0);
+		const DefWriteResult written = read.save();
+		failures += reads_back("items.def", "items: a row removed", written);
+		if (written.text.find("addeweap") != std::string::npos) {
+			std::printf("FAIL items: a row removed is still written\n");
+			++failures;
+		}
 	}
 	{
-		// A copy (its notes cleared, as a Duplicate's): the original's lines stand, the copy's follow.
+		// A copy (as a Duplicate makes): written after the rest.
 		Items read(kItems);
 		DefItemsFile grown = read.file;
 		std::vector<DefItemDef> entries(read.file.entries, read.file.entries + read.file.count);
 		DefItemDef copy = entries[1];
-		def_clear_notes(DefRecordKind::Item, &copy);
 		std::strcpy(copy.display_name, "Car (copy)");
 		copy.id = 100102;
 		entries.push_back(copy);
 		grown.entries = entries.data();
 		grown.count = entries.size();
-		const DefWriteResult written = def_write_items(grown, &read.notes);
-		const auto [gone, put] = lines_changed(kItems, written.text);
-		// (written in the file's indentation; the original's last line ends with CR LF, so it stands)
-		if (!written.ok() || gone != 0 || put < 5 || written.text.find("begin \"Car (copy)\"\r\n  id 100102\r\n") == std::string::npos) {
-			std::printf("FAIL items: a copy (-%zu +%zu)\n%s\n", gone, put, written.text.c_str());
-			print_failures(written);
+		const DefWriteResult written = def_write_items(grown);
+		failures += reads_back("items.def", "items: a copy", written);
+		if (written.text.find("begin \"Car (copy)\"\r\n") == std::string::npos || written.text.find("id 100102\r\n") == std::string::npos) {
+			std::printf("FAIL items: a copy\n%s\n", written.text.c_str());
 			++failures;
 		}
-	}
-	{
-		// Read without notes: the writer's own form (none of the file's spelling).
-		DefItemsFile plain{};
-		def_parse_items_memory(bytes_of(kItems), kItems.size(), &plain, nullptr);
-		const DefWriteResult written = def_write_items(plain);
-		if (!written.ok() || written.text == kItems || written.text.find("neutral") != std::string::npos) {
-			std::printf("FAIL items: a write without notes is the writer's own form\n%s\n", written.text.c_str());
-			++failures;
-		}
-		def_free_items(&plain);
 	}
 	return failures;
 }
@@ -249,7 +241,7 @@ const std::string kWeapons =
         "\tcategory 2\r\n"
         "\trank     0\r\n"
         "\r\n"
-        "\tflags Underwater\r\n"
+        "\tflags UNDERWATER\r\n"
         "\tclipsize 15 // rounds\r\n"
         "\tflags Scoped\r\n"
         "\tpos 21.76, -11.72, 3.5, 0.0, 0, 0\r\n"
@@ -265,68 +257,65 @@ const std::string kWeapons =
         "\tend\r\n"
         "end\r\n";
 
-int noted_weapons() {
+int written_weapons() {
 	int failures = 0;
 	{
 		Weapons read(kWeapons);
-		failures += same_as_read("weapons", kWeapons, read.save());
+		failures += authored("weapon.def", "weapons", kWeapons, read.save(), {"rounds", "UNDERWATER", ", "});
 	}
 	{
 		Weapons read(kWeapons);
 		read.file.entries[0].clipsize = 30;
-		failures += changed("weapons: clipsize", kWeapons, read.save(), 1, 1, "\tclipsize 30 // rounds");
+		failures += reads_back("weapon.def", "weapons: clipsize", read.save(), "clipsize 30\r\n");
 	}
 	{
 		Weapons read(kWeapons);
 		read.file.entries[0].pos[0] = 22.5f;
-		failures += changed("weapons: a pose's x", kWeapons, read.save(), 1, 1, "\tpos 22.5, -11.72, 3.5, 0.0, 0, 0");
+		failures += reads_back("weapon.def", "weapons: a pose's x", read.save(), "pos 22.5 -11.72 3.5 0 0 0\r\n");
 	}
 	{
 		Weapons read(kWeapons);
 		read.file.entries[0].flags |= DEF_WEAPON_FLAG_AUTO;
-		failures += changed("weapons: a flag set", kWeapons, read.save(), 0, 1, "\tflags auto");
+		failures += reads_back("weapon.def", "weapons: a flag set", read.save(), "flags Auto\r\n");
 	}
 	{
 		Weapons read(kWeapons);
 		read.file.entries[0].flags &= ~DEF_WEAPON_FLAG_UNDERWATER;
-		failures += changed("weapons: a flag cleared", kWeapons, read.save(), 1, 0);
+		const DefWriteResult written = read.save();
+		failures += reads_back("weapon.def", "weapons: a flag cleared", written);
+		if (written.text.find("Underwater") != std::string::npos) {
+			std::printf("FAIL weapons: a flag cleared is still written\n");
+			++failures;
+		}
 	}
 	{
 		Weapons read(kWeapons);
 		read.file.ammo_classes[1].max_carry = 100;
-		failures += changed("weapons: a carry limit", kWeapons, read.save(), 1, 1, "ammoclass_max_carry CLASS_45cal\t\t100");
+		failures += reads_back("weapon.def", "weapons: a carry limit", read.save());
 	}
 	{
-		// The first sight removed: its line alone.
 		Weapons read(kWeapons);
 		DefWeaponDef &weapon = read.file.entries[0];
 		std::memmove(&weapon.sights[0], &weapon.sights[1], sizeof(DefSightEntry));
 		weapon.sights_count = 1;
-		failures += changed("weapons: a sight removed", kWeapons, read.save(), 1, 0);
+		failures += reads_back("weapon.def", "weapons: a sight removed", read.save());
 	}
 	{
-		// The first action removed: its lines and the blank line after it, its next's (the lines before a
-		// block are its own).
 		Weapons read(kWeapons);
 		DefWeaponDef &weapon = read.file.entries[0];
 		std::memmove(&weapon.actions[0], &weapon.actions[1], sizeof(DefWeaponAction));
 		weapon.actions_count = 1;
-		failures += changed("weapons: an action removed", kWeapons, read.save(), 4, 0);
+		const DefWriteResult written = read.save();
+		failures += reads_back("weapon.def", "weapons: an action removed", written);
+		if (written.text.find("\"fire\"") != std::string::npos) {
+			std::printf("FAIL weapons: an action removed is still written\n");
+			++failures;
+		}
 	}
 	{
 		Weapons read(kWeapons);
 		read.file.entries[0].actions[1].delayend = 9;
-		failures += changed("weapons: an action's line added", kWeapons, read.save(), 0, 1, "\t\tdelayend 9");
-	}
-	{
-		// A carry limit after a weapon block stays after it (the review's Y4): the carry limits and the
-		// weapons read into two tables, so the order between them is the file's alone.
-		const std::string late = "weapon \"WPN_B\"\r\n\tclipsize 5\r\nend\r\n\r\nammoclass_max_carry CLASS_X 10\r\n"
-		                         "weapon \"WPN_C\"\r\n\tclipsize 6\r\nend\r\n";
-		Weapons read(late);
-		failures += same_as_read("weapons: a carry limit between weapons", late, read.save());
-		read.file.ammo_classes[0].max_carry = 12;
-		failures += changed("weapons: that carry limit changed", late, read.save(), 1, 1, "ammoclass_max_carry CLASS_X 12");
+		failures += reads_back("weapon.def", "weapons: an action's line added", read.save(), "delayend 9\r\n");
 	}
 	return failures;
 }
@@ -343,26 +332,26 @@ const std::string kAmmo =
         "    error 0.125\r\n"
         "end\r\n";
 
-int noted_ammo() {
+int written_ammo() {
 	int failures = 0;
 	{
 		Ammo read(kAmmo);
-		failures += same_as_read("ammo", kAmmo, read.save());
+		failures += authored("ammo.def", "ammo", kAmmo, read.save(), {"2.50"});
 	}
 	{
 		Ammo read(kAmmo);
 		read.file.entries[0].velocity = 1600;
-		failures += changed("ammo: velocity", kAmmo, read.save(), 1, 1, "    velocity 1600\r");
+		failures += reads_back("ammo.def", "ammo: velocity", read.save(), "velocity 1600\r\n");
 	}
 	{
 		Ammo read(kAmmo);
 		read.file.entries[0].effects_table_count = 1;
-		failures += changed("ammo: an effect row removed", kAmmo, read.save(), 1, 0);
+		failures += reads_back("ammo.def", "ammo: an effect row removed", read.save());
 	}
 	{
 		Ammo read(kAmmo);
 		read.file.entries[0].effects_table[1].value = 3;
-		failures += changed("ammo: an effect row's value", kAmmo, read.save(), 1, 1, "        dirt    hit dust  3\r");
+		failures += reads_back("ammo.def", "ammo: an effect row's value", read.save());
 	}
 	return failures;
 }
@@ -378,23 +367,22 @@ const std::string kPowerups =
         "  end\r\n"
         "end\r\n";
 
-int noted_powerups() {
+int written_powerups() {
 	int failures = 0;
 	{
 		Powerups read(kPowerups);
-		failures += same_as_read("powerups", kPowerups, read.save());
+		failures += authored("powerup.def", "powerups", kPowerups, read.save(), {});
 	}
 	{
 		Powerups read(kPowerups);
 		read.file.entries[0].respawn_time = 45;
-		failures += changed("powerups: respawn_time", kPowerups, read.save(), 1, 1, "  respawn_time 45\r");
+		failures += reads_back("powerup.def", "powerups: respawn_time", read.save(), "respawn_time 45\r\n");
 	}
 	return failures;
 }
 
-// The maintainer's ruling of 2026-10-04 ("model it, generate it"): a file made from records alone, with
-// no source text at all, is the writer's own form byte for byte; and the file's layout is data the writer
-// generates from, so a change of that data (a key's spelling, a separator, a comment) is in the output.
+// A file made from records alone, with no source text at all, is the writer's own form byte for byte, and reads
+// back as itself.
 int minted_parity() {
 	int failures = 0;
 	DefItemDef item{};
@@ -409,8 +397,8 @@ int minted_parity() {
 	file.count = 1;
 	const DefWriteResult written = def_write_items(file);
 	const std::string expected = "// Item definitions\r\n\r\nbegin \"Minted Truck\"\r\n\tid 100500\r\n\thp 250\r\n"
-	                             "\ttype vehicle\r\n\tattrib: playercontrol landable\r\nend\r\n\r\n";
-	if (!written.ok() || written.text != expected) {
+	                             "\ttype vehicle\r\n\tattrib: PlayerControl Landable\r\nend\r\n\r\n";
+	if (!written.ok() || written.text != expected || plain_form("items.def", written.text) != expected) {
 		std::printf("FAIL a minted item: the writer's own form is not\n%s\nbut\n%s\n", expected.c_str(), written.text.c_str());
 		print_failures(written);
 		++failures;
@@ -418,37 +406,8 @@ int minted_parity() {
 	return failures;
 }
 
-int layout_is_data() {
-	int failures = 0;
-	Items read(kItems);
-	DefNotedRecord &truck = read.notes.records[0];
-	bool found = false;
-	for (DefNotedLine &line : truck.lines)
-		if (line.role == DefNotedRole::Line && line.shape.entry.rfind("hp", 0) == 0 && !line.shape.words.empty()) {
-			line.shape.words[0].spelling = "HP"; // the key as the file spells it
-			// (Three blanks, not a tab: our items parser matches `hp ` with its blank, a divergence from the
-			// game's tokenizer listed for the formats' next batch.)
-			if (!line.gaps.empty()) line.gaps[0] = "   ";
-			line.tail = " ; very tough";
-			found = true;
-		}
-	if (!read.notes.leading.empty()) read.notes.leading[0].tail = "// Items, made by hand";
-	const DefWriteResult written = read.save();
-	if (!found || !written.ok() || written.text.find("  HP   3000 ; very tough\r\n") == std::string::npos ||
-	    !written.rewritten.empty() ||
-	    written.text.rfind("// Items, made by hand\r\n", 0) != 0) {
-		std::printf("FAIL the layout is data the writer generates from:\n%s\n", written.text.c_str());
-		for (const std::string &line : written.rewritten) std::printf("  rewritten: %s\n", line.c_str());
-		print_failures(written);
-		++failures;
-	}
-	return failures;
-}
-
-// The review's Y2: a sight moved within its weapon, or duplicated, follows the weapon's order (an
-// effects row of an ammo's table likewise), each keeping the comment above it, and the record keeps its
-// own form (no record rewritten); a Duplicate's copy (its notes cleared, as the catalog's prepare_record
-// does) in the writer's form where the order has it.
+// The review's Y2: a sight moved within its weapon, or duplicated, follows the weapon's order (an effects row of an
+// ammo's table likewise).
 const std::string kSights = "weapon \"WPN_S\"\r\n"
                             "\t// the scope\r\n"
                             "\tsights scope.tga 0 0 640 480 blend\r\n"
@@ -463,11 +422,10 @@ int nested_order() {
 		DefWeaponDef &weapon = read.file.entries[0];
 		std::swap(weapon.sights[0], weapon.sights[1]);
 		const DefWriteResult written = read.save();
-		const std::string moved = "weapon \"WPN_S\"\r\n\t// the dot\r\n\tsights reticle.tga 0 0 64 64 add\r\n"
-		                          "\t// the scope\r\n\tsights scope.tga 0 0 640 480 blend\r\nend\r\n";
-		if (!written.ok() || written.text != moved || !written.rewritten.empty()) {
+		failures += reads_back("weapon.def", "a sight moved", written);
+		if (written.text.find("sights reticle.tga") == std::string::npos ||
+		    written.text.find("sights reticle.tga") > written.text.find("sights scope.tga")) {
 			std::printf("FAIL a sight moved:\n%s\n", written.text.c_str());
-			print_failures(written);
 			++failures;
 		}
 	}
@@ -477,19 +435,16 @@ int nested_order() {
 		DefSightEntry *const own = weapon.sights;
 		const size_t own_count = weapon.sights_count;
 		std::vector<DefSightEntry> sights(weapon.sights, weapon.sights + weapon.sights_count);
-		DefSightEntry copy = sights[0];
-		def_clear_notes(DefRecordKind::Sight, &copy);
-		sights.insert(sights.begin() + 1, copy);
+		sights.insert(sights.begin() + 1, sights[0]);
 		weapon.sights = sights.data();
 		weapon.sights_count = sights.size();
 		const DefWriteResult written = read.save();
 		weapon.sights = own; // the file's, freed with it
 		weapon.sights_count = own_count;
-		const std::string duplicated = "weapon \"WPN_S\"\r\n\t// the scope\r\n\tsights scope.tga 0 0 640 480 blend\r\n"
-		                               "\tsights scope.tga 0 0 640 480 blend\r\n\t// the dot\r\n\tsights reticle.tga 0 0 64 64 add\r\nend\r\n";
-		if (!written.ok() || written.text != duplicated || !written.rewritten.empty()) {
+		failures += reads_back("weapon.def", "a sight duplicated", written);
+		const size_t first = written.text.find("sights scope.tga"), second = written.text.find("sights scope.tga", first + 1);
+		if (second == std::string::npos || second > written.text.find("sights reticle.tga")) {
 			std::printf("FAIL a sight duplicated:\n%s\n", written.text.c_str());
-			print_failures(written);
 			++failures;
 		}
 	}
@@ -498,61 +453,18 @@ int nested_order() {
 		DefAmmoDef &ammo = read.file.entries[0];
 		std::swap(ammo.effects_table[0], ammo.effects_table[1]);
 		const DefWriteResult written = read.save();
-		if (!written.ok() || written.text.find("        dirt    hit dust  2\r\n        metal   hit spark 4\r\n") == std::string::npos ||
-		    !written.rewritten.empty()) {
+		failures += reads_back("ammo.def", "an effects row moved", written);
+		if (written.text.find("dirt hit dust 2") == std::string::npos ||
+		    written.text.find("dirt hit dust 2") > written.text.find("metal hit spark 4")) {
 			std::printf("FAIL an effects row moved:\n%s\n", written.text.c_str());
-			print_failures(written);
 			++failures;
 		}
 	}
 	return failures;
 }
 
-// The review's Y3: a record whose own form its edit cannot carry (the surviving `action "fire"` removed,
-// so the earlier block the game skipped would read again as the action) is written in the writer's form
-// with its comment lines kept, the earlier block left out, and both said (rewritten).
-const std::string kReplaced = "weapon \"WPN_R\"\r\n"
-                              "\t// fire, first form\r\n"
-                              "\taction \"fire\"\r\n"
-                              "\t\tdelayend 3\r\n"
-                              "\tend\r\n"
-                              "\taction \"fire\"\r\n"
-                              "\t\tdelayend 4\r\n"
-                              "\tend\r\n"
-                              "\t// reload\r\n"
-                              "\taction \"reload\"\r\n"
-                              "\t\tanim reload\r\n"
-                              "\tend\r\n"
-                              "end\r\n";
-
-int fallback_keeps_and_says() {
-	int failures = 0;
-	Weapons read(kReplaced);
-	DefWeaponDef &weapon = read.file.entries[0];
-	if (weapon.actions_count != 2) {
-		std::printf("FAIL the replaced block: %zu actions read\n", weapon.actions_count);
-		return 1;
-	}
-	std::swap(weapon.actions[0], weapon.actions[1]);
-	weapon.actions_count = 1; // the fire block gone (its memory the file's, freed with it)
-	const DefWriteResult written = read.save();
-	weapon.actions_count = 2;
-	std::swap(weapon.actions[0], weapon.actions[1]);
-	const bool said = written.rewritten.size() == 1 && written.rewritten[0].find("fire") != std::string::npos;
-	if (!written.ok() || written.text.find("delayend") != std::string::npos ||
-	    written.text.find("// fire, first form") == std::string::npos || written.text.find("// reload") == std::string::npos ||
-	    !said) {
-		std::printf("FAIL a record written in the writer's form keeps its comments and says what it leaves out:\n%s\n",
-		            written.text.c_str());
-		for (const std::string &line : written.rewritten) std::printf("  rewritten: %s\n", line.c_str());
-		print_failures(written);
-		++failures;
-	}
-	return failures;
-}
-
-// The review's Y3: an attribute set anew on an item whose `attrib:` line holds as many words as a line
-// holds goes on a line of its own (our parser reads no more of one).
+// The review's Y3: an item with more attributes than an `attrib:` line holds has its others on a line of its
+// own (our parser reads no more of one), and reads back.
 int attribute_lines_full() {
 	int failures = 0;
 	DefItemDef item{};
@@ -585,7 +497,14 @@ int attribute_lines_full() {
 	}
 	Items read(made.text);
 	read.file.entries[0].attrib |= DEF_ITEM_ATTRIB_NOSHADOW;
-	failures += changed("items: an attribute past a full line", made.text, read.save(), 0, 1);
+	const DefWriteResult written = read.save();
+	failures += reads_back("items.def", "items: an attribute past a full line", written);
+	// The writer's lines in the table's order, as many words to a line as a line holds, the rest on the next.
+	const size_t first = written.text.find("attrib: "), second = written.text.find("attrib: ", first + 1);
+	if (second == std::string::npos || written.text.find("attrib: ", second + 1) != std::string::npos) {
+		std::printf("FAIL items: an attribute past a full line: not two `attrib:` lines\n%s\n", written.text.c_str());
+		++failures;
+	}
 	return failures;
 }
 
@@ -644,8 +563,6 @@ int shortest_reals() {
 
 // --- retail -----------------------------------------------------------------------------------------------
 
-// The family's writer's own form of a text read without notes ("" where it does not write): two texts of one
-// form read as one model.
 std::string plain_form(const char *family, const std::string &text) {
 	const uint8_t *bytes = bytes_of(text);
 	DefWriteResult written;
@@ -671,6 +588,39 @@ std::string plain_form(const char *family, const std::string &text) {
 		def_free_powerup(&file);
 	}
 	return written.ok() ? written.text : std::string();
+}
+
+// A line cut for the reals' checks: its blanks, its words (ending at a blank or a comma), the separators after each
+// and its ending; text() puts it back together.
+struct Cut {
+	std::string indent;
+	std::vector<std::string> words;
+	std::vector<std::string> gaps;
+	std::string eol;
+	std::string text() const {
+		std::string out = indent;
+		for (size_t i = 0; i < words.size(); ++i) out += words[i] + (i < gaps.size() ? gaps[i] : std::string());
+		return out + eol;
+	}
+};
+Cut cut_of(const std::string &line) {
+	Cut out;
+	size_t end = line.size();
+	while (end > 0 && (line[end - 1] == '\r' || line[end - 1] == '\n')) --end;
+	out.eol = line.substr(end);
+	size_t at = 0;
+	while (at < end && (line[at] == ' ' || line[at] == '\t')) ++at;
+	out.indent = line.substr(0, at);
+	while (at < end) {
+		size_t stop = at;
+		while (stop < end && line[stop] != ' ' && line[stop] != '\t' && line[stop] != ',') ++stop;
+		out.words.push_back(line.substr(at, stop - at));
+		size_t next = stop;
+		while (next < end && (line[next] == ' ' || line[next] == '\t' || line[next] == ',')) ++next;
+		out.gaps.push_back(line.substr(stop, next - stop));
+		at = next;
+	}
+	return out;
 }
 
 // A word that is a plain decimal with a point (a real as a line writes it).
@@ -730,8 +680,8 @@ std::vector<std::string> longer_than_read(const char *family, const std::string 
 	if (index >= lines.size()) return out;
 	const std::string form = reference ? *reference : plain_form(family, text);
 	if (form.empty()) return out;
-	DefNotedLine line = def_noted_line(lines[index].data(), lines[index].size());
-	const std::vector<std::string> before = was ? def_noted_line(was->data(), was->size()).words : std::vector<std::string>();
+	Cut line = cut_of(lines[index]);
+	const std::vector<std::string> before = was ? cut_of(*was).words : std::vector<std::string>();
 	for (size_t w = 1; w < line.words.size(); ++w) {
 		if (!is_real(line.words[w])) continue;
 		if (w < before.size() && before[w] == line.words[w]) continue;
@@ -758,13 +708,13 @@ std::vector<std::string> longer_than_needed(const char *family, const std::strin
 	std::vector<std::string> out;
 	const std::vector<std::string> lines = lines_of(text);
 	for (size_t i = 0; i < lines.size() && out.size() < cap; ++i) {
-		const DefNotedLine head = def_noted_line(lines[i].data(), lines[i].size());
+		const Cut head = cut_of(lines[i]);
 		if (!head.indent.empty() || head.words.empty()) continue;
 		const std::string key = head.words[0];
 		if (key != "begin" && key != "weapon" && key != "ammo" && key != "powerup") continue;
 		size_t end = i + 1;
 		while (end < lines.size()) {
-			const DefNotedLine at = def_noted_line(lines[end].data(), lines[end].size());
+			const Cut at = cut_of(lines[end]);
 			if (at.indent.empty() && at.words.size() == 1 && at.words[0] == "end") break;
 			++end;
 		}
@@ -784,7 +734,7 @@ std::vector<std::string> longer_than_needed(const char *family, const std::strin
 std::vector<std::string> long_reals(const std::string &text) {
 	std::vector<std::string> out;
 	for (const std::string &line : split_lines(text)) {
-		const DefNotedLine words = def_noted_line(line.data(), line.size());
+		const Cut words = cut_of(line);
 		for (const std::string &word : words.words) {
 			const size_t point = word.find('.');
 			if (point == std::string::npos || word.find_first_not_of("-0123456789.") != std::string::npos) continue;
@@ -808,8 +758,8 @@ size_t changed_line(const std::string &a, const std::string &b) {
 	return found;
 }
 
-// An edit of a retail catalog read with its notes: what changed, the save, and how many lines it changed
-// (`gone` removed, `put` added) against the file.
+// An edit of a retail catalog: what changed, the save, and how many lines it changed (`gone` removed, `put`
+// added) against the first save.
 struct RetailEdit {
 	std::string field;
 	DefWriteResult saved;
@@ -822,7 +772,7 @@ int retail_catalog(const std::string &label, const char *family, const std::vect
 	const std::string what = label + family;
 	DefWriteResult first;
 	// Each edit on a read of its own: a whole number, a real (the writer's decimal of it: bug 1 over a
-	// retail line), and an item's attribute (its `attrib:` line, the words the game skips kept).
+	// retail line), and an item's attribute (its `attrib:` line).
 	RetailEdit whole, real, attribute;
 	const auto edit = [&](auto &read, RetailEdit &out, auto change) {
 		out.field = change(read.file);
@@ -917,13 +867,15 @@ int retail_catalog(const std::string &label, const char *family, const std::vect
 			return std::string(file.entries[0].name) + " respawn_time";
 		});
 	}
-	failures += same_as_read(what.c_str(), original, first);
-	std::printf("%s: %zu lines; first save %s\n", what.c_str(), split_lines(original).size(),
-	            first.ok() && first.text == original ? "is the original" : "DIFFERS");
+	// Through the game's reader, written from its model and read again: the same fields (the writer's own check
+	// passed: ok), and written again the same.
+	failures += reads_back(family, what.c_str(), first);
+	std::printf("%s: %zu lines; its writer's form %zu lines, %s\n", what.c_str(), split_lines(original).size(),
+	            split_lines(first.text).size(), first.ok() && plain_form(family, first.text) == first.text ? "read back" : "DIFFERS");
 	for (RetailEdit *e : {&whole, &real, &attribute}) {
 		if (e == &attribute && std::strcmp(family, "items.def") != 0) continue;
 		if (e == &real && std::strcmp(family, "powerup.def") == 0) continue;
-		const auto [gone, put] = e->saved.ok() ? lines_changed(original, e->saved.text) : std::pair<size_t, size_t>{0, 0};
+		const auto [gone, put] = e->saved.ok() ? lines_changed(first.text, e->saved.text) : std::pair<size_t, size_t>{0, 0};
 		std::printf("  %s changed: -%zu +%zu lines\n", e->field.c_str(), gone, put);
 		// One field changed, one line changed (an attribute's removed word may take its line with it).
 		const bool one = gone == 1 && (put == 1 || (e == &attribute && put == 0));
@@ -935,8 +887,8 @@ int retail_catalog(const std::string &label, const char *family, const std::vect
 		}
 		// The real's new line: its reals the shortest the reader takes back to their words.
 		if (e == &real) {
-			const size_t at = changed_line(original, e->saved.text);
-			const std::string was = at == std::string::npos ? std::string() : lines_of(original)[at];
+			const size_t at = changed_line(first.text, e->saved.text);
+			const std::string was = at == std::string::npos ? std::string() : lines_of(first.text)[at];
 			const std::vector<std::string> longer = at == std::string::npos ? std::vector<std::string>{"<no line>"}
 			                                                                 : longer_than_read(family, e->saved.text, at, nullptr, &was);
 			if (!longer.empty()) {
@@ -969,7 +921,7 @@ int retail_catalog(const std::string &label, const char *family, const std::vect
 
 int retail_catalogs() {
 	const std::string root = retail::install();
-	if (root.empty()) return retail::skip_leg("the def notes' retail catalogs need OPENNOVA_JO_DIR");
+	if (root.empty()) return retail::skip_leg("the def writers' retail catalogs need OPENNOVA_JO_DIR");
 	int failures = 0;
 	opennova::Vfs vfs;
 	vfs.set_scr_policy(opennova::VFS_SCR_FORCE_JO_DFX2);
@@ -999,19 +951,58 @@ int retail_catalogs() {
 
 } // namespace
 
+// The #1098 review: the game keeps a type's value alone, so the words the chain reads alike are written as its
+// first match (foliage as decoration, object as powerup [orig: ItemDef_ParseProperty, the type chain
+// @0x4A02E4..0x4A04B7]); a door's death word of 0 (`num_doors 0` after `attrib: Door`, which gives 1 while still 0
+// [orig: @0x4a0cb0..0x4a0cb9]) is written and reads back 0; the weapon flags go down in the game's table rows'
+// order (Armor row 32, after NoSelect; OnlyFireScoped row 17, after ForceCrouch [orig: the table @ 0x830bf0]).
+int review_1098() {
+	int failures = 0;
+	const std::string items = "begin \"Tree\"\r\n\tid 100200\r\n\ttype foliage\r\nend\r\n"
+	                          "begin \"Crate\"\r\n\tid 100201\r\n\ttype OBJECT\r\nend\r\n"
+	                          "begin \"Door\"\r\n\tid 100202\r\n\ttype building\r\n\tattrib: Door\r\n\tnum_doors 0\r\nend\r\n";
+	{
+		Items read(items);
+		const DefWriteResult written = read.save();
+		failures += reads_back("items.def", "review: a type's first word", written, "\ttype decoration\r\n");
+		failures += reads_back("items.def", "review: a type's first word", written, "\ttype powerup\r\n");
+		if (written.text.find("foliage") != std::string::npos || written.text.find("object") != std::string::npos ||
+		    written.text.find("OBJECT") != std::string::npos) {
+			std::printf("FAIL review: a type's other word is written\n%s\n", written.text.c_str());
+			++failures;
+		}
+		failures += reads_back("items.def", "review: a door's death word of 0", written, "\tdeathtime -1\r\n");
+		Items again(written.text);
+		if (again.file.count != 3 || again.file.entries[2].deathtime_ticks != 0 ||
+		    !(again.file.entries[2].attrib & DEF_ITEM_ATTRIB_DOOR) || again.file.entries[0].type != DEF_ITEM_TYPE_FOLIAGE ||
+		    again.file.entries[1].type != DEF_ITEM_TYPE_OBJECT) {
+			std::printf("FAIL review: the items do not read back as read\n%s\n", written.text.c_str());
+			++failures;
+		}
+	}
+	{
+		const std::string weapons = "weapon \"WPN_F\"\r\n\tflags Armor\r\n\tflags NoSelect\r\n\tflags OnlyFireScoped\r\n"
+		                            "\tflags ForceCrouch\r\nend\r\n";
+		Weapons read(weapons);
+		failures += reads_back("weapon.def", "review: the flags in the game's rows' order", read.save(),
+		                       "\tflags ForceCrouch\r\n\tflags OnlyFireScoped\r\n\tflags NoSelect\r\n\tflags Armor\r\n");
+	}
+	std::printf("review: type words, a door's death word, the weapon flags' order\n");
+	return failures;
+}
+
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	int failures = 0;
+	failures += review_1098();
 	failures += shortest_reals();
 	failures += minted_parity();
-	failures += layout_is_data();
 	failures += nested_order();
-	failures += fallback_keeps_and_says();
 	failures += attribute_lines_full();
-	failures += noted_items();
-	failures += noted_weapons();
-	failures += noted_ammo();
-	failures += noted_powerups();
+	failures += written_items();
+	failures += written_weapons();
+	failures += written_ammo();
+	failures += written_powerups();
 	failures += retail_catalogs();
 	if (failures) std::printf("%d failure(s)\n", failures);
 	return failures ? 1 : 0;

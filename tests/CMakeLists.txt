@@ -667,20 +667,13 @@ target_link_libraries(score_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(score_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(score_roundtrip COMMAND score_roundtrip_test)
 
-# The modeled layout of a line-oriented text file (formats/textlayout): a line's parts, a file generated
-# over its notes (a value, a set, a key anew, records swapped, gone and added), the writer's form without.
-add_executable(text_layout_test textlayout/text_layout_test.cpp)
-target_link_libraries(text_layout_test PRIVATE opennova_formats)
-target_include_directories(text_layout_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME text_layout COMMAND text_layout_test)
-
-# The AI profiles' writer over the file's modeled layout (formats/aip, textlayout): a minted profile in
-# the writer's form, an authored file written again as it was, one value one line; --retail: every
-# shipped profile byte for byte.
-add_executable(aip_noted_test aip/aip_noted_test.cpp)
-target_link_libraries(aip_noted_test PRIVATE opennova_base opennova_formats)
-target_include_directories(aip_noted_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(aip_noted COMMAND aip_noted_test)
+# The AI profiles' writer (formats/aip): a minted profile in the writer's form byte for byte, written and
+# read again the same profile, each unit's shortest word; --retail: every shipped profile written from its
+# model reads back as that model.
+add_executable(aip_write_test aip/aip_write_test.cpp)
+target_link_libraries(aip_write_test PRIVATE opennova_base opennova_formats)
+target_include_directories(aip_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(aip_write COMMAND aip_write_test)
 
 # game.cfg: the minted fixtures/gamecfg/synth_game.cfg (Game_SaveConfig's
 # layout through gamecfg::write), its byte-exact load/write round trip, and the
@@ -2331,18 +2324,15 @@ target_link_libraries(mnu_coverage_test PRIVATE opennova_formats)
 target_include_directories(mnu_coverage_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_gated_test(mnu_coverage COMMAND mnu_coverage_test)
 
-# The modeled text layout (formats/mnu/mnu_text_layout, D-MNU-22): a menu read and
-# written again comes back byte-identical; a value edit changes only its own token; an
-# added or moved record goes beside the records of its own list; seeded rounds of list
-# edits read back as edited; a document made in code writes the canonical bytes. The
-# retail twin sweeps every .mnu the packed install serves (OPENNOVA_JO_DIR) and the
-# reference set's shipped menus (OPENNOVA_JO_ASSETS): 47 menus, 24 distinct files, each
-# byte-identical, the list rounds and the one-line check of one-token edits over each
-# distinct file.
-add_executable(mnu_text_layout_test mnu/mnu_text_layout_test.cpp)
-target_link_libraries(mnu_text_layout_test PRIVATE opennova_base opennova_formats)
-target_include_directories(mnu_text_layout_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(mnu_text_layout COMMAND mnu_text_layout_test)
+# The menu writer's own form (formats/mnu/mnu_write, D-MNU-22): a document made in code
+# writes the canonical bytes; a menu written and read again is the model it was; edits and
+# seeded rounds of list edits read back as edited. The retail twin sweeps every .mnu the
+# packed install serves (OPENNOVA_JO_DIR) and the reference set's shipped menus
+# (OPENNOVA_JO_ASSETS): each reads back as the model it was, and the edits as edited.
+add_executable(mnu_write_test mnu/mnu_write_test.cpp)
+target_link_libraries(mnu_write_test PRIVATE opennova_base opennova_formats)
+target_include_directories(mnu_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(mnu_write COMMAND mnu_write_test)
 
 # The format's rules a property table reads (formats/mnu/mnu_schema, ADR 0046 S9h): which
 # window type reads what, what an ACTION's verb reads, the material flag tokens. The table
@@ -2357,13 +2347,15 @@ target_link_libraries(mns_parse_test PRIVATE opennova_formats)
 target_include_directories(mns_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mns_parse COMMAND mns_parse_test)
 
-# Lossless MNS document model (ADR 0009): synthetic byte round-trips, edit
-# stability and diagnostics unconditionally; the shipped menu_style.mns legs
-# read the reference fixture set (SKIP-LEG without OPENNOVA_JO_ASSETS).
-add_executable(mns_document_test mns/mns_document_test.cpp)
-target_link_libraries(mns_document_test PRIVATE opennova_formats)
-target_include_directories(mns_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(mns_document COMMAND mns_document_test)
+# The stylesheet writer (formats/mns, mns::write): the reader's list written in the
+# writer's form, a minted list byte for byte, an authored sheet read back as its list,
+# what the reader reads otherwise refused; the retail twin reads the reference set's
+# menu_style.mns (OPENNOVA_JO_ASSETS) and every .mns the packed install serves
+# (OPENNOVA_JO_DIR), each written and read back as the same list.
+add_executable(mns_write_test mns/mns_write_test.cpp)
+target_link_libraries(mns_write_test PRIVATE opennova_base opennova_formats)
+target_include_directories(mns_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(mns_write COMMAND mns_write_test)
 
 # World runtime substrate: addressable entities (faithful find_by_net_id), shared
 # var store, entity-command primitives, the logic-tick clock, snapshot/restore.
@@ -5085,10 +5077,13 @@ target_link_libraries(def_write_hudpos_test PRIVATE opennova_base opennova_forma
 target_include_directories(def_write_hudpos_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(def_write_hudpos COMMAND def_write_hudpos_test)
 
-add_executable(def_noted_write_test def/def_noted_write_test.cpp)
-target_link_libraries(def_noted_write_test PRIVATE opennova_base opennova_formats)
-target_include_directories(def_noted_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(def_noted_write COMMAND def_noted_write_test)
+# The def writers' own form (formats/def): a minted record byte for byte and read back as itself, the
+# writer's reals the shortest that read back; --retail: every catalog written from its model reads back as
+# that model, one field changed changes one line, and its reals are the shortest.
+add_executable(def_write_form_test def/def_write_form_test.cpp)
+target_link_libraries(def_write_form_test PRIVATE opennova_base opennova_formats)
+target_include_directories(def_write_form_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(def_write_form COMMAND def_write_form_test)
 
 # The capture-point labels: the map-overlay slot walk and the marker types 8/9.
 add_executable(hud_capture_labels_test hud/hud_capture_labels_test.cpp)

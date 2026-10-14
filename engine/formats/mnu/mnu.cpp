@@ -1,12 +1,10 @@
 // MNU menu file parser implementation: the typed layer over mnu_xml's retail
-// reader, which names each record's element for the text layout (mnu_text_layout.h);
-// the writer is mnu_write.cpp. docs/mnu/menu-re.md ("The reader", "The writer") has the
+// reader; the writer is mnu_write.cpp. docs/mnu/menu-re.md ("The reader", "The writer") has the
 // rules with their witnesses.
 #include <formats/mnu/mnu.h>
 
 #include <formats/mns/mns.h>
-#include <formats/mnu/mnu_text_layout.h>
-#include <formats/mnu/mnu_write.h>
+#include <formats/mnu/mnu_schema.h>
 #include <formats/mnu/mnu_xml.h>
 #include <formats/rtxt/rtxt.h>
 
@@ -165,6 +163,34 @@ bool type_reads(WindowType t, const Node &child) {
   return true;
 }
 
+// The elements the LAN_LIST, GLB_TABLE and GOPHER parses read, each by its schema path
+// (schema_reads) on `type` [orig: CLanListWnd_ParseXMLDefinition @ 0x65b9d0;
+// CLanGameBrowser_ParseExtendedXMLDefinition @ 0x65dac0; CGopherWnd_ParseXMLDefinition @
+// 0x65b130]; null for any other element.
+const char *typed_part_path(const Node &child, WindowType type) {
+  static const struct {
+    const char *tag;
+    const char *path;
+  } kParts[] = {
+      {"JOIN_BUTTON", "join_button"},
+      {"SEARCH_BUTTON", "search_button"},
+      {"GLB_TABLE", "glb_table"},
+      {"GLB_INFO_BUTTON", "glb_info_button"},
+      {"GLB_INFO_PLAYER_DETAILS", "glb_info_player_details"},
+      {"GLB_INFO_SERVER_DETAILS", "glb_info_server_details"},
+      {"GLB_NW_INFO", "glb_nw_info"},
+      {"FILTERS", "gopher_categories"},
+      {"GOPHER_BACK", "gopher_back"},
+  };
+  for (const auto &part : kParts)
+    if (tag_is(child, part.tag)) return part.path;
+  if (tag_is(child, "TARGET")) return type == WindowType::Gopher ? "gopher_targets" : "glb_target";
+  return nullptr;
+}
+
+// The three names CWnd_ParseVirtualKeyNameW @ 0x6467f0 knows (13, 27, 32).
+const char *const kVirtualKeyNames[] = {"VK_RETURN", "VK_ESCAPE", "VK_SPACE"};
+
 // The edit attributes (MAXCHAR, MAXVAL, MINVAL) [orig: CEditWnd_ParseXMLProperties
 // @ 0x661d10]: EDIT, MULTILINE_EDIT and the RADIOEDIT edit part.
 bool reads_edit_attributes(WindowType t) {
@@ -180,7 +206,7 @@ struct ReadScope {
 
 class TreeReader {
 public:
-  TreeReader(SourceEncoding encoding, TextLayoutCapture &capture) : encoding_(encoding), capture_(capture) {}
+  explicit TreeReader(SourceEncoding encoding) : encoding_(encoding) {}
 
   void read_document(const mnu_xml::Document &xml, Document &out);
   void sweep(const mnu_xml::Document &xml, std::vector<ParseNote> &notes) const;
@@ -228,8 +254,23 @@ private:
   const Attribute *effective(const Node &node, const char *name, const char *const *tokens);
   // A presence flag: any attribute of the name.
   bool flag(const Node &node, const char *name);
-  // A keyword attribute's token (effective); empty when absent.
+  // A keyword attribute's token (effective), as its table spells it; empty when absent, and for a
+  // token the table lacks (the code no token sets; noted, left out).
   std::string keyword(const Node &node, const char *name, const char *const *tokens);
+  // A JUSTIFY / VJUSTIFY: each one's keyword sets the justification and another token's wcstol the
+  // x or y offset, two fields, so the first authored of each kind is kept (`keyword` as its table
+  // spells it, `offset` the number's decimal), each set only where one is authored.
+  void justification(const Node &node, const char *name, const char *const *tokens, std::string &keyword,
+                     std::string &offset);
+  // The first authored attribute of a name whose value has a token, the others noted: a walk that
+  // skips a value of no token (`if (token)`) and overwrites, the list last authored first [orig:
+  // CGopherWnd_ParseCategoryXML @ 0x65a5ba, @ 0x65a7da]. An empty one is noted, not fatal.
+  std::string first_token(const Node &node, const char *name);
+  // A VALUE the parse reads with wcstol: the number's decimal; empty when absent (and, `zero_none`,
+  // for 0, the parse's default).
+  std::string number_value(const Node &node, const char *name, bool zero_none);
+  // A FLAGS word [orig: sub_646CC0 @ 0x646cc0]; kDefaultUiMaterialFlags when absent.
+  uint32_t flags_attr(const Node &node, const char *name);
   std::string string_attr(const Node &node, const char *name);
   bool number_attr(const Node &node, const char *name, int &out);
   int number_text(const Node &node) {
@@ -247,7 +288,7 @@ private:
   bool read_screen(const Node &node, Screen &out);
   bool read_created_window(const Node &node, Window &out);
   void read_window_body(const Node &node, Window &w, ReadScope &frame);
-  void read_part(const Node &node, WindowPart &part, WindowType type, ReadScope &owner, const char *key);
+  void read_part(const Node &node, WindowPart &part, WindowType type, ReadScope &owner);
   bool read_appearance(const Node &node, Appearance &out, const char *const *types);
   bool read_sound(const Node &node, Sound &out);
   void read_position(const Node &node, Position &pos);
@@ -256,23 +297,24 @@ private:
   void read_action(const Node &node, Action &out);
   void read_cursor(const Node &node, Cursor &cursor);
   void read_string(const Node &node, String &s, bool repeated);
-  // `cell`: a TABLE ROW cell, the only ITEM whose COLUMN retail reads.
-  void read_item(const Node &node, Item &item, bool cell);
-  // False when a row retail's LIST / TABLE parse stops at was read (`stops` is the
-  // window's type rule).
-  bool read_items(const Node &node, Items &items, bool list_rule, bool table_rule);
+  // `cell`: a TABLE ROW cell, the only ITEM whose COLUMN retail reads; `type` the window's.
+  void read_item(const Node &node, Item &item, bool cell, WindowType type);
+  // False when a row retail's LIST / TABLE parse stops at was read. Each row and attribute
+  // the window's `type` reads (schema_reads "items.*"); the others are left out.
+  bool read_items(const Node &node, Items &items, WindowType type);
+  // Each attribute of `name` on `node`: one the window's type does not read, left out.
+  void not_read(const Node &node, const char *name, WindowType type);
   void read_column(const Node &node, TableColumn &column);
-  Element read_extra(const Node &node);
-  // `by`: the element whose parse stopped (the text layout keeps the rest while it stands as read).
-  void unread_rest(const Node &parent, size_t from, const char *const *tags, const std::string &why, const Node &by);
+  void read_glb_fields(const Node &node, GlbFields &fields);
+  bool read_gopher_category(const Node &node, GopherCategory &category, ReadScope &owner);
+  void unread_rest(const Node &parent, size_t from, const char *const *tags, const std::string &why);
 
   SourceEncoding encoding_;
-  // Told which element each record and singleton was read from, and which elements are read
-  // for nothing only while another stands (the text layout's Tied tokens).
-  TextLayoutCapture &capture_;
   std::map<const void *, std::string> reasons_;
   std::set<const void *> fatal_;
   bool reads_ = true; // retail reads what is being read now
+  // A GLB_TABLE's browser reads its tables' HEADER FIELDs (read_column) [orig: @ 0x65dac0].
+  bool glb_header_fields_ = false;
 };
 
 std::string TreeReader::narrow(const Text &text) const {
@@ -350,8 +392,108 @@ bool TreeReader::flag(const Node &node, const char *name) {
 
 std::string TreeReader::keyword(const Node &node, const char *name, const char *const *tokens) {
   std::string out;
-  token(node, effective(node, name, tokens), out);
+  const Attribute *attr = effective(node, name, tokens);
+  if (!token(node, attr, out)) return std::string();
+  // A token the parse knows, as its table spells it: the compare is without case, so the
+  // file's spelling is none of the model's.
+  for (const char *const *t = tokens; *t; ++t)
+    if (iequals(out, *t)) return *t;
+  // Another token sets no code: the parse reads it as none.
+  attr->read = false;
+  because(attr, std::string(name) + " \"" + out + "\" is no token the parse knows: it sets nothing, as no " + name +
+                    " does; it is left out.");
+  return std::string();
+}
+
+void TreeReader::justification(const Node &node, const char *name, const char *const *tokens, std::string &keyword,
+                               std::string &offset) {
+  // The walk compares every one of the name, so an empty one faults (CRT_wcsicmp of no token).
+  const Attribute *kept_keyword = nullptr;
+  const Attribute *kept_offset = nullptr;
+  for (const Attribute &a : node.attributes) {
+    if (!mnu_xml::iequals(a.name, name)) continue;
+    Text tok;
+    if (!a.token(tok)) {
+      empty_value(node, a);
+      continue;
+    }
+    const bool is_keyword = in(tok, tokens);
+    const Attribute *&kept = is_keyword ? kept_keyword : kept_offset;
+    if (kept) {
+      because(&a, std::string("A repeated ") + name + (is_keyword ? " keyword" : " offset") +
+                      ": retail keeps the first; this one is left out.");
+      continue;
+    }
+    kept = &a;
+  }
+  std::string text;
+  if (kept_keyword && token(node, kept_keyword, text))
+    for (const char *const *t = tokens; *t; ++t)
+      if (iequals(text, *t)) keyword = *t;
+  if (kept_offset) {
+    kept_offset->read = true;
+    Text tok;
+    kept_offset->token(tok);
+    variable_number(node, kept_offset, tok);
+    offset = std::to_string(static_cast<int>(mnu_xml::wcstol(tok, 10)));
+  }
+}
+
+std::string TreeReader::first_token(const Node &node, const char *name) {
+  const Attribute *kept = nullptr;
+  for (const Attribute &a : node.attributes) {
+    if (!mnu_xml::iequals(a.name, name)) continue;
+    Text tok;
+    if (!a.token(tok)) {
+      because(&a, std::string("An empty ") + name + " on " + mnu_xml::ascii(node.tag) +
+                      ": retail skips a value of no token; it is left out.");
+      continue;
+    }
+    if (kept) {
+      because(&a, std::string("A repeated ") + name + ": retail keeps the first; this one is left out.");
+      continue;
+    }
+    kept = &a;
+  }
+  std::string out;
+  token(node, kept, out);
   return out;
+}
+
+std::string TreeReader::number_value(const Node &node, const char *name, bool zero_none) {
+  const Attribute *attr = first(node, name);
+  std::string ignored;
+  if (!token(node, attr, ignored)) return std::string();
+  Text tok;
+  attr->token(tok);
+  variable_number(node, attr, tok);
+  const int value = static_cast<int>(mnu_xml::wcstol(tok, 10));
+  if (zero_none && value == 0) {
+    // The parse's default: the model holds none, and the writer leaves it out.
+    attr->read = false;
+    because(attr, std::string(name) + " reads 0, the parse's default, as none does; it is left out.");
+    return std::string();
+  }
+  return std::to_string(value);
+}
+
+uint32_t TreeReader::flags_attr(const Node &node, const char *name) {
+  std::string text;
+  const Attribute *attr = first(node, name);
+  if (!token(node, attr, text)) return kDefaultUiMaterialFlags;
+  const uint32_t word = ui_material_flags_of(text);
+  if (word == kDefaultUiMaterialFlags) {
+    attr->read = false;
+    because(attr, std::string(name) + " reads the default word (STANDARD_TRANSPARENT), as none does; it is left out.");
+  }
+  return word;
+}
+
+void TreeReader::not_read(const Node &node, const char *name, WindowType type) {
+  for (const Attribute &a : node.attributes)
+    if (mnu_xml::iequals(a.name, name))
+      because(&a, std::string("A ") + strutil::to_upper(window_type_name(type)) + " reads no " + name +
+                      " (its type's parse does not); it is left out.");
 }
 
 std::string TreeReader::string_attr(const Node &node, const char *name) {
@@ -413,20 +555,17 @@ bool TreeReader::singleton(ReadScope &frame, const Node &node, const char *tag, 
   it->second->read = false;
   fatal_.erase(it->second);
   because(it->second, std::string("A later ") + tag + " replaces this one (retail keeps the last); it is left out.");
-  capture_.tie(*it->second, node);
   it->second = &node;
   return false;
 }
 
 // Marks the elements of `tags` from `from` on as not read, with `why`.
-void TreeReader::unread_rest(const Node &parent, size_t from, const char *const *tags, const std::string &why,
-                             const Node &by) {
+void TreeReader::unread_rest(const Node &parent, size_t from, const char *const *tags, const std::string &why) {
   for (size_t i = from; i < parent.children.size(); ++i) {
     const Node &child = *parent.children[i];
     if (tags && !tag_in(child, tags)) continue;
     child.read = false;
     because(&child, why);
-    capture_.tie(child, by);
   }
 }
 
@@ -439,7 +578,6 @@ void TreeReader::read_document(const mnu_xml::Document &xml, Document &out) {
       continue;
     }
     Screen screen;
-    screen.source = capture_.record(*root);
     read_screen(*root, screen);
     out.screens.push_back(std::move(screen));
   }
@@ -458,7 +596,6 @@ bool TreeReader::read_screen(const Node &node, Screen &out) {
     const Node &child = *child_ptr;
     if (tag_is(child, "NAME")) {
       singleton(frame, child, "NAME", false);
-      capture_.keep(child, "NAME");
       out.name = text_of(child);
     } else if (tag_is(child, "MUSICVAR")) {
       // wcstok(text, L"\"") then wcstol: an empty one faults.
@@ -471,7 +608,6 @@ bool TreeReader::read_screen(const Node &node, Screen &out) {
         continue;
       }
       singleton(frame, child, "MUSICVAR", false);
-      capture_.keep(child, "MUSICVAR");
       child.read = true;
       variable_number(child, nullptr, tok);
       out.music_var = static_cast<int>(mnu_xml::wcstol(tok, 10));
@@ -508,9 +644,9 @@ bool TreeReader::read_created_window(const Node &node, Window &out) {
     fatal_because(&node, "A WINDOW with an empty TYPE: retail's factory faults on it; it is left out.");
     return false;
   }
+  // The factory's match of the token (a generic window for a token it does not match); the writer
+  // puts the type's own name down.
   out.type = parse_window_type(token_text);
-  out.type_token = token_text;
-  out.source = capture_.record(node);
   ReadScope frame;
   read_window_body(node, out, frame);
   return true;
@@ -519,7 +655,7 @@ bool TreeReader::read_created_window(const Node &node, Window &out) {
 // A part's own embedded widget parses the element's children with its own chain
 // (the attributes are the element's); an empty one hands the parse no node, which
 // faults. A repeated part element parses into the same widget.
-void TreeReader::read_part(const Node &node, WindowPart &part, WindowType type, ReadScope &owner, const char *key) {
+void TreeReader::read_part(const Node &node, WindowPart &part, WindowType type, ReadScope &owner) {
   if (node.children.empty()) {
     if (reads_)
       fatal_because(&node, "An empty " + mnu_xml::ascii(node.tag) +
@@ -530,7 +666,6 @@ void TreeReader::read_part(const Node &node, WindowPart &part, WindowType type, 
   }
   const bool first_time = !part.present();
   Window &w = part.author(type);
-  capture_.keep(node, key);
   if (!first_time) {
     because(&node, "A repeated " + mnu_xml::ascii(node.tag) + ": retail parses it into the same widget; "
                        "it is saved as one.");
@@ -542,8 +677,9 @@ void TreeReader::read_part(const Node &node, WindowPart &part, WindowType type, 
   if (!first_time) node.read = false; // the note covers the element; its content is read
 }
 
-// The base parse [orig: CUIElement_ParseXMLDefinition @ 0x648120] then every
-// type's own parse, flattened: the model keeps what any type reads.
+// The base parse [orig: CUIElement_ParseXMLDefinition @ 0x648120] then the window's
+// type's own parse: the model keeps what its type reads, an element or an attribute only
+// another type's parse reads left out (schema_reads, grill set A3).
 void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame) {
   node.read = true;
   // The base attribute walk: NAME and FORM (first authored), the presence flags.
@@ -562,21 +698,38 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
   // The per-type attribute walks [orig: CRadioWnd_ParseXMLDefinition @ 0x656c40;
   // CCheckWnd_ParseXMLDefinition @ 0x64ad90; CEditWnd_ParseXMLProperties
   // @ 0x661d10; CLanGameBrowser_ParseExtendedXMLDefinition @ 0x65dac0].
-  w.checked = flag(node, "CHECKED") || w.checked;
-  w.as_button = flag(node, "AS_BUTTON") || w.as_button;
-  w.password = flag(node, "PASSWORD") || w.password;  // [orig: PASSWORD compare @ 0x661d3b]
-  w.number = flag(node, "NUMBER") || w.number;
-  w.readonly = flag(node, "READONLY") || w.readonly;
-  {
-    Reads edit(*this, reads_edit_attributes(w.type));
+  const auto own = [&w](const char *path) { return schema_reads(w.type, path) == SchemaApplies::Reads; };
+  if (own("checked")) w.checked = flag(node, "CHECKED") || w.checked;
+  else not_read(node, "CHECKED", w.type);
+  if (own("as_button")) w.as_button = flag(node, "AS_BUTTON") || w.as_button;
+  else not_read(node, "AS_BUTTON", w.type);
+  if (reads_edit_attributes(w.type)) {
+    w.password = flag(node, "PASSWORD") || w.password;  // [orig: PASSWORD compare @ 0x661d3b]
+    w.number = flag(node, "NUMBER") || w.number;
+    w.readonly = flag(node, "READONLY") || w.readonly;
     if (number_attr(node, "MAXCHAR", number)) { w.maxchar = number; w.has_maxchar = true; }
     if (number_attr(node, "MAXVAL", number)) { w.maxval = number; w.has_maxval = true; }
     if (number_attr(node, "MINVAL", number)) { w.minval = number; w.has_minval = true; }
+  } else {
+    for (const char *name : {"PASSWORD", "NUMBER", "READONLY", "MAXCHAR", "MAXVAL", "MINVAL"}) not_read(node, name, w.type);
   }
+  // PLAYERLIST sets the browser's list mode, SERVERLIST clears it, by presence, over the attribute
+  // list last authored first: the first authored of the two decides [orig:
+  // CLanGameBrowser_ParseExtendedXMLDefinition @ 0x65dadf..0x65db16, self[3658]].
+  const Attribute *list_mode = nullptr;
   for (const Attribute &a : node.attributes) {
-    if (in(a.name, kExtraAttributes)) {
+    if (mnu_xml::iequals(a.name, "PLAYERLIST") || mnu_xml::iequals(a.name, "SERVERLIST")) {
+      if (!own("glb_playerlist")) {
+        not_read(node, mnu_xml::ascii(a.name).c_str(), w.type);
+        continue;
+      }
+      if (list_mode) {
+        because(&a, "A later PLAYERLIST or SERVERLIST: retail's mode is the first authored's; this one is left out.");
+        continue;
+      }
       a.read = true;
-      w.extra_attributes.push_back({mnu_xml::ascii(a.name), std::string(), false});
+      list_mode = &a;
+      w.glb_playerlist = mnu_xml::iequals(a.name, "PLAYERLIST");
     } else if (mnu_xml::iequals(a.name, "GROUP")) {
       because(&a, "GROUP is read only as a child element (<GROUP>n</GROUP>); the attribute is left out.");
     } else if (mnu_xml::iequals(a.name, "DISABLED")) {
@@ -602,13 +755,11 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
         because(&child, "An APPEARANCE with no attributes or no STATE retail knows (DEFAULT, DISABLED, "
                         "MOUSEOVER, SELECTED) stops this window's parse in retail: it, the elements after it "
                         "and the child windows are left out.");
-        capture_.tie(child, node);
         unread_rest(node, i + 1, kBaseTags,
-                    "Not read: an earlier APPEARANCE or SOUND stopped this window's parse in retail.", node);
+                    "Not read: an earlier APPEARANCE or SOUND stopped this window's parse in retail.");
         continue;
       }
       child.read = true;
-      appearance.source = capture_.record(child);
       w.appearances.push_back(std::move(appearance));
     } else if (tag_is(child, "SOUND")) {
       Sound sound;
@@ -618,54 +769,59 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
         because(&child, "A SOUND with no STATE retail knows (MOUSEIN, MOUSEOUT, SELECTED) or no TRIGGER stops "
                         "this window's parse in retail: it, the elements after it and the child windows are "
                         "left out.");
-        capture_.tie(child, node);
         unread_rest(node, i + 1, kBaseTags,
-                    "Not read: an earlier APPEARANCE or SOUND stopped this window's parse in retail.", node);
+                    "Not read: an earlier APPEARANCE or SOUND stopped this window's parse in retail.");
         continue;
       }
       child.read = true;
-      sound.source = capture_.record(child);
       w.sounds.push_back(std::move(sound));
     } else if (tag_is(child, "FRAME")) {
       const bool first_one = singleton(frame, child, "FRAME", true);
-      capture_.keep(child, "FRAME");
       read_frame(child, w.frame);
       if (!first_one) child.read = false;
     } else if (tag_is(child, "POSITION")) {
       const bool first_one = singleton(frame, child, "POSITION", true);
-      capture_.keep(child, "POSITION");
       read_position(child, w.position);
       if (!first_one) child.read = false;
     } else if (tag_is(child, "FONT")) {
       const bool first_one = singleton(frame, child, "FONT", true);
-      capture_.keep(child, "FONT");
       read_font(child, w.font);
       if (!first_one) child.read = false;
     } else if (tag_is(child, "TEXT_RSRC")) {
       singleton(frame, child, "TEXT_RSRC", false);
-      capture_.keep(child, "TEXT_RSRC");
       w.text_rsrc = text_of(child);
       w.has_text_rsrc = true;
     } else if (tag_is(child, "ACTION")) {
       Action action;
       read_action(child, action);
-      action.source = capture_.record(child);
       w.actions.push_back(std::move(action));
     } else if (tag_is(child, "CURSOR")) {
       const bool first_one = singleton(frame, child, "CURSOR", true);
-      capture_.keep(child, "CURSOR");
       read_cursor(child, w.cursor);
       if (!first_one) child.read = false;
     } else if (tag_is(child, "HOTKEY")) {
-      // VIRTUAL by presence; the text is the key name or its first character, untrimmed.
+      // VIRTUAL by presence: the text one of the three names CWnd_ParseVirtualKeyNameW @ 0x6467f0
+      // knows, untrimmed, without case; else the key is the text's first character. A key of 0
+      // registers nothing [orig: CWnd_RegisterHotkeysRecursive @ 0x649d90].
       Hotkey hotkey;
       hotkey.virtual_key = flag(child, "VIRTUAL");
-      hotkey.value = text_of(child);
-      hotkey.source = capture_.record(child);
+      const std::string text = text_of(child);
+      if (hotkey.virtual_key) {
+        for (const char *name : kVirtualKeyNames)
+          if (iequals(text, name)) hotkey.value = name;
+      } else if (!child.text.empty()) {
+        hotkey.value = narrow(Text(1, child.text[0]));
+      }
+      if (hotkey.value.empty()) {
+        child.read = false;
+        because(&child, hotkey.virtual_key ? "A VIRTUAL HOTKEY of a name the game does not know (VK_RETURN, VK_ESCAPE, "
+                                             "VK_SPACE) is key 0, which registers nothing; it is left out."
+                                           : "An empty HOTKEY is key 0, which registers nothing; it is left out.");
+        continue;
+      }
       w.hotkeys.push_back(std::move(hotkey));
     } else if (tag_is(child, "PRIVATE_DATA")) {
       singleton(frame, child, "PRIVATE_DATA", false);
-      capture_.keep(child, "PRIVATE_DATA");
       w.private_data = text_of(child);
     } else if (tag_is(child, "WINDOW")) {
       windows.push_back(&child);
@@ -677,7 +833,6 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
       if (tag_is(*child, "WINDOW")) {
         child->read = false;
         because(child.get(), "Not created: an APPEARANCE or SOUND stopped this window's parse in retail.");
-        capture_.tie(*child, node);
       }
   for (const Node *child : windows) {
     Window window;
@@ -685,7 +840,6 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
   }
 
   // The type's own elements, in document order.
-  const bool scroll_rule = w.type == WindowType::Scroll;
   const bool list_rule = w.type == WindowType::List || w.type == WindowType::LanList;
   const bool table_rule = w.type == WindowType::Table;
   bool scroll_stopped = false, own_stopped = false;
@@ -695,35 +849,43 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
     if ((scroll_stopped && tag_in(child, kScrollTags)) ||
         (own_stopped && tag_in(child, list_rule ? kListTags : kTableTags)))
       continue;
-    Reads reads(*this, type_reads(w.type, child));
+    // An element only another type's parse reads: left out (the window's type never reads it).
+    const char *typed = typed_part_path(child, w.type);
+    const bool read_here = typed ? schema_reads(w.type, typed) == SchemaApplies::Reads
+                           : tag_is(child, "DATASOURCE") ? w.type == WindowType::Marquee
+                                                         : type_reads(w.type, child);
+    if (!read_here) {
+      if (typed || tag_is(child, "DATASOURCE") || tag_in(child, kScrollTags) ||
+          tag_in(child, kTableTags) || tag_is(child, "STRING") || tag_is(child, "TOGGLE_STRING") ||
+          tag_is(child, "GROUP") || tag_is(child, "SPINUP") || tag_is(child, "SPINDOWN") || tag_is(child, "LIST_BOX"))
+        because(&child, "A " + strutil::to_upper(window_type_name(w.type)) + " reads no " +
+                            mnu_xml::ascii(child.tag) + " (its type's parse does not); it is left out.");
+      continue;
+    }
     if (tag_is(child, "STRING")) {
       const bool first_one = singleton(frame, child, "STRING", true);
-      capture_.keep(child, "STRING");
       read_string(child, w.string_data, !first_one);
     } else if (tag_is(child, "TOGGLE_STRING")) {
       singleton(frame, child, "TOGGLE_STRING", false);
-      capture_.keep(child, "TOGGLE_STRING");
       w.toggle_string.present = true;
-      w.toggle_string.type = keyword(child, "TYPE", kStringTypes);
+      w.toggle_string.type = keyword(child, "TYPE", kStringTypes); // ID alone [orig: @ 0x658170]
       w.toggle_string.value = text_of(child);
     } else if (tag_is(child, "GROUP")) {
       singleton(frame, child, "GROUP", false);
-      capture_.keep(child, "GROUP");
       w.group = number_text(child);
       w.has_group = true;
     } else if (tag_is(child, "ITEMS")) {
       const bool first_one = singleton(frame, child, "ITEMS", true);
-      capture_.keep(child, "ITEMS");
-      if (!read_items(child, w.items, list_rule, table_rule)) {
+      if (!read_items(child, w.items, w.type)) {
         own_stopped = true;
         unread_rest(node, i + 1, list_rule ? kListTags : kTableTags,
-                    "Not read: an earlier ITEMS APPEARANCE stopped this widget's list parse in retail.", child);
+                    "Not read: an earlier ITEMS APPEARANCE stopped this widget's list parse in retail.");
       }
       if (!first_one) child.read = false;
     } else if (tag_is(child, "SPINUP")) {
-      read_part(child, w.spinup, WindowType::Button, frame, "SPINUP");
+      read_part(child, w.spinup, WindowType::Button, frame);
     } else if (tag_is(child, "SPINDOWN")) {
-      read_part(child, w.spindown, WindowType::Button, frame, "SPINDOWN");
+      read_part(child, w.spindown, WindowType::Button, frame);
     } else if (tag_is(child, "LIST_BOX")) {
       // [orig: CComboWnd_ParseXMLDefinition @ 0x65c0d0] sb_edge_pad is the combo's;
       // every other attribute and the content are the embedded list's.
@@ -731,82 +893,118 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
         w.sb_edge_pad = number;
         w.has_sb_edge_pad = true;
       }
-      read_part(child, w.list_box, WindowType::List, frame, "LIST_BOX");
+      read_part(child, w.list_box, WindowType::List, frame);
     } else if (tag_is(child, "SCROLLBAR")) {
-      read_part(child, w.scrollbar, WindowType::Scroll, frame, "SCROLLBAR");
+      read_part(child, w.scrollbar, WindowType::Scroll, frame);
     } else if (tag_is(child, "MIN_ITEM_HEIGHT")) {
       singleton(frame, child, "MIN_ITEM_HEIGHT", false);
-      capture_.keep(child, "MIN_ITEM_HEIGHT");
       w.table_data.min_item_height = number_text(child);
       w.table_data.has_min_item_height = true;
     } else if (tag_is(child, "FIXED_HEADER_HEIGHT")) {
       singleton(frame, child, "FIXED_HEADER_HEIGHT", false);
-      capture_.keep(child, "FIXED_HEADER_HEIGHT");
       w.table_data.fixed_header_height = number_text(child);
       w.table_data.has_fixed_header_height = true;
     } else if (tag_is(child, "COLUMN")) {
       if (frame.seen.count("COLUMN")) {
         because(&child, "A repeated COLUMN: retail's result depends on the COUNTs (docs/mnu/menu-re.md); "
                         "only the first COLUMN is kept.");
-        capture_.tie(child, *frame.seen["COLUMN"]);
         continue;
       }
       frame.seen["COLUMN"] = &child;
-      capture_.keep(child, "COLUMN");
       read_column(child, w.table_data.column);
     } else if (tag_is(child, "ORIENTATION")) {
       // Only a HORIZONTAL text sets anything and nothing resets it [orig: @ 0x64c745 /
       // 0x64c755]: the model keeps the first HORIZONTAL one, else the first.
       const auto seen = frame.seen.find("ORIENTATION");
+      // The model holds what the text decides: HORIZONTAL, or nothing (vertical).
+      const auto decided = [this](const Node &n) {
+        return iequals(text_of(n), kHorizontalOrientation) ? std::string(kHorizontalOrientation) : std::string();
+      };
       if (seen == frame.seen.end()) {
         frame.seen["ORIENTATION"] = &child;
-        capture_.keep(child, "ORIENTATION");
-        w.orientation = text_of(child);
+        w.orientation = decided(child);
       } else if (mnu_xml::iequals(child.text, kHorizontalOrientation) &&
                  !mnu_xml::iequals(seen->second->text, kHorizontalOrientation)) {
         seen->second->read = false;
         because(seen->second, "A later HORIZONTAL ORIENTATION decides (retail never resets it to vertical); "
                               "this one is left out.");
-        capture_.tie(*seen->second, child);
         seen->second = &child;
-        capture_.keep(child, "ORIENTATION");
-        w.orientation = text_of(child);
+        w.orientation = decided(child);
       } else {
         because(&child, "A repeated ORIENTATION changes nothing in retail (only a HORIZONTAL one sets anything, "
                         "and nothing resets it); it is left out.");
-        capture_.tie(child, *seen->second);
       }
     } else if (tag_is(child, "HEIGHT") || tag_is(child, "WIDTH")) {
       // One slot: the last authored of either [orig: @ 0x64c766 / 0x64c77e].
       singleton(frame, child, "HEIGHT", false);
-      capture_.keep(child, "SCROLL_EXTENT");
       w.scroll_extent = number_text(child);
       w.has_scroll_extent = true;
       w.scroll_extent_is_width = tag_is(child, "WIDTH");
     } else if (tag_in(child, kScrollTags)) {
       Appearance row;
       const bool ok = read_appearance(child, row, kAppearanceTypes);
-      if (!ok && scroll_rule) {
+      if (!ok) {
         scroll_stopped = true;
         because(&child, mnu_xml::ascii(child.tag) + " with no STATE retail knows stops the scroll parse in "
                                                    "retail: it and the scroll elements after it are left out.");
-        capture_.tie(child, node);
         unread_rest(node, i + 1, kScrollTags,
-                    "Not read: an earlier scroll part stopped the scroll parse in retail.", node);
+                    "Not read: an earlier scroll part stopped the scroll parse in retail.");
         continue;
       }
-      // (Not a SCROLL: retail reads none of these; the row is kept as authored.)
       child.read = true;
-      row.source = capture_.record(child);
       if (tag_is(child, "SHUTTLE")) w.shuttle.push_back(std::move(row));
       else if (tag_is(child, "SCROLLUP") || tag_is(child, "SCROLLLEFT")) w.scrollup.push_back(std::move(row));
       else w.scrolldown.push_back(std::move(row));
     } else if (tag_is(child, "DATASOURCE")) {
       // Every one loads and appends its credits [orig: @ 0x65ceeb -> CMarqueeWnd_LoadCreditsFromIni].
-      capture_.keep(child, "DATASOURCE#" + std::to_string(w.datasources.size()));
       w.datasources.push_back(text_of(child));
-    } else if (tag_in(child, kExtraTags)) {
-      w.extras.push_back(read_extra(child));
+    } else if (tag_is(child, "JOIN_BUTTON")) {
+      read_part(child, w.join_button, WindowType::Button, frame);
+    } else if (tag_is(child, "SEARCH_BUTTON")) {
+      read_part(child, w.search_button, WindowType::Button, frame);
+    } else if (tag_is(child, "GLB_TABLE") || tag_is(child, "GLB_INFO_PLAYER_DETAILS")) {
+      // An embedded table parses the element's children; the browser then reads its HEADERs'
+      // FIELDs [orig: @ 0x65dac0; CTableWnd at +184 / +1422 of CLanWnd_Construct @ 0x65ec30].
+      const bool saved = glb_header_fields_;
+      glb_header_fields_ = true;
+      read_part(child, tag_is(child, "GLB_TABLE") ? w.glb_table : w.glb_info_player_details, WindowType::Table,
+                frame);
+      glb_header_fields_ = saved;
+    } else if (tag_is(child, "GLB_INFO_BUTTON")) {
+      read_part(child, w.glb_info_button, WindowType::Button, frame);
+    } else if (tag_is(child, "GLB_INFO_SERVER_DETAILS")) {
+      // A multiline edit parses the children; the browser reads the first FIELDS child's slots.
+      read_part(child, w.glb_info_server_details, WindowType::MultilineEdit, frame);
+      for (const auto &grand : child.children)
+        if (tag_is(*grand, "FIELDS")) {
+          read_glb_fields(*grand, w.glb_server_fields);
+          break;
+        }
+    } else if (tag_is(child, "GLB_NW_INFO")) {
+      read_part(child, w.glb_nw_info, WindowType::Static, frame);
+    } else if (tag_is(child, "TARGET")) {
+      if (w.type == WindowType::GlbTable) {
+        // The last TARGET's text is the browser's [orig: @ 0x65dac0, self[3668]].
+        if (const auto seen = frame.seen.find("TARGET"); seen != frame.seen.end()) {
+          seen->second->read = false;
+          because(seen->second, "A later TARGET replaces this one (the browser keeps the last); it is left out.");
+        }
+        frame.seen["TARGET"] = &child;
+        w.glb_target = text_of(child);
+        w.has_glb_target = true;
+      } else {
+        // Every one is a target in order [orig: CGopherWnd_ParseXMLDefinition @ 0x65b130].
+        w.gopher_targets.push_back(text_of(child));
+      }
+    } else if (tag_is(child, "FILTERS")) {
+      child.read = true;
+      for (const auto &grand : child.children) {
+        if (!tag_is(*grand, "CATEGORY")) continue;
+        GopherCategory category;
+        if (read_gopher_category(*grand, category, frame)) w.gopher_categories.push_back(std::move(category));
+      }
+    } else if (tag_is(child, "GOPHER_BACK")) {
+      read_part(child, w.gopher_back, WindowType::Button, frame);
     }
   }
 }
@@ -821,7 +1019,7 @@ bool TreeReader::read_appearance(const Node &node, Appearance &out, const char *
   int number = 0;
   if (number_attr(node, "MAP_STATE", number)) { out.map_state = number; out.has_map_state = true; }
   if (number_attr(node, "HEIGHT", number)) { out.height = number; out.has_height = true; }
-  out.flags = string_attr(node, "FLAGS");
+  out.flags = flags_attr(node, "FLAGS");
   out.value = narrow(node.text);
   return !node.attributes.empty() && known_token(out.state, kAppearanceStates);
 }
@@ -851,27 +1049,21 @@ void TreeReader::read_position(const Node &node, Position &pos) {
     if (tag_is(c, "LEFT") || tag_is(c, "ULX")) {
       pos.left = number_text(c);
       pos.has_left = true;
-      capture_.keep(c, "LEFT");
     } else if (tag_is(c, "RIGHT")) {
       pos.right = number_text(c);
       pos.has_right = true;
-      capture_.keep(c, "RIGHT");
     } else if (tag_is(c, "TOP") || tag_is(c, "ULY")) {
       pos.top = number_text(c);
       pos.has_top = true;
-      capture_.keep(c, "TOP");
     } else if (tag_is(c, "BOTTOM")) {
       pos.bottom = number_text(c);
       pos.has_bottom = true;
-      capture_.keep(c, "BOTTOM");
     } else if (tag_is(c, "WIDTH")) {
       pos.right = pos.left + number_text(c);
       pos.has_right = true;
-      capture_.keep(c, "RIGHT");
     } else if (tag_is(c, "HEIGHT")) {
       pos.bottom = pos.top + number_text(c);
       pos.has_bottom = true;
-      capture_.keep(c, "BOTTOM");
     }
   }
 }
@@ -897,7 +1089,6 @@ void TreeReader::read_font(const Node &node, Font &font) {
     else if (tag_is(c, "MOUSEOVER_BG")) slot = &font.mouseover_bg;
     if (slot) {
       *slot = text_of(c);
-      capture_.keep(c, strutil::to_upper(mnu_xml::ascii(c.tag)));
     }
   }
 }
@@ -916,13 +1107,10 @@ void TreeReader::read_frame(const Node &node, mnu::Frame &frame) {
       if (number_attr(c, "INSETX", number)) { frame.insetx = number; frame.has_insetx = true; }
       if (number_attr(c, "INSETY", number)) { frame.insety = number; frame.has_insety = true; }
       frame.stencil = text_of(c);
-      capture_.keep(c, "STENCIL");
     } else if (tag_is(c, "BRUSH")) {
       frame.brush = text_of(c);
-      capture_.keep(c, "BRUSH");
     } else if (tag_is(c, "MONOGRAM")) {
       frame.monogram = text_of(c);
-      capture_.keep(c, "MONOGRAM");
     }
   }
 }
@@ -942,13 +1130,20 @@ void TreeReader::read_action(const Node &node, Action &out) {
     else because(&a, "FIELD, SOURCE and NAME write one slot and retail keeps the first authored; " +
                          mnu_xml::ascii(a.name) + " is left out.");
   }
-  if (slot && token(node, slot, out.field)) out.field_attr = strutil::to_upper(mnu_xml::ascii(slot->name));
+  if (slot) token(node, slot, out.field);
   out.state = keyword(node, "STATE", kActionStates);
   int number = 0;
   if (number_attr(node, "TARGET_FORM", number)) { out.target_form = number; out.has_target_form = true; }
   out.external_browser = flag(node, "EXTERNAL_BROWSER");
   out.toggle = flag(node, "TOGGLE");
   out.test = keyword(node, "TEST", kActionTests);
+  if (out.test == kActionTests[0]) { // LT is the parse's 0, as no TEST
+    out.test.clear();
+    if (const Attribute *test = effective(node, "TEST", kActionTests)) {
+      test->read = false;
+      because(test, "TEST LT is the parse's 0, as none does; it is left out.");
+    }
+  }
   for (const Attribute &a : node.attributes)
     if (mnu_xml::iequals(a.name, "TARGET") || mnu_xml::iequals(a.name, "SCREEN") ||
         mnu_xml::iequals(a.name, "WINDOW"))
@@ -967,10 +1162,12 @@ void TreeReader::read_cursor(const Node &node, Cursor &cursor) {
     const Node &c = *child_ptr;
     if (tag_is(c, "FILE")) {
       cursor.file = text_of(c);
-      capture_.keep(c, "FILE");
     } else if (tag_is(c, "FLAGS")) {
-      cursor.flags = text_of(c);
-      capture_.keep(c, "FLAGS");
+      cursor.flags = ui_material_flags_of(text_of(c)); // [orig: sub_646CC0 @ 0x649586]
+      if (cursor.flags == kDefaultUiMaterialFlags) {
+        c.read = false;
+        because(&c, "FLAGS reads the default word (STANDARD_TRANSPARENT), as none does; it is left out.");
+      }
     }
   }
 }
@@ -982,24 +1179,33 @@ void TreeReader::read_string(const Node &node, String &s, bool repeated) {
   s.present = true;
   s.value = text_of(node);
   s.type = keyword(node, "TYPE", kStringTypes);
-  if (node.attr("JUSTIFY")) s.justify = keyword(node, "JUSTIFY", kJustify);
-  if (node.attr("VJUSTIFY")) s.vjustify = keyword(node, "VJUSTIFY", kVJustify);
+  // A keyword sets the justification, another token's wcstol the offset [orig: @ 0x657d62..0x657eba].
+  justification(node, "JUSTIFY", kJustify, s.justify, s.justify_offset);
+  justification(node, "VJUSTIFY", kVJustify, s.vjustify, s.vjustify_offset);
   int number = 0;
   if (number_attr(node, "EDGE", number)) { s.edge = number; s.has_edge = true; }
   if (flag(node, "WRAP")) s.wrap = true;
   if (repeated) node.read = false; // the merge note covers it
 }
 
-void TreeReader::read_item(const Node &node, Item &item, bool cell) {
+void TreeReader::read_item(const Node &node, Item &item, bool cell, WindowType type) {
   node.read = true;
-  item.type = keyword(node, "TYPE", kItemTypes);
-  item.value = string_attr(node, "VALUE");
-  item.justify = keyword(node, "JUSTIFY", kJustify);
-  item.vjustify = keyword(node, "VJUSTIFY", kVJustify);
-  item.pairs_list = flag(node, "PAIRS_LIST");
+  item.type = keyword(node, "TYPE", item_types_for(type, cell));
+  item.value = number_value(node, "VALUE", true);
+  justification(node, "JUSTIFY", kJustify, item.justify, item.justify_offset);
+  justification(node, "VJUSTIFY", kVJustify, item.vjustify, item.vjustify_offset);
+  // PAIRS_LIST a LIST's ITEM alone reads, COLUMN a TABLE cell alone (schema_reads
+  // "items.item.pairs_list", "items.item.column", "items.row.item.pairs_list").
+  if (!cell && schema_reads(type, "items.item.pairs_list") == SchemaApplies::Reads)
+    item.pairs_list = flag(node, "PAIRS_LIST");
+  else
+    not_read(node, "PAIRS_LIST", type);
   int number = 0;
-  Reads column(*this, cell);
-  if (number_attr(node, "COLUMN", number)) { item.column = number; item.has_column = true; }
+  if (cell) {
+    if (number_attr(node, "COLUMN", number)) { item.column = number; item.has_column = true; }
+  } else {
+    not_read(node, "COLUMN", type);
+  }
   item.text = text_of(node);
 }
 
@@ -1007,12 +1213,25 @@ void TreeReader::read_item(const Node &node, Item &item, bool cell) {
 // the SPINLIST form, and the TABLE form (MULTISELECT; ROW > ITEM cells;
 // APPEARANCE with IMAGEROW) [orig: @ 0x6457b6, 0x64bd57, 0x642816]. An APPEARANCE
 // row with no known STATE ends a LIST's or a TABLE's own parse.
-bool TreeReader::read_items(const Node &node, Items &items, bool list_rule, bool table_rule) {
+bool TreeReader::read_items(const Node &node, Items &items, WindowType type) {
+  const bool list_rule = type == WindowType::List || type == WindowType::LanList;
+  const bool table_rule = type == WindowType::Table;
+  const auto reads = [type](const char *path) { return schema_reads(type, path) == SchemaApplies::Reads; };
   node.read = true;
   items.present = true;
-  if (node.attr("JUSTIFY")) items.justify = keyword(node, "JUSTIFY", kJustify);
-  if (node.attr("VJUSTIFY")) items.vjustify = keyword(node, "VJUSTIFY", kVJustify);
-  if (flag(node, "MULTISELECT")) items.multiselect = true;
+  if (reads("items.justify")) {
+    justification(node, "JUSTIFY", kJustify, items.justify, items.justify_offset);
+    justification(node, "VJUSTIFY", kVJustify, items.vjustify, items.vjustify_offset);
+  } else {
+    not_read(node, "JUSTIFY", type);
+    not_read(node, "VJUSTIFY", type);
+  }
+  if (reads("items.multiselect")) {
+    if (flag(node, "MULTISELECT")) items.multiselect = true;
+  } else {
+    not_read(node, "MULTISELECT", type);
+  }
+  const std::string kind = strutil::to_upper(window_type_name(type));
   for (size_t i = 0; i < node.children.size(); ++i) {
     const Node &c = *node.children[i];
     // Each form reads its own rows (docs/mnu/menu-re.md, the ITEMS forms): an ITEM
@@ -1021,38 +1240,42 @@ bool TreeReader::read_items(const Node &node, Items &items, bool list_rule, bool
     // CListWnd_ParseXMLDefinition @ 0x645770; CUISpinList_ParseXMLDefinition @ 0x64bd10;
     // CTableWnd_ParseXMLContentDefinition @ 0x6427d0].
     if (tag_is(c, "ITEM")) {
-      Reads reads(*this, !table_rule);
+      if (!reads("items.item")) {
+        because(&c, "A " + kind + "'s ITEMS reads no ITEM row here" +
+                        (table_rule ? " (a TABLE's cells are ITEMs in a ROW)" : "") + "; it is left out.");
+        continue;
+      }
       Item item;
-      read_item(c, item, false);
-      item.source = capture_.record(c);
+      read_item(c, item, false, type);
       items.items.push_back(std::move(item));
     } else if (tag_is(c, "ROW")) {
-      Reads reads(*this, table_rule);
+      if (!reads("items.row")) {
+        because(&c, "A " + kind + "'s ITEMS reads no ROW (a TABLE's alone does); it is left out.");
+        continue;
+      }
       c.read = true;
       TableRow row;
-      row.source = capture_.record(c);
       for (const auto &cell_ptr : c.children) {
         if (!tag_is(*cell_ptr, "ITEM")) continue;
         Item cell;
-        read_item(*cell_ptr, cell, true);
-        cell.source = capture_.record(*cell_ptr);
+        read_item(*cell_ptr, cell, true, type);
         row.cells.push_back(std::move(cell));
       }
       items.rows.push_back(std::move(row));
     } else if (tag_is(c, "APPEARANCE")) {
-      Reads reads(*this, list_rule || table_rule);
+      if (!reads("items.appearance")) {
+        because(&c, "A " + kind + "'s ITEMS reads no APPEARANCE (a LIST's and a TABLE's do); it is left out.");
+        continue;
+      }
       Appearance appearance;
       const bool ok = read_appearance(c, appearance, table_rule ? kTableAppearanceTypes : kAppearanceTypes);
-      if (!ok && (list_rule || table_rule)) {
+      if (!ok) {
         because(&c, "An ITEMS APPEARANCE with no STATE retail knows ends this widget's list parse in retail: "
                     "it and what follows are left out.");
-        capture_.tie(c, node);
-        unread_rest(node, i + 1, nullptr, "Not read: an earlier ITEMS APPEARANCE ended the list parse.", node);
+        unread_rest(node, i + 1, nullptr, "Not read: an earlier ITEMS APPEARANCE ended the list parse.");
         return false;
       }
-      // (Another type reads no ITEMS APPEARANCE: the row is kept as authored.)
       c.read = true;
-      appearance.source = capture_.record(c);
       items.appearances.push_back(std::move(appearance));
     }
   }
@@ -1139,7 +1362,6 @@ void TreeReader::read_column(const Node &node, TableColumn &column) {
         sort_headers[slot] = &c;
         if (slot == 0) {
           column.primary_sort = walk_index;
-          column.primary_sort_token = strutil::to_upper(mnu_xml::ascii(a.name));
         } else {
           (slot == 1 ? column.secondary_sort : column.tertiary_sort) = walk_index;
         }
@@ -1147,7 +1369,32 @@ void TreeReader::read_column(const Node &node, TableColumn &column) {
       read_index(header.has_column, header.column);
       header.justify = keyword(c, "JUSTIFY", kJustify);
       header.vjustify = keyword(c, "VJUSTIFY", kVJustify);
-      header.sort = string_attr(c, "SORT");
+      // SORT by its first character: '1' numeric, 'A' or 'a' alphabetic, another nothing [orig:
+      // @ 0x6432ca..0x6432dd].
+      {
+        const Attribute *sort = first(c, "SORT");
+        std::string text;
+        if (token(c, sort, text)) {
+          if (text[0] == '1') header.sort = "1";
+          else if (text[0] == 'A' || text[0] == 'a') header.sort = "A";
+          else {
+            sort->read = false;
+            because(sort, "A SORT whose first character is not 1, A or a sets nothing; it is left out.");
+          }
+        }
+      }
+      // The browser stores a HEADER's FIELD at its column index alone where 0 <= index < the table's
+      // column count [orig: CLanGameBrowser_ParseExtendedXMLDefinition @ 0x65dc50, @ 0x65de8c].
+      if (glb_header_fields_) {
+        if (header.column >= 0 && header.column < columns) {
+          header.field = string_attr(c, "FIELD");
+        } else {
+          for (const Attribute &a : c.attributes)
+            if (mnu_xml::iequals(a.name, "FIELD"))
+              because(&a, "The browser reads no FIELD of a HEADER whose COLUMN is below 0 or not below the "
+                          "table's column count; it is left out.");
+        }
+      }
       if (number_attr(c, "WIDTH", number)) { header.width = number; header.has_width = true; }
       // A type="id" HEADER's text is a string id, looked up as the table parses
       // [orig: CUIStringTable_LookupString call @ 0x6434df].
@@ -1159,14 +1406,13 @@ void TreeReader::read_column(const Node &node, TableColumn &column) {
                     "without a COUNT of 1 or more) is not set up by retail.");
         c.read = false;
       }
-      header.source = capture_.record(c);
       column.headers.push_back(std::move(header));
     } else if (tag_is(c, "BODY")) {
       c.read = true;
       TableBody body;
       read_index(body.has_column, body.column);
-      body.justify = keyword(c, "JUSTIFY", kJustify);
-      body.vjustify = keyword(c, "VJUSTIFY", kVJustify);
+      justification(c, "JUSTIFY", kJustify, body.justify, body.justify_offset);
+      justification(c, "VJUSTIFY", kVJustify, body.vjustify, body.vjustify_offset);
       // The draw kind: the walk's last write, the first authored of the three.
       for (const Attribute &a : c.attributes) {
         const bool custom = mnu_xml::iequals(a.name, kBodyDisplays[0]);
@@ -1180,18 +1426,16 @@ void TreeReader::read_column(const Node &node, TableColumn &column) {
         body.bitmap_text = body.bitmap_text || bitmap_text;
       }
       body.scale_bitmap = flag(c, "SCALE_BITMAP");
-      body.bitmap_flags = string_attr(c, "BITMAP_FLAGS");
-      body.source = capture_.record(c);
+      body.bitmap_flags = flags_attr(c, "BITMAP_FLAGS");
       column.bodies.push_back(std::move(body));
     } else if (tag_is(c, "SUBST")) {
       c.read = true;
       TableSubst subst;
       read_index(subst.has_column, subst.column);
-      subst.value = string_attr(c, "VALUE");
+      subst.value = string_attr(c, "VALUE"); // the token, matched as text [orig: @ 0x6438f1..0x643918]
       subst.is_url = flag(c, "URL");
       subst.is_file = flag(c, "FILE");
       subst.file = text_of(c);
-      subst.source = capture_.record(c);
       column.substitutions.push_back(std::move(subst));
     }
   }
@@ -1206,24 +1450,80 @@ void TreeReader::read_column(const Node &node, TableColumn &column) {
   }
 }
 
-Element TreeReader::read_extra(const Node &node) {
+// [orig: CLanGameBrowser_ParseXMLFieldDefinitions @ 0x65d850] count (an overwriting walk over the
+// attribute list, last authored first, so the first authored; an empty one faults in wcstol), then
+// each FORMAT (the last; its \r and \n pairs read as CR and LF) and FIELD (its which, the first
+// authored, one past the count reading 0; the last FIELD of a slot kept). A FIELD with no count
+// writes through no array, and one at the count past its array: each faults.
+void TreeReader::read_glb_fields(const Node &node, GlbFields &fields) {
   node.read = true;
-  Element element;
-  element.source = capture_.record(node);
-  element.tag = strutil::to_upper(mnu_xml::ascii(node.tag));
-  element.text = narrow(node.text);
-  for (const Attribute &a : node.attributes) {
-    a.read = true;
-    if (a.name.empty() && !a.has_value) continue;
-    ElementAttribute attr;
-    attr.name = narrow(a.name);
-    Text tok;
-    attr.has_value = a.has_value;
-    if (a.token(tok)) attr.value = narrow(tok);
-    element.attributes.push_back(std::move(attr));
+  fields.present = true;
+  if (number_attr(node, "count", fields.count)) fields.has_count = true;
+  for (const auto &child_ptr : node.children) {
+    const Node &c = *child_ptr;
+    if (tag_is(c, "FORMAT")) {
+      std::string text = text_of(c);
+      std::string read;
+      for (size_t i = 0; i < text.size(); ++i) {
+        if (text[i] == '\\' && i + 1 < text.size() && (text[i + 1] == 'r' || text[i + 1] == 'n')) {
+          read += text[i + 1] == 'r' ? '\r' : '\n';
+          ++i;
+        } else {
+          read += text[i];
+        }
+      }
+      fields.format = read;
+      fields.has_format = true;
+    } else if (tag_is(c, "FIELD")) {
+      c.read = true;
+      int which = 0;
+      number_attr(c, "which", which);
+      if (static_cast<unsigned>(which) > static_cast<unsigned>(fields.count)) which = 0;
+      if (!fields.has_count || which == fields.count) {
+        fatal_because(&c, fields.has_count ? "A FIELD whose which is the count writes past the browser's slots in "
+                                             "retail; it is left out."
+                                           : "A FIELD before any count writes through no slots in retail; it is left out.");
+        c.read = false;
+        continue;
+      }
+      const std::string text = text_of(c);
+      auto slot = std::find_if(fields.fields.begin(), fields.fields.end(),
+                               [which](const GlbFieldSlot &f) { return f.which == which; });
+      if (slot != fields.fields.end()) slot->text = text;
+      else fields.fields.push_back({which, text});
+    }
   }
-  for (const auto &child : node.children) element.children.push_back(read_extra(*child));
-  return element;
+}
+
+// [orig: CGopherWnd_ParseCategoryXML @ 0x65a540] LEVEL on the CATEGORY; its children: LABEL (the
+// category static parses the element's children), ITEM (a button: NAME, TARGET, FILTER, TABLE, the
+// text) and INFO (a static: NAME, FILTER, TABLE, the text); each attribute the first authored with a
+// token (first_token). An empty CATEGORY hands the parse no node, which faults.
+bool TreeReader::read_gopher_category(const Node &node, GopherCategory &category, ReadScope &owner) {
+  if (node.children.empty()) {
+    fatal_because(&node, "An empty CATEGORY crashes retail (its parse reads no element); it is left out.");
+    return false;
+  }
+  node.read = true;
+  category.level = first_token(node, "LEVEL");
+  category.has_level = !category.level.empty();
+  for (const auto &child_ptr : node.children) {
+    const Node &c = *child_ptr;
+    if (tag_is(c, "LABEL")) {
+      read_part(c, category.label, WindowType::Static, owner);
+    } else if (tag_is(c, "ITEM") || tag_is(c, "INFO")) {
+      c.read = true;
+      GopherEntry entry;
+      entry.info = tag_is(c, "INFO");
+      entry.name = first_token(c, "NAME");
+      if (!entry.info) entry.target = first_token(c, "TARGET");
+      entry.filter = first_token(c, "FILTER");
+      entry.table = first_token(c, "TABLE");
+      entry.text = text_of(c);
+      category.entries.push_back(std::move(entry));
+    }
+  }
+  return true;
 }
 
 // The model record a node is in (ParseNote::locator): its top-level SCREEN by its place
@@ -1280,6 +1580,78 @@ void TreeReader::sweep(const mnu_xml::Document &xml, std::vector<ParseNote> &not
 }  // namespace
 
 // --- public API --------------------------------------------------------------
+
+const std::vector<UiMaterialFlag> &ui_material_flags() {
+  // g_UIMaterialFlagNames @ 0x84a5d0, in table order (rows of wchar name[64] + DWORD flags).
+  static const std::vector<UiMaterialFlag> table = {
+      {"STANDARD", 0x300600}, {"STANDARD_TRANSPARENT", 0x300651}, {"AFUNC_BITMASK", 0xF},
+      {"ASRC_BITMASK", 0xF0}, {"COLOR_BITMASK", 0xF00}, {"AFUNC_NONE", 0x0}, {"AFUNC_BLEND", 0x1},
+      {"AFUNC_SRCCOPY", 0x0}, {"AFUNC_ADD", 0x2}, {"AFUNC_SHADE", 0x3}, {"AFUNC_GLOW", 0x4},
+      {"AFUNC_ALPHALIGHT", 0x5}, {"AFUNC_MULTIPLY", 0x6}, {"AFUNC_DEST", 0x7}, {"AFUNC_MULTIPLYDBL", 0x8},
+      {"AFUNC_SQR", 0x9}, {"AFUNC_SQRADD", 0xA}, {"ASRC_NONE", 0x0}, {"ASRC_CONSTANT", 0x10},
+      {"ASRC_ITERATED", 0x20}, {"ASRC_TEXTURE", 0x30}, {"ASRC_TEXTURExCONSTANT", 0x40},
+      {"ASRC_TEXTURExITERATED", 0x50}, {"COLOR_NONE", 0x0}, {"COLOR_CONSTANT", 0x100},
+      {"COLOR_ITERATED", 0x200}, {"COLOR_ITERATEDxCONSTANT", 0x300}, {"COLOR_TEXTURE", 0x400},
+      {"COLOR_TEXTURExCONSTANT", 0x500}, {"COLOR_TEXTURExITERATED", 0x600}, {"COLOR_TEXTURERAMP", 0x700},
+      {"COLOR_TEXTUREdpCONSTANT", 0x800}, {"COLOR_TEXTUREdpITERATED", 0x900}, {"COLOR2_SQRD", 0x1000},
+      {"APPLYSPECULAR", 0x10000}, {"APPLYFOG", 0x20000}, {"ALPHATEST", 0x40000}, {"NATIVE2X", 0x80000},
+      {"NOWRITEDEPTH", 0x100000}, {"NOCHECKDEPTH", 0x200000}, {"GMAT_OVR_CLAMPUV1", 0x1000000},
+      {"GMAT_OVR_CLAMPUV2", 0x2000000}, {"TINTASTEXT", 0x80000000u},
+  };
+  return table;
+}
+
+uint32_t ui_material_flags_of(const std::string &text) {
+  // [orig: sub_646CC0 @ 0x646cc0] wcstok on " ,|+"; each token the first row of its name, without case.
+  uint32_t flags = 0;
+  size_t at = 0;
+  while (at < text.size()) {
+    const size_t start = text.find_first_not_of(" ,|+", at);
+    if (start == std::string::npos) break;
+    const size_t end = text.find_first_of(" ,|+", start);
+    const std::string token = text.substr(start, end == std::string::npos ? std::string::npos : end - start);
+    for (const UiMaterialFlag &row : ui_material_flags())
+      if (iequals(token, row.name)) {
+        flags |= row.bits;
+        break;
+      }
+    at = end == std::string::npos ? text.size() : end;
+  }
+  return flags;
+}
+
+std::string ui_material_flags_text(uint32_t flags) {
+  const std::vector<UiMaterialFlag> &table = ui_material_flags();
+  if (flags == 0) return "AFUNC_NONE";
+  // The widest rows first (the most bits; the table's order among rows of as many), each one whose
+  // bits are all the word's and that adds some.
+  std::vector<const UiMaterialFlag *> rows;
+  for (const UiMaterialFlag &row : table)
+    if (row.bits != 0) rows.push_back(&row);
+  std::stable_sort(rows.begin(), rows.end(), [](const UiMaterialFlag *a, const UiMaterialFlag *b) {
+    auto bits = [](uint32_t v) {
+      int n = 0;
+      for (; v; v &= v - 1) ++n;
+      return n;
+    };
+    return bits(a->bits) > bits(b->bits);
+  });
+  std::string out;
+  uint32_t covered = 0;
+  for (const UiMaterialFlag *row : rows) {
+    if ((row->bits & ~flags) != 0 || (row->bits & ~covered) == 0) continue;
+    if (!out.empty()) out += '|';
+    out += row->name;
+    covered |= row->bits;
+  }
+  return covered == flags ? out : std::string();
+}
+
+const char *const *item_types_for(WindowType type, bool cell) {
+  if (cell || type == WindowType::Table) return kCellItemTypes;
+  if (type == WindowType::SpinList) return kSpinListItemTypes;
+  return kListItemTypes;
+}
 
 bool known_token(const std::string &token, const char *const *tokens) {
   for (size_t i = 0; tokens[i]; ++i)
@@ -1428,13 +1800,13 @@ const Window *find_window(const Screen &screen, const std::string &name) {
 }
 
 bool parse(const std::string &content, Document &out, std::string &error,
-           std::vector<ParseNote> *notes, ParseLayout layout) {
+           std::vector<ParseNote> *notes) {
   return parse(reinterpret_cast<const uint8_t *>(content.data()),
-               content.size(), out, error, notes, layout);
+               content.size(), out, error, notes);
 }
 
 bool parse(const uint8_t *data, size_t size, Document &out, std::string &error,
-           std::vector<ParseNote> *notes, ParseLayout layout) {
+           std::vector<ParseNote> *notes) {
   out = Document{};
   if (notes) notes->clear();
   if (!data && size != 0) {
@@ -1448,27 +1820,18 @@ bool parse(const uint8_t *data, size_t size, Document &out, std::string &error,
     out.screens.clear();
     return false;
   }
-  TextLayoutCapture capture(out.source_encoding, layout == ParseLayout::Text);
-  TreeReader reader(out.source_encoding, capture);
+  TreeReader reader(out.source_encoding);
   reader.read_document(xml, out);
   if (notes) {
     // The reader's own notes are all retail hangs or overruns.
     for (const mnu_xml::Note &n : xml.notes) notes->push_back({n.line, std::string(), n.message, true});
     reader.sweep(xml, *notes);
   }
-  // The file's look, when asked for, modeled against the writer's words for the records as read;
-  // the bytes the loader skips before the text (the byte order mark) are the layout's.
-  if (!capture.on()) return true;
-  const size_t skipped = out.source_encoding == SourceEncoding::Utf16LE ? std::min<size_t>(size, 2)
-                         : out.source_encoding == SourceEncoding::Utf8Bom ? 3
-                                                                          : 0;
-  out.text_layout = capture.finish(text, xml, written_screens(out),
-                                   std::string(reinterpret_cast<const char *>(data), skipped));
   return true;
 }
 
 bool parse_file(const std::string &path, Document &out, std::string &error,
-                std::vector<ParseNote> *notes, ParseLayout layout) {
+                std::vector<ParseNote> *notes) {
   std::ifstream file(path, std::ios::binary);
   if (!file) {
     error = "Failed to open file: " + path;
@@ -1479,8 +1842,234 @@ bool parse_file(const std::string &path, Document &out, std::string &error,
   buffer << file.rdbuf();
   std::string content = buffer.str();
 
-  return parse(content, out, error, notes, layout);
+  return parse(content, out, error, notes);
 }
+
+// --- the model's equality ---------------------------------------------------------------------
+
+namespace {
+
+// Field-by-field equality over the model; `where` gathers the path to the first difference.
+class Same {
+public:
+  explicit Same(std::string *where) : where_(where) {}
+
+  bool document(const Document &a, const Document &b) {
+    if (!same(a.source_encoding == b.source_encoding, "source_encoding")) return false;
+    return list(a.screens, b.screens, "screen", [this](const Screen &x, const Screen &y) { return screen(x, y); });
+  }
+
+private:
+  std::string *where_;
+  std::vector<std::string> path_;
+
+  bool same(bool equal, const std::string &field) {
+    if (!equal && where_) {
+      std::string at;
+      for (const std::string &step : path_) at += step + "/";
+      *where_ = at + field;
+    }
+    return equal;
+  }
+  template <typename T, typename F>
+  bool list(const std::vector<T> &a, const std::vector<T> &b, const char *name, F each) {
+    if (!same(a.size() == b.size(), std::string(name) + " count")) return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+      path_.push_back(std::string(name) + ":" + std::to_string(i));
+      const bool ok = each(a[i], b[i]);
+      path_.pop_back();
+      if (!ok) return false;
+    }
+    return true;
+  }
+  bool screen(const Screen &a, const Screen &b) {
+    return same(a.name == b.name, "name") && same(a.has_music_var == b.has_music_var, "has_music_var") &&
+           same(a.music_var == b.music_var, "music_var") &&
+           list(a.roots, b.roots, "window", [this](const Window &x, const Window &y) { return window(x, y); });
+  }
+  bool appearance(const Appearance &a, const Appearance &b) {
+    return same(a.state == b.state, "state") && same(a.type == b.type, "type") && same(a.value == b.value, "value") &&
+           same(a.has_map_state == b.has_map_state && a.map_state == b.map_state, "map_state") &&
+           same(a.has_height == b.has_height && a.height == b.height, "height") && same(a.flags == b.flags, "flags");
+  }
+  bool appearances(const std::vector<Appearance> &a, const std::vector<Appearance> &b, const char *name) {
+    return list(a, b, name, [this](const Appearance &x, const Appearance &y) { return appearance(x, y); });
+  }
+  bool item(const Item &a, const Item &b) {
+    return same(a.type == b.type, "type") && same(a.value == b.value, "value") && same(a.text == b.text, "text") &&
+           same(a.justify == b.justify, "justify") && same(a.vjustify == b.vjustify, "vjustify") &&
+           same(a.justify_offset == b.justify_offset, "justify_offset") &&
+           same(a.vjustify_offset == b.vjustify_offset, "vjustify_offset") &&
+           same(a.pairs_list == b.pairs_list, "pairs_list") &&
+           same(a.has_column == b.has_column && a.column == b.column, "column");
+  }
+  bool items(const Items &a, const Items &b) {
+    path_.push_back("items");
+    const bool ok =
+        same(a.present == b.present, "present") && same(a.multiselect == b.multiselect, "multiselect") &&
+        same(a.justify == b.justify, "justify") && same(a.vjustify == b.vjustify, "vjustify") &&
+        same(a.justify_offset == b.justify_offset, "justify_offset") &&
+        same(a.vjustify_offset == b.vjustify_offset, "vjustify_offset") &&
+        appearances(a.appearances, b.appearances, "appearance") &&
+        list(a.items, b.items, "item", [this](const Item &x, const Item &y) { return item(x, y); }) &&
+        list(a.rows, b.rows, "row", [this](const TableRow &x, const TableRow &y) {
+          return list(x.cells, y.cells, "item", [this](const Item &p, const Item &q) { return item(p, q); });
+        });
+    path_.pop_back();
+    return ok;
+  }
+  bool column(const TableColumn &a, const TableColumn &b) {
+    path_.push_back("column");
+    const bool ok =
+        same(a.has_count == b.has_count && a.count == b.count, "count") &&
+        same(a.has_spacing == b.has_spacing && a.spacing == b.spacing, "spacing") &&
+        list(a.headers, b.headers, "header",
+             [this](const TableHeader &x, const TableHeader &y) {
+               return same(x.justify == y.justify, "justify") && same(x.vjustify == y.vjustify, "vjustify") &&
+                      same(x.has_column == y.has_column && x.column == y.column, "column") &&
+                      same(x.sort == y.sort, "sort") && same(x.has_width == y.has_width && x.width == y.width, "width") &&
+                      same(x.type == y.type, "type") && same(x.text == y.text, "text") &&
+                      same(x.field == y.field, "field");
+             }) &&
+        list(a.bodies, b.bodies, "body",
+             [this](const TableBody &x, const TableBody &y) {
+               return same(x.justify == y.justify, "justify") && same(x.vjustify == y.vjustify, "vjustify") &&
+                      same(x.justify_offset == y.justify_offset, "justify_offset") &&
+                      same(x.vjustify_offset == y.vjustify_offset, "vjustify_offset") &&
+                      same(x.has_column == y.has_column && x.column == y.column, "column") &&
+                      same(x.bitmap_draw == y.bitmap_draw, "bitmap_draw") &&
+                      same(x.bitmap_text == y.bitmap_text, "bitmap_text") &&
+                      same(x.custom_draw == y.custom_draw, "custom_draw") && same(x.display == y.display, "display") &&
+                      same(x.bitmap_flags == y.bitmap_flags, "bitmap_flags") &&
+                      same(x.scale_bitmap == y.scale_bitmap, "scale_bitmap");
+             }) &&
+        list(a.substitutions, b.substitutions, "subst",
+             [this](const TableSubst &x, const TableSubst &y) {
+               return same(x.has_column == y.has_column && x.column == y.column, "column") &&
+                      same(x.value == y.value, "value") && same(x.is_file == y.is_file, "file") &&
+                      same(x.is_url == y.is_url, "url") && same(x.file == y.file, "text");
+             }) &&
+        same(a.primary_sort == b.primary_sort, "primary_sort") &&
+        same(a.secondary_sort == b.secondary_sort, "secondary_sort") &&
+        same(a.tertiary_sort == b.tertiary_sort, "tertiary_sort");
+    path_.pop_back();
+    return ok;
+  }
+  bool glb_fields(const GlbFields &a, const GlbFields &b) {
+    return same(a.present == b.present, "glb_server_fields") &&
+           same(a.has_count == b.has_count && a.count == b.count, "glb_server_fields.count") &&
+           same(a.has_format == b.has_format && a.format == b.format, "glb_server_fields.format") &&
+           list(a.fields, b.fields, "glb_server_fields.field", [this](const GlbFieldSlot &x, const GlbFieldSlot &y) {
+             return same(x.which == y.which, "which") && same(x.text == y.text, "text");
+           });
+  }
+  bool category(const GopherCategory &a, const GopherCategory &b) {
+    return same(a.has_level == b.has_level && a.level == b.level, "level") && part(a.label, b.label, "label") &&
+           list(a.entries, b.entries, "entry", [this](const GopherEntry &x, const GopherEntry &y) {
+             return same(x.info == y.info, "info") && same(x.name == y.name, "name") &&
+                    same(x.target == y.target, "target") && same(x.filter == y.filter, "filter") &&
+                    same(x.table == y.table, "table") && same(x.text == y.text, "text");
+           });
+  }
+  bool part(const WindowPart &a, const WindowPart &b, const char *name) {
+    if (!same(a.present() == b.present(), std::string(name) + " present")) return false;
+    if (!a.present()) return true;
+    path_.push_back(name);
+    const bool ok = window(*a, *b);
+    path_.pop_back();
+    return ok;
+  }
+  bool window(const Window &a, const Window &b) {
+    const Font &f = a.font, &g = b.font;
+    const Frame &r = a.frame, &q = b.frame;
+    return same(a.name == b.name, "name") && same(a.type == b.type, "type") && same(a.hidden == b.hidden, "hidden") &&
+           same(a.disabled == b.disabled, "disabled") && same(a.checked == b.checked, "checked") &&
+           same(a.draw_frame == b.draw_frame, "draw_frame") && same(a.modal == b.modal, "modal") &&
+           same(a.readonly == b.readonly, "readonly") && same(a.as_button == b.as_button, "as_button") &&
+           same(a.has_group == b.has_group && a.group == b.group, "group") && same(a.number == b.number, "number") &&
+           same(a.has_minval == b.has_minval && a.minval == b.minval, "minval") &&
+           same(a.has_maxval == b.has_maxval && a.maxval == b.maxval, "maxval") &&
+           same(a.has_maxchar == b.has_maxchar && a.maxchar == b.maxchar, "maxchar") &&
+           same(a.has_form == b.has_form && a.form == b.form, "form") && same(a.global_var == b.global_var, "global_var") &&
+           same(a.password == b.password, "password") && same(a.orientation == b.orientation, "orientation") &&
+           same(a.has_scroll_extent == b.has_scroll_extent && a.scroll_extent == b.scroll_extent &&
+                    a.scroll_extent_is_width == b.scroll_extent_is_width,
+                "scroll_extent") &&
+           same(a.position.has_left == b.position.has_left && a.position.left == b.position.left &&
+                    a.position.has_top == b.position.has_top && a.position.top == b.position.top &&
+                    a.position.has_right == b.position.has_right && a.position.right == b.position.right &&
+                    a.position.has_bottom == b.position.has_bottom && a.position.bottom == b.position.bottom,
+                "position") &&
+           appearances(a.appearances, b.appearances, "appearance") &&
+           list(a.sounds, b.sounds, "sound",
+                [this](const Sound &x, const Sound &y) {
+                  return same(x.state == y.state, "state") && same(x.trigger == y.trigger, "trigger") &&
+                         same(x.file == y.file, "file");
+                }) &&
+           list(a.actions, b.actions, "action",
+                [this](const Action &x, const Action &y) {
+                  return same(x.type == y.type, "type") && same(x.state == y.state, "state") &&
+                         same(x.file == y.file, "file") && same(x.field == y.field, "field") &&
+                         same(x.has_target_form == y.has_target_form && x.target_form == y.target_form, "target_form") &&
+                         same(x.toggle == y.toggle, "toggle") && same(x.test == y.test, "test") &&
+                         same(x.target == y.target, "target") && same(x.external_browser == y.external_browser, "external_browser");
+                }) &&
+           same(a.string_data.present == b.string_data.present && a.string_data.type == b.string_data.type &&
+                    a.string_data.justify == b.string_data.justify && a.string_data.vjustify == b.string_data.vjustify &&
+                    a.string_data.justify_offset == b.string_data.justify_offset &&
+                    a.string_data.vjustify_offset == b.string_data.vjustify_offset &&
+                    a.string_data.has_edge == b.string_data.has_edge && a.string_data.edge == b.string_data.edge &&
+                    a.string_data.wrap == b.string_data.wrap && a.string_data.value == b.string_data.value,
+                "string") &&
+           same(a.toggle_string.present == b.toggle_string.present && a.toggle_string.type == b.toggle_string.type &&
+                    a.toggle_string.value == b.toggle_string.value,
+                "toggle_string") &&
+           same(f.name == g.name && f.default_fg == g.default_fg && f.default_bg == g.default_bg &&
+                    f.mouseover_fg == g.mouseover_fg && f.mouseover_bg == g.mouseover_bg &&
+                    f.selected_fg == g.selected_fg && f.selected_bg == g.selected_bg && f.disabled_fg == g.disabled_fg &&
+                    f.disabled_bg == g.disabled_bg,
+                "font") &&
+           same(r.stencil == q.stencil && r.has_stencil_size == q.has_stencil_size && r.stencil_size == q.stencil_size &&
+                    r.brush == q.brush && r.monogram == q.monogram && r.has_insetx == q.has_insetx &&
+                    r.insetx == q.insetx && r.has_insety == q.has_insety && r.insety == q.insety,
+                "frame") &&
+           items(a.items, b.items) && part(a.list_box, b.list_box, "list_box") &&
+           same(a.has_sb_edge_pad == b.has_sb_edge_pad && a.sb_edge_pad == b.sb_edge_pad, "sb_edge_pad") &&
+           part(a.spinup, b.spinup, "spinup") && part(a.spindown, b.spindown, "spindown") &&
+           part(a.scrollbar, b.scrollbar, "scrollbar") &&
+           same(a.cursor.file == b.cursor.file && a.cursor.flags == b.cursor.flags, "cursor") &&
+           same(a.has_text_rsrc == b.has_text_rsrc && a.text_rsrc == b.text_rsrc, "text_rsrc") &&
+           same(a.private_data == b.private_data, "private_data") && same(a.datasources == b.datasources, "datasource") &&
+           list(a.hotkeys, b.hotkeys, "hotkey",
+                [this](const Hotkey &x, const Hotkey &y) {
+                  return same(x.value == y.value, "value") && same(x.virtual_key == y.virtual_key, "virtual");
+                }) &&
+           appearances(a.shuttle, b.shuttle, "shuttle") && appearances(a.scrollup, b.scrollup, "scrollup") &&
+           appearances(a.scrolldown, b.scrolldown, "scrolldown") && column(a.table_data.column, b.table_data.column) &&
+           same(a.table_data.has_min_item_height == b.table_data.has_min_item_height &&
+                    a.table_data.min_item_height == b.table_data.min_item_height,
+                "min_item_height") &&
+           same(a.table_data.has_fixed_header_height == b.table_data.has_fixed_header_height &&
+                    a.table_data.fixed_header_height == b.table_data.fixed_header_height,
+                "fixed_header_height") &&
+           part(a.join_button, b.join_button, "join_button") && part(a.search_button, b.search_button, "search_button") &&
+           same(a.glb_playerlist == b.glb_playerlist, "glb_playerlist") && part(a.glb_table, b.glb_table, "glb_table") &&
+           part(a.glb_info_button, b.glb_info_button, "glb_info_button") &&
+           part(a.glb_info_player_details, b.glb_info_player_details, "glb_info_player_details") &&
+           part(a.glb_info_server_details, b.glb_info_server_details, "glb_info_server_details") &&
+           glb_fields(a.glb_server_fields, b.glb_server_fields) && part(a.glb_nw_info, b.glb_nw_info, "glb_nw_info") &&
+           same(a.has_glb_target == b.has_glb_target && a.glb_target == b.glb_target, "glb_target") &&
+           same(a.gopher_targets == b.gopher_targets, "gopher_targets") &&
+           list(a.gopher_categories, b.gopher_categories, "gopher_category",
+                [this](const GopherCategory &x, const GopherCategory &y) { return category(x, y); }) &&
+           part(a.gopher_back, b.gopher_back, "gopher_back") &&
+           list(a.children, b.children, "window", [this](const Window &x, const Window &y) { return window(x, y); });
+  }
+};
+
+}  // namespace
+
+bool equal(const Document &a, const Document &b, std::string *where) { return Same(where).document(a, b); }
 
 std::string strip_hotkey_marker(const std::string &text,
                                 std::string *out_hotkey,

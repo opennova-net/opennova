@@ -79,11 +79,9 @@ void AvatarComboRow::assign(const AvatarCombo &p_value, int p_alignment,
 	character_id_ = p_character_id;
 }
 
-String AvatarComboRow::get_raw_id() const { return String(value_.raw_id); }
 String AvatarComboRow::get_head_name() const { return String(value_.head_name); }
 
 void AvatarComboRow::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("get_raw_id"), &AvatarComboRow::get_raw_id);
 	ClassDB::bind_method(D_METHOD("get_id"), &AvatarComboRow::get_id);
 	ClassDB::bind_method(D_METHOD("get_head_name"), &AvatarComboRow::get_head_name);
 	ClassDB::bind_method(D_METHOD("get_head"), &AvatarComboRow::get_head);
@@ -95,7 +93,6 @@ void AvatarComboRow::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_division_index"), &AvatarComboRow::get_division_index);
 	ClassDB::bind_method(D_METHOD("get_combo_index"), &AvatarComboRow::get_combo_index);
 	ClassDB::bind_method(D_METHOD("get_character_id"), &AvatarComboRow::get_character_id);
-	READ_ONLY_PROPERTY(Variant::STRING, "raw_id", "get_raw_id");
 	READ_ONLY_PROPERTY(Variant::INT, "id", "get_id");
 	READ_ONLY_PROPERTY(Variant::STRING, "head_name", "get_head_name");
 	READ_ONLY_PROPERTY(Variant::INT, "alignment", "get_alignment");
@@ -108,25 +105,19 @@ void AvatarComboRow::_bind_methods() {
 // --- AvatarNationalityRow ------------------------------------------------------
 
 void AvatarNationalityRow::assign(const AvatarNationality &p_value) {
-	raw_id_ = String(p_value.raw_id);
 	id_ = p_value.id;
 	name_key_ = String(p_value.name_key);
-	flags_ = String(p_value.flags);
 	alignment_ = p_value.alignment;
 	division_count_ = static_cast<int>(p_value.divisions_count);
 }
 
 void AvatarNationalityRow::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("get_raw_id"), &AvatarNationalityRow::get_raw_id);
 	ClassDB::bind_method(D_METHOD("get_id"), &AvatarNationalityRow::get_id);
 	ClassDB::bind_method(D_METHOD("get_name_key"), &AvatarNationalityRow::get_name_key);
-	ClassDB::bind_method(D_METHOD("get_flags"), &AvatarNationalityRow::get_flags);
 	ClassDB::bind_method(D_METHOD("get_alignment"), &AvatarNationalityRow::get_alignment);
 	ClassDB::bind_method(D_METHOD("get_division_count"), &AvatarNationalityRow::get_division_count);
-	READ_ONLY_PROPERTY(Variant::STRING, "raw_id", "get_raw_id");
 	READ_ONLY_PROPERTY(Variant::INT, "id", "get_id");
 	READ_ONLY_PROPERTY(Variant::STRING, "name_key", "get_name_key");
-	READ_ONLY_PROPERTY(Variant::STRING, "flags", "get_flags");
 	READ_ONLY_PROPERTY(Variant::INT, "alignment", "get_alignment");
 	READ_ONLY_PROPERTY(Variant::INT, "division_count", "get_division_count");
 }
@@ -134,23 +125,17 @@ void AvatarNationalityRow::_bind_methods() {
 // --- AvatarDivisionRow ---------------------------------------------------------
 
 void AvatarDivisionRow::assign(const AvatarDivision &p_value) {
-	raw_id_ = String(p_value.raw_id);
 	id_ = p_value.id;
 	name_key_ = String(p_value.name_key);
-	flags_ = String(p_value.flags);
 	combo_count_ = static_cast<int>(p_value.combos_count);
 }
 
 void AvatarDivisionRow::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("get_raw_id"), &AvatarDivisionRow::get_raw_id);
 	ClassDB::bind_method(D_METHOD("get_id"), &AvatarDivisionRow::get_id);
 	ClassDB::bind_method(D_METHOD("get_name_key"), &AvatarDivisionRow::get_name_key);
-	ClassDB::bind_method(D_METHOD("get_flags"), &AvatarDivisionRow::get_flags);
 	ClassDB::bind_method(D_METHOD("get_combo_count"), &AvatarDivisionRow::get_combo_count);
-	READ_ONLY_PROPERTY(Variant::STRING, "raw_id", "get_raw_id");
 	READ_ONLY_PROPERTY(Variant::INT, "id", "get_id");
 	READ_ONLY_PROPERTY(Variant::STRING, "name_key", "get_name_key");
-	READ_ONLY_PROPERTY(Variant::STRING, "flags", "get_flags");
 	READ_ONLY_PROPERTY(Variant::INT, "combo_count", "get_combo_count");
 }
 

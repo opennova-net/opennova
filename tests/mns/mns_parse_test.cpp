@@ -184,7 +184,8 @@ static int test_lf_line_ends_stop() {
 	std::string error;
 	const char *data = "FOO bar\nBAZ qux\n"; // lf
 	TEST_EXPECT(!opennova::mns::parse(data, strlen(data), sheet, error));
-	TEST_EXPECT(error.find("line 1") == 0 && error.find("LF") != std::string::npos);
+	// The reader loops where the next line's text starts, after the lone LF it stepped over.
+	TEST_EXPECT(error.find("line 2:") == 0 && error.find("stops responding") != std::string::npos);
 	TEST_EXPECT(sheet.get("FOO") == "bar" && !sheet.has("BAZ"));
 
 	std::printf("test_lf_line_ends_stop passed\n");
@@ -385,17 +386,16 @@ static int test_has() {
 }
 
 static int test_write() {
-	opennova::mns::StyleSheet sheet;
-	sheet.variables["FOO"] = "bar";
-	sheet.variables["BAZ"] = "qux";
+	opennova::mns::KeyValueList list;
+	list.nodes = {{"FOO", "bar"}, {"BAZ", "qux"}};
 
-	std::vector<uint8_t> out;
+	std::string out;
 	std::string error;
-	TEST_EXPECT(opennova::mns::write(sheet, out, error));
+	TEST_EXPECT(opennova::mns::write(list, out, error));
 
 	// Parse it back.
 	opennova::mns::StyleSheet sheet2;
-	TEST_EXPECT(opennova::mns::parse(reinterpret_cast<const char *>(out.data()), out.size(), sheet2, error));
+	TEST_EXPECT(opennova::mns::parse(out.data(), out.size(), sheet2, error));
 	TEST_EXPECT(sheet2.get("FOO") == "bar");
 	TEST_EXPECT(sheet2.get("BAZ") == "qux");
 

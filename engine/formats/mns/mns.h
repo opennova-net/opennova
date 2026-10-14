@@ -59,7 +59,9 @@ struct StyleSheet {
 // The shell's variable list: the {name, value, next} nodes at CGameMenu+0x54 [orig:
 // CGameMenu_ctor @ 0x63e060 zeroes it @ 0x63e0e5]. One node per name, compared case-blind;
 // a later definition replaces the value and keeps the first spelling. Kept here in
-// creation order (retail prepends, so its head is the node made last).
+// creation order (retail prepends, so its head is the node made last). It is a stylesheet's
+// model: what the reader makes of the file (its directives decided, its comments, blanks and
+// switched-off lines read as nothing), and all the writer writes from.
 struct KeyValue {
 	std::string name;
 	std::string value;
@@ -88,12 +90,31 @@ ReadResult parse_key_value_buffer(const char *text, size_t size, KeyValueList &l
 // The 1-based line of a byte offset (CRLF, LF and CR each end a line).
 int line_at_offset(const char *text, size_t size, size_t offset);
 
-// Parse MNS stylesheet from memory buffer: the game's own read of it (the lossless
-// Document's evaluate()). False, with the first error's line and message, when the game
-// stops before the end or would stop responding; `out` holds what it read either way.
+// What a stop of the reader means to the game, for a message: the stylesheet read no further
+// (Failed), or the game stops responding there (Hangs); "" for a read to the end.
+const char *stop_message(ReadStatus status);
+
+// Parse MNS stylesheet from memory buffer: the game's own read of it (parse_key_value_buffer
+// into an empty list). False, with "line N: " and the stop's message, when the game stops
+// before the end or would stop responding; `out` holds what it read either way.
 bool parse(const char *data, size_t size, StyleSheet &out, std::string &error);
 
-// Write stylesheet to binary buffer.
-bool write(const StyleSheet &sheet, std::vector<uint8_t> &out, std::string &error);
+// A name the reader reads whole as a define's name: non-empty, no blank or line end, none of
+// \ / % < > # [orig: NapiConfigMap_ParseKeyValueBuffer @ 0x639af4..0x639b19].
+bool is_valid_name(const std::string &name);
+// A value the reader reads back as one line writes it: non-empty, no line end or NUL, no "//"
+// (a comment starts there), every '\' in a "\\" pair (a lone one continues the value onto
+// the next text), no blank at either end (the reader skips and trims them), not starting with
+// '#' (the game stops responding on it) [orig: NapiConfigMap_ParseKeyValueBuffer @
+// 0x639bba..0x639d6b].
+bool is_valid_value(const std::string &value);
+
+// The stylesheet's text from its list alone (ADR 0003; no original writer of a stylesheet is
+// witnessed, so the form is OpenNova's): each node `name<TAB>value` with CR LF after it, the
+// only line end the reader reads without stopping [orig: NapiConfigMap_ParseKeyValueBuffer @
+// 0x639c3b], in the list's order. No comment, blank line or directive is written. False with
+// the reason for a name or value the reader reads otherwise, two names it takes for one, or a
+// text that does not read back as the list.
+bool write(const KeyValueList &list, std::string &text, std::string &error);
 
 }  // namespace opennova::mns

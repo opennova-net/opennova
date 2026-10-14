@@ -19,8 +19,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <formats/textlayout/text_layout.h>
-
 namespace opennova::avatars {
 
 /* ========================================================================= */
@@ -69,7 +67,6 @@ typedef struct AvatarPart {
     int camo[3];              /* `camo r g b` (small variant indices)            [orig @ 0x57ac50] */
     int voice;                /* `voice`                                          [orig @ 0x57acc0] */
     int sex;                  /* AvatarSex                                        [orig @ 0x57acec] */
-    uint64_t note;            /* its lines in the file's modeled layout (textlayout); 0 none */
 } AvatarPart;
 
 typedef struct AvatarPartSnapshot {
@@ -89,8 +86,8 @@ typedef struct AvatarPartSnapshot {
 /* ========================================================================= */
 
 typedef struct AvatarCombo {
-    char raw_id[32];          /* id token verbatim, e.g. "001" (round-trip)      [orig @ 0x57a815] */
-    int id;                   /* parsed numeric id (atol, leading non-digit skipped) */
+    int id;                   /* the id token (token 1, kept @ 0x57a815)'s atol, written as its
+                                 decimal                                          [orig @ 0x57a90d] */
     char head_name[64];       /* reference part names (D-PLAYERINFO-4)           [orig @ 0x57a804..0x57a809] */
     char body_name[64];
     char arms_name[64];       /* empty if the combo has no arms */
@@ -98,37 +95,35 @@ typedef struct AvatarCombo {
     AvatarPartSnapshot body;
     AvatarPartSnapshot arms;
     int has_arms;
-    uint64_t note;            /* its line in the file's modeled layout; 0 none */
 } AvatarCombo;
 
 /* ========================================================================= */
-/* Division: `division <id> <nameKey> [flags] { combo... }`                  */
+/* Division: `division <id> <nameKey> { combo... }`                          */
+/* (a token after the name key, e.g. the shipped "skipdemo", is read for      */
+/* nothing [orig: CAvatarDefs_ParseConfigLine @ 0x57a73b..0x57a7ab, tokens 1  */
+/* and 2 alone] and not kept)                                                 */
 /* ========================================================================= */
 
 typedef struct AvatarDivision {
-    char raw_id[32];          /* id token verbatim, e.g. "D00" */
-    int id;                   /* parsed numeric id (0..15)                        [orig @ 0x57a757] */
+    int id;                   /* the id token's lenient atol, 0..15 (written as its decimal) [orig @ 0x57a74e..0x57a757] */
     char name_key[64];        /* "Avatars" RTXT string key                        [orig @ 0x57a7ab] */
-    char flags[128];          /* trailing tokens after name_key (e.g. "skipdemo"); "" if none */
     AvatarCombo *combos;
     size_t combos_count;
-    uint64_t note;            /* its lines in the file's modeled layout; 0 none */
 } AvatarDivision;
 
 /* ========================================================================= */
-/* Nationality: `nationality <id> <nameKey> [flags] { alignment; division... }`*/
+/* Nationality: `nationality <id> <nameKey> { alignment; division... }`       */
+/* (a token after the name key is read for nothing [orig: @ 0x57a615..0x57a681, */
+/* tokens 1 and 2 alone] and not kept)                                        */
 /* ========================================================================= */
 
 typedef struct AvatarNationality {
-    char raw_id[32];          /* id token verbatim, e.g. "N00" */
-    int id;                   /* parsed numeric id (0..31)                        [orig @ 0x57a631] */
+    int id;                   /* the id token's lenient atol, 0..31 (written as its decimal) [orig @ 0x57a628..0x57a631] */
     char name_key[64];        /* "Avatars" RTXT string key                        [orig @ 0x57a681] */
-    char flags[128];          /* trailing tokens after name_key (e.g. "skipdemo"); "" if none */
     int alignment;            /* AvatarAlignment (good/evil)                      [orig @ 0x57a6e9] */
     int has_alignment;        /* whether an `alignment` line was present */
     AvatarDivision *divisions;
     size_t divisions_count;
-    uint64_t note;            /* its lines in the file's modeled layout; 0 none */
 } AvatarNationality;
 
 /* ========================================================================= */
@@ -142,7 +137,6 @@ typedef struct AvatarsFile {
     size_t nationalities_count;
     AvatarDiagnostic *diagnostics;
     size_t diagnostics_count;
-    uint64_t note;            /* the file's own record in its modeled layout; 0 none */
 } AvatarsFile;
 
 /* ========================================================================= */
@@ -158,34 +152,20 @@ int avatars_parse_memory(const void *data, size_t size, AvatarsFile *out);
 void avatars_free(AvatarsFile *file);
 
 /* Serialize `file` to a canonical Avatars.def from scratch (never raw
- * passthrough — docs/adr/0003, policy docs/adr/0021). On success returns 0 and
+ * passthrough — docs/adr/0003, policy docs/adr/0021; no original writer of the
+ * file is witnessed, so the form is OpenNova's). On success returns 0 and
  * sets *out_data (malloc'd, NUL-terminated) and *out_size (length excluding the
- * NUL). Free with avatars_free_buffer(). The write is deterministic: a
+ * NUL). Free with avatars_free_buffer(). The write is deterministic, from
+ * the model alone: every id its decimal, every name as the model holds it; a
  * parse->write->parse->write round-trip is byte-identical on the second write.
- * Returns 2, writing nothing, when a line would hold an empty field ahead of a
- * filled one (a nationality's or division's id or name key ahead of its flags,
- * a combo's id, head or body ahead of the next): the game's tokenizer reads
- * the `""` it would be written as as no token, so the later fields would read
- * back shifted. */
+ * Returns 2, writing nothing, when a combo line would hold an empty name ahead
+ * of a filled one (its head ahead of its body, its body ahead of its arms):
+ * the game's tokenizer reads the `""` it would be written as as no token, so
+ * the later names would read back shifted. */
 int avatars_write(const AvatarsFile *file, char **out_data, size_t *out_size);
 void avatars_free_buffer(char *data);
 
-/* The parse with the file's layout modeled (textlayout, ADR 0003: "model it, generate it"): each record's
- * lines (a part's, a nationality's, a division's, a combo's) its own, every line the walk reads nothing of
- * (a comment, a blank, an unrecognized key, a refused block, a combo whose parts are not defined yet) read for
- * nothing where it stands; each record's note set. */
-int avatars_parse_memory(const void *data, size_t size, AvatarsFile *out, textlayout::Notes &notes);
-
-/* avatars_write over the file's modeled layout: the file as it was but for the lines of a changed value (its
- * comments, its spacing, a word's own spelling, the lines the walk reads nothing of); a line or a record put
- * down anew after the one before it in the writer's order, in the writer's form; the records of a kind (the
- * parts, the nationalities, a nationality's divisions, a division's combos) in the model's order. The text is
- * read again: one that would not read back as the model is written in the writer's form, `rewritten` set.
- * Returns as avatars_write. */
-int avatars_write(const AvatarsFile *file, const textlayout::Notes *notes, char **out_data, size_t *out_size,
-                  bool *rewritten);
-
-/* Whether two models read the same (their notes, diagnostics and the parts' resolved snapshots aside). */
+/* Whether two models read the same (their diagnostics and the parts' resolved snapshots aside). */
 bool avatars_equal(const AvatarsFile &a, const AvatarsFile &b);
 
 } // namespace opennova::avatars

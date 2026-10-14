@@ -17,7 +17,6 @@
 // 0046 S12 D5) read as the saved line's arguments, and a set of what one shows leaves its
 // record byte for byte as it was, directly and after another number went through the line,
 // over the inline catalogs, the items fixture and the three retail catalogs.
-#include <formats/def/def_notes.h>
 #include <formats/def/def_scan.h>
 #include <formats/def/def_write.h>
 #include <formats/def/def_write_record.h>
@@ -355,34 +354,13 @@ int mission_editor_keys() {
 		std::printf("FAIL mission editor seeds\n");
 		++failures;
 	}
-	// The file written again over its modeled layout as it was, byte for byte, a value changed on its own line;
-	// and from nothing: each key and word where the record holds one, none where it holds the seed.
-	{
-		DefItemsFile noted{};
-		DefTextNotes notes;
-		DefParseReport report;
-		def_parse_items_memory(reinterpret_cast<const uint8_t *>(text), std::strlen(text), &noted, &report, notes);
-		const DefWriteResult kept = def_write_items(noted, &notes);
-		if (!kept.ok() || kept.text != text) {
-			std::printf("FAIL mission editor keys kept:\n%s\n", kept.text.c_str());
-			++failures;
-		}
-		if (noted.count == 2) noted.entries[0].max_engagement_dist = 450;
-		const DefWriteResult edited = def_write_items(noted, &notes);
-		std::string expected = text;
-		expected.replace(expected.find("max_engagement_dist 400"), 23, "max_engagement_dist 450");
-		if (!edited.ok() || edited.text != expected) {
-			std::printf("FAIL mission editor keys edited:\n%s\n", edited.text.c_str());
-			++failures;
-		}
-		def_free_items(&noted);
-	}
+	// Written from nothing: each key and word where the record holds one, none where it holds the seed.
 	const DefWriteResult made = def_write_items(file);
 	const size_t crate_at = made.text.find("Crate");
 	if (!made.ok() || made.text.find("max_attack_dist 30") == std::string::npos ||
 	    made.text.find("max_engagement_dist 400") == std::string::npos || made.text.find("min_engagement_dist 20") == std::string::npos ||
-	    made.text.find("fire_timer 5") == std::string::npos || made.text.find("evil") == std::string::npos ||
-	    made.text.find("good") == std::string::npos || crate_at == std::string::npos ||
+	    made.text.find("fire_timer 5") == std::string::npos || made.text.find("attrib: Aidata Good Evil\r\n") == std::string::npos ||
+	    crate_at == std::string::npos ||
 	    made.text.find("_dist", crate_at) != std::string::npos || made.text.find("fire_timer", crate_at) != std::string::npos) {
 		std::printf("FAIL mission editor keys written:\n%s\n", made.text.c_str());
 		++failures;
@@ -416,8 +394,7 @@ int ignored_input() {
 	}
 	const std::string &text = items.written.text;
 	if (text.find("subtype") != std::string::npos || text.find("exp1") != std::string::npos ||
-	    text.find("good") == std::string::npos || text.find("plain") != std::string::npos ||
-	    text.find("nodie") == std::string::npos || text.find("aidata") == std::string::npos) {
+	    text.find("plain") != std::string::npos || text.find("attrib: Aidata NoDie Good\r\n") == std::string::npos) {
 		std::printf("FAIL ignored items output:\n%s\n", text.c_str());
 		++failures;
 	}
@@ -925,13 +902,10 @@ size_t lines_differing(const std::string &a, const std::string &b) {
 	return differ;
 }
 
-// What the writer keeps of a file it read (the UX round's plain-words lane; def.h's DefLineOrder and
-// DefLayout): each record's lines in the order the file has them, its rows and its blocks where they
-// stood, the file's indentation, an item's attributes on one line, each item's spawn list on its own
-// line; a record made from nothing in the table's order. A one-field change is a one-line change; an
-// order the reparse would read otherwise (a deceleration before the acceleration that defaults it,
-// once the deceleration is cleared) is written in the table's order instead.
-int kept_layout() {
+// The writer's own form (S26, 2026-10-13: no file's order or indentation kept): each record's lines in its
+// kind's property table's order, a tab a level, its rows and its blocks after its lines; each item's spawn
+// list on its own line. A one-field change is a one-line change; every write reads back as its records.
+int writer_form() {
 	int failures = 0;
 	const char *items =
 	        "begin \"Buggy\"\r\n"
@@ -955,43 +929,35 @@ int kept_layout() {
 	const std::string expected =
 	        "// Item definitions\r\n\r\n"
 	        "begin \"Buggy\"\r\n"
-	        "  sid dbuggy1\r\n"
-	        "  id 101291\r\n"
-	        "  type vehicle\r\n"
-	        "  attrib: playercontrol aidata noscar dynamicshadow\r\n"
-	        "  hp 3000\r\n"
-	        "  addeweap ewep01 101419\r\n"
-	        "  pcvehicle_spawnlist 101291\r\n"
-	        "  sound_profile SP_DuneBuggy\r\n"
+	        "\tsid dbuggy1\r\n"
+	        "\tid 101291\r\n"
+	        "\thp 3000\r\n"
+	        "\tsound_profile SP_DuneBuggy\r\n"
+	        "\ttype vehicle\r\n"
+	        "\tattrib: PlayerControl Aidata NoScar DynamicShadow\r\n"
+	        "\tpcvehicle_spawnlist 101291\r\n"
+	        "\taddeweap ewep01 101419\r\n"
 	        "end\r\n\r\n"
 	        "begin \"Truck\"\r\n"
-	        "  id 101300\r\n"
-	        "  pcvehicle_spawnlist 101291 101300\r\n"
-	        "  type vehicle\r\n"
+	        "\tid 101300\r\n"
+	        "\ttype vehicle\r\n"
+	        "\tpcvehicle_spawnlist 101291 101300\r\n"
 	        "end\r\n\r\n";
 	if (!first.ok() || first.text != expected) {
-		std::printf("FAIL kept layout, items:\n%s\n", first.text.c_str());
+		std::printf("FAIL the writer's form, items:\n%s\n", first.text.c_str());
 		for (const auto &d : first.diagnostics) std::printf("  %s.%s: %s\n", d.record.c_str(), d.field.c_str(), d.message.c_str());
 		++failures;
 	}
 	file.entries[0].hp = 2500;
 	const DefWriteResult second = def_write_items(file);
-	if (!second.ok() || lines_differing(first.text, second.text) != 1 || second.text.find("  hp 2500\r\n") == std::string::npos) {
-		std::printf("FAIL kept layout: one field, %zu lines\n", lines_differing(first.text, second.text));
-		++failures;
-	}
-	// A record made from nothing: the table's order, the file's indentation.
-	file.entries[0].line_order.count = 0;
-	const DefWriteResult table = def_write_items(file);
-	if (!table.ok() || table.text.find("begin \"Buggy\"\r\n  sid dbuggy1\r\n  id 101291\r\n  hp 2500\r\n  sound_profile "
-	                                   "SP_DuneBuggy\r\n  type vehicle\r\n") == std::string::npos) {
-		std::printf("FAIL kept layout: a record of no order\n%s\n", table.text.c_str());
+	if (!second.ok() || lines_differing(first.text, second.text) != 1 || second.text.find("\thp 2500\r\n") == std::string::npos) {
+		std::printf("FAIL the writer's form: one field, %zu lines\n", lines_differing(first.text, second.text));
 		++failures;
 	}
 	def_free_items(&file);
 
-	// The order the reparse reads otherwise: a deceleration of 0 written before the acceleration that
-	// defaults an unset one, which the table's order writes after it.
+	// A deceleration of 0 the file put before the acceleration that defaults an unset one: the table's order
+	// writes it after, and it reads back.
 	const char *ordered = "begin \"Car\"\r\n\tid 100100\r\n\ttype vehicle\r\n\tdeceleration 70\r\n\tacceleration 15\r\nend\r\n";
 	def_parse_items_memory(reinterpret_cast<const uint8_t *>(ordered), std::strlen(ordered), &file, nullptr);
 	file.entries[0].deceleration = 0;
@@ -999,17 +965,15 @@ int kept_layout() {
 	DefItemsFile back{};
 	def_parse_items_memory(reinterpret_cast<const uint8_t *>(reordered.text.data()), reordered.text.size(), &back, nullptr);
 	if (!reordered.ok() || back.count != 1 || back.entries[0].deceleration != 0 || back.entries[0].acceleration != 60) {
-		std::printf("FAIL kept layout: an order the reparse refuses\n%s\n", reordered.text.c_str());
+		std::printf("FAIL the writer's form: a deceleration of 0\n%s\n", reordered.text.c_str());
 		++failures;
 	}
 	def_free_items(&back);
 	def_free_items(&file);
 
-	// The names sharing the death, door and clip words, each written under the name the file gave it from
-	// the words as they stand (a helicopter's deathtime, whose every byte its rotor_parts and aux_parts set
-	// after it, left out: the game keeps nothing of it); deathtime in whole seconds; a real in the form a
-	// person writes; a line at the default kept; every debris slot up to the last, in the files' two digits;
-	// no attrib line for the Door a door line raises.
+	// The names sharing the death, door and clip words (rotor_parts, num_doors, sqb_rate, ...) read into the
+	// words: the writer puts the words down under their own keys, and they read back; a real in the form a
+	// person writes; every debris slot up to the last, in the files' two digits.
 	const char *shared =
 	        "begin \"Heli\"\r\n\tid 100200\r\n\ttype vehicle\r\n\tdeathtime 5\r\n\tscore 0\r\n\trotor_parts 1 2 3 4\r\n\taux_parts 5 6 7 8\r\n"
 	        "\tshadow shadow8.tga 4.5 8.9 0.0 -0.14\r\n\thusk_sub_part_types 01_HULL 02_WHEEL 03_CHUNK_M\r\nend\r\n"
@@ -1025,20 +989,17 @@ int kept_layout() {
 		same = again.entries[i].deathtime_ticks == file.entries[i].deathtime_ticks && again.entries[i].clipsize == file.entries[i].clipsize &&
 		       again.entries[i].door_type == file.entries[i].door_type && again.entries[i].attrib == file.entries[i].attrib &&
 		       again.entries[i].door_open_rate_q16 == file.entries[i].door_open_rate_q16;
-	for (const char *line : {"\tdeathtime 5\r\n", "\tscore 0\r\n", "\trotor_parts 1 2 3 4\r\n", "\taux_parts 5 6 7 8\r\n",
-	                         "\tshadow shadow8.tga 4.5 8.9 0 -0.14\r\n", "\thusk_sub_part_types 01_HULL 02_WHEEL 03_CHUNK_M\r\n",
-	                         "\tnum_doors 2\r\n\tfirst_door 3\r\n\topen_rate 2\r\n", "\tsqb_rate 6\r\n\tsqb_distance 1.25\r\n\tsqb_error 20\r\n"})
+	for (const char *line : {"\tshadow shadow8.tga 4.5 8.9 0 -0.14\r\n", "\thusk_sub_part_types 01_HULL 02_WHEEL 03_CHUNK_M\r\n"})
 		same = same && names.text.find(line) != std::string::npos;
-	if (!names.ok() || !same || names.text.find("clipsize") != std::string::npos || names.text.find("attrib") != std::string::npos ||
-	    names.text.find("deathtime") != names.text.rfind("deathtime")) {
-		std::printf("FAIL kept layout: the shared words' names\n%s\n", names.text.c_str());
+	if (!names.ok() || !same) {
+		std::printf("FAIL the writer's form: the shared words\n%s\n", names.text.c_str());
 		++failures;
 	}
 	def_free_items(&again);
 	def_free_items(&file);
 
-	// A weapon's lines, its sights and its actions where they stood; its actions a level in, their lines
-	// a level further, by the file's own indentation; the carry limits at the top level.
+	// A weapon's lines, then its sights and its actions; its actions a level in, their lines a level further;
+	// the carry limits at the top level, first.
 	const char *weapons =
 	        "ammoclass_max_carry CLASS_9mm 120\r\n"
 	        "weapon \"WPN_A\"\r\n"
@@ -1056,15 +1017,15 @@ int kept_layout() {
 	        "// Weapon definitions\r\n\r\n"
 	        "ammoclass_max_carry CLASS_9mm 120\r\n"
 	        "weapon \"WPN_A\"\r\n"
-	        "    category 2\r\n"
-	        "    action \"fire\"\r\n"
-	        "        function wpn_std_fire\r\n"
-	        "        delayend 4\r\n"
-	        "    end\r\n"
-	        "    clipsize 15\r\n"
+	        "\tclipsize 15\r\n"
+	        "\tcategory 2\r\n"
+	        "\taction \"fire\"\r\n"
+	        "\t\tdelayend 4\r\n"
+	        "\t\tfunction wpn_std_fire\r\n"
+	        "\tend\r\n"
 	        "end\r\n\r\n";
 	if (!gun.ok() || gun.text != gun_expected) {
-		std::printf("FAIL kept layout, weapons:\n%s\n", gun.text.c_str());
+		std::printf("FAIL the writer's form, weapons:\n%s\n", gun.text.c_str());
 		for (const auto &d : gun.diagnostics) std::printf("  %s.%s: %s\n", d.record.c_str(), d.field.c_str(), d.message.c_str());
 		++failures;
 	}
@@ -1092,12 +1053,10 @@ std::pair<size_t, size_t> lines_changed(const std::string &a, const std::string 
 	return {x.size() - common[0][0], y.size() - common[0][0]};
 }
 
-// An edit the kept order cannot carry (the review's W5, W1): a present line unticked is no line (only that
-// line goes); a particle slot emptied is no line, never `particlefx ""`; an item of more attributes than an
-// `attrib:` line holds saves over several; a record whose own order reads back otherwise is written in the
-// table's order alone, named (DefWriteResult::reordered), every other record keeping its own; and a table
-// with room for every step (W12).
-int kept_layout_edits() {
+// The review's W5, W1 in the writer's form: a present line unticked is no line (only that line goes); a
+// particle slot emptied is no line, never `particlefx ""`; an item of more attributes than an `attrib:` line
+// holds saves over several; and a table with room for every step (W12).
+int writer_form_edits() {
 	int failures = 0;
 	// A weapon's switchcategory unticked.
 	const char *weapons = "weapon \"WPN_A\"\r\n\tcategory 2\r\n\tswitchcategory 3\r\n\tclipsize 15\r\nend\r\n"
@@ -1108,8 +1067,7 @@ int kept_layout_edits() {
 	guns.entries[0].has_switchcategory = 0;
 	const DefWriteResult after = def_write_weapons(guns);
 	const auto [removed, added] = lines_changed(before.text, after.text);
-	if (!before.ok() || !after.ok() || removed != 1 || added != 0 || after.text.find("switchcategory") != std::string::npos ||
-	    !after.reordered.empty()) {
+	if (!before.ok() || !after.ok() || removed != 1 || added != 0 || after.text.find("switchcategory") != std::string::npos) {
 		std::printf("FAIL kept layout: a present line unticked (-%zu +%zu)\n%s\n", removed, added, after.text.c_str());
 		++failures;
 	}
@@ -1139,32 +1097,76 @@ int kept_layout_edits() {
 		widest = std::max(widest, size_t(std::count(one.begin(), one.end(), ' ')));
 	}
 	if (!full.ok() || !emptied.ok() || gone != 1 || put != 0 || emptied.text.find("particlefx") != std::string::npos ||
-	    !emptied.reordered.empty() || attrib_lines != 2 || widest != 29 || flags != 30) {
+	    attrib_lines != 2 || widest != 29 || flags != 30) {
 		std::printf("FAIL kept layout: a slot emptied (-%zu +%zu), %zu attrib line(s) of up to %zu words\n%s\n", gone, put,
 		            attrib_lines, widest, emptied.text.c_str());
 		++failures;
 	}
 	def_free_items(&file);
 
-	// The record whose own order reads back otherwise (a deceleration of 0 before the acceleration that
-	// defaults an unset one) in the table's order, named; the other keeps its own (hp before id).
-	const char *ordered = "begin \"Car\"\r\n\tid 100100\r\n\ttype vehicle\r\n\tdeceleration 70\r\n\tacceleration 15\r\nend\r\n"
-	                      "begin \"Kept\"\r\n\thp 40\r\n\tid 100101\r\n\ttype vehicle\r\nend\r\n";
-	def_parse_items_memory(reinterpret_cast<const uint8_t *>(ordered), std::strlen(ordered), &file, nullptr);
-	file.entries[0].deceleration = 0;
-	const DefWriteResult reordered = def_write_items(file);
-	if (!reordered.ok() || reordered.reordered != std::vector<std::string>{"Car"} ||
-	    reordered.text.find("begin \"Kept\"\r\n\thp 40\r\n\tid 100101\r\n") == std::string::npos) {
-		std::printf("FAIL kept layout: one record in the table's order\n%s\n", reordered.text.c_str());
-		++failures;
-	}
-	def_free_items(&file);
-
 	for (size_t k = 0; k < kDefRecordKindCount; ++k)
-		if (def_properties(DefRecordKind(k)).size() >= DEF_LINE_ORDER_SQB_RATE) {
-			std::printf("FAIL kind %zu's property table reaches the alias steps\n", k);
+		if (def_properties(DefRecordKind(k)).size() >= kDefStepRows) {
+			std::printf("FAIL kind %zu's property table reaches the rows' step\n", k);
 			++failures;
 		}
+	return failures;
+}
+
+// The writer's words are the game's (S26, 2026-10-13): each attribute, flag and kill zone as the game's own
+// table spells it, whatever spelling the file had [orig: ItemDef_ParseProperty, "Aidata" @ 0x4A06F3,
+// "VehicleBay" @ 0x4A0CEC; the weapon flag table @ 0x830BF0; the ammo flag table @ 0x813500; the kill zone
+// table @ 0x8133E0]; a tracer type the game's name table names by its name, a number it names none of as
+// that number [orig: AmmoDef_ParseTypeName @ 0x409b90]. Each reads back as it was.
+int retail_words() {
+	int failures = 0;
+	const char *items = "begin \"Truck\"\r\n\tid 100100\r\n\ttype vehicle\r\n\tattrib: AIDATA vehiclebay noscar parent good\r\nend\r\n";
+	DefItemsFile file{};
+	def_parse_items_memory(reinterpret_cast<const uint8_t *>(items), std::strlen(items), &file, nullptr);
+	const DefWriteResult item = def_write_items(file);
+	DefItemsFile item_back{};
+	def_parse_items_memory(reinterpret_cast<const uint8_t *>(item.text.data()), item.text.size(), &item_back, nullptr);
+	if (!item.ok() || item.text.find("\tattrib: Aidata NoScar VehicleBay Parent Good\r\n") == std::string::npos ||
+	    item_back.count != 1 || item_back.entries[0].attrib != file.entries[0].attrib ||
+	    item_back.entries[0].attrib2 != file.entries[0].attrib2 || !item_back.entries[0].attrib_parent ||
+	    !item_back.entries[0].attrib_good) {
+		std::printf("FAIL the game's words, items:\n%s\n", item.text.c_str());
+		++failures;
+	}
+	def_free_items(&item_back);
+	def_free_items(&file);
+
+	const char *weapons = "weapon \"WPN_A\"\r\n\tcategory 2\r\n\tflags SCOPED\r\n\tflags NoRangeCheck\r\n\tflags inset\r\nend\r\n";
+	DefWeaponsFile guns{};
+	def_parse_weapons_memory(reinterpret_cast<const uint8_t *>(weapons), std::strlen(weapons), &guns, nullptr);
+	const DefWriteResult gun = def_write_weapons(guns);
+	DefWeaponsFile gun_back{};
+	def_parse_weapons_memory(reinterpret_cast<const uint8_t *>(gun.text.data()), gun.text.size(), &gun_back, nullptr);
+	if (!gun.ok() || gun.text.find("\tflags Scoped\r\n\tflags norangecheck\r\n\tflags Inset\r\n") == std::string::npos ||
+	    gun_back.count != 1 || gun_back.entries[0].flags != guns.entries[0].flags ||
+	    gun_back.entries[0].flags2 != guns.entries[0].flags2) {
+		std::printf("FAIL the game's words, weapons:\n%s\n", gun.text.c_str());
+		++failures;
+	}
+	def_free_weapons(&gun_back);
+	def_free_weapons(&guns);
+
+	const char *ammo = "ammo ROUND\r\ntracer_type 5 8\r\nkztype ROUNDS_KZ_RADIUSBLAST\r\nflag nooitems\r\nflag water\r\nend\r\n";
+	DefAmmoFile rounds{};
+	def_parse_ammo_memory(reinterpret_cast<const uint8_t *>(ammo), std::strlen(ammo), &rounds, nullptr);
+	const DefWriteResult round = def_write_ammo(rounds);
+	DefAmmoFile round_back{};
+	def_parse_ammo_memory(reinterpret_cast<const uint8_t *>(round.text.data()), round.text.size(), &round_back, nullptr);
+	if (!round.ok() || round.text.find("tracer_type grenade 8\r\n") == std::string::npos ||
+	    round.text.find("kztype rounds_kz_RadiusBlast\r\n") == std::string::npos ||
+	    round.text.find("flag water\r\n") == std::string::npos || round.text.find("flag NoOItems\r\n") == std::string::npos ||
+	    round_back.count != 1 || round_back.entries[0].tracer_type_friendly != 5 ||
+	    round_back.entries[0].tracer_type_enemy != 8 || round_back.entries[0].kztype != rounds.entries[0].kztype ||
+	    round_back.entries[0].flags != rounds.entries[0].flags) {
+		std::printf("FAIL the game's words, ammo:\n%s\n", round.text.c_str());
+		++failures;
+	}
+	def_free_ammo(&round_back);
+	def_free_ammo(&rounds);
 	return failures;
 }
 
@@ -1272,8 +1274,7 @@ int main(int argc, char **argv) {
 	// Past 32 bits, the game's atol saturates (2147483647, or -2147483648 when negative) on
 	// every platform [orig: strtoxl @ 0x76b26f..0x76b295], and the bounds and the low byte apply
 	// to that: category 4294967297 is 2147483647, read as 0 (not 1); rank -4294967297 as 0;
-	// unit_type 2147483651 is byte 255 (not 3), -2147483649 byte 0 (written as `unit_type 0`: the
-	// file has the line, which a save keeps at the default as at any value).
+	// unit_type 2147483651 is byte 255 (not 3), -2147483649 byte 0 (the default: no line).
 	{
 		const Outcome huge = run("weapon.def", "weapon \"WPN_HUGE\"\r\ncategory 4294967297\r\nrank -4294967297\r\nend\r\n");
 		const Outcome high = run("items.def", "begin \"High\"\r\nid 100001\r\nunit_type 2147483651\r\nend\r\n");
@@ -1290,7 +1291,7 @@ int main(int argc, char **argv) {
 		    huge.written.text.find("category 1\r\n") != std::string::npos ||
 		    high.blocking() || !reads_as(high, "unit_type", "255") ||
 		    high.written.text.find("unit_type 255\r\n") == std::string::npos || low.blocking() ||
-		    !reads_as(low, "unit_type", "0") || low.written.text.find("unit_type 0\r\n") == std::string::npos) {
+		    !reads_as(low, "unit_type", "0") || low.written.text.find("unit_type") != std::string::npos) {
 			std::printf("FAIL numbers past 32 bits:\n%s\n%s\n%s\n", huge.written.text.c_str(), high.written.text.c_str(),
 			            low.written.text.c_str());
 			++failures;
@@ -1355,8 +1356,9 @@ int main(int argc, char **argv) {
 	failures += powerup_table();
 	failures += tokenizer_rules();
 	failures += authored_units();
-	failures += kept_layout();
-	failures += kept_layout_edits();
+	failures += writer_form();
+	failures += writer_form_edits();
+	failures += retail_words();
 	failures += numbers_at_both_precisions();
 	failures += scaled_defaults();
 	{
@@ -1418,23 +1420,12 @@ int main(int argc, char **argv) {
 				// Every number the Inspector shows in written units reads back from the line
 				// the saved file writes, and a set of it leaves the record as it was.
 				failures += authored_catalog(family, bytes, true);
-				// Every record keeps the order it was read in (none written in the table's: reordered), and
-				// a save after one field changed changes that one line of what a save before it writes (the
-				// writer keeps the file's order and indentation): an item's hp, a weapon's clipsize, an
-				// ammo's velocity, each on the first record whose file has the line.
+				// A save after one field changed changes that one line of what a save before it writes: an
+				// item's hp, a weapon's clipsize, an ammo's velocity, each on the first record that holds one.
 				const auto layout = [&](const DefWriteResult &before, const DefWriteResult &after, const char *what) {
 					const size_t changed = lines_differing(before.text, after.text);
-					std::printf("%s%s: %zu record(s) in the table's order; one %s changed, %zu line(s) of the save change\n",
-					            label.c_str(), family, before.reordered.size(), what, changed);
-					for (const std::string &name : before.reordered) std::printf("  reordered: %s\n", name.c_str());
-					if (!before.ok() || !after.ok() || changed != 1 || !before.reordered.empty() || !after.reordered.empty())
-						++failures;
-				};
-				const auto first_with = [](DefRecordKind kind, const DefLineOrder &order, const char *key) {
-					const std::vector<DefProperty> &properties = def_properties(kind);
-					for (size_t i = 0; i < order.count; ++i)
-						if (order.steps[i] < properties.size() && properties[order.steps[i]].key == key) return true;
-					return false;
+					std::printf("%s%s: one %s changed, %zu line(s) of the save change\n", label.c_str(), family, what, changed);
+					if (!before.ok() || !after.ok() || changed != 1) ++failures;
 				};
 				if (std::strcmp(family, "items.def") == 0) {
 					DefItemsFile parsed{};
@@ -1452,7 +1443,7 @@ int main(int argc, char **argv) {
 						++failures;
 					}
 					for (size_t i = 0; i < parsed.count; ++i)
-						if (first_with(DefRecordKind::Item, parsed.entries[i].line_order, "hp")) {
+						if (parsed.entries[i].hp > 0) {
 							parsed.entries[i].hp += 1;
 							break;
 						}
@@ -1463,7 +1454,7 @@ int main(int argc, char **argv) {
 					def_parse_weapons_memory(bytes.data(), bytes.size(), &parsed, nullptr);
 					const DefWriteResult before = def_write_weapons(parsed);
 					for (size_t i = 0; i < parsed.count; ++i)
-						if (first_with(DefRecordKind::Weapon, parsed.entries[i].line_order, "clipsize")) {
+						if (parsed.entries[i].clipsize > 0) {
 							parsed.entries[i].clipsize += 1;
 							break;
 						}
@@ -1474,7 +1465,7 @@ int main(int argc, char **argv) {
 					def_parse_ammo_memory(bytes.data(), bytes.size(), &parsed, nullptr);
 					const DefWriteResult before = def_write_ammo(parsed);
 					for (size_t i = 0; i < parsed.count; ++i)
-						if (first_with(DefRecordKind::Ammo, parsed.entries[i].line_order, "velocity")) {
+						if (parsed.entries[i].velocity > 0) {
 							parsed.entries[i].velocity += 1;
 							break;
 						}

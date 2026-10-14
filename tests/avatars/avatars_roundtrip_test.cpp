@@ -69,61 +69,43 @@ int check_roundtrip(const std::string &path) {
     return 0;
 }
 
-std::string written(const AvatarsFile &file, const opennova::textlayout::Notes *notes, bool &rewritten) {
+std::string written(const AvatarsFile &file) {
     char *data = nullptr;
     size_t size = 0;
-    if (avatars_write(&file, notes, &data, &size, &rewritten) != 0) return std::string("<refused>");
+    if (avatars_write(&file, &data, &size) != 0) return std::string("<refused>");
     std::string out(data, size);
     avatars_free_buffer(data);
     return out;
 }
 
-int lines_changed(const std::string &a, const std::string &b) {
-    const auto split = [](const std::string &t) {
-        std::vector<std::string> out;
-        size_t at = 0;
-        while (at < t.size()) {
-            const size_t end = t.find("\r\n", at);
-            out.push_back(t.substr(at, end == std::string::npos ? std::string::npos : end - at));
-            at = end == std::string::npos ? t.size() : end + 2;
-        }
-        return out;
-    };
-    const std::vector<std::string> x = split(a), y = split(b);
-    if (x.size() != y.size()) return -1;
-    int n = 0;
-    for (size_t i = 0; i < x.size(); ++i) n += x[i] != y[i];
-    return n;
+// Whether a text reads back as the model it was written from.
+bool reads_back(const std::string &text, const AvatarsFile &file) {
+    AvatarsFile again;
+    const bool same = avatars_parse_memory(text.data(), text.size(), &again) == 0 && avatars_equal(again, file);
+    avatars_free(&again);
+    return same;
 }
 
-// A table read with its layout (textlayout) and written again is the file, byte for byte; one value changed
-// changes its one line, and the text reads back as the model.
-int check_noted(const std::string &text, const std::string &what) {
-    opennova::textlayout::Notes notes;
+// A shipped table read through the game's reader, written from its model and read again: the same fields; one
+// value changed reads back changed.
+int check_written(const std::string &text, const std::string &what) {
     AvatarsFile file;
-    TEST_EXPECT(avatars_parse_memory(text.data(), text.size(), &file, notes) == 0);
-    bool rewritten = true;
-    std::string out = written(file, &notes, rewritten);
-    TEST_EXPECT(!rewritten && out == text);
+    TEST_EXPECT(avatars_parse_memory(text.data(), text.size(), &file) == 0);
     TEST_EXPECT(file.parts_count > 0 && file.nationalities_count > 0);
+    TEST_EXPECT(reads_back(written(file), file));
     file.parts[0].voice = file.parts[0].voice == 3 ? 4 : 3;
-    out = written(file, &notes, rewritten);
-    TEST_EXPECT(!rewritten);
-    const int voice_lines = lines_changed(text, out);
-    // A part with no voice line gains one: the line count moves by one instead.
-    TEST_EXPECT(voice_lines == 1 || voice_lines == -1);
-    AvatarsFile again;
-    TEST_EXPECT(avatars_parse_memory(out.data(), out.size(), &again) == 0 && avatars_equal(again, file));
-    avatars_free(&again);
+    TEST_EXPECT(reads_back(written(file), file));
     avatars_free(&file);
-    std::printf("%s: written again over its layout byte for byte; a voice changed, its one line\n", what.c_str());
+    std::printf("%s: written from its model, read back as its fields; a voice changed reads back\n", what.c_str());
     return 0;
 }
 
-// An authored table: its comments, its spacing, the `graphic_d` alias, a key the walk reads nothing of, a refused
-// nationality and a combo whose head is not defined yet, all where they stood; a combo added after its division's
-// last, two combos swapped, a part removed with its lines.
-int check_noted_synthetic() {
+// An authored table (its comments, its spacing, the `graphic_d` alias, a key the walk reads nothing of, a refused
+// nationality, a trailing token after a name key, ids spelled with a letter or leading zeros, and a combo whose
+// head is not defined yet): written from its model in the writer's form, none of what the walk reads nothing of,
+// every id its decimal, and read back as the model; edits (a value, a swap, a combo added, a part removed) read
+// back too (the #1098 review, F2: the id token's spelling and the trailing tokens are not kept).
+int check_authored() {
     const std::string text =
             "// avatars\r\n"
             "define head  H1   // the first head\r\n"
@@ -154,54 +136,43 @@ int check_noted_synthetic() {
             "    combo 003 H1 B1\r\n"
             "  }\r\n"
             "}\r\n";
-    opennova::textlayout::Notes notes;
     AvatarsFile file;
-    TEST_EXPECT(avatars_parse_memory(text.data(), text.size(), &file, notes) == 0);
+    TEST_EXPECT(avatars_parse_memory(text.data(), text.size(), &file) == 0);
     TEST_EXPECT(file.parts_count == 3 && file.nationalities_count == 1 &&
                 file.nationalities[0].divisions[0].combos_count == 2);
-    bool rewritten = true;
-    std::string out = written(file, &notes, rewritten);
-    if (out != text) std::fprintf(stderr, "noted synthetic:\n%s\n", out.c_str());
-    TEST_EXPECT(!rewritten && out == text);
-    // A line the walk reads nothing of (`frobnicate 3`, the comments) is the layout's alone: the writer's own form,
-    // from the model, has none of it (no stored line text is put back).
-    {
-        bool plain_rewritten = false;
-        const std::string plain = written(file, nullptr, plain_rewritten);
-        TEST_EXPECT(plain.find("frobnicate") == std::string::npos && plain.find("// the first head") == std::string::npos &&
-                    plain.find("graphic\t\th1.3di") != std::string::npos);
-    }
-    // The graphic changed: the alias stays, the word changes.
+    const std::string out = written(file);
+    TEST_EXPECT(out.find("frobnicate") == std::string::npos && out.find("// the first head") == std::string::npos &&
+                out.find("AV_BAD") == std::string::npos && out.find("NOHEAD") == std::string::npos &&
+                out.find("\tgraphic\t\th1.3di\r\n") != std::string::npos);
+    TEST_EXPECT(out.find("skipdemo") == std::string::npos && out.find("N00") == std::string::npos &&
+                out.find("D00") == std::string::npos && out.find("\nnationality 0 AV_US\r\n") != std::string::npos &&
+                out.find("\tdivision 0 AV_D0\r\n") != std::string::npos &&
+                out.find("\t\tcombo 1 H1 B1\r\n\t\tcombo 3 H1 B1\r\n") != std::string::npos);
+    TEST_EXPECT(reads_back(out, file));
+    // The graphic changed.
     std::snprintf(file.parts[0].graphic, sizeof(file.parts[0].graphic), "%s", "h2.3di");
-    out = written(file, &notes, rewritten);
-    TEST_EXPECT(!rewritten && out.find("  graphic_d  h2.3di\r\n") != std::string::npos && lines_changed(text, out) == 1);
-    std::snprintf(file.parts[0].graphic, sizeof(file.parts[0].graphic), "%s", "h1.3di");
-    // Two combos swapped: their lines follow, each with the lines read for nothing before it (the refused combo
-    // goes with the one after it).
+    TEST_EXPECT(reads_back(written(file), file) && written(file).find("\tgraphic\t\th2.3di\r\n") != std::string::npos);
+    // Two combos swapped.
     AvatarDivision &div = file.nationalities[0].divisions[0];
     std::swap(div.combos[0], div.combos[1]);
-    out = written(file, &notes, rewritten);
-    TEST_EXPECT(!rewritten && out.find("    combo 002 NOHEAD B1\r\n    combo 003 H1 B1\r\n    combo 001 H1 B1\r\n") !=
-                std::string::npos);
+    TEST_EXPECT(reads_back(written(file), file) &&
+                written(file).find("\t\tcombo 3 H1 B1\r\n\t\tcombo 1 H1 B1\r\n") != std::string::npos);
     std::swap(div.combos[0], div.combos[1]);
-    // A combo added: after the division's last, in the writer's form.
+    // A combo added after the division's last.
     div.combos = static_cast<AvatarCombo *>(std::realloc(div.combos, (div.combos_count + 1) * sizeof(AvatarCombo)));
     div.combos[div.combos_count] = div.combos[0];
-    div.combos[div.combos_count].note = 0;
-    SETSTR(div.combos[div.combos_count].raw_id, "004");
     div.combos[div.combos_count].id = 4;
     ++div.combos_count;
-    out = written(file, &notes, rewritten);
-    TEST_EXPECT(!rewritten && out.find("    combo 003 H1 B1\r\n\t\tcombo 004 H1 B1\r\n  }\r\n") != std::string::npos);
+    TEST_EXPECT(reads_back(written(file), file) &&
+                written(file).find("\t\tcombo 3 H1 B1\r\n\t\tcombo 4 H1 B1\r\n\t}\r\n") != std::string::npos);
     --div.combos_count;
-    // A part removed: its lines go, the comment before it stays.
+    // A part removed.
     AvatarsFile fewer = file;
     fewer.parts_count = 2; // H1 and B1, A1 gone
-    out = written(fewer, &notes, rewritten);
-    TEST_EXPECT(!rewritten && out.find("define arms") == std::string::npos &&
-                out.find("// an unused arms\r\nnationality N40 AV_BAD\r\n") != std::string::npos);
+    TEST_EXPECT(reads_back(written(fewer), fewer) && written(fewer).find("define arms") == std::string::npos);
     avatars_free(&file);
-    std::printf("noted: an authored table written again as it was; a value, a swap, a combo added, a part removed\n");
+    std::printf("authored: an authored table written in the writer's form, read back as its model; a value, a swap, "
+                "a combo added, a part removed\n");
     return 0;
 }
 
@@ -229,23 +200,19 @@ int main(int argc, char **argv) {
 
     AvatarCombo combo;
     std::memset(&combo, 0, sizeof(combo));
-    SETSTR(combo.raw_id, "001");
     combo.id = 1;
     SETSTR(combo.head_name, "TEST_HEAD");
     SETSTR(combo.body_name, "TEST_BODY"); // no arms -> arms_name stays empty
 
     AvatarDivision div;
     std::memset(&div, 0, sizeof(div));
-    SETSTR(div.raw_id, "D00");
     div.id = 0;
     SETSTR(div.name_key, "AV_DIV_TEST");
-    SETSTR(div.flags, "skipdemo");
     div.combos = &combo;
     div.combos_count = 1;
 
     AvatarNationality nat;
     std::memset(&nat, 0, sizeof(nat));
-    SETSTR(nat.raw_id, "N00");
     nat.id = 0;
     SETSTR(nat.name_key, "AV_NAT_TEST");
     nat.has_alignment = 1;
@@ -275,7 +242,6 @@ int main(int argc, char **argv) {
     TEST_EXPECT(fp.nationalities_count == 1);
     TEST_EXPECT(fp.nationalities[0].alignment == AVATAR_ALIGN_EVIL);
     TEST_EXPECT(fp.nationalities[0].divisions_count == 1);
-    TEST_EXPECT(std::strcmp(fp.nationalities[0].divisions[0].flags, "skipdemo") == 0);
     TEST_EXPECT(fp.nationalities[0].divisions[0].combos_count == 1);
     const AvatarCombo *rc = &fp.nationalities[0].divisions[0].combos[0];
     TEST_EXPECT(std::strcmp(rc->head_name, "TEST_HEAD") == 0);
@@ -286,17 +252,15 @@ int main(int argc, char **argv) {
     avatars_free(&fp);
     avatars_free_buffer(fb);
 
-    // An empty field ahead of a filled one is refused, nothing written: the
+    // An empty name ahead of a filled one is refused, nothing written: the
     // `""` the writer spells it with is no token to the game's tokenizer, so
-    // the flags would read back as the name key and the body as the head.
-    // [orig: Config_TokenizeLine @0x53CB60, the quote arm
-    //  @0x53CC4E..0x53CC70]
+    // the body would read back as the head. An empty name key ends its line:
+    // no later field shifts. [orig: Config_TokenizeLine @0x53CB60, the quote
+    // arm @0x53CC4E..0x53CC70]
     {
         char *rb = nullptr;
         size_t rn = 0;
         SETSTR(div.name_key, "");
-        TEST_EXPECT(avatars_write(&fs, &rb, &rn) == 2 && rb == nullptr);
-        SETSTR(div.flags, "");
         TEST_EXPECT(avatars_write(&fs, &rb, &rn) == 0); // an empty tail is no shift
         avatars_free_buffer(rb);
         rb = nullptr;
@@ -304,15 +268,13 @@ int main(int argc, char **argv) {
         SETSTR(combo.head_name, "");
         TEST_EXPECT(avatars_write(&fs, &rb, &rn) == 2 && rb == nullptr);
         SETSTR(combo.head_name, "TEST_HEAD");
-        SETSTR(nat.raw_id, "");
-        TEST_EXPECT(avatars_write(&fs, &rb, &rn) == 2 && rb == nullptr);
     }
-    if (check_noted_synthetic() != 0) return 1;
-    // The retail legs: the install's Avatars.def (its base archives and each expansion's mount) written again over
-    // its layout byte for byte, and the reference fixture set's.
+    if (check_authored() != 0) return 1;
+    // The retail legs: the install's Avatars.def (its base archives and each expansion's mount) through the game's
+    // reader, written from its model and read back as its fields, and the reference fixture set's.
     const std::string install = retail::install();
     if (install.empty()) {
-        retail::skip_leg("OPENNOVA_JO_DIR (the packed install's Avatars.def over its layout)");
+        retail::skip_leg("OPENNOVA_JO_DIR (the packed install's Avatars.def written and read back)");
     } else {
         std::vector<std::string> mounts{std::string()};
         for (const std::string &expansion : retail::expansions()) mounts.push_back(expansion);
@@ -321,7 +283,7 @@ int main(int argc, char **argv) {
             TEST_EXPECT(vfs.mount_game(install, expansion, opennova::VfsMountMode::Packed));
             std::vector<uint8_t> bytes;
             TEST_EXPECT(vfs.read_file("Avatars.def", bytes) && !bytes.empty());
-            if (check_noted(std::string(bytes.begin(), bytes.end()), "the install's Avatars.def " + expansion) != 0) return 1;
+            if (check_written(std::string(bytes.begin(), bytes.end()), "the install's Avatars.def " + expansion) != 0) return 1;
         }
     }
     const std::string retail = retail::reference_fixture("avatars/Avatars.def");

@@ -122,8 +122,9 @@ func _load_weapons() -> WeaponDatabase:
 # static items do), the ammo/type/grenade combos, STATIC_TOTAL_WEIGHT, and the
 # bare *_ICON windows.
 func _loadout_screen_xml() -> String:
-	var type_items := ('<ITEMS><ITEM value="0">FMJ</ITEM><ITEM value="1">AP</ITEM>'
-			+ '<ITEM value="2">SP</ITEM></ITEMS>')
+	# A combo's rows are its LIST_BOX's, as the shipped menus author them.
+	var type_items := ('<LIST_BOX><ITEMS><ITEM value="0">FMJ</ITEM><ITEM value="1">AP</ITEM>'
+			+ '<ITEM value="2">SP</ITEM></ITEMS></LIST_BOX>')
 	var body := ""
 	var y := 10
 	for n in ["PRIMARY", "SECONDARY", "ACCESSORY"]:
@@ -144,7 +145,7 @@ func _loadout_screen_xml() -> String:
 	var class_items := ""
 	for v in range(5, 10):  # Medic..Engineer = values 5..9
 		class_items += '<ITEM value="%d">class %d</ITEM>' % [v, v]
-	body += MenuDriverFixture.wnd("combobox", "PLAYERCLASS", y + 24, "<ITEMS>%s</ITEMS>" % class_items)
+	body += MenuDriverFixture.wnd("combobox", "PLAYERCLASS", y + 24, "<LIST_BOX><ITEMS>%s</ITEMS></LIST_BOX>" % class_items)
 	return MenuDriverFixture.screen_xml("PLAYER_INFO", body)
 
 

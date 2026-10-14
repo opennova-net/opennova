@@ -839,8 +839,7 @@ std::string MenuFrameCompiler::combo_face_text(const WidgetNode &node,
 		return ws->items[static_cast<size_t>(shown(static_cast<int>(ws->items.size())))];
 	}
 	const mnu::Window &w = *node.window;
-	const std::vector<WidgetNode::ItemVisual> &rows =
-			(w.list_box && w.list_box->items.present) ? node.popup_items : node.items;
+	const std::vector<WidgetNode::ItemVisual> &rows = node.popup_items;
 	if (rows.empty()) {
 		return std::string();
 	}
@@ -863,8 +862,7 @@ std::string MenuFrameCompiler::item_display_text(int index, const MenuFrameState
 				: std::string();
 	}
 	const mnu::Window &w = *node.window;
-	const std::vector<WidgetNode::ItemVisual> &rows =
-			(w.list_box && w.list_box->items.present) ? node.popup_items : node.items;
+	const std::vector<WidgetNode::ItemVisual> &rows = node.popup_items;
 	return row >= 0 && row < static_cast<int>(rows.size()) ? rows[static_cast<size_t>(row)].text
 															  : std::string();
 }
@@ -888,12 +886,10 @@ void MenuFrameCompiler::emit_combo_popup(const WidgetNode &node,
 	const mnu::RectEdges popup = offset_rect(local, rect.left, rect.top);
 	// Popup background appearances (default state).
 	emit_state_pass(popup, s, node.popup_states[kStateDefault]);
-	// Rows: runtime-seeded rows win; else the authored nested collection wins
-	// even when empty, else the top-level items (the documented D-MNU-7/8
-	// model).
+	// Rows: runtime-seeded rows win; else the LIST_BOX list's (a combo reads no
+	// ITEMS of its own; D-MNU-7/8).
 	const bool runtime_rows = ws != nullptr && ws->has_items;
-	const std::vector<WidgetNode::ItemVisual> &rows =
-			(w.list_box && w.list_box->items.present) ? node.popup_items : node.items;
+	const std::vector<WidgetNode::ItemVisual> &rows = node.popup_items;
 	const int row_count = runtime_rows ? static_cast<int>(ws->items.size())
 									   : static_cast<int>(rows.size());
 	const int row_h = row_height_(node);
@@ -927,12 +923,7 @@ void MenuFrameCompiler::emit_combo_popup(const WidgetNode &node,
 		} else if (i == hovered) {
 			style = kStateMouseover;
 		}
-		// A conditional whose operands are arrays decays both to pointers, so the
-		// result cannot bind to a StatePass(&)[4]; the pointer form is the same
-		// object and indexes identically.
-		const StatePass *row_states = (w.list_box && w.list_box->items.present)
-				? node.popup_items_states
-				: node.items_states;
+		const StatePass *row_states = node.popup_items_states;
 		if (style >= 0 && row_states[style].present) {
 			const StatePass &pass = row_states[style];
 			const mnu::RectEdges hi{ row.left + 1, row.top, row.right - 1, row.bottom };

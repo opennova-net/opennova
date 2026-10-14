@@ -57,10 +57,12 @@ bool test_applicability() {
   CHECK(mnu::schema_reads(T::Button, "position.left") == SchemaApplies::Reads &&
             mnu::schema_reads(T::Gopher, "text_rsrc") == SchemaApplies::Reads,
         "the base parse: every type");
-  CHECK(mnu::schema_element_reads(T::LanList, "JOIN_BUTTON") == SchemaApplies::Reads &&
-            mnu::schema_element_reads(T::GlbTable, "JOIN_BUTTON") == SchemaApplies::Ignored &&
-            mnu::schema_element_reads(T::Gopher, "target") == SchemaApplies::Reads,
-        "the extras by tag");
+  CHECK(mnu::schema_reads(T::LanList, "join_button") == SchemaApplies::Reads &&
+            mnu::schema_reads(T::GlbTable, "join_button") == SchemaApplies::Ignored &&
+            mnu::schema_reads(T::Gopher, "gopher_targets") == SchemaApplies::Reads &&
+            mnu::schema_reads(T::Gopher, "glb_target") == SchemaApplies::Ignored &&
+            mnu::schema_reads(T::GlbTable, "glb_server_fields") == SchemaApplies::Reads,
+        "the LAN_LIST, GLB_TABLE and GOPHER parts by type");
   mnu::Action action;
   action.type = "window";
   CHECK(mnu::schema_action_reads(action, "state") == SchemaApplies::Reads &&
@@ -148,7 +150,7 @@ bool test_defaults() {
   mnu::Window window;
   mnu::schema_default(window);
   CHECK(window.type == mnu::WindowType::Static && window.position.has_left && window.position.right == 100 &&
-            window.position.bottom == 20 && window.appearances.size() == 1 && window.appearances[0].state == "default" &&
+            window.position.bottom == 20 && window.appearances.size() == 1 && window.appearances[0].state == "DEFAULT" &&
             window.appearances[0].type.empty(),
         "a window: STATIC, 0,0,100,20, a typeless DEFAULT appearance");
   mnu::Action action;
@@ -156,18 +158,23 @@ bool test_defaults() {
   CHECK(action.type == "POP_SCREEN", "an ACTION: POP_SCREEN, the verb with no operand");
   mnu::Sound sound;
   mnu::schema_default(sound);
-  CHECK(sound.state == "mousein" && sound.trigger == "MOUSE_OVER", "a SOUND on MOUSEIN");
+  CHECK(sound.state == "MOUSEIN" && sound.trigger == "MOUSE_OVER", "a SOUND on MOUSEIN");
+  mnu::GopherCategory category;
+  mnu::schema_default(category);
+  CHECK(category.entries.size() == 1 && category.entries[0].name == "GOPHER_BUTTON" && !category.entries[0].info,
+        "a CATEGORY with one ITEM (an empty one crashes retail)");
   mnu::TableHeader header;
   mnu::schema_default(header, 3);
   CHECK(header.has_column && header.column == 3, "a HEADER with its COLUMN");
   mnu::WindowPart part;
   const mnu::Window &authored = mnu::schema_default_part(part, mnu::WindowType::List);
-  CHECK(authored.appearances.size() == 1 && authored.appearances[0].state == "default", "a part's DEFAULT appearance");
+  CHECK(authored.appearances.size() == 1 && authored.appearances[0].state == "DEFAULT", "a part's DEFAULT appearance");
   mnu::Window typed;
   mnu::schema_set_type_token(typed, "Button");
-  CHECK(typed.type == mnu::WindowType::Button && mnu::schema_type_token(typed) == "Button", "the token as typed");
+  CHECK(typed.type == mnu::WindowType::Button && mnu::schema_type_token(typed) == "button",
+        "the factory's type, written as its own name");
   mnu::schema_set_type_token(typed, "NOT_A_TYPE");
-  CHECK(typed.type == mnu::WindowType::Window && mnu::schema_type_token(typed) == "NOT_A_TYPE",
+  CHECK(typed.type == mnu::WindowType::Window && mnu::schema_type_token(typed) == "window",
         "a token the factory does not match builds a generic window");
   CHECK(mnu::schema_part_reads_root_text("list_box") && !mnu::schema_part_reads_root_text("spinup") &&
             !mnu::schema_part_reads_root_text("scrollbar"),

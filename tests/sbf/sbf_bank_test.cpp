@@ -1,12 +1,12 @@
 // The bank as a model (formats/sbf/sbf.h: SbfFile, sbf_read_bank, sbf_write_bank): the minted
-// synthetic bank (fixtures/sbf/synth_gamemus.sbf, tests/fixtures/minimal_sbf_gen.cpp) read into
-// the model (its tails 0x80, its reserved pair gamemus's) and written back byte for byte; a bank
-// built with no source bytes written as the shipped banks are laid out (each chunk a whole block,
-// its tail the previous chunk's bytes or zeros, one reserved pair); an edit (a stream renamed, one
-// dropped, one encoded anew) written from the fields alone and read back; each stream's decode the
-// raw entry's, a stream stopping at a chunk whose shift is past 7; what the reader refuses (entries
-// sharing bytes among them) and what it notes of a layout the writer lays out otherwise; what the
-// writer refuses. The retail banks' byte sweep is sbf_jo_install_sweep.
+// synthetic bank (fixtures/sbf/synth_gamemus.sbf, tests/fixtures/minimal_sbf_gen.cpp, laid out with
+// the writer's constants) read into the model and written back byte for byte; a bank built with no
+// source bytes written as the writer lays one out (each chunk a whole block, the writer's reserved
+// pair, its tail SBF_CHUNK_TAIL); an edit (a stream renamed, one dropped, one encoded anew) written
+// from the fields alone and read back; each stream's decode the raw entry's, a stream stopping at a
+// chunk whose shift is past 7; what the reader refuses (entries sharing bytes among them) and what
+// it notes of a layout the writer lays out otherwise (a write then the writer's bytes); what the
+// writer refuses. The retail banks' sweep is sbf_jo_install_sweep.
 #include <formats/sbf/sbf.h>
 
 #include "common/file_io.h"
@@ -32,12 +32,10 @@ uint32_t get_u32(const std::vector<uint8_t> &bytes, size_t at) {
 	return value;
 }
 
-// A bank built from fields alone, as a shipped bank is laid out: a stream of two chunks (one full, one
-// of 100 bytes) and a stream of one 10-byte chunk, under menumus.sbf's reserved pair.
+// A bank built from fields alone, as the writer lays one out: a stream of two chunks (one full, one
+// of 100 bytes) and a stream of one 10-byte chunk.
 int test_from_scratch() {
 	SbfFile bank;
-	bank.chunk_reserved_a = 0x1A;
-	bank.chunk_reserved_b = 0x01;
 	SbfStream two;
 	two.name = "TWO";
 	SbfChunk full;
@@ -63,37 +61,26 @@ int test_from_scratch() {
 	TEST_EXPECT(get_u32(written, SBF_HEADER_SIZE + 16) == index_end &&
 	            get_u32(written, SBF_HEADER_SIZE + 20) == 2u * SBF_CHUNK_TOTAL &&
 	            get_u32(written, SBF_HEADER_SIZE + SBF_ENTRY_SIZE + 16) == index_end + 2 * SBF_CHUNK_TOTAL);
-	// Every chunk header: its valid count, its shifts, the bank's reserved pair.
+	// Every chunk header: its valid count, its shifts, the writer's reserved pair.
 	const size_t first = index_end, second = index_end + SBF_CHUNK_TOTAL, third = index_end + 2 * SBF_CHUNK_TOTAL;
 	TEST_EXPECT(get_u32(written, first) == uint32_t(SBF_CHUNK_AUDIO) && written[first + 4] == 3 && written[first + 5] == 4);
 	TEST_EXPECT(get_u32(written, second) == 100 && get_u32(written, third) == 10);
-	for (const size_t at : {first, second, third}) TEST_EXPECT(written[at + 6] == 0x1A && written[at + 7] == 0x01);
-	// The tails, by the Residue rule: the previous chunk's bytes at the same offsets, zeros under a
-	// stream's first chunk.
-	bool residue = true;
-	for (int i = 100; i < SBF_CHUNK_AUDIO; ++i) residue = residue && written[second + 8 + size_t(i)] == uint8_t(i * 7);
-	bool zeros = true;
-	for (int i = 10; i < SBF_CHUNK_AUDIO; ++i) zeros = zeros && written[third + 8 + size_t(i)] == 0;
-	TEST_EXPECT(residue && zeros);
-	// Read back: the same fields, the rule and the pair found, nothing laid out otherwise.
+	for (const size_t at : {first, second, third})
+		TEST_EXPECT(written[at + 6] == SBF_CHUNK_RESERVED_A && written[at + 7] == SBF_CHUNK_RESERVED_B);
+	// The tails: the writer's SBF_CHUNK_TAIL past the bytes each chunk plays.
+	bool tails = true;
+	for (int i = 100; i < SBF_CHUNK_AUDIO; ++i) tails = tails && written[second + 8 + size_t(i)] == SBF_CHUNK_TAIL;
+	for (int i = 10; i < SBF_CHUNK_AUDIO; ++i) tails = tails && written[third + 8 + size_t(i)] == SBF_CHUNK_TAIL;
+	TEST_EXPECT(tails);
+	// Read back: the same fields, nothing laid out otherwise.
 	SbfFile again;
 	SbfFileLayout layout;
 	TEST_EXPECT(sbf_read_bank(written.data(), written.size(), again, error, &layout));
 	TEST_EXPECT(layout.packed && layout.trailing_bytes == 0 && layout.reserved_other == 0 && layout.tails_other == 0 &&
 	            layout.short_chunks == 0);
-	TEST_EXPECT(again.tail == SbfTail::Residue && again.chunk_reserved_a == 0x1A && again.chunk_reserved_b == 0x01);
 	TEST_EXPECT(again.streams.size() == 2 && again.streams[0].chunks.size() == 2 &&
 	            again.streams[0].chunks[0].audio == full.audio && again.streams[0].chunks[1].audio == part.audio &&
 	            again.streams[1].chunks[0].audio == small.audio);
-	// The same bank under the Silence rule: every tail 0x80.
-	bank.tail = SbfTail::Silence;
-	TEST_EXPECT(sbf_write_bank(bank, written, error));
-	bool silent = true;
-	for (int i = 100; i < SBF_CHUNK_AUDIO; ++i) silent = silent && written[second + 8 + size_t(i)] == 0x80;
-	for (int i = 10; i < SBF_CHUNK_AUDIO; ++i) silent = silent && written[third + 8 + size_t(i)] == 0x80;
-	TEST_EXPECT(silent);
-	TEST_EXPECT(sbf_read_bank(written.data(), written.size(), again, error, &layout) && again.tail == SbfTail::Silence &&
-	            layout.tails_other == 0);
 	// A name of 16 bytes fills the index's with no terminator, and reads back whole.
 	bank.streams[0].name = "SIXTEEN_CHARS_XX";
 	TEST_EXPECT(sbf_write_bank(bank, written, error));
@@ -117,16 +104,15 @@ int main() {
 		return 0;
 	}
 
-	// The minted bank through the model and back, byte for byte: its tails 0x80, its reserved pair
-	// gamemus's.
+	// The minted bank through the model and back, byte for byte: laid out with the writer's constants
+	// (sbf_encode_file's), it reads with nothing laid out otherwise.
 	SbfFile bank;
 	SbfFileLayout layout;
 	std::string error;
 	TEST_EXPECT(sbf_read_bank(bytes.data(), bytes.size(), bank, error, &layout));
 	TEST_EXPECT(layout.packed && layout.trailing_bytes == 0 && layout.names_with_tails == 0 && layout.reserved_other == 0 &&
 	            layout.tails_other == 0 && layout.short_chunks == 0);
-	TEST_EXPECT(bank.version == SBF_VERSION_DEFAULT && bank.flags == SBF_FLAGS_BYTE_PAIRED_STEREO);
-	TEST_EXPECT(bank.tail == SbfTail::Silence && bank.chunk_reserved_a == 0xFA && bank.chunk_reserved_b == 0x00);
+	TEST_EXPECT(layout.header_words_other == 0 && bank.flags == SBF_FLAGS_BYTE_PAIRED_STEREO);
 	TEST_EXPECT(bank.streams.size() == 13 && bank.streams[0].name == "SILENCE" && bank.streams[1].name == "TONE01");
 	TEST_EXPECT(bank.streams[0].chunks.size() == 1 && bank.streams[0].chunks[0].audio.size() == 2216);
 	TEST_EXPECT(bank.streams[1].chunks.size() == 3 && bank.streams[1].chunks[2].audio.size() == 1000);
@@ -148,8 +134,8 @@ int main() {
 	}
 	sbf_close(&arc);
 
-	// An edit written from the fields alone: a stream renamed, one dropped, one encoded anew (its chunks
-	// under the bank's pair and rule); read back with the offsets the writer worked out.
+	// An edit written from the fields alone: a stream renamed, one dropped, one encoded anew; read back
+	// with the offsets the writer worked out.
 	SbfFile edited = bank;
 	edited.streams[2].name = "RENAMED";
 	edited.streams.erase(edited.streams.begin() + 3);
@@ -217,9 +203,16 @@ int main() {
 	}
 	TEST_EXPECT(!sbf_read_bank(broken.data(), broken.size(), again, error) && error.find("share") != std::string::npos);
 
+	// The header's version and reserved words, which no reader reads: counted, written as the writer's.
+	broken = bytes;
+	put_u32(broken, 4, 0x200);
+	put_u32(broken, 12, 7);
+	TEST_EXPECT(sbf_read_bank(broken.data(), broken.size(), again, error, &layout) && layout.header_words_other == 2);
+	TEST_EXPECT(sbf_write_bank(again, written, error) && written == bytes);
+
 	// What it notes of a layout the writer lays out otherwise: bytes past the last stream, a name with
 	// bytes after its terminator, streams out of their index's order, a chunk's reserved pair not the
-	// bank's, a tail the bank's rule does not make, a valid count past its block.
+	// writer's, a tail not the writer's (each written back as the writer's), a valid count past its block.
 	broken = bytes;
 	broken.push_back(0);
 	TEST_EXPECT(sbf_read_bank(broken.data(), broken.size(), again, error, &layout) && layout.trailing_bytes == 1);
@@ -234,12 +227,11 @@ int main() {
 	const size_t chunk0 = get_u32(bytes, SBF_HEADER_SIZE + SBF_ENTRY_SIZE + 16); // TONE01's first chunk
 	broken = bytes;
 	broken[chunk0 + 6] = 0x1A;
-	TEST_EXPECT(sbf_read_bank(broken.data(), broken.size(), again, error, &layout) && layout.reserved_other == 1 &&
-	            again.chunk_reserved_a == 0xFA);
+	TEST_EXPECT(sbf_read_bank(broken.data(), broken.size(), again, error, &layout) && layout.reserved_other == 1);
+	TEST_EXPECT(sbf_write_bank(again, written, error) && written == bytes);
 	broken = bytes;
 	broken[chunk0 + 2 * SBF_CHUNK_TOTAL + 8 + 2000] = 0x11; // in TONE01's last chunk's tail
-	TEST_EXPECT(sbf_read_bank(broken.data(), broken.size(), again, error, &layout) && layout.tails_other == 1 &&
-	            again.tail == SbfTail::Silence);
+	TEST_EXPECT(sbf_read_bank(broken.data(), broken.size(), again, error, &layout) && layout.tails_other == 1);
 	TEST_EXPECT(sbf_write_bank(again, written, error) && written == bytes);
 	broken = bytes;
 	put_u32(broken, chunk0 + 2 * SBF_CHUNK_TOTAL, SBF_CHUNK_AUDIO + 50); // a valid count past the block

@@ -3,11 +3,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
-#include <vector>
-
-#include <formats/textlayout/text_layout.h>
 
 namespace opennova::def {
 
@@ -33,38 +31,33 @@ const char *hudfx_tag(size_t slot);
 // The slot a tag names, compared without case [orig: the stricmp chain @ 0x58F986..0x58FB22]; -1 for none.
 int hudfx_slot_of(std::string_view tag);
 
-// A line the walk would take: its slot and its model's name (the line's second token).
+// The line the walk takes: its slot and its model's name (the line's second token).
 struct HudFxLine {
 	uint8_t slot = 0;
 	std::string model;
-	uint64_t note = 0; // its line in the file's modeled layout (textlayout); 0: none
 };
 
-// A file's tagged lines in its order; the game reads the first alone.
+// The file as the game reads it: its first tagged line, the one line the walk takes (the line's callback
+// returns 1, which ends the walk [orig: File_ParseASCIIFile @ 0x53D942]); none for a file of no tagged line.
+// What follows that line the game reads nothing of, and the model holds none of it.
 struct HudFxFile {
-	std::vector<HudFxLine> lines;
-	uint64_t note = 0; // the file's own record in its layout; 0: none
+	std::optional<HudFxLine> line;
 };
 
-// The file's tagged lines as the walk cuts them (CR LF lines, its tokens; a line of no token or opening '/'
-// skipped), each line whose first token is a tag; with `notes`, its layout modeled (every other line read for
-// nothing where it stands).
+// The file's first tagged line as the walk cuts it (CR LF lines, its tokens; a line of no token or opening '/'
+// skipped), the walk ending there.
 HudFxFile hudfx_parse(const uint8_t *data, size_t size);
-HudFxFile hudfx_parse(const uint8_t *data, size_t size, textlayout::Notes &notes);
 
-// The nine names the slots hold once the game has read the file: the first line's model copied into its slot
-// and on, a name of 16 or more characters running into the slots after it, as the copy runs [orig: @
+// The nine names the slots hold once the game has read the file: the line's model copied into its slot and on,
+// a name of 16 or more characters running into the slots after it, as the copy runs [orig: @
 // 0x58F992..0x58FB42]; the last slot's run past the nine goes into a buffer the init clears after [orig:
 // memset(&dword_2723388, 0, 0x240) @ 0x5A4941]. Each slot's name is what its load reads, to its first NUL.
 std::array<std::string, kHudFxSlots> hudfx_slot_names(const HudFxFile &file);
 
-// The file's text from scratch (ADR 0003): each line `tag<TAB>model` with CR LF after it, over the file's
-// modeled layout where the file has one (each line as the file had it but for a changed tag's or model's
-// words; a line put down anew after the one before it, in the writer's form; the lines in the file's model's
-// order). The text is read again: one that would not read back as the file is written in the writer's form,
-// `rewritten` set. A line of no model is its tag alone (the game loads nothing for it). False with the reason for
-// a model the walk reads otherwise (holding a blank, a comma, a quote, `;` or `//`).
-bool hudfx_write(const HudFxFile &file, const textlayout::Notes *notes, std::string &text, std::string &error,
-                 bool *rewritten = nullptr);
+// The file's text from scratch (ADR 0003; no original writer of hudfx.def is witnessed, so the form is
+// OpenNova's), from its line alone: `tag<TAB>model` with CR LF after it (empty for a file of no line). A line of
+// no model is its tag alone (the game loads nothing for it). False with the reason for a slot past the nine, or a
+// model the walk reads otherwise (holding a blank, a comma, a quote, `;` or `//`).
+bool hudfx_write(const HudFxFile &file, std::string &text, std::string &error);
 
 } // namespace opennova::def

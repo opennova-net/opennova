@@ -37,7 +37,7 @@
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
 #include <formats/mnu/mnu.h>
-#include <formats/mns/mns_document.h>
+#include <formats/mns/mns.h>
 #include <formats/rtxt/rtxt.h>
 #include <runtime/menu/menu_assets.h>
 #include <runtime/menu/menu_frame.h>
@@ -172,9 +172,9 @@ std::map<std::string, std::string> style_vars(const AssetSource &assets) {
 	std::map<std::string, std::string> vars;
 	std::vector<uint8_t> style;
 	if (assets.read("menu_style.mns", style)) {
-		const opennova::mns::EvaluationResult evaluated = opennova::mns::Document::parse(
-				reinterpret_cast<const char *>(style.data()), style.size()).evaluate();
-		for (const auto &kv : evaluated.sheet.variables) vars[kv.first] = kv.second;
+		opennova::mns::KeyValueList list;
+		opennova::mns::parse_key_value_buffer(reinterpret_cast<const char *>(style.data()), style.size(), list);
+		for (const auto &kv : list.sheet().variables) vars[kv.first] = kv.second;
 	}
 	return vars;
 }
@@ -609,7 +609,8 @@ int census_leg(Totals &totals) {
 	expect(census.shadowquality, "SHADOWQUALITY draws the 20-texel band btn1e.tga's first load baked");
 	expect(census.red_pw, "RED_PW draws the 24-texel band btn3.tga's first load baked");
 	expect(census.arrows == 68 && census.arrows_all_states == 68, "the 68 spin arrows draw all four state rows");
-	expect(census.typeless == 216 && census.unknown_type == 1, "216 typeless rows and one unknown TYPE");
+	// The grill's one unknown TYPE reads as none (the reader holds a TYPE its parse does not know as none).
+	expect(census.typeless == 217 && census.unknown_type == 0, "217 typeless rows: the one unknown TYPE reads as none");
 	expect(census.marker_widgets > 0 && census.marker_draw_diffs == 0, "a typeless row marks its state, draws nothing");
 	totals.failures += census.failures;
 	return 0;

@@ -46,25 +46,6 @@ bool read(const std::string &text, charattr::Table &table, charattr::Reading *re
 	return charattr::read_table(reinterpret_cast<const uint8_t *>(text.data()), text.size(), table, reading);
 }
 
-// How many CR LF lines differ between two texts of as many lines (-1 for another count).
-int lines_changed(const std::string &a, const std::string &b) {
-	const auto split = [](const std::string &t) {
-		std::vector<std::string> out;
-		size_t at = 0;
-		while (at < t.size()) {
-			const size_t end = t.find("\r\n", at);
-			out.push_back(t.substr(at, end == std::string::npos ? std::string::npos : end - at));
-			at = end == std::string::npos ? t.size() : end + 2;
-		}
-		return out;
-	};
-	const std::vector<std::string> x = split(a), y = split(b);
-	if (x.size() != y.size()) return -1;
-	int n = 0;
-	for (size_t i = 0; i < x.size(); ++i) n += x[i] != y[i];
-	return n;
-}
-
 uint32_t bits(float value) {
 	uint32_t out = 0;
 	std::memcpy(&out, &value, sizeof out);
@@ -177,12 +158,11 @@ void synthetic_loader() {
 	std::printf("loader: classes in order to the first missing, the first section of a label, values and words\n");
 }
 
-// A file read with its layout (textlayout) and written again is itself: its comments, a number's own spelling, a
-// `;` comment, the attribute words in the file's order, a class before another, a section never read. One value
-// changed changes its one line; a key set anew goes after the key before it in the writer's order, where the
-// section's cursor still finds it; an attribute removed leaves the others where they stood; a class added comes
-// after the file's in the writer's form.
-void synthetic_noted() {
+// An authored file (a comment, a number's own spelling, a `;` comment, the attribute words in an order of
+// their own, a class before another, a section never read) through the loader, written from its table in the
+// writer's form and read again: the same rows; each edit (a value, a key set anew, an attribute removed, a class
+// added) reads back too.
+void synthetic_authored() {
 	const std::string text = crlf(
 			"// classes\n"
 			"[CHARACTER2]\n"
@@ -195,36 +175,30 @@ void synthetic_noted() {
 			"\n"
 			"[CHARACTER1]\n"
 			"STEALTH = 9\n");
-	textlayout::Notes notes;
 	charattr::Table table;
-	CHECK(charattr::read_table(reinterpret_cast<const uint8_t *>(text.data()), text.size(), table, nullptr, notes));
+	CHECK(read(text, table));
 	CHECK(table.rows[0].active && table.rows[1].active && !table.rows[2].active);
 	std::string written, error;
-	bool rewritten = true;
-	CHECK(charattr::write_table(table, &notes, written, error, &rewritten) && !rewritten && written == text);
+	charattr::Table again;
+	CHECK(charattr::write_table(table, written, error) && read(written, again) && charattr::same_rows(again, table));
+	CHECK(written.rfind("[CHARACTER1]\r\nHPBONUS = 2.0\r\nJUNGLE_CAMMO = 5310\r\n\r\n[CHARACTER2]\r\nSTEALTH = 3.5\r\n", 0) == 0);
 	charattr::Table changed = table;
 	changed.rows[0].hp_bonus = 3.0f;
-	CHECK(charattr::write_table(changed, &notes, written, error, &rewritten) && !rewritten);
-	CHECK(lines_changed(text, written) == 1 && written.find("HPBONUS = 3.0\r\n") != std::string::npos);
+	CHECK(charattr::write_table(changed, written, error) && read(written, again) && charattr::same_rows(again, changed));
 	changed = table;
 	changed.rows[0].run_modifier = 1;
-	CHECK(charattr::write_table(changed, &notes, written, error, &rewritten) && !rewritten);
-	CHECK(written.find("JUNGLE_CAMMO = 5310\r\nRUN_MODIFIER = 1\r\n") != std::string::npos);
-	charattr::Table again;
-	CHECK(read(written, again) && charattr::same_rows(again, changed));
+	CHECK(charattr::write_table(changed, written, error) && read(written, again) && charattr::same_rows(again, changed));
 	changed = table;
 	changed.rows[1].attributes = charattr::kKnifeBonus;
-	CHECK(charattr::write_table(changed, &notes, written, error, &rewritten) && !rewritten);
-	CHECK(written.find("ATTRIBUTES = KnifeBonus\r\n") != std::string::npos && lines_changed(text, written) == 1);
+	CHECK(charattr::write_table(changed, written, error) && read(written, again) && charattr::same_rows(again, changed));
 	changed = table;
 	changed.rows[2].active = true;
 	changed.rows[2].class_id = 3;
 	changed.rows[2].stealth = 1.0f;
-	CHECK(charattr::write_table(changed, &notes, written, error, &rewritten) && !rewritten);
-	CHECK(written.size() > text.size() && written.find("[CHARACTER3]\r\nSTEALTH = 1.0\r\n") != std::string::npos);
+	CHECK(charattr::write_table(changed, written, error) && written.find("[CHARACTER3]\r\nSTEALTH = 1.0\r\n") != std::string::npos);
 	CHECK(read(written, again) && charattr::same_rows(again, changed));
-	std::printf("noted: an authored file written again as it was; a value, a key set anew, an attribute removed and "
-	            "a class added each where the file has room\n");
+	std::printf("authored: an authored file written in the writer's form, read back as its rows; a value, a key set "
+	            "anew, an attribute removed and a class added each read back\n");
 }
 
 void synthetic_writer() {
@@ -306,7 +280,7 @@ void synthetic_writer() {
 	CHECK(!charattr::write_table(full, text, error) && text.empty() && error.find("72 values") != std::string::npos &&
 	      error.find("8 bytes past") != std::string::npos && error.find("0x7609e8") != std::string::npos);
 	// The same text, the pool unchecked: what the file would hold.
-	CHECK(charattr::compose_table(full, nullptr, text, error) &&
+	CHECK(charattr::compose_table(full, text, error) &&
 	      configfile::data_strings_pool(reinterpret_cast<const uint8_t *>(text.data()), text.size()).overrun() == 8);
 	std::printf("writer: every key away from 0, CR LF, the floats by their bits; a table no file loads as, or whose "
 	            "text would overrun the reader's pool, refused (composed all the same)\n");
@@ -314,8 +288,8 @@ void synthetic_writer() {
 
 // A charattr.def in the CBIN form reads as its text twin: ConfigFile_LoadFromFile takes it through the binary
 // reader into the sections the loader's accessors walk [orig: CharAttr_LoadFromDef @ 0x412177 ->
-// ConfigFile_LoadFromFile @ 0x760aa3 -> ConfigFile_ParseBinary @ 0x75e8a0]. It has no lines, so its notes are
-// empty and a write puts the table down in the writer's form.
+// ConfigFile_LoadFromFile @ 0x760aa3 -> ConfigFile_ParseBinary @ 0x75e8a0]; a write puts the table down in the
+// writer's text form.
 void synthetic_cbin() {
 	cbin::BinaryConfig config;
 	config.xor_key = 0x2468ACE1u;
@@ -355,16 +329,10 @@ void synthetic_cbin() {
 	CHECK(reading.sources[0].attribute_words.size() == 2 && reading.sources[0].attribute_words[1].read &&
 	      reading.sources[0].attribute_words[1].written.empty());
 
-	// No lines to lay out: the notes come back empty, and the writer's form reads back to the same rows.
-	textlayout::Notes notes;
-	charattr::Table noted;
-	CHECK(charattr::read_table(bytes.data(), bytes.size(), noted, nullptr, notes));
-	CHECK(notes.records.empty() && noted.note == 0 && noted.rows[0].note == 0 && charattr::same_rows(noted, twin));
+	// The writer's form of it reads back to the same rows.
 	std::string written;
-	bool rewritten = true;
 	charattr::Table again;
-	CHECK(charattr::write_table(noted, &notes, written, error, &rewritten) && read(written, again) &&
-	      charattr::same_rows(again, twin));
+	CHECK(charattr::write_table(binary, written, error) && read(written, again) && charattr::same_rows(again, twin));
 
 	// A CBIN file the binary reader refuses fails the load and leaves the table cleared.
 	charattr::Table cut;
@@ -409,7 +377,7 @@ void synthetic_cbin() {
 	null_label.labels.push_back(cbin::BinaryConfig::Label{});
 	CHECK(cbin::encode_binary_config(null_label, null_bytes, error));
 	CHECK(!charattr::read_table(null_bytes.data(), null_bytes.size(), nulled) && !nulled.rows[0].active);
-	std::printf("cbin: a CBIN charattr.def reads as its text twin, with no notes\n");
+	std::printf("cbin: a CBIN charattr.def reads as its text twin\n");
 }
 
 // A class's camouflage items by their property [orig: CharAttr_GetCammoTypeId @ 0x4127b0], and the property a
@@ -461,20 +429,13 @@ int retail_legs() {
 		std::printf("%s: classes 1..9, CHARACTER8's row CRC 0x22A25E01, written and read the same; 278 values "
 		            "over 288 bytes as shipped, %u over %u written\n",
 		            what.c_str(), pool.values, pool.string_bytes);
-		// Read with its layout and written again: the shipped file byte for byte (its banners, its spacing, the
-		// legacy block's sections, the classes in the file's order); one value changed, one line.
-		textlayout::Notes notes;
-		charattr::Table noted;
-		CHECK(charattr::read_table(bytes.data(), bytes.size(), noted, nullptr, notes));
-		bool rewritten = true;
-		CHECK(charattr::write_table(noted, &notes, written, error, &rewritten) && !rewritten);
-		CHECK(written == std::string(bytes.begin(), bytes.end()));
-		noted.rows[7].run_modifier = 2;
-		CHECK(charattr::write_table(noted, &notes, written, error, &rewritten) && !rewritten);
-		CHECK(lines_changed(std::string(bytes.begin(), bytes.end()), written) == 1);
+		// The game's reader takes the written file as the shipped one (round_trip above); one value changed reads
+		// back changed.
+		charattr::Table edited = table;
+		edited.rows[7].run_modifier = 2;
 		charattr::Table again;
-		CHECK(read(written, again) && charattr::same_rows(again, noted));
-		std::printf("%s: written again over its layout byte for byte; one value changed one line\n", what.c_str());
+		CHECK(charattr::write_table(edited, written, error) && read(written, again) && charattr::same_rows(again, edited));
+		std::printf("%s: one value changed reads back\n", what.c_str());
 		++ran;
 	};
 	const std::string install = retail::install();
@@ -520,7 +481,7 @@ int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	synthetic_loader();
 	synthetic_writer();
-	synthetic_noted();
+	synthetic_authored();
 	synthetic_cbin();
 	synthetic_cammo();
 	retail_legs();

@@ -77,11 +77,11 @@ const BOARD_XML := """
     </WINDOW>
     <WINDOW type="combobox" name="MODE">
       <POSITION><LEFT>200</LEFT><TOP>0</TOP><RIGHT>300</RIGHT><BOTTOM>20</BOTTOM></POSITION>
-      <ITEMS>
-        <ITEM value="0">ONE</ITEM>
-        <ITEM value="1">TWO</ITEM>
-      </ITEMS>
       <LIST_BOX>
+        <ITEMS>
+          <ITEM value="0">ONE</ITEM>
+          <ITEM value="1">TWO</ITEM>
+        </ITEMS>
         <POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>100</RIGHT><BOTTOM>80</BOTTOM></POSITION>
         <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
       </LIST_BOX>
@@ -759,12 +759,12 @@ const COMBO_SCROLL_XML := """
     <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
     <WINDOW type="combobox" name="SCROLLY">
       <POSITION><LEFT>200</LEFT><TOP>0</TOP><RIGHT>300</RIGHT><BOTTOM>20</BOTTOM></POSITION>
-      <ITEMS>
-        <ITEM value="0">ZERO</ITEM><ITEM value="1">ONE</ITEM>
-        <ITEM value="2">TWO</ITEM><ITEM value="3">THREE</ITEM>
-        <ITEM value="4">FOUR</ITEM><ITEM value="5">FIVE</ITEM>
-      </ITEMS>
       <LIST_BOX>
+        <ITEMS>
+          <ITEM value="0">ZERO</ITEM><ITEM value="1">ONE</ITEM>
+          <ITEM value="2">TWO</ITEM><ITEM value="3">THREE</ITEM>
+          <ITEM value="4">FOUR</ITEM><ITEM value="5">FIVE</ITEM>
+        </ITEMS>
         <POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>100</RIGHT><BOTTOM>100</BOTTOM></POSITION>
         <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
         <SCROLLBAR>

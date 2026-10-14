@@ -10,6 +10,7 @@
 #include <godot_cpp/variant/string_name.hpp>
 
 #include <cstdint>
+#include <string>
 
 #include <formats/sbf/sbf.h>
 
@@ -45,31 +46,29 @@ public:
 
 	const opennova::sbf::SbfRawEntry *raw_entry_at(int p_index) const;
 
-	// Raw source bytes held in memory from load_from_path (kept for
-	// sbf_open_memory lifetime). Used by the saver for raw passthrough.
+	// The bytes load_from_path read, the streaming reader's (sbf_open_memory keeps
+	// its index pointing into them; playback reads its chunks from them). The
+	// saver never writes them: it writes the bank's model.
 	PackedByteArray get_raw_file_bytes() const { return _file_bytes; }
 	bool read_file_block(uint64_t p_offset, uint32_t p_size, PackedByteArray &r_block) const;
 
-	// Editor mutation API (Phase D / SBF F2). Replaces the audio for an entry
-	// with int16-equivalent floats in [-1, 1]. Marks bank dirty so the saver
-	// switches to the re-encode path.
+	// Editor mutation API. Replaces an entry's stream in the bank's model with
+	// int16-equivalent floats in [-1, 1], encoded chunk by chunk
+	// (sbf_encode_stream). Marks the bank dirty.
 	Error set_entry_pcm(int p_index, const PackedFloat32Array &p_samples);
 	bool is_dirty() const { return _dirty; }
 	void clear_dirty() { _dirty = false; }
 
-	// Phase E (bank-edit ops). All mutate _arc.entries + override map and set
-	// _dirty so the saver re-encodes.
+	// Appends an entry: its name (at most 15 bytes) and its stream encoded from the
+	// samples, to the entry table and the bank's model. Marks the bank dirty.
 	Error add_entry(const String &p_name, const PackedFloat32Array &p_samples);
 
-	// Build a fresh SBF byte stream from the current entry table + override
-	// PCM map. Entries without an override are decoded from the original
-	// chunks (lossy round-trip; precision-of-int8). Used by the saver when
-	// is_dirty() is true.
+	// The .sbf bytes from the bank's model alone (sbf_write_bank, ADR 0003): every
+	// stream's chunks as read or as an edit encoded them, never the bytes the bank
+	// was read from.
 	Error build_encoded_bytes(PackedByteArray &out) const;
-	// The .sbf write (ADR 0032 direct document I/O, replacing the deleted
-	// ResourceFormat pair): clean banks pass the retained source bytes through
-	// losslessly; dirty banks re-encode from the entry table + PCM overrides
-	// and clear the dirty bit.
+	// The .sbf write (ADR 0032 direct document I/O): build_encoded_bytes, then the
+	// dirty bit cleared.
 	Error save_to_path(const String &p_path);
 
 protected:
@@ -83,9 +82,15 @@ private:
 	opennova::sbf::SbfArchive _arc;
 	bool _opened = false;
 	bool _dirty = false;
-	// Per-entry int16 PCM overrides keyed by entry index. Populated by
-	// set_entry_pcm; consumed by build_encoded_bytes during re-encode save.
-	HashMap<int, Vector<int16_t>> _entry_pcm_overrides;
+	// The bank as its fields (formats/sbf: SbfFile, sbf_read_bank), what every edit
+	// changes and the saver writes. Read from the loaded bytes on the first edit or
+	// save (`_model_read`; playback never needs it); `_model_error` says why a bank
+	// the streaming reader opened has none (`_modeled` false), which refuses both.
+	mutable opennova::sbf::SbfFile _model;
+	mutable bool _model_read = false;
+	mutable bool _modeled = false;
+	mutable std::string _model_error;
+	bool _ensure_model() const;
 };
 
 } // namespace godot

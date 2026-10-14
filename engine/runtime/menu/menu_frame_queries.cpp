@@ -221,10 +221,9 @@ int MenuFrameCompiler::item_count(int index, const MenuFrameState &state) const 
 	if (ws != nullptr && ws->has_items) {
 		return static_cast<int>(ws->items.size());
 	}
-	// A combo's selectable rows are its popup rows when the nested LIST_BOX
-	// collection is authored (D-MNU-7/8).
+	// A combo's selectable rows are its LIST_BOX popup rows (D-MNU-7/8).
 	const mnu::Window &w = *node.window;
-	if (w.type == mnu::WindowType::Combo && w.list_box && w.list_box->items.present) {
+	if (w.type == mnu::WindowType::Combo) {
 		return static_cast<int>(node.popup_items.size());
 	}
 	return static_cast<int>(node.items.size());

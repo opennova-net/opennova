@@ -28,14 +28,11 @@ struct CodeRow {
 // In enum order (menu_frame_note_token indexes it).
 const CodeRow kCodes[kMenuFrameNoteCodeCount] = {
 	{ Code::AppearanceStateUnknown, "appearance_state_unknown", Basis::Witnessed },
-	{ Code::AppearanceTypeUnknown, "appearance_type_unknown", Basis::Witnessed },
 	{ Code::AppearanceCustom, "appearance_custom", Basis::Witnessed },
 	{ Code::AppearanceReplaced, "appearance_replaced", Basis::Witnessed },
 	{ Code::ColorUnparsed, "color_unparsed", Basis::Witnessed },
 	{ Code::ColorTransparent, "color_transparent", Basis::Witnessed },
 	{ Code::StyleVarUnresolved, "style_var_unresolved", Basis::Witnessed },
-	{ Code::TypeUnknown, "type_unknown", Basis::Witnessed },
-	{ Code::ItemKindAsText, "item_kind_as_text", Basis::Witnessed },
 	{ Code::TableCellsDeferred, "table_cells_deferred", Basis::Deferred },
 	{ Code::TableCellsCustom, "table_cells_custom", Basis::Witnessed },
 	{ Code::ScrollExtentDefault, "scroll_extent_default", Basis::Witnessed },
@@ -100,10 +97,6 @@ bool reads_string(mnu::WindowType type) {
 		default:
 			return false;
 	}
-}
-
-bool is_image_or_color_item(const mnu::Item &item) {
-	return iequals(item.type, "image") || iequals(item.type, "color");
 }
 
 } // namespace
@@ -188,13 +181,10 @@ void MenuFrameCompiler::note_appearance_row_(const std::vector<mnu::Appearance> 
 	const bool outline = iequals(ap.type, "outline");
 	const bool custom = iequals(ap.type, "custom");
 	if (!image && !color && !outline && !custom) {
-		// A table's ITEMS reads IMAGEROW (its row image: D-MNU-13); anywhere else, and any
-		// other token, the row marks its state and draws nothing. An empty TYPE is the
-		// marker on purpose.
+		// A table's ITEMS reads IMAGEROW (its row image: D-MNU-13); a row of no TYPE marks its
+		// state and draws nothing (the reader holds a TYPE its parse does not know as none).
 		if (iequals(ap.type, "imagerow") && std::strcmp(list, "items.appearance") == 0) {
 			note_(Code::TableCellsDeferred, ap.type, list, record, field("type"));
-		} else if (!ap.type.empty()) {
-			note_(Code::AppearanceTypeUnknown, ap.type, list, record, field("type"));
 		}
 		return;
 	}
@@ -217,13 +207,11 @@ void MenuFrameCompiler::note_appearance_row_(const std::vector<mnu::Appearance> 
 	}
 }
 
-// The window's own fields: its TYPE [orig: CUIScene_CreateWidgetByType @ 0x64f630 builds
-// a generic CWnd for a token it does not match], its FONT and asset names, a SCROLL's
-// arrow length, and the rows a list, a combo or a table holds that the port does not draw.
+// The window's own fields: its FONT and asset names, a SCROLL's arrow length, and the rows a
+// list, a combo or a table holds that the port does not draw. (A TYPE token the factory does not
+// match builds a generic window [orig: CUIScene_CreateWidgetByType @ 0x64f630]: the model holds
+// the type alone.)
 void MenuFrameCompiler::note_window_(const mnu::Window &w) const {
-	if (w.type == mnu::WindowType::Window && !w.type_token.empty() && !iequals(w.type_token, "window")) {
-		note_(Code::TypeUnknown, w.type_token, nullptr, -1, "type");
-	}
 	note_var_(w.font.name, nullptr, -1, "font.name");
 	note_color_(w.font.default_fg, true, nullptr, -1, "font.default_fg");
 	note_color_(w.font.mouseover_fg, true, nullptr, -1, "font.mouseover_fg");
@@ -237,24 +225,6 @@ void MenuFrameCompiler::note_window_(const mnu::Window &w) const {
 	// WIDTH arm of CUIScrollWidget_ParseExtendedXMLDef @ 0x64c6d0 writes it, @ 0x64cb5f].
 	if (w.type == mnu::WindowType::Scroll && !w.has_scroll_extent) {
 		note_(Code::ScrollExtentDefault, "20", nullptr, -1, "scroll_extent");
-	}
-	// A list's and a combo's rows of TYPE IMAGE or COLOR are the text written for them, which the row
-	// draws as its label [orig: CListWnd_ParseXMLDefinition @ 0x645b0f..0x645b26, the literal row
-	// @ 0x645c1b..0x645c6f; CListWnd_DrawItems @ 0x643f30] (MenuFrameCompiler::configure, build_items).
-	if (w.type == mnu::WindowType::List || w.type == mnu::WindowType::LanList) {
-		for (size_t i = 0; i < w.items.items.size(); ++i) {
-			if (is_image_or_color_item(w.items.items[i])) {
-				note_(Code::ItemKindAsText, w.items.items[i].type, "items.item", static_cast<int>(i), "type");
-			}
-		}
-	}
-	if (w.type == mnu::WindowType::Combo && w.list_box) {
-		for (const mnu::Item &item : w.list_box->items.items) {
-			if (is_image_or_color_item(item)) {
-				note_(Code::ItemKindAsText, item.type, "list_box", 0, "");
-				break;
-			}
-		}
 	}
 	// A table's bitmap and bitmap-and-text cells and its SUBST images are drawn
 	// (menu_frame_table.cpp, emit_table); an ITEMS IMAGEROW row stays deferred, noted where its

@@ -254,11 +254,6 @@ std::vector<DefChoice> item_types() {
 	return {{"", 0, "Unset"}, {"vehicle", 1}, {"decoration", 2}, {"person", 3}, {"marker", 4}, {"building", 5},
 	        {"powerup", 6}, {"effect", 8}};
 }
-// The word a type line writes where the chain reads two for its value (DefItemType 2 and 6): the
-// first, or the other [orig: ItemDef_ParseProperty, the type chain @0x4A02E4..0x4A04B7].
-std::vector<DefChoice> item_type_words() {
-	return {{"", 0, "decoration, powerup"}, {"other", 1, "foliage, object"}};
-}
 std::vector<DefChoice> kill_zones() {
 	std::vector<DefChoice> out = {{"", 0, "Unset"}};
 	for (size_t n = 1; const char *name = def_ammo_kz_keyword(n); ++n) out.push_back({name, int64_t(n)});
@@ -385,7 +380,6 @@ struct ChoiceRule {
 };
 const ChoiceRule kChoices[] = {
 	{{kItem, "type"}, item_types},
-	{{kItem, "type_word"}, item_type_words},
 	{{kAmmo, "kztype"}, kill_zones},
 	{{kAmmo, "tracer_type_friendly"}, tracer_types}, {{kAmmo, "tracer_type_enemy"}, tracer_types},
 	{{kItem, "", "husk_sub_part_types["}, death_pieces},
@@ -487,10 +481,6 @@ void def_sync_derived(DefRecordKind kind, void *value, const std::string &field)
 		// ItemDef_ParseProperty, the `end` arm @0x49EB2F..0x49EB5F].
 		if (field == "id" && item.sid_derived) std::snprintf(item.sid, 16, "S%06i", item.id);
 		if (field == "sid") item.sid_derived = 0;
-		// Only 2 and 6 have a second word (foliage, object): any other type writes its one.
-		if ((field == "type" || field == "type_word") && item.type != DEF_ITEM_TYPE_DECORATION &&
-		    item.type != DEF_ITEM_TYPE_POWERUP)
-			item.type_word = 0;
 		return;
 	}
 	if (kind == DefRecordKind::Powerup) {

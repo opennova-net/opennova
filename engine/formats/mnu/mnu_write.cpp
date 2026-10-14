@@ -1,13 +1,16 @@
-// The writer: each record as the element it puts down (the writer's words, mnu_write.h), the
-// writer's own layout, the write issues, and the serialization entry points, which hand a
-// document read from a file to its text layout (mnu_text_layout.h). docs/mnu/menu-re.md ("The
-// writer") has the rules with their witnesses.
-#include <formats/mnu/mnu_write.h>
-
-#include <formats/mnu/mnu_text_layout.h>
+// The writer: each record as the element it puts down (the writer's words), the writer's own
+// layout, the write issues, and the serialization entry points. The file is written from the
+// model alone (D-MNU-22): no original tool writes a menu, so the layout is OpenNova's own.
+// docs/mnu/menu-re.md ("The writer") has the rules with their witnesses.
+#include <formats/mnu/mnu.h>
+#include <formats/mnu/mnu_schema.h>
 
 #include <algorithm>
+#include <cstdint>
+#include <cstdlib>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include <base/io/strutil.h>
 
@@ -17,153 +20,61 @@ namespace {
 
 using opennova::strutil::iequals;
 
-std::string upper(std::string s) {
-	for (char &c : s)
-		if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 32);
-	return s;
-}
-
-bool in_list(const std::string &key, const char *const *keys) {
-	for (size_t i = 0; keys[i]; ++i)
-		if (key == keys[i]) return true;
-	return false;
-}
-
-// The attribute keys each parse reads (written_vocabulary), as the reader's walks compare them
-// (mnu.cpp's TreeReader): a key outside its element's set is a token the game reads as nothing.
-const char *const kWindowKeys[] = {"TYPE", "NAME", "FORM", "HIDDEN", "DISABLE", "GLOBAL_VAR", "DRAW_FRAME",
-                                   "MODAL", "CHECKED", "AS_BUTTON", "PASSWORD", "NUMBER", "READONLY", "MAXCHAR",
-                                   "MAXVAL", "MINVAL", "PLAYERLIST", "SERVERLIST", nullptr};
-// A part is its owner's own widget (its TYPE is not read); a LIST_BOX's sb_edge_pad is the combo's.
-const char *const kPartKeys[] = {"NAME", "FORM", "HIDDEN", "DISABLE", "GLOBAL_VAR", "DRAW_FRAME", "MODAL",
-                                 "CHECKED", "AS_BUTTON", "PASSWORD", "NUMBER", "READONLY", "MAXCHAR", "MAXVAL",
-                                 "MINVAL", "PLAYERLIST", "SERVERLIST", "SB_EDGE_PAD", nullptr};
-const char *const kAppearanceKeys[] = {"STATE", "TYPE", "MAP_STATE", "HEIGHT", "FLAGS", nullptr};
-const char *const kSoundKeys[] = {"STATE", "TRIGGER", nullptr};
-const char *const kActionKeys[] = {"TYPE", "FILE", "@FIELD", "STATE", "TARGET_FORM", "EXTERNAL_BROWSER", "TOGGLE",
-                                   "TEST", nullptr};
-const char *const kHotkeyKeys[] = {"VIRTUAL", nullptr};
-const char *const kStringKeys[] = {"TYPE", "JUSTIFY", "VJUSTIFY", "EDGE", "WRAP", nullptr};
-const char *const kTypeKeys[] = {"TYPE", nullptr};
-const char *const kItemsKeys[] = {"JUSTIFY", "VJUSTIFY", "MULTISELECT", nullptr};
-const char *const kItemKeys[] = {"TYPE", "VALUE", "JUSTIFY", "VJUSTIFY", "PAIRS_LIST", "COLUMN", nullptr};
-const char *const kStencilKeys[] = {"SIZE", "INSETX", "INSETY", nullptr};
-const char *const kColumnKeys[] = {"COUNT", "SPACING", nullptr};
-const char *const kHeaderKeys[] = {"COLUMN", "JUSTIFY", "VJUSTIFY", "SORT", "WIDTH", "TYPE", "@SORT0", "@SORT1",
-                                   "@SORT2", nullptr};
-const char *const kBodyKeys[] = {"COLUMN", "JUSTIFY", "VJUSTIFY", "CUSTOM_DRAW", "BITMAP_DRAW", "BITMAP_TEXT",
-                                 "SCALE_BITMAP", "BITMAP_FLAGS", nullptr};
-const char *const kSubstKeys[] = {"COLUMN", "VALUE", "URL", "FILE", nullptr};
-const char *const kNoKeys[] = {nullptr};
-
-const char *const *vocabulary_of(WrittenKind kind) {
-	switch (kind) {
-	case WrittenKind::Window: return kWindowKeys;
-	case WrittenKind::Part: return kPartKeys;
-	case WrittenKind::Appearance: return kAppearanceKeys;
-	case WrittenKind::Sound: return kSoundKeys;
-	case WrittenKind::Action: return kActionKeys;
-	case WrittenKind::Hotkey: return kHotkeyKeys;
-	case WrittenKind::String: return kStringKeys;
-	case WrittenKind::ToggleString: return kTypeKeys;
-	case WrittenKind::Items: return kItemsKeys;
-	case WrittenKind::Item: return kItemKeys;
-	case WrittenKind::Stencil: return kStencilKeys;
-	case WrittenKind::Column: return kColumnKeys;
-	case WrittenKind::Header: return kHeaderKeys;
-	case WrittenKind::Body: return kBodyKeys;
-	case WrittenKind::Subst: return kSubstKeys;
-	default: return kNoKeys;
-	}
-}
-
-// --- digests -------------------------------------------------------------------------------------
-
-// FNV-1a over the bytes of each part, each part ended by a byte no text holds alone.
-struct Digest {
-	uint64_t h = 1469598103934665603ull;
-	void add(const std::string &s) {
-		for (char c : s) {
-			h ^= static_cast<uint8_t>(c);
-			h *= 1099511628211ull;
-		}
-		h ^= 0xFF;
-		h *= 1099511628211ull;
-	}
-	void add(uint64_t v) {
-		for (int i = 0; i < 8; ++i) {
-			h ^= static_cast<uint8_t>(v >> (8 * i));
-			h *= 1099511628211ull;
-		}
-	}
+// One attribute the writer puts down: ` name="value"`, or ` name` when bare.
+struct WrittenAttribute {
+	std::string name;
+	std::string value;
+	bool bare = false;
+	// What follows the name: `="value"`, or nothing when bare.
+	std::string value_token() const { return bare ? std::string() : "=\"" + value + "\""; }
 };
 
-void digest(WrittenElement &e) {
-	Digest own;
-	own.add(uint64_t(e.kind));
-	own.add(uint64_t(e.form));
-	own.add(e.tag);
-	for (const WrittenAttribute &a : e.attributes) {
-		own.add(a.key);
-		own.add(a.name);
-		own.add(a.value);
-		own.add(uint64_t(a.bare));
-	}
-	own.add(e.text);
-	e.own_digest = own.h;
-	Digest tree;
-	tree.add(e.own_digest);
-	for (WrittenElement &child : e.children) {
-		digest(child);
-		tree.add(child.key);
-		tree.add(child.tree_digest);
-	}
-	e.tree_digest = tree.h;
-}
+// How the writer's layout puts an element down.
+enum class WrittenForm : uint8_t {
+	Leaf,      // its text and its close tag on its line (the text is the model's)
+	Container, // each element in it on a line of its own, then its close tag on its own line
+	Compact,   // its text, then its elements, all on its line (an extra element holding both)
+};
+
+// A record as the element the writer puts down for it.
+struct WrittenElement {
+	std::string tag;
+	WrittenForm form = WrittenForm::Leaf;
+	std::vector<WrittenAttribute> attributes;
+	std::string text; // the model's text (escape_text writes it)
+	std::vector<WrittenElement> children;
+};
+
+// The writer's layout: a line ending and the step each level of elements is indented by (both
+// empty for one line, no indentation).
+struct WrittenStyle {
+	std::string eol;
+	std::string unit;
+};
 
 // --- the writer's words ----------------------------------------------------------------------------
 
 void put(std::vector<WrittenAttribute> &a, const char *name, const std::string &value) {
-	if (!value.empty()) a.push_back({upper(name), name, value, false});
+	if (!value.empty()) a.push_back({name, value, false});
 }
 void put_int(std::vector<WrittenAttribute> &a, const char *name, bool has, int value) {
-	if (has) a.push_back({upper(name), name, std::to_string(value), false});
+	if (has) a.push_back({name, std::to_string(value), false});
 }
 void put_bare(std::vector<WrittenAttribute> &a, const char *name, bool on) {
-	if (on) a.push_back({upper(name), name, std::string(), true});
+	if (on) a.push_back({name, std::string(), true});
 }
 
-std::string list_key(uint64_t source) { return "#" + std::to_string(source); }
-
-WrittenElement element(WrittenKind kind, const std::string &tag, WrittenForm form, std::string key,
-                       std::string list = std::string()) {
+WrittenElement element(const std::string &tag, WrittenForm form) {
 	WrittenElement e;
-	e.kind = kind;
 	e.tag = tag;
 	e.form = form;
-	e.key = std::move(key);
-	e.list = std::move(list);
 	return e;
 }
 
-WrittenElement leaf(const char *tag, const std::string &text, const char *key = nullptr) {
-	WrittenElement e = element(WrittenKind::Plain, tag, WrittenForm::Leaf, key ? key : tag);
+WrittenElement leaf(const char *tag, const std::string &text) {
+	WrittenElement e = element(tag, WrittenForm::Leaf);
 	e.text = text;
 	return e;
-}
-
-// The attributes a parse keeps in order under names that may repeat, each keyed by its name and
-// its place among those of the name.
-void put_kept(std::vector<WrittenAttribute> &out, WrittenKind kind, const std::vector<ElementAttribute> &kept) {
-	std::vector<std::pair<std::string, size_t>> seen;
-	for (const ElementAttribute &a : kept) {
-		const std::string name = upper(a.name);
-		size_t place = 0;
-		auto it = std::find_if(seen.begin(), seen.end(), [&](const auto &s) { return s.first == name; });
-		if (it == seen.end()) seen.emplace_back(name, 1);
-		else place = it->second++;
-		out.push_back({written_key(kind, a.name, place), a.name, a.value, !a.has_value});
-	}
 }
 
 bool is_space_text(const std::string &text) {
@@ -172,8 +83,40 @@ bool is_space_text(const std::string &text) {
 	});
 }
 
+// Whether a window of `type` reads the field or list at `path` (schema_reads): the writer puts down
+// what the window's type reads alone, as the reader keeps it.
+bool reads(WindowType type, const char *path) { return schema_reads(type, path) == SchemaApplies::Reads; }
+
+// A keyword's token as its parse's table spells it (the compare is without case); any other token is
+// none the parse reads (a code it sets nothing by), written as none.
+std::string canon(const std::string &value, const char *const *tokens) {
+	for (const char *const *t = tokens; *t; ++t)
+		if (iequals(value, *t)) return *t;
+	return std::string();
+}
+
+// A number the parse reads with wcstol, written as strtol's decimal of the model's text; "" none.
+std::string decimal(const std::string &value) {
+	if (value.empty()) return value;
+	return std::to_string(static_cast<int>(std::strtol(value.c_str(), nullptr, 10)));
+}
+
+// A JUSTIFY / VJUSTIFY pair: the keyword as its table spells it and, apart, the offset's decimal, a second
+// attribute of the name (the parse keeps the first authored of each kind).
+void put_justification(std::vector<WrittenAttribute> &a, const char *name, const std::string &keyword,
+                       const std::string &offset, const char *const *tokens) {
+	put(a, name, canon(keyword, tokens));
+	put(a, name, decimal(offset));
+}
+
+// A FLAGS word's text where it is not the default (none authored reads the default).
+void put_flags(std::vector<WrittenAttribute> &a, const char *name, uint32_t flags) {
+	if (flags != kDefaultUiMaterialFlags) a.push_back({name, ui_material_flags_text(flags), false});
+}
+
 bool empty_row(const Appearance &a) {
-	return a.state.empty() && a.type.empty() && a.value.empty() && !a.has_map_state && !a.has_height && a.flags.empty();
+	return a.state.empty() && a.type.empty() && a.value.empty() && !a.has_map_state && !a.has_height &&
+	       a.flags == kDefaultUiMaterialFlags;
 }
 
 // Where the writer puts a table sort key so that retail's HEADER walk sets it to the
@@ -217,53 +160,59 @@ public:
 
 private:
 	WrittenElement window(const Window &w, const char *tag, bool part, std::vector<WrittenAttribute> extra = {});
-	void appearance(const Appearance &a, const char *tag, const char *list, std::vector<WrittenElement> &out);
-	WrittenElement item(const Item &i);
-	void items(const Items &items, std::vector<WrittenElement> &out);
+	void appearance(const Appearance &a, const char *tag, std::vector<WrittenElement> &out, bool table = false);
+	WrittenElement item(const Item &i, bool cell, WindowType type);
+	void items(const Items &items, WindowType type, std::vector<WrittenElement> &out);
 	void column(const TableColumn &column, std::vector<WrittenElement> &out);
-	WrittenElement extra(const Element &x, const char *list);
+	void glb_fields(const GlbFields &fields, WrittenElement &out);
+	WrittenElement category(const GopherCategory &category);
+	// The GLB_TABLE browser's tables: their HEADERs carry FIELD.
+	bool glb_header_fields_ = false;
 };
 
-void Words::appearance(const Appearance &a, const char *tag, const char *list, std::vector<WrittenElement> &out) {
+void Words::appearance(const Appearance &a, const char *tag, std::vector<WrittenElement> &out, bool table) {
 	if (empty_row(a)) return; // nothing to write (an element with no attributes stops the parse)
-	WrittenElement e = element(WrittenKind::Appearance, tag, WrittenForm::Leaf, list_key(a.source), list);
-	e.source = a.source;
-	put(e.attributes, "type", a.type);
-	put(e.attributes, "state", a.state);
+	WrittenElement e = element(tag, WrittenForm::Leaf);
+	put(e.attributes, "type", canon(a.type, table ? kTableAppearanceTypes : kAppearanceTypes));
+	put(e.attributes, "state", canon(a.state, kAppearanceStates));
 	put_int(e.attributes, "map_state", a.has_map_state, a.map_state);
 	put_int(e.attributes, "height", a.has_height, a.height);
-	put(e.attributes, "flags", a.flags);
+	put_flags(e.attributes, "flags", a.flags);
 	e.text = a.value;
 	out.push_back(std::move(e));
 }
 
-WrittenElement Words::item(const Item &i) {
-	WrittenElement e = element(WrittenKind::Item, "ITEM", WrittenForm::Leaf, list_key(i.source), "ITEM");
-	e.source = i.source;
-	put(e.attributes, "type", i.type);
-	put(e.attributes, "value", i.value);
-	put(e.attributes, "justify", i.justify);
-	put(e.attributes, "vjustify", i.vjustify);
-	put_bare(e.attributes, "PAIRS_LIST", i.pairs_list);
-	put_int(e.attributes, "column", i.has_column, i.column);
+WrittenElement Words::item(const Item &i, bool cell, WindowType type) {
+	WrittenElement e = element("ITEM", WrittenForm::Leaf);
+	put(e.attributes, "type", canon(i.type, item_types_for(type, cell)));
+	const std::string value = decimal(i.value);
+	put(e.attributes, "value", value == "0" ? std::string() : value);
+	put_justification(e.attributes, "justify", i.justify, i.justify_offset, kJustify);
+	put_justification(e.attributes, "vjustify", i.vjustify, i.vjustify_offset, kVJustify);
+	put_bare(e.attributes, "PAIRS_LIST", !cell && reads(type, "items.item.pairs_list") && i.pairs_list);
+	if (cell) put_int(e.attributes, "column", i.has_column, i.column);
 	e.text = i.text;
 	return e;
 }
 
-void Words::items(const Items &items, std::vector<WrittenElement> &out) {
-	if (!items.present) return;
-	WrittenElement e = element(WrittenKind::Items, "ITEMS", WrittenForm::Container, "ITEMS");
-	put(e.attributes, "justify", items.justify);
-	put(e.attributes, "vjustify", items.vjustify);
-	put_bare(e.attributes, "MULTISELECT", items.multiselect);
-	for (const Appearance &a : items.appearances) appearance(a, "APPEARANCE", "APPEARANCE", e.children);
-	for (const Item &i : items.items) e.children.push_back(item(i));
-	for (const TableRow &row : items.rows) {
-		WrittenElement r = element(WrittenKind::Row, "ROW", WrittenForm::Container, list_key(row.source), "ROW");
-		r.source = row.source;
-		for (const Item &cell : row.cells) r.children.push_back(item(cell));
-		e.children.push_back(std::move(r));
+void Words::items(const Items &items, WindowType type, std::vector<WrittenElement> &out) {
+	if (!items.present || !reads(type, "items")) return;
+	WrittenElement e = element("ITEMS", WrittenForm::Container);
+	if (reads(type, "items.justify")) {
+		put_justification(e.attributes, "justify", items.justify, items.justify_offset, kJustify);
+		put_justification(e.attributes, "vjustify", items.vjustify, items.vjustify_offset, kVJustify);
 	}
+	put_bare(e.attributes, "MULTISELECT", reads(type, "items.multiselect") && items.multiselect);
+	if (reads(type, "items.appearance"))
+		for (const Appearance &a : items.appearances) appearance(a, "APPEARANCE", e.children, type == WindowType::Table);
+	if (reads(type, "items.item"))
+		for (const Item &i : items.items) e.children.push_back(item(i, false, type));
+	if (reads(type, "items.row"))
+		for (const TableRow &row : items.rows) {
+			WrittenElement r = element("ROW", WrittenForm::Container);
+			for (const Item &cell : row.cells) r.children.push_back(item(cell, true, type));
+			e.children.push_back(std::move(r));
+		}
 	out.push_back(std::move(e));
 }
 
@@ -272,37 +221,35 @@ void Words::column(const TableColumn &c, std::vector<WrittenElement> &out) {
 	const bool keys = places[0].slot || places[1].slot || places[2].slot;
 	if (!c.has_count && !c.has_spacing && c.headers.empty() && c.bodies.empty() && c.substitutions.empty() && !keys)
 		return;
-	WrittenElement e = element(WrittenKind::Column, "COLUMN", WrittenForm::Container, "COLUMN");
+	WrittenElement e = element("COLUMN", WrittenForm::Container);
 	put_int(e.attributes, "count", c.has_count, c.count);
 	put_int(e.attributes, "spacing", c.has_spacing, c.spacing);
-	const char *const key_tokens[] = {c.primary_sort_token.empty() ? kPrimarySortTokens[0] : c.primary_sort_token.c_str(),
-	                                  "SECONDARY_SORT", "TERTIARY_SORT"};
+	const char *const key_tokens[] = {kPrimarySortTokens[0], "SECONDARY_SORT", "TERTIARY_SORT"};
 	for (size_t i = 0; i < c.headers.size(); ++i) {
 		const TableHeader &h = c.headers[i];
-		WrittenElement header = element(WrittenKind::Header, "HEADER", WrittenForm::Leaf, list_key(h.source), "HEADER");
-		header.source = h.source;
+		WrittenElement header = element("HEADER", WrittenForm::Leaf);
 		// A sort key written before COLUMN takes this HEADER's index, one written after it
 		// the index before (the walk runs last authored first).
 		std::vector<WrittenAttribute> before, after;
 		for (int k = 0; k < 3; ++k)
 			if (places[k].slot && places[k].placed && places[k].header == i)
-				(places[k].own ? before : after).push_back({"@SORT" + std::to_string(k), key_tokens[k], std::string(), true});
-		put(header.attributes, "justify", h.justify);
-		put(header.attributes, "vjustify", h.vjustify);
+				(places[k].own ? before : after).push_back({key_tokens[k], std::string(), true});
+		put(header.attributes, "justify", canon(h.justify, kJustify));
+		put(header.attributes, "vjustify", canon(h.vjustify, kVJustify));
 		header.attributes.insert(header.attributes.end(), before.begin(), before.end());
 		put_int(header.attributes, "column", h.has_column, h.column);
 		header.attributes.insert(header.attributes.end(), after.begin(), after.end());
-		put(header.attributes, "sort", h.sort);
+		put(header.attributes, "sort", h.sort == "1" ? "1" : !h.sort.empty() && (h.sort[0] == 'A' || h.sort[0] == 'a') ? "A" : "");
 		put_int(header.attributes, "width", h.has_width, h.width);
-		put(header.attributes, "type", h.type);
+		put(header.attributes, "type", canon(h.type, kStringTypes));
+		if (glb_header_fields_) put(header.attributes, "FIELD", h.field);
 		header.text = h.text;
 		e.children.push_back(std::move(header));
 	}
 	for (const TableBody &b : c.bodies) {
-		WrittenElement body = element(WrittenKind::Body, "BODY", WrittenForm::Leaf, list_key(b.source), "BODY");
-		body.source = b.source;
-		put(body.attributes, "justify", b.justify);
-		put(body.attributes, "vjustify", b.vjustify);
+		WrittenElement body = element("BODY", WrittenForm::Leaf);
+		put_justification(body.attributes, "justify", b.justify, b.justify_offset, kJustify);
+		put_justification(body.attributes, "vjustify", b.vjustify, b.vjustify_offset, kVJustify);
 		put_int(body.attributes, "column", b.has_column, b.column);
 		// The draw kind retail keeps is the first authored of the three: written first.
 		const bool on[] = {b.custom_draw, b.bitmap_draw, b.bitmap_text};
@@ -310,13 +257,12 @@ void Words::column(const TableColumn &c, std::vector<WrittenElement> &out) {
 			if (on[k] && iequals(b.display, kBodyDisplays[k])) put_bare(body.attributes, kBodyDisplays[k], true);
 		for (int k = 0; k < 3; ++k)
 			if (on[k] && !iequals(b.display, kBodyDisplays[k])) put_bare(body.attributes, kBodyDisplays[k], true);
-		put(body.attributes, "BITMAP_FLAGS", b.bitmap_flags);
+		put_flags(body.attributes, "BITMAP_FLAGS", b.bitmap_flags);
 		put_bare(body.attributes, "SCALE_BITMAP", b.scale_bitmap);
 		e.children.push_back(std::move(body));
 	}
 	for (const TableSubst &s : c.substitutions) {
-		WrittenElement subst = element(WrittenKind::Subst, "SUBST", WrittenForm::Leaf, list_key(s.source), "SUBST");
-		subst.source = s.source;
+		WrittenElement subst = element("SUBST", WrittenForm::Leaf);
 		put_int(subst.attributes, "column", s.has_column, s.column);
 		put(subst.attributes, "value", s.value);
 		put_bare(subst.attributes, "URL", s.is_url);
@@ -327,67 +273,88 @@ void Words::column(const TableColumn &c, std::vector<WrittenElement> &out) {
 	out.push_back(std::move(e));
 }
 
-WrittenElement Words::extra(const Element &x, const char *list) {
-	// Text beside child elements is written compact, so no layout whitespace joins it.
-	const WrittenForm form = x.children.empty()        ? WrittenForm::Leaf
-	                         : !is_space_text(x.text) ? WrittenForm::Compact
-	                                                  : WrittenForm::Container;
-	WrittenElement e = element(WrittenKind::Element, x.tag, form, list_key(x.source), list);
-	e.source = x.source;
-	put_kept(e.attributes, WrittenKind::Element, x.attributes);
-	e.text = x.text;
-	for (const Element &child : x.children) e.children.push_back(extra(child, "ELEMENT"));
+// [orig: CLanGameBrowser_ParseXMLFieldDefinitions @ 0x65d850] count, the FORMAT (CR and LF as the \r
+// and \n pairs the parse reads them from), each slot's FIELD.
+void Words::glb_fields(const GlbFields &fields, WrittenElement &out) {
+	if (!fields.present) return;
+	WrittenElement e = element("FIELDS", WrittenForm::Container);
+	put_int(e.attributes, "count", fields.has_count, fields.count);
+	if (fields.has_format) {
+		std::string text;
+		for (const char c : fields.format) text += c == '\r' ? std::string("\\r") : c == '\n' ? std::string("\\n") : std::string(1, c);
+		e.children.push_back(leaf("FORMAT", text));
+	}
+	for (const GlbFieldSlot &f : fields.fields) {
+		WrittenElement field = element("FIELD", WrittenForm::Leaf);
+		put_int(field.attributes, "which", true, f.which);
+		field.text = f.text;
+		e.children.push_back(std::move(field));
+	}
+	out.children.push_back(std::move(e));
+}
+
+// [orig: CGopherWnd_ParseCategoryXML @ 0x65a540] LEVEL; LABEL (the category static's elements), the
+// ITEM and INFO rows.
+WrittenElement Words::category(const GopherCategory &c) {
+	WrittenElement e = element("CATEGORY", WrittenForm::Container);
+	if (c.has_level) put(e.attributes, "LEVEL", c.level);
+	if (c.label) e.children.push_back(window(*c.label, "LABEL", true));
+	for (const GopherEntry &entry : c.entries) {
+		WrittenElement row = element(entry.info ? "INFO" : "ITEM", WrittenForm::Leaf);
+		put(row.attributes, "NAME", entry.name);
+		if (!entry.info) put(row.attributes, "TARGET", entry.target);
+		put(row.attributes, "FILTER", entry.filter);
+		put(row.attributes, "TABLE", entry.table);
+		row.text = entry.text;
+		e.children.push_back(std::move(row));
+	}
 	return e;
 }
 
 WrittenElement Words::window(const Window &w, const char *tag, bool part, std::vector<WrittenAttribute> extra_attributes) {
-	const WrittenKind kind = part ? WrittenKind::Part : WrittenKind::Window;
-	WrittenElement e = element(kind, tag, WrittenForm::Container, part ? std::string(tag) : list_key(w.source),
-	                           part ? std::string() : std::string("WINDOW"));
-	e.source = w.source;
+	WrittenElement e = element(tag, WrittenForm::Container);
 	e.attributes = std::move(extra_attributes);
-	if (!part) put(e.attributes, "type", w.type_token.empty() ? window_type_name(w.type) : w.type_token);
+	// The type's own name [orig: CUIScene_CreateWidgetByType @ 0x64f630 matches it without case].
+	if (!part) put(e.attributes, "type", window_type_name(w.type));
+	const bool edit = reads(w.type, "password");
 	put(e.attributes, "name", w.name);
 	put_bare(e.attributes, "DRAW_FRAME", w.draw_frame);
 	put_bare(e.attributes, "HIDDEN", w.hidden);
 	put_bare(e.attributes, "MODAL", w.modal);
-	put_bare(e.attributes, "READONLY", w.readonly);
+	put_bare(e.attributes, "READONLY", edit && w.readonly);
 	put_bare(e.attributes, "DISABLE", w.disabled);
-	put_bare(e.attributes, "CHECKED", w.checked);
-	put_bare(e.attributes, "AS_BUTTON", w.as_button);
-	put_bare(e.attributes, "NUMBER", w.number);
-	put_int(e.attributes, "MINVAL", w.has_minval, w.minval);
-	put_int(e.attributes, "MAXVAL", w.has_maxval, w.maxval);
-	put_int(e.attributes, "MAXCHAR", w.has_maxchar, w.maxchar);
+	put_bare(e.attributes, "CHECKED", reads(w.type, "checked") && w.checked);
+	put_bare(e.attributes, "AS_BUTTON", reads(w.type, "as_button") && w.as_button);
+	put_bare(e.attributes, "NUMBER", edit && w.number);
+	put_int(e.attributes, "MINVAL", edit && w.has_minval, w.minval);
+	put_int(e.attributes, "MAXVAL", edit && w.has_maxval, w.maxval);
+	put_int(e.attributes, "MAXCHAR", edit && w.has_maxchar, w.maxchar);
 	put_bare(e.attributes, "GLOBAL_VAR", w.global_var);
-	put_bare(e.attributes, "PASSWORD", w.password);
+	put_bare(e.attributes, "PASSWORD", edit && w.password);
 	put_int(e.attributes, "FORM", w.has_form, w.form);
-	put_kept(e.attributes, kind, w.extra_attributes);
+	put_bare(e.attributes, "PLAYERLIST", reads(w.type, "glb_playerlist") && w.glb_playerlist);
 	window_elements(w, e.children);
 	return e;
 }
 
 void Words::window_elements(const Window &w, std::vector<WrittenElement> &out) {
-	if (w.has_group) out.push_back(leaf("GROUP", std::to_string(w.group)));
+	const WindowType t = w.type;
+	if (w.has_group && reads(t, "group")) out.push_back(leaf("GROUP", std::to_string(w.group)));
 	for (const Hotkey &h : w.hotkeys) {
-		WrittenElement e = element(WrittenKind::Hotkey, "HOTKEY", WrittenForm::Leaf, list_key(h.source), "HOTKEY");
-		e.source = h.source;
+		WrittenElement e = element("HOTKEY", WrittenForm::Leaf);
 		put_bare(e.attributes, "VIRTUAL", h.virtual_key);
 		e.text = h.value;
 		out.push_back(std::move(e));
 	}
 	for (const Action &a : w.actions) {
-		WrittenElement e = element(WrittenKind::Action, "ACTION", WrittenForm::Leaf, list_key(a.source), "ACTION");
-		e.source = a.source;
-		put(e.attributes, "type", a.type);
-		put(e.attributes, "state", a.state);
+		WrittenElement e = element("ACTION", WrittenForm::Leaf);
+		put(e.attributes, "type", canon(a.type, kActionTypes));
+		put(e.attributes, "state", canon(a.state, kActionStates));
 		put(e.attributes, "file", a.file);
-		if (!a.field.empty())
-			e.attributes.push_back({"@FIELD", a.field_attr.empty() ? std::string(kActionFieldAttributes[0]) : a.field_attr,
-			                        a.field, false});
+		if (!a.field.empty()) e.attributes.push_back({kActionFieldAttributes[0], a.field, false});
 		put_int(e.attributes, "target_form", a.has_target_form, a.target_form);
 		put_bare(e.attributes, "TOGGLE", a.toggle);
-		put(e.attributes, "test", a.test);
+		put(e.attributes, "test", canon(a.test, kActionTests + 1)); // LT is the parse's 0, as none
 		put_bare(e.attributes, "EXTERNAL_BROWSER", a.external_browser);
 		e.text = a.target;
 		out.push_back(std::move(e));
@@ -395,9 +362,9 @@ void Words::window_elements(const Window &w, std::vector<WrittenElement> &out) {
 	const Frame &f = w.frame;
 	const bool has_stencil = !f.stencil.empty() || f.has_stencil_size || f.has_insetx || f.has_insety;
 	if (has_stencil || !f.brush.empty() || !f.monogram.empty()) {
-		WrittenElement frame = element(WrittenKind::Plain, "FRAME", WrittenForm::Container, "FRAME");
+		WrittenElement frame = element("FRAME", WrittenForm::Container);
 		if (has_stencil) {
-			WrittenElement stencil = element(WrittenKind::Stencil, "STENCIL", WrittenForm::Leaf, "STENCIL");
+			WrittenElement stencil = element("STENCIL", WrittenForm::Leaf);
 			put_int(stencil.attributes, "size", f.has_stencil_size, f.stencil_size);
 			put_int(stencil.attributes, "insetx", f.has_insetx, f.insetx);
 			put_int(stencil.attributes, "insety", f.has_insety, f.insety);
@@ -410,43 +377,41 @@ void Words::window_elements(const Window &w, std::vector<WrittenElement> &out) {
 	}
 	const Position &pos = w.position;
 	if (pos.has_left || pos.has_top || pos.has_right || pos.has_bottom) {
-		WrittenElement position = element(WrittenKind::Position, "POSITION", WrittenForm::Container, "POSITION");
+		WrittenElement position = element("POSITION", WrittenForm::Container);
 		const std::pair<const char *, std::pair<bool, int>> edges[] = {{"LEFT", {pos.has_left, pos.left}},
 		                                                                {"TOP", {pos.has_top, pos.top}},
 		                                                                {"RIGHT", {pos.has_right, pos.right}},
 		                                                                {"BOTTOM", {pos.has_bottom, pos.bottom}}};
 		for (const auto &edge : edges) {
 			if (!edge.second.first) continue;
-			WrittenElement e = leaf(edge.first, std::to_string(edge.second.second));
-			e.kind = WrittenKind::Edge;
-			position.children.push_back(std::move(e));
+			position.children.push_back(leaf(edge.first, std::to_string(edge.second.second)));
 		}
 		out.push_back(std::move(position));
 	}
-	if (w.has_scroll_extent)
-		out.push_back(leaf(w.scroll_extent_is_width ? "WIDTH" : "HEIGHT", std::to_string(w.scroll_extent), "SCROLL_EXTENT"));
-	if (!w.orientation.empty()) out.push_back(leaf("ORIENTATION", w.orientation));
-	for (const Appearance &a : w.appearances) appearance(a, "APPEARANCE", "APPEARANCE", out);
-	for (const Appearance &a : w.shuttle) appearance(a, "SHUTTLE", "SHUTTLE", out);
-	for (const Appearance &a : w.scrollup) appearance(a, "SCROLLUP", "SCROLLUP", out);
-	for (const Appearance &a : w.scrolldown) appearance(a, "SCROLLDOWN", "SCROLLDOWN", out);
-	if (w.has_text_rsrc) out.push_back(leaf("TEXT_RSRC", w.text_rsrc));
-	for (size_t i = 0; i < w.datasources.size(); ++i) {
-		WrittenElement e = leaf("DATASOURCE", w.datasources[i]);
-		e.key = "DATASOURCE#" + std::to_string(i);
-		e.list = "DATASOURCE";
-		out.push_back(std::move(e));
+	const bool scroll = reads(t, "shuttle");
+	if (scroll && w.has_scroll_extent)
+		out.push_back(leaf(w.scroll_extent_is_width ? "WIDTH" : "HEIGHT", std::to_string(w.scroll_extent)));
+	if (scroll && !w.orientation.empty()) out.push_back(leaf("ORIENTATION", w.orientation));
+	for (const Appearance &a : w.appearances) appearance(a, "APPEARANCE", out);
+	if (scroll) {
+		for (const Appearance &a : w.shuttle) appearance(a, "SHUTTLE", out);
+		for (const Appearance &a : w.scrollup) appearance(a, "SCROLLUP", out);
+		for (const Appearance &a : w.scrolldown) appearance(a, "SCROLLDOWN", out);
 	}
+	if (w.has_text_rsrc) out.push_back(leaf("TEXT_RSRC", w.text_rsrc));
+	if (reads(t, "datasource"))
+		for (const std::string &datasource : w.datasources) out.push_back(leaf("DATASOURCE", datasource));
 	if (!w.private_data.empty()) out.push_back(leaf("PRIVATE_DATA", w.private_data));
-	if (!w.cursor.file.empty() || !w.cursor.flags.empty()) {
-		WrittenElement cursor = element(WrittenKind::Plain, "CURSOR", WrittenForm::Container, "CURSOR");
+	if (!w.cursor.file.empty() || w.cursor.flags != kDefaultUiMaterialFlags) {
+		WrittenElement cursor = element("CURSOR", WrittenForm::Container);
 		if (!w.cursor.file.empty()) cursor.children.push_back(leaf("FILE", w.cursor.file));
-		if (!w.cursor.flags.empty()) cursor.children.push_back(leaf("FLAGS", w.cursor.flags));
+		if (w.cursor.flags != kDefaultUiMaterialFlags)
+			cursor.children.push_back(leaf("FLAGS", ui_material_flags_text(w.cursor.flags)));
 		out.push_back(std::move(cursor));
 	}
 	const Font &font = w.font;
 	if (!font.empty()) {
-		WrittenElement e = element(WrittenKind::Plain, "FONT", WrittenForm::Container, "FONT");
+		WrittenElement e = element("FONT", WrittenForm::Container);
 		const std::pair<const char *, const std::string *> slots[] = {
 		    {"NAME", &font.name},
 		    {"DEFAULT_FG", &font.default_fg},
@@ -463,56 +428,130 @@ void Words::window_elements(const Window &w, std::vector<WrittenElement> &out) {
 		out.push_back(std::move(e));
 	}
 	const String &s = w.string_data;
-	if (s.present) {
-		WrittenElement e = element(WrittenKind::String, "STRING", WrittenForm::Leaf, "STRING");
-		put(e.attributes, "type", s.type);
-		put(e.attributes, "justify", s.justify);
-		put(e.attributes, "vjustify", s.vjustify);
+	if (s.present && reads(t, "string")) {
+		WrittenElement e = element("STRING", WrittenForm::Leaf);
+		put(e.attributes, "type", canon(s.type, kStringTypes));
+		put_justification(e.attributes, "justify", s.justify, s.justify_offset, kJustify);
+		put_justification(e.attributes, "vjustify", s.vjustify, s.vjustify_offset, kVJustify);
 		put_int(e.attributes, "edge", s.has_edge, s.edge);
 		put_bare(e.attributes, "WRAP", s.wrap);
 		e.text = s.value;
 		out.push_back(std::move(e));
 	}
-	if (w.toggle_string.present) {
-		WrittenElement e = element(WrittenKind::ToggleString, "TOGGLE_STRING", WrittenForm::Leaf, "TOGGLE_STRING");
-		put(e.attributes, "type", w.toggle_string.type);
+	if (w.toggle_string.present && reads(t, "toggle_string")) {
+		WrittenElement e = element("TOGGLE_STRING", WrittenForm::Leaf);
+		put(e.attributes, "type", canon(w.toggle_string.type, kStringTypes));
 		e.text = w.toggle_string.value;
 		out.push_back(std::move(e));
 	}
 	for (const Sound &snd : w.sounds) {
-		WrittenElement e = element(WrittenKind::Sound, "SOUND", WrittenForm::Leaf, list_key(snd.source), "SOUND");
-		e.source = snd.source;
-		put(e.attributes, "state", snd.state);
+		WrittenElement e = element("SOUND", WrittenForm::Leaf);
+		put(e.attributes, "state", canon(snd.state, kSoundStates));
 		put(e.attributes, "trigger", snd.trigger);
 		e.text = snd.file;
 		out.push_back(std::move(e));
 	}
-	items(w.items, out);
+	items(w.items, t, out);
 	// The combo's sb_edge_pad rides on the LIST_BOX element with the list's own attributes.
-	if (w.list_box) {
+	if (w.list_box && reads(t, "list_box")) {
 		std::vector<WrittenAttribute> pad;
 		put_int(pad, "sb_edge_pad", w.has_sb_edge_pad, w.sb_edge_pad);
 		out.push_back(window(*w.list_box, "LIST_BOX", true, std::move(pad)));
 	}
-	if (w.spinup) out.push_back(window(*w.spinup, "SPINUP", true));
-	if (w.spindown) out.push_back(window(*w.spindown, "SPINDOWN", true));
-	column(w.table_data.column, out);
-	if (w.table_data.has_min_item_height)
+	if (w.spinup && reads(t, "spinup")) out.push_back(window(*w.spinup, "SPINUP", true));
+	if (w.spindown && reads(t, "spindown")) out.push_back(window(*w.spindown, "SPINDOWN", true));
+	if (reads(t, "column")) column(w.table_data.column, out);
+	if (w.table_data.has_min_item_height && reads(t, "min_item_height"))
 		out.push_back(leaf("MIN_ITEM_HEIGHT", std::to_string(w.table_data.min_item_height)));
-	if (w.table_data.has_fixed_header_height)
+	if (w.table_data.has_fixed_header_height && reads(t, "fixed_header_height"))
 		out.push_back(leaf("FIXED_HEADER_HEIGHT", std::to_string(w.table_data.fixed_header_height)));
-	if (w.scrollbar) out.push_back(window(*w.scrollbar, "SCROLLBAR", true));
-	for (const Element &x : w.extras) out.push_back(extra(x, "EXTRA"));
+	if (w.scrollbar && reads(t, "scrollbar")) out.push_back(window(*w.scrollbar, "SCROLLBAR", true));
+	if (w.join_button && reads(t, "join_button")) out.push_back(window(*w.join_button, "JOIN_BUTTON", true));
+	if (w.search_button && reads(t, "search_button")) out.push_back(window(*w.search_button, "SEARCH_BUTTON", true));
+	if (reads(t, "glb_table")) {
+		const bool saved = glb_header_fields_;
+		glb_header_fields_ = true;
+		if (w.glb_table) out.push_back(window(*w.glb_table, "GLB_TABLE", true));
+		if (w.glb_info_player_details) out.push_back(window(*w.glb_info_player_details, "GLB_INFO_PLAYER_DETAILS", true));
+		glb_header_fields_ = saved;
+		if (w.glb_info_button) out.push_back(window(*w.glb_info_button, "GLB_INFO_BUTTON", true));
+		if (w.glb_info_server_details) {
+			WrittenElement details = window(*w.glb_info_server_details, "GLB_INFO_SERVER_DETAILS", true);
+			glb_fields(w.glb_server_fields, details);
+			out.push_back(std::move(details));
+		}
+		if (w.glb_nw_info) out.push_back(window(*w.glb_nw_info, "GLB_NW_INFO", true));
+		if (w.has_glb_target) out.push_back(leaf("TARGET", w.glb_target));
+	}
+	if (reads(t, "gopher_targets"))
+		for (const std::string &target : w.gopher_targets) out.push_back(leaf("TARGET", target));
+	if (reads(t, "gopher_categories") && !w.gopher_categories.empty()) {
+		WrittenElement filters = element("FILTERS", WrittenForm::Container);
+		for (const GopherCategory &c : w.gopher_categories) filters.children.push_back(category(c));
+		out.push_back(std::move(filters));
+	}
+	if (w.gopher_back && reads(t, "gopher_back")) out.push_back(window(*w.gopher_back, "GOPHER_BACK", true));
 	for (const Window &child : w.children) out.push_back(window(child, "WINDOW", false));
 }
 
 WrittenElement Words::screen(const Screen &s) {
-	WrittenElement e = element(WrittenKind::Screen, "SCREEN", WrittenForm::Container, list_key(s.source), "SCREEN");
-	e.source = s.source;
+	WrittenElement e = element("SCREEN", WrittenForm::Container);
 	if (!s.name.empty()) e.children.push_back(leaf("NAME", s.name));
 	if (s.has_music_var) e.children.push_back(leaf("MUSICVAR", std::to_string(s.music_var)));
 	for (const Window &root : s.roots) e.children.push_back(window(root, "WINDOW", false));
 	return e;
+}
+
+// The writer's words for each screen of a document.
+std::vector<WrittenElement> written_screens(const Document &doc) {
+	Words words;
+	std::vector<WrittenElement> out;
+	out.reserve(doc.screens.size());
+	for (const Screen &s : doc.screens) out.push_back(words.screen(s));
+	return out;
+}
+
+// The open tag of an element: `<TAG attributes...>`.
+std::string written_open_tag(const WrittenElement &e) {
+	std::string out = "<" + e.tag;
+	for (const WrittenAttribute &a : e.attributes) out += " " + a.name + a.value_token();
+	return out + ">";
+}
+
+void render_written_content(const WrittenElement &e, const WrittenStyle &style, const std::string &indent,
+                            std::string &out);
+
+// An element in the writer's layout; `indent` is what stands before its own first line, so each
+// element in it goes on a new line at `indent` and one `unit` more.
+void render_written(const WrittenElement &e, const WrittenStyle &style, const std::string &indent, std::string &out) {
+	out += written_open_tag(e);
+	render_written_content(e, style, indent, out);
+	out += "</" + e.tag + ">";
+}
+
+// What stands between an element's open and close tags.
+void render_written_content(const WrittenElement &e, const WrittenStyle &style, const std::string &indent,
+                            std::string &out) {
+	switch (e.form) {
+	case WrittenForm::Leaf: out += escape_text(e.text); break;
+	case WrittenForm::Compact: {
+		out += escape_text(e.text);
+		const WrittenStyle one_line;
+		for (const WrittenElement &child : e.children) render_written(child, one_line, std::string(), out);
+		break;
+	}
+	case WrittenForm::Container: {
+		const std::string inner = indent + style.unit;
+		for (const WrittenElement &child : e.children) {
+			out += style.eol;
+			out += inner;
+			render_written(child, style, inner, out);
+		}
+		out += style.eol;
+		out += indent;
+		break;
+	}
+	}
 }
 
 // --- write issues ------------------------------------------------------------
@@ -525,7 +564,12 @@ bool known(const std::string &value, const char *const *tokens) { return known_t
 
 // Whether the writer puts any child element in a window (retail creates no WINDOW
 // without one; a part without one crashes it).
-bool writes_elements(const Window &w) { return !written_window_elements(w).empty(); }
+bool writes_elements(const Window &w) {
+	Words words;
+	std::vector<WrittenElement> out;
+	words.window_elements(w, out);
+	return !out.empty();
+}
 
 // Each issue names the record that holds the value by its lists' element paths and the
 // field by its element path (WriteIssue::locator; the names the editor's menu table
@@ -549,7 +593,13 @@ private:
 	void rows(const std::string &window, const std::string &owner, const char *list, const char *tag,
 	          const std::vector<Appearance> &rows, bool read);
 	void window(const Window &w, const std::string &locator, const char *tag, bool part);
-	void element(const std::string &window, const std::string &locator, const Element &e);
+	// A FLAGS word the table's names cannot spell (a bit no row holds).
+	void flags(const std::string &window, const std::string &locator, const std::string &field, uint32_t word) {
+		if (word != kDefaultUiMaterialFlags && ui_material_flags_text(word).empty())
+			add(window, locator, field,
+			    field + " holds a bit no flag name of the game's table sets: no FLAGS text reads it, so it cannot be "
+			            "saved.");
+	}
 	static std::string at(const std::string &owner, const char *list, size_t index) {
 		return owner + "/" + list + ":" + std::to_string(index);
 	}
@@ -566,7 +616,7 @@ void IssueCheck::rows(const std::string &window, const std::string &owner, const
 		const std::string locator = at(owner, list, i);
 		value(window, locator, "type", a.type);
 		value(window, locator, "state", a.state);
-		value(window, locator, "flags", a.flags);
+		flags(window, locator, "flags", a.flags);
 		if (read && !known(a.state, kAppearanceStates))
 			add(window, locator, "state",
 			    std::string("An ") + tag + " with no STATE retail knows (DEFAULT, DISABLED, MOUSEOVER, SELECTED) stops "
@@ -574,14 +624,8 @@ void IssueCheck::rows(const std::string &window, const std::string &owner, const
 	}
 }
 
-void IssueCheck::element(const std::string &window, const std::string &locator, const Element &e) {
-	for (size_t i = 0; i < e.attributes.size(); ++i) value(window, at(locator, "attribute", i), "value", e.attributes[i].value);
-	for (size_t i = 0; i < e.children.size(); ++i) element(window, at(locator, "element", i), e.children[i]);
-}
-
 void IssueCheck::window(const Window &w, const std::string &locator, const char *tag, bool part) {
 	const std::string &name = w.name;
-	if (!part) value(name, locator, "type", w.type_token);
 	value(name, locator, "name", w.name);
 	if (!writes_elements(w)) {
 		if (part)
@@ -645,13 +689,14 @@ void IssueCheck::window(const Window &w, const std::string &locator, const char 
 		value(name, row, "vjustify", h.vjustify);
 		value(name, row, "sort", h.sort);
 		value(name, row, "type", h.type);
+		value(name, row, "field", h.field);
 	}
 	for (size_t i = 0; i < column.bodies.size(); ++i) {
 		const TableBody &b = column.bodies[i];
 		const std::string row = at(locator, "column.body", i);
 		value(name, row, "justify", b.justify);
 		value(name, row, "vjustify", b.vjustify);
-		value(name, row, "bitmap_flags", b.bitmap_flags);
+		flags(name, row, "bitmap_flags", b.bitmap_flags);
 	}
 	for (size_t i = 0; i < column.substitutions.size(); ++i)
 		value(name, at(locator, "column.subst", i), "value", column.substitutions[i].value);
@@ -662,9 +707,46 @@ void IssueCheck::window(const Window &w, const std::string &locator, const char 
 			add(name, locator, keys[k],
 			    "A table sort key names a column no HEADER's index reaches, so no HEADER can carry it: it cannot be "
 			    "saved.");
-	for (size_t i = 0; i < w.extra_attributes.size(); ++i)
-		value(name, at(locator, "attribute", i), "value", w.extra_attributes[i].value);
-	for (size_t i = 0; i < w.extras.size(); ++i) element(name, at(locator, "element", i), w.extras[i]);
+	flags(name, locator, "cursor.flags", w.cursor.flags);
+	// The GLB_TABLE's FIELDS: a FIELD with no count, or at the count, writes past the browser's slots.
+	const GlbFields &glb = w.glb_server_fields;
+	for (size_t i = 0; glb.present && i < glb.fields.size(); ++i) {
+		const GlbFieldSlot &f = glb.fields[i];
+		if (!glb.has_count || f.which < 0 || f.which >= glb.count)
+			add(name, at(locator, "glb_server_fields.field", i), "which",
+			    "A FIELD slot outside 0 to one less than the count writes past the browser's slots in retail.");
+	}
+	if (glb.has_format && (glb.format.find("\\r") != std::string::npos || glb.format.find("\\n") != std::string::npos))
+		add(name, locator, "glb_server_fields.format",
+		    "A FORMAT holding a backslash before r or n reads back as a line break: it cannot be saved.");
+	for (size_t i = 0; i < w.gopher_categories.size(); ++i) {
+		const GopherCategory &c = w.gopher_categories[i];
+		const std::string row = at(locator, "gopher_category", i);
+		value(name, row, "level", c.level);
+		if (!c.label && c.entries.empty())
+			add(name, row, "", "An empty CATEGORY crashes retail (its parse reads no element).");
+		for (size_t e = 0; e < c.entries.size(); ++e) {
+			const GopherEntry &entry = c.entries[e];
+			const std::string at_entry = at(row, "entry", e);
+			value(name, at_entry, "name", entry.name);
+			value(name, at_entry, "target", entry.target);
+			value(name, at_entry, "filter", entry.filter);
+			value(name, at_entry, "table", entry.table);
+		}
+		if (c.label) window(*c.label, at(row, "label", 0), "LABEL", true);
+	}
+	const std::pair<const WindowPart *, const char *> typed_parts[] = {
+	        {&w.join_button, "JOIN_BUTTON"},
+	        {&w.search_button, "SEARCH_BUTTON"},
+	        {&w.glb_table, "GLB_TABLE"},
+	        {&w.glb_info_button, "GLB_INFO_BUTTON"},
+	        {&w.glb_info_player_details, "GLB_INFO_PLAYER_DETAILS"},
+	        {&w.glb_info_server_details, "GLB_INFO_SERVER_DETAILS"},
+	        {&w.glb_nw_info, "GLB_NW_INFO"},
+	        {&w.gopher_back, "GOPHER_BACK"},
+	};
+	for (const auto &[part, part_tag] : typed_parts)
+		if (*part) window(**part, at(locator, strutil::to_lower(part_tag).c_str(), 0), part_tag, true);
 	// [orig: CTableWnd_RecalcLayout @ 0x63f1a0, idiv @ 0x63f26b]
 	if (w.type == WindowType::Table && w.table_data.has_min_item_height && w.table_data.min_item_height == 0)
 		add(name, locator, "min_item_height", "MIN_ITEM_HEIGHT 0 divides by zero when retail creates the table.");
@@ -701,81 +783,6 @@ WrittenStyle canonical_style(bool pretty, int indent_size) {
 
 } // namespace
 
-// --- the writer's words, public to the library -----------------------------------------------------
-
-bool written_vocabulary(WrittenKind kind, const std::string &key) {
-	if (kind == WrittenKind::Element) return true;
-	return in_list(key.substr(0, key.find('#')), vocabulary_of(kind));
-}
-
-std::string written_key(WrittenKind kind, const std::string &name, size_t place) {
-	const std::string up = upper(name);
-	if (kind == WrittenKind::Action && in_list(up, kActionFieldAttributes)) return "@FIELD";
-	if (kind == WrittenKind::Header) {
-		if (in_list(up, kPrimarySortTokens)) return "@SORT0";
-		if (up == "SECONDARY_SORT") return "@SORT1";
-		if (up == "TERTIARY_SORT") return "@SORT2";
-	}
-	if (kind == WrittenKind::Element || ((kind == WrittenKind::Window || kind == WrittenKind::Part) &&
-	                                     in_list(up, kExtraAttributes)))
-		return up + "#" + std::to_string(place);
-	return up;
-}
-
-std::vector<WrittenElement> written_screens(const Document &doc) {
-	Words words;
-	std::vector<WrittenElement> out;
-	out.reserve(doc.screens.size());
-	for (const Screen &s : doc.screens) {
-		out.push_back(words.screen(s));
-		digest(out.back());
-	}
-	return out;
-}
-
-std::vector<WrittenElement> written_window_elements(const Window &w) {
-	Words words;
-	std::vector<WrittenElement> out;
-	words.window_elements(w, out);
-	return out;
-}
-
-std::string written_open_tag(const WrittenElement &e) {
-	std::string out = "<" + e.tag;
-	for (const WrittenAttribute &a : e.attributes) out += " " + a.name + a.value_token();
-	return out + ">";
-}
-
-void render_written(const WrittenElement &e, const WrittenStyle &style, const std::string &indent, std::string &out) {
-	out += written_open_tag(e);
-	render_written_content(e, style, indent, out);
-	out += "</" + e.tag + ">";
-}
-
-void render_written_content(const WrittenElement &e, const WrittenStyle &style, const std::string &indent,
-                            std::string &out) {
-	switch (e.form) {
-	case WrittenForm::Leaf: out += escape_text(e.text); break;
-	case WrittenForm::Compact: {
-		out += escape_text(e.text);
-		const WrittenStyle one_line;
-		for (const WrittenElement &child : e.children) render_written(child, one_line, std::string(), out);
-		break;
-	}
-	case WrittenForm::Container: {
-		const std::string inner = indent + style.unit;
-		for (const WrittenElement &child : e.children) {
-			out += style.eol;
-			out += inner;
-			render_written(child, style, inner, out);
-		}
-		out += style.eol;
-		out += indent;
-		break;
-	}
-	}
-}
-
 // --- the writer --------------------------------------------------------------
 
 // Element text: retail's reader turns '<' into a tag and '&' into an entity; both
@@ -803,7 +810,6 @@ std::vector<WriteIssue> write_issues(const Document &doc) {
 std::string serialize(const Document &doc, bool pretty, int indent_size) {
 	const std::vector<WrittenElement> screens = written_screens(doc);
 	const WrittenStyle style = canonical_style(pretty, indent_size);
-	if (text_layout_applies(doc)) return text_layout_generate(*doc.text_layout, screens, style);
 	std::string out;
 	for (const WrittenElement &screen : screens) {
 		render_written(screen, style, std::string(), out);
@@ -822,16 +828,13 @@ bool serialize_bytes(const Document &doc, std::vector<uint8_t> &out,
 		return false;
 	}
 	const std::string text = serialize(doc, pretty, indent_size);
-	// The byte order mark the file had (the loader reads past it), else the writer's own.
-	const bool laid_out = text_layout_applies(doc);
 	if (doc.source_encoding != SourceEncoding::Utf16LE) {
 		if (doc.source_encoding == SourceEncoding::Utf8Bom) out.insert(out.end(), {0xEF, 0xBB, 0xBF});
 		out.insert(out.end(), text.begin(), text.end());
 		return true;
 	}
 	// The model's UTF-8 as little-endian UTF-16 after the byte order mark.
-	if (laid_out && doc.text_layout->bom.size() == 2) out.insert(out.end(), doc.text_layout->bom.begin(), doc.text_layout->bom.end());
-	else out.insert(out.end(), {0xFF, 0xFE});
+	out.insert(out.end(), {0xFF, 0xFE});
 	auto unit = [&](uint32_t u) {
 		out.push_back(static_cast<uint8_t>(u & 0xFF));
 		out.push_back(static_cast<uint8_t>(u >> 8));
