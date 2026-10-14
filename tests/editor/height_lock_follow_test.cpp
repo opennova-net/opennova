@@ -19,11 +19,9 @@
 #include <formats/mission/mission_mis.h>
 #include <formats/trn/trn_io.h>
 
-#include <chrono>
 #include <cstdio>
 #include <memory>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include "common/file_io.h"
@@ -77,18 +75,6 @@ std::vector<double> heights_of(ProjectSession &session, const std::string &path)
 
 bool has(const std::string &text, const char *part) { return text.find(part) != std::string::npos; }
 
-// Polls until the project's references are read (the graph the follow finds the missions by).
-bool read_through(ProjectSession &session, double seconds) {
-	const auto start = std::chrono::steady_clock::now();
-	while (std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() < seconds) {
-		session.poll();
-		const SessionView &v = session.view();
-		if (v.findings.graph && v.activity.validation.read && !v.activity.validation.files_unread) return true;
-		std::this_thread::sleep_for(std::chrono::milliseconds(10));
-	}
-	return false;
-}
-
 // The change of the ground under (x, y), 16.16, from `before` to `after`, as the original editor samples it over Tmap.
 int32_t change_at(const TrnConfig &trn, int32_t scale, const std::vector<uint16_t> &before,
 		const std::vector<uint16_t> &after, double x, double y) {
@@ -116,7 +102,10 @@ int test_follow() {
 	TEST_EXPECT(editor_test::write_bytes(root + "/missions/away.bms", mission_at({{300.0f, -300.0f}})));
 	editor_test::set_missions(session, true);
 	editor_test::handle_to_end(session, request::rescan());
-	TEST_EXPECT(read_through(session, 60.0));
+	// The project's references read (the graph the follow finds the missions by): the operations and the validation
+	// they left due run to their end.
+	session.run_operations();
+	TEST_EXPECT(v.findings.graph && v.activity.validation.read && !v.activity.validation.files_unread);
 	const AssetEntry *open_entry = v.project.scan->find("open.bms");
 	const AssetEntry *closed_entry = v.project.scan->find("closed.bms");
 	const AssetEntry *away_entry = v.project.scan->find("away.bms");

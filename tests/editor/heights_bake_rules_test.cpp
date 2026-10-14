@@ -19,11 +19,9 @@
 #include <formats/cpt/cpt_io.h>
 #include <formats/mission/bms_edit.h>
 
-#include <chrono>
 #include <cstdio>
 #include <memory>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include "common/file_io.h"
@@ -102,19 +100,9 @@ struct Rig {
 		for (const auto &[file, points] : missions) editor_test::write_bytes(root + "/missions/" + file, mission_at(points));
 		editor_test::set_missions(session, true);
 		editor_test::handle_to_end(session, request::rescan());
-		read_through(60.0);
+		session.run_operations(); // the references read: the graph the follows find the missions by
 		trn = v.project.scan->find("Tmap.trn")->relative_path;
 		cpt = v.project.scan->find("Tmap.cpt")->relative_path;
-	}
-	bool read_through(double seconds) {
-		const auto start = std::chrono::steady_clock::now();
-		while (std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() < seconds) {
-			session.poll();
-			const SessionView &v = session.view();
-			if (v.findings.graph && v.activity.validation.read && !v.activity.validation.files_unread) return true;
-			std::this_thread::sleep_for(std::chrono::milliseconds(10));
-		}
-		return false;
 	}
 	std::string path_of(const char *name) const { return session.view().project.scan->find(name)->relative_path; }
 	const DocumentBase *open_at(const std::string &path) {
@@ -349,7 +337,7 @@ int test_locked_stays_closed() {
 	for (const char *file : {"/missions/m.bms", "/missions/free.bms"})
 		editor_test::write_bytes(rig.root + file, mission_at({{-200.0f, 200.0f}}, mission::EntityKind::Item, 106102));
 	editor_test::handle_to_end(rig.session, request::rescan());
-	rig.read_through(60.0);
+	rig.session.run_operations();
 	const std::string m = rig.path_of("m.bms"), free = rig.path_of("free.bms");
 	rig.session.handle(request::open_document(m));
 	const auto *mission = dynamic_cast<const MissionDocument *>(rig.open_at(m));
@@ -384,7 +372,7 @@ int test_env_routing() {
 	editor_test::write_bytes(rig.root + "/missions/near.bms",
 	                         mission_at({{-200.0f, 200.0f}}, mission::EntityKind::Building, 100701, "away"));
 	editor_test::handle_to_end(rig.session, request::rescan());
-	rig.read_through(60.0);
+	rig.session.run_operations();
 	const std::string here = rig.path_of("here.bms"), away = rig.path_of("away.bms"), near = rig.path_of("near.bms");
 	// An open mission on the other .cpt: no follower of a stroke in the .trn's view, as its own strokes edit Away.cpt.
 	rig.session.handle(request::open_document(near));
