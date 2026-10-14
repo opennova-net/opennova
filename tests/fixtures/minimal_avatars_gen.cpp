@@ -2,8 +2,7 @@
 // table written by avatars_write (ADR 0021: from scratch, deterministic) from
 // authored rows, in the shape the shipped Avatars.def has — a pool of head /
 // body / arms parts (camo variants, a quoted multi-word display name, both
-// sexes) and an eight-nationality tree of divisions and combos with the
-// trailing `skipdemo` flags at both levels, four good and four evil
+// sexes) and an eight-nationality tree of divisions and combos, four good and four evil
 // nationalities so the team filter partitions and the packed character ids the
 // join profile derives (nat | div | combo | side) stay reachable. No retail
 // table is carried: the shipped file is the reference-tree leg of avatars_parse
@@ -98,9 +97,6 @@ struct Tree {
 AvatarCombo combo(int id, const char *head, const char *body, const char *arms) {
 	AvatarCombo c;
 	std::memset(&c, 0, sizeof(c));
-	char raw[8];
-	std::snprintf(raw, sizeof(raw), "%03d", id);
-	SETSTR(c.raw_id, raw);
 	c.id = id;
 	SETSTR(c.head_name, head);
 	SETSTR(c.body_name, body);
@@ -111,9 +107,8 @@ AvatarCombo combo(int id, const char *head, const char *body, const char *arms) 
 	return c;
 }
 
-// Eight nationalities N00..N07 (0..3 good, 4..7 evil); nationality 0 carries
-// four divisions (its first flagged skipdemo with four combos, its third
-// unflagged), nationality 1 carries the nationality-level skipdemo flag, the
+// Eight nationalities 0..7 (0..3 good, 4..7 evil); nationality 0 carries
+// four divisions (its first with four combos, its second with three), the
 // rest two divisions of two combos each. Combo parts cycle through the pool.
 void make_tree(Tree &t, const std::vector<AvatarPart> &parts) {
 	static const char *const kNatKeys[8] = {"AV_NAT_SYNTH_ALPHA", "AV_NAT_SYNTH_BRAVO", "AV_NAT_SYNTH_CHARLIE",
@@ -143,24 +138,16 @@ void make_tree(Tree &t, const std::vector<AvatarPart> &parts) {
 			}
 			AvatarDivision &div = t.divisions[static_cast<size_t>(n)][static_cast<size_t>(d)];
 			std::memset(&div, 0, sizeof(div));
-			char raw[8];
-			std::snprintf(raw, sizeof(raw), "D%02d", d);
-			SETSTR(div.raw_id, raw);
 			div.id = d;
 			const std::string key = "AV_DIV_SYNTH_" + std::to_string(n) + "_" + std::to_string(d);
 			SETSTR(div.name_key, key.c_str());
-			if (d == 0 || d == 3) SETSTR(div.flags, "skipdemo");
 			div.combos = combos.data();
 			div.combos_count = combos.size();
 		}
 		AvatarNationality &nat = t.nationalities[static_cast<size_t>(n)];
 		std::memset(&nat, 0, sizeof(nat));
-		char raw[8];
-		std::snprintf(raw, sizeof(raw), "N%02d", n);
-		SETSTR(nat.raw_id, raw);
 		nat.id = n;
 		SETSTR(nat.name_key, kNatKeys[n]);
-		if (n == 1) SETSTR(nat.flags, "skipdemo");
 		nat.has_alignment = 1;
 		nat.alignment = n < 4 ? AVATAR_ALIGN_GOOD : AVATAR_ALIGN_EVIL;
 		nat.divisions = t.divisions[static_cast<size_t>(n)].data();

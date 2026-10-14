@@ -101,9 +101,10 @@ int check_written(const std::string &text, const std::string &what) {
 }
 
 // An authored table (its comments, its spacing, the `graphic_d` alias, a key the walk reads nothing of, a refused
-// nationality and a combo whose head is not defined yet): written from its model in the writer's form, none of
-// what the walk reads nothing of, and read back as the model; edits (a value, a swap, a combo added, a part
-// removed) read back too.
+// nationality, a trailing token after a name key, ids spelled with a letter or leading zeros, and a combo whose
+// head is not defined yet): written from its model in the writer's form, none of what the walk reads nothing of,
+// every id its decimal, and read back as the model; edits (a value, a swap, a combo added, a part removed) read
+// back too (the #1098 review, F2: the id token's spelling and the trailing tokens are not kept).
 int check_authored() {
     const std::string text =
             "// avatars\r\n"
@@ -143,6 +144,10 @@ int check_authored() {
     TEST_EXPECT(out.find("frobnicate") == std::string::npos && out.find("// the first head") == std::string::npos &&
                 out.find("AV_BAD") == std::string::npos && out.find("NOHEAD") == std::string::npos &&
                 out.find("\tgraphic\t\th1.3di\r\n") != std::string::npos);
+    TEST_EXPECT(out.find("skipdemo") == std::string::npos && out.find("N00") == std::string::npos &&
+                out.find("D00") == std::string::npos && out.find("\nnationality 0 AV_US\r\n") != std::string::npos &&
+                out.find("\tdivision 0 AV_D0\r\n") != std::string::npos &&
+                out.find("\t\tcombo 1 H1 B1\r\n\t\tcombo 3 H1 B1\r\n") != std::string::npos);
     TEST_EXPECT(reads_back(out, file));
     // The graphic changed.
     std::snprintf(file.parts[0].graphic, sizeof(file.parts[0].graphic), "%s", "h2.3di");
@@ -151,16 +156,15 @@ int check_authored() {
     AvatarDivision &div = file.nationalities[0].divisions[0];
     std::swap(div.combos[0], div.combos[1]);
     TEST_EXPECT(reads_back(written(file), file) &&
-                written(file).find("\t\tcombo 003 H1 B1\r\n\t\tcombo 001 H1 B1\r\n") != std::string::npos);
+                written(file).find("\t\tcombo 3 H1 B1\r\n\t\tcombo 1 H1 B1\r\n") != std::string::npos);
     std::swap(div.combos[0], div.combos[1]);
     // A combo added after the division's last.
     div.combos = static_cast<AvatarCombo *>(std::realloc(div.combos, (div.combos_count + 1) * sizeof(AvatarCombo)));
     div.combos[div.combos_count] = div.combos[0];
-    SETSTR(div.combos[div.combos_count].raw_id, "004");
     div.combos[div.combos_count].id = 4;
     ++div.combos_count;
     TEST_EXPECT(reads_back(written(file), file) &&
-                written(file).find("\t\tcombo 003 H1 B1\r\n\t\tcombo 004 H1 B1\r\n\t}\r\n") != std::string::npos);
+                written(file).find("\t\tcombo 3 H1 B1\r\n\t\tcombo 4 H1 B1\r\n\t}\r\n") != std::string::npos);
     --div.combos_count;
     // A part removed.
     AvatarsFile fewer = file;
@@ -196,23 +200,19 @@ int main(int argc, char **argv) {
 
     AvatarCombo combo;
     std::memset(&combo, 0, sizeof(combo));
-    SETSTR(combo.raw_id, "001");
     combo.id = 1;
     SETSTR(combo.head_name, "TEST_HEAD");
     SETSTR(combo.body_name, "TEST_BODY"); // no arms -> arms_name stays empty
 
     AvatarDivision div;
     std::memset(&div, 0, sizeof(div));
-    SETSTR(div.raw_id, "D00");
     div.id = 0;
     SETSTR(div.name_key, "AV_DIV_TEST");
-    SETSTR(div.flags, "skipdemo");
     div.combos = &combo;
     div.combos_count = 1;
 
     AvatarNationality nat;
     std::memset(&nat, 0, sizeof(nat));
-    SETSTR(nat.raw_id, "N00");
     nat.id = 0;
     SETSTR(nat.name_key, "AV_NAT_TEST");
     nat.has_alignment = 1;
@@ -242,7 +242,6 @@ int main(int argc, char **argv) {
     TEST_EXPECT(fp.nationalities_count == 1);
     TEST_EXPECT(fp.nationalities[0].alignment == AVATAR_ALIGN_EVIL);
     TEST_EXPECT(fp.nationalities[0].divisions_count == 1);
-    TEST_EXPECT(std::strcmp(fp.nationalities[0].divisions[0].flags, "skipdemo") == 0);
     TEST_EXPECT(fp.nationalities[0].divisions[0].combos_count == 1);
     const AvatarCombo *rc = &fp.nationalities[0].divisions[0].combos[0];
     TEST_EXPECT(std::strcmp(rc->head_name, "TEST_HEAD") == 0);
@@ -253,17 +252,15 @@ int main(int argc, char **argv) {
     avatars_free(&fp);
     avatars_free_buffer(fb);
 
-    // An empty field ahead of a filled one is refused, nothing written: the
+    // An empty name ahead of a filled one is refused, nothing written: the
     // `""` the writer spells it with is no token to the game's tokenizer, so
-    // the flags would read back as the name key and the body as the head.
-    // [orig: Config_TokenizeLine @0x53CB60, the quote arm
-    //  @0x53CC4E..0x53CC70]
+    // the body would read back as the head. An empty name key ends its line:
+    // no later field shifts. [orig: Config_TokenizeLine @0x53CB60, the quote
+    // arm @0x53CC4E..0x53CC70]
     {
         char *rb = nullptr;
         size_t rn = 0;
         SETSTR(div.name_key, "");
-        TEST_EXPECT(avatars_write(&fs, &rb, &rn) == 2 && rb == nullptr);
-        SETSTR(div.flags, "");
         TEST_EXPECT(avatars_write(&fs, &rb, &rn) == 0); // an empty tail is no shift
         avatars_free_buffer(rb);
         rb = nullptr;
@@ -271,8 +268,6 @@ int main(int argc, char **argv) {
         SETSTR(combo.head_name, "");
         TEST_EXPECT(avatars_write(&fs, &rb, &rn) == 2 && rb == nullptr);
         SETSTR(combo.head_name, "TEST_HEAD");
-        SETSTR(nat.raw_id, "");
-        TEST_EXPECT(avatars_write(&fs, &rb, &rn) == 2 && rb == nullptr);
     }
     if (check_authored() != 0) return 1;
     // The retail legs: the install's Avatars.def (its base archives and each expansion's mount) through the game's

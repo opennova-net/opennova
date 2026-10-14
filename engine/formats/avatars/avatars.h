@@ -86,8 +86,8 @@ typedef struct AvatarPartSnapshot {
 /* ========================================================================= */
 
 typedef struct AvatarCombo {
-    char raw_id[32];          /* id token verbatim, e.g. "001" (round-trip)      [orig @ 0x57a815] */
-    int id;                   /* parsed numeric id (atol, leading non-digit skipped) */
+    int id;                   /* the id token (token 1, kept @ 0x57a815)'s atol, written as its
+                                 decimal                                          [orig @ 0x57a90d] */
     char head_name[64];       /* reference part names (D-PLAYERINFO-4)           [orig @ 0x57a804..0x57a809] */
     char body_name[64];
     char arms_name[64];       /* empty if the combo has no arms */
@@ -98,27 +98,28 @@ typedef struct AvatarCombo {
 } AvatarCombo;
 
 /* ========================================================================= */
-/* Division: `division <id> <nameKey> [flags] { combo... }`                  */
+/* Division: `division <id> <nameKey> { combo... }`                          */
+/* (a token after the name key, e.g. the shipped "skipdemo", is read for      */
+/* nothing [orig: CAvatarDefs_ParseConfigLine @ 0x57a73b..0x57a7ab, tokens 1  */
+/* and 2 alone] and not kept)                                                 */
 /* ========================================================================= */
 
 typedef struct AvatarDivision {
-    char raw_id[32];          /* id token verbatim, e.g. "D00" */
-    int id;                   /* parsed numeric id (0..15)                        [orig @ 0x57a757] */
+    int id;                   /* the id token's lenient atol, 0..15 (written as its decimal) [orig @ 0x57a74e..0x57a757] */
     char name_key[64];        /* "Avatars" RTXT string key                        [orig @ 0x57a7ab] */
-    char flags[128];          /* trailing tokens after name_key (e.g. "skipdemo"); "" if none */
     AvatarCombo *combos;
     size_t combos_count;
 } AvatarDivision;
 
 /* ========================================================================= */
-/* Nationality: `nationality <id> <nameKey> [flags] { alignment; division... }`*/
+/* Nationality: `nationality <id> <nameKey> { alignment; division... }`       */
+/* (a token after the name key is read for nothing [orig: @ 0x57a615..0x57a681, */
+/* tokens 1 and 2 alone] and not kept)                                        */
 /* ========================================================================= */
 
 typedef struct AvatarNationality {
-    char raw_id[32];          /* id token verbatim, e.g. "N00" */
-    int id;                   /* parsed numeric id (0..31)                        [orig @ 0x57a631] */
+    int id;                   /* the id token's lenient atol, 0..31 (written as its decimal) [orig @ 0x57a628..0x57a631] */
     char name_key[64];        /* "Avatars" RTXT string key                        [orig @ 0x57a681] */
-    char flags[128];          /* trailing tokens after name_key (e.g. "skipdemo"); "" if none */
     int alignment;            /* AvatarAlignment (good/evil)                      [orig @ 0x57a6e9] */
     int has_alignment;        /* whether an `alignment` line was present */
     AvatarDivision *divisions;
@@ -154,13 +155,13 @@ void avatars_free(AvatarsFile *file);
  * passthrough — docs/adr/0003, policy docs/adr/0021; no original writer of the
  * file is witnessed, so the form is OpenNova's). On success returns 0 and
  * sets *out_data (malloc'd, NUL-terminated) and *out_size (length excluding the
- * NUL). Free with avatars_free_buffer(). The write is deterministic: a
+ * NUL). Free with avatars_free_buffer(). The write is deterministic, from
+ * the model alone: every id its decimal, every name as the model holds it; a
  * parse->write->parse->write round-trip is byte-identical on the second write.
- * Returns 2, writing nothing, when a line would hold an empty field ahead of a
- * filled one (a nationality's or division's id or name key ahead of its flags,
- * a combo's id, head or body ahead of the next): the game's tokenizer reads
- * the `""` it would be written as as no token, so the later fields would read
- * back shifted. */
+ * Returns 2, writing nothing, when a combo line would hold an empty name ahead
+ * of a filled one (its head ahead of its body, its body ahead of its arms):
+ * the game's tokenizer reads the `""` it would be written as as no token, so
+ * the later names would read back shifted. */
 int avatars_write(const AvatarsFile *file, char **out_data, size_t *out_size);
 void avatars_free_buffer(char *data);
 

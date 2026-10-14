@@ -100,22 +100,6 @@ static int tok_lenient_id(const char *t) {
     return tok_int(t);
 }
 
-/* Join tokens [first..count) into dst with single spaces (the nationality and
- * division trailing flags, e.g. "skipdemo"; the authoring model's superset, the
- * game reads none of them). */
-static void join_flags(const io::ConfigTokens &t, int first, char *dst, size_t dst_size) {
-    dst[0] = '\0';
-    size_t off = 0;
-    for (int i = first; i < t.count; ++i) {
-        if (off && off + 1 < dst_size) dst[off++] = ' ';
-        size_t cp = strlen(t.tokens[i]);
-        if (off + cp >= dst_size) cp = (off < dst_size) ? dst_size - 1 - off : 0;
-        memcpy(dst + off, t.tokens[i], cp);
-        off += cp;
-    }
-    if (off < dst_size) dst[off] = '\0'; else dst[dst_size - 1] = '\0';
-}
-
 static int cstr_ieq(const char *a, const char *b) {
     while (*a && *b) {
         if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) return 0;
@@ -284,9 +268,8 @@ static int parse_buffer(const char *buf, size_t buf_len, AvatarsFile *out) {
                 AvatarNationality fresh;
                 memset(&fresh, 0, sizeof(fresh));
                 fresh.id = (int)id;
-                tok_copy(tok(t, 1), fresh.raw_id, sizeof(fresh.raw_id));
+                /* Tokens 1 and 2 alone: a later one is read for nothing. */
                 tok_copy(tok(t, 2), fresh.name_key, sizeof(fresh.name_key));
-                join_flags(t, 3, fresh.flags, sizeof(fresh.flags));
                 DA_PUSH(out->nationalities, out->nationalities_count, nats_cap, fresh);
                 nat = (long)out->nationalities_count - 1;
                 div = -1;
@@ -348,9 +331,8 @@ static int parse_buffer(const char *buf, size_t buf_len, AvatarsFile *out) {
                 AvatarDivision fresh;
                 memset(&fresh, 0, sizeof(fresh));
                 fresh.id = (int)id;
-                tok_copy(tok(t, 1), fresh.raw_id, sizeof(fresh.raw_id));
+                /* Tokens 1 and 2 alone: a later one is read for nothing. */
                 tok_copy(tok(t, 2), fresh.name_key, sizeof(fresh.name_key));
-                join_flags(t, 3, fresh.flags, sizeof(fresh.flags));
                 size_t cap = np->divisions_count;
                 np->divisions = (AvatarDivision *)realloc(np->divisions,
                                                           (cap + 1) * sizeof(*np->divisions));
@@ -372,7 +354,6 @@ static int parse_buffer(const char *buf, size_t buf_len, AvatarsFile *out) {
                division's alone */
             AvatarCombo c;
             memset(&c, 0, sizeof(c));
-            tok_copy(tok(t, 1), c.raw_id, sizeof(c.raw_id));
             c.id = tok_int(tok(t, 1));
             tok_copy(tok(t, 2), c.head_name, sizeof(c.head_name));
             tok_copy(tok(t, 3), c.body_name, sizeof(c.body_name));
@@ -524,22 +505,21 @@ static std::string text_of(const AvatarsFile *file) {
     }
     for (size_t i = 0; i < file->nationalities_count; ++i) {
         const AvatarNationality *nat = &file->nationalities[i];
-        std::string head = "nationality " + value_of(nat->raw_id) + " " + value_of(nat->name_key);
-        if (nat->flags[0]) head += std::string(" ") + nat->flags;
-        line(head);
+        snprintf(num, sizeof(num), "%d", nat->id);
+        line(std::string("nationality ") + num + " " + value_of(nat->name_key));
         line("{");
         if (nat->has_alignment)
             line(std::string("\talignment\t") + ((nat->alignment == AVATAR_ALIGN_EVIL) ? "evil" : "good"));
         for (size_t j = 0; j < nat->divisions_count; ++j) {
             const AvatarDivision *d = &nat->divisions[j];
             line("");
-            std::string division = "\tdivision " + value_of(d->raw_id) + " " + value_of(d->name_key);
-            if (d->flags[0]) division += std::string(" ") + d->flags;
-            line(division);
+            snprintf(num, sizeof(num), "%d", d->id);
+            line(std::string("\tdivision ") + num + " " + value_of(d->name_key));
             line("\t{");
             for (size_t c = 0; c < d->combos_count; ++c) {
                 const AvatarCombo *cm = &d->combos[c];
-                std::string combo = "\t\tcombo " + value_of(cm->raw_id) + " " + value_of(cm->head_name) + " " +
+                snprintf(num, sizeof(num), "%d", cm->id);
+                std::string combo = std::string("\t\tcombo ") + num + " " + value_of(cm->head_name) + " " +
                                     value_of(cm->body_name);
                 if (cm->arms_name[0]) combo += " " + value_of(cm->arms_name);
                 line(combo);
@@ -555,13 +535,11 @@ static std::string text_of(const AvatarsFile *file) {
 static int fields_refused(const AvatarsFile *file) {
     for (size_t i = 0; i < file->nationalities_count; ++i) {
         const AvatarNationality *nat = &file->nationalities[i];
-        if (fields_shift({nat->raw_id, nat->name_key, nat->flags})) return 2;
         for (size_t j = 0; j < nat->divisions_count; ++j) {
             const AvatarDivision *d = &nat->divisions[j];
-            if (fields_shift({d->raw_id, d->name_key, d->flags})) return 2;
             for (size_t c = 0; c < d->combos_count; ++c) {
                 const AvatarCombo *cm = &d->combos[c];
-                if (fields_shift({cm->raw_id, cm->head_name, cm->body_name, cm->arms_name}))
+                if (fields_shift({cm->head_name, cm->body_name, cm->arms_name}))
                     return 2;
             }
         }
@@ -597,18 +575,16 @@ bool avatars_equal(const AvatarsFile &a, const AvatarsFile &b) {
     }
     for (size_t i = 0; i < a.nationalities_count; ++i) {
         const AvatarNationality &x = a.nationalities[i], &y = b.nationalities[i];
-        if (strcmp(x.raw_id, y.raw_id) || x.id != y.id || strcmp(x.name_key, y.name_key) || strcmp(x.flags, y.flags) ||
-            x.alignment != y.alignment || x.has_alignment != y.has_alignment ||
+        if (x.id != y.id || strcmp(x.name_key, y.name_key) || x.alignment != y.alignment || x.has_alignment != y.has_alignment ||
             x.divisions_count != y.divisions_count)
             return false;
         for (size_t j = 0; j < x.divisions_count; ++j) {
             const AvatarDivision &d = x.divisions[j], &e = y.divisions[j];
-            if (strcmp(d.raw_id, e.raw_id) || d.id != e.id || strcmp(d.name_key, e.name_key) || strcmp(d.flags, e.flags) ||
-                d.combos_count != e.combos_count)
+            if (d.id != e.id || strcmp(d.name_key, e.name_key) || d.combos_count != e.combos_count)
                 return false;
             for (size_t c = 0; c < d.combos_count; ++c) {
                 const AvatarCombo &m = d.combos[c], &n = e.combos[c];
-                if (strcmp(m.raw_id, n.raw_id) || m.id != n.id || strcmp(m.head_name, n.head_name) ||
+                if (m.id != n.id || strcmp(m.head_name, n.head_name) ||
                     strcmp(m.body_name, n.body_name) || strcmp(m.arms_name, n.arms_name) || m.has_arms != n.has_arms)
                     return false;
             }

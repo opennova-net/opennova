@@ -4,7 +4,8 @@
 // The retail leg pins the shipped table (a retail JO + JOX extract,
 // Desktop/REVX02/AVATARS.DEF) against the witnessed grammar; the synthetic leg pins the parser
 // over the same shapes (docs/playerinfo/avatars-re.md): part pool,
-// nationality -> division -> combo tree, trailing flags, quoted values.
+// nationality -> division -> combo tree, ids by number (a trailing token, the shipped "skipdemo", is read for
+// nothing and not kept), quoted values.
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -24,9 +25,9 @@ const AvatarPart *find_part(const AvatarsFile &f, const char *name) {
     return nullptr;
 }
 
-const AvatarNationality *find_nat(const AvatarsFile &f, const char *raw_id) {
+const AvatarNationality *find_nat(const AvatarsFile &f, int id) {
     for (size_t i = 0; i < f.nationalities_count; ++i)
-        if (std::strcmp(f.nationalities[i].raw_id, raw_id) == 0) return &f.nationalities[i];
+        if (f.nationalities[i].id == id) return &f.nationalities[i];
     return nullptr;
 }
 
@@ -84,36 +85,29 @@ int check_synth(const std::string &path) {
     TEST_EXPECT(bare->kind == AVATAR_PART_ARMS);
     TEST_EXPECT(std::strcmp(bare->display_name, "Synth Bare Arms") == 0);
 
-    // Nationality N00, alignment good, 4 divisions (D00..D03).
-    const AvatarNationality *alpha = find_nat(f, "N00");
+    // Nationality 0, alignment good, 4 divisions (0..3).
+    const AvatarNationality *alpha = find_nat(f, 0);
     TEST_EXPECT(alpha != nullptr);
-    TEST_EXPECT(alpha->id == 0); // lenient id parse skips the leading 'N'
     TEST_EXPECT(std::strcmp(alpha->name_key, "AV_NAT_SYNTH_ALPHA") == 0);
     TEST_EXPECT(alpha->has_alignment && alpha->alignment == AVATAR_ALIGN_GOOD);
     TEST_EXPECT(alpha->divisions_count == 4);
 
-    // Division D00, trailing "skipdemo" flag, 4 combos; first combo 001 wears the boonie set.
+    // Division 0, 4 combos; first combo 1 wears the boonie set.
     const AvatarDivision *d0 = &alpha->divisions[0];
-    TEST_EXPECT(std::strcmp(d0->raw_id, "D00") == 0);
     TEST_EXPECT(d0->id == 0);
     TEST_EXPECT(std::strcmp(d0->name_key, "AV_DIV_SYNTH_0_0") == 0);
-    TEST_EXPECT(std::strcmp(d0->flags, "skipdemo") == 0);
     TEST_EXPECT(d0->combos_count == 4);
     const AvatarCombo *c0 = &d0->combos[0];
-    TEST_EXPECT(std::strcmp(c0->raw_id, "001") == 0);
     TEST_EXPECT(c0->id == 1);
     TEST_EXPECT(std::strcmp(c0->head_name, "SYN_HEAD_BOONIE") == 0);
     TEST_EXPECT(std::strcmp(c0->body_name, "SYN_BODY_0") == 0);
     TEST_EXPECT(std::strcmp(c0->arms_name, "SYN_ARMS_1") == 0);
 
-    // Nationality-level trailing flag (N01 skipdemo); a division with no flag (N00 D02); an
-    // evil nationality (N07).
-    const AvatarNationality *bravo = find_nat(f, "N01");
-    TEST_EXPECT(bravo != nullptr);
-    TEST_EXPECT(std::strcmp(bravo->flags, "skipdemo") == 0);
-    TEST_EXPECT(std::strcmp(alpha->divisions[2].name_key, "AV_DIV_SYNTH_0_2") == 0);
-    TEST_EXPECT(alpha->divisions[2].flags[0] == '\0');
-    const AvatarNationality *hotel = find_nat(f, "N07");
+    // Nationality 1; nationality 0's third division; an evil nationality (7).
+    const AvatarNationality *bravo = find_nat(f, 1);
+    TEST_EXPECT(bravo != nullptr && std::strcmp(bravo->name_key, "AV_NAT_SYNTH_BRAVO") == 0);
+    TEST_EXPECT(std::strcmp(alpha->divisions[2].name_key, "AV_DIV_SYNTH_0_2") == 0 && alpha->divisions[2].id == 2);
+    const AvatarNationality *hotel = find_nat(f, 7);
     TEST_EXPECT(hotel != nullptr && hotel->alignment == AVATAR_ALIGN_EVIL);
     TEST_EXPECT(!has_diag(f, "AVATAR_DUPLICATE_PART"));
 
@@ -168,34 +162,29 @@ int check_retail(const std::string &path) {
     TEST_EXPECT(bare->kind == AVATAR_PART_ARMS);
     TEST_EXPECT(std::strcmp(bare->display_name, "Bare Arms") == 0);
 
-    // Nationality N00 = United States, alignment good, 9 divisions (D00..D08).
-    const AvatarNationality *us = find_nat(f, "N00");
+    // Nationality N00 = United States, alignment good, 9 divisions (D00..D08): the lenient id parse skips the
+    // leading 'N' [orig: CAvatarDefs_ParseConfigLine @ 0x57a628..0x57a631].
+    const AvatarNationality *us = find_nat(f, 0);
     TEST_EXPECT(us != nullptr);
-    TEST_EXPECT(us->id == 0); // lenient id parse skips the leading 'N'
     TEST_EXPECT(std::strcmp(us->name_key, "AV_NAT_UNITEDSTATES") == 0);
     TEST_EXPECT(us->has_alignment && us->alignment == AVATAR_ALIGN_GOOD);
     TEST_EXPECT(us->divisions_count == 9);
 
-    // Division D00 = SEAL, trailing "skipdemo" flag, 4 combos; first combo 001.
+    // Division D00 = SEAL (its trailing "skipdemo" read for nothing), 4 combos; first combo 001, id 1.
     const AvatarDivision *d0 = &us->divisions[0];
-    TEST_EXPECT(std::strcmp(d0->raw_id, "D00") == 0);
     TEST_EXPECT(d0->id == 0);
     TEST_EXPECT(std::strcmp(d0->name_key, "AV_DIV_SEAL") == 0);
-    TEST_EXPECT(std::strcmp(d0->flags, "skipdemo") == 0);
     TEST_EXPECT(d0->combos_count == 4);
     const AvatarCombo *c0 = &d0->combos[0];
-    TEST_EXPECT(std::strcmp(c0->raw_id, "001") == 0);
     TEST_EXPECT(c0->id == 1);
     TEST_EXPECT(std::strcmp(c0->head_name, "JO_HEAD_SEAL") == 0);
     TEST_EXPECT(std::strcmp(c0->body_name, "JO_BODY_SEAL_1") == 0);
     TEST_EXPECT(std::strcmp(c0->arms_name, "JO_ARMS_US_1") == 0);
 
-    // Nationality-level trailing flag (Great Britain skipdemo); a division with no flag.
-    const AvatarNationality *gb = find_nat(f, "N01");
+    // Great Britain (its trailing "skipdemo" read for nothing); a division of the United States.
+    const AvatarNationality *gb = find_nat(f, 1);
     TEST_EXPECT(gb != nullptr);
-    TEST_EXPECT(std::strcmp(gb->flags, "skipdemo") == 0);
     TEST_EXPECT(std::strcmp(us->divisions[2].name_key, "AV_DIV_FORCERECON") == 0);
-    TEST_EXPECT(us->divisions[2].flags[0] == '\0');
 
     avatars_free(&f);
     return 0;
