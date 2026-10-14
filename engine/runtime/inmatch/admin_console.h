@@ -111,6 +111,10 @@ public:
 			std::vector<std::string> &replies) override;
 	std::string status_report() override;
 
+	// CMD's local arms (Client_ProcessLocalCommand): true when one takes the line, which then
+	// goes no further (the `pb_` lines, SAVEKEYS, SAVENFO, VERSION).
+	bool local_command(const std::string &line);
+
 private:
 	using Args = std::vector<std::string>;
 
@@ -132,7 +136,6 @@ private:
 	void cycle_tail(std::vector<std::string> &replies);
 	void chat_send(std::string text);
 	void console_command(const std::string &line);
-	bool local_command(const std::string &line);
 	bool in_game() const { return scene_ == AdminScene::GameLoop; }
 
 	NapiNPServerCtx &ctx_;

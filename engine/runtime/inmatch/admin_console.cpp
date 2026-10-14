@@ -18,6 +18,7 @@
 
 #include <cstdio>
 #include <string>
+#include <string_view>
 
 namespace opennova::inmatch {
 
@@ -656,18 +657,26 @@ void AdminConsole::handle_weapon(const Args &args, std::vector<std::string> &rep
 }
 
 // Client_ProcessLocalCommand's arms a host reaches with no client of its own: each takes a
-// line its prefix opens. PunkBuster's two arms (its callback and the `pb_` lines) and the WAC
-// overlay toggles by name come first in retail and are not modeled (D-NET-371); SAVEKEYS is
+// line its prefix opens. PunkBuster's command hook comes first in retail and is not modeled
+// (D-NET-371). A `pb_` line, behind one leading '/' or '\\', is taken whatever PunkBuster's
+// state: retail hands it to the PunkBuster module (`pb_sv_` to its server half, any other to
+// its client half), each a call that does nothing with no PunkBuster context, and returns 1.
+// The WAC overlay toggles by name are not modeled (D-NET-371); SAVEKEYS is
 // taken here, its keylist.key dump of the profile's binding table not modeled, nor is the arm
 // past VERSION, which out of a session matches the line's CRC against the binding table and
 // queues its input action (D-NET-710). SAVENFO writes debug.nfo (entity_usage_text); VERSION posts
 // "Version <version>  - <title>" to the SYSTEM ring in white with the 930-tick life.
-// [orig: Client_ProcessLocalCommand @0x520BF0 — sub_4D7F00 @0x520C2A, `pb_` @0x520C50, the
+// [orig: Client_ProcessLocalCommand @0x520BF0 — sub_4D7F00 @0x520C2A; the `pb_` arm
+//  @0x520C3B..0x520CB6: the '/' or '\\' skip @0x520C3B..0x520C45, strnicmp(.., "pb_", 3)
+//  @0x520C50 (the string @0x7CCF84), "sv_" @0x520C6B, the PunkBuster calls @0x520C94 /
+//  @0x520CC9 (0x4DA3F0 / 0x4D7ED0, each a no-op with no context 0xB608F4), return 1; the
 //  WAC overlays @0x520CF1, SAVEKEYS @0x520D10 (KeyBinding_DumpAllToFile @0x54C0A0), SAVENFO
 //  @0x520D4B (Entity_DumpUsageStatistics("debug.nfo") @0x520D5C), VERSION @0x520D8E (the
 //  format @0x7D00AC, Chat_AddMessageChannel2(.., -1, 930) @0x520DC2), the binding CRC
 //  @0x520DF2..0x520E5B]
 bool AdminConsole::local_command(const std::string &line) {
+	const size_t skip = !line.empty() && (line[0] == '/' || line[0] == '\\') ? 1 : 0;
+	if (strutil::starts_with_icase(std::string_view(line).substr(skip), "pb_")) return true;
 	if (strutil::starts_with_icase(line, "SAVEKEYS")) return true;
 	if (strutil::starts_with_icase(line, "SAVENFO")) {
 		const char *name = "debug.nfo";

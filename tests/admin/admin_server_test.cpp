@@ -746,6 +746,12 @@ void test_cmd_arms() {
 	expect(host.punt(1).dpc == 0, "SAVEKEYS takes the line: the PUNT never runs");
 	a.one("CMD NETLOG");
 	expect(host.net_log.enabled(), "NETLOG again");
+	// A `pb_` line, behind one '/' or '\\', is taken whatever PunkBuster's state; the hook
+	// itself is not modeled (D-NET-371). [orig: Client_ProcessLocalCommand @0x520C3B..0x520CB6]
+	expect(host.console->local_command("pb_sv_ban 3") && host.console->local_command("/PB_kick 2") &&
+	               host.console->local_command("\\pb_") && !host.console->local_command("pbx") &&
+	               !host.console->local_command("//pb_x") && !host.console->local_command("NETLOG"),
+	       "the pb_ lines are taken, nothing else");
 	// A session peer runs the local arms first too.
 	host.ctx.is_mp_session_peer = 1;
 	a.one("CMD VERSION");
