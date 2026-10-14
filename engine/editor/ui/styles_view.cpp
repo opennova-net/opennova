@@ -24,8 +24,6 @@ namespace opennova::editor {
 namespace {
 
 constexpr NodeKind kVariable = node_kind(StyleKind::Variable);
-constexpr NodeKind kComment = node_kind(StyleKind::Comment);
-constexpr NodeKind kBlank = node_kind(StyleKind::Blank);
 
 using window_requests::edit;
 using window_requests::matches;
@@ -107,10 +105,8 @@ void StylesView::rebind(const DocumentBase &) {
 	reveal_ = RecordReveal();
 }
 
-// The lines the table lists: the variables and the lines that decide what the game reads (#if
-// lines and the lines they switch off). Comment and blank lines stay in the file as they are,
-// unlisted: the shipped menu_style.mns has 38 comment lines, its first variable on line 40. Those
-// the filter shows: a name or a value holding it. After an edit, an undo or a redo (the revision
+// The lines the table lists: the variables, the list the game reads (MnsDocument). Those the filter
+// shows: a name or a value holding it. After an edit, an undo or a redo (the revision
 // alone moved), the lines its change set names changed or added are matched again, the others
 // keeping their match, and the places are made again from the rows' order.
 void StylesView::refresh_lines(const MnsDocument &document) {
@@ -135,7 +131,6 @@ void StylesView::refresh_lines(const MnsDocument &document) {
 	const auto &rows = document.rows();
 	for (size_t i = 0; i < rows.size(); ++i) {
 		const Node &row = *rows[i];
-		if (row.kind == kComment || row.kind == kBlank) continue;
 		lines_.listed.push_back(i);
 		if (!filter_.text[0]) {
 			lines_.shown.push_back(i);
@@ -232,9 +227,8 @@ void StylesView::draw(Workspace &workspace, const DocumentBase &base) {
 	const std::vector<size_t> &listed = lines_.listed;
 	const std::vector<size_t> &shown = lines_.shown;
 
-	// The selected line when the table lists it: Add goes after it, else at the end of the file
-	// (a comment or a blank line a Problems row selected is no line of the table, so it places
-	// nothing); its own moves, Up and Down to the place of the listed line before or after it.
+	// The selected line when the table lists it: Add goes after it, else at the end of the file;
+	// its own moves, Up and Down to the place of the listed line before or after it.
 	const auto &rows = document->rows();
 	size_t index = SIZE_MAX;
 	for (size_t i = 0; i < rows.size(); ++i)
@@ -253,9 +247,6 @@ void StylesView::draw(Workspace &workspace, const DocumentBase &base) {
 	tools.count = listed.size();
 	tools.selected = at;
 	tools.pick = "Select a line first.";
-	if (at != SIZE_MAX && document->frozen(*selected))
-		tools.locked = "The selected line stays where it is: #if lines, the lines they switch off, and a value that "
-		               "continues across other lines.";
 	const NodeAddress address = selected ? NodeAddress{selected->id, selected->kind, 0} : NodeAddress();
 	switch (ui_kit::row_tools(tools_row, tools)) {
 	case ui_kit::RowTool::Duplicate: edit(workspace, *document, EditOperation::Duplicate, address, index + 1); break;
@@ -277,8 +268,8 @@ void StylesView::draw(Workspace &workspace, const DocumentBase &base) {
 	const ImGuiStyle &style = ImGui::GetStyle();
 	const float line_width = ui_kit::text_width(ui_kit::kChangeRoom) + ui_kit::text_width("0000") + style.FramePadding.x * 2.0f;
 	const float used_width = ui_kit::button_width("99 uses");
-	const float needed = line_width + used_width + em * (8.0f + 8.0f + 9.0f + 8.0f + 10.0f);
-	if (!ImGui::BeginTable("lines", 7,
+	const float needed = line_width + used_width + em * (8.0f + 8.0f + 9.0f + 10.0f);
+	if (!ImGui::BeginTable("lines", 6,
 	                       ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_ScrollY |
 	                               ImGuiTableFlags_ScrollX | ImGuiTableFlags_Resizable,
 	                       ImVec2(0.0f, 0.0f), std::max(needed, ImGui::GetContentRegionAvail().x)))
@@ -288,13 +279,11 @@ void StylesView::draw(Workspace &workspace, const DocumentBase &base) {
 	ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 1.5f);
 	ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch, 1.5f);
 	ImGui::TableSetupColumn("##swatch", ImGuiTableColumnFlags_WidthFixed, em * 9.0f);
-	ImGui::TableSetupColumn("Comment", ImGuiTableColumnFlags_WidthStretch, 1.5f);
 	ImGui::TableSetupColumn("Used by", ImGuiTableColumnFlags_WidthFixed, used_width);
 	ImGui::TableSetupColumn("Status", ImGuiTableColumnFlags_WidthStretch, 1.0f);
 	ImGui::TableHeadersRow();
 	const FieldSchema *name_field = variable_field(*document, "name");
 	const FieldSchema *value_field = variable_field(*document, "value");
-	const FieldSchema *comment_field = variable_field(*document, "comment");
 	// Every row one control high, so the table clips: only the lines in sight draw (and the one
 	// being revealed, to scroll to).
 	const float row_height = ImGui::GetFrameHeight() + style.CellPadding.y * 2.0f;
@@ -325,7 +314,6 @@ void StylesView::draw(Workspace &workspace, const DocumentBase &base) {
 			const Document::RecordChange change = document->record_change(line);
 			ui_kit::change_dot(change, x);
 			ui_kit::tooltip(ui_kit::change_words(change));
-			const bool frozen = document->frozen(*row);
 			ImGui::TableNextColumn();
 			if (row->kind == kVariable) {
 				// What the value is used as (graph/style_value_use, kept while the document and the
@@ -352,18 +340,9 @@ void StylesView::draw(Workspace &workspace, const DocumentBase &base) {
 						set(workspace, *document, line, "value", picked, false);
 				}
 				ImGui::TableNextColumn();
-				cell(comment_field);
-				ImGui::TableNextColumn();
 				used_by_cell(workspace, use.users);
 				ImGui::TableNextColumn();
-				if (!use.use.winner) quiet_text("defined again below: the game reads that one");
-				else if (!read) quiet_text("not read by the game");
-				else if (frozen) quiet_text("locked: continues across other lines");
-			} else {
-				quiet_text(row->name(), row->name() + "\nLocked: #if lines and the lines they switch off stay where they are.");
-				for (int skip = 0; skip < 4; ++skip) ImGui::TableNextColumn();
-				ImGui::TableNextColumn();
-				quiet_text(row->kind == node_kind(StyleKind::Conditional) ? "directive" : "switched off");
+				if (!read) quiet_text("not read by the game");
 			}
 			ImGui::PopID();
 		}

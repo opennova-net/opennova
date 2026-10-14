@@ -1,6 +1,6 @@
 // The AI profile document (ai_profile_document.h, ADR 0046 S23 B): the profile's table over aip::Profile, its
-// fields the reader's keys (aip::key_rows) in the units the file writes them, its parse through the game's reader
-// with the file's layout modeled, its save through the profile's writer over that layout.
+// fields the reader's keys (aip::key_rows) in the units the file writes them, its parse through the game's reader,
+// its save through the profile's writer from the profile alone (S26).
 #include "ai_profile_document.h"
 
 #include <cmath>
@@ -10,7 +10,6 @@
 #include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
-#include <editor/documents/noted_file_state.h>
 #include <editor/documents/source_issue_findings.h>
 
 namespace opennova::editor {
@@ -266,8 +265,8 @@ const AiProfileRow &profile_row(const Node &node) { return static_cast<const AiP
 
 constexpr FindingCodeEntry<AiProfileFinding> kFindingEntries[] = {
 	{ AiProfileFinding::InvalidInput, { "ai_profile.invalid_input", FindingFix::None, nullptr, true } },
-	// The words the reader reads nothing of are kept on a save (the file's layout), so nothing is offered.
-	{ AiProfileFinding::IgnoredInput, listed_code("ai_profile.ignored_input") },
+	// The words the reader reads nothing of: a save writes the profile alone (formats/aip), without them.
+	{ AiProfileFinding::IgnoredInput, listed_code("ai_profile.ignored_input", FindingFix::Rewrite, kRewriteDropsIgnoredInput) },
 	{ AiProfileFinding::NoType, listed_code("ai_profile.no_type") },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(AiProfileFinding::kCount),
@@ -305,16 +304,22 @@ std::string AiProfileDocument::record_title(const NodeAddress &address) const {
 }
 
 bool AiProfileDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
-                              std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues,
+                              std::shared_ptr<const FileState> &, std::vector<SourceIssue> &issues,
                               Diagnostic &error) {
-	auto notes = std::make_shared<textlayout::Notes>();
 	std::vector<aip::UnreadLine> unread;
 	auto row = std::make_shared<AiProfileRow>();
 	// The loader hands a single NUL for an empty file (Document's load): an empty profile, of no type and no line, as
 	// a profile of no type saves.
 	const size_t size = bytes.size() == 1 && bytes[0] == 0 ? 0 : bytes.size();
-	row->profile = aip::parse_profile(bytes.data(), size, *notes, &unread);
+	row->profile = aip::parse_profile(bytes.data(), size, &unread);
 	const std::string text(bytes.begin(), bytes.end());
+	// The 1-based line of a byte offset (CR LF and LF each end a line).
+	const auto line_of_offset = [&text](size_t offset) {
+		size_t line = 1;
+		for (size_t i = 0; i < offset && i < text.size(); ++i)
+			if (text[i] == '\n') ++line;
+		return line;
+	};
 	for (const aip::UnreadLine &line : unread) {
 		std::string why;
 		switch (line.why) {
@@ -323,12 +328,9 @@ bool AiProfileDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std
 		case aip::UnreadLine::Why::OtherType: why = "only the other type's key set holds it"; break;
 		case aip::UnreadLine::Why::Unknown: why = "no key of the reader's is it"; break;
 		}
-		issues.push_back({false, line_of_offset(text, line.offset), "Profile", line.key,
+		issues.push_back({false, line_of_offset(line.offset), "Profile", line.key,
 		                  "The game reads nothing of '" + line.key + "': " + why + " [orig: AIProfile_ParseProperty @ 0x45DE70]."});
 	}
-	auto noted = std::make_shared<NotedFileState>();
-	noted->notes = std::move(notes);
-	state = std::move(noted);
 	shape(*row);
 	rows.push_back(std::move(row));
 	return true;
@@ -339,22 +341,17 @@ SerializeResult AiProfileDocument::serialize() const {
 	const aip::Profile *p = profile();
 	if (!p) return result;
 	std::string text, error;
-	bool rewritten = false;
-	if (!aip::write_profile(*p, noted_layout(file_state()), text, error, &rewritten)) {
+	if (!aip::write_profile(*p, text, error)) {
 		result.issues.push_back({true, 0, "Profile", std::string(), "The profile could not be written: " + error});
 		return result;
 	}
 	result.text = std::move(text);
-	if (rewritten)
-		result.notes.push_back("The profile is written in the editor's form: the file's lines would not read back as it "
-		                       "is (a key repeated or a type line moved), so its comments and spacing are not kept.");
 	return result;
 }
 
 std::string AiProfileDocument::save_words() const {
-	return "Saving writes the file in the form it was read in: its comments, its spacing, how each number is spelled "
-	       "and the lines the game reads nothing of; a changed value changes its own line, and a key set anew goes "
-	       "after the key before it. The game reads the same profile.";
+	return "Saving writes the profile in the editor's form, from what the game reads of it: its type, then each key "
+	       "its type reads. Comments and the lines the game reads nothing of are not kept.";
 }
 
 std::shared_ptr<Node> AiProfileDocument::make_node(NodeKind, NodeId, const std::vector<std::shared_ptr<const Node>> &,

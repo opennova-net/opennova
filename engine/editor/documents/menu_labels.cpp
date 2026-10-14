@@ -72,7 +72,8 @@ std::string action_words(const Document &document, const NodeAddress &address) {
 	if (is(type, "POP_SCREEN")) return "Go back";
 	if (is(type, "URL")) return target.empty() ? std::string("Open a web page (none named)") : "Open " + target;
 	if (is(type, "TAB")) return target.empty() ? std::string("Tab to a control") : "Tab to " + target;
-	if (!mnu::known_token(type, mnu::kActionTypes)) return type.empty() ? std::string("Does nothing (no action type)") : "Does nothing (" + type + " is no action type)";
+	// The parse holds a TYPE it knows, else none (formats/mnu: another token sets no code).
+	if (!mnu::known_token(type, mnu::kActionTypes)) return "Does nothing (no action type)";
 	const std::string words = choice_words(document, address, "type");
 	return target.empty() ? words : words + ": " + target;
 }
@@ -128,10 +129,25 @@ std::string menu_record_label(const Document &document, const NodeAddress &addre
 		const std::string file = first_line(text_of(document, address, "file"));
 		return value.empty() && file.empty() ? std::string() : value + " shows " + file;
 	}
-	if (token == "attribute") {
-		const std::string name = text_of(document, address, "name");
-		const std::string value = text_of(document, address, "value");
-		return name.empty() ? std::string() : value.empty() ? name : name + "=" + value;
+	if (token == "gopher_targets") {
+		const std::string target = first_line(text_of(document, address, "value"));
+		return target.empty() ? std::string() : "Target: " + target;
+	}
+	if (token == "gopher_categories") {
+		const std::string level = first_line(text_of(document, address, "level"));
+		return level.empty() ? std::string("Category") : "Category " + level;
+	}
+	if (token == "entry") {
+		const std::string name = first_line(text_of(document, address, "name"));
+		const std::string text = first_line(text_of(document, address, "text"));
+		return (flag_of(document, address, "info") ? std::string("Info") : std::string("Button")) +
+		       (name.empty() ? std::string() : " " + name) + (text.empty() ? std::string() : ": " + text);
+	}
+	if (token == "glb_server_fields.field") {
+		const std::string text = first_line(text_of(document, address, "text"));
+		Value which;
+		const int64_t slot = document.get(address, "which", which) && std::holds_alternative<int64_t>(which) ? std::get<int64_t>(which) : 0;
+		return "Field " + std::to_string(slot) + (text.empty() ? std::string() : ": " + text);
 	}
 	return std::string();
 }

@@ -1,6 +1,7 @@
 // The character attributes document (ADR 0046 DI-09's charattr follow-up; S23 B its rows): charattr.def's classes as
-// rows read as the game's loader reads them (formats/charattr) with the file's layout modeled, written back over it:
-// the file as it was but for a changed value's line. Each class the game reads names three items by their type ids
+// rows read as the game's loader reads them (formats/charattr), a save writing the table in the format's writer's form
+// from the rows alone (the S26 ruling), a changed value its own line. Each class the game reads names three items by
+// their type ids
 // (the items.def id less 100000): references of its camouflage fields, which reach the items (Used by); a type id no
 // item has is a warning in the game's words (a player of the class spawns as items.def's first row); a rename of the
 // item's id writes the type id back at its line. A section the game never reads is no row and names nothing, and is a
@@ -8,7 +9,7 @@
 // and a class read with no camouflage item. A class added is the next; one removed the last (the loader stops at the
 // first class it lacks). A file in the ConfigFile's binary (CBIN) form opens read only, its classes as the game reads
 // them, with a listed finding. The retail leg (OPENNOVA_JO_DIR): the install's charattr.def, base and each expansion,
-// through the document byte for byte.
+// through the document: saved as the format's writer writes what its loader reads, a fixed point.
 #include <algorithm>
 #include <cstdio>
 #include <string>
@@ -24,6 +25,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <formats/cbin/binary_config.h>
+#include <formats/charattr/charattr.h>
 
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
@@ -46,6 +48,14 @@ std::string crlf(const std::string &text) {
 }
 
 using editor_test::set_edit;
+
+// The text a save of `text` writes: the format's writer's of the table its loader reads.
+std::string written(const std::string &text) {
+	charattr::Table table;
+	charattr::read_table(reinterpret_cast<const uint8_t *>(text.data()), text.size(), table);
+	std::string out, error;
+	return charattr::compose_table(table, out, error) ? out : std::string();
+}
 
 struct Project {
 	editor_test::TempProjectDir dir{"opennova_editor_charattr_document"};
@@ -110,14 +120,17 @@ const Node *class_row(const CharAttrDocument &document, int id) {
 
 } // namespace
 
-// The rows: the classes the game reads, each its keys; the save the file as it was but for a changed value's line; a
-// class added the next, one removed the last alone.
+// The rows: the classes the game reads, each its keys; the save the writer's text of them (the sections and the
+// lines the game reads nothing of left out), a changed value its own line; a class added the next, one removed the
+// last alone.
 static int test_rows() {
 	const std::string text = crlf(kCharAttr);
 	CharAttrDocument document;
 	Diagnostic error;
 	TEST_EXPECT(document.load_bytes(bytes_of(text), "charattr.def", AssetKind::CharAttrDefs, "jo", error));
-	TEST_EXPECT(document.rows().size() == 2 && document.serialize().text == text);
+	TEST_EXPECT(document.rows().size() == 2 && !written(text).empty() && document.serialize().text == written(text));
+	TEST_EXPECT(document.serialize().text.find("CHARACTER4") == std::string::npos &&
+	            document.serialize().text.find("//") == std::string::npos);
 	const Node *one = class_row(document, 1), *two = class_row(document, 2);
 	TEST_EXPECT(one && two);
 	if (!one || !two) return 1;
@@ -129,14 +142,14 @@ static int test_rows() {
 	TEST_EXPECT(document.record_title(first) == "CHARACTER1 (AutoScope)");
 	// A value changed: its own line.
 	TEST_EXPECT(document.apply(set_edit(first, "stealth", 30.0), error));
-	std::string expected = text;
-	expected.replace(expected.find("STEALTH = 25"), 12, "STEALTH = 30.0");
-	TEST_EXPECT(document.serialize().text == expected);
+	std::string edited = text;
+	edited.replace(edited.find("STEALTH = 25"), 12, "STEALTH = 30");
+	TEST_EXPECT(document.serialize().text == written(edited));
 	// The attributes are the table's words' flags.
 	TEST_EXPECT(!document.apply(set_edit(first, "attributes", int64_t(0x40)), error));
 	TEST_EXPECT(document.apply(set_edit(second, "attributes", int64_t(charattr::kMedic)), error));
-	TEST_EXPECT(document.serialize().text.find("[CHARACTER2]\r\nSTEALTH = quiet\r\nJUNGLE_CAMMO = 7002\r\nDESERT_CAMMO = 7002\r\n"
-	                                           "ATTRIBUTES = Medic") != std::string::npos);
+	TEST_EXPECT(document.serialize().text.find("[CHARACTER2]\r\nJUNGLE_CAMMO = 7002\r\nDESERT_CAMMO = 7002\r\n"
+	                                           "ATTRIBUTES = Medic\r\n") != std::string::npos);
 	// A class added: CHARACTER3 after the file's two, its section in the writer's form; a key set on it, its line.
 	const std::string two_classes = crlf("// classes\n[CHARACTER1]\nSTEALTH = 25\nJUNGLE_CAMMO = 7001\n\n[CHARACTER2]\nJUNGLE_CAMMO = 7002\n");
 	CharAttrDocument grown;
@@ -151,7 +164,8 @@ static int test_rows() {
 	if (!three) return 1;
 	TEST_EXPECT(grown.apply(set_edit({three->id, kClass, 0}, "desert_cammo", int64_t(7003)), error));
 	const std::string saved = grown.serialize().text;
-	TEST_EXPECT(saved.rfind(two_classes, 0) == 0 && saved.find("[CHARACTER3]\r\nDESERT_CAMMO = 7003\r\n") != std::string::npos);
+	TEST_EXPECT(saved.rfind(written(two_classes), 0) == 0 &&
+	            saved.find("[CHARACTER3]\r\nDESERT_CAMMO = 7003\r\n") != std::string::npos);
 	CharAttrDocument again;
 	TEST_EXPECT(again.load_bytes(bytes_of(saved), "charattr.def", AssetKind::CharAttrDefs, "jo", error) && again.rows().size() == 3);
 	// The middle class is not removed (the loader would stop there); the last is.
@@ -160,7 +174,7 @@ static int test_rows() {
 	remove.address = {class_row(grown, 2)->id, kClass, 0};
 	TEST_EXPECT(!grown.apply(remove, error));
 	remove.address = {three->id, kClass, 0};
-	TEST_EXPECT(grown.apply(remove, error) && grown.rows().size() == 2 && grown.serialize().text == two_classes);
+	TEST_EXPECT(grown.apply(remove, error) && grown.rows().size() == 2 && grown.serialize().text == written(two_classes));
 	std::printf("rows: the classes read, a value's own line, the attributes' words, a class added and the last removed\n");
 	return 0;
 }
@@ -217,7 +231,8 @@ static int test_references() {
 	return 0;
 }
 
-// A rename of the item's id writes the type id back at the class's lines; the unread sections' numbers stay.
+// A rename of the item's id writes the type id back at the read classes' lines, the save the writer's text (the unread
+// sections, whose numbers name nothing, left out).
 static int test_rename() {
 	Project project;
 	const std::string items = project.path("items.def"), charattr = project.path("charattr.def");
@@ -233,13 +248,12 @@ static int test_rename() {
 	TEST_EXPECT(renamed_outcome.done());
 	project.rescan();
 	const std::string text = project.read(charattr);
-	// CHARACTER2's two now 7003; CHARACTER4's three and the repeat's one, never read, stay 7002.
+	// CHARACTER2's two now 7003; CHARACTER4's three and the repeat's one, never read, not written.
 	size_t renamed = 0, kept = 0;
 	for (size_t at = text.find("7003"); at != std::string::npos; at = text.find("7003", at + 1)) ++renamed;
 	for (size_t at = text.find("7002"); at != std::string::npos; at = text.find("7002", at + 1)) ++kept;
-	TEST_EXPECT(renamed == 2 && kept == 4);
-	TEST_EXPECT(text.find("[CHARACTER2]\r\nSTEALTH = quiet\r\nJUNGLE_CAMMO = 7003\r\nDESERT_CAMMO = 7003\r\n") !=
-	            std::string::npos);
+	TEST_EXPECT(renamed == 2 && kept == 0);
+	TEST_EXPECT(text.find("[CHARACTER2]\r\nJUNGLE_CAMMO = 7003\r\nDESERT_CAMMO = 7003\r\n") != std::string::npos);
 	size_t reaching = 0;
 	for (const GraphEdge *edge : edges_of(project.graph(), charattr)) reaching += edge->value == "107003" ? 1 : 0;
 	TEST_EXPECT(reaching == 2);
@@ -263,16 +277,20 @@ static int test_retail() {
 		CharAttrDocument document;
 		Diagnostic error;
 		TEST_EXPECT(document.load_bytes(bytes, "charattr.def", AssetKind::CharAttrDefs, "jo", error) && !document.blocked());
-		const SerializeResult written = document.serialize();
-		if (!written.ok() || written.text != std::string(bytes.begin(), bytes.end()) || !written.notes.empty()) {
-			std::fprintf(stderr, "FAIL the install's charattr.def %s is not saved as it was\n", expansion.c_str());
+		const SerializeResult saved = document.serialize();
+		CharAttrDocument again;
+		if (!saved.ok() || saved.text != written(std::string(bytes.begin(), bytes.end())) ||
+		    !again.load_bytes(bytes_of(saved.text), "charattr.def", AssetKind::CharAttrDefs, "jo", error) ||
+		    again.serialize().text != saved.text) {
+			std::fprintf(stderr, "FAIL the install's charattr.def %s is not saved as the format's writer writes it\n",
+			             expansion.c_str());
 			return 1;
 		}
 		size_t overruns = 0;
 		for (const Diagnostic &d : validate_charattr_file(document)) overruns += d.code() == "document.config_overrun";
 		TEST_EXPECT(overruns == 0);
-		std::printf("retail: charattr.def %s, %zu classes, saved byte for byte\n", expansion.empty() ? "(base)" : expansion.c_str(),
-		            document.rows().size());
+		std::printf("retail: charattr.def %s, %zu classes, saved as the format's writer writes it, a fixed point\n",
+		            expansion.empty() ? "(base)" : expansion.c_str(), document.rows().size());
 	}
 	return 0;
 }

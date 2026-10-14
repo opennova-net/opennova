@@ -37,16 +37,15 @@ StyleValueUse style_value_use(const MnsDocument &document, const NodeAddress &li
 	Value text;
 	const std::string shown =
 			document.get(address, "value", text) ? std::get<std::string>(text) : std::string();
-	const bool fixed = document.frozen(*row);
 	// The guess from the value alone only where no use says what it is: a string id's, a name's
 	// or a shown text's value is none of a colour, a font and an image, hex digits or not.
-	out.colour = !fixed && (colour || (!font && !image && !other && mnu::color_reads_whole(shown)));
+	out.colour = colour || (!font && !image && !other && mnu::color_reads_whole(shown));
 	out.file = value;
 	if (font || value.reference == ReferenceKind::Font) out.file.reference = ReferenceKind::Font;
 	else if (image || value.reference == ReferenceKind::MenuTexture)
 		out.file.reference = ReferenceKind::MenuTexture;
 	else out.file.reference = ReferenceKind::None;
-	out.picks = !fixed && !out.colour && graph && out.file.reference != ReferenceKind::None;
+	out.picks = !out.colour && graph && out.file.reference != ReferenceKind::None;
 	return out;
 }
 

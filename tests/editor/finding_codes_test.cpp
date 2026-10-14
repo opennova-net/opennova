@@ -23,7 +23,6 @@
 #include <editor/session/finding_codes.h>
 #include <editor/session/session_json.h>
 #include <base/io/json.h>
-#include <formats/mns/mns_document.h>
 #include <runtime/menu/menu_frame.h>
 
 #include <algorithm>
@@ -150,7 +149,7 @@ static int test_lookup() {
 	TEST_EXPECT(std::string(finding_code(StringsFinding::Regrouped).token) == "strings.regrouped");
 	TEST_EXPECT(std::string(finding_code(MenuFinding::RenderMapping).token) == "menu.render.mapping");
 	TEST_EXPECT(std::string(finding_code(StyleFinding::LineEnding).token) == "style.line_ending");
-	TEST_EXPECT(std::string(finding_code(StyleFinding::LoneBackslash).token) == "style.lone_backslash");
+	TEST_EXPECT(std::string(finding_code(StyleFinding::Backslash).token) == "style.backslash");
 	TEST_EXPECT(std::string(finding_code(StyleFinding::Stops).token) == "style.stops");
 	TEST_EXPECT(std::string(finding_code(StyleFinding::MixedUse).token) == "style.mixed_use");
 	TEST_EXPECT(std::string(finding_code(ModelFinding::FrameMissing).token) == "model.frame_missing");
@@ -183,8 +182,7 @@ static int test_stand_in_hides_nothing() {
 
 // A type's codes are one family, its table's group: every token starts with its group's key; the
 // menu's render check has a row per compiler note, its token menu.render. and the note's, found by
-// the note; the stylesheet's reader rows are the stylesheet reader's codes, style. and the code's
-// token with '_' for '-' (its line-ending the validator's line_ending).
+// the note.
 static int test_type_tables() {
 	for (size_t i = 1; i <= kDocumentTypeCount; ++i) {
 		const DocumentType *type = registered_document_type(static_cast<DocumentTypeId>(i));
@@ -232,24 +230,14 @@ static int test_type_tables() {
 	                     "menu.render.text_id_missing", "menu.render.text_table_missing",
 	                     "menu.render.texture_missing" }));
 	TEST_EXPECT(noted(FindingProblem::Info) ==
-	            Tokens({ "menu.render.image_height_shared", "menu.render.item_kind_as_text",
-	                     "menu.render.list_rows_clipped", "menu.render.table_cells_deferred" }));
-	TEST_EXPECT(noted(FindingProblem::Warning).size() == 21);
+	            Tokens({ "menu.render.image_height_shared", "menu.render.list_rows_clipped",
+	                     "menu.render.table_cells_deferred" }));
+	TEST_EXPECT(noted(FindingProblem::Warning).size() == 19);
 	// Only a render check's row says it; its screen it could not map is an Error its check makes.
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) {
 		            return row.problem != FindingProblem::None && row.source != FindingSource::RenderCheck;
 	            }).empty());
 	TEST_EXPECT(finding_code(MenuFinding::RenderMapping).problem == FindingProblem::None);
-	for (size_t i = 0; i < mns::kDiagnosticCodeCount; ++i) {
-		const auto code = static_cast<mns::DiagnosticCode>(i);
-		std::string token = "style.";
-		for (const char *c = mns::diagnostic_code_token(code); *c; ++c) token += *c == '-' ? '_' : *c;
-		const FindingCodeRow &row = finding_code(code);
-		if (token != row.token)
-			std::fprintf(stderr, "%s reads as %s\n", mns::diagnostic_code_token(code), row.token);
-		TEST_EXPECT(token == row.token && editor_test::finding_row(token) == &row && style_finding_codes().holds(&row));
-	}
-	TEST_EXPECT(&finding_code(mns::DiagnosticCode::LineEnding) == &finding_code(StyleFinding::LineEnding));
 	return 0;
 }
 
@@ -288,11 +276,10 @@ static int test_columns() {
 	TEST_EXPECT(fixed_by(FindingFix::ItemId) == Tokens({ "catalog.item_identity", "catalog.reserved_kind", "catalog.reserved_name" }));
 	// DI-11: what a finding's maker planned with its file at hand (Diagnostic::planned): an id, a name or a key
 	// of its own for a record no lookup finds, an end pose's trigger moved, an entity set where the game grounds it
-	// (DI-28); a variable no menu names, removed; a file's line ends restored to CR LF (the line-ends rule); a
-	// ConfigFile's lines its loader reads the same without, commented out under the reader's pool (the pool rule);
-	// the .mis beside a mission (S24 Names): the names that still match taken, or the file written from the mission.
+	// (DI-28); a variable no menu names, removed; a file's line ends restored to CR LF (the line-ends rule); the .mis
+	// beside a mission (S24 Names): the names that still match taken, or the file written from the mission.
 	TEST_EXPECT(fixed_by(FindingFix::EditRecord) ==
-	            Tokens({ "animation.end_pose_trigger", "catalog.name_duplicate", "document.config_overrun", "document.line_ends",
+	            Tokens({ "animation.end_pose_trigger", "catalog.name_duplicate", "document.line_ends",
 	                     "menu.duplicate_screen",
 	                     "menu.duplicate_window", "mission.names_foreign", "mission.names_outside", "mission.names_unmatched",
 	                     "mission.off_ground",
@@ -304,15 +291,20 @@ static int test_columns() {
 	TEST_EXPECT(fixed_by(FindingFix::FallbackRow) == Tokens({ "catalog.first_row" }));
 	// A finished normal map a normal-map slot's row loads as a diffuse: its row given type 4.
 	TEST_EXPECT(fixed_by(FindingFix::NormalRowType) == Tokens({ "texture.normal_slot_loader" }));
-	// (A catalog's input the game ignores has none: a save keeps it as the file has it, the demo round's bug 3;
-	// nor a menu's, kept with its look, D-MNU-22.)
+	// (S26: every writer writes its model alone, so a save drops the input the game ignores of each kind.)
 	TEST_EXPECT(fixed_by(FindingFix::Rewrite) ==
-	            Tokens({ "animation_map.ignored_input", "dialog_bank.ignored_input", "environment.ignored_input",
-	                     "face_animation.ignored_input", "font.ignored_input", "mission.event_order",
+	            Tokens({ "ai_profile.ignored_input", "animation_map.ignored_input", "avatars.ignored_input",
+	                     "catalog.ignored_input", "dialog_bank.ignored_input", "environment.ignored_input",
+	                     "face_animation.ignored_input", "font.ignored_input", "menu.ignored_input", "mission.event_order",
 	                     "mission.rewrite_differs", "music_bank.ignored_input", "script.line_ending",
-	                     "shader.form", "sound_bank.ignored_input", "strings.regrouped", "style.line_ending",
-	                     "terrain.ignored_input", "til.ignored_input" }));
+	                     "shader.form", "sound_bank.ignored_input", "strings.regrouped", "style.ignored_input",
+	                     "style.line_ending", "terrain.ignored_input", "til.ignored_input" }));
 	const std::map<std::string, std::string> rewrites = {
+		{ "ai_profile.ignored_input", "without the input the game ignores" },
+		{ "avatars.ignored_input", "without the input the game ignores" },
+		{ "catalog.ignored_input", "without the input the game ignores" },
+		{ "menu.ignored_input", "without the input the game ignores" },
+		{ "style.ignored_input", "without the input the game ignores" },
 		{ "animation_map.ignored_input", "without the input the game ignores" },
 		{ "dialog_bank.ignored_input", "without the input the game ignores" },
 		{ "environment.ignored_input", "with each line as the game reads it" },
@@ -341,7 +333,8 @@ static int test_columns() {
 	                     "menu.invalid_input", "menu.unserializable", "menu.variable_number", "mission.invalid_input",
 	                     "mission.runs_past_table",
 	                     "mission.unserializable",
-	                     "music_bank.invalid_input", "music_script.invalid_input", "music_script.unserializable", "sound_bank.invalid_input",
+	                     "music_bank.invalid_input", "music_script.invalid_input", "music_script.unserializable",
+	                     "score.fanfare_unkept", "sound_bank.invalid_input",
 	                     "sound_bank.unserializable", "sound_profiles.unserializable", "strings.invalid_input",
 	                     "terrain.invalid_input", "til.invalid_input" }));
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.place == FindingPlace::File; }) ==
@@ -363,8 +356,7 @@ static int test_columns() {
 	                     "import.encode", "import.font", "import.input", "import.migrate", "import.option", "import.read",
 	                     "import.scene", "import.sidecar", "import.terrain", "import.write", "menu.invalid_input",
 	                     "mission.runs_past_table", "model.light_no_registers", "project.root.unreadable", "style.hangs",
-	                     "style.unknown_directive", "style.value_starts_with_hash", "terrain.refused",
-	                     "texture.particle_too_big", "texture.pcx_overrun", "texture.wrong_reader" }));
+	                     "terrain.refused", "texture.particle_too_big", "texture.pcx_overrun", "texture.wrong_reader" }));
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.integrity; }) ==
 	            Tokens({ "asset.name.duplicate", "asset.name.empty", "asset.name.too_long", "build.archive",
 	                     "build.expansion.base_missing", "build.name_unstorable", "document.decode", "document.kind",
@@ -382,8 +374,7 @@ static int test_columns() {
 	            Tokens({ "avatars.reader_stops", "build.expansion.exp_name", "document.config_overrun",
 	                     "hudfx.power_slots_empty",
 	                     "menu.invalid_input", "mission.runs_past_table", "model.light_no_registers", "style.hangs",
-	                     "style.unknown_directive", "style.value_starts_with_hash", "terrain.refused",
-	                     "texture.particle_too_big", "texture.pcx_overrun", "texture.wrong_reader" }));
+	                     "terrain.refused", "texture.particle_too_big", "texture.pcx_overrun", "texture.wrong_reader" }));
 	// A finding whose file the editor's model cannot carry where the game reads it on (unwritable_code) gates only
 	// an open file with unsaved edits, which the build's Save cannot write: a closed one packs as stored. One the
 	// game's own reader stops at gates either way, saying what the game does.
@@ -462,13 +453,14 @@ static int test_columns() {
 		for (const FindingCodeRow &row : table.rows) {
 			const std::string token = row.token;
 			// A row whose file does not serialize: the editor's own (.unserializable, .invalid_input), input the game's
-			// reader stops at that the model cannot carry (.reader_stops, a run of events past its table), or a number
-			// the menu writer cannot hold (menu.variable_number). Each gates a build only with the game's refusal said
+			// reader stops at that the model cannot carry (.reader_stops, a run of events past its table), a number
+			// the menu writer cannot hold (menu.variable_number), or a fanfare pair the score writer writes none of (the
+			// reader would not read it back, score.fanfare_unkept). Each gates a build only with the game's refusal said
 			// (game_stops_code); the rest are unwritable_code, listed, gating only an open file with unsaved edits. A
 			// game refusal of what a file that serializes holds (game_fails_code) blocks no save.
 			TEST_EXPECT(row.blocks_save == (ends_with(token, ".unserializable") || ends_with(token, ".invalid_input") ||
 			                                ends_with(token, ".reader_stops") || token == "mission.runs_past_table" ||
-			                                token == "menu.variable_number"));
+			                                token == "menu.variable_number" || token == "score.fanfare_unkept"));
 			TEST_EXPECT(!(row.blocks_save && row.gates_build) || row.game_refusal != nullptr);
 			TEST_EXPECT(!starts_with(token, "asset.name.") || row.place == FindingPlace::File);
 			const std::string key = finding_group_key(row.group);
