@@ -100,6 +100,8 @@ struct Host {
 	inmatch::NapiNPConnection &add(uint8_t slot, bool local) {
 		inmatch::NapiNPConnection c;
 		c.type = local ? inmatch::NapiNPConnection::kTypeClientSide : inmatch::NapiNPConnection::kTypeServerSide;
+		// A remote joiner rides a socket; the link's default is the local loopback.
+		c.link.mode = local ? replication::TransportMode::Loopback : replication::TransportMode::Client;
 		c.phase = inmatch::ConnectionPhase::PlayerAdded;
 		c.reply.player_slot = slot;
 		ctx.np_protocol.connection_list.push_back(std::move(c));
