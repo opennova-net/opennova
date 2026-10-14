@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -93,6 +94,51 @@ bool prepare_expansion_run(const std::string &install, const std::string &build_
                            const std::string &run_dir, const std::string &copy_cache, Diagnostic &error,
                            const FileLink &link = io::link_file, std::vector<std::string> *staged = nullptr,
                            bool seed_root_reads = true);
+
+// The install's base game an expansion's Play stages (prepare_expansion_run): its archives and the loose files
+// beside them, a file the build's expansion packs left out. False with `error` (play.install_missing: no install,
+// none of the game's archives; play.install_copy: a build without the expansion's folder).
+bool expansion_base_files(const std::string &install, const std::string &build_dir, const std::string &expansion,
+                          std::vector<std::string> &base, Diagnostic &error);
+
+// The copies an expansion's Play needs in the copy cache, made over the editor's frames (S26 C16): where the run
+// directories' volume will not link the install's files (`link` refuses a probe), each file the game only reads
+// that the cache lacks as the install's file stands, copied a slice of bytes at a time (the build's operation
+// steps it once the build lands, BuildOperation), so prepare_expansion_run then links every one from the cache
+// at once. Each is copied beside its place and put there whole, the cache's record written after each: a fill
+// cancelled or failed part way leaves every file the record trusts whole, and the staging copies the rest.
+class InstallCopyFill {
+public:
+	InstallCopyFill();
+	~InstallCopyFill();
+	InstallCopyFill(InstallCopyFill &&) noexcept;
+	InstallCopyFill &operator=(InstallCopyFill &&) noexcept;
+
+	// What the fill copies for an expansion's Play over `install` from `build_dir`, its run directories under
+	// `run_root`: nothing (empty()) where there is no cache, the volume links, the cache holds every file, or the
+	// base cannot be listed (the staging refuses it as Play starts).
+	static InstallCopyFill plan(const std::string &install, const std::string &build_dir, const std::string &expansion,
+	                            const std::string &run_root, const std::string &copy_cache,
+	                            const FileLink &link = io::link_file);
+	bool empty() const;
+	// About `budget` bytes more copied (a file's slices, files in turn); true once every file is copied, or it
+	// stopped (cancelled, failed).
+	bool step(uint64_t budget);
+	void cancel();
+	bool cancelled() const;
+	bool failed() const;
+	const std::string &reason() const; // why it failed
+	uint64_t bytes_done() const;
+	uint64_t bytes_total() const;
+	size_t files_done() const;
+	size_t files_total() const;
+	// What the operation's progress says: "Copying the game install's files for the expansion: 3 of 12".
+	std::string label() const;
+
+private:
+	struct State;
+	std::unique_ptr<State> state_;
+};
 
 // A standalone build staged in `run_dir` for the runtime to mount there (make_play_launch_plan's
 // `on_run_dir`): every file of the build but its record, one the game only reads linked (copied where

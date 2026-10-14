@@ -1,11 +1,15 @@
 #include <editor/run/launch_plan.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <filesystem>
 #include <system_error>
 #include <utility>
+#include <vector>
 
+#include <base/io/file_io.h>
 #include <base/io/file_time.h>
+#include <base/io/os_path.h>
 #include <base/io/hash.h>
 #include <base/io/json.h>
 #include <base/io/strutil.h>
@@ -171,6 +175,45 @@ std::string install_copy_dir(const std::string &copy_cache, const std::string &i
 	return join_path(copy_cache, io::hex64(io::fnv1a64_bytes(io::kFnv1a64Offset, key.data(), key.size())));
 }
 
+// The copy cache's folder for `install` with its record as the disk holds it (none for no cache).
+InstallCopies load_install_copies(const std::string &copy_cache, const std::string &install) {
+	InstallCopies copies;
+	if (copy_cache.empty()) return copies;
+	copies.dir = install_copy_dir(copy_cache, install);
+	std::string text, message;
+	io::JsonValue record;
+	if (io::read_file_text(join_path(copies.dir, kInstallCopyRecordFileName), text, message) &&
+	    io::json_parse(text, record, message) && record.is_object())
+		copies.record = std::move(record);
+	return copies;
+}
+
+// Whether the cache holds `name` as the install's file stands: its record trusts a copy of that size and last
+// write, and the copy is whole (that size).
+bool cache_fresh(const InstallCopies &copies, const std::string &name, uint64_t size, int64_t written) {
+	std::error_code ec;
+	const io::JsonValue *was = copies.record.get(strutil::to_lower(name));
+	return was && was->is_object() && uint64_t(was->get_number("size", -1.0)) == size &&
+	       was->get_string("modified", "") == io::hex64(uint64_t(written)) &&
+	       fs::file_size(system_path(join_path(copies.dir, name)), ec) == size && !ec;
+}
+
+// A copy of `name` put in the cache, recorded by the size and last write it was copied at: trusted by the next
+// run only when that write had settled as this pass began (InstallCopies).
+void record_copy(InstallCopies &copies, const std::string &name, uint64_t size, int64_t written) {
+	io::JsonValue entry = io::JsonValue::make_object();
+	entry.set("size", io::JsonValue::make_number(double(size)));
+	entry.set("modified", io::JsonValue::make_string(io::hex64(uint64_t(written))));
+	if (io::file_stamp_settled(written, copies.pass_began)) copies.record.set(strutil::to_lower(name), std::move(entry));
+	else copies.record.set(strutil::to_lower(name), io::JsonValue::make_null()); // not trusted next run
+	copies.changed = true;
+}
+
+// The record written beside the copies; false with why.
+bool write_install_copies(const InstallCopies &copies, std::string &reason) {
+	return io::write_file_atomic(join_path(copies.dir, kInstallCopyRecordFileName), io::json_write(copies.record), reason);
+}
+
 // The install's file `name` at `to` in the run directory: one the game may write copied from the
 // install, fresh, never linked or cached; one it only reads linked, else (another volume) linked
 // from its copy in the copy cache, copied there first when the cache has none of its size and last
@@ -190,23 +233,14 @@ bool stage_install_file(const fs::path &install, const std::string &name, const 
 	}
 	const int64_t written = io::file_modified_ticks(system_path(from));
 	const std::string cached = join_path(copies.dir, name);
-	const io::JsonValue *was = copies.record.get(strutil::to_lower(name));
-	const bool fresh = was && was->is_object() && uint64_t(was->get_number("size", -1.0)) == size &&
-	                   was->get_string("modified", "") == io::hex64(uint64_t(written)) &&
-	                   fs::file_size(system_path(cached), ec) == size && !ec;
-	if (!fresh) {
+	if (!cache_fresh(copies, name, size, written)) {
 		// Copied beside its place, then put there: a cache a copy was cut short in holds no torn file.
 		const std::string partial = cached + ".tmp";
 		fs::remove(system_path(partial), ec);
 		if (!io::ensure_directory(copies.dir, reason) || !copy_to(path_of(from), path_of(partial), reason) ||
 		    !io::replace_file(partial, cached, reason))
 			return false;
-		io::JsonValue entry = io::JsonValue::make_object();
-		entry.set("size", io::JsonValue::make_number(double(size)));
-		entry.set("modified", io::JsonValue::make_string(io::hex64(uint64_t(written))));
-		if (io::file_stamp_settled(written, copies.pass_began)) copies.record.set(strutil::to_lower(name), std::move(entry));
-		else copies.record.set(strutil::to_lower(name), io::JsonValue::make_null()); // not trusted next run
-		copies.changed = true;
+		record_copy(copies, name, size, written);
 	}
 	copies.used.push_back(strutil::to_lower(name));
 	return link(cached, utf8_of(to), reason) || copy_to(path_of(cached), to, reason);
@@ -315,6 +349,53 @@ bool stage_expansion_folder(const fs::path &build, const fs::path &run, const st
 bool prepare_expansion_run(const std::string &install, const std::string &build_dir, const std::string &expansion,
                            const std::string &run_dir, const std::string &copy_cache, Diagnostic &error,
                            const FileLink &link, std::vector<std::string> *staged_files, bool seed_root_reads) {
+	std::vector<std::string> base;
+	if (!expansion_base_files(install, build_dir, expansion, base, error)) return false;
+	const std::string folder = vfs_expansion_dir(std::string(), expansion);
+	const fs::path install_root = path_of(install);
+	const fs::path run = path_of(run_dir);
+	InstallCopies copies = load_install_copies(copy_cache, install);
+	const auto staged = [&](bool ok, const std::string &from, const std::string &reason) {
+		if (!ok)
+			error = make_finding(CoreFinding::PlayInstallCopy, DiagnosticSeverity::Error,
+			                     "Could not stage " + from + " in " + run_dir + ": " + reason);
+		return ok;
+	};
+	// The files the game reads from its folder by name (kInstallRootReads), copied where the run directory
+	// holds none of its own (seeds: the copy a run before kept stays).
+	std::vector<std::string> seeds;
+	for (const char *read : kInstallRootReads) {
+		const std::string found = seed_root_reads ? file_named(install, read) : std::string();
+		if (!found.empty() && file_named(run_dir, read).empty()) seeds.push_back(found);
+	}
+	bool ok = true;
+	for (const std::string &name : base) {
+		std::string reason;
+		add_staged(staged_files, path_of(name));
+		ok = staged(stage_install_file(install_root, name, run / path_of(name), copies, link, reason),
+		            utf8_of(install_root / path_of(name)), reason);
+		if (!ok) break;
+	}
+	for (const std::string &name : seeds) {
+		if (!ok) break;
+		std::string reason;
+		ok = staged(copy_to(install_root / path_of(name), run / path_of(name), reason), utf8_of(install_root / path_of(name)),
+		            reason);
+	}
+	if (ok && !copy_cache.empty()) prune_install_copies(copy_cache, copies);
+	if (copies.changed) {
+		std::string message;
+		write_install_copies(copies, message);
+	}
+	if (!ok) return false;
+	// The expansion's folder, a directory of the run's own (the game writes its weapon.sav there, which
+	// the run keeps), its files the build's.
+	return stage_expansion_folder(path_of(build_dir), run, folder, link, error, staged_files);
+}
+
+bool expansion_base_files(const std::string &install, const std::string &build_dir, const std::string &expansion,
+                          std::vector<std::string> &base, Diagnostic &error) {
+	base.clear();
 	std::error_code ec;
 	if (install.empty() || !fs::is_directory(system_path(install), ec)) {
 		error = make_finding(CoreFinding::PlayInstallMissing, DiagnosticSeverity::Error,
@@ -328,30 +409,12 @@ bool prepare_expansion_run(const std::string &install, const std::string &build_
 		                     "The game install " + install + " has none of the game's archives for the expansion to play over.");
 		return false;
 	}
-	const std::string folder = vfs_expansion_dir(std::string(), expansion);
-	const fs::path built = path_of(build_dir) / path_of(folder);
+	const fs::path built = path_of(build_dir) / path_of(vfs_expansion_dir(std::string(), expansion));
 	if (!fs::is_directory(system_path(utf8_of(built)), ec)) {
 		error = make_finding(CoreFinding::PlayInstallCopy, DiagnosticSeverity::Error,
 		                     "The build " + build_dir + " holds no expansion " + expansion + ".");
 		return false;
 	}
-	const fs::path install_root = path_of(install);
-	const fs::path run = path_of(run_dir);
-	InstallCopies copies;
-	if (!copy_cache.empty()) {
-		copies.dir = install_copy_dir(copy_cache, install);
-		std::string text, message;
-		io::JsonValue record;
-		if (io::read_file_text(join_path(copies.dir, kInstallCopyRecordFileName), text, message) &&
-		    io::json_parse(text, record, message) && record.is_object())
-			copies.record = std::move(record);
-	}
-	const auto staged = [&](bool ok, const std::string &from, const std::string &reason) {
-		if (!ok)
-			error = make_finding(CoreFinding::PlayInstallCopy, DiagnosticSeverity::Error,
-			                     "Could not stage " + from + " in " + run_dir + ": " + reason);
-		return ok;
-	};
 	// The names the expansion's archives hold: under /d (the stock game's Play) the file system's front
 	// door reads the expansion's folder, then the working directory, then the archives [orig:
 	// FileSystem_OpenFile @ 0x75b1c0, the loose walk @ 0x75b203..0x75b27b before the archives, run
@@ -377,39 +440,181 @@ bool prepare_expansion_run(const std::string &install, const std::string &build_
 		                   [&wanted](const std::string &held) { return pff::normalized_logical_name(held) == wanted; });
 	};
 	// The install's base game: its archives and the loose files it ships beside them, but a file the
-	// expansion packs, staged; and the files it reads from its folder by name (kInstallRootReads), copied
-	// where the run directory holds none of its own (seeds: the copy a run before kept stays).
-	std::vector<std::string> base = archives;
+	// expansion packs.
+	base = archives;
 	for (const std::string &loose : list_install_loose_files(install))
 		if (!packs(loose)) base.push_back(loose);
-	std::vector<std::string> seeds;
-	for (const char *read : kInstallRootReads) {
-		const std::string found = seed_root_reads ? file_named(install, read) : std::string();
-		if (!found.empty() && file_named(run_dir, read).empty()) seeds.push_back(found);
+	return true;
+}
+
+// --- the copy cache filled over the editor's frames (C16) ---------------------------------------------------
+
+struct InstallCopyFill::State {
+	struct Copy {
+		std::string name;
+		uint64_t size = 0;
+		int64_t written = 0;
+	};
+	std::string install;
+	InstallCopies copies;
+	std::vector<Copy> pending;
+	size_t next = 0;
+	uint64_t done = 0;
+	uint64_t total = 0;
+	std::FILE *in = nullptr;
+	std::FILE *out = nullptr;
+	uint64_t file_done = 0;
+	bool cancelled = false;
+	bool failed = false;
+	std::string reason;
+
+	~State() { close(true); }
+	// The file in copy closed; its partial copy removed (`drop`).
+	void close(bool drop) {
+		if (in) std::fclose(in);
+		if (out) std::fclose(out);
+		in = out = nullptr;
+		if (drop && next < pending.size()) {
+			std::error_code ec;
+			fs::remove(system_path(join_path(copies.dir, pending[next].name) + ".tmp"), ec);
+		}
 	}
-	bool ok = true;
+	bool fail(const std::string &why) {
+		failed = true;
+		reason = why;
+		close(true);
+		return true;
+	}
+};
+
+InstallCopyFill::InstallCopyFill() = default;
+InstallCopyFill::~InstallCopyFill() = default;
+InstallCopyFill::InstallCopyFill(InstallCopyFill &&) noexcept = default;
+InstallCopyFill &InstallCopyFill::operator=(InstallCopyFill &&) noexcept = default;
+
+InstallCopyFill InstallCopyFill::plan(const std::string &install, const std::string &build_dir,
+                                      const std::string &expansion, const std::string &run_root,
+                                      const std::string &copy_cache, const FileLink &link) {
+	InstallCopyFill fill;
+	std::vector<std::string> base;
+	Diagnostic refused; // the staging says the same, as Play starts
+	if (copy_cache.empty() || !expansion_base_files(install, build_dir, expansion, base, refused)) return fill;
+	// Whether the run directories' volume links the install's files: a probe linked and gone again. Where it
+	// does, the staging links each one and the cache is never asked.
+	std::string reason;
+	if (!io::ensure_directory(run_root, reason)) return fill;
+	const std::string probe = join_path(run_root, ".install_link_probe");
+	std::error_code ec;
+	fs::remove(system_path(probe), ec);
+	if (link(utf8_of(path_of(install) / path_of(base.front())), probe, reason)) {
+		fs::remove(system_path(probe), ec);
+		return fill;
+	}
+	auto state = std::make_unique<State>();
+	state->install = install;
+	state->copies = load_install_copies(copy_cache, install);
 	for (const std::string &name : base) {
+		if (game_may_write(name)) continue; // copied fresh into the run directory, never cached
+		const std::string from = utf8_of(path_of(install) / path_of(name));
+		const uint64_t size = fs::file_size(system_path(from), ec);
+		if (ec) continue; // the staging says why it cannot stage it
+		const int64_t written = io::file_modified_ticks(system_path(from));
+		if (cache_fresh(state->copies, name, size, written)) continue;
+		state->pending.push_back({name, size, written});
+		state->total += size;
+	}
+	if (!state->pending.empty()) fill.state_ = std::move(state);
+	return fill;
+}
+
+bool InstallCopyFill::empty() const {
+	return !state_;
+}
+
+bool InstallCopyFill::step(uint64_t budget) {
+	if (!state_) return true;
+	State &s = *state_;
+	if (s.cancelled || s.failed) return true;
+	uint64_t left = budget > 0 ? budget : 1;
+	std::vector<char> chunk;
+	while (s.next < s.pending.size() && left > 0) {
+		const State::Copy &copy = s.pending[s.next];
+		const std::string cached = join_path(s.copies.dir, copy.name);
+		const std::string partial = cached + ".tmp";
+		if (!s.in) {
+			// Copied beside its place, then put there: a cache a copy was cut short in holds no torn file.
+			std::string reason;
+			if (!io::ensure_directory(s.copies.dir, reason)) return s.fail(reason);
+			std::error_code ec;
+			fs::remove(system_path(partial), ec);
+			const std::string from = utf8_of(path_of(s.install) / path_of(copy.name));
+			s.in = io::fopen_utf8(from.c_str(), "rb");
+			s.out = s.in ? io::fopen_utf8(partial.c_str(), "wb") : nullptr;
+			if (!s.in || !s.out) return s.fail("could not open " + (s.in ? partial : from));
+			s.file_done = 0;
+		}
+		const uint64_t want = std::min<uint64_t>(left, std::min<uint64_t>(copy.size - s.file_done, uint64_t(1) << 22));
+		chunk.resize(size_t(want));
+		const size_t read = want ? std::fread(chunk.data(), 1, size_t(want), s.in) : 0;
+		if (read != want || (read && std::fwrite(chunk.data(), 1, read, s.out) != read))
+			return s.fail("could not copy " + copy.name + " into " + s.copies.dir);
+		s.file_done += read;
+		s.done += read;
+		left -= std::min<uint64_t>(left, read ? read : 1);
+		if (s.file_done < copy.size) continue;
+		// The file whole: put in its place and recorded, the record written, so a fill stopped after it keeps it.
+		const bool closed = std::fclose(s.out) == 0;
+		s.out = nullptr;
+		std::fclose(s.in);
+		s.in = nullptr;
 		std::string reason;
-		add_staged(staged_files, path_of(name));
-		ok = staged(stage_install_file(install_root, name, run / path_of(name), copies, link, reason),
-		            utf8_of(install_root / path_of(name)), reason);
-		if (!ok) break;
+		if (!closed || !io::replace_file(partial, cached, reason))
+			return s.fail(closed ? reason : "could not write " + partial);
+		record_copy(s.copies, copy.name, copy.size, copy.written);
+		if (!write_install_copies(s.copies, reason)) return s.fail(reason);
+		++s.next;
 	}
-	for (const std::string &name : seeds) {
-		if (!ok) break;
-		std::string reason;
-		ok = staged(copy_to(install_root / path_of(name), run / path_of(name), reason), utf8_of(install_root / path_of(name)),
-		            reason);
-	}
-	if (ok && !copy_cache.empty()) prune_install_copies(copy_cache, copies);
-	if (copies.changed) {
-		std::string message;
-		io::write_file_atomic(join_path(copies.dir, kInstallCopyRecordFileName), io::json_write(copies.record), message);
-	}
-	if (!ok) return false;
-	// The expansion's folder, a directory of the run's own (the game writes its weapon.sav there, which
-	// the run keeps), its files the build's.
-	return stage_expansion_folder(path_of(build_dir), run, folder, link, error, staged_files);
+	return s.next >= s.pending.size();
+}
+
+void InstallCopyFill::cancel() {
+	if (!state_) return;
+	state_->cancelled = true;
+	state_->close(true);
+}
+
+bool InstallCopyFill::cancelled() const {
+	return state_ && state_->cancelled;
+}
+
+bool InstallCopyFill::failed() const {
+	return state_ && state_->failed;
+}
+
+const std::string &InstallCopyFill::reason() const {
+	static const std::string kNone;
+	return state_ ? state_->reason : kNone;
+}
+
+uint64_t InstallCopyFill::bytes_done() const {
+	return state_ ? state_->done : 0;
+}
+
+uint64_t InstallCopyFill::bytes_total() const {
+	return state_ ? state_->total : 0;
+}
+
+size_t InstallCopyFill::files_done() const {
+	return state_ ? state_->next : 0;
+}
+
+size_t InstallCopyFill::files_total() const {
+	return state_ ? state_->pending.size() : 0;
+}
+
+std::string InstallCopyFill::label() const {
+	return "Copying the game install's files for the expansion: " + std::to_string(files_done()) + " of " +
+	       std::to_string(files_total());
 }
 
 LaunchPlan make_play_launch_plan(const std::string &runtime_executable, const std::string &build_dir,

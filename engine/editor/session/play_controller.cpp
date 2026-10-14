@@ -215,6 +215,20 @@ PlayGame PlayController::play_game() const {
 	return {"OpenNova"};
 }
 
+std::unique_ptr<InstallCopyFill> PlayController::copy_fill(const PlayIntent &intent, const BuildReport &built) {
+	if (built.expansion.empty() || !view_.project.open) return nullptr;
+	// The base game start stages from: the runtime's, the session's base game; Strict Play's, the install itself
+	// (one that plays over a base game's export stages that export's files, never the cache).
+	const bool in_install = plays_in_install(intent.mode);
+	const std::string base = core_.base_game();
+	if (in_install && !(base.empty() || base == core_.game_install())) return nullptr;
+	const std::string install = in_install ? core_.game_install() : base;
+	auto fill = std::make_unique<InstallCopyFill>(InstallCopyFill::plan(
+	        install, built.build_dir, built.expansion, core_.paths().run_dir, core_.paths().install_copy_dir, link_));
+	if (fill->empty()) return nullptr;
+	return fill;
+}
+
 void PlayController::start(const PlayIntent &intent) {
 	const std::string &mission = intent.mission;
 	const bool behind = intent.behind, fresh = intent.fresh;
@@ -330,7 +344,7 @@ void PlayController::start(const PlayIntent &intent) {
 	};
 	if (in_install) {
 		const bool staged = prepare_strict_install_launch_plan(core_.game_install(), build_dir, run_dir, expansion, plan,
-		                                                       error, io::link_file, core_.base_game(), copy_cache);
+		                                                       error, link_, core_.base_game(), copy_cache);
 		record_staging(plan.staged);
 		if (!staged) {
 			core_.report(error);
@@ -349,8 +363,8 @@ void PlayController::start(const PlayIntent &intent) {
 		const bool on_run_dir = start.set && expansion.empty();
 		std::vector<std::string> staged;
 		const bool prepared = expansion.empty()
-		        ? !on_run_dir || prepare_runtime_run(build_dir, run_dir, error, &staged)
-		        : prepare_expansion_run(core_.base_game(), build_dir, expansion, run_dir, copy_cache, error, io::link_file,
+		        ? !on_run_dir || prepare_runtime_run(build_dir, run_dir, error, &staged, link_)
+		        : prepare_expansion_run(core_.base_game(), build_dir, expansion, run_dir, copy_cache, error, link_,
 		                                &staged);
 		record_staging(staged);
 		if (!prepared) {

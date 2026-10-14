@@ -938,6 +938,54 @@ static int test_strict_play() {
 		TEST_EXPECT(!opennova::io::read_file_text(expansion_run + "/" + own, held, held_error) ||
 		            held.find("install") == std::string::npos);
 	}
+	session.handle(request::stop_play());
+	session.poll();
+	session.poll();
+
+	// S26 C16: the install on another volume. The build's operation copies the install's archives into the copy
+	// cache over the editor's polls once the build lands, its progress saying so, and the Play then links them
+	// from there; cancelled while it copies, the build's operation goes whole and no game starts, no torn copy
+	// left in the cache.
+	for (const char *archive : {"language.pff", "localres.pff", "resource.pff"})
+		fs::last_write_time(opennova::io::os_path(install + "/" + archive), fs::file_time_type::clock::now() - std::chrono::hours(1));
+	session.set_file_link([&install](const std::string &from, const std::string &to, std::string &reason) {
+		if (from.rfind(install, 0) == 0) {
+			reason = "another volume";
+			return false;
+		}
+		return opennova::io::link_file(from, to, reason);
+	});
+	const auto copies_seen = [&] {
+		for (int i = 0; i < 200000 && v.activity.operation.running(); ++i) {
+			session.poll();
+			if (v.activity.operation.label.rfind("Copying the game install's files for the expansion", 0) == 0) return true;
+		}
+		return false;
+	};
+	session.set_poll_budget({0, 64});
+	const int before_cancel = platform.spawns;
+	session.handle(request::play());
+	TEST_EXPECT(copies_seen());
+	session.handle(request::cancel_operation());
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == before_cancel);
+	TEST_EXPECT(v.activity.play_state == PlayState::Stopped);
+	TEST_EXPECT(output_has(v, "Cancelled the build."));
+	{
+		std::error_code ec;
+		for (const auto &entry : fs::recursive_directory_iterator(opennova::io::os_path(dir.file("project/.opennova")), ec))
+			TEST_EXPECT(entry.path().extension() != ".tmp");
+	}
+	session.handle(request::play());
+	TEST_EXPECT(copies_seen());
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == before_cancel + 1 && v.activity.play_state == PlayState::Running);
+	const std::string copied_run = platform.last_plan.working_dir;
+	for (const char *archive : {"language.pff", "localres.pff", "resource.pff"}) {
+		std::error_code ec;
+		TEST_EXPECT(!fs::equivalent(copied_run + "/" + archive, install + "/" + archive, ec) &&
+		            fs::hard_link_count(opennova::io::os_path(copied_run + "/" + archive), ec) >= 2); // the cache's copy
+	}
 	return 0;
 }
 

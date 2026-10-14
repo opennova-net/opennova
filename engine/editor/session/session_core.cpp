@@ -1678,7 +1678,8 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 	        plan, output_root, std::move(protected_dirs), view_.findings.diagnostics, intent, exported,
 	        [this](const ExportIntent &wanted, const BuildReport &built, ExportRequest &request, ExportReport &refused) {
 		        return export_request(wanted, built, request, refused);
-	        }));
+	        },
+	        [this](const PlayIntent &wanted, const BuildReport &built) { return play().copy_fill(wanted, built); }));
 	if (id == 0) return refuse_busy(std::string()); // another operation runs, holding nothing it needs
 	outcome_.operation = id;
 	build_reports_ = panel;

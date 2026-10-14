@@ -58,6 +58,9 @@ public:
 	// What Play launches: asked now for what the view shows of the runtime, and again with a port
 	// for the game's MCP endpoint each time the game is spawned, once its build lands.
 	void set_launcher_source(PlayLauncherSource source);
+	// How Play's staging gives a file a second name (io::link_file; a test's: one refusing what another volume's
+	// link would).
+	void set_file_link(FileLink link);
 
 	// True when the request was served here; false for the shell-only kinds. The view is
 	// validated when it returns, unless a pump holds validation.

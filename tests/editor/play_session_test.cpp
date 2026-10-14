@@ -791,6 +791,81 @@ static int test_expansion_staging() {
 	return 0;
 }
 
+// S26 C16: what an expansion's Play needs in the copy cache, copied a slice of bytes at a time ahead of the
+// staging (InstallCopyFill): nothing where the run directories' volume links the install; on another volume each
+// file the game only reads that the cache lacks, every slice within its budget, the record trusting each whole
+// file, so prepare_expansion_run then links them all from the cache and copies none; a fill cancelled part way
+// leaves no torn copy and the record as it was for the file it was copying.
+static int test_install_copy_fill() {
+	namespace fs = std::filesystem;
+	editor_test::TempProjectDir dir("opennova_editor_install_copy_fill");
+	const std::string install = dir.file("install"), build = dir.file("build/0123456789abcdef"), cache = dir.file("copies");
+	const std::string run_root = dir.file("run");
+	for (const char *name : {"language.pff", "localres.pff", "resource.pff"})
+		TEST_EXPECT(write_empty_archive(install + "/" + name));
+	TEST_EXPECT(editor_test::write_text(install + "/intro.bik", std::string(10000, 'v')) &&
+	            editor_test::write_text(install + "/cc.bin", "us") && editor_test::write_text(install + "/Jointops.exe", "exe"));
+	TEST_EXPECT(write_empty_archive(build + "/expansion/jxm/jxm.pff"));
+	std::error_code ec;
+	for (const fs::directory_entry &file : fs::directory_iterator(install, ec))
+		if (file.is_regular_file()) settle(file.path().generic_string());
+	const FileLink across = [&install](const std::string &from, const std::string &to, std::string &reason) {
+		if (from.rfind(install, 0) == 0) {
+			reason = "another volume";
+			return false;
+		}
+		return opennova::io::link_file(from, to, reason);
+	};
+	// The same volume, or no cache: nothing to copy.
+	TEST_EXPECT(InstallCopyFill::plan(install, build, "jxm", run_root, cache).empty());
+	TEST_EXPECT(InstallCopyFill::plan(install, build, "jxm", run_root, std::string(), across).empty());
+	TEST_EXPECT(!fs::exists(run_root + "/.install_link_probe"));
+	// Another volume: the three archives and the video (the game only reads them), never cc.bin (it may write it).
+	InstallCopyFill fill = InstallCopyFill::plan(install, build, "jxm", run_root, cache, across);
+	TEST_EXPECT(!fill.empty() && fill.files_total() == 4 && fill.bytes_done() == 0 &&
+	            fill.label() == "Copying the game install's files for the expansion: 0 of 4");
+	const uint64_t total = fill.bytes_total();
+	TEST_EXPECT(total >= 10000);
+	int steps = 0;
+	bool sliced = true;
+	for (bool done = false; !done && steps < 100000; ++steps) {
+		const uint64_t before = fill.bytes_done();
+		done = fill.step(4096);
+		sliced = sliced && fill.bytes_done() - before <= 4096;
+	}
+	TEST_EXPECT(sliced && steps >= 3 && fill.bytes_done() == total && fill.files_done() == 4 && !fill.failed());
+	TEST_EXPECT(files_in(cache).size() == 1);
+	const std::string key = cache + "/" + files_in(cache).front();
+	TEST_EXPECT(files_in(key) == std::vector<std::string>({"install_copy.json", "intro.bik", "language.pff", "localres.pff",
+	                                                         "resource.pff"}));
+	std::string text, io_error;
+	TEST_EXPECT(opennova::io::read_file_text(key + "/intro.bik", text, io_error) && text == std::string(10000, 'v'));
+	// The staging then links each from the cache and copies none: the cache as the fill left it.
+	const std::string cache_tree = editor_test::tree_digest(key);
+	TEST_EXPECT(InstallCopyFill::plan(install, build, "jxm", run_root, cache, across).empty()); // every file there
+	const std::string run = run_root + "/1";
+	fs::create_directories(run);
+	Diagnostic error;
+	TEST_EXPECT(prepare_expansion_run(install, build, "jxm", run, cache, error, across));
+	TEST_EXPECT(fs::equivalent(run + "/intro.bik", key + "/intro.bik", ec) && fs::equivalent(run + "/language.pff", key + "/language.pff", ec));
+	TEST_EXPECT(editor_test::tree_digest(key) == cache_tree);
+	// A fill cancelled part way through a file: no torn copy, the cache's copy and its record as they were.
+	TEST_EXPECT(editor_test::write_text(install + "/intro.bik", std::string(20000, 'w')));
+	settle(install + "/intro.bik");
+	InstallCopyFill again = InstallCopyFill::plan(install, build, "jxm", run_root, cache, across);
+	TEST_EXPECT(again.files_total() == 1 && again.bytes_total() == 20000);
+	TEST_EXPECT(!again.step(4096) && again.bytes_done() == 4096 && fs::exists(key + "/intro.bik.tmp"));
+	again.cancel();
+	TEST_EXPECT(again.cancelled() && again.step(4096) && again.bytes_done() == 4096 && !fs::exists(key + "/intro.bik.tmp"));
+	TEST_EXPECT(opennova::io::read_file_text(key + "/intro.bik", text, io_error) && text == std::string(10000, 'v'));
+	TEST_EXPECT(editor_test::tree_digest(key) == cache_tree);
+	// A cache that cannot be written (its folder a file): the fill stops, failed, saying why.
+	TEST_EXPECT(editor_test::write_text(dir.file("not a folder"), "x"));
+	InstallCopyFill blocked = InstallCopyFill::plan(install, build, "jxm", run_root, dir.file("not a folder"), across);
+	TEST_EXPECT(!blocked.empty() && blocked.step(4096) && blocked.failed() && !blocked.reason().empty());
+	return 0;
+}
+
 // DI-26: Play from here's start in words, for Output. Where the start is placed in the mission is the
 // engine's (runtime/mission/player_start.h, tests/mission/player_start_test.cpp).
 static int test_play_start_words() {
@@ -923,6 +998,7 @@ int main() {
 	failures += test_run_directory_keeps_game_state();
 	failures += test_run_directories_per_mode();
 	failures += test_expansion_staging();
+	failures += test_install_copy_fill();
 	failures += test_lifecycle();
 	if (failures == 0) std::printf("editor_play_session: all tests passed\n");
 	return failures == 0 ? 0 : 1;

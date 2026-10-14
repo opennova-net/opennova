@@ -96,6 +96,10 @@ void ProjectSession::set_launcher_source(PlayLauncherSource source) {
 	impl_->play.set_launcher_source(std::move(source));
 }
 
+void ProjectSession::set_file_link(FileLink link) {
+	impl_->play.set_file_link(std::move(link));
+}
+
 bool ProjectSession::handle(const EditorRequest &request) {
 	++impl_->handle_entries;
 	const SessionCore::RequestScope scope(impl_->core, request_kind_row(request.kind).background);
