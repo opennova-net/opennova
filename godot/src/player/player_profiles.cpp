@@ -128,9 +128,8 @@ bool avatar_selection_from_dictionary(const Dictionary &profile, int side,
 // PLAYERNAME edit and GetUserNameA hand the game and player.sav keeps: cp1252,
 // '?' for a character the page has no byte for (utf8_to_retail_text); it reads
 // back through cp1252 (D-NET-661). The record's 16-byte field and the ACCEPT's
-// 15 then cut at the game's character count.
-// [orig: the PLAYERNAME change strncpy(+4, name, 0x10) @0x55fc91; the ACCEPT
-//  @0x55efc8; GetUserNameA(+4, 16) @0x54f535]
+// 15 then cut at the game's character count (engine: profile/player_profiles.cpp,
+// which cites the PLAYERNAME change, the ACCEPT and GetUserNameA).
 std::string profile_text(const String &p_text) {
 	return opennova::utf8_to_retail_text(opennova::to_std(p_text));
 }

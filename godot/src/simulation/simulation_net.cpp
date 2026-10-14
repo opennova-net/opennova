@@ -582,8 +582,7 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	// Build the Joiner runtime now so get_joiner_phase reads Idle before the first load (the contract
 	// the legacy joiner_session_ held); the role retains the request for a load that rebuilds it.
 	// The callsign goes out as the profile name's code-page bytes, the NA TLV and the host's
-	// roster carrying them [orig: CNapiNPConnection_SendClientJoin @0x61fe20, NA @0x620162]
-	// (D-NET-661).
+	// roster carrying them (engine: inmatch/joiner_role.h create_runtime; D-NET-661).
 	runtime_ = &joiner_role_->create_runtime(
 			opennova::utf8_to_retail_text(opennova::to_std(p_player_name)),
 			p_join_role == static_cast<int>(opennova::inmatch::JoinRole::Spectator)
