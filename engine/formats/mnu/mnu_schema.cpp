@@ -159,15 +159,14 @@ void schema_default(Window &window) {
   schema_default(appearance);
   window.appearances.push_back(appearance);
 }
-void schema_default(Appearance &appearance) { appearance.state = "default"; }
+void schema_default(Appearance &appearance) { appearance.state = "DEFAULT"; }
 void schema_default(Sound &sound) {
-  sound.state = "mousein";
+  sound.state = "MOUSEIN";
   sound.trigger = "MOUSE_OVER";
 }
 // POP_SCREEN: the one verb that takes no operand [orig: CUIWidget_HandleScriptedAction @ 0x6497f0, code
 // 12].
 void schema_default(Action &action) { action.type = "POP_SCREEN"; }
-void schema_default(Element &element) { element.tag = "TARGET"; }
 void schema_default(TableHeader &header, size_t column) {
   header.has_column = true;
   header.column = int(column);
@@ -177,9 +176,13 @@ void schema_default(TableBody &body, size_t column) {
   body.column = int(column);
 }
 void schema_default(TableSubst &subst) { subst.has_column = true; }
-// A window keeps only PLAYERLIST and SERVERLIST (GLB_TABLE) of its attributes; an element takes any.
-void schema_default_window_attribute(ElementAttribute &attribute) { attribute.name = "PLAYERLIST"; }
-void schema_default_element_attribute(ElementAttribute &attribute) { attribute.name = "NAME"; }
+void schema_default(GopherEntry &entry) { entry.name = "GOPHER_BUTTON"; }
+void schema_default(GopherCategory &category) {
+  GopherEntry entry;
+  schema_default(entry);
+  category.entries.push_back(entry);
+}
+void schema_default(GlbFieldSlot &slot) { slot.which = 0; }
 // A part with no element would crash retail: a new one is written with a typeless DEFAULT appearance.
 Window &schema_default_part(WindowPart &part, WindowType type) {
   Window &window = part.author(type);
@@ -206,22 +209,12 @@ void schema_set_type_token(Window &window, const std::string &token) { window.ty
 bool schema_part_reads_root_text(const std::string &part_path) { return part_path == "list_box"; }
 
 const std::vector<SchemaChoice> &ui_material_flag_choices() {
-  // g_UIMaterialFlagNames @ 0x84a5d0, in table order (rows of wchar name[64] + DWORD flags).
-  static const std::vector<SchemaChoice> choices = {
-      {"STANDARD", 0x300600}, {"STANDARD_TRANSPARENT", 0x300651}, {"AFUNC_BITMASK", 0xF},
-      {"ASRC_BITMASK", 0xF0}, {"COLOR_BITMASK", 0xF00}, {"AFUNC_NONE", 0x0}, {"AFUNC_BLEND", 0x1},
-      {"AFUNC_SRCCOPY", 0x0}, {"AFUNC_ADD", 0x2}, {"AFUNC_SHADE", 0x3}, {"AFUNC_GLOW", 0x4},
-      {"AFUNC_ALPHALIGHT", 0x5}, {"AFUNC_MULTIPLY", 0x6}, {"AFUNC_DEST", 0x7}, {"AFUNC_MULTIPLYDBL", 0x8},
-      {"AFUNC_SQR", 0x9}, {"AFUNC_SQRADD", 0xA}, {"ASRC_NONE", 0x0}, {"ASRC_CONSTANT", 0x10},
-      {"ASRC_ITERATED", 0x20}, {"ASRC_TEXTURE", 0x30}, {"ASRC_TEXTURExCONSTANT", 0x40},
-      {"ASRC_TEXTURExITERATED", 0x50}, {"COLOR_NONE", 0x0}, {"COLOR_CONSTANT", 0x100},
-      {"COLOR_ITERATED", 0x200}, {"COLOR_ITERATEDxCONSTANT", 0x300}, {"COLOR_TEXTURE", 0x400},
-      {"COLOR_TEXTURExCONSTANT", 0x500}, {"COLOR_TEXTURExITERATED", 0x600}, {"COLOR_TEXTURERAMP", 0x700},
-      {"COLOR_TEXTUREdpCONSTANT", 0x800}, {"COLOR_TEXTUREdpITERATED", 0x900}, {"COLOR2_SQRD", 0x1000},
-      {"APPLYSPECULAR", 0x10000}, {"APPLYFOG", 0x20000}, {"ALPHATEST", 0x40000}, {"NATIVE2X", 0x80000},
-      {"NOWRITEDEPTH", 0x100000}, {"NOCHECKDEPTH", 0x200000}, {"GMAT_OVR_CLAMPUV1", 0x1000000},
-      {"GMAT_OVR_CLAMPUV2", 0x2000000}, {"TINTASTEXT", 0x80000000LL},
-  };
+  // g_UIMaterialFlagNames @ 0x84a5d0, in table order (mnu::ui_material_flags).
+  static const std::vector<SchemaChoice> choices = [] {
+    std::vector<SchemaChoice> out;
+    for (const UiMaterialFlag &row : ui_material_flags()) out.push_back({row.name, int64_t(row.bits)});
+    return out;
+  }();
   return choices;
 }
 
@@ -294,10 +287,16 @@ const ReadRule kReadRules[] = {
     {"scrollbar", kLists | type_bit(T::Table) | type_bit(T::MultilineEdit)},
     {"min_item_height", kLists | type_bit(T::Table)},  // [orig: @ 0x64600d, 0x643a9f]
     {"fixed_header_height", type_bit(T::Table)},       // [orig: @ 0x643ace]
-    // [orig: CLanListWnd_ParseXMLDefinition @ 0x65b9d0; CLanGameBrowser_ParseExtendedXMLDefinition
-    // @ 0x65dac0; CGopherWnd_ParseXMLDefinition @ 0x65b130]
-    {"element", type_bit(T::LanList) | type_bit(T::GlbTable) | type_bit(T::Gopher)},
-    {"attribute", type_bit(T::GlbTable)},
+    // [orig: CLanListWnd_ParseXMLDefinition @ 0x65b9d0]
+    {"join_button", type_bit(T::LanList)}, {"search_button", type_bit(T::LanList)},
+    // [orig: CLanGameBrowser_ParseExtendedXMLDefinition @ 0x65dac0]
+    {"glb_playerlist", type_bit(T::GlbTable)}, {"glb_table", type_bit(T::GlbTable)},
+    {"glb_info_button", type_bit(T::GlbTable)}, {"glb_info_player_details", type_bit(T::GlbTable)},
+    {"glb_info_server_details", type_bit(T::GlbTable)}, {"glb_server_fields", type_bit(T::GlbTable)},
+    {"glb_nw_info", type_bit(T::GlbTable)}, {"glb_target", type_bit(T::GlbTable)},
+    // [orig: CGopherWnd_ParseXMLDefinition @ 0x65b130]
+    {"gopher_targets", type_bit(T::Gopher)}, {"gopher_categories", type_bit(T::Gopher)},
+    {"gopher_back", type_bit(T::Gopher)},
 };
 
 }  // namespace
@@ -335,28 +334,6 @@ SchemaApplies schema_action_reads(const Action &action, const std::string &field
   // (UI_BuildURLAndSubmitRequest @ 0x63e3f0 takes only the scene).
   if (field == "target_form") return iequals(action.type, "FORM_POST") ? SchemaApplies::Unverified : SchemaApplies::Ignored;
   return SchemaApplies::Reads; // TEST (stored for every verb) and the target text
-}
-
-SchemaApplies schema_element_reads(WindowType type, const std::string &tag) {
-  struct TagRule {
-    const char *tag;
-    Types types;
-  };
-  static const TagRule rules[] = {
-      {"JOIN_BUTTON", type_bit(T::LanList)},     // [orig: @ 0x65b9e4]
-      {"SEARCH_BUTTON", type_bit(T::LanList)},   // [orig: @ 0x65ba00]
-      {"GLB_TABLE", type_bit(T::GlbTable)},      // [orig: @ 0x65dae8 .. 0x65e012]
-      {"GLB_INFO_BUTTON", type_bit(T::GlbTable)},
-      {"GLB_INFO_PLAYER_DETAILS", type_bit(T::GlbTable)},
-      {"GLB_INFO_SERVER_DETAILS", type_bit(T::GlbTable)},
-      {"GLB_NW_INFO", type_bit(T::GlbTable)},
-      {"TARGET", type_bit(T::GlbTable) | type_bit(T::Gopher)},
-      {"FILTERS", type_bit(T::Gopher)},          // [orig: @ 0x65b167 .. 0x65b2af]
-      {"GOPHER_BACK", type_bit(T::Gopher)},
-  };
-  for (const TagRule &rule : rules)
-    if (iequals(tag, rule.tag)) return (rule.types & type_bit(type)) ? SchemaApplies::Reads : SchemaApplies::Ignored;
-  return SchemaApplies::Ignored;
 }
 
 SchemaApplies schema_applies_both(SchemaApplies a, SchemaApplies b) {

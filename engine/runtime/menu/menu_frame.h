@@ -386,13 +386,11 @@ using MenuTableCellPainter =
 enum class MenuFrameNoteCode : uint16_t {
 	// configure
 	AppearanceStateUnknown, // a STATE the parse does not know: the row sets nothing
-	AppearanceTypeUnknown,  // a TYPE it does not know: the row only marks its state
 	AppearanceCustom,       // CUSTOM: the shell's draw hook; the compile draws nothing for it
 	AppearanceReplaced,     // a later row of the same state and type replaces this row's value
 	ColorUnparsed,          // a COLOR, OUTLINE or FONT colour the hex read stops short in
 	ColorTransparent,       // a COLOR or OUTLINE of fewer than eight digits: it reads alpha 0
 	StyleVarUnresolved,     // a whole-value %VAR% the shell's list lacks: kept literal
-	ItemKindAsText,         // a list or combo row of TYPE IMAGE or COLOR: its text drawn as the row's label
 	TableCellsDeferred,     // a table's ITEMS IMAGEROW row, not drawn (D-MNU-13)
 	TableCellsCustom,       // a CUSTOM_DRAW column: the menu's code draws its cells; the compile, none
 	ScrollExtentDefault,    // a SCROLL with no HEIGHT or WIDTH: its arrows are the default 20 long
@@ -927,7 +925,7 @@ private:
 	// list's SPINUP or SPINDOWN), once the parts are built.
 	void settle_part_notes_(size_t from = 0) const;
 	void note_window_loads_(const mnu::Window &w);
-	int32_t band_height_(const std::string &name, const std::string &flags) const;
+	int32_t band_height_(const std::string &name, uint32_t flags) const;
 	std::string resolve_var(const std::string &value) const;
 	uint32_t resolve_text_color(const std::string &value) const;
 	ResolvedText resolve_text_value(const std::string *table, const std::string &type,

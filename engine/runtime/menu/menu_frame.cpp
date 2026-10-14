@@ -26,10 +26,10 @@ bool iequals(const std::string &a, const char *b) {
 
 // The texture-cache key of an IMAGE load: the name and the FLAGS word it was
 // loaded with [orig: CTextureManager_LoadOrFindTexture @ 0x654980 — stricmp on
-// the name, then the subtype compare]. The FLAGS text stands for its word (the
-// token table sub_646CC0 @ 0x646cc0 is not ported).
-std::string texture_load_key(const std::string &name, const std::string &flags) {
-	return opennova::strutil::to_lower(name) + '\n' + opennova::strutil::to_lower(flags);
+// the name, then the subtype compare] and the FLAGS word (mnu::ui_material_flags_of,
+// sub_646CC0 @ 0x646cc0).
+std::string texture_load_key(const std::string &name, uint32_t flags) {
+	return opennova::strutil::to_lower(name) + '\n' + std::to_string(flags);
 }
 
 // The JUSTIFY and VJUSTIFY of a list's ITEMS block or of one of its ITEMs over the layout so far
@@ -241,7 +241,7 @@ void MenuFrameCompiler::reset_texture_loads() {
 }
 
 int32_t MenuFrameCompiler::band_height_(const std::string &name,
-		const std::string &flags) const {
+		uint32_t flags) const {
 	const auto found = texture_loads_.find(texture_load_key(resolve_var(name), flags));
 	return found == texture_loads_.end() ? -1 : found->second;
 }
@@ -515,8 +515,13 @@ void MenuFrameCompiler::resolve_node_(int index) {
 			out.push_back(visual);
 		}
 	};
-	build_items(w.items.items, node.text_table, node.row_layout, w.type == mnu::WindowType::SpinList,
-			node.items);
+	// A combo reads no ITEMS of its own: its rows are its LIST_BOX list's (below).
+	if (w.type != mnu::WindowType::Combo) {
+		build_items(w.items.items, node.text_table, node.row_layout, w.type == mnu::WindowType::SpinList,
+				node.items);
+	} else {
+		node.items.clear();
+	}
 	// A combo's LIST_BOX list is attached before its parse: its own TEXT_RSRC,
 	// else the root's, never the combo's [orig: CComboWnd_ParseXMLDefinition
 	// @ 0x65c0d0 -> CWnd_SetParentAndAttach].

@@ -21,8 +21,8 @@ using opennova::to_gd;
 using opennova::to_std;
 
 // The canonical item-row container of a list-like widget is the engine's
-// (runtime/menu menu_items_container: a combo's authored LIST_BOX rows, else
-// the window-level ITEMS block).
+// (runtime/menu menu_items_container: a combo's LIST_BOX rows, any other list's
+// own ITEMS block).
 using opennova::menu::menu_items_container;
 
 } // namespace

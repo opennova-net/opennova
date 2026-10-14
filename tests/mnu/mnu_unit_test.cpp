@@ -199,7 +199,7 @@ bool test_text_rules() {
   const mnu::Window &w = root(doc);
   CHECK(w.name == "W&amp;", "attributes are raw");
   CHECK(w.string_data.value == "  KEY \r\n", "untrimmed text");
-  CHECK(w.hotkeys[0].value == " V", "an untrimmed HOTKEY");
+  CHECK(w.hotkeys[0].value == " ", "an untrimmed HOTKEY: its key the text's first character, a space");
   // &#233; is U+FFE9 to retail's reader; a code-page menu narrows it as every retail
   // consumer does (WideCharToMultiByte on 1252): '?'.
   CHECK(w.appearances[0].value == "a&b?.tga", "decoded text, the numeric entity narrowed");
@@ -244,7 +244,8 @@ bool test_action_rules() {
   CHECK(a[1].field == "s" && a[1].external_browser && a[1].target == " addr ",
         "one slot, the first authored; EXTERNAL_BROWSER by presence; the text untrimmed");
   CHECK(noted(notes, "/ACTION@FIELD"), "the second of the slot is noted");
-  CHECK(a[2].type == "FLY" && a[2].test == "GE", "an unknown TYPE is kept (code 0 at runtime)");
+  CHECK(a[2].type.empty() && a[2].test == "GE" && noted(notes, "/ACTION@TYPE"),
+        "an unknown TYPE is code 0 (ignored at runtime), held as none and noted");
   CHECK(fixed_point(doc), "fixed point");
   return true;
 }
@@ -642,27 +643,121 @@ bool test_fatal_notes() {
   return true;
 }
 
-// What only the GLB_TABLE, GOPHER and LAN_LIST parses read: each on the type that reads it, its
-// attribute names as the writer spells them (upper case).
-bool test_extras() {
+// The GLB_TABLE, GOPHER and LAN_LIST parses' own elements, each typed as the parse reads it
+// [orig: CLanGameBrowser_ParseExtendedXMLDefinition @ 0x65dac0; CGopherWnd_ParseXMLDefinition @
+// 0x65b130; CGopherWnd_ParseCategoryXML @ 0x65a540; CLanListWnd_ParseXMLDefinition @ 0x65b9d0].
+bool test_typed_parts() {
   mnu::Document doc;
   std::vector<mnu::ParseNote> notes;
-  CHECK(parse(screen_of("type=\"glb_table\" name=\"G\" PLAYERLIST",
+  CHECK(parse(screen_of("type=\"glb_table\" name=\"G\" SERVERLIST PLAYERLIST",
                         std::string(kPos) +
-                            "<GLB_TABLE><COLUMN count=\"2\"><HEADER column=\"1\" FIELD=\"ping\">P</HEADER></COLUMN>"
-                            "</GLB_TABLE><TARGET>http://x</TARGET><JOIN_BUTTON name=\"J\"><POSITION><LEFT>1</LEFT>"
-                            "</POSITION></JOIN_BUTTON><BOGUS></BOGUS>"),
+                            "<GLB_TABLE><POSITION><LEFT>1</LEFT></POSITION><COLUMN count=\"2\"><HEADER column=\"1\" "
+                            "FIELD=\"ping\">P</HEADER></COLUMN></GLB_TABLE>"
+                            "<GLB_INFO_BUTTON><STRING>Info</STRING></GLB_INFO_BUTTON>"
+                            "<GLB_INFO_SERVER_DETAILS><POSITION><LEFT>2</LEFT></POSITION><FIELDS count=\"3\">"
+                            "<FORMAT>a\\nb</FORMAT><FIELD which=\"1\">map</FIELD><FIELD which=\"7\">zero</FIELD>"
+                            "<FIELD which=\"1\">mode</FIELD></FIELDS></GLB_INFO_SERVER_DETAILS>"
+                            "<GLB_NW_INFO><POSITION><LEFT>3</LEFT></POSITION></GLB_NW_INFO>"
+                            "<TARGET>http://a</TARGET><TARGET>http://b</TARGET>"
+                            "<JOIN_BUTTON><POSITION><LEFT>1</LEFT></POSITION></JOIN_BUTTON><BOGUS></BOGUS>"),
+              doc, &notes),
+        "parse");
+  const mnu::Window &g = root(doc);
+  CHECK(g.glb_playerlist, "PLAYERLIST, the last of the two authored");
+  CHECK(g.glb_table && g.glb_table->type == mnu::WindowType::Table &&
+            g.glb_table->table_data.column.headers.size() == 1 &&
+            g.glb_table->table_data.column.headers[0].field == "ping",
+        "the browser's table, its HEADER's FIELD");
+  CHECK(g.glb_info_button && g.glb_info_button->string_data.value == "Info", "the info button");
+  const mnu::GlbFields &f = g.glb_server_fields;
+  CHECK(g.glb_info_server_details && f.present && f.count == 3 && f.format == "a\nb" && f.fields.size() == 2 &&
+            f.fields[0].which == 1 && f.fields[0].text == "mode" && f.fields[1].which == 0 && f.fields[1].text == "zero",
+        "the FIELDS: the escapes read, a which past the count reads 0, the last FIELD of a slot kept");
+  CHECK(g.glb_nw_info && g.has_glb_target && g.glb_target == "http://b", "the last TARGET");
+  CHECK(noted(notes, "/BOGUS") && noted(notes, "/JOIN_BUTTON") && noted(notes, "/TARGET"),
+        "the unknown element, the LAN_LIST's JOIN_BUTTON and the replaced TARGET are noted");
+  CHECK(fixed_point(doc), "fixed point");
+  mnu::Document back;
+  CHECK(parse(mnu::serialize(doc), back) && mnu::equal(back, doc), "read back as the model");
+
+  notes.clear();
+  CHECK(parse(screen_of("type=\"gopher\" name=\"GO\"",
+                        std::string(kPos) +
+                            "<TARGET>http://x</TARGET><TARGET>http://y</TARGET><FILTERS><CATEGORY LEVEL=\"L1\"><LABEL>"
+                            "<STRING>Maps</STRING></LABEL><ITEM NAME=\"A\" TARGET=\"t\" FILTER=\"f\" TABLE=\"tb\" "
+                            "NAME=\"B\">Alpha</ITEM><INFO NAME=\"I\" TARGET=\"no\" FILTER=\"g\">Info</INFO></CATEGORY>"
+                            "</FILTERS><GOPHER_BACK><POSITION><LEFT>1</LEFT></POSITION></GOPHER_BACK>"),
+              doc, &notes),
+        "parse gopher");
+  const mnu::Window &go = root(doc);
+  CHECK(go.gopher_targets == std::vector<std::string>({"http://x", "http://y"}), "every TARGET in order");
+  CHECK(go.gopher_categories.size() == 1, "one CATEGORY");
+  if (!go.gopher_categories.empty()) {
+    const mnu::GopherCategory &c = go.gopher_categories[0];
+    CHECK(c.has_level && c.level == "L1" && c.label && c.label->string_data.value == "Maps", "LEVEL and the LABEL");
+    CHECK(c.entries.size() == 2 && !c.entries[0].info && c.entries[0].name == "B" && c.entries[0].target == "t" &&
+              c.entries[0].filter == "f" && c.entries[0].table == "tb" && c.entries[0].text == "Alpha",
+          "an ITEM: its attributes, the last of a name, and its text");
+    CHECK(c.entries[1].info && c.entries[1].name == "I" && c.entries[1].target.empty() && c.entries[1].filter == "g",
+          "an INFO reads no TARGET");
+  }
+  CHECK(go.gopher_back, "GOPHER_BACK");
+  CHECK(fixed_point(doc), "gopher fixed point");
+  CHECK(parse(mnu::serialize(doc), back) && mnu::equal(back, doc), "gopher read back as the model");
+  std::string error;
+  CHECK(mnu::parse(screen_of("type=\"gopher\" name=\"GO\"", std::string(kPos) + "<FILTERS><CATEGORY></CATEGORY></FILTERS>"),
+                   doc, error, &notes) &&
+            root(doc).gopher_categories.empty(),
+        "an empty CATEGORY is left out");
+
+  CHECK(parse(screen_of("type=\"lan_list\" name=\"L\"",
+                        std::string(kPos) + "<JOIN_BUTTON><STRING>Join</STRING></JOIN_BUTTON>"
+                                            "<SEARCH_BUTTON><STRING>Find</STRING></SEARCH_BUTTON>"),
+              doc),
+        "parse lan list");
+  CHECK(root(doc).join_button && root(doc).join_button->string_data.value == "Join" && root(doc).search_button &&
+            root(doc).search_button->string_data.value == "Find",
+        "the LAN_LIST's two buttons");
+  CHECK(fixed_point(doc), "lan list fixed point");
+  return true;
+}
+
+// What the game reads of a keyword, a number, a flag word and a key, held as it reads it (the #1098
+// review, round 3): a token a table lacks is none, a JUSTIFY another token the offset wcstol reads, a
+// VALUE its number, FLAGS the word sub_646CC0 ORs [orig: @ 0x646cc0], a SORT its first character, a
+// HOTKEY the key.
+bool test_held_as_read() {
+  mnu::Document doc;
+  std::vector<mnu::ParseNote> notes;
+  CHECK(parse(screen_of("type=\"list\" name=\"L\"",
+                        std::string(kPos) +
+                            "<APPEARANCE type=\"sparkle\" state=\"default\" flags=\"standard|alphatest, bogus\">a.tga"
+                            "</APPEARANCE><ACTION type=\"FLY\" state=\"maybe\" test=\"lt\">X</ACTION>"
+                            "<ITEMS justify=\"12px\"><ITEM type=\"image\" value=\"007\" vjustify=\"bottom\">a</ITEM>"
+                            "<ITEM value=\"0\">b</ITEM></ITEMS><STRING type=\"TEXT\" justify=\"-3\">s</STRING>"
+                            "<HOTKEY>Vx</HOTKEY><HOTKEY VIRTUAL>vk_escape</HOTKEY><HOTKEY VIRTUAL>VK_ENTER</HOTKEY>"
+                            "<CURSOR><FILE>c.tga</FILE><FLAGS>STANDARD</FLAGS></CURSOR>"),
               doc, &notes),
         "parse");
   const mnu::Window &w = root(doc);
-  CHECK(w.extra_attributes.size() == 1 && w.extra_attributes[0].name == "PLAYERLIST", "PLAYERLIST");
-  CHECK(w.extras.size() == 2 && w.extras[0].tag == "GLB_TABLE" && w.extras[1].text == "http://x", "extras");
-  CHECK(w.extras[0].children[0].children[0].attributes[1].name == "FIELD" &&
-            w.extras[0].children[0].children[0].attributes[1].value == "ping",
-        "the subtree as read, its names upper case");
-  CHECK(noted(notes, "/BOGUS") && noted(notes, "/JOIN_BUTTON") && notes.size() == 2,
-        "the unknown element and the LAN_LIST's JOIN_BUTTON (a GLB_TABLE reads none) are noted");
+  CHECK(w.appearances.size() == 1 && w.appearances[0].type.empty() && w.appearances[0].state == "DEFAULT" &&
+            w.appearances[0].flags == (0x300600u | 0x40000u),
+        "an unknown TYPE is none; FLAGS the word");
+  CHECK(noted(notes, "/APPEARANCE@TYPE"), "the unknown TYPE noted");
+  CHECK(w.actions.size() == 1 && w.actions[0].type.empty() && w.actions[0].state.empty() && w.actions[0].test.empty(),
+        "an ACTION's unknown TYPE and STATE are code 0, LT the parse's 0");
+  CHECK(w.items.justify == "12" && w.items.items.size() == 2 && w.items.items[0].type.empty() &&
+            w.items.items[0].value == "7" && w.items.items[0].vjustify == "BOTTOM" && w.items.items[1].value.empty(),
+        "a LIST's ITEMS: the offset's number, IMAGE none (a LIST reads ID alone), the VALUE's number, 0 none");
+  CHECK(w.string_data.type.empty() && w.string_data.justify == "-3", "a STRING's TYPE other than ID is none");
+  CHECK(w.hotkeys.size() == 2 && w.hotkeys[0].value == "V" && !w.hotkeys[0].virtual_key && w.hotkeys[1].value == "VK_ESCAPE",
+        "a key's first character; a VIRTUAL name as the table spells it; VK_ENTER (key 0) left out");
+  CHECK(w.cursor.file == "c.tga" && w.cursor.flags == 0x300600u, "the CURSOR's FLAGS word");
   CHECK(fixed_point(doc), "fixed point");
+  CHECK(mnu::ui_material_flags_text(0x300651) == "STANDARD_TRANSPARENT" && mnu::ui_material_flags_text(0) == "AFUNC_NONE" &&
+            mnu::ui_material_flags_of("STANDARD_TRANSPARENT|ALPHATEST") == 0x340651u &&
+            mnu::ui_material_flags_of(mnu::ui_material_flags_text(0x340651u)) == 0x340651u,
+        "a FLAGS word's text reads back as the word");
   return true;
 }
 
@@ -789,7 +884,7 @@ bool test_every_element_fixed_point() {
   image.map_state = 0;
   image.has_height = true;
   image.height = 24;
-  image.flags = "STANDARD_TRANSPARENT";
+  image.flags = 0x340651u; // STANDARD_TRANSPARENT|ALPHATEST
   mnu::Window w;
   w.name = "ALL";
   w.type = mnu::WindowType::Table;
@@ -849,7 +944,7 @@ bool test_every_element_fixed_point() {
   w.spinup.author(mnu::WindowType::Button).appearances = {image};
   w.spindown.author(mnu::WindowType::Button).string_data = {true, "", "", "", false, 0, false, "-"};
   w.scrollbar.author(mnu::WindowType::Scroll).scrolldown = {image};
-  w.cursor = {"c.tga", "STANDARD"};
+  w.cursor = {"c.tga", 0x300600u};
   w.has_text_rsrc = true;
   w.text_rsrc = "menutxt.BIN";
   w.private_data = "p";
@@ -866,7 +961,7 @@ bool test_every_element_fixed_point() {
   body.has_column = true;
   body.bitmap_draw = body.custom_draw = body.bitmap_text = body.scale_bitmap = true;
   body.display = "BITMAP_TEXT";
-  body.bitmap_flags = "STANDARD";
+  body.bitmap_flags = 0x300600u;
   mnu::TableSubst subst;
   subst.has_column = true;
   subst.value = "1";
@@ -879,16 +974,8 @@ bool test_every_element_fixed_point() {
   w.table_data.min_item_height = 20;
   w.table_data.has_fixed_header_height = true;
   w.table_data.fixed_header_height = 0;
-  mnu::Element target;
-  target.tag = "TARGET";
-  target.text = "http://x";
-  mnu::Element join;
-  join.tag = "JOIN_BUTTON";
-  join.attributes = {{"name", "J", true}, {"BARE", "", false}};
-  join.text = "note";
-  join.children = {target};
-  w.extras = {join, target};
-  w.extra_attributes = {{"SERVERLIST", "", false}};
+  w.glb_playerlist = true;
+  w.gopher_targets = {"http://x"};
   mnu::Window child;
   child.name = "CHILD";
   child.type = mnu::WindowType::Static;
@@ -914,7 +1001,7 @@ bool test_every_element_fixed_point() {
   // a COMBOBOX and a SPINLIST read, the LAN_LIST and GLB_TABLE elements and attributes.
   CHECK(!r.readonly && !r.as_button && !r.number && !r.password && !r.has_maxchar && r.orientation.empty() &&
             r.shuttle.empty() && r.datasources.empty() && r.items.items.empty() && !r.items.rows.empty() &&
-            r.items.justify.empty() && !r.spindown && !r.list_box && r.extras.empty() && r.extra_attributes.empty(),
+            r.items.justify.empty() && !r.spindown && !r.list_box && !r.glb_playerlist && r.gopher_targets.empty(),
         "what a TABLE does not read is not written");
   CHECK(r.scrollbar && r.checked && r.has_group && r.table_data.has_min_item_height, "what a TABLE reads is");
   CHECK(back.screens[0].roots.size() == 2, "both roots");
@@ -1094,7 +1181,8 @@ int main() {
   RUN_TEST(test_table_header_walk);
   RUN_TEST(test_repeated_type_elements);
   RUN_TEST(test_fatal_notes);
-  RUN_TEST(test_extras);
+  RUN_TEST(test_typed_parts);
+  RUN_TEST(test_held_as_read);
   RUN_TEST(test_writer_forms);
   RUN_TEST(test_write_issues);
   RUN_TEST(test_every_element_fixed_point);

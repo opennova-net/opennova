@@ -163,6 +163,34 @@ bool type_reads(WindowType t, const Node &child) {
   return true;
 }
 
+// The elements the LAN_LIST, GLB_TABLE and GOPHER parses read, each by its schema path
+// (schema_reads) on `type` [orig: CLanListWnd_ParseXMLDefinition @ 0x65b9d0;
+// CLanGameBrowser_ParseExtendedXMLDefinition @ 0x65dac0; CGopherWnd_ParseXMLDefinition @
+// 0x65b130]; null for any other element.
+const char *typed_part_path(const Node &child, WindowType type) {
+  static const struct {
+    const char *tag;
+    const char *path;
+  } kParts[] = {
+      {"JOIN_BUTTON", "join_button"},
+      {"SEARCH_BUTTON", "search_button"},
+      {"GLB_TABLE", "glb_table"},
+      {"GLB_INFO_BUTTON", "glb_info_button"},
+      {"GLB_INFO_PLAYER_DETAILS", "glb_info_player_details"},
+      {"GLB_INFO_SERVER_DETAILS", "glb_info_server_details"},
+      {"GLB_NW_INFO", "glb_nw_info"},
+      {"FILTERS", "gopher_categories"},
+      {"GOPHER_BACK", "gopher_back"},
+  };
+  for (const auto &part : kParts)
+    if (tag_is(child, part.tag)) return part.path;
+  if (tag_is(child, "TARGET")) return type == WindowType::Gopher ? "gopher_targets" : "glb_target";
+  return nullptr;
+}
+
+// The three names CWnd_ParseVirtualKeyNameW @ 0x6467f0 knows (13, 27, 32).
+const char *const kVirtualKeyNames[] = {"VK_RETURN", "VK_ESCAPE", "VK_SPACE"};
+
 // The edit attributes (MAXCHAR, MAXVAL, MINVAL) [orig: CEditWnd_ParseXMLProperties
 // @ 0x661d10]: EDIT, MULTILINE_EDIT and the RADIOEDIT edit part.
 bool reads_edit_attributes(WindowType t) {
@@ -226,8 +254,17 @@ private:
   const Attribute *effective(const Node &node, const char *name, const char *const *tokens);
   // A presence flag: any attribute of the name.
   bool flag(const Node &node, const char *name);
-  // A keyword attribute's token (effective); empty when absent.
+  // A keyword attribute's token (effective), as its table spells it; empty when absent, and for a
+  // token the table lacks (the code no token sets; noted, left out).
   std::string keyword(const Node &node, const char *name, const char *const *tokens);
+  // A JUSTIFY / VJUSTIFY the parse reads as a keyword or, another token, as the number wcstol reads
+  // (the x or y offset): the keyword as its table spells it, or the number's decimal.
+  std::string offset_keyword(const Node &node, const char *name, const char *const *tokens);
+  // A VALUE the parse reads with wcstol: the number's decimal; empty when absent (and, `zero_none`,
+  // for 0, the parse's default).
+  std::string number_value(const Node &node, const char *name, bool zero_none);
+  // A FLAGS word [orig: sub_646CC0 @ 0x646cc0]; kDefaultUiMaterialFlags when absent.
+  uint32_t flags_attr(const Node &node, const char *name);
   std::string string_attr(const Node &node, const char *name);
   bool number_attr(const Node &node, const char *name, int &out);
   int number_text(const Node &node) {
@@ -262,13 +299,16 @@ private:
   // Each attribute of `name` on `node`: one the window's type does not read, left out.
   void not_read(const Node &node, const char *name, WindowType type);
   void read_column(const Node &node, TableColumn &column);
-  Element read_extra(const Node &node);
+  void read_glb_fields(const Node &node, GlbFields &fields);
+  bool read_gopher_category(const Node &node, GopherCategory &category, ReadScope &owner);
   void unread_rest(const Node &parent, size_t from, const char *const *tags, const std::string &why);
 
   SourceEncoding encoding_;
   std::map<const void *, std::string> reasons_;
   std::set<const void *> fatal_;
   bool reads_ = true; // retail reads what is being read now
+  // A GLB_TABLE's browser reads its tables' HEADER FIELDs (read_column) [orig: @ 0x65dac0].
+  bool glb_header_fields_ = false;
 };
 
 std::string TreeReader::narrow(const Text &text) const {
@@ -346,12 +386,58 @@ bool TreeReader::flag(const Node &node, const char *name) {
 
 std::string TreeReader::keyword(const Node &node, const char *name, const char *const *tokens) {
   std::string out;
-  token(node, effective(node, name, tokens), out);
+  const Attribute *attr = effective(node, name, tokens);
+  if (!token(node, attr, out)) return std::string();
   // A token the parse knows, as its table spells it: the compare is without case, so the
   // file's spelling is none of the model's.
   for (const char *const *t = tokens; *t; ++t)
     if (iequals(out, *t)) return *t;
-  return out;
+  // Another token sets no code: the parse reads it as none.
+  attr->read = false;
+  because(attr, std::string(name) + " \"" + out + "\" is no token the parse knows: it sets nothing, as no " + name +
+                    " does; it is left out.");
+  return std::string();
+}
+
+std::string TreeReader::offset_keyword(const Node &node, const char *name, const char *const *tokens) {
+  const Attribute *attr = effective(node, name, tokens);
+  std::string out;
+  if (!token(node, attr, out)) return std::string();
+  for (const char *const *t = tokens; *t; ++t)
+    if (iequals(out, *t)) return *t;
+  Text tok;
+  attr->token(tok);
+  variable_number(node, attr, tok);
+  return std::to_string(static_cast<int>(mnu_xml::wcstol(tok, 10)));
+}
+
+std::string TreeReader::number_value(const Node &node, const char *name, bool zero_none) {
+  const Attribute *attr = first(node, name);
+  std::string ignored;
+  if (!token(node, attr, ignored)) return std::string();
+  Text tok;
+  attr->token(tok);
+  variable_number(node, attr, tok);
+  const int value = static_cast<int>(mnu_xml::wcstol(tok, 10));
+  if (zero_none && value == 0) {
+    // The parse's default: the model holds none, and the writer leaves it out.
+    attr->read = false;
+    because(attr, std::string(name) + " reads 0, the parse's default, as none does; it is left out.");
+    return std::string();
+  }
+  return std::to_string(value);
+}
+
+uint32_t TreeReader::flags_attr(const Node &node, const char *name) {
+  std::string text;
+  const Attribute *attr = first(node, name);
+  if (!token(node, attr, text)) return kDefaultUiMaterialFlags;
+  const uint32_t word = ui_material_flags_of(text);
+  if (word == kDefaultUiMaterialFlags) {
+    attr->read = false;
+    because(attr, std::string(name) + " reads the default word (STANDARD_TRANSPARENT), as none does; it is left out.");
+  }
+  return word;
 }
 
 void TreeReader::not_read(const Node &node, const char *name, WindowType type) {
@@ -579,13 +665,15 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
     for (const char *name : {"PASSWORD", "NUMBER", "READONLY", "MAXCHAR", "MAXVAL", "MINVAL"}) not_read(node, name, w.type);
   }
   for (const Attribute &a : node.attributes) {
-    if (in(a.name, kExtraAttributes)) {
-      if (!own("attribute")) {
+    // PLAYERLIST sets the browser's list mode, SERVERLIST clears it, by presence; the last
+    // authored decides [orig: CLanGameBrowser_ParseExtendedXMLDefinition @ 0x65dac0, self[3658]].
+    if (mnu_xml::iequals(a.name, "PLAYERLIST") || mnu_xml::iequals(a.name, "SERVERLIST")) {
+      if (!own("glb_playerlist")) {
         not_read(node, mnu_xml::ascii(a.name).c_str(), w.type);
         continue;
       }
       a.read = true;
-      w.extra_attributes.push_back({strutil::to_upper(mnu_xml::ascii(a.name)), std::string(), false});
+      w.glb_playerlist = mnu_xml::iequals(a.name, "PLAYERLIST");
     } else if (mnu_xml::iequals(a.name, "GROUP")) {
       because(&a, "GROUP is read only as a child element (<GROUP>n</GROUP>); the attribute is left out.");
     } else if (mnu_xml::iequals(a.name, "DISABLED")) {
@@ -656,10 +744,25 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
       read_cursor(child, w.cursor);
       if (!first_one) child.read = false;
     } else if (tag_is(child, "HOTKEY")) {
-      // VIRTUAL by presence; the text is the key name or its first character, untrimmed.
+      // VIRTUAL by presence: the text one of the three names CWnd_ParseVirtualKeyNameW @ 0x6467f0
+      // knows, untrimmed, without case; else the key is the text's first character. A key of 0
+      // registers nothing [orig: CWnd_RegisterHotkeysRecursive @ 0x649d90].
       Hotkey hotkey;
       hotkey.virtual_key = flag(child, "VIRTUAL");
-      hotkey.value = text_of(child);
+      const std::string text = text_of(child);
+      if (hotkey.virtual_key) {
+        for (const char *name : kVirtualKeyNames)
+          if (iequals(text, name)) hotkey.value = name;
+      } else if (!child.text.empty()) {
+        hotkey.value = narrow(Text(1, child.text[0]));
+      }
+      if (hotkey.value.empty()) {
+        child.read = false;
+        because(&child, hotkey.virtual_key ? "A VIRTUAL HOTKEY of a name the game does not know (VK_RETURN, VK_ESCAPE, "
+                                             "VK_SPACE) is key 0, which registers nothing; it is left out."
+                                           : "An empty HOTKEY is key 0, which registers nothing; it is left out.");
+        continue;
+      }
       w.hotkeys.push_back(std::move(hotkey));
     } else if (tag_is(child, "PRIVATE_DATA")) {
       singleton(frame, child, "PRIVATE_DATA", false);
@@ -691,12 +794,12 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
         (own_stopped && tag_in(child, list_rule ? kListTags : kTableTags)))
       continue;
     // An element only another type's parse reads: left out (the window's type never reads it).
-    const bool read_here = tag_in(child, kExtraTags)
-                               ? schema_element_reads(w.type, mnu_xml::ascii(child.tag)) == SchemaApplies::Reads
+    const char *typed = typed_part_path(child, w.type);
+    const bool read_here = typed ? schema_reads(w.type, typed) == SchemaApplies::Reads
                            : tag_is(child, "DATASOURCE") ? w.type == WindowType::Marquee
                                                          : type_reads(w.type, child);
     if (!read_here) {
-      if (tag_in(child, kExtraTags) || tag_is(child, "DATASOURCE") || tag_in(child, kScrollTags) ||
+      if (typed || tag_is(child, "DATASOURCE") || tag_in(child, kScrollTags) ||
           tag_in(child, kTableTags) || tag_is(child, "STRING") || tag_is(child, "TOGGLE_STRING") ||
           tag_is(child, "GROUP") || tag_is(child, "SPINUP") || tag_is(child, "SPINDOWN") || tag_is(child, "LIST_BOX"))
         because(&child, "A " + strutil::to_upper(window_type_name(w.type)) + " reads no " +
@@ -709,7 +812,7 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
     } else if (tag_is(child, "TOGGLE_STRING")) {
       singleton(frame, child, "TOGGLE_STRING", false);
       w.toggle_string.present = true;
-      w.toggle_string.type = keyword(child, "TYPE", kStringTypes);
+      w.toggle_string.type = keyword(child, "TYPE", kStringTypes); // ID alone [orig: @ 0x658170]
       w.toggle_string.value = text_of(child);
     } else if (tag_is(child, "GROUP")) {
       singleton(frame, child, "GROUP", false);
@@ -799,8 +902,53 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
     } else if (tag_is(child, "DATASOURCE")) {
       // Every one loads and appends its credits [orig: @ 0x65ceeb -> CMarqueeWnd_LoadCreditsFromIni].
       w.datasources.push_back(text_of(child));
-    } else if (tag_in(child, kExtraTags)) {
-      w.extras.push_back(read_extra(child));
+    } else if (tag_is(child, "JOIN_BUTTON")) {
+      read_part(child, w.join_button, WindowType::Button, frame);
+    } else if (tag_is(child, "SEARCH_BUTTON")) {
+      read_part(child, w.search_button, WindowType::Button, frame);
+    } else if (tag_is(child, "GLB_TABLE") || tag_is(child, "GLB_INFO_PLAYER_DETAILS")) {
+      // An embedded table parses the element's children; the browser then reads its HEADERs'
+      // FIELDs [orig: @ 0x65dac0; CTableWnd at +184 / +1422 of CLanWnd_Construct @ 0x65ec30].
+      const bool saved = glb_header_fields_;
+      glb_header_fields_ = true;
+      read_part(child, tag_is(child, "GLB_TABLE") ? w.glb_table : w.glb_info_player_details, WindowType::Table,
+                frame);
+      glb_header_fields_ = saved;
+    } else if (tag_is(child, "GLB_INFO_BUTTON")) {
+      read_part(child, w.glb_info_button, WindowType::Button, frame);
+    } else if (tag_is(child, "GLB_INFO_SERVER_DETAILS")) {
+      // A multiline edit parses the children; the browser reads the first FIELDS child's slots.
+      read_part(child, w.glb_info_server_details, WindowType::MultilineEdit, frame);
+      for (const auto &grand : child.children)
+        if (tag_is(*grand, "FIELDS")) {
+          read_glb_fields(*grand, w.glb_server_fields);
+          break;
+        }
+    } else if (tag_is(child, "GLB_NW_INFO")) {
+      read_part(child, w.glb_nw_info, WindowType::Static, frame);
+    } else if (tag_is(child, "TARGET")) {
+      if (w.type == WindowType::GlbTable) {
+        // The last TARGET's text is the browser's [orig: @ 0x65dac0, self[3668]].
+        if (const auto seen = frame.seen.find("TARGET"); seen != frame.seen.end()) {
+          seen->second->read = false;
+          because(seen->second, "A later TARGET replaces this one (the browser keeps the last); it is left out.");
+        }
+        frame.seen["TARGET"] = &child;
+        w.glb_target = text_of(child);
+        w.has_glb_target = true;
+      } else {
+        // Every one is a target in order [orig: CGopherWnd_ParseXMLDefinition @ 0x65b130].
+        w.gopher_targets.push_back(text_of(child));
+      }
+    } else if (tag_is(child, "FILTERS")) {
+      child.read = true;
+      for (const auto &grand : child.children) {
+        if (!tag_is(*grand, "CATEGORY")) continue;
+        GopherCategory category;
+        if (read_gopher_category(*grand, category, frame)) w.gopher_categories.push_back(std::move(category));
+      }
+    } else if (tag_is(child, "GOPHER_BACK")) {
+      read_part(child, w.gopher_back, WindowType::Button, frame);
     }
   }
 }
@@ -815,7 +963,7 @@ bool TreeReader::read_appearance(const Node &node, Appearance &out, const char *
   int number = 0;
   if (number_attr(node, "MAP_STATE", number)) { out.map_state = number; out.has_map_state = true; }
   if (number_attr(node, "HEIGHT", number)) { out.height = number; out.has_height = true; }
-  out.flags = string_attr(node, "FLAGS");
+  out.flags = flags_attr(node, "FLAGS");
   out.value = narrow(node.text);
   return !node.attributes.empty() && known_token(out.state, kAppearanceStates);
 }
@@ -933,6 +1081,13 @@ void TreeReader::read_action(const Node &node, Action &out) {
   out.external_browser = flag(node, "EXTERNAL_BROWSER");
   out.toggle = flag(node, "TOGGLE");
   out.test = keyword(node, "TEST", kActionTests);
+  if (out.test == kActionTests[0]) { // LT is the parse's 0, as no TEST
+    out.test.clear();
+    if (const Attribute *test = effective(node, "TEST", kActionTests)) {
+      test->read = false;
+      because(test, "TEST LT is the parse's 0, as none does; it is left out.");
+    }
+  }
   for (const Attribute &a : node.attributes)
     if (mnu_xml::iequals(a.name, "TARGET") || mnu_xml::iequals(a.name, "SCREEN") ||
         mnu_xml::iequals(a.name, "WINDOW"))
@@ -952,7 +1107,11 @@ void TreeReader::read_cursor(const Node &node, Cursor &cursor) {
     if (tag_is(c, "FILE")) {
       cursor.file = text_of(c);
     } else if (tag_is(c, "FLAGS")) {
-      cursor.flags = text_of(c);
+      cursor.flags = ui_material_flags_of(text_of(c)); // [orig: sub_646CC0 @ 0x649586]
+      if (cursor.flags == kDefaultUiMaterialFlags) {
+        c.read = false;
+        because(&c, "FLAGS reads the default word (STANDARD_TRANSPARENT), as none does; it is left out.");
+      }
     }
   }
 }
@@ -964,8 +1123,9 @@ void TreeReader::read_string(const Node &node, String &s, bool repeated) {
   s.present = true;
   s.value = text_of(node);
   s.type = keyword(node, "TYPE", kStringTypes);
-  if (node.attr("JUSTIFY")) s.justify = keyword(node, "JUSTIFY", kJustify);
-  if (node.attr("VJUSTIFY")) s.vjustify = keyword(node, "VJUSTIFY", kVJustify);
+  // A keyword sets the justification, another token's wcstol the offset [orig: @ 0x657c30].
+  if (node.attr("JUSTIFY")) s.justify = offset_keyword(node, "JUSTIFY", kJustify);
+  if (node.attr("VJUSTIFY")) s.vjustify = offset_keyword(node, "VJUSTIFY", kVJustify);
   int number = 0;
   if (number_attr(node, "EDGE", number)) { s.edge = number; s.has_edge = true; }
   if (flag(node, "WRAP")) s.wrap = true;
@@ -974,10 +1134,10 @@ void TreeReader::read_string(const Node &node, String &s, bool repeated) {
 
 void TreeReader::read_item(const Node &node, Item &item, bool cell, WindowType type) {
   node.read = true;
-  item.type = keyword(node, "TYPE", kItemTypes);
-  item.value = string_attr(node, "VALUE");
-  item.justify = keyword(node, "JUSTIFY", kJustify);
-  item.vjustify = keyword(node, "VJUSTIFY", kVJustify);
+  item.type = keyword(node, "TYPE", item_types_for(type, cell));
+  item.value = number_value(node, "VALUE", true);
+  item.justify = offset_keyword(node, "JUSTIFY", kJustify);
+  item.vjustify = offset_keyword(node, "VJUSTIFY", kVJustify);
   // PAIRS_LIST a LIST's ITEM alone reads, COLUMN a TABLE cell alone (schema_reads
   // "items.item.pairs_list", "items.item.column", "items.row.item.pairs_list").
   if (!cell && schema_reads(type, "items.item.pairs_list") == SchemaApplies::Reads)
@@ -1004,8 +1164,8 @@ bool TreeReader::read_items(const Node &node, Items &items, WindowType type) {
   node.read = true;
   items.present = true;
   if (reads("items.justify")) {
-    if (node.attr("JUSTIFY")) items.justify = keyword(node, "JUSTIFY", kJustify);
-    if (node.attr("VJUSTIFY")) items.vjustify = keyword(node, "VJUSTIFY", kVJustify);
+    if (node.attr("JUSTIFY")) items.justify = offset_keyword(node, "JUSTIFY", kJustify);
+    if (node.attr("VJUSTIFY")) items.vjustify = offset_keyword(node, "VJUSTIFY", kVJustify);
   } else {
     not_read(node, "JUSTIFY", type);
     not_read(node, "VJUSTIFY", type);
@@ -1153,7 +1313,21 @@ void TreeReader::read_column(const Node &node, TableColumn &column) {
       read_index(header.has_column, header.column);
       header.justify = keyword(c, "JUSTIFY", kJustify);
       header.vjustify = keyword(c, "VJUSTIFY", kVJustify);
-      header.sort = string_attr(c, "SORT");
+      // SORT by its first character: '1' numeric, 'A' or 'a' alphabetic, another nothing [orig:
+      // @ 0x6432ca..0x6432dd].
+      {
+        const Attribute *sort = first(c, "SORT");
+        std::string text;
+        if (token(c, sort, text)) {
+          if (text[0] == '1') header.sort = "1";
+          else if (text[0] == 'A' || text[0] == 'a') header.sort = "A";
+          else {
+            sort->read = false;
+            because(sort, "A SORT whose first character is not 1, A or a sets nothing; it is left out.");
+          }
+        }
+      }
+      if (glb_header_fields_) header.field = string_attr(c, "FIELD");
       if (number_attr(c, "WIDTH", number)) { header.width = number; header.has_width = true; }
       // A type="id" HEADER's text is a string id, looked up as the table parses
       // [orig: CUIStringTable_LookupString call @ 0x6434df].
@@ -1170,8 +1344,8 @@ void TreeReader::read_column(const Node &node, TableColumn &column) {
       c.read = true;
       TableBody body;
       read_index(body.has_column, body.column);
-      body.justify = keyword(c, "JUSTIFY", kJustify);
-      body.vjustify = keyword(c, "VJUSTIFY", kVJustify);
+      body.justify = offset_keyword(c, "JUSTIFY", kJustify);
+      body.vjustify = offset_keyword(c, "VJUSTIFY", kVJustify);
       // The draw kind: the walk's last write, the first authored of the three.
       for (const Attribute &a : c.attributes) {
         const bool custom = mnu_xml::iequals(a.name, kBodyDisplays[0]);
@@ -1185,13 +1359,13 @@ void TreeReader::read_column(const Node &node, TableColumn &column) {
         body.bitmap_text = body.bitmap_text || bitmap_text;
       }
       body.scale_bitmap = flag(c, "SCALE_BITMAP");
-      body.bitmap_flags = string_attr(c, "BITMAP_FLAGS");
+      body.bitmap_flags = flags_attr(c, "BITMAP_FLAGS");
       column.bodies.push_back(std::move(body));
     } else if (tag_is(c, "SUBST")) {
       c.read = true;
       TableSubst subst;
       read_index(subst.has_column, subst.column);
-      subst.value = string_attr(c, "VALUE");
+      subst.value = number_value(c, "VALUE", false);
       subst.is_url = flag(c, "URL");
       subst.is_file = flag(c, "FILE");
       subst.file = text_of(c);
@@ -1209,28 +1383,107 @@ void TreeReader::read_column(const Node &node, TableColumn &column) {
   }
 }
 
-Element TreeReader::read_extra(const Node &node) {
+// [orig: CLanGameBrowser_ParseXMLFieldDefinitions @ 0x65d850] count (the attribute walk's last), then
+// each FORMAT (the last; its \r and \n pairs read as CR and LF) and FIELD (its which, one past the
+// count reading 0; the last FIELD of a slot kept). A FIELD with no count writes through no array,
+// and one at the count past its array: each faults.
+void TreeReader::read_glb_fields(const Node &node, GlbFields &fields) {
   node.read = true;
-  Element element;
-  element.tag = strutil::to_upper(mnu_xml::ascii(node.tag));
-  element.text = narrow(node.text);
-  // White space beside child elements is the file's layout, none of the element's text (the writer
-  // lays a container out in its own form).
-  if (!node.children.empty() &&
-      std::all_of(element.text.begin(), element.text.end(), [](char c) { return std::isspace(static_cast<unsigned char>(c)); }))
-    element.text.clear();
+  fields.present = true;
   for (const Attribute &a : node.attributes) {
-    a.read = true;
-    if (a.name.empty() && !a.has_value) continue;
-    ElementAttribute attr;
-    attr.name = strutil::to_upper(narrow(a.name)); // the parses compare names without case
+    if (!mnu_xml::iequals(a.name, "count")) continue;
+    std::string text;
+    if (!token(node, &a, text)) continue;
     Text tok;
-    attr.has_value = a.has_value;
-    if (a.token(tok)) attr.value = narrow(tok);
-    element.attributes.push_back(std::move(attr));
+    a.token(tok);
+    fields.count = static_cast<int>(mnu_xml::wcstol(tok, 10));
+    fields.has_count = true;
   }
-  for (const auto &child : node.children) element.children.push_back(read_extra(*child));
-  return element;
+  for (const auto &child_ptr : node.children) {
+    const Node &c = *child_ptr;
+    if (tag_is(c, "FORMAT")) {
+      std::string text = text_of(c);
+      std::string read;
+      for (size_t i = 0; i < text.size(); ++i) {
+        if (text[i] == '\\' && i + 1 < text.size() && (text[i + 1] == 'r' || text[i + 1] == 'n')) {
+          read += text[i + 1] == 'r' ? '\r' : '\n';
+          ++i;
+        } else {
+          read += text[i];
+        }
+      }
+      fields.format = read;
+      fields.has_format = true;
+    } else if (tag_is(c, "FIELD")) {
+      c.read = true;
+      int which = 0;
+      for (const Attribute &a : c.attributes) {
+        if (!mnu_xml::iequals(a.name, "which")) continue;
+        std::string text;
+        if (!token(c, &a, text)) continue;
+        Text tok;
+        a.token(tok);
+        which = static_cast<int>(mnu_xml::wcstol(tok, 10));
+      }
+      if (static_cast<unsigned>(which) > static_cast<unsigned>(fields.count)) which = 0;
+      if (!fields.has_count || which == fields.count) {
+        fatal_because(&c, fields.has_count ? "A FIELD whose which is the count writes past the browser's slots in "
+                                             "retail; it is left out."
+                                           : "A FIELD before any count writes through no slots in retail; it is left out.");
+        c.read = false;
+        continue;
+      }
+      const std::string text = text_of(c);
+      auto slot = std::find_if(fields.fields.begin(), fields.fields.end(),
+                               [which](const GlbFieldSlot &f) { return f.which == which; });
+      if (slot != fields.fields.end()) slot->text = text;
+      else fields.fields.push_back({which, text});
+    }
+  }
+}
+
+// [orig: CGopherWnd_ParseCategoryXML @ 0x65a540] LEVEL on the CATEGORY (the last token); its
+// children: LABEL (the category static parses the element's children), ITEM (a button: NAME,
+// TARGET, FILTER, TABLE, the text) and INFO (a static: NAME, FILTER, TABLE, the text). An empty
+// CATEGORY hands the parse no node, which faults.
+bool TreeReader::read_gopher_category(const Node &node, GopherCategory &category, ReadScope &owner) {
+  if (node.children.empty()) {
+    fatal_because(&node, "An empty CATEGORY crashes retail (its parse reads no element); it is left out.");
+    return false;
+  }
+  node.read = true;
+  for (const Attribute &a : node.attributes) {
+    if (!mnu_xml::iequals(a.name, "LEVEL")) continue;
+    std::string text;
+    if (token(node, &a, text)) {
+      category.level = text;
+      category.has_level = true;
+    }
+  }
+  const auto last = [this](const Node &c, const char *name, std::string &out) {
+    for (const Attribute &a : c.attributes) {
+      if (!mnu_xml::iequals(a.name, name)) continue;
+      std::string text;
+      if (token(c, &a, text)) out = text;
+    }
+  };
+  for (const auto &child_ptr : node.children) {
+    const Node &c = *child_ptr;
+    if (tag_is(c, "LABEL")) {
+      read_part(c, category.label, WindowType::Static, owner);
+    } else if (tag_is(c, "ITEM") || tag_is(c, "INFO")) {
+      c.read = true;
+      GopherEntry entry;
+      entry.info = tag_is(c, "INFO");
+      last(c, "NAME", entry.name);
+      if (!entry.info) last(c, "TARGET", entry.target);
+      last(c, "FILTER", entry.filter);
+      last(c, "TABLE", entry.table);
+      entry.text = text_of(c);
+      category.entries.push_back(std::move(entry));
+    }
+  }
+  return true;
 }
 
 // The model record a node is in (ParseNote::locator): its top-level SCREEN by its place
@@ -1287,6 +1540,78 @@ void TreeReader::sweep(const mnu_xml::Document &xml, std::vector<ParseNote> &not
 }  // namespace
 
 // --- public API --------------------------------------------------------------
+
+const std::vector<UiMaterialFlag> &ui_material_flags() {
+  // g_UIMaterialFlagNames @ 0x84a5d0, in table order (rows of wchar name[64] + DWORD flags).
+  static const std::vector<UiMaterialFlag> table = {
+      {"STANDARD", 0x300600}, {"STANDARD_TRANSPARENT", 0x300651}, {"AFUNC_BITMASK", 0xF},
+      {"ASRC_BITMASK", 0xF0}, {"COLOR_BITMASK", 0xF00}, {"AFUNC_NONE", 0x0}, {"AFUNC_BLEND", 0x1},
+      {"AFUNC_SRCCOPY", 0x0}, {"AFUNC_ADD", 0x2}, {"AFUNC_SHADE", 0x3}, {"AFUNC_GLOW", 0x4},
+      {"AFUNC_ALPHALIGHT", 0x5}, {"AFUNC_MULTIPLY", 0x6}, {"AFUNC_DEST", 0x7}, {"AFUNC_MULTIPLYDBL", 0x8},
+      {"AFUNC_SQR", 0x9}, {"AFUNC_SQRADD", 0xA}, {"ASRC_NONE", 0x0}, {"ASRC_CONSTANT", 0x10},
+      {"ASRC_ITERATED", 0x20}, {"ASRC_TEXTURE", 0x30}, {"ASRC_TEXTURExCONSTANT", 0x40},
+      {"ASRC_TEXTURExITERATED", 0x50}, {"COLOR_NONE", 0x0}, {"COLOR_CONSTANT", 0x100},
+      {"COLOR_ITERATED", 0x200}, {"COLOR_ITERATEDxCONSTANT", 0x300}, {"COLOR_TEXTURE", 0x400},
+      {"COLOR_TEXTURExCONSTANT", 0x500}, {"COLOR_TEXTURExITERATED", 0x600}, {"COLOR_TEXTURERAMP", 0x700},
+      {"COLOR_TEXTUREdpCONSTANT", 0x800}, {"COLOR_TEXTUREdpITERATED", 0x900}, {"COLOR2_SQRD", 0x1000},
+      {"APPLYSPECULAR", 0x10000}, {"APPLYFOG", 0x20000}, {"ALPHATEST", 0x40000}, {"NATIVE2X", 0x80000},
+      {"NOWRITEDEPTH", 0x100000}, {"NOCHECKDEPTH", 0x200000}, {"GMAT_OVR_CLAMPUV1", 0x1000000},
+      {"GMAT_OVR_CLAMPUV2", 0x2000000}, {"TINTASTEXT", 0x80000000u},
+  };
+  return table;
+}
+
+uint32_t ui_material_flags_of(const std::string &text) {
+  // [orig: sub_646CC0 @ 0x646cc0] wcstok on " ,|+"; each token the first row of its name, without case.
+  uint32_t flags = 0;
+  size_t at = 0;
+  while (at < text.size()) {
+    const size_t start = text.find_first_not_of(" ,|+", at);
+    if (start == std::string::npos) break;
+    const size_t end = text.find_first_of(" ,|+", start);
+    const std::string token = text.substr(start, end == std::string::npos ? std::string::npos : end - start);
+    for (const UiMaterialFlag &row : ui_material_flags())
+      if (iequals(token, row.name)) {
+        flags |= row.bits;
+        break;
+      }
+    at = end == std::string::npos ? text.size() : end;
+  }
+  return flags;
+}
+
+std::string ui_material_flags_text(uint32_t flags) {
+  const std::vector<UiMaterialFlag> &table = ui_material_flags();
+  if (flags == 0) return "AFUNC_NONE";
+  // The widest rows first (the most bits; the table's order among rows of as many), each one whose
+  // bits are all the word's and that adds some.
+  std::vector<const UiMaterialFlag *> rows;
+  for (const UiMaterialFlag &row : table)
+    if (row.bits != 0) rows.push_back(&row);
+  std::stable_sort(rows.begin(), rows.end(), [](const UiMaterialFlag *a, const UiMaterialFlag *b) {
+    auto bits = [](uint32_t v) {
+      int n = 0;
+      for (; v; v &= v - 1) ++n;
+      return n;
+    };
+    return bits(a->bits) > bits(b->bits);
+  });
+  std::string out;
+  uint32_t covered = 0;
+  for (const UiMaterialFlag *row : rows) {
+    if ((row->bits & ~flags) != 0 || (row->bits & ~covered) == 0) continue;
+    if (!out.empty()) out += '|';
+    out += row->name;
+    covered |= row->bits;
+  }
+  return covered == flags ? out : std::string();
+}
+
+const char *const *item_types_for(WindowType type, bool cell) {
+  if (cell || type == WindowType::Table) return kCellItemTypes;
+  if (type == WindowType::SpinList) return kSpinListItemTypes;
+  return kListItemTypes;
+}
 
 bool known_token(const std::string &token, const char *const *tokens) {
   for (size_t i = 0; tokens[i]; ++i)
@@ -1559,7 +1884,8 @@ private:
                return same(x.justify == y.justify, "justify") && same(x.vjustify == y.vjustify, "vjustify") &&
                       same(x.has_column == y.has_column && x.column == y.column, "column") &&
                       same(x.sort == y.sort, "sort") && same(x.has_width == y.has_width && x.width == y.width, "width") &&
-                      same(x.type == y.type, "type") && same(x.text == y.text, "text");
+                      same(x.type == y.type, "type") && same(x.text == y.text, "text") &&
+                      same(x.field == y.field, "field");
              }) &&
         list(a.bodies, b.bodies, "body",
              [this](const TableBody &x, const TableBody &y) {
@@ -1583,14 +1909,21 @@ private:
     path_.pop_back();
     return ok;
   }
-  bool element(const Element &a, const Element &b) {
-    return same(a.tag == b.tag, "tag") && same(a.text == b.text, "text") &&
-           list(a.attributes, b.attributes, "attribute",
-                [this](const ElementAttribute &x, const ElementAttribute &y) {
-                  return same(x.name == y.name, "name") && same(x.value == y.value, "value") &&
-                         same(x.has_value == y.has_value, "has_value");
-                }) &&
-           list(a.children, b.children, "element", [this](const Element &x, const Element &y) { return element(x, y); });
+  bool glb_fields(const GlbFields &a, const GlbFields &b) {
+    return same(a.present == b.present, "glb_server_fields") &&
+           same(a.has_count == b.has_count && a.count == b.count, "glb_server_fields.count") &&
+           same(a.has_format == b.has_format && a.format == b.format, "glb_server_fields.format") &&
+           list(a.fields, b.fields, "glb_server_fields.field", [this](const GlbFieldSlot &x, const GlbFieldSlot &y) {
+             return same(x.which == y.which, "which") && same(x.text == y.text, "text");
+           });
+  }
+  bool category(const GopherCategory &a, const GopherCategory &b) {
+    return same(a.has_level == b.has_level && a.level == b.level, "level") && part(a.label, b.label, "label") &&
+           list(a.entries, b.entries, "entry", [this](const GopherEntry &x, const GopherEntry &y) {
+             return same(x.info == y.info, "info") && same(x.name == y.name, "name") &&
+                    same(x.target == y.target, "target") && same(x.filter == y.filter, "filter") &&
+                    same(x.table == y.table, "table") && same(x.text == y.text, "text");
+           });
   }
   bool part(const WindowPart &a, const WindowPart &b, const char *name) {
     if (!same(a.present() == b.present(), std::string(name) + " present")) return false;
@@ -1671,12 +2004,17 @@ private:
            same(a.table_data.has_fixed_header_height == b.table_data.has_fixed_header_height &&
                     a.table_data.fixed_header_height == b.table_data.fixed_header_height,
                 "fixed_header_height") &&
-           list(a.extras, b.extras, "element", [this](const Element &x, const Element &y) { return element(x, y); }) &&
-           list(a.extra_attributes, b.extra_attributes, "attribute",
-                [this](const ElementAttribute &x, const ElementAttribute &y) {
-                  return same(x.name == y.name, "name") && same(x.value == y.value, "value") &&
-                         same(x.has_value == y.has_value, "has_value");
-                }) &&
+           part(a.join_button, b.join_button, "join_button") && part(a.search_button, b.search_button, "search_button") &&
+           same(a.glb_playerlist == b.glb_playerlist, "glb_playerlist") && part(a.glb_table, b.glb_table, "glb_table") &&
+           part(a.glb_info_button, b.glb_info_button, "glb_info_button") &&
+           part(a.glb_info_player_details, b.glb_info_player_details, "glb_info_player_details") &&
+           part(a.glb_info_server_details, b.glb_info_server_details, "glb_info_server_details") &&
+           glb_fields(a.glb_server_fields, b.glb_server_fields) && part(a.glb_nw_info, b.glb_nw_info, "glb_nw_info") &&
+           same(a.has_glb_target == b.has_glb_target && a.glb_target == b.glb_target, "glb_target") &&
+           same(a.gopher_targets == b.gopher_targets, "gopher_targets") &&
+           list(a.gopher_categories, b.gopher_categories, "gopher_category",
+                [this](const GopherCategory &x, const GopherCategory &y) { return category(x, y); }) &&
+           part(a.gopher_back, b.gopher_back, "gopher_back") &&
            list(a.children, b.children, "window", [this](const Window &x, const Window &y) { return window(x, y); });
   }
 };

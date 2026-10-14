@@ -122,12 +122,9 @@ const mnu::Items *menu_items_container(const mnu::Window *window) {
 		case mnu::WindowType::SpinList:
 			return &window->items;
 		case mnu::WindowType::Combo:
-			// LIST_BOX owns combo items when it actually authors an ITEMS block
-			// under an authored LIST_BOX. A latent/disabled LIST_BOX or a
-			// styling-only one falls back to top-level ITEMS, matching runtime.
-			return window->list_box && window->list_box->items.present
-					? &window->list_box->items
-					: &window->items;
+			// A combo's rows are its LIST_BOX list's: the combo reads no ITEMS of its own
+			// [orig: CComboWnd_ParseXMLDefinition @ 0x65c0d0].
+			return window->list_box ? &window->list_box->items : nullptr;
 		default:
 			return nullptr;
 	}

@@ -110,8 +110,8 @@ const char *const kCanonicalPretty =
     "      <RIGHT>300</RIGHT>\n"
     "      <BOTTOM>40</BOTTOM>\n"
     "    </POSITION>\n"
-    "    <APPEARANCE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">a.tga</APPEARANCE>\n"
-    "    <APPEARANCE type=\"IMAGE\" state=\"MOUSEOVER\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">b&amp;c&lt;d>.tga</APPEARANCE>\n"
+    "    <APPEARANCE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT|ALPHATEST\">a.tga</APPEARANCE>\n"
+    "    <APPEARANCE type=\"IMAGE\" state=\"MOUSEOVER\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT|ALPHATEST\">b&amp;c&lt;d>.tga</APPEARANCE>\n"
     "    <TEXT_RSRC>menutxt.BIN</TEXT_RSRC>\n"
     "    <PRIVATE_DATA>p</PRIVATE_DATA>\n"
     "    <CURSOR>\n"
@@ -128,7 +128,7 @@ const char *const kCanonicalPretty =
     "    <TOGGLE_STRING type=\"ID\">ALT</TOGGLE_STRING>\n"
     "    <SOUND state=\"MOUSEIN\" trigger=\"MOUSE_OVER\">menu.lwf</SOUND>\n"
     "    <ITEMS MULTISELECT>\n"
-    "      <APPEARANCE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">row.tga</APPEARANCE>\n"
+    "      <APPEARANCE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT|ALPHATEST\">row.tga</APPEARANCE>\n"
     "      <ROW>\n"
     "        <ITEM type=\"BITMAP\" column=\"1\">c.tga</ITEM>\n"
     "        <ITEM type=\"BITMAP\" column=\"1\">c.tga</ITEM>\n"
@@ -145,7 +145,7 @@ const char *const kCanonicalPretty =
     "    <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>\n"
     "    <FIXED_HEADER_HEIGHT>0</FIXED_HEADER_HEIGHT>\n"
     "    <SCROLLBAR>\n"
-    "      <SCROLLDOWN type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">dn.tga</SCROLLDOWN>\n"
+    "      <SCROLLDOWN type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT|ALPHATEST\">dn.tga</SCROLLDOWN>\n"
     "    </SCROLLBAR>\n"
     "    <WINDOW type=\"edit\" name=\"ED\" READONLY NUMBER MINVAL=\"-1\" MAXVAL=\"99\" MAXCHAR=\"2\" PASSWORD>\n"
     "      <POSITION>\n"
@@ -163,9 +163,9 @@ const char *const kCanonicalPretty =
     "      </POSITION>\n"
     "      <WIDTH>20</WIDTH>\n"
     "      <ORIENTATION>HORIZONTAL</ORIENTATION>\n"
-    "      <SHUTTLE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">s1.tga</SHUTTLE>\n"
-    "      <SCROLLUP type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">u1.tga</SCROLLUP>\n"
-    "      <SCROLLDOWN type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">d1.tga</SCROLLDOWN>\n"
+    "      <SHUTTLE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT|ALPHATEST\">s1.tga</SHUTTLE>\n"
+    "      <SCROLLUP type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT|ALPHATEST\">u1.tga</SCROLLUP>\n"
+    "      <SCROLLDOWN type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT|ALPHATEST\">d1.tga</SCROLLDOWN>\n"
     "    </WINDOW>\n"
     "    <WINDOW type=\"marquee_wnd\" name=\"MQ\">\n"
     "      <POSITION>\n"
@@ -179,7 +179,7 @@ const char *const kCanonicalPretty =
     "        <LEFT>14</LEFT>\n"
     "      </POSITION>\n"
     "      <ITEMS justify=\"LEFT\" vjustify=\"TOP\" MULTISELECT>\n"
-    "        <APPEARANCE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">row.tga</APPEARANCE>\n"
+    "        <APPEARANCE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT|ALPHATEST\">row.tga</APPEARANCE>\n"
     "        <ITEM type=\"ID\" value=\"1\" justify=\"RIGHT\" vjustify=\"CENTER\" PAIRS_LIST>T</ITEM>\n"
     "      </ITEMS>\n"
     "    </WINDOW>\n"
@@ -192,7 +192,7 @@ const char *const kCanonicalPretty =
     "          <TOP>9</TOP>\n"
     "        </POSITION>\n"
     "        <SCROLLBAR>\n"
-    "          <SHUTTLE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">sh.tga</SHUTTLE>\n"
+    "          <SHUTTLE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT|ALPHATEST\">sh.tga</SHUTTLE>\n"
     "        </SCROLLBAR>\n"
     "      </LIST_BOX>\n"
     "    </WINDOW>\n"
@@ -201,33 +201,80 @@ const char *const kCanonicalPretty =
     "        <LEFT>16</LEFT>\n"
     "      </POSITION>\n"
     "      <SPINUP>\n"
-    "        <APPEARANCE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">up.tga</APPEARANCE>\n"
+    "        <APPEARANCE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT|ALPHATEST\">up.tga</APPEARANCE>\n"
     "      </SPINUP>\n"
     "      <SPINDOWN>\n"
     "        <STRING>-</STRING>\n"
     "      </SPINDOWN>\n"
     "    </WINDOW>\n"
-    "    <WINDOW type=\"glb_table\" name=\"GB\" SERVERLIST PLAYERLIST>\n"
+    "    <WINDOW type=\"glb_table\" name=\"GB\" PLAYERLIST>\n"
     "      <POSITION>\n"
     "        <LEFT>17</LEFT>\n"
     "      </POSITION>\n"
+    "      <GLB_TABLE>\n"
+    "        <POSITION>\n"
+    "          <LEFT>2</LEFT>\n"
+    "        </POSITION>\n"
+    "        <COLUMN>\n"
+    "          <HEADER column=\"0\" FIELD=\"ping\">Ping</HEADER>\n"
+    "        </COLUMN>\n"
+    "      </GLB_TABLE>\n"
+    "      <GLB_INFO_PLAYER_DETAILS>\n"
+    "        <POSITION>\n"
+    "          <TOP>3</TOP>\n"
+    "        </POSITION>\n"
+    "      </GLB_INFO_PLAYER_DETAILS>\n"
+    "      <GLB_INFO_BUTTON>\n"
+    "        <STRING>Info</STRING>\n"
+    "      </GLB_INFO_BUTTON>\n"
+    "      <GLB_INFO_SERVER_DETAILS>\n"
+    "        <POSITION>\n"
+    "          <TOP>4</TOP>\n"
+    "        </POSITION>\n"
+    "        <FIELDS count=\"2\">\n"
+    "          <FORMAT>%s\\n%s</FORMAT>\n"
+    "          <FIELD which=\"0\">map</FIELD>\n"
+    "          <FIELD which=\"1\">mode</FIELD>\n"
+    "        </FIELDS>\n"
+    "      </GLB_INFO_SERVER_DETAILS>\n"
+    "      <GLB_NW_INFO>\n"
+    "        <POSITION>\n"
+    "          <TOP>5</TOP>\n"
+    "        </POSITION>\n"
+    "      </GLB_NW_INFO>\n"
     "      <TARGET>http://x</TARGET>\n"
     "    </WINDOW>\n"
     "    <WINDOW type=\"gopher\" name=\"GO\">\n"
     "      <POSITION>\n"
     "        <LEFT>18</LEFT>\n"
     "      </POSITION>\n"
-    "      <FILTERS>\n"
-    "        <TARGET>http://x</TARGET>\n"
-    "        <JOIN_BUTTON NAME=\"J\" BARE EMPTY=\"\">note<TARGET>http://x</TARGET></JOIN_BUTTON>\n"
-    "      </FILTERS>\n"
     "      <TARGET>http://x</TARGET>\n"
+    "      <TARGET>http://y</TARGET>\n"
+    "      <FILTERS>\n"
+    "        <CATEGORY LEVEL=\"LEVEL1\">\n"
+    "          <LABEL>\n"
+    "            <STRING>Maps</STRING>\n"
+    "          </LABEL>\n"
+    "          <ITEM NAME=\"B\" TARGET=\"t\" FILTER=\"f\" TABLE=\"tb\">Alpha</ITEM>\n"
+    "          <INFO NAME=\"I\" FILTER=\"g\">About</INFO>\n"
+    "        </CATEGORY>\n"
+    "      </FILTERS>\n"
+    "      <GOPHER_BACK>\n"
+    "        <POSITION>\n"
+    "          <LEFT>1</LEFT>\n"
+    "        </POSITION>\n"
+    "      </GOPHER_BACK>\n"
     "    </WINDOW>\n"
     "    <WINDOW type=\"lan_list\" name=\"LL\">\n"
     "      <POSITION>\n"
     "        <LEFT>19</LEFT>\n"
     "      </POSITION>\n"
-    "      <JOIN_BUTTON NAME=\"J\" BARE EMPTY=\"\">note<TARGET>http://x</TARGET></JOIN_BUTTON>\n"
+    "      <JOIN_BUTTON>\n"
+    "        <STRING>Join</STRING>\n"
+    "      </JOIN_BUTTON>\n"
+    "      <SEARCH_BUTTON>\n"
+    "        <STRING>Find</STRING>\n"
+    "      </SEARCH_BUTTON>\n"
     "    </WINDOW>\n"
     "    <WINDOW type=\"static\" name=\"CHILD\">\n"
     "      <POSITION>\n"
@@ -254,16 +301,16 @@ const char *const kCanonicalCompact =
     "</ACTION><ACTION type=\"SCREEN\" file=\"next.mnu\">NEXT</ACTION><FRAME>"
     "<STENCIL size=\"8\" insetx=\"5\">s.tga</STENCIL><BRUSH>b.tga</BRUSH><MONOGRAM>m.tga</MONOGRAM></FRAME>"
     "<POSITION><LEFT>1</LEFT><TOP>2</TOP><RIGHT>300</RIGHT><BOTTOM>40</BOTTOM></POSITION>"
-    "<APPEARANCE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">a.tga"
+    "<APPEARANCE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT|ALPHATEST\">a.tga"
     "</APPEARANCE>"
-    "<APPEARANCE type=\"IMAGE\" state=\"MOUSEOVER\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">b&amp;c&lt;d>.tga"
+    "<APPEARANCE type=\"IMAGE\" state=\"MOUSEOVER\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT|ALPHATEST\">b&amp;c&lt;d>.tga"
     "</APPEARANCE><TEXT_RSRC>menutxt.BIN</TEXT_RSRC><PRIVATE_DATA>p</PRIVATE_DATA><CURSOR><FILE>c.tga"
     "</FILE><FLAGS>STANDARD</FLAGS></CURSOR><FONT><NAME>f.fnt</NAME><DEFAULT_FG>FF000001</DEFAULT_FG>"
     "<MOUSEOVER_BG>%DEF_BG%</MOUSEOVER_BG><DISABLED_FG>3</DISABLED_FG></FONT>"
     "<STRING type=\"ID\" justify=\"CENTER\" vjustify=\"BOTTOM\" edge=\"4\" WRAP>KEY</STRING>"
     "<TOGGLE_STRING type=\"ID\">ALT</TOGGLE_STRING><SOUND state=\"MOUSEIN\" trigger=\"MOUSE_OVER\">menu.lwf"
     "</SOUND><ITEMS MULTISELECT>"
-    "<APPEARANCE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">row.tga"
+    "<APPEARANCE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT|ALPHATEST\">row.tga"
     "</APPEARANCE><ROW><ITEM type=\"BITMAP\" column=\"1\">c.tga</ITEM><ITEM type=\"BITMAP\" column=\"1\">c.tga"
     "</ITEM></ROW><ROW></ROW></ITEMS><COLUMN count=\"3\" spacing=\"2\">"
     "<HEADER justify=\"CENTER\" SECONDARY_SORT TERTIARY_SORT column=\"0\" sort=\"A\" width=\"100\" type=\"ID\">H0"
@@ -271,36 +318,43 @@ const char *const kCanonicalCompact =
     "<BODY column=\"1\" BITMAP_TEXT CUSTOM_DRAW BITMAP_DRAW BITMAP_FLAGS=\"STANDARD\" SCALE_BITMAP></BODY>"
     "<SUBST column=\"0\" value=\"1\" URL FILE>x.tga</SUBST></COLUMN><MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>"
     "<FIXED_HEADER_HEIGHT>0</FIXED_HEADER_HEIGHT><SCROLLBAR>"
-    "<SCROLLDOWN type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">dn.tga"
+    "<SCROLLDOWN type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT|ALPHATEST\">dn.tga"
     "</SCROLLDOWN></SCROLLBAR>"
     "<WINDOW type=\"edit\" name=\"ED\" READONLY NUMBER MINVAL=\"-1\" MAXVAL=\"99\" MAXCHAR=\"2\" PASSWORD>"
     "<POSITION><LEFT>10</LEFT></POSITION></WINDOW><WINDOW type=\"checkbox\" name=\"CB\" CHECKED AS_BUTTON>"
     "<POSITION><LEFT>11</LEFT></POSITION></WINDOW><WINDOW type=\"scroll\" name=\"SC\"><POSITION><LEFT>12"
     "</LEFT></POSITION><WIDTH>20</WIDTH><ORIENTATION>HORIZONTAL</ORIENTATION>"
-    "<SHUTTLE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">s1.tga"
+    "<SHUTTLE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT|ALPHATEST\">s1.tga"
     "</SHUTTLE>"
-    "<SCROLLUP type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">u1.tga"
+    "<SCROLLUP type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT|ALPHATEST\">u1.tga"
     "</SCROLLUP>"
-    "<SCROLLDOWN type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">d1.tga"
+    "<SCROLLDOWN type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT|ALPHATEST\">d1.tga"
     "</SCROLLDOWN></WINDOW><WINDOW type=\"marquee_wnd\" name=\"MQ\"><POSITION><LEFT>13</LEFT></POSITION>"
     "<DATASOURCE>nlist.kda</DATASOURCE><DATASOURCE>credits.ini</DATASOURCE></WINDOW>"
     "<WINDOW type=\"list\" name=\"LS\"><POSITION><LEFT>14</LEFT></POSITION>"
     "<ITEMS justify=\"LEFT\" vjustify=\"TOP\" MULTISELECT>"
-    "<APPEARANCE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">row.tga"
+    "<APPEARANCE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT|ALPHATEST\">row.tga"
     "</APPEARANCE><ITEM type=\"ID\" value=\"1\" justify=\"RIGHT\" vjustify=\"CENTER\" PAIRS_LIST>T</ITEM></ITEMS>"
     "</WINDOW><WINDOW type=\"combobox\" name=\"CO\"><POSITION><LEFT>15</LEFT></POSITION>"
     "<LIST_BOX sb_edge_pad=\"6\" name=\"DROP\"><POSITION><TOP>9</TOP></POSITION><SCROLLBAR>"
-    "<SHUTTLE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">sh.tga"
+    "<SHUTTLE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT|ALPHATEST\">sh.tga"
     "</SHUTTLE></SCROLLBAR></LIST_BOX></WINDOW><WINDOW type=\"spinlist\" name=\"SP\"><POSITION><LEFT>16"
     "</LEFT></POSITION><SPINUP>"
-    "<APPEARANCE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">up.tga"
+    "<APPEARANCE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT|ALPHATEST\">up.tga"
     "</APPEARANCE></SPINUP><SPINDOWN><STRING>-</STRING></SPINDOWN></WINDOW>"
-    "<WINDOW type=\"glb_table\" name=\"GB\" SERVERLIST PLAYERLIST><POSITION><LEFT>17</LEFT></POSITION>"
-    "<TARGET>http://x</TARGET></WINDOW><WINDOW type=\"gopher\" name=\"GO\"><POSITION><LEFT>18</LEFT>"
-    "</POSITION><FILTERS><TARGET>http://x</TARGET><JOIN_BUTTON NAME=\"J\" BARE EMPTY=\"\">note"
-    "<TARGET>http://x</TARGET></JOIN_BUTTON></FILTERS><TARGET>http://x</TARGET></WINDOW>"
-    "<WINDOW type=\"lan_list\" name=\"LL\"><POSITION><LEFT>19</LEFT></POSITION>"
-    "<JOIN_BUTTON NAME=\"J\" BARE EMPTY=\"\">note<TARGET>http://x</TARGET></JOIN_BUTTON></WINDOW>"
+    "<WINDOW type=\"glb_table\" name=\"GB\" PLAYERLIST><POSITION><LEFT>17</LEFT></POSITION><GLB_TABLE>"
+    "<POSITION><LEFT>2</LEFT></POSITION><COLUMN><HEADER column=\"0\" FIELD=\"ping\">Ping</HEADER></COLUMN>"
+    "</GLB_TABLE><GLB_INFO_PLAYER_DETAILS><POSITION><TOP>3</TOP></POSITION></GLB_INFO_PLAYER_DETAILS>"
+    "<GLB_INFO_BUTTON><STRING>Info</STRING></GLB_INFO_BUTTON><GLB_INFO_SERVER_DETAILS><POSITION><TOP>4"
+    "</TOP></POSITION><FIELDS count=\"2\"><FORMAT>%s\\n%s</FORMAT><FIELD which=\"0\">map</FIELD>"
+    "<FIELD which=\"1\">mode</FIELD></FIELDS></GLB_INFO_SERVER_DETAILS><GLB_NW_INFO><POSITION><TOP>5</TOP>"
+    "</POSITION></GLB_NW_INFO><TARGET>http://x</TARGET></WINDOW><WINDOW type=\"gopher\" name=\"GO\">"
+    "<POSITION><LEFT>18</LEFT></POSITION><TARGET>http://x</TARGET><TARGET>http://y</TARGET><FILTERS>"
+    "<CATEGORY LEVEL=\"LEVEL1\"><LABEL><STRING>Maps</STRING></LABEL>"
+    "<ITEM NAME=\"B\" TARGET=\"t\" FILTER=\"f\" TABLE=\"tb\">Alpha</ITEM><INFO NAME=\"I\" FILTER=\"g\">About</INFO>"
+    "</CATEGORY></FILTERS><GOPHER_BACK><POSITION><LEFT>1</LEFT></POSITION></GOPHER_BACK></WINDOW>"
+    "<WINDOW type=\"lan_list\" name=\"LL\"><POSITION><LEFT>19</LEFT></POSITION><JOIN_BUTTON><STRING>Join"
+    "</STRING></JOIN_BUTTON><SEARCH_BUTTON><STRING>Find</STRING></SEARCH_BUTTON></WINDOW>"
     "<WINDOW type=\"static\" name=\"CHILD\"><POSITION><LEFT>7</LEFT></POSITION></WINDOW>"
     "<WINDOW type=\"window\" name=\"BARE\"></WINDOW></WINDOW><WINDOW type=\"static\" name=\"CHILD\"><POSITION>"
     "<LEFT>7</LEFT></POSITION></WINDOW></SCREEN><SCREEN></SCREEN>";
@@ -314,7 +368,7 @@ mnu::Appearance image_row(const char *state, const char *value) {
 	a.map_state = 1;
 	a.has_height = true;
 	a.height = 24;
-	a.flags = "STANDARD_TRANSPARENT";
+	a.flags = 0x340651u; // STANDARD_TRANSPARENT|ALPHATEST
 	return a;
 }
 
@@ -402,7 +456,7 @@ mnu::Document minted() {
 	w.items.rows = {row, mnu::TableRow{}};
 	w.scrollbar.author(mnu::WindowType::Scroll).scrolldown = {image_row("DEFAULT", "dn.tga")};
 	w.cursor.file = "c.tga";
-	w.cursor.flags = "STANDARD";
+	w.cursor.flags = 0x300600u; // STANDARD
 	w.has_text_rsrc = true;
 	w.text_rsrc = "menutxt.BIN";
 	w.private_data = "p";
@@ -433,7 +487,7 @@ mnu::Document minted() {
 	body.column = 1;
 	body.bitmap_draw = body.custom_draw = body.bitmap_text = body.scale_bitmap = true;
 	body.display = "BITMAP_TEXT";
-	body.bitmap_flags = "STANDARD";
+	body.bitmap_flags = 0x300600u;
 	column.bodies = {body};
 	mnu::TableSubst subst;
 	subst.has_column = true;
@@ -499,26 +553,66 @@ mnu::Document minted() {
 	spin.spinup.author(mnu::WindowType::Button).appearances = {image_row("DEFAULT", "up.tga")};
 	spin.spindown.author(mnu::WindowType::Button).string_data.present = true;
 	spin.spindown->string_data.value = "-";
-	// The elements the GLB_TABLE, GOPHER and LAN_LIST parses read, and the GLB_TABLE's attributes.
-	mnu::Element target;
-	target.tag = "TARGET";
-	target.text = "http://x";
-	mnu::Element join;
-	join.tag = "JOIN_BUTTON";
-	join.attributes = {{"NAME", "J", true}, {"BARE", "", false}, {"EMPTY", "", true}};
-	join.text = "note";
-	join.children = {target};
-	mnu::Element filters;
-	filters.tag = "FILTERS";
-	filters.text = ""; // a container: white space beside its elements is layout
-	filters.children = {target, join};
+	// The GLB_TABLE browser's parts [orig: CLanGameBrowser_ParseExtendedXMLDefinition @ 0x65dac0]: PLAYERLIST,
+	// its table with a HEADER's FIELD, the info button, the player details table, the server details edit and
+	// its FIELDS, the NovaWorld info static and the TARGET.
 	mnu::Window glb = typed_window(mnu::WindowType::GlbTable, "GB", 17);
-	glb.extra_attributes = {{"SERVERLIST", "", false}, {"PLAYERLIST", "", false}};
-	glb.extras = {target};
+	glb.glb_playerlist = true;
+	mnu::Window &browser = glb.glb_table.author(mnu::WindowType::Table);
+	browser.position.has_left = true;
+	browser.position.left = 2;
+	mnu::TableHeader ping;
+	ping.has_column = true;
+	ping.column = 0;
+	ping.field = "ping";
+	ping.text = "Ping";
+	browser.table_data.column.headers = {ping};
+	glb.glb_info_button.author(mnu::WindowType::Button).string_data.present = true;
+	glb.glb_info_button->string_data.value = "Info";
+	mnu::Window &players = glb.glb_info_player_details.author(mnu::WindowType::Table);
+	players.position.has_top = true;
+	players.position.top = 3;
+	mnu::Window &details = glb.glb_info_server_details.author(mnu::WindowType::MultilineEdit);
+	details.position.has_top = true;
+	details.position.top = 4;
+	glb.glb_server_fields.present = glb.glb_server_fields.has_count = glb.glb_server_fields.has_format = true;
+	glb.glb_server_fields.count = 2;
+	glb.glb_server_fields.format = "%s\n%s";
+	glb.glb_server_fields.fields = {{0, "map"}, {1, "mode"}};
+	glb.glb_nw_info.author(mnu::WindowType::Static).position.has_top = true;
+	glb.glb_nw_info->position.top = 5;
+	glb.has_glb_target = true;
+	glb.glb_target = "http://x";
+	// The GOPHER's targets, its FILTERS' CATEGORY (LEVEL, LABEL, an ITEM and an INFO) and GOPHER_BACK [orig:
+	// CGopherWnd_ParseXMLDefinition @ 0x65b130; CGopherWnd_ParseCategoryXML @ 0x65a540].
 	mnu::Window gopher = typed_window(mnu::WindowType::Gopher, "GO", 18);
-	gopher.extras = {filters, target};
+	gopher.gopher_targets = {"http://x", "http://y"};
+	mnu::GopherCategory category;
+	category.has_level = true;
+	category.level = "LEVEL1";
+	category.label.author(mnu::WindowType::Static).string_data.present = true;
+	category.label->string_data.value = "Maps";
+	mnu::GopherEntry button;
+	button.name = "B";
+	button.target = "t";
+	button.filter = "f";
+	button.table = "tb";
+	button.text = "Alpha";
+	mnu::GopherEntry info;
+	info.info = true;
+	info.name = "I";
+	info.filter = "g";
+	info.text = "About";
+	category.entries = {button, info};
+	gopher.gopher_categories = {category};
+	gopher.gopher_back.author(mnu::WindowType::Button).position.has_left = true;
+	gopher.gopher_back->position.left = 1;
+	// The LAN_LIST's two buttons [orig: CLanListWnd_ParseXMLDefinition @ 0x65b9d0].
 	mnu::Window lan = typed_window(mnu::WindowType::LanList, "LL", 19);
-	lan.extras = {join};
+	lan.join_button.author(mnu::WindowType::Button).string_data.present = true;
+	lan.join_button->string_data.value = "Join";
+	lan.search_button.author(mnu::WindowType::Button).string_data.present = true;
+	lan.search_button->string_data.value = "Find";
 	mnu::Window child = typed_window(mnu::WindowType::Static, "CHILD", 7);
 	mnu::Window bare;
 	bare.name = "BARE";

@@ -38,13 +38,13 @@ const std::vector<SchemaChoice> &ui_material_flag_choices();
 // parses from one child element, LIST_BOX, SPINUP, SPINDOWN or SCROLLBAR: a window's fields but its
 // TYPE, which the owner decides), an APPEARANCE (Appearance; the shuttle's, the scroll arrows' and the
 // ITEMS' too), a SOUND, an ACTION, a HOTKEY, a DATASOURCE (its text), an ITEM (an ITEMS row's and a
-// table row's cell), a table ROW, a HEADER, a BODY, a SUBST, an extra element (Element) and its
-// attribute (ElementAttribute).
+// table row's cell), a table ROW, a HEADER, a BODY, a SUBST, a GOPHER's CATEGORY (GopherCategory) and its
+// ITEM or INFO (GopherEntry), and a GLB_INFO_SERVER_DETAILS's FIELD slot (GlbFieldSlot).
 enum class SchemaShape {
   Screen, Window, Part, Appearance, Sound, Action, Hotkey, Datasource, Item, Row, Header, Body, Subst,
-  Element, Attribute,
+  Category, Entry, FieldSlot,
 };
-inline constexpr size_t kSchemaShapeCount = size_t(SchemaShape::Attribute) + 1;
+inline constexpr size_t kSchemaShapeCount = size_t(SchemaShape::FieldSlot) + 1;
 
 // --- what a field names ----------------------------------------------------------------------
 // What a field names outside its record (docs/mnu/menu-re.md, "Names and the lookups"): a font by
@@ -70,19 +70,19 @@ bool schema_hex_colour(SchemaReference reference);
 // --- what a new record is ----------------------------------------------------------------------
 // The defaults a list's new record takes, each of which the writer writes and the reader reads back as
 // written: a window of type STATIC at 0,0,100,20 with a typeless DEFAULT appearance, an APPEARANCE with
-// STATE DEFAULT, a SOUND on MOUSEIN with the MOUSE_OVER trigger, an ACTION of type POP_SCREEN, an extra
-// element TARGET, a HEADER and a BODY with their COLUMN written (the new column's index), a SUBST with
-// its COLUMN written, a window's attribute PLAYERLIST and an element's attribute NAME.
+// STATE DEFAULT, a SOUND on MOUSEIN with the MOUSE_OVER trigger, an ACTION of type POP_SCREEN, a HEADER
+// and a BODY with their COLUMN written (the new column's index), a SUBST with its COLUMN written, a
+// CATEGORY with one ITEM (an empty CATEGORY crashes retail), an ITEM, a FIELD slot 0.
 void schema_default(Window &window);
 void schema_default(Appearance &appearance);
 void schema_default(Sound &sound);
 void schema_default(Action &action);
-void schema_default(Element &element);
 void schema_default(TableHeader &header, size_t column);
 void schema_default(TableBody &body, size_t column);
 void schema_default(TableSubst &subst);
-void schema_default_window_attribute(ElementAttribute &attribute);
-void schema_default_element_attribute(ElementAttribute &attribute);
+void schema_default(GopherCategory &category);
+void schema_default(GopherEntry &entry);
+void schema_default(GlbFieldSlot &slot);
 // A part authored with its window of `type`, which, new, takes a typeless DEFAULT appearance.
 Window &schema_default_part(WindowPart &part, WindowType type);
 
@@ -106,8 +106,6 @@ SchemaApplies schema_reads(WindowType type, const std::string &path);
 // Whether an ACTION's verb reads one of its fields [orig: CUIElement_ParseXMLDefinition
 // @ 0x648120 ACTION arm; CUIWidget_HandleScriptedAction @ 0x6497f0].
 SchemaApplies schema_action_reads(const Action &action, const std::string &field);
-// Whether a window of `type` reads an extra element of `tag` at its top level.
-SchemaApplies schema_element_reads(WindowType type, const std::string &tag);
 // The stricter of two answers (Ignored, then Unverified, then Reads).
 SchemaApplies schema_applies_both(SchemaApplies a, SchemaApplies b);
 

@@ -260,9 +260,6 @@ static int test_configure_notes() {
 		// Six digits leave the alpha 0; eight with an alpha of 00 are taken as written.
 		TEST_EXPECT(count(notes, Code::ColorTransparent) == 1);
 		TEST_EXPECT(is(find(notes, Code::AppearanceStateUnknown), 0, "appearance", 0, "state", "HOVER"));
-		// An unknown TYPE marks the state; an empty one is the marker on purpose (no note).
-		TEST_EXPECT(count(notes, Code::AppearanceTypeUnknown) == 1);
-		TEST_EXPECT(is(find(notes, Code::AppearanceTypeUnknown), 0, "appearance", 1, "type", "SPARKLE"));
 		TEST_EXPECT(is(find(notes, Code::AppearanceCustom), 0, "appearance", 3, "type", "mouseover"));
 		// Two DEFAULT COLOR rows: the later one's value is the one read.
 		TEST_EXPECT(is(find(notes, Code::AppearanceReplaced), 0, "appearance", 4, "value", "default color"));
@@ -333,25 +330,12 @@ static int test_configure_notes() {
 		rig.configure(root);
 		const std::vector<MenuFrameNote> &notes = rig.compiler.build_notes();
 		// A RADIOEDIT is drawn (its radio part): no note.
-		TEST_EXPECT(count(notes, Code::ItemKindAsText) == 1);
-		TEST_EXPECT(is(find(notes, Code::ItemKindAsText), 2, "items.item", 1, "type", "IMAGE"));
 		TEST_EXPECT(count(notes, Code::TableCellsDeferred) == 1);
 		TEST_EXPECT(is(find(notes, Code::TableCellsDeferred), 3, "items.appearance", 0, "type", "IMAGEROW"));
 		TEST_EXPECT(count(notes, Code::TableCellsCustom) == 1);
 		TEST_EXPECT(is(find(notes, Code::TableCellsCustom), 3, "column.body", 3, "display", "CUSTOM_DRAW"));
 		TEST_EXPECT(count(notes, Code::ScrollExtentDefault) == 1);
 		TEST_EXPECT(is(find(notes, Code::ScrollExtentDefault), 4, "", -1, "scroll_extent", "20"));
-	}
-	{
-		// A spin arrow's rows are its list's SPINUP record.
-		Rig rig;
-		Window spin = window(WindowType::SpinList, "SPIN", 0, 0, 100, 20);
-		with_font(spin);
-		Window &up = spin.spinup.author(WindowType::Button);
-		up.position = window(WindowType::Button, "", 100, 0, 116, 10).position;
-		up.appearances = {appearance("DEFAULT", "SPARKLE", "")};
-		rig.configure(spin);
-		TEST_EXPECT(is(find(rig.compiler.build_notes(), Code::AppearanceTypeUnknown), 0, "spinup", 0, ""));
 	}
 	return 0;
 }
