@@ -781,11 +781,19 @@ void cache_client_pose(const std::vector<uint8_t> &payload, SessionReplyState &s
 // The C2S 0x00 JOIN body's CD identity blob: the flat-TLV run is walked for
 // the "CD" field, whose value packs [name\0][value\0] pairs back to back (the
 // NovaWorld NAMEINFO / PCID / SQUADINFO / JOINTICKET cookies). A LAN join
-// carries no CD and yields no pairs. [orig: NapiNPServer_HandlePlayerJoinMessage
-//  @0x512AA0 "CD" -> the cookie buffer; KeyValueBuffer_FindValue @0x4C2A30]
+// carries no CD and yields no pairs. Each CD the walk meets replaces the
+// connection's cookie buffer (the previous one freed, a CD of no length leaving
+// none), so the last CD is the cookie, however the walk's fields overlap.
+// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512AA0 - the "CD" compare
+//  @0x512C45, the store @0x512C5D -> sub_4C6060 (frees +0x2DC @0x4C6072, zeroes
+//  +0x2DC / +0x2E0 @0x4C6080..0x4C6086, keeps none for a length below 1
+//  @0x4C608E..0x4C6095, else a copy of the declared length); KeyValueBuffer_FindValue
+//  @0x4C2A30]
 std::vector<std::pair<std::string, std::string>> parse_join_identity_pairs(
 		const std::vector<uint8_t> &payload) {
 	std::vector<std::pair<std::string, std::string>> pairs;
+	const uint8_t *cookie = nullptr;
+	size_t cookie_bytes = 0;
 	size_t pos = 0;
 	while (pos < payload.size()) {
 		FlatTlvField field;
@@ -793,10 +801,14 @@ std::vector<std::pair<std::string, std::string>> parse_join_identity_pairs(
 		if (next == kFlatTlvEnd || field.name.empty()) break;
 		pos = next;
 		if (!strutil::iequals(field.name, "CD")) continue;
-		// The pairs inside the JOIN's own bytes: a CD that runs past them reads on in
-		// retail (D-NET-410), and the pairs past them are not read here.
-		const uint8_t *cursor = field.value;
-		const uint8_t *end = field.value + field.present;
+		// The cookie's bytes inside the JOIN: a CD that runs past them reads on in retail
+		// (D-NET-410), and the pairs past them are not read here.
+		cookie = field.size < 1 ? nullptr : field.value;
+		cookie_bytes = field.size < 1 ? 0 : field.present;
+	}
+	if (cookie != nullptr) {
+		const uint8_t *cursor = cookie;
+		const uint8_t *end = cookie + cookie_bytes;
 		while (cursor < end) {
 			const uint8_t *name_end = std::find(cursor, end, uint8_t{0});
 			if (name_end == end) break;

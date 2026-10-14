@@ -604,7 +604,9 @@ std::vector<std::string> handshake_keys(const wire::ParityHandshake &handshake) 
 	while (pos < len) {
 		FlatTlvField field;
 		const size_t next = read_flat_tlv(data, len, pos, field);
-		if (next == kFlatTlvEnd || field.name.empty()) {
+		// A field that runs past the body (its present bytes short of its size) is malformed
+		// too: the walk ends there, so an overlapping run costs one key, not one per byte.
+		if (next == kFlatTlvEnd || field.name.empty() || field.present < field.size) {
 			keys.push_back("malformed@" + std::to_string(pos));
 			break;
 		}

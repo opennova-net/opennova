@@ -1185,15 +1185,17 @@ int test_hello_and_auth_walks_end_only_at_an_empty_name() {
 	ClientAuth parsed_auth;
 	TEST_EXPECT(parse_client_auth(auth.data(), auth.size(), parsed_auth));
 	TEST_EXPECT(parsed_auth.ck == 0xDEADBEEFu && parsed_auth.hk == 0u);
-	// 0x42: a CU declaring 2048 bytes with ten there keeps its declared length, which the
-	// join handler's 2048-byte bound reads (the 0x42 is then dropped unanswered).
+	// 0x42: a CU declaring 2048 bytes with ten there is dropped by the walk's bound, which
+	// reads the declared length; one declaring 2047 keeps it, zero past the datagram.
 	std::vector<uint8_t> long_cu;
-	append_field(long_cu, "CK", { 0xEF, 0xBE, 0xAD, 0xDE });
-	long_cu.insert(long_cu.end(), { 'C', 'U', 0x00, 0x00, 0x08 });
-	for (int i = 0; i < 10; ++i)
-		long_cu.push_back(0x03);
+	append_field(long_cu, "CK", {0xEF, 0xBE, 0xAD, 0xDE});
+	long_cu.insert(long_cu.end(), {'C', 'U', 0x00, 0x00, 0x08});
+	for (int i = 0; i < 10; ++i) long_cu.push_back(0x03);
+	TEST_EXPECT(!parse_client_auth(long_cu.data(), long_cu.size(), parsed_auth));
+	long_cu[long_cu.size() - 12] = 0xFF; // the CU's size, now 2047
+	long_cu[long_cu.size() - 11] = 0x07;
 	TEST_EXPECT(parse_client_auth(long_cu.data(), long_cu.size(), parsed_auth));
-	TEST_EXPECT(parsed_auth.cu.size() == 1 && parsed_auth.cu[0].size() == 2048u &&
+	TEST_EXPECT(parsed_auth.cu.size() >= 1 && parsed_auth.cu[0].size() == 2047u &&
 			parsed_auth.cu[0][9] == 0x03 && parsed_auth.cu[0][10] == 0x00);
 
 	// 0x82: 64 CUs, an empty name, then a 65th: the walk ended at the name, so it accepts.
@@ -1224,6 +1226,37 @@ int test_hello_and_auth_walks_end_only_at_an_empty_name() {
 	return 0;
 }
 
+// An overlapping CU chain cannot allocate past retail's slots (D-NET-412 review): every CU
+// in a run of "CU\0" + an overrunning size re-reads the next one from its value, so the walk
+// meets one CU per five bytes. The bounds run inside the walk: a declared length of 2048 or
+// more, or a 65th CU, ends it and fails the parse (the 0x42 dropped unanswered), so the walk
+// holds at most 64 slots of under 2048 bytes.
+// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - @0x62BBE7..0x62BBFA, the copy @0x62BC0B]
+int test_client_auth_cu_chain_is_bounded_inside_the_walk() {
+	const auto chain = [](size_t count, uint8_t lo, uint8_t hi) {
+		std::vector<uint8_t> bytes;
+		for (size_t i = 0; i < count; ++i) bytes.insert(bytes.end(), {'C', 'U', 0x00, lo, hi});
+		return bytes;
+	};
+	ClientAuth parsed;
+	// 800 CUs each declaring 65535: the first one ends the walk.
+	const std::vector<uint8_t> huge = chain(800, 0xFF, 0xFF);
+	TEST_EXPECT(!parse_client_auth(huge.data(), huge.size(), parsed));
+	TEST_EXPECT(parsed.cu.empty());
+	// 65 CUs each declaring 2047: the 65th ends the walk, after 64 slots.
+	const std::vector<uint8_t> sixty_five = chain(65, 0xFF, 0x07);
+	TEST_EXPECT(!parse_client_auth(sixty_five.data(), sixty_five.size(), parsed));
+	TEST_EXPECT(parsed.cu.size() == 64u);
+	// 64 of them parse, each slot its declared 2047 bytes and no more.
+	const std::vector<uint8_t> sixty_four = chain(64, 0xFF, 0x07);
+	TEST_EXPECT(parse_client_auth(sixty_four.data(), sixty_four.size(), parsed));
+	TEST_EXPECT(parsed.cu.size() == 64u);
+	size_t held = 0;
+	for (const std::vector<uint8_t> &cu : parsed.cu) held += cu.size();
+	TEST_EXPECT(held == 64u * 2047u);
+	return 0;
+}
+
 int main() {
 	if (test_client_hello_roundtrip() != 0) return 1;
 	if (test_client_hello_minimal() != 0) return 1;
@@ -1248,6 +1281,7 @@ int main() {
 		return 1;
 	if (test_hello_and_auth_walks_end_only_at_an_empty_name() != 0)
 		return 1;
+	if (test_client_auth_cu_chain_is_bounded_inside_the_walk() != 0) return 1;
 	if (test_cu_writers_leave_out_an_entry_of_2048_bytes() != 0) return 1;
 	if (test_server_hello_requires_no_hk() != 0) return 1;
 	if (test_server_hello_ut_is_nonzero_gated() != 0) return 1;

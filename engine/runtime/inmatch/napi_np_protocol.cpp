@@ -666,19 +666,17 @@ void handle_client_hello(NapiNPServerCtx &ctx, const PeerAddr &peer,
 // [orig: NapiNPProtocol_HandleClientJoin @0x62b750]
 void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
                         const std::vector<uint8_t> &body, HandleResult &out) {
-	ClientAuth auth;
-	if (!parse_client_auth(body.data(), body.size(), auth)) return;
-	if (!ctx.is_authority || ctx.np_protocol.host_running == 0) return;
 	// The CU bounds end the retail TLV walk, before its envelope: a CU of 2048 bytes or more, or
 	// a 65th (every CU counts), and on the socket pass that leg returns without queuing the 0x42,
-	// so it is dropped unanswered. The JFC 9 / 10 rejections behind the test run only on the
-	// queued pass, which never sees it.
+	// so it is dropped unanswered. parse_client_auth runs them inside its walk and fails the
+	// parse. The JFC 9 / 10 rejections behind the test run only on the queued pass, which never
+	// sees it.
 	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750 - the length bound @0x62BBEB..0x62BBF1,
 	//  the count bound @0x62BBF7..0x62BBFA, the socket-pass return @0x62C32A..0x62C331, the
 	//  queued-pass rejections @0x62C344 / @0x62C359]
-	for (size_t i = 0; i < auth.cu.size(); ++i) {
-		if (auth.cu[i].size() >= kCuSlotBytes || i >= kCuSlots) return;
-	}
+	ClientAuth auth;
+	if (!parse_client_auth(body.data(), body.size(), auth)) return;
+	if (!ctx.is_authority || ctx.np_protocol.host_running == 0) return;
 	// Only the NVS/PN/PG/PV1 envelope is silent. The subsequent server-side
 	// gates answer a CR=0 ServerAuth, in this order, before retry/replacement.
 	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750, gates @0x62bdf2]

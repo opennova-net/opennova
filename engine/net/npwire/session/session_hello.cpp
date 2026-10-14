@@ -298,11 +298,18 @@ bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out) {
 		else if (strutil::iequals(name, "SPN"))  out.spn  = load_value_dword(value, data + len);
 		else if (strutil::iequals(name, "SCRK")) out.scrk = copy_string(kStringBuffer);
 		else if (strutil::iequals(name, "CU")) {
-			// The CU keeps its declared length, which the join handler's bound reads
-			// (handle_client_join), whatever of it the datagram holds; its bytes past the
-			// datagram read zero here (D-NET-410).
-			// [orig: NapiNPProtocol_HandleClientJoin - the length ReadTLV hands back read
-			//  by the bound `mov esi, [len]` @0x62BBE7]
+			// Every CU counts into its own 2048-byte slot, bounded inside the walk: a CU
+			// whose declared length (what ReadTLV hands back, whether or not the datagram
+			// holds it) is 2048 or more, or a 65th, ends the walk and drops the 0x42
+			// unanswered (the socket pass returns without queuing it). Under the bounds the
+			// slot takes the declared length, its bytes past the datagram zero here
+			// (D-NET-410), so the walk never holds more than 64 slots of under 2048 bytes
+			// however its fields overlap.
+			// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - `mov esi, [len]` @0x62BBE7,
+			//  `cmp esi, 0x800; jge` @0x62BBEB..0x62BBF1, `cmp edi, 0x40; jge`
+			//  @0x62BBF7..0x62BBFA, the copy @0x62BC0B, the socket-pass return
+			//  @0x62C32A..0x62C331]
+			if (field.size >= kCuSlotBytes || out.cu.size() >= kCuSlots) return false;
 			std::vector<uint8_t> cu(field.size);
 			load_value_bytes(value, end, cu.data(), cu.size());
 			out.cu.push_back(std::move(cu));
@@ -313,7 +320,8 @@ bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out) {
 		// Unknown tags (DE/PV3/etc.) intentionally ignored.
 		pos = next;
 	}
-	// No field is required: a zero (or absent) CK is the connection's remote key
+	// No field is required (false only for the CU bounds above): a zero (or absent) CK is the
+	// connection's remote key
 	// like any other, and the gates that follow the walk never test it. Only a
 	// non-stock peer sends one: a stock client draws a nonzero key and writes CK
 	// only when nonzero.
