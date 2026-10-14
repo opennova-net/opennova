@@ -190,6 +190,20 @@ bool infantry_org1_motor_head(InfantryState &inf, IRootMotionSource *source, Ani
     return have;
 }
 
+void infantry_org1_still_think(InfantryState &inf, const IRootMotionSource *source, bool guarding,
+                               uint8_t alert) {
+    // The legs' selection: guard 140 for a Flags 0x40 body whose .adm authors it, else none, which
+    // the selector seeds as idle 43. [orig: Entity_UpdateInfantryAI — the seed @0x4BAA90; the guard
+    // leg @0x4BD196..0x4BD1BB]
+    int target = anim_state::kIdle;
+    if (guarding && source != nullptr && source->has_clip(inf.adm_id, anim_state::kGuard))
+        target = anim_state::kGuard;
+    // [orig: @0x4BD2F0..0x4BD31C, no target held in slot+0x0C]
+    target = infantry_alerted_idle(target, inf.damage_timer, alert, false);
+    // [orig: the arbitration @0x4BD837..0x4BD874]
+    commit_body_state(inf, infantry_resolve_state(source, inf.adm_id, target));
+}
+
 void advance_primary_channel_fallback(InfantryState &inf) {
     prepare_primary_channel(inf, nullptr, nullptr);
     if (primary_blend_active(inf)) {

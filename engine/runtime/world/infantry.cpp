@@ -293,8 +293,12 @@ void AiSystem::infantry_route_think(AiEntity &e, World &world, int32_t &entry_he
 // State selection + commit (every think). [orig: 0x4b9910 dump 2896-3110, 3693-3710]
 // ----------------------------------------------------------------------------
 int AiSystem::infantry_resolve_state(int adm_id, int state) const {
-    if (root_motion == nullptr) return -1;
-    auto has = [&](int s) { return root_motion->has_clip(adm_id, s); };
+    return world::infantry_resolve_state(root_motion, adm_id, state);
+}
+
+int infantry_resolve_state(const IRootMotionSource *source, int adm_id, int state) {
+    if (source == nullptr) return -1;
+    auto has = [&](int s) { return source->has_clip(adm_id, s); };
     if (has(state)) return state;
     // Cited fallback chains. [orig: availability = animMap[id] != animMap[0]; jog<->run
     // mutual fallback dump 3010-3025; wounded falls back to the base gait]
@@ -403,6 +407,13 @@ void commit_player_body_state(InfantryState &inf, int resolved,
     // an unchanged wash blend every fourth body tick.
     if (committed != inf.anim_state)
         inf.request_body_animation(committed);
+}
+
+int infantry_alerted_idle(int target, int32_t damage_timer, uint8_t alert, bool target_held) {
+    // [orig: Entity_UpdateInfantryAI — `cmp [esi+2F8h],0` @0x4BD2F0, `cmp byte [eax+88h],0`
+    //  @0x4BD2FD, `cmp edi,2Bh` @0x4BD306, the slot+0x0C pick @0x4BD30F..0x4BD319]
+    if ((damage_timer == 0 && alert == 0) || target != anim_state::kIdle) return target;
+    return target_held ? anim_state::kIdle3 : anim_state::kIdle2;
 }
 
 void AiSystem::infantry_select(AiEntity &e, World &world, int selected_state) {
@@ -524,9 +535,8 @@ void AiSystem::infantry_select(AiEntity &e, World &world, int selected_state) {
     // Alerted idle: damageTimer or the slot alert byte (NOT wasHit) promotes 43 to the
     // armed idle 49 when the combat pass holds a target in slot[3], else 44.
     // [orig: Entity_UpdateInfantryAI @0x4bd2f0..0x4bd31c]
-    if ((inf.damage_timer != 0 || e.slot.bytes()[AiSlot::kAlertByte] != 0) &&
-        target == anim_state::kIdle)
-        target = e.slot.f[3] != 0 ? anim_state::kIdle3 : anim_state::kIdle2;
+    target = infantry_alerted_idle(target, inf.damage_timer, e.slot.bytes()[AiSlot::kAlertByte],
+                                   e.slot.f[3] != 0);
 
     // The previous-think move mode the pre_attack reaction reads [orig: @0x4bd356
     // `pad_368[2] = moveMode`, after the idle collapse].
@@ -1392,7 +1402,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // Per-entity stagger key. [orig: Entity_UpdateInfantryAI @0x4b9910 head
     //  @0x4b9948..0x4b9953 — tickKey = current_tick + 36 * entity+0x7C (the net
     //  id), strength-reduced as lea [eax+eax*8] then lea [tick+edx*4]]
-    const uint32_t key = logic_tick + 36u * static_cast<uint32_t>(e.net_id);
+    const uint32_t key = infantry_org1_key(logic_tick, e.net_id);
     // Tick-start pose Z: the resolver's ladder entry gate measures the CL anchor
     // against the pose at the motor head, not the integrated one.
     // [orig: savedLivePose captured @ 0x4b4190-0x4b419c; entry read @ 0x4b327d]

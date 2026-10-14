@@ -377,6 +377,65 @@ void body_ticks_on_as_the_motor_head() {
     CHECK(bare.channels.last_events == 0);
 }
 
+// A still body ticked on with its think (the editor's mission view plays a placed person who walks no
+// route so): the world's motor, its 16-tick think included, and the shared head with the still think
+// on the body's think ticks leave the same channels every tick. A calm body idles on; an alert one
+// (the record's alert_state, yellow 1 or red 2) turns to idle_2 at its first think, or idles on where
+// its .adm authors no idle_2; a guarding body holds guard. The alerted idle takes idle 43 alone, to
+// idle_3 with a target held. [orig: Entity_UpdateInfantryAI @0x4BD2F0..0x4BD31C]
+void still_body_thinks_as_the_world() {
+    CHECK(infantry_alerted_idle(anim_state::kIdle, 0, 2, false) == anim_state::kIdle2);
+    CHECK(infantry_alerted_idle(anim_state::kIdle, 0, 1, true) == anim_state::kIdle3);
+    CHECK(infantry_alerted_idle(anim_state::kIdle, 3, 0, false) == anim_state::kIdle2);
+    CHECK(infantry_alerted_idle(anim_state::kIdle, 0, 0, true) == anim_state::kIdle);
+    CHECK(infantry_alerted_idle(anim_state::kGuard, 0, 2, false) == anim_state::kGuard);
+    CHECK(infantry_alerted_idle(anim_state::kWalkForward, 5, 2, true) == anim_state::kWalkForward);
+    CHECK(infantry_org1_key(1, 13) == 469u && infantry_org1_key(3, 0) == 3u);
+    struct Case {
+        int id;
+        uint8_t alert;
+        bool guarding;
+        bool idle_2;
+        int plays; // the state played once its first think has run
+    };
+    const Case cases[] = {{13, 0, false, true, 43}, {13, 2, false, true, 44}, {0, 1, false, true, 44},
+                          {7, 2, false, false, 43}, {5, 2, true, true, 140}, {4, 0, true, true, 140}};
+    for (const Case &c : cases) {
+        Rig r(c.id);
+        RingSource world_clips, clips;
+        if (!c.idle_2) {
+            world_clips.clips.erase(anim_state::kIdle2);
+            clips.clips.erase(anim_state::kIdle2);
+        }
+        r.owned->ai.root_motion = &world_clips;
+        r.body().slot.bytes()[AiSlot::kAlertByte] = c.alert;
+        if (c.guarding) r.entity().flags = 0x40;
+        r.init();
+        AnimVariantRings rings;
+        OrganicSpawnFacts facts;
+        facts.flags = c.guarding ? 0x40 : 0;
+        OrganicSpawnBody spawned = organic_spawn_pose(facts, uint32_t(c.id), &clips, rings, 0);
+        InfantryState &body = spawned.channels;
+        CHECK(same_channels(body, r.body().inf));
+        CHECK(body.anim_state == (c.guarding ? anim_state::kGuard : anim_state::kIdle));
+        int thinks = 0;
+        // The mission's first frame runs at tick 1.
+        for (uint32_t tick = 1; tick <= 200; ++tick) {
+            r.owned->ai.update_organic(r.body(), *r.owned, tick);
+            RootMotionFrame frame;
+            CHECK(infantry_org1_motor_head(body, &clips, rings, frame));
+            if ((infantry_org1_key(tick, c.id) & 15u) == 0) {
+                infantry_org1_still_think(body, &clips, c.guarding, c.alert);
+                ++thinks;
+            }
+            CHECK(same_channels(body, r.body().inf));
+            if (thinks == 0) CHECK(body.anim_state == (c.guarding ? anim_state::kGuard : anim_state::kIdle));
+        }
+        CHECK(thinks >= 12);
+        CHECK(body.anim_state == c.plays && body.body_clip_state() == c.plays);
+    }
+}
+
 // A retail soldier (the install's Eindo01.adm, a body of net id 13 standing), posed and ticked on over
 // the install's clips: the world's motor and the shared head leave the same channels, the idle
 // (I_idle1.bad at 363 ticks after the warmup) wraps where its own clock wraps, and each unblended
@@ -507,6 +566,7 @@ int main(int argc, char **argv) {
     postures_mounts_and_wash();
     world_free_pose_matches_the_world();
     body_ticks_on_as_the_motor_head();
+    still_body_thinks_as_the_world();
     retail_soldier_ticks_on();
     control_point_pool_precedence();
     grounding_strict_one_unit_limit();
