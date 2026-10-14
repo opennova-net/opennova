@@ -18,6 +18,28 @@ using io::LogLevel;
 
 namespace {
 
+// The operator's gloss on the connect's NWEC tags this driver reports (the game shows menutxt's
+// text; these lines are the lister's own).
+const char *connect_tag_meaning(const std::string &tag) {
+	if (tag == "NWEC15")
+		return "the gate did not answer";
+	if (tag == "NWEC25")
+		return "the gate named no session server and lacks its POST address or port";
+	if (tag == "NWEC40")
+		return "the connect poll timed out";
+	if (tag == "NWEC42")
+		return "no session server answered within 20 s";
+	if (tag == "NWEC43")
+		return "the session server refused the join";
+	if (tag == "NWEC45")
+		return "the session closed before its verify";
+	if (tag == "NWEC46")
+		return "the session was not verified within 20 s";
+	if (tag == "NWEC48")
+		return "the session was not verified";
+	return nullptr;
+}
+
 constexpr int kHttpTimeoutMs = 15000;
 
 std::string ip4(const std::array<uint8_t, 4> &ip) {
@@ -84,11 +106,24 @@ Lister::Lister(ListerOptions options, std::unique_ptr<ListingSource> owned, List
 	          };
 	          hooks.cookie_vars = [this]() { return cookie_vars(); };
 	          hooks.on_fatal = [this](const std::string &message) {
-		          io::logf(LogLevel::kError, "[session] failed: %s", message.c_str());
+		          const char *meaning = connect_tag_meaning(message);
+		          io::logf(LogLevel::kError, "[session] failed: %s%s%s%s", message.c_str(),
+		                   meaning != nullptr ? " (" : "", meaning != nullptr ? meaning : "",
+		                   meaning != nullptr ? ")" : "");
+		          // A refused join (CR 0) keeps the 0x82's failure fields on the connection.
+		          if (const ClientSession *session = lobby_.session(); session != nullptr && message == "NWEC43")
+			          io::logf(LogLevel::kError, "[session] the 0x82 refused: JFC %u JFP %u JFS \"%s\"",
+			                   session->join_fail_code(), session->join_fail_param(),
+			                   session->join_fail_string().c_str());
 		          end(kExitFailed);
 	          };
 	          hooks.on_soft_error = [](const std::string &message) {
 		          io::logf(LogLevel::kDebug, "[gate] %s", message.c_str());
+	          };
+	          // A gate naming no UDPNOVAWORLD leaves no NWU session to register the host on.
+	          hooks.on_sessionless = [this]() {
+		          io::logf(LogLevel::kError, "[gate] the gate named no NovaWorld session server (UDPNOVAWORLD)");
+		          end(kExitFailed);
 	          };
 	          return hooks;
           }(),

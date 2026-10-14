@@ -78,6 +78,15 @@ uint8_t opcode_of(const std::vector<uint8_t> &dg) {
 	return nw_decode_inbound(dg.data(), dg.size(), opcode, body) ? opcode : 0;
 }
 
+// The 0x41 `dg` carries, parsed (false when it is none).
+bool hello_of(const std::vector<uint8_t> &dg, ClientHello &out) {
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	return nw_decode_inbound(dg.data(), dg.size(), opcode, body) &&
+			opcode == SESSION_OPCODE_CLIENT_HELLO &&
+			parse_client_hello(body.data(), body.size(), out);
+}
+
 // The server's 0x81 to the session's 0x41 `hello_dg`: its CI and identity echoed, the CI
 // changed by `ci_xor`.
 std::vector<uint8_t> server_hello_to(const std::vector<uint8_t> &hello_dg, uint32_t ci_xor = 0) {
@@ -271,20 +280,36 @@ int main() {
 		for (std::size_t i = 0; i < want.size() && i < lobby.targets().size(); ++i) {
 			CHECK(lobby.targets()[i].ip == want[i].first && lobby.targets()[i].port == want[i].second);
 		}
-		// One 0x41 per target, in order, the port narrowed to 16 bits at the send.
+		// One 0x41 per target, in order, the port narrowed to 16 bits at the send. D-NET-541: each
+		// is that target's own announce, carrying the target's address and port (as kept, before
+		// the narrowing) as EIP / EPN, and no ET; the rest of the hello is the connection's.
+		// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0 - @0x629190..0x62919D;
+		//  NapiNPSession_SendAnnouncePacket @0x61FA00 - EIP @0x61FCF5, EPN @0x61FD23, ET
+		//  @0x61FD51; NapiNPEnumerator_CreateTarget @0x624C30 - @0x624C9F]
 		const std::vector<PeerAddr> sent_to = {at(127, 0, 0, 1, 32000), at(10, 0, 0, 9, 64206),
 		                                       at(127, 0, 0, 2, 64206), PeerAddr{0xFFFFFFFFu, 9},
 		                                       at(127, 0, 0, 3, 1)};
+		auto check_announces = [&](std::size_t first) {
+			ClientHello lead;
+			CHECK(hello_of(session.sent[first].second, lead));
+			for (std::size_t i = 0; i < sent_to.size() && first + i < session.sent.size(); ++i) {
+				const auto &dg = session.sent[first + i];
+				CHECK(dg.first == sent_to[i]);
+				ClientHello hello;
+				CHECK(hello_of(dg.second, hello));
+				CHECK(hello.eip == want[i].first && hello.epn == want[i].second);
+				CHECK(hello.et == 0);
+				CHECK(hello.ci == lead.ci && hello.pn == lead.pn && hello.pg == lead.pg);
+			}
+		};
 		CHECK(session.sent.size() == sent_to.size());
-		for (std::size_t i = 0; i < sent_to.size() && i < session.sent.size(); ++i) {
-			CHECK(session.sent[i].first == sent_to[i]);
-			CHECK(opcode_of(session.sent[i].second) == SESSION_OPCODE_CLIENT_HELLO);
-			CHECK(session.sent[i].second == session.sent[0].second);
-		}
-		// The re-announce goes to every target again.
+		check_announces(0);
+		// The re-announce goes to every target again, each its own announce once more.
 		lobby.tick(10 + SESSION_CONNECT_RETRANSMIT_MS + 1);
 		CHECK(session.sent.size() == 2 * sent_to.size());
 		CHECK(session.sent.back().first == sent_to.back());
+		if (session.sent.size() == 2 * sent_to.size())
+			check_announces(sent_to.size());
 		CHECK(lobby.nw_peer() == PeerAddr{});
 		// Until then the connection has no server, so its own packets (all but the 0x41) go
 		// nowhere. [orig: CNapiNPManager_SendTo @0x61EC20 - the address test @0x61EC59]
@@ -312,26 +337,206 @@ int main() {
 		lobby.close();
 	}
 	// A gate naming only addresses that resolve to none still starts the connection, which probes
-	// nothing; one naming no UDPNOVAWORLD at all ends ours (retail's sessionless path, D-NET-540).
+	// nothing, POST pair or not (the in-use word passes the POST test). D-NET-540: one naming no
+	// UDPNOVAWORLD needs the POST address and port: without either the gate fails (state -9, the
+	// menu's NWEC25), with both the connect goes on with no NWU session (on_sessionless, no
+	// session, the in-use word clear). The command line's POST pair stands in for the gate's.
+	// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - the in-use word @0x4CF525..0x4CF541,
+	//  the command line's POST pair @0x4CF54B..0x4CF562, the in-use test @0x4CF599..0x4CF5A0,
+	//  the address @0x4CF5A6, the port @0x4CF627, -9 @0x4CF6AC;
+	//  UI_ProcessLANSessionStateMachine @0x558DE0 - NWEC25 @0x5590FD]
 	{
-		for (const char *body : {"VAR \"UDPNOVAWORLD\" \"0.0.0.0:5\"\r\n",
-		                         "VAR \"LOBBYNAME\" \"jop_2_consumer\"\r\n"}) {
+		struct Case {
+			NwuLobbySession::CommandLine command_line;
+			bool session;
+			bool sessionless;
+			const char *fatal;
+		};
+		const NwuLobbySession::CommandLine none;
+		NwuLobbySession::CommandLine post_switches;
+		post_switches.post_ip_address = "10.1.2.3";
+		post_switches.post_port_number = 7000;
+		NwuLobbySession::CommandLine unresolved_post = post_switches;
+		unresolved_post.post_ip_address = "nowhere.example";
+		const std::string post_ip = "VAR \"POSTIPADDRESS\" \"192.168.0.5\"\r\n";
+		const std::string post_port = "VAR \"POSTIPPORT\" \"7598\"\r\n";
+		const std::string lobby_name = "VAR \"LOBBYNAME\" \"jop_2_consumer\"\r\n";
+		const std::string unresolved = "VAR \"UDPNOVAWORLD\" \"0.0.0.0:5\"\r\n";
+		const std::vector<std::pair<std::string, Case>> cases = {
+			{ unresolved, { none, true, false, nullptr } },
+			{ unresolved + post_ip + post_port, { none, true, false, nullptr } },
+			{ lobby_name, { none, false, false, "NWEC25" } },
+			{ lobby_name + post_ip, { none, false, false, "NWEC25" } },
+			{ lobby_name + post_port, { none, false, false, "NWEC25" } },
+			{ lobby_name + post_ip + post_port, { none, false, true, nullptr } },
+			{ lobby_name, { post_switches, false, true, nullptr } },
+			{ lobby_name + post_port, { unresolved_post, false, false, "NWEC25" } },
+		};
+		for (const auto &[body, want] : cases) {
 			MemorySocket gate;
 			MemorySocket session;
 			std::vector<std::string> fatals;
+			int sessionless = 0;
+			GateResponse seen;
 			NwuLobbySession::Hooks hooks;
 			hooks.on_fatal = [&fatals](const std::string &message) { fatals.push_back(message); };
+			hooks.on_sessionless = [&sessionless]() { ++sessionless; };
+			hooks.on_gate_response = [&seen](const GateResponse &gate) { seen = gate; };
 			NwuLobbySession lobby(hooks, NwuLobbySession::Environment{});
+			lobby.set_command_line(want.command_line);
 			lobby.open(gate, session);
 			lobby.probe("127.0.0.1", GATE_DEFAULT_PORT);
 			gate.inbound.push_back({PeerAddr{0x0100007Fu, GATE_DEFAULT_PORT}, gate_reply(body)});
 			lobby.tick(10);
-			const bool named = std::string(body).find("UDPNOVAWORLD") != std::string::npos;
 			CHECK(lobby.targets().empty());
 			CHECK(session.sent.empty());
-			CHECK(named ? (fatals.empty() && lobby.session() != nullptr)
-			            : (fatals == std::vector<std::string>{"no UDPNOVAWORLD"} && lobby.session() == nullptr));
+			CHECK((lobby.session() != nullptr) == want.session);
+			CHECK(lobby.match_facts().in_use == want.session);
+			CHECK(sessionless == (want.sessionless ? 1 : 0));
+			CHECK(want.fatal == nullptr ? fatals.empty()
+										: fatals == std::vector<std::string>{ want.fatal });
+			if (!want.command_line.post_ip_address.empty() && want.sessionless) {
+				// The switches' pair is the response's, as the hook and the heartbeat read it.
+				CHECK((lobby.gate_response().post_ip == std::array<uint8_t, 4>{ 10, 1, 2, 3 }));
+				CHECK(lobby.gate_response().post_port == 7000u);
+				CHECK((seen.post_ip == std::array<uint8_t, 4>{ 10, 1, 2, 3 }) &&
+						seen.post_port == 7000u);
+			}
 			lobby.close();
+		}
+	}
+
+	// D-NET-542: the connect's sources, first match only: the menu's JUNCTIONCODE (one target),
+	// else every /UDPNOVAWORLD command-line entry, else the gate's entries. A command-line entry
+	// marks the NWU session in use when the gate names none (so no POST pair is asked for). A set
+	// USEJUNCTION (the gate's, or the command line's over it) empties JUNCTIONCODE at the
+	// response, and the menu's entry (open()) empties it when the last response went through with
+	// USEJUNCTION and CLEARJUNCTION both set.
+	// [orig: CNapiGameSession_ConnectToNovaWorld @0x4D4640 - @0x4D4A4A, @0x4D4A71,
+	//  @0x4D4A78..0x4D4A9E, @0x4D4AA2..0x4D4ACE; CNapiGateManager_ProcessResponse @0x4CED20 -
+	//  @0x4CF52E..0x4CF541, @0x4CF6ED..0x4CF76E; UI_ProcessLANSessionStateMachine @0x558DE0 -
+	//  @0x558E2D..0x558E64]
+	{
+		const std::string gate_entry = "VAR \"UDPNOVAWORLD\" \"127.0.0.1:64206\"\r\n";
+		const std::string use_junction = "VAR \"USEJUNCTION\" \"1\"\r\n";
+		const std::string clear_junction = "VAR \"CLEARJUNCTION\" \"1\"\r\n";
+		const std::string lobby_only = "VAR \"LOBBYNAME\" \"jop_2_consumer\"\r\n";
+		NwuLobbySession::CommandLine switches;
+		switches.udp_novaworld = { "127.0.0.5:7001", "127.0.0.6", "0.0.0.0:9" };
+		struct Run {
+			std::vector<std::pair<uint32_t, uint32_t>> targets;
+			std::vector<PeerAddr> hellos_to;
+			std::vector<std::string> fatals;
+			bool session = false;
+			bool in_use = false;
+			std::string junction_after;
+		};
+		auto run = [&](NwuLobbySession &lobby, const std::string &body) {
+			MemorySocket gate;
+			MemorySocket session;
+			Run out;
+			lobby.open(gate, session);
+			lobby.probe("127.0.0.1", GATE_DEFAULT_PORT);
+			gate.inbound.push_back(
+					{ PeerAddr{ 0x0100007Fu, GATE_DEFAULT_PORT }, gate_reply(body) });
+			lobby.tick(10);
+			for (const auto &target : lobby.targets())
+				out.targets.push_back({ target.ip, target.port });
+			for (const auto &dg : session.sent) {
+				if (opcode_of(dg.second) == SESSION_OPCODE_CLIENT_HELLO)
+					out.hellos_to.push_back(dg.first);
+			}
+			out.session = lobby.session() != nullptr;
+			out.in_use = lobby.match_facts().in_use;
+			out.junction_after = lobby.junction_code();
+			lobby.close();
+			return out;
+		};
+		auto make = [](std::vector<std::string> &fatals) {
+			NwuLobbySession::Hooks hooks;
+			hooks.on_fatal = [&fatals](const std::string &message) { fatals.push_back(message); };
+			return hooks;
+		};
+		const std::vector<std::pair<uint32_t, uint32_t>> switch_targets = {
+			{ at(127, 0, 0, 5, 0).ip, 7001 }, { at(127, 0, 0, 6, 0).ip, 64206 }
+		};
+
+		// The command line's entries over the gate's.
+		{
+			std::vector<std::string> fatals;
+			NwuLobbySession lobby(make(fatals), NwuLobbySession::Environment{});
+			lobby.set_command_line(switches);
+			const Run r = run(lobby, gate_entry);
+			CHECK(fatals.empty() && r.session && r.in_use);
+			CHECK(r.targets == switch_targets);
+			CHECK((r.hellos_to ==
+					std::vector<PeerAddr>{ at(127, 0, 0, 5, 7001), at(127, 0, 0, 6, 64206) }));
+		}
+		// The command line's entries alone mark the session in use: no POST pair is asked for.
+		{
+			std::vector<std::string> fatals;
+			NwuLobbySession lobby(make(fatals), NwuLobbySession::Environment{});
+			lobby.set_command_line(switches);
+			const Run r = run(lobby, lobby_only);
+			CHECK(fatals.empty() && r.session && r.in_use);
+			CHECK(r.targets == switch_targets);
+		}
+		// JUNCTIONCODE first, its one address the only target.
+		{
+			std::vector<std::string> fatals;
+			NwuLobbySession lobby(make(fatals), NwuLobbySession::Environment{});
+			lobby.set_command_line(switches);
+			lobby.set_junction_code("127.0.0.9:7009");
+			const Run r = run(lobby, gate_entry);
+			CHECK(fatals.empty() && r.session);
+			CHECK((r.targets ==
+					std::vector<std::pair<uint32_t, uint32_t>>{
+							{ at(127, 0, 0, 9, 0).ip, 7009 } }));
+			CHECK((r.hellos_to == std::vector<PeerAddr>{ at(127, 0, 0, 9, 7009) }));
+			CHECK(r.junction_after == "127.0.0.9:7009");
+		}
+		// The gate's USEJUNCTION empties JUNCTIONCODE ahead of the connect, so the next source
+		// stands; the command line's USEJUNCTION 0 overrides it and JUNCTIONCODE stays first.
+		{
+			std::vector<std::string> fatals;
+			NwuLobbySession lobby(make(fatals), NwuLobbySession::Environment{});
+			lobby.set_junction_code("127.0.0.9:7009");
+			const Run r = run(lobby, gate_entry + use_junction);
+			CHECK(fatals.empty() && r.junction_after.empty());
+			CHECK((r.targets ==
+					std::vector<std::pair<uint32_t, uint32_t>>{
+							{ at(127, 0, 0, 1, 0).ip, 64206 } }));
+
+			NwuLobbySession::CommandLine keep;
+			keep.use_junction = 0;
+			std::vector<std::string> kept_fatals;
+			NwuLobbySession kept(make(kept_fatals), NwuLobbySession::Environment{});
+			kept.set_command_line(keep);
+			kept.set_junction_code("127.0.0.9:7009");
+			const Run k = run(kept, gate_entry + use_junction);
+			CHECK(k.junction_after == "127.0.0.9:7009");
+			CHECK((k.targets ==
+					std::vector<std::pair<uint32_t, uint32_t>>{
+							{ at(127, 0, 0, 9, 0).ip, 7009 } }));
+		}
+		// The menu's entry: after a response with USEJUNCTION and CLEARJUNCTION both set, a
+		// JUNCTIONCODE written since is emptied by the next open(); with CLEARJUNCTION clear (the
+		// command line's 0 over the gate's 1) it stands.
+		{
+			for (const int32_t clear_override : { -1, 0 }) {
+				std::vector<std::string> fatals;
+				NwuLobbySession lobby(make(fatals), NwuLobbySession::Environment{});
+				NwuLobbySession::CommandLine cl;
+				cl.clear_junction = clear_override;
+				lobby.set_command_line(cl);
+				run(lobby, gate_entry + use_junction + clear_junction);
+				lobby.set_junction_code("127.0.0.9:7009");
+				MemorySocket gate;
+				MemorySocket session;
+				lobby.open(gate, session);
+				CHECK(lobby.junction_code() == (clear_override == -1 ? "" : "127.0.0.9:7009"));
+				lobby.close();
+			}
 		}
 	}
 

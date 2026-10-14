@@ -245,6 +245,18 @@ public:
 	//  CNapiNPConnection_PumpStateMachine @0x6292e0 case 3 (the 0x42 re-send)]
 	std::vector<uint8_t> retransmit_stage_datagram();
 
+	// The 0x41 the enumerator sends one probe target: this connection's hello carrying the
+	// target's address and port as EIP / EPN, each written only when nonzero, and no ET (a
+	// target's +0x34 is 0 from its creation). The owner re-addresses every 0x41 the session
+	// hands it (start(), the stage retransmit, the reconnect's re-probe) with one of these per
+	// target. `eip` is the address as the socket layer holds it (PeerAddr's packing), `epn` the
+	// port as the target keeps it (NwuLobbySession::Target::port, before the send narrows it).
+	// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0 - the target walk
+	//  @0x629190..0x62919D pushes +0x14, +0x18 and +0x34 per target;
+	//  NapiNPSession_SendAnnouncePacket @0x61FA00 - EIP @0x61FCF5, EPN @0x61FD23, ET @0x61FD51,
+	//  each iff nonzero; NapiNPEnumerator_CreateTarget @0x624C30 - +0x34 = 0 @0x624C9F]
+	std::vector<uint8_t> build_announce(uint32_t eip, uint32_t epn);
+
 	// Feed one inbound datagram (received off the UDP socket, CRC envelope intact). Appends the
 	// datagrams retail sends from inside its receive pump to `out` — the 0x42 answering a
 	// ServerHello, a teardown's 0x46 burst, the packets a 0x84 asks for — to send at once;
@@ -397,6 +409,26 @@ public:
 	static constexpr int32_t kSessionRoleHosting = 2;
 	static constexpr int32_t kSessionRolePlaying = 3;
 	int32_t session_role() const { return session_role_; }
+	// The CGameSession state (session+0x11C: 1 connecting, 2/3 the NP connection up and verifying,
+	// 4 verified, 5..8 the host and play legs, 0 down) and the clock at its entry (+0x124), which
+	// the periodic update's first-connect give-up reads.
+	// [orig: CGameSession_SetState @0x4CE140 - the store @0x4CE1CD, the stamp @0x4CE1D5]
+	int lobby_state() const { return lobby_state_; }
+	uint32_t lobby_state_entered_ms() const { return lobby_state_entered_ms_; }
+
+	// ---- the first connect's give-ups ---------------------------------------
+	// RequestDisconnect: an NP connection that is up (its state 5) tears down (the 0x46 burst into
+	// `out`, the disconnect callback); one still connecting is left as it is.
+	// [orig: CNapiNPConnection_RequestDisconnect @0x61E0F0 - state 5 -> SetState(6)
+	//  @0x61E0F3..0x61E0FA; any other state but 1 returns -1 @0x61E110]
+	void request_disconnect(std::vector<std::vector<uint8_t>> &out);
+	// A give-up of the first connect: the session in state 1 drops to 0, the connection is asked
+	// to disconnect, and the enumerator's probe stops, so the connection takes no 0x81 and sends
+	// no 0x41 from here.
+	// [orig: CNapiGameSession_ProcessNetwork @0x4D09F0 and its twin CNapiGameSession_PumpConnection
+	//  @0x4D0A40 - SetState(0) under the state-1 flag @0x4D0A48..0x4D0A53, RequestDisconnect
+	//  @0x4D0A5F, NapiTimer_Stop on the enumerator @0x4D0A71 (+0x2C = 0 @0x61DF06)]
+	void abort_connect(std::vector<std::vector<uint8_t>> &out);
 
 	// ---- the reconnect ------------------------------------------------------
 	// Armed while the hosting/playing word is nonzero (the NP connection's +0x710 mirror of
@@ -413,6 +445,20 @@ public:
 	// (RCNT, +0x738): both ride the re-join's 0x42.
 	uint32_t disconnect_count() const { return dcnt_; }
 	uint32_t reconnect_count() const { return rcnt_; }
+	// The connection's join failure (JFC +0x5F0, JFP +0x5F4, JFS +0x5F8, 64 bytes): what the last
+	// rejecting 0x82 carried (JFC reads 1 when absent), or JFC 2 / JFP 0 / an empty JFS from a
+	// re-join's 0x42 leg that gave up. [orig: NapiNP_HandleServerJoinResponse @0x629840 -
+	//  @0x629CD8..0x629CF6 (JFS through CNapiSessionConfig_SetServerPassword @0x4CACE0);
+	//  CNapiNPConnection_PumpStateMachine @0x6292E0 - @0x629525..0x629539]
+	uint32_t join_fail_code() const { return jfc_; }
+	uint32_t join_fail_param() const { return jfp_; }
+	const std::string &join_fail_string() const { return jfs_; }
+	// The NP connection dropped to its down state (4) with no teardown: a rejecting 0x82, or a
+	// re-join's 0x42 leg that gave up. A first connect's periodic update gives the connect up on
+	// it (NwuLobbySession); a reconnect's pump goes on probing from it.
+	// [orig: NapiNP_HandleServerJoinResponse @0x629840 - the store @0x629F95;
+	//  CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 - the state-4 test @0x4D4436..0x4D4441]
+	bool connection_down() const { return connection_down_; }
 	// The HostSetup ReconnectCounter (session+0x500): 0 on a fresh host request, one up per
 	// re-host. The host result's republish runs only while it is above 0 (NwuHostRole).
 	// [orig: CNapiGameSession_BuildHostVarLists @0x4d0b50 (the zero @0x4d0b7b);
@@ -431,9 +477,9 @@ public:
 	uint32_t tossed_datagrams() const { return tossed_datagrams_; }
 	// Whether this connection takes the 0x81 datagram `data`, whoever sent it: it is probing (a
 	// reconnect's probe window, never the re-join's 0x42 leg or the gap between windows; the
-	// first connect's Hello state, D-NET-571), the reply's CI is its own and the identity
-	// block its protocol's. A reply it does not take is the next protocol's to read.
-	// [orig: Nwu_HandleServerHello @0x626D20 - the CI lookup @0x627533
+	// first connect's Hello state until a give-up stops the probe), the reply's CI is its own
+	// and the identity block its protocol's. A reply it does not take is the next protocol's to
+	// read. [orig: Nwu_HandleServerHello @0x626D20 - the CI lookup @0x627533
 	//  (NapiNPProtocol_FindConnectionByIndex @0x6227F0 over the protocol's connections, no
 	//  address), the enumerator gates @0x627547..0x62755C and the
 	//  identity compares @0x62758B / @0x627624 / @0x627643 each returning 0 @0x626DCB, so
@@ -523,6 +569,10 @@ private:
 	bool send_host_request(int currently_hosting);
 	bool send_play_request(int currently_playing);
 	void set_lobby_state(int state); // the CGameSession_SetState mirror (flags, GLSVSS arming)
+	// The enumerator probing: the first connect's from its start until its 0x81 or a give-up
+	// stops it, a reconnect's inside its probe window. [orig: the enumerator's +0x2C, set by
+	//  NapiTimer_Start and cleared by NapiTimer_Stop @0x61DF00]
+	bool probing() const;
 	void fail(std::string reason);
 
 	Config cfg_;
@@ -562,6 +612,8 @@ private:
 	uint32_t glsvss_deadline_ms_ = 0;    // session+579 (0 = disarmed)
 	uint32_t glsvss_poll_ms_ = 0;        // session+578
 	int lobby_state_ = 0;                // the CGameSession state (session+0x11C)
+	uint32_t lobby_state_entered_ms_ = 0; // its entry stamp (session+0x124)
+	bool first_probe_stopped_ = false; // a give-up stopped the first connect's probe
 	uint32_t session_flags_ = 0;         // session+0x120
 	int32_t session_role_ = kSessionRoleNone; // session+0x128
 
@@ -603,6 +655,10 @@ private:
 	Reconnect reconnect_;
 	uint32_t dcnt_ = 0;                  // conn+0x734
 	uint32_t rcnt_ = 0;                  // conn+0x738
+	uint32_t jfc_ = 0; // conn+0x5F0
+	uint32_t jfp_ = 0; // conn+0x5F4
+	std::string jfs_; // conn+0x5F8 (64 bytes)
+	bool connection_down_ = false; // conn state 4 with no teardown
 
 	// The 0-default is deliberately preserved (start() resets it to 1 — see Risk #1 / capture frame 9739).
 	SessionSequencing seq_{0, 0}; // outbound seq + last inbound ack [ADR 0013 shared framing]

@@ -428,12 +428,17 @@ func _on_disconnected(reason: String) -> void:
 			"Retry", Callable(self, "_reconnect"), Screen.CONNECTING)
 
 
+# A connect failure the client reports as an NWEC tag (the gate's NWEC15, a give-up
+# of the first connect's NWEC40..NWEC48) shows its menutxt text, as the retail
+# NovaWorld error dialog does; any other message keeps the plain-language lead.
 func _on_error(message: String) -> void:
 	if _suppress_client_messages or _closing:
 		return
 	_reset_connection_state()
-	_show_message("The matchmaking service could not be reached.\n\n%s" % message,
-			"Retry", Callable(self, "_reconnect"), Screen.CONNECTING)
+	var text := error_message(message)
+	if text == message:
+		text = "The matchmaking service could not be reached.\n\n%s" % message
+	_show_message(text, "Retry", Callable(self, "_reconnect"), Screen.CONNECTING)
 
 
 # Fill the browser from the GSB server list. Rows arrive asynchronously over
@@ -788,12 +793,20 @@ static func error_message(reason: String) -> String:
 	if menutxt != null and menutxt.has_string(reason):
 		var localized := menutxt.get_string(reason)
 		if not localized.is_empty() and localized != reason:
-			return "%s\n\n(%s)" % [localized, reason]
+			return _with_tag(localized, reason)
 	# The in-match join's CV* refusals are gameerr "MP Errors" keys.
 	var mp_error := Strings.lookup_or(Strings.TABLE_GAMEERR, "MP Errors", reason, "")
 	if not mp_error.is_empty() and mp_error != reason:
-		return "%s\n\n(%s)" % [mp_error, reason]
+		return _with_tag(mp_error, reason)
 	return reason
+
+
+# The text with its tag beside it, unless the text already names the tag (the
+# stock menutxt texts end in "(Code NWECnn)").
+static func _with_tag(text: String, tag: String) -> String:
+	if text.contains(tag):
+		return text
+	return "%s\n\n(%s)" % [text, tag]
 
 
 # The NWJoin handshake resolved the host's in-match address. Hand it (with the
