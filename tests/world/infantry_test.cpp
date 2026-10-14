@@ -38,6 +38,8 @@
 #include <runtime/world/infantry_internal.h>
 #include <runtime/world/infantry_ladder.h>
 #include <runtime/world/player_input.h>
+
+#include "channel_clip_source.h"
 #include <runtime/world/world.h>
 #include "common/retail_mission_files.h"
 #include "common/retail_paths.h"
@@ -133,7 +135,10 @@ struct TestSource : IRootMotionSource {
                id == anim_state::kWoundedRun || id == anim_state::kWalkCrouchForward ||
                id == anim_state::kWalkProneForward;
     }
-    bool has_clip(int /*adm_id*/, int id) const override { return clips.count(id) != 0; }
+    // RESET authored: the body holds its channel (infantry_has_anim_channel).
+    bool has_clip(int /*adm_id*/, int id) const override {
+        return id == anim_state::kReset || clips.count(id) != 0;
+    }
     // One-shot length per state when set: the weapon channel's clip-end promotion
     // [orig: AnimMap_UpdateEntity @0x40b77b] is exercised through this.
     std::map<int, int32_t> lengths;
@@ -154,7 +159,10 @@ struct TestSource : IRootMotionSource {
 struct BlendProbeSource : IRootMotionSource {
     std::map<int, RootMotionFrame> frames;
 
-    bool has_clip(int, int id) const override { return frames.count(id) != 0; }
+    // RESET authored: the body holds its channel (infantry_has_anim_channel).
+    bool has_clip(int, int id) const override {
+        return id == anim_state::kReset || frames.count(id) != 0;
+    }
     int32_t clip_length_ticks(int, int, int /*variant*/) const override { return -1; }
     bool advance(int, int id, int32_t &phase, RootMotionFrame &out) override {
         auto it = frames.find(id);
@@ -165,7 +173,11 @@ struct BlendProbeSource : IRootMotionSource {
     }
 };
 
+// A soldier holds its animation channel: a rig that wires no clip source of its own gets one
+// whose RESET row is authored and that plays nothing (test_world::ChannelClipSource).
+test_world::ChannelClipSource channel_only;
 AiEntity *soldier(AiSystem &ai) {
+    if (ai.root_motion == nullptr) ai.root_motion = &channel_only;
     int idx = ai.attach(EntityHandle::make(0, 0));
     AiEntity *e = ai.at(idx);
     e->inf.active = true;
@@ -526,7 +538,10 @@ CollisionModel ladder_slab_model(bool with_backing = true) {
 // a direct pin on the 0x100000 root suppression. Gaits walk forward.
 struct ClimbSource : IRootMotionSource {
     std::set<int> clips;
-    bool has_clip(int, int id) const override { return clips.count(id) != 0; }
+    // RESET authored: the body holds its channel (infantry_has_anim_channel).
+    bool has_clip(int, int id) const override {
+        return id == anim_state::kReset || clips.count(id) != 0;
+    }
     int32_t clip_length_ticks(int, int, int /*variant*/) const override { return -1; }
     bool advance(int, int id, int32_t &phase, RootMotionFrame &out) override {
         if (clips.count(id) == 0) return false;
@@ -3892,6 +3907,7 @@ void test_infantry_parity_pins_2026_08_28() {
         w.registry.configure_pool(0, 4);
         AiSystem ai;
         ai.terrain = &flat.field;
+        ai.root_motion = &channel_only;
         w.script.wac_values.fallmps = 1;
         Entity body{};
         body.alive = true;
@@ -4887,6 +4903,7 @@ struct AimRig {
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
         AiSystem &ai = w.ai;
+        ai.root_motion = &channel_only; // the bodies hold their channels, no clip plays
         auto make = [&](int idx, uint8_t team, int32_t x, int32_t y, int32_t z) {
             Entity body{};
             body.alive = true;
@@ -6341,9 +6358,11 @@ int main(int argc, char **argv) {
             std::array<int32_t, 2> step = {0x1000, 0x3000};
             std::array<int32_t, 2> capsule = {fx(1), fx(3)};
 
+            // RESET authored: the body holds its channel (infantry_has_anim_channel).
             bool has_clip(int adm_id, int id) const override {
                 if (adm_id < 0 || adm_id >= static_cast<int>(clips.size())) return false;
-                return clips[static_cast<size_t>(adm_id)].count(id) != 0;
+                return id == anim_state::kReset ||
+                       clips[static_cast<size_t>(adm_id)].count(id) != 0;
             }
             int32_t clip_length_ticks(int, int, int /*variant*/) const override { return -1; }
             bool advance(int adm_id, int id, int32_t &phase, RootMotionFrame &out) override {

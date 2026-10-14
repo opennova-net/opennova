@@ -367,11 +367,12 @@ int count_mounted_entities(const World &world, const Entity &veh) {
 }
 
 // See ai.h. [orig: @0x48DFD3..0x48DFDF — `occupant->Position.z +
-// CameraOffset.z <= g_EnvWaterHeightFixed`]. Retail's CameraOffset.z is always
-// live (the body updater writes it every tick); our eye offset is derived by
-// the infantry body legs, so a body that never derived one (0) has no head
-// height to test and keeps the wheel — a seated eye sits above the deck, never
-// at it.
+// CameraOffset.z <= g_EnvWaterHeightFixed`]. Every caller passes a PLAYER
+// occupant. Retail's CameraOffset.z is live for a body holding its animation
+// channel (the body updater writes it every tick); our player bodies restamp it
+// only on a tick whose head had a clip (the stand-in for org2's unported channel
+// exit), so a player body that never derived one (0) has no head height to test
+// and keeps the wheel — a seated eye sits above the deck, never at it.
 bool watercraft_driver_submerged(const World &world, const Entity &occ) {
     if (world.env.water_z == 0 || occ.eye_offset_z == 0) return false;
     return to_fixed(occ.position.z) + occ.eye_offset_z <= world.env.water_z;

@@ -225,6 +225,8 @@ RootMotionFrame AiSystem::tick_still_body(AiEntity &e, World &world, uint32_t lo
     if (self == nullptr || (flags & (1u | kEntityFlagDead)) != 0 || self->mounted ||
             (self->attach_parent.valid() && self->attach_bone != 0))
         return RootMotionFrame{};
+    // No animation channel: the game's update runs nothing. [orig: @0x4B9931..0x4B993B]
+    if (!infantry_has_anim_channel(inf, root_motion)) return RootMotionFrame{};
     // The motor copy's health from the registry, as tick_infantry hydrates it.
     e.health = self->health;
     if (self->health_max > 0)
@@ -257,7 +259,7 @@ RootMotionFrame AiSystem::tick_still_body(AiEntity &e, World &world, uint32_t lo
     }
     // [orig: @0x4BE8FD..0x4BEBE7, @0x4BEF97, @0x4BEFC5..0x4BEFED]
     infantry_org1_heading_chase(e, self, key);
-    // Whether or not the head had a clip [orig: @0x4B9A48, @0x4BF078..0x4BF094].
+    // Unconditional for a body with its channel [orig: @0x4B9A48, @0x4BF078..0x4BF094].
     infantry_restamp_eye(e, world, frame);
     finish_infantry_tick(e, world);
     return frame;

@@ -14,6 +14,7 @@
 #include <runtime/world/world.h>
 
 #include "../common/synthetic_mission.h"
+#include "../world/channel_clip_source.h"
 
 using namespace opennova;
 using namespace opennova::world;
@@ -1367,7 +1368,11 @@ int main() {
     // Boarders spawn ON FOOT and attach through the infantry think's board leg
     // (infantry_board.cpp) — there is no load-time mount shortcut, matching retail.
     // Drive the think for a few 16-tick boundaries to let the order land.
-    auto run_ai = [](AiSystem &, World &aw, int n) {
+    // The boarders hold their animation channels; a rig wiring no clip source gets one that
+    // plays nothing (test_world::ChannelClipSource).
+    static test_world::ChannelClipSource channel_only;
+    auto run_ai = [](AiSystem &ai, World &aw, int n) {
+        if (ai.root_motion == nullptr) ai.root_motion = &channel_only;
         TickContext c;
         c.world = &aw;
         c.is_authority = true;
@@ -1624,8 +1629,10 @@ int main() {
             return id == anim_state::kWalkForward || id == anim_state::kRunForward ||
                    id == anim_state::kJogForward;
         }
+        // RESET authored: the body holds its channel (infantry_has_anim_channel).
         bool has_clip(int /*adm_id*/, int id) const override {
-            return gait(id) || id == anim_state::kIdle || id == anim_state::kStop;
+            return id == anim_state::kReset || gait(id) || id == anim_state::kIdle ||
+                   id == anim_state::kStop;
         }
         int32_t clip_length_ticks(int, int, int /*variant*/) const override { return -1; }
         bool advance(int /*adm_id*/, int id, int32_t &phase, RootMotionFrame &out) override {

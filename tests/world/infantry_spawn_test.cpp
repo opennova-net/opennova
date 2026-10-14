@@ -616,21 +616,35 @@ void still_bodies_attend_as_the_world() {
     CHECK(alone.body(0).inf.ai_focus == alone.bodies[1]);
 }
 
-// A body whose table registers no clip restamps its eye all the same, in the world's update and in the
-// still body's tick: the zeroed frame's extent floors at 0x9000, the lean level, no lateral.
-// [orig: Entity_UpdateInfantryAI @0x4B9A34..0x4B9A48, @0x4BF078..0x4BF094]
-void clipless_body_restamps_its_eye() {
+// A body with no animation channel (its table authors no RESET row, so the registration frees
+// the channel) runs nothing in the world's update or in the still body's tick: no motor, no think
+// (a red body stays on its idle), its eye and its place untouched. [orig: AnimMap_RegisterEntity
+// @0x40BBBC..0x40BBC6; Entity_UpdateInfantryAI @0x4B9931..0x4B993B]
+void channelless_body_runs_nothing() {
     for (const bool still : {false, true}) {
         Rig r(5);
-        r.source.clips.clear();
         r.init();
+        r.source.clips.erase(anim_state::kReset);
+        r.body().slot.bytes()[AiSlot::kAlertByte] = 2;
         r.body().inf.eye_offset_x = r.body().inf.eye_offset_y = r.body().inf.eye_offset_z = 12345;
-        if (still) r.owned->ai.tick_still_body(r.body(), *r.owned, 1);
-        else r.owned->ai.update_organic(r.body(), *r.owned, 1);
-        CHECK(r.body().inf.eye_offset_z == 0x9000 && r.body().inf.eye_offset_x == 0 &&
-              r.body().inf.eye_offset_y == 0);
-        CHECK(r.entity().eye_offset_z == 0x9000);
+        CHECK(!infantry_has_anim_channel(r.body().inf, &r.source));
+        const InfantryState before = r.body().inf;
+        const int32_t at[3] = {r.body().pos[0], r.body().pos[1], r.body().pos[2]};
+        for (uint32_t tick = 1; tick <= 40; ++tick) {
+            if (still) r.owned->ai.tick_still_body(r.body(), *r.owned, tick);
+            else r.owned->ai.update_organic(r.body(), *r.owned, tick);
+        }
+        const InfantryState &after = r.body().inf;
+        CHECK(same_channels(after, before) && after.anim_state == anim_state::kIdle);
+        CHECK(after.eye_offset_x == 12345 && after.eye_offset_y == 12345 &&
+              after.eye_offset_z == 12345);
+        CHECK(r.body().pos[0] == at[0] && r.body().pos[1] == at[1] && r.body().pos[2] == at[2]);
     }
+    // With its RESET row the body holds its channel.
+    Rig held(5);
+    held.init();
+    CHECK(infantry_has_anim_channel(held.body().inf, &held.source));
+    CHECK(!infantry_has_anim_channel(held.body().inf, nullptr));
 }
 
 // A retail soldier (the install's Eindo01.adm, a body of net id 13 standing), posed and ticked on over
@@ -765,7 +779,7 @@ int main(int argc, char **argv) {
     body_ticks_on_as_the_motor_head();
     still_body_thinks_as_the_world();
     still_bodies_attend_as_the_world();
-    clipless_body_restamps_its_eye();
+    channelless_body_runs_nothing();
     retail_soldier_ticks_on();
     control_point_pool_precedence();
     grounding_strict_one_unit_limit();
