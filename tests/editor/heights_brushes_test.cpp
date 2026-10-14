@@ -387,10 +387,11 @@ int test_seed() {
 	return 0;
 }
 
-// The session closed while a seed runs (the project or the editor closed as Sculpt is picked): the close cancels it
-// and the seed stops at its next node (the bake's cancel between nodes: tests/cpt/trngen_region_bake_test), so the
-// close does not wait out the bake of the whole file. The seed is held on the worker until the close (a test's hold):
-// the worker's when the session goes, its bake begun under the close's cancel, it comes back cancelled.
+// The session closed while a seed runs (the project or the editor closed as Sculpt is picked): the close cancels it,
+// so the close does not wait out the bake of the whole file. Here the seed is held on the worker until the close (a
+// test's hold): the worker's when the session goes, its bake begins under the close's cancel and comes back cancelled
+// at its first node. A cancel set while a bake's walk runs, stopping it at its next node, is pinned on the walk itself
+// (tests/cpt/trngen_region_bake_test's test_walk_cancelled_partway).
 int test_close_during_seed() {
 	BakeTestHold hold;
 	auto rig = std::make_unique<SeedRig>("opennova_editor_heights_seed_close");
