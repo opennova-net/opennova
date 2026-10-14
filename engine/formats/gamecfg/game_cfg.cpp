@@ -123,14 +123,19 @@ const std::vector<ConfigVarRow> &config_var_rows(ConfigTable table) {
 				break;
 			}
 		}
-		// Three shared rows default otherwise: the NovaWorld and LAN-enumeration port
-		// ceilings 32787 where Jointops.exe's are 65535, and mpmaxplayers 16 where its is
-		// 64 (docs/titles/dfx2-vs-jo-re.md DFX2-8).
-		// [orig: @0x831850, @0x8318b0, @0x8319d0 (dfx2.exe)]
+		// Three shared rows default otherwise (docs/titles/dfx2-vs-jo-re.md DFX2-8): the
+		// NovaWorld and LAN-enumeration port ceilings take mplanserverportmax's default, the
+		// one literal all four rows point at, where Jointops.exe's are 65535; mpmaxplayers is
+		// 16 where Jointops.exe's is 64.
+		// [orig: the rows @0x831850, @0x8318b0, @0x8318f8 over the literal @0x7d1674;
+		//  @0x8319d0 (dfx2.exe)]
+		const char *lan_server_port_max = nullptr;
+		for (const ConfigVarRow &row : rows)
+			if (std::strcmp(row.name, "mplanserverportmax") == 0) lan_server_port_max = row.default_value;
 		for (ConfigVarRow &row : rows) {
 			if (std::strcmp(row.name, "mpnovaworldportmax") == 0 ||
 					std::strcmp(row.name, "mpnovaworldlanenumsessionportmax") == 0)
-				row.default_value = "32787";
+				row.default_value = lan_server_port_max;
 			else if (std::strcmp(row.name, "mpmaxplayers") == 0)
 				row.default_value = "16";
 		}
