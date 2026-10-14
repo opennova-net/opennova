@@ -704,17 +704,24 @@ void append_connection_settings(const GameConfig &cfg,
 			PROTOCOL_MSG_FLAG_SETTINGS_UPDATE | PROTOCOL_MSG_FLAG_LEN8));
 }
 
-bool emit_admission_metadata(const GameConfig &cfg, NapiNPConnection &conn,
+void emit_admission_metadata(const GameConfig &cfg, NapiNPConnection &conn,
                              std::vector<NapiNPConnection> &roster, world::World *world,
                              const NapiNPServerCtx *ctx, std::vector<ProtocolMessage> &out) {
+	// Retail's 0x02 handler picks no slot row: it stamps the timing and the holdoff, sends the
+	// 0x01 / 0x7A / 0x7B / 0x03 records and sets game state 7, and Server_PlayerAdd picks the
+	// row at the add. So a joiner the lineup queue admitted past the rows completes its
+	// admission, and the spawn pump holds it past the cap (re-sending the 0x03) until a row
+	// frees. Ours reserves a row here when one is free (the delayed 0x04 and the live entity
+	// then agree); with none, the add reserves it.
+	// [orig: the C2S 0x02 handler @0x512FD0 - NapiNPServer_UpdateHoldoffTicks @0x513068, the
+	//  sends @0x5130AC..0x5131D5, game state 7 @0x51319C; Server_PlayerAdd's row pick
+	//  @0x51CC9A; CNapiServer_ProcessPendingPlayerSpawns's cap @0x4C8E13]
 	const uint8_t capacity =
 			static_cast<uint8_t>(cfg.total_player_slot_capacity()); // [orig @0x24c0ca4]
-	const std::optional<uint8_t> player_slot =
-			Server_ReservePlayerSlot(roster, conn, capacity);
-	if (!player_slot.has_value()) return false;
-	// Team is allocated with the roster slot, even though it is intentionally
-	// not serialized until the later spawn-pump packet. Player-add consumes this
-	// reservation, so the delayed 0x04 and the live entity cannot disagree.
+	(void)Server_ReservePlayerSlot(roster, conn, capacity);
+	// Team is allocated at admission, even though it is intentionally not serialized until
+	// the later spawn-pump packet. Player-add consumes this reservation, so the delayed 0x04
+	// and the live entity cannot disagree.
 	if (world != nullptr) {
 		(void)Server_ReservePlayerTeam(cfg, /*is_in_session=*/true, roster, conn, *world,
 				ctx != nullptr ? ctx->rotation : nullptr);
@@ -735,7 +742,6 @@ bool emit_admission_metadata(const GameConfig &cfg, NapiNPConnection &conn,
 			s2c::FULL_PLAYER_INFO, build_tag7b_session_summary(cfg, conn)));
 	// [u8 1][u16 count=1][u16 mask=1] — the golden's live restriction record shape.
 	out.push_back(make_protocol_message(s2c::SYNC_TICK, {0x01, 0x01, 0x00, 0x01, 0x00}));
-	return true;
 }
 
 // Build a 0x46 player-sync for a SPECIFIC roster slot (the one the client's C2S 0x22 requests). Finds
@@ -1178,11 +1184,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					return {};
 				}
 				if (!st.admission_metadata_pushed) {
-					if (!emit_admission_metadata(
-								config, conn, roster, world, inputs.server_ctx, replies)) {
-						conn.admission_stage = GameAdmissionStage::Rejected;
-						return {};
-					}
+					emit_admission_metadata(config, conn, roster, world, inputs.server_ctx, replies);
 					st.admission_metadata_pushed = true;
 					st.admission_completed_tick = now_tick;
 				}
@@ -1360,11 +1362,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// caller entering here gets the same one-shot metadata; spawn metadata and
 				// roster remain tick-owned boundaries.
 				if (!st.admission_metadata_pushed) {
-					if (!emit_admission_metadata(
-								config, conn, roster, world, inputs.server_ctx, replies)) {
-						conn.admission_stage = GameAdmissionStage::Rejected;
-						return {};
-					}
+					emit_admission_metadata(config, conn, roster, world, inputs.server_ctx, replies);
 					st.admission_metadata_pushed = true;
 					st.admission_completed_tick = now_tick;
 				}

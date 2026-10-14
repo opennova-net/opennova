@@ -3223,6 +3223,79 @@ bool run_join_gate_admits_the_lineup_queue() {
 	return true;
 }
 
+// A joiner the lineup queue admits past the slot rows is held, never dropped (D-NET-403
+// review). A Serve Only host with a cap of 1 has one joiner row; with a queue of 1 its gate
+// admits two. Retail's C2S 0x02 handler picks no row, so the second joiner's 0x02 is answered
+// with the post-handshake metadata like the first's, and the spawn pump, its cap reached by the
+// first joiner's add, holds the second and re-sends it the one-byte S2C 0x03.
+// [orig: the C2S 0x02 handler @0x512FD0 (no row pick; the 0x7A / 0x7B / 0x03 sends
+//  @0x5130AC..0x5131D5); CNapiServer_ProcessPendingPlayerSpawns - the cap @0x4C8E13, the
+//  0x03 nag @0x4C8F7A..0x4C8FD1; Server_PlayerAdd's row pick @0x51CC9A]
+bool run_lineup_joiner_past_the_rows_is_held_not_dropped() {
+	world::World world;
+	world.registry.configure_pool(0, 16);
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::GameConfig settings;
+	settings.max_players = 1;
+	settings.dedicated_server = true; // the slot limit 2: row 0 the host's, row 1 a joiner's
+	settings.use_lineup_queue = 1;
+	settings.lineup_queue_size = 1;
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
+			kHostKey, nullptr, settings);
+	ctx.world = &world;
+	const std::string client_scrk =
+			"QUEUEDJOINERSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
+	const PeerAddr first_peer{0x0100007Fu, 32401};
+	const PeerAddr second_peer{0x0100007Fu, 32402};
+	std::string first_scrk;
+	std::string second_scrk;
+	std::vector<ProtocolMessage> second_post;
+	if (!handshake(ctx, first_peer, client_scrk, 0x40404040u, first_scrk)) return false;
+	// The helper itself requires the 0x02 answered and the node kept.
+	if (!handshake(ctx, second_peer, client_scrk, 0x41414141u, second_scrk, nullptr, nullptr,
+				true, &second_post))
+		return false;
+	if (!expect(find_reply(second_post, s2c::FULL_PLAYER_INFO) != nullptr &&
+	                    find_reply(second_post, s2c::PLAYER_NAME) != nullptr,
+	            "the queued joiner's 0x02 is answered with the post-handshake 0x7A / 0x7B"))
+		return false;
+	const inmatch::NapiNPConnection *first = nullptr;
+	const inmatch::NapiNPConnection *second = nullptr;
+	for (const inmatch::NapiNPConnection &c : ctx.np_protocol.connection_list) {
+		if (c.peer == first_peer) first = &c;
+		if (c.peer == second_peer) second = &c;
+	}
+	if (!expect(first != nullptr && second != nullptr && first->reply.player_slot_reserved &&
+	                    !second->reply.player_slot_reserved &&
+	                    second->admission_stage == inmatch::GameAdmissionStage::Complete,
+	            "the first holds the joiner row; the second completes its admission without one"))
+		return false;
+
+	advance_to_periodic_second(world);
+	const std::vector<inmatch::TickOut> spawn_out = inmatch::tick_connections(ctx, 16, 6);
+	bool second_held_nag = false;
+	for (const inmatch::TickOut &tick : spawn_out) {
+		if (!(tick.peer == second_peer)) continue;
+		for (const std::vector<uint8_t> &datagram : tick.outbound) {
+			ProtocolPacketHeader header;
+			std::vector<ProtocolMessage> messages;
+			if (!decode_s2c(datagram, second_scrk, header, messages)) continue;
+			const ProtocolMessage *nag = find_reply(messages, 0x03);
+			if (nag != nullptr && nag->payload == std::vector<uint8_t>{0x00}) second_held_nag = true;
+		}
+	}
+	first = second = nullptr;
+	for (const inmatch::NapiNPConnection &c : ctx.np_protocol.connection_list) {
+		if (c.peer == first_peer) first = &c;
+		if (c.peer == second_peer) second = &c;
+	}
+	return expect(first != nullptr && first->phase >= inmatch::ConnectionPhase::PlayerAdded &&
+	                      second != nullptr &&
+	                      second->phase < inmatch::ConnectionPhase::PlayerAdded &&
+	                      inmatch::connection_count(ctx) == 2 && second_held_nag,
+	        "the pump adds the first and holds the second, re-sending it the S2C 0x03 {00}");
+}
+
 // A Serve Only host (D-NET-400) advertises, admits and publishes its session cap; only the
 // slot limit carries its own slot. A cfg block with a cap of 2, dedicated, makes a session
 // whose LAN discovery 0x81 MP is 2 (protocol +0x524, the session's copy of the cap), whose
@@ -4231,6 +4304,7 @@ int main(int argc, char **argv) {
 	ok = run_spectator_admission_codes_match_retail() && ok;
 	ok = run_capacity_rejects_when_full() && ok;
 	ok = run_join_gate_admits_the_lineup_queue() && ok;
+	ok = run_lineup_joiner_past_the_rows_is_held_not_dropped() && ok;
 	ok = run_dedicated_host_advertises_and_admits_its_cap() && ok;
 	ok = run_mps_negotiates_the_connection_ceiling() && ok;
 	ok = run_character_join_vars_parsed() && ok;
