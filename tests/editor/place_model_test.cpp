@@ -66,11 +66,9 @@ constexpr const char *kItems = "begin \"Null\"\nid 100000\ntype marker\nend\n"
                                "begin \"Drop Armory\"\nid 106101\ntype building\ngraphic armory\nend\n"
                                "begin \"house\"\nid 100001\ntype decoration\ngraphic shed\nend\n";
 
-std::string fixture(const std::string &rel) { return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/" + rel; }
-
 // A synth model read, `change` applied to it in memory (null: as minted).
 template <typename Change> ModelItemFacts facts_of(const char *name, Change change) {
-	const std::vector<uint8_t> bytes = test_io::read_file(fixture(std::string("threedi/synth/") + name + ".3di"));
+	const std::vector<uint8_t> bytes = test_io::read_file(test_paths_fixture(std::string("threedi/synth/") + name + ".3di"));
 	threedi::Threedi3di3 model{};
 	ModelItemFacts facts;
 	facts.because = "unread";
@@ -86,7 +84,7 @@ ModelItemFacts facts_of(const char *name) {
 }
 
 struct Rig {
-	editor_test::TempProjectDir dir;
+	test_temp::TempDir dir;
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{ platform, preferences };
@@ -104,12 +102,12 @@ struct Rig {
 		const AssetEntry *items = view.project.scan ? view.project.scan->find("items.def") : nullptr;
 		if (!items) return false;
 		catalog = items->relative_path;
-		if (!editor_test::write_text(view.project.root + "/" + catalog, kItems)) return false;
-		if (!editor_test::write_bytes(view.project.root + "/" + kMission, test_io::read_file(fixture("bms/synth_logic.bms"))))
+		if (!test_io::write_text(view.project.root + "/" + catalog, kItems)) return false;
+		if (!test_io::write_file(view.project.root + "/" + kMission, test_io::read_file(test_paths_fixture("bms/synth_logic.bms"))))
 			return false;
 		for (const char *model : { "crate", "armory", "pump", "house", "shed", "person", "carrier", "mount" })
-			if (!editor_test::write_bytes(view.project.root + "/models/" + model + ".3di",
-			                              test_io::read_file(fixture(std::string("threedi/synth/") + model + ".3di"))))
+			if (!test_io::write_file(view.project.root + "/models/" + model + ".3di",
+			                              test_io::read_file(test_paths_fixture(std::string("threedi/synth/") + model + ".3di"))))
 				return false;
 		session.handle(request::rescan());
 		session.run_operations();
@@ -284,7 +282,7 @@ static int test_drop_makes_item() {
 	TEST_EXPECT(found);
 
 	// The armory's twin with no item: a building by its occlusion; the house's: a decoration named "house 2".
-	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/bunker.3di", test_io::read_file(fixture("threedi/synth/armory.3di"))));
+	TEST_EXPECT(test_io::write_file(view.project.root + "/models/bunker.3di", test_io::read_file(test_paths_fixture("threedi/synth/armory.3di"))));
 	rig.session.handle(request::rescan());
 	rig.session.run_operations();
 	rig.devices.sync(rig.session);
@@ -332,7 +330,7 @@ static int test_drop_refusals() {
 
 	// items.def that no longer reads: the item's batch refused, so the entity is not placed.
 	const SessionView &view = rig.session.view();
-	TEST_EXPECT(editor_test::write_text(view.project.root + "/" + rig.catalog, "begin \"Broken\"\nid 100000\ntype marker\n"));
+	TEST_EXPECT(test_io::write_text(view.project.root + "/" + rig.catalog, "begin \"Broken\"\nid 100000\ntype marker\n"));
 	rig.session.handle(request::rescan());
 	rig.session.run_operations();
 	rig.devices.sync(rig.session);
@@ -490,7 +488,7 @@ static int test_retail() {
 	                                     { decoration, def::DEF_ITEM_TYPE_DECORATION } }) {
 		std::vector<uint8_t> model_bytes;
 		TEST_EXPECT(base.read_file(graphic + ".3di", model_bytes) &&
-		            editor_test::write_bytes(view.project.root + "/models/" + graphic + ".3di", model_bytes));
+		            test_io::write_file(view.project.root + "/models/" + graphic + ".3di", model_bytes));
 		rig.session.handle(request::rescan());
 		rig.session.run_operations();
 		rig.devices.sync(rig.session);

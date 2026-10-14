@@ -597,13 +597,13 @@ const char *const kFile =
         "I 1 b1\n";
 
 struct Loaded {
-	editor_test::TempProjectDir dir{"opennova_document_core_test"};
+	test_temp::TempDir dir{"opennova_document_core_test"};
 	FakeDocument document;
 	NodeAddress alpha, beta, header, a1, x, y, a1b, a2, b1;
 	std::string original;
 
 	bool load() {
-		if (!editor_test::write_text(dir.file("fake.txt"), kFile)) return false;
+		if (!test_io::write_text(dir.file("fake.txt"), kFile)) return false;
 		Diagnostic error;
 		if (!document.load(dir.file("fake.txt"), "fake.txt", opennova::editor::AssetKind::Unknown, "jo", error)) return false;
 		if (document.rows().size() != 2) return false;
@@ -1799,7 +1799,7 @@ static int test_changes_since_save() {
 
 	// A clean document whose file holds other bytes than it writes (a blank line the reader
 	// skips) needs a rewrite; written, it does not.
-	TEST_EXPECT(editor_test::write_text(fake.dir.file("spaced.txt"), std::string(kFile) + "\n"));
+	TEST_EXPECT(test_io::write_text(fake.dir.file("spaced.txt"), std::string(kFile) + "\n"));
 	FakeDocument spaced;
 	TEST_EXPECT(spaced.load(fake.dir.file("spaced.txt"), "spaced.txt", opennova::editor::AssetKind::Unknown, "jo", error));
 	TEST_EXPECT(!spaced.dirty() && spaced.rewrite_need() == Document::RewriteNeed::Rewrite);
@@ -2387,7 +2387,7 @@ static int test_failed_load() {
 static int test_document_base() {
 	using editor_test::BlobDocument;
 	using editor_test::BlobReplace;
-	editor_test::TempProjectDir dir{"opennova_document_base_test"};
+	test_temp::TempDir dir{"opennova_document_base_test"};
 	const std::string file = dir.file("blob.txt");
 	const auto file_text = [&] {
 		std::vector<uint8_t> bytes;
@@ -2396,7 +2396,7 @@ static int test_document_base() {
 		return std::string(bytes.begin(), bytes.end());
 	};
 	const std::string original = "one\n# a note\ntwo\n", edited = "one\ntwo\nthree\n";
-	TEST_EXPECT(editor_test::write_text(file, original));
+	TEST_EXPECT(test_io::write_text(file, original));
 	BlobDocument blob;
 	Diagnostic error;
 	TEST_EXPECT(blob.load_generation() == 0);
@@ -2433,7 +2433,7 @@ static int test_document_base() {
 	blob.redo();
 	TEST_EXPECT(!blob.dirty()); // back at the saved checkpoint
 	// A file changed outside the editor: it no longer matches, and a save is refused.
-	TEST_EXPECT(editor_test::write_text(file, "changed\n") && !blob.matches_file());
+	TEST_EXPECT(test_io::write_text(file, "changed\n") && !blob.matches_file());
 	replace.payload = std::make_shared<BlobReplace>("four\n");
 	TEST_EXPECT(blob.apply(replace, error) && !blob.save(error) &&
 	            error.code() == "document.conflict");
@@ -2801,8 +2801,8 @@ static int test_history_budget() {
 	const size_t budget = HistoryBudget().bytes;
 	TEST_EXPECT(budget == size_t(64) << 20 && HistoryBudget().min_steps == 1);
 	g_line_heft = size_t(8) << 20;
-	editor_test::TempProjectDir dir{"opennova_history_budget_test"};
-	TEST_EXPECT(editor_test::write_text(dir.file("heavy.txt"), "L a 1 TAG1\nL b 2 TAG1\n"));
+	test_temp::TempDir dir{"opennova_history_budget_test"};
+	TEST_EXPECT(test_io::write_text(dir.file("heavy.txt"), "L a 1 TAG1\nL b 2 TAG1\n"));
 	FlatDocument document;
 	Diagnostic error;
 	TEST_EXPECT(document.load(dir.file("heavy.txt"), "heavy.txt", AssetKind::Unknown, "jo", error));

@@ -47,7 +47,7 @@ static Evaluated evaluate(const ProjectPaths &paths, const ProjectDocument &doc)
 }
 
 static int test_default_project_fills_and_validates() {
-	editor_test::TempProjectDir dir("opennova_editor_create_missing_test");
+	test_temp::TempDir dir("opennova_editor_create_missing_test");
 	const std::string root = dir.file("Blank");
 	ProjectDocument doc;
 	Diagnostic error;
@@ -118,7 +118,7 @@ static int test_default_project_fills_and_validates() {
 }
 
 static int test_single_role_and_wrong_kind() {
-	editor_test::TempProjectDir dir("opennova_editor_create_missing_role_test");
+	test_temp::TempDir dir("opennova_editor_create_missing_role_test");
 	const std::string root = dir.file("One");
 	ProjectDocument doc;
 	Diagnostic error;
@@ -137,13 +137,13 @@ static int test_single_role_and_wrong_kind() {
 	std::string text, io_error;
 	TEST_EXPECT(opennova::io::read_file_bytes(root + "/menus/main.mnu", made, io_error));
 	// The report it was made from, asked again: the file is on disk now, refused, untouched.
-	TEST_EXPECT(editor_test::write_text(root + "/menus/main.mnu", "edited since"));
+	TEST_EXPECT(test_io::write_text(root + "/menus/main.mnu", "edited since"));
 	const CreateMissingResult stale = create_missing_requirements(paths, doc, before.scan, before.report, {"main_menu"});
 	TEST_EXPECT(stale.created.empty() && stale.diagnostics.size() == 1 &&
 	            stale.diagnostics[0].code() == "create_missing.exists");
 	TEST_EXPECT(opennova::io::read_file_text(root + "/menus/main.mnu", text, io_error) && text == "edited since");
 	// A report that lists it, in another folder: refused the same way, nothing made beside it.
-	TEST_EXPECT(editor_test::write_bytes(root + "/elsewhere/main.mnu", made));
+	TEST_EXPECT(test_io::write_file(root + "/elsewhere/main.mnu", made));
 	fs::remove(root + "/menus/main.mnu");
 	const Evaluated moved = evaluate(paths, doc);
 	const CreateMissingResult present = create_missing_requirements(paths, doc, moved.scan, moved.report, {"main_menu"});
@@ -165,7 +165,7 @@ static int test_single_role_and_wrong_kind() {
 	for (const Diagnostic &d : unknown.diagnostics) TEST_EXPECT(d.code() == "create_missing.unknown");
 
 	// A present-but-wrong file is refused, never overwritten.
-	TEST_EXPECT(editor_test::write_text(root + "/gametext.bin", "not a string table"));
+	TEST_EXPECT(test_io::write_text(root + "/gametext.bin", "not a string table"));
 	Evaluated wrong = evaluate(paths, doc);
 	const CreateMissingResult refused = create_missing_requirements(paths, doc, wrong.scan, wrong.report, {"gametext"});
 	TEST_EXPECT(refused.created.empty());
@@ -180,7 +180,7 @@ static int test_single_role_and_wrong_kind() {
 // can fill are made when named; the ones that need real content (the sound banks, the music, the
 // mission-text fallback, the HUD layouts, the celestial model, the fallback animation) have none.
 static int test_mission_rows_are_all_filled() {
-	editor_test::TempProjectDir dir("opennova_editor_create_missing_mission_test");
+	test_temp::TempDir dir("opennova_editor_create_missing_mission_test");
 	const std::string root = dir.file("Mission");
 	ProjectDocument doc;
 	Diagnostic error;
@@ -242,7 +242,7 @@ static int test_mission_rows_are_all_filled() {
 // (anywhere: a pointer in another folder is the one the menu takes) and its target is free; an
 // expansion makes none (its base game serves the pointer).
 static int test_the_pointer_comes_with_the_menu_once() {
-	editor_test::TempProjectDir dir("opennova_editor_create_missing_pointer_test");
+	test_temp::TempDir dir("opennova_editor_create_missing_pointer_test");
 	const std::string root = dir.file("Pointer");
 	ProjectDocument doc;
 	Diagnostic error;
@@ -251,7 +251,7 @@ static int test_the_pointer_comes_with_the_menu_once() {
 
 	// A pointer of the project's own, in its own folder: the menu takes it, nothing is made beside it.
 	std::vector<uint8_t> own{1, 2, 3};
-	TEST_EXPECT(editor_test::write_bytes(root + "/art/newarow1.tga", own));
+	TEST_EXPECT(test_io::write_file(root + "/art/newarow1.tga", own));
 	const Evaluated has_one = evaluate(paths, doc);
 	const CreateMissingResult kept = create_missing_requirements(paths, doc, has_one.scan, has_one.report, {"main_menu"});
 	TEST_EXPECT(kept.created.size() == 1 && kept.created[0] == "menus/main.mnu" && kept.diagnostics.empty());
@@ -271,7 +271,7 @@ static int test_the_pointer_comes_with_the_menu_once() {
 
 	// The scan older than the tree (the pointer on disk since): left as it is, no finding.
 	fs::remove(root + "/menus/main.mnu");
-	TEST_EXPECT(editor_test::write_bytes(root + "/textures/newarow1.tga", own));
+	TEST_EXPECT(test_io::write_file(root + "/textures/newarow1.tga", own));
 	const CreateMissingResult stale = create_missing_requirements(paths, doc, bare.scan, bare.report, {"main_menu"});
 	TEST_EXPECT(stale.created.size() == 1 && stale.diagnostics.empty());
 	TEST_EXPECT(opennova::io::read_file_bytes(root + "/textures/newarow1.tga", read, io_error) && read == own);

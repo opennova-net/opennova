@@ -183,7 +183,7 @@ std::vector<std::string> tree_names(const MnuDocument &document, const RecordTre
 // The tree of one screen's windows (a part's windows left out) and the one Move each
 // gesture makes, applied and undone.
 void test_menu_tree_model() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_tree_test");
+	test_temp::TempDir dir("opennova_editor_ui_tree_test");
 	std::shared_ptr<MnuDocument> document = load_menu(dir);
 	const Node &screen = *document->rows()[0];
 	const RecordTree tree = build_record_tree(*document, screen, kWindow);
@@ -261,7 +261,7 @@ bool has_field(const InspectorSection *section, const char *id) {
 // ignores and the file leaves out is not there; a filter; a leaf's own fields with the
 // records beside it.
 void test_inspector_plan() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_plan_test");
+	test_temp::TempDir dir("opennova_editor_ui_plan_test");
 	std::shared_ptr<MnuDocument> document = load_menu(dir);
 	const NodeAddress back = named(*document, "BACK"), choices = named(*document, "CHOICES");
 	const std::vector<InspectorSection> button = plan_inspector(*document, back, back, "");
@@ -376,7 +376,7 @@ ImVec2 confirmation_button(bool cancel) {
 // the Document window: a row is found by clicking down the tree until it selects, a drag is
 // a press, a move and a release, a button is pressed by its id, a shortcut by its keys.
 void test_menu_window_ui() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_menu_test");
+	test_temp::TempDir dir("opennova_editor_ui_menu_test");
 	std::shared_ptr<MnuDocument> document = load_menu(dir);
 	const Node &screen = *document->rows()[0];
 	SessionView v = menu_view(document);
@@ -458,7 +458,7 @@ void test_menu_window_ui() {
 	{
 		auto extra = std::make_shared<MnuDocument>();
 		Diagnostic error;
-		CHECK(editor_test::write_text(dir.file("extra.mnu"), kMenu), "second menu fixture");
+		CHECK(test_io::write_text(dir.file("extra.mnu"), kMenu), "second menu fixture");
 		CHECK(extra->load(dir.file("extra.mnu"), "extra.mnu", AssetKind::Menu, "jo", error), error.message.c_str());
 		CHECK(named(*extra, "TITLE") == named(*document, "TITLE"), "the same ids in both files");
 		v.documents.open.push_back(extra);
@@ -637,7 +637,7 @@ std::vector<float> tooltips_shown() {
 }
 
 void test_inspector_ui() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_inspector_test");
+	test_temp::TempDir dir("opennova_editor_ui_inspector_test");
 	std::shared_ptr<MnuDocument> document = load_menu(dir);
 	const NodeAddress back = named(*document, "BACK");
 	SessionView v = menu_view(document);
@@ -766,7 +766,7 @@ void test_inspector_ui() {
 // is the field's own. A Save names the document active when it was raised; no shortcut
 // acts while the unsaved prompt is open.
 void test_actions_after_edits() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_actions_test");
+	test_temp::TempDir dir("opennova_editor_ui_actions_test");
 	std::shared_ptr<MnuDocument> document = load_menu(dir);
 	const NodeAddress back = named(*document, "BACK");
 	SessionView v = menu_view(document);
@@ -821,7 +821,7 @@ void test_actions_after_edits() {
 	// the Save waits for the row's request.
 	auto other = std::make_shared<MnuDocument>();
 	Diagnostic error;
-	CHECK(editor_test::write_text(dir.file("extra.mnu"), kMenu), "second menu fixture");
+	CHECK(test_io::write_text(dir.file("extra.mnu"), kMenu), "second menu fixture");
 	CHECK(other->load(dir.file("extra.mnu"), "extra.mnu", AssetKind::Menu, "jo", error), error.message.c_str());
 	v.documents.open.push_back(other);
 	// A Problems row opens a file of the project the editor opens (problem_location): the
@@ -964,7 +964,7 @@ int64_t set_value(const std::vector<Edit> &edits, const char *field) {
 // asked to Fit, at 100% (a pixel a design unit). The menu's viewport, its device, and the scope of
 // its view's items in the Preview window.
 struct LayoutPreview {
-	editor_test::TempProjectDir dir;
+	test_temp::TempDir dir;
 	std::shared_ptr<MnuDocument> document = std::make_shared<MnuDocument>();
 	SessionView v;
 	HandViewports shell;
@@ -976,7 +976,7 @@ struct LayoutPreview {
 	explicit LayoutPreview(const char *name) : dir(name) {}
 	bool start(bool fit = false) {
 		Diagnostic error;
-		CHECK(editor_test::write_text(dir.file("layout.mnu"), kLayoutMenu), "layout fixture");
+		CHECK(test_io::write_text(dir.file("layout.mnu"), kLayoutMenu), "layout fixture");
 		CHECK(document->load(dir.file("layout.mnu"), "layout.mnu", AssetKind::Menu, "jo", error), error.message.c_str());
 		if (document->rows().empty()) return false;
 		const Node &screen = *document->rows()[0];
@@ -1574,7 +1574,7 @@ std::vector<std::string> listed(Ui &ui) {
 // optional file's note has its fixes too.
 void test_problems_window_ui() {
 	using List = std::vector<std::string>;
-	editor_test::TempProjectDir dir("opennova_editor_ui_problems_test");
+	test_temp::TempDir dir("opennova_editor_ui_problems_test");
 	SessionView v = problems_view(menu_at(dir, "a.mnu", "menus/a.mnu"), menu_at(dir, "b.mnu", "menus/b.mnu"));
 	Ui ui;
 	ui.windows.set_view(&v);
@@ -1808,7 +1808,7 @@ void test_problems_window_ui() {
 // More's list follows its finding when others go, and closes when it goes.
 void test_problems_confirmation_follows() {
 	using List = std::vector<std::string>;
-	editor_test::TempProjectDir dir("opennova_editor_ui_problems_follow");
+	test_temp::TempDir dir("opennova_editor_ui_problems_follow");
 	SessionView v = problems_view(menu_at(dir, "a.mnu", "menus/a.mnu"), menu_at(dir, "b.mnu", "menus/b.mnu"));
 	v.project.retail_files.clear(); // no game install: placeholders are the Fix all
 	Ui ui;
@@ -1892,7 +1892,7 @@ void test_problems_confirmation_follows() {
 // in the message's column; a group's Fix all stays in its cell. (Problems spans the bottom:
 // a window 480 wide makes it narrow.)
 void test_problems_narrow() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_problems_narrow");
+	test_temp::TempDir dir("opennova_editor_ui_problems_narrow");
 	SessionView v = problems_view(menu_at(dir, "a.mnu", "menus/a.mnu"), menu_at(dir, "b.mnu", "menus/b.mnu"));
 	Ui ui;
 	ImGui::GetIO().DisplaySize = ImVec2(480.0f, 700.0f);
@@ -2124,8 +2124,8 @@ void test_problems_original() {
 
 // The stylesheet's variables as a table: an add goes after the selected line, Remove takes the selected line.
 void test_styles_window_ui() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_styles_test");
-	CHECK(editor_test::write_text(dir.file("menu_style.mns"), "DEF_TEXT_FG\tFFFFFFFF\r\nTRIM_COLOR\tFF808080\r\n"),
+	test_temp::TempDir dir("opennova_editor_ui_styles_test");
+	CHECK(test_io::write_text(dir.file("menu_style.mns"), "DEF_TEXT_FG\tFFFFFFFF\r\nTRIM_COLOR\tFF808080\r\n"),
 	      "stylesheet fixture");
 	auto document = std::make_shared<MnsDocument>();
 	Diagnostic error;
@@ -2172,14 +2172,14 @@ void test_styles_window_ui() {
 // no Down; a line end the game does not read is the stored file's finding, on its line, until a save; Add variable
 // goes after the selected variable.
 void test_styles_lines_listed() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_styles_lines");
+	test_temp::TempDir dir("opennova_editor_ui_styles_lines");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Styles"));
 	session.run_operations();
 	const SessionView &v = session.view();
-	CHECK(editor_test::write_text(v.project.root + "/menu_style.mns",
+	CHECK(test_io::write_text(v.project.root + "/menu_style.mns",
 	                              "// Header\r\nA_FG FFFFFFFF\r\n// Colours below\n\r\nB_FG FF000000\r\n// Footer\r\n"),
 	      "stylesheet fixture");
 	session.handle(request::rescan());
@@ -2297,7 +2297,7 @@ void test_styles_lines_listed() {
 // stylesheet at the variable, the second shows the font in Files (the editor does not edit
 // fonts).
 void test_go_to_ui() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_go_to");
+	test_temp::TempDir dir("opennova_editor_ui_go_to");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -2414,7 +2414,7 @@ void test_go_to_ui() {
 // the number, but the form's Go to and the table cell's badge dot each open the table at the
 // item it names, its id shown.
 void test_numeric_go_to_ui() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_numeric_go_to");
+	test_temp::TempDir dir("opennova_editor_ui_numeric_go_to");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -2426,7 +2426,7 @@ void test_numeric_go_to_ui() {
 	CHECK(items_asset != nullptr, "the project's item table");
 	if (!items_asset) return;
 	const std::string items_path = items_asset->relative_path;
-	CHECK(editor_test::write_text(v.project.root + "/" + items_path,
+	CHECK(test_io::write_text(v.project.root + "/" + items_path,
 	                              "begin \"Carrier\"\nid 100164\ntype vehicle\naddeweap ewep01 100166\nend\n"
 	                              "begin \"Gun\"\nid 100166\ntype vehicle\nend\n"),
 	      "an item naming another by id");
@@ -2493,7 +2493,7 @@ struct Group {
 // S13 V8: the menu view's tree of the selected screen follows the menu's change sets: a window of
 // another screen moved keeps it, one of the screen moved makes it again.
 void test_menu_tree_follows_changes() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_menu_tree_changes");
+	test_temp::TempDir dir("opennova_editor_ui_menu_tree_changes");
 	std::shared_ptr<MnuDocument> document = load_menu(dir);
 	Diagnostic error;
 	Edit add;
@@ -2618,7 +2618,7 @@ void run_menu_tests() {
 // reads and kept across frames; the document toolbar's Used by chip clears the selection and brings the
 // Inspector forward, the requests the editor MCP raises for it too.
 void test_used_by_ui() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_used_by");
+	test_temp::TempDir dir("opennova_editor_ui_used_by");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -2677,7 +2677,7 @@ void test_used_by_ui() {
 // A string table's Uses count opens its users (DI-05): a click on WPN_ONE's count selects the string and
 // brings the Inspector forward, whose Referenced by lists the weapon naming it, each a Go to.
 void test_uses_open_users_ui() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_uses");
+	test_temp::TempDir dir("opennova_editor_ui_uses");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -2694,8 +2694,8 @@ void test_uses_open_users_ui() {
 	table.entries = {{"WPN_ONE", "The first weapon", {}, 0}, {"WPN_TWO", "The second weapon", {}, 0}};
 	std::vector<uint8_t> bytes;
 	std::string error;
-	CHECK(opennova::rtxt::write(table, bytes, error) && editor_test::write_bytes(v.project.root + "/" + table_path, bytes) &&
-	              editor_test::write_text(v.project.root + "/" + weapons_path, "weapon \"Gun\"\nloadout_menu_textid WPN_ONE\nend\n"),
+	CHECK(opennova::rtxt::write(table, bytes, error) && test_io::write_file(v.project.root + "/" + table_path, bytes) &&
+	              test_io::write_text(v.project.root + "/" + weapons_path, "weapon \"Gun\"\nloadout_menu_textid WPN_ONE\nend\n"),
 	      "the strings and the weapon naming one");
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::handle_to_end(session, request::open_document(table_path));
@@ -2725,7 +2725,7 @@ void test_uses_open_users_ui() {
 // DI-34: what a menu window plays and when heads its Inspector (ui/menu_inspector): BACK's MOUSEIN row on a
 // Play; its SOUND row selected says the same; TITLE, with none, says nothing of sound; drawing raises nothing.
 void test_menu_sounds_inspector_ui() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_menu_sounds_test");
+	test_temp::TempDir dir("opennova_editor_ui_menu_sounds_test");
 	std::shared_ptr<MnuDocument> document = load_menu(dir);
 	const NodeAddress back = named(*document, "BACK");
 	SessionView v = menu_view(document);

@@ -175,7 +175,7 @@ const Diagnostic *finding(const SessionView &view, const std::string &code, cons
 }
 
 int test_project() {
-	editor_test::TempProjectDir dir{"opennova_editor_texture_budget"};
+	test_temp::TempDir dir{"opennova_editor_texture_budget"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -186,12 +186,12 @@ int test_project() {
 	const std::string t = root + "/textures/";
 	// A 2048 crate diffuse past the warning; a small one under it; two arms' normal maps in slot 3 with type 0,
 	// a .tga and an .mdt; a crate normal map of type 4; an opaque DXT5 beside a .tga its row names.
-	TEST_EXPECT(editor_test::write_bytes(t + "crate.tga", tga(2048, 2048)) && editor_test::write_bytes(t + "small.tga", tga(64, 64)) &&
-	            editor_test::write_bytes(t + "arm_n.tga", tga(64, 64)) && editor_test::write_bytes(t + "leg_n.mdt", tga(1024, 1024)) &&
-	            editor_test::write_bytes(t + "crate_n.mdt", tga(512, 512)) && editor_test::write_bytes(t + "skin.tga", tga(8, 8)) &&
-	            editor_test::write_bytes(t + "skin.dds", dxt5(256, 255)));
+	TEST_EXPECT(test_io::write_file(t + "crate.tga", tga(2048, 2048)) && test_io::write_file(t + "small.tga", tga(64, 64)) &&
+	            test_io::write_file(t + "arm_n.tga", tga(64, 64)) && test_io::write_file(t + "leg_n.mdt", tga(1024, 1024)) &&
+	            test_io::write_file(t + "crate_n.mdt", tga(512, 512)) && test_io::write_file(t + "skin.tga", tga(8, 8)) &&
+	            test_io::write_file(t + "skin.dds", dxt5(256, 255)));
 	const std::string scene = dir.file("scene");
-	TEST_EXPECT(editor_test::write_text(scene + "/crate.o3d",
+	TEST_EXPECT(test_io::write_text(scene + "/crate.o3d",
 	                                    "o3d 2\nmodel CRATE\nmaterial VS_PHONGT\ntexture crate.tga 1 0\ntexture crate_n.mdt 3 4\n"
 	                                    "material FF_ST_OP\ntexture small.tga 1 0\n"
 	                                    "material VS_SKBUMPDIFFT\ntexture skin.tga 1 0\ntexture arm_n.tga 3 0\n"

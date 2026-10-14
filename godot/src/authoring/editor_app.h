@@ -149,6 +149,11 @@ public:
 	// or "playing", and the project file it is of ("" while idle). The wire reads the workspace section's sound.
 	String get_sound_state() const;
 	String get_sound_path() const;
+	// The tests' waits, states never clocks: the terrain sculpt's worker until it holds no bake
+	// (ProjectSession::wait_for_bakes), what it finished landing at the next pump; the decodes of the workspace's
+	// sound a pump began (PreviewSoundPlayer::wait), the play starting at the next pump.
+	void wait_for_bakes();
+	void wait_for_sound();
 	// The clip sounds the Shell started in all (DI-04: a previewed clip's events, each sound's voices), and the
 	// order of the last one it took (ProjectSession::clip_sounds_since), for the tests.
 	int64_t get_clip_voices_started() const { return clip_voices_ ? int64_t(clip_voices_->started()) : 0; }

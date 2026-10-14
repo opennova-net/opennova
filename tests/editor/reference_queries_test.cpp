@@ -62,7 +62,7 @@ bool found_alike(const AssetGraph &graph, const Document &document, const std::s
 // The badge, the finding and the picker agree on a menu's references, through the
 // reference queries and the graph alike.
 static int test_menu_references() {
-	editor_test::TempProjectDir dir("opennova_reference_queries_menu");
+	test_temp::TempDir dir("opennova_reference_queries_menu");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -198,7 +198,7 @@ static int test_menu_references() {
 // usages are the uses of its screens and windows, another menu's too. A use, a definition and a
 // file each go where the scan says: opened when the editor edits the file's kind, else shown.
 static int test_go_to_targets() {
-	editor_test::TempProjectDir dir("opennova_reference_queries_go_to");
+	test_temp::TempDir dir("opennova_reference_queries_go_to");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -208,12 +208,12 @@ static int test_go_to_targets() {
 	const std::string go = "<ACTION TYPE=\"WINDOW\" STATE=\"SHOW\">TITLE</ACTION>\r\n";
 	const std::string back = "<ACTION TYPE=\"SCREEN\" FILE=\"flow.mnu\">HOME</ACTION>\r\n"
 	                         "<ACTION TYPE=\"WINDOW\" STATE=\"HIDE\">TITLE</ACTION>\r\n";
-	TEST_EXPECT(editor_test::write_text(
+	TEST_EXPECT(test_io::write_text(
 	        root + "/flow.mnu",
 	        screen("HOME", window("STATIC", "PANEL",
 	                              window("BUTTON", "GO", go) + window("STATIC", "TITLE") + window("STATIC", "AWAY"))) +
 	                screen("AWAY", window("STATIC", "BACKDROP", window("BUTTON", "BACK", back) + window("STATIC", "TITLE")))));
-	TEST_EXPECT(editor_test::write_text(
+	TEST_EXPECT(test_io::write_text(
 	        root + "/other.mnu",
 	        screen("OTHER", window("BUTTON", "JUMP", "<ACTION TYPE=\"SCREEN\" FILE=\"flow.mnu\">AWAY</ACTION>\r\n"))));
 	editor_test::handle_to_end(session, request::rescan());
@@ -296,7 +296,7 @@ static int test_go_to_targets() {
 // and brand.mns once more: the stylesheet's list holds the name once, its later line's value, which the graph
 // publishes inert (the game reads brand.mns's), and that is the one found.
 static int test_find_definition() {
-	editor_test::TempProjectDir dir("opennova_reference_queries_find");
+	test_temp::TempDir dir("opennova_reference_queries_find");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -311,9 +311,9 @@ static int test_find_definition() {
 	const std::string style_dir = style_file.substr(0, style_file.rfind('/'));
 	std::string text, problem;
 	TEST_EXPECT(opennova::io::read_file_text(style_file, text, problem));
-	TEST_EXPECT(editor_test::write_text(
+	TEST_EXPECT(test_io::write_text(
 			style_file, text + "\r\nDEF_TEXT_FG FF00FF00\r\nTWICE 1\r\nTWICE 2\r\n"));
-	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "DEF_TEXT_FG FF102030\r\n"));
+	TEST_EXPECT(test_io::write_text(style_dir + "/brand.mns", "DEF_TEXT_FG FF102030\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::handle_to_end(session, request::open_document(style_path));
 	Document *sheet = session.document_for(style_path);
@@ -370,7 +370,7 @@ static int test_find_definition() {
 static int test_file_uses() {
 	namespace fs = std::filesystem;
 	using opennova::io::JsonValue;
-	editor_test::TempProjectDir dir("opennova_reference_queries_used_by");
+	test_temp::TempDir dir("opennova_reference_queries_used_by");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -387,7 +387,7 @@ static int test_file_uses() {
 	TEST_EXPECT(items != nullptr);
 	if (!items) return 1;
 	const std::string items_path = items->relative_path;
-	TEST_EXPECT(editor_test::write_text(join_path(root, items_path),
+	TEST_EXPECT(test_io::write_text(join_path(root, items_path),
 	                                    "begin \"Wooden supply crate\"\nid 100011\ntype object\ngraphic oncrate1\nend\n\n"
 	                                    "begin \"Unplaced crate\"\nid 100012\ntype object\ngraphic oncrate1\nend\n"));
 	{
@@ -399,7 +399,7 @@ static int test_file_uses() {
 		std::vector<uint8_t> bytes;
 		std::string error;
 		TEST_EXPECT(opennova::bms::write(mission, bytes, error));
-		TEST_EXPECT(editor_test::write_bytes(root + "/onjo_m1.bms", bytes));
+		TEST_EXPECT(test_io::write_file(root + "/onjo_m1.bms", bytes));
 	}
 	editor_test::handle_to_end(session, request::rescan());
 	const AssetGraph &graph = *view.findings.graph;

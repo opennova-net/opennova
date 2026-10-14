@@ -66,7 +66,7 @@ std::string file_text(const std::string &path) {
 } // namespace
 
 static int test_non_record_type() {
-	editor_test::TempProjectDir dir("opennova_editor_non_record_document");
+	test_temp::TempDir dir("opennova_editor_non_record_document");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);

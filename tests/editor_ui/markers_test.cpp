@@ -121,7 +121,7 @@ using editor_test::set_edit;
 // read fresh), nothing is marked. BACK and TITLE selected together: a field changed on TITLE
 // alone is marked in the shared form.
 void test_field_marks() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_marks_test");
+	test_temp::TempDir dir("opennova_editor_ui_marks_test");
 	std::shared_ptr<MnuDocument> document = load_menu(dir);
 	const NodeAddress back = named(*document, "BACK"), title = named(*document, "TITLE"), main = named(*document, "MAIN");
 	SessionView v = menu_view(document);
@@ -201,7 +201,7 @@ void test_field_marks() {
 // marked Changed, a row added marked Added, both unmarked once undone. Its row selected, the
 // inspector's breadcrumb names it by the same words, the key in the tooltip.
 void test_outline_marks() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_outline_marks");
+	test_temp::TempDir dir("opennova_editor_ui_outline_marks");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -252,7 +252,7 @@ void test_outline_marks() {
 // the light gone after a moment. Scrolled away, the same ask again (the same row clicked again:
 // another event) shows and lights it again; a view that moved otherwise does not.
 void test_reveal_field() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_reveal_test");
+	test_temp::TempDir dir("opennova_editor_ui_reveal_test");
 	std::shared_ptr<MnuDocument> document = load_menu(dir);
 	const NodeAddress back = named(*document, "BACK");
 	SessionView v = menu_view(document);
@@ -309,7 +309,7 @@ void test_reveal_field() {
 // again (a second click on the row) is another event and shows it again; an ask about a record no
 // longer selected shows nothing.
 void test_reveal_waits_for_the_inspector() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_reveal_waits");
+	test_temp::TempDir dir("opennova_editor_ui_reveal_waits");
 	std::shared_ptr<MnuDocument> document = load_menu(dir);
 	const NodeAddress back = named(*document, "BACK");
 	const NodeAddress title = named(*document, "TITLE");
@@ -374,7 +374,7 @@ void test_reveal_waits_for_the_inspector() {
 // document was read again meanwhile (its records numbered anew, the same record number another
 // load's), though the selection did not move. An ask made after the reload shows.
 void test_reveal_goes_with_the_selection() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_reveal_selection");
+	test_temp::TempDir dir("opennova_editor_ui_reveal_selection");
 	std::shared_ptr<MnuDocument> document = load_menu(dir);
 	const NodeAddress back = named(*document, "BACK");
 	const NodeAddress title = named(*document, "TITLE");
@@ -472,7 +472,7 @@ float scrolled_in(const ImGuiWindow *window) { return window && window->Active ?
 // strings list scrolls to the key (and back up to the first one; a key in view moves nothing),
 // and into a model the outline opens the model and its user points to show the point.
 void test_reveal_in_views() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_reveal_views");
+	test_temp::TempDir dir("opennova_editor_ui_reveal_views");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -491,7 +491,7 @@ void test_reveal_in_views() {
 	}
 	std::vector<uint8_t> bytes;
 	std::string io_error;
-	CHECK(opennova::rtxt::write(table, bytes, io_error) && editor_test::write_bytes(v.project.root + "/strings/many.bin", bytes),
+	CHECK(opennova::rtxt::write(table, bytes, io_error) && test_io::write_file(v.project.root + "/strings/many.bin", bytes),
 	      "a table of 200 keys");
 	session.handle(request::rescan());
 	session.run_operations();
@@ -569,7 +569,7 @@ void test_reveal_in_views() {
 // the saved Yes; Revert to saved raises the request whose batch writes the block again, one step
 // undone as one.
 void test_block_switch() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_switch_test");
+	test_temp::TempDir dir("opennova_editor_ui_switch_test");
 	std::shared_ptr<MnuDocument> document = load_menu(dir);
 	const NodeAddress title = named(*document, "TITLE");
 	SessionView v = menu_view(document);
@@ -640,7 +640,7 @@ void test_block_switch() {
 // its tooltip naming each record's saved value, and its Revert to saved is one batch giving
 // both their saved value, undone as one step.
 void test_revert_several() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_revert_several");
+	test_temp::TempDir dir("opennova_editor_ui_revert_several");
 	std::shared_ptr<MnuDocument> document = load_menu(dir);
 	const NodeAddress back = named(*document, "BACK"), title = named(*document, "TITLE");
 	SessionView v = menu_view(document);

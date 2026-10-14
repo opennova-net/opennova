@@ -3,12 +3,13 @@ extends GutTest
 ## The particle and definition previews draw the game's content as the game draws it (ADR 0046 "The preview
 ## background", its follow-up). Every engine shader writes the D3D9 gamma-domain numbers, and the game shows them
 ## through exactly one display decode: the FrameFx terminal its WorldEnvironment carries, which the particle
-## renderer composes last behind its passes on the camera. A preview with no WorldEnvironment carries its decode on
-## its scenario (DisplayDecode); the particle renderer's camera compositor replaced it there, so while particles drew
-## the effect's and the definition's pictures showed their numbers encoded once more than the game's (a particle and
-## a model brighter than the game draws them). Each preview's picture is read here against the game's frame: the
-## game world's own render nodes (the ClearColor WorldEnvironment, FrameFx, the MissionEnvironment with no .env the
-## previews light by, the EffectWorld and an ObjectModel) over the same files, seen through the preview's camera.
+## renderer composes last behind its passes on the camera. Each 3D preview carries the game
+## world's ClearColor and FrameFx rows for it; a FrameFx with no WorldEnvironment beside it
+## installs no terminal, and the picture showed its numbers encoded once more than the game's (a
+## particle and a model brighter than the game draws them). Each preview's picture is read here
+## against the game's frame: the game world's own render nodes (the ClearColor WorldEnvironment,
+## FrameFx, the MissionEnvironment with no .env the previews light by, the EffectWorld and an
+## ObjectModel) over the same files, seen through the preview's camera.
 
 const EditorFixture := preload("res://tests/authoring/editor_fixture.gd")
 const CRATE := "res://../fixtures/threedi/synth/crate.3di"
@@ -38,29 +39,6 @@ func after_each() -> void:
 	await EditorFixture.teardown(self, _dirs)
 
 
-func _write(path: String, bytes: PackedByteArray) -> void:
-	assert_eq(DirAccess.make_dir_recursive_absolute(path.get_base_dir()), OK)
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file, "wrote %s" % path)
-	if file != null:
-		file.store_buffer(bytes)
-		file.close()
-
-
-## An 8 x 8 32-bit TGA of one opaque colour.
-func _tga(rgb: Color) -> PackedByteArray:
-	var bytes := PackedByteArray()
-	bytes.resize(18)
-	bytes[2] = 2
-	bytes[12] = 8
-	bytes[14] = 8
-	bytes[16] = 32
-	bytes[17] = 0x08
-	for _texel in 64:
-		bytes.append_array(PackedByteArray([rgb.b8, rgb.g8, rgb.r8, 255]))
-	return bytes
-
-
 ## Steady: opaque quads of one colour that stand at the spawn point for as long as the effect plays (no speed,
 ## no spread, white keys, full alpha). Speck: the same, a few centimetres wide, the item's particle slot (it keeps
 ## the particle renderer composing the definition's camera while the crate is read).
@@ -81,11 +59,11 @@ func _project() -> String:
 	var dir := OS.get_cache_dir().path_join("opennova editor preview decode project %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
 	assert_true(_seam.new_project(dir, "Preview Decode"))
-	_write(dir.path_join(MODEL), FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(CRATE)))
-	_write(dir.path_join("models/crate.tga"), _tga(CRATE_RGB))
-	_write(dir.path_join(PTL), _ptl().to_utf8_buffer())
-	_write(dir.path_join("particles/solid.tga"), _tga(PARTICLE_RGB))
-	_write(dir.path_join(ITEMS), TestFs.crlf("begin \"Pump station\"\nid 100500\ntype object\ngraphic crate\n"
+	TestFs.write_bytes(self, dir.path_join(MODEL), FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(CRATE)))
+	TestFs.write_bytes(self, dir.path_join("models/crate.tga"), TestFs.tga_bytes(Vector2i(8, 8), CRATE_RGB, 0x08))
+	TestFs.write_bytes(self, dir.path_join(PTL), _ptl().to_utf8_buffer())
+	TestFs.write_bytes(self, dir.path_join("particles/solid.tga"), TestFs.tga_bytes(Vector2i(8, 8), PARTICLE_RGB, 0x08))
+	TestFs.write_bytes(self, dir.path_join(ITEMS), TestFs.crlf("begin \"Pump station\"\nid 100500\ntype object\ngraphic crate\n"
 			+ "particlefx Speck ground\nend\n").to_utf8_buffer())
 	_seam.request({"kind": "rescan"})
 	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
@@ -97,7 +75,7 @@ func _game_root(project: String) -> ResourceRoot:
 	var dir := OS.get_cache_dir().path_join("opennova editor preview decode game %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
 	for path in [MODEL, "models/crate.tga", PTL, "particles/solid.tga"]:
-		_write(dir.path_join(path.get_file()), FileAccess.get_file_as_bytes(project.path_join(path)))
+		TestFs.write_bytes(self, dir.path_join(path.get_file()), FileAccess.get_file_as_bytes(project.path_join(path)))
 	var root := ResourceRoot.new()
 	root.set_root_dir(dir)
 	return root

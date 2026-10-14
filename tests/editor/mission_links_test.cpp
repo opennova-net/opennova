@@ -57,14 +57,14 @@ JsonValue document_entry(const SessionView &view, const std::string &path) {
 }
 
 int test_pick() {
-	editor_test::TempProjectDir dir("opennova_mission_links_pick");
+	test_temp::TempDir dir("opennova_mission_links_pick");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Links"));
 	editor_test::create_missing_files(session);
 	const std::string repo = test_paths_repo_root(__FILE__);
-	TEST_EXPECT(editor_test::write_bytes(session.view().project.root + "/missions/logic.bms",
+	TEST_EXPECT(test_io::write_file(session.view().project.root + "/missions/logic.bms",
 	                                     test_io::read_file(repo + "/fixtures/bms/synth_logic.bms")));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::handle_to_end(session, request::open_document("missions/logic.bms"));

@@ -63,7 +63,7 @@ std::vector<uint8_t> model_with_points(const char *name, const std::vector<std::
 }
 
 struct Project {
-	editor_test::TempProjectDir dir{"opennova_editor_def_references"};
+	test_temp::TempDir dir{"opennova_editor_def_references"};
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -84,10 +84,10 @@ struct Project {
 	bool write(const std::string &relative, const std::string &text) {
 		std::string lines;
 		for (const char c : text) lines += c == '\n' ? std::string("\r\n") : std::string(1, c);
-		return editor_test::write_text(root + "/" + relative, lines);
+		return test_io::write_text(root + "/" + relative, lines);
 	}
 	bool write(const std::string &relative, const std::vector<uint8_t> &bytes) {
-		return editor_test::write_bytes(root + "/" + relative, bytes);
+		return test_io::write_file(root + "/" + relative, bytes);
 	}
 	void rescan() { editor_test::handle_to_end(session, request::rescan()); }
 	JsonValue query(const char *name, const std::string &args) {

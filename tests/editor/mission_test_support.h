@@ -21,13 +21,8 @@
 
 namespace mission_test {
 
-// A fixture's path under fixtures/.
-inline std::string fixture(const std::string &rel) {
-	return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/" + rel;
-}
-
 // The minted mission the logic tests read (fixtures/bms/synth_logic.bms).
-inline std::vector<uint8_t> fixture_bytes() { return test_io::read_file(fixture("bms/synth_logic.bms")); }
+inline std::vector<uint8_t> fixture_bytes() { return test_io::read_file(test_paths_fixture("bms/synth_logic.bms")); }
 
 // A mission document read from `bytes` as the file `name`; null, saying why, when it does not load.
 inline std::unique_ptr<opennova::editor::Document> open(const std::vector<uint8_t> &bytes,

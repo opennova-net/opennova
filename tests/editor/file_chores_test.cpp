@@ -76,7 +76,7 @@ bool row_naming(const SessionView &view, const char *code, const std::string &na
 
 // A new project with its required files made, validated.
 struct Project {
-	editor_test::TempProjectDir dir{"opennova_editor_file_chores"};
+	test_temp::TempDir dir{"opennova_editor_file_chores"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -192,8 +192,8 @@ int test_duplicate() {
 	// A mission and the script the game finds by its name, copied together.
 	const std::vector<uint8_t> bms = test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/bms/synth_logic.bms");
 	TEST_EXPECT(!bms.empty());
-	TEST_EXPECT(editor_test::write_bytes(join_path(p.root, "missions/logic1.bms"), bms));
-	TEST_EXPECT(editor_test::write_text(join_path(p.root, "missions/logic1.wac"), "// the mission's script\n"));
+	TEST_EXPECT(test_io::write_file(join_path(p.root, "missions/logic1.bms"), bms));
+	TEST_EXPECT(test_io::write_text(join_path(p.root, "missions/logic1.wac"), "// the mission's script\n"));
 	TEST_EXPECT(editor_test::handle_to_end(session, request::rescan()).done());
 	TEST_EXPECT(editor_test::handle_to_end(session, request::duplicate_asset("logic1.bms")).done());
 	TEST_EXPECT(on_disk(p.root, "missions/logic2.bms") && on_disk(p.root, "missions/logic2.wac"));
@@ -211,7 +211,7 @@ int test_import_source() {
 	if (!p.made) return 1;
 	ProjectSession &session = p.session;
 	const SessionView &v = p.view();
-	TEST_EXPECT(editor_test::write_bytes(join_path(p.root, "art/logo.png"), test_png::gradient_png(8, 8)));
+	TEST_EXPECT(test_io::write_file(join_path(p.root, "art/logo.png"), test_png::gradient_png(8, 8)));
 	const Importer *importer = importer_for("logo.png");
 	TEST_EXPECT(importer != nullptr);
 	if (!importer) return 1;
@@ -256,7 +256,7 @@ int test_import_source() {
 
 	// A record that names its output whatever the source is called (S18's name option): a copy with it would
 	// make a second file of that name, so it is refused, saying so; alone, the source copies.
-	TEST_EXPECT(editor_test::write_bytes(join_path(p.root, "art/sign_src.png"), test_png::gradient_png(8, 8, 3)));
+	TEST_EXPECT(test_io::write_file(join_path(p.root, "art/sign_src.png"), test_png::gradient_png(8, 8, 3)));
 	ImportSidecar named = sidecar;
 	named.options["name"] = "fixedsign.tga";
 	TEST_EXPECT(save_import_sidecar(join_path(p.root, "art/sign_src.png.import"), named, error));
@@ -331,16 +331,16 @@ int test_folders() {
 
 // The trash alone: a batch moved in and out whole, refused over a file that sits where one comes back.
 int test_trash() {
-	editor_test::TempProjectDir dir("opennova_editor_trash");
+	test_temp::TempDir dir("opennova_editor_trash");
 	const ProjectPaths paths = ProjectPaths::for_root(dir.file("project"));
-	TEST_EXPECT(editor_test::write_text(join_path(paths.root, "a.txt"), "a"));
-	TEST_EXPECT(editor_test::write_text(join_path(paths.root, "sub/b.txt"), "b"));
+	TEST_EXPECT(test_io::write_text(join_path(paths.root, "a.txt"), "a"));
+	TEST_EXPECT(test_io::write_text(join_path(paths.root, "sub/b.txt"), "b"));
 	TrashBatch batch;
 	std::string error;
 	TEST_EXPECT(!trash_paths(paths, {"a.txt", "missing.txt"}, batch, error) && !error.empty() && on_disk(paths.root, "a.txt"));
 	TEST_EXPECT(trash_paths(paths, {"a.txt", "sub/b.txt"}, batch, error) && batch.id == 1 && batch.paths.size() == 2);
 	TEST_EXPECT(!on_disk(paths.root, "a.txt") && on_disk(paths.root, ".opennova/trash/1/sub/b.txt"));
-	TEST_EXPECT(editor_test::write_text(join_path(paths.root, "a.txt"), "another"));
+	TEST_EXPECT(test_io::write_text(join_path(paths.root, "a.txt"), "another"));
 	TEST_EXPECT(!restore_trash(paths, batch, error) && error.find("a.txt") != std::string::npos);
 	std::error_code ec;
 	fs::remove(system_path(join_path(paths.root, "a.txt")), ec);
@@ -436,8 +436,8 @@ int test_mission_moves() {
 	const SessionView &v = p.view();
 	const std::vector<uint8_t> bms = test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/bms/synth_logic.bms");
 	TEST_EXPECT(!bms.empty());
-	TEST_EXPECT(editor_test::write_bytes(join_path(p.root, "missions/logic1.bms"), bms));
-	TEST_EXPECT(editor_test::write_text(join_path(p.root, "missions/logic1.wac"), "// the mission's script\n"));
+	TEST_EXPECT(test_io::write_file(join_path(p.root, "missions/logic1.bms"), bms));
+	TEST_EXPECT(test_io::write_text(join_path(p.root, "missions/logic1.wac"), "// the mission's script\n"));
 	TEST_EXPECT(editor_test::handle_to_end(session, request::rescan()).done());
 	TEST_EXPECT(editor_test::handle_to_end(session, request::move_asset("logic1.bms", "maps")).done());
 	TEST_EXPECT(on_disk(p.root, "maps/logic1.bms") && on_disk(p.root, "maps/logic1.wac") && !on_disk(p.root, "missions"));
@@ -459,7 +459,7 @@ int test_mission_moves() {
 	// The way back moves the files that went, exactly those: a companion that sat in the folder before stays
 	// there (Edit > Move back, and Undo file of a move of several).
 	TEST_EXPECT(editor_test::handle_to_end(session, request::move_asset("scripts/logic1.wac", "")).done());
-	TEST_EXPECT(editor_test::write_text(join_path(p.root, "maps/logic1.til"), "tiles"));
+	TEST_EXPECT(test_io::write_text(join_path(p.root, "maps/logic1.til"), "tiles"));
 	TEST_EXPECT(editor_test::handle_to_end(session, request::rescan()).done());
 	TEST_EXPECT(editor_test::handle_to_end(session, request::move_asset("logic1.bms", "maps")).done());
 	TEST_EXPECT(on_disk(p.root, "maps/logic1.bms") && on_disk(p.root, "maps/logic1.wac") && on_disk(p.root, "maps/logic1.til"));

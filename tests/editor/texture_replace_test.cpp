@@ -62,13 +62,6 @@ using editor_test::tga32;
 
 std::vector<uint8_t> png(const std::vector<uint8_t> &rgba, int w, int h) { return encode_png_rgba(rgba.data(), uint32_t(w), uint32_t(h)); }
 
-std::vector<uint8_t> read_bytes(const std::string &path) {
-	std::vector<uint8_t> out;
-	std::string error;
-	io::read_file_bytes(path, out, error);
-	return out;
-}
-
 // The first texel of a file as the game reads it.
 std::vector<uint8_t> first_texel(const std::string &name, const std::vector<uint8_t> &bytes) {
 	const std::shared_ptr<const TextureImage> image = decode_texture(name, bytes);
@@ -152,7 +145,7 @@ bool holds(const std::vector<std::string> &lines, const std::string &words) {
 // indices); a cube map refused; each set-aside a folder of its own; a record that cannot be written putting
 // back what was done.
 int test_preview() {
-	editor_test::TempProjectDir dir{"opennova_editor_texture_preview"};
+	test_temp::TempDir dir{"opennova_editor_texture_preview"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -170,25 +163,25 @@ int test_preview() {
 	codes.width = codes.height = 4;
 	codes.indices.assign(16, 3);
 	TEST_EXPECT(encode_pcx_indexed(codes, map_pcx, why));
-	TEST_EXPECT(editor_test::write_bytes(root + "/textures/body.tga", tga32(rgba, 8, 8)) &&
-	            editor_test::write_bytes(root + "/textures/map.tga", rgb) &&
-	            editor_test::write_bytes(root + "/textures/isle_f.pcx", map_pcx) &&
-	            editor_test::write_bytes(root + "/textures/sky_cube.dds", cube_dds()) &&
-	            editor_test::write_bytes(root + "/textures/one.tga", tga32(rgba, 8, 8)) &&
-	            editor_test::write_bytes(root + "/textures/two.tga", tga32(rgba, 8, 8)) &&
-	            editor_test::write_bytes(root + "/textures/five.tga", tga32(rgba, 8, 8)) &&
-	            editor_test::write_text(root + "/terrains/isle.trn",
+	TEST_EXPECT(test_io::write_file(root + "/textures/body.tga", tga32(rgba, 8, 8)) &&
+	            test_io::write_file(root + "/textures/map.tga", rgb) &&
+	            test_io::write_file(root + "/textures/isle_f.pcx", map_pcx) &&
+	            test_io::write_file(root + "/textures/sky_cube.dds", cube_dds()) &&
+	            test_io::write_file(root + "/textures/one.tga", tga32(rgba, 8, 8)) &&
+	            test_io::write_file(root + "/textures/two.tga", tga32(rgba, 8, 8)) &&
+	            test_io::write_file(root + "/textures/five.tga", tga32(rgba, 8, 8)) &&
+	            test_io::write_text(root + "/terrains/isle.trn",
 	                                    "polytrn_colormap map.tga\npolytrn_detailmap grain.tga\npolytrn_foliagemap isle_f.pcx\n"
 	                                    "polytrn_polydata isle.cpt\n"
 	                                    "polytrn_sectorcount 1\npolytrn_sectors 0\n") &&
-	            editor_test::write_bytes(outside + "/new.png", png(solid(8, 8, 0, 200, 0), 8, 8)) &&
-	            editor_test::write_bytes(outside + "/codes.pcx", map_pcx));
+	            test_io::write_file(outside + "/new.png", png(solid(8, 8, 0, 200, 0), 8, 8)) &&
+	            test_io::write_file(outside + "/codes.pcx", map_pcx));
 	editor_test::handle_to_end(session, request::rescan());
 	session.run_operations();
 
 	// A plain TGA: before and after in words, its form kept, the set-aside said, nothing written yet.
 	TextureSourcePlan plan = plan_texture_replace(paths, *view.project.scan, "textures/body.tga", "new.png",
-	                                              read_bytes(outside + "/new.png"), {});
+	                                              test_io::read_file(outside + "/new.png"), {});
 	TEST_EXPECT(plan.ok() && plan.before_words == "8 x 8, a 32-bit TGA" && plan.after_words == "8 x 8, a 32-bit TGA" &&
 	            plan.made_name == "body.tga" && first_texel("body.tga", plan.made) == std::vector<uint8_t>({0, 200, 0, 255}) &&
 	            holds(plan.changes, std::string("set aside in ") + kReplacedFolder));
@@ -219,7 +212,7 @@ int test_preview() {
 	session.handle(request::cancel_texture_source());
 
 	// Two set-asides at once: a folder each, never one written over.
-	const std::vector<uint8_t> image = read_bytes(outside + "/new.png");
+	const std::vector<uint8_t> image = test_io::read_file(outside + "/new.png");
 	const TextureSourcePlan one = plan_texture_replace(paths, *view.project.scan, "textures/one.tga", "one.png", image, {});
 	const TextureSourcePlan two = plan_texture_replace(paths, *view.project.scan, "textures/two.tga", "two.png", image, {});
 	std::vector<Diagnostic> findings;
@@ -241,21 +234,21 @@ int test_preview() {
 	session.run_operations();
 	const AssetEntry *made = view.project.scan->find("one.tga");
 	TEST_EXPECT(made && made->imported_from == "art/one.png");
-	const std::vector<uint8_t> was = read_bytes(root + "/art/one.png");
+	const std::vector<uint8_t> was = test_io::read_file(root + "/art/one.png");
 	const TextureSourcePlan again =
 			plan_texture_replace(paths, *view.project.scan, "one.tga", "one.png", png(solid(8, 8, 1, 2, 3), 8, 8), {});
 	TEST_EXPECT(again.ok() && again.source == "art/one.png" && again.old_source.empty());
 	fs::remove(root + "/art/one.png" + kImportSidecarSuffix, ec);
 	fs::create_directories(root + "/art/one.png" + kImportSidecarSuffix, ec);
 	findings.clear();
-	TEST_EXPECT(!apply_texture_source(paths, again, findings) && read_bytes(root + "/art/one.png") == was);
+	TEST_EXPECT(!apply_texture_source(paths, again, findings) && test_io::read_file(root + "/art/one.png") == was);
 	std::printf("preview: before and after, the form kept, an exact size and palette indices asked, a cube map refused, "
 	            "a folder per set-aside, a failed record putting back the source and the texture\n");
 	return 0;
 }
 
 int test_replace() {
-	editor_test::TempProjectDir dir{"opennova_editor_texture_replace"};
+	test_temp::TempDir dir{"opennova_editor_texture_replace"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -264,11 +257,11 @@ int test_replace() {
 	const SessionView &view = session.view();
 	const std::string root = view.project.root;
 	const std::string outside = dir.file("mine");
-	TEST_EXPECT(editor_test::write_bytes(root + "/textures/body.tga", tga32(solid(8, 8, 200, 0, 0), 8, 8)) &&
-	            editor_test::write_bytes(outside + "/skin.png", png(solid(8, 8, 0, 200, 0), 8, 8)) &&
-	            editor_test::write_bytes(outside + "/skin2.png", png(solid(8, 8, 0, 0, 200), 8, 8)) &&
-	            editor_test::write_bytes(outside + "/paint.tga", tga32(solid(8, 8, 50, 60, 70), 8, 8)) &&
-	            editor_test::write_text(outside + "/notes.txt", "x"));
+	TEST_EXPECT(test_io::write_file(root + "/textures/body.tga", tga32(solid(8, 8, 200, 0, 0), 8, 8)) &&
+	            test_io::write_file(outside + "/skin.png", png(solid(8, 8, 0, 200, 0), 8, 8)) &&
+	            test_io::write_file(outside + "/skin2.png", png(solid(8, 8, 0, 0, 200), 8, 8)) &&
+	            test_io::write_file(outside + "/paint.tga", tga32(solid(8, 8, 50, 60, 70), 8, 8)) &&
+	            test_io::write_text(outside + "/notes.txt", "x"));
 	// An 8-bit PCX of one colour: a source of another form than a PNG.
 	{
 		IndexedImage8 flat;
@@ -279,7 +272,7 @@ int test_replace() {
 		flat.palette[1][2] = 70;
 		std::vector<uint8_t> pcx;
 		std::string why;
-		TEST_EXPECT(encode_pcx_indexed(flat, pcx, why) && editor_test::write_bytes(outside + "/flat.pcx", pcx));
+		TEST_EXPECT(encode_pcx_indexed(flat, pcx, why) && test_io::write_file(outside + "/flat.pcx", pcx));
 	}
 	editor_test::handle_to_end(session, request::rescan());
 	session.run_operations();
@@ -294,7 +287,7 @@ int test_replace() {
 	TEST_EXPECT(body && body->imported_from == "art/body.png");
 	TEST_EXPECT(!fs::exists(root + "/textures/body.tga") && set_aside(root, "textures/body.tga"));
 	TEST_EXPECT(record_of(root, "art/body.png") == ImportOptions({{"format", "tga"}}));
-	if (body) TEST_EXPECT(first_texel("body.tga", read_bytes(root + "/" + body->relative_path)) == std::vector<uint8_t>({0, 200, 0, 255}));
+	if (body) TEST_EXPECT(first_texel("body.tga", test_io::read_file(root + "/" + body->relative_path)) == std::vector<uint8_t>({0, 200, 0, 255}));
 
 	// An import's output replaced by an image of its source's form: the source written over.
 	editor_test::handle_to_end(session, request::replace_texture("body.tga", outside + "/skin2.png"));
@@ -302,7 +295,7 @@ int test_replace() {
 	session.run_operations();
 	body = view.project.scan->find("body.tga");
 	TEST_EXPECT(body && body->imported_from == "art/body.png" && set_aside(root, "art/body.png"));
-	if (body) TEST_EXPECT(first_texel("body.tga", read_bytes(root + "/" + body->relative_path)) == std::vector<uint8_t>({0, 0, 200, 255}));
+	if (body) TEST_EXPECT(first_texel("body.tga", test_io::read_file(root + "/" + body->relative_path)) == std::vector<uint8_t>({0, 0, 200, 255}));
 	// By a TGA: kept as a PNG of its texels, so of the source's form, which it writes over.
 	editor_test::handle_to_end(session, request::replace_texture("body.tga", outside + "/paint.tga"));
 	TEST_EXPECT(session.outcome().done());
@@ -312,11 +305,11 @@ int test_replace() {
 	{
 		ImageSource kept;
 		std::string why;
-		const std::vector<uint8_t> bytes = read_bytes(root + "/art/body.png");
+		const std::vector<uint8_t> bytes = test_io::read_file(root + "/art/body.png");
 		TEST_EXPECT(bytes.size() > 8 && bytes[1] == 'P' && bytes[2] == 'N' && bytes[3] == 'G' &&
 		            decode_image_source("body.png", bytes, kept, why) && kept.image.pixels == solid(8, 8, 50, 60, 70));
 	}
-	if (body) TEST_EXPECT(first_texel("body.tga", read_bytes(root + "/" + body->relative_path)) == std::vector<uint8_t>({50, 60, 70, 255}));
+	if (body) TEST_EXPECT(first_texel("body.tga", test_io::read_file(root + "/" + body->relative_path)) == std::vector<uint8_t>({50, 60, 70, 255}));
 	// By one of another form: a PCX source under the texture's stem, the old source and its record set aside.
 	editor_test::handle_to_end(session, request::replace_texture("body.tga", outside + "/flat.pcx"));
 	TEST_EXPECT(session.outcome().done());
@@ -325,7 +318,7 @@ int test_replace() {
 	TEST_EXPECT(body && body->imported_from == "art/body.pcx" && !fs::exists(root + "/art/body.png") &&
 	            set_aside(root, "art/body.png.import"));
 	TEST_EXPECT(record_of(root, "art/body.pcx") == ImportOptions({{"format", "tga"}}));
-	if (body) TEST_EXPECT(first_texel("body.tga", read_bytes(root + "/" + body->relative_path)) == std::vector<uint8_t>({90, 80, 70, 255}));
+	if (body) TEST_EXPECT(first_texel("body.tga", test_io::read_file(root + "/" + body->relative_path)) == std::vector<uint8_t>({90, 80, 70, 255}));
 
 	// A name the project lacks (a field's missing texture): made under it, its source after its stem.
 	editor_test::handle_to_end(session, request::replace_texture("grass.tga", outside + "/skin.png"));
@@ -336,15 +329,15 @@ int test_replace() {
 	// A stem too long for a "_src" beside it, its own name taken: cut to fit, ending on no separator
 	// (onbarl1_0.dds's art/onbarl1_src.png, never onbarl1__src.png).
 	{
-		TEST_EXPECT(editor_test::write_bytes(root + "/art/onbarl1_0.png", png(solid(4, 4, 1, 1, 1), 4, 4)));
+		TEST_EXPECT(test_io::write_file(root + "/art/onbarl1_0.png", png(solid(4, 4, 1, 1, 1), 4, 4)));
 		std::vector<uint8_t> dds;
 		std::string why;
 		const std::vector<uint8_t> grey = solid(4, 4, 5, 5, 5);
-		TEST_EXPECT(dds::dds_write_a8r8g8b8(grey.data(), 4, 4, dds, why) && editor_test::write_bytes(root + "/textures/onbarl1_0.dds", dds));
+		TEST_EXPECT(dds::dds_write_a8r8g8b8(grey.data(), 4, 4, dds, why) && test_io::write_file(root + "/textures/onbarl1_0.dds", dds));
 		editor_test::handle_to_end(session, request::rescan());
 		session.run_operations();
 		const TextureSourcePlan cut = plan_texture_replace(ProjectPaths::for_root(root), *view.project.scan, "onbarl1_0.dds",
-		                                                   "barrel.png", read_bytes(outside + "/skin.png"), {});
+		                                                   "barrel.png", test_io::read_file(outside + "/skin.png"), {});
 		TEST_EXPECT(cut.ok() && cut.source == "art/onbarl1_src.png");
 	}
 
@@ -362,11 +355,11 @@ int test_replace() {
 	{
 		TextureSourcePlan plan = plan_texture_source(ProjectPaths::for_root(root), *view.project.scan, "body.tga");
 		TEST_EXPECT(plan.ok() && plan.source == "art/body.pcx" && plan.bytes.empty());
-		TEST_EXPECT(editor_test::write_bytes(root + "/textures/rock.tga", tga32(solid(4, 4, 1, 2, 3), 4, 4)));
+		TEST_EXPECT(test_io::write_file(root + "/textures/rock.tga", tga32(solid(4, 4, 1, 2, 3), 4, 4)));
 		std::vector<uint8_t> dds;
 		std::string why;
 		const std::vector<uint8_t> blue = solid(4, 4, 0, 0, 255);
-		TEST_EXPECT(dds::dds_write_a8r8g8b8(blue.data(), 4, 4, dds, why) && editor_test::write_bytes(root + "/textures/sky.dds", dds));
+		TEST_EXPECT(dds::dds_write_a8r8g8b8(blue.data(), 4, 4, dds, why) && test_io::write_file(root + "/textures/sky.dds", dds));
 		editor_test::handle_to_end(session, request::rescan());
 		session.run_operations();
 		plan = plan_texture_source(ProjectPaths::for_root(root), *view.project.scan, "textures/rock.tga");
@@ -388,7 +381,7 @@ int test_replace() {
 // texture.not_read's fix sets it aside under .replaced/, never deleted; refused for a texture a use reads, an
 // import's output, a texture no use names and a name the project lacks.
 int test_set_aside() {
-	editor_test::TempProjectDir dir{"opennova_editor_texture_set_aside"};
+	test_temp::TempDir dir{"opennova_editor_texture_set_aside"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -400,12 +393,12 @@ int test_set_aside() {
 	std::string why;
 	const std::vector<uint8_t> grey = solid(4, 4, 5, 5, 5);
 	TEST_EXPECT(dds::dds_write_a8r8g8b8(grey.data(), 4, 4, dds, why));
-	TEST_EXPECT(editor_test::write_bytes(root + "/textures/crate.tga", tga32(grey, 4, 4)) &&
-	            editor_test::write_bytes(root + "/textures/crate.dds", dds) &&
-	            editor_test::write_bytes(root + "/textures/lid.tga", tga32(grey, 4, 4)) &&
-	            editor_test::write_bytes(root + "/textures/loose.tga", tga32(grey, 4, 4)));
+	TEST_EXPECT(test_io::write_file(root + "/textures/crate.tga", tga32(grey, 4, 4)) &&
+	            test_io::write_file(root + "/textures/crate.dds", dds) &&
+	            test_io::write_file(root + "/textures/lid.tga", tga32(grey, 4, 4)) &&
+	            test_io::write_file(root + "/textures/loose.tga", tga32(grey, 4, 4)));
 	const std::string scene = dir.file("scene");
-	TEST_EXPECT(editor_test::write_text(scene + "/crate.o3d",
+	TEST_EXPECT(test_io::write_text(scene + "/crate.o3d",
 	                                    "o3d 2\nmodel CRATE\nmaterial FF_ST_OP\ntexture crate.tga 1 0\nmaterial FF_ST_OP\n"
 	                                    "texture lid.tga 1 0\nlod 0\npart 0 0 0 0\nmesh 0 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\n"
 	                                    "v 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
@@ -445,7 +438,7 @@ int test_set_aside() {
 }
 
 int test_split() {
-	editor_test::TempProjectDir dir{"opennova_editor_texture_split"};
+	test_temp::TempDir dir{"opennova_editor_texture_split"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -460,9 +453,9 @@ int test_split() {
 			text += "\tgraphic" + std::to_string(i + 1) + " = " + graphics[i] + ", blend;\r\n";
 		return text + "}\r\n";
 	};
-	TEST_EXPECT(editor_test::write_bytes(root + "/textures/cloud.tga", tga32(solid(4, 4, 9, 9, 9), 4, 4)) &&
-	            editor_test::write_text(root + "/fx/a.ptl", particles("a", {"cloud.tga"})) &&
-	            editor_test::write_text(root + "/fx/b.ptl", particles("b", {"cloud.tga", "cloud.tga"})));
+	TEST_EXPECT(test_io::write_file(root + "/textures/cloud.tga", tga32(solid(4, 4, 9, 9, 9), 4, 4)) &&
+	            test_io::write_text(root + "/fx/a.ptl", particles("a", {"cloud.tga"})) &&
+	            test_io::write_text(root + "/fx/b.ptl", particles("b", {"cloud.tga", "cloud.tga"})));
 	editor_test::handle_to_end(session, request::rescan());
 	session.run_operations();
 	// A plain file: copied, b.ptl's two layers moved to the copy, a.ptl's left.
@@ -474,15 +467,15 @@ int test_split() {
 	TEST_EXPECT(io::read_file_text(root + "/fx/b.ptl", text, error) && text == particles("b", {"cloud_2.tga", "cloud_2.tga"}));
 	TEST_EXPECT(io::read_file_text(root + "/fx/a.ptl", text, error) && text == particles("a", {"cloud.tga"}));
 	// An import's output: its source copied beside it, the copy's record naming the new file.
-	TEST_EXPECT(editor_test::write_bytes(root + "/art/haze.png", png(solid(4, 4, 7, 7, 7), 4, 4)));
+	TEST_EXPECT(test_io::write_file(root + "/art/haze.png", png(solid(4, 4, 7, 7, 7), 4, 4)));
 	ImportSidecar record;
 	record.importer = "image";
 	record.version = kImageImporterVersion;
 	record.options = {{"format", "tga"}};
 	Diagnostic saved;
 	TEST_EXPECT(save_import_sidecar(root + "/art/haze.png" + kImportSidecarSuffix, record, saved));
-	TEST_EXPECT(editor_test::write_text(root + "/fx/c.ptl", particles("c", {"haze.tga"})) &&
-	            editor_test::write_text(root + "/fx/d.ptl", particles("d", {"haze.tga"})));
+	TEST_EXPECT(test_io::write_text(root + "/fx/c.ptl", particles("c", {"haze.tga"})) &&
+	            test_io::write_text(root + "/fx/d.ptl", particles("d", {"haze.tga"})));
 	editor_test::handle_to_end(session, request::rescan());
 	session.run_operations();
 	TEST_EXPECT(view.project.scan->find("haze.tga") && view.project.scan->find("haze.tga")->imported_from == "art/haze.png");

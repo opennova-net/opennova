@@ -56,7 +56,7 @@ bool read_dds(const std::string &path, dds::DdsImage &image) {
 } // namespace
 
 int main() {
-	editor_test::TempProjectDir dir{"opennova_editor_texture_store_dds"};
+	test_temp::TempDir dir{"opennova_editor_texture_store_dds"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -67,7 +67,7 @@ int main() {
 	// A model of a diffuse and a detail row, a glass row with alpha, an odd-sided row; a terrain that reads a
 	// colour map and a detail map by their own names.
 	const std::string scene = dir.file("scene");
-	TEST_EXPECT(editor_test::write_text(scene + "/thing.o3d",
+	TEST_EXPECT(test_io::write_text(scene + "/thing.o3d",
 	                                    "o3d 2\nmodel THING\nmaterial FF_MT_OP\ntexture body.tga 1 0\ntexture grain.tga 2 0\n"
 	                                    "material FF_ST_OP\ntexture glass.tga 1 0\nmaterial FF_ST_OP\ntexture odd.tga 1 0\n"
 	                                    "material FF_ST_OP\ntexture skin.tga 1 0\nmaterial FF_ST_OP\ntexture dup.tga 1 0\n"
@@ -76,15 +76,15 @@ int main() {
 	TEST_EXPECT(import_assets({loose(scene + "/thing.o3d")}, ProjectPaths::for_root(root), *view.project.document, false)
 	                    .imported == std::vector<std::string>({"models/thing.3di"}));
 	const std::string t = root + "/textures/";
-	TEST_EXPECT(editor_test::write_bytes(t + "body.tga", tga_bytes(8, 8, 255)) && editor_test::write_bytes(t + "grain.tga", tga_bytes(4, 4, 255)) &&
-	            editor_test::write_bytes(t + "glass.tga", tga_bytes(4, 4, 128)) && editor_test::write_bytes(t + "odd.tga", tga_bytes(6, 4, 255)) &&
-	            editor_test::write_bytes(t + "map.tga", tga_bytes(4, 4, 255)) && editor_test::write_bytes(t + "dup.tga", tga_bytes(4, 4, 255)) &&
-	            editor_test::write_bytes(t + "dup.dds", tga_bytes(4, 4, 255)));
-	TEST_EXPECT(editor_test::write_text(root + "/terrains/isle.trn",
+	TEST_EXPECT(test_io::write_file(t + "body.tga", tga_bytes(8, 8, 255)) && test_io::write_file(t + "grain.tga", tga_bytes(4, 4, 255)) &&
+	            test_io::write_file(t + "glass.tga", tga_bytes(4, 4, 128)) && test_io::write_file(t + "odd.tga", tga_bytes(6, 4, 255)) &&
+	            test_io::write_file(t + "map.tga", tga_bytes(4, 4, 255)) && test_io::write_file(t + "dup.tga", tga_bytes(4, 4, 255)) &&
+	            test_io::write_file(t + "dup.dds", tga_bytes(4, 4, 255)));
+	TEST_EXPECT(test_io::write_text(root + "/terrains/isle.trn",
 	                                    "polytrn_colormap map.tga\npolytrn_detailmap cdet.tga\npolytrn_polydata isle.cpt\n"
 	                                    "polytrn_sectorcount 1\npolytrn_sectors 0\n"));
 	// skin.tga: an import's output (a TGA source with its record writing it as a 32-bit TGA).
-	TEST_EXPECT(editor_test::write_bytes(root + "/art/skin_src.tga", tga_bytes(4, 4, 255)));
+	TEST_EXPECT(test_io::write_file(root + "/art/skin_src.tga", tga_bytes(4, 4, 255)));
 	{
 		ImportSidecar record;
 		record.importer = "image";

@@ -806,7 +806,7 @@ int test_mission_headings() {
 // A string table's Uses column (the plain-words lane, the audit's 5.2): each string by how many references
 // of the project's files name it (the graph's users of the key it defines), made again when the graph moves.
 int test_uses() {
-	editor_test::TempProjectDir dir("opennova_outline_uses");
+	test_temp::TempDir dir("opennova_outline_uses");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -825,8 +825,8 @@ int test_uses() {
 	std::vector<uint8_t> bytes;
 	std::string error;
 	TEST_EXPECT(opennova::rtxt::write(table, bytes, error) &&
-	            editor_test::write_bytes(view.project.root + "/" + table_path, bytes) &&
-	            editor_test::write_text(view.project.root + "/" + weapons_path,
+	            test_io::write_file(view.project.root + "/" + table_path, bytes) &&
+	            test_io::write_text(view.project.root + "/" + weapons_path,
 	                                    "weapon \"Gun\"\nloadout_menu_textid WPN_ONE\nend\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::handle_to_end(session, request::open_document(table_path));
@@ -840,7 +840,7 @@ int test_uses() {
 	TEST_EXPECT(outline.uses(*view.findings.graph, *strings, lines[0].address) == 1);
 	TEST_EXPECT(outline.uses(*view.findings.graph, *strings, lines[1].address) == 0);
 	// The weapon names the second one instead: the counts follow the graph.
-	TEST_EXPECT(editor_test::write_text(view.project.root + "/" + weapons_path,
+	TEST_EXPECT(test_io::write_text(view.project.root + "/" + weapons_path,
 	                                    "weapon \"Gun\"\nloadout_menu_textid WPN_TWO\nend\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(outline.uses(*view.findings.graph, *strings, lines[0].address) == 0 &&

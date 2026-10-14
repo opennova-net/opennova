@@ -220,7 +220,7 @@ int test_kind() {
 // --- through a session -------------------------------------------------------------------------------------
 
 struct EffectRig {
-	editor_test::TempProjectDir dir{"opennova_editor_effect_viewport"};
+	test_temp::TempDir dir{"opennova_editor_effect_viewport"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -250,12 +250,12 @@ bool make_project(EffectRig &rig) {
 	// a.ptl sorts before b.ptl: its Shared wins; b.ptl's own Smoke is its alone. A gore-set .ptg the
 	// project does not load (no fgn2.bin): the .ptu is the set.
 	const bool written =
-	        editor_test::write_text(root + "/" + rig.first, effect_text("Shared", "Dot") + particle_text("Dot", 0.1f, 50.0f, 0.2f, "dot.tga") +
+	        test_io::write_text(root + "/" + rig.first, effect_text("Shared", "Dot") + particle_text("Dot", 0.1f, 50.0f, 0.2f, "dot.tga") +
 	                                                           table_text("grow", 128)) &&
-	        editor_test::write_text(root + "/" + rig.second, effect_text("Smoke", "Cloud") + effect_text("Shared", "Cloud") +
+	        test_io::write_text(root + "/" + rig.second, effect_text("Smoke", "Cloud") + effect_text("Shared", "Cloud") +
 	                                                            particle_text("Cloud", 0.5f, 20.0f, 1.0f, "cloud.tga")) &&
-	        editor_test::write_text(root + "/particles/gore.ptu", effect_text("Gore", "Dot")) &&
-	        editor_test::write_text(root + "/particles/gore.ptg", effect_text("GoreG", "Dot"));
+	        test_io::write_text(root + "/particles/gore.ptu", effect_text("Gore", "Dot")) &&
+	        test_io::write_text(root + "/particles/gore.ptg", effect_text("GoreG", "Dot"));
 	editor_test::handle_to_end(rig.session, request::rescan());
 	return written;
 }

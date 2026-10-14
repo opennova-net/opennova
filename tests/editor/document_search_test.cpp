@@ -34,7 +34,7 @@ using editor_test::NoProcess;
 
 // A new project's files, the item and weapon tables replaced, a model, and a clip and its table
 // imported from the Blender add-on's scene text.
-bool make_project(ProjectSession &session, const editor_test::TempProjectDir &dir) {
+bool make_project(ProjectSession &session, const test_temp::TempDir &dir) {
 	session.handle(request::new_project(dir.file("project"), "Search"));
 	session.run_operations();
 	editor_test::create_missing_files(session);
@@ -44,14 +44,14 @@ bool make_project(ProjectSession &session, const editor_test::TempProjectDir &di
 	if (!items || !weapons) return false;
 	const std::string repo = test_paths_repo_root(__FILE__);
 	const std::string source = dir.file("source");
-	if (!editor_test::write_text(v.project.root + "/" + items->relative_path,
+	if (!test_io::write_text(v.project.root + "/" + items->relative_path,
 	                             "begin \"Searched Thing\"\nid 100300\ntype vehicle\ngraphic armory\nturn_rate 90\nprimary_weapon Searchgun\n"
 	                             "end\n") ||
-	    !editor_test::write_text(v.project.root + "/" + weapons->relative_path, "weapon \"Searchgun\"\nend\n") ||
-	    !editor_test::write_bytes(v.project.root + "/models/armory.3di",
+	    !test_io::write_text(v.project.root + "/" + weapons->relative_path, "weapon \"Searchgun\"\nend\n") ||
+	    !test_io::write_file(v.project.root + "/models/armory.3di",
 	                              test_io::read_file(repo + "/fixtures/threedi/synth/armory.3di")) ||
-	    !editor_test::write_bytes(source + "/skinned.o3d", test_io::read_file(repo + "/fixtures/threedi/o3d/skinned.o3d")) ||
-	    !editor_test::write_text(source + "/skin.o3a", editor_test::kSkinClips))
+	    !test_io::write_file(source + "/skinned.o3d", test_io::read_file(repo + "/fixtures/threedi/o3d/skinned.o3d")) ||
+	    !test_io::write_text(source + "/skin.o3a", editor_test::kSkinClips))
 		return false;
 	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 	import.imports = {{source + "/skinned.o3d", {}}, {source + "/skin.o3a", {}}};
@@ -127,7 +127,7 @@ int check_self_search(const Document &document) {
 } // namespace
 
 static int test_each_document_type() {
-	editor_test::TempProjectDir dir("opennova_document_search");
+	test_temp::TempDir dir("opennova_document_search");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -166,7 +166,7 @@ static int test_each_document_type() {
 }
 
 static int test_project_search() {
-	editor_test::TempProjectDir dir("opennova_project_search");
+	test_temp::TempDir dir("opennova_project_search");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);

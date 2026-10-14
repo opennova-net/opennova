@@ -80,7 +80,7 @@ std::string make_project(const std::string &root, const std::string &title, cons
 	Diagnostic error;
 	if (!create_project(root, title, "jo", document, error)) return std::string();
 	for (const auto &[path, text] : files)
-		if (!editor_test::write_text(root + "/" + path, text)) return std::string();
+		if (!test_io::write_text(root + "/" + path, text)) return std::string();
 	return root;
 }
 
@@ -250,7 +250,7 @@ Stepped open_stepped(ProjectSession &session, const std::string &root, const Pol
 // without, a record whose source is gone), the scan equals scan_project_assets' member for member;
 // at one byte the steps are at least the files listed and visited; the counts only rise.
 static int test_project_scan_steps() {
-	editor_test::TempProjectDir dir("opennova_long_ops_scan");
+	test_temp::TempDir dir("opennova_long_ops_scan");
 	std::vector<std::string> roots;
 	for (const Fixture &fixture : kFixtures)
 		roots.push_back(make_project(dir.file(fixture.name), fixture.name, fixture.files()));
@@ -294,7 +294,7 @@ static int test_project_scan_steps() {
 // to the same sources, findings and outputs; at one byte a source a step; the cache written once,
 // at the end, and a pass dropped before its end leaves it as it was.
 static int test_import_pass_steps() {
-	editor_test::TempProjectDir dir("opennova_long_ops_pass");
+	test_temp::TempDir dir("opennova_long_ops_pass");
 	std::vector<std::string> roots;
 	for (const char *name : {"stepped", "whole"}) {
 		const std::vector<uint8_t> png = gradient_png(8, 8);
@@ -304,7 +304,7 @@ static int test_import_pass_steps() {
 		            {"art/typo.png", std::string(png.begin(), png.end())}};
 		roots.push_back(make_project(dir.file(name), name, files));
 		TEST_EXPECT(mark_for_import(roots.back() + "/art/logo.png") && mark_for_import(roots.back() + "/art/b/icon.png"));
-		TEST_EXPECT(editor_test::write_text(roots.back() + "/art/typo.png.import", "{ not json"));
+		TEST_EXPECT(test_io::write_text(roots.back() + "/art/typo.png.import", "{ not json"));
 	}
 	const ProjectPaths stepped_paths = ProjectPaths::for_root(roots[0]);
 	const ProjectDocument document = document_of(roots[0]);
@@ -346,10 +346,10 @@ static int test_import_pass_steps() {
 // never reaches), the scan updated with the paths changed equals a scan made afresh, member for
 // member, and reads those files alone (their count).
 static int test_scan_update() {
-	editor_test::TempProjectDir dir("opennova_long_ops_update");
+	test_temp::TempDir dir("opennova_long_ops_update");
 	const std::string root = make_project(dir.file("project"), "Update", fixture_projects::style_and_item_files());
 	TEST_EXPECT(!root.empty());
-	TEST_EXPECT(editor_test::write_bytes(root + "/art/logo.png", gradient_png(8, 8)));
+	TEST_EXPECT(test_io::write_file(root + "/art/logo.png", gradient_png(8, 8)));
 	const ProjectPaths paths = ProjectPaths::for_root(root);
 	const ProjectDocument document = document_of(root);
 	AssetScan scan = scan_project_assets(paths, document);
@@ -362,11 +362,11 @@ static int test_scan_update() {
 	};
 	const std::vector<Change> script = {
 		{"an item table edited", {"defs/items.def"}, 1,
-		 [&] { return editor_test::write_text(root + "/defs/items.def", fixture_projects::item("Zulu", 900)); }},
+		 [&] { return test_io::write_text(root + "/defs/items.def", fixture_projects::item("Zulu", 900)); }},
 		{"a file added", {"menus/new.mnu"}, 1,
-		 [&] { return editor_test::write_text(root + "/menus/new.mnu", "<SCREEN>\r\n<NAME>NEW</NAME>\r\n</SCREEN>\r\n"); }},
+		 [&] { return test_io::write_text(root + "/menus/new.mnu", "<SCREEN>\r\n<NAME>NEW</NAME>\r\n</SCREEN>\r\n"); }},
 		{"a second file of a name", {"other/new.mnu"}, 1,
-		 [&] { return editor_test::write_text(root + "/other/new.mnu", "<SCREEN>\r\n<NAME>TWO</NAME>\r\n</SCREEN>\r\n"); }},
+		 [&] { return test_io::write_text(root + "/other/new.mnu", "<SCREEN>\r\n<NAME>TWO</NAME>\r\n</SCREEN>\r\n"); }},
 		{"a file removed", {"other/new.mnu"}, 0, [&] { return fs::remove(root + "/other/new.mnu"); }},
 		{"a file renamed", {"menus/new.mnu", "menus/renamed.mnu"}, 1,
 		 [&] {
@@ -389,12 +389,12 @@ static int test_scan_update() {
 		{"the PNG gone, its record left", {"art/logo.png"}, 1, [&] { return fs::remove(root + "/art/logo.png"); }},
 		{"the record gone", {"art/logo.png.import"}, 0, [&] { return fs::remove(root + "/art/logo.png.import"); }},
 		{"a file under the cache", {".opennova/stray.def"}, 0,
-		 [&] { return editor_test::write_text(root + "/.opennova/stray.def", "x"); }},
+		 [&] { return test_io::write_text(root + "/.opennova/stray.def", "x"); }},
 		{"the project file", {"project.opennova"}, 0, [&] { return true; }},
 		{"a name too long for an archive", {"textures/averyveryverylongname.pcx"}, 1,
-		 [&] { return editor_test::write_text(root + "/textures/averyveryverylongname.pcx", "pcx"); }},
+		 [&] { return test_io::write_text(root + "/textures/averyveryverylongname.pcx", "pcx"); }},
 		{"a kind the game does not use", {"notes/readme.docx"}, 1,
-		 [&] { return editor_test::write_text(root + "/notes/readme.docx", "docx"); }},
+		 [&] { return test_io::write_text(root + "/notes/readme.docx", "docx"); }},
 	};
 	for (const Change &change : script) {
 		TEST_EXPECT(change.apply());
@@ -416,7 +416,7 @@ static int test_scan_update() {
 // (read ahead, the update taking them), one for the update, one for each file the document
 // types open, and the last one ends it.
 static int test_validation_steps() {
-	editor_test::TempProjectDir dir("opennova_long_ops_validation");
+	test_temp::TempDir dir("opennova_long_ops_validation");
 	for (const Fixture &fixture : kFixtures) {
 		const std::string root = make_project(dir.file(fixture.name), fixture.name, fixture.files());
 		TEST_EXPECT(!root.empty());
@@ -458,7 +458,7 @@ static int test_validation_steps() {
 // takes those three from its start (counted done) and reads the others alone, a step for each, and
 // comes to the rows and the graph's stats one validation in one call makes.
 static int test_validation_keeps_its_readings() {
-	editor_test::TempProjectDir dir("opennova_long_ops_readings");
+	test_temp::TempDir dir("opennova_long_ops_readings");
 	const std::string root = make_project(dir.file("fixtures"), "fixtures", fixture_projects::fixture_files());
 	TEST_EXPECT(!root.empty());
 	const ProjectPaths paths = ProjectPaths::for_root(root);
@@ -497,7 +497,7 @@ static int test_validation_keeps_its_readings() {
 // one step that writes; dropped before it, every file is as it was; run to its end it writes what
 // apply_symbol_rename writes on a twin project.
 static int test_rename_transaction_steps() {
-	editor_test::TempProjectDir dir("opennova_long_ops_rename");
+	test_temp::TempDir dir("opennova_long_ops_rename");
 	const Files files{{"defs/weapon.def", "weapon \"GUN_A\"\nend\nweapon \"GUN_C\"\nend\n"},
 	                  {"defs/items.def", "begin \"Carrier\"\nid 100300\ntype vehicle\nprimary_weapon GUN_A\nend\n"}};
 	std::vector<std::string> roots;
@@ -556,7 +556,7 @@ static int test_rename_transaction_steps() {
 // after is what an Open run to its end makes (another session over the same files), member for
 // member.
 static int test_open_stepped() {
-	editor_test::TempProjectDir dir("opennova_long_ops_open");
+	test_temp::TempDir dir("opennova_long_ops_open");
 	for (const Fixture &fixture : kFixtures) {
 		const std::string root = make_project(dir.file(fixture.name), fixture.name, fixture.files());
 		TEST_EXPECT(!root.empty());
@@ -587,7 +587,7 @@ static int test_open_stepped() {
 // While it runs an edit and a save are refused (operation.busy), a selection and a query go on, and
 // a Close cancels it as a cancel does. Opened to its end, the project's local.json names the install.
 static int test_open_cancelled() {
-	editor_test::TempProjectDir dir("opennova_long_ops_cancel");
+	test_temp::TempDir dir("opennova_long_ops_cancel");
 	const std::string root = make_project(dir.file("project"), "Cancel", fixture_projects::fixture_files());
 	TEST_EXPECT(!root.empty());
 	const std::string install = dir.file("install");
@@ -659,7 +659,7 @@ static int test_open_cancelled() {
 // alone (one file's own findings made); SaveAll of two, two; a file created, one; and after each the
 // scan equals one made afresh.
 static int test_save_scans_one_file() {
-	editor_test::TempProjectDir dir("opennova_long_ops_save");
+	test_temp::TempDir dir("opennova_long_ops_save");
 	const std::string root = make_project(dir.file("project"), "Save", fixture_projects::fixture_files());
 	TEST_EXPECT(!root.empty());
 	Session s;
@@ -710,15 +710,15 @@ static int test_save_scans_one_file() {
 // refused (import.changed, what the operation came to), nothing written at any step, the dialog
 // showing the new plan, one ImportPlanned event flagged.
 static int test_stale_import_refused() {
-	editor_test::TempProjectDir dir("opennova_long_ops_stale");
+	test_temp::TempDir dir("opennova_long_ops_stale");
 	const std::string root = make_project(dir.file("project"), "Stale", {});
 	const std::string art = dir.file("art");
 	const auto menu = [](const std::string &texture) {
 		return "<SCREEN>\r\n<NAME>A</NAME>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"W\">\r\n<APPEARANCE STATE=\"DEFAULT\" "
 		       "TYPE=\"IMAGE\">" + texture + "</APPEARANCE>\r\n</WINDOW>\r\n</SCREEN>\r\n";
 	};
-	TEST_EXPECT(editor_test::write_text(art + "/a.mnu", menu("one.tga")) && editor_test::write_text(art + "/one.tga", "tga") &&
-	            editor_test::write_text(art + "/two.tga", "tga"));
+	TEST_EXPECT(test_io::write_text(art + "/a.mnu", menu("one.tga")) && test_io::write_text(art + "/one.tga", "tga") &&
+	            test_io::write_text(art + "/two.tga", "tga"));
 	Session s;
 	const SessionView &v = s.view();
 	s.session.handle(request::open_project(root));
@@ -734,7 +734,7 @@ static int test_stale_import_refused() {
 	std::vector<ImportChoice> shown;
 	for (const ImportPlanRow &row : v.dialogs.import_preview.plan->rows)
 		if (row.selected) shown.push_back(row.source);
-	TEST_EXPECT(editor_test::write_text(art + "/a.mnu", menu("two.tga")));
+	TEST_EXPECT(test_io::write_text(art + "/a.mnu", menu("two.tga")));
 	const auto before = snapshot(root);
 	const uint64_t seen = v.events.next_seq() - 1;
 	s.session.set_poll_budget({0, 4096});
@@ -762,14 +762,14 @@ static int test_stale_import_refused() {
 // changed on disk (an import source among them), an import of a menu with what it needs, a file's
 // rename and a name's rename everywhere.
 static int test_stepped_equals_whole() {
-	editor_test::TempProjectDir dir("opennova_long_ops_twins");
+	test_temp::TempDir dir("opennova_long_ops_twins");
 	Session sessions[2];
 	std::vector<std::string> roots;
 	const std::string art = dir.file("art");
-	TEST_EXPECT(editor_test::write_text(art + "/b.mnu", "<SCREEN>\r\n<NAME>B</NAME>\r\n<WINDOW TYPE=\"STATIC\" "
+	TEST_EXPECT(test_io::write_text(art + "/b.mnu", "<SCREEN>\r\n<NAME>B</NAME>\r\n<WINDOW TYPE=\"STATIC\" "
 	                                                   "NAME=\"W\">\r\n<APPEARANCE STATE=\"DEFAULT\" "
 	                                                   "TYPE=\"IMAGE\">b.tga</APPEARANCE>\r\n</WINDOW>\r\n</SCREEN>\r\n") &&
-	            editor_test::write_text(art + "/b.tga", "tga"));
+	            test_io::write_text(art + "/b.tga", "tga"));
 	for (size_t i = 0; i < 2; ++i) {
 		roots.push_back(make_project(dir.file(i == 0 ? "stepped" : "whole"), "Twin", fixture_projects::style_and_item_files()));
 		TEST_EXPECT(!roots.back().empty());
@@ -797,8 +797,8 @@ static int test_stepped_equals_whole() {
 		return same_lines(what, view_lines(sessions[0].view(), false), view_lines(sessions[1].view(), false));
 	};
 	for (const std::string &root : roots) {
-		TEST_EXPECT(editor_test::write_text(root + "/defs/more.def", fixture_projects::item("Mike", 500)));
-		TEST_EXPECT(editor_test::write_bytes(root + "/art/logo.png", gradient_png(8, 8)) && mark_for_import(root + "/art/logo.png"));
+		TEST_EXPECT(test_io::write_text(root + "/defs/more.def", fixture_projects::item("Mike", 500)));
+		TEST_EXPECT(test_io::write_file(root + "/art/logo.png", gradient_png(8, 8)) && mark_for_import(root + "/art/logo.png"));
 		fs::remove(root + "/extra/items.def");
 	}
 	TEST_EXPECT(both("a Rescan", [](size_t) { return request::rescan(); }));
@@ -830,7 +830,7 @@ static int test_stepped_equals_whole() {
 // finds the graph and the cache as the first left them, nothing of its own moved, and the missing
 // model's row is made all the same. The progress shown never falls back while it runs.
 static int test_validation_started_again() {
-	editor_test::TempProjectDir dir("opennova_long_ops_again");
+	test_temp::TempDir dir("opennova_long_ops_again");
 	const std::string root = make_project(dir.file("project"), "Again",
 	                                      {{"defs/items.def", "begin \"Crate\"\nid 100300\ntype building\nhp 10\nend\n"}});
 	TEST_EXPECT(!root.empty());
@@ -889,7 +889,7 @@ static int test_validation_started_again() {
 // the open document the rename rewrote; a selection the modder made while the rename ran is theirs
 // (the selection's serial moved since the start) and stays.
 static int test_rename_keeps_the_selection() {
-	editor_test::TempProjectDir dir("opennova_long_ops_selection");
+	test_temp::TempDir dir("opennova_long_ops_selection");
 	const std::string root = make_project(
 			dir.file("project"), "Selection",
 			{{"defs/weapon.def", "weapon \"GUN_A\"\nend\nweapon \"GUN_C\"\nend\n"},
@@ -948,7 +948,7 @@ static int test_retail_open() {
 		retail::skip_leg("OPENNOVA_JO_DIR (a project of the JO install's files opened a step at a time)");
 		return 0;
 	}
-	editor_test::TempProjectDir dir("opennova_long_ops_retail");
+	test_temp::TempDir dir("opennova_long_ops_retail");
 	const std::string root = make_project(dir.file("project"), "Retail", {});
 	TEST_EXPECT(!root.empty());
 	const ProjectDocument document = document_of(root);
@@ -975,7 +975,7 @@ static int test_retail_open() {
 		if (!document_type_for(kind) && kind != AssetKind::Texture && kind != AssetKind::Font) continue;
 		std::vector<uint8_t> file;
 		if (!origin.read(name, file)) continue;
-		TEST_EXPECT(editor_test::write_bytes(root + "/" + asset_kind_token(kind) + "/" + name, file));
+		TEST_EXPECT(test_io::write_file(root + "/" + asset_kind_token(kind) + "/" + name, file));
 		++exported;
 		bytes_exported += file.size();
 	}

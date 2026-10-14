@@ -104,7 +104,7 @@ bool fill_strings(ProjectSession &session) {
 
 // The project: the preview project's files, thirty string tables (the first with long
 // strings), a stylesheet whose lines run long and the deep menu.
-bool bounds_project(ProjectSession &session, const editor_test::TempProjectDir &dir) {
+bool bounds_project(ProjectSession &session, const test_temp::TempDir &dir) {
 	if (!preview_project(session, dir)) return false;
 	const SessionView &v = session.view();
 	const AssetEntry *table = v.project.scan->find("gametext.bin");
@@ -114,11 +114,11 @@ bool bounds_project(ProjectSession &session, const editor_test::TempProjectDir &
 	for (int i = 0; i < 30; ++i) {
 		char name[32];
 		std::snprintf(name, sizeof(name), "/strings/table%02d.bin", i);
-		if (!editor_test::write_bytes(v.project.root + name, bytes)) return false;
+		if (!test_io::write_file(v.project.root + name, bytes)) return false;
 	}
-	if (!editor_test::write_text(v.project.root + "/" + style->relative_path, long_style()) ||
-	    !editor_test::write_text(v.project.root + "/menus/deep.mnu", deep_menu()) ||
-	    !editor_test::write_bytes(v.project.root + "/missions/synth_logic.bms",
+	if (!test_io::write_text(v.project.root + "/" + style->relative_path, long_style()) ||
+	    !test_io::write_text(v.project.root + "/menus/deep.mnu", deep_menu()) ||
+	    !test_io::write_file(v.project.root + "/missions/synth_logic.bms",
 	                              test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/bms/synth_logic.bms")))
 		return false;
 	session.handle(request::rescan());
@@ -458,7 +458,7 @@ void reach_last_tab(Sweep &sweep) {
 }
 
 void test_bounds() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_bounds");
+	test_temp::TempDir dir("opennova_editor_ui_bounds");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);

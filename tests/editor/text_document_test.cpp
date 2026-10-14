@@ -309,9 +309,9 @@ static int test_folding_and_changes() {
 	TEST_EXPECT(!document->changes_since(load, 0, changes));
 	// The saved checkpoint is never folded over: a gesture's batch after a save is a step of its own,
 	// whose undo gives the saved text back, clean; one more undo the text before, unsaved.
-	editor_test::TempProjectDir dir("opennova_editor_text_checkpoint");
+	test_temp::TempDir dir("opennova_editor_text_checkpoint");
 	const std::string file = dir.file("checkpoint.cfg");
-	TEST_EXPECT(editor_test::write_text(file, "one\r\n"));
+	TEST_EXPECT(test_io::write_text(file, "one\r\n"));
 	TextDocument saved;
 	TEST_EXPECT(saved.load(file, "checkpoint.cfg", AssetKind::Config, "jo", error));
 	const uint64_t drag = next_edit_gesture();
@@ -378,9 +378,9 @@ static int test_history_budget() {
 // A snapshot shares the document's identity, load and revision, serializes its text, and is read
 // only; a save writes the text and moves the checkpoint.
 static int test_snapshot_and_save() {
-	editor_test::TempProjectDir dir("opennova_editor_text_save");
+	test_temp::TempDir dir("opennova_editor_text_save");
 	const std::string file = dir.file("game.cfg");
-	TEST_EXPECT(editor_test::write_text(file, "name = one\r\n"));
+	TEST_EXPECT(test_io::write_text(file, "name = one\r\n"));
 	auto document = std::make_unique<TextDocument>();
 	Diagnostic error;
 	TEST_EXPECT(document->load(file, "game.cfg", AssetKind::Config, "jo", error));
@@ -402,7 +402,7 @@ static int test_snapshot_and_save() {
 	TEST_EXPECT(test_io::read_file_text(file) == "name = two\r\n");
 	// A file changed outside the editor: the save is refused.
 	TEST_EXPECT(apply(*document, {TextDocument::replace(span(1, 8, 3), "six")}));
-	TEST_EXPECT(editor_test::write_text(file, "name = ten\r\n"));
+	TEST_EXPECT(test_io::write_text(file, "name = ten\r\n"));
 	TEST_EXPECT(!document->save(error) && error.code() == "document.conflict");
 	return 0;
 }
@@ -544,10 +544,10 @@ static int test_script_type() {
 // unsaved). A CR alone in a script, an LF alone in a credits text; a text's file written as it holds
 // it.
 static int test_line_ends() {
-	editor_test::TempProjectDir dir("opennova_editor_text_line_ends");
+	test_temp::TempDir dir("opennova_editor_text_line_ends");
 	const std::string file = dir.file("ends.wac");
 	const std::string original = "If true(bluekills) then\r\n\tfxrain FX_Buildup\r\nendif\r\n";
-	TEST_EXPECT(editor_test::write_text(file, original));
+	TEST_EXPECT(test_io::write_text(file, original));
 	const DocumentType *type = document_type_for(AssetKind::Script);
 	std::unique_ptr<DocumentBase> made = type->make();
 	Diagnostic error;
@@ -606,7 +606,7 @@ static int test_line_ends() {
 // A project holding the script, the minted particle file, an ammo table and the string table of the
 // script's name (the mission text a script of that mission's name reads its keys from, S14).
 struct ScriptProject {
-	editor_test::TempProjectDir dir{"opennova_editor_text_project"};
+	test_temp::TempDir dir{"opennova_editor_text_project"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -626,13 +626,13 @@ bool make_script_project(ScriptProject &project) {
 	if (!opennova::rtxt::write(table, strings, error)) return false;
 	const std::string root = project.root();
 	const bool written =
-	        editor_test::write_text(root + "/scripts/text_document.wac", repo_file("wac/text_document.wac")) &&
-	        editor_test::write_text(root + "/particles/effects.ptl", repo_file("particle/synth_minimal_effect.ptl")) &&
-	        editor_test::write_text(root + "/defs/ammo.def",
+	        test_io::write_text(root + "/scripts/text_document.wac", repo_file("wac/text_document.wac")) &&
+	        test_io::write_text(root + "/particles/effects.ptl", repo_file("particle/synth_minimal_effect.ptl")) &&
+	        test_io::write_text(root + "/defs/ammo.def",
 	                                "ammo AT_CONTRACT\nmax_age 1.5\nend\nammo ammo_satchel\nmax_age 2\nend\n"
 	                                "ammo bomb\nmax_age 3\nend\n") &&
-	        editor_test::write_bytes(root + "/strings/text_document.bin", strings) &&
-	        editor_test::write_bytes(root + "/sounds/game.lwf", editor_test::sound_bank_of({"EXPLO_BASE"}));
+	        test_io::write_file(root + "/strings/text_document.bin", strings) &&
+	        test_io::write_file(root + "/sounds/game.lwf", editor_test::sound_bank_of({"EXPLO_BASE"}));
 	editor_test::handle_to_end(project.session, request::rescan());
 	return written && project.view().findings.graph;
 }
@@ -761,7 +761,7 @@ static int test_graph_and_rename() {
 		std::vector<uint8_t> bytes;
 		std::string error;
 		TEST_EXPECT(opennova::bms::write(mission, bytes, error) &&
-		            editor_test::write_bytes(project.root() + "/missions/text_document.bms", bytes));
+		            test_io::write_file(project.root() + "/missions/text_document.bms", bytes));
 		editor_test::handle_to_end(project.session, request::rescan());
 	}
 	const std::vector<const GraphSymbol *> owned = project.graph().symbols_named(ReferenceKind::TextId, "MISSION_START");
@@ -915,7 +915,7 @@ static int test_wire() {
 	TEST_EXPECT(editor_request_from_json(closed, closed_read, error) && closed_read.edits.size() == 1);
 	// A closed music script, a .bin its name alone does not type: its spans read by the kind the scan
 	// read (its content), the document open after its first read.
-	TEST_EXPECT(editor_test::write_text(project.root() + "/gamemus.bin", repo_file("mus/synth_gamemus.bin")));
+	TEST_EXPECT(test_io::write_text(project.root() + "/gamemus.bin", repo_file("mus/synth_gamemus.bin")));
 	editor_test::handle_to_end(project.session, request::rescan());
 	answer = send(R"({"kind": "edit_record", "path": "gamemus.bin", "open_first": true, "edits": [{"op": "apply", "payload": "text.span", "line": 6, "column": 1, "text": "// note\n"}]})");
 	const DocumentBase *music = project.session.document_base_for("gamemus.bin");
@@ -1138,9 +1138,9 @@ static int test_shader_and_text() {
 	// The plain form is a fact of the stored file, no line Save drops; its Rewrite writes the form and
 	// the finding goes with the file it was about.
 	TEST_EXPECT(plain->ignored_lines() == 0 && plain->issues().empty() && !plain->blocked());
-	editor_test::TempProjectDir dir("opennova_editor_text_shader");
+	test_temp::TempDir dir("opennova_editor_text_shader");
 	const std::string file = dir.file("plain.fx");
-	TEST_EXPECT(editor_test::write_text(file, source));
+	TEST_EXPECT(test_io::write_text(file, source));
 	std::unique_ptr<DocumentBase> rewritten = type->make();
 	TEST_EXPECT(rewritten->load(file, "plain.fx", AssetKind::Shader, "jo", error) && type->validate_file(*rewritten).size() == 1);
 	TEST_EXPECT(rewritten->save(error) && type->validate_file(*rewritten).empty() &&
@@ -1197,7 +1197,7 @@ static int test_text_readers() {
 static int test_project_notes() {
 	const DocumentType *text = document_type(DocumentTypeId::Text);
 	TEST_EXPECT(text && document_type_for(AssetKind::Notes) == text && is_editable_kind(AssetKind::Notes));
-	editor_test::TempProjectDir dir("opennova_editor_text_notes");
+	test_temp::TempDir dir("opennova_editor_text_notes");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1205,9 +1205,9 @@ static int test_project_notes() {
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project.root;
 	const std::string readme = "# Notes\r\n\r\nWhat this project holds.\r\n";
-	TEST_EXPECT(editor_test::write_text(root + "/README.md", readme));
-	TEST_EXPECT(editor_test::write_text(root + "/LICENSE", "MIT License\n"));
-	TEST_EXPECT(editor_test::write_bytes(root + "/blob", {0x00, 0x01, 0x02}));
+	TEST_EXPECT(test_io::write_text(root + "/README.md", readme));
+	TEST_EXPECT(test_io::write_text(root + "/LICENSE", "MIT License\n"));
+	TEST_EXPECT(test_io::write_file(root + "/blob", {0x00, 0x01, 0x02}));
 	editor_test::handle_to_end(session, request::rescan());
 	size_t unknown = 0, about_notes = 0;
 	for (const Diagnostic &d : session.view().findings.diagnostics) {
@@ -1367,7 +1367,7 @@ static int test_gate_tag_config() {
 // decode would make it noise), the project's file opening with no finding; the import plan's origin
 // reads it so.
 static int test_import_shader() {
-	editor_test::TempProjectDir dir("opennova_editor_text_import");
+	test_temp::TempDir dir("opennova_editor_text_import");
 	const std::string root = dir.file("project");
 	ProjectDocument project;
 	Diagnostic error;

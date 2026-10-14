@@ -126,7 +126,7 @@ int test_pictures() {
 }
 
 struct Rig {
-	editor_test::TempProjectDir dir{"opennova_editor_texture_thumbnails"};
+	test_temp::TempDir dir{"opennova_editor_texture_thumbnails"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -146,9 +146,9 @@ int test_session() {
 	Rig rig;
 	editor_test::handle_to_end(rig.session, request::new_project(rig.root(), "Thumbnails"));
 	editor_test::create_missing_files(rig.session);
-	TEST_EXPECT(editor_test::write_bytes(rig.root() + "/textures/stance.tga", tga_of(solid(8, 4, 90, 80, 70, 200), 8, 4)) &&
-	            editor_test::write_bytes(rig.root() + "/textures/other.tga", tga_of(solid(2, 2, 1, 1, 1, 255), 2, 2)) &&
-	            editor_test::write_text(rig.root() + "/defs/items.def",
+	TEST_EXPECT(test_io::write_file(rig.root() + "/textures/stance.tga", tga_of(solid(8, 4, 90, 80, 70, 200), 8, 4)) &&
+	            test_io::write_file(rig.root() + "/textures/other.tga", tga_of(solid(2, 2, 1, 1, 1, 255), 2, 2)) &&
+	            test_io::write_text(rig.root() + "/defs/items.def",
 	                                    "begin \"Brick\"\nid 100300\ntype building\nhud_image stance.tga\nend\n"));
 	editor_test::handle_to_end(rig.session, request::rescan());
 	rig.session.run_operations();
@@ -175,7 +175,7 @@ int test_session() {
 		TEST_EXPECT(thumbnails.step(rig.view(), size_t(1) << 30) && !thumbnails.pending());
 	}
 	// The file changed (its stamp moved): the last picture answers until a poll makes the new one.
-	TEST_EXPECT(editor_test::write_bytes(rig.root() + "/textures/stance.tga", tga_of(solid(16, 16, 9, 9, 9, 255), 16, 16)));
+	TEST_EXPECT(test_io::write_file(rig.root() + "/textures/stance.tga", tga_of(solid(16, 16, 9, 9, 9, 255), 16, 16)));
 	editor_test::handle_to_end(rig.session, request::rescan());
 	rig.session.run_operations();
 	TEST_EXPECT(thumbnails.get(rig.view(), "textures/stance.tga", TextureLoadTransform::None) == made && thumbnails.pending());

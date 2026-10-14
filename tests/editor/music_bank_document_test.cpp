@@ -165,7 +165,7 @@ int test_findings() {
 // play_sound of a stream through a session: the voice names the bank and the stream's place; refused for a bank with
 // unsaved changes (the Shell streams the file) and for a stream it has not.
 int test_session_play() {
-	editor_test::TempProjectDir dir("opennova_editor_music_bank");
+	test_temp::TempDir dir("opennova_editor_music_bank");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -173,7 +173,7 @@ int test_session_play() {
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project.root;
 	const std::string path = "music/synth.sbf";
-	TEST_EXPECT(editor_test::write_bytes(root + "/" + path, synth()));
+	TEST_EXPECT(test_io::write_file(root + "/" + path, synth()));
 	editor_test::handle_to_end(session, request::rescan());
 	ActionOutcome played = editor_test::handle_to_end(session, request::play_stream(path, 2));
 	TEST_EXPECT(played.done());
@@ -212,14 +212,14 @@ int test_session_play() {
 // script's plays name them in the bank of its name made .SBF, each present; a play past the bank's streams a warning
 // in the game's words (it plays the bank's first).
 int test_script_plays_streams() {
-	editor_test::TempProjectDir dir("opennova_editor_music_streams");
+	test_temp::TempDir dir("opennova_editor_music_streams");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Music streams"));
 	const std::string root = session.view().project.root;
-	TEST_EXPECT(editor_test::write_bytes(root + "/gamemus.sbf", synth()));
-	TEST_EXPECT(editor_test::write_bytes(root + "/gamemus.bin",
+	TEST_EXPECT(test_io::write_file(root + "/gamemus.sbf", synth()));
+	TEST_EXPECT(test_io::write_file(root + "/gamemus.bin",
 	                                     test_io::read_file(std::string(test_paths_repo_root(__FILE__)) +
 	                                                        "/fixtures/mus/synth_gamemus.bin")));
 	editor_test::handle_to_end(session, request::rescan());

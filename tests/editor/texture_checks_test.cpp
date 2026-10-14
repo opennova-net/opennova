@@ -102,7 +102,7 @@ struct Found {
 };
 
 int test_checks() {
-	editor_test::TempProjectDir dir{"opennova_editor_texture_checks"};
+	test_temp::TempDir dir{"opennova_editor_texture_checks"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -115,17 +115,17 @@ int test_checks() {
 	// a colour map, an odd-width PCX, a 4-bit PCX.
 	std::vector<uint8_t> top = tga(4, 4);
 	top[17] |= 0x20;
-	TEST_EXPECT(editor_test::write_bytes(t + "top.tga", top) && editor_test::write_bytes(t + "grey16.tga", tga_header(3, 16, 0)) &&
-	            editor_test::write_bytes(t + "rle16.tga", tga_header(10, 16, 0)) &&
-	            editor_test::write_bytes(t + "mapped.tga", tga_header(2, 24, 0, 4)) &&
-	            editor_test::write_bytes(t + "odd.pcx", pcx(5, 4, 6)) && editor_test::write_bytes(t + "oddfull.pcx", pcx(5, 16, 6)) &&
-	            editor_test::write_bytes(t + "oddwide.pcx", pcx(6, 16, 16)));
+	TEST_EXPECT(test_io::write_file(t + "top.tga", top) && test_io::write_file(t + "grey16.tga", tga_header(3, 16, 0)) &&
+	            test_io::write_file(t + "rle16.tga", tga_header(10, 16, 0)) &&
+	            test_io::write_file(t + "mapped.tga", tga_header(2, 24, 0, 4)) &&
+	            test_io::write_file(t + "odd.pcx", pcx(5, 4, 6)) && test_io::write_file(t + "oddfull.pcx", pcx(5, 16, 6)) &&
+	            test_io::write_file(t + "oddwide.pcx", pcx(6, 16, 16)));
 	std::vector<uint8_t> four = pcx(4, 4, 4);
 	four[3] = 4;
 	// A 24-bit one (three planes) the reader takes, its odd width no overrun: no finding.
 	std::vector<uint8_t> rgb = pcx(5, 4, 6);
 	rgb[65] = 3;
-	TEST_EXPECT(editor_test::write_bytes(t + "four.pcx", four) && editor_test::write_bytes(t + "rgb.pcx", rgb));
+	TEST_EXPECT(test_io::write_file(t + "four.pcx", four) && test_io::write_file(t + "rgb.pcx", rgb));
 	// A DDS of 100 x 64, which the DDS reader pads to 128 x 64; one of 64 x 32, which it takes as it is.
 	{
 		std::vector<uint8_t> odd_dds, even_dds;
@@ -133,7 +133,7 @@ int test_checks() {
 		const std::vector<uint8_t> texels(size_t(100) * 64 * 4, 128);
 		TEST_EXPECT(opennova::dds::dds_write_a8r8g8b8(texels.data(), 100, 64, odd_dds, error) &&
 		            opennova::dds::dds_write_a8r8g8b8(texels.data(), 64, 32, even_dds, error));
-		TEST_EXPECT(editor_test::write_bytes(t + "padded.dds", odd_dds) && editor_test::write_bytes(t + "even.dds", even_dds));
+		TEST_EXPECT(test_io::write_file(t + "padded.dds", odd_dds) && test_io::write_file(t + "even.dds", even_dds));
 	}
 	// A TGA whose file ends before its texels do, as raw true colour and as run-length packets; a PCX whose
 	// rows are shorter than its width.
@@ -142,21 +142,21 @@ int test_checks() {
 	std::vector<uint8_t> cut_rle = tga_header(10, 32, 0);
 	cut_rle.resize(18);
 	cut_rle.insert(cut_rle.end(), {0x81, 1, 2, 3, 4});
-	TEST_EXPECT(editor_test::write_bytes(t + "cut.tga", cut) && editor_test::write_bytes(t + "cutrle.tga", cut_rle) &&
-	            editor_test::write_bytes(t + "short.pcx", pcx(6, 4, 4)));
+	TEST_EXPECT(test_io::write_file(t + "cut.tga", cut) && test_io::write_file(t + "cutrle.tga", cut_rle) &&
+	            test_io::write_file(t + "short.pcx", pcx(6, 4, 4)));
 	// The uses': terrains, a model, a particle file, the default loading screen.
-	TEST_EXPECT(editor_test::write_bytes(t + "detail.tga", tga(8, 8)) && editor_test::write_bytes(t + "small.tga", tga(512, 512)) &&
-	            editor_test::write_bytes(t + "wide.tga", tga(2048, 512)) && editor_test::write_bytes(t + "tall.tga", tga(512, 2048)) &&
-	            editor_test::write_bytes(t + "colour.tga", tga(1024, 1024)) && editor_test::write_bytes(t + "map.pcx", pcx(8, 8, 8)) &&
-	            editor_test::write_bytes(t + "fol.pcx", pcx(64, 32, 64)) && editor_test::write_bytes(t + "fol48.pcx", pcx(48, 48, 48)) &&
-	            editor_test::write_bytes(t + "fol2k.pcx", pcx(2048, 1024, 2048)) &&
-	            editor_test::write_bytes(t + "blendw.tga", tga(64, 32)) && editor_test::write_bytes(t + "blendt.tga", tga(32, 64)) &&
-	            editor_test::write_bytes(t + "tiles.tga", tga(100, 64)) && editor_test::write_bytes(t + "skin.pcx", pcx(8, 8, 8)) &&
-	            editor_test::write_bytes(t + "big.mdt", tga(1024, 16)) && editor_test::write_bytes(t + "bump.tga", tga(100, 64)) &&
-	            editor_test::write_bytes(t + "wall.tga", tga(8, 8)) && editor_test::write_bytes(t + "wall.dds", tga(8, 8)) &&
-	            editor_test::write_bytes(t + "huge.tga", tga(1024, 8)) && editor_test::write_bytes(t + "page.tga", tga(256, 16)) &&
-	            editor_test::write_bytes(t + "fits.tga", tga(255, 256)) &&
-	            editor_test::write_bytes(t + "loadscrn.pcx", pcx(640, 480, 640)));
+	TEST_EXPECT(test_io::write_file(t + "detail.tga", tga(8, 8)) && test_io::write_file(t + "small.tga", tga(512, 512)) &&
+	            test_io::write_file(t + "wide.tga", tga(2048, 512)) && test_io::write_file(t + "tall.tga", tga(512, 2048)) &&
+	            test_io::write_file(t + "colour.tga", tga(1024, 1024)) && test_io::write_file(t + "map.pcx", pcx(8, 8, 8)) &&
+	            test_io::write_file(t + "fol.pcx", pcx(64, 32, 64)) && test_io::write_file(t + "fol48.pcx", pcx(48, 48, 48)) &&
+	            test_io::write_file(t + "fol2k.pcx", pcx(2048, 1024, 2048)) &&
+	            test_io::write_file(t + "blendw.tga", tga(64, 32)) && test_io::write_file(t + "blendt.tga", tga(32, 64)) &&
+	            test_io::write_file(t + "tiles.tga", tga(100, 64)) && test_io::write_file(t + "skin.pcx", pcx(8, 8, 8)) &&
+	            test_io::write_file(t + "big.mdt", tga(1024, 16)) && test_io::write_file(t + "bump.tga", tga(100, 64)) &&
+	            test_io::write_file(t + "wall.tga", tga(8, 8)) && test_io::write_file(t + "wall.dds", tga(8, 8)) &&
+	            test_io::write_file(t + "huge.tga", tga(1024, 8)) && test_io::write_file(t + "page.tga", tga(256, 16)) &&
+	            test_io::write_file(t + "fits.tga", tga(255, 256)) &&
+	            test_io::write_file(t + "loadscrn.pcx", pcx(640, 480, 640)));
 	// A VS_DOT3DIFF2 material cuts out by its normal map's alpha: its PCX diffuse is no finding, its 24-bit
 	// normal map is.
 	{
@@ -164,8 +164,8 @@ int test_checks() {
 		std::vector<uint8_t> rgb;
 		std::string error;
 		opennova::tga::tga_write_rgb24(rgba.data(), 4, 4, rgb, error);
-		TEST_EXPECT(editor_test::write_bytes(t + "dotskin.pcx", pcx(8, 8, 8)) && editor_test::write_bytes(t + "dotdet.tga", tga(8, 8)) &&
-		            editor_test::write_bytes(t + "dotnorm.mdt", rgb));
+		TEST_EXPECT(test_io::write_file(t + "dotskin.pcx", pcx(8, 8, 8)) && test_io::write_file(t + "dotdet.tga", tga(8, 8)) &&
+		            test_io::write_file(t + "dotnorm.mdt", rgb));
 	}
 	// A char map holding classes past the twenty the tile set tables name (S25): listed, the build going on.
 	{
@@ -177,8 +177,8 @@ int test_checks() {
 		classes.indices[70] = 22;
 		std::vector<uint8_t> bytes;
 		std::string error;
-		TEST_EXPECT(opennova::encode_pcx_indexed(classes, bytes, error) && editor_test::write_bytes(t + "classes.pcx", bytes) &&
-		            editor_test::write_text(root + "/terrains/l.trn",
+		TEST_EXPECT(opennova::encode_pcx_indexed(classes, bytes, error) && test_io::write_file(t + "classes.pcx", bytes) &&
+		            test_io::write_text(root + "/terrains/l.trn",
 		                                    trn("polytrn_colormap colour.tga\npolytrn_charmap classes.pcx\n")));
 	}
 	// Terrain maps of no TGA through the game's TGA reader, which sizes the texels by bytes 12 to 15 (S26 A3):
@@ -196,39 +196,39 @@ int test_checks() {
 		wrap[13] = wrap[15] = 0x5A;
 		const std::vector<uint8_t> png = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0x0D, 'I', 'H', 'D', 'R',
 		                                  0, 0, 0, 8, 0, 0, 0, 8, 8, 6, 0, 0, 0, 0, 0, 0, 0};
-		TEST_EXPECT(editor_test::write_bytes(t + "dpi.pcx", dpi) && editor_test::write_bytes(t + "stale.pcx", stale) &&
-		            editor_test::write_bytes(t + "wrap.pcx", wrap) && editor_test::write_bytes(t + "big.png", png) &&
-		            editor_test::write_text(root + "/terrains/m.trn", trn("polytrn_colormap dpi.pcx\n")) &&
-		            editor_test::write_text(root + "/terrains/n.trn", trn("polytrn_colormap stale.pcx\n")) &&
-		            editor_test::write_text(root + "/terrains/o.trn", trn("polytrn_colormap big.png\n")) &&
-		            editor_test::write_text(root + "/terrains/q.trn",
+		TEST_EXPECT(test_io::write_file(t + "dpi.pcx", dpi) && test_io::write_file(t + "stale.pcx", stale) &&
+		            test_io::write_file(t + "wrap.pcx", wrap) && test_io::write_file(t + "big.png", png) &&
+		            test_io::write_text(root + "/terrains/m.trn", trn("polytrn_colormap dpi.pcx\n")) &&
+		            test_io::write_text(root + "/terrains/n.trn", trn("polytrn_colormap stale.pcx\n")) &&
+		            test_io::write_text(root + "/terrains/o.trn", trn("polytrn_colormap big.png\n")) &&
+		            test_io::write_text(root + "/terrains/q.trn",
 		                                    trn("polytrn_colormap colour.tga\npolytrn_detailblendmap big.png\n")) &&
-		            editor_test::write_text(root + "/terrains/r.trn", trn("polytrn_colormap wrap.pcx\n")));
+		            test_io::write_text(root + "/terrains/r.trn", trn("polytrn_colormap wrap.pcx\n")));
 	}
-	TEST_EXPECT(editor_test::write_text(root + "/terrains/a.trn", trn("polytrn_colormap small.tga\n")) &&
-	            editor_test::write_text(root + "/terrains/b.trn", trn("polytrn_colormap wide.tga\npolytrn_foliagemap fol.pcx\npolytrn_charmap fol.pcx\n")) &&
-	            editor_test::write_text(root + "/terrains/c.trn", trn("polytrn_colormap tall.tga\npolytrn_foliagemap fol48.pcx\npolytrn_charmap fol48.pcx\n")) &&
-	            editor_test::write_text(root + "/terrains/d.trn", trn("polytrn_colormap map.pcx\npolytrn_tilestrip tiles.tga\n")) &&
-	            editor_test::write_text(root + "/terrains/e.trn", trn("polytrn_colormap colour.tga\n")) &&
-	            editor_test::write_text(root + "/terrains/f.trn", trn("polytrn_colormap colour.tga\npolytrn_detailblendmap blendw.tga\n"
+	TEST_EXPECT(test_io::write_text(root + "/terrains/a.trn", trn("polytrn_colormap small.tga\n")) &&
+	            test_io::write_text(root + "/terrains/b.trn", trn("polytrn_colormap wide.tga\npolytrn_foliagemap fol.pcx\npolytrn_charmap fol.pcx\n")) &&
+	            test_io::write_text(root + "/terrains/c.trn", trn("polytrn_colormap tall.tga\npolytrn_foliagemap fol48.pcx\npolytrn_charmap fol48.pcx\n")) &&
+	            test_io::write_text(root + "/terrains/d.trn", trn("polytrn_colormap map.pcx\npolytrn_tilestrip tiles.tga\n")) &&
+	            test_io::write_text(root + "/terrains/e.trn", trn("polytrn_colormap colour.tga\n")) &&
+	            test_io::write_text(root + "/terrains/f.trn", trn("polytrn_colormap colour.tga\npolytrn_detailblendmap blendw.tga\n"
 	                                                                  "polytrn_foliagemap fol2k.pcx\n")) &&
-	            editor_test::write_text(root + "/terrains/g.trn", trn("polytrn_colormap colour.tga\npolytrn_detailblendmap blendt.tga\n")) &&
+	            test_io::write_text(root + "/terrains/g.trn", trn("polytrn_colormap colour.tga\npolytrn_detailblendmap blendt.tga\n")) &&
 	            // A blend map the TGA reader cannot read: skipped, the terrain loading on.
-	            editor_test::write_text(root + "/terrains/k.trn", trn("polytrn_colormap colour.tga\npolytrn_detailblendmap map.pcx\n")) &&
+	            test_io::write_text(root + "/terrains/k.trn", trn("polytrn_colormap colour.tga\npolytrn_detailblendmap map.pcx\n")) &&
 	            // A splat detail read by STAGE (its .dds) and by its own name through the TGA reader: no "never
 	            // read" on its .tga. A detail map whose .tga the project lacks: no coefficient made of its .dds.
-	            editor_test::write_text(root + "/terrains/h.trn",
+	            test_io::write_text(root + "/terrains/h.trn",
 	                                    "polytrn_detailmap cdet.tga\npolytrn_polydata isle.cpt\npolytrn_sectorcount 1\npolytrn_sectors 0\n"
 	                                    "polytrn_colormap colour.tga\npolytrn_detailmap_c1 det.tga\n") &&
-	            editor_test::write_bytes(t + "det.tga", tga(8, 8)) && editor_test::write_bytes(t + "det.dds", tga(8, 8)) &&
-	            editor_test::write_bytes(t + "cdet.dds", tga(8, 8)) &&
-	            editor_test::write_text(root + "/fx.ptl",
+	            test_io::write_file(t + "det.tga", tga(8, 8)) && test_io::write_file(t + "det.dds", tga(8, 8)) &&
+	            test_io::write_file(t + "cdet.dds", tga(8, 8)) &&
+	            test_io::write_text(root + "/fx.ptl",
 	                                    "[effectdef]\n{\n\tid = BOOM;\n\tpdefs = puff, dent, ring;\n}\n\n[particledef]\n{\n\tid = "
 	                                    "puff;\n\tgraphic1 = huge.tga, additive;\n}\n\n[particledef]\n{\n\tid = dent;\n"
 	                                    "\tgraphic1 = page.tga, bump;\n}\n\n[particledef]\n{\n\tid = ring;\n"
 	                                    "\tgraphic1 = fits.tga, distort;\n}\n"));
 	const std::string scene = dir.file("scene");
-	TEST_EXPECT(editor_test::write_text(scene + "/thing.o3d",
+	TEST_EXPECT(test_io::write_text(scene + "/thing.o3d",
 	                                    "o3d 2\nmodel THING\nmaterial VS_SKBASIC\nmatflags 1\nalphatest 128\n"
 	                                    "texture skin.pcx 1 0\ntexture wall.tga 2 0\nmaterial FF_ST_OP\ntexture big.mdt 3 4\n"
 	                                    "texture bump.tga 3 5\nmaterial VS_DOT3DIFF2\nmatflags 1\nalphatest 64\n"

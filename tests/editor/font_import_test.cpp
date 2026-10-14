@@ -174,10 +174,10 @@ static int test_options() {
 
 // The importer's run over an ImportContext, as the import pass calls it.
 static int test_import_run() {
-	editor_test::TempProjectDir dir("opennova_editor_font_import_run");
+	test_temp::TempDir dir("opennova_editor_font_import_run");
 	const std::string root = dir.root();
 	const std::string folder = root + "/fonts";
-	TEST_EXPECT(editor_test::write_bytes(folder + "/Hud14.png", sheet_png(test_sheet())));
+	TEST_EXPECT(test_io::write_file(folder + "/Hud14.png", sheet_png(test_sheet())));
 	const auto run = [&](const std::string &name, const std::string &set, const ImportOptions &options, ImportProduct &product,
 	                     std::vector<Diagnostic> &context_findings) {
 		const std::vector<uint8_t> bytes = text_bytes(set);
@@ -214,7 +214,7 @@ static int test_import_run() {
 	product = ImportProduct();
 	TEST_EXPECT(run("Hud14.fntset", "sheet Missing.png\n", {}, product, findings) == 1);
 	TEST_EXPECT(count_code(findings, "import.input") == 1 && product.outputs.empty());
-	TEST_EXPECT(editor_test::write_text(folder + "/Broken.png", "not a picture"));
+	TEST_EXPECT(test_io::write_text(folder + "/Broken.png", "not a picture"));
 	product = ImportProduct();
 	TEST_EXPECT(run("Hud14.fntset", "sheet Broken.png\n", {}, product, findings) == 1);
 	TEST_EXPECT(count_code(product.diagnostics, "import.decode") == 1);
@@ -231,7 +231,7 @@ static int test_import_run() {
 
 // Over a project: the set an import source, the .fnt the build packs, the sheet an input.
 static int test_project() {
-	editor_test::TempProjectDir dir("opennova_editor_font_import_project");
+	test_temp::TempDir dir("opennova_editor_font_import_project");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -240,8 +240,8 @@ static int test_project() {
 	const SessionView &view = session.view();
 	const std::string root = view.project.root;
 	const ProjectPaths paths = ProjectPaths::for_root(root);
-	TEST_EXPECT(editor_test::write_bytes(root + "/fonts/Hud14.png", sheet_png(test_sheet())));
-	TEST_EXPECT(editor_test::write_text(root + "/fonts/Hud14.fntset", "sheet Hud14.png\n"));
+	TEST_EXPECT(test_io::write_file(root + "/fonts/Hud14.png", sheet_png(test_sheet())));
+	TEST_EXPECT(test_io::write_text(root + "/fonts/Hud14.fntset", "sheet Hud14.png\n"));
 	// Without its record the set is no import source.
 	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(view.project.imports->empty());
@@ -281,7 +281,7 @@ static int test_project() {
 	TEST_EXPECT(run.reimported == 0 && run.sources.size() == 1 && run.sources[0].ok);
 	RgbaImage wider = test_sheet();
 	ink(wider, 'A', 0, 6, 1, 8);
-	TEST_EXPECT(editor_test::write_bytes(root + "/fonts/Hud14.png", sheet_png(wider)));
+	TEST_EXPECT(test_io::write_file(root + "/fonts/Hud14.png", sheet_png(wider)));
 	run = run_imports(paths, *view.project.document);
 	TEST_EXPECT(run.reimported == 1 && run.sources[0].ok);
 	std::vector<uint8_t> bytes;
@@ -303,7 +303,7 @@ static int test_project() {
 // An import of a set from a folder outside the project: planned and imported with its sheet beside it
 // in fonts/ (the font importer's folder), the sheet copied as it is with no record of its own.
 static int test_import_from_disk() {
-	editor_test::TempProjectDir dir("opennova_editor_font_import_disk");
+	test_temp::TempDir dir("opennova_editor_font_import_disk");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -312,10 +312,10 @@ static int test_import_from_disk() {
 	const std::string root = view.project.root;
 	const ProjectPaths paths = ProjectPaths::for_root(root);
 	const std::string art = dir.file("art");
-	TEST_EXPECT(editor_test::write_bytes(art + "/glyphs/Hud14.png", sheet_png(test_sheet())));
-	TEST_EXPECT(editor_test::write_text(art + "/Hud14.fntset", "sheet glyphs/Hud14.png\n"));
-	TEST_EXPECT(editor_test::write_text(art + "/Lost.fntset", "sheet Lost.png\n"));
-	TEST_EXPECT(editor_test::write_text(art + "/Away.fntset", "sheet ../../Hud14.png\n"));
+	TEST_EXPECT(test_io::write_file(art + "/glyphs/Hud14.png", sheet_png(test_sheet())));
+	TEST_EXPECT(test_io::write_text(art + "/Hud14.fntset", "sheet glyphs/Hud14.png\n"));
+	TEST_EXPECT(test_io::write_text(art + "/Lost.fntset", "sheet Lost.png\n"));
+	TEST_EXPECT(test_io::write_text(art + "/Away.fntset", "sheet ../../Hud14.png\n"));
 	ImportChoice choice;
 	choice.path = art + "/Hud14.fntset";
 	const ImportPlan plan = plan_import({choice}, false, paths, *view.project.document, *view.project.scan, *view.findings.graph, "");
@@ -338,7 +338,7 @@ static int test_import_from_disk() {
 	// replace; with it, both come.
 	RgbaImage wider = test_sheet();
 	ink(wider, 'A', 0, 6, 1, 8);
-	TEST_EXPECT(editor_test::write_bytes(art + "/glyphs/Hud14.png", sheet_png(wider)));
+	TEST_EXPECT(test_io::write_file(art + "/glyphs/Hud14.png", sheet_png(wider)));
 	ImportResult again = import_assets({choice}, paths, *view.project.document, false);
 	TEST_EXPECT(count_code(again.diagnostics, "import.exists") == 1 && again.imported.empty());
 	again = import_assets({choice}, paths, *view.project.document, true);
@@ -361,7 +361,7 @@ static int test_import_from_disk() {
 // the sheet copied beside it and its grid, its record the options, then imported; a sheet of six rows from the space;
 // refused, nothing written: a name taken, no sheet, a value of no key, a grid the sheet does not divide into.
 static int test_new_font() {
-	editor_test::TempProjectDir dir("opennova_editor_new_font");
+	test_temp::TempDir dir("opennova_editor_new_font");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -377,7 +377,7 @@ static int test_new_font() {
 	for (int y = 1; y < 9; ++y)
 		for (int x = 1; x < 6; ++x) six.pixels[(size_t(kCellH * 2 + y) * size_t(six.width) + size_t(kCellW + x)) * 4 + 3] = 255; // 'A'
 	const std::string outside = dir.file("art/Ascii.png");
-	TEST_EXPECT(editor_test::write_bytes(outside, sheet_png(six)));
+	TEST_EXPECT(test_io::write_file(outside, sheet_png(six)));
 	const ActionOutcome made_font = editor_test::handle_to_end(session, request::new_font("Ascii", {{"sheet", outside}, {"rows", "6"}, {"spacing", "-2"}}));
 	TEST_EXPECT(made_font.done());
 	const AssetEntry *set = view.project.scan->find("Ascii.fntset");

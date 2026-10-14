@@ -33,15 +33,6 @@ func after_each() -> void:
 	await EditorFixture.teardown(self, _dirs)
 
 
-func _write(path: String, bytes: PackedByteArray) -> void:
-	assert_eq(DirAccess.make_dir_recursive_absolute(path.get_base_dir()), OK)
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file, "wrote %s" % path)
-	if file != null:
-		file.store_buffer(bytes)
-		file.close()
-
-
 ## A slow, large, additive glow that emits for a long while: big quads about the spawn point.
 func _ptl() -> String:
 	var text := "[effectdef]\n{\n\tid = Glow;\n\tpdefs = GlowDot;\n}\n\n"
@@ -81,8 +72,8 @@ func test_the_particle_renderer_draws_in_the_effect_device() -> void:
 	var dir := OS.get_cache_dir().path_join("opennova editor effect device project %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
 	assert_true(_seam.new_project(dir, "Effect Device"))
-	_write(dir.path_join(PTL), _ptl().to_utf8_buffer())
-	_write(dir.path_join("particles/particle_dot.tga"),
+	TestFs.write_bytes(self, dir.path_join(PTL), _ptl().to_utf8_buffer())
+	TestFs.write_bytes(self, dir.path_join("particles/particle_dot.tga"),
 			FileAccess.get_file_as_bytes(ProjectSettings.globalize_path("res://../fixtures/cbin/particle_dot.tga")))
 	_seam.request({"kind": "rescan"})
 	assert_true(_seam.open_document(PTL))

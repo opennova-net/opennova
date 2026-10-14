@@ -19,7 +19,7 @@ namespace {
 // A new project with its required files behind the windows; each request served as the Shell serves
 // it, a while after the last (never a run's: NavigationHistory::kCoalesceMs).
 struct Navigating {
-	editor_test::TempProjectDir dir;
+	test_temp::TempDir dir;
 	editor_test::FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session;

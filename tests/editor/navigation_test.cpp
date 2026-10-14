@@ -180,7 +180,7 @@ int test_same_place() {
 // A new project with its required files and a second menu, on a platform whose clock the test steps:
 // main.mnu opened first, then extra.mnu made and opened.
 struct Navigated {
-	editor_test::TempProjectDir dir;
+	test_temp::TempDir dir;
 	editor_test::FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session;
@@ -422,15 +422,15 @@ int test_go_to_lands() {
 	for (const AssetEntry &entry : v.project.scan->entries)
 		if (entry.kind == AssetKind::HudPosDefs) hudpos = entry.relative_path;
 	const std::string root = v.project.root;
-	TEST_EXPECT(editor_test::write_bytes(root + "/sounds/menu.lwf", test_io::read_file(fixtures + "lwf/menu.lwf")) &&
-	            editor_test::write_bytes(root + "/sounds/tone.wav", test_io::read_file(fixtures + "lwf/tone.wav")) &&
-	            editor_test::write_text(root + "/" + hudpos,
+	TEST_EXPECT(test_io::write_file(root + "/sounds/menu.lwf", test_io::read_file(fixtures + "lwf/menu.lwf")) &&
+	            test_io::write_file(root + "/sounds/tone.wav", test_io::read_file(fixtures + "lwf/tone.wav")) &&
+	            test_io::write_text(root + "/" + hudpos,
 	                                    "VEHICLE_HUD\r\n  sid BUGGY1\r\n  icon v_icon.tga\r\n  statictexture v_static.tga\r\n"
 	                                    "VEHICLE_END\r\n\r\nVEHICLE_HUD\r\n  sid BUGGY2\r\n  icon v_icon.tga\r\n"
 	                                    "  statictexture v_static2.tga\r\nVEHICLE_END\r\n") &&
-	            editor_test::write_text(root + "/textures/map.tga", "not a picture") &&
-	            editor_test::write_text(root + "/textures/grain.tga", "not a picture") &&
-	            editor_test::write_text(root + "/faces/head.grm", "basetexture map.tga\r\neyetexture grain.tga grain.tga\r\n"));
+	            test_io::write_text(root + "/textures/map.tga", "not a picture") &&
+	            test_io::write_text(root + "/textures/grain.tga", "not a picture") &&
+	            test_io::write_text(root + "/faces/head.grm", "basetexture map.tga\r\neyetexture grain.tga grain.tga\r\n"));
 	editor_test::handle_to_end(n.session, request::rescan());
 	const std::string bank = "sounds/menu.lwf", wave = "sounds/tone.wav", face = "faces/head.grm";
 
