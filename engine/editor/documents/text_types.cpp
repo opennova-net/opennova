@@ -4,10 +4,12 @@
 #include <iterator>
 #include <utility>
 
+#include <base/gameprofile/gameprofile.h>
 #include <base/io/strutil.h>
 #include <editor/project/project_files.h>
 #include <formats/scr/scr.h>
 #include <net/novacrypto/pubcrypto.h>
+#include <net/title/title_identity.h>
 #include <runtime/renderer/shader_effect_info.h>
 
 namespace opennova::editor {
@@ -57,6 +59,11 @@ bool decode_shader(const std::string &, const std::vector<uint8_t> &stored, std:
 	return true;
 }
 
+// gt.ssc's key chain: Joint Operations' (net/title/title_identity.h), the title an editor project is.
+const char *gate_tag_keys() {
+	return title_identity(gameprofile::GAME_JO)->gate_tag_keys;
+}
+
 // The gate tag written back in the form the game decodes, with what followed the encoded text in the
 // file (its line end: the decode reads printable characters alone), so the tag as it was read writes
 // the bytes it was read from.
@@ -65,7 +72,7 @@ public:
 	explicit GateTagEncoding(std::string tail) : tail_(std::move(tail)) {}
 	bool encode(const std::string &text, std::string &stored, std::vector<SourceIssue> &issues) const override {
 		(void)issues;
-		stored = encode_key_chain(std::vector<uint8_t>(text.begin(), text.end()), kGateTagKeys) + tail_;
+		stored = encode_key_chain(std::vector<uint8_t>(text.begin(), text.end()), gate_tag_keys()) + tail_;
 		return true;
 	}
 
@@ -83,7 +90,7 @@ bool decode_config(const std::string &path, const std::vector<uint8_t> &stored, 
 	text.assign(stored.begin(), stored.end());
 	if (!strutil::iequals(basename_of(path), kGateTagFile)) return true;
 	std::vector<uint8_t> tag;
-	if (!decode_key_chain(text, kGateTagKeys, tag)) {
+	if (!decode_key_chain(text, gate_tag_keys(), tag)) {
 		encoding = std::make_shared<GateTagEncoding>(std::string());
 		return true;
 	}
