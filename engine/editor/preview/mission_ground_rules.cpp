@@ -369,7 +369,8 @@ std::vector<MissionGroundVerdict> mission_ground_verdicts(const MissionScene &sc
 	std::vector<MissionPoseInput> inputs;
 	for (const MissionEntityMark &entity : entities)
 		if (entity.pool == MissionPool::Organic)
-			inputs.push_back(MissionPoseInput{ entity.row, entity.item, entity.attributes, entity.route, entity.ssn });
+			inputs.push_back(MissionPoseInput{ entity.row, entity.item, entity.attributes, entity.route, entity.ssn,
+					uint8_t(entity.alert) });
 	std::vector<MissionPose> poses;
 	if (!inputs.empty()) {
 		anim::AdmRootMotion motion;
