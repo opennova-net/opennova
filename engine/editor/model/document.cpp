@@ -820,6 +820,12 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 		NodeId row = 0;
 		std::vector<std::vector<NodeId>> before;
 	} placed;
+	// An edit that may change which records a row holds: a structural one, or a Set its type says reshapes
+	// (set_reshapes), which the renumbering compares as it does a structural edit.
+	const auto reshaping = [this](const Edit &edit) {
+		return structural(edit.operation) ||
+		       (edit.operation == EditOperation::Set && set_reshapes(edit.address.kind, edit.field));
+	};
 	// One edit staged against the rows as the edits before it left them; false, with `error`, when
 	// it is refused.
 	const auto stage_one = [&](size_t i) -> bool {
@@ -999,7 +1005,7 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 
 		// A record inside the row: the row's clone changed (the row cloned on its first touch).
 		Node *updated = staged.touch(row_id);
-		if (structural(edit.operation) && edit.operation != EditOperation::Apply) {
+		if (reshaping(edit) && edit.operation != EditOperation::Apply) {
 			placed.before = place_lists(*updated);
 			if (!placed.before.empty()) placed.row = row_id;
 		}
@@ -1196,7 +1202,7 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 		return true;
 	};
 	for (size_t i = 0; i < edits.size(); ++i) {
-		const bool reorders = !targets.empty() && structural(edits[i].operation);
+		const bool reorders = !targets.empty() && reshaping(edits[i]);
 		const std::vector<std::vector<NodeId>> before =
 		        reorders ? collection_orders(targets, staged) : std::vector<std::vector<NodeId>>();
 		placed = Placed();
