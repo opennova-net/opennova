@@ -141,32 +141,6 @@ func test_new_project_fills_builds_and_plays() -> void:
 	assert_eq(_seam.get_required_missing(), 0)
 
 
-## A mono 16-bit RIFF wave of `seconds` at 22050 Hz, a tone.
-func _wave_bytes(seconds: float) -> PackedByteArray:
-	var samples := int(22050 * seconds)
-	var data := PackedByteArray()
-	data.resize(samples * 2)
-	for i in samples:
-		data.encode_s16(i * 2, int(sin(i * 0.1) * 8000.0))
-	var head := PackedByteArray()
-	head.resize(44)
-	head.encode_u32(0, 0x46464952) # RIFF
-	head.encode_u32(4, 36 + data.size())
-	head.encode_u32(8, 0x45564157) # WAVE
-	head.encode_u32(12, 0x20746d66) # "fmt "
-	head.encode_u32(16, 16)
-	head.encode_u16(20, 1) # PCM
-	head.encode_u16(22, 1) # mono
-	head.encode_u32(24, 22050)
-	head.encode_u32(28, 44100)
-	head.encode_u16(32, 2)
-	head.encode_u16(34, 16)
-	head.encode_u32(36, 0x61746164) # data
-	head.encode_u32(40, data.size())
-	head.append_array(data)
-	return head
-
-
 ## The workspace's sound (the MCP gaps lane): play_sound, served by the session, asks a play the Shell takes,
 ## decoding the project's wave as the game decodes it and playing it, then reporting it so the workspace
 ## section says it plays; the card closing (set_workspace) stops it, and so does the project closing; a name
@@ -180,7 +154,7 @@ func test_play_sound_plays_and_stops() -> void:
 	assert_true(_seam.new_project(root, "Sounds"))
 	assert_eq(DirAccess.make_dir_recursive_absolute(root.path_join("sounds")), OK)
 	var file := FileAccess.open(root.path_join("sounds/beep.wav"), FileAccess.WRITE)
-	file.store_buffer(_wave_bytes(3.0))
+	file.store_buffer(TestFs.wave_bytes(3.0))
 	file.close()
 	assert_true(_run_operation({"kind": "rescan"}))
 	var answer := _request({"kind": "play_sound", "path": "beep.wav"})
@@ -225,7 +199,7 @@ func test_play_set_plays_its_layers() -> void:
 	assert_eq(DirAccess.make_dir_recursive_absolute(root.path_join("sounds")), OK)
 	for name in ["low.wav", "high.wav"]:
 		var file := FileAccess.open(root.path_join("sounds").path_join(name), FileAccess.WRITE)
-		file.store_buffer(_wave_bytes(3.0))
+		file.store_buffer(TestFs.wave_bytes(3.0))
 		file.close()
 	assert_true(_run_operation({"kind": "rescan"}))
 	assert_true(bool(_request({"kind": "create_file", "path": "game.lwf"}).get("ok", false)))
@@ -280,7 +254,7 @@ func test_play_dialog_plays_its_lines_in_turn() -> void:
 	assert_eq(DirAccess.make_dir_recursive_absolute(root.path_join("sounds")), OK)
 	for name in ["first.wav", "second.wav"]:
 		var file := FileAccess.open(root.path_join("sounds").path_join(name), FileAccess.WRITE)
-		file.store_buffer(_wave_bytes(0.5))
+		file.store_buffer(TestFs.wave_bytes(0.5))
 		file.close()
 	assert_true(_run_operation({"kind": "rescan"}))
 	assert_true(bool(_request({"kind": "create_file", "path": "talk.lwf"}).get("ok", false)))

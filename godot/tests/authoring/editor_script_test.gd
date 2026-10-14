@@ -48,13 +48,6 @@ func _fixture(relative: String) -> PackedByteArray:
 	return FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(FIXTURES + relative))
 
 
-func _write(path: String, bytes: PackedByteArray) -> void:
-	assert_eq(DirAccess.make_dir_recursive_absolute(path.get_base_dir()), OK)
-	var out := FileAccess.open(path, FileAccess.WRITE)
-	out.store_buffer(bytes)
-	out.close()
-
-
 ## A project of the fixture script and the effect, the ammo and the sound set its operands name (its text
 ## key's table left out: that reference is missing, a mark on line 7), and the minted credits file.
 func _project(texts := 0) -> bool:
@@ -70,13 +63,13 @@ func _project(texts := 0) -> bool:
 					{"op": "set", "id": "s", "field": "name", "value": "EXPLO_BASE"}]}), "its set added")
 	assert_true(_seam.done({"kind": "save_all"}), "game.lwf saved")
 	assert_true(_seam.done({"kind": "close_document", "path": "game.lwf"}), "game.lwf closed")
-	_write(dir.path_join(SCRIPT), _fixture("wac/text_document.wac"))
-	_write(dir.path_join("particles/effects.ptl"), _fixture("particle/synth_minimal_effect.ptl"))
-	_write(dir.path_join("defs/ammo.def"),
+	TestFs.write_bytes(self, dir.path_join(SCRIPT), _fixture("wac/text_document.wac"))
+	TestFs.write_bytes(self, dir.path_join("particles/effects.ptl"), _fixture("particle/synth_minimal_effect.ptl"))
+	TestFs.write_bytes(self, dir.path_join("defs/ammo.def"),
 			TestFs.crlf("ammo AT_CONTRACT\nmax_age 1.5\nend\nammo ammo_satchel\nmax_age 2\nend\n").to_utf8_buffer())
-	_write(dir.path_join(CREDITS), _fixture("cbin/synth_nlist.kda"))
+	TestFs.write_bytes(self, dir.path_join(CREDITS), _fixture("cbin/synth_nlist.kda"))
 	for i in texts:
-		_write(dir.path_join("notes/note%d.txt" % i), ("note %d\r\n" % i).to_utf8_buffer())
+		TestFs.write_bytes(self, dir.path_join("notes/note%d.txt" % i), ("note %d\r\n" % i).to_utf8_buffer())
 	_seam.request({"kind": "rescan"})
 	return _seam.settled
 
