@@ -103,10 +103,7 @@ std::pair<size_t, size_t> sibling_place(const Document &document, const NodeAddr
 	return {0, 0};
 }
 
-bool has_code(const std::vector<Diagnostic> &diagnostics, const char *code) {
-	for (const Diagnostic &d : diagnostics) if (d.code() == code) return true;
-	return false;
-}
+using editor_test::has_code;
 
 bool load(MnuDocument &document, const std::string &path) {
 	Diagnostic error;

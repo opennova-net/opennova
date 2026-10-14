@@ -18,6 +18,7 @@
 
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
+#include "editor/editor_test_support.h"
 
 using namespace opennova;
 using namespace opennova::editor;
@@ -34,9 +35,7 @@ FieldUse use_of(const AiProfileDocument &document, const NodeAddress &at, const 
 	return FieldUse();
 }
 
-bool has_code(const std::vector<Diagnostic> &findings, const char *code) {
-	return std::any_of(findings.begin(), findings.end(), [&](const Diagnostic &d) { return d.code() == code; });
-}
+using editor_test::has_code;
 
 const std::string kFile =
 		"description     \"Grnd - test\"\r\n"

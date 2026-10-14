@@ -71,9 +71,7 @@ const SoundBankRow *row_named(const SoundBankDocument &bank, SoundBankKind kind,
 	return nullptr;
 }
 
-bool has_code(const std::vector<Diagnostic> &findings, const char *code) {
-	return std::any_of(findings.begin(), findings.end(), [&](const Diagnostic &d) { return d.code() == code; });
-}
+using editor_test::has_code;
 
 // A bank of `waves` (name = file stem) and one set of a layer naming each, flags `flags`.
 std::vector<uint8_t> bank_bytes(const std::vector<std::string> &waves, const std::string &set_name, uint32_t flags,

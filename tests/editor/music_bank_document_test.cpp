@@ -43,10 +43,7 @@ std::vector<uint8_t> synth() {
 }
 
 using editor_test::set_edit;
-
-bool has_code(const std::vector<Diagnostic> &findings, const char *code) {
-	return std::any_of(findings.begin(), findings.end(), [&](const Diagnostic &d) { return d.code() == code; });
-}
+using editor_test::has_code;
 
 NodeAddress stream_at(const MusicBankDocument &bank, size_t place) {
 	const MusicBankRow &row = *bank.bank_row();

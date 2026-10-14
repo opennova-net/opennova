@@ -89,12 +89,7 @@ bool mark_for_import(const std::string &source) {
 }
 
 using editor_test::NoProcess;
-
-size_t count_code(const std::vector<Diagnostic> &diagnostics, const std::string &code) {
-	size_t n = 0;
-	for (const Diagnostic &d : diagnostics) n += d.code() == code ? 1 : 0;
-	return n;
-}
+using editor_test::count_code;
 
 std::string read_text(const std::string &path) {
 	std::string text, message;

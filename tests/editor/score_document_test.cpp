@@ -30,10 +30,7 @@ constexpr NodeKind kVar = node_kind(ScoreKind::Var);
 
 std::vector<uint8_t> bytes_of(const std::string &text) { return std::vector<uint8_t>(text.begin(), text.end()); }
 
-bool has_code(const std::vector<Diagnostic> &findings, const char *code) {
-	return std::any_of(findings.begin(), findings.end(), [&](const Diagnostic &d) { return d.code() == code; });
-}
-
+using editor_test::has_code;
 using editor_test::set_edit;
 
 const ScoreBlockRow *block_named(const ScoreDocument &document, const std::string &name) {

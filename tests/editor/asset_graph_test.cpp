@@ -124,11 +124,7 @@ bool has_symbol(const AssetGraph &graph, ReferenceKind kind, const std::string &
 	return false;
 }
 
-size_t count_code(const std::vector<Diagnostic> &diagnostics, const char *code) {
-	size_t n = 0;
-	for (const Diagnostic &d : diagnostics) if (d.code() == code) ++n;
-	return n;
-}
+using editor_test::count_code;
 
 std::string read_text(const std::string &path) {
 	std::ifstream in(path, std::ios::binary);

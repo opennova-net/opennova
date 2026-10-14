@@ -188,9 +188,7 @@ std::string sha256(const std::string &bytes) {
 	return opennova::io::sha256_hex(bytes.data(), bytes.size());
 }
 
-bool has_code(const std::vector<Diagnostic> &findings, const char *code) {
-	return std::any_of(findings.begin(), findings.end(), [&](const Diagnostic &d) { return d.code() == code; });
-}
+using editor_test::has_code;
 
 } // namespace
 

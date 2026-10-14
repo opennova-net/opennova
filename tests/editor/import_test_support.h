@@ -83,11 +83,7 @@ inline const ImportNotFollowed *not_followed(const ImportPlan &plan, ReferenceKi
 	return nullptr;
 }
 
-inline bool has_code(const std::vector<Diagnostic> &diagnostics, const char *code) {
-	for (const Diagnostic &d : diagnostics)
-		if (d.code() == code) return true;
-	return false;
-}
+using editor_test::has_code;
 
 inline bool has_error(const std::vector<Diagnostic> &diagnostics) {
 	for (const Diagnostic &d : diagnostics)

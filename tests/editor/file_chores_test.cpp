@@ -65,9 +65,7 @@ std::vector<uint8_t> bytes_of(const std::string &root, const std::string &relati
 	return out;
 }
 
-bool has_code(const std::vector<Diagnostic> &findings, const char *code) {
-	return std::any_of(findings.begin(), findings.end(), [code](const Diagnostic &d) { return d.code() == code; });
-}
+using editor_test::has_code;
 
 // A Problems row of `code` whose words name `name`.
 bool row_naming(const SessionView &view, const char *code, const std::string &name) {

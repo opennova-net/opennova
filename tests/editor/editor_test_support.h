@@ -450,6 +450,18 @@ inline opennova::editor::Diagnostic finding_of(opennova::editor::DiagnosticSever
 			std::move(field));
 }
 
+// Whether a finding of `code` is among `findings`, and how many are.
+inline bool has_code(const std::vector<opennova::editor::Diagnostic> &findings, const std::string &code) {
+	for (const opennova::editor::Diagnostic &d : findings)
+		if (d.code() == code) return true;
+	return false;
+}
+inline size_t count_code(const std::vector<opennova::editor::Diagnostic> &findings, const std::string &code) {
+	size_t n = 0;
+	for (const opennova::editor::Diagnostic &d : findings) n += d.code() == code ? 1 : 0;
+	return n;
+}
+
 // What the game install makes of the files at `paths`, as its validation keys them (OriginalData, the game's
 // own data's baseline, ready): every finding of `rows` about one of them, by the file's logical name.
 inline opennova::editor::OriginalData originals_of(const std::vector<opennova::editor::Diagnostic> &rows,

@@ -42,10 +42,7 @@ std::vector<uint8_t> fixture(const char *name) {
 }
 
 using editor_test::set_edit;
-
-bool has_code(const std::vector<Diagnostic> &findings, const char *code) {
-	return std::any_of(findings.begin(), findings.end(), [&](const Diagnostic &d) { return d.code() == code; });
-}
+using editor_test::has_code;
 
 NodeAddress glyph_at(const FontDocument &font, uint8_t byte) {
 	const FontRow &row = *font.font_row();

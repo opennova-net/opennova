@@ -76,11 +76,7 @@ std::string text(const Document &document, NodeAddress address, const char *fiel
 	return std::get<std::string>(value);
 }
 
-bool has_code(const std::vector<Diagnostic> &diagnostics, const std::string &code) {
-	for (const Diagnostic &d : diagnostics)
-		if (d.code() == code) return true;
-	return false;
-}
+using editor_test::has_code;
 
 } // namespace
 

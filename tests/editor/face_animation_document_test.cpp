@@ -45,14 +45,8 @@ std::vector<uint8_t> person() {
 }
 
 using editor_test::set_edit;
-
-bool has_code(const std::vector<Diagnostic> &findings, const char *code) {
-	return std::any_of(findings.begin(), findings.end(), [&](const Diagnostic &d) { return d.code() == code; });
-}
-
-size_t count_code(const std::vector<Diagnostic> &findings, const char *code) {
-	return size_t(std::count_if(findings.begin(), findings.end(), [&](const Diagnostic &d) { return d.code() == code; }));
-}
+using editor_test::has_code;
+using editor_test::count_code;
 
 const FaceAnimationRow &face_of(const FaceAnimationDocument &document) { return *document.face_row(); }
 
