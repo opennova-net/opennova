@@ -443,9 +443,7 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 	static const char *const kTurnNames[] = { "1 deg", "5 deg", "15 deg", "45 deg", "90 deg" };
 	combo("Turn", options.turn, kMissionTurns, kTurnNames, IM_ARRAYSIZE(kTurnNames), "deg",
 			"What a turned entity's heading snaps to. Hold Ctrl while turning to turn freely.");
-	row.next(ui_kit::checkbox_width("Stick"));
-	ImGui::Checkbox("Stick", &options.stick);
-	ui_kit::tooltip("A move keeps each entity's height over the ground; off, its height stands.");
+	ui_kit::check(row, "Stick", &options.stick, "A move keeps each entity's height over the ground; off, its height stands.");
 	if (ui_kit::tool(row, "Show", true, "What the picture draws (terrain, sky, water, models), what the viewport marks "
 										"over it, the labels and how far a mark is drawn."))
 		ImGui::OpenPopup("show");

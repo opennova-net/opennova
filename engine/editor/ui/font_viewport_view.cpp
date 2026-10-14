@@ -62,15 +62,12 @@ void FontViewportView::draw_ready(Workspace &workspace, const ViewportModel &vie
 			                uint32_t(rgb[2] * 255.0f + 0.5f);
 		ui_kit::tooltip("The colour the text is asked in: every caller halves it and the page's MODULATE2X doubles it "
 		                "back, so it shows as asked where the page is white.");
-		row.next(ui_kit::checkbox_width("Bold"));
-		ImGui::Checkbox("Bold", &options.bold);
-		ui_kit::tooltip("The drawer's bold: each glyph struck again a pixel right and a pixel up.");
-		row.next(ui_kit::checkbox_width("Italic"));
-		ImGui::Checkbox("Italic", &options.italic);
-		ui_kit::tooltip("The drawer's italic: each glyph's top sheared right by an eighth of its height.");
-		row.next(ui_kit::checkbox_width("Underline"));
-		ImGui::Checkbox("Underline", &options.underline);
-		ui_kit::tooltip("The drawer's underline: a line under the run in twice the colour.");
+		ui_kit::check(row, "Bold", &options.bold,
+		              "The drawer's bold: each glyph struck again a pixel right and a pixel up.");
+		ui_kit::check(row, "Italic", &options.italic,
+		              "The drawer's italic: each glyph's top sheared right by an eighth of its height.");
+		ui_kit::check(row, "Underline", &options.underline,
+		              "The drawer's underline: a line under the run in twice the colour.");
 	}
 	if (options != model.options()) workspace.request(request::set_viewport(model.path(), font_options_change(options)));
 	if (model.shown_page() < 0) {

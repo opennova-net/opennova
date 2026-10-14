@@ -51,11 +51,7 @@ void effect_picker(Workspace &workspace, const EffectViewport &model, ui_kit::Wr
 	// Its block in the text: the script device's caret there (a Go to, so back and forward record it).
 	const std::string place = model.place_of(shown);
 	if (ui_kit::tool(row, "Go to", !place.empty(), place.empty() ? "The effect is not in the text as it stands." : "Its block in the text.")) {
-		ReferenceTarget target;
-		target.file = model.path();
-		target.locator = place;
-		target.editable = true;
-		window_requests::go_to(workspace, target);
+		window_requests::go_to(workspace, window_requests::target_at(model.path(), place));
 	}
 }
 
@@ -81,9 +77,8 @@ void EffectViewportView::draw_ready(Workspace &workspace, const ViewportModel &v
 	clock_buttons(workspace, row, model, context.input.clock, "Run or hold the preview clock: the effect's game ticks.",
 			"The effect spawned anew: the preview clock at tick 0.");
 	EffectViewportOptions options = model.options();
-	row.next(ui_kit::checkbox_width("Grid"));
-	ImGui::Checkbox("Grid", &options.grid);
-	ui_kit::tooltip("A metre's squares on the ground the effect spawns on (the editor's aid).");
+	ui_kit::check(row, "Grid", &options.grid,
+	              "A metre's squares on the ground the effect spawns on (the editor's aid).");
 	// The mission wind every GLOBALWIND particle drifts with, as a mission's header gives it.
 	row.next(ui_kit::button_width("Wind"));
 	if (ImGui::Button("Wind")) ImGui::OpenPopup("wind");
@@ -128,11 +123,7 @@ void EffectViewportView::draw_ready(Workspace &workspace, const ViewportModel &v
 		std::string file, locator;
 		if (model.spawned_place(file, locator) &&
 				ui_kit::tool(note, "Go to it", true, "The definition the game spawns, in " + file + ".")) {
-			ReferenceTarget target;
-			target.file = file;
-			target.locator = locator;
-			target.editable = true;
-			window_requests::go_to(workspace, target);
+			window_requests::go_to(workspace, window_requests::target_at(file, locator));
 		}
 		ImGui::SameLine();
 		ui_kit::clipped_text(said);
