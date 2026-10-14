@@ -172,6 +172,7 @@ bool MissionPoses::refresh(const SessionView &view, const MissionScene &scene) {
 			// Where it stood, until stand() stands it again.
 			pose.lift = were[i].lift;
 			pose.settled = were[i].settled;
+			pose.stood = were[i].stood;
 			pose.on = were[i].on;
 		}
 		if (same_row && same_pose(were[i], pose)) {
@@ -318,9 +319,11 @@ bool MissionPoses::stand(const MissionScene &scene, const MissionPeopleFloor &fl
 		} else {
 			on = 0;
 		}
-		if (lift == pose.lift && settled == pose.settled && on == pose.on) continue;
+		const bool stood = terrain != nullptr;
+		if (lift == pose.lift && settled == pose.settled && stood == pose.stood && on == pose.on) continue;
 		pose.lift = lift;
 		pose.settled = settled;
+		pose.stood = stood;
 		pose.on = on;
 		pose.stamp = ++serial_;
 		moved = true;

@@ -87,6 +87,10 @@ struct MissionPose {
 	// draws the person there. The rise alone with no terrain read.
 	double lift = 0.0;
 	bool settled = false; // the solve moved it
+	// A ground was read for it (a terrain): unsettled there, the warmup's solve leaves it in the air, the resolver
+	// marking it airborne, and its think exits until it lands [orig: Entity_WarmUpOrganicAnimation
+	// @0x4B8BD8..0x4B8BF5; Entity_UpdateInfantryAI @0x4BAA61..0x4BAA66].
+	bool stood = false;
 	NodeId on = 0;        // the record whose floor the solve met (0: the terrain, or nothing)
 	std::string clip, source_clip; // the .bad each channel plays ("" none)
 	uint32_t stamp = 0; // moves when anything above does

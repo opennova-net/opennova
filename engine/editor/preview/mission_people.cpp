@@ -106,6 +106,7 @@ void MissionPeople::reset(const MissionPoses &poses, int32_t tick) {
 		person.ssn = pose.ssn;
 		person.alert = pose.alert;
 		person.guarding = pose.guarding;
+		person.airborne = pose.stood && !pose.settled;
 		if (in_world) {
 			const auto body = world_->bodies.find(pose.row);
 			const world::AiEntity *ai = body != world_->bodies.end() ? world_->mission->world.ai.for_handle(body->second)
@@ -167,9 +168,10 @@ bool MissionPeople::run_to(const MissionPoses &poses, int32_t tick) {
 			const uint32_t word = person.channels.last_events;
 			if (word != 0)
 				events_.push_back(Event{ person.row, tick_, word, person.channels.clip_phase, frame.capsule_bottom });
-			// The think after the head, on its own 16-tick stagger.
-			world::infantry_org1_still_think(
-					person.channels, motion, game_tick, person.ssn, person.guarding, person.alert);
+			// The think after the head, on its own 16-tick stagger, unless the spawn left the body in the air.
+			if (!person.airborne)
+				world::infantry_org1_still_think(
+						person.channels, motion, game_tick, person.ssn, person.guarding, person.alert);
 		}
 	}
 	for (Person &person : people_) {
