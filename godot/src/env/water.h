@@ -10,6 +10,7 @@
 #include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/node3d.hpp>
+#include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/classes/sub_viewport.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -101,8 +102,9 @@ public:
 	// This water's globals written again from its state whatever the hold
 	// (its render activity untouched); an unbuilt water writes the absent set.
 	void republish_globals();
-	// How many times a water wrote its process-wide globals since the process began (a read-back for
-	// the hold's tests: a headless renderer keeps no global to read back).
+	// How many times a water wrote its process-wide globals since the process began, one count per
+	// value written (each shader global, the shader cache's water plane): a read-back for the
+	// hold's tests (a headless renderer keeps no global to read back).
 	static int64_t get_global_writes() { return global_writes_; }
 	// Irreversibly drop the retained water renderer graph during process
 	// exit. Normal world unload deliberately keeps this graph warm for the
@@ -231,6 +233,9 @@ private:
 	bool mirror_enabled_ = true;
 	bool globals_held_ = false;
 	static int64_t global_writes_;
+	static void _write_global(
+			RenderingServer *p_rs, const StringName &p_name, const Variant &p_value);
+	static void _clear_water_plane();
 	float terrain_water_height_ = 0.0f;
 	bool terrain_bounds_valid_ = false;
 	float terrain_min_height_ = 0.0f;

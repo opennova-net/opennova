@@ -172,8 +172,9 @@ public:
 	// published its own, E13).
 	static void publish_absent();
 	// How many times a mask pass wrote its globals since the process began,
-	// the absent values too (a read-back for the hold's tests).
-	static int64_t get_global_writes() { return global_writes_.load(); }
+	// the absent values too: one count per process-wide value written (a
+	// read-back for the hold's tests).
+	static int64_t get_global_writes() { return global_writes_; }
 
 private:
 	std::shared_ptr<FoliageMaskFrame> _build_frame(
@@ -209,7 +210,7 @@ private:
 	bool eye_written_ = false;
 	bool texture_bound_ = false;
 	bool globals_held_ = false;
-	static inline std::atomic<int64_t> global_writes_{ 0 };
+	static inline int64_t global_writes_ = 0;
 	static void _write_global(
 			RenderingServer *p_rs, const StringName &p_name, const Variant &p_value);
 	int64_t last_draws_ = 0;

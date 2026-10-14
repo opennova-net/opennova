@@ -13,7 +13,6 @@
 #include <godot_cpp/variant/node_path.hpp>
 
 #include <array>
-#include <atomic>
 #include <memory>
 #include <unordered_map>
 
@@ -167,9 +166,10 @@ public:
 	// Celestial after one that published its own, E13).
 	static void publish_absent();
 	// How many times a Celestial wrote the veil global since the process
-	// began, its absent value too (a read-back for the hold's tests: a
+	// began, its absent value too: one count per process-wide value written,
+	// the rule every held row counts by (a read-back for the hold's tests: a
 	// headless renderer keeps no global to read back).
-	static int64_t get_global_writes() { return global_writes_.load(); }
+	static int64_t get_global_writes() { return global_writes_; }
 	int get_sun_veil_stopdown() const;
 
 	void _ready() override;
@@ -264,7 +264,7 @@ private:
 	// The last advanced frame's sun-veil pair (env_celestial.h SunVeil).
 	int sun_veil_glare_ = 0;
 	bool globals_held_ = false;
-	static inline std::atomic<int64_t> global_writes_{ 0 };
+	static inline int64_t global_writes_ = 0;
 	static void _write_global(
 			RenderingServer *p_rs, const StringName &p_name, const Variant &p_value);
 	int sun_veil_stopdown_ = 0;

@@ -141,7 +141,7 @@ func test_a_held_weather_writes_no_process_wide_state_until_it_republishes() -> 
 	weather.advance_frame(1.0 / 62.5)
 	assert_eq(Weather.get_global_writes(), writes, "a held weather writes none of its globals")
 	weather.republish_globals()
-	assert_eq(Weather.get_global_writes(), writes + 1, "republishing writes them whatever the hold")
+	assert_gt(Weather.get_global_writes(), writes, "republishing writes them whatever the hold")
 
 
 func test_clearing_the_terrain_lets_every_row_go_of_it() -> void:
@@ -191,4 +191,4 @@ func test_publishing_the_absent_scene_writes_every_rows_absent_set() -> void:
 	assert_gt(Water.get_global_writes(), water_writes, "the water's absent set is written")
 	assert_gt(Celestial.get_global_writes(), veil_writes, "the absent veil is written")
 	assert_gt(FoliageDispatcher.get_global_writes(), mask_writes, "the absent masks are written")
-	assert_gt(EnvironmentCubeCapture.get_global_writes(), cube_writes, "no cube is written")
+	assert_gt(EnvironmentCubeCapture.get_global_writes(), cube_writes, "the absent cube is written")

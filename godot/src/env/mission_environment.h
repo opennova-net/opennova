@@ -260,8 +260,9 @@ public:
 	// frame, so another picture never renders under it; the game never holds.
 	void set_globals_held(bool p_held) { globals_held_ = p_held; }
 	bool is_globals_held() const { return globals_held_; }
-	// How many process-wide shader globals every environment wrote since the process began: a read-back
-	// for the hold's tests (a headless renderer keeps no global to read back).
+	// How many process-wide shader globals every environment wrote since the process began, one
+	// count per value written: a read-back for the hold's tests (a headless renderer keeps no
+	// global to read back).
 	static int64_t get_global_writes() { return global_writes_; }
 
 
