@@ -69,6 +69,14 @@ class Lister;
 
 namespace opennova::serve {
 
+// The display width a host takes when its platform reports none (opennova-serve off Windows,
+// as on the hosted servers' Linux machines, or a failed GetSystemMetrics): a representative
+// retail host's desktop. Retail always runs on a Windows desktop, whose width picks the HUD
+// fonts (HUD_InitAllFonts @0x51EE20); 1024 picks Arial16b as every retail host wider than 800
+// does, where a width of 0 would pick Arial12b, whose narrow glyphs split chat lines retail's
+// do not. A platform equivalent, not a witnessed value (D-NET-720, platform class).
+inline constexpr int32_t kHeadlessDesktopWidth = 1024;
+
 struct ServeOptions {
 	std::string resource_dir; // --resource-dir
 	std::string expansion;    // /exp or /mod <name>: the last one, its first 32 bytes
@@ -93,10 +101,10 @@ struct ServeOptions {
 	nw_lister::Credentials credentials;            // main() loads it and masks every value
 	LogSwitches log_switches; // /PROFILE <path>, /PUNT.TXT, /PUNTLOG, /CHEATLOG (server_logs.h)
 	// The primary desktop's width, the display width game.cfg's defaults take ahead of its
-	// video_res line; main() samples it on Windows, and a host with no desktop has 0, the
-	// failure value of the call [orig: Config_SetDefaults @0x54D0F3..0x54D0F6
-	// (GetSystemMetrics(SM_CXSCREEN) into outWidth)].
-	int32_t desktop_width = 0;
+	// video_res line [orig: Config_SetDefaults @0x54D0F3..0x54D0F6 (GetSystemMetrics
+	// (SM_CXSCREEN) into outWidth)]. main() samples it on Windows; a platform that reports
+	// none keeps kHeadlessDesktopWidth.
+	int32_t desktop_width = kHeadlessDesktopWidth;
 };
 
 // Parses the command line (argv[1..]). Returns 0 when the options parsed, 1 on
@@ -165,6 +173,8 @@ public:
 	bool quit() const { return quit_; }
 	// The missions the session has booted (the starting map is 1).
 	int missions_played() const { return missions_played_; }
+	// The chat display's wrap font picked at the last mission start (select_chat_font).
+	const std::string &chat_font_name() const { return chat_font_name_; }
 	// The cfg block (game.cfg, the host file over it; remote_admin_port is
 	// the admin server's) and the weapon table its avail_wpn rows address.
 	const gamecfg::GameCfg &game_cfg() const { return config_.cfg(); }

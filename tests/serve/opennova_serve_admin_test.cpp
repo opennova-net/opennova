@@ -257,6 +257,9 @@ int main() {
 	}
 	serve::Server &server = *holder;
 	CHECK(server.admin_port() == admin_port);
+	// No video_res and no display width from the test's platform: the chat wrap font is the
+	// 1024-wide platform equivalent's, Arial16b (D-NET-720).
+	CHECK(server.chat_font_name() == "Arial16b.fnt");
 	CHECK(serve_test::read_text(work / "admin_log.txt").empty());
 	// banned.txt loaded at the session's round init.
 	{

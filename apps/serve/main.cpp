@@ -127,8 +127,9 @@ int main(int argc, char **argv) {
 		return 2;
 	}
 #ifdef _WIN32
-	// The defaults' display width (server.h ServeOptions::desktop_width).
-	options.desktop_width = GetSystemMetrics(SM_CXSCREEN);
+	// The defaults' display width (server.h ServeOptions::desktop_width); a call that reports
+	// none (0) leaves the platform equivalent.
+	if (const int width = GetSystemMetrics(SM_CXSCREEN); width > 0) options.desktop_width = width;
 #endif
 	// The log sink masks every registered secret, so an account name, a
 	// password or a session tag never reaches the console (opennova-nw-lister's).
