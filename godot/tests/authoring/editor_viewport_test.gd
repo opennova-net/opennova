@@ -482,9 +482,10 @@ func test_menu_follows_its_tables_and_its_style() -> void:
 	assert_true(String(_viewport("state").get("error", "")).contains("no document is open"))
 
 
-## S9k1 and S9k2 on the editor's wire, a smoke (viewport_wire_test, menu_viewport_test and menu_arrange_test pin
-## the rules): TITLE and EXIT selected, a drag of TITLE on the grid lands it on the screen's grid and moves EXIT as
-## far, one undo step; Align left over both, one step; an unknown handle refused.
+## S9k1 and S9k2 on the editor's wire, a smoke (viewport_wire_test, menu_viewport_test and
+## menu_arrange_test pin the rules): TITLE and EXIT selected, a drag of TITLE on the grid lands it
+## on the screen's grid and moves EXIT as far, one undo step; Align left over both, one step; an
+## unknown handle refused.
 func test_a_drag_and_an_arrange_on_the_wire() -> void:
 	if _app == null:
 		return
@@ -502,12 +503,15 @@ func test_a_drag_and_an_arrange_on_the_wire() -> void:
 	assert_eq(title_at.slice(0, 2), [16, 200], "TITLE on the grid: %s" % str(title_at))
 	var exit_was: Array = _item(start, "EXIT").get("rect", [0, 0])
 	var exit_at: Array = _item(moved, "EXIT").get("rect", [0, 0])
-	assert_eq(exit_at.slice(0, 2), [int(exit_was[0]) + 16, int(exit_was[1]) + 5], "EXIT moved as far")
+	var exit_wanted := [int(exit_was[0]) + 16, int(exit_was[1]) + 5]
+	assert_eq(exit_at.slice(0, 2), exit_wanted, "EXIT moved as far")
 	_seam.undo()
-	assert_eq(str(_item(_state(), "TITLE").get("rect", [])), str(_item(start, "TITLE").get("rect", [])))
+	var title_back := str(_item(_state(), "TITLE").get("rect", []))
+	assert_eq(title_back, str(_item(start, "TITLE").get("rect", [])), "TITLE back")
 	assert_false(_seam.is_document_dirty(), "one undo step")
 	assert_true(_command("align_left", [title, exit]))
-	assert_eq(int(_seam.get_field(exit, "position.left")), int(_seam.get_field(title, "position.left")))
+	var title_left := int(_seam.get_field(title, "position.left"))
+	assert_eq(int(_seam.get_field(exit, "position.left")), title_left, "EXIT's left edge TITLE's")
 	assert_false(_drag({"id": title, "handle": "middle", "by": [1, 1]}), "an unknown handle")
 
 
