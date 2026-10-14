@@ -32,15 +32,14 @@
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
+#include "editor/mission_test_support.h"
 
 using namespace opennova::editor;
 using opennova::io::JsonValue;
 
 namespace {
 
-std::string fixture(const std::string &rel) {
-	return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/" + rel;
-}
+using mission_test::fixture;
 
 // Files by name (any case), each write moving its stamp.
 struct GroundFiles final : opennova::FileSource {
@@ -110,13 +109,7 @@ std::vector<uint8_t> foliage_map() {
 	return pcx_of(map);
 }
 
-// Class c's block's middle texel, mission metres (the island layout: texel (512 + x, 512 - y) of the
-// 1024-unit atlas, a 256 map's texel four units), at the texel's middle.
-void block_middle(int c, double &x, double &y) {
-	const int tx = 32 + 32 * (c % 5), tz = 32 + 32 * (c / 5);
-	x = 4.0 * tx - 512.0 + 2.0;
-	y = 512.0 - 4.0 * tz - 2.0;
-}
+using mission_test::block_middle;
 
 // A .til of one tile whose stored z is `z` (the north edge of the square the game draws it over; the surface sampler
 // tests the square 16 units north of -z, D-TIL-9).
@@ -133,19 +126,7 @@ std::vector<uint8_t> tile_stored(double x, double z, uint8_t index) {
 	return bytes;
 }
 
-// A .til of one tile whose surface sampler square starts at (x, y), 16 units east and north (its stored z -y).
-std::vector<uint8_t> tile_at(double x, double y, uint8_t index) {
-	opennova::TilFile til;
-	opennova::TilOverlayEntry entry;
-	entry.x_fixed = opennova::bms::to_fixed_16_16(x);
-	entry.z_fixed = -opennova::bms::to_fixed_16_16(y);
-	entry.tile_index = index;
-	til.entries.push_back(entry);
-	std::vector<uint8_t> bytes;
-	std::string error;
-	if (!opennova::save_til(til, bytes, error)) std::fprintf(stderr, "the .til: %s\n", error.c_str());
-	return bytes;
-}
+using mission_test::tile_at;
 
 std::shared_ptr<GroundFiles> tmap_files() {
 	auto files = std::make_shared<GroundFiles>();

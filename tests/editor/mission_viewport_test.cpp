@@ -75,6 +75,7 @@
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
+#include "editor/mission_test_support.h"
 #include "editor/test_platform.h"
 #include "editor/viewport_test_support.h"
 
@@ -91,9 +92,7 @@ using editor_test::NoProcess;
 
 constexpr const char *kMission = "missions/synth_logic.bms";
 
-std::string fixture(const std::string &rel) {
-	return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/" + rel;
-}
+using mission_test::fixture;
 
 // An item catalog for the drop: the pump drawn by two items, the armory a building, the shed a
 // person, the crate (a model with a `ground` user point) an object, and the waypoint marker path 1's stops are.
@@ -169,10 +168,7 @@ struct Rig {
 	ViewportAction last() { return devices.last(path, ViewportKind::Mission); }
 };
 
-NodeAddress first_of(const Document &document, MissionKind kind) {
-	const std::vector<const Node *> rows = static_cast<const MissionDocument &>(document).rows_of(kind);
-	return rows.empty() ? NodeAddress() : NodeAddress{ rows.front()->id, rows.front()->kind, 0 };
-}
+using mission_test::first_of;
 
 using editor_test::set_edit;
 
@@ -2115,28 +2111,8 @@ std::vector<uint8_t> ground_charmap() {
 	return bytes;
 }
 
-// Where class c's block has its middle, mission metres: its texel (32 + 32 (c % 5), 32 + 32 (c / 5)), a
-// texel 4 units of the 1024-unit atlas whose texel (512 + x, 512 - y) mission (x, y) is on the island
-// (terrain-re.md, the island layout; Tmap's grid is the same), at the texel's middle.
-void block_middle(int c, double &x, double &y) {
-	const int tx = 32 + 32 * (c % 5), tz = 32 + 32 * (c / 5);
-	x = 4.0 * tx - 512.0 + 2.0;
-	y = 512.0 - 4.0 * tz - 2.0;
-}
-
-std::vector<uint8_t> tile_at(double x, double y, uint8_t index) {
-	opennova::TilFile til;
-	opennova::TilOverlayEntry entry;
-	// The tile's 16-unit square from (x, y), its z stored negated as the game reads it.
-	entry.x_fixed = opennova::bms::to_fixed_16_16(x);
-	entry.z_fixed = -opennova::bms::to_fixed_16_16(y);
-	entry.tile_index = index;
-	til.entries.push_back(entry);
-	std::vector<uint8_t> bytes;
-	std::string error;
-	if (!opennova::save_til(til, bytes, error)) std::fprintf(stderr, "the .til: %s\n", error.c_str());
-	return bytes;
-}
+using mission_test::block_middle;
+using mission_test::tile_at;
 
 // The ground's facts over a minted terrain (DI-07): Tmap's .trn and .cpt with a char map painting every
 // class at a known place, read through the runtime's own load; each class at its block's middle with its

@@ -31,6 +31,7 @@
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
+#include "editor/mission_test_support.h"
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
@@ -38,10 +39,7 @@ using opennova::io::JsonValue;
 
 namespace {
 
-bool same(const std::string &got, const std::string &want) {
-	if (got != want) std::printf("  got:  %s\n  want: %s\n", got.c_str(), want.c_str());
-	return got == want;
-}
+using mission_test::same;
 
 const ScriptCompletion *item(const ScriptCompletions &completions, const std::string &insert) {
 	for (const ScriptCompletion &each : completions.items)

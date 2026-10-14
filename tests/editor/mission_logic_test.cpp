@@ -42,6 +42,7 @@
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
+#include "editor/mission_test_support.h"
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
@@ -53,23 +54,9 @@ namespace {
 
 constexpr NodeKind k(MissionKind kind) { return node_kind(kind); }
 
-bool same(const std::string &got, const std::string &want) {
-	if (got != want) std::printf("  got:  %s\n  want: %s\n", got.c_str(), want.c_str());
-	return got == want;
-}
-
-std::vector<uint8_t> fixture_bytes() {
-	return test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/bms/synth_logic.bms");
-}
-
-std::unique_ptr<Document> open(const std::vector<uint8_t> &bytes, const char *name = "synth_logic.bms") {
-	const DocumentType *type = document_type_for(AssetKind::Mission);
-	if (!type) return nullptr;
-	std::unique_ptr<Document> document = records_of(type->make());
-	Diagnostic error;
-	if (!document || !document->load_bytes(bytes, name, AssetKind::Mission, "jo", error)) return nullptr;
-	return document;
-}
+using mission_test::same;
+using mission_test::fixture_bytes;
+using mission_test::open;
 
 const MissionDocument &as_mission(const Document &document) { return dynamic_cast<const MissionDocument &>(document); }
 

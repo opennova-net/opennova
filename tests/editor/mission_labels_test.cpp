@@ -47,6 +47,7 @@
 #include "common/test_paths.h"
 #include "common/thread_cpu_clock.h"
 #include "editor/editor_test_support.h"
+#include "editor/mission_test_support.h"
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
@@ -58,37 +59,11 @@ constexpr NodeKind k(MissionKind kind) { return node_kind(kind); }
 
 std::string repo() { return test_paths_repo_root(__FILE__); }
 
-std::unique_ptr<Document> open(const std::vector<uint8_t> &bytes, const char *name = "synth_logic.bms") {
-	const DocumentType *type = document_type_for(AssetKind::Mission);
-	if (!type) return nullptr;
-	std::unique_ptr<Document> document = records_of(type->make());
-	Diagnostic error;
-	if (!document || !document->load_bytes(bytes, name, AssetKind::Mission, "jo", error)) {
-		std::fprintf(stderr, "%s does not load: %s\n", name, error.message.c_str());
-		return nullptr;
-	}
-	return document;
-}
-
-const MissionDocument &as_mission(const Document &document) { return dynamic_cast<const MissionDocument &>(document); }
-
-NodeAddress row_at(const Document &document, MissionKind kind, size_t index) {
-	const std::vector<const Node *> rows = as_mission(document).rows_of(kind);
-	return index < rows.size() ? NodeAddress{rows[index]->id, rows[index]->kind, 0} : NodeAddress();
-}
-
-// The first record of `kind` a row holds.
-NodeAddress first_child(const Document &document, const NodeAddress &row, MissionKind kind) {
-	for (const Document::Collection &collection : document.collections_of(row))
-		if (collection.spec.kind == k(kind) && !collection.ids.empty()) return {row.row, k(kind), collection.ids[0]};
-	return NodeAddress();
-}
-
-// The words against those wanted, the two printed where they differ.
-bool same(const std::string &got, const std::string &want) {
-	if (got != want) std::printf("  got:  %s\n  want: %s\n", got.c_str(), want.c_str());
-	return got == want;
-}
+using mission_test::open;
+using mission_test::as_mission;
+using mission_test::row_at;
+using mission_test::first_child;
+using mission_test::same;
 
 int32_t ssn_of(const Document &document, const NodeAddress &row) {
 	return static_cast<const EntityRow *>(document.row(row.row))->native.id;

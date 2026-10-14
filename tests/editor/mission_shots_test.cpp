@@ -38,15 +38,14 @@
 #include "common/file_io.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
+#include "editor/mission_test_support.h"
 
 using namespace opennova::editor;
 using opennova::io::JsonValue;
 
 namespace {
 
-std::string fixture(const std::string &rel) {
-	return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/" + rel;
-}
+using mission_test::fixture;
 
 // Each line ended CR LF, as the game's readers take a text (File_ParseASCIIFile splits on it).
 std::string crlf(const std::string &text) {
@@ -106,12 +105,7 @@ std::vector<uint8_t> charmap() {
 	return bytes;
 }
 
-// Class c's block's middle, mission metres (the island layout: a 256 map's texel four units).
-void block_middle(int c, double &x, double &y) {
-	const int tx = 32 + 32 * (c % 5), tz = 32 + 32 * (c / 5);
-	x = 4.0 * tx - 512.0 + 2.0;
-	y = 512.0 - 4.0 * tz - 2.0;
-}
+using mission_test::block_middle;
 
 // AT_NULL authors tags 1 to 12 in order, so its bank's place t holds tag t; AMMO_T authors its obj row alone.
 const char *kAmmo =

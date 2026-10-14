@@ -51,6 +51,7 @@
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
+#include "editor/mission_test_support.h"
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
@@ -112,10 +113,7 @@ int test_live_logic() {
 
 constexpr NodeKind k(MissionKind kind) { return node_kind(kind); }
 
-bool same(const std::string &got, const std::string &want) {
-	if (got != want) std::printf("  got:  %s\n  want: %s\n", got.c_str(), want.c_str());
-	return got == want;
-}
+using mission_test::same;
 
 std::unique_ptr<Document> open_mission() {
 	const std::vector<uint8_t> bytes =
@@ -138,12 +136,7 @@ std::vector<NodeAddress> listed(const MissionDocument &m, MissionKind kind) {
 	return out;
 }
 
-bool apply_edits(Document &document, const std::vector<Edit> &edits) {
-	Diagnostic error;
-	const bool ok = document.apply(edits, error);
-	if (!ok) std::printf("  refused: %s\n", error.message.c_str());
-	return ok;
-}
+using mission_test::apply_edits;
 
 Edit set_of(const NodeAddress &address, const std::string &field, const std::string &value) {
 	Edit edit;

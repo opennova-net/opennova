@@ -41,6 +41,7 @@
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
+#include "editor/mission_test_support.h"
 #include "editor/test_platform.h"
 #include "editor/viewport_test_support.h"
 
@@ -54,9 +55,7 @@ using editor_test::NoProcess;
 
 constexpr const char *kMission = "missions/synth_logic.bms";
 
-std::string fixture(const std::string &rel) {
-	return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/" + rel;
-}
+using mission_test::fixture;
 
 struct Rig {
 	editor_test::TempProjectDir dir;
@@ -110,10 +109,7 @@ struct Rig {
 
 bool near(double a, double b, double slack) { return std::fabs(a - b) <= slack; }
 
-NodeAddress first_of(const Document &document, MissionKind kind) {
-	const std::vector<const Node *> rows = static_cast<const MissionDocument &>(document).rows_of(kind);
-	return rows.empty() ? NodeAddress() : NodeAddress{ rows.front()->id, rows.front()->kind, 0 };
-}
+using mission_test::first_of;
 
 } // namespace
 

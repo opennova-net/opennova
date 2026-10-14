@@ -48,6 +48,7 @@
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
+#include "editor/mission_test_support.h"
 #include "editor/test_platform.h"
 #include "editor/viewport_test_support.h"
 
@@ -62,9 +63,7 @@ using editor_test::NoProcess;
 
 constexpr const char *kMission = "missions/people.bms";
 
-std::string fixture(const std::string &rel) {
-	return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/" + rel;
-}
+using mission_test::fixture;
 
 // A person's table (CRLF lines, as the game's config reader takes them): the reset and idle_2 rows
 // idle, idle a ring of two (idle, then walk), the walk and the guard rows walk.
