@@ -6,20 +6,28 @@
 #include <iterator>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include <base/gameprofile/gameprofile.h>
+#include <base/io/file_io.h>
 #include <base/io/strutil.h>
+#include <base/resource_index/resource_index.h>
+#include <base/vfs/vfs_decode.h>
 #include <editor/documents/mission_table.h>
 #include <editor/documents/mission_validation.h>
 #include <editor/documents/mns_document.h>
+#include <editor/documents/particle_token_slots.h>
+#include <editor/documents/particle_type.h>
 #include <editor/documents/strings_document.h>
 #include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/texture_checks.h>
 #include <editor/model/diagnostic.h>
+#include <editor/model/text_document.h>
 #include <editor/project/project_files.h>
 #include <formats/def/def.h>
 #include <formats/mission/authoring.h>
@@ -242,12 +250,77 @@ void check_gametext_flow(const AssetGraph &graph, const ValidationCache &files, 
 	}
 }
 
+// What the list ends with, in the words of its fix: a list stops at a ';' attached to its last token alone.
+std::string slot_fault_words(const ParticleSlotFault &fault) {
+	const std::string slot = std::to_string(fault.slot);
+	const std::string where = fault.outside
+	        ? "past the 30 slots of the game's token table"
+	        : "into token slot " + slot + ", which no line parsed before it filled (the longest so far held " +
+	                  std::to_string(fault.filled) + " tokens)";
+	std::string what;
+	if (strutil::iequals(fault.key, "flags") || strutil::iequals(fault.key, "move"))
+		what = "The " + fault.key + " list here ends with no ';' attached to its last name (as the game's own writer "
+		       "ends it, \" ;\"), so the game's parser takes one token past it";
+	else if (strutil::iequals(fault.key, "pdefs"))
+		what = "The pdefs list here has no ';' attached to its last name, so the game's parser takes tokens on past it";
+	else
+		what = "This row of fewer than 8 values has no ';' attached to its last, so the game's parser takes tokens on "
+		       "past it";
+	return what + ", reading " + where + ": the game faults as the mission loads its effects. Attach the ';' to the last "
+	       "token (\"" + fault.key + " = ... LAST;\"), or let a line of at least " + std::to_string(fault.slot + 1) +
+	       " tokens come first (in this file, or in a particle file whose name sorts before it).";
+}
+
+// The particle files as the game parses them at a mission's start (every .ptl, then the gore set the project picks
+// [orig: CEffectSystem_Init @ 0x5F6070]; opennova::effect_file_order) through its line tokenizer's process-wide token
+// table: each list that reads a slot no line before it filled faults the game (documents/particle_token_slots.h), an
+// error at the line. An open document stands in with its text. An expansion's base game parses its own particle files
+// among them, which the project does not list: none there.
+void check_particle_token_slots(const AssetGraph &, const ValidationCache &, const ValidationInput &input,
+		std::vector<Diagnostic> &out) {
+	if (!input.project.expansion.standalone()) return;
+	std::vector<std::string> names;
+	std::set<std::string> seen;
+	for (const AssetEntry &entry : input.scan.entries)
+		if (entry.kind == AssetKind::Particles && seen.insert(strutil::to_lower(entry.logical_name)).second)
+			names.push_back(entry.logical_name);
+	if (names.empty()) return;
+	const std::vector<std::string> order =
+	        effect_file_order(names, gore_particle_extension(input.scan.find(kGoreContentMarker) != nullptr));
+	const int policy = gameprofile::gameprofile_scr_policy_for_code(input.project.target_game.c_str());
+	std::vector<ParticleLoadFile> files;
+	for (const std::string &name : order) {
+		const AssetEntry *entry = input.scan.find(name);
+		if (!entry) continue;
+		ParticleLoadFile file;
+		file.path = entry->relative_path;
+		const std::shared_ptr<const DocumentBase> open = input.open_document(*entry);
+		if (const TextDocument *text = open ? text_of(*open) : nullptr) {
+			file.bytes.assign(text->text().begin(), text->text().end());
+		} else {
+			std::string error;
+			if (!io::read_file_bytes(join_path(input.paths.root, entry->relative_path), file.bytes, error) ||
+			    !vfs_decode_payload(file.bytes, policy))
+				continue;
+		}
+		files.push_back(std::move(file));
+	}
+	for (const ParticleSlotFault &fault : particle_token_slot_faults(files)) {
+		Diagnostic d = make_finding(finding_code(ParticleFinding::UnfilledTokenSlot), DiagnosticSeverity::Error,
+		                            slot_fault_words(fault), files[fault.file].path, fault.key);
+		d.line = size_t(fault.line);
+		d.column = 1;
+		out.push_back(std::move(d));
+	}
+}
+
 // The cross-file checks, one row per asset kind, in AssetKind's order.
 constexpr UseCheckRow kUseChecks[] = {
 	{ AssetKind::Texture, check_texture_uses },
 	{ AssetKind::Strings, check_gametext_flow },
 	{ AssetKind::Mission, check_mission_pools },
 	{ AssetKind::MenuStyle, check_style_uses },
+	{ AssetKind::Particles, check_particle_token_slots },
 };
 
 constexpr bool rows_in_kind_order() {

@@ -673,6 +673,14 @@ opennova_add_editor_test(ai_profile MIXED SOURCES ai_profile_document_test.cpp)
 # rewriting one value's span, a key added where the line-ordered reader reads it, a value the reader takes otherwise
 # refused, the particle_keys query; --retail: the install's particle files, each key's text at its span.
 opennova_add_editor_test(particle_keys MIXED)
+
+# The particle type's project check: an effect's particle and a particle's curve table that no particle file the game
+# loads defines (every file's names, without case; the gore set the project picks), each a warning at the name.
+opennova_add_editor_test(particle_project_check)
+
+# The game's particle parse hazard: the line tokenizer's token slots a list reads past its line into, a fault where no
+# line parsed before it filled the slot (the files in the order the game parses them), an error that gates the build.
+opennova_add_editor_test(particle_token_slots)
 # The HUD effects document (ADR 0046 S23 B): hudfx.def's model lines, the one the game reads, the game's failure
 # where the HUD model is that line, a long name's run, an edit's one line, the blank. JO ships none.
 opennova_add_editor_test(hudfx SOURCES hudfx_document_test.cpp)
@@ -807,6 +815,10 @@ opennova_add_editor_test(font_document MIXED)
 # edited, its findings, a stream played through a session; a SKIP-LEG without OPENNOVA_JO_DIR (every bank the
 # install streams, byte for byte).
 opennova_add_editor_test(music_bank MIXED SOURCES music_bank_document_test.cpp)
+
+# A music bank stream's audio from a wave: a stream's audio replaced and a stream added over a session (a mono 44100 Hz
+# wave of the project, a stereo 22050 Hz one on disk), saved and decoded back within the codec's precision, undone.
+opennova_add_editor_test(music_stream_audio)
 
 # Waves (ADR 0046, round S23 lane A): a .wav as a document read as the game's loader reads it, its one finding, a
 # trim and a normalise through a session; a SKIP-LEG without OPENNOVA_JO_ASSETS (every shipped wave byte for byte,

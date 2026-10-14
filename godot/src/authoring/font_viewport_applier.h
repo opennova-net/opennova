@@ -6,6 +6,7 @@
 #include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/classes/sub_viewport.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
+#include <godot_cpp/variant/rid.hpp>
 
 #include <memory>
 #include <vector>
@@ -21,13 +22,15 @@ namespace godot {
 // A font viewport's device work (round S23 lane A): the font's pages as textures (the texels the document holds,
 // one RGBA8 texture a page, nothing decoded here), and the picture the portable viewport lays out
 // (editor/preview/font_viewport: the text's glyph quads from the game's text engine, or a page with its glyphs'
-// rects) drawn on one canvas item, each glyph run through the font page's material, MODULATE2X(TEXTURE, DIFFUSE)
-// (hud/font_page_glyphs: the game's page stage), each texel `zoom` pixels across, nearest. The editor's preview
-// background behind it. A Rebuild takes the pages anew; every pump draws the layout again where it moved. It reads
-// none of the process-wide render state a mission publishes.
+// rects) drawn on a canvas item of its own under the Glyphs node (a redraw of the node, which Godot makes as it
+// enters the tree, shows or is resized, clears the node's own item and never a child item), each glyph run through
+// the font page's material, MODULATE2X(TEXTURE, DIFFUSE) (hud/font_page_glyphs: the game's page stage), each texel
+// `zoom` pixels across, nearest. The editor's preview background behind it. A Rebuild takes the pages anew; every
+// pump draws the layout again where it moved. It reads none of the process-wide render state a mission publishes.
 class FontViewportApplier final : public ViewportApplier {
 public:
 	explicit FontViewportApplier(SubViewport &viewport);
+	~FontViewportApplier() override;
 
 	void rebuild(const opennova::editor::ViewportModel &model, const opennova::editor::SessionView &view,
 			const opennova::editor::PreviewClock &clock) override;
@@ -40,15 +43,18 @@ public:
 	bool reads_scene_state() const override { return false; }
 	void background(opennova::editor::PreviewBackground background) override;
 
-	// What it holds (a GUT device test reads it): the pages uploaded, the glyph quads drawn last.
+	// What it holds (a GUT device test reads it): the pages uploaded, the glyph quads drawn last, the item they are
+	// drawn on.
 	int pages() const { return int(pages_.size()); }
 	int quads_drawn() const { return quads_drawn_; }
+	RID glyph_item() const { return glyph_item_; }
 
 private:
 	void draw(const opennova::editor::ViewportModel &model);
 
 	uint64_t backdrop_id_ = 0;
 	uint64_t glyphs_id_ = 0;
+	RID glyph_item_; // the glyphs' own item, a child of the Glyphs node's
 	Ref<ShaderMaterial> backdrop_material_;
 	Ref<Shader> glyph_shader_;
 	Ref<ShaderMaterial> glyph_material_;

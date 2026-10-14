@@ -28,6 +28,12 @@ class ProjectAssetSource : public FileSource {
 public:
 	void set_scan(const std::string &root, const AssetScan &scan, const std::string &target_game);
 	void set_open(const std::vector<std::shared_ptr<const DocumentBase>> &open);
+	// An expansion project's base game (assets/install_view.h base_game_files: its files as the game mounts them
+	// below the expansion's pair), read for a name the project's files lack, as the game falls back to the archives
+	// under the expansion's [orig: PFF_OpenAllArchives @ 0x4a4310, slots 2..4]; null for a standalone project. A base
+	// file has no project path (path_of ""), so what writes the project's files never writes one.
+	void set_base(std::shared_ptr<const FileSource> base);
+	const std::shared_ptr<const FileSource> &base() const { return base_; }
 	void clear();
 
 	bool read(const std::string &name, std::vector<uint8_t> &out) const override;
@@ -76,6 +82,8 @@ private:
 	mutable std::map<std::string, Serialized> serialized_by_path_;
 	mutable uint64_t serializations_ = 0;
 	uint64_t generation_ = 0;
+	std::shared_ptr<const FileSource> base_;
+	uint64_t base_serial_ = 0; // moves with each base set, and so moves its files' stamps
 };
 
 } // namespace opennova::editor

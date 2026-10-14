@@ -13,6 +13,8 @@
 
 namespace opennova::editor {
 
+class ProjectCheck;
+
 // The particle type (ADR 0046 DI-14): a .ptl (and the gore set's .ptu or .ptg), a text document of
 // the file as stored, which the game's effect system reads at a mission's start, every file of the
 // kind then the gore set, by name [orig: CEffectSystem_Init @ 0x5F6070 -> File_ParseASCIIFile with
@@ -31,6 +33,13 @@ enum class ParticleFinding {
 	Unreadable,
 	// An effect id the file defines again: the game's lookup takes the first.
 	DuplicateEffect,
+	// The project check's (make_particle_project_check): an effect's particle no file the game loads defines, and
+	// a particle's curve table no file the game loads defines.
+	EffectUnresolved,
+	CurveUnresolved,
+	// The use check's (graph/use_checks.cpp, documents/particle_token_slots.h): a list the game's parser reads past its
+	// line into a token slot no line parsed before it filled, which faults the game as it loads the effects.
+	UnfilledTokenSlot,
 	kCount
 };
 const FindingCodeRow &finding_code(ParticleFinding code);
@@ -48,5 +57,22 @@ bool read_particle_text(const TextDocument &document, particle::ParticleFile &ou
 // id without case [orig: CEffectWorld_FindEffectDefByName @ 0x5E34F0]; a name it does not find it clones the
 // stock effect for [orig: CEffectWorld_InternEffectHandle @ 0x5f7310].
 bool define_particle_effect(const DocumentBase &document, const ReferenceSubject &missing, PlannedFix &out);
+
+// The particle type's project check (DocumentType::project_check, documents/project_check.h): what the names inside
+// the particle files come to once the game has loaded them all. The effect system loads every particle file of the
+// catalog (every .ptl, then the gore set's .ptu, or .ptg where the files hold fgn2.bin: opennova::effect_file_order
+// [orig: CEffectSystem_Init @ 0x5F6070]) and only then resolves the names inside them, each among every file's,
+// without case. Problems rows after the build's gate (the game runs the mission either way), warnings at the name:
+// - particle.effect_unresolved: an effect's pdefs member no file defines as a [particledef]. The game resolves an
+//   effect's particles all or none: the first it misses is logged (UNRESOLVED: EFFDEF <effect> missing PARDEF
+//   <particle>) and the effect keeps none of them, so it spawns nothing [orig: CEffectBank_ResolveAllEntries @
+//   0x5E4920, its find CEffectWorld_FindParticleDefByName @ 0x5E41D0, _stricmp @ 0x5E420C];
+// - particle.curve_unresolved: a particle's *_func (its own or a graphic's) naming a table no file defines as a
+//   [tabledef]: the game logs it not found and draws that channel without its curve [orig:
+//   CEffectDef_ResolveTblDefReference @ 0x5E9630, its find CParticleManager_FindTableDefByName @ 0x5E9540].
+// A file the reader stops in loads nothing (particle.unreadable is its own finding): it defines nothing and its names
+// are not checked. An expansion project's base game loads its own particle files with the project's, which the
+// project's files do not hold, so the check finds nothing there.
+std::unique_ptr<ProjectCheck> make_particle_project_check();
 
 } // namespace opennova::editor

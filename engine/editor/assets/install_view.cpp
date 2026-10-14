@@ -157,6 +157,33 @@ uint64_t InstallView::size(const InstallFile &file) const {
 	return ec ? 0 : static_cast<uint64_t>(on_disk);
 }
 
+const InstallFile *InstallFileSource::find_(const std::string &name) const {
+	const size_t slash = name.find_last_of("/\\");
+	return view_->find(slash == std::string::npos ? name : name.substr(slash + 1));
+}
+
+bool InstallFileSource::read(const std::string &name, std::vector<uint8_t> &out) const {
+	const std::lock_guard<std::mutex> lock(reading_);
+	const InstallFile *file = find_(name);
+	return file && view_->read(*file, out);
+}
+
+uint64_t InstallFileSource::stamp(const std::string &name) const { return find_(name) ? 1 : 0; }
+
+uint64_t InstallFileSource::size_of(const std::string &name) const {
+	const std::lock_guard<std::mutex> lock(reading_);
+	const InstallFile *file = find_(name);
+	return file ? view_->size(*file) : 0;
+}
+
+std::shared_ptr<const InstallFileSource> base_game_files(const std::string &base, const ProjectDocument &document) {
+	if (document.expansion.standalone() || base.empty()) return nullptr;
+	auto view = std::make_unique<InstallView>();
+	std::string error;
+	if (!view->open(base_install_spec(base, document), error)) return nullptr;
+	return std::make_shared<const InstallFileSource>(std::move(view));
+}
+
 ImportChoice install_choice(const std::string &root, const InstallFile &file) {
 	ImportChoice choice;
 	choice.path = root;

@@ -40,7 +40,8 @@ void set_preview_backdrop(ShaderMaterial &material, opennova::editor::PreviewBac
 
 // The ground grid an effect's and a definition's picture draw (a line every metre, the two through the spawn point
 // brighter), its lines' colours read against `background`: light over the Dark and the Grey ones, dark over the
-// Light and the Checker ones (PreviewBackdrop::dark_lines); on Dark as before the preference.
+// Light and the Checker ones (PreviewBackdrop::dark_lines); on Dark as before the preference. Opaque, in the scene's
+// opaque pass, so an effect's particles draw over the lines in front of them.
 Ref<ArrayMesh> preview_grid_mesh(opennova::editor::PreviewBackground background);
 
 } // namespace godot

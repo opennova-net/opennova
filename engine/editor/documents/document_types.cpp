@@ -168,9 +168,10 @@ constexpr DocumentType kTypes[] = {
 	// The particle file (DI-14): a text the effect system's reader reads, its findings that reader's;
 	// what it names the asset graph reads through the same reader (no references of the type's own). An
 	// effect a file names and no file defines is written by the engine's own effect writer (DI-15).
+	// Its project check: an effect's particle, or a particle's curve table, that no file the game loads defines.
 	{ DocumentTypeId::Particles, "particle", make_particle_document, validate_particle_file, text_fields,
-			particle_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-			nullptr, define_particle_effect },
+			particle_finding_codes, make_particle_project_check, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+			nullptr, nullptr, define_particle_effect },
 	// The environment (DI-19a): a .env's keywords and keyframes over env::Config, its references its
 	// fields' (the cloud layers' textures, the sun, moon, glare and star models).
 	{ DocumentTypeId::Environment, "environment", make_environment, validate_environment_file,

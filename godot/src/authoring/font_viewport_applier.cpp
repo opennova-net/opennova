@@ -37,19 +37,29 @@ FontViewportApplier::FontViewportApplier(SubViewport &viewport) {
 	backdrop->set_size(Vector2(1.0f, 1.0f));
 	viewport.add_child(backdrop);
 	backdrop_id_ = backdrop->get_instance_id();
-	// The glyphs' item: every glyph run on it draws through the font page's material (font_page_glyphs: MODULATE2X
-	// where the run's UVs carry its flag), each texel sampled nearest so a zoomed texel is a square.
+	// The glyphs' item, a child of the Glyphs node's own (which Godot clears whenever it redraws the node: as it
+	// enters the tree, shows, or is resized), so what is drawn stays until the layout moves: every glyph run on it
+	// draws through the font page's material (font_page_glyphs: MODULATE2X where the run's UVs carry its flag), each
+	// texel sampled nearest so a zoomed texel is a square.
 	Control *glyphs = memnew(Control);
 	glyphs->set_name("Glyphs");
 	glyphs->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
-	glyphs->set_texture_filter(CanvasItem::TEXTURE_FILTER_NEAREST);
+	viewport.add_child(glyphs);
+	glyphs_id_ = glyphs->get_instance_id();
 	glyph_shader_.instantiate();
 	glyph_shader_->set_code(glyph_canvas_shader_code());
 	glyph_material_.instantiate();
 	glyph_material_->set_shader(glyph_shader_);
-	glyphs->set_material(glyph_material_);
-	viewport.add_child(glyphs);
-	glyphs_id_ = glyphs->get_instance_id();
+	RenderingServer *rs = RenderingServer::get_singleton();
+	glyph_item_ = rs->canvas_item_create();
+	rs->canvas_item_set_parent(glyph_item_, glyphs->get_canvas_item());
+	rs->canvas_item_set_material(glyph_item_, glyph_material_->get_rid());
+	rs->canvas_item_set_default_texture_filter(glyph_item_, RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_NEAREST);
+}
+
+FontViewportApplier::~FontViewportApplier() {
+	if (glyph_item_.is_valid())
+		if (RenderingServer *rs = RenderingServer::get_singleton()) rs->free_rid(glyph_item_);
 }
 
 void FontViewportApplier::rebuild(const opennova::editor::ViewportModel &model, const opennova::editor::SessionView &,
@@ -87,8 +97,7 @@ void FontViewportApplier::clear() {
 	picture_.reset();
 	drawn_ = false;
 	quads_drawn_ = 0;
-	if (Control *glyphs = Object::cast_to<Control>(ObjectDB::get_instance(glyphs_id_)))
-		RenderingServer::get_singleton()->canvas_item_clear(glyphs->get_canvas_item());
+	RenderingServer::get_singleton()->canvas_item_clear(glyph_item_);
 }
 
 void FontViewportApplier::background(opennova::editor::PreviewBackground background) {
@@ -97,10 +106,8 @@ void FontViewportApplier::background(opennova::editor::PreviewBackground backgro
 
 void FontViewportApplier::draw(const opennova::editor::ViewportModel &model) {
 	const auto &font = static_cast<const opennova::editor::FontViewport &>(model);
-	Control *glyphs = Object::cast_to<Control>(ObjectDB::get_instance(glyphs_id_));
-	if (!glyphs) return;
 	RenderingServer *rs = RenderingServer::get_singleton();
-	const RID item = glyphs->get_canvas_item();
+	const RID item = glyph_item_;
 	rs->canvas_item_clear(item);
 	quads_drawn_ = 0;
 	drawn_serial_ = font.layout_serial();
@@ -158,6 +165,9 @@ void FontViewportApplier::apply(const opennova::editor::ViewportModel &model, co
 	report.drawn = opennova::io::JsonValue::make_object();
 	report.drawn.set("quads", opennova::io::JsonValue::make_number(double(quads_drawn_)));
 	report.drawn.set("pages", opennova::io::JsonValue::make_number(double(pages_.size())));
+	// The item they are drawn on (a GUT test sets it beside the Glyphs node's own: never the node's, which a redraw of
+	// the node clears).
+	report.drawn.set("item", opennova::io::json_string(std::to_string(glyph_item_.get_id())));
 }
 
 void FontViewportApplier::tick(const opennova::editor::ViewportModel &, const opennova::editor::PreviewClock &) {}

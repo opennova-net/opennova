@@ -194,6 +194,20 @@ inline EditorRequest wave_operation(std::string path, std::string operation,
 	request.open_first = open_first;
 	return request;
 }
+// A stream of the music bank at `path` made from the wave `wave` (a project file, or a file on disk:
+// documents/music_bank_document.h): the stream at the place `stream` ("0" the first) its audio replaced, or, `stream`
+// empty, a new stream added at the end of the bank; `name` (not empty) the stream's name; one undo step; `open_first`:
+// the bank opened first.
+inline EditorRequest music_stream_audio(std::string path, std::string wave, std::string stream = {}, std::string name = {},
+                                        bool open_first = false) {
+	EditorRequest request = of(EditorRequestKind::MusicStreamAudio);
+	request.path = std::move(path);
+	if (!name.empty()) request.values.emplace_back("name", std::move(name));
+	if (!stream.empty()) request.values.emplace_back("stream", std::move(stream));
+	request.values.emplace_back("wave", std::move(wave));
+	request.open_first = open_first;
+	return request;
+}
 // A font named `name` made from a glyph sheet (round S23 lane A: import/font_import.h): `values` names the sheet
 // (sheet), its grid (columns, rows, first) and the importer's options (advance, tracking, space, spacing,
 // design_width, color).
