@@ -1,6 +1,7 @@
 #include <runtime/devtools/render_window.h>
 
 #include <runtime/devtools/debug_control_ids.h>
+#include <runtime/devtools/ui_kit.h>
 
 #include <imgui.h>
 
@@ -116,11 +117,11 @@ void RenderWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 			ImGui::Text("view distance %.1f .. %.1f", static_cast<double>(t.traversal.dist_min),
 					static_cast<double>(t.traversal.dist_max));
 		} else if (snapshot_.valid) {
-			ImGui::TextDisabled("No terrain frame this world.");
+			ui_kit::empty_state("No terrain frame this world.");
 		}
 	}
 	if (!snapshot_.valid) {
-		ImGui::TextDisabled("No renderer counters pushed (load a mission).");
+		ui_kit::empty_state("No renderer counters pushed (load a mission).");
 		return;
 	}
 	if (ImGui::CollapsingHeader("Device", ImGuiTreeNodeFlags_DefaultOpen)) {
