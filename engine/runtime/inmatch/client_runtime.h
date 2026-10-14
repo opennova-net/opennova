@@ -497,6 +497,8 @@ public:
 	void set_discovered_session(JoinerConnection::DiscoveredSession session) {
 		if (joiner_) joiner_->set_discovered_session(std::move(session));
 	}
+	// The joiner connection's index, the CI its 0x41 / 0x42 carry (0 without a joiner).
+	uint32_t joiner_client_index() const { return joiner_ ? joiner_->client_index() : 0u; }
 	// The dialed host (JoinerConnection::set_host_address). Joiner only.
 	void set_host_address(const PeerAddr &host) {
 		if (joiner_) joiner_->set_host_address(host);

@@ -17,6 +17,7 @@
 #include "simulation/entity_row.h"
 #include "object/character_join_profile.h"
 #include "network/host_session_options.h" // the hosted-session request record
+#include "network/join_target.h" // the join request (set_join_discovered_session)
 #include "simulation/fp_viewmodel_spec.h" // the first-person submit spec record
 #include "simulation/player_aim_overlay.h" // the local per-segment aim overlay record
 #include "simulation/player_local_view.h" // the local view-state snapshot record
@@ -110,6 +111,8 @@ void Simulation::_bind_methods() {
 			&Simulation::local_player_radio_request_icon_viewer);
 	ClassDB::bind_method(D_METHOD("set_join_character_profile", "profile"),
 	                     &Simulation::set_join_character_profile);
+	ClassDB::bind_method(D_METHOD("set_join_discovered_session", "target"),
+	                     &Simulation::set_join_discovered_session);
 	ClassDB::bind_method(D_METHOD("set_join_world_ready", "ready"), &Simulation::set_join_world_ready);
 	ClassDB::bind_method(D_METHOD("poll_join_preload"), &Simulation::poll_join_preload);
 	ClassDB::bind_method(D_METHOD("is_join_preload_ready"), &Simulation::is_join_preload_ready);

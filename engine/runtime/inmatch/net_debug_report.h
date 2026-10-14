@@ -36,6 +36,7 @@ struct JoinerNetworkDiagnostics {
 	bool freeze_suspected = false;
 	bool in_match = false;
 	bool deployed = false;
+	uint32_t client_index = 0; // the connection's CI, its 0x41 / 0x42's (0 before its start)
 	std::string stage;
 	// The CRC / attribute challenges the server issued and the answers.
 	uint32_t entity_checksum_seen = 0;

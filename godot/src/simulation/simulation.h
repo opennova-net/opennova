@@ -79,7 +79,7 @@ class EntityRow;      // one typed entity-directory row
 class WeaponDef;      // one weapon.def row as a typed record (object/weapon_def.h)
 class CharacterJoinProfile; // the two-side character selection (object/character_join_profile.h)
 class FpViewmodelSpec;      // the first-person submit spec (simulation/fp_viewmodel_spec.h)
-class HostSessionOptions;   // the hosted-session request (network/host_session_options.h)
+class HostSessionOptions; class JoinTarget; // network/host_session_options.h, join_target.h
 class PlayerLocalView;      // the local view-state snapshot (simulation/player_local_view.h)
 struct NvgLaserSource;      // one NVG laser candidate (simulation/fire_presenter.h)
 class PlayerAimOverlay;     // the local per-segment aim overlay (simulation/player_aim_overlay.h)
@@ -1179,7 +1179,7 @@ public:
 	// NovaWorld-issued NAMEINFO/PCID/SQUADINFO/JOINTICKET the host validates
 	// (codes 23/24/25/28). Empty for LAN. Retained across runtime rebuilds.
 	void set_join_cd_cookie(const PackedByteArray &p_cookie);
-	void set_join_discovered_session(bool, int64_t, bool, const String &, int64_t); // the row's 0x81 (C++)
+	void set_join_discovered_session(const Ref<JoinTarget> &p_target); // the row's 0x81
 	// The install root whose loose expansion/<name>/version.txt feeds the JOIN
 	// VERSIONCRCSTRING checksum (D-NET-166). Empty keeps the golden "0".
 	// Retained across runtime rebuilds like the character data.
