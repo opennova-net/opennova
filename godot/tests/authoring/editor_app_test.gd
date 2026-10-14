@@ -552,11 +552,11 @@ func test_records_at_any_depth() -> void:
 	_seam.resolve_unsaved(1) # Discard
 
 
-## A new document's name is checked before anything is written (a plain name inside the
-## project, up to the archive's 16 bytes, an extension that names the kind), the refusal
-## comes back as the request's outcome, and a new menu of its own gets one screen named
-## after the file, with no copy of STARTUP and no Exit button. A font (S11b) is made and
-## not opened, and create_file says it was made.
+## A new document's name is checked before anything is written (a name outside the project
+## refused, nothing written; the archive's 16 bytes and an extension that names the kind are
+## editor_session_test's test_outcomes_and_refusals), and a new menu of its own gets one screen
+## named after the file, with no copy of STARTUP and no Exit button. A font (round S23) is made
+## and opened, and create_file of a file that is there already is no failure.
 func test_create_file_names_and_a_menu_of_its_own() -> void:
 	if _app == null:
 		return
@@ -565,21 +565,7 @@ func test_create_file_names_and_a_menu_of_its_own() -> void:
 	assert_true(_seam.new_project(dir, "Names"))
 	assert_eq(_seam.create_missing_files(), 0)
 	assert_false(_seam.create_file("../x.mnu"))
-	assert_false(_seam.create_file("abcdefghijklm.mnu"), "17 bytes: past the archive's 16")
-	var answer: Variant = JSON.parse_string(_app.request_json(JSON.stringify(
-			{"kind": "create_file", "path": "foo.mnu", "file_kind": "strings"})))
-	assert_true(answer is Dictionary and bool(answer.get("ok", false)), str(answer))
-	if answer is Dictionary:
-		var outcome: Dictionary = answer.get("outcome", {})
-		assert_false(bool(outcome.get("done", true)), str(answer))
-		var findings: Array = outcome.get("findings", [])
-		assert_eq(findings.size(), 1, str(answer))
-		if findings.size() == 1:
-			assert_eq(String(findings[0].get("code", "")), "document.kind")
 	assert_false(FileAccess.file_exists(dir.path_join("x.mnu")))
-	assert_false(FileAccess.file_exists(dir.path_join("menus/abcdefghijklm.mnu")))
-	assert_false(FileAccess.file_exists(dir.path_join("menus/foo.mnu")))
-	assert_false(FileAccess.file_exists(dir.path_join("strings/foo.mnu")))
 	assert_true(_seam.create_file("extra.mnu"), "\n".join(_seam.get_output_lines()))
 	assert_true(FileAccess.file_exists(dir.path_join("menus/extra.mnu")))
 	assert_eq(_seam.get_row_count(), 1)

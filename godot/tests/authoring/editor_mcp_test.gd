@@ -368,6 +368,10 @@ func test_request_waits_within_the_tool_budget() -> void:
 	assert_false(bool(answer.get("timed_out", false)), str(answer))
 
 
+## With no project: the tool list, the state, and what the tools refuse (the pickers need a person, an unknown
+## kind, a screenshot headless, a viewport with no document, Build and Play with no project), the log saying the
+## endpoint listens. The session's own refusals (a member no kind takes, a query with no document, an unknown
+## query) are session_json_test's test_request_round_trip and editor_query_test's test_refusals.
 func test_catalog_state_and_refusals_without_a_project() -> void:
 	if _client == null:
 		return
@@ -384,16 +388,11 @@ func test_catalog_state_and_refusals_without_a_project() -> void:
 	assert_true((await _call("editor_request", {"kind": "pick_directory"})).get("_error", "").contains("person"),
 			"the pickers need a person")
 	assert_true((await _call("editor_request", {"kind": "nope"})).get("_error", "").contains("nope"))
-	assert_true((await _call("editor_request", {"kind": "build", "flagg": true})).get("_error", "").contains("flagg"),
-			"an unknown member is refused, not ignored")
-	assert_true((await _query("document")).has("_error"), "no document is open")
 	assert_true(str((await _call("editor_request", {"kind": "build"})).get("outcome", {})).contains("project.none"))
 	assert_true(str((await _call("editor_request", {"kind": "play"})).get("outcome", {})).contains("project.none"))
 	assert_true((await _call("editor_screenshot")).get("_error", "").contains("headless"))
 	assert_true((await _call("editor_viewport", {"op": "state"})).get("_error", "").contains("no document is open"),
 			"no project, no viewport")
-	assert_true((await _query("menu_tree")).get("_error", "").contains("no document is active"), "no project, no menu")
-	assert_true((await _query("nope")).get("_error", "").contains("Unknown query"), "an unknown query")
 	var logs := await _call("editor_logs")
 	var texts: Array[String] = []
 	for entry in logs.get("entries", []):
@@ -402,16 +401,14 @@ func test_catalog_state_and_refusals_without_a_project() -> void:
 
 
 ## S13 A4, the request table on the wire: editor_request's kind enum is every token the table
-## serves (S13 A5: the catalog query's request kinds but those a person answers, the pickers),
-## each a kind the reader knows (a member no kind takes is refused as that member, never as an
-## unknown kind), the retail token gone; a field outside a kind's set is refused naming what it
-## takes, and one it must carry left out is refused. The edits' schema is the session's batch table
-## (S13 D9: the catalog's batch): its op enum the table's ops, apply among them, one property per
-## member, an apply's payload the one token it takes and a span's line from 1. The game install's words: the settings take
-## game_install and the project's play_mode (the retail keys and the editor-wide play_in_install and
-## play_in_install_strict refused), the run section says play_mode, ran_mode and game_install (file_log null
-## before a game install's game ran), the import section install_files, and an import from an install that holds
-## no archives is import.install.
+## serves (S13 A5: the catalog query's request kinds but those a person answers, the pickers), the
+## query enum the catalog's queries, editor_viewport's ops, kinds and members the viewport query's
+## (S13 V7), the edits' schema the session's batch table (S13 D9), set_workspace's workspace the
+## catalog's workspace table; one refusal read through the tool (a member its kind does not take).
+## How the session reads a request (each kind's members, the retired ones, the retail token, the game
+## install's settings and the run and import sections' words) is session_json_test's test_tokens,
+## test_request_round_trip, test_request_table_samples, test_settings_json and test_game_install_keys; an
+## import from an install holding no archives is import_plan_test's test_plan_game_install.
 func test_request_table_on_the_wire() -> void:
 	if _client == null:
 		return
@@ -495,51 +492,15 @@ func test_request_table_on_the_wire() -> void:
 			served.has("apply_confirmation"))
 	assert_false(served.has("pick_directory") or served.has("pick_file"), "the pickers need a person")
 	assert_true(served.has("preview_install_import") and not served.has("preview_retail_import"))
-	for kind: Variant in served:
-		var error := String((await _call("editor_request", {"kind": kind, "zzz": 1})).get("_error", ""))
-		assert_true(error.contains("zzz") and not error.contains("Unknown request kind"), "%s: %s" % [kind, error])
-	assert_true(String((await _call("editor_request", {"kind": "preview_retail_import"})).get("_error", "")).contains(
-			"Unknown request kind"), "the retail token names nothing")
 	assert_true(String((await _call("editor_request", {"kind": "build", "path": "x"})).get("_error", "")).contains(
 			"build takes no \"path\" (it takes out_dir, rehash, report)"))
-	assert_true(String((await _call("editor_request", {"kind": "open_project"})).get("_error", "")).contains(
-			"needs \"dir\""))
-	for retired in ["text", "flag", "edit", "unsaved_choice"]:
-		assert_true(String((await _call("editor_request", {"kind": "save", retired: true})).get("_error", "")).contains(
-				"Unknown request member"), "%s names no field" % retired)
-
-	var dir := OS.get_cache_dir().path_join("opennova request table %d" % Time.get_ticks_usec())
-	_dirs.append(dir)
-	assert_true(bool((await _call("editor_request", {"kind": "new_project", "dir": dir, "title": "Words"})).get("ok", false)))
-	var install := dir.path_join("no install here")
-	var applied := await _call("editor_request", {"kind": "apply_project_settings",
-			"settings": {"serial": 1, "game_install": install, "play_mode": "strict"}})
-	assert_true(bool(applied.get("ok", false)) and bool(applied.get("outcome", {}).get("done", false)), str(applied))
-	var state := await _state(["run", "import"])
-	var play: Dictionary = state.get("run", {})
-	assert_eq(String(play.get("play_mode", "")), "strict", str(play))
-	assert_eq(String(play.get("ran_mode", "x")), "", "no game ran yet")
-	assert_true(play.has("file_log") and play["file_log"] == null, str(play))
-	assert_true(String(play.get("game_install", "")).ends_with("no install here"), str(play))
-	assert_false(play.has("retail") or play.has("retail_directory") or play.has("in_install") or play.has("strict"), str(play))
-	for retired in ["play_in_install", "play_in_install_strict"]:
-		assert_true(String((await _call("editor_request", {"kind": "apply_project_settings",
-				"settings": {retired: true}})).get("_error", "")).contains(retired), "%s names nothing" % retired)
-	var import: Dictionary = state.get("import", {})
-	assert_true(import.has("install_files") and not import.has("retail_files"), str(import))
-	assert_true(String((await _call("editor_request", {"kind": "apply_project_settings",
-			"settings": {"retail_directory": install}})).get("_error", "")).contains("retail_directory"))
-	var listing := await _call("editor_request", {"kind": "preview_install_import", "with_dependencies": true})
-	var findings: Array = listing.get("outcome", {}).get("findings", [])
-	assert_true(not findings.is_empty() and String(findings[0].get("code", "")) == "import.install", str(listing))
 
 
-## Play's settings are each project's (its .opennova/local.json), never the editor's settings file, which
-## every editor on the machine shares: apply_project_settings sets the open project's play_mode and
-## save_before_play, the run and preferences sections say them; a second project made after it plays in the
-## OpenNova runtime and saves first; each opened again keeps its own; the editor's settings file names none
-## of them, and a project's local.json names its own. With no project open they are refused (project.none).
-## play takes a play_mode for one Play alone (the catalog's modes), a mode no Play has refused.
+## Play's settings through the endpoint: with no project they are refused (project.none); a new project plays in
+## the OpenNova runtime and saves first, apply_project_settings sets its play_mode and save_before_play, the run
+## and preferences sections say them and its .opennova/local.json keeps them. play takes a play_mode for one Play
+## alone (the catalog's modes), a mode no Play has refused. That each project keeps its own, never the editor's
+## settings file, is editor_session_test's test_play_settings_per_project.
 func test_play_settings_are_each_projects() -> void:
 	if _client == null:
 		return
@@ -547,9 +508,7 @@ func test_play_settings_are_each_projects() -> void:
 	assert_true(str(nothing.get("outcome", {}).get("findings", [])).contains("project.none"), str(nothing))
 	var root := OS.get_cache_dir().path_join("opennova play settings %d" % Time.get_ticks_usec())
 	_dirs.append(root)
-	var strict_dir := root.path_join("strict one")
-	var default_dir := root.path_join("default one")
-	assert_true(bool((await _call("editor_request", {"kind": "new_project", "dir": strict_dir, "title": "Strict one"})).get("ok", false)))
+	assert_true(bool((await _call("editor_request", {"kind": "new_project", "dir": root, "title": "Strict one"})).get("ok", false)))
 	var fresh: Dictionary = (await _state(["run", "preferences"]))
 	assert_eq(String(fresh.get("run", {}).get("play_mode", "")), "runtime", "a project never set plays in OpenNova")
 	assert_true(bool(fresh.get("preferences", {}).get("save_before_play", false)), str(fresh))
@@ -560,33 +519,15 @@ func test_play_settings_are_each_projects() -> void:
 	assert_eq(String(set_state.get("run", {}).get("play_mode", "")), "strict", str(set_state))
 	assert_eq(String(set_state.get("preferences", {}).get("play_mode", "")), "strict", str(set_state))
 	assert_false(bool(set_state.get("run", {}).get("save_before_play", true)), str(set_state))
-	assert_false(set_state.get("preferences", {}).has("play_in_install"), str(set_state))
-	assert_true(bool((await _call("editor_request", {"kind": "new_project", "dir": default_dir, "title": "Default one"})).get("ok", false)))
-	var second: Dictionary = (await _state(["run"])).get("run", {})
-	assert_eq(String(second.get("play_mode", "")), "runtime", "the project made after it keeps the default")
-	assert_true(bool(second.get("save_before_play", false)), str(second))
-	assert_true(bool((await _call("editor_request", {"kind": "open_project", "dir": strict_dir})).get("ok", false)))
-	var again: Dictionary = (await _state(["run"])).get("run", {})
-	assert_eq(String(again.get("play_mode", "")), "strict", "reopened, it keeps its own")
-	assert_false(bool(again.get("save_before_play", true)), str(again))
-	assert_true(bool((await _call("editor_request", {"kind": "open_project", "dir": default_dir})).get("ok", false)))
-	assert_eq(String((await _state(["run"])).get("run", {}).get("play_mode", "")), "runtime")
-	# Kept with each project, never in the editor's settings file.
-	var settings_text := FileAccess.get_file_as_string(String(_app.get("settings_path")))
-	assert_false(settings_text.contains("play_in_install") or settings_text.contains("play_mode") or
-			settings_text.contains("save_before_play"), settings_text)
-	var strict_local := FileAccess.get_file_as_string(strict_dir.path_join(".opennova/local.json"))
-	assert_true(strict_local.contains("\"play_mode\": \"strict\"") and strict_local.contains("\"save_before_play\": false"),
-			strict_local)
-	# One Play's own mode: the catalog's modes on the play request; a mode no Play has refused before anything
-	# is built.
+	var local := FileAccess.get_file_as_string(root.path_join(".opennova/local.json"))
+	assert_true(local.contains("\"play_mode\": \"strict\"") and local.contains("\"save_before_play\": false"), local)
 	var listed: Variant = await _client.rpc(get_tree(), "tools/list")
 	var request_tool := {}
 	for tool in (listed as Dictionary).get("result", {}).get("tools", []):
 		if String(tool["name"]) == "editor_request":
 			request_tool = tool
-	var modes := ["runtime", "strict"]
-	assert_eq(request_tool.get("inputSchema", {}).get("properties", {}).get("play_mode", {}).get("enum", []), modes)
+	assert_eq(request_tool.get("inputSchema", {}).get("properties", {}).get("play_mode", {}).get("enum", []),
+			["runtime", "strict"])
 	assert_true(request_tool.get("inputSchema", {}).get("properties", {}).has("save_before_play"), str(request_tool))
 	var refused := await _call("editor_request", {"kind": "play", "play_mode": "retail"})
 	assert_true(String(refused.get("_error", "")).contains("play_mode"), str(refused))
@@ -594,9 +535,10 @@ func test_play_settings_are_each_projects() -> void:
 
 
 ## The previews' background is an editor preference the MCP reads and sets: the preferences section says it
-## (grey before any is set), set_preview_background sets each of the four (its catalog enum the four tokens),
-## the editor's settings file keeps it, and a word none has is refused naming the field, nothing changed.
-## No project is needed: it is the editor's, not a project's.
+## (grey before any is set), set_preview_background sets it (its catalog enum the four tokens), the editor's
+## settings file keeps it, and a word none has is refused naming the field, nothing changed. No project is
+## needed: it is the editor's, not a project's. Each of the four read back as written is session_json_test's
+## test_preview_background_json.
 func test_the_preview_background_through_the_editor_mcp() -> void:
 	if _client == null:
 		return
@@ -608,11 +550,9 @@ func test_the_preview_background_through_the_editor_mcp() -> void:
 			request_tool = tool
 	var schema: Dictionary = request_tool.get("inputSchema", {}).get("properties", {})
 	assert_eq(schema.get("preview_background", {}).get("enum", []), ["dark", "grey", "light", "checker"], str(schema.keys()))
-	assert_true((schema.get("kind", {}).get("enum", []) as Array).has("set_preview_background"))
-	for background in ["light", "checker", "dark", "grey", "light"]:
-		var answer := await _call("editor_request", {"kind": "set_preview_background", "preview_background": background})
-		assert_true(bool(answer.get("outcome", {}).get("done", false)), str(answer))
-		assert_eq(String((await _state(["preferences"])).get("preferences", {}).get("preview_background", "")), background)
+	var answer := await _call("editor_request", {"kind": "set_preview_background", "preview_background": "light"})
+	assert_true(bool(answer.get("outcome", {}).get("done", false)), str(answer))
+	assert_eq(String((await _state(["preferences"])).get("preferences", {}).get("preview_background", "")), "light")
 	var settings_text := FileAccess.get_file_as_string(String(_app.get("settings_path")))
 	assert_true(settings_text.contains("\"preview_background\": \"light\""), settings_text)
 	var refused := await _call("editor_request", {"kind": "set_preview_background", "preview_background": "purple"})
@@ -1138,10 +1078,17 @@ func test_create_missing_files_through_the_editor_mcp() -> void:
 	assert_eq(String(selected.get("name", "")), "DI33_OPEN", str(selected))
 
 
-## The asset graph through the endpoint (S7): a blank project's references all resolve, a
-## texture named by the menu is found from both ends, the rename rewrites the menu and
-## moves the file, and a rename that would break a site the editor cannot rewrite is
-## refused with the reason.
+## The asset graph through the endpoint (S7), one request of each family: a blank project's references all
+## resolve, a page of the symbols, a reference field's choices, completion and Go to places, a find in the
+## menu and in the project, who uses the stylesheet; a texture the menu names found from both ends, renamed (the
+## unsaved prompt first, its save writing the menu) with the menu rewritten, moved to a folder with nothing
+## rewritten, deleted to the trash and brought back; a style variable renamed everywhere, planned then
+## committed. The rules each family's request reaches are pinned below the wire: the lists' pages and
+## refusals (editor_query_test's test_paging and test_refusals), the choices and places (asset_graph_test,
+## mission_labels_test), the finds (document_search_test, jumps_test), the rename, its refusals and its
+## prompt (editor_session_test's test_outcomes_and_refusals, asset_graph_test's test_rename,
+## unsaved_guard_test), a move and its way back (file_placement_test's test_move), the trash, a duplicate and
+## the folders (file_chores_test's test_delete_named and test_folders), a symbol renamed (symbol_rename_test).
 func test_graph_references_and_rename() -> void:
 	if _client == null:
 		return
@@ -1154,129 +1101,50 @@ func test_graph_references_and_rename() -> void:
 	for edge in references.get("edges", []):
 		assert_eq(String(edge.get("status", "")), "present", str(edge))
 	assert_eq(int((await _query("missing")).get("count", -1)), 0)
-	var fonts := await _query("symbols", {"kind": "style_var"})
-	assert_gt(int(fonts.get("count", 0)), 0)
-	# S12 Z2: the graph's lists page as search does: the total as count, a page of at most limit.
 	var all_symbols := await _query("symbols")
-	assert_gt(int(all_symbols.get("count", 0)), 2, str(all_symbols))
 	var symbol_page := await _query("symbols", {"offset": 1, "limit": 2})
 	assert_eq(int(symbol_page.get("count", -1)), int(all_symbols.get("count", 0)))
-	assert_eq(int(symbol_page.get("offset", -1)), 1)
 	assert_eq(symbol_page.get("symbols", []).size(), 2, str(symbol_page))
-	if symbol_page.get("symbols", []).size() == 2:
-		assert_eq(String(symbol_page["symbols"][0].get("locator", "")), String(all_symbols["symbols"][1].get("locator", "")))
-	var edge_page := await _query("references", {"path": "main.mnu", "limit": 1})
-	assert_eq(edge_page.get("edges", []).size(), 1, str(edge_page))
-	assert_eq(int(edge_page.get("count", 0)), int(references.get("count", -1)))
-	assert_eq(String(edge_page.get("path", "")), "main.mnu")
-	assert_true((await _query("missing", {"limit": 0})).has("_error"), "a limit from 1")
-	assert_true((await _query("usages", {"path": "menu_style.mns", "offset": -1})).has("_error"), "an offset from 0")
-	# A texture the menu names: a 4x4 TGA (the menu opens on its first screen, which the
-	# preview draws, decoding it; Godot's reader wants more bytes than a 1x1 file has).
+	# A texture the menu names: a 4x4 TGA (the menu opens on its first screen, which the preview draws,
+	# decoding it; Godot's reader wants more bytes than a 1x1 file has).
 	var root: String = (await _state(["project"]))["project"]["root"]
-	var texture := FileAccess.open(root.path_join("logo.tga"), FileAccess.WRITE)
-	assert_not_null(texture)
-	var tga := PackedByteArray([0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 4, 0, 32, 8])
-	var pixels := PackedByteArray()
-	pixels.resize(4 * 4 * 4)
-	pixels.fill(255)
-	tga.append_array(pixels)
-	texture.store_buffer(tga)
-	texture.close()
+	TestFs.write_bytes(self, root.path_join("logo.tga"), TestFs.tga_bytes(Vector2i(4, 4)))
 	assert_true(bool((await _call("editor_request", {"kind": "rescan"})).get("ok", false)))
 	assert_eq(String((await _open("main.mnu")).get("kind", "")), "menu")
 	var exit_id := await _find("EXIT")
 	assert_gt(exit_id, 0)
-	# S12 Z2: a reference field's picker names and its Go to places. MAIN's font names a style
-	# variable: the picker offers the project's fonts and the stylesheet's variables; Go to leads
-	# to the variable where the game reads it, then to the .fnt its value names (which the
-	# editor does not open).
+	# S12 Z2, DI-09: MAIN's font names a style variable: the picker offers the project's fonts and the
+	# stylesheet's variables, completion begins with what is typed, Go to leads to the variable where the game
+	# reads it, then to the .fnt its value names.
 	var main_id := await _find("MAIN", "MAIN.MNU/STARTUP")
 	assert_gt(main_id, 0)
 	var choices := await _query("reference_choices", {"id": main_id, "field": "font.name"})
-	assert_eq(String(choices.get("reference", "")), "font", str(choices))
 	var offered := {}
 	for choice in choices.get("choices", []):
 		offered[String(choice.get("kind", ""))] = true
-		if String(choice.get("name", "")) == "%DEF_FONTNAME_LG%":
-			assert_eq(String(choice.get("status", "")), "present", str(choice))
 	assert_true(offered.has("font") and offered.has("style_var"), str(choices))
-	assert_eq(int(choices.get("count", 0)), choices.get("choices", []).size(), "one page holds them")
-	# DI-09: the field completing what is typed: the names "%def_font" begins first, without case, each with
-	# whether the field holds it whole; the typed name's status as the field would hold it.
 	var completed := await _query("complete", {"id": main_id, "field": "font.name", "prefix": "%def_font"})
 	var completions: Array = completed.get("choices", [])
-	assert_eq(String(completed.get("reference", "")), "font", str(completed))
-	assert_true(not completions.is_empty() and bool(completions[0].get("prefix", false)), str(completed))
-	assert_true(String(completions[0].get("name", "")).to_upper().begins_with("%DEF_FONT"), str(completions[0]))
-	assert_true(completions[0].has("fits"), str(completions[0]))
-	assert_eq(String(completed.get("typed", {}).get("status", "")), "missing", str(completed))
-	assert_true((await _query("complete", {"field": "font.name"})).has("_error"), "complete names its record")
-	var second := await _query("reference_choices", {"id": main_id, "field": "font.name", "offset": 1, "limit": 1})
-	assert_eq(second.get("choices", []).size(), 1, str(second))
-	assert_eq(int(second.get("count", -1)), int(choices.get("count", 0)))
-	var targets := await _query("reference_targets", {"id": main_id, "field": "font.name"})
-	assert_eq(String(targets.get("value", "")), "%DEF_FONTNAME_LG%", str(targets))
-	var places: Array = targets.get("targets", [])
-	assert_eq(places.size(), 2, str(targets))
+	assert_true(not completions.is_empty() and String(completions[0].get("name", "")).to_upper().begins_with("%DEF_FONT"),
+			str(completed))
+	var places: Array = (await _query("reference_targets", {"id": main_id, "field": "font.name"})).get("targets", [])
+	assert_eq(places.size(), 2, str(places))
 	if places.size() == 2:
 		assert_true(String(places[0].get("file", "")).ends_with("menu_style.mns"), str(places[0]))
-		assert_true(bool(places[0].get("editable", false)) and not String(places[0].get("locator", "")).is_empty())
 		assert_true(String(places[1].get("file", "")).to_lower().ends_with(".fnt"), str(places[1]))
-		assert_true(bool(places[1].get("editable", false)), "a font is a document (round S23)")
-		# DI-17: a Go to always lands, an open_document of the place: the font's document (round S23), its page
-		# asked by its path.
-		var font_file := String(places[1].get("file", ""))
-		assert_true(_done(await _call("editor_request", {"kind": "open_document", "path": font_file})))
-		assert_eq(String((await _state(["documents"])).get("documents", {}).get("active", "")), font_file)
-		var page := await _query("file_card", {"path": font_file})
-		assert_eq(String(page.get("path", "")), font_file, str(page))
-		assert_true(page.has("defines") and page.has("used_by"), str(page))
-		# Back to the menu, the document the queries below ask.
-		assert_eq(String((await _open("main.mnu")).get("kind", "")), "menu")
-	assert_eq(int((await _query("reference_choices", {"id": main_id, "field": "name"})).get("count", -1)), 0,
-			"a field that is no reference offers nothing")
-	assert_true((await _query("reference_targets", {"id": main_id, "field": "nope"})).has("_error"))
-	assert_true((await _query("reference_choices", {"id": main_id})).has("_error"), "choices needs a field")
-	# S12 D3: a window found on its own screen; who uses the stylesheet (no file names it, the
-	# menus name its variables), each use with the locator of the record that makes it.
-	assert_eq(await _find("EXIT", "MAIN.MNU/STARTUP"), exit_id)
-	assert_true((await _query("record", {"symbol": "EXIT", "scope": "MAIN.MNU/NOWHERE"})).has("_error"))
-	# S12 D8: find in the open menu (every field whose value as shown holds the text, without
-	# case) and in the project (the files and symbols whose names hold it, with their usages).
-	var hits := await _query("document_search", {"text": "exit"})
+	# S12 D8: a find in the open menu, and in the project; who uses the stylesheet.
 	var exit_hit := false
-	for hit in hits.get("hits", []):
-		exit_hit = exit_hit or (int(hit.get("id", 0)) == exit_id and String(hit.get("field", "")) == "name"
-				and not String(hit.get("locator", "")).is_empty())
-	assert_true(exit_hit, str(hits))
-	for hit in (await _query("document_search", {"text": "exit", "match_case": true})).get("hits", []):
-		assert_false(int(hit.get("id", 0)) == exit_id and String(hit.get("field", "")) == "name", "match_case keeps EXIT out")
-	assert_true((await _query("document_search")).has("_error"), "search needs a text")
-	var found_menu := false
+	for hit in (await _query("document_search", {"text": "exit"})).get("hits", []):
+		exit_hit = exit_hit or (int(hit.get("id", 0)) == exit_id and String(hit.get("field", "")) == "name")
+	assert_true(exit_hit)
 	var found_exit := false
-	for hit in (await _query("project_search", {"text": "main.mnu"})).get("hits", []):
-		found_menu = found_menu or (String(hit.get("kind", "")) == "file" and String(hit.get("name", "")) == "main.mnu")
 	for hit in (await _query("project_search", {"text": "exi"})).get("hits", []):
 		found_exit = found_exit or (String(hit.get("kind", "")) == "menu_window" and String(hit.get("name", "")) == "EXIT"
 				and hit.has("usages"))
-	assert_true(found_menu and found_exit)
-	# A page at a time: the total as count, the page's hits alone.
-	var everything := await _query("project_search", {"text": "e"})
-	var page := await _query("project_search", {"text": "e", "offset": 1, "limit": 1})
-	assert_gt(int(everything.get("count", 0)), 1, str(everything))
-	assert_eq(int(page.get("count", -1)), int(everything.get("count", 0)))
-	assert_eq(page.get("hits", []).size(), 1, str(page))
-	assert_true((await _query("project_search", {"text": "e", "limit": 0})).has("_error"))
-	var document_page := await _query("document_search", {"text": "exit", "limit": 1})
-	assert_eq(document_page.get("hits", []).size(), 1, str(document_page))
-	assert_eq(int((await _query("referrers", {"path": "menu_style.mns"})).get("count", -1)), 0)
-	var style_uses := await _query("usages", {"path": "menu_style.mns"})
-	var style_edges: Array = style_uses.get("edges", [])
-	assert_false(style_edges.is_empty(), str(style_uses))
-	if not style_edges.is_empty():
-		assert_false(String(style_edges[0].get("locator", "")).is_empty(), str(style_edges[0]))
-	# EXIT's first APPEARANCE row made an image (the rows are records of their own).
+	assert_true(found_exit)
+	var style_edges: Array = (await _query("usages", {"path": "menu_style.mns"})).get("edges", [])
+	assert_true(not style_edges.is_empty() and not String(style_edges[0].get("locator", "")).is_empty(), str(style_edges))
+	# EXIT's first APPEARANCE row made an image (the rows are records of their own): the texture's user.
 	var exit_record := await _record(exit_id)
 	var row_id := 0
 	for collection in exit_record.get("collections", []):
@@ -1287,105 +1155,33 @@ func test_graph_references_and_rename() -> void:
 	assert_true(_done(await _set_field(row_id, "value", "logo.tga")))
 	var users := await _query("referrers", {"path": "logo.tga"})
 	assert_eq(int(users.get("count", 0)), 1, str(users))
-	assert_eq(String(users["edges"][0].get("field", "")), "value")
 	assert_eq(String(users["edges"][0].get("record", "")), "STARTUP/MAIN/EXIT/Appearance 1")
-	# The menu that names it has unsaved edits: the rename waits on the unsaved prompt, which
-	# names the rename and the menu and offers no discard; its save writes the menu and renames.
+	# The menu that names it has unsaved edits: the rename waits on the unsaved prompt; its save writes the
+	# menu and renames, the menu naming the new name.
 	var waiting := await _call("editor_request", {"kind": "rename_asset", "path": "logo.tga", "new_name": "logo2.tga"})
-	assert_true(bool(waiting.get("ok", false)) and bool(waiting.get("outcome", {}).get("unsaved_prompt", false)),
-			str(waiting))
-	assert_false(_done(waiting), "a rename that waits on the prompt is not done")
-	var prompt: Dictionary = (await _state(["dialogs"])).get("dialogs", {}).get("unsaved_prompt", {})
-	assert_eq(String(prompt.get("action", "")), "rename_asset", str(prompt))
-	assert_eq(prompt.get("files", []).size(), 1, str(prompt))
-	assert_false(bool(prompt.get("can_discard", true)))
-	assert_true(FileAccess.file_exists(root.path_join("logo.tga")))
+	assert_true(bool(waiting.get("outcome", {}).get("unsaved_prompt", false)) and not _done(waiting), str(waiting))
 	var renamed := await _call("editor_request", {"kind": "resolve_unsaved", "choice": "save"})
 	assert_true(bool(renamed.get("outcome", {}).get("done", false)), str(renamed))
-	assert_false(FileAccess.file_exists(root.path_join("logo.tga")))
-	assert_true(FileAccess.file_exists(root.path_join("logo2.tga")))
+	assert_true(FileAccess.file_exists(root.path_join("logo2.tga")) and not FileAccess.file_exists(root.path_join("logo.tga")))
 	var reloaded_exit := await _record(await _find("EXIT"))
 	var reloaded_row := 0
 	for collection in reloaded_exit.get("collections", []):
 		if String(collection.get("kind_name", "")) == "appearance":
 			reloaded_row = int(collection["records"][0]["id"])
 	assert_eq(String(await _value(reloaded_row, "value")), "logo2.tga")
-	assert_eq(int((await _query("missing")).get("count", -1)), 0)
-	var extension := await _call("editor_request", {"kind": "rename_asset", "path": "logo2.tga", "new_name": "logo2.pcx"})
-	assert_true(bool(extension.get("ok", false)) and not _done(extension), "the extension stays: " + str(extension))
-	# The new name taken on disk after the last scan: the commit refuses, the outcome says why,
-	# and the Problems row outlives the refresh that follows.
-	var late := FileAccess.open(root.path_join("late.tga"), FileAccess.WRITE)
-	assert_not_null(late)
-	late.store_string("late")
-	late.close()
-	var taken := await _call("editor_request", {"kind": "rename_asset", "path": "logo2.tga", "new_name": "late.tga"})
-	assert_true(not _done(taken) and _found(taken, "rename.exists"), str(taken))
-	assert_true(FileAccess.file_exists(root.path_join("logo2.tga")))
-	var codes: Array[String] = []
-	for problem in (await _query("problems", {"severities": ["error"]})).get("problems", []):
-		codes.append(String(problem.get("code", "")))
-	assert_has(codes, "rename.exists")
-	# Assigning a requirement that is already met renames nothing, and the outcome says so.
-	var assigned := await _call("editor_request", {"kind": "assign_requirement", "role": "main_menu", "path": "logo2.tga"})
-	assert_true(not _done(assigned) and _found(assigned, "requirement.assigned"), str(assigned))
-	assert_true(FileAccess.file_exists(root.path_join("logo2.tga")))
-	# DI-03: a move to another folder rewrites nothing (the game finds a file by its name alone): the menu
-	# still names logo2.tga, which still resolves; the way back puts it at the top level again, the folder
-	# the move made gone with it. A folder outside the project is refused, nothing moved.
-	var outside := await _call("editor_request", {"kind": "move_asset", "path": "logo2.tga", "folder": "../out"})
-	assert_true(not _done(outside) and _found(outside, "rename.path"), str(outside))
-	var moved := await _call("editor_request", {"kind": "move_asset", "path": "logo2.tga", "folder": "art"})
-	assert_true(_done(moved), str(moved))
-	assert_false(FileAccess.file_exists(root.path_join("logo2.tga")))
+	# DI-03: a move to another folder rewrites nothing (the game finds a file by its name alone).
+	assert_true(_done(await _call("editor_request", {"kind": "move_asset", "path": "logo2.tga", "folder": "art"})))
 	assert_true(FileAccess.file_exists(root.path_join("art/logo2.tga")))
 	assert_eq(String(await _value(reloaded_row, "value")), "logo2.tga")
 	assert_eq(int((await _query("missing")).get("count", -1)), 0)
-	var back_plan := await _call("editor_request", {"kind": "preview_rename_back"})
-	assert_true(_done(back_plan), str(back_plan))
-	var plan: Dictionary = (await _state(["dialogs"])).get("dialogs", {}).get("rename_preview", {})
-	assert_true(bool(plan.get("move", false)) and String(plan.get("folder", "?")) == "", str(plan))
-	assert_true(_done(await _call("editor_request", {"kind": "rename_back"})))
-	assert_true(FileAccess.file_exists(root.path_join("logo2.tga")))
-	assert_false(DirAccess.dir_exists_absolute(root.path_join("art")))
-	# DI-25: a file the menu names is deleted only when asked to leave that use (refused first, file.named, its
-	# uses said), to the project's trash: the use is a missing reference then, and undo_file brings it back. A
-	# duplicate takes the name the project's rules give (the stem's number counted on); a folder is made,
-	# renamed with the file in it, and the file history takes each step back.
-	var named := await _call("editor_request", {"kind": "delete_asset", "path": "logo2.tga"})
-	assert_true(not _done(named) and _found(named, "file.named"), str(named))
-	assert_true(FileAccess.file_exists(root.path_join("logo2.tga")))
-	var deleted := await _call("editor_request", {"kind": "delete_asset", "path": "logo2.tga", "force": true})
+	# DI-25: deleted to the project's trash when asked to leave its use, and the file history brings it back.
+	var deleted := await _call("editor_request", {"kind": "delete_asset", "path": "art/logo2.tga", "force": true})
 	assert_true(_done(deleted), str(deleted))
-	assert_false(FileAccess.file_exists(root.path_join("logo2.tga")))
 	assert_gt(int((await _query("missing")).get("count", -1)), 0)
-	var history: Dictionary = (await _state(["project"])).get("project", {}).get("file_history", {})
-	assert_eq(String(history.get("undo", "")), "Delete logo2.tga")
 	assert_true(_done(await _call("editor_request", {"kind": "undo_file"})))
-	assert_true(FileAccess.file_exists(root.path_join("logo2.tga")))
-	assert_eq(int((await _query("missing")).get("count", -1)), 0)
-	var copied := await _call("editor_request", {"kind": "duplicate_asset", "path": "logo2.tga"})
-	assert_true(_done(copied), str(copied))
-	assert_true(FileAccess.file_exists(root.path_join("logo3.tga")))
-	assert_true(_done(await _call("editor_request", {"kind": "new_folder", "folder": "art"})))
-	assert_true(DirAccess.dir_exists_absolute(root.path_join("art")))
-	assert_true(_done(await _call("editor_request", {"kind": "move_asset", "path": "logo3.tga", "folder": "art"})))
-	assert_true(_done(await _call("editor_request", {"kind": "rename_folder", "folder": "art", "new_name": "pics"})))
-	assert_true(FileAccess.file_exists(root.path_join("pics/logo3.tga")))
-	assert_false(DirAccess.dir_exists_absolute(root.path_join("art")))
-	assert_true(_done(await _call("editor_request", {"kind": "undo_file"})))
-	assert_true(FileAccess.file_exists(root.path_join("art/logo3.tga")))
-	var outside_folder := await _call("editor_request", {"kind": "new_folder", "folder": "../out"})
-	assert_true(not _done(outside_folder) and _found(outside_folder, "file.folder"), str(outside_folder))
-	# The move is a rename's way back's, not the file history's: moved back, the folder, then the copy, taken back.
-	assert_true(_done(await _call("editor_request", {"kind": "move_asset", "path": "art/logo3.tga", "folder": ""})))
-	assert_true(_done(await _call("editor_request", {"kind": "undo_file"})))
-	assert_false(DirAccess.dir_exists_absolute(root.path_join("art")))
-	assert_true(_done(await _call("editor_request", {"kind": "undo_file"})))
-	assert_false(FileAccess.file_exists(root.path_join("logo3.tga")))
-	# S12 D9: a style variable the blank menu names renamed everywhere: planned first
-	# (preview_rename, the dialogs section's rename_preview: the definition and its uses, each
-	# before and after), then committed on disk; every use still resolves, under the new name.
+	assert_true(FileAccess.file_exists(root.path_join("art/logo2.tga")))
+	# S12 D9: a style variable the blank menu names renamed everywhere: planned (the dialogs section's
+	# rename_preview), then committed; every use still resolves, under the new name.
 	var variable: Dictionary = {}
 	for symbol in (await _query("symbols", {"kind": "style_var"})).get("symbols", []):
 		if not bool(symbol.get("inert", false)) and String(symbol.get("name", "")) == "DEF_FONTNAME_LG":
@@ -1393,15 +1189,9 @@ func test_graph_references_and_rename() -> void:
 	assert_false(variable.is_empty(), "DEF_FONTNAME_LG is defined where the game reads it")
 	var rename_args := {"path": String(variable.get("file", "")), "locator": String(variable.get("locator", "")),
 			"field": String(variable.get("field", "")), "new_name": "DEF_FONTNAME_BIG"}
-	var previewed := await _call("editor_request", {"kind": "preview_rename"}.merged(rename_args))
-	assert_true(_done(previewed), str(previewed))
-	var planned: Dictionary = (await _state(["dialogs"])).get("dialogs", {}).get("rename_preview", {})
-	assert_true(bool(planned.get("ok", false)), str(planned))
-	var sites: Array = planned.get("sites", [])
-	assert_gt(sites.size(), 0, str(planned))
-	if not sites.is_empty():
-		assert_eq(String(sites[0].get("before", "")), "DEF_FONTNAME_LG")
-		assert_eq(String(sites[0].get("after", "")), "DEF_FONTNAME_BIG")
+	assert_true(_done(await _call("editor_request", {"kind": "preview_rename"}.merged(rename_args))))
+	var sites: Array = (await _state(["dialogs"])).get("dialogs", {}).get("rename_preview", {}).get("sites", [])
+	assert_true(not sites.is_empty() and String(sites[0].get("after", "")) == "DEF_FONTNAME_BIG", str(sites))
 	var committed := await _call("editor_request", {"kind": "rename_symbol"}.merged(rename_args))
 	assert_true(bool(committed.get("outcome", {}).get("done", false)), str(committed))
 	var big := false
@@ -1409,14 +1199,13 @@ func test_graph_references_and_rename() -> void:
 		big = big or String(symbol.get("name", "")) == "DEF_FONTNAME_BIG"
 	assert_true(big, "the variable renamed")
 	assert_eq(int((await _query("missing")).get("count", -1)), 0)
-	assert_true((await _call("editor_request", {"kind": "rename_symbol", "path": "menu_style.mns"})).has("_error"),
-			"rename_symbol needs a locator, a field and a name")
 
 
-## A request's outcome through the endpoint (S9b): `ok` says the request read, the outcome
-## says whether it happened. A badly named new document is refused with its finding and
-## writes nothing; a new menu of its own gets one screen named after the file; closing it
-## with unsaved changes waits on the prompt, which the outcome says.
+## A request's outcome through the endpoint (S9b): `ok` says the request read, the outcome says whether it
+## happened. A badly named new document is refused with its finding and writes nothing; a new menu of its own
+## gets one screen named after the file; closing it with unsaved changes waits on the prompt, which the
+## outcome says. create_file's other refusals (a kind its extension does not take, a name past the archive's
+## 16 bytes) are editor_session_test's test_outcomes_and_refusals.
 func test_request_outcomes() -> void:
 	if _client == null:
 		return
@@ -1427,23 +1216,14 @@ func test_request_outcomes() -> void:
 	assert_true(bool(filled.get("outcome", {}).get("done", false)), str(filled))
 	var bad := await _call("editor_request", {"kind": "create_file", "path": "../x.mnu"})
 	assert_true(bool(bad.get("ok", false)), "the request read")
-	assert_false(bool(bad.get("outcome", {}).get("done", true)), str(bad))
-	var findings: Array = bad.get("outcome", {}).get("findings", [])
-	assert_eq(findings.size(), 1, str(bad))
-	if findings.size() == 1:
-		assert_eq(String(findings[0].get("code", "")), "document.name")
+	assert_true(not _done(bad) and _found(bad, "document.name"), str(bad))
 	assert_false(FileAccess.file_exists(dir.path_join("x.mnu")))
-	var wrong := await _call("editor_request", {"kind": "create_file", "path": "foo.mnu", "file_kind": "strings"})
-	assert_true(not _done(wrong) and _found(wrong, "document.kind"), str(wrong))
-	var long := await _call("editor_request", {"kind": "create_file", "path": "abcdefghijklm.mnu"})
-	assert_true(not _done(long) and _found(long, "document.name"), str(long))
 	var extra := await _call("editor_request", {"kind": "create_file", "path": "extra.mnu", "file_kind": "menu"})
 	assert_true(_done(extra), str(extra))
-	assert_eq(String((await _query("document", {"path": "extra.mnu"})).get("kind", "")), "menu")
 	var rows := await _query("document", {"path": "extra.mnu"})
+	assert_eq(String(rows.get("kind", "")), "menu")
 	assert_eq(int(rows.get("row_count", 0)), 1, str(rows))
 	assert_eq(String(rows.get("rows", [{}])[0].get("name", "")), "EXTRA")
-	assert_true((await _query("record", {"symbol": "EXIT"})).has("_error"), "no Exit button")
 	var main := await _find("MAIN")
 	assert_gt(main, 0)
 	assert_true(_done(await _set_field(main, "position.left", 8)))
@@ -1451,50 +1231,29 @@ func test_request_outcomes() -> void:
 	assert_true(bool(closing.get("outcome", {}).get("unsaved_prompt", false)) and not _done(closing), str(closing))
 	var discarded := await _call("editor_request", {"kind": "resolve_unsaved", "choice": "discard"})
 	assert_true(bool(discarded.get("outcome", {}).get("done", false)), str(discarded))
-	var listed := await _query("documents")
-	for document in listed.get("documents", []):
+	for document in (await _query("documents")).get("documents", []):
 		assert_ne(String(document.get("path", "")), "menus/extra.mnu", "discarded and closed")
 
 
-## Every scanned file is reachable past the result's list cap (PAGE_MAX): the files query pages
-## the list, count the total, and the project section counts it.
+## Every scanned file is reachable past the result's list cap (PAGE_MAX): the files query's first page holds
+## PAGE_MAX of them and counts them all, the last page the last one with no page after it, and the project
+## section counts them. Every page read in turn, each entry once, is editor_query_test's test_paging.
 func test_file_list_pages_past_the_cap() -> void:
 	if _client == null:
 		return
 	var dir := OS.get_cache_dir().path_join("opennova files mcp %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
 	assert_true(bool((await _call("editor_request", {"kind": "new_project", "dir": dir, "title": "Files"})).get("ok", false)))
-	var extra := EditorMcpCatalog.PAGE_MAX + 10
 	assert_eq(DirAccess.make_dir_recursive_absolute(dir.path_join("notes")), OK)
-	for i in extra:
-		var file := FileAccess.open(dir.path_join("notes/n%03d.txt" % i), FileAccess.WRITE)
-		assert_not_null(file)
-		if file != null:
-			file.store_string("note")
-			file.close()
+	for i in EditorMcpCatalog.PAGE_MAX + 10:
+		TestFs.write_text(self, dir.path_join("notes/n%03d.txt" % i), "note")
 	assert_true(bool((await _call("editor_request", {"kind": "rescan"})).get("ok", false)))
 	var first := await _query("files", {"limit": EditorMcpCatalog.PAGE_MAX})
 	var total := int(first.get("count", 0))
 	assert_gt(total, EditorMcpCatalog.PAGE_MAX, str(first.keys()))
 	assert_eq(first.get("files", []).size(), EditorMcpCatalog.PAGE_MAX)
-	var names := {}
-	var offset := 0
-	while offset < total:
-		var page := await _query("files", {"offset": offset, "limit": EditorMcpCatalog.PAGE_MAX})
-		assert_eq(int(page.get("offset", -1)), offset, str(page.keys()))
-		var files: Array = page.get("files", [])
-		assert_false(files.is_empty(), "every page up to count holds files")
-		if files.is_empty():
-			break
-		for file in files:
-			names[String(file["name"])] = true
-		offset += files.size()
-	assert_eq(names.size(), total, "every file listed once")
-	for i in extra:
-		assert_true(names.has("n%03d.txt" % i), "n%03d.txt listed" % i)
 	var last := await _query("files", {"offset": total - 1, "limit": 5})
 	assert_eq(int(last.get("count", 0)), total)
-	assert_eq(int(last.get("offset", -1)), total - 1)
 	assert_eq(last.get("files", []).size(), 1, "the last page of the files")
 	assert_eq(last.get("next_offset"), null, "no page after the last")
 	assert_eq(int((await _state(["project"])).get("project", {}).get("file_count", 0)), total)
@@ -1737,10 +1496,10 @@ func test_import_with_dependencies_through_the_endpoint() -> void:
 		assert_true(FileAccess.file_exists((await _state(["project"]))["project"]["root"].path_join("n200.txt")))
 
 
-## S9k2 through the endpoint: TITLE and EXIT copied from STARTUP and pasted into a second
-## screen's MAIN and into another menu file (their names free there), the selection
-## duplicated in one step and undone, the two arranged by editor_viewport op=command (one
-## request, one undo step) and undone, and the refusals.
+## S9k2 through the endpoint: TITLE and EXIT copied and pasted into a second screen's MAIN (the copies
+## selected, under that screen), then arranged in the viewport (EXIT's left edge to TITLE's: one request, one
+## undo step, no gesture). The rest of the clipboard (nothing selected, into another file, a duplicate) is
+## mnu_document_test's copy_and_paste; the arrange commands and their refusals are menu_arrange_test's.
 func test_clipboard_across_screens_and_arrange() -> void:
 	if _client == null:
 		return
@@ -1748,90 +1507,45 @@ func test_clipboard_across_screens_and_arrange() -> void:
 	_dirs.append(dir)
 	assert_true(bool((await _call("editor_request", {"kind": "new_project", "dir": dir, "title": "Clip"})).get("ok", false)))
 	assert_true(bool((await _create_missing()).get("ok", false)))
-	var menu := await _open("main.mnu")
-	assert_eq(String(menu.get("kind", "")), "menu", str(menu))
+	assert_eq(String((await _open("main.mnu")).get("kind", "")), "menu")
 	var title := await _find("TITLE")
 	var exit := await _find("EXIT")
 	assert_gt(title, 0)
 	assert_gt(exit, 0)
-	# Opened, the menu shows its first screen (the screen selected, none of its windows);
-	# with the selection toggled empty there is nothing to duplicate.
-	var opened: Dictionary = (await _state(["selection"])).get("selection", {})
-	assert_gt(int(opened["primary"]["row"]), 0, str(opened))
-	assert_eq(int(opened["primary"]["child"]), 0, str(opened))
-	assert_true(bool((await _select(title)).get("ok", false)))
-	assert_true(bool((await _select(title, "toggle")).get("ok", false)))
-	var nothing := await _ask("duplicate")
-	assert_true(bool(nothing.get("ok", false)) and not _done(nothing), "nothing selected to duplicate: " + str(nothing))
-
-	# A second screen, with its own MAIN.
 	var second := await _add("screen")
 	assert_gt(second, 0)
-	var rows := await _query("document")
 	var second_main := 0
-	for row: Variant in rows.get("rows", []):
+	for row: Variant in (await _query("document")).get("rows", []):
 		if row is Dictionary and int((row as Dictionary).get("id", 0)) == second:
 			second_main = int((row as Dictionary)["collections"][0]["records"][0]["id"])
-	assert_gt(second_main, 0, str(rows))
-
-	# TITLE and EXIT copied, pasted into the second screen's MAIN.
+	assert_gt(second_main, 0)
 	assert_true(bool((await _select(title)).get("ok", false)))
 	assert_true(bool((await _select(exit, "add")).get("ok", false)))
 	assert_true(_done(await _ask("copy")))
-	assert_gt(int((await _state(["selection"])).get("selection", {}).get("clipboard_bytes", 0)), 0)
 	var pasted := await _ask("paste", {"paste_at": {"parent": second_main}})
 	assert_true(_done(pasted), str(pasted))
 	var selected: Array = (await _state(["selection"])).get("selection", {}).get("records", [])
 	assert_eq(selected.size(), 2, str(selected))
 	if selected.size() == 2:
-		var copy_id := int((selected[0] as Dictionary).get("child", 0))
-		var copy_record := await _record(copy_id)
+		var copy_record := await _record(int((selected[0] as Dictionary).get("child", 0)))
 		assert_true(String(copy_record.get("path", "")).ends_with("/MAIN/TITLE"), str(copy_record))
 		assert_eq(int((copy_record.get("owner", {}) as Dictionary).get("row", 0)), second, str(copy_record))
-
-	# Into another menu file.
-	var extra := await _call("editor_request", {"kind": "create_file", "path": "extra.mnu", "file_kind": "menu"})
-	assert_true(_done(extra), str(extra))
-	assert_eq(String((await _query("document", {"path": "extra.mnu"})).get("kind", "")), "menu")
-	var extra_main := await _find("MAIN")
-	assert_gt(extra_main, 0)
-	var into_extra := await _ask("paste", {"paste_at": {"parent": extra_main}})
-	assert_true(_done(into_extra), str(into_extra))
-	assert_eq((await _state(["selection"])).get("selection", {}).get("records", []).size(), 2, str(into_extra))
-	assert_gt(await _find("EXIT"), 0)
-
-	# Back in main.mnu: the selection duplicated in one step, each copy after its original.
-	assert_eq(String((await _open("main.mnu")).get("kind", "")), "menu")
+	# The originals selected again, the viewport shows their screen.
 	assert_true(bool((await _select(title)).get("ok", false)))
 	assert_true(bool((await _select(exit, "add")).get("ok", false)))
-	var duplicated := await _ask("duplicate")
-	assert_true(_done(duplicated), str(duplicated))
-	assert_eq((await _state(["selection"])).get("selection", {}).get("records", []).size(), 2, str(duplicated))
-	assert_gt(await _find("EXIT2"), 0)
-	assert_true(_done(await _ask("undo")))
-	assert_true((await _query("record", {"symbol": "EXIT2"})).has("_error"), "the duplicate undone")
-
-	# Arranged in the viewport: EXIT's left edge to TITLE's, one request, one undo step.
 	var arranged := await _call("editor_viewport", {"op": "command", "command": {"name": "align_left", "ids": [title, exit]}})
 	assert_true(_done(arranged), str(arranged))
 	assert_false(arranged.get("outcome", {}).has("gesture"), "a command carries no gesture")
 	var rects: Dictionary = arranged.get("viewport", {})
 	assert_eq(int(_rect_of(rects, "EXIT")[0]), int(_rect_of(rects, "TITLE")[0]), str(rects))
 	assert_true(_done(await _ask("undo")))
-	rects = await _call("editor_viewport", {"op": "items", "limit": 200})
-	assert_eq(int(_rect_of(rects, "EXIT")[0]), 340, str(rects))
-	assert_false(_done(await _call("editor_viewport", {"op": "command", "command": {"name": "align_left", "ids": [title]}})),
-			"one window cannot be aligned")
-	assert_false(_done(await _call("editor_viewport", {"op": "command",
-			"command": {"name": "sideways", "ids": [title, exit]}})))
-	assert_true((await _call("editor_viewport", {"op": "command", "command": {"ids": [title]}})).get("_error", "").contains(
-			"name"), "a command names itself")
+	assert_eq(int(_rect_of(await _call("editor_viewport", {"op": "items", "limit": 200}), "EXIT")[0]), 340)
 
 
 ## DI-35: a menu's Try mode through editor_viewport: op try turns it on from the screen shown, op click is the
-## game's click (a new project's EXIT: the quit said, not done, the screen staying), op key a key by its name, each
-## answering with the viewport, its body's try saying where the menu is and what the game would have done; Reset;
-## the refusals (a click with Try off, a key no name gives); off again.
+## game's click (a new project's EXIT: the quit said, not done, the screen staying), answering with the
+## viewport, its body's try saying where the menu is and what the game would have done; off again. Keys,
+## Reset and the refusals are menu_try_test's.
 func test_try_mode_through_the_editor_mcp() -> void:
 	if _client == null:
 		return
@@ -1840,32 +1554,21 @@ func test_try_mode_through_the_editor_mcp() -> void:
 	assert_true(bool((await _call("editor_request", {"kind": "new_project", "dir": dir, "title": "Try"})).get("ok", false)))
 	assert_true(bool((await _create_missing()).get("ok", false)))
 	assert_eq(String((await _open("main.mnu")).get("kind", "")), "menu")
-	var items := await _call("editor_viewport", {"op": "items", "limit": 200})
-	var rect := _rect_of(items, "EXIT")
-	assert_eq(rect.size(), 4, str(items))
+	var rect := _rect_of(await _call("editor_viewport", {"op": "items", "limit": 200}), "EXIT")
+	assert_eq(rect.size(), 4)
 	if rect.size() != 4:
 		return
 	var at := [(float(rect[0]) + float(rect[2])) / 2.0, (float(rect[1]) + float(rect[3])) / 2.0]
-	assert_false(_done(await _call("editor_viewport", {"op": "click", "click": {"at": at}})), "Try is off: no click")
 	var on := await _call("editor_viewport", {"op": "try", "try": {"on": true}})
 	assert_true(_done(on), str(on))
-	var tried: Dictionary = on.get("viewport", {}).get("body", {}).get("try", {})
-	assert_true(bool(tried.get("on", false)), str(tried))
-	assert_eq(String(tried.get("screen", "")), "STARTUP", str(tried))
+	assert_eq(String(on.get("viewport", {}).get("body", {}).get("try", {}).get("screen", "")), "STARTUP", str(on))
 	var clicked := await _call("editor_viewport", {"op": "click", "click": {"at": at}})
 	assert_true(_done(clicked), str(clicked))
-	tried = clicked.get("viewport", {}).get("body", {}).get("try", {})
+	var tried: Dictionary = clicked.get("viewport", {}).get("body", {}).get("try", {})
 	var last: Dictionary = tried.get("last", {}) if tried.get("last") is Dictionary else {}
 	assert_eq(String(last.get("kind", "")), "exit", str(tried))
 	assert_eq(String(last.get("control", "")), "EXIT", str(last))
 	assert_eq(String(tried.get("screen", "")), "STARTUP", "the quit said, not done")
-	var keyed := await _call("editor_viewport", {"op": "key", "key": {"key": "VK_RETURN"}})
-	assert_true(_done(keyed), str(keyed))
-	assert_false(_done(await _call("editor_viewport", {"op": "key", "key": {"key": "NO_SUCH_KEY"}})))
-	assert_true((await _call("editor_viewport", {"op": "key"})).get("_error", "").contains("needs \"key\""))
-	var reset := await _call("editor_viewport", {"op": "try", "try": {"reset": true}})
-	assert_true(_done(reset), str(reset))
-	assert_eq((reset.get("viewport", {}).get("body", {}).get("try", {}).get("outcomes", [1]) as Array).size(), 0)
 	var off := await _call("editor_viewport", {"op": "try", "try": {"on": false}})
 	assert_true(_done(off), str(off))
 	assert_false(bool(off.get("viewport", {}).get("body", {}).get("try", {}).get("on", true)))
@@ -1882,15 +1585,11 @@ func _tree_window(tree: Dictionary, name: String) -> Dictionary:
 	return {}
 
 
-## S9m through the endpoint, as queries and edit_record's batch form (S13 A5): the menu_tree of
-## STARTUP (a closed menu as the last validation read it, then the open one), a button with two
-## ACTIONs and a SOUND and a list with an ITEM added and filled in by label in one batch (the ids
-## answered in the outcome's made and added, the tree and the preview showing them, one undo step
-## taking all of it), a button's ACTIONs replaced by a replace_list edit and undone, a record's
-## fields set in the order the client wrote them, the menu_findings by source (the sound bank the
-## project lacks is the graph's), paging, and the refusals (an unknown label before the document
-## sees anything, a field the document refuses with nothing committed, a path naming no menu, an
-## unknown query or menu).
+## S9m through the endpoint, as edit_record's batch form (S13 A5): a button with two ACTIONs added and filled in
+## by label in one batch (the ids answered in the outcome's made and added), and a record's fields set in the
+## order the client wrote them (a body's draw kind, then its flag cleared, leaves no draw kind: sorted keys
+## would clear the flag first). The menu reads (menu_tree, menu_findings), their pages and refusals, the
+## batch's undo step, replace_list and its refusals are editor_query_test's test_menu_reads_and_batches.
 func test_menu_tools_through_the_editor_mcp() -> void:
 	if _client == null:
 		return
@@ -1898,108 +1597,26 @@ func test_menu_tools_through_the_editor_mcp() -> void:
 	_dirs.append(dir)
 	assert_true(bool((await _call("editor_request", {"kind": "new_project", "dir": dir, "title": "Tools"})).get("ok", false)))
 	assert_true(bool((await _create_missing()).get("ok", false)))
-	# Closed: the render check's copy, every window placed.
-	var closed := await _query("menu_tree", {"path": "main.mnu"})
-	assert_false(bool(closed.get("open", true)), str(closed))
-	assert_eq(closed.get("screens", []).size(), 1, str(closed))
-	var title_closed := _tree_window(closed, "TITLE")
-	assert_eq(String(title_closed.get("text", "")), "Tools", str(closed))
-	assert_eq((title_closed.get("rect", []) as Array).size(), 4, str(title_closed))
-	# Open: the ids a batch names.
 	assert_eq(String((await _open("main.mnu")).get("kind", "")), "menu")
-	var tree := await _query("menu_tree")
-	assert_true(bool(tree.get("open", false)), str(tree))
-	var main := int(_tree_window(tree, "MAIN").get("id", 0))
-	assert_gt(main, 0, str(tree))
-	var screen: int = int(((tree.get("screens", [{}]) as Array)[0] as Dictionary).get("id", 0))
-	assert_gt(screen, 0)
-	var windows_before: int = int(((tree.get("screens", [{}]) as Array)[0] as Dictionary).get("window_count", 0))
-
-	var edits: Array = [
+	var main := int(_tree_window(await _query("menu_tree"), "MAIN").get("id", 0))
+	assert_gt(main, 0)
+	var batch := await _edit([
 		{"op": "add", "kind": "window", "parent": main, "as": "hello"},
 		{"op": "set", "id": "hello", "field": "name", "value": "HELLO"},
 		{"op": "set", "id": "hello", "field": "type", "value": "BUTTON"},
-		{"op": "set", "id": "hello", "field": "string.value", "value": "Hello"},
-		{"op": "set", "id": "hello", "field": "position.left", "value": 340},
-		{"op": "set", "id": "hello", "field": "position.top", "value": 430},
-		{"op": "set", "id": "hello", "field": "position.right", "value": 460},
 		{"op": "add", "kind": "action", "parent": "hello", "as": "back"},
 		{"op": "add", "kind": "action", "parent": "hello", "as": "show"},
 		{"op": "set", "id": "show", "field": "type", "value": "WINDOW"},
-		{"op": "set", "id": "show", "field": "state", "value": "SHOW"},
 		{"op": "set", "id": "show", "field": "target", "value": "TITLE"},
-		{"op": "add", "kind": "sound", "parent": "hello", "as": "click"},
-		{"op": "set", "id": "click", "field": "file", "value": "menu.lwf"},
-		{"op": "add", "kind": "window", "parent": main, "as": "list"},
-		{"op": "set", "id": "list", "field": "name", "value": "CHOICES"},
-		{"op": "set", "id": "list", "field": "type", "value": "LIST"},
-		{"op": "set", "id": "list", "field": "position.left", "value": 340},
-		{"op": "set", "id": "list", "field": "position.top", "value": 470},
-		{"op": "set", "id": "list", "field": "position.right", "value": 460},
-		{"op": "set", "id": "list", "field": "position.bottom", "value": 520},
-		{"op": "add", "kind": "items.item", "parent": "list", "as": "one"},
-		{"op": "set", "id": "one", "field": "text", "value": "One"},
-	]
-	var batch := await _edit(edits, "main.mnu")
+	], "main.mnu")
 	assert_true(bool(batch.get("outcome", {}).get("done", false)), str(batch))
 	var made: Dictionary = batch.get("outcome", {}).get("made", {})
-	assert_eq(made.size(), 6, str(batch))
-	assert_eq((batch.get("outcome", {}).get("added", []) as Array).size(), 6, str(batch))
+	assert_eq(made.size(), 3, str(batch))
+	assert_eq((batch.get("outcome", {}).get("added", []) as Array).size(), 3, str(batch))
 	var hello := int(made.get("hello", 0))
-	assert_gt(hello, 0)
 	assert_eq(await _find("HELLO"), hello)
-	var show := await _record(int(made.get("show", 0)))
-	var show_fields := {}
-	for field: Variant in show.get("fields", []):
-		show_fields[String((field as Dictionary).get("id", ""))] = (field as Dictionary).get("value", "")
-	assert_eq(String(show_fields.get("type", "")), "WINDOW", str(show))
-	assert_eq(String(show_fields.get("target", "")), "TITLE", str(show))
-
-	# The tree and the preview show them.
-	tree = await _query("menu_tree")
-	var hello_window := _tree_window(tree, "HELLO")
-	assert_eq(String(hello_window.get("type", "")), "button", str(hello_window)) # as the format writes it
-	assert_eq(String(hello_window.get("text", "")), "Hello", str(hello_window))
-	assert_eq(int(hello_window.get("parent", 0)), main)
-	assert_eq(int((hello_window.get("lists", {}) as Dictionary).get("action", 0)), 2, str(hello_window))
-	assert_eq(int((hello_window.get("lists", {}) as Dictionary).get("sound", 0)), 1, str(hello_window))
-	var local: Array = hello_window.get("local", [])
-	assert_eq(local.size(), 4, str(hello_window))
-	if local.size() == 4:
-		assert_eq(int(local[0]), 340)
-		assert_eq(int(local[1]), 430)
-		assert_eq(int(local[2]), 460)
-	assert_eq(int((_tree_window(tree, "CHOICES").get("lists", {}) as Dictionary).get("items.item", 0)), 1, str(tree))
-	var preview := await _call("editor_viewport", {"op": "state"})
-	assert_eq(String(preview.get("status", "")), "ready", str(preview))
-	var rects := await _call("editor_viewport", {"op": "items", "limit": 200})
-	var hello_rect := _rect_of(rects, "HELLO")
-	assert_eq(int(hello_rect[0]), 340, str(rects))
-	for widget: Variant in rects.get("items", []):
-		if widget is Dictionary and String((widget as Dictionary).get("name", "")) == "HELLO":
-			assert_eq(String((widget as Dictionary).get("text", "")), "Hello")
-
-	# One undo step takes the whole batch; redo puts it back.
-	assert_true(_done(await _ask("undo")))
-	assert_true((await _query("record", {"symbol": "HELLO"})).has("_error"), "the batch undone")
-	assert_true((await _query("record", {"symbol": "CHOICES"})).has("_error"))
-	assert_true(_done(await _ask("redo")))
-	hello = await _find("HELLO")
-	assert_gt(hello, 0)
-
-	# A list replaced: HELLO's ACTIONs by one, one undo step.
-	var listed := await _edit([{"op": "replace_list", "id": hello, "list": "action",
-			"records": [{"type": "WINDOW", "state": "HIDE", "target": "TITLE"}]}], "main.mnu")
-	assert_true(bool(listed.get("outcome", {}).get("done", false)), str(listed))
-	assert_eq((listed.get("outcome", {}).get("added", []) as Array).size(), 1, str(listed))
-	tree = await _query("menu_tree")
-	assert_eq(int((_tree_window(tree, "HELLO").get("lists", {}) as Dictionary).get("action", 0)), 1, str(tree))
-	assert_true(_done(await _ask("undo")))
-	tree = await _query("menu_tree")
-	assert_eq(int((_tree_window(tree, "HELLO").get("lists", {}) as Dictionary).get("action", 0)), 2, str(tree))
-	# A record's fields set in the order written, through the endpoint: a body's draw kind,
-	# then its flag cleared, leaves no draw kind (sorted keys would clear the flag first). (HELLO a TABLE
-	# meanwhile: a button reads no COLUMN, so its list takes no record.)
+	assert_eq(String(await _value(int(made.get("show", 0)), "target")), "TITLE")
+	# HELLO a TABLE for the leg: a button reads no COLUMN, so its list takes no record.
 	assert_true(_done(await _edit([{"op": "set", "id": hello, "field": "type", "value": "table"}], "main.mnu")))
 	var drawn := await _edit([{"op": "replace_list", "id": hello, "list": "column.body",
 			"records": [{"display": "CUSTOM_DRAW", "custom_draw": 0}]}], "main.mnu")
@@ -2007,56 +1624,5 @@ func test_menu_tools_through_the_editor_mcp() -> void:
 	var drawn_added: Array = drawn.get("outcome", {}).get("added", [])
 	assert_eq(drawn_added.size(), 1, str(drawn))
 	if drawn_added.size() == 1:
-		var drawn_record := await _record(int(drawn_added[0]))
-		var drawn_fields := {}
-		for field in drawn_record.get("fields", []):
-			drawn_fields[String(field["id"])] = field
-		assert_eq(String(drawn_fields.get("display", {}).get("value", "?")), "", str(drawn_record))
-		assert_eq(int(drawn_fields.get("custom_draw", {}).get("value", -1)), 0, str(drawn_record))
-	assert_true(_done(await _ask("undo")))
-	assert_true(_done(await _ask("undo"))) # HELLO a button again
-	# The menu reads name a menu: a stylesheet is none.
-	var not_menu := await _query("menu_tree", {"path": "menu_style.mns"})
-	assert_true(not_menu.get("_error", "").contains("no menu"), str(not_menu))
-
-	# Refused: an unknown label (nothing asked of the document), a field the document refuses
-	# (nothing committed), a list with no records, an unknown query or menu.
-	var unknown := await _edit([{"op": "set", "id": "nobody", "field": "name", "value": "X"}], "main.mnu")
-	assert_true(unknown.get("_error", "").contains("nobody"), str(unknown))
-	var refused := await _edit([
-		{"op": "add", "kind": "window", "parent": main, "as": "x"},
-		{"op": "set", "id": "x", "field": "no_such_field", "value": 1},
-	], "main.mnu")
-	assert_true(bool(refused.get("ok", false)) and not _done(refused), str(refused))
-	assert_false(refused.get("outcome", {}).get("findings", []).is_empty(), str(refused))
-	assert_true((refused.get("outcome", {}).get("added", []) as Array).is_empty(), "nothing added")
-	tree = await _query("menu_tree")
-	assert_eq(int(((tree.get("screens", [{}]) as Array)[0] as Dictionary).get("window_count", 0)), windows_before + 2,
-			"nothing committed")
-	assert_true((await _edit([{"op": "replace_list", "id": hello, "list": "action"}], "main.mnu")).has("_error"))
-	assert_true((await _call("editor_request", {"kind": "edit_record", "path": "main.mnu"})).has("_error"),
-			"edits are required")
-	assert_true((await _query("nope")).has("_error"))
-	assert_true((await _query("menu_findings", {"path": "nothing.mnu"})).has("_error"))
-
-	# Paging one screen's windows.
-	var page := await _query("menu_tree", {"screen": screen, "offset": 1, "limit": 2})
-	var paged: Dictionary = (page.get("screens", [{}]) as Array)[0]
-	assert_eq((paged.get("windows", []) as Array).size(), 2, str(page))
-	assert_eq(int(paged.get("offset", -1)), 1)
-	assert_eq(int(paged.get("window_count", 0)), windows_before + 2)
-	assert_eq(int(paged.get("count", 0)), windows_before + 2)
-	assert_true((await _query("menu_tree", {"screen": 999999})).has("_error"))
-
-	# The findings of the menu: the sound bank the project lacks is the graph's warning.
-	var analysis := await _query("menu_findings", {"path": "main.mnu", "limit": 200})
-	var bank := false
-	for row: Variant in analysis.get("problems", []):
-		var problem: Dictionary = row
-		bank = bank or (String(problem.get("code", "")) == "reference.missing" and String(problem.get("source", "")) == "graph"
-				and String(problem.get("message", "")).contains("menu.lwf"))
-	assert_true(bank, str(analysis))
-	assert_gt(int((analysis.get("sources", {}) as Dictionary).get("graph", 0)), 0, str(analysis))
-	assert_gt(int(((analysis.get("screens", [{}]) as Array)[0] as Dictionary).get("notes", 0)), 0, str(analysis))
-	var errors := await _query("menu_findings", {"severity": "error"})
-	assert_eq(int(errors.get("count", -1)), (errors.get("problems", []) as Array).size(), str(errors))
+		assert_eq(String(await _value(int(drawn_added[0]), "display")), "", "the flag cleared after the draw kind")
+		assert_eq(int(await _value(int(drawn_added[0]), "custom_draw")), 0)
