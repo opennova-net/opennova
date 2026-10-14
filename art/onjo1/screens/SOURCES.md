@@ -34,8 +34,9 @@ frame the text takes, in a scratch folder outside the repo; nothing of theirs is
   `screens_scatter` places the foliage models over a ground by a named attribute.
 - **Weather and grade.** `screens_rain` (thin streaks at random in a box before the camera, none
   within a few metres of it, leaning with the wind), a box of principled volume for the mist, a
-  gradient world sky with procedural clouds (and the dawn sun's disc), and in three scenes `grade`, a
-  transparent plane before the lens that darkens toward an edge or the corners (a graduated filter).
+  gradient world sky with procedural clouds (and the dawn sun's disc), and in four scenes `grade` (in
+  `jo_Epil`, `grade sky` and `grade foot`), a transparent plane before the lens that darkens toward an
+  edge or the corners (a graduated filter).
 - **Render settings.** Cycles on the GPU, 512 samples (adaptive, threshold 0.01), OpenImageDenoise, AgX
   with the look `AgX - Medium High Contrast` and each scene's exposure, no metadata stamped into the
   PNG. A text's emission is set for exposure 0 and divided by its scene's exposure, so the title colours
@@ -49,7 +50,7 @@ frame the text takes, in a scratch folder outside the repo; nothing of theirs is
 | `onmnbg` | `art/onjo1/menu/src/onmnbg.png` (1600 x 1200) | `assets/onmnbg.tga`, 800 x 600 (`../menu/SOURCES.md`) | The main menu's background: the camp at dusk in the rain, the soldier in profile with his carbine before the guard tower, the hut's lit door and lamplight, palms over it all; the left third dark and calm for the menu's buttons. | A small `OPENNOVA` mark top right (Barlow Condensed Black, 20-pixel capitals, grey); the menu draws its own title. |
 | `onjo_m1` | `assets/art/onjo_m1.png` (800 x 600) | `onjo_m1.pcx` (`format pcx`, `palette median_cut`, as `expansions/onjo1/art/onjo1_m1.png.import`) | The loading image of "Indigo Shore" (`onjo_m1.bms`): the island on a rainy day, looking north from a rise beside the track down its last stretch into the camp: the clearing's trampled floor, the hut, the sandbag walls and the stacked crates, palms both sides. The lower centre is the muddy track, calm for the game's continue line and bar. | Laid out as `onjo1_m1.png`: `INDIGO SHORE` (Barlow Condensed SemiBold, 44-pixel capitals, white) from (95, 135), `OPENNOVA` (Barlow Semi Condensed SemiBold, 16, amber, letter-spaced) below it, and `A REBEL CAMP ON THE ISLAND. CLEAR IT AND GET OUT.` (Barlow Semi Condensed Medium, 11, light grey) at y 485. |
 | `loading` | `assets/art/loading.png` (800 x 600) | `loading.pcx` (`format pcx`, `palette median_cut`) | The boot splash the game shows while it starts: palms against a dark night sky over a misty jungle. | Our mark, centred: `OPEN` in white and `NOVA` in amber (Barlow Condensed Black, 64-pixel capitals), a thin amber rule beneath with a four-point star at its middle (meshes in the scene). |
-| `jo_Epil` | `assets/art/jo_Epil.png` (800 x 600) | `jo_Epil.tga` (`format tga24`) | The single-player win screen's backdrop: dawn on the north beach, the sun just over a calm sea and its path on the water, a leaning palm, the soldier at the water's edge looking out. The upper middle is plain sky for the score lines the game draws. | None. |
+| `jo_Epil` | `assets/art/jo_Epil.png` (800 x 600) | `jo_Epil.tga` (`format tga24`) | The single-player win screen's backdrop: dawn on the north beach under a low, dark cloud deck, the sun on the horizon behind a leaning palm and its path on a calm sea, the soldier at the water's edge looking out. The game draws its grey score lines over rows 125 to 265 and its key help over rows 545 to 575, so those stay dark and calm: the sky is graded down above the warm horizon band and the sand at the foot (mean luminance there about 55 and 30). | None. |
 | `jo_Epil2` | `assets/art/jo_Epil2.png` (800 x 600) | `jo_Epil2.tga` (`format tga24`) | The lose screen's backdrop: the dark, wet jungle floor at night in the rain, the carbine dropped on its side in a puddle with a cold light's reflection beside it, the jungle out of focus behind (depth of field on the carbine). | None. |
 
 ## Re-rendering
