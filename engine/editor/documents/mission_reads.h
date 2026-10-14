@@ -42,6 +42,7 @@ struct MissionEntityRead {
 	int wp_number = 0;
 	int team = 0;
 	uint32_t attributes = 0; // the record's bmsi_attributes (NoShadow, Reflective, ...)
+	int alert_state = 0;     // the record's alert_state (0 green, 1 yellow, 2 red)
 };
 
 struct MissionAreaRead {

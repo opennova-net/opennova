@@ -19,12 +19,18 @@ class MissionPoses;
 // A mission's people playing their clips (ADR 0046 S23 C): each person its spawn poses (MissionPoses, DI-38) whose
 // item's move_function binds the org1 physics row ticked on from its spawn by the game's own org1 motor head
 // (world::infantry_org1_motor_head: the primary's state copied into the secondary's request, then the AnimMap dual
-// update), one tick a tick of the preview clock, from the tick of the clock it was posed at; another row's body
-// (org0, whose update is a nullsub) stands as its warmup left it. Each tick's event word is what the body's sound
-// block and its fire pass read that tick (the mission view hears the people's footsteps and foley with Listen on). The editor's
-// choice beside the game's: the think does not run, so a person plays the state its spawn requested on and on (an
-// idle's variants as its ring serves them), the clock's ticks standing in for the world's; a route's walker, whom the
-// game walks along its route, stands frozen at its spawn pose rather than walking in place (the maintainer's S26
+// update), one tick a tick of the preview clock, from the tick of the clock it was posed at, the first the game's
+// tick 1; another row's body (org0, whose update is a nullsub) stands as its warmup left it. Each tick's event word is
+// what the body's sound block and its fire pass read that tick (the mission view hears the people's footsteps and
+// foley with Listen on). After the head the think of a still body runs on the body's think ticks
+// (world::infantry_org1_still_think, S27: the tick plus 36 times its SSN a multiple of 16): a guard holds its guard,
+// and a person whose record carries an alert_state turns from its idle to idle_2 at its first think [orig:
+// Entity_UpdateInfantryAI @0x4BD2F0..0x4BD31C]. The editor's choice beside the game's: the think's legs that read the
+// world do not run (no perception takes a target; no attention scan looks at a neighbour, which plays the look idles
+// 125 / 126 / 141 where the .adm authors them, or sees an enemy or a corpse; no idle facing turns a person from its
+// teammates; the picture has no simulation, DI-31), so a person plays the state its first think selected on and on
+// (an idle's variants as its ring serves them), the clock's ticks standing in for the world's; a route's walker, whom
+// the game walks along its route, stands frozen at its spawn pose rather than walking in place (the maintainer's S26
 // ruling).
 class MissionPeople {
 public:
@@ -67,6 +73,10 @@ private:
 		NodeId row = 0;
 		world::InfantryState channels;
 		world::InfantryBodyPose pose;
+		// What its think reads (MissionPose's): its SSN, its AI slot's alert byte, whether it guards.
+		int ssn = 0;
+		uint8_t alert = 0;
+		bool guarding = false;
 	};
 	std::vector<Person> people_;
 	std::unordered_map<NodeId, size_t> rows_;

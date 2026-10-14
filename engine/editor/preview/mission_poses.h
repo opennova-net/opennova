@@ -95,23 +95,33 @@ struct MissionPose {
 	PersonDefinition definition;
 	int adm_id = -1;
 	world::InfantryState channels;
+	// What its think reads of the record (S27, mission_people.h): its SSN (the think's stagger), the AI slot's alert
+	// byte (the record's alert_state, which reaches the slot an `aidata` definition takes; 0 without one) and whether
+	// it guards (Flags 0x40, the Guarding attribute through the same slot) [orig: Entity_SpawnFromBMSRecord, inside the
+	// aidata branch @0x40ED5C: Flags 0x40 @0x40EDA5, the alert byte @0x40EEA4].
+	int ssn = 0;
+	uint8_t alert = 0;
+	bool guarding = false;
 };
 
 struct PersonRecord {
 	int ssn = 0;
 	int route = 0;
 	uint32_t attributes = 0;
+	uint8_t alert = 0; // its alert_state
 };
 
-// What a person's spawn reads of its record (its item, attributes, route and SSN).
+// What a person's spawn and its think read of its record (its item, attributes, route, SSN and alert_state).
 struct MissionPoseInput {
 	NodeId row = 0;
 	int64_t item = 0;
 	uint32_t attributes = 0;
 	int route = 0;
 	int ssn = 0;
+	uint8_t alert = 0;
 	bool operator==(const MissionPoseInput &o) const {
-		return row == o.row && item == o.item && attributes == o.attributes && route == o.route && ssn == o.ssn;
+		return row == o.row && item == o.item && attributes == o.attributes && route == o.route && ssn == o.ssn &&
+				alert == o.alert;
 	}
 };
 
@@ -241,9 +251,9 @@ void pose_person(const PersonDefinition &definition, const PersonRecord &record,
 		MissionPose &pose);
 
 // A pose on the wire (the mission viewport's items: an organic's `pose`): {status, ai_function,
-// adm, ai_slot, state, row (its .adm row, "anim_idle"), because, updates, rise, playing {state,
-// row, phase, variant, clip, parked}, and while it blends from {state, row, phase, variant, clip}
-// and weight}.
+// adm, ai_slot, state, row (its .adm row, "anim_idle"), because, updates, rise, alert (its AI slot's
+// alert byte), playing {state, row, phase, variant, clip, parked}, and while it blends from {state,
+// row, phase, variant, clip} and weight}.
 io::JsonValue mission_pose_json(const MissionPose &pose);
 
 } // namespace opennova::editor

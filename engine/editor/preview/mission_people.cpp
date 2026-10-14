@@ -37,6 +37,9 @@ void MissionPeople::reset(const MissionPoses &poses, int32_t tick) {
 		person.row = pose.row;
 		person.channels = pose.channels;
 		person.pose = pose.pose;
+		person.ssn = pose.ssn;
+		person.alert = pose.alert;
+		person.guarding = pose.guarding;
 		rows_[pose.row] = people_.size();
 		people_.push_back(std::move(person));
 	}
@@ -63,12 +66,17 @@ bool MissionPeople::run_to(const MissionPoses &poses, int32_t tick) {
 	world::IRootMotionSource *motion = poses.motion();
 	while (tick_ < tick) {
 		++tick_;
+		// The game's tick: its first frame runs at 1 (MissionKernel::boot), the clock's first tick past the start.
+		const uint32_t game_tick = uint32_t(tick_ - started_at_);
 		for (Person &person : people_) {
 			world::RootMotionFrame frame;
 			world::infantry_org1_motor_head(person.channels, motion, rings_, frame);
 			const uint32_t word = person.channels.last_events;
 			if (word != 0)
 				events_.push_back(Event{ person.row, tick_, word, person.channels.clip_phase, frame.capsule_bottom });
+			// The think after the head, on its own 16-tick stagger.
+			world::infantry_org1_still_think(
+					person.channels, motion, game_tick, person.ssn, person.guarding, person.alert);
 		}
 	}
 	for (Person &person : people_) person.pose = world::infantry_body_pose(person.channels);

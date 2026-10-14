@@ -21,9 +21,9 @@ bool same_transform(const MissionEntityMark &a, const MissionEntityMark &b) {
 	return a.x == b.x && a.y == b.y && a.z == b.z && a.pitch == b.pitch && a.yaw == b.yaw && a.roll == b.roll;
 }
 
-// What a person's spawn pose reads of its record beside its item and attributes.
+// What a person's spawn pose and its think read of its record beside its item and attributes.
 bool same_pose_fields(const MissionEntityMark &a, const MissionEntityMark &b) {
-	return a.route == b.route && a.ssn == b.ssn;
+	return a.route == b.route && a.ssn == b.ssn && a.alert == b.alert;
 }
 
 bool pool_shown(const MissionViewportOptions &options, MissionPool pool) {

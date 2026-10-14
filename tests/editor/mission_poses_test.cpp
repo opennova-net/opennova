@@ -5,7 +5,9 @@
 // ring entries, the blend), with why a person is not posed (an item no catalog defines, another
 // class, no .adm, no clips); a definition without `aidata` reads neither the route nor the guard;
 // the pose follows the records live (a route edited, an SSN edited: an Update with the poses moved;
-// another item's catalog edit), and its wire form names the row, the clip and the playhead. Mixed:
+// another item's catalog edit), and its wire form names the row, the clip, the playhead and the alert byte; the
+// people play on as the world's bodies do, their think of a still body included (S27: an alert person turns to
+// idle_2 at its first think, a guard holds guard). Mixed:
 // the retail leg (OPENNOVA_JO_DIR) poses every shipped mission's people over the game's own catalog
 // and clips and holds each pose to the world init's.
 #include <algorithm>
@@ -83,18 +85,19 @@ constexpr const char *kItems = "begin \"Spawn Rifleman\"\nid 106200\ntype person
 							   "begin \"Spawn Pilot\"\nid 106204\ntype person\ngraphic shed\nanim_def nowhere\n"
 							   "ai_function org1\nattrib: aidata\nend\n";
 
-// One placed person: its item, its SSN, its route and its attributes.
+// One placed person: its item, its SSN, its route, its attributes and its alert_state.
 struct Placed {
 	int item;
 	int ssn;
 	int route;
 	uint32_t attributes;
+	uint8_t alert;
 };
-// In the file's order: posed idle, a route's walk, a guard, the civilian (its route and guard unread),
-// route 126 and 127, a second rifleman of the ring, then the four not posed.
-const Placed kPeople[] = { { 106200, 13, 0, 0 }, { 106200, 6, 3, 0 }, { 106200, 15, 0, 0x2 }, { 106201, 4, 3, 0x2 },
-	{ 106200, 2, 126, 0 }, { 106200, 1, 127, 0x2 }, { 106200, 12, 0, 0 }, { 106202, 7, 0, 0 }, { 106203, 8, 0, 0 },
-	{ 106204, 9, 0, 0 }, { 109999, 10, 0, 0 } };
+// In the file's order: posed idle, a route's walk, a red guard, the civilian (its route, guard and alert unread),
+// route 126 and a yellow 127 guard, a second rifleman of the ring on red alert, then the four not posed.
+const Placed kPeople[] = { { 106200, 13, 0, 0, 0 }, { 106200, 6, 3, 0, 0 }, { 106200, 15, 0, 0x2, 2 },
+	{ 106201, 4, 3, 0x2, 2 }, { 106200, 2, 126, 0, 0 }, { 106200, 1, 127, 0x2, 1 }, { 106200, 12, 0, 0, 2 },
+	{ 106202, 7, 0, 0, 0 }, { 106203, 8, 0, 0, 0 }, { 106204, 9, 0, 0, 0 }, { 109999, 10, 0, 0, 0 } };
 
 std::vector<uint8_t> people_mission() {
 	opennova::bms::File mission;
@@ -104,6 +107,7 @@ std::vector<uint8_t> people_mission() {
 				opennova::mission::new_entity(opennova::mission::EntityKind::Organic, person.item, person.ssn);
 		entity.waypoint_id = uint8_t(person.route);
 		entity.bmsi_attributes = person.attributes;
+		entity.alert_state = person.alert;
 		mission.organics.push_back(entity);
 	}
 	opennova::mission::sync_counts(mission);
@@ -187,8 +191,8 @@ struct WorldPeople {
 		for (int pool = 0; pool < 4; ++pool) world.registry.configure_pool(pool, 4096);
 		world.ai.root_motion = &motion;
 	}
-	// A body of `adm` with the record's SSN, route and guard as the spawn folds them; the handle.
-	world::EntityHandle add(int adm, int ssn, int route, bool guard) {
+	// A body of `adm` with the record's SSN, route, guard and alert as the spawn folds them; the handle.
+	world::EntityHandle add(int adm, int ssn, int route, bool guard, uint8_t alert = 0) {
 		world::Entity seed;
 		seed.kind = world::EntityKind::Organic;
 		seed.item_id = 1;
@@ -206,6 +210,7 @@ struct WorldPeople {
 			body.slot.f[35] = 1;
 			body.slot.f[37] = route;
 		}
+		body.slot.bytes()[world::AiSlot::kAlertByte] = alert;
 		handles.push_back(handle);
 		return handle;
 	}
@@ -218,13 +223,6 @@ struct WorldPeople {
 	// How far the init lifted the body from its spawn at z 0 (no collision world: no ground solve), metres.
 	double rise(world::EntityHandle handle) { return double(world.ai.for_handle(handle)->pos[2]) / 65536.0; }
 };
-
-// The next logic tick on which the org1 body of net id `id` does not think: its 16-tick think keys on the tick
-// plus 36 times the id [orig: Entity_UpdateInfantryAI @0x4b9948..0x4b9953].
-uint32_t tick_without_think(uint32_t tick, int id) {
-	while (((tick + 36u * uint32_t(id)) & 15u) == 0) ++tick;
-	return tick;
-}
 
 bool same(const world::InfantryBodyPose &a, const world::InfantryBodyPose &b) {
 	return a.state == b.state && a.phase == b.phase && a.variant == b.variant && a.parked == b.parked &&
@@ -261,6 +259,13 @@ static int test_poses() {
 	}
 	TEST_EXPECT(pose_of(0)->ai_slot && !pose_of(3)->ai_slot);
 	TEST_EXPECT(pose_of(0)->updates == 363 && pose_of(0)->pose.state == 43);
+	// What the think reads: the alert byte and the guard through the AI slot (the civilian has none).
+	const int alerts[] = { 0, 0, 2, 0, 0, 1, 2 };
+	const bool guards[] = { false, false, true, false, false, true, false };
+	for (size_t i = 0; i < 7; ++i) {
+		TEST_EXPECT(pose_of(i)->alert == alerts[i] && pose_of(i)->guarding == guards[i]);
+		TEST_EXPECT(pose_of(i)->ssn == kPeople[i].ssn);
+	}
 
 	// Each posed body as the world's own init leaves it, the ring heads shared in pool order.
 	{
@@ -318,6 +323,7 @@ static int test_poses() {
 		const JsonValue *playing = json.get("playing");
 		TEST_EXPECT(playing && playing->get_string("clip", "") == "walk.bad" &&
 				playing->get_number("phase", -1) == double(pose_of(1)->pose.phase));
+		TEST_EXPECT(mission_pose_json(*pose_of(6)).get_number("alert", -1) == 2.0 && json.get_number("alert", -1) == 0.0);
 		const JsonValue not_posed = mission_pose_json(*pose_of(10));
 		TEST_EXPECT(not_posed.get_string("status", "") == "no_item" && not_posed.get("playing") == nullptr);
 		// The viewport's items carry it for each organic, and the body counts the posed.
@@ -465,10 +471,13 @@ static int test_retail() {
 
 // S23 C: the people play their clips on the preview clock from their spawn: each tick of the clock a tick of every
 // posed body on the org1 physics row by the game's own org1 motor head (world::infantry_org1_motor_head), in pool order
-// over the shared ring heads, so after each tick every such body is the world's own body after its init and as many
-// ticks of the world's motor on ticks its think does not run, and the event words are the world's; a body on the org0
-// row (the civilian) stands as its warmup left it, as the game's nullsub leaves it, and a route's walker stands at its
-// spawn pose (S26: no think walks it along its route); a clock gone back starts them again from their spawn.
+// over the shared ring heads, and on its think ticks the think of a still body (S27, world::infantry_org1_still_think),
+// so after each tick every such body is the world's own body after its init and as many ticks of the world's motor
+// and its think from the game's first tick, and the event words are the world's: the red rifleman turns to idle_2 at
+// its first think, the guards hold guard (the yellow 127 one turns to it), route 126's idle_2 turns to the idle; a body
+// on the org0 row (the civilian) stands as its warmup left it, as the game's nullsub leaves it, and a route's walker
+// stands at its spawn pose (S26: no think walks it along its route); a clock gone back starts them again from their
+// spawn.
 static int test_people_play() {
 	Rig rig("opennova_editor_mission_people_play");
 	TEST_EXPECT(rig.open());
@@ -492,7 +501,7 @@ static int test_people_play() {
 	for (size_t i = 0; i < 7; ++i) {
 		const bool slot = kPeople[i].item == 106200;
 		bodies.push_back(people.add(adm, kPeople[i].ssn, slot ? kPeople[i].route : 0,
-				slot && (kPeople[i].attributes & 0x2u) != 0));
+				slot && (kPeople[i].attributes & 0x2u) != 0, slot ? kPeople[i].alert : 0));
 	}
 	people.init();
 	const int32_t start = playing.tick();
@@ -505,7 +514,8 @@ static int test_people_play() {
 			if (kPeople[i].item != 106200) continue; // the civilian's org0 row runs no motor
 			world::AiEntity &entity = *people.world.ai.for_handle(bodies[i]);
 			const int32_t before = entity.inf.clip_phase;
-			people.world.ai.update_organic(entity, people.world, tick_without_think(uint32_t(1000 + 16 * tick), kPeople[i].ssn));
+			// The game's tick: the clock's first past the people's start is its first frame, tick 1.
+			people.world.ai.update_organic(entity, people.world, uint32_t(tick));
 			if (entity.inf.last_events != 0) ++world_events;
 			wraps += entity.inf.clip_phase < before ? 1 : 0;
 		}
@@ -527,6 +537,12 @@ static int test_people_play() {
 		}
 	}
 	TEST_EXPECT(wraps > 0); // the clips played round
+	// What the first thinks made of them.
+	const int plays[] = { 43, -1, 140, -1, 43, 140, 44 };
+	for (size_t i : { 0, 2, 4, 5, 6 }) {
+		const world::InfantryBodyPose *pose = rig.viewport()->people().pose(rows[i].row);
+		TEST_EXPECT(pose && pose->state == plays[i] && !pose->blending);
+	}
 	// The events kept: the last kCatchUpTicks ticks' words, the world's over the same ticks.
 	size_t kept = 0;
 	for (const MissionPeople::Event &event : rig.viewport()->people().events())

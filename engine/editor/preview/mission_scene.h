@@ -46,9 +46,11 @@ struct MissionEntityMark {
 	int group = 0;
 	uint32_t attributes = 0;
 	// What a person's spawn pose reads of it beside its item and attributes (DI-38, mission_poses.h):
-	// its route (the record's waypoint_id, 0 none) and its id (the SSN, the warmup's update count).
+	// its route (the record's waypoint_id, 0 none) and its id (the SSN, the warmup's update count);
+	// and what its think reads (S27): its alert_state, the AI slot's alert byte.
 	int route = 0;
 	int ssn = 0;
+	int alert = 0;
 	PreviewVec3 at; // its position in the presentation frame (the camera's)
 	uint32_t stamp = 0; // moves when its transform, its item, its group or its attributes do (the scene's serial then)
 };

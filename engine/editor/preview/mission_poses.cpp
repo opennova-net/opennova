@@ -47,6 +47,7 @@ bool same_pose(const MissionPose &a, const MissionPose &b) {
 	const world::InfantryBodyPose &p = a.pose, &q = b.pose;
 	return a.item == b.item && a.status == b.status && a.ai_function == b.ai_function && a.adm == b.adm &&
 			a.ai_slot == b.ai_slot && a.state == b.state && a.updates == b.updates && a.rise == b.rise &&
+			a.ssn == b.ssn && a.alert == b.alert && a.guarding == b.guarding &&
 			a.clip == b.clip &&
 			a.source_clip == b.source_clip && p.state == q.state && p.phase == q.phase && p.variant == q.variant &&
 			p.parked == q.parked && p.blending == q.blending && p.source_state == q.source_state &&
@@ -125,7 +126,8 @@ bool MissionPoses::refresh(const SessionView &view, const MissionScene &scene) {
 	std::vector<MissionPoseInput> inputs;
 	for (const MissionEntityMark &entity : scene.entities()) {
 		if (entity.pool != MissionPool::Organic) continue;
-		inputs.push_back(MissionPoseInput{ entity.row, entity.item, entity.attributes, entity.route, entity.ssn });
+		inputs.push_back(MissionPoseInput{ entity.row, entity.item, entity.attributes, entity.route, entity.ssn,
+				uint8_t(entity.alert) });
 	}
 	const AssetGraph *graph = view.findings.graph.get();
 	const uint64_t graph_generation = graph ? graph->generation() : 0;
@@ -353,7 +355,7 @@ void mission_pose_people(const std::vector<MissionPoseInput> &inputs,
 			out.push_back(std::move(pose));
 			continue;
 		}
-		pose_person(*definition, PersonRecord{ input.ssn, input.route, input.attributes }, has_file, *files,
+		pose_person(*definition, PersonRecord{ input.ssn, input.route, input.attributes, input.alert }, has_file, *files,
 				rig_files.store, motion, rings, pose);
 		out.push_back(std::move(pose));
 	}
@@ -395,6 +397,9 @@ void pose_person(const PersonDefinition &definition, const PersonRecord &record,
 	const world::OrganicSpawnFacts facts =
 			world::organic_spawn_facts_from_record(pose.ai_slot, record.route, record.attributes);
 	pose.status = "posed";
+	pose.ssn = record.ssn;
+	pose.alert = pose.ai_slot ? record.alert : 0;
+	pose.guarding = (facts.flags & world::kEntityFlagMounted) != 0;
 	pose.state = world::organic_spawn_state(facts, &motion, adm_id);
 	pose.because = because_of(facts, pose.state);
 	pose.updates = world::organic_warmup_updates(uint32_t(record.ssn)) + 1;
@@ -423,6 +428,7 @@ io::JsonValue mission_pose_json(const MissionPose &pose) {
 	out.set("because", json_string(pose.because));
 	out.set("updates", json_number(double(pose.updates)));
 	out.set("rise", json_number(pose.rise));
+	out.set("alert", json_number(pose.alert));
 	out.set("lift", json_number(pose.lift));
 	out.set("settled", JsonValue::make_bool(pose.settled));
 	if (pose.on) out.set("on", json_number(double(pose.on)));
