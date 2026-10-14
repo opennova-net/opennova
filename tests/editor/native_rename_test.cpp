@@ -136,14 +136,16 @@ int test_rename_in_native_texts() {
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	const std::string root = view.project.root;
-	for (const char *name : {"map.tga", "grain.tga", "spark.tga", "fx_01.tga", "fx_02.tga", "stance.tga", "cloud.pcx"})
+	for (const char *name : {"map.tga", "grain.tga", "spark.tga", "fx_01.tga", "fx_02.tga", "stance.tga", "cloud.pcx", "logo.tga"})
 		TEST_EXPECT(editor_test::write_bytes(root + "/textures/" + name, tga_bytes()));
 	const std::string trn = "; map.tga\r\npolytrn_colormap map.tga\r\npolytrn_detailmap grain.tga\r\npolytrn_polydata isle.cpt\r\n";
 	const std::string env = "sky_map1 cloud.pcx ; the near layer\r\nsky_map2 cloud.pcx\r\n";
+	const std::string dusk = "sky_map2 logo.tga\r\n";
 	const std::string ptl = "[particledef]\r\n{\r\n\tid = a;\r\n\tgraphic1 = spark.tga, additive;\r\n}\r\n[particledef]\r\n{\r\n"
 	                        "\tid = b;\r\n\tgraphic1 = fx.tga, blend;\r\n\tg1_flip_frames = 2;\r\n}\r\n";
 	const std::string hud = "HUDSTANCE 0 10 10 stance.tga STAND\r\n";
 	TEST_EXPECT(editor_test::write_text(root + "/terrains/isle.trn", trn) && editor_test::write_text(root + "/envs/day.env", env) &&
+	            editor_test::write_text(root + "/envs/dusk.env", dusk) &&
 	            editor_test::write_text(root + "/effects/fx.ptl", ptl) && editor_test::write_text(root + "/hud/hudpos.def", hud));
 	// The night's environment stored in the SCR form, as a retail archive may hold it.
 	{
@@ -173,6 +175,11 @@ int test_rename_in_native_texts() {
 	TEST_EXPECT(session.outcome().done());
 	TEST_EXPECT(read_text(root + "/envs/day.env") == "sky_map1 sky.pcx ; the near layer\r\nsky_map2 sky.pcx\r\n");
 	TEST_EXPECT(read_text(root + "/envs/night.env") == "sky_map1 sky.pcx\r\n");
+	// A sky map's name is made .pcx as the game parses it, so an environment naming a TGA uses no TGA: the
+	// TGA's rename leaves it as it is.
+	editor_test::handle_to_end(session, request::rename_asset("textures/logo.tga", "logo2.tga"));
+	TEST_EXPECT(session.outcome().done() && read_text(root + "/textures/logo2.tga").size() == tga_bytes().size());
+	TEST_EXPECT(read_text(root + "/envs/dusk.env") == dusk);
 	// A particle's graphic.
 	editor_test::handle_to_end(session, request::rename_asset("textures/spark.tga", "fire.tga"));
 	TEST_EXPECT(session.outcome().done());
