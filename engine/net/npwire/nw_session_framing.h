@@ -106,17 +106,25 @@ uint32_t make_random_session_u32();
 // [orig: NapiNP_GenerateSessionKey @0x61EA70 - the jz @0x61EAC3]
 uint32_t make_session_key(const std::function<uint32_t()> &draw = {});
 
-// The CI a new client-side (type-2) connection takes: the game protocol's
-// connection counter, pre-incremented, a step to 0 taking 1 instead.
-// `advance_connection_index` steps the given counter; `next_connection_index`
-// steps the process's one counter. A LAN browse's enumerator connection takes
-// one, and the join from a row it discovered goes on with that same connection,
-// so the browse's 0x41s and the join's 0x42 carry one CI; a dial without a row
-// creates its own connection and takes the next.
-// [orig: CNapiNPConnection_Create @0x62acb0 - `add [esi+0ECCh], edx` @0x62b282,
-//  the 0 -> 1 wrap @0x62b288..0x62b28a, conn+0x14 @0x62b296; a type-2 connection's
-//  enumerator is created with it @0x62b1dc; CNapiNetwork_StartClientConnection
-//  @0x4ca160 -> CNapiNPConnection_InitFromSession @0x626320 on that connection]
+// The connection counter: the game protocol's, pre-incremented at every connection
+// create on the protocol, a step to 0 taking 1 instead, the new connection keeping it
+// as its index. Retail steps it for the client side's connections (type 2) and the
+// host's server-side ones (type 1) alike; a client connection's index is the CI its
+// 0x41s and 0x42 carry. `advance_connection_index` steps the given counter;
+// `next_connection_index` steps the process's one counter. A LAN browse's enumerator
+// connection takes one, and the join from a row it discovered goes on with that same
+// connection, so the browse's 0x41s and the join's 0x42 carry one CI; a dial without
+// a row creates its own connection and takes the next. Only our client connections
+// step it: the host's server-side creates do not (D-NET-713; a server-side index never
+// reaches the wire, the 0x82 echoing the client's CI, so only a later client
+// connection in the same process numbers differently).
+// [orig: CNapiNPConnection_Create @0x62acb0 - `add [esi+0ECCh], edx` @0x62b282 on both
+//  arms (the type test @0x62b1d1..0x62b1d5), the 0 -> 1 wrap @0x62b288..0x62b28a,
+//  conn+0x14 @0x62b296; a type-2 connection's enumerator is created with it @0x62b1dc;
+//  the creates: type 2 @0x4c9b9c / @0x4c9d9c, type 1 in NapiNPProtocol_HandleClientJoin
+//  @0x62bf06; CNapiNPConnection_SendSessionInit's CI is the client's, conn+0x154
+//  @0x620fa7; CNapiNetwork_StartClientConnection @0x4ca160 ->
+//  CNapiNPConnection_InitFromSession @0x626320 on the enumerator's connection]
 uint32_t advance_connection_index(uint32_t &counter);
 uint32_t next_connection_index();
 
