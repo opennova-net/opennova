@@ -346,25 +346,15 @@ static int remove_last_item() {
     TEST_EXPECT(document.rows().empty() && !document.blocked());
     return 0;
 }
-// S11a: a field edit shows as changed and reverts; the spawn registry compares by its IDs
-// (a slot set back to its own ID is no change, though the edit made a new state).
+// S11a: the spawn registry compares by its IDs (a slot set back to its own ID is no change, though
+// the edit made a new state). A field's change and its revert are the core's (document_core_test
+// test_changes_since_save) and every type's (editor_document_contract_test check_real_change).
 static int changes_since_save() {
 	editor_test::TempProjectDir dir("opennova_catalog_changes_test");
 	TEST_EXPECT(editor_test::write_text(dir.file("items.def"),
 	                                    "begin \"One\"\nid 100001\ntype marker\nhp 10\npcvehicle_spawnlist 8\nend\n"));
 	DefCatalogDocument document; Diagnostic error;
 	TEST_EXPECT(document.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
-	const NodeAddress row{document.rows()[0]->id, node_kind(DefRecordKind::Item), 0};
-	TEST_EXPECT(!document.field_changed(row, "hp") && document.record_change(row) == Document::RecordChange::Unchanged);
-	TEST_EXPECT(document.apply(field(row, "hp", int64_t(20)), error));
-	TEST_EXPECT(document.field_changed(row, "hp") && !document.field_changed(row, "id"));
-	TEST_EXPECT(document.record_change(row) == Document::RecordChange::Changed);
-	const std::vector<Edit> back = document.revert_edits(row, "hp");
-	TEST_EXPECT(back.size() == 1 && back[0].operation == EditOperation::Set && std::get<int64_t>(back[0].value) == 10);
-	TEST_EXPECT(document.apply(back, error) && !document.field_changed(row, "hp"));
-	TEST_EXPECT(row_at(document, 0).native.as<DefItemDef>().hp == 10 && document.record_change(row) == Document::RecordChange::Unchanged);
-	document.undo();
-	TEST_EXPECT(row_at(document, 0).native.as<DefItemDef>().hp == 20 && document.field_changed(row, "hp"));
 	Edit spawn; spawn.operation = EditOperation::SetFileValue; spawn.position = 0; spawn.value = int64_t(9);
 	TEST_EXPECT(!document.file_state_changed() && document.apply(spawn, error) && document.file_state_changed());
 	spawn.value = int64_t(8);

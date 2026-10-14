@@ -506,38 +506,6 @@ int findings_follow_rows() {
 	return 0;
 }
 
-// S11a: a clip's frame rate and a frame's step edited are changes and revert; a table's
-// key edited is a change and reverts; a clip added to a row is Added and changes the row.
-int changes_since_save() {
-	using Change = Document::RecordChange;
-	AnimationDocument clip;
-	Diagnostic error;
-	TEST_EXPECT(clip.load(anim_dir() + "/walk.bad", "walk.bad", AssetKind::Animation, "jo", error));
-	const ClipRow *row = clip.clip();
-	TEST_EXPECT(row && !row->events.empty());
-	if (!row || row->events.empty()) return 1;
-	const NodeAddress clip_row{row->id, node_kind(AnimationKind::Clip), 0};
-	const NodeAddress event{row->id, kEvent, row->collections[1][0]};
-	TEST_EXPECT(clip.apply(set(clip_row, "fps", int64_t(25)), error) && clip.apply(set(event, "velocity.x", 0.25), error));
-	TEST_EXPECT(clip.field_changed(clip_row, "fps") && clip.field_changed(event, "velocity.x"));
-	TEST_EXPECT(clip.record_change(clip_row) == Change::Changed && clip.record_change(event) == Change::Changed);
-	TEST_EXPECT(clip.apply(clip.revert_edits(clip_row, "fps"), error) && clip.apply(clip.revert_edits(event, "velocity.x"), error));
-	TEST_EXPECT(!clip.field_changed(clip_row, "fps") && !clip.field_changed(event, "velocity.x"));
-	TEST_EXPECT(clip.record_change(event) == Change::Unchanged && serialized(clip) == test_io::read_file(anim_dir() + "/walk.bad"));
-
-	AnimationMapDocument table;
-	TEST_EXPECT(table.load(anim_dir() + "/soldier.adm", "soldier.adm", AssetKind::AnimationMap, "jo", error));
-	const NodeAddress first{table.rows()[1]->id, kRow, 0};
-	TEST_EXPECT(table.apply(set(first, "key", std::string("anim_crouch_idle")), error) && table.field_changed(first, "key"));
-	TEST_EXPECT(table.apply(table.revert_edits(first, "key"), error) && !table.field_changed(first, "key"));
-	TEST_EXPECT(table.record_change(first) == Change::Unchanged);
-	TEST_EXPECT(table.apply(op(EditOperation::Add, {first.row, kMapClip, 0}), error));
-	TEST_EXPECT(table.record_change({first.row, kMapClip, table.last_added()}) == Change::Added &&
-	            table.record_change(first) == Change::Changed);
-	std::printf("changes: a clip's fields and a table's key changed and reverted, a clip added\n");
-	return 0;
-}
-
 int validation_and_graph() {
 	editor_test::TempProjectDir dir("opennova_animation_validation_test");
 	const std::string root = dir.file("Game");
@@ -658,7 +626,6 @@ int main(int argc, char **argv) {
 	if (table_lines() != 0) return 1;
 	if (define_slot() != 0) return 1;
 	if (findings_follow_rows() != 0) return 1;
-	if (changes_since_save() != 0) return 1;
 	if (validation_and_graph() != 0) return 1;
 	return retail_files();
 }

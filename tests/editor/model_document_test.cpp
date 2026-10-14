@@ -225,34 +225,6 @@ int part_animations() {
 	return 0;
 }
 
-// S11a: a light's colour edited is a change of the light, not of the model row, and reverts;
-// a user point added is Added and changes the row that holds it.
-int changes_since_save() {
-	using Change = Document::RecordChange;
-	ModelDocument document;
-	TEST_EXPECT(load(document, synth_dir() + "/armory.3di", "armory.3di"));
-	const ModelRow *row = document.model_row();
-	TEST_EXPECT(row && !row->lights.empty());
-	if (!row || row->lights.empty()) return 1;
-	const NodeAddress model{row->id, node_kind(ModelKind::Model), 0};
-	const NodeAddress light{row->id, kLight, row->ids.lists[2][0].id};
-	Value red;
-	TEST_EXPECT(document.get(light, "start.r", red));
-	const int64_t was = std::get<int64_t>(red);
-	Diagnostic error;
-	TEST_EXPECT(document.apply(set(light, "start.r", int64_t(was == 12 ? 13 : 12)), error));
-	TEST_EXPECT(document.field_changed(light, "start.r") && document.record_change(light) == Change::Changed);
-	TEST_EXPECT(document.record_change(model) == Change::Unchanged);
-	TEST_EXPECT(document.apply(document.revert_edits(light, "start.r"), error) && !document.field_changed(light, "start.r"));
-	TEST_EXPECT(document.get(light, "start.r", red) && std::get<int64_t>(red) == was);
-	TEST_EXPECT(document.record_change(light) == Change::Unchanged && serialized(document) == test_io::read_file(synth_dir() + "/armory.3di"));
-	TEST_EXPECT(document.apply(op(EditOperation::Add, {row->id, kUserPoint, 0}), error));
-	TEST_EXPECT(document.record_change({row->id, kUserPoint, document.last_added()}) == Change::Added &&
-	            document.record_change(model) == Change::Changed);
-	std::printf("changes: a light's field changed and reverted, a user point added\n");
-	return 0;
-}
-
 int validation() {
 	editor_test::TempProjectDir dir("opennova_model_validation_test");
 	const std::string root = dir.file("Game");
@@ -1059,7 +1031,6 @@ int main(int argc, char **argv) {
 	if (edits() != 0) return 1;
 	if (alike_but_user_points_tables() != 0) return 1;
 	if (part_animations() != 0) return 1;
-	if (changes_since_save() != 0) return 1;
 	if (validation() != 0) return 1;
 	if (frames_and_registers() != 0) return 1;
 	if (record_references() != 0) return 1;

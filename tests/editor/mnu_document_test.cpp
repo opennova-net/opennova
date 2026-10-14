@@ -1981,11 +1981,12 @@ int retail_sweep() {
 
 } // namespace
 
-// S11a: a field's value edited is a change, and a Set gives it back. An optional field's
-// presence is a change of its own: EXIT's left edge left out (the same value) is changed
-// and a Write gives it back; GROUP, left out in the file, written is changed and a Clear
-// takes it back. A window's children reordered mark the window that holds them, not the
-// children or the screen.
+// S11a: an optional field's presence is a change of its own: EXIT's left edge left out (the
+// same value) is changed and a Write gives it back; GROUP, left out in the file, written is
+// changed and a Clear takes it back. A window's children reordered mark the window that holds
+// them, not the children or the screen. A field's value changed and a Set giving it back are the
+// core's (document_core_test test_changes_since_save) and every type's
+// (editor_document_contract_test check_real_change).
 int changes_since_save() {
 	editor_test::TempProjectDir dir("opennova_menu_changes_test");
 	NoProcess platform;
@@ -2005,23 +2006,11 @@ int changes_since_save() {
 	TEST_EXPECT(find_definition(AssetGraph(), *document, "EXIT", exit) &&
 			find_definition(AssetGraph(), *document, "TITLE", title));
 	Diagnostic error;
-	const std::string saved_text = text_of(*document, title, "string.value");
-	TEST_EXPECT(document->apply(set(title, "string.value", std::string("Another title")), error));
-	TEST_EXPECT(document->field_changed(title, "string.value") && !document->field_changed(title, "name"));
-	TEST_EXPECT(document->record_change(title) == Change::Changed && document->record_change(root) == Change::Unchanged);
-	std::vector<Edit> back = document->revert_edits(title, "string.value");
-	TEST_EXPECT(back.size() == 1 && back[0].operation == EditOperation::Set &&
-	            std::get<std::string>(back[0].value) == saved_text);
-	TEST_EXPECT(document->apply(back, error) && !document->field_changed(title, "string.value") &&
-	            text_of(*document, title, "string.value") == saved_text && document->record_change(title) == Change::Unchanged);
-	document->undo();
-	document->undo();
-	TEST_EXPECT(!document->dirty());
 	Edit clear = op(EditOperation::Clear, exit);
 	clear.field = "position.left";
 	TEST_EXPECT(document->apply(clear, error) && document->field_changed(exit, "position.left"));
 	TEST_EXPECT(document->record_change(exit) == Change::Changed && document->record_change(root) == Change::Unchanged);
-	back = document->revert_edits(exit, "position.left");
+	std::vector<Edit> back = document->revert_edits(exit, "position.left");
 	TEST_EXPECT(back.size() == 1 && back[0].operation == EditOperation::Write);
 	TEST_EXPECT(document->apply(back, error) && !document->field_changed(exit, "position.left") &&
 	            document->present(exit, "position.left") && document->record_change(exit) == Change::Unchanged);
