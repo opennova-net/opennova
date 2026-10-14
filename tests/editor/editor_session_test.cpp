@@ -660,10 +660,12 @@ static int test_import() {
 	return 0;
 }
 
-// Play in the game install (Strict Play) refused before any child starts: no install chosen, an install
-// without its program (play.install_missing), a run directory that cannot be made (play.run_directory); the
-// JOTAC install's Bink DLL (binkw32_.dll) staged as the game loads it. (S26 K1: the install mode, the
-// install's configuration and saves beside the build with /d, is gone; Strict Play is the game install's.)
+// Play in the game install (Strict Play) refused before any child starts, as the session reports it: no install
+// chosen (play.install_missing), a run directory that cannot be made (play.run_directory). What refuses an
+// install (one without its program too) and what its run directory holds (the JOTAC install's Bink DLL,
+// binkw32_.dll, staged as the game loads it) is run/'s: play_session_test's test_strict_install_staging. (S26
+// K1: the install mode, the install's configuration and saves beside the build with /d, is gone; Strict Play
+// is the game install's.)
 static int test_install_play_refusals() {
 	editor_test::TempProjectDir dir("opennova_editor_install_play_test");
 	FakePlatform platform;
@@ -679,43 +681,33 @@ static int test_install_play_refusals() {
 	session.handle(request::play());
 	session.run_operations();
 	TEST_EXPECT(platform.spawns == 0 && session.view().findings.diagnostics.back().code() == "play.install_missing");
-	const std::string install = dir.file("retail install");
-	TEST_EXPECT(editor_test::write_text(install + "/binkw32.dll", "ordinary Bink"));
-	editor_test::set_game_install(session, install);
-	session.handle(request::play());
-	session.run_operations();
-	TEST_EXPECT(platform.spawns == 0 && session.view().findings.diagnostics.back().code() == "play.install_missing");
-	TEST_EXPECT(editor_test::write_text(install + "/Jointops.exe", "retail executable") &&
-	            editor_test::write_text(install + "/binkw32_.dll", "real JOTAC Bink"));
-	session.handle(request::play());
-	session.run_operations();
-	const std::string run = session.view().project.root + "/.opennova/run/strict/1";
-	std::string copied, io_error;
-	TEST_EXPECT(platform.spawns == 1 && platform.last_plan.working_dir == run &&
-	            platform.last_plan.args == std::vector<std::string>({"/w", "/FRISK"}));
-	TEST_EXPECT(opennova::io::read_file_text(run + "/binkw32.dll", copied, io_error) && copied == "real JOTAC Bink");
-	session.handle(request::stop_play());
-	session.poll();
-	TEST_EXPECT(session.view().activity.play_state == PlayState::Stopped);
 	// A run directory that cannot be made is reported before any child starts.
+	const std::string install = dir.file("retail install");
+	TEST_EXPECT(editor_test::write_text(install + "/Jointops.exe", "retail executable") &&
+	            editor_test::write_text(install + "/binkw32.dll", "Bink"));
+	editor_test::set_game_install(session, install);
 	const std::string project = session.view().project.root;
 	fs::remove_all(project + "/.opennova/run");
 	TEST_EXPECT(editor_test::write_text(project + "/.opennova/run", "a file where the runs go"));
 	session.handle(request::play());
 	session.run_operations();
-	TEST_EXPECT(platform.spawns == 1 && session.view().findings.diagnostics.back().code() == "play.run_directory");
+	TEST_EXPECT(platform.spawns == 0 && session.view().findings.diagnostics.back().code() == "play.run_directory");
 	fs::remove(project + "/.opennova/run");
 	return 0;
 }
 
-// Strict Play in the game install (the project's play_mode strict, set by apply_project_settings and kept in
-// its local.json, never the editor's): the run directory holds the build's files and the install's program and Bink DLL alone, the game
-// launched /w /FRISK with no /d. Its file log is read once the game exits, never while it runs. The first
-// run, which found no game.cfg, writing one and quitting on its own with code 0 soon after it started, is
-// started once more in the same run directory, said in Output (and on the run section), once the game's
-// one-at-a-time gate is let go; a second such exit, a stop, or a first run that wrote nothing is not. Play
-// is refused before a build while the gate is held (another game of the install runs); a project that
-// builds as an expansion on the install's base game plays as the stock game's /exp does.
+// Strict Play in the game install as the session runs it (the project's play_mode strict, set by
+// apply_project_settings): what its run directory holds, the first-run rule and each mode's run directories
+// are run/'s, pinned by play_session_test (test_strict_install_staging, test_strict_first_run_decision,
+// test_run_directory_keeps_game_state, test_run_directories_per_mode); here, the session's wiring of them. Play
+// is refused before a build while the game's one-at-a-time gate is held (another game of the install runs).
+// The game runs in the project's .opennova/run/strict/1, launched /w /FRISK; its file log is read once the game
+// exits, never while it runs. The first run, which found no game.cfg, writing one and quitting on its own with
+// code 0 soon after it started, is started once more in the same run directory, said in Output (and on the run
+// section), once the gate is let go; a second such exit, a run that had a game.cfg, one that wrote none, ran
+// past the window or was stopped is not. The next Play names what its run directory kept; an OpenNova runtime
+// Play between two runs in its own mode's directory. A project that builds as an expansion on the install's
+// base game plays with /exp.
 static int test_strict_play() {
 	editor_test::TempProjectDir dir("opennova_editor_strict_play_test");
 	FakePlatform platform;
@@ -727,10 +719,7 @@ static int test_strict_play() {
 	editor_test::create_missing_files(session);
 	const std::string install = dir.file("install");
 	TEST_EXPECT(editor_test::write_text(install + "/Jointops.exe", "retail executable") &&
-	            editor_test::write_text(install + "/binkw32.dll", "Bink") &&
-	            editor_test::write_text(install + "/game.cfg", "install settings") &&
-	            editor_test::write_text(install + "/player.sav", "install player") &&
-	            editor_test::write_text(install + "/score.ini", "install scores"));
+	            editor_test::write_text(install + "/binkw32.dll", "Bink"));
 	editor_test::set_game_install(session, install);
 	ProjectSettingsChange strict;
 	strict.play_mode = PlayMode::Strict;
@@ -738,18 +727,6 @@ static int test_strict_play() {
 	TEST_EXPECT(v.project.play_mode == PlayMode::Strict &&
 	            view_section_to_json(v, ViewSection::Run).get_string("play_mode", "") == "strict" &&
 	            view_section_to_json(v, ViewSection::Preferences).get_string("play_mode", "") == "strict");
-	{
-		// Kept with the project (its local.json), never the editor's: another editor on the same settings
-		// file, no project open, plays in the OpenNova runtime.
-		FakePlatform other;
-		FilePreferencesStore reopened_preferences(dir.file("settings.json"));
-		ProjectSession reopened(other, reopened_preferences);
-		TEST_EXPECT(reopened.view().project.play_mode == PlayMode::Runtime);
-		LocalSettings local;
-		Diagnostic finding;
-		TEST_EXPECT(load_local_settings(ProjectPaths::for_root(v.project.root), local, finding) &&
-		            local.play_mode == PlayMode::Strict);
-	}
 
 	// Another game of the install runs (its gate held): refused before anything is built.
 	platform.semaphores = {kInstallInstanceSemaphore};
@@ -763,16 +740,8 @@ static int test_strict_play() {
 	TEST_EXPECT(platform.spawns == 1 && v.activity.play_state == PlayState::Running && v.activity.play_run_mode == "strict");
 	const std::string project = v.project.root;
 	const std::string run = project + "/.opennova/run/strict/1";
-	const std::string built = v.activity.last_build->build_dir;
-	TEST_EXPECT(platform.last_plan.args == std::vector<std::string>({"/w", "/FRISK"}) &&
-	            platform.last_plan.executable == run + "/Jointops.exe" && platform.last_plan.working_dir == run &&
-	            platform.last_plan.log_file == run + "/_filelog.txt" && platform.last_plan.mcp_port == 0);
-	for (const char *absent : {"game.cfg", "player.sav", "score.ini", "build.json"})
-		TEST_EXPECT(!fs::exists(run + "/" + absent));
-	for (const char *present : {"Jointops.exe", "binkw32.dll", "language.pff", "localres.pff", "resource.pff", "nw_cdata.coo"})
-		TEST_EXPECT(fs::is_regular_file(run + "/" + present));
+	TEST_EXPECT(platform.last_plan.args == std::vector<std::string>({"/w", "/FRISK"}) && platform.last_plan.working_dir == run);
 	TEST_EXPECT(output_has(v, "Running: the game install (strict) on the build."));
-	const std::string build_tree = editor_test::tree_digest(built), install_tree = editor_test::tree_digest(install);
 
 	// The first run writes its game.cfg and its log, and quits on its own (code 0) two seconds in, while
 	// another game holds the gate a moment: the log is not read while it runs, then read as it exits; the
@@ -820,25 +789,15 @@ static int test_strict_play() {
 		            log->get("archives")->array.size() == 3 && log->get("from_archives")->array.size() == 2 &&
 		            log->get("from_archives")->array[1].string == "main.mnu" && log->get("from_disk")->array.empty());
 	}
-	TEST_EXPECT(editor_test::tree_digest(built) == build_tree && editor_test::tree_digest(install) == install_tree);
 
-	// The next strict Play keeps what the game wrote in its run directory (its game.cfg, which names the
-	// adapter its device dialog chose, so no dialog and no first run; its saves; its device log), and never
-	// anything of the install: what the Play before staged is staged again (the cookie jar the build's own
-	// once more), the game's file log gone.
+	// The next strict Play takes the same run directory and names what it kept of what the game wrote there.
 	TEST_EXPECT(editor_test::write_text(run + "/player.sav", "the game's player") &&
-	            editor_test::write_text(run + "/ghw.txt", "device log") &&
-	            editor_test::write_text(run + "/nw_cdata.coo", "rewritten by the game"));
+	            editor_test::write_text(run + "/ghw.txt", "device log"));
 	session.handle(request::play());
 	session.run_operations();
 	TEST_EXPECT(platform.spawns == 3 && v.activity.play_state == PlayState::Running && platform.last_plan.working_dir == run &&
 	            !v.activity.play_fresh && v.activity.play_run_mode == "strict");
 	TEST_EXPECT(v.activity.play_kept == std::vector<std::string>({"game.cfg", "ghw.txt", "player.sav"}));
-	TEST_EXPECT(opennova::io::read_file_text(run + "/game.cfg", text, io_error) && text == "written by the game");
-	TEST_EXPECT(opennova::io::read_file_text(run + "/player.sav", text, io_error) && text == "the game's player");
-	TEST_EXPECT(opennova::io::read_file_text(run + "/nw_cdata.coo", text, io_error) && text != "rewritten by the game");
-	TEST_EXPECT(fs::is_regular_file(run + "/Jointops.exe") && !fs::exists(run + "/_filelog.txt") &&
-	            !fs::exists(run + "/score.ini"));
 	// It quits on its own at once: it had a game.cfg, so it is no first run and is not started again.
 	platform.clock += 1000;
 	platform.codes[v.activity.play_pid] = 0;
@@ -846,11 +805,9 @@ static int test_strict_play() {
 	session.poll();
 	session.poll();
 	TEST_EXPECT(platform.spawns == 3 && v.activity.play_state == PlayState::Stopped && !v.activity.play_started_again);
-	TEST_EXPECT(editor_test::tree_digest(built) == build_tree && editor_test::tree_digest(install) == install_tree);
 
-	// An OpenNova runtime Play between two strict Plays (a modder switching back and forth) runs in a run
-	// directory of its own mode, beside strict's, which it never takes, empties or removes: the next strict
-	// Play keeps the game.cfg the first run wrote, so the game opens no device dialog and is no first run.
+	// An OpenNova runtime Play between two strict Plays (a modder switching back and forth) runs in its own
+	// mode's run directory; the next strict Play takes strict's again, with what it kept.
 	const std::string runtime = dir.file("runtime/opennova.exe");
 	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
 	PlayLauncher launcher;
@@ -864,9 +821,7 @@ static int test_strict_play() {
 	const std::string runtime_run = project + "/.opennova/run/runtime/1";
 	TEST_EXPECT(platform.spawns == 4 && v.activity.play_state == PlayState::Running && v.activity.play_run_mode == "runtime" &&
 	            platform.last_plan.executable == runtime && platform.last_plan.working_dir == runtime_run &&
-	            v.activity.play_kept.empty() && !fs::exists(runtime_run + "/game.cfg"));
-	TEST_EXPECT(opennova::io::read_file_text(run + "/game.cfg", text, io_error) && text == "written by the game");
-	TEST_EXPECT(editor_test::write_text(runtime_run + "/weapon.sav", "the runtime's weapons"));
+	            v.activity.play_kept.empty());
 	session.handle(request::stop_play());
 	session.poll();
 	TEST_EXPECT(v.activity.play_state == PlayState::Stopped);
@@ -876,14 +831,9 @@ static int test_strict_play() {
 	TEST_EXPECT(platform.spawns == 5 && v.activity.play_state == PlayState::Running && v.activity.play_run_mode == "strict" &&
 	            platform.last_plan.working_dir == run && !v.activity.play_fresh);
 	TEST_EXPECT(v.activity.play_kept == std::vector<std::string>({"game.cfg", "ghw.txt", "player.sav"}));
-	TEST_EXPECT(opennova::io::read_file_text(run + "/game.cfg", text, io_error) && text == "written by the game");
-	TEST_EXPECT(opennova::io::read_file_text(runtime_run + "/weapon.sav", text, io_error) && text == "the runtime's weapons");
-	platform.clock += 1000;
-	platform.codes[v.activity.play_pid] = 0;
-	platform.exit_child(v.activity.play_pid);
+	session.handle(request::stop_play());
 	session.poll();
-	session.poll();
-	TEST_EXPECT(platform.spawns == 5 && v.activity.play_state == PlayState::Stopped && !v.activity.play_started_again);
+	TEST_EXPECT(v.activity.play_state == PlayState::Stopped);
 
 	// A first run (Play fresh: the run directory emptied first) that wrote no game.cfg, or that ran past
 	// the window, or that was stopped, is not started again; one that quit with code 0 having opened nothing
@@ -914,8 +864,7 @@ static int test_strict_play() {
 	TEST_EXPECT(first_run_ends(true, 2000, true));
 
 	// A project that builds as an expansion on the install's base game plays as the stock game plays /exp from
-	// its install: the install's archives, the build's expansion folder, the program and Bink DLL, none of the
-	// install's configuration, saves or files it reads by name; launched /w /exp jxm /FRISK, no /d.
+	// its install, launched /w /exp jxm /FRISK (what its run directory holds: test_strict_install_staging).
 	const std::string standalone_build = v.activity.last_build->build_dir;
 	for (const char *archive : {"language.pff", "localres.pff", "resource.pff"})
 		TEST_EXPECT(fs::copy_file(standalone_build + "/" + archive, install + "/" + archive, fs::copy_options::overwrite_existing));
@@ -928,16 +877,6 @@ static int test_strict_play() {
 	session.run_operations();
 	TEST_EXPECT(platform.spawns == spawns + 1 &&
 	            platform.last_plan.args == std::vector<std::string>({"/w", "/exp", "jxm", "/FRISK"}));
-	const std::string expansion_run = platform.last_plan.working_dir;
-	for (const char *present : {"Jointops.exe", "binkw32.dll", "language.pff", "localres.pff", "resource.pff"})
-		TEST_EXPECT(fs::is_regular_file(expansion_run + "/" + present));
-	TEST_EXPECT(fs::is_directory(expansion_run + "/expansion/jxm"));
-	// What the run directory holds of these is its own runs' (the game wrote them), never the install's.
-	for (const char *own : {"game.cfg", "player.sav", "score.ini"}) {
-		std::string held, held_error;
-		TEST_EXPECT(!opennova::io::read_file_text(expansion_run + "/" + own, held, held_error) ||
-		            held.find("install") == std::string::npos);
-	}
 	session.handle(request::stop_play());
 	session.poll();
 	session.poll();
