@@ -745,3 +745,36 @@ func test_missing_material_texture_uses_the_retail_checkerboard() -> void:
 	assert_eq(image.get_pixel(0, 0), Color8(48, 48, 48, 255))
 	assert_eq(image.get_pixel(4, 0), Color8(80, 80, 80, 255))
 	assert_eq(image.get_pixel(4, 4), Color8(48, 48, 48, 255))
+
+
+func test_a_model_drops_its_weather_sample_once_no_rings_stand() -> void:
+	# armory declares FLICKER (material 3's generator), so a renderable frame
+	# hashes the model's position into the weather's rings while an unheld
+	# world's weather publishes them. Once the absent set clears them the sample
+	# goes and the registers read as a model's that never sampled; a value
+	# written since stands.
+	var world := Node3D.new()
+	add_child_autofree(world)
+	WorldSceneTable.build(world, false)
+	var data := EnvFile.new()
+	data.reset_to_default()
+	(world.get_node("MissionEnvironment") as MissionEnvironment).environment_data = data
+	await get_tree().process_frame
+	var model := ObjectModel.new()
+	add_child_autofree(model)
+	model.set_process(false)
+	model.set_object_data(_object_data(ARMRY_3DI))
+	assert_false(model.get_ctrl_values().has("FLICKER"), "no sample before a frame")
+	(world.get_node("Weather") as Weather).advance_frame(1.0 / 62.5)
+	model.advance_runtime_frame(0.016)
+	var sampled := model.get_ctrl_values()
+	assert_true(
+		sampled.has("FLICKER") and sampled.has("SWING"), "the standing rings' sample is the model's"
+	)
+	WorldSceneTable.publish_absent()
+	model.advance_runtime_frame(0.016)
+	var dropped := model.get_ctrl_values()
+	assert_false(dropped.has("FLICKER") or dropped.has("SWING"), "no rings: the sample goes")
+	model.set_ctrl_value("FLICKER", 0x2000)
+	model.advance_runtime_frame(0.016)
+	assert_eq(model.get_ctrl_values().get("FLICKER"), 0x2000, "a value written since stands")

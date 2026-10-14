@@ -25,6 +25,10 @@ public:
 	// A position-hashed weather sample overwrites values without changing the
 	// current writer's lifecycle tag, exactly like the old direct store.
 	void sample_weather(int32_t flicker, int32_t swing);
+	// The registers still holding the last weather sample (nothing stored to or
+	// cleared from them since) are cleared, as a model that never sampled reads
+	// them: no rings stand any more. True when one was.
+	bool drop_weather();
 
 	static int part_register(int channel);
 	static const char *part_owner(int channel);
@@ -45,6 +49,7 @@ private:
 	void erase_owner(int ordinal);
 	ControlRegisterValues values_{};
 	std::bitset<threedi::THREEDI_CTRL_REGISTER_COUNT> present_;
+	std::bitset<threedi::THREEDI_CTRL_REGISTER_COUNT> weather_; // holding a weather sample
 	std::vector<int> present_order_;
 	std::unordered_map<int, std::string> owners_;
 	std::vector<int> owner_order_;

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <initializer_list>
 
 namespace opennova::renderer {
 namespace {
@@ -56,6 +57,8 @@ void ModelControls::erase_owner(int ordinal) {
 // restored. [orig: global CTRL value slots @0x83FCE8, stride 8]
 bool ModelControls::store(int ordinal, int64_t value, const std::string &owner) {
 	if (!valid(ordinal)) return false;
+	// A value written stands over a weather sample taken before it.
+	weather_.reset(static_cast<size_t>(ordinal));
 	const int32_t next = signed_dword(value);
 	const auto current = owners_.find(ordinal);
 	if (has(ordinal) && values_[static_cast<size_t>(ordinal)] == next &&
@@ -73,6 +76,7 @@ bool ModelControls::store(int ordinal, int64_t value, const std::string &owner) 
 
 bool ModelControls::clear(int ordinal) {
 	if (!has(ordinal)) return false;
+	weather_.reset(static_cast<size_t>(ordinal));
 	present_.reset(static_cast<size_t>(ordinal));
 	values_[static_cast<size_t>(ordinal)] = 0;
 	erase_ordinal(present_order_, ordinal);
@@ -106,6 +110,17 @@ ControlRegisterValues ModelControls::runtime_values(int32_t flicker, int32_t swi
 void ModelControls::sample_weather(int32_t flicker, int32_t swing) {
 	write_value(threedi::THREEDI_CTRL_FLICKER, flicker);
 	write_value(threedi::THREEDI_CTRL_SWING, swing);
+	weather_.set(threedi::THREEDI_CTRL_FLICKER);
+	weather_.set(threedi::THREEDI_CTRL_SWING);
+}
+
+bool ModelControls::drop_weather() {
+	bool dropped = false;
+	for (const int ordinal : { threedi::THREEDI_CTRL_FLICKER, threedi::THREEDI_CTRL_SWING }) {
+		if (weather_[static_cast<size_t>(ordinal)])
+			dropped = clear(ordinal) || dropped;
+	}
+	return dropped;
 }
 
 // [orig: Entity_ApplyCommand @0x43ab60 case 0x22; the per-channel publisher
