@@ -745,6 +745,7 @@ bool check_create_session_mpreset_exit() {
 	settings.server_name = "RESET";
 	settings.max_players = 4;
 	opennova::inmatch::SessionStartup startup;
+	startup.title = &kJo;
 	startup.host_key = 0x1234;
 	for (const int32_t word : {1, -1, 7}) {
 		settings.multiplayer_reset = word;
@@ -788,6 +789,7 @@ bool check_create_session_mpreset_exit() {
 	opennova::inmatch::HostOwner owner;
 	owner.host_loopback = &host_loop;
 	opennova::inmatch::HostConfig host;
+	host.title = &kJo;
 	host.socket_mode = SocketMode::Socketless;
 	host.serve_and_play = true;
 	host.config.multiplayer_reset = 1;
