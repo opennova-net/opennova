@@ -34,13 +34,16 @@ class MissionPoses;
 //   chase; the eye restamp) [orig: Entity_UpdateInfantryAI @0x4B9910]. The device draws each body's aim overlay
 //   (aim_overlay) as the game's presenter does.
 // - Else the motor head (world::infantry_org1_motor_head) and the still body's think (world::infantry_org1_still_think)
-//   alone, over channels of the people's own.
+//   alone, over channels of the people's own, the think skipped for a person its spawn left in the air over a ground
+//   read (MissionPose::stood, unsettled: airborne, the game's think exits [orig: @0x4BAA61..0x4BAA66]); a person the
+//   init hides (another team's respawn zone [orig: @0x4B9A03]) is known only in the world, whose zones it reads.
 // The editor's choice beside the game's: what the still body's tick does not run (the perception's targets and the
 // combat that follows, an enemy within the scan alerting a person the game's perception would have engaged; the root
 // integrate and the ground solve, a person standing where its spawn stood it; the picture has no simulation, DI-31),
 // the clock's ticks standing in for the world's; a route's walker, whom the game walks along its route, stands frozen at
 // its spawn pose rather than walking in place (the maintainer's S26 ruling), its body in the world only for the
-// others to look at.
+// others to look at; a person on route 127 (follow the local player) is a still body only because the view has no
+// local player to follow (AiSystem::infantry_command_think's 127 leg), as its think would walk it to the player.
 class MissionPeople {
 public:
 	// A jump of the clock longer than this many ticks (a seek, the Shell held up, a clock gone back) starts the people
@@ -105,6 +108,7 @@ private:
 		int ssn = 0;
 		uint8_t alert = 0;
 		bool guarding = false;
+		bool airborne = false;    // without a world: left in the air over a ground read (no think)
 		world::EntityHandle body; // in the world
 	};
 	struct PeopleWorld; // the people's world, its load as it stood before the inits, its bodies by row

@@ -357,6 +357,18 @@ static int test_poses() {
 		TEST_EXPECT(rig.session.outcome().done());
 		rig.pump();
 		TEST_EXPECT(pose_of(0)->updates == 11 && pose_of(0)->pose.phase != phase);
+		// An alert_state edit (S27): an Update, the pose's alert byte moved, its stamp with it (the people start again
+		// on the poses' serial); the civilian's, whose definition takes no AI slot, moves no pose.
+		const uint32_t serial = poses.serial();
+		rig.session.handle(request::edit_record(kMission, set_edit(rows[6], "alert_state", int64_t(0))));
+		TEST_EXPECT(rig.session.outcome().done());
+		rig.pump();
+		TEST_EXPECT(rig.last() == ViewportAction::Update && pose_of(6)->alert == 0 && poses.serial() != serial);
+		const uint32_t alerted = poses.serial();
+		rig.session.handle(request::edit_record(kMission, set_edit(rows[3], "alert_state", int64_t(1))));
+		TEST_EXPECT(rig.session.outcome().done());
+		rig.pump();
+		TEST_EXPECT(pose_of(3)->alert == 0 && poses.serial() == alerted);
 		// The catalog's table for the rifleman taken away outside the editor: those people stand.
 		std::string edited = kItems;
 		const std::string table = "anim_def people\nmove_function org1\nai_function org1\nattrib";
