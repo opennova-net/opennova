@@ -1,5 +1,6 @@
 <SCREEN>
-  <NAME>NW_MULTI_PLAYER</NAME>
+  <NAME>LAN_MULTI_PLAYER</NAME>
+  <MUSICVAR>5</MUSICVAR>
   <WINDOW type="window" name="MAIN">
     <POSITION>
       <LEFT>0</LEFT>
@@ -7,31 +8,2405 @@
       <RIGHT>800</RIGHT>
       <BOTTOM>600</BOTTOM>
     </POSITION>
-    <APPEARANCE type="custom" state="default"></APPEARANCE>
+    <APPEARANCE type="IMAGE" state="DEFAULT">%DEF_IMAGE_DEFAULT_BG%</APPEARANCE>
+    <TEXT_RSRC>menutxt.bin</TEXT_RSRC>
     <CURSOR>
       <FILE>newarow1.tga</FILE>
-      <FLAGS>STANDARD_TRANSPARENT</FLAGS>
     </CURSOR>
     <FONT>
-      <NAME>%DEF_FONTNAME_LG%</NAME>
+      <NAME>%DEF_FONTNAME%</NAME>
       <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
       <MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
       <SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
       <DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
     </FONT>
+    <WINDOW type="static" name="TITLE">
+      <POSITION>
+        <LEFT>40</LEFT>
+        <TOP>16</TOP>
+        <RIGHT>600</RIGHT>
+        <BOTTOM>64</BOTTOM>
+      </POSITION>
+      <APPEARANCE state="DEFAULT"></APPEARANCE>
+      <FONT>
+        <NAME>%IMPACT_FONTNAME%</NAME>
+        <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+      </FONT>
+      <STRING justify="LEFT" vjustify="CENTER">MULTIPLAYER</STRING>
+    </WINDOW>
+    <WINDOW type="static" name="SUBTITLE">
+      <POSITION>
+        <LEFT>42</LEFT>
+        <TOP>70</TOP>
+        <RIGHT>600</RIGHT>
+        <BOTTOM>94</BOTTOM>
+      </POSITION>
+      <APPEARANCE state="DEFAULT"></APPEARANCE>
+      <STRING justify="LEFT" vjustify="CENTER">Play the missions together over your local network.</STRING>
+    </WINDOW>
+    <WINDOW type="window" name="LAN">
+      <POSITION>
+        <LEFT>30</LEFT>
+        <TOP>110</TOP>
+        <RIGHT>770</RIGHT>
+        <BOTTOM>530</BOTTOM>
+      </POSITION>
+      <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+      <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+      <WINDOW type="static" name="STATIC_PLAYERCHOICE">
+        <POSITION>
+          <LEFT>20</LEFT>
+          <TOP>16</TOP>
+          <RIGHT>120</RIGHT>
+          <BOTTOM>40</BOTTOM>
+        </POSITION>
+        <APPEARANCE state="DEFAULT"></APPEARANCE>
+        <STRING justify="LEFT" vjustify="CENTER">PLAYER</STRING>
+      </WINDOW>
+      <WINDOW type="spinlist" name="PLAYERCHOICE">
+        <POSITION>
+          <LEFT>154</LEFT>
+          <TOP>16</TOP>
+          <RIGHT>380</RIGHT>
+          <BOTTOM>40</BOTTOM>
+        </POSITION>
+        <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+        <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+        <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+        <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+        <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+        <ITEMS justify="CENTER" vjustify="CENTER">
+        </ITEMS>
+        <SPINUP>
+          <POSITION>
+            <LEFT>228</LEFT>
+            <TOP>0</TOP>
+            <RIGHT>252</RIGHT>
+            <BOTTOM>24</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+          <STRING justify="CENTER" vjustify="CENTER">></STRING>
+          <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+        </SPINUP>
+        <SPINDOWN>
+          <POSITION>
+            <LEFT>-26</LEFT>
+            <TOP>0</TOP>
+            <RIGHT>-2</RIGHT>
+            <BOTTOM>24</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+          <STRING justify="CENTER" vjustify="CENTER">&lt;</STRING>
+          <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+        </SPINDOWN>
+      </WINDOW>
+      <WINDOW type="static" name="STATIC_GAMES">
+        <POSITION>
+          <LEFT>20</LEFT>
+          <TOP>56</TOP>
+          <RIGHT>520</RIGHT>
+          <BOTTOM>80</BOTTOM>
+        </POSITION>
+        <APPEARANCE state="DEFAULT"></APPEARANCE>
+        <STRING justify="LEFT" vjustify="CENTER">GAMES ON YOUR NETWORK</STRING>
+      </WINDOW>
+      <WINDOW type="list" name="LAN_GAME_LIST">
+        <POSITION>
+          <LEFT>20</LEFT>
+          <TOP>84</TOP>
+          <RIGHT>520</RIGHT>
+          <BOTTOM>400</BOTTOM>
+        </POSITION>
+        <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+        <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+        <ITEMS justify="LEFT" vjustify="CENTER">
+          <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+        </ITEMS>
+        <MIN_ITEM_HEIGHT>26</MIN_ITEM_HEIGHT>
+        <SCROLLBAR>
+          <POSITION>
+            <LEFT>484</LEFT>
+            <TOP>0</TOP>
+            <RIGHT>500</RIGHT>
+            <BOTTOM>316</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <SHUTTLE type="COLOR" state="DEFAULT">%TRIM_COLOR%</SHUTTLE>
+          <SHUTTLE type="COLOR" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</SHUTTLE>
+          <SHUTTLE type="COLOR" state="SELECTED">%DEF_TEXT_SELECTED_FG%</SHUTTLE>
+          <SCROLLUP type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</SCROLLUP>
+          <SCROLLUP type="COLOR" state="MOUSEOVER">%TRIM_COLOR%</SCROLLUP>
+          <SCROLLDOWN type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</SCROLLDOWN>
+          <SCROLLDOWN type="COLOR" state="MOUSEOVER">%TRIM_COLOR%</SCROLLDOWN>
+          <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+        </SCROLLBAR>
+      </WINDOW>
+      <WINDOW type="button" name="LAN_SEARCH">
+        <POSITION>
+          <LEFT>540</LEFT>
+          <TOP>84</TOP>
+          <RIGHT>720</RIGHT>
+          <BOTTOM>114</BOTTOM>
+        </POSITION>
+        <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+        <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+        <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+        <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+        <STRING justify="CENTER" vjustify="CENTER">SEARCH</STRING>
+        <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
+        <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
+      </WINDOW>
+      <WINDOW type="button" name="LAN_JOINGAME">
+        <HOTKEY VIRTUAL>VK_RETURN</HOTKEY>
+        <POSITION>
+          <LEFT>540</LEFT>
+          <TOP>124</TOP>
+          <RIGHT>720</RIGHT>
+          <BOTTOM>154</BOTTOM>
+        </POSITION>
+        <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+        <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+        <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+        <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+        <STRING justify="CENTER" vjustify="CENTER">JOIN</STRING>
+        <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
+        <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
+      </WINDOW>
+      <WINDOW type="button" name="LAN_HOSTGAME">
+        <ACTION type="SCREEN" file="mp.mnu">MULTI_PLAYER_HOST</ACTION>
+        <POSITION>
+          <LEFT>540</LEFT>
+          <TOP>196</TOP>
+          <RIGHT>720</RIGHT>
+          <BOTTOM>226</BOTTOM>
+        </POSITION>
+        <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+        <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+        <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+        <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+        <STRING justify="CENTER" vjustify="CENTER">HOST A GAME</STRING>
+        <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
+        <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
+      </WINDOW>
+    </WINDOW>
     <WINDOW type="button" name="BACK">
       <HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
       <ACTION type="POP_SCREEN"></ACTION>
       <POSITION>
-        <LEFT>340</LEFT>
-        <TOP>540</TOP>
-        <RIGHT>460</RIGHT>
+        <LEFT>30</LEFT>
+        <TOP>548</TOP>
+        <RIGHT>220</RIGHT>
+        <BOTTOM>582</BOTTOM>
       </POSITION>
-      <APPEARANCE state="default"></APPEARANCE>
-      <APPEARANCE state="mouseover"></APPEARANCE>
-      <APPEARANCE state="selected"></APPEARANCE>
-      <APPEARANCE state="disabled"></APPEARANCE>
-      <STRING justify="CENTER">Back</STRING>
+      <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+      <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+      <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+      <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+      <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+      <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+      <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+      <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+      <FONT>
+        <NAME>%DEF_FONTNAME_LG%</NAME>
+        <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+        <MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+        <SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+        <DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+      </FONT>
+      <STRING justify="CENTER" vjustify="CENTER">BACK</STRING>
+      <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
+      <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+<SCREEN>
+  <NAME>NW_MULTI_PLAYER</NAME>
+  <MUSICVAR>6</MUSICVAR>
+  <WINDOW type="window" name="OUTER_MAIN">
+    <POSITION>
+      <LEFT>0</LEFT>
+      <TOP>0</TOP>
+      <RIGHT>800</RIGHT>
+      <BOTTOM>600</BOTTOM>
+    </POSITION>
+    <APPEARANCE type="IMAGE" state="DEFAULT">%DEF_IMAGE_DEFAULT_BG%</APPEARANCE>
+    <TEXT_RSRC>menutxt.bin</TEXT_RSRC>
+    <CURSOR>
+      <FILE>newarow1.tga</FILE>
+    </CURSOR>
+    <FONT>
+      <NAME>%DEF_FONTNAME%</NAME>
+      <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+      <MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+      <SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+      <DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+    </FONT>
+    <WINDOW type="window" name="MAIN">
+      <POSITION>
+        <LEFT>0</LEFT>
+        <TOP>0</TOP>
+        <RIGHT>800</RIGHT>
+        <BOTTOM>600</BOTTOM>
+      </POSITION>
+      <WINDOW type="static" name="TITLE">
+        <POSITION>
+          <LEFT>40</LEFT>
+          <TOP>16</TOP>
+          <RIGHT>600</RIGHT>
+          <BOTTOM>72</BOTTOM>
+        </POSITION>
+        <APPEARANCE state="DEFAULT"></APPEARANCE>
+        <FONT>
+          <NAME>%IMPACT_FONTNAME%</NAME>
+          <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+        </FONT>
+        <STRING justify="LEFT" vjustify="CENTER">NOVAWORLD</STRING>
+      </WINDOW>
+      <WINDOW type="static" name="NOVAWORLD_NOTE">
+        <POSITION>
+          <LEFT>42</LEFT>
+          <TOP>90</TOP>
+          <RIGHT>600</RIGHT>
+          <BOTTOM>114</BOTTOM>
+        </POSITION>
+        <APPEARANCE state="DEFAULT"></APPEARANCE>
+        <STRING justify="LEFT" vjustify="CENTER">Online play is not part of this game yet.</STRING>
+      </WINDOW>
+      <WINDOW type="window" name="NOVAWORLD">
+        <POSITION>
+          <LEFT>30</LEFT>
+          <TOP>130</TOP>
+          <RIGHT>770</RIGHT>
+          <BOTTOM>530</BOTTOM>
+        </POSITION>
+      </WINDOW>
+      <WINDOW type="button" name="BACK">
+        <HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+        <ACTION type="POP_SCREEN"></ACTION>
+        <POSITION>
+          <LEFT>30</LEFT>
+          <TOP>548</TOP>
+          <RIGHT>220</RIGHT>
+          <BOTTOM>582</BOTTOM>
+        </POSITION>
+        <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+        <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+        <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+        <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+        <FONT>
+          <NAME>%DEF_FONTNAME_LG%</NAME>
+          <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+          <MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+          <SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+          <DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+        </FONT>
+        <STRING justify="CENTER" vjustify="CENTER">BACK</STRING>
+        <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
+        <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
+      </WINDOW>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+<SCREEN>
+  <NAME>MULTI_PLAYER_HOST</NAME>
+  <MUSICVAR>8</MUSICVAR>
+  <WINDOW type="window" name="MAIN">
+    <POSITION>
+      <LEFT>0</LEFT>
+      <TOP>0</TOP>
+      <RIGHT>800</RIGHT>
+      <BOTTOM>600</BOTTOM>
+    </POSITION>
+    <APPEARANCE type="IMAGE" state="DEFAULT">%DEF_IMAGE_DEFAULT_BG%</APPEARANCE>
+    <TEXT_RSRC>menutxt.bin</TEXT_RSRC>
+    <CURSOR>
+      <FILE>newarow1.tga</FILE>
+    </CURSOR>
+    <FONT>
+      <NAME>%DEF_FONTNAME%</NAME>
+      <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+      <MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+      <SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+      <DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+    </FONT>
+    <WINDOW type="static" name="TITLE">
+      <POSITION>
+        <LEFT>40</LEFT>
+        <TOP>16</TOP>
+        <RIGHT>600</RIGHT>
+        <BOTTOM>72</BOTTOM>
+      </POSITION>
+      <APPEARANCE state="DEFAULT"></APPEARANCE>
+      <FONT>
+        <NAME>%IMPACT_FONTNAME%</NAME>
+        <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+      </FONT>
+      <STRING justify="LEFT" vjustify="CENTER">HOST A GAME</STRING>
+    </WINDOW>
+    <WINDOW type="window" name="WRAPPER">
+      <POSITION>
+        <LEFT>30</LEFT>
+        <TOP>76</TOP>
+        <RIGHT>770</RIGHT>
+        <BOTTOM>530</BOTTOM>
+      </POSITION>
+      <WINDOW type="radio" name="RADIO_TAB_GENERAL" CHECKED>
+        <GROUP>1</GROUP>
+        <ACTION type="WINDOW" state="SHOW">TAB_GENERAL</ACTION>
+        <ACTION type="WINDOW" state="HIDE">TAB_GAME</ACTION>
+        <ACTION type="WINDOW" state="HIDE">TAB_WEAPON</ACTION>
+        <POSITION>
+          <LEFT>0</LEFT>
+          <TOP>0</TOP>
+          <RIGHT>116</RIGHT>
+          <BOTTOM>28</BOTTOM>
+        </POSITION>
+        <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+        <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+        <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+        <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+        <STRING justify="CENTER" vjustify="CENTER">GAME</STRING>
+        <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
+        <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
+      </WINDOW>
+      <WINDOW type="radio" name="RADIO_TAB_GAME">
+        <GROUP>1</GROUP>
+        <ACTION type="WINDOW" state="HIDE">TAB_GENERAL</ACTION>
+        <ACTION type="WINDOW" state="SHOW">TAB_GAME</ACTION>
+        <ACTION type="WINDOW" state="HIDE">TAB_WEAPON</ACTION>
+        <POSITION>
+          <LEFT>124</LEFT>
+          <TOP>0</TOP>
+          <RIGHT>240</RIGHT>
+          <BOTTOM>28</BOTTOM>
+        </POSITION>
+        <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+        <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+        <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+        <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+        <STRING justify="CENTER" vjustify="CENTER">RULES</STRING>
+        <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
+        <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
+      </WINDOW>
+      <WINDOW type="radio" name="RADIO_TAB_WEAPON">
+        <GROUP>1</GROUP>
+        <ACTION type="WINDOW" state="HIDE">TAB_GENERAL</ACTION>
+        <ACTION type="WINDOW" state="HIDE">TAB_GAME</ACTION>
+        <ACTION type="WINDOW" state="SHOW">TAB_WEAPON</ACTION>
+        <POSITION>
+          <LEFT>248</LEFT>
+          <TOP>0</TOP>
+          <RIGHT>448</RIGHT>
+          <BOTTOM>28</BOTTOM>
+        </POSITION>
+        <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+        <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+        <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+        <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+        <STRING justify="CENTER" vjustify="CENTER">CLASSES AND WEAPONS</STRING>
+        <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
+        <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
+      </WINDOW>
+      <WINDOW type="window" name="TAB_GENERAL">
+        <POSITION>
+          <LEFT>0</LEFT>
+          <TOP>32</TOP>
+          <RIGHT>740</RIGHT>
+          <BOTTOM>448</BOTTOM>
+        </POSITION>
+        <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+        <WINDOW type="static" name="STATIC_GAME_NAME">
+          <POSITION>
+            <LEFT>16</LEFT>
+            <TOP>12</TOP>
+            <RIGHT>156</RIGHT>
+            <BOTTOM>36</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">GAME NAME</STRING>
+        </WINDOW>
+        <WINDOW type="edit" name="GAME_NAME" MAXCHAR="31">
+          <POSITION>
+            <LEFT>160</LEFT>
+            <TOP>12</TOP>
+            <RIGHT>420</RIGHT>
+            <BOTTOM>36</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="SELECTED">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER" edge="6">OpenNova co-op</STRING>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_PASSWORD">
+          <POSITION>
+            <LEFT>16</LEFT>
+            <TOP>42</TOP>
+            <RIGHT>156</RIGHT>
+            <BOTTOM>66</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">PASSWORD</STRING>
+        </WINDOW>
+        <WINDOW type="edit" name="SERVER_PASSWORD" MAXCHAR="16">
+          <POSITION>
+            <LEFT>160</LEFT>
+            <TOP>42</TOP>
+            <RIGHT>420</RIGHT>
+            <BOTTOM>66</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="SELECTED">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER" edge="6"></STRING>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_SERVER_MESSAGE">
+          <POSITION>
+            <LEFT>16</LEFT>
+            <TOP>72</TOP>
+            <RIGHT>156</RIGHT>
+            <BOTTOM>96</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">WELCOME</STRING>
+        </WINDOW>
+        <WINDOW type="edit" name="SERVER_MESSAGE" MAXCHAR="127">
+          <POSITION>
+            <LEFT>160</LEFT>
+            <TOP>72</TOP>
+            <RIGHT>420</RIGHT>
+            <BOTTOM>96</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="SELECTED">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER" edge="6">Welcome.</STRING>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_SERVERTYPE">
+          <POSITION>
+            <LEFT>440</LEFT>
+            <TOP>12</TOP>
+            <RIGHT>540</RIGHT>
+            <BOTTOM>36</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">SERVER</STRING>
+        </WINDOW>
+        <WINDOW type="spinlist" name="SERVERTYPE">
+          <POSITION>
+            <LEFT>570</LEFT>
+            <TOP>12</TOP>
+            <RIGHT>696</RIGHT>
+            <BOTTOM>36</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+          <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          <ITEMS justify="CENTER" vjustify="CENTER">
+            <ITEM>HOST AND PLAY</ITEM>
+            <ITEM value="1">HOST ONLY</ITEM>
+          </ITEMS>
+          <SPINUP>
+            <POSITION>
+              <LEFT>128</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>152</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">></STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINUP>
+          <SPINDOWN>
+            <POSITION>
+              <LEFT>-26</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>-2</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">&lt;</STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINDOWN>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_GAME_LOCATION">
+          <POSITION>
+            <LEFT>440</LEFT>
+            <TOP>42</TOP>
+            <RIGHT>540</RIGHT>
+            <BOTTOM>66</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">COUNTRY</STRING>
+        </WINDOW>
+        <WINDOW type="spinlist" name="GAME_LOCATION">
+          <POSITION>
+            <LEFT>570</LEFT>
+            <TOP>42</TOP>
+            <RIGHT>696</RIGHT>
+            <BOTTOM>66</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+          <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          <ITEMS justify="CENTER" vjustify="CENTER">
+            <ITEM value="33"></ITEM>
+            <ITEM value="1">AQ</ITEM>
+            <ITEM value="34">AR</ITEM>
+            <ITEM value="35">AT</ITEM>
+            <ITEM value="2">AU</ITEM>
+            <ITEM value="3">BE</ITEM>
+            <ITEM value="4">BR</ITEM>
+            <ITEM value="5">CA</ITEM>
+            <ITEM value="6">CH</ITEM>
+            <ITEM value="7">CN</ITEM>
+            <ITEM value="8">DE</ITEM>
+            <ITEM value="9">DK</ITEM>
+            <ITEM value="10">ES</ITEM>
+            <ITEM value="11">EU</ITEM>
+            <ITEM value="12">FI</ITEM>
+            <ITEM value="13">FR</ITEM>
+            <ITEM value="14">GB</ITEM>
+            <ITEM value="36">GL</ITEM>
+            <ITEM value="37">GR</ITEM>
+            <ITEM value="15">HK</ITEM>
+            <ITEM value="16">HU</ITEM>
+            <ITEM value="38">IE</ITEM>
+            <ITEM value="39">IL</ITEM>
+            <ITEM value="40">IN</ITEM>
+            <ITEM value="41">IS</ITEM>
+            <ITEM value="17">IT</ITEM>
+            <ITEM value="18">JP</ITEM>
+            <ITEM value="19">KR</ITEM>
+            <ITEM value="20">LU</ITEM>
+            <ITEM value="21">MX</ITEM>
+            <ITEM value="22">NL</ITEM>
+            <ITEM value="23">NO</ITEM>
+            <ITEM value="24">NZ</ITEM>
+            <ITEM value="25">PL</ITEM>
+            <ITEM value="42">PR</ITEM>
+            <ITEM value="26">PT</ITEM>
+            <ITEM value="43">RO</ITEM>
+            <ITEM value="27">RU</ITEM>
+            <ITEM value="28">SE</ITEM>
+            <ITEM value="29">SG</ITEM>
+            <ITEM value="30">TW</ITEM>
+            <ITEM value="31">UK</ITEM>
+            <ITEM value="32">US</ITEM>
+            <ITEM value="44">ZA</ITEM>
+          </ITEMS>
+          <SPINUP>
+            <POSITION>
+              <LEFT>128</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>152</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">></STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINUP>
+          <SPINDOWN>
+            <POSITION>
+              <LEFT>-26</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>-2</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">&lt;</STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINDOWN>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_SERVER_PUNKBUSTER" HIDDEN>
+          <POSITION>
+            <LEFT>440</LEFT>
+            <TOP>72</TOP>
+            <RIGHT>540</RIGHT>
+            <BOTTOM>96</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">PUNKBUSTER</STRING>
+        </WINDOW>
+        <WINDOW type="spinlist" name="SERVER_PUNKBUSTER" HIDDEN>
+          <POSITION>
+            <LEFT>570</LEFT>
+            <TOP>72</TOP>
+            <RIGHT>696</RIGHT>
+            <BOTTOM>96</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+          <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          <ITEMS justify="CENTER" vjustify="CENTER">
+            <ITEM>NO</ITEM>
+            <ITEM value="1">YES</ITEM>
+          </ITEMS>
+          <SPINUP>
+            <POSITION>
+              <LEFT>128</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>152</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">></STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINUP>
+          <SPINDOWN>
+            <POSITION>
+              <LEFT>-26</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>-2</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">&lt;</STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINDOWN>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_AVAILABLE">
+          <POSITION>
+            <LEFT>16</LEFT>
+            <TOP>112</TOP>
+            <RIGHT>156</RIGHT>
+            <BOTTOM>136</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">MISSIONS</STRING>
+        </WINDOW>
+        <WINDOW type="spinlist" name="GAME_TYPE">
+          <POSITION>
+            <LEFT>186</LEFT>
+            <TOP>112</TOP>
+            <RIGHT>300</RIGHT>
+            <BOTTOM>136</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+          <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          <ITEMS justify="CENTER" vjustify="CENTER">
+            <ITEM value="255">ALL GAMES</ITEM>
+            <ITEM value="1">TEAM DEATHMATCH</ITEM>
+            <ITEM value="2">CO-OP</ITEM>
+            <ITEM value="3">TEAM KING OF THE HILL</ITEM>
+            <ITEM value="4">KING OF THE HILL</ITEM>
+            <ITEM value="5">SEARCH AND DESTROY</ITEM>
+            <ITEM value="6">ATTACK AND DEFEND</ITEM>
+            <ITEM value="7">CAPTURE THE FLAG</ITEM>
+            <ITEM value="8">FLAGBALL</ITEM>
+            <ITEM value="9">ADVANCE AND SECURE</ITEM>
+            <ITEM value="10">CONQUER AND CONTROL</ITEM>
+            <ITEM value="11">DEATHMATCH</ITEM>
+          </ITEMS>
+          <SPINUP>
+            <POSITION>
+              <LEFT>116</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>140</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">></STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINUP>
+          <SPINDOWN>
+            <POSITION>
+              <LEFT>-26</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>-2</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">&lt;</STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINDOWN>
+        </WINDOW>
+        <WINDOW type="window" name="MISSION_LIST_WRAPPER">
+          <POSITION>
+            <LEFT>16</LEFT>
+            <TOP>142</TOP>
+            <RIGHT>316</RIGHT>
+            <BOTTOM>404</BOTTOM>
+          </POSITION>
+          <WINDOW type="list" name="MISSION_LIST">
+            <POSITION>
+              <LEFT>0</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>300</RIGHT>
+              <BOTTOM>262</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+            <ITEMS justify="LEFT" vjustify="CENTER" MULTISELECT>
+              <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            </ITEMS>
+            <MIN_ITEM_HEIGHT>22</MIN_ITEM_HEIGHT>
+            <SCROLLBAR>
+              <POSITION>
+                <LEFT>284</LEFT>
+                <TOP>0</TOP>
+                <RIGHT>300</RIGHT>
+                <BOTTOM>262</BOTTOM>
+              </POSITION>
+              <APPEARANCE type="COLOR" state="DEFAULT">%COLOR_BLACK%</APPEARANCE>
+              <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+              <SHUTTLE type="COLOR" state="DEFAULT">%TRIM_COLOR%</SHUTTLE>
+              <SHUTTLE type="COLOR" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</SHUTTLE>
+              <SHUTTLE type="COLOR" state="SELECTED">%DEF_TEXT_SELECTED_FG%</SHUTTLE>
+              <SCROLLUP type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</SCROLLUP>
+              <SCROLLUP type="COLOR" state="MOUSEOVER">%TRIM_COLOR%</SCROLLUP>
+              <SCROLLDOWN type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</SCROLLDOWN>
+              <SCROLLDOWN type="COLOR" state="MOUSEOVER">%TRIM_COLOR%</SCROLLDOWN>
+              <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+            </SCROLLBAR>
+          </WINDOW>
+        </WINDOW>
+        <WINDOW type="button" name="ADD_MISSIONS">
+          <POSITION>
+            <LEFT>326</LEFT>
+            <TOP>200</TOP>
+            <RIGHT>414</RIGHT>
+            <BOTTOM>226</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <STRING justify="CENTER" vjustify="CENTER">ADD ></STRING>
+          <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
+          <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
+        </WINDOW>
+        <WINDOW type="button" name="REMOVE_MISSIONS">
+          <POSITION>
+            <LEFT>326</LEFT>
+            <TOP>236</TOP>
+            <RIGHT>414</RIGHT>
+            <BOTTOM>262</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <STRING justify="CENTER" vjustify="CENTER">&lt; REMOVE</STRING>
+          <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
+          <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_SELECTED">
+          <POSITION>
+            <LEFT>424</LEFT>
+            <TOP>112</TOP>
+            <RIGHT>724</RIGHT>
+            <BOTTOM>136</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">ROTATION</STRING>
+        </WINDOW>
+        <WINDOW type="table" name="SELECTED_MISSIONS">
+          <POSITION>
+            <LEFT>424</LEFT>
+            <TOP>142</TOP>
+            <RIGHT>724</RIGHT>
+            <BOTTOM>404</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          <ITEMS MULTISELECT>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+          </ITEMS>
+          <COLUMN count="3" spacing="0">
+            <HEADER justify="CENTER" vjustify="CENTER" column="0" width="180">MISSION</HEADER>
+            <HEADER justify="CENTER" vjustify="CENTER" column="1" width="60">TYPE</HEADER>
+            <HEADER justify="CENTER" vjustify="CENTER" column="2" width="44">SWAP</HEADER>
+            <BODY justify="LEFT" vjustify="CENTER" column="0"></BODY>
+            <BODY justify="CENTER" vjustify="CENTER" column="1"></BODY>
+            <BODY justify="CENTER" vjustify="CENTER" column="2"></BODY>
+          </COLUMN>
+          <MIN_ITEM_HEIGHT>22</MIN_ITEM_HEIGHT>
+          <SCROLLBAR>
+            <POSITION>
+              <LEFT>284</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>300</RIGHT>
+              <BOTTOM>262</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%COLOR_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <SHUTTLE type="COLOR" state="DEFAULT">%TRIM_COLOR%</SHUTTLE>
+            <SHUTTLE type="COLOR" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</SHUTTLE>
+            <SHUTTLE type="COLOR" state="SELECTED">%DEF_TEXT_SELECTED_FG%</SHUTTLE>
+            <SCROLLUP type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</SCROLLUP>
+            <SCROLLUP type="COLOR" state="MOUSEOVER">%TRIM_COLOR%</SCROLLUP>
+            <SCROLLDOWN type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</SCROLLDOWN>
+            <SCROLLDOWN type="COLOR" state="MOUSEOVER">%TRIM_COLOR%</SCROLLDOWN>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SCROLLBAR>
+        </WINDOW>
+      </WINDOW>
+      <WINDOW type="window" name="TAB_GAME" HIDDEN>
+        <POSITION>
+          <LEFT>0</LEFT>
+          <TOP>32</TOP>
+          <RIGHT>740</RIGHT>
+          <BOTTOM>448</BOTTOM>
+        </POSITION>
+        <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+        <WINDOW type="static" name="STATIC_CONNECTIONSPEED">
+          <POSITION>
+            <LEFT>16</LEFT>
+            <TOP>10</TOP>
+            <RIGHT>212</RIGHT>
+            <BOTTOM>34</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">CONNECTION</STRING>
+        </WINDOW>
+        <WINDOW type="spinlist" name="CONNECTIONSPEED">
+          <POSITION>
+            <LEFT>242</LEFT>
+            <TOP>10</TOP>
+            <RIGHT>340</RIGHT>
+            <BOTTOM>34</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+          <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          <ITEMS justify="CENTER" vjustify="CENTER">
+            <ITEM>MODEM</ITEM>
+            <ITEM value="1">60K</ITEM>
+            <ITEM value="2">64K</ITEM>
+            <ITEM value="3">80K</ITEM>
+            <ITEM value="4">100K</ITEM>
+            <ITEM value="5">128K</ITEM>
+            <ITEM value="6">144K</ITEM>
+            <ITEM value="7">192K</ITEM>
+            <ITEM value="8">256K</ITEM>
+            <ITEM value="9">350K</ITEM>
+            <ITEM value="10">384K</ITEM>
+            <ITEM value="11">512K</ITEM>
+            <ITEM value="12">640K</ITEM>
+            <ITEM value="13">768K</ITEM>
+            <ITEM value="14">1M</ITEM>
+            <ITEM value="15">1.1M</ITEM>
+            <ITEM value="16">1.25M</ITEM>
+            <ITEM value="17">T1</ITEM>
+            <ITEM value="18">T3</ITEM>
+          </ITEMS>
+          <SPINUP>
+            <POSITION>
+              <LEFT>100</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>124</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">></STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINUP>
+          <SPINDOWN>
+            <POSITION>
+              <LEFT>-26</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>-2</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">&lt;</STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINDOWN>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_MAXPLAYERS_RECOMMENDATION">
+          <POSITION>
+            <LEFT>376</LEFT>
+            <TOP>10</TOP>
+            <RIGHT>720</RIGHT>
+            <BOTTOM>34</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER"></STRING>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_MAX_PLAYERS">
+          <POSITION>
+            <LEFT>16</LEFT>
+            <TOP>40</TOP>
+            <RIGHT>212</RIGHT>
+            <BOTTOM>64</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">MAX PLAYERS</STRING>
+        </WINDOW>
+        <WINDOW type="edit" name="MAX_PLAYERS" NUMBER MINVAL="1" MAXVAL="64">
+          <POSITION>
+            <LEFT>216</LEFT>
+            <TOP>40</TOP>
+            <RIGHT>306</RIGHT>
+            <BOTTOM>64</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="SELECTED">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER" edge="6">8</STRING>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_REPLAY">
+          <POSITION>
+            <LEFT>16</LEFT>
+            <TOP>70</TOP>
+            <RIGHT>212</RIGHT>
+            <BOTTOM>94</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">AT THE END</STRING>
+        </WINDOW>
+        <WINDOW type="spinlist" name="REPLAY">
+          <POSITION>
+            <LEFT>242</LEFT>
+            <TOP>70</TOP>
+            <RIGHT>340</RIGHT>
+            <BOTTOM>94</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+          <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          <ITEMS justify="CENTER" vjustify="CENTER">
+            <ITEM>NEXT</ITEM>
+            <ITEM value="1">REPLAY</ITEM>
+          </ITEMS>
+          <SPINUP>
+            <POSITION>
+              <LEFT>100</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>124</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">></STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINUP>
+          <SPINDOWN>
+            <POSITION>
+              <LEFT>-26</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>-2</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">&lt;</STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINDOWN>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_DELAY">
+          <POSITION>
+            <LEFT>16</LEFT>
+            <TOP>100</TOP>
+            <RIGHT>212</RIGHT>
+            <BOTTOM>124</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">START DELAY</STRING>
+        </WINDOW>
+        <WINDOW type="edit" name="DELAY" NUMBER MINVAL="0" MAXVAL="600">
+          <POSITION>
+            <LEFT>216</LEFT>
+            <TOP>100</TOP>
+            <RIGHT>306</RIGHT>
+            <BOTTOM>124</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="SELECTED">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER" edge="6">30</STRING>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_DELAY_SECONDS">
+          <POSITION>
+            <LEFT>316</LEFT>
+            <TOP>100</TOP>
+            <RIGHT>368</RIGHT>
+            <BOTTOM>124</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">SEC</STRING>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_RESPAWN">
+          <POSITION>
+            <LEFT>16</LEFT>
+            <TOP>130</TOP>
+            <RIGHT>212</RIGHT>
+            <BOTTOM>154</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">RESPAWN WAIT</STRING>
+        </WINDOW>
+        <WINDOW type="edit" name="RESPAWN" NUMBER MINVAL="0" MAXVAL="600">
+          <POSITION>
+            <LEFT>216</LEFT>
+            <TOP>130</TOP>
+            <RIGHT>306</RIGHT>
+            <BOTTOM>154</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="SELECTED">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER" edge="6">10</STRING>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_RESPAWN_SECONDS">
+          <POSITION>
+            <LEFT>316</LEFT>
+            <TOP>130</TOP>
+            <RIGHT>368</RIGHT>
+            <BOTTOM>154</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">SEC</STRING>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_TIME">
+          <POSITION>
+            <LEFT>16</LEFT>
+            <TOP>160</TOP>
+            <RIGHT>212</RIGHT>
+            <BOTTOM>184</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">TIME LIMIT</STRING>
+        </WINDOW>
+        <WINDOW type="edit" name="TIME" NUMBER MINVAL="1" MAXVAL="99999">
+          <POSITION>
+            <LEFT>216</LEFT>
+            <TOP>160</TOP>
+            <RIGHT>306</RIGHT>
+            <BOTTOM>184</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="SELECTED">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER" edge="6">60</STRING>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_TIME_MINUTES">
+          <POSITION>
+            <LEFT>316</LEFT>
+            <TOP>160</TOP>
+            <RIGHT>368</RIGHT>
+            <BOTTOM>184</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">MIN</STRING>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_TAKEOVER_TIME">
+          <POSITION>
+            <LEFT>16</LEFT>
+            <TOP>190</TOP>
+            <RIGHT>212</RIGHT>
+            <BOTTOM>214</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">TAKEOVER TIME</STRING>
+        </WINDOW>
+        <WINDOW type="edit" name="TAKEOVER_TIME" NUMBER MINVAL="1" MAXVAL="999">
+          <POSITION>
+            <LEFT>216</LEFT>
+            <TOP>190</TOP>
+            <RIGHT>306</RIGHT>
+            <BOTTOM>214</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="SELECTED">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER" edge="6">16</STRING>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_TAKEOVER_TIME_SECONDS">
+          <POSITION>
+            <LEFT>316</LEFT>
+            <TOP>190</TOP>
+            <RIGHT>368</RIGHT>
+            <BOTTOM>214</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">SEC</STRING>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_SCORE_LIMIT">
+          <POSITION>
+            <LEFT>16</LEFT>
+            <TOP>220</TOP>
+            <RIGHT>212</RIGHT>
+            <BOTTOM>244</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">SCORE LIMIT</STRING>
+        </WINDOW>
+        <WINDOW type="edit" name="MAX_SCORE" NUMBER MINVAL="1" MAXVAL="999">
+          <POSITION>
+            <LEFT>216</LEFT>
+            <TOP>220</TOP>
+            <RIGHT>306</RIGHT>
+            <BOTTOM>244</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="SELECTED">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER" edge="6">20</STRING>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_KOTH_LIMIT">
+          <POSITION>
+            <LEFT>16</LEFT>
+            <TOP>250</TOP>
+            <RIGHT>212</RIGHT>
+            <BOTTOM>274</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">HILL TIME</STRING>
+        </WINDOW>
+        <WINDOW type="edit" name="MAX_KOTH" NUMBER MINVAL="1" MAXVAL="999">
+          <POSITION>
+            <LEFT>216</LEFT>
+            <TOP>250</TOP>
+            <RIGHT>306</RIGHT>
+            <BOTTOM>274</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="SELECTED">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER" edge="6">10</STRING>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_KOTH_MINUTES">
+          <POSITION>
+            <LEFT>316</LEFT>
+            <TOP>250</TOP>
+            <RIGHT>368</RIGHT>
+            <BOTTOM>274</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">MIN</STRING>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_KILL_LIMIT">
+          <POSITION>
+            <LEFT>16</LEFT>
+            <TOP>280</TOP>
+            <RIGHT>212</RIGHT>
+            <BOTTOM>304</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">KILL LIMIT</STRING>
+        </WINDOW>
+        <WINDOW type="edit" name="KILL_LIMIT" NUMBER MINVAL="1" MAXVAL="999">
+          <POSITION>
+            <LEFT>216</LEFT>
+            <TOP>280</TOP>
+            <RIGHT>306</RIGHT>
+            <BOTTOM>304</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="SELECTED">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER" edge="6">20</STRING>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_LFP_TAKEOVER">
+          <POSITION>
+            <LEFT>16</LEFT>
+            <TOP>310</TOP>
+            <RIGHT>212</RIGHT>
+            <BOTTOM>334</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">BASE TAKEOVER</STRING>
+        </WINDOW>
+        <WINDOW type="spinlist" name="LFP_TAKEOVER">
+          <POSITION>
+            <LEFT>242</LEFT>
+            <TOP>310</TOP>
+            <RIGHT>340</RIGHT>
+            <BOTTOM>334</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+          <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          <ITEMS justify="CENTER" vjustify="CENTER">
+            <ITEM>FAST</ITEM>
+            <ITEM value="1">MEDIUM</ITEM>
+            <ITEM value="2">SLOW</ITEM>
+          </ITEMS>
+          <SPINUP>
+            <POSITION>
+              <LEFT>100</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>124</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">></STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINUP>
+          <SPINDOWN>
+            <POSITION>
+              <LEFT>-26</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>-2</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">&lt;</STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINDOWN>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_TOD_CONTINUITY">
+          <POSITION>
+            <LEFT>16</LEFT>
+            <TOP>340</TOP>
+            <RIGHT>212</RIGHT>
+            <BOTTOM>364</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">KEEP TIME OF DAY</STRING>
+        </WINDOW>
+        <WINDOW type="spinlist" name="TOD_CONTINUITY">
+          <POSITION>
+            <LEFT>242</LEFT>
+            <TOP>340</TOP>
+            <RIGHT>340</RIGHT>
+            <BOTTOM>364</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+          <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          <ITEMS justify="CENTER" vjustify="CENTER">
+            <ITEM>NO</ITEM>
+            <ITEM value="1">YES</ITEM>
+          </ITEMS>
+          <SPINUP>
+            <POSITION>
+              <LEFT>100</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>124</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">></STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINUP>
+          <SPINDOWN>
+            <POSITION>
+              <LEFT>-26</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>-2</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">&lt;</STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINDOWN>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_FF_KILLS">
+          <POSITION>
+            <LEFT>376</LEFT>
+            <TOP>40</TOP>
+            <RIGHT>572</RIGHT>
+            <BOTTOM>64</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">FRIENDLY FIRE</STRING>
+        </WINDOW>
+        <WINDOW type="spinlist" name="TEAM_FF">
+          <POSITION>
+            <LEFT>602</LEFT>
+            <TOP>40</TOP>
+            <RIGHT>700</RIGHT>
+            <BOTTOM>64</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+          <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          <ITEMS justify="CENTER" vjustify="CENTER">
+            <ITEM>OFF</ITEM>
+            <ITEM value="1">ON</ITEM>
+          </ITEMS>
+          <SPINUP>
+            <POSITION>
+              <LEFT>100</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>124</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">></STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINUP>
+          <SPINDOWN>
+            <POSITION>
+              <LEFT>-26</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>-2</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">&lt;</STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINDOWN>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_MAX_FF_KILLS">
+          <POSITION>
+            <LEFT>376</LEFT>
+            <TOP>70</TOP>
+            <RIGHT>572</RIGHT>
+            <BOTTOM>94</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">TEAM KILL LIMIT</STRING>
+        </WINDOW>
+        <WINDOW type="edit" name="MAX_FF_KILLS" NUMBER MINVAL="1" MAXVAL="999">
+          <POSITION>
+            <LEFT>576</LEFT>
+            <TOP>70</TOP>
+            <RIGHT>666</RIGHT>
+            <BOTTOM>94</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="SELECTED">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER" edge="6">5</STRING>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_FRIENDLY_TAG">
+          <POSITION>
+            <LEFT>376</LEFT>
+            <TOP>100</TOP>
+            <RIGHT>572</RIGHT>
+            <BOTTOM>124</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">FRIENDLY TAGS</STRING>
+        </WINDOW>
+        <WINDOW type="spinlist" name="FRIENDLY_TAG">
+          <POSITION>
+            <LEFT>602</LEFT>
+            <TOP>100</TOP>
+            <RIGHT>700</RIGHT>
+            <BOTTOM>124</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+          <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          <ITEMS justify="CENTER" vjustify="CENTER">
+            <ITEM>OFF</ITEM>
+            <ITEM value="1">ON</ITEM>
+          </ITEMS>
+          <SPINUP>
+            <POSITION>
+              <LEFT>100</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>124</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">></STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINUP>
+          <SPINDOWN>
+            <POSITION>
+              <LEFT>-26</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>-2</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">&lt;</STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINDOWN>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_FF_WARNING">
+          <POSITION>
+            <LEFT>376</LEFT>
+            <TOP>130</TOP>
+            <RIGHT>572</RIGHT>
+            <BOTTOM>154</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">FRIENDLY WARNING</STRING>
+        </WINDOW>
+        <WINDOW type="spinlist" name="FF_WARNING">
+          <POSITION>
+            <LEFT>602</LEFT>
+            <TOP>130</TOP>
+            <RIGHT>700</RIGHT>
+            <BOTTOM>154</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+          <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          <ITEMS justify="CENTER" vjustify="CENTER">
+            <ITEM>OFF</ITEM>
+            <ITEM value="1">ON</ITEM>
+          </ITEMS>
+          <SPINUP>
+            <POSITION>
+              <LEFT>100</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>124</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">></STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINUP>
+          <SPINDOWN>
+            <POSITION>
+              <LEFT>-26</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>-2</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">&lt;</STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINDOWN>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_TEAM_CHOOSE">
+          <POSITION>
+            <LEFT>376</LEFT>
+            <TOP>160</TOP>
+            <RIGHT>572</RIGHT>
+            <BOTTOM>184</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">PLAYERS PICK TEAMS</STRING>
+        </WINDOW>
+        <WINDOW type="spinlist" name="TEAM_CHOOSE">
+          <POSITION>
+            <LEFT>602</LEFT>
+            <TOP>160</TOP>
+            <RIGHT>700</RIGHT>
+            <BOTTOM>184</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+          <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          <ITEMS justify="CENTER" vjustify="CENTER">
+            <ITEM>NO</ITEM>
+            <ITEM value="1">YES</ITEM>
+          </ITEMS>
+          <SPINUP>
+            <POSITION>
+              <LEFT>100</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>124</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">></STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINUP>
+          <SPINDOWN>
+            <POSITION>
+              <LEFT>-26</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>-2</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">&lt;</STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINDOWN>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_FF_CLAYMORE_PREF">
+          <POSITION>
+            <LEFT>376</LEFT>
+            <TOP>190</TOP>
+            <RIGHT>572</RIGHT>
+            <BOTTOM>214</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">MINES HURT</STRING>
+        </WINDOW>
+        <WINDOW type="spinlist" name="CLAYMORE_PREF">
+          <POSITION>
+            <LEFT>602</LEFT>
+            <TOP>190</TOP>
+            <RIGHT>700</RIGHT>
+            <BOTTOM>214</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+          <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          <ITEMS justify="CENTER" vjustify="CENTER">
+            <ITEM>ENEMIES</ITEM>
+            <ITEM value="1">ANYONE</ITEM>
+          </ITEMS>
+          <SPINUP>
+            <POSITION>
+              <LEFT>100</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>124</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">></STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINUP>
+          <SPINDOWN>
+            <POSITION>
+              <LEFT>-26</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>-2</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">&lt;</STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINDOWN>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_TRACERS">
+          <POSITION>
+            <LEFT>376</LEFT>
+            <TOP>220</TOP>
+            <RIGHT>572</RIGHT>
+            <BOTTOM>244</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">TRACERS</STRING>
+        </WINDOW>
+        <WINDOW type="spinlist" name="TRACERS">
+          <POSITION>
+            <LEFT>602</LEFT>
+            <TOP>220</TOP>
+            <RIGHT>700</RIGHT>
+            <BOTTOM>244</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+          <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          <ITEMS justify="CENTER" vjustify="CENTER">
+            <ITEM>NO</ITEM>
+            <ITEM value="1">YES</ITEM>
+          </ITEMS>
+          <SPINUP>
+            <POSITION>
+              <LEFT>100</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>124</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">></STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINUP>
+          <SPINDOWN>
+            <POSITION>
+              <LEFT>-26</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>-2</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">&lt;</STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINDOWN>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_ALLOW_AI" HIDDEN>
+          <POSITION>
+            <LEFT>376</LEFT>
+            <TOP>250</TOP>
+            <RIGHT>572</RIGHT>
+            <BOTTOM>274</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">ALLOW AI</STRING>
+        </WINDOW>
+        <WINDOW type="spinlist" name="ALLOW_AI" HIDDEN>
+          <POSITION>
+            <LEFT>602</LEFT>
+            <TOP>250</TOP>
+            <RIGHT>700</RIGHT>
+            <BOTTOM>274</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+          <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          <ITEMS justify="CENTER" vjustify="CENTER">
+            <ITEM>NO</ITEM>
+            <ITEM value="1">YES</ITEM>
+          </ITEMS>
+          <SPINUP>
+            <POSITION>
+              <LEFT>100</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>124</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">></STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINUP>
+          <SPINDOWN>
+            <POSITION>
+              <LEFT>-26</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>-2</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">&lt;</STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINDOWN>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_ALLOW_SPECTATORS">
+          <POSITION>
+            <LEFT>376</LEFT>
+            <TOP>250</TOP>
+            <RIGHT>572</RIGHT>
+            <BOTTOM>274</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">SPECTATORS</STRING>
+        </WINDOW>
+        <WINDOW type="spinlist" name="ALLOW_SPECTATORS">
+          <POSITION>
+            <LEFT>602</LEFT>
+            <TOP>250</TOP>
+            <RIGHT>700</RIGHT>
+            <BOTTOM>274</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+          <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          <ITEMS justify="CENTER" vjustify="CENTER">
+            <ITEM>NO</ITEM>
+            <ITEM value="1">YES</ITEM>
+          </ITEMS>
+          <SPINUP>
+            <POSITION>
+              <LEFT>100</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>124</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">></STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINUP>
+          <SPINDOWN>
+            <POSITION>
+              <LEFT>-26</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>-2</RIGHT>
+              <BOTTOM>24</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+            <STRING justify="CENTER" vjustify="CENTER">&lt;</STRING>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SPINDOWN>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_SPECTATOR_PW">
+          <POSITION>
+            <LEFT>376</LEFT>
+            <TOP>280</TOP>
+            <RIGHT>572</RIGHT>
+            <BOTTOM>304</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">SPECTATOR PASSWORD</STRING>
+        </WINDOW>
+        <WINDOW type="edit" name="SPECTATOR_PW" MAXCHAR="16">
+          <POSITION>
+            <LEFT>576</LEFT>
+            <TOP>280</TOP>
+            <RIGHT>720</RIGHT>
+            <BOTTOM>304</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="SELECTED">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER" edge="6"></STRING>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_BLUE_PW">
+          <POSITION>
+            <LEFT>376</LEFT>
+            <TOP>310</TOP>
+            <RIGHT>572</RIGHT>
+            <BOTTOM>334</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">BLUE PASSWORD</STRING>
+        </WINDOW>
+        <WINDOW type="edit" name="BLUE_PW" MAXCHAR="16">
+          <POSITION>
+            <LEFT>576</LEFT>
+            <TOP>310</TOP>
+            <RIGHT>720</RIGHT>
+            <BOTTOM>334</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="SELECTED">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER" edge="6"></STRING>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_RED_PW">
+          <POSITION>
+            <LEFT>376</LEFT>
+            <TOP>340</TOP>
+            <RIGHT>572</RIGHT>
+            <BOTTOM>364</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">RED PASSWORD</STRING>
+        </WINDOW>
+        <WINDOW type="edit" name="RED_PW" MAXCHAR="16">
+          <POSITION>
+            <LEFT>576</LEFT>
+            <TOP>340</TOP>
+            <RIGHT>720</RIGHT>
+            <BOTTOM>364</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="SELECTED">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER" edge="6"></STRING>
+          <SOUND state="MOUSEIN" trigger="MOVER_COMBO">menu.lwf</SOUND>
+        </WINDOW>
+      </WINDOW>
+      <WINDOW type="window" name="TAB_WEAPON" HIDDEN>
+        <POSITION>
+          <LEFT>0</LEFT>
+          <TOP>32</TOP>
+          <RIGHT>740</RIGHT>
+          <BOTTOM>448</BOTTOM>
+        </POSITION>
+        <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+        <WINDOW type="static" name="STATIC_CLASS_RESTRICT">
+          <POSITION>
+            <LEFT>16</LEFT>
+            <TOP>12</TOP>
+            <RIGHT>356</RIGHT>
+            <BOTTOM>36</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">CLASSES</STRING>
+        </WINDOW>
+        <WINDOW type="table" name="CLASS_LIST">
+          <POSITION>
+            <LEFT>16</LEFT>
+            <TOP>40</TOP>
+            <RIGHT>356</RIGHT>
+            <BOTTOM>330</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          <ITEMS>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+          </ITEMS>
+          <COLUMN count="2" spacing="0">
+            <HEADER justify="CENTER" vjustify="CENTER" column="0" sort="A" width="200">CLASS</HEADER>
+            <HEADER justify="CENTER" vjustify="CENTER" column="1" sort="A" width="110">ALLOWED</HEADER>
+            <BODY justify="LEFT" vjustify="CENTER" column="0"></BODY>
+            <BODY justify="LEFT" vjustify="CENTER" column="1"></BODY>
+          </COLUMN>
+          <MIN_ITEM_HEIGHT>22</MIN_ITEM_HEIGHT>
+          <SCROLLBAR>
+            <POSITION>
+              <LEFT>324</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>340</RIGHT>
+              <BOTTOM>290</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%COLOR_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <SHUTTLE type="COLOR" state="DEFAULT">%TRIM_COLOR%</SHUTTLE>
+            <SHUTTLE type="COLOR" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</SHUTTLE>
+            <SHUTTLE type="COLOR" state="SELECTED">%DEF_TEXT_SELECTED_FG%</SHUTTLE>
+            <SCROLLUP type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</SCROLLUP>
+            <SCROLLUP type="COLOR" state="MOUSEOVER">%TRIM_COLOR%</SCROLLUP>
+            <SCROLLDOWN type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</SCROLLDOWN>
+            <SCROLLDOWN type="COLOR" state="MOUSEOVER">%TRIM_COLOR%</SCROLLDOWN>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SCROLLBAR>
+        </WINDOW>
+        <WINDOW type="button" name="CLASS_ALWAYS">
+          <POSITION>
+            <LEFT>16</LEFT>
+            <TOP>342</TOP>
+            <RIGHT>120</RIGHT>
+            <BOTTOM>368</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <STRING justify="CENTER" vjustify="CENTER">ALWAYS</STRING>
+          <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
+          <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
+        </WINDOW>
+        <WINDOW type="button" name="CLASS_NEVER">
+          <POSITION>
+            <LEFT>128</LEFT>
+            <TOP>342</TOP>
+            <RIGHT>232</RIGHT>
+            <BOTTOM>368</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <STRING justify="CENTER" vjustify="CENTER">NEVER</STRING>
+          <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
+          <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
+        </WINDOW>
+        <WINDOW type="button" name="CLASS_MISSION">
+          <POSITION>
+            <LEFT>240</LEFT>
+            <TOP>342</TOP>
+            <RIGHT>344</RIGHT>
+            <BOTTOM>368</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <STRING justify="CENTER" vjustify="CENTER">MISSION</STRING>
+          <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
+          <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
+        </WINDOW>
+        <WINDOW type="static" name="STATIC_WPN_RESTRICT">
+          <POSITION>
+            <LEFT>384</LEFT>
+            <TOP>12</TOP>
+            <RIGHT>724</RIGHT>
+            <BOTTOM>36</BOTTOM>
+          </POSITION>
+          <APPEARANCE state="DEFAULT"></APPEARANCE>
+          <STRING justify="LEFT" vjustify="CENTER">WEAPONS</STRING>
+        </WINDOW>
+        <WINDOW type="table" name="WEAPON_LIST">
+          <POSITION>
+            <LEFT>384</LEFT>
+            <TOP>40</TOP>
+            <RIGHT>724</RIGHT>
+            <BOTTOM>330</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          <ITEMS>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+          </ITEMS>
+          <COLUMN count="2" spacing="0">
+            <HEADER justify="CENTER" vjustify="CENTER" column="0" sort="A" width="200">WEAPON</HEADER>
+            <HEADER justify="CENTER" vjustify="CENTER" column="1" sort="A" width="110">ALLOWED</HEADER>
+            <BODY justify="LEFT" vjustify="CENTER" column="0"></BODY>
+            <BODY justify="LEFT" vjustify="CENTER" column="1"></BODY>
+          </COLUMN>
+          <MIN_ITEM_HEIGHT>22</MIN_ITEM_HEIGHT>
+          <SCROLLBAR>
+            <POSITION>
+              <LEFT>324</LEFT>
+              <TOP>0</TOP>
+              <RIGHT>340</RIGHT>
+              <BOTTOM>290</BOTTOM>
+            </POSITION>
+            <APPEARANCE type="COLOR" state="DEFAULT">%COLOR_BLACK%</APPEARANCE>
+            <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+            <SHUTTLE type="COLOR" state="DEFAULT">%TRIM_COLOR%</SHUTTLE>
+            <SHUTTLE type="COLOR" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</SHUTTLE>
+            <SHUTTLE type="COLOR" state="SELECTED">%DEF_TEXT_SELECTED_FG%</SHUTTLE>
+            <SCROLLUP type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</SCROLLUP>
+            <SCROLLUP type="COLOR" state="MOUSEOVER">%TRIM_COLOR%</SCROLLUP>
+            <SCROLLDOWN type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</SCROLLDOWN>
+            <SCROLLDOWN type="COLOR" state="MOUSEOVER">%TRIM_COLOR%</SCROLLDOWN>
+            <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+          </SCROLLBAR>
+        </WINDOW>
+        <WINDOW type="button" name="WPN_MISSION">
+          <POSITION>
+            <LEFT>384</LEFT>
+            <TOP>342</TOP>
+            <RIGHT>464</RIGHT>
+            <BOTTOM>368</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <STRING justify="CENTER" vjustify="CENTER">MISSION</STRING>
+          <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
+          <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
+        </WINDOW>
+        <WINDOW type="button" name="WPN_NEVER">
+          <POSITION>
+            <LEFT>470</LEFT>
+            <TOP>342</TOP>
+            <RIGHT>550</RIGHT>
+            <BOTTOM>368</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <STRING justify="CENTER" vjustify="CENTER">NEVER</STRING>
+          <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
+          <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
+        </WINDOW>
+        <WINDOW type="button" name="WPN_ALWAYS">
+          <POSITION>
+            <LEFT>556</LEFT>
+            <TOP>342</TOP>
+            <RIGHT>636</RIGHT>
+            <BOTTOM>368</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <STRING justify="CENTER" vjustify="CENTER">ALWAYS</STRING>
+          <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
+          <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
+        </WINDOW>
+        <WINDOW type="button" name="WPN_ARMORY">
+          <POSITION>
+            <LEFT>642</LEFT>
+            <TOP>342</TOP>
+            <RIGHT>722</RIGHT>
+            <BOTTOM>368</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+          <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+          <STRING justify="CENTER" vjustify="CENTER">ARMORY</STRING>
+          <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
+          <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
+        </WINDOW>
+      </WINDOW>
+    </WINDOW>
+    <WINDOW type="button" name="START_GAME">
+      <HOTKEY VIRTUAL>VK_RETURN</HOTKEY>
+      <POSITION>
+        <LEFT>580</LEFT>
+        <TOP>548</TOP>
+        <RIGHT>770</RIGHT>
+        <BOTTOM>582</BOTTOM>
+      </POSITION>
+      <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+      <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+      <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+      <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+      <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+      <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+      <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+      <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+      <FONT>
+        <NAME>%DEF_FONTNAME_LG%</NAME>
+        <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+        <MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+        <SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+        <DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+      </FONT>
+      <STRING justify="CENTER" vjustify="CENTER">START</STRING>
+      <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
+      <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
+    </WINDOW>
+    <WINDOW type="button" name="BACK">
+      <HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+      <ACTION type="POP_SCREEN"></ACTION>
+      <POSITION>
+        <LEFT>30</LEFT>
+        <TOP>548</TOP>
+        <RIGHT>220</RIGHT>
+        <BOTTOM>582</BOTTOM>
+      </POSITION>
+      <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+      <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+      <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+      <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+      <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+      <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+      <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+      <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+      <FONT>
+        <NAME>%DEF_FONTNAME_LG%</NAME>
+        <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+        <MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+        <SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+        <DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+      </FONT>
+      <STRING justify="CENTER" vjustify="CENTER">BACK</STRING>
+      <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
+      <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
     </WINDOW>
   </WINDOW>
 </SCREEN>

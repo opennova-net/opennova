@@ -74,7 +74,11 @@ func test_no_resource_dir_boots_the_bundled_placeholder_menu() -> void:
 	var menu := _shell.get_menu_shell()
 	assert_eq(menu.get_current_menu_file().to_lower(), "main.mnu")
 	var driver := menu.get_driver()
-	for widget_name in ["PLAY_RETAIL", "CHANGE_FOLDER", "EXIT"]:
+	assert_eq(driver.get_current_screen(), "STARTUP")
+	# The original main menu's buttons by its names (SINGLE_PLAYER, LAN_MULTI_PLAYER,
+	# PLAYER_INFO, OPTIONS, EXIT), and ours for a retail install.
+	for widget_name in ["SINGLE_PLAYER", "LAN_MULTI_PLAYER", "PLAYER_INFO", "OPTIONS",
+			"PLAY_RETAIL", "CHANGE_FOLDER", "EXIT"]:
 		assert_true(driver.has_widget(widget_name), "%s is authored" % widget_name)
 	var frame := menu.get_frame()
 	# One mouse sample resolves the screen's claimed pointer.
@@ -83,6 +87,32 @@ func test_no_resource_dir_boots_the_bundled_placeholder_menu() -> void:
 			"MAIN's pointer newarow1.tga decodes (a plain git blob, never an LFS pointer)")
 	assert_eq(frame.get_unresolved_asset_count(), 0, "every asset the menu names resolves")
 	assert_gt(frame.get_draw_list_stats().glyphs, 0, "the bundled font draws the menu text")
+
+
+# The main menu's buttons reach their screens by their authored actions, as the
+# original's do: the Mods list is a tab of OPTIONS (options.mnu), beside the
+# options' own tabs and the credits, and BACK returns to STARTUP.
+func test_the_bundled_main_menu_reaches_its_screens() -> void:
+	_shell = await _boot()
+	var menu := _shell.get_menu_shell()
+	var driver := menu.get_driver()
+	for target in [["SINGLE_PLAYER", "sp.mnu", "SINGLE_PLAYER", ["IA_LIST", "BRIEFING", "ACCEPT"]],
+			["LAN_MULTI_PLAYER", "mp.mnu", "LAN_MULTI_PLAYER", ["LAN_GAME_LIST", "LAN_SEARCH",
+				"LAN_JOINGAME", "LAN_HOSTGAME", "SELECTED_MISSIONS", "START_GAME"]],
+			["PLAYER_INFO", "player.mnu", "PLAYER_INFO", ["PLAYERNAME", "PLAYERCLASS",
+				"NATIONALITY", "COMBO_LIST", "ACCEPT"]],
+			["OPTIONS", "options.mnu", "OPTIONS", ["RADIO_TAB_MODS", "AVAIL_LIST", "MOD_DESC",
+				"RADIO_TAB_CREDITS", "CREDITS", "CONTROL_MAPPING", "ACCEPT", "BACK"]]]:
+		_press(target[0])
+		await get_tree().process_frame
+		assert_eq(menu.get_current_menu_file().to_lower(), target[1], "%s opens %s" % [target[0], target[1]])
+		assert_eq(driver.get_current_screen(), target[2])
+		for widget_name in target[3]:
+			assert_true(driver.has_widget(widget_name), "%s holds %s" % [target[2], widget_name])
+		driver.pop_screen()
+		await get_tree().process_frame
+		assert_eq(menu.get_current_menu_file().to_lower(), "main.mnu", "back from %s" % target[2])
+		assert_eq(driver.get_current_screen(), "STARTUP")
 
 
 func _temp_dir(label: String) -> String:
@@ -191,6 +221,21 @@ func test_the_bundled_mods_screen_lists_the_base_game_and_its_expansions() -> vo
 	assert_eq(driver.get_widget_items(avail), PackedStringArray(
 			["Joint Operations: Typhoon Rising", "Unnamed Expansion", "Test Storm"]))
 	assert_eq(driver.selected_row(avail), 0, "the base game running is highlighted")
+	# The Mods list is a tab of the whole options screen, as the original's is: one
+	# ACCEPT writes the options' words and switches the game only when the pick is
+	# another than the one running (Options_HandleAcceptOrBack's two legs).
+	var profile := PlayerProfile.store()
+	var invert_before: int = profile.get_word("invert_mouse")
+	assert_true(profile.set_word("invert_mouse", 0))
+	var invert := driver.widget_id("INVERT_MOUSE")
+	assert_gte(invert, 0, "the options' controls tab is on the Mods screen")
+	driver.set_widget_checked(invert, true)
+	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
+	shell.update_menu_frame()
+	assert_eq(profile.get_word("invert_mouse"), 1, "ACCEPT wrote the options' words")
+	assert_eq(String(root.get_expansion()), "", "the game running picked: no switch")
+	assert_false(shell.has_pending_expansion_reload(), "nothing waits to reload")
+	assert_true(profile.set_word("invert_mouse", invert_before))
 	var desc := driver.widget_id("MOD_DESC")
 	driver.select_row(avail, 2, true)
 	assert_eq(driver.get_widget_text(desc), "A storm.", "a pick shows its EXP_DESC")

@@ -55,6 +55,10 @@ assets/**/*.md text eol=lf
 # The menu's pointer is a .tga the editor's blank factory makes (4 KB), not a
 # Blender export: main.mnu names it, so the bundled-menu GUT test reads it.
 assets/newarow1.tga -text -eol filter= diff= merge=
+# The main menu's background (800 x 600, 24-bit, 1.4 MB) is the one rendered
+# image kept out of LFS, for the same reason: the menu names it, and the
+# bundled-menu GUT tests pull no LFS. Its master is art/onjo1/menu/src/onmnbg.png.
+assets/onmnbg.tga -text -eol filter= diff= merge=
 
 # expansions/ holds the game's expansions, each an editor expansion project on
 # the base game's project assets/ (ADR 0046 T5), stored as assets/ is: small

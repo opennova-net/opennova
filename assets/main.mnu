@@ -1,132 +1,235 @@
-<!-- OpenNova's main menu (ADR 0048), authored from scratch. The shell opens
-     main.mnu's first screen. SINGLE PLAYER opens sp.mnu's SINGLE_PLAYER
-     screen, where the game lists its single-player missions; MODS opens
-     options.mnu's OPTIONS screen, the Mods list. PLAY_RETAIL,
-     CHANGE_FOLDER and EXIT are wired by name
-     (godot/game/bundled_menu_companion.gd), EXIT the way retail wires its EXIT
-     control; the original game leaves the first two inert. Literal strings,
-     hex colors and one named font, so the menu needs no string table or
-     stylesheet. The font is uppercase-only, and its comma reads as a period at
-     menu size, so the text avoids commas. MAIN's CURSOR names the mouse
-     pointer: the original game hides the system pointer, so a screen naming
-     none has no pointer at all (docs/mnu/menu-re.md). -->
 <SCREEN>
-	<NAME>STARTUP</NAME>
-	<WINDOW type="window" name="MAIN">
-		<APPEARANCE type="color" state="default">FF0B1015</APPEARANCE>
-		<POSITION>
-			<LEFT>0</LEFT>
-			<TOP>0</TOP>
-			<RIGHT>800</RIGHT>
-			<BOTTOM>600</BOTTOM>
-		</POSITION>
-		<FONT>
-			<NAME>opennova.fnt</NAME>
-			<DEFAULT_FG>FFD8DEE4</DEFAULT_FG>
-			<MOUSEOVER_FG>FFFFC040</MOUSEOVER_FG>
-			<SELECTED_FG>FFFF8000</SELECTED_FG>
-			<DISABLED_FG>FF545252</DISABLED_FG>
-		</FONT>
-		<CURSOR>
-			<FILE>newarow1.tga</FILE>
-			<FLAGS>STANDARD_TRANSPARENT</FLAGS>
-		</CURSOR>
-		<WINDOW type="static" name="TITLE">
-			<FONT>
-				<NAME>opennova.fnt</NAME>
-				<DEFAULT_FG>FFFFC040</DEFAULT_FG>
-			</FONT>
-			<POSITION>
-				<LEFT>0</LEFT>
-				<TOP>150</TOP>
-				<RIGHT>800</RIGHT>
-				<BOTTOM>170</BOTTOM>
-			</POSITION>
-			<STRING justify="CENTER" vjustify="CENTER">OPENNOVA</STRING>
-		</WINDOW>
-		<WINDOW type="static" name="COMING_SOON">
-			<POSITION>
-				<LEFT>0</LEFT>
-				<TOP>185</TOP>
-				<RIGHT>800</RIGHT>
-				<BOTTOM>205</BOTTOM>
-			</POSITION>
-			<STRING justify="CENTER" vjustify="CENTER">A SMALL GAME OF OUR OWN. MORE IS COMING.</STRING>
-		</WINDOW>
-		<WINDOW type="static" name="RETAIL_NOTE_1">
-			<POSITION>
-				<LEFT>0</LEFT>
-				<TOP>250</TOP>
-				<RIGHT>800</RIGHT>
-				<BOTTOM>270</BOTTOM>
-			</POSITION>
-			<STRING justify="CENTER" vjustify="CENTER">YOU CAN ALSO PLAY JOINT OPERATIONS FROM YOUR OWN INSTALL:</STRING>
-		</WINDOW>
-		<WINDOW type="static" name="RETAIL_NOTE_2">
-			<POSITION>
-				<LEFT>0</LEFT>
-				<TOP>275</TOP>
-				<RIGHT>800</RIGHT>
-				<BOTTOM>295</BOTTOM>
-			</POSITION>
-			<STRING justify="CENTER" vjustify="CENTER">PRESS PLAY RETAIL AND CHOOSE YOUR GAME FOLDER.</STRING>
-		</WINDOW>
-		<WINDOW type="button" name="SINGLE_PLAYER_GO">
-			<ACTION type="screen" file="sp.mnu">SINGLE_PLAYER</ACTION>
-			<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
-			<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
-			<POSITION>
-				<LEFT>290</LEFT>
-				<TOP>345</TOP>
-				<RIGHT>510</RIGHT>
-				<BOTTOM>373</BOTTOM>
-			</POSITION>
-			<STRING justify="CENTER" vjustify="CENTER">SINGLE PLAYER</STRING>
-		</WINDOW>
-		<WINDOW type="button" name="MODS">
-			<ACTION type="screen" file="options.mnu">OPTIONS</ACTION>
-			<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
-			<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
-			<POSITION>
-				<LEFT>290</LEFT>
-				<TOP>383</TOP>
-				<RIGHT>510</RIGHT>
-				<BOTTOM>411</BOTTOM>
-			</POSITION>
-			<STRING justify="CENTER" vjustify="CENTER">MODS</STRING>
-		</WINDOW>
-		<WINDOW type="button" name="PLAY_RETAIL">
-			<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
-			<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
-			<POSITION>
-				<LEFT>290</LEFT>
-				<TOP>421</TOP>
-				<RIGHT>510</RIGHT>
-				<BOTTOM>449</BOTTOM>
-			</POSITION>
-			<STRING justify="CENTER" vjustify="CENTER">PLAY RETAIL</STRING>
-		</WINDOW>
-		<WINDOW type="button" name="CHANGE_FOLDER">
-			<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
-			<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
-			<POSITION>
-				<LEFT>290</LEFT>
-				<TOP>459</TOP>
-				<RIGHT>510</RIGHT>
-				<BOTTOM>487</BOTTOM>
-			</POSITION>
-			<STRING justify="CENTER" vjustify="CENTER">CHANGE FOLDER</STRING>
-		</WINDOW>
-		<WINDOW type="button" name="EXIT">
-			<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
-			<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
-			<POSITION>
-				<LEFT>290</LEFT>
-				<TOP>497</TOP>
-				<RIGHT>510</RIGHT>
-				<BOTTOM>525</BOTTOM>
-			</POSITION>
-			<STRING justify="CENTER" vjustify="CENTER">EXIT</STRING>
-		</WINDOW>
-	</WINDOW>
+  <NAME>STARTUP</NAME>
+  <MUSICVAR>1</MUSICVAR>
+  <WINDOW type="window" name="MAIN">
+    <POSITION>
+      <LEFT>0</LEFT>
+      <TOP>0</TOP>
+      <RIGHT>800</RIGHT>
+      <BOTTOM>600</BOTTOM>
+    </POSITION>
+    <APPEARANCE type="IMAGE" state="DEFAULT">onmnbg.tga</APPEARANCE>
+    <TEXT_RSRC>menutxt.bin</TEXT_RSRC>
+    <CURSOR>
+      <FILE>newarow1.tga</FILE>
+    </CURSOR>
+    <FONT>
+      <NAME>%DEF_FONTNAME%</NAME>
+      <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+      <MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+      <SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+      <DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+    </FONT>
+    <WINDOW type="static" name="TITLE">
+      <POSITION>
+        <LEFT>40</LEFT>
+        <TOP>52</TOP>
+        <RIGHT>400</RIGHT>
+        <BOTTOM>104</BOTTOM>
+      </POSITION>
+      <APPEARANCE state="DEFAULT"></APPEARANCE>
+      <FONT>
+        <NAME>%IMPACT_FONTNAME%</NAME>
+        <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+      </FONT>
+      <STRING justify="LEFT" vjustify="CENTER">OPENNOVA</STRING>
+    </WINDOW>
+    <WINDOW type="static" name="TAGLINE">
+      <POSITION>
+        <LEFT>42</LEFT>
+        <TOP>112</TOP>
+        <RIGHT>400</RIGHT>
+        <BOTTOM>136</BOTTOM>
+      </POSITION>
+      <APPEARANCE state="DEFAULT"></APPEARANCE>
+      <STRING justify="LEFT" vjustify="CENTER">A small game of our own. Pre-1.0, experimental.</STRING>
+    </WINDOW>
+    <WINDOW type="window" name="BUTTONS">
+      <POSITION>
+        <LEFT>40</LEFT>
+        <TOP>196</TOP>
+        <RIGHT>270</RIGHT>
+        <BOTTOM>560</BOTTOM>
+      </POSITION>
+      <FONT>
+        <NAME>%DEF_FONTNAME_LG%</NAME>
+        <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+        <MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+        <SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+        <DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+      </FONT>
+      <WINDOW type="button" name="SINGLE_PLAYER">
+        <ACTION type="SCREEN" file="sp.mnu">SINGLE_PLAYER</ACTION>
+        <POSITION>
+          <LEFT>0</LEFT>
+          <TOP>0</TOP>
+          <RIGHT>230</RIGHT>
+          <BOTTOM>34</BOTTOM>
+        </POSITION>
+        <APPEARANCE state="DEFAULT"></APPEARANCE>
+        <APPEARANCE state="MOUSEOVER"></APPEARANCE>
+        <APPEARANCE state="SELECTED"></APPEARANCE>
+        <APPEARANCE state="DISABLED"></APPEARANCE>
+        <FONT>
+          <NAME>%DEF_FONTNAME_LG%</NAME>
+          <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+          <MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+          <SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+          <DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+        </FONT>
+        <STRING justify="LEFT" vjustify="CENTER">SINGLE PLAYER</STRING>
+        <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
+        <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
+      </WINDOW>
+      <WINDOW type="button" name="LAN_MULTI_PLAYER">
+        <ACTION type="SCREEN" file="mp.mnu">LAN_MULTI_PLAYER</ACTION>
+        <POSITION>
+          <LEFT>0</LEFT>
+          <TOP>40</TOP>
+          <RIGHT>230</RIGHT>
+          <BOTTOM>74</BOTTOM>
+        </POSITION>
+        <APPEARANCE state="DEFAULT"></APPEARANCE>
+        <APPEARANCE state="MOUSEOVER"></APPEARANCE>
+        <APPEARANCE state="SELECTED"></APPEARANCE>
+        <APPEARANCE state="DISABLED"></APPEARANCE>
+        <FONT>
+          <NAME>%DEF_FONTNAME_LG%</NAME>
+          <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+          <MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+          <SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+          <DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+        </FONT>
+        <STRING justify="LEFT" vjustify="CENTER">MULTIPLAYER</STRING>
+        <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
+        <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
+      </WINDOW>
+      <WINDOW type="button" name="PLAYER_INFO">
+        <ACTION type="SCREEN" file="player.mnu">PLAYER_INFO</ACTION>
+        <POSITION>
+          <LEFT>0</LEFT>
+          <TOP>80</TOP>
+          <RIGHT>230</RIGHT>
+          <BOTTOM>114</BOTTOM>
+        </POSITION>
+        <APPEARANCE state="DEFAULT"></APPEARANCE>
+        <APPEARANCE state="MOUSEOVER"></APPEARANCE>
+        <APPEARANCE state="SELECTED"></APPEARANCE>
+        <APPEARANCE state="DISABLED"></APPEARANCE>
+        <FONT>
+          <NAME>%DEF_FONTNAME_LG%</NAME>
+          <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+          <MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+          <SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+          <DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+        </FONT>
+        <STRING justify="LEFT" vjustify="CENTER">PLAYER</STRING>
+        <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
+        <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
+      </WINDOW>
+      <WINDOW type="button" name="OPTIONS">
+        <ACTION type="SCREEN" file="options.mnu">OPTIONS</ACTION>
+        <POSITION>
+          <LEFT>0</LEFT>
+          <TOP>120</TOP>
+          <RIGHT>230</RIGHT>
+          <BOTTOM>154</BOTTOM>
+        </POSITION>
+        <APPEARANCE state="DEFAULT"></APPEARANCE>
+        <APPEARANCE state="MOUSEOVER"></APPEARANCE>
+        <APPEARANCE state="SELECTED"></APPEARANCE>
+        <APPEARANCE state="DISABLED"></APPEARANCE>
+        <FONT>
+          <NAME>%DEF_FONTNAME_LG%</NAME>
+          <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+          <MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+          <SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+          <DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+        </FONT>
+        <STRING justify="LEFT" vjustify="CENTER">OPTIONS</STRING>
+        <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
+        <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
+      </WINDOW>
+      <WINDOW type="button" name="PLAY_RETAIL">
+        <POSITION>
+          <LEFT>0</LEFT>
+          <TOP>184</TOP>
+          <RIGHT>230</RIGHT>
+          <BOTTOM>218</BOTTOM>
+        </POSITION>
+        <APPEARANCE state="DEFAULT"></APPEARANCE>
+        <APPEARANCE state="MOUSEOVER"></APPEARANCE>
+        <APPEARANCE state="SELECTED"></APPEARANCE>
+        <APPEARANCE state="DISABLED"></APPEARANCE>
+        <FONT>
+          <NAME>%DEF_FONTNAME_LG%</NAME>
+          <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+          <MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+          <SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+          <DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+        </FONT>
+        <STRING justify="LEFT" vjustify="CENTER">PLAY RETAIL</STRING>
+        <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
+        <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
+      </WINDOW>
+      <WINDOW type="button" name="CHANGE_FOLDER">
+        <POSITION>
+          <LEFT>0</LEFT>
+          <TOP>224</TOP>
+          <RIGHT>230</RIGHT>
+          <BOTTOM>258</BOTTOM>
+        </POSITION>
+        <APPEARANCE state="DEFAULT"></APPEARANCE>
+        <APPEARANCE state="MOUSEOVER"></APPEARANCE>
+        <APPEARANCE state="SELECTED"></APPEARANCE>
+        <APPEARANCE state="DISABLED"></APPEARANCE>
+        <FONT>
+          <NAME>%DEF_FONTNAME_LG%</NAME>
+          <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+          <MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+          <SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+          <DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+        </FONT>
+        <STRING justify="LEFT" vjustify="CENTER">CHANGE FOLDER</STRING>
+        <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
+        <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
+      </WINDOW>
+      <WINDOW type="button" name="EXIT">
+        <POSITION>
+          <LEFT>0</LEFT>
+          <TOP>288</TOP>
+          <RIGHT>230</RIGHT>
+          <BOTTOM>322</BOTTOM>
+        </POSITION>
+        <APPEARANCE state="DEFAULT"></APPEARANCE>
+        <APPEARANCE state="MOUSEOVER"></APPEARANCE>
+        <APPEARANCE state="SELECTED"></APPEARANCE>
+        <APPEARANCE state="DISABLED"></APPEARANCE>
+        <FONT>
+          <NAME>%DEF_FONTNAME_LG%</NAME>
+          <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+          <MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+          <SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+          <DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+        </FONT>
+        <STRING justify="LEFT" vjustify="CENTER">EXIT</STRING>
+        <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
+        <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
+      </WINDOW>
+    </WINDOW>
+    <WINDOW type="static" name="RETAIL_NOTE">
+      <POSITION>
+        <LEFT>42</LEFT>
+        <TOP>560</TOP>
+        <RIGHT>500</RIGHT>
+        <BOTTOM>584</BOTTOM>
+      </POSITION>
+      <APPEARANCE state="DEFAULT"></APPEARANCE>
+      <FONT>
+        <NAME>%DEF_FONTNAME%</NAME>
+        <DEFAULT_FG>%DEF_TEXT_DISABLED_FG%</DEFAULT_FG>
+      </FONT>
+      <STRING justify="LEFT" vjustify="CENTER">PLAY RETAIL plays Joint Operations from your own install.</STRING>
+    </WINDOW>
+  </WINDOW>
 </SCREEN>
