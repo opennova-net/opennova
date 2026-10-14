@@ -51,6 +51,32 @@ int main() {
 		TEST_EXPECT(bus.clear_owned(THREEDI_CTRL_FLICKER, "weather-probe"));
 		TEST_EXPECT(bus.runtime_values(22, -9)[THREEDI_CTRL_FLICKER] == 22);
 		TEST_EXPECT(bus.runtime_values(22, -9)[THREEDI_CTRL_SWING] == -43);
+		// The rings gone, SWING's sample goes; FLICKER, cleared since, stays absent.
+		TEST_EXPECT(bus.drop_weather() && !bus.has(THREEDI_CTRL_SWING) &&
+				!bus.has(THREEDI_CTRL_FLICKER));
+		TEST_EXPECT(bus.present_registers().empty() && !bus.drop_weather());
+	}
+	{
+		// A weather sample dropped once no rings stand: the registers read as a model's
+		// that never sampled; a value written since, or another register, stands.
+		ModelControls bus;
+		TEST_EXPECT(!bus.drop_weather());
+		bus.sample_weather(41, -43);
+		TEST_EXPECT(bus.store(door, 5)); // another register's write keeps the drop
+		TEST_EXPECT(bus.drop_weather());
+		TEST_EXPECT(!bus.has(THREEDI_CTRL_FLICKER) && !bus.has(THREEDI_CTRL_SWING));
+		TEST_EXPECT(bus.present_registers() == (std::vector<int>{ door }) && bus.value(door) == 5);
+		TEST_EXPECT(bus.runtime_values(0, 0)[THREEDI_CTRL_FLICKER] == 0);
+		bus.sample_weather(41, -43);
+		TEST_EXPECT(!bus.store(THREEDI_CTRL_FLICKER, 41)); // the same value, written, stands
+		TEST_EXPECT(bus.store(THREEDI_CTRL_SWING, 7, "authority"));
+		TEST_EXPECT(!bus.drop_weather());
+		TEST_EXPECT(bus.value(THREEDI_CTRL_FLICKER) == 41 && bus.value(THREEDI_CTRL_SWING) == 7);
+		bus.sample_weather(41, -43);
+		TEST_EXPECT(bus.clear(THREEDI_CTRL_FLICKER)); // a clear since stays clear
+		TEST_EXPECT(bus.drop_weather() && !bus.has(THREEDI_CTRL_FLICKER) &&
+				!bus.has(THREEDI_CTRL_SWING));
+		TEST_EXPECT(bus.present_registers() == (std::vector<int>{ door }));
 	}
 	{
 		ModelControls bus;
