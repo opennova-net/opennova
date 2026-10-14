@@ -329,15 +329,15 @@ bool MissionDocument::paste_rows(const Edit &edit, const std::vector<std::shared
 	}
 	int32_t next_ssn = next_free_ssn(rows);
 	// Every SSN of the fragment first: a fresh one given to one copy is none another copy holds, so a
-	// later copy's own SSN is never taken for it (follow_id follows by value). The player's 10000 is
-	// never given.
+	// later copy's own SSN is never taken for it (follow_id follows by value); none is skipped beyond
+	// those, as the original editor's allocation (mission::ssn_after, D-MIS-10).
 	std::set<int32_t> held;
 	for (const std::vector<bms::Entity> *pool : {&fragment.items, &fragment.buildings, &fragment.markers, &fragment.organics})
 		for (const bms::Entity &entity : *pool) held.insert(entity.id);
 	for (std::vector<bms::Entity> *pool : {&fragment.items, &fragment.buildings, &fragment.markers, &fragment.organics})
 		for (bms::Entity &entity : *pool) {
 			if (ssns.insert(entity.id).second) continue;
-			while (ssns.count(next_ssn) || held.count(next_ssn) || next_ssn == kPlayerSsn) ++next_ssn;
+			while (ssns.count(next_ssn) || held.count(next_ssn)) ++next_ssn;
 			const int32_t fresh = next_ssn++;
 			follow_id(fragment, ParamKind::Entity, entity.id, fresh);
 			entity.id = fresh;

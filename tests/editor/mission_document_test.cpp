@@ -989,11 +989,11 @@ int test_clipboard() {
 		            error.message.find("Every zone id 1 to 99 is taken") != std::string::npos);
 		while (document->can_undo()) document->undo();
 	}
-	// No player's net id is given: after an entity of SSN 9999, an Add takes 10256, past the 256 the game
-	// stamps on its players (master's mission::ssn_after, D-MIS-10).
+	// After an entity of SSN 9999 an Add takes 10000, one past the largest, skipping none as the original
+	// editor does (master's mission::ssn_after, D-MIS-10), though the players' net ids share it.
 	TEST_EXPECT(document->apply(edit_of(EditOperation::Set, walker, "id", int64_t(9999)), error));
 	TEST_EXPECT(document->apply(edit_of(EditOperation::Add, {0, k(MissionKind::Item), 0}), error) &&
-	            static_cast<const EntityRow *>(document->row(document->last_added()))->native.id == 10256);
+	            static_cast<const EntityRow *>(document->row(document->last_added()))->native.id == 10000);
 	while (document->can_undo()) document->undo();
 	TEST_EXPECT(bytes_of(*document) == original);
 	std::printf("clipboard: rows told apart and placed, a nested kind into its owner\n");
