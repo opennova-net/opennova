@@ -290,7 +290,9 @@ public:
     bool get_show_instruction2() const { return value_.instructions.show_second; }
     bool get_replace_instruction() const { return value_.instructions.replace_first; }
     // The welcome line composes the roster's name and squad (the page's bytes,
-    // D-NET-661) into the gametext's: read as cp1252 (D-HUD-57).
+    // D-NET-661) into the gametext template, which game_text_lookup hands the
+    // engine as UTF-8: read as cp1252 (D-HUD-57), so a non-ASCII template
+    // character is read twice over (D-HUD-59).
     String get_instruction_text() const { return opennova::cp1252_to_gd(value_.instructions.first_text); }
     String get_instruction2_text() const { return opennova::to_gd(value_.instructions.second_text); }
     bool get_show_round_status() const { return value_.instructions.show_round_status; }

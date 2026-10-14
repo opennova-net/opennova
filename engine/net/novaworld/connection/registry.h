@@ -39,10 +39,9 @@ struct Connection {
 	uint64_t created_ms = 0;
 	uint64_t last_seen_ms = 0;
 	std::string pn;          // the latest CLIENT_HELLO's Protocol Name ("NOVAWORLDUDP", …)
-	// The CI and PN the session's accepted 0x42 established (the Hello identity it
-	// matched, stamped when the row went Active): a later Hello never changes them,
-	// and the session's 0x43s are classified by session_pn.
-	uint32_t session_ci = 0;
+	// The PN the session's accepted 0x42 established (the Hello identity it matched,
+	// stamped when the row went Active): a later Hello never changes it, and the
+	// session's 0x43s are classified by it.
 	std::string session_pn;
 	// Per-session crypto keys for the SESSION (0x43/0x83) inner-NWU cipher.
 	// Inbound SESSION packets (C→S) are encrypted with `client_scrk`;
@@ -95,10 +94,10 @@ public:
 
 	// Promote the connection at `addr` to Active once JOIN succeeds, storing
 	// both SCRKs (client- and server-generated) needed for SESSION inner-NWU
-	// decrypt/encrypt respectively, and the session's identity (session_ci /
-	// session_pn) from the Hello identity the accepted 0x42 matched. Returns
-	// false if missing. Address-keyed only: an id-keyed promote aliased two
-	// retail clients that both send ci=1 (G.7).
+	// decrypt/encrypt respectively, and the session's protocol (session_pn) from
+	// the Hello identity the accepted 0x42 matched. Returns false if missing.
+	// Address-keyed only: an id-keyed promote aliased two retail clients that
+	// both send ci=1 (G.7).
 	bool mark_active_by_addr(const PeerAddr &addr, std::string identity,
 	                         std::string client_scrk, std::string server_scrk);
 

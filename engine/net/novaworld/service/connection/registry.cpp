@@ -84,7 +84,6 @@ bool ConnectionRegistry::mark_active_by_addr(const PeerAddr &addr,
 	// Re-promote even if already Active so a fresh AUTH (e.g. after a
 	// dropped reply) refreshes the SCRKs.
 	it->second.state = ConnectionState::Active;
-	it->second.session_ci = it->second.reported_id;
 	it->second.session_pn = it->second.pn;
 	it->second.identity = std::move(identity);
 	it->second.client_scrk = std::move(client_scrk);

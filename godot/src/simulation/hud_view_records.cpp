@@ -87,10 +87,11 @@ void ScoreboardHeader::_bind_methods() {
 
 // --- EndRoundOverlay --------------------------------------------------------
 
-// The lines are the game's code-page bytes (the gametext's and the roster's
-// names, D-NET-661): read as cp1252, and HudOverlay::set_end_round_overlay
-// hands them back as those bytes, so a name's high byte draws as its one glyph
-// (D-HUD-57).
+// The lines join the roster's names, the page's bytes (D-NET-661), to the
+// gametext the overlays lookup hands the engine as UTF-8: read as cp1252, and
+// HudOverlay::set_end_round_overlay hands them back as those bytes, so a name's
+// high byte draws as its one glyph (D-HUD-57); a non-ASCII gametext character
+// is then read twice over (D-HUD-59).
 PackedStringArray EndRoundOverlay::get_texts() const {
 	PackedStringArray out;
 	for (const opennova::hud::EndRoundResolvedLine &l : value_.lines)

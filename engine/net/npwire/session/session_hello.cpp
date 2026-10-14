@@ -374,6 +374,9 @@ std::vector<uint8_t> client_auth_to_bytes(const ClientAuth &msg) {
 	}
 	if (!msg.scrk.empty()) append_string_field(buf, "SCRK", msg.scrk);
 	// The reconnect trailer, each tag only when nonzero [orig: @0x620309..0x62037f].
+	// NF is the client's own netflow-log flag, written only when set; no host reads it
+	// (D-NET-429) [orig: CNapiNPConnection_SendClientJoin - the +0x7BC byte @0x620309,
+	//  the gate @0x620310..0x620316].
 	if (msg.nf) append_u32_field(buf, "NF", msg.nf);
 	if (msg.dcnt) append_u32_field(buf, "DCNT", msg.dcnt);
 	if (msg.rcnt) append_u32_field(buf, "RCNT", msg.rcnt);
