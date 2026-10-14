@@ -12,6 +12,12 @@
 
 namespace opennova::editor {
 
+ModelGrab model_canvas_grab(const ModelCanvasFrame &frame, const CanvasInput &in, int under);
+
+// The bone record a joint is in the frame's clip document (by index: a clip's channels pair with
+// the model's parts by index); none past its bones or with no clip document.
+NodeAddress model_canvas_bone_record(const ModelCanvasFrame &frame, int joint);
+
 namespace {
 
 // What the canvas shows: the model's document (this instance of it), none for a model an

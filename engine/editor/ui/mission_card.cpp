@@ -32,13 +32,17 @@
 #include <editor/ui/mission_board_live.h>
 #include <editor/ui/record_drag.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/viewport_widgets.h>
 #include <formats/mission/bms.h>
 
 namespace opennova::editor {
 
+static bool draw_type_picker(CardContext &context, bool actions);
+
+static std::vector<ScriptUse> script_event_uses(const SessionView &view, const MissionDocument &mission, size_t index);
+
 namespace {
 
-constexpr NodeKind k(MissionKind kind) { return node_kind(kind); }
 
 const ImVec4 kMuted(0.62f, 0.62f, 0.62f, 1.0f);
 const ImVec4 kWarn(0.95f, 0.75f, 0.35f, 1.0f);
@@ -188,7 +192,7 @@ void draw_chip(CardContext &context, Flow &flow, const BoardLine &line, const Bo
 		// A variable: picked from those the events use, by name, or a new one (the lowest no event uses).
 		const std::unique_ptr<MissionNames> names = mission_label_names(context.mission, context.names);
 		const std::string preview = names->variable(chip.value);
-		const float width = std::min(ui_kit::text_width(preview.c_str()) + ImGui::GetFrameHeight() + style.FramePadding.x * 2.0f, flow.room());
+		const float width = std::min(combo_width(ui_kit::text_width(preview.c_str())), flow.room());
 		flow.place(width, style.ItemSpacing.x * 0.5f);
 		ImGui::SetNextItemWidth(width);
 		if (ImGui::BeginCombo("##variable", preview.c_str(), ImGuiComboFlags_HeightLarge)) {
@@ -215,8 +219,8 @@ void draw_chip(CardContext &context, Flow &flow, const BoardLine &line, const Bo
 		shown.text = chip.unset ? "(" + chip.label + ": not set)" : words;
 		shown.raw = raw;
 		shown.dangling = chip.missing;
-		const float width = std::min({ui_kit::text_width(shown.text.c_str()) + ui_kit::text_width(raw.c_str()) + style.ItemSpacing.x +
-		                                      ImGui::GetFrameHeight() + style.FramePadding.x * 2.0f,
+		const float width = std::min({combo_width(ui_kit::text_width(shown.text.c_str()) + ui_kit::text_width(raw.c_str()) +
+		                                                  style.ItemSpacing.x),
 		                              ImGui::GetFontSize() * 22.0f, flow.room()});
 		flow.place(width, style.ItemSpacing.x * 0.5f);
 		ImGui::SetNextItemWidth(width);
@@ -228,7 +232,7 @@ void draw_chip(CardContext &context, Flow &flow, const BoardLine &line, const Bo
 		std::vector<FieldChoice> own;
 		const std::vector<FieldChoice> &choices = context.mission.choices_on(line.record, use, own);
 		const float width = std::min(choices.empty() ? ImGui::GetFontSize() * 4.5f + (*chip.unit ? ui_kit::text_width(chip.unit) + style.ItemSpacing.x : 0.0f)
-		                                             : std::min(ui_kit::text_width(words.c_str()) + ImGui::GetFrameHeight() + style.FramePadding.x * 2.0f,
+		                                             : std::min(combo_width(ui_kit::text_width(words.c_str())),
 		                                                        ImGui::GetFontSize() * 16.0f),
 		                             flow.room());
 		flow.place(width, style.ItemSpacing.x * 0.5f);
@@ -349,7 +353,7 @@ void drop_line(CardContext &context, const BoardCard &card, bool actions, size_t
 	if (held && held->IsDataType(kLogicLineDragPayload) && held->Data && size_t(held->DataSize) == sizeof(LogicLineDrag)) {
 		const LogicLineDrag drag = *static_cast<const LogicLineDrag *>(held->Data);
 		const bool fits = drag.document == context.mission.identity() &&
-		                  drag.record.kind == k(actions ? MissionKind::Action : MissionKind::Trigger);
+		                  drag.record.kind == node_kind(actions ? MissionKind::Action : MissionKind::Trigger);
 		// Within its own list, the place it takes once it has left its own.
 		size_t to = position;
 		if (fits && drag.record.row == card.event.row && position != SIZE_MAX) {
@@ -379,7 +383,7 @@ void drop_line(CardContext &context, const BoardCard &card, bool actions, size_t
 					ImGui::TextUnformatted(left.c_str());
 					if (untriggered) {
 						const Node *row = context.mission.row(drag.record.row);
-						const bool waits = row && row->kind == k(MissionKind::Event) &&
+						const bool waits = row && row->kind == node_kind(MissionKind::Event) &&
 						                   static_cast<const EventRow *>(row)->native.event.delay > 0;
 						ImGui::TextColored(kWarn, "%s is left with no trigger: it %s, as the mission runs.", title.c_str(),
 						                   waits ? "acts after its wait" : "fires right away");
@@ -635,7 +639,8 @@ std::map<int64_t, std::vector<ScriptUse>> script_variable_uses(const SessionView
 	return out;
 }
 
-std::vector<ScriptUse> script_event_uses(const SessionView &view, const MissionDocument &mission, size_t index) {
+// The script lines that name the event at `index` by its number (event(n)).
+static std::vector<ScriptUse> script_event_uses(const SessionView &view, const MissionDocument &mission, size_t index) {
 	const AssetGraph *graph = view.findings.graph.get();
 	if (!graph) return {};
 	return script_uses_of(graph->referrers_of(ReferenceKind::MissionEventLatch, std::to_string(index), mission_event_scope(mission.path())));
@@ -674,7 +679,10 @@ void draw_mission_line(CardContext &context, const BoardCard &card, const BoardL
 	}
 }
 
-bool draw_type_picker(CardContext &context, bool actions) {
+// The type picker for the add or the retype `state` names, drawn in an open popup's body: Common (the shipped
+// missions' most used), for a trigger the recipes' triggers with their presets, then every type by its group,
+// filtered by what is typed. True once it raised the add or the retype (the popup then closed).
+static bool draw_type_picker(CardContext &context, bool actions) {
 	CardState &state = context.state;
 	const float em = ImGui::GetFontSize();
 	if (ImGui::IsWindowAppearing()) {
@@ -757,7 +765,7 @@ bool draw_type_picker(CardContext &context, bool actions) {
 		// Show text: its chip opens on New text once its line is there.
 		if (raised && chosen->action && chosen->type == int32_t(bms::ActionType::OutputText)) {
 			const Node *row = context.mission.row(state.add_event);
-			const auto *event = row && row->kind == k(MissionKind::Event) ? static_cast<const EventRow *>(row) : nullptr;
+			const auto *event = row && row->kind == node_kind(MissionKind::Event) ? static_cast<const EventRow *>(row) : nullptr;
 			const size_t count = event ? event->native.actions.size() : 0;
 			state.open_event = state.add_event;
 			state.open_revision = context.mission.revision();
@@ -842,7 +850,7 @@ CardAsked draw_mission_card(CardContext &context, const BoardCard &card) {
 		draw_card_live(context.workspace, mission.path(), view.activity.live_logic, CardLiveSpot{card.index, card.event.row, -1, 0});
 	}
 	const Node *row = mission.row(card.event.row);
-	const uint32_t flags = row && row->kind == k(MissionKind::Event) ? uint32_t(static_cast<const EventRow *>(row)->native.event.flags) : 0;
+	const uint32_t flags = row && row->kind == node_kind(MissionKind::Event) ? uint32_t(static_cast<const EventRow *>(row)->native.event.flags) : 0;
 	ui_kit::WrapRow flags_row;
 	flags_row.next(0.0f);
 	const auto flag = [&](const char *label, bms::EventFlags bit, bool on, const char *tip) {

@@ -13,6 +13,8 @@
 
 namespace opennova::editor {
 
+struct ReferenceTarget;
+
 class DocumentBase;
 
 // What fills a document's tab (ADR 0046 S13 V3, decision 11 as S13 amends it).
@@ -112,6 +114,10 @@ struct InspectorTaken {
 	std::vector<NodeKind> collections;
 	bool own_uses = false;
 };
+// A line of a type's part of the Inspector that goes to `target` when clicked (a Selectable cut to the
+// room, the whole line in its tooltip); `id` tells lines of the same words apart.
+void inspector_jump_line(Workspace &workspace, const ReferenceTarget &target, const std::string &line,
+                         const std::string &id);
 // A type's part of the Inspector over the selected record: its top (true where it drew, saying what
 // it took of the generic form), and its bottom, after the generic form.
 using InspectorTop = bool (*)(Workspace &workspace, const Document &document, const NodeAddress &record,

@@ -44,16 +44,6 @@ struct LogicRun {
 	}
 };
 
-// A popup's child window, as ImGui names it: the popup's window, then "<child>_<its id>".
-ImGuiID popup_child(ImGuiID popup, const char *child) {
-	char popup_name[32];
-	std::snprintf(popup_name, sizeof(popup_name), "##Popup_%08x", popup);
-	const ImGuiID popup_window = ImHashStr(popup_name);
-	char name[96];
-	std::snprintf(name, sizeof(name), "%s/%s_%08X", popup_name, child, ImHashStr(child, 0, popup_window));
-	return ImHashStr(name);
-}
-
 void test_event_inspector() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_logic");
 	NoProcess platform;

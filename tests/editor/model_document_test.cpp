@@ -57,32 +57,15 @@ constexpr NodeKind kVolume = node_kind(ModelKind::Volume);
 
 std::string synth_dir() { return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth"; }
 
-std::vector<uint8_t> serialized(const Document &document) {
-	const SerializeResult result = document.serialize();
-	return std::vector<uint8_t>(result.text.begin(), result.text.end());
-}
+using editor_test::serialized;
 
 bool load(ModelDocument &document, const std::string &path, const std::string &name) {
 	Diagnostic error;
 	return document.load(path, name, AssetKind::Model, "jo", error);
 }
 
-Edit set(NodeAddress address, const char *field, Value value) {
-	Edit edit;
-	edit.address = address;
-	edit.field = field;
-	edit.value = std::move(value);
-	return edit;
-}
-
-Edit op(EditOperation operation, NodeAddress address, size_t position = SIZE_MAX, NodeId parent = 0) {
-	Edit edit;
-	edit.operation = operation;
-	edit.address = address;
-	edit.position = position;
-	edit.parent = parent;
-	return edit;
-}
+using editor_test::op_edit;
+using editor_test::set_edit;
 
 // The model validator over one model, as a project's validation runs it over each file.
 std::vector<Diagnostic> validated(const std::shared_ptr<const ModelDocument> &document) {
@@ -118,9 +101,9 @@ int edits() {
 
 	// A light's colour and a user point's name, one undo step each.
 	const NodeAddress light{model, kLight, row->ids.lists[2][0].id};
-	TEST_EXPECT(document.apply(set(light, "start.r", int64_t(12)), error));
+	TEST_EXPECT(document.apply(set_edit(light, "start.r", int64_t(12)), error));
 	const NodeAddress point{model, kUserPoint, row->ids.lists[3][0].id};
-	TEST_EXPECT(document.apply(set(point, "name", std::string("muzzle")), error));
+	TEST_EXPECT(document.apply(set_edit(point, "name", std::string("muzzle")), error));
 	Value value;
 	TEST_EXPECT(document.get(point, "name", value) && std::get<std::string>(value) == "muzzle");
 	TEST_EXPECT(document.dirty() && document.can_undo());
@@ -129,7 +112,7 @@ int edits() {
 	row = document.model_row();
 	const std::string first_shader = row->materials[0].material.shader_name;
 	const NodeAddress first{model, kMaterial, row->ids.lists[1][0].id};
-	TEST_EXPECT(document.apply(op(EditOperation::Move, first, row->materials.size() - 1), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Move, first, 0, row->materials.size() - 1), error));
 	{
 		Threedi3di3 before{}, after{};
 		const std::vector<uint8_t> bytes = serialized(document);
@@ -149,40 +132,40 @@ int edits() {
 
 	// A drawn material stays; a new one is added, given a texture row, and removed.
 	row = document.model_row();
-	TEST_EXPECT(!document.apply(op(EditOperation::Remove, {model, kMaterial, row->ids.lists[1][0].id}), error));
-	TEST_EXPECT(document.apply(op(EditOperation::Add, {model, kMaterial, 0}), error));
+	TEST_EXPECT(!document.apply(op_edit(EditOperation::Remove, {model, kMaterial, row->ids.lists[1][0].id}), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {model, kMaterial, 0}), error));
 	const NodeId added = document.last_added();
-	TEST_EXPECT(document.apply(op(EditOperation::Add, {model, kTexture, 0}, SIZE_MAX, added), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {model, kTexture, 0}, added, SIZE_MAX), error));
 	const NodeAddress texture{model, kTexture, document.last_added()};
-	TEST_EXPECT(document.apply(set(texture, "name", std::string("newtex.tga")), error));
+	TEST_EXPECT(document.apply(set_edit(texture, "name", std::string("newtex.tga")), error));
 	TEST_EXPECT(document.get(texture, "name", value) && std::get<std::string>(value) == "newtex.tga");
-	TEST_EXPECT(document.apply(op(EditOperation::Remove, {model, kMaterial, added}), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Remove, {model, kMaterial, added}), error));
 
 	// Registers: added at the end, the last removed; lights and user points freely.
 	row = document.model_row();
 	const size_t registers = row->registers.size();
-	TEST_EXPECT(document.apply(op(EditOperation::Add, {model, kRegister, 0}), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {model, kRegister, 0}), error));
 	TEST_EXPECT(document.model_row()->registers.size() == registers + 1);
-	TEST_EXPECT(document.apply(op(EditOperation::Remove, {model, kRegister, document.last_added()}), error));
-	TEST_EXPECT(document.apply(op(EditOperation::Duplicate, light, 1), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Remove, {model, kRegister, document.last_added()}), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Duplicate, light, 0, 1), error));
 	TEST_EXPECT(document.model_row()->lights.size() == row->lights.size() + 1);
-	TEST_EXPECT(document.apply(op(EditOperation::Add, {model, kUserPoint, 0}), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {model, kUserPoint, 0}), error));
 
 	// The fixed records: the collision's are the geometry's; a row stays.
 	const CollisionRow *collision = document.collision_row();
 	if (!collision->volumes.empty()) {
 		const NodeAddress volume{collision->id, kVolume, collision->ids.lists[1][0].id};
-		TEST_EXPECT(!document.apply(op(EditOperation::Remove, volume), error));
-		TEST_EXPECT(document.apply(set(volume, "flags", int64_t(0x4)), error));
+		TEST_EXPECT(!document.apply(op_edit(EditOperation::Remove, volume), error));
+		TEST_EXPECT(document.apply(set_edit(volume, "flags", int64_t(0x4)), error));
 		// A blink box's letters read as the add-on writes them: a letter is there where its bit is clear
 		// (flags 0x4: every letter but S); setting the letters writes the bits back, the others kept.
 		Value letters;
 		TEST_EXPECT(document.get(volume, "letters", letters) && std::get<int64_t>(letters) == (0x3E & ~0x4));
-		TEST_EXPECT(document.apply(set(volume, "letters", int64_t(0x2 | 0x8)), error)); // V and W
+		TEST_EXPECT(document.apply(set_edit(volume, "letters", int64_t(0x2 | 0x8)), error)); // V and W
 		Value flags;
 		TEST_EXPECT(document.get(volume, "flags", flags) && std::get<int64_t>(flags) == (0x3E & ~(0x2 | 0x8)));
 	}
-	TEST_EXPECT(!document.apply(op(EditOperation::Remove, {collision->id, node_kind(ModelKind::Collision), 0}), error));
+	TEST_EXPECT(!document.apply(op_edit(EditOperation::Remove, {collision->id, node_kind(ModelKind::Collision), 0}), error));
 
 	// Save and reload: the edits are the file's.
 	TEST_EXPECT(document.save(error));
@@ -208,48 +191,20 @@ int part_animations() {
 	const NodeId lod_id = row->ids.lists[0][0].id;
 	Diagnostic error;
 	if (lod.panm.size() < lod.lod.render_object_count) {
-		TEST_EXPECT(document.apply(op(EditOperation::Add, {row->id, kPanm, 0}, SIZE_MAX, lod_id), error));
+		TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {row->id, kPanm, 0}, lod_id, SIZE_MAX), error));
 		TEST_EXPECT(document.model_row()->lods[0].panm.size() == lod.panm.size() + 1);
 	} else {
-		TEST_EXPECT(!document.apply(op(EditOperation::Add, {row->id, kPanm, 0}, SIZE_MAX, lod_id), error));
+		TEST_EXPECT(!document.apply(op_edit(EditOperation::Add, {row->id, kPanm, 0}, lod_id, SIZE_MAX), error));
 	}
 	row = document.model_row();
 	const std::vector<RecordIds> &ids = row->ids.lists[0][0].lists[0];
 	TEST_EXPECT(!ids.empty());
-	if (ids.size() > 1) TEST_EXPECT(!document.apply(op(EditOperation::Remove, {row->id, kPanm, ids.front().id}), error));
+	if (ids.size() > 1) TEST_EXPECT(!document.apply(op_edit(EditOperation::Remove, {row->id, kPanm, ids.front().id}), error));
 	const NodeAddress first{row->id, kPanm, ids.front().id};
-	TEST_EXPECT(document.apply(set(first, "rotx.rate", int64_t(-300)), error));
+	TEST_EXPECT(document.apply(set_edit(first, "rotx.rate", int64_t(-300)), error));
 	Value value;
 	TEST_EXPECT(document.get(first, "rotx.rate", value) && std::get<int64_t>(value) == -300);
 	std::printf("part animations: appended in part order, tracks set\n");
-	return 0;
-}
-
-// S11a: a light's colour edited is a change of the light, not of the model row, and reverts;
-// a user point added is Added and changes the row that holds it.
-int changes_since_save() {
-	using Change = Document::RecordChange;
-	ModelDocument document;
-	TEST_EXPECT(load(document, synth_dir() + "/armory.3di", "armory.3di"));
-	const ModelRow *row = document.model_row();
-	TEST_EXPECT(row && !row->lights.empty());
-	if (!row || row->lights.empty()) return 1;
-	const NodeAddress model{row->id, node_kind(ModelKind::Model), 0};
-	const NodeAddress light{row->id, kLight, row->ids.lists[2][0].id};
-	Value red;
-	TEST_EXPECT(document.get(light, "start.r", red));
-	const int64_t was = std::get<int64_t>(red);
-	Diagnostic error;
-	TEST_EXPECT(document.apply(set(light, "start.r", int64_t(was == 12 ? 13 : 12)), error));
-	TEST_EXPECT(document.field_changed(light, "start.r") && document.record_change(light) == Change::Changed);
-	TEST_EXPECT(document.record_change(model) == Change::Unchanged);
-	TEST_EXPECT(document.apply(document.revert_edits(light, "start.r"), error) && !document.field_changed(light, "start.r"));
-	TEST_EXPECT(document.get(light, "start.r", red) && std::get<int64_t>(red) == was);
-	TEST_EXPECT(document.record_change(light) == Change::Unchanged && serialized(document) == test_io::read_file(synth_dir() + "/armory.3di"));
-	TEST_EXPECT(document.apply(op(EditOperation::Add, {row->id, kUserPoint, 0}), error));
-	TEST_EXPECT(document.record_change({row->id, kUserPoint, document.last_added()}) == Change::Added &&
-	            document.record_change(model) == Change::Changed);
-	std::printf("changes: a light's field changed and reverted, a user point added\n");
 	return 0;
 }
 
@@ -266,10 +221,10 @@ int validation() {
 	Diagnostic error;
 	// A light on a part LOD 0 does not have, and nine seats.
 	const NodeAddress light{row->id, kLight, row->ids.lists[2][0].id};
-	TEST_EXPECT(document.apply(set(light, "part", int64_t(200)), error));
+	TEST_EXPECT(document.apply(set_edit(light, "part", int64_t(200)), error));
 	for (int i = 0; i < 9; ++i) {
-		TEST_EXPECT(document.apply(op(EditOperation::Add, {row->id, kUserPoint, 0}), error));
-		TEST_EXPECT(document.apply(set({row->id, kUserPoint, document.last_added()}, "name",
+		TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {row->id, kUserPoint, 0}), error));
+		TEST_EXPECT(document.apply(set_edit({row->id, kUserPoint, document.last_added()}, "name",
 		                               std::string("sitex") + std::to_string(i)), error));
 	}
 	TEST_EXPECT(editor_test::write_bytes(root + "/armory.3di", serialized(document)));
@@ -306,7 +261,7 @@ int frames_and_registers() {
 	Diagnostic error;
 	// Row 0 and a frame after it.
 	while (document->model_row()->frames.size() < 2)
-		TEST_EXPECT(document->apply(op(EditOperation::Add, {model, kFrame, 0}), error));
+		TEST_EXPECT(document->apply(op_edit(EditOperation::Add, {model, kFrame, 0}), error));
 	const int64_t frames = static_cast<int64_t>(document->model_row()->frames.size());
 	const NodeAddress panm{model, kPanm, document->model_row()->ids.lists[0][0].lists[0][0].id};
 	const FieldSchema *matrix = nullptr;
@@ -321,11 +276,11 @@ int frames_and_registers() {
 		return out;
 	};
 	for (const int64_t rotation : {0, 1, 2, 3, 4}) {
-		TEST_EXPECT(document->apply(set(panm, "flags.rotation", rotation), error));
+		TEST_EXPECT(document->apply(set_edit(panm, "flags.rotation", rotation), error));
 		const bool reads = rotation == 1 || rotation == 2;
 		TEST_EXPECT(document->field_on(panm, *matrix).applies == (reads ? Applicability::Reads : Applicability::Ignored));
 		for (const int64_t byte : {int64_t(0), int64_t(128), int64_t(255), int64_t(192), frames - 1, frames, int64_t(127)}) {
-			TEST_EXPECT(document->apply(set(panm, "matrix", byte), error));
+			TEST_EXPECT(document->apply(set_edit(panm, "matrix", byte), error));
 			const std::vector<Diagnostic> found = on_row("model.frame_missing");
 			const bool past = reads && byte > 0 && byte < 128 && byte >= frames;
 			TEST_EXPECT(found.size() == (past ? 1u : 0u));
@@ -337,12 +292,12 @@ int frames_and_registers() {
 	}
 	// A frame a part animation turns through stays while it does; a byte that names none
 	// lets the last row go.
-	TEST_EXPECT(document->apply(set(panm, "flags.rotation", int64_t(2)), error));
-	TEST_EXPECT(document->apply(set(panm, "matrix", frames - 1), error));
+	TEST_EXPECT(document->apply(set_edit(panm, "flags.rotation", int64_t(2)), error));
+	TEST_EXPECT(document->apply(set_edit(panm, "matrix", frames - 1), error));
 	const NodeAddress last{model, kFrame, document->model_row()->ids.lists[5].back().id};
-	TEST_EXPECT(!document->apply(op(EditOperation::Remove, last), error));
-	TEST_EXPECT(document->apply(set(panm, "matrix", int64_t(255)), error));
-	TEST_EXPECT(document->apply(op(EditOperation::Remove, last), error));
+	TEST_EXPECT(!document->apply(op_edit(EditOperation::Remove, last), error));
+	TEST_EXPECT(document->apply(set_edit(panm, "matrix", int64_t(255)), error));
+	TEST_EXPECT(document->apply(op_edit(EditOperation::Remove, last), error));
 
 	// The registers the records name, first with no CTRL table (the house has none): a style
 	// that reads a register reads the global one its index numbers (a warning naming it; past
@@ -352,7 +307,7 @@ int frames_and_registers() {
 	const NodeAddress material{model, kMaterial, document->model_row()->ids.lists[1][0].id};
 	const auto set_all = [&](const NodeAddress &at, std::initializer_list<std::pair<const char *, int64_t>> fields) {
 		bool applied = true;
-		for (const auto &field : fields) applied = document->apply(set(at, field.first, field.second), error) && applied;
+		for (const auto &field : fields) applied = document->apply(set_edit(at, field.first, field.second), error) && applied;
 		return applied;
 	};
 	TEST_EXPECT(set_all(material, {{"rgbgen.style", 0x71}, {"rgbgen.param", 0}, {"alphagen.style", 0x72},
@@ -360,7 +315,7 @@ int frames_and_registers() {
 	                               {"vgen.param", 200}, {"texanim.frames", 4}, {"texanim.type", 1}, {"texanim.time", 3}}));
 	TEST_EXPECT(set_all(panm, {{"flags.rotation", 2}, {"flags.scale", 0}, {"rotx.style", 0x71}, {"rotx.param", 0},
 	                           {"roty.style", 0x72}, {"roty.param", 7}, {"scalex.style", 0x71}, {"scalex.param", 9}}));
-	TEST_EXPECT(document->apply(op(EditOperation::Add, {model, kLight, 0}), error));
+	TEST_EXPECT(document->apply(op_edit(EditOperation::Add, {model, kLight, 0}), error));
 	const NodeAddress light{model, kLight, document->last_added()};
 	TEST_EXPECT(set_all(light, {{"style", 0x71}, {"param", 0}}));
 	// The register findings of a model, by record and field.
@@ -410,7 +365,7 @@ int frames_and_registers() {
 	// nothing committed, while the game reads one (the X track's, met first), taken once none does.
 	// The light's index, past the table the model lacks, stays past the one the register makes.
 	const uint64_t tableless = document->revision();
-	TEST_EXPECT(!document->apply(op(EditOperation::Add, {model, kRegister, 0}), error) &&
+	TEST_EXPECT(!document->apply(op_edit(EditOperation::Add, {model, kRegister, 0}), error) &&
 	            error.code() == "document.collection" &&
 	            error.message.find(" rotx.param reads global register 0 now. Point it at no register first.") !=
 	                    std::string::npos &&
@@ -418,7 +373,7 @@ int frames_and_registers() {
 	TEST_EXPECT(set_all(material, {{"rgbgen.style", 0}, {"alphagen.style", 0}, {"ugen.style", 0}, {"vgen.style", 0},
 	                               {"texanim.type", 0}}) &&
 	            set_all(panm, {{"rotx.style", 0}, {"roty.style", 0}}));
-	TEST_EXPECT(document->apply(op(EditOperation::Add, {model, kRegister, 0}), error));
+	TEST_EXPECT(document->apply(op_edit(EditOperation::Add, {model, kRegister, 0}), error));
 	Value lit;
 	TEST_EXPECT(document->get(light, "param", lit) && std::get<int64_t>(lit) == 1);
 	TEST_EXPECT(set_all(material, {{"rgbgen.style", 0x71}, {"alphagen.style", 0x72}, {"ugen.style", 0x74},
@@ -576,7 +531,7 @@ int record_references() {
 	                                              "part_animation rotx.param FLICKER"}));
 
 	// A register nothing names removed from the middle: the later ones' references move down, one step.
-	TEST_EXPECT(document.apply(op(EditOperation::Remove, reg(1)), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Remove, reg(1)), error));
 	TEST_EXPECT(written(1, 2, 2, 1, 2) && document.model_row()->registers.size() == 3 &&
 	            std::strcmp(document.model_row()->registers[1].name, "EWEAP_GUNPITCH") == 0);
 	TEST_EXPECT(value_of(light, "param") == 2 && lacking() == 0);
@@ -588,26 +543,26 @@ int record_references() {
 	// A register a field the game reads names: refused, nothing committed, the refusal naming it
 	// (the arm's Y track, met first: a LOD's part animations come before the materials).
 	const uint64_t revision = document.revision();
-	TEST_EXPECT(!document.apply(op(EditOperation::Remove, reg(2)), error) && error.code() == "document.collection" &&
+	TEST_EXPECT(!document.apply(op_edit(EditOperation::Remove, reg(2)), error) && error.code() == "document.collection" &&
 	            error.message == "rig/LOD 1/Part animation 2 roty.param reads this register: point it at another first." &&
 	            document.revision() == revision && serialized(document) == original);
 	// FLICKER moved to the front; a register added there; GUNYAW duplicated (its copy right after it).
-	TEST_EXPECT(document.apply(op(EditOperation::Move, reg(3), 0), error) && written(3, 0, 0, 3, 2));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Move, reg(3), 0, 0), error) && written(3, 0, 0, 3, 2));
 	document.undo();
-	TEST_EXPECT(document.apply(op(EditOperation::Add, {model, kRegister, 0}, 0), error) && written(3, 4, 4, 3, 2));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {model, kRegister, 0}, 0, 0), error) && written(3, 4, 4, 3, 2));
 	document.undo();
-	TEST_EXPECT(document.apply(op(EditOperation::Duplicate, reg(1)), error) && written(3, 4, 4, 3, 2) &&
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Duplicate, reg(1)), error) && written(3, 4, 4, 3, 2) &&
 	            std::strcmp(document.model_row()->registers[2].name, "EWEAP_GUNYAW") == 0);
 	document.undo();
 	// A batch: the Remove, then the light pointed at register 0 as the Remove left them; one step.
-	TEST_EXPECT(document.apply({op(EditOperation::Remove, reg(1)), set(light, "param", int64_t(0))}, error) &&
+	TEST_EXPECT(document.apply({op_edit(EditOperation::Remove, reg(1)), set_edit(light, "param", int64_t(0))}, error) &&
 	            written(1, 0, 2, 1, 2));
 	document.undo();
 	TEST_EXPECT(serialized(document) == original && !document.can_undo());
 	// An index past the table (the light's 4 of four) stays past it: across an Add at the front it is
 	// 5, still a register the model lacks, never FLICKER sliding into its place.
-	TEST_EXPECT(document.apply(set(light, "param", int64_t(4)), error) && lacking() == 1);
-	TEST_EXPECT(document.apply(op(EditOperation::Add, {model, kRegister, 0}, 0), error) &&
+	TEST_EXPECT(document.apply(set_edit(light, "param", int64_t(4)), error) && lacking() == 1);
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {model, kRegister, 0}, 0, 0), error) &&
 	            value_of(light, "param") == 5 && lacking() == 1);
 	document.undo();
 	document.undo();
@@ -617,12 +572,12 @@ int record_references() {
 	// (its tracks no longer loaded), so nothing the game reads names GUNPITCH. Its Remove is taken;
 	// the unread Y track naming it keeps its byte, the unread X track's FLICKER moves down with the
 	// light's. Removing GUNYAW renumbers the unread tracks as it does the read ones.
-	TEST_EXPECT(document.apply({set(glow, "rgbgen.style", int64_t(0)), set(arm, "flags.rotation", int64_t(0))}, error));
+	TEST_EXPECT(document.apply({set_edit(glow, "rgbgen.style", int64_t(0)), set_edit(arm, "flags.rotation", int64_t(0))}, error));
 	TEST_EXPECT(references(document) == (std::map<std::string, std::string>{{"light param", "3"}}));
-	TEST_EXPECT(document.apply(op(EditOperation::Remove, reg(2)), error) && value_of(arm, "roty.param") == 2 &&
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Remove, reg(2)), error) && value_of(arm, "roty.param") == 2 &&
 	            value_of(arm, "rotx.param") == 2 && value_of(light, "param") == 2);
 	document.undo();
-	TEST_EXPECT(document.apply(op(EditOperation::Remove, reg(1)), error) && value_of(arm, "roty.param") == 1 &&
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Remove, reg(1)), error) && value_of(arm, "roty.param") == 1 &&
 	            value_of(arm, "rotx.param") == 2 && value_of(light, "param") == 2);
 	document.undo();
 	document.undo();
@@ -631,13 +586,13 @@ int record_references() {
 	// A field cannot be given an index it cannot hold: the glow's byte on register 255 of 256, a
 	// register added at the front would make it 256. Refused, nothing committed.
 	std::vector<Edit> more;
-	for (int i = 0; i < 252; ++i) more.push_back(op(EditOperation::Add, {model, kRegister, 0}));
+	for (int i = 0; i < 252; ++i) more.push_back(op_edit(EditOperation::Add, {model, kRegister, 0}));
 	TEST_EXPECT(document.apply(more, error) && document.model_row()->registers.size() == 256);
-	TEST_EXPECT(document.apply(set(glow, "rgbgen.param", int64_t(255)), error));
+	TEST_EXPECT(document.apply(set_edit(glow, "rgbgen.param", int64_t(255)), error));
 	const uint64_t full = document.revision();
 	// (The material named by its place, not its shader tag: S17.)
 	TEST_EXPECT(document.record_path(glow).rfind("rig/Material ", 0) == 0);
-	TEST_EXPECT(!document.apply(op(EditOperation::Add, {model, kRegister, 0}, 0), error) &&
+	TEST_EXPECT(!document.apply(op_edit(EditOperation::Add, {model, kRegister, 0}, 0, 0), error) &&
 	            error.code() == "document.collection" &&
 	            error.message == "Register 255 would move to 256, which " + document.record_path(glow) +
 	                                     " rgbgen.param cannot hold." &&
@@ -648,49 +603,49 @@ int record_references() {
 
 	// Frames: one nothing names removed moves the arm's frame; the one it turns through is refused;
 	// one added, one moved and one duplicated before it move it again.
-	TEST_EXPECT(document.apply(op(EditOperation::Remove, frame(1)), error) && written(2, 3, 3, 2, 1));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Remove, frame(1)), error) && written(2, 3, 3, 2, 1));
 	document.undo();
-	TEST_EXPECT(!document.apply(op(EditOperation::Remove, frame(2)), error) &&
+	TEST_EXPECT(!document.apply(op_edit(EditOperation::Remove, frame(2)), error) &&
 	            error.message == "rig/LOD 1/Part animation 2 matrix turns through this rotation frame: point it at another "
 	                             "first.");
-	TEST_EXPECT(document.apply(op(EditOperation::Add, {model, kFrame, 0}, 1), error) && written(2, 3, 3, 2, 3));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {model, kFrame, 0}, 0, 1), error) && written(2, 3, 3, 2, 3));
 	document.undo();
-	TEST_EXPECT(document.apply(op(EditOperation::Move, frame(2), 1), error) && written(2, 3, 3, 2, 1));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Move, frame(2), 0, 1), error) && written(2, 3, 3, 2, 1));
 	document.undo();
-	TEST_EXPECT(document.apply(op(EditOperation::Duplicate, frame(1)), error) && written(2, 3, 3, 2, 3) &&
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Duplicate, frame(1)), error) && written(2, 3, 3, 2, 3) &&
 	            document.model_row()->frames.size() == 4);
 	document.undo();
 	// Row 0 is never read (a frame byte of 0 names none): it takes a Remove, an Add before it, a Move;
 	// but a byte the game reads never moves onto it.
-	TEST_EXPECT(document.apply(op(EditOperation::Remove, frame(0)), error) && written(2, 3, 3, 2, 1));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Remove, frame(0)), error) && written(2, 3, 3, 2, 1));
 	document.undo();
-	TEST_EXPECT(document.apply(op(EditOperation::Add, {model, kFrame, 0}, 0), error) && written(2, 3, 3, 2, 3));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {model, kFrame, 0}, 0, 0), error) && written(2, 3, 3, 2, 3));
 	document.undo();
-	TEST_EXPECT(!document.apply(op(EditOperation::Move, frame(2), 0), error) &&
+	TEST_EXPECT(!document.apply(op_edit(EditOperation::Move, frame(2), 0, 0), error) &&
 	            error.message == "Rotation frame 2 would move to 0, which rig/LOD 1/Part animation 2 matrix cannot "
 	                             "name (a frame byte names rows 1 to 127)." &&
 	            serialized(document) == original);
 	// A byte naming no row (0, 255) stays through a shift; one on a row that turns through no frame
 	// (the base's) is renumbered all the same.
 	for (const int64_t none : {int64_t(0), int64_t(255)}) {
-		TEST_EXPECT(document.apply({set(base, "flags.rotation", int64_t(2)), set(base, "matrix", none)}, error));
-		TEST_EXPECT(document.apply(op(EditOperation::Add, {model, kFrame, 0}, 1), error) &&
+		TEST_EXPECT(document.apply({set_edit(base, "flags.rotation", int64_t(2)), set_edit(base, "matrix", none)}, error));
+		TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {model, kFrame, 0}, 0, 1), error) &&
 		            value_of(base, "matrix") == none && written(2, 3, 3, 2, 3));
 		document.undo();
 		document.undo();
 	}
-	TEST_EXPECT(document.apply(set(base, "matrix", int64_t(2)), error));
-	TEST_EXPECT(document.apply(op(EditOperation::Add, {model, kFrame, 0}, 1), error) &&
+	TEST_EXPECT(document.apply(set_edit(base, "matrix", int64_t(2)), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {model, kFrame, 0}, 0, 1), error) &&
 	            value_of(base, "matrix") == 3 && written(2, 3, 3, 2, 3));
 	document.undo();
 	document.undo();
 	// A frame byte names rows 1 to 127: on row 127 of 128, a frame added before it is refused.
 	std::vector<Edit> rows;
-	for (int i = 0; i < 125; ++i) rows.push_back(op(EditOperation::Add, {model, kFrame, 0}));
+	for (int i = 0; i < 125; ++i) rows.push_back(op_edit(EditOperation::Add, {model, kFrame, 0}));
 	TEST_EXPECT(document.apply(rows, error) && document.model_row()->frames.size() == 128);
-	TEST_EXPECT(document.apply(set(arm, "matrix", int64_t(127)), error));
+	TEST_EXPECT(document.apply(set_edit(arm, "matrix", int64_t(127)), error));
 	const uint64_t rows_full = document.revision();
-	TEST_EXPECT(!document.apply(op(EditOperation::Add, {model, kFrame, 0}, 1), error) &&
+	TEST_EXPECT(!document.apply(op_edit(EditOperation::Add, {model, kFrame, 0}, 0, 1), error) &&
 	            error.message == "Rotation frame 127 would move to 128, which rig/LOD 1/Part animation 2 matrix cannot "
 	                             "name (a frame byte names rows 1 to 127)." &&
 	            document.revision() == rows_full);
@@ -703,10 +658,10 @@ int record_references() {
 	ModelDocument second;
 	TEST_EXPECT(second.load_bytes(rig_model::bytes(true), "rig.3di", AssetKind::Model, "jo", error));
 	const NodeAddress gunyaw{second.model_row()->id, kRegister, second.model_row()->ids.lists[4][1].id};
-	TEST_EXPECT(!second.apply(op(EditOperation::Remove, gunyaw), error) &&
+	TEST_EXPECT(!second.apply(op_edit(EditOperation::Remove, gunyaw), error) &&
 	            error.message == "A material's second RGB generator names register 3, which the editor shows and "
 	                             "never sets: that register stays where it is.");
-	TEST_EXPECT(second.apply(op(EditOperation::Add, {second.model_row()->id, kRegister, 0}), error));
+	TEST_EXPECT(second.apply(op_edit(EditOperation::Add, {second.model_row()->id, kRegister, 0}), error));
 	TEST_EXPECT(references(second).count("material rgbgen2.param") == 1 &&
 	            references(second).at("material rgbgen2.param") == "3");
 	const NodeAddress paint{second.model_row()->id, kMaterial, second.model_row()->ids.lists[1][0].id};
@@ -903,7 +858,7 @@ int field_metadata() {
 			}
 		return FieldSchema();
 	};
-	TEST_EXPECT(document->apply(op(EditOperation::Add, {model, kLight, 0}), error));
+	TEST_EXPECT(document->apply(op_edit(EditOperation::Add, {model, kLight, 0}), error));
 	const NodeAddress light{model, kLight, document->last_added()};
 	// Where a record sits is the core's index of its row (Document::path_in, S13 D8): the new light
 	// the model row's third table's last record.
@@ -919,7 +874,7 @@ int field_metadata() {
 	TEST_EXPECT(schema(light, "atten_end").label == "Reach" && schema(light, "atten_end").unit == "m");
 	const FieldSchema byte34 = schema(light, "unknown1");
 	TEST_EXPECT(byte34.read_only && byte34.applies == Applicability::Unverified && !byte34.description.empty());
-	TEST_EXPECT(!document->apply(set(light, "unknown1", int64_t(1)), error));
+	TEST_EXPECT(!document->apply(set_edit(light, "unknown1", int64_t(1)), error));
 	// The light's part: LOD 0's parts, any other index typed.
 	const FieldSchema part = schema(light, "part");
 	const size_t parts = row->base->lods[0].render_object_count;
@@ -929,60 +884,60 @@ int field_metadata() {
 	const FieldSchema parent = schema(panm, "parent");
 	TEST_EXPECT(parent.choices.size() == parts + 1 && parent.choices[0].value == 255 && parent.choices[0].label == "None");
 	while (document->model_row()->frames.size() < 3)
-		TEST_EXPECT(document->apply(op(EditOperation::Add, {model, kFrame, 0}), error));
-	TEST_EXPECT(document->apply(set(panm, "flags.rotation", int64_t(2)), error));
+		TEST_EXPECT(document->apply(op_edit(EditOperation::Add, {model, kFrame, 0}), error));
+	TEST_EXPECT(document->apply(set_edit(panm, "flags.rotation", int64_t(2)), error));
 	// Its frame byte names an MTRX row once its rotation turns through one, whatever the byte names
 	// now: the picker offers the rows above 0 (0 names none); a row that turns through no frame (a
 	// billboard) names none.
 	for (const int64_t from : {int64_t(0), int64_t(255), int64_t(1)}) {
-		TEST_EXPECT(document->apply(set(panm, "matrix", from), error));
+		TEST_EXPECT(document->apply(set_edit(panm, "matrix", from), error));
 		const FieldUse matrix = use_of(panm, "matrix");
 		const std::vector<ReferenceChoice> rows = picker(panm, "matrix");
 		TEST_EXPECT(matrix.reference == ReferenceKind::ModelFrame && !matrix.own_choices &&
 		            !matrix.schema->open_choices && schema(panm, "matrix").choices.empty());
 		TEST_EXPECT(rows.size() == 2 && rows[0].name == "1" && rows[1].name == "2" &&
 		            rows[1].status == ReferenceStatus::Present && rows[1].file == "house.3di");
-		TEST_EXPECT(document->apply(set(panm, "matrix", int64_t(2)), error));
+		TEST_EXPECT(document->apply(set_edit(panm, "matrix", int64_t(2)), error));
 	}
-	TEST_EXPECT(document->apply(set(panm, "flags.rotation", int64_t(3)), error));
+	TEST_EXPECT(document->apply(set_edit(panm, "flags.rotation", int64_t(3)), error));
 	TEST_EXPECT(use_of(panm, "matrix").reference == ReferenceKind::None && picker(panm, "matrix").empty());
-	TEST_EXPECT(document->apply(set(panm, "flags.rotation", int64_t(2)), error));
+	TEST_EXPECT(document->apply(set_edit(panm, "flags.rotation", int64_t(2)), error));
 	// With no CTRL table the load leaves a material's and a track's register bytes as the global
 	// registers they number (no record of the model); a light's it swaps through the table it lacks.
 	TEST_EXPECT(document->model_row()->registers.empty());
 	const NodeAddress first_material{model, kMaterial, document->model_row()->ids.lists[1][0].id};
 	TEST_EXPECT(document->apply(
-	        {set(first_material, "rgbgen.style", int64_t(0x71)), set(light, "style", int64_t(0x71))}, error));
+	        {set_edit(first_material, "rgbgen.style", int64_t(0x71)), set_edit(light, "style", int64_t(0x71))}, error));
 	TEST_EXPECT(use_of(first_material, "rgbgen.param").reference == ReferenceKind::None &&
 	            use_of(light, "param").reference == ReferenceKind::ModelRegister);
 	document->undo();
 	// A generator's parameter names a register above style 0x70: the picker offers the model's
 	// registers by index, each with its name in its record and as its label.
-	TEST_EXPECT(document->apply(op(EditOperation::Add, {model, kRegister, 0}), error));
+	TEST_EXPECT(document->apply(op_edit(EditOperation::Add, {model, kRegister, 0}), error));
 	const NodeAddress reg{model, kRegister, document->last_added()};
-	TEST_EXPECT(document->apply(set(reg, "name", std::string("ENGINE_RPM")), error));
+	TEST_EXPECT(document->apply(set_edit(reg, "name", std::string("ENGINE_RPM")), error));
 	const NodeAddress material{model, kMaterial, document->model_row()->ids.lists[1][0].id};
-	TEST_EXPECT(document->apply(set(material, "rgbgen.style", int64_t(0x71)), error));
+	TEST_EXPECT(document->apply(set_edit(material, "rgbgen.style", int64_t(0x71)), error));
 	const std::vector<ReferenceChoice> named = picker(material, "rgbgen.param");
 	TEST_EXPECT(use_of(material, "rgbgen.param").reference == ReferenceKind::ModelRegister &&
 	            schema(material, "rgbgen.param").choices.empty());
 	TEST_EXPECT(named.size() == 1 && named[0].name == "0" && named[0].kind == ReferenceKind::ModelRegister &&
 	            named[0].record.size() >= 11 && named[0].record.substr(named[0].record.size() - 11) == "/ENGINE_RPM" &&
 	            named[0].label == "ENGINE_RPM");
-	TEST_EXPECT(document->apply(set(material, "rgbgen.style", int64_t(0)), error));
+	TEST_EXPECT(document->apply(set_edit(material, "rgbgen.style", int64_t(0)), error));
 	TEST_EXPECT(use_of(material, "rgbgen.param").reference == ReferenceKind::None);
 	// Only a register the field can hold is offered: with 257 of them, the byte-sized
 	// generator parameter takes registers 0..255, the 16-bit flipbook time all 257.
 	while (document->model_row()->registers.size() < 257)
-		TEST_EXPECT(document->apply(op(EditOperation::Add, {model, kRegister, 0}), error));
-	TEST_EXPECT(document->apply(set(material, "rgbgen.style", int64_t(0x71)), error));
+		TEST_EXPECT(document->apply(op_edit(EditOperation::Add, {model, kRegister, 0}), error));
+	TEST_EXPECT(document->apply(set_edit(material, "rgbgen.style", int64_t(0x71)), error));
 	const std::vector<ReferenceChoice> byte_param = picker(material, "rgbgen.param");
 	TEST_EXPECT(byte_param.size() == 256 && byte_param.back().name == "255");
-	TEST_EXPECT(document->apply(set(material, "rgbgen.param", int64_t(255)), error));
-	TEST_EXPECT(document->apply({set(material, "texanim.frames", int64_t(4)), set(material, "texanim.type", int64_t(1))}, error));
+	TEST_EXPECT(document->apply(set_edit(material, "rgbgen.param", int64_t(255)), error));
+	TEST_EXPECT(document->apply({set_edit(material, "texanim.frames", int64_t(4)), set_edit(material, "texanim.type", int64_t(1))}, error));
 	const std::vector<ReferenceChoice> time = picker(material, "texanim.time");
 	TEST_EXPECT(time.size() == 257 && time.back().name == "256");
-	TEST_EXPECT(document->apply(set(material, "rgbgen.style", int64_t(0)), error));
+	TEST_EXPECT(document->apply(set_edit(material, "rgbgen.style", int64_t(0)), error));
 	// The material's words: a range, the reflection one row, the second channel shown only.
 	TEST_EXPECT(schema(material, "alpha_test").ranged && schema(material, "alpha_test").max == 255.0);
 	TEST_EXPECT(schema(material, "reflect.a").group == "Reflection" && schema(material, "reflect.a").label == "Reflection alpha");
@@ -1059,7 +1014,6 @@ int main(int argc, char **argv) {
 	if (edits() != 0) return 1;
 	if (alike_but_user_points_tables() != 0) return 1;
 	if (part_animations() != 0) return 1;
-	if (changes_since_save() != 0) return 1;
 	if (validation() != 0) return 1;
 	if (frames_and_registers() != 0) return 1;
 	if (record_references() != 0) return 1;

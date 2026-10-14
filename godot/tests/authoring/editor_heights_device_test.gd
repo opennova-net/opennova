@@ -7,12 +7,8 @@ extends GutTest
 ## puts its tiles in place, and the mission's Undos put the shipped ground back, the device following each with no
 ## build.
 
-const EDITOR_SCENE := "res://editor/editor_root.tscn"
-const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
-const MISSION_FIXTURE := "res://../fixtures/bms/synth_logic.bms"
-const FIXTURES := "res://../fixtures/"
+const EditorFixture := preload("res://tests/authoring/editor_fixture.gd")
 const MISSION := "missions/synth_logic.bms"
-const TERRAIN_TEXTURES := ["mnml_c", "mnml_dm", "mnml_dc1", "mnml_dc2", "mnml_dc3", "mnml_dmd", "mnml_d1", "mnml_t"]
 # Mission (-200, 200): the Tmap terrain's sector at grid (3, 3), quadrant 1, the atlas texel (312, 312).
 const AT := Vector2(-200.0, 200.0)
 
@@ -23,77 +19,24 @@ var _gesture := 0
 
 
 func before_each() -> void:
-	var packed := load(EDITOR_SCENE) as PackedScene
-	assert_not_null(packed, "the editor scene loads (the editor-enabled variant is loaded)")
-	if packed == null:
-		return
-	_app = packed.instantiate()
-	_seam = EditorSeam.new(_app)
-	var settings_dir := OS.get_cache_dir().path_join("opennova editor heights device %d" % Time.get_ticks_usec())
-	assert_eq(DirAccess.make_dir_recursive_absolute(settings_dir), OK)
-	_dirs.append(settings_dir)
-	_app.set("settings_path", settings_dir.path_join("editor_settings.json"))
-	add_child_autofree(_app)
+	_seam = await EditorFixture.boot(self, "heights device", _dirs)
+	_app = _seam.app if _seam != null else null
 
 
 func after_each() -> void:
-	_app = null
-	for dir in _dirs:
-		TestFs.remove_dir_recursive(dir)
-	_dirs.clear()
-	await get_tree().process_frame
-
-
-func _write(path: String, bytes: PackedByteArray) -> void:
-	assert_eq(DirAccess.make_dir_recursive_absolute(path.get_base_dir()), OK)
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file, "wrote %s" % path)
-	if file != null:
-		file.store_buffer(bytes)
-		file.close()
-
-
-func _copy_fixture(source: String, target: String) -> void:
-	var bytes := FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(FIXTURES + source))
-	assert_false(bytes.is_empty(), "the fixture is available: " + source)
-	_write(target, bytes)
+	await EditorFixture.teardown(self, _dirs)
 
 
 ## A new project holding the minted mission on the Tmap terrain (its .trn, heights, maps and the textures it names)
 ## and its environment, scanned, the mission open.
 func _open_mission() -> bool:
-	var dir := OS.get_cache_dir().path_join("opennova editor heights device project %d" % Time.get_ticks_usec())
-	_dirs.append(dir)
-	assert_true(_seam.new_project(dir, "Heights Device"))
-	assert_eq(_seam.create_missing_files(), 0)
-	var root: String = _seam.get_project_root()
-	_write(root.path_join(MISSION), FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(MISSION_FIXTURE)))
-	for name in ["Tmap.trn", "Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx"]:
-		_copy_fixture("terrain/tmap/" + name, root.path_join("terrain").path_join(name))
-	for name in TERRAIN_TEXTURES:
-		_write(root.path_join("terrain").path_join(name + ".tga"),
-				TestFs.tga_bytes(Vector2i(2048, 2048) if name == "mnml_c" or name == "mnml_d1" else Vector2i(32, 32)))
-	for name in ["synth_full.env", "cloud01.pcx", "cloud01b.pcx"]:
-		_copy_fixture("env/" + name, root.path_join("env").path_join(name))
-	_app.request_json(JSON.stringify({"kind": "rescan"}))
-	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
+	var root := EditorFixture.new_project(self, _seam, _dirs, "Heights Device")
+	EditorFixture.mint_tmap_mission(self, _seam, root)
 	return _seam.open_document(MISSION)
 
 
 func _state() -> Dictionary:
 	return _seam.query("viewport", {"op": "state", "limit": 10, "path": MISSION})
-
-
-func _await_ready() -> Dictionary:
-	var state := _state()
-	for _frame in 900:
-		if String(state.get("status", "")) == "ready" and bool(state.get("device", {}).get("attached", false)) \
-				and int(state.get("builds", 0)) > 0:
-			break
-		await get_tree().process_frame
-		state = _state()
-	_app.pump()
-	return _state()
 
 
 func _terrain(state: Dictionary) -> Terrain:
@@ -127,7 +70,7 @@ func test_a_sculpt_is_an_update_of_the_missions_view() -> void:
 	if _app == null:
 		return
 	assert_true(_open_mission())
-	var state := await _await_ready()
+	var state: Dictionary = await _seam.await_viewport({"path": MISSION, "limit": 10})
 	assert_eq(String(state.get("status", "")), "ready", str(state))
 	var builds := int(state.get("builds", 0))
 	var terrain := _terrain(state)
@@ -196,7 +139,7 @@ func test_the_devices_ground_is_the_games_under_the_ray() -> void:
 	if _app == null:
 		return
 	assert_true(_open_mission())
-	var state := await _await_ready()
+	var state: Dictionary = await _seam.await_viewport({"path": MISSION, "limit": 10})
 	assert_eq(String(state.get("status", "")), "ready", str(state))
 	var device: SubViewport = _app.get_viewport_device(MISSION, "mission")
 	assert_not_null(device, "the mission's device")

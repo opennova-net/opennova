@@ -6,12 +6,8 @@ extends GutTest
 ## under the environment of the mission that runs on it, or the engine's own); the ground overlay the options ask
 ## tints the terrain as an Update; an edit of the terrain builds its picture again.
 
-const EDITOR_SCENE := "res://editor/editor_root.tscn"
-const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
-const MISSION := "res://../fixtures/bms/synth_logic.bms"
-const FIXTURES := "res://../fixtures/"
+const EditorFixture := preload("res://tests/authoring/editor_fixture.gd")
 const TERRAIN := "terrain/Tmap.trn"
-const TERRAIN_TEXTURES := ["mnml_c", "mnml_dm", "mnml_dc1", "mnml_dc2", "mnml_dc3", "mnml_dmd", "mnml_d1", "mnml_t"]
 
 var _dirs: Array[String] = []
 var _app: Node = null
@@ -19,76 +15,19 @@ var _seam: RefCounted = null
 
 
 func before_each() -> void:
-	var packed := load(EDITOR_SCENE) as PackedScene
-	assert_not_null(packed, "the editor scene loads (the editor-enabled variant is loaded)")
-	if packed == null:
-		return
-	_app = packed.instantiate()
-	_seam = EditorSeam.new(_app)
-	var settings_dir := OS.get_cache_dir().path_join("opennova editor terrain viewport %d" % Time.get_ticks_usec())
-	assert_eq(DirAccess.make_dir_recursive_absolute(settings_dir), OK)
-	_dirs.append(settings_dir)
-	_app.set("settings_path", settings_dir.path_join("editor_settings.json"))
-	add_child_autofree(_app)
+	_seam = await EditorFixture.boot(self, "terrain viewport", _dirs)
+	_app = _seam.app if _seam != null else null
 
 
 func after_each() -> void:
-	_app = null
-	for dir in _dirs:
-		TestFs.remove_dir_recursive(dir)
-	_dirs.clear()
-	await get_tree().process_frame
-
-
-func _write(path: String, bytes: PackedByteArray) -> void:
-	assert_eq(DirAccess.make_dir_recursive_absolute(path.get_base_dir()), OK)
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file, "wrote %s" % path)
-	if file != null:
-		file.store_buffer(bytes)
-		file.close()
-
-
-func _copy_fixture(source: String, target: String) -> void:
-	var bytes := FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(FIXTURES + source))
-	assert_false(bytes.is_empty(), "the fixture is available: " + source)
-	_write(target, bytes)
-
-
-## A small grey true-colour TGA (all channels alike).
-static func _tga(size: int) -> PackedByteArray:
-	var image := Image.create(size, size, false, Image.FORMAT_RGBA8)
-	image.fill(Color(0.5, 0.5, 0.5, 1.0))
-	var header := PackedByteArray()
-	header.resize(18)
-	header[2] = 2
-	header.encode_u16(12, size)
-	header.encode_u16(14, size)
-	header[16] = 32
-	header[17] = 0x28
-	return header + image.get_data()
+	await EditorFixture.teardown(self, _dirs)
 
 
 ## A project holding the minted mission, its terrain (Tmap, its two foliage models: the synth crate under both
 ## names) and its environment (synth_full), the terrain open.
 func _open_terrain() -> bool:
-	var dir := OS.get_cache_dir().path_join("opennova editor terrain project %d" % Time.get_ticks_usec())
-	_dirs.append(dir)
-	assert_true(_seam.new_project(dir, "Terrain Viewport"))
-	assert_eq(_seam.create_missing_files(), 0)
-	var root: String = _seam.get_project_root()
-	_write(root.path_join("missions").path_join("synth_logic.bms"),
-			FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(MISSION)))
-	for name in ["Tmap.trn", "Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx"]:
-		_copy_fixture("terrain/tmap/" + name, root.path_join("terrain").path_join(name))
-	for name in TERRAIN_TEXTURES:
-		_write(root.path_join("terrain").path_join(name + ".tga"), _tga(32))
-	for name in ["bush1.3di", "bush2.3di"]:
-		_copy_fixture("threedi/synth/crate.3di", root.path_join("models").path_join(name))
-	for name in ["synth_full.env", "cloud01.pcx", "cloud01b.pcx"]:
-		_copy_fixture("env/" + name, root.path_join("env").path_join(name))
-	_app.request_json(JSON.stringify({"kind": "rescan"}))
-	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
+	var root := EditorFixture.new_project(self, _seam, _dirs, "Terrain Viewport")
+	EditorFixture.mint_tmap_mission(self, _seam, root, {"small": true, "foliage": true})
 	return _seam.open_document(TERRAIN)
 
 
@@ -103,18 +42,9 @@ func _change(change: Dictionary) -> bool:
 	return bool(answer.get("outcome", {}).get("done", false))
 
 
-## The viewport ready on its device, a build newer than `builds` ended: a frame at a time.
+## The viewport ready on its device, a build newer than `builds` ended (EditorSeam.await_viewport).
 func _await_built(builds := 0) -> Dictionary:
-	var state := _state()
-	for _frame in 900:
-		if String(state.get("status", "")) == "ready" and bool(state.get("device", {}).get("attached", false)) \
-				and int(state.get("builds", 0)) > builds and not bool(state.get("device", {}).get("build", {}).get("loading", true)):
-			break
-		_app.pump()
-		await get_tree().process_frame
-		state = _state()
-	_app.pump()
-	return _state()
+	return await _seam.await_viewport({"path": TERRAIN, "kind": "terrain", "limit": 50}, builds)
 
 
 func _frames(count: int) -> void:

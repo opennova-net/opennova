@@ -19,7 +19,7 @@ namespace {
 // record that uses a dialog names the bank itself, tolerated as a warning). The sounds are read only
 // beside the .dbf (GraphEdge::needs): without one they are no reference at all, and with one they are
 // no longer optional, the bank's dialogs playing silent without them (a warning, the sound bank
-// kind's: review F5, the data lane's m13).
+// kind's).
 constexpr MissionFileSetRow kRows[] = {
 	{"text", ReferenceKind::MissionStrings, false, "its string table"},
 	{"script", ReferenceKind::Script, true, "its script"},

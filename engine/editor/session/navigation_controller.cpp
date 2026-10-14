@@ -24,13 +24,6 @@ namespace {
 
 using Pane = NavigationPlace::Pane;
 
-// The open document at exactly `path`, or null.
-const DocumentBase *open_at(const SessionView &view, const std::string &path) {
-	for (const std::shared_ptr<const DocumentBase> &document : view.documents.open)
-		if (document->path() == path) return document.get();
-	return nullptr;
-}
-
 // Whether the document's view shows one row of it at a time, the selection's, as a page of it (a menu's
 // screen: the Preview-role kind that shows its type shows a part of it, a page, preview/viewport_kinds.h; a
 // definition table's record, which the definition preview shows, is no page).
@@ -101,7 +94,7 @@ bool NavigationController::is_step(const EditorRequest &request, const Navigatio
 	if (from.pane != to.pane || from.path != to.path) return true;
 	// Within the document that shows, a record picked is where the person is; another of a menu's screens
 	// is a step, as a page of the menu is.
-	const DocumentBase *document = open_at(view_, to.path);
+	const DocumentBase *document = view_.documents.open_at(to.path);
 	return document && shows_parts(*document) && from.document == to.document && from.record.row != to.record.row;
 }
 
@@ -136,7 +129,7 @@ NavigationPlace NavigationController::document_place() const {
 	place.path = path;
 	const std::string name = basename_of(path);
 	place.label = name;
-	const DocumentBase *document = open_at(view_, path);
+	const DocumentBase *document = view_.documents.open_at(path);
 	if (!document) return place;
 	if (const Document *records = records_of(*document)) {
 		const Selection &selection = view_.documents.selection;

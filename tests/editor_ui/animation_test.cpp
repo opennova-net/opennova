@@ -20,11 +20,6 @@ namespace editor_ui_test {
 
 namespace {
 
-std::string lowered(std::string text) {
-	for (char &c : text) c = char(std::tolower(static_cast<unsigned char>(c)));
-	return text;
-}
-
 // The workspace over a session: each frame's requests served as the Shell serves them, the devices
 // following the viewports.
 struct ClipRun {
@@ -270,7 +265,7 @@ void test_event_press() {
 }
 
 // From a model's Animations, a map opened to play on it takes the model alone: the map's viewport keeps
-// its own options (S17 review: the request reset its level, overlays, Repeat and Bones).
+// its own options (S17 review: the request reset its level, overlays and Bones).
 void test_animations_keep_options() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_animations_keep_options");
 	NoProcess platform;
@@ -292,7 +287,7 @@ void test_animations_keep_options() {
 	ClipRun run{session, devices, ui};
 	const std::string map = "anims/SKIN.adm";
 	session.handle(request::open_document(map));
-	session.handle(request::set_viewport(map, R"({"options": {"repeat": false, "bones": false}})"));
+	session.handle(request::set_viewport(map, R"({"options": {"bones": false}})"));
 	run.settle();
 	const std::string model_path = "models/armory.3di";
 	session.handle(request::open_document(model_path));
@@ -305,7 +300,7 @@ void test_animations_keep_options() {
 	const ModelViewport *shown = run.model(map);
 	CHECK(v.documents.active == map && shown && opennova::strutil::iequals(shown->options().rig_model, "armory.3di"),
 	      "the map opened to play on the model");
-	CHECK(shown && !shown->options().repeat && !shown->options().bones, "its own options kept");
+	CHECK(shown && !shown->options().bones, "its own options kept");
 	ui.drain();
 }
 

@@ -20,10 +20,6 @@ class SessionCore;
 struct SessionView;
 struct TerrainFamily;
 
-// Whether the entity at `address` of `mission` is height-locked (its height_lock field set; a mission whose entities
-// carry none: each follows the ground).
-bool height_locked(const MissionDocument &mission, const NodeAddress &address);
-
 // The entities of `mission` within `radius` of (x, y) (mission units, on the plane): those that follow the ground when
 // it is sculpted and those height-locked (the Terrain pane's lock line, the terrain query's lock op).
 struct GroundFollowers {

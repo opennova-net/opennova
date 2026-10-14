@@ -54,8 +54,8 @@
     windows read (`session/view`, S13 V4: sub-views of the project, the documents, the findings,
     the activity and the dialogs, and the events a request posts for one window to take once),
     the selection (S13 D7: one document's records over any of its rows), and the finding codes'
-    lookup (S13 A6, `finding_codes`: a token's row over every table, the tables, the columns' wire
-    forms)), `model` (the
+    tables (S13 A6, `finding_codes`: every table with whose it is, the columns' wire forms)),
+    `model` (the
     neutral editing core, ADR 0046 d9:
     `DocumentBase` (every document's lifecycle, S13 D6), `Document` (the record document
     over it, whose index of each row keeps every record's path there, `path_in`, S13 D8, and
@@ -85,7 +85,7 @@
     collection its own references name by index, S13 D8's Record references, resolved within the
     file), the one resolver behind the badges, the
     pickers and the Problems rows, the reference queries a document's fields ask, a base layer's names
-    (a read-only dependency mount's), and the rename transaction; what other files make of what one
+    (an expansion project's base game's), and the rename transaction; what other files make of what one
     defines, one `use_checks` row per asset kind, and what a stylesheet line's value is used as
     (`style_value_use`, from the menus' uses of it); and `project_validation`, the one pass over the
     project's files: the graph's update, each file's own findings, the use checks, the graph's

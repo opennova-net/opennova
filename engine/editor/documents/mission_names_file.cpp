@@ -10,6 +10,7 @@
 
 #include <base/io/hash.h>
 #include <editor/documents/mission_document.h>
+#include <editor/model/field_text.h>
 #include <editor/project/project_files.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
@@ -49,10 +50,6 @@ bool name_bytes_empty(const bms::GroupRecord &record) {
 	for (const char byte : record.name)
 		if (byte != 0) return false;
 	return true;
-}
-
-std::string counted(size_t count, const char *one, const char *many) {
-	return std::to_string(count) + " " + (count == 1 ? one : many);
 }
 
 // A reason as a sentence: its full stop where it has none.
@@ -132,7 +129,7 @@ void take_locks(const bms::File &mission, MissionNamesFile &out) {
 	for (const std::vector<bms::Entity> *pool : {&mission.items, &mission.buildings, &mission.markers, &mission.organics})
 		for (const bms::Entity &entity : *pool) ids.push_back(entity.id);
 	out.kept_locks.assign(ids.size(), 0);
-	out.kept_bases.assign(ids.size(), 0);
+	out.kept_bases.assign(ids.size(), std::nullopt);
 	std::vector<bool> given(ids.size(), false);
 	for (const MissionNamesFile::Lock &lock : out.locks) {
 		if (!lock.lock) continue;
@@ -336,25 +333,34 @@ bool mission_holds_locks(const MissionDocument &document) {
 }
 
 bool mission_names_text(const MissionDocument &document, const std::vector<int32_t> *base_heights, std::string &text,
-                        std::string &error) {
+                        std::string &error, std::vector<MissionNamesFile::Lock> *written) {
 	bms::File file;
 	if (!document.compose(file)) {
 		error = "The mission could not be composed.";
 		return false;
 	}
 	const mission::MisNames names = mission_names(document);
-	// A locked entity whose base no .mis gave it (locked in the editor since its last write) takes the ground under
-	// it as its base, the height handed at this save; from then on its base is what the .mis keeps, which a
-	// sculpt leaves (D-MIS-4: the original editor keeps a locked item's base absolute [orig: JOTACmed.exe
-	// sub_402770 @ 0x402c9f..0x402ccd]).
-	if (base_heights) {
-		size_t at = 0;
-		for (std::vector<bms::Entity> *pool : {&file.items, &file.buildings, &file.markers, &file.organics})
-			for (bms::Entity &entity : *pool) {
-				if (entity.mis_height_lock != 0 && entity.mis_extra_bheight == 0 && at < base_heights->size())
-					entity.mis_extra_bheight = (*base_heights)[at];
-				++at;
+	// A locked entity's base is the one the .mis keeps for it, as read or as the last write wrote it (its SSN's lock
+	// there, take_locks over the mission as it stands), a 0 among them; one locked in the editor since takes the
+	// ground under it, the height handed at this save, which the write keeps (MissionDocument::names_file_written), so
+	// a sculpt after it leaves it (D-MIS-4: the original editor keeps a locked item's base absolute [orig: JOTACmed.exe
+	// sub_402770 @ 0x402c9f..0x402ccd]). With no ground handed it keeps the row's.
+	MissionNamesFile known = document.names_file();
+	known.kept_bases.clear();
+	if (known.found == Found::Matched) take_locks(file, known);
+	if (written) written->clear();
+	size_t at = 0;
+	int pool_index = 0;
+	for (std::vector<bms::Entity> *pool : {&file.items, &file.buildings, &file.markers, &file.organics}) {
+		for (bms::Entity &entity : *pool) {
+			if (entity.mis_height_lock != 0) {
+				if (at < known.kept_bases.size() && known.kept_bases[at]) entity.mis_extra_bheight = *known.kept_bases[at];
+				else if (base_heights && at < base_heights->size()) entity.mis_extra_bheight = (*base_heights)[at];
 			}
+			if (written) written->push_back({pool_index, entity.id, entity.mis_height_lock, entity.mis_extra_bheight});
+			++at;
+		}
+		++pool_index;
 	}
 	return mission::write_mis_text(file, text, error, base_heights, &names);
 }

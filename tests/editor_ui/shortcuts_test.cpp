@@ -112,11 +112,6 @@ void attach(Ui &ui, JumpsProject &project) {
 	ui.drain();
 }
 
-void press(Ui &ui, ImGuiKey key) {
-	ui.key(key, true);
-	ui.key(key, false);
-}
-
 // The project's finder while it shows (its id "###project_find" whatever its scope's title), null otherwise.
 const ImGuiWindow *finder() {
 	if (GImGui->OpenPopupStack.Size != 1 || !GImGui->OpenPopupStack[0].Window) return nullptr;
@@ -152,26 +147,6 @@ ImVec2 centre_of(Ui &ui, ImGuiID id) {
 	ui.frames(2);
 	ui.drain();
 	return rect.GetCenter();
-}
-
-// A right click at `at`: the frame after it, its text.
-std::string right_click(Ui &ui, ImVec2 at) {
-	ui.mouse(at.x, at.y);
-	ui.button(true, ImGuiMouseButton_Right);
-	ui.button(false, ImGuiMouseButton_Right);
-	return logged_frame(ui);
-}
-
-// The point along `x` in [top, bottom] where the mouse hovers the item `id`, found moving down.
-bool hover_find(Ui &ui, ImGuiID id, float x, float top, float bottom, ImVec2 &at) {
-	for (float y = top; y < bottom; y += 2.0f) {
-		ui.mouse(x, y);
-		if (GImGui->HoveredId == id) {
-			at = ImVec2(x, y);
-			return true;
-		}
-	}
-	return false;
 }
 
 // Go to file (Ctrl+P) and Go to name (Ctrl+T): the finder opened in that scope, its text empty, a name typed

@@ -56,7 +56,7 @@ std::string choice_tip(const ReferenceChoice &choice, const AssetGraph *graph, c
 
 // Whether the value is missing, by the finding the graph makes of it as Problems shows it (a %NAME% the
 // stylesheets do not define: the variable's), and that finding's fixes: those Problems raises at once alone (a fix
-// that asks first, a Use fix's rename, waits in Problems' confirmation, which the picker has not: review X16).
+// that asks first, a Use fix's rename, waits in Problems' confirmation, which the picker has not).
 void missing_fixes(const SessionView &view, const Document &document, const NodeAddress &record, const FieldUse &field,
                    const Value &value, bool &missing, std::vector<ProblemFix> &fixes) {
 	fixes.clear();
@@ -491,7 +491,6 @@ bool ReferencePicker::draw_completions(Workspace &workspace, const Document &doc
 		completing_.choices = picker_choices(view.findings.graph.get(), document, record, field, names ? &*names : nullptr);
 		completing_.view = reads;
 		completing_.scope = field.scope;
-		++completions_made_;
 	}
 	std::vector<ReferenceCompletion> completions = complete_reference(completing_.choices, field, typed);
 	// The whole name typed, and nothing else beginning it: nothing to complete.

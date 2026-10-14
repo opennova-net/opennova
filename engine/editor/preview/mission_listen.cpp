@@ -2,9 +2,12 @@
 
 #include <algorithm>
 #include <chrono>
+#include <string_view>
 #include <cmath>
 #include <cstdio>
 
+#include <base/io/fixed.h>
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <base/io/tick_rate.h>
 #include <editor/assets/asset_registry.h>
@@ -36,9 +39,6 @@ using io::json_number;
 using io::json_string;
 using io::JsonValue;
 
-// The listener's own source in the mixer's dynamic table (the rain beside it), standing in for the local player's
-// registry serial.
-constexpr uint64_t kListenerSource = 1;
 // The listener's view as the player hears the game: first person (audio::kListenerViewFirstPerson).
 constexpr uint8_t kListenView = audio::kListenerViewFirstPerson;
 // The hours' names, by the region the game's time-of-day test returns (audio::time_of_day_region), and an item's
@@ -51,13 +51,7 @@ constexpr size_t kFiredKept = 16;
 // distance 0 [orig: Wac_PlayScriptedVoiceWave @ 0x4ed688; Audio_Play3DPositionalSound @ 0x4ecc90..0x4ecc96;
 // Audio_UpdateAmbientStream @ 0x4edb22] (world::ScriptVoiceChannel::frame's, the runtime's own).
 int32_t script_voice_volume_at_listener() {
-	return audio::calc_distance_volume(0, int64_t(100) * 65536, (world::kScriptVoiceVolume * 255 + 128) >> 8, 255);
-}
-
-// A project file by its name as the asset source serves it (a path's file name).
-std::string served_name(const std::string &file) {
-	const size_t slash = file.find_last_of("/\\");
-	return slash == std::string::npos ? file : file.substr(slash + 1);
+	return audio::calc_distance_volume(0, int64_t(100) * io::kFp16OneInt, (world::kScriptVoiceVolume * 255 + 128) >> 8, 255);
 }
 
 std::string metres(float value) {
@@ -91,12 +85,12 @@ const MissionSoundSource *MissionListen::source(NodeId row) const {
 
 const MissionListen::Catalog &MissionListen::catalog_(const SessionView &view, const std::string &file) {
 	Catalog &catalog = catalogs_[file];
-	const uint64_t stamp = view.findings.assets && !file.empty() ? view.findings.assets->stamp(served_name(file)) : 0;
+	const uint64_t stamp = view.findings.assets && !file.empty() ? view.findings.assets->stamp(io::utf8_file_name(file)) : 0;
 	if (catalog.stamp == stamp && stamp != 0) return catalog;
 	catalog = Catalog();
 	catalog.stamp = stamp;
 	std::vector<uint8_t> bytes;
-	if (!view.findings.assets || !view.findings.assets->read(served_name(file), bytes) || bytes.empty()) return catalog;
+	if (!view.findings.assets || !view.findings.assets->read(io::utf8_file_name(file), bytes) || bytes.empty()) return catalog;
 	def::DefItemsFile items{};
 	if (def::def_parse_items_memory(bytes.data(), bytes.size(), &items) == 0) {
 		// A type id resolves to its first row (mission::item_defs_by_id).
@@ -110,53 +104,6 @@ const MissionListen::Catalog &MissionListen::catalog_(const SessionView &view, c
 	}
 	def::def_free_items(&items);
 	return catalog;
-}
-
-const PreviewBank *MissionListen::find_set_(const std::string &name, int32_t &index) const {
-	index = -1;
-	if (name.empty()) return nullptr;
-	// The game's search: the global chain in its order, the first bank's first set of the name [orig:
-	// SoundBank_FindSetByNameAnyBank @ 0x5274f0].
-	for (const PreviewBank *bank : chain_banks(banks_.banks(), banks_.expansion()))
-		if ((index = audio::find_bank_set(bank->file, name)) >= 0) return bank;
-	index = -1;
-	return nullptr;
-}
-
-std::vector<audio::AmbientMixer::LayerDesc> MissionListen::describe_(const std::string &set, int source,
-		const char *kind, const SessionView &view) {
-	std::vector<audio::AmbientMixer::LayerDesc> out;
-	int32_t index = -1;
-	const PreviewBank *bank = find_set_(set, index);
-	if (!bank) return out;
-	const lwf::File &file = bank->file;
-	int layer = 0;
-	for (const audio::EmitterLayer &each : audio::emitter_layers(file, file.multis[size_t(index)])) {
-		const lwf::Sndparm &member = file.sndparms[each.sndparm];
-		const lwf::Single *single = member.single_index < file.singles.size() ? &file.singles[member.single_index] : nullptr;
-		Candidate candidate;
-		candidate.source = source;
-		candidate.kind = kind;
-		candidate.set = file.multis[size_t(index)].name;
-		candidate.bank = bank->name;
-		candidate.wave = single ? single->name : std::string();
-		candidate.layer = layer++;
-		// The wave as the game loads it, by its file's name (the scan's first file of the name, a wave): a layer the
-		// project has no wave for takes no channel, as the game's candidates are only the layers whose wave its root
-		// holds (MissionAudio's describe_ambient).
-		const AssetEntry *entry = single && view.project.scan ? view.project.scan->find(served_name(single->path)) : nullptr;
-		if (!entry || entry->kind != AssetKind::Wave) continue;
-		candidate.path = entry->relative_path;
-		audio::AmbientMixer::LayerDesc desc;
-		desc.candidate_id = next_candidate_++;
-		desc.falloff_u = each.falloff_u;
-		desc.min_u = each.min_u;
-		desc.member_vol = each.volume;
-		desc.clamp_vol = each.clamp;
-		candidates_[desc.candidate_id] = std::move(candidate);
-		out.push_back(desc);
-	}
-	return out;
 }
 
 bool MissionListen::refresh(const SessionView &view, const MissionScene &scene, const MissionDocument &document,
@@ -193,13 +140,12 @@ bool MissionListen::refresh(const SessionView &view, const MissionScene &scene, 
 		graph_generation_ = generation;
 		graph_read_ = true;
 	}
-	const std::unordered_map<int32_t, Candidate> before = std::move(candidates_);
+	const std::unordered_map<int32_t, PreviewAmbientMix::Candidate> before = mix_.candidates();
 	sources_.clear();
 	source_index_.clear();
-	candidates_.clear();
+	mix_.clear_candidates();
 	marker_sets_.clear();
 	marker_keys_.clear();
-	next_candidate_ = 1;
 	// Every entity whose item the game updates as an env-sound emitter, in the walk resolve_envs_markers makes:
 	// the markers, the items, the buildings, the people, each pool in the file's order.
 	size_t resolved_count = 0;
@@ -230,7 +176,7 @@ bool MissionListen::refresh(const SessionView &view, const MissionScene &scene, 
 			bool any_set = false;
 			for (size_t slot = 0; slot < 4; ++slot) {
 				int32_t at = -1;
-				const PreviewBank *bank = find_set_(source.slots[slot], at);
+				const PreviewBank *bank = PreviewAmbientMix::find_set(banks_, source.slots[slot], at);
 				source.banks[slot] = bank ? bank->name : std::string();
 				if (!bank) continue;
 				any_set = true;
@@ -244,7 +190,7 @@ bool MissionListen::refresh(const SessionView &view, const MissionScene &scene, 
 			std::vector<std::string> names;
 			std::vector<std::vector<audio::AmbientMixer::LayerDesc>> sets;
 			for (const std::string &name : audio::envs_distinct_sets(held)) {
-				std::vector<audio::AmbientMixer::LayerDesc> layers = describe_(name, index, "marker", view);
+				std::vector<audio::AmbientMixer::LayerDesc> layers = mix_.describe(banks_, name, index, "marker", view);
 				if (layers.empty()) continue;
 				names.push_back(name);
 				sets.push_back(std::move(layers));
@@ -269,85 +215,90 @@ bool MissionListen::refresh(const SessionView &view, const MissionScene &scene, 
 			sources_.push_back(std::move(source));
 		}
 	}
-	// The rain's two loops, beside the listener.
-	for (int side = 0; side < 2; ++side) rain_layers_[side] = describe_(world::kRainAmbientSets[side], -1, "rain", view);
+	// The rain's two loops, beside the listener; the sets the items loop.
+	mix_.describe_rain(banks_, view);
+	item_sets_.clear();
+	for (const std::string &name : script_.item_loop_sets()) {
+		std::vector<audio::AmbientMixer::LayerDesc> layers = mix_.describe(banks_, name, -1, "item", view);
+		if (!layers.empty()) item_sets_[name] = std::move(layers);
+	}
 	// Other candidates than before (a source added, removed or given other sets, a wave found or lost): the channels
-	// start again.
-	bool same = before.size() == candidates_.size();
-	for (const auto &[id, candidate] : candidates_) {
+	// start again. An item's own candidates of its set (made as it registers) are not among them.
+	size_t kept = 0;
+	for (const auto &[id, candidate] : before)
+		if (std::string_view(candidate.kind) != "item" || mix_.candidates().count(id)) ++kept;
+	bool same = kept == mix_.candidates().size();
+	for (const auto &[id, candidate] : mix_.candidates()) {
 		if (!same) break;
 		const auto was = before.find(id);
 		same = was != before.end() && was->second.path == candidate.path && was->second.set == candidate.set &&
 				was->second.layer == candidate.layer &&
 				(candidate.source < 0 ? was->second.source < 0 : was->second.source >= 0);
 	}
-	if (!same) {
-		pool_.reset();
-		channels_.clear();
-	}
-	remix_();
-	++serial_;
+	if (!same) mix_.reset_channels();
+	remix_(true);
+	mix_.moved();
 	return true;
 }
 
-void MissionListen::remix_() {
+void MissionListen::remix_(bool keep_loops) {
 	// The channels stand while the candidates are the same (a source moved, its sets the same): an incumbent keeps its
 	// channel, its wave playing on, once the new table's first walk registers it again.
-	mixer_ = std::make_unique<audio::AmbientMixer>();
+	mix_.new_mixer();
 	mixed_tick_ = -1;
+	std::map<std::pair<uint64_t, int>, ItemLoop> held;
+	held.swap(item_loops_);
 	for (const MissionSoundSource &source : sources_) {
 		if (source.marker < 0) continue;
 		const float at[3] = { source.at.x, source.at.y, source.at.z };
-		mixer_->add_marker(at, 0, source.stagger, 0, marker_keys_[size_t(source.marker)].data(),
+		mix_.mixer().add_marker(at, 0, source.stagger, 0, marker_keys_[size_t(source.marker)].data(),
 				marker_sets_[size_t(source.marker)]);
 	}
+	if (!keep_loops)
+		return;
+	// Each item's loop registered again as its entity update last registered it, in the order of
+	// their ticks, so a held clock keeps it heard (the update registers it again only on a later
+	// tick), its lifetime from that tick.
+	std::vector<const MissionScriptEmitter *> again;
+	for (const auto &entry : held)
+		again.push_back(&entry.second.last);
+	std::stable_sort(again.begin(), again.end(),
+			[](const MissionScriptEmitter *a, const MissionScriptEmitter *b) {
+				return a->tick < b->tick;
+			});
+	for (const MissionScriptEmitter *emitter : again)
+		register_item_(*emitter);
 }
 
-void MissionListen::apply_plan_(const audio::AmbientChannelPlan &plan) {
-	while (int(channels_.size()) < plan.channel_count) {
-		MissionSoundChannel channel;
-		channel.channel = int(channels_.size());
-		channels_.push_back(channel);
+void MissionListen::register_item_(const MissionScriptEmitter &emitter) {
+	audio::AmbientMixer &mixer = mix_.mixer();
+	const world::SoundEmitterEvent &event = emitter.event;
+	if (emitter.tick > mixer.clock_tick()) mixer.advance_to_tick(emitter.tick);
+	const float at[3] = { event.pos.x, event.pos.y, event.pos.z };
+	const int32_t lifetime = audio::emitter_lifetime_word(event.lifetime_ticks);
+	const std::pair<uint64_t, int> key{ event.source_spawn_id, int(event.lane) };
+	if (event.source_only) {
+		mixer.update_emitter_source(event.source_spawn_id, at, event.source_bms_id);
+		return;
 	}
-	for (const int released : plan.released) {
-		MissionSoundChannel free_channel;
-		free_channel.channel = released;
-		channels_[size_t(released)] = free_channel;
-		++serial_;
+	if (event.pitch_q16 == 0 || event.volume_q8_8 == 0) {
+		mixer.register_emitter(event.source_spawn_id, event.lane, at, event.source_bms_id, lifetime, event.pitch_q16,
+				event.volume_q8_8, {});
+		item_loops_.erase(key);
+		return;
 	}
-	const auto fill = [&](MissionSoundChannel &channel, const audio::AmbientCandidate &row) {
-		const PreviewVec3 at{ row.pos[0], row.pos[1], row.pos[2] };
-		// The channel plays the emitter's word alone, no member pitch in it (D-SND-56).
-		const uint32_t pitch = audio::emitter_play_word(int32_t(row.pitch_q16));
-		if (channel.volume != row.vol || channel.pitch_q16 != pitch || channel.at.x != at.x || channel.at.y != at.y ||
-				channel.at.z != at.z)
-			++serial_;
-		channel.volume = row.vol;
-		channel.pitch_q16 = pitch;
-		channel.at = at;
-		channel.distance = distance_between(at, listener_);
-	};
-	for (const audio::AmbientChannelPlan::Bind &bind : plan.binds) {
-		MissionSoundChannel &channel = channels_[size_t(bind.channel)];
-		channel = MissionSoundChannel();
-		channel.channel = bind.channel;
-		channel.candidate = bind.row.candidate_id;
-		channel.started = ++started_;
-		const auto found = candidates_.find(bind.row.candidate_id);
-		if (found != candidates_.end()) {
-			const Candidate &candidate = found->second;
-			channel.source = candidate.kind;
-			channel.row = candidate.source >= 0 ? sources_[size_t(candidate.source)].row : 0;
-			channel.set = candidate.set;
-			channel.bank = candidate.bank;
-			channel.wave = candidate.wave;
-			channel.path = candidate.path;
-			channel.layer = candidate.layer;
-		}
-		fill(channel, bind.row);
-		++serial_;
+	const auto set = item_sets_.find(event.set_name);
+	if (set == item_sets_.end()) return;
+	ItemLoop &loop = item_loops_[key];
+	loop.last = emitter;
+	if (loop.set != event.set_name) {
+		if (!loop.set.empty())
+			mixer.register_emitter(event.source_spawn_id, event.lane, at, event.source_bms_id, lifetime, 0, 0, {});
+		loop.set = event.set_name;
+		loop.layers = mix_.renumber(set->second);
 	}
-	for (const audio::AmbientChannelPlan::Bind &update : plan.updates) fill(channels_[size_t(update.channel)], update.row);
+	mixer.register_emitter(event.source_spawn_id, event.lane, at, event.source_bms_id, lifetime, event.pitch_q16,
+			event.volume_q8_8, loop.layers);
 }
 
 void MissionListen::play_to(int32_t tick, const PreviewVec3 &listener, double hours) {
@@ -366,55 +317,33 @@ void MissionListen::play_to(int32_t tick, const PreviewVec3 &listener, double ho
 	script_.set_hours(hours);
 	script_.run_to(tick);
 	// A step back of the clock: the sources register again from the start, as at the mission's.
-	if (!mixer_ || tick < mixed_tick_) remix_();
-	mixer_->set_time_of_day_hours(float(hours));
-	// The cohorts the ticks since visit [orig: Entity_UpdateAllEntities @ 0x4c225a].
-	mixer_->advance_to_tick(tick);
+	if (!mix_.has_mixer() || tick < mixed_tick_)
+		remix_(false);
+	mix_.mixer().set_time_of_day_hours(float(hours));
+	// The items' loops the script's entity update registered, each at its tick; then the cohorts the ticks since visit
+	// [orig: Entity_UpdateAllEntities @ 0x4c225a].
+	for (const MissionScriptEmitter &emitter : script_.take_emitters()) register_item_(emitter);
+	mix_.mixer().advance_to_tick(tick);
 	mixed_tick_ = tick;
-	// The rain beside the listener while it rains, registered into the same table at the tick [orig:
-	// Entity_UpdateInfantryPlayerBody @ 0x4b4747..0x4b490e].
-	if (const world::WeatherState *weather = script_.weather()) {
-		double eye[3];
-		preview_to_mission(listener, eye);
-		world::RainAmbientBody body;
-		body.pos = world::Vec3{ float(eye[0]), float(eye[1]), float(eye[2]) };
-		body.source_spawn_id = kListenerSource;
-		body.emitted_tick = uint32_t(tick);
-		world::SoundEmitterEvent rain[2];
-		const size_t count = world::rain_ambient_emitters(*weather, body, rain);
-		for (size_t i = 0; i < count; ++i) {
-			const int side = rain[i].lane == 1 ? 0 : 1;
-			if (rain_layers_[side].empty()) continue;
-			const double at[3] = { rain[i].pos.x, rain[i].pos.y, rain[i].pos.z };
-			const PreviewVec3 placed = mission_to_preview(at);
-			const float pos[3] = { placed.x, placed.y, placed.z };
-			mixer_->register_emitter(kListenerSource, rain[i].lane, pos, 0, rain[i].lifetime_ticks, rain[i].pitch_q16,
-					rain[i].volume_q8_8, rain_layers_[side]);
-		}
-	}
-	// The mix at the listener: the live slots culled, their volumes, the audible loudest first [orig:
-	// SoundEmitter_UpdateAndMixTop8 @ 0x5284a0]; then the channels the loudest take.
-	const float ear[3] = { listener.x, listener.y, listener.z };
-	const std::vector<audio::AmbientCandidate> &rows = mixer_->mix(ear);
-	audio::AmbientChannelPlan plan;
-	pool_.plan(rows, [&](int32_t id) {
-		const auto found = candidates_.find(id);
-		return found != candidates_.end() && !found->second.path.empty();
-	}, true, plan);
-	apply_plan_(plan);
+	// The rain beside the listener while it rains, registered into the same table at the tick.
+	if (const world::WeatherState *weather = script_.weather()) mix_.register_rain(tick, listener, *weather);
+	// The mix at the listener, then the channels the loudest take, a source's its row.
+	const std::vector<audio::AmbientCandidate> &rows =
+			mix_.mix(listener, [this](int source) { return sources_[size_t(source)].row; });
+	const std::unordered_map<int32_t, PreviewAmbientMix::Candidate> &candidates = mix_.candidates();
 	// What each source does now.
 	std::unordered_map<int32_t, int32_t> loudest; // source index -> its loudest row
 	for (const audio::AmbientCandidate &row : rows) {
-		const auto found = candidates_.find(row.candidate_id);
-		if (found == candidates_.end() || found->second.source < 0) continue;
+		const auto found = candidates.find(row.candidate_id);
+		if (found == candidates.end() || found->second.source < 0) continue;
 		int32_t &held = loudest[found->second.source];
 		held = std::max(held, row.vol);
 	}
 	std::unordered_map<int32_t, int> channel_of;
-	for (const MissionSoundChannel &channel : channels_) {
+	for (const MissionSoundChannel &channel : mix_.channels()) {
 		if (channel.candidate < 0) continue;
-		const auto found = candidates_.find(channel.candidate);
-		if (found != candidates_.end() && found->second.source >= 0 && !channel_of.count(found->second.source))
+		const auto found = candidates.find(channel.candidate);
+		if (found != candidates.end() && found->second.source >= 0 && !channel_of.count(found->second.source))
 			channel_of[found->second.source] = channel.channel;
 	}
 	for (size_t i = 0; i < sources_.size(); ++i) {
@@ -424,7 +353,7 @@ void MissionListen::play_to(int32_t tick, const PreviewVec3 &listener, double ho
 		source.channel = -1;
 		// The hour's region (a source with no set the mixer holds reads the clock alone, unstaggered).
 		const audio::TimeOfDayRegion region =
-				source.marker >= 0 ? mixer_->marker_region(source.marker) : audio::time_of_day_region(float(hours));
+				source.marker >= 0 ? mix_.mixer().marker_region(source.marker) : audio::time_of_day_region(float(hours));
 		source.region = region.region;
 		source.blend = region.blend;
 		const size_t hour = size_t(region.region);
@@ -449,12 +378,8 @@ void MissionListen::play_to(int32_t tick, const PreviewVec3 &listener, double ho
 }
 
 std::vector<ClipSoundFired> MissionListen::fire_sounds(const AssetScan *scan, audio::SoundSelector &selector,
-		uint64_t &seq, float volume) {
+		uint64_t &seq) {
 	std::vector<ClipSoundFired> out;
-	const auto scaled = [&](ClipSoundFired &fired) {
-		for (ClipSoundFired::Voice &voice : fired.voices)
-			voice.volume = int32_t(std::lround(double(voice.volume) * double(std::clamp(volume, 0.0f, 1.0f))));
-	};
 	std::vector<DialogChannel::Loaded> loaded;
 	for (const MissionScriptSound &sound : script_.take_sounds()) {
 		// A Play dialog: the channel run through the ticks before its own, then its dialog registered, so its tick's
@@ -478,7 +403,6 @@ std::vector<ClipSoundFired> MissionListen::fire_sounds(const AssetScan *scan, au
 			fired.words = "Tick " + std::to_string(sound.tick) + " (the script's voice): " + sound.wave + " at volume " +
 			              std::to_string(voice_volume) + ".";
 			fired.voices.push_back({sound.wave, sound.wave, std::string(), 0x10000u, voice_volume});
-			scaled(fired);
 			if (scan) find_clip_sound_waves(fired, *scan);
 			fired_.push_back(fired);
 			out.push_back(std::move(fired));
@@ -508,7 +432,6 @@ std::vector<ClipSoundFired> MissionListen::fire_sounds(const AssetScan *scan, au
 		ClipSoundFired fired = plan_set_heard(sound.set, sound.tick, what, banks_, heard, selector, kListenView);
 		fired.seq = ++seq;
 		fired.action = sound.shot >= 0 ? std::string("shot") : std::string(mission_script_sound_kind_token(sound.kind));
-		scaled(fired);
 		if (scan) find_clip_sound_waves(fired, *scan);
 		fired_.push_back(fired);
 		out.push_back(std::move(fired));
@@ -536,10 +459,9 @@ std::vector<ClipSoundFired> MissionListen::fire_sounds(const AssetScan *scan, au
 		              dialog_bank_ + ", line " + std::to_string(line.line) + "): " +
 		              (line.wave.empty() ? std::string("(no wave)") : line.wave) +
 		              (line.file.empty() ? std::string(", which the dialog bank's sounds lack: \"EX Cannot load audio\"")
-		                                 : " (" + served_name(line.file) + ")") +
+		                                 : " (" + io::utf8_file_name(line.file) + ")") +
 		              (text.empty() ? std::string() : " \"" + text + "\"");
-		if (!line.file.empty()) fired.voices.push_back({line.wave, served_name(line.file), std::string(), 0x10000u, line.volume});
-		scaled(fired);
+		if (!line.file.empty()) fired.voices.push_back({line.wave, io::utf8_file_name(line.file), std::string(), 0x10000u, line.volume});
 		if (scan) find_clip_sound_waves(fired, *scan);
 		fired_.push_back(fired);
 		out.push_back(std::move(fired));
@@ -593,19 +515,14 @@ void MissionListen::run_dialog_to_(int32_t end, std::vector<DialogChannel::Loade
 }
 
 void MissionListen::close() {
-	if (opened_) ++serial_;
+	if (opened_) mix_.moved();
 	opened_ = false;
 	script_.close();
-	mixer_.reset();
-	pool_.reset();
-	channels_.clear();
+	mix_.close();
 	sources_.clear();
 	source_index_.clear();
-	candidates_.clear();
 	marker_sets_.clear();
 	marker_keys_.clear();
-	rain_layers_[0].clear();
-	rain_layers_[1].clear();
 	resolved_.clear();
 	catalogs_.clear();
 	graph_read_ = false;
@@ -684,7 +601,6 @@ io::JsonValue MissionListen::source_json(NodeId row) const {
 io::JsonValue MissionListen::to_json(const MissionListenOptions &options) const {
 	JsonValue out = JsonValue::make_object();
 	out.set("on", JsonValue::make_bool(options.on));
-	out.set("volume", json_number(double(options.volume)));
 	out.set("hours", json_number(std::round(hours_ * 1000.0) / 1000.0));
 	out.set("tick", json_number(tick_));
 	out.set("listener", point_json(listener_));
@@ -699,26 +615,7 @@ io::JsonValue MissionListen::to_json(const MissionListenOptions &options) const 
 	sources.set("count", json_number(double(sources_.size())));
 	for (size_t i = 0; i < 6; ++i) sources.set(kStatus[i], json_number(double(counts[i])));
 	out.set("sources", std::move(sources));
-	JsonValue channels = JsonValue::make_array();
-	for (const MissionSoundChannel &channel : channels_) {
-		if (channel.candidate < 0) continue;
-		JsonValue row = JsonValue::make_object();
-		row.set("channel", json_number(channel.channel));
-		row.set("source", json_string(channel.source));
-		row.set("row", json_number(double(channel.row)));
-		row.set("set", json_string(channel.set));
-		row.set("bank", json_string(channel.bank));
-		row.set("layer", json_number(channel.layer));
-		row.set("wave", json_string(channel.wave));
-		row.set("path", json_string(channel.path));
-		row.set("volume", json_number(channel.volume));
-		row.set("pitch", json_number(std::round(double(channel.pitch_q16) / 65536.0 * 1000.0) / 1000.0));
-		row.set("at", point_json(channel.at));
-		row.set("distance", json_number(std::round(double(channel.distance) * 100.0) / 100.0));
-		row.set("started", json_number(double(channel.started)));
-		channels.push(std::move(row));
-	}
-	out.set("channels", std::move(channels));
+	out.set("channels", mix_.channels_json(point_json));
 	// The weather as the script has it now.
 	JsonValue rain = JsonValue::make_object(), overcast = JsonValue::make_object();
 	if (const world::WeatherState *weather = script_.weather()) {
@@ -726,7 +623,7 @@ io::JsonValue MissionListen::to_json(const MissionListenOptions &options) const 
 		rain.set("percent", json_number(percent(weather->rain_pct_current_q16())));
 		rain.set("target", json_number(percent(weather->rain_pct_target_q16())));
 		rain.set("kind", json_string(weather->precipitation_kind == uint32_t(world::PrecipitationKind::Snow) ? "snow" : "rain"));
-		rain.set("sets_found", json_number(double((rain_layers_[0].empty() ? 0 : 1) + (rain_layers_[1].empty() ? 0 : 1))));
+		rain.set("sets_found", json_number(double(mix_.rain_sets_found())));
 		overcast.set("percent", json_number(percent(weather->overcast_blend_q16())));
 		overcast.set("target", json_number(percent(weather->overcast_target_q16())));
 	}

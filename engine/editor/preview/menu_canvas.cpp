@@ -11,6 +11,28 @@
 
 namespace opennova::editor {
 
+// What the pointer shows over a handle (Move: over the window itself).
+CanvasCursor menu_handle_cursor(LayoutHandle handle);
+
+// The handle a press at `at` takes on the rect a..b; false for none.
+bool menu_handle_at(CanvasPoint at, CanvasPoint a, CanvasPoint b, LayoutHandle &out);
+
+// Where a handle of the rect a..b sits.
+CanvasPoint menu_handle_point(LayoutHandle handle, CanvasPoint a, CanvasPoint b);
+
+// A design-space rect on the picture, scaled `scale_x` x `scale_y`: its corners `a` (top left)
+// and `b` (bottom right) on the pixels the game draws it on (menu::menu_scaled_edge).
+void menu_picture_rect(
+		const mnu::RectEdges &rect, float scale_x, float scale_y, CanvasPoint &a, CanvasPoint &b);
+
+// The selected window whose rect holds the picture point `at`: the primary when it does, else
+// the front-most one (the last in the compiled screen's pre-order, the order the runtime draws
+// in); none when no selected window's rect holds it.
+NodeAddress menu_selected_window_at(
+		const MenuCanvasFrame &frame, CanvasPoint at, float scale_x, float scale_y);
+
+MenuPress menu_canvas_press(const MenuCanvasFrame &frame, const CanvasInput &in);
+
 namespace {
 
 constexpr NodeKind kWindowKind = node_kind(MenuKind::Window);

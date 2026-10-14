@@ -5,7 +5,7 @@
 // the graph lists them in the scope all. Find usages: of a file, of a record by its locator (or its path, as a
 // finding names it), none for a record defining no name; its subject in words. Go to definition from a record:
 // what its first field naming something that resolves names (a mission entity's item, an item's model). On the
-// wire: the project_search query's scope and the usages query's locator, each refused where it does not read;
+// wire: the project_search query's scope, a hit's words, and the usages query's locator, each refused where it does not read;
 // the workspace's finder, its scope and Find usages' subject, its text afresh in another scope, a file renamed
 // followed, a file gone closing it, the refusals; an item record's Place in mission, the definition viewport's
 // place_in_mission command, arming the mission's Place tool with the item, refused for a record that is no item,
@@ -207,6 +207,11 @@ static int test_wire() {
 	answer = rig.query("project_search", R"({"text": "pump", "scope": "names"})", error);
 	hits = answer.get("hits");
 	TEST_EXPECT(error.empty() && hits && !hits->array.empty() && hits->array.front().get_string("kind", "file") != "file");
+	// A name found by its words carries them: the rifleman by its catalog's name.
+	answer = rig.query("project_search", R"({"text": "rifleman", "scope": "names"})", error);
+	hits = answer.get("hits");
+	TEST_EXPECT(error.empty() && hits && !hits->array.empty() &&
+	            hits->array.front().get_string("words", "").find("Rifleman") != std::string::npos);
 	rig.query("project_search", R"({"text": "pump", "scope": "folders"})", error);
 	TEST_EXPECT(error.find("no scope \"folders\"") != std::string::npos);
 	const NodeAddress pump = rig.record(rig.items, "106100");

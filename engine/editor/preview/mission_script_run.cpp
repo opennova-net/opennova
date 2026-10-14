@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 
+#include <base/io/fixed.h>
 #include <base/io/tick_rate.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/mission_document.h>
@@ -84,6 +85,12 @@ const world::WeatherState *MissionScriptRun::weather() const {
 
 uint32_t MissionScriptRun::script_runs() const {
 	return kernel_ ? kernel_->wac.runs() : 0;
+}
+
+std::vector<MissionScriptEmitter> MissionScriptRun::take_emitters() {
+	std::vector<MissionScriptEmitter> out;
+	out.swap(emitters_);
+	return out;
 }
 
 std::vector<MissionScriptSound> MissionScriptRun::take_sounds() {
@@ -195,6 +202,12 @@ void MissionScriptRun::boot_(const std::shared_ptr<const ProjectAssetSource> &fi
 	// @ 0x525cb8 -> Environment_MissionStartInit @ 0x57f878].
 	kernel->world.weather.seed(env::weather_seed_from_config(mission_env.config, kernel->mission.header));
 	kernel->complete_mission_start();
+	// The sets the items loop, each once.
+	loop_sets_.clear();
+	for (const auto &[item, traits] : kernel->world.tables.item_death_traits.rows)
+		for (const std::string &set : traits.regional_loops)
+			if (!set.empty() && std::find(loop_sets_.begin(), loop_sets_.end(), set) == loop_sets_.end())
+				loop_sets_.push_back(set);
 	// What the settle raised is the start's own, never heard: the mission has not begun. The dialogs the pre-mission
 	// pass queued play once it has [docs/audio/lwf-dbf-sound-re.md: a PreMission PlayWavList is registered at the
 	// start and plays back serially]: heard at tick 0.
@@ -202,6 +215,8 @@ void MissionScriptRun::boot_(const std::shared_ptr<const ProjectAssetSource> &fi
 	sounds_ = start_sounds_;
 	kernel->world.out.weather_sounds.clear();
 	kernel->world.out.slot_sounds.clear();
+	kernel->world.out.sound_emitters.clear();
+	emitters_.clear();
 	let_go(kernel->world.out);
 	scripted_ = kernel->wac_loaded;
 	kernel_ = std::move(kernel);
@@ -260,10 +275,12 @@ void MissionScriptRun::step_() {
 		heard.set = sound.set_name;
 		if (sound.slot >= audio::kSlotShotDawn && sound.slot < audio::kSlotShotDawn + 4)
 			heard.shot = int(sound.slot) - int(audio::kSlotShotDawn);
-		for (int axis = 0; axis < 3; ++axis) heard.at[axis] = double(sound.pos[axis]) / 65536.0;
+		for (int axis = 0; axis < 3; ++axis) heard.at[axis] = double(sound.pos[axis]) / io::kFp16OneD;
 		sounds_.push_back(std::move(heard));
 	}
 	out.slot_sounds.clear();
+	// The items' ambient loops their update registered this tick (a genx item's hum, on its cohort's visit).
+	for (world::SoundEmitterEvent &event : out.sound_emitters.drain()) emitters_.push_back({ tick, std::move(event) });
 	take_voices(out, tick, sounds_);
 	let_go(out);
 	tick_ = tick;
@@ -283,11 +300,18 @@ bool MissionScriptRun::run_to(int32_t tick) {
 		let_go(kernel_->world.out);
 		kernel_->world.out.weather_sounds.clear();
 		kernel_->world.out.slot_sounds.clear();
+		kernel_->world.out.sound_emitters.clear();
 		sounds_ = start_sounds_;
+		emitters_.clear();
 		tick_ = 0;
 	}
 	const int32_t run = std::min(tick - tick_, kMissionScriptCatchUpTicks);
-	for (int32_t i = 0; i < run; ++i) step_();
+	// The run is the frame's batch: its last tick is the one an item's update registers its loop on, as the game's frame
+	// marks the last of its batch [orig: dword_24E0E80, read @0x4A93CC].
+	for (int32_t i = 0; i < run; ++i) {
+		kernel_->world.rules.last_tick_of_batch = i + 1 == run;
+		step_();
+	}
 	// Of a run longer than a second, only what its last second raised is heard (the rest would sound at once).
 	const int32_t heard_from = tick_ - io::kTicksPerSecondInt;
 	sounds_.erase(std::remove_if(sounds_.begin(), sounds_.end(),

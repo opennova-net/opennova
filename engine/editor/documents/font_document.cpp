@@ -12,6 +12,7 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/source_issue_findings.h>
 #include <editor/model/staged_rows.h>
+#include <runtime/hud/game_font.h>
 
 namespace opennova::editor {
 
@@ -196,8 +197,6 @@ const RecordTable &font_table() {
 	return table;
 }
 
-bool is_font_kind(AssetKind kind) { return asset_kind_row(kind).document == DocumentTypeId::Font; }
-
 FontGlyphRect font_glyph_rect(const FontGlyph &glyph) {
 	int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
 	fnt_uv_to_pixels(&glyph.uv, &x0, &y0, &x1, &y1);
@@ -205,9 +204,8 @@ FontGlyphRect font_glyph_rect(const FontGlyph &glyph) {
 }
 
 int font_glyph_advance(const FontRow &font, const FontGlyph &glyph) {
-	// [orig: CGameFont_GetCharExtent @ 0x674de4..0x674e25]: floor(((u1 - u0) * 256 + spacing - 1) * scale + 0.5).
-	const float width = (glyph.uv.u1 - glyph.uv.u0) * float(FNT_TEXTURE_WIDTH);
-	return int(std::floor((width + float(font.spacing) - 1.0f) * fnt_design_scale(font.design_width) + 0.5f));
+	// The game's measure (hud::glyph_extent, CGameFont_GetCharExtent's fold) at the font's own scale.
+	return hud::glyph_extent(glyph.uv, font.spacing, fnt_design_scale(font.design_width));
 }
 
 // --- the row -------------------------------------------------------------------------------------
@@ -263,10 +261,6 @@ bool FontDocument::font(fnt_font_t &out, std::string &why) const {
 
 bool FontDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                          std::shared_ptr<const FileState> &, std::vector<SourceIssue> &issues, Diagnostic &error) {
-	if (!is_font_kind(kind())) {
-		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not a font.", path());
-		return false;
-	}
 	fnt_font_t read{};
 	const fnt_error_t parsed = fnt_parse(bytes.data(), bytes.size(), &read);
 	if (parsed != FNT_OK) {
@@ -344,9 +338,11 @@ namespace {
 constexpr FindingCodeEntry<FontFinding> kFindingEntries[] = {
 	{ FontFinding::InvalidInput, { "font.invalid_input", FindingFix::None, nullptr, true } },
 	{ FontFinding::IgnoredInput, { "font.ignored_input", FindingFix::Rewrite, kRewriteDropsIgnoredInput } },
-	// The drawer binds the glyph's page from the font's table past its pages [orig: CGameFont_DrawText @ 0x6752c0]:
-	// what it draws then is no texture of the font's; the writer refuses it.
-	{ FontFinding::Unserializable, { "font.unserializable", FindingFix::None, nullptr, true } },
+	// The drawer runs one pass per page of the font's, binding that page and drawing the glyphs on it alone
+	// [orig: CGameFont_DrawText @ 0x675428, the compare @ 0x675755, the loop's end @ 0x675D9D]: a glyph on a page
+	// past them is never drawn, nothing bound for it, no fault. The writer cannot write it (fnt_validate), so its
+	// Save is refused; listed.
+	{ FontFinding::Unserializable, unwritable_code("font.unserializable") },
 	// The page is sampled clamped [orig: GameFont_LoadFromBlob @ 0x674804, flags 0x140001]: the edge's texels
 	// stretched; no refusal witnessed, listed.
 	{ FontFinding::GlyphOutside, listed_code("font.glyph_outside") },
@@ -390,8 +386,9 @@ std::vector<Diagnostic> validate_font_file(const DocumentBase &document) {
 		if (glyph.page >= font->pages)
 			add(i, DiagnosticSeverity::Error, FontFinding::Unserializable, "page",
 			    byte_words(byte) + " is on page " + std::to_string(glyph.page) + ", which the font lacks (" +
-			            std::to_string(font->pages) + " pages): the game draws it from no page of the font [orig: "
-			            "CGameFont_DrawText @ 0x6752c0], so the font is not saved until it names one.");
+			            std::to_string(font->pages) + " pages): the game never draws it, drawing each page's glyphs "
+			            "in that page's pass [orig: CGameFont_DrawText @ 0x675755], and the editor's writer cannot write "
+			            "it, so the font is not saved until it names one.");
 		if (rect.x + rect.width > int(FNT_TEXTURE_WIDTH) || rect.y + rect.height > int(FNT_TEXTURE_HEIGHT) ||
 		    glyph.uv.u0 < 0.0f || glyph.uv.v0 < 0.0f)
 			add(i, DiagnosticSeverity::Warning, FontFinding::GlyphOutside, "width",

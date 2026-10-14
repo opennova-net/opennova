@@ -127,8 +127,6 @@ struct ScriptUse {
 };
 // The mission's script's variables (its V#), by number, each with its lines.
 std::map<int64_t, std::vector<ScriptUse>> script_variable_uses(const SessionView &view, const MissionDocument &mission);
-// The script lines that name the event at `index` by its number (event(n)).
-std::vector<ScriptUse> script_event_uses(const SessionView &view, const MissionDocument &mission, size_t index);
 // The numbers of the mission's script's variables (the keys of script_variable_uses): what mission_new_variable
 // passes over.
 std::vector<int64_t> script_variable_indexes(const std::map<int64_t, std::vector<ScriptUse>> &uses);
@@ -140,10 +138,6 @@ bool logic_editable(const SessionView &view, const DocumentBase &document);
 // One line of a card alone (S24 A7: the Inspector over a trigger or an action), the card's width: its lead, its
 // runs and chips, its retype picker.
 void draw_mission_line(CardContext &context, const BoardCard &card, const BoardLine &line);
-// The type picker for the add or the retype `state` names, drawn in an open popup's body: Common (the shipped
-// missions' most used), for a trigger the recipes' triggers with their presets, then every type by its group,
-// filtered by what is typed. True once it raised the add or the retype (the popup then closed).
-bool draw_type_picker(CardContext &context, bool actions);
 
 // The edits a type picker's choice makes: an add of `type` (with `presets`, a recipe's) to the event at a place,
 // or a retype of a line, raised as one edit_record that keeps the selection. True when raised.

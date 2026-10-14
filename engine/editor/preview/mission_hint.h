@@ -38,10 +38,6 @@ struct MissionHintInput {
 
 std::string mission_canvas_hint(const MissionHintInput &in);
 
-// A snap's words: "1 m", "0.25 m", "free".
-std::string mission_snap_words(float metres);
-// A turn snap's words: "15 deg", "whole degrees".
-std::string mission_turn_words(float degrees);
 // What a handle does, in a few words ("move on the ground", "raise or lower", "turn", "move the west
 // edge"), and its step ("1 m steps", "15 deg steps").
 std::string mission_handle_words(MissionHandle handle);

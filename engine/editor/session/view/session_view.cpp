@@ -8,6 +8,12 @@
 
 namespace opennova::editor {
 
+const DocumentBase *DocumentsView::open_at(const std::string &path) const {
+	for (const std::shared_ptr<const DocumentBase> &document : open)
+		if (document && document->path() == path) return document.get();
+	return nullptr;
+}
+
 std::string editor_window_title(const SessionView &view) {
 	const char *const product = "OpenNova Editor";
 	if (!view.project.open) return product;

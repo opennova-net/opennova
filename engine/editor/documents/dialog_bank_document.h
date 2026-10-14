@@ -96,7 +96,6 @@ protected:
 	void refine_symbol(const NodeAddress &address, SymbolFacts &facts) const override;
 };
 
-bool is_dialog_bank_kind(AssetKind kind);
 // The scope a bank's dialogs live in: its file name, upper case ("01TR.DBF").
 std::string dialog_bank_scope(const std::string &path);
 // The scope a bank's lines' waves are found in: the bank's sounds, <base>.LWF; and the file the game opens in

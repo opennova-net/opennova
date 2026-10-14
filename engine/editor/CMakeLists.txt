@@ -115,7 +115,6 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/til_project_check.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_image.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_budget.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_compare.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_load_rules.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_operations.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_roles.cpp
@@ -187,6 +186,8 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/animation_uses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/sound_preview.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/dialog_preview.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/preview_ambient_mix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/preview_pick.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/preview_clip_sounds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/preview_waves.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/preview_clip_fire.cpp
@@ -233,6 +234,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_viewport_shots.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_shots.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/definition_canvas.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_world.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/orbit_canvas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/definition_effects.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/definition_viewport.cpp
@@ -241,6 +243,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/ammo_impacts.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/effect_catalog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/effect_playback.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/effect_schedule.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/effect_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/environment_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/terrain_viewport.cpp
@@ -265,6 +268,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_preview_camera.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_preview_rig.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_viewport.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_viewport_damage.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/script_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/shown_text.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/text_burst.cpp
@@ -311,8 +315,8 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/run/play_session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/run/play_start.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/run/run_directory.cpp
-    # session — the one open project and everything the editor does to it (ADR 0046 d10):
-    # the facade and its parts (S13 A2: the core, the open documents, the Problems rows, Play,
+    # session — the one open project and everything the editor does to it (ADR 0046 S13 A2):
+    # the facade and its parts (the core, the open documents, the Problems rows, Play,
     # imports, renames, the unsaved guard, the navigation history, the preferences over their
     # store), what Problems shows of its findings and offers to do about them, the request and
     # query tables (S13 A4, A5) and their wire forms (session_json, view_json), the selection
@@ -326,6 +330,9 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/document_set_scope.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_preferences.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_queries.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/asset_queries.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/document_op_queries.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/viewport_query.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/particle_keys_query.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_preferences_store.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/environment_uses.cpp
@@ -379,6 +386,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/selection.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_core.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_json.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/reference_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/texture_budget_list.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/texture_import_state.cpp
@@ -448,6 +456,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/inspector_layout.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/inspector_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/main_viewport_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/viewport_widgets.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/menu_inspector.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/menu_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/menu_viewport_view.cpp

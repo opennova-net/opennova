@@ -54,6 +54,7 @@
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
+#include "editor/editor_test_support.h"
 
 using namespace opennova::editor;
 namespace def = opennova::def;
@@ -569,14 +570,7 @@ protected:
 	}
 };
 
-Edit edit_of(EditOperation operation, NodeAddress address, NodeId parent = 0, size_t position = SIZE_MAX) {
-	Edit edit;
-	edit.operation = operation;
-	edit.address = address;
-	edit.parent = parent;
-	edit.position = position;
-	return edit;
-}
+using editor_test::op_edit;
 
 // The core over the shelves: a list of two kinds, a field its records' owners decide, a Move refused by
 // its list's erase.
@@ -600,8 +594,8 @@ int core_over_a_table() {
 		return NodeAddress{node.id, shelf.leaves[index].kind, shelf.ids.lists[0][index].id};
 	};
 	// An Add of each kind through the list's make, where the edit's kind says.
-	TEST_EXPECT(document.apply(edit_of(EditOperation::Add, {first.id, kNote, 0}, 0, 1), error));
-	TEST_EXPECT(document.apply(edit_of(EditOperation::Add, {first.id, kBook, 0}, 0, SIZE_MAX), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {first.id, kNote, 0}, 0, 1), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {first.id, kBook, 0}, 0, SIZE_MAX), error));
 	TEST_EXPECT(document.serialize().text == "shelf 0 B10 N0 N2 B30 B0\nshelf 1 B5\n");
 	// A book's pages: read on a shelf that stands, ignored on one that leans (the shelf it lies in).
 	const FieldSchema &pages = shelf_table().kind(kBook)->fields()[0];
@@ -611,7 +605,7 @@ int core_over_a_table() {
 	const std::string before = document.serialize().text;
 	const RecordIds ids = static_cast<const Shelf &>(*document.rows()[0]).ids;
 	g_erase_refused = true;
-	TEST_EXPECT(!document.apply(edit_of(EditOperation::Move, leaf(0, 0), 0, 3), error));
+	TEST_EXPECT(!document.apply(op_edit(EditOperation::Move, leaf(0, 0), 0, 3), error));
 	g_erase_refused = false;
 	const Shelf &kept = static_cast<const Shelf &>(*document.rows()[0]);
 	TEST_EXPECT(document.serialize().text == before && kept.ids.lists[0].size() == ids.lists[0].size() &&
@@ -619,12 +613,12 @@ int core_over_a_table() {
 	for (size_t i = 0; i < ids.lists[0].size(); ++i) TEST_EXPECT(kept.ids.lists[0][i].id == ids.lists[0][i].id);
 	// Allowed, the Move moves the record with its identity, of its own kind.
 	const NodeAddress moved = leaf(0, 0);
-	TEST_EXPECT(document.apply(edit_of(EditOperation::Move, moved, 0, 3), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Move, moved, 0, 3), error));
 	const Shelf &after = static_cast<const Shelf &>(*document.rows()[0]);
 	TEST_EXPECT(document.serialize().text == "shelf 0 N0 N2 B30 B10 B0\nshelf 1 B5\n" &&
 	            after.ids.lists[0][3].id == moved.child && ids_match(shelf_table(), after.record(), after.ids));
 	// A note moved the same way, named by its own kind.
-	TEST_EXPECT(document.apply(edit_of(EditOperation::Move, leaf(0, 1), 0, 0), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Move, leaf(0, 1), 0, 0), error));
 	TEST_EXPECT(document.serialize().text == "shelf 0 N2 N0 B30 B10 B0\nshelf 1 B5\n");
 	std::printf("core: a list of two kinds walked and added as each, a field its shelf decides, a Move its list "
 	            "refuses leaving the record, its identities and the file as they were\n");

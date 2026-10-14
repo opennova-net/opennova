@@ -13,7 +13,7 @@
 // made while it ran (a file rewritten at its size moving its stamp, and a rename tried again
 // while another holds the file, are tests/io/file_io_test's now). Retail leg (OPENNOVA_JO_DIR): a project of the JO install's files opened a
 // step at a time at the editor's budget (its polls, its steps, its longest poll, bounded, and its
-// wall time), and the base layer a dependency mount of the install would build.
+// wall time), and the install as the base layer under an expansion project's graph.
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -940,8 +940,8 @@ static int test_rename_keeps_the_selection() {
 // (kDefaultPollBudget: 10 ms of 64 KiB steps), each loop bounded: the polls the Open takes and its
 // wall time, its first poll (the install's names listed, one step), then the validation's, and the
 // longest poll of each (the frame the editor would stall for), bounded by the budget and the
-// longest single step (one file's or one menu's work, timed afresh); and the base layer a read-only
-// dependency mount of the install builds (GraphLayer::build), timed.
+// longest single step (one file's or one menu's work, timed afresh); and the install as the base
+// layer under an expansion project's graph (GraphLayer::build), timed.
 static int test_retail_open() {
 	const std::string install = retail::install();
 	if (install.empty()) {
@@ -1119,8 +1119,9 @@ static int test_retail_open() {
 	const double room = kDefaultPollBudget.ms + 2 * step_floor + 50 + 2 * test_clock::kThreadCpuTickMs;
 	TEST_EXPECT(longest_open <= room);
 	TEST_EXPECT(longest_validation <= room);
-	// The dependency mount's base layer over the whole install, which an expansion project's Open
-	// would build (ADR 0046 d12's later list): one call today, timed.
+	// An expansion project's base game as the base layer under its graph, the whole install
+	// (ADR 0046 "An expansion's base game under its graph"; the Open steps it by bytes,
+	// BaseLayerBuild): one call here, timed.
 	const auto layered = clock::now();
 	GraphStats built;
 	const std::shared_ptr<const GraphLayer> layer = GraphLayer::build(layer_files, document.target_game, &built);

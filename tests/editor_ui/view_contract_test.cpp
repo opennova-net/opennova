@@ -1,4 +1,4 @@
-// S13 V3 (ADR 0046 S13, "Adding a document type"): every document type's view (ui/document_views)
+// S13 V3 (ADR 0046 S12, "Adding a document type"): every document type's view (ui/document_views)
 // holds to one contract over a file of its type, drawn alone on the null ImGui backend. Each
 // DocumentTypeId past None has its row, and a file here (a type with none fails); the view the row
 // makes (make_view) is an outline in the mode its row names (its model's), or a view of its own

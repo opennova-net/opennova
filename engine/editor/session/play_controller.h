@@ -61,6 +61,9 @@ public:
 	// port unless the game install runs; the game is launched from that one answer, and the view's
 	// runtime follows it.
 	void set_launcher_source(PlayLauncherSource source);
+	// How Play's staging gives a file a second name (io::link_file; a test's: one refusing what another volume's
+	// link would, so the copy cache is asked).
+	void set_file_link(FileLink link) { link_ = std::move(link); }
 	// The runtime Play launches, resolved (the source run's binary, the project's local setting,
 	// the editor's, else the one packaged beside the editor; "" when none).
 	std::string resolve_runtime_executable() const;
@@ -85,7 +88,16 @@ public:
 	// runtime mounting the run directory, where the build is staged for it; one that cannot be staged
 	// starts nothing (play.start).
 	void start(const PlayIntent &intent);
+	// What a Play of `intent` on the build `built` copies into the copy cache before it stages (S26 C16, the build's
+	// operation steps it): an expansion's base game (start's prepare_expansion_run, the runtime's or Strict Play's
+	// over the install itself) where the run directories' volume cannot link the install's files; null for none.
+	std::unique_ptr<InstallCopyFill> copy_fill(const PlayIntent &intent, const BuildReport &built);
 	void stop();
+	// Quit's (S26 C8): a Stop asked for and not yet seen through (a game past its WM_CLOSE, or with no
+	// window to take it) waited for, its own quit for kPlayQuitGraceMs, then forced (the deadline's kill) for the
+	// rest of kPlayQuitWaitMs, its exit absorbed, so closing the editor, which lets its game go, never leaves running
+	// a game the modder asked to stop. A game running unasked keeps running, as it outlives the editor.
+	void finish_stop();
 	// The poll's: the child's state, the game's log tail, how it ended once it has; the validation
 	// its report left due.
 	void poll();
@@ -155,6 +167,7 @@ private:
 	PlayLease play_lease_; // the running game's lease, as written (pid -1: none)
 	std::string run_dir_;  // the running game's run directory, its record written ("" for none)
 	PlayLauncherSource source_;
+	FileLink link_ = io::link_file;
 	PlayLauncher launcher_; // what the source said without a port: the view's runtime
 	std::string game_log_file_;
 	uint64_t game_log_offset_ = 0;
@@ -163,8 +176,7 @@ private:
 	// exited) and strictly so (its mode's), whether its run directory held a game.cfg before its first start, whether
 	// it was started again, when it started, and what its file log said it loaded.
 	LaunchPlan plan_;
-	bool install_run_ = false;
-	bool strict_run_ = false;
+	bool install_run_ = false; // Strict Play in the game install (else the OpenNova runtime)
 	bool had_config_ = false;
 	bool started_again_ = false;
 	bool start_again_pending_ = false; // waiting for the game before to let its gate go

@@ -294,7 +294,8 @@ Edited swatch(FieldColor color, Value &value) {
 	return out;
 }
 
-Edited channel_swatch(std::vector<Value> &values) {
+// A red / green / blue group's swatch over its three channels (0..255, in that order).
+static Edited channel_swatch(std::vector<Value> &values) {
 	Edited out;
 	if (values.size() != 3) return out;
 	float rgb[3];

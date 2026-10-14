@@ -40,11 +40,12 @@ void remove_empty_up(const fs::path &path, const fs::path &top) {
 	}
 }
 
-} // namespace
-
+// Where a batch's paths are: its folder under the trash.
 std::string trash_batch_dir(const ProjectPaths &paths, uint64_t id) {
 	return join_path(paths.trash_dir, std::to_string(id));
 }
+
+} // namespace
 
 size_t trash_file_count(const ProjectPaths &paths) {
 	size_t files = 0;

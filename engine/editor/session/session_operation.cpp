@@ -1,4 +1,5 @@
 #include <editor/session/session_operation.h>
+#include <editor/session/row_table.h>
 
 #include <chrono>
 #include <iterator>
@@ -45,12 +46,7 @@ static_assert(every_operation_writes_the_slot(), "one operation runs at a time: 
 
 static_assert(std::size(kOperationKindRows) == kOperationKindCount, "every operation kind has exactly one row");
 
-constexpr bool operation_kind_rows_in_order() {
-	for (size_t i = 0; i < kOperationKindCount; ++i)
-		if (kOperationKindRows[i].kind != static_cast<OperationKind>(i)) return false;
-	return true;
-}
-static_assert(operation_kind_rows_in_order(), "the operation kind rows follow the enum's order");
+static_assert(rows_follow(kOperationKindRows, &OperationKindRow::kind), "the operation kind rows follow the enum's order");
 
 // A step budget no operation exhausts: run_to_end() steps as far as each step goes.
 constexpr StepBudget kWholeStep{UINT64_MAX};
@@ -123,6 +119,10 @@ bool OperationSlot::finish(SessionCore &core) {
 bool OperationSlot::cancel() {
 	if (!operation_ || !operation_->cancellable()) return false;
 	operation_->cancel();
+	if (operation_->finishes_on_cancel()) {
+		done_ = true; // finished as the cancel is asked (SessionCore::cancel_operation)
+		return true;
+	}
 	last_ = OperationOutcome{id_, operation_->kind(), OperationEnd::Cancelled, {}};
 	operation_.reset();
 	id_ = 0;

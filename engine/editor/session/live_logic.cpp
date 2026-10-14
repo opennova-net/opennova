@@ -62,12 +62,18 @@ JsonValue live_snapshot_arguments() {
 	return out;
 }
 
-std::string play_debug_words(const PlayDebugCall &call) {
+// A call in words ("fire event 3", "set V12 to 1").
+static std::string play_debug_words(const PlayDebugCall &call) {
 	if (call.op == PlayDebugOp::FireEvent) return "fire event " + std::to_string(call.event + 1);
 	return "set V" + std::to_string(call.variable) + " to " + std::to_string(call.value);
 }
 
-bool live_logic_from_snapshot(const JsonValue &snapshot, LiveLogic &out, std::string &game_mission, std::string &error) {
+// The game's mission_logic_snapshot record (the row's result, or the invoke's whole answer {error, result}) read
+// into `out`: its tick, its events with their latch, countdowns, each trigger's last truth and a fire pending, its
+// mission variables (those absent read 0); `game_mission` the game's mission by its file's basename, "" at its
+// menu. A joiner's report (authority false) holds no rows. False, `error` why, for a record that is no snapshot.
+// `out.mission`, `played_revision`, `stale` and `serial` are the session's and are left as they were.
+static bool live_logic_from_snapshot(const JsonValue &snapshot, LiveLogic &out, std::string &game_mission, std::string &error) {
 	// The invoke's whole answer carries the record as its result.
 	const JsonValue *record = &snapshot;
 	if (const JsonValue *result = snapshot.get("result"); result && result->is_object()) record = result;

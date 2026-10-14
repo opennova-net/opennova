@@ -86,8 +86,6 @@ const RecordTable &hudfx_table() {
 	return table;
 }
 
-bool is_hudfx_kind(AssetKind kind) { return asset_kind_row(kind).document == DocumentTypeId::HudFx; }
-
 std::string HudFxRow::name() const {
 	const char *tag = def::hudfx_tag(line.slot);
 	return tag ? tag : "";
@@ -111,10 +109,6 @@ std::string HudFxDocument::record_title(const NodeAddress &address) const {
 
 bool HudFxDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                           std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &, Diagnostic &error) {
-	if (!is_hudfx_kind(kind())) {
-		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not hudfx.def.", path());
-		return false;
-	}
 	auto notes = std::make_shared<textlayout::Notes>();
 	const def::HudFxFile read = def::hudfx_parse(bytes.data(), bytes.size(), *notes);
 	for (const def::HudFxLine &line : read.lines) {

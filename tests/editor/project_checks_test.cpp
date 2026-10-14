@@ -44,6 +44,7 @@
 #include "common/test_expect.h"
 #include "editor/blob_document.h"
 #include "editor/editor_test_support.h"
+#include "editor/fixture_projects.h"
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
@@ -127,17 +128,8 @@ const DocumentType &blob_menu_type() {
 	return type;
 }
 
-std::string window(const std::string &name, const std::string &body) {
-	return "<WINDOW TYPE=\"STATIC\" NAME=\"" + name +
-			"\">\r\n<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>90</RIGHT><BOTTOM>90</BOTTOM></"
-			"POSITION>\r\n" +
-			body + "</WINDOW>\r\n";
-}
-
-std::string item(const std::string &name, int id) {
-	return "begin \"" + name + "\"\n  id " + std::to_string(id) +
-			"\n  type marker\n  hp 0\nend\n\n";
-}
+using fixture_projects::window;
+using fixture_projects::item;
 
 using Files = std::vector<std::pair<std::string, std::string>>;
 

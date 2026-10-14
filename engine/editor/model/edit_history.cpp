@@ -60,6 +60,11 @@ bool EditStep::changes_rows() const {
 	return false;
 }
 
+namespace {
+
+// A step's swaps done to a row list, forward (its before to its after) or back: the rows it takes
+// out from the last index down, the rows it puts in from the first index up, the rest swapped in
+// place.
 void apply_step(
 		std::vector<std::shared_ptr<const Node>> &rows, const EditStep &step, bool forward) {
 	struct Place {
@@ -100,6 +105,8 @@ void apply_step(
 			rows[at] = forward ? swap.after : swap.before;
 	}
 }
+
+} // namespace
 
 size_t EditHistory::mark_bytes(size_t rows) {
 	return sizeof(Mark) + rows * sizeof(NodeId);

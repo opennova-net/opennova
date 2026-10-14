@@ -18,7 +18,7 @@ enum class FontViewStatus : uint8_t {
 	Ready,
 };
 // "no_font", "unwritable", "ready".
-const char *font_view_status_token(FontViewStatus status);
+inline constexpr const char *kFontViewStatusTokens[] = {"no_font", "unwritable", "ready"};
 
 // What the picture shows of the font (its options, each a SetViewport): `text`, drawn as the game draws text
 // (its lines split at a line break, its bytes the game's code page), in `color` (0xRRGGBB, the colour a caller
@@ -39,7 +39,6 @@ struct FontViewportOptions {
 inline constexpr int kFontZoomMost = 8;
 // The picture's margin round the text or the page, game pixels.
 inline constexpr float kFontPictureMargin = 8.0f;
-io::JsonValue font_options_json(const FontViewportOptions &options);
 // The change a SetViewport makes to set a font viewport's options to `options`.
 std::string font_options_change(const FontViewportOptions &options);
 
@@ -97,7 +96,7 @@ public:
 	NodeAddress glyph_address(const ViewportInput &input, size_t glyph) const;
 
 	ViewportStatus status() const override;
-	const char *reason() const override { return font_view_status_token(reason_); }
+	const char *reason() const override { return enum_token(kFontViewStatusTokens, reason_); }
 	std::string message() const override;
 	const std::string &detail() const override { return detail_; }
 	std::string caption() const override;

@@ -44,18 +44,7 @@ struct Preferences {
 	// (recent_items_game; the settings file's `recent_items_by_game`); a store that does not say reads
 	// as none.
 	std::map<std::string, std::vector<int64_t>> recent_items;
-	// The Play settings an earlier editor kept here for every project (play_in_install,
-	// play_in_install_strict, save_before_play), each as the file held it (held_setting: `play_in_install
-	// true`), in kRetiredPlayKeys' order: read by nothing, never written, so the next save drops them. Play's
-	// settings are each project's (LocalSettings::play_mode, save_before_play); pre-1.0 there is no reader
-	// carrying the editor's old ones into a project. The session says once that they were seen and
-	// ignored (SessionCore::start).
-	std::vector<std::string> retired_play;
 };
-
-// The keys of retired_play: what the editor's settings file kept of Play before Play's settings were
-// each project's.
-inline constexpr const char *kRetiredPlayKeys[] = {"play_in_install", "play_in_install_strict", "save_before_play"};
 
 // Where the preferences are kept (S13 A2). The embedder owns the store and hands the session a
 // reference: the shell a file in the editor's user directory (FilePreferencesStore), a test or

@@ -19,6 +19,7 @@
 #include <formats/mnu/mnu_layout.h>
 
 #include "common/test_expect.h"
+#include "editor/menu_test_support.h"
 
 using namespace opennova::editor;
 namespace mnu = opennova::mnu;
@@ -68,15 +69,8 @@ LayoutStart start_of(const mnu::Position &authored, const LayoutSolve &solve, in
 	return start;
 }
 
-bool same(const mnu::Position &a, const mnu::Position &b) {
-	return a.has_left == b.has_left && a.has_top == b.has_top && a.has_right == b.has_right &&
-	       a.has_bottom == b.has_bottom && (!a.has_left || a.left == b.left) && (!a.has_top || a.top == b.top) &&
-	       (!a.has_right || a.right == b.right) && (!a.has_bottom || a.bottom == b.bottom);
-}
-
-bool rect_is(const mnu::RectEdges &r, int left, int top, int right, int bottom) {
-	return r.left == left && r.top == top && r.right == right && r.bottom == bottom;
-}
+using menu_test::same;
+using menu_test::rect_is;
 
 // The plan, and that the runtime's solve lands it on the drag's target.
 bool plan(const LayoutStart &start, LayoutHandle handle, int dx, int dy, int grid, const LayoutSolve &solve,
@@ -158,20 +152,25 @@ static int test_each_handle() {
 	const LayoutStart start = start_of(all(100, 100, 300, 200), solve);
 	struct Case {
 		LayoutHandle handle;
+		const char *token;
 		mnu::Position expected;
 	};
 	const Case cases[] = {
-	        {LayoutHandle::Left, all(110, 100, 300, 200)},        {LayoutHandle::Right, all(100, 100, 310, 200)},
-	        {LayoutHandle::Top, all(100, 120, 300, 200)},         {LayoutHandle::Bottom, all(100, 100, 300, 220)},
-	        {LayoutHandle::TopLeft, all(110, 120, 300, 200)},     {LayoutHandle::TopRight, all(100, 120, 310, 200)},
-	        {LayoutHandle::BottomLeft, all(110, 100, 300, 220)},  {LayoutHandle::BottomRight, all(100, 100, 310, 220)},
+	        {LayoutHandle::Left, "left", all(110, 100, 300, 200)},
+	        {LayoutHandle::Right, "right", all(100, 100, 310, 200)},
+	        {LayoutHandle::Top, "top", all(100, 120, 300, 200)},
+	        {LayoutHandle::Bottom, "bottom", all(100, 100, 300, 220)},
+	        {LayoutHandle::TopLeft, "top_left", all(110, 120, 300, 200)},
+	        {LayoutHandle::TopRight, "top_right", all(100, 120, 310, 200)},
+	        {LayoutHandle::BottomLeft, "bottom_left", all(110, 100, 300, 220)},
+	        {LayoutHandle::BottomRight, "bottom_right", all(100, 100, 310, 220)},
 	};
 	for (const Case &c : cases) {
 		mnu::Position out;
 		TEST_EXPECT(plan(start, c.handle, 10, 20, 0, solve, out));
 		TEST_EXPECT(same(out, c.expected));
 		LayoutHandle back;
-		TEST_EXPECT(layout_handle_from_token(layout_handle_token(c.handle), back) && back == c.handle);
+		TEST_EXPECT(layout_handle_from_token(c.token, back) && back == c.handle);
 	}
 	LayoutHandle none;
 	TEST_EXPECT(!layout_handle_from_token("middle", none));

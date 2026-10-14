@@ -7,11 +7,11 @@ extends RefCounted
 ## queries page their lists). editor_viewport (S13 V7) is the same two seams under one tool: its
 ## reads the viewport query, its writes set_viewport and edit_in_viewport.
 
-## How long editor_play op=stop waits for the game to leave.
-const STOP_WAIT_MS := 10_000
-## How long editor_request's `wait` awaits the operation and the validation, unless `wait_ms` says
-## (S13 A3): past it the answer says timed_out, with the operation and the validation as they stand.
-const REQUEST_WAIT_MS := 300_000
+## How long editor_request's `wait` awaits the operation and the validation, at most and by default
+## (S13 A3): past it the answer says timed_out, with the operation and the validation as they stand. Below
+## the tool's own budget, so a long wait always answers as timed_out (S26 C2: a wait_ms past the budget was
+## cut by the registry with a bare error, the handler cancelled).
+const REQUEST_WAIT_MS := EditorMcpCatalog.REQUEST_WAIT_MAX_MS
 
 var service: EditorMcpService
 var app: Node
@@ -31,8 +31,6 @@ func _handlers() -> Dictionary:
 		"editor_state": _tool_editor_state,
 		"editor_request": _tool_editor_request,
 		"editor_query": _tool_editor_query,
-		"editor_build": _tool_editor_build,
-		"editor_play": _tool_editor_play,
 		"editor_viewport": _tool_editor_viewport,
 		"editor_screenshot": _tool_editor_screenshot,
 		"editor_logs": _tool_editor_logs,
@@ -68,14 +66,14 @@ func _tool_editor_query(args: Dictionary, _ctx: McpToolContext) -> Variant:
 ## rename's commit, a build); `wait` (the tool's, not the request's) awaits that operation's end and
 ## the validation the polls step after it (or after an edit: no request runs it), frames passing the
 ## while, and answers with what the operation came to (operation: the last_operation block) and the
-## status and view_revision as it left them. `wait_ms` bounds the wait (REQUEST_WAIT_MS): past it the
-## answer says timed_out, its operation the running operation's state and its validation the
-## validation's.
+## status and view_revision as it left them. `wait_ms` bounds the wait (REQUEST_WAIT_MS, also its
+## most): past it the answer says timed_out, its operation the running operation's state and its
+## validation the validation's; the caller polls editor_query operation from there.
 func _tool_editor_request(args: Dictionary, ctx: McpToolContext) -> Variant:
 	var request := args.duplicate()
 	request.erase("_session_id")
 	var wait := bool(request.get("wait", false))
-	var wait_ms := int(request.get("wait_ms", REQUEST_WAIT_MS))
+	var wait_ms := clampi(int(request.get("wait_ms", REQUEST_WAIT_MS)), 0, REQUEST_WAIT_MS)
 	request.erase("wait")
 	request.erase("wait_ms")
 	# Unsorted: a replace_list record's fields are set in the order written, and JSON.stringify
@@ -103,94 +101,7 @@ func _tool_editor_request(args: Dictionary, ctx: McpToolContext) -> Variant:
 		var status := _query("state", {"sections": ["status"]})
 		answer["status"] = String(status.get("status", {}).get("status", answer.get("status", "")))
 		answer["view_revision"] = int(status.get("view_revision", answer.get("view_revision", 0)))
-	return answer
-
-
-## The build raised as the windows raise it, then frames awaited until its operation ends: the
-## editor keeps drawing and answering the while. A build running already is joined, not started
-## again.
-func _tool_editor_build(args: Dictionary, ctx: McpToolContext) -> Variant:
-	if not _project_open():
-		return McpToolResult.error("No project is open: editor_request new_project or open_project first.")
-	var build_request := {"kind": "build"}
-	# report false: the build result's panel stays closed as the build ends.
-	if args.has("report") and not bool(args.get("report", true)):
-		build_request["report"] = false
-	var answer: Variant = _parsed(String(app.call("request_json", JSON.stringify(build_request))))
-	var failed := _outcome_error(answer, "editor_build")
-	if failed != null:
-		return failed
-	var ended := await _operation_end(int(answer.get("outcome", {}).get("operation", 0)), ctx)
-	var build: Dictionary = _query("operation").get("build", {})
-	build["operation"] = ended
-	build["ok"] = String(ended.get("end", "")) == "done" and bool(build.get("ok", false))
-	if String(ended.get("end", "")) == "cancelled" or ended.is_empty():
-		return McpToolResult.error("The build was cancelled before it landed.", build)
-	if not bool(build["ok"]):
-		return McpToolResult.error("The build failed; its diagnostics and editor_query problems say why.", build)
-	return build
-
-
-func _tool_editor_play(args: Dictionary, ctx: McpToolContext) -> Variant:
-	var op := String(args.get("op", ""))
-	match op:
-		"start":
-			if not _project_open():
-				return McpToolResult.error("No project is open: editor_request new_project or open_project first.")
-			if String(_run().get("state", "")) != "stopped":
-				return McpToolResult.error("The game is already running; editor_play op=stop first.")
-			# Play builds first: its build's operation is awaited as editor_build awaits it, and the
-			# game starts on the poll the build lands, in `mission` when one is named (S14).
-			var play := {"kind": "play"}
-			var mission := String(args.get("mission", ""))
-			if not mission.is_empty():
-				play["mission"] = mission
-			if bool(args.get("behind", false)):
-				play["behind"] = true
-			if bool(args.get("fresh", false)):
-				play["fresh"] = true
-			# How this Play runs and whether it saves first, for itself alone (left out, the project's own).
-			var own := {}
-			for key in ["play_mode", "save_before_play"]:
-				if args.has(key):
-					own[key] = args[key]
-			play.merge(own)
-			# Play from here (DI-26): a start of the caller's (start {at, yaw}), or the mission view's own
-			# (from_here: the ground under its camera, or under the picture point `at`), which the view plans
-			# as the Play it raises.
-			if args.has("start"):
-				play["start"] = args["start"]
-			if bool(args.get("from_here", false)):
-				var command := {"name": "play_from_here", "kind": "mission"}
-				if args.has("at"):
-					command["at"] = args["at"]
-				play = {"kind": "edit_in_viewport", "path": mission, "command": command}
-				if bool(args.get("behind", false)):
-					play["behind"] = true
-				if bool(args.get("fresh", false)):
-					play["fresh"] = true
-				play.merge(own)
-			var answer: Variant = _parsed(String(app.call("request_json", JSON.stringify(play))))
-			var failed := _outcome_error(answer, "editor_play op=start")
-			if failed != null:
-				return failed
-			await _operation_end(int(answer.get("outcome", {}).get("operation", 0)), ctx)
-			var run := _run()
-			if String(run.get("state", "")) != "running":
-				return McpToolResult.error("Play did not start; the build or the launch refused (editor_query "
-						+ "problems and output).", _query("operation").get("build", {}))
-			return run
-		"stop":
-			app.call("request_json", JSON.stringify({"kind": "stop_play"}))
-			var deadline := Time.get_ticks_msec() + STOP_WAIT_MS
-			while String(_run().get("state", "")) != "stopped" and Time.get_ticks_msec() < deadline \
-					and not ctx.cancelled:
-				await ctx.frames(1)
-			return _run()
-		"state":
-			return _run()
-		_:
-			return McpToolResult.error("Unknown editor_play op '%s'." % op)
+	return _whole(answer)
 
 
 ## editor_viewport (S13 V7): a document's viewport, `op` dispatched to the session's two seams. A read
@@ -259,7 +170,7 @@ func _tool_editor_viewport(args: Dictionary, _ctx: McpToolContext) -> Variant:
 	var after := _query("viewport", state)
 	if not after.is_empty():
 		answer["viewport"] = after
-	return answer
+	return _whole(answer)
 
 func _tool_editor_screenshot(args: Dictionary, ctx: McpToolContext) -> Variant:
 	var viewport: Viewport = app.get_viewport() if app.is_inside_tree() else null
@@ -280,27 +191,31 @@ func _tool_editor_logs(args: Dictionary, ctx: McpToolContext) -> Variant:
 
 ## A query's answer as the tool's result, or the query's refusal as the tool's error.
 func _answer(name: String, params: Dictionary) -> Variant:
-	var answer: Variant = _parsed(String(app.call("query_json", name, JSON.stringify(params))))
+	var text := String(app.call("query_json", name, JSON.stringify(params)))
+	var answer: Variant = _parsed(text)
 	if not (answer is Dictionary):
 		return McpToolResult.error("The editor returned an invalid answer.")
 	if (answer as Dictionary).has("error"):
 		return McpToolResult.error(String(answer["error"]))
-	return answer
+	return _whole(answer, text)
+
+
+## The session's answer as the tool's result, whole (S26 C1): the session pages its lists and its JSON is
+## JSON already, so the game MCP's McpJson.sanitize (a list cut at 200 entries with a string in it, a depth
+## past 24 turned to "<max depth>", a string clipped at 8192 characters) only cut it: a menu's tree, a
+## model's parts, a font's 224 glyphs and a texture thumbnail's PNG came back broken. `text` is the
+## session's own JSON text when the caller has it (the answer as it was not changed since).
+static func _whole(answer: Dictionary, text := "") -> McpToolResult:
+	var result := McpToolResult.new()
+	result.add_text(text if not text.is_empty() else JSON.stringify(answer, "", false))
+	result.structured = answer
+	return result
 
 
 ## A query's answer ({} when it was refused).
 func _query(name: String, params := {}) -> Dictionary:
 	var answer: Variant = _parsed(String(app.call("query_json", name, JSON.stringify(params))))
 	return answer if answer is Dictionary and not (answer as Dictionary).has("error") else {}
-
-
-func _project_open() -> bool:
-	return bool(_query("state", {"sections": ["project"]}).get("project", {}).get("open", false))
-
-
-## The run section: Play's state, pid, port and exit.
-func _run() -> Dictionary:
-	return _query("state", {"sections": ["run"]}).get("run", {})
 
 
 ## The session's JSON as a Variant with whole numbers as integers: Godot's parser
@@ -325,31 +240,6 @@ static func _whole_numbers(value: Variant) -> Variant:
 			return out
 		_:
 			return value
-
-
-## A request's answer as a tool error when the request did not happen: `ok` only says
-## it read; the outcome (session_json's action_outcome_to_json) says whether it was
-## refused or did not finish (its findings say why) or waits on the unsaved-changes
-## prompt. null when it was done.
-func _outcome_error(answer: Variant, what: String) -> McpToolResult:
-	if not (answer is Dictionary):
-		return McpToolResult.error("The editor returned an invalid answer.")
-	if not bool(answer.get("ok", false)):
-		return McpToolResult.error(String(answer.get("error", "The request was refused.")))
-	var outcome: Dictionary = answer.get("outcome", {})
-	if bool(outcome.get("unsaved_prompt", false)):
-		var prompt: Dictionary = _query("state", {"sections": ["dialogs"]}).get("dialogs", {}).get("unsaved_prompt", {})
-		var choices := "save, discard or cancel" if bool(prompt.get("can_discard", true)) else "save or cancel"
-		var files := ", ".join(PackedStringArray(prompt.get("files", [])))
-		return McpToolResult.error("%s waits on unsaved changes (%s): editor_request resolve_unsaved with " % [what, files]
-				+ "choice %s." % choices, prompt)
-	if bool(outcome.get("done", false)):
-		return null
-	var findings: Array = outcome.get("findings", [])
-	var reason := ""
-	if not findings.is_empty():
-		reason = " (%s: %s)" % [String(findings[0].get("code", "")), String(findings[0].get("message", ""))]
-	return McpToolResult.error("%s did not go through%s." % [what, reason], findings)
 
 
 ## Frames until the validation the polls step has ended (S13 A3: the first one after a project

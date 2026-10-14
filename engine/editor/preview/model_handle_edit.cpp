@@ -4,6 +4,7 @@
 #include <cstring>
 #include <variant>
 
+#include <base/io/fixed.h>
 #include <editor/documents/model_document.h>
 #include <formats/threedi/threedi_build.h>
 
@@ -61,7 +62,7 @@ bool held(const ModelDocument &document, const NodeAddress &record, const char *
 	Value current;
 	if (!document.get(record, field, current) || !std::holds_alternative<double>(current)) return false;
 	const double now = std::get<double>(current);
-	if (kind == ModelOverlayKind::UserPoint) return std::llround(value * 65536.0) == std::llround(now * 65536.0);
+	if (kind == ModelOverlayKind::UserPoint) return std::llround(value * io::kFp16OneD) == std::llround(now * io::kFp16OneD);
 	return float(value) == float(now);
 }
 

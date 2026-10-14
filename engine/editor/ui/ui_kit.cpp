@@ -96,6 +96,28 @@ bool tool(WrapRow &row, const char *label, bool enabled, const std::string &tip,
 	return pressed && enabled && !held;
 }
 
+bool check(WrapRow &row, const char *label, bool *value, const std::string &tip) {
+	row.next(checkbox_width(label));
+	const bool changed = ImGui::Checkbox(label, value);
+	tooltip(tip);
+	return changed;
+}
+
+PathField path_field(const char *label, char *buffer, size_t size, const char *browse, float width, bool enabled) {
+	PathField out;
+	WrapRow row;
+	const float field = width > 0.0f ? width : ImGui::CalcItemWidth();
+	row.next(field_width(field, label));
+	ImGui::SetNextItemWidth(field);
+	out.edited = ImGui::InputText(label, buffer, size);
+	out.typing = ImGui::IsItemActive();
+	row.next(button_width(browse));
+	ImGui::BeginDisabled(!enabled);
+	out.browse = ImGui::Button(browse) && enabled;
+	ImGui::EndDisabled();
+	return out;
+}
+
 RowTool row_tools(WrapRow &row, const RowTools &t) {
 	const bool chosen = t.selected < t.count;
 	const bool full = t.max != 0 && t.count >= t.max;
@@ -368,9 +390,13 @@ ImVec4 reference_color(ReferenceStatus status) {
 }
 
 void empty_state(const char *text, const char *hint) {
+	note(text);
+	if (hint) note(hint);
+}
+
+void note(const std::string &text) {
 	ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-	ImGui::TextWrapped("%s", text);
-	if (hint) ImGui::TextWrapped("%s", hint);
+	ImGui::TextWrapped("%s", text.c_str());
 	ImGui::PopStyleColor();
 }
 

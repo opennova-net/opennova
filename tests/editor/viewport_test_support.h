@@ -2,7 +2,9 @@
 
 // The viewports' tests' fakes (S13 V5): a device that draws nothing and records what its viewport
 // asked, the device cache over such devices, and the requests a planner made, served through a
-// session. The Shell's devices are godot/src/authoring's; these stand in for them in a ctest.
+// session. The Shell's devices are godot/src/authoring's; these stand in for them in a ctest. And
+// what the viewports' tests read and stage alike: the synthetic models' fixture, a window's edges, a
+// JSON member, an effect's and a particle's text, a definition's spawns, a refusal's words.
 
 #include <functional>
 #include <memory>
@@ -13,6 +15,7 @@
 #include <editor/preview/viewport_follow.h>
 
 #include <editor/preview/canvas_gesture.h>
+#include <editor/preview/definition_viewport.h>
 #include <editor/preview/menu_viewport.h>
 #include <editor/preview/model_viewport.h>
 #include <editor/preview/script_viewport.h>
@@ -25,11 +28,61 @@
 #include <editor/session/project_session.h>
 #include <editor/session/view/session_view.h>
 
+#include "common/test_paths.h"
 #include "editor/editor_test_support.h"
 
 namespace editor_test {
 
 using opennova::editor::ViewportAction;
+
+// The synthetic models' fixture `name` (fixtures/threedi/synth).
+inline std::string synth(const char *name) {
+	return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth/" + name;
+}
+
+// A whole-number field of a record (-1: none), and a window's four edges: left, top, right, bottom.
+inline int64_t field_of(const opennova::editor::Document &document, const opennova::editor::NodeAddress &address,
+		const char *field) {
+	opennova::editor::Value value;
+	return document.get(address, field, value) && std::holds_alternative<int64_t>(value) ? std::get<int64_t>(value)
+	                                                                                      : -1;
+}
+inline std::vector<int64_t> edges(const opennova::editor::Document &document,
+		const opennova::editor::NodeAddress &window) {
+	return {field_of(document, window, "position.left"), field_of(document, window, "position.top"),
+			field_of(document, window, "position.right"), field_of(document, window, "position.bottom")};
+}
+
+// A member of a JSON object, or a member of that member (null: none).
+inline const opennova::io::JsonValue *at(const opennova::io::JsonValue &value, const char *a, const char *b = nullptr) {
+	const opennova::io::JsonValue *one = value.get(a);
+	return b && one ? one->get(b) : one;
+}
+
+// A particle `id` emitting `rate` a second for `dur` seconds, each living `age` seconds; an effect `id`
+// of the particles `pdefs`.
+inline std::string particle_text(const std::string &id, float dur, float rate, float age) {
+	return "[particledef]\n{\n\tid = " + id + ";\n\temit_dur = " + std::to_string(dur) + ";\n\temit_rate = " +
+			std::to_string(rate) + ";\n\temit_burst = 1;\n\tage = " + std::to_string(age) +
+			";\n\tscale = 0.5;\n\tspeed = 2.0;\n\tspread = 30.0;\n\tgravity = 1.0;\n\tscale_func = grow;\n}\n\n";
+}
+inline std::string effect_text(const std::string &id, const std::string &pdefs) {
+	return "[effectdef]\n{\n\tid = " + id + ";\n\tpdefs = " + pdefs + ";\n}\n\n";
+}
+
+// The spawns of `source` the definition viewport's effects keep.
+inline std::vector<opennova::editor::DefinitionSpawn> spawns_of(const opennova::editor::DefinitionViewport &viewport,
+		const std::string &source) {
+	std::vector<opennova::editor::DefinitionSpawn> out;
+	for (const opennova::editor::DefinitionSpawn &spawn : viewport.effects().spawns())
+		if (spawn.source == source) out.push_back(spawn);
+	return out;
+}
+
+// What a refused request said ("" for none).
+inline std::string refusal(opennova::editor::ProjectSession &session) {
+	return session.outcome().findings.empty() ? std::string() : session.outcome().findings.front().message;
+}
 
 // A device that draws nothing: the actions its viewport asked of it, in order, and the size it was
 // drawn at. It reports its size as the Shell's does: the one a canvas drew it at since the last pump

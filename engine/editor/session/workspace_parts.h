@@ -127,9 +127,6 @@ ShownModal shown_modal(const SessionView &view);
 // Whether `modal` (of the document at `path`, a Remove screen prompt's) is the one that shows, or none does
 // (a window's own ask, shown at once, the frame it is made).
 bool modal_may_show(const SessionView &view, HeldModal modal, const std::string &path = std::string());
-// "" none; unsaved, import, texture_source, settings, new_project, new_file, file_rename, file_delete, rename,
-// rename_back, project_find, confirm, remove_screen.
-const char *held_modal_token(HeldModal modal);
 
 // The workspace section: each part as the windows show it, the sound, and each open document's views.
 io::JsonValue workspace_to_json(const SessionView &view);

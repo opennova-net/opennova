@@ -16,10 +16,12 @@
 #include <algorithm>
 #include <cstdio>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <base/io/json.h>
 #include <editor/documents/def_table.h>
+#include <editor/documents/texture_roles.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
 #include <editor/graph/reference_queries.h>
@@ -28,6 +30,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <formats/rtxt/rtxt.h>
+#include <runtime/hud/hud_layout_from_hudpos.h>
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
@@ -436,7 +439,8 @@ static int test_aliases_and_parts() {
 	TEST_EXPECT(setup(project));
 	TEST_EXPECT(project.write(project.path("items.def"), std::string(kItems) +
 	                                                         "begin \"Buggy\"\nid 100502\nsid buggy1\ntype vehicle\nend\n"));
-	TEST_EXPECT(project.write("defs/hudpos.def", "VEHICLE_HUD\n  sid BUGGY1\n  interface h_buggy.tga\nVEHICLE_END\n"
+	TEST_EXPECT(project.write("defs/hudpos.def", "VEHICLE_HUD\n  sid BUGGY1\n  icon i_buggy.tga\n  interface h_buggy.tga\n"
+	                                             "  statictexture s_buggy.tga\nVEHICLE_END\n"
 	                                             "VEHICLE_HUD\n  sid S100500\nVEHICLE_END\n"
 	                                             "VEHICLE_HUD\n  sid gone\nVEHICLE_END\n"));
 	TEST_EXPECT(project.write("defs/Avatars.def",
@@ -455,6 +459,15 @@ static int test_aliases_and_parts() {
 	TEST_EXPECT(buggy && buggy->kind == ReferenceKind::ItemAlias && graph.resolve(*buggy) == ReferenceStatus::Present);
 	TEST_EXPECT(tank && graph.resolve(*tank) == ReferenceStatus::Present);
 	TEST_EXPECT(gone && graph.resolve(*gone) == ReferenceStatus::Missing);
+	// The panel's three names, each a texture the HUD loads in its alpha mode (S26 A12) [orig: HUD_LoadAllTextures @
+	// 0x59E248..0x59E2CB].
+	const int32_t hud_alpha = texture_role_arg(hud::kVehicleHudInterfaceRole);
+	for (const auto &[field, name] : {std::pair<const char *, const char *>{"icon", "i_buggy.tga"},
+	                                  {"interface", "h_buggy.tga"}, {"statictexture", "s_buggy.tga"}}) {
+		const GraphEdge *texture = edge_of(graph, hudpos, field, name);
+		TEST_EXPECT(texture && texture->kind == ReferenceKind::Texture && texture->loader_arg == hud_alpha);
+		if (!texture || texture->loader_arg != hud_alpha) std::printf("  the panel's %s: not the HUD alpha role\n", field);
+	}
 	// A combination's parts, each of its kind.
 	const GraphEdge *head = edge_of(graph, avatars, "head", "h1");
 	TEST_EXPECT(head && head->kind == ReferenceKind::AvatarPart && head->scope == "AVATARS.DEF/HEAD" &&

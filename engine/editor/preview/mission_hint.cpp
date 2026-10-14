@@ -5,6 +5,12 @@
 
 namespace opennova::editor {
 
+// A turn snap's words: "15 deg", "whole degrees".
+std::string mission_turn_words(float degrees);
+
+// A snap's words: "1 m", "0.25 m", "free".
+std::string mission_snap_words(float metres);
+
 std::string mission_snap_words(float metres) {
 	if (!(metres > 0.0f)) return "free";
 	char text[32];

@@ -16,7 +16,7 @@
 #                variants are built: the runtime-only libopennova.* the game
 #                and the Play child ship, and the editor-enabled
 #                libopennova_editor.* the OpenNova Editor ships and every source
-#                run (the Godot editor, GUT) loads (ADR 0046 d4).
+#                run (the Godot editor, GUT) loads (ADR 0046 d2).
 #   Dev       -> lib*.<platform>.template_debug.x86_64.<dll|so>  (editor)
 #                RelWithDebInfo: optimized native code (/O2 + symbols). This is
 #                the flavor every editor session and every game runtime it

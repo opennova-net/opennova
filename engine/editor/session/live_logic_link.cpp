@@ -31,7 +31,7 @@ std::string header_value(const std::string &head, const char *name) {
 
 } // namespace
 
-GameMcpRead read_game_mcp_response(const std::string &bytes, GameMcpResponse &out) {
+static GameMcpRead read_game_mcp_response(const std::string &bytes, GameMcpResponse &out) {
 	const size_t head_end = bytes.find("\r\n\r\n");
 	if (head_end == std::string::npos) return bytes.size() > 65536 ? GameMcpRead::Malformed : GameMcpRead::Incomplete;
 	const std::string head = bytes.substr(0, head_end);
@@ -50,7 +50,8 @@ GameMcpRead read_game_mcp_response(const std::string &bytes, GameMcpResponse &ou
 	return GameMcpRead::Whole;
 }
 
-std::string game_mcp_post(int port, const std::string &session_id, const std::string &body) {
+// A POST of `body` to the endpoint at `port` (with `session_id` where the endpoint gave one).
+static std::string game_mcp_post(int port, const std::string &session_id, const std::string &body) {
 	std::string out = "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(port) +
 	                  "\r\nContent-Type: application/json\r\nAccept: application/json\r\n";
 	if (!session_id.empty()) out += "Mcp-Session-Id: " + session_id + "\r\n";
@@ -58,7 +59,8 @@ std::string game_mcp_post(int port, const std::string &session_id, const std::st
 	return out + body;
 }
 
-std::string game_mcp_initialize_body(uint64_t id) {
+// The JSON-RPC requests the link makes: initialize, and a tools/call of game_debug with `arguments`.
+static std::string game_mcp_initialize_body(uint64_t id) {
 	JsonValue client = JsonValue::make_object();
 	client.set("name", io::json_string("opennova-editor"));
 	client.set("version", io::json_string("1"));
@@ -74,7 +76,7 @@ std::string game_mcp_initialize_body(uint64_t id) {
 	return io::json_write(out);
 }
 
-std::string game_mcp_debug_body(uint64_t id, const JsonValue &arguments) {
+static std::string game_mcp_debug_body(uint64_t id, const JsonValue &arguments) {
 	JsonValue params = JsonValue::make_object();
 	params.set("name", io::json_string("game_debug"));
 	params.set("arguments", arguments);
@@ -86,7 +88,9 @@ std::string game_mcp_debug_body(uint64_t id, const JsonValue &arguments) {
 	return io::json_write(out);
 }
 
-bool game_mcp_tool_result(const std::string &body, JsonValue &out, std::string &error) {
+// A tools/call answer's tool result (its structuredContent, else its text read as JSON) into `out`; false with
+// `error` the tool's own words (an isError result) or why the answer does not read.
+static bool game_mcp_tool_result(const std::string &body, JsonValue &out, std::string &error) {
 	JsonValue answer;
 	if (!io::json_parse(body, answer, error)) {
 		error = "the game's answer does not read: " + error;

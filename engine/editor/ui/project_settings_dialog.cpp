@@ -30,21 +30,6 @@ const char *game_display_name(const std::string &code) {
 	return profile != nullptr ? profile->display_name : code.c_str();
 }
 
-// A path field and its Browse..., the button under the field when the dialog is narrow;
-// true when Browse... was pressed; `typing`, when given, whether the field is being typed in, and
-// `edited` whether its text changed this frame.
-bool path_field(const char *label, char *buffer, size_t size, const char *browse, bool *typing = nullptr,
-                bool *edited = nullptr) {
-	ui_kit::WrapRow row;
-	row.next(ui_kit::field_width(field_width(), label));
-	ImGui::SetNextItemWidth(field_width());
-	const bool changed = ImGui::InputText(label, buffer, size);
-	if (edited) *edited = changed;
-	if (typing) *typing = ImGui::IsItemActive();
-	row.next(ui_kit::button_width(browse));
-	return ImGui::Button(browse);
-}
-
 // Whether no Apply was answered after the one the SettingsApplied event at `seq` answers: the
 // view's settings_result is then that Apply's (each answer replaces it). An answer the view no
 // longer holds is not known to be the last.
@@ -159,17 +144,17 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 		ImGui::TextDisabled("Apply renames the project's own expansion files to the new name.");
 
 	ImGui::SeparatorText("This computer");
-	bool typing = false, edited = false;
-	if (path_field("Game install folder", game_install_.text, sizeof(game_install_.text), "Browse...##install", &typing,
-	               &edited)) {
+	const ui_kit::PathField install =
+			ui_kit::path_field("Game install folder", game_install_.text, sizeof(game_install_.text), "Browse...##install", field_width());
+	if (install.browse) {
 		pick_ = PickPurpose::GameInstall;
 		workspace.request(request::pick_directory(PickPurpose::GameInstall));
 	}
-	if (edited) set("game_install", io::JsonValue::make_string(game_install_.sent()));
+	if (install.edited) set("game_install", io::JsonValue::make_string(game_install_.sent()));
 	ui_kit::tooltip(game_install_.text);
 	// What the folder holds, checked once it is not being typed (the UX round's project lane).
 	bool found = false;
-	const std::string words = check_.words(workspace, game_install_.text, typing, std::string(), found);
+	const std::string words = check_.words(workspace, game_install_.text, install.typing, std::string(), found);
 	ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + field_width() * 1.5f);
 	ImGui::PushStyleColor(ImGuiCol_Text, words.empty() || found ? ImVec4(0.55f, 0.85f, 0.55f, 1.0f) : ImVec4(0.95f, 0.55f, 0.45f, 1.0f));
 	ImGui::TextWrapped("%s", words.empty() ? "Checking the folder..." : words.c_str());
@@ -183,13 +168,13 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 		if (shown != runtime) ui_kit::tooltip(runtime);
 		ImGui::TextDisabled("A source run: Play runs the Godot binary at the checkout.");
 	} else {
-		bool runtime_edited = false;
-		if (path_field("OpenNova runtime", runtime_.text, sizeof(runtime_.text), "Browse...##runtime", nullptr,
-		               &runtime_edited)) {
+		const ui_kit::PathField runtime =
+				ui_kit::path_field("OpenNova runtime", runtime_.text, sizeof(runtime_.text), "Browse...##runtime", field_width());
+		if (runtime.browse) {
 			pick_ = PickPurpose::RuntimeExecutable;
 			workspace.request(request::pick_file(PickPurpose::RuntimeExecutable));
 		}
-		if (runtime_edited) set("runtime", io::JsonValue::make_string(runtime_.sent()));
+		if (runtime.edited) set("runtime", io::JsonValue::make_string(runtime_.sent()));
 		ImGui::TextDisabled("opennova.exe; left empty, the one packaged beside the editor.");
 		ui_kit::tooltip(v.activity.runtime_executable.empty() ? "No runtime is found now." : "Play runs " + v.activity.runtime_executable + ".");
 	}
@@ -197,18 +182,16 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 	// never reaches another project, nor another editor on the machine).
 	ImGui::SeparatorText("Play");
 	const auto set_mode = [&set](PlayMode mode) { set("play_mode", io::JsonValue::make_string(play_mode_token(mode))); };
-	bool in_install = plays_in_install(held.play_mode);
-	if (ImGui::Checkbox("Play in the game install", &in_install)) set_mode(in_install ? PlayMode::Install : PlayMode::Runtime);
-	ui_kit::tooltip("Play starts the game install on the build instead of the OpenNova runtime.");
-	ImGui::Indent();
-	ImGui::BeginDisabled(!in_install);
-	bool strict = held.play_mode == PlayMode::Strict;
-	if (ImGui::Checkbox("Strict: as a player's install", &strict)) set_mode(strict ? PlayMode::Strict : PlayMode::Install);
-	ImGui::EndDisabled();
-	ImGui::Unindent();
-	ui_kit::tooltip("The game runs on the build alone, as a player who dropped Jointops.exe into the build's folder "
-	                "runs it: nothing of the install but its program and Bink DLL, no /d. Off, the install's "
-	                "configuration and saves are beside it and loose files win (/d).");
+	bool strict = plays_in_install(held.play_mode);
+	if (ImGui::Checkbox("Play in the game install (strict)", &strict)) set_mode(strict ? PlayMode::Strict : PlayMode::Runtime);
+	ui_kit::tooltip("Play starts the game install's own program on the build instead of the OpenNova runtime, as a "
+	                "player who dropped Jointops.exe into the build's folder runs it: nothing of the install but its "
+	                "program and Bink DLL, no /d. It starts at its menu, where the mission is chosen.");
+	// DI-26: Play saves first instead of asking (S26 K6: kept here alone, the Build menu's copy gone).
+	bool save_first = held.save_before_play;
+	if (ImGui::Checkbox("Save all before Play", &save_first)) set("save_before_play", io::JsonValue::make_bool(save_first));
+	ui_kit::tooltip("Play writes every file with unsaved edits first, as Save all does, and starts at once. Off, Play "
+	                "asks first, as Build does.");
 	ImGui::TextDisabled("This project's, on this computer (.opennova/local.json): other projects play as each is set.");
 
 	if (!error_.empty()) {
@@ -246,6 +229,7 @@ void ProjectSettingsDialog::apply(Workspace &workspace) {
 	settings.game_install = held.game_install;
 	if (!v.activity.source_run) settings.runtime_executable = held.runtime;
 	settings.play_mode = held.play_mode;
+	settings.save_before_play = held.save_before_play;
 	waiting_ = true;
 	error_.clear();
 	workspace.request(std::move(request));

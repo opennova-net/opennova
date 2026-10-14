@@ -148,9 +148,19 @@ Value value_of(const aip::KeyRow &row, const aip::Profile &p) {
 // A value set: the number written as the file writes it and read through the key's arm, as the game reads it (so
 // the field then shows what the game holds: 0.25 seconds read as 15 ticks shows 0.24).
 bool set_key(const aip::KeyRow &row, aip::Profile &p, const Value &value, std::string &error) {
+	// A key the profile's type does not read stays as the reader left it, which no line of the writer's puts down
+	// (aip::write_profile writes a key of the type alone): only HELO reads the helicopter keys, GROUND its own, and
+	// ORGANIC none but the type [orig: AIProfile_ParseProperty @ 0x45DF15..0x45DF2F, the type dispatch]. Setting
+	// it back to the zeroed record's value is the one edit it takes.
+	const bool unread = row.unit != aip::Unit::Type && !aip::reads(row, p.type);
+	const auto refuse_unread = [&]() {
+		error = std::string("The game reads ") + row.key + " only in a profile of another type, so this one keeps none.";
+		return false;
+	};
 	if (row.unit == aip::Unit::Weapon) {
 		const auto *text = std::get_if<std::string>(&value);
 		if (!text) return error = "A weapon is an ammo's name.", false;
+		if (unread && !text->empty()) return refuse_unread();
 		if (text->find_first_of(" \t,\";\r\n") != std::string::npos || text->find("//") != std::string::npos)
 			return error = "A weapon's name is one word of the walk: no blank, comma, quote, ';' or '//'.", false;
 		(p.*(row.block)).*(row.name) = *text;
@@ -158,6 +168,7 @@ bool set_key(const aip::KeyRow &row, aip::Profile &p, const Value &value, std::s
 	}
 	double number = 0.0;
 	if (!number_of(value, number)) return error = "The value is a number.", false;
+	if (unread && number != 0.0) return refuse_unread();
 	int32_t stored = 0;
 	if (choice_unit(row.unit) || row.unit == aip::Unit::Flags || row.unit == aip::Unit::HuntFlags) {
 		if (number != std::floor(number) || number < 0 || number > 0xFFFFFFFF) return error = "The value is a choice.", false;
@@ -176,6 +187,31 @@ bool set_key(const aip::KeyRow &row, aip::Profile &p, const Value &value, std::s
 		stored = aip::read_value(row, p.type, {word}, row.get ? row.get(p) : 0);
 		if (stored != 0 && aip::value_words(row, p.type, stored).empty())
 			return error = "No number the file can hold reads back as that.", false;
+	}
+	// A new type's reader reads none of another type's keys, and keeps none of a subtype word of the other type
+	// [orig: AIProfile_ParseProperty @ 0x45DF15..0x45DF2F; the subtype words @ 0x45E887 (GROUND), @ 0x45FA63 (HELO)]:
+	// the profile becomes what the file then holds as the game reads it, which the writer puts down. The loader's
+	// zeroed record [orig: AIProfile_LoadOrFind @ 0x45FE09] of the new type reads each line the old profile's
+	// writer puts down (its words, value_words) through the new type's arm, a key the new type does not read none
+	// (a speed both read moving to the new type's member as its words read there; given back, the old type reads
+	// the same words again).
+	if (row.unit == aip::Unit::Type && stored != p.type) {
+		const aip::Profile was = p;
+		aip::Profile made;
+		row.set(made, stored);
+		for (const aip::KeyRow &other : aip::key_rows()) {
+			if (other.unit == aip::Unit::Type || !aip::reads(other, stored)) continue;
+			if (other.unit == aip::Unit::Weapon) {
+				(made.*(other.block)).*(other.name) = (was.*(other.block)).*(other.name);
+				continue;
+			}
+			const int32_t held = other.get ? other.get(was) : 0;
+			if (held == 0 || !other.set) continue;
+			const std::vector<std::string> words = aip::value_words(other, was.type, held);
+			if (!words.empty()) other.set(made, aip::read_value(other, stored, words, 0));
+		}
+		p = made;
+		return true;
 	}
 	row.set(p, stored);
 	return true;
@@ -248,8 +284,6 @@ const RecordTable &ai_profile_table() {
 	return table;
 }
 
-bool is_ai_profile_kind(AssetKind kind) { return asset_kind_row(kind).document == DocumentTypeId::AiProfile; }
-
 size_t AiProfileRow::footprint() const {
 	return sizeof(AiProfileRow) + footprint_of(profile.primary.weapon) + footprint_of(profile.secondary.weapon) +
 	       ids_footprint();
@@ -273,14 +307,13 @@ std::string AiProfileDocument::record_title(const NodeAddress &address) const {
 bool AiProfileDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                               std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues,
                               Diagnostic &error) {
-	if (!is_ai_profile_kind(kind())) {
-		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not an AI profile.", path());
-		return false;
-	}
 	auto notes = std::make_shared<textlayout::Notes>();
 	std::vector<aip::UnreadLine> unread;
 	auto row = std::make_shared<AiProfileRow>();
-	row->profile = aip::parse_profile(bytes.data(), bytes.size(), *notes, &unread);
+	// The loader hands a single NUL for an empty file (Document's load): an empty profile, of no type and no line, as
+	// a profile of no type saves.
+	const size_t size = bytes.size() == 1 && bytes[0] == 0 ? 0 : bytes.size();
+	row->profile = aip::parse_profile(bytes.data(), size, *notes, &unread);
 	const std::string text(bytes.begin(), bytes.end());
 	for (const aip::UnreadLine &line : unread) {
 		std::string why;

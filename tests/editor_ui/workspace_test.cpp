@@ -8,9 +8,8 @@
 // name each a tab, an inactive tab closed, a view's confirmation outliving its hidden tab
 // and closing with its document, thirty tabs all reachable through the tab list); the
 // welcome view and File > New project...; the project settings over a real session (one
-// Apply for every setting, a write that fails keeping the dialog open on every retry, a
-// partial failure retried against the settings in effect, the dialog closing with its
-// project and a late Browse... dropped); the File, Edit and Build menus; the menu bar's
+// Apply for every setting, a write that fails keeping the dialog open on every retry, the
+// dialog closing with its project and a late Browse... dropped); the File, Edit and Build menus; the menu bar's
 // right end (what the session said, the unsaved files, the counts, the build or the game,
 // the buttons; never over the menus); a canvas whose picture fills it read through ImGui (the
 // right button apart from a press, the keys a camera flies by, a line of text drawn); Files (its folders, the file count, the kind hidden
@@ -139,11 +138,6 @@ void type_into(Ui &ui, ImGuiID field, const char *text) {
 	ui.frames(2);
 }
 
-bool modal_open(const char *title) {
-	const ImGuiWindow *window = ImGui::FindWindowByName(title);
-	return window && window->Active;
-}
-
 ImGuiTabBar *document_tabs() { return GImGui->TabBars.GetByKey(item_id(Ui::window_id("Document"), {"documents"})); }
 
 // Where a tab of the bar is: its row, from its offset and width.
@@ -160,29 +154,6 @@ ImVec2 close_button(const ImGuiTabBar &bar, const std::string &path) {
 	const ImGuiStyle &style = ImGui::GetStyle();
 	const float size = ImGui::GetFontSize();
 	return ImVec2(rect.Max.x - style.FramePadding.x - size * 0.5f, rect.Min.y + style.FramePadding.y + size * 0.5f);
-}
-
-// The point in [top, bottom] along `x` where the mouse hovers the item `id` (a row of a
-// list), found moving the mouse down; false when none does.
-bool hover_find(Ui &ui, ImGuiID id, float x, float top, float bottom, ImVec2 &at) {
-	for (float y = top; y < bottom; y += 2.0f) {
-		ui.mouse(x, y);
-		if (GImGui->HoveredId == id) {
-			at = ImVec2(x, y);
-			return true;
-		}
-	}
-	return false;
-}
-
-// The factory at its index in the blank factories' table, the index the New menu's entry
-// is pushed with.
-int factory_index(const char *role, AssetKind kind) {
-	for (size_t i = 0; i < blank_factory_count(); ++i) {
-		const BlankFactory *factory = blank_factory_at(i);
-		if (std::string(factory->role) == role && factory->kind == kind) return static_cast<int>(i);
-	}
-	return -1;
 }
 
 std::shared_ptr<MnuDocument> edited(std::shared_ptr<MnuDocument> document) {
@@ -599,7 +570,7 @@ void test_view_prompt_outlives_its_tab() {
 	ui.away();
 	ui.drain();
 	// Remove screen... in the active menu's tab: the prompt open, nothing raised yet.
-	// The prompt is its menu's, known by its path (review X26: two menus' prompts never one window).
+	// The prompt is its menu's, known by its path (two menus' prompts never one window).
 	const std::string prompt = "Remove screen?##" + a->path();
 	const auto ask = [&ui, &prompt](const std::shared_ptr<MnuDocument> &menu) {
 		ui.activate(item_id(document_tab_id(menu->path()), {"Remove screen..."}));
@@ -760,9 +731,8 @@ void test_welcome_view() {
 // File > Project settings... over a real session: the fields are the dialog's until Apply,
 // which raises one ApplyProjectSettings naming every setting, and the session writes what
 // differs from the settings in effect. A setting it could not write keeps the dialog open
-// saying why, on every Apply that fails again; one it wrote is in effect from then on, so a
-// name changed back after a partial failure is written back (the dialog never compares with
-// what it opened with); once none fails it closes. A Browse... fills the field it asked for.
+// saying why, on every Apply that fails again; once none fails it closes. A Browse... fills the
+// field it asked for.
 // The dialog is its project's: another project opened while it is open closes it, raising
 // nothing, and a Browse... answered after that is dropped. Cancel changes nothing; a source
 // run shows the runtime it drives, no field.
@@ -786,7 +756,7 @@ void test_project_settings() {
 	              v.workspace.settings.open && v.workspace.settings.title == "Armory",
 	      "the dialog opens, the workspace's, over the settings in effect");
 	CHECK(in_order(logged_frame(ui), {"Armory", "Name", "Missions", "Multiplayer", "Game install folder", "OpenNova runtime",
-	                                  "Play in the game install", "Strict: as a player's install", "Apply", "Cancel"}),
+	                                  "Play in the game install (strict)", "Save all before Play", "Apply", "Cancel"}),
 	      "its fields");
 	ui.activate(item_id(dialog, {"Apply"}));
 	std::vector<EditorRequest> requests = serve(ui, session);
@@ -801,7 +771,9 @@ void test_project_settings() {
 	CHECK(!modal_open("Project settings") && v.activity.status == "No setting changed.", "nothing changed: written nothing, closed");
 
 	// A runtime typed; the editor's settings cannot be written (a folder stands where their
-	// file is written first): the dialog stays, saying why, however often it is applied.
+	// file is written first): the dialog stays, saying why, however often it is applied. What
+	// the session writes then (a partial write, a name changed back written back) is
+	// tests/editor/editor_session_test.cpp test_project_settings's.
 	std::error_code ec;
 	std::filesystem::create_directories(settings_file + ".tmp", ec);
 	CHECK(only_workspace(choose_served(ui, session, "File", {"Project settings..."})) && modal_open("Project settings"),
@@ -815,36 +787,18 @@ void test_project_settings() {
 		requests = serve(ui, session);
 		CHECK(one(requests, EditorRequestKind::ApplyProjectSettings) &&
 						newest_event(v, ViewEventKind::SettingsApplied).tag ==
-								requests[0].settings.serial &&
-						v.project.settings_result.failures.size() == 1 &&
-						v.project.runtime_setting.empty(),
-				"the runtime is not written");
+								requests[0].settings.serial,
+				"the Apply's event carries its serial");
 		CHECK(modal_open("Project settings") && logged_frame(ui).find("cannot create") != std::string::npos,
 		      "the dialog stays open, saying why, on every Apply that fails");
 	}
-	// A new name too: the name is written, the runtime is not. The name changed back is
-	// written back: the name in effect is Harbor now.
-	type_into(ui, item_id(dialog, {"Name"}), "Harbor");
-	ui.activate(item_id(dialog, {"Apply"}));
-	serve(ui, session);
-	ProjectDocument on_disk;
-	Diagnostic error;
-	CHECK(v.project.document->title == "Harbor" && v.project.runtime_setting.empty() && modal_open("Project settings") &&
-	              open_project(armory, on_disk, error) && on_disk.title == "Harbor",
-	      "a partial failure: the name written, the runtime not, the dialog open");
-	type_into(ui, item_id(dialog, {"Name"}), "Armory");
-	ui.activate(item_id(dialog, {"Apply"}));
-	serve(ui, session);
-	CHECK(v.project.document->title == "Armory" && open_project(armory, on_disk, error) && on_disk.title == "Armory" &&
-	              modal_open("Project settings"),
-	      "the name changed back is written back");
-	// The settings writable again: the runtime is written, and the dialog closes.
+	// The settings writable again: the dialog closes.
 	std::filesystem::remove_all(settings_file + ".tmp", ec);
 	ui.activate(item_id(dialog, {"Apply"}));
 	serve(ui, session);
-	CHECK(!modal_open("Project settings") && v.project.runtime_setting == "C:/tools/opennova.exe" && v.project.document->title == "Armory" &&
-	              v.project.settings_result.failures.empty(),
-	      "none failed: done");
+	CHECK(!modal_open("Project settings") && v.project.runtime_setting == "C:/tools/opennova.exe", "none failed: done");
+	ProjectDocument on_disk;
+	Diagnostic error;
 
 	// Browse...: the shell's answer fills the field it asked for (an answer for another field
 	// is dropped), the workspace's.
@@ -1051,30 +1005,10 @@ void test_menus() {
 		ui.drain();
 	}
 	CHECK(choose(ui, "Build", {"Stop"}).empty(), "Build > Stop: nothing runs");
-	r = raised("Build", {"Play in the game install"}, EditorRequestKind::ApplyProjectSettings);
-	CHECK(r.kind == EditorRequestKind::ApplyProjectSettings && r.settings.play_mode == std::optional<PlayMode>(PlayMode::Install) &&
-	              !r.settings.title && !r.settings.mission && !r.settings.game_install && !r.settings.runtime_executable,
-	      "Build > Play in the game install: the project's play mode alone");
-	CHECK(choose(ui, "Build", {"Strict: as a player's install"}).empty(), "Build > Strict: only under Play in the game install");
-	v.project.play_mode = PlayMode::Install;
-	v.revisions.touch(ViewConcern::Preferences);
-	ui.frames(2);
-	ui.drain();
-	r = raised("Build", {"Strict: as a player's install"}, EditorRequestKind::ApplyProjectSettings);
-	CHECK(r.kind == EditorRequestKind::ApplyProjectSettings && r.settings.play_mode == std::optional<PlayMode>(PlayMode::Strict) &&
-	              !r.settings.title,
-	      "Build > Strict: the project's play mode alone");
-	v.project.play_mode = PlayMode::Strict;
-	v.revisions.touch(ViewConcern::Preferences);
-	ui.frames(2);
-	ui.drain();
-	r = raised("Build", {"Play in the game install"}, EditorRequestKind::ApplyProjectSettings);
-	CHECK(r.kind == EditorRequestKind::ApplyProjectSettings && r.settings.play_mode == std::optional<PlayMode>(PlayMode::Runtime),
-	      "Build > Play in the game install, unchecked: the OpenNova runtime, strict or not");
-	v.project.play_mode = PlayMode::Runtime;
-	v.revisions.touch(ViewConcern::Preferences);
-	ui.frames(2);
-	ui.drain();
+	// S26 K6: Play's settings live in the Project settings dialog alone, and K4: Build to folder is gone.
+	CHECK(choose(ui, "Build", {"Play in the game install"}).empty() && choose(ui, "Build", {"Save all before Play"}).empty() &&
+	              choose(ui, "Build", {"Build to folder..."}).empty(),
+	      "Build holds no Play setting and no Build to folder");
 	r = raised("Build", {"Show build folder"}, EditorRequestKind::RevealPath);
 	CHECK(r.kind == EditorRequestKind::RevealPath && r.path == v.activity.last_build->build_dir, "Build > Show build folder");
 	v.activity.play_state = PlayState::Running;
@@ -1519,7 +1453,7 @@ void test_files_window() {
 	CHECK(one(requests, EditorRequestKind::CreateFile) && requests[0].path == "first.bms" && requests[0].file_kind == "mission" &&
 	              requests[0].values == Values({{"environment", "day.env"}, {"terrain", "island.trn"}, {"title", "The first"}}) &&
 	              !modal_open("New file"),
-	      "Create: the mission's name and its values by their tokens, sorted as the wire reads them (review F10)");
+	      "Create: the mission's name and its values by their tokens, sorted as the wire reads them");
 
 	// S20: New > Terrain from images... asks a terrain's name, its images and its numbers in the same
 	// prompt; Create waits for the heightmap and the colour map, then raises new_terrain with the values by
@@ -1574,12 +1508,12 @@ bool same_line(const std::string &text, const char *first, const char *second) {
 // unchecked. The check box raises the setting's request. A listing's choices raise PlanImport
 // with the files chosen; a changed plan says so; a file with unsaved edits holds nothing, and
 // the unsaved prompt an Import raises takes the dialog's place until it is answered (S12).
-// The import dialog's group checks (the review of the project lane, M2, L7, L8, L9). A plan of 22 chosen
-// textures and none found goes by kind: its Texture line's check leaves out every file, the chosen one the
-// project cannot take too (L8), and takes back the files it can, never the one the project has already,
-// whose replace no one asked for (M2: Import sends no replace). A tree of two chosen menus naming one font:
-// the font listed under both, leaving out a.mnu's Font keeps it while b.mnu, checked, names it (L7); Uncheck
-// shown leaves the rows of a closed line as they are (L9).
+// The import dialog's group checks (S19, "The import a modder reads"). A plan of 22 chosen textures
+// and none found goes by kind: its Texture line's check leaves out every file, the chosen one the
+// project cannot take too, and takes back the files it can, never the one the project has already,
+// whose replace no one asked for (Import sends no replace). A tree of two chosen menus naming one
+// font: the font listed under both, leaving out a.mnu's Font keeps it while b.mnu, checked, names
+// it; Uncheck shown leaves the rows of a closed line as they are.
 void test_import_dialog_groups() {
 	using State = ImportPlanRow::State;
 	const auto row = [](State state, const std::string &name, AssetKind kind) {
@@ -1618,7 +1552,7 @@ void test_import_dialog_groups() {
 		ui.activate(textures);
 		ui.away();
 		CHECK(logged_frame(ui).find("Import 0 files") != std::string::npos,
-		      "the line's uncheck: every file left out, the chosen one the project cannot take too (L8)");
+		      "the line's uncheck: every file left out, the chosen one the project cannot take too");
 		ui.activate(textures);
 		ui.away();
 		CHECK(logged_frame(ui).find("Import 20 files") != std::string::npos,
@@ -1655,7 +1589,7 @@ void test_import_dialog_groups() {
 	std::string text = logged_frame(ui);
 	CHECK(in_order(text, {"a.mnu", "Font (1 file)", "shared.fnt", "Texture (1 file)", "logo.tga", "b.mnu",
 	                      "Font (0 files, 1 more another file brings)", "shared.fnt", "named here too; it comes with a.mnu"}),
-	      "the font b.mnu names too, under b.mnu as well (L7)");
+	      "the font b.mnu names too, under b.mnu as well");
 	const auto group_item = [](size_t group, const char *label) {
 		return item_id(pushed(item_id(import_body_id(), {"import_plan"}), int(4 + group)), {label});
 	};
@@ -1666,7 +1600,7 @@ void test_import_dialog_groups() {
 	ui.activate(group_item(2, "##group"));
 	ui.away();
 	CHECK(logged_frame(ui).find("Import 2 files") != std::string::npos, "b.mnu left out too: the font goes with the line");
-	// a.mnu's Texture line closed: Uncheck shown leaves its logo as it is (L9).
+	// a.mnu's Texture line closed: Uncheck shown leaves its logo as it is.
 	ui.activate(group_item(3, "##open"));
 	ui.away();
 	ui.activate(item_id(import_body_id(), {"Uncheck shown"}));
@@ -1913,9 +1847,9 @@ void test_import_dialog_problem_root() {
 	      "Import: the menu alone");
 }
 
-// ADR 0046 S14 (review F2): a chosen file the project holds already is held, unchecked by default,
-// and the import takes the rest without asking to replace; the row checked alone is replaced (the
-// request then replaces), and Replace existing files checks every held row.
+// ADR 0046 S19, "The import a modder reads": a chosen file the project holds already is held,
+// unchecked by default, and the import takes the rest without asking to replace; the row checked
+// alone is replaced (the request then replaces), and Replace existing files checks every held row.
 void test_import_dialog_held_rows() {
 	SessionView v = seeded_view();
 	DialogsView::ImportPreview &preview = v.dialogs.import_preview;
@@ -1964,11 +1898,6 @@ void test_import_dialog_held_rows() {
 	CHECK(logged_frame(ui).find("Import 2 files") != std::string::npos, "Replace existing files checks every held row");
 	ui.activate(item_id(dialog, {"Replace existing files"}));
 	CHECK(logged_frame(ui).find("Import 1 file") != std::string::npos, "and unchecks them");
-}
-
-std::string lowered(std::string text) {
-	for (char &c : text) c = char(std::tolower(static_cast<unsigned char>(c)));
-	return text;
 }
 
 // The Preview window over a real session as the Shell drives it: after each frame the requests
@@ -2494,7 +2423,7 @@ void test_mission_view_input() {
 	      "a change of Team: one batch over every selected record, ended, applied");
 }
 
-// The mission's view over a device that answers a ground (z = 3 + x / 10; S14 review M2, M8), the
+// The mission's view over a device that answers a ground (z = 3 + x / 10; S14), the
 // session's viewports given the same devices: the canvas reads the device from its first frame, so a
 // drag of an entity with Stick on (the default) keeps its height over that ground where it goes, and
 // an area's mark stands on the ground, where a click selects it; the toolbar's Ground, an entity

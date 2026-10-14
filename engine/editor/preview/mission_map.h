@@ -53,10 +53,6 @@ struct MissionMapCamera {
 	}
 	bool operator!=(const MissionMapCamera &o) const { return !(*this == o); }
 };
-// On the wire: {center: [x, y], zoom, scale (read only: metres a pixel at the device's size)}.
-io::JsonValue mission_map_camera_to_json(const MissionMapCamera &camera, int width);
-// A SetViewport's camera member, {center?, zoom?}, over `camera`: false, nothing changed, with why.
-bool mission_map_camera_from_json(const io::JsonValue &json, MissionMapCamera &camera, std::string &error);
 
 // The map's view of a picture `width` x `height`: the CMAP's rect over the whole picture, its scale and its middle.
 struct MissionMapView {
@@ -76,6 +72,10 @@ struct MissionMapView {
 MissionMapView mission_map_view(const MissionMapCamera &camera, int width, int height, bool flip_180 = false);
 // The zoom that shows `metres` across a picture `width` pixels wide (the CMAP's law inverted), in the map's range.
 float mission_map_zoom_for(double metres, int width);
+// The tile set's texels (RGBA8) as MED's 2D view draws a placed tile: a texel whose alpha byte is not 0 drawn opaque,
+// one whose alpha is 0 not drawn (each alpha byte made 255 or 0) [orig: JOTACmed sub_417D30, the texel test and the
+// & 0x00FFFFFF; docs/tiles/til-re.md "The editors' tile tools"].
+void mission_map_tile_texels(std::vector<uint8_t> &rgba);
 
 // The map's options: the marks by kind and the labels (the 3D view's), the CMAP's grid and text toggles (the
 // commander map's GRID and TEXT, which the device's compile draws), stick (a moved entity keeps its height over the
@@ -97,7 +97,6 @@ struct MissionMapOptions {
 // {marks: {items, buildings, markers, organics, areas, paths, labels, links}, color_by (team or group), grid, text,
 // stick, snap, background (colour, height, delta, flatness or none), water}.
 io::JsonValue mission_map_options_to_json(const MissionMapOptions &options);
-bool mission_map_options_from_json(const io::JsonValue &json, MissionMapOptions &held, std::string &error);
 
 // A footprint narrower than this many pixels across its middle is drawn as its pin (its wireframe a speck there), and
 // picked and boxed as one.
@@ -124,10 +123,6 @@ struct MissionMapMark {
 	const MissionMapFootprint *footprint = nullptr;
 	bool outlined = false;
 };
-// Every entity (the scene's order) then every area, shown or not, so an index is stable within a frame; `footprints`
-// (the scene's entities' order, may be shorter) the entities' models placed.
-std::vector<MissionMapMark> mission_map_marks(const MissionScene &scene, const MissionMapOptions &options,
-		const MissionMapView &view, const std::vector<MissionMapFootprint> *footprints = nullptr);
 // The shown mark a press at (x, y) takes: a pin within kMissionPickSlop pixels, the nearest (the later drawn first
 // among equals); else a wireframe whose model the point falls on seen from above, else whose footprint is within the
 // slop, the smaller footprint first (a crate on a building's floor before the building); -1 none.

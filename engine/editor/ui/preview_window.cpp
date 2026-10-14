@@ -21,16 +21,6 @@
 
 namespace opennova::editor {
 
-namespace {
-
-const DocumentBase *open_document(const SessionView &view, const std::string &path) {
-	for (const auto &document : view.documents.open)
-		if (document && document->path() == path) return document.get();
-	return nullptr;
-}
-
-} // namespace
-
 PreviewWindow::PreviewWindow(Workspace &workspace) : workspace_(workspace) {
 	open = true;
 }
@@ -41,7 +31,7 @@ namespace {
 
 // The Preview-role kind the active document's type reaches (shown or fed), kCount for none or no document.
 ViewportKind active_preview_kind(const SessionView &view, DocumentTypeId &type) {
-	const DocumentBase *document = open_document(view, view.documents.active);
+	const DocumentBase *document = view.documents.open_at(view.documents.active);
 	if (!document) return ViewportKind::kCount;
 	type = asset_kind_row(document->kind()).document;
 	return preview_kind_of(type);
@@ -176,7 +166,7 @@ void PreviewWindow::end_frame() {
 // "main.mnu - STARTUP", "skinned.3di" or "walk.bad on skinned.3di", cut to the width the
 // dot after it leaves; the whole of it, the path and whether it is unsaved in its tooltip.
 void PreviewWindow::header_(const SessionView &view, ViewportKind kind, const std::string &path) {
-	const DocumentBase *document = open_document(view, path);
+	const DocumentBase *document = view.documents.open_at(path);
 	std::string text = basename_of(path);
 	const ViewportModel *model = view.documents.viewports ? view.documents.viewports->find(path, kind) : nullptr;
 	if (model) text += model->caption();

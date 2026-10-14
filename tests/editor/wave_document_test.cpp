@@ -67,9 +67,7 @@ std::vector<uint8_t> stereo_wave(size_t frames) {
 	return out;
 }
 
-bool has_code(const std::vector<Diagnostic> &findings, const char *code) {
-	return std::any_of(findings.begin(), findings.end(), [&](const Diagnostic &d) { return d.code() == code; });
-}
+using editor_test::has_code;
 
 bool load(WaveDocument &wave, const std::vector<uint8_t> &bytes, Diagnostic &error) {
 	return wave.load_bytes(bytes, "sounds/tone.wav", AssetKind::Wave, "jo", error);

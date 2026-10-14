@@ -14,6 +14,7 @@
 // grid survives a Set of every field to its own value. Only the words a field derives are derived
 // again when it changes (a light's axis and view_proj follow its position, direction, cone and reach,
 // never its colour).
+#include <base/io/fixed.h>
 #include <editor/documents/model_document.h>
 
 #include <algorithm>
@@ -287,7 +288,7 @@ std::vector<Entry> model_entries() {
 		// [orig: WriteGHDR @ 0x452B40] (docs/threedi/3di-gp-format-re.md).
 		{fixed(in(realf("max_radius", "Largest LOD radius"), "m")),
 				[](const void *d, int) -> Value {
-					return static_cast<double>(static_cast<uint32_t>(as<ThreediHeader>(d).max_radius_fp16)) / 65536.0;
+					return static_cast<double>(static_cast<uint32_t>(as<ThreediHeader>(d).max_radius_fp16)) / io::kFp16OneD;
 				}},
 	};
 }
@@ -800,7 +801,7 @@ std::vector<Entry> user_point_entries() {
 						: on_row(realf(kWords[k], kAxisLabels[2][k - 3]), "Direction"),
 				[](const void *d, int w) -> Value {
 					return static_cast<double>(user_point_word(const_cast<ThreediUserPoint &>(as<ThreediUserPoint>(d)), w)) /
-							65536.0;
+							io::kFp16OneD;
 				},
 				[](void *d, const Value &v, int w, std::string &e) {
 					if (!(std::fabs(real(v)) < 32768.0)) {
@@ -875,7 +876,7 @@ std::vector<Entry> section_entries() {
 	static const char *const kOffsetLabels[3] = {"Offset X", "Offset Y", "Offset Z"};
 	for (int k = 0; k < 3; ++k)
 		out.push_back({fixed(on_row(in(realf(kOffset[k], kOffsetLabels[k]), "m"), "Offset")),
-				[](const void *d, int a) -> Value { return as<ThreediCollisionObject>(d).offset[a] / 65536.0; }, nullptr,
+				[](const void *d, int a) -> Value { return as<ThreediCollisionObject>(d).offset[a] / io::kFp16OneD; }, nullptr,
 				nullptr, nullptr, k});
 	return out;
 }

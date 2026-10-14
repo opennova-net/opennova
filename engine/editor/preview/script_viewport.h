@@ -24,7 +24,7 @@ enum class ScriptViewStatus : uint8_t {
 	Ready,
 };
 // "no_text", "ready": its token on the wire.
-const char *script_view_status_token(ScriptViewStatus status);
+inline constexpr const char *kScriptViewStatusTokens[] = {"no_text", "ready"};
 
 // Why the text document takes no edit now ("" when it does): what holds it read only (its first
 // blocking issue: a music script's message handler, a credits file its text form cannot carry), else
@@ -88,9 +88,6 @@ struct ScriptReveal {
 // A completion list's ask takes the caret there, as typing there would; a word's words leave the caret and the
 // selection as they are.
 enum class ScriptAssistOp : uint8_t { None, Complete, Hover };
-// "none", "complete", "hover": an op's token, and back (false for another).
-const char *script_assist_op_token(ScriptAssistOp op);
-bool script_assist_op_from_token(const std::string &token, ScriptAssistOp &out);
 struct ScriptAssistAsk {
 	ScriptAssistOp op = ScriptAssistOp::None;
 	size_t line = 0, column = 0;           // the document's, from 1
@@ -164,7 +161,7 @@ public:
 			TextBurst &burst, CanvasRequests &out, std::string &error) const;
 
 	ViewportStatus status() const override;
-	const char *reason() const override { return script_view_status_token(reason_); }
+	const char *reason() const override { return enum_token(kScriptViewStatusTokens, reason_); }
 	std::string message() const override;
 	const std::string &detail() const override { return detail_; }
 	const char *units() const override { return "pixels"; }

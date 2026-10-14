@@ -9,8 +9,7 @@ extends GutTest
 ## picture shows its numbers as they are through its one display decode, so the colours read as the 2D ones do.
 ## Each is set as the editor sets it (set_preview_background) and drawn at the device's next frames, live.
 
-const EDITOR_SCENE := "res://editor/editor_root.tscn"
-const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
+const EditorFixture := preload("res://tests/authoring/editor_fixture.gd")
 const ARMORY := "res://../fixtures/threedi/synth/armory.3di"
 const CRATE := "res://../fixtures/threedi/synth/crate.3di"
 const PTL := "particles/puff.ptl"
@@ -26,29 +25,12 @@ var _seam: RefCounted = null
 
 
 func before_each() -> void:
-	# The ImGui context past its first frames before the editor attaches to it (editor_device_test.gd says why).
-	for _frame in 3:
-		await get_tree().process_frame
-	var packed := load(EDITOR_SCENE) as PackedScene
-	assert_not_null(packed, "the editor scene loads (the editor-enabled variant is loaded)")
-	if packed == null:
-		return
-	_app = packed.instantiate()
-	_seam = EditorSeam.new(_app)
-	var settings_dir := OS.get_cache_dir().path_join("opennova editor preview background %d" % Time.get_ticks_usec())
-	assert_eq(DirAccess.make_dir_recursive_absolute(settings_dir), OK)
-	_dirs.append(settings_dir)
-	_app.set("settings_path", settings_dir.path_join("editor_settings.json"))
-	add_child_autofree(_app)
-	await get_tree().process_frame
+	_seam = await EditorFixture.boot(self, "preview background", _dirs, 3)
+	_app = _seam.app if _seam != null else null
 
 
 func after_each() -> void:
-	_app = null
-	for dir in _dirs:
-		TestFs.remove_dir_recursive(dir)
-	_dirs.clear()
-	await get_tree().process_frame
+	await EditorFixture.teardown(self, _dirs)
 
 
 func _write(path: String, bytes: PackedByteArray) -> void:
@@ -104,14 +86,8 @@ func _project() -> String:
 
 ## The viewport over `path` of `kind` ready on its device, then drawn a few frames.
 func _await_drawn(path: String, kind: String) -> bool:
-	var ready := false
-	for _frame in 600:
-		var state: Dictionary = _seam.query("viewport", {"op": "state", "path": path, "kind": kind, "limit": 1})
-		if String(state.get("status", "")) == "ready" and bool(state.get("device", {}).get("attached", false)) \
-				and int(state.get("builds", 0)) > 0:
-			ready = true
-			break
-		await get_tree().process_frame
+	var asked := {"path": path, "kind": kind, "limit": 1}
+	var ready: bool = _seam.built(await _seam.await_viewport(asked, 0, Callable(), 600, false))
 	assert_true(ready, "%s's viewport ready" % kind)
 	for _frame in 6:
 		await get_tree().process_frame
@@ -156,9 +132,10 @@ func _check_each(path: String, kind: String, x: int, own: Callable) -> void:
 				_near(image.get_pixel(x, 2), 0xD2D2D2, what + " at the top")
 				_near(image.get_pixel(x, low), 0xB4B4B4, what + " at the bottom")
 			"checker":
-				# The square at the top left and the one beside it (squares of 8 from the picture's corner).
-				_near(image.get_pixel(x % 8, 2), 0x9E9E9E, what + "'s first square")
-				_near(image.get_pixel(8 + x % 8, 2), 0x666666, what + "'s second square")
+				# The square at the top left and the one beside it (squares of 8 from the picture's corner), each read
+				# inside its square: a picture stretched from a screen of its own (the HUD's) filters its squares' edges.
+				_near(image.get_pixel(2, 2), 0x9E9E9E, what + "'s first square")
+				_near(image.get_pixel(10, 2), 0x666666, what + "'s second square")
 			"dark":
 				own.call(image.get_pixel(x, 2), what)
 

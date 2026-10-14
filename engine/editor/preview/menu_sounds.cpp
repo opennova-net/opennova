@@ -6,6 +6,7 @@
 #include <base/io/strutil.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/mnu_document.h>
+#include <editor/preview/option_reads.h>
 #include <formats/lwf/lwf.h>
 #include <formats/mnu/mnu.h>
 #include <runtime/audio/oneshot_play.h>
@@ -48,11 +49,9 @@ bool read_menu_sound_options(const io::JsonValue &json, MenuSoundOptions &held, 
 			error = "Unknown sound option \"" + member.key + "\" (it takes mute).";
 			return false;
 		}
-		if (!member.value.is_bool()) {
-			error = "options.sound.mute is true or false.";
+		if (!read_json_bool(
+					member.value, options.mute, error, "options.sound.mute is true or false."))
 			return false;
-		}
-		options.mute = member.value.boolean;
 	}
 	held = options;
 	return true;

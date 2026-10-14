@@ -4,6 +4,7 @@
 #include <optional>
 
 #include <base/io/fixed.h>
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/graph/asset_graph.h>
@@ -37,15 +38,9 @@ ItemModels models_of(const AssetGraph &graph, const GraphSymbol &item) {
 	return out;
 }
 
-// A project file by its name as the asset source serves it (a path's file name).
-std::string served_name(const std::string &file) {
-	const size_t slash = file.find_last_of('/');
-	return slash == std::string::npos ? file : file.substr(slash + 1);
-}
-
 // A file's stamp as the asset source serves it (0: none).
 uint64_t stamp_of(const SessionView &view, const std::string &file) {
-	return view.findings.assets && !file.empty() ? view.findings.assets->stamp(served_name(file)) : 0;
+	return view.findings.assets && !file.empty() ? view.findings.assets->stamp(io::utf8_file_name(file)) : 0;
 }
 
 } // namespace
@@ -106,7 +101,7 @@ const MissionItemCache::Model &MissionItemCache::model_(const SessionView &view,
 	model = Model();
 	model.stamp = stamp;
 	std::vector<uint8_t> bytes;
-	if (file.empty() || !view.findings.assets || !view.findings.assets->read(served_name(file), bytes) || bytes.empty())
+	if (file.empty() || !view.findings.assets || !view.findings.assets->read(io::utf8_file_name(file), bytes) || bytes.empty())
 		return model;
 	++files_read_;
 	threedi::Threedi3di3 parsed{};
@@ -135,7 +130,7 @@ const MissionItemCache::Catalog &MissionItemCache::catalog_(const SessionView &v
 	catalog = Catalog();
 	catalog.stamp = stamp;
 	std::vector<uint8_t> bytes;
-	if (!view.findings.assets || !view.findings.assets->read(served_name(file), bytes) || bytes.empty()) return catalog;
+	if (!view.findings.assets || !view.findings.assets->read(io::utf8_file_name(file), bytes) || bytes.empty()) return catalog;
 	++files_read_;
 	def::DefItemsFile items{};
 	if (def::def_parse_items_memory(bytes.data(), bytes.size(), &items) == 0)

@@ -51,10 +51,6 @@ bool FilePreferencesStore::load(Preferences &out, Diagnostic &finding) {
 	// A word no background has reads as the default, as an absent key does.
 	if (!preview_background_from_token(json.get_string("preview_background", ""), settings.preview_background))
 		settings.preview_background = kDefaultPreviewBackground;
-	// Play's settings are each project's now: the ones an earlier editor kept here for every project are
-	// named, read by nothing, and dropped by the next save (no reader carries them into a project, pre-1.0).
-	for (const char *key : kRetiredPlayKeys)
-		if (const io::JsonValue *held = json.get(key)) settings.retired_play.push_back(held_setting(key, *held));
 	if (const io::JsonValue *recent = json.get("recent_projects"); recent && recent->is_array()) {
 		for (const io::JsonValue &item : recent->array) {
 			if (item.is_string() && !item.string.empty()) settings.recent_projects.push_back(item.string);

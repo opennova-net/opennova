@@ -1,4 +1,4 @@
-// The shaders (ADR 0046 d7/d8, the blank factories): OpenNova's own HLSL effects, written here from
+// The shaders (ADR 0046 d7, the blank factories): OpenNova's own HLSL effects, written here from
 // scratch for the contract the original renderer reads an effect by, never from its shipped effects.
 //
 // The renderer registers its effects as it starts [orig: HLSLEffect_InitAndLoadAll @ 0x5B0080]: _ffp.fx,

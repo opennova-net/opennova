@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdio>
 
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <base/vfs/file_stamps.h>
 #include <editor/documents/animation_document.h>
@@ -19,11 +20,9 @@ namespace opennova::editor {
 
 namespace {
 
-std::string file_of(const std::string &path) { return path.substr(path.find_last_of("/\\") + 1); }
-
 // Two clip names open the same file: the .bad the game's load opens for each (anim::bad_file_name).
 bool same_clip(const std::string &a, const std::string &b) {
-	return strutil::iequals(anim::bad_file_name(file_of(a)), anim::bad_file_name(file_of(b)));
+	return strutil::iequals(anim::bad_file_name(io::utf8_file_name(a)), anim::bad_file_name(io::utf8_file_name(b)));
 }
 
 // A model's file name as the scan lists it, from a graph target (its extension optional).
@@ -58,7 +57,7 @@ PreviewRig resolve_preview_rig(const AssetGraph &graph, const AssetScan &scan, c
 					const std::string model = model_file(scan, graphic->target);
 					if (model.empty()) continue;
 					out.model = model;
-					out.source = file_of(edge->source) + ": " + edge->record;
+					out.source = io::utf8_file_name(edge->source) + ": " + edge->record;
 					out.pairing = usage_target(scan, *edge);
 					out.record_file = edge->source;
 					out.record = edge->record;
@@ -77,8 +76,8 @@ PreviewRig resolve_preview_rig(const AssetGraph &graph, const AssetScan &scan, c
 		std::vector<std::string> tables;
 		for (const GraphEdge *edge : graph.referrers_of_file(path_of(file)))
 			if (edge->kind == ReferenceKind::Animation &&
-					std::find(tables.begin(), tables.end(), file_of(edge->source)) == tables.end())
-				tables.push_back(file_of(edge->source));
+					std::find(tables.begin(), tables.end(), io::utf8_file_name(edge->source)) == tables.end())
+				tables.push_back(io::utf8_file_name(edge->source));
 		if (!tables.empty()) rig.table = tables.front();
 		if (chosen.empty())
 			for (const std::string &table : tables) {

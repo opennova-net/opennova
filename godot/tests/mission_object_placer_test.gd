@@ -1506,7 +1506,7 @@ func test_move_static_instance_rewrites_rows_in_place() -> void:
 	assert_true(level0.custom_aabb.encloses(before), "the bounds only grow")
 	assert_true(level0.custom_aabb.has_point(moved.origin), "and hold the row where it is now")
 	# Every population it may draw in grows with it, live or not: a later level switch (or a show)
-	# appends it there, inside the bounds the population advertises (review M6).
+	# appends it there, inside the bounds the population advertises.
 	assert_true(level1.custom_aabb.encloses(level1_before), "the level 1 bounds only grow")
 	assert_true(level1.custom_aabb.has_point(moved.origin), "and hold it before it switches there")
 
@@ -1662,7 +1662,7 @@ func test_a_stepped_placement_is_the_whole_placement() -> void:
 	assert_null(bare_parent.get_node_or_null("MissionObjects"))
 
 
-# S14 review m13: the stepped run is the whole placement over a mission that crosses its unit sizes:
+# S14: the stepped run is the whole placement over a mission that crosses its unit sizes:
 # 600 statics of one graphic (two bucket units of 512 rows) and 6 individual models (two models units
 # of four): the labels in order, the same census and as many individual models as place() makes.
 func _crossing_placer(root: ResourceRoot, item_db: ItemDatabase, data: ObjectData) -> MissionObjectPlacer:

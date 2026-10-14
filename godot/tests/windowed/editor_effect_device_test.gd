@@ -8,8 +8,7 @@ extends GutTest
 ## spawn point). The device draws single-sampled, as the game's view does: a multisampled SubViewport's
 ## depth is no attachment the passes can bind, and every particle went undrawn.
 
-const EDITOR_SCENE := "res://editor/editor_root.tscn"
-const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
+const EditorFixture := preload("res://tests/authoring/editor_fixture.gd")
 const PTL := "particles/glow.ptl"
 ## The waits are on the preview clock and the scene, never a frame count: the clock runs on the frames'
 ## own time, and a window behind others draws without the vsync cap, so a fixed count of frames can pass
@@ -26,28 +25,12 @@ var _seam: RefCounted = null
 
 
 func before_each() -> void:
-	for _frame in 3:
-		await get_tree().process_frame
-	var packed := load(EDITOR_SCENE) as PackedScene
-	assert_not_null(packed, "the editor scene loads (the editor-enabled variant is loaded)")
-	if packed == null:
-		return
-	_app = packed.instantiate()
-	_seam = EditorSeam.new(_app)
-	var settings_dir := OS.get_cache_dir().path_join("opennova editor effect device %d" % Time.get_ticks_usec())
-	assert_eq(DirAccess.make_dir_recursive_absolute(settings_dir), OK)
-	_dirs.append(settings_dir)
-	_app.set("settings_path", settings_dir.path_join("editor_settings.json"))
-	add_child_autofree(_app)
-	await get_tree().process_frame
+	_seam = await EditorFixture.boot(self, "effect device", _dirs, 3)
+	_app = _seam.app if _seam != null else null
 
 
 func after_each() -> void:
-	_app = null
-	for dir in _dirs:
-		TestFs.remove_dir_recursive(dir)
-	_dirs.clear()
-	await get_tree().process_frame
+	await EditorFixture.teardown(self, _dirs)
 
 
 func _write(path: String, bytes: PackedByteArray) -> void:

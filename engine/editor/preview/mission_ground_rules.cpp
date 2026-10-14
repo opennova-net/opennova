@@ -34,7 +34,7 @@ using io::JsonValue;
 using io::json_number;
 using io::json_string;
 
-constexpr double kUnit = 65536.0;
+constexpr double kUnit = io::kFp16OneD;
 // The start's settle probes from one unit over the body [orig: Game_StartMission @0x525FC1, height 0x10000].
 constexpr int32_t kProbeUp = 0x10000;
 // How near another entity's volume a static's box comes and still touches it: a quarter unit.

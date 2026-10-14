@@ -7,7 +7,9 @@
 
 namespace opennova::editor {
 
-std::string recent_items_game(const ProjectDocument &project) { return project.target_game; }
+std::string recent_items_game(const ProjectDocument &project) {
+	return project.expansion.standalone() ? project.target_game : project.target_game + "/" + project.expansion.name;
+}
 
 bool EditorPreferences::load(Diagnostic &finding) {
 	finding = Diagnostic();

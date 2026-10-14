@@ -111,7 +111,7 @@ static int test_expansion_project() {
 	for (const char *role : { "expansion_table", "expansion_version" })
 		TEST_EXPECT(run({ "create-missing", root, "--role", role }) == 0);
 	TEST_EXPECT(run({ "build", root }) == 0);
-	const std::string built = opennova::editor::last_good_build_dir(root + "/.opennova/build/play");
+	const std::string built = editor_test::last_good_build_dir(root + "/.opennova/build/play");
 	TEST_EXPECT(!built.empty() && fs::is_regular_file(built + "/expansion/jxm/jxm.pff") &&
 	            fs::is_regular_file(built + "/expansion/jxm/jxmL.pff") && fs::is_regular_file(built + "/expansion/jxm/jxm.bin") &&
 	            fs::is_regular_file(built + "/expansion/jxm/version.txt") && !fs::exists(built + "/language.pff"));
@@ -254,7 +254,7 @@ static int test_new_status_validate() {
 	}
 
 	// Generic native file import uses the same core; a file the project holds already is kept as it
-	// is, whatever its bytes, unless --replace writes it over (review F2).
+	// is, whatever its bytes, unless --replace writes it over (S19, "The import a modder reads").
 	TEST_EXPECT(run({"import", root}) == 2);
 	const std::string source = dir.file("source.txt");
 	TEST_EXPECT(editor_test::write_text(source, "imported file"));
@@ -345,7 +345,7 @@ static int test_imports() {
 	TEST_EXPECT(run_capture(capture, {"build", root, "--out", dir.file("out")}, text) == 0);
 	TEST_EXPECT(fs::is_regular_file(root + "/.opennova/.gitignore"));
 	TEST_EXPECT(text.find("imported art/logo.png") != std::string::npos);
-	const std::string build = opennova::editor::last_good_build_dir(dir.file("out"));
+	const std::string build = editor_test::last_good_build_dir(dir.file("out"));
 	TEST_EXPECT(!build.empty());
 	// logo.png's record asks for a PCX; splash.png, imported by the import verb, takes the image importer's
 	// default, a 32-bit TGA.
@@ -694,7 +694,7 @@ static int test_one_game_install() {
 	TEST_EXPECT(editor_test::write_text(install + "/menumus.sbf", "music") && editor_test::write_text(install + "/game.cfg", "cfg"));
 	TEST_EXPECT(run_usage(dir.file("err.txt"), {"import", root, "--all", "--entry", "arial99.fnt"}, text) == 2 &&
 	            text.find("--all") != std::string::npos);
-	// Every file and a walk at once: a usage error, never a flag left unread (review F14).
+	// Every file and a walk at once: a usage error, never a flag left unread (S14 R4).
 	TEST_EXPECT(run_usage(dir.file("err.txt"), {"import", root, "--all", "--with-dependencies"}, text) == 2 &&
 	            text.find("--with-dependencies") != std::string::npos);
 	TEST_EXPECT(run_capture(capture, {"import", root, "--all", "--dry-run", "--rows"}, text) == 0);

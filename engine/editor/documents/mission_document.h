@@ -103,9 +103,6 @@ std::string *mission_row_name(Node &row);
 // The field a kind's name is ("name" an event's, "description" a path's and an area's), null for a kind
 // with none.
 const char *mission_name_field(NodeKind kind);
-// The most bytes a kind's name holds (kMisEventNameChars an event's, kMisDescriptionChars a path's and an
-// area's, formats/mission/mission_mis.h: the original editor's dialogs), 0 for a kind with none.
-size_t mission_name_width(NodeKind kind);
 
 // The AI class each item's records are written with, by item id (MissionDocument::set_item_classes).
 using MissionItemClasses = std::unordered_map<int64_t, std::string>;
@@ -328,12 +325,12 @@ private:
 	uint64_t spent_overwrite_ = 0;
 	uint64_t writing_over_ = 0;
 	std::vector<int32_t> base_heights_;
+	// Each entity's lock and base as the last names_file_text wrote them, for names_file_written to keep.
+	std::vector<MissionNamesFile::Lock> written_locks_;
 	uint64_t names_state_ = 0;
 	mutable Lookups lookups_;
 	std::shared_ptr<const MissionItemClasses> item_classes_;
 };
-
-bool is_mission_kind(AssetKind kind);
 
 // The SSN a new entity takes over `rows` (an Add, a Duplicate, a paste's copy told apart): one past
 // the largest the rows hold, skipping none, as the original editor allocates (mission::ssn_after,
