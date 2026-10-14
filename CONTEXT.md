@@ -439,7 +439,7 @@ One of the two applications exported from the `godot/` project: the OpenNova gam
 runtime (`opennova.exe`, ADR 0045 and ADR 0048; its Play export adds the runtime MCP
 for the editor) and the OpenNova Editor (`opennova-editor.exe`, ADR 0046). Backend
 services and development tools are outside this taxonomy (ADR 0015); so are
-`opennova-serve` (ADR 0051) and the OpenNova Launcher (ADR 0054).
+`opennova-serve` (ADR 0051) and the OpenNova Switcher (ADR 0054).
 _Avoid_: product (when the Godot boundary matters), app (ambiguous), the runtime
 (as a product name)
 
@@ -476,15 +476,14 @@ The headless game server (`apps/serve`, ADR 0051): the game's Serve Only host wi
 Godot, configured by a host file. A product, not a Godot product.
 _Avoid_: dedicated server (for the binary), server exe, opennova-server
 
-**OpenNova Launcher**:
-The Windows tray app (`launcher/`, `opennova-launcher.exe`, ADR 0054) that points a stock
+**OpenNova Switcher**:
+The Windows tray app (`switcher/`, `opennova-switcher.exe`, ADR 0054) that points a stock
 retail install's NovaWorld at OpenNova's service, NovaLogic's, or an address the user
 enters, by managing one block in the Windows hosts file for `gs.novaworld.net`. It does
-nothing else: it starts no game and installs nothing. The only product called Launcher;
-not a Godot product.
-_Avoid_: launcher for the editor's Play or a script that starts the game (those launch;
-they are not the Launcher), host file for the Windows hosts file it edits (the host file
-is retail's dedicated-server config, below)
+nothing else: it starts no game and installs nothing. Not a Godot product.
+_Avoid_: launcher (it launches nothing; the OpenNova Launcher was the product ADR 0048
+retired), host file for the Windows hosts file it edits (the host file is retail's
+dedicated-server config, below)
 
 **Host file**:
 Retail's dedicated-server config, the file `/HOST <file>` names: `<Key> <value>` lines of

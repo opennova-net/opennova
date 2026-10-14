@@ -25,9 +25,9 @@ easier to relay than to rediscover.
   `opennova-<name>` (kebab case; DEVELOPING.md "Naming an app"). `common/` is the shared
   socket helpers and the remote-admin TCP pump, deliberately app-layer (pcap I/O lives in
   `engine/base/pcapio`); `serve/` (ADR 0051) keeps its files in its working directory.
-- `launcher/` — the OpenNova Launcher (ADR 0054): a .NET 8 tray app, `opennova-launcher.exe`,
+- `switcher/` — the OpenNova Switcher (ADR 0054): a .NET 8 tray app, `opennova-switcher.exe`,
   that switches retail's `gs.novaworld.net` between OpenNova's NovaWorld, NovaLogic's and a
-  custom address through one hosts-file block; outside CMake (`package-launcher-windows.yml`).
+  custom address through one hosts-file block; outside CMake (`package-switcher-windows.yml`).
 - `tools/blender/opennova_3di/` — the Blender `.3di` and animation import/export add-on (ADR 0047;
   `scripts/package_blender_addon.sh` zips it with `opennova-3di`).
 - `web/` — NovaWorld web portal (Vue 3 + TS); `backend/` + `deploy/` + `infra/` — service
