@@ -169,7 +169,10 @@ private:
 	};
 	const Catalog &catalog_(const SessionView &view, const std::string &file);
 	// The mixer made again over the sources (each resolved one a marker), its clock at the start.
-	void remix_();
+	// The mix table made again: the markers added, and where `keep_loops` the items' loops registered before it
+	// registered again as they last were (an edit's rebuild; a step back of the clock drops them, the script
+	// registering them again as it runs).
+	void remix_(bool keep_loops);
 	// An item's ambient loop registered into the table at its tick (MissionAudio's dynamic emitter): its set's layers
 	// its own candidates, made again where its set changes; one with no pitch or volume registered empty, a clear.
 	void register_item_(const MissionScriptEmitter &emitter);
@@ -204,6 +207,7 @@ private:
 	struct ItemLoop {
 		std::string set;
 		std::vector<audio::AmbientMixer::LayerDesc> layers;
+		MissionScriptEmitter last; // its last registration, at its tick
 	};
 	std::map<std::pair<uint64_t, int>, ItemLoop> item_loops_;
 	PreviewAmbientMix mix_;

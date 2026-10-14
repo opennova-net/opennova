@@ -576,6 +576,29 @@ static int test_an_items_loop() {
 	if (heard)
 		for (const JsonValue &channel : heard->array) listed = listed || channel.get_string("source", "") == "item";
 	TEST_EXPECT(listed);
+	// An edit with the clock held (a marker moved: the sources described again, the mix table made again): the
+	// generator's loop stays heard, registered again as its update last registered it, though no tick passes.
+	TEST_EXPECT(rig.set(R"({"clock": {"playing": false}})"));
+	const int32_t held = rig.session.viewports().clock().ticks();
+	const std::vector<NodeAddress> markers = rig.rows(MissionKind::Marker);
+	TEST_EXPECT(!markers.empty());
+	if (markers.empty()) return 1;
+	Edit nudge;
+	nudge.address = markers[0];
+	nudge.field = "x";
+	nudge.value = 1.5;
+	rig.session.handle(request::edit_record(kMission, { nudge }));
+	TEST_EXPECT(rig.session.outcome().done());
+	for (int frame = 0; frame < 3; ++frame) {
+		rig.session.advance(1.0 / 62.5);
+		rig.devices.sync(rig.session);
+	}
+	TEST_EXPECT(rig.session.viewports().clock().ticks() == held);
+	const MissionListen &after = rig.viewport()->listen();
+	hum = nullptr;
+	for (const MissionSoundChannel &channel : after.channels())
+		if (channel.candidate >= 0 && std::string(channel.source) == "item") hum = &channel;
+	TEST_EXPECT(hum && hum->set == "LP_DAY" && hum->volume > 0);
 	std::printf("test_an_items_loop passed\n");
 	return 0;
 }
