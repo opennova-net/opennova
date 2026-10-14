@@ -12,7 +12,6 @@
 #include <editor/model/node.h>
 #include <editor/model/table_shape.h>
 #include <formats/def/def.h>
-#include <formats/def/def_notes.h>
 #include <formats/def/def_schema.h>
 #include <formats/def/def_write.h>
 
@@ -120,29 +119,13 @@ private:
 	std::vector<uint64_t> storage_;
 };
 
-// What every catalog keeps of its file beside its rows: the indentation it was read with
-// (def::DefLayout) and its modeled layout (def::DefTextNotes: each line's blanks, separators, comment and
-// ending, the shape of a record's line against the writer's words, the tokens the game skips), which its
-// writer generates the file from (each row names its lines by its record's note), so a file read and
-// saved again is the file as it was, and one field changed changes that one line. Never shown or edited:
-// it is carried for the save alone. The notes are made once, as the file is read, and shared by
-// every state of the document: what an undo step holds of a state is not they (the document holds them
-// whatever its history holds), so a state's footprint leaves them out (the review: a spawn-slot edit of
-// jox01's items.def counted its 4.7 MB of notes twice against the history's budget).
-struct CatalogFileState : FileState {
-	def::DefLayout layout{};
-	std::shared_ptr<const def::DefTextNotes> notes;
-	std::shared_ptr<FileState> clone() const override { return std::make_shared<CatalogFileState>(*this); }
-	size_t footprint() const override { return sizeof(CatalogFileState); }
-};
-
-// items.def's file-wide state beside its layout: the vehicle spawn registry, whose family row says how
-// a set and a comparison go.
-struct ItemsFileState : CatalogFileState {
+// items.def's file-wide state: the vehicle spawn registry, whose family row says how a set and a comparison go.
+// A catalog keeps nothing else of its file beside its rows: its writer writes the file from them alone, in its
+// form (formats/def def_write.h).
+struct ItemsFileState : FileState {
 	std::vector<int> spawn_ids;
 	std::shared_ptr<FileState> clone() const override { return std::make_shared<ItemsFileState>(*this); }
-	size_t footprint() const override { return CatalogFileState::footprint() + sizeof(ItemsFileState) -
-		                                       sizeof(CatalogFileState) + footprint_of(spawn_ids); }
+	size_t footprint() const override { return sizeof(ItemsFileState) + footprint_of(spawn_ids); }
 };
 
 // A family of `.def` the catalog opens: its asset kind, the kinds its files hold (a bit per catalog

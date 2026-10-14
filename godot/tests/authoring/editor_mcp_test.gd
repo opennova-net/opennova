@@ -1006,7 +1006,8 @@ func test_stylesheet_through_the_editor_mcp() -> void:
 	assert_eq(String(opened.get("kind", "")), "menu_style", str(opened))
 	var rows := await _query("document", {"limit": 200})
 	var row_list: Array = rows.get("rows", [])
-	assert_gt(row_list.size(), 11, str(rows))
+	# Its rows are the variables the game reads (S26: the list), the blank's eleven.
+	assert_eq(row_list.size(), 11, str(rows))
 	var fg := await _find("%def_text_fg%")
 	assert_gt(fg, 0)
 	var fg_record := await _record(fg)
@@ -1965,7 +1966,7 @@ func test_menu_tools_through_the_editor_mcp() -> void:
 	# The tree and the preview show them.
 	tree = await _query("menu_tree")
 	var hello_window := _tree_window(tree, "HELLO")
-	assert_eq(String(hello_window.get("type", "")), "BUTTON", str(hello_window))
+	assert_eq(String(hello_window.get("type", "")), "button", str(hello_window)) # as the format writes it
 	assert_eq(String(hello_window.get("text", "")), "Hello", str(hello_window))
 	assert_eq(int(hello_window.get("parent", 0)), main)
 	assert_eq(int((hello_window.get("lists", {}) as Dictionary).get("action", 0)), 2, str(hello_window))
@@ -2005,7 +2006,9 @@ func test_menu_tools_through_the_editor_mcp() -> void:
 	tree = await _query("menu_tree")
 	assert_eq(int((_tree_window(tree, "HELLO").get("lists", {}) as Dictionary).get("action", 0)), 2, str(tree))
 	# A record's fields set in the order written, through the endpoint: a body's draw kind,
-	# then its flag cleared, leaves no draw kind (sorted keys would clear the flag first).
+	# then its flag cleared, leaves no draw kind (sorted keys would clear the flag first). (HELLO a TABLE
+	# meanwhile: a button reads no COLUMN, so its list takes no record.)
+	assert_true(_done(await _edit([{"op": "set", "id": hello, "field": "type", "value": "table"}], "main.mnu")))
 	var drawn := await _edit([{"op": "replace_list", "id": hello, "list": "column.body",
 			"records": [{"display": "CUSTOM_DRAW", "custom_draw": 0}]}], "main.mnu")
 	assert_true(bool(drawn.get("outcome", {}).get("done", false)), str(drawn))
@@ -2019,6 +2022,7 @@ func test_menu_tools_through_the_editor_mcp() -> void:
 		assert_eq(String(drawn_fields.get("display", {}).get("value", "?")), "", str(drawn_record))
 		assert_eq(int(drawn_fields.get("custom_draw", {}).get("value", -1)), 0, str(drawn_record))
 	assert_true(_done(await _ask("undo")))
+	assert_true(_done(await _ask("undo"))) # HELLO a button again
 	# The menu reads name a menu: a stylesheet is none.
 	var not_menu := await _query("menu_tree", {"path": "menu_style.mns"})
 	assert_true(not_menu.get("_error", "").contains("no menu"), str(not_menu))

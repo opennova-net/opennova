@@ -18,15 +18,16 @@ namespace opennova::editor {
 // on its record, what a new record is written as, a window's TYPE token, whose TEXT_RSRC a part's
 // string ids fall back to.
 //
-// The kinds: Screen, Window, then one kind per list, named by the list's element path ("attribute",
-// "action", "items.item", "list_box", "column.header"; a path two owners share, "attribute" and
-// "element", is one kind), a table row's cells last ("item"). A part (LIST_BOX, SPINUP, SPINDOWN,
-// SCROLLBAR) is a window an owner parses from one child element: a window's fields but its TYPE,
-// which the owner decides, in a list that holds one window at most. Each kind is a record of one of
+// The kinds: Screen, Window, then one kind per list, named by the list's element path ("action",
+// "items.item", "list_box", "column.header", "gopher_categories"), a table row's cells last ("item"). A
+// part (LIST_BOX, SPINUP, SPINDOWN, SCROLLBAR; a LAN_LIST's, a GLB_TABLE's and a GOPHER's own elements;
+// a gopher category's LABEL) is a window an owner parses from one child element: a window's fields but
+// its TYPE, which the owner decides, in a list that holds one window at most. Each kind is a record of one of
 // the format's shapes (mnu::SchemaShape): Screen mnu::Screen; Window and Part mnu::Window; Appearance
 // (the appearance, shuttle, scroll and item-appearance kinds) mnu::Appearance; Sound, Action, Hotkey;
 // Datasource a std::string; Item (an ITEMS row and a table row's cell) mnu::Item; Row mnu::TableRow;
-// Header, Body, Subst the table's columns; Element and Attribute an extra element and its attribute.
+// Header, Body, Subst the table's columns; Category a gopher's FILTERS CATEGORY (mnu::GopherCategory), Entry
+// its ITEM or INFO row, FieldSlot a GLB server details FIELD (the gopher's TARGETs Datasource strings).
 
 enum class MenuKind : NodeKind { Screen = 0, Window = 1 };
 constexpr NodeKind node_kind(MenuKind kind) { return static_cast<NodeKind>(kind); }

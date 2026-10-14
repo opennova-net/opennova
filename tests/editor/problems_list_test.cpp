@@ -469,7 +469,7 @@ int test_fixes_lazy() {
 	v.project.open = true;
 	v.project.root = "C:/mods/Many";
 	for (int file = 0; file < 50; ++file) {
-		// (Animation maps: a menu keeps the input the game ignores with its look, D-MNU-22, no Rewrite.)
+		// (Animation maps, whose ignored input a Rewrite drops.)
 		const std::string name = "f" + std::to_string(file) + ".adm";
 		editor_test::own(v.project.scan)
 				.entries.push_back(file_entry(name, "anims/" + name, AssetKind::AnimationMap));

@@ -1,12 +1,12 @@
 // The HUD effects document (hudfx_document.h, ADR 0046 S23 B): hudfx.def's tagged lines as rows over
-// formats/def/def_hudfx, read and written over the file's modeled layout; the fields' words and the findings
-// say what the game makes of the file (docs/interface/hud-re.md "hudfx.def").
+// formats/def/def_hudfx, read through its reader and written by its writer from the rows alone (S26); the fields'
+// words and the findings say what the game makes of the file (docs/interface/hud-re.md "hudfx.def").
 #include "hudfx_document.h"
 
 #include <iterator>
 
 #include <editor/assets/asset_kinds.h>
-#include <editor/documents/noted_file_state.h>
+#include <editor/model/staged_rows.h>
 
 namespace opennova::editor {
 namespace {
@@ -62,7 +62,6 @@ RecordTable make_table() {
 const HudFxRow &fx_row(const Node &node) { return static_cast<const HudFxRow &>(node); }
 
 constexpr FindingCodeEntry<HudFxFinding> kFindingEntries[] = {
-	{ HudFxFinding::NeverRead, listed_code("hudfx.never_read") },
 	{ HudFxFinding::NoModel, listed_code("hudfx.no_model") },
 	{ HudFxFinding::NameRuns, listed_code("hudfx.name_runs") },
 	{ HudFxFinding::PowerUnseen, listed_code("hudfx.power_unseen") },
@@ -93,9 +92,11 @@ std::string HudFxRow::name() const {
 
 def::HudFxFile HudFxDocument::file() const {
 	def::HudFxFile out;
-	if (const auto *noted = noted_layout(file_state())) out.note = noted->root();
 	for (const auto &node : rows())
-		if (node && node->kind == kLine) out.lines.push_back(fx_row(*node).line);
+		if (node && node->kind == kLine) {
+			out.line = fx_row(*node).line;
+			break;
+		}
 	return out;
 }
 
@@ -108,37 +109,31 @@ std::string HudFxDocument::record_title(const NodeAddress &address) const {
 }
 
 bool HudFxDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
-                          std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &, Diagnostic &error) {
-	auto notes = std::make_shared<textlayout::Notes>();
-	const def::HudFxFile read = def::hudfx_parse(bytes.data(), bytes.size(), *notes);
-	for (const def::HudFxLine &line : read.lines) {
+                          std::shared_ptr<const FileState> &, std::vector<SourceIssue> &, Diagnostic &error) {
+	const def::HudFxFile read = def::hudfx_parse(bytes.data(), bytes.size());
+	if (read.line) {
 		auto row = std::make_shared<HudFxRow>();
-		row->line = line;
+		row->line = *read.line;
 		shape(*row);
 		rows.push_back(std::move(row));
 	}
-	auto noted = std::make_shared<NotedFileState>();
-	noted->notes = std::move(notes);
-	state = std::move(noted);
 	return true;
 }
 
 SerializeResult HudFxDocument::serialize() const {
 	SerializeResult result;
 	std::string text, error;
-	bool rewritten = false;
-	if (!def::hudfx_write(file(), noted_layout(file_state()), text, error, &rewritten)) {
+	if (!def::hudfx_write(file(), text, error)) {
 		result.issues.push_back({true, 0, std::string(), std::string(), "The file could not be written: " + error});
 		return result;
 	}
 	result.text = std::move(text);
-	if (rewritten) result.notes.push_back("The lines are written in the editor's form: the file's would not read back as they are.");
 	return result;
 }
 
 std::string HudFxDocument::save_words() const {
-	return "Saving writes the file in the form it was read in, its comments and spacing kept; a changed line changes "
-	       "alone, a new line goes after the last.";
+	return "Saving writes the one line the game reads, its tag and its model, in the editor's form; what followed it "
+	       "in the file, which the game never read, is not kept.";
 }
 
 std::shared_ptr<Node> HudFxDocument::make_node(NodeKind kind, NodeId, const std::vector<std::shared_ptr<const Node>> &,
@@ -152,15 +147,19 @@ std::shared_ptr<Node> HudFxDocument::make_node(NodeKind kind, NodeId, const std:
 	return row;
 }
 
-void HudFxDocument::prepare_duplicate(Node &copy, const Node &, const std::vector<std::shared_ptr<const Node>> &) const {
-	static_cast<HudFxRow &>(copy).line.note = 0;
-}
-
-void HudFxDocument::refine_field(const NodeAddress &address, FieldUse &use) const {
-	TableDocument::refine_field(address, use);
-	// The walk ends at the first tagged line [orig: File_ParseASCIIFile @ 0x53D942]: a later line is read for nothing.
-	const auto &all = rows();
-	if (!all.empty() && all.front() && all.front()->id != address.row) use.applies = Applicability::Ignored;
+bool HudFxDocument::accept_step(const EditStep &step, const StagedRows &rows, StepRefusal &refusal) const {
+	if (!TableDocument::accept_step(step, rows, refusal)) return false;
+	// The walk ends at the first tagged line [orig: File_ParseASCIIFile @ 0x53D942]: a second is one the game never
+	// reads, which the file does not hold.
+	size_t lines = 0;
+	for (const auto &node : rows.rows())
+		if (node && node->kind == kLine) ++lines;
+	if (lines > 1) {
+		refusal.message = "hudfx.def holds the one line the game reads (its walk ends there): change that line's tag "
+		                  "or model instead.";
+		return false;
+	}
+	return true;
 }
 
 const FindingCodeRow &finding_code(HudFxFinding code) { return kFindingRows[static_cast<size_t>(code)]; }
@@ -183,12 +182,6 @@ std::vector<Diagnostic> validate_hudfx_file(const DocumentBase &document) {
 	for (size_t i = 0; i < all.size(); ++i) {
 		const Node &node = *all[i];
 		const def::HudFxLine &line = fx_row(node).line;
-		if (i > 0) {
-			add(node, DiagnosticSeverity::Warning, HudFxFinding::NeverRead, "tag",
-			    "The game reads the file's first model line alone (its tag ends the walk) [orig: HUD_CacheModelNameByTag "
-			    "@ 0x58F970 returns 1; File_ParseASCIIFile @ 0x53D942]: this line never takes effect.");
-			continue;
-		}
 		if (line.model.empty()) {
 			add(node, DiagnosticSeverity::Warning, HudFxFinding::NoModel, "model",
 			    "The line names no model: its slot holds none and nothing is loaded [orig: HUD_InitOverlaySystem @ "

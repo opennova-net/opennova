@@ -22,9 +22,8 @@ namespace opennova::editor {
 // in the CBIN form (a credits file stored so, which its type writes back so) is read by the binary reader,
 // whose pools are cleared at their own sizes, and makes none. Reads a text document's text as the game reads
 // those bytes; a blocked document makes none. A record document of such a kind (the character attributes, S23 B)
-// makes the same finding in its own validator over the text its save writes, in these words, with its fix: the
-// lines its loader reads the same without, holding numbers alone, commented out in its layout
-// (documents/charattr_document.h).
+// makes the same finding in its own validator over the file a build packs, in these words (the file as it sits, or
+// with unsaved edits the text its save writes; documents/charattr_document.h).
 std::vector<Diagnostic> config_overrun_findings(const DocumentBase &document);
 // The finding's words: what `file` holds, what the reader makes of it, where the first value past the pool is.
 std::string config_overrun_words(const std::string &file, const configfile::DataStringsPool &pool);

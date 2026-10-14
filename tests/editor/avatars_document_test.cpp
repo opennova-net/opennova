@@ -1,14 +1,14 @@
 // The avatars table document (ADR 0046 S23 B; editor/documents/avatars_document.h): Avatars.def as rows over
-// formats/avatars with the file's layout modeled (formats/textlayout): its parts (a head, a body, arms: a model and
-// a text key each) and its nationalities, each holding its divisions, each its combinations of a head, a body and
-// arms; a value changed changes its own line; the graph reads the document's records (a part's models, its shown
-// name a key of Game.bin's Avatars section, a combination's parts by name in the file's scope of their kind, the
-// earlier of two parts of a name inert where no combination binds it); the reader's notes as findings at their
-// lines; the order the game binds a combination's parts in (the last of a name above it, in the text a save
-// writes); a file the reader stops in held read only with the gating finding; in a session, an
-// edit of a head's model moves the graph's reference with it, and Undo moves it back. The retail leg
-// (OPENNOVA_JO_DIR): the install's Avatars.def (its base archives and each expansion's) through the document, saved
-// byte for byte.
+// formats/avatars, written by its writer from the rows alone (the S26 ruling): its parts (a head, a body, arms: a
+// model and a text key each) and its nationalities, each holding its divisions, each its combinations of a head, a
+// body and arms; a value changed changes its own line; the graph reads the document's records (a part's models, its
+// shown name a key of Game.bin's Avatars section, a combination's parts by name in the file's scope of their kind,
+// the earlier of two parts of a name inert); the reader's notes as findings at their lines; the order the game binds
+// a combination's parts in (the last of a name above it, in the text a save writes: every part first); a file the
+// reader stops in held read only with the gating finding; in a session, an edit of a head's model moves the graph's
+// reference with it, and Undo moves it back. The retail leg (OPENNOVA_JO_DIR): the install's Avatars.def (its base
+// archives and each expansion's) through the document, saved as the format's writer writes what its reader reads of
+// it, a fixed point.
 #include <editor/documents/avatars_document.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
@@ -42,6 +42,19 @@ std::vector<uint8_t> bytes_of(const std::string &text) { return std::vector<uint
 
 using editor_test::set_edit;
 
+// The text formats/avatars' writer makes of what its reader reads of `text`: what a save of it writes.
+std::string written_form(const std::string &text) {
+	avatars::AvatarsFile file{};
+	if (avatars::avatars_parse_memory(text.data(), text.size(), &file) != 0) return std::string();
+	char *data = nullptr;
+	size_t size = 0;
+	const int rc = avatars::avatars_write(&file, &data, &size);
+	avatars::avatars_free(&file);
+	const std::string out = rc == 0 && data ? std::string(data, size) : std::string();
+	avatars::avatars_free_buffer(data);
+	return out;
+}
+
 const std::string kFile =
 		"// the parts\r\n"
 		"define head HEAD_A\r\n{\r\n\tname\t\tAV_HEAD_A\r\n\tgraphic\t\thead_a.3di\r\n\tcamo\t\t0 0 0\r\n\tvoice\t\t1\r\n\tsex\t\tm\r\n}\r\n"
@@ -57,16 +70,17 @@ int test_rows() {
 	Diagnostic error;
 	TEST_EXPECT(document.load_bytes(bytes_of(kFile), "defs/Avatars.def", AssetKind::AvatarDefs, "jo", error));
 	TEST_EXPECT(document.rows().size() == 5 && !document.blocked());
-	TEST_EXPECT(document.serialize().text == kFile);
+	const std::string written = written_form(kFile);
+	TEST_EXPECT(!written.empty() && document.serialize().text == written);
 	const auto &first = static_cast<const AvatarPartRow &>(*document.rows()[0]);
 	TEST_EXPECT(first.part.name == "HEAD_A" && first.part.display_name == "AV_HEAD_A" && first.part.voice == 1);
 	TEST_EXPECT(document.record_title({first.id, kPart, 0}) == "Head HEAD_A");
 	const auto &nationality = static_cast<const AvatarNationalityRow &>(*document.rows()[4]);
 	TEST_EXPECT(nationality.nationality.divisions.size() == 1 && nationality.nationality.divisions[0].combos.size() == 1);
-	TEST_EXPECT(document.record_title({nationality.id, kNationality, 0}) == "Nationality N00 AV_NAT_US");
+	TEST_EXPECT(document.record_title({nationality.id, kNationality, 0}) == "Nationality 0 AV_NAT_US");
 	// A head's model changed: its own line.
 	TEST_EXPECT(document.apply(set_edit({first.id, kPart, 0}, "graphic", std::string("head_b.3di")), error));
-	std::string expected = kFile;
+	std::string expected = written;
 	expected.replace(expected.find("head_a.3di"), 10, "head_b.3di");
 	TEST_EXPECT(document.serialize().text == expected);
 	// A word of the walk holds no blank.
@@ -95,7 +109,7 @@ int test_rows() {
 	AvatarsDocument again;
 	TEST_EXPECT(again.load_bytes(bytes_of(document.serialize().text), "defs/Avatars.def", AssetKind::AvatarDefs, "jo", error) &&
 	            again.rows().size() == 7);
-	TEST_EXPECT(static_cast<const AvatarNationalityRow &>(*again.rows()[6]).nationality.raw_id == "N01");
+	TEST_EXPECT(static_cast<const AvatarNationalityRow &>(*again.rows()[6]).nationality.id == 1);
 	// A division goes into a nationality, not the rows.
 	add.address = {0, kDivision, 0};
 	TEST_EXPECT(!document.apply(add, error));
@@ -143,7 +157,7 @@ int test_findings_and_session() {
 	TEST_EXPECT(findings.size() == 1 && findings[0].code() == "avatars.ignored_input" &&
 	            findings[0].severity == DiagnosticSeverity::Warning && findings[0].line == 4 &&
 	            findings[0].message.find("duplicate nationality") != std::string::npos);
-	TEST_EXPECT(document.serialize().text == twice);
+	TEST_EXPECT(document.serialize().text == written_form(twice));
 
 	editor_test::TempProjectDir dir("opennova_editor_avatars_document");
 	editor_test::NoProcess platform;
@@ -186,9 +200,9 @@ int test_findings_and_session() {
 }
 
 // The game binds a combination's parts among those above it, the last of a name [orig: CAvatarDefs_ParseConfigLine
-// @ 0x57A830..0x57A854]: a combination between two heads of a name binds the earlier, one after both the later, and
-// neither head is inert; a combination set to a head the layout puts below it makes the save write the writer's form
-// (every part first), so nothing is dropped; the reader stopping on the text a save writes is the gating finding.
+// @ 0x57A830..0x57A854], in the text a save writes, every part first: a combination between two heads of a name in
+// the file binds the later, as one after both does, and the earlier head is inert; a combination set to a head the
+// file has below it binds it; the reader stopping on the text a save writes is the gating finding.
 int test_order() {
 	const std::string between =
 			"define head HEAD_A\r\n{\r\n\tgraphic\t\ta1.3di\r\n}\r\n"
@@ -208,14 +222,14 @@ int test_order() {
 			last += symbol.scope == "AVATARS.DEF/HEAD";
 			inert += symbol.inert;
 		}
-	TEST_EXPECT(first == 1 && last == 1 && inert == 0);
+	TEST_EXPECT(first == 1 && last == 1 && inert == 1);
 	size_t to_first = 0, to_last = 0;
 	for (const GraphEdge &e : out.edges)
 		if (e.kind == ReferenceKind::AvatarPart && e.value == "HEAD_A") {
 			to_first += e.scope == "AVATARS.DEF/HEAD#1";
 			to_last += e.scope == "AVATARS.DEF/HEAD";
 		}
-	TEST_EXPECT(to_first == 1 && to_last == 1);
+	TEST_EXPECT(to_first == 0 && to_last == 2);
 
 	AvatarsDocument document;
 	TEST_EXPECT(document.load_bytes(bytes_of(between), "Avatars.def", AssetKind::AvatarDefs, "jo", error));
@@ -228,13 +242,11 @@ int test_order() {
 				return true;
 			});
 	TEST_EXPECT(combo.kind == kCombo);
-	// The first nationality's combination set to HEAD_B, which the layout puts below it: the text would not read
-	// back as the rows (the game would drop it), so the save writes the writer's form, every part first, and says so;
-	// nothing is dropped, so no finding. There both combinations bind the later HEAD_A, and the earlier is inert.
+	// The first nationality's combination set to HEAD_B, which the file has below it: the save writes every part
+	// first, so it binds; no finding. The other combination binds the later HEAD_A, and the earlier is inert.
 	TEST_EXPECT(document.apply(set_edit(combo, "head", std::string("HEAD_B")), error));
 	const SerializeResult rewritten = document.serialize();
-	TEST_EXPECT(rewritten.ok() && !rewritten.notes.empty() &&
-	            rewritten.text.find("define arms ARMS_B") < rewritten.text.find("nationality N00"));
+	TEST_EXPECT(rewritten.ok() && rewritten.text.find("define arms ARMS_B") < rewritten.text.find("nationality 0"));
 	TEST_EXPECT(validate_avatars_file(document).empty());
 	size_t shadowed = 0;
 	for (const auto &row : document.rows())
@@ -293,12 +305,17 @@ int test_retail() {
 		TEST_EXPECT(document.load_bytes(bytes, "Avatars.def", AssetKind::AvatarDefs, "jo", error));
 		TEST_EXPECT(!document.blocked());
 		const SerializeResult written = document.serialize();
-		if (!written.ok() || written.text != std::string(bytes.begin(), bytes.end()) || !written.notes.empty()) {
-			std::fprintf(stderr, "FAIL the install's Avatars.def %s is not saved as it was\n", expansion.c_str());
+		AvatarsDocument again;
+		if (!written.ok() || written.text != written_form(std::string(bytes.begin(), bytes.end())) ||
+		    !again.load_bytes(std::vector<uint8_t>(written.text.begin(), written.text.end()), "Avatars.def",
+		                      AssetKind::AvatarDefs, "jo", error) ||
+		    again.serialize().text != written.text || again.rows().size() != document.rows().size()) {
+			std::fprintf(stderr, "FAIL the install's Avatars.def %s is not saved as the format's writer writes it\n",
+			             expansion.c_str());
 			return 1;
 		}
-		std::printf("retail: Avatars.def %s, %zu rows, saved byte for byte\n", expansion.empty() ? "(base)" : expansion.c_str(),
-		            document.rows().size());
+		std::printf("retail: Avatars.def %s, %zu rows, saved as the format's writer writes it, a fixed point\n",
+		            expansion.empty() ? "(base)" : expansion.c_str(), document.rows().size());
 	}
 	return 0;
 }

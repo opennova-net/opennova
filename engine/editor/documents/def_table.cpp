@@ -566,22 +566,13 @@ const ItemsFileState *items_state(const FileState *state) { return dynamic_cast<
 bool parse_items(const std::vector<uint8_t> &bytes, std::vector<CatalogRecord> &rows,
                  std::shared_ptr<const FileState> &state, DefParseReport &report) {
 	DefItemsFile file{};
-	auto notes = std::make_shared<DefTextNotes>();
-	def_parse_items_memory(bytes.data(), bytes.size(), &file, &report, *notes);
+	def_parse_items_memory(bytes.data(), bytes.size(), &file, &report);
 	auto spawn = std::make_shared<ItemsFileState>();
 	spawn->spawn_ids.assign(file.vehicle_spawn_ids, file.vehicle_spawn_ids + file.vehicle_spawn_id_count);
-	spawn->layout = file.layout;
-	spawn->notes = std::move(notes);
 	state = spawn;
 	for (size_t i = 0; i < file.count; ++i) rows.emplace_back(R::Item, &file.entries[i]);
 	std::free(file.entries); // each row took its record's arrays
 	return true;
-}
-
-// The notes a file was read with (none for a file made from nothing).
-const DefTextNotes *notes_of(const FileState *state) {
-	const auto *catalog = dynamic_cast<const CatalogFileState *>(state);
-	return catalog ? catalog->notes.get() : nullptr;
 }
 
 DefWriteResult write_items(const std::vector<const CatalogRecord *> &rows, const FileState *state) {
@@ -594,21 +585,8 @@ DefWriteResult write_items(const std::vector<const CatalogRecord *> &rows, const
 	if (const ItemsFileState *spawn = items_state(state)) {
 		file.vehicle_spawn_id_count = int(spawn->spawn_ids.size());
 		std::copy(spawn->spawn_ids.begin(), spawn->spawn_ids.end(), file.vehicle_spawn_ids);
-		file.layout = spawn->layout;
 	}
-	return def_write_items(file, notes_of(state));
-}
-
-// The layout and the notes a file of a family with no other file-wide state was read with.
-std::shared_ptr<const FileState> layout_state(const DefLayout &layout, std::shared_ptr<const DefTextNotes> notes) {
-	auto state = std::make_shared<CatalogFileState>();
-	state->layout = layout;
-	state->notes = std::move(notes);
-	return state;
-}
-DefLayout layout_of(const FileState *state) {
-	const auto *catalog = dynamic_cast<const CatalogFileState *>(state);
-	return catalog ? catalog->layout : DefLayout{};
+	return def_write_items(file);
 }
 
 // items.def's vehicle spawn registry: an id at a slot, a new one at the end, up to its 32 slots.
@@ -639,21 +617,14 @@ bool same_spawn_registry(const FileState *a, const FileState *b) {
 std::shared_ptr<const FileState> spawn_registry_after_remove(const std::shared_ptr<const FileState> &state,
                                                              size_t remaining) {
 	if (remaining != 0) return state;
-	// The file's layout and notes stand (its comments before and after the records).
-	auto empty = std::make_shared<ItemsFileState>();
-	if (const ItemsFileState *current = items_state(state.get())) {
-		empty->layout = current->layout;
-		empty->notes = current->notes;
-	}
-	return empty;
+	return std::make_shared<ItemsFileState>();
 }
 
 bool parse_weapons(const std::vector<uint8_t> &bytes, std::vector<CatalogRecord> &rows,
                    std::shared_ptr<const FileState> &state, DefParseReport &report) {
 	DefWeaponsFile file{};
-	auto notes = std::make_shared<DefTextNotes>();
-	def_parse_weapons_memory(bytes.data(), bytes.size(), &file, &report, *notes);
-	state = layout_state(file.layout, std::move(notes));
+	def_parse_weapons_memory(bytes.data(), bytes.size(), &file, &report);
+	state = nullptr;
 	for (size_t i = 0; i < file.ammo_classes_count; ++i) rows.emplace_back(R::Carry, &file.ammo_classes[i]);
 	for (size_t i = 0; i < file.count; ++i) rows.emplace_back(R::Weapon, &file.entries[i]);
 	std::free(file.entries);
@@ -661,7 +632,7 @@ bool parse_weapons(const std::vector<uint8_t> &bytes, std::vector<CatalogRecord>
 	return true;
 }
 
-DefWriteResult write_weapons(const std::vector<const CatalogRecord *> &rows, const FileState *state) {
+DefWriteResult write_weapons(const std::vector<const CatalogRecord *> &rows, const FileState *) {
 	std::vector<DefWeaponDef> weapons;
 	std::vector<DefAmmoClassCarry> carries;
 	for (const CatalogRecord *row : rows) {
@@ -673,48 +644,44 @@ DefWriteResult write_weapons(const std::vector<const CatalogRecord *> &rows, con
 	file.count = weapons.size();
 	file.ammo_classes = carries.data();
 	file.ammo_classes_count = carries.size();
-	file.layout = layout_of(state);
-	return def_write_weapons(file, notes_of(state));
+	return def_write_weapons(file);
 }
 
-// powerup.def: its rows and the notes it was read with.
+// powerup.def: its rows.
 bool parse_powerup(const std::vector<uint8_t> &bytes, std::vector<CatalogRecord> &rows,
                    std::shared_ptr<const FileState> &state, DefParseReport &report) {
 	DefPowerupFile file{};
-	auto notes = std::make_shared<DefTextNotes>();
-	def_parse_powerup_memory(bytes.data(), bytes.size(), &file, &report, *notes);
-	state = layout_state(DefLayout{}, std::move(notes));
+	def_parse_powerup_memory(bytes.data(), bytes.size(), &file, &report);
+	state = nullptr;
 	for (size_t i = 0; i < file.count; ++i) rows.emplace_back(R::Powerup, &file.entries[i]);
 	std::free(file.entries);
 	return true;
 }
-DefWriteResult write_powerup(const std::vector<const CatalogRecord *> &rows, const FileState *state) {
+DefWriteResult write_powerup(const std::vector<const CatalogRecord *> &rows, const FileState *) {
 	std::vector<DefPowerupDef> entries;
 	for (const CatalogRecord *row : rows) entries.push_back(row->as<DefPowerupDef>());
 	DefPowerupFile file{};
 	file.entries = entries.data();
 	file.count = entries.size();
-	return def_write_powerup(file, notes_of(state));
+	return def_write_powerup(file);
 }
-// ammo.def: its rows and the layout and notes it was read with.
+// ammo.def: its rows.
 bool parse_ammo(const std::vector<uint8_t> &bytes, std::vector<CatalogRecord> &rows,
                 std::shared_ptr<const FileState> &state, DefParseReport &report) {
 	DefAmmoFile file{};
-	auto notes = std::make_shared<DefTextNotes>();
-	def_parse_ammo_memory(bytes.data(), bytes.size(), &file, &report, *notes);
-	state = layout_state(file.layout, std::move(notes));
+	def_parse_ammo_memory(bytes.data(), bytes.size(), &file, &report);
+	state = nullptr;
 	for (size_t i = 0; i < file.count; ++i) rows.emplace_back(R::Ammo, &file.entries[i]);
 	std::free(file.entries);
 	return true;
 }
-DefWriteResult write_ammo(const std::vector<const CatalogRecord *> &rows, const FileState *state) {
+DefWriteResult write_ammo(const std::vector<const CatalogRecord *> &rows, const FileState *) {
 	std::vector<DefAmmoDef> entries;
 	for (const CatalogRecord *row : rows) entries.push_back(row->as<DefAmmoDef>());
 	DefAmmoFile file{};
 	file.entries = entries.data();
 	file.count = entries.size();
-	file.layout = layout_of(state);
-	return def_write_ammo(file, notes_of(state));
+	return def_write_ammo(file);
 }
 
 constexpr CatalogFamily kFamilies[] = {

@@ -36,14 +36,10 @@ struct MusicBankStream {
 	std::shared_ptr<const std::vector<sbf::SbfChunk>> chunks;
 };
 
+// The bank as the game reads it (sbf::SbfFile's model): its channel format and its streams. The header's version and
+// reserved words and each chunk's reserved pair and tail, which the game never reads, are the writer's constants.
 struct MusicBankRow : TableRow {
-	uint32_t version = sbf::SBF_VERSION_DEFAULT;
 	uint32_t flags = sbf::SBF_FLAGS_BYTE_PAIRED_STEREO;
-	uint32_t reserved = 0;
-	// The bank's one reserved pair and tail rule (sbf::SbfFile's), which every chunk is written under.
-	uint8_t chunk_reserved_a = 0xFA;
-	uint8_t chunk_reserved_b = 0x00;
-	sbf::SbfTail tail = sbf::SbfTail::Residue;
 	std::vector<MusicBankStream> streams;
 
 	MusicBankRow();

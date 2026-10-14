@@ -433,7 +433,8 @@ static int test_actions() {
 
 	// A menu the game could not read: Clear, and kept so, no retry each pump (the failure latch),
 	// until it changes; undone, the picture made again.
-	set(session, *menu, exit, "string.justify", std::string("CEN\"TER"));
+	// (A quote in a window's name: retail's reader ends the attribute there, so the writer refuses it.)
+	set(session, *menu, exit, "name", std::string("EX\"IT"));
 	from = device->taken.size();
 	devices.sync(session);
 	devices.sync(session);
@@ -1352,13 +1353,13 @@ static int test_menu_change_sets() {
 			shown->followed_change() == ChangeClass::Unknown && shown->configures() == 4 &&
 			device->since(from) == (Actions{ ViewportAction::Rebuild }));
 
-	// SECOND's window made unwritable (a justify the writer cannot write), a screen after the shown
+	// SECOND's window made unwritable (a name holding a quote, which the writer cannot write), a screen after the shown
 	// one: the game would read none of the menu, so the picture goes (Clear, Failed); undone, it is
 	// made again.
 	menu = session.document_for(path);
 	TEST_EXPECT(menu != nullptr);
 	if (!menu) return 1;
-	set(session, *menu, named(*menu, "NOTE"), "string.justify", std::string("CEN\"TER"));
+	set(session, *menu, named(*menu, "NOTE"), "name", std::string("NO\"TE"));
 	TEST_EXPECT(session.outcome().done() && !menu->serialize().ok());
 	from = device->taken.size();
 	devices.sync(session);
@@ -2040,7 +2041,7 @@ static int test_builds() {
 	devices.frame(session, 4);
 	TEST_EXPECT(!device->built.loading && menu_device->built.loading && menu_device->built.progress.done == 2);
 	menu_device->taken_building.clear();
-	set(session, *menu, exit, "string.justify", std::string("CEN\"TER"));
+	set(session, *menu, exit, "name", std::string("EX\"IT")); // a quote the writer cannot write
 	devices.frame(session);
 	TEST_EXPECT(menu_device->taken_building == (Actions{ ViewportAction::Clear }) && !menu_device->built.loading &&
 			menu_device->shown == 0);

@@ -53,9 +53,6 @@ std::string menu_note_message(const menu::MenuFrameNote &note) {
 	case Code::AppearanceStateUnknown:
 		return "The game does not know the appearance state " + quoted(s) +
 		       " (DEFAULT, DISABLED, MOUSEOVER or SELECTED), so this row sets nothing.";
-	case Code::AppearanceTypeUnknown:
-		return "The game does not know the appearance type " + quoted(s) +
-		       " (IMAGE, COLOR, OUTLINE or CUSTOM), so this row only marks its state as present and draws nothing.";
 	case Code::AppearanceCustom:
 		return "The game hands a CUSTOM appearance (the " + s +
 		       " state) to the menu's own code to draw; the preview draws nothing for it.";
@@ -72,12 +69,6 @@ std::string menu_note_message(const menu::MenuFrameNote &note) {
 		       "write eight digits (FF, then RRGGBB) for an opaque one.";
 	case Code::StyleVarUnresolved:
 		return "No stylesheet the game reads defines " + s + ", so the game uses the text as written.";
-	case Code::TypeUnknown:
-		return "The game does not know the window type " + quoted(s) +
-		       ", so it makes a plain window, which draws only its appearance and frame.";
-	case Code::ItemKindAsText:
-		return "The game reads a list's or a combo box's " + s +
-		       " row as text: it keeps no image or colour, so the row draws the text written as its label.";
 	case Code::TableCellsDeferred:
 		return "OpenNova does not draw a table's " + s + " row images yet (D-MNU-13).";
 	case Code::TableCellsCustom:

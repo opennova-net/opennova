@@ -33,7 +33,7 @@ const DefWords *def_words_of(def::DefRecordKind kind, const std::string &id);
 // show as their token.
 struct DefChoiceWords {
 	const char *id;      // the member ("attrib")
-	const char *token;   // the choice's token as the file writes it ("noshadow")
+	const char *token;   // the choice's token as the file writes it, the game's name table's spelling ("NoShadow")
 	const char *label;   // "No shadow"
 	const char *meaning; // what the game does with it
 	const char *cite;    // its witness
