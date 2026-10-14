@@ -120,7 +120,7 @@ std::string particles() {
 
 // The soldier's item: an org1 person on the SOLD map, its ammo and points as `extra` adds to them.
 std::string items(const std::string &ai_function, const std::string &extra) {
-	return editor_test::crlf("begin \"Soldier\"\nid 100300\ntype person\ngraphic skinned\nanim_def sold\n"
+	return test_io::crlf("begin \"Soldier\"\nid 100300\ntype person\ngraphic skinned\nanim_def sold\n"
 	                         "ai_function " + ai_function + "\nmove_function org1\nsound_profile on_soldier\n" + extra + "end\n");
 }
 
@@ -128,7 +128,7 @@ const char *kArmed = "ammo_closeattack AMMO_TEST\nammo_easyrocket AMMO_ROCKET\na
                      "ammo_marker3 AMMO_TEST\nlaunchups_closeattack mflash01\nlaunchups_rocket MFlash01\n";
 
 struct FireProject {
-	editor_test::TempProjectDir dir{"opennova_editor_clip_fire"};
+	test_temp::TempDir dir{"opennova_editor_clip_fire"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -142,26 +142,26 @@ struct FireProject {
 		editor_test::create_missing_files(session);
 		root = session.view().project.root;
 		const std::string source = dir.file("source");
-		bool ok = editor_test::write_text(source + "/skinned.o3d", soldier_model()) &&
-		          editor_test::write_text(source + "/sold.o3a", sold_clips());
+		bool ok = test_io::write_text(source + "/skinned.o3d", soldier_model()) &&
+		          test_io::write_text(source + "/sold.o3a", sold_clips());
 		EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 		import.imports = {{source + "/skinned.o3d", {}}, {source + "/sold.o3a", {}}};
 		session.handle(import);
 		session.run_operations();
-		ok = ok && editor_test::write_bytes(root + "/sounds/game.lwf", editor_test::wave_bank_of(std::vector<std::string>(std::begin(kSets), std::end(kSets))));
+		ok = ok && test_io::write_file(root + "/sounds/game.lwf", editor_test::wave_bank_of(std::vector<std::string>(std::begin(kSets), std::end(kSets))));
 		const std::vector<uint8_t> tone = test_io::read_file(repo() + "/fixtures/lwf/tone.wav");
-		for (const char *set : kSets) ok = ok && editor_test::write_bytes(root + "/sounds/" + strutil::to_lower(set) + ".wav", tone);
-		ok = ok && editor_test::write_text(root + "/defs/SndProf.def",
-		                                   editor_test::crlf("begin \"default\"\nend\nbegin \"on_soldier\"\n"
+		for (const char *set : kSets) ok = ok && test_io::write_file(root + "/sounds/" + strutil::to_lower(set) + ".wav", tone);
+		ok = ok && test_io::write_text(root + "/defs/SndProf.def",
+		                                   test_io::crlf("begin \"default\"\nend\nbegin \"on_soldier\"\n"
 		                                                     "\tSSLFootGND FS_GND_L 0 0 0\nend\n")) &&
-		     editor_test::write_text(root + "/defs/ammo.def", editor_test::crlf(kAmmo)) &&
-		     editor_test::write_text(root + "/particles/fire.ptl", particles());
+		     test_io::write_text(root + "/defs/ammo.def", test_io::crlf(kAmmo)) &&
+		     test_io::write_text(root + "/particles/fire.ptl", particles());
 		ok = ok && write_items("org1", kArmed);
 		made = ok && select("anim_attack");
 	}
 
 	bool write_items(const std::string &ai_function, const std::string &extra) {
-		if (!editor_test::write_text(root + "/defs/items.def", items(ai_function, extra))) return false;
+		if (!test_io::write_text(root + "/defs/items.def", items(ai_function, extra))) return false;
 		editor_test::handle_to_end(session, request::rescan());
 		while (session.view().activity.validation.running) session.poll();
 		return true;

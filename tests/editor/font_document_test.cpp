@@ -161,7 +161,7 @@ int test_blank() {
 // out again with no Rebuild; a page with its glyphs; the hit of a glyph naming its record; an edit of the spacing
 // laid out again (an Update); a font that cannot be made, Failed.
 struct FontRig {
-	editor_test::TempProjectDir dir{"opennova_editor_font_viewport"};
+	test_temp::TempDir dir{"opennova_editor_font_viewport"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -188,7 +188,7 @@ int test_viewport() {
 	FontRig rig;
 	editor_test::handle_to_end(rig.session, request::new_project(rig.root(), "Fonts"));
 	editor_test::create_missing_files(rig.session);
-	TEST_EXPECT(editor_test::write_bytes(rig.root() + "/" + rig.font, fixture("synth_1page.fnt")));
+	TEST_EXPECT(test_io::write_file(rig.root() + "/" + rig.font, fixture("synth_1page.fnt")));
 	editor_test::handle_to_end(rig.session, request::rescan());
 	editor_test::handle_to_end(rig.session, request::open_document(rig.font));
 	TEST_EXPECT(rig.session.outcome().done() && rig.view().documents.active == rig.font);

@@ -176,7 +176,7 @@ static int test_routing() {
 }
 
 struct Project {
-	editor_test::TempProjectDir dir;
+	test_temp::TempDir dir;
 	std::string root;
 	ProjectDocument doc;
 	ProjectPaths paths;
@@ -363,10 +363,10 @@ static int test_protected_build_survives_and_archives_are_refused() {
 	// The output root may be any folder (--out): pruning deletes only what proves it is a
 	// build, never a bystander, whatever its name looks like.
 	const std::string out = p.output_root();
-	TEST_EXPECT(editor_test::write_text(out + "/my important documents/keep.txt", "mine"));
-	TEST_EXPECT(editor_test::write_text(out + "/0123456789abcdef/keep.txt", "mine"));     // id-shaped, no record
-	TEST_EXPECT(editor_test::write_text(out + "/fedcba9876543210.tmp/keep.txt", "mine")); // staging-shaped, no marker
-	TEST_EXPECT(editor_test::write_text(out + "/00000000000000aa/build.json",
+	TEST_EXPECT(test_io::write_text(out + "/my important documents/keep.txt", "mine"));
+	TEST_EXPECT(test_io::write_text(out + "/0123456789abcdef/keep.txt", "mine"));     // id-shaped, no record
+	TEST_EXPECT(test_io::write_text(out + "/fedcba9876543210.tmp/keep.txt", "mine")); // staging-shaped, no marker
+	TEST_EXPECT(test_io::write_text(out + "/00000000000000aa/build.json",
 	                                    "{\"schema_version\":1,\"build_id\":\"someone-else\"}"));
 
 	TEST_EXPECT(write_table(p.root + "/strings/menutxt.bin", "two"));
@@ -387,7 +387,7 @@ static int test_protected_build_survives_and_archives_are_refused() {
 
 	// A .pff inside the project is left out with a plain explanation, the build going ahead: the game never
 	// mounts an archive packed inside another.
-	TEST_EXPECT(editor_test::write_text(p.root + "/old/stuff.pff", "PFF3"));
+	TEST_EXPECT(test_io::write_text(p.root + "/old/stuff.pff", "PFF3"));
 	const BuildPlan plan = p.plan();
 	TEST_EXPECT(plan.ok);
 	bool reported = false;
@@ -408,7 +408,7 @@ static int test_long_names_bind_packed_files_only() {
 	TEST_EXPECT(p.create());
 	TEST_EXPECT(p.fill());
 	const std::string video = "a_long_intro_movie_name.bik";
-	TEST_EXPECT(editor_test::write_text(p.root + "/video/" + video, "BIKi"));
+	TEST_EXPECT(test_io::write_text(p.root + "/video/" + video, "BIKi"));
 	const BuildPlan loose = p.plan();
 	if (!loose.ok)
 		for (const Diagnostic &d : loose.diagnostics)
@@ -425,7 +425,7 @@ static int test_long_names_bind_packed_files_only() {
 	TEST_EXPECT(report.ok && fs::is_regular_file(system_path((fs::path(report.build_dir) / video).generic_string())));
 
 	const std::string texture = "art/a_long_texture_name.tga";
-	TEST_EXPECT(editor_test::write_text(p.root + "/" + texture, "x"));
+	TEST_EXPECT(test_io::write_text(p.root + "/" + texture, "x"));
 	const BuildPlan packed = p.plan();
 	TEST_EXPECT(!packed.ok);
 	std::vector<std::string> too_long;
@@ -442,10 +442,10 @@ static int test_new_kinds_land_where_their_rows_say() {
 	Project p("opennova_editor_build_new_kinds_test");
 	TEST_EXPECT(p.create());
 	TEST_EXPECT(p.fill());
-	TEST_EXPECT(editor_test::write_text(p.root + "/sounds/boom.wav", "RIFF"));
-	TEST_EXPECT(editor_test::write_text(p.root + "/missions/ASP_G7.npz", "0ZPN"));
-	TEST_EXPECT(editor_test::write_text(p.root + "/faces/head.grm", "BASE_TEXTURE face.tga\r\n"));
-	TEST_EXPECT(editor_test::write_text(p.root + "/score.ini", "VERSION 40\r\n"));
+	TEST_EXPECT(test_io::write_text(p.root + "/sounds/boom.wav", "RIFF"));
+	TEST_EXPECT(test_io::write_text(p.root + "/missions/ASP_G7.npz", "0ZPN"));
+	TEST_EXPECT(test_io::write_text(p.root + "/faces/head.grm", "BASE_TEXTURE face.tga\r\n"));
+	TEST_EXPECT(test_io::write_text(p.root + "/score.ini", "VERSION 40\r\n"));
 	const BuildPlan plan = p.plan();
 	for (const Diagnostic &d : plan.diagnostics)
 		std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
@@ -462,8 +462,8 @@ static int test_new_kinds_land_where_their_rows_say() {
 	// S16: the NovaWorld screens in localres.pff with the menus and nowhere else, the one place the
 	// game reads them without /d [orig: @ 0x63e1c6 -> FileSystem_OpenFile @ 0x75b1c0, whose loose
 	// search only /d turns on @ 0x4a6fac].
-	TEST_EXPECT(editor_test::write_text(p.root + "/nw_error.mnx", "<HTML/>") &&
-	            editor_test::write_text(p.root + "/nw_startup.mnx", "<HTML/>"));
+	TEST_EXPECT(test_io::write_text(p.root + "/nw_error.mnx", "<HTML/>") &&
+	            test_io::write_text(p.root + "/nw_startup.mnx", "<HTML/>"));
 	const BuildPlan screens = p.plan();
 	TEST_EXPECT(screens.ok && in(screens.archives[1].entries, "nw_error.mnx") && in(screens.archives[1].entries, "nw_startup.mnx"));
 	TEST_EXPECT(!in(screens.loose, "nw_error.mnx") && !in(screens.loose, "nw_startup.mnx") &&
@@ -471,7 +471,7 @@ static int test_new_kinds_land_where_their_rows_say() {
 	// One of a name no archive holds, which the game never reads (a backup): left out and said, the build
 	// going ahead.
 	const std::string backup = "nw_startup_backup.mnx";
-	TEST_EXPECT(editor_test::write_text(p.root + "/" + backup, "<HTML/>"));
+	TEST_EXPECT(test_io::write_text(p.root + "/" + backup, "<HTML/>"));
 	const BuildPlan unread = p.plan();
 	size_t said = 0;
 	for (const Diagnostic &d : unread.diagnostics)
@@ -519,13 +519,6 @@ using Files = std::vector<std::pair<std::string, std::vector<uint8_t>>>;
 
 static std::vector<uint8_t> bytes_of(const std::string &text) {
 	return std::vector<uint8_t>(text.begin(), text.end());
-}
-
-static std::vector<uint8_t> file_bytes(const std::string &path) {
-	std::vector<uint8_t> bytes;
-	std::string error;
-	opennova::io::read_file_bytes(path, bytes, error);
-	return bytes;
 }
 
 // The project file of the name, wherever the project keeps it ("" for none).
@@ -594,11 +587,11 @@ static int test_expansion_layout() {
 	TEST_EXPECT(p.create());
 	TEST_EXPECT(p.fill());
 	TEST_EXPECT(write_table(p.root + "/strings/jxm.bin", "The expansion"));
-	TEST_EXPECT(editor_test::write_text(p.root + "/video/header.bik", "BIKi"));
+	TEST_EXPECT(test_io::write_text(p.root + "/video/header.bik", "BIKi"));
 	TEST_EXPECT(write_bank(p.root + "/music/Mjxm.sbf", 0) != 0);
-	TEST_EXPECT(editor_test::write_text(p.root + "/version.txt", "1.0"));
-	TEST_EXPECT(editor_test::write_text(p.root + "/cc.bin", "us"));
-	TEST_EXPECT(editor_test::write_text(p.root + "/nw_error.mnx", "<HTML/>"));
+	TEST_EXPECT(test_io::write_text(p.root + "/version.txt", "1.0"));
+	TEST_EXPECT(test_io::write_text(p.root + "/cc.bin", "us"));
+	TEST_EXPECT(test_io::write_text(p.root + "/nw_error.mnx", "<HTML/>"));
 	const BaseInstall install = make_base(p.dir.file("install"), { { "basetable.bin", bytes_of("base") } }, {}, {});
 	TEST_EXPECT(install.written);
 	const BaseNames base = install.base();
@@ -680,7 +673,7 @@ static int test_expansion_layout() {
 // the pair by name, and a missing <b>.pff is no expansion at all [orig: Expansion_LoadAssets @
 // 0x4a4767]. The empty pair mounts with /exp and verifies.
 static int test_expansion_empty_pair() {
-	editor_test::TempProjectDir dir("opennova_editor_build_expansion_empty_test");
+	test_temp::TempDir dir("opennova_editor_build_expansion_empty_test");
 	const ProjectPaths paths = ProjectPaths::for_root(dir.file("Game"));
 	const BaseInstall install = make_base(dir.file("install"), { { "gametext.bin", bytes_of("text") } }, {}, {});
 	const BaseNames base = install.base();
@@ -727,24 +720,24 @@ static int test_lean_packing() {
 	Project p("opennova_editor_build_lean_test");
 	TEST_EXPECT(p.create());
 	TEST_EXPECT(p.fill());
-	TEST_EXPECT(editor_test::write_text(p.root + "/video/intro.bik", "the base's intro"));
-	TEST_EXPECT(editor_test::write_text(p.root + "/video/header.bik", "a header of our own"));
-	TEST_EXPECT(editor_test::write_text(p.root + "/missions/m2.bms", "our mission"));
-	TEST_EXPECT(editor_test::write_text(p.root + "/missions/m2.bin", "its table"));
-	TEST_EXPECT(editor_test::write_text(p.root + "/cc.bin", "us"));
-	TEST_EXPECT(editor_test::write_text(p.root + "/score.ini", "ours"));
-	TEST_EXPECT(editor_test::write_text(p.root + "/missions/ASP_G7.npz", "a map project of ours"));
-	TEST_EXPECT(editor_test::write_text(p.root + "/missions/ASP_G7.bin", "its own table"));
-	TEST_EXPECT(editor_test::write_text(p.root + "/missions/m3.bms", "a mission with the base's text"));
+	TEST_EXPECT(test_io::write_text(p.root + "/video/intro.bik", "the base's intro"));
+	TEST_EXPECT(test_io::write_text(p.root + "/video/header.bik", "a header of our own"));
+	TEST_EXPECT(test_io::write_text(p.root + "/missions/m2.bms", "our mission"));
+	TEST_EXPECT(test_io::write_text(p.root + "/missions/m2.bin", "its table"));
+	TEST_EXPECT(test_io::write_text(p.root + "/cc.bin", "us"));
+	TEST_EXPECT(test_io::write_text(p.root + "/score.ini", "ours"));
+	TEST_EXPECT(test_io::write_text(p.root + "/missions/ASP_G7.npz", "a map project of ours"));
+	TEST_EXPECT(test_io::write_text(p.root + "/missions/ASP_G7.bin", "its own table"));
+	TEST_EXPECT(test_io::write_text(p.root + "/missions/m3.bms", "a mission with the base's text"));
 	const std::string gametext = find_file(p.root, "gametext.bin"), menu = find_file(p.root, "main.mnu"),
 	                  coo = find_file(p.root, "nw_cdata.coo");
 	TEST_EXPECT(!gametext.empty() && !menu.empty() && !coo.empty());
 	const BaseInstall install = make_base(
-	        p.dir.file("install"), { { "gametext.bin", file_bytes(gametext) }, { "m2.bin", bytes_of("its table") },
+	        p.dir.file("install"), { { "gametext.bin", test_io::read_file(gametext) }, { "m2.bin", bytes_of("its table") },
 	                                 { "ASP_G7.bin", bytes_of("its own table") }, { "m3.bin", bytes_of("the base's") } },
-	        { { "main.mnu", file_bytes(menu) }, { "m2.bms", bytes_of("the base's mission") } }, {},
+	        { { "main.mnu", test_io::read_file(menu) }, { "m2.bms", bytes_of("the base's mission") } }, {},
 	        { { "intro.bik", bytes_of("the base's intro") }, { "header.bik", bytes_of("the base's header") },
-	          { "cc.bin", bytes_of("us") }, { "score.ini", bytes_of("theirs") }, { "nw_cdata.coo", file_bytes(coo) } });
+	          { "cc.bin", bytes_of("us") }, { "score.ini", bytes_of("theirs") }, { "nw_cdata.coo", test_io::read_file(coo) } });
 	TEST_EXPECT(install.written);
 	settle_files(install.root); // the base cache keeps what it reads of settled files alone
 	const BaseNames base = install.base();
@@ -779,8 +772,8 @@ static int test_lean_packing() {
 			TEST_EXPECT(d.severity == DiagnosticSeverity::Warning && !blocks_build(d, &base));
 	}
 	TEST_EXPECT(untitled == std::vector<std::string>{ "missions/m3.bms" } && twice == std::vector<std::string>{ "missions/m2.bms" });
-	TEST_EXPECT(report.same_as_base_files == 3 && report.same_as_base_bytes == file_bytes(gametext).size() +
-	                                                                               file_bytes(menu).size() + 16);
+	TEST_EXPECT(report.same_as_base_files == 3 && report.same_as_base_bytes == test_io::read_file(gametext).size() +
+	                                                                               test_io::read_file(menu).size() + 16);
 	TEST_EXPECT(report.base_bytes_read > 0);
 	size_t root_only = 0;
 	for (const Diagnostic &d : report.diagnostics)
@@ -1000,7 +993,7 @@ static int test_export() {
 	Project p("opennova_editor_export_test");
 	TEST_EXPECT(p.create());
 	TEST_EXPECT(p.fill());
-	TEST_EXPECT(editor_test::write_text(p.root + "/video/intro.bik", "BIKi"));
+	TEST_EXPECT(test_io::write_text(p.root + "/video/intro.bik", "BIKi"));
 	const BuildReport build = run_build(p.plan(), p.output_root());
 	TEST_EXPECT(build.ok);
 	const std::string tree = editor_test::tree_digest(build.build_dir);
@@ -1029,8 +1022,8 @@ static int test_export() {
 
 	// Again over its own export: what the person added there kept (and said), a file of the export they
 	// changed replaced by the build's (and said), the record naming the export's own files alone.
-	TEST_EXPECT(editor_test::write_text(request.export_dir + "/notes.txt", "mine"));
-	TEST_EXPECT(editor_test::write_text(request.export_dir + "/intro.bik", "changed"));
+	TEST_EXPECT(test_io::write_text(request.export_dir + "/notes.txt", "mine"));
+	TEST_EXPECT(test_io::write_text(request.export_dir + "/intro.bik", "changed"));
 	// Its last write after the record's, set two seconds past it (a coarse-stamp file system keeps two).
 	const fs::file_time_type recorded = fs::last_write_time(request.export_dir + "/" + kExportRecordFileName, ec);
 	fs::last_write_time(request.export_dir + "/intro.bik", recorded + std::chrono::seconds(2), ec);
@@ -1050,9 +1043,9 @@ static int test_export() {
 	            text.find("notes.txt") == std::string::npos);
 	// A cut-short export's staging folder, and a set-aside one an export could not remove, go first.
 	TEST_EXPECT(opennova::io::read_file_text(request.export_dir + "/" + kExportRecordFileName, text, error));
-	TEST_EXPECT(editor_test::write_text(request.export_dir + kExportStagingSuffix + "/" + kExportRecordFileName, text) &&
-	            editor_test::write_text(request.export_dir + kExportPreviousSuffix + "/" + kExportRecordFileName, text) &&
-	            editor_test::write_text(request.export_dir + kExportPreviousSuffix + "/language.pff", "old"));
+	TEST_EXPECT(test_io::write_text(request.export_dir + kExportStagingSuffix + "/" + kExportRecordFileName, text) &&
+	            test_io::write_text(request.export_dir + kExportPreviousSuffix + "/" + kExportRecordFileName, text) &&
+	            test_io::write_text(request.export_dir + kExportPreviousSuffix + "/language.pff", "old"));
 	TEST_EXPECT(export_build(request).ok && !fs::exists(request.export_dir + kExportStagingSuffix) &&
 	            !fs::exists(request.export_dir + kExportPreviousSuffix));
 	// A set-aside folder that cannot be removed (a file of it open elsewhere): the new export is in, and said.
@@ -1097,8 +1090,8 @@ static int test_export() {
 	// The scan passes over a staging or set-aside folder beside the project's own export folder, which a
 	// build would otherwise refuse as archives in the project.
 	const std::string own = p.paths.export_dir(p.doc);
-	TEST_EXPECT(editor_test::write_text(own + kExportStagingSuffix + "/language.pff", "PFF3") &&
-	            editor_test::write_text(own + kExportPreviousSuffix + "/expansion/jxm/jxm.pff", "PFF3"));
+	TEST_EXPECT(test_io::write_text(own + kExportStagingSuffix + "/language.pff", "PFF3") &&
+	            test_io::write_text(own + kExportPreviousSuffix + "/expansion/jxm/jxm.pff", "PFF3"));
 	{
 		const BuildPlan beside = p.plan();
 		TEST_EXPECT(beside.ok && count_code(beside.diagnostics, "build.archive_in_project") == 0);
@@ -1114,7 +1107,7 @@ static int test_export() {
 	// Never over the person's files, another project's export, a foreign staging folder, the build.
 	ExportRequest theirs = request;
 	theirs.export_dir = p.dir.file("theirs");
-	TEST_EXPECT(editor_test::write_text(theirs.export_dir + "/keep.txt", "mine"));
+	TEST_EXPECT(test_io::write_text(theirs.export_dir + "/keep.txt", "mine"));
 	ExportReport refused = export_build(theirs);
 	TEST_EXPECT(!refused.ok && refused.diagnostics.size() == 1 && refused.diagnostics[0].code() == "export.folder");
 	TEST_EXPECT(files_under(theirs.export_dir) == std::vector<std::string>{"keep.txt"});
@@ -1125,7 +1118,7 @@ static int test_export() {
 	TEST_EXPECT(!refused.ok && refused.diagnostics[0].code() == "export.folder" && files_under(request.export_dir) == with_notes);
 	ExportRequest staged = request;
 	staged.export_dir = p.dir.file("staged");
-	TEST_EXPECT(editor_test::write_text(staged.export_dir + kExportStagingSuffix + "/keep.txt", "mine"));
+	TEST_EXPECT(test_io::write_text(staged.export_dir + kExportStagingSuffix + "/keep.txt", "mine"));
 	refused = export_build(staged);
 	TEST_EXPECT(!refused.ok && refused.diagnostics[0].code() == "export.folder" &&
 	            fs::is_regular_file(staged.export_dir + kExportStagingSuffix + "/keep.txt") && !fs::exists(staged.export_dir));
@@ -1138,8 +1131,8 @@ static int test_export() {
 	ExportRequest runtime = request;
 	runtime.export_dir = p.dir.file("with_runtime");
 	runtime.runtime_dir = p.dir.file("runtime_package");
-	TEST_EXPECT(editor_test::write_text(runtime.runtime_dir + "/opennova.exe", "exe") &&
-	            editor_test::write_text(runtime.runtime_dir + "/data/opennova.pck", "pck"));
+	TEST_EXPECT(test_io::write_text(runtime.runtime_dir + "/opennova.exe", "exe") &&
+	            test_io::write_text(runtime.runtime_dir + "/data/opennova.pck", "pck"));
 	TEST_EXPECT(export_build(runtime).ok && fs::is_regular_file(runtime.export_dir + "/runtime/opennova.exe") &&
 	            fs::is_regular_file(runtime.export_dir + "/runtime/data/opennova.pck") &&
 	            fs::is_regular_file(runtime.export_dir + "/language.pff"));
@@ -1334,7 +1327,7 @@ static int test_entry_past_four_gib_refused() {
 	opennova::io::JsonValue cache = opennova::io::JsonValue::make_object();
 	cache.set("schema_version", opennova::io::JsonValue::make_number(kBuildCacheSchemaVersion));
 	cache.set("files", std::move(files));
-	TEST_EXPECT(editor_test::write_text(plan.hash_cache, opennova::io::json_write(cache)));
+	TEST_EXPECT(test_io::write_text(plan.hash_cache, opennova::io::json_write(cache)));
 	const BuildReport report = run_build(plan, p.output_root());
 	TEST_EXPECT(!report.ok && report.files_hashed > 0); // the others read, the huge one the cache's
 	bool refused = false;
@@ -1372,7 +1365,7 @@ static int test_cleanup_keeps_its_proof() {
 	const std::string foreign = p.output_root() + "/" + third.build_id + kBuildStagingSuffix;
 	fs::remove_all(third.build_dir);
 	fs::create_directories(foreign);
-	TEST_EXPECT(editor_test::write_text(foreign + "/mine.txt", "not a build"));
+	TEST_EXPECT(test_io::write_text(foreign + "/mine.txt", "not a build"));
 	const BuildReport again = run_build(p.plan(), p.output_root());
 	for (const Diagnostic &d : again.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
 	TEST_EXPECT(again.ok && again.build_id == third.build_id && fs::is_regular_file(foreign + "/mine.txt"));
@@ -1525,8 +1518,8 @@ static int test_unknown_kinds_are_left_out() {
 	TEST_EXPECT(p.create());
 	TEST_EXPECT(p.fill());
 	const std::string notes = "a_long_design_notes_file.xyz";
-	TEST_EXPECT(editor_test::write_text(p.root + "/notes/" + notes, "design notes"));
-	TEST_EXPECT(editor_test::write_bytes(p.root + "/art/field.nq8", chunk_file()));
+	TEST_EXPECT(test_io::write_text(p.root + "/notes/" + notes, "design notes"));
+	TEST_EXPECT(test_io::write_file(p.root + "/art/field.nq8", chunk_file()));
 	TEST_EXPECT(write_filler(p.root + "/art/sketch.blend", 4 * 1024 * 1024));
 	const AssetScan scan = scan_project_assets(p.paths, p.doc);
 	const AssetEntry *unknown = scan.find(notes);
@@ -1570,13 +1563,13 @@ static int test_project_notes_are_left_out_silently() {
 	Project p("opennova_editor_build_notes_test");
 	TEST_EXPECT(p.create());
 	TEST_EXPECT(p.fill());
-	TEST_EXPECT(editor_test::write_text(p.root + "/README.md", "# The game\r\n\r\nWhat this folder holds.\r\n"));
-	TEST_EXPECT(editor_test::write_text(p.root + "/art/SOURCES.md", "| File | Source |\n|---|---|\n"));
-	TEST_EXPECT(editor_test::write_text(p.root + "/LICENSE", "MIT License\n\nCopyright (c) the authors\n"));
-	TEST_EXPECT(editor_test::write_text(p.root + "/notes/todo.txt", "the hut's roof\n"));
-	TEST_EXPECT(editor_test::write_text(p.root + "/earlyerr.txt", "Line one\r\nLine two\r\n"));
-	TEST_EXPECT(editor_test::write_text(p.root + "/_VIDTEST.TXT", ""));
-	TEST_EXPECT(editor_test::write_bytes(p.root + "/data/blob", {0x4E, 0x00, 0x01, 0xFF}));
+	TEST_EXPECT(test_io::write_text(p.root + "/README.md", "# The game\r\n\r\nWhat this folder holds.\r\n"));
+	TEST_EXPECT(test_io::write_text(p.root + "/art/SOURCES.md", "| File | Source |\n|---|---|\n"));
+	TEST_EXPECT(test_io::write_text(p.root + "/LICENSE", "MIT License\n\nCopyright (c) the authors\n"));
+	TEST_EXPECT(test_io::write_text(p.root + "/notes/todo.txt", "the hut's roof\n"));
+	TEST_EXPECT(test_io::write_text(p.root + "/earlyerr.txt", "Line one\r\nLine two\r\n"));
+	TEST_EXPECT(test_io::write_text(p.root + "/_VIDTEST.TXT", ""));
+	TEST_EXPECT(test_io::write_file(p.root + "/data/blob", {0x4E, 0x00, 0x01, 0xFF}));
 	const AssetScan scan = scan_project_assets(p.paths, p.doc);
 	for (const char *name : {"README.md", "SOURCES.md", "LICENSE", "todo.txt"})
 		TEST_EXPECT(scan.find(name) && scan.find(name)->kind == AssetKind::Notes);
@@ -1782,11 +1775,11 @@ static int test_publish_waits_for_a_held_file() {
 // proves itself the project's and the next export removes it first (its record went first, and every later
 // export was refused: "holds files that are no export of this project").
 static int test_export_removal_keeps_its_record() {
-	editor_test::TempProjectDir dir("opennova_editor_export_removal_test");
+	test_temp::TempDir dir("opennova_editor_export_removal_test");
 	const std::string folder = dir.file("game.old");
-	TEST_EXPECT(editor_test::write_text(folder + "/" + kExportRecordFileName, "{}") &&
-	            editor_test::write_text(folder + "/language.pff", "held") &&
-	            editor_test::write_text(folder + "/video/intro.bik", "gone"));
+	TEST_EXPECT(test_io::write_text(folder + "/" + kExportRecordFileName, "{}") &&
+	            test_io::write_text(folder + "/language.pff", "held") &&
+	            test_io::write_text(folder + "/video/intro.bik", "gone"));
 	std::string reason;
 	bool removed = false;
 	{
@@ -1873,7 +1866,7 @@ static int test_held_archives_are_never_written_through() {
 // the path in its extended form, system_path), and the next build prunes it; a project folder
 // some 205 characters long whatever the temp folder, its own files short of the limit.
 static int test_deep_output_root() {
-	editor_test::TempProjectDir dir("opennova_editor_build_deep_test");
+	test_temp::TempDir dir("opennova_editor_build_deep_test");
 	std::string root = dir.root();
 	while (root.size() < 200) root += "/" + std::string(std::min<size_t>(48, std::max<size_t>(1, 199 - root.size())), 'd');
 	root += "/Game";
@@ -1888,7 +1881,7 @@ static int test_deep_output_root() {
 		TEST_EXPECT(made.unavailable.empty() && made.diagnostics.empty());
 	}
 	const std::string video = "a_long_intro_movie_name.bik";
-	TEST_EXPECT(editor_test::write_text(root + "/video/" + video, "BIKi"));
+	TEST_EXPECT(test_io::write_text(root + "/video/" + video, "BIKi"));
 	TEST_EXPECT(write_table(root + "/strings/menutxt.bin", "shallow"));
 	TEST_EXPECT(editor_test::backdate_tree(root, std::chrono::hours(1))); // written a while ago
 	const auto plan_of = [&]() {

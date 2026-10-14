@@ -36,8 +36,6 @@ using opennova::io::JsonValue;
 
 namespace {
 
-std::string fixture(const std::string &name) { return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/" + name; }
-
 using editor_test::contains;
 
 // A picture one pixel a metre over flat ground.
@@ -100,7 +98,7 @@ JsonValue ask(ProjectSession &session, const std::string &path, const char *op, 
 }
 
 int test_tiles_in_a_mission() {
-	editor_test::TempProjectDir dir("opennova_editor_tile_edit");
+	test_temp::TempDir dir("opennova_editor_tile_edit");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -108,14 +106,14 @@ int test_tiles_in_a_mission() {
 	const SessionView &v = session.view();
 	const std::string root = v.project.root;
 	for (const char *name : {"Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx"})
-		TEST_EXPECT(editor_test::write_bytes(root + "/terrain/" + name, test_io::read_file(fixture(std::string("terrain/tmap/") + name))));
+		TEST_EXPECT(test_io::write_file(root + "/terrain/" + name, test_io::read_file(test_paths_fixture(std::string("terrain/tmap/") + name))));
 	// The terrain names its own tiles (polytrn_tileinfo), two of them.
-	std::vector<uint8_t> trn = test_io::read_file(fixture("terrain/tmap/Tmap.trn"));
+	std::vector<uint8_t> trn = test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.trn"));
 	const std::string tileinfo = "\r\npolytrn_tileinfo        Tmap_t\r\n";
 	trn.insert(trn.end(), tileinfo.begin(), tileinfo.end());
-	TEST_EXPECT(editor_test::write_bytes(root + "/terrain/Tmap.trn", trn));
-	TEST_EXPECT(editor_test::write_bytes(root + "/terrain/Tmap_t.til", two_tiles()));
-	TEST_EXPECT(editor_test::write_text(root + "/day.env", "env"));
+	TEST_EXPECT(test_io::write_file(root + "/terrain/Tmap.trn", trn));
+	TEST_EXPECT(test_io::write_file(root + "/terrain/Tmap_t.til", two_tiles()));
+	TEST_EXPECT(test_io::write_text(root + "/day.env", "env"));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::set_missions(session, true);
 	editor_test::handle_to_end(session, request::create_file("m.bms", "mission", {{"terrain", "Tmap.trn"}, {"environment", "day.env"}}));
@@ -247,7 +245,7 @@ int test_tiles_in_a_mission() {
 	// past it, which the game draws from the set's last row.
 	std::vector<uint8_t> set_pixels(size_t(128) * 64 * 4, 90), set;
 	std::string why;
-	TEST_EXPECT(tga::tga_write_rgba32(set_pixels.data(), 128, 64, set, why) && editor_test::write_bytes(root + "/terrain/mnml_t.tga", set));
+	TEST_EXPECT(tga::tga_write_rgba32(set_pixels.data(), 128, 64, set, why) && test_io::write_file(root + "/terrain/mnml_t.tga", set));
 	editor_test::handle_to_end(session, request::rescan());
 	session.run_operations();
 	const auto finding = [&](const char *code, const std::string &asset) -> const Diagnostic * {
@@ -278,7 +276,7 @@ int test_tiles_in_a_mission() {
 // holds, two, hidden by it): the first stamp's file holds the install's three and the stamp, never
 // the terrain's two.
 int test_seeded_from_the_install() {
-	editor_test::TempProjectDir dir("opennova_editor_tile_edit_install");
+	test_temp::TempDir dir("opennova_editor_tile_edit_install");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -286,13 +284,13 @@ int test_seeded_from_the_install() {
 	const SessionView &v = session.view();
 	const std::string root = v.project.root;
 	for (const char *name : {"Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx"})
-		TEST_EXPECT(editor_test::write_bytes(root + "/terrain/" + name, test_io::read_file(fixture(std::string("terrain/tmap/") + name))));
-	std::vector<uint8_t> trn = test_io::read_file(fixture("terrain/tmap/Tmap.trn"));
+		TEST_EXPECT(test_io::write_file(root + "/terrain/" + name, test_io::read_file(test_paths_fixture(std::string("terrain/tmap/") + name))));
+	std::vector<uint8_t> trn = test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.trn"));
 	const std::string tileinfo = "\r\npolytrn_tileinfo        Tmap_t\r\n";
 	trn.insert(trn.end(), tileinfo.begin(), tileinfo.end());
-	TEST_EXPECT(editor_test::write_bytes(root + "/terrain/Tmap.trn", trn));
-	TEST_EXPECT(editor_test::write_bytes(root + "/terrain/Tmap_t.til", two_tiles()));
-	TEST_EXPECT(editor_test::write_text(root + "/day.env", "env"));
+	TEST_EXPECT(test_io::write_file(root + "/terrain/Tmap.trn", trn));
+	TEST_EXPECT(test_io::write_file(root + "/terrain/Tmap_t.til", two_tiles()));
+	TEST_EXPECT(test_io::write_text(root + "/day.env", "env"));
 	// The install: m.til, three tiles.
 	TilFile shipped;
 	shipped.entries = {make_til_entry(0, 64 << 16, 1, 0, 0), make_til_entry(16 << 16, 64 << 16, 2, 0, 0),

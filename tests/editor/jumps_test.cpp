@@ -47,7 +47,7 @@ using FindScope = WorkspaceView::FindScope;
 constexpr const char *kMission = "missions/synth_logic.bms";
 
 struct Rig {
-	editor_test::TempProjectDir dir;
+	test_temp::TempDir dir;
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -66,14 +66,14 @@ struct Rig {
 		items = catalog->relative_path;
 		weapons = weapon->relative_path;
 		const std::string repo = test_paths_repo_root(__FILE__);
-		if (!editor_test::write_bytes(v.project.root + "/" + items, test_io::read_file(repo + "/fixtures/def/items.def")) ||
-		    !editor_test::write_text(v.project.root + "/" + weapons, "weapon \"Searchgun\"\nend\n") ||
-		    !editor_test::write_bytes(v.project.root + "/" + kMission, test_io::read_file(repo + "/fixtures/bms/synth_logic.bms")) ||
-		    !editor_test::write_bytes(v.project.root + "/missions/synth_logic.bin",
+		if (!test_io::write_file(v.project.root + "/" + items, test_io::read_file(repo + "/fixtures/def/items.def")) ||
+		    !test_io::write_text(v.project.root + "/" + weapons, "weapon \"Searchgun\"\nend\n") ||
+		    !test_io::write_file(v.project.root + "/" + kMission, test_io::read_file(repo + "/fixtures/bms/synth_logic.bms")) ||
+		    !test_io::write_file(v.project.root + "/missions/synth_logic.bin",
 		                              test_io::read_file(repo + "/fixtures/bms/synth_logic.bin")))
 			return false;
 		for (const char *model : {"pump", "armory", "shed"})
-			if (!editor_test::write_bytes(v.project.root + "/models/" + model + ".3di",
+			if (!test_io::write_file(v.project.root + "/models/" + model + ".3di",
 			                              test_io::read_file(repo + "/fixtures/threedi/synth/" + model + ".3di")))
 				return false;
 		session.handle(request::rescan());

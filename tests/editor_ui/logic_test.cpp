@@ -45,7 +45,7 @@ struct LogicRun {
 };
 
 void test_event_inspector() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_logic");
+	test_temp::TempDir dir("opennova_editor_ui_logic");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -54,7 +54,7 @@ void test_event_inspector() {
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	const std::string repo = test_paths_repo_root(__FILE__);
-	CHECK(editor_test::write_bytes(v.project.root + "/missions/logic.bms", test_io::read_file(repo + "/fixtures/bms/synth_logic.bms")),
+	CHECK(test_io::write_file(v.project.root + "/missions/logic.bms", test_io::read_file(repo + "/fixtures/bms/synth_logic.bms")),
 	      "the mission written");
 	session.handle(request::rescan());
 	session.run_operations();

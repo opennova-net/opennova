@@ -99,7 +99,7 @@ bool same_order(const MnuDocument &document, const Node &screen, const opennova:
 } // namespace
 
 static int test_blank_startup() {
-	editor_test::TempProjectDir dir("opennova_editor_menu_render");
+	test_temp::TempDir dir("opennova_editor_menu_render");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -183,7 +183,7 @@ static int test_blank_startup() {
 // stylesheets it names comes, goes or takes another value (S13 D4); a closed menu is read by the
 // check itself and read again only when its file moves.
 static int test_render_again_only_when_moved() {
-	editor_test::TempProjectDir dir("opennova_editor_menu_render_again");
+	test_temp::TempDir dir("opennova_editor_menu_render_again");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -226,13 +226,13 @@ static int test_render_again_only_when_moved() {
 	TEST_EXPECT(unused("SEMIOPAQUE_BLACK"));
 	const ValidationStats &stats = session.validation_stats();
 	const std::string root = view.project.root;
-	TEST_EXPECT(editor_test::write_text(root + "/menus/trim.mnu",
+	TEST_EXPECT(test_io::write_text(root + "/menus/trim.mnu",
 			"<SCREEN>\r\n<NAME>TRIM</NAME>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"BAND\">\r\n"
 			"<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>90</RIGHT><BOTTOM>90</BOTTOM>"
 			"</POSITION>\r\n"
 			"<APPEARANCE STATE=\"DEFAULT\" TYPE=\"COLOR\">%TRIM_COLOR%</APPEARANCE>\r\n"
 			"</WINDOW>\r\n</SCREEN>\r\n"));
-	TEST_EXPECT(editor_test::write_text(root + "/menus/label.mnu",
+	TEST_EXPECT(test_io::write_text(root + "/menus/label.mnu",
 			"<SCREEN>\r\n<NAME>LABEL</NAME>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"WORDS\">\r\n"
 			"<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>90</RIGHT><BOTTOM>90</BOTTOM>"
 			"</POSITION>\r\n"
@@ -444,7 +444,7 @@ static int test_retail_install_leg() {
 		retail::skip_leg("OPENNOVA_JO_DIR (every .mnu the packed install serves, through the headless render)");
 		return 0;
 	}
-	editor_test::TempProjectDir scratch("opennova_menu_render_install");
+	test_temp::TempDir scratch("opennova_menu_render_install");
 	SweepTotals totals;
 	std::map<std::string, std::vector<uint8_t>> seen;
 	std::vector<std::string> layers{std::string()};
@@ -467,7 +467,7 @@ static int test_retail_install_leg() {
 			if (earlier == stored) continue;
 			earlier = stored;
 			const std::string path = scratch.file(location.logical_name.c_str());
-			if (!editor_test::write_bytes(path, stored)) {
+			if (!test_io::write_file(path, stored)) {
 				++totals.failures;
 				continue;
 			}
@@ -488,7 +488,7 @@ static int test_retail_install_leg() {
 // The menu renders again, its note goes, and the Problems rows are composed again once (Findings
 // moves) though nothing of the graph did.
 static int test_notes_alone_recompose() {
-	editor_test::TempProjectDir dir("opennova_menu_render_notes");
+	test_temp::TempDir dir("opennova_menu_render_notes");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -514,8 +514,8 @@ static int test_notes_alone_recompose() {
 	const std::string broken =
 			(std::filesystem::path(root + "/" + font).parent_path() / "broken.fnt")
 					.generic_string();
-	TEST_EXPECT(editor_test::write_text(broken, "not a font"));
-	TEST_EXPECT(editor_test::write_text(root + "/menus/letters.mnu",
+	TEST_EXPECT(test_io::write_text(broken, "not a font"));
+	TEST_EXPECT(test_io::write_text(root + "/menus/letters.mnu",
 			"<SCREEN>\r\n<NAME>LETTERS</NAME>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"WORDS\">\r\n"
 			"<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>90</RIGHT><BOTTOM>90</BOTTOM>"
 			"</POSITION>\r\n<FONT><NAME>broken.fnt</NAME></FONT>\r\n<STRING>Hello</STRING>\r\n"
@@ -532,7 +532,7 @@ static int test_notes_alone_recompose() {
 	const size_t compositions = session.problems_compositions();
 	const uint64_t findings = view.revisions.of(ViewConcern::Findings);
 	const uint64_t graph = view.findings.graph->generation();
-	TEST_EXPECT(editor_test::write_bytes(broken, readable));
+	TEST_EXPECT(test_io::write_file(broken, readable));
 	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(
 			session.validation_stats().files_validated == 1 && view.findings.graph->generation() == graph);
@@ -546,7 +546,7 @@ static int test_notes_alone_recompose() {
 // polls a step a poll, the check renders one menu a poll at most and every menu once, and the
 // Problems rows come to the rows of a session that ran the validation to its end.
 static int test_render_check_steps() {
-	editor_test::TempProjectDir dir("opennova_menu_render_steps");
+	test_temp::TempDir dir("opennova_menu_render_steps");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession whole(platform, preferences);
@@ -554,7 +554,7 @@ static int test_render_check_steps() {
 	editor_test::create_missing_files(whole);
 	const std::string root = whole.view().project.root;
 	for (const char *name : {"FIRST", "SECOND"})
-		TEST_EXPECT(editor_test::write_text(root + "/menus/" + name + ".mnu",
+		TEST_EXPECT(test_io::write_text(root + "/menus/" + name + ".mnu",
 				std::string("<SCREEN>\r\n<NAME>") + name + "</NAME>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"WORDS\">\r\n"
 				"<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>90</RIGHT><BOTTOM>90</BOTTOM></POSITION>\r\n"
 				"<STRING>Hello</STRING>\r\n</WINDOW>\r\n</SCREEN>\r\n"));

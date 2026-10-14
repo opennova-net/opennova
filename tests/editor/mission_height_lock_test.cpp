@@ -62,8 +62,6 @@ private:
 	uint64_t serial_ = 0;
 };
 
-std::string fixture(const std::string &name) { return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/" + name; }
-
 // Each "  <key> <value>" line's value in the .mis text, in order.
 std::vector<std::string> values_of(const std::string &text, const std::string &key) {
 	std::vector<std::string> out;
@@ -80,7 +78,7 @@ std::vector<std::string> values_of(const std::string &text, const std::string &k
 int64_t z_of(const std::string &position) { return std::stoll(position.substr(position.rfind(' ') + 1)); }
 
 struct Project {
-	editor_test::TempProjectDir dir{"opennova_editor_mission_height_lock"};
+	test_temp::TempDir dir{"opennova_editor_mission_height_lock"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -120,10 +118,10 @@ int main() {
 	Project p;
 	editor_test::handle_to_end(p.session, request::new_project(p.dir.file("project"), "Locks"));
 	p.root = p.session.view().project.root;
-	const std::vector<uint8_t> trn = test_io::read_file(fixture("terrain/tmap/Tmap.trn")),
-	                           cpt = test_io::read_file(fixture("terrain/tmap/Tmap.cpt"));
-	TEST_EXPECT(!trn.empty() && !cpt.empty() && editor_test::write_bytes(p.root + "/Tmap.trn", trn) &&
-	            editor_test::write_bytes(p.root + "/Tmap.cpt", cpt));
+	const std::vector<uint8_t> trn = test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.trn")),
+	                           cpt = test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.cpt"));
+	TEST_EXPECT(!trn.empty() && !cpt.empty() && test_io::write_file(p.root + "/Tmap.trn", trn) &&
+	            test_io::write_file(p.root + "/Tmap.cpt", cpt));
 	// The terrain as the original editor samples it (mission::mis_terrain_height over the .trn's own grid).
 	auto files = std::make_shared<MemoryFiles>();
 	files->put("Tmap.trn", trn);
@@ -163,7 +161,7 @@ int main() {
 	TEST_EXPECT(under[0] != 0 && under[1] != 0 && under[0] != under[1]);
 	mission::sync_counts(file);
 	std::vector<uint8_t> bytes;
-	TEST_EXPECT(bms::write(file, bytes, error) && editor_test::write_bytes(p.root + "/" + kMission, bytes));
+	TEST_EXPECT(bms::write(file, bytes, error) && test_io::write_file(p.root + "/" + kMission, bytes));
 	editor_test::handle_to_end(p.session, request::rescan());
 	p.session.handle(request::open_document(kMission));
 	TEST_EXPECT(p.mission() != nullptr && p.items().size() == 2);
@@ -210,7 +208,7 @@ int main() {
 		TEST_EXPECT(id != std::string::npos);
 		if (id == std::string::npos) return 1;
 		text.replace(id, 7, "\n  id 9");
-		TEST_EXPECT(editor_test::write_text(p.root + "/" + kMis, text));
+		TEST_EXPECT(test_io::write_text(p.root + "/" + kMis, text));
 		p.reopen();
 		TEST_EXPECT(p.mission() && p.lock_of(1) == 0 && p.mission()->names_file().refused.size() == 1);
 		bool listed = false;
@@ -224,7 +222,7 @@ int main() {
 	// stays unsaved, said in its words.
 	{
 		const std::string original = "// mission metafile, saved on 10/11/2026, 12:00" + written.substr(written.find("\r\n"));
-		TEST_EXPECT(editor_test::write_text(p.root + "/" + kMis, original));
+		TEST_EXPECT(test_io::write_text(p.root + "/" + kMis, original));
 		p.reopen();
 		TEST_EXPECT(p.mission() && p.mission()->names_file().found == MissionNamesFile::Found::Matched &&
 		            !p.mission()->names_file().ours && p.lock_of(1) == 1);
@@ -263,7 +261,7 @@ int main() {
 		}
 		mission::sync_counts(pools);
 		std::vector<uint8_t> pool_bytes;
-		TEST_EXPECT(bms::write(pools, pool_bytes, error) && editor_test::write_bytes(p.root + "/" + kMission, pool_bytes));
+		TEST_EXPECT(bms::write(pools, pool_bytes, error) && test_io::write_file(p.root + "/" + kMission, pool_bytes));
 		editor_test::handle_to_end(p.session, request::rescan());
 		editor_test::handle_to_end(p.session, request::open_document(kMission));
 		const MissionKind locked[] = {MissionKind::Building, MissionKind::Marker, MissionKind::Organic};

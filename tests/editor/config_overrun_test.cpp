@@ -265,7 +265,7 @@ int test_blanks() {
 }
 
 int test_session() {
-	editor_test::TempProjectDir dir("opennova_editor_config_overrun");
+	test_temp::TempDir dir("opennova_editor_config_overrun");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -274,7 +274,7 @@ int test_session() {
 	const AssetEntry *entry = session.view().project.scan->find("charattr.def");
 	const std::string path = entry ? entry->relative_path : std::string("charattr.def");
 	const std::string past = fixture_text("pool_past_line.def");
-	TEST_EXPECT(editor_test::write_bytes(session.view().project.root + "/" + path,
+	TEST_EXPECT(test_io::write_file(session.view().project.root + "/" + path,
 	                                     std::vector<uint8_t>(past.begin(), past.end())));
 	editor_test::handle_to_end(session, request::rescan());
 	const auto finding = [&]() -> const Diagnostic * {
@@ -311,7 +311,7 @@ int test_session() {
 	TEST_EXPECT(v.activity.has_build && v.activity.last_build->ok && !v.activity.last_build->refused);
 	// The file past the line again, written outside the editor and reloaded: the row and the refusal again.
 	editor_test::handle_to_end(session, request::close_document(path));
-	TEST_EXPECT(editor_test::write_bytes(session.view().project.root + "/" + path,
+	TEST_EXPECT(test_io::write_file(session.view().project.root + "/" + path,
 	                                     std::vector<uint8_t>(past.begin(), past.end())));
 	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(finding() != nullptr);

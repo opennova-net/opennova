@@ -71,7 +71,7 @@ bool has_fix(const Diagnostic &d, const SessionView &v, const std::string &label
 // lacks, a model (the synthetic crate) naming a texture it lacks, a sound profile's slot naming a set no
 // bank holds.
 struct LogProject {
-	editor_test::TempProjectDir dir{"opennova_editor_play_log"};
+	test_temp::TempDir dir{"opennova_editor_play_log"};
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -84,18 +84,18 @@ struct LogProject {
 		editor_test::create_missing_files(session);
 		const std::vector<uint8_t> crate =
 		        test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth/crate.3di");
-		if (crate.empty() || !editor_test::write_bytes(root + "/crate.3di", crate)) return false;
-		if (!editor_test::write_text(root + "/defs/items.def", "begin \"Null\"\n\tid 100000\n\ttype marker\nend\n"
+		if (crate.empty() || !test_io::write_file(root + "/crate.3di", crate)) return false;
+		if (!test_io::write_text(root + "/defs/items.def", "begin \"Null\"\n\tid 100000\n\ttype marker\nend\n"
 		                                                  "begin \"Wooden barrel\"\n\tgraphic onbarrel\n\tid 100011\n\ttype decoration\nend\n"
 		                                                  "begin \"Crate\"\n\tgraphic crate\n\tid 100012\n\ttype decoration\nend\n"))
 			return false;
-		if (!editor_test::write_text(root + "/defs/SndProf.def", "begin \"default\"\nend\nbegin \"on_soldier\"\n"
+		if (!test_io::write_text(root + "/defs/SndProf.def", "begin \"default\"\nend\nbegin \"on_soldier\"\n"
 		                                                    "\tSSRFootGND NO_SUCH_SET 0 0 0\nend\n"))
 			return false;
 		session.handle(request::rescan());
 		session.run_operations();
 		const std::string runtime = dir.file("runtime/opennova.exe");
-		if (!editor_test::write_text(runtime, "MZ")) return false;
+		if (!test_io::write_text(runtime, "MZ")) return false;
 		PlayLauncher launcher;
 		launcher.executable = runtime;
 		session.set_launcher_source(editor_test::fixed_launcher(launcher));
@@ -116,7 +116,7 @@ struct LogProject {
 		std::string held;
 		std::string error;
 		opennova::io::read_file_text(platform.last_plan.log_file, held, error);
-		editor_test::write_text(platform.last_plan.log_file, held + text);
+		test_io::write_text(platform.last_plan.log_file, held + text);
 		session.poll();
 		session.run_operations();
 	}
@@ -212,8 +212,8 @@ static int test_rows_by_mode() {
 	TEST_EXPECT(project.open());
 	const SessionView &v = project.session.view();
 	const std::string install = project.dir.file("install");
-	TEST_EXPECT(editor_test::write_text(install + "/Jointops.exe", "retail executable") &&
-	            editor_test::write_text(install + "/binkw32.dll", "Bink"));
+	TEST_EXPECT(test_io::write_text(install + "/Jointops.exe", "retail executable") &&
+	            test_io::write_text(install + "/binkw32.dll", "Bink"));
 	editor_test::set_game_install(project.session, install);
 	TEST_EXPECT(project.play());
 	project.log(miss_line(resource_kind::kModel, "onbarrel.3di"));
@@ -227,10 +227,10 @@ static int test_rows_by_mode() {
 	editor_test::apply_settings(project.session, strict);
 	TEST_EXPECT(project.play());
 	const std::string run = project.platform.last_plan.working_dir;
-	TEST_EXPECT(editor_test::write_text(run + "/_filelog.txt",
+	TEST_EXPECT(test_io::write_text(run + "/_filelog.txt",
 	                                    "LOADED FILE: language.pff\nLOADED FILE: localres.pff\nLOADED FILE: resource.pff\n"
 	                                    "PFF LOADED FILE: gametext.bin\nPFF LOADED FILE: crate.3di\n") &&
-	            editor_test::write_text(run + "/ghw.txt", "GHW.TXT - LOG FILE\nMission:\"ONJO_M1.BMS\" - \"!Untitled\" - "
+	            test_io::write_text(run + "/ghw.txt", "GHW.TXT - LOG FILE\nMission:\"ONJO_M1.BMS\" - \"!Untitled\" - "
 	                                                      "\"ONJO_M1.BMS\" - \"\"\n"));
 	project.exit(0);
 	const Diagnostic *texture = nullptr;

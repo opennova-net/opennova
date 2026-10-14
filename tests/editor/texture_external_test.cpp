@@ -69,7 +69,7 @@ std::vector<uint8_t> first_texel(const DocumentBase *document) {
 }
 
 int test_round_trip() {
-	editor_test::TempProjectDir dir{"opennova_editor_texture_external"};
+	test_temp::TempDir dir{"opennova_editor_texture_external"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -77,8 +77,8 @@ int test_round_trip() {
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	const std::string root = view.project.root;
-	TEST_EXPECT(editor_test::write_bytes(root + "/textures/rock.tga", tga32(200, 0, 0)) &&
-	            editor_test::write_bytes(root + "/textures/moss.tga", tga32(0, 0, 200)));
+	TEST_EXPECT(test_io::write_file(root + "/textures/rock.tga", tga32(200, 0, 0)) &&
+	            test_io::write_file(root + "/textures/moss.tga", tga32(0, 0, 200)));
 	editor_test::handle_to_end(session, request::rescan());
 	session.run_operations();
 	editor_test::handle_to_end(session, request::open_document("textures/rock.tga"));
@@ -112,7 +112,7 @@ int test_round_trip() {
 	TEST_EXPECT(changes().empty());
 
 	// Its program is saving the source: written just now, it waits, never read half-written.
-	TEST_EXPECT(editor_test::write_bytes(root + "/art/rock.png", png32(0, 200, 0)));
+	TEST_EXPECT(test_io::write_file(root + "/art/rock.png", png32(0, 200, 0)));
 	const ExternalChanges waiting = changes();
 	TEST_EXPECT(waiting.empty() && waiting.unsettled == 1);
 	editor_test::handle_to_end(session, request::refresh_changed_sources());
@@ -136,12 +136,12 @@ int test_round_trip() {
 
 	// A file an import read (an input) moved: its source imported again.
 	{
-		TEST_EXPECT(editor_test::write_bytes(root + "/textures/grain.tga", tga32(1, 1, 1)));
+		TEST_EXPECT(test_io::write_file(root + "/textures/grain.tga", tga32(1, 1, 1)));
 		editor_test::handle_to_end(session, request::rescan());
 		session.run_operations();
 		std::vector<uint8_t> bigger = tga32(2, 2, 2);
 		bigger.push_back(0);
-		TEST_EXPECT(editor_test::write_bytes(root + "/textures/grain.tga", bigger) &&
+		TEST_EXPECT(test_io::write_file(root + "/textures/grain.tga", bigger) &&
 		            editor_test::backdate(root + "/textures/grain.tga", std::chrono::seconds(60)));
 		ImportedSource reads;
 		reads.source = "art/moss.png";
@@ -163,7 +163,7 @@ int test_round_trip() {
 	// nothing made; one with none is refused (the dialog's preview asks before making one).
 	editor_test::handle_to_end(session, request::open_texture_source("rock.tga"));
 	TEST_EXPECT(session.outcome().done() && opened(view) == root + "/art/rock.png");
-	TEST_EXPECT(editor_test::write_bytes(root + "/textures/plain.tga", tga32(9, 9, 9)));
+	TEST_EXPECT(test_io::write_file(root + "/textures/plain.tga", tga32(9, 9, 9)));
 	editor_test::handle_to_end(session, request::rescan());
 	session.run_operations();
 	session.handle(request::open_texture_source("textures/plain.tga"));
@@ -178,7 +178,7 @@ int test_round_trip() {
 	{
 		std::vector<uint8_t> rgba(64, 120);
 		const std::vector<uint8_t> png = encode_png_rgba(rgba.data(), 4, 4);
-		TEST_EXPECT(editor_test::write_bytes(root + "/textures/pic.png", png));
+		TEST_EXPECT(test_io::write_file(root + "/textures/pic.png", png));
 		editor_test::handle_to_end(session, request::rescan());
 		session.run_operations();
 		editor_test::handle_to_end(session, request::open_document("textures/pic.png"));
@@ -194,7 +194,7 @@ int test_round_trip() {
 		std::vector<uint8_t> red;
 		for (int i = 0; i < 16; ++i) red.insert(red.end(), {220, 10, 10, 255});
 		const std::vector<uint8_t> saved = encode_png_rgba(red.data(), 4, 4);
-		TEST_EXPECT(editor_test::write_bytes(root + "/textures/pic.png", saved) &&
+		TEST_EXPECT(test_io::write_file(root + "/textures/pic.png", saved) &&
 		            editor_test::backdate(root + "/textures/pic.png", std::chrono::seconds(60)));
 		TEST_EXPECT(changes().files == std::vector<std::string>({"textures/pic.png"}) && changes().sources.empty());
 		editor_test::handle_to_end(session, request::refresh_changed_sources());
@@ -205,7 +205,7 @@ int test_round_trip() {
 	}
 	// A file that is no texture (an item table): its program is no paint program, refused.
 	{
-		TEST_EXPECT(editor_test::write_text(root + "/defs/items.def", "begin \"Brick\"\nid 100300\ntype building\nend\n"));
+		TEST_EXPECT(test_io::write_text(root + "/defs/items.def", "begin \"Brick\"\nid 100300\ntype building\nend\n"));
 		editor_test::handle_to_end(session, request::rescan());
 		session.run_operations();
 		session.handle(request::edit_externally("defs/items.def"));

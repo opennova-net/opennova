@@ -123,7 +123,7 @@ static bool find_fix(const SessionView &v, const char *code, const std::string &
 }
 
 static int test_lifecycle() {
-	editor_test::TempProjectDir dir("opennova_editor_session_test");
+	test_temp::TempDir dir("opennova_editor_session_test");
 	FakePlatform platform;
 	FilePreferencesStore preferences(dir.file("settings/editor.json"));
 	ProjectSession session(platform, preferences);
@@ -257,7 +257,7 @@ static int test_lifecycle() {
 
 	// With a runtime the launcher names, Play builds (unchanged) and spawns on it.
 	const std::string runtime = dir.file("runtime/opennova.exe");
-	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
+	TEST_EXPECT(test_io::write_text(runtime, "MZ"));
 	PlayLauncher launcher;
 	launcher.executable = runtime;
 	launcher.mcp_port = 8999;
@@ -291,7 +291,7 @@ static int test_lifecycle() {
 	session.run_operations();
 	TEST_EXPECT(platform.spawns == 1);
 	TEST_EXPECT(v.findings.diagnostics.back().code() == "play.already_running");
-	TEST_EXPECT(editor_test::write_text(platform.last_plan.log_file, "Godot Engine v4.6.1\r\nhalf"));
+	TEST_EXPECT(test_io::write_text(platform.last_plan.log_file, "Godot Engine v4.6.1\r\nhalf"));
 	session.poll();
 	// The game's whole log folds under its one line (the UX round's problems lane); a line that matters
 	// (an error, a missing file) is shown below it as well, a banner is not.
@@ -310,7 +310,7 @@ static int test_lifecycle() {
 	const std::string written = std::string("USER ERROR: BootRootMount: ") +
 	                            opennova::gameprofile::kBootResourceMissingMarker + "MAIN.MNU \xE2\x80\x94 retail: " +
 	                            main_menu->failure + "\r\n";
-	TEST_EXPECT(editor_test::write_text(platform.last_plan.log_file,
+	TEST_EXPECT(test_io::write_text(platform.last_plan.log_file,
 	                                    "Godot Engine v4.6.1\r\nhalf line\r\n" + written +
 	                                            "USER ERROR: BootRootMount: " +
 	                                            opennova::gameprofile::kBootResourceMissingMarker +
@@ -433,7 +433,7 @@ static int test_lifecycle() {
 // system's own UTF-16 names (base/io/os_path.h), not the editor's conversions.
 static int test_utf8_project_path() {
 	namespace io = opennova::io;
-	editor_test::TempProjectDir dir("opennova_editor_Jos\xC3\xA9_\xE3\x83\xA2\xE3\x83\x87\xE3\x83\xAB"); // José_モデル
+	test_temp::TempDir dir("opennova_editor_Jos\xC3\xA9_\xE3\x83\xA2\xE3\x83\x87\xE3\x83\xAB"); // José_モデル
 	FakePlatform platform;
 	FilePreferencesStore preferences(dir.file("settings/editor.json"));
 	ProjectSession session(platform, preferences);
@@ -452,10 +452,10 @@ static int test_utf8_project_path() {
 	// A file named outside ASCII is listed by its name; a loose file and an archive's member, both
 	// from a folder named so, are imported.
 	const std::string note = "notes_\xE3\x83\xA2.txt"; // notes_モ.txt
-	TEST_EXPECT(editor_test::write_text(root + "/" + note, "a note"));
+	TEST_EXPECT(test_io::write_text(root + "/" + note, "a note"));
 	const std::string loose = dir.file("sources \xC3\xA9/loose.txt");
 	const std::string packed = dir.file("sources \xC3\xA9/source.pff");
-	TEST_EXPECT(editor_test::write_text(loose, "loose file"));
+	TEST_EXPECT(test_io::write_text(loose, "loose file"));
 	const uint8_t data[] = {'p', 'a', 'c', 'k', 'e', 'd'};
 	const opennova::pff::PffWriteEntry entries[] = {{"note.txt", data, sizeof(data), 0, 0, 0}};
 	TEST_EXPECT(opennova::pff::pff_write_archive(packed.c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 1) ==
@@ -480,7 +480,7 @@ static int test_utf8_project_path() {
 	TEST_EXPECT(built.rfind(root + "/.opennova/build/play/", 0) == 0);
 	TEST_EXPECT(fs::is_regular_file(io::os_path(built + "/localres.pff")));
 	const std::string runtime = dir.file("runtime \xC3\xA9/opennova.exe");
-	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
+	TEST_EXPECT(test_io::write_text(runtime, "MZ"));
 	PlayLauncher launcher;
 	launcher.executable = runtime;
 	launcher.mcp_port = 8999;
@@ -524,7 +524,7 @@ static int test_utf8_project_path() {
 // preview of files that cannot be read opens nothing. Which selections import_assets refuses whole is
 // import_apply_test's test_apply_staging.
 static int test_import() {
-	editor_test::TempProjectDir dir("opennova_editor_import_test");
+	test_temp::TempDir dir("opennova_editor_import_test");
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -532,7 +532,7 @@ static int test_import() {
 	session.run_operations();
 	const std::string loose = dir.file("loose.txt");
 	const std::string packed = dir.file("source.pff");
-	TEST_EXPECT(editor_test::write_text(loose, "loose file"));
+	TEST_EXPECT(test_io::write_text(loose, "loose file"));
 	const uint8_t data[] = {'p', 'a', 'c', 'k', 'e', 'd'};
 	const opennova::pff::PffWriteEntry entries[] = {
 		{"note.txt", data, sizeof(data), 0, 0, 0},
@@ -573,7 +573,7 @@ static int test_import() {
 	// Replacing is explicit and uses the existing project's path and spelling.
 	fs::create_directory(dir.file("project/custom"));
 	fs::rename(dir.file("project/note.txt"), dir.file("project/custom/NOTE.TXT"));
-	TEST_EXPECT(editor_test::write_text(dir.file("project/custom/NOTE.TXT"), "authored"));
+	TEST_EXPECT(test_io::write_text(dir.file("project/custom/NOTE.TXT"), "authored"));
 	importing.imports = {{packed, "note.txt"}};
 	session.handle(importing);
 	session.run_operations();
@@ -589,7 +589,7 @@ static int test_import() {
 	// unsaved prompt (what it lists and offers: unsaved_guard_test), the file as it was. An import
 	// that replaces no edited file goes ahead. A clean open document reloads after replacement.
 	const std::string items = dir.file("items.def");
-	TEST_EXPECT(editor_test::write_text(items, "begin \"Marker\"\nid 100001\ntype marker\nhp 10\nend\n"));
+	TEST_EXPECT(test_io::write_text(items, "begin \"Marker\"\nid 100001\ntype marker\nhp 10\nend\n"));
 	importing.imports = {{items, {}}};
 	session.handle(importing);
 	session.run_operations();
@@ -604,7 +604,7 @@ static int test_import() {
 	edit.edits[0].field = "hp"; edit.edits[0].value = int64_t(20);
 	session.handle(edit);
 	TEST_EXPECT(session.documents_dirty());
-	TEST_EXPECT(editor_test::write_text(items, "begin \"Marker\"\nid 100001\ntype marker\nhp 30\nend\n"));
+	TEST_EXPECT(test_io::write_text(items, "begin \"Marker\"\nid 100001\ntype marker\nhp 30\nend\n"));
 	session.handle(importing);
 	session.run_operations();
 	const DialogsView::UnsavedPrompt &prompt = session.view().dialogs.unsaved_prompt;
@@ -616,7 +616,7 @@ static int test_import() {
 	{
 		// Another file, no replace: nothing edited is written over, so nothing waits.
 		const std::string other = dir.file("other.txt");
-		TEST_EXPECT(editor_test::write_text(other, "other"));
+		TEST_EXPECT(test_io::write_text(other, "other"));
 		EditorRequest alone = request::of(EditorRequestKind::ImportFiles);
 		alone.imports = {{other, {}}};
 		session.handle(alone);
@@ -632,7 +632,7 @@ static int test_import() {
 	        *records_of(*session.view().documents.open[0])->rows()[0]);
 	TEST_EXPECT(reimported.native.as<opennova::def::DefItemDef>().hp == 30);
 
-	TEST_EXPECT(editor_test::write_text(dir.file("bad.pff"), "not an archive"));
+	TEST_EXPECT(test_io::write_text(dir.file("bad.pff"), "not an archive"));
 	preview.paths = {dir.file("bad.pff"), dir.file("missing.txt")};
 	session.handle(preview);
 	session.run_operations();
@@ -647,7 +647,7 @@ static int test_import() {
 // K1: the install mode, the install's configuration and saves beside the build with /d, is gone; Strict Play
 // is the game install's.)
 static int test_install_play_refusals() {
-	editor_test::TempProjectDir dir("opennova_editor_install_play_test");
+	test_temp::TempDir dir("opennova_editor_install_play_test");
 	FakePlatform platform;
 	FilePreferencesStore preferences(dir.file("settings.json"));
 	ProjectSession session(platform, preferences);
@@ -663,12 +663,12 @@ static int test_install_play_refusals() {
 	TEST_EXPECT(platform.spawns == 0 && session.view().findings.diagnostics.back().code() == "play.install_missing");
 	// A run directory that cannot be made is reported before any child starts.
 	const std::string install = dir.file("retail install");
-	TEST_EXPECT(editor_test::write_text(install + "/Jointops.exe", "retail executable") &&
-	            editor_test::write_text(install + "/binkw32.dll", "Bink"));
+	TEST_EXPECT(test_io::write_text(install + "/Jointops.exe", "retail executable") &&
+	            test_io::write_text(install + "/binkw32.dll", "Bink"));
 	editor_test::set_game_install(session, install);
 	const std::string project = session.view().project.root;
 	fs::remove_all(project + "/.opennova/run");
-	TEST_EXPECT(editor_test::write_text(project + "/.opennova/run", "a file where the runs go"));
+	TEST_EXPECT(test_io::write_text(project + "/.opennova/run", "a file where the runs go"));
 	session.handle(request::play());
 	session.run_operations();
 	TEST_EXPECT(platform.spawns == 0 && session.view().findings.diagnostics.back().code() == "play.run_directory");
@@ -689,7 +689,7 @@ static int test_install_play_refusals() {
 // Play between two runs in its own mode's directory. A project that builds as an expansion on the install's
 // base game plays with /exp.
 static int test_strict_play() {
-	editor_test::TempProjectDir dir("opennova_editor_strict_play_test");
+	test_temp::TempDir dir("opennova_editor_strict_play_test");
 	FakePlatform platform;
 	FilePreferencesStore preferences(dir.file("settings.json"));
 	ProjectSession session(platform, preferences);
@@ -698,8 +698,8 @@ static int test_strict_play() {
 	session.run_operations();
 	editor_test::create_missing_files(session);
 	const std::string install = dir.file("install");
-	TEST_EXPECT(editor_test::write_text(install + "/Jointops.exe", "retail executable") &&
-	            editor_test::write_text(install + "/binkw32.dll", "Bink"));
+	TEST_EXPECT(test_io::write_text(install + "/Jointops.exe", "retail executable") &&
+	            test_io::write_text(install + "/binkw32.dll", "Bink"));
 	editor_test::set_game_install(session, install);
 	ProjectSettingsChange strict;
 	strict.play_mode = PlayMode::Strict;
@@ -727,8 +727,8 @@ static int test_strict_play() {
 	// another game holds the gate a moment: the log is not read while it runs, then read as it exits; the
 	// game is started again in the same run directory once the gate is let go.
 	const int64_t first = v.activity.play_pid;
-	TEST_EXPECT(editor_test::write_text(run + "/game.cfg", "written by the game") &&
-	            editor_test::write_text(run + "/_filelog.txt", "LOADED FILE: language.pff\nPFF LOADED FILE: gameerr.bin\n"));
+	TEST_EXPECT(test_io::write_text(run + "/game.cfg", "written by the game") &&
+	            test_io::write_text(run + "/_filelog.txt", "LOADED FILE: language.pff\nPFF LOADED FILE: gameerr.bin\n"));
 	session.poll();
 	TEST_EXPECT(!output_has(v, "PFF LOADED FILE: gameerr.bin"));
 	platform.clock += 2000;
@@ -753,7 +753,7 @@ static int test_strict_play() {
 	// The second run quitting the same way is not started again; its log (written anew) is reported, and
 	// is the run section's file_log.
 	const int64_t second = v.activity.play_pid;
-	TEST_EXPECT(editor_test::write_text(run + "/_filelog.txt", "LOADED FILE: language.pff\nLOADED FILE: localres.pff\n"
+	TEST_EXPECT(test_io::write_text(run + "/_filelog.txt", "LOADED FILE: language.pff\nLOADED FILE: localres.pff\n"
 	                                                           "LOADED FILE: resource.pff\nPFF LOADED FILE: gametext.bin\n"
 	                                                           "PFF LOADED FILE: main.mnu\nPFF LOADED FILE: main.mnu\n"));
 	platform.clock += 1000;
@@ -771,8 +771,8 @@ static int test_strict_play() {
 	}
 
 	// The next strict Play takes the same run directory and names what it kept of what the game wrote there.
-	TEST_EXPECT(editor_test::write_text(run + "/player.sav", "the game's player") &&
-	            editor_test::write_text(run + "/ghw.txt", "device log"));
+	TEST_EXPECT(test_io::write_text(run + "/player.sav", "the game's player") &&
+	            test_io::write_text(run + "/ghw.txt", "device log"));
 	session.handle(request::play());
 	session.run_operations();
 	TEST_EXPECT(platform.spawns == 3 && v.activity.play_state == PlayState::Running && platform.last_plan.working_dir == run &&
@@ -789,7 +789,7 @@ static int test_strict_play() {
 	// An OpenNova runtime Play between two strict Plays (a modder switching back and forth) runs in its own
 	// mode's run directory; the next strict Play takes strict's again, with what it kept.
 	const std::string runtime = dir.file("runtime/opennova.exe");
-	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
+	TEST_EXPECT(test_io::write_text(runtime, "MZ"));
 	PlayLauncher launcher;
 	launcher.executable = runtime;
 	session.set_launcher_source(editor_test::fixed_launcher(launcher));
@@ -825,7 +825,7 @@ static int test_strict_play() {
 		if (platform.spawns != spawns + 1) return false;
 		const std::string here = v.activity.play_run_dir;
 		if (fs::exists(here + "/game.cfg")) return false;
-		if (writes_config && !editor_test::write_text(here + "/game.cfg", "written")) return false;
+		if (writes_config && !test_io::write_text(here + "/game.cfg", "written")) return false;
 		platform.clock += after_ms;
 		if (stopped) {
 			session.handle(request::stop_play());
@@ -918,7 +918,7 @@ static int test_strict_play() {
 		std::error_code ec;
 		fs::remove_all(opennova::io::os_path(copy_cache), ec);
 	}
-	TEST_EXPECT(editor_test::write_text(copy_cache, "not a folder"));
+	TEST_EXPECT(test_io::write_text(copy_cache, "not a folder"));
 	const int before_failure = platform.spawns;
 	session.handle(request::play());
 	session.run_operations();
@@ -950,16 +950,16 @@ static int test_strict_play() {
 // and a Play joining a running build runs in the mode it named. With no project open, Play's settings are
 // refused (project.none), nothing written.
 static int test_play_settings_per_project() {
-	editor_test::TempProjectDir dir("opennova_editor_play_settings_per_project");
+	test_temp::TempDir dir("opennova_editor_play_settings_per_project");
 	FakePlatform platform;
 	FilePreferencesStore preferences(dir.file("settings.json"));
 	ProjectSession session(platform, preferences);
 	const SessionView &v = session.view();
 	const std::string runtime = dir.file("runtime/opennova.exe");
 	const std::string install = dir.file("install");
-	TEST_EXPECT(editor_test::write_text(runtime, "MZ") && editor_test::write_text(install + "/Jointops.exe", "exe") &&
-	            editor_test::write_text(install + "/binkw32.dll", "bink") &&
-	            editor_test::write_text(install + "/game.cfg", "settings"));
+	TEST_EXPECT(test_io::write_text(runtime, "MZ") && test_io::write_text(install + "/Jointops.exe", "exe") &&
+	            test_io::write_text(install + "/binkw32.dll", "bink") &&
+	            test_io::write_text(install + "/game.cfg", "settings"));
 	PlayLauncher launcher;
 	launcher.executable = runtime;
 	session.set_launcher_source(editor_test::fixed_launcher(launcher));
@@ -1063,14 +1063,14 @@ static int test_play_settings_per_project() {
 // the editor's setting, which a session started later reads, and plans an open preview
 // again with it (its serial moving, the files the chosen one needs gone or back).
 static int test_import_dependencies_setting() {
-	editor_test::TempProjectDir dir("opennova_editor_import_setting");
+	test_temp::TempDir dir("opennova_editor_import_setting");
 	const std::string settings = dir.file("settings/editor.json");
 	const std::string art = dir.file("art");
-	TEST_EXPECT(editor_test::write_text(art + "/a.mnu", "<SCREEN>\r\n<NAME>A</NAME>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"GO\">\r\n"
+	TEST_EXPECT(test_io::write_text(art + "/a.mnu", "<SCREEN>\r\n<NAME>A</NAME>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"GO\">\r\n"
 	                                                    "<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>9</RIGHT><BOTTOM>9</BOTTOM>"
 	                                                    "</POSITION>\r\n<FONT><NAME>arial99</NAME></FONT>\r\n</WINDOW>\r\n"
 	                                                    "</SCREEN>\r\n") &&
-	            editor_test::write_text(art + "/arial99.fnt", "fnt"));
+	            test_io::write_text(art + "/arial99.fnt", "fnt"));
 	{
 		FakePlatform platform;
 		FilePreferencesStore preferences(settings);
@@ -1121,7 +1121,7 @@ static int test_import_dependencies_setting() {
 // document with a bad name writes nothing, and a new menu of its own gets one screen
 // named after the file instead of a copy of STARTUP.
 static int test_outcomes_and_refusals() {
-	editor_test::TempProjectDir dir("opennova_editor_session_outcomes");
+	test_temp::TempDir dir("opennova_editor_session_outcomes");
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1134,10 +1134,10 @@ static int test_outcomes_and_refusals() {
 
 	// The new name taken on disk after the last scan: the plan passes, the commit
 	// refuses, and the finding outlives the refresh that follows.
-	TEST_EXPECT(editor_test::write_text(root + "/logo.tga", "tga"));
+	TEST_EXPECT(test_io::write_text(root + "/logo.tga", "tga"));
 	session.handle(request::rescan());
 	session.run_operations();
-	TEST_EXPECT(editor_test::write_text(root + "/logo2.tga", "late"));
+	TEST_EXPECT(test_io::write_text(root + "/logo2.tga", "late"));
 	// The request is done (its commit started), and what the commit came to is its operation's.
 	const ActionOutcome renamed = editor_test::handle_to_end(session, request::rename_asset("logo.tga", "logo2.tga"));
 	TEST_EXPECT(!renamed.done() && !renamed.unsaved_prompt);
@@ -1150,7 +1150,7 @@ static int test_outcomes_and_refusals() {
 	// A file of no kind the game knows is left out of the build (S13 A8; it packed all the same
 	// before, its long name refused): a new name past the archives' 16 characters is taken, and
 	// the scan holds no name finding against it, only the warning that the build leaves it out.
-	TEST_EXPECT(editor_test::write_text(root + "/notes/readme.docx", "notes"));
+	TEST_EXPECT(test_io::write_text(root + "/notes/readme.docx", "notes"));
 	session.handle(request::rescan());
 	session.run_operations();
 	const ActionOutcome long_name =
@@ -1274,7 +1274,7 @@ static int test_outcomes_and_refusals() {
 // build lists each blocker once. Play where the platform has no spawn says the editor cannot start the
 // game there, before building.
 static int test_requests_that_cannot_run() {
-	editor_test::TempProjectDir dir("opennova_editor_session_cannot_run");
+	test_temp::TempDir dir("opennova_editor_session_cannot_run");
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1296,7 +1296,7 @@ static int test_requests_that_cannot_run() {
 
 	editor_test::create_missing_files(session);
 	TEST_EXPECT(v.project.requirements->required_missing == 0);
-	TEST_EXPECT(editor_test::write_text(root + "/logo.tga", "tga"));
+	TEST_EXPECT(test_io::write_text(root + "/logo.tga", "tga"));
 	session.handle(request::rescan());
 	session.run_operations();
 
@@ -1308,7 +1308,7 @@ static int test_requests_that_cannot_run() {
 	EditorRequest reimport = request::reimport();
 	reimport.force = true;
 	EditorRequest brand = request::create_missing({"brand_style"});
-	TEST_EXPECT(editor_test::write_text(dir.file("loose.txt"), "loose"));
+	TEST_EXPECT(test_io::write_text(dir.file("loose.txt"), "loose"));
 	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 	import.imports = {{dir.file("loose.txt"), {}}};
 	const Case during_build[] = {
@@ -1366,7 +1366,7 @@ static int test_requests_that_cannot_run() {
 // a viewport change that does not read) is refused in its outcome, says why on the status line, and leaves
 // no Problems row, whatever kind of request names it.
 static int test_request_faults_leave_no_rows() {
-	editor_test::TempProjectDir dir("opennova_editor_session_request_faults");
+	test_temp::TempDir dir("opennova_editor_session_request_faults");
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1424,7 +1424,7 @@ static int test_request_faults_leave_no_rows() {
 // a Reload and a Create say on the status line what they did, or that they did not, never the line
 // an earlier request left.
 static int test_status_says_the_request() {
-	editor_test::TempProjectDir dir("opennova_editor_session_status_line");
+	test_temp::TempDir dir("opennova_editor_session_status_line");
 	opennova::editor::NullProcessPlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1482,7 +1482,7 @@ static int test_status_says_the_request() {
 // reloaded does not take over, an untouched one keeps its selection, and the renamed
 // file's own document follows it to the new name.
 static int test_rename_keeps_the_active_document() {
-	editor_test::TempProjectDir dir("opennova_editor_session_rename_active");
+	test_temp::TempDir dir("opennova_editor_session_rename_active");
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1491,7 +1491,7 @@ static int test_rename_keeps_the_active_document() {
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	const std::string root = v.project.root;
-	TEST_EXPECT(editor_test::write_text(root + "/logo.tga", "tga"));
+	TEST_EXPECT(test_io::write_text(root + "/logo.tga", "tga"));
 	session.handle(request::rescan());
 	session.run_operations();
 
@@ -1563,7 +1563,7 @@ static int test_rename_keeps_the_active_document() {
 // document (the stylesheet the screen draws with) is active, cleared when the screen is
 // removed or the menu closes.
 static int test_preview_target() {
-	editor_test::TempProjectDir dir("opennova_editor_session_preview");
+	test_temp::TempDir dir("opennova_editor_session_preview");
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1637,7 +1637,7 @@ static const Diagnostic *finding_on(const std::vector<Diagnostic> &diagnostics, 
 // was, its error blocking) before the build's gate; a rename asked while a validation is due lists every
 // document with unsaved edits on its prompt (it plans again once the validation it joins ends).
 static int test_validation_cost() {
-	editor_test::TempProjectDir dir("opennova_editor_session_validation");
+	test_temp::TempDir dir("opennova_editor_session_validation");
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1749,7 +1749,7 @@ static int test_validation_cost() {
 	std::string error;
 	TEST_EXPECT(opennova::io::read_file_bytes(root + "/" + menu, original, error));
 	// A UTF-16 byte-order mark and half a code unit: a menu that cannot be decoded.
-	TEST_EXPECT(editor_test::write_bytes(root + "/" + menu, {0xFF, 0xFE, 0x41}));
+	TEST_EXPECT(test_io::write_file(root + "/" + menu, {0xFF, 0xFE, 0x41}));
 	session.handle(request::rescan());
 	session.run_operations();
 	TEST_EXPECT(stats.files_validated == 1 && stats.files_loaded == 1 && stats.files_failed == 1 &&
@@ -1767,7 +1767,7 @@ static int test_validation_cost() {
 	TEST_EXPECT(session.problems_compositions() == compositions &&
 			v.revisions.of(ViewConcern::Findings) == findings);
 	TEST_EXPECT(finding_on(v.findings.diagnostics, menu) != nullptr);
-	TEST_EXPECT(editor_test::write_bytes(root + "/" + menu, original));
+	TEST_EXPECT(test_io::write_file(root + "/" + menu, original));
 	session.handle(request::rescan());
 	session.run_operations();
 	TEST_EXPECT(stats.files_validated == 1 && stats.files_loaded == 1 && stats.files_failed == 0 &&
@@ -1801,7 +1801,7 @@ static int test_validation_cost() {
 	TEST_EXPECT(has_code(v.findings.diagnostics, "catalog.item_type"));
 	held = session.document_for("items.def"); // read again: a new document
 	TEST_EXPECT(held != nullptr && !held->dirty() && held->matches_file());
-	TEST_EXPECT(editor_test::write_bytes(items_file, items_bytes));
+	TEST_EXPECT(test_io::write_file(items_file, items_bytes));
 	session.handle(request::build());
 	session.run_operations();
 	TEST_EXPECT(v.activity.has_build && v.activity.last_build->ok &&
@@ -1811,13 +1811,13 @@ static int test_validation_cost() {
 	session.handle(request::open_document(menu));
 	const Document *kept = session.document_for(menu);
 	TEST_EXPECT(kept != nullptr);
-	TEST_EXPECT(editor_test::write_bytes(root + "/" + menu, {0xFF, 0xFE, 0x41}));
+	TEST_EXPECT(test_io::write_file(root + "/" + menu, {0xFF, 0xFE, 0x41}));
 	session.handle(request::build());
 	session.run_operations();
 	TEST_EXPECT(v.activity.has_build && !v.activity.last_build->ok && finding_on(v.activity.last_build->diagnostics, menu) != nullptr);
 	TEST_EXPECT(session.document_for(menu) == kept && has_code(v.activity.last_build->diagnostics, "document.stale"));
 	TEST_EXPECT(finding_on(v.findings.diagnostics, menu) != nullptr && finding_on(v.findings.diagnostics, menu)->code() == "document.stale");
-	TEST_EXPECT(editor_test::write_bytes(root + "/" + menu, original));
+	TEST_EXPECT(test_io::write_file(root + "/" + menu, original));
 	session.handle(request::build());
 	session.run_operations();
 	TEST_EXPECT(v.activity.has_build && v.activity.last_build->ok && session.document_for(menu) == kept && !has_code(v.findings.diagnostics, "document.stale"));
@@ -1826,7 +1826,7 @@ static int test_validation_cost() {
 	// graph yet: its prompt lists every document with unsaved edits, the menu whose new reference
 	// the rename would rewrite among them (S13 A3: the rename plans again once the validation it
 	// joins has ended).
-	TEST_EXPECT(editor_test::write_text(root + "/logo.tga", "tga"));
+	TEST_EXPECT(test_io::write_text(root + "/logo.tga", "tga"));
 	session.handle(request::rescan());
 	session.run_operations();
 	session.handle(request::open_document(menu));
@@ -1859,7 +1859,7 @@ static int test_validation_cost() {
 // holding a line the game ignores (a catalog.ignored_input finding), the item table and
 // the string table open, the item table active.
 struct SaveProject {
-	editor_test::TempProjectDir dir;
+	test_temp::TempDir dir;
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session;
@@ -1879,7 +1879,7 @@ struct SaveProject {
 		if (!items_entry || !strings_entry) return false;
 		items_path = items_entry->relative_path;
 		strings_path = strings_entry->relative_path;
-		if (!editor_test::write_text(root + "/" + items_path,
+		if (!test_io::write_text(root + "/" + items_path,
 		                             "begin \"Marker\"\nid 100001\ntype marker\nsubtype Ruins\nhp 10\nend\n"))
 			return false;
 		session.handle(request::rescan());
@@ -2093,7 +2093,7 @@ static int test_gestures_per_document() {
 // dropped the same (S26: every writer writes its model alone); a file the
 // project lacks is refused, and so is one that does not serialize, closed or open, with the reason.
 static int test_rewrite_closed_file() {
-	editor_test::TempProjectDir dir("opennova_editor_session_rewrite");
+	test_temp::TempDir dir("opennova_editor_session_rewrite");
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -2103,7 +2103,7 @@ static int test_rewrite_closed_file() {
 	const SessionView &v = session.view();
 	const std::string menu = "menus/rewrite.mnu";
 	const std::string file = v.project.root + "/" + menu;
-	TEST_EXPECT(editor_test::write_text(file, "<SCREEN><NAME>R</NAME><WINDOW type=\"button\" name=\"B\" SCREENX=\"1\">"
+	TEST_EXPECT(test_io::write_text(file, "<SCREEN><NAME>R</NAME><WINDOW type=\"button\" name=\"B\" SCREENX=\"1\">"
 	                                          "<POSITION><LEFT>0</LEFT></POSITION></WINDOW></SCREEN>"));
 	session.handle(request::rescan());
 	session.run_operations();
@@ -2122,8 +2122,8 @@ static int test_rewrite_closed_file() {
 	TEST_EXPECT(entry != nullptr);
 	if (!entry) return 1;
 	const std::string items = entry->relative_path;
-	const std::string items_text = editor_test::crlf("begin \"Marker\"\nid 100001\ntype marker\nsubtype Ruins\nhp 10\nend\n");
-	TEST_EXPECT(editor_test::write_text(v.project.root + "/" + items, items_text));
+	const std::string items_text = test_io::crlf("begin \"Marker\"\nid 100001\ntype marker\nsubtype Ruins\nhp 10\nend\n");
+	TEST_EXPECT(test_io::write_text(v.project.root + "/" + items, items_text));
 	session.handle(request::rescan());
 	session.run_operations();
 	TEST_EXPECT(has_code(v.findings.diagnostics, "catalog.ignored_input"));
@@ -2142,7 +2142,7 @@ static int test_rewrite_closed_file() {
 	const std::string crash_text = "<SCREEN><NAME>C</NAME><WINDOW type=\"button\" name=\"B\" SCREENX=\"1\">"
 	                               "<POSITION><LEFT>0</LEFT></POSITION><ACTION type=\"\">X</ACTION></WINDOW></SCREEN>";
 	const std::string crash = v.project.root + "/menus/crash.mnu";
-	TEST_EXPECT(editor_test::write_text(crash, crash_text));
+	TEST_EXPECT(test_io::write_text(crash, crash_text));
 	session.handle(request::rescan());
 	session.run_operations();
 	TEST_EXPECT(has_code(v.findings.diagnostics, "menu.ignored_input"));
@@ -2225,7 +2225,7 @@ static int test_play_saves_first() {
 	TEST_EXPECT(view_section_to_json(v, ViewSection::Preferences).get_bool("save_before_play", false) &&
 	            view_section_to_json(v, ViewSection::Run).get_bool("save_before_play", false));
 	const std::string runtime = project.dir.file("runtime/opennova.exe");
-	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
+	TEST_EXPECT(test_io::write_text(runtime, "MZ"));
 	PlayLauncher launcher;
 	launcher.executable = runtime;
 	session.set_launcher_source(editor_test::fixed_launcher(launcher));
@@ -2473,7 +2473,7 @@ static int test_selection_memory() {
 // its game writes later is ignored, with no project open, in another, and in this one
 // opened again; the next Play's game reports anew, and the Play after that clears it.
 static int test_boot_findings() {
-	editor_test::TempProjectDir dir("opennova_editor_session_boot");
+	test_temp::TempDir dir("opennova_editor_session_boot");
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -2483,7 +2483,7 @@ static int test_boot_findings() {
 	session.run_operations();
 	editor_test::create_missing_files(session);
 	const std::string runtime = dir.file("runtime/opennova.exe");
-	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
+	TEST_EXPECT(test_io::write_text(runtime, "MZ"));
 	PlayLauncher launcher;
 	launcher.executable = runtime;
 	session.set_launcher_source(editor_test::fixed_launcher(launcher));
@@ -2493,7 +2493,7 @@ static int test_boot_findings() {
 	const std::string log = platform.last_plan.log_file;
 	const int64_t first_game = v.activity.play_pid;
 	std::string lines = boot_line("gametext.bin", "- retail: exits") + boot_line("mystery.dat", "- unknown");
-	TEST_EXPECT(editor_test::write_text(log, lines));
+	TEST_EXPECT(test_io::write_text(log, lines));
 	session.poll();
 	session.run_operations(); // the validation the report left due (S13 A3: the polls step it)
 	TEST_EXPECT(v.activity.boot_missing.size() == 2 &&
@@ -2529,20 +2529,20 @@ static int test_boot_findings() {
 	session.handle(request::close_project());
 	TEST_EXPECT(v.activity.boot_missing.empty() && !has_code(v.findings.diagnostics, "play.boot_missing") && v.activity.play_state == PlayState::Running);
 	lines += boot_line("keyhelp.bin", "- late");
-	TEST_EXPECT(editor_test::write_text(log, lines));
+	TEST_EXPECT(test_io::write_text(log, lines));
 	session.poll();
 	TEST_EXPECT(v.activity.boot_missing.empty());
 	session.handle(request::new_project(dir.file("second"), "Second"));
 	session.run_operations();
 	lines += boot_line("vmacros.bin", "- late");
-	TEST_EXPECT(editor_test::write_text(log, lines));
+	TEST_EXPECT(test_io::write_text(log, lines));
 	session.poll();
 	TEST_EXPECT(v.activity.boot_missing.empty() &&
 			!has_code(v.findings.diagnostics, "play.boot_missing"));
 	session.handle(request::open_project(first));
 	session.run_operations();
 	lines += boot_line("gameerr.bin", "- late");
-	TEST_EXPECT(editor_test::write_text(log, lines));
+	TEST_EXPECT(test_io::write_text(log, lines));
 	session.poll();
 	TEST_EXPECT(v.activity.boot_missing.empty() &&
 			!has_code(v.findings.diagnostics, "play.boot_missing"));
@@ -2553,7 +2553,7 @@ static int test_boot_findings() {
 	session.handle(request::play());
 	session.run_operations();
 	TEST_EXPECT(v.activity.play_state == PlayState::Running);
-	TEST_EXPECT(editor_test::write_text(platform.last_plan.log_file,
+	TEST_EXPECT(test_io::write_text(platform.last_plan.log_file,
 	                                    boot_line("menutxt.bin", "- optional")));
 	session.poll();
 	session.run_operations(); // the validation the report left due
@@ -2576,7 +2576,7 @@ static int test_boot_findings() {
 // (play_mission_for: the mission itself, or a file the game finds by its name). Play in the game
 // install starts at its menu whatever is named, and says so.
 static int test_play_mission() {
-	editor_test::TempProjectDir dir("opennova_editor_session_play_mission");
+	test_temp::TempDir dir("opennova_editor_session_play_mission");
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -2592,12 +2592,12 @@ static int test_play_mission() {
 		std::string error;
 		TEST_EXPECT(opennova::bms::write(mission, mission_bytes, error));
 	}
-	TEST_EXPECT(editor_test::write_bytes(root + "/missions/First.bms", mission_bytes) &&
-	            editor_test::write_text(root + "/missions/First.wac", "// the mission's script\r\n"));
+	TEST_EXPECT(test_io::write_file(root + "/missions/First.bms", mission_bytes) &&
+	            test_io::write_text(root + "/missions/First.wac", "// the mission's script\r\n"));
 	session.handle(request::rescan());
 	session.run_operations();
 	const std::string runtime = dir.file("runtime/opennova.exe");
-	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
+	TEST_EXPECT(test_io::write_text(runtime, "MZ"));
 	PlayLauncher launcher;
 	launcher.executable = runtime;
 	launcher.mcp_port = 8999;
@@ -2623,7 +2623,7 @@ static int test_play_mission() {
 	}
 	const std::string report = std::string("USER WARNING: MainGame: ") + opennova::gameprofile::kLaunchMissionFailedMarker +
 	                           "First.bms the terrain did not load.\r\n";
-	TEST_EXPECT(editor_test::write_text(platform.last_plan.log_file, "Godot Engine v4.6.1\r\n" + report + report));
+	TEST_EXPECT(test_io::write_text(platform.last_plan.log_file, "Godot Engine v4.6.1\r\n" + report + report));
 	session.poll();
 	session.run_operations(); // the validation the report left due
 	TEST_EXPECT(count_code(v.findings.diagnostics, "play.mission.failed") == 1);
@@ -2711,7 +2711,7 @@ static int test_play_mission() {
 	}
 
 	// A mission whose name holds a space: the game's report names it whole, the row on its file.
-	TEST_EXPECT(editor_test::write_bytes(root + "/missions/my map.bms", mission_bytes));
+	TEST_EXPECT(test_io::write_file(root + "/missions/my map.bms", mission_bytes));
 	session.handle(request::rescan());
 	session.run_operations();
 	session.handle(request::play("my map.bms"));
@@ -2719,7 +2719,7 @@ static int test_play_mission() {
 	TEST_EXPECT(platform.spawns == 4 && v.activity.play_state == PlayState::Running && v.activity.play_mission == "my map.bms");
 	const std::string spaced = std::string("USER WARNING: MainGame: ") + opennova::gameprofile::kLaunchMissionFailedMarker +
 	                           "my map.bms the terrain did not load.\r\n";
-	TEST_EXPECT(editor_test::write_text(platform.last_plan.log_file, "Godot Engine v4.6.1\r\n" + spaced));
+	TEST_EXPECT(test_io::write_text(platform.last_plan.log_file, "Godot Engine v4.6.1\r\n" + spaced));
 	session.poll();
 	session.run_operations();
 	const Diagnostic *spaced_failed = finding_in(v.findings.diagnostics, "play.mission.failed", "missions/my map.bms");
@@ -2728,8 +2728,8 @@ static int test_play_mission() {
 	session.poll();
 
 	const std::string install = dir.file("install");
-	TEST_EXPECT(editor_test::write_text(install + "/Jointops.exe", "exe") && editor_test::write_text(install + "/binkw32.dll", "bink") &&
-	            editor_test::write_text(install + "/game.cfg", "settings"));
+	TEST_EXPECT(test_io::write_text(install + "/Jointops.exe", "exe") && test_io::write_text(install + "/binkw32.dll", "bink") &&
+	            test_io::write_text(install + "/game.cfg", "settings"));
 	editor_test::set_game_install(session, install);
 	ProjectSettingsChange in_install;
 	in_install.play_mode = PlayMode::Strict;
@@ -2772,7 +2772,7 @@ static std::vector<opennova::bms::Entity> staged_markers(const std::string &arch
 // its menu, where the mission is chosen.
 static int test_play_from_here() {
 	using namespace opennova;
-	editor_test::TempProjectDir dir("opennova_editor_session_play_from_here");
+	test_temp::TempDir dir("opennova_editor_session_play_from_here");
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -2792,11 +2792,11 @@ static int test_play_from_here() {
 		std::string error;
 		TEST_EXPECT(bms::write(mission, mission_bytes, error));
 	}
-	TEST_EXPECT(editor_test::write_bytes(root + "/missions/First.bms", mission_bytes));
+	TEST_EXPECT(test_io::write_file(root + "/missions/First.bms", mission_bytes));
 	session.handle(request::rescan());
 	session.run_operations();
 	const std::string runtime = dir.file("runtime/opennova.exe");
-	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
+	TEST_EXPECT(test_io::write_text(runtime, "MZ"));
 	PlayLauncher launcher;
 	launcher.executable = runtime;
 	launcher.mcp_port = 8999;
@@ -2885,7 +2885,7 @@ static int test_play_from_here() {
 
 	// Strict Play in the game install: the staged archive carries the start; the game starts at its menu.
 	const std::string install = dir.file("install");
-	TEST_EXPECT(editor_test::write_text(install + "/Jointops.exe", "exe") && editor_test::write_text(install + "/binkw32.dll", "bink"));
+	TEST_EXPECT(test_io::write_text(install + "/Jointops.exe", "exe") && test_io::write_text(install + "/binkw32.dll", "bink"));
 	editor_test::set_game_install(session, install);
 	ProjectSettingsChange strict;
 	strict.play_mode = PlayMode::Strict;
@@ -2911,7 +2911,7 @@ static int test_play_from_here() {
 // not take, a required one left out, or a terrain the project lacks: refused (document.values),
 // nothing made. A new script is made in missions/ and opened.
 static int test_new_mission() {
-	editor_test::TempProjectDir dir("opennova_editor_session_new_mission");
+	test_temp::TempDir dir("opennova_editor_session_new_mission");
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -2929,7 +2929,7 @@ static int test_new_mission() {
 	// The project has no terrain yet: a project is its own files.
 	TEST_EXPECT(refused(request::create_file("first.bms", "", Values{{"terrain", "island"}, {"environment", "day"}}),
 	                    "The project has no terrain named island"));
-	TEST_EXPECT(editor_test::write_text(root + "/terrain/island.trn", "trn") && editor_test::write_text(root + "/day.env", "env"));
+	TEST_EXPECT(test_io::write_text(root + "/terrain/island.trn", "trn") && test_io::write_text(root + "/day.env", "env"));
 	session.handle(request::rescan());
 	session.run_operations();
 	TEST_EXPECT(v.project.scan->find("island.trn") && v.project.scan->find("island.trn")->kind == AssetKind::Terrain &&
@@ -2965,7 +2965,7 @@ static int test_new_mission() {
 		if (d.code() == "reference.missing" && d.asset == "missions/first.bms")
 			TEST_EXPECT(d.field == "tiles" && d.severity == DiagnosticSeverity::Warning);
 	// A mission whose text table the project holds already keeps that table.
-	TEST_EXPECT(editor_test::write_text(root + "/strings/second.bin", "mine"));
+	TEST_EXPECT(test_io::write_text(root + "/strings/second.bin", "mine"));
 	session.handle(request::rescan());
 	session.run_operations();
 	session.handle(request::create_file("second.bms", "", Values{{"terrain", "island"}, {"environment", "day"}}));
@@ -2990,7 +2990,7 @@ static int test_new_mission() {
 // a note on it; a mission's own files and the scripts the game opens by a fixed name are none.
 // Neither gates a build.
 static int test_mission_notes() {
-	editor_test::TempProjectDir dir("opennova_editor_session_mission_notes");
+	test_temp::TempDir dir("opennova_editor_session_mission_notes");
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -3008,17 +3008,17 @@ static int test_mission_notes() {
 		std::string error;
 		TEST_EXPECT(opennova::bms::write(mission, mission_bytes, error));
 	}
-	TEST_EXPECT(editor_test::write_bytes(root + "/missions/First.bms", mission_bytes));
+	TEST_EXPECT(test_io::write_file(root + "/missions/First.bms", mission_bytes));
 	for (const char *file : {"missions/First.wac", "missions/lost.wac", "game.wac"})
-		TEST_EXPECT(editor_test::write_text(root + "/" + file, "// a script\r\n"));
+		TEST_EXPECT(test_io::write_text(root + "/" + file, "// a script\r\n"));
 	for (const char *file : {"missions/first.til", "missions/lost.til"})
-		TEST_EXPECT(editor_test::write_text(root + "/" + file, "x"));
+		TEST_EXPECT(test_io::write_text(root + "/" + file, "x"));
 	// A dialog bank is a document the editor reads (DI-32): an empty one, as the engine's writer makes it.
 	{
 		std::vector<uint8_t> bank;
 		std::string error;
 		TEST_EXPECT(opennova::dbf::encode_dbf(opennova::dbf::File(), bank, error) &&
-		            editor_test::write_bytes(root + "/missions/lost.dbf", bank));
+		            test_io::write_file(root + "/missions/lost.dbf", bank));
 	}
 	session.handle(request::rescan());
 	session.run_operations();
@@ -3035,7 +3035,7 @@ static int test_mission_notes() {
 	session.run_operations();
 	TEST_EXPECT(v.activity.has_build && v.activity.last_build->ok);
 	// The mission the files wait for comes: their notes go. The feature on: its warning goes.
-	TEST_EXPECT(editor_test::write_bytes(root + "/missions/Lost.bms", mission_bytes));
+	TEST_EXPECT(test_io::write_file(root + "/missions/Lost.bms", mission_bytes));
 	session.handle(request::rescan());
 	session.run_operations();
 	TEST_EXPECT(count_code(v.findings.diagnostics, "mission.sidecar.unused") == 0 &&
@@ -3049,7 +3049,7 @@ static int test_mission_notes() {
 // S11b: an optional file the project lacks is a note naming its row, counted apart from the
 // required ones and never a build's gate; made by name (its fix), its note goes.
 static int test_optional_rows() {
-	editor_test::TempProjectDir dir("opennova_editor_session_optional");
+	test_temp::TempDir dir("opennova_editor_session_optional");
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -3084,7 +3084,7 @@ static int test_optional_rows() {
 // roles it makes and which it refuses (a file there, of the wrong kind, a role no requirement of the
 // project has) is create_missing_test's test_single_role_and_wrong_kind.
 static int test_create_missing_roles() {
-	editor_test::TempProjectDir dir("opennova_editor_session_create_roles");
+	test_temp::TempDir dir("opennova_editor_session_create_roles");
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -3106,7 +3106,7 @@ static int test_create_missing_roles() {
 	blank.logical_name = "keyhelp.bin";
 	blank.role = "menutxt"; // another table than keyhelp's own blank, to tell them apart
 	TEST_EXPECT(make_blank(blank, AssetKind::Strings, table, error));
-	TEST_EXPECT(editor_test::write_bytes(root + "/strings/keyhelp.bin", table));
+	TEST_EXPECT(test_io::write_file(root + "/strings/keyhelp.bin", table));
 	TEST_EXPECT(
 			finding_about(v.findings.diagnostics, "requirement.missing", "keyhelp.bin") != nullptr);
 	EditorRequest keyhelp = request::create_missing({"keyhelp"});
@@ -3125,7 +3125,7 @@ static int test_create_missing_roles() {
 // and nothing written; then it writes the three, a file with unsaved edits it does not
 // write over left as it is.
 static int test_import_fix_plans_dependencies() {
-	editor_test::TempProjectDir dir("opennova_editor_session_import_fix");
+	test_temp::TempDir dir("opennova_editor_session_import_fix");
 	const std::string install = dir.file("install");
 	const std::string menu = "<SCREEN>\r\n<NAME>STARTUP</NAME>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"TITLE\">\r\n"
 	                         "<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>9</RIGHT><BOTTOM>9</BOTTOM></POSITION>\r\n"
@@ -3180,7 +3180,7 @@ static int test_import_fix_plans_dependencies() {
 	session.run_operations();
 	// A file with unsaved edits the import does not write over holds nothing: the import goes
 	// ahead, and the edits stay.
-	TEST_EXPECT(editor_test::write_text(root + "/defs/items.def", "begin \"Marker\"\nid 100001\ntype marker\nhp 10\nend\n"));
+	TEST_EXPECT(test_io::write_text(root + "/defs/items.def", "begin \"Marker\"\nid 100001\ntype marker\nhp 10\nend\n"));
 	session.handle(request::rescan());
 	session.run_operations();
 	session.handle(request::open_document("items.def"));
@@ -3207,7 +3207,7 @@ static int test_import_fix_plans_dependencies() {
 // importing it meets the row; Use renames a file of the project to the required name; a
 // missing font's Create makes the font and the reference resolves.
 static int test_fixes_apply() {
-	editor_test::TempProjectDir dir("opennova_editor_session_fixes");
+	test_temp::TempDir dir("opennova_editor_session_fixes");
 	const std::string install = dir.file("install");
 	std::vector<uint8_t> table;
 	Diagnostic error;
@@ -3217,7 +3217,7 @@ static int test_fixes_apply() {
 	const std::vector<uint8_t> splash = test_png::gradient_png(4, 4, 7);
 	const opennova::pff::PffWriteEntry entries[] = {{"gametext.bin", table.data(), uint32_t(table.size()), 0, 0, 0},
 	                                                {"splash.png", splash.data(), uint32_t(splash.size()), 0, 0, 0}};
-	TEST_EXPECT(editor_test::write_text(install + "/readme.txt", "an install"));
+	TEST_EXPECT(test_io::write_text(install + "/readme.txt", "an install"));
 	TEST_EXPECT(opennova::pff::pff_write_archive((install + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 2) ==
 	            opennova::pff::PFF_WRITE_OK);
 	FakePlatform platform;
@@ -3228,7 +3228,7 @@ static int test_fixes_apply() {
 	editor_test::set_game_install(session, install);
 	const SessionView &v = session.view();
 	const std::string root = v.project.root;
-	TEST_EXPECT(editor_test::write_bytes(root + "/strings/spare.bin", table));
+	TEST_EXPECT(test_io::write_file(root + "/strings/spare.bin", table));
 	session.handle(request::rescan());
 	session.run_operations();
 	ProblemFix fix;
@@ -3310,7 +3310,7 @@ static int test_fixes_apply() {
 	// the source no longer decoding, the pass cannot make it again and the scan says so; the
 	// source mended, the finding's fix imports it again and the output is back.
 	const std::string authored = dir.file("badge.png");
-	TEST_EXPECT(editor_test::write_bytes(authored, test_png::gradient_png(8, 8)));
+	TEST_EXPECT(test_io::write_file(authored, test_png::gradient_png(8, 8)));
 	EditorRequest loose = request::of(EditorRequestKind::ImportFiles);
 	loose.imports = {{authored, {}}};
 	session.handle(loose);
@@ -3321,12 +3321,12 @@ static int test_fixes_apply() {
 	const std::string output = root + "/" + (*v.project.imports)[0].outputs[0];
 	std::vector<uint8_t> good;
 	TEST_EXPECT(fs::exists(source + kImportSidecarSuffix) && fs::is_regular_file(output) && opennova::io::read_file_bytes(source, good, io_error));
-	TEST_EXPECT(editor_test::write_text(source, "no longer a png"));
+	TEST_EXPECT(test_io::write_text(source, "no longer a png"));
 	fs::remove(output);
 	session.handle(request::rescan());
 	session.run_operations();
 	TEST_EXPECT(has_code(v.findings.diagnostics, "import.output_missing") && !fs::exists(output));
-	TEST_EXPECT(editor_test::write_bytes(source, good));
+	TEST_EXPECT(test_io::write_file(source, good));
 	TEST_EXPECT(find_fix(v, "import.output_missing", "Import badge.png again", fix));
 	session.handle(fix.request);
 	session.run_operations();
@@ -3342,7 +3342,7 @@ static int test_fixes_apply() {
 // SettingsApplied event carrying its serial, flagged when the view's settings_result lists a
 // setting that could not be written; a failure is a finding and the request's refusal too.
 static int test_project_settings() {
-	editor_test::TempProjectDir dir("opennova_editor_session_settings");
+	test_temp::TempDir dir("opennova_editor_session_settings");
 	FakePlatform platform;
 	const std::string settings_file = dir.file("settings/editor.json");
 	FilePreferencesStore preferences(settings_file);
@@ -3508,7 +3508,7 @@ static int test_menu_first_screen() {
 	TEST_EXPECT(session.document_for(menu_path) == menu && v.documents.selection.primary == title);
 	std::string text, io_error;
 	TEST_EXPECT(opennova::io::read_file_text(project.root + "/" + menu_path, text, io_error) &&
-	            editor_test::write_text(project.root + "/" + menu_path, text + "\r\n"));
+	            test_io::write_text(project.root + "/" + menu_path, text + "\r\n"));
 	const uint64_t was = menu->identity();
 	session.handle(request::rescan());
 	session.run_operations();
@@ -3551,7 +3551,7 @@ static int test_rescan_keeps_what_did_not_change() {
 	// The menu changed on disk (a line end added by hand): read again, alone.
 	std::string text, error;
 	TEST_EXPECT(opennova::io::read_file_text(project.root + "/" + menu_path, text, error) &&
-	            editor_test::write_text(project.root + "/" + menu_path, text + "\r\n"));
+	            test_io::write_text(project.root + "/" + menu_path, text + "\r\n"));
 	session.handle(request::rescan());
 	session.run_operations();
 	TEST_EXPECT(session.outcome().done());
@@ -3569,7 +3569,7 @@ static int test_rescan_keeps_what_did_not_change() {
 	// file reads again.
 	std::vector<uint8_t> menu_bytes;
 	TEST_EXPECT(opennova::io::read_file_bytes(project.root + "/" + menu_path, menu_bytes, error));
-	TEST_EXPECT(editor_test::write_bytes(project.root + "/" + menu_path, {0xFF, 0xFE, 0x41}));
+	TEST_EXPECT(test_io::write_file(project.root + "/" + menu_path, {0xFF, 0xFE, 0x41}));
 	session.handle(request::rescan());
 	session.run_operations();
 	TEST_EXPECT(session.document_for(menu_path) == reread);
@@ -3579,7 +3579,7 @@ static int test_rescan_keeps_what_did_not_change() {
 	session.handle(request::rescan());
 	session.run_operations();
 	TEST_EXPECT(count_code(v.findings.diagnostics, "document.stale") == 1 && session.document_for(menu_path) == reread);
-	TEST_EXPECT(editor_test::write_bytes(project.root + "/" + menu_path, menu_bytes));
+	TEST_EXPECT(test_io::write_file(project.root + "/" + menu_path, menu_bytes));
 	session.handle(request::rescan());
 	session.run_operations();
 	TEST_EXPECT(session.document_for(menu_path) == reread && !has_code(v.findings.diagnostics, "document.stale"));
@@ -3588,7 +3588,7 @@ static int test_rescan_keeps_what_did_not_change() {
 	edit.edits[0].value = int64_t(30);
 	session.handle(edit);
 	TEST_EXPECT(items->dirty());
-	TEST_EXPECT(editor_test::write_text(project.root + "/" + project.items_path,
+	TEST_EXPECT(test_io::write_text(project.root + "/" + project.items_path,
 	                                    "begin \"Marker\"\nid 100001\ntype marker\nsubtype Ruins\nhp 50\nend\n"));
 	session.handle(request::rescan());
 	session.run_operations();
@@ -3661,7 +3661,7 @@ static int test_rescan_keeps_what_did_not_change() {
 // its game go: a game that ignored the stop request (no window to take WM_CLOSE) does not outlive the editor.
 // A game running unasked keeps running.
 static int test_quit_finishes_a_stop() {
-	editor_test::TempProjectDir dir("opennova_editor_session_quit_stop");
+	test_temp::TempDir dir("opennova_editor_session_quit_stop");
 	FakePlatform platform;
 	platform.terminate_exits = false; // the game takes no stop request
 	MemoryPreferencesStore preferences;
@@ -3671,7 +3671,7 @@ static int test_quit_finishes_a_stop() {
 	session.run_operations();
 	editor_test::create_missing_files(session);
 	const std::string runtime = dir.file("runtime/opennova.exe");
-	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
+	TEST_EXPECT(test_io::write_text(runtime, "MZ"));
 	PlayLauncher launcher;
 	launcher.executable = runtime;
 	session.set_launcher_source(editor_test::fixed_launcher(launcher));
@@ -3698,7 +3698,7 @@ static int test_quit_finishes_a_stop() {
 // menu bar's "Build failed" always has its rows to show. The findings that blocked it are
 // not listed twice.
 static int test_build_findings_stay() {
-	editor_test::TempProjectDir dir("opennova_editor_session_build_rows");
+	test_temp::TempDir dir("opennova_editor_session_build_rows");
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -3726,8 +3726,8 @@ static int test_build_findings_stay() {
 	// the rows when it ends: a mission's terrain naming nothing, saved, blocks the build (the game
 	// refuses to start the mission, and the build follows retail, S14); corrected while it packs, the
 	// old blocker is not kept (and not listed twice once it is back).
-	TEST_EXPECT(editor_test::write_text(v.project.root + "/terrain/island.trn", "trn") &&
-	            editor_test::write_text(v.project.root + "/day.env", "env"));
+	TEST_EXPECT(test_io::write_text(v.project.root + "/terrain/island.trn", "trn") &&
+	            test_io::write_text(v.project.root + "/day.env", "env"));
 	session.handle(request::rescan());
 	session.run_operations();
 	session.handle(request::create_file("gate.bms", "", { { "terrain", "island" }, { "environment", "day" } }));
@@ -3812,7 +3812,7 @@ static int test_view_revisions() {
 	const auto has = [](const Concerns &concerns, ViewConcern concern) {
 		return std::find(concerns.begin(), concerns.end(), concern) != concerns.end();
 	};
-	editor_test::TempProjectDir dir("opennova_editor_session_revisions");
+	test_temp::TempDir dir("opennova_editor_session_revisions");
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -3840,7 +3840,7 @@ static int test_view_revisions() {
 	// Play, then a line of the game's log: Output alone, nothing validated; a poll with nothing
 	// new moves nothing.
 	const std::string runtime = dir.file("runtime/opennova.exe");
-	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
+	TEST_EXPECT(test_io::write_text(runtime, "MZ"));
 	PlayLauncher launcher;
 	launcher.executable = runtime;
 	session.set_launcher_source(editor_test::fixed_launcher(launcher));
@@ -3854,7 +3854,7 @@ static int test_view_revisions() {
 		before = v.revisions;
 		const size_t passes = stats.passes;
 		const std::string log = platform.last_plan.log_file;
-		TEST_EXPECT(editor_test::write_text(log, "Godot Engine v4.6.1\r\n"));
+		TEST_EXPECT(test_io::write_text(log, "Godot Engine v4.6.1\r\n"));
 		session.poll();
 		TEST_EXPECT(output_has(v, "Godot Engine v4.6.1")); // folded under the game's line
 		TEST_EXPECT(moved_since(v, before) == Concerns({ViewConcern::Output}));
@@ -3863,7 +3863,7 @@ static int test_view_revisions() {
 		// it leaves due (Operation: the view shows it due, S13 A3); the next poll makes its row.
 		before = v.revisions;
 		const std::string boot = "Godot Engine v4.6.1\r\n" + boot_line("main.mnu", "- gone");
-		TEST_EXPECT(editor_test::write_text(log, boot));
+		TEST_EXPECT(test_io::write_text(log, boot));
 		session.poll();
 		TEST_EXPECT(v.activity.boot_missing.size() == 1 && v.activity.validation.running &&
 				!has_code(v.findings.diagnostics, "play.boot_missing"));
@@ -3891,7 +3891,7 @@ static int test_view_revisions() {
 	// An item naming a model the project lacks, read by a Rescan.
 	const std::string crate_def =
 			"begin \"Crate\"\nid 100300\ntype building\nhp 10\ngraphic crate\nend\n";
-	TEST_EXPECT(editor_test::write_text(v.project.root + "/defs/items.def", crate_def));
+	TEST_EXPECT(test_io::write_text(v.project.root + "/defs/items.def", crate_def));
 	session.handle(request::rescan());
 	session.run_operations();
 	TEST_EXPECT(finding_about(v.findings.diagnostics, "reference.missing", "crate") != nullptr);
@@ -4008,7 +4008,7 @@ static int test_view_revisions() {
 // where the dialog's stops at kImportPlanFileCap): a replacement of a thousand and one files, the
 // last an edited catalog's, waits on the unsaved prompt for that catalog, nothing written.
 static int test_import_guard_past_the_cap() {
-	editor_test::TempProjectDir dir("opennova_editor_session_import_cap");
+	test_temp::TempDir dir("opennova_editor_session_import_cap");
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -4016,7 +4016,7 @@ static int test_import_guard_past_the_cap() {
 	session.run_operations();
 	const SessionView &v = session.view();
 	const std::string root = v.project.root;
-	TEST_EXPECT(editor_test::write_text(root + "/defs/items.def", "begin \"Marker\"\nid 100001\ntype marker\nhp 10\nend\n"));
+	TEST_EXPECT(test_io::write_text(root + "/defs/items.def", "begin \"Marker\"\nid 100001\ntype marker\nhp 10\nend\n"));
 	session.handle(request::rescan());
 	session.run_operations();
 	session.handle(request::open_document("items.def"));
@@ -4076,7 +4076,7 @@ static size_t staging_dirs(const std::string &output_root) {
 // is published, and the Play that waited on it starts nothing, then or on any later poll (the
 // play-after-close bug: the waiting Play outlived the project it was asked in).
 static int test_play_then_close() {
-	editor_test::TempProjectDir dir("opennova_editor_session_play_close");
+	test_temp::TempDir dir("opennova_editor_session_play_close");
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -4085,7 +4085,7 @@ static int test_play_then_close() {
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	const std::string runtime = dir.file("runtime/opennova.exe");
-	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
+	TEST_EXPECT(test_io::write_text(runtime, "MZ"));
 	PlayLauncher launcher;
 	launcher.executable = runtime;
 	session.set_launcher_source(editor_test::fixed_launcher(launcher));
@@ -4140,10 +4140,10 @@ static int test_play_then_close() {
 // directory is pruned like any other. A file that only looks like a lease (an older record among
 // them) is never touched.
 static int test_play_leases() {
-	editor_test::TempProjectDir dir("opennova_editor_session_leases");
+	test_temp::TempDir dir("opennova_editor_session_leases");
 	const std::string project = dir.file("project");
 	const std::string runtime = dir.file("runtime/opennova.exe");
-	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
+	TEST_EXPECT(test_io::write_text(runtime, "MZ"));
 	PlayLauncher launcher;
 	launcher.executable = runtime;
 	const auto lease_of = [](const std::string &build_dir, int64_t pid) {
@@ -4192,10 +4192,10 @@ static int test_play_leases() {
 		return "{\"schema_version\":" + std::to_string(schema) + ",\"build_id\":\"" + build_id + "\",\"pid\":" +
 		       std::to_string(pid) + ",\"created\":\"created " + std::to_string(pid) + "\"}";
 	};
-	TEST_EXPECT(editor_test::write_text(decoys[0], record(kPlayLeaseSchemaVersion, 78)));
-	TEST_EXPECT(editor_test::write_text(decoys[1], "not a lease record"));
-	TEST_EXPECT(editor_test::write_text(decoys[2], record(kPlayLeaseSchemaVersion, 79)));
-	TEST_EXPECT(editor_test::write_text(decoys[3], record(1, 79)));
+	TEST_EXPECT(test_io::write_text(decoys[0], record(kPlayLeaseSchemaVersion, 78)));
+	TEST_EXPECT(test_io::write_text(decoys[1], "not a lease record"));
+	TEST_EXPECT(test_io::write_text(decoys[2], record(kPlayLeaseSchemaVersion, 79)));
+	TEST_EXPECT(test_io::write_text(decoys[3], record(1, 79)));
 
 	FakePlatform platform;
 	platform.next_pid = 900;
@@ -4208,7 +4208,7 @@ static int test_play_leases() {
 	const SessionView &v = session.view();
 	TEST_EXPECT(v.project.open && v.activity.play_state == PlayState::Stopped);
 	const auto rebuild = [&](const char *text) {
-		editor_test::write_text(v.project.root + "/defs/items.def",
+		test_io::write_text(v.project.root + "/defs/items.def",
 		                        std::string("begin \"Marker\"\nid 100001\ntype marker\nhp ") + text + "\nend\n");
 		session.handle(request::build());
 		session.run_operations();
@@ -4252,7 +4252,7 @@ static int test_play_leases() {
 	for (const std::string &decoy : decoys) TEST_EXPECT(fs::is_regular_file(decoy));
 	// Every game gone, a Play takes runtime/1 again and removes runtime/2; a directory under the mode's
 	// that no run's number names is left alone.
-	TEST_EXPECT(editor_test::write_text(runs + "/notes/keep.txt", "mine"));
+	TEST_EXPECT(test_io::write_text(runs + "/notes/keep.txt", "mine"));
 	session.handle(request::play());
 	session.run_operations();
 	TEST_EXPECT(v.activity.play_state == PlayState::Running && platform.last_plan.working_dir == runs + "/1");
@@ -4264,7 +4264,7 @@ static int test_play_leases() {
 // MCP's) lands there, and its result says how players install it. (S26 K4: the Build menu's Build to folder and
 // the folder it remembered are gone; Export is what ships.)
 static int test_build_to_folder() {
-	editor_test::TempProjectDir dir("opennova_editor_session_build_folder");
+	test_temp::TempDir dir("opennova_editor_session_build_folder");
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -4285,7 +4285,7 @@ static int test_build_to_folder() {
 // 2,100 lines of the game's log, read in pages as they come: every one once, in order; a cursor
 // below the oldest line held starts at it.
 static int test_output_cursor() {
-	editor_test::TempProjectDir dir("opennova_editor_session_output");
+	test_temp::TempDir dir("opennova_editor_session_output");
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -4294,7 +4294,7 @@ static int test_output_cursor() {
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	const std::string runtime = dir.file("runtime/opennova.exe");
-	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
+	TEST_EXPECT(test_io::write_text(runtime, "MZ"));
 	PlayLauncher launcher;
 	launcher.executable = runtime;
 	session.set_launcher_source(editor_test::fixed_launcher(launcher));
@@ -4321,7 +4321,7 @@ static int test_output_cursor() {
 	std::string log;
 	const auto game_says = [&](int from, int to) {
 		for (int i = from; i < to; ++i) log += "error line " + std::to_string(i) + "\r\n";
-		const bool written = editor_test::write_text(platform.last_plan.log_file, log);
+		const bool written = test_io::write_text(platform.last_plan.log_file, log);
 		session.poll();
 		return written;
 	};
@@ -4366,7 +4366,7 @@ static int test_output_cursor() {
 // request picks (project_file: the path named, else the first of the name, as Files shows it),
 // never another; a Save naming the other's path names that one.
 static int test_save_picks_like_the_rest() {
-	editor_test::TempProjectDir dir("opennova_editor_session_duplicate_save");
+	test_temp::TempDir dir("opennova_editor_session_duplicate_save");
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -4377,8 +4377,8 @@ static int test_save_picks_like_the_rest() {
 	// A menu with input the game ignores (SCREENX), which a save rewrites away (S26: the writer writes the model).
 	const std::string ignored = "<SCREEN><NAME>D</NAME><WINDOW type=\"button\" name=\"B\" SCREENX=\"1\">"
 	                            "<POSITION><LEFT>0</LEFT></POSITION></WINDOW></SCREEN>";
-	TEST_EXPECT(editor_test::write_text(v.project.root + "/menus/dup.mnu", ignored));
-	TEST_EXPECT(editor_test::write_text(v.project.root + "/extra/dup.mnu", ignored));
+	TEST_EXPECT(test_io::write_text(v.project.root + "/menus/dup.mnu", ignored));
+	TEST_EXPECT(test_io::write_text(v.project.root + "/extra/dup.mnu", ignored));
 	session.handle(request::rescan());
 	session.run_operations();
 	TEST_EXPECT(has_code(v.findings.diagnostics, "asset.name.duplicate"));
@@ -4407,7 +4407,7 @@ static int test_save_picks_like_the_rest() {
 // that opens its document first, an import that rescans and the unsaved prompt's answer that runs
 // what waited on it are each one entry, and one outcome.
 static int test_handle_entered_once() {
-	editor_test::TempProjectDir dir("opennova_editor_session_entries");
+	test_temp::TempDir dir("opennova_editor_session_entries");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -4483,7 +4483,7 @@ static int test_handle_entered_once() {
 
 	// An import that rescans after it writes.
 	const std::string loose = dir.file("loose/notes.txt");
-	TEST_EXPECT(editor_test::write_text(loose, "notes"));
+	TEST_EXPECT(test_io::write_text(loose, "notes"));
 	std::vector<Diagnostic> diagnostics;
 	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 	import.imports = list_import_choices({loose}, diagnostics);
@@ -4498,7 +4498,7 @@ static int test_handle_entered_once() {
 // its build landed (S13 A2), never when Play is asked for: a Play whose build a Cancel stops asks
 // for none, and each game started gets a port asked then.
 static int test_mcp_port_allocated_at_spawn() {
-	editor_test::TempProjectDir dir("opennova_editor_session_mcp_port");
+	test_temp::TempDir dir("opennova_editor_session_mcp_port");
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -4507,7 +4507,7 @@ static int test_mcp_port_allocated_at_spawn() {
 	session.run_operations();
 	editor_test::create_missing_files(session);
 	const std::string runtime = dir.file("runtime/opennova.exe");
-	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
+	TEST_EXPECT(test_io::write_text(runtime, "MZ"));
 	int asked = 0, ports = 0;
 	session.set_launcher_source([&](bool with_mcp_port) {
 		++asked;
@@ -4534,7 +4534,7 @@ static int test_mcp_port_allocated_at_spawn() {
 	TEST_EXPECT(v.activity.play_state == PlayState::Stopped && v.activity.play_mcp_port == 0);
 
 	// A Play whose build is cancelled asks for no port.
-	TEST_EXPECT(editor_test::write_text(v.project.root + "/notes.txt", "a new file: the next build packs again"));
+	TEST_EXPECT(test_io::write_text(v.project.root + "/notes.txt", "a new file: the next build packs again"));
 	session.handle(request::rescan());
 	session.run_operations();
 	session.handle(request::play());
@@ -4555,7 +4555,7 @@ static int test_mcp_port_allocated_at_spawn() {
 // the executable, whether the run drives the source checkout, its Godot options and the port all
 // come from it, and the view's runtime follows it, whatever the source answered when it was set.
 static int test_play_launches_one_answer() {
-	editor_test::TempProjectDir dir("opennova_editor_session_one_launcher");
+	test_temp::TempDir dir("opennova_editor_session_one_launcher");
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -4564,7 +4564,7 @@ static int test_play_launches_one_answer() {
 	session.run_operations();
 	editor_test::create_missing_files(session);
 	const std::string first = dir.file("runtime/first.exe"), second = dir.file("runtime/second.exe");
-	TEST_EXPECT(editor_test::write_text(first, "MZ") && editor_test::write_text(second, "MZ"));
+	TEST_EXPECT(test_io::write_text(first, "MZ") && test_io::write_text(second, "MZ"));
 	std::string executable = first;
 	std::vector<std::string> args = {"--first"};
 	session.set_launcher_source([&](bool with_mcp_port) {
@@ -4600,7 +4600,7 @@ static int test_reentry_keeps_the_outer_outcome() {
 			return false;
 		}
 	};
-	editor_test::TempProjectDir dir("opennova_editor_session_reentry");
+	test_temp::TempDir dir("opennova_editor_session_reentry");
 	Reentrant platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -4625,7 +4625,7 @@ static int test_reentry_keeps_the_outer_outcome() {
 // ApplyProjectSettings a SettingsApplied (the request's serial, flagged when a setting could not
 // be written); a PlanImport an ImportPlanned. Opening, selecting and cancelling post none.
 static int test_view_events() {
-	editor_test::TempProjectDir dir("opennova_editor_session_view_events");
+	test_temp::TempDir dir("opennova_editor_session_view_events");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -4722,7 +4722,7 @@ static int test_view_events() {
 
 	// PlanImport: the import dialog's plan made, its checks to take again; a cancel posts none.
 	const std::string loose = dir.file("loose/notes.txt");
-	TEST_EXPECT(editor_test::write_text(loose, "notes"));
+	TEST_EXPECT(test_io::write_text(loose, "notes"));
 	std::vector<Diagnostic> diagnostics;
 	session.handle(request::plan_import(list_import_choices({ loose }, diagnostics), false));
 	session.run_operations();
@@ -4742,7 +4742,7 @@ static int test_view_events() {
 // groups first, so no gesture holds the validation it joins; set_import_dependencies with a
 // preview open plans it again whatever the setting was.
 static int test_no_request_validates() {
-	editor_test::TempProjectDir dir("opennova_editor_session_validates");
+	test_temp::TempDir dir("opennova_editor_session_validates");
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -4788,7 +4788,7 @@ static int test_no_request_validates() {
 	TEST_EXPECT(has_code(session.outcome().findings, "requirement.unknown"));
 	// A preview open, then its setting set to what it was: planned again all the same.
 	const std::string loose = dir.file("loose.txt");
-	TEST_EXPECT(editor_test::write_text(loose, "loose"));
+	TEST_EXPECT(test_io::write_text(loose, "loose"));
 	TEST_EXPECT(after_an_edit(request::preview_import({ loose }, false)));
 	TEST_EXPECT(v.dialogs.import_preview.open && !v.dialogs.import_preview.with_dependencies);
 	const uint64_t planned = v.activity.last_operation.id;

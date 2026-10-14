@@ -88,15 +88,6 @@ func _camera(state: Dictionary) -> Camera3D:
 	return device.get_node_or_null("Mission/Camera") as Camera3D
 
 
-func _write(path: String, bytes: PackedByteArray) -> void:
-	assert_eq(DirAccess.make_dir_recursive_absolute(path.get_base_dir()), OK)
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file, "wrote %s" % path)
-	if file != null:
-		file.store_buffer(bytes)
-		file.close()
-
-
 func _vector(values: Variant) -> Vector3:
 	var list: Array = values if values is Array else [0, 0, 0]
 	return Vector3(float(list[0]), float(list[1]), float(list[2]))
@@ -105,7 +96,7 @@ func _vector(values: Variant) -> Vector3:
 func _copy_fixture(source: String, target: String) -> void:
 	var bytes := FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(FIXTURES + source))
 	assert_false(bytes.is_empty(), "the fixture is available: " + source)
-	_write(target, bytes)
+	TestFs.write_bytes(self, target, bytes)
 
 
 ## The item table the mission's picture reads: the fixture's, its pump drawn by the synth crate (one
@@ -141,9 +132,9 @@ func _open_mission(whole := true, also: PackedStringArray = PackedStringArray(),
 	var root := EditorFixture.new_project(self, _seam, _dirs, "Mission Viewport Game")
 	var mission := FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(MISSION))
 	for name in also:
-		_write(root.path_join("missions").path_join(name), mission)
+		TestFs.write_bytes(self, root.path_join("missions").path_join(name), mission)
 	if not whole:
-		_write(root.path_join("missions").path_join("synth_logic.bms"), mission)
+		TestFs.write_bytes(self, root.path_join("missions").path_join("synth_logic.bms"), mission)
 		_seam.request({"kind": "rescan"})
 		assert_true(_seam.settled, "a Rescan steps across pumps (S13 A3)")
 		return _seam.open_document("missions/synth_logic.bms")
@@ -835,7 +826,7 @@ func test_a_file_change_places_again() -> void:
 	var crate := root.path_join("models").path_join("crate.3di")
 	var bytes := FileAccess.get_file_as_bytes(crate)
 	# A new stamp: the size moves with a byte past the end the reader never reads.
-	_write(crate, bytes + PackedByteArray([0]))
+	TestFs.write_bytes(self, crate, bytes + PackedByteArray([0]))
 	_app.request_json(JSON.stringify({"kind": "rescan"}))
 	assert_true(_seam.settle(), "a Rescan steps across pumps")
 	state = await _await_ready()
@@ -858,7 +849,7 @@ func test_a_file_change_places_again() -> void:
 ## project rescanned, settled (the pumps take the Rebuild; no frame has stepped a unit yet).
 func _touch_the_crate() -> void:
 	var crate: String = _seam.get_project_root().path_join("models").path_join("crate.3di")
-	_write(crate, FileAccess.get_file_as_bytes(crate) + PackedByteArray([0]))
+	TestFs.write_bytes(self, crate, FileAccess.get_file_as_bytes(crate) + PackedByteArray([0]))
 	_app.request_json(JSON.stringify({"kind": "rescan"}))
 	assert_true(_seam.settle(), "a Rescan steps across pumps")
 
@@ -1294,7 +1285,7 @@ func _people_project() -> void:
 	assert_true(items.contains(rifleman), "the fixture's rifleman")
 	items = items.replace(rifleman,
 			"  id 106102\r\n  type person\r\n  graphic person\r\n  anim_def soldier\r\n  move_function org1\r\n  ai_function org1\r\n  attrib: aidata\r\n")
-	_write(items_path, items.to_utf8_buffer())
+	TestFs.write_bytes(self, items_path, items.to_utf8_buffer())
 	_copy_fixture("threedi/synth/person.3di", root.path_join("models").path_join("person.3di"))
 	for name in ["soldier.adm", "idle.bad", "walk.bad"]:
 		_copy_fixture("anim/" + name, root.path_join("anim").path_join(name))
@@ -1616,12 +1607,12 @@ func test_the_shoot_tool_plays_its_impacts() -> void:
 	for tag in ["obj", "dirt", "grass", "snow", "cement", "sand", "packeddirt", "water", "railroad", "mud", "ice",
 			"quicksand", "stone", "wood", "metal", "glass", "cloth", "foliage", "hmetal", "flesh"]:
 		rows += "\t\t%s Puff S_HIT 15\n" % tag
-	_write(root.path_join("defs/ammo.def"), TestFs.crlf("ammo AT_NULL\nend\nammo AMMO_T\n\tvelocity 800\n\tmax_age 2\n"
+	TestFs.write_bytes(self, root.path_join("defs/ammo.def"), TestFs.crlf("ammo AT_NULL\nend\nammo AMMO_T\n\tvelocity 800\n\tmax_age 2\n"
 			+ "\tweight_in_grains 62\n\tscar_type 1\n\teffects_table\n" + rows + "\tend\nend\n").to_utf8_buffer())
 	var ptl := "[effectdef]\n{\n\tid = Puff;\n\tpdefs = PuffDot;\n}\n\n[particledef]\n{\n\tid = PuffDot;\n\temit_dur = 30;\n"
 	ptl += "\temit_rate = 40;\n\temit_burst = 1;\n\tage = 1.0;\n\tscale = 1.0;\n\tspeed = 1.5;\n\tspread = 40;\n"
 	ptl += "\tgraphic1 = particle_dot.tga, blend;\n\tg1_alpha = 1;\n\tg1_scale = 1;\n}\n\n"
-	_write(root.path_join("particles/puff.ptl"), ptl.to_utf8_buffer())
+	TestFs.write_bytes(self, root.path_join("particles/puff.ptl"), ptl.to_utf8_buffer())
 	_copy_fixture("cbin/particle_dot.tga", root.path_join("particles/particle_dot.tga"))
 	_app.request_json(JSON.stringify({"kind": "rescan"}))
 	assert_true(_seam.settle(), "a Rescan steps across pumps")
@@ -1723,8 +1714,8 @@ func test_a_shot_swaps_in_the_husk() -> void:
 	const PUMP := "  id 106100\r\n  type object\r\n  graphic crate\r\n"
 	assert_true(items.contains(PUMP), "the fixture's pump")
 	items = items.replace(PUMP, PUMP + "  husk shed\r\n  ai_function gnrc\r\n  hp 1\r\n")
-	_write(items_path, items.to_utf8_buffer())
-	_write(root.path_join("defs/ammo.def"), TestFs.crlf("ammo AT_NULL\nend\nammo AMMO_T\n\tvelocity 800\n\tmax_age 2\n"
+	TestFs.write_bytes(self, items_path, items.to_utf8_buffer())
+	TestFs.write_bytes(self, root.path_join("defs/ammo.def"), TestFs.crlf("ammo AT_NULL\nend\nammo AMMO_T\n\tvelocity 800\n\tmax_age 2\n"
 			+ "\tweight_in_grains 62\n\tscar_type 1\nend\n").to_utf8_buffer())
 	var before := int(state.get("builds", 0))
 	_app.request_json(JSON.stringify({"kind": "rescan"}))

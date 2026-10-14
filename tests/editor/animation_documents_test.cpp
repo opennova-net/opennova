@@ -119,8 +119,8 @@ int clips() {
 		TEST_EXPECT(document.load(anim_dir() + "/" + name, name, AssetKind::Animation, "jo", error));
 		TEST_EXPECT(serialized(document) == test_io::read_file(anim_dir() + "/" + name));
 	}
-	editor_test::TempProjectDir dir("opennova_animation_documents_test");
-	TEST_EXPECT(editor_test::write_bytes(dir.file("walk.bad"), test_io::read_file(anim_dir() + "/walk.bad")));
+	test_temp::TempDir dir("opennova_animation_documents_test");
+	TEST_EXPECT(test_io::write_file(dir.file("walk.bad"), test_io::read_file(anim_dir() + "/walk.bad")));
 	AnimationDocument document;
 	Diagnostic error;
 	TEST_EXPECT(document.load(dir.file("walk.bad"), "walk.bad", AssetKind::Animation, "jo", error));
@@ -203,9 +203,9 @@ int clips() {
 }
 
 int tables() {
-	editor_test::TempProjectDir dir("opennova_animation_map_document_test");
+	test_temp::TempDir dir("opennova_animation_map_document_test");
 	const std::vector<uint8_t> source = test_io::read_file(anim_dir() + "/soldier.adm");
-	TEST_EXPECT(editor_test::write_bytes(dir.file("soldier.adm"), source));
+	TEST_EXPECT(test_io::write_file(dir.file("soldier.adm"), source));
 	AnimationMapDocument document;
 	Diagnostic error;
 	TEST_EXPECT(document.load(dir.file("soldier.adm"), "soldier.adm", AssetKind::AnimationMap, "jo", error));
@@ -344,9 +344,9 @@ int tables() {
 // past its reset) leaves out first-person slots, wpn_reset among them; a body's map that names a
 // first-person slot too stays a body's.
 int maps_by_kind() {
-	editor_test::TempProjectDir dir("opennova_animation_map_kinds_test");
+	test_temp::TempDir dir("opennova_animation_map_kinds_test");
 	const auto load = [&](const char *name, const std::string &text, AnimationMapDocument &document) -> int {
-		TEST_EXPECT(editor_test::write_text(dir.file(name), text));
+		TEST_EXPECT(test_io::write_text(dir.file(name), text));
 		Diagnostic error;
 		TEST_EXPECT(document.load(dir.file(name), name, AssetKind::AnimationMap, "jo", error));
 		return 0;
@@ -391,8 +391,8 @@ int unused_files_and_letters() {
 }
 
 int table_lines() {
-	editor_test::TempProjectDir dir("opennova_animation_map_lines_test");
-	TEST_EXPECT(editor_test::write_text(dir.file("notes.adm"),
+	test_temp::TempDir dir("opennova_animation_map_lines_test");
+	TEST_EXPECT(test_io::write_text(dir.file("notes.adm"),
 	                                    "// the soldier\r\nanim_reset\t\"idle.bad\"\r\nanim_idle\t\"idle.bad\" // old\r\n"));
 	AnimationMapDocument document;
 	Diagnostic error;
@@ -409,7 +409,7 @@ int table_lines() {
 	const std::vector<uint8_t> written = test_io::read_file(dir.file("notes.adm"));
 	TEST_EXPECT(std::string(written.begin(), written.end()).find("//") == std::string::npos);
 
-	TEST_EXPECT(editor_test::write_text(dir.file("ten.adm"), "anim_reset\t\"idle.bad\"\r\nanim_idle a b c d e f g h i j\r\n"));
+	TEST_EXPECT(test_io::write_text(dir.file("ten.adm"), "anim_reset\t\"idle.bad\"\r\nanim_idle a b c d e f g h i j\r\n"));
 	AnimationMapDocument ten;
 	TEST_EXPECT(ten.load(dir.file("ten.adm"), "ten.adm", AssetKind::AnimationMap, "jo", error));
 	TEST_EXPECT(ten.blocked() && ten.issues().size() == 1 && ten.issues()[0].blocks && ten.issues()[0].line == 2);
@@ -422,8 +422,8 @@ int table_lines() {
 // the action writes it at the table's end, its clips none yet (the save waits for one); none for a key naming no
 // slot, for a slot a row already holds, for another map's scope.
 int define_slot() {
-	editor_test::TempProjectDir dir("opennova_animation_map_define_test");
-	TEST_EXPECT(editor_test::write_text(dir.file("gun.adm"), "anim_reset\t\"idle.bad\"\r\nanim_idle\t\"idle.bad\"\r\n"));
+	test_temp::TempDir dir("opennova_animation_map_define_test");
+	TEST_EXPECT(test_io::write_text(dir.file("gun.adm"), "anim_reset\t\"idle.bad\"\r\nanim_idle\t\"idle.bad\"\r\n"));
 	AnimationMapDocument document;
 	Diagnostic error;
 	TEST_EXPECT(document.load(dir.file("gun.adm"), "gun.adm", AssetKind::AnimationMap, "jo", error));
@@ -456,14 +456,14 @@ int define_slot() {
 // locator names the file as loaded: the saved baseline), and goes to the file once that row
 // is removed; a row added in its place never takes it.
 int findings_follow_rows() {
-	editor_test::TempProjectDir dir("opennova_animation_map_follow_test");
+	test_temp::TempDir dir("opennova_animation_map_follow_test");
 	const std::string root = dir.file("Game");
 	ProjectDocument project;
 	Diagnostic error;
 	TEST_EXPECT(create_project(root, "Anim Game", "jo", project, error));
 	const ProjectPaths paths = ProjectPaths::for_root(root);
-	TEST_EXPECT(editor_test::write_text(root + "/notes.adm", "anim_reset\t\"idle.bad\"\r\nanim_idle\t\"idle.bad\" // old\r\n"));
-	TEST_EXPECT(editor_test::write_bytes(root + "/idle.bad", test_io::read_file(anim_dir() + "/idle.bad")));
+	TEST_EXPECT(test_io::write_text(root + "/notes.adm", "anim_reset\t\"idle.bad\"\r\nanim_idle\t\"idle.bad\" // old\r\n"));
+	TEST_EXPECT(test_io::write_file(root + "/idle.bad", test_io::read_file(anim_dir() + "/idle.bad")));
 	auto table = std::make_shared<AnimationMapDocument>();
 	TEST_EXPECT(table->load(root + "/notes.adm", "notes.adm", AssetKind::AnimationMap, "jo", error));
 	if (table->rows().size() != 2) return 1;
@@ -489,21 +489,21 @@ int findings_follow_rows() {
 }
 
 int validation_and_graph() {
-	editor_test::TempProjectDir dir("opennova_animation_validation_test");
+	test_temp::TempDir dir("opennova_animation_validation_test");
 	const std::string root = dir.file("Game");
 	ProjectDocument project;
 	Diagnostic created;
 	TEST_EXPECT(create_project(root, "Anim Game", "jo", project, created));
 	const ProjectPaths paths = ProjectPaths::for_root(root);
-	TEST_EXPECT(editor_test::write_text(root + "/soldier.adm",
+	TEST_EXPECT(test_io::write_text(root + "/soldier.adm",
 	                                    "anim_reset\t\"idle.bad\"\r\nanim_nosuchslot\t\"idle.bad\"\r\nanim_idle\t\"gone.bad\"\r\n"));
-	TEST_EXPECT(editor_test::write_bytes(root + "/idle.bad", test_io::read_file(anim_dir() + "/idle.bad")));
-	TEST_EXPECT(editor_test::write_text(root + "/noreset.adm", "anim_idle\t\"idle.bad\"\r\n"));
+	TEST_EXPECT(test_io::write_file(root + "/idle.bad", test_io::read_file(anim_dir() + "/idle.bad")));
+	TEST_EXPECT(test_io::write_text(root + "/noreset.adm", "anim_idle\t\"idle.bad\"\r\n"));
 	// S12: a comment line, a comment after a row, a slot two rows name, a second reset row; a
 	// row of ten clips.
-	TEST_EXPECT(editor_test::write_text(root + "/twice.adm", "; the rig\r\nanim_reset\t\"idle.bad\"\r\nanim_idle\t\"idle.bad\"\r\n"
+	TEST_EXPECT(test_io::write_text(root + "/twice.adm", "; the rig\r\nanim_reset\t\"idle.bad\"\r\nanim_idle\t\"idle.bad\"\r\n"
 	                                                         "ANIM_IDLE\t\"idle.bad\" // again\r\nanim_reset\t\"idle.bad\"\r\n"));
-	TEST_EXPECT(editor_test::write_text(root + "/ten.adm", "anim_reset\t\"idle.bad\"\r\nanim_idle a b c d e f g h i j\r\n"));
+	TEST_EXPECT(test_io::write_text(root + "/ten.adm", "anim_reset\t\"idle.bad\"\r\nanim_idle a b c d e f g h i j\r\n"));
 	// S12: the chain with its second bone hung off its last, which comes after it.
 	{
 		const std::vector<uint8_t> source = chain_clip();
@@ -512,7 +512,7 @@ int validation_and_graph() {
 		if (clip.num_bones != 4) return 1;
 		clip.bones[1].parent_index = 3;
 		std::vector<uint8_t> bytes;
-		TEST_EXPECT(bad::bad_write_buffer(&clip, bytes) == 0 && editor_test::write_bytes(root + "/late.bad", bytes));
+		TEST_EXPECT(bad::bad_write_buffer(&clip, bytes) == 0 && test_io::write_file(root + "/late.bad", bytes));
 		bad::bad_free(&clip);
 	}
 	const AssetScan scan = scan_project_assets(paths, project);

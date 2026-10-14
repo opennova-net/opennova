@@ -50,7 +50,7 @@ struct ClipRun {
 };
 
 void test_timeline() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_clip_timeline");
+	test_temp::TempDir dir("opennova_editor_ui_clip_timeline");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -211,14 +211,14 @@ std::string long_clip() {
 // A press on an event's mark holds the clock on the event's own tick while it is held, wherever the
 // mouse goes (S17 review: the scrub took it back to the mouse's tick, a frame off on a long clip).
 void test_event_press() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_clip_event_press");
+	test_temp::TempDir dir("opennova_editor_ui_clip_event_press");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	CHECK(preview_project(session, dir), "the preview project");
 	const SessionView &v = session.view();
 	const std::string source = dir.file("source");
-	CHECK(editor_test::write_text(source + "/long.o3a", long_clip()), "the long clip written");
+	CHECK(test_io::write_text(source + "/long.o3a", long_clip()), "the long clip written");
 	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 	import.imports = {{source + "/long.o3a", {}}};
 	session.handle(import);
@@ -267,13 +267,13 @@ void test_event_press() {
 // From a model's Animations, a map opened to play on it takes the model alone: the map's viewport keeps
 // its own options (S17 review: the request reset its level, overlays and Bones).
 void test_animations_keep_options() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_animations_keep_options");
+	test_temp::TempDir dir("opennova_editor_ui_animations_keep_options");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	CHECK(preview_project(session, dir), "the preview project");
 	const SessionView &v = session.view();
-	CHECK(editor_test::write_text(v.project.root + "/defs/items.def",
+	CHECK(test_io::write_text(v.project.root + "/defs/items.def",
 	                              "begin \"Skinned Thing\"\nid 100200\ntype building\ngraphic skinned\nanim_def skin\nend\n"
 	                              "begin \"Armored\"\nid 100201\ntype building\ngraphic armory\nanim_def skin\nend\n"),
 	      "two items playing SKIN.adm");
@@ -307,7 +307,7 @@ void test_animations_keep_options() {
 // A weapon's map in first person (DI-13): the First person popup says what draws, its Eye is the viewport's
 // first-person view, and the timeline's legend names the action's set and says the clip's events go unread.
 void test_first_person() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_first_person");
+	test_temp::TempDir dir("opennova_editor_ui_first_person");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -319,14 +319,14 @@ void test_first_person() {
 		return v.project.root + "/" + (entry ? entry->relative_path : name);
 	};
 	// The map is a weapon's (its animadm beside its gfx1), no item's; the walk is its FIRE's clip.
-	CHECK(editor_test::write_text(v.project.root + "/defs/items.def",
+	CHECK(test_io::write_text(v.project.root + "/defs/items.def",
 	                              "begin \"Skinned Thing\"\nid 100200\ntype building\ngraphic skinned\nend\n") &&
-	              editor_test::write_text(at("weapon.def"),
-	                                      editor_test::crlf("weapon \"WPN_SKIN\"\n\tclipsize 10\n\tanimadm skin\n\tgfx1 skinned\n"
+	              test_io::write_text(at("weapon.def"),
+	                                      test_io::crlf("weapon \"WPN_SKIN\"\n\tclipsize 10\n\tanimadm skin\n\tgfx1 skinned\n"
 	                                                        "\taction \"fire\"\n\t\tanim anim_walk_forward\n\t\tsoundsetend GS_SKIN\n"
 	                                                        "\t\tfunction wpn_std_fire\n\tend\nend\n")) &&
-	              editor_test::write_text(at("Avatars.def"),
-	                                      editor_test::crlf("define head H1\n{\n\tgraphic skinned.3di\n}\n"
+	              test_io::write_text(at("Avatars.def"),
+	                                      test_io::crlf("define head H1\n{\n\tgraphic skinned.3di\n}\n"
 	                                                        "define body B1\n{\n\tgraphic skinned.3di\n}\n"
 	                                                        "define arms A1\n{\n\tgraphic armory.3di\n}\n"
 	                                                        "nationality 0 AV_N\n{\n\talignment good\n\tdivision 0 AV_D\n"

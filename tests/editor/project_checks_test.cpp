@@ -154,7 +154,7 @@ Files composed_files() {
 
 // A project of `files`, scanned, and the project's files as the game looks them up.
 struct Project {
-	editor_test::TempProjectDir dir;
+	test_temp::TempDir dir;
 	std::string root;
 	ProjectDocument document;
 	ProjectPaths paths;
@@ -167,7 +167,7 @@ struct Project {
 		if (!create_project(root, "Checks", "jo", document, error))
 			return false;
 		for (const auto &file : made)
-			if (!editor_test::write_text(root + "/" + file.first, file.second))
+			if (!test_io::write_text(root + "/" + file.first, file.second))
 				return false;
 		paths = ProjectPaths::for_root(root);
 		scan = scan_project_assets(paths, document);
@@ -367,7 +367,7 @@ static int test_session() {
 	(void)probe_type();
 	g_probe = Probe();
 	const DocumentTypeStandIn stand_in(probe_type());
-	editor_test::TempProjectDir dir("opennova_editor_project_checks_session");
+	test_temp::TempDir dir("opennova_editor_project_checks_session");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);

@@ -39,12 +39,6 @@ namespace {
 
 using editor_test::tga_bytes;
 
-std::string read_text(const std::string &path) {
-	std::string text, error;
-	opennova::io::read_file_text(path, text, error);
-	return text;
-}
-
 // The token rewrite alone, over each kind's text.
 int test_rewrite_text() {
 	std::vector<size_t> missed;
@@ -87,7 +81,7 @@ int test_rewrite_text() {
 // loader derives, a record or a field the text does not have, or the file alone.
 int test_native_text_place() {
 	size_t line = 0, column = 0;
-	using editor_test::crlf;
+	using test_io::crlf;
 	const std::string trn = "; polytrn_colormap map.tga, the old map\r\npolytrn_colormap \"map.tga\"\r\npolytrn_detailmap grain.tga\r\n"
 	                        "polytrn_polydata isle.cpt\r\npolytrn_colormap MAP.tga ; the one read\r\n";
 	TEST_EXPECT(native_text_place("isle.trn", AssetKind::Terrain, "jo", trn, "Terrain", "polytrn_colormap", line, column) &&
@@ -122,7 +116,7 @@ int test_native_text_place() {
 
 // Through the session: each kind's sites rewritten by a file's rename, the frame refused, the SCR form.
 int test_rename_in_native_texts() {
-	editor_test::TempProjectDir dir{"opennova_editor_native_rename"};
+	test_temp::TempDir dir{"opennova_editor_native_rename"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -131,16 +125,16 @@ int test_rename_in_native_texts() {
 	const SessionView &view = session.view();
 	const std::string root = view.project.root;
 	for (const char *name : {"map.tga", "grain.tga", "spark.tga", "fx_01.tga", "fx_02.tga", "stance.tga", "cloud.pcx", "logo.tga"})
-		TEST_EXPECT(editor_test::write_bytes(root + "/textures/" + name, tga_bytes()));
+		TEST_EXPECT(test_io::write_file(root + "/textures/" + name, tga_bytes()));
 	const std::string trn = "; map.tga\r\npolytrn_colormap map.tga\r\npolytrn_detailmap grain.tga\r\npolytrn_polydata isle.cpt\r\n";
 	const std::string env = "sky_map1 cloud.pcx ; the near layer\r\nsky_map2 cloud.pcx\r\n";
 	const std::string dusk = "sky_map2 logo.tga\r\n";
 	const std::string ptl = "[particledef]\r\n{\r\n\tid = a;\r\n\tgraphic1 = spark.tga, additive;\r\n}\r\n[particledef]\r\n{\r\n"
 	                        "\tid = b;\r\n\tgraphic1 = fx.tga, blend;\r\n\tg1_flip_frames = 2;\r\n}\r\n";
 	const std::string hud = "HUDSTANCE 0 10 10 stance.tga STAND\r\n";
-	TEST_EXPECT(editor_test::write_text(root + "/terrains/isle.trn", trn) && editor_test::write_text(root + "/envs/day.env", env) &&
-	            editor_test::write_text(root + "/envs/dusk.env", dusk) &&
-	            editor_test::write_text(root + "/effects/fx.ptl", ptl) && editor_test::write_text(root + "/hud/hudpos.def", hud));
+	TEST_EXPECT(test_io::write_text(root + "/terrains/isle.trn", trn) && test_io::write_text(root + "/envs/day.env", env) &&
+	            test_io::write_text(root + "/envs/dusk.env", dusk) &&
+	            test_io::write_text(root + "/effects/fx.ptl", ptl) && test_io::write_text(root + "/hud/hudpos.def", hud));
 	// The night's environment stored in the SCR form, as a retail archive may hold it.
 	{
 		std::string payload = "sky_map1 cloud.pcx\r\n";
@@ -148,7 +142,7 @@ int test_rename_in_native_texts() {
 		std::vector<uint8_t> body(payload.begin(), payload.end());
 		opennova::scr::scr_encrypt(body.data(), body.size(), opennova::scr::SCR_KEY_JO_DFX2);
 		stored.insert(stored.end(), body.begin(), body.end());
-		TEST_EXPECT(editor_test::write_bytes(root + "/envs/night.env", stored));
+		TEST_EXPECT(test_io::write_file(root + "/envs/night.env", stored));
 	}
 	editor_test::handle_to_end(session, request::rescan());
 	session.run_operations();
@@ -156,7 +150,7 @@ int test_rename_in_native_texts() {
 	// The terrain's colour map: the line read, the comment kept.
 	editor_test::handle_to_end(session, request::rename_asset("textures/map.tga", "land.tga"));
 	TEST_EXPECT(session.outcome().done());
-	TEST_EXPECT(read_text(root + "/terrains/isle.trn") ==
+	TEST_EXPECT(test_io::read_file_text(root + "/terrains/isle.trn") ==
 	            "; map.tga\r\npolytrn_colormap land.tga\r\npolytrn_detailmap grain.tga\r\npolytrn_polydata isle.cpt\r\n");
 	// The two cloud layers of one environment, and the one of an environment stored in the SCR form,
 	// which is written back as plain text.
@@ -167,29 +161,29 @@ int test_rename_in_native_texts() {
 	}
 	editor_test::handle_to_end(session, request::rename_asset("textures/cloud.pcx", "sky.pcx"));
 	TEST_EXPECT(session.outcome().done());
-	TEST_EXPECT(read_text(root + "/envs/day.env") == "sky_map1 sky.pcx ; the near layer\r\nsky_map2 sky.pcx\r\n");
-	TEST_EXPECT(read_text(root + "/envs/night.env") == "sky_map1 sky.pcx\r\n");
+	TEST_EXPECT(test_io::read_file_text(root + "/envs/day.env") == "sky_map1 sky.pcx ; the near layer\r\nsky_map2 sky.pcx\r\n");
+	TEST_EXPECT(test_io::read_file_text(root + "/envs/night.env") == "sky_map1 sky.pcx\r\n");
 	// A sky map's name is made .pcx as the game parses it, so an environment naming a TGA uses no TGA: the
 	// TGA's rename leaves it as it is.
 	editor_test::handle_to_end(session, request::rename_asset("textures/logo.tga", "logo2.tga"));
-	TEST_EXPECT(session.outcome().done() && read_text(root + "/textures/logo2.tga").size() == tga_bytes().size());
-	TEST_EXPECT(read_text(root + "/envs/dusk.env") == dusk);
+	TEST_EXPECT(session.outcome().done() && test_io::read_file_text(root + "/textures/logo2.tga").size() == tga_bytes().size());
+	TEST_EXPECT(test_io::read_file_text(root + "/envs/dusk.env") == dusk);
 	// A particle's graphic.
 	editor_test::handle_to_end(session, request::rename_asset("textures/spark.tga", "fire.tga"));
 	TEST_EXPECT(session.outcome().done());
-	TEST_EXPECT(read_text(root + "/effects/fx.ptl").find("graphic1 = fire.tga, additive;") != std::string::npos);
+	TEST_EXPECT(test_io::read_file_text(root + "/effects/fx.ptl").find("graphic1 = fire.tga, additive;") != std::string::npos);
 	// The HUD's stance icon; and the way back rewrites it again.
 	editor_test::handle_to_end(session, request::rename_asset("textures/stance.tga", "pose.tga"));
 	TEST_EXPECT(session.outcome().done());
-	TEST_EXPECT(read_text(root + "/hud/hudpos.def") == "HUDSTANCE 0 10 10 pose.tga STAND\r\n");
+	TEST_EXPECT(test_io::read_file_text(root + "/hud/hudpos.def") == "HUDSTANCE 0 10 10 pose.tga STAND\r\n");
 	editor_test::handle_to_end(session, request::rename_back());
 	TEST_EXPECT(session.outcome().done());
-	TEST_EXPECT(read_text(root + "/hud/hudpos.def") == hud);
+	TEST_EXPECT(test_io::read_file_text(root + "/hud/hudpos.def") == hud);
 	// A text is the game's code page (Windows-1252): a new name written in it as such (an e acute one byte),
 	// never as UTF-8; one the code page has no character of refused as the rename is planned.
 	editor_test::handle_to_end(session, request::rename_asset("textures/grain.tga", "caf\xC3\xA9.tga"));
 	TEST_EXPECT(session.outcome().done());
-	TEST_EXPECT(read_text(root + "/terrains/isle.trn").find("polytrn_detailmap caf\xE9.tga\r\n") != std::string::npos);
+	TEST_EXPECT(test_io::read_file_text(root + "/terrains/isle.trn").find("polytrn_detailmap caf\xE9.tga\r\n") != std::string::npos);
 	{
 		const RenamePlan plan = plan_rename(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, "textures/fire.tga",
 		                                    "\xE6\x97\xA5.tga");
@@ -206,8 +200,8 @@ int test_rename_in_native_texts() {
 	}
 	editor_test::handle_to_end(session, request::rename_asset("textures/fx_01.tga", "fx_09.tga"));
 	TEST_EXPECT(view.findings.diagnostics.back().code() == "rename.site");
-	TEST_EXPECT(read_text(root + "/textures/fx_01.tga").size() == tga_bytes().size() && read_text(root + "/textures/fx_09.tga").empty());
-	TEST_EXPECT(read_text(root + "/effects/fx.ptl").find("graphic1 = fx.tga, blend;") != std::string::npos);
+	TEST_EXPECT(test_io::read_file_text(root + "/textures/fx_01.tga").size() == tga_bytes().size() && test_io::read_file_text(root + "/textures/fx_09.tga").empty());
+	TEST_EXPECT(test_io::read_file_text(root + "/effects/fx.ptl").find("graphic1 = fx.tga, blend;") != std::string::npos);
 	// Every name the renames rewrote reaches its file.
 	const std::vector<const GraphEdge *> missing = view.findings.graph->missing();
 	for (const char *name : {"land.tga", "sky.pcx", "fire.tga", "stance.tga"})

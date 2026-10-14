@@ -95,7 +95,7 @@ int test_layout_type() {
 }
 
 struct Rig {
-	editor_test::TempProjectDir dir{"opennova_editor_hud_viewport"};
+	test_temp::TempDir dir{"opennova_editor_hud_viewport"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -126,10 +126,10 @@ int test_session() {
 	Rig rig;
 	editor_test::handle_to_end(rig.session, request::new_project(rig.root(), "HUD"));
 	editor_test::create_missing_files(rig.session);
-	TEST_EXPECT(editor_test::write_text(rig.root() + "/" + rig.layout, kLayout) &&
-	            editor_test::write_text(rig.root() + "/defs/weapon.def", kWeapons) &&
-	            editor_test::write_text(rig.root() + "/textures/onhframe.tga", "not read here") &&
-	            editor_test::write_text(rig.root() + "/textures/h_onclip.tga", "not read here"));
+	TEST_EXPECT(test_io::write_text(rig.root() + "/" + rig.layout, kLayout) &&
+	            test_io::write_text(rig.root() + "/defs/weapon.def", kWeapons) &&
+	            test_io::write_text(rig.root() + "/textures/onhframe.tga", "not read here") &&
+	            test_io::write_text(rig.root() + "/textures/h_onclip.tga", "not read here"));
 	editor_test::handle_to_end(rig.session, request::rescan());
 	rig.pump();
 
@@ -260,7 +260,7 @@ int test_canvas() {
 	Rig rig;
 	editor_test::handle_to_end(rig.session, request::new_project(rig.root(), "HUD"));
 	editor_test::create_missing_files(rig.session);
-	TEST_EXPECT(editor_test::write_text(rig.root() + "/" + rig.layout, kLayout));
+	TEST_EXPECT(test_io::write_text(rig.root() + "/" + rig.layout, kLayout));
 	editor_test::handle_to_end(rig.session, request::rescan());
 	editor_test::handle_to_end(rig.session, request::open_document(rig.layout));
 	rig.pump();
@@ -416,7 +416,7 @@ int test_commands() {
 	Rig rig;
 	editor_test::handle_to_end(rig.session, request::new_project(rig.root(), "HUD"));
 	editor_test::create_missing_files(rig.session);
-	TEST_EXPECT(editor_test::write_text(rig.root() + "/" + rig.layout, kLayout));
+	TEST_EXPECT(test_io::write_text(rig.root() + "/" + rig.layout, kLayout));
 	editor_test::handle_to_end(rig.session, request::rescan());
 	editor_test::handle_to_end(rig.session, request::open_document(rig.layout));
 	rig.pump();
@@ -507,7 +507,7 @@ int test_canvas_drag() {
 	Rig rig;
 	editor_test::handle_to_end(rig.session, request::new_project(rig.root(), "HUD"));
 	editor_test::create_missing_files(rig.session);
-	TEST_EXPECT(editor_test::write_text(rig.root() + "/" + rig.layout, kLayout));
+	TEST_EXPECT(test_io::write_text(rig.root() + "/" + rig.layout, kLayout));
 	editor_test::handle_to_end(rig.session, request::rescan());
 	editor_test::handle_to_end(rig.session, request::open_document(rig.layout));
 	editor_test::handle_to_end(rig.session, request::set_viewport(rig.layout,
@@ -622,8 +622,8 @@ int test_sights_and_board() {
 	                            "weapon \"W_SCOPE\"\r\n\tclipsize 5\r\n\tstartrounds 10\r\n\tflags scoped\r\n"
 	                            "\tflags showrange\r\n\tflags showelevation\r\n\tscope_max_mag 4 0\r\n"
 	                            "\tscope_max_zero 10 100 200 1\r\n\tpos 25 -5 -145 0 0 0\r\n\ttpos -1 12 -138 0 0 0\r\nend\r\n";
-	TEST_EXPECT(editor_test::write_text(rig.root() + "/" + rig.layout, kLayout) &&
-	            editor_test::write_text(rig.root() + "/defs/weapon.def", weapons));
+	TEST_EXPECT(test_io::write_text(rig.root() + "/" + rig.layout, kLayout) &&
+	            test_io::write_text(rig.root() + "/defs/weapon.def", weapons));
 	editor_test::handle_to_end(rig.session, request::rescan());
 	editor_test::handle_to_end(rig.session, request::open_document(rig.layout));
 	rig.pump();

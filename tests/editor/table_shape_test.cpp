@@ -61,8 +61,6 @@ namespace bms = opennova::bms;
 
 namespace {
 
-std::string fixture(const char *relative) { return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/" + relative; }
-
 std::vector<uint8_t> text_bytes(const std::string &text) { return std::vector<uint8_t>(text.begin(), text.end()); }
 
 // A table and the records it reads, as natives the test owns: the rows' handles and how the file
@@ -282,7 +280,7 @@ int sweep(const Subject &subject, Counts &counts) {
 int menu() {
 	MnuDocument document;
 	Diagnostic error;
-	TEST_EXPECT(document.load_bytes(test_io::read_file(fixture("mnu/all_widgets.mnu")), "all_widgets.mnu",
+	TEST_EXPECT(document.load_bytes(test_io::read_file(test_paths_fixture("mnu/all_widgets.mnu")), "all_widgets.mnu",
 	                                AssetKind::Menu, "JO", error));
 	std::vector<std::shared_ptr<MenuScreen>> rows;
 	for (const auto &row : document.rows())
@@ -348,7 +346,7 @@ const char *const kMountedItem =
 
 int catalogs() {
 	Counts items, weapons, powerups;
-	const std::vector<uint8_t> shared = test_io::read_file(fixture("def/items.def"));
+	const std::vector<uint8_t> shared = test_io::read_file(test_paths_fixture("def/items.def"));
 	if (catalog("items.def", AssetKind::ItemDefs, text_bytes(std::string(shared.begin(), shared.end()) + kMountedItem),
 	            items) != 0)
 		return 1;
@@ -369,7 +367,7 @@ int catalogs() {
 int model() {
 	ModelDocument document;
 	Diagnostic error;
-	TEST_EXPECT(document.load_bytes(test_io::read_file(fixture("threedi/synth/armory.3di")), "armory.3di",
+	TEST_EXPECT(document.load_bytes(test_io::read_file(test_paths_fixture("threedi/synth/armory.3di")), "armory.3di",
 	                                AssetKind::Model, "JO", error));
 	auto row = std::static_pointer_cast<ModelRow>(document.model_row()->clone());
 	auto collision = std::static_pointer_cast<CollisionRow>(document.collision_row()->clone());
@@ -394,7 +392,7 @@ int mission() {
 	// The mission document's rows, cloned: the natives the test owns.
 	MissionDocument document;
 	Diagnostic error;
-	TEST_EXPECT(document.load_bytes(test_io::read_file(fixture("bms/synth_dense.bms")), "synth_dense.bms",
+	TEST_EXPECT(document.load_bytes(test_io::read_file(test_paths_fixture("bms/synth_dense.bms")), "synth_dense.bms",
 	                                AssetKind::Mission, "JO", error));
 	std::vector<std::shared_ptr<const Node>> rows;
 	for (const auto &row : document.rows()) rows.push_back(row->clone());
@@ -666,7 +664,7 @@ Keystroke keystroke(DefCatalogDocument &document, const char *field, int64_t val
 int keystroke_in_a_catalog() {
 	DefCatalogDocument document;
 	Diagnostic error;
-	TEST_EXPECT(document.load_bytes(test_io::read_file(fixture("def/items.def")), "items.def", AssetKind::ItemDefs, "JO",
+	TEST_EXPECT(document.load_bytes(test_io::read_file(test_paths_fixture("def/items.def")), "items.def", AssetKind::ItemDefs, "JO",
 	                                error));
 	TEST_EXPECT(tables_of(document) && !document.rows().empty());
 	const NodeAddress item{document.rows()[0]->id, node_kind(def::DefRecordKind::Item), 0};

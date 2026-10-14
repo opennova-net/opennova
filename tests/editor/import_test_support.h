@@ -42,11 +42,11 @@ inline std::string go_to(const std::string &file, const char *target) {
 }
 
 // An archive of the named texts (the boot table's resource.pff makes a game install), each staged as
-// its file holds it (editor_test::staged).
+// its file holds it (test_io::staged).
 inline bool write_pff(const std::string &path, const std::vector<std::pair<std::string, std::string>> &files) {
 	std::vector<std::string> texts;
 	texts.reserve(files.size());
-	for (const auto &file : files) texts.push_back(editor_test::staged(file.first, file.second));
+	for (const auto &file : files) texts.push_back(test_io::staged(file.first, file.second));
 	std::vector<opennova::pff::PffWriteEntry> entries;
 	for (size_t i = 0; i < files.size(); ++i)
 		entries.push_back({files[i].first.c_str(), reinterpret_cast<const uint8_t *>(texts[i].data()),
@@ -102,7 +102,7 @@ inline std::vector<ImportChoice> selected_sources(const ImportPlan &plan) {
 
 // A new project of its own; the plan over its view.
 struct Project {
-	editor_test::TempProjectDir dir;
+	test_temp::TempDir dir;
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session;

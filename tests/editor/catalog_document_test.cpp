@@ -41,8 +41,8 @@ static std::string written_def(const std::string &text, const char *name, AssetK
 	return written.ok() ? written.text : std::string();
 }
 static int history_and_save() {
-	editor_test::TempProjectDir dir("opennova_catalog_document_test");
-	TEST_EXPECT(editor_test::write_text(dir.file("items.def"), "begin \"One\"\nid 100001\ntype marker\nhp 10\nend\n"));
+	test_temp::TempDir dir("opennova_catalog_document_test");
+	TEST_EXPECT(test_io::write_text(dir.file("items.def"), "begin \"One\"\nid 100001\ntype marker\nhp 10\nend\n"));
 	DefCatalogDocument document; Diagnostic error;
 	TEST_EXPECT(document.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
 	const auto id = document.rows()[0]->id;
@@ -81,7 +81,7 @@ static int history_and_save() {
 	TEST_EXPECT(opennova::io::read_file_text(dir.file("items.def"), external, message));
 	const auto hp = external.find("hp 25"); TEST_EXPECT(hp != std::string::npos);
 	external.replace(hp, 5, "hp 99");
-	TEST_EXPECT(editor_test::write_text(dir.file("items.def"), external));
+	TEST_EXPECT(test_io::write_text(dir.file("items.def"), external));
 	std::filesystem::last_write_time(dir.file("items.def"), stamp);
 	TEST_EXPECT(!document.save(error) && error.code() == "document.conflict");
 	std::string retained; TEST_EXPECT(opennova::io::read_file_text(dir.file("items.def"), retained, message));
@@ -99,8 +99,8 @@ static int history_and_save() {
 // Two items added in one batch (S13 D7): each new item takes an id no row of the batch has, the
 // second skipping the first's (make_node reads the rows as the batch left them), one undo step.
 static int two_new_items() {
-	editor_test::TempProjectDir dir("opennova_catalog_two_new_items");
-	TEST_EXPECT(editor_test::write_text(dir.file("items.def"), "begin \"One\"\nid 100001\ntype marker\nhp 10\nend\n"));
+	test_temp::TempDir dir("opennova_catalog_two_new_items");
+	TEST_EXPECT(test_io::write_text(dir.file("items.def"), "begin \"One\"\nid 100001\ntype marker\nhp 10\nend\n"));
 	DefCatalogDocument document; Diagnostic error;
 	TEST_EXPECT(document.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
 	Edit add; add.operation = EditOperation::Add; add.address = {0, node_kind(DefRecordKind::Item), 0};
@@ -111,8 +111,8 @@ static int two_new_items() {
 	return 0;
 }
 static int collections() {
-	editor_test::TempProjectDir dir("opennova_catalog_collections_test");
-	TEST_EXPECT(editor_test::write_text(dir.file("weapon.def"), "weapon \"WPN_ONE\"\nend\n"));
+	test_temp::TempDir dir("opennova_catalog_collections_test");
+	TEST_EXPECT(test_io::write_text(dir.file("weapon.def"), "weapon \"WPN_ONE\"\nend\n"));
 	DefCatalogDocument document; Diagnostic error;
 	TEST_EXPECT(document.load(dir.file("weapon.def"), "weapon.def", AssetKind::WeaponDefs, "jo", error));
 	const auto parent = document.rows()[0]->id;
@@ -162,11 +162,11 @@ static int collections() {
 // own, written after its original, and one moved follows the weapon's order; the save is the writer's form of
 // the records (the file's comments none of it, S26), and says nothing.
 static int nested_rows_follow_the_record() {
-	editor_test::TempProjectDir dir("opennova_catalog_nested_rows");
-	// The text as the file holds it, CR LF (editor_test::crlf: the one break the def walk splits at).
-	const std::string text = editor_test::crlf("weapon \"WPN_S\"\n\t// the scope\n\tsights scope.tga 0 0 640 480 blend\n"
+	test_temp::TempDir dir("opennova_catalog_nested_rows");
+	// The text as the file holds it, CR LF (test_io::crlf: the one break the def walk splits at).
+	const std::string text = test_io::crlf("weapon \"WPN_S\"\n\t// the scope\n\tsights scope.tga 0 0 640 480 blend\n"
 	                                           "\t// the dot\n\tsights reticle.tga 0 0 64 64 add\nend\n");
-	TEST_EXPECT(editor_test::write_text(dir.file("weapon.def"), text));
+	TEST_EXPECT(test_io::write_text(dir.file("weapon.def"), text));
 	DefCatalogDocument document; Diagnostic error;
 	TEST_EXPECT(document.load(dir.file("weapon.def"), "weapon.def", AssetKind::WeaponDefs, "jo", error));
 	const auto parent = document.rows()[0]->id;
@@ -183,7 +183,7 @@ static int nested_rows_follow_the_record() {
 	TEST_EXPECT(document.apply(duplicate, error));
 	SerializeResult written = document.serialize();
 	TEST_EXPECT(written.ok() && written.notes.empty() &&
-	            written.text == weapons(editor_test::crlf("weapon \"WPN_S\"\n\tsights scope.tga 0 0 640 480 blend\n"
+	            written.text == weapons(test_io::crlf("weapon \"WPN_S\"\n\tsights scope.tga 0 0 640 480 blend\n"
 	                                                      "\tsights scope.tga 0 0 640 480 blend\n\tsights reticle.tga 0 0 64 64 add\nend\n")));
 	document.undo();
 	Edit move; move.operation = EditOperation::Move;
@@ -192,12 +192,12 @@ static int nested_rows_follow_the_record() {
 	TEST_EXPECT(document.apply(move, error));
 	written = document.serialize();
 	TEST_EXPECT(written.ok() && written.notes.empty() &&
-	            written.text == weapons(editor_test::crlf("weapon \"WPN_S\"\n\tsights reticle.tga 0 0 64 64 add\n"
+	            written.text == weapons(test_io::crlf("weapon \"WPN_S\"\n\tsights reticle.tga 0 0 64 64 add\n"
 	                                                      "\tsights scope.tga 0 0 640 480 blend\nend\n")));
 	return 0;
 }
 static int session_gate() {
-	editor_test::TempProjectDir dir("opennova_catalog_session_test");
+	test_temp::TempDir dir("opennova_catalog_session_test");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -251,13 +251,13 @@ static int session_gate() {
 	return 0;
 }
 static int malformed() {
-	editor_test::TempProjectDir dir("opennova_catalog_malformed_test");
-	TEST_EXPECT(editor_test::write_text(dir.file("items.def"), "begin \"Bad\"\nhp twelve\nend\n"));
+	test_temp::TempDir dir("opennova_catalog_malformed_test");
+	TEST_EXPECT(test_io::write_text(dir.file("items.def"), "begin \"Bad\"\nhp twelve\nend\n"));
 	DefCatalogDocument document; Diagnostic error;
 	TEST_EXPECT(document.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
 	TEST_EXPECT(document.blocked() && document.issues().front().line == 2);
 	TEST_EXPECT(!document.save(error) && error.code() == "document.unserializable");
-	TEST_EXPECT(editor_test::write_text(dir.file("items.def"), "begin \"Open\"\nid 100001\n"));
+	TEST_EXPECT(test_io::write_text(dir.file("items.def"), "begin \"Open\"\nid 100001\n"));
 	TEST_EXPECT(document.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
 	TEST_EXPECT(document.blocked());
 	return 0;
@@ -265,10 +265,10 @@ static int malformed() {
 // Lines the game ignores never block the document: they are reported, the record
 // stays editable, and a save writes the records alone (S26), without them: the findings go with them.
 static int ignored_input() {
-	editor_test::TempProjectDir dir("opennova_catalog_ignored_test");
+	test_temp::TempDir dir("opennova_catalog_ignored_test");
 	// (Train: an attrib word the game matches and skips; Good, which the mission editor reads, is modeled.)
 	const std::string text = "begin \"One\"\nid 100001\ntype marker\nsubtype Ruins\nattrib: train nodie\nend\n";
-	TEST_EXPECT(editor_test::write_text(dir.file("items.def"), text));
+	TEST_EXPECT(test_io::write_text(dir.file("items.def"), text));
 	DefCatalogDocument document; Diagnostic error;
 	TEST_EXPECT(document.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
 	TEST_EXPECT(!document.blocked() && document.ignored_lines() == 2 && document.issues().size() == 2);
@@ -279,7 +279,7 @@ static int ignored_input() {
 	TEST_EXPECT(document.ignored_lines() == 0 && document.issues().empty() && document.can_undo());
 	std::string saved, message;
 	TEST_EXPECT(opennova::io::read_file_text(dir.file("items.def"), saved, message));
-	TEST_EXPECT(saved == written_def(editor_test::crlf("begin \"One\"\nid 100001\ntype marker\nattrib: nodie\nhp 20\nend\n"),
+	TEST_EXPECT(saved == written_def(test_io::crlf("begin \"One\"\nid 100001\ntype marker\nattrib: nodie\nhp 20\nend\n"),
 	                                 "items.def", AssetKind::ItemDefs) &&
 	            saved.find("Ruins") == std::string::npos && saved.find("train") == std::string::npos);
 	TEST_EXPECT(document.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
@@ -291,8 +291,8 @@ static int ignored_input() {
 // re-initializes the row, so a value the game never reads in the earlier block blocks
 // nothing: the block is one ignored-input finding, and a save writes the records alone, without it.
 static int replaced_action_block() {
-	editor_test::TempProjectDir dir("opennova_catalog_replaced_test");
-	TEST_EXPECT(editor_test::write_text(dir.file("weapon.def"),
+	test_temp::TempDir dir("opennova_catalog_replaced_test");
+	TEST_EXPECT(test_io::write_text(dir.file("weapon.def"),
 		"weapon \"WPN_TWICE\"\naction \"FIRE\"\ndelayend nope\nend\naction \"FIRE\"\ndelayend 2\nend\nend\n"));
 	DefCatalogDocument document; Diagnostic error;
 	TEST_EXPECT(document.load(dir.file("weapon.def"), "weapon.def", AssetKind::WeaponDefs, "jo", error));
@@ -303,7 +303,7 @@ static int replaced_action_block() {
 	TEST_EXPECT(document.save(error));
 	std::string saved, message;
 	TEST_EXPECT(opennova::io::read_file_text(dir.file("weapon.def"), saved, message));
-	TEST_EXPECT(saved == written_def(editor_test::crlf("weapon \"WPN_TWICE\"\naction \"FIRE\"\ndelayend 2\nend\n"
+	TEST_EXPECT(saved == written_def(test_io::crlf("weapon \"WPN_TWICE\"\naction \"FIRE\"\ndelayend 2\nend\n"
 	                                                   "weaponweight 1.5\nend\n"),
 	                                 "weapon.def", AssetKind::WeaponDefs) &&
 	            saved.find("nope") == std::string::npos);
@@ -314,7 +314,7 @@ static int replaced_action_block() {
 // (S12 D3): an item by its id, the file read again once closed and the record found by the
 // locator the graph read, its id shown; a locator the file does not have selects nothing.
 static int go_to_record() {
-	editor_test::TempProjectDir dir("opennova_catalog_goto_test");
+	test_temp::TempDir dir("opennova_catalog_goto_test");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -341,8 +341,8 @@ static int go_to_record() {
 	return 0;
 }
 static int remove_last_item() {
-    editor_test::TempProjectDir dir("opennova_catalog_empty_test");
-    TEST_EXPECT(editor_test::write_text(dir.file("items.def"), "begin \"One\"\nid 100001\ntype marker\npcvehicle_spawnlist 8\nend\n"));
+    test_temp::TempDir dir("opennova_catalog_empty_test");
+    TEST_EXPECT(test_io::write_text(dir.file("items.def"), "begin \"One\"\nid 100001\ntype marker\npcvehicle_spawnlist 8\nend\n"));
     DefCatalogDocument document; Diagnostic error;
     TEST_EXPECT(document.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
     Edit remove; remove.operation = EditOperation::Remove;
@@ -361,8 +361,8 @@ static int remove_last_item() {
 // the edit made a new state). A field's change and its revert are the core's (document_core_test
 // test_changes_since_save) and every type's (editor_document_contract_test check_real_change).
 static int changes_since_save() {
-	editor_test::TempProjectDir dir("opennova_catalog_changes_test");
-	TEST_EXPECT(editor_test::write_text(dir.file("items.def"),
+	test_temp::TempDir dir("opennova_catalog_changes_test");
+	TEST_EXPECT(test_io::write_text(dir.file("items.def"),
 	                                    "begin \"One\"\nid 100001\ntype marker\nhp 10\npcvehicle_spawnlist 8\nend\n"));
 	DefCatalogDocument document; Diagnostic error;
 	TEST_EXPECT(document.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
@@ -380,8 +380,8 @@ static int changes_since_save() {
 // (Clear leaves the line out); a round's light colour is a packed RGB; a husk piece's
 // debris types are the table's names.
 static int written_units() {
-	editor_test::TempProjectDir dir("opennova_catalog_units_test");
-	TEST_EXPECT(editor_test::write_text(dir.file("items.def"),
+	test_temp::TempDir dir("opennova_catalog_units_test");
+	TEST_EXPECT(test_io::write_text(dir.file("items.def"),
 		"begin \"Buggy\"\nid 100001\ntype vehicle\nplayer_speed 30\nmax_slope 35\n"
 		"light_transfer 35\npcvehicle_spawnlist 8 4\npcvehicle_spawnlist 4\nend\n"));
 	DefCatalogDocument items; Diagnostic error;
@@ -429,7 +429,7 @@ static int written_units() {
 	const FieldSchema pieces = schema(items, buggy, "husk_sub_part_types[0]");
 	TEST_EXPECT(pieces.choices.size() == 13 && pieces.choices[1].name == "WHEEL" && pieces.token == "husk_sub_part_types");
 
-	TEST_EXPECT(editor_test::write_text(dir.file("weapon.def"),
+	TEST_EXPECT(test_io::write_text(dir.file("weapon.def"),
 		"weapon \"WPN_TEST\"\ncharfilter medic\nerror_hiptheta 0.5\nswitchcategory 3\nend\n"));
 	DefCatalogDocument weapons;
 	TEST_EXPECT(weapons.load(dir.file("weapon.def"), "weapon.def", AssetKind::WeaponDefs, "jo", error));
@@ -470,7 +470,7 @@ static int written_units() {
 	TEST_EXPECT(!reread.present(again, "switchcategory") && reread.get(again, "error_hip_theta_fp16", value) &&
 	            std::get<double>(value) == 0.5);
 
-	TEST_EXPECT(editor_test::write_text(dir.file("ammo.def"), "ammo AT_TEST\nmax_age 1.5\nlight_move 3 255 120 20\nend\n"));
+	TEST_EXPECT(test_io::write_text(dir.file("ammo.def"), "ammo AT_TEST\nmax_age 1.5\nlight_move 3 255 120 20\nend\n"));
 	DefCatalogDocument ammo;
 	TEST_EXPECT(ammo.load(dir.file("ammo.def"), "ammo.def", AssetKind::AmmoDefs, "jo", error));
 	const NodeAddress round{ammo.rows()[0]->id, node_kind(DefRecordKind::Ammo), 0};
@@ -487,7 +487,7 @@ static int written_units() {
 // integers no code singles out (a weapon's rank and run gait, a door's type) stay plain. The
 // choices name values only: a file reads and writes as it did.
 static int witnessed_enums() {
-	editor_test::TempProjectDir dir("opennova_catalog_enums_test");
+	test_temp::TempDir dir("opennova_catalog_enums_test");
 	using Table = std::vector<std::pair<int64_t, const char *>>;
 	// A field of the record's kind, as its type's table declares it.
 	auto schema = [](const Document &document, const NodeAddress &address, const char *id) -> const FieldSchema & {
@@ -507,7 +507,7 @@ static int witnessed_enums() {
 	Diagnostic error;
 	const std::string weapon_text = "weapon \"WPN_ENUM\"\r\n\tcategory 11\r\n\trank 3\r\n\tspecial_hold 2\r\n"
 	                                "\tattack_anim 1\r\n\trun_anim 1\r\nend\r\n\r\n";
-	TEST_EXPECT(editor_test::write_text(dir.file("weapon.def"), weapon_text));
+	TEST_EXPECT(test_io::write_text(dir.file("weapon.def"), weapon_text));
 	DefCatalogDocument weapons;
 	TEST_EXPECT(weapons.load(dir.file("weapon.def"), "weapon.def", AssetKind::WeaponDefs, "jo", error));
 	const NodeAddress weapon{weapons.rows()[0]->id, node_kind(DefRecordKind::Weapon), 0};
@@ -536,7 +536,7 @@ static int witnessed_enums() {
 	TEST_EXPECT(written.find("\tcategory 11\r\n") != std::string::npos && written.find("\trank 3\r\n") != std::string::npos &&
 	            written.find("\tspecial_hold 2\r\n") != std::string::npos);
 
-	TEST_EXPECT(editor_test::write_text(dir.file("items.def"),
+	TEST_EXPECT(test_io::write_text(dir.file("items.def"),
 		"begin \"Heli\"\nid 100010\ntype vehicle\nphysics 1\nunit_type 3\ndoor_type 2\nend\n"));
 	DefCatalogDocument items;
 	TEST_EXPECT(items.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
@@ -554,7 +554,7 @@ static int witnessed_enums() {
 	// A line the game reads as another number (D10b): the document holds what the game reads,
 	// the line is reported and blocks nothing, and a save writes what the record holds, what the game read (S26: the
 	// writer writes the records alone); a category set writes the new one.
-	TEST_EXPECT(editor_test::write_text(dir.file("wide.def"), "weapon \"WPN_WIDE\"\ncategory 13\nend\n"));
+	TEST_EXPECT(test_io::write_text(dir.file("wide.def"), "weapon \"WPN_WIDE\"\ncategory 13\nend\n"));
 	DefCatalogDocument wide;
 	TEST_EXPECT(wide.load(dir.file("wide.def"), "weapon.def", AssetKind::WeaponDefs, "jo", error) && !wide.blocked());
 	const NodeAddress wide_weapon{wide.rows()[0]->id, node_kind(DefRecordKind::Weapon), 0};
@@ -564,9 +564,9 @@ static int witnessed_enums() {
 	TEST_EXPECT(wide.rewrite_need() == Document::RewriteNeed::Rewrite);
 	TEST_EXPECT(wide.apply(field(wide_weapon, "category", int64_t(4)), error));
 	TEST_EXPECT(wide.serialize().text ==
-	            written_def(editor_test::crlf("weapon \"WPN_WIDE\"\ncategory 4\nend\n"), "weapon.def", AssetKind::WeaponDefs));
+	            written_def(test_io::crlf("weapon \"WPN_WIDE\"\ncategory 4\nend\n"), "weapon.def", AssetKind::WeaponDefs));
 
-	TEST_EXPECT(editor_test::write_text(dir.file("ammo.def"), "ammo AT_GLASS\nscar_type 2\nend\n"));
+	TEST_EXPECT(test_io::write_text(dir.file("ammo.def"), "ammo AT_GLASS\nscar_type 2\nend\n"));
 	DefCatalogDocument ammo;
 	TEST_EXPECT(ammo.load(dir.file("ammo.def"), "ammo.def", AssetKind::AmmoDefs, "jo", error));
 	const NodeAddress round{ammo.rows()[0]->id, node_kind(DefRecordKind::Ammo), 0};
@@ -580,8 +580,8 @@ static int witnessed_enums() {
 // a name clears every weapon; a weapon named all, in any case, would be read back as every weapon:
 // refused. A row of a name an earlier row has is one no item binds.
 static int powerup_weapon() {
-	editor_test::TempProjectDir dir("opennova_catalog_powerup_test");
-	TEST_EXPECT(editor_test::write_text(dir.file("powerup.def"),
+	test_temp::TempDir dir("opennova_catalog_powerup_test");
+	TEST_EXPECT(test_io::write_text(dir.file("powerup.def"),
 	                                    "powerup \"PU_GUN\"\r\nweapon WPN_A\r\nend\r\n"
 	                                    "powerup \"PU_TWICE\"\r\nweapon WPN_A\r\nweapon all\r\nend\r\n"));
 	DefCatalogDocument document;
@@ -624,9 +624,9 @@ static int powerup_weapon() {
 // free id and its name with " (copy)", a weapon its token with "_2", each within the characters of a
 // name the game keeps, never one a row of its kind has; nested records keep theirs.
 static int duplicates_apart() {
-	editor_test::TempProjectDir dir("opennova_catalog_duplicates_apart");
+	test_temp::TempDir dir("opennova_catalog_duplicates_apart");
 	const std::string long_name(44, 'L');
-	TEST_EXPECT(editor_test::write_text(dir.file("items.def"),
+	TEST_EXPECT(test_io::write_text(dir.file("items.def"),
 	                                    "begin \"Dune Buggy\"\nid 100000\ntype vehicle\nhp 10\nend\nbegin \"Dune Buggy (copy)\"\n"
 	                                    "id 100001\ntype vehicle\nend\nbegin \"" + long_name + "\"\nid 100003\ntype marker\nend\n"));
 	DefCatalogDocument items; Diagnostic error;
@@ -647,7 +647,7 @@ static int duplicates_apart() {
 		TEST_EXPECT(d.code() != "catalog.name_duplicate" && d.code() != "catalog.item_identity");
 	items.undo(); items.undo(); TEST_EXPECT(!items.dirty());
 
-	TEST_EXPECT(editor_test::write_text(dir.file("weapon.def"), "weapon \"WPN_M16\"\naction \"FIRE\"\nend\nend\n"));
+	TEST_EXPECT(test_io::write_text(dir.file("weapon.def"), "weapon \"WPN_M16\"\naction \"FIRE\"\nend\nend\n"));
 	DefCatalogDocument weapons;
 	TEST_EXPECT(weapons.load(dir.file("weapon.def"), "weapon.def", AssetKind::WeaponDefs, "jo", error));
 	duplicate.address = {weapons.rows()[0]->id, node_kind(DefRecordKind::Weapon), 0};
@@ -670,7 +670,7 @@ static int duplicates_apart() {
 	// name then refused and the copy keeping its original's): 45 characters, two of them two UTF-8
 	// bytes, kept to 39 before " (copy)". An id other files name is no copy's: with 100001 and
 	// 100002 named elsewhere, the copy takes 100003.
-	TEST_EXPECT(editor_test::write_text(dir.file("items.def"),
+	TEST_EXPECT(test_io::write_text(dir.file("items.def"),
 	                                    "begin \"V\xE9hicule blind\xE9 de transport de troupes lourd\"\nid 100000\ntype vehicle\nend\n"));
 	DefCatalogDocument words;
 	TEST_EXPECT(words.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
@@ -769,8 +769,8 @@ static int plain_words() {
 		rank = at;
 	}
 
-	editor_test::TempProjectDir dir("opennova_catalog_plain_words");
-	TEST_EXPECT(editor_test::write_text(dir.file("weapon.def"), "weapon \"WPN_M16\"\nend\nweapon \"WPN_LOADOUT\"\n"
+	test_temp::TempDir dir("opennova_catalog_plain_words");
+	TEST_EXPECT(test_io::write_text(dir.file("weapon.def"), "weapon \"WPN_M16\"\nend\nweapon \"WPN_LOADOUT\"\n"
 	                                                            "loadout_menu_textid WEP_LOAD\nend\nweapon \"WPN_BARE\"\nend\n"));
 	DefCatalogDocument weapons; Diagnostic error;
 	TEST_EXPECT(weapons.load(dir.file("weapon.def"), "weapon.def", AssetKind::WeaponDefs, "jo", error));
@@ -787,11 +787,11 @@ static int plain_words() {
 	TEST_EXPECT(title(weapons, 0, &names) == "M16A2 Rifle" && title(weapons, 1, &names) == "Loadout Gun" &&
 	            title(weapons, 2, &names) == "WPN_BARE" && title(weapons, 0, nullptr) == "WPN_M16");
 	TEST_EXPECT(weapons.rows()[0]->kind == weapon);
-	TEST_EXPECT(editor_test::write_text(dir.file("ammo.def"), "ammo AMMO_556\nend\n"));
+	TEST_EXPECT(test_io::write_text(dir.file("ammo.def"), "ammo AMMO_556\nend\n"));
 	DefCatalogDocument ammo;
 	TEST_EXPECT(ammo.load(dir.file("ammo.def"), "ammo.def", AssetKind::AmmoDefs, "jo", error));
 	TEST_EXPECT(title(ammo, 0, &names) == "5.56x45" && title(ammo, 0, nullptr) == "AMMO_556");
-	TEST_EXPECT(editor_test::write_text(dir.file("items.def"),
+	TEST_EXPECT(test_io::write_text(dir.file("items.def"),
 	                                    "begin \"Hummer\"\nid 100100\ntype vehicle\naddeweap ewep01 100184\nend\n"));
 	DefCatalogDocument items;
 	TEST_EXPECT(items.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
@@ -814,7 +814,7 @@ static int plain_words() {
 // graph (both read in the one encoding), a name set is written back in the code page, and one the code
 // page has no character of is refused.
 static int code_page_names() {
-	editor_test::TempProjectDir dir("opennova_catalog_code_page");
+	test_temp::TempDir dir("opennova_catalog_code_page");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -826,8 +826,8 @@ static int code_page_names() {
 	TEST_EXPECT(weapon_entry && item_entry);
 	if (!weapon_entry || !item_entry) return 1;
 	const std::string weapon_file = weapon_entry->relative_path, item_file = item_entry->relative_path;
-	TEST_EXPECT(editor_test::write_text(view.project.root + "/" + weapon_file, "weapon \"Caf\xE9\"\nend\n") &&
-	            editor_test::write_text(view.project.root + "/" + item_file,
+	TEST_EXPECT(test_io::write_text(view.project.root + "/" + weapon_file, "weapon \"Caf\xE9\"\nend\n") &&
+	            test_io::write_text(view.project.root + "/" + item_file,
 	                                    "begin \"Thing\"\nid 100300\nprimary_weapon Caf\xE9\nend\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(view.findings.graph != nullptr);
@@ -856,7 +856,7 @@ static int code_page_names() {
 // unticked (its line's present tick cleared) and saved is that one line gone, every other line as the save
 // before it wrote it (the writer's form of the records, S26), no record reordered and no note.
 static int unticked_line_saves_alone() {
-	editor_test::TempProjectDir dir("opennova_catalog_unticked_line");
+	test_temp::TempDir dir("opennova_catalog_unticked_line");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -867,7 +867,7 @@ static int unticked_line_saves_alone() {
 	TEST_EXPECT(entry != nullptr);
 	if (!entry) return 1;
 	const std::string path = entry->relative_path, file = view.project.root + "/" + entry->relative_path;
-	TEST_EXPECT(editor_test::write_text(file, "weapon \"WPN_A\"\n\tcategory 2\n\tswitchcategory 3\n\tclipsize 15\nend\n"
+	TEST_EXPECT(test_io::write_text(file, "weapon \"WPN_A\"\n\tcategory 2\n\tswitchcategory 3\n\tclipsize 15\nend\n"
 	                                          "weapon \"WPN_B\"\n\tclipsize 30\n\tcategory 1\nend\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::handle_to_end(session, request::open_document(path));
@@ -899,8 +899,8 @@ static int unticked_line_saves_alone() {
 // which the begin arm keeps 46 [orig: ItemDef_ParseProperty @0x49EBD9, the cut @0x49EBFB]; the saved line
 // reads back the same. A text the reader does not cut is refused past its field, saying how much it holds.
 static int item_name_cut() {
-	editor_test::TempProjectDir dir("opennova_catalog_item_name_cut");
-	TEST_EXPECT(editor_test::write_text(dir.file("items.def"), "begin \"Map centre\"\nid 102043\ntype marker\nend\n"));
+	test_temp::TempDir dir("opennova_catalog_item_name_cut");
+	TEST_EXPECT(test_io::write_text(dir.file("items.def"), "begin \"Map centre\"\nid 102043\ntype marker\nend\n"));
 	DefCatalogDocument items; Diagnostic error;
 	TEST_EXPECT(items.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
 	const NodeAddress item{items.rows()[0]->id, node_kind(DefRecordKind::Item), 0};
@@ -913,7 +913,7 @@ static int item_name_cut() {
 	TEST_EXPECT(again.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
 	TEST_EXPECT(std::string(row_at(again, 0).native.as<DefItemDef>().display_name) == retail.substr(0, 46));
 	// The read-back file's line as the game reads it: 46 kept of any longer name.
-	TEST_EXPECT(editor_test::write_text(dir.file("items.def"), "begin \"" + retail + "\"\nid 102043\ntype marker\nend\n"));
+	TEST_EXPECT(test_io::write_text(dir.file("items.def"), "begin \"" + retail + "\"\nid 102043\ntype marker\nend\n"));
 	DefCatalogDocument shipped;
 	TEST_EXPECT(shipped.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
 	TEST_EXPECT(std::string(row_at(shipped, 0).native.as<DefItemDef>().display_name) == retail.substr(0, 46));
@@ -928,9 +928,9 @@ static int item_name_cut() {
 // the last record (the writer's own form, and the base game's file) is one blank line after each
 // add, never one more per add.
 static int adds_keep_the_ending() {
-	editor_test::TempProjectDir dir("opennova_catalog_adds_keep_the_ending");
+	test_temp::TempDir dir("opennova_catalog_adds_keep_the_ending");
 	const std::string text = "// Item definitions\r\n\r\nbegin \"A\"\r\nid 100000\r\ntype marker\r\nend\r\n\r\n";
-	TEST_EXPECT(editor_test::write_text(dir.file("items.def"), text));
+	TEST_EXPECT(test_io::write_text(dir.file("items.def"), text));
 	DefCatalogDocument items; Diagnostic error;
 	TEST_EXPECT(items.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
 	TEST_EXPECT(items.serialize().text == written_def(text, "items.def", AssetKind::ItemDefs));
@@ -958,8 +958,8 @@ static int adds_keep_the_ending() {
 // ItemDef_ParseProperty, the type chain @0x4A02E4..0x4A04B7]): read as the kind the game keeps, which a save writes
 // in the kind's own word (the writer writes the model alone, formats/def def_write_record).
 static int type_words() {
-	editor_test::TempProjectDir dir("opennova_catalog_type_words");
-	TEST_EXPECT(editor_test::write_text(dir.file("items.def"),
+	test_temp::TempDir dir("opennova_catalog_type_words");
+	TEST_EXPECT(test_io::write_text(dir.file("items.def"),
 	                                    "begin \"Jungle Bush\"\r\nid 100300\r\ntype foliage\r\nend\r\n\r\n"
 	                                    "begin \"Crate\"\r\nid 100301\r\ntype object\r\nend\r\n\r\n"));
 	DefCatalogDocument items; Diagnostic error;
@@ -981,8 +981,8 @@ static int type_words() {
 // last block of it (S23 B): every earlier block's definition is inert, with why; the last is found; "null" reopens
 // no row, so its blocks stay as they are.
 static int repeated_weapon_name() {
-	editor_test::TempProjectDir dir("opennova_catalog_repeated_weapon");
-	TEST_EXPECT(editor_test::write_text(dir.file("weapon.def"),
+	test_temp::TempDir dir("opennova_catalog_repeated_weapon");
+	TEST_EXPECT(test_io::write_text(dir.file("weapon.def"),
 	                                    "weapon \"WPN_TWICE\"\nend\nweapon \"null\"\nend\nweapon \"wpn_twice\"\nend\n"
 	                                    "weapon \"null\"\nend\nweapon \"WPN_TWICE\"\nend\n"));
 	DefCatalogDocument weapons;

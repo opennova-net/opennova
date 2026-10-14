@@ -112,7 +112,7 @@ int test_folders() {
 // A project holding the sound bank fixture (it names tone.wav and two waves the project lacks), its wave, a
 // texture whose name holds "texture" and two others: the files a filter lists, and the cards.
 struct SoundProject {
-	editor_test::TempProjectDir dir{"opennova_editor_project_lane"};
+	test_temp::TempDir dir{"opennova_editor_project_lane"};
 	editor_test::FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -121,13 +121,13 @@ struct SoundProject {
 		if (!session.handle(request::new_project(dir.file("project"), "Sounds"))) return;
 		session.run_operations();
 		const std::string root = session.view().project.root;
-		made = editor_test::write_bytes(root + "/sounds/menu.lwf", test_io::read_file(repo() + "/fixtures/lwf/menu.lwf")) &&
-		       editor_test::write_bytes(root + "/sounds/tone.wav", test_io::read_file(repo() + "/fixtures/lwf/tone.wav")) &&
-		       editor_test::write_text(root + "/sounds/bad.wav", "not a wave") &&
-		       editor_test::write_text(root + "/texture_notes.txt", "which texture goes where") &&
-		       editor_test::write_text(root + "/rootpic.tga", "not a picture") &&
-		       editor_test::write_text(root + "/textures/zz.pcx", "not a picture") &&
-		       editor_test::write_text(root + "/textures/aa.tga", "not a picture");
+		made = test_io::write_file(root + "/sounds/menu.lwf", test_io::read_file(repo() + "/fixtures/lwf/menu.lwf")) &&
+		       test_io::write_file(root + "/sounds/tone.wav", test_io::read_file(repo() + "/fixtures/lwf/tone.wav")) &&
+		       test_io::write_text(root + "/sounds/bad.wav", "not a wave") &&
+		       test_io::write_text(root + "/texture_notes.txt", "which texture goes where") &&
+		       test_io::write_text(root + "/rootpic.tga", "not a picture") &&
+		       test_io::write_text(root + "/textures/zz.pcx", "not a picture") &&
+		       test_io::write_text(root + "/textures/aa.tga", "not a picture");
 		session.handle(request::rescan());
 		session.run_operations();
 	}
@@ -245,8 +245,8 @@ int test_file_card() {
 		large.put('\0');
 	}
 	// L3: the card says what the build says of a file it refuses or leaves out.
-	TEST_EXPECT(editor_test::write_text(root + "/saves/player.sav", "a save") &&
-	            editor_test::write_text(root + "/extra/mine.pff", "an archive"));
+	TEST_EXPECT(test_io::write_text(root + "/saves/player.sav", "a save") &&
+	            test_io::write_text(root + "/extra/mine.pff", "an archive"));
 	session.handle(request::rescan());
 	session.run_operations();
 	const FileCard huge = file_card(v, "huge.wav");
@@ -298,18 +298,18 @@ bool write_archive(const std::string &path, const std::vector<std::string> &name
 bool fake_install(const std::string &dir, size_t files, bool executable) {
 	std::vector<std::string> names;
 	for (size_t i = 0; i < files; ++i) names.push_back("file" + std::to_string(i) + ".tga");
-	if (!editor_test::write_text(dir + "/readme.txt", "an install")) return false;
+	if (!test_io::write_text(dir + "/readme.txt", "an install")) return false;
 	if (!write_archive(dir + "/resource.pff", names) || !write_archive(dir + "/language.pff", {"lang.tga"}) ||
 	    !write_archive(dir + "/localres.pff", {"local.tga"}))
 		return false;
-	return !executable || editor_test::write_text(dir + "/Jointops.exe", "MZ");
+	return !executable || test_io::write_text(dir + "/Jointops.exe", "MZ");
 }
 
 // A folder read as a game install: one whose archives mount says what it serves and whether the game's
 // program is there; one holding none is no game; a folder that is not there says so; none named says the
 // project can still take files from the disk.
 int test_install_check() {
-	editor_test::TempProjectDir dir("opennova_editor_install_check");
+	test_temp::TempDir dir("opennova_editor_install_check");
 	const std::string install = dir.file("Joint Operations");
 	TEST_EXPECT(fake_install(install, 3, true));
 	const InstallCheck found = check_install(install, "jo");
@@ -320,7 +320,7 @@ int test_install_check() {
 	TEST_EXPECT(fake_install(bare, 1, false));
 	TEST_EXPECT(check_install(bare, "jo").ok() && check_install(bare, "jo").words().find("No Jointops.exe beside them") != std::string::npos);
 	const std::string empty = dir.file("Empty");
-	TEST_EXPECT(editor_test::write_text(empty + "/notes.txt", "nothing of the game"));
+	TEST_EXPECT(test_io::write_text(empty + "/notes.txt", "nothing of the game"));
 	const InstallCheck none = check_install(empty, "jo");
 	TEST_EXPECT(none.exists && !none.ok() && none.words().rfind("No game here", 0) == 0);
 	// A language pack alone is no install (the game boots on any one archive, the editor imports
@@ -333,13 +333,13 @@ int test_install_check() {
 	            language.missing_archives == std::vector<std::string>({"localres.pff", "resource.pff"}) &&
 	            language.words() == "Not the whole game: no localres.pff or resource.pff here (a language pack, or an install in part).");
 	const std::string broken = dir.file("Broken");
-	TEST_EXPECT(editor_test::write_text(broken + "/resource.pff", "not an archive") &&
-	            editor_test::write_text(broken + "/language.pff", "not one either"));
+	TEST_EXPECT(test_io::write_text(broken + "/resource.pff", "not an archive") &&
+	            test_io::write_text(broken + "/language.pff", "not one either"));
 	const InstallCheck unopened = check_install(broken, "jo");
 	TEST_EXPECT(!unopened.ok() && unopened.archives_present &&
 	            unopened.words().rfind("The game's archives here do not open: language.pff and resource.pff are there", 0) == 0);
 	const std::string built = dir.file("Built");
-	TEST_EXPECT(fake_install(built, 1, false) && editor_test::write_text(built + "/build.json", "{}"));
+	TEST_EXPECT(fake_install(built, 1, false) && test_io::write_text(built + "/build.json", "{}"));
 	TEST_EXPECT(!check_install(built, "jo").ok() && check_install(built, "jo").build &&
 	            check_install(built, "jo").words().rfind("This is a build the editor made", 0) == 0);
 	const std::string cached = dir.file("Mod/.opennova/build/play/abc");
@@ -355,7 +355,7 @@ int test_install_check() {
 // local.json); a folder that holds no game refused, nothing made; check_install on the wire; the recent
 // projects with their titles and games, one whose folder no longer holds a project not found.
 int test_new_project_install() {
-	editor_test::TempProjectDir dir("opennova_editor_new_project_install");
+	test_temp::TempDir dir("opennova_editor_new_project_install");
 	const std::string install = dir.file("JO");
 	TEST_EXPECT(fake_install(install, 2, true));
 	editor_test::FakePlatform platform;
@@ -365,7 +365,7 @@ int test_new_project_install() {
 		const SessionView &v = session.view();
 		// A folder that holds no game: refused, nothing made, the editor's install as it was.
 		const std::string empty = dir.file("NotAGame");
-		TEST_EXPECT(editor_test::write_text(empty + "/x.txt", "x"));
+		TEST_EXPECT(test_io::write_text(empty + "/x.txt", "x"));
 		EditorRequest wrong = request::new_project(dir.file("Refused"), "Refused");
 		wrong.game_install = empty;
 		session.handle(wrong);
@@ -429,7 +429,7 @@ int test_new_project_install() {
 // `.opennova/` made at its old path as it closes. A session that keeps no workspace (the command
 // line's) reopens none and writes none.
 int test_session_install_and_workspace() {
-	editor_test::TempProjectDir dir("opennova_editor_session_install");
+	test_temp::TempDir dir("opennova_editor_session_install");
 	const std::string own = dir.file("JO");
 	const std::string other = dir.file("Other JO");
 	TEST_EXPECT(fake_install(own, 1, true) && fake_install(other, 1, true));
@@ -493,7 +493,7 @@ int test_session_install_and_workspace() {
 // the record selected in each (kept in .opennova/local.json as the project closes and as the editor quits);
 // a file gone since is passed over, the others reopened, Output saying how many.
 int test_reopen_as_left() {
-	editor_test::TempProjectDir dir("opennova_editor_reopen_as_left");
+	test_temp::TempDir dir("opennova_editor_reopen_as_left");
 	editor_test::FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -554,11 +554,11 @@ int test_import_plan_words() {
 	import_test::Project project("opennova_editor_lane_plan");
 	const std::string root = project.root();
 	const std::string art = project.dir.file("art");
-	TEST_EXPECT(editor_test::write_text(art + "/a.mnu", screen("A", window("BUTTON", "GO", font("arial99") + image("logo.tga")))));
-	TEST_EXPECT(editor_test::write_text(art + "/arial99.fnt", "fnt") && editor_test::write_text(art + "/LOGO.TGA", "tga"));
-	TEST_EXPECT(editor_test::write_text(root + "/fonts/same.fnt", "same") && editor_test::write_text(art + "/same.fnt", "same") &&
-	            editor_test::write_text(root + "/fonts/edited.fnt", "mine!!") &&
-	            editor_test::write_text(art + "/edited.fnt", "theirs"));
+	TEST_EXPECT(test_io::write_text(art + "/a.mnu", screen("A", window("BUTTON", "GO", font("arial99") + image("logo.tga")))));
+	TEST_EXPECT(test_io::write_text(art + "/arial99.fnt", "fnt") && test_io::write_text(art + "/LOGO.TGA", "tga"));
+	TEST_EXPECT(test_io::write_text(root + "/fonts/same.fnt", "same") && test_io::write_text(art + "/same.fnt", "same") &&
+	            test_io::write_text(root + "/fonts/edited.fnt", "mine!!") &&
+	            test_io::write_text(art + "/edited.fnt", "theirs"));
 	project.session.handle(request::rescan());
 	project.session.run_operations();
 	const ImportPlan plan = project.plan({{art + "/a.mnu", {}}, {art + "/same.fnt", {}}, {art + "/edited.fnt", {}}});
@@ -587,7 +587,7 @@ int test_import_plan_words() {
 	std::vector<ImportChoice> many;
 	for (int i = 0; i < 22; ++i) {
 		const std::string name = art + "/t" + std::to_string(10 + i) + ".tga";
-		TEST_EXPECT(editor_test::write_text(name, "texture bytes"));
+		TEST_EXPECT(test_io::write_text(name, "texture bytes"));
 		many.push_back({name, {}});
 	}
 	many.push_back({art + "/arial99.fnt", {}});
@@ -596,7 +596,7 @@ int test_import_plan_words() {
 	            kinds[0].root == ImportPlanGroup::kNone && kinds[1].kind == AssetKind::Font);
 	// A font two chosen menus name: wanted by both, planned under the first, listed under the
 	// second too (its `also`), counted once.
-	TEST_EXPECT(editor_test::write_text(art + "/b.mnu", screen("B", window("BUTTON", "GO", font("arial99")))));
+	TEST_EXPECT(test_io::write_text(art + "/b.mnu", screen("B", window("BUTTON", "GO", font("arial99")))));
 	const ImportPlan both = project.plan({{art + "/a.mnu", {}}, {art + "/b.mnu", {}}});
 	const ImportPlanRow *shared = row_named(both, "arial99.fnt");
 	TEST_EXPECT(shared && shared->wanted_by == std::vector<std::string>({"a.mnu", "b.mnu"}));
@@ -621,13 +621,13 @@ int test_held_compare() {
 	const std::string root = project.root();
 	const std::string archive = project.dir.file("mod/held.pff");
 	TEST_EXPECT(write_archive(archive, {"same.tga", "other.tga"}));
-	TEST_EXPECT(editor_test::write_bytes(root + "/textures/same.tga", {1, 2, 3, 4}) &&
-	            editor_test::write_bytes(root + "/textures/other.tga", {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}));
+	TEST_EXPECT(test_io::write_file(root + "/textures/same.tga", {1, 2, 3, 4}) &&
+	            test_io::write_file(root + "/textures/other.tga", {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}));
 	const std::string art = project.dir.file("art");
 	std::vector<ImportChoice> chosen{{archive, "same.tga"}, {archive, "other.tga"}};
 	for (size_t i = 0; i < kHeldCompared + 2; ++i) {
 		const std::string name = "h" + std::to_string(100 + i) + ".tga";
-		TEST_EXPECT(editor_test::write_text(art + "/" + name, "held") && editor_test::write_text(root + "/textures/" + name, "held"));
+		TEST_EXPECT(test_io::write_text(art + "/" + name, "held") && test_io::write_text(root + "/textures/" + name, "held"));
 		chosen.push_back({art + "/" + name, {}});
 	}
 	project.session.handle(request::rescan());
@@ -650,7 +650,7 @@ int test_held_compare() {
 // The chooser's facts: a game install's files and an archive's members each with its kind by its name and its
 // size as stored; the import_preview query's choices carry them, and its rows their words and groups.
 int test_import_choices() {
-	editor_test::TempProjectDir dir("opennova_editor_lane_choices");
+	test_temp::TempDir dir("opennova_editor_lane_choices");
 	const std::string install = dir.file("JO");
 	TEST_EXPECT(fake_install(install, 3, true));
 	ProjectDocument document;
@@ -685,7 +685,7 @@ int test_import_choices() {
 // project's PNG whose alpha a PCX drops says so on the pass that imports it and on every pass after (a
 // reopened project), and no more once its record keeps the alpha.
 int test_import_findings_kept() {
-	editor_test::TempProjectDir dir("opennova_editor_lane_findings");
+	test_temp::TempDir dir("opennova_editor_lane_findings");
 	const std::string root = dir.file("project");
 	ProjectDocument doc;
 	Diagnostic error;
@@ -698,7 +698,7 @@ int test_import_findings_kept() {
 		for (uint32_t x = 0; x < 2; ++x)
 			for (const uint32_t channel : {x * 90, y * 120, 33u, 40u + x * 100}) spec.rows.push_back(uint8_t(channel));
 	}
-	TEST_EXPECT(editor_test::write_bytes(root + "/art/glow.png", test_png::make_png(spec)));
+	TEST_EXPECT(test_io::write_file(root + "/art/glow.png", test_png::make_png(spec)));
 	const Importer *importer = importer_for("glow.png");
 	TEST_EXPECT(importer != nullptr);
 	if (!importer) return 1;

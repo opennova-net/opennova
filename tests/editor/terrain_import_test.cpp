@@ -176,13 +176,6 @@ int expect_surface_sampled(const opennova::terrain::SurfaceTypeMap &map, int sid
 	return 0;
 }
 
-std::vector<uint8_t> read(const std::string &path) {
-	std::vector<uint8_t> bytes;
-	std::string message;
-	opennova::io::read_file_bytes(path, bytes, message);
-	return bytes;
-}
-
 // A camera at `eye` looking along `fwd` (normalized here): the column-major world-to-view matrix the
 // frame compiler culls with, -Z forward, +Y up.
 opennova::TerrainViewInput camera_at(const float eye[3], float fwd[3]) {
@@ -304,7 +297,7 @@ int test_surface_legend_words() {
 }
 
 struct Project {
-	editor_test::TempProjectDir dir;
+	test_temp::TempDir dir;
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session;
@@ -324,9 +317,9 @@ struct Project {
 int test_new_terrain() {
 	Project project("opennova_editor_terrain_import");
 	const std::string images = project.dir.file("images");
-	TEST_EXPECT(editor_test::write_bytes(images + "/height.png", island_png16()));
-	TEST_EXPECT(editor_test::write_bytes(images + "/colour.png", colour_png(kSide)));
-	TEST_EXPECT(editor_test::write_bytes(images + "/small.png", colour_png(256)));
+	TEST_EXPECT(test_io::write_file(images + "/height.png", island_png16()));
+	TEST_EXPECT(test_io::write_file(images + "/colour.png", colour_png(kSide)));
+	TEST_EXPECT(test_io::write_file(images + "/small.png", colour_png(256)));
 	const ProjectSession &session = project.session;
 
 	// Refused, nothing written: a colour map of another size, a value of no key, a name too long.
@@ -349,9 +342,9 @@ int test_new_terrain() {
 	TEST_EXPECT(!outcome.refused);
 	TerrainSet set;
 	std::string why;
-	TEST_EXPECT(parse_terrain_set(read(project.at("art/terrain/isle.tset")), set, why));
+	TEST_EXPECT(parse_terrain_set(test_io::read_file(project.at("art/terrain/isle.tset")), set, why));
 	TEST_EXPECT(set.heightmap == "isle_heightmap.png" && set.colormap == "isle_colormap.png" && set.detail.empty());
-	TEST_EXPECT(read(project.at("art/terrain/isle_heightmap.png")) == island_png16());
+	TEST_EXPECT(test_io::read_file(project.at("art/terrain/isle_heightmap.png")) == island_png16());
 	ImportSidecar record;
 	Diagnostic error;
 	TEST_EXPECT(load_import_sidecar(project.at("art/terrain/isle.tset.import"), record, error));
@@ -388,7 +381,7 @@ int test_new_terrain() {
 	// The outputs, read back as the game reads them.
 	opennova::TrnConfig trn;
 	{
-		const std::vector<uint8_t> text = read(project.output("isle.trn"));
+		const std::vector<uint8_t> text = test_io::read_file(project.output("isle.trn"));
 		std::istringstream in(std::string(text.begin(), text.end()));
 		TEST_EXPECT(opennova::load_trn(in, trn, why)); // the admission gate
 	}
@@ -397,7 +390,7 @@ int test_new_terrain() {
 	TEST_EXPECT(trn.water_height == 24 && trn.sector_count == 8 && trn.origin_x == -4);
 	TEST_EXPECT(trn.sector_grid[3][3] == 1 && trn.sector_grid[3][4] == 3 && trn.sector_grid[4][3] == 2 && trn.sector_grid[4][4] == 4);
 	TEST_EXPECT(trn.sector_grid[0][0] == 0 && trn.wrap_x == 0 && trn.charmap.empty());
-	const std::vector<uint8_t> cpt_bytes = read(project.output("isle.cpt"));
+	const std::vector<uint8_t> cpt_bytes = test_io::read_file(project.output("isle.cpt"));
 	opennova::CptFile cpt;
 	TEST_EXPECT(opennova::load_cpt(cpt_bytes.data(), cpt_bytes.size(), cpt, why));
 	TEST_EXPECT(cpt.depth_format == opennova::DepthFormat::CDEP && cpt.tiles.size() == 341 && cpt_bytes[6] == 5);
@@ -405,13 +398,13 @@ int test_new_terrain() {
 	const double peak = cpt.depth_buffer[512 * kSide + 512] / 256.0;
 	TEST_EXPECT(peak > 48.0 && peak < 52.0 && cpt.depth_buffer[0] == 0);
 	for (const char *texture : {"isle_c.tga", "isle_d1.tga"}) {
-		const std::vector<uint8_t> tga = read(project.output(texture));
+		const std::vector<uint8_t> tga = test_io::read_file(project.output(texture));
 		uint32_t w = 0, h = 0;
 		TEST_EXPECT(opennova::tga::tga_header_size(tga.data(), tga.size(), w, h) && w == 1024 && h == 1024);
 	}
-	TEST_EXPECT(read(project.output("isle_c.tga"))[16] == 24 && read(project.output("isle_d1.tga"))[16] == 32);
+	TEST_EXPECT(test_io::read_file(project.output("isle_c.tga"))[16] == 24 && test_io::read_file(project.output("isle_d1.tga"))[16] == 32);
 	opennova::TilFile til;
-	const std::vector<uint8_t> til_bytes = read(project.output("isle.til"));
+	const std::vector<uint8_t> til_bytes = test_io::read_file(project.output("isle.til"));
 	TEST_EXPECT(til_bytes.size() == 16 && opennova::load_til(til_bytes.data(), til_bytes.size(), til, why) && til.empty());
 
 	// The runtime's own load over the outputs: the heights the field store samples, the patches a
@@ -484,16 +477,16 @@ int test_new_terrain() {
 
 	// Rerun-stable: imported again with nothing changed, the same bytes.
 	std::map<std::string, std::vector<uint8_t>> before;
-	for (const std::string &name : terrain_output_names("isle", false, false, false)) before[name] = read(project.output(name));
+	for (const std::string &name : terrain_output_names("isle", false, false, false)) before[name] = test_io::read_file(project.output(name));
 	outcome = editor_test::handle_to_end(project.session, request::reimport("art/terrain/isle.tset", true));
 	TEST_EXPECT(!outcome.refused && (*session.view().project.imports)[0].reimported);
-	for (const auto &[name, bytes] : before) TEST_EXPECT(!bytes.empty() && read(project.output(name)) == bytes);
+	for (const auto &[name, bytes] : before) TEST_EXPECT(!bytes.empty() && test_io::read_file(project.output(name)) == bytes);
 
 	// An input changed imports it again: the colour map's first texel.
 	std::vector<uint8_t> rgba(size_t(kSide) * kSide * 4, 200);
-	TEST_EXPECT(editor_test::write_bytes(project.at("art/terrain/isle_colormap.png"), encode_png_rgba(rgba.data(), kSide, kSide)));
+	TEST_EXPECT(test_io::write_file(project.at("art/terrain/isle_colormap.png"), encode_png_rgba(rgba.data(), kSide, kSide)));
 	outcome = editor_test::handle_to_end(project.session, request::reimport(std::string(), false));
-	TEST_EXPECT(read(project.output("isle_c.tga")) != before["isle_c.tga"] && read(project.output("isle.cpt")) == before["isle.cpt"]);
+	TEST_EXPECT(test_io::read_file(project.output("isle_c.tga")) != before["isle_c.tga"] && test_io::read_file(project.output("isle.cpt")) == before["isle.cpt"]);
 
 	// A name taken: refused, nothing written over.
 	outcome = editor_test::handle_to_end(project.session, request::new_terrain("isle",
@@ -505,7 +498,7 @@ int test_new_terrain() {
 	for (const Diagnostic &d : outcome.findings) std::fprintf(stderr, "  %s: %s\n", d.code().c_str(), d.message.c_str());
 	TEST_EXPECT(!outcome.refused && fs::is_regular_file(system_path(project.at("terrain/isle.env"))));
 	{
-		const std::vector<uint8_t> text = read(project.at("terrain/isle.env"));
+		const std::vector<uint8_t> text = test_io::read_file(project.at("terrain/isle.env"));
 		std::istringstream in(std::string(text.begin(), text.end()));
 		opennova::env::Config env;
 		TEST_EXPECT(opennova::env::load_env(in, env, why) && env.keyframes.size() == 3 && env.name == "isle");
@@ -527,10 +520,10 @@ int test_new_terrain_surface() {
 	const std::string images = project.dir.file("images");
 	const std::vector<uint8_t> c512 = surface_classes(512);
 	std::vector<uint8_t> stray = c512;
-	TEST_EXPECT(editor_test::write_bytes(images + "/height.png", island_png16()));
-	TEST_EXPECT(editor_test::write_bytes(images + "/colour.png", colour_png(kSide)));
-	TEST_EXPECT(editor_test::write_bytes(images + "/surface.png", surface_colour_png(512, c512)));
-	TEST_EXPECT(editor_test::write_bytes(images + "/bad.png", surface_palette_png(512, std::vector<uint8_t>(c512.size(), 31))));
+	TEST_EXPECT(test_io::write_file(images + "/height.png", island_png16()));
+	TEST_EXPECT(test_io::write_file(images + "/colour.png", colour_png(kSide)));
+	TEST_EXPECT(test_io::write_file(images + "/surface.png", surface_colour_png(512, c512)));
+	TEST_EXPECT(test_io::write_file(images + "/bad.png", surface_palette_png(512, std::vector<uint8_t>(c512.size(), 31))));
 	const ProjectSession &session = project.session;
 
 	ActionOutcome outcome = editor_test::handle_to_end(project.session, request::new_terrain("reef",
@@ -545,7 +538,7 @@ int test_new_terrain_surface() {
 	TEST_EXPECT(!outcome.refused);
 	TerrainSet set;
 	std::string why;
-	TEST_EXPECT(parse_terrain_set(read(project.at("art/terrain/reef.tset")), set, why) && set.surface == "reef_surface.png");
+	TEST_EXPECT(parse_terrain_set(test_io::read_file(project.at("art/terrain/reef.tset")), set, why) && set.surface == "reef_surface.png");
 	ImportSidecar record;
 	Diagnostic error;
 	TEST_EXPECT(load_import_sidecar(project.at("art/terrain/reef.tset.import"), record, error));
@@ -559,14 +552,14 @@ int test_new_terrain_surface() {
 	// The .trn names it; the file is the game's 8-bit PCX, the legend its palette.
 	opennova::TrnConfig trn;
 	{
-		const std::vector<uint8_t> text = read(project.output("reef.trn"));
+		const std::vector<uint8_t> text = test_io::read_file(project.output("reef.trn"));
 		const std::string words(text.begin(), text.end());
 		TEST_EXPECT(words.find("polytrn_charmap") != std::string::npos && words.find("reef_m.pcx") != std::string::npos);
 		std::istringstream in(words);
 		TEST_EXPECT(opennova::load_trn(in, trn, why) && trn.charmap == "reef_m.pcx");
 	}
 	{
-		const std::vector<uint8_t> pcx = read(project.output("reef_m.pcx"));
+		const std::vector<uint8_t> pcx = test_io::read_file(project.output("reef_m.pcx"));
 		IndexedImage8 map;
 		TEST_EXPECT(pcx.size() > 897 && pcx[3] == 8 && pcx[65] == 1);
 		TEST_EXPECT(opennova::decode_pcx_indexed(pcx.data(), pcx.size(), map, why) && map.width == 512 && map.indices == c512);
@@ -612,7 +605,7 @@ int test_new_terrain_surface() {
 
 	// The map made again as a palette PNG of 1024: imported again, the classes read at that scale.
 	const std::vector<uint8_t> c1024 = surface_classes(1024);
-	TEST_EXPECT(editor_test::write_bytes(project.at("art/terrain/reef_surface.png"), surface_palette_png(1024, c1024)));
+	TEST_EXPECT(test_io::write_file(project.at("art/terrain/reef_surface.png"), surface_palette_png(1024, c1024)));
 	outcome = editor_test::handle_to_end(project.session, request::reimport(std::string(), false));
 	TEST_EXPECT(!outcome.refused && (*session.view().project.imports)[0].ok);
 	{
@@ -785,10 +778,10 @@ int test_new_terrain_foliage() {
 	Project project("opennova_editor_terrain_foliage");
 	const std::string images = project.dir.file("images");
 	const std::vector<uint8_t> c256 = foliage_codes(256);
-	TEST_EXPECT(editor_test::write_bytes(images + "/height.png", island_png16()));
-	TEST_EXPECT(editor_test::write_bytes(images + "/colour.png", colour_png(kSide)));
-	TEST_EXPECT(editor_test::write_bytes(images + "/foliage.png", foliage_palette_png(256, c256)));
-	TEST_EXPECT(editor_test::write_bytes(images + "/coloured.png", colour_png(256)));
+	TEST_EXPECT(test_io::write_file(images + "/height.png", island_png16()));
+	TEST_EXPECT(test_io::write_file(images + "/colour.png", colour_png(kSide)));
+	TEST_EXPECT(test_io::write_file(images + "/foliage.png", foliage_palette_png(256, c256)));
+	TEST_EXPECT(test_io::write_file(images + "/coloured.png", colour_png(256)));
 	const std::string defs = "graphic grass.3di match 253 color_upper 2 | graphic shrub.3di match 254 253 attrib forceon";
 
 	ActionOutcome outcome = editor_test::handle_to_end(project.session, request::new_terrain("isle",
@@ -809,7 +802,7 @@ int test_new_terrain_foliage() {
 	TEST_EXPECT(!outcome.refused);
 	TerrainSet set;
 	std::string why;
-	TEST_EXPECT(parse_terrain_set(read(project.at("art/terrain/isle.tset")), set, why) && set.foliagemap == "isle_foliagemap.png" &&
+	TEST_EXPECT(parse_terrain_set(test_io::read_file(project.at("art/terrain/isle.tset")), set, why) && set.foliagemap == "isle_foliagemap.png" &&
 	            set.foliage.size() == 2);
 	ImportSidecar record;
 	Diagnostic error;
@@ -830,7 +823,7 @@ int test_new_terrain_foliage() {
 	// The .trn names the map and holds the definitions as its blocks; the map is the game's 8-bit PCX.
 	opennova::TrnConfig trn;
 	{
-		const std::vector<uint8_t> text = read(project.output("isle.trn"));
+		const std::vector<uint8_t> text = test_io::read_file(project.output("isle.trn"));
 		std::istringstream in(std::string(text.begin(), text.end()));
 		TEST_EXPECT(opennova::load_trn(in, trn, why) && trn.foliagemap == "isle_f.pcx" && trn.foliage_defs.size() == 2);
 	}
@@ -840,7 +833,7 @@ int test_new_terrain_foliage() {
 	            trn.foliage_defs[1].attrib_flags == FOLIAGE_ATTRIB_FORCE_ON);
 	IndexedImage8 map;
 	{
-		const std::vector<uint8_t> pcx = read(project.output("isle_f.pcx"));
+		const std::vector<uint8_t> pcx = test_io::read_file(project.output("isle_f.pcx"));
 		TEST_EXPECT(pcx.size() > 897 && pcx[3] == 8 && pcx[65] == 1);
 		TEST_EXPECT(opennova::decode_pcx_indexed(pcx.data(), pcx.size(), map, why) && map.width == 256 && map.indices == c256);
 	}

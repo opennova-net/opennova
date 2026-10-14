@@ -42,8 +42,6 @@ using opennova::io::JsonValue;
 
 namespace {
 
-std::string fixture(const std::string &name) { return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/" + name; }
-
 bool contains(const std::string &text, const std::string &part) { return text.find(part) != std::string::npos; }
 
 const MapsDevicePatch *last_of(const MissionViewport &view, MapsDevicePatch::Kind kind) {
@@ -60,7 +58,7 @@ bool accounts_for(const MapsDevicePatch &patch, const std::string &name) {
 }
 
 int test_view() {
-	editor_test::TempProjectDir dir("opennova_editor_terrain_maps_view");
+	test_temp::TempDir dir("opennova_editor_terrain_maps_view");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -69,7 +67,7 @@ int test_view() {
 	const SessionView &v = session.view();
 	const std::string root = v.project.root;
 	for (const char *name : {"Tmap.trn", "Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx"})
-		TEST_EXPECT(editor_test::write_bytes(root + "/terrain/" + name, test_io::read_file(fixture(std::string("terrain/tmap/") + name))));
+		TEST_EXPECT(test_io::write_file(root + "/terrain/" + name, test_io::read_file(test_paths_fixture(std::string("terrain/tmap/") + name))));
 	// The colour map the .trn names, 1024 square, 24-bit with the TGA 2.0 footer as the shipped ones are.
 	std::vector<uint8_t> grey(size_t(1024) * 1024 * 4, 128), colour_map;
 	for (size_t i = 3; i < grey.size(); i += 4) grey[i] = 255; // a 24-bit TGA holds no alpha
@@ -79,8 +77,8 @@ int test_view() {
 	form.descriptor = 0;
 	form.footer = true;
 	TEST_EXPECT(tga::tga_write(grey.data(), 1024, 1024, form, colour_map, why));
-	TEST_EXPECT(editor_test::write_bytes(root + "/terrain/mnml_c.tga", colour_map));
-	TEST_EXPECT(editor_test::write_text(root + "/day.env", "env"));
+	TEST_EXPECT(test_io::write_file(root + "/terrain/mnml_c.tga", colour_map));
+	TEST_EXPECT(test_io::write_text(root + "/day.env", "env"));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::set_missions(session, true);
 	editor_test::handle_to_end(session, request::create_file("m.bms", "mission", {{"terrain", "Tmap.trn"}, {"environment", "day.env"}}));
@@ -272,7 +270,7 @@ int test_view() {
 // An imported island (S20's import of a terrain set's images: 8-bit grey heights, a colour map, a surface map of grass
 // (class 2) as a palette PNG, a foliage map of code 0 as a grey PNG) and a mission on it: the mission's path ("" where
 // a step failed).
-std::string isle_project(ProjectSession &session, editor_test::TempProjectDir &dir) {
+std::string isle_project(ProjectSession &session, test_temp::TempDir &dir) {
 	const SessionView &v = session.view();
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Isle"));
 	const std::string images = dir.file("images");
@@ -284,11 +282,11 @@ std::string isle_project(ProjectSession &session, editor_test::TempProjectDir &d
 			heights[size_t(y) * kSide + x] = uint8_t(std::max(0.0, 200.0 * (1.0 - std::hypot(x - 512.0, y - 512.0) / 400.0)));
 	std::vector<uint8_t> ramp;
 	for (int i = 0; i < 256; ++i) ramp.insert(ramp.end(), 3, uint8_t(i));
-	bool written = editor_test::write_bytes(images + "/height.png", png::encode_png_gray(heights.data(), kSide, kSide));
-	written = editor_test::write_bytes(images + "/colour.png", png::encode_png_rgba(colours.data(), kSide, kSide)) && written;
-	written = editor_test::write_bytes(images + "/surface.png", png::encode_png_indexed(classes.data(), kMap, kMap, ramp.data(), 256)) &&
+	bool written = test_io::write_file(images + "/height.png", png::encode_png_gray(heights.data(), kSide, kSide));
+	written = test_io::write_file(images + "/colour.png", png::encode_png_rgba(colours.data(), kSide, kSide)) && written;
+	written = test_io::write_file(images + "/surface.png", png::encode_png_indexed(classes.data(), kMap, kMap, ramp.data(), 256)) &&
 	          written;
-	written = editor_test::write_bytes(images + "/foliage.png", png::encode_png_gray(codes.data(), kMap, kMap)) && written;
+	written = test_io::write_file(images + "/foliage.png", png::encode_png_gray(codes.data(), kMap, kMap)) && written;
 	ActionOutcome outcome = editor_test::handle_to_end(session, request::new_terrain("isle",
 	        {{"heightmap", images + "/height.png"}, {"colormap", images + "/colour.png"}, {"surface", images + "/surface.png"},
 	         {"foliagemap", images + "/foliage.png"}}));
@@ -306,7 +304,7 @@ std::string isle_project(ProjectSession &session, editor_test::TempProjectDir &d
 // stand for the maps the import makes. A surface stroke on the source reaches the view's ground (its class there, an
 // Update), and a foliage stroke is an Update whose device patch holds the codes, nothing built again at its end.
 int test_imported() {
-	editor_test::TempProjectDir dir("opennova_editor_terrain_maps_view_import");
+	test_temp::TempDir dir("opennova_editor_terrain_maps_view_import");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -424,7 +422,7 @@ bool legend_holds(const MissionOverlayImage &overlay, int value) {
 // first followed once the stroke is in), never from the outputs read again. A source read again or
 // closed unsaved (its paint dropped) has the view's ground read whole again, the overlay with it.
 int test_sample_unsaved() {
-	editor_test::TempProjectDir dir("opennova_editor_terrain_maps_view_sample");
+	test_temp::TempDir dir("opennova_editor_terrain_maps_view_sample");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -531,7 +529,7 @@ int test_brush_overlay_rule() {
 // person's own again as the tool moves away or the pane hides; an overlay the person picks meanwhile stays. The options
 // say what shows, the body's brush_overlay why; the legend's fold is an option of the canvas's alone (no Update).
 int test_brush_overlay() {
-	editor_test::TempProjectDir dir("opennova_editor_terrain_brush_overlay");
+	test_temp::TempDir dir("opennova_editor_terrain_brush_overlay");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -540,8 +538,8 @@ int test_brush_overlay() {
 	const SessionView &v = session.view();
 	const std::string root = v.project.root;
 	for (const char *name : {"Tmap.trn", "Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx"})
-		TEST_EXPECT(editor_test::write_bytes(root + "/terrain/" + name, test_io::read_file(fixture(std::string("terrain/tmap/") + name))));
-	TEST_EXPECT(editor_test::write_text(root + "/day.env", "env"));
+		TEST_EXPECT(test_io::write_file(root + "/terrain/" + name, test_io::read_file(test_paths_fixture(std::string("terrain/tmap/") + name))));
+	TEST_EXPECT(test_io::write_text(root + "/day.env", "env"));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::set_missions(session, true);
 	editor_test::handle_to_end(session, request::create_file("m.bms", "mission", {{"terrain", "Tmap.trn"}, {"environment", "day.env"}}));

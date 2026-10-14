@@ -686,7 +686,7 @@ int test_document_titles() {
 // and of the trigger (its words) beside their names, and the `problems` query's row of the trigger's
 // missing SSN naming the trigger in words (`record_title`) while the mission is open.
 int test_wire_and_problems() {
-	editor_test::TempProjectDir dir("opennova_mission_sentence_wire");
+	test_temp::TempDir dir("opennova_mission_sentence_wire");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -702,7 +702,7 @@ int test_wire_and_problems() {
 		file.triggers[0].param1 = 4321;
 		std::vector<uint8_t> out;
 		TEST_EXPECT(bms::write(file, out, message));
-		TEST_EXPECT(editor_test::write_bytes(root + "/missions/words.bms", out));
+		TEST_EXPECT(test_io::write_file(root + "/missions/words.bms", out));
 	}
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::handle_to_end(session, request::open_document("missions/words.bms"));

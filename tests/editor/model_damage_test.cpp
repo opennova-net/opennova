@@ -66,7 +66,7 @@ const char *kItems =
 		"begin \"Shed sign\"\nid 100503\ntype decoration\ngraphic house\nai_function gnrl\nsounddeath EXPLO_PUMP\nend\n";
 
 struct DamageProject {
-	editor_test::TempProjectDir dir{"opennova_editor_model_damage"};
+	test_temp::TempDir dir{"opennova_editor_model_damage"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -79,12 +79,12 @@ struct DamageProject {
 		session.run_operations();
 		editor_test::create_missing_files(session);
 		root = session.view().project.root;
-		bool ok = editor_test::write_bytes(root + "/models/crate.3di", test_io::read_file(synth("crate.3di"))) &&
-		          editor_test::write_bytes(root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))) &&
-		          editor_test::write_bytes(root + "/models/house.3di", test_io::read_file(synth("house.3di"))) &&
-		          editor_test::write_bytes(root + "/sounds/game.lwf", editor_test::wave_bank_of({"EXPLO_PUMP"})) &&
-		          editor_test::write_bytes(root + "/sounds/explo_pump.wav", test_io::read_file(repo() + "/fixtures/lwf/tone.wav")) &&
-		          editor_test::write_text(root + "/defs/items.def", editor_test::crlf(kItems));
+		bool ok = test_io::write_file(root + "/models/crate.3di", test_io::read_file(synth("crate.3di"))) &&
+		          test_io::write_file(root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))) &&
+		          test_io::write_file(root + "/models/house.3di", test_io::read_file(synth("house.3di"))) &&
+		          test_io::write_file(root + "/sounds/game.lwf", editor_test::wave_bank_of({"EXPLO_PUMP"})) &&
+		          test_io::write_file(root + "/sounds/explo_pump.wav", test_io::read_file(repo() + "/fixtures/lwf/tone.wav")) &&
+		          test_io::write_text(root + "/defs/items.def", test_io::crlf(kItems));
 		editor_test::handle_to_end(session, request::rescan());
 		while (session.view().activity.validation.running) session.poll();
 		made = ok && open("models/crate.3di");
@@ -412,9 +412,9 @@ static int test_retail() {
 	def::def_free_items(&parsed);
 	if (damageable.empty()) return retail::skip_leg("OPENNOVA_JO_ASSETS with the models JO's damageable items name");
 	for (const std::string &model : models)
-		TEST_EXPECT(editor_test::write_bytes(project.root + "/models/" + std::filesystem::path(model).filename().string(),
+		TEST_EXPECT(test_io::write_file(project.root + "/models/" + std::filesystem::path(model).filename().string(),
 		                                     test_io::read_file(model)));
-	TEST_EXPECT(editor_test::write_bytes(project.root + "/defs/items.def", bytes));
+	TEST_EXPECT(test_io::write_file(project.root + "/defs/items.def", bytes));
 	editor_test::handle_to_end(project.session, request::rescan());
 	while (project.session.view().activity.validation.running) project.session.poll();
 	size_t swapped = 0, pieces = 0, gnrc = 0, brains = 0, tails = 0;

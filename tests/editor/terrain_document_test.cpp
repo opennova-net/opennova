@@ -524,7 +524,7 @@ std::vector<uint8_t> grey_png(int side) {
 // In a session: an authored terrain's references through the document, the missions on it, an edit followed,
 // undone, saved; an imported terrain opened and its edits refused, its import read and reimported.
 int test_session() {
-	editor_test::TempProjectDir dir("opennova_terrain_document");
+	test_temp::TempDir dir("opennova_terrain_document");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -532,12 +532,12 @@ int test_session() {
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	const std::string root = view.project.root;
-	TEST_EXPECT(editor_test::write_text(root + "/isle.trn", kShipped));
-	TEST_EXPECT(editor_test::write_text(root + "/isle_c.tga", "x"));
+	TEST_EXPECT(test_io::write_text(root + "/isle.trn", kShipped));
+	TEST_EXPECT(test_io::write_text(root + "/isle_c.tga", "x"));
 	// The mission's .env and overcast.def each set a terrain key, which the game's terrain reader takes after the
 	// .trn (D-TERRAIN-18): the terrain's uses say where each comes from.
-	TEST_EXPECT(editor_test::write_text(root + "/day.env", "sky_height 175\r\npolytrn_detaildensity 64\r\n"));
-	TEST_EXPECT(editor_test::write_text(root + "/overcast.def", "polytrn_wrapx 1\r\n"));
+	TEST_EXPECT(test_io::write_text(root + "/day.env", "sky_height 175\r\npolytrn_detaildensity 64\r\n"));
+	TEST_EXPECT(test_io::write_text(root + "/overcast.def", "polytrn_wrapx 1\r\n"));
 	{
 		opennova::bms::File file;
 		opennova::mission::make_default(file);
@@ -547,8 +547,8 @@ int test_session() {
 		            opennova::mission::set_header_string(file, "terrain_tile", "rock.tga", why));
 		std::vector<uint8_t> bytes;
 		TEST_EXPECT(opennova::bms::write(file, bytes, why));
-		TEST_EXPECT(editor_test::write_bytes(root + "/landing.bms", bytes));
-		TEST_EXPECT(editor_test::write_text(root + "/landing.til", "0lit"));
+		TEST_EXPECT(test_io::write_file(root + "/landing.bms", bytes));
+		TEST_EXPECT(test_io::write_text(root + "/landing.til", "0lit"));
 	}
 	editor_test::handle_to_end(session, request::rescan());
 	const AssetGraph &graph = *view.findings.graph;
@@ -635,8 +635,8 @@ int test_session() {
 
 	// A terrain an import makes: opened to be read, no edit taken, its import read and imported again.
 	const std::string images = dir.file("images");
-	TEST_EXPECT(editor_test::write_bytes(images + "/height.png", grey_png(1024)));
-	TEST_EXPECT(editor_test::write_bytes(images + "/colour.png", grey_png(1024)));
+	TEST_EXPECT(test_io::write_file(images + "/height.png", grey_png(1024)));
+	TEST_EXPECT(test_io::write_file(images + "/colour.png", grey_png(1024)));
 	ActionOutcome outcome = editor_test::handle_to_end(session, request::new_terrain("reef",
 	        {{"heightmap", images + "/height.png"}, {"colormap", images + "/colour.png"}, {"water", "6"}}));
 	TEST_EXPECT(!outcome.refused);

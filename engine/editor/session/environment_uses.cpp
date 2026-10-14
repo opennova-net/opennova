@@ -205,7 +205,7 @@ EnvironmentUses environment_uses(const SessionView &view, const std::string &pat
 		// The water plane by the game's ladder (env::mission_water_rung, its witnesses there): the
 		// header's override, then the environment's water height where this file writes one, then
 		// the terrain's, the fallback for a configuration that never read the .trn, as this file's
-		// own lines are (D-ENV-S26B2).
+		// own lines are (env #46).
 		const env::ResolvedWaterHeight water = env::mission_water_rung(use.overrides,
 				environment_read ? environment : env::Config(),
 				use.terrain_read ? float(use.terrain_water) * 0.5f : 0.0f);

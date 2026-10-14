@@ -111,7 +111,7 @@ bool load(MnuDocument &document, const std::string &path) {
 }
 
 int structure_and_save() {
-	editor_test::TempProjectDir dir("opennova_menu_document_test");
+	test_temp::TempDir dir("opennova_menu_document_test");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -214,7 +214,7 @@ int structure_and_save() {
 }
 
 int validation() {
-	editor_test::TempProjectDir dir("opennova_menu_validation_test");
+	test_temp::TempDir dir("opennova_menu_validation_test");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -294,7 +294,7 @@ int validation() {
 // --- Windows at any depth (ADR 0046 S9g, S9h) ------------------------------------------
 
 int windows_at_depth() {
-	editor_test::TempProjectDir dir("opennova_menu_depth_test");
+	test_temp::TempDir dir("opennova_menu_depth_test");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -499,9 +499,9 @@ const char *const kShippedShape =
 // part moved to a window that has none, refused where one is); a list it does not read takes no record (the
 // writer writes a list only where it is read); a leaf added into an absent block authors it; the parts' toggles.
 int every_list() {
-	editor_test::TempProjectDir dir("opennova_menu_every_list_test");
+	test_temp::TempDir dir("opennova_menu_every_list_test");
 	const std::string path = dir.file("options.mnu");
-	TEST_EXPECT(editor_test::write_text(path, kShippedShape));
+	TEST_EXPECT(test_io::write_text(path, kShippedShape));
 	MnuDocument document;
 	TEST_EXPECT(load(document, path) && document.identities_match());
 	NodeAddress back, main, spin, results;
@@ -620,9 +620,9 @@ int every_list() {
 
 // Every list's default record, the window's and the nested one (a row's cell), survives a save and a reload.
 int defaults_survive() {
-	editor_test::TempProjectDir dir("opennova_menu_defaults_test");
+	test_temp::TempDir dir("opennova_menu_defaults_test");
 	const std::string path = dir.file("options.mnu");
-	TEST_EXPECT(editor_test::write_text(path, kShippedShape));
+	TEST_EXPECT(test_io::write_text(path, kShippedShape));
 	MnuDocument document;
 	TEST_EXPECT(load(document, path));
 	NodeAddress back, results;
@@ -648,9 +648,9 @@ int defaults_survive() {
 
 // window_index numbers windows as the frame compiler does (the spin arrows after them).
 int window_index_matches_the_compiler() {
-	editor_test::TempProjectDir dir("opennova_menu_index_test");
+	test_temp::TempDir dir("opennova_menu_index_test");
 	const std::string path = dir.file("options.mnu");
-	TEST_EXPECT(editor_test::write_text(path, kShippedShape));
+	TEST_EXPECT(test_io::write_text(path, kShippedShape));
 	MnuDocument document;
 	TEST_EXPECT(load(document, path));
 	const mnu::Document native = document.native();
@@ -678,7 +678,7 @@ int window_index_matches_the_compiler() {
 // anything else cannot be copied; Cut is a copy and a Remove; windows of two screens copied and
 // cut together (the polish).
 int copy_and_paste() {
-	editor_test::TempProjectDir dir("opennova_menu_clipboard_test");
+	test_temp::TempDir dir("opennova_menu_clipboard_test");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -781,7 +781,7 @@ int copy_and_paste() {
 // (a window inside another selected one goes with that one), the copies selected; a screen
 // on its own after itself; nothing selected is refused.
 int duplicate_selection() {
-	editor_test::TempProjectDir dir("opennova_menu_duplicate_test");
+	test_temp::TempDir dir("opennova_menu_duplicate_test");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -853,11 +853,11 @@ int duplicate_selection() {
 
 // A code-page menu's windows pasted into a Unicode one keep their characters.
 int copy_between_encodings() {
-	editor_test::TempProjectDir dir("opennova_menu_clipboard_encoding_test");
+	test_temp::TempDir dir("opennova_menu_clipboard_encoding_test");
 	const std::string code_page = dir.file("a.mnu"), unicode = dir.file("b.mnu");
-	TEST_EXPECT(editor_test::write_text(code_page, "<SCREEN><NAME>A</NAME><WINDOW type=\"static\" name=\"CAFE\">"
+	TEST_EXPECT(test_io::write_text(code_page, "<SCREEN><NAME>A</NAME><WINDOW type=\"static\" name=\"CAFE\">"
 	                                               "<POSITION><LEFT>0</LEFT></POSITION><STRING>Caf\xE9</STRING></WINDOW></SCREEN>"));
-	TEST_EXPECT(editor_test::write_text(unicode, "\xEF\xBB\xBF<SCREEN><NAME>B</NAME><WINDOW type=\"window\" name=\"MAIN\">"
+	TEST_EXPECT(test_io::write_text(unicode, "\xEF\xBB\xBF<SCREEN><NAME>B</NAME><WINDOW type=\"window\" name=\"MAIN\">"
 	                                             "<POSITION><LEFT>0</LEFT></POSITION></WINDOW></SCREEN>"));
 	MnuDocument from, to;
 	TEST_EXPECT(load(from, code_page) && load(to, unicode));
@@ -897,11 +897,11 @@ int copy_between_encodings() {
 // counts characters in either encoding, as the game's narrowed buffers count them (a Unicode menu's
 // text of two-byte characters past half the width in bytes is taken, and refused at the width).
 int texts_in_their_code_page() {
-	editor_test::TempProjectDir dir("opennova_menu_code_page_test");
+	test_temp::TempDir dir("opennova_menu_code_page_test");
 	const std::string code_page = dir.file("a.mnu"), unicode = dir.file("b.mnu");
-	TEST_EXPECT(editor_test::write_text(code_page, "<SCREEN><NAME>A</NAME><WINDOW type=\"static\" name=\"CAFE\">"
+	TEST_EXPECT(test_io::write_text(code_page, "<SCREEN><NAME>A</NAME><WINDOW type=\"static\" name=\"CAFE\">"
 	                                               "<POSITION><LEFT>0</LEFT></POSITION><STRING>Caf\xE9</STRING></WINDOW></SCREEN>"));
-	TEST_EXPECT(editor_test::write_text(unicode, "\xEF\xBB\xBF<SCREEN><NAME>B</NAME><WINDOW type=\"static\" name=\"MAIN\">"
+	TEST_EXPECT(test_io::write_text(unicode, "\xEF\xBB\xBF<SCREEN><NAME>B</NAME><WINDOW type=\"static\" name=\"MAIN\">"
 	                                             "<POSITION><LEFT>0</LEFT></POSITION><STRING>Caf\xC3\xA9</STRING></WINDOW></SCREEN>"));
 	MnuDocument cp, wide;
 	TEST_EXPECT(load(cp, code_page) && load(wide, unicode));
@@ -933,9 +933,9 @@ int texts_in_their_code_page() {
 // A window selected with one that holds it comes with that one; a window a part holds
 // copies; the windows a part holds count among the names a new window avoids.
 int copy_selection_shapes() {
-	editor_test::TempProjectDir dir("opennova_menu_clipboard_shapes_test");
+	test_temp::TempDir dir("opennova_menu_clipboard_shapes_test");
 	const std::string path = dir.file("options.mnu");
-	TEST_EXPECT(editor_test::write_text(path, kShippedShape));
+	TEST_EXPECT(test_io::write_text(path, kShippedShape));
 	MnuDocument document;
 	TEST_EXPECT(load(document, path));
 	NodeAddress results, caption, spin;
@@ -967,9 +967,9 @@ int copy_selection_shapes() {
 // A screen duplicated after its records were looked up: the copy's records answer by their
 // own identities (read, set, add into, found by name), and the original's still do.
 int duplicate_screen() {
-	editor_test::TempProjectDir dir("opennova_menu_duplicate_screen_test");
+	test_temp::TempDir dir("opennova_menu_duplicate_screen_test");
 	const std::string path = dir.file("options.mnu");
-	TEST_EXPECT(editor_test::write_text(path, kShippedShape));
+	TEST_EXPECT(test_io::write_text(path, kShippedShape));
 	MnuDocument document;
 	TEST_EXPECT(load(document, path));
 	NodeAddress back;
@@ -1001,9 +1001,9 @@ int duplicate_screen() {
 // finds the last of two screens of one name, so a same-named copy would stand in for the
 // original), its windows keeping theirs.
 int typed_add_and_screen_copy() {
-	editor_test::TempProjectDir dir("opennova_menu_typed_add_test");
+	test_temp::TempDir dir("opennova_menu_typed_add_test");
 	const std::string path = dir.file("options.mnu");
-	TEST_EXPECT(editor_test::write_text(path, kShippedShape));
+	TEST_EXPECT(test_io::write_text(path, kShippedShape));
 	MnuDocument document;
 	TEST_EXPECT(load(document, path));
 	const std::string original = document.serialize().text;
@@ -1049,9 +1049,9 @@ int typed_add_and_screen_copy() {
 // no other screen has, even the SCREEN<n> its identity would give it, which a file read
 // again may already hold (retail finds the last of two screens of one name).
 int screens_stay_found() {
-	editor_test::TempProjectDir dir("opennova_menu_screens_found_test");
+	test_temp::TempDir dir("opennova_menu_screens_found_test");
 	const std::string path = dir.file("options.mnu");
-	TEST_EXPECT(editor_test::write_text(path, kShippedShape));
+	TEST_EXPECT(test_io::write_text(path, kShippedShape));
 	MnuDocument document;
 	TEST_EXPECT(load(document, path));
 	const NodeAddress only{document.rows()[0]->id, kScreen, 0};
@@ -1079,7 +1079,7 @@ int screens_stay_found() {
 	const std::string authored = "<NAME>OPTIONS</NAME>";
 	text.replace(text.find(authored), authored.size(), "<NAME>" + lowered + "</NAME>");
 	const std::string again = dir.file("again.mnu");
-	TEST_EXPECT(editor_test::write_text(again, text));
+	TEST_EXPECT(test_io::write_text(again, text));
 	MnuDocument reread;
 	TEST_EXPECT(load(reread, again));
 	TEST_EXPECT(reread.apply(op_edit(EditOperation::Add, {0, kScreen, 0}), error) && reread.rows().size() == 2);
@@ -1090,9 +1090,9 @@ int screens_stay_found() {
 
 // The nested lists: a table cell moved between rows and back, so the edited menu reads back as written.
 int nested_lists() {
-	editor_test::TempProjectDir dir("opennova_menu_nested_lists_test");
+	test_temp::TempDir dir("opennova_menu_nested_lists_test");
 	const std::string path = dir.file("options.mnu");
-	TEST_EXPECT(editor_test::write_text(path, kShippedShape));
+	TEST_EXPECT(test_io::write_text(path, kShippedShape));
 	MnuDocument document;
 	TEST_EXPECT(load(document, path));
 	NodeAddress back, results;
@@ -1125,9 +1125,9 @@ int nested_lists() {
 // --- Edits that must not lose authored data (ADR 0046 S9d, S9h) -----------------------
 
 int shipped_shape_edits() {
-	editor_test::TempProjectDir dir("opennova_menu_shipped_shape_test");
+	test_temp::TempDir dir("opennova_menu_shipped_shape_test");
 	const std::string path = dir.file("options.mnu");
-	TEST_EXPECT(editor_test::write_text(path, kShippedShape));
+	TEST_EXPECT(test_io::write_text(path, kShippedShape));
 	MnuDocument document;
 	TEST_EXPECT(load(document, path));
 	const Node &row = *document.rows()[0];
@@ -1209,9 +1209,9 @@ int shipped_shape_edits() {
 // The inspector sends a coalesced Set per keystroke: a field's typing is one undo step,
 // each Set applied to the record as the group found it.
 int typed_clear_and_retype() {
-	editor_test::TempProjectDir dir("opennova_menu_typed_retype_test");
+	test_temp::TempDir dir("opennova_menu_typed_retype_test");
 	const std::string path = dir.file("options.mnu");
-	TEST_EXPECT(editor_test::write_text(path, kShippedShape));
+	TEST_EXPECT(test_io::write_text(path, kShippedShape));
 	MnuDocument document;
 	TEST_EXPECT(load(document, path));
 	NodeAddress back;
@@ -1265,24 +1265,24 @@ int typed_clear_and_retype() {
 // (docs/mnu/menu-re.md, "Crash and hang cases"); so does a number holding a stylesheet
 // variable, which retail reads through the variable and a save would write as 0 (S12 B2).
 int parse_notes() {
-	editor_test::TempProjectDir dir("opennova_menu_parse_notes_test");
+	test_temp::TempDir dir("opennova_menu_parse_notes_test");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Notes"));
 	editor_test::create_missing_files(session);
 	const std::string window = "<WINDOW type=\"button\" name=\"B\" SCREENX=\"1\"><POSITION><LEFT>0</LEFT></POSITION>";
-	TEST_EXPECT(editor_test::write_text(dir.file("project/menus/ignored.mnu"),
+	TEST_EXPECT(test_io::write_text(dir.file("project/menus/ignored.mnu"),
 	                                    "<SCREEN><NAME>I</NAME>" + window + "</WINDOW></SCREEN>"));
-	TEST_EXPECT(editor_test::write_text(dir.file("project/menus/crash.mnu"),
+	TEST_EXPECT(test_io::write_text(dir.file("project/menus/crash.mnu"),
 	                                    "<SCREEN><NAME>C</NAME>" + window + "<ACTION type=\"\">X</ACTION></WINDOW></SCREEN>"));
 	// The text ends inside a tag: retail's attribute loop never ends.
-	TEST_EXPECT(editor_test::write_text(dir.file("project/menus/hang.mnu"), "<SCREEN><NAME>H</NAME><WINDOW type=\"button\""));
-	TEST_EXPECT(editor_test::write_text(dir.file("project/menus/variable.mnu"),
+	TEST_EXPECT(test_io::write_text(dir.file("project/menus/hang.mnu"), "<SCREEN><NAME>H</NAME><WINDOW type=\"button\""));
+	TEST_EXPECT(test_io::write_text(dir.file("project/menus/variable.mnu"),
 	                                    "<SCREEN><NAME>V</NAME><WINDOW type=\"button\" name=\"B\"><POSITION><LEFT>%X%"
 	                                    "</LEFT></POSITION></WINDOW></SCREEN>"));
 	// S12 review: B's ignored attribute after a window A inside MAIN, for a move below.
-	TEST_EXPECT(editor_test::write_text(dir.file("project/menus/moved.mnu"),
+	TEST_EXPECT(test_io::write_text(dir.file("project/menus/moved.mnu"),
 	                                    "<SCREEN><NAME>M</NAME><WINDOW type=\"window\" name=\"MAIN\"><WINDOW type=\"button\" "
 	                                    "name=\"A\"><POSITION><LEFT>0</LEFT></POSITION></WINDOW>" +
 	                                            window + "</WINDOW></WINDOW></SCREEN>"));
@@ -1352,7 +1352,7 @@ int parse_notes() {
 // The blank project's STARTUP menu: the moves that change nothing, its root's custom
 // row, and a string table renamed under a menu that names it.
 int blank_menu_edits() {
-	editor_test::TempProjectDir dir("opennova_menu_blank_edits_test");
+	test_temp::TempDir dir("opennova_menu_blank_edits_test");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1424,7 +1424,7 @@ int blank_menu_edits() {
 // longer resolves, and one undo gives the NAME back; Rename everywhere (RenameSymbol) is what
 // rewrites the uses, the definition and each ACTION reaching it.
 int name_is_its_own_edit() {
-	editor_test::TempProjectDir dir("opennova_menu_name_edit_test");
+	test_temp::TempDir dir("opennova_menu_name_edit_test");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1442,7 +1442,7 @@ int name_is_its_own_edit() {
 	const std::string back = "<ACTION TYPE=\"SCREEN\" FILE=\"flow.mnu\">HOME</ACTION>\r\n";
 	const std::string panel =
 	        window("STATIC", "PANEL", window("BUTTON", "GO", go) + window("STATIC", "TITLE", ""));
-	TEST_EXPECT(editor_test::write_text(view.project.root + "/flow.mnu",
+	TEST_EXPECT(test_io::write_text(view.project.root + "/flow.mnu",
 	                                    "<SCREEN>\r\n<NAME>HOME</NAME>\r\n" + panel +
 	                                            "</SCREEN>\r\n<SCREEN>\r\n<NAME>AWAY</NAME>\r\n" +
 	                                            window("BUTTON", "BACK", back) + "</SCREEN>\r\n"));
@@ -1613,9 +1613,9 @@ const char *const kLookupShape =
 // meets every kind of find (the retail menus: the sweep below).
 int lookup_matches_the_runtime() {
 	using Found = MenuLookupName::Found;
-	editor_test::TempProjectDir dir("opennova_menu_lookup_test");
+	test_temp::TempDir dir("opennova_menu_lookup_test");
 	const std::string shape = dir.file("lookup.mnu");
-	TEST_EXPECT(editor_test::write_text(shape, kLookupShape));
+	TEST_EXPECT(test_io::write_text(shape, kLookupShape));
 	const std::string fixtures = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/mnu/";
 	for (const std::string &path : {shape, fixtures + "all_widgets.mnu", fixtures + "widgets.mnu"}) {
 		MnuDocument document;
@@ -1778,7 +1778,7 @@ void sweep_structure(MnuDocument &document, const std::string &label, const std:
 	} else {
 		const std::string copy = scratch + "/edited.mnu";
 		MnuDocument reloaded;
-		if (!editor_test::write_text(copy, edited.text) || !load(reloaded, copy) || reloaded.blocked() ||
+		if (!test_io::write_text(copy, edited.text) || !load(reloaded, copy) || reloaded.blocked() ||
 		    reloaded.serialize().text != edited.text || !reloaded.identities_match() ||
 		    record_count(reloaded) != record_count(document))
 			sweep_fail(totals, label, "the edited menu does not read back as it was written");
@@ -1882,7 +1882,7 @@ void sweep_install_mount(const std::string &install, const std::string &expansio
 		if (earlier == stored) { ++totals.repeats; continue; }
 		earlier = stored;
 		const std::string absolute = scratch + "/" + location.logical_name;
-		if (!editor_test::write_bytes(absolute, stored)) { sweep_fail(totals, label, "the scratch copy failed"); continue; }
+		if (!test_io::write_file(absolute, stored)) { sweep_fail(totals, label, "the scratch copy failed"); continue; }
 		sweep_menu(label, absolute, decoded, scratch, totals);
 	}
 }
@@ -1907,7 +1907,7 @@ int retail_sweep() {
 	if (retail::reference_fixture("mnu/jo_main.mnu").empty()) {
 		retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/mnu/jo_*.mnu (the shipped revx02 menus through MnuDocument)");
 	} else {
-		editor_test::TempProjectDir scratch("opennova_menu_fixture_sweep");
+		test_temp::TempDir scratch("opennova_menu_fixture_sweep");
 		SweepTotals totals;
 		for (const char *name : kFixtures) {
 			const std::string path = retail::reference_fixture((std::string("mnu/") + name + ".mnu").c_str());
@@ -1924,7 +1924,7 @@ int retail_sweep() {
 	if (install.empty()) {
 		retail::skip_leg("OPENNOVA_JO_DIR (every .mnu the packed install serves, through MnuDocument)");
 	} else {
-		editor_test::TempProjectDir scratch("opennova_menu_retail_sweep");
+		test_temp::TempDir scratch("opennova_menu_retail_sweep");
 		SweepTotals totals;
 		std::map<std::string, std::vector<uint8_t>> seen;
 		sweep_install_mount(install, std::string(), scratch.root(), seen, totals);
@@ -1946,7 +1946,7 @@ int retail_sweep() {
 // core's (document_core_test test_changes_since_save) and every type's
 // (editor_document_contract_test check_real_change).
 int changes_since_save() {
-	editor_test::TempProjectDir dir("opennova_menu_changes_test");
+	test_temp::TempDir dir("opennova_menu_changes_test");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1995,7 +1995,7 @@ int changes_since_save() {
 // material flag names it knows and taking any combination of them; the default word (STANDARD_TRANSPARENT, the
 // parse's where none is written) leaves the element out.
 int colours_and_flags() {
-	editor_test::TempProjectDir dir("opennova_menu_colours_test");
+	test_temp::TempDir dir("opennova_menu_colours_test");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -2057,14 +2057,14 @@ int colours_and_flags() {
 // then the file loaded again in place as A and B, at the same revision and with the same row
 // identities, answer from the new file.
 int memos_follow_a_load_in_place() {
-	editor_test::TempProjectDir dir("opennova_menu_load_in_place");
+	test_temp::TempDir dir("opennova_menu_load_in_place");
 	const std::string path = dir.file("twice.mnu");
 	const auto screen = [](const char *name) {
 		return std::string("<SCREEN>\r\n\t<NAME>") + name +
 		       "</NAME>\r\n\t<WINDOW type=\"window\" name=\"MAIN\">"
 		       "<POSITION><LEFT>0</LEFT></POSITION></WINDOW>\r\n</SCREEN>\r\n";
 	};
-	TEST_EXPECT(editor_test::write_text(path, screen("A") + screen("A")));
+	TEST_EXPECT(test_io::write_text(path, screen("A") + screen("A")));
 	MnuDocument document;
 	TEST_EXPECT(load(document, path) && document.rows().size() == 2);
 	const NodeAddress first{document.rows()[0]->id, kScreen, 0};
@@ -2074,7 +2074,7 @@ int memos_follow_a_load_in_place() {
 	TEST_EXPECT(shadowed.inert && image && image->screens.size() == 2 &&
 	            image->screens[1].name == "A");
 	const uint64_t generation = document.load_generation();
-	TEST_EXPECT(editor_test::write_text(path, screen("A") + screen("B")));
+	TEST_EXPECT(test_io::write_text(path, screen("A") + screen("B")));
 	TEST_EXPECT(load(document, path) && document.revision() == 0 &&
 	            document.load_generation() != generation);
 	TEST_EXPECT(document.rows().size() == 2 && document.rows()[0]->id == first.row);
@@ -2089,9 +2089,9 @@ int memos_follow_a_load_in_place() {
 // A window's parts in words (the plain-words lane, the audit's 5.1): each by what it does or shows, as
 // the outline and the Inspector title it (record_display over the menu row's record_label), never "Action 2".
 int parts_in_words() {
-	editor_test::TempProjectDir dir("opennova_menu_parts_in_words");
+	test_temp::TempDir dir("opennova_menu_parts_in_words");
 	const std::string path = dir.file("words.mnu");
-	TEST_EXPECT(editor_test::write_text(
+	TEST_EXPECT(test_io::write_text(
 			path, "<SCREEN>\r\n\t<NAME>MAIN</NAME>\r\n\t<WINDOW type=\"button\" name=\"GO\">\r\n"
 			      "\t\t<APPEARANCE STATE=\"DEFAULT\" TYPE=\"IMAGE\">btn.tga</APPEARANCE>\r\n"
 			      "\t\t<APPEARANCE STATE=\"MOUSEOVER\" TYPE=\"COLOR\">%TRIM_COLOR%</APPEARANCE>\r\n"

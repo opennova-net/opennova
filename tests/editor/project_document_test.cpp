@@ -18,7 +18,7 @@ using namespace opennova::editor;
 namespace fs = std::filesystem;
 
 static int test_create_then_open() {
-	editor_test::TempProjectDir dir("opennova_editor_project_document_test");
+	test_temp::TempDir dir("opennova_editor_project_document_test");
 	const std::string root = dir.file("MyGame");
 	ProjectDocument created;
 	Diagnostic error;
@@ -93,7 +93,7 @@ static int test_on_disk_form_is_deterministic() {
 // The expansion object (ADR 0046 S16): read back as written, absent for a standalone project, and
 // refused where the game could not take it (the name rule, a builds_on with no name, another game).
 static int test_expansion_object() {
-	editor_test::TempProjectDir dir("opennova_editor_project_document_expansion_test");
+	test_temp::TempDir dir("opennova_editor_project_document_expansion_test");
 	Diagnostic error;
 	ProjectDocument doc;
 	const std::string root = dir.file("Mod");
@@ -105,7 +105,7 @@ static int test_expansion_object() {
 	const auto refused = [&](const std::string &object, const char *code, const char *words) {
 		const std::string text = "{\"schema_version\": 2, \"project_id\": \"x\", \"title\": \"t\", \"target_game\": "
 		                         "\"jo\", \"expansion\": " + object + "}\n";
-		if (!editor_test::write_text(paths.project_file, text)) return false;
+		if (!test_io::write_text(paths.project_file, text)) return false;
 		ProjectDocument out;
 		Diagnostic why;
 		return !open_project(root, out, why) && why.code() == code && why.message.find(words) != std::string::npos;
@@ -118,12 +118,12 @@ static int test_expansion_object() {
 	TEST_EXPECT(refused("{\"name\": \"twelve_chars\"}", "project.field.invalid", "holds 11"));
 	TEST_EXPECT(refused("{\"name\": \"jxm\", \"builds_on\": \"a/b\"}", "project.field.invalid", "'/'"));
 	// An installed expansion's name binds no archive name: only the mount's 31 characters.
-	TEST_EXPECT(editor_test::write_text(paths.project_file,
+	TEST_EXPECT(test_io::write_text(paths.project_file,
 	        "{\"schema_version\": 2, \"project_id\": \"x\", \"title\": \"t\", \"expansion\": {\"name\": \"jxm\", "
 	        "\"builds_on\": \"a_long_expansion_name\"}}\n"));
 	TEST_EXPECT(open_project(root, opened, error) && opened.expansion.builds_on == "a_long_expansion_name");
 	// Only Joint Operations' expansions are witnessed.
-	TEST_EXPECT(editor_test::write_text(paths.project_file,
+	TEST_EXPECT(test_io::write_text(paths.project_file,
 	        "{\"schema_version\": 2, \"project_id\": \"x\", \"title\": \"t\", \"target_game\": \"dfx\", "
 	        "\"expansion\": {\"name\": \"jxm\"}}\n"));
 	TEST_EXPECT(!open_project(root, opened, error) && error.code() == "project.expansion.unsupported");
@@ -135,7 +135,7 @@ static int test_expansion_object() {
 }
 
 static int test_refusals() {
-	editor_test::TempProjectDir dir("opennova_editor_project_document_refusals_test");
+	test_temp::TempDir dir("opennova_editor_project_document_refusals_test");
 	Diagnostic error;
 	ProjectDocument doc;
 
@@ -146,25 +146,25 @@ static int test_refusals() {
 	const ProjectPaths paths = ProjectPaths::for_root(root);
 	std::error_code ec;
 	fs::create_directories(root, ec);
-	TEST_EXPECT(editor_test::write_text(paths.project_file,
+	TEST_EXPECT(test_io::write_text(paths.project_file,
 	                                    "{\"schema_version\": 3, \"project_id\": \"x\", \"title\": \"t\"}\n"));
 	TEST_EXPECT(!open_project(root, doc, error));
 	TEST_EXPECT(error.code() == "project.schema_version.unsupported");
 	// Schema 1, which S16's expansion object superseded: refused (no reader pre-1.0), saying what
 	// changed so its author can bring it over.
-	TEST_EXPECT(editor_test::write_text(paths.project_file,
+	TEST_EXPECT(test_io::write_text(paths.project_file,
 	                                    "{\"schema_version\": 1, \"project_id\": \"x\", \"title\": \"t\"}\n"));
 	TEST_EXPECT(!open_project(root, doc, error));
 	TEST_EXPECT(error.code() == "project.schema_version.unsupported" &&
 	            error.message.find("set \"schema_version\" to 2") != std::string::npos);
 
-	TEST_EXPECT(editor_test::write_text(
+	TEST_EXPECT(test_io::write_text(
 	        paths.project_file,
 	        "{\"schema_version\": 2, \"project_id\": \"x\", \"title\": \"t\", \"target_game\": \"quake\"}\n"));
 	TEST_EXPECT(!open_project(root, doc, error));
 	TEST_EXPECT(error.code() == "project.target_game.unknown");
 
-	TEST_EXPECT(editor_test::write_text(paths.project_file, "{\"schema_version\": 2,\n"));
+	TEST_EXPECT(test_io::write_text(paths.project_file, "{\"schema_version\": 2,\n"));
 	TEST_EXPECT(!open_project(root, doc, error));
 	TEST_EXPECT(error.code() == "project.json");
 
@@ -174,7 +174,7 @@ static int test_refusals() {
 }
 
 static int test_export_dir_and_local_settings() {
-	editor_test::TempProjectDir dir("opennova_editor_project_paths_test");
+	test_temp::TempDir dir("opennova_editor_project_paths_test");
 	const std::string root = dir.file("P");
 	ProjectDocument doc;
 	Diagnostic error;
@@ -217,7 +217,7 @@ static int test_export_dir_and_local_settings() {
 	            back.game_install == (fs::current_path() / "Joint Ops").lexically_normal().generic_string());
 	// Another schema is set aside (S13 A4, pre-1.0: no reader for it): read as absent, the warning
 	// naming the file, its schema and what it held; a seed then writes a new file over it.
-	TEST_EXPECT(editor_test::write_text(paths.local_settings_file, "{\"schema_version\": 9}\n"));
+	TEST_EXPECT(test_io::write_text(paths.local_settings_file, "{\"schema_version\": 9}\n"));
 	Diagnostic finding;
 	TEST_EXPECT(load_local_settings(paths, back, finding) && back.game_install.empty() &&
 			back.runtime_executable.empty());
@@ -244,7 +244,7 @@ static int test_export_dir_and_local_settings() {
 	            text.find("\"schema_version\": 2") != std::string::npos && text.find("retail") == std::string::npos);
 	const std::string older = "{\"retail_root\": \"" + install +
 			"\", \"runtime_executable\": \"C:/games/opennova.exe\", \"schema_version\": 1}\n";
-	TEST_EXPECT(editor_test::write_text(paths.local_settings_file, older));
+	TEST_EXPECT(test_io::write_text(paths.local_settings_file, older));
 	finding = Diagnostic();
 	TEST_EXPECT(open_local_settings(paths, std::string(), back, finding) &&
 			back.game_install.empty() && back.runtime_executable.empty());
@@ -269,7 +269,7 @@ static int test_export_dir_and_local_settings() {
 // off too; a file without them (one an earlier editor wrote) reads as the defaults; a mode no PlayMode has
 // reads as the runtime, never the game install; the tokens are the run directory's mode names.
 static int test_local_play_settings() {
-	editor_test::TempProjectDir dir("opennova_editor_local_play_settings");
+	test_temp::TempDir dir("opennova_editor_local_play_settings");
 	const std::string root = dir.file("P");
 	ProjectDocument doc;
 	Diagnostic error;
@@ -290,14 +290,14 @@ static int test_local_play_settings() {
 		TEST_EXPECT(load_local_settings(paths, back, error) && back.play_mode == mode &&
 		            back.save_before_play == (mode != PlayMode::Strict));
 	}
-	TEST_EXPECT(editor_test::write_text(paths.local_settings_file, "{\"schema_version\": 2, \"game_install\": \"\"}\n"));
+	TEST_EXPECT(test_io::write_text(paths.local_settings_file, "{\"schema_version\": 2, \"game_install\": \"\"}\n"));
 	TEST_EXPECT(load_local_settings(paths, local, error) && local.play_mode == PlayMode::Runtime && local.save_before_play);
-	TEST_EXPECT(editor_test::write_text(paths.local_settings_file, "{\"schema_version\": 2, \"play_mode\": \"retail\"}\n"));
+	TEST_EXPECT(test_io::write_text(paths.local_settings_file, "{\"schema_version\": 2, \"play_mode\": \"retail\"}\n"));
 	TEST_EXPECT(load_local_settings(paths, local, error) && local.play_mode == PlayMode::Runtime);
-	TEST_EXPECT(editor_test::write_text(paths.local_settings_file, "{\"schema_version\": 2, \"play_mode\": true}\n"));
+	TEST_EXPECT(test_io::write_text(paths.local_settings_file, "{\"schema_version\": 2, \"play_mode\": true}\n"));
 	TEST_EXPECT(load_local_settings(paths, local, error) && local.play_mode == PlayMode::Runtime);
 	// S26 K1: the install mode is gone; a local.json naming it (an older editor's) plays in the OpenNova runtime.
-	TEST_EXPECT(editor_test::write_text(paths.local_settings_file, "{\"schema_version\": 2, \"play_mode\": \"install\"}\n"));
+	TEST_EXPECT(test_io::write_text(paths.local_settings_file, "{\"schema_version\": 2, \"play_mode\": \"install\"}\n"));
 	TEST_EXPECT(load_local_settings(paths, local, error) && local.play_mode == PlayMode::Runtime);
 	PlayMode read = PlayMode::Strict;
 	TEST_EXPECT(!play_mode_from_token("Strict", read) && read == PlayMode::Strict && !play_mode_from_token("install", read) &&

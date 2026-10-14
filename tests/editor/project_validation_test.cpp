@@ -117,7 +117,7 @@ uint64_t digest(const std::vector<std::string> &rows) {
 
 // A project of `files`, scanned.
 struct Project {
-	editor_test::TempProjectDir dir{ "opennova_editor_project_validation" };
+	test_temp::TempDir dir{ "opennova_editor_project_validation" };
 	std::string root = dir.file("Game");
 	ProjectDocument document;
 	ProjectPaths paths;
@@ -128,7 +128,7 @@ struct Project {
 		if (!create_project(root, "Validation", "jo", document, error))
 			return false;
 		for (const auto &file : files)
-			if (!editor_test::write_text(root + "/" + file.first, file.second))
+			if (!test_io::write_text(root + "/" + file.first, file.second))
 				return false;
 		paths = ProjectPaths::for_root(root);
 		rescan();
@@ -425,9 +425,9 @@ static int test_gametext_flow_keys() {
 	bool made = true;
 	const auto flow_rows = [&](bool mission) {
 		Project project;
-		made = made && project.make({}) && editor_test::write_bytes(project.root + "/strings/gametext.bin", bytes);
+		made = made && project.make({}) && test_io::write_file(project.root + "/strings/gametext.bin", bytes);
 		if (mission)
-			made = made && editor_test::write_bytes(project.root + "/missions/synth_logic.bms",
+			made = made && test_io::write_file(project.root + "/missions/synth_logic.bms",
 					test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/bms/synth_logic.bms"));
 		project.rescan();
 		AssetGraph graph;
@@ -637,7 +637,7 @@ static int test_retail_validation() {
 		std::vector<uint8_t> bytes;
 		if (!origin.read(name, bytes))
 			continue;
-		TEST_EXPECT(editor_test::write_bytes(
+		TEST_EXPECT(test_io::write_file(
 				project.root + "/" + asset_kind_token(kind) + "/" + name, bytes));
 		++exported;
 		models += kind == AssetKind::Model ? 1 : 0;

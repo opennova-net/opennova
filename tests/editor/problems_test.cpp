@@ -108,10 +108,10 @@ const Diagnostic *requirement_finding(const SessionView &view, const char *code,
 	return nullptr;
 }
 
-std::shared_ptr<const Document> menu_document(const editor_test::TempProjectDir &dir, const char *file, const char *relative) {
+std::shared_ptr<const Document> menu_document(const test_temp::TempDir &dir, const char *file, const char *relative) {
 	auto document = std::make_shared<MnuDocument>();
 	Diagnostic error;
-	if (!editor_test::write_text(dir.file(file), kMenuB) ||
+	if (!test_io::write_text(dir.file(file), kMenuB) ||
 	    !document->load(dir.file(file), relative, AssetKind::Menu, "jo", error))
 		return nullptr;
 	return document;
@@ -121,7 +121,7 @@ std::shared_ptr<const Document> menu_document(const editor_test::TempProjectDir 
 
 // The query over a view of six findings in two open menus, a stylesheet and a catalog.
 static int test_query() {
-	editor_test::TempProjectDir dir("opennova_editor_problems_query");
+	test_temp::TempDir dir("opennova_editor_problems_query");
 	SessionView view;
 	view.project.open = true;
 	const auto a = menu_document(dir, "a.mnu", "menus/a.mnu");
@@ -238,7 +238,7 @@ static int test_query() {
 // The fixes over a real session: a project with two spare string tables and two menus (b.mnu
 // named by a.mnu), a fake game install that has some of what the project lacks.
 static int test_fixes() {
-	editor_test::TempProjectDir dir("opennova_editor_problems_fixes");
+	test_temp::TempDir dir("opennova_editor_problems_fixes");
 	// The install: the boot table's resource.pff.
 	const std::string install = dir.file("install");
 	std::vector<uint8_t> table;
@@ -254,7 +254,7 @@ static int test_fixes() {
 		{"logo.dds", bytes, sizeof(bytes), 0, 0, 0},
 		{"badge.png", bytes, sizeof(bytes), 0, 0, 0},
 	};
-	TEST_EXPECT(editor_test::write_text(install + "/readme.txt", "an install"));
+	TEST_EXPECT(test_io::write_text(install + "/readme.txt", "an install"));
 	TEST_EXPECT(opennova::pff::pff_write_archive((install + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 5) ==
 	            opennova::pff::PFF_WRITE_OK);
 
@@ -266,10 +266,10 @@ static int test_fixes() {
 	const std::string root = v.project.root;
 	blank.logical_name = "spare.bin";
 	TEST_EXPECT(make_blank(blank, AssetKind::Strings, table, error));
-	TEST_EXPECT(editor_test::write_bytes(root + "/strings/spare.bin", table) && editor_test::write_bytes(root + "/strings/other.bin", table));
-	TEST_EXPECT(editor_test::write_text(root + "/menus/a.mnu", kMenuA) && editor_test::write_text(root + "/menus/b.mnu", kMenuB));
-	TEST_EXPECT(editor_test::write_text(root + "/art/splash.tga", "tga") && editor_test::write_text(root + "/art/splash.pcx", "pcx"));
-	TEST_EXPECT(editor_test::write_text(root + "/foo.bin", "raw bytes")); // a .bin that is no string table
+	TEST_EXPECT(test_io::write_file(root + "/strings/spare.bin", table) && test_io::write_file(root + "/strings/other.bin", table));
+	TEST_EXPECT(test_io::write_text(root + "/menus/a.mnu", kMenuA) && test_io::write_text(root + "/menus/b.mnu", kMenuB));
+	TEST_EXPECT(test_io::write_text(root + "/art/splash.tga", "tga") && test_io::write_text(root + "/art/splash.pcx", "pcx"));
+	TEST_EXPECT(test_io::write_text(root + "/foo.bin", "raw bytes")); // a .bin that is no string table
 	editor_test::handle_to_end(session, request::rescan());
 
 	// A required file with a factory, and no game data: Create it (placeholder content, with
@@ -742,7 +742,7 @@ static int test_fix_index() {
 // file is made at the project's root, its finding goes, the graph resolves the reference to it
 // and the Build packs it.
 static int test_placeholders() {
-	editor_test::TempProjectDir dir("opennova_editor_problems_placeholders");
+	test_temp::TempDir dir("opennova_editor_problems_placeholders");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -755,12 +755,12 @@ static int test_placeholders() {
 	fs::create_directories(fs::path(root) / "models", ec);
 	fs::copy_file(model, fs::path(root) / "models" / "armory.3di", ec);
 	TEST_EXPECT(!ec);
-	TEST_EXPECT(editor_test::write_text(root + "/menus/c.mnu",
+	TEST_EXPECT(test_io::write_text(root + "/menus/c.mnu",
 	                                    "<SCREEN>\r\n\t<NAME>C</NAME>\r\n\t<WINDOW type=\"window\" name=\"MAIN\">\r\n"
 	                                    "\t\t<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>\r\n"
 	                                    "\t\t<APPEARANCE type=\"image\" state=\"default\">logo.tga</APPEARANCE>\r\n"
 	                                    "\t</WINDOW>\r\n</SCREEN>\r\n"));
-	TEST_EXPECT(editor_test::write_text(root + "/fx.ptl", "[effectdef]\n{\n\tid = BOOM;\n\tpdefs = puff;\n}\n\n[particledef]\n{\n"
+	TEST_EXPECT(test_io::write_text(root + "/fx.ptl", "[effectdef]\n{\n\tid = BOOM;\n\tpdefs = puff;\n}\n\n[particledef]\n{\n"
 	                                                      "\tid = puff;\n\tgraphic1 = puff.tga, additive;\n}\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	const auto missing = [&v](ReferenceKind kind, const char *target) -> const Diagnostic * {
@@ -843,7 +843,7 @@ static int test_placeholders() {
 	const std::string install = dir.file("install");
 	const uint8_t bytes[] = {'d', 'a', 't', 'a'};
 	const opennova::pff::PffWriteEntry entries[] = {{"logo.dds", bytes, sizeof(bytes), 0, 0, 0}};
-	TEST_EXPECT(editor_test::write_text(install + "/readme.txt", "an install"));
+	TEST_EXPECT(test_io::write_text(install + "/readme.txt", "an install"));
 	TEST_EXPECT(opennova::pff::pff_write_archive((install + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 1) ==
 	            opennova::pff::PFF_WRITE_OK);
 	editor_test::set_game_install(session, install);
@@ -915,7 +915,7 @@ static int test_optional_group() {
 // name another kind of file holds: Import the game's own, or Rename that file; a missing
 // symbol: Open the file where it belongs.
 static int test_locations_and_fixes() {
-	editor_test::TempProjectDir dir("opennova_editor_problems_places");
+	test_temp::TempDir dir("opennova_editor_problems_places");
 	const std::string install = dir.file("install");
 	std::vector<uint8_t> table;
 	Diagnostic error;
@@ -923,7 +923,7 @@ static int test_locations_and_fixes() {
 	blank.logical_name = "gameerr.bin";
 	TEST_EXPECT(make_blank(blank, AssetKind::Strings, table, error));
 	const opennova::pff::PffWriteEntry entries[] = {{"gameerr.bin", table.data(), uint32_t(table.size()), 0, 0, 0}};
-	TEST_EXPECT(editor_test::write_text(install + "/readme.txt", "an install"));
+	TEST_EXPECT(test_io::write_text(install + "/readme.txt", "an install"));
 	TEST_EXPECT(opennova::pff::pff_write_archive((install + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 1) ==
 	            opennova::pff::PFF_WRITE_OK);
 	NoProcess platform;
@@ -947,9 +947,9 @@ static int test_locations_and_fixes() {
 	             "\t\t\t<APPEARANCE state=\"default\"></APPEARANCE>\r\n"
 	             "\t\t\t<POSITION><LEFT>10</LEFT><TOP>40</TOP></POSITION>\r\n"
 	             "\t\t</WINDOW>\r\n");
-	TEST_EXPECT(editor_test::write_text(root + "/menus/a.mnu", bogus));
+	TEST_EXPECT(test_io::write_text(root + "/menus/a.mnu", bogus));
 	// c.mnu names twin.tga, of which the project has two (art/ and other/).
-	TEST_EXPECT(editor_test::write_text(root + "/menus/c.mnu",
+	TEST_EXPECT(test_io::write_text(root + "/menus/c.mnu",
 	                                    "<SCREEN>\r\n<NAME>C</NAME>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"PIC\">\r\n"
 	                                    "<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>9</RIGHT><BOTTOM>9</BOTTOM></POSITION>\r\n"
 	                                    "<APPEARANCE STATE=\"DEFAULT\" TYPE=\"IMAGE\">twin.tga</APPEARANCE>\r\n"
@@ -967,15 +967,15 @@ static int test_locations_and_fixes() {
 	std::vector<uint8_t> ungrouped;
 	std::string io_error;
 	TEST_EXPECT(opennova::rtxt::write(strings_file, ungrouped, io_error) &&
-	            editor_test::write_bytes(root + "/strings/ungrouped.bin", ungrouped));
-	TEST_EXPECT(editor_test::write_text(root + "/anims/noreset.adm", "anim_idle\t\"idle.bad\"\r\n"));
-	TEST_EXPECT(editor_test::write_text(root + "/" + items_path,
+	            test_io::write_file(root + "/strings/ungrouped.bin", ungrouped));
+	TEST_EXPECT(test_io::write_text(root + "/anims/noreset.adm", "anim_idle\t\"idle.bad\"\r\n"));
+	TEST_EXPECT(test_io::write_text(root + "/" + items_path,
 	                                    "begin \"Marker\"\nid 100001\ntype marker\nhp 10\nend\n"
 	                                    "begin \"MARKER\"\nid 100002\ntype marker\nhp 10\nend\n"
 	                                    "begin \"Crate\"\nid 100001\ntype marker\nhp 10\nend\n"));
-	TEST_EXPECT(editor_test::write_text(root + "/art/a_name_too_long_for_archives.tga", "tga"));
-	TEST_EXPECT(editor_test::write_text(root + "/art/twin.tga", "tga") && editor_test::write_text(root + "/other/twin.tga", "tga"));
-	TEST_EXPECT(editor_test::write_text(root + "/" + gameerr_path, "raw bytes")); // no string table: the wrong kind
+	TEST_EXPECT(test_io::write_text(root + "/art/a_name_too_long_for_archives.tga", "tga"));
+	TEST_EXPECT(test_io::write_text(root + "/art/twin.tga", "tga") && test_io::write_text(root + "/other/twin.tga", "tga"));
+	TEST_EXPECT(test_io::write_text(root + "/" + gameerr_path, "raw bytes")); // no string table: the wrong kind
 	editor_test::handle_to_end(session, request::rescan());
 	const auto finding_in = [&v](const char *code, const std::string &asset) -> const Diagnostic * {
 		for (const Diagnostic &d : v.findings.diagnostics)
@@ -1126,7 +1126,7 @@ static int test_locations_and_fixes() {
 	TEST_EXPECT(fixes_for(text_id, v).empty());
 	// A file where it belongs that the editor has no editor for (the NovaWorld string table a scope names): its
 	// page opened, as every Go to lands (DI-17), never Files.
-	TEST_EXPECT(editor_test::write_text(root + "/nw_cdata.coo", "coo"));
+	TEST_EXPECT(test_io::write_text(root + "/nw_cdata.coo", "coo"));
 	editor_test::handle_to_end(session, request::rescan());
 	stylesheet = v.project.scan->find("menu_style.mns"); // the scan read again: its entries are new
 	const AssetEntry *coo = v.project.scan->find("nw_cdata.coo");
@@ -1145,7 +1145,7 @@ static int test_locations_and_fixes() {
 	TEST_EXPECT(weapons != nullptr);
 	if (!weapons) return 1;
 	const std::string weapons_path = weapons->relative_path, style_path = stylesheet->relative_path;
-	TEST_EXPECT(editor_test::write_text(root + "/" + weapons_path, "") && editor_test::write_text(root + "/" + style_path, ""));
+	TEST_EXPECT(test_io::write_text(root + "/" + weapons_path, "") && test_io::write_text(root + "/" + style_path, ""));
 	editor_test::handle_to_end(session, request::rescan());
 	bool any = false;
 	v.findings.graph->for_each_symbol([&any](const GraphSymbol &symbol) {
@@ -1230,7 +1230,7 @@ static int test_findings_index() {
 // patched to serve the texture (its folder moved: validated again at the next rescan): the project's
 // finding is the modder's (the install resolves it). With no install, none is the game's own.
 static int test_original_data() {
-	editor_test::TempProjectDir dir("opennova_editor_problems_original");
+	test_temp::TempDir dir("opennova_editor_problems_original");
 	const auto menu = [](const char *name) {
 		return std::string("<SCREEN>\r\n\t<NAME>") + name + "</NAME>\r\n\t<WINDOW type=\"window\" name=\"MAIN\">\r\n"
 		       "\t\t<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>\r\n"
@@ -1245,7 +1245,7 @@ static int test_original_data() {
 		return opennova::pff::pff_write_archive((install + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3, entries.data(),
 		                                        uint32_t(entries.size())) == opennova::pff::PFF_WRITE_OK;
 	};
-	TEST_EXPECT(editor_test::write_text(install + "/readme.txt", "an install"));
+	TEST_EXPECT(test_io::write_text(install + "/readme.txt", "an install"));
 	TEST_EXPECT(write_install({{"shipped.mnu", shipped}}));
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
@@ -1253,8 +1253,8 @@ static int test_original_data() {
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Original"));
 	const SessionView &v = session.view();
 	const std::string root = v.project.root;
-	TEST_EXPECT(editor_test::write_text(root + "/menus/shipped.mnu", shipped));
-	TEST_EXPECT(editor_test::write_text(root + "/menus/mine.mnu", menu("MINE")));
+	TEST_EXPECT(test_io::write_text(root + "/menus/shipped.mnu", shipped));
+	TEST_EXPECT(test_io::write_text(root + "/menus/mine.mnu", menu("MINE")));
 	editor_test::set_game_install(session, install);
 	editor_test::handle_to_end(session, request::rescan());
 	const auto logo_in = [&v](const char *path) {
@@ -1372,7 +1372,7 @@ static int test_original_data() {
 	editor_test::handle_to_end(session, request::close_document("menus/shipped.mnu"));
 	// Changed by a byte on disk: the same; the modder's menu's is the modder's. The install was validated
 	// once: nothing of the project's moves it.
-	TEST_EXPECT(editor_test::write_text(root + "/menus/shipped.mnu", shipped + " "));
+	TEST_EXPECT(test_io::write_text(root + "/menus/shipped.mnu", shipped + " "));
 	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(still_theirs("a byte changed on disk") && !in_original_data(logo_in("menus/mine.mnu"), v));
 	TEST_EXPECT(baseline.validations() == validated);
@@ -1486,7 +1486,7 @@ static int test_original_marks() {
 // without) are marked, the rest are not; the query shows them alone; the refused build names them, its
 // status line the first, each refusal said with why (the manifest's citation).
 static int test_blocking() {
-	editor_test::TempProjectDir dir("opennova_editor_problems_blocking");
+	test_temp::TempDir dir("opennova_editor_problems_blocking");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1525,13 +1525,13 @@ static int test_blocking() {
 // others. Raised in one frame, as the Problems window's drain raises them: the placeholders first (made at
 // once), then the import's preview (an operation over the project's files); neither is refused as busy.
 static int test_fix_all_served_whole() {
-	editor_test::TempProjectDir dir("opennova_editor_problems_fix_all");
+	test_temp::TempDir dir("opennova_editor_problems_fix_all");
 	const std::string install = dir.file("install");
 	const std::string table = "a table";
 	const opennova::pff::PffWriteEntry entries[] = {
 		{"keyhelp.bin", reinterpret_cast<const uint8_t *>(table.data()), uint32_t(table.size()), 0, 0, 0},
 	};
-	TEST_EXPECT(editor_test::write_text(install + "/readme.txt", "an install"));
+	TEST_EXPECT(test_io::write_text(install + "/readme.txt", "an install"));
 	TEST_EXPECT(opennova::pff::pff_write_archive((install + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 1) ==
 	            opennova::pff::PFF_WRITE_OK);
 	NoProcess platform;
@@ -1570,7 +1570,7 @@ static int test_fix_all_served_whole() {
 // archive in the project is a row too, the build leaving it out, blocking nothing (a quality rule refuses
 // no build).
 static int test_plan_refusals_are_rows() {
-	editor_test::TempProjectDir dir("opennova_editor_problems_plan_rows");
+	test_temp::TempDir dir("opennova_editor_problems_plan_rows");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1579,10 +1579,10 @@ static int test_plan_refusals_are_rows() {
 	const opennova::pff::PffWriteEntry entries[] = {{"note.txt", reinterpret_cast<const uint8_t *>("x"), 1, 0, 0, 0}};
 	TEST_EXPECT(opennova::pff::pff_write_archive((v.project.root + "/extra.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 1) ==
 	            opennova::pff::PFF_WRITE_OK);
-	TEST_EXPECT(editor_test::write_text(v.project.root + "/scripts/a_name_far_too_long.wac", "// a script\r\n"));
+	TEST_EXPECT(test_io::write_text(v.project.root + "/scripts/a_name_far_too_long.wac", "// a script\r\n"));
 	// A closed animation map with a row of nine clips: the game registers every one, and a build packs the file as
 	// stored, so its finding refuses nothing, in the result's words as in the gate.
-	TEST_EXPECT(editor_test::write_text(v.project.root + "/anims/nine.adm",
+	TEST_EXPECT(test_io::write_text(v.project.root + "/anims/nine.adm",
 	                                    "\r\nanim_reset\t\t\t\t\"a\" \"b\" \"c\" \"d\" \"e\" \"f\" \"g\" \"h\" \"i\"\r\n\r\n\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	const auto rows_of = [&v](const char *code) {
@@ -1643,7 +1643,7 @@ static int test_plan_refusals_are_rows() {
 // Problems at once, while the validation the change left due has yet to run (an import's 27 such rows
 // stood until the validation after it ended); the other rows wait for it, which then composes them.
 static int test_requirements_at_once() {
-	editor_test::TempProjectDir dir("opennova_editor_problems_requirements");
+	test_temp::TempDir dir("opennova_editor_problems_requirements");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);

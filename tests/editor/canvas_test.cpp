@@ -942,14 +942,14 @@ int test_menu_canvas_held() {
 }
 
 int test_model_canvas() {
-	editor_test::TempProjectDir dir("opennova_editor_canvas_model");
+	test_temp::TempDir dir("opennova_editor_canvas_model");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	const SessionView &view = session.view();
 	session.handle(request::new_project(dir.file("project"), "Canvas Test"));
 	session.run_operations();
-	TEST_EXPECT(editor_test::write_bytes(
+	TEST_EXPECT(test_io::write_file(
 			dir.file("project/models/armory.3di"), test_io::read_file(synth("armory.3di"))));
 	session.handle(request::rescan());
 	session.run_operations();
@@ -1275,7 +1275,7 @@ struct GroundDevice final : ViewportDevice {
 // 640 x 480, every request the canvas raises served through the session as the windows serve them.
 // `device` (null: none) is the device its context carries, as the view's carries the Shell's.
 struct MissionRig {
-	editor_test::TempProjectDir dir{ "opennova_editor_canvas_mission" };
+	test_temp::TempDir dir{ "opennova_editor_canvas_mission" };
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{ platform, preferences };
@@ -1294,13 +1294,13 @@ struct MissionRig {
 		session.run_operations();
 		editor_test::create_missing_files(session);
 		const std::string fixtures = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/";
-		if (!editor_test::write_bytes(view.project.root + "/missions/synth_logic.bms",
+		if (!test_io::write_file(view.project.root + "/missions/synth_logic.bms",
 					test_io::read_file(fixtures + "bms/synth_logic.bms")))
 			return false;
 		if (items &&
-				(!editor_test::write_text(view.project.root + "/defs/items.def",
+				(!test_io::write_text(view.project.root + "/defs/items.def",
 						 "begin \"Drop Pump\"\nid 106100\ntype object\ngraphic pump\nend\n") ||
-						!editor_test::write_bytes(view.project.root + "/models/pump.3di",
+						!test_io::write_file(view.project.root + "/models/pump.3di",
 								test_io::read_file(fixtures + "threedi/synth/pump.3di"))))
 			return false;
 		session.handle(request::rescan());

@@ -76,14 +76,14 @@ int test_marks() {
 // Two scripts edited under one gesture: an Undo in either takes both, a Redo makes both again; an EndEdit by the
 // token ends it in both, and its cancel drops both.
 int test_linked_undo() {
-	editor_test::TempProjectDir dir("opennova_editor_terrain_stroke");
+	test_temp::TempDir dir("opennova_editor_terrain_stroke");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Linked"));
 	const std::string root = session.view().project.root;
-	TEST_EXPECT(editor_test::write_text(root + "/scripts/a.wac", "aaa\r\n"));
-	TEST_EXPECT(editor_test::write_text(root + "/scripts/b.wac", "bbb\r\n"));
+	TEST_EXPECT(test_io::write_text(root + "/scripts/a.wac", "aaa\r\n"));
+	TEST_EXPECT(test_io::write_text(root + "/scripts/b.wac", "bbb\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	const SessionView &v = session.view();
 	const AssetEntry *a_entry = v.project.scan->find("a.wac");
@@ -135,14 +135,14 @@ int test_linked_undo() {
 // its Save writes beside it (one gesture's link) that changed outside the editor too is refused, named in the status,
 // its own conflict deciding it; nothing the other program saved there is lost unasked.
 int test_scope_save_over() {
-	editor_test::TempProjectDir dir("opennova_editor_terrain_save_over");
+	test_temp::TempDir dir("opennova_editor_terrain_save_over");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Over"));
 	const std::string root = session.view().project.root;
-	TEST_EXPECT(editor_test::write_text(root + "/scripts/a.wac", "aaa\r\n"));
-	TEST_EXPECT(editor_test::write_text(root + "/scripts/b.wac", "bbb\r\n"));
+	TEST_EXPECT(test_io::write_text(root + "/scripts/a.wac", "aaa\r\n"));
+	TEST_EXPECT(test_io::write_text(root + "/scripts/b.wac", "bbb\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	const SessionView &v = session.view();
 	const std::string a = v.project.scan->find("a.wac")->relative_path, b = v.project.scan->find("b.wac")->relative_path;
@@ -153,8 +153,8 @@ int test_scope_save_over() {
 	session.handle(request::edit_record(b, span(1, 1, 3, "BBB", gesture)));
 	session.handle(request::end_edit(std::string(), gesture));
 	// Another program saves over both.
-	TEST_EXPECT(editor_test::write_text(root + "/" + a, "outside a, longer\r\n"));
-	TEST_EXPECT(editor_test::write_text(root + "/" + b, "outside b, longer\r\n"));
+	TEST_EXPECT(test_io::write_text(root + "/" + a, "outside a, longer\r\n"));
+	TEST_EXPECT(test_io::write_text(root + "/" + b, "outside b, longer\r\n"));
 	session.handle(request::open_document(a));
 	editor_test::handle_to_end(session, request::save_over(a));
 	std::string on_disk, error;
@@ -192,7 +192,7 @@ int test_wire_and_workspace() {
 			R"({"kind":"terrain_stroke","stroke":{"plane":"heights","points":[[0,0]],"brush":{"radius":9999}}})", bad, error));
 	TEST_EXPECT(!editor_request_from_json(bad, back, error) && contains(error, "radius"));
 
-	editor_test::TempProjectDir dir("opennova_editor_terrain_brush_workspace");
+	test_temp::TempDir dir("opennova_editor_terrain_brush_workspace");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -209,7 +209,7 @@ int test_wire_and_workspace() {
 	TEST_EXPECT(session.outcome().done() && !v.workspace.terrain_brush.has_cursor);
 	// A document that is neither a mission nor a terrain has no Terrain pane; a stroke in it is refused.
 	const std::string root = v.project.root;
-	TEST_EXPECT(editor_test::write_text(root + "/scripts/a.wac", "aaa\r\n"));
+	TEST_EXPECT(test_io::write_text(root + "/scripts/a.wac", "aaa\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	const std::string a = v.project.scan->find("a.wac")->relative_path;
 	session.handle(request::open_document(a));
