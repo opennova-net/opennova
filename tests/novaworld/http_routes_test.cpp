@@ -49,6 +49,7 @@
 #include <base/io/sha256.h>
 #include <formats/admincfg/admin_cfg.h>
 #include <net/admin/admin_server.h>
+#include <net/novacrypto/cdkey.h>
 #include <net/novacrypto/epask.h>
 #include <net/napi/session.h>
 #include <net/novaworld/client_session.h>
@@ -460,6 +461,16 @@ std::vector<std::string> header_values(const net::HttpReply &reply, const std::s
 std::string header_value(const net::HttpReply &reply, const std::string &name) {
 	const auto values = header_values(reply, name);
 	return values.empty() ? std::string() : values.front();
+}
+
+// Whether a reply's Set-Cookie names `name` at all (set_cookie_value reads an
+// empty value and none alike).
+bool sets_cookie(const net::HttpReply &reply, const std::string &name) {
+	for (const std::string &line : header_values(reply, "Set-Cookie")) {
+		if (line.compare(0, name.size() + 1, name + "=") == 0)
+			return true;
+	}
+	return false;
 }
 
 std::string credentials(const std::string &username, const std::string &password) {
@@ -913,6 +924,11 @@ int test_admin_routes_table(Harness &h) {
 		 "{\"game_slug\":\"jop_2_consumer\",\"status\":\"active\",\"exp_bits\":\"3\"}"},
 		{"POST", "/api/admin/hosts/999999/command", "{\"verb\":\"Cycle\"}"},
 		{"POST", "/api/admin/hosts/999999/stop", ""},
+		{"GET", "/api/admin/cd-keys", ""},
+		{"POST", "/api/admin/cd-keys", "{\"title\":\"dfx2\",\"count\":1}"},
+		{"POST", "/api/admin/cd-keys/999999/assign", "{\"username\":\"web_table_player\"}"},
+		{"POST", "/api/admin/cd-keys/999999/revoke", ""},
+		{"POST", "/api/admin/cd-keys/999999/activations", "{\"nwpssk\":\"ABCDEFGHIJKLMNOPQRSTUVW\"}"},
 	};
 	const auto users_before = nws::list_users(*h.pool.acquire()).size();
 	const auto status_before = nws::get_server_status(*h.pool.acquire());
@@ -935,6 +951,7 @@ int test_admin_routes_table(Harness &h) {
 	TEST_EXPECT(nws::list_users(*h.pool.acquire()).size() == users_before);
 	TEST_EXPECT(nws::get_server_status(*h.pool.acquire()).message == status_before.message);
 	TEST_EXPECT(h.pool.acquire()->query("SELECT 1 FROM active_hosts WHERE rid = 4242;").empty());
+	TEST_EXPECT(h.pool.acquire()->query("SELECT 1 FROM cd_keys;").empty());
 	TEST_EXPECT(set_role(h, admin_id, "player"));
 	return 0;
 }
@@ -1926,6 +1943,11 @@ int test_dfx2_client_path(Harness &h) {
 	TEST_EXPECT(body_text(reply) == page("dfx2_0_start.htm"));
 	TEST_EXPECT(set_cookie_value(reply, "GT") == "dfx2:0:cus:buffy");
 	jar.keep(reply);
+	// An activated copy (dfx2_activation covers one that is not): the wire key its boot read
+	// decoded and its machine's fingerprint, the browser variables its NovaWorld connect set.
+	jar.cookies["NWCDKIID"] = opennova::cdkey::make_wire_key("DFX2-PATH-0001");
+	jar.cookies["NWCDKIIDEXP1"] = "";
+	jar.cookies["NWPSSK"] = "ABCDEFGHIJKLMNOPQRSTUVW";
 
 	reply = h.send_to(port, "GET",
 			"/NWStart.dll?MSGBASE=dfx2_0_msg.htm&IN=dfx2_0_main.htm&OUT=dfx2_0_login.htm"
@@ -1984,6 +2006,12 @@ int test_dfx2_client_path(Harness &h) {
 							{ "JOINLAN_URL", "" } }));
 	TEST_EXPECT(body_text(reply).find(base + "/dfx2_0.gsb</IB3_SUBST>") != std::string::npos);
 	TEST_EXPECT(set_cookie_value(reply, "EXPBITS") == "1");
+	// Activated already: no NWACT, and no key minted for the account.
+	TEST_EXPECT(!sets_cookie(reply, "NWACT"));
+	TEST_EXPECT(h.pool.acquire()
+					->query("SELECT 1 FROM cd_keys k JOIN players p ON p.id = k.user_id "
+							"WHERE p.username = 'dfx2_player';")
+					.empty());
 	jar.keep(reply);
 
 	// The browser list: a DFX2 listing, and a JO one it never shows.
@@ -2066,6 +2094,361 @@ int test_dfx2_client_path(Harness &h) {
 
 	for (const uint32_t rid : { 3201u, 3202u })
 		opennova::hostdb::remove_host_by_rid(*h.pool.acquire(), rid);
+	return 0;
+}
+
+// The CD keys' admin routes (cd_key_routes.h), with the Bearer token: generate (the title
+// and count rules; DFX2-XXXX-XXXX-XXXX-XXXX serials whose wire key nests them), the list and
+// its filters, assign (by username and by id, each refusal), a manual activation (its NWACT
+// read back to the key's wire key by the client's own leg, the same NWACT again for the same
+// machine), the key's and the account's activations, and revoke (after which the key neither
+// activates nor assigns, and the account may take another).
+int test_cd_key_routes(Harness &h) {
+	namespace cdkey = opennova::cdkey;
+	const auto json = [](const net::HttpReply &reply) {
+		return crow::json::load(body_text(reply));
+	};
+	const auto post = [&h](const std::string &path, const std::string &body) {
+		return h.send("POST", path, { kJson, kBearer }, body);
+	};
+	const auto code_of = [&json](const net::HttpReply &reply) {
+		const auto body = json(reply);
+		return body && body.has("error") ? str(body["error"]) : std::string();
+	};
+	constexpr const char *kMachine = "ABCDEFGHIJKLMNOPQRSTUVW";
+
+	for (const char *body :
+			{ "{}", "{\"title\":\"dfx2\"}", "{\"count\":2}", "{\"title\":\"jo\",\"count\":1}",
+					"{\"title\":\"dfx2\",\"count\":0}", "{\"title\":\"dfx2\",\"count\":101}",
+					"{\"title\":\"dfx2\",\"count\":\"2\"}", "[]" }) {
+		const auto refused = post("/api/admin/cd-keys", body);
+		if (refused.code != 400)
+			std::fprintf(stderr, "  generate %s: %s\n", body, describe(refused).c_str());
+		TEST_EXPECT(refused.code == 400);
+	}
+	auto reply = post("/api/admin/cd-keys", "{\"title\":\"dfx2\",\"count\":3}");
+	TEST_EXPECT(reply.code == 201);
+	auto made = json(reply);
+	TEST_EXPECT(made && made["keys"].size() == 3);
+	std::vector<int64_t> ids;
+	std::vector<std::string> serials;
+	for (const auto &k : made["keys"]) {
+		const std::string serial = str(k["serial"]);
+		TEST_EXPECT(serial.size() == 24 && serial.compare(0, 5, "DFX2-") == 0);
+		for (size_t i = 4; i < serial.size(); i += 5)
+			TEST_EXPECT(serial[i] == '-');
+		std::string inner;
+		TEST_EXPECT(str(k["wire_key"]) == cdkey::make_wire_key(serial));
+		TEST_EXPECT(cdkey::decode_wire_key(str(k["wire_key"]), inner) && inner == serial);
+		TEST_EXPECT(str(k["title"]) == "dfx2" && str(k["state"]) == "unassigned");
+		TEST_EXPECT(k["account"].t() == crow::json::type::Null &&
+				k["assigned_at"].t() == crow::json::type::Null);
+		TEST_EXPECT(str(k["created_by"]) == "token" && k["activations"].i() == 0);
+		ids.push_back(k["id"].i());
+		serials.push_back(serial);
+	}
+	TEST_EXPECT(serials[0] != serials[1] && serials[1] != serials[2]);
+
+	// The list: newest first, the filters, the paging and its refusals.
+	reply = h.send("GET", "/api/admin/cd-keys?title=dfx2&state=unassigned&limit=2", { kBearer });
+	auto listed = json(reply);
+	TEST_EXPECT(
+			reply.code == 200 && listed && listed["keys"].size() == 2 && listed["total"].i() >= 3);
+	TEST_EXPECT(listed["keys"][0]["id"].i() > listed["keys"][1]["id"].i());
+	TEST_EXPECT(listed["auto_mint"].b() && listed["titles"].size() == 1 &&
+			str(listed["titles"][0]) == "dfx2");
+	reply = h.send("GET", "/api/admin/cd-keys?q=" + serials[1].substr(10), { kBearer });
+	listed = json(reply);
+	TEST_EXPECT(reply.code == 200 && listed && listed["total"].i() == 1 &&
+			listed["keys"][0]["id"].i() == ids[1]);
+	for (const char *query :
+			{ "?state=bogus", "?title=jo", "?limit=0", "?limit=501", "?offset=x", "?limit=-1" }) {
+		const auto refused = h.send("GET", std::string("/api/admin/cd-keys") + query, { kBearer });
+		TEST_EXPECT(refused.code == 400 && code_of(refused) == "invalid_field");
+	}
+
+	// Assign: by username, then the refusals.
+	const int64_t owner = make_account(h, "cdkey_owner", "pw-cdkey-owner");
+	const int64_t other = make_account(h, "cdkey_other", "pw-cdkey-other");
+	TEST_EXPECT(owner > 0 && other > 0);
+	const std::string key0 = "/api/admin/cd-keys/" + std::to_string(ids[0]);
+	const std::string key1 = "/api/admin/cd-keys/" + std::to_string(ids[1]);
+	reply = post(key0 + "/assign", "{\"username\":\"cdkey_owner\"}");
+	auto assigned = json(reply);
+	TEST_EXPECT(reply.code == 200 && assigned && str(assigned["key"]["state"]) == "assigned");
+	TEST_EXPECT(assigned["key"]["account"]["id"].i() == owner &&
+			str(assigned["key"]["account"]["username"]) == "cdkey_owner");
+	TEST_EXPECT(assigned["key"]["assigned_at"].t() == crow::json::type::String);
+	reply = post(key0 + "/assign", "{\"user_id\":" + std::to_string(other) + "}");
+	TEST_EXPECT(reply.code == 409 && code_of(reply) == "already_assigned");
+	reply = post(key1 + "/assign", "{\"username\":\"cdkey_owner\"}");
+	TEST_EXPECT(reply.code == 409 && code_of(reply) == "account_has_key");
+	reply = post(key1 + "/assign", "{\"username\":\"nobody_here\"}");
+	TEST_EXPECT(reply.code == 404 && code_of(reply) == "no_such_account");
+	reply = post("/api/admin/cd-keys/999999/assign", "{\"username\":\"cdkey_other\"}");
+	TEST_EXPECT(reply.code == 404 && code_of(reply) == "not_found");
+	TEST_EXPECT(post(key1 + "/assign", "{}").code == 400);
+	TEST_EXPECT(post(key1 + "/assign", "{\"username\":7}").code == 400);
+	reply = post(key1 + "/assign", "{\"user_id\":" + std::to_string(other) + "}");
+	TEST_EXPECT(reply.code == 200 && json(reply)["key"]["account"]["id"].i() == other);
+	reply = h.send("GET", "/api/admin/cd-keys?state=assigned&q=cdkey_", { kBearer });
+	TEST_EXPECT(reply.code == 200 && json(reply)["total"].i() == 2);
+
+	// A manual activation: the NWACT a machine's registry CDKIID takes, recorded once per machine.
+	TEST_EXPECT(post(key0 + "/activations", "{\"nwpssk\":\"abc\"}").code == 400);
+	TEST_EXPECT(post(key0 + "/activations", "{}").code == 400);
+	TEST_EXPECT(post("/api/admin/cd-keys/999999/activations",
+						std::string("{\"nwpssk\":\"") + kMachine + "\"}")
+						.code == 404);
+	reply = post(key0 + "/activations", std::string("{\"nwpssk\":\"") + kMachine + "\"}");
+	auto activated = json(reply);
+	TEST_EXPECT(reply.code == 201 && activated && !activated["reactivated"].b());
+	const std::string nwact = str(activated["nwact"]);
+	std::string wire;
+	TEST_EXPECT(cdkey::read_activation(nwact, kMachine, wire) &&
+			wire == str(made["keys"][0]["wire_key"]));
+	TEST_EXPECT(activated["key"]["activations"].i() == 1);
+	reply = post(key0 + "/activations", std::string("{\"nwpssk\":\"") + kMachine + "\"}");
+	TEST_EXPECT(reply.code == 200 && json(reply)["reactivated"].b() &&
+			str(json(reply)["nwact"]) == nwact);
+	reply = h.send("GET", key0 + "/activations", { kBearer });
+	auto history = json(reply);
+	TEST_EXPECT(reply.code == 200 && history && history["activations"].size() == 1);
+	TEST_EXPECT(str(history["activations"][0]["nwpssk"]) == kMachine &&
+			str(history["activations"][0]["nwact"]) == nwact);
+	TEST_EXPECT(h.send("GET", "/api/admin/cd-keys/999999/activations", { kBearer }).code == 404);
+	reply = h.send("GET", "/api/admin/users/" + std::to_string(owner) + "/cd-keys", { kBearer });
+	auto account = json(reply);
+	TEST_EXPECT(
+			reply.code == 200 && account && str(account["account"]["username"]) == "cdkey_owner");
+	TEST_EXPECT(account["keys"].size() == 1 && account["activations"].size() == 1);
+	TEST_EXPECT(str(account["activations"][0]["serial"]) == serials[0]);
+	TEST_EXPECT(h.send("GET", "/api/admin/users/999999/cd-keys", { kBearer }).code == 404);
+
+	// Revoke: once; after it the key neither activates nor assigns, and the account takes another.
+	reply = post(key0 + "/revoke", "");
+	auto revoked = json(reply);
+	TEST_EXPECT(reply.code == 200 && revoked && str(revoked["key"]["state"]) == "revoked");
+	TEST_EXPECT(revoked["key"]["revoked_at"].t() == crow::json::type::String);
+	reply = post(key0 + "/revoke", "");
+	TEST_EXPECT(reply.code == 409 && code_of(reply) == "already_revoked");
+	TEST_EXPECT(post("/api/admin/cd-keys/999999/revoke", "").code == 404);
+	reply = post(key0 + "/activations", std::string("{\"nwpssk\":\"") + kMachine + "\"}");
+	TEST_EXPECT(reply.code == 409 && code_of(reply) == "revoked");
+	reply = post("/api/admin/cd-keys/" + std::to_string(ids[2]) + "/revoke", "");
+	TEST_EXPECT(reply.code == 200);
+	reply = post("/api/admin/cd-keys/" + std::to_string(ids[2]) + "/assign",
+			"{\"username\":\"cdkey_owner\"}");
+	TEST_EXPECT(reply.code == 409 && code_of(reply) == "revoked");
+	reply = post("/api/admin/cd-keys", "{\"title\":\"dfx2\",\"count\":1}");
+	const int64_t fresh = json(reply)["keys"][0]["id"].i();
+	reply = post("/api/admin/cd-keys/" + std::to_string(fresh) + "/assign",
+			"{\"username\":\"cdkey_owner\"}");
+	TEST_EXPECT(reply.code == 200);
+	reply = h.send("GET", "/api/admin/users/" + std::to_string(owner) + "/cd-keys", { kBearer });
+	TEST_EXPECT(reply.code == 200 && json(reply)["keys"].size() == 2);
+	reply = h.send("GET", "/api/admin/cd-keys?state=revoked", { kBearer });
+	TEST_EXPECT(reply.code == 200 && json(reply)["total"].i() == 2);
+	return 0;
+}
+
+// A retail DFX2 client's activation through the login (cd_key_routes.h login_activation), on
+// listeners of its own (their own retail login brakes), one minting an account's first key and
+// one not (ONNET_CD_KEY_AUTO_MINT=0). An unactivated client (its NWCDKIID empty) gets the
+// activation login at NWStart, and its completed login carries NWACT for the NWPSSK it posts:
+// the client's own reading of it (the mix under that fingerprint, the registry chain) gives the
+// wire key of the account's key, minted now. The same machine gets the same NWACT again, another
+// machine its own; an activated client (a wire key in NWCDKIID), a JO client and a client posting
+// no NWPSSK get none; an account whose key was revoked gets none and no new key; with minting
+// off, an account with no key gets none while one holding a key is activated.
+int test_dfx2_activation(Harness &h) {
+	namespace cdkey = opennova::cdkey;
+	constexpr const char *kMachineA = "ABCDEFGHIJKLMNOPQRSTUVW";
+	constexpr const char *kMachineB = "TTTTTTTTTTTTTTTTTTTTTTT";
+	opennova::ConnectionManager manager;
+	nws::SessionStore sessions;
+	nws::ServerConfig config;
+	config.public_host = "127.0.0.1";
+	config.http_port = 0;
+	config.admin_api_token = kAdminToken;
+	config.templates_dir = h.retail_root / "templates";
+	config.static_dir = h.retail_root / "static";
+	config.web_dist_dir = h.retail_root / "web";
+	nws::HttpListener minting(manager, h.pool, sessions);
+	TEST_EXPECT(minting.start(config));
+	config.cd_key_auto_mint = false;
+	nws::HttpListener assigned_only(manager, h.pool, sessions);
+	TEST_EXPECT(assigned_only.start(config));
+	const auto page = [&h](const char *name) {
+		return test_io::read_file_text((h.retail_root / "templates" / name).string());
+	};
+
+	struct Login {
+		std::string start_page; // what NWStart.dll rendered
+		net::HttpReply completion; // GET /NWLogin.dll
+	};
+	// A DFX2 client's login from the gate's startupurl on: `jar` holds the browser variables its
+	// NovaWorld connect set (NWCDKIID, NWPSSK); JO's pages when `dfx2` is false.
+	const auto retail_login = [&](uint16_t port, const std::string &user,
+									  const std::string &password,
+									  std::map<std::string, std::string> variables, bool dfx2) {
+		Login out;
+		CookieJar jar;
+		jar.cookies = std::move(variables);
+		auto reply = h.send_to(port, "GET",
+				dfx2 ? "/nwprepare.dll?ver1=1&ver2=9013&cc=us&pfid=38&gt=dfx2:0:cus:buffy&url=dfx2_"
+					   "0_start.htm"
+					 : "/nwprepare.dll?ver1=3&ver2=2345&cc=us&gt=jop:cus2&url=jop_2_start.htm",
+				jar.header());
+		jar.keep(reply);
+		reply = h.send_to(port, "GET",
+				dfx2 ? "/NWStart.dll?MSGBASE=dfx2_0_msg.htm&IN=dfx2_0_main.htm&OUT=dfx2_0_login.htm"
+					   "&ACT=dfx2_0_actlogin.htm&verfile=dfx2_0.ver"
+					 : "/NWStart.dll?MSGBASE=jop_2_msg.htm&IN=jop_2_main.htm&OUT=jop_2_login.htm&"
+					   "verfile=jop_2.ver",
+				jar.header());
+		out.start_page = body_text(reply);
+		jar.keep(reply);
+		opennova::EpaskParams epask;
+		std::string body;
+		if (!opennova::epask_from_string(jar.cookies["EPASK"], epask) ||
+				!opennova::build_login_post_body(epask,
+						{ { "EPASK", opennova::epask_to_string(epask), false },
+								{ "NAME", user, true }, { "PASSWORD", password, true },
+								{ "success", dfx2 ? "dfx2_0_main.htm" : "jop_2_main.htm", true },
+								{ "failure", dfx2 ? "dfx2_0_actlogin.htm" : "jop_2_login.htm",
+										true },
+								{ "msgbase", dfx2 ? "dfx2_0_msg.htm" : "jop_2_msg.htm", true },
+								{ "relay", dfx2 ? "dfx2_0_relay.htm" : "jop_2_relay.htm", true },
+								{ "pfid", dfx2 ? "38" : "28", true } },
+						body))
+			return out;
+		auto headers = jar.header();
+		headers.push_back("Content-Type: application/x-www-form-urlencoded");
+		reply = h.send_to(port, "POST", "/NWLogin.dll", headers, body);
+		if (!nwlogin_succeeded(reply)) {
+			std::fprintf(stderr, "  retail login %s: %s\n", user.c_str(), describe(reply).c_str());
+			return out;
+		}
+		jar.keep(reply);
+		out.completion = h.send_to(port, "GET", "/NWLogin.dll", jar.header());
+		return out;
+	};
+	const auto unactivated = [](const char *machine) {
+		return std::map<std::string, std::string>{ { "NWCDKIID", "" }, { "NWCDKIIDEXP1", "" },
+			{ "NWPSSK", machine } };
+	};
+	const auto live_wire_key = [&h](int64_t user) {
+		const auto rows = h.pool.acquire()->query("SELECT wire_key, created_by FROM cd_keys WHERE "
+												  "user_id = ? AND revoked_at IS NULL;",
+				{ opennova::db::BindValue(user) });
+		return rows.size() == 1
+				? rows[0].as_text(0).value_or("") + "|" + rows[0].as_text(1).value_or("")
+				: std::string();
+	};
+
+	// The first activation: the activation login, then the NWACT of a key minted for the account.
+	const int64_t player = make_account(h, "act_player", "pw-act-player");
+	TEST_EXPECT(player > 0);
+	auto login = retail_login(
+			minting.bound_port(), "act_player", "pw-act-player", unactivated(kMachineA), true);
+	TEST_EXPECT(login.start_page == page("dfx2_0_actlogin.htm"));
+	TEST_EXPECT(login.completion.transport_ok && login.completion.code == 200);
+	TEST_EXPECT(body_text(login.completion).find("NovaWorld Main Menu") != std::string::npos);
+	const std::string nwact_a = set_cookie_value(login.completion, "NWACT");
+	const std::string minted = live_wire_key(player);
+	TEST_EXPECT(
+			!nwact_a.empty() && minted.size() > 5 && minted.substr(minted.size() - 5) == "|auto");
+	const std::string wire_key = minted.substr(0, minted.size() - 5);
+	std::string recovered;
+	TEST_EXPECT(cdkey::read_activation(nwact_a, kMachineA, recovered) && recovered == wire_key);
+	std::string serial;
+	TEST_EXPECT(cdkey::decode_wire_key(recovered, serial) && serial.compare(0, 5, "DFX2-") == 0);
+	// Only that machine reads it.
+	TEST_EXPECT(!cdkey::read_activation(nwact_a, kMachineB, recovered));
+
+	// The same machine again: the same NWACT, no second key; another machine its own.
+	login = retail_login(
+			minting.bound_port(), "act_player", "pw-act-player", unactivated(kMachineA), true);
+	TEST_EXPECT(set_cookie_value(login.completion, "NWACT") == nwact_a);
+	TEST_EXPECT(live_wire_key(player) == minted);
+	login = retail_login(
+			minting.bound_port(), "act_player", "pw-act-player", unactivated(kMachineB), true);
+	const std::string nwact_b = set_cookie_value(login.completion, "NWACT");
+	TEST_EXPECT(!nwact_b.empty() && nwact_b != nwact_a);
+	TEST_EXPECT(cdkey::read_activation(nwact_b, kMachineB, recovered) && recovered == wire_key);
+	TEST_EXPECT(h.pool.acquire()
+						->query("SELECT COUNT(*) FROM cd_key_activations a JOIN cd_keys k ON k.id "
+								"= a.key_id "
+								"WHERE k.user_id = ?;",
+								{ opennova::db::BindValue(player) })
+						.front()
+						.as_int(0)
+						.value() == 2);
+
+	// Activated (its NWCDKIID the wire key it now keeps): the login page, and no NWACT.
+	login = retail_login(minting.bound_port(), "act_player", "pw-act-player",
+			{ { "NWCDKIID", wire_key }, { "NWCDKIIDEXP1", "" }, { "NWPSSK", kMachineA } }, true);
+	TEST_EXPECT(login.start_page == page("dfx2_0_login.htm"));
+	TEST_EXPECT(login.completion.code == 200 && !sets_cookie(login.completion, "NWACT"));
+	// No NWPSSK: nothing to bind an NWACT to, and nothing minted.
+	const int64_t bare = make_account(h, "act_bare", "pw-act-bare");
+	login = retail_login(
+			minting.bound_port(), "act_bare", "pw-act-bare", { { "NWCDKIID", "" } }, true);
+	TEST_EXPECT(login.completion.code == 200 && !sets_cookie(login.completion, "NWACT"));
+	TEST_EXPECT(live_wire_key(bare).empty());
+	// A JO client: JO's pages, no NWACT, no key, its empty NWCDKIID taken as ever.
+	const int64_t jo = make_account(h, "act_jo", "pw-act-jo");
+	login = retail_login(
+			minting.bound_port(), "act_jo", "pw-act-jo", unactivated(kMachineA), false);
+	// JO's start page has no ACT: its login page, whatever the NWCDKIID.
+	TEST_EXPECT(login.start_page.find("<TITLE>NovaWorld Login</TITLE>") != std::string::npos &&
+			login.start_page.find("VALUE=\"jop_2_main.htm\"") != std::string::npos);
+	TEST_EXPECT(login.completion.code == 200 && !sets_cookie(login.completion, "NWACT"));
+	TEST_EXPECT(live_wire_key(jo).empty());
+
+	// Revoked: no NWACT, and no new key minted in its place.
+	TEST_EXPECT(
+			h.send("POST",
+					 "/api/admin/cd-keys/" +
+							 std::to_string(h.pool.acquire()
+											 ->query("SELECT id FROM cd_keys WHERE user_id = ?;",
+													 { opennova::db::BindValue(player) })
+											 .front()
+											 .as_int(0)
+											 .value()) +
+							 "/revoke",
+					 { kJson, kBearer })
+					.code == 200);
+	login = retail_login(
+			minting.bound_port(), "act_player", "pw-act-player", unactivated(kMachineA), true);
+	TEST_EXPECT(login.completion.code == 200 && !sets_cookie(login.completion, "NWACT"));
+	TEST_EXPECT(live_wire_key(player).empty());
+
+	// Minting off: no key, no NWACT; an admin's key activates.
+	const int64_t waiting = make_account(h, "act_waiting", "pw-act-waiting");
+	login = retail_login(assigned_only.bound_port(), "act_waiting", "pw-act-waiting",
+			unactivated(kMachineB), true);
+	TEST_EXPECT(login.start_page == page("dfx2_0_actlogin.htm"));
+	TEST_EXPECT(login.completion.code == 200 && !sets_cookie(login.completion, "NWACT"));
+	TEST_EXPECT(live_wire_key(waiting).empty());
+	auto made = h.send(
+			"POST", "/api/admin/cd-keys", { kJson, kBearer }, "{\"title\":\"dfx2\",\"count\":1}");
+	const auto key = crow::json::load(body_text(made));
+	TEST_EXPECT(made.code == 201 && key);
+	TEST_EXPECT(
+			h.send("POST",
+					 "/api/admin/cd-keys/" + std::to_string(key["keys"][0]["id"].i()) + "/assign",
+					 { kJson, kBearer }, "{\"username\":\"act_waiting\"}")
+					.code == 200);
+	login = retail_login(assigned_only.bound_port(), "act_waiting", "pw-act-waiting",
+			unactivated(kMachineB), true);
+	TEST_EXPECT(cdkey::read_activation(
+			set_cookie_value(login.completion, "NWACT"), kMachineB, recovered));
+	TEST_EXPECT(recovered == str(key["keys"][0]["wire_key"]));
+
+	assigned_only.stop();
+	minting.stop();
 	return 0;
 }
 
@@ -4964,6 +5347,8 @@ int run(Harness &h) {
 		{ "menu_urls_name_bound_port", test_menu_urls_name_bound_port },
 		{ "lobby_per_title", test_lobby_per_title },
 		{ "dfx2_client_path", test_dfx2_client_path },
+		{ "cd_key_routes", test_cd_key_routes },
+		{ "dfx2_activation", test_dfx2_activation },
 		{ "unknown_path_404", test_unknown_path_404 },
 		{ "server_info", test_server_info },
 		{ "admin_host_push", test_admin_host_push },

@@ -2,6 +2,7 @@
 
 #include "auth.h"
 #include "catalog_repository.h"
+#include "cd_key_routes.h"
 #include "host_routes.h"
 #include "hosted/bootstrap_route.h"
 #include "hosted/console_routes.h"
@@ -287,7 +288,11 @@ crow::json::wvalue user_to_json(const UserRecord &u) {
 
 struct HttpListener::Impl {
 	explicit Impl(db::ConnectionPool &pool) :
-			access(app, pool), hosts(access, pool), hosted_servers(access, pool), console(access, pool) {}
+			access(app, pool),
+			hosts(access, pool),
+			hosted_servers(access, pool),
+			console(access, pool),
+			cd_keys(access, pool) {}
 
 	WebApp app;
 	// start()'s handshake with the Crow thread: Pending until Crow serves
@@ -308,6 +313,8 @@ struct HttpListener::Impl {
 	hosted::HostedRoutes hosted_servers;
 	// Their console routes over the admin links (hosted/console_routes.h).
 	hosted::ConsoleRoutes console;
+	// The CD keys' admin routes and the retail login's DFX2 activation (cd_key_routes.h).
+	CdKeyRoutes cd_keys;
 	// The games catalogue, loaded once in start() before the routes register
 	// and never written after, so handlers read it without a lock.
 	catalog::GameCatalog games;
@@ -368,6 +375,8 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->hosted_servers.register_routes(impl_->app);
 	impl_->console.set_handler_threads(handler_threads());
 	impl_->console.register_routes(impl_->app, admin_links_);
+	impl_->cd_keys.configure(config);
+	impl_->cd_keys.register_routes(impl_->app);
 	if (bootstrap_store_ != nullptr)
 		hosted::register_bootstrap_route(impl_->app, *bootstrap_store_, bootstrap_admitted_);
 	register_legacy_login_routes(templates_dir);
@@ -1201,6 +1210,13 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		const std::string out_p  = req.url_params.get("OUT")     ? req.url_params.get("OUT")     : game.page("login.htm");
 		const std::string msgbase = req.url_params.get("MSGBASE")? req.url_params.get("MSGBASE") : game.page("msg.htm");
 		const auto epask = cookies.count("EPASK") ? cookies.at("EPASK") : opennova::epask_to_string(epask_params_);
+		// An unactivated DFX2 client (its NWCDKIID no wire key) gets the activation login, ACT.
+		const char *act_p = req.url_params.get("ACT");
+		const auto nwcdkiid = cookies.find("NWCDKIID");
+		const std::string nwcdkiid_v = nwcdkiid == cookies.end() ? std::string() : nwcdkiid->second;
+		const bool activating = act_p != nullptr && *act_p != '\0' &&
+				cdkeys::needs_activation(game.title, nwcdkiid_v);
+		const std::string page_p = activating ? std::string(act_p) : out_p;
 
 		std::printf("[http] GET %s IN=%s OUT=%s MSGBASE=%s cookies=[%s]\n",
 				loggable(req.url).c_str(), loggable(in_p).c_str(), loggable(out_p).c_str(),
@@ -1216,7 +1232,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			{"JOINLAN_URL", ""},
 		};
 		crow::response res(200);
-		res.body = render_template_file(templates_dir, out_p, vars);
+		res.body = render_template_file(templates_dir, page_p, vars);
 		res.set_header("Content-Type", "text/html");
 		add_standard_headers(res);
 		add_cookie(res, "YOURIP",      req.remote_ip_address);
@@ -1606,6 +1622,11 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		add_cookie(res, "CHAR",     session->nwhandle.empty() ? "DevUser"    : session->nwhandle);
 		add_cookie(res, "PCID",     session->pcid.empty()     ? "00000001"   : session->pcid);
 		add_cookie(res, "EXPBITS",  session->exp_bits.empty() ? "3" : session->exp_bits);
+		// A DFX2 client not yet activated: its machine's NWACT, which its NovaWorld screen
+		// writes to the registry CDKIID (cd_key_routes.h).
+		const std::string nwact = impl_->cd_keys.login_activation(session->user_id, game, cookies);
+		if (!nwact.empty())
+			add_cookie(res, "NWACT", nwact);
 
 		// Echo the client's persistent/express-login cookies back so retail's
 		// logged-in state stays valid and these survive to later requests —

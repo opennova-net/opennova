@@ -22,8 +22,8 @@ export async function fetchConnections(signal?: AbortSignal): Promise<Connection
   return response.data;
 }
 
-// The hosted servers' admin routes (/api/admin/hosted*) and the hosting
-// approval (users.ts setCanHost) answer an AdminResult instead of throwing,
+// The hosted servers' admin routes (/api/admin/hosted*), the CD keys' (cdKeys.ts)
+// and the hosting approval (users.ts setCanHost) answer an AdminResult instead of throwing,
 // with the server's `error` code mapped to a message: the server's own
 // `message` text is never shown.
 
@@ -39,6 +39,11 @@ export type AdminErrorCode =
   | 'missing_field'
   | 'not_found'
   | 'not_live'
+  | 'no_such_account'
+  | 'revoked'
+  | 'already_revoked'
+  | 'already_assigned'
+  | 'account_has_key'
   | 'db_error'
   | 'network'
   | 'unknown';
@@ -63,6 +68,11 @@ const KNOWN_ADMIN_CODES: ReadonlySet<string> = new Set<AdminErrorCode>([
   'missing_field',
   'not_found',
   'not_live',
+  'no_such_account',
+  'revoked',
+  'already_revoked',
+  'already_assigned',
+  'account_has_key',
   'db_error',
 ]);
 
@@ -84,6 +94,15 @@ function adminMessageFor(code: AdminErrorCode): string {
       return 'It no longer exists. Refresh the list.';
     case 'not_live':
       return 'That hosted server has already ended. Refresh the list.';
+    case 'no_such_account':
+      return 'No player account has that name.';
+    case 'revoked':
+    case 'already_revoked':
+      return 'That key is revoked. Refresh the list.';
+    case 'already_assigned':
+      return 'That key is already on an account. Refresh the list.';
+    case 'account_has_key':
+      return 'That account already holds a key for this game. Revoke it first.';
     case 'db_error':
       return 'The server hit a database error. Try again shortly.';
     case 'network':

@@ -10,8 +10,11 @@
 #include "../common/test_expect.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <optional>
+#include <string>
 #include <vector>
 
 #ifndef OPENNOVA_SOURCE_DIR
@@ -77,7 +80,7 @@ int test_migrations_create_expected_tables() {
 
 	// Expected tables from the backend migration set.
 	const std::vector<std::string> expected = {
-		"active_hosts", "active_user_sessions",
+		"active_hosts", "active_user_sessions", "cd_key_activations", "cd_keys",
 		"games", "host_keys", "host_players", "host_roster", "hosted_server_console", "hosted_server_events",
 		"hosted_servers", "hosts", "login_addresses",
 		"player_game_access",
@@ -333,7 +336,7 @@ int test_web_sessions_migration_over_existing_accounts() {
 	TEST_EXPECT(db.query("SELECT name FROM pragma_table_info('players') WHERE name = 'role';").empty());
 
 	const auto second = run_migrations(db, migrations);
-	TEST_EXPECT(second.applied.size() == 7);
+	TEST_EXPECT(second.applied.size() == 8);
 	TEST_EXPECT(second.applied[0] == "0008_web_sessions_and_roles.sql");
 	TEST_EXPECT(second.applied[1] == "0009_host_keys.sql");
 	TEST_EXPECT(second.applied[2] == "0010_credentials_generation.sql");
@@ -341,6 +344,7 @@ int test_web_sessions_migration_over_existing_accounts() {
 	TEST_EXPECT(second.applied[4] == "0012_hosted_server_console.sql");
 	TEST_EXPECT(second.applied[5] == "0013_games_title.sql");
 	TEST_EXPECT(second.applied[6] == "0014_hosted_server_game.sql");
+	TEST_EXPECT(second.applied[7] == "0015_cd_keys.sql");
 	const auto roles = db.query("SELECT COUNT(*), SUM(role = 'player'), SUM(kind = 'player'), "
 	                            "SUM(can_host) FROM players;");
 	TEST_EXPECT(roles[0].as_int(0).value() == 5);
@@ -375,7 +379,7 @@ int test_hosted_server_game_migration() {
 	        "SELECT id, 'stopped', 'Before', 8, 30, 50, 5, 5, 0, 'a.bms' FROM players WHERE username = 'host_before';");
 
 	const auto second = run_migrations(db, migrations);
-	TEST_EXPECT(!second.applied.empty() && second.applied.back() == "0014_hosted_server_game.sql");
+	TEST_EXPECT(second.applied.size() >= 2 && second.applied[1] == "0014_hosted_server_game.sql");
 	const auto rows = db.query("SELECT game FROM hosted_servers WHERE game_name = 'Before';");
 	TEST_EXPECT(rows.size() == 1 && rows[0].as_text(0).value() == "jop_2_consumer");
 	db.exec("INSERT INTO hosted_servers (owner_user_id, state, game, game_name, max_players, time_limit, "
@@ -635,6 +639,153 @@ int test_host_keys_and_account_deletes() {
 	return 0;
 }
 
+// A statement the schema must refuse.
+bool refused(Database &db, const std::string &sql) {
+	try {
+		db.exec(sql);
+	} catch (const opennova::db::SqliteError &) {
+		return true;
+	}
+	return false;
+}
+
+// 0015's rules over `db` (migrated): a serial and a wire key are each unique,
+// a key's account must exist, an account holds one live key per title (any
+// number of revoked ones), a machine is one activation per key, and a
+// deleted account takes its keys and their activations, a deleted key its
+// activations. `prefix` keeps the rows of one call apart from another's.
+int expect_cd_key_rules(Database &db, const std::string &prefix) {
+	using opennova::db::BindValue;
+	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) VALUES (?, 'x', ?, "
+			"'1', ?);",
+			{ BindValue(prefix + "owner"), BindValue(prefix + "pc"), BindValue(prefix + "owner") });
+	const int64_t owner =
+			db.query("SELECT id FROM players WHERE username = ?;", { BindValue(prefix + "owner") })
+					.front()
+					.as_int(0)
+					.value();
+	const auto add_key = [&](const std::string &serial, std::optional<int64_t> user, bool revoked) {
+		db.exec("INSERT INTO cd_keys (title, serial, wire_key, user_id, created_by, revoked_at) "
+				"VALUES ('dfx2', ?, ?, ?, 'token', ?);",
+				{ BindValue(prefix + serial), BindValue(prefix + serial + "-WIRE"),
+						user ? BindValue(*user) : BindValue(std::monostate{}),
+						revoked ? BindValue(std::string("2026-10-14 00:00:00"))
+								: BindValue(std::monostate{}) });
+		return db.last_insert_rowid();
+	};
+	const int64_t live = add_key("LIVE", owner, false);
+	const auto fresh = db.query(
+			"SELECT created_at IS NOT NULL, assigned_at, revoked_at FROM cd_keys WHERE id = ?;",
+			{ BindValue(live) });
+	TEST_EXPECT(fresh.size() == 1 && fresh[0].as_int(0).value() == 1);
+	TEST_EXPECT(fresh[0].is_null(1) && fresh[0].is_null(2));
+	add_key("OLD1", owner, true);
+	add_key("OLD2", owner, true);
+	add_key("FREE", std::nullopt, false);
+	// A second live key for the account and title, a duplicate serial or wire key, a key
+	// for no account: refused.
+	TEST_EXPECT(refused(db,
+			"INSERT INTO cd_keys (title, serial, wire_key, user_id, created_by) VALUES "
+			"('dfx2', '" +
+					prefix + "TWO', '" + prefix + "TWO-WIRE', " + std::to_string(owner) +
+					", 'token');"));
+	TEST_EXPECT(refused(db,
+			"INSERT INTO cd_keys (title, serial, wire_key, created_by) VALUES ('dfx2', '" + prefix +
+					"LIVE', 'OTHER-WIRE-" + prefix + "', 'token');"));
+	TEST_EXPECT(refused(db,
+			"INSERT INTO cd_keys (title, serial, wire_key, created_by) VALUES ('dfx2', 'OTHER-" +
+					prefix + "', '" + prefix + "LIVE-WIRE', 'token');"));
+	TEST_EXPECT(refused(db,
+			"INSERT INTO cd_keys (title, serial, wire_key, user_id, created_by) VALUES "
+			"('dfx2', 'GHOST-" +
+					prefix + "', 'GHOST-WIRE-" + prefix + "', 999999, 'token');"));
+	// Another title's live key is the account's own business.
+	db.exec("INSERT INTO cd_keys (title, serial, wire_key, user_id, created_by) VALUES ('other', "
+			"?, ?, ?, 'token');",
+			{ BindValue(prefix + "OTHER"), BindValue(prefix + "OTHER-WIRE"), BindValue(owner) });
+
+	db.exec("INSERT INTO cd_key_activations (key_id, nwpssk, nwact) VALUES (?, "
+			"'ABCDEFGHIJKLMNOPQRSTUVW', 'X');",
+			{ BindValue(live) });
+	const auto activation =
+			db.query("SELECT created_at IS NOT NULL FROM cd_key_activations WHERE key_id = ?;",
+					{ BindValue(live) });
+	TEST_EXPECT(activation.size() == 1 && activation[0].as_int(0).value() == 1);
+	TEST_EXPECT(refused(db,
+			"INSERT INTO cd_key_activations (key_id, nwpssk, nwact) VALUES (" +
+					std::to_string(live) + ", 'ABCDEFGHIJKLMNOPQRSTUVW', 'Y');"));
+	TEST_EXPECT(refused(db,
+			"INSERT INTO cd_key_activations (key_id, nwpssk, nwact) VALUES "
+			"(999999, 'ABCDEFGHIJKLMNOPQRSTUVW', 'Y');"));
+	db.exec("INSERT INTO cd_key_activations (key_id, nwpssk, nwact) VALUES (?, "
+			"'TTTTTTTTTTTTTTTTTTTTTTT', 'Z');",
+			{ BindValue(live) });
+
+	// A deleted key takes its activations; a deleted account its keys.
+	const int64_t free_key =
+			db.query("SELECT id FROM cd_keys WHERE serial = ?;", { BindValue(prefix + "FREE") })
+					.front()
+					.as_int(0)
+					.value();
+	db.exec("INSERT INTO cd_key_activations (key_id, nwpssk, nwact) VALUES (?, "
+			"'ABCDEFGHIJKLMNOPQRSTUVW', 'F');",
+			{ BindValue(free_key) });
+	db.exec("DELETE FROM cd_keys WHERE id = ?;", { BindValue(free_key) });
+	TEST_EXPECT(
+			db.query("SELECT 1 FROM cd_key_activations WHERE key_id = ?;", { BindValue(free_key) })
+					.empty());
+	db.exec("DELETE FROM players WHERE id = ?;", { BindValue(owner) });
+	TEST_EXPECT(db.query("SELECT 1 FROM cd_keys WHERE serial LIKE ? || '%';", { BindValue(prefix) })
+					.empty());
+	TEST_EXPECT(db.query("SELECT 1 FROM cd_key_activations WHERE key_id = ?;", { BindValue(live) })
+					.empty());
+	return 0;
+}
+
+// 0015 on a fresh database: the two tables, their indexes and their rules.
+int test_cd_keys_fresh() {
+	const std::filesystem::path source_dir{ OPENNOVA_SOURCE_DIR };
+	Database db(":memory:");
+	run_migrations(db, source_dir / "backend" / "migrations");
+	for (const char *index :
+			{ "idx_cd_keys_title", "idx_cd_keys_user", "idx_cd_keys_live_per_account" }) {
+		TEST_EXPECT(db.query("SELECT 1 FROM sqlite_master WHERE type = 'index' AND tbl_name = "
+							 "'cd_keys' AND name = ?;",
+							  { opennova::db::BindValue(std::string(index)) })
+							.size() == 1);
+	}
+	return expect_cd_key_rules(db, "fresh-");
+}
+
+// 0015 over a database at 0014 (every deployment before it), holding accounts:
+// the full set applies 0015 alone, the accounts stay as they were, and the new
+// tables start empty and take keys for those accounts.
+int test_cd_keys_over_0014() {
+	const std::filesystem::path source_dir{ OPENNOVA_SOURCE_DIR };
+	const auto migrations = source_dir / "backend" / "migrations";
+	const auto seed_dir = source_dir / "backend" / "seed";
+	test_temp::TempDir before_0015("backend_schema_pre0015");
+	copy_migrations_before(migrations, "0015", before_0015.path);
+
+	Database db(":memory:");
+	TEST_EXPECT(run_migrations(db, before_0015.path).applied.size() == 14);
+	apply_seeds(db, seed_dir);
+	TEST_EXPECT(db.query("SELECT name FROM sqlite_master WHERE name = 'cd_keys';").empty());
+	const auto accounts = db.query("SELECT COUNT(*) FROM players;").front().as_int(0).value();
+	TEST_EXPECT(accounts == 5);
+
+	const auto second = run_migrations(db, migrations);
+	TEST_EXPECT(second.applied.size() == 1 && second.applied[0] == "0015_cd_keys.sql");
+	TEST_EXPECT(db.query("SELECT COUNT(*) FROM players;").front().as_int(0).value() == accounts);
+	TEST_EXPECT(db.query("SELECT 1 FROM cd_keys;").empty());
+	TEST_EXPECT(db.query("SELECT 1 FROM cd_key_activations;").empty());
+	db.exec("INSERT INTO cd_keys (title, serial, wire_key, user_id, created_by) "
+			"SELECT 'dfx2', 'PRE0015-' || username, 'PRE0015-WIRE-' || username, id, 'token' FROM "
+			"players;");
+	TEST_EXPECT(db.query("SELECT COUNT(*) FROM cd_keys;").front().as_int(0).value() == accounts);
+	return expect_cd_key_rules(db, "over-");
+}
+
 } // namespace
 
 int main() {
@@ -651,7 +802,13 @@ int main() {
 	if (test_host_keys_and_account_deletes() != 0) return 1;
 	if (test_credentials_generation() != 0) return 1;
 	if (test_hosted_server_game_migration() != 0) return 1;
+	if (test_cd_keys_fresh() != 0)
+		return 1;
+	if (test_cd_keys_over_0014() != 0)
+		return 1;
 	std::printf("OK: backend schema + seed (migrations, seed idempotency, FKs, "
-	            "web sessions + roles, games titles, host keys, credentials generation, hosted server games)\n");
+				"web sessions + roles, games titles, host keys, credentials generation, hosted "
+				"server games, "
+				"cd keys)\n");
 	return 0;
 }

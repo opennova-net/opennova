@@ -139,6 +139,12 @@ struct ServerConfig {
 	// (LobbySession::set_require_host_key).
 	bool require_host_key = false;
 
+	// ONNET_CD_KEY_AUTO_MINT (on unless set to 0): a DFX2 account that has never
+	// held a CD key gets one minted onto it at its first activation, so a player
+	// need not wait on an admin (cd_keys.h, cd_key_routes.h). Off, only a key an
+	// admin assigned activates. Service policy: NovaLogic's issuer is unwitnessed.
+	bool cd_key_auto_mint = true;
+
 	// Reflection override for the host/join flow (dev/NAT). NovaWorld tells a
 	// hosting client its reachable endpoint and advertises it to joiners. On the
 	// open internet the observed UDP source IS that endpoint, but behind a docker

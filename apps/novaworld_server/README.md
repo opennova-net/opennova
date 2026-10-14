@@ -722,6 +722,63 @@ next-map cursor unset when the list grows) and no `ONESHOT`, and a `PLAYER ... A
 is not on the list. The commands that change the server are recorded in the console with
 their sender; the reads are not.
 
+## CD keys (DFX2 activation)
+
+Delta Force Xtreme 2 activates against NovaWorld; Joint Operations does not
+([`docs/titles/dfx2-vs-jo-re.md`](../../docs/titles/dfx2-vs-jo-re.md) section 9). JO only
+reads its registry `CDKIID` into the `NWCDKIID` form field, which NovaLogic's service
+accepted empty, and its host checks no key, so JO's flow takes no key and keeps taking an
+empty `NWCDKIID` / `NWCDKIIDEXP1`. DFX2's boot and STARTUP menu gate on a registry
+`CDKIID` that NovaLogic's (now dead, `NWNODB01`) service handed out as the `NWACT`
+browser variable, and its LAN host checks the wire `CDKIID` that value decodes to
+(DFX2-13, codes 10 to 13). The codec is `engine/net/novacrypto/cdkey.h`; the keys are
+`cd_keys.h` (migration 0015) and the routes `cd_key_routes.h`.
+
+- **A key** is its serial, `DFX2-XXXX-XXXX-XXXX-XXXX` (64 bits from the OS CSPRNG, the
+  service's own format: NovaLogic's issuer is unwitnessed), and its wire key, the serial
+  under DFX2's wire chain: the `CDKIID` an activated copy keeps and a LAN host decodes.
+  Every serial is unique, so two accounts' copies never meet at codes 12 and 13. No `/MP`
+  tail and no `CDKIIDEXP1` are issued (nothing in `dfx2.exe` writes a `CDKIIDEXP1`). An
+  account holds at most one live key per title; a revoked key activates no machine.
+- **The activation** of one machine is `NWACT = mix_up(encode(wire key, registry chain),
+  NWPSSK)`: machine-bound, A to Z, and the same every time that machine asks
+  (`cd_key_activations` keeps one row per key and machine). The client's own leg (the mix
+  down under its fingerprint, the registry chain decoded) gives back the wire key.
+- **The hand-off.** A DFX2 client sets `NWCDKIID` (the wire key its boot read decoded,
+  empty when unactivated) and `NWPSSK` (its 23-letter fingerprint) as browser variables
+  when it connects to NovaWorld, so every web request carries them as cookies
+  [orig: CNapiGameSession_OnNovaWorldConnected @0x4d18dd, @0x4d1914 (dfx2.exe)].
+  `GET /NWStart.dll` answers a DFX2 client whose `NWCDKIID` is no wire key with the start
+  page's `ACT` page (`dfx2_0_actlogin.htm`, "Please login to activate this product")
+  instead of `OUT`. Its completed login (`GET /NWLogin.dll`) then carries
+  `Set-Cookie: NWACT=<value>` for the posted `NWPSSK`: the response's `SET-COOKIE`
+  lines land in the browser's one cookie jar, and the NovaWorld screen's idle update reads
+  `NWACT` from it, writes it to the registry `CDKIID`, validates it, and clears it [orig:
+  HTTP_ResponseHandler @0x6e6925, CookieJar_UpdateFromURL @0x6dc9e0;
+  @0x557539..0x55757e (dfx2.exe), CDKey_WriteActivationFromNWACT @0x411e30 (dfx2.exe)].
+  The registry write needs an administrator. An activated client, a JO client and a
+  client posting no `NWPSSK` get no `NWACT`.
+- **Minting.** An account that has never held a DFX2 key gets one minted onto it at its
+  first activation (`created_by` `auto`) while `ONNET_CD_KEY_AUTO_MINT` is on (the
+  default; `0` turns it off, and then only a key an admin assigned activates). An account
+  whose keys were all revoked gets none on its own.
+- **The admin routes** (each `require_admin`): `GET /api/admin/cd-keys` (`?title=`,
+  `?state=` unassigned / assigned / revoked, `?q=` a part of the serial, wire key or
+  username, `?limit=` 1 to 500, `?offset=`), `POST /api/admin/cd-keys` `{"title",
+  "count"}` (1 to 100), `POST /api/admin/cd-keys/<id>/assign` `{"username"}` or
+  `{"user_id"}`, `POST /api/admin/cd-keys/<id>/revoke`, `GET
+  /api/admin/cd-keys/<id>/activations`, `POST /api/admin/cd-keys/<id>/activations`
+  `{"nwpssk"}` (a manual activation: the NWACT for that machine, recorded) and `GET
+  /api/admin/users/<id>/cd-keys` (an account's keys and machines). The site's admin page
+  is `/admin/cd-keys`.
+
+Tests: `cdkey` (the codec, the RE record's section 9.7 vectors, the LAN join codes),
+`cd_keys` (the keys and activations on a migrated in-memory database, every build),
+`backend_schema` (0015 on a fresh database and over one at 0014), and the route harness's
+`cd_key_routes` and `dfx2_activation` cases (the admin routes, and a DFX2 client's whole
+activation through `NWStart.dll` and `NWLogin.dll`, its NWACT read back to the account's
+wire key).
+
 ## The switcher's address
 
 `GET /api/server-info` answers `{"novaworld_ip": "<ONNET_PUBLIC_HOST>"}` with
@@ -754,6 +811,8 @@ for a docker bridge or NAT (leave unset in production): `ONNET_CLIENT_REFLECT_IP
 `ONNET_CLIENT_REFLECT_{GATE,NOVAWORLD}_PORT`. The listing policy:
 `ONNET_REQUIRE_HOST_KEY=1` lists no host whose HostKey names no account (default off:
 listed with no owner; "Listed servers and owners" above).
+`ONNET_CD_KEY_AUTO_MINT=0` stops minting a DFX2 account's first CD key at its first
+activation (default on; "CD keys (DFX2 activation)" above).
 Seeding: `SEED_DEV_USERS=1` applies the dev-only `0002_dev_users.sql` (the
 `test`/`foo` accounts) — leave unset in production. Build + run via Docker:
 [`Dockerfile`](Dockerfile) and the compose files under [`deploy/`](../../deploy/).
@@ -913,7 +972,8 @@ the known addresses and the credentials generation below.
 
 Every source but `main.cpp` builds as the static library
 `opennova_novaworld_server_core` (mirroring `opennova_serve_core`); the exe is
-`main.cpp` over it. The HTTP sources (`http_listener`, `host_routes`, `web_access`,
+`main.cpp` over it. The HTTP sources (`http_listener`, `host_routes`, `cd_keys`,
+`cd_key_routes`, `web_access`,
 `web_session`, `rate_limiter`, `template_engine`, `session_store`, `auth`, and the
 hosted servers' `hosted/`) join the core only under
 `BUILD_NOVAWORLD_HTTP`, which also defines `OPENNOVA_HTTP_ENABLED` PUBLIC so

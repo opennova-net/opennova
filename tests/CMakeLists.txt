@@ -3440,6 +3440,13 @@ target_link_libraries(pubcrypto_test PRIVATE opennova_net)
 target_include_directories(pubcrypto_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME pubcrypto COMMAND pubcrypto_test)
 
+# The DFX2 CD key (net/novacrypto/cdkey.h): the RE record's vectors, the hardware
+# mix, the client's NWACT reading and the LAN host's join codes 10 to 13.
+add_executable(cdkey_test novacrypto/cdkey_test.cpp)
+target_link_libraries(cdkey_test PRIVATE opennova_net)
+target_include_directories(cdkey_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME cdkey COMMAND cdkey_test)
+
 add_executable(epask_test novacrypto/epask_test.cpp)
 target_link_libraries(epask_test PRIVATE opennova_net)
 target_include_directories(epask_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -4114,6 +4121,21 @@ target_link_libraries(host_key_test PRIVATE opennova_novaworld_service opennova_
 target_include_directories(host_key_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(host_key_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME host_key COMMAND host_key_test)
+
+# The service's CD keys below the HTTP layer (apps/novaworld_server/cd_keys.h, migration
+# 0015): the serial format, generate / list / assign / revoke, and the DFX2 activations
+# (the account's, minting its first key or not, and an admin's manual one), each NWACT
+# read back by the client's leg. Compiles the server's cd_keys.cpp directly, as
+# hosted_supervisor_test does, so it runs on every build.
+add_executable(cd_keys_test
+    novaworld/cd_keys_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/cd_keys.cpp)
+target_link_libraries(cd_keys_test PRIVATE opennova_novaworld_service)
+target_include_directories(cd_keys_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+target_compile_definitions(cd_keys_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_test(NAME cd_keys COMMAND cd_keys_test)
 
 add_executable(backend_schema_test novaworld/backend_schema_test.cpp)
 target_link_libraries(backend_schema_test PRIVATE opennova_novaworld_service)
