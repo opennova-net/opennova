@@ -994,13 +994,62 @@ inline InfantryBodyPose infantry_body_pose(const InfantryState &inf) {
 //   warmup (physics_class_from_move_function names the row);
 // - not for a body hidden at init (flags bit 0, the respawn zone of another team), which exits
 //   before the head [orig: @0x4B9A03];
-// - and the think after it, on its 16-tick stagger, may change the state played: the first promotes
-//   an alert record's idle 43 to 44 or 49 [orig: @0x4BD2FD..0x4BD31C]. A caller that runs no think
-//   plays the spawn's state on, its channels wrapping and serving `rings` as the game's do.
-// [orig: Entity_UpdateInfantryAI @0x4B9A14..0x4B9A48, the copy @0x4B9A28; AnimMap_UpdateDualChannels
-//  @0x40B8C0 from @0x4B9A48]
+// - and the think after it, on its 16-tick stagger (infantry_org1_key), may change the state
+//   played: the first promotes an alert record's idle 43 to 44 or 49 [orig: @0x4BD2FD..0x4BD31C]. A
+//   caller that runs no think plays the spawn's state on, its channels wrapping and serving `rings`
+//   as the game's do; one that keeps a body still runs infantry_org1_still_think after it.
+// [orig: Entity_UpdateInfantryAI @0x4B9A14..0x4B9A48, the copy @0x4B9A28;
+//  AnimMap_UpdateDualChannels @0x40B8C0 from @0x4B9A48]
 bool infantry_org1_motor_head(InfantryState &inf, IRootMotionSource *source, AnimVariantRings &rings,
                               RootMotionFrame &frame);
+
+// The org1 body's staggered key: the logic tick plus 36 times its net id (+0x7C, a placed record's
+// SSN). Its think runs where the key is a multiple of 16, its perception where it is one of 32 and
+// its attention scan where it is one of 256; a mission's first frame runs at tick 1
+// (MissionKernel::boot). [orig: Entity_UpdateInfantryAI @0x4B9948..0x4B9953, `lea [eax+eax*8]` then
+//  `lea [tick+edx*4]`; the think's gate (key & 0xF)]
+inline uint32_t infantry_org1_key(uint32_t logic_tick, int32_t net_id) {
+    return logic_tick + 36u * static_cast<uint32_t>(net_id);
+}
+
+// The org1 selection's alerted idle: on a body whose damage timer (+0x2F8) or AI slot alert byte
+// (+0x88, a placed record's alert_state) is set, an idle 43 target becomes idle_3 49 when the slot
+// holds a target (+0x0C, `target_held`), else idle_2 44; every other target, and every target of a
+// calm body, stands. [orig: Entity_UpdateInfantryAI @0x4BD2F0..0x4BD31C]
+int infantry_alerted_idle(int target, int32_t damage_timer, uint8_t alert, bool target_held);
+
+// The state the org1 body's .adm plays for `state`: the state where it authors it, else the
+// selector's fallback chains (jog and run for each other, then walk; idle_2 and idle_3 to idle;
+// the stance walks and idles to the standing ones), else idle 43. -1 with no source.
+// AiSystem::infantry_resolve_state answers it over the system's root motion.
+// [orig: availability = animMap[id] != animMap[0]; Entity_UpdateInfantryAI's gait and idle seeds]
+int infantry_resolve_state(const IRootMotionSource *source, int adm_id, int state);
+
+// THE ORG1 THINK OF A STILL BODY, on the logic tick `logic_tick` of the body of net id `net_id`:
+// on its think ticks (its key a multiple of 16, infantry_org1_key) the damage timer's decay on a
+// key that is a multiple of 64, then the selection the think commits for a body its legs give no
+// move and no state of their own: the guard family's guard 140 for a `guarding` body (Flags 0x40)
+// whose .adm authors it, else the selector's idle 43, through the alerted idle
+// (infantry_alerted_idle, its slot holding no target) on the slot's `alert` byte, resolved on its
+// .adm and committed through the org1 arbitration (an equal state commits nothing). Returns whether
+// the think ran. AiSystem's think runs the same legs among its others; a caller that ticks a still
+// body outside a world (the editor's mission view) runs it after the motor head every tick. It is
+// the world's think only for a body on which no other leg acts:
+// - none of the think's legs gives it a move or a state: no route or order walked, no target held
+//   and no reaction (its perception finds no threat), no burn, no reload, no hit, no drag, no
+//   ladder, no hold;
+// - unparented: a body attached to a parent's point skips the selection
+//   [orig: @0x4BD273..0x4BD288];
+// - nothing substitutes: dry, above half its health, in no rotor's wash;
+// - and no look target held: the attention scan, every 256 key ticks, finds no body within its
+//   radius in its line of sight to look at, whose look swaps idle 43, idle_2 44 and guard 140 for
+//   their looks 125, 126 and 141 where the .adm authors them [orig: @0x4BE72C..0x4BE7E7], and sees
+//   no enemy and no corpse, which raise the damage timer [orig: the scan @0x4BE0CA..0x4BE463].
+// [orig: Entity_UpdateInfantryAI — the key @0x4B9948..0x4B9953; the decay @0x4BBE24..0x4BBE38;
+//  the 43 seed @0x4BAA90; the guard leg @0x4BD196..0x4BD1BB; the alerted idle
+//  @0x4BD2F0..0x4BD31C; the arbitration @0x4BD837..0x4BD874]
+bool infantry_org1_still_think(InfantryState &inf, const IRootMotionSource *source,
+                               uint32_t logic_tick, int32_t net_id, bool guarding, uint8_t alert);
 
 // Pure retail body-tick kernels, exposed so deterministic tests can pin the
 // wrap/arithmetic-shift behavior independently of locomotion.
