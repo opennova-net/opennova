@@ -1145,7 +1145,8 @@ public:
     // - the heading chase: the body, the legs and the look [orig: @0x4BE8FD..0x4BEBD9];
     // - the eye restamp (infantry_restamp_eye) [orig: @0x4BF078..0x4BF14C];
     // - and the registry mirror (finish_infantry_tick).
-    // It skips what a body that stands does not run or does not show: the death edge and the
+    // Returns the motor head's frame (its event word, what the body's sound block reads, and its
+    // capsule). It skips what a body that stands does not run or does not show: the death edge and the
     // corpse leg; the slope pass (a standing body only decays toward level, where it spawns); the
     // attachment, the carrier ride and the steep-ground slide; the think's route, command and
     // combat legs and the selection's other substitutions (no route, order, target or hit: the
@@ -1154,7 +1155,7 @@ public:
     // for a body that never fires and stands level); the sound and fire passes; the root
     // integrate, gravity and the resolver (the body stays where its spawn stood it).
     // [orig: Entity_UpdateInfantryAI @0x4B9910]
-    void tick_still_body(AiEntity &e, World &world, uint32_t logic_tick);
+    RootMotionFrame tick_still_body(AiEntity &e, World &world, uint32_t logic_tick);
     // The infantry combat pass (org1 riflemen; world-wac-ai-re §17.1-17.3/17.5, D-AI-4):
     // 32-tick staged perception and 16-tick reactions, movement goals and aim.
     // Returns the proposed animation (0 = no override) for the common selector.

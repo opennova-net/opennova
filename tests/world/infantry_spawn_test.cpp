@@ -542,7 +542,9 @@ void still_bodies_attend_as_the_world() {
     for (uint32_t tick = 1; tick <= 600; ++tick) {
         for (size_t i = 0; i < full.bodies.size(); ++i) {
             full.owned->ai.update_organic(full.body(i), *full.owned, tick);
-            still.owned->ai.tick_still_body(still.body(i), *still.owned, tick);
+            const RootMotionFrame frame = still.owned->ai.tick_still_body(still.body(i), *still.owned, tick);
+            // The motor head's frame: the event word the body keeps and its capsule.
+            CHECK(frame.events == still.body(i).inf.last_events && frame.capsule_top == 2 * 65536);
         }
         for (size_t i = 0; i < full.bodies.size(); ++i) {
             CHECK(same_attention(full, still, i));

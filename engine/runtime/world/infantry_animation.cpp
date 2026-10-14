@@ -213,7 +213,7 @@ bool infantry_org1_still_think(InfantryState &inf, const IRootMotionSource *sour
     return true;
 }
 
-void AiSystem::tick_still_body(AiEntity &e, World &world, uint32_t logic_tick) {
+RootMotionFrame AiSystem::tick_still_body(AiEntity &e, World &world, uint32_t logic_tick) {
     InfantryState &inf = e.inf;
     Entity *self = world.registry.get(e.handle);
     // [orig: Entity_UpdateInfantryAI @0x4B9A14..0x4B9A48]
@@ -238,6 +238,7 @@ void AiSystem::tick_still_body(AiEntity &e, World &world, uint32_t logic_tick) {
     infantry_org1_heading_chase(e, self, infantry_org1_key(logic_tick, e.net_id));
     if (have_clip) infantry_restamp_eye(e, world, frame);
     finish_infantry_tick(e, world);
+    return frame;
 }
 
 void advance_primary_channel_fallback(InfantryState &inf) {
