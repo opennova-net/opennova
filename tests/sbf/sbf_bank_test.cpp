@@ -112,7 +112,7 @@ int main() {
 	TEST_EXPECT(sbf_read_bank(bytes.data(), bytes.size(), bank, error, &layout));
 	TEST_EXPECT(layout.packed && layout.trailing_bytes == 0 && layout.names_with_tails == 0 && layout.reserved_other == 0 &&
 	            layout.tails_other == 0 && layout.short_chunks == 0);
-	TEST_EXPECT(bank.version == SBF_VERSION_DEFAULT && bank.flags == SBF_FLAGS_BYTE_PAIRED_STEREO);
+	TEST_EXPECT(layout.header_words_other == 0 && bank.flags == SBF_FLAGS_BYTE_PAIRED_STEREO);
 	TEST_EXPECT(bank.streams.size() == 13 && bank.streams[0].name == "SILENCE" && bank.streams[1].name == "TONE01");
 	TEST_EXPECT(bank.streams[0].chunks.size() == 1 && bank.streams[0].chunks[0].audio.size() == 2216);
 	TEST_EXPECT(bank.streams[1].chunks.size() == 3 && bank.streams[1].chunks[2].audio.size() == 1000);
@@ -202,6 +202,13 @@ int main() {
 		        uint32_t(bytes.size()) - (SBF_HEADER_SIZE + 13 * SBF_ENTRY_SIZE));
 	}
 	TEST_EXPECT(!sbf_read_bank(broken.data(), broken.size(), again, error) && error.find("share") != std::string::npos);
+
+	// The header's version and reserved words, which no reader reads: counted, written as the writer's.
+	broken = bytes;
+	put_u32(broken, 4, 0x200);
+	put_u32(broken, 12, 7);
+	TEST_EXPECT(sbf_read_bank(broken.data(), broken.size(), again, error, &layout) && layout.header_words_other == 2);
+	TEST_EXPECT(sbf_write_bank(again, written, error) && written == bytes);
 
 	// What it notes of a layout the writer lays out otherwise: bytes past the last stream, a name with
 	// bytes after its terminator, streams out of their index's order, a chunk's reserved pair not the

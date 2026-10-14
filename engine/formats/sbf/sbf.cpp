@@ -312,9 +312,7 @@ bool sbf_read_bank(const uint8_t *data, size_t size, SbfFile &out, std::string &
     SbfFile bank;
     SbfHeader header;
     memcpy(&header, data, SBF_HEADER_SIZE);
-    bank.version = header.version;
     bank.flags = header.flags;
-    bank.reserved = header.reserved;
     const size_t index_end = SBF_HEADER_SIZE + (size_t)header.entry_count * SBF_ENTRY_SIZE;
     std::vector<SbfRawEntry> entries(header.entry_count);
     uint64_t streamed = 0;
@@ -347,6 +345,7 @@ bool sbf_read_bank(const uint8_t *data, size_t size, SbfFile &out, std::string &
     /* Each stream's chunks, every chunk's reserved pair and tail checked
        against the writer's constants (a write keeps neither). */
     SbfFileLayout found;
+    found.header_words_other = (header.version != SBF_VERSION_DEFAULT ? 1 : 0) + (header.reserved != SBF_HEADER_RESERVED ? 1 : 0);
     size_t expected = index_end;
     bank.streams.reserve(header.entry_count);
     for (uint32_t i = 0; i < header.entry_count; ++i) {
@@ -437,9 +436,9 @@ bool sbf_write_bank(const SbfFile &bank, std::vector<uint8_t> &out, std::string 
         for (int b = 0; b < 4; ++b) out.push_back((uint8_t)(value >> (8 * b)));
     };
     word(SBF_MAGIC);
-    word(bank.version);
+    word(SBF_VERSION_DEFAULT);
     word(bank.flags);
-    word(bank.reserved);
+    word(SBF_HEADER_RESERVED);
     word((uint32_t)SBF_HEADER_SIZE);
     word((uint32_t)bank.streams.size());
     uint32_t cursor = (uint32_t)(SBF_HEADER_SIZE + bank.streams.size() * SBF_ENTRY_SIZE);

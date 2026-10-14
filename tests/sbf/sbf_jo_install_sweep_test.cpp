@@ -6,10 +6,10 @@
 // on the real thing: 13 entries, NULLS first, NULLS one chunk (total_size
 // 0x1008) of 0x08A8 valid samples. Every bank reads into the bank model
 // (sbf_read_bank), packed as the writer packs one; its write (sbf_write_bank,
-// the chunks' reserved pair and tails the writer's constants, never the
-// bank's) reads back as the same fields, the same size, and differs from the
-// file only in those never-read bytes; each stream's decode is the raw
-// entry's.
+// the header's version and reserved words and the chunks' reserved pair and
+// tails the writer's constants, never the bank's) reads back as the same
+// fields, the same size, and differs from the file only in those never-read
+// bytes; each stream's decode is the raw entry's.
 //
 // Reports Skipped without OPENNOVA_JO_DIR.
 
@@ -65,8 +65,8 @@ void round_trip(const std::string &path, const char *label) {
 	SbfFile again;
 	SbfFileLayout again_layout;
 	bool same = sbf_read_bank(written.data(), written.size(), again, error, &again_layout) &&
-	            again_layout.reserved_other == 0 && again_layout.tails_other == 0 && again.streams.size() == bank.streams.size() &&
-	            again.version == bank.version && again.flags == bank.flags && again.reserved == bank.reserved;
+	            again_layout.reserved_other == 0 && again_layout.tails_other == 0 && again_layout.header_words_other == 0 &&
+	            again.streams.size() == bank.streams.size() && again.flags == bank.flags;
 	for (size_t i = 0; same && i < bank.streams.size(); ++i) {
 		const SbfStream &x = bank.streams[i], &y = again.streams[i];
 		same = x.name == y.name && x.block_size == y.block_size && x.sample_length_hint == y.sample_length_hint &&
@@ -76,10 +76,13 @@ void round_trip(const std::string &path, const char *label) {
 			       x.chunks[c].audio == y.chunks[c].audio;
 	}
 	CHECK(same, "%s's write reads back as the same fields\n", label);
-	// The write differs from the file only in the chunks' reserved pairs and tails, which no reader reads.
+	// The write differs from the file only in the header's version and reserved words and the chunks'
+	// reserved pairs and tails, which no reader reads.
 	size_t other = 0;
 	if (written.size() == bytes.size() && bank.streams.size() == again.streams.size()) {
 		std::vector<bool> never_read(bytes.size(), false);
+		for (size_t k = 4; k < 8; ++k) never_read[k] = true;
+		for (size_t k = 12; k < 16; ++k) never_read[k] = true;
 		size_t at = size_t(SBF_HEADER_SIZE) + bank.streams.size() * size_t(SBF_ENTRY_SIZE);
 		for (const SbfStream &stream : bank.streams)
 			for (const SbfChunk &chunk : stream.chunks) {
@@ -103,8 +106,9 @@ void round_trip(const std::string &path, const char *label) {
 	CHECK(streams_decoding == arc.header.entry_count, "%s: every stream decodes as its raw entry (%zu of %u)\n", label,
 	      streams_decoding, arc.header.entry_count);
 	sbf_close(&arc);
-	std::printf("%s: %zu streams through the bank model and back (%zu chunk reserved pairs and %zu tails not the "
-	            "writer's)\n", label, bank.streams.size(), layout.reserved_other, layout.tails_other);
+	std::printf("%s: %zu streams through the bank model and back (%zu header words, %zu chunk reserved pairs and %zu "
+	            "tails not the writer's)\n", label, bank.streams.size(), layout.header_words_other, layout.reserved_other,
+	            layout.tails_other);
 }
 
 void sweep(const std::string &path, const char *label) {
