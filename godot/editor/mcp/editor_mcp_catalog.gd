@@ -92,7 +92,8 @@ const REQUEST_PROSE := (
 		+ "runs it, an edit's included), then answers with operation (what it came to: id, kind, end done, "
 		+ "failed or cancelled, the findings a rename's commit, an import's write or a reimport made, and an "
 		+ "import's imported and not_imported files) and the status and view_revision as it left them; wait_ms "
-		+ "(300000 when left out) bounds it, past which the answer says timed_out: true, its operation the "
+		+ ("(%d when left out, and at most) bounds it, past which the answer says timed_out: true, its operation the "
+				% REQUEST_WAIT_MAX_MS)
 		+ "running operation's state and its validation the validation's. A request that "
 		+ "asks open_first is read once before its "
 		+ "document opens: one refused as it is read opens nothing. While an operation runs, a request that conflicts "

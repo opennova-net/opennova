@@ -24,6 +24,14 @@
 #include <io.h>
 #include <share.h>
 #include <sys/stat.h>
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <winioctl.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
 #endif
 
 #include <base/resource_index/boot_policy.h>
@@ -44,7 +52,10 @@
 #include <formats/rtxt/rtxt.h>
 #include <formats/sbf/sbf.h>
 #include <runtime/renderer/material_texture.h>
+#include <base/io/file_time.h>
+#include <base/io/hash.h>
 #include <base/io/json.h>
+#include <base/io/os_path.h>
 #include <editor/project_build/build_plan.h>
 #include <editor/project_build/build_run.h>
 #include <editor/project_build/export_build.h>
@@ -1269,6 +1280,72 @@ static int test_cancel_publishes_nothing() {
 // S26 C11: a build directory that will not go keeps the proof that it is one, so a later build prunes
 // it (it was left empty with no proof, a later build of its content refused as "not a build directory");
 // and a staging name taken by a directory that is no staging (no marker) is passed by, not a failure.
+// A file of `size` bytes that takes no room on the disk (sparse: NTFS's FSCTL_SET_SPARSE, a POSIX truncate's hole).
+static bool write_sparse(const std::string &path, uint64_t size) {
+#ifdef _WIN32
+	HANDLE file = CreateFileW(opennova::io::os_path(path).c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+	                          FILE_ATTRIBUTE_NORMAL, nullptr);
+	if (file == INVALID_HANDLE_VALUE) return false;
+	DWORD returned = 0;
+	LARGE_INTEGER end;
+	end.QuadPart = LONGLONG(size);
+	const bool ok = DeviceIoControl(file, FSCTL_SET_SPARSE, nullptr, 0, nullptr, 0, &returned, nullptr) &&
+	                SetFilePointerEx(file, end, nullptr, FILE_BEGIN) && SetEndOfFile(file);
+	CloseHandle(file);
+	return ok;
+#else
+	const int file = ::open(path.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 0644);
+	if (file < 0) return false;
+	const bool ok = ::ftruncate(file, off_t(size)) == 0;
+	::close(file);
+	return ok;
+#endif
+}
+
+// S26 C9: an archive entry's size is 32 bits, so a file past 4 GiB is refused (it wrapped, and its prefix was
+// packed as if whole). The file is sparse and its hash the build cache's, so no byte of it is read.
+static int test_entry_past_four_gib_refused() {
+	Project p("opennova_editor_build_past_4gib_test");
+	TEST_EXPECT(p.create());
+	TEST_EXPECT(p.fill());
+	BuildPlan plan = p.plan();
+	TEST_EXPECT(!plan.archives.empty());
+	if (plan.archives.empty()) return 1;
+	const uint64_t size = (uint64_t(1) << 32) + 1;
+	const std::string huge = p.root + "/huge.wav";
+	TEST_EXPECT(write_sparse(huge, size));
+	BuildEntry entry;
+	entry.logical_name = "huge.wav";
+	entry.source_path = huge;
+	entry.relative_path = "huge.wav";
+	entry.size_bytes = size;
+	plan.archives.back().entries.push_back(entry);
+	plan.hash_cache = p.root + "/.opennova/hashes.json";
+	opennova::io::JsonValue item = opennova::io::JsonValue::make_object();
+	item.set("path", opennova::io::JsonValue::make_string(huge));
+	item.set("size", opennova::io::JsonValue::make_number(double(size)));
+	item.set("modified", opennova::io::JsonValue::make_string(
+	                             opennova::io::hex64(uint64_t(opennova::io::file_modified_ticks(opennova::io::os_path(huge))))));
+	item.set("hash", opennova::io::JsonValue::make_string(opennova::io::hex64(1)));
+	opennova::io::JsonValue files = opennova::io::JsonValue::make_array();
+	files.push(std::move(item));
+	opennova::io::JsonValue cache = opennova::io::JsonValue::make_object();
+	cache.set("schema_version", opennova::io::JsonValue::make_number(kBuildCacheSchemaVersion));
+	cache.set("files", std::move(files));
+	TEST_EXPECT(editor_test::write_text(plan.hash_cache, opennova::io::json_write(cache)));
+	const BuildReport report = run_build(plan, p.output_root());
+	TEST_EXPECT(!report.ok && report.files_hashed > 0); // the others read, the huge one the cache's
+	bool refused = false;
+	for (const Diagnostic &d : report.diagnostics)
+		refused = refused || (d.code() == "build.archive" && d.message.find("huge.wav is too large for an archive (4294967297 "
+		                                                                     "bytes; an entry holds at most 4 GiB)") !=
+		                                                             std::string::npos);
+	TEST_EXPECT(refused);
+	std::error_code ec;
+	std::filesystem::remove(opennova::io::os_path(huge), ec);
+	return 0;
+}
+
 static int test_cleanup_keeps_its_proof() {
 	Project p("opennova_editor_build_cleanup_test");
 	TEST_EXPECT(p.create());
@@ -1886,6 +1963,7 @@ int main() {
 	failures += test_steps_are_bounded();
 	failures += test_cancel_publishes_nothing();
 	failures += test_cleanup_keeps_its_proof();
+	failures += test_entry_past_four_gib_refused();
 	failures += test_export_removal_keeps_its_record();
 	failures += test_file_rewritten_mid_read_fails();
 	failures += test_archives_match_the_single_call_writer();

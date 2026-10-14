@@ -353,6 +353,29 @@ func test_answers_come_back_whole() -> void:
 		assert_true(code is Dictionary, "no sentinel in the list: %s" % str(code))
 
 
+# S26 C2: editor_request's wait is held below the tool's own budget, which cut a longer one with a bare error and
+# cancelled the handler: the schema's maximum and default, the description naming it, the handler's clamp the same,
+# and a wait asked far past it answered as any other, never a budget error.
+func test_request_waits_within_the_tool_budget() -> void:
+	if _client == null:
+		return
+	assert_lt(EditorMcpCatalog.REQUEST_WAIT_MAX_MS, EditorMcpCatalog.TOOL_BUDGET_MS)
+	assert_eq(EditorMcpTools.REQUEST_WAIT_MS, EditorMcpCatalog.REQUEST_WAIT_MAX_MS)
+	var listed: Variant = await _client.rpc(get_tree(), "tools/list")
+	var wait_ms := {}
+	var described := ""
+	for tool in (listed as Dictionary).get("result", {}).get("tools", []):
+		if String(tool["name"]) == "editor_request":
+			wait_ms = tool.get("inputSchema", {}).get("properties", {}).get("wait_ms", {})
+			described = String(tool.get("description", ""))
+	assert_eq(int(wait_ms.get("maximum", 0)), EditorMcpCatalog.REQUEST_WAIT_MAX_MS)
+	assert_true(String(wait_ms.get("description", "")).contains(str(EditorMcpCatalog.REQUEST_WAIT_MAX_MS)))
+	assert_true(described.contains("(%d when left out, and at most)" % EditorMcpCatalog.REQUEST_WAIT_MAX_MS), described)
+	var answer := await _call("editor_request", {"kind": "clear_output", "wait": true, "wait_ms": 100_000_000})
+	assert_false(answer.has("_error"), str(answer))
+	assert_false(bool(answer.get("timed_out", false)), str(answer))
+
+
 func test_catalog_state_and_refusals_without_a_project() -> void:
 	if _client == null:
 		return
