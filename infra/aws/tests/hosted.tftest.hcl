@@ -185,6 +185,29 @@ run "hosted_policy" {
   }
 }
 
+# A newer Canonical image moves neither the template (ignore_changes) nor the
+# policy's image pin: both keep the image the template has in state.
+run "new_canonical_image" {
+  command = plan
+  variables {
+    hosted_data_snapshot_id = "snap-0123456789abcdef0"
+    vpc_id                  = "vpc-0123456789abcdef0"
+    subnet_id               = "subnet-0123456789abcdef0"
+  }
+  override_data {
+    target = data.aws_ami.hosted[0]
+    values = { id = "ami-0fedcba9876543210", root_device_name = "/dev/sda1" }
+  }
+  assert {
+    condition = aws_launch_template.hosted[0].image_id == "ami-0123456789abcdef0" && flatten([
+      for st in data.aws_iam_policy_document.hosted_service[0].statement : [
+        for c in st.condition : c.values if c.variable == "ec2:ImageID"
+      ]
+    ]) == ["ami-0123456789abcdef0"]
+    error_message = "a new Canonical image must move neither the template nor the policy"
+  }
+}
+
 run "burstable_refused" {
   command = plan
 
