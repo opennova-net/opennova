@@ -240,7 +240,7 @@ void configured_fallback(Assets &assets) {
 	CHECK(h.player_adm() != 0);
 	CHECK(strutil::iequals(h.kernel->root_motion.adm_name(h.player_adm()), "US01.adm"));
 	// A table the load cannot find (missing.adm, and no default.adm) takes the
-	// configured map (D-INF-S27P3); one that opens with no RESET row (unusable.adm,
+	// configured map (D-INF-33); one that opens with no RESET row (unusable.adm,
 	// its RESET naming a missing .bad) holds no channel [orig: AnimMap_RegisterEntity
 	// @0x40BBBC..0x40BBC6 -> @0x40BD8B]; an item naming none (types 43, 46) registers
 	// none [orig: Entity_SpawnFromItemDef @0x452571, the empty animDef skips the load].

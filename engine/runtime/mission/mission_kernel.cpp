@@ -281,7 +281,7 @@ int MissionKernel::adm_id_for_runtime_type(uint16_t type_id) {
 		// Neither <stem>.adm nor default.adm is mounted: the game frees the
 		// new entry and leaves the map's current table dangling [orig:
 		// AnimMap_LoadAdmFile @0x40CEFB], undefined; the port keeps the
-		// configured infantry map (D-INF-S27P3).
+		// configured infantry map (D-INF-33).
 	}
 	if (adm_id < 0) adm_id = default_infantry_adm_id_;
 	world.ai.root_motion = root_motion.empty() ? nullptr : &root_motion;
