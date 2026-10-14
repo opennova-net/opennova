@@ -548,7 +548,9 @@ def wait_stopped(client: GameMcp, seconds: float) -> dict:
 def follow_operation(client: GameMcp, answer: dict, deadline: float) -> dict:
     """An editor_request answer whose wait ran out at the tool's own (timed_out), followed through the operation
     query to the operation's end and the validation after it, until `deadline` (time.monotonic()): the answer as
-    a wait to the end gives it (operation: what it came to), or still timed_out."""
+    a wait to the end gives it (operation: what it came to), or still timed_out. Where another operation's outcome
+    stands in its place (one started after it ended), what it came to is not known: its end reads "unknown",
+    never done."""
     operation = int((answer.get("outcome") or {}).get("operation", 0) or 0)
     while time.monotonic() < deadline:
         state = client.structured("editor_query", {"query": "operation"})
@@ -559,7 +561,7 @@ def follow_operation(client: GameMcp, answer: dict, deadline: float) -> dict:
         if settled:
             if operation:
                 last = state.get("last_operation") or {}
-                answer["operation"] = last if int(last.get("id", 0)) == operation else {}
+                answer["operation"] = last if int(last.get("id", 0)) == operation else {"id": operation, "end": "unknown"}
             answer.pop("timed_out", None)
             answer.pop("validation", None)
             return answer

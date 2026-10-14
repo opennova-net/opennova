@@ -502,11 +502,18 @@ void PlayController::stop() {
 
 void PlayController::finish_stop() {
 	if (play_.state() != PlayState::Stopping) return;
-	play_.force();
-	const int64_t until = core_.platform().now_ms() + kPlayQuitWaitMs;
+	const int64_t began = core_.platform().now_ms();
+	bool forced = false;
 	while (true) {
 		poll();
-		if (play_.state() == PlayState::Stopped || core_.platform().now_ms() >= until) return;
+		if (play_.state() == PlayState::Stopped) return;
+		const int64_t now = core_.platform().now_ms();
+		if (now - began >= kPlayQuitWaitMs) return;
+		if (!forced && now - began >= kPlayQuitGraceMs) {
+			play_.force();
+			forced = true;
+			continue;
+		}
 		core_.platform().sleep_ms(kPlayWaitStepMs);
 	}
 }

@@ -18,8 +18,10 @@ namespace opennova::editor {
 // EditorApp supplies the platform (godot/src/authoring/child_process.h).
 inline constexpr int64_t kPlayStopDeadlineMs = 5000;
 inline constexpr int64_t kPlayWaitStepMs = 10; // wait()'s pause between two observations
-// How long a Quit waits for a game it forced (PlaySession::force) to be gone before the editor closes.
-inline constexpr int64_t kPlayQuitWaitMs = 2000;
+// How long a Quit waits for a Stop asked for to be seen through before the editor closes: the game's own quit for
+// kPlayQuitGraceMs, then the deadline's kill (PlaySession::force) for the rest.
+inline constexpr int64_t kPlayQuitWaitMs = 3000;
+inline constexpr int64_t kPlayQuitGraceMs = 2000;
 
 class PlaySession {
 public:

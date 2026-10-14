@@ -94,9 +94,9 @@ public:
 	std::unique_ptr<InstallCopyFill> copy_fill(const PlayIntent &intent, const BuildReport &built);
 	void stop();
 	// Quit's (S26 #1121 review): a Stop asked for and not yet seen through (a game past its WM_CLOSE, or with no
-	// window to take it) forced now and waited for a moment (kPlayQuitWaitMs), its exit absorbed, so closing the
-	// editor, which lets its game go, never leaves running a game the modder asked to stop. A game running
-	// unasked keeps running, as it outlives the editor.
+	// window to take it) waited for, its own quit for kPlayQuitGraceMs, then forced (the deadline's kill) for the
+	// rest of kPlayQuitWaitMs, its exit absorbed, so closing the editor, which lets its game go, never leaves running
+	// a game the modder asked to stop. A game running unasked keeps running, as it outlives the editor.
 	void finish_stop();
 	// The poll's: the child's state, the game's log tail, how it ended once it has; the validation
 	// its report left due.

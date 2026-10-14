@@ -8,7 +8,10 @@ plain-integer one still reads; `stop --pid-file` reaches the recorded port with 
 endpoint that is another process's, or names none, is refused with nothing sent; a stop given no
 process and no --port sends nothing (each client's default port is the stand-in's here, so a
 mistake shows as a call recorded, never as a person's editor quit); --port alone stops as before;
-a launch that reaches another process's endpoint fails; the console wrapper is never launched.
+a launch that reaches another process's endpoint fails; the console wrapper is never launched. The editor's stop
+reads the run section until the game has left before it asks the editor to quit; a wait that ran out at the
+editor_request tool's own is followed through the operation query to the operation's end and the validation after
+it (follow_operation), another operation's outcome never taken for its own.
 """
 import contextlib
 import io
@@ -37,6 +40,7 @@ class Endpoint:
     def __init__(self, pid):
         self.pid = pid
         self.calls = []
+        self.run_states = ["stopped"]  # what the run section says, in turn (the last one stays)
         endpoint = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -55,8 +59,11 @@ class Endpoint:
                 else:
                     name = message["params"]["name"]
                     endpoint.calls.append((name, message["params"].get("arguments", {})))
-                    # The run section: no game running (a stop_play waits for it gone before quit).
-                    held = {"run": {"state": "stopped"}} if name == "editor_state" else {}
+                    # The run section (a stop_play waits for the game gone before quit).
+                    held = {}
+                    if name == "editor_state":
+                        states = endpoint.run_states
+                        held = {"run": {"state": states.pop(0) if len(states) > 1 else states[0]}}
                     result = {"content": [], "structuredContent": held}
                 body = json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": result}).encode("utf-8")
                 self.send_response(200)
@@ -171,6 +178,63 @@ class EditorStopTest(StopCase):
         self.assertEqual(code, 0)
         self.assertTrue(self.b.quit_asked())
         self.assertEqual(self.a.calls, [])
+
+    def test_the_game_is_waited_for_before_the_quit(self):
+        # The game takes a while to leave (stopping, stopping, then stopped): the quit is asked only then.
+        self.b.run_states = ["stopping", "stopping", "stopped"]
+        code, _ = self.stop("--pid-file", self.pid_file(self.b))
+        self.assertEqual(code, 0)
+        self.assertEqual([name for name, _ in self.b.calls],
+                         ["editor_request", "editor_state", "editor_state", "editor_state", "editor_request"])
+        self.assertEqual(self.b.calls[-1][1], {"kind": "quit"})
+
+
+class FollowOperationTest(unittest.TestCase):
+    """follow_operation over a stand-in client whose operation query answers in turn (the last one stays)."""
+
+    class Client:
+        def __init__(self, answers):
+            self.answers = list(answers)
+            self.asked = 0
+
+        def structured(self, name, arguments, timeout=None):
+            assert name == "editor_query" and arguments == {"query": "operation"}
+            self.asked += 1
+            return self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
+
+    def setUp(self):
+        quick = mock.patch.object(editor_mcp.time, "sleep", lambda seconds: None)
+        quick.start()
+        self.addCleanup(quick.stop)
+
+    def follow(self, answers, deadline_s=60.0):
+        client = self.Client(answers)
+        timed_out = {"ok": True, "outcome": {"operation": 7}, "timed_out": True, "validation": {"running": True}}
+        return editor_mcp.follow_operation(client, timed_out, editor_mcp.time.monotonic() + deadline_s), client
+
+    def test_followed_to_the_end_and_the_validation_after_it(self):
+        running = {"operation": {"running": True, "id": 7}, "validation": {"running": False}}
+        validating = {"operation": {"running": False}, "last_operation": {"id": 7, "end": "done"},
+                      "validation": {"running": True}}
+        settled = {"operation": {"running": False}, "last_operation": {"id": 7, "end": "done", "kind": "import_apply"},
+                   "validation": {"running": False}}
+        answer, client = self.follow([running, validating, settled])
+        self.assertEqual(client.asked, 3)
+        self.assertNotIn("timed_out", answer)
+        self.assertNotIn("validation", answer)
+        self.assertEqual(answer["operation"], {"id": 7, "end": "done", "kind": "import_apply"})
+
+    def test_another_operations_outcome_is_not_ours(self):
+        other = {"operation": {"running": False}, "last_operation": {"id": 9, "end": "done"},
+                 "validation": {"running": False}}
+        answer, _ = self.follow([other])
+        self.assertEqual(answer["operation"], {"id": 7, "end": "unknown"})
+
+    def test_a_deadline_passed_leaves_it_timed_out(self):
+        running = {"operation": {"running": True, "id": 7}, "validation": {"running": False}}
+        answer, client = self.follow([running], deadline_s=-1.0)
+        self.assertTrue(answer.get("timed_out"))
+        self.assertEqual(client.asked, 0)
 
 
 class GameStopTest(StopCase):
