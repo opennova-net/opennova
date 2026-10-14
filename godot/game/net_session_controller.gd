@@ -225,6 +225,7 @@ func _begin_spectator_preflight(target: JoinTarget) -> void:
 	_spectator_probe_target = target
 	_spectator_probe = LanSession.new()
 	_spectator_probe.name = "SpectatorPreflight"
+	_spectator_probe.resource_root = _resource_root()
 	add_child(_spectator_probe)
 	_spectator_probe.servers_changed.connect(
 			_on_spectator_preflight_rows.bind(_spectator_probe, target, serial))

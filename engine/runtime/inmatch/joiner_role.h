@@ -91,6 +91,9 @@ public:
 	// The dialed socket and the host it reaches; null = socketless (every send
 	// dropped, nothing received — the headless tests).
 	void set_socket(opennova::IDatagramSocket *socket, const PeerAddr &host);
+	// The title identity every runtime this role creates speaks (ClientRuntime::set_title):
+	// configure before create_runtime. A runtime with none refuses to start.
+	void set_title(const TitleIdentity *title) { title_ = title; }
 	// The proxy-assisted NovaWorld join (the .joi NI/NP/BK next to NK): the game
 	// node the 48-byte rendezvous targets, the relay cookie and the NK relay
 	// endpoint the ordinary dial uses. All six fields set = the rendezvous is
@@ -303,6 +306,7 @@ private:
 
 	opennova::IDatagramSocket *socket_ = nullptr;
 	PeerAddr host_addr_{};
+	const TitleIdentity *title_ = nullptr; // set_title
 	// The proxy rendezvous: the installed six fields, the node endpoint and
 	// the enumerator's last-send clock (0 = never sent, the first pump sends).
 	// [orig: conn+1464..+1484; enum_info+52 @0x629108/@0x62911f]

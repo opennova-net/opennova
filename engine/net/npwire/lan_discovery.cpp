@@ -3,26 +3,27 @@
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
+#include <net/title/title_identity.h>
 
 #include <utility>
 
 namespace opennova {
 
-std::vector<uint8_t> build_lan_discovery_probe(uint32_t client_index, uint32_t target_ip,
-                                               uint32_t target_port) {
-	// Retail LAN enumeration uses the ordinary JO game-session identity built
+std::vector<uint8_t> build_lan_discovery_probe(const TitleIdentity &title, uint32_t client_index,
+                                               uint32_t target_ip, uint32_t target_port) {
+	// Retail LAN enumeration uses the title's ordinary game-session identity built
 	// by CNapiNetwork_Init [orig: NapiNPSession_SendAnnouncePacket @0x61fa00;
 	// CNapiNetwork_Init @0x4ca4a0]. This helper lives in the neutral wire layer;
 	// no matchmaking/service configuration participates in discovery. The
 	// announce names its own destination [orig: @0x61fcf5..0x61fd47].
-	ClientHello hello = make_jointoperations_client_hello(client_index);
+	ClientHello hello = make_title_client_hello(title, client_index);
 	hello.eip = target_ip;
 	hello.epn = target_port;
 	return nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 }
 
-bool parse_lan_discovery_reply(const uint8_t *data, size_t size, uint32_t client_index,
-                               LanDiscoveryServer &out) {
+bool parse_lan_discovery_reply(const TitleIdentity &title, const uint8_t *data, size_t size,
+                               uint32_t client_index, LanDiscoveryServer &out) {
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
 	if (!data || !nw_decode_inbound(data, size, opcode, body) ||
@@ -59,7 +60,7 @@ bool parse_lan_discovery_reply(const uint8_t *data, size_t size, uint32_t client
 	// (LanDiscoveryBrowser::accept_reply). [orig: Nwu_HandleServerHello @0x626d20:
 	//  SF zeroed @0x626eb7, loaded @0x62721a; CNapiNetwork_OnSessionDiscovered
 	//  @0x4c8470: the P2 gate @0x4c84a3..0x4c84ba, SF read @0x4c84f1]
-	if (!server_hello_matches_identity(hello, make_jointoperations_client_hello(0))) return false;
+	if (!server_hello_matches_identity(hello, make_title_client_hello(title, 0))) return false;
 
 	LanDiscoveryServer parsed;
 	parsed.server_name = std::move(hello.sn);
@@ -101,8 +102,9 @@ bool lan_session_admits_connect_type(int connect_type, uint32_t server_flags) {
 	return true;
 }
 
-bool LanDiscoveryBrowser::begin(uint32_t client_index, uint32_t enumerate_ip, int port_min,
-                                int port_max, int connect_type) {
+bool LanDiscoveryBrowser::begin(const TitleIdentity &title, uint32_t client_index,
+                                uint32_t enumerate_ip, int port_min, int port_max,
+                                int connect_type) {
 	if (client_index == 0 || port_min < 1 || port_max > 65535 || port_min > port_max) return false;
 	stop();
 	servers_.clear();
@@ -110,6 +112,7 @@ bool LanDiscoveryBrowser::begin(uint32_t client_index, uint32_t enumerate_ip, in
 	// One identity per browse window: retail keeps its connection identity
 	// across the enumerator's re-announce pumps, so every burst repeats the
 	// same probe bytes.
+	title_ = &title;
 	client_index_ = client_index;
 	enumerate_ip_ = enumerate_ip;
 	connect_type_ = connect_type;
@@ -122,7 +125,8 @@ bool LanDiscoveryBrowser::begin(uint32_t client_index, uint32_t enumerate_ip, in
 }
 
 std::vector<uint8_t> LanDiscoveryBrowser::probe(int port) const {
-	return build_lan_discovery_probe(client_index_, enumerate_ip_,
+	if (title_ == nullptr) return {};
+	return build_lan_discovery_probe(*title_, client_index_, enumerate_ip_,
 	                                 static_cast<uint32_t>(port < 0 ? 0 : port));
 }
 
@@ -156,11 +160,12 @@ bool LanDiscoveryBrowser::advance(double delta_seconds, bool &announce_due) {
 LanRowChange LanDiscoveryBrowser::accept_reply(const uint8_t *data, size_t size,
                                                const std::string &source_ip,
                                                int source_port) {
-	if (!browsing_ || data == nullptr || size == 0 || source_port < port_min_ ||
-	    source_port > port_max_ || !usable_address(source_ip))
+	if (!browsing_ || title_ == nullptr || data == nullptr || size == 0 ||
+	    source_port < port_min_ || source_port > port_max_ || !usable_address(source_ip))
 		return LanRowChange::kNone;
 	LanDiscoveryServer server;
-	if (!parse_lan_discovery_reply(data, size, client_index_, server)) return LanRowChange::kNone;
+	if (!parse_lan_discovery_reply(*title_, data, size, client_index_, server))
+		return LanRowChange::kNone;
 	// The discovery callback drops a session whose P2 does not admit the browse's
 	// network connect type before it ever becomes a session node, so it takes no
 	// row and no slot under the cap. [orig: CNapiNetwork_OnSessionDiscovered

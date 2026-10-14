@@ -8,6 +8,9 @@
 //  Game_StartMission @0x5248c6..0x524903]
 
 #include "lister.h"
+
+#include <base/gameprofile/gameprofile.h>
+#include <net/title/title_identity.h>
 #include "nw_udp_listener.h"
 #include "server_config.h"
 
@@ -30,6 +33,9 @@
 #include <thread>
 #include <utility>
 #include <vector>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 namespace {
 
@@ -145,6 +151,8 @@ int main() {
 
 	MatchSource source(columns("Lister E2E"), { player(0, "Alpha"), player(1, "Bravo") });
 	opennova::serve::ListerOptions options;
+	options.title = &kJo;
+	options.gate_tag = options.title->gate_tag;
 	options.master_host = "127.0.0.1";
 	options.master_gate_port = gate_port;
 	opennova::serve::Lister lister(options, source, nullptr);

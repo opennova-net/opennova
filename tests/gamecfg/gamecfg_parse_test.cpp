@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <limits>
 #include <string>
+#include <vector>
 
 using namespace opennova::gamecfg;
 
@@ -347,10 +348,47 @@ int resolution_dimensions() {
 	return 0;
 }
 
+// dfx2.exe's cfg table: JO's rows with mpdfxcategory between mpnovaworldhostlanonly and mpreset
+// (DFX2-7), read and written only under that table; JO's table ignores the key and never writes it.
+int dfx2_table_row() {
+	const std::vector<ConfigVarRow> &jo = config_var_rows(ConfigTable::Jo);
+	const std::vector<ConfigVarRow> &dfx2 = config_var_rows(ConfigTable::Dfx2);
+	TEST_EXPECT(jo.size() == kConfigVarRowCount && dfx2.size() == jo.size() + 1);
+	size_t at = dfx2.size();
+	for (size_t i = 0; i < dfx2.size(); ++i)
+		if (std::string(dfx2[i].name) == "mpdfxcategory") at = i;
+	TEST_EXPECT(at > 0 && at + 1 < dfx2.size());
+	TEST_EXPECT(std::string(dfx2[at - 1].name) == "mpnovaworldhostlanonly");
+	TEST_EXPECT(std::string(dfx2[at + 1].name) == "mpreset");
+	TEST_EXPECT(dfx2[at].type == ConfigVarType::Int32 && std::string(dfx2[at].default_value) == "0");
+
+	const std::string body = with_version("mpdfxcategory = \"5\"\r\n");
+	LoadOptions dfx2_options;
+	dfx2_options.table = ConfigTable::Dfx2;
+	const LoadResult read_dfx2 = load_text(body, dfx2_options);
+	TEST_EXPECT(read_dfx2.cfg.table == ConfigTable::Dfx2 && read_dfx2.cfg.mp_dfx_category == 5);
+	TEST_EXPECT(int_word(read_dfx2.cfg, "MPDFXCATEGORY") != nullptr &&
+			*int_word(read_dfx2.cfg, "MPDFXCATEGORY") == 5);
+	const LoadResult read_jo = load_text(body);
+	TEST_EXPECT(read_jo.cfg.table == ConfigTable::Jo && read_jo.cfg.mp_dfx_category == 0);
+	TEST_EXPECT(int_word(read_jo.cfg, "mpdfxcategory") == nullptr);
+
+	const std::string written_dfx2 = write(read_dfx2.cfg, {});
+	const size_t lan_only = written_dfx2.find("mpnovaworldhostlanonly = ");
+	const size_t category = written_dfx2.find("mpdfxcategory = \"5\"");
+	const size_t reset = written_dfx2.find("mpreset = ");
+	TEST_EXPECT(lan_only != std::string::npos && category != std::string::npos &&
+			reset != std::string::npos && lan_only < category && category < reset);
+	TEST_EXPECT(write(read_jo.cfg, {}).find("mpdfxcategory") == std::string::npos);
+	TEST_EXPECT(defaults({}, 0, 0, ConfigTable::Dfx2).mp_dfx_category == 0);
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	if (defaults_match_config_set_defaults() != 0) return 1;
+	if (dfx2_table_row() != 0) return 1;
 	if (comments_and_quoting() != 0) return 1;
 	if (value_is_token_two() != 0) return 1;
 	if (unknown_and_dead_keys() != 0) return 1;

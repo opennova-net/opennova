@@ -14,6 +14,7 @@
 #include "network/host_session_options.h" // the hosted-session request record
 #include "network/join_target.h" // the join request the discovered session comes from
 #include "util/string_convert.h"
+#include "resource_index/resource_root.h" // session_title (the launch game a bare session speaks)
 
 #include <cmath>
 #include <cstring>
@@ -61,9 +62,25 @@ using namespace sim_internal;
 // start_host_session's gating. The host ctx's mission points straight at the
 // kernel's adopted document, which outlives the match; a reload's bring-up
 // rebuilds the loopback and a fresh host owner drops stale owner peers.
+namespace {
+
+// The title a session speaks, the listen host's (HostConfig::title) and the joiner's
+// (JoinerRole::set_title): the one the shell named (Simulation::set_title, the mounted
+// game's), else, for a session no shell named one for, the game the process was launched
+// as (ResourceRoot::session_title with no root). Null when that title's identity is not
+// witnessed in full; a joiner then does not dial and a host admits no joiner.
+const opennova::TitleIdentity *session_title(const opennova::TitleIdentity *named) {
+	if (named != nullptr) return named;
+	std::string error;
+	return ResourceRoot::session_title(Ref<ResourceRoot>(), error);
+}
+
+} // namespace
+
 opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type) {
 	namespace inmatch = opennova::inmatch;
 	inmatch::HostConfig cfg;
+	cfg.title = session_title(net_.title);
 	if (is_host_listening()) {
 		cfg.config = net_.host_session_config; // mission/player/spawn + game_type/mp_attributes from the UI
 		if (cfg.config.server_name.empty()) cfg.config.server_name = "OpenNova LAN Host";
@@ -576,9 +593,13 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	// listen_server_ false (the session kind is the flag); a sim is host XOR joiner.
 	// The joiner role, constructed with the loadout profile seams it keeps; the
 	// session's role switch is the gate: re-dialing a live mission is rejected
-	// without partially replacing its transport.
+	// without partially replacing its transport. A session with no title identity
+	// (session_title) has nothing to join with.
+	const opennova::TitleIdentity *title = session_title(net_.title);
+	if (title == nullptr) return false;
 	if (!install_role(std::make_unique<opennova::inmatch::JoinerRole>(joiner_kit_seams())))
 		return false;
+	joiner_role_->set_title(title);
 	if (net_.pump.is_null()) net_.pump.instantiate();
 	net_.pump->set_capture_path(net_.capture_pcap_path);
 	if (net_.pump->dial(p_host_ip, p_port) != 0) {

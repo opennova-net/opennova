@@ -11,6 +11,7 @@
 #include <net/npwire/session_keys.h>
 #include <net/novacrypto/crc32.h>
 #include <base/gameprofile/gameprofile.h>
+#include <net/title/title_identity.h>
 #include <base/io/le.h>
 #include <base/io/log.h>
 #include <base/vfs/vfs.h>
@@ -192,6 +193,10 @@ JoinerConnection::JoinerConnection(std::string player_name,
 }
 
 std::vector<uint8_t> JoinerConnection::start() {
+	if (title_ == nullptr) {
+		last_error_ = "no title identity to join with";
+		return {};
+	}
 	// Fresh per-connection key material, the CK and then the SCRK, from the manager's
 	// PRNG (D-NET-524): a CONSTANT ck would alias a quick reconnect from the same
 	// endpoint to the host's same-(CI,CK) retransmit echo (stale auth material)
@@ -299,21 +304,21 @@ std::vector<uint8_t> JoinerConnection::start() {
 }
 
 std::vector<uint8_t> JoinerConnection::build_client_hello() {
-	// The browse and connect legs use the same retail JO identity. The callsign
+	// The browse and connect legs use the same title identity. The callsign
 	// belongs in ClientAuth.NA (not CO) and is later echoed into the organic-spawn
 	// named organic record by the host. A dial without a row announces to the dialed
 	// host, whose address and port the announce writes as its EIP / EPN.
 	// [orig: NapiNPSession_SendAnnouncePacket @0x61fa00 - @0x61fcf5..0x61fd47;
 	//  CNapiGameSession_InitTransportConnection @0x4c9ec3 (the resolved address)]
-	ClientHello hello = make_jointoperations_client_hello(client_index_);
+	ClientHello hello = make_title_client_hello(*title_, client_index_);
 	hello.eip = host_address_.ip;
 	hello.epn = host_address_.port;
 	return nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 }
 
 std::vector<uint8_t> JoinerConnection::build_client_auth() {
-	ClientAuth auth = make_jointoperations_client_auth(
-			client_index_, client_key_, server_hk_, player_name_, conn_.client_scrk);
+	ClientAuth auth = make_title_client_auth(
+			*title_, client_index_, client_key_, server_hk_, player_name_, conn_.client_scrk);
 	// The session record's address and port: the host the reply came from.
 	// [orig: CNapiNPConnection_InitFromSession @0x6263ae..0x6263b7]
 	auth.sip = host_address_.ip;
@@ -336,8 +341,8 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 	// SOPD==180 (DC=8) — any client of this patch must send exactly these; do not "unpin" them.
 	// BT is the account ban state (1/2 reject, DC=6/7; 0 for LAN). The rest are stored/display
 	// only (@0x4c7260 SetVersionString/SetCountryCode/TZB). VERSIONSTRING is the binary's own
-	// sprintf("V%i.%i.%i.%i", 1, 7, 5, 7), the JO profile's version text, as every pinned
-	// constant here is that binary's [orig:
+	// sprintf("V%i.%i.%i.%i", ...), the title's profile's version text (JO's 1, 7, 5, 7); the
+	// four pinned constants are JO's binary's [orig:
 	// Game_ParseCommandLineAndInit @0x4a7d81 into byte_B4C0B0, copied @0x569b5c]; COUNTRYCODE
 	// is the install's CC.BIN, omitted when empty
 	// [orig: @0x569b70; the strlen gate @0x4c385a] (D-NET-296).
@@ -360,7 +365,7 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 			std::pair<const char *, const char *>{"MBN", "20042002"},
 			std::pair<const char *, const char *>{"SOPD", "180"},
 			std::pair<const char *, const char *>{"VERSIONSTRING",
-					gameprofile::gameprofile_by_id(gameprofile::GAME_JO)->version_text},
+					gameprofile::gameprofile_by_id(title_->game_id)->version_text},
 	}) {
 		auth.cu.push_back(make_client_cu_chunk(2, field.first, field.second));
 	}
@@ -542,11 +547,11 @@ void JoinerConnection::on_server_hello(const std::vector<uint8_t> &body, PollRes
 	if (!parse_server_hello(body.data(), body.size(), sh)) return;
 	// Correlate the reply with the outstanding ClientHello before accepting host material. A
 	// phase-correct stale/spoofed 0x81 from another handshake must not advance this connection.
-	// Then the host's identity block must be the JO protocol's, else the reply is dropped.
+	// Then the host's identity block must be the title's, else the reply is dropped.
 	// [orig: Nwu_HandleServerHello @0x626D20 - the CI lookup @0x627533, the identity compares
 	//  @0x62758B / @0x627624 / @0x627643]
-	if (sh.ci != client_index_) return;
-	if (!server_hello_matches_identity(sh, make_jointoperations_client_hello(client_index_))) return;
+	if (title_ == nullptr || sh.ci != client_index_) return;
+	if (!server_hello_matches_identity(sh, make_title_client_hello(*title_, client_index_))) return;
 	// An absent HK reads 0, and the 0x42 then omits it. [orig: Nwu_HandleServerHello @0x626D20 -
 	//  HK @0x626E97; CNapiNPConnection_SendClientJoin @0x61FE20 - the HK gate @0x6200F2]
 	server_hk_ = sh.hk;          // echo this in ClientAuth.hk

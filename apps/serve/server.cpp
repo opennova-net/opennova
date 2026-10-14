@@ -14,6 +14,7 @@
 #include <formats/mission/bms.h>
 #include <formats/rtxt/rtxt.h>
 #include <net/npwire/net_ports.h>
+#include <net/title/title_identity.h>
 #include <runtime/hud/hud_math.h> // hud_label_font_choice (HUD_InitAllFonts)
 #include <runtime/inmatch/host_config.h>
 #include <runtime/inmatch/map_change.h>
@@ -44,7 +45,8 @@ const char kUsage[] =
 		"                   (GameName, MaxPlayers, KillLimit, ...) and one `Mission <file.bms>`\n"
 		"                   line per rotation entry; the last Mission line is the starting map\n"
 		"  /exp, /d, /game  mount the expansion (/mod is /exp), prefer loose files, pick the\n"
-		"                   data's game code\n"
+		"                   data's game code: its keying and the title the server speaks\n"
+		"                   (default jo)\n"
 		"  /LAN             every game.cfg read sets mpnovaworldhostlanonly: a NovaWorld\n"
 		"                   listing advertises LAN only\n"
 		"  --loose-root     mount a directory that holds no game archives as loose files\n"
@@ -229,7 +231,8 @@ bool Server::begin(std::string &error, const std::atomic<bool> *cancel) {
 	// a NovaWorld host hosts on its session before either does
 	// [orig: @0x4A66A5..0x4A674F; the live NovaWorld host, D-NET-221,
 	//  UI_DispatchScreenEvent @0x54F2CA..0x54F379].
-	if (!read_boot_config(error) || !mount(error) || !read_config_over_weapons(error)) {
+	if (!resolve_title(error) || !read_boot_config(error) || !mount(error) ||
+			!read_config_over_weapons(error)) {
 		stop();
 		return false;
 	}
@@ -293,12 +296,37 @@ bool Server::read_boot_config(std::string &error) {
 	return true;
 }
 
+bool Server::resolve_title(std::string &error) {
+	const std::string code = options_.game.empty() ? std::string("jo") : options_.game;
+	title_ = resolve_title_identity(code, error);
+	if (title_ == nullptr) {
+		error = "/game " + code + ": " + error;
+		return false;
+	}
+	// The listing's login and HOSTKEY fetch request the title's web pages by name.
+	if (!options_.master_host.empty() && options_.credentials.present()) {
+		const std::string refusal = title_identity_refusal(*title_, TitleIdentityPart::WebFlow);
+		if (!refusal.empty()) {
+			error = "/game " + code + " with --credentials: " + refusal;
+			title_ = nullptr;
+			return false;
+		}
+	}
+	// The title's cfg table, which every game.cfg read and save walks: dfx2.exe's carries the
+	// mpdfxcategory its host lists print as DFXCATEGORY1 (DFX2-7).
+	config_.set_config_table(title_->host_category_var ? gamecfg::ConfigTable::Dfx2
+	                                                   : gamecfg::ConfigTable::Jo);
+	return true;
+}
+
 // The mount opennova.exe makes (godot/game/boot_root_mount.gd over
 // ResourceRoot::mount_runtime / set_root_dir): the witnessed fixed archive
 // table (Packed, PackedWithLooseOverride under /d) with the game code's SCR
 // keying, and, only when asked, a directory with no archives mounted as a
-// plain loose root with the JO keying and no expansion (ADR 0025).
+// plain loose root with no expansion, under the JO keying when /game names no
+// title (ADR 0025). Then the gate tag: the title's, or the mount's gt.ssc's.
 bool Server::mount(std::string &error) {
+	const std::string code = options_.game.empty() ? std::string("jo") : options_.game;
 	const VfsMountMode mode = options_.loose_override ? VfsMountMode::PackedWithLooseOverride
 													  : VfsMountMode::Packed;
 	std::string game = options_.game;
@@ -309,13 +337,18 @@ bool Server::mount(std::string &error) {
 	if (!mounted && options_.loose_root) {
 		mounted = index_.scan(options_.resource_dir, std::string(), VfsMountMode::LooseOnly,
 				VfsArchiveDiscovery::ScanAll);
-		game = "jo";
+		if (game.empty()) game = "jo";
 	}
 	if (!mounted) {
 		error = "could not mount '" + options_.resource_dir + "': " + index_.last_error();
 		return false;
 	}
 	index_.set_scr_policy(gameprofile::gameprofile_scr_policy_for_code(game.c_str()));
+	// The boot's gt.ssc over the gate manager's default tag, read once the archives mount
+	// [orig: Game_InitSubsystems @0x4a7149..0x4a714e -> Mission_LoadEncryptedConfig @0x4cdcd0].
+	gate_tag_ = title_gate_tag(*title_, &index_);
+	io::logf(io::LogLevel::kInfo, "opennova-serve: speaking %s, gate tag %s", code.c_str(),
+			gate_tag_.c_str());
 	// The expansion's text-override table, as the boot's Expansion_LoadAssets
 	// reads it with no archive open (vfs.h carries the witness).
 	text_override_table_.clear();
@@ -473,6 +506,7 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	request.session = session_.get();
 	request.role = role_.get();
 	request.host = role_.get();
+	request.host_cfg.title = title_;
 	request.host_cfg.config = config;
 	request.host_cfg.socket_mode = inmatch::SocketMode::Lan;
 	// A listed server's session runs on the NovaWorld network type, whose
@@ -652,6 +686,7 @@ HostRegistration Server::listing_columns() const {
 	r.password = !config.server_password.empty();
 	r.listen_host = false;
 	r.lan_only = config_.cfg().mp_novaworld_host_lan_only != 0 ? 1 : 0;
+	r.category = config_.cfg().mp_dfx_category; // DFXCATEGORY1, where the title's lists carry it
 	r.allow_ping = config_.cfg().ping != 0;
 	r.send_player_list = config_.cfg().sendplayerlist != 0;
 	r.country = config_.cfg().country;
@@ -688,6 +723,8 @@ bool Server::host_on_novaworld(std::string &error, const std::atomic<bool> *canc
 	};
 	listing_ = std::make_unique<ServeListing>(listing_columns(), std::move(seams));
 	ListerOptions lister_options;
+	lister_options.title = title_;
+	lister_options.gate_tag = gate_tag_;
 	lister_options.master_host = options_.master_host;
 	lister_options.master_gate_port = options_.master_gate_port;
 	// Loopback and the OpenNova service by default, NovaLogic's NovaWorld behind --allow-public.

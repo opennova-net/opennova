@@ -11,6 +11,8 @@
 
 namespace opennova {
 
+struct TitleIdentity; // net/title/title_identity.h
+
 // Flat TLV format used by session-level messages (ClientHello, ServerHello,
 // ClientJoin, ServerJoin, ClientGoodBye, ServerGoodBye). Witnessed byte-exact
 // at NapiBuffer_AddField@0x5e65e0 and NapiNPSession_SendDescription@0x5e9840:
@@ -39,7 +41,7 @@ struct ClientHello {
 	bool pg_present = false;
 	std::string pv1;  // Protocol Version 1 (e.g. "0.0.0 2/10/2004 EM")
 	std::string pv2;  // Protocol Version 2 (e.g. "1")
-	std::string pv3;  // Protocol Version 3, proto+0x1AC (JO: jointoperations_protocol_version3)
+	std::string pv3;  // Protocol Version 3, proto+0x1AC (title_protocol_version3)
 	uint32_t ci = 0;  // Client/Connection Index
 	uint32_t pm = 0;  // transport player count; a NONZERO PM is also the host-side
 	                  // identity bypass (see client_hello_admits). An absent and a
@@ -380,51 +382,60 @@ bool parse_disconnect_event(const uint8_t *data, size_t len, DisconnectEvent &ou
 // Lives in npwire/character_id.h (included above): the one packing shared by
 // ClientAuth CI0/CI1, the entity+0x15C wire NetId, and the weapon.sav header.
 
-// Retail JO game-session identity shared by LAN enumeration and the actual
-// game connection. These values come from CNapiNetwork_Init @ 0x4ca4a0 and
-// the retail LAN ClientAuth capture; they are unrelated to NovaWorld's lobby
-// identity. `player_name` is the game ClientAuth NA/callsign.
-std::array<uint8_t, 16> jointoperations_protocol_guid();
-bool is_jointoperations_protocol_name(std::string_view protocol_name);
+// ---- the title's in-match identity -------------------------------------
+// The game protocol's identity block a title's network init installs
+// (net/title/title_identity.h), which LAN enumeration, the joiner's 0x41 and
+// 0x42 and the host's 0x81 carry and the host's gate compares. It is
+// unrelated to the NovaWorld lobby's identity. Every `title` here is a complete
+// identity (resolve_title_identity); `player_name` is the game ClientAuth
+// NA/callsign.
+// [orig: CNapiNetwork_Init @0x4ca4a0 - CO @0x4ca72f, AP @0x4ca747, BDAT
+//  @0x4ca76c, PN @0x4ca790, PG @0x4ca7a4, PV1 @0x4ca7c2, PV2 @0x4ca7db, PV3
+//  @0x4ca8bb]
 
-// The JO protocol's PV3, proto+0x1AC: the build string the network init
+// The PN compare is case-insensitive, as the host's identity gate compares
+// every string field. [orig: Napi_StrCaseEqual @0x616e70, used by
+// NapiNPProtocol_HandleClientJoin @0x62B750]
+bool is_title_protocol_name(const TitleIdentity &title, std::string_view protocol_name);
+
+// The protocol's PV3, proto+0x1AC: the build string the network init
 // assembles, "CONSUMER" " " "RELEASE" " ", then "%ld.%ld.%ld.%ld [%ld.%ld]" over
-// the version 1, 7, 5, 7 and the ADDRESSES of two string literals of this
+// the title's version quad and the ADDRESSES of two string literals of its
 // image (so the bracket pair is the executable's own data layout, not a build
-// number), then " " and the build date, copied at 63 characters:
+// number), then " " and the build date, copied at 63 characters. JO's is
 // "CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42". The 0x41,
 // the 0x42 and the host's 0x81 write it.
 // [orig: CNapiNetwork_Init @0x4ca4a0 - "CONSUMER" @0x7ca6a4, " " @0x7c11e4 and
 //  "RELEASE" @0x7ca69c concatenated @0x4ca7e6..0x4ca835; the sprintf
-//  @0x4ca83d..0x4ca85b over "%ld.%ld.%ld.%ld [%ld.%ld]" @0x7ca680 with 1 (ebp
-//  @0x4ca5fc), 7, 5, 7 and the literal addresses pushed @0x4ca842 / @0x4ca83d;
-//  " " and the date @0x7ca6d8 @0x4ca877..0x4ca89a; Napi_CopyString to proto+0x1AC
-//  (64) @0x4ca8bb..0x4ca8c2]
-inline constexpr uint32_t kJoBuildTagAddressA = 0x7C9730u; // the "3" literal, 8165168
-inline constexpr uint32_t kJoBuildTagAddressB = 0x7C9714u; // the "2345" literal, 8165140
-std::string jointoperations_protocol_version3();
+//  @0x4ca83d..0x4ca85b over "%ld.%ld.%ld.%ld [%ld.%ld]" @0x7ca680 with the
+//  quad and the literal addresses pushed @0x4ca842 / @0x4ca83d; " " and the
+//  date @0x4ca877..0x4ca89a; Napi_CopyString to proto+0x1AC (64)
+//  @0x4ca8bb..0x4ca8c2]
+std::string title_protocol_version3(const TitleIdentity &title);
 
-// The JO identity's 0x41. Its EIP / EPN are the caller's: the announce writes
-// its own destination, each only when nonzero.
-ClientHello make_jointoperations_client_hello(uint32_t client_index);
-ClientAuth make_jointoperations_client_auth(uint32_t client_index, uint32_t client_key,
-		uint32_t host_key, std::string_view player_name, std::string_view client_scrk);
+// The title's 0x41. Its EIP / EPN are the caller's: the announce writes its
+// own destination, each only when nonzero.
+ClientHello make_title_client_hello(const TitleIdentity &title, uint32_t client_index);
+ClientAuth make_title_client_auth(const TitleIdentity &title, uint32_t client_index,
+		uint32_t client_key, uint32_t host_key, std::string_view player_name,
+		std::string_view client_scrk);
 
 // Retail's game host silently drops 0x41/0x42 messages unless their version
-// block matches the identity installed by CNapiNetwork_Init. The 0x42 gate
-// additionally compares PV2; CO/AP/BDAT remain intentionally free because the
-// retail handlers parse but do not compare them.
-bool matches_jointoperations_identity(const ClientHello &hello);
-bool matches_jointoperations_identity(const ClientAuth &auth);
+// block matches the identity its network init installed. The 0x42 gate
+// additionally compares PV2 (a refusal, code 7, not a silent drop); CO/AP/BDAT
+// remain intentionally free because the retail handlers parse but do not
+// compare them.
+bool matches_title_identity(const TitleIdentity &title, const ClientHello &hello);
+bool matches_title_identity(const TitleIdentity &title, const ClientAuth &auth);
 
 // The 0x41 admission a host applies before answering with a ServerHello: a
 // hello whose PM is nonzero is answered WITHOUT any identity validation (the
 // version block is only checked when PM == 0), so a retail host's unsolicited
-// announce — which carries its player count as PM — always draws a reply.
-// [orig: NapiNPProtocol_HandleClientHello @0x6213b0 — `if (!protocol_version)`
+// announce, which carries its player count as PM, always draws a reply.
+// [orig: NapiNPProtocol_HandleClientHello @0x6213b0 - `if (!protocol_version)`
 //  around the NVS/PN/PG/PV1 compares, jnz @0x6217c2 -> SendServerInfoPacket
 //  @0x6218fc]
-bool client_hello_admits(const ClientHello &hello);
+bool client_hello_admits(const TitleIdentity &title, const ClientHello &hello);
 
 // ---- ClientAuth CU chunks (NW-S3) --------------------------------------
 //

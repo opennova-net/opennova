@@ -94,6 +94,9 @@ struct WeaponRosterEntry {
 };
 using WeaponRoster = std::vector<WeaponRosterEntry>;
 
+// The cfg table of a title (config_var_rows): JO's, or dfx2.exe's, one row longer.
+enum class ConfigTable : uint8_t { Jo, Dfx2 };
+
 // Every key, as the fields of retail's g_GameConfigState @0x25506B8 hold them.
 // Strings keep at most the bytes retail's copy keeps (the sizes cited per
 // field); a copy retail does without a bound keeps its field's size less one
@@ -153,6 +156,9 @@ struct GameCfg {
 	int32_t hud_color_index = 0;  // +0x514
 	int32_t hud_detail = 0;       // +0x518
 
+	// The cfg table the block's title reads and writes (config_var_rows).
+	ConfigTable table = ConfigTable::Jo;
+
 	// MULTIPLAYER: the cfg table's rows (kConfigVarRows)
 	std::string mp_ip_address_string;   // `mpipaddressstring` +0x1F8 [32]
 	int32_t mp_gate_port_min = 0;       // +0x218
@@ -190,6 +196,10 @@ struct GameCfg {
 	int32_t mp_max_packet_size = 0;     // +0x338
 	int32_t mp_extract_extended_metric_information = 0; // +0x33C (bool)
 	int32_t mp_novaworld_host_lan_only = 0; // +0x340 (bool)
+	// `mpdfxcategory`, a row of dfx2.exe's table alone (ConfigTable::Dfx2): the value its host
+	// lists print as DFXCATEGORY1 [orig: the key table row @0x831b20 (dfx2.exe), the field
+	// dword_254EFAC, type 2, default "0"].
+	int32_t mp_dfx_category = 0;
 	int32_t mp_reset = 0;               // +0x344 (bool): a load that reads 1 exits the process
 
 	// MULTIPLAYER: the switch keys
@@ -338,12 +348,20 @@ struct ConfigVarRow {
 extern const ConfigVarRow kConfigVarRows[];
 extern const size_t kConfigVarRowCount;
 
+// The rows a block of `table` walks: JO's (kConfigVarRows), or dfx2.exe's, which are JO's with
+// `mpdfxcategory` between mpnovaworldhostlanonly and mpreset, the one row the two tables do not
+// share (docs/titles/dfx2-vs-jo-re.md DFX2-7; the block grows by that word).
+// [orig: the key table row @0x831b20 (dfx2.exe); Config_SetDefaults @0x54d030 (@0x54d039)
+//  against @0x54a2ca (dfx2.exe), the block 0xA40 against 0xA44 bytes]
+const std::vector<ConfigVarRow> &config_var_rows(ConfigTable table);
+
 // Config_SetDefaults: every field zeroed, then the cfg table's defaults, then
 // the witnessed constants and the two localized strings. `player_index` and
 // `hw3d_deviceno` are the values the defaults keep (retail saves and restores
-// the first; the second lives outside the reset block).
+// the first; the second lives outside the reset block); `table` is the title's.
 // [orig: Config_SetDefaults @0x54D030]
-GameCfg defaults(const DefaultTexts &texts = {}, int32_t player_index = 0, int32_t hw3d_deviceno = 0);
+GameCfg defaults(const DefaultTexts &texts = {}, int32_t player_index = 0, int32_t hw3d_deviceno = 0,
+		ConfigTable table = ConfigTable::Jo);
 
 // Config_ParseSettingsLine: applies one tokenized line to `cfg`; a line whose
 // key nothing accepts changes nothing. [orig: Config_ParseSettingsLine @0x54F740]
@@ -379,6 +397,8 @@ struct LoadOptions {
 	// the read [orig: Game_ParseCommandLineAndInit @0x4A74EB sets
 	// g_LanSwitch; Game_LoadConfig @0x5514B1..0x5514BA].
 	bool lan_switch = false;
+	// The title's cfg table (config_var_rows).
+	ConfigTable table = ConfigTable::Jo;
 };
 
 struct LoadResult {

@@ -21,9 +21,13 @@
 //
 // Faithful port of novaworld_client.cpp's login()/send_login_post()/on_login_request_completed(),
 // gsb_url()/request_server_list()/on_gsb_request_completed(), join()/on_join_request_completed(), and
-// http_base()/request_headers()/merge_response_cookies(). The URL/.dll/form-field literals are
-// byte-preserved [orig: the retail jop_2_* template + NWLogin/NWStart/NWJoin query strings].
+// http_base()/request_headers()/merge_response_cookies(). The URL/.dll/form-field shapes are
+// byte-preserved, their page names, pfid, version pair and product code the title's
+// (TitleIdentity::pages / pfid / ver1 / ver2 / product_code) [orig: the retail jop_2_* template +
+// NWLogin/NWStart/NWJoin query strings].
 namespace opennova {
+
+struct TitleIdentity; // net/title/title_identity.h
 
 // --- the transport seam (the owner maps these onto its HTTP client) ---
 enum class HttpMethod { Get, Post };
@@ -39,6 +43,11 @@ struct HttpRequestSpec {
 // The lobby context the HTTP machines read — filled by the owner from the gate response + the NWU
 // session leg (the UDP side stays in the binding/ClientSession; here we only consume its outputs).
 struct LobbyHttpContext {
+	// The title the session speaks (complete: resolve_title_identity) and its gate manager's tag
+	// (title_gate_tag), which the start page's [GT] takes; the owner's NWU session's. Without a
+	// title the flow requests nothing.
+	const TitleIdentity *title = nullptr;
+	std::string gate_tag;
 	std::string startup_url;  // gate "UNPS" StartupUrl ("[domainname]/..." templated, or concrete for OpenNova)
 	std::string post_ip;      // gate POST host (fallback http_base)
 	std::string post_port;    // gate POST port
@@ -127,7 +136,8 @@ public:
 	bool login_active() const { return login_step_ != LoginStep::Idle; }
 
 	// --- GSB server browser ---
-	// Build the GSB fetch (jop_2.gsb?a=1) with the current cookies; invalid when no base URL yet.
+	// Build the GSB fetch (the title's server list, JO's jop_2.gsb?a=1) with the current cookies;
+	// invalid when no base URL or no title yet.
 	// [orig: gsb_url() + request_server_list()]
 	HttpRequestSpec gsb_request() const;
 	// Parse a completed GSB response into `out` (reuses gsb_parse_response). Returns false on a failed

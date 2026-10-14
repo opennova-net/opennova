@@ -219,17 +219,17 @@ std::string encode_key_chain(const std::vector<uint8_t> &plaintext, const std::s
 	return encode_ap(buffer);
 }
 
-// [orig: NapiNP_DecodeEncryptedString @ 0x619130: the printable count @ 0x6191c1 and the room for the
-// keys' CRCs @ 0x61920f; each printable character a nibble, low first, one outside A-P refused
-// @ 0x61923a, an odd count refused @ 0x619261; the keys right to left @ 0x619294, each
-// NapiNP_DecryptBuffer @ 0x6192e1 then its CRC compared @ 0x6192f6]
+// [orig: NapiNP_DecodeEncryptedString @ 0x619130: the printable count @ 0x6191c1, the room for the
+// keys' CRCs and the caller's buffer @ 0x61920f; each printable character a nibble, low first, one
+// outside A-P refused @ 0x61923a, an odd count refused @ 0x619261; the keys right to left
+// @ 0x619294, each NapiNP_DecryptBuffer @ 0x6192e1 then its CRC compared @ 0x6192f6]
 bool decode_key_chain(const std::string &encoded, const std::string &key_chain,
-                      std::vector<uint8_t> &plaintext) {
+                      std::vector<uint8_t> &plaintext, std::size_t room) {
 	plaintext.clear();
 	const std::vector<std::string> keys = chain_keys(key_chain);
 	size_t printables = 0;
 	for (const char c : encoded) printables += printable(static_cast<unsigned char>(c)) ? 1 : 0;
-	if (printables / 2 < 4 * keys.size()) return false;
+	if (printables / 2 < 4 * keys.size() || printables / 2 > room) return false;
 	std::vector<uint8_t> data;
 	data.reserve(printables / 2);
 	bool high = false;

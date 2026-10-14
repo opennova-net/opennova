@@ -80,6 +80,9 @@ int main() {
 	cfg.gcc = "gcc";
 	cfg.version = "1.7.5.7";
 	cfg.pb_server = true;
+	// JO's version pair, the title's (TitleIdentity::ver1 / ver2; NwuHostRole sets it).
+	cfg.ver1 = "3";
+	cfg.ver2 = "2345";
 
 	nw::HostLobbyText text;
 	text.yes = "Yes";
@@ -151,7 +154,7 @@ int main() {
 		expect(value_of(host, "BBMode") == "1", "BBMode passes through");
 		expect(value_of(host, "GV") == "1.7.5.7" && value_of(host, "Version") == "1.7.5.7",
 		       "GV and Version are the game version");
-		expect(value_of(host, "Ver1") == "3" && value_of(host, "Ver2") == "2345", "Ver1/Ver2 literals");
+		expect(value_of(host, "Ver1") == "3" && value_of(host, "Ver2") == "2345", "Ver1/Ver2: the title's version pair");
 		expect(value_of(host, "PBServer") == "1", "PBServer 1/0");
 		expect(value_of(host, "ServerIP") == "<absent>", "no ServerIP var exists in retail");
 

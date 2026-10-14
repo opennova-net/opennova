@@ -18,6 +18,8 @@
 // stands in for a row with none, never for DFX2's own.
 
 #include "gate_listener.h"
+#include <net/title/title_identity.h>
+#include <base/gameprofile/gameprofile.h>
 #include "net_sockets.h"
 #include "server_config.h"
 
@@ -45,6 +47,11 @@
 
 namespace net = opennova::net;
 namespace nws = opennova::novaworld_server;
+
+// The JO and JO demo titles' gate tags (net/title/title_identity.h), the probes' payloads.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+static const opennova::TitleIdentity &kJoDemo =
+		*opennova::title_identity(opennova::gameprofile::GAME_JO_DEMO);
 
 namespace {
 
@@ -185,7 +192,7 @@ int main() {
 
 	opennova::GateResponse reply;
 	{
-		const auto jo = probe_text(port, opennova::GATE_PROBE_TAG_JOINTOPS);
+		const auto jo = probe_text(port, kJo.gate_tag);
 		TEST_EXPECT(jo.has_value());
 		TEST_EXPECT(opennova::gate_response_parse(jo->text, reply));
 	}
@@ -202,7 +209,7 @@ int main() {
 	const Lobby on{ "opennova_0_consumer", kJoQuery, "", "", "" };
 	if (expect_lobby(port, "jop:cus2", jo) != 0)
 		return 1;
-	if (expect_lobby(port, opennova::GATE_PROBE_TAG_JODEMO, jo) != 0)
+	if (expect_lobby(port, kJoDemo.gate_tag, jo) != 0)
 		return 1;
 	if (expect_lobby(port, "dfx2:0:cus:buffy", dfx2) != 0)
 		return 1;

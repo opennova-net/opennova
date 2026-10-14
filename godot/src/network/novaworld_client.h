@@ -27,6 +27,7 @@
 #include "rtxt/rtxt_string_file.h"
 #include "network/udp_pump.h"
 #include "network/udp_pump_datagram_socket.h"
+#include "resource_index/resource_root.h"
 
 #include <cstdint>
 #include <memory>
@@ -98,6 +99,13 @@ public:
 
 	void set_player_name(const String &name);
 	String get_player_name() const;
+
+	// The mounted game whose title the session speaks (its identity and its gate
+	// tag, the title's or the mount's gt.ssc's; the launch game's with none,
+	// ResourceRoot::session_title): start() refuses when the title's identity is
+	// not witnessed in full.
+	void set_resource_root(const Ref<ResourceRoot> &root) { resource_root_ = root; }
+	Ref<ResourceRoot> get_resource_root() const { return resource_root_; }
 
 	// The gametext table the hosted Host list's STRNOVA / TimeOfDay tokens
 	// resolve through (null keeps the stock English fallbacks).
@@ -280,6 +288,7 @@ private:
 	String player_name_ = "GodotPlayer";
 
 	Ref<RtxtStringFile> gametext_;
+	Ref<ResourceRoot> resource_root_;
 
 	// State.
 	State state_ = STATE_IDLE;

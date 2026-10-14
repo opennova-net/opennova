@@ -51,15 +51,6 @@ inline constexpr const char *NOVAWORLD_DOMAIN = "novaworld.net";
 // for NovaLogic's live service (ADR 0051 d6).
 bool is_novaworld_domain_host(std::string_view host);
 
-// Protocol tag the probe ships as its payload; the literal differs per
-// NovaLogic title and is how the gate distinguishes which title is calling
-// in. Retail Joint Operations installs "jop:cus2" as the session's gate tag
-// [orig: CNapiGameSession ctor Napi_CopyString(this+76, "jop:cus2", 64)
-//  @0x4d14b6; literal @0x7cc35c]. The demo binary (jodemo.exe) ships
-// "jopd:cus4"; it stays here only as the witnessed demo value.
-inline constexpr const char *GATE_PROBE_TAG_JOINTOPS = "jop:cus2";
-inline constexpr const char *GATE_PROBE_TAG_JODEMO = "jopd:cus4";
-
 // NWU cipher key used to obfuscate both request and response.
 // [orig: "GATEAPI" @0x7e0524]
 inline constexpr const char *GATE_NWU_KEY = "GATEAPI";
@@ -69,7 +60,10 @@ inline constexpr const char *GATE_NWU_KEY = "GATEAPI";
 // the socket layer. It is NOT a complete datagram: the caller that owns the
 // socket must wrap the result in the NAPI CRC envelope
 // (napi_envelope_encode) before sendto, as NapiSocket_SendTo's encrypt path
-// does in retail. There is no default tag — the caller names its title.
+// does in retail. `tag` is the gate manager's, which differs per NovaLogic
+// title and is how the gate tells which title is calling in: the title's
+// default or the boot's gt.ssc (net/title/title_identity.h title_gate_tag);
+// there is no default here.
 std::vector<uint8_t> gate_probe_build(std::string_view tag,
                                       std::string_view nwu_key = GATE_NWU_KEY);
 

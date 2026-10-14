@@ -33,6 +33,8 @@
 // regenerate to make an unexplained diff pass.
 
 #include <runtime/inmatch/client_runtime.h>
+#include <base/gameprofile/gameprofile.h>
+#include <net/title/title_identity.h>
 #include <runtime/inmatch/host_session.h> // the host owner loop (SAME loop the game's host runs)
 
 #include <net/npwire/idatagram_socket.h>
@@ -63,6 +65,9 @@
 #include <utility>
 #include <vector>
 #include <cstring>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 #ifndef SELF_CAPTURE_FIXTURE
 #define SELF_CAPTURE_FIXTURE ""
@@ -166,6 +171,7 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 	owner.ctx.world = &world;
 	owner.ctx.mission = &mission;
 	inmatch::HostConfig host_cfg;
+	host_cfg.title = &kJo;
 	host_cfg.config.server_name = "OpenNova self-capture host";
 	host_cfg.config.max_players = 16;
 	// The committed fixture pins message coverage, not retail's LAN subrate.
@@ -178,6 +184,7 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 
 	MemoryDatagramSocket sock;
 	inmatch::ClientRuntime client("SelfCapture");
+	client.set_title(&kJo);
 
 	int cap_seq = 0;
 	auto record = [&](int src, int dst, const std::vector<uint8_t> &d) {

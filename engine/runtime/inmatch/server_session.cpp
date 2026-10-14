@@ -32,6 +32,7 @@ void set_transport_mode(NapiNPServerCtx &ctx, SocketMode socket) {
 void start_server(NapiNPServerCtx &ctx, const SessionStartup &startup) {
 	if (!ctx.is_authority) return;
 	NapiNPProtocol &p = ctx.np_protocol;
+	p.identity = startup.title;             // the network init's identity block (the 0x81's, the gates')
 	p.host_key = startup.host_key;          // HK TLV (validated against the client HK on join)
 	p.host_start_tick = startup.host_start_tick; // uptime base
 	if (p.gen_session_seed_flag) p.session_seed_id = startup.session_seed_id;

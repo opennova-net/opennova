@@ -1,4 +1,6 @@
 #include "net_sockets.h"
+#include <net/title/title_identity.h>
+#include <base/gameprofile/gameprofile.h>
 
 #include <net/napi/envelope.h>
 #include <net/novacrypto/nwu.h>
@@ -10,6 +12,9 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 namespace {
 
@@ -42,7 +47,7 @@ bool serve_one_probe(opennova::net::Socket &server, const std::string &response_
 	opennova::nwu_encrypt(plain.data(), plain.size(), opennova::GATE_NWU_KEY);
 	const std::string tag(reinterpret_cast<const char *>(plain.data()),
 			plain.empty() ? 0 : plain.size() - 1);
-	if (tag != opennova::GATE_PROBE_TAG_JOINTOPS) return false;
+	if (tag != kJo.gate_tag) return false;
 
 	std::vector<uint8_t> reply_inner(response_body.begin(), response_body.end());
 	opennova::nwu_decrypt(reply_inner.data(), reply_inner.size(), opennova::GATE_NWU_KEY);
@@ -87,7 +92,7 @@ int main() {
 	opennova::net::ScopedSocket client(opennova::net::udp_bind(0));
 	if (!expect(client.is_valid(), "client bind")) return 1;
 
-	const auto probe_inner = opennova::gate_probe_build(opennova::GATE_PROBE_TAG_JOINTOPS);
+	const auto probe_inner = opennova::gate_probe_build(kJo.gate_tag);
 	std::vector<uint8_t> probe(probe_inner.size() + 16);
 	size_t probe_size = 0;
 	if (!expect(opennova::napi_envelope_encode(probe_inner.data(), probe_inner.size(),

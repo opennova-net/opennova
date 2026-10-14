@@ -6,6 +6,7 @@
 #include <net/novaworld/lobby_vars.h> // parse_host_and_port
 #include <net/npwire/nw_session_framing.h> // make_random_session_u32 / make_session_key
 #include <net/npwire/session_keys.h>      // the server-direction opcodes
+#include <net/title/title_identity.h>
 
 #include <base/io/strutil.h>
 
@@ -142,7 +143,13 @@ void NwuLobbySession::open(IDatagramSocket &gate, IDatagramSocket &session) {
 
 void NwuLobbySession::probe(const std::string &gate_host, uint16_t gate_port) {
 	if (gate_socket_ == nullptr) return;
-	const std::vector<uint8_t> probe_dg = gate_probe_build(GATE_PROBE_TAG_JOINTOPS);
+	if (title_ == nullptr) {
+		if (hooks_.on_fatal) hooks_.on_fatal("no title identity to probe the gate with");
+		return;
+	}
+	// The gate manager's tag: the title's, or the boot's gt.ssc (set_title).
+	// [orig: CNapiGateManager_ProbeThreadProc @0x6339e0 - the tag's bytes @0x633aa1]
+	const std::vector<uint8_t> probe_dg = gate_probe_build(gate_tag_);
 	// The NWU payload rides the LSB-scatter CRC envelope the gate expects: retail's socket
 	// layer applies it when NapiSocket_SendTo's encrypt flag is set; the service strips it.
 	// [orig: CNapiGateManager_ProbeThreadProc @0x633ade -> NapiSocket_SendTo(..., 1)]
@@ -508,11 +515,12 @@ void NwuLobbySession::poll_gate() {
 // or host: all 11 chunks, type 2, the locale chunks empty on the join; UdpCode1/2 and MetTag come
 // from the gate. [orig: CNapiGameSession_ConnectToNovaWorld @0x4d4640]
 void NwuLobbySession::begin_session() {
-	ClientSession::Config cfg;
+	ClientSession::Config cfg = ClientSession::Config::lobby(*title_, gate_tag_);
 	cfg.client_index = client_index_;
 	cfg.client_key = client_key_;
 	cfg.max_packet_size = env_.max_packet_size;
 	NovaWorldJoinCu cu;
+	cu.build_date_and_time = title_->lobby_bdat;
 	cu.gate_tag = cfg.na;
 	cu.met_tag = gate_response_.met_label;
 	cu.udp_code1 = gate_response_.udp_code1;

@@ -165,6 +165,9 @@ public:
 	uint16_t bound_port() const { return bound_port_; }
 	bool running() const { return running_; }
 	const ResourceIndex &index() const { return index_; }
+	// The title the server speaks and its gate tag (mount): null / empty before the mount.
+	const TitleIdentity *title() const { return title_; }
+	const std::string &gate_tag() const { return gate_tag_; }
 	const std::string &end_message() const { return end_message_; }
 	bool rotation_ended() const { return rotation_ended_; }
 	// The remote admin's GOTO MENUSTATE quit the session (exit reason 1).
@@ -218,6 +221,10 @@ private:
 	// One game frame's admin pump [orig: CAdminServer_ProcessFrame @0x406F50 from
 	// Game_ProcessMainFrame @0x5268F1].
 	void pump_admin();
+	// The title the server speaks: /game's, JO's without one (net/title/title_identity.h).
+	// False when its session identity is not witnessed in full, or when the listing logs in
+	// (--credentials) and its web flow is not.
+	bool resolve_title(std::string &error);
 	bool read_boot_config(std::string &error);
 	bool mount(std::string &error);
 	bool read_config_over_weapons(std::string &error);
@@ -239,6 +246,10 @@ private:
 	void select_chat_font();
 
 	ServeOptions options_;
+	// The title the server speaks (/game's, JO's without one: mount) and its gate tag, the
+	// title's or the mount's gt.ssc's (title_gate_tag).
+	const TitleIdentity *title_ = nullptr;
+	std::string gate_tag_;
 	ResourceIndex index_;
 	// The mount's expansion text-override table, read once at the boot's
 	// mount (vfs_expansion_override_table); empty = none.

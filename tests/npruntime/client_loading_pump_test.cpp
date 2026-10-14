@@ -30,6 +30,8 @@
 //  Client_ProcessNetworkFrame @0x42c3dd]
 
 #include <runtime/inmatch/client_runtime.h>
+#include <base/gameprofile/gameprofile.h>
+#include <net/title/title_identity.h>
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/napi_np_connection.h>
 
@@ -46,6 +48,9 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 namespace {
 
@@ -143,6 +148,8 @@ struct Harness {
 	std::string server_scrk = "SERVER-LOADING-PUMP-SCRK";
 	ClientAuth auth;
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+
+	Harness() { client.set_title(&kJo); }
 
 	// One client frame on the 16 ms clock, with `incoming` delivered first.
 	std::vector<std::vector<uint8_t>> frame(

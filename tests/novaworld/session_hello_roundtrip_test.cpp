@@ -9,6 +9,8 @@
 // having to launch retail every iteration.
 
 #include <net/npwire/nw_session_framing.h>
+#include <net/title/title_identity.h>
+#include <base/gameprofile/gameprofile.h>
 #include <net/npwire/flat_tlv.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_ping.h>
@@ -22,6 +24,9 @@
 #include <cstring>
 #include <string>
 #include <vector>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 using opennova::ClientAuth;
 using opennova::ClientHello;
@@ -204,21 +209,21 @@ int test_client_hello_minimal() {
 //  compares run only under `if (!protocol_version)`; jnz @0x6217c2 jumps a
 //  nonzero PM straight to the ServerInfo reply @0x6218fc]
 int test_client_hello_admits_nonzero_pm_without_identity() {
-	ClientHello retail = opennova::make_jointoperations_client_hello(5);
-	TEST_EXPECT(opennova::client_hello_admits(retail));
+	ClientHello retail = opennova::make_title_client_hello(kJo, 5);
+	TEST_EXPECT(opennova::client_hello_admits(kJo, retail));
 
 	ClientHello foreign;
 	foreign.pn = "SOMEOTHERGAME";
 	foreign.pv1 = "9.9.9";
-	TEST_EXPECT(!opennova::client_hello_admits(foreign));
+	TEST_EXPECT(!opennova::client_hello_admits(kJo, foreign));
 	foreign.pm = 2;
-	TEST_EXPECT(opennova::client_hello_admits(foreign));
+	TEST_EXPECT(opennova::client_hello_admits(kJo, foreign));
 
 	ClientHello bare;
 	bare.pm = 1;
-	TEST_EXPECT(opennova::client_hello_admits(bare));
+	TEST_EXPECT(opennova::client_hello_admits(kJo, bare));
 	bare.pm = 0;
-	TEST_EXPECT(!opennova::client_hello_admits(bare));
+	TEST_EXPECT(!opennova::client_hello_admits(kJo, bare));
 	return 0;
 }
 
@@ -319,7 +324,7 @@ int test_client_hello_short_dword_takes_the_following_bytes() {
 	// identity check is skipped [orig: @0x6217C2].
 	TEST_EXPECT(parsed.pm ==
 			((uint32_t('E') << 8) | (uint32_t('I') << 16) | (uint32_t('P') << 24)));
-	TEST_EXPECT(opennova::client_hello_admits(parsed));
+	TEST_EXPECT(opennova::client_hello_admits(kJo, parsed));
 	TEST_EXPECT(parsed.eip == 0x44332211u);
 
 	// A zero-length field still loads four bytes: here the next field's name and
@@ -378,7 +383,7 @@ int test_client_auth_short_dword_takes_the_following_bytes() {
 //  NapiNPProtocol_HandleClientJoin @0x62BA24..0x62BA38; NapiVarBlock_Init
 //  @0x62E710]
 int test_pg_of_any_length_loads_sixteen_bytes() {
-	const opennova::ClientHello retail = opennova::make_jointoperations_client_hello(3);
+	const opennova::ClientHello retail = opennova::make_title_client_hello(kJo, 3);
 	const std::vector<uint8_t> guid(retail.pg.begin(), retail.pg.end());
 	TEST_EXPECT(guid[15] == 'h');
 	const auto identity = [&retail](std::vector<uint8_t> &out) {
@@ -394,12 +399,12 @@ int test_pg_of_any_length_loads_sixteen_bytes() {
 	ClientHello hello;
 	TEST_EXPECT(parse_client_hello(short_pg.data(), short_pg.size(), hello));
 	TEST_EXPECT(hello.pg_present && hello.pg == retail.pg);
-	TEST_EXPECT(opennova::matches_jointoperations_identity(hello));
+	TEST_EXPECT(opennova::matches_title_identity(kJo, hello));
 	ClientAuth auth;
 	append_field(short_pg, "CK", {0x01, 0x00, 0x00, 0x00});
 	TEST_EXPECT(parse_client_auth(short_pg.data(), short_pg.size(), auth));
 	TEST_EXPECT(auth.pg_present && auth.pg == retail.pg && auth.hk == 0x11223344u);
-	TEST_EXPECT(opennova::matches_jointoperations_identity(auth));
+	TEST_EXPECT(opennova::matches_title_identity(kJo, auth));
 
 	std::vector<uint8_t> long_pg;
 	identity(long_pg);
@@ -409,18 +414,18 @@ int test_pg_of_any_length_loads_sixteen_bytes() {
 	append_field(long_pg, "PV1", cstr_value(retail.pv1));
 	append_field(long_pg, "CK", {0x01, 0x00, 0x00, 0x00});
 	TEST_EXPECT(parse_client_hello(long_pg.data(), long_pg.size(), hello));
-	TEST_EXPECT(hello.pg == retail.pg && opennova::matches_jointoperations_identity(hello));
+	TEST_EXPECT(hello.pg == retail.pg && opennova::matches_title_identity(kJo, hello));
 	TEST_EXPECT(parse_client_auth(long_pg.data(), long_pg.size(), auth));
-	TEST_EXPECT(auth.pg == retail.pg && opennova::matches_jointoperations_identity(auth));
+	TEST_EXPECT(auth.pg == retail.pg && opennova::matches_title_identity(kJo, auth));
 
 	std::vector<uint8_t> no_pg;
 	identity(no_pg);
 	append_field(no_pg, "PV1", cstr_value(retail.pv1));
 	TEST_EXPECT(parse_client_hello(no_pg.data(), no_pg.size(), hello));
-	TEST_EXPECT(!hello.pg_present && !opennova::matches_jointoperations_identity(hello));
+	TEST_EXPECT(!hello.pg_present && !opennova::matches_title_identity(kJo, hello));
 	append_field(no_pg, "CK", {0x01, 0x00, 0x00, 0x00});
 	TEST_EXPECT(parse_client_auth(no_pg.data(), no_pg.size(), auth));
-	TEST_EXPECT(!auth.pg_present && !opennova::matches_jointoperations_identity(auth));
+	TEST_EXPECT(!auth.pg_present && !opennova::matches_title_identity(kJo, auth));
 	return 0;
 }
 
@@ -434,7 +439,7 @@ int test_pg_of_any_length_loads_sixteen_bytes() {
 //  NapiNPProtocol_HandleClientJoin @0x62B750 - NVS @0x62B933, CO @0x62B961, PN
 //  @0x62BA01, PV1 @0x62BA68, NA @0x62BB55, PW @0x62BB86, SCRK @0x62BC4B]
 int test_hello_and_auth_strings_copy_to_the_first_nul() {
-	const ClientHello retail = opennova::make_jointoperations_client_hello(3);
+	const ClientHello retail = opennova::make_title_client_hello(kJo, 3);
 	const std::vector<uint8_t> guid(retail.pg.begin(), retail.pg.end());
 	const auto bare = [](const std::string &s) { return std::vector<uint8_t>(s.begin(), s.end()); };
 
@@ -452,11 +457,11 @@ int test_hello_and_auth_strings_copy_to_the_first_nul() {
 	ClientHello hello;
 	TEST_EXPECT(parse_client_hello(inner.data(), inner.size(), hello));
 	TEST_EXPECT(hello.pn == retail.pn && hello.pv1 == retail.pv1);
-	TEST_EXPECT(opennova::matches_jointoperations_identity(hello));
+	TEST_EXPECT(opennova::matches_title_identity(kJo, hello));
 	ClientAuth auth;
 	TEST_EXPECT(parse_client_auth(inner.data(), inner.size(), auth));
 	TEST_EXPECT(auth.pn == retail.pn && auth.pv1 == retail.pv1);
-	TEST_EXPECT(opennova::matches_jointoperations_identity(auth));
+	TEST_EXPECT(opennova::matches_title_identity(kJo, auth));
 
 	// A value without its NUL runs on into the next field's name; the last
 	// field's stops at the datagram's end.
@@ -503,7 +508,7 @@ int test_client_side_readers_load_short_fields_whole() {
 	// of "SN"; an empty TZB takes "SF", its NUL and SF's size byte; a one-byte
 	// SF takes "NP" and its NUL; the last field, a one-byte ET, reads zero past
 	// the end.
-	const std::array<uint8_t, 16> guid = opennova::jointoperations_protocol_guid();
+	const std::array<uint8_t, 16> guid = (*kJo.guid);
 	std::vector<uint8_t> sh;
 	append_field(sh, "CI", {0x09, 0x00});
 	append_field(sh, "HK", {0x44, 0x33, 0x22, 0x11});
@@ -733,7 +738,7 @@ int test_client_auth_minimum_for_acceptance() {
 //  @0x62BF7F; CNapiNPConnection_SendClientJoin @0x61fe20 gates the CK tag on
 //  nonzero]
 int test_client_auth_zero_ck_parses() {
-	ClientAuth src = opennova::make_jointoperations_client_auth(
+	ClientAuth src = opennova::make_title_client_auth(kJo,
 			1, /*client_key=*/0, 0x0FE0E112u, "ZeroKey", "SCRK");
 	const auto absent = client_auth_to_bytes(src);
 	TEST_EXPECT(!has_tlv_field(absent, "CK"));
@@ -741,7 +746,7 @@ int test_client_auth_zero_ck_parses() {
 	round.ck = 0xFFFFFFFFu;
 	TEST_EXPECT(parse_client_auth(absent.data(), absent.size(), round));
 	TEST_EXPECT(round.ck == 0 && round.na == "ZeroKey" && round.ci == 1);
-	TEST_EXPECT(opennova::matches_jointoperations_identity(round));
+	TEST_EXPECT(opennova::matches_title_identity(kJo, round));
 
 	std::vector<uint8_t> explicit_zero;
 	append_field(explicit_zero, "CI", {0x02, 0x00, 0x00, 0x00});
@@ -762,17 +767,17 @@ int test_client_auth_zero_ck_parses() {
 //  @0x620088..0x6200ba; NapiNPProtocol_HandleClientJoin @0x62BAA3..0x62BAC4]
 int test_jointoperations_pv3_is_the_build_string() {
 	const std::string expected = "CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42";
-	TEST_EXPECT(opennova::kJoBuildTagAddressA == 8165168u && opennova::kJoBuildTagAddressB == 8165140u);
-	TEST_EXPECT(opennova::jointoperations_protocol_version3() == expected);
+	TEST_EXPECT(kJo.build->tag_address_a == 8165168u && kJo.build->tag_address_b == 8165140u);
+	TEST_EXPECT(opennova::title_protocol_version3(kJo) == expected);
 	TEST_EXPECT(expected.size() == 63); // exactly the 64-byte field's capacity
-	const ClientHello hello = opennova::make_jointoperations_client_hello(3);
+	const ClientHello hello = opennova::make_title_client_hello(kJo, 3);
 	TEST_EXPECT(hello.pv3 == expected);
 	const auto hello_names = tlv_field_names(client_hello_to_bytes(hello));
 	const std::vector<std::string> hello_expected = {
 			"NVS", "CO", "AP", "BDAT", "PN", "PG", "PV1", "PV2", "PV3", "CI"};
 	TEST_EXPECT(hello_names == hello_expected);
 
-	const ClientAuth auth = opennova::make_jointoperations_client_auth(
+	const ClientAuth auth = opennova::make_title_client_auth(kJo,
 			3, 0x4667B839u, 0x0FE0E112u, "Builder", "SCRK");
 	TEST_EXPECT(auth.pv3 == expected);
 	const auto bytes = client_auth_to_bytes(auth);
@@ -786,7 +791,7 @@ int test_jointoperations_pv3_is_the_build_string() {
 	TEST_EXPECT(round.pv3 == expected);
 	// PV3 is not an identity gate: the host compares NVS / PN / PG / PV1 (and PV2) only.
 	round.pv3 = "anything";
-	TEST_EXPECT(opennova::matches_jointoperations_identity(round));
+	TEST_EXPECT(opennova::matches_title_identity(kJo, round));
 	return 0;
 }
 
@@ -925,7 +930,7 @@ int test_server_auth_cu_walk_bounds() {
 int test_cu_writers_leave_out_an_entry_of_2048_bytes() {
 	// A chunk is [type][name\0][u16 len][value\0]: 5 bytes around a one-letter name.
 	ClientAuth join =
-			opennova::make_jointoperations_client_auth(7, 0x1234ABCDu, 0, "Writer", "SCRK");
+			opennova::make_title_client_auth(kJo, 7, 0x1234ABCDu, 0, "Writer", "SCRK");
 	join.cu.clear();
 	join.cu.push_back(opennova::make_client_cu_chunk(2, "A", std::string(2041, 'a')));
 	join.cu.push_back(opennova::make_client_cu_chunk(2, "B", std::string(2042, 'b')));
@@ -963,7 +968,7 @@ int test_cu_writers_leave_out_an_entry_of_2048_bytes() {
 //  @0x627591..0x627624, PV1 @0x627643; CNapiNPConnection_SendClientJoin @0x61FE20 - the HK
 //  gate @0x6200F2]
 int test_server_hello_requires_no_hk() {
-	const ClientHello local = opennova::make_jointoperations_client_hello(7);
+	const ClientHello local = opennova::make_title_client_hello(kJo, 7);
 	ServerHello written = opennova::build_server_hello(local, 0x7F000001u, 32768);
 	written.hk = 0x0FE0E115u;
 	written.sn = "NoKeyHost";
@@ -975,7 +980,7 @@ int test_server_hello_requires_no_hk() {
 	TEST_EXPECT(parse_server_hello(hk_less.data(), hk_less.size(), parsed));
 	TEST_EXPECT(parsed.hk == 0 && parsed.ci == 7 && parsed.sn == "NoKeyHost");
 	TEST_EXPECT(opennova::server_hello_matches_identity(parsed, local));
-	const ClientAuth join = opennova::make_jointoperations_client_auth(
+	const ClientAuth join = opennova::make_title_client_auth(kJo,
 			7, 0x1234ABCDu, parsed.hk, "NoKeyJoiner", "SCRK");
 	TEST_EXPECT(!has_tlv_field(client_auth_to_bytes(join), "HK"));
 	TEST_EXPECT(parse_server_hello(nullptr, 0, parsed) && parsed.hk == 0 && parsed.ci == 0);
@@ -1037,7 +1042,7 @@ int test_server_hello_omitted_metadata_parses_empty() {
 
 int test_server_hello_game_metadata_has_retail_order() {
 	ServerHello hello;
-	hello.pg = opennova::jointoperations_protocol_guid();
+	hello.pg = (*kJo.guid);
 	hello.p1 = 0x00010020u;
 	hello.p2 = 0x00000904u;
 	hello.np = 1;
@@ -1106,7 +1111,7 @@ int test_server_hello_full_field_set_has_retail_order() {
 	hello.ci = 9;
 	hello.de = 0x11u;
 	hello.ut = 12345u;
-	hello.pg = opennova::jointoperations_protocol_guid();
+	hello.pg = (*kJo.guid);
 	hello.locale_block = true;
 	hello.cn = "United States";
 	hello.lng = "";  // an empty string inside the block still ships its NUL

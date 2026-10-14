@@ -4,6 +4,7 @@
 #include <base/io/strutil.h>
 #include <net/napi/tlv.h>
 #include <net/npwire/flat_tlv.h>
+#include <net/title/title_identity.h>
 
 namespace opennova {
 
@@ -68,65 +69,52 @@ constexpr size_t kLongStringBuffer = 512;
 
 } // namespace
 
-std::array<uint8_t, 16> jointoperations_protocol_guid() {
-	// QUuid(0xB074D646, 0x81F9, 0x475F,
-	//       0x92,0xDA,0xDE,0xA7,0x24,0x7F,0x14,0x68)
-	// in the retail static initializer at 0x7937a0. QUuid's first three
-	// components occupy native little-endian memory; PG copies those 16 bytes.
-	return {0x46, 0xD6, 0x74, 0xB0, 0xF9, 0x81, 0x5F, 0x47,
-	        0x92, 0xDA, 0xDE, 0xA7, 0x24, 0x7F, 0x14, 0x68};
+bool is_title_protocol_name(const TitleIdentity &title, std::string_view protocol_name) {
+	return title.pn != nullptr && strutil::iequals(protocol_name, title.pn);
 }
 
-bool is_jointoperations_protocol_name(std::string_view protocol_name) {
-	// The retail PN compare is case-insensitive, which subsumes the two spellings the
-	// established NovaWorld PN router accepted; keep the policy in the neutral
-	// game-wire layer so inmatch does not reimplement service routing. The retail
-	// identity gate compares every string field through Napi_StrCaseEqual, not exact
-	// equality. [orig: Napi_StrCaseEqual @0x616e70, used by HandleClientJoin @0x62B750]
-	return strutil::iequals(protocol_name, "JOINTOPERATIONS");
-}
-
-std::string jointoperations_protocol_version3() {
+std::string title_protocol_version3(const TitleIdentity &title) {
 	// The version quad and the two literal addresses, printed `%ld` (all positive).
 	// [orig: CNapiNetwork_Init @0x4ca83d..0x4ca85b]
-	constexpr uint32_t kVersion[4] = {1u, 7u, 5u, 7u};
+	const TitleBuild &build = *title.build;
 	std::string out = "CONSUMER";
 	out += " ";
 	out += "RELEASE";
 	out += " ";
-	out += std::to_string(kVersion[0]) + "." + std::to_string(kVersion[1]) + "." +
-			std::to_string(kVersion[2]) + "." + std::to_string(kVersion[3]) + " [" +
-			std::to_string(kJoBuildTagAddressA) + "." + std::to_string(kJoBuildTagAddressB) + "]";
+	out += std::to_string(build.version[0]) + "." + std::to_string(build.version[1]) + "." +
+			std::to_string(build.version[2]) + "." + std::to_string(build.version[3]) + " [" +
+			std::to_string(build.tag_address_a) + "." + std::to_string(build.tag_address_b) + "]";
 	out += " ";
-	out += "Jul 21 2009 18:54:42";
-	// Napi_CopyString into the 64-byte proto+0x1AC keeps 63 characters (the string is
+	out += build.date;
+	// Napi_CopyString into the 64-byte proto+0x1AC keeps 63 characters (JO's string is
 	// exactly 63). [orig: @0x4ca8b4..0x4ca8c2]
 	constexpr std::size_t kPv3Chars = 63;
 	if (out.size() > kPv3Chars) out.resize(kPv3Chars);
 	return out;
 }
 
-ClientHello make_jointoperations_client_hello(uint32_t client_index) {
+ClientHello make_title_client_hello(const TitleIdentity &title, uint32_t client_index) {
 	ClientHello hello;
-	hello.nvs = "NAPI NP Version 0.0.1 1/12/2004 - 2/20/2004 Milota Copyright 2004 NovaLogic";
-	hello.co = "NovaLogic Inc, Calabasas CA U.S.A.";
-	hello.ap = "Jointops.exe";
-	hello.bdat = "Jul 21 2009 18:54:42";
-	hello.pn = "JOINTOPERATIONS";
-	hello.pg = jointoperations_protocol_guid();
+	hello.nvs = title.nvs;
+	hello.co = title.co;
+	hello.ap = title.ap;
+	hello.bdat = title.bdat;
+	hello.pn = title.pn;
+	hello.pg = *title.guid;
 	hello.pg_present = true;
-	hello.pv1 = "0.0.0 1/12/2004 EM";
-	hello.pv2 = "16";
+	hello.pv1 = title.pv1;
+	hello.pv2 = title.pv2;
 	// [orig: NapiNPSession_SendAnnouncePacket @0x61fa00 - PV3 from proto+0x1AC
 	//  @0x61fc68..0x61fc9a]
-	hello.pv3 = jointoperations_protocol_version3();
+	hello.pv3 = title_protocol_version3(title);
 	hello.ci = client_index;
 	return hello;
 }
 
-ClientAuth make_jointoperations_client_auth(uint32_t client_index, uint32_t client_key,
-		uint32_t host_key, std::string_view player_name, std::string_view client_scrk) {
-	const ClientHello hello = make_jointoperations_client_hello(client_index);
+ClientAuth make_title_client_auth(const TitleIdentity &title, uint32_t client_index,
+		uint32_t client_key, uint32_t host_key, std::string_view player_name,
+		std::string_view client_scrk) {
+	const ClientHello hello = make_title_client_hello(title, client_index);
 	ClientAuth auth;
 	auth.nvs = hello.nvs;
 	auth.co = hello.co;
@@ -148,28 +136,22 @@ ClientAuth make_jointoperations_client_auth(uint32_t client_index, uint32_t clie
 
 // String fields compare case-insensitively like the witnessed gate; the PG GUID stays a
 // raw 16-byte compare. [orig: HandleClientJoin @0x62B750 via Napi_StrCaseEqual @0x616e70]
-bool matches_jointoperations_identity(const ClientHello &hello) {
-	const ClientHello expected = make_jointoperations_client_hello(hello.ci);
-	return strutil::iequals(hello.nvs, expected.nvs) &&
-			is_jointoperations_protocol_name(hello.pn) &&
-			hello.pg_present && hello.pg == expected.pg &&
-			strutil::iequals(hello.pv1, expected.pv1);
+bool matches_title_identity(const TitleIdentity &title, const ClientHello &hello) {
+	return strutil::iequals(hello.nvs, title.nvs) && is_title_protocol_name(title, hello.pn) &&
+			hello.pg_present && hello.pg == *title.guid && strutil::iequals(hello.pv1, title.pv1);
 }
 
-bool matches_jointoperations_identity(const ClientAuth &auth) {
-	const ClientHello expected = make_jointoperations_client_hello(auth.ci);
-	return strutil::iequals(auth.nvs, expected.nvs) &&
-			is_jointoperations_protocol_name(auth.pn) &&
-			auth.pg_present && auth.pg == expected.pg &&
-			strutil::iequals(auth.pv1, expected.pv1);
+bool matches_title_identity(const TitleIdentity &title, const ClientAuth &auth) {
+	return strutil::iequals(auth.nvs, title.nvs) && is_title_protocol_name(title, auth.pn) &&
+			auth.pg_present && auth.pg == *title.guid && strutil::iequals(auth.pv1, title.pv1);
 }
 
-// [orig: NapiNPProtocol_HandleClientHello @0x6213b0 — the PM TLV lands in
+// [orig: NapiNPProtocol_HandleClientHello @0x6213b0 - the PM TLV lands in
 //  `protocol_version` @0x62172c; `cmp edi, ebx / jnz loc_6218B6` @0x6217bc..
 //  0x6217c2 jumps PAST the NVS/PN/PG/PV1 compares straight to the
 //  SendServerInfoPacket call @0x6218fc, so only a zero PM is validated]
-bool client_hello_admits(const ClientHello &hello) {
-	return hello.pm != 0 || matches_jointoperations_identity(hello);
+bool client_hello_admits(const TitleIdentity &title, const ClientHello &hello) {
+	return hello.pm != 0 || matches_title_identity(title, hello);
 }
 
 bool parse_client_hello(const uint8_t *data, size_t len, ClientHello &out) {

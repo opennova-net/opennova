@@ -3597,6 +3597,14 @@ target_link_libraries(protocol_message_test PRIVATE opennova_net)
 target_include_directories(protocol_message_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME protocol_message COMMAND protocol_message_test)
 
+# The title identity table (engine/net/title): JO's row and wire bytes, DFX2's witnessed values
+# and the refusal of the rest by name, the gt.ssc gate-tag override over a mount (minted by our
+# own encoder), and each consumer's refusal of a missing identity.
+add_executable(title_identity_test title/title_identity_test.cpp)
+target_link_libraries(title_identity_test PRIVATE opennova_runtime)
+target_include_directories(title_identity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME title_identity COMMAND title_identity_test)
+
 add_executable(session_protocol_test novaworld/session_protocol_test.cpp)
 target_link_libraries(session_protocol_test PRIVATE opennova_net)
 target_include_directories(session_protocol_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

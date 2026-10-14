@@ -2,11 +2,14 @@
 //
 // After NWJoin the client opens a session to the host and sends a ClientHello
 // whose PN flips the connection protocol from the lobby (NOVAWORLDUDP) to the
-// in-match game (JOINTOPERATIONS). This pins the exact retail identity populated
-// by CNapiNetwork_Init @ 0x4ca4a0. The default NOVAWORLDUDP hello remains
-// unchanged, so the per-PN identity selector cannot regress the lobby path.
+// in-match game (JO's JOINTOPERATIONS). This pins the exact retail identity
+// populated by CNapiNetwork_Init @ 0x4ca4a0, through JO's title row. The lobby
+// (NOVAWORLDUDP) hello stays the service protocol's with the title's PV1, so the
+// per-PN identity selector cannot regress the lobby path.
 
 #include <net/novaworld/client_session.h>
+#include <base/gameprofile/gameprofile.h>
+#include <net/title/title_identity.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 
@@ -54,8 +57,10 @@ int main() {
 	    0x46, 0xD6, 0x74, 0xB0, 0xF9, 0x81, 0x5F, 0x47,
 	    0x92, 0xDA, 0xDE, 0xA7, 0x24, 0x7F, 0x14, 0x68};
 
+	const TitleIdentity &title = *title_identity(gameprofile::GAME_JO);
+
 	// Exact retail JointOperations game-session hello.
-	ClientSession jo{ClientSession::Config::jointoperations()};
+	ClientSession jo{ClientSession::Config::game_protocol(title)};
 	ClientHello jo_hello;
 	check(decode_hello(jo.start(), jo_hello), "JO hello decodes");
 	check(jo_hello.nvs ==
@@ -71,12 +76,13 @@ int main() {
 	check(jo_hello.pg_present, "JO hello carries PG");
 	check(jo_hello.pg == kRetailJoPg, "JO hello PG == retail JO GUID");
 
-	// Default (lobby) hello — unchanged.
-	ClientSession nw{};  // default Config -> NOVAWORLDUDP
+	// The title's lobby hello.
+	ClientSession nw{ClientSession::Config::lobby(title, title.gate_tag)};
 	ClientHello nw_hello;
 	check(decode_hello(nw.start(), nw_hello), "NOVAWORLDUDP hello decodes");
 	check(nw_hello.pn == "NOVAWORLDUDP", "default hello PN == NOVAWORLDUDP");
-	check(nw_hello.pv1 == "0.0.0 2/10/2004 EM", "default hello PV1 unchanged");
+	check(nw_hello.pv1 == "0.0.0 2/10/2004 EM", "lobby hello PV1 == JO's lobby PV1");
+	check(nw_hello.bdat == "Jul 21 2009 18:54:41", "lobby hello BDAT == JO's lobby build stamp");
 	check(nw_hello.pg == (std::array<uint8_t, 16>{
 	          0xF2, 0x0C, 0xEE, 0xD8, 0xCE, 0xE4, 0x8D, 0x44,
 	          0x90, 0xB4, 0x1D, 0x42, 0xB3, 0x64, 0xAB, 0x71}),

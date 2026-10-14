@@ -54,6 +54,9 @@ add_library(opennova_net STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/lan_discovery.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/datagram_demux.cpp # one socket under the game and NWU protocols
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/session_vars.cpp # the session-variable list (0x60 server info)
+    # title — each title's wire and NovaWorld identity (the in-match hello, the lobby
+    # identity, the gate tag and gt.ssc) keyed by gameprofile's GameId
+    ${CMAKE_CURRENT_SOURCE_DIR}/title/title_identity.cpp
     # novaworld session leg — NWU session establishment above the npwire
     # framing: the client session state machine, the session-protocol
     # classifier, join identity, the lobby CU var-list codec

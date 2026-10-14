@@ -22,6 +22,8 @@
 //  @0x5ba0a0; Chat_SendTeamMessage @0x49a900; NapiNPServer_HandleChatMessage
 //  @0x513760; CNapiNPConnection_LogHostStarted @0x61e6a0]
 #include "server.h"
+#include <base/gameprofile/gameprofile.h>
+#include <net/title/title_identity.h>
 #include "server_logs.h"
 #include "serve_test_support.h"
 #include "status_console.h"
@@ -49,6 +51,9 @@
 #include <memory>
 #include <string>
 #include <vector>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 using namespace opennova;
 namespace fs = std::filesystem;
@@ -426,6 +431,7 @@ void test_serve_session_capture() {
 	net::ScopedSocket joiner_sock(net::udp_bind(0, &joiner_port));
 	CHECK(joiner_sock.is_valid());
 	inmatch::ClientRuntime client("LogJoiner");
+	client.set_title(&kJo);
 	auto ship = [&](const std::vector<uint8_t> &d) {
 		if (!d.empty()) net::udp_send_to(joiner_sock.get(), server_ep, d.data(), d.size());
 	};

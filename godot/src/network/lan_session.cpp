@@ -80,10 +80,15 @@ void LanSession::_bind_methods() {
 			&LanSession::start_browsing,
 			DEFVAL(String(DEFAULT_BROADCAST)), DEFVAL(int(opennova::kRetailLanPortMin)), DEFVAL(int(opennova::kRetailLanPortMax)),
 			DEFVAL(int(opennova::kLanConnectTypeLan)));
+	ClassDB::bind_method(D_METHOD("set_resource_root", "root"), &LanSession::set_resource_root);
+	ClassDB::bind_method(D_METHOD("get_resource_root"), &LanSession::get_resource_root);
 	ClassDB::bind_method(D_METHOD("stop"), &LanSession::stop);
 	ClassDB::bind_method(D_METHOD("get_servers"), &LanSession::get_servers);
 	ClassDB::bind_method(D_METHOD("is_browsing"), &LanSession::is_browsing);
 	ClassDB::bind_method(D_METHOD("get_client_index"), &LanSession::get_client_index);
+
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "resource_root", PROPERTY_HINT_RESOURCE_TYPE, "ResourceRoot"),
+	             "set_resource_root", "get_resource_root");
 
 	ADD_SIGNAL(MethodInfo("servers_changed", PropertyInfo(Variant::ARRAY, "servers")));
 	// The browse window expired (the 30 s gate): the LAN screen re-enables its
@@ -102,10 +107,16 @@ int LanSession::start_browsing(const String &destination, int port_min, int port
 	servers_.clear();
 	emit_signal("servers_changed", get_servers());
 
+	std::string title_error;
+	const opennova::TitleIdentity *title = ResourceRoot::session_title(resource_root_, title_error);
+	if (title == nullptr) {
+		emit_error(String("LAN browse has no identity: ") + opennova::to_gd(title_error));
+		return static_cast<int>(ERR_UNCONFIGURED);
+	}
 	const String target = destination.strip_edges();
 	if (target.is_empty() ||
-			!browser_.begin(opennova::next_connection_index(), enumerate_address(target), port_min,
-					port_max, connect_type)) {
+			!browser_.begin(*title, opennova::next_connection_index(), enumerate_address(target),
+					port_min, port_max, connect_type)) {
 		emit_error("LAN browse destination or port range is invalid");
 		return static_cast<int>(ERR_INVALID_PARAMETER);
 	}

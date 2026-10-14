@@ -101,6 +101,14 @@ public:
 	// by Game_ParseCommandLineAndInit @0x4A74EB, read by every Game_LoadConfig
 	// @0x5514B1].
 	void set_lan_switch(bool on) { lan_switch_ = on; }
+	// The title's cfg table (gamecfg::config_var_rows): every read takes it, and the block as it
+	// stands takes it at once (its defaults, the table's).
+	void set_config_table(gamecfg::ConfigTable table) {
+		table_ = table;
+		if (cfg_.table != table)
+			cfg_ = gamecfg::defaults(texts_, cfg_.player_index, cfg_.hw3d_deviceno, table);
+	}
+	gamecfg::ConfigTable config_table() const { return table_; }
 	bool lan_switch() const { return lan_switch_; }
 	// Game_SaveConfig. False (with `error`) when the file does not open, where
 	// retail writes nothing, silently.
@@ -165,6 +173,7 @@ private:
 	bool reset_exit_ = false;
 	bool video_test_ran_ = false;
 	bool lan_switch_ = false;
+	gamecfg::ConfigTable table_ = gamecfg::ConfigTable::Jo;
 };
 
 } // namespace opennova::inmatch

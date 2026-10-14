@@ -66,17 +66,18 @@ bool try_decrypt_pub_bytes(std::vector<uint8_t> data, const std::string &pcid_ke
 // [orig: NapiNP_DecodeEncryptedString @ 0x619130, the isprint scan
 // @ 0x6191c1, the key loop @ 0x619294..0x619302]. The decode never throws:
 // false where the original returns -1 (a printable character outside A-P,
-// an odd count of them, too few bytes for the keys' CRCs, a CRC that does
-// not match).
+// an odd count of them, more bytes than the caller's `room`, too few bytes
+// for the keys' CRCs, a CRC that does not match). `room` is the caller's
+// output buffer, which the A-P text's byte count may not exceed
+// [orig: @ 0x61920f, `bufSize < decodedLen`]; a caller with no buffer of
+// its own passes none.
 std::string encode_key_chain(const std::vector<uint8_t> &plaintext, const std::string &key_chain);
 bool decode_key_chain(const std::string &encoded, const std::string &key_chain,
-                      std::vector<uint8_t> &plaintext);
+                      std::vector<uint8_t> &plaintext, std::size_t room = SIZE_MAX);
 
-// gt.ssc, the gate tag the game reads encoded by its name alone, and its key chain
-// [orig: Mission_LoadEncryptedConfig @ 0x4cdcd0: the name @ 0x7cbb50, the file read whole, at most
-// 0x1FFF bytes, and decoded under the key chain @ 0x7cbb44 by NapiNP_DecodeEncryptedString
-// @ 0x4cdd65; one that does not decode is skipped].
+// gt.ssc, the gate tag the game reads encoded by its name alone, under the title's key chain
+// (net/title/title_identity.h: TitleIdentity::gate_tag_keys, decode_gate_tag_file)
+// [orig: Mission_LoadEncryptedConfig @ 0x4cdcd0: the name @ 0x7cbb50].
 inline constexpr const char *kGateTagFile = "gt.ssc";
-inline constexpr const char *kGateTagKeys = "jop:2:oyez";
 
 } // namespace opennova

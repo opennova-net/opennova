@@ -12,6 +12,8 @@
 //  NapiNPMessage_Create @0x628048]
 
 #include <runtime/inmatch/joiner_connection.h>
+#include <base/gameprofile/gameprofile.h>
+#include <net/title/title_identity.h>
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/session_timeout_config.h>
 
@@ -25,6 +27,9 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 namespace {
 
@@ -141,6 +146,7 @@ bool check_joiner_holds_out_of_order_packets_up_to_field_10() {
 	for (const uint32_t bound : {2u, 0xFFFFFFFFu}) {
 		uint64_t now_ms = 1000;
 		inmatch::JoinerConnection joiner("QueueBoundJoiner", [&now_ms] { return now_ms; });
+		joiner.set_title(&kJo);
 		if (!accept_with_cs_overrides(joiner, {{10, bound}})) return false;
 		if (!expect(joiner.session_timeouts().packet_queue_max == static_cast<int32_t>(bound),
 				"the 0x82 overlays CS field 10"))
@@ -168,6 +174,7 @@ bool check_joiner_holds_out_of_order_packets_up_to_field_10() {
 bool check_joiner_builds_at_most_field_14_packets() {
 	uint64_t now_ms = 1000;
 	inmatch::JoinerConnection joiner("PacketBudgetJoiner", [&now_ms] { return now_ms; });
+	joiner.set_title(&kJo);
 	if (!accept_with_cs_overrides(joiner, {{14, 1}})) return false;
 	if (!expect(joiner.session_timeouts().max_packets_per_tick == 1,
 			"the 0x82 overlays CS field 14"))
@@ -194,6 +201,7 @@ bool check_joiner_overlays_the_host_cs_block() {
 	{
 		uint64_t now_ms = 1000;
 		inmatch::JoinerConnection joiner("StockJoiner", [&now_ms] { return now_ms; });
+		joiner.set_title(&kJo);
 		if (!accept_with_cs(joiner, 120000u, 1200u)) return false;
 		if (!expect(joiner.session_timeouts().timeout_ms == 120000 &&
 						joiner.session_timeouts().msg_out_max == 1200 &&
@@ -217,6 +225,7 @@ bool check_joiner_overlays_the_host_cs_block() {
 	{
 		uint64_t now_ms = 1000;
 		inmatch::JoinerConnection joiner("NeverJoiner", [&now_ms] { return now_ms; });
+		joiner.set_title(&kJo);
 		if (!accept_with_cs(joiner, 0xFFFFFFFFu, 0xFFFFFFFFu)) return false;
 		if (!expect(joiner.session_timeouts().timeout_ms == -1 &&
 						joiner.session_timeouts().msg_out_max == -1 &&
@@ -232,6 +241,7 @@ bool check_joiner_overlays_the_host_cs_block() {
 	{
 		uint64_t now_ms = 1000;
 		inmatch::JoinerConnection joiner("ThirtyJoiner", [&now_ms] { return now_ms; });
+		joiner.set_title(&kJo);
 		if (!accept_with_cs(joiner, 30000u, 1200u)) return false;
 		now_ms += 30000;
 		if (!expect(!joiner.session_lost(), "30000 ms is inside a 30 s window")) return false;

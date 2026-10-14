@@ -27,6 +27,8 @@
 //     listed with no owner.
 
 #include "nw_service_harness.h"
+#include <net/title/title_identity.h>
+#include <base/gameprofile/gameprofile.h>
 
 #include "lister.h"
 
@@ -53,6 +55,9 @@
 #include <thread>
 #include <utility>
 #include <vector>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 #ifndef OPENNOVA_SOURCE_DIR
 #error "OPENNOVA_SOURCE_DIR must be set by CMake"
@@ -142,6 +147,8 @@ struct ListerRun {
 
 opennova::serve::ListerOptions lister_options(const Service &service, bool with_account) {
 	opennova::serve::ListerOptions options;
+	options.title = &kJo;
+	options.gate_tag = kJo.gate_tag;
 	options.master_host = "127.0.0.1";
 	options.master_gate_port = service.gate.bound_port();
 	if (with_account) {
@@ -157,6 +164,8 @@ opennova::serve::ListerOptions lister_options(const Service &service, bool with_
 std::string fetch_host_key(const Service &service) {
 	opennova::LobbyHttpFlow flow;
 	opennova::LobbyHttpContext ctx;
+	ctx.title = &kJo;
+	ctx.gate_tag = kJo.gate_tag;
 	ctx.startup_url = "http://127.0.0.1:" + std::to_string(service.http.bound_port()) +
 	                  "/nwprepare.dll?ver1=[VER1]&ver2=[VER2]&cc=[CC]&gt=[GT]&url=jop_2_start.htm";
 	flow.set_context(ctx);
@@ -195,7 +204,7 @@ class RawHost {
 public:
 	RawHost(uint16_t service_port, uint32_t ci, uint32_t ck)
 		: session_([ci, ck] {
-			  ClientSession::Config cfg;
+			  ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 			  cfg.client_index = ci;
 			  cfg.client_key = ck;
 			  cfg.na = "ownership:host";

@@ -10,6 +10,7 @@
 #include <godot_cpp/variant/typed_array.hpp>
 
 #include "network/lan_server_row.h"
+#include "resource_index/resource_root.h"
 
 namespace godot {
 
@@ -25,6 +26,13 @@ class LanSession : public Node {
 public:
 	LanSession();
 	~LanSession() override;
+
+	// The mounted game whose title the browse speaks (the launch game's with none,
+	// ResourceRoot::session_title): its probes carry the title's in-match identity
+	// and only hosts of the same identity list. A browse refuses to start when the
+	// title's identity is not witnessed in full.
+	void set_resource_root(const Ref<ResourceRoot> &root) { resource_root_ = root; }
+	Ref<ResourceRoot> get_resource_root() const { return resource_root_; }
 
 	// `connect_type` is the network connect type the browse runs under
 	// (opennova::kLanConnectType*): the LAN screen browses as LAN, a NovaWorld
@@ -51,6 +59,7 @@ private:
 	void emit_error(const String &message);
 
 	opennova::LanDiscoveryBrowser browser_;
+	Ref<ResourceRoot> resource_root_;
 	Ref<PacketPeerUDP> socket_;
 	TypedArray<LanServerRow> servers_;
 	String browse_target_;

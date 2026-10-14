@@ -89,6 +89,8 @@ void NovaWorldClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_gate_port"), &NovaWorldClient::get_gate_port);
 	ClassDB::bind_method(D_METHOD("set_player_name", "name"), &NovaWorldClient::set_player_name);
 	ClassDB::bind_method(D_METHOD("get_player_name"), &NovaWorldClient::get_player_name);
+	ClassDB::bind_method(D_METHOD("set_resource_root", "root"), &NovaWorldClient::set_resource_root);
+	ClassDB::bind_method(D_METHOD("get_resource_root"), &NovaWorldClient::get_resource_root);
 	ClassDB::bind_method(D_METHOD("set_gametext", "gametext"), &NovaWorldClient::set_gametext);
 	ClassDB::bind_method(D_METHOD("get_gametext"), &NovaWorldClient::get_gametext);
 
@@ -136,6 +138,8 @@ void NovaWorldClient::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "host"),     "set_host", "get_host");
 	ADD_PROPERTY(PropertyInfo(Variant::INT,    "gate_port"), "set_gate_port", "get_gate_port");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "player_name"), "set_player_name", "get_player_name");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "resource_root", PROPERTY_HINT_RESOURCE_TYPE, "ResourceRoot"),
+	             "set_resource_root", "get_resource_root");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "gametext", PROPERTY_HINT_RESOURCE_TYPE, "RtxtStringFile"),
 	             "set_gametext", "get_gametext");
 
@@ -286,6 +290,16 @@ void NovaWorldClient::start() {
 		host_http_->connect("request_completed",
 		                    Callable(this, "on_host_request_completed"));
 	}
+
+	// The title the mounted game speaks and its gate tag (the title's, or the mount's
+	// gt.ssc's): a session without a witnessed identity does not start.
+	std::string title_error;
+	const opennova::TitleIdentity *title = ResourceRoot::session_title(resource_root_, title_error);
+	if (title == nullptr) {
+		enter_state(STATE_ERROR, String("no NovaWorld identity: ") + opennova::to_gd(title_error));
+		return;
+	}
+	lobby_.set_title(title, ResourceRoot::session_gate_tag(resource_root_, *title));
 
 	// The gate worker's socket (an OS-assigned port), and the NovaWorld network
 	// type's one socket: bound from the mpnovaworld range, it carries the NWU
@@ -714,6 +728,8 @@ TypedArray<NovaWorldServerRow> NovaWorldClient::get_server_rows() const {
 // touch the flow's cookie jar, so NWHANDLE/PCID survive login -> GSB -> join.
 void NovaWorldClient::sync_flow_context() {
 	opennova::LobbyHttpContext ctx;
+	ctx.title = lobby_.title();
+	ctx.gate_tag = lobby_.gate_tag();
 	if (server_info_.is_valid()) {
 		ctx.startup_url = opennova::to_std(server_info_->get_startup_url());
 		ctx.post_ip = opennova::to_std(server_info_->get_post_ip());

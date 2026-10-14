@@ -22,6 +22,8 @@
 // ends the process with code 0: no exit tail (the lock stays), the NovaWorld
 // session's goodbye alone (the service drops the row).
 #include "server.h"
+#include <base/gameprofile/gameprofile.h>
+#include <net/title/title_identity.h>
 #include "serve_test_support.h"
 
 #include "lister.h"
@@ -55,6 +57,9 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 using namespace opennova;
 namespace fs = std::filesystem;
@@ -188,7 +193,7 @@ int main() {
 		uint16_t browse_port = 0;
 		net::ScopedSocket browse(net::udp_bind(0, &browse_port));
 		const uint32_t ci = 0x4321;
-		const std::vector<uint8_t> probe = build_lan_discovery_probe(
+		const std::vector<uint8_t> probe = build_lan_discovery_probe(kJo,
 				ci, peer_addr_from_octets(game_ep.ip, game_ep.port).ip, game_ep.port);
 		net::udp_send_to(browse.get(), game_ep, probe.data(), probe.size());
 		LanDiscoveryServer found;
@@ -198,7 +203,7 @@ int main() {
 			uint8_t rx[2048];
 			net::Endpoint from{};
 			const int n = net::udp_recv_from(browse.get(), rx, sizeof(rx), from, 10);
-			if (n > 0) answered = parse_lan_discovery_reply(rx, static_cast<size_t>(n), ci, found);
+			if (n > 0) answered = parse_lan_discovery_reply(kJo, rx, static_cast<size_t>(n), ci, found);
 		}
 		CHECK(answered);
 		CHECK(found.server_name == "Serve NW");
@@ -297,6 +302,7 @@ int main() {
 	uint16_t joiner_port = 0;
 	net::ScopedSocket joiner_sock(net::udp_bind(0, &joiner_port));
 	inmatch::ClientRuntime client("ListedJoiner");
+	client.set_title(&kJo);
 	auto ship = [&](const std::vector<uint8_t> &d) {
 		if (!d.empty()) net::udp_send_to(joiner_sock.get(), game_ep, d.data(), d.size());
 	};

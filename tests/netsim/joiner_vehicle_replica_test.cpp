@@ -5,6 +5,8 @@
 // addeweap child follows.
 
 #include <formats/def/def.h>
+#include <base/gameprofile/gameprofile.h>
+#include <net/title/title_identity.h>
 #include <net/npwire/entity_class.h>
 #include <net/npwire/idatagram_socket.h>
 #include <net/npwire/ingame_decode.h>
@@ -31,6 +33,9 @@
 #include <memory>
 #include <optional>
 #include <string>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 namespace {
 
@@ -75,6 +80,7 @@ struct Harness {
 		role.bind(*kernel);
 		kernel->world.load_systems();
 		role.set_socket(&socket, PeerAddr{});
+		role.set_title(&kJo);
 		role.create_runtime("TankJoiner", inmatch::JoinRole::Player, "", "");
 		role.kit_seams.apply_authoritative = [] {};
 		role.kit_seams.reseed_on_side_change = [] { return false; };

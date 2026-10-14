@@ -206,8 +206,7 @@ std::string write(const GameCfg &cfg, const WeaponRoster &weapons) {
 	// other row `<name> = "<value>"`, the value as its type prints it
 	// [orig: @0x54C82C..0x54C87B; NapiConfigVar_FormatValueToString @0x635370:
 	// String copies, Int32/UInt32 "%ld" @0x635402, Bool "1"/"0" @0x63551B].
-	for (size_t i = 0; i < kConfigVarRowCount; ++i) {
-		const ConfigVarRow &row = kConfigVarRows[i];
+	for (const ConfigVarRow &row : config_var_rows(cfg.table)) {
 		switch (row.type) {
 			case ConfigVarType::None:
 				emit(out, "// %s\n", row.name);

@@ -118,6 +118,10 @@ void host_session_flush_s2c(HostOwner &owner, opennova::IDatagramSocket &sock);
 // Host bring-up config. The owner sets owner.ctx.world / owner.ctx.mission and owner.host_loopback (its
 // dcb-2 LoopbackChannel) BEFORE start_host_session; this fills the rest.
 struct HostConfig {
+	// The title identity the host speaks (net/title/title_identity.h): the 0x81 it writes and the
+	// 0x41 / 0x42 it admits. The embedder resolves a complete one (resolve_title_identity) and
+	// refuses to host without; with none, the host answers no hello and admits no join.
+	const TitleIdentity *title = nullptr;
 	// The ONE consolidated GameConfig (ADR 0013): §6.4 identity (server name / max players / passwords /
 	// game type) + the §6.9 rule globals + the §5.1 reactive-reply config (mission / player / spawn).
 	GameConfig config;

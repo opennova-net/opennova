@@ -105,6 +105,20 @@ public:
 
 	NwuLobbySession(Hooks hooks, Environment env);
 
+	// The title the session speaks (complete: resolve_title_identity; it outlives the session)
+	// and the tag its gate manager holds (title_gate_tag: the title's, or the mount's gt.ssc's):
+	// the gate probe's payload, the connection's NA and the 0x42's GateTag CU. Set before
+	// probe(); a probe with no title sends nothing and reports on_fatal.
+	// [orig: CNapiGateManager_InitDefaults @0x4d1460 (the tag at +76 @0x4d14b6); Game_InitSubsystems
+	//  -> Mission_LoadEncryptedConfig @0x4cdcd0; CNapiGateManager_ProbeThreadProc @0x6339e0 (the
+	//  tag's bytes @0x633aa1); CNapiGameSession_ConnectToNovaWorld @0x4d48d8 / @0x4d494f]
+	void set_title(const TitleIdentity *title, std::string gate_tag) {
+		title_ = title;
+		gate_tag_ = std::move(gate_tag);
+	}
+	const TitleIdentity *title() const { return title_; }
+	const std::string &gate_tag() const { return gate_tag_; }
+
 	// The command line's switches (unset: none), read at each gate response.
 	void set_command_line(CommandLine command_line) { command_line_ = std::move(command_line); }
 	// The NovaWorld menu's JUNCTIONCODE form field: when it is nonempty at the connect, its one
@@ -206,6 +220,8 @@ private:
 
 	Hooks hooks_;
 	Environment env_;
+	const TitleIdentity *title_ = nullptr; // set_title
+	std::string gate_tag_;
 	CommandLine command_line_;
 	IDatagramSocket *gate_socket_ = nullptr;
 	IDatagramSocket *session_socket_ = nullptr;

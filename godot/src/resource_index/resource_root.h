@@ -26,6 +26,10 @@
 
 #include <vector>
 
+namespace opennova {
+struct TitleIdentity; // net/title/title_identity.h
+} // namespace opennova
+
 namespace godot {
 
 class ResourceRoot : public RefCounted {
@@ -103,6 +107,20 @@ public:
 	// C++-side seam (not bound): the `/game` code the live mount was made for ("jo" for
 	// a loose mount, empty when nothing is mounted); the menu's version label reads it.
 	const String &game_code() const { return game_code_; }
+	// C++-side seam (not bound): the title the live mount speaks, game_code()'s
+	// (opennova::resolve_title_identity); null, with `error` saying why, when nothing is
+	// mounted or the title is unknown or its identity is not yet witnessed in full.
+	const opennova::TitleIdentity *title_identity(std::string &error) const;
+	// C++-side seam (not bound): the title a session over `root` speaks: the live mount's
+	// (title_identity), or, with no root, the game the process was launched as
+	// (LaunchFlags::game: `/game`'s, JO's without one, as the boot mount picks it). Null, with
+	// `error` saying why, when that title's identity is not witnessed in full.
+	static const opennova::TitleIdentity *session_title(const Ref<ResourceRoot> &root,
+			std::string &error);
+	// C++-side seam (not bound): the gate tag `title` probes the NovaWorld gate with over
+	// `root`: its own, or the mount's gt.ssc's (opennova::title_gate_tag); its own with no root.
+	static std::string session_gate_tag(const Ref<ResourceRoot> &root,
+			const opennova::TitleIdentity &title);
 
 private:
 	static bool has_virtual_scheme(const String &path);

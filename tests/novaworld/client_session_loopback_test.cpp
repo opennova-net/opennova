@@ -19,6 +19,8 @@
 // echo, the 0x43/0x83 framing), this test fails.
 
 #include <net/novaworld/client_session.h>
+#include <net/title/title_identity.h>
+#include <base/gameprofile/gameprofile.h>
 #include <net/novaworld/connect_or_host.h>
 #include <net/novaworld/http_flow.h>
 #include <net/novaworld/lobby_vars.h>
@@ -45,6 +47,9 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 using namespace opennova;
 
@@ -423,7 +428,7 @@ size_t count_opcode(const std::vector<std::vector<uint8_t>> &out, uint8_t want) 
 void test_peer_disconnect_legs() {
 	{
 		MiniServer server;
-		ClientSession::Config cfg;
+		ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		cfg.client_index = 0x00000031u;
 		cfg.client_key = 0x31313131u;
 		ClientSession client(cfg);
@@ -464,7 +469,7 @@ void test_peer_disconnect_legs() {
 		// [orig: Nwu_HandleDisconnect @0x623CE0 - the role @0x624065, DSTR 128 @0x624079,
 		//  DDSTR 32 @0x624097]
 		MiniServer server;
-		ClientSession::Config cfg;
+		ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		cfg.client_index = 0x00000034u;
 		cfg.client_key = 0x34343434u;
 		ClientSession client(cfg);
@@ -491,7 +496,7 @@ void test_peer_disconnect_legs() {
 	}
 	{
 		MiniServer server;
-		ClientSession::Config cfg;
+		ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		cfg.client_index = 0x00000032u;
 		cfg.client_key = 0x32323232u;
 		ClientSession client(cfg);
@@ -540,7 +545,7 @@ void test_peer_disconnect_legs() {
 // [orig: CNapiNPConnection_PumpStateMachine @0x6292e0 case 5; PumpSendIntervals @0x628fd0]
 void test_send_interval_pump() {
 	MiniServer server;
-	ClientSession::Config cfg;
+	ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	cfg.client_index = 0x00000033u;
 	cfg.client_key = 0x33333333u;
 	ClientSession client(cfg);
@@ -604,7 +609,7 @@ void test_send_interval_pump() {
 // [orig: CNapiGameSession_HandlePuntNotification @0x4d20b0]
 void test_leave_novaworld() {
 	MiniServer server;
-	ClientSession::Config cfg;
+	ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	cfg.client_index = 0x00000034u;
 	cfg.client_key = 0x34343434u;
 	ClientSession client(cfg);
@@ -646,7 +651,7 @@ void test_leave_novaworld() {
 //  HandleVerifyResponse @0x4d1f35..0x4d1f53; CNapiGameSession_OnDisconnect @0x4cfb68;
 //  ResetToDisconnected @0x4d08fc..0x4d0927]
 void test_session_words() {
-	ClientSession::Config cfg;
+	ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	cfg.client_index = 0x00000035u;
 	cfg.client_key = 0x35353535u;
 	{
@@ -771,7 +776,7 @@ void test_parser_roundtrip() {
 }
 
 void test_client_correlates_handshake_echoes() {
-	ClientSession::Config cfg;
+	ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	cfg.client_index = 0x11223344u;
 	cfg.client_key = 0x55667788u;
 	ClientSession client(cfg);
@@ -982,7 +987,7 @@ bool has_field(const std::vector<uint8_t> &body, std::string_view wanted) {
 //  @0x62758B, PG @0x627591..0x627624, PV1 @0x627643; CNapiNPConnection_SendClientJoin
 //  @0x61FE20 - the HK gate @0x6200F2]
 void test_client_reads_the_server_hello_as_retail() {
-	ClientSession::Config cfg;
+	ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	cfg.client_index = 0x3D3D3D3Du;
 	cfg.client_key = 0x3E3E3E3Eu;
 	ClientSession client(cfg);
@@ -1030,10 +1035,12 @@ void test_client_reads_the_server_hello_as_retail() {
 void test_play_uses_current_http_cookies() {
 	LobbyHttpFlow flow;
 	LobbyHttpContext context;
+	context.title = &kJo;
+	context.gate_tag = context.title->gate_tag;
 	context.startup_url = "http://gs.opennova.test/NWStart.dll?prepare=1";
 	context.identity_vars = make_lobby_identity_vars(LobbyIdentityParams{});
 	flow.set_context(context);
-	ClientSession::Config cfg;
+	ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	cfg.cookie_vars = [&flow]() { return flow.session_cookie_vars(); };
 	MiniServer server;
 	ClientSession client(cfg);
@@ -1133,7 +1140,7 @@ void inject_reconnect_keys(ClientSession::Config &cfg, uint32_t first_key) {
 // each only when nonzero, so a first join's bytes are unchanged.
 // [orig: SendClientJoin @0x62033d..0x62037f; SendSessionInit @0x62125d]
 void test_reconnect_wire() {
-	ClientSession::Config cfg;
+	ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	ClientAuth auth = make_client_auth(cfg, cfg.co, 0x1234ABCDu, "SCRK");
 	const std::vector<uint8_t> first = client_auth_to_bytes(auth);
 	auth.dcnt = 1;
@@ -1179,7 +1186,7 @@ uint32_t pump_until_probe(ClientSession &client, uint32_t from, uint32_t limit,
 //  PumpStateMachine @0x629487..0x6296cb; InitNPConnection @0x4d4098..0x4d40bc]
 void test_reconnect_schedule() {
 	MiniServer server;
-	ClientSession::Config cfg;
+	ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	cfg.client_index = 0x00000036u;
 	cfg.client_key = 0x36363636u;
 	ClientSession client(cfg);
@@ -1254,7 +1261,7 @@ void test_reconnect_schedule() {
 //  jz @0x61EAC3]
 void test_reconnect_redraws_a_zero_client_key() {
 	MiniServer server;
-	ClientSession::Config cfg;
+	ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	cfg.client_index = 0x0000003Cu;
 	cfg.client_key = 0x3C3C3C3Cu;
 	inject_reconnect_keys(cfg, 0);
@@ -1282,7 +1289,7 @@ void test_reconnect_redraws_a_zero_client_key() {
 //  CNapiGameSession_OnDisconnect @0x4cfaa0]
 void test_reconnect_replay() {
 	MiniServer server;
-	ClientSession::Config cfg;
+	ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	cfg.client_index = 0x00000037u;
 	cfg.client_key = 0x37373737u;
 	cfg.cookie_vars = []() {
@@ -1363,7 +1370,7 @@ void test_reconnect_replay() {
 //  @0x4ce300; SendHostRequest @0x4d3700; OnDisconnect's GSID clear @0x4cfc3b..0x4cfc54]
 void test_reconnect_rehost() {
 	MiniServer server;
-	ClientSession::Config cfg;
+	ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	cfg.client_index = 0x00000038u;
 	cfg.client_key = 0x38383838u;
 	inject_reconnect_keys(cfg, 0x52525200u);
@@ -1453,7 +1460,7 @@ void test_reconnect_rehost() {
 //  Server_PlayerAdd's removal and re-creation @0x51d426..0x51d4aa]
 void test_host_update_writes_changed_lists() {
 	MiniServer server;
-	ClientSession::Config cfg;
+	ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	cfg.client_index = 0x00000039u;
 	cfg.client_key = 0x39393939u;
 	ClientSession client(cfg);
@@ -1550,7 +1557,7 @@ void test_host_update_writes_changed_lists() {
 // [orig: PumpStateMachine case 3 @0x629508..0x629595; Nwu_HandleServerHello @0x627ea1..0x627eb3]
 void test_reconnect_join_timeout() {
 	MiniServer server;
-	ClientSession::Config cfg;
+	ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	cfg.client_index = 0x00000039u;
 	cfg.client_key = 0x39393939u;
 	inject_reconnect_keys(cfg, 0x53535300u);
@@ -1600,7 +1607,7 @@ void test_reconnect_join_timeout() {
 //  tail's gates @0x629487..0x6294A5, a down state reopening the window @0x629632..0x629676]
 void test_reconnect_rejoin_rejected() {
 	MiniServer server;
-	ClientSession::Config cfg;
+	ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	cfg.client_index = 0x0000003Au;
 	cfg.client_key = 0x3A3A3A3Au;
 	inject_reconnect_keys(cfg, 0x54545400u);
@@ -1670,7 +1677,7 @@ void test_reconnect_rejoin_rejected() {
 //  @0x629693; ResetToDisconnected - CNapiNPConnection_Destroy @0x4D08A7]
 void test_reconnect_takes_a_hello_only_while_probing() {
 	MiniServer server;
-	ClientSession::Config cfg;
+	ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	cfg.client_index = 0x0000003Du;
 	cfg.client_key = 0x3D3D3D3Du;
 	inject_reconnect_keys(cfg, 0x56565600u);
@@ -1748,7 +1755,7 @@ void test_reconnect_takes_a_hello_only_while_probing() {
 // [orig: HandleConnectVerifyResponse @0x4d5928..0x4d599e — a word of 1 takes neither branch]
 void test_reconnect_verified_word() {
 	MiniServer server;
-	ClientSession::Config cfg;
+	ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	cfg.client_index = 0x0000003Au;
 	cfg.client_key = 0x3A3A3A3Au;
 	inject_reconnect_keys(cfg, 0x54545400u);
@@ -1781,7 +1788,7 @@ void test_reconnect_verified_word() {
 //  the state 5/6 gate]
 void test_stop_hosting_while_reconnecting() {
 	MiniServer server;
-	ClientSession::Config cfg;
+	ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	cfg.client_index = 0x0000003Bu;
 	cfg.client_key = 0x3B3B3B3Bu;
 	inject_reconnect_keys(cfg, 0x55555500u);
@@ -1859,7 +1866,7 @@ ProtocolMessage cs_update_record(const std::vector<std::pair<uint32_t, uint32_t>
 
 // A cookie jar long enough that the host request outgrows one 1300-byte packet.
 ClientSession::Config cookie_heavy_config(uint32_t ci, uint32_t ck) {
-	ClientSession::Config cfg;
+	ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	cfg.client_index = ci;
 	cfg.client_key = ck;
 	cfg.cookie_vars = []() {
@@ -1939,7 +1946,7 @@ void test_lobby_np_connection() {
 	// a list keyed to another connection draws nothing.
 	{
 		MiniServer server;
-		ClientSession::Config cfg;
+		ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		cfg.client_index = 0x00000043u;
 		cfg.client_key = 0x43434343u;
 		ClientSession client(cfg);
@@ -1975,7 +1982,7 @@ void test_lobby_np_connection() {
 	// 0x44 carrying the server's key, and the gap's arrival releases both in order.
 	{
 		MiniServer server;
-		ClientSession::Config cfg;
+		ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		cfg.client_index = 0x00000044u;
 		cfg.client_key = 0x44444444u;
 		ClientSession client(cfg);
@@ -2006,7 +2013,7 @@ void test_lobby_np_connection() {
 	// A full pool: the field-11 bound refuses a node and the connection tears down with MSGCRE.
 	{
 		MiniServer server;
-		ClientSession::Config cfg;
+		ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		cfg.client_index = 0x00000045u;
 		cfg.client_key = 0x45454545u;
 		ClientSession client(cfg);
@@ -2054,7 +2061,7 @@ int main() {
 	test_reconnect_verified_word();
 
 	MiniServer server;
-	ClientSession::Config cfg;
+	ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	cfg.client_index = 0x00000001u;
 	cfg.client_key   = 0x0BADF00Du;
 	// NW-S5: configure the verify "Cookie" var-list so the verify request carries
@@ -2407,6 +2414,7 @@ int main() {
 			// The host leg: the role forwards the command to on_command. The lobby is
 			// constructed and never opened; the Command notice touches neither it nor the phase.
 			NwuLobbySession dormant(NwuLobbySession::Hooks{}, NwuLobbySession::Environment{});
+			dormant.set_title(&kJo, kJo.gate_tag);
 			NwuHostRole::Hooks hooks;
 			std::optional<ServerCommand> seen;
 			hooks.on_command = [&seen](const ServerCommand &c) { seen = c; };
@@ -2535,7 +2543,7 @@ int main() {
 	//  NapiStatement_SerializeVarList @ 0x4d0660]
 	{
 		MiniServer server2;
-		ClientSession::Config cfg2;
+		ClientSession::Config cfg2 = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		cfg2.client_index = 0x00000002u;
 		cfg2.client_key   = 0x0BADF00Du;
 		ClientSession client2(cfg2);

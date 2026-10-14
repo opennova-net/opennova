@@ -167,10 +167,11 @@ bool Lister::start() {
 		session_socket_ = std::make_unique<net::NetDatagramSocket>(session_udp_.get());
 		session = session_socket_.get();
 	}
+	lobby_.set_title(options_.title, options_.gate_tag);
 	lobby_.open(*gate_socket_, *session);
 	lobby_.probe(options_.master_host, options_.master_gate_port);
-	io::logf(LogLevel::kInfo, "[gate] probing %s:%u (%s)", options_.master_host.c_str(),
-			options_.master_gate_port,
+	io::logf(LogLevel::kInfo, "[gate] probing %s:%u as %s (%s)", options_.master_host.c_str(),
+			options_.master_gate_port, options_.gate_tag.c_str(),
 			options_.allow_public ? "public destinations allowed"
 								  : "NovaLogic's NovaWorld refused");
 	return true;
@@ -347,6 +348,8 @@ void Lister::request_host() {
 void Lister::sync_flow_context() {
 	const GateResponse &gate = lobby_.gate_response();
 	LobbyHttpContext ctx;
+	ctx.title = options_.title;
+	ctx.gate_tag = options_.gate_tag;
 	ctx.startup_url = gate.startup_url;
 	ctx.post_ip = ip4(gate.post_ip);
 	ctx.post_port = std::to_string(gate.post_port);

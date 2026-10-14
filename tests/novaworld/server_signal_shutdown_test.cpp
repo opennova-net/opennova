@@ -28,6 +28,8 @@
 // every failure path, and PR_SET_PDEATHSIG on Linux should ctest kill the test).
 
 #include "net_http.h"
+#include <net/title/title_identity.h>
+#include <base/gameprofile/gameprofile.h>
 #include "net_sockets.h"
 
 #include <net/napi/envelope.h>
@@ -56,6 +58,9 @@
 #ifdef __linux__
 #include <sys/prctl.h>
 #endif
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 #ifndef OPENNOVA_SOURCE_DIR
 #error "OPENNOVA_SOURCE_DIR must be set by CMake"
@@ -347,7 +352,7 @@ int exercise_second_signal(ServerProcess &server, const std::string &binary,
 int probe_gate(uint16_t port, opennova::GateResponse &out) {
 	net::ScopedSocket client(net::udp_bind(0));
 	TEST_EXPECT(client.is_valid());
-	const auto inner = opennova::gate_probe_build(opennova::GATE_PROBE_TAG_JOINTOPS);
+	const auto inner = opennova::gate_probe_build(kJo.gate_tag);
 	std::vector<uint8_t> probe(inner.size() + 16);
 	size_t probe_size = 0;
 	TEST_EXPECT(opennova::napi_envelope_encode(inner.data(), inner.size(), probe.data(),
@@ -374,7 +379,7 @@ int session_web_domain(uint16_t port, std::string &web_domain) {
 	net::ScopedSocket client(net::udp_bind(0));
 	TEST_EXPECT(client.is_valid());
 	const net::Endpoint to{{127, 0, 0, 1}, port};
-	opennova::ClientSession session;
+	opennova::ClientSession session{opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag)};
 	const auto send = [&](const std::vector<uint8_t> &datagram) {
 		if (!datagram.empty()) net::udp_send_to(client.get(), to, datagram.data(), datagram.size());
 	};

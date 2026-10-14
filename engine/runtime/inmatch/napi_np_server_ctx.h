@@ -24,6 +24,10 @@
 // Forward declarations — the runtime holds non-owning pointers to the authoritative world and
 // the in-match replication seam. No World/codec headers are pulled into this header, and there
 // is NO socket and NO Godot code anywhere under engine/runtime/inmatch (engine/CLAUDE.md).
+namespace opennova {
+struct TitleIdentity; // net/title/title_identity.h
+} // namespace opennova
+
 namespace opennova::world {
 class World;
 }
@@ -81,6 +85,12 @@ enum class SocketMode : uint32_t {
 // [orig: g_NapiNPCtx.np_protocol @+0xE5C] NapiNPProtocol (§6.5) — the host state block reached
 // from the singleton. Only the fields the in-match runtime needs now are modeled; offsets cited.
 struct NapiNPProtocol {
+	// The title identity the network init installs: CO +0x18, AP +0x58, BDAT +0x98, PN +0xDC,
+	// PG +0x11C, PV1 +0x12C, PV2 +0x16C, PV3 +0x1AC (net/title/title_identity.h). The host's 0x81
+	// writes it and its 0x41 / 0x42 gates compare against it. start_server installs the session's
+	// (SessionStartup::title); with none (null), no hello is answered and no join admitted.
+	// [orig: CNapiNetwork_Init @0x4ca4a0 - the stores @0x4ca72f..0x4ca8c2]
+	const TitleIdentity *identity = nullptr;
 	bool reject_new_connections = false; // [orig +0x1F7, JFC6 @0x62be8f]
 	uint32_t server_flags = 0;          // [orig +0x500] P1 TLV (server config flag word)
 	uint32_t build_flags = 0;           // [orig +0x504] P2 TLV (CNapiServerConfig_BuildFlags)

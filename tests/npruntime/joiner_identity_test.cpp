@@ -1,4 +1,6 @@
 #include <runtime/inmatch/joiner_connection.h>
+#include <base/gameprofile/gameprofile.h>
+#include <net/title/title_identity.h>
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
@@ -8,6 +10,9 @@
 #include <net/npwire/session_keys.h>
 #include <cstdio>
 #include <utility>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 using namespace opennova;
 
@@ -22,6 +27,7 @@ bool expect(bool condition, const char *message) {
 // [orig: Player_FindLocalPlayerEntity @0x4E0090; NapiNPClientMsg_0x00C @0x42E730]
 bool run_identity() {
 	inmatch::JoinerConnection joiner("SharedCallsign");
+	joiner.set_title(&kJo);
 	const std::string server_scrk = "IDENTITY-SERVER-SCRK";
 	constexpr uint32_t connection_id = 0x12345678u;
 	uint8_t opcode = 0;

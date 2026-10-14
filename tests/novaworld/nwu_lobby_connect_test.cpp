@@ -10,6 +10,8 @@
 //  UI_ShowNovaWorldConnectError @0x5584A0]
 
 #include <net/napi/envelope.h>
+#include <net/title/title_identity.h>
+#include <base/gameprofile/gameprofile.h>
 #include <net/napi/session.h>
 #include <net/novacrypto/nwu.h>
 #include <net/novaworld/gate_probe.h>
@@ -27,6 +29,9 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 using namespace opennova;
 
@@ -98,7 +103,9 @@ struct Rig {
 	uint32_t jfp_at_fatal = 0;
 	NwuLobbySession lobby;
 
-	Rig() : lobby(hooks(), NwuLobbySession::Environment{}) {}
+	Rig() : lobby(hooks(), NwuLobbySession::Environment{}) {
+		lobby.set_title(&kJo, kJo.gate_tag);
+	}
 
 	NwuLobbySession::Hooks hooks() {
 		NwuLobbySession::Hooks out;

@@ -10,6 +10,8 @@
 // instead (D-NET-181).
 
 #include <runtime/inmatch/client_runtime.h>
+#include <base/gameprofile/gameprofile.h>
+#include <net/title/title_identity.h>
 #include <runtime/inmatch/joiner_connection.h>
 #include <runtime/inmatch/host_role.h>
 #include <runtime/inmatch/host_session.h>
@@ -39,6 +41,9 @@
 #include <deque>
 #include <string>
 #include <vector>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 namespace {
 
@@ -153,7 +158,7 @@ std::vector<uint8_t> frame_c2s(SessionSequencing &sequencing,
 
 ClientAuth make_retail_client_auth(
 		uint32_t client_index, uint32_t client_key, uint32_t host_key) {
-	ClientAuth auth = make_jointoperations_client_auth(
+	ClientAuth auth = make_title_client_auth(kJo,
 			client_index, client_key, host_key, "ClosedPeer", kClientScrk);
 	auto add_environment = [&](const char *name, const char *value) {
 		auth.cu.push_back(make_client_cu_chunk(2, name, value));
@@ -326,6 +331,7 @@ bool check_decode_is_order_and_shape_robust() {
 
 bool check_captured_punt_closes_a_joiner_parked_at_the_deploy_screen() {
 	inmatch::JoinerConnection joiner("PuntedPlayer");
+	joiner.set_title(&kJo);
 	seed_joiner(joiner);
 	// The captured situation: an established joiner sitting on the deploy screen, owing a pick.
 	if (!expect(joiner.begin_redeployment() && joiner.deployment_pick_pending(),
@@ -400,6 +406,7 @@ bool check_captured_punt_closes_a_joiner_parked_at_the_deploy_screen() {
 bool check_runtime_host_close_bypasses_holdoff_and_discards_queued_traffic() {
 	uint64_t now_ms = 0x10203040u;
 	inmatch::ClientRuntime client("PuntedRuntime", [&now_ms] { return now_ms; });
+	client.set_title(&kJo);
 	client.seed_session(kServerKey, kClientKey, kClientScrk, kServerScrk,
 	                    1, 0, 0x0001, 0x14B9, 0, 1, false);
 
@@ -460,6 +467,7 @@ bool check_runtime_host_close_bypasses_holdoff_and_discards_queued_traffic() {
 
 bool check_initial_settings_and_close_emit_only_goodbyes() {
 	inmatch::JoinerConnection joiner("SettingsCloseRace");
+	joiner.set_title(&kJo);
 	uint32_t client_key = 0;
 	if (!drive_to_initial_server_settings(joiner, client_key)) return false;
 
@@ -488,6 +496,7 @@ bool check_initial_settings_and_close_emit_only_goodbyes() {
 
 bool check_ordinary_settings_traffic_is_undisturbed() {
 	inmatch::JoinerConnection joiner("SettingsTraffic");
+	joiner.set_title(&kJo);
 	seed_joiner(joiner);
 	SessionSequencing server_tx{1, 0};
 	// The initial connection-control pair (full tag 0x100) plus the send-holdoff field the joiner
@@ -611,6 +620,7 @@ bool check_host_control_punt(uint32_t charattr_silence,
 		return false;
 
 	inmatch::JoinerConnection joiner("HostPuntReceiver");
+	joiner.set_title(&kJo);
 	seed_joiner(joiner);
 	const inmatch::JoinerConnection::PollResult receive =
 			joiner.handle_datagram(socket.sent[0].data(), socket.sent[0].size());
@@ -768,7 +778,7 @@ bool check_staged_host_disconnect_accepts_only_keyed_goodbye() {
 			"a staged close neither refreshes nor answers a keyed resend request"))
 		return false;
 
-	const ClientHello hello = make_jointoperations_client_hello(99);
+	const ClientHello hello = make_title_client_hello(kJo, 99);
 	const std::vector<uint8_t> hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 	const ClientAuth auth = make_retail_client_auth(
@@ -1020,6 +1030,7 @@ bool check_host_pool_overflow_disconnects_with_msgcre() {
 //  TeardownActiveConnection @0x62549e..0x6254d3]
 bool check_joiner_pool_overflow_disconnects_with_msgcre() {
 	inmatch::JoinerConnection joiner("OverflowJoiner");
+	joiner.set_title(&kJo);
 	seed_joiner(joiner);
 	std::vector<ProtocolMessage> retained(
 			JO_SESSION_OUTBOUND_MESSAGE_MAX - 1, make_protocol_message(0x60, {}));
@@ -1064,6 +1075,7 @@ bool check_joiner_pool_overflow_disconnects_with_msgcre() {
 bool check_server_goodbye_closes_the_joiner() {
 	const DisconnectEvent stop = make_disconnect_event(1, 9, 0, 0, "", 0, "NP.C:SH:STOP");
 	inmatch::JoinerConnection joiner("GoodbyeTarget");
+	joiner.set_title(&kJo);
 	seed_joiner(joiner);
 
 	const std::vector<uint8_t> wrong_key = nw_encode_outbound(
@@ -1105,6 +1117,7 @@ bool check_server_goodbye_closes_the_joiner() {
 
 	// The record's strings are capped at the latch (Napi_CopyString 128 / 32).
 	inmatch::JoinerConnection capped("CappedTarget");
+	capped.set_title(&kJo);
 	seed_joiner(capped);
 	const DisconnectEvent long_record = make_disconnect_event(1, 3, 120001, 120000,
 			std::string(200, 'x'), 0, std::string(40, 'y'));
@@ -1123,6 +1136,7 @@ bool check_server_goodbye_closes_the_joiner() {
 
 	// An empty TLV run after the key still disconnects, with a zero record (role 1).
 	inmatch::JoinerConnection zeros("ZeroRecordTarget");
+	zeros.set_title(&kJo);
 	seed_joiner(zeros);
 	const std::vector<uint8_t> bare = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_GOODBYE, u32_value(kClientKey));
@@ -1136,6 +1150,7 @@ bool check_server_goodbye_closes_the_joiner() {
 
 	// Before the accepted 0x82 there is no active connection to close.
 	inmatch::JoinerConnection early("HelloPhaseTarget");
+	early.set_title(&kJo);
 	(void)early.start();
 	const std::vector<uint8_t> premature = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_GOODBYE, server_goodbye_to_bytes(early.client_key(), stop));
@@ -1332,6 +1347,7 @@ bool check_join_deploy_idle_punt_uses_state6_elapsed_time() {
 			{make_protocol_message(
 					punt.tag, punt.body, punt.protocol_flags_raw)});
 	inmatch::JoinerConnection joiner("IdlePuntReceiver");
+	joiner.set_title(&kJo);
 	seed_joiner(joiner);
 	joiner.handle_datagram(wire.data(), wire.size());
 	return expect(joiner.session_lost() &&
@@ -1578,6 +1594,7 @@ bool reply_body(const inmatch::JoinerConnection::PollResult &result, uint8_t tag
 // @0x42AFB0, the 42 arm @0x42AFCC] (D-NET-181).
 bool check_crc_challenges_are_not_answered() {
 	inmatch::JoinerConnection joiner("ChallengeSilence");
+	joiner.set_title(&kJo);
 	seed_joiner(joiner);
 	SessionSequencing server_tx{1, 0};
 
@@ -1628,6 +1645,7 @@ bool check_crc_challenges_are_not_answered() {
 //  NapiNP_HandleServerJoinResponse @0x629840]
 bool check_join_rejection_retains_the_raw_reject_record() {
 	inmatch::JoinerConnection joiner("RejectedPlayer");
+	joiner.set_title(&kJo);
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
 	ClientHello client_hello;
@@ -1683,6 +1701,7 @@ bool check_join_rejection_retains_the_raw_reject_record() {
 // the NovaWorld server "THOR THUNDER" 2026-08-31.
 bool check_pv2_mismatch_reports_an_incompatible_version() {
 	inmatch::JoinerConnection joiner("VersionMismatch");
+	joiner.set_title(&kJo);
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
 	ClientHello client_hello;
@@ -1743,6 +1762,7 @@ inmatch::IntegritySources oracle_sources(uint32_t table_crc, int32_t named_rows,
 
 bool check_revx02_sources_answer_exact_crc_challenges() {
 	inmatch::JoinerConnection joiner("VerifiedChallenge");
+	joiner.set_title(&kJo);
 	joiner.set_integrity_sources(oracle_sources(integrity_oracle::kRevx02WeaponTableCrc, 140,
 			integrity_oracle::kRevx02AmmoRowCrcs, std::size(integrity_oracle::kRevx02AmmoRowCrcs)));
 	seed_joiner(joiner);
@@ -1877,6 +1897,7 @@ bool check_revx02_sources_answer_exact_crc_challenges() {
 // Row 0x18 is 0x6422E3A9; index 75 takes the zero-CRC arm.
 bool check_jox01_sources_answer_exact_crc_challenges() {
 	inmatch::JoinerConnection joiner("Jox01Challenge");
+	joiner.set_title(&kJo);
 	joiner.set_integrity_sources(oracle_sources(integrity_oracle::kJox01WeaponTableCrc, 95,
 			integrity_oracle::kJox01AmmoRowCrcs, std::size(integrity_oracle::kJox01AmmoRowCrcs)));
 	seed_joiner(joiner);

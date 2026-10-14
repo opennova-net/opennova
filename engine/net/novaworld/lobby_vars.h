@@ -37,7 +37,10 @@ struct HostLobbyText {
 // server state the Host list republishes; a field the hosting leg leaves alone keeps its default.
 struct HostRegistration {
 	// --- HostSetup [orig: CNapiGameSession_BuildHostVarLists @0x4d0b50, the +460 list] ---
-	std::string lobby_name = "jop_2_consumer"; // LobbyName (g_LobbyName)
+	// LobbyName (g_LobbyName): the gate response's LOBBYNAME, empty until a gate names one (the
+	// host leg refuses an empty one: connect_or_host.h). [orig: CNapiGateManager_ProcessResponse
+	//  @0x4ced20 (LOBBYNAME)]
+	std::string lobby_name;
 	std::string server_name = "OpenNova Host"; // ServerName
 	std::string server_message;               // Msg (serverMessage_560)
 	int max_players = 32;                     // MaxPlayers (HostSetup, the initial Host list)
@@ -53,6 +56,12 @@ struct HostRegistration {
 	std::string access_code_list;             // AccessCodeList
 	std::string expansion;                    // Exp (g_ExpansionName); PLoad is always empty
 	int lan_only = 0;                         // LAN (hostLanOnly_340)
+	// DFXCATEGORY1, a title's host lists' var after LAN (TitleIdentity::host_category_var, which
+	// NwuHostRole sets): the game.cfg `mpdfxcategory` word printed "%ld", on HostSetup and on the
+	// Host list alike. [orig: the twin of CNapiGameSession_BuildHostVarLists @0x4d0b50 at
+	//  @0x4d0ce0 (dfx2.exe) - HostSetup @0x4d0e8a..0x4d0eb1, Host @0x4d0faf..0x4d0fd5]
+	bool category_var = false;
+	int32_t category = 0;
 	// ReconnectCounter (session+0x500): the HostSetup list's last var. A fresh host request
 	// zeroes it; each re-host after an NWU reconnect counts one up.
 	// [orig: BuildHostVarLists @0x4d0b50 zeroes it @0x4d0b7b and appends it through
@@ -99,6 +108,10 @@ struct HostRegistration {
 	std::string language;                     // Lang (LOCALE_SENGLANGUAGE)
 	int tz_bias = 0;                          // TZB (TIME_ZONE_INFORMATION.Bias)
 	bool pb_server = false;                   // PBServer "1"/"0" (game_settings.reserved_D4)
+	// Ver1 / Ver2: the title's version pair (TitleIdentity::ver1 / ver2); NwuHostRole sets it from
+	// its session's title. [orig: Lobby_UpdateServerInfo @0x4ff3ea / @0x4ff3ff]
+	std::string ver1;
+	std::string ver2;
 	// game.cfg `sendplayerlist` (default 1) -> g_NWSendPlayerList: the POST status blob
 	// carries the " p=<name>" suffix at all. [orig: the config apply @0x54e2c4 region
 	//  (g_NWSendPlayerList = g_GameConfigState+0x4BC); Lobby_UpdateServerInfo @0x4ff560]

@@ -1182,6 +1182,8 @@ public:
 	// VERSIONCRCSTRING checksum (D-NET-166). Empty keeps the golden "0".
 	// Retained across runtime rebuilds like the character data.
 	void set_join_expansion_version_root(const String &p_game_root);
+	// C++ seam: the session's title, the mounted game's (simulation_net.cpp session_title).
+	void set_title(const opennova::TitleIdentity *p_title) { net_.title = p_title; }
 	// Load the process-scoped character-attribute table before the first join
 	// network pump. Missing/empty charattr.def is soft and leaves all rows inactive,
 	// matching Game_Run's continue-after-error behavior.

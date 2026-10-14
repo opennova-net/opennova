@@ -22,6 +22,8 @@
 // The decorator itself is pinned first: same seed, same schedule; delivery in (due, send) order.
 
 #include <runtime/inmatch/client_runtime.h>
+#include <base/gameprofile/gameprofile.h>
+#include <net/title/title_identity.h>
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_protocol.h>
@@ -48,6 +50,9 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 namespace {
 
@@ -260,6 +265,7 @@ bool run_soak(const SoakCase &soak) {
 	owner.ctx.world = &world;
 	owner.ctx.mission = &mission;
 	inmatch::HostConfig host_cfg;
+	host_cfg.title = &kJo;
 	host_cfg.config.server_name = "OpenNova Soak";
 	host_cfg.config.max_players = 16;
 	// A NovaWorld host's dictated period: one send boundary every 12 ticks of 16 ms (192 ms).
@@ -287,6 +293,7 @@ bool run_soak(const SoakCase &soak) {
 		j.sock = std::make_unique<ImpairedDatagramSocket>(std::move(end), c2s, clock);
 		const std::string name = "SoakJoiner" + std::to_string(i);
 		j.client = std::make_unique<inmatch::ClientRuntime>(name, clock);
+		j.client->set_title(&kJo);
 		j.up.carrier_handle = 0xFFFF;
 		j.up.pos_x = w::to_fixed(52.0 + i);
 		j.up.pos_y = w::to_fixed(61.0);

@@ -21,6 +21,8 @@
 //  MissionList_GetCurrentEntry @0x4FC540; CAdminServer_HandleSetCommand @0x405A60;
 //  CAdminServer_HandleChatCommand @0x404AC0; CAdminServer_HandlePlayer @0x403EF0]
 #include "server.h"
+#include <base/gameprofile/gameprofile.h>
+#include <net/title/title_identity.h>
 #include "serve_test_support.h"
 
 #include <formats/gamecfg/game_cfg.h>
@@ -39,6 +41,9 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 using namespace opennova;
 namespace fs = std::filesystem;
@@ -80,6 +85,7 @@ struct Rig {
 	Rig(serve::Server &s, uint16_t joiner_port) : server(s) {
 		server_ep = net::Endpoint{{127, 0, 0, 1}, server.bound_port()};
 		joiner_sock = net::ScopedSocket(net::udp_bind(joiner_port));
+		client.set_title(&kJo);
 	}
 	void ship(const std::vector<uint8_t> &d) {
 		if (!d.empty()) net::udp_send_to(joiner_sock.get(), server_ep, d.data(), d.size());

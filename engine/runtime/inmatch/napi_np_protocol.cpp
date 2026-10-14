@@ -13,6 +13,7 @@
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 #include <net/npwire/session_ping.h> // the shared 0x45/0x85 body codec
+#include <net/title/title_identity.h> // the protocol's installed identity
 
 #include <runtime/inmatch/session_transport.h> // ISessionTransport::host_send (loopback burst delivery)
 #include <runtime/inmatch/server_console.h>    // the /INOUT player lines
@@ -33,7 +34,6 @@
 #include <runtime/world/world.h>
 
 #include <algorithm>
-#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <iterator>
@@ -599,12 +599,15 @@ void handle_client_hello(NapiNPServerCtx &ctx, const PeerAddr &peer,
                          const std::vector<uint8_t> &body, HandleResult &out) {
 	ClientHello hello;
 	if (!parse_client_hello(body.data(), body.size(), hello)) return;
+	// A protocol with no identity installed answers nothing (NapiNPProtocol::identity).
+	const TitleIdentity *identity = ctx.np_protocol.identity;
+	if (identity == nullptr) return;
 	// A nonzero PM (a peer host's own announce) bypasses the NVS/PN/PG/PV1
-	// identity walk; only a PM-less probe is held to the JO identity.
+	// identity walk; only a PM-less probe is held to the host's title identity.
 	// [orig: NapiNPProtocol_HandleClientHello @0x6213B0 — `jnz loc_6218B6`
 	//  @0x6217C2 skips the validation, send @0x6218FC]
-	if (!client_hello_admits(hello)) {
-		return; // not the retail JO game identity (no node created)
+	if (!client_hello_admits(*identity, hello)) {
+		return; // not the host's game identity (no node created)
 	}
 	// The host must be up before it admits a join — Hello rejects while host_running == 0 (and only
 	// an authority accepts joins). This is P1's bring-up gate: create_session -> start_server sets
@@ -622,14 +625,14 @@ void handle_client_hello(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	//  @0x621792, passed to NapiNPProtocol_SendServerInfoPacket, which writes them
 	//  @0x620baa..0x620c0c]
 	ServerHello reply = build_server_hello(hello, peer.ip, peer.port);
-	// The host writes its OWN protocol identity, not the prober's: the JO identity the
+	// The host writes its OWN protocol identity, not the prober's: the title identity the
 	// network init installed, its PV3 build string included (D-NET-520), and UT, the
 	// uptime, whenever nonzero (D-NET-265). [orig: NapiNPProtocol_SendServerInfoPacket
 	//  @0x620583..0x62078a (CO/AP/BDAT/PN/PG/PV1/PV2/PV3 from the protocol, each gated, PV3
 	//  @0x620758..0x62078a); UT @0x62064f..0x620683; CNapiNetwork_Init @0x4ca4a0, PV3 into
 	//  proto+0x1AC @0x4ca8bb..0x4ca8c2]
 	{
-		const ClientHello self = make_jointoperations_client_hello(0);
+		const ClientHello self = make_title_client_hello(*identity, 0);
 		reply.co = self.co;
 		reply.ap = self.ap;
 		reply.bdat = self.bdat;
@@ -684,17 +687,21 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	ClientAuth auth;
 	if (!parse_client_auth(body.data(), body.size(), auth)) return;
 	if (!ctx.is_authority || ctx.np_protocol.host_running == 0) return;
+	const TitleIdentity *identity = ctx.np_protocol.identity;
+	if (identity == nullptr) return;
 	// Only the NVS/PN/PG/PV1 envelope is silent. The subsequent server-side
 	// gates answer a CR=0 ServerAuth, in this order, before retry/replacement.
 	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750, gates @0x62bdf2]
-	if (!matches_jointoperations_identity(auth)) return;
+	if (!matches_title_identity(*identity, auth)) return;
 	// The PW and PV2 compares are case-insensitive C-string compares
 	// [orig: Napi_StrCaseEqual @0x616e70].
 	uint32_t reject = 0;
 	if (auth.hk != ctx.np_protocol.host_key) reject = 3;
 	else if (!ctx.config.server_password.empty() &&
 	         !strutil::iequals(auth.pw, std::string_view(ctx.config.server_password.c_str()))) reject = 4;
-	else if (!strutil::iequals(auth.pv2, "16")) reject = 7;
+	// PV2 against the installed one. [orig: HandleClientJoin @0x62b750 - `proto+364 != PV2`
+	//  @0x62be40]
+	else if (!strutil::iequals(auth.pv2, identity->pv2)) reject = 7;
 	else if (auth.na.empty()) reject = 5;
 	else if (ctx.np_protocol.reject_new_connections) reject = 6;
 	if (reject != 0) {
@@ -796,15 +803,16 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// The joiner's display name: the GAME join's NA TLV is the player CALLSIGN — the retail
 	// client puts its company string in CO ("NovaLogic Inc, Calabasas CA U.S.A.") and the
 	// callsign in NA, and the golden host's 0x0C record name equals NA ("FooPlayer"). Only
-	// the witnessed NOVAWORLD-connect gate tags ("jop:cus2" retail / "jopd:cus4" demo — a
-	// "jop"-prefixed tag) fall back to CO / the Hello name: a callsign is free text and may
+	// the witnessed NOVAWORLD-connect gate tags, which begin with the title's product code
+	// ("jop:cus2" retail / "jopd:cus4" demo under JO's "jop", "dfx2:0:cus:buffy" under DFX2's
+	// "dfx2") and carry a ':', fall back to CO / the Hello name: a callsign is free text and may
 	// itself contain ':' — treating any colon as a gate tag stalled that joiner's 0x0C
 	// name-match (the host would name it the company string, never equal to its NA).
 	// [wire: retail-ashi5a f=199140 / retail_join_v18 f=47676; net-re §5.0b]
-	const bool na_is_gate_tag = auth.na.size() >= 4 &&
-			(std::tolower(static_cast<unsigned char>(auth.na[0])) == 'j') &&
-			(std::tolower(static_cast<unsigned char>(auth.na[1])) == 'o') &&
-			(std::tolower(static_cast<unsigned char>(auth.na[2])) == 'p') &&
+	const std::string_view product_code = identity->product_code;
+	const bool na_is_gate_tag = auth.na.size() > product_code.size() &&
+			strutil::iequals(std::string_view(auth.na).substr(0, product_code.size()),
+					product_code) &&
 			auth.na.find(':') != std::string::npos;
 	if (!auth.na.empty() && !na_is_gate_tag) {
 		conn.player_name = auth.na;

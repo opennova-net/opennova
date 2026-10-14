@@ -31,6 +31,9 @@ void set_transport_mode(NapiNPServerCtx &ctx, SocketMode socket);
 // host_key; GetTickCount -> host_start_tick; (GetTickCount + rand) % 900000 + 100000 ->
 // session_seed_id]
 struct SessionStartup {
+	// The title identity the host speaks (HostConfig::title), installed on the protocol by
+	// start_server (NapiNPProtocol::identity).
+	const TitleIdentity *title = nullptr;
 	uint32_t host_key = 0;
 	uint32_t host_start_tick = 0;
 	uint32_t session_seed_id = 0;

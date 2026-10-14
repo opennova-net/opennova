@@ -9,17 +9,21 @@
 
 #include <runtime/inmatch/session_transport.h>
 
+#include <base/gameprofile/gameprofile.h>
+#include <net/title/title_identity.h>
+
 namespace opennova::inmatch::test {
 
-// Bring a listen/dedicated host fully up. `host_key` is seeded onto the host (and advertised in
-// ServerHello.hk / checked against ClientAuth.hk); `local_client`, when non-null with HostClient,
-// registers the host's own type-2 loopback connection.
+// Bring a listen/dedicated host fully up, speaking JO's title identity. `host_key` is seeded onto
+// the host (and advertised in ServerHello.hk / checked against ClientAuth.hk); `local_client`, when
+// non-null with HostClient, registers the host's own type-2 loopback connection.
 inline void bring_up_host(NapiNPServerCtx &ctx, ConnectionMode mode, SocketMode socket,
                           uint32_t host_key, replication::ISessionTransport *local_client,
                           const GameConfig &config) {
 	set_connection_mode(ctx, mode);
 	set_transport_mode(ctx, socket);
 	SessionStartup startup;
+	startup.title = title_identity(gameprofile::GAME_JO);
 	startup.host_key = host_key;
 	create_session(ctx, config, startup, local_client); // P1: is_in_session=1, host_running=1
 	// start_host_session installs the host's own per-side character selection on the

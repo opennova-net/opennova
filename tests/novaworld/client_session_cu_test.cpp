@@ -15,6 +15,8 @@
 // apps/novaworld_server makes). No sockets.
 
 #include <net/novaworld/client_session.h>
+#include <net/title/title_identity.h>
+#include <base/gameprofile/gameprofile.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 
@@ -25,6 +27,9 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 using namespace opennova;
 
@@ -87,6 +92,7 @@ struct ExpectedCu {
 int main() {
 	// ---- 1. make_novaworld_join_cu builds the retail set ------------------
 	NovaWorldJoinCu in;
+	in.build_date_and_time = "Jul 21 2009 18:54:41"; // JO's lobby BDAT (TitleIdentity::lobby_bdat)
 	in.gate_tag = "jop:cus2";
 	in.met_tag = "metlabel-xyz";
 	in.udp_code1 = "1234567890";
@@ -120,7 +126,7 @@ int main() {
 	}
 
 	// ---- 2. ClientSession EMITS them in its generated ClientAuth (0x42) ----
-	ClientSession::Config cfg;
+	ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	cfg.client_index = 0x11223344u;
 	cfg.client_key = 0x55667788u;
 	cfg.cu_vars = cu;
