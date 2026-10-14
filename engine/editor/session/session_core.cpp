@@ -1665,7 +1665,7 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 	BuildPlan plan = plan_build(paths_, *view_.project.scan, *view_.project.requirements, gate, build_target(), &base,
 	                            &shipped);
 	plan.rehash = rehash;
-	// The build is this project's: in a folder several projects build into (Build to folder), it reuses, prunes
+	// The build is this project's: in a folder several projects build into (a build request's out_dir), it reuses, prunes
 	// and replaces only its own. Inside the project (its default folder, its cache, its export folder) every
 	// build there is its own.
 	plan.project = view_.project.document->project_id;

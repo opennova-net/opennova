@@ -10,7 +10,7 @@ namespace opennova::editor {
 
 // What the last build came to, in a modder's words (the UX round's problems lane): the build panel's
 // model, which the panel draws, Output's line says in short and the tests read. A build that landed: how long it took, where (the
-// project's own build folder, or the folder Build to folder chose, with a line on how a player installs
+// project's own build folder, or the folder a build request's out_dir named, with a line on how a player installs
 // what it holds), and each file it published with its size (an archive with how many files it packs,
 // written or kept from the last build); one that changed nothing says so; one refused names what refuses
 // it (the gate's refusals, each with why); one that failed on the way says why.
@@ -31,7 +31,7 @@ struct BuildResult {
 };
 
 // The result of `report`; `in_project` whether it landed under the project's own build folder (Build), or
-// in a folder of the modder's choosing (Build to folder).
+// in a folder a build request names (its out_dir).
 BuildResult build_result(const BuildReport &report, bool in_project);
 // A build that landed in one line for Output: "Built in 37 s: resource.pff 220.4 MB, localres.pff 3.1 MB,
 // language.pff 12.0 KB and 1 loose file, in <where>."

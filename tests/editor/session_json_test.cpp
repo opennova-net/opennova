@@ -976,7 +976,7 @@ static int test_request_table_samples() {
 }
 
 // apply_project_settings (S11d): the one request the project settings take, its settings
-// each optional (one left out is not set), read strictly (a play_mode is runtime, install or strict; the
+// each optional (one left out is not set), read strictly (a play_mode is runtime or strict; the
 // editor-wide play_in_install and play_in_install_strict name nothing since Play's settings are each
 // project's); the five requests it replaced are no tokens. play takes its own play_mode and
 // save_before_play, for itself alone, read as strictly. Over a session, the dialogs section says what the last one could not write and its

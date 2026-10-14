@@ -19,7 +19,7 @@ namespace opennova::editor {
 
 namespace {
 
-// A Play mode's directory under the run root names it (kRunMode*): one of the three, never a path.
+// A Play mode's directory under the run root names it (kRunMode*): runtime or strict, never a path.
 bool run_mode_known(const std::string &mode) {
 	return mode == kRunModeRuntime || mode == kRunModeStrict;
 }

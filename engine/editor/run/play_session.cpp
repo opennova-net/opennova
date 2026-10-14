@@ -11,8 +11,11 @@ bool PlaySession::start(const LaunchPlan &plan, Diagnostic &error) {
 	std::string why;
 	const int64_t pid = platform_.spawn(plan, why);
 	if (pid < 0) {
-		error = make_finding(CoreFinding::PlaySpawn, DiagnosticSeverity::Error,
-		                     "The game could not be started: " + plan.executable + (why.empty() ? "" : " (" + why + ")"));
+		// The program named once: the platform's reason names it where it says it could not start it.
+		const std::string said = why.empty()                                       ? plan.executable
+		                         : why.find(plan.executable) != std::string::npos ? why
+		                                                                          : plan.executable + " (" + why + ")";
+		error = make_finding(CoreFinding::PlaySpawn, DiagnosticSeverity::Error, "The game could not be started: " + said);
 		return false;
 	}
 	pid_ = pid;

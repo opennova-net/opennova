@@ -109,23 +109,26 @@ struct ExportRun::Streams {
 // this project's export, so the next export removes it first instead of refusing it as the person's.
 bool remove_tree(const std::string &dir, std::string &reason) {
 	const fs::path root = system_path(dir);
-	std::error_code ec, left;
+	std::error_code walked, failed, left;
 	if (!fs::exists(root, left)) return true;
-	for (const fs::directory_entry &entry : fs::directory_iterator(root, ec)) {
-		if (entry.path().filename() == kExportRecordFileName) continue;
+	// Walked with increment(error_code): a range-for's operator++ throws where the walk fails.
+	for (fs::directory_iterator it(root, walked), end; !walked && it != end; it.increment(walked)) {
+		if (it->path().filename() == kExportRecordFileName) continue;
 		std::error_code removed;
-		fs::remove_all(entry.path(), removed);
-		if (removed && !ec) ec = removed;
+		fs::remove_all(it->path(), removed);
+		if (removed && !failed) failed = removed;
 	}
 	bool stayed = false;
-	for (const fs::directory_entry &entry : fs::directory_iterator(root, left))
-		stayed = stayed || entry.path().filename() != kExportRecordFileName;
-	if (!stayed) {
+	std::error_code listed;
+	for (fs::directory_iterator it(root, listed), end; !listed && it != end; it.increment(listed))
+		stayed = stayed || it->path().filename() != kExportRecordFileName;
+	if (!stayed && !listed) {
 		fs::remove(root / kExportRecordFileName, left);
 		fs::remove(root, left);
 		if (!fs::exists(root, left)) return true;
 	}
-	reason = ec ? ec.message() : std::string("a file of it is in use");
+	const std::error_code &why = failed ? failed : walked ? walked : listed;
+	reason = why ? why.message() : std::string("a file of it is in use");
 	return false;
 }
 

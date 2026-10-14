@@ -40,7 +40,7 @@ namespace opennova::editor {
 // directory), its proof last: the output root may be any folder the user chose, as deep as it is
 // (every call to the system takes a path through system_path, project/project_files.h). A build is
 // its project's (BuildPlan::project, in its record and its staging marker): where several projects
-// build into one folder (Build to folder), a build reuses, prunes and replaces only its own
+// build into one folder (a build request's out_dir), a build reuses, prunes and replaces only its own
 // project's, and says how many of the others' it left (BuildReport::others).
 // 2: each archive's record carries its size beside its hash (1 kept the hash alone).
 // 3: the record names its project.

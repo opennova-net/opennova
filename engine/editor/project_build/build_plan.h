@@ -79,7 +79,7 @@ struct BuildPlan {
 	// request's `rehash`, the command line's --rehash).
 	bool rehash = false;
 	// The project's id (ProjectDocument::project_id), which its build record names: a build reuses, prunes
-	// and replaces only its own project's builds where several share a folder (Build to folder).
+	// and replaces only its own project's builds where several share a folder (a build request's out_dir).
 	std::string project;
 	// The folder is the project's own (its default build folder, under its cache): a build recorded before
 	// records named their project is taken for its own there, and for another project's anywhere else.
