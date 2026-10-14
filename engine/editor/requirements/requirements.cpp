@@ -22,9 +22,7 @@ bool requirement_phase_enabled(const ProjectDocument &doc, int phase) {
 }
 
 bool requirement_multiplayer_only(const std::string &role) {
-	for (const char *only : { "mp_menu", "gamemus_sbf", "gamemus_bin", "expansion_gamemus_sbf", "expansion_gamemus_bin" })
-		if (role == only) return true;
-	return false;
+	return role == "mp_menu";
 }
 
 namespace {

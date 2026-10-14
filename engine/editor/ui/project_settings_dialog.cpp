@@ -125,8 +125,8 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 	if (ImGui::Checkbox("Multiplayer", &multiplayer)) set("multiplayer", io::JsonValue::make_bool(multiplayer));
 	// What it does, in the game's terms: the files the game reads for multiplayer alone join the checklist
 	// (requirement_multiplayer_only).
-	ui_kit::tooltip("The game then needs the files it reads for multiplayer alone: the NovaWorld screens (mp.mnu) and, "
-	                "with Missions, the multiplayer missions' music. Problems lists the missing ones.");
+	ui_kit::tooltip("The game then needs the files it reads for multiplayer alone: the NovaWorld screens (mp.mnu). "
+	                "Problems lists the missing ones.");
 	ImGui::SeparatorText("Expansion");
 	ExpansionChoice choice{ held.builds_on, held.as_expansion, held.expansion, held.base_project };
 	bool changed = false;
