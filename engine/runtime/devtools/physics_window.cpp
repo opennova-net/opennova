@@ -1,13 +1,11 @@
 #include <runtime/devtools/physics_window.h>
 
+#include <runtime/devtools/capture_table.h>
 #include <runtime/devtools/ui_kit.h>
 
 #include <imgui.h>
 
-#include <cstdio>
-
 namespace opennova::devtools {
-
 
 void PhysicsWindow::on_visibility(bool visible) {
 	if (!visible) {
@@ -32,12 +30,7 @@ void PhysicsWindow::format_rows() {
 		return;
 	}
 	for (int i = 0; i < kContactKindCount; ++i) {
-		const PhysicsKindCount &c = snapshot_.kinds[static_cast<size_t>(i)];
-		char buf[96];
-		std::snprintf(buf, sizeof(buf), "%s: held %d / total %llu",
-				c.name != nullptr ? c.name : "?", c.held,
-				static_cast<unsigned long long>(c.total));
-		rows_[static_cast<size_t>(i)] = buf;
+		rows_[static_cast<size_t>(i)] = capture_row_text(snapshot_.kinds[static_cast<size_t>(i)]);
 	}
 }
 
@@ -63,15 +56,15 @@ bool PhysicsWindow::take_request(PhysicsRequest &request) {
 
 void PhysicsWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 	(void)frame_index;
+	ui_kit::WrapRow layers;
 	bool contacts_on = contacts_layer_.enabled();
-	if (ImGui::Checkbox("Show contacts in Game view", &contacts_on)) {
+	if (ui_kit::check(layers, "Show contacts in Game view", &contacts_on, contacts_layer_.tooltip())) {
 		pass.set_overlay_enabled(contacts_layer_, contacts_on);
 	}
-	if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) ImGui::SetTooltip("%s", contacts_layer_.tooltip());
-	ImGui::SameLine();
 	bool hitboxes_on = hitbox_layer_.enabled();
-	if (ImGui::Checkbox("Show hit meshes", &hitboxes_on)) pass.set_overlay_enabled(hitbox_layer_, hitboxes_on);
-	if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) ImGui::SetTooltip("%s", hitbox_layer_.tooltip());
+	if (ui_kit::check(layers, "Show hit meshes", &hitboxes_on, hitbox_layer_.tooltip())) {
+		pass.set_overlay_enabled(hitbox_layer_, hitboxes_on);
+	}
 	if (hitbox_record_.valid) {
 		size_t faces = 0;
 		int64_t authored = 0;
@@ -88,59 +81,21 @@ void PhysicsWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 		return;
 	}
 
-	ImGui::TextUnformatted(snapshot_.capturing ? "Capturing hits" : "Capture idle");
-	if (ImGui::IsItemHovered()) {
-		ImGui::SetTooltip("The contact capture records while this window shows.");
-	}
-	ImGui::SameLine();
-	if (ImGui::Button("Clear")) {
+	ui_kit::WrapRow capture;
+	const char *state = snapshot_.capturing ? "Capturing hits" : "Capture idle";
+	capture.next(ui_kit::text_width(state));
+	ImGui::TextUnformatted(state);
+	ui_kit::tooltip("The contact capture records while this window shows.");
+	if (ui_kit::tool(capture, "Clear", true, "Drop the captured contacts.")) {
 		enqueue_request({PhysicsRequest::Kind::Clear, 0});
 	}
 	ImGui::Text("logic tick %llu (%.2f s readings)",
 			static_cast<unsigned long long>(snapshot_.logic_tick), kRefreshSeconds);
 	ImGui::Text("recent hits %d (inside the TTL window)", snapshot_.recent);
 
-	if (ImGui::SmallButton("All")) {
-		mask_edit_ = kContactKindMaskAll;
-		enqueue_request({PhysicsRequest::Kind::SetKindMask,
-				static_cast<int32_t>(mask_edit_)});
-	}
-	ImGui::SameLine();
-	if (ImGui::SmallButton("None")) {
-		mask_edit_ = 0;
-		enqueue_request({PhysicsRequest::Kind::SetKindMask, 0});
-	}
-
-	if (ImGui::BeginTable("contact_kinds", 2,
-				ImGuiTableFlags_SizingStretchProp)) {
-		const ImVec2 swatch_size(ImGui::GetFrameHeight(), ImGui::GetFrameHeight());
-		for (int i = 0; i < kContactKindCount; ++i) {
-			ImGui::TableNextRow();
-			ImGui::TableNextColumn();
-			ImGui::PushID(i);
-			bool on = (mask_edit_ & (1u << i)) != 0;
-			if (ImGui::Checkbox("##draw", &on)) {
-				mask_edit_ = on ? (mask_edit_ | (1u << i))
-								: (mask_edit_ & ~(1u << i));
-				enqueue_request({PhysicsRequest::Kind::SetKindMask,
-						static_cast<int32_t>(mask_edit_)});
-			}
-			ImGui::SameLine();
-			ImGui::ColorButton("##swatch",
-					ImVec4(kContactKindColors[i][0], kContactKindColors[i][1],
-							kContactKindColors[i][2], 1.0f),
-					ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoPicker,
-					swatch_size);
-			ImGui::SameLine();
-			ImGui::TextUnformatted(snapshot_.kinds[static_cast<size_t>(i)].name);
-			ImGui::TableNextColumn();
-			ImGui::Text("held %d / total %llu",
-					snapshot_.kinds[static_cast<size_t>(i)].held,
-					static_cast<unsigned long long>(
-							snapshot_.kinds[static_cast<size_t>(i)].total));
-			ImGui::PopID();
-		}
-		ImGui::EndTable();
+	if (capture_mask_table("contact_kinds", mask_edit_, kContactKindMaskAll, snapshot_.kinds,
+				kContactKindColors, kContactKindCount)) {
+		enqueue_request({PhysicsRequest::Kind::SetKindMask, static_cast<int32_t>(mask_edit_)});
 	}
 }
 

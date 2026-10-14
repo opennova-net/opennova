@@ -6,6 +6,8 @@
 // unloaded).
 #pragma once
 
+#include <runtime/devtools/capture_table.h>
+
 #include <cstdint>
 
 namespace opennova::devtools {
@@ -29,19 +31,13 @@ inline constexpr float kContactKindColors[kContactKindCount][3] = {
 	{0.3f, 0.9f, 1.0f},   // Water hit
 };
 
-struct PhysicsKindCount {
-	const char *name = "";
-	int32_t held = 0;    // events currently in the ring (<= the ring cap)
-	uint64_t total = 0;  // lifetime recorded — overwrite never hides throughput
-};
-
 struct PhysicsSnapshot {
 	bool valid = false;
 	uint64_t logic_tick = 0;
 	bool capturing = false;   // CollisionWorld contact capture armed
 	uint32_t kind_mask = kContactKindMaskAll; // bit i = draw kind i
 	int32_t recent = 0;        // ring events inside the contact-debug TTL
-	PhysicsKindCount kinds[kContactKindCount];
+	CaptureCount kinds[kContactKindCount];
 };
 
 }  // namespace opennova::devtools
