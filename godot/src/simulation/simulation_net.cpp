@@ -18,6 +18,7 @@
 #include <cstring>
 
 #include <runtime/inmatch/server_admin_command.h> // Server_ExecuteServerCommand (the NovaWorld ServerCommand verbs)
+#include <runtime/inmatch/server_info.h> // Server_ToggleJoinLock (the lockgame action)
 #include <runtime/inmatch/server_spawn.h> // Server_SetPlayerSpectator
 #include <runtime/inmatch/session_status.h>
 #include <formats/threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
@@ -73,11 +74,20 @@ opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type)
 		cfg.config = inmatch::singleplayer_game_config(p_game_type,
 				player_.profile_record_set ? &player_.profile_record : nullptr);
 	}
-	// Every session create reads the process's cfg block word, single player's
+	// Every session create reads the process's cfg block words, single player's
 	// and a host's alike (engine: inmatch/game_config_block.h; the create's
-	// ProcessExit, inmatch/server_session.h).
-	if (net_.game_config.is_valid())
-		cfg.config.multiplayer_reset = net_.game_config->native().cfg().mp_reset;
+	// ProcessExit, inmatch/server_session.h): mpreset, and the lineup queue the
+	// 0x42 gate admits past the cap (GameConfig::join_capacity; the session
+	// create's copy, CNapiGameSession_BuildAndCreateSession @0x569626..0x569646).
+	if (net_.game_config.is_valid()) {
+		const opennova::gamecfg::GameCfg &block = net_.game_config->native().cfg();
+		cfg.config.multiplayer_reset = block.mp_reset;
+		cfg.config.use_lineup_queue = block.mp_use_lineup_queue;
+		cfg.config.lineup_queue_size = block.mp_lineup_queue_size;
+		// The join validator reads the block's duplicate-PCID word live
+		// (Server_ValidatePlayerJoinRequest @0x512771).
+		cfg.config.punt_duplicate_pcids = block.mp_host_punt_same_pcids;
+	}
 	cfg.socket_mode = is_host_listening() ? inmatch::SocketMode::Lan : inmatch::SocketMode::Socketless;
 	cfg.serve_and_play = is_host_listening() ? net_.host_serve_and_play : true;
 	cfg.network_type = is_host_listening() ? net_.host_network_type : inmatch::NetworkType::Lan;
@@ -341,8 +351,10 @@ std::vector<Simulation::HostPeerSlot> Simulation::host_peer_slots() const {
 		if (c.phase < opennova::inmatch::ConnectionPhase::PlayerAdded) continue;
 		HostPeerSlot s;
 		s.slot = c.reply.player_slot;
+		s.connection_id = c.connection_id;
 		s.own = c.type == opennova::inmatch::NapiNPConnection::kTypeClientSide;
-		s.player_name = opennova::to_gd(c.player_name);
+		// The roster's name is the joiner's NA bytes, the page's (D-NET-661).
+		s.player_name = opennova::cp1252_to_gd(c.player_name);
 		s.ip_and_port = opennova::to_gd(opennova::peer_addr_to_string(c.peer));
 		s.pcid = opennova::to_gd(c.account.pcid);
 		s.team = String::num_int64(c.player_list_team);
@@ -370,17 +382,13 @@ Simulation::ServerCommandResult Simulation::execute_server_command(const String 
 	out.handled = outcome.handled;
 	out.stop_hosting = outcome.stop_hosting;
 	out.config_changed = outcome.config_changed;
-	if (ctx == nullptr)
-		return out;
-	out.has_config = true;
-	if (outcome.config_changed) {
-		// The sim's host session record is what the next session build reads.
+	if (ctx != nullptr && outcome.config_changed) {
+		// The sim's host session record is what the next session build reads; the NovaWorld
+		// listing reads the live context's (inmatch::read_session_listing_columns).
 		net_.host_session_config.server_name = ctx->config.server_name;
 		net_.host_session_config.custom_text = ctx->config.custom_text;
 		net_.host_session_config.multiplayer_reset = ctx->config.multiplayer_reset;
 	}
-	out.server_name = opennova::to_gd(ctx->config.server_name);
-	out.server_message = opennova::to_gd(ctx->config.custom_text);
 	return out;
 }
 
@@ -406,6 +414,16 @@ bool Simulation::apply_player_enter_result(uint32_t p_connection_id, bool p_succ
 	if (ctx == nullptr) return false;
 	return opennova::inmatch::Server_ApplyPlayerEnterResult(*ctx, p_connection_id, p_success,
 			p_msg_code);
+}
+
+// The lockgame action at the authority (HudToggles' EVENT_JOIN_LOCK_TOGGLED, in a session on the
+// authority): the join lock flips and a hosting NovaWorld session's server-info update runs at once
+// through the context's hook (SessionDrive::bind_nw_host).
+int Simulation::toggle_join_lock() {
+	opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
+	if (ctx == nullptr)
+		return -1;
+	return opennova::inmatch::Server_ToggleJoinLock(*ctx) ? 1 : 0;
 }
 
 void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options) {
@@ -563,7 +581,10 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	joiner_role_->set_socket(net_.pump_socket.get(), net_.pump->dialed_host());
 	// Build the Joiner runtime now so get_joiner_phase reads Idle before the first load (the contract
 	// the legacy joiner_session_ held); the role retains the request for a load that rebuilds it.
-	runtime_ = &joiner_role_->create_runtime(opennova::to_std(p_player_name),
+	// The callsign goes out as the profile name's code-page bytes, the NA TLV and the host's
+	// roster carrying them (engine: inmatch/joiner_role.h create_runtime; D-NET-661).
+	runtime_ = &joiner_role_->create_runtime(
+			opennova::utf8_to_retail_text(opennova::to_std(p_player_name)),
 			p_join_role == static_cast<int>(opennova::inmatch::JoinRole::Spectator)
 					? opennova::inmatch::JoinRole::Spectator
 					: opennova::inmatch::JoinRole::Player,

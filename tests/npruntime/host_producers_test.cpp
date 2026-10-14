@@ -498,6 +498,25 @@ bool check_vehicle_spawn_availability() {
 			"a team without slots is refused");
 }
 
+// D-NET-699: the S2C 0x79 boundary kicks a connection the join validator flagged for a
+// duplicate PCID; a tick off the boundary kicks no one.
+// [orig: Server_TickUpdate - the 0x79 countdown @0x51E1B2..0x51E1C5, the send @0x51E202,
+//  CNapiServer_DisconnectPendingSpawnBans @0x51E20C]
+bool check_duplicate_pcid_kick_at_the_quality_boundary() {
+	HostFixture f(2);
+	f.conn(0).account.pcid = "P-DUP-0001";
+	f.conn(0).duplicate_pcid_kick_pending = true;
+	inmatch::Server_TickUpdate(f.ctx); // the countdown at 1000: no boundary
+	if (!expect(!f.conn(0).pending_disconnect, "off the 0x79 boundary no one is kicked"))
+		return false;
+	f.ctx.network_quality_broadcast_countdown = 0;
+	inmatch::Server_TickUpdate(f.ctx);
+	return expect(f.conn(0).pending_disconnect && f.conn(0).disconnect_event_valid &&
+					f.conn(0).disconnect_event.dstr == "N.C:SPTWNTBP[P-DUP-0001]" &&
+					!f.conn(1).pending_disconnect,
+			"the 0x79 boundary kicks the flagged connection");
+}
+
 bool check_spectator_respawn_request() {
 	HostFixture f(2);
 	// Gates: permanent death and a spectator capacity.
@@ -1507,6 +1526,7 @@ bool check_player_enter_hook() {
 		inmatch::NapiNPConnection conn = conn_fixture::make_conn(
 				id, 1, &t, ns::TransportMode::Client, w::EntityHandle{}, false);
 		conn.phase = inmatch::ConnectionPhase::Joined;
+		conn.join_ticket_validation = true; // its 0x01 entered state 3
 		conn.peer = PeerAddr{0x0100007Fu, port};
 		conn.join_validated_host_ms = 0;
 		conn.join_identity_pairs = {{"PCID", "42"}, {"PUBJOINTICKET", "T-" + std::to_string(id)}};
@@ -1569,7 +1589,20 @@ bool check_player_enter_hook() {
 		return false;
 	f.ctx.np_protocol.host_run_duration_ms += 0x1D4C1u;
 	inmatch::Server_CheckPlayerTimeouts(f.ctx);
-	return expect(conn_by_id(23).host_disconnect_sent, "the unarmed validation deadline reaps");
+	if (!expect(conn_by_id(23).host_disconnect_sent, "the unarmed validation deadline reaps"))
+		return false;
+	// A joiner whose 0x01 entered state 6 (no ticket gate) is never visited, however long it
+	// waits [orig: the 0x01 @0x512FAF..0x512FB3; the watchdog's states 3 / 4 @0x4C8B7C, @0x4C8BD4].
+	ns::UdpSessionTransport t_e(ns::UdpSessionTransport::Role::Host);
+	joined(24, t_e, 4004);
+	conn_by_id(24).join_ticket_validation = false;
+	conn_by_id(24).join_validated_host_ms = 0;
+	f.ctx.novaworld_join_tickets_armed = true;
+	f.ctx.np_protocol.host_run_duration_ms += 0x1D4C1u;
+	inmatch::Server_CheckPlayerTimeouts(f.ctx);
+	return expect(!conn_by_id(24).host_disconnect_sent && !conn_by_id(24).player_enter_requested &&
+	                      requests.size() == 3,
+	        "a state-6 joiner is neither announced nor reaped");
 }
 
 // --------------------------------------------------------------------------
@@ -1945,6 +1978,7 @@ int main() {
 	ok = check_chat_routing() && ok;
 	ok = check_loaded_model_reply_stamp() && ok;
 	ok = check_vehicle_spawn_availability() && ok;
+	ok = check_duplicate_pcid_kick_at_the_quality_boundary() && ok;
 	ok = check_spectator_respawn_request() && ok;
 	ok = check_spectator_convert_deploys() && ok;
 	ok = check_spectator_convert_humans_count() && ok;

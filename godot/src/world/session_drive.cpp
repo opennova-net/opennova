@@ -11,8 +11,11 @@
 #include <net/npwire/peer_addr.h>
 #include <runtime/inmatch/host_config.h> // run_host_server_command
 #include <runtime/inmatch/mission_exit.h> // the post-mission router
+#include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/server_info.h> // read_session_listing_columns (the listing's columns)
 #include "object/avatar_database.h"
 #include "resource_index/launch_flags.h"
+#include "rtxt/rtxt_string_file.h" // game_text_lookup (the listing's GateTypeAbbrev text)
 #include "util/string_convert.h"
 #include "world/game_world.h"
 #include "world/loading_screen_info.h"
@@ -615,15 +618,15 @@ void SessionDrive::observe_tick(MissionRoot *p_runtime) {
 		return;
 	}
 	// A hosting NovaWorld session follows the hosted match: one PlayerList slot
-	// per admitted player, the live round clock the TimeLeft column reads at
-	// every refresh, the session's GSID as the in-match host's 0x81 SUS1
+	// per admitted player, the session's GSID as the in-match host's 0x81 SUS1
 	// (cleared when its connection tears down, re-supplied by a re-host), and
-	// the cookie-key ring as it advances.
+	// the cookie-key ring as it advances. The listing's columns, the round
+	// clock's TimeLeft among them, are read off the match at each update (the
+	// column source bind_nw_host installs).
 	NovaWorldClient *client = nw_client();
 	if (client != nullptr && nw_host_bound_ && !sim->is_joiner()) {
 		opennova::NwuHostRole &host = client->host_role();
 		sync_nw_host_roster(host, sim);
-		host.set_round_time_remaining_ticks(sim->round_time_remaining_ticks());
 		sim->set_novaworld_registration(opennova::cp1252_to_gd(host.gsid()), host.app_id(), host.cookie_keys(),
 				opennova::to_gd(client->get_login_pcid()));
 	}
@@ -673,7 +676,8 @@ void SessionDrive::sync_nw_host_roster(opennova::NwuHostRole &p_host, const Ref<
 			self_listed = true;
 		} else {
 			player.slot = slot.slot;
-			player.player_name = opennova::to_std(slot.player_name);
+			player.connection_id = slot.connection_id;
+			player.player_name = opennova::utf8_to_retail_text(opennova::to_std(slot.player_name));
 			player.ip_and_port = opennova::to_std(slot.ip_and_port);
 			player.pcid = opennova::to_std(slot.pcid);
 		}
@@ -804,6 +808,42 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 	}
 	opennova::NwuHostRole &host = client->host_role();
 	nw_host_bound_ = true;
+	// From here the listing's columns follow the match: each server-info update reads them off
+	// the live session (the name and message, the game type, the mission, the caps, the join
+	// lock, the rules, the round clock; D-NET-373), as retail's reads its globals at each run.
+	// The source resolves the world and the session node by identity on every call, and a call
+	// with no match (a map change's load) leaves the last live read standing; unbind_nw_host()
+	// clears it. [orig: Lobby_UpdateServerInfo @0x4FE8C0]
+	const ObjectID world_id = ObjectID(world_->get_instance_id());
+	const ObjectID columns_client_id = nw_client_id_;
+	host.set_column_source([world_id, columns_client_id](opennova::HostRegistration &r) {
+		GameWorld *live_world = Object::cast_to<GameWorld>(ObjectDB::get_instance(world_id));
+		NovaWorldClient *live_client =
+				Object::cast_to<NovaWorldClient>(ObjectDB::get_instance(columns_client_id));
+		const Ref<Simulation> live_sim =
+				live_world != nullptr ? live_world->get_sim() : Ref<Simulation>();
+		const opennova::inmatch::NapiNPServerCtx *ctx =
+				live_sim.is_valid() ? live_sim->host_ctx() : nullptr;
+		// A map change's load holds no sim (the kept session waits for the next runtime): the
+		// last live read stands.
+		if (ctx == nullptr)
+			return false;
+		opennova::inmatch::read_session_listing_columns(r, *ctx,
+				game_text_lookup(live_client != nullptr ? live_client->get_gametext()
+														: Ref<RtxtStringFile>()));
+		return true;
+	});
+	// The join lock's toggle runs the server-info update at once (D-NET-659), through the hosting
+	// session's role; the hook resolves the session node by identity on every call.
+	// [orig: Server_ToggleJoinLock @0x50D750 -> Lobby_UpdateServerInfo(0) @0x50D762]
+	if (opennova::inmatch::NapiNPServerCtx *ctx = sim->host_ctx()) {
+		ctx->on_update_server_info = [columns_client_id]() {
+			NovaWorldClient *live =
+					Object::cast_to<NovaWorldClient>(ObjectDB::get_instance(columns_client_id));
+			if (live != nullptr)
+				live->host_role().update_server_info();
+		};
+	}
 	const std::string login_pcid = client->get_login_pcid();
 	sim->set_novaworld_registration(opennova::cp1252_to_gd(host.gsid()), host.app_id(), host.cookie_keys(),
 			opennova::to_gd(login_pcid));
@@ -829,7 +869,9 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 			p_opts->get_host_session()->get_serve_and_play()) {
 		opennova::HostPlayerSlot self;
 		self.slot = 0;
-		self.player_name = opennova::to_std(p_opts->get_player_name());
+		// The host's own name as its roster carries it, the page's bytes (D-NET-661).
+		self.player_name =
+				opennova::utf8_to_retail_text(opennova::to_std(p_opts->get_player_name()));
 		self.ip_and_port = opennova::peer_addr_to_string(opennova::PeerAddr{});
 		self.pcid = login_pcid; // the host's own player's PCID is its login cookie
 		// Its PlayerTeam / PlayerType are the match's, as for any added player.
@@ -846,9 +888,8 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 	}
 	// The mission start's update, at every mission start of a hosting session, map changes
 	// included (NwuHostRole::publish_mission_start, which carries Game_StartMission's cite):
-	// both lists whole. A fresh host's first full Host list, its HostKey included, is this one,
-	// since its host result publishes nothing (D-NET-465); the columns still hold the host
-	// request's (D-NET-373).
+	// both lists whole, the columns the started mission's. A fresh host's first full Host list,
+	// its HostKey included, is this one, since its host result publishes nothing (D-NET-465).
 	host.publish_mission_start();
 }
 
@@ -859,10 +900,15 @@ void SessionDrive::unbind_nw_host() {
 	nw_host_bound_ = false;
 	nw_self_slot_ = opennova::HostPlayerSlot{};
 	nw_self_slot_set_ = false;
+	// The listing's columns stop following a match the session is leaving.
+	if (NovaWorldClient *client = nw_client())
+		client->host_role().set_column_source(nullptr);
 	// The in-match host stops advertising the GSID and stops announcing joiners
 	// to a session it is leaving.
 	Ref<Simulation> sim = world_->get_sim();
 	if (sim.is_valid()) {
+		if (opennova::inmatch::NapiNPServerCtx *ctx = sim->host_ctx())
+			ctx->on_update_server_info = nullptr;
 		sim->set_novaworld_join_tickets(false, Simulation::PlayerEnterRequestHook());
 		sim->set_novaworld_registration(String(), 0, opennova::SessionIdRing{}, String());
 	}
@@ -913,11 +959,7 @@ void SessionDrive::on_nw_host_server_command(const String &p_verb, const String 
 		}
 		return;
 	}
-	if (result.config_changed && client != nullptr && result.has_config) {
-		// The changed columns ride the session's next refresh as its dirty delta.
-		client->host_role().set_server_name(opennova::to_std(result.server_name));
-		client->host_role().set_server_message(opennova::to_std(result.server_message));
-	}
+	// A changed name or message is the live session's, which the listing's next update reads.
 }
 
 void SessionDrive::on_nw_host_player_enter_result(int64_t p_connection_id, int p_success,

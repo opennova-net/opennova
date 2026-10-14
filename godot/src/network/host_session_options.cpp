@@ -21,10 +21,18 @@ HOST_SESSION_TEXT_IMPL(country)
 HOST_SESSION_TEXT_IMPL(mission_name)
 HOST_SESSION_TEXT_IMPL(mission_file)
 HOST_SESSION_TEXT_IMPL(custom_text)
-HOST_SESSION_TEXT_IMPL(player_name)
 HOST_SESSION_TEXT_IMPL(expansion)
 HOST_SESSION_TEXT_IMPL(spectator_password)
 #undef HOST_SESSION_TEXT_IMPL
+
+// The host's own callsign, its roster name: the page's bytes, as a joiner's NA
+// (D-NET-661).
+String HostSessionOptions::get_player_name() const {
+	return opennova::cp1252_to_gd(config_.player_name);
+}
+void HostSessionOptions::set_player_name(const String &p_value) {
+	config_.player_name = opennova::utf8_to_retail_text(to_std(p_value));
+}
 
 String HostSessionOptions::get_channel() const {
 	switch (config_.session_channel) {

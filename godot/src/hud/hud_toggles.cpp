@@ -2,7 +2,7 @@
 
 using namespace godot;
 
-int HudToggles::poll(int p_rows_down, bool p_chorded, bool p_active,
+int64_t HudToggles::poll(int p_rows_down, bool p_chorded, bool p_active,
 		bool p_in_session, bool p_objective_game, bool p_local_alive, bool p_authority,
 		bool p_mp_session_peer, bool p_mouse_scale_negative) {
 	opennova::hud::HudKeyPoll keys;
@@ -15,7 +15,7 @@ int HudToggles::poll(int p_rows_down, bool p_chorded, bool p_active,
 	keys.authority = p_authority;
 	keys.mp_session_peer = p_mp_session_peer;
 	keys.mouse_scale_negative = p_mouse_scale_negative;
-	return static_cast<int>(opennova::hud::hud_toggles_poll(state_, keys));
+	return static_cast<int64_t>(opennova::hud::hud_toggles_poll(state_, keys));
 }
 
 int HudToggles::escape(bool p_in_session, bool p_spawn_gate, bool p_authority) {
@@ -218,6 +218,7 @@ void HudToggles::_bind_methods() {
 	BIND_ENUM_CONSTANT(EVENT_MOUSE_FLIPPED);
 	BIND_ENUM_CONSTANT(EVENT_MOUSE_SCALE_STEPPED);
 	BIND_ENUM_CONSTANT(EVENT_MOUSE_SCALE_NEGATIVE);
+	BIND_ENUM_CONSTANT(EVENT_JOIN_LOCK_TOGGLED);
 	BIND_ENUM_CONSTANT(SPECIAL_KEY_CONSUMED);
 	BIND_ENUM_CONSTANT(SPECIAL_KEY_CHAIN_TAKEN);
 	BIND_ENUM_CONSTANT(SPECIAL_KEY_QUIT_CONFIRMED);
@@ -248,5 +249,6 @@ void HudToggles::_bind_methods() {
 	BIND_ENUM_CONSTANT(ROW_TOGGLE_SERVER);
 	BIND_ENUM_CONSTANT(ROW_FLIP_MOUSE);
 	BIND_ENUM_CONSTANT(ROW_MOUSE_SCALE);
+	BIND_ENUM_CONSTANT(ROW_LOCK_GAME);
 	BIND_ENUM_CONSTANT(ROW_COUNT);
 }

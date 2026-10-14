@@ -1118,7 +1118,9 @@ void HudOverlay::set_end_round_overlay(bool p_shown, int p_top, int p_bottom,
 	const int64_t count = std::min(p_texts.size(), p_ys.size());
 	for (int64_t i = 0; i < count; ++i) {
 		opennova::hud::HudEndRoundLine line;
-		line.text = opennova::to_std(p_texts[i]);
+		// The overlay's lines go back as the code-page bytes EndRoundOverlay read
+		// them from (D-HUD-57).
+		line.text = opennova::utf8_to_retail_text(opennova::to_std(p_texts[i]));
 		line.y = p_ys[i];
 		er.lines.push_back(line);
 	}

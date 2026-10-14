@@ -21,6 +21,7 @@
 #include <net/novaworld/connection/manager.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/protocol_message.h>
+#include <net/npwire/session_hello.h> // ClientHello (the stray JO-PN Hello)
 #include <net/npwire/session_keys.h>
 
 #include "net_sockets.h"
@@ -122,21 +123,61 @@ int main() {
 		if (!dg.empty()) opennova::net::udp_send_to(client, server_ep, dg.data(), dg.size());
 	};
 
+	// The session's own 0x42 and the 0x82 it drew, for the retransmit leg below.
+	const auto opcode_of = [](const uint8_t *data, size_t size) {
+		uint8_t op = 0;
+		std::vector<uint8_t> inner;
+		return opennova::nw_decode_inbound(data, size, op, inner) ? int(op) : -1;
+	};
+	std::vector<uint8_t> session_auth;
+	std::vector<uint8_t> first_server_auth;
 	send(session.start());
 	uint8_t rx[4096];
 	for (int i = 0; i < 40 && !session.is_verified(); ++i) {
 		opennova::net::Endpoint from;
 		const int n = opennova::net::udp_recv_from(client, rx, sizeof rx, from, 200);
+		if (n > 0 && first_server_auth.empty() &&
+		    opcode_of(rx, static_cast<size_t>(n)) == opennova::SESSION_OPCODE_SERVER_AUTH)
+			first_server_auth.assign(rx, rx + n);
 		std::vector<std::vector<uint8_t>> out;
 		if (n > 0 && !session.handle_datagram(rx, static_cast<size_t>(n), out)) break;
 		session.finish_receive_batch(out);
 		session.pump(out);
 		session.process_periodic_update();
-		for (const auto &dg : out) send(dg);
+		for (const auto &dg : out) {
+			if (session_auth.empty() &&
+			    opcode_of(dg.data(), dg.size()) == opennova::SESSION_OPCODE_CLIENT_AUTH)
+				session_auth = dg;
+			send(dg);
+		}
 	}
 	expect(session.is_verified(), "the session verifies against the real listener");
 
 	if (session.is_verified()) {
+		// A stray 0x41 naming another identity from the verified endpoint ends nothing:
+		// retail's Hello handler creates and destroys no connection, so the session's next
+		// 0x43 is still served (D-NET-630).
+		// [orig: NapiNPProtocol_HandleClientHello @0x6213B0; NapiNPProtocol_HandleClientJoin
+		//  @0x62BEBA..0x62BF06]
+		opennova::ClientSession::Config stray_cfg = cfg;
+		stray_cfg.client_index = 0x53545259u;
+		opennova::ClientSession stray(stray_cfg);
+		send(stray.start());
+		std::vector<uint8_t> stray_reply;
+		expect(receive_opcode(client, opennova::SESSION_OPCODE_SERVER_HELLO, stray_reply, 1000),
+				"the stray Hello is answered");
+		// A stray 0x41 whose PN is JointOperations but whose identity is not the full JO one
+		// stays on the lobby path and re-names the row's Hello identity only: the session keeps
+		// the protocol its 0x42 established, so its 0x43s are still lobby traffic (D-NET-630
+		// review).
+		opennova::ClientHello jo_pn;
+		jo_pn.ci = 0x4A4F504Eu;
+		jo_pn.pn = "JointOperations";
+		send(opennova::nw_encode_outbound(opennova::SESSION_OPCODE_CLIENT_HELLO,
+				opennova::client_hello_to_bytes(jo_pn)));
+		expect(receive_opcode(client, opennova::SESSION_OPCODE_SERVER_HELLO, stray_reply, 1000),
+		       "the stray JO-PN Hello is answered");
+
 		// A host request whose reply is "lost": read it off the socket but never feed it to
 		// the session.
 		auto host_req = opennova::make_client_host_request(
@@ -151,7 +192,8 @@ int main() {
 		opennova::ProtocolPacketHeader lost_hdr;
 		std::vector<opennova::ProtocolMessage> lost_messages;
 		expect(receive_records(client, session.server_scrk(), lost_hdr, lost_messages, 1000),
-		       "the host request draws a 0x83 carrying the ServerHostResult records");
+				"the host request draws a 0x83 carrying the ServerHostResult records (the stray "
+				"Hello left the connection live)");
 
 		// The stock client's 0x44: [service local key][the missing sequence].
 		std::vector<uint8_t> resend_body;
@@ -183,6 +225,25 @@ int main() {
 		std::vector<opennova::ProtocolMessage> none;
 		expect(!receive_records(client, session.server_scrk(), none_hdr, none, 300),
 		       "a 0x44 under a foreign key draws nothing");
+
+		// The session's own 0x42, retransmitted after the stray Hellos, is the live
+		// connection's CI + CK and gets its cached 0x82 byte for byte: retail's retransmit leg
+		// reads the connection, never Hello state.
+		// [orig: NapiNPProtocol_HandleClientJoin @0x62BEE0..0x62BEE6]
+		expect(!session_auth.empty() && !first_server_auth.empty(),
+		       "the session's 0x42 and its 0x82 were captured");
+		send(session_auth);
+		std::vector<uint8_t> replayed;
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(1000);
+		while (replayed.empty() && std::chrono::steady_clock::now() < deadline) {
+			opennova::net::Endpoint from;
+			const int n = opennova::net::udp_recv_from(client, rx, sizeof rx, from, 50);
+			if (n > 0 && opcode_of(rx, static_cast<size_t>(n)) ==
+			                     opennova::SESSION_OPCODE_SERVER_AUTH)
+				replayed.assign(rx, rx + n);
+		}
+		expect(!replayed.empty() && replayed == first_server_auth,
+		       "the retransmitted 0x42 after a stray Hello draws its cached 0x82");
 		send(session.build_goodbye());
 	}
 	opennova::net::close_socket(client);

@@ -89,14 +89,50 @@ bool set_or_create_var(std::vector<ClientVar> &list, const ClientVar &var) {
 	return true;
 }
 
+// The same over a list whose vars carry their changed bit: a different value sets the
+// var's bit, a new entry is created with it set.
+// [orig: CNapiVarEntry_SetValue @0x630590 (the bit @0x6305c6); CNapiVarList_CreateEntry
+//  @0x6317c0 (@0x6318a1)]
+bool set_or_create_var(std::vector<ClientSession::ListVar> &list, const ClientVar &var) {
+	for (ClientSession::ListVar &v : list) {
+		if (v.var.fnum == var.fnum && strutil::iequals(v.var.name, var.name)) {
+			if (v.var.value == var.value)
+				return false;
+			v.var.value = var.value;
+			v.dirty = true;
+			return true;
+		}
+	}
+	list.push_back({ var, true });
+	return true;
+}
+
 // NapiLinkedList_RemoveByUserData: drop every var a slot owns. True when it removed one, each
 // removal raising the list's changed flag. [orig: @0x630810 (the flag @0x63086d)]
-bool remove_slot_vars(std::vector<ClientVar> &list, int slot) {
+bool remove_slot_vars(std::vector<ClientSession::ListVar> &list, int slot) {
 	const auto kept = std::remove_if(list.begin(), list.end(),
-	                                 [slot](const ClientVar &v) { return v.fnum == slot; });
+			[slot](const ClientSession::ListVar &v) { return v.var.fnum == slot; });
 	const bool removed = kept != list.end();
 	list.erase(kept, list.end());
 	return removed;
+}
+
+// NapiMemHeap_SetAllocId's var half: every var's bit to `dirty`. [orig: @0x6308b0..0x6308bb]
+void mark_vars(std::vector<ClientSession::ListVar> &list, bool dirty) {
+	for (ClientSession::ListVar &v : list)
+		v.dirty = dirty;
+}
+
+// The vars a serialization writes: all of them under includeAll, else those whose bit is set.
+// [orig: NapiStatement_SerializeVarList @0x4d0660 — `cmp includeAll, 0; jnz` @0x4d0710..0x4d0718,
+//  `cmp [var+0x18], 0; jz` @0x4d071a..0x4d071e]
+std::vector<ClientVar> list_vars(
+		const std::vector<ClientSession::ListVar> &list, bool include_all) {
+	std::vector<ClientVar> out;
+	for (const ClientSession::ListVar &v : list)
+		if (include_all || v.dirty)
+			out.push_back(v.var);
+	return out;
 }
 
 } // namespace
@@ -1277,19 +1313,24 @@ bool ClientSession::request_hosting(const HostRegistration &cfg, int currently_h
 	HostRegistration setup = cfg;
 	setup.reconnect_counter = reconnect_counter_;
 	host_setup_ = make_host_setup_var_list(setup);
-	host_list_ = make_host_var_list(setup, HostLobbyText{}, /*full=*/false);
+	host_list_.clear();
+	for (const ClientVar &v : make_host_var_list(setup, HostLobbyText{}, /*full=*/false))
+		set_or_create_var(host_list_, v);
 	player_list_.clear();
 	mark_host_lists();
 	return send_host_request(currently_hosting);
 }
 
-// Both lists' changed flags raised: the flags the next update reads.
+// Both lists marked with 1: each list's changed flag and every var's bit, which the next update
+// reads.
 // [orig: CNapiGameSession_InitHeapsAndSerializeCounter @0x4ce300 (the Host mark @0x4ce32f, the
 //  PlayerList's @0x4ce33c; HostSetup's @0x4ce322); NapiMemHeap_SetAllocId @0x630890 (the flag
-//  @0x6308a4)]
+//  @0x6308a4, each var's bit @0x6308b3)]
 void ClientSession::mark_host_lists() {
 	host_list_changed_ = true;
 	player_list_changed_ = true;
+	mark_vars(host_list_, true);
+	mark_vars(player_list_, true);
 }
 
 // [orig: CNapiGameSession_StartHostingSession @0x4d4540 — state 4 -> 5 @0x4d4561, then
@@ -1303,7 +1344,8 @@ bool ClientSession::send_host_request(int currently_hosting) {
 	host_result_ = ServerResultFields{};
 	set_lobby_state(5);
 	if (queue_lobby_record(make_client_host_request(currently_hosting, cookie_vars(), host_setup_,
-	                                                host_list_, player_list_))) {
+				list_vars(host_list_, /*include_all=*/true),
+				list_vars(player_list_, /*include_all=*/true)))) {
 		return true;
 	}
 	host_state_ = previous;
@@ -1311,23 +1353,39 @@ bool ClientSession::send_host_request(int currently_hosting) {
 	return false;
 }
 
-// The Host and PlayerList vars land in the session's lists (SetOrCreate). The update goes
-// only when it includes both lists whole or either list's changed flag is set; it writes a
-// list whole under includeAll and otherwise only a flagged one, then clears both flags.
-// [orig: Lobby_UpdateServerInfo @0x4fe8c0 (the SetOrCreates) -> CPlayerManager_RebuildLists
-//  @0x4d4590 (the test @0x4d45ac, the clears @0x4d45c2 / @0x4d45cf; the host result's
-//  @0x4d5c95 / @0x4d5c9e) -> CNapiGameSession_SendHostUpdate @0x4d3860]
-bool ClientSession::send_host_update(const std::vector<ClientVar> &host,
-                                     const std::vector<ClientVar> &player_list, bool include_all) {
-	for (const ClientVar &v : host)
+// The writers' SetOrCreates: each var into the session's list, in any state.
+// [orig: CNapiVarList_SetOrCreate @0x6318c0; Lobby_UpdateServerInfo @0x4fe8c0 (the Host list);
+//  Server_ChangeEntityTeam @0x518e22, NapiNPServerMsg_HandlePlayerLoadout @0x515ae2,
+//  Server_SendWeaponSlotListToPlayer @0x5025db (the PlayerList)]
+void ClientSession::set_host_list_vars(const std::vector<ClientVar> &vars) {
+	for (const ClientVar &v : vars)
 		if (set_or_create_var(host_list_, v)) host_list_changed_ = true;
-	for (const ClientVar &v : player_list)
+}
+
+void ClientSession::set_player_list_vars(const std::vector<ClientVar> &vars) {
+	for (const ClientVar &v : vars)
 		if (set_or_create_var(player_list_, v)) player_list_changed_ = true;
+}
+
+// The update goes in state 6 only when it includes both lists whole or either list's changed
+// flag is set; it writes a list under includeAll or its flag, its vars whole under includeAll
+// and otherwise those whose changed bit is set, then marks both lists with 0 (the flags and every
+// var's bit).
+// [orig: CPlayerManager_RebuildLists @0x4d4590 (`cmp [esi+0x11c], 6` @0x4d4593, the test
+//  @0x4d459c..0x4d45ac, the marks with 0 @0x4d45c2 / @0x4d45cf; the host result's @0x4d5c95 /
+//  @0x4d5c9e) -> CNapiGameSession_SendHostUpdate @0x4d3860 -> NapiStatement_SerializeVarList
+//  @0x4d0660 (the list's flag @0x4d06ac..0x4d06be, a var's bit @0x4d071a)]
+bool ClientSession::send_host_update(bool include_all) {
+	if (host_state_ != HostState::Established)
+		return false;
 	if (!include_all && !host_list_changed_ && !player_list_changed_) return false;
-	const NapiMessage update = make_client_host_update(host, include_all || host_list_changed_,
-	                                                   player_list, include_all || player_list_changed_);
+	const NapiMessage update = make_client_host_update(list_vars(host_list_, include_all),
+			include_all || host_list_changed_, list_vars(player_list_, include_all),
+			include_all || player_list_changed_);
 	host_list_changed_ = false;
 	player_list_changed_ = false;
+	mark_vars(host_list_, false);
+	mark_vars(player_list_, false);
 	return queue_statement(update);
 }
 
@@ -1336,8 +1394,11 @@ bool ClientSession::send_host_update(const std::vector<ClientVar> &host,
 //  the state-6 wrapper @0x4d0e20]
 bool ClientSession::send_host_player_added(const HostPlayerSlot &player) {
 	remove_slot_vars(player_list_, player.slot);
-	for (const ClientVar &v : make_player_list({player})) player_list_.push_back(v);
-	player_list_changed_ = true; // the created entries [orig: CNapiVarList_CreateEntry @0x6318a7]
+	// Each a new entry, created with its bit set [orig: CNapiVarList_CreateEntry @0x6318a1 /
+	// @0x6318a7].
+	for (const ClientVar &v : make_player_list({ player }))
+		set_or_create_var(player_list_, v);
+	player_list_changed_ = true;
 	if (host_state_ != HostState::Established) return false;
 	return queue_statement(make_client_host_player_added(
 			player.slot, player.player_name, player.ip_and_port, player.pcid, player.team,

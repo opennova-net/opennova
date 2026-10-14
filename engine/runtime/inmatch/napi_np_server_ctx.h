@@ -151,7 +151,16 @@ struct NapiNPServerCtx {
 	// LE octet packing (the same as BanList_ParseIPEntry @0x4fd5c9); banlist.txt's
 	// PCIDs and banned.txt's names refuse at the game-layer join (codes 29 / 31).
 	// [orig: CNapiNetwork_ValidateJoinRequest @0x4c61b0, the compare @0x4c6210]
+	// The join lock (g_ServerJoinLocked): its writers are the lockgame toggle
+	// (Server_ToggleJoinLock, server_info.h) and the round init's clear.
+	// [orig: the validate's test @0x4C61C3; Server_ToggleJoinLock @0x50D75D;
+	//  Server_InitNewRoundState @0x51CAAA]
 	bool join_locked = false;
+	// The server-info update a toggle runs at once (Lobby_UpdateServerInfo(0)): a NovaWorld
+	// embedder installs it while its session hosts the match; empty, nothing runs, as retail's
+	// update returns outside a NovaWorld session. [orig: Server_ToggleJoinLock @0x50D762;
+	//  Lobby_UpdateServerInfo's gates @0x4FE8D8..0x4FE8FA]
+	std::function<void()> on_update_server_info;
 	ServerBanLists bans;
 	GameConfig config;             // [orig g_NapiNPCtx.game_settings @+0xE68 + the scattered g_* rule globals]
 	NapiNPProtocol np_protocol;    // [orig +0xE5C] (pointer in the original; embedded here)
@@ -331,6 +340,10 @@ struct NapiNPServerCtx {
 	bool mission_text_loaded = false;
 	std::string mission_briefing3;
 	std::string mission_briefing2;
+	// The mission text's [info] title the NovaWorld listing's MissionName reads ("" with no
+	// mission table or no entry; the column then reads the mission header's name).
+	// [orig: MissionText_GetString("info", "title") from Lobby_UpdateServerInfo @0x4FE993]
+	std::string mission_text_title;
 	// MissionText [Locations]/LOCATION%03i labels for each BMS type-2044
 	// marker the spawn admitted, in spawn order, each keyed by its record's
 	// name_index (install_mission_location_names). The S2C 0x0F writer copies
@@ -510,6 +523,21 @@ inline void set_server_text(NapiNPServerCtx &ctx, ServerTextTable text) {
 	ctx.server_text = std::move(text);
 }
 
+// The join-ticket gate: in session, on the NovaWorld transport, join tickets
+// required. A joiner's C2S 0x01 enters NetPlayer game state 3 (the validation
+// the timeout watchdog runs) only under it, else state 6; the validator's
+// code-28 leg reads the same three words (D-NET-702). Ours carries retail's
+// two ticket words (the NovaWorld session's +0x4FC the 0x01 tests and its
+// +0x120 bit 0x40 the watchdog tests) as the one novaworld_join_tickets_armed.
+// [orig: the C2S 0x01 handler @0x512ED0 - is_in_session @0x512F87, the
+//  transport @0x512F90, dword_B604DC @0x512F99, state 3 @0x512FA2..0x512FA6,
+//  state 6 @0x512FAF..0x512FB3; Server_ValidatePlayerJoinRequest
+//  @0x5128E2..0x5128F8]
+inline bool join_tickets_required(const NapiNPServerCtx &ctx) {
+	return ctx.is_in_session != 0 && ctx.transport_mode == NetworkType::NovaWorld &&
+			ctx.novaworld_join_tickets_armed;
+}
+
 // The host's local address: "PUB" while it is in a session on the NovaWorld
 // transport; false (no address, no cookie lookups) otherwise.
 // [orig: CNapiNetwork_GetLocalAddress @0x4C4F60 — the gate @0x4c4f75, the copy
@@ -524,14 +552,16 @@ inline bool get_local_address(const NapiNPServerCtx &ctx, std::string &out) {
 // The JOIN handler's cookie leg for a remote connection: on a NovaWorld session
 // its CD cookie's PCID and SQUADINFO land in the connection's account fields.
 // The host's own loopback skips it (its account is the shell's login PCID).
+// True when the cookie's PCID decrypted (load_join_account).
 // [orig: NapiNPServer_HandlePlayerJoinMessage @0x512AA0 — the loopback gate
 //  `!connection+0x2E` @0x512ca2, GetLocalAddress && cookie @0x512cdc]
-inline void load_join_account_from_cookie(const NapiNPServerCtx &ctx, NapiNPConnection &conn) {
+inline bool load_join_account_from_cookie(const NapiNPServerCtx &ctx, NapiNPConnection &conn) {
 	std::string local_address;
 	if (conn.type == NapiNPConnection::kTypeClientSide || !get_local_address(ctx, local_address) ||
 			conn.join_identity_pairs.empty())
-		return;
-	load_join_account(conn.join_identity_pairs, local_address, ctx.cookie_key_table, conn.account);
+		return false;
+	return load_join_account(
+			conn.join_identity_pairs, local_address, ctx.cookie_key_table, conn.account);
 }
 
 // The NovaWorld host binding's account facts: the cookie-key table, and the

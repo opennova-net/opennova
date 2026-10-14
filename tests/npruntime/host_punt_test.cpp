@@ -290,9 +290,14 @@ bool check_decode_is_order_and_shape_robust() {
 		DisconnectEvent truncated_event;
 		parse_disconnect_event(truncated.data(), truncated.size(), truncated_event);
 	}
-	// A body whose final TLV claims more bytes than remain ends the walk there: the fields
-	// gathered before it stand and the description still counts (retail's receiver moves the
-	// connection to state 6 no matter what the walk yielded @0x621d59).
+	// A body whose final TLV claims more bytes than remain is still read: ReadTLV hands back
+	// its name, value pointer and declared length, so DPC loads its one byte (zero past the
+	// body, D-NET-410), and the next read takes a name from the value's bytes, which ends the
+	// body; the fields before it stand and the description still counts (retail's receiver
+	// moves the connection to state 6 no matter what the walk yielded @0x621d59) (D-NET-412).
+	// [orig: NapiNP_ReadTLV @0x61DBE0 - the value out @0x61DCF7, the overrun leaving the cursor
+	//  at the value @0x61DD00..0x61DD10; CNapiNPConnection_HandleDescriptionPacket - DPC
+	//  @0x621C51]
 	std::vector<uint8_t> overrun;
 	append_tlv(overrun, "DC", u32_value(2));
 	overrun.push_back('D');
@@ -304,8 +309,8 @@ bool check_decode_is_order_and_shape_robust() {
 	overrun.push_back(0x01);
 	DisconnectEvent overrun_event;
 	if (!expect(parse_disconnect_event(overrun.data(), overrun.size(), overrun_event) &&
-	                    overrun_event.dc == 2 && overrun_event.dpc == 0,
-	            "a value that claims more bytes than remain stops the walk and keeps prior fields"))
+						overrun_event.dc == 2 && overrun_event.dpc == 1,
+				"a value that claims more bytes than remain is read with the bytes there are"))
 		return false;
 
 	// A well-formed TLV run with none of the seven names is still a disconnect block with zero

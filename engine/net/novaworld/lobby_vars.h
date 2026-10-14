@@ -109,6 +109,10 @@ struct HostRegistration {
 // [orig: Server_PlayerAdd @0x51d421..0x51d4aa]
 struct HostPlayerSlot {
 	int slot = 0;
+	// The add's own identity, not a var: the in-match connection the player was added for. A
+	// leave and a re-join into the same slot is a new connection, so a roster sync sends both the
+	// removal and the add, as retail's remove and add each send theirs (plan_roster_sync).
+	uint32_t connection_id = 0;
 	std::string player_name;   // PlayerName
 	std::string ip_and_port;   // PlayerIpAndPort ("a.b.c.d:port")
 	std::string pcid;          // PlayerPCID
@@ -157,17 +161,6 @@ std::vector<ClientVar> make_player_list(const std::vector<HostPlayerSlot> &playe
 //  dword_B6022C (the Host list) then dword_B60274 (the PlayerList) for PlayerName]
 LobbyStatusBlob make_host_status_blob(const HostRegistration &cfg, const HostLobbyText &text,
                                       const std::vector<HostPlayerSlot> &players);
-
-// The vars whose values changed (or are new) between two snapshots, in `next`'s order: the
-// dirty set a periodic ClientHostUpdate carries. Retail marks an entry dirty only when
-// SetValue sees a different string (or creates it); whether the update goes at all is decided
-// by the two lists' changed flags, which a removal raises with nothing dirty
-// (ClientSession::send_host_update).
-// [orig: CNapiVarEntry_SetValue @0x630590 (String_ExactMatch gate); NapiStatement_SerializeVarList
-//  @0x4d0660 (`includeAll || node+24`); CPlayerManager_RebuildLists @0x4d4590 (the flag test
-//  @0x4d45ac)]
-std::vector<ClientVar> dirty_client_vars(const std::vector<ClientVar> &previous,
-                                         const std::vector<ClientVar> &next);
 
 // ClientHostRequest: CurrentlyHosting (0 on a fresh host, 1 on the re-host path), VarCheck=1,
 // Cookie (the login cookie jar + locale, i.e. the verify Cookie set with NWUID filled),

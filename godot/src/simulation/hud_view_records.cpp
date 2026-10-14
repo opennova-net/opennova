@@ -87,9 +87,15 @@ void ScoreboardHeader::_bind_methods() {
 
 // --- EndRoundOverlay --------------------------------------------------------
 
+// The lines join the roster's names, the page's bytes (D-NET-661), to the
+// gametext the overlays lookup hands the engine as UTF-8: read as cp1252, and
+// HudOverlay::set_end_round_overlay hands them back as those bytes, so a name's
+// high byte draws as its one glyph (D-HUD-57); a non-ASCII gametext character
+// is then read twice over (D-HUD-59).
 PackedStringArray EndRoundOverlay::get_texts() const {
 	PackedStringArray out;
-	for (const opennova::hud::EndRoundResolvedLine &l : value_.lines) out.push_back(to_gd(l.text));
+	for (const opennova::hud::EndRoundResolvedLine &l : value_.lines)
+		out.push_back(opennova::cp1252_to_gd(l.text));
 	return out;
 }
 
@@ -173,13 +179,13 @@ void EndRoundColumn::_bind_methods() {
 // --- EndRoundRow ------------------------------------------------------------
 
 // The player slot's name and squad tag are the 0x46 roster's bytes in the game's
-// code page. The menu's cells take those bytes from the record itself
-// (MenuDriver::fill_stat_results -> inmatch::fill_stat_results, where the
-// witness lives); these getters are the script's view of them, as text
-// (retail_text_to_utf8: a stock peer's cp1252, or the UTF-8 one of ours sent),
-// where a UTF-8 parse made a lone high byte U+FFFD (D-MNU-46).
-String EndRoundRow::get_name() const { return to_gd(opennova::retail_text_to_utf8(value_.name)); }
-String EndRoundRow::get_squad() const { return to_gd(opennova::retail_text_to_utf8(value_.squad)); }
+// code page, a stock peer's and ours alike (D-NET-661). The menu's cells take
+// those bytes from the record itself (MenuDriver::fill_stat_results ->
+// inmatch::fill_stat_results, where the witness lives); these getters are the
+// script's view of them, read as cp1252, where a UTF-8 parse made a lone high
+// byte U+FFFD (D-MNU-46).
+String EndRoundRow::get_name() const { return opennova::cp1252_to_gd(value_.name); }
+String EndRoundRow::get_squad() const { return opennova::cp1252_to_gd(value_.squad); }
 PackedStringArray EndRoundRow::get_cells() const {
 	PackedStringArray out;
 	for (const std::string &c : value_.cells) out.push_back(to_gd(c));

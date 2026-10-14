@@ -71,9 +71,14 @@ HostScreenState host_session_settings(gamecfg::GameCfg &cfg) {
 	// by the apply's cap @0x551B30].
 	host.serve_and_play = cfg.dedicated == 0;
 	host.game_type_setting = cfg.mp_gametype;
-	// [orig: game_settings.use_lineup_queue @0x569632, lineup_queue_size @0x569646]
-	host.use_lineup_queue = cfg.mp_use_lineup_queue;
-	host.lineup_queue_size = cfg.mp_lineup_queue_size;
+	// The lineup queue the 0x42 gate admits past the cap [orig:
+	//  game_settings.use_lineup_queue @0x569632, lineup_queue_size @0x569646;
+	//  CNapiNetwork_ValidateJoinRequest @0x4C6220..0x4C624E].
+	config.use_lineup_queue = cfg.mp_use_lineup_queue;
+	config.lineup_queue_size = cfg.mp_lineup_queue_size;
+	// The join validator's duplicate-PCID word [orig: puntDuplicatePcids_330,
+	//  Server_ValidatePlayerJoinRequest @0x512771].
+	config.punt_duplicate_pcids = cfg.mp_host_punt_same_pcids;
 
 	// The identity. The name is copied 31 bytes deep into both of its homes
 	// [orig: Game_ApplySessionSettingsToGlobals @0x551FEB strncpy(g_ServerNameStr,
@@ -125,6 +130,7 @@ HostScreenState host_session_settings(gamecfg::GameCfg &cfg) {
 	config.mp_attributes = static_cast<uint32_t>(cfg.mpattrib); // game_settings @0x56967F
 	config.fat_bullets = cfg.fatbullets;              // g_FatBullets @0x551C01
 	config.one_shot_kill = cfg.oneshotonekill;        // g_OneShotKill @0x551BF5
+	config.allow_custom_skins = cfg.allowcustomskins; // dword_24D218C @0x551C22
 	config.unlimited_vehicles = cfg.unlimited_vehicles; // dword_24D2258 @0x551D91
 	config.voting_enabled = cfg.mpvoting;             // g_VoteKickEnabled @0x551DC3
 	config.voting_min_players = cfg.mpvoting_min_players; // @0x551DCF

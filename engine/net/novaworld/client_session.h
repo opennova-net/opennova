@@ -77,6 +77,15 @@ public:
 		Established, // state 6: registered (HostCommands consumed)
 		Failed,      // back to state 4 with a MsgCode (host_result())
 	};
+	// One var of the session's Host list or PlayerList and its changed bit: set by a changed
+	// value, a new entry or a mark, cleared by each ClientHostUpdate; an update writes the vars
+	// whose bit is set. [orig: CNapiVarEntry +0x18 — set @0x6305c6 (SetValue) / @0x6318a1
+	//  (CreateEntry), stored by NapiMemHeap_SetAllocId @0x6308b3, read by
+	//  NapiStatement_SerializeVarList @0x4d071a]
+	struct ListVar {
+		ClientVar var;
+		bool dirty = false;
+	};
 	// The start-playing leg [orig: states 4/7/8].
 	enum class PlayState {
 		Idle,
@@ -309,18 +318,31 @@ public:
 	// when the session is not in state 4 or the request could not be queued (state back to 4).
 	// [orig: CNapiGameSession_StartHostingSession @0x4d4540 -> SendHostRequest @0x4d3700]
 	bool request_hosting(const HostRegistration &cfg, int currently_hosting);
-	// ClientHostUpdate with the given Host and PlayerList vars (full lists or dirty deltas),
-	// once they land in the session's lists: under `include_all` both lists go whole,
-	// otherwise only a list whose changed flag is set (a changed value, a new entry or a
-	// removal since the last update, or a mark), and nothing goes when neither is. Every
-	// update clears both flags. False when nothing was queued.
-	// [orig: CPlayerManager_RebuildLists @0x4d4590 -> CNapiGameSession_SendHostUpdate @0x4d3860]
-	bool send_host_update(const std::vector<ClientVar> &host,
-	                      const std::vector<ClientVar> &player_list, bool include_all = false);
-	// Raises the Host and PlayerList lists' changed flags, the list half of retail's marks
-	// (which also mark every var dirty: ours' callers carry that half as their dirty-delta
-	// baselines, NwuHostRole::republish_lists). [orig: Game_StartMission @0x5248e4 / @0x5248ef;
-	// CNapiGameSession_HandleHostVerifyResponse @0x4d5c63 / @0x4d5c71]
+	// SetOrCreate each var into the session's Host list or PlayerList: a different value or a
+	// new entry sets the var's changed bit and raises the list's changed flag, in any state (the
+	// server-info update's Host list, a PlayerList writer's PlayerTeam / PlayerType).
+	// [orig: CNapiVarList_SetOrCreate @0x6318c0 -> CNapiVarEntry_SetValue @0x630590 (the var's
+	//  bit @0x6305c6, the list's flag @0x6305ce) / CNapiVarList_CreateEntry @0x6317c0 (@0x6318a1,
+	//  @0x6318a7); Lobby_UpdateServerInfo @0x4fe8c0 (the Host list, session+0x214);
+	//  Server_ChangeEntityTeam @0x518e22, Server_SendWeaponSlotListToPlayer @0x5025db (the
+	//  PlayerList, +0x25c)]
+	void set_host_list_vars(const std::vector<ClientVar> &vars);
+	void set_player_list_vars(const std::vector<ClientVar> &vars);
+	// ClientHostUpdate in state 6 alone: under `include_all` both lists go whole, otherwise
+	// only a list whose changed flag is set (a changed value, a new entry or a removal since the
+	// last update, or a mark), carrying the vars whose changed bit is set; nothing goes when
+	// neither flag is. Every update clears both flags and every var's bit (the marks with 0).
+	// False when nothing was queued.
+	// [orig: CPlayerManager_RebuildLists @0x4d4590 (the state-6 test @0x4d4593, the flag test
+	//  @0x4d459c..0x4d45ac, the marks with 0 @0x4d45c2 / @0x4d45cf) ->
+	//  CNapiGameSession_SendHostUpdate @0x4d3860 -> NapiStatement_SerializeVarList @0x4d0660
+	//  (includeAll or the var's bit @0x4d0710..0x4d071e)]
+	bool send_host_update(bool include_all = false);
+	// Marks both lists: every var's changed bit and the list's flag, as retail's marks with 1
+	// at the mission start, a re-host's result and the host requests.
+	// [orig: NapiMemHeap_SetAllocId @0x630890 (the flag @0x6308a4, each var's bit @0x6308b3);
+	//  Game_StartMission @0x5248e4 / @0x5248ef; CNapiGameSession_HandleHostVerifyResponse
+	//  @0x4d5c63 / @0x4d5c71; CNapiGameSession_InitHeapsAndSerializeCounter @0x4ce32f / @0x4ce33c]
 	void mark_host_lists();
 	// ClientHostPlayerAdded / ClientHostPlayerRemoved — queued only while Established (state 6).
 	// [orig: the state-6 wrappers @0x4d0e20 / @0x4d0e40]
@@ -601,8 +623,8 @@ private:
 	// [orig: BuildHostVarLists @0x4d0b50; Server_PlayerAdd @0x51d421..0x51d4aa (the PlayerList
 	//  SetOrCreates); ConnectOrHost @0x4d53bb..0x4d542b (PlaySetup)]
 	std::vector<ClientVar> host_setup_;
-	std::vector<ClientVar> host_list_;
-	std::vector<ClientVar> player_list_;
+	std::vector<ListVar> host_list_;
+	std::vector<ListVar> player_list_;
 	std::vector<ClientVar> play_setup_;
 	// The Host and PlayerList lists' changed flags (list+0x44): raised by a changed value, a
 	// new entry, a removal or a mark, cleared by each ClientHostUpdate. The marks: the host

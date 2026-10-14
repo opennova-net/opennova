@@ -2026,6 +2026,20 @@ bool run_client_join_rejects_match_retail() {
 	bad = auth;
 	bad.cu.assign(65, std::vector<uint8_t>{1});
 	if (!dropped(bad, {}, "a 0x42 with a 65th CU is dropped unanswered")) return false;
+	// A last CU declaring 2048 bytes that the datagram cuts is dropped all the same: the walk
+	// hands the field back with its declared length, which the bound reads (D-NET-412).
+	// [orig: NapiNP_ReadTLV @0x61DBE0 - the length out @0x61DCEA, the value out @0x61DCF7;
+	//  NapiNPProtocol_HandleClientJoin - `mov esi, [len]` @0x62BBE7]
+	{
+		std::vector<uint8_t> body = client_auth_to_bytes(auth);
+		body.insert(body.end(), { 'C', 'U', 0x00, 0x00, 0x08 });
+		body.insert(body.end(), 10, 0x03);
+		auto dg = craft(SESSION_OPCODE_CLIENT_AUTH, body);
+		const auto result = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
+		if (!expect(result.outbound.empty() && inmatch::connection_count(ctx) == 0,
+					"a 0x42 whose cut CU declares 2048 bytes is dropped unanswered"))
+			return false;
+	}
 	bad.cu.assign(63, std::vector<uint8_t>{1});
 	bad.cu.push_back(std::vector<uint8_t>(2047, 1));
 	bad.hk ^= 1;
@@ -2886,6 +2900,9 @@ bool run_spectator_admission_codes_match_retail() {
 	settings.max_players = 1;
 	settings.spectator_slots = 1;
 	settings.spectator_password = "watch";
+	// The 0x42 gate's headroom is the lineup queue's, one connection here.
+	settings.use_lineup_queue = 1;
+	settings.lineup_queue_size = 1;
 	inmatch::test::bring_up_host(
 			ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
 			kHostKey, nullptr, settings);
@@ -2912,11 +2929,11 @@ bool run_spectator_admission_codes_match_retail() {
 		return false;
 	}
 
-	// The 0x42 gate is ONE shared count against max_players + positive slots:
-	// an ordinary player may occupy the spectator headroom (retail has no
-	// separate ordinary cap), and the join past the shared total rejects with
-	// the CR=0 0x82 carrying JFC=14 and JFP=5 (the positive-spectator-slots
-	// reason). [orig: CNapiNetwork_ValidateJoinRequest @0x4c61b0 reasons 4/5;
+	// The 0x42 gate is ONE shared count, players and spectators alike, against
+	// max_players plus the open lineup queue: an ordinary player may take the
+	// queue's headroom, and the join past the shared total rejects with the
+	// CR=0 0x82 carrying JFC=14 and JFP=5 (the open-queue reason).
+	// [orig: CNapiNetwork_ValidateJoinRequest @0x4c6220..0x4c624e reasons 4/5;
 	// NapiNPProtocol_SendJoinRejection @0x620cd0]
 	{
 		const std::string player_scrk =
@@ -2926,10 +2943,8 @@ bool run_spectator_admission_codes_match_retail() {
 		const PeerAddr player_peer{0x0100007Fu, 32014};
 		inmatch::HandleResult player_result = inmatch::handle_server_datagram(
 				ctx, player_peer, player_auth.data(), player_auth.size(), 4);
-		if (!expect(
-				!player_result.outbound.empty() &&
-				inmatch::connection_count(ctx) == 2,
-				"an ordinary player occupies the spectator headroom (shared count)")) {
+		if (!expect(!player_result.outbound.empty() && inmatch::connection_count(ctx) == 2,
+					"an ordinary player occupies the lineup queue's headroom (shared count)")) {
 			return false;
 		}
 		const PeerAddr third{0x0100007Fu, 32013};
@@ -3111,6 +3126,206 @@ bool run_capacity_rejects_when_full() {
 	return true;
 }
 
+// The 0x42 gate's headroom is the session's lineup queue (D-NET-403): the cap plus the queue's
+// size while the queue is on and its size positive, counted signed, the full reject's reason
+// JFP 5 under that same test, else JFP 4. A positive spectator limit never widens the gate
+// (its count is the game-layer join's DPC 15).
+// [orig: CNapiNetwork_ValidateJoinRequest @0x4C6220..0x4C623F (the capacity), @0x4C6241..0x4C624E
+//  (the reason); CNapiGameSession_BuildAndCreateSession @0x569626..0x569646 (the two words)]
+bool run_join_gate_admits_the_lineup_queue() {
+	const std::string scrk = "LINEUPQUEUESCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
+	// Joins `count` peers in turn and returns the last one's reply: 0 when it was admitted,
+	// else the reject's JFP (0xFFFFFFFF when no 0x82 came back).
+	auto last_join = [&](inmatch::NapiNPServerCtx &ctx, uint16_t base_port, int count) {
+		uint32_t result = 0;
+		for (int i = 0; i < count; ++i) {
+			const PeerAddr peer{ 0x0100007Fu, static_cast<uint16_t>(base_port + i) };
+			auto a = craft_auth(
+					"JOINTOPERATIONS", kHostKey, 0x7000u + static_cast<uint32_t>(i), scrk);
+			const inmatch::HandleResult r = inmatch::handle_server_datagram(
+					ctx, peer, a.data(), a.size(), static_cast<uint32_t>(i + 1));
+			uint8_t opcode = 0;
+			std::vector<uint8_t> body;
+			ServerAuth reply;
+			if (r.outbound.empty() ||
+					!nw_decode_inbound(
+							r.outbound.front().data(), r.outbound.front().size(), opcode, body) ||
+					opcode != SESSION_OPCODE_SERVER_AUTH ||
+					!parse_server_auth(body.data(), body.size(), reply)) {
+				result = 0xFFFFFFFFu;
+			} else {
+				result = reply.cr == 1 ? 0u : (reply.jfc == 14 ? reply.jfp : 0xFFFFFFFEu);
+			}
+		}
+		return result;
+	};
+	auto host = [](inmatch::NapiNPServerCtx &ctx, const inmatch::GameConfig &settings) {
+		inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly,
+				inmatch::SocketMode::Lan, kHostKey, nullptr, settings);
+	};
+
+	// A positive spectator limit with the queue off: the gate is the bare cap.
+	{
+		inmatch::GameConfig settings;
+		settings.max_players = 1;
+		settings.spectator_slots = 2;
+		inmatch::NapiNPServerCtx ctx;
+		host(ctx, settings);
+		if (!expect(settings.join_capacity() == 1 && last_join(ctx, 32301, 2) == 4u &&
+							inmatch::connection_count(ctx) == 1,
+					"a spectator limit never widens the 0x42 gate: the second joiner meets the "
+					"cap with JFP 4"))
+			return false;
+	}
+	// The queue on with a positive size: the cap plus the queue, then JFP 5.
+	{
+		inmatch::GameConfig settings;
+		settings.max_players = 1;
+		settings.use_lineup_queue = 1;
+		settings.lineup_queue_size = 2;
+		inmatch::NapiNPServerCtx ctx;
+		host(ctx, settings);
+		if (!expect(settings.lineup_queue_open() && settings.join_capacity() == 3 &&
+							last_join(ctx, 32311, 3) == 0u && inmatch::connection_count(ctx) == 3,
+					"the open queue admits two connections past a cap of one"))
+			return false;
+		if (!expect(last_join(ctx, 32321, 1) == 5u && inmatch::connection_count(ctx) == 3,
+					"the join past the cap and the queue rejects with JFP 5"))
+			return false;
+	}
+	// A queue switched off, or of no size, adds nothing and the reject is JFP 4.
+	const std::pair<int32_t, int32_t> closed_queues[] = { { 0, 5 }, { 1, 0 }, { 1, -3 } };
+	for (const std::pair<int32_t, int32_t> &closed : closed_queues) {
+		inmatch::GameConfig settings;
+		settings.max_players = 1;
+		settings.use_lineup_queue = closed.first;
+		settings.lineup_queue_size = closed.second;
+		inmatch::NapiNPServerCtx ctx;
+		host(ctx, settings);
+		if (!expect(!settings.lineup_queue_open() && settings.join_capacity() == 1 &&
+							last_join(ctx, 32331, 2) == 4u,
+					"a closed queue (off, or a size of zero or less) keeps the cap and JFP 4"))
+			return false;
+	}
+	// The add is 32-bit and the compare signed: a size that wraps the sum admits nothing.
+	{
+		inmatch::GameConfig settings;
+		settings.max_players = 2;
+		settings.use_lineup_queue = 1;
+		settings.lineup_queue_size = 0x7FFFFFFF;
+		inmatch::NapiNPServerCtx ctx;
+		host(ctx, settings);
+		if (!expect(settings.join_capacity() < 0 && last_join(ctx, 32341, 1) == 5u &&
+							inmatch::connection_count(ctx) == 0,
+					"a queue that wraps the capacity negative admits no one"))
+			return false;
+	}
+	return true;
+}
+
+// A joiner the lineup queue admits past the slot rows is held, never dropped (D-NET-403
+// review). A Serve Only host with a cap of 1 has one joiner row; with a queue of 1 its gate
+// admits two. Retail's C2S 0x02 handler picks no row, so the second joiner's 0x02 is answered
+// with the post-handshake metadata like the first's, and the spawn pump, its cap reached by the
+// first joiner's add, holds the second and re-sends it the one-byte S2C 0x03.
+// [orig: the C2S 0x02 handler @0x512FD0 (no row pick; the 0x7A / 0x7B / 0x03 sends
+//  @0x5130AC..0x5131D5); CNapiServer_ProcessPendingPlayerSpawns - the cap @0x4C8E13, the
+//  0x03 nag @0x4C8F7A..0x4C8FD1; Server_PlayerAdd's row pick @0x51CC9A]
+bool run_lineup_joiner_past_the_rows_is_held_not_dropped() {
+	world::World world;
+	world.registry.configure_pool(0, 16);
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::GameConfig settings;
+	settings.max_players = 1;
+	settings.dedicated_server = true; // the slot limit 2: row 0 the host's, row 1 a joiner's
+	settings.use_lineup_queue = 1;
+	settings.lineup_queue_size = 1;
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
+			kHostKey, nullptr, settings);
+	ctx.world = &world;
+	// A SCRK a stock client can send: the 0x42's SCRK lands in a 64-byte buffer, 63 characters
+	// [orig: NapiNPProtocol_HandleClientJoin - SCRK's `push 40h` @0x62BC40, the copy @0x62BC4B].
+	const std::string client_scrk =
+			"QUEUEDJOINSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
+	const PeerAddr first_peer{0x0100007Fu, 32401};
+	const PeerAddr second_peer{0x0100007Fu, 32402};
+	std::string first_scrk;
+	std::string second_scrk;
+	std::vector<ProtocolMessage> second_post;
+	if (!handshake(ctx, first_peer, client_scrk, 0x40404040u, first_scrk)) return false;
+	// The helper itself requires the 0x02 answered and the node kept.
+	if (!handshake(ctx, second_peer, client_scrk, 0x41414141u, second_scrk, nullptr, nullptr,
+				true, &second_post))
+		return false;
+	if (!expect(find_reply(second_post, s2c::FULL_PLAYER_INFO) != nullptr &&
+	                    find_reply(second_post, s2c::PLAYER_NAME) != nullptr,
+	            "the queued joiner's 0x02 is answered with the post-handshake 0x7A / 0x7B"))
+		return false;
+	const inmatch::NapiNPConnection *first = nullptr;
+	const inmatch::NapiNPConnection *second = nullptr;
+	for (const inmatch::NapiNPConnection &c : ctx.np_protocol.connection_list) {
+		if (c.peer == first_peer) first = &c;
+		if (c.peer == second_peer) second = &c;
+	}
+	if (!expect(first != nullptr && second != nullptr && first->reply.player_slot_reserved &&
+	                    !second->reply.player_slot_reserved &&
+	                    second->admission_stage == inmatch::GameAdmissionStage::Complete,
+	            "the first holds the joiner row; the second completes its admission without one"))
+		return false;
+
+	advance_to_periodic_second(world);
+	const std::vector<inmatch::TickOut> spawn_out = inmatch::tick_connections(ctx, 16, 6);
+	bool second_held_nag = false;
+	for (const inmatch::TickOut &tick : spawn_out) {
+		if (!(tick.peer == second_peer)) continue;
+		for (const std::vector<uint8_t> &datagram : tick.outbound) {
+			ProtocolPacketHeader header;
+			std::vector<ProtocolMessage> messages;
+			if (!decode_s2c(datagram, second_scrk, header, messages)) continue;
+			const ProtocolMessage *nag = find_reply(messages, 0x03);
+			if (nag != nullptr && nag->payload == std::vector<uint8_t>{0x00}) second_held_nag = true;
+		}
+	}
+	first = second = nullptr;
+	for (const inmatch::NapiNPConnection &c : ctx.np_protocol.connection_list) {
+		if (c.peer == first_peer) first = &c;
+		if (c.peer == second_peer) second = &c;
+	}
+	if (!expect(first != nullptr && first->phase >= inmatch::ConnectionPhase::PlayerAdded &&
+	                    second != nullptr &&
+	                    second->phase < inmatch::ConnectionPhase::PlayerAdded &&
+	                    inmatch::connection_count(ctx) == 2 && second_held_nag,
+	            "the pump adds the first and holds the second, re-sending it the S2C 0x03 {00}"))
+		return false;
+
+	// On a LAN host the second joiner's 0x01 entered state 6, so the join watchdog never visits
+	// it: past 120 s it is still connected and still re-sent the 0x03.
+	// [orig: the C2S 0x01 handler @0x512FAF..0x512FB3; CNapiNetwork_CheckPlayerTimeouts - states
+	//  3 / 4 alone @0x4C8B7C, @0x4C8BD4]
+	ctx.np_protocol.host_run_duration_ms = 0x1D4C0u + 2000u;
+	inmatch::Server_CheckPlayerTimeouts(ctx);
+	advance_to_periodic_second(world);
+	const std::vector<inmatch::TickOut> later_out = inmatch::tick_connections(ctx, 16, 7);
+	bool still_nagged = false;
+	for (const inmatch::TickOut &tick : later_out) {
+		if (!(tick.peer == second_peer)) continue;
+		for (const std::vector<uint8_t> &datagram : tick.outbound) {
+			ProtocolPacketHeader header;
+			std::vector<ProtocolMessage> messages;
+			if (!decode_s2c(datagram, second_scrk, header, messages)) continue;
+			const ProtocolMessage *nag = find_reply(messages, 0x03);
+			if (nag != nullptr && nag->payload == std::vector<uint8_t>{0x00}) still_nagged = true;
+		}
+	}
+	second = nullptr;
+	for (const inmatch::NapiNPConnection &c : ctx.np_protocol.connection_list)
+		if (c.peer == second_peer) second = &c;
+	return expect(second != nullptr && !second->join_ticket_validation &&
+	                      !second->host_disconnect_sent && inmatch::connection_count(ctx) == 2 &&
+	                      still_nagged,
+	        "past 120 s the held LAN joiner is still connected and still re-sent the 0x03");
+}
+
 // A Serve Only host (D-NET-400) advertises, admits and publishes its session cap; only the
 // slot limit carries its own slot. A cfg block with a cap of 2, dedicated, makes a session
 // whose LAN discovery 0x81 MP is 2 (protocol +0x524, the session's copy of the cap), whose
@@ -3128,8 +3343,7 @@ bool run_dedicated_host_advertises_and_admits_its_cap() {
 	cfg.mp_max_players = 2;
 	cfg.dedicated = 1;
 	cfg.unlimited_vehicles = 0;
-	// The gate's bare cap: retail adds the lineup queue's size while it is on
-	// (stock 1 / 100), which the port does not model (D-NET-403).
+	// The gate's bare cap: the lineup queue off (stock 1 / 100 would admit the third).
 	cfg.mp_use_lineup_queue = 0;
 	const inmatch::HostScreenState serve_only = inmatch::host_session_settings(cfg);
 	inmatch::NapiNPServerCtx ctx;
@@ -3176,6 +3390,28 @@ bool run_dedicated_host_advertises_and_admits_its_cap() {
 	            rejected.cr == 0 && rejected.jfc == 14 && rejected.jfp == 4 &&
 	            inmatch::connection_count(ctx) == 2,
 	            "the third joiner meets the full cap, not the dedicated slot")) return false;
+
+	// The stock queue on: the same third joiner is admitted past the cap.
+	{
+		gamecfg::GameCfg queued = gamecfg::defaults();
+		queued.mp_max_players = 2;
+		queued.dedicated = 1;
+		const inmatch::HostScreenState stock = inmatch::host_session_settings(queued);
+		inmatch::NapiNPServerCtx queued_ctx;
+		inmatch::test::bring_up_host(queued_ctx, inmatch::ConnectionMode::HostOnly,
+				inmatch::SocketMode::Lan, kHostKey, nullptr, stock.config);
+		auto queued_join = [&](const PeerAddr &p, uint32_t ck, uint32_t now) {
+			auto a = craft_auth("JOINTOPERATIONS", kHostKey, ck, scrk);
+			return inmatch::handle_server_datagram(queued_ctx, p, a.data(), a.size(), now);
+		};
+		queued_join(PeerAddr{ 0x0100007Fu, 32161 }, 0x5161u, 2);
+		queued_join(PeerAddr{ 0x0100007Fu, 32162 }, 0x5162u, 3);
+		queued_join(PeerAddr{ 0x0100007Fu, 32163 }, 0x5163u, 4);
+		if (!expect(stock.config.join_capacity() == 102 &&
+							inmatch::connection_count(queued_ctx) == 3,
+					"the stock lineup queue (1 / 100) admits a third joiner past a cap of 2"))
+			return false;
+	}
 
 	cfg.dedicated = 0;
 	cfg.unlimited_vehicles = 2;
@@ -4097,6 +4333,8 @@ int main(int argc, char **argv) {
 	ok = run_host_server_hello_writes_its_own_identity() && ok;
 	ok = run_spectator_admission_codes_match_retail() && ok;
 	ok = run_capacity_rejects_when_full() && ok;
+	ok = run_join_gate_admits_the_lineup_queue() && ok;
+	ok = run_lineup_joiner_past_the_rows_is_held_not_dropped() && ok;
 	ok = run_dedicated_host_advertises_and_admits_its_cap() && ok;
 	ok = run_mps_negotiates_the_connection_ceiling() && ok;
 	ok = run_character_join_vars_parsed() && ok;

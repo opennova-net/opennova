@@ -149,8 +149,7 @@ int main() {
 			CHECK(!config.allow_ai);
 			CHECK(config.time_of_day_continuity == 1);
 			CHECK(config.game_type == game_type::kDeathmatch);
-			CHECK(server->host_screen().use_lineup_queue == 0);
-			CHECK(server->host_screen().lineup_queue_size == 7);
+			CHECK(config.use_lineup_queue == 0 && config.lineup_queue_size == 7);
 			CHECK(!server->role().state.host_owner.serve_and_play);
 			CHECK(server->game_cfg().remote_admin_port == 4711);
 			// The cfg's one-port range was the bind scan.
