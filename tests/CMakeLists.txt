@@ -4764,7 +4764,7 @@ set_tests_properties(opennova_serve_server_command_push PROPERTIES RUN_SERIAL TR
 # opennova-serve's remote-admin server (ADR 0051 PR5b) over real loopback TCP, with a LAN joiner
 # in a synthetic two-map rotation: the login, PLAYER LIST, the MISSION verbs (ADD ONESHOT at a
 # position, SETNEXT, CYCLE, the one-shot's removal), SET and game.cfg's save, CHAT SEND as S2C
-# 0x14, PLAYER BAN on a LAN host, QUIT, and the working
+# 0x14, PLAYER BAN on a LAN host, a second session beside the first, QUIT, and the working
 # directory's admin.cfg, admin_log.txt and banned.txt. No retail data.
 add_executable(opennova_serve_admin_test serve/opennova_serve_admin_test.cpp)
 target_link_libraries(opennova_serve_admin_test PRIVATE opennova_serve_core)

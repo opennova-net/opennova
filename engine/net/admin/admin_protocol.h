@@ -13,15 +13,11 @@ namespace opennova {
 // The retail remote-admin protocol, client side: the TCP console the game server opens on
 // `remote_admin_port` (CAdminServer), as the retail admin client RAT.exe speaks it. The server
 // sends a challenge, the client answers with the encrypted login, then sends one NUL-terminated
-// command per packet and reads the text replies. Only the read-only commands a server listing
-// needs are named here. The witness record is docs/net/novaworld-net-re.md §6.9.
+// command per packet and reads the text replies. Its one client is the NovaWorld service's admin
+// link to its hosted servers (apps/novaworld_server/hosted/admin_link.h), and the parsers below
+// are what its console routes read. The witness record is docs/net/novaworld-net-re.md §6.9.
 // [orig: CAdminServer_ProcessFrame @0x406f50; CAdminServer_ProcessClientData @0x406ec0;
 //  CAdminServer_HandleLogin @0x405870; CAdminServer_DispatchCommand @0x406720]
-
-// The server's port is `remote_admin_port`, 0 (the listener off) by default; RAT.exe dials
-// 0x8020 when its `open` names no port. [orig: Config_SetDefaults @0x54d454;
-//  Game_InitSubsystems @0x4a72c7; RAT.exe @0x401057]
-inline constexpr uint16_t ADMIN_CLIENT_DEFAULT_PORT = 32800;
 
 // Every packet: the u32le marker 0x0A0D0000, the u32le total length (this header included),
 // the payload. [orig: CAdminServer_SendResponse @0x402d40 @0x402d6b..0x402d85]
@@ -36,9 +32,6 @@ inline constexpr size_t ADMIN_CHALLENGE_BYTES = 33;
 inline constexpr size_t ADMIN_LOGIN_BYTES = 65;
 inline constexpr size_t ADMIN_LOGIN_FIELD_MAX_CHARS = 31;
 
-inline constexpr const char *ADMIN_COMMAND_PLAYER_LIST = "PLAYER LIST";
-inline constexpr const char *ADMIN_COMMAND_MISSION_LIST = "MISSION LIST";
-inline constexpr const char *ADMIN_COMMAND_GET_GAMESETTINGS = "GET GAMESETTINGS";
 // The orderly end: the server closes the connection itself, freeing its slot.
 // [orig: DispatchCommand @0x406811; RAT.exe @0x401475]
 inline constexpr const char *ADMIN_COMMAND_QUIT = "QUIT";
@@ -158,10 +151,5 @@ std::vector<std::string> admin_parse_chat_window(std::string_view reply);
 // GET GAMESETTINGS: its "<Key padded to 21> = <value>\n" rows as (key, value), in order.
 // [orig: CAdminServer_HandleGet @0x403434..0x403D42]
 std::vector<std::pair<std::string, std::string>> admin_parse_game_settings(std::string_view reply);
-// MISSION LIST: the <CURRENT MISSION> entry's file name without its .bms/.npj/.npz extension;
-// "" when no entry is current.
-std::string admin_parse_current_mission(std::string_view reply);
-// GET GAMESETTINGS: the round's remaining whole minutes; -1 when untimed or run out.
-int admin_parse_time_left_minutes(std::string_view reply);
 
 } // namespace opennova

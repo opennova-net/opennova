@@ -11,6 +11,8 @@
 //     not a SET key (retail's usage and `Setting Not Found`, no save);
 //   - CHAT SEND reaches the joiner as S2C 0x14 [10][255], and CHAT GET lists the host's ring;
 //   - PLAYER BAN on the LAN joiner: no PCID, so the error and no punt;
+//   - a second session logs in, runs PLAYER LIST and QUITs beside the first, which stays
+//     connected and answers after it (the hosted shape: the service's link beside a RAT.exe);
 //   - QUIT closes the connection.
 // Then the files: admin_log.txt's lines, banned.txt loaded at the session start and saved at
 // the exit when dirty. Last, on a fresh server, GOTO MENUSTATE quits the session.
@@ -374,6 +376,22 @@ int main() {
 			"PLAYER BAN on a LAN joiner");
 	std::this_thread::sleep_for(300ms);
 	CHECK(rig.with([&] { return !rig.client.session_lost() && rig.client.in_match(); }));
+
+	// --- A second session beside this one, the hosted shape (the service's admin link next to
+	// an owner's RAT.exe): it logs in, lists the players and QUITs while the first stays
+	// connected, and the first still answers after it.
+	{
+		AdminClient second;
+		CHECK(second.connect(admin_port));
+		CHECK(second.login("boss", "pw"));
+		const std::vector<AdminPlayer> players = admin_parse_player_list(second.one("PLAYER LIST"));
+		CHECK(players.size() == 1 && players[0].name == "ServeJoiner");
+		CHECK(second.send(admin_encode_command("QUIT")));
+		uint8_t closed = 0;
+		CHECK(net::tcp_recv(second.socket.get(), &closed, 1) == 0);
+	}
+	CHECK(admin.one("PLAYER LIST")
+					.rfind("NAME            \t #\tTEAM\tClass\tKills\tDeaths\tPING\n", 0) == 0);
 
 	// --- QUIT: the server closes the connection with no reply.
 	CHECK(admin.send(admin_encode_command("QUIT")));
