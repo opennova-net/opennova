@@ -1644,15 +1644,17 @@ static const Diagnostic *finding_on(const std::vector<Diagnostic> &diagnostics, 
 	return nullptr;
 }
 
-// What a validation costs (ADR 0046 S9e, S13 D4): each file's own findings are made once and
-// kept while what they were made from holds (a closed file's size and modified time as the
-// scan says them, an open document's instance and revision), so an edit to an open document
-// validates that document alone, extracts it alone and reads no file; no request runs the
-// validation (S13 A3): the edits between two polls validate once, at the poll, and a finding
-// reported between them survives it; the build gates on the session's own findings, so an error
-// an unsaved edit made still blocks it; a closed file changed on disk is read again at the next
-// refresh, alone; an open one changed on disk is read again (or kept as it was, its error
-// blocking) before the build's gate; a rename asked while a validation is due lists every
+// What a validation costs as the session's polls run it (ADR 0046 S9e, S13 D4). What one validation
+// reads and makes (an open document's findings from the document, reading no file; one edit of it that
+// document alone, the graph extracting it alone; a closed file changed on disk read again alone) is
+// project_validation_test's test_what_a_validation_reads, and a Move to a record's own place or a Set of
+// the value a field holds recording nothing is document_core_test's (test_structural_edits,
+// test_set_same_value). Here: no request runs the validation (S13 A3): an edit's finding is listed at
+// the poll, the edits between two polls validate once, and a finding reported between them survives it;
+// the build gates on the session's own findings, so an error an unsaved edit made still blocks it; a
+// closed file that no longer loads keeps its finding at each refresh while it stays as it is, a refresh
+// that finds nothing changed composing no row; an open one changed on disk is read again (or kept as it
+// was, its error blocking) before the build's gate; a rename asked while a validation is due lists every
 // document with unsaved edits on its prompt (it plans again once the validation it joins ends).
 static int test_validation_cost() {
 	editor_test::TempProjectDir dir("opennova_editor_session_validation");
@@ -1677,15 +1679,12 @@ static int test_validation_cost() {
 	TEST_EXPECT(stats.files_validated == editable && stats.files_loaded == editable &&
 			stats.files_reused == 0 && stats.files_failed == 0);
 
-	// Opening a document leaves the validation due; the poll validates it from the document,
-	// reading nothing: the other files' findings are kept.
+	// Opening a document leaves the validation due; the poll runs it.
 	session.handle(request::open_document("items.def"));
 	session.poll();
 	Document *items = session.document_for("items.def");
 	TEST_EXPECT(items != nullptr && !items->rows().empty());
 	if (!items || items->rows().empty()) return 1;
-	TEST_EXPECT(stats.files_validated == 1 && stats.files_loaded == 0 &&
-			stats.files_reused == editable - 1);
 	const NodeAddress marker{items->rows()[0]->id, items->rows()[0]->kind, 0};
 	auto set = [&](const char *field, Value value) {
 		EditorRequest request = request::edit_record(items->path(), Edit());
@@ -1695,15 +1694,13 @@ static int test_validation_cost() {
 		session.handle(request);
 	};
 
-	// One Set on the open document, then the poll: one validation of that document alone, no file
-	// read, the graph extracting that document alone, the edit's finding listed.
+	// One Set on the open document, then the poll: one validation, the edit's finding listed (the file
+	// on disk holds none: validated from the document).
 	size_t passes = stats.passes;
 	set("type", int64_t(0));
 	TEST_EXPECT(stats.passes == passes && !has_code(v.findings.diagnostics, "catalog.item_type"));
 	session.poll();
-	TEST_EXPECT(stats.passes == passes + 1 && stats.files_validated == 1 &&
-			stats.files_loaded == 0 && stats.files_reused == editable - 1);
-	TEST_EXPECT(v.findings.graph->stats().files_extracted == 1);
+	TEST_EXPECT(stats.passes == passes + 1);
 	TEST_EXPECT(has_code(v.findings.diagnostics, "catalog.item_type"));
 	set("type", int64_t(4));
 	session.poll();
@@ -1737,23 +1734,6 @@ static int test_validation_cost() {
 			v.findings.diagnostics.back().code() == "document.value");
 	TEST_EXPECT(count_code(v.findings.diagnostics, "document.value") == 2);
 	TEST_EXPECT(!has_code(v.findings.diagnostics, "catalog.item_type"));
-	// A Move to where the record already is changes nothing: nothing to validate.
-	passes = stats.passes;
-	EditorRequest stay = request::edit_record(items->path(), Edit());
-	stay.edits[0].operation = EditOperation::Move;
-	stay.edits[0].address = marker;
-	stay.edits[0].position = 0;
-	session.handle(stay);
-	TEST_EXPECT(stats.passes == passes);
-	// So does a Set of the value the field holds (S12 Z2): no step, the document's revision as
-	// it was, nothing to validate.
-	Value type_now;
-	TEST_EXPECT(items->get(marker, "type", type_now));
-	const uint64_t revision_now = items->revision();
-	const bool dirty_now = items->dirty();
-	set("type", type_now);
-	TEST_EXPECT(session.last_edit_ok() && stats.passes == passes && items->revision() == revision_now &&
-	            items->dirty() == dirty_now);
 
 	// An unsaved edit that errs: Build waits on the unsaved prompt (the edit's finding listed at
 	// the poll); the prompt's Save writes the file and builds over the session's own findings, which
@@ -1813,16 +1793,6 @@ static int test_validation_cost() {
 	TEST_EXPECT(stats.files_validated == 1 && stats.files_loaded == 1 && stats.files_failed == 0 &&
 			stats.files_reused == editable - 1);
 	TEST_EXPECT(finding_on(v.findings.diagnostics, menu) == nullptr);
-	// The same size with a new modified time: read again too.
-	const AssetEntry *weapons = v.project.scan->find("weapon.def");
-	TEST_EXPECT(weapons != nullptr);
-	if (!weapons) return 1;
-	const fs::path weapon_path = fs::path(root) / weapons->relative_path;
-	fs::last_write_time(weapon_path, fs::last_write_time(weapon_path) + std::chrono::hours(1));
-	session.handle(request::rescan());
-	session.run_operations();
-	TEST_EXPECT(stats.files_validated == 1 && stats.files_loaded == 1 &&
-			stats.files_reused == editable - 1);
 
 	// Build packs the files on disk: a clean open document whose file changed outside the
 	// editor is read again before the gate, so the gate sees what the build packs (here an item of
