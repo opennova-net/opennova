@@ -37,13 +37,11 @@ export function cp1252Problem(text: string, cap?: number): string | null {
   }
   if (missing.length > 0) {
     const shown = missing.slice(0, 4).map((ch) => `“${ch}”`).join(', ');
-    return `The game server's text is Windows-1252, which has no character for ${shown}. Remove ${
-      missing.length === 1 ? 'it' : 'them'
-    } and try again.`;
+    return `The game cannot show ${shown}. Use only standard letters, numbers and punctuation.`;
   }
   const length = cp1252Length(text);
   if (cap !== undefined && length > cap) {
-    return `The game server keeps ${cap} characters at most; this is ${length}.`;
+    return `Use ${cap} characters at most; this is ${length}.`;
   }
   return null;
 }

@@ -104,7 +104,7 @@ function messageFor(code: HostedErrorCode, field?: SettingsField, retryAfterSeco
     case 'not_approved':
       return 'Your account is not approved to host a server, or is no longer active.';
     case 'already_live':
-      return 'You already have a hosted server. It is shown below.';
+      return 'You already have a hosted server running.';
     case 'at_capacity':
       return 'Every hosted server place on this service is taken. Try again later.';
     case 'no_live_server':
@@ -428,9 +428,9 @@ function consoleMessageFor(
     case 'invalid_index':
       return `A rotation entry is numbered 0 to ${MISSIONS_MAX - 1}.`;
     case 'invalid_mission':
-      return 'A mission is a .bms file name of letters, digits, _ and -.';
+      return 'That is not a map name. Pick a map from the list.';
     case 'invalid_text':
-      return `A chat line is 1 to ${CHAT_TEXT_MAX} characters of the game's Windows-1252 text, with no control characters.`;
+      return `A chat line is 1 to ${CHAT_TEXT_MAX} characters. Use only standard letters, numbers and punctuation.`;
     case 'invalid_json':
     case 'invalid_field':
     case 'missing_field':

@@ -1,21 +1,14 @@
 <template>
-  <article
-    class="space-y-6 rounded-panel border border-border bg-panel p-6"
-    :aria-labelledby="ids.name"
+  <component
+    :is="embedded ? 'div' : 'article'"
+    :class="embedded ? 'space-y-6' : 'space-y-6 rounded-panel border border-border bg-panel p-6'"
+    :aria-labelledby="embedded ? undefined : ids.name"
   >
-    <header class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <header v-if="!embedded" class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
       <div class="min-w-0">
-        <h2 :id="ids.name" class="truncate text-2xl font-semibold text-ink">
+        <h3 :id="ids.name" class="truncate text-2xl font-semibold text-ink">
           {{ server.server_name || 'Unnamed server' }}
-        </h2>
-        <p v-if="isHosted" class="mt-1 text-sm">
-          <RouterLink
-            to="/me/server"
-            class="inline-flex items-center gap-2 rounded-control bg-accent/15 px-2 py-0.5 text-xs font-semibold uppercase tracking-wider text-accent hover:bg-accent/25"
-          >
-            Your hosted server<span class="sr-only">: open its page</span>
-          </RouterLink>
-        </p>
+        </h3>
         <p class="mt-1 text-sm text-ink-muted">
           <span class="text-ink">{{ server.mission_name || 'No mission yet' }}</span>
           <span v-if="server.game_type"> · {{ server.game_type }}</span>
@@ -51,8 +44,8 @@
     </p>
 
     <div class="grid gap-6 lg:grid-cols-2">
-      <!-- TextChatServer -->
-      <form class="space-y-2" @submit.prevent="sendChat">
+      <!-- TextChatServer (a hosted server's chat is its console's) -->
+      <form v-if="!embedded" class="space-y-2" @submit.prevent="sendChat">
         <label :for="ids.chat" class="block text-xs font-medium uppercase tracking-wider text-ink-muted">
           Say to everyone on the server
         </label>
@@ -93,9 +86,8 @@
           <button type="submit" :disabled="busy" :class="primaryButton">Rename</button>
         </div>
         <p :id="ids.nameHint" class="text-xs text-ink-muted">
-          {{ cp1252Length(name) }} of 31 characters, in the game's Windows-1252 text (accented
-          Latin letters work; emoji and most other scripts do not). The server saves it in its
-          game.cfg; the browser shows it after the server's next update.
+          {{ cp1252Length(name) }} of 31 characters. Accented letters work; emoji and most other
+          scripts do not.
         </p>
       </form>
 
@@ -120,7 +112,7 @@
           <button type="submit" :disabled="busy" :class="primaryButton">Set</button>
         </div>
         <p :id="ids.msgHint" class="text-xs text-ink-muted">
-          {{ cp1252Length(message) }} of 127 characters, in Windows-1252, saved in the server's game.cfg.
+          {{ cp1252Length(message) }} of 127 characters.
         </p>
       </form>
 
@@ -142,8 +134,8 @@
           <button type="button" :disabled="busy" :class="warnButton" @click="endMission('GameOver')">Game over</button>
         </div>
         <p :id="ids.missionHint" class="text-xs text-ink-muted">
-          Each ends the running mission for everyone on the server, with the winner you pick, and the
-          server moves on to the next map in its rotation (a stock host runs the three alike).
+          Each ends the mission for everyone on the server, with the winner you pick, and moves on to
+          the next map.
         </p>
       </fieldset>
 
@@ -186,9 +178,10 @@
       </fieldset>
     </div>
 
-    <!-- Players: PuntPlayer / KillPlayer / ChangeTeam, aimed ByIndex at a roster slot -->
-    <section class="space-y-3" :aria-labelledby="ids.players">
-      <h3 :id="ids.players" class="text-lg font-semibold text-ink">Players</h3>
+    <!-- Players: PuntPlayer / KillPlayer / ChangeTeam, aimed ByIndex at a roster slot (a
+         hosted server's players are its console's) -->
+    <section v-if="!embedded" class="space-y-3" :aria-labelledby="ids.players">
+      <h4 :id="ids.players" class="text-lg font-semibold text-ink">Players</h4>
       <p v-if="server.roster.length === 0" class="text-sm text-ink-muted">
         No players in the game, as of the server's last update.
       </p>
@@ -227,26 +220,11 @@
       </div>
     </section>
 
-    <!-- A hosted server's listing: its stop is the hosted server's own, from its page. -->
-    <section
-      v-if="isHosted"
-      class="space-y-3 rounded-panel border border-border p-4"
-      :aria-labelledby="ids.stop"
-    >
-      <h3 :id="ids.stop" class="text-lg font-semibold text-ink">Stop hosting</h3>
+    <!-- ServerStopHosting (MsgCode 7); a hosted server's stop is its section's -->
+    <section v-if="!embedded" class="space-y-3 rounded-panel border border-danger/40 p-4" :aria-labelledby="ids.stop">
+      <h4 :id="ids.stop" class="text-lg font-semibold text-danger">Stop hosting</h4>
       <p class="text-sm text-ink-muted">
-        This listing is your hosted server. Stop it from its page, where you can follow it until its
-        machine has shut down.
-      </p>
-      <RouterLink to="/me/server" :class="secondaryButton" class="inline-block">Open my hosted server</RouterLink>
-    </section>
-
-    <!-- ServerStopHosting (MsgCode 7) -->
-    <section v-else class="space-y-3 rounded-panel border border-danger/40 p-4" :aria-labelledby="ids.stop">
-      <h3 :id="ids.stop" class="text-lg font-semibold text-danger">Stop hosting</h3>
-      <p class="text-sm text-ink-muted">
-        Ends the running match for everyone on the server: every player is dropped, the server
-        goes back to its main menu and leaves NovaWorld.
+        Ends the match for everyone on the server and takes it off NovaWorld.
       </p>
       <button
         v-if="!confirmingStop"
@@ -282,12 +260,17 @@
         </div>
       </form>
     </section>
-  </article>
+  </component>
 </template>
 
 <script setup lang="ts">
+// One of the account's listed servers with the owner's pushes to it
+// (api/myServers.ts), on the My servers page. `embedded` puts it inside the
+// hosted server's section (HostedServerStatus) for that server's own listing,
+// with only what its console lacks: the name, the message, the mission's end
+// and the weather and time. Its header, chat, players and stop are then the
+// section's own.
 import { computed, nextTick, ref } from 'vue';
-import { RouterLink } from 'vue-router';
 import { sendServerCommand, stopHosting, type HostError } from '../api/myServers';
 import type { MyServer, OwnerVerb, RosterSlot, ServerCommandBody } from '../types/myServers';
 import { cp1252Length, cp1252Problem } from '../utils/cp1252';
@@ -297,6 +280,8 @@ const props = defineProps<{
   server: MyServer;
   // The page's clock (ms), for the "ago" times.
   now: number;
+  // Inside the hosted server's section: the controls its console lacks alone.
+  embedded?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -368,10 +353,6 @@ function teamLabel(team: string): string {
   if (!team) return 'None';
   return TEAM_NAMES[team] ?? team;
 }
-
-// A listing of one of the account's hosted servers (its service account's):
-// its stop is the hosted server's own, from /me/server.
-const isHosted = computed(() => props.server.hosted_server_id != null);
 
 function ago(utc: string): string {
   return agoAt(utc, props.now);

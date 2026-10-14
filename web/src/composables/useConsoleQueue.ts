@@ -1,5 +1,5 @@
 // The page's one hosted-console queue (utils/consoleQueue.ts). A page with a
-// console (HostedServerPage, the admin's HostedSection) makes it in its setup
+// console (MyServersPage, the admin's HostedSection) makes it in its setup
 // with provideConsoleQueue, and every console panel inside it takes that one
 // with useConsoleQueue, so all of the page's admitted console calls run one at
 // a time: the service answers an account's second concurrent console request

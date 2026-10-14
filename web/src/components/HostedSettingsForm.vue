@@ -6,10 +6,15 @@
     @submit.prevent="submit"
   >
     <div class="space-y-2">
-      <h2 :id="`${baseId}-heading`" class="text-2xl font-semibold text-ink">Start a server</h2>
+      <h2 :id="`${baseId}-heading`" class="text-2xl font-semibold text-ink">
+        {{ retry ? 'Start your server again' : 'Start your hosted server' }}
+      </h2>
       <p class="text-sm text-ink-muted">
-        The service runs your server on a machine of its own and lists it on NovaWorld, where it stays
-        until you stop it. Every setting is checked here first and again by the service.
+        {{
+          retry
+            ? 'Your last server failed. Check its settings and try again.'
+            : 'Pick your settings and start. Your server stays in the server browser until you stop it.'
+        }}
       </p>
     </div>
 
@@ -41,8 +46,7 @@
         />
         <p :id="hintId('game_name')" class="text-xs text-ink-muted">
           {{ cp1252Length(form.game_name.trim()) }} of {{ GAME_NAME_MAX }} characters. Players see it in the
-          server browser. The game's text is Windows-1252: accented Latin letters work, emoji and most other
-          scripts do not, and a double quote is not allowed.
+          server browser. Accented letters work; emoji, most other scripts and double quotes do not.
         </p>
         <p v-if="errors.game_name" :id="errorId('game_name')" class="text-xs text-danger">{{ errors.game_name }}</p>
       </div>
@@ -174,22 +178,23 @@
     />
 
     <div class="flex flex-col gap-3 border-t border-border pt-6 sm:flex-row sm:items-center sm:justify-between">
-      <p class="text-xs text-ink-muted">
-        Hosted servers are experimental (pre-1.0). Starting takes a few minutes; this page follows it.
-      </p>
+      <p class="text-xs text-ink-muted">Hosted servers are experimental (pre-1.0).</p>
       <button
         type="submit"
         :disabled="busy"
         class="rounded-control bg-accent px-6 py-3 font-semibold text-on-accent transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {{ busy ? 'Starting…' : 'Start server' }}
+        {{ busy ? 'Starting…' : retry ? 'Try again' : 'Start server' }}
       </button>
     </div>
   </form>
 </template>
 
 <script setup lang="ts">
-// The hosted server's settings and its start (POST /api/me/server/start).
+// The hosted server's settings and its start (POST /api/me/server/start):
+// the My servers page's one start control, offered only while the account
+// has no live server (the service allows one: 409 already_live). After a
+// failed server it is the owner's try again, with that server's settings.
 // Every field is checked against the backend's rule (utils/hostedSettings.ts)
 // before the request; a refusal the backend gives on one field
 // (invalid_settings) marks that field with the rule, never the backend's text.
@@ -218,6 +223,8 @@ const props = defineProps<{
   previous: HostedSettings | null;
   // The service's missions (GET /api/me/server default_missions).
   defaultMissions: string[];
+  // The last server failed: the start is another try at it.
+  retry?: boolean;
 }>();
 
 const emit = defineEmits<{

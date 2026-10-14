@@ -627,7 +627,7 @@ pages, the `.gsb` feeds and the logins:
   `rotation_busy`, and two removes can never both pass the last-map check.
 
 `GET .../console` reads the database alone and is not admitted. The site serializes its
-console calls per page: the My server page and the admin's hosted page each send every
+console calls per page: the My servers page and the admin's hosted page each send every
 admitted call (their polls and their commands; the console log's read is not admitted, so
 it runs beside them) through one queue (`web/src/utils/consoleQueue.ts`), a command ahead
 of the waiting polls, so a page never meets its own `console_busy`.

@@ -308,7 +308,7 @@ A backup sidecar also runs nightly (see `deploy/backup/`).
 ## 6. Hosted game servers
 
 An account an admin approved (`can_host` in the admin users page) can start one
-headless Joint Operations server from the site's My server page (ADR 0053). The service
+headless Joint Operations server from the site's My servers page (ADR 0053). The service
 launches one EC2 machine per server (`infra/aws/hosted.tf`, `c7a.medium` by default),
 running the public `opennova-serve` image over the game data, a private encrypted EBS
 snapshot made once from your licensed install and mounted read-only. The server lists
@@ -447,7 +447,7 @@ players never reach it (the machines mount it read-only and run nothing but the 
 
 ### The smoke test
 
-1. Start a server from My server. Its timeline runs `requested`, `provisioning`,
+1. Start a server from My servers. Its timeline runs `requested`, `provisioning`,
    `booting` (the machine boots, installs docker, mounts the data and fetches its
    bundle: a few minutes), `listing`, then `running`.
    `./deploy/run.sh hosted status` lists the machine. Note how long `booting` and
@@ -464,7 +464,7 @@ players never reach it (the machines mount it read-only and run nothing but the 
    server's timeline shows the crash and a restart on a new machine (restart 1 of 3).
 5. Restart the service (`./deploy/run.sh app restart novaworld`): the running server
    resumes on its machine and lists again.
-6. Stop it from My server: the machine terminates (`hosted status` shows it
+6. Stop it from My servers: the machine terminates (`hosted status` shows it
    `shutting-down`, then nothing).
 7. The bootstrap route answers no one outside the VPC:
    `curl -i -X POST http://<EIP>:8080/hosted/bootstrap/1` answers 404.

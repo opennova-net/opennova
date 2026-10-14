@@ -179,7 +179,7 @@
             The rotation is full: it holds {{ MISSIONS_MAX }} maps at most. Remove one to add another.
           </template>
           <template v-else-if="missions !== null && addable.length === 0">
-            The server lists no mission this console can add (a .bms name of letters, digits, _ and -).
+            The server has no mission to add.
           </template>
           <template v-else>
             From the missions the server has. The rotation holds {{ MISSIONS_MAX }} maps at most.
@@ -235,8 +235,8 @@
         <p :id="ids.chatHint" class="text-xs" :class="chatProblem ? 'text-danger' : 'text-ink-muted'">
           <template v-if="chatProblem">{{ chatProblem }}</template>
           <template v-else>
-            {{ cp1252Length(chatText.trim()) }} of {{ CHAT_TEXT_MAX }} characters, in the game's Windows-1252 text.
-            The server drops a line repeated within about 20 seconds.
+            {{ cp1252Length(chatText.trim()) }} of {{ CHAT_TEXT_MAX }} characters. The server drops a line repeated
+            too quickly.
           </template>
         </p>
       </form>
@@ -277,7 +277,7 @@
 // its chat and its console log, read through the service's console routes
 // (api/hostedServer.ts) by useHostedConsole, every call the service admits in
 // the page's one console queue (useConsoleQueue: the service runs one console
-// request per account at once). The owner's view (HostedServerStatus, on /me/server) has
+// request per account at once). The owner's view (HostedServerStatus, on /me/servers) has
 // every command the owner's routes offer: kick, ban, swap and kill a player,
 // add, remove and play-next a map, cycle, and chat. The admin's view
 // (HostedSection, on /admin/hosted) reads the same panels and cycles.

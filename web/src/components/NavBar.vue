@@ -17,7 +17,6 @@
         <template v-if="ready">
           <template v-if="user">
             <RouterLink class="hover:text-ink-bright transition" to="/me/servers">My servers</RouterLink>
-            <RouterLink class="hover:text-ink-bright transition" to="/me/server">Hosted server</RouterLink>
             <span class="text-ink-muted">
               <span class="sr-only">Logged in as </span>
               <span class="normal-case tracking-normal font-medium text-ink">{{ user.username }}</span>
@@ -96,7 +95,6 @@
           <template v-if="ready">
             <template v-if="user">
               <RouterLink class="rounded-control px-3 py-2 hover:bg-hover" to="/me/servers" @click="closeMenu">My servers</RouterLink>
-              <RouterLink class="rounded-control px-3 py-2 hover:bg-hover" to="/me/server" @click="closeMenu">Hosted server</RouterLink>
               <p class="px-3 py-2 text-ink-muted">
                 Logged in as
                 <span class="normal-case tracking-normal font-medium text-ink">{{ user.username }}</span>

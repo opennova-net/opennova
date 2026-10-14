@@ -17,8 +17,7 @@
         offers, up to {{ MISSIONS_MAX }}.
       </template>
       <template v-else>
-        This service names no missions of its own, so add each map by its file name (letters, digits,
-        _ and -, then .bms), up to {{ MISSIONS_MAX }}.
+        This service offers no list of maps, so type each map's name, up to {{ MISSIONS_MAX }}.
       </template>
     </p>
     <p v-if="error" :id="`${baseId}-error`" class="text-xs text-danger">{{ error }}</p>
@@ -236,11 +235,11 @@ async function pick(mission: string, index: number) {
 function addCustom() {
   const name = custom.value.trim();
   if (name === '') {
-    customError.value = 'Type a mission file name first.';
+    customError.value = 'Type a map name first.';
     return;
   }
   if (!isMissionName(name)) {
-    customError.value = `That is not a mission file name: up to ${MISSION_STEM_MAX} letters, digits, _ and -, then .bms.`;
+    customError.value = `That is not a map name. Use up to ${MISSION_STEM_MAX} letters, numbers, _ and -, like mission.bms.`;
     return;
   }
   if (chosen.value.has(name.toLowerCase())) {

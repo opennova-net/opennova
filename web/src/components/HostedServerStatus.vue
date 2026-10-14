@@ -14,7 +14,7 @@
           {{ server.settings.game_name || 'Unnamed server' }}
         </h2>
         <p class="mt-2 flex flex-wrap items-center gap-2 text-sm text-ink-muted">
-          <span :class="stateBadgeClass(server.state)">{{ stateLabel(server.state) }}</span>
+          <span :class="stateBadgeClass(server.state)">{{ ownerStateLabel(server.state) }}</span>
           <span>{{ expansionLabel }}</span>
         </p>
       </div>
@@ -48,8 +48,8 @@
       <h3 :id="ids.progress" class="text-lg font-semibold text-ink">State</h3>
       <ol v-if="stepIndex >= 0" class="flex flex-col gap-2 sm:flex-row sm:gap-1">
         <li
-          v-for="(step, index) in START_STEPS"
-          :key="step"
+          v-for="(step, index) in OWNER_START_STEPS"
+          :key="step.label"
           class="flex items-center gap-2 sm:flex-1 sm:flex-col sm:items-stretch"
           :aria-current="index === stepIndex ? 'step' : undefined"
         >
@@ -59,7 +59,7 @@
             :class="stepBarClass(index)"
           ></span>
           <span class="text-xs" :class="index === stepIndex ? 'font-semibold text-ink' : 'text-ink-muted'">
-            {{ stateLabel(step) }}<span class="sr-only">{{ stepSuffix(index) }}</span>
+            {{ step.label }}<span class="sr-only">{{ stepSuffix(index) }}</span>
           </span>
         </li>
       </ol>
@@ -67,46 +67,51 @@
         class="rounded-panel border p-3 text-sm"
         :class="stateNoteClass"
       >
-        <span class="font-semibold">{{ stateLabel(server.state) }}.</span>
+        <span class="font-semibold">{{ ownerStateLabel(server.state) }}.</span>
         {{ stateDescription(server.state) }}
-        <template v-if="server.state === 'failed' && server.failure_reason">
-          The service's note: {{ server.failure_reason }}.
-        </template>
-        <template v-if="server.state === 'stopping'">This takes up to a minute.</template>
       </p>
       <p v-if="server.live && server.restarts > 0" class="text-sm text-warn">
-        The service restarted it {{ server.restarts }} time{{ server.restarts === 1 ? '' : 's' }} after a crash.
-        After 3 restarts without an hour of running in between, the next crash ends it as failed.
+        It crashed and was restarted {{ server.restarts === 1 ? 'once' : `${server.restarts} times` }}.
       </p>
     </section>
 
-    <!-- The listing the server's NovaWorld account holds. -->
+    <!-- The listing the server's NovaWorld account holds, with the owner's
+         pushes to it (the account's listed servers, GET /api/me/hosts) that
+         the console below lacks, while it runs. -->
     <section v-if="server.live" class="space-y-3" :aria-labelledby="ids.listing">
       <h3 :id="ids.listing" class="text-lg font-semibold text-ink">Listing</h3>
-      <div v-if="server.listing" class="space-y-3 rounded-panel border border-border p-4">
+      <div v-if="shownListing" class="space-y-3 rounded-panel border border-border p-4">
         <dl class="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[auto_1fr]">
           <dt class="text-ink-muted">Name</dt>
-          <dd class="break-words text-ink">{{ server.listing.server_name || server.settings.game_name }}</dd>
+          <dd class="break-words text-ink">{{ shownListing.name }}</dd>
+          <template v-if="shownListing.message">
+            <dt class="text-ink-muted">Message</dt>
+            <dd class="break-words text-ink">{{ shownListing.message }}</dd>
+          </template>
           <dt class="text-ink-muted">Mission</dt>
-          <dd class="break-words text-ink">{{ server.listing.mission_name || 'No mission yet' }}</dd>
+          <dd class="break-words text-ink">{{ shownListing.mission || 'No mission yet' }}</dd>
           <dt class="text-ink-muted">Players</dt>
-          <dd class="text-ink">{{ server.listing.players }} of {{ server.listing.max_players }}</dd>
+          <dd class="text-ink">{{ shownListing.players }} of {{ shownListing.maxPlayers }}</dd>
           <dt class="text-ink-muted">Address</dt>
-          <dd class="break-all font-mono text-ink">{{ server.listing.host_ip }}:{{ server.listing.host_port }}</dd>
+          <dd class="break-all font-mono text-ink">{{ shownListing.address }}</dd>
         </dl>
-        <p class="text-sm text-ink-muted">
-          Players find it in the NovaWorld server browser. Its players, rotation and chat are in the console
-          below; renaming it and its message:
-          <RouterLink to="/me/servers" class="text-accent hover:text-ink-bright">My servers</RouterLink>.
-        </p>
+        <p class="text-sm text-ink-muted">Players find it in the server browser.</p>
       </div>
       <p v-else-if="server.state === 'running'" class="text-sm text-warn">
-        Not listed right now. If its listing stays gone for about a minute, the service ends the server as
-        failed.
+        It is not in the server browser right now.
       </p>
       <p v-else class="text-sm text-ink-muted">
-        Not listed yet: it appears in the server browser once the game server is up.
+        It shows up in the server browser once it is ready.
       </p>
+      <MyServerCard
+        v-if="listing && server.state === 'running'"
+        :key="listing.rid"
+        embedded
+        :server="listing"
+        :now="now"
+        @changed="emit('listing-changed')"
+        @session-ended="emit('session-ended')"
+      />
     </section>
 
     <!-- The settings it was started with. -->
@@ -167,7 +172,7 @@
     <!-- Every transition, oldest first. -->
     <section v-if="events.length > 0" class="space-y-3" :aria-labelledby="ids.timeline">
       <h3 :id="ids.timeline" class="text-lg font-semibold text-ink">Timeline</h3>
-      <details :open="server.live">
+      <details>
         <summary class="cursor-pointer text-sm text-accent hover:text-ink-bright">
           {{ events.length }} event{{ events.length === 1 ? '' : 's' }}, oldest first
         </summary>
@@ -198,8 +203,7 @@
     >
       <h3 :id="ids.stop" class="text-lg font-semibold text-danger">Stop the server</h3>
       <p class="text-sm text-ink-muted">
-        Ends the match for everyone on it and shuts its machine down. Its settings stay on this page, so you
-        can start it again.
+        Ends the match for everyone on it. Its settings stay here, so you can start it again.
       </p>
       <button
         v-if="!confirmingStop"
@@ -240,18 +244,22 @@
 <script setup lang="ts">
 // One hosted server as its owner sees it: where it is in its life
 // (requested -> provisioning -> booting -> listing -> running, then stopping
-// -> stopped, or failed), its listing, its settings, its console while it
-// runs (HostedServerConsole, in the page's console queue), its timeline and,
-// while it is live, the owner's stop (POST /api/me/server/stop). The page
-// (HostedServerPage) polls and hands the server in.
+// -> stopped, or failed), its listing with the owner's pushes its console
+// lacks (MyServerCard, embedded), its settings, its console while it runs
+// (HostedServerConsole, in the page's console queue), its timeline and, while
+// it is live, the owner's stop (POST /api/me/server/stop). The page
+// (MyServersPage) polls and hands the server and its listing in.
 import { computed, nextTick, ref, watch } from 'vue';
-import { RouterLink } from 'vue-router';
 import HostedServerConsole from './HostedServerConsole.vue';
+import MyServerCard from './MyServerCard.vue';
 import { stopHostedServer, type HostedError } from '../api/hostedServer';
 import type { HostedEvent, HostedServer } from '../types/hostedServer';
+import type { MyServer } from '../types/myServers';
 import { FIELD_LABELS } from '../utils/hostedSettings';
 import {
-  START_STEPS,
+  OWNER_START_STEPS,
+  ownerStateLabel,
+  ownerStepIndex,
   stateBadgeClass,
   stateDescription,
   stateLabel,
@@ -262,6 +270,9 @@ const props = defineProps<{
   server: HostedServer;
   // The page's clock (ms), for the "ago" times.
   now: number;
+  // The server's own listing among the account's listed servers, while it is
+  // live and listed; null otherwise.
+  listing?: MyServer | null;
 }>();
 
 const emit = defineEmits<{
@@ -271,8 +282,10 @@ const emit = defineEmits<{
   (e: 'refused', error: HostedError): void;
   // The console was refused because the server is not running any more.
   (e: 'console-gone'): void;
-  // The console was refused the session.
+  // The console or a push to the listing was refused the session.
   (e: 'session-ended'): void;
+  // A push to the listing may have changed it: read the listings again.
+  (e: 'listing-changed'): void;
 }>();
 
 const ids = computed(() => {
@@ -298,6 +311,32 @@ const showPassword = ref(false);
 
 const events = computed<HostedEvent[]>(() => props.server.events ?? []);
 
+// The listing as shown: the account's listed row when the page has it (read
+// every few seconds, so a rename shows soon), else the hosted read's.
+const shownListing = computed(() => {
+  const row = props.listing ?? null;
+  const own = props.server.listing;
+  if (row) {
+    return {
+      name: row.server_name || own?.server_name || props.server.settings.game_name,
+      message: row.msg,
+      mission: row.mission_name || own?.mission_name || '',
+      players: row.players,
+      maxPlayers: row.max_players,
+      address: `${row.host_ip}:${row.host_port}`,
+    };
+  }
+  if (!own) return null;
+  return {
+    name: own.server_name || props.server.settings.game_name,
+    message: '',
+    mission: own.mission_name,
+    players: own.players,
+    maxPlayers: own.max_players,
+    address: `${own.host_ip}:${own.host_port}`,
+  };
+});
+
 // The stop's "stopping" line lasts until the server has ended (its state then
 // says so itself).
 watch(
@@ -312,7 +351,7 @@ const expansionLabel = computed(() =>
 );
 
 // The start step the server is on, or -1 once it is stopping or has ended.
-const stepIndex = computed(() => START_STEPS.indexOf(props.server.state));
+const stepIndex = computed(() => ownerStepIndex(props.server.state));
 
 function stepBarClass(index: number): string {
   if (index < stepIndex.value) return 'bg-online';
@@ -382,10 +421,7 @@ async function confirmStop() {
     stopButton.value?.focus();
     return;
   }
-  status.value =
-    result.value?.state === 'stopped'
-      ? 'Your server has stopped.'
-      : 'Stopping your server: the match ends and its machine shuts down. This page follows it.';
+  status.value = result.value?.state === 'stopped' ? 'Your server has stopped.' : 'Stopping your server.';
   emit('stopped', result.value);
   // The stop section goes with the stopping state: the keyboard goes to the
   // card's heading.
