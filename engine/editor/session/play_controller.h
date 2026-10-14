@@ -93,7 +93,7 @@ public:
 	// over the install itself) where the run directories' volume cannot link the install's files; null for none.
 	std::unique_ptr<InstallCopyFill> copy_fill(const PlayIntent &intent, const BuildReport &built);
 	void stop();
-	// Quit's (S26 #1121 review): a Stop asked for and not yet seen through (a game past its WM_CLOSE, or with no
+	// Quit's (S26 C8): a Stop asked for and not yet seen through (a game past its WM_CLOSE, or with no
 	// window to take it) waited for, its own quit for kPlayQuitGraceMs, then forced (the deadline's kill) for the
 	// rest of kPlayQuitWaitMs, its exit absorbed, so closing the editor, which lets its game go, never leaves running
 	// a game the modder asked to stop. A game running unasked keeps running, as it outlives the editor.

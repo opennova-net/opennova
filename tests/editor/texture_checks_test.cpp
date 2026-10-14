@@ -181,8 +181,8 @@ int test_checks() {
 		            editor_test::write_text(root + "/terrains/l.trn",
 		                                    trn("polytrn_colormap colour.tga\npolytrn_charmap classes.pcx\n")));
 	}
-	// Terrain maps of no TGA through the game's TGA reader, which sizes the texels by bytes 12 to 15 (S26, the #1121
-	// review M3): a PCX whose DPI words read 8 x 8 (image type 1, entries of no 24 bits: cleared black); one of type 5
+	// Terrain maps of no TGA through the game's TGA reader, which sizes the texels by bytes 12 to 15 (S26 A3):
+	// a PCX whose DPI words read 8 x 8 (image type 1, entries of no 24 bits: cleared black); one of type 5
 	// (no arm: its texels unwritten); a PNG, read 18505 x 21060, past the pool; a PCX whose words read 23171 x 23171,
 	// whose 4 x w x h wraps the int the buffer is asked in.
 	{
@@ -261,7 +261,7 @@ int test_checks() {
 	// a warning. Sixteen rows fill the block (320 bytes): the texel lands 4 bytes past it, on the next block's pool
 	// pointer where the allocator split the block it gave, within a block it gave whole (36 bytes more at most): a
 	// warning. Rows of 16 bytes for 6 texels write 40 bytes past a full block, past any block the allocator gives, and
-	// the game faults (S26 A4; the #1121 review m2).
+	// the game faults (S26 A4).
 	TEST_EXPECT(has("texture.pcx_overrun", "textures/odd.pcx", S::Warning, false));
 	TEST_EXPECT(has("texture.pcx_overrun", "textures/oddfull.pcx", S::Warning, false));
 	TEST_EXPECT(has("texture.pcx_overrun", "textures/oddwide.pcx", S::Error, true));
@@ -297,7 +297,7 @@ int test_checks() {
 	TEST_EXPECT(has("texture.colormap_size", "terrains/b.trn", S::Error, false));
 	TEST_EXPECT(has("texture.colormap_size", "terrains/c.trn", S::Warning, false));
 	// A colour map or a blend map that is no TGA: the terrain's TGA reader takes it by its header's words, the
-	// terrain loading on with what the type's arm wrote (S26 A3; the #1121 review M3): a PCX whose DPI words are 0, no
+	// terrain loading on with what the type's arm wrote (S26 A3): a PCX whose DPI words are 0, no
 	// texel; one whose words read 8 x 8 (type 1, entries of no 24 bits), black; one of type 5, texels never written.
 	const auto said = [&](const char *asset, const char *words) {
 		for (const Found &f : found)

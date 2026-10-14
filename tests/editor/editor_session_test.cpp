@@ -3633,7 +3633,7 @@ static int test_rescan_keeps_what_did_not_change() {
 	TEST_EXPECT(!session.outcome().done() && v.project.open && v.documents.open.size() == open &&
 	            session.document_for(project.items_path) == again && again->dirty());
 	// A Discard ahead of a switch that goes through drops the documents before the workspace is remembered, as
-	// Quit's does: the project reopens without them (it reopened with the discarded document, #1121 review).
+	// Quit's does: the project reopens without them (S26 C3).
 	const std::string first_root = project.root;
 	session.handle(request::new_project((std::filesystem::path(first_root).parent_path() / "other").generic_string(), "Other"));
 	TEST_EXPECT(v.dialogs.unsaved_prompt.open && v.dialogs.unsaved_prompt.action == EditorRequestKind::NewProject);
@@ -3646,7 +3646,7 @@ static int test_rescan_keeps_what_did_not_change() {
 	return 0;
 }
 
-// #1121 review: a Stop asked for is seen through by a Quit (the deadline's kill now), since closing the editor lets
+// S26 C8: a Stop asked for is seen through by a Quit (the deadline's kill now), since closing the editor lets
 // its game go: a game that ignored the stop request (no window to take WM_CLOSE) does not outlive the editor.
 // A game running unasked keeps running.
 static int test_quit_finishes_a_stop() {

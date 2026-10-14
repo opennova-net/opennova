@@ -1053,7 +1053,7 @@ bool derives_others(const Document &document, const NodeAddress &address, const 
 	        {DefRecordKind::Action, "function_args_count"}, {DefRecordKind::Weapon, "charfilter_count"},
 	        {DefRecordKind::Weapon, "teamfilter_count"}};
 	// An AI profile's type makes the record the file then reads as under the new type: a key the type does not
-	// read cleared (S26 A11; the #1121 review m3), which giving the type back does not bring back.
+	// read cleared (S26 A11), which giving the type back does not bring back.
 	if (dynamic_cast<const AiProfileDocument *>(&document)) return field == "type";
 	if (!dynamic_cast<const DefCatalogDocument *>(&document)) return false;
 	return std::any_of(std::begin(kCoupled), std::end(kCoupled), [&](const std::pair<DefRecordKind, const char *> &member) {
