@@ -797,32 +797,28 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 					hello_owner->pn == auth.pn &&
 					classify_session_protocol(hello_owner->pn) ==
 							SessionProtocolKind::Lobby;
-			// Pre-session reliability is byte-for-byte retransmission. Once a
-			// ClientAuth has minted this endpoint's session material, an exact
-			// repeat must replay the same ServerAuth without disturbing lobby,
-			// sequence, or reassembly state. In particular, a delayed first
-			// 0x82 remains safe for the client to accept after this retry.
+			// A retransmit is the live connection's own CI and CK: once a ClientAuth
+			// has minted this endpoint's session material, its repeat replays the same
+			// ServerAuth without disturbing lobby, sequence, or reassembly state, so a
+			// delayed first 0x82 remains safe for the client to accept after the retry.
+			// Retail's retransmit leg reads the connection alone, no Hello state, so a
+			// stray Hello in between (which re-names the row's Hello identity only)
+			// does not stop it. [orig: NapiNPProtocol_HandleClientJoin - conn_state ==
+			//  1 && CI && CK -> CNapiNPConnection_SendSessionInit @0x62BEE0..0x62BEE6]
+			const bool live_connection = hello_owner.has_value() &&
+					hello_owner->state == ConnectionState::Active;
 			std::vector<uint8_t> cached_server_auth;
-			std::string cached_server_scrk;
 			{
 				std::lock_guard<std::mutex> lk(lobby_states_mu_);
 				const auto it = lobby_states_.find(peer);
 				if (it != lobby_states_.end() &&
 				    it->second.client_ci == auth.ci &&
 				    it->second.client_ck == auth.ck &&
-				    it->second.client_auth_body == body &&
 				    !it->second.server_auth_datagram.empty()) {
 					cached_server_auth = it->second.server_auth_datagram;
-					cached_server_scrk = it->second.server_scrk;
 				}
 			}
-			if (hello_identity_matches && !cached_server_auth.empty()) {
-				// ClientHello may have reinserted this address as Handshaking,
-				// so restore the same cached keys in the registry as well.
-				manager_.notify_active_addr(
-						peer, /*identity=*/auth.na,
-						/*client_scrk=*/auth.scrk,
-						/*server_scrk=*/cached_server_scrk);
+			if (live_connection && !cached_server_auth.empty()) {
 				manager_.notify_seen_addr(peer, now_ms());
 				opennova::net::udp_send_to(
 						socket.get(), from, cached_server_auth.data(),
@@ -931,7 +927,6 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 					state.lobby = std::move(*resumed_lobby);
 					state.lobby.hosting = false;
 				}
-				state.client_auth_body = body;
 				state.server_scrk = server_scrk;
 				state.server_auth_datagram = packet;
 				// Auth is still lobby-routed even if a client skipped/reordered
@@ -1027,7 +1022,9 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 					admission.admitted ? 1 : 0, messages.size());
 
 			std::vector<ProtocolMessage> replies;
-			const SessionProtocolKind protocol = classify_session_protocol(conn_opt->pn);
+			// The session's protocol is its accepted 0x42's; a later Hello re-names only
+			// the row's Hello identity (D-NET-630).
+			const SessionProtocolKind protocol = classify_session_protocol(conn_opt->session_pn);
 			// JointOperations peers are routed to the shared HostOwner above and
 			// never reach this switch — only the lobby (NOVAWORLDUDP) container
 			// path and unsupported PNs land here.
@@ -1124,9 +1121,9 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 				}
 			} else {
 				std::fprintf(stderr, "[nwudp] %s — unsupported SESSION PN='%s'\n",
-						client_label.c_str(), loggable(conn_opt->pn).c_str());
+						client_label.c_str(), loggable(conn_opt->session_pn).c_str());
 				if (tracker_) {
-					tracker_->record("pn", conn_opt->pn, body.data(), body.size(),
+					tracker_->record("pn", conn_opt->session_pn, body.data(), body.size(),
 					                 client_label, now_ms());
 				}
 			}

@@ -27,17 +27,23 @@ struct Connection {
 	// Server-local registry identity. It starts as ClientHello.CI, but the
 	// registry may synthesize it when another endpoint already owns that CI.
 	uint32_t id = 0;
-	// The unmodified ClientHello.CI of the address's latest Hello. Keeping it
+	// The unmodified ClientHello.CI of the address's latest Hello: with `pn`, the
+	// Hello-owned identity the lobby's 0x42 gate checks (D-NET-266). Keeping it
 	// separate lets an exact later Hello be recognized as a retransmit even when
 	// `id` was synthesized; a Hello naming another identity at a live row
-	// re-names the row (ConnectionManager::notify_handshake) without touching
-	// the live connection, so that identity's 0x42 can replace it.
+	// re-names these two (ConnectionManager::notify_handshake) and nothing of the
+	// live session, so that identity's 0x42 can replace it.
 	uint32_t reported_id = 0;
 	PeerAddr addr;
 	ConnectionState state = ConnectionState::Handshaking;
 	uint64_t created_ms = 0;
 	uint64_t last_seen_ms = 0;
 	std::string pn;          // the latest CLIENT_HELLO's Protocol Name ("NOVAWORLDUDP", …)
+	// The CI and PN the session's accepted 0x42 established (the Hello identity it
+	// matched, stamped when the row went Active): a later Hello never changes them,
+	// and the session's 0x43s are classified by session_pn.
+	uint32_t session_ci = 0;
+	std::string session_pn;
 	// Per-session crypto keys for the SESSION (0x43/0x83) inner-NWU cipher.
 	// Inbound SESSION packets (C→S) are encrypted with `client_scrk`;
 	// outbound SESSION packets (S→C) are encrypted with `server_scrk`.
@@ -89,14 +95,16 @@ public:
 
 	// Promote the connection at `addr` to Active once JOIN succeeds, storing
 	// both SCRKs (client- and server-generated) needed for SESSION inner-NWU
-	// decrypt/encrypt respectively. Returns false if missing. Address-keyed
-	// only: an id-keyed promote aliased two retail clients that both send
-	// ci=1 (G.7).
+	// decrypt/encrypt respectively, and the session's identity (session_ci /
+	// session_pn) from the Hello identity the accepted 0x42 matched. Returns
+	// false if missing. Address-keyed only: an id-keyed promote aliased two
+	// retail clients that both send ci=1 (G.7).
 	bool mark_active_by_addr(const PeerAddr &addr, std::string identity,
 	                         std::string client_scrk, std::string server_scrk);
 
 	// Name the row at `addr` after a Hello's identity (its CI and PN), keeping
-	// its registry id, state, keys and clocks. Returns false if missing.
+	// its registry id, state, keys, clocks and session identity. Returns false
+	// if missing.
 	bool rename_hello_by_addr(const PeerAddr &addr, uint32_t reported_id, std::string pn);
 
 	std::optional<Connection> find(uint32_t id) const;

@@ -126,8 +126,10 @@ int test_hello_of_another_identity_keeps_a_live_row() {
 	TEST_EXPECT(row->client_scrk == "client-scrk" && row->server_scrk == "server-scrk");
 	TEST_EXPECT(row->identity == "live");
 	TEST_EXPECT(row->created_ms == 100 && row->last_seen_ms == 150);
-	// The row now names the stray Hello's identity, which a following 0x42 must match.
+	// The row's Hello identity now names the stray Hello, which a following 0x42 must match;
+	// the session keeps the protocol its 0x42 established, which its 0x43s are classified by.
 	TEST_EXPECT(row->reported_id == 0x20 && row->pn == "NOVAWORLDUDPX");
+	TEST_EXPECT(row->session_ci == 0x10 && row->session_pn == "NOVAWORLDUDP");
 	// The live connection's own identity, Hello'd again, re-names it back, still live.
 	mgr.notify_handshake(handshake(0x10, addr.ip, addr.port, 300));
 	const auto back = mgr.registry().find_by_addr(addr);

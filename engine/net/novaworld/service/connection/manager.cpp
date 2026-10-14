@@ -39,8 +39,9 @@ void ConnectionManager::notify_handshake(Connection conn) {
 	// and only answers, so a live connection at the address lives on until a
 	// 0x42 that is not its retransmit replaces it. The row this service keeps per
 	// Hello (D-NET-266's zombie guard: a 0x42 needs its Hello's identity) takes
-	// the new Hello's identity and keeps the live connection's id, state and
-	// keys, so that identity's 0x42 replaces it as retail's would.
+	// the new Hello's identity and keeps the live connection's id, state, keys
+	// and session identity (the PN its 0x43s are classified by), so that
+	// identity's 0x42 replaces it as retail's would.
 	// [orig: NapiNPProtocol_HandleClientHello @0x6213B0 -> NapiNPProtocol_SendServerInfoPacket
 	//  @0x6204B0, no connection lookup; NapiNPProtocol_HandleClientJoin @0x62BEBA..0x62BF06]
 	if (existing_for_addr && existing_for_addr->state == ConnectionState::Active) {
