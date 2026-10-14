@@ -25,6 +25,7 @@
 #include <base/vfs/vfs.h>
 #include <editor/documents/mnu_table.h>
 #include <formats/mnu/mnu.h>
+#include <formats/mnu/mnu_layout.h>
 
 #include "common/retail_paths.h"
 
@@ -162,7 +163,8 @@ mnu::Document every_element() {
 	w.actions = {action};
 	w.string_data = {true, "ID", "CENTER", "BOTTOM", "3", "", true, 6, true, "KEY"};
 	w.toggle_string = {true, "ID", "ALT"};
-	w.font = {"f.fnt", "1", "2", "3", "4", "5", "6", "7", "8"};
+	w.font = {"f.fnt", mnu::color_of("1"), mnu::color_of("2"), mnu::color_of("3"), mnu::color_of("4"),
+	          mnu::color_of("5"), mnu::color_of("6"), mnu::color_of("7"), mnu::color_of("8")};
 	w.frame.stencil = "s.tga";
 	w.frame.has_stencil_size = w.frame.has_insetx = w.frame.has_insety = true;
 	w.frame.stencil_size = 9;
@@ -392,6 +394,11 @@ bool is_flag(const FieldSchema &field) {
 // A value other than `value` that the field takes (another of its tokens when it has them).
 Value changed(const FieldSchema &field, const Value &value) {
 	if (const auto *text = std::get_if<std::string>(&value)) {
+		// A colour takes a colour (mnu::Color): another word, or another variable's name.
+		if (field.color == opennova::editor::FieldColor::HexArgb) {
+			const mnu::Color colour = mnu::color_of(*text);
+			return colour.var.empty() ? mnu::color_text(colour.argb ^ 1u) : "%" + colour.var + "Z%";
+		}
 		for (const auto &choice : field.choices)
 			if (!choice.name.empty() && *text != choice.name) return choice.name;
 		// A keyword of one token the table spells, or none: none.
@@ -496,7 +503,11 @@ bool test_no_field_aliases_another() {
 				const bool draw_kind = on_record && std::string(token(target.record.kind)) == "column.body" &&
 				                       (path == "display" || path == "custom_draw" || path == "bitmap_draw" ||
 				                        path == "bitmap_text");
-				CHECK(self || member || draw_kind, target.key << " " << field.id << " also changed " << after[i]);
+				// A row's or an item's TYPE set reads its text as the new TYPE does (mnu::set_appearance_type,
+				// set_item_type): a texture name made a colour is written as the word the read takes of it.
+				const bool retyped_text = on_record && field.id == "type" && (path == "value" || path == "text");
+				CHECK(self || member || draw_kind || retyped_text,
+				      target.key << " " << field.id << " also changed " << after[i]);
 			}
 		}
 	}
