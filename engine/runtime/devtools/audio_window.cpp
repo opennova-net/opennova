@@ -1,6 +1,7 @@
 #include <runtime/devtools/audio_window.h>
 
 #include <runtime/devtools/debug_control_ids.h>
+#include <runtime/devtools/ui_kit.h>
 
 #include <imgui.h>
 
@@ -69,7 +70,7 @@ void AudioWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 	(void)pass;
 	(void)frame_index;
 	if (!snapshot_.valid) {
-		ImGui::TextDisabled("No audio device sampled.");
+		ui_kit::empty_state("No audio device sampled.");
 		return;
 	}
 	if (ImGui::BeginTable("buses", 6, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {

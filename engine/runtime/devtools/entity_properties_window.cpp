@@ -2,6 +2,7 @@
 
 #include <runtime/devtools/debug_control_ids.h>
 #include <runtime/devtools/entities_window.h>
+#include <runtime/devtools/ui_kit.h>
 
 #include <formats/def/def.h> // the items.def attrib keyword + type-name tables (the parser's own)
 #include <formats/mission/mission.h> // kItemIdOffset: wire type id -> items.def id
@@ -199,15 +200,13 @@ void EntityPropertiesWindow::draw_attrib_grid(const char *label, bool second_wor
 				toggle_bit(second_word, bit);
 			}
 			ImGui::EndDisabled();
-			if (!second_word && bit == DEF_ITEM_ATTRIB_AIDATA &&
-					ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-				ImGui::SetTooltip(locked
-						? "Locked while a wire session is live: the AI-class gate also decides\n"
-						  "what the 0x0D record carries, and a stock client reads its own def."
-						: "The AI-class gate: also changes what the 0x0D wire record carries.\n"
-						  "Overrides are per entity, never replicated (joiners keep their own\n"
-						  "items.def), and re-stamped by the next items.def sweep\n"
-						  "(mission load, net topology sync).");
+			if (!second_word && bit == DEF_ITEM_ATTRIB_AIDATA) {
+				ui_kit::tooltip(locked
+						? "Locked while a wire session is live: the AI-class gate also decides what the "
+						  "0x0D record carries, and a stock client reads its own def."
+						: "The AI-class gate: also changes what the 0x0D wire record carries. Overrides "
+						  "are per entity, never replicated (joiners keep their own items.def), and "
+						  "re-stamped by the next items.def sweep (mission load, net topology sync).");
 			}
 		}
 		ImGui::EndTable();

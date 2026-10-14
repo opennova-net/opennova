@@ -2,6 +2,7 @@
 
 #include <formats/mission/bms.h>
 #include <runtime/devtools/debug_control_ids.h>
+#include <runtime/devtools/ui_kit.h>
 
 #include <imgui.h>
 
@@ -149,9 +150,7 @@ void ScriptWindow::draw_variables() {
 					editing_index_ = i;
 					edit_value_ = value;
 				}
-				if (!globals && can_edit && ImGui::IsItemHovered()) {
-					ImGui::SetTooltip("Double-click to edit (Enter, or leaving it, applies).");
-				}
+				if (!globals && can_edit) ui_kit::tooltip("Double-click to edit (Enter, or leaving it, applies).");
 			}
 			ImGui::PopID();
 			ImGui::TableNextColumn();
@@ -165,7 +164,7 @@ void ScriptWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 	(void)pass;
 	(void)frame_index;
 	if (!snapshot_.valid) {
-		ImGui::TextUnformatted("No mission scripts pushed (load a mission).");
+		ui_kit::empty_state("No mission scripts pushed (load a mission).");
 		return;
 	}
 	const mission::ScriptDebugReport &r = snapshot_.report;
@@ -254,10 +253,8 @@ void ScriptWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 				ImGui::TableNextColumn();
 				const std::string truth = bms_truth_text(static_cast<int>(i));
 				ImGui::TextUnformatted(truth.c_str());
-				if (ImGui::IsItemHovered()) {
-					ImGui::SetTooltip("Each trigger's last term as the chain ran it (after its own negation):\n"
-									  "T true, F false, - not evaluated by the last run.");
-				}
+				ui_kit::tooltip("Each trigger's last term as the chain ran it (after its own negation): "
+								"T true, F false, - not evaluated by the last run.");
 				ImGui::TableNextColumn();
 				if (e.last_checked_tick >= 0) {
 					ImGui::Text("%lld", static_cast<long long>(e.last_checked_tick));
@@ -282,10 +279,8 @@ void ScriptWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 				} else if (can_fire) {
 					ImGui::PushID(static_cast<int>(i));
 					if (ImGui::SmallButton("Fire")) request_fire_event(e.index);
-					if (ImGui::IsItemHovered()) {
-						ImGui::SetTooltip("The chain reads true at its next run; the delay, latch and repeat "
-										  "then run as the event's own.");
-					}
+					ui_kit::tooltip("The chain reads true at its next run; the delay, latch and repeat "
+									"then run as the event's own.");
 					ImGui::PopID();
 				}
 			}

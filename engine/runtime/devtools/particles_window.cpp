@@ -1,6 +1,7 @@
 #include <runtime/devtools/particles_window.h>
 
 #include <runtime/devtools/debug_control_ids.h>
+#include <runtime/devtools/ui_kit.h>
 
 #include <imgui.h>
 
@@ -79,7 +80,7 @@ void ParticlesWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 	(void)frame_index;
 	draw_control(board_, control_id::kHideParticles, requests_);
 	if (!snapshot_.valid) {
-		ImGui::TextDisabled("No effect scene pushed (load a mission).");
+		ui_kit::empty_state("No effect scene pushed (load a mission).");
 		return;
 	}
 	const particle::EffectDebugSnapshot &s = snapshot_.scene;
