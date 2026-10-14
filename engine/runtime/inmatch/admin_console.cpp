@@ -660,13 +660,13 @@ void AdminConsole::handle_weapon(const Args &args, std::vector<std::string> &rep
 // overlay toggles by name come first in retail and are not modeled (D-NET-371); SAVEKEYS is
 // taken here, its keylist.key dump of the profile's binding table not modeled, nor is the arm
 // past VERSION, which out of a session matches the line's CRC against the binding table and
-// queues its input action. SAVENFO writes debug.nfo (entity_usage_text); VERSION posts
+// queues its input action (D-NET-710). SAVENFO writes debug.nfo (entity_usage_text); VERSION posts
 // "Version <version>  - <title>" to the SYSTEM ring in white with the 930-tick life.
-// [orig: Client_ProcessLocalCommand @0x520BF0 — sub_4D7F00 @0x520C1A, `pb_` @0x520C50, the
+// [orig: Client_ProcessLocalCommand @0x520BF0 — sub_4D7F00 @0x520C2A, `pb_` @0x520C50, the
 //  WAC overlays @0x520CF1, SAVEKEYS @0x520D10 (KeyBinding_DumpAllToFile @0x54C0A0), SAVENFO
 //  @0x520D4B (Entity_DumpUsageStatistics("debug.nfo") @0x520D5C), VERSION @0x520D8E (the
-//  format @0x7D00AC, Chat_AddDebugMessage(.., -1, 930) @0x520DC2, an IDB name for
-//  Chat_AddMessageChannel2 @0x4987F0), the binding CRC @0x520DF2..0x520E5B]
+//  format @0x7D00AC, Chat_AddMessageChannel2(.., -1, 930) @0x520DC2), the binding CRC
+//  @0x520DF2..0x520E5B]
 bool AdminConsole::local_command(const std::string &line) {
 	if (strutil::starts_with_icase(line, "SAVEKEYS")) return true;
 	if (strutil::starts_with_icase(line, "SAVENFO")) {
@@ -697,7 +697,7 @@ bool AdminConsole::local_command(const std::string &line) {
 // S2C 0x06 whatever NETLOG does not take (Server_HandleConsoleCommandMessage); an authority that
 // is not a peer runs the NETLOG handler (a `STAT` prefix taken whole; NETLOG toggling the net
 // log and going on), Server_HandleBanPuntCommand, then NapiClientCmd_ParseAndExecute, whose
-// debug commands and key-binding queue are not modeled. Its one-second guard compares the tick
+// debug commands and key-binding queue are not modeled (D-NET-710). Its one-second guard compares the tick
 // with the last stamp minus 1000, so it never drops a line.
 // [orig: Client_ProcessConsoleCommand @0x520E80 — the guard, Client_ProcessLocalCommand
 //  @0x520EEC, the peer's QueueReliableMessage(4) with NetPacket_WriteNullableString @0x42A430,

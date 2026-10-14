@@ -1928,7 +1928,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				for (ProtocolMessage &m : chat) replies.push_back(std::move(m));
 				break;
 			}
-			case c2s::ADMIN_NETLOG_COMMAND: { // [orig: NapiNPServerMsg_Chat @0x5199D0]
+			case c2s::ADMIN_NETLOG_COMMAND: { // [orig: NapiNPServerMsg_HandleConsoleLine @0x5199D0]
 				// A session peer's console line: NETLOG / STAT, else echoed back as
 				// S2C 0x06 for the client to run (server_console.h).
 				if (inputs.server_ctx == nullptr) break;

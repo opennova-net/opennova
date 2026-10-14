@@ -6,7 +6,7 @@
 // [orig: CNapiNetwork_SetNetLogFile @0x4C69A0; NapiLog_SetEnabled @0x62F2B0;
 //  NapiLog_WriteEntry @0x62EE30; NapiLog_FlushIfExpired @0x62F2F0; NapiLog_Flush @0x62F1A0;
 //  NapiLog_EnsureOpen @0x62EDC0; NapiLog_Shutdown @0x62F310; Server_HandleAdminNetlogCommand
-//  @0x5175D0; NapiNPServerMsg_Chat @0x5199D0; Entity_DumpUsageStatistics @0x40E620]
+//  @0x5175D0; NapiNPServerMsg_HandleConsoleLine @0x5199D0; Entity_DumpUsageStatistics @0x40E620]
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_console.h>
 #include <runtime/inmatch/server_session.h> // set_connection_mode

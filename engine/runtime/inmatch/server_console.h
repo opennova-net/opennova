@@ -129,7 +129,7 @@ struct ChatDisplayWrap {
 
 // One line into the display buffer, with its colour and life. A wrap of more
 // than 40 segments writes only the 40 slots (retail's runs past the buffer,
-// D-NET-372's successor row).
+// D-NET-711).
 void chat_display_post(ChatDisplayBuffer &buffer, const ChatDisplayWrap &wrap,
 		const std::string &text, uint32_t argb, int32_t life = kChatDisplayLife);
 // One logic tick: every slot's nonzero timer steps down by one
@@ -280,7 +280,7 @@ bool Server_HandleAdminNetlogCommand(NapiNPServerCtx &ctx, const std::string &li
 // and a line it does not take goes back to the sender as S2C 0x06 [text NUL]
 // (unreliable), which the client runs as its own command. `now_ms` is the
 // host's clock.
-// [orig: NapiNPServerMsg_Chat @0x5199D0 (an IDB misnomer) — the authority
+// [orig: NapiNPServerMsg_HandleConsoleLine @0x5199D0 — the authority
 //  @0x5199FA, the slot conn+352 -> +192 @0x519A01..0x519A18, the slot's
 //  +100360 stamp @0x519A1E..0x519A3C, the copy @0x519A4D..0x519A72,
 //  Server_HandleAdminNetlogCommand @0x519A7B, NetBuffer_WriteString and
