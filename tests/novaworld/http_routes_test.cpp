@@ -2699,7 +2699,7 @@ int test_unknown_path_404(Harness &h) {
 	return 0;
 }
 
-// GET /api/server-info, the OpenNova Launcher's route: the configured public_host
+// GET /api/server-info, the OpenNova Switcher's route: the configured public_host
 // (the address the gate advertises) with no credential, never cached; the Secure
 // listener, which trusts no proxy, answers it as well. A listener whose
 // public_host is a hostname answers 503 no_public_ipv4 (a hosts line names an

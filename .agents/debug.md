@@ -77,7 +77,7 @@ a gated ctest reports Skipped (exit 77) without its root, never a silent pass.
   MSVC `/Od` and `/RTC1` invalidate frame-time readings. `scripts/build.sh`
   builds the main tree with `--config Release`.
 - Hosts file: remove the `gs.novaworld.net` redirect line you added when the run is
-  done (or switch the OpenNova Launcher back to **NovaLogic NovaWorld**), and touch no
+  done (or switch the OpenNova Switcher back to **NovaLogic NovaWorld**), and touch no
   other hosts entry.
 
 ## When To Stop

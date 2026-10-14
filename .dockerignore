@@ -11,8 +11,8 @@ godot/exports/
 node_modules/
 **/node_modules/
 web/dist/
-launcher/**/bin/
-launcher/**/obj/
+switcher/**/bin/
+switcher/**/obj/
 __pycache__/
 *.pyc
 .scratch/

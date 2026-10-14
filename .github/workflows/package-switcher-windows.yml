@@ -1,0 +1,97 @@
+name: Package switcher
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Version stamped into the exe (a release tag); empty keeps the project's
+        type: string
+        required: false
+        default: ""
+    outputs:
+      artifact_id:
+        description: ID of the Windows switcher zip
+        value: ${{ jobs.package.outputs.artifact_id }}
+      artifact_url:
+        description: Download URL of the Windows switcher zip
+        value: ${{ jobs.package.outputs.artifact_url }}
+
+permissions:
+  contents: read
+
+jobs:
+  # The OpenNova Switcher (switcher/, ADR 0054): the hosts-file tray app, .NET,
+  # outside the CMake build. Its xunit suite runs here, then the
+  # self-contained single-file exe ships with its README.
+  package:
+    runs-on: windows-latest
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      artifact_url: ${{ steps.upload.outputs.artifact-url }}
+    steps:
+      # Nothing here reads LFS objects or a submodule.
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Test
+        run: dotnet test switcher/OpenNovaSwitcher.sln -c Release --nologo
+
+      - name: Publish the single-file exe
+        shell: bash
+        env:
+          SWITCHER_VERSION: ${{ inputs.version }}
+        run: |
+          version_args=()
+          if [[ -n "$SWITCHER_VERSION" ]]; then
+            version_args=("-p:Version=${SWITCHER_VERSION#v}")
+          fi
+          dotnet publish switcher/src/OpenNovaSwitcher/OpenNovaSwitcher.csproj -c Release -r win-x64 \
+            --nologo -o build/switcher "${version_args[@]}"
+
+      # The zip holds the exe and its README, nothing else; the exe is a
+      # self-contained x64 binary that names itself and asks for elevation.
+      - name: Package and check the zip
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stage = (New-Item -ItemType Directory -Force build/switcher-package).FullName
+          Copy-Item build/switcher/opennova-switcher.exe $stage
+          Copy-Item switcher/README.md $stage
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path "$stage/*" -DestinationPath dist/opennova-switcher-windows.zip -Force
+
+          $unpacked = (New-Item -ItemType Directory -Force build/switcher-smoke).FullName
+          Expand-Archive -LiteralPath dist/opennova-switcher-windows.zip -DestinationPath $unpacked -Force
+          $shipped = @(Get-ChildItem -LiteralPath $unpacked -Recurse -File | ForEach-Object Name | Sort-Object)
+          if (Compare-Object $shipped @("README.md", "opennova-switcher.exe")) {
+            throw "The switcher zip holds $($shipped -join ', '), not opennova-switcher.exe and README.md"
+          }
+          $exe = Join-Path $unpacked "opennova-switcher.exe"
+          $info = (Get-Item $exe).VersionInfo
+          Write-Host "$($info.ProductName) $($info.ProductVersion), $((Get-Item $exe).Length) bytes"
+          if ($info.ProductName -ne "OpenNova Switcher") { throw "The exe names itself '$($info.ProductName)'" }
+          $bytes = [IO.File]::ReadAllBytes($exe)
+          $peHeader = [BitConverter]::ToInt32($bytes, 0x3C)
+          if ([BitConverter]::ToUInt16($bytes, $peHeader + 4) -ne 0x8664) { throw "The switcher exe is not an x64 image" }
+          $text = [Text.Encoding]::ASCII.GetString($bytes)
+          if ($text -notmatch 'requestedExecutionLevel level="requireAdministrator"') {
+            throw "The switcher exe's manifest does not ask for elevation"
+          }
+          # The exe is unsigned: the run's log states both hashes.
+          foreach ($file in @("dist/opennova-switcher-windows.zip", $exe)) {
+            Write-Host "SHA-256 $((Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash)  $(Split-Path -Leaf $file)"
+          }
+
+      # Upload the zip directly, without a second archive wrapper.
+      - name: Upload switcher zip
+        id: upload
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/opennova-switcher-windows.zip
+          archive: false
+          if-no-files-found: error
