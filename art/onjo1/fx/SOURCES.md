@@ -6,7 +6,7 @@ third-party material), in the look of Joint Operations' own particle art. The or
 textures were looked at for size, shape, alpha and drawing mode only (in a scratch folder outside the
 repo); nothing of theirs is here. The effects that draw them are `assets/onhit.ptl` (the impacts),
 `assets/onmuz.ptl` (the guns' flashes and casings), `assets/onblood.ptu` (the body hit, the gore set) and
-the curves in `assets/ontable.ptl`, hand-written in the original's particle-file layout.
+the curves in `assets/onatable.ptl`, hand-written in the original's particle-file layout.
 
 ## How the game draws them
 
