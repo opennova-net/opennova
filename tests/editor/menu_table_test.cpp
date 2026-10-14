@@ -5,8 +5,8 @@
 // changes nothing; a Clear leaves the element out; every list's default record writes and reads back;
 // the references a sibling decides; the two texts written as attribute names take only the reader's
 // tokens; and the shape's parts as the menu fills them (each kind's labelled fields, its choices with
-// their words, its lists by their tokens); and what a record's owners decide of it (an ITEMS row's
-// text by its window's type). Over a synthetic menu holding every element, the fifteen shipped revx02
+// their words, its lists by their tokens); what a record's owners decide of it (an ITEMS row's
+// text by its window's type); and a window's TYPE set as the game reads the window after it. Over a synthetic menu holding every element, the fifteen shipped revx02
 // menus of the reference fixture set (a SKIP-LEG without OPENNOVA_JO_ASSETS) and every menu the packed
 // install serves, the same menus editor_menus_retail sweeps (a SKIP-LEG without OPENNOVA_JO_DIR). Which
 // window type reads what, what a field names and what a new record is are the format's rules
@@ -790,6 +790,109 @@ bool test_owners() {
 	return true;
 }
 
+// One window holding what any type reads: every_element's TABLE with the LAN_LIST's, the GLB_TABLE's and the GOPHER's
+// own elements, an ITEMS row of a TYPE a SPINLIST alone sets a kind by (IMAGE) and an ITEMS APPEARANCE of one a TABLE
+// alone knows (IMAGEROW).
+mnu::Window window_of_every_type() {
+	const mnu::Document doc = every_element();
+	mnu::Window w = doc.screens[0].roots[0];
+	const mnu::Window &lan = doc.screens[0].roots[2], &glb = doc.screens[0].roots[3], &gopher = doc.screens[0].roots[4];
+	w.join_button = lan.join_button;
+	w.search_button = lan.search_button;
+	w.glb_playerlist = glb.glb_playerlist;
+	w.glb_table = glb.glb_table;
+	w.glb_info_player_details = glb.glb_info_player_details;
+	w.glb_info_button = glb.glb_info_button;
+	w.glb_info_server_details = glb.glb_info_server_details;
+	w.glb_server_fields = glb.glb_server_fields;
+	w.glb_nw_info = glb.glb_nw_info;
+	w.has_glb_target = glb.has_glb_target;
+	w.glb_target = glb.glb_target;
+	w.gopher_targets = gopher.gopher_targets;
+	w.gopher_categories = gopher.gopher_categories;
+	w.gopher_back = gopher.gopher_back;
+	mnu::Item image = w.items.items[0];
+	image.type = "IMAGE";
+	w.items.items.push_back(image);
+	mnu::Appearance row = w.items.appearances[0];
+	row.type = "IMAGEROW";
+	w.items.appearances.push_back(row);
+	return w;
+}
+
+// A window's TYPE set through the table (menu_set_window_type) is what the game reads: for every pair of types, the
+// window as the old type reads it, changed to the new, equals the menu the old window's words read under the new
+// TYPE token; the identities keep the window's shape, what stays keeping its own, and only the records the change
+// makes (a GLB_TABLE's TARGET as a GOPHER's) are new. A value neither type writes is not brought back, a latent one
+// both read stays latent.
+bool test_type_change_reads_as_the_game() {
+	using opennova::editor::NodeId;
+	using opennova::editor::RecordIds;
+	const mnu::Window whole = window_of_every_type();
+	size_t pairs = 0, made = 0;
+	NodeId next = 0;
+	for (int f = 0; f < mnu::kWindowTypeCount; ++f) {
+		const mnu::WindowType from = mnu::WindowType(f);
+		mnu::Document written;
+		written.screens.resize(1);
+		written.screens[0].name = "S";
+		written.screens[0].roots = {whole};
+		written.screens[0].roots[0].type = from;
+		const std::string text = mnu::serialize(written);
+		const std::string typed = std::string("<WINDOW type=\"") + mnu::window_type_name(from) + "\"";
+		const size_t at = text.find(typed);
+		mnu::Document read;
+		CHECK(at != std::string::npos && parse(text, read) && read.screens[0].roots.size() == 1,
+		      mnu::window_type_name(from) << ": the window reads");
+		for (int t = 0; t < mnu::kWindowTypeCount; ++t) {
+			const mnu::WindowType to = mnu::WindowType(t);
+			const std::string label = std::string(mnu::window_type_name(from)) + " to " + mnu::window_type_name(to);
+			std::string words = text;
+			words.replace(at, typed.size(), std::string("<WINDOW type=\"") + mnu::window_type_name(to) + "\"");
+			mnu::Document expected;
+			CHECK(parse(words, expected) && expected.screens[0].roots.size() == 1, label << ": the words read");
+			mnu::Document changed = read;
+			const RecordHandle window = window_record(changed.screens[0].roots[0]);
+			RecordIds ids = opennova::editor::shape_ids(T(), window);
+			std::set<NodeId> before;
+			opennova::editor::for_each_identity(ids, [&](NodeId &id) {
+				if (&id == &ids.id) return;
+				id = ++next;
+				before.insert(id);
+			});
+			opennova::editor::menu_set_window_type(window, ids, to);
+			std::string where;
+			CHECK(mnu::equal(changed, expected, &where), label << ": the game reads " << where << " otherwise");
+			CHECK(opennova::editor::ids_match(T(), window, ids), label << ": the identities keep the window's shape");
+			size_t fresh = 0;
+			bool kept = true;
+			opennova::editor::for_each_identity(ids, [&](NodeId &id) {
+				if (&id == &ids.id) return;
+				if (!id) ++fresh;
+				else kept = kept && before.count(id);
+			});
+			const size_t targets = from == mnu::WindowType::GlbTable && to == mnu::WindowType::Gopher ? 1 : 0;
+			CHECK(kept && fresh == targets, label << ": what stays keeps its identity, the TARGET alone is new");
+			made += fresh;
+			++pairs;
+		}
+	}
+	CHECK(made == 1, "one GLB_TABLE TARGET read as a GOPHER's");
+	// A value the old type does not write (set through the table on a STATIC) is not brought back by a type that
+	// reads it; a latent value both types read stays latent.
+	mnu::Window plain;
+	plain.type = mnu::WindowType::Static;
+	plain.readonly = true;
+	plain.position.left = 7;
+	const RecordHandle window = window_record(plain);
+	RecordIds ids = opennova::editor::shape_ids(T(), window);
+	opennova::editor::menu_set_window_type(window, ids, mnu::WindowType::Edit);
+	CHECK(plain.type == mnu::WindowType::Edit && !plain.readonly, "READONLY the STATIC never wrote stays unread");
+	CHECK(!plain.position.has_left && plain.position.left == 7, "a latent LEFT stays latent");
+	std::cout << pairs << " type changes ";
+	return true;
+}
+
 // The shipped menus, each rebuilt through the table alone.
 bool test_retail_fixtures() {
 	static const char *const kFixtures[] = {
@@ -880,6 +983,7 @@ int main(int argc, char **argv) {
 	RUN_TEST(test_references);
 	RUN_TEST(test_tokens_held_as_read);
 	RUN_TEST(test_owners);
+	RUN_TEST(test_type_change_reads_as_the_game);
 	RUN_TEST(test_retail_fixtures);
 	RUN_TEST(test_retail_install);
 	if (failed > 0) {

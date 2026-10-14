@@ -1646,6 +1646,96 @@ RecordTable make_table() {
 	return RecordTable(std::move(kinds));
 }
 
+// --- a window's TYPE set ------------------------------------------------------------------------------
+
+// The record of a shape as the reader starts it, zeroed: what a field reads where no element sets it.
+std::shared_ptr<void> zeroed(mnu::SchemaShape shape) {
+	switch (shape) {
+	case mnu::SchemaShape::Screen: return std::make_shared<mnu::Screen>();
+	case mnu::SchemaShape::Window:
+	case mnu::SchemaShape::Part: return std::make_shared<mnu::Window>();
+	case mnu::SchemaShape::Appearance: return std::make_shared<mnu::Appearance>();
+	case mnu::SchemaShape::Sound: return std::make_shared<mnu::Sound>();
+	case mnu::SchemaShape::Action: return std::make_shared<mnu::Action>();
+	case mnu::SchemaShape::Hotkey: return std::make_shared<mnu::Hotkey>();
+	case mnu::SchemaShape::Datasource: return std::make_shared<std::string>();
+	case mnu::SchemaShape::Item: return std::make_shared<mnu::Item>();
+	case mnu::SchemaShape::Row: return std::make_shared<mnu::TableRow>();
+	case mnu::SchemaShape::Header: return std::make_shared<mnu::TableHeader>();
+	case mnu::SchemaShape::Body: return std::make_shared<mnu::TableBody>();
+	case mnu::SchemaShape::Subst: return std::make_shared<mnu::TableSubst>();
+	case mnu::SchemaShape::Category: return std::make_shared<mnu::GopherCategory>();
+	case mnu::SchemaShape::Entry: return std::make_shared<mnu::GopherEntry>();
+	case mnu::SchemaShape::FieldSlot: return std::make_shared<mnu::GlbFieldSlot>();
+	}
+	return nullptr;
+}
+
+// Every slot of the entry as the zeroed record holds it (a TYPE's and a part toggle's have none: the type is set
+// apart, a part goes with its list).
+void reset_entry(const Entry &e, void *record, void *zero) {
+	if (e.text) *e.text(record) = *e.text(zero);
+	if (e.number) *e.number(record) = *e.number(zero);
+	if (e.flag) *e.flag(record) = *e.flag(zero);
+	if (e.bit) *e.bit(record) = *e.bit(zero);
+	if (e.flags) *e.flags(record) = *e.flags(zero);
+}
+
+std::string joined(const std::string &prefix, const std::string &step) { return prefix.empty() ? step : prefix + "." + step; }
+
+bool both_read(mnu::WindowType from, mnu::WindowType to, const std::string &path) {
+	return mnu::schema_reads(from, path) == mnu::SchemaApplies::Reads &&
+	       mnu::schema_reads(to, path) == mnu::SchemaApplies::Reads;
+}
+
+// The TYPE tokens an ITEMS APPEARANCE row is read with: a TABLE's also know IMAGEROW [orig:
+// CTableWnd_ParseXMLContentDefinition @ 0x642816; CListWnd_ParseXMLDefinition @ 0x645770].
+const char *const *items_appearance_types(mnu::WindowType type) {
+	return type == mnu::WindowType::Table ? mnu::kTableAppearanceTypes : mnu::kAppearanceTypes;
+}
+
+// A record of the window's own (the window, or a record of a list that holds no window) after its window's TYPE
+// went from `from` to `to`, `prefix` its element path from the window ("" the window's own): what both types read
+// keeps, the rest goes (menu_set_window_type).
+void retype_record(const RecordHandle &record, RecordIds &ids, const std::string &prefix, mnu::WindowType from,
+                   mnu::WindowType to) {
+	const mnu::SchemaShape shape = menu_shape(record.kind);
+	const std::shared_ptr<void> zero = zeroed(shape);
+	for (const Entry &e : all_entries()[size_t(shape)]) {
+		// A JUSTIFY's offset is read with its keyword (menu_field_reads).
+		std::string own = e.path;
+		if (own.size() > 7 && own.compare(own.size() - 7, 7, "_offset") == 0) own.resize(own.size() - 7);
+		if (!both_read(from, to, joined(prefix, own))) reset_entry(e, record.data, zero.get());
+	}
+	// The token a row's TYPE keeps where both forms read it: an ITEM's by the ITEMS form [orig: @ 0x6457b6, 0x64bd57,
+	// 0x642816], an ITEMS APPEARANCE's by whether the form is a TABLE's.
+	if (record.kind == kind_index("items.item") || record.kind == kind_index("item")) {
+		const bool cell = record.kind == kind_index("item");
+		std::string &type = record.as<mnu::Item>().type;
+		if (!mnu::known_token(type, mnu::item_types_for(from, cell)) || !mnu::known_token(type, mnu::item_types_for(to, cell)))
+			type.clear();
+	} else if (record.kind == kind_index("items.appearance")) {
+		std::string &type = record.as<mnu::Appearance>().type;
+		if (!mnu::known_token(type, items_appearance_types(from)) || !mnu::known_token(type, items_appearance_types(to)))
+			type.clear();
+	}
+	const std::vector<TableList> &lists = menu_table().kind(record.kind)->lists();
+	for (size_t l = 0; l < lists.size() && l < ids.lists.size(); ++l) {
+		const TableList &list = lists[l];
+		const std::string path = joined(prefix, menu_table().kind(list.spec.kind)->row().token);
+		if (!both_read(from, to, path)) {
+			while (list.ops.size(record) && list.ops.erase(record, 0)) {
+			}
+			ids.lists[l].clear();
+			continue;
+		}
+		// A child window, and a part, is read by its own type's parse.
+		if (is_window_kind(list.spec.kind)) continue;
+		for (size_t i = 0; i < list.ops.size(record) && i < ids.lists[l].size(); ++i)
+			retype_record(list.ops.at(record, i), ids.lists[l][i], path, from, to);
+	}
+}
+
 } // namespace
 
 const RecordTable &menu_table() {
@@ -1722,6 +1812,35 @@ DetachedRecord menu_window_record(const mnu::Window &window) {
 	out.kind = kWindowKind;
 	out.data = std::make_shared<mnu::Window>(window);
 	return out;
+}
+
+void menu_set_window_type(const RecordHandle &window, RecordIds &ids, mnu::WindowType type) {
+	mnu::Window &w = window.as<mnu::Window>();
+	const mnu::WindowType from = w.type;
+	if (from == type) return;
+	const auto reads = [](mnu::WindowType t, const char *path) {
+		return mnu::schema_reads(t, path) == mnu::SchemaApplies::Reads;
+	};
+	// The one element two types read into members of their own: TARGET, a GLB_TABLE's last [orig:
+	// CLanGameBrowser_ParseExtendedXMLDefinition @ 0x65dac0, self[3668]], a GOPHER's each in order [orig:
+	// CGopherWnd_ParseXMLDefinition @ 0x65b130]. The texts the window writes, read by the new type's arm.
+	std::vector<std::string> targets;
+	if (reads(from, "glb_target") && w.has_glb_target) targets.push_back(w.glb_target);
+	if (reads(from, "gopher_targets")) targets = w.gopher_targets;
+	retype_record(window, ids, std::string(), from, type);
+	w.type = type;
+	if (targets.empty()) return;
+	if (reads(type, "glb_target") && !reads(from, "glb_target")) {
+		w.has_glb_target = true;
+		w.glb_target = targets.back();
+	} else if (reads(type, "gopher_targets") && !reads(from, "gopher_targets")) {
+		w.gopher_targets = targets;
+		// Records the change makes: identities of 0, which the batch numbers (Document::set_reshapes).
+		const size_t list = menu_window_list("gopher_targets");
+		const ListOps &ops = menu_table().kind(window.kind)->lists()[list].ops;
+		ids.lists[list].clear();
+		for (size_t i = 0; i < targets.size(); ++i) ids.lists[list].push_back(shape_ids(menu_table(), ops.at(window, i)));
+	}
 }
 
 } // namespace opennova::editor

@@ -1065,6 +1065,13 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 			const bool written_before = read_present(*updated, address, edit.field);
 			if (!set_field(*updated, address, edit.field, edit.value, message))
 				return refuse(C::DocumentValue, said("Unknown field."), edit.field);
+			if (set_reshapes(address.kind, edit.field)) {
+				// A record the Set made takes a fresh identity, as an Add's does.
+				updated->for_each_identity([&](NodeId &id) {
+					if (!id) id = allocate();
+				});
+				reshaped();
+			}
 			if (read_before && read(*updated, address, edit.field, after) && after == before &&
 			    read_present(*updated, address, edit.field) == written_before)
 				return true;
