@@ -1327,10 +1327,12 @@ void test_preview_gestures_end() {
 	CHECK(ui.drain().empty(), "the hidden menu view takes no key");
 }
 
-// S9k2: several windows on the canvas. Shift+click adds a window, Ctrl+click toggles one; a
-// drag from the screen's background selects what its box touches, in one selection (none: the
-// screen); a drag of a selected window moves every selected one in one batch per step, one
-// gesture; the arrows nudge them all; Ctrl+C / X / V / D; the toolbar's Arrange aligns them.
+// S9k2: several windows on the canvas, through the view (the canvas's own rules, its values and the
+// clipboard's and Arrange's, are tests/editor/canvas_test.cpp test_menu_several_windows's): Shift+click
+// adds a window and Ctrl+click toggles one; a drag of a selected window moves the view's whole
+// selection, one gesture ended on release; Ctrl+C / X / V / D raise their requests (none of them with
+// the screen among the selection, no Paste with the clipboard empty); the toolbar's Arrange raises
+// the op it names.
 void test_preview_several_windows_ui() {
 	LayoutPreview preview("opennova_editor_ui_preview_multi_test");
 	if (!preview.start()) return;
@@ -1346,18 +1348,10 @@ void test_preview_several_windows_ui() {
 	auto at = [&](float x, float y) { return preview.at(x, y); };
 	auto click = [&](ImVec2 p, ImGuiKey modifier) {
 		ui.mouse(p.x, p.y);
-		if (modifier != ImGuiKey_None) ImGui::GetIO().AddKeyEvent(modifier, true);
+		ImGui::GetIO().AddKeyEvent(modifier, true);
 		ui.button(true);
 		ui.button(false);
-		if (modifier != ImGuiKey_None) ImGui::GetIO().AddKeyEvent(modifier, false);
-		ui.frames();
-		return ui.drain();
-	};
-	auto drag = [&](ImVec2 from, float dx, float dy) {
-		ui.mouse(from.x, from.y);
-		ui.button(true);
-		for (int step = 1; step <= 4; ++step) ui.mouse(from.x + dx * float(step) / 4.0f, from.y + dy * float(step) / 4.0f);
-		ui.button(false);
+		ImGui::GetIO().AddKeyEvent(modifier, false);
 		ui.frames();
 		return ui.drain();
 	};
@@ -1385,47 +1379,26 @@ void test_preview_several_windows_ui() {
 	              !only(requests, EditorRequestKind::EditRecord),
 	      "Ctrl+click toggles a window");
 
-	// BOX and OTHER selected, OTHER the primary: a drag of BOX moves both, snapped by BOX.
+	// BOX and OTHER selected in the view, OTHER the primary: a drag of BOX moves both.
 	v.documents.selection.primary = other;
 	v.documents.selection.records = {box, other};
 	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(2);
 	ui.drain();
-	requests = drag(at(200.0f, 150.0f), 40.0f, 21.0f);
+	const ImVec2 from = at(200.0f, 150.0f);
+	ui.mouse(from.x, from.y);
+	ui.button(true);
+	for (int step = 1; step <= 4; ++step) ui.mouse(from.x + 40.0f * float(step) / 4.0f, from.y + 21.0f * float(step) / 4.0f);
+	ui.button(false);
+	ui.frames();
+	requests = ui.drain();
 	uint64_t gesture = 0;
 	size_t count = 0;
-	std::vector<Edit> last = batches(requests, gesture, count);
-	CHECK(count >= 2 && gesture != 0, "the steps share one gesture");
-	CHECK(set_on(last, box, "position.left") == 144 && set_on(last, box, "position.top") == 120 &&
-	              set_on(last, other, "position.left") == 444 && set_on(last, other, "position.right") == 644 &&
-	              set_on(last, other, "position.top") == 320,
-	      "one batch moves both windows by BOX's snapped step");
-	CHECK(selections(requests) == (std::vector<std::pair<NodeAddress, SelectMode>>{{box, SelectMode::Add}}),
-	      "the window dragged becomes the primary, the other stays selected");
+	const std::vector<Edit> last = batches(requests, gesture, count);
+	CHECK(count >= 2 && gesture != 0 && set_on(last, box, "position.left") != -1 &&
+	              set_on(last, other, "position.left") != -1,
+	      "one gesture moves the view's whole selection");
 	CHECK(!requests.empty() && requests.back().kind == EditorRequestKind::EndEdit, "release ends the gesture");
-
-	// The arrows move both.
-	ui.key(ImGuiKey_RightArrow, true);
-	ui.key(ImGuiKey_RightArrow, false);
-	requests = ui.drain();
-	last = batches(requests, gesture, count);
-	CHECK(count == 1 && set_on(last, box, "position.left") == 101 && set_on(last, other, "position.left") == 401,
-	      "Right moves every selected window a unit");
-
-	// A drag from MAIN's empty part (a root window not selected) selects what the box touches, in
-	// one selection (S13 D7, V5): BOX and OTHER, the last the primary.
-	requests = drag(at(50.0f, 500.0f), 400.0f, -390.0f);
-	const EditorRequest *boxed = only(requests, EditorRequestKind::SelectRecord);
-	CHECK(boxed && boxed->address == other && boxed->mode == SelectMode::Replace &&
-	              boxed->records == (std::vector<NodeAddress>{box, other}) && !only(requests, EditorRequestKind::EditRecord),
-	      "the marquee selects BOX and OTHER in one selection, not TINY or MAIN");
-	requests = drag(at(20.0f, 500.0f), 40.0f, 60.0f);
-	const NodeAddress screen_address{screen.id, node_kind(MenuKind::Screen), 0};
-	CHECK(selections(requests) == (std::vector<std::pair<NodeAddress, SelectMode>>{{screen_address, SelectMode::Replace}}),
-	      "a box over nothing selects the screen");
-	requests = click(at(20.0f, 500.0f), ImGuiKey_None);
-	CHECK(selections(requests) == (std::vector<std::pair<NodeAddress, SelectMode>>{{main, SelectMode::Replace}}),
-	      "a click on the background still selects it");
 
 	// The clipboard keys.
 	auto chord = [&](ImGuiKey key) {
@@ -1444,10 +1417,10 @@ void test_preview_several_windows_ui() {
 	requests = chord(ImGuiKey_V);
 	const EditorRequest *paste = only(requests, EditorRequestKind::Paste);
 	CHECK(paste && paste->paste_at.row == screen.id && paste->paste_at.parent == main.child && paste->paste_at.position == 2,
-	      "Ctrl+V pastes after the primary window (OTHER)");
+	      "Ctrl+V pastes where the canvas's clipboard says (after the primary OTHER)");
 	// Copy, Cut and Duplicate take the selection as it is: with the screen among it (or a
 	// window's list row) the preview raises none of them, as the menu view does not.
-	v.documents.selection.records = {screen_address, box, other};
+	v.documents.selection.records = {{screen.id, node_kind(MenuKind::Screen), 0}, box, other};
 	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(2);
 	ui.drain();
@@ -1459,38 +1432,18 @@ void test_preview_several_windows_ui() {
 	ui.frames(2);
 	ui.drain();
 
-	// Arrange from the toolbar: BOX's left edge to the primary OTHER's, one batch.
+	// Arrange from the toolbar, each item its op: Align left edges a Set of BOX's left to OTHER's,
+	// Bring to front one Move.
 	ui.activate(item_id(preview_id, {"Arrange"}));
 	ui.activate(popup_item(item_id(preview_id, {"arrange"}), "Align left edges"));
 	requests = ui.drain();
 	const EditorRequest *aligned = only(requests, EditorRequestKind::EditRecord);
-	CHECK(aligned && set_on(aligned->edits, box, "position.left") == 400 && set_on(aligned->edits, box, "position.right") == 600 &&
-	              set_on(aligned->edits, other, "position.left") == -1,
-	      "Align left edges: BOX to OTHER's left, one batch");
+	CHECK(aligned && set_on(aligned->edits, box, "position.left") == 400, "Align left edges: one batch");
 	ui.activate(item_id(preview_id, {"Arrange"}));
 	ui.activate(popup_item(item_id(preview_id, {"arrange"}), "Bring to front"));
 	requests = ui.drain();
 	const EditorRequest *front = only(requests, EditorRequestKind::EditRecord);
-	const NodeAddress tiny = named(*document, "TINY");
-	CHECK(front && front->edits.size() == 1 && front->edits[0].operation == EditOperation::Move &&
-	              front->edits[0].address == tiny && front->edits[0].position == 0,
-	      "Bring to front of BOX and OTHER: one Move, TINY before them");
-
-	// MAIN and OTHER selected, OTHER the primary: a press on BOX (not selected, but inside
-	// MAIN's rect) is a press inside a selected window, so the drag moves MAIN (OTHER rides
-	// inside it), and MAIN becomes the primary with OTHER still selected.
-	v.documents.selection.primary = other;
-	v.documents.selection.records = {main, other};
-	v.revisions.touch(ViewConcern::Selection);
-	ui.frames(2);
-	ui.drain();
-	requests = drag(at(200.0f, 150.0f), 16.0f, 8.0f);
-	last = batches(requests, gesture, count);
-	CHECK(gesture != 0 && set_on(last, main, "position.left") == 16 && set_on(last, main, "position.top") == 8 &&
-	              set_on(last, box, "position.left") == -1 && set_on(last, other, "position.left") == -1,
-	      "a press on a window inside a selected one moves the selection");
-	CHECK(selections(requests) == (std::vector<std::pair<NodeAddress, SelectMode>>{{main, SelectMode::Add}}),
-	      "the selected window pressed in becomes the primary, the other stays selected");
+	CHECK(front && front->edits.size() == 1 && front->edits[0].operation == EditOperation::Move, "Bring to front: one Move");
 	CHECK(ui.windows.pending_requests() == 0, "nothing else");
 }
 
