@@ -1,12 +1,14 @@
 # The particle effects' sources
 
-The textures of the base game's particle effects (bullet impacts, blood, muzzle flashes, spent casings):
-our own art, made from scratch by procedure (noise, falloffs, shapes and a turned-brass render; no
-third-party material), in the look of Joint Operations' own particle art. The original game's particle
-textures were looked at for size, shape, alpha and drawing mode only (in a scratch folder outside the
-repo); nothing of theirs is here. The effects that draw them are `assets/onhit.ptl` (the impacts),
-`assets/onmuz.ptl` (the guns' flashes and casings), `assets/onblood.ptu` (the body hit, the gore set) and
-the curves in `assets/onatable.ptl`, hand-written in the original's particle-file layout.
+The textures of the base game's particle effects (bullet impacts, blood, muzzle flashes, spent casings,
+the grenades' blasts, splash and smoke): our own art, made from scratch by procedure (noise, falloffs,
+shapes and a turned-brass render; no third-party material), in the look of Joint Operations' own
+particle art. The original game's particle textures were looked at for size, shape, alpha and drawing
+mode only (in a scratch folder outside the repo); nothing of theirs is here. The effects that draw them
+are `assets/onhit.ptl` (the impacts), `assets/onmuz.ptl` (the guns' flashes and casings),
+`assets/onblood.ptu` (the body hit, the gore set), `assets/onexpl.ptl` (the frag's ground blast, the
+small splash, the smoke grenade's column) and the curves in `assets/onatable.ptl`, hand-written in the
+original's particle-file layout.
 
 ## How the game draws them
 
@@ -61,6 +63,9 @@ build.
 | `onfxdrp1.tga` | 16 x 16 | alpha | `src/onfxdrp1.png` (64) | A drop with two satellites, white with a highlight and a darker rim for the def to colour (the blood drops). | A slightly pointed disc and two dots; radial shading, a highlight. |
 | `onmzfl1.tga` | 32 x 32 | additive | `src/onmzfl1.png` (128) | The muzzle flash seen from the front: a five-pointed star round a hot core. | Five tapering angular petals, a core and a glow, noise along the petals. |
 | `onmzfl2.tga` | 64 x 64 | additive | `src/onmzfl2.png` (256) | A flame tongue seen from the side, along the texture's height (drawn aligned to its motion: the forward flame and the flash's side petals). | A tapered flame envelope warped by stretched noise, eroded into licks, a white core along its axis. |
+| `onfxsmk1.tga` | 64 x 64 | alpha | `src/onfxsmk1.png` (256) | A dense, rounded smoke billow (the smoke grenade's column, the frag's dust and smoke). | As `onfxpuf1`, with more and fuller blobs and little erosion; the alpha peaks at 0.72. |
+| `onfxfire.tga` | 64 x 64 | additive | `src/onfxfire.png` (256) | A fireball: a turbulent billow, white-hot where it is densest, through yellow and orange to a dark red rim (the frag's fire, its colour curves ageing it to red). | Gaussian blobs saturated into a cloud, its heat their density times fractal noise, a round falloff; coloured by heat. |
+| `onfxblst.tga` | 128 x 128 | additive | `src/onfxblst.png` (512) | A blast flash: a white core in a wide warm glow, faint streaks and a faint shock ring (the frag's flash and its expanding shock). | Radial gaussians, thin angular streaks and a noisy gaussian band at 0.78 of the radius; warm-to-white by heat. |
 | `oncas_01.tga` .. `oncas_05.tga` | 32 x 32 | alpha | `src/` (128) | A spent 5.56 mm case, five frames of its tumble (the carbine's casing flipbook, `oncas.tga`). | A lathe profile of the 5.56 x 45 case (rim, extractor groove, body, shoulder, neck, open mouth, primer) sampled as points, turned to each frame's angle and depth-sorted, lit as brass (diffuse, a tight highlight, a darkened groove, a dark mouth), area-averaged from four times the master. |
 | `onpcs_01.tga` .. `onpcs_04.tga` | 32 x 32 | alpha | `src/` (128) | A spent 9 mm case, four frames (the pistol's casing flipbook, `onpcs.tga`). | As the 5.56 frames, from the 9 x 19 case's straight, slightly tapered profile. |
 

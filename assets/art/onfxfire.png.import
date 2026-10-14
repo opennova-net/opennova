@@ -1,0 +1,13 @@
+{
+  "importer": "image",
+  "options": {
+    "format": "tga",
+    "size": "64x64"
+  },
+  "outputs": [
+    "onfxfire.tga"
+  ],
+  "schema_version": 1,
+  "source_hash": "ecc1c663cd02bb04",
+  "version": 3
+}
