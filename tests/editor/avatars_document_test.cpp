@@ -4,7 +4,7 @@
 // body and arms; a value changed changes its own line; the graph reads the document's records (a part's models, its
 // shown name a key of Game.bin's Avatars section, a combination's parts by name in the file's scope of their kind,
 // the earlier of two parts of a name inert); the reader's notes as findings at their lines; the order the game binds
-// a combination's parts in (the last of a name above it, in the text a save writes: every part first); a file the
+// a combination's parts in (the last of a name above it, the rows in the file's order, which a save keeps); a file the
 // reader stops in held read only with the gating finding; in a session, an edit of a head's model moves the graph's
 // reference with it, and Undo moves it back. The retail leg (OPENNOVA_JO_DIR): the install's Avatars.def (its base
 // archives and each expansion's) through the document, saved as the format's writer writes what its reader reads of
@@ -200,9 +200,10 @@ int test_findings_and_session() {
 }
 
 // The game binds a combination's parts among those above it, the last of a name [orig: CAvatarDefs_ParseConfigLine
-// @ 0x57A830..0x57A854], in the text a save writes, every part first: a combination between two heads of a name in
-// the file binds the later, as one after both does, and the earlier head is inert; a combination set to a head the
-// file has below it binds it; the reader stopping on the text a save writes is the gating finding.
+// @ 0x57A830..0x57A8D3], and the rows keep the file's order, which a save writes (D-PLAYERINFO-35): a combination
+// between two heads of a name binds the earlier, one after both the later, each through its section, and the save
+// reads back so; a combination set to a head below its nationality is refused until the head moves above it; a part
+// below every nationality is inert; the reader stopping on the text a save writes is the gating finding.
 int test_order() {
 	const std::string between =
 			"define head HEAD_A\r\n{\r\n\tgraphic\t\ta1.3di\r\n}\r\n"
@@ -222,41 +223,63 @@ int test_order() {
 			last += symbol.scope == "AVATARS.DEF/HEAD";
 			inert += symbol.inert;
 		}
-	TEST_EXPECT(first == 1 && last == 1 && inert == 1);
+	TEST_EXPECT(first == 1 && last == 1 && inert == 0);
 	size_t to_first = 0, to_last = 0;
 	for (const GraphEdge &e : out.edges)
 		if (e.kind == ReferenceKind::AvatarPart && e.value == "HEAD_A") {
 			to_first += e.scope == "AVATARS.DEF/HEAD#1";
 			to_last += e.scope == "AVATARS.DEF/HEAD";
 		}
-	TEST_EXPECT(to_first == 0 && to_last == 2);
+	TEST_EXPECT(to_first == 1 && to_last == 1);
 
 	AvatarsDocument document;
 	TEST_EXPECT(document.load_bytes(bytes_of(between), "Avatars.def", AssetKind::AvatarDefs, "jo", error));
-	TEST_EXPECT(validate_avatars_file(document).empty());
+	TEST_EXPECT(validate_avatars_file(document).empty() && document.rows().size() == 7 &&
+	            document.rows()[2]->kind == kNationality && document.rows()[6]->kind == kNationality);
+	// The save keeps the order: read again, the first nationality's combination binds the first HEAD_A.
+	const auto heads_bound = [](const std::string &text) {
+		avatars::AvatarsFile file{};
+		std::string heads;
+		if (avatars::avatars_parse_memory(text.data(), text.size(), &file) != 0) return heads;
+		for (size_t i = 0; i < file.nationalities_count; ++i)
+			heads += std::string(file.nationalities[i].divisions[0].combos[0].head.graphic) + " ";
+		avatars::avatars_free(&file);
+		return heads;
+	};
+	TEST_EXPECT(heads_bound(between) == "a1.3di a2.3di " && heads_bound(document.serialize().text) == "a1.3di a2.3di ");
+	TEST_EXPECT(document.serialize().text == written_form(between));
 	NodeAddress combo{};
-	for (const auto &row : document.rows())
-		if (row && row->kind == kNationality && combo.kind != kCombo)
-			document.walk_records(*row, [&](const NodeAddress &nested, const Document::Placement &) {
-				if (nested.kind == kCombo) combo = nested;
-				return true;
-			});
+	document.walk_records(*document.rows()[2], [&](const NodeAddress &nested, const Document::Placement &) {
+		if (nested.kind == kCombo) combo = nested;
+		return true;
+	});
 	TEST_EXPECT(combo.kind == kCombo);
-	// The first nationality's combination set to HEAD_B, which the file has below it: the save writes every part
-	// first, so it binds; no finding. The other combination binds the later HEAD_A, and the earlier is inert.
+	for (const FieldSchema &field : document.fields(kCombo))
+		if (field.id == "head") TEST_EXPECT(document.field_on(combo, field).scope == "AVATARS.DEF/HEAD#1");
+	// HEAD_B stands below the first nationality: its combination cannot name it (the game would drop it) ...
+	TEST_EXPECT(!document.apply(set_edit(combo, "head", std::string("HEAD_B")), error) &&
+	            error.message.find("above its nationality") != std::string::npos);
+	// ... until HEAD_B moves above it; the save then writes it there.
+	const NodeId head_b = document.rows()[4]->id;
+	Edit move;
+	move.operation = EditOperation::Move;
+	move.address = {head_b, kPart, 0};
+	move.position = 2;
+	TEST_EXPECT(document.apply(move, error) && document.rows()[2]->id == head_b);
 	TEST_EXPECT(document.apply(set_edit(combo, "head", std::string("HEAD_B")), error));
 	const SerializeResult rewritten = document.serialize();
-	TEST_EXPECT(rewritten.ok() && rewritten.text.find("define arms ARMS_B") < rewritten.text.find("nationality 0"));
-	TEST_EXPECT(validate_avatars_file(document).empty());
-	size_t shadowed = 0;
-	for (const auto &row : document.rows())
-		if (row && row->kind == kPart && static_cast<const AvatarPartRow &>(*row).part.name == "HEAD_A") {
-			SymbolFacts facts;
-			static_cast<const Document &>(document).refine_symbol({row->id, kPart, 0}, facts);
-			shadowed += facts.inert;
-		}
-	TEST_EXPECT(shadowed == 1);
-	std::printf("order: a combination binds the last part of a name above it in the text a save writes\n");
+	TEST_EXPECT(rewritten.ok() && rewritten.text.find("define head HEAD_B") < rewritten.text.find("nationality 0") &&
+	            rewritten.text.find("define arms ARMS_B") > rewritten.text.find("nationality 0"));
+	TEST_EXPECT(heads_bound(rewritten.text) == "hb.3di a2.3di " && validate_avatars_file(document).empty());
+	// A part added at the end stands below every nationality: no combination binds it, inert.
+	Edit append;
+	append.operation = EditOperation::Add;
+	append.address = {0, kPart, 0};
+	TEST_EXPECT(document.apply(append, error));
+	SymbolFacts facts;
+	static_cast<const Document &>(document).refine_symbol({document.rows().back()->id, kPart, 0}, facts);
+	TEST_EXPECT(facts.inert && facts.inert_reason.find("no nationality stands below it") != std::string::npos);
+	std::printf("order: a combination binds the last part of a name above it, and a save keeps every part where it stood\n");
 
 	// Parts added past the reader's 512: the text a save writes stops the game's reader, the finding refusing a build.
 	std::string near;
