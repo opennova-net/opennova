@@ -225,7 +225,8 @@ struct Font {
 // parse sets a kind by (a LIST's ID; a SPINLIST's ID, IMAGE, COLOR; a cell's ID, BITMAP
 // [orig: CListWnd_ParseXMLDefinition @ 0x645770; CUISpinList_ParseXMLDefinition @ 0x64bd10;
 // CTableWnd_ParseXMLContentDefinition @ 0x6427d0]), any other none; VALUE the number
-// wcstol reads ("" for 0, the parses' default); JUSTIFY and VJUSTIFY a keyword or the
+// wcstol reads ("" for 0, the parses' default; a SUBST's VALUE is its token, matched as text);
+// JUSTIFY and VJUSTIFY a keyword or the
 // number wcstol reads of another token (the x or y offset), as a STRING's.
 struct Item {
   std::string type;     // ID / IMAGE / COLOR (spin list) / BITMAP (table cell); "" none

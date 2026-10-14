@@ -274,7 +274,8 @@ int main() {
 	std::printf("  radio mnemonic rows %d (grill: 18); widgets authoring VK_ENTER %d, their rows %d\n",
 			radio_rows, enter_widgets, enter_rows);
 	expect(radio_rows == 18, "the 18 shipped RADIO tab labels register their {hot} letter");
-	expect(enter_widgets == 2 && enter_rows == 0, "VK_ENTER registers nothing (cmap WPNAME_OK, loadout ACCEPT)");
+	// VK_ENTER is key 0 (cmap WPNAME_OK, loadout ACCEPT), which registers nothing: the reader leaves it out.
+	expect(enter_widgets == 0 && enter_rows == 0, "VK_ENTER registers nothing (cmap WPNAME_OK, loadout ACCEPT)");
 
 	// (a) Enter on the loadout screen reaches no ACCEPT.
 	{

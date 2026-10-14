@@ -609,7 +609,8 @@ int census_leg(Totals &totals) {
 	expect(census.shadowquality, "SHADOWQUALITY draws the 20-texel band btn1e.tga's first load baked");
 	expect(census.red_pw, "RED_PW draws the 24-texel band btn3.tga's first load baked");
 	expect(census.arrows == 68 && census.arrows_all_states == 68, "the 68 spin arrows draw all four state rows");
-	expect(census.typeless == 216 && census.unknown_type == 1, "216 typeless rows and one unknown TYPE");
+	// The grill's one unknown TYPE reads as none (the reader holds a TYPE its parse does not know as none).
+	expect(census.typeless == 217 && census.unknown_type == 0, "217 typeless rows: the one unknown TYPE reads as none");
 	expect(census.marker_widgets > 0 && census.marker_draw_diffs == 0, "a typeless row marks its state, draws nothing");
 	totals.failures += census.failures;
 	return 0;

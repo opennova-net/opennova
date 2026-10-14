@@ -1365,7 +1365,7 @@ void TreeReader::read_column(const Node &node, TableColumn &column) {
       c.read = true;
       TableSubst subst;
       read_index(subst.has_column, subst.column);
-      subst.value = number_value(c, "VALUE", false);
+      subst.value = string_attr(c, "VALUE"); // the token, matched as text [orig: @ 0x6438f1..0x643918]
       subst.is_url = flag(c, "URL");
       subst.is_file = flag(c, "FILE");
       subst.file = text_of(c);

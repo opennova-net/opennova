@@ -267,7 +267,9 @@ String MnuDocument::get_item_value(int p_id, int p_index) const {
 	if (items == nullptr || p_index < 0 || p_index >= static_cast<int>(items->items.size())) {
 		return String();
 	}
-	return to_gd(items->items[p_index].value);
+	// The number the row holds: none is 0 (the parse's default).
+	const std::string &value = items->items[p_index].value;
+	return to_gd(value.empty() ? std::string("0") : value);
 }
 
 // --- M10: table column template (headers / bodies) ---
