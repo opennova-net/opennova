@@ -53,6 +53,13 @@ PreviewWaves::Wave PreviewWaves::wave(const std::string &file) {
 	return out;
 }
 
+PreviewWaves::Wave PreviewWaves::wait(const std::string &file) {
+	(void)wave(file); // its decode begun
+	Entry &entry = waves_[file];
+	if (!entry.finished && entry.job.valid()) entry.job.wait();
+	return wave(file);
+}
+
 std::vector<std::string> PreviewWaves::refresh() {
 	std::vector<std::string> dropped;
 	for (auto it = waves_.begin(); it != waves_.end();) {
@@ -94,6 +101,10 @@ std::vector<PreviewVoiceQueue::Ready> PreviewVoiceQueue::take_ready() {
 	}
 	waiting_ = std::move(still);
 	return ready;
+}
+
+void PreviewVoiceQueue::wait() {
+	for (const Ready &waiting : waiting_) (void)waves_.wait(waiting.file);
 }
 
 std::vector<std::string> PreviewVoiceQueue::refresh() {
