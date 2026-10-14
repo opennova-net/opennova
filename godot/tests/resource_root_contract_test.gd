@@ -603,11 +603,11 @@ func test_dds_reader_takes_what_d3dx_takes_by_its_own_header_tests() -> void:
 	# A stray byte after the SOI: D3DX's libjpeg skips it with a warning it never makes
 	# fatal and decodes the image [orig: D3DX_JPEG_SkipToNextMarker @0x71BEA7..0x71BEBA,
 	# emit_message @0x71C550]; Godot's decoder refuses it, so the port binds the
-	# checkerboard (D-RMAT-S26B1).
+	# checkerboard (D-RMAT-26).
 	assert_eq(
 		resources.load_material_texture("stray.dds", 0).get_width(),
 		128,
-		"Godot's decoder refuses the stray byte D3DX skips: the checkerboard (D-RMAT-S26B1)"
+		"Godot's decoder refuses the stray byte D3DX skips: the checkerboard (D-RMAT-26)"
 	)
 	# Godot's JPEG decoder reports its refusal.
 	assert_engine_error('Condition "err" is true')

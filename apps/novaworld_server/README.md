@@ -9,7 +9,7 @@ session handshake, the browser/host/play container services, and the legacy
 
 | Listener | Port | Protocol |
 | --- | --- | --- |
-| `GateListener` | UDP 7597 | `novaworld_gate` probe → gate response (NWU `GATEAPI`); the same port is the advertised `POSTIPPORT`, the sink for a retail host's plaintext status heartbeat (`Lobby_UpdateServerInfo`), folded into `active_hosts` by `HostKey` |
+| `GateListener` | UDP 7597 | `novaworld_gate` probe → gate response (NWU `GATEAPI`) from the tag's lobby ("Lobbies: one per title" below); the same port is the advertised `POSTIPPORT`, the sink for a retail host's plaintext status heartbeat (`Lobby_UpdateServerInfo`), folded into `active_hosts` by `HostKey` |
 | `NwUdpListener` | UDP 64206 | NWU framing -> session handshake (0x41/0x42/0x43/0x46) -> PN dispatch: NOVAWORLDUDP containers or JointOperations game runtime |
 | `HttpListener` (Crow, `BUILD_NOVAWORLD_HTTP`) | TCP 8080 | `NW*.dll` routes + `/api/*` backend + web portal fallback |
 
@@ -88,6 +88,54 @@ session handshake, the browser/host/play container services, and the legacy
   (declared first) close last, and the last close checkpoints the WAL. The HTTP
   listener clears Crow's own signal set (`signal_clear()`), which would otherwise
   take both signals and stop only Crow.
+
+## Lobbies: one per title
+
+Each `games` row is a lobby ([`catalog_repository.h`](catalog_repository.h)). The rows
+are `backend/seed/0001_games.sql`'s, which every boot applies after the migrations
+(`INSERT OR IGNORE`, so a row added there reaches every database at its next boot);
+migration 0013 adds `title`, the engine's game profile code the row's clients speak
+(`engine/base/gameprofile`), and the gate's per-row answer (`startup_query`,
+`glsvss_*`).
+
+| Gate tag | Slug | LobbyName | Title | Start page | Browser list | pfid | Expansion bits |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `jop:cus2`, and `jopd:cus4` (the JO demo's) by alias | `jop_2_consumer` | `jop_2_consumer` | `jo` | `jop_2_start.htm` | `/jop_2.gsb` | 28 | 3 |
+| `dfx2:0:cus:buffy` | `dfx2_consumer` | `dfx2_0_consumer` | `dfx2` | `dfx2_0_start.htm` | `/dfx2_0.gsb` | 38 | 1 |
+| `opennova:0` | `opennova_0_consumer` | `opennova_0_consumer` | `jo` | `jop_2_start.htm` | `/opennova_0.gsb` | 28 | 1 |
+
+The OpenNova row (ON data) speaks JO's wire identity, so its title, version pair
+(3 / 2345), product family, pages and gate answer's shape are JO's; its gate tag,
+LobbyName and browser list are its own, so anyone running ON data lands in its lobby.
+Expansion bits: bit 0 is the base game and bit 1 JO's `jox01`; DFX2 and ON have no
+expansion.
+
+- **The gate** answers a probe from the row its tag selects: `LobbyName`, the
+  `startupurl`'s query (`startup_query`) and the GLSVSS leg (`glsvss_*`; a row with none
+  takes the configured `ONNET_GLSVSS_*`, none by default). JO's reply is the bytes it
+  always was. DFX2's answers what NovaLogic's live gate answered the DFX2 tag on
+  2026-10-14 (`dfx2_0_consumer`, `pfid=38` in the `startupurl`, `[DFX2]KILLS` /
+  3600000 / 45000), in this gate's shape: the `POSTIPADDRESS` / `POSTIPPORT` pair, which
+  the live DFX2 reply lacks (its `udpnovaworld` line lets a client skip them), and this
+  service's address in the `startupurl` where the live one has `[domainname]`; its
+  `TimeOnGateServer`, a key no client reads, is not sent. A tag no row (nor the alias)
+  answers to gets no reply, and the unknown tracker records it. The gate reads the table
+  once in `start()`, so its receive thread never touches SQLite for a probe; a change to
+  the table takes a restart.
+- **Listings** carry the LobbyName the gate gave their host (`active_hosts.game`), so a
+  host lands in its own game: `/api/lobbies` groups the hosts by it (one group per row),
+  and each row's `.gsb` route lists its own alone, showing the row's `ver1` and
+  `exp_bits` in a column the host reported nothing for.
+- **The `NW*.dll` pages** fill in the requesting client's game's values: its browser
+  list as `GSB_SERVER`, its pages where the request names none, and its expansion bits
+  (the login's `EXPBITS`, the join's requirement). The game is the gate tag the client
+  sends, the `gt` query `/nwprepare.dll` carries (the `[GT]` the gate's `startupurl`
+  has it substitute) and, on every later request, the `GT` cookie that page sets (a stock
+  client sends its cookies back on every request); else its product family (the
+  request's `pfid`, else the `NWPF` cookie `/NWJoin.dll` and `/NWHost.dll` set); else the
+  prefix of the page it names (`dfx2_0_`); else JO's. JO and ON share pfid 28 and JO's
+  pages, so only the tag tells them apart. The HTTP listener also reads the table once in
+  `start()`, where it registers the `.gsb` routes.
 
 ## Connection lifecycle
 
@@ -698,7 +746,8 @@ All via environment (`server_config.cpp`): `ONNET_PUBLIC_HOST`,
 `ONNET_MET_IP`, `ONNET_MET_PORT`, `ONNET_MET_LABEL`, `ONNET_MET_PING`,
 `ONNET_MET_EXT` (emitted as the METIPADDRESS family when `ONNET_MET_IP` is set)
 and the GLSVSS leg `ONNET_GLSVSS_REQUEST`, `ONNET_GLSVSS_RIMS`,
-`ONNET_GLSVSS_AGRMS` (the gate VARs) plus `ONNET_GLSVSS_RESULTS` (what
+`ONNET_GLSVSS_AGRMS` (the gate VARs for a games row with no GLSVSS leg of its own;
+DFX2's row has one) plus `ONNET_GLSVSS_RESULTS` (what
 `ClientGLSVSSRequest` is answered with). The gate response carries only the
 nineteen keys the retail parser recognises. The host/join reflection override
 for a docker bridge or NAT (leave unset in production): `ONNET_CLIENT_REFLECT_IP`,
@@ -865,11 +914,12 @@ the known addresses and the credentials generation below.
 Every source but `main.cpp` builds as the static library
 `opennova_novaworld_server_core` (mirroring `opennova_serve_core`); the exe is
 `main.cpp` over it. The HTTP sources (`http_listener`, `host_routes`, `web_access`,
-`web_session`, `rate_limiter`, `template_engine`, `session_store`, `auth`,
-`catalog_repository`, and the hosted servers' `hosted/`) join the core only under
+`web_session`, `rate_limiter`, `template_engine`, `session_store`, `auth`, and the
+hosted servers' `hosted/`) join the core only under
 `BUILD_NOVAWORLD_HTTP`, which also defines `OPENNOVA_HTTP_ENABLED` PUBLIC so
 `main.cpp` starts the listener; the header-only `loggable.h` serves every listener
-either way. The route harness, ctest
+either way, and `catalog_repository` (the games catalogue) builds in every core,
+since the gate reads it too. The route harness, ctest
 `opennova_novaworld_server_http_routes`
 ([`tests/novaworld/http_routes_test.cpp`](../../tests/novaworld/http_routes_test.cpp)),
 drives the Crow listener in-process on port 0 (the port it reads back from
@@ -889,9 +939,19 @@ last run probes the gate and opens a NovaWorld session: `UDPNOVAWORLD` names the
 NW UDP listener's logged port and, with the HTTP layer, `STARTUPURL` and the
 SessionInit's web domain the HTTP listener's. The ctest
 `gate_listener` ([`tests/novaworld/gate_listener_test.cpp`](../../tests/novaworld/gate_listener_test.cpp))
-starts the real `GateListener` on port 0 and checks that its reported port answers
-a probe and comes back as POSTIPPORT, and that `UDPNOVAWORLD` and `STARTUPURL`
-carry the sibling ports its config names. The website sessions' store and the rate
+starts the real `GateListener` on port 0 over the migrated and seeded games table and
+checks that its reported port answers a probe and comes back as POSTIPPORT, that
+`UDPNOVAWORLD` and `STARTUPURL` carry the sibling ports its config names, that each
+gate tag's reply carries its row's lobby (JO's and the JO demo's alias the reply this
+gate always sent, byte for byte; DFX2's the live DFX2 gate's values in this gate's shape;
+OpenNova's its row's), that a configured GLSVSS leg stands in for JO's and never for
+DFX2's, and that a tag no row answers to gets no reply; `host_register_list` takes a
+DFX2 host's lists (`DFXCATEGORY1`, `PBServer` `0`); the route harness's
+`lobby_per_title` case drives
+`/api/games`, each row's `.gsb` route and the game a retail page's `GSB_SERVER` names
+(the gate tag, the `GT` cookie, the `NWPF` cookie, the page prefix), and
+`backend_schema` migration 0013 on a fresh database and over one at 0012. The website
+sessions' store and the rate
 limiter also have Crow-free ctests that compile those sources straight in and run on
 every build: `web_session`
 ([`tests/novaworld/web_session_test.cpp`](../../tests/novaworld/web_session_test.cpp),

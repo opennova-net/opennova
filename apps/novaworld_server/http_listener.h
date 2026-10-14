@@ -32,6 +32,7 @@ struct ServerConfig;
 class SessionStore;
 class NwUdpListener;
 namespace hosted { class AdminLinks; }
+namespace catalog { struct GameRow; }
 
 // Crow-backed HTTP listener. start() registers six route families, each in
 // its own registrar (bodies in http_listener.cpp, the listed servers' in
@@ -49,6 +50,12 @@ namespace hosted { class AdminLinks; }
 //   legacy login chain  — retail NW*.dll prepare/start/login/logout/account
 //   legacy host/join    — *.gsb browser blobs, /NWJoin.dll, /NWHost.dll
 //   static + catch-all  — web/dist, /static/*, bare templates, 404 tracker
+//
+// One lobby per title: start() loads the games catalogue once
+// (catalog::GameCatalog), registers each row's .gsb route, and every retail
+// page fills in the requesting client's game's values (its gsb URL, its page
+// names where the request names none, its expansion bits), the game its
+// gate tag names (catalog::GameCatalog::for_client).
 //
 // Crow is async + multi-threaded internally; we just hand it a thread to
 // own. start() spawns that thread and returns once Crow serves; stop()
@@ -129,9 +136,10 @@ private:
 	// configured one or the OS's pick for port 0. The retail client is REMOTE,
 	// so these must point at the public host, never 127.0.0.1 (else the client
 	// POSTs its host registration / fetches the server browser from its own
-	// localhost).
+	// localhost). The browser list is the requesting client's game's
+	// (catalog::GameRow::gsb_route: "/jop_2.gsb" for JO's).
 	std::string host_url() const;
-	std::string gsb_url() const;
+	std::string gsb_url(const catalog::GameRow &game) const;
 
 	struct Impl;
 	std::unique_ptr<Impl> impl_;

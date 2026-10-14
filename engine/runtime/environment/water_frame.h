@@ -72,7 +72,7 @@ float resolve_water_height(const WaterHeightRungs &rungs,
 // rung is OpenNova's fallback, not retail's (the global has no terrain
 // writer; a .trn's water_height is a time-of-day line, already the
 // environment's): it serves a caller whose config never read the .trn
-// (D-ENV-S26B2). The host boot, the editor's ground facts and its environment
+// (env #46). The host boot, the editor's ground facts and its environment
 // uses resolve it here alike.
 ResolvedWaterHeight mission_water_rung(
 		const BmsEnvOverrides &overrides, const Config &environment, float terrain_height);
