@@ -861,6 +861,8 @@ void ObjectModel::end_ctrl_update() {
 void ObjectModel::set_ctrl_value(const String &p_name, int64_t p_value) {
 	const String reg = ObjectData::canonical_control_register_name(p_name);
 	if (reg.is_empty()) return;
+	// The value written stands over a weather sample taken before it.
+	weather_sampled_ = false;
 	set_ctrl_override_native({}, opennova::threedi::threedi_ctrl_register_ordinal(
 			reg.utf8().get_data()), p_value);
 }
@@ -1558,6 +1560,14 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 					static_cast<int32_t>(std::lround(static_cast<double>(p.y) * 65536.0)),
 					flicker, swing)) {
 			controls_.sample_weather(flicker, swing);
+			weather_sampled_ = true;
+		} else if (weather_sampled_) {
+			// No rings stand any more (no weather publishes them: a world with
+			// none, or the absent set a picture with no world takes, E13): the
+			// last weather's sample goes, the registers as the absent set leaves
+			// them, 0. A value written since (set_ctrl_value) stands.
+			controls_.sample_weather(0, 0);
+			weather_sampled_ = false;
 		}
 	}
 	// Retail poses PANM during entity submission before the later render-batch

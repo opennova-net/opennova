@@ -359,6 +359,7 @@ private:
 	HashMap<int64_t, Array> anim_frames_by_mat_;
 	// Native CTRL values, writer ownership and local part-channel playback.
 	opennova::renderer::ModelControls controls_;
+	bool weather_sampled_ = false; // FLICKER/SWING hold a weather ring sample
 	opennova::renderer::ControlRegisterValues runtime_ctrl_values();
 	// Optional visual parts (a player body's selected head) driven by this
 	// model's presentation calls: every animation/body/part call and every CTRL
