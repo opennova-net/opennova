@@ -2,11 +2,15 @@
 // its console chat and the /INOUT lines.
 #include <runtime/inmatch/server_console.h>
 
+#include <base/io/strutil.h>
+#include <formats/def/def.h> // DefItemsFile (SAVENFO's rows)
+#include <net/napi/session.h> // tokenize_quoted (String_TokenizeQuotedToArray)
 #include <net/npwire/ingame_encode.h> // encode_chat_broadcast
 #include <net/npwire/ingame_message_id.h>
 #include <runtime/hud/feed_format.h> // chat_channel_sink / chat_channel_color / strip_inline_tags
 #include <runtime/hud/hud_chat_entry.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/world/world.h>
 
 #include <cstdio>
 
@@ -122,6 +126,183 @@ std::string inout_player_added_line(const NapiNPConnection &conn) {
 	//  @0x61e8a6 and name (+0x80) @0x61e909]
 	return peer_addr_to_string(conn.peer) + " : " + connection_kind(conn) + "PLAYER ADDED \"" +
 			conn.player_name + "\".";
+}
+
+std::string napi_log_stamp(std::time_t t) {
+	// [orig: NapiLog_WriteEntry @0x62EE7C..0x62EEA8 over Napi_GetLocalTime's
+	//  _localtime64: the year with its century, the month from 1]
+	std::tm local{};
+#if defined(_WIN32)
+	localtime_s(&local, &t);
+#else
+	localtime_r(&t, &local);
+#endif
+	char text[64];
+	std::snprintf(text, sizeof(text), "%4.4ld-%2.2ld-%2.2ld %2.2ld:%2.2ld:%2.2ld: ",
+			static_cast<long>(local.tm_year + 1900), static_cast<long>(local.tm_mon + 1),
+			static_cast<long>(local.tm_mday), static_cast<long>(local.tm_hour),
+			static_cast<long>(local.tm_min), static_cast<long>(local.tm_sec));
+	return text;
+}
+
+NetLog::NetLog(ServerFileSink &files)
+	: files_(files), stamp_([] { return napi_log_stamp(std::time(nullptr)); }) {}
+
+void NetLog::write_entry(const char *text) {
+	// Mode 3: the stamp (flag 4) and the line into the buffer, CR LF after it.
+	buffer_ += stamp_();
+	buffer_ += text;
+	buffer_ += "\r\n";
+}
+
+void NetLog::set_enabled(bool on) {
+	// [orig: NapiLog_SetEnabled @0x62F2B0 — the same state returns @0x62F2BD; the
+	//  stop line before the clear @0x62F2C5..0x62F2CF, the set before the start
+	//  line @0x62F2D7..0x62F2E0]
+	if (on == enabled_) return;
+	if (on) {
+		enabled_ = true;
+		write_entry("NapiLog Started!");
+	} else {
+		write_entry("NapiLog Stopped!");
+		enabled_ = false;
+	}
+}
+
+void NetLog::flush(uint32_t now_ms) {
+	// [orig: NapiLog_Flush @0x62F1A0 — a nonempty buffer only; the open, the
+	//  write, the close; the buffer emptied whether the open held or not; the
+	//  stamp of the flush always]
+	if (!buffer_.empty()) {
+		// The first open truncates the file (0x20 in the open's flags while
+		// the log's +16 stands), every later one appends; a failed open leaves
+		// +16 as it was [orig: NapiLog_EnsureOpen @0x62EDD8..0x62EDFB].
+		if (files_.write(kNetLogFileName, buffer_, /*append=*/!first_open_)) first_open_ = false;
+		buffer_.clear();
+	}
+	last_flush_ms_ = now_ms;
+}
+
+void NetLog::flush_if_expired(uint32_t now_ms) {
+	// [orig: NapiLog_FlushIfExpired @0x62F2F0 — `now - last >= interval`]
+	if (now_ms - last_flush_ms_ >= kNetLogFlushIntervalMs) flush(now_ms);
+}
+
+void NetLog::shutdown(uint32_t now_ms) {
+	// [orig: NapiLog_Shutdown @0x62F310 — the stop line and the clear when on,
+	//  then the flush]
+	if (enabled_) {
+		write_entry("NapiLog Stopped!");
+		enabled_ = false;
+	}
+	flush(now_ms);
+}
+
+namespace {
+
+// The slot's local byte (+5): the host's own client connection.
+bool slot_is_local(const NapiNPConnection &conn) {
+	return conn.type == NapiNPConnection::kTypeClientSide ||
+	       conn.link.mode == replication::TransportMode::Loopback;
+}
+
+// The chat throttle's interval, which the console line's shares [orig: the
+// slot's +100360 word, `last + 1000` @0x519A36].
+constexpr uint32_t kConsoleLineThrottleMs = 1000;
+// The copy's bound: 1023 characters and the NUL [orig: the 1024 count
+// @0x519A53].
+constexpr size_t kConsoleLineMaxChars = 1023;
+// NETLOG's reply chat channel and lifetime [orig: NetPacket_WriteTwoBytesAndCString
+// (.., slot+20, 14, ..) @0x517715; SendFiltered(0x14, 1, 310) @0x51771A].
+constexpr uint8_t kNetlogReplyChannel = 14;
+constexpr uint32_t kNetlogReplyRetentionFlushes = 310;
+
+} // namespace
+
+bool Server_HandleAdminNetlogCommand(NapiNPServerCtx &ctx, const std::string &line,
+		const NapiNPConnection *slot, std::vector<ProtocolMessage> &replies) {
+	const std::vector<std::string> tokens = tokenize_quoted(line);
+	if (line.empty() || tokens.empty()) return false;
+	const bool host_itself = slot == nullptr || slot_is_local(*slot);
+	if (strutil::starts_with_icase(line, "STAT")) return true;
+	if (!strutil::iequals(tokens[0], "NETLOG") || !host_itself || ctx.logs.net == nullptr) return false;
+	NetLog &log = *ctx.logs.net;
+	log.set_enabled(!log.enabled());
+	if (slot != nullptr) {
+		char text[64];
+		std::snprintf(text, sizeof(text), "NETLOG: SERVER SET TO %ld", static_cast<long>(log.enabled() ? 1 : 0));
+		ChatBroadcast reply;
+		reply.channel = kNetlogReplyChannel;
+		reply.sender_slot = static_cast<uint8_t>(slot->reply.player_slot);
+		reply.text = text;
+		ProtocolMessage message = make_protocol_message(s2c::CHAT_BROADCAST, encode_chat_broadcast(reply));
+		message.retention_flushes = kNetlogReplyRetentionFlushes;
+		replies.push_back(std::move(message));
+	}
+	return false;
+}
+
+std::vector<ProtocolMessage> Server_HandleConsoleCommandMessage(NapiNPServerCtx &ctx,
+		NapiNPConnection &sender, const std::vector<uint8_t> &payload, uint32_t now_ms) {
+	std::vector<ProtocolMessage> replies;
+	if (ctx.is_authority == 0 || !player_slot_active(sender)) return replies;
+	const uint32_t last = sender.reply.chat_last_ms;
+	if (last != 0 && now_ms < last + kConsoleLineThrottleMs) return replies;
+	sender.reply.chat_last_ms = now_ms;
+	std::string line;
+	for (size_t i = 0; i < payload.size() && line.size() < kConsoleLineMaxChars && payload[i] != 0; ++i)
+		line.push_back(static_cast<char>(payload[i]));
+	if (Server_HandleAdminNetlogCommand(ctx, line, &sender, replies)) return replies;
+	std::vector<uint8_t> body(line.begin(), line.end());
+	body.push_back(0);
+	ProtocolMessage echo = make_protocol_message(s2c::CLIENT_CONSOLE_COMMAND, std::move(body));
+	echo.reliable = false;
+	replies.push_back(std::move(echo));
+	return replies;
+}
+
+std::string entity_usage_file_name(const std::string &name) {
+	std::string file = name.substr(0, 27);
+	const size_t dot = file.find('.');
+	if (dot == std::string::npos) return std::string();
+	return file.substr(0, dot) + ".nfo";
+}
+
+std::string entity_usage_text(const world::World &world, const def::DefItemsFile *items,
+		const std::string &name) {
+	const size_t item_count = items != nullptr ? items->count : 0;
+	std::vector<int32_t> counts(item_count, 0);
+	// Every row of the five pools below its used count: a live row counts by its
+	// ItemTypeIndex, a freed one is ItemTypeIndex 0, which no line prints.
+	for (int pool = 0; pool < world::EntityRegistry::kPoolCount; ++pool) {
+		world.registry.for_each_in_pool(pool, [&](const world::Entity &e) {
+			if (e.item_type_index > 0 && static_cast<size_t>(e.item_type_index) < counts.size())
+				++counts[static_cast<size_t>(e.item_type_index)];
+		});
+	}
+	std::string out = "Object usage for " + name;
+	char line[512];
+	std::snprintf(line, sizeof(line), "\nNumber of OITEMS (people and players)        :\t%d\n",
+			static_cast<int>(world.registry.pool_used(0)));
+	out += line;
+	std::snprintf(line, sizeof(line), "\nNumber of MITEMS (vehicles and moving things):\t%d\n",
+			static_cast<int>(world.registry.pool_used(1)));
+	out += line;
+	std::snprintf(line, sizeof(line), "\nNumber of DITEMS (static things)             :\t%d\n",
+			static_cast<int>(world.registry.pool_used(2)));
+	out += line;
+	std::snprintf(line, sizeof(line), "\nNumber of MARKERS (You Know Markers)         :\t%d\n\n",
+			static_cast<int>(world.registry.pool_used(3)));
+	out += line;
+	for (size_t index = 1; index < item_count; ++index) {
+		if (counts[index] == 0) continue;
+		const def::DefItemDef &row = items->entries[index];
+		std::snprintf(line, sizeof(line), "type id-%07d  count-%04d  %s \n", row.id, counts[index],
+				row.display_name);
+		out += line;
+	}
+	out += "\n\n";
+	return out;
 }
 
 std::string inout_player_removed_line(const NapiNPConnection &conn) {

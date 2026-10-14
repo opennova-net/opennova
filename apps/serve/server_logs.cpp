@@ -46,6 +46,10 @@ int parse_log_switch(const std::vector<std::string> &args, size_t i, LogSwitches
 		out.cheat_log = true;
 		return 1;
 	}
+	if (strutil::iequals(a, "/NETLOG")) {
+		out.net_log = true;
+		return 1;
+	}
 	return 0;
 }
 
@@ -59,12 +63,18 @@ void ServerLogDevices::arm(const LogSwitches &switches) {
 		if (switches.cheat_log) punt_->arm_cheat_log();
 		if (switches.punt_log) punt_->arm_punt_log();
 	}
+	// CNapiNetwork_SetNetLogFile(1) for the switch, then again for the file
+	// [orig: @0x4A7A23..0x4A7A29; Napi_FileExists("_DONETLOG.TXT") @0x4A7CBC..0x4A7CD3].
+	if (switches.net_log) net_.set_enabled(true);
+	if (files_.exists(inmatch::kNetLogArmFileName)) net_.set_enabled(true);
 }
 
 inmatch::ServerLogs ServerLogDevices::logs() {
 	inmatch::ServerLogs logs;
 	logs.profile = profile_.get();
 	logs.punt = punt_.get();
+	logs.net = &net_;
+	logs.files = &files_;
 	return logs;
 }
 

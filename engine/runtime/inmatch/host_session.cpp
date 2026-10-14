@@ -363,6 +363,10 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 	// [orig: Game_ProcessMainFrame -- Server_TickUpdate @0x5266B6, then
 	//  Entity_UpdateAllEntities @0x52674B]
 	Server_RouteFrameTailEdges(owner.ctx);
+	// The manager's pump flushes the net log once its interval has passed
+	// [orig: NapiNPManager_Pump @0x62AC98 -> NapiLog_FlushIfExpired @0x62F2F0].
+	if (owner.ctx.logs.net != nullptr)
+		owner.ctx.logs.net->flush_if_expired(owner.ctx.np_protocol.host_run_duration_ms);
 
 	// (5) A dedicated host registers no type-2 local client. If its embedder nevertheless supplied a
 	// loopback channel, defensively drain it so that unused input cannot accumulate. A serve-and-play

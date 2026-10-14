@@ -310,6 +310,7 @@ void test_switches_and_devices() {
 	CHECK(serve::parse_log_switch(args, 4, sw, error) == 1);
 	CHECK(serve::parse_log_switch(args, 5, sw, error) == 0);
 	CHECK(serve::parse_log_switch({"/PROFILE"}, 0, sw, error) == -1);
+	CHECK(serve::parse_log_switch({"/netlog"}, 0, sw, error) == 1 && sw.net_log);
 
 	// The devices in a working directory of their own.
 	const fs::path dir = fs::temp_directory_path() /
@@ -329,7 +330,25 @@ void test_switches_and_devices() {
 		logs.punt->write_punt(4, "Joe", "ACRC", "");
 		CHECK(logs.profile->open("servetst.bms"));
 		logs.profile->close();
+		// The net log, the process's always: off until NETLOG, then its start line at the
+		// first flush, and its stop line at the close (D-NET-371).
+		CHECK(logs.net != nullptr && logs.files != nullptr && !logs.net->enabled());
+		logs.net->set_enabled(true);
+		logs.net->flush(5000);
+		devices.close(6000);
 	}
+	{
+		// A _DONETLOG.TXT in the working directory turns it on at the start.
+		std::ofstream("_DONETLOG.TXT") << "";
+		serve::ServerLogDevices devices;
+		devices.arm(serve::LogSwitches{});
+		CHECK(devices.logs().net->enabled());
+	}
+	std::ifstream netlog("_NETLOG.TXT", std::ios::binary);
+	const std::string netlog_text((std::istreambuf_iterator<char>(netlog)), std::istreambuf_iterator<char>());
+	CHECK(netlog_text.find(": NapiLog Started!\r\n") != std::string::npos &&
+			netlog_text.find(": NapiLog Stopped!\r\n") != std::string::npos);
+	netlog.close();
 	std::ifstream punt("_PUNT.TXT", std::ios::binary);
 	const std::string punt_text((std::istreambuf_iterator<char>(punt)), std::istreambuf_iterator<char>());
 	CHECK(punt_text.find(" : START : \r\n") != std::string::npos);

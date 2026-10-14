@@ -655,16 +655,56 @@ void AdminConsole::handle_weapon(const Args &args, std::vector<std::string> &rep
 	replies.emplace_back("OK - Weapon availbility changed.");
 }
 
-// The host's own console line. A session peer queues it to its own server as reliable C2S
-// 0x04; an authority that is not a peer runs its arms in order until one takes it.
-// Client_ProcessLocalCommand's commands, the NETLOG toggle and NapiClientCmd_ParseAndExecute's
-// input bindings are not modeled (D-NET-371); its one-second guard compares the tick with the
-// last stamp minus 1000, so it never drops a line.
+// Client_ProcessLocalCommand's arms a host reaches with no client of its own: each takes a
+// line its prefix opens. PunkBuster's two arms (its callback and the `pb_` lines) and the WAC
+// overlay toggles by name come first in retail and are not modeled (D-NET-371); SAVEKEYS is
+// taken here, its keylist.key dump of the profile's binding table not modeled, nor is the arm
+// past VERSION, which out of a session matches the line's CRC against the binding table and
+// queues its input action. SAVENFO writes debug.nfo (entity_usage_text); VERSION posts
+// "Version <version>  - <title>" to the SYSTEM ring in white with the 930-tick life.
+// [orig: Client_ProcessLocalCommand @0x520BF0 — sub_4D7F00 @0x520C1A, `pb_` @0x520C50, the
+//  WAC overlays @0x520CF1, SAVEKEYS @0x520D10 (KeyBinding_DumpAllToFile @0x54C0A0), SAVENFO
+//  @0x520D4B (Entity_DumpUsageStatistics("debug.nfo") @0x520D5C), VERSION @0x520D8E (the
+//  format @0x7D00AC, Chat_AddDebugMessage(.., -1, 930) @0x520DC2, an IDB name for
+//  Chat_AddMessageChannel2 @0x4987F0), the binding CRC @0x520DF2..0x520E5B]
+bool AdminConsole::local_command(const std::string &line) {
+	if (strutil::starts_with_icase(line, "SAVEKEYS")) return true;
+	if (strutil::starts_with_icase(line, "SAVENFO")) {
+		const char *name = "debug.nfo";
+		const std::string file = entity_usage_file_name(name);
+		const def::DefItemsFile *items = seams_.items_table ? seams_.items_table() : nullptr;
+		if (ctx_.world != nullptr && ctx_.logs.files != nullptr && !file.empty()) {
+			// fopen("w+"): text mode, each '\n' on the disk a CR LF [orig: @0x40E6B2].
+			std::string text;
+			for (const char c : entity_usage_text(*ctx_.world, items, name)) {
+				if (c == '\n') text += '\r';
+				text += c;
+			}
+			(void)ctx_.logs.files->write(file, text, /*append=*/false);
+		}
+		return true;
+	}
+	if (strutil::starts_with_icase(line, "VERSION")) {
+		const std::string text = "Version " + seams_.version_text + "  - " + seams_.title_text;
+		if (seams_.system_message) seams_.system_message(text, 0xFFFFFFFFu);
+		return true;
+	}
+	return false;
+}
+
+// The host's own console line: Client_ProcessLocalCommand's arms first; then a session peer
+// queues the line to its own server as reliable C2S 0x04, whose authority half echoes back as
+// S2C 0x06 whatever NETLOG does not take (Server_HandleConsoleCommandMessage); an authority that
+// is not a peer runs the NETLOG handler (a `STAT` prefix taken whole; NETLOG toggling the net
+// log and going on), Server_HandleBanPuntCommand, then NapiClientCmd_ParseAndExecute, whose
+// debug commands and key-binding queue are not modeled. Its one-second guard compares the tick
+// with the last stamp minus 1000, so it never drops a line.
 // [orig: Client_ProcessConsoleCommand @0x520E80 — the guard, Client_ProcessLocalCommand
-//  @0x520BF0, the peer's QueueReliableMessage(4) with NetPacket_WriteNullableString @0x42A430,
-//  the authority's Server_HandleAdminNetlogCommand @0x5175D0 (a `STAT` prefix taken whole),
+//  @0x520EEC, the peer's QueueReliableMessage(4) with NetPacket_WriteNullableString @0x42A430,
+//  the authority's Server_HandleAdminNetlogCommand(line, 0) @0x5175D0,
 //  Server_HandleBanPuntCommand(line, 0) @0x50B380, NapiClientCmd_ParseAndExecute @0x4329C0]
 void AdminConsole::console_command(const std::string &line) {
+	if (local_command(line)) return;
 	if (ctx_.is_mp_session_peer != 0) {
 		if (seams_.host_client != nullptr) {
 			std::vector<uint8_t> body(line.begin(), line.end());
@@ -674,7 +714,8 @@ void AdminConsole::console_command(const std::string &line) {
 		return;
 	}
 	if (ctx_.is_authority == 0) return;
-	if (!tokenize_quoted(line).empty() && strutil::starts_with_icase(line, "STAT")) return;
+	std::vector<ProtocolMessage> no_slot_replies;
+	if (Server_HandleAdminNetlogCommand(ctx_, line, nullptr, no_slot_replies)) return;
 	Server_HandleBanPuntCommand(ctx_, line);
 }
 

@@ -40,10 +40,14 @@
 // @0x625afb, enabled by NapiLog_SetEnabled(dword_B4C688) @0x4c6d15 after
 // the socket opens; `/INOUT` @0x4a743d..0x4a744f].
 
+#include <net/npwire/protocol_message.h>
 #include <runtime/hud/game_text_lookup.h>
+#include <runtime/inmatch/server_files.h>
 
 #include <cstddef>
 #include <cstdint>
+#include <ctime>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -51,6 +55,14 @@ namespace opennova::hud {
 enum class ChatSendResult : uint8_t;
 class ChatEntry;
 } // namespace opennova::hud
+
+namespace opennova::def {
+struct DefItemsFile;
+}
+
+namespace opennova::world {
+class World;
+}
 
 namespace opennova::inmatch {
 
@@ -121,5 +133,111 @@ uint32_t server_console_submit(NapiNPServerCtx &ctx, hud::ChatEntry &entry,
 std::string inout_host_line(const NapiNPServerCtx &ctx, bool started);
 std::string inout_player_added_line(const NapiNPConnection &conn);
 std::string inout_player_removed_line(const NapiNPConnection &conn);
+
+// THE NET LOG: the protocol manager's NapiLog, which the process creates with
+// its network (buffered, mode 3; a line stamp; a 5000 ms flush interval) and
+// which only NETLOG, the `/NETLOG` switch and a `_DONETLOG.TXT` in the working
+// directory turn on, naming its file `_NETLOG.TXT`. Nothing in the image writes
+// a line into it but its own start and stop lines: an enable appends
+// "NapiLog Started!", a disable "NapiLog Stopped!", each behind the stamp
+// "yyyy-mm-dd hh:mm:ss: " and followed by CR LF, into the log's buffer. The
+// manager's pump flushes the buffer once 5000 ms have passed since the last
+// flush; the log's first open of the file truncates it, every later one
+// appends, and each flush closes it again; the shutdown stops the log (its
+// stop line when it is on) and flushes.
+// [orig: CNapiNetwork_SetNetLogFile @0x4C69A0 (NapiLog_SetFilename "_NETLOG.TXT",
+//  NapiLog_SetEnabled); NapiNPManager_Init @0x62C4BB..0x62C4D0 (CNapiLog_Init
+//  "netlog.txt", mode 3, flags 6: the stamp 4 and the append-once 2, 5000);
+//  NapiLog_SetEnabled @0x62F2B0; NapiLog_WriteEntry @0x62EE30 (the stamp
+//  "%4.4ld-%2.2ld-%2.2ld %2.2ld:%2.2ld:%2.2ld: " of Napi_GetLocalTime @0x61D160,
+//  NapiBuffer_AppendLine @0x634BB0 and its "\r\n" @0x7C1310);
+//  NapiLog_FlushIfExpired @0x62F2F0 from NapiNPManager_Pump @0x62AC98;
+//  NapiLog_Flush @0x62F1A0; NapiLog_EnsureOpen @0x62EDC0 (NapiFile_Open 0x6A, its
+//  0x20 the truncate, the first time, else 0x4A); NapiLog_Shutdown @0x62F310 from
+//  NapiNPManager_Shutdown @0x62B739; the switch @0x4A7A11..0x4A7A29 and
+//  _DONETLOG.TXT @0x4A7CBC..0x4A7CD3 in Game_ParseCommandLineAndInit]
+inline constexpr const char *kNetLogFileName = "_NETLOG.TXT";
+inline constexpr const char *kNetLogArmFileName = "_DONETLOG.TXT";
+inline constexpr uint32_t kNetLogFlushIntervalMs = 5000;
+
+// NapiLog_WriteEntry's stamp over local time `t`: "yyyy-mm-dd hh:mm:ss: ".
+std::string napi_log_stamp(std::time_t t);
+
+class NetLog {
+public:
+	explicit NetLog(ServerFileSink &files);
+
+	// The stamp text the entries take (napi_log_stamp over the current time by
+	// default); a test pins it.
+	void set_stamp_text(std::function<std::string()> stamp) { stamp_ = std::move(stamp); }
+
+	bool enabled() const { return enabled_; }
+	// NapiLog_SetEnabled: a change of state writes its line; the same state none.
+	void set_enabled(bool on);
+	// NapiLog_FlushIfExpired at the manager's pump, `now_ms` the process clock.
+	void flush_if_expired(uint32_t now_ms);
+	// NapiLog_Flush: the buffer to the file, when it holds anything.
+	void flush(uint32_t now_ms);
+	// NapiLog_Shutdown: the stop line when the log is on, then the flush.
+	void shutdown(uint32_t now_ms);
+	// What the buffer holds, not yet flushed.
+	const std::string &pending() const { return buffer_; }
+
+private:
+	void write_entry(const char *text);
+
+	ServerFileSink &files_;
+	std::function<std::string()> stamp_;
+	bool enabled_ = false;
+	bool first_open_ = true; // the log's +16: the first open truncates
+	std::string buffer_;
+	uint32_t last_flush_ms_ = 0;
+};
+
+// Server_HandleAdminNetlogCommand over one console line: a line of no token is
+// not taken; a line beginning `STAT` is taken whole; a first token NETLOG from
+// the host itself (no slot: its own console, or the slot of its own local
+// client) toggles the net log and, for a slot, answers it S2C 0x14
+// [14][slot number]["NETLOG: SERVER SET TO <0|1>"] (reliable, 310 flushes),
+// into `replies`; NETLOG is not taken either way, so the caller's arms go on.
+// A host with no net log device (ctx.logs.net) toggles nothing.
+// [orig: Server_HandleAdminNetlogCommand @0x5175D0 — the token count
+//  @0x517621..0x51762C, the host test `!input || input+5` @0x51762F..0x51763B,
+//  STAT @0x51764F..0x51765C, NETLOG @0x517670..0x5176B1, the reply
+//  @0x5176C1..0x51771A, the return 0 @0x5175FD]
+bool Server_HandleAdminNetlogCommand(NapiNPServerCtx &ctx, const std::string &line,
+		const NapiNPConnection *slot, std::vector<ProtocolMessage> &replies);
+
+// The authority's C2S 0x04 (the console line a session peer's
+// Client_ProcessConsoleCommand queues, its NUL-terminated text): from a sender
+// that holds a player slot, at most one a second by the slot's word the chat
+// throttle shares; the text, cut at 1023 characters, runs the NETLOG handler,
+// and a line it does not take goes back to the sender as S2C 0x06 [text NUL]
+// (unreliable), which the client runs as its own command. `now_ms` is the
+// host's clock.
+// [orig: NapiNPServerMsg_Chat @0x5199D0 (an IDB misnomer) — the authority
+//  @0x5199FA, the slot conn+352 -> +192 @0x519A01..0x519A18, the slot's
+//  +100360 stamp @0x519A1E..0x519A3C, the copy @0x519A4D..0x519A72,
+//  Server_HandleAdminNetlogCommand @0x519A7B, NetBuffer_WriteString and
+//  SendFiltered(6, 0, 1) to the sender @0x519AB0..0x519AC5;
+//  NapiNPClientMsg_HandleChatCommand @0x432BC0]
+std::vector<ProtocolMessage> Server_HandleConsoleCommandMessage(NapiNPServerCtx &ctx,
+		NapiNPConnection &sender, const std::vector<uint8_t> &payload, uint32_t now_ms);
+
+// Entity_DumpUsageStatistics(name)'s text: "Object usage for <name>", the used
+// counts of pools 0..3, then a line per items.def row past row 0 that one of
+// the five pools' rows takes (its id, its count, its name), then a blank pair;
+// '\n' as written (the file opens in text mode, so the disk takes CR LF).
+// [orig: Entity_DumpUsageStatistics @0x40E620 — the formats @0x7C350C,
+//  @0x7C34D8, @0x7C34A4, @0x7C3470, @0x7C3438, @0x7C3418, @0x7C3414; the five
+//  pool walks over each row's +0x1C @0x40E725..0x40E755; the rows 1..gItemCount-1
+//  by their +0x50 id and +0x00 name @0x40E757..0x40E7A2]
+std::string entity_usage_text(const world::World &world, const def::DefItemsFile *items,
+		const std::string &name);
+// The file Entity_DumpUsageStatistics(name) writes: the name's first 27
+// characters with everything from its first '.' replaced by ".nfo", or no file
+// when it holds no '.' [orig: strncpy(.., 0x1B) and strstr(".") / strcpy(".nfo")
+// @0x40E66E..0x40E6A6].
+std::string entity_usage_file_name(const std::string &name);
 
 } // namespace opennova::inmatch

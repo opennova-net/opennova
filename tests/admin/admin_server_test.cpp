@@ -32,6 +32,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -99,8 +100,25 @@ struct FakeRotation final : inmatch::RotationAdmin {
 	}
 };
 
+// The host's working directory, in memory.
+class MemoryFiles final : public inmatch::ServerFileSink {
+public:
+	std::map<std::string, std::string> files;
+	bool exists(const std::string &name) override { return files.count(name) != 0; }
+	void remove(const std::string &name) override { files.erase(name); }
+	bool write(const std::string &name, std::string_view bytes, bool append) override {
+		std::string &f = files[name];
+		if (!append) f.clear();
+		f.append(bytes.data(), bytes.size());
+		return true;
+	}
+};
+
 struct Host {
 	inmatch::NapiNPServerCtx ctx;
+	MemoryFiles files;
+	inmatch::NetLog net_log{files};
+	std::vector<std::string> system_lines;
 	std::unique_ptr<w::World> heap = std::make_unique<w::World>();
 	w::World &world = *heap;
 	std::vector<ns::UdpSessionTransport> transports;
@@ -177,6 +195,14 @@ struct Host {
 			if (section == "Overlays" && key == "STROVER64") return "Team Deathmatch";
 			return {};
 		};
+		// CMD VERSION's texts and a listen host's SYSTEM ring; the net log and the working
+		// directory CMD NETLOG and SAVENFO reach.
+		seams.version_text = "V1.7.5.7";
+		seams.title_text = "Joint Operations: Typhoon Rising";
+		seams.system_message = [this](const std::string &text, uint32_t) { system_lines.push_back(text); };
+		net_log.set_stamp_text([] { return std::string("2026-10-13 21:07:05: "); });
+		ctx.logs.net = &net_log;
+		ctx.logs.files = &files;
 		console = std::make_unique<inmatch::AdminConsole>(ctx, std::move(seams));
 	}
 	inmatch::NapiNPConnection &conn(size_t i) { return ctx.np_protocol.connection_list[i]; }
@@ -655,6 +681,45 @@ void test_weapon_cmd_goto_chat() {
 	expect(host.drain(0).empty(), "the shared table refused the repeat");
 }
 
+// CMD's arms on this Serve Only host (D-NET-371): Client_ProcessLocalCommand's SAVENFO and
+// VERSION, then NETLOG (toggling the net log and going on), STAT (taken whole) and the ban arms.
+// [orig: Client_ProcessConsoleCommand @0x520E80; Client_ProcessLocalCommand @0x520BF0;
+//  Server_HandleAdminNetlogCommand @0x5175D0]
+void test_cmd_arms() {
+	Host host;
+	io::CrtRand rand;
+	AdminServer server(users_config(), *host.console, rand);
+	Client a{server};
+	a.connect(ip(127, 0, 0, 1));
+	a.login("root", "s3cret");
+	expect_eq(a.one("CMD NETLOG"), "OK - Command executed.", "CMD NETLOG");
+	expect(host.net_log.enabled() && host.net_log.pending() == "2026-10-13 21:07:05: NapiLog Started!\r\n",
+	       "NETLOG turns the net log on with its start line");
+	a.one("cmd netlog");
+	expect(!host.net_log.enabled(), "and off again");
+	expect_eq(a.one("CMD SAVENFO"), "OK - Command executed.", "CMD SAVENFO");
+	const auto nfo = host.files.files.find("debug.nfo");
+	expect(nfo != host.files.files.end() &&
+	               nfo->second.rfind("Object usage for debug.nfo\r\nNumber of OITEMS (people and players)        :\t2\r\n", 0) == 0,
+	       "SAVENFO writes debug.nfo, its lines CR LF on the disk");
+	expect(host.system_lines.empty(), "nothing on the SYSTEM ring yet");
+	expect_eq(a.one("CMD version"), "OK - Command executed.", "CMD VERSION");
+	expect(host.system_lines.size() == 1 && host.system_lines[0] == "Version V1.7.5.7  - Joint Operations: Typhoon Rising",
+	       "VERSION posts its line");
+	host.drain(1);
+	expect_eq(a.one("CMD STAT PUNT 2"), "OK - Command executed.", "a STAT line");
+	expect(host.punt(1).dpc == 0, "STAT takes the line whole: the PUNT never runs");
+	expect_eq(a.one("CMD SAVEKEYS PUNT 2"), "OK - Command executed.", "a SAVEKEYS line");
+	expect(host.punt(1).dpc == 0, "SAVEKEYS takes the line: the PUNT never runs");
+	a.one("CMD NETLOG");
+	expect(host.net_log.enabled(), "NETLOG again");
+	// A session peer runs the local arms first too.
+	host.ctx.is_mp_session_peer = 1;
+	a.one("CMD VERSION");
+	expect(host.system_lines.size() == 2, "a listen host's VERSION is its own");
+	host.ctx.is_mp_session_peer = 0;
+}
+
 void test_framing() {
 	Host host;
 	io::CrtRand rand;
@@ -776,6 +841,7 @@ int main() {
 	test_mission();
 	test_player();
 	test_weapon_cmd_goto_chat();
+	test_cmd_arms();
 	test_framing();
 	test_reply_plan();
 	test_query_report();
