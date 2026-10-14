@@ -13,6 +13,7 @@
 
 #include <editor/assets/asset_kinds.h>
 #include <editor/blank/blank_factory.h>
+#include <editor/requirements/requirements.h>
 #include <formats/dds/dds.h>
 #include <formats/def/def.h>
 #include <formats/fnt/fnt.h>
@@ -27,6 +28,7 @@
 #include <formats/tga/tga_read.h>
 #include <formats/til/til_io.h>
 #include <runtime/audio/sound_profile.h>
+#include <runtime/inmatch/pre_game_menu.h>
 #include <formats/charattr/charattr.h>
 #include <runtime/menu/menu_assets.h>
 #include <runtime/menu/menu_frame.h>
@@ -583,6 +585,53 @@ static int test_mission_menu_flows() {
 // clean by the game's own parse and not empty (a comment line first); the loading screen's image,
 // the boards' textures and the loading screen's and the chat's fonts the placeholders at the
 // game's own sizes; game.wac and server.wac scripts that compile to nothing.
+// pre.mnu, the join screen (PRE_GAME_MENU): every window the panel machine shows and hides by name is there and hidden
+// until it shows it (inmatch::pre_game_window_name), with the controls the join reads and presses: MESSAGES, the status
+// box; ABORT_CANCEL on Esc; BACK and ACCEPT (on Enter); GAME_PASSWORD and TEAM_PASSWORD, SPECTATE and PLAY. Multiplayer
+// puts it on the checklist (requirement_multiplayer_only).
+static int test_pre_menu() {
+	using opennova::mnu::WindowType;
+	const BlankFactory *factory = find_blank_factory_for_role("pre_menu");
+	TEST_EXPECT(factory != nullptr && factory->kind == AssetKind::Menu && !factory->free_form);
+	const std::vector<uint8_t> bytes = make("pre_menu", "pre.mnu");
+	TEST_EXPECT(!bytes.empty() && is_crlf_text(text_of(bytes)) && make("pre_menu", "pre.mnu") == bytes);
+	opennova::mnu::Document doc;
+	std::string error;
+	TEST_EXPECT(opennova::mnu::parse(bytes.data(), bytes.size(), doc, error));
+	const opennova::mnu::Screen *screen = doc.find_screen("PRE_GAME_MENU");
+	TEST_EXPECT(screen != nullptr && screen->roots.size() == 1);
+	if (!screen || screen->roots.size() != 1) return 1;
+	const opennova::mnu::Window &main_window = screen->roots.front();
+	TEST_EXPECT(main_window.name == "MAIN" && main_window.cursor.file == blank_pointer_name());
+	for (int bit = 0; bit < opennova::inmatch::kPreGameWindowCount; ++bit) {
+		const opennova::mnu::Window *panel = window_named(main_window, opennova::inmatch::pre_game_window_name(bit));
+		if (!panel) std::fprintf(stderr, "  pre.mnu lacks %s\n", opennova::inmatch::pre_game_window_name(bit));
+		TEST_EXPECT(panel != nullptr && panel->hidden);
+	}
+	const struct {
+		const char *name;
+		WindowType type;
+		const char *hotkey;
+	} controls[] = {{"MESSAGES", WindowType::MultilineEdit, ""}, {"ABORT_CANCEL", WindowType::Button, "VK_ESCAPE"},
+	                {"BACK", WindowType::Button, ""},           {"ACCEPT", WindowType::Button, "VK_RETURN"},
+	                {"GAME_PASSWORD", WindowType::Edit, ""},    {"TEAM_PASSWORD", WindowType::Edit, ""},
+	                {"SPECTATE", WindowType::Radio, ""},        {"PLAY", WindowType::Radio, ""}};
+	opennova::menu::MenuFrameCompiler compiler;
+	compiler.configure(screen);
+	for (const auto &control : controls) {
+		const opennova::mnu::Window *window = window_named(main_window, control.name);
+		TEST_EXPECT(window != nullptr && window->type == control.type);
+		if (window && control.hotkey[0]) TEST_EXPECT(has_hotkey(*window, control.hotkey));
+		TEST_EXPECT(compiler.widget_index(control.name) >= 0);
+	}
+	std::vector<std::string> ids;
+	collect_string_ids(main_window, ids);
+	TEST_EXPECT(ids.empty() && main_window.text_rsrc.empty());
+	TEST_EXPECT(requirement_multiplayer_only("pre_menu") && requirement_multiplayer_only("mp_menu"));
+	std::printf("pre.mnu: the join screen's panels and controls, hidden until shown\n");
+	return 0;
+}
+
 static int test_mission_start_files() {
 	using namespace opennova::def;
 	const std::vector<uint8_t> powerup = make("powerup_def", "powerup.def");
@@ -974,6 +1023,7 @@ int main() {
 	failures += test_string_tables();
 	failures += test_startup_menu_compiles();
 	failures += test_mission_menus();
+	failures += test_pre_menu();
 	failures += test_mission_menu_flows();
 	failures += test_mission_start_files();
 	failures += test_free_form_menu();

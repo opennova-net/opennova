@@ -71,6 +71,12 @@ std::string text(const char *name, const char *label, const Box &box) {
 	       position(box) + "<STRING justify=\"CENTER\">" + mnu::escape_text(label) + "</STRING>\n</WINDOW>\n";
 }
 
+// A window of `type` with nothing but its box (an edit, a multi-line edit, a radio button): its content the game's.
+std::string plain(const char *type, const char *name, const Box &box) {
+	return "<WINDOW type=\"" + std::string(type) + "\" name=\"" + std::string(name) +
+	       "\">\n<APPEARANCE state=\"default\"></APPEARANCE>\n" + position(box) + "</WINDOW>\n";
+}
+
 std::string panel(const char *name, const Box &box, bool hidden, const std::string &children) {
 	return "<WINDOW type=\"window\" name=\"" + std::string(name) + "\"" + (hidden ? " HIDDEN" : "") + ">\n" +
 	       position(box) + children + "</WINDOW>\n";
@@ -214,6 +220,33 @@ bool make_blank_mp_menu(const BlankRequest &request, std::vector<uint8_t> &out, 
 	                         "<APPEARANCE state=\"disabled\"></APPEARANCE>\n" +
 	                         position({340, 540, 460}) + "<STRING justify=\"CENTER\">Back</STRING>\n</WINDOW>\n";
 	return blank_menu_bytes(screen("NW_MULTI_PLAYER", back), request, out, error);
+}
+
+// pre.mnu: the join screen, PRE_GAME_MENU, which the PreMenu loads as a join starts [orig: sub_5693E0 @ 0x5693e0, the
+// load @ 0x56944a] and whose panels the panel machine shows and hides by name, every one hidden until it does [orig:
+// UI_ShowPreGameMenuByState @ 0x568d10; runtime/inmatch/pre_game_menu.h's windows]: ERROR_WRAPPER with MESSAGES, where
+// the join machine writes its status line and a failure's reason [orig: MultiPlayer_JoinSessionStateMachine @
+// 0x56a320]; ABORT_WRAPPER with ABORT_CANCEL, the join's Cancel (on Esc); ABORTRETRY_WRAPPER with BACK and ACCEPT (on
+// Enter); and the password and spectate panels with the controls they are read by (GAME_PASSWORD, SPECTATE and PLAY,
+// TEAM_PASSWORD under its two titles' wrappers), named as the shipped screen names them.
+bool make_blank_pre_menu(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
+	const std::string children =
+	        panel("GAME_PASSWORD_WRAPPER", {250, 180, 550, 320}, true,
+	              text("STATIC_GAME_PASSWORD", "Game password", {0, 10, 300}) + plain("edit", "GAME_PASSWORD", {50, 60, 250, 84})) +
+	        panel("SPECTATE_WRAPPER", {250, 180, 550, 320}, true,
+	              text("STATIC_SPECTATE", "Spectate", {40, 20, 140}) + plain("radio", "SPECTATE", {160, 20, 184, 44}) +
+	                      text("STATIC_PLAY", "Play", {40, 70, 140}) + plain("radio", "PLAY", {160, 70, 184, 94})) +
+	        panel("TEAM_PASSWORD_WRAPPER", {250, 180, 550, 320}, true,
+	              panel("TEAM_STATIC_WRAPPER", {0, 0, 300, 40}, true, text("STATIC_TEAM_PASSWORD", "Team password", {0, 10, 300})) +
+	                      panel("SPECTATOR_STATIC_WRAPPER", {0, 0, 300, 40}, true,
+	                            text("STATIC_SPECTATOR_PASSWORD", "Spectator password", {0, 10, 300})) +
+	                      plain("edit", "TEAM_PASSWORD", {50, 60, 250, 84})) +
+	        panel("ERROR_WRAPPER", {150, 240, 650, 330}, true, plain("multiline_edit", "MESSAGES", {0, 0, 500, 90})) +
+	        panel("ABORT_WRAPPER", {340, 350, 460, 380}, true,
+	              button("ABORT_CANCEL", "Cancel", {0, 0, 120}, {{true, "VK_ESCAPE"}})) +
+	        panel("ABORTRETRY_WRAPPER", {250, 350, 550, 380}, true,
+	              button("BACK", "Back", {0, 0, 140}, {}) + button("ACCEPT", "Accept", {160, 0, 300}, {{true, "VK_RETURN"}}));
+	return blank_menu_bytes(screen("PRE_GAME_MENU", children), request, out, error);
 }
 
 } // namespace opennova::editor

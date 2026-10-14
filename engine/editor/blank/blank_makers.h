@@ -44,6 +44,7 @@ bool make_blank_vehicle_menu(const BlankRequest &, std::vector<uint8_t> &out, Di
 bool make_blank_stat_menu(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 bool make_blank_death_menu(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 bool make_blank_mp_menu(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+bool make_blank_pre_menu(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 
 // mns (blank_style.cpp)
 bool make_blank_menu_style(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);

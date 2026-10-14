@@ -111,6 +111,9 @@ const BlankFactory k_factories[] = {
 	  "the deploy screen (DEATH): the spawn list the game fills, and Leave Mission with its question", false },
 	{ "mp_menu", AssetKind::Menu, make_blank_mp_menu,
 	  "the multiplayer screen the game comes back to (NW_MULTI_PLAYER) with its Back button, on Esc", false },
+	{ "pre_menu", AssetKind::Menu, make_blank_pre_menu,
+	  "the join screen (PRE_GAME_MENU): its status box and Cancel (on Esc), the password and spectate panels and their "
+	  "Back and Accept, each hidden until the join shows it", false },
 	{ "font_arials18", AssetKind::Font, make_blank_font, "the built-in bitmap font", false },
 	{ "font_arial22", AssetKind::Font, make_blank_font, "the built-in bitmap font", false },
 	{ "font_couri20b", AssetKind::Font, make_blank_font, "the built-in bitmap font", false },

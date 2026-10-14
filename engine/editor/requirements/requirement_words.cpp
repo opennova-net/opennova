@@ -73,6 +73,7 @@ constexpr RequirementWords kWords[] = {
 	{ "stat_menu", "The end-of-round statistics screen does not open." },
 	{ "death_menu", "The deploy screen does not open: a player who dies cannot pick a spawn." },
 	{ "mp_menu", "Coming back from a NovaWorld game, the multiplayer screen does not open." },
+	{ "pre_menu", "Joining a multiplayer game shows no join screen: no status line and no Cancel." },
 	{ "hudfx_def", "The HUD goes without the effects this file defines." },
 	{ "hudpos_def", "The HUD uses its default positions." },
 	{ "monogram_tga", "A mission's screens draw without this texture." },
