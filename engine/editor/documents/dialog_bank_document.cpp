@@ -169,8 +169,6 @@ const RecordTable &dialog_bank_table() {
 	return table;
 }
 
-bool is_dialog_bank_kind(AssetKind kind) { return asset_kind_row(kind).document == DocumentTypeId::DialogBank; }
-
 std::string dialog_bank_scope(const std::string &path) { return strutil::to_upper(basename_of(path)); }
 
 std::string dialog_sounds_scope(const std::string &path) {
@@ -231,10 +229,6 @@ std::string DialogBankDocument::record_title(const NodeAddress &address) const {
 bool DialogBankDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                                std::shared_ptr<const FileState> &, std::vector<SourceIssue> &issues,
                                Diagnostic &error) {
-	if (!is_dialog_bank_kind(kind())) {
-		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not a dialog bank.", path());
-		return false;
-	}
 	dbf::File file;
 	std::string message;
 	if (!dbf::parse_dbf_memory(bytes.data(), bytes.size(), file, message)) {

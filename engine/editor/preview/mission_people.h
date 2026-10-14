@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <base/io/json.h>
+#include <base/io/tick_rate.h>
 #include <editor/model/node.h>
 #include <editor/preview/preview_clip_sounds.h>
 #include <runtime/world/infantry.h>
@@ -21,13 +22,15 @@ class MissionPoses;
 // update), one tick a tick of the preview clock, from the tick of the clock it was posed at; another row's body
 // (org0, whose update is a nullsub) stands as its warmup left it. Each tick's event word is what the body's sound
 // block and its fire pass read that tick (the mission view hears the people's footsteps and foley with Listen on). The editor's
-// choice beside the game's: the think does not run, so a person plays the state its spawn requested on and on (a
-// route's walk in place, an idle's variants as its ring serves them), the clock's ticks standing in for the world's.
+// choice beside the game's: the think does not run, so a person plays the state its spawn requested on and on (an
+// idle's variants as its ring serves them), the clock's ticks standing in for the world's; a route's walker, whom the
+// game walks along its route, stands frozen at its spawn pose rather than walking in place (the maintainer's S26
+// ruling).
 class MissionPeople {
 public:
 	// A jump of the clock longer than this many ticks (a seek, the Shell held up, a clock gone back) starts the people
 	// again from their spawn at the clock rather than playing the jump through.
-	static constexpr int32_t kCatchUpTicks = 62;
+	static constexpr int32_t kCatchUpTicks = io::kTicksPerSecondInt;
 
 	// An event word a body's channel read on a tick: whose, on which of the clock's ticks, the word, the body's playhead
 	// (its clip's tick) and the capsule's bottom under its origin (16.16, its footsteps' height below it).
@@ -48,6 +51,8 @@ public:
 
 	// A person's body as it plays now (null: no posed person of the row).
 	const world::InfantryBodyPose *pose(NodeId row) const;
+	// Its channels as they play now (null: no posed person of the row), what the Shoot tool's world poses its rig by.
+	const world::InfantryState *channels(NodeId row) const;
 	// The event words of the last kCatchUpTicks ticks played, in tick order.
 	const std::vector<Event> &events() const { return events_; }
 	// The clock's tick the people stand at, the tick they were started at, how many play; a serial that moves with

@@ -26,6 +26,13 @@
 
 namespace opennova::editor {
 
+MissionGrab mission_canvas_grab(const MissionCanvasFrame &frame, const ViewportContext &context,
+		const CanvasInput &in, int under);
+
+// The primary's handle within the pick slop of the pointer (its height, its yaw, an area's edges),
+// while the mission takes edits: false for none.
+bool mission_canvas_handle_under(const MissionCanvasFrame &frame, const CanvasInput &in, MissionHandle &out);
+
 namespace {
 
 CanvasSubject subject_of(const MissionCanvasFrame &frame) {

@@ -131,9 +131,10 @@ static int test_menu_references() {
 	TEST_EXPECT(
 			missing_finding(graph, *document, exit, font_use, std::string("nofont.fnt"), picked) &&
 			editor_test::reference_of(picked).kind == ReferenceKind::Font && subject_target(picked) == "nofont.fnt");
-	// An APPEARANCE row's value is a texture for an IMAGE row, nothing for a typeless one.
+	// An APPEARANCE row's value is a texture for an IMAGE row, nothing for a typeless one; one
+	// that does not load the window draws without, a warning (S26 A8).
 	set_image(session, *document, exit, "missing.tga");
-	TEST_EXPECT(has_missing(view.findings.diagnostics, "value", DiagnosticSeverity::Error));
+	TEST_EXPECT(has_missing(view.findings.diagnostics, "value", DiagnosticSeverity::Warning));
 	TEST_EXPECT(reference_status(graph, document->field_on(row, *value),
 						std::string("missing.tga")) == ReferenceStatus::Missing);
 	const Diagnostic *texture =
@@ -184,10 +185,10 @@ static int test_menu_references() {
 			located = true;
 	TEST_EXPECT(located);
 	// A saved menu with a missing texture builds (S14: a missing reference is listed and gates no
-	// build), its error still a Problems row after the build.
+	// build), its warning still a Problems row after the build.
 	editor_test::handle_to_end(session, request::save_all());
 	editor_test::handle_to_end(session, request::build());
-	TEST_EXPECT(view.activity.last_build->ok && has_missing(view.findings.diagnostics, "value", DiagnosticSeverity::Error));
+	TEST_EXPECT(view.activity.last_build->ok && has_missing(view.findings.diagnostics, "value", DiagnosticSeverity::Warning));
 	return 0;
 }
 

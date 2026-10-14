@@ -40,13 +40,7 @@ constexpr NodeKind kCombo = node_kind(AvatarsKind::Combo);
 
 std::vector<uint8_t> bytes_of(const std::string &text) { return std::vector<uint8_t>(text.begin(), text.end()); }
 
-Edit set_edit(const NodeAddress &at, const char *field, Value value) {
-	Edit edit;
-	edit.address = at;
-	edit.field = field;
-	edit.value = std::move(value);
-	return edit;
-}
+using editor_test::set_edit;
 
 const std::string kFile =
 		"// the parts\r\n"

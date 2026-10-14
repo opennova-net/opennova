@@ -10,8 +10,7 @@
 #include <editor/preview/viewport_model.h>
 #include <editor/session/view/session_view.h>
 
-#include "env/mission_environment.h"
-#include "env/water.h"
+#include "world/world_scene.h"
 
 namespace godot {
 
@@ -92,10 +91,10 @@ void ViewportDevice::publish_scene_state() {
 		applier_->publish_scene_state();
 		return;
 	}
-	// The shipped defaults: the retail noon the environment globals have before any mission
-	// publishes, and no water.
-	MissionEnvironment::publish_shipped_defaults();
-	Water::publish_absent();
+	// Every global a world's rows write as a process has it with no world: the retail noon the
+	// environment globals have before any mission publishes, no water, no weather rings, no cube,
+	// no veil, no foliage masks (every device's world is held, E13).
+	WorldScene::publish_absent();
 }
 
 void ViewportDevice::withhold_render() {

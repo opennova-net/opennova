@@ -39,7 +39,9 @@ enum class ModelViewStatus : uint8_t {
 	Ready,
 };
 // "no_project", "ready", ...: its token on the wire.
-const char *model_view_status_token(ModelViewStatus status);
+inline constexpr const char *kModelViewStatusTokens[] = {
+	"no_project", "no_model", "unserializable", "unreadable", "no_rig", "reading", "ready",
+};
 // The line a model viewport shows for a status (`detail`: the first serialize issue, the
 // animation's file).
 std::string model_view_status_message(ModelViewStatus status, const std::string &detail);
@@ -54,10 +56,7 @@ struct ModelViewportOptions {
 	std::map<std::string, int64_t> ctrl;
 	ModelOverlayOptions overlays;
 	std::string rig_model;
-	// A clip's preview (ADR 0046 S17): a one-shot played again from its start after it ends and
-	// holds its last frame a moment (the game plays it once; a loop loops either way), and the rig's
-	// bones drawn over the picture, each named.
-	bool repeat = true;
+	// A clip's preview (ADR 0046 S17): the rig's bones drawn over the picture, each named.
 	bool bones = true;
 	// The grid a canvas's drag of a marker's place snaps to on each of the file's axes (metres; 0 free: the
 	// toolbar's Snap, kModelHandleSnaps; the MCP gaps lane), the canvas's alone: no picture changes.
@@ -74,7 +73,7 @@ struct ModelViewportOptions {
 	ClipFireOptions fire;
 	bool operator==(const ModelViewportOptions &other) const {
 		return lod == other.lod && ctrl == other.ctrl && overlays == other.overlays &&
-				rig_model == other.rig_model && repeat == other.repeat && bones == other.bones && snap == other.snap &&
+				rig_model == other.rig_model && bones == other.bones && snap == other.snap &&
 				sound == other.sound && damage == other.damage && first_person == other.first_person &&
 				fire == other.fire;
 	}
@@ -85,14 +84,10 @@ struct ModelViewportOptions {
 // pitch and distance): what an orbit, a pan, a dolly or a framing on its canvas sends.
 std::string model_camera_change(const OrbitCamera &camera);
 // The options on the wire (the envelope's `options`, a SetViewport's): {lod ("auto" or a level),
-// ctrl {register: value}, overlays {user_points, lights, pivots}, rig_model, repeat, bones, snap,
+// ctrl {register: value}, overlays {user_points, lights, pivots}, rig_model, bones, snap,
 // sound {mute, surface, body, female, profile}, damage {state, item}, first_person {view, character,
 // action}, fire {target, surface, range, enemy}}.
 io::JsonValue model_options_to_json(const ModelViewportOptions &options);
-
-// How long a repeated one-shot holds its last frame before it plays again, in game ticks (half a
-// second): the editor's aid, not the game's (the game plays a one-shot once).
-inline constexpr int32_t kClipRepeatHoldTicks = 31;
 
 // A model's viewport (ADR 0046 S10p2, S10p6, S13 V5; ViewportKind::Model): the model document at its
 // path as it would save (its serialize(), read back), or a clip or an animation table played on its
@@ -201,9 +196,8 @@ public:
 	// Its frames (the header's count: the last frame is that count) and its rate (0: none plays).
 	uint32_t clip_frame_count() const;
 	uint32_t clip_fps() const;
-	// The tick of the clip's clock the clock's ticks play (S17): the clock's ticks, a repeated
-	// one-shot's taken again from 0 every length and hold (options' repeat, kClipRepeatHoldTicks); what
-	// the device poses the skeleton at and the timeline shows.
+	// The tick of the clip's clock the clock's ticks play (S17): the clock's ticks (a one-shot played once,
+	// as the game plays it, holding its end); what the device poses the skeleton at and the timeline shows.
 	int32_t clip_ticks(const PreviewClock &clock) const;
 	// The clip's frame at the clock's ticks (loops wrap, a one-shot holds its end).
 	double clip_frame(const PreviewClock &clock) const;
@@ -238,8 +232,7 @@ public:
 	std::vector<std::string> event_fire_words(uint32_t trigger) const;
 	// The sounds the clip's events fired over the ticks the clock ran through since the last call
 	// (clip_events_due: never over a seek, a clip newly chosen, a pause, the run from where a seek put the
-	// clock heard whole, PreviewClock::heard_from; from the clip's tick of each, a repeated one-shot's taken
-	// again from 0), each planned through `selector` (plan_clip_event) and numbered from `next_seq` on, kept
+	// clock heard whole, PreviewClock::heard_from; from the clip's tick of each), each planned through `selector` (plan_clip_event) and numbered from `next_seq` on, kept
 	// with the last ones fired, and returned. Nothing while no clip plays. Each voice's wave is the project's
 	// file of its name (`scan`, find_clip_sound_waves).
 	std::vector<ClipSoundFired> fire_sounds(const PreviewClock &clock, const AssetScan *scan,
@@ -300,7 +293,7 @@ public:
 	NodeAddress record_of(const ViewportInput &input, const ModelOverlay &overlay) const;
 
 	ViewportStatus status() const override;
-	const char *reason() const override { return model_view_status_token(reason_); }
+	const char *reason() const override { return enum_token(kModelViewStatusTokens, reason_); }
 	std::string message() const override { return model_view_status_message(reason_, detail_); }
 	const std::string &detail() const override { return detail_; }
 	std::string caption() const override;
@@ -419,9 +412,6 @@ private:
 	FirstPersonSources first_person_;
 	bool eye_ = false;
 	OrbitCamera eye_camera_;
-	// The clock's ticks a repeated one-shot plays over before it plays again (0: it does not repeat): its
-	// length, or the last tick a first-person action's leg plays on past it, and the hold.
-	int32_t repeat_period_() const;
 	// An action leg's sound planned (fire_sounds, press_leg).
 	ClipSoundFired plan_leg_(const WeaponActionRun &run, const WeaponActionLeg &leg, int32_t tick, int32_t clip_tick,
 			audio::SoundSelector &selector, const AssetScan *scan) const;

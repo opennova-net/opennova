@@ -266,10 +266,6 @@ SerializeResult AnimationDocument::serialize() const {
 
 bool AnimationDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                               std::shared_ptr<const FileState> &, std::vector<SourceIssue> &, Diagnostic &error) {
-	if (!is_animation_kind(kind())) {
-		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not a clip.", path());
-		return false;
-	}
 	const assets::BoneAnimation base = assets::parse_bone_animation(bytes.data(), bytes.size());
 	if (!base) {
 		error = make_finding(CoreFinding::DocumentParse, DiagnosticSeverity::Error, "The clip could not be read.", path());

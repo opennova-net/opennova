@@ -81,12 +81,6 @@ bool mission_handle_from_token(const char *token, MissionHandle &out) {
 	return false;
 }
 
-const char *mission_handle_token(MissionHandle handle) {
-	for (const HandleToken &row : kHandles)
-		if (row.handle == handle) return row.token;
-	return "";
-}
-
 bool mission_ground_point(const ViewportContext &context, const OrbitCamera &camera, float x, float y,
 		double plane_z, double out[3], bool *on_terrain) {
 	if (on_terrain) *on_terrain = false;

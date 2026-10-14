@@ -46,6 +46,7 @@
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
+#include "editor/mission_test_support.h"
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
@@ -55,23 +56,9 @@ namespace mission = opennova::mission;
 
 namespace {
 
-bool same(const std::string &got, const std::string &want) {
-	if (got != want) std::printf("  got:  %s\n  want: %s\n", got.c_str(), want.c_str());
-	return got == want;
-}
-
-std::unique_ptr<Document> open(const std::vector<uint8_t> &bytes, const char *name) {
-	const DocumentType *type = document_type_for(AssetKind::Mission);
-	if (!type) return nullptr;
-	std::unique_ptr<Document> document = records_of(type->make());
-	Diagnostic error;
-	if (!document || !document->load_bytes(bytes, name, AssetKind::Mission, "jo", error)) return nullptr;
-	return document;
-}
-
-std::vector<uint8_t> fixture_bytes() {
-	return test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/bms/synth_logic.bms");
-}
+using mission_test::same;
+using mission_test::open;
+using mission_test::fixture_bytes;
 
 const BoardNote *note_of(const BoardCard &card, const char *code) {
 	for (const BoardNote &note : card.notes)
@@ -79,12 +66,7 @@ const BoardNote *note_of(const BoardCard &card, const char *code) {
 	return nullptr;
 }
 
-bool apply_edits(Document &document, const std::vector<Edit> &edits) {
-	Diagnostic error;
-	const bool ok = document.apply(edits, error);
-	if (!ok) std::printf("  refused: %s\n", error.message.c_str());
-	return ok;
-}
+using mission_test::apply_edits;
 
 // The cards over the minted mission: two events, the first's trigger and action as lines of runs and chips.
 int test_cards() {

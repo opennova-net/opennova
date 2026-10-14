@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <base/io/json.h>
+#include <base/io/tick_rate.h>
 #include <editor/preview/model_preview_camera.h>
 #include <editor/preview/model_preview_rig.h>
 #include <editor/preview/sound_preview.h>
@@ -34,7 +35,6 @@ class ProjectAssetSource;
 // The body whose sound block reads the clip's events: Auto the one the paired item's move_function runs
 // (org2 the player body, any other an NPC's), else the one chosen.
 enum class ClipSoundBody : uint8_t { Auto, Npc, Player };
-const char *clip_sound_body_token(ClipSoundBody body); // "auto", "npc", "player"
 
 // The model viewport's sound options (its options' `sound`).
 struct ClipSoundOptions {
@@ -138,14 +138,14 @@ struct ClipEventDue {
 // How far behind a run of the clock fires: clip_events_due reads the last this many ticks of a longer run,
 // and a model viewport fires nothing for a run longer than it (it was not the one previewed meanwhile, or
 // the Shell was held up), going on from where the clock is.
-inline constexpr int32_t kClipSoundCatchUpTicks = 62;
+inline constexpr int32_t kClipSoundCatchUpTicks = io::kTicksPerSecondInt;
 // The words read on each tick in (`from`, `to`] of the clock, in order: each tick the body's sound block
-// reads (world::anim_sound_tick), the clip's channel at its own tick there (the clock's tick; a repeated
-// one-shot's taken again from 0 every `period` ticks, 0 none, whose start reads nothing, as a channel
-// started reads nothing before its first step) reading a word (anim::clip_trigger_at). `catch_up` false reads
+// reads (world::anim_sound_tick), the clip's channel at its own tick there (the clock's tick; its start
+// reads nothing, as a channel started reads nothing before its first step) reading a word
+// (anim::clip_trigger_at). `catch_up` false reads
 // every tick of a longer run (a clip's fire schedule, DI-24, which the range runs from tick 0).
-std::vector<ClipEventDue> clip_events_due(const anim::ClipTimeline &clock, const ClipSoundTrack &track, int32_t period,
-                                          int32_t from, int32_t to, bool player_body, bool catch_up = true);
+std::vector<ClipEventDue> clip_events_due(const anim::ClipTimeline &clock, const ClipSoundTrack &track, int32_t from, int32_t to,
+                                          bool player_body, bool catch_up = true);
 
 // One sound an event fired: what the editor's wire and the Shell read of it. `seq` the session's order of
 // every clip sound fired (moves with each), the animation document's path, the clock's tick and the

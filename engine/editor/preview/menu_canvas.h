@@ -74,17 +74,6 @@ inline constexpr LayoutHandle kMenuHandles[] = { LayoutHandle::TopLeft, LayoutHa
 	LayoutHandle::BottomLeft, LayoutHandle::BottomRight, LayoutHandle::Left, LayoutHandle::Right,
 	LayoutHandle::Top, LayoutHandle::Bottom };
 
-// A design-space rect on the picture, scaled `scale_x` x `scale_y`: its corners `a` (top left)
-// and `b` (bottom right) on the pixels the game draws it on (menu::menu_scaled_edge).
-void menu_picture_rect(
-		const mnu::RectEdges &rect, float scale_x, float scale_y, CanvasPoint &a, CanvasPoint &b);
-// Where a handle of the rect a..b sits.
-CanvasPoint menu_handle_point(LayoutHandle handle, CanvasPoint a, CanvasPoint b);
-// The handle a press at `at` takes on the rect a..b; false for none.
-bool menu_handle_at(CanvasPoint at, CanvasPoint a, CanvasPoint b, LayoutHandle &out);
-// What the pointer shows over a handle (Move: over the window itself).
-CanvasCursor menu_handle_cursor(LayoutHandle handle);
-
 // What a left press on the canvas took. With Shift or Ctrl the selection changes on release
 // and nothing moves (a press on the screen's background a marquee). Otherwise: on a handle of
 // the primary window a resize of it; inside the primary or another selected window (its rect,
@@ -103,13 +92,7 @@ struct MenuPress {
 	LayoutPress layout; // where the drag began: the windows it takes
 	int dx = 0, dy = 0, grid = -1; // the last step planned
 };
-MenuPress menu_canvas_press(const MenuCanvasFrame &frame, const CanvasInput &in);
 
-// The selected window whose rect holds the picture point `at`: the primary when it does, else
-// the front-most one (the last in the compiled screen's pre-order, the order the runtime draws
-// in); none when no selected window's rect holds it.
-NodeAddress menu_selected_window_at(
-		const MenuCanvasFrame &frame, CanvasPoint at, float scale_x, float scale_y);
 // The window the game's hit test finds under the pointer (none: none, or a stale picture).
 NodeAddress menu_window_at(const MenuCanvasFrame &frame, const CanvasInput &in);
 // Every shown window of the screen but its root windows (the background a marquee starts on)

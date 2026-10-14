@@ -16,7 +16,6 @@ namespace opennova::editor {
 
 namespace {
 
-std::string stem_of(const std::string &logical_name) { return utf8_of(path_of(logical_name).stem()); }
 
 // The one-bone rest pose every blank clip is: one looping interval at 30 fps, the shape of retail's reset
 // clips (docs/threedi/scene-naming-contract.md), its two keys the identity and its two events still (no
@@ -56,7 +55,7 @@ Diagnostic refusal(CoreFinding code, const BlankRequest &request, const std::str
 // text the editor's converter reads and built through threedi_o3d_build for the retail target: the converter's
 // path, so the bytes are the engine's own writer's.
 bool make_blank_model(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
-	std::string name = stem_of(request.logical_name);
+	std::string name = file_stem(request.logical_name);
 	if (name.size() > 15) name.resize(15); // the model's name field (threedi_build: the scene's `model`)
 	std::istringstream text("o3d 2\nmodel " + name +
 	                        "\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nmesh 0\n"
@@ -84,7 +83,7 @@ bool make_blank_model(const BlankRequest &request, std::vector<uint8_t> &out, Di
 // 0x40c400, the padding loop @ 0x40c5a1], so it poses any rig at rest.
 bool make_blank_animation(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
 	std::string why;
-	if (!bad::bad_build_mint(rest_clip(stem_of(request.logical_name)), nullptr, bad::bad_retail_limits(), out, &why)) {
+	if (!bad::bad_build_mint(rest_clip(file_stem(request.logical_name)), nullptr, bad::bad_retail_limits(), out, &why)) {
 		out.clear();
 		error = refusal(CoreFinding::BlankAnimation, request, "The clip", why);
 		return false;
@@ -96,7 +95,7 @@ std::string blank_reset_clip_name(const std::string &map_name) {
 	// <table>_rst, the exporter's name for a table's reset clip (docs/threedi/scene-naming-contract.md), cut to
 	// what a packed name holds (15 bytes with its extension [orig: PFF_FindEntry @ 0x7685D0]).
 	constexpr const char *kSuffix = "_rst.bad";
-	std::string stem = stem_of(map_name);
+	std::string stem = file_stem(map_name);
 	const size_t room = bad::bad_retail_limits().packed_name_bytes - std::char_traits<char>::length(kSuffix);
 	if (stem.size() > room) stem.resize(room);
 	return strutil::to_lower(stem) + kSuffix;

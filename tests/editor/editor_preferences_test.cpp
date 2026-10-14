@@ -5,9 +5,8 @@
 // (ignored, not set aside: an additive change keeps a user's settings), skips an item that is no
 // whole number a double holds, and sets aside a file of another schema, an older editor's among them
 // (no reader for it: pre-1.0), read as the defaults with a warning naming everything it held and
-// written again by the next save; Play's settings an earlier editor kept for every project are named,
-// read by nothing and dropped by the next save (each project keeps its own now), a session saying so once
-// in Output; EditorPreferences reads a store
+// written again by the next save; Play's settings an earlier editor kept for every project are ignored,
+// read by nothing and dropped by the next save (each project keeps its own now); EditorPreferences reads a store
 // once, writes a change from a copy (a change the store refuses leaves the values in effect), and
 // keeps the recent-projects list and each game's recently placed items capped, most recent first;
 // and a session over each store shows them, a project's game's items alone.
@@ -19,6 +18,7 @@
 #include <system_error>
 #include <vector>
 
+#include <editor/project/project_document.h>
 #include <editor/session/editor_preferences.h>
 #include <editor/session/file_preferences_store.h>
 #include <editor/session/preferences_store.h>
@@ -51,8 +51,7 @@ Preferences every_preference() {
 bool same(const Preferences &a, const Preferences &b) {
 	return a.recent_projects == b.recent_projects && a.runtime_executable == b.runtime_executable &&
 	       a.game_install == b.game_install && a.import_dependencies == b.import_dependencies &&
-	       a.preview_background == b.preview_background && a.recent_items == b.recent_items &&
-	       a.retired_play == b.retired_play;
+	       a.preview_background == b.preview_background && a.recent_items == b.recent_items;
 }
 
 // The settings file every_preference() is: the keys sorted, two spaces an indent, a newline last;
@@ -233,7 +232,6 @@ static int test_file_store_writes_the_settings_file() {
 	TEST_EXPECT(editor_test::write_text(s15, kS15File));
 	Preferences kept = every_preference();
 	kept.recent_items.clear();
-	kept.retired_play = {"play_in_install true"}; // Play's, each project's since: named, read by nothing
 	kept.preview_background = PreviewBackground::Grey; // S15's file has no background: the default
 	loaded = Preferences();
 	Diagnostic two;
@@ -257,7 +255,7 @@ static int test_file_store_writes_the_settings_file() {
 	TEST_EXPECT(FilePreferencesStore(dir.file("missing.json")).load(loaded, error) && same(loaded, Preferences()));
 	TEST_EXPECT(editor_test::write_text(dir.file("bare.json"), "{\"schema_version\": 2}"));
 	TEST_EXPECT(FilePreferencesStore(dir.file("bare.json")).load(loaded, error) && loaded.import_dependencies &&
-	            loaded.game_install.empty() && loaded.retired_play.empty() &&
+	            loaded.game_install.empty() &&
 	            loaded.preview_background == PreviewBackground::Grey);
 	// Each background by its token; a word none has, or a value that is no word, reads as the default.
 	for (const PreviewBackground background : kPreviewBackgrounds) {
@@ -293,29 +291,21 @@ static int test_file_store_writes_the_settings_file() {
 }
 
 // Play's settings are each project's (its .opennova/local.json): the keys an earlier editor kept in the
-// editor's settings for every project (Play in the game install, strictly, saving first) are no
-// preference of the editor's any more. A file holding them reads every other preference as it is, no
-// warning (nothing is set aside), each of them named with its value as written and read by nothing; the
-// next save writes the file without them, byte for byte this editor's.
-static int test_file_store_retires_the_shared_play_settings() {
+// editor's settings for every project are read by nothing, as any key the schema no longer reads (S26: the
+// notice that named them is gone). A file holding them reads every other preference as it is, no warning;
+// the next save writes the file without them, byte for byte this editor's.
+static int test_file_store_ignores_the_shared_play_settings() {
 	editor_test::TempProjectDir dir("opennova_editor_preferences_retired_play");
 	const std::string path = dir.file("editor_settings.json");
 	TEST_EXPECT(editor_test::write_text(path, kRetiredPlayFile));
 	FilePreferencesStore store(path);
 	Preferences loaded;
 	Diagnostic finding;
-	Preferences kept = every_preference();
-	kept.retired_play = {"play_in_install true", "play_in_install_strict true", "save_before_play false"};
-	TEST_EXPECT(store.load(loaded, finding) && same(loaded, kept) && finding.code().empty());
+	TEST_EXPECT(store.load(loaded, finding) && same(loaded, every_preference()) && finding.code().empty());
 	Diagnostic error;
 	TEST_EXPECT(store.save(loaded, error));
 	std::string written;
 	TEST_EXPECT(test_io::read_file_text(path, written) && written == kSettingsFile);
-	TEST_EXPECT(store.load(loaded, finding) && same(loaded, every_preference()) && loaded.retired_play.empty());
-	// One alone is named alone, as the file wrote it.
-	TEST_EXPECT(editor_test::write_text(path, "{\"schema_version\": 2, \"play_in_install_strict\": false}"));
-	TEST_EXPECT(store.load(loaded, finding) &&
-	            loaded.retired_play == std::vector<std::string>({"play_in_install_strict false"}));
 	return 0;
 }
 
@@ -340,6 +330,11 @@ static int test_editor_preferences() {
 	            store.preferences().recent_projects == preferences.values().recent_projects);
 	// The recently placed items (S15), per game (the polish): capped at kRecentItemsMax, most recent
 	// first, an item placed again moved to the front; another game's its own, none before any.
+	// S15/S26: a project's items are kept under its game, an expansion's under the expansion with it.
+	ProjectDocument standalone, expansion;
+	standalone.target_game = expansion.target_game = "jo";
+	expansion.expansion.name = "jxm";
+	TEST_EXPECT(recent_items_game(standalone) == "jo" && recent_items_game(expansion) == "jo/jxm");
 	for (int64_t item = 1; item <= 14; ++item) preferences.remember_recent_item("jo", item);
 	const std::vector<int64_t> &jo = preferences.recent_items("jo");
 	TEST_EXPECT(jo.size() == kRecentItemsMax && jo.front() == 14 && jo.back() == 3);
@@ -462,36 +457,21 @@ static int test_session_over_a_store() {
 		            written.find("retail") == std::string::npos && written.find("\"game_install\": \"\"") != std::string::npos);
 	}
 	{
-		// The maintainer's settings file with strict Play in the game install kept for every project: said
-		// once in Output as the editor starts (the keys and their values, where Play's settings live now), the
-		// file written again without them at once, none of it in effect: a project opened then plays in the
-		// OpenNova runtime and saves first. An editor started on the file afterwards says nothing.
+		// The maintainer's settings file with strict Play in the game install kept for every project: none of it in
+		// effect and nothing said (S26: the notice is gone), no finding; a project opened then plays in the
+		// OpenNova runtime and saves first.
 		const std::string path = dir.file("shared/editor_settings.json");
 		TEST_EXPECT(editor_test::write_text(path, kRetiredPlayFile));
 		FilePreferencesStore store(path);
-		{
-			ProjectSession session(platform, store);
-			const SessionView &v = session.view();
-			const OutputLog &output = v.activity.output;
-			size_t said = 0;
-			for (uint64_t i = output.first_index(); i < output.next_index(); ++i) {
-				const std::string &line = output.at(i);
-				said += line.find("play_in_install true, play_in_install_strict true, save_before_play false") !=
-				                std::string::npos &&
-				        line.find(".opennova/local.json") != std::string::npos;
-			}
-			TEST_EXPECT(said == 1);
-			for (const Diagnostic &d : v.findings.diagnostics) TEST_EXPECT(d.code().rfind("editor_settings", 0) != 0);
-			std::string written;
-			TEST_EXPECT(test_io::read_file_text(path, written) && written == kSettingsFile);
-			session.handle(request::new_project(dir.file("shared_project"), "Shared"));
-			session.run_operations();
-			TEST_EXPECT(session.project_open() && v.project.play_mode == PlayMode::Runtime && v.project.save_before_play);
-		}
-		ProjectSession again(platform, store);
-		const OutputLog &output = again.view().activity.output;
+		ProjectSession session(platform, store);
+		const SessionView &v = session.view();
+		const OutputLog &output = v.activity.output;
 		for (uint64_t i = output.first_index(); i < output.next_index(); ++i)
 			TEST_EXPECT(output.at(i).find("play_in_install") == std::string::npos);
+		for (const Diagnostic &d : v.findings.diagnostics) TEST_EXPECT(d.code().rfind("editor_settings", 0) != 0);
+		session.handle(request::new_project(dir.file("shared_project"), "Shared"));
+		session.run_operations();
+		TEST_EXPECT(session.project_open() && v.project.play_mode == PlayMode::Runtime && v.project.save_before_play);
 	}
 	return 0;
 }
@@ -500,7 +480,7 @@ int main() {
 	int failures = 0;
 	failures += test_memory_store_round_trips();
 	failures += test_file_store_writes_the_settings_file();
-	failures += test_file_store_retires_the_shared_play_settings();
+	failures += test_file_store_ignores_the_shared_play_settings();
 	failures += test_editor_preferences();
 	failures += test_session_over_a_store();
 	if (failures == 0) std::printf("editor_preferences: all tests passed\n");

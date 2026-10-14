@@ -28,8 +28,6 @@ bool trash_paths(const ProjectPaths &paths, const std::vector<std::string> &rela
 // A batch's paths put back where they were, all or none: refused, nothing moved, when something sits at one of
 // those places or the batch lacks one (`error` names it); the batch's folder removed once it is empty.
 bool restore_trash(const ProjectPaths &paths, const TrashBatch &batch, std::string &error);
-// Where a batch's paths are: its folder under the trash.
-std::string trash_batch_dir(const ProjectPaths &paths, uint64_t id);
 // How many files the trash holds, in every batch.
 size_t trash_file_count(const ProjectPaths &paths);
 // Everything the trash holds removed for good, the trash's folder with it: false with `error` (the system's

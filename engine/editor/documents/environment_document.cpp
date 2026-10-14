@@ -818,8 +818,6 @@ const RecordTable &environment_table() {
 	return table;
 }
 
-bool is_environment_kind(AssetKind kind) { return asset_kind_row(kind).document == DocumentTypeId::Environment; }
-
 // --- the document ---------------------------------------------------------------------------------
 
 const EnvironmentRow *EnvironmentDocument::environment_row() const {
@@ -891,11 +889,6 @@ void EnvironmentDocument::refine_field(const NodeAddress &address, FieldUse &use
 bool EnvironmentDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                                 std::shared_ptr<const FileState> &, std::vector<SourceIssue> &issues,
                                 Diagnostic &error) {
-	if (!is_environment_kind(kind())) {
-		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not an environment.",
-		                     path());
-		return false;
-	}
 	const std::string text(bytes.begin(), bytes.end());
 	auto row = std::make_shared<EnvironmentRow>();
 	std::istringstream input(text);

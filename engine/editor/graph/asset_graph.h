@@ -155,11 +155,11 @@ public:
 	// generation.
 	void clear();
 
-	// The base layer (ADR 0046 d10: a read-only dependency mount; project assets win): a lookup by
-	// name tries the project, then the base, whose files the project has a file of the name of
-	// are hidden; choices offers the base's names after the project's (the names a lookup finds
-	// before the others); the base makes no edge and no finding. Every edge is resolved again,
-	// under a new generation; null takes it away.
+	// The base layer (ADR 0046 d10, "An expansion's base game under its graph": an expansion
+	// project's base game; project assets win): a lookup by name tries the project, then the base,
+	// whose files the project has a file of the name of are hidden; choices offers the base's names
+	// after the project's (the names a lookup finds before the others); the base makes no edge and
+	// no finding. Every edge is resolved again, under a new generation; null takes it away.
 	GraphUpdate set_base(std::shared_ptr<const GraphLayer> base);
 	const std::shared_ptr<const GraphLayer> &base() const { return base_; }
 

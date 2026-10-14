@@ -17,6 +17,8 @@
 
 namespace opennova::editor {
 
+static bool plan_file_finding(const AssetEntry &asset, const std::string &expansion, Diagnostic &out);
+
 namespace {
 
 // Where a file goes in the build (an archive's slot, loose, or nowhere), and, for a loose one, its
@@ -138,7 +140,10 @@ std::vector<Diagnostic> plan_scan_findings(const AssetScan &scan, const std::str
 	return out;
 }
 
-bool plan_file_finding(const AssetEntry &asset, const std::string &expansion, Diagnostic &out) {
+// The same of one file (the rule plan_scan_findings runs over every file): true with the finding for a file
+// the build refuses or leaves out with a word (Files' card says it as the build would), false for one it
+// packs or copies, or leaves out without one.
+static bool plan_file_finding(const AssetEntry &asset, const std::string &expansion, Diagnostic &out) {
 	BuildTarget target;
 	target.expansion = expansion;
 	return own_finding(asset, target, out);
@@ -187,7 +192,9 @@ BuildPlaceWords build_place_words(const AssetEntry &asset, const std::string &ex
 	return out;
 }
 
-std::string base_missing_words(const BuildTarget &target) {
+// Why an expansion's base game is not there to build over: the game install unset or not mounting, or,
+// for an expansion of a project's base game, that project's export missing (build.expansion.base_missing).
+static std::string base_missing_words(const BuildTarget &target) {
 	if (!target.base_project.empty())
 		return "The project builds as the expansion " + target.expansion + ", which plays over the base game's project " +
 		       target.base_project + " as it ships, and " +

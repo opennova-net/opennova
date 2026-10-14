@@ -30,11 +30,10 @@ namespace opennova::editor {
 
 namespace {
 
-constexpr NodeKind k(MissionKind kind) { return node_kind(kind); }
 
 bool logic_record(const NodeAddress &address) {
-	return (!address.child && address.kind == k(MissionKind::Event)) ||
-	       (address.child && (address.kind == k(MissionKind::Trigger) || address.kind == k(MissionKind::Action)));
+	return (!address.child && address.kind == node_kind(MissionKind::Event)) ||
+	       (address.child && (address.kind == node_kind(MissionKind::Trigger) || address.kind == node_kind(MissionKind::Action)));
 }
 
 // What the board was built over, so it is built again only when one of them moves: the document (its
@@ -143,11 +142,11 @@ void MissionBoardPane::toolbar(Workspace &workspace, const MissionDocument &miss
 	if (ui_kit::checkbox_width(attention.c_str()) > ImGui::GetContentRegionAvail().x)
 		attention = "(" + std::to_string(board_.noted) + ")";
 	attention += "###attention";
-	row.next(ui_kit::checkbox_width(attention.c_str()));
 	bool attend = shown.logic_attention;
-	if (ImGui::Checkbox(attention.c_str(), &attend)) set_shown(workspace, mission, "logic_attention", io::JsonValue::make_bool(attend));
-	ui_kit::tooltip("Only the events the board notes something on (an event with no action whose firing nothing reads, a "
-	                "value not set, an area the game drops...): the editor's reading, never a build's refusal.");
+	if (ui_kit::check(row, attention.c_str(), &attend,
+	                  "Only the events the board notes something on (an event with no action whose firing nothing reads, "
+	                  "a value not set, an area the game drops...): the editor's reading, never a build's refusal."))
+		set_shown(workspace, mission, "logic_attention", io::JsonValue::make_bool(attend));
 	const bool all_folded = !board_.cards.empty() &&
 	                        std::all_of(board_.cards.begin(), board_.cards.end(), [](const BoardCard &card) { return card.folded; });
 	const char *fold = all_folded ? "Unfold all" : "Fold all";
@@ -262,7 +261,7 @@ void MissionBoardPane::keys(Workspace &workspace, const MissionDocument &mission
 	if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_D)) window_requests::clipboard(workspace, mission, EditorRequestKind::Duplicate);
 	if (ImGui::Shortcut(ImGuiKey_Delete)) window_requests::edit(workspace, mission, EditOperation::Remove, selected);
 	if (selected.child) {
-		const bool action = selected.kind == k(MissionKind::Action);
+		const bool action = selected.kind == node_kind(MissionKind::Action);
 		const std::vector<BoardLine> &lines = action ? card->actions : card->triggers;
 		for (const BoardLine &line : lines) {
 			if (line.record != selected) continue;

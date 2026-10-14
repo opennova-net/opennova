@@ -99,11 +99,12 @@ const char *slot_words(uint8_t slot) {
 	}
 }
 
-} // namespace
-
+// Whether a part index names a part of LOD 0.
 bool model_part_exists(const ModelRow &row, int64_t part) {
 	return part >= 0 && static_cast<size_t>(part) < lod0_parts(row);
 }
+
+} // namespace
 
 std::string model_part_name(const ModelRow &row, int64_t part) {
 	if (part == -1 || part == 255) return "None";

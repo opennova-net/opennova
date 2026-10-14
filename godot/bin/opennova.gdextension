@@ -6,7 +6,7 @@ reloadable = true
 
 [libraries]
 
-; Two variants from one source tree (ADR 0046 d4). Godot picks the row whose tags
+; Two variants from one source tree (ADR 0046 d2). Godot picks the row whose tags
 ; all hold with the most tags: an export tagged `opennova_runtime` (the game, the
 ; Play child) loads the runtime-only library, one tagged `opennova_editor` (the
 ; OpenNova Editor) the editor-enabled one, and a source run (the Godot editor, GUT,

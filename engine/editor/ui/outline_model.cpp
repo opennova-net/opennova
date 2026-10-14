@@ -16,15 +16,13 @@ namespace {
 // The most lines of text a master and detail cell shows before its box scrolls.
 constexpr int kMostLines = 8;
 
-// The first kind of row the file holds (RecordKindRow::top): its own records, whose rows a list
-// names alone (another kind's after its label: a weapon table's carry limits).
+} // namespace
+
 const RecordKindRow *own_kind(const Document &document) {
 	for (const RecordKindRow &row : document.kinds())
 		if (row.top) return &row;
 	return nullptr;
 }
-
-} // namespace
 
 OutlineModel::OutlineModel(OutlineMode mode, OutlineFileValuesHook file_values, OutlineRowListedHook row_listed,
                            OutlineGroupsHook groups, OutlineRowReadsOthersHook reads_others)

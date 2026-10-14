@@ -17,6 +17,9 @@
 
 namespace opennova::editor {
 
+// The dialog name a value gives: a name as written, a whole number its dlg%03i ("12" is dlg012).
+std::string dialog_name_given(const std::string &value);
+
 namespace {
 
 // The most ticks a dialog's play is run for (an hour of the clock): a guard, no game rule.

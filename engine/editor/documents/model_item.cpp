@@ -5,6 +5,7 @@
 #include <set>
 #include <string_view>
 
+#include <editor/model/field_text.h>
 #include <formats/def/def.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <formats/threedi/threedi_panm.h>
@@ -15,10 +16,6 @@
 namespace opennova::editor {
 
 namespace {
-
-std::string counted(size_t count, const char *one, const char *many) {
-	return std::to_string(count) + " " + (count == 1 ? one : many);
-}
 
 // The doors the model's parts turn: the distinct DOOR_nn registers its first LOD's part tracks read (a
 // register-generator style names a register by the model's own CTRL table [orig: ThreediGp_LoadFromFile

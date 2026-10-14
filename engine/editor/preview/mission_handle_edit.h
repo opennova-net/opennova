@@ -36,7 +36,6 @@ enum class MissionHandle : uint8_t {
 // area's edges), "x_min_y_min", "x_max_y_min", "x_max_y_max", "x_min_y_max" (its corners), "z_min",
 // "z_max" (its bottom and its top).
 bool mission_handle_from_token(const char *token, MissionHandle &out);
-const char *mission_handle_token(MissionHandle handle);
 // The handle is an area's edge, its corner, its bottom or top, any of them.
 inline bool mission_handle_is_edge(MissionHandle handle) {
 	return handle >= MissionHandle::XMin && handle <= MissionHandle::YMax;

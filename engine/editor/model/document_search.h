@@ -35,7 +35,4 @@ struct DocumentHit {
 std::vector<DocumentHit> find_in_document(const Document &document, const std::string &text,
                                           const SearchOptions &options = SearchOptions());
 
-// Where `text` is found in `in` (as `options` compares), or npos.
-size_t find_text(const std::string &in, const std::string &text, const SearchOptions &options = SearchOptions());
-
 } // namespace opennova::editor

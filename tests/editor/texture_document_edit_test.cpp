@@ -48,12 +48,7 @@ std::vector<uint8_t> graded(int w, int h) {
 	return out;
 }
 
-std::vector<uint8_t> tga32(const std::vector<uint8_t> &rgba, int w, int h) {
-	std::vector<uint8_t> out;
-	std::string why;
-	tga::tga_write_rgba32(rgba.data(), uint32_t(w), uint32_t(h), out, why);
-	return out;
-}
+using editor_test::tga32;
 
 std::vector<uint8_t> first_level(const std::string &name, const std::vector<uint8_t> &bytes, uint32_t &w, uint32_t &h) {
 	const std::shared_ptr<const TextureImage> image = decode_texture(name, bytes);

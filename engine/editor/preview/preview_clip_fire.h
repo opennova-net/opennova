@@ -94,16 +94,17 @@ public:
 
 	// What the clip fires with: the project (its files, ammo.def and weapon.def as the load reads them, its effect
 	// catalog), the item pairing the clip (DI-04's sources), the body the clip sounds bind (a player's fires
-	// nothing), the rig's model and rig, the clip playing (its key, variant, timeline and event words) and the
-	// clock's period a repeated one-shot plays again at (0 none). Nothing fires while no clip plays.
+	// nothing), the rig's model and rig and the clip playing (its key, variant, timeline and event words).
+	// Nothing fires while no clip plays.
 	void refresh(const SessionView &view, const ClipSoundItem &item, const ClipSoundBinding &binding,
 			const assets::Model &model, const std::shared_ptr<const anim::SkeletalClips> &rig, const std::string &key,
-			int variant, const anim::ClipTimeline *timeline, const ClipSoundTrack &track, int32_t period,
+			int variant, const anim::ClipTimeline *timeline, const ClipSoundTrack &track,
 			const ClipFireOptions &options);
 	void clear();
 	// The run to the clock's tick `tick`: every shot on the ticks up to it fired (the range stands after that tick,
-	// as the game's frame shows what its tick left), the effects it spawned played to it.
-	void run_to(int32_t tick);
+	// as the game's frame shows what its tick left), the effects it spawned played to it through `frustum` (the
+	// view's, preview_view_frustum; none: every emitter advances).
+	void run_to(int32_t tick, const particle::ParticleViewFrustum &frustum = {});
 
 	// Whether anything fires: the body reads fire bits, the clip carries one, and the item's bytes name an ammo.
 	bool armed() const { return armed_; }
@@ -161,7 +162,6 @@ private:
 	anim::ClipTimeline timeline_;
 	bool has_clip_ = false;
 	ClipSoundTrack track_;
-	int32_t period_ = 0;
 	float height_ = 0.0f; // the range's frame over the preview's origin (metres, the preview's +y)
 	uint64_t inputs_ = 0; // what the shots are made of, hashed: another starts the schedule again
 	std::vector<ClipFireShot> shots_;

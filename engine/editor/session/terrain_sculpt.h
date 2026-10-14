@@ -19,6 +19,13 @@ namespace opennova::editor {
 
 class SessionCore;
 
+// A test's hold on the terrain sculpt's worker (TerrainSculpt::hold_for_test; test-only: neither the Shell nor a command
+// line sets one). The test owns it, so what came of the job it held reads after the session is gone: how many of the
+// jobs that ran while it was set came back cancelled.
+struct BakeTestHold {
+	size_t cancelled = 0;
+};
+
 // The terrain sculpt's baker (ADR 0046 S25, the heights lane): the session's own thread that bakes the heights a
 // stroke changed with the TrnGen port's region bake (formats/cpt/trngen/terrain_region_bake.h), so that every tile
 // the stroke did not reach keeps its bytes and the remade ones are the bytes a whole bake of the sculpted input makes.
@@ -53,6 +60,16 @@ public:
 	// stroke's step or as one of its own; `followed` takes the missions the landing moved. False, with why, where a bake
 	// fails (its regions stay due).
 	bool settle(const std::string &path, std::string &error, std::vector<std::string> *followed = nullptr);
+	// The worker waited on until it holds no job, queued or running (a test's wait: no app calls it): what it finished
+	// lands at the next poll, which starts the next one due. Unlike settle, it lands nothing and starts nothing. A job a
+	// test holds counts as none (the worker has it, its bake not begun).
+	void wait_idle();
+	// A test's hold (test-only): while `hold` is set, a job the worker takes waits there before its bake runs, until the
+	// hold is let go (null) or the session closes, whose cancel the bake then meets at its first node; each job that
+	// came back cancelled while it was set is counted in it. A settle of the held job's file (its Save) waits
+	// for the bake the hold keeps from starting, so it never returns: a test lets the hold go before anything settles
+	// that file (else ctest's timeout ends the hang).
+	void hold_for_test(BakeTestHold *hold);
 	// Whether a bake runs or is due for `path`, and its words for the pane's bake line ("" none).
 	std::string bake_words(const std::string &path) const;
 	// The bakes made since the session started (a test's count), and the bakes started (each lands, fails or is
@@ -107,6 +124,8 @@ private:
 	std::string running_path_;
 	bool running_seed_ = false; // the job running is a seed (no stroke stops it; closing the session does)
 	size_t landed_ = 0, started_ = 0;
+	BakeTestHold *test_hold_ = nullptr; // hold_for_test's
+	bool held_ = false;                 // the worker holds its job for it
 	// The seeds made: each file's bake state from the input its tiles were made from (a .cpt's atlas, an image's
 	// heights as read), its texels' hash and the locks it was baked under, the last few files' within a byte budget;
 	// an image's with the whole .cpt its bake made (what its first landing lays under the strokes' regions).
@@ -144,11 +163,5 @@ private:
 	std::vector<LocksMemo> locks_memo_;
 	const void *imports_scan_ = nullptr; // the scan the image documents' imports were last read against
 };
-
-// The quadrant lock flags of the first .trn (by its path) naming the .cpt `cpt_name` as its polytrn_polydata, from the
-// session's view of the project's files; none where no .trn names it. `others` names each later .trn naming it with
-// other flags (the conflict noted).
-std::array<trngen::CornerLockFlags, 4> terrain_bake_locks(const SessionCore &core, const std::string &cpt_name,
-                                                          std::vector<std::string> *others = nullptr);
 
 } // namespace opennova::editor

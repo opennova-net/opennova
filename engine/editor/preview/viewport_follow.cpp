@@ -2,16 +2,6 @@
 
 namespace opennova::editor {
 
-const char *viewport_action_token(ViewportAction action) {
-	switch (action) {
-	case ViewportAction::Keep: return "keep";
-	case ViewportAction::Rebuild: return "rebuild";
-	case ViewportAction::Update: return "update";
-	case ViewportAction::Clear: return "clear";
-	}
-	return "keep";
-}
-
 PreviewFollow::Found PreviewFollow::follow(const Key &key, bool moved, const FileSource &files,
 		uint64_t generation) {
 	if (!shows_ || moved || key != key_) return Found::Anew;

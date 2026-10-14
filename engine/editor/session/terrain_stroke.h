@@ -22,6 +22,8 @@ class SessionCore;
 // brush paints (session/terrain_add_map.h). Refused (terrain.stroke), nothing changed: a view with no terrain, a plane
 // whose file does not resolve or is refused, a plan refused.
 void serve_terrain_stroke(SessionCore &core, const EditorRequest &request);
+// A stroke's refusal (terrain.stroke, an error) at the view `at`: what the terrain's files and tools refuse.
+void refuse_stroke(SessionCore &core, const std::string &why, const std::string &at);
 
 // The stroke on the wire (the request's `stroke` field, session_json's one delegate): {plane, brush?, points,
 // gesture, end, cancel, add}; read back (TerrainStrokeAsk::wire set; each point within kTerrainPointMost), false with

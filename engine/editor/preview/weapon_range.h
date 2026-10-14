@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include <base/io/tick_rate.h>
 #include <base/vfs/file_source.h>
 #include <editor/preview/viewport_follow.h>
 #include <runtime/renderer/scar_draw_list.h>
@@ -107,7 +108,7 @@ inline constexpr float kWeaponRangeFarthest = 500.0f;
 // The wall's half-size, metres: big enough to take a burst's dispersion at the range's distances.
 inline constexpr float kWeaponRangeTargetHalf = 2.0f;
 // How long a run is followed: ten minutes of the game's ticks.
-inline constexpr int32_t kWeaponRangeMostTicks = 62 * 600;
+inline constexpr int32_t kWeaponRangeMostTicks = io::kTicksPerSecondInt * 600;
 
 // What the range fires with: the project's files (the open documents standing in for theirs), the weapon table's
 // file and the record fired, the view the shots show in, whether another's view is the other side's (the round's

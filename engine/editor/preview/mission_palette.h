@@ -32,9 +32,6 @@ inline constexpr size_t kMissionPaletteGroupCount = size_t(MissionPaletteGroup::
 // The group's words ("Recently placed", "People", "Vehicles", ...) and its token on the wire
 // ("recent", "people", "vehicles", "objects", "buildings", "decoration", "markers", "effects", "other").
 const char *mission_palette_group_words(MissionPaletteGroup group);
-const char *mission_palette_group_token(MissionPaletteGroup group);
-// The group an item of TYPE `type` stands in (-1, an unknown TYPE: Other).
-MissionPaletteGroup mission_palette_group_of_type(int type);
 // The pool's words a placed record of it stands in ("organics", "items", "buildings", "markers").
 const char *mission_pool_words(MissionKind pool);
 

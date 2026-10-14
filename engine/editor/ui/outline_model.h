@@ -359,4 +359,8 @@ private:
 	size_t rows_made_ = 0;
 };
 
+// The first kind of row the file holds (RecordKindRow::top): its own records, whose rows a list names alone
+// (another kind's after its label: a weapon table's carry limits), and the rows a master column lists and adds.
+const RecordKindRow *own_kind(const Document &document);
+
 } // namespace opennova::editor

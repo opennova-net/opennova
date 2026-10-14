@@ -20,6 +20,9 @@
 
 namespace opennova::editor {
 
+// A volume's colour by its type's family, and a person's hit sphere's.
+uint32_t model_volume_rgb(int64_t type);
+
 namespace {
 
 using threedi::ThreediBuildVec3;
@@ -70,7 +73,7 @@ struct Geometry {
 	threedi::ThreediCollisionProbeBoxes probes{};
 };
 
-constexpr double q16(int32_t v) { return v / 65536.0; }
+constexpr double q16(int32_t v) { return v / io::kFp16OneD; }
 
 ThreediBuildVec3 vec(const float p[3]) { return ThreediBuildVec3{p[0], p[1], p[2]}; }
 
@@ -149,7 +152,7 @@ std::shared_ptr<const Geometry> make_geometry(const threedi::Threedi3di3 &model)
 		world::EntityBoundRadiusInputs bound;
 		bound.model_radius_q16 = world::model_bound_radius_q16_from_3di(model);
 		bound.has_collision_block = true;
-		out->bound_radius = double(world::entity_bound_radius_q16(bound)) / 65536.0;
+		out->bound_radius = double(world::entity_bound_radius_q16(bound)) / io::kFp16OneD;
 		out->has_probes = threedi::threedi_3di3_collision_probe_boxes(c, &out->probes) != 0;
 	}
 	out->has_occlusion = world::occlusion_model_from_3di(model, out->occlusion);
@@ -427,7 +430,7 @@ std::vector<ModelCollisionShape> model_collision_shapes(const assets::Model &sho
 			s.person = true;
 			s.rgb = kModelHitSphereRgb;
 			s.legend = "Hit spheres";
-			s.radius = float(world::person_effective_radius(int32_t(o), section.radius_q16, 0) / 65536.0);
+			s.radius = float(world::person_effective_radius(int32_t(o), section.radius_q16, 0) / io::kFp16OneD);
 			s.name = "Hit sphere of " + part_word(o) + (o == 14 ? " (the head)" : "");
 		} else if (section.bone) {
 			// A skinned model no person wears (a first-person view's arms): its stored sphere, which no round

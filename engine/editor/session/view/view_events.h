@@ -7,6 +7,7 @@
 #include <string>
 
 #include <editor/model/value.h>
+#include <editor/session/row_table.h>
 
 namespace opennova::editor {
 
@@ -86,25 +87,8 @@ inline constexpr ViewEventKindRow kViewEventKindRows[] = {
 static_assert(std::size(kViewEventKindRows) == kViewEventKindCount,
 		"every view event kind has exactly one row");
 
-constexpr bool view_event_kind_rows_in_order() {
-	for (size_t i = 0; i < kViewEventKindCount; ++i)
-		if (kViewEventKindRows[i].kind != static_cast<ViewEventKind>(i)) return false;
-	return true;
-}
-static_assert(view_event_kind_rows_in_order(), "the view event kind rows follow the enum's order");
-
-constexpr bool view_event_kind_tokens_unique() {
-	for (size_t i = 0; i < kViewEventKindCount; ++i)
-		for (size_t j = i + 1; j < kViewEventKindCount; ++j) {
-			const char *a = kViewEventKindRows[i].token;
-			const char *b = kViewEventKindRows[j].token;
-			size_t k = 0;
-			while (a[k] != '\0' && a[k] == b[k]) ++k;
-			if (a[k] == b[k]) return false;
-		}
-	return true;
-}
-static_assert(view_event_kind_tokens_unique(), "each view event kind has a token of its own");
+static_assert(rows_follow(kViewEventKindRows, &ViewEventKindRow::kind), "the view event kind rows follow the enum's order");
+static_assert(tokens_unique(kViewEventKindRows, &ViewEventKindRow::token), "each view event kind has a token of its own");
 
 inline const char *view_event_kind_token(ViewEventKind kind) {
 	return kViewEventKindRows[static_cast<size_t>(kind)].token;

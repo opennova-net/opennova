@@ -41,7 +41,7 @@ bool places_in_mission(const Document &document, const NodeAddress &record) {
 	return row && static_cast<const CatalogRow &>(*row).record_kind() == def::DefRecordKind::Item;
 }
 
-void draw_place_in_mission(Workspace &workspace, const Document &document, const NodeAddress &record, bool menu) {
+static void draw_place_in_mission(Workspace &workspace, const Document &document, const NodeAddress &record, bool menu) {
 	const SessionView &view = workspace.view();
 	const std::string mission = place_in_mission_target(view);
 	const bool can = !mission.empty() && view.allows(EditorRequestKind::EditInViewport);
@@ -86,10 +86,7 @@ bool draw_catalog_inspector(Workspace &workspace, const Document &document, cons
 	                                : "Open " + layout + "'s HUD preview with " + weapon +
 	                                          " held: its name, ammo count, clip and round art and icon as the game "
 	                                          "draws them.")) {
-		ReferenceTarget target;
-		target.file = layout;
-		target.editable = true;
-		window_requests::go_to(workspace, target);
+		window_requests::go_to(workspace, window_requests::target_at(layout));
 		io::JsonValue options = io::JsonValue::make_object();
 		options.set("weapon", io::json_string(weapon));
 		workspace.request(request::set_viewport(layout, viewport_change(ViewportKind::Hud, "options", std::move(options))));

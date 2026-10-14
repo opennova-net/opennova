@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -94,6 +95,52 @@ bool prepare_expansion_run(const std::string &install, const std::string &build_
                            const FileLink &link = io::link_file, std::vector<std::string> *staged = nullptr,
                            bool seed_root_reads = true);
 
+// The install's base game an expansion's Play stages (prepare_expansion_run): its archives and the loose files
+// beside them, a file the build's expansion packs left out. False with `error` (play.install_missing: no install,
+// none of the game's archives; play.install_copy: a build without the expansion's folder).
+bool expansion_base_files(const std::string &install, const std::string &build_dir, const std::string &expansion,
+                          std::vector<std::string> &base, Diagnostic &error);
+
+// The copies an expansion's Play needs in the copy cache, made over the editor's frames (S26 C16): where the run
+// directories' volume will not link the install's files (`link` refuses a probe), each file the game only reads
+// that the cache lacks as the install's file stands, copied a slice of bytes at a time (the build's operation
+// steps it once the build lands, BuildOperation), so prepare_expansion_run then links every one from the cache
+// at once. Each is copied beside its place (a file made new), handed to the disk and put there whole, the cache's
+// record written after each: a fill cancelled or failed part way leaves every file the record trusts whole, and
+// the next Play's fill copies what is left (the Play it ran for starts no game).
+class InstallCopyFill {
+public:
+	InstallCopyFill();
+	~InstallCopyFill();
+	InstallCopyFill(InstallCopyFill &&) noexcept;
+	InstallCopyFill &operator=(InstallCopyFill &&) noexcept;
+
+	// What the fill copies for an expansion's Play over `install` from `build_dir`, its run directories under
+	// `run_root`: nothing (empty()) where there is no cache, the volume links, the cache holds every file, or the
+	// base cannot be listed (the staging refuses it as Play starts).
+	static InstallCopyFill plan(const std::string &install, const std::string &build_dir, const std::string &expansion,
+	                            const std::string &run_root, const std::string &copy_cache,
+	                            const FileLink &link = io::link_file);
+	bool empty() const;
+	// About `budget` bytes more copied (a file's slices, files in turn); true once every file is copied, or it
+	// stopped (cancelled, failed).
+	bool step(uint64_t budget);
+	void cancel();
+	bool cancelled() const;
+	bool failed() const;
+	const std::string &reason() const; // why it failed
+	uint64_t bytes_done() const;
+	uint64_t bytes_total() const;
+	size_t files_done() const;
+	size_t files_total() const;
+	// What the operation's progress says: "Copying the game install's files for the expansion: 3 of 12".
+	std::string label() const;
+
+private:
+	struct State;
+	std::unique_ptr<State> state_;
+};
+
 // A standalone build staged in `run_dir` for the runtime to mount there (make_play_launch_plan's
 // `on_run_dir`): every file of the build but its record, one the game only reads linked (copied where
 // the file system will not link it), every other copied, each in place of what the run kept under its
@@ -115,36 +162,9 @@ inline constexpr const char *kInstallExecutable = "Jointops.exe";
 // crt_exit(0) @ 0x4a7c3f]. The first one held is a game running; Play passes none of those flags.
 inline constexpr const char *kInstallInstanceSemaphore = "semaphore:NOVALOGIC JOINT OPERATIONS:1";
 
-// The historical Jointops.exe /w /d /FRISK launch in `run_dir`: the game install's game opens its
-// archives and, under /d, its loose files from its working directory [orig: PFF_OpenAllArchives @
-// 0x4a4310, CWD-relative _lopen; docs/vfs/vfs-pff-mount-re.md] and writes there (game.cfg, its
-// saves, its _filelog.txt), so the run directory gets the build's files (one the game only reads
-// linked, copied where the file system cannot link it; every other, which the game may write,
-// copied), the install's executable and Bink DLL, a game.cfg, the build's own when the project has
-// one, and the install's game.cfg, player.sav and weapon.sav and the files it reads from its folder by
-// name (score.ini, earlyerr.txt, admin.cfg) where neither the project nor the run directory has its own
-// (seeds: the profile, bindings and device the player starts with). A seed never replaces the run
-// directory's own copy, newer or not: the game rewrites its game.cfg as it quits every run [orig: Game_Run
-// @ 0x4a7fff Game_SaveConfig after the loop], so an install's copy newer than the run's says only that the
-// install was played since; the run keeps what its own runs chose (the device its dialog named above
-// all), and a fresh Play (RunTake::fresh) seeds again. The seeds are not staged files (LaunchPlan::staged):
-// the next Play keeps them as the game left them. The required files are checked before any is copied,
-// so a missing one launches nothing. The game install and the build directory are only read. A build of
-// the expansion `expansion` (ADR 0046 S16) is staged as prepare_expansion_run stages it, the install's
-// own game.cfg and saves beside it, and the game launched `/w /d /exp <expansion> /FRISK`. `link` gives a
-// file a second name, as prepare_expansion_run's. `base_game` is the folder the expansion's base game is
-// staged from where it is not the install's (an expansion of a project's base game, ADR 0046 T5: that
-// project's export); "" the install's.
-bool prepare_retail_launch_plan(const std::string &retail_directory, const std::string &build_dir,
-                                const std::string &run_dir, LaunchPlan &out, Diagnostic &error,
-                                const std::string &expansion = std::string(),
-                                const std::string &copy_cache = std::string(), const FileLink &link = io::link_file,
-                                const std::string &base_game = std::string());
-
 // Strict Play in the game install: the game as a player who dropped the install's Jointops.exe into
 // the build's folder runs it. The run directory gets the build's files (one the game only reads linked,
-// copied where the file system cannot link it; every other copied, as prepare_retail_launch_plan stages
-// them, so no write reaches the build) and the install's executable and Bink DLL (copied), nothing else
+// copied where the file system cannot link it; every other copied, so no write reaches the build) and the install's executable and Bink DLL (copied), nothing else
 // of the install: no configuration, save, score table, early error text or admin configuration (a
 // game.cfg the build holds is the project's own and is staged with the rest), so the game boots on the
 // build alone and writes its own, which strict Play's own run directory (`.opennova/run/strict/<n>`)

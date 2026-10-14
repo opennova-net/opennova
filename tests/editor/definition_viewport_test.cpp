@@ -36,7 +36,6 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
-#include <formats/lwf/lwf.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <runtime/world/destruction.h>
@@ -102,16 +101,8 @@ std::vector<uint8_t> wreck_bytes() {
 	return out;
 }
 
-// A particle `id` emitting `rate` a second for `dur` seconds, each living `age` seconds.
-std::string particle_text(const std::string &id, float dur, float rate, float age) {
-	return "[particledef]\n{\n\tid = " + id + ";\n\temit_dur = " + std::to_string(dur) + ";\n\temit_rate = " +
-	       std::to_string(rate) + ";\n\temit_burst = 1;\n\tage = " + std::to_string(age) +
-	       ";\n\tscale = 0.5;\n\tspeed = 2.0;\n\tspread = 30.0;\n\tgravity = 1.0;\n\tscale_func = grow;\n}\n\n";
-}
-
-std::string effect_text(const std::string &id, const std::string &pdefs) {
-	return "[effectdef]\n{\n\tid = " + id + ";\n\tpdefs = " + pdefs + ";\n}\n\n";
-}
+using editor_test::particle_text;
+using editor_test::effect_text;
 
 // The effects: a smoke that emits for a long while, a death burst, a fire and an other.
 std::string particles() {
@@ -119,37 +110,6 @@ std::string particles() {
 	       particle_text("p_fire", 30.0f, 8.0f, 1.0f) + particle_text("p_other", 30.0f, 4.0f, 1.0f) +
 	       effect_text("Effect_Smoke", "p_smoke") + effect_text("Effect_Dead", "p_dead") +
 	       effect_text("Effect_Fire", "p_fire") + effect_text("Effect_Other", "p_other");
-}
-
-// A bank of one set playing one wave.
-std::vector<uint8_t> bank_of(const std::string &set) {
-	lwf::File bank;
-	lwf::Single single;
-	single.name = set;
-	single.path = strutil::to_lower(set) + ".wav";
-	single.volume = 0xD2;
-	bank.singles.push_back(single);
-	lwf::Multi multi;
-	multi.name = set;
-	multi.pitch_base = lwf::kAuthoredSetPitchBase;
-	multi.target_id = 100;
-	multi.playlist_indices.push_back(0);
-	bank.multis.push_back(multi);
-	lwf::Playlist layer;
-	layer.falloff_radius = 100;
-	layer.flags = lwf::kFlagInternal | lwf::kFlagExternal;
-	layer.sndparm_indices.push_back(0);
-	bank.playlists.push_back(layer);
-	lwf::Sndparm member;
-	member.single_index = 0;
-	member.pitch_scaled = lwf::kPitchUnityQ16;
-	member.volume = 200;
-	member.clamp_volume = 255;
-	bank.sndparms.push_back(member);
-	std::vector<uint8_t> out;
-	std::string error;
-	lwf::encode_lwf(bank, out, error);
-	return out;
 }
 
 // The soldier's clips as the Blender add-on writes them (an .o3a): SKIN.adm's reset, idle and walk rows over the
@@ -213,7 +173,7 @@ struct DefinitionRig {
 		ok = ok && editor_test::write_bytes(root + "/models/fxpump.3di", pump_bytes()) &&
 		     editor_test::write_bytes(root + "/models/fxwreck.3di", wreck_bytes()) &&
 		     editor_test::write_text(root + "/particles/fx.ptl", particles()) &&
-		     editor_test::write_bytes(root + "/sounds/game.lwf", bank_of("EXPLO_PUMP")) &&
+		     editor_test::write_bytes(root + "/sounds/game.lwf", editor_test::wave_bank_of({"EXPLO_PUMP"})) &&
 		     editor_test::write_bytes(root + "/sounds/explo_pump.wav", test_io::read_file(repo() + "/fixtures/lwf/tone.wav")) &&
 		     editor_test::write_text(root + "/defs/items.def", editor_test::crlf(kItems)) &&
 		     editor_test::write_text(root + "/defs/weapon.def", kWeapons) &&
@@ -275,13 +235,7 @@ struct DefinitionRig {
 	ViewportAction last() { return devices.last(path, ViewportKind::Definition); }
 };
 
-// The spawns of `source`.
-std::vector<DefinitionSpawn> spawns_of(const DefinitionViewport &viewport, const std::string &source) {
-	std::vector<DefinitionSpawn> out;
-	for (const DefinitionSpawn &spawn : viewport.effects().spawns())
-		if (spawn.source == source) out.push_back(spawn);
-	return out;
-}
+using editor_test::spawns_of;
 
 bool near(float a, float b) {
 	return std::fabs(a - b) < 1e-4f;

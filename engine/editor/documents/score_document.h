@@ -76,8 +76,6 @@ protected:
 	void prepare_record(const Node &row, const ListChange &change, DetachedRecord &record) const override;
 };
 
-bool is_score_kind(AssetKind kind);
-
 // The scoring table's validator: a version other than 40 (the game writes its defaults over the file instead), a
 // fanfare the game does not keep, a block of a name no game type has (its lines read for nothing), a block of a
 // name an earlier one has (both read into one row: the later's lines win), a block of more FIELD lines than a row

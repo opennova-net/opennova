@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <iterator>
+#include <editor/session/row_table.h>
 
 namespace opennova::editor {
 
@@ -89,25 +90,8 @@ inline constexpr ViewConcernRow kViewConcernRows[] = {
 static_assert(std::size(kViewConcernRows) == kViewConcernCount,
 		"every view concern has exactly one row");
 
-constexpr bool view_concern_rows_in_order() {
-	for (size_t i = 0; i < kViewConcernCount; ++i)
-		if (kViewConcernRows[i].concern != static_cast<ViewConcern>(i)) return false;
-	return true;
-}
-static_assert(view_concern_rows_in_order(), "the view concern rows follow the enum's order");
-
-constexpr bool view_concern_tokens_unique() {
-	for (size_t i = 0; i < kViewConcernCount; ++i)
-		for (size_t j = i + 1; j < kViewConcernCount; ++j) {
-			const char *a = kViewConcernRows[i].token;
-			const char *b = kViewConcernRows[j].token;
-			size_t k = 0;
-			while (a[k] != '\0' && a[k] == b[k]) ++k;
-			if (a[k] == b[k]) return false;
-		}
-	return true;
-}
-static_assert(view_concern_tokens_unique(), "each view concern has a token of its own");
+static_assert(rows_follow(kViewConcernRows, &ViewConcernRow::concern), "the view concern rows follow the enum's order");
+static_assert(tokens_unique(kViewConcernRows, &ViewConcernRow::token), "each view concern has a token of its own");
 
 inline const char *view_concern_token(ViewConcern concern) {
 	return kViewConcernRows[static_cast<size_t>(concern)].token;

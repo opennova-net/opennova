@@ -12,6 +12,12 @@
 
 namespace opennova::editor {
 
+// Names in words: "a", "a and b", "a, b and c".
+std::string names_in_words(const std::vector<std::string> &names);
+// A project folder in words: "the top level", else its path with a slash ("defs/"); as asked when it is no folder
+// of the project (a move says why).
+std::string folder_words(const std::string &folder);
+
 class SessionCore;
 struct ProjectPaths;
 struct SessionView;
@@ -118,6 +124,9 @@ private:
 		// The import sources it rewrote in place (write_files): imported again after each way.
 		std::vector<std::string> reimport;
 	};
+	// Undo's and Redo's one body: the last step of `from` taken (back: undone) and moved onto `to`, said with
+	// `said` and its words; refused with `none` when `from` is empty.
+	void step_over(std::vector<Step> &from, std::vector<Step> &to, bool back, const char *none, const char *said);
 	// The step taken back (`back`) or done again; false, refused with why, nothing changed.
 	bool take(Step &step, bool back);
 	// A folder renamed now (plan_folder_rename, each move committed in turn, put back when one fails), its files

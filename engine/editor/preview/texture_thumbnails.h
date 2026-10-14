@@ -100,8 +100,6 @@ private:
 	uint64_t serial_ = 0;
 };
 
-// A thumbnail's picture as a PNG (the wire's): empty for one with none.
-std::vector<uint8_t> thumbnail_png(const TextureThumbnail &thumbnail);
 // A thumbnail on the wire: file, state (ready, unloadable), transform, the picture's width and height,
 // the file's source_width, source_height, levels, format, texels and alpha in words, refusal; with
 // `png`, the picture as a base64 PNG.

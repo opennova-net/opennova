@@ -95,8 +95,6 @@ inline std::string window(
 	       "</WINDOW>\r\n";
 }
 
-inline std::string screen(const char *name, const std::string &body) {
-	return std::string("<SCREEN>\r\n<NAME>") + name + "</NAME>\r\n" + body + "</SCREEN>\r\n";
-}
+using menu_test::screen;
 
 } // namespace graph_test

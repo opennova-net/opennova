@@ -45,11 +45,6 @@ bool within(const std::string &path, const std::string &folder) {
 	return path.size() > folder.size() && path[folder.size()] == '/' && strutil::iequals(path.substr(0, folder.size()), folder);
 }
 
-// A folder in words: "the top level", else its path with a slash.
-std::string folder_words(const std::string &folder) {
-	return folder.empty() ? std::string("the top level") : folder + "/";
-}
-
 // The paths of a side of a step that are the project's files (not a folder under the cache): what a scan reads
 // again.
 std::vector<std::string> project_files_of(const std::vector<std::string> &paths) {
@@ -72,14 +67,6 @@ std::vector<std::string> chore_files(const EditorRequest &request) {
 	return out;
 }
 
-// Names in words: "a", "a and b", "a, b and c".
-std::string names_in_words(const std::vector<std::string> &names) {
-	std::string out;
-	for (size_t i = 0; i < names.size(); ++i)
-		out += (i == 0 ? "" : i + 1 == names.size() ? " and " : ", ") + names[i];
-	return out;
-}
-
 // The delete plans `plans` with those whose file another plan takes with it (a mission's companion, an import
 // source's record) left out, so each file goes once.
 std::vector<DeletePlan> taken_once(std::vector<DeletePlan> plans) {
@@ -96,6 +83,19 @@ std::vector<DeletePlan> taken_once(std::vector<DeletePlan> plans) {
 }
 
 } // namespace
+
+std::string names_in_words(const std::vector<std::string> &names) {
+	std::string out;
+	for (size_t i = 0; i < names.size(); ++i)
+		out += (i == 0 ? "" : i + 1 == names.size() ? " and " : ", ") + names[i];
+	return out;
+}
+
+std::string folder_words(const std::string &folder) {
+	std::string normal, why;
+	if (!normalize_project_folder(folder, normal, why)) return folder;
+	return normal.empty() ? std::string("the top level") : normal + "/";
+}
 
 size_t deleted_uses(const SessionView &view, const std::vector<DeletePlan> &plans, std::vector<std::string> &places,
                     size_t most) {
@@ -931,30 +931,26 @@ bool FileChores::take(Step &step, bool back) {
 }
 
 void FileChores::undo() {
-	if (!view_.project.open) return;
-	if (done_.empty()) return refuse(CoreFinding::FileHistory, "No file chore of this project is left to take back.");
-	Step &step = done_.back();
-	if (!take(step, true)) return;
-	const std::string words = step.words;
-	undone_.push_back(std::move(step));
-	done_.pop_back();
-	show();
-	core_.note("Took back: " + words + ".");
-	view_.activity.status = "Took back: " + words + ".";
-	core_.touch(ViewConcern::Output);
+	step_over(done_, undone_, true, "No file chore of this project is left to take back.", "Took back: ");
 }
 
 void FileChores::redo() {
+	step_over(undone_, done_, false, "No file chore taken back is left to do again.", "Did again: ");
+}
+
+// The last step of `from` taken (back: undone) and moved onto `to`, said with `said` and its words; refused with
+// `none` when `from` is empty.
+void FileChores::step_over(std::vector<Step> &from, std::vector<Step> &to, bool back, const char *none, const char *said) {
 	if (!view_.project.open) return;
-	if (undone_.empty()) return refuse(CoreFinding::FileHistory, "No file chore taken back is left to do again.");
-	Step &step = undone_.back();
-	if (!take(step, false)) return;
-	const std::string words = step.words;
-	done_.push_back(std::move(step));
-	undone_.pop_back();
+	if (from.empty()) return refuse(CoreFinding::FileHistory, none);
+	Step &step = from.back();
+	if (!take(step, back)) return;
+	const std::string words = said + step.words + ".";
+	to.push_back(std::move(step));
+	from.pop_back();
 	show();
-	core_.note("Did again: " + words + ".");
-	view_.activity.status = "Did again: " + words + ".";
+	core_.note(words);
+	view_.activity.status = words;
 	core_.touch(ViewConcern::Output);
 }
 

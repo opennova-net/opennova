@@ -103,8 +103,8 @@ struct ProjectView {
 	// the editor's) and the editor's own (the one a new project starts with, its preference).
 	std::string retail_directory;
 	std::string editor_install;
-	// How the open project plays (its local.json's play_mode: the OpenNova runtime, the game install, or
-	// Strict Play in it), and whether Play saves every unsaved file first instead of asking (its
+	// How the open project plays (its local.json's play_mode: the OpenNova runtime, or
+	// Strict Play in the game install), and whether Play saves every unsaved file first instead of asking (its
 	// save_before_play, DI-26); with no project open, the defaults a project that never said has.
 	PlayMode play_mode = PlayMode::Runtime;
 	bool save_before_play = true;
@@ -114,9 +114,6 @@ struct ProjectView {
 	// Preferences::preview_background): each open preview's device draws it at its next pump.
 	PreviewBackground preview_background = kDefaultPreviewBackground;
 	std::vector<int64_t> recent_items;
-	// The folder the project's last Build to folder built into (its local settings' build_folder; "" for
-	// none): Build > Build to <it> builds there again (the UX round's problems lane).
-	std::string build_folder;
 };
 
 } // namespace opennova::editor

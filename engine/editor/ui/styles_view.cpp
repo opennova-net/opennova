@@ -147,7 +147,6 @@ void StylesView::refresh_lines(const MnsDocument &document) {
 			const std::string text =
 			        document.get({row.id, row.kind, 0}, "value", value) ? std::get<std::string>(value) : std::string();
 			kept = lines_.matched.insert_or_assign(row.id, matches(row.name(), filter_.text) || matches(text, filter_.text)).first;
-			++lines_matched_;
 		}
 		if (kept->second) lines_.shown.push_back(i);
 	}

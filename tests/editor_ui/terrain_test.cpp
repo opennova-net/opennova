@@ -4,11 +4,9 @@
 // pressed there is one set_workspace of the brush. A tab pressed picks its family's first tool where the brush has
 // another family's (Paint: Surface, its legend then shown); the tab of the brush's own family picks nothing.
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include <base/io/json.h>
@@ -352,19 +350,19 @@ void test_ledger() {
 	const DocumentBase *heights = open_at(v, cpt);
 	CHECK(heights && heights->dirty() && v.documents.active == run.path, "2. Tmap.cpt opened beside the mission, sculpted");
 	// The stroke's bake lands in the background; the tank follows the ground with it (the follow pass), one step with
-	// the stroke.
-	// (The bake runs on a worker: a minute of the wall clock at most, polled each frame as the Shell polls it.)
+	// the stroke. (The bake runs on a worker, waited on between frames, each frame polling as the Shell polls; over
+	// once a frame leaves no bake running.)
 	bool landed = false;
-	for (int round = 0; round < 3000 && !landed; ++round) {
+	for (;;) {
+		run.settle(1);
 		opennova::io::JsonValue args = opennova::io::JsonValue::make_object();
 		args.set("path", opennova::io::json_string(run.path));
 		args.set("op", opennova::io::json_string("bake"));
 		std::string error;
 		const opennova::io::JsonValue bake = run.session.query("terrain", args, error);
 		landed = !bake.get_bool("due", true) && bake.get("landed") && bake.get("landed")->number >= 1.0;
-		if (landed) break;
-		std::this_thread::sleep_for(std::chrono::milliseconds(20));
-		run.settle(1);
+		if (landed || (v.documents.baking.empty() && v.documents.preparing.empty())) break;
+		run.session.wait_for_bakes();
 	}
 	CHECK(landed, "2. the stroke's bake landed");
 	run.take();
@@ -718,7 +716,7 @@ void test_painting_feedback() {
 	run.take();
 	legend = MissionRun::drawn_window("/overlay_legend_");
 	CHECK(legend && legend->Scroll.y > scrolled, "the legend scrolled to the brush's class");
-	// A class in the middle after the last: scrolled back up to it, short of the legend's top (the review's m5).
+	// A class in the middle after the last: scrolled back up to it, short of the legend's top.
 	const float bottom = legend ? legend->Scroll.y : 0.0f;
 	run.session.handle(request::set_workspace(R"({"terrain_brush": {"surface": 10}})"));
 	run.settle();
@@ -726,8 +724,8 @@ void test_painting_feedback() {
 	legend = MissionRun::drawn_window("/overlay_legend_");
 	const float middle = legend ? legend->Scroll.y : 0.0f;
 	CHECK(legend && middle < bottom && middle > 0.0f, "the legend scrolled back to a class in its middle");
-	// Erase: the row of what the brush lays marked, class 1 (the game's default), never the brush's class (m3); the
-	// legend scrolled up to it.
+	// Erase: the row of what the brush lays marked, class 1 (the game's default), never the brush's
+	// class; the legend scrolled up to it.
 	run.session.handle(request::set_workspace(R"({"terrain_brush": {"erase": true}})"));
 	run.settle();
 	run.take();
@@ -744,7 +742,7 @@ void test_painting_feedback() {
 	run.session.handle(request::set_workspace(R"({"terrain_brush": {"erase": false}})"));
 	run.settle();
 	run.take();
-	// A drag over the panel reaches nothing under it: no stroke, the camera standing (m5).
+	// A drag over the panel reaches nothing under it: no stroke, the camera standing.
 	legend = MissionRun::drawn_window("/overlay_legend_");
 	CHECK(legend != nullptr, "the legend drawn");
 	if (legend) {

@@ -23,7 +23,6 @@ struct Ask {
 bool model_row(R role) { return role == R::ModelDiffuse || role == R::ModelDetail || role == R::ModelFlipFrame; }
 
 std::string extension_of(const std::string &name) { return strutil::to_lower(utf8_of(path_of(name).extension())); }
-std::string stem_of(const std::string &name) { return utf8_of(path_of(basename_of(name)).stem()); }
 
 // The format a use asks of its file: the one its name's extension says, a .tga by its role; a sky's cloud
 // layer from a source with an alpha, the .dds its loader reads first.
@@ -33,7 +32,7 @@ std::string format_for(const TextureUse &use, bool source_alpha, std::string &wh
 	if (use.role == R::SkyCloud && source_alpha) {
 		// [orig: Texture_LoadFromArchive @ 0x58BA1B..0x58BA50: the .dds beside the name before it, its alpha
 		//  as it is; a PCX's alpha is its palette's luminance @ 0x58BC21..0x58BCFB]
-		why = "its loader reads " + stem_of(name) + ".dds before " + name +
+		why = "its loader reads " + file_stem(name) + ".dds before " + name +
 		      ", and only a DDS keeps the source's alpha as the cloud's density (a PCX's is its colours' brightness)";
 		return "dds";
 	}
@@ -44,7 +43,7 @@ std::string format_for(const TextureUse &use, bool source_alpha, std::string &wh
 	if (extension != ".tga") return std::string();
 	if (model_row(use.role)) {
 		// [orig: Texture_LoadByNameWithChannel @ 0x58B53C..0x58B5C0: the .dds beside the name first]
-		why = "its loader reads " + stem_of(name) + ".dds before " + name +
+		why = "its loader reads " + file_stem(name) + ".dds before " + name +
 		      ", and the game's own model textures are DXT5 with their mips";
 		return "dds";
 	}
@@ -123,7 +122,7 @@ TextureImportNeeds texture_import_needs(const std::vector<TextureUse> &uses, con
 			normals.push_back({"height", "the game makes the normal map from the height in its alpha", &use});
 		if (format.empty()) continue;
 		formats.push_back({format, why, &use});
-		stems.push_back({stem_of(use.name_written), "it names " + basename_of(use.name_written), &use});
+		stems.push_back({file_stem(use.name_written), "it names " + basename_of(use.name_written), &use});
 		if (!use.known()) continue;
 		const TextureRoleRow &role = texture_role_row(use.role);
 		if (role.size == renderer::TextureSizeRule::Exact)
@@ -152,7 +151,7 @@ TextureImportNeeds texture_import_needs(const std::vector<TextureUse> &uses, con
 		out.conflicts.push_back(conflict("name", stems));
 	} else {
 		const std::string name = stems.front().value + renderer::image_format_extension(format);
-		if (strutil::to_lower(name) != strutil::to_lower(stem_of(source_name) + renderer::image_format_extension(format)))
+		if (strutil::to_lower(name) != strutil::to_lower(file_stem(source_name) + renderer::image_format_extension(format)))
 			choose(out, "name", name, {{name, stems.front().why, stems.front().use}});
 	}
 	if (!sizes.empty()) {

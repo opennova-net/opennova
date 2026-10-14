@@ -96,6 +96,10 @@ void ProjectSession::set_launcher_source(PlayLauncherSource source) {
 	impl_->play.set_launcher_source(std::move(source));
 }
 
+void ProjectSession::set_file_link(FileLink link) {
+	impl_->play.set_file_link(std::move(link));
+}
+
 bool ProjectSession::handle(const EditorRequest &request) {
 	++impl_->handle_entries;
 	const SessionCore::RequestScope scope(impl_->core, request_kind_row(request.kind).background);
@@ -275,6 +279,14 @@ void ProjectSession::run_operations() {
 	}
 	impl_->problems.validate_pending();
 	impl_->problems.settle_originals();
+}
+
+void ProjectSession::wait_for_bakes() {
+	impl_->sculpt.wait_idle();
+}
+
+void ProjectSession::hold_bakes_for_test(BakeTestHold *hold) {
+	impl_->sculpt.hold_for_test(hold);
 }
 
 uint64_t ProjectSession::start_operation(std::unique_ptr<SessionOperation> operation) {

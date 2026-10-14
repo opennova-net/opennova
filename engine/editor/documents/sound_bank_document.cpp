@@ -19,7 +19,10 @@
 #include <runtime/audio/sound_selector.h>
 
 namespace opennova::editor {
+
 namespace {
+
+const char *layer_selection_words(uint32_t flags);
 
 constexpr NodeKind kWave = node_kind(SoundBankKind::Wave);
 constexpr NodeKind kSet = node_kind(SoundBankKind::Set);
@@ -360,10 +363,13 @@ const RecordTable &sound_bank_table() {
 	return table;
 }
 
-bool is_sound_bank_kind(AssetKind kind) { return asset_kind_row(kind).document == DocumentTypeId::SoundBank; }
+namespace {
 
+// The scope a bank's own names live in (its waves'): its file name, upper case ("GAME.LWF").
 std::string sound_bank_scope(const std::string &path) { return strutil::to_upper(basename_of(path)); }
 
+// How a layer's flags pick its member, in words [orig: SoundBank_PlayTriggerEntries @ 0x75cd5c..0x75cdfc]:
+// "in order" (0x10), "a random start, then in order" (0x80), else "at random" (0x08 never read).
 const char *layer_selection_words(uint32_t flags) {
 	// The member selection the game's player runs for the flags (audio::selection_mode_for_flags).
 	switch (audio::selection_mode_for_flags(flags)) {
@@ -373,6 +379,8 @@ const char *layer_selection_words(uint32_t flags) {
 	}
 	return "at random";
 }
+
+} // namespace
 
 // --- the row -------------------------------------------------------------------------------------
 
@@ -431,10 +439,6 @@ std::string SoundBankDocument::record_title(const NodeAddress &address) const {
 bool SoundBankDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                               std::shared_ptr<const FileState> &, std::vector<SourceIssue> &issues,
                               Diagnostic &error) {
-	if (!is_sound_bank_kind(kind())) {
-		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not a sound bank.", path());
-		return false;
-	}
 	lwf::File file;
 	std::string message;
 	if (!lwf::parse_lwf_buffer(bytes.data(), bytes.size(), file, message)) {
@@ -450,7 +454,7 @@ bool SoundBankDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std
 		issues.push_back({false, 0, std::string(), std::string(),
 		                  "The bank holds " + std::to_string(file.trigger_count) +
 		                          " trigger records, which the game reads and never uses [orig: SoundBank_OpenFile @ "
-		                          "0x75cb7a]: a save keeps their count and writes each record zero."});
+		                          "0x75cb7a]: the bank's model holds none, so a save writes none."});
 	// The first wave of each name: a member names its wave by its name, which the save finds the
 	// first of, as the bank's own lookups do.
 	std::unordered_map<std::string, size_t> first_of;

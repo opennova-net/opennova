@@ -1,4 +1,5 @@
 #include <editor/session/request_fields.h>
+#include <editor/session/row_table.h>
 
 #include <iterator>
 
@@ -107,10 +108,10 @@ constexpr RequestField kFields[] = {
 			"The unsaved-changes prompt's answer: save, discard or cancel." },
 	{ F::Settings, "settings", J::Object,
 			"The settings to set, {serial?, title?, mission?, multiplayer?, expansion?, builds_on?, "
-			"base_project?, game_install?, runtime_executable?, play_mode?, save_before_play?, build_folder?}, "
+			"base_project?, game_install?, runtime_executable?, play_mode?, save_before_play?}, "
 			"each left out as it is (expansion \"\" a standalone project, builds_on \"\" the base game, "
 			"base_project \"\" the game install's base game, else the base game's project, T5). play_mode "
-			"(runtime, install or strict: Strict Play stages the build and the install's program alone and "
+			"(runtime or strict: Strict Play stages the build and the install's program alone and "
 			"launches without /d, as a player's drop-in) and save_before_play are the open project's Play "
 			"settings, kept in its .opennova/local.json on this checkout, never the editor's: a project that "
 			"never set them plays in the OpenNova runtime and saves first." },
@@ -224,7 +225,7 @@ constexpr RequestField kFields[] = {
 	{ F::Behind, "behind", J::Boolean,
 			"Play's game window starts behind every other window, the editor keeping the foreground (shown without "
 			"activation, sent to the bottom while it starts, until the person brings it forward): a client driving "
-			"the editor while a person works at the machine. Windows only: elsewhere Play spawns nothing. On "
+			"the editor while a person works at the machine. Windows only: elsewhere the game starts as Play starts it. On "
 			"edit_in_viewport, the Play its command plans (play_from_here)." },
 	{ F::Fresh, "fresh", J::Boolean,
 			"Play's run directory is emptied before the game starts, of what the runs before wrote there as "
@@ -329,21 +330,7 @@ constexpr RequestField kFields[] = {
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");
 
-constexpr bool fields_in_order() {
-	for (size_t i = 0; i < kRequestFieldCount; ++i)
-		if (kFields[i].id != static_cast<RequestFieldId>(i))
-			return false;
-	return true;
-}
-static_assert(fields_in_order(), "the request field rows follow the enum's order");
-
-constexpr bool same_text(const char *a, const char *b) {
-	while (*a && *a == *b) {
-		++a;
-		++b;
-	}
-	return *a == *b;
-}
+static_assert(rows_follow(kFields, &RequestField::id), "the request field rows follow the enum's order");
 
 // Every token its own, never the request's "kind", and every field says what it means.
 constexpr bool fields_named() {
@@ -366,13 +353,7 @@ const RequestField &request_field(RequestFieldId id) {
 }
 
 bool request_field_from_token(const std::string &token, RequestFieldId &out) {
-	for (const RequestField &row : kFields) {
-		if (token == row.token) {
-			out = row.id;
-			return true;
-		}
-	}
-	return false;
+	return row_from_token(kFields, &RequestField::id, &RequestField::token, token, out);
 }
 
 const char *request_json_token(RequestJson json) {

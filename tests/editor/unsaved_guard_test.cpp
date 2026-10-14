@@ -3,11 +3,13 @@
 // that would lose, pack or write over them waits on the prompt exactly when its row's guard column
 // says, the prompt naming what waits (a Close's or a Reload's document, another request's path),
 // listing that file and offering Discard as the row's can_discard says; a guarded request that
-// touches no unsaved file goes ahead; and no other kind ever opens the prompt.
+// touches no unsaved file goes ahead; and no other kind ever opens the prompt. What the prompt says
+// waits and its Save button are each guarded row's words.
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <iterator>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -253,10 +255,70 @@ static int test_untouched_goes_ahead() {
 	return 0;
 }
 
+// The unsaved prompt's words are the request table's (S13 A4: waiting_action and the Save
+// labels in editor_windows.cpp were switches): for every kind the prompt guards, what waits (the
+// file the request names for the rows whose words name one) and the Save button say what they
+// said; a kind it does not guard has none.
+static int test_prompt_words_from_the_table() {
+	struct Words {
+		EditorRequestKind kind;
+		const char *waiting;
+		const char *save;
+	};
+	const Words kOld[] = {
+		{EditorRequestKind::NewProject, "Create a new project", "Save all"},
+		{EditorRequestKind::OpenProject, "Open another project", "Save all"},
+		{EditorRequestKind::CloseProject, "Close the project", "Save all"},
+		{EditorRequestKind::ImportFiles, "Import", "Save all and import"},
+		{EditorRequestKind::Build, "Build", "Save all and build"},
+		{EditorRequestKind::Play, "Play", "Save all and play"},
+		{EditorRequestKind::Export, "Export", "Save all and export"},
+		{EditorRequestKind::ReloadDocument, "Reload main.mnu", "Save"},
+		{EditorRequestKind::CloseDocument, "Close main.mnu", "Save"},
+		{EditorRequestKind::RenameAsset, "Rename main.mnu", "Save all and rename"},
+		{EditorRequestKind::AssignRequirement, "Rename main.mnu", "Save all and rename"},
+		{EditorRequestKind::RenameSymbol, "Rename everywhere (defined in main.mnu)", "Save all and rename"},
+		{EditorRequestKind::RenameBack, "Rename back", "Save all and rename back"},
+		// S18: a texture's split rewrites its referrers as a rename does.
+		{EditorRequestKind::SplitTexture, "Split main.mnu", "Save all and split"},
+		{EditorRequestKind::Quit, "Quit", "Save all"},
+		// DI-03: a move closes and opens the moved file's document again, as a rename does.
+		{EditorRequestKind::MoveAsset, "Move main.mnu", "Save all and move"},
+		// DI-25: a delete takes the file to the trash and a duplicate copies it as saved; a folder's rename moves
+		// its files' documents, and the file history's steps take files away.
+		{EditorRequestKind::DeleteAsset, "Delete main.mnu", "Save all and delete"},
+		{EditorRequestKind::DuplicateAsset, "Duplicate main.mnu", "Save all and duplicate"},
+		{EditorRequestKind::RenameFolder, "Rename the folder", "Save all and rename"},
+		// A folder deleted with what it holds takes its files' documents away.
+		{EditorRequestKind::DeleteFolder, "Delete the folder", "Save all and delete"},
+		{EditorRequestKind::UndoFile, "Undo file", "Save all and undo"},
+		{EditorRequestKind::RedoFile, "Redo file", "Save all and redo"},
+	};
+	size_t guarded = 0;
+	for (size_t i = 0; i < kEditorRequestKindCount; ++i) {
+		const auto kind = static_cast<EditorRequestKind>(i);
+		const RequestKindRow &row = request_kind_row(kind);
+		const Words *old = nullptr;
+		for (const Words &words : kOld)
+			if (words.kind == kind) old = &words;
+		TEST_EXPECT((row.guard != GuardScope::None) == (old != nullptr));
+		if (!old) {
+			TEST_EXPECT(!row.waiting && !row.save_label && waiting_words(kind, "menus/main.mnu").empty());
+			continue;
+		}
+		++guarded;
+		TEST_EXPECT(waiting_words(kind, "menus/main.mnu") == old->waiting && row.save_label &&
+		            std::string(row.save_label) == old->save);
+	}
+	TEST_EXPECT(guarded == std::size(kOld));
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_guard_column_is_the_prompt();
 	failures += test_untouched_goes_ahead();
+	failures += test_prompt_words_from_the_table();
 	if (failures == 0) std::printf("editor_unsaved_guard: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

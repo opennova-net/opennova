@@ -212,9 +212,9 @@ static int test_query() {
 	TEST_EXPECT(kinds.groups[2].key == "style" && kinds.groups[2].rows.size() == 2 && kinds.groups[5].key == "rename");
 	TEST_EXPECT(kinds.rows == std::vector<size_t>({1, 3, 4, 2, 0, 5, 6}) && kinds.total() == 7);
 	// A group's title is its row's group's (the families the old table did not name have one too).
-	TEST_EXPECT(std::string(finding_group_title(finding_row("reference.missing")->group)) == "Missing references" &&
-	            std::string(finding_group_title(finding_row("animation_map.row")->group)) == "Animation maps" &&
-	            std::string(finding_group_title(finding_row("rename.site")->group)) == "Renames");
+	TEST_EXPECT(std::string(finding_group_title(editor_test::finding_row("reference.missing")->group)) == "Missing references" &&
+	            std::string(finding_group_title(editor_test::finding_row("animation_map.row")->group)) == "Animation maps" &&
+	            std::string(finding_group_title(editor_test::finding_row("rename.site")->group)) == "Renames");
 	// Grouped and filtered: the groups hold what is shown ("4 of 7").
 	query.errors = false;
 	const ProblemAnswer filtered = answer_problems(query, view);
@@ -502,9 +502,9 @@ static int test_fixes() {
 	return 0;
 }
 
-// No Rewrite for a file whose own finding says it does not serialize (its Save is refused):
-// fixes_for, has_fixes, bulk_fixes_for and the query's fixable filter agree; another file's
-// input that a rewrite drops keeps its Rewrite.
+// No Rewrite for a file whose own finding says it does not serialize (its Save is refused), as
+// bulk_fixes_for and the query's fixable filter say it (fixes_for and has_fixes: test_fixes, every
+// Rewrite row against every blocks_save row); another file's input that a rewrite drops keeps its Rewrite.
 static int test_rewrite_unserializable() {
 	SessionView view;
 	view.project.open = true;
@@ -513,12 +513,8 @@ static int test_rewrite_unserializable() {
 	                    finding(DiagnosticSeverity::Warning, "animation_map.ignored_input", "A key the game ignores.", "anims/b.adm"),
 	                    finding(DiagnosticSeverity::Warning, "strings.regrouped", "A section read twice.", "strings/menu.bin"),
 	                    finding(DiagnosticSeverity::Error, "strings.invalid_input", "A string it cannot hold.", "strings/menu.bin")};
-	for (const size_t blocked : {size_t(0), size_t(3)}) {
-		const Diagnostic &d = view.findings.diagnostics[blocked];
-		TEST_EXPECT(fixes_for(d, view).empty() && !has_fixes(d, view) && bulk_fixes_for(d, view).empty());
-	}
-	TEST_EXPECT(labels_of(fixes_for(view.findings.diagnostics[2], view)) == std::vector<std::string>({"Rewrite b.adm"}));
-	TEST_EXPECT(bulk_fixes_for(view.findings.diagnostics[2], view).size() == 1 && has_fixes(view.findings.diagnostics[2], view));
+	for (const size_t blocked : {size_t(0), size_t(3)}) TEST_EXPECT(bulk_fixes_for(view.findings.diagnostics[blocked], view).empty());
+	TEST_EXPECT(bulk_fixes_for(view.findings.diagnostics[2], view).size() == 1);
 	ProblemQuery fixable;
 	fixable.fixable = true;
 	const ProblemAnswer answer = answer_problems(fixable, view);
@@ -1523,7 +1519,7 @@ static int test_blocking() {
 	return 0;
 }
 
-// A Fix all over the required files served whole (the review's M4): where the game install has some (here
+// A Fix all over the required files served whole: where the game install has some (here
 // keyhelp.bin) and lacks the rest, the group's first fixes are an import of the one and placeholders of the
 // others. Raised in one frame, as the Problems window's drain raises them: the placeholders first (made at
 // once), then the import's preview (an operation over the project's files); neither is refused as busy.
@@ -1567,7 +1563,7 @@ static int test_fix_all_served_whole() {
 	return 0;
 }
 
-// What only the build's plan refuses (the review's M3): a name no archive stores is a Problems row before any
+// What only the build's plan refuses: a name no archive stores is a Problems row before any
 // build, marked "Blocks the build" like the gate's; the refusal's count, the rows' blocking count and Show
 // them agree; a refused build adds no second row of it; the headline says whose refusals they are. An
 // archive in the project is a row too, the build leaving it out, blocking nothing (a quality rule refuses
@@ -1621,17 +1617,17 @@ static int test_plan_refusals_are_rows() {
 	TEST_EXPECT(std::find(result.refusals.begin(), result.refusals.end(),
 	                      "a_name_far_too_long.wac's name is too long for an archive") != result.refusals.end());
 	for (const std::string &line : result.refusals) TEST_EXPECT(line.find("extra.pff") == std::string::npos);
-	// The menu bar's words, from the build's own report whatever the status line says since (the review's L5).
+	// The menu bar's words, from the build's own report whatever the status line says since.
 	TEST_EXPECT(refused_words(*v.activity.last_build) ==
 	            "Refused: " + result.refusals.front() + " (and 5 more).");
-	// A name keeps its case in a refusal's words; a sentence's opener is lowered (the review's L6).
+	// A name keeps its case in a refusal's words; a sentence's opener is lowered.
 	Diagnostic upper = editor_test::finding_of(DiagnosticSeverity::Error, "build.name_unstorable", "x", "A_NAME_FAR_TOO_LONG.WAC");
 	TEST_EXPECT(blocker_words(upper) == "A_NAME_FAR_TOO_LONG.WAC's name is too long for an archive");
 	Diagnostic named = editor_test::finding_of(DiagnosticSeverity::Error, "document.parse", "MAIN.MNU cannot be read.", "main.mnu");
 	TEST_EXPECT(blocker_words(named) == "MAIN.MNU cannot be read");
 	named.message = "The file cannot be read.";
 	TEST_EXPECT(blocker_words(named) == "the file cannot be read");
-	// A fatal table of another kind: read without a check, not refused with a message (the review's L1).
+	// A fatal table of another kind: read without a check, not refused with a message.
 	Diagnostic wrong = editor_test::finding_of(DiagnosticSeverity::Error, "requirement.wrong_kind", "x", "strings/gametext.bin");
 	wrong.subject = RequirementSubject{"gametext", "gametext.bin"};
 	TEST_EXPECT(blocker_words(wrong) == "gametext.bin is not the kind of file the game reads there: the game reads it as one "

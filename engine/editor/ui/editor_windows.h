@@ -27,7 +27,7 @@ class ProblemsWindow;
 class TextureThumbnailImages;
 class ViewportDeviceSource;
 
-// The OpenNova Editor's workspace (ADR 0046 d10, S11d): the ImGui pass with the editor's
+// The OpenNova Editor's workspace (ADR 0046 d11, S11d): the ImGui pass with the editor's
 // six windows on it (Files on the left, Document in the centre with Preview beside it,
 // the Inspector on the right, Problems and Output along the bottom) and on its menu bar Back and
 // Forward (the navigation history) then the File / Edit / Go / Build menus, the bar ending with the
@@ -104,7 +104,6 @@ public:
 	void set_thumbnail_images(TextureThumbnailImages *images) { thumbnail_images_ = images; }
 
 	// The new-project form (the welcome view's and File > New project...'s), for a test.
-	const NewProjectForm &new_project_form() const { return new_project_; }
 
 	// Workspace
 	const SessionView &view() const override;

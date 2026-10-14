@@ -17,12 +17,6 @@ struct SessionView;
 // heard, and handed to the Shell's one preview player through the workspace's sound
 // (WorkspaceView::Sound, ProjectSession::report_sound).
 
-// The project's sound banks: each .lwf of the scan, an open bank document's rows in place of its file; a
-// bank that does not read left out.
-std::vector<PreviewBank> project_banks(const SessionView &view);
-// The project's sound profiles: its SndProf.def as the game reads it, an open document's rows in place of
-// the file; none without one.
-std::vector<audio::SoundProfile> project_profiles(const SessionView &view);
 // The project's expansion's name ("" standalone): the chain's first two banks are its own.
 std::string project_expansion(const SessionView &view);
 

@@ -43,11 +43,6 @@ const AssetEntry *chore_entry_at(const SessionView &view, const std::string &pat
 	return nullptr;
 }
 
-// A folder in words: "the top level", else its path with a slash.
-std::string folder_words(const std::string &folder) {
-	return folder.empty() || folder == "/" ? std::string("the top level") : folder + "/";
-}
-
 // Whether `path` lies in `folder`.
 bool in_folder(const std::string &path, const std::string &folder) {
 	return path.size() > folder.size() && path[folder.size()] == '/' && strutil::iequals(path.substr(0, folder.size()), folder);

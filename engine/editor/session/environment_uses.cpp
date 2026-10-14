@@ -202,15 +202,13 @@ EnvironmentUses environment_uses(const SessionView &view, const std::string &pat
 				}
 			}
 		}
-		// The water plane by the game's ladder: the header's override, then the environment's water height
-		// where it writes one, then the terrain's, whose line the parse reads first (runtime/environment/
-		// water_frame.h, env #28 and #44) [orig: TimeOfDay_ParseProperty @ 0x57cb4e; Environment_LoadTimeOfDayConfig
-		// @ 0x57dbeb, @ 0x57dcbf; Terrain_Init @ 0x60fcb1..0x60fcba; Game_LoadTerrainDuringConnect @ 0x520710].
-		const env::WaterHeightRungs rungs = env::mission_water_rungs(
-				use.overrides, use.terrain_read ? float(use.terrain_water) * 0.5f : 0.0f, use.terrain_read);
-		env::EnvironmentState state;
-		if (environment_read) state.set_config(&environment, true);
-		const env::ResolvedWaterHeight water = env::resolve_water_rung(rungs, environment_read ? &state : nullptr, 0.0f);
+		// The water plane by the game's ladder (env::mission_water_rung, its witnesses there): the
+		// header's override, then the environment's water height where this file writes one, then
+		// the terrain's, the fallback for a configuration that never read the .trn, as this file's
+		// own lines are (D-ENV-S26B2).
+		const env::ResolvedWaterHeight water = env::mission_water_rung(use.overrides,
+				environment_read ? environment : env::Config(),
+				use.terrain_read ? float(use.terrain_water) * 0.5f : 0.0f);
 		use.water_height = water.height;
 		use.water_from = water.rung;
 		uses.missions.push_back(std::move(use));

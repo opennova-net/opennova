@@ -8,6 +8,7 @@
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/particle_type.h>
 #include <editor/model/text_document.h>
+#include <editor/preview/option_reads.h>
 #include <editor/preview/orbit_canvas.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/session/request_factories.h>
@@ -15,6 +16,10 @@
 #include <editor/session/view/view_events.h>
 
 namespace opennova::editor {
+
+// The options on the wire (the envelope's `options`, a SetViewport's): {effect, wind_speed,
+// wind_direction, grid}.
+io::JsonValue effect_options_to_json(const EffectViewportOptions &options);
 
 namespace {
 
@@ -39,16 +44,12 @@ OrbitCamera default_camera() {
 	return camera;
 }
 
-JsonValue camera_to_json(const OrbitCamera &camera) {
-	return orbit_camera_to_json(camera);
-}
-
-// A SetViewport's options over `held`: {effect, loop, wind_speed, wind_direction, grid}, each optional;
+// A SetViewport's options over `held`: {effect, wind_speed, wind_direction, grid}, each optional;
 // `effects` the file's (an effect must be one of them).
 bool read_options(const JsonValue &json, const std::vector<EffectViewportEffect> &effects, EffectViewportOptions &held,
 		std::string &error) {
 	if (!json.is_object()) {
-		error = "options is an object {effect, loop, wind_speed, wind_direction, grid}.";
+		error = "options is an object {effect, wind_speed, wind_direction, grid}.";
 		return false;
 	}
 	EffectViewportOptions options = held;
@@ -70,23 +71,20 @@ bool read_options(const JsonValue &json, const std::vector<EffectViewportEffect>
 				return false;
 			}
 			options.effect = defined != effects.end() ? defined->id : value.string;
-		} else if (key == "loop" || key == "grid") {
-			if (!value.is_bool()) {
-				error = "options." + key + " is true or false.";
+		} else if (key == "grid") {
+			if (!read_json_bool(value, options.grid, error, "options.grid is true or false."))
 				return false;
-			}
-			(key == "loop" ? options.play.loop : options.grid) = value.boolean;
 		} else if (key == "wind_speed" || key == "wind_direction") {
-			int64_t whole = 0;
 			const bool speed = key == "wind_speed";
-			if (!io::json_whole_in(value, speed ? 0 : -360, speed ? kMostWindSpeed : 360, whole)) {
-				error = speed ? "options.wind_speed is the mission header's wind speed, a whole number from 0 (none) to 1000."
-				              : "options.wind_direction is the mission header's wind heading, whole degrees from -360 to 360.";
+			if (!read_json_whole(value, speed ? 0 : -360, speed ? kMostWindSpeed : 360,
+						(speed ? options.play.wind_speed : options.play.wind_direction), error,
+						speed ? "options.wind_speed is the mission header's wind speed, a whole "
+								"number from 0 (none) to 1000."
+							  : "options.wind_direction is the mission header's wind heading, "
+								"whole degrees from -360 to 360."))
 				return false;
-			}
-			(speed ? options.play.wind_speed : options.play.wind_direction) = int(whole);
 		} else {
-			error = "Unknown effect option \"" + key + "\" (it takes effect, loop, wind_speed, wind_direction, grid).";
+			error = "Unknown effect option \"" + key + "\" (it takes effect, wind_speed, wind_direction, grid).";
 			return false;
 		}
 	}
@@ -94,29 +92,11 @@ bool read_options(const JsonValue &json, const std::vector<EffectViewportEffect>
 	return true;
 }
 
-// The camera a `camera` member sets over `held` (read_orbit_camera); `frame` the camera on the live particles.
-bool read_camera(const JsonValue &json, OrbitCamera &held, bool &frame, std::string &error) {
-	return read_orbit_camera(json, held, frame, error);
-}
-
 } // namespace
-
-const char *effect_view_status_token(EffectViewStatus status) {
-	switch (status) {
-	case EffectViewStatus::NoProject: return "no_project";
-	case EffectViewStatus::NoFile: return "no_file";
-	case EffectViewStatus::Unreadable: return "unreadable";
-	case EffectViewStatus::NoEffect: return "no_effect";
-	case EffectViewStatus::SpawnsNothing: return "spawns_nothing";
-	case EffectViewStatus::Ready: return "ready";
-	}
-	return "no_project";
-}
 
 io::JsonValue effect_options_to_json(const EffectViewportOptions &options) {
 	JsonValue out = JsonValue::make_object();
 	out.set("effect", json_string(options.effect));
-	out.set("loop", JsonValue::make_bool(options.play.loop));
 	out.set("wind_speed", json_number(options.play.wind_speed));
 	out.set("wind_direction", json_number(options.play.wind_direction));
 	out.set("grid", JsonValue::make_bool(options.grid));
@@ -128,7 +108,7 @@ std::string effect_options_change(const EffectViewportOptions &options) {
 }
 
 std::string effect_camera_change(const OrbitCamera &camera) {
-	return viewport_change(ViewportKind::Effect, "camera", camera_to_json(camera));
+	return viewport_change(ViewportKind::Effect, "camera", orbit_camera_to_json(camera));
 }
 
 EffectViewport::EffectViewport(std::string path) : ViewportModel(ViewportKind::Effect, std::move(path), kHeadlessSize) {
@@ -272,7 +252,8 @@ ViewportAction EffectViewport::follow_(const ViewportInput &input, PreviewClock 
 		scene_handed_ = false;
 	}
 	shown_ = effect;
-	playback_.play_to(clock.ticks(), options_.play);
+	const ViewportState picture = size();
+	playback_.play_to(clock.ticks(), options_.play, preview_view_frustum(camera_, picture.width, picture.height));
 	if (closure_.spawns()) {
 		reason_ = EffectViewStatus::Ready;
 		detail_.clear();
@@ -309,7 +290,7 @@ bool EffectViewport::check_(const io::JsonValue &json, std::string &error) const
 		return false;
 	OrbitCamera camera = camera_;
 	bool frame = false;
-	if (const JsonValue *member = json.get("camera"); member && !read_camera(*member, camera, frame, error)) return false;
+	if (const JsonValue *member = json.get("camera"); member && !read_orbit_camera(*member, camera, frame, error)) return false;
 	return true;
 }
 
@@ -318,7 +299,7 @@ void EffectViewport::apply_(const io::JsonValue &json, PreviewClock &) {
 	if (const JsonValue *member = json.get("options")) read_options(*member, effects_, options_, error);
 	if (const JsonValue *member = json.get("camera")) {
 		bool frame = false;
-		read_camera(*member, camera_, frame, error);
+		read_orbit_camera(*member, camera_, frame, error);
 		if (frame) {
 			const ViewportState at = size();
 			camera_ = framed(at.width, at.height);
@@ -447,7 +428,7 @@ io::JsonValue EffectViewport::options_json() const {
 }
 
 io::JsonValue EffectViewport::camera_json() const {
-	return camera_to_json(camera_);
+	return orbit_camera_to_json(camera_);
 }
 
 io::JsonValue EffectViewport::body_json(const ViewportInput &) const {
@@ -484,10 +465,9 @@ io::JsonValue EffectViewport::body_json(const ViewportInput &) const {
 	resolved.set("particles", std::move(particles));
 	resolved.set("spawns", JsonValue::make_bool(closure_.spawns()));
 	out.set("resolved", std::move(resolved));
-	// The playing cycle on the preview clock, and what the scene holds now.
+	// The spawn on the preview clock, and what the scene holds now.
 	JsonValue play = JsonValue::make_object();
 	play.set("tick", json_number(playback_.tick()));
-	play.set("cycle_start", json_number(playback_.cycle_start()));
 	play.set("age", json_number(playback_.age()));
 	play.set("pre_aged", json_number(playback_.pre_aged()));
 	play.set("spawns", json_number(double(playback_.spawns())));

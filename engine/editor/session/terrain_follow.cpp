@@ -28,6 +28,8 @@
 
 namespace opennova::editor {
 
+static bool height_locked(const MissionDocument &mission, const NodeAddress &address);
+
 namespace {
 
 constexpr size_t kAtlasWords = size_t(1024) * 1024;
@@ -181,7 +183,9 @@ bool file_moves(const bms::File &file, const std::vector<int32_t> &locks, const 
 
 } // namespace
 
-bool height_locked(const MissionDocument &mission, const NodeAddress &address) {
+// Whether the entity at `address` of `mission` is height-locked (its height_lock field set; a mission whose entities
+// carry none: each follows the ground).
+static bool height_locked(const MissionDocument &mission, const NodeAddress &address) {
 	Value lock;
 	if (!mission.get(address, "height_lock", lock)) return false;
 	if (const auto *number = std::get_if<int64_t>(&lock)) return *number != 0;

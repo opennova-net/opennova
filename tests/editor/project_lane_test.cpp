@@ -231,8 +231,8 @@ int test_file_card() {
 	TEST_EXPECT(workspace && workspace->get("card") && workspace->get("card")->get_string("path", "") == "sounds/tone.wav" &&
 	            workspace->get("sound") && workspace->get("sound")->get_string("state", "") == "starting" &&
 	            workspace->get("sound")->get_string("path", "") == "sounds/tone.wav");
-	// The review's L5: a sound read before is taken as it is while its file stands, read again once it moved,
-	// and a wave past the card's cap is said to be too large, nothing read.
+	// A sound read before is taken as it is while its file stands, read again once it moved, and a
+	// wave past the card's cap is said to be too large, nothing read.
 	FileCard::Sound known = wave.sound;
 	known.rate = 12345;
 	TEST_EXPECT(file_card(v, "sounds/tone.wav", &known).sound.rate == 12345);
@@ -254,7 +254,7 @@ int test_file_card() {
 	// The demo round's bug 9: while the graph has not read the project's files as the scan lists them (a
 	// file landed: a Create, an import) the card says its names are being read (its lists the graph's as
 	// far as it has read), on the wire too; once read, it does not; nor during an edit's validation, which
-	// the graph keeps up with (the review's Y7: no flicker on each keystroke).
+	// the graph keeps up with (no flicker on each keystroke).
 	TEST_EXPECT(!wave.reading && !file_card(v, "sounds/tone.wav").reading);
 	session.handle(request::create_file("Extra.mnu", asset_kind_token(AssetKind::Menu)));
 	TEST_EXPECT(v.activity.validation.files_unread && file_card(v, "sounds/tone.wav").reading &&
@@ -323,8 +323,9 @@ int test_install_check() {
 	TEST_EXPECT(editor_test::write_text(empty + "/notes.txt", "nothing of the game"));
 	const InstallCheck none = check_install(empty, "jo");
 	TEST_EXPECT(none.exists && !none.ok() && none.words().rfind("No game here", 0) == 0);
-	// The review's L11: a language pack alone is no install (the game boots on any one archive, the editor
-	// imports from the whole game); archives that do not open say so; a build the editor made is a project's.
+	// A language pack alone is no install (the game boots on any one archive, the editor imports
+	// from the whole game); archives that do not open say so; a build the editor made is a
+	// project's.
 	const std::string pack = dir.file("Pack");
 	TEST_EXPECT(write_archive(pack + "/language.pff", {"words.tga"}));
 	const InstallCheck language = check_install(pack, "jo");
@@ -372,9 +373,9 @@ int test_new_project_install() {
 		TEST_EXPECT(!v.project.open && !std::filesystem::exists(opennova::io::os_path(dir.file("Refused"))));
 		TEST_EXPECT(v.project.install_check.root == absolute_install_path(empty) && !v.project.install_check.ok());
 		TEST_EXPECT(preferences.preferences().game_install.empty());
-		// The review's M3: why, where the welcome page shows it.
+		// Why, where the welcome page shows it.
 		TEST_EXPECT(v.project.refused.rfind("The project could not be created: No game here", 0) == 0);
-		// The review's L2: a project refused after its install was checked leaves the editor's install as it was.
+		// A project refused after its install was checked leaves the editor's install as it was.
 		EditorRequest expansion = request::new_expansion_project(dir.file("Exp"), "Exp", "myexp", "jox99");
 		expansion.game_install = install;
 		session.handle(expansion);
@@ -412,21 +413,21 @@ int test_new_project_install() {
 	ProjectSession again(platform, preferences);
 	const SessionView &v = again.view();
 	TEST_EXPECT(v.project.recent_details.size() == 2 && v.project.recent_details[0].found && !v.project.recent_details[1].found);
-	// The review's L10: nothing mounted as the session starts; the welcome page's field asks for its check.
+	// Nothing mounted as the session starts; the welcome page's field asks for its check.
 	TEST_EXPECT(v.project.install_check.root.empty() && v.project.editor_install == absolute_install_path(install));
-	// The review's M3: an Open of a recent project that no longer reads drops it, saying so.
+	// An Open of a recent project that no longer reads drops it, saying so.
 	again.handle(request::open_project(dir.file("Mod")));
 	TEST_EXPECT(!v.project.open && v.project.recent_projects.size() == 1 &&
 	            v.project.refused.find("off the recent projects") != std::string::npos);
 	return 0;
 }
 
-// The review's M1: an Open with a session's own install (open_project's game_install) plays and imports
-// from it while it is open and never writes it: closing (with the documents moved, which writes the
+// An Open with a session's own install (open_project's game_install) plays and imports from it
+// while it is open and never writes it: closing (with the documents moved, which writes the
 // workspace) and quitting leave local.json naming the project's own; Project settings' Apply of the
-// project's own install drops the session's. The review's L13: a project whose folder went while it was open
-// gets no `.opennova/` made at its old path as it closes. L15e: a session that keeps no workspace (the
-// command line's) reopens none and writes none.
+// project's own install drops the session's. A project whose folder went while it was open gets no
+// `.opennova/` made at its old path as it closes. A session that keeps no workspace (the command
+// line's) reopens none and writes none.
 int test_session_install_and_workspace() {
 	editor_test::TempProjectDir dir("opennova_editor_session_install");
 	const std::string own = dir.file("JO");
@@ -593,7 +594,7 @@ int test_import_plan_words() {
 	const std::vector<ImportPlanGroup> kinds = import_plan_groups(project.plan(many, false));
 	TEST_EXPECT(kinds.size() == 2 && kinds[0].kind == AssetKind::Texture && kinds[0].files == 22 &&
 	            kinds[0].root == ImportPlanGroup::kNone && kinds[1].kind == AssetKind::Font);
-	// The review's L7: a font two chosen menus name: wanted by both, planned under the first, listed under the
+	// A font two chosen menus name: wanted by both, planned under the first, listed under the
 	// second too (its `also`), counted once.
 	TEST_EXPECT(editor_test::write_text(art + "/b.mnu", screen("B", window("BUTTON", "GO", font("arial99")))));
 	const ImportPlan both = project.plan({{art + "/a.mnu", {}}, {art + "/b.mnu", {}}});
@@ -612,8 +613,8 @@ int test_import_plan_words() {
 	return 0;
 }
 
-// The review's L6 and the 64-file cap: a chosen file the project has from an archive compared by its size
-// first, then its bytes; the first kHeldCompared held files compared, those past them unknown.
+// The 64-file cap: a chosen file the project has from an archive compared by its size first, then
+// its bytes; the first kHeldCompared held files compared, those past them unknown.
 int test_held_compare() {
 	using import_test::row_named;
 	import_test::Project project("opennova_editor_lane_held");

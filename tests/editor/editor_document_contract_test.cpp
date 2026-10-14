@@ -1039,19 +1039,22 @@ template <class Try> void each_alternative(Document &document, const std::vector
 		}
 }
 
-// The def members whose Set changes another member of their record for good (def_sync_derived,
-// def_schema.cpp): an item's powerup_def and default_aip set a bit of its attrib, an action's
-// function_args_count clears the arguments past it, a weapon's filter counts the names past
-// them. revert_edits gives the member back alone, so the other one stays as the Set made it: an
-// open item each (ADR 0046 S13 D2), and the one reason a revert here is not held to the file's
-// bytes. (An item's armor_kz also sets armor_blast, a mirror its armor line writes equal, so its
-// revert gives the bytes back.)
+// The members whose Set changes another member of their record for good: the def members
+// (def_sync_derived, def_schema.cpp: an item's powerup_def and default_aip set a bit of its
+// attrib, an action's function_args_count clears the arguments past it, a weapon's filter counts
+// the names past them) and an AI profile's type. revert_edits gives the member back alone, so the
+// other one stays as the Set made it: an open item each (ADR 0046 S13 D2), and the one reason a
+// revert here is not held to the file's bytes. (An item's armor_kz also sets armor_blast, a mirror
+// its armor line writes equal, so its revert gives the bytes back.)
 bool derives_others(const Document &document, const NodeAddress &address, const std::string &field) {
 	using opennova::def::DefRecordKind;
 	static const std::pair<DefRecordKind, const char *> kCoupled[] = {
 	        {DefRecordKind::Item, "powerup_def"},        {DefRecordKind::Item, "default_aip"},
 	        {DefRecordKind::Action, "function_args_count"}, {DefRecordKind::Weapon, "charfilter_count"},
 	        {DefRecordKind::Weapon, "teamfilter_count"}};
+	// An AI profile's type makes the record the file then reads as under the new type: a key the type does not
+	// read cleared (S26 A11), which giving the type back does not bring back.
+	if (dynamic_cast<const AiProfileDocument *>(&document)) return field == "type";
 	if (!dynamic_cast<const DefCatalogDocument *>(&document)) return false;
 	return std::any_of(std::begin(kCoupled), std::end(kCoupled), [&](const std::pair<DefRecordKind, const char *> &member) {
 		return member.first == def_kind(address.kind) && field == member.second;

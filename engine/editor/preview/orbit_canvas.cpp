@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include <editor/preview/option_reads.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/session/request_factories.h>
 
@@ -16,7 +17,9 @@ CanvasSubject subject_of(const ViewportModel &viewport) {
 	return subject;
 }
 
-io::JsonValue vec3(const PreviewVec3 &v) {
+} // namespace
+
+io::JsonValue preview_point_json(const PreviewVec3 &v) {
 	io::JsonValue out = io::JsonValue::make_array();
 	out.array.push_back(io::json_number(v.x));
 	out.array.push_back(io::json_number(v.y));
@@ -24,11 +27,9 @@ io::JsonValue vec3(const PreviewVec3 &v) {
 	return out;
 }
 
-} // namespace
-
 io::JsonValue orbit_camera_to_json(const OrbitCamera &camera) {
 	io::JsonValue out = io::JsonValue::make_object();
-	out.set("target", vec3(camera.target));
+	out.set("target", preview_point_json(camera.target));
 	out.set("yaw", io::json_number(camera.yaw));
 	out.set("pitch", io::json_number(camera.pitch));
 	out.set("distance", io::json_number(camera.distance));
@@ -66,11 +67,8 @@ bool read_orbit_camera(const io::JsonValue &json, OrbitCamera &held, bool &frame
 			}
 			camera.target = PreviewVec3{at[0], at[1], at[2]};
 		} else if (key == "frame") {
-			if (!value.is_bool()) {
-				error = "camera.frame is true or false.";
+			if (!read_json_bool(value, frame, error, "camera.frame is true or false."))
 				return false;
-			}
-			frame = value.boolean;
 		} else {
 			error = "Unknown camera member \"" + key + "\" (it takes yaw, pitch, distance, target, frame).";
 			return false;

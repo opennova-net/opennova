@@ -20,18 +20,11 @@ namespace opennova::editor {
 
 namespace {
 
-// A sentence of the game's words, muted and wrapped.
-void note(const std::string &text) {
-	ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-	ImGui::TextWrapped("%s", text.c_str());
-	ImGui::PopStyleColor();
-}
-
 // What the editor's last play of `set` played, where it is that set's.
 void last_play(const Workspace &workspace, const std::string &set) {
 	const WorkspaceView::Sound &sound = workspace.view().workspace.sound;
 	if (sound.set.empty() || !strutil::iequals(sound.set, set) || sound.words.empty()) return;
-	note("Last played: " + sound.words);
+	ui_kit::note("Last played: " + sound.words);
 }
 
 constexpr audio::FootSurface kSurfaces[] = {audio::FootSurface::Ground, audio::FootSurface::Snow, audio::FootSurface::Object, audio::FootSurface::Water};
@@ -96,10 +89,10 @@ bool draw_dialog_bank_inspector(Workspace &workspace, const Document &document, 
 	const auto &row = static_cast<const DialogBankRow &>(*node);
 	const std::string &name = row.dialog.name;
 	const int64_t number = audio::dialog_index_of(name);
-	note(number >= 1 ? "A mission plays this dialog as dialog " + std::to_string(number) + " (its Play dialog action, its "
-	                   "Dialog triggers): each line the wave of its name in " + dialog_sounds_scope(document.path()) +
-	                   ", one after another, its subtitle in the chat."
-	                 : "No Play dialog plays this dialog: a mission names one by the number that forms dlg%03i.");
+	ui_kit::note(number >= 1 ? "A mission plays this dialog as dialog " + std::to_string(number) + " (its Play dialog action, its "
+	                           "Dialog triggers): each line the wave of its name in " + dialog_sounds_scope(document.path()) +
+	                           ", one after another, its subtitle in the chat."
+	                         : "No Play dialog plays this dialog: a mission names one by the number that forms dlg%03i.");
 	// A line: its index in the dialog, by its identity.
 	int line = -1;
 	if (record.child && !row.ids.lists.empty())
@@ -125,15 +118,15 @@ bool draw_sound_profile_inspector(Workspace &workspace, const Document &document
 	if (!node) return false;
 	const std::string &profile = static_cast<const SoundProfileRow &>(*node).profile.name;
 	if (!record.child) {
-		note("Footsteps of this profile, as the game picks the slot by what is under the foot:");
+		ui_kit::note("Footsteps of this profile, as the game picks the slot by what is under the foot:");
 		footstep_tools(workspace, profile, 0);
 		return true;
 	}
 	const RecordHandle handle = profiles->record_in(*node, record);
 	if (!handle || record.kind != node_kind(SoundProfileKind::Slot)) return false;
 	const ProfileSlot &slot = handle.as<ProfileSlot>();
-	note(std::string(audio::sound_profile_slot_keyword(slot.slot)) + ": " + sound_profile_slot_words(slot.slot) + " (" +
-	     sound_profile_slot_family(slot.slot) + ").");
+	ui_kit::note(std::string(audio::sound_profile_slot_keyword(slot.slot)) + ": " + sound_profile_slot_words(slot.slot) + " (" +
+	             sound_profile_slot_family(slot.slot) + ").");
 	ui_kit::WrapRow tools;
 	if (ui_kit::tool(tools, "Play", !slot.set.empty(),
 	                 slot.set.empty() ? std::string("The slot names no set: the game plays nothing for it.")

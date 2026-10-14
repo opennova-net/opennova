@@ -1416,7 +1416,7 @@ Diagnostic AssetGraph::missing_finding(const GraphEdge &edge) const {
 	const ReferenceKindRow &row = reference_row(edge.kind);
 	const std::string who = edge.record.empty() ? edge.source : "'" + edge.record + "' in " + edge.source;
 	// A file of a name its loader opens that the project holds, of another kind: no name missing, a
-	// file the game reads as what it is not (review F3), an error that gates.
+	// file the game reads as what it is not, an error that gates.
 	const GraphSlot *other = nullptr;
 	if (row.resolution == ReferenceResolution::File)
 		for (const std::string &candidate :

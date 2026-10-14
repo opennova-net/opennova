@@ -145,7 +145,6 @@ private:
 	mutable Order order_;
 };
 
-bool is_avatars_kind(AssetKind kind);
 // The scope an Avatars.def's parts of a kind live in: the file's name and the kind ("AVATARS.DEF/HEAD").
 std::string avatar_part_scope(const std::string &path, int kind);
 

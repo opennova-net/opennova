@@ -76,8 +76,6 @@ private:
 	bool binary_form_ = false;
 };
 
-bool is_charattr_kind(AssetKind kind);
-
 // The character attributes' validator: a section the game never reads, an ATTRIBUTES word no attribute is, a value
 // the reader reads as 0 for not being a number, a class read with no camouflage item; and the ConfigFile pool rule
 // (core document.config_overrun) over the text a save writes, its fix commenting out the lines the loader reads the

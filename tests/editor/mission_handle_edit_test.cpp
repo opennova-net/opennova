@@ -19,6 +19,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <iterator>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -211,10 +212,13 @@ bool near(double a, double b, double slack = 1e-6) { return std::fabs(a - b) <= 
 
 int test_tokens() {
 	MissionHandle handle = MissionHandle::Move;
-	for (const char *token : { "move", "height", "yaw", "x_min", "x_max", "y_min", "y_max", "x_min_y_min", "x_max_y_min",
-				"x_max_y_max", "x_min_y_max", "z_min", "z_max" }) {
-		TEST_EXPECT(mission_handle_from_token(token, handle) && std::string(mission_handle_token(handle)) == token);
-	}
+	const char *const tokens[] = { "move", "height", "yaw", "x_min", "x_max", "y_min", "y_max", "x_min_y_min", "x_max_y_min",
+		"x_max_y_max", "x_min_y_max", "z_min", "z_max" };
+	const MissionHandle handles[] = { MissionHandle::Move, MissionHandle::Height, MissionHandle::Yaw, MissionHandle::XMin,
+		MissionHandle::XMax, MissionHandle::YMin, MissionHandle::YMax, MissionHandle::XMinYMin, MissionHandle::XMaxYMin,
+		MissionHandle::XMaxYMax, MissionHandle::XMinYMax, MissionHandle::ZMin, MissionHandle::ZMax };
+	for (size_t i = 0; i < std::size(tokens); ++i)
+		TEST_EXPECT(mission_handle_from_token(tokens[i], handle) && handle == handles[i]);
 	TEST_EXPECT(!mission_handle_from_token("place", handle) && !mission_handle_from_token("", handle));
 	TEST_EXPECT(!mission_handle_is_edge(MissionHandle::Move) && !mission_handle_is_edge(MissionHandle::Yaw) &&
 			mission_handle_is_edge(MissionHandle::XMin) && mission_handle_is_edge(MissionHandle::YMax) &&

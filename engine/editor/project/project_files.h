@@ -47,6 +47,8 @@ std::string shown_path(const std::string &path, const std::string &root);
 // A path's file name, its last step ("menus/main.mnu" -> "main.mnu"): the flat logical name
 // a project path names (ADR 0046 d6).
 std::string basename_of(const std::string &path);
+// Its file name less the extension ("menus/main.mnu" -> "main").
+std::string file_stem(const std::string &path);
 
 // A name someone chose for a file the editor is about to write into the project: a
 // created document, an imported file, a rename's new name (ADR 0046 d6: the identity

@@ -26,7 +26,7 @@ enum class EnvironmentViewStatus : uint8_t {
 	Ready,
 };
 // "no_project", "no_environment", "unwritable", "ready": its token on the wire.
-const char *environment_view_status_token(EnvironmentViewStatus status);
+inline constexpr const char *kEnvironmentViewStatusTokens[] = {"no_project", "no_environment", "unwritable", "ready"};
 
 // A weather command as a mission's script gives it: a percent and the seconds it takes to get there
 // [orig: WacCmd_Rain @ 0x4edf60; WacCmd_Overcast @ 0x4ee040].
@@ -54,7 +54,7 @@ struct EnvironmentViewportOptions {
 	bool terrain = true;
 	bool water = true;
 	// Listen (S23 C): the weather heard at the camera, the rain's loops and the lightning's thunder
-	// (preview/environment_listen), at the master volume.
+	// (preview/environment_listen), at the game's volume.
 	MissionListenOptions listen;
 	bool operator==(const EnvironmentViewportOptions &o) const {
 		return time == o.time && day_seconds == o.day_seconds && mission == o.mission && header == o.header &&
@@ -72,13 +72,7 @@ inline constexpr int32_t kEnvironmentCatchUpTicks = 620;
 // The eye's height over the ground (metres), a person's standing there.
 inline constexpr float kEnvironmentEyeHeight = 1.8f;
 
-// The options on the wire (the envelope's `options`, a SetViewport's): {time (null: the start), day_seconds,
-// mission, header, rain {percent, seconds}, overcast {percent, seconds}, show {terrain, water}, listen {on,
-// volume}}.
-io::JsonValue environment_options_to_json(const EnvironmentViewportOptions &options);
-// The change a SetViewport makes to set the options to `options` (a weather member only where it differs
-// from `held`'s: a command is issued each time a SetViewport names it), and its camera.
-std::string environment_options_change(const EnvironmentViewportOptions &options, const EnvironmentViewportOptions &held);
+// The change a SetViewport makes to set the camera to `camera`.
 std::string environment_camera_change(const OrbitCamera &camera);
 // A time of day as "HH:MM" (hours 0..24).
 std::string environment_clock_words(double hours);
@@ -86,7 +80,6 @@ std::string environment_clock_words(double hours);
 // Where the clock's start and its rate come from: the option, the using mission's header, the file
 // (curtime, tod_rate), or the engine's default (Environment_InitDefaults' advance of 75).
 enum class EnvironmentClockFrom : uint8_t { Option, Mission, Environment, Default };
-const char *environment_clock_from_token(EnvironmentClockFrom from);
 
 // An environment's viewport (DI-19b; ViewportKind::Environment, the Document tab's main view; CONTEXT.md
 // "Environment viewport"): the environment at its path as the game would read it were it saved now (the
@@ -152,7 +145,7 @@ public:
 	OrbitCamera framed(int width, int height) const;
 
 	ViewportStatus status() const override;
-	const char *reason() const override { return environment_view_status_token(reason_); }
+	const char *reason() const override { return enum_token(kEnvironmentViewStatusTokens, reason_); }
 	std::string message() const override;
 	const std::string &detail() const override { return detail_; }
 	std::string caption() const override;

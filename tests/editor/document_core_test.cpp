@@ -623,22 +623,8 @@ struct Loaded {
 	}
 };
 
-Edit make(EditOperation operation, NodeAddress address, NodeId parent = 0, size_t position = SIZE_MAX) {
-	Edit edit;
-	edit.operation = operation;
-	edit.address = address;
-	edit.parent = parent;
-	edit.position = position;
-	return edit;
-}
-
-Edit set(NodeAddress address, const char *field, Value value) {
-	Edit edit;
-	edit.address = address;
-	edit.field = field;
-	edit.value = std::move(value);
-	return edit;
-}
+using editor_test::op_edit;
+using editor_test::set_edit;
 
 // --- a flat table of many lines (S13 D2): the core's per-call costs, counted -----------------
 
@@ -989,22 +975,22 @@ static int test_structural_edits() {
 	FakeDocument &document = fake.document;
 	Diagnostic error;
 	// A leaf added into a1b (depth 2), then one between x and y.
-	TEST_EXPECT(document.apply(make(EditOperation::Add, {0, kLeaf, 0}, fake.a1b.child), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {0, kLeaf, 0}, fake.a1b.child), error));
 	const NodeAddress deep = document.address_of(document.last_added());
 	Document::Placement at;
 	TEST_EXPECT(deep.kind == kLeaf && document.placement(deep, at) && at.owner == fake.a1b && at.index == 0);
 	TEST_EXPECT(document.ancestors(deep) == std::vector<NodeAddress>({fake.alpha, fake.a1, fake.a1b}));
-	TEST_EXPECT(document.apply(make(EditOperation::Add, {fake.alpha.row, kLeaf, 0}, fake.a1.child, 1), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {fake.alpha.row, kLeaf, 0}, fake.a1.child, 1), error));
 	TEST_EXPECT(document.placement(document.address_of(document.last_added()), at) && at.owner == fake.a1 && at.index == 1);
 	TEST_EXPECT(document.placement(fake.y, at) && at.index == 2);
 	// Reorder inside a1 (an index among a1's leaves), then reparent x into a2.
-	TEST_EXPECT(document.apply(make(EditOperation::Move, fake.y, 0, 0), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Move, fake.y, 0, 0), error));
 	TEST_EXPECT(document.placement(fake.y, at) && at.owner == fake.a1 && at.index == 0);
-	TEST_EXPECT(document.apply(make(EditOperation::Move, fake.x, fake.a2.child, 0), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Move, fake.x, fake.a2.child, 0), error));
 	TEST_EXPECT(document.placement(fake.x, at) && at.owner == fake.a2 && at.index == 0);
 	TEST_EXPECT(document.record_path(fake.x) == "alpha/a2/x");
 	// An item reparented into its sibling, with its subtree.
-	TEST_EXPECT(document.apply(make(EditOperation::Move, fake.a1b, fake.a2.child, SIZE_MAX), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Move, fake.a1b, fake.a2.child, SIZE_MAX), error));
 	TEST_EXPECT(document.ancestors(deep) == std::vector<NodeAddress>({fake.alpha, fake.a2, fake.a1b}));
 	for (int i = 0; i < 5; ++i) document.undo();
 	TEST_EXPECT(document.serialize().text == fake.original && !document.dirty());
@@ -1016,31 +1002,31 @@ static int test_structural_edits() {
 		if (!as_expected) std::printf("  not refused as %s: %s\n", code, error.message.c_str());
 		return as_expected;
 	};
-	TEST_EXPECT(refused(make(EditOperation::Move, fake.b1, fake.a1.child), "document.collection"));
+	TEST_EXPECT(refused(op_edit(EditOperation::Move, fake.b1, fake.a1.child), "document.collection"));
 	TEST_EXPECT(error.message.find("within its own") != std::string::npos);
-	TEST_EXPECT(refused(make(EditOperation::Add, {fake.beta.row, kLeaf, 0}, fake.a1.child), "document.selection"));
-	TEST_EXPECT(refused(make(EditOperation::Move, fake.a1, fake.a1.child), "document.collection"));
+	TEST_EXPECT(refused(op_edit(EditOperation::Add, {fake.beta.row, kLeaf, 0}, fake.a1.child), "document.selection"));
+	TEST_EXPECT(refused(op_edit(EditOperation::Move, fake.a1, fake.a1.child), "document.collection"));
 	TEST_EXPECT(error.message.find("inside itself") != std::string::npos);
-	TEST_EXPECT(refused(make(EditOperation::Move, fake.a1, fake.a1b.child), "document.collection"));
+	TEST_EXPECT(refused(op_edit(EditOperation::Move, fake.a1, fake.a1b.child), "document.collection"));
 	TEST_EXPECT(error.message.find("inside itself") != std::string::npos);
-	TEST_EXPECT(refused(make(EditOperation::Remove, fake.header), "document.collection"));
-	TEST_EXPECT(refused(make(EditOperation::Move, fake.header, 0, 5), "document.collection"));
-	TEST_EXPECT(refused(make(EditOperation::Duplicate, fake.header), "document.collection"));
-	TEST_EXPECT(refused(make(EditOperation::Add, {fake.alpha.row, kHeader, 0}), "document.collection"));
-	TEST_EXPECT(refused(make(EditOperation::Add, {fake.alpha.row, kLeaf, 0}), "document.collection")); // a group holds no leaves
-	TEST_EXPECT(refused(make(EditOperation::Move, fake.x, fake.y.child), "document.collection"));      // nor does a leaf
-	TEST_EXPECT(refused(set({fake.alpha.row, kLeaf, fake.a1.child}, "name", std::string("n")), "document.selection"));
+	TEST_EXPECT(refused(op_edit(EditOperation::Remove, fake.header), "document.collection"));
+	TEST_EXPECT(refused(op_edit(EditOperation::Move, fake.header, 0, 5), "document.collection"));
+	TEST_EXPECT(refused(op_edit(EditOperation::Duplicate, fake.header), "document.collection"));
+	TEST_EXPECT(refused(op_edit(EditOperation::Add, {fake.alpha.row, kHeader, 0}), "document.collection"));
+	TEST_EXPECT(refused(op_edit(EditOperation::Add, {fake.alpha.row, kLeaf, 0}), "document.collection")); // a group holds no leaves
+	TEST_EXPECT(refused(op_edit(EditOperation::Move, fake.x, fake.y.child), "document.collection"));      // nor does a leaf
+	TEST_EXPECT(refused(set_edit({fake.alpha.row, kLeaf, fake.a1.child}, "name", std::string("n")), "document.selection"));
 	TEST_EXPECT(error.message.find("the record is Item, the address says Leaf") != std::string::npos);
-	TEST_EXPECT(refused(set({fake.alpha.row, kItem, 99999}, "name", std::string("n")), "document.selection"));
-	TEST_EXPECT(refused(make(EditOperation::Remove, {fake.alpha.row, kItem, 99999}), "document.selection"));
-	TEST_EXPECT(refused(set({fake.alpha.row, kItem, 0}, "name", std::string("n")), "document.selection"));
-	TEST_EXPECT(refused(make(EditOperation::Remove, {fake.alpha.row, kLeaf, 0}), "document.selection"));
-	Edit clear = make(EditOperation::Clear, fake.a1);
+	TEST_EXPECT(refused(set_edit({fake.alpha.row, kItem, 99999}, "name", std::string("n")), "document.selection"));
+	TEST_EXPECT(refused(op_edit(EditOperation::Remove, {fake.alpha.row, kItem, 99999}), "document.selection"));
+	TEST_EXPECT(refused(set_edit({fake.alpha.row, kItem, 0}, "name", std::string("n")), "document.selection"));
+	TEST_EXPECT(refused(op_edit(EditOperation::Remove, {fake.alpha.row, kLeaf, 0}), "document.selection"));
+	Edit clear = op_edit(EditOperation::Clear, fake.a1);
 	clear.field = "name";
 	TEST_EXPECT(refused(clear, "document.value") && error.message == "This field is always written.");
 	clear.field = "nope";
 	TEST_EXPECT(refused(clear, "document.value"));
-	Edit write = make(EditOperation::Write, fake.a1);
+	Edit write = op_edit(EditOperation::Write, fake.a1);
 	write.field = "name";
 	TEST_EXPECT(refused(write, "document.value") && error.message == "This field is always written.");
 	TEST_EXPECT(document.serialize().text == fake.original && !document.can_undo());
@@ -1066,10 +1052,10 @@ static int test_structural_edits() {
 	TEST_EXPECT(document.serialize().text == fake.original && !document.dirty());
 
 	// B5: a Move that leaves a record where it is records nothing, the document stays clean.
-	TEST_EXPECT(document.apply(make(EditOperation::Move, fake.y, 0, 1), error));
-	TEST_EXPECT(document.apply(make(EditOperation::Move, fake.y, 0, 7), error)); // Down on the last sibling
-	TEST_EXPECT(document.apply(make(EditOperation::Move, fake.y, fake.a1.child, 1), error)); // its own owner, named
-	TEST_EXPECT(document.apply(make(EditOperation::Move, fake.alpha, 0, 0), error));        // a row to its own place
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Move, fake.y, 0, 1), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Move, fake.y, 0, 7), error)); // Down on the last sibling
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Move, fake.y, fake.a1.child, 1), error)); // its own owner, named
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Move, fake.alpha, 0, 0), error));        // a row to its own place
 	TEST_EXPECT(!document.dirty() && !document.can_undo());
 	return 0;
 }
@@ -1086,14 +1072,14 @@ static int test_set_same_value() {
 	Value name, weight;
 	TEST_EXPECT(document.get(fake.a1, "name", name) && document.get(fake.a1, "weight", weight));
 	const uint64_t start = document.revision();
-	TEST_EXPECT(document.apply(set(fake.a1, "name", name), error));
+	TEST_EXPECT(document.apply(set_edit(fake.a1, "name", name), error));
 	TEST_EXPECT(!document.dirty() && !document.can_undo() && document.revision() == start);
-	Edit write = make(EditOperation::Write, fake.a1);
+	Edit write = op_edit(EditOperation::Write, fake.a1);
 	write.field = "weight";
-	TEST_EXPECT(document.apply(std::vector<Edit>{set(fake.a1, "weight", weight), write, set(fake.a1, "name", name)}, error));
+	TEST_EXPECT(document.apply(std::vector<Edit>{set_edit(fake.a1, "weight", weight), write, set_edit(fake.a1, "name", name)}, error));
 	TEST_EXPECT(!document.dirty() && !document.can_undo() && document.revision() == start);
 	// Typing: the group's value changed, then typed back to what the group found.
-	Edit typed = set(fake.a1, "name", std::string("a1 typed"));
+	Edit typed = set_edit(fake.a1, "name", std::string("a1 typed"));
 	typed.coalesce = true;
 	TEST_EXPECT(document.apply(typed, error) && document.dirty() && document.can_undo());
 	typed.value = name;
@@ -1106,11 +1092,11 @@ static int test_set_same_value() {
 	document.undo(); // the typing on: one step
 	TEST_EXPECT(!document.dirty() && !document.can_undo() && document.serialize().text == fake.original);
 	// Left out, the weight keeps its value: a Set of it writes the field again.
-	Edit clear = make(EditOperation::Clear, fake.a1);
+	Edit clear = op_edit(EditOperation::Clear, fake.a1);
 	clear.field = "weight";
 	TEST_EXPECT(document.apply(clear, error) && !document.present(fake.a1, "weight"));
 	const uint64_t cleared = document.revision();
-	TEST_EXPECT(document.apply(set(fake.a1, "weight", weight), error) && document.present(fake.a1, "weight") &&
+	TEST_EXPECT(document.apply(set_edit(fake.a1, "weight", weight), error) && document.present(fake.a1, "weight") &&
 	            document.revision() != cleared);
 	document.undo();
 	document.undo();
@@ -1126,7 +1112,7 @@ static int test_add_with_a_value() {
 	TEST_EXPECT(fake.load());
 	FakeDocument &document = fake.document;
 	Diagnostic error;
-	Edit add = make(EditOperation::Add, {fake.alpha.row, kItem, 0}, fake.a1.child);
+	Edit add = op_edit(EditOperation::Add, {fake.alpha.row, kItem, 0}, fake.a1.child);
 	add.field = "weight";
 	add.value = int64_t(9);
 	TEST_EXPECT(document.apply(add, error));
@@ -1139,7 +1125,7 @@ static int test_add_with_a_value() {
 	add.value = std::string("heavy"); // the weight takes a number
 	TEST_EXPECT(!document.apply(add, error) && error.code() == "document.value" && error.field == "weight");
 	TEST_EXPECT(document.serialize().text == fake.original && !document.can_undo() && !document.dirty());
-	Edit row = make(EditOperation::Add, {0, kGroup, 0});
+	Edit row = op_edit(EditOperation::Add, {0, kGroup, 0});
 	row.field = "name";
 	row.value = std::string("gamma");
 	TEST_EXPECT(document.apply(row, error) && document.rows().back()->name() == "gamma");
@@ -1161,7 +1147,7 @@ static int test_veto() {
 	TEST_EXPECT(fake.load());
 	FakeDocument &document = fake.document;
 	Diagnostic error;
-	TEST_EXPECT(document.apply(make(EditOperation::Duplicate, fake.a2, 0, 2), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Duplicate, fake.a2, 0, 2), error));
 	const NodeId added = document.last_added();
 	const uint64_t revision = document.revision();
 	const std::string text = document.serialize().text;
@@ -1170,15 +1156,15 @@ static int test_veto() {
 		seen.push_back(step);
 		return false;
 	};
-	TEST_EXPECT(!document.apply(make(EditOperation::Add, {0, kGroup, 0}), error) && error.code() == "document.structure" &&
+	TEST_EXPECT(!document.apply(op_edit(EditOperation::Add, {0, kGroup, 0}), error) && error.code() == "document.structure" &&
 	            error.message == "Vetoed.");
-	TEST_EXPECT(!document.apply(make(EditOperation::Remove, fake.beta), error));
-	TEST_EXPECT(!document.apply(make(EditOperation::Move, fake.beta, 0, 0), error));
-	TEST_EXPECT(!document.apply(make(EditOperation::Duplicate, fake.beta, 0, 2), error));
-	TEST_EXPECT(!document.apply(make(EditOperation::Add, {fake.alpha.row, kItem, 0}, fake.a1.child), error));
-	TEST_EXPECT(!document.apply(set(fake.y, "name", std::string("z")), error) && error.code() == "document.structure");
-	TEST_EXPECT(!document.apply({set(fake.y, "name", std::string("z")), set(fake.b1, "name", std::string("c")),
-	                             make(EditOperation::Add, {0, kGroup, 0}, 0, 0)},
+	TEST_EXPECT(!document.apply(op_edit(EditOperation::Remove, fake.beta), error));
+	TEST_EXPECT(!document.apply(op_edit(EditOperation::Move, fake.beta, 0, 0), error));
+	TEST_EXPECT(!document.apply(op_edit(EditOperation::Duplicate, fake.beta, 0, 2), error));
+	TEST_EXPECT(!document.apply(op_edit(EditOperation::Add, {fake.alpha.row, kItem, 0}, fake.a1.child), error));
+	TEST_EXPECT(!document.apply(set_edit(fake.y, "name", std::string("z")), error) && error.code() == "document.structure");
+	TEST_EXPECT(!document.apply({set_edit(fake.y, "name", std::string("z")), set_edit(fake.b1, "name", std::string("c")),
+	                             op_edit(EditOperation::Add, {0, kGroup, 0}, 0, 0)},
 	                            error) &&
 	            error.code() == "document.structure");
 	TEST_EXPECT(document.revision() == revision && document.last_added() == added && document.serialize().text == text &&
@@ -1207,8 +1193,8 @@ static int test_veto() {
 			if (swap.before && !swap.after && swap.before_position == 0) return false;
 		return true;
 	};
-	TEST_EXPECT(document.apply(make(EditOperation::Remove, fake.beta), error) && document.rows().size() == 1);
-	TEST_EXPECT(!document.apply(make(EditOperation::Remove, fake.alpha), error) && document.rows().size() == 1);
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Remove, fake.beta), error) && document.rows().size() == 1);
+	TEST_EXPECT(!document.apply(op_edit(EditOperation::Remove, fake.alpha), error) && document.rows().size() == 1);
 	document.veto = nullptr;
 	document.undo();
 	TEST_EXPECT(document.serialize().text == text);
@@ -1223,9 +1209,9 @@ static int test_batches_and_gestures() {
 	Diagnostic error;
 	// A batch is one step, and undo swaps the identical row back.
 	const Node *before = document.rows()[0].get();
-	TEST_EXPECT(document.apply(std::vector<Edit>{set(fake.a1, "name", std::string("A")), set(fake.x, "name", std::string("X")),
-	                                             make(EditOperation::Remove, fake.y),
-	                                             make(EditOperation::Add, {fake.alpha.row, kItem, 0}, 0, 0)},
+	TEST_EXPECT(document.apply(std::vector<Edit>{set_edit(fake.a1, "name", std::string("A")), set_edit(fake.x, "name", std::string("X")),
+	                                             op_edit(EditOperation::Remove, fake.y),
+	                                             op_edit(EditOperation::Add, {fake.alpha.row, kItem, 0}, 0, 0)},
 	                           error));
 	TEST_EXPECT(document.rows()[0].get() != before && document.address_of(fake.y.child) == NodeAddress());
 	TEST_EXPECT(document.last_added_records().size() == 1 && document.address_of(document.last_added()).kind == kItem);
@@ -1236,13 +1222,13 @@ static int test_batches_and_gestures() {
 	document.undo();
 	// A batch resolves each edit against the row as the edits before it left it: an item
 	// removed, then its leaf, is refused, and nothing is committed.
-	TEST_EXPECT(!document.apply(std::vector<Edit>{make(EditOperation::Remove, fake.a1), make(EditOperation::Remove, fake.x)}, error) &&
+	TEST_EXPECT(!document.apply(std::vector<Edit>{op_edit(EditOperation::Remove, fake.a1), op_edit(EditOperation::Remove, fake.x)}, error) &&
 	            error.code() == "document.selection");
 	TEST_EXPECT(document.rows()[0].get() == before && !document.can_undo());
 	// Two rows, and a row's own edit with a record's, in one batch: one step (S13 D7).
-	TEST_EXPECT(document.apply(std::vector<Edit>{set(fake.a1, "name", std::string("A")), set(fake.b1, "name", std::string("B"))}, error));
+	TEST_EXPECT(document.apply(std::vector<Edit>{set_edit(fake.a1, "name", std::string("A")), set_edit(fake.b1, "name", std::string("B"))}, error));
 	document.undo();
-	TEST_EXPECT(document.apply(std::vector<Edit>{set(fake.a1, "name", std::string("A")), make(EditOperation::Remove, fake.beta)}, error) &&
+	TEST_EXPECT(document.apply(std::vector<Edit>{set_edit(fake.a1, "name", std::string("A")), op_edit(EditOperation::Remove, fake.beta)}, error) &&
 	            document.rows().size() == 1);
 	document.undo();
 	TEST_EXPECT(document.rows()[0].get() == before && document.serialize().text == fake.original && !document.can_undo());
@@ -1250,7 +1236,7 @@ static int test_batches_and_gestures() {
 	// Coalesced batches of the same fields fold into one step (a drag without a gesture),
 	// each applied to the row as the group found it; the group ends at end_edit_group.
 	auto drag = [&](int64_t weight, const char *name) {
-		Edit a = set(fake.a1, "weight", weight), b = set(fake.a2, "name", std::string(name));
+		Edit a = set_edit(fake.a1, "weight", weight), b = set_edit(fake.a2, "name", std::string(name));
 		a.coalesce = b.coalesce = true;
 		return document.apply(std::vector<Edit>{a, b}, error);
 	};
@@ -1268,20 +1254,20 @@ static int test_batches_and_gestures() {
 	// then renamed, then moved), until the group ends.
 	const uint64_t gesture = next_edit_gesture();
 	TEST_EXPECT(gesture != 0 && next_edit_gesture() != gesture);
-	Edit add = make(EditOperation::Add, {0, kLeaf, 0}, fake.a2.child);
+	Edit add = op_edit(EditOperation::Add, {0, kLeaf, 0}, fake.a2.child);
 	add.gesture = gesture;
 	TEST_EXPECT(document.apply(add, error));
 	const NodeAddress leaf = document.address_of(document.last_added());
-	Edit rename = set(leaf, "name", std::string("z"));
+	Edit rename = set_edit(leaf, "name", std::string("z"));
 	rename.gesture = gesture;
-	Edit move = make(EditOperation::Move, leaf, fake.a1.child, 0);
+	Edit move = op_edit(EditOperation::Move, leaf, fake.a1.child, 0);
 	move.gesture = gesture;
 	TEST_EXPECT(document.apply(rename, error) && document.apply(move, error));
 	Document::Placement at;
 	TEST_EXPECT(document.placement(leaf, at) && at.owner == fake.a1 && at.index == 0);
 	// The same gesture on another row folds into the same step (S13 D7: a gesture folds over
 	// every row it changes).
-	Edit other = set(fake.b1, "name", std::string("B"));
+	Edit other = set_edit(fake.b1, "name", std::string("B"));
 	other.gesture = gesture;
 	TEST_EXPECT(document.apply(other, error));
 	document.undo();
@@ -1289,7 +1275,7 @@ static int test_batches_and_gestures() {
 	// A gesture never swallows the saved checkpoint: the step after a save is its own.
 	document.redo();
 	TEST_EXPECT(document.save(error) && !document.dirty());
-	Edit after = set(fake.a1, "name", std::string("saved-then"));
+	Edit after = set_edit(fake.a1, "name", std::string("saved-then"));
 	after.gesture = gesture;
 	TEST_EXPECT(document.apply(after, error) && document.dirty());
 	document.undo();
@@ -1313,7 +1299,7 @@ static int test_typing_burst() {
 		return document.get(address, "name", value) ? std::get<std::string>(value) : std::string("?");
 	};
 	const auto type = [&](const char *text) {
-		Edit key = set(fake.a1, "name", std::string(text));
+		Edit key = set_edit(fake.a1, "name", std::string(text));
 		key.coalesce = true;
 		return document.apply(std::vector<Edit>{key}, error);
 	};
@@ -1447,14 +1433,14 @@ static int test_batch_made() {
 	FakeDocument &document = fake.document;
 	Diagnostic error;
 	const std::vector<Edit> batch{
-	        make(EditOperation::Add, {0, kItem, 0}, fake.a1.child),                    // 0: an item in a1
-	        set({fake.alpha.row, kItem, batch_made(0)}, "name", std::string("fresh")), // 1
-	        make(EditOperation::Add, {0, kLeaf, 0}, batch_made(0)),                    // 2: a leaf in it
-	        set({0, kLeaf, batch_made(2)}, "name", std::string("leafy")),              // 3
-	        make(EditOperation::Move, fake.y, batch_made(0), 0),                       // 4: y into it, first
-	        make(EditOperation::Duplicate, fake.a2, 0, 2),                             // 5: a2 copied
-	        set({0, kItem, batch_made(5)}, "name", std::string("a2copy")),             // 6
-	        set({0, kItem, batch_made(0)}, "weight", int64_t(4)),                      // 7
+	        op_edit(EditOperation::Add, {0, kItem, 0}, fake.a1.child),                    // 0: an item in a1
+	        set_edit({fake.alpha.row, kItem, batch_made(0)}, "name", std::string("fresh")), // 1
+	        op_edit(EditOperation::Add, {0, kLeaf, 0}, batch_made(0)),                    // 2: a leaf in it
+	        set_edit({0, kLeaf, batch_made(2)}, "name", std::string("leafy")),              // 3
+	        op_edit(EditOperation::Move, fake.y, batch_made(0), 0),                       // 4: y into it, first
+	        op_edit(EditOperation::Duplicate, fake.a2, 0, 2),                             // 5: a2 copied
+	        set_edit({0, kItem, batch_made(5)}, "name", std::string("a2copy")),             // 6
+	        set_edit({0, kItem, batch_made(0)}, "weight", int64_t(4)),                      // 7
 	};
 	TEST_EXPECT(document.apply(batch, error));
 	const std::vector<NodeId> made = document.last_added_records();
@@ -1482,35 +1468,35 @@ static int test_batch_made() {
 
 	// Refused, nothing committed.
 	const uint64_t revision = document.revision();
-	TEST_EXPECT(!document.apply(std::vector<Edit>{set({fake.alpha.row, kItem, batch_made(1)}, "name", std::string("early")),
-	                                              make(EditOperation::Add, {0, kItem, 0}, fake.a1.child)},
+	TEST_EXPECT(!document.apply(std::vector<Edit>{set_edit({fake.alpha.row, kItem, batch_made(1)}, "name", std::string("early")),
+	                                              op_edit(EditOperation::Add, {0, kItem, 0}, fake.a1.child)},
 	                            error) &&
 	            error.code() == "document.batch");
-	TEST_EXPECT(!document.apply(set({fake.alpha.row, kItem, batch_made(0)}, "name", std::string("self")), error) &&
+	TEST_EXPECT(!document.apply(set_edit({fake.alpha.row, kItem, batch_made(0)}, "name", std::string("self")), error) &&
 	            error.code() == "document.batch");
-	TEST_EXPECT(!document.apply(std::vector<Edit>{set(fake.a1, "name", std::string("A")),
-	                                              set({fake.alpha.row, kItem, batch_made(0)}, "name", std::string("B"))},
+	TEST_EXPECT(!document.apply(std::vector<Edit>{set_edit(fake.a1, "name", std::string("A")),
+	                                              set_edit({fake.alpha.row, kItem, batch_made(0)}, "name", std::string("B"))},
 	                            error) &&
 	            error.code() == "document.batch");
-	TEST_EXPECT(!document.apply(std::vector<Edit>{make(EditOperation::Add, {0, kItem, 0}, fake.a1.child),
-	                                              set({fake.beta.row, kItem, batch_made(0)}, "name", std::string("elsewhere"))},
+	TEST_EXPECT(!document.apply(std::vector<Edit>{op_edit(EditOperation::Add, {0, kItem, 0}, fake.a1.child),
+	                                              set_edit({fake.beta.row, kItem, batch_made(0)}, "name", std::string("elsewhere"))},
 	                            error) &&
 	            error.code() == "document.batch");
-	TEST_EXPECT(!document.apply(std::vector<Edit>{make(EditOperation::Remove, fake.beta),
-	                                              set(fake.b1, "name", std::string("gone"))},
+	TEST_EXPECT(!document.apply(std::vector<Edit>{op_edit(EditOperation::Remove, fake.beta),
+	                                              set_edit(fake.b1, "name", std::string("gone"))},
 	                            error) &&
 	            error.code() == "document.batch" && error.message.find("removed") != std::string::npos);
 	TEST_EXPECT(document.revision() == revision && document.serialize().text == fake.original && !document.can_undo());
 
 	// A row the batch makes: named as a row (its own field), as an owner (an item put in it) and
 	// as a record (the item named through the edit that made it); one step.
-	Edit row = make(EditOperation::Add, {0, kGroup, 0});
+	Edit row = op_edit(EditOperation::Add, {0, kGroup, 0});
 	const std::vector<Edit> rows{
 	        row,                                                             // 0: a group at the end
-	        set({batch_made(0), kGroup, 0}, "name", std::string("gamma")),   // 1: its name
-	        make(EditOperation::Add, {0, kItem, 0}, batch_made(0)),          // 2: an item in it
-	        set({0, kItem, batch_made(2)}, "name", std::string("g1")),       // 3
-	        set({0, kGroup, batch_made(0)}, "name", std::string("gamma2")),  // 4: the group, named as a record
+	        set_edit({batch_made(0), kGroup, 0}, "name", std::string("gamma")),   // 1: its name
+	        op_edit(EditOperation::Add, {0, kItem, 0}, batch_made(0)),          // 2: an item in it
+	        set_edit({0, kItem, batch_made(2)}, "name", std::string("g1")),       // 3
+	        set_edit({0, kGroup, batch_made(0)}, "name", std::string("gamma2")),  // 4: the group, named as a record
 	};
 	TEST_EXPECT(document.apply(rows, error));
 	TEST_EXPECT(document.rows().size() == 3 && document.rows().back()->name() == "gamma2" &&
@@ -1530,7 +1516,7 @@ static int test_clipboard() {
 	const std::string leaves = document.copy({fake.x, fake.y});
 	TEST_EXPECT(leaves == "leaves\nL 1 x\nL 1 y\n");
 	TEST_EXPECT(document.copy({fake.x, fake.a1}).empty() && document.copy({fake.header}).empty());
-	Edit paste = make(EditOperation::Paste, {0, 0, 0}, fake.a2.child, 0);
+	Edit paste = op_edit(EditOperation::Paste, {0, 0, 0}, fake.a2.child, 0);
 	paste.value = leaves;
 	TEST_EXPECT(document.apply(paste, error));
 	const std::vector<NodeId> added = document.last_added_records();
@@ -1543,7 +1529,7 @@ static int test_clipboard() {
 	TEST_EXPECT(document.serialize().text == fake.original && !document.can_undo());
 	// An item with its subtree, pasted into the other group; leaves never at the top.
 	const std::string items = document.copy({fake.a1});
-	paste = make(EditOperation::Paste, {fake.beta.row, 0, 0}, 0, SIZE_MAX);
+	paste = op_edit(EditOperation::Paste, {fake.beta.row, 0, 0}, 0, SIZE_MAX);
 	paste.value = items;
 	TEST_EXPECT(document.apply(paste, error));
 	const NodeAddress copied = document.address_of(document.last_added());
@@ -1554,10 +1540,10 @@ static int test_clipboard() {
 		return true;
 	});
 	TEST_EXPECT(inside.size() == 6); // header, b1, a1, x, y, a1b
-	paste = make(EditOperation::Paste, {fake.alpha.row, 0, 0});
+	paste = op_edit(EditOperation::Paste, {fake.alpha.row, 0, 0});
 	paste.value = leaves;
 	TEST_EXPECT(!document.apply(paste, error) && error.code() == "document.paste");
-	paste = make(EditOperation::Paste, {0, 0, 0});
+	paste = op_edit(EditOperation::Paste, {0, 0, 0});
 	paste.value = items;
 	TEST_EXPECT(!document.apply(paste, error) && error.code() == "document.paste"); // at the top: rows paste later
 	return 0;
@@ -1604,7 +1590,7 @@ static int test_selection() {
 	Diagnostic error;
 	selection.select(path, fake.x, {}, SelectMode::Replace);
 	selection.select(path, fake.a1b, {}, SelectMode::Add);
-	TEST_EXPECT(document.apply(make(EditOperation::Remove, fake.a1b), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Remove, fake.a1b), error));
 	selection.repair(document, nullptr, fake.a1);
 	TEST_EXPECT(is(fake.a1, {fake.a1}));
 	document.undo();
@@ -1614,7 +1600,7 @@ static int test_selection() {
 	selection.select(path, fake.y, {}, SelectMode::Add);
 	selection.select(path, fake.b1, {}, SelectMode::Add);
 	selection.select(path, fake.a2, {}, SelectMode::Add);
-	TEST_EXPECT(document.apply(make(EditOperation::Remove, fake.y), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Remove, fake.y), error));
 	serial = selection.serial;
 	selection.repair(document, nullptr, fake.alpha);
 	TEST_EXPECT(is(fake.a2, {fake.x, fake.b1, fake.a2}) && selection.serial != serial);
@@ -1623,7 +1609,7 @@ static int test_selection() {
 	TEST_EXPECT(selection.serial == serial);
 	document.undo();
 	// What an edit made is the selection; its undo leaves none.
-	TEST_EXPECT(document.apply(make(EditOperation::Duplicate, fake.a2, 0, 2), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Duplicate, fake.a2, 0, 2), error));
 	selection.select_added(document);
 	const NodeAddress duplicate = document.address_of(document.last_added());
 	TEST_EXPECT(is(duplicate, {duplicate}));
@@ -1676,11 +1662,11 @@ static int test_selection_repair() {
 		return selection.repair(document, &changes, NodeAddress());
 	};
 	const uint64_t serial = selection.serial;
-	TEST_EXPECT(repaired({set(line(10), "weight", int64_t(-1))}) == 1);
+	TEST_EXPECT(repaired({set_edit(line(10), "weight", int64_t(-1))}) == 1);
 	TEST_EXPECT(selection.records.size() == kSelected && selection.serial == serial);
-	TEST_EXPECT(repaired({set(line(11), "weight", int64_t(-1))}) == 0); // a line not selected
+	TEST_EXPECT(repaired({set_edit(line(11), "weight", int64_t(-1))}) == 0); // a line not selected
 	const NodeAddress gone = line(20), primary = line(0), last = line((kSelected - 1) * 10);
-	TEST_EXPECT(repaired({make(EditOperation::Remove, gone), make(EditOperation::Remove, primary)}) == 0);
+	TEST_EXPECT(repaired({op_edit(EditOperation::Remove, gone), op_edit(EditOperation::Remove, primary)}) == 0);
 	TEST_EXPECT(selection.records.size() == kSelected - 2 && !selection.holds(gone) && selection.primary == last);
 	TEST_EXPECT(selection.repair(document, nullptr, NodeAddress()) == kSelected - 2);
 	return 0;
@@ -1693,7 +1679,9 @@ static int test_selection_repair() {
 // state; an undo back to the checkpoint is unchanged again; saved_value reads a field as the
 // saved file holds it (S11e: the inspector's tooltip) and revert_edits gives it its saved
 // value and presence back as one undoable batch; a save moves the baseline; and a clean
-// document whose file holds other bytes than it writes needs a rewrite.
+// document whose file holds other bytes than it writes needs a rewrite. These are the Document
+// base's, no type overriding them (model/document.h), so the fake document pins them for every
+// record type; editor_document_contract_test's check_real_change holds each type's files to them.
 static int test_changes_since_save() {
 	using Change = Document::RecordChange;
 	Loaded fake;
@@ -1705,7 +1693,7 @@ static int test_changes_since_save() {
 	TEST_EXPECT(document.rewrite_need() == Document::RewriteNeed::None);
 
 	// A child's own field.
-	TEST_EXPECT(document.apply(set(fake.x, "name", std::string("xx")), error));
+	TEST_EXPECT(document.apply(set_edit(fake.x, "name", std::string("xx")), error));
 	TEST_EXPECT(document.field_changed(fake.x, "name") && document.record_change(fake.x) == Change::Changed);
 	TEST_EXPECT(document.record_change(fake.a1) == Change::Unchanged && document.record_change(fake.alpha) == Change::Unchanged);
 	TEST_EXPECT(!document.field_changed(fake.y, "name") && document.record_change(fake.y) == Change::Unchanged);
@@ -1714,17 +1702,17 @@ static int test_changes_since_save() {
 	TEST_EXPECT(!document.dirty() && !document.field_changed(fake.x, "name") && document.record_change(fake.x) == Change::Unchanged);
 
 	// A child removed, then one moved within its owner: the owner that keeps them.
-	TEST_EXPECT(document.apply(make(EditOperation::Remove, fake.y), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Remove, fake.y), error));
 	TEST_EXPECT(document.record_change(fake.a1) == Change::Changed && document.record_change(fake.x) == Change::Unchanged);
 	TEST_EXPECT(document.record_change(fake.alpha) == Change::Unchanged);
 	document.undo();
 	TEST_EXPECT(document.record_change(fake.a1) == Change::Unchanged);
-	TEST_EXPECT(document.apply(make(EditOperation::Move, fake.y, 0, 0), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Move, fake.y, 0, 0), error));
 	TEST_EXPECT(document.record_change(fake.a1) == Change::Changed && document.record_change(fake.y) == Change::Unchanged);
 	document.undo();
 
 	// A record the baseline lacks: Added, its owner changed; a row too.
-	TEST_EXPECT(document.apply(make(EditOperation::Add, {fake.alpha.row, kLeaf, 0}, fake.a2.child), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {fake.alpha.row, kLeaf, 0}, fake.a2.child), error));
 	const NodeAddress fresh = document.address_of(document.last_added());
 	TEST_EXPECT(document.record_change(fresh) == Change::Added && document.field_changed(fresh, "name"));
 	TEST_EXPECT(document.record_change(fake.a2) == Change::Changed && document.record_change(fake.a1) == Change::Unchanged);
@@ -1732,13 +1720,13 @@ static int test_changes_since_save() {
 	Value nothing;
 	TEST_EXPECT(!document.saved_value(fresh, "name", nothing)); // nor to show
 	document.undo();
-	TEST_EXPECT(document.apply(make(EditOperation::Add, {0, kGroup, 0}), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {0, kGroup, 0}), error));
 	const NodeAddress gamma{document.last_added(), kGroup, 0};
 	TEST_EXPECT(document.record_change(gamma) == Change::Added && document.record_change(fake.alpha) == Change::Unchanged &&
 	            document.record_change(fake.beta) == Change::Unchanged);
 	document.undo();
 	// A row moved among the rows: it and the one it passed.
-	TEST_EXPECT(document.apply(make(EditOperation::Move, fake.beta, 0, 0), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Move, fake.beta, 0, 0), error));
 	TEST_EXPECT(document.record_change(fake.beta) == Change::Changed && document.record_change(fake.alpha) == Change::Changed);
 	TEST_EXPECT(document.record_change(fake.a1) == Change::Unchanged);
 	document.undo();
@@ -1754,7 +1742,7 @@ static int test_changes_since_save() {
 
 	// A typing burst folds into one step, each keystroke a revision of its own: the cached
 	// answers follow every one, and the undo of the step.
-	Edit typing = set(fake.x, "name", std::string("xy"));
+	Edit typing = set_edit(fake.x, "name", std::string("xy"));
 	typing.coalesce = true;
 	TEST_EXPECT(document.apply(typing, error) && document.field_changed(fake.x, "name"));
 	typing.value = std::string("x");
@@ -1766,7 +1754,7 @@ static int test_changes_since_save() {
 
 	// revert_edits. a1's weight left out: a Write gives it back. saved_value says what the
 	// saved file holds: the value and that it is written.
-	Edit clear = make(EditOperation::Clear, fake.a1);
+	Edit clear = op_edit(EditOperation::Clear, fake.a1);
 	clear.field = "weight";
 	TEST_EXPECT(document.apply(clear, error) && document.field_changed(fake.a1, "weight"));
 	TEST_EXPECT(document.record_change(fake.a1) == Change::Changed);
@@ -1782,7 +1770,7 @@ static int test_changes_since_save() {
 	TEST_EXPECT(document.field_changed(fake.a1, "weight") && !document.present(fake.a1, "weight"));
 	document.undo();
 	// a2's weight, left out in the baseline, set: a Set of its saved value, then a Clear.
-	TEST_EXPECT(document.apply(set(fake.a2, "weight", int64_t(7)), error) && document.present(fake.a2, "weight"));
+	TEST_EXPECT(document.apply(set_edit(fake.a2, "weight", int64_t(7)), error) && document.present(fake.a2, "weight"));
 	TEST_EXPECT(document.saved_value(fake.a2, "weight", saved, &kept) && !kept && std::get<int64_t>(saved) == 0);
 	back = document.revert_edits(fake.a2, "weight");
 	TEST_EXPECT(back.size() == 2 && back[0].operation == EditOperation::Set && std::get<int64_t>(back[0].value) == 0 &&
@@ -1793,7 +1781,7 @@ static int test_changes_since_save() {
 	TEST_EXPECT(document.field_changed(fake.a2, "weight"));
 	document.undo();
 	// A plain field: one Set.
-	TEST_EXPECT(document.apply(set(fake.x, "name", std::string("xx")), error));
+	TEST_EXPECT(document.apply(set_edit(fake.x, "name", std::string("xx")), error));
 	back = document.revert_edits(fake.x, "name");
 	TEST_EXPECT(back.size() == 1 && back[0].operation == EditOperation::Set && std::get<std::string>(back[0].value) == "x");
 	TEST_EXPECT(document.saved_value(fake.x, "name", saved, &kept) && kept && std::get<std::string>(saved) == "x");
@@ -1850,7 +1838,7 @@ static int test_per_call_costs() {
 
 	const NodeAddress edited = line(kEdited);
 	g_line_clones = 0;
-	TEST_EXPECT(document.apply(set(edited, "weight", int64_t(-1)), error));
+	TEST_EXPECT(document.apply(set_edit(edited, "weight", int64_t(-1)), error));
 	TEST_EXPECT(g_line_clones == 1);
 	g_line_reads = 0;
 	for (size_t i = 0; i < kRows; ++i) {
@@ -1885,7 +1873,7 @@ static int test_per_call_costs() {
 	TEST_EXPECT(table[3].read_only && document.field_on(line(0), table[3]).read_only);
 	// A record's own choices: the widgets' and the find's (choices_on), a value found by its
 	// choice's name as the Inspector shows it; the graph's extraction never asks.
-	TEST_EXPECT(document.apply({set(line(3), "title", std::string("own3")), set(line(3), "tag", std::string("MINE"))},
+	TEST_EXPECT(document.apply({set_edit(line(3), "title", std::string("own3")), set_edit(line(3), "tag", std::string("MINE"))},
 	                           error));
 	const FieldUse own_tag = document.field_on(line(3), tag);
 	std::vector<FieldChoice> own;
@@ -1971,12 +1959,12 @@ static int test_record_index() {
 	const std::shared_ptr<Node> copy = alpha.clone();
 	const Document::RecordPath walked = document.path_in(*copy, fake.a1b.child);
 	TEST_EXPECT(walked.size() == 2 && walked[1].collection == 1 && walked[1].index == 0);
-	TEST_EXPECT(document.apply(set(fake.x, "name", std::string("xx")), error) && every_found());
-	TEST_EXPECT(document.apply(make(EditOperation::Remove, fake.y), error) && every_found());
-	TEST_EXPECT(document.apply(make(EditOperation::Duplicate, fake.a1, 0, 2), error) && every_found());
-	TEST_EXPECT(document.apply(make(EditOperation::Move, fake.beta, 0, 0), error) && every_found());
-	TEST_EXPECT(document.apply(make(EditOperation::Duplicate, fake.beta, 0, 2), error) && every_found());
-	TEST_EXPECT(document.apply(make(EditOperation::Remove, fake.beta), error) && every_found());
+	TEST_EXPECT(document.apply(set_edit(fake.x, "name", std::string("xx")), error) && every_found());
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Remove, fake.y), error) && every_found());
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Duplicate, fake.a1, 0, 2), error) && every_found());
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Move, fake.beta, 0, 0), error) && every_found());
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Duplicate, fake.beta, 0, 2), error) && every_found());
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Remove, fake.beta), error) && every_found());
 	TEST_EXPECT(document.rows().size() == 2 && met.size() > 12);
 	while (document.can_undo()) {
 		document.undo();
@@ -1989,20 +1977,20 @@ static int test_record_index() {
 	}
 	// Several edits, then one lookup: the index catches up over all of them at once.
 	const auto last_row = [&] { return NodeAddress{document.rows().back()->id, document.rows().back()->kind, 0}; };
-	TEST_EXPECT(document.apply(set(fake.a1, "name", std::string("A1")), error));
-	TEST_EXPECT(document.apply(make(EditOperation::Remove, fake.x), error));
-	TEST_EXPECT(document.apply(make(EditOperation::Duplicate, fake.a2, 0, 2), error));
-	TEST_EXPECT(document.apply(make(EditOperation::Move, last_row(), 0, 0), error));
+	TEST_EXPECT(document.apply(set_edit(fake.a1, "name", std::string("A1")), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Remove, fake.x), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Duplicate, fake.a2, 0, 2), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Move, last_row(), 0, 0), error));
 	TEST_EXPECT(every_found());
 	// A record pasted with what it holds: every one it makes found in its new place.
 	const std::string items = document.copy({fake.a1});
-	Edit paste = make(EditOperation::Paste, {fake.alpha.row, 0, 0}, 0, SIZE_MAX);
+	Edit paste = op_edit(EditOperation::Paste, {fake.alpha.row, 0, 0}, 0, SIZE_MAX);
 	paste.value = items;
 	TEST_EXPECT(!items.empty() && document.apply(paste, error) && document.last_added_records().size() == 1 &&
 	            every_found());
 	// Saved: the index is made again; an edit after the save, then undos past it.
 	TEST_EXPECT(document.save(error) && every_found());
-	TEST_EXPECT(document.apply(make(EditOperation::Remove, fake.a2), error) && every_found());
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Remove, fake.a2), error) && every_found());
 	document.undo();
 	TEST_EXPECT(every_found());
 	document.undo();
@@ -2011,7 +1999,7 @@ static int test_record_index() {
 	TEST_EXPECT(document.load(fake.dir.file("fake.txt"), "fake.txt", AssetKind::Unknown, "jo", error));
 	met.clear();
 	TEST_EXPECT(every_found() && document.rows().size() == 2);
-	TEST_EXPECT(document.apply(make(EditOperation::Move, last_row(), 0, 0), error) && every_found());
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Move, last_row(), 0, 0), error) && every_found());
 	return 0;
 }
 
@@ -2037,7 +2025,7 @@ static int test_record_references() {
 	const auto reg = [&](size_t i) { return NodeAddress{row(0).id, kRegister, row(0).collections[0][i]}; };
 	const auto user = [&](size_t i) { return NodeAddress{row(0).id, kUser, row(0).collections[1][i]}; };
 	// A Remove in the middle: the users naming a later register shift with it, one step.
-	TEST_EXPECT(document.apply(make(EditOperation::Remove, reg(1)), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Remove, reg(1)), error));
 	const std::string removed = "B one\nR r0\nR r2\nR r3\nU 0\nU 1\nU 2\nU 1\n";
 	TEST_EXPECT(document.serialize().text == removed && document.renumbered == 1);
 	document.undo();
@@ -2047,28 +2035,28 @@ static int test_record_references() {
 	document.undo();
 	// A register a user names: refused, nothing committed.
 	const uint64_t revision = document.revision();
-	TEST_EXPECT(!document.apply(make(EditOperation::Remove, reg(2)), error) &&
+	TEST_EXPECT(!document.apply(op_edit(EditOperation::Remove, reg(2)), error) &&
 	            error.code() == "document.collection" && error.message == "A user reads this register." &&
 	            document.revision() == revision && document.serialize().text == text);
 	// A Move to the front, a Duplicate, an Add at the front: each index follows its register.
-	TEST_EXPECT(document.apply(make(EditOperation::Move, reg(3), 0, 0), error) &&
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Move, reg(3), 0, 0), error) &&
 	            document.serialize().text == "B one\nR r3\nR r0\nR r1\nR r2\nU 1\nU 3\nU 0\nU 3\n");
 	document.undo();
-	TEST_EXPECT(document.apply(make(EditOperation::Duplicate, reg(1)), error) &&
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Duplicate, reg(1)), error) &&
 	            document.serialize().text == "B one\nR r0\nR r1\nR r1\nR r2\nR r3\nU 0\nU 3\nU 4\nU 3\n");
 	document.undo();
-	TEST_EXPECT(document.apply(make(EditOperation::Add, {row(0).id, kRegister, 0}, 0, 0), error) &&
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {row(0).id, kRegister, 0}, 0, 0), error) &&
 	            document.serialize().text == "B one\nR NEW\nR r0\nR r1\nR r2\nR r3\nU 1\nU 3\nU 4\nU 3\n");
 	document.undo();
 	// An Add at the end moves no register, but the collection grows: the type is asked once (for an
 	// index past the registers, of which the bank has none), and no user changes. An edit of no
 	// register asks nothing.
 	const size_t asked = document.renumbered;
-	TEST_EXPECT(document.apply(make(EditOperation::Add, {row(0).id, kRegister, 0}), error) &&
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {row(0).id, kRegister, 0}), error) &&
 	            document.renumbered == asked + 1 &&
 	            document.serialize().text == "B one\nR r0\nR r1\nR r2\nR r3\nR NEW\nU 0\nU 2\nU 3\nU 2\n");
 	document.undo();
-	TEST_EXPECT(document.apply(make(EditOperation::Add, {row(0).id, kUser, 0}), error) &&
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {row(0).id, kUser, 0}), error) &&
 	            document.renumbered == asked + 1);
 	document.undo();
 	TEST_EXPECT(document.serialize().text == text && !document.can_undo());
@@ -2078,15 +2066,15 @@ static int test_record_references() {
 	IndexDocument past;
 	TEST_EXPECT(past.load_bytes(bytes_of(dangling), "past.fake", AssetKind::Model, "jo", error));
 	const Node &past_bank = *past.rows()[0];
-	TEST_EXPECT(past.apply(make(EditOperation::Add, {past_bank.id, kRegister, 0}, 0, 0), error) &&
+	TEST_EXPECT(past.apply(op_edit(EditOperation::Add, {past_bank.id, kRegister, 0}, 0, 0), error) &&
 	            past.serialize().text == "B one\nR NEW\nR r0\nR r1\nR r2\nR r3\nU 10\nU 5\n");
 	past.undo();
-	TEST_EXPECT(past.apply(make(EditOperation::Remove, {past_bank.id, kRegister, past_bank.collections[0][0]}), error) &&
+	TEST_EXPECT(past.apply(op_edit(EditOperation::Remove, {past_bank.id, kRegister, past_bank.collections[0][0]}), error) &&
 	            past.serialize().text == "B one\nR r1\nR r2\nR r3\nU 8\nU 3\n");
 	past.undo();
 	TEST_EXPECT(past.serialize().text == dangling && !past.can_undo());
 	// A batch: the Remove, then a Set naming register 2 as the Remove left them (r3); one step.
-	TEST_EXPECT(document.apply({make(EditOperation::Remove, reg(1)), set(user(0), "reg", int64_t(2))}, error) &&
+	TEST_EXPECT(document.apply({op_edit(EditOperation::Remove, reg(1)), set_edit(user(0), "reg", int64_t(2))}, error) &&
 	            document.serialize().text == "B one\nR r0\nR r2\nR r3\nU 2\nU 1\nU 2\nU 1\n");
 	document.undo();
 	TEST_EXPECT(document.serialize().text == text && !document.can_undo());
@@ -2097,11 +2085,11 @@ static int test_record_references() {
 	IndexDocument two;
 	TEST_EXPECT(two.load_bytes(bytes_of(two_banks), "two.fake", AssetKind::Model, "jo", error));
 	const Node &first = *two.rows()[0];
-	TEST_EXPECT(two.apply(make(EditOperation::Remove, {first.id, kRegister, first.collections[0][0]}), error) &&
+	TEST_EXPECT(two.apply(op_edit(EditOperation::Remove, {first.id, kRegister, first.collections[0][0]}), error) &&
 	            two.serialize().text == "B a\nR a1\nU 0\nB b\nR b0\nR b1\nU 2\nU 1\n");
 	two.undo();
 	const Node &second = *two.rows()[1];
-	TEST_EXPECT(two.apply(make(EditOperation::Move, {second.id, kBank, 0}, 0, 0), error) &&
+	TEST_EXPECT(two.apply(op_edit(EditOperation::Move, {second.id, kBank, 0}, 0, 0), error) &&
 	            two.serialize().text == "B b\nR b0\nR b1\nU 1\nU 0\nB a\nR a0\nR a1\nU 3\n");
 	two.undo();
 	// A structural edit reads each row's registers from the core's index of the row: a batch of ten
@@ -2110,7 +2098,7 @@ static int test_record_references() {
 	const NodeId first_id = two.rows()[0]->id, second_id = two.rows()[1]->id;
 	two.walks.clear();
 	std::vector<Edit> adds;
-	for (int i = 0; i < 10; ++i) adds.push_back(make(EditOperation::Add, {first_id, kRegister, 0}, 0, 0));
+	for (int i = 0; i < 10; ++i) adds.push_back(op_edit(EditOperation::Add, {first_id, kRegister, 0}, 0, 0));
 	TEST_EXPECT(two.apply(adds, error) && two.walks[second_id] <= 1 &&
 	            two.serialize().text.find("U 13\nU 12\n") != std::string::npos);
 	two.undo();
@@ -2121,14 +2109,14 @@ static int test_record_references() {
 	IndexDocument plain(false);
 	TEST_EXPECT(plain.load_bytes(bytes_of(text), "bank.fake", AssetKind::Model, "jo", error));
 	const Node &bank = *plain.rows()[0];
-	TEST_EXPECT(!plain.apply(make(EditOperation::Remove, {bank.id, kRegister, bank.collections[0][1]}), error) &&
+	TEST_EXPECT(!plain.apply(op_edit(EditOperation::Remove, {bank.id, kRegister, bank.collections[0][1]}), error) &&
 	            error.code() == "document.collection" &&
 	            error.message == "Other records name each CTRL register by its index, which this document does "
 	                             "not renumber." &&
 	            plain.serialize().text == text);
-	TEST_EXPECT(!plain.apply(make(EditOperation::Add, {bank.id, kRegister, 0}), error) &&
+	TEST_EXPECT(!plain.apply(op_edit(EditOperation::Add, {bank.id, kRegister, 0}), error) &&
 	            error.code() == "document.collection" && plain.serialize().text == text);
-	TEST_EXPECT(plain.apply(make(EditOperation::Add, {bank.id, kUser, 0}), error));
+	TEST_EXPECT(plain.apply(op_edit(EditOperation::Add, {bank.id, kUser, 0}), error));
 	// A type whose schema names no Record kind has no collection to renumber.
 	Loaded fake;
 	TEST_EXPECT(fake.load() && fake.document.targeted_collections().empty());
@@ -2153,20 +2141,20 @@ static int test_moved_rows() {
 		        c{document.rows()[2]->id, kLine, 0};
 		const auto changes = [&] { return Changes{document.record_change(a), document.record_change(b), document.record_change(c)}; };
 		const auto edit_and_give_back = [&] {
-			return document.apply(set(a, "title", std::string("a2")), error) &&
+			return document.apply(set_edit(a, "title", std::string("a2")), error) &&
 			       document.apply(document.revert_edits(a, "title"), error) && !document.field_changed(a, "title");
 		};
 		if (!move_first) {
 			TEST_EXPECT(edit_and_give_back());
 			TEST_EXPECT(changes() == Changes({same, same, same}));
 		}
-		TEST_EXPECT(document.apply(make(EditOperation::Move, c, 0, 0), error));
+		TEST_EXPECT(document.apply(op_edit(EditOperation::Move, c, 0, 0), error));
 		TEST_EXPECT(changes() == Changes({moved, moved, moved}));
 		if (move_first) {
 			TEST_EXPECT(edit_and_give_back());
 			TEST_EXPECT(changes() == Changes({moved, moved, moved}));
 		}
-		TEST_EXPECT(document.apply(make(EditOperation::Move, c, 0, 2), error));
+		TEST_EXPECT(document.apply(op_edit(EditOperation::Move, c, 0, 2), error));
 		TEST_EXPECT(changes() == Changes({same, same, same}));
 	}
 	return 0;
@@ -2182,7 +2170,7 @@ static int test_snapshot() {
 	TEST_EXPECT(fake.load());
 	FakeDocument &document = fake.document;
 	Diagnostic error;
-	TEST_EXPECT(document.apply(set(fake.x, "name", std::string("xx")), error));
+	TEST_EXPECT(document.apply(set_edit(fake.x, "name", std::string("xx")), error));
 	const std::string edited = document.serialize().text;
 	std::unique_ptr<Document> snapshot = records_of(document.snapshot());
 	TEST_EXPECT(snapshot && snapshot->is_snapshot() && !document.is_snapshot());
@@ -2190,7 +2178,7 @@ static int test_snapshot() {
 	            snapshot->dirty() && snapshot->can_undo() && snapshot->rows() == document.rows());
 	TEST_EXPECT(snapshot->serialize().text == edited && snapshot->record_change(fake.x) == Change::Changed &&
 	            snapshot->field_changed(fake.x, "name") && snapshot->record_change(fake.y) == Change::Unchanged);
-	TEST_EXPECT(!snapshot->apply(set(fake.x, "name", std::string("z")), error) && error.code() == "document.snapshot");
+	TEST_EXPECT(!snapshot->apply(set_edit(fake.x, "name", std::string("z")), error) && error.code() == "document.snapshot");
 	snapshot->undo();
 	TEST_EXPECT(snapshot->revision() == document.revision() && snapshot->serialize().text == edited);
 	TEST_EXPECT(!snapshot->save(error) && error.code() == "document.snapshot");
@@ -2216,8 +2204,8 @@ static int test_snapshot() {
 	bool edits = true;
 	for (int i = 0; i < 50; ++i) {
 		Diagnostic refused;
-		edits = document.apply(set(fake.y, "name", std::string("y") + std::to_string(i)), refused) && edits;
-		edits = document.apply(make(EditOperation::Duplicate, fake.a2, 0, 2), refused) && edits;
+		edits = document.apply(set_edit(fake.y, "name", std::string("y") + std::to_string(i)), refused) && edits;
+		edits = document.apply(op_edit(EditOperation::Duplicate, fake.a2, 0, 2), refused) && edits;
 		document.undo();
 	}
 	reader.join();
@@ -2244,7 +2232,7 @@ static int test_apply_payload() {
 	Value name;
 	const auto apply = [&](const NodeAddress &address, std::shared_ptr<const EditPayload> payload,
 	                       uint64_t gesture = 0) {
-		Edit edit = make(EditOperation::Apply, address);
+		Edit edit = op_edit(EditOperation::Apply, address);
 		edit.payload = std::move(payload);
 		edit.gesture = gesture;
 		return edit;
@@ -2288,7 +2276,7 @@ static int test_apply_payload() {
 	TEST_EXPECT(text() == renamed && !document.address_of(sprout).row);
 	// With a Set in its batch: one step.
 	const Edit again = apply(fake.a1, fake_change("again"));
-	TEST_EXPECT(document.apply({again, set(fake.x, "name", std::string("xx"))}, error));
+	TEST_EXPECT(document.apply({again, set_edit(fake.x, "name", std::string("xx"))}, error));
 	TEST_EXPECT(name_of_a1() == "again" && document.revision() == 4);
 	document.undo();
 	TEST_EXPECT(text() == renamed);
@@ -2326,9 +2314,9 @@ static int test_apply_payload() {
 	const Edit other = apply(fake.a1, std::make_shared<Other>());
 	TEST_EXPECT(!document.apply(other, error) && error.code() == "document.payload" &&
 	            error.message == "Not a fake change.");
-	TEST_EXPECT(!document.apply(make(EditOperation::Apply, fake.a1), error) &&
+	TEST_EXPECT(!document.apply(op_edit(EditOperation::Apply, fake.a1), error) &&
 	            error.code() == "document.payload");
-	TEST_EXPECT(!document.apply({set(fake.x, "name", std::string("zz")), other}, error) &&
+	TEST_EXPECT(!document.apply({set_edit(fake.x, "name", std::string("zz")), other}, error) &&
 	            error.code() == "document.payload");
 	// A change handed back as a copy that changes nothing, naming no row or a record: no step (the
 	// state is kept only when the change changes something, S13 D7's second review).
@@ -2343,7 +2331,7 @@ static int test_apply_payload() {
 	// One naming no row among other edits: one step with them (S13 D7).
 	const Edit file_note = apply({}, fake_change("", "", "x"));
 	Value renamed_x;
-	TEST_EXPECT(document.apply({file_note, set(fake.x, "name", std::string("zz"))}, error) && note() == "x" &&
+	TEST_EXPECT(document.apply({file_note, set_edit(fake.x, "name", std::string("zz"))}, error) && note() == "x" &&
 	            document.get(fake.x, "name", renamed_x) && std::get<std::string>(renamed_x) == "zz");
 	document.undo();
 	TEST_EXPECT(text() == renamed && note().empty());
@@ -2427,7 +2415,7 @@ static int test_document_base() {
 	replace.payload = std::make_shared<BlobReplace>(edited);
 	TEST_EXPECT(blob.apply(replace, error) && blob.blob() == edited && blob.revision() == 1);
 	TEST_EXPECT(blob.dirty() && blob.can_undo() && blob.history_bytes() == original.size());
-	TEST_EXPECT(!blob.apply(set({1, 0, 0}, "name", std::string("x")), error) &&
+	TEST_EXPECT(!blob.apply(set_edit({1, 0, 0}, "name", std::string("x")), error) &&
 	            error.code() == "document.payload");
 	TEST_EXPECT(blob.revision() == 1 && blob.blob() == edited);
 	// Its own history: undone to the file as loaded (clean again), redone.
@@ -2516,9 +2504,9 @@ static int test_follow_in_one_step() {
 		Value value;
 		return document.get(address, "name", value) ? std::get<std::string>(value) : std::string("?");
 	};
-	const std::vector<Edit> rename{set(fake.a1, "name", std::string("A")), set(fake.x, "name", std::string("X")),
-	                               set(fake.b1, "name", std::string("B"))};
-	Edit typed = set(fake.a2, "name", std::string("typed"));
+	const std::vector<Edit> rename{set_edit(fake.a1, "name", std::string("A")), set_edit(fake.x, "name", std::string("X")),
+	                               set_edit(fake.b1, "name", std::string("B"))};
+	Edit typed = set_edit(fake.a2, "name", std::string("typed"));
 	typed.coalesce = true;
 	TEST_EXPECT(document.apply(typed, error));
 	TEST_EXPECT(document.apply(rename, error));
@@ -2533,7 +2521,7 @@ static int test_follow_in_one_step() {
 
 	// A coalesced burst over two rows: each keystroke from what the group found, one step.
 	const auto type = [&](const char *text) {
-		Edit a = set(fake.a1, "name", std::string(text)), b = set(fake.b1, "name", std::string(text) + "!");
+		Edit a = set_edit(fake.a1, "name", std::string(text)), b = set_edit(fake.b1, "name", std::string(text) + "!");
 		a.coalesce = b.coalesce = true;
 		return document.apply(std::vector<Edit>{a, b}, error);
 	};
@@ -2554,10 +2542,10 @@ static int test_follow_in_one_step() {
 
 	// Refused, nothing committed: an edit refused on either row, the type's veto on either row.
 	const uint64_t revision = document.revision();
-	TEST_EXPECT(!document.apply({set(fake.a1, "name", std::string("A")), set({fake.beta.row, kItem, 99999}, "name", std::string("gone"))},
+	TEST_EXPECT(!document.apply({set_edit(fake.a1, "name", std::string("A")), set_edit({fake.beta.row, kItem, 99999}, "name", std::string("gone"))},
 	                            error) &&
 	            error.code() == "document.selection");
-	TEST_EXPECT(!document.apply({set({fake.alpha.row, kItem, 99999}, "name", std::string("gone")), set(fake.b1, "name", std::string("B"))},
+	TEST_EXPECT(!document.apply({set_edit({fake.alpha.row, kItem, 99999}, "name", std::string("gone")), set_edit(fake.b1, "name", std::string("B"))},
 	                            error) &&
 	            error.code() == "document.selection");
 	document.veto = refuse_beta;
@@ -2585,8 +2573,8 @@ static int test_multi_row_batches() {
 	};
 	std::vector<Edit> batch;
 	for (size_t i = 0; i < kTouched; ++i) {
-		batch.push_back(set(line(i * 10), "weight", int64_t(-1)));
-		batch.push_back(set(line(i * 10), "tag", std::string("TAG2")));
+		batch.push_back(set_edit(line(i * 10), "weight", int64_t(-1)));
+		batch.push_back(set_edit(line(i * 10), "tag", std::string("TAG2")));
 	}
 	const std::vector<std::shared_ptr<const Node>> found = document.rows();
 	g_line_clones = 0;
@@ -2619,34 +2607,34 @@ static int test_mixed_batch() {
 	FakeDocument &document = fake.document;
 	Diagnostic error;
 	// Four groups: alpha, beta, delta, eps.
-	TEST_EXPECT(document.apply({make(EditOperation::Add, {0, kGroup, 0}), make(EditOperation::Add, {0, kGroup, 0})}, error));
-	TEST_EXPECT(document.apply({set({document.rows()[2]->id, kGroup, 0}, "name", std::string("delta")),
-	                            set({document.rows()[3]->id, kGroup, 0}, "name", std::string("eps"))},
+	TEST_EXPECT(document.apply({op_edit(EditOperation::Add, {0, kGroup, 0}), op_edit(EditOperation::Add, {0, kGroup, 0})}, error));
+	TEST_EXPECT(document.apply({set_edit({document.rows()[2]->id, kGroup, 0}, "name", std::string("delta")),
+	                            set_edit({document.rows()[3]->id, kGroup, 0}, "name", std::string("eps"))},
 	                           error));
 	const NodeAddress delta{document.rows()[2]->id, kGroup, 0}, eps{document.rows()[3]->id, kGroup, 0};
 	TEST_EXPECT(document.save(error) && !document.dirty());
 	const std::string saved = document.serialize().text;
 	const std::string pasted = document.copy({fake.beta});
 	TEST_EXPECT(pasted.rfind("groups\n", 0) == 0);
-	Edit gamma = make(EditOperation::Add, {0, kGroup, 0});
+	Edit gamma = op_edit(EditOperation::Add, {0, kGroup, 0});
 	gamma.field = "name";
 	gamma.value = std::string("gamma");
-	Edit paste = make(EditOperation::Paste, {0, 0, 0});
+	Edit paste = op_edit(EditOperation::Paste, {0, 0, 0});
 	paste.value = pasted;
 	Edit note;
 	note.operation = EditOperation::SetFileValue;
 	note.value = std::string("mixed");
 	const std::vector<Edit> batch{
 	        gamma,                                                     // 0: a group at the end
-	        make(EditOperation::Add, {0, kItem, 0}, batch_made(0)),    // 1: an item in it
-	        set({0, kItem, batch_made(1)}, "name", std::string("g1")), // 2
-	        make(EditOperation::Duplicate, fake.alpha, 0, 1),          // 3: alpha copied after itself
-	        make(EditOperation::Move, eps, 0, 0),                      // 4: eps to the top
-	        make(EditOperation::Remove, delta),                        // 5
+	        op_edit(EditOperation::Add, {0, kItem, 0}, batch_made(0)),    // 1: an item in it
+	        set_edit({0, kItem, batch_made(1)}, "name", std::string("g1")), // 2
+	        op_edit(EditOperation::Duplicate, fake.alpha, 0, 1),          // 3: alpha copied after itself
+	        op_edit(EditOperation::Move, eps, 0, 0),                      // 4: eps to the top
+	        op_edit(EditOperation::Remove, delta),                        // 5
 	        paste,                                                     // 6: beta pasted at the end
 	        note,                                                      // 7
-	        set(fake.a1, "name", std::string("A1")),                   // 8
-	        set({batch_made(6), kGroup, 0}, "name", std::string("pasted")), // 9: the pasted group
+	        set_edit(fake.a1, "name", std::string("A1")),                   // 8
+	        set_edit({batch_made(6), kGroup, 0}, "name", std::string("pasted")), // 9: the pasted group
 	};
 	TEST_EXPECT(document.apply(batch, error));
 	const std::string after = document.serialize().text;
@@ -2668,7 +2656,7 @@ static int test_mixed_batch() {
 
 	// The same batch with an edit naming the row it removed: refused, nothing committed.
 	std::vector<Edit> late = batch;
-	late.push_back(set(delta, "name", std::string("late")));
+	late.push_back(set_edit(delta, "name", std::string("late")));
 	TEST_EXPECT(!document.apply(late, error) && error.code() == "document.batch");
 	TEST_EXPECT(document.serialize().text == saved && document.revision() == before && document.can_redo());
 	return 0;
@@ -2689,8 +2677,8 @@ static int test_gesture_across_rows() {
 	};
 	uint64_t gesture = next_edit_gesture();
 	const auto drag = [&](int64_t to, bool with_b1) {
-		std::vector<Edit> edits{set(fake.a1, "weight", to)};
-		if (with_b1) edits.push_back(set(fake.b1, "weight", to));
+		std::vector<Edit> edits{set_edit(fake.a1, "weight", to)};
+		if (with_b1) edits.push_back(set_edit(fake.b1, "weight", to));
 		for (Edit &edit : edits) edit.gesture = gesture;
 		return document.apply(edits, error);
 	};
@@ -2704,7 +2692,7 @@ static int test_gesture_across_rows() {
 	// A batch of the gesture adding a row: a step of its own, ending the group.
 	gesture = next_edit_gesture();
 	TEST_EXPECT(drag(20, true));
-	Edit add = make(EditOperation::Add, {0, kGroup, 0});
+	Edit add = op_edit(EditOperation::Add, {0, kGroup, 0});
 	add.gesture = gesture;
 	TEST_EXPECT(document.apply(add, error) && drag(21, true));
 	document.undo(); // the drag after the row: its own step
@@ -2744,7 +2732,7 @@ static int test_changes_since() {
 	const NodeId alpha = fake.alpha.row, beta = fake.beta.row;
 	const uint64_t start = document.revision();
 	TEST_EXPECT(since(start) && rows.empty());
-	TEST_EXPECT(document.apply(set(fake.x, "name", std::string("xx")), error));
+	TEST_EXPECT(document.apply(set_edit(fake.x, "name", std::string("xx")), error));
 	const uint64_t edited = document.revision();
 	TEST_EXPECT(since(start) && rows.changed == Ids{alpha} && rows.added.empty() && rows.removed.empty() &&
 	            !rows.reordered && !rows.file_state);
@@ -2757,8 +2745,8 @@ static int test_changes_since() {
 	// A gesture's step: a1, then a1 and b1, then a1 again.
 	const uint64_t gesture = next_edit_gesture();
 	const auto drag = [&](int64_t to, bool with_b1) {
-		std::vector<Edit> edits{set(fake.a1, "weight", to)};
-		if (with_b1) edits.push_back(set(fake.b1, "weight", to));
+		std::vector<Edit> edits{set_edit(fake.a1, "weight", to)};
+		if (with_b1) edits.push_back(set_edit(fake.b1, "weight", to));
 		for (Edit &edit : edits) edit.gesture = gesture;
 		return document.apply(edits, error);
 	};
@@ -2775,7 +2763,7 @@ static int test_changes_since() {
 	TEST_EXPECT(since(third) && rows.changed == (Ids{alpha, beta}));
 
 	// An edit after the undo discards the gesture's branch: its states are no longer held.
-	TEST_EXPECT(document.apply({make(EditOperation::Add, {0, kGroup, 0}), make(EditOperation::Move, fake.beta, 0, 0)}, error));
+	TEST_EXPECT(document.apply({op_edit(EditOperation::Add, {0, kGroup, 0}), op_edit(EditOperation::Move, fake.beta, 0, 0)}, error));
 	const NodeId gamma = document.last_added();
 	TEST_EXPECT(!since(first) && !since(second) && !since(third));
 	TEST_EXPECT(since(start) && rows.added == Ids{gamma} && rows.reordered && rows.changed.empty() && rows.removed.empty());
@@ -2783,7 +2771,7 @@ static int test_changes_since() {
 	Edit note;
 	note.operation = EditOperation::SetFileValue;
 	note.value = std::string("n");
-	TEST_EXPECT(document.apply({make(EditOperation::Remove, fake.alpha), note}, error));
+	TEST_EXPECT(document.apply({op_edit(EditOperation::Remove, fake.alpha), note}, error));
 	TEST_EXPECT(since(shaped) && rows.removed == Ids{alpha} && rows.file_state && !rows.reordered && rows.added.empty());
 	TEST_EXPECT(since(start) && rows.added == Ids{gamma} && rows.removed == Ids{alpha} && rows.file_state);
 	document.undo();
@@ -2823,7 +2811,7 @@ static int test_history_budget() {
 	const size_t per_step = 2 * document.rows()[0]->footprint() + EditHistory::mark_bytes(1);
 	const size_t kept = budget / per_step;
 	TEST_EXPECT(kept >= 1 && kept < 10);
-	for (int64_t i = 0; i < 10; ++i) TEST_EXPECT(document.apply(set(a, "weight", 100 + i), error));
+	for (int64_t i = 0; i < 10; ++i) TEST_EXPECT(document.apply(set_edit(a, "weight", 100 + i), error));
 	TEST_EXPECT(document.history_bytes() == kept * per_step && document.history_bytes() <= budget && document.dirty());
 	ChangeSet changes;
 	TEST_EXPECT(!document.changes_since(load, start, changes));
@@ -2838,8 +2826,8 @@ static int test_history_budget() {
 	TEST_EXPECT(document.save(error) && !document.dirty());
 	// One line far past the budget: its step stays, and gives way to the next.
 	g_line_heft = size_t(100) << 20;
-	TEST_EXPECT(document.apply(set(a, "weight", int64_t(1)), error) && document.can_undo() && document.history_bytes() > budget);
-	TEST_EXPECT(document.apply(set(a, "weight", int64_t(2)), error));
+	TEST_EXPECT(document.apply(set_edit(a, "weight", int64_t(1)), error) && document.can_undo() && document.history_bytes() > budget);
+	TEST_EXPECT(document.apply(set_edit(a, "weight", int64_t(2)), error));
 	document.undo();
 	TEST_EXPECT(!document.can_undo() && document.get(a, "weight", weight) && std::get<int64_t>(weight) == 1 && document.dirty());
 	g_line_heft = 0;
@@ -2856,7 +2844,7 @@ static int test_moved_row_marked() {
 	TEST_EXPECT(fake.load());
 	FakeDocument &document = fake.document;
 	Diagnostic error;
-	Edit gamma = make(EditOperation::Add, {0, kGroup, 0});
+	Edit gamma = op_edit(EditOperation::Add, {0, kGroup, 0});
 	gamma.field = "name";
 	gamma.value = std::string("gamma");
 	TEST_EXPECT(document.apply(gamma, error) && document.rows().size() == 3);
@@ -2872,17 +2860,17 @@ static int test_moved_row_marked() {
 			if (swap.moved) ids.push_back(swap.id());
 		return ids;
 	};
-	TEST_EXPECT(document.apply(make(EditOperation::Move, fake.alpha, 0, 1), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Move, fake.alpha, 0, 1), error));
 	TEST_EXPECT(seen.size() == 1 && seen[0].swaps.size() == 1 && moved(seen[0]) == std::vector<NodeId>{fake.alpha.row});
 	TEST_EXPECT(document.rows()[1]->id == fake.alpha.row);
 	document.undo();
 	TEST_EXPECT(document.serialize().text == three);
-	TEST_EXPECT(document.apply(make(EditOperation::Move, fake.beta, 0, 2), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Move, fake.beta, 0, 2), error));
 	TEST_EXPECT(seen.size() == 2 && seen[1].swaps.size() == 1 && moved(seen[1]) == std::vector<NodeId>{fake.beta.row});
 	document.undo();
 	TEST_EXPECT(document.serialize().text == three);
 	const uint64_t revision = document.revision();
-	TEST_EXPECT(document.apply({make(EditOperation::Move, fake.alpha, 0, 2), make(EditOperation::Move, fake.alpha, 0, 0)}, error));
+	TEST_EXPECT(document.apply({op_edit(EditOperation::Move, fake.alpha, 0, 2), op_edit(EditOperation::Move, fake.alpha, 0, 0)}, error));
 	TEST_EXPECT(document.revision() == revision && seen.size() == 2 && document.serialize().text == three);
 	document.veto = nullptr;
 	return 0;
@@ -2898,25 +2886,25 @@ static int test_made_then_removed() {
 	FakeDocument &document = fake.document;
 	Diagnostic error;
 	const auto group = [](const char *name) {
-		Edit add = make(EditOperation::Add, {0, kGroup, 0});
+		Edit add = op_edit(EditOperation::Add, {0, kGroup, 0});
 		add.field = "name";
 		add.value = std::string(name);
 		return add;
 	};
 	const NodeAddress first_made{batch_made(0), kGroup, 0};
-	TEST_EXPECT(!document.apply({group("s"), make(EditOperation::Remove, first_made), set(first_made, "name", std::string("late"))},
+	TEST_EXPECT(!document.apply({group("s"), op_edit(EditOperation::Remove, first_made), set_edit(first_made, "name", std::string("late"))},
 	                            error) &&
 	            error.code() == "document.batch");
 	TEST_EXPECT(document.rows().size() == 2 && !document.can_undo() && document.serialize().text == fake.original);
-	TEST_EXPECT(document.apply({group("s"), group("t"), make(EditOperation::Remove, first_made), set(fake.a1, "name", std::string("A1"))},
+	TEST_EXPECT(document.apply({group("s"), group("t"), op_edit(EditOperation::Remove, first_made), set_edit(fake.a1, "name", std::string("A1"))},
 	                           error));
 	TEST_EXPECT(document.rows().size() == 3 && document.rows()[2]->name() == "t");
 	const NodeId t = document.rows()[2]->id;
 	TEST_EXPECT(document.last_added_records() == std::vector<NodeId>{t} && document.last_added() == t);
 	TEST_EXPECT(document.last_made() == std::vector<NodeId>({0, t, 0, 0}));
-	TEST_EXPECT(document.apply({make(EditOperation::Add, {fake.alpha.row, kItem, 0}),
-	                            make(EditOperation::Remove, {fake.alpha.row, kItem, batch_made(0)}),
-	                            set(fake.a1, "name", std::string("A2"))},
+	TEST_EXPECT(document.apply({op_edit(EditOperation::Add, {fake.alpha.row, kItem, 0}),
+	                            op_edit(EditOperation::Remove, {fake.alpha.row, kItem, batch_made(0)}),
+	                            set_edit(fake.a1, "name", std::string("A2"))},
 	                           error));
 	TEST_EXPECT(document.last_added_records().empty() && document.last_added() == 0 &&
 	            document.last_made() == std::vector<NodeId>({0, 0, 0}));
@@ -2932,10 +2920,10 @@ static int test_duplicate_in_place() {
 	TEST_EXPECT(fake.load());
 	FakeDocument &document = fake.document;
 	Diagnostic error;
-	Edit top = make(EditOperation::Add, {0, kGroup, 0}, 0, 0);
+	Edit top = op_edit(EditOperation::Add, {0, kGroup, 0}, 0, 0);
 	top.field = "name";
 	top.value = std::string("top");
-	TEST_EXPECT(document.apply({top, make(EditOperation::Duplicate, fake.beta), make(EditOperation::Duplicate, {batch_made(0), kGroup, 0})},
+	TEST_EXPECT(document.apply({top, op_edit(EditOperation::Duplicate, fake.beta), op_edit(EditOperation::Duplicate, {batch_made(0), kGroup, 0})},
 	                           error));
 	const std::vector<NodeId> &made = document.last_made();
 	TEST_EXPECT(made.size() == 3 && document.rows().size() == 5);
@@ -2945,7 +2933,7 @@ static int test_duplicate_in_place() {
 	            document.rows()[4]->id == made[1]);
 	document.undo();
 	TEST_EXPECT(document.serialize().text == fake.original);
-	TEST_EXPECT(document.apply({make(EditOperation::Add, {fake.alpha.row, kItem, 0}, 0, 0), make(EditOperation::Duplicate, fake.a1)},
+	TEST_EXPECT(document.apply({op_edit(EditOperation::Add, {fake.alpha.row, kItem, 0}, 0, 0), op_edit(EditOperation::Duplicate, fake.a1)},
 	                           error));
 	const std::vector<Document::Collection> items = document.collections_of(fake.alpha);
 	std::vector<NodeId> order;
@@ -2967,12 +2955,12 @@ static int test_after_edit_once_per_row() {
 	FakeDocument &document = fake.document;
 	Diagnostic error;
 	document.after_edits = 0;
-	TEST_EXPECT(document.apply({set(fake.a1, "name", std::string("A")), set(fake.x, "name", std::string("X")),
-	                            set(fake.b1, "name", std::string("B")), make(EditOperation::Add, {0, kGroup, 0})},
+	TEST_EXPECT(document.apply({set_edit(fake.a1, "name", std::string("A")), set_edit(fake.x, "name", std::string("X")),
+	                            set_edit(fake.b1, "name", std::string("B")), op_edit(EditOperation::Add, {0, kGroup, 0})},
 	                           error));
 	TEST_EXPECT(document.after_edits == 3);
 	document.after_edits = 0;
-	TEST_EXPECT(document.apply(set(fake.a1, "name", std::string("A")), error) && document.after_edits == 0);
+	TEST_EXPECT(document.apply(set_edit(fake.a1, "name", std::string("A")), error) && document.after_edits == 0);
 	return 0;
 }
 
@@ -3006,7 +2994,7 @@ static int test_history_counts_state_and_folds() {
 	const auto drag = [&](int64_t to) {
 		std::vector<Edit> edits;
 		for (const auto &row : flat.rows()) {
-			Edit edit = set({row->id, kLine, 0}, "weight", to);
+			Edit edit = set_edit({row->id, kLine, 0}, "weight", to);
 			edit.gesture = gesture;
 			edits.push_back(edit);
 		}

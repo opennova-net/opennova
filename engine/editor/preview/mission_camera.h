@@ -48,6 +48,9 @@ void mission_camera_top(OrbitCamera &camera);
 // The camera on the wire: {target: [x, y, z], yaw, pitch, distance, eye: [x, y, z], fov}, the points
 // mission points, the angles degrees; `eye` and `fov` (the horizontal field of view) are read only.
 io::JsonValue mission_camera_to_json(const OrbitCamera &camera);
+// What a SetViewport's camera member takes of it: {target, yaw, pitch, distance} (not the read-only eye and fov), the
+// camera change a mission, terrain or environment view sends.
+io::JsonValue mission_camera_members(const OrbitCamera &camera);
 // A SetViewport's camera member, {target?, yaw?, pitch?, distance?}, set over `camera`: every member
 // checked before any applies; false, the camera as it was, with `error` naming the member and what it
 // takes (a member it does not take, `eye` and `fov` among them, refused).

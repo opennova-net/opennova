@@ -14,6 +14,7 @@
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/viewport_widgets.h>
 #include <editor/ui/viewport_canvas.h>
 #include <base/io/strutil.h>
 #include <runtime/menu/menu_frame.h>
@@ -46,9 +47,7 @@ std::string unreadable_banner(const std::vector<std::string> &unreadable) {
 
 // The viewport's options set (a SetViewport of them).
 void set_options(Workspace &workspace, const MenuViewport &menu, const MenuViewportOptions &options) {
-	workspace.request(request::set_viewport(menu.path(),
-			viewport_change(ViewportKind::Menu, "options",
-					menu_options_to_json(options, menu.show(), menu.pointer(), menu.sound()))));
+	set_viewport_member(workspace, menu, "options", menu_options_to_json(options, menu.show(), menu.pointer(), menu.sound()));
 }
 
 // The sounds muted or heard (a SetViewport of that alone, DI-34).
@@ -76,13 +75,7 @@ void set_pointer(Workspace &workspace, const MenuViewport &menu, bool shown) {
 // Where the pointer comes from: the window whose CURSOR names it, at that field (window_requests::go_to, so
 // the history records it).
 void go_to_pointer(Workspace &workspace, const MnuDocument &document, const MenuPointer &pointer) {
-	ReferenceTarget target;
-	target.label = pointer.name + "'s pointer";
-	target.file = document.path();
-	target.locator = document.locator(pointer.window);
-	target.field = "cursor.file";
-	target.editable = true;
-	window_requests::go_to(workspace, target);
+	window_requests::go_to(workspace, window_requests::target_at(document.path(), document.locator(pointer.window), "cursor.file"));
 }
 
 // Try mode on or off, or Try back to where it started (a SetViewport of `try`, DI-35).
@@ -233,12 +226,9 @@ void MenuViewportView::Tools::toolbar(Workspace &workspace, ViewportView &, View
 		pointer_and_sound(workspace, row, menu, frame, context);
 		return;
 	}
-	row.next(ui_kit::checkbox_width("Snap"));
-	ImGui::Checkbox("Snap", &snap);
-	ui_kit::tooltip("Drags snap to a grid of 8 units. Hold Alt to place freely.");
-	row.next(ui_kit::checkbox_width("Show hidden"));
-	ImGui::Checkbox("Show hidden", &options.show_hidden);
-	ui_kit::tooltip("Draw every window, including those the screen starts hidden.");
+	ui_kit::check(row, "Snap", &snap, "Drags snap to a grid of 8 units. Hold Alt to place freely.");
+	ui_kit::check(row, "Show hidden", &options.show_hidden,
+	              "Draw every window, including those the screen starts hidden.");
 
 	// The selected window held in a state, as the game's mouse and keyboard would leave it.
 	ImGui::BeginDisabled(!selected.child);
@@ -260,9 +250,8 @@ void MenuViewportView::Tools::toolbar(Workspace &workspace, ViewportView &, View
 	ui_kit::tooltip("Show the selected window under the mouse, pressed or disabled.");
 	const mnu::WindowType type = menu_window_type(*frame.document, selected);
 	auto hold = [&](const char *label, bool &flag, const char *tip) {
-		row.next(ui_kit::checkbox_width(label));
-		if (ImGui::Checkbox(label, &flag)) options.force_window = selected.child;
-		ui_kit::tooltip(tip);
+		if (ui_kit::check(row, label, &flag, tip))
+			options.force_window = selected.child;
 	};
 	if (menu_type_checkable(type)) hold("Checked", options.checked, "Show the selected window checked.");
 	if (menu_type_has_list(type)) hold("Open list", options.popup_open, "Show the selected combo box with its list open.");
@@ -359,12 +348,12 @@ void MenuViewportView::Tools::pointer_and_sound(Workspace &workspace, ui_kit::Wr
 
 	// The game's pointer (DI-08): drawn at the mouse over the picture, and named here (the one at the mouse,
 	// else the screen's own), a click going to the window whose CURSOR it is.
-	row.next(ui_kit::checkbox_width("Pointer"));
 	bool pointer_shown = menu.pointer().shown;
-	if (ImGui::Checkbox("Pointer", &pointer_shown)) set_pointer(workspace, menu, pointer_shown);
-	ui_kit::tooltip("Draw the game's mouse pointer where the mouse is over the picture, as the game does: the "
-	                "CURSOR of the window under it, else of that window's root window, else of the first root "
-	                "window whose CURSOR loads, at the image's own size whatever the zoom.");
+	if (ui_kit::check(row, "Pointer", &pointer_shown,
+	                  "Draw the game's mouse pointer where the mouse is over the picture, as the game does: the "
+	                  "CURSOR of the window under it, else of that window's root window, else of the first root "
+	                  "window whose CURSOR loads, at the image's own size whatever the zoom."))
+		set_pointer(workspace, menu, pointer_shown);
 	// Off the picture: where a client holds it, else the screen's own (the screen Try shows while trying).
 	const MenuPointer now = mouse_on_picture ? pointer
 	                        : menu.pointer().held ? menu.pointer_at(context, menu.pointer().x, menu.pointer().y)
@@ -383,13 +372,13 @@ void MenuViewportView::Tools::pointer_and_sound(Workspace &workspace, ui_kit::Wr
 		                "pointer on it at all. Name one on its root window (Pointer image).");
 	}
 	// The windows' sounds (DI-34): heard or muted, and what was heard last.
-	row.next(ui_kit::checkbox_width("Sound"));
 	bool heard = !menu.sound().mute;
-	if (ImGui::Checkbox("Sound", &heard)) set_mute(workspace, menu, !heard);
-	ui_kit::tooltip("Play the windows' sounds as the game does with the mouse there: a window's SOUND of state "
-	                "MOUSEIN as the mouse comes onto it, SELECTED on a click (and MOUSEIN again while the mouse stays), "
-	                "MOUSEOUT as it leaves, each a set of the bank the SOUND names. Off, they are fired and listed, "
-	                "and nothing is heard.");
+	if (ui_kit::check(row, "Sound", &heard,
+	                  "Play the windows' sounds as the game does with the mouse there: a window's SOUND of state "
+	                  "MOUSEIN as the mouse comes onto it, SELECTED on a click (and MOUSEIN again while the mouse stays), "
+	                  "MOUSEOUT as it leaves, each a set of the bank the SOUND names. Off, they are fired and listed, "
+	                  "and nothing is heard."))
+		set_mute(workspace, menu, !heard);
 	if (!menu.sounds_fired().empty()) {
 		const MenuSoundFired &last = menu.sounds_fired().back();
 		const std::string line = fired_line(last);

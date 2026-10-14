@@ -17,6 +17,7 @@
 #include <editor/session/mission_logic_json.h>
 #include <editor/session/play_controller.h>
 #include <editor/session/session_core.h>
+#include <editor/session/row_table.h>
 
 namespace opennova::editor {
 
@@ -236,14 +237,6 @@ constexpr MissionLogicOp kMissionLogicOps[] = {
 	{ "variables", answer_variables },
 	{ "live", answer_live },
 };
-
-constexpr bool same_text(const char *a, const char *b) {
-	while (*a && *a == *b) {
-		++a;
-		++b;
-	}
-	return *a == *b;
-}
 
 // Each op a token of its own and an answer.
 constexpr bool ops_named() {

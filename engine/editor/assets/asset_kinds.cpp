@@ -122,11 +122,10 @@ constexpr AssetKindRow kRows[] = {
 	        .names_files()
 	        .folder("missions")
 	        .row,
-	// OpenNova's mission list lists none yet (runtime/mission/mission_catalog.h).
-	Kind(AssetKind::MapProject, "map_project", "Map project")
-	        .names_files()
-	        .folder("missions")
-	        .row,
+	// A packed file and nothing more (S26, the maintainer's cut of the map-project extras): retail's mission list
+	// takes one as it takes a .bms (file_kind.cpp's row), which the build packs as stored; the editor opens it in no
+	// document, follows nothing it names and keeps it where the project has it.
+	Kind(AssetKind::MapProject, "map_project", "Map project").row,
 	Kind(AssetKind::Terrain, "terrain", "Terrain")
 	        .edited_by(DocumentTypeId::Terrain)
 	        .names_files()

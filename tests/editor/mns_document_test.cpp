@@ -10,9 +10,11 @@
 #include <editor/documents/document_types.h>
 #include <editor/documents/mns_document.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/reference_kinds.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/graph/style_value_use.h>
 #include <editor/project/project_files.h>
+#include <editor/project_build/build_plan.h>
 #include <editor/project_build/build_run.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
@@ -58,13 +60,7 @@ NodeAddress row_at(const Document &document, size_t index) {
 	return {row->id, row->kind, 0};
 }
 
-Edit set(NodeAddress address, const char *field, Value value) {
-	Edit edit;
-	edit.address = address;
-	edit.field = field;
-	edit.value = std::move(value);
-	return edit;
-}
+using editor_test::set_edit;
 
 Edit structural(EditOperation operation, NodeAddress address, size_t position = SIZE_MAX) {
 	Edit edit;
@@ -80,11 +76,7 @@ std::string text(const Document &document, NodeAddress address, const char *fiel
 	return std::get<std::string>(value);
 }
 
-bool has_code(const std::vector<Diagnostic> &diagnostics, const std::string &code) {
-	for (const Diagnostic &d : diagnostics)
-		if (d.code() == code) return true;
-	return false;
-}
+using editor_test::has_code;
 
 } // namespace
 
@@ -151,7 +143,7 @@ static int test_the_shipped_sheet(const std::string &fixture) {
 			text(document, fg, "value") == "FFFFFFFF");
 	// A value edit changes one line; its undo gives the file back.
 	Diagnostic error;
-	TEST_EXPECT(document.apply(set(fg, "value", std::string("11223344")), error));
+	TEST_EXPECT(document.apply(set_edit(fg, "value", std::string("11223344")), error));
 	const std::string edited = saved(document);
 	TEST_EXPECT(edited.size() == src.size());
 	size_t differing = 0;
@@ -172,20 +164,20 @@ static int test_edits() {
 		MnsDocument document;
 		TEST_EXPECT(load(document, dir, src));
 		const NodeAddress fg = row_at(document, 1);
-		TEST_EXPECT(document.apply(set(fg, "value", std::string("FF102030")), error));
+		TEST_EXPECT(document.apply(set_edit(fg, "value", std::string("FF102030")), error));
 		TEST_EXPECT(saved(document) == "// Colors\r\nDEF_TEXT_FG\t\tFF102030\r\nTRIM\tFF808080\r\n");
 		document.undo();
 		TEST_EXPECT(saved(document) == src && !document.dirty());
-		TEST_EXPECT(document.apply(set(fg, "name", std::string("TEXT_COLOR")), error));
+		TEST_EXPECT(document.apply(set_edit(fg, "name", std::string("TEXT_COLOR")), error));
 		TEST_EXPECT(saved(document) == "// Colors\r\nTEXT_COLOR\t\tFFFFFFFF\r\nTRIM\tFF808080\r\n");
 		// The comment edits in place, "//" added when left out; the value is refused a
 		// lone backslash (the game joins there), '#' (it stops responding), nothing.
-		TEST_EXPECT(document.apply(set(row_at(document, 0), "text", std::string("Text colours")), error));
+		TEST_EXPECT(document.apply(set_edit(row_at(document, 0), "text", std::string("Text colours")), error));
 		TEST_EXPECT(saved(document).rfind("// Text colours\r\n", 0) == 0);
-		TEST_EXPECT(!document.apply(set(fg, "value", std::string("a\\b")), error));
-		TEST_EXPECT(!document.apply(set(fg, "value", std::string("#FF0000")), error));
-		TEST_EXPECT(!document.apply(set(fg, "value", std::string("")), error));
-		TEST_EXPECT(document.apply(set(fg, "value", std::string("c:\\\\x")), error)); // a pair stays doubled
+		TEST_EXPECT(!document.apply(set_edit(fg, "value", std::string("a\\b")), error));
+		TEST_EXPECT(!document.apply(set_edit(fg, "value", std::string("#FF0000")), error));
+		TEST_EXPECT(!document.apply(set_edit(fg, "value", std::string("")), error));
+		TEST_EXPECT(document.apply(set_edit(fg, "value", std::string("c:\\\\x")), error)); // a pair stays doubled
 		TEST_EXPECT(text(document, fg, "value") == "c:\\\\x");
 	}
 	// An add at the end of a file with no final newline: that line gains CRLF.
@@ -194,8 +186,8 @@ static int test_edits() {
 		TEST_EXPECT(load(document, dir, "FOO bar"));
 		TEST_EXPECT(document.apply(structural(EditOperation::Add, {0, kVariable, 0}), error));
 		const NodeAddress added = document.address_of(document.last_added());
-		TEST_EXPECT(document.apply(set(added, "name", std::string("NEW")), error));
-		TEST_EXPECT(document.apply(set(added, "value", std::string("value")), error));
+		TEST_EXPECT(document.apply(set_edit(added, "name", std::string("NEW")), error));
+		TEST_EXPECT(document.apply(set_edit(added, "value", std::string("value")), error));
 		TEST_EXPECT(saved(document) == "FOO bar\r\nNEW\tvalue\r\n");
 		// A comment and a blank line where they are put.
 		TEST_EXPECT(document.apply(structural(EditOperation::Add, {0, kBlank, 0}, 1), error));
@@ -212,7 +204,7 @@ static int test_edits() {
 				found.row == document.rows()[3]->id); // the one the game reads
 		Value overridden;
 		TEST_EXPECT(document.get(row_at(document, 1), "overridden", overridden) && std::get<int64_t>(overridden) == 1);
-		TEST_EXPECT(document.apply(set(row_at(document, 1), "value", std::string("z")), error));
+		TEST_EXPECT(document.apply(set_edit(row_at(document, 1), "value", std::string("z")), error));
 		TEST_EXPECT(saved(document) == "// c\r\nFOO z\r\nBAR 1\r\nfoo b\r\n");
 		TEST_EXPECT(document.apply(structural(EditOperation::Remove, row_at(document, 2)), error));
 		TEST_EXPECT(saved(document) == "// c\r\nFOO z\r\nfoo b\r\n");
@@ -221,7 +213,7 @@ static int test_edits() {
 	{
 		MnsDocument document;
 		TEST_EXPECT(load(document, dir, "FOO a\r\n", "conflict.mns"));
-		TEST_EXPECT(document.apply(set(row_at(document, 0), "value", std::string("b")), error));
+		TEST_EXPECT(document.apply(set_edit(row_at(document, 0), "value", std::string("b")), error));
 		TEST_EXPECT(editor_test::write_text(dir.file("conflict.mns"), "FOO other\r\n"));
 		TEST_EXPECT(!document.save(error) && error.code() == "document.conflict");
 	}
@@ -268,7 +260,7 @@ static int test_refusals() {
 		TEST_EXPECT(document.frozen(*document.rows()[1]));
 		TEST_EXPECT(!document.apply(structural(EditOperation::Remove, foo), error));
 		TEST_EXPECT(!document.apply(structural(EditOperation::Move, foo, 0), error));
-		TEST_EXPECT(document.apply(set(foo, "value", std::string("new")), error));
+		TEST_EXPECT(document.apply(set_edit(foo, "value", std::string("new")), error));
 		TEST_EXPECT(text(document, foo, "value") == "new");
 		TEST_EXPECT(document.native().evaluate().sheet.get("FOO") == "new");
 	}
@@ -335,7 +327,7 @@ static int test_validation() {
 	TEST_EXPECT(menu && find_definition(AssetGraph(), *menu, "TITLE", title));
 	if (!menu) return 1;
 	EditorRequest name_it = request::edit_record(
-			menu->path(), set(title, "font.default_bg", std::string("%TRIM_COLOR%")));
+			menu->path(), set_edit(title, "font.default_bg", std::string("%TRIM_COLOR%")));
 	editor_test::handle_to_end(session, name_it);
 	const std::vector<std::string> left = unused();
 	TEST_EXPECT(left.size() == 5 && std::find(left.begin(), left.end(), "TRIM_COLOR") == left.end());
@@ -352,7 +344,7 @@ static int test_validation() {
 	for (const Diagnostic &d : view.findings.diagnostics) {
 		if (d.code() == "style.line_ending") {
 			line_ending = true;
-			TEST_EXPECT(d.severity == DiagnosticSeverity::Error && d.line == 1 && d.record == "A");
+			TEST_EXPECT(d.severity == DiagnosticSeverity::Warning && d.line == 1 && d.record == "A");
 		}
 	}
 	TEST_EXPECT(line_ending);
@@ -372,7 +364,7 @@ static int test_validation() {
 	TEST_EXPECT(styles->native().evaluate().success && styles->native().evaluate().sheet.get("B") == "2");
 	NodeAddress b;
 	TEST_EXPECT(find_definition(AssetGraph(), *styles, "B", b));
-	EditorRequest edit = request::edit_record(brand_path, set(b, "value", std::string("3")));
+	EditorRequest edit = request::edit_record(brand_path, set_edit(b, "value", std::string("3")));
 	editor_test::handle_to_end(session, edit);
 	TEST_EXPECT(styles->dirty() && has_code(view.findings.diagnostics, "style.line_ending"));
 	editor_test::handle_to_end(session, request::save_all());
@@ -418,6 +410,52 @@ static int test_validation() {
 	return 0;
 }
 
+// A stylesheet the game reads whose stored text hangs its reader (S26 A2): a value ended by a lone LF with text right
+// after it [orig: NapiConfigMap_ParseKeyValueBuffer @ 0x639c3b]. The rows end CR LF and read on, so the hang is the
+// stored file's: style.hangs, an error that gates the build with the game's refusal, until a Save writes the rows;
+// then it is gone and the build goes.
+static int test_stored_hang() {
+	editor_test::TempProjectDir dir("opennova_styles_stored_hang");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Styles"));
+	editor_test::create_missing_files(session);
+	const SessionView &view = session.view();
+	const AssetEntry *style = view.project.scan->find("menu_style.mns");
+	TEST_EXPECT(style != nullptr);
+	if (!style) return 1;
+	const std::string style_dir = (dir.path / "project" / style->relative_path).parent_path().generic_string();
+	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "A 1\nB 2\r\n"));
+	editor_test::handle_to_end(session, request::rescan());
+	const AssetEntry *brand = view.project.scan->find("brand.mns");
+	TEST_EXPECT(brand != nullptr);
+	if (!brand) return 1;
+	const std::string brand_path = brand->relative_path;
+	const auto hang = [&]() -> const Diagnostic * {
+		for (const Diagnostic &d : view.findings.diagnostics)
+			if (d.code() == "style.hangs" && d.asset == brand_path) return &d;
+		return nullptr;
+	};
+	// The read stands still at B on line 2, after the value the lone LF ended.
+	const Diagnostic *found = hang();
+	TEST_EXPECT(found && found->severity == DiagnosticSeverity::Error && found->line == 2 && blocks_build(*found) &&
+	            blocker_is_the_games(*found) &&
+	            blocker_reason(*found).find("NapiConfigMap_ParseKeyValueBuffer") != std::string::npos);
+	editor_test::handle_to_end(session, request::build());
+	TEST_EXPECT(view.activity.last_build && !view.activity.last_build->ok);
+	editor_test::handle_to_end(session, request::open_document(brand_path));
+	editor_test::handle_to_end(session, request::save(brand_path));
+	TEST_EXPECT(!hang());
+	std::string written, message;
+	TEST_EXPECT(opennova::io::read_file_text(dir.file("project") + "/" + brand_path, written, message) &&
+	            written == "A 1\r\nB 2\r\n");
+	editor_test::handle_to_end(session, request::build());
+	TEST_EXPECT(view.activity.last_build && view.activity.last_build->ok);
+	std::printf("test_stored_hang passed\n");
+	return 0;
+}
+
 // S11a: a value edit is a change and reverts; a line's number and its overridden flag,
 // read off the whole document, never are, though a line added above moves every line and
 // a later definition's removal lifts the override.
@@ -428,7 +466,7 @@ static int test_changes_since_save() {
 	using Change = Document::RecordChange;
 	Diagnostic error;
 	const NodeAddress foo = row_at(document, 1), bar = row_at(document, 2), later = row_at(document, 3);
-	TEST_EXPECT(document.apply(set(bar, "value", std::string("2")), error));
+	TEST_EXPECT(document.apply(set_edit(bar, "value", std::string("2")), error));
 	TEST_EXPECT(document.field_changed(bar, "value") && document.record_change(bar) == Change::Changed);
 	TEST_EXPECT(document.apply(document.revert_edits(bar, "value"), error) && !document.field_changed(bar, "value"));
 	TEST_EXPECT(text(document, bar, "value") == "1" && document.record_change(bar) == Change::Unchanged);
@@ -521,6 +559,7 @@ int main(int argc, char **argv) {
 	failures += test_refusals();
 	failures += test_changes_since_save();
 	failures += test_validation();
+	failures += test_stored_hang();
 	const std::string fixture = retail::reference_fixture("mns/menu_style.mns");
 	if (!fixture.empty()) failures += test_the_shipped_sheet(fixture);
 	if (failures == 0) std::printf("editor_styles: all tests passed\n");

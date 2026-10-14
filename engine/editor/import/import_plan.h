@@ -223,7 +223,7 @@ struct ImportPlan {
 	// The symbols a place's copy of a file defines where the project's own copy of that file, the one
 	// the game reads, does not (an edited items.def without an item a mission places): the import
 	// keeps the project's file unless asked to replace it, so the place's copy is not brought and the
-	// names stay undefined in the project (review F6); once per reference kind (`kind` the defining
+	// names stay undefined in the project (S14 R4); once per reference kind (`kind` the defining
 	// file's), with how many and where the first was met.
 	std::vector<ImportNotFollowed> shadowed;
 	// A source that cannot be read or converted (as import_assets reports it), a file whose

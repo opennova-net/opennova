@@ -18,6 +18,11 @@
 
 namespace opennova::editor {
 
+// The group an item of TYPE `type` stands in (-1, an unknown TYPE: Other).
+MissionPaletteGroup mission_palette_group_of_type(int type);
+
+const char *mission_palette_group_token(MissionPaletteGroup group);
+
 namespace {
 
 using io::JsonValue;

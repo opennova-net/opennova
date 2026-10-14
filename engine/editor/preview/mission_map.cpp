@@ -15,6 +15,7 @@
 #include <editor/preview/mission_map_canvas.h>
 #include <editor/preview/mission_overlay.h>
 #include <editor/preview/mission_source.h>
+#include <editor/preview/option_reads.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
@@ -27,6 +28,19 @@
 #include <runtime/mission/mission_sidecars.h>
 
 namespace opennova::editor {
+
+// A SetViewport's camera member, {center?, zoom?}, over `camera`: false, nothing changed, with why.
+bool mission_map_camera_from_json(const io::JsonValue &json, MissionMapCamera &camera, std::string &error);
+
+// On the wire: {center: [x, y], zoom, scale (read only: metres a pixel at the device's size)}.
+io::JsonValue mission_map_camera_to_json(const MissionMapCamera &camera, int width);
+
+// Every entity (the scene's order) then every area, shown or not, so an index is stable within a frame; `footprints`
+// (the scene's entities' order, may be shorter) the entities' models placed.
+std::vector<MissionMapMark> mission_map_marks(const MissionScene &scene, const MissionMapOptions &options,
+		const MissionMapView &view, const std::vector<MissionMapFootprint> *footprints = nullptr);
+
+bool mission_map_options_from_json(const io::JsonValue &json, MissionMapOptions &held, std::string &error);
 
 namespace {
 
@@ -179,7 +193,11 @@ void MissionMapView::unproject(float px, float py, double &x, double &y) const {
 float mission_map_zoom_for(double metres, int width) {
 	(void)width;
 	// Across the picture the map shows zoom x 65536 / 200 metres, whatever its width (the scale's law).
-	return std::clamp(float(metres * 200.0 / 65536.0), kMissionMapZoomMin, kMissionMapZoomMax);
+	return std::clamp(float(metres * 200.0 / io::kFp16OneD), kMissionMapZoomMin, kMissionMapZoomMax);
+}
+
+void mission_map_tile_texels(std::vector<uint8_t> &rgba) {
+	for (size_t i = 3; i < rgba.size(); i += 4) rgba[i] = rgba[i] ? 255 : 0;
 }
 
 // --- the options -----------------------------------------------------------------------------------
@@ -257,22 +275,18 @@ bool mission_map_options_from_json(const io::JsonValue &json, MissionMapOptions 
 					        mark.key + ".";
 					return false;
 				}
-				if (!mark.value.is_bool()) {
-					error = "options.marks." + mark.key + " is true or false.";
+				if (!read_json_bool(mark.value, *into, error,
+							"options.marks." + mark.key + " is true or false."))
 					return false;
-				}
-				*into = mark.value.boolean;
 			}
 		} else if (name == "color_by") {
-			if (!member.value.is_string() || !mission_color_by_from_token(member.value.string, out.color_by)) {
-				error = "options.color_by is team or group.";
+			if (!read_json_token(member.value, mission_color_by_from_token, out.color_by, error,
+						"options.color_by is team or group."))
 				return false;
-			}
 		} else if (name == "background") {
-			if (!member.value.is_string() || !mission_map_background_from_token(member.value.string, out.background)) {
-				error = "options.background is colour, height, delta, flatness or none.";
+			if (!read_json_token(member.value, mission_map_background_from_token, out.background,
+						error, "options.background is colour, height, delta, flatness or none."))
 				return false;
-			}
 		} else if (name == "grid" || name == "text" || name == "stick" || name == "water") {
 			bool &into = name == "grid" ? out.grid : name == "text" ? out.text : name == "stick" ? out.stick : out.water;
 			if (!read_bool(json, name.c_str(), into, error)) return false;
@@ -782,7 +796,7 @@ bool MissionMapViewport::follow_terrain_view_(const SessionView &view) {
 			atlas = field->heightmap;
 			revision = ground.heights_revision();
 		}
-		if (ground.water()) water = int32_t(ground.water_height() * 65536.0);
+		if (ground.water()) water = int32_t(ground.water_height() * io::kFp16OneD);
 	}
 	terrain_view_.follow(background, options_.water, atlas, revision, water);
 	return terrain_view_.serial() != before;

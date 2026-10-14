@@ -16,8 +16,7 @@ extends GutTest
 ## And the picture an animation map's row makes: its rig's model drawn skinned and posed, the mesh in the
 ## rendered image as the model's own document draws it from the same camera (not the rig's bones alone).
 
-const EDITOR_SCENE := "res://editor/editor_root.tscn"
-const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
+const EditorFixture := preload("res://tests/authoring/editor_fixture.gd")
 const ARMORY := "res://../fixtures/threedi/synth/armory.3di"
 const SKINNED := "res://../fixtures/threedi/o3d/skinned.o3d"
 ## The skinned fixture's map: its rest row and an idle holding the rest pose (three bones, one frame each).
@@ -65,31 +64,12 @@ var _seam: RefCounted = null
 
 
 func before_each() -> void:
-	# The ImGui context past its first frames before the editor attaches to it: a context whose first
-	# NewFrame ran without docking asserts when docking is enabled exactly at its second (imgui.cpp's
-	# frame sanity check), which an editor made in a run's first frame would meet.
-	for _frame in 3:
-		await get_tree().process_frame
-	var packed := load(EDITOR_SCENE) as PackedScene
-	assert_not_null(packed, "the editor scene loads (the editor-enabled variant is loaded)")
-	if packed == null:
-		return
-	_app = packed.instantiate()
-	_seam = EditorSeam.new(_app)
-	var settings_dir := OS.get_cache_dir().path_join("opennova editor device %d" % Time.get_ticks_usec())
-	assert_eq(DirAccess.make_dir_recursive_absolute(settings_dir), OK)
-	_dirs.append(settings_dir)
-	_app.set("settings_path", settings_dir.path_join("editor_settings.json"))
-	add_child_autofree(_app)
-	await get_tree().process_frame
+	_seam = await EditorFixture.boot(self, "device", _dirs, 3)
+	_app = _seam.app if _seam != null else null
 
 
 func after_each() -> void:
-	_app = null
-	for dir in _dirs:
-		TestFs.remove_dir_recursive(dir)
-	_dirs.clear()
-	await get_tree().process_frame
+	await EditorFixture.teardown(self, _dirs)
 
 
 ## The viewport over `path`, its envelope.
@@ -102,15 +82,10 @@ func _device(path: String) -> SubViewport:
 	return _app.get_viewport_device(path, "model")
 
 
-## The viewport over `path` ready on its device, a frame at a time.
+## The viewport over `path` once its device built its picture, the Shell's frames alone
+## (EditorSeam.await_viewport, nothing pumped).
 func _await_ready(path: String) -> Dictionary:
-	var state := _state(path)
-	for _frame in 600:
-		if String(state.get("status", "")) == "ready" and bool(state.get("device", {}).get("attached", false)):
-			break
-		await get_tree().process_frame
-		state = _state(path)
-	return state
+	return await _seam.await_viewport({"path": path, "limit": 1}, 0, Callable(), 900, false)
 
 
 ## How far the build of the viewport over `path` has run.

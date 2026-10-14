@@ -71,6 +71,11 @@ public:
 	void unsaved_files(const EditorRequest &request, std::vector<std::string> &files);
 
 private:
+	// A rename's operation started over `planner` (a file's or a name's, RenameOperation's), the document the
+	// modder is in kept: refused busy naming `what` when the gate lets none run beside it; the status line says
+	// `status` while it runs.
+	template <class Planner>
+	void start_rename(Planner planner, const std::string &what, std::string status);
 	// A name's rename everywhere planned from a PreviewRename's or a RenameSymbol's fields (the
 	// definition found by its file, locator and field in the graph, current first).
 	SymbolRenamePlan plan_symbol(const EditorRequest &request);

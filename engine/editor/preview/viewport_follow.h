@@ -25,8 +25,6 @@ enum class ViewportAction : uint8_t {
 			// what changed only the overlays show
 	Clear, // what it built dropped (the viewport's status says why there is nothing)
 };
-// "keep", "rebuild", "update", "clear".
-const char *viewport_action_token(ViewportAction action);
 
 // The follow every viewport kind shares (ADR 0046 S13 V5): the state it shows (its key), whether
 // that state failed (a document the game could not read, a screen it lacks, a rig model that does
