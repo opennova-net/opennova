@@ -250,6 +250,9 @@ void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 	// destroy, so it holds across the map changes between them (§5.70.3)
 	// [orig: `mov g_LastGameToggle, 0` @0x51CAA4].
 	if (ctx.rotation != nullptr) ctx.rotation->last_game = false;
+	// The join lock clears with it, so a new session admits joiners; a map change runs no round
+	// state init and keeps it [orig: `mov g_ServerJoinLocked, ebx(0)` @0x51CAAA].
+	ctx.join_locked = false;
 	if (!ctx.is_authority) return;
 	// Server_ResetRoundCounters copies the configured StartDelay seconds into the
 	// one live pre-round timer. Keep the timer on World: it is the authority

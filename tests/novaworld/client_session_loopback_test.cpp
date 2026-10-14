@@ -1394,9 +1394,8 @@ void test_reconnect_rehost() {
 	joiner.team = "1";
 	joiner.type = "8";
 	exchange(server, client, sent(client, client.send_host_player_added(joiner)), out);
-	exchange(server, client,
-	         sent(client, client.send_host_update({{0, "Players", "2"}, {0, "MissionName", "ASH_G11A"}}, {})),
-	         out);
+	client.set_host_list_vars({ { 0, "Players", "2" }, { 0, "MissionName", "ASH_G11A" } });
+	exchange(server, client, sent(client, client.send_host_update()), out);
 
 	// The connection drops (the reap); the GSID the in-match SUS1 publishes clears with it.
 	client.set_clock_ms(240001);
@@ -1443,11 +1442,15 @@ void test_reconnect_rehost() {
 
 // A ClientHostUpdate writes a list's container only under includeAll or while the list's
 // changed flag is set (a changed value, a new entry, a removal or a mark since the last
-// update), and goes only when either is; each update clears both flags (D-NET-489).
-// [orig: NapiStatement_SerializeVarList @0x4d0660 (the return @0x4d06b6); CPlayerManager_RebuildLists
-//  @0x4d4590 (the test @0x4d45ac, the clears @0x4d45c2 / @0x4d45cf); CNapiVarEntry_SetValue
-//  @0x6305ce; CNapiVarList_CreateEntry @0x6318a7; NapiLinkedList_RemoveByUserData @0x63086d;
-//  CNapiGameSession_InitHeapsAndSerializeCounter @0x4ce32f / @0x4ce33c]
+// update), and goes only when either is; it writes a list's vars whole under includeAll and
+// otherwise the vars whose changed bit is set (a changed value, a new entry, a mark), and each
+// update clears both flags and every bit (D-NET-489, D-NET-658).
+// [orig: NapiStatement_SerializeVarList @0x4d0660 (the return @0x4d06b6, the var's bit
+//  @0x4d071a); CPlayerManager_RebuildLists @0x4d4590 (the test @0x4d45ac, the marks with 0
+//  @0x4d45c2 / @0x4d45cf); CNapiVarEntry_SetValue @0x6305c6 / @0x6305ce; CNapiVarList_CreateEntry
+//  @0x6318a1 / @0x6318a7; NapiLinkedList_RemoveByUserData @0x63086d; NapiMemHeap_SetAllocId
+//  @0x6308a4 / @0x6308b3; CNapiGameSession_InitHeapsAndSerializeCounter @0x4ce32f / @0x4ce33c;
+//  Server_PlayerAdd's removal and re-creation @0x51d426..0x51d4aa]
 void test_host_update_writes_changed_lists() {
 	MiniServer server;
 	ClientSession::Config cfg;
@@ -1459,33 +1462,53 @@ void test_host_update_writes_changed_lists() {
 	reg.server_name = "Lists Srv";
 	reg.app_id = 1357;
 	std::vector<std::vector<uint8_t>> out;
+	expect(!client.send_host_update(/*include_all=*/true),
+			"host update: no update goes outside state 6");
 	exchange(server, client, sent(client, client.request_hosting(reg, 0)), out);
 	if (!expect(client.host_state() == ClientSession::HostState::Established,
 	            "host update: the host result establishes the hosting")) return;
-	// The lists an update put on the wire, by VarList name, and each one's var count.
+	// The lists an update put on the wire, by VarList name, and each one's var count; `vars`
+	// keeps each var's (list, name, value).
+	struct WrittenVar {
+		std::string list, name, value;
+	};
+	std::vector<WrittenVar> vars;
 	const auto lists_of = [&](bool queued, std::vector<std::pair<std::string, size_t>> &lists) {
 		lists.clear();
+		vars.clear();
 		const auto datagrams = sent(client, queued);
 		std::vector<NapiMessage> containers;
 		if (!decode_client_statements(datagrams, client.client_scrk(), containers) || containers.size() != 1 ||
 				containers[0].name != "ClientHostUpdate")
 			return false;
-		for (const NapiMessage &list : containers[0].children)
+		for (const NapiMessage &list : containers[0].children) {
 			lists.emplace_back(field_of(list, "VarList"), list.children.size());
+			for (const NapiMessage &var : list.children)
+				vars.push_back({ field_of(list, "VarList"), field_of(var, "VarName"),
+						field_of(var, "VarValue") });
+		}
 		std::vector<std::vector<uint8_t>> acked;
 		exchange(server, client, datagrams, acked);
 		return true;
 	};
 	using Lists = std::vector<std::pair<std::string, size_t>>;
 	Lists lists;
-	expect(lists_of(client.send_host_update({{0, "Players", "1"}}, {}), lists) &&
-	               lists == Lists{{"Host", 1}, {"PlayerList", 0}},
-	       "host update: the request's marks stand, so the first update writes both lists");
-	expect(!client.send_host_update({{0, "Players", "1"}}, {}),
-	       "host update: nothing changed and nothing marked, so no update goes");
-	expect(lists_of(client.send_host_update({{0, "Players", "2"}}, {}), lists) &&
-	               lists == Lists{{"Host", 1}},
-	       "host update: a changed Host value writes the Host list alone");
+	// The request built the Host list's first run (eight vars) and marked both lists: every
+	// var's bit stands, so the first update writes them all with the new Players.
+	client.set_host_list_vars({ { 0, "Players", "1" } });
+	expect(lists_of(client.send_host_update(), lists) &&
+					lists == Lists{ { "Host", 9 }, { "PlayerList", 0 } },
+			"host update: the request's marks stand, so the first update writes both lists whole");
+	client.set_host_list_vars({ { 0, "Players", "1" } });
+	expect(!client.send_host_update(),
+			"host update: nothing changed and nothing marked, so no update goes");
+	// The whole Host list handed again with one changed value: that var alone is written.
+	std::vector<ClientVar> host = make_host_var_list(reg, HostLobbyText{}, /*full=*/false);
+	host.push_back({ 0, "Players", "2" });
+	client.set_host_list_vars(host);
+	expect(lists_of(client.send_host_update(), lists) && lists == Lists{ { "Host", 1 } } &&
+					vars.size() == 1 && vars[0].name == "Players" && vars[0].value == "2",
+			"host update: a changed Host value writes that var alone");
 	HostPlayerSlot joiner;
 	joiner.slot = 1;
 	joiner.player_name = "Joiner";
@@ -1493,20 +1516,33 @@ void test_host_update_writes_changed_lists() {
 	joiner.team = "1";
 	joiner.type = "8";
 	exchange(server, client, sent(client, client.send_host_player_added(joiner)), out);
-	expect(lists_of(client.send_host_update({}, make_player_list({joiner})), lists) &&
-	               lists == Lists{{"PlayerList", 5}},
-	       "host update: an added player's vars write the PlayerList alone");
+	expect(lists_of(client.send_host_update(), lists) && lists == Lists{ { "PlayerList", 5 } },
+			"host update: an added player's vars write the PlayerList alone");
+	// Removed and added again with the same five values between two updates: the re-created
+	// entries carry their bits, so the five vars go out.
 	exchange(server, client, sent(client, client.send_host_player_removed(1)), out);
-	expect(lists_of(client.send_host_update({}, {}), lists) && lists == Lists{{"PlayerList", 0}},
-	       "host update: a removal alone writes the PlayerList's empty container");
-	expect(lists_of(client.send_host_update({}, {}, /*include_all=*/true), lists) &&
-	               lists == Lists{{"Host", 0}, {"PlayerList", 0}},
-	       "host update: includeAll writes both lists whatever changed");
-	expect(!client.send_host_update({}, {}), "host update: the includeAll update cleared both flags");
+	exchange(server, client, sent(client, client.send_host_player_added(joiner)), out);
+	expect(lists_of(client.send_host_update(), lists) && lists == Lists{ { "PlayerList", 5 } },
+			"host update: a slot removed and added again between two updates writes its five vars");
+	// A var changed and changed back between two updates keeps its bit: it goes out with the
+	// value it has.
+	client.set_player_list_vars({ { 1, "PlayerTeam", "2" } });
+	client.set_player_list_vars({ { 1, "PlayerTeam", "1" } });
+	expect(lists_of(client.send_host_update(), lists) && lists == Lists{ { "PlayerList", 1 } } &&
+					vars.size() == 1 && vars[0].name == "PlayerTeam" && vars[0].value == "1",
+			"host update: a var changed and changed back goes out with its value");
+	exchange(server, client, sent(client, client.send_host_player_removed(1)), out);
+	expect(lists_of(client.send_host_update(), lists) && lists == Lists{ { "PlayerList", 0 } },
+			"host update: a removal alone writes the PlayerList's empty container");
+	expect(lists_of(client.send_host_update(/*include_all=*/true), lists) &&
+					lists == Lists{ { "Host", 9 }, { "PlayerList", 0 } },
+			"host update: includeAll writes both lists whole whatever changed");
+	expect(!client.send_host_update(),
+			"host update: the includeAll update cleared both flags and every var's bit");
 	client.mark_host_lists();
-	expect(lists_of(client.send_host_update({}, {}), lists) &&
-	               lists == Lists{{"Host", 0}, {"PlayerList", 0}},
-	       "host update: a mark writes both lists");
+	expect(lists_of(client.send_host_update(), lists) &&
+					lists == Lists{ { "Host", 9 }, { "PlayerList", 0 } },
+			"host update: a mark writes both lists whole");
 }
 
 // The re-join's 0x42 leg: re-sent every > 3000 ms until 20000 ms from the ServerHello, which

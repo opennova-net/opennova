@@ -97,7 +97,9 @@ int main() {
 	const fs::path work = serve_test::fresh_dir("novaworld_cwd");
 	serve_test::ScopedCwd cwd(work);
 	CHECK(serve_test::write_bytes(dir / "SERVETST.BMS", serve_test::deathmatch_mission()));
-	CHECK(serve_test::write_bytes(dir / "SERVETS2.BMS", serve_test::deathmatch_mission("Serve Test Map Two")));
+	// The next map's header names another climate, which its Region column reads (D-NET-373).
+	CHECK(serve_test::write_bytes(dir / "SERVETS2.BMS",
+			serve_test::deathmatch_mission("Serve Test Map Two", bms::ClimateType::Snow)));
 	// The Host list's tokens come from the mounted gametext, as the game's do.
 	CHECK(serve_test::write_bytes(dir / "gametext.bin",
 			serve_test::gametext({
@@ -279,6 +281,9 @@ int main() {
 		if (after) {
 			CHECK(after->mission_name == "Serve Test Map Two");
 			CHECK(var(after->last_host_update["Host"], "MissionName") == "Serve Test Map Two");
+			// The next map's climate (header +0x84), STRNOVA09 here, where the first map's 0
+			// listed STRNOVA07 [orig: Lobby_UpdateServerInfo @0x4FE9D5..0x4FE9E7].
+			CHECK(var(after->last_host_update["Host"], "Region") == "Snow");
 			CHECK(after->server_name == "Serve NW Renamed");
 			CHECK(var(after->last_host_update["Host"], "Msg") == "renamed by the service");
 			// The same socket: the endpoint the service observed is unchanged.

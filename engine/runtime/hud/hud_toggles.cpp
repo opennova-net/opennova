@@ -81,7 +81,7 @@ constexpr const char *kRowTokens[kHudToggleRowCount] = {
 	"huddetail", "hudcolor", "showhud", "dotsize", "Goals", "view1st", "viewwithgun",
 	"viewchase", "playerlist_alt", "OldMessages", "ShowScore", "ShowFriendly", "help",
 	"helpmap", "Briefing", "Verbose", "commander_menu", "pause", "AudioEmote", "RadioMacro",
-	"ToggleServer", "flipmouse", "mousescale",
+	"ToggleServer", "flipmouse", "mousescale", "lockgame",
 };
 
 } // namespace
@@ -115,6 +115,7 @@ void hud_key_poll_set_rows(HudKeyPoll &k, uint32_t rows) {
 	k.toggle_server = down(kRowToggleServer);
 	k.flipmouse = down(kRowFlipMouse);
 	k.mousescale = down(kRowMouseScale);
+	k.lockgame = down(kRowLockGame);
 }
 
 uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
@@ -313,6 +314,15 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	if (s.flipmouse.step(k.flipmouse, k.active, false)) events |= kMouseFlipped;
 	if (s.mousescale.step(k.mousescale, k.active, false))
 		events |= kMouseScaleStepped | (k.mouse_scale_negative ? kMouseScaleNegative : 0u);
+	// lockgame: an authority in a session, a listen host or a dedicated one, toggles its join
+	// lock. The row ships unbound (flags 0x04000000: no gate bit, mode 3, alive or dead), and
+	// the binding head's three filters take no code 119.
+	// [orig: case 119 — is_in_session @0x49BC1C..0x49BC23, is_authority @0x49BC29..0x49BC30,
+	//  Server_ToggleJoinLock @0x49BC36; catalog row 84; the filters @0x52AD50 (codes
+	//  151..167 @0x52AD91 / @0x52AE9F, 405..410 @0x52AEBF), @0x4A3E50 (none), @0x56FC30 (the
+	//  cine editor's table, 119 its pass-through entry @0x56FCF5)]
+	if (s.lockgame.step(k.lockgame, k.active, k.chorded) && k.in_session && k.authority)
+		events |= kJoinLockToggled;
 	return events;
 }
 

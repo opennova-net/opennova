@@ -1,8 +1,9 @@
 // The NovaWorld lobby var-builders (engine/net/novaworld/lobby_vars): the HostSetup / Host /
-// PlayerList lists in retail's insertion order with retail's value sources, the dirty delta, the
-// ClientHostRequest shape, the NW-S5 identity set, and the host:port split. Server-free, Godot-free.
+// PlayerList lists in retail's insertion order with retail's value sources, the
+// ClientHostRequest shape, the NW-S5 identity set, and the host:port split. Server-free,
+// Godot-free.
 // [orig: CNapiGameSession_BuildHostVarLists @0x4d0b50; Lobby_UpdateServerInfo @0x4fe8c0;
-//  Server_PlayerAdd @0x51d421; CNapiVarEntry_SetValue @0x630590; CNapiGameSession_SendHostRequest @0x4d3700]
+//  Server_PlayerAdd @0x51d421; CNapiGameSession_SendHostRequest @0x4d3700]
 
 #include <net/novaworld/lobby_vars.h>
 
@@ -246,20 +247,7 @@ int main() {
 		       "sendplayerlist off drops the p= suffix");
 	}
 
-	// 5. The dirty delta: changed values and new entries only.
-	{
-		const auto before = nw::make_host_var_list(cfg, text, true);
-		nw::HostRegistration next = cfg;
-		next.player_count = 4;
-		next.mission_name = "ASH_G12A";
-		const auto after = nw::make_host_var_list(next, text, true);
-		const auto dirty = nw::dirty_client_vars(before, after);
-		expect(names_are(dirty, {"MissionName", "Players"}), "only the changed columns are dirty");
-		expect(nw::dirty_client_vars(after, after).empty(), "an unchanged list has no dirty vars");
-		expect(nw::dirty_client_vars({}, after).size() == after.size(), "everything is dirty on the first send");
-	}
-
-	// 6. ClientHostRequest: CurrentlyHosting 0 on a fresh host, the Cookie, HostSetup, the
+	// 5. ClientHostRequest: CurrentlyHosting 0 on a fresh host, the Cookie, HostSetup, the
 	//    initial Host list, and an empty PlayerList.
 	{
 		const std::vector<nw::ClientVar> cookie = {{0, "CountryName", "United States"}, {0, "NWUID", "u-1"}};
@@ -278,7 +266,7 @@ int main() {
 		       "the request's PlayerList is empty");
 	}
 
-	// 7. The NW-S5 identity set: names + order + the three empties + the fingerprint seed math.
+	// 6. The NW-S5 identity set: names + order + the three empties + the fingerprint seed math.
 	{
 		nw::LobbyIdentityParams p;
 		p.client_index = 0x11112222u;
@@ -323,7 +311,7 @@ int main() {
 		expect(nw::az_fingerprint(123, 16) == nw::az_fingerprint(123, 16), "az_fingerprint deterministic");
 	}
 
-	// 8. Retail's stable volume/MAC identity transforms, pinned independently
+	// 7. Retail's stable volume/MAC identity transforms, pinned independently
 	// from the binding that gathers the platform inputs.
 	{
 		nw::RetailMachineInputs in;
@@ -341,7 +329,7 @@ int main() {
 		       "NWUSID matches generate_hardware_fingerprint transform");
 	}
 
-	// 9. D-NET-469: parse_host_and_port is retail's host-and-port split: the host before the first
+	// 8. D-NET-469: parse_host_and_port is retail's host-and-port split: the host before the first
 	// colon (all of it without one), the port the napi literal's value after it, else 0; only a
 	// string over 511 bytes fails. [orig: Network_ParseHostAndPort @0x62E200 - @0x62E260,
 	// @0x62E297, @0x62E2B1, @0x62E2BD]
