@@ -903,9 +903,40 @@ static int test_drop() {
 				 R"({"kind": "edit_in_viewport", "drop": {"file": "a.3di", "at": [1, 1], "to": [2, 2]}})",
 				 R"({"kind": "edit_in_viewport", "drop": {"reference": "area", "at": [1, 1], "to": [2]}})",
 				 R"({"kind": "edit_in_viewport", "drop": {"file": "a.3di", "at": [10, 10], "kind": "chart"}})",
+				 R"({"kind": "edit_in_viewport", "drop": {"reference": "tile", "name": "3", "at": [1, 1], "ground": [2, 2]}})",
+				 R"({"kind": "edit_in_viewport", "drop": {"file": "a.3di", "ground": [2, 2]}})",
+				 R"({"kind": "edit_in_viewport", "drop": {"reference": "item", "name": "1", "ground": [2, 2]}})",
+				 R"({"kind": "edit_in_viewport", "drop": {"reference": "tile", "name": "3", "ground": [2]}})",
 				 R"({"kind": "edit_in_viewport", "drop": "a.3di"})" }) {
 		const JsonValue answer = wired.wire(unread);
 		TEST_EXPECT(!answer.get_bool("ok", true) && answer.get_string("error", "").find("drop") != std::string::npos);
+	}
+	// A terrain tile's stamp at a ground point (mission metres) and a tile's drag to one, read back as written; a drag of
+	// another handle to the ground not read.
+	{
+		EditorRequest stamp = request::of(EditorRequestKind::EditInViewport);
+		stamp.drop.reference = "tile";
+		stamp.drop.name = "3";
+		stamp.drop.ground = true;
+		stamp.drop.x = 52.0f;
+		stamp.drop.y = -70.5f;
+		EditorRequest back;
+		std::string error;
+		TEST_EXPECT(editor_request_from_json(editor_request_to_json(stamp), back, error) && back == stamp &&
+		            back.drop.ground && back.drop.y == -70.5f);
+		EditorRequest carried = request::of(EditorRequestKind::EditInViewport);
+		carried.drag.id = 7;
+		carried.drag.handle = "tile";
+		carried.drag.by = false;
+		carried.drag.ground = true;
+		carried.drag.x = 64.0f;
+		carried.drag.y = 96.0f;
+		TEST_EXPECT(editor_request_from_json(editor_request_to_json(carried), back, error) && back == carried && back.drag.ground);
+		const JsonValue moved = wired.wire(R"({"kind": "edit_in_viewport", "drag": {"id": 3, "handle": "move", "ground": [1, 1]}})");
+		TEST_EXPECT(!moved.get_bool("ok", true) && moved.get_string("error", "").find("ground") != std::string::npos);
+		const JsonValue both = wired.wire(R"({"kind": "edit_in_viewport", "drag": {"id": 3, "handle": "tile", "to": [1, 1], )"
+		                                  R"("ground": [1, 1]}})");
+		TEST_EXPECT(!both.get_bool("ok", true));
 	}
 	TEST_EXPECT(refused(wired.wire(R"({"kind": "edit_in_viewport", "drop": {"file": "armory.3di", "at": [10, 10]}, )"
 								   R"("command": {"name": "align_left"}})"),

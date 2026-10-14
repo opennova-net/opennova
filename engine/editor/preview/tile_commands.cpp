@@ -194,9 +194,10 @@ bool plan_tile_drop(const TerrainViewContext &view, const ViewportDrop &drop, Ca
 		error = "A tile is stamped at a point, not over a box.";
 		return false;
 	}
-	TerrainPoint at;
+	// The point of the picture the stamp lands under, or the ground point it names (mission metres).
+	TerrainPoint at{double(drop.x), double(drop.y)};
 	double height = 0.0;
-	if (!view.space.pointer_ground(drop.x, drop.y, at, height)) {
+	if (!drop.ground && !view.space.pointer_ground(drop.x, drop.y, at, height)) {
 		error = "No ground lies under that point of the picture.";
 		return false;
 	}
@@ -235,7 +236,7 @@ bool plan_tile_drag(const TerrainViewContext &view, const ViewportDrag &drag, Ca
 	const TilOverlayEntry &entry = held->entry;
 	const TerrainPoint corner{double(entry.x_fixed) / io::kFp16OneD, double(entry.z_fixed) / io::kFp16OneD};
 	float x = drag.x, y = drag.y;
-	if (drag.by) {
+	if (drag.by && !drag.ground) {
 		float hx = 0.0f, hy = 0.0f;
 		if (!view.space.to_picture(corner, view.space.planar() ? 0.0 : view.space.height(corner), hx, hy)) {
 			error = "The tile is not on the picture: drag it to a point, \"to\": [x, y].";
@@ -244,9 +245,10 @@ bool plan_tile_drag(const TerrainViewContext &view, const ViewportDrag &drag, Ca
 		x += hx;
 		y += hy;
 	}
-	TerrainPoint at;
+	// The ground under the point of the picture, or the ground point the drag names (mission metres).
+	TerrainPoint at{double(x), double(y)};
 	double height = 0.0;
-	if (!view.space.pointer_ground(x, y, at, height)) {
+	if (!drag.ground && !view.space.pointer_ground(x, y, at, height)) {
 		error = "No ground lies under that point of the picture.";
 		return false;
 	}
