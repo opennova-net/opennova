@@ -3,24 +3,32 @@
 // The one home for the read_file/write_file helpers the fixture generators and
 // roundtrip tests used to carry per file: a fixture generator reads the
 // committed bytes back to byte-compare its writer's output, a roundtrip test
-// reads the fixture it feeds the parser. Header-only, infrastructure only (no
-// retail counterpart to cite).
+// reads the fixture it feeds the parser. Every path is a UTF-8 string, turned
+// into the system's own through base/io/os_path.h (a folder named outside the
+// ANSI code page, a path past MAX_PATH). And the CR LF text a test stages a
+// retail text file with. Header-only, infrastructure only.
 #pragma once
 
+#include <cctype>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <ios>
 #include <iterator>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <vector>
+
+#include <base/io/os_path.h>
 
 namespace test_io {
 
 // Read the whole file into `out`. False when the file cannot be opened (an
 // empty file reads as true with an empty vector).
 inline bool read_file(const std::string &path, std::vector<uint8_t> &out) {
-	std::ifstream f(path, std::ios::binary | std::ios::ate);
+	std::ifstream f(opennova::io::os_path(path), std::ios::binary | std::ios::ate);
 	if (!f) return false;
 	const std::streamoff sz = f.tellg();
 	if (sz < 0) return false;
@@ -42,7 +50,7 @@ inline std::vector<uint8_t> read_file(const std::string &path) {
 // The text forms: the whole file as a std::string, read in binary mode (no
 // newline translation). False when the file cannot be opened.
 inline bool read_file_text(const std::string &path, std::string &out) {
-	std::ifstream f(path, std::ios::binary);
+	std::ifstream f(opennova::io::os_path(path), std::ios::binary);
 	if (!f) return false;
 	out.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
 	return true;
@@ -56,8 +64,13 @@ inline std::string read_file_text(const std::string &path) {
 	return text;
 }
 
+// The whole of `bytes` written to `path` (created or truncated), its folders made.
 inline bool write_file(const std::string &path, const std::vector<uint8_t> &bytes) {
-	std::ofstream f(path, std::ios::binary | std::ios::trunc);
+	const std::filesystem::path file = opennova::io::os_path(path);
+	std::error_code ec;
+	if (file.has_parent_path())
+		std::filesystem::create_directories(file.parent_path(), ec);
+	std::ofstream f(file, std::ios::binary | std::ios::trunc);
 	if (!f) return false;
 	if (!bytes.empty()) f.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
 	return static_cast<bool>(f);
@@ -70,6 +83,42 @@ inline bool is_lfs_pointer(const std::vector<uint8_t> &bytes) {
 	static const char kLfsSentinel[] = "version https://git-lfs";
 	return bytes.size() >= sizeof(kLfsSentinel) - 1 &&
 	       std::memcmp(bytes.data(), kLfsSentinel, sizeof(kLfsSentinel) - 1) == 0;
+}
+
+// `text` with every line ending in CR LF, the last one included: the one break the retail walk of a
+// .def, .trn or .env file splits at, which drops the last byte of a line left without it
+// [orig: File_ParseASCIIFile @0x53D8C7..0x53D8F5; engine/base/io/ascii_config.h], and the one the
+// ConfigFile reader ends a line at (charattr.def). A test writes such a file's text with LF and
+// stages it through this (the GUT suite's TestFs.crlf); a CR LF already there stays one.
+inline std::string crlf(std::string_view text) {
+	std::string lf;
+	for (size_t i = 0; i < text.size(); ++i)
+		if (!(text[i] == '\r' && i + 1 < text.size() && text[i + 1] == '\n'))
+			lf += text[i];
+	if (!lf.empty() && lf.back() != '\n')
+		lf += '\n';
+	std::string out;
+	for (const char c : lf) {
+		if (c == '\n')
+			out += '\r';
+		out += c;
+	}
+	return out;
+}
+
+// A text as a file named `name` holds it: a .def, .trn or .env with CR LF line ends (crlf above),
+// any other as it is.
+inline std::string staged(const std::string &name, const std::string &text) {
+	std::string extension = name.size() >= 4 ? name.substr(name.size() - 4) : std::string();
+	for (char &c : extension)
+		c = char(std::tolower(static_cast<unsigned char>(c)));
+	return extension == ".def" || extension == ".trn" || extension == ".env" ? crlf(text) : text;
+}
+
+// A text file written at `path` as staged above, its folders made (write_file).
+inline bool write_text(const std::string &path, const std::string &text) {
+	const std::string bytes = staged(path, text);
+	return write_file(path, std::vector<uint8_t>(bytes.begin(), bytes.end()));
 }
 
 } // namespace test_io
