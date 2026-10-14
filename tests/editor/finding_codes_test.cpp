@@ -355,7 +355,8 @@ static int test_columns() {
 	                     "hudfx.power_slots_empty", "import.decode",
 	                     "import.encode", "import.font", "import.input", "import.migrate", "import.option", "import.read",
 	                     "import.scene", "import.sidecar", "import.terrain", "import.write", "menu.invalid_input",
-	                     "mission.runs_past_table", "model.light_no_registers", "project.root.unreadable", "style.hangs",
+	                     "mission.runs_past_table", "model.light_no_registers", "particle.unfilled_token_slot",
+	                     "project.root.unreadable", "style.hangs",
 	                     "terrain.refused", "texture.particle_too_big", "texture.pcx_overrun", "texture.wrong_reader" }));
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.integrity; }) ==
 	            Tokens({ "asset.name.duplicate", "asset.name.empty", "asset.name.too_long", "build.archive",
@@ -373,7 +374,8 @@ static int test_columns() {
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.game_refusal != nullptr; }) ==
 	            Tokens({ "avatars.reader_stops", "build.expansion.exp_name", "document.config_overrun",
 	                     "hudfx.power_slots_empty",
-	                     "menu.invalid_input", "mission.runs_past_table", "model.light_no_registers", "style.hangs",
+	                     "menu.invalid_input", "mission.runs_past_table", "model.light_no_registers",
+	                     "particle.unfilled_token_slot", "style.hangs",
 	                     "terrain.refused", "texture.particle_too_big", "texture.pcx_overrun", "texture.wrong_reader" }));
 	// A finding whose file the editor's model cannot carry where the game reads it on (unwritable_code) gates only
 	// an open file with unsaved edits, which the build's Save cannot write: a closed one packs as stored. One the

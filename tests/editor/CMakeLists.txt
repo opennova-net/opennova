@@ -677,6 +677,10 @@ opennova_add_editor_test(particle_keys MIXED)
 # The particle type's project check: an effect's particle and a particle's curve table that no particle file the game
 # loads defines (every file's names, without case; the gore set the project picks), each a warning at the name.
 opennova_add_editor_test(particle_project_check)
+
+# The game's particle parse hazard: the line tokenizer's token slots a list reads past its line into, a fault where no
+# line parsed before it filled the slot (the files in the order the game parses them), an error that gates the build.
+opennova_add_editor_test(particle_token_slots)
 # The HUD effects document (ADR 0046 S23 B): hudfx.def's model lines, the one the game reads, the game's failure
 # where the HUD model is that line, a long name's run, an edit's one line, the blank. JO ships none.
 opennova_add_editor_test(hudfx SOURCES hudfx_document_test.cpp)

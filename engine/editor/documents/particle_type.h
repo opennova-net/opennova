@@ -37,6 +37,9 @@ enum class ParticleFinding {
 	// a particle's curve table no file the game loads defines.
 	EffectUnresolved,
 	CurveUnresolved,
+	// The use check's (graph/use_checks.cpp, documents/particle_token_slots.h): a list the game's parser reads past its
+	// line into a token slot no line parsed before it filled, which faults the game as it loads the effects.
+	UnfilledTokenSlot,
 	kCount
 };
 const FindingCodeRow &finding_code(ParticleFinding code);

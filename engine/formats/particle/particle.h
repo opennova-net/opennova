@@ -90,6 +90,9 @@ constexpr std::uint32_t Bubble    = 1u <<  4;  // bit 4 = 0x10 — engine table 
 
 std::uint32_t parse_move_bits(std::string_view raw) noexcept;
 std::string format_move_bits(std::uint32_t bits);
+// Whether `token` is one of the move table's names, whole and without case, as the move key's list takes its tokens
+// [orig: CParticleDef_ParseProperties @ 0x5EA4F0..0x5EA517, _stricmp over the names @ 0x848808].
+bool is_move_flag_name(std::string_view token) noexcept;
 
 // Particle flag table. 29 named entries — verified live from
 // `g_ParticleFlagTable @ 0x5ba500` in ParticleEdit_v1_1.exe (count
@@ -139,6 +142,9 @@ constexpr std::uint32_t AboveH2O              = 1u << 28;  // 0x10000000 "ABOVEH
 
 std::uint32_t parse_particle_flags(std::string_view raw) noexcept;
 std::string format_particle_flags(std::uint32_t bits);
+// Whether `token` is one of the flag table's names, whole and without case, as the flags key's list takes its tokens
+// [orig: CParticleDef_ParseProperties @ 0x5EA5F0..0x5EA617, _stricmp over the names @ 0x846A20].
+bool is_particle_flag_name(std::string_view token) noexcept;
 
 // "table12", "table12 reverse", "table12 inverse"/"table12 invert", or both
 // modifiers in any order. Engine: per-func dispatch in
