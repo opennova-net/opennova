@@ -10,6 +10,7 @@
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/outline_view.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/viewport_widgets.h>
 
 #include <algorithm>
 #include <cstring>
@@ -229,7 +230,7 @@ void MenuView::draw_windows(Workspace &workspace, const MnuDocument &document, c
 		if (const FieldSchema *type = type_field(document)) {
 			float widest = 0.0f;
 			for (const FieldChoice &choice : type->choices) widest = std::max(widest, ui_kit::text_width(choice_title(choice).c_str()));
-			const float width = std::min(ui_kit::combo_width(widest), ImGui::GetContentRegionAvail().x);
+			const float width = std::min(combo_width(widest), ImGui::GetContentRegionAvail().x);
 			row.next(width);
 			const FieldChoice *current = choice_of(*type, Value(add_type_));
 			ImGui::SetNextItemWidth(width);

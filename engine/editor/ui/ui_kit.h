@@ -48,13 +48,8 @@ float text_width(const char *text);
 // not. Small: the tools of a list inside a panel (the inspector's, the outline's). A label
 // wider than the row's whole line is cut to it ("..."), the button then found by "###label".
 bool tool(WrapRow &row, const char *label, bool enabled, const std::string &tip, bool small = false);
-// A tool shown pressed while `on` (a mode, a pane shown): `tool` in the pressed button's colour.
-bool toggle_tool(WrapRow &row, const char *label, bool on, bool enabled, const std::string &tip);
 // A check box on `row`, its tooltip `tip`: true when it changed `value`.
 bool check(WrapRow &row, const char *label, bool *value, const std::string &tip);
-// How wide a combo is whose widest choice's text is `widest` wide: the text, the arrow's square and
-// the frame's padding.
-float combo_width(float widest);
 
 // A path's field with its label and Browse... beside it, under it when the row is narrow, `width` wide
 // (0: the item width): whether Browse... was pressed (never while not `enabled`), the text edited this

@@ -13,7 +13,8 @@ class Workspace;
 
 // The pieces the viewports' toolbars share (ADR 0046 S13 V5: each kind's view, ui/viewport_views).
 
-// A combo as wide as its widest choice, its arrow and its padding: none is cut.
+// A combo as wide as its widest choice, its arrow and its padding: none is cut (every window's combos too: the menu
+// view's, the map view's, Problems', the mission card's).
 float combo_width(float widest_text);
 // A SetViewport of one member of `viewport` (`options`, `camera`, `clock`), its kind's change (viewport_change).
 void set_viewport_member(Workspace &workspace, const ViewportModel &viewport, const char *member, io::JsonValue value);

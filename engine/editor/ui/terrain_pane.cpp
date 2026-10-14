@@ -12,6 +12,7 @@
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/terrain_pane_parts.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/viewport_widgets.h>
 #include <editor/ui/workspace.h>
 
 #include <imgui.h>
@@ -35,9 +36,9 @@ void draw_tools(Workspace &workspace, const TerrainBrush &brush, const TerrainTo
 	ui_kit::WrapRow row;
 	for (const TerrainTool tool : tools) {
 		const bool active = brush.tool == tool;
-		if (ui_kit::toggle_tool(row, terrain_tool_label(tool), active, true,
-		                        active ? std::string("Put the brush down (no tool): the view's own tools again.")
-		                               : std::string("Brush with ") + terrain_tool_label(tool) + "."))
+		if (lit_tool(row, terrain_tool_label(tool), active, true,
+		             active ? std::string("Put the brush down (no tool): the view's own tools again.")
+		                    : std::string("Brush with ") + terrain_tool_label(tool) + "."))
 			set_tool(workspace, active ? TerrainTool::None : tool);
 	}
 }

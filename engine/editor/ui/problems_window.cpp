@@ -21,6 +21,7 @@
 #include <editor/ui/project_find.h>
 #include <editor/ui/texture_preview.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/viewport_widgets.h>
 #include <editor/ui/welcome_view.h>
 
 #include <imgui.h>
@@ -73,7 +74,7 @@ void choice_combo(ui_kit::WrapRow &row, const char *label, const Choice<T> (&cho
 		widest = std::max(widest, ImGui::CalcTextSize(choice.label).x);
 		if (choice.value == value) current = choice.label;
 	}
-	const float width = ui_kit::combo_width(widest);
+	const float width = combo_width(widest);
 	row.next(ui_kit::field_width(width, label));
 	ImGui::SetNextItemWidth(width);
 	const bool open = ImGui::BeginCombo(label, current);

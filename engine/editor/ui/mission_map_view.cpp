@@ -17,6 +17,7 @@
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/mission_mark_menu.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/viewport_widgets.h>
 #include <editor/ui/workspace.h>
 
 namespace opennova::editor {
@@ -119,7 +120,7 @@ void MissionMapViewportView::draw_ready(Workspace &workspace, const ViewportMode
 	for (const Kind &kind : kinds) ui_kit::check(row, kind.label, kind.shown, kind.tip);
 	{
 		const char *const words[] = { "Team", "Group" };
-		const float width = ui_kit::combo_width(ui_kit::text_width("Group"));
+		const float width = combo_width(ui_kit::text_width("Group"));
 		row.next(ui_kit::field_width(width, "Colour"));
 		ImGui::SetNextItemWidth(width);
 		if (ImGui::BeginCombo("Colour", words[size_t(options.color_by)])) {
@@ -147,7 +148,7 @@ void MissionMapViewportView::draw_ready(Workspace &workspace, const ViewportMode
 		size_t current = 0;
 		for (size_t i = 0; i < std::size(kBackgrounds); ++i)
 			if (kBackgrounds[i] == options.background) current = i;
-		const float width = ui_kit::combo_width(ui_kit::text_width("Colour map"));
+		const float width = combo_width(ui_kit::text_width("Colour map"));
 		row.next(ui_kit::field_width(width, "Background"));
 		ImGui::SetNextItemWidth(width);
 		if (ImGui::BeginCombo("Background", words[current])) {
@@ -181,7 +182,7 @@ void MissionMapViewportView::draw_ready(Workspace &workspace, const ViewportMode
 			std::snprintf(text, sizeof(text), "%g m", double(snap));
 			return std::string(text);
 		};
-		const float width = ui_kit::combo_width(ui_kit::text_width("0.25 m"));
+		const float width = combo_width(ui_kit::text_width("0.25 m"));
 		row.next(ui_kit::field_width(width, "Snap"));
 		ImGui::SetNextItemWidth(width);
 		if (ImGui::BeginCombo("Snap", words(options.snap).c_str())) {

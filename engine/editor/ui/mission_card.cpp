@@ -32,6 +32,7 @@
 #include <editor/ui/mission_board_live.h>
 #include <editor/ui/record_drag.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/viewport_widgets.h>
 #include <formats/mission/bms.h>
 
 namespace opennova::editor {
@@ -191,7 +192,7 @@ void draw_chip(CardContext &context, Flow &flow, const BoardLine &line, const Bo
 		// A variable: picked from those the events use, by name, or a new one (the lowest no event uses).
 		const std::unique_ptr<MissionNames> names = mission_label_names(context.mission, context.names);
 		const std::string preview = names->variable(chip.value);
-		const float width = std::min(ui_kit::combo_width(ui_kit::text_width(preview.c_str())), flow.room());
+		const float width = std::min(combo_width(ui_kit::text_width(preview.c_str())), flow.room());
 		flow.place(width, style.ItemSpacing.x * 0.5f);
 		ImGui::SetNextItemWidth(width);
 		if (ImGui::BeginCombo("##variable", preview.c_str(), ImGuiComboFlags_HeightLarge)) {
@@ -218,7 +219,7 @@ void draw_chip(CardContext &context, Flow &flow, const BoardLine &line, const Bo
 		shown.text = chip.unset ? "(" + chip.label + ": not set)" : words;
 		shown.raw = raw;
 		shown.dangling = chip.missing;
-		const float width = std::min({ui_kit::combo_width(ui_kit::text_width(shown.text.c_str()) + ui_kit::text_width(raw.c_str()) +
+		const float width = std::min({combo_width(ui_kit::text_width(shown.text.c_str()) + ui_kit::text_width(raw.c_str()) +
 		                                                  style.ItemSpacing.x),
 		                              ImGui::GetFontSize() * 22.0f, flow.room()});
 		flow.place(width, style.ItemSpacing.x * 0.5f);
@@ -231,7 +232,7 @@ void draw_chip(CardContext &context, Flow &flow, const BoardLine &line, const Bo
 		std::vector<FieldChoice> own;
 		const std::vector<FieldChoice> &choices = context.mission.choices_on(line.record, use, own);
 		const float width = std::min(choices.empty() ? ImGui::GetFontSize() * 4.5f + (*chip.unit ? ui_kit::text_width(chip.unit) + style.ItemSpacing.x : 0.0f)
-		                                             : std::min(ui_kit::combo_width(ui_kit::text_width(words.c_str())),
+		                                             : std::min(combo_width(ui_kit::text_width(words.c_str())),
 		                                                        ImGui::GetFontSize() * 16.0f),
 		                             flow.room());
 		flow.place(width, style.ItemSpacing.x * 0.5f);
