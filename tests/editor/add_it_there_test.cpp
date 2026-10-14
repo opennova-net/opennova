@@ -42,8 +42,6 @@ namespace {
 
 using editor_test::NoProcess;
 
-std::string fixture(const char *relative) { return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/" + relative; }
-
 using editor_test::set_edit;
 
 // A row added with its name, then its fields set, as one batch.
@@ -61,7 +59,7 @@ std::vector<Edit> row_with(NodeKind kind, const char *name_field, const std::str
 }
 
 struct Fixture {
-	editor_test::TempProjectDir dir;
+	test_temp::TempDir dir;
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -91,7 +89,7 @@ struct Fixture {
 			return false;
 		}
 		const std::string text = document->serialize().text;
-		return editor_test::write_bytes(root + "/" + path, std::vector<uint8_t>(text.begin(), text.end()));
+		return test_io::write_file(root + "/" + path, std::vector<uint8_t>(text.begin(), text.end()));
 	}
 	// The reference.missing finding naming `target` (of `kind`), null for none.
 	const Diagnostic *missing(ReferenceKind kind, const std::string &target) const {
@@ -149,7 +147,7 @@ static int test_catalog_rows() {
 	Fixture f("opennova_editor_add_there_catalog");
 	const NodeKind item = node_kind(CatalogKind::Item), weapon = node_kind(CatalogKind::Weapon);
 	const std::string powerup_file = f.path_of("powerup.def").empty() ? "powerup.def" : f.path_of("powerup.def");
-	TEST_EXPECT(editor_test::write_text(f.root + "/" + powerup_file, editor_test::crlf("powerup PW_OTHER\nend\n")));
+	TEST_EXPECT(test_io::write_text(f.root + "/" + powerup_file, test_io::crlf("powerup PW_OTHER\nend\n")));
 	editor_test::handle_to_end(f.session, request::rescan());
 	TEST_EXPECT(f.edit_file("items.def", row_with(item, "display_name", "Rifleman",
 	                                              {{"primary_weapon", "WPN_GONE"}, {"powerup_def", "PW_DI15"},
@@ -201,7 +199,7 @@ static int test_item_ids() {
 	const AssetKind mission_kind = AssetKind::Mission;
 	std::unique_ptr<Document> mission = records_of(document_type_for(mission_kind)->make());
 	Diagnostic error;
-	TEST_EXPECT(mission && mission->load_bytes(test_io::read_file(fixture("bms/synth_logic.bms")), "di15.bms", mission_kind, "jo", error));
+	TEST_EXPECT(mission && mission->load_bytes(test_io::read_file(test_paths_fixture("bms/synth_logic.bms")), "di15.bms", mission_kind, "jo", error));
 	if (!mission) return 1;
 	const MissionDocument &entities = dynamic_cast<const MissionDocument &>(*mission);
 	const std::vector<const Node *> items = entities.rows_of(MissionKind::Item), people = entities.rows_of(MissionKind::Organic);
@@ -212,7 +210,7 @@ static int test_item_ids() {
 	TEST_EXPECT(mission->apply(set_edit({items[0]->id, items[0]->kind, 0}, "item", int64_t(100777)), error) &&
 	            mission->apply(set_edit({people[0]->id, people[0]->kind, 0}, "item", int64_t(reserved)), error));
 	const std::string text = mission->serialize().text;
-	TEST_EXPECT(editor_test::write_bytes(f.root + "/missions/di15.bms", std::vector<uint8_t>(text.begin(), text.end())));
+	TEST_EXPECT(test_io::write_file(f.root + "/missions/di15.bms", std::vector<uint8_t>(text.begin(), text.end())));
 	editor_test::handle_to_end(f.session, request::rescan());
 	const std::string catalog = f.path_of("items.def");
 
@@ -258,7 +256,7 @@ static int test_string_ids() {
 	std::vector<uint8_t> bytes;
 	std::string io_error;
 	TEST_EXPECT(!table.empty() && opennova::rtxt::write(strings_file, bytes, io_error) &&
-	            editor_test::write_bytes(f.root + "/" + table, bytes));
+	            test_io::write_file(f.root + "/" + table, bytes));
 	editor_test::handle_to_end(f.session, request::rescan());
 	std::vector<ProblemFix> fixes;
 	const ProblemFix *fix = add_there(f, fixes, ReferenceKind::TextId, "WEP_DI15_A", table, "Add WEP_DI15_A to gametext.bin");
@@ -302,9 +300,9 @@ static int test_string_ids() {
 // menu_style.mns, a set in the SOUND's own bank (not in game.lwf).
 static int test_menu_names() {
 	Fixture f("opennova_editor_add_there_menu");
-	TEST_EXPECT(editor_test::write_bytes(f.root + "/click.lwf", editor_test::sound_bank_of({"MOUSE_OVER"})) &&
-	            editor_test::write_bytes(f.root + "/game.lwf", editor_test::sound_bank_of({"FIRE"})));
-	TEST_EXPECT(editor_test::write_text(
+	TEST_EXPECT(test_io::write_file(f.root + "/click.lwf", editor_test::sound_bank_of({"MOUSE_OVER"})) &&
+	            test_io::write_file(f.root + "/game.lwf", editor_test::sound_bank_of({"FIRE"})));
+	TEST_EXPECT(test_io::write_text(
 	        f.root + "/menus/di15.mnu",
 	        "<SCREEN>\r\n<NAME>HOME</NAME>\r\n<WINDOW type=\"window\" name=\"MAIN\">\r\n"
 	        "<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>\r\n"
@@ -352,9 +350,9 @@ static int test_menu_names() {
 // the effect writer's block after the particle file's last effect, the file shown at it.
 static int test_sound_and_effect() {
 	Fixture f("opennova_editor_add_there_sound");
-	TEST_EXPECT(editor_test::write_bytes(f.root + "/aside.lwf", editor_test::sound_bank_of({"ASIDE"})) &&
-	            editor_test::write_bytes(f.root + "/game.lwf", editor_test::sound_bank_of({"FIRE"})));
-	TEST_EXPECT(editor_test::write_text(f.root + "/fx.ptl", "[effectdef]\n{\n\tid = FX_OTHER;\n}\n\n[particledef]\n{\n\tid = puff;\n}\n"));
+	TEST_EXPECT(test_io::write_file(f.root + "/aside.lwf", editor_test::sound_bank_of({"ASIDE"})) &&
+	            test_io::write_file(f.root + "/game.lwf", editor_test::sound_bank_of({"FIRE"})));
+	TEST_EXPECT(test_io::write_text(f.root + "/fx.ptl", "[effectdef]\n{\n\tid = FX_OTHER;\n}\n\n[particledef]\n{\n\tid = puff;\n}\n"));
 	editor_test::handle_to_end(f.session, request::rescan());
 	const std::string too_long(24, 'Q');
 	TEST_EXPECT(f.edit_file("items.def", row_with(node_kind(CatalogKind::Item), "display_name", "Door",
@@ -396,7 +394,7 @@ static int test_sound_and_effect() {
 // (through the wire as the problems query writes it); and a menu an ACTION loads, which the menu's own Create makes.
 static int test_create_with_it() {
 	Fixture f("opennova_editor_add_there_create");
-	TEST_EXPECT(editor_test::write_text(
+	TEST_EXPECT(test_io::write_text(
 	        f.root + "/menus/di33.mnu",
 	        "<SCREEN>\r\n<NAME>HOME</NAME>\r\n<WINDOW type=\"window\" name=\"MAIN\">\r\n"
 	        "<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>\r\n"

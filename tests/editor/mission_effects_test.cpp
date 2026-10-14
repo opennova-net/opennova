@@ -134,7 +134,7 @@ bool near(float a, float b, float within = 1e-3f) {
 }
 
 struct Rig {
-	editor_test::TempProjectDir dir{ "opennova_editor_mission_effects" };
+	test_temp::TempDir dir{ "opennova_editor_mission_effects" };
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{ platform, preferences };
@@ -147,10 +147,10 @@ struct Rig {
 		session.run_operations();
 		editor_test::create_missing_files(session);
 		root = session.view().project.root;
-		if (!editor_test::write_bytes(root + "/" + kMission, fires_mission()) ||
-				!editor_test::write_text(root + "/defs/items.def", kItems) ||
-				!editor_test::write_bytes(root + "/models/fxpump.3di", pump_bytes()) ||
-				!editor_test::write_text(root + "/particles/fx.ptl", particles()))
+		if (!test_io::write_file(root + "/" + kMission, fires_mission()) ||
+				!test_io::write_text(root + "/defs/items.def", kItems) ||
+				!test_io::write_file(root + "/models/fxpump.3di", pump_bytes()) ||
+				!test_io::write_text(root + "/particles/fx.ptl", particles()))
 			return false;
 		editor_test::handle_to_end(session, request::rescan());
 		while (session.view().activity.validation.running) session.poll();
@@ -344,7 +344,7 @@ static int test_slots_follow_the_mission_live() {
 	TEST_EXPECT(effects.opens() == 2);
 
 	// The particle file edited: the scene opened again over the new closures.
-	TEST_EXPECT(editor_test::write_text(rig.root + "/particles/fx.ptl", particles(20.0f)));
+	TEST_EXPECT(test_io::write_text(rig.root + "/particles/fx.ptl", particles(20.0f)));
 	editor_test::handle_to_end(rig.session, request::rescan());
 	rig.devices.sync(rig.session);
 	rig.viewport();

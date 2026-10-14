@@ -42,7 +42,7 @@ namespace {
 // edit (its MAIN window's left edge moved). The project's save_before_play off (DI-26: on, Play saves first
 // and asks nothing), so every row the prompt guards asks.
 struct Dirty {
-	editor_test::TempProjectDir dir;
+	test_temp::TempDir dir;
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session;
@@ -135,7 +135,7 @@ EditorRequest touching(EditorRequestKind kind, Dirty &dirty) {
 		std::vector<uint8_t> tga;
 		std::string why;
 		opennova::tga::tga_write_rgba32(rgba.data(), 2, 2, tga, why);
-		editor_test::write_bytes(dirty.view().project.root + "/textures/tex.tga", tga);
+		test_io::write_file(dirty.view().project.root + "/textures/tex.tga", tga);
 		dirty.session.handle(request::rescan());
 		dirty.session.run_operations();
 		Document *document = dirty.session.document_for(dirty.extra);

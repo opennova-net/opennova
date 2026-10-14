@@ -201,7 +201,7 @@ const AssetEntry *output_of(const SessionView &view, const std::string &source) 
 }
 
 int test_project() {
-	editor_test::TempProjectDir dir{"opennova_editor_texture_import"};
+	test_temp::TempDir dir{"opennova_editor_texture_import"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -214,7 +214,7 @@ int test_project() {
 	// screen; and one no reference names.
 	const std::string art = dir.file("art");
 	for (const char *name : {"body.png", "isle_c.png", "m01.png", "logo.png"})
-		TEST_EXPECT(editor_test::write_text(art + "/" + name, png_of(graded(16, 8))));
+		TEST_EXPECT(test_io::write_text(art + "/" + name, png_of(graded(16, 8))));
 	const ImportResult imported = import_assets({{art + "/body.png", {}}, {art + "/isle_c.png", {}}, {art + "/m01.png", {}},
 	                                             {art + "/logo.png", {}}},
 	                                            paths, *view.project.document, false);
@@ -222,7 +222,7 @@ int test_project() {
 	// The model's diffuse names body.tga, its normal map body.mdt: two files of one stem, as the game's own
 	// models pair them, which ask nothing of each other.
 	const std::string scene = dir.file("scene");
-	TEST_EXPECT(editor_test::write_text(scene + "/thing.o3d",
+	TEST_EXPECT(test_io::write_text(scene + "/thing.o3d",
 	                                    "o3d 2\nmodel THING\nmaterial VS_SKBASIC\ntexture body.tga 1 0\nmaterial FF_ST_OP\n"
 	                                    "texture body.mdt 3 4\nlod 0\npart 0 0 0 0\n"
 	                                    "mesh 0 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
@@ -231,20 +231,20 @@ int test_project() {
 		std::vector<uint8_t> mdt;
 		std::string why;
 		const RgbaImage bump = graded(4, 4);
-		TEST_EXPECT(tga::tga_write_rgba32(bump.pixels.data(), 4, 4, mdt, why) && editor_test::write_bytes(root + "/textures/body.mdt", mdt));
+		TEST_EXPECT(tga::tga_write_rgba32(bump.pixels.data(), 4, 4, mdt, why) && test_io::write_file(root + "/textures/body.mdt", mdt));
 	}
 	// A sky's clouds from a source with an alpha (its density): the .dds its loader reads before the .pcx it
 	// names, the one form that keeps it.
-	TEST_EXPECT(editor_test::write_text(art + "/cloud.png", png_of(graded(16, 8))));
+	TEST_EXPECT(test_io::write_text(art + "/cloud.png", png_of(graded(16, 8))));
 	TEST_EXPECT(import_assets({{art + "/cloud.png", {}}}, paths, *view.project.document, false).imported.size() == 1);
 	{
 		std::ostringstream text;
 		env::Config config;
 		config.sky_map1 = "cloud.pcx";
 		std::string error;
-		TEST_EXPECT(env::save_env(text, config, error) && editor_test::write_text(root + "/envs/day.env", text.str()));
+		TEST_EXPECT(env::save_env(text, config, error) && test_io::write_text(root + "/envs/day.env", text.str()));
 	}
-	TEST_EXPECT(editor_test::write_text(root + "/terrains/isle.trn",
+	TEST_EXPECT(test_io::write_text(root + "/terrains/isle.trn",
 	                                    "polytrn_colormap isle_c.tga\npolytrn_detailmap logo.tga\npolytrn_polydata isle.cpt\n"
 	                                    "polytrn_sectorcount 1\npolytrn_sectors 0\n"));
 	editor_test::handle_to_end(session, request::rescan());
@@ -268,7 +268,7 @@ int test_project() {
 		const RgbaImage art_image = graded(8, 8);
 		std::vector<uint8_t> tga;
 		std::string why;
-		TEST_EXPECT(tga::tga_write_rgba32(art_image.pixels.data(), 8, 8, tga, why) && editor_test::write_bytes(art + "/plain.tga", tga));
+		TEST_EXPECT(tga::tga_write_rgba32(art_image.pixels.data(), 8, 8, tga, why) && test_io::write_file(art + "/plain.tga", tga));
 		TEST_EXPECT(import_assets({{art + "/plain.tga", {}}}, paths, *view.project.document, false).imported.size() == 1);
 		editor_test::handle_to_end(session, request::rescan());
 		session.run_operations();
@@ -440,7 +440,7 @@ int test_needs_conflict() {
 // TGA (its loader reads no .dds) the fix makes a 32-bit TGA, which serves both, the name kept. Without the
 // HUD's use it makes the DDS and says the file becomes another.
 int test_fit_weighs_every_use() {
-	editor_test::TempProjectDir dir{"opennova_editor_texture_fit"};
+	test_temp::TempDir dir{"opennova_editor_texture_fit"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -450,12 +450,12 @@ int test_fit_weighs_every_use() {
 	const std::string root = view.project.root;
 	const ProjectPaths paths = ProjectPaths::for_root(root);
 	const std::string art = dir.file("art");
-	TEST_EXPECT(editor_test::write_text(art + "/skin.png", png_of(graded(16, 16))));
+	TEST_EXPECT(test_io::write_text(art + "/skin.png", png_of(graded(16, 16))));
 	ImportChoice skin;
 	skin.path = art + "/skin.png";
 	TEST_EXPECT(import_assets({skin}, paths, *view.project.document, false).imported.size() == 1);
 	const std::string scene = dir.file("scene");
-	TEST_EXPECT(editor_test::write_text(scene + "/cut.o3d",
+	TEST_EXPECT(test_io::write_text(scene + "/cut.o3d",
 	                                    "o3d 2\nmodel CUT\nmaterial VS_SKBASIC\nmatflags 1\nalphatest 128\ntexture skin.tga 1 0\n"
 	                                    "lod 0\npart 0 0 0 0\nmesh 0 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\n"
 	                                    "t 0 1 2\n"));
@@ -484,7 +484,7 @@ int test_fit_weighs_every_use() {
 	TEST_EXPECT(fix.request == request::set_import_options(source, {{"format", "dds"}}) &&
 	            fix.detail.find("makes skin.dds in place of skin.tga") != std::string::npos);
 	// A HUD image naming skin.tga too: a 32-bit TGA serves both, the name kept.
-	TEST_EXPECT(editor_test::write_text(root + "/defs/items.def", "begin \"Brick\"\nid 100300\ntype building\nhud_image skin.tga\nend\n"));
+	TEST_EXPECT(test_io::write_text(root + "/defs/items.def", "begin \"Brick\"\nid 100300\ntype building\nhud_image skin.tga\nend\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	session.run_operations();
 	fix = fit_fix();

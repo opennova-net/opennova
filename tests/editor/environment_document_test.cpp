@@ -528,7 +528,7 @@ std::string text_of(const opennova::io::JsonValue *value) { return value && valu
 // In a session: the graph reads the environment's references through the document; the missions that run
 // on it, with their terrain, overrides and water plane; an edit the graph follows, undone, saved.
 int test_session() {
-	editor_test::TempProjectDir dir("opennova_environment_document");
+	test_temp::TempDir dir("opennova_environment_document");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -546,11 +546,11 @@ int test_session() {
 	std::ostringstream env_text;
 	std::string error;
 	TEST_EXPECT(opennova::env::save_env(env_text, config, error));
-	TEST_EXPECT(editor_test::write_text(root + "/day.env", env_text.str()));
-	TEST_EXPECT(editor_test::write_text(root + "/island.trn",
+	TEST_EXPECT(test_io::write_text(root + "/day.env", env_text.str()));
+	TEST_EXPECT(test_io::write_text(root + "/island.trn",
 	                                    "polytrn_colormap map.tga\r\npolytrn_detailmap detail.tga\r\npolytrn_polydata island.cpt\r\n"
 	                                    "polytrn_sectorcount 1\r\npolytrn_sectors 0\r\nwater_height 25\r\n"));
-	TEST_EXPECT(editor_test::write_text(root + "/near.pcx", "x"));
+	TEST_EXPECT(test_io::write_text(root + "/near.pcx", "x"));
 	// Two missions on it: one fogging closer, one setting its own water height.
 	const auto mission = [&](const char *name, int attrib, int fog, int water, int start) {
 		opennova::bms::File file;
@@ -565,7 +565,7 @@ int test_session() {
 		            opennova::mission::set_header_int(file, "minutes_per_day", 30, why));
 		std::vector<uint8_t> bytes;
 		TEST_EXPECT(opennova::bms::write(file, bytes, why));
-		TEST_EXPECT(editor_test::write_bytes(root + "/" + name, bytes));
+		TEST_EXPECT(test_io::write_file(root + "/" + name, bytes));
 		return 0;
 	};
 	TEST_EXPECT(mission("fogged.bms", 0x2, 800, 0, 6 << 8) == 0);
@@ -649,7 +649,7 @@ int test_session() {
 	// A terrain key in an environment is its missions' terrain's, after the .trn's (D-TERRAIN-18): its uses list the
 	// line each mission's terrain takes.
 	{
-		TEST_EXPECT(editor_test::write_text(root + "/dusk.env", "sky_height 175\r\npolytrn_detaildensity 64\r\n"));
+		TEST_EXPECT(test_io::write_text(root + "/dusk.env", "sky_height 175\r\npolytrn_detaildensity 64\r\n"));
 		opennova::bms::File file;
 		opennova::mission::make_default(file);
 		std::string why;
@@ -657,7 +657,7 @@ int test_session() {
 		            opennova::mission::set_header_string(file, "environment", "dusk", why));
 		std::vector<uint8_t> bytes;
 		TEST_EXPECT(opennova::bms::write(file, bytes, why));
-		TEST_EXPECT(editor_test::write_bytes(root + "/late.bms", bytes));
+		TEST_EXPECT(test_io::write_file(root + "/late.bms", bytes));
 		editor_test::handle_to_end(session, request::rescan());
 		const EnvironmentUses uses = environment_uses(view, "dusk.env");
 		TEST_EXPECT(uses.missions.size() == 1 && uses.missions[0].terrain_keys.size() == 1);
@@ -688,7 +688,7 @@ int test_session() {
 			const std::vector<uint8_t> rgba(size_t(1024) * 1024 * 4, 200); // the game reads 1024 x 1024 texels
 			std::vector<uint8_t> tga;
 			TEST_EXPECT(opennova::tga::tga_write_rgba32(rgba.data(), 1024, 1024, tga, why) &&
-			            editor_test::write_bytes(root + "/map.tga", tga));
+			            test_io::write_file(root + "/map.tga", tga));
 		}
 		editor_test::handle_to_end(session, request::rescan());
 		editor_test::handle_to_end(session, request::build());
@@ -719,7 +719,7 @@ int test_session() {
 		// shipped; the environment's key now sets over overcast.def's.
 		const AssetEntry *overcast_entry = view.project.scan->find("overcast.def");
 		const std::string overcast = overcast_entry ? overcast_entry->relative_path : std::string("overcast.def");
-		TEST_EXPECT(editor_test::write_text(root + "/" + overcast, "tod_begin 1200\r\nsun_rgb 1,2,3\r\ntod_end\r\n"
+		TEST_EXPECT(test_io::write_text(root + "/" + overcast, "tod_begin 1200\r\nsun_rgb 1,2,3\r\ntod_end\r\n"
 		                                                           "polytrn_detaildensity 32\r\n"));
 		editor_test::handle_to_end(session, request::rescan());
 		{

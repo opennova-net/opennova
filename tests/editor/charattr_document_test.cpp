@@ -41,12 +41,6 @@ constexpr NodeKind kClass = node_kind(CharAttrKind::Class);
 
 std::vector<uint8_t> bytes_of(const std::string &text) { return std::vector<uint8_t>(text.begin(), text.end()); }
 
-std::string crlf(const std::string &text) {
-	std::string lines;
-	for (const char c : text) lines += c == '\n' ? std::string("\r\n") : std::string(1, c);
-	return lines;
-}
-
 using editor_test::set_edit;
 
 // The text a save of `text` writes: the format's writer's of the table its loader reads.
@@ -58,7 +52,7 @@ std::string written(const std::string &text) {
 }
 
 struct Project {
-	editor_test::TempProjectDir dir{"opennova_editor_charattr_document"};
+	test_temp::TempDir dir{"opennova_editor_charattr_document"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -75,7 +69,7 @@ struct Project {
 		return entry ? entry->relative_path : std::string();
 	}
 	// Each line ending CR LF, as the game's readers end a line.
-	bool write(const std::string &relative, const std::string &text) { return editor_test::write_text(root + "/" + relative, crlf(text)); }
+	bool write(const std::string &relative, const std::string &text) { return test_io::write_text(root + "/" + relative, test_io::crlf(text)); }
 	std::string read(const std::string &relative) const {
 		std::vector<uint8_t> bytes;
 		std::string error;
@@ -124,7 +118,7 @@ const Node *class_row(const CharAttrDocument &document, int id) {
 // lines the game reads nothing of left out), a changed value its own line; a class added the next, one removed the
 // last alone.
 static int test_rows() {
-	const std::string text = crlf(kCharAttr);
+	const std::string text = test_io::crlf(kCharAttr);
 	CharAttrDocument document;
 	Diagnostic error;
 	TEST_EXPECT(document.load_bytes(bytes_of(text), "charattr.def", AssetKind::CharAttrDefs, "jo", error));
@@ -151,7 +145,7 @@ static int test_rows() {
 	TEST_EXPECT(document.serialize().text.find("[CHARACTER2]\r\nJUNGLE_CAMMO = 7002\r\nDESERT_CAMMO = 7002\r\n"
 	                                           "ATTRIBUTES = Medic\r\n") != std::string::npos);
 	// A class added: CHARACTER3 after the file's two, its section in the writer's form; a key set on it, its line.
-	const std::string two_classes = crlf("// classes\n[CHARACTER1]\nSTEALTH = 25\nJUNGLE_CAMMO = 7001\n\n[CHARACTER2]\nJUNGLE_CAMMO = 7002\n");
+	const std::string two_classes = test_io::crlf("// classes\n[CHARACTER1]\nSTEALTH = 25\nJUNGLE_CAMMO = 7001\n\n[CHARACTER2]\nJUNGLE_CAMMO = 7002\n");
 	CharAttrDocument grown;
 	TEST_EXPECT(grown.load_bytes(bytes_of(two_classes), "charattr.def", AssetKind::CharAttrDefs, "jo", error) &&
 	            grown.rows().size() == 2);

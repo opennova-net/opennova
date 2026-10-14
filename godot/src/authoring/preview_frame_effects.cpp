@@ -12,6 +12,7 @@
 #include "particle/effect_distortion_drawer.h"
 #include "particle/particle_renderer.h"
 #include "render/frame_fx.h"
+#include "world/world_scene.h"
 
 namespace godot {
 
@@ -22,10 +23,15 @@ constexpr const char *kSunVeilShader = "res://shaders/sun_veil_overlay.gdshader"
 } // namespace
 
 PreviewFrameEffects::PreviewFrameEffects(Node3D &root, SubViewport &viewport, bool veil_drawn) {
-	FrameFx *frame_fx = memnew(FrameFx);
-	frame_fx->set_name("FrameFx");
-	root.add_child(frame_fx);
-	frame_fx_id_ = frame_fx->get_instance_id();
+	// FrameFx puts its terminal (the FrameFX composite and the display decode every engine shader's
+	// gamma-domain numbers take once) on the WorldEnvironment in its scope as it enters the tree,
+	// and installs nothing where there is none: a view without the game's ClearColor beside it
+	// showed its numbers encoded once more than the game's.
+	WorldSceneRows rows;
+	rows.set(static_cast<size_t>(WorldSceneRow::ClearColor));
+	rows.set(static_cast<size_t>(WorldSceneRow::FrameFx));
+	const WorldScene scene = WorldScene::create(root, rows, false);
+	frame_fx_id_ = scene.nodes().framefx->get_instance_id();
 	if (veil_drawn)
 		add_veil_(viewport);
 }

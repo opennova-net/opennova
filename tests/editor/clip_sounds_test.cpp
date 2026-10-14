@@ -64,13 +64,13 @@ std::string sold_clips() {
 const char *kSets[] = {"FS_GND_L", "FS_GND_R", "FS_SNOW_L", "FS_SNOW_R", "FS_OBJ_L", "FS_OBJ_R", "FS_WATER", "FS_PRONE"};
 
 std::string items(const std::string &extra) {
-	return editor_test::crlf("begin \"Soldier\"\nid 100300\ntype person\ngraphic skinned\nanim_def sold\n" + extra + "end\n");
+	return test_io::crlf("begin \"Soldier\"\nid 100300\ntype person\ngraphic skinned\nanim_def sold\n" + extra + "end\n");
 }
 
 // A project of the soldier's rig and clips, its bank, its waves and its profiles; SOLD.adm open with the
 // row `key` selected.
 struct ClipProject {
-	editor_test::TempProjectDir dir{"opennova_editor_clip_sounds"};
+	test_temp::TempDir dir{"opennova_editor_clip_sounds"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -84,18 +84,18 @@ struct ClipProject {
 		editor_test::create_missing_files(session);
 		root = session.view().project.root;
 		const std::string source = dir.file("source");
-		bool ok = editor_test::write_bytes(source + "/skinned.o3d",
+		bool ok = test_io::write_file(source + "/skinned.o3d",
 		                                   test_io::read_file(repo() + "/fixtures/threedi/o3d/skinned.o3d")) &&
-		          editor_test::write_text(source + "/sold.o3a", sold_clips());
+		          test_io::write_text(source + "/sold.o3a", sold_clips());
 		EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 		import.imports = {{source + "/skinned.o3d", {}}, {source + "/sold.o3a", {}}};
 		session.handle(import);
 		session.run_operations();
-		ok = ok && editor_test::write_bytes(root + "/sounds/game.lwf", editor_test::wave_bank_of(std::vector<std::string>(std::begin(kSets), std::end(kSets))));
+		ok = ok && test_io::write_file(root + "/sounds/game.lwf", editor_test::wave_bank_of(std::vector<std::string>(std::begin(kSets), std::end(kSets))));
 		const std::vector<uint8_t> tone = test_io::read_file(repo() + "/fixtures/lwf/tone.wav");
-		for (const char *set : kSets) ok = ok && editor_test::write_bytes(root + "/sounds/" + strutil::to_lower(set) + ".wav", tone);
-		ok = ok && editor_test::write_text(root + "/defs/SndProf.def",
-		                                   editor_test::crlf("begin \"default\"\nend\nbegin \"on_soldier\"\n"
+		for (const char *set : kSets) ok = ok && test_io::write_file(root + "/sounds/" + strutil::to_lower(set) + ".wav", tone);
+		ok = ok && test_io::write_text(root + "/defs/SndProf.def",
+		                                   test_io::crlf("begin \"default\"\nend\nbegin \"on_soldier\"\n"
 		                                                     "\tSSLFootGND FS_GND_L 0 0 0\n\tSSRFootGND FS_GND_R 0 0 0\n"
 		                                                     "\tSSLFootSnow FS_SNOW_L 0 0 0\n\tSSRFootSnow FS_SNOW_R 0 0 0\n"
 		                                                     "\tSSLFootOBJ FS_OBJ_L 0 0 0\n\tSSRFootOBJ FS_OBJ_R 0 0 0\n"
@@ -106,7 +106,7 @@ struct ClipProject {
 	}
 
 	bool write_items(const std::string &extra) {
-		if (!editor_test::write_text(root + "/defs/items.def", items(extra))) return false;
+		if (!test_io::write_text(root + "/defs/items.def", items(extra))) return false;
 		editor_test::handle_to_end(session, request::rescan());
 		while (session.view().activity.validation.running) session.poll();
 		return true;

@@ -46,7 +46,7 @@ struct ModelRun {
 };
 
 void test_material_surface() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_model");
+	test_temp::TempDir dir("opennova_editor_ui_model");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -54,7 +54,7 @@ void test_material_surface() {
 	session.run_operations();
 	const SessionView &v = session.view();
 	const std::string repo = test_paths_repo_root(__FILE__);
-	CHECK(editor_test::write_bytes(v.project.root + "/models/armory.3di", test_io::read_file(repo + "/fixtures/threedi/synth/armory.3di")),
+	CHECK(test_io::write_file(v.project.root + "/models/armory.3di", test_io::read_file(repo + "/fixtures/threedi/synth/armory.3di")),
 	      "the model written");
 	session.handle(request::rescan());
 	session.run_operations();
@@ -188,7 +188,7 @@ void test_material_surface() {
 // in words, Play destroy the destroyed state from the death (the clock at 0, run); the Registers popup
 // grouped by what drives each register in the game.
 void test_damage_popup() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_model_damage");
+	test_temp::TempDir dir("opennova_editor_ui_model_damage");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -197,11 +197,11 @@ void test_damage_popup() {
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	const std::string repo = test_paths_repo_root(__FILE__);
-	CHECK(editor_test::write_bytes(v.project.root + "/models/crate.3di",
+	CHECK(test_io::write_file(v.project.root + "/models/crate.3di",
 	                               test_io::read_file(repo + "/fixtures/threedi/synth/crate.3di")) &&
-	              editor_test::write_bytes(v.project.root + "/models/armory.3di",
+	              test_io::write_file(v.project.root + "/models/armory.3di",
 	                                       test_io::read_file(repo + "/fixtures/threedi/synth/armory.3di")) &&
-	              editor_test::write_text(v.project.root + "/defs/items.def",
+	              test_io::write_text(v.project.root + "/defs/items.def",
 	                                      "begin \"Pump station\"\nid 100500\ntype object\ngraphic crate\n"
 	                                      "ai_function gnrc\nhusk armory\nsounddeath EXPLO_PUMP\nend\n"),
 	      "the models and the item");
@@ -261,7 +261,7 @@ void test_damage_popup() {
 // record's picture beside the table, its line naming the model it draws with a Go to of the model's file (an
 // OpenDocument, a step of the navigation history), Replay the clock at 0 and run.
 void test_definition_view() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_definition");
+	test_temp::TempDir dir("opennova_editor_ui_definition");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -270,11 +270,11 @@ void test_definition_view() {
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	const std::string repo = test_paths_repo_root(__FILE__);
-	CHECK(editor_test::write_bytes(v.project.root + "/models/crate.3di",
+	CHECK(test_io::write_file(v.project.root + "/models/crate.3di",
 	                               test_io::read_file(repo + "/fixtures/threedi/synth/crate.3di")) &&
-	              editor_test::write_bytes(v.project.root + "/models/armory.3di",
+	              test_io::write_file(v.project.root + "/models/armory.3di",
 	                                       test_io::read_file(repo + "/fixtures/threedi/synth/armory.3di")) &&
-	              editor_test::write_text(v.project.root + "/defs/items.def",
+	              test_io::write_text(v.project.root + "/defs/items.def",
 	                                      "begin \"Pump station\"\nid 100500\ntype object\ngraphic crate\n"
 	                                      "ai_function gnrc\nhusk armory\nend\n"),
 	      "the models and the item");
@@ -329,7 +329,7 @@ void test_definition_view() {
 // tick with the clock run, the shot in the run's words; Hold fire turns into Release while the key is held; Clear
 // forgets the gestures.
 void test_weapon_fire_view() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_weapon_fire");
+	test_temp::TempDir dir("opennova_editor_ui_weapon_fire");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -338,13 +338,13 @@ void test_weapon_fire_view() {
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	const std::string repo = test_paths_repo_root(__FILE__);
-	CHECK(editor_test::write_bytes(v.project.root + "/models/crate.3di",
+	CHECK(test_io::write_file(v.project.root + "/models/crate.3di",
 	                               test_io::read_file(repo + "/fixtures/threedi/synth/crate.3di")) &&
-	              editor_test::write_text(v.project.root + "/defs/weapon.def",
+	              test_io::write_text(v.project.root + "/defs/weapon.def",
 	                                      "weapon \"W_UI\"\n\tclipsize 5\n\tstartrounds 10\n\tgfx3 crate\n"
 	                                      "\tround_type AMMO_UI\n\tflags auto\n"
 	                                      "\taction \"fire\"\n\t\tdelayend 4\n\t\tfunction wpn_std_fire\n\tend\nend\n") &&
-	              editor_test::write_text(v.project.root + "/defs/ammo.def",
+	              test_io::write_text(v.project.root + "/defs/ammo.def",
 	                                      "ammo AT_NULL\nend\nammo AMMO_UI\n\tvelocity 600\n\tmax_age 2\nend\n"),
 	      "the model, the weapon and its ammo");
 	editor_test::handle_to_end(session, request::rescan());
@@ -395,7 +395,7 @@ void test_weapon_fire_view() {
 // An ammo record's Preview (DI-23, preview/ammo_impacts): its impact rows drawn as a board (each surface's row, the
 // bank's place where the ammo authors none, the scar), and Fire firing the ammo alone at the range's target.
 void test_ammo_board_view() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_ammo_board");
+	test_temp::TempDir dir("opennova_editor_ui_ammo_board");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -403,8 +403,8 @@ void test_ammo_board_view() {
 	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
-	CHECK(editor_test::write_text(v.project.root + "/defs/ammo.def",
-	                              editor_test::crlf("ammo AT_NULL\nend\nammo AMMO_UI\n\tvelocity 600\n\tmax_age 2\n"
+	CHECK(test_io::write_text(v.project.root + "/defs/ammo.def",
+	                              test_io::crlf("ammo AT_NULL\nend\nammo AMMO_UI\n\tvelocity 600\n\tmax_age 2\n"
 	                                                "\tscar_type 1\n\teffects_table\n\t\tmetal Spark IMP_METAL 15\n\tend\nend\n")),
 	      "the ammo");
 	editor_test::handle_to_end(session, request::rescan());
@@ -454,7 +454,7 @@ void test_ammo_board_view() {
 // model two items draw the button offers them, the one picked armed (an OpenDocument of the mission and a
 // SetViewport of its tool).
 void test_place_in_mission() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_place_in_mission");
+	test_temp::TempDir dir("opennova_editor_ui_place_in_mission");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -467,11 +467,11 @@ void test_place_in_mission() {
 	CHECK(items != nullptr, "the project's items.def");
 	if (!items) return;
 	const std::string catalog = items->relative_path;
-	CHECK(editor_test::write_bytes(v.project.root + "/models/crate.3di", test_io::read_file(repo + "/fixtures/threedi/synth/crate.3di")) &&
-	              editor_test::write_bytes(v.project.root + "/models/pump.3di", test_io::read_file(repo + "/fixtures/threedi/synth/pump.3di")) &&
-	              editor_test::write_bytes(v.project.root + "/missions/synth_logic.bms",
+	CHECK(test_io::write_file(v.project.root + "/models/crate.3di", test_io::read_file(repo + "/fixtures/threedi/synth/crate.3di")) &&
+	              test_io::write_file(v.project.root + "/models/pump.3di", test_io::read_file(repo + "/fixtures/threedi/synth/pump.3di")) &&
+	              test_io::write_file(v.project.root + "/missions/synth_logic.bms",
 	                                       test_io::read_file(repo + "/fixtures/bms/synth_logic.bms")) &&
-	              editor_test::write_text(v.project.root + "/" + catalog,
+	              test_io::write_text(v.project.root + "/" + catalog,
 	                                      "begin \"Null\"\nid 100000\ntype marker\nend\n"
 	                                      "begin \"Drop Pump\"\nid 106100\ntype object\ngraphic pump\nend\n"
 	                                      "begin \"Drop Scaled Pump\"\nid 106103\ntype object\ngraphic pump\nend\n"),

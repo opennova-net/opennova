@@ -92,7 +92,6 @@ using editor_test::NoProcess;
 
 constexpr const char *kMission = "missions/synth_logic.bms";
 
-using mission_test::fixture;
 
 // An item catalog for the drop: the pump drawn by two items, the armory a building, the shed a
 // person, the crate (a model with a `ground` user point) an object, and the waypoint marker path 1's stops are.
@@ -123,7 +122,7 @@ struct FlakyStore : MemoryPreferencesStore {
 // A session over a project holding the minted mission, the mission open and its viewport followed
 // once through the fake devices.
 struct Rig {
-	editor_test::TempProjectDir dir;
+	test_temp::TempDir dir;
 	NoProcess platform;
 	FlakyStore preferences;
 	ProjectSession session{ platform, preferences };
@@ -138,13 +137,13 @@ struct Rig {
 		session.run_operations();
 		editor_test::create_missing_files(session);
 		const SessionView &view = session.view();
-		if (!editor_test::write_bytes(view.project.root + "/" + kMission, test_io::read_file(fixture("bms/synth_logic.bms"))))
+		if (!test_io::write_file(view.project.root + "/" + kMission, test_io::read_file(test_paths_fixture("bms/synth_logic.bms"))))
 			return false;
 		if (items) {
-			if (!editor_test::write_text(view.project.root + "/defs/items.def", kDropItems)) return false;
+			if (!test_io::write_text(view.project.root + "/defs/items.def", kDropItems)) return false;
 			for (const char *model : { "pump.3di", "armory.3di", "shed.3di", "crate.3di" })
-				if (!editor_test::write_bytes(view.project.root + "/models/" + model,
-							test_io::read_file(fixture(std::string("threedi/synth/") + model))))
+				if (!test_io::write_file(view.project.root + "/models/" + model,
+							test_io::read_file(test_paths_fixture(std::string("threedi/synth/") + model))))
 					return false;
 		}
 		session.handle(request::rescan());
@@ -323,7 +322,7 @@ static int test_files() {
 	TEST_EXPECT(device);
 	// The device read a file as it built: the file moving its stamp builds again.
 	const std::string root = rig.session.view().project.root;
-	TEST_EXPECT(editor_test::write_text(root + "/Tmap.trn", "version 1\n"));
+	TEST_EXPECT(test_io::write_text(root + "/Tmap.trn", "version 1\n"));
 	editor_test::backdate(root + "/Tmap.trn", std::chrono::seconds(10));
 	rig.session.handle(request::rescan());
 	rig.session.run_operations();
@@ -331,7 +330,7 @@ static int test_files() {
 	rig.pump();
 	rig.pump();
 	const uint64_t builds = viewport->builds();
-	TEST_EXPECT(editor_test::write_text(root + "/Tmap.trn", "version 2\n"));
+	TEST_EXPECT(test_io::write_text(root + "/Tmap.trn", "version 2\n"));
 	rig.session.handle(request::rescan());
 	rig.session.run_operations();
 	rig.pump();
@@ -733,7 +732,7 @@ static int test_sphere_picking() {
 	TEST_EXPECT(rig.open(true, true));
 	const MissionViewport *viewport = rig.viewport();
 	const SessionView &view = rig.session.view();
-	const std::vector<uint8_t> bytes = test_io::read_file(fixture("threedi/synth/pump.3di"));
+	const std::vector<uint8_t> bytes = test_io::read_file(test_paths_fixture("threedi/synth/pump.3di"));
 	opennova::threedi::Threedi3di3 model{};
 	TEST_EXPECT(opennova::threedi::threedi_3di3_read_memory(bytes.data(), bytes.size(), &model) == 0);
 	const bool collision = model.collision != nullptr;
@@ -792,12 +791,12 @@ static int test_sphere_picking() {
 		std::vector<uint8_t> written;
 		TEST_EXPECT(opennova::threedi::threedi_3di3_write_memory(&larger, written) == 0);
 		opennova::threedi::threedi_3di3_free(&larger);
-		TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/pump.3di", written));
+		TEST_EXPECT(test_io::write_file(view.project.root + "/models/pump.3di", written));
 		rig.session.handle(request::rescan());
 		rig.session.run_operations();
 		rig.pump();
 		TEST_EXPECT(near(radii.at(106100), mission_item_bound_radius(radius_q16 * 2, true, 0, false, 0), 1e-4));
-		TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/pump.3di", bytes));
+		TEST_EXPECT(test_io::write_file(view.project.root + "/models/pump.3di", bytes));
 		rig.session.handle(request::rescan());
 		rig.session.run_operations();
 		rig.pump();
@@ -863,7 +862,7 @@ static int test_envelope() {
 constexpr double kCrateWords[3] = { 0.25, -0.5, 0.75 };
 constexpr double kCrateAnchor[3] = { 0.5, 0.25, 0.75 };
 static bool mint_anchored_crate(Rig &rig) {
-	const std::vector<uint8_t> bytes = test_io::read_file(fixture("threedi/synth/crate.3di"));
+	const std::vector<uint8_t> bytes = test_io::read_file(test_paths_fixture("threedi/synth/crate.3di"));
 	opennova::threedi::Threedi3di3 model{};
 	if (opennova::threedi::threedi_3di3_read_memory(bytes.data(), bytes.size(), &model) != 0) return false;
 	bool moved = false;
@@ -878,7 +877,7 @@ static bool mint_anchored_crate(Rig &rig) {
 	std::vector<uint8_t> written;
 	const bool wrote = moved && opennova::threedi::threedi_3di3_write_memory(&model, written) == 0;
 	opennova::threedi::threedi_3di3_free(&model);
-	if (!wrote || !editor_test::write_bytes(rig.session.view().project.root + "/models/crate.3di", written)) return false;
+	if (!wrote || !test_io::write_file(rig.session.view().project.root + "/models/crate.3di", written)) return false;
 	rig.session.handle(request::rescan());
 	rig.session.run_operations();
 	rig.pump();
@@ -1879,7 +1878,7 @@ static int test_retail() {
 			TEST_EXPECT(game.read_file(file.logical_name, bytes));
 			const std::string path = "missions/" + (expansion.empty() ? std::string("base") : expansion) + "/" +
 					std::filesystem::path(file.logical_name).filename().string();
-			TEST_EXPECT(editor_test::write_bytes(project + "/" + path, bytes));
+			TEST_EXPECT(test_io::write_file(project + "/" + path, bytes));
 			paths.push_back(path);
 		}
 	}
@@ -2038,7 +2037,7 @@ static int test_fog_reach() {
 	Rig rig("opennova_editor_mission_viewport_fog");
 	TEST_EXPECT(rig.open(false));
 	const std::string root = rig.session.view().project.root;
-	TEST_EXPECT(editor_test::write_text(root + "/" + environment + ".env", "fog_level 60\nfog_type 1\n"));
+	TEST_EXPECT(test_io::write_text(root + "/" + environment + ".env", "fog_level 60\nfog_type 1\n"));
 	rig.session.handle(request::rescan());
 	rig.session.run_operations();
 	rig.session.handle(request::open_document(kMission));
@@ -2121,8 +2120,8 @@ using mission_test::tile_at;
 static int test_ground_facts() {
 	using namespace opennova;
 	auto files = std::make_shared<GroundFiles>();
-	files->put("Tmap.trn", test_io::read_file(fixture("terrain/tmap/Tmap.trn")));
-	files->put("Tmap.cpt", test_io::read_file(fixture("terrain/tmap/Tmap.cpt")));
+	files->put("Tmap.trn", test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.trn")));
+	files->put("Tmap.cpt", test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.cpt")));
 	files->put("Tmap_m.pcx", ground_charmap());
 	MissionSceneHeader header;
 	header.terrain = "Tmap";
@@ -2214,7 +2213,7 @@ static int test_ground_facts() {
 	TEST_EXPECT(near(ground.water_height(), 10.5));
 	files->put_text("pad.env", "water_height 30\r\n");
 	{
-		const std::vector<uint8_t> trn = test_io::read_file(fixture("terrain/tmap/Tmap.trn"));
+		const std::vector<uint8_t> trn = test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.trn"));
 		std::string text(trn.begin(), trn.end());
 		const size_t at = text.find("water_height");
 		TEST_EXPECT(at != std::string::npos);
@@ -2264,9 +2263,9 @@ static int test_ground_hit() {
 	Rig rig("opennova_editor_mission_viewport_ground_facts");
 	TEST_EXPECT(rig.open());
 	const std::string root = rig.session.view().project.root;
-	TEST_EXPECT(editor_test::write_bytes(root + "/Tmap.trn", test_io::read_file(fixture("terrain/tmap/Tmap.trn"))));
-	TEST_EXPECT(editor_test::write_bytes(root + "/Tmap.cpt", test_io::read_file(fixture("terrain/tmap/Tmap.cpt"))));
-	TEST_EXPECT(editor_test::write_bytes(root + "/Tmap_m.pcx", ground_charmap()));
+	TEST_EXPECT(test_io::write_file(root + "/Tmap.trn", test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.trn"))));
+	TEST_EXPECT(test_io::write_file(root + "/Tmap.cpt", test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.cpt"))));
+	TEST_EXPECT(test_io::write_file(root + "/Tmap_m.pcx", ground_charmap()));
 	rig.session.handle(request::rescan());
 	rig.session.run_operations();
 	rig.pump();

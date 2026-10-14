@@ -21,9 +21,11 @@ class ParticleRenderer;
 // NVG, no thermal: the bloom alone).
 class PreviewFrameEffects {
 public:
-	// FrameFx under `root` (the device's scope, beside its WorldEnvironment), the view's one display decode; the veil
-	// over `viewport`'s picture where `veil` (a picture with a sky whose Celestial pushes it: a model's, an effect's or
-	// a definition's has none).
+	// The game world's ClearColor and FrameFx rows under `root` (world/world_scene.h, in
+	// game_world.tscn's order, the clear first): FrameFx installs its terminal compositor, the
+	// view's one display decode, on the WorldEnvironment beside it as the game's does; the veil
+	// over `viewport`'s picture where `veil` (a picture with a sky whose Celestial pushes it: a
+	// model's, an effect's or a definition's has none).
 	PreviewFrameEffects(Node3D &root, SubViewport &viewport, bool veil = true);
 	// Over a world's own FrameFx (the WorldScene row a mission's preview draws: its load's
 	// post-step draws the mission texture into it), the veil over `viewport`'s picture.

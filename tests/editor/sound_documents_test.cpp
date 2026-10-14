@@ -371,7 +371,7 @@ int test_preview_picks() {
 // --- the project: graph, blanks, session -------------------------------------------------------------
 
 struct SoundProject {
-	editor_test::TempProjectDir dir{"opennova_editor_sound_documents"};
+	test_temp::TempDir dir{"opennova_editor_sound_documents"};
 	editor_test::FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -383,14 +383,14 @@ struct SoundProject {
 		const std::string root = session.view().project.root;
 		// game.lwf plays fs_dirt1.wav for FSP_DIRT_L; menu.lwf, off the chain, holds MENU_ONLY; the profile
 		// names both, an item binds it.
-		made = editor_test::write_bytes(root + "/sounds/game.lwf", bank_bytes({"fs_dirt1"}, "FSP_DIRT_L",
+		made = test_io::write_file(root + "/sounds/game.lwf", bank_bytes({"fs_dirt1"}, "FSP_DIRT_L",
 		                                                                       lwf::kFlagInternal | lwf::kFlagExternal)) &&
-		       editor_test::write_bytes(root + "/sounds/menu.lwf", bank_bytes({"tone"}, "MENU_ONLY", lwf::kFlagInternal)) &&
-		       editor_test::write_bytes(root + "/sounds/fs_dirt1.wav", test_io::read_file(repo() + "/fixtures/lwf/tone.wav")) &&
-		       editor_test::write_text(root + "/SndProf.def",
+		       test_io::write_file(root + "/sounds/menu.lwf", bank_bytes({"tone"}, "MENU_ONLY", lwf::kFlagInternal)) &&
+		       test_io::write_file(root + "/sounds/fs_dirt1.wav", test_io::read_file(repo() + "/fixtures/lwf/tone.wav")) &&
+		       test_io::write_text(root + "/SndProf.def",
 		                               "begin \"default\"\r\n\tSSLFootGND FSP_DIRT_L 0 0 0\r\n\tSSRFootGND MENU_ONLY 0 0 0\r\nend\r\n"
 		                               "begin \"SP_Soldier\"\r\nend\r\n") &&
-		       editor_test::write_text(root + "/defs/items.def",
+		       test_io::write_text(root + "/defs/items.def",
 		                               "begin \"Soldier\"\r\nid 100100\r\ntype person\r\nsound_profile SP_Soldier\r\n"
 		                               "sounddeath FSP_DIRT_L\r\nend\r\n");
 		// The blank SndProf.def Create Missing made goes: the project's own is the one above.
@@ -584,7 +584,7 @@ int test_wave_import() {
 	SoundProject project;
 	TEST_EXPECT(project.made);
 	const std::string outside = project.dir.file("outside");
-	TEST_EXPECT(editor_test::write_bytes(outside + "/stereo.wav", wave_of(2, 16, 44100, 441, true)));
+	TEST_EXPECT(test_io::write_file(outside + "/stereo.wav", wave_of(2, 16, 44100, 441, true)));
 	ImportChoice choice;
 	choice.path = outside + "/stereo.wav";
 	const SessionView &view = project.session.view();
@@ -596,7 +596,7 @@ int test_wave_import() {
 	const std::vector<uint8_t> landed = test_io::read_file(view.project.root + "/" + result.imported[0]);
 	TEST_EXPECT(lwf::wave_retail_check(landed).plays);
 	// A refused wave written over a project file: Problems says so.
-	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/sounds/fs_dirt1.wav", wave_of(2, 16, 44100, 441)));
+	TEST_EXPECT(test_io::write_file(view.project.root + "/sounds/fs_dirt1.wav", wave_of(2, 16, 44100, 441)));
 	editor_test::handle_to_end(project.session, request::rescan());
 	bool warned = false;
 	for (const Diagnostic &d : view.findings.diagnostics)
@@ -679,7 +679,7 @@ int test_retail_import_follows_sounds() {
 		return 0;
 	}
 	// A project of no bank of its own (one of the name would keep its copy: ImportPlan::shadowed).
-	editor_test::TempProjectDir dir("opennova_editor_sound_import_plan");
+	test_temp::TempDir dir("opennova_editor_sound_import_plan");
 	editor_test::FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);

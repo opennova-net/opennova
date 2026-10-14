@@ -48,9 +48,9 @@ std::string item(const char *name, int id, const char *type) {
 	return std::string("begin \"") + name + "\"\nid " + std::to_string(id) + "\ntype " + type + "\nend\n";
 }
 
-bool load(DefCatalogDocument &document, editor_test::TempProjectDir &dir, const std::string &text) {
+bool load(DefCatalogDocument &document, test_temp::TempDir &dir, const std::string &text) {
 	Diagnostic error;
-	return editor_test::write_text(dir.file("items.def"), text) &&
+	return test_io::write_text(dir.file("items.def"), text) &&
 	       document.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error);
 }
 
@@ -67,7 +67,7 @@ size_t count_of(const std::vector<Diagnostic> &findings, const std::string &code
 // A new item and a copy take the first free id the engine keeps for nothing: 100185, the parachute's,
 // is passed over; so is every reserved id the picker meets.
 int test_free_ids() {
-	editor_test::TempProjectDir dir("opennova_reserved_free_ids");
+	test_temp::TempDir dir("opennova_reserved_free_ids");
 	std::string text;
 	for (int id = 100000; id < 100185; ++id) text += item(("R" + std::to_string(id)).c_str(), id, "marker");
 	DefCatalogDocument document;
@@ -96,7 +96,7 @@ int test_free_ids() {
 	BlankRequest blank;
 	blank.logical_name = "items.def";
 	TEST_EXPECT(make_blank(blank, AssetKind::ItemDefs, bytes, error));
-	TEST_EXPECT(editor_test::write_bytes(dir.file("items.def"), bytes));
+	TEST_EXPECT(test_io::write_file(dir.file("items.def"), bytes));
 	DefCatalogDocument made;
 	TEST_EXPECT(made.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
 	TEST_EXPECT(made.rows().size() == 1 && item_at(made, 0).id == 100000 && item_at(made, 0).type == DEF_ITEM_TYPE_MARKER);
@@ -108,7 +108,7 @@ int test_free_ids() {
 // field free, an id the engine keeps for a model free too (a warning), and a mismatch the file already
 // had left editable.
 int test_refusals() {
-	editor_test::TempProjectDir dir("opennova_reserved_refusals");
+	test_temp::TempDir dir("opennova_reserved_refusals");
 	DefCatalogDocument document;
 	TEST_EXPECT(load(document, dir,
 	                 item("Null", 100000, "marker") + item("Insertion point", 106094, "marker") +
@@ -157,7 +157,7 @@ int test_refusals() {
 // The engine's rows added on their ids and of their kinds (the outline's Add engine item...): one undo
 // step each; what the engine keeps the id for then said on the row.
 int test_add_engine_items() {
-	editor_test::TempProjectDir dir("opennova_reserved_add");
+	test_temp::TempDir dir("opennova_reserved_add");
 	DefCatalogDocument document;
 	TEST_EXPECT(load(document, dir, item("Null", 100000, "marker")));
 	Diagnostic error;
@@ -183,7 +183,7 @@ int test_add_engine_items() {
 // the first row; a name only the editor's words for an unshipped row give, and one whose id the file
 // has, are none.
 int test_findings() {
-	editor_test::TempProjectDir dir("opennova_reserved_findings");
+	test_temp::TempDir dir("opennova_reserved_findings");
 	DefCatalogDocument document;
 	TEST_EXPECT(load(document, dir,
 	                 item("Crate", 100010, "decoration") + item("Insertion point", 106094, "marker") +
@@ -230,7 +230,7 @@ const Diagnostic *view_finding(const SessionView &view, const std::string &code,
 // of its own, Use the engine's id, each a Rename everywhere carrying the mission's records with it; Add a
 // Null marker first) and what each does.
 int test_session() {
-	editor_test::TempProjectDir dir("opennova_reserved_session");
+	test_temp::TempDir dir("opennova_reserved_session");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -241,7 +241,7 @@ int test_session() {
 	TEST_EXPECT(entry != nullptr);
 	if (!entry) return 1;
 	const std::string items = entry->relative_path, root = view.project.root;
-	TEST_EXPECT(editor_test::write_text(root + "/" + items,
+	TEST_EXPECT(test_io::write_text(root + "/" + items,
 	                                    item("Null", 100000, "marker") + item("Truck", 106001, "vehicle") +
 	                                            item("Teleport target", 100060, "marker") +
 	                                            item("Insertion point", 106094, "marker")));
@@ -253,7 +253,7 @@ int test_session() {
 		std::vector<uint8_t> bytes;
 		std::string error;
 		TEST_EXPECT(opennova::bms::write(mission, bytes, error));
-		TEST_EXPECT(editor_test::write_bytes(root + "/missions/place.bms", bytes));
+		TEST_EXPECT(test_io::write_file(root + "/missions/place.bms", bytes));
 	}
 	editor_test::handle_to_end(session, request::rescan());
 
@@ -300,7 +300,7 @@ int test_session() {
 	TEST_EXPECT(!view_finding(view, "catalog.reserved_name", "Teleport target"));
 
 	// The first row: a decoration first, a Null marker added before it.
-	TEST_EXPECT(editor_test::write_text(root + "/" + items, item("Crate", 100010, "decoration") + item("Insertion point", 106094, "marker")));
+	TEST_EXPECT(test_io::write_text(root + "/" + items, item("Crate", 100010, "decoration") + item("Insertion point", 106094, "marker")));
 	editor_test::handle_to_end(session, request::rescan());
 	const Diagnostic *first = view_finding(view, "catalog.first_row", "Crate");
 	TEST_EXPECT(first != nullptr);

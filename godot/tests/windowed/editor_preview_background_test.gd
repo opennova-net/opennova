@@ -11,6 +11,8 @@ extends GutTest
 
 const EditorFixture := preload("res://tests/authoring/editor_fixture.gd")
 const ARMORY := "res://../fixtures/threedi/synth/armory.3di"
+## The frame and strip textures' one colour.
+const FRAME_RGB := Color(0.1, 0.12, 0.08)
 const CRATE := "res://../fixtures/threedi/synth/crate.3di"
 const PTL := "particles/puff.ptl"
 const ITEMS := "defs/items.def"
@@ -33,29 +35,6 @@ func after_each() -> void:
 	await EditorFixture.teardown(self, _dirs)
 
 
-func _write(path: String, bytes: PackedByteArray) -> void:
-	assert_eq(DirAccess.make_dir_recursive_absolute(path.get_base_dir()), OK)
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file, "wrote %s" % path)
-	if file != null:
-		file.store_buffer(bytes)
-		file.close()
-
-
-## A `width` x `height` 32-bit TGA of one colour (a dark one: what used to vanish on the old background).
-func _tga(width: int, height: int, rgb := Color(0.1, 0.12, 0.08)) -> PackedByteArray:
-	var bytes := PackedByteArray()
-	bytes.resize(18)
-	bytes[2] = 2
-	bytes[12] = width
-	bytes[14] = height
-	bytes[16] = 32
-	bytes[17] = 0x08
-	for _texel in width * height:
-		bytes.append_array(PackedByteArray([rgb.b8, rgb.g8, rgb.r8, 255]))
-	return bytes
-
-
 func _ptl() -> String:
 	return ("[effectdef]\n{\n\tid = Puff;\n\tpdefs = PuffDot;\n}\n\n[particledef]\n{\n\tid = PuffDot;\n\temit_dur = 1.0;\n"
 			+ "\temit_rate = 40;\n\temit_burst = 1;\n\tage = 1.0;\n\tscale = 1.0;\n\tspeed = 1.5;\n\tspread = 40;\n"
@@ -68,17 +47,17 @@ func _project() -> String:
 	var dir := OS.get_cache_dir().path_join("opennova editor preview background project %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
 	assert_true(_seam.new_project(dir, "Preview Background"))
-	_write(dir.path_join("models/armory.3di"), FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(ARMORY)))
-	_write(dir.path_join("models/crate.3di"), FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(CRATE)))
-	_write(dir.path_join(PTL), _ptl().to_utf8_buffer())
-	_write(dir.path_join("particles/particle_dot.tga"),
+	TestFs.write_bytes(self, dir.path_join("models/armory.3di"), FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(ARMORY)))
+	TestFs.write_bytes(self, dir.path_join("models/crate.3di"), FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(CRATE)))
+	TestFs.write_bytes(self, dir.path_join(PTL), _ptl().to_utf8_buffer())
+	TestFs.write_bytes(self, dir.path_join("particles/particle_dot.tga"),
 			FileAccess.get_file_as_bytes(ProjectSettings.globalize_path("res://../fixtures/cbin/particle_dot.tga")))
-	_write(dir.path_join(ITEMS), TestFs.crlf("begin \"Pump station\"\nid 100500\ntype object\ngraphic crate\nend\n")
+	TestFs.write_bytes(self, dir.path_join(ITEMS), TestFs.crlf("begin \"Pump station\"\nid 100500\ntype object\ngraphic crate\nend\n")
 			.to_utf8_buffer())
-	_write(dir.path_join(LAYOUT), TestFs.crlf("StaticFrame frame.tga 6,586\nHUDHEALTH 25,741,177,751\n").to_utf8_buffer())
-	_write(dir.path_join("textures/frame.tga"), _tga(8, 8))
+	TestFs.write_bytes(self, dir.path_join(LAYOUT), TestFs.crlf("StaticFrame frame.tga 6,586\nHUDHEALTH 25,741,177,751\n").to_utf8_buffer())
+	TestFs.write_bytes(self, dir.path_join("textures/frame.tga"), TestFs.tga_bytes(Vector2i(8, 8), FRAME_RGB, 0x08))
 	# Narrow and tall: fitted to the picture's height, it leaves the picture's sides to the background.
-	_write(dir.path_join(TEXTURE), _tga(2, 8))
+	TestFs.write_bytes(self, dir.path_join(TEXTURE), TestFs.tga_bytes(Vector2i(2, 8), FRAME_RGB, 0x08))
 	_seam.request({"kind": "rescan"})
 	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
 	return dir

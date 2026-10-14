@@ -39,8 +39,6 @@ using io::JsonValue;
 
 namespace {
 
-std::string fixture(const std::string &name) { return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/" + name; }
-
 // A picture one pixel a metre over flat ground (a view's planners' space).
 struct FlatSpace final : TerrainBrushSpace {
 	bool pointer_ground(float x, float y, TerrainPoint &at, double &height) const override {
@@ -65,7 +63,7 @@ struct Recorder final : CanvasRequests {
 using editor_test::contains;
 
 TrnConfig tmap() {
-	const std::vector<uint8_t> bytes = test_io::read_file(fixture("terrain/tmap/Tmap.trn"));
+	const std::vector<uint8_t> bytes = test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.trn"));
 	TrnConfig trn;
 	std::string error;
 	std::istringstream text(std::string(bytes.begin(), bytes.end()));
@@ -133,7 +131,7 @@ int test_routing() {
 }
 
 int test_strokes() {
-	editor_test::TempProjectDir dir("opennova_editor_terrain_map_paint");
+	test_temp::TempDir dir("opennova_editor_terrain_map_paint");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -141,7 +139,7 @@ int test_strokes() {
 	const SessionView &v = session.view();
 	const std::string root = v.project.root;
 	for (const char *name : {"Tmap.trn", "Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx"})
-		TEST_EXPECT(editor_test::write_bytes(root + "/terrain/" + name, test_io::read_file(fixture(std::string("terrain/tmap/") + name))));
+		TEST_EXPECT(test_io::write_file(root + "/terrain/" + name, test_io::read_file(test_paths_fixture(std::string("terrain/tmap/") + name))));
 	// The colour map the .trn names, 1024 square, 24-bit with the TGA 2.0 footer as the shipped ones are.
 	std::vector<uint8_t> grey(size_t(1024) * 1024 * 4, 128), colour_map;
 	for (size_t i = 3; i < grey.size(); i += 4) grey[i] = 255; // opaque: the 24-bit form holds no alpha
@@ -151,8 +149,8 @@ int test_strokes() {
 	form.descriptor = 0;
 	form.footer = true;
 	TEST_EXPECT(tga::tga_write(grey.data(), 1024, 1024, form, colour_map, why));
-	TEST_EXPECT(editor_test::write_bytes(root + "/terrain/mnml_c.tga", colour_map));
-	TEST_EXPECT(editor_test::write_text(root + "/day.env", "env"));
+	TEST_EXPECT(test_io::write_file(root + "/terrain/mnml_c.tga", colour_map));
+	TEST_EXPECT(test_io::write_text(root + "/day.env", "env"));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::set_missions(session, true);
 	editor_test::handle_to_end(session, request::create_file("m.bms", "mission", {{"terrain", "Tmap.trn"}, {"environment", "day.env"}}));
@@ -246,7 +244,7 @@ int test_strokes() {
 	TEST_EXPECT(session.outcome().done() && codes->plane(0).u8(64, 64) == 0);
 	ask.brush.erase = false;
 	// A layer the blend map does not hold, and a map no brush paints: refused, saying why.
-	TEST_EXPECT(editor_test::write_bytes(root + "/terrain/mnml_d1.tga", colour_map));
+	TEST_EXPECT(test_io::write_file(root + "/terrain/mnml_d1.tga", colour_map));
 	editor_test::handle_to_end(session, request::rescan());
 	ask.plane = TerrainPlane::Blend;
 	ask.brush.tool = TerrainTool::Detail;
@@ -256,7 +254,7 @@ int test_strokes() {
 	TEST_EXPECT(!session.outcome().done() && contains(session.outcome().findings.back().message, "three detail layers"));
 	std::vector<uint8_t> rle = colour_map;
 	rle[2] = 10;
-	TEST_EXPECT(editor_test::write_bytes(root + "/terrain/mnml_d1.tga", rle));
+	TEST_EXPECT(test_io::write_file(root + "/terrain/mnml_d1.tga", rle));
 	session.handle(request::close_document("terrain/mnml_d1.tga"));
 	editor_test::handle_to_end(session, request::rescan());
 	ask.brush.layer = 1;
@@ -269,7 +267,7 @@ int test_strokes() {
 // An imported terrain (S20): its surface map's source, a palette PNG whose indices are the classes, takes the stroke
 // in the output's place as an index (the import reads it so), opened quietly and written again as a palette PNG.
 int test_imported_source() {
-	editor_test::TempProjectDir dir("opennova_editor_terrain_map_paint_import");
+	test_temp::TempDir dir("opennova_editor_terrain_map_paint_import");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -284,13 +282,13 @@ int test_imported_source() {
 			heights[size_t(y) * kSide + x] = uint8_t(std::max(0.0, 200.0 * (1.0 - std::hypot(x - 512.0, y - 512.0) / 400.0)));
 	std::vector<uint8_t> ramp;
 	for (int i = 0; i < 256; ++i) ramp.insert(ramp.end(), 3, uint8_t(i));
-	TEST_EXPECT(editor_test::write_bytes(images + "/height.png", png::encode_png_gray(heights.data(), kSide, kSide)));
-	TEST_EXPECT(editor_test::write_bytes(images + "/colour.png", png::encode_png_rgba(colours.data(), kSide, kSide)));
-	TEST_EXPECT(editor_test::write_bytes(images + "/surface.png", png::encode_png_indexed(classes.data(), kMap, kMap, ramp.data(), 256)));
+	TEST_EXPECT(test_io::write_file(images + "/height.png", png::encode_png_gray(heights.data(), kSide, kSide)));
+	TEST_EXPECT(test_io::write_file(images + "/colour.png", png::encode_png_rgba(colours.data(), kSide, kSide)));
+	TEST_EXPECT(test_io::write_file(images + "/surface.png", png::encode_png_indexed(classes.data(), kMap, kMap, ramp.data(), 256)));
 	// A detail blend map's weights (the .tset's blendmap key, S25 B4): the first layer full everywhere.
 	std::vector<uint8_t> weights;
 	for (int i = 0; i < kMap * kMap; ++i) weights.insert(weights.end(), {255, 0, 0, 255});
-	TEST_EXPECT(editor_test::write_bytes(images + "/blend.png", png::encode_png_rgba(weights.data(), kMap, kMap)));
+	TEST_EXPECT(test_io::write_file(images + "/blend.png", png::encode_png_rgba(weights.data(), kMap, kMap)));
 	ActionOutcome outcome = editor_test::handle_to_end(session, request::new_terrain("isle",
 	        {{"heightmap", images + "/height.png"}, {"colormap", images + "/colour.png"}, {"surface", images + "/surface.png"},
 	         {"blendmap", images + "/blend.png"}}));
@@ -408,7 +406,7 @@ int test_imported_source() {
 	std::vector<uint8_t> set_before = test_io::read_file(set_path);
 	const std::string note = "; my island, by hand\r\n";
 	set_before.insert(set_before.end(), note.begin(), note.end());
-	TEST_EXPECT(editor_test::write_bytes(set_path, set_before));
+	TEST_EXPECT(test_io::write_file(set_path, set_before));
 	editor_test::handle_to_end(session, request::rescan());
 	session.run_operations();
 	TerrainStrokeAsk add;
@@ -452,7 +450,7 @@ int test_imported_source() {
 		session.handle(request::close_document(v.project.scan->find("isle_foliagemap.png")->relative_path));
 		std::vector<uint8_t> greys(size_t(256) * 256 * 4, 0);
 		for (size_t i = 3; i < greys.size(); i += 4) greys[i] = 255;
-		TEST_EXPECT(editor_test::write_bytes(grey_path, png::encode_png_rgba(greys.data(), 256, 256)));
+		TEST_EXPECT(test_io::write_file(grey_path, png::encode_png_rgba(greys.data(), 256, 256)));
 		editor_test::handle_to_end(session, request::rescan());
 		session.run_operations();
 		ask.brush.foliage = 6;
@@ -481,26 +479,26 @@ int test_imported_source() {
 // the mission's view that its Undo takes back; a stroke then paints it. A second Add, the colour map's and an empty
 // stroke refused.
 int test_add_maps() {
-	editor_test::TempProjectDir dir("opennova_editor_terrain_map_add");
+	test_temp::TempDir dir("opennova_editor_terrain_map_add");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Add"));
 	const SessionView &v = session.view();
 	const std::string root = v.project.root;
-	const std::vector<uint8_t> trn_bytes = test_io::read_file(fixture("terrain/tmap/Tmap.trn"));
+	const std::vector<uint8_t> trn_bytes = test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.trn"));
 	std::string trn_text, line;
 	std::istringstream lines(std::string(trn_bytes.begin(), trn_bytes.end()));
 	while (std::getline(lines, line))
 		if (line.rfind("polytrn_charmap", 0) != 0 && line.rfind("polytrn_foliagemap", 0) != 0) trn_text += line + "\n";
-	TEST_EXPECT(editor_test::write_text(root + "/terrain/Tmap.trn", trn_text));
-	TEST_EXPECT(editor_test::write_bytes(root + "/terrain/Tmap.cpt", test_io::read_file(fixture("terrain/tmap/Tmap.cpt"))));
+	TEST_EXPECT(test_io::write_text(root + "/terrain/Tmap.trn", trn_text));
+	TEST_EXPECT(test_io::write_file(root + "/terrain/Tmap.cpt", test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.cpt"))));
 	std::vector<uint8_t> grey(size_t(1024) * 1024 * 4, 128), colour_map;
 	for (size_t i = 3; i < grey.size(); i += 4) grey[i] = 255; // a 24-bit TGA holds no alpha
 	std::string why;
 	TEST_EXPECT(tga::tga_write_rgb24(grey.data(), 1024, 1024, colour_map, why));
-	TEST_EXPECT(editor_test::write_bytes(root + "/terrain/mnml_c.tga", colour_map));
-	TEST_EXPECT(editor_test::write_text(root + "/day.env", "env"));
+	TEST_EXPECT(test_io::write_file(root + "/terrain/mnml_c.tga", colour_map));
+	TEST_EXPECT(test_io::write_text(root + "/day.env", "env"));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::set_missions(session, true);
 	editor_test::handle_to_end(session, request::create_file("m.bms", "mission", {{"terrain", "Tmap.trn"}, {"environment", "day.env"}}));

@@ -37,12 +37,10 @@ using namespace opennova::editor;
 
 namespace {
 
-std::string fixture(const char *relative) { return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/" + relative; }
-
 std::unique_ptr<TerrainHeightsDocument> open_tmap() {
 	auto document = std::make_unique<TerrainHeightsDocument>();
 	Diagnostic error;
-	if (!document->load_bytes(test_io::read_file(fixture("terrain/tmap/Tmap.cpt")), "terrain/Tmap.cpt",
+	if (!document->load_bytes(test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.cpt")), "terrain/Tmap.cpt",
 	                          AssetKind::TerrainPolyData, "jo", error))
 		return nullptr;
 	return document;
@@ -151,15 +149,15 @@ int test_dabs() {
 }
 
 int test_session() {
-	editor_test::TempProjectDir dir("opennova_editor_heights_brushes");
+	test_temp::TempDir dir("opennova_editor_heights_brushes");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Heights"));
 	const std::string root = session.view().project.root;
-	const std::vector<uint8_t> cpt_bytes = test_io::read_file(fixture("terrain/tmap/Tmap.cpt"));
-	TEST_EXPECT(editor_test::write_bytes(root + "/terrain/Tmap.cpt", cpt_bytes));
-	TEST_EXPECT(editor_test::write_bytes(root + "/terrain/Tmap.trn", test_io::read_file(fixture("terrain/tmap/Tmap.trn"))));
+	const std::vector<uint8_t> cpt_bytes = test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.cpt"));
+	TEST_EXPECT(test_io::write_file(root + "/terrain/Tmap.cpt", cpt_bytes));
+	TEST_EXPECT(test_io::write_file(root + "/terrain/Tmap.trn", test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.trn"))));
 	editor_test::handle_to_end(session, request::rescan());
 	const SessionView &v = session.view();
 	const AssetEntry *trn = v.project.scan->find("Tmap.trn");
@@ -221,7 +219,7 @@ int test_session() {
 // stroke's regions as the live heights, the ground the game collides with patched under them; the bake's landing the
 // tiles it replaced; the undo the shipped heights and tiles back.
 int test_view() {
-	editor_test::TempProjectDir dir("opennova_editor_heights_view");
+	test_temp::TempDir dir("opennova_editor_heights_view");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -229,10 +227,10 @@ int test_view() {
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Heights"));
 	const SessionView &v = session.view();
 	const std::string root = v.project.root;
-	const std::vector<uint8_t> cpt_bytes = test_io::read_file(fixture("terrain/tmap/Tmap.cpt"));
-	TEST_EXPECT(editor_test::write_bytes(root + "/terrain/Tmap.cpt", cpt_bytes));
-	TEST_EXPECT(editor_test::write_bytes(root + "/terrain/Tmap.trn", test_io::read_file(fixture("terrain/tmap/Tmap.trn"))));
-	TEST_EXPECT(editor_test::write_text(root + "/day.env", "env"));
+	const std::vector<uint8_t> cpt_bytes = test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.cpt"));
+	TEST_EXPECT(test_io::write_file(root + "/terrain/Tmap.cpt", cpt_bytes));
+	TEST_EXPECT(test_io::write_file(root + "/terrain/Tmap.trn", test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.trn"))));
+	TEST_EXPECT(test_io::write_text(root + "/day.env", "env"));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::set_missions(session, true);
 	editor_test::handle_to_end(session, request::create_file("m.bms", "mission", {{"terrain", "Tmap.trn"}, {"environment", "day.env"}}));
@@ -314,7 +312,7 @@ int test_view() {
 
 // A project with the Tmap terrain and a mission on it, the mission open (the view a stroke brushes in).
 struct SeedRig {
-	editor_test::TempProjectDir dir;
+	test_temp::TempDir dir;
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -323,9 +321,9 @@ struct SeedRig {
 		editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Heights"));
 		const SessionView &v = session.view();
 		const std::string root = v.project.root;
-		editor_test::write_bytes(root + "/terrain/Tmap.cpt", test_io::read_file(fixture("terrain/tmap/Tmap.cpt")));
-		editor_test::write_bytes(root + "/terrain/Tmap.trn", test_io::read_file(fixture("terrain/tmap/Tmap.trn")));
-		editor_test::write_text(root + "/day.env", "env");
+		test_io::write_file(root + "/terrain/Tmap.cpt", test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.cpt")));
+		test_io::write_file(root + "/terrain/Tmap.trn", test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.trn")));
+		test_io::write_text(root + "/day.env", "env");
 		editor_test::handle_to_end(session, request::rescan());
 		editor_test::set_missions(session, true);
 		editor_test::handle_to_end(session,
@@ -412,7 +410,7 @@ int test_close_during_seed() {
 // the views and the ground read); its save writes the heightmap, and the project's refresh imports it again, the
 // .cpt it makes the bytes the image stood in for it with (DI-26's save-first then the build's refresh carry it).
 int test_imported() {
-	editor_test::TempProjectDir dir("opennova_editor_heights_imported");
+	test_temp::TempDir dir("opennova_editor_heights_imported");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -428,12 +426,12 @@ int test_imported() {
 		}
 	std::vector<uint8_t> rgba(size_t(kSide) * kSide * 4, 200);
 	const std::string images = dir.file("images");
-	TEST_EXPECT(editor_test::write_bytes(images + "/height.png", png::encode_png_gray16(samples.data(), kSide, kSide)));
-	TEST_EXPECT(editor_test::write_bytes(images + "/colour.png", png::encode_png_rgba(rgba.data(), kSide, kSide)));
+	TEST_EXPECT(test_io::write_file(images + "/height.png", png::encode_png_gray16(samples.data(), kSide, kSide)));
+	TEST_EXPECT(test_io::write_file(images + "/colour.png", png::encode_png_rgba(rgba.data(), kSide, kSide)));
 	const ActionOutcome made = editor_test::handle_to_end(session, request::new_terrain("isle",
 	        {{"heightmap", images + "/height.png"}, {"colormap", images + "/colour.png"}, {"top", "100"}}));
 	TEST_EXPECT(!made.refused);
-	TEST_EXPECT(editor_test::write_text(root + "/day.env", "env"));
+	TEST_EXPECT(test_io::write_text(root + "/day.env", "env"));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::set_missions(session, true);
 	editor_test::handle_to_end(session, request::create_file("m.bms", "mission", {{"terrain", "isle.trn"}, {"environment", "day.env"}}));

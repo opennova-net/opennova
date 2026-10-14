@@ -62,7 +62,7 @@ int test_kind() {
 }
 
 struct Rig {
-	editor_test::TempProjectDir dir{ "opennova_editor_environment_viewport" };
+	test_temp::TempDir dir{ "opennova_editor_environment_viewport" };
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{ platform, preferences };
@@ -124,7 +124,7 @@ int write_mission(const std::string &root, const char *name, int attrib, int fog
 	            opennova::mission::set_header_int(file, "minutes_per_day", minutes, why));
 	std::vector<uint8_t> bytes;
 	TEST_EXPECT(opennova::bms::write(file, bytes, why));
-	TEST_EXPECT(editor_test::write_bytes(root + "/" + name, bytes));
+	TEST_EXPECT(test_io::write_file(root + "/" + name, bytes));
 	return 0;
 }
 
@@ -145,8 +145,8 @@ int test_session() {
 	std::ostringstream text;
 	std::string error;
 	TEST_EXPECT(opennova::env::save_env(text, config, error));
-	TEST_EXPECT(editor_test::write_text(root + "/day.env", text.str()));
-	TEST_EXPECT(editor_test::write_text(root + "/island.trn",
+	TEST_EXPECT(test_io::write_text(root + "/day.env", text.str()));
+	TEST_EXPECT(test_io::write_text(root + "/island.trn",
 	                                    "polytrn_colormap map.tga\r\npolytrn_detailmap detail.tga\r\npolytrn_polydata island.cpt\r\n"
 	                                    "polytrn_sectorcount 1\r\npolytrn_sectors 0\r\nwater_height 25\r\n"));
 	// Two missions on it: one fogging closer and starting at 06:00 on a 30-minute day (the 60-minute floor),
@@ -325,7 +325,7 @@ int test_no_mission() {
 	std::ostringstream text;
 	std::string error;
 	TEST_EXPECT(opennova::env::save_env(text, config, error));
-	TEST_EXPECT(editor_test::write_text(rig.root() + "/day.env", text.str()));
+	TEST_EXPECT(test_io::write_text(rig.root() + "/day.env", text.str()));
 	editor_test::handle_to_end(rig.session, request::rescan());
 	editor_test::handle_to_end(rig.session, request::open_document(rig.path));
 	rig.pump();
@@ -360,7 +360,7 @@ int test_listen() {
 	std::ostringstream text;
 	std::string error;
 	TEST_EXPECT(opennova::env::save_env(text, config, error));
-	TEST_EXPECT(editor_test::write_text(root + "/day.env", text.str()));
+	TEST_EXPECT(test_io::write_text(root + "/day.env", text.str()));
 	// The bank: the rain's two loops heard to 30 m, the thunder to 2 km; a wave each.
 	opennova::lwf::File bank;
 	const char *sets[] = { "LPNV_RAIN_L", "LPNV_RAIN_R", "THUNDER" };
@@ -389,10 +389,10 @@ int test_listen() {
 	}
 	std::vector<uint8_t> bytes;
 	TEST_EXPECT(opennova::lwf::encode_lwf(bank, bytes, error));
-	TEST_EXPECT(editor_test::write_bytes(root + "/sounds/game.lwf", bytes));
+	TEST_EXPECT(test_io::write_file(root + "/sounds/game.lwf", bytes));
 	const std::vector<uint8_t> tone = test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/lwf/tone.wav");
 	for (const char *set : sets)
-		TEST_EXPECT(editor_test::write_bytes(root + "/sounds/" + opennova::strutil::to_lower(set) + ".wav", tone));
+		TEST_EXPECT(test_io::write_file(root + "/sounds/" + opennova::strutil::to_lower(set) + ".wav", tone));
 	editor_test::handle_to_end(rig.session, request::rescan());
 	editor_test::handle_to_end(rig.session, request::open_document(rig.path));
 	rig.pump();

@@ -170,13 +170,13 @@ int test_line_order() {
 }
 
 int test_query() {
-	editor_test::TempProjectDir dir("opennova_particle_keys");
+	test_temp::TempDir dir("opennova_particle_keys");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Particles"));
 	const std::string root = session.view().project.root;
-	TEST_EXPECT(editor_test::write_text(root + "/t.ptl", kText));
+	TEST_EXPECT(test_io::write_text(root + "/t.ptl", kText));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::handle_to_end(session, request::open_document("t.ptl"));
 	JsonValue args;

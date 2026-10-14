@@ -71,8 +71,8 @@ WorkspaceView::Voice voice_of(const char *path) {
 // A voice fired in the frame the project's files move (a save's rescan) plays: an unchanged wave is kept, its
 // decode in flight or done, and never decoded again.
 int test_a_voice_survives_a_rescan() {
-	editor_test::TempProjectDir dir("opennova_preview_waves_survive");
-	TEST_EXPECT(editor_test::write_bytes(dir.file("sounds/shot.wav"), wave_of(100)));
+	test_temp::TempDir dir("opennova_preview_waves_survive");
+	TEST_EXPECT(test_io::write_file(dir.file("sounds/shot.wav"), wave_of(100)));
 	PreviewWaves waves;
 	PreviewVoiceQueue queue(waves);
 	queue.add(dir.root(), {voice_of("sounds/shot.wav")});
@@ -99,11 +99,11 @@ int test_a_voice_survives_a_rescan() {
 // A wave whose file changed is dropped with the voices waiting on it, and decoded anew from its new bytes when next
 // asked; one whose file went is dropped likewise.
 int test_a_changed_or_removed_wave() {
-	editor_test::TempProjectDir dir("opennova_preview_waves_changed");
+	test_temp::TempDir dir("opennova_preview_waves_changed");
 	const std::string shot = join_path(dir.root(), "sounds/shot.wav");
 	const std::string step = join_path(dir.root(), "sounds/step.wav");
-	TEST_EXPECT(editor_test::write_bytes(shot, wave_of(100)));
-	TEST_EXPECT(editor_test::write_bytes(step, wave_of(50)));
+	TEST_EXPECT(test_io::write_file(shot, wave_of(100)));
+	TEST_EXPECT(test_io::write_file(step, wave_of(50)));
 	PreviewWaves waves;
 	PreviewVoiceQueue queue(waves);
 	queue.add(dir.root(), {voice_of("sounds/shot.wav"), voice_of("sounds/step.wav")});
@@ -111,7 +111,7 @@ int test_a_changed_or_removed_wave() {
 	// Both decodes done first: a decode reading a file holds it open, and Windows refuses to delete an open file.
 	TEST_EXPECT(waves.wait(step).state == PreviewWaves::State::Decoded);
 	// The shot rewritten and the step deleted before the pump: both voices dropped with their waves.
-	TEST_EXPECT(editor_test::write_bytes(shot, wave_of(200)));
+	TEST_EXPECT(test_io::write_file(shot, wave_of(200)));
 	std::error_code ec;
 	TEST_EXPECT(std::filesystem::remove(system_path(step), ec));
 	const std::vector<std::string> dropped = queue.refresh();
@@ -124,7 +124,7 @@ int test_a_changed_or_removed_wave() {
 	queue.add(dir.root(), {voice_of("sounds/step.wav")});
 	TEST_EXPECT(taken(queue).empty() && queue.waiting() == 0);
 	// The step written again: the failure dropped at the rescan, the wave decoded.
-	TEST_EXPECT(editor_test::write_bytes(step, wave_of(75)));
+	TEST_EXPECT(test_io::write_file(step, wave_of(75)));
 	TEST_EXPECT(waves.refresh() == std::vector<std::string>({step}));
 	const PreviewWaves::Wave back = waves.wait(step);
 	TEST_EXPECT(back.state == PreviewWaves::State::Decoded && frames_of(back) == 75);

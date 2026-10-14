@@ -75,15 +75,15 @@ size_t finding_at(const SessionView &view, const char *code, const std::string &
 }
 
 int test_looks() {
-	editor_test::TempProjectDir dir{"opennova_editor_disk_looks"};
+	test_temp::TempDir dir{"opennova_editor_disk_looks"};
 	const std::string root = dir.root();
 	ProjectDocument doc;
 	doc.title = "Looks";
 	const ProjectPaths paths = ProjectPaths::for_root(root);
-	TEST_EXPECT(editor_test::write_text(root + "/a.def", items_text(1)) &&
-	            editor_test::write_text(root + "/sub/b.def", items_text(2)) &&
-	            editor_test::write_text(root + "/sub/deep/c.def", items_text(1)) &&
-	            editor_test::write_text(root + "/.opennova/cache.def", items_text(1)));
+	TEST_EXPECT(test_io::write_text(root + "/a.def", items_text(1)) &&
+	            test_io::write_text(root + "/sub/b.def", items_text(2)) &&
+	            test_io::write_text(root + "/sub/deep/c.def", items_text(1)) &&
+	            test_io::write_text(root + "/.opennova/cache.def", items_text(1)));
 	TEST_EXPECT(editor_test::backdate_tree(root, std::chrono::seconds(60)));
 	const AssetScan scan = scan_project_assets(paths, doc);
 	// The walk keeps each folder it went into with its stamp, and each file's own stamp.
@@ -105,7 +105,7 @@ int test_looks() {
 	TEST_EXPECT(changes.folder_changes(paths, doc, settled, now, &listed).empty() && listed == 0);
 
 	// A file written just now waits until a look 250 ms later finds it as it was.
-	TEST_EXPECT(editor_test::write_text(root + "/a.def", items_text(3)));
+	TEST_EXPECT(test_io::write_text(root + "/a.def", items_text(3)));
 	changes.look_at(paths, settled, {"a.def"}, 1000, io::file_clock_now_ticks());
 	TEST_EXPECT(changes.waiting() == 1 && changes.ready() == 0);
 	changes.look_at(paths, settled, {"a.def"}, 1100, io::file_clock_now_ticks());
@@ -113,9 +113,9 @@ int test_looks() {
 	changes.look_at(paths, settled, {"a.def"}, 1000 + kDiskHoldStillMs, io::file_clock_now_ticks());
 	TEST_EXPECT(changes.waiting() == 0 && changes.take_ready() == std::vector<std::string>({"a.def"}));
 	// Moved again between two looks: it waits from the second.
-	TEST_EXPECT(editor_test::write_text(root + "/a.def", items_text(4)));
+	TEST_EXPECT(test_io::write_text(root + "/a.def", items_text(4)));
 	changes.look_at(paths, settled, {"a.def"}, 2000, io::file_clock_now_ticks());
-	TEST_EXPECT(editor_test::write_text(root + "/a.def", items_text(5)));
+	TEST_EXPECT(test_io::write_text(root + "/a.def", items_text(5)));
 	changes.look_at(paths, settled, {"a.def"}, 2300, io::file_clock_now_ticks());
 	TEST_EXPECT(changes.waiting() == 1 && changes.ready() == 0);
 	// Its last write settled (two seconds back): ready at the first look.
@@ -131,10 +131,10 @@ int test_looks() {
 	changes.look_at(paths, settled, {"sub/deep/c.def"}, 3000 + kDiskHoldStillMs, io::file_clock_now_ticks());
 	TEST_EXPECT(changes.take_ready() == std::vector<std::string>({"sub/deep/c.def"}));
 	// Moved back to what the scan holds: forgotten.
-	TEST_EXPECT(editor_test::write_text(root + "/sub/b.def", items_text(9)));
+	TEST_EXPECT(test_io::write_text(root + "/sub/b.def", items_text(9)));
 	changes.look_at(paths, settled, {"sub/b.def"}, 4000, io::file_clock_now_ticks());
 	TEST_EXPECT(changes.waiting() == 1);
-	TEST_EXPECT(editor_test::write_text(root + "/sub/b.def", items_text(2)));
+	TEST_EXPECT(test_io::write_text(root + "/sub/b.def", items_text(2)));
 	{
 		std::error_code ec;
 		fs::last_write_time(system_path(root + "/sub/b.def"),
@@ -145,10 +145,10 @@ int test_looks() {
 
 	// The folders: a file made in one, one gone from another, a folder made with a file, a folder gone with
 	// what it held; a dot-folder's file and the export folder's never.
-	TEST_EXPECT(editor_test::write_text(root + "/new.def", items_text(1)) &&
-	            editor_test::write_text(root + "/made/d.def", items_text(1)) &&
-	            editor_test::write_text(root + "/.opennova/other.def", items_text(1)) &&
-	            editor_test::write_text(paths.export_dir(doc) + "/shipped.def", items_text(1)));
+	TEST_EXPECT(test_io::write_text(root + "/new.def", items_text(1)) &&
+	            test_io::write_text(root + "/made/d.def", items_text(1)) &&
+	            test_io::write_text(root + "/.opennova/other.def", items_text(1)) &&
+	            test_io::write_text(paths.export_dir(doc) + "/shipped.def", items_text(1)));
 	{
 		std::error_code ec;
 		fs::remove(system_path(root + "/sub/b.def"), ec);
@@ -170,7 +170,7 @@ int test_looks() {
 
 	// The sweep: every file of a scan looked at, a step at a time.
 	const AssetScan now_scan = scan_project_assets(paths, doc);
-	TEST_EXPECT(editor_test::write_text(root + "/made/d.def", items_text(7)) &&
+	TEST_EXPECT(test_io::write_text(root + "/made/d.def", items_text(7)) &&
 	            editor_test::backdate(root + "/made/d.def", std::chrono::seconds(60)));
 	std::vector<std::string> every;
 	for (const auto &[path, visit] : now_scan.visits()) every.push_back(path);
@@ -188,9 +188,9 @@ int test_looks() {
 	// keeps the stamp (FAT stamps two seconds apart, exFAT ten milliseconds) is found by its content once the
 	// stamp has settled and the content holds still, never before; one whose content is as the scan read it is
 	// not. A stamp as fine as NTFS's or Linux's moves with a rewrite: no content is read for it.
-	TEST_EXPECT(editor_test::write_text(root + "/racy.def", items_text(1)) &&
-	            editor_test::write_text(root + "/kept.def", items_text(1)) &&
-	            editor_test::write_text(root + "/fine.def", items_text(1)));
+	TEST_EXPECT(test_io::write_text(root + "/racy.def", items_text(1)) &&
+	            test_io::write_text(root + "/kept.def", items_text(1)) &&
+	            test_io::write_text(root + "/fine.def", items_text(1)));
 	{
 		using Ticks = fs::file_time_type::duration;
 		const int64_t tick = std::chrono::duration_cast<Ticks>(std::chrono::milliseconds(10)).count();
@@ -207,7 +207,7 @@ int test_looks() {
 	const int64_t racy_stamp = scanned_stamp(racy_scan, "racy.def").modified_ticks;
 	std::string rewritten = items_text(1);
 	rewritten.replace(rewritten.find("hp 10"), 5, "hp 11");
-	TEST_EXPECT(editor_test::write_text(root + "/racy.def", rewritten));
+	TEST_EXPECT(test_io::write_text(root + "/racy.def", rewritten));
 	{
 		std::error_code ec;
 		fs::last_write_time(system_path(root + "/racy.def"), fs::file_time_type(fs::file_time_type::duration(racy_stamp)), ec);
@@ -232,7 +232,7 @@ int test_looks() {
 }
 
 int test_session() {
-	editor_test::TempProjectDir dir{"opennova_editor_disk_watch"};
+	test_temp::TempDir dir{"opennova_editor_disk_watch"};
 	editor_test::FakePlatform platform;
 	platform.clock = 10000;
 	MemoryPreferencesStore preferences;
@@ -241,8 +241,8 @@ int test_session() {
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	const std::string root = view.project.root;
-	TEST_EXPECT(editor_test::write_text(root + "/defs/items.def", items_text(2)) &&
-	            editor_test::write_text(root + "/defs/other.def", items_text(1)) &&
+	TEST_EXPECT(test_io::write_text(root + "/defs/items.def", items_text(2)) &&
+	            test_io::write_text(root + "/defs/other.def", items_text(1)) &&
 	            editor_test::backdate_tree(root, std::chrono::seconds(60)));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::handle_to_end(session, request::open_document("defs/items.def"));
@@ -261,7 +261,7 @@ int test_session() {
 
 	// Another program saves the open catalog: written just now, it waits for a look that finds it holding
 	// still, then comes back with no Rescan, the record selected in it selected again by its place.
-	TEST_EXPECT(editor_test::write_text(root + "/defs/items.def", items_text(3)));
+	TEST_EXPECT(test_io::write_text(root + "/defs/items.def", items_text(3)));
 	session.handle(request::refresh_changed_sources());
 	TEST_EXPECT(session.outcome().operation == 0 && view.project.outside_waiting == 1);
 	platform.clock += 100;
@@ -299,7 +299,7 @@ int test_session() {
 
 	// A file no document shows changes: the checks' round finds it (its last write settled: ready at once), and
 	// reads it again.
-	TEST_EXPECT(editor_test::write_text(root + "/defs/other.def", items_text(4)) &&
+	TEST_EXPECT(test_io::write_text(root + "/defs/other.def", items_text(4)) &&
 	            editor_test::backdate(root + "/defs/other.def", std::chrono::seconds(30)));
 	editor_test::handle_to_end(session, request::refresh_changed_sources());
 	TEST_EXPECT(session.outcome().operation != 0 && view.project.outside_waiting == 0);
@@ -308,7 +308,7 @@ int test_session() {
 	// at its step, and the next check reads it again.
 	session.handle(request::refresh_changed_sources(true));
 	TEST_EXPECT(view.project.outside_sweeping);
-	TEST_EXPECT(editor_test::write_text(root + "/defs/other.def", items_text(6)) &&
+	TEST_EXPECT(test_io::write_text(root + "/defs/other.def", items_text(6)) &&
 	            editor_test::backdate(root + "/defs/other.def", std::chrono::seconds(20)));
 	session.set_poll_budget(PollBudget{0, kWalkEntryCost});
 	size_t polls = 0;
@@ -323,7 +323,7 @@ int test_session() {
 	TEST_EXPECT(scanned_stamp(*view.project.scan, "defs/other.def") == disk_stamp(ProjectPaths::for_root(root), "defs/other.def"));
 
 	// A file made and one deleted: the folder's last write moved, so the checks find both, each named.
-	TEST_EXPECT(editor_test::write_text(root + "/defs/new.def", items_text(1)));
+	TEST_EXPECT(test_io::write_text(root + "/defs/new.def", items_text(1)));
 	{
 		std::error_code ec;
 		fs::remove(system_path(root + "/defs/other.def"), ec);
@@ -345,7 +345,7 @@ int test_session() {
 	edit.edits[0].value = int64_t(77);
 	session.handle(edit);
 	TEST_EXPECT(items->dirty());
-	TEST_EXPECT(editor_test::write_text(root + "/defs/items.def", items_text(5)) &&
+	TEST_EXPECT(test_io::write_text(root + "/defs/items.def", items_text(5)) &&
 	            editor_test::backdate(root + "/defs/items.def", std::chrono::seconds(30)));
 	editor_test::handle_to_end(session, request::refresh_changed_sources());
 	TEST_EXPECT(session.outcome().operation != 0);
@@ -379,13 +379,13 @@ int test_session() {
 	// A PNG the game reads as it is: the import round trip's own, two seconds after its last write (S18).
 	{
 		std::vector<uint8_t> rgba(64, 120);
-		TEST_EXPECT(editor_test::write_bytes(root + "/textures/pic.png", encode_png_rgba(rgba.data(), 4, 4)) &&
+		TEST_EXPECT(test_io::write_file(root + "/textures/pic.png", encode_png_rgba(rgba.data(), 4, 4)) &&
 		            editor_test::backdate(root + "/textures/pic.png", std::chrono::seconds(60)));
 		editor_test::handle_to_end(session, request::rescan());
 		editor_test::handle_to_end(session, request::open_document("textures/pic.png"));
 		std::vector<uint8_t> red;
 		for (int i = 0; i < 16; ++i) red.insert(red.end(), {220, 10, 10, 255});
-		TEST_EXPECT(editor_test::write_bytes(root + "/textures/pic.png", encode_png_rgba(red.data(), 4, 4)));
+		TEST_EXPECT(test_io::write_file(root + "/textures/pic.png", encode_png_rgba(red.data(), 4, 4)));
 		session.handle(request::refresh_changed_sources());
 		platform.clock += kDiskHoldStillMs;
 		session.handle(request::refresh_changed_sources());

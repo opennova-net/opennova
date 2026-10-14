@@ -49,7 +49,7 @@ using editor_test::NoProcess;
 
 // A new project with its missing files made, the session and its root.
 struct Project {
-	editor_test::TempProjectDir dir;
+	test_temp::TempDir dir;
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session;
@@ -65,7 +65,7 @@ struct Project {
 		const AssetEntry *entry = view().project.scan->find(name);
 		return entry ? entry->relative_path : std::string();
 	}
-	bool write(const std::string &relative, const std::string &text) { return editor_test::write_text(root() + "/" + relative, text); }
+	bool write(const std::string &relative, const std::string &text) { return test_io::write_text(root() + "/" + relative, text); }
 	std::string read(const std::string &relative) const {
 		std::ifstream in(root() + "/" + relative, std::ios::binary);
 		std::stringstream buffer;
@@ -406,7 +406,7 @@ static int test_item_id_in_mission() {
 		std::vector<uint8_t> bytes;
 		std::string error;
 		TEST_EXPECT(opennova::bms::write(mission, bytes, error));
-		TEST_EXPECT(editor_test::write_bytes(project.root() + "/missions/place.bms", bytes));
+		TEST_EXPECT(test_io::write_file(project.root() + "/missions/place.bms", bytes));
 	}
 	project.rescan();
 	const GraphSymbol *item = project.defined(ReferenceKind::Item, "100300", items);

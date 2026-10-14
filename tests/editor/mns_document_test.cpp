@@ -41,9 +41,9 @@ constexpr NodeKind kVariable = node_kind(StyleKind::Variable);
 using editor_test::NoProcess;
 
 // A stylesheet of `text` loaded as a document, the file written under `dir`.
-bool load(MnsDocument &document, const editor_test::TempProjectDir &dir, const std::string &text,
+bool load(MnsDocument &document, const test_temp::TempDir &dir, const std::string &text,
           const char *name = "menu_style.mns") {
-	if (!editor_test::write_text(dir.file(name), text)) return false;
+	if (!test_io::write_text(dir.file(name), text)) return false;
 	Diagnostic error;
 	return document.load(dir.file(name), name, AssetKind::MenuStyle, "jo", error);
 }
@@ -99,7 +99,7 @@ using editor_test::has_code;
 // The rows are the game's list: what it reads of each form, which a save writes alone and which reads back as the
 // list; a file in the writer's form saves byte for byte, every other form what the game reads of it.
 static int test_the_list() {
-	editor_test::TempProjectDir dir("opennova_styles_list");
+	test_temp::TempDir dir("opennova_styles_list");
 	struct Case {
 		const char *src;
 		const char *written;
@@ -156,7 +156,7 @@ static int test_the_list() {
 static int test_the_shipped_sheet(const std::string &fixture) {
 	std::string src, message;
 	TEST_EXPECT(opennova::io::read_file_text(fixture, src, message));
-	editor_test::TempProjectDir dir("opennova_styles_retail");
+	test_temp::TempDir dir("opennova_styles_retail");
 	MnsDocument document;
 	TEST_EXPECT(load(document, dir, src));
 	// The document and the game read it alike.
@@ -184,7 +184,7 @@ static int test_the_shipped_sheet(const std::string &fixture) {
 }
 
 static int test_edits() {
-	editor_test::TempProjectDir dir("opennova_styles_edits");
+	test_temp::TempDir dir("opennova_styles_edits");
 	Diagnostic error;
 	// A value edit changes one line; undo returns the same bytes; a rename.
 	{
@@ -243,7 +243,7 @@ static int test_edits() {
 		MnsDocument document;
 		TEST_EXPECT(load(document, dir, "FOO a\r\n", "conflict.mns"));
 		TEST_EXPECT(document.apply(set_edit(row_at(document, 0), "value", std::string("b")), error));
-		TEST_EXPECT(editor_test::write_text(dir.file("conflict.mns"), "FOO other\r\n"));
+		TEST_EXPECT(test_io::write_text(dir.file("conflict.mns"), "FOO other\r\n"));
 		TEST_EXPECT(!document.save(error) && error.code() == "document.conflict");
 	}
 	std::printf("test_edits passed\n");
@@ -253,7 +253,7 @@ static int test_edits() {
 // S11a: a value edit is a change and reverts; a line's number, read off the whole document, never is, though a
 // variable added above moves every line.
 static int test_changes_since_save() {
-	editor_test::TempProjectDir dir("opennova_styles_changes");
+	test_temp::TempDir dir("opennova_styles_changes");
 	MnsDocument document;
 	TEST_EXPECT(load(document, dir, "FOO a\r\nBAR 1\r\n"));
 	using Change = Document::RecordChange;
@@ -277,7 +277,7 @@ static int test_changes_since_save() {
 // does not read; and on a blank project nothing but the starter variables no blank menu names (style.unused, info,
 // S9l), which leave once a menu names one.
 static int test_validation() {
-	editor_test::TempProjectDir dir("opennova_styles_validation");
+	test_temp::TempDir dir("opennova_styles_validation");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -316,8 +316,8 @@ static int test_validation() {
 	TEST_EXPECT(style != nullptr);
 	const std::string style_dir = (dir.path / "project" / style->relative_path).parent_path().generic_string();
 	// A comment ended by a lone LF, and a stylesheet by another name.
-	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "// brand\nA 1\r\nB 2\r\n"));
-	TEST_EXPECT(editor_test::write_text(style_dir + "/other.mns", "#else\r\nC 3\r\n"));
+	TEST_EXPECT(test_io::write_text(style_dir + "/brand.mns", "// brand\nA 1\r\nB 2\r\n"));
+	TEST_EXPECT(test_io::write_text(style_dir + "/other.mns", "#else\r\nC 3\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	const AssetEntry *brand = view.project.scan->find("brand.mns");
 	TEST_EXPECT(brand != nullptr);
@@ -358,7 +358,7 @@ static int test_validation() {
 			std::fprintf(stderr, "build: %s %s %s\n", d.code().c_str(), d.asset.c_str(), d.message.c_str());
 	TEST_EXPECT(view.activity.last_build->ok);
 	// A clean sheet with a line ended LF: an explicit Save of it (no edit) rewrites it CR LF, and its finding is gone.
-	TEST_EXPECT(editor_test::write_text(style_dir + "/note.mns", "N 1\r\nM 2\n"));
+	TEST_EXPECT(test_io::write_text(style_dir + "/note.mns", "N 1\r\nM 2\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	const AssetEntry *note = view.project.scan->find("note.mns");
 	TEST_EXPECT(note != nullptr);
@@ -385,7 +385,7 @@ static int test_validation() {
 // hang is the stored file's: style.hangs, an error that gates the build with the game's refusal, until a Save writes
 // the list; then it is gone and the build goes.
 static int test_stored_hang() {
-	editor_test::TempProjectDir dir("opennova_styles_stored_hang");
+	test_temp::TempDir dir("opennova_styles_stored_hang");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -396,7 +396,7 @@ static int test_stored_hang() {
 	TEST_EXPECT(style != nullptr);
 	if (!style) return 1;
 	const std::string style_dir = (dir.path / "project" / style->relative_path).parent_path().generic_string();
-	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "A 1\nB 2\r\n"));
+	TEST_EXPECT(test_io::write_text(style_dir + "/brand.mns", "A 1\nB 2\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	const AssetEntry *brand = view.project.scan->find("brand.mns");
 	TEST_EXPECT(brand != nullptr);
@@ -431,7 +431,7 @@ static int test_stored_hang() {
 // colour, a font and an image, so a value that reads as hex there ("ADD", "FACE") is no colour
 // (S13 D4's second review); a value no menu uses that the game reads whole as hex still is.
 static int test_style_value_use() {
-	editor_test::TempProjectDir dir("opennova_styles_value_use");
+	test_temp::TempDir dir("opennova_styles_value_use");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -445,9 +445,9 @@ static int test_style_value_use() {
 	const std::string sheet = dir.file("project") + "/" + path;
 	std::string text, message;
 	TEST_EXPECT(opennova::io::read_file_text(sheet, text, message));
-	TEST_EXPECT(editor_test::write_text(sheet, text + "ID_ONLY ADD\r\nTEXT_ONLY FACE\r\nPAINT FF102030\r\nSPARE 30\r\n"));
+	TEST_EXPECT(test_io::write_text(sheet, text + "ID_ONLY ADD\r\nTEXT_ONLY FACE\r\nPAINT FF102030\r\nSPARE 30\r\n"));
 	const std::string window = "<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>90</RIGHT><BOTTOM>90</BOTTOM></POSITION>\r\n";
-	TEST_EXPECT(editor_test::write_text(
+	TEST_EXPECT(test_io::write_text(
 	        (std::filesystem::path(sheet).parent_path() / "uses.mnu").generic_string(),
 	        "<SCREEN>\r\n<NAME>USES</NAME>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"A\">\r\n" + window +
 	                "<STRING TYPE=\"ID\">%ID_ONLY%</STRING>\r\n</WINDOW>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"B\">\r\n" +
@@ -474,7 +474,7 @@ static int test_style_value_use() {
 // on the load generation as well: FOO a colour, then the file loaded again in place with FOO a
 // font's file, at the same revision and on the same row identity, answers from the new file.
 static int test_load_in_place() {
-	editor_test::TempProjectDir dir("opennova_styles_load_in_place");
+	test_temp::TempDir dir("opennova_styles_load_in_place");
 	MnsDocument document;
 	TEST_EXPECT(load(document, dir, "FOO FFFF0000\r\n"));
 	const NodeAddress foo = row_at(document, 0);

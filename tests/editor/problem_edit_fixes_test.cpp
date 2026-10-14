@@ -40,8 +40,6 @@ namespace {
 
 using editor_test::NoProcess;
 
-std::string fixture(const char *relative) { return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/" + relative; }
-
 // A fixture file as an author's edits leave it: loaded through its kind's document type, `edit` applied
 // (false refuses), and written again by the type's writer; none when it does not load or is refused.
 std::vector<uint8_t> edited(const std::string &path, const char *name, AssetKind kind,
@@ -76,7 +74,7 @@ bool edits_of(const std::vector<ProblemFix> &fixes, const std::string &path) {
 }
 
 struct Fixture {
-	editor_test::TempProjectDir dir;
+	test_temp::TempDir dir;
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -123,7 +121,7 @@ static int test_mission_ids() {
 	int32_t walker = 0, fresh = 0; // fresh: the SSN a new entity takes
 	std::set<int32_t> zones;
 	const std::vector<uint8_t> bytes =
-	        edited(fixture("bms/synth_logic.bms"), "fixes.bms", AssetKind::Mission, [&](Document &document, Diagnostic &error) {
+	        edited(test_paths_fixture("bms/synth_logic.bms"), "fixes.bms", AssetKind::Mission, [&](Document &document, Diagnostic &error) {
 		        const MissionDocument &mission = dynamic_cast<const MissionDocument &>(document);
 		        const std::vector<const Node *> items = mission.rows_of(MissionKind::Item), organics = mission.rows_of(MissionKind::Organic);
 		        const std::vector<const Node *> areas = mission.rows_of(MissionKind::Area);
@@ -133,7 +131,7 @@ static int test_mission_ids() {
 		        return document.apply(set_edit({items[0]->id, items[0]->kind, 0}, "id", int64_t(walker)), error) &&
 		               document.apply(set_edit({areas[1]->id, areas[1]->kind, 0}, "id", int64_t(first_zone)), error);
 	        });
-	TEST_EXPECT(!bytes.empty() && editor_test::write_bytes(f.root + "/missions/fixes.bms", bytes));
+	TEST_EXPECT(!bytes.empty() && test_io::write_file(f.root + "/missions/fixes.bms", bytes));
 	if (bytes.empty()) return 1;
 	editor_test::handle_to_end(f.session, request::rescan());
 	const std::string path = "missions/fixes.bms";
@@ -193,7 +191,7 @@ static int test_string_key() {
 	table.entries = {first, other, again};
 	std::vector<uint8_t> bytes;
 	std::string io_error;
-	TEST_EXPECT(opennova::rtxt::write(table, bytes, io_error) && editor_test::write_bytes(f.root + "/strings/dup.bin", bytes));
+	TEST_EXPECT(opennova::rtxt::write(table, bytes, io_error) && test_io::write_file(f.root + "/strings/dup.bin", bytes));
 	editor_test::handle_to_end(f.session, request::rescan());
 	const std::string path = "strings/dup.bin";
 	const Diagnostic *twice = f.finding("strings.key_duplicate", path);
@@ -239,7 +237,7 @@ static int test_menu_names() {
 		return text + "\t</WINDOW>\r\n</SCREEN>\r\n";
 	};
 	// Screen A with two windows named GO, then two screens named B.
-	TEST_EXPECT(editor_test::write_text(f.root + "/menus/twice.mnu", screen("A", 2) + screen("B", 1) + screen("B", 1)));
+	TEST_EXPECT(test_io::write_text(f.root + "/menus/twice.mnu", screen("A", 2) + screen("B", 1) + screen("B", 1)));
 	editor_test::handle_to_end(f.session, request::rescan());
 	const std::string path = "menus/twice.mnu";
 
@@ -270,7 +268,7 @@ static int test_menu_names() {
 	std::string variable = screen("A", 2);
 	variable.replace(variable.find("name=\"GO\""), 9, "name=\"%GO%\"");
 	variable.replace(variable.find("name=\"GO\""), 9, "name=\"%GO%\"");
-	TEST_EXPECT(editor_test::write_text(f.root + "/menus/var.mnu", variable));
+	TEST_EXPECT(test_io::write_text(f.root + "/menus/var.mnu", variable));
 	editor_test::handle_to_end(f.session, request::rescan());
 	const Diagnostic *named = f.finding("menu.duplicate_window", "menus/var.mnu");
 	TEST_EXPECT(named && named->planned.empty() && fixes_for(*named, f.view()).empty());
@@ -285,7 +283,7 @@ static int test_catalog() {
 	TEST_EXPECT(items != nullptr);
 	if (!items) return 1;
 	const std::string path = items->relative_path;
-	TEST_EXPECT(editor_test::write_text(f.root + "/" + path,
+	TEST_EXPECT(test_io::write_text(f.root + "/" + path,
 	                                    "begin \"Marker\"\nid 100001\ntype marker\nhp 10\nend\n"
 	                                    "begin \"MARKER\"\nid 100002\ntype marker\nhp 10\nend\n"
 	                                    "begin \"Crate\"\nid 100001\ntype marker\nhp 10\nend\n"));
@@ -322,7 +320,7 @@ static int test_end_pose() {
 	Fixture f("opennova_editor_edit_fixes_clip");
 	size_t last = 0;
 	const auto clip_with = [&](uint32_t before, uint32_t end) {
-		return edited(fixture("anim/walk.bad"), "walk.bad", AssetKind::Animation, [&](Document &document, Diagnostic &error) {
+		return edited(test_paths_fixture("anim/walk.bad"), "walk.bad", AssetKind::Animation, [&](Document &document, Diagnostic &error) {
 			const ClipRow *clip = dynamic_cast<const AnimationDocument &>(document).clip();
 			if (!clip || clip->version != 1 || clip->events.size() < 2) {
 				error.message = "the fixture is no version 1 clip with events";
@@ -335,8 +333,8 @@ static int test_end_pose() {
 		});
 	};
 	const std::vector<uint8_t> moved = clip_with(0x40, 0x1), held = clip_with(0x1, 0x1);
-	TEST_EXPECT(!moved.empty() && !held.empty() && editor_test::write_bytes(f.root + "/anims/moved.bad", moved) &&
-	            editor_test::write_bytes(f.root + "/anims/held.bad", held));
+	TEST_EXPECT(!moved.empty() && !held.empty() && test_io::write_file(f.root + "/anims/moved.bad", moved) &&
+	            test_io::write_file(f.root + "/anims/held.bad", held));
 	editor_test::handle_to_end(f.session, request::rescan());
 
 	const std::string path = "anims/moved.bad";
@@ -376,8 +374,8 @@ static int test_unused_variable() {
 	std::string read_error;
 	TEST_EXPECT(opennova::io::read_file_text(f.root + "/" + path, text, read_error));
 	text += "DI11_UNUSED\tFF00FF00\r\nDI11_INSIDE\tthere\r\n";
-	TEST_EXPECT(editor_test::write_text(f.root + "/" + path, text));
-	TEST_EXPECT(editor_test::write_text(f.root + "/menus/inside.mnu",
+	TEST_EXPECT(test_io::write_text(f.root + "/" + path, text));
+	TEST_EXPECT(test_io::write_text(f.root + "/menus/inside.mnu",
 	                                    "<SCREEN>\r\n<NAME>INSIDE</NAME>\r\n<WINDOW type=\"static\" name=\"HELLO\">\r\n"
 	                                    "<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>90</RIGHT><BOTTOM>20</BOTTOM></POSITION>\r\n"
 	                                    "<STRING>Hello %DI11_INSIDE%!</STRING>\r\n</WINDOW>\r\n</SCREEN>\r\n"));

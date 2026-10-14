@@ -72,7 +72,7 @@ void test_sculpt_parts() {
 	const SessionView &v = run.session.view();
 	const std::string repo = test_paths_repo_root(__FILE__);
 	for (const char *name : {"Tmap.trn", "Tmap.cpt"})
-		CHECK(editor_test::write_bytes(v.project.root + "/terrain/" + name,
+		CHECK(test_io::write_file(v.project.root + "/terrain/" + name,
 		                               test_io::read_file(repo + "/fixtures/terrain/tmap/" + name)),
 		      "the terrain's file written");
 	run.session.handle(request::rescan());
@@ -114,7 +114,7 @@ bool open_on_terrain(MissionRun &run) {
 	const std::string root = run.session.view().project.root;
 	const std::string fixtures = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/terrain/tmap/";
 	for (const char *name : {"Tmap.trn", "Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx"})
-		if (!editor_test::write_bytes(root + "/terrain/" + name, test_io::read_file(fixtures + name))) return false;
+		if (!test_io::write_file(root + "/terrain/" + name, test_io::read_file(fixtures + name))) return false;
 	run.session.handle(request::rescan());
 	run.session.run_operations();
 	run.settle();
@@ -296,7 +296,7 @@ void test_ledger() {
 	CHECK(open_on_terrain(run), "the mission open on its terrain");
 	const SessionView &v = run.session.view();
 	const std::string root = v.project.root;
-	CHECK(editor_test::write_bytes(root + "/terrain/mnml_t.tga", grey_tga(256, 128)), "the terrain's tile set written");
+	CHECK(test_io::write_file(root + "/terrain/mnml_t.tga", grey_tga(256, 128)), "the terrain's tile set written");
 	run.session.handle(request::rescan());
 	run.session.run_operations();
 	ViewportCommand top;

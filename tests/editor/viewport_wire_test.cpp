@@ -116,7 +116,7 @@ uint64_t gesture_of(const JsonValue &answer) {
 // A session over a new project with layout.mnu (kLayoutMenu) and models/armory.3di (and, asked, the
 // minted mission as missions/synth_logic.bms), the menu open.
 struct Wired {
-	editor_test::TempProjectDir dir;
+	test_temp::TempDir dir;
 	MemoryPreferencesStore preferences;
 	ProjectSession session;
 	Document *menu = nullptr;
@@ -127,13 +127,13 @@ struct Wired {
 		session.handle(request::new_project(dir.file("project"), "Wire"));
 		session.run_operations();
 		const std::string root = session.view().project.root;
-		editor_test::write_text(root + "/layout.mnu", kLayoutMenu);
-		editor_test::write_bytes(root + "/models/armory.3di", test_io::read_file(synth("armory.3di")));
+		test_io::write_text(root + "/layout.mnu", kLayoutMenu);
+		test_io::write_file(root + "/models/armory.3di", test_io::read_file(synth("armory.3di")));
 		if (mission) {
-			editor_test::write_bytes(root + "/missions/synth_logic.bms",
+			test_io::write_file(root + "/missions/synth_logic.bms",
 					test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/bms/synth_logic.bms"));
 			// The item a drop places: the armory, a building.
-			editor_test::write_text(root + "/defs/items.def", "begin \"Wire Armory\"\nid 106101\ntype building\ngraphic armory\nend\n");
+			test_io::write_text(root + "/defs/items.def", "begin \"Wire Armory\"\nid 106101\ntype building\ngraphic armory\nend\n");
 		}
 		session.handle(request::rescan());
 		session.run_operations();
@@ -1041,7 +1041,7 @@ static int test_viewport_box() {
 	TEST_EXPECT(answer.get_string("viewport", "") == "model" && names(answer).empty() &&
 			answer.get_number("count", -1) == 0.0);
 	// A text's viewport has no canvas.
-	editor_test::write_text(session.view().project.root + "/notes.cfg", "[Game]\r\nname = Box\r\n");
+	test_io::write_text(session.view().project.root + "/notes.cfg", "[Game]\r\nname = Box\r\n");
 	session.handle(request::rescan());
 	session.run_operations();
 	session.handle(request::open_document("notes.cfg"));
@@ -1132,7 +1132,7 @@ static int test_viewport_click() {
 	TEST_EXPECT(clicked == 1);
 	TEST_EXPECT(done(click(mission, R"("at": [-5000, -5000])")) && selection.records.empty());
 	// A text's viewport has no canvas.
-	editor_test::write_text(view.project.root + "/notes.cfg", "[Game]\r\nname = Click\r\n");
+	test_io::write_text(view.project.root + "/notes.cfg", "[Game]\r\nname = Click\r\n");
 	session.handle(request::rescan());
 	session.run_operations();
 	session.handle(request::open_document("notes.cfg"));

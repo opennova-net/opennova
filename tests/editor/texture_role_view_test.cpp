@@ -130,7 +130,7 @@ int test_pieces() {
 }
 
 struct Rig {
-	editor_test::TempProjectDir dir{"opennova_editor_texture_role_view"};
+	test_temp::TempDir dir{"opennova_editor_texture_role_view"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -167,16 +167,16 @@ int test_session() {
 	editor_test::handle_to_end(rig.session, request::new_project(rig.root(), "Roles"));
 	editor_test::create_missing_files(rig.session);
 	const std::string t = rig.root() + "/textures/";
-	TEST_EXPECT(editor_test::write_bytes(t + "blend.tga", tga(2, 1, {100, 50, 0, 255, 0, 0, 0, 255})) &&
-	            editor_test::write_bytes(t + "fol.pcx", pcx8(2, 2, {0, 5, 5, 9})) &&
-	            editor_test::write_bytes(t + "spark.tga", tga(16, 16, std::vector<uint8_t>(16 * 16 * 4, 200))));
-	TEST_EXPECT(editor_test::write_text(rig.root() + "/terrains/isle.trn",
+	TEST_EXPECT(test_io::write_file(t + "blend.tga", tga(2, 1, {100, 50, 0, 255, 0, 0, 0, 255})) &&
+	            test_io::write_file(t + "fol.pcx", pcx8(2, 2, {0, 5, 5, 9})) &&
+	            test_io::write_file(t + "spark.tga", tga(16, 16, std::vector<uint8_t>(16 * 16 * 4, 200))));
+	TEST_EXPECT(test_io::write_text(rig.root() + "/terrains/isle.trn",
 	                                    "polytrn_detailmap detail.tga\npolytrn_polydata isle.cpt\npolytrn_sectorcount 1\n"
 	                                    "polytrn_sectors 0\npolytrn_colormap colour.tga\npolytrn_detailmap_c1 grass.tga\n"
 	                                    "polytrn_detailmap_c2 rock.tga\n"
 	                                    "polytrn_detailmap_c3 sand.tga\npolytrn_detailblendmap blend.tga\npolytrn_foliagemap fol.pcx\n"
 	                                    "foliage\n  graphic grass.3di\n  match 5\nend\n") &&
-	            editor_test::write_text(rig.root() + "/fx.ptl",
+	            test_io::write_text(rig.root() + "/fx.ptl",
 	                                    "[effectdef]\n{\n\tid = FLASH;\n\tpdefs = spark;\n}\n\n[particledef]\n{\n\tid = spark;\n"
 	                                    "\tgraphic1 = spark.tga, additive;\n}\n"));
 	editor_test::handle_to_end(rig.session, request::rescan());
@@ -197,7 +197,7 @@ int test_session() {
 	TEST_EXPECT(legend && legend->array.size() == 3 && legend->array[1].get_string("key", "") == "5" &&
 	            legend->array[1].get_string("words", "") == "grows foliage 1 (grass.3di)" && legend->array[1].get_number("share", 0) == 0.5);
 	// The terrain written again: the legend read again.
-	TEST_EXPECT(editor_test::write_text(rig.root() + "/terrains/isle.trn",
+	TEST_EXPECT(test_io::write_text(rig.root() + "/terrains/isle.trn",
 	                                    "polytrn_detailmap detail.tga\npolytrn_polydata isle.cpt\npolytrn_sectorcount 1\n"
 	                                    "polytrn_sectors 0\npolytrn_colormap colour.tga\npolytrn_foliagemap fol.pcx\nfoliage\n"
 	                                    "  graphic tall_grass.3di\n  match 5 9\n"

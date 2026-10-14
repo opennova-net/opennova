@@ -286,8 +286,8 @@ void test_workspace_layout() {
 	// A seeded project with a catalog open: a missing model reference and a line the game
 	// ignores draw the inspector's Missing badge and the catalog's dropped-lines notice.
 	SessionView v = seeded_view();
-	editor_test::TempProjectDir dir("opennova_catalog_ui_test");
-	CHECK(editor_test::write_text(dir.file("items.def"), "begin \"Marker\"\nid 100001\ntype marker\ngraphic nowhere\nsubtype Ruins\nend\n"),
+	test_temp::TempDir dir("opennova_catalog_ui_test");
+	CHECK(test_io::write_text(dir.file("items.def"), "begin \"Marker\"\nid 100001\ntype marker\ngraphic nowhere\nsubtype Ruins\nend\n"),
 	      "catalog fixture");
 	auto catalog = std::make_shared<DefCatalogDocument>();
 	Diagnostic error;
@@ -378,7 +378,7 @@ void test_dock_survives_resizes() {
 // tab follows the active document when it changes elsewhere, raising nothing; the close
 // button and Ctrl+W close a document, its tab staying until the session closes it.
 void test_document_tabs() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_tabs_test");
+	test_temp::TempDir dir("opennova_editor_ui_tabs_test");
 	const auto a = menu_at(dir, "a.mnu", "menus/a.mnu");
 	const auto b = edited(menu_at(dir, "b.mnu", "menus/b.mnu"));
 	const auto c = menu_at(dir, "c.mnu", "menus/c.mnu");
@@ -448,7 +448,7 @@ void test_document_tabs() {
 // folders get a tab each, labelled by the path, both reachable. An inactive tab's close
 // button closes its document without showing it.
 void test_document_tab_choices() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_tab_choices");
+	test_temp::TempDir dir("opennova_editor_ui_tab_choices");
 	const auto a = menu_at(dir, "a.mnu", "menus/a.mnu");
 	const auto b = menu_at(dir, "b.mnu", "menus/b.mnu");
 	const auto c = menu_at(dir, "c.mnu", "menus/c.mnu");
@@ -544,7 +544,7 @@ void test_document_tab_choices() {
 // is that document's, the instance: the menu read again (a new instance at its path) or
 // closed while it asks, it closes, removing nothing.
 void test_view_prompt_outlives_its_tab() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_view_prompt");
+	test_temp::TempDir dir("opennova_editor_ui_view_prompt");
 	constexpr NodeKind kScreen = node_kind(MenuKind::Screen);
 	// A menu with two screens: a screen goes only while another is left.
 	const auto two_screens = [&dir, kScreen](const char *file, const char *relative) {
@@ -617,7 +617,7 @@ void test_view_prompt_outlives_its_tab() {
 // Thirty open documents: more tabs than the bar shows, the tab list lists every one, and
 // the last, chosen from it, becomes the active document.
 void test_thirty_tabs() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_thirty_tabs");
+	test_temp::TempDir dir("opennova_editor_ui_thirty_tabs");
 	SessionView v;
 	v.project.open = true;
 	v.project.root = "C:/mods/Thirty";
@@ -737,7 +737,7 @@ void test_welcome_view() {
 // nothing, and a Browse... answered after that is dropped. Cancel changes nothing; a source
 // run shows the runtime it drives, no field.
 void test_project_settings() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_settings");
+	test_temp::TempDir dir("opennova_editor_ui_settings");
 	NoProcess platform;
 	const std::string settings_file = dir.file("settings/editor.json");
 	FilePreferencesStore preferences(settings_file);
@@ -871,7 +871,7 @@ void test_project_settings() {
 // stays open saying a setting failed. Its Apply wrote and the other failed: it closes, saying
 // nothing of the other's failure.
 void test_project_settings_two_applies() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_settings_two_applies");
+	test_temp::TempDir dir("opennova_editor_ui_settings_two_applies");
 	NoProcess platform;
 	const std::string settings_file = dir.file("settings/editor.json");
 	FilePreferencesStore preferences(settings_file);
@@ -943,7 +943,7 @@ void test_view_event_mailbox_cap() {
 // The File, Edit and Build menus raise their requests (a Save, a Close and an Undo naming
 // the active document); what cannot run now is disabled.
 void test_menus() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_menus_test");
+	test_temp::TempDir dir("opennova_editor_ui_menus_test");
 	const std::shared_ptr<MnuDocument> document = edited(load_menu(dir));
 	SessionView v = menu_view(document);
 	v.project.recent_projects = {"C:/mods/Menus", "C:/mods/Other"};
@@ -1044,7 +1044,7 @@ std::vector<std::pair<float, float>> hover_spans(Ui &ui, const std::vector<ImGui
 // joins it); a narrow window leaves parts out from the left, what was said first, and at every
 // width the right end starts after the menus and Stop ends inside the bar.
 void test_menu_bar_status() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_status_test");
+	test_temp::TempDir dir("opennova_editor_ui_status_test");
 	const auto a = menu_at(dir, "a.mnu", "menus/a.mnu");
 	const auto b = edited(menu_at(dir, "b.mnu", "menus/b.mnu"));
 	const auto c = edited(menu_at(dir, "c.mnu", "menus/c.mnu"));
@@ -1197,7 +1197,7 @@ void test_menu_bar_status() {
 // reads by name at once (not offered while the project has it) and asks a free-form kind's
 // name in a modal checked as it is typed; a file's menu renames it.
 void test_files_window() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_files_test");
+	test_temp::TempDir dir("opennova_editor_ui_files_test");
 	const auto main_menu = edited(menu_at(dir, "main.mnu", "menus/main.mnu"));
 	SessionView v;
 	v.project.open = true;
@@ -1755,7 +1755,7 @@ void test_import_dialog() {
 	// S12: a file with unsaved edits holds nothing here: Import goes to the session, whose guard
 	// asks to save only a file the import writes over. While that prompt is open the dialog gives
 	// way to it, and comes back as it was, Replace existing files still checked.
-	editor_test::TempProjectDir dir("opennova_editor_ui_import_dirty");
+	test_temp::TempDir dir("opennova_editor_ui_import_dirty");
 	v.documents.open.push_back(edited(menu_at(dir, "a.mnu", "menus/a.mnu")));
 	v.revisions.touch(ViewConcern::Documents);
 	ui.frames(2);
@@ -1977,7 +1977,7 @@ void set_field(ProjectSession &session, const Document &document, const NodeAddr
 // neither, what to open again. A model newly previewed never takes the focus. The line
 // naming a menu or a model says when that file has unsaved changes.
 void test_preview_follows() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_preview_follows");
+	test_temp::TempDir dir("opennova_editor_ui_preview_follows");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -2079,7 +2079,7 @@ void test_preview_follows() {
 // the toolbar naming the pointer there; over the selected window (a move there) neither; off the picture
 // neither; with Pointer off the system pointer stays. The toolbar's pointer goes to MAIN's CURSOR.
 void test_preview_menu_pointer() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_preview_menu_pointer");
+	test_temp::TempDir dir("opennova_editor_ui_preview_menu_pointer");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -2155,7 +2155,7 @@ void test_preview_menu_pointer() {
 // marker ends once, for the model, when the menu becomes the active document mid-drag, and
 // letting go raises nothing.
 void test_preview_model_gestures() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_preview_model_gestures");
+	test_temp::TempDir dir("opennova_editor_ui_preview_model_gestures");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -2248,7 +2248,7 @@ void test_preview_model_gestures() {
 // the picture dollies it (kModelWheelDolly of the distance), a double-click frames the selected
 // marker.
 void test_preview_model_pane_input() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_preview_model_input");
+	test_temp::TempDir dir("opennova_editor_ui_preview_model_input");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -2322,14 +2322,14 @@ void test_preview_model_pane_input() {
 // pools, which the session holds and the Inspector shows as their shared form (E9), where a change
 // of Team is one batch over every one of them, ended once.
 void test_mission_view_input() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_mission_view_input");
+	test_temp::TempDir dir("opennova_editor_ui_mission_view_input");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	CHECK(preview_project(session, dir), "the preview project");
 	const SessionView &v = session.view();
 	const std::string repo = test_paths_repo_root(__FILE__);
-	CHECK(editor_test::write_bytes(v.project.root + "/missions/synth_logic.bms",
+	CHECK(test_io::write_file(v.project.root + "/missions/synth_logic.bms",
 	                               test_io::read_file(repo + "/fixtures/bms/synth_logic.bms")),
 	      "the mission written");
 	session.handle(request::rescan());
@@ -2430,14 +2430,14 @@ void test_mission_view_input() {
 // selected and lifted off the ground, is one EditInViewport the session plans over its own context,
 // the entity set down on the ground.
 void test_mission_view_ground() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_mission_view_ground");
+	test_temp::TempDir dir("opennova_editor_ui_mission_view_ground");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	CHECK(preview_project(session, dir), "the preview project");
 	const SessionView &v = session.view();
 	const std::string repo = test_paths_repo_root(__FILE__);
-	CHECK(editor_test::write_bytes(v.project.root + "/missions/synth_logic.bms",
+	CHECK(test_io::write_file(v.project.root + "/missions/synth_logic.bms",
 	                               test_io::read_file(repo + "/fixtures/bms/synth_logic.bms")),
 	      "the mission written");
 	session.handle(request::rescan());
@@ -2528,14 +2528,14 @@ void test_mission_view_ground() {
 // primary's place typed in the East field moves it there (one batch); the right button's click on a
 // mark opens the menu of what applies, whose Select same item selects every entity of its item.
 void test_mission_view_placing() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_mission_view_placing");
+	test_temp::TempDir dir("opennova_editor_ui_mission_view_placing");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	CHECK(preview_project(session, dir), "the preview project");
 	const SessionView &v = session.view();
 	const std::string repo = test_paths_repo_root(__FILE__);
-	CHECK(editor_test::write_bytes(v.project.root + "/missions/synth_logic.bms",
+	CHECK(test_io::write_file(v.project.root + "/missions/synth_logic.bms",
 	                               test_io::read_file(repo + "/fixtures/bms/synth_logic.bms")),
 	      "the mission written");
 	session.handle(request::rescan());
@@ -2692,14 +2692,14 @@ void test_mission_view_placing() {
 // it left and Document has its share again; the mission active again, Preview steps aside again (the
 // UX round's project lane), though it has the menu to show.
 void test_preview_steps_aside() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_preview_steps_aside");
+	test_temp::TempDir dir("opennova_editor_ui_preview_steps_aside");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	CHECK(preview_project(session, dir), "the preview project");
 	const SessionView &v = session.view();
 	const std::string repo = test_paths_repo_root(__FILE__);
-	CHECK(editor_test::write_bytes(v.project.root + "/missions/synth_logic.bms",
+	CHECK(test_io::write_file(v.project.root + "/missions/synth_logic.bms",
 	                               test_io::read_file(repo + "/fixtures/bms/synth_logic.bms")),
 	      "the mission written");
 	session.handle(request::rescan());
@@ -2967,7 +2967,7 @@ void test_window_title() {
 	v.project.open = true;
 	editor_test::own(v.project.document).title = "Armory";
 	CHECK(editor_window_title(v) == "Armory - OpenNova Editor", "a project");
-	editor_test::TempProjectDir dir("opennova_editor_ui_title_test");
+	test_temp::TempDir dir("opennova_editor_ui_title_test");
 	const auto menu = load_menu(dir);
 	v.documents.open = {menu};
 	CHECK(editor_window_title(v) == "Armory - OpenNova Editor", "every file saved");
@@ -2982,7 +2982,7 @@ void test_window_title() {
 // as they were; a finding about a file, the files as they were, makes them again, and so does a
 // file the scan finds anew.
 void test_files_tree_kept() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_files_kept");
+	test_temp::TempDir dir("opennova_editor_ui_files_kept");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -3024,7 +3024,7 @@ void test_files_tree_kept() {
 	}
 	CHECK(steps > 1 && session.view().activity.has_build, "the build stepped");
 	const std::string readme = session.view().project.root + "/notes/readme.txt";
-	CHECK(editor_test::write_text(readme, "x"), "a file written");
+	CHECK(test_io::write_text(readme, "x"), "a file written");
 	session.handle(request::rescan());
 	session.run_operations();
 	ui.frames(2);
@@ -3060,7 +3060,7 @@ int import_count(Ui &ui) {
 // once: a row unchecked stays unchecked until the next one. Another view's events already held
 // when the workspace is given it are not sent; those posted after are.
 void test_view_event_mailboxes() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_mailboxes");
+	test_temp::TempDir dir("opennova_editor_ui_mailboxes");
 	const auto a = menu_at(dir, "a.mnu", "menus/a.mnu");
 	const auto b = menu_at(dir, "b.mnu", "menus/b.mnu");
 	const auto c = menu_at(dir, "c.mnu", "menus/c.mnu");

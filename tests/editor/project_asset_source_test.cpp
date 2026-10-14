@@ -67,7 +67,7 @@ bool has_section(const std::vector<uint8_t> &bytes, const std::string &section) 
 } // namespace
 
 static int test_names_decode_and_rescan() {
-	editor_test::TempProjectDir dir("opennova_editor_asset_source");
+	test_temp::TempDir dir("opennova_editor_asset_source");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -92,8 +92,8 @@ static int test_names_decode_and_rescan() {
 	// A file added outside the editor resolves after a rescan; an SCR payload reads decoded. The project's
 	// notes are no file the game reads: none resolves.
 	const std::string plain = "WEAPON\r\nNAME test\r\n";
-	TEST_EXPECT(editor_test::write_bytes(root + "/defs/secret.def", scr_encoded(plain, opennova::scr::SCR_KEY_JO_DFX2)));
-	TEST_EXPECT(editor_test::write_text(root + "/notes/todo.txt", "the roof\r\n"));
+	TEST_EXPECT(test_io::write_file(root + "/defs/secret.def", scr_encoded(plain, opennova::scr::SCR_KEY_JO_DFX2)));
+	TEST_EXPECT(test_io::write_text(root + "/notes/todo.txt", "the roof\r\n"));
 	TEST_EXPECT(assets.stamp("secret.def") == 0);
 	const uint64_t before = assets.generation();
 	session.handle(request::rescan());
@@ -103,7 +103,7 @@ static int test_names_decode_and_rescan() {
 	TEST_EXPECT(assets.read("SECRET.DEF", read) && std::string(read.begin(), read.end()) == plain);
 
 	// An import output under .opennova/imported/ resolves by its own name.
-	TEST_EXPECT(editor_test::write_bytes(root + "/art/logo.png", test_png::gradient_png(8, 8)));
+	TEST_EXPECT(test_io::write_file(root + "/art/logo.png", test_png::gradient_png(8, 8)));
 	const Importer *importer = importer_for(root + "/art/logo.png");
 	TEST_EXPECT(importer != nullptr);
 	ImportSidecar sidecar;
@@ -115,7 +115,7 @@ static int test_names_decode_and_rescan() {
 	Diagnostic error;
 	TEST_EXPECT(save_import_sidecar(root + "/art/logo.png.import", sidecar, error));
 	// A PNG with no .import record is a texture the build packs as it is.
-	TEST_EXPECT(editor_test::write_bytes(root + "/art/plain.png", test_png::gradient_png(4, 4)));
+	TEST_EXPECT(test_io::write_file(root + "/art/plain.png", test_png::gradient_png(4, 4)));
 	session.handle(request::rescan());
 	session.run_operations();
 	TEST_EXPECT(assets.path_of("logo.pcx").find(".opennova/imported/") == 0);
@@ -128,7 +128,7 @@ static int test_names_decode_and_rescan() {
 
 	// A changed file moves its stamp on the next rescan.
 	const uint64_t stamp = assets.stamp("secret.def");
-	TEST_EXPECT(editor_test::write_text(root + "/defs/secret.def", "a different, longer plain text file"));
+	TEST_EXPECT(test_io::write_text(root + "/defs/secret.def", "a different, longer plain text file"));
 	session.handle(request::rescan());
 	session.run_operations();
 	TEST_EXPECT(assets.stamp("secret.def") != stamp);
@@ -137,7 +137,7 @@ static int test_names_decode_and_rescan() {
 }
 
 static int test_open_document_stands_in() {
-	editor_test::TempProjectDir dir("opennova_editor_asset_source_open");
+	test_temp::TempDir dir("opennova_editor_asset_source_open");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -196,7 +196,7 @@ static int test_open_document_stands_in() {
 // document holds now: the stamp and the serialized bytes follow the load too, not the identity and
 // revision alone, which repeat (S13 V9's review).
 static int test_load_in_place() {
-	editor_test::TempProjectDir dir("opennova_editor_asset_source_reload");
+	test_temp::TempDir dir("opennova_editor_asset_source_reload");
 	const std::string root = dir.file("project");
 	ProjectDocument project;
 	Diagnostic error;
@@ -208,7 +208,7 @@ static int test_load_in_place() {
 		       "\">\r\n<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>90</RIGHT><BOTTOM>90</BOTTOM></POSITION>\r\n"
 		       "</WINDOW>\r\n</SCREEN>\r\n";
 	};
-	TEST_EXPECT(editor_test::write_text(file, menu_text("FIRST")));
+	TEST_EXPECT(test_io::write_text(file, menu_text("FIRST")));
 	const AssetScan scan = scan_project_assets(ProjectPaths::for_root(root), project);
 	const AssetEntry *entry = scan.at_path(relative);
 	TEST_EXPECT(entry != nullptr);
@@ -226,7 +226,7 @@ static int test_load_in_place() {
 	const uint64_t stamp = assets.stamp("reload.mnu"), generation = assets.generation();
 	const uint64_t identity = menu->identity(), revision = menu->revision();
 	// The file changed on disk and read again into the same document.
-	TEST_EXPECT(editor_test::write_text(file, menu_text("SECOND")));
+	TEST_EXPECT(test_io::write_text(file, menu_text("SECOND")));
 	TEST_EXPECT(menu->load(file, relative, entry->kind, project.target_game, error));
 	TEST_EXPECT(menu->identity() == identity && menu->revision() == revision);
 	assets.set_open({menu});

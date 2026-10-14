@@ -38,7 +38,7 @@ constexpr const char *kMission = "missions/synth_logic.bms";
 
 // The fixture's item catalog, the minted mission and its table, and the synth models the mission's items draw.
 struct JumpsProject {
-	editor_test::TempProjectDir dir{"opennova_editor_ui_shortcuts"};
+	test_temp::TempDir dir{"opennova_editor_ui_shortcuts"};
 	editor_test::FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -53,13 +53,13 @@ struct JumpsProject {
 		if (!catalog) return false;
 		items = catalog->relative_path;
 		const std::string repo = test_paths_repo_root(__FILE__);
-		if (!editor_test::write_bytes(v.project.root + "/" + items, test_io::read_file(repo + "/fixtures/def/items.def")) ||
-		    !editor_test::write_bytes(v.project.root + "/" + kMission, test_io::read_file(repo + "/fixtures/bms/synth_logic.bms")) ||
-		    !editor_test::write_bytes(v.project.root + "/missions/synth_logic.bin",
+		if (!test_io::write_file(v.project.root + "/" + items, test_io::read_file(repo + "/fixtures/def/items.def")) ||
+		    !test_io::write_file(v.project.root + "/" + kMission, test_io::read_file(repo + "/fixtures/bms/synth_logic.bms")) ||
+		    !test_io::write_file(v.project.root + "/missions/synth_logic.bin",
 		                              test_io::read_file(repo + "/fixtures/bms/synth_logic.bin")))
 			return false;
 		for (const char *model : {"pump", "armory", "shed"})
-			if (!editor_test::write_bytes(v.project.root + "/models/" + model + ".3di",
+			if (!test_io::write_file(v.project.root + "/models/" + model + ".3di",
 			                              test_io::read_file(repo + "/fixtures/threedi/synth/" + model + ".3di")))
 				return false;
 		session.handle(request::rescan());
@@ -500,7 +500,7 @@ void test_menu_and_table_row_menus() {
 	if (project.items.empty()) return;
 	const SessionView &v = project.session.view();
 	const std::string path = "menus/options.mnu";
-	CHECK(editor_test::write_text(v.project.root + "/" + path, kMenu), "the menu");
+	CHECK(test_io::write_text(v.project.root + "/" + path, kMenu), "the menu");
 	project.session.handle(request::rescan());
 	project.session.run_operations();
 	project.session.handle(request::open_document(path));

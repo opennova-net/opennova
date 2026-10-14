@@ -99,7 +99,7 @@ int test_table_and_wire() {
 // building on an expansion building as one; the state section writes the form as it shows; the modal opened
 // closes once new_project makes the project.
 int test_new_project_form() {
-	editor_test::TempProjectDir dir("opennova_editor_workspace_form");
+	test_temp::TempDir dir("opennova_editor_workspace_form");
 	editor_test::FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -132,7 +132,7 @@ int test_new_project_form() {
 // it again; the project closing closes it. The card of a file the project lacks, or with no project open,
 // refused: a warning, nothing changed. focus posts a focus_window event naming the window.
 int test_build_result_card_and_focus() {
-	editor_test::TempProjectDir dir("opennova_editor_workspace_build");
+	test_temp::TempDir dir("opennova_editor_workspace_build");
 	editor_test::FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -162,7 +162,7 @@ int test_build_result_card_and_focus() {
 // closed refused; the fields set (a play_mode no mode has refused); its Apply (a serial) that wrote everything
 // closes it, one that failed keeps it; the project closing closes it.
 int test_settings() {
-	editor_test::TempProjectDir dir("opennova_editor_workspace_settings");
+	test_temp::TempDir dir("opennova_editor_workspace_settings");
 	editor_test::FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -210,7 +210,7 @@ int test_settings() {
 
 // A project with the files the game reads by name (a new project's, made), its catalogs' records, open.
 struct FilesProject {
-	editor_test::TempProjectDir dir{ "opennova_editor_workspace_files" };
+	test_temp::TempDir dir{ "opennova_editor_workspace_files" };
 	editor_test::FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{ platform, preferences };
@@ -226,8 +226,8 @@ struct FilesProject {
 		if (!weapons || !items) return false;
 		weapons_path = weapons->relative_path;
 		items_path = items->relative_path;
-		if (!editor_test::write_text(v.project.root + "/" + weapons_path, "weapon \"GUN_A\"\nend\n") ||
-		    !editor_test::write_text(v.project.root + "/" + items_path,
+		if (!test_io::write_text(v.project.root + "/" + weapons_path, "weapon \"GUN_A\"\nend\n") ||
+		    !test_io::write_text(v.project.root + "/" + items_path,
 		                             "begin \"Carrier\"\nid 100300\ntype vehicle\nprimary_weapon GUN_A\nend\n"))
 			return false;
 		session.handle(request::rescan());
@@ -420,7 +420,7 @@ int test_document_views() {
 	TEST_EXPECT(session.handle(request::close_document(project.items_path)) && w.documents.empty());
 	// A menu's Remove prompt: a screen of the menu while it keeps a second (its last, or an id that is no screen
 	// of it, refused), dropped as the menu is read again; its window type one of TYPE's.
-	TEST_EXPECT(editor_test::write_text(v.project.root + "/menus/two.mnu",
+	TEST_EXPECT(test_io::write_text(v.project.root + "/menus/two.mnu",
 	                                    "<SCREEN>\r\n<NAME>FIRST</NAME>\r\n</SCREEN>\r\n<SCREEN>\r\n<NAME>SECOND</NAME>\r\n</SCREEN>\r\n"));
 	session.handle(request::rescan());
 	session.run_operations();
@@ -455,7 +455,7 @@ int test_document_views() {
 	TEST_EXPECT(session.handle(request::set_workspace("{\"document\": {\"remove_screen\": " +
 	                                                  std::to_string(now->rows()[1]->id) + "}}")) &&
 	            w.document(menu_path).remove_screen == now->rows()[1]->id);
-	TEST_EXPECT(editor_test::write_text(v.project.root + "/menus/two.mnu",
+	TEST_EXPECT(test_io::write_text(v.project.root + "/menus/two.mnu",
 	                                    "<SCREEN>\r\n<NAME>ZERO</NAME>\r\n</SCREEN>\r\n<SCREEN>\r\n<NAME>FIRST</NAME>\r\n</SCREEN>\r\n"
 	                                    "<SCREEN>\r\n<NAME>SECOND</NAME>\r\n</SCREEN>\r\n"));
 	session.handle(request::rescan());
@@ -477,8 +477,8 @@ int test_import_dialog() {
 	TEST_EXPECT(session.handle(request::set_workspace(R"({"import": {"filter": "a"}})")) &&
 	            refused_with(session, "workspace.refused") && import.filter.empty());
 	const std::string source = project.dir.file("source");
-	TEST_EXPECT(editor_test::write_text(source + "/extra.mnu", "<SCREEN>\r\n<NAME>EXTRA</NAME>\r\n</SCREEN>\r\n") &&
-	            editor_test::write_text(source + "/notes.txt", "notes"));
+	TEST_EXPECT(test_io::write_text(source + "/extra.mnu", "<SCREEN>\r\n<NAME>EXTRA</NAME>\r\n</SCREEN>\r\n") &&
+	            test_io::write_text(source + "/notes.txt", "notes"));
 	TEST_EXPECT(session.handle(request::preview_import({ source + "/extra.mnu", source + "/notes.txt" }, false)));
 	session.run_operations();
 	const DialogsView::ImportPreview &preview = v.dialogs.import_preview;
@@ -611,7 +611,7 @@ int test_files_followed() {
 	ProjectSession &session = project.session;
 	const SessionView &v = session.view();
 	const WorkspaceView &w = v.workspace;
-	TEST_EXPECT(editor_test::write_text(v.project.root + "/menus/extra.mnu", "<SCREEN>\r\n<NAME>EXTRA</NAME>\r\n</SCREEN>\r\n"));
+	TEST_EXPECT(test_io::write_text(v.project.root + "/menus/extra.mnu", "<SCREEN>\r\n<NAME>EXTRA</NAME>\r\n</SCREEN>\r\n"));
 	session.handle(request::rescan());
 	session.run_operations();
 	const AssetEntry *extra = v.project.scan->find("extra.mnu");
@@ -641,7 +641,7 @@ int test_files_followed() {
 // lacks required files, what it proposes in the workspace section, apply_confirmation raising it (one
 // create_missing naming every role) and closing it; one that proposes nothing refused, nothing raised.
 int test_confirmation_applied() {
-	editor_test::TempProjectDir dir("opennova_editor_workspace_confirm");
+	test_temp::TempDir dir("opennova_editor_workspace_confirm");
 	editor_test::FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);

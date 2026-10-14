@@ -159,14 +159,14 @@ int test_findings_and_session() {
 	            findings[0].message.find("duplicate nationality") != std::string::npos);
 	TEST_EXPECT(document.serialize().text == written_form(twice));
 
-	editor_test::TempProjectDir dir("opennova_editor_avatars_document");
+	test_temp::TempDir dir("opennova_editor_avatars_document");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Avatars"));
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project.root;
-	TEST_EXPECT(editor_test::write_text(root + "/Avatars.def", twice + "\r\n" +
+	TEST_EXPECT(test_io::write_text(root + "/Avatars.def", twice + "\r\n" +
 	                                    "define head HEAD_A\r\n{\r\n\tgraphic\t\thead_a.3di\r\n\tcamo\t\t0 0 0\r\n"
 	                                    "\tvoice\t\t1\r\n\tsex\t\tm\r\n}\r\n"));
 	editor_test::handle_to_end(session, request::rescan());

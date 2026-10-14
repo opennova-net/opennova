@@ -303,16 +303,16 @@ int test_named_words() {
 // names (GraphNameSource): a title, a value, the picker's choices (reference_choices then
 // word_choices), the record query's `display` and the document query's `title`.
 int test_session_words() {
-	editor_test::TempProjectDir dir("opennova_mission_labels");
+	test_temp::TempDir dir("opennova_mission_labels");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Labels"));
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project.root;
-	TEST_EXPECT(editor_test::write_bytes(root + "/defs/items.def", test_io::read_file(repo() + "/fixtures/def/items.def")));
-	TEST_EXPECT(editor_test::write_bytes(root + "/missions/synth_logic.bms", test_io::read_file(repo() + "/fixtures/bms/synth_logic.bms")));
-	TEST_EXPECT(editor_test::write_bytes(root + "/missions/synth_logic.bin", test_io::read_file(repo() + "/fixtures/bms/synth_logic.bin")));
+	TEST_EXPECT(test_io::write_file(root + "/defs/items.def", test_io::read_file(repo() + "/fixtures/def/items.def")));
+	TEST_EXPECT(test_io::write_file(root + "/missions/synth_logic.bms", test_io::read_file(repo() + "/fixtures/bms/synth_logic.bms")));
+	TEST_EXPECT(test_io::write_file(root + "/missions/synth_logic.bin", test_io::read_file(repo() + "/fixtures/bms/synth_logic.bin")));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::handle_to_end(session, request::open_document("missions/synth_logic.bms"));
 	const Document *document = session.document_for("missions/synth_logic.bms");
@@ -411,15 +411,15 @@ int test_text_key_picks() {
 	TEST_EXPECT(!text_key_number("STRNAME5", "STRNAME", number) && !text_key_number("STRNAME0005", "STRNAME", number) &&
 	            !text_key_number("STRNAME", "STRNAME", number) && !text_key_number("LOCATION001", "STRNAME", number) &&
 	            !text_key_number("STRNAME00x", "STRNAME", number));
-	editor_test::TempProjectDir dir("opennova_mission_text_keys");
+	test_temp::TempDir dir("opennova_mission_text_keys");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Keys"));
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project.root;
-	TEST_EXPECT(editor_test::write_bytes(root + "/defs/items.def", test_io::read_file(repo() + "/fixtures/def/items.def")));
-	TEST_EXPECT(editor_test::write_bytes(root + "/missions/synth_logic.bms", test_io::read_file(repo() + "/fixtures/bms/synth_logic.bms")));
+	TEST_EXPECT(test_io::write_file(root + "/defs/items.def", test_io::read_file(repo() + "/fixtures/def/items.def")));
+	TEST_EXPECT(test_io::write_file(root + "/missions/synth_logic.bms", test_io::read_file(repo() + "/fixtures/bms/synth_logic.bms")));
 	opennova::rtxt::File table;
 	const auto section = [&table](const char *name, std::initializer_list<std::pair<const char *, const char *>> rows) {
 		const uint32_t index = static_cast<uint32_t>(table.sections.size());
@@ -436,7 +436,7 @@ int test_text_key_picks() {
 	std::vector<uint8_t> bytes;
 	std::string error;
 	TEST_EXPECT(opennova::rtxt::write(table, bytes, error));
-	TEST_EXPECT(editor_test::write_bytes(root + "/missions/synth_logic.bin", bytes));
+	TEST_EXPECT(test_io::write_file(root + "/missions/synth_logic.bin", bytes));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::handle_to_end(session, request::open_document("missions/synth_logic.bms"));
 	const Document *document = session.document_for("missions/synth_logic.bms");

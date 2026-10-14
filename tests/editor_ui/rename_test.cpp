@@ -23,7 +23,7 @@ void serve(ProjectSession &session, const std::vector<EditorRequest> &requests) 
 }
 
 void test_rename_everywhere_ui() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_rename");
+	test_temp::TempDir dir("opennova_editor_ui_rename");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -36,8 +36,8 @@ void test_rename_everywhere_ui() {
 	CHECK(weapons && items, "the catalogs");
 	if (!weapons || !items) return;
 	const std::string weapons_path = weapons->relative_path;
-	CHECK(editor_test::write_text(v.project.root + "/" + weapons_path, "weapon \"GUN_A\"\nend\n") &&
-	              editor_test::write_text(v.project.root + "/" + items->relative_path,
+	CHECK(test_io::write_text(v.project.root + "/" + weapons_path, "weapon \"GUN_A\"\nend\n") &&
+	              test_io::write_text(v.project.root + "/" + items->relative_path,
 	                                      "begin \"Carrier\"\nid 100300\ntype vehicle\nprimary_weapon GUN_A\nend\n"),
 	      "the fixtures");
 	session.handle(request::rescan());
@@ -105,7 +105,7 @@ void test_rename_everywhere_ui() {
 // renamed by typing leaves the menu's %X_COLOR% on menu_style.mns's, which the game reads once
 // brand.mns no longer defines it; the Inspector says the use still names the saved name.
 void test_hint_on_a_fallback() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_rename_hint");
+	test_temp::TempDir dir("opennova_editor_ui_rename_hint");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -118,10 +118,10 @@ void test_hint_on_a_fallback() {
 	if (!sheet) return;
 	const std::string folder = std::filesystem::path(sheet->relative_path).parent_path().generic_string();
 	const std::string brand_path = (folder.empty() ? std::string() : folder + "/") + "brand.mns";
-	CHECK(editor_test::write_text(v.project.root + "/" + sheet->relative_path,
+	CHECK(test_io::write_text(v.project.root + "/" + sheet->relative_path,
 	                              test_io::read_file_text(v.project.root + "/" + sheet->relative_path) + "X_COLOR FF000000\r\n") &&
-	              editor_test::write_text(v.project.root + "/" + brand_path, "X_COLOR FF102030\r\n") &&
-	              editor_test::write_text(v.project.root + "/menus/f.mnu",
+	              test_io::write_text(v.project.root + "/" + brand_path, "X_COLOR FF102030\r\n") &&
+	              test_io::write_text(v.project.root + "/menus/f.mnu",
 	                                      "<SCREEN>\r\n<NAME>F</NAME>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"W\">\r\n"
 	                                      "<APPEARANCE STATE=\"DEFAULT\" TYPE=\"COLOR\">%X_COLOR%</APPEARANCE>\r\n"
 	                                      "</WINDOW>\r\n</SCREEN>\r\n"),

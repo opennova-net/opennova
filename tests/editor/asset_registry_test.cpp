@@ -168,37 +168,37 @@ static int test_classification() {
 }
 
 static int test_scan_exclusions_and_diagnostics() {
-	editor_test::TempProjectDir dir("opennova_editor_asset_registry_test");
+	test_temp::TempDir dir("opennova_editor_asset_registry_test");
 	const std::string root = dir.file("P");
 	ProjectDocument doc;
 	Diagnostic error;
 	TEST_EXPECT(create_project(root, "P", "jo", doc, error));
 	const ProjectPaths paths = ProjectPaths::for_root(root);
-	TEST_EXPECT(editor_test::write_text(paths.root + "/menus/main.mnu", "<MENU/>"));
-	TEST_EXPECT(editor_test::write_text(paths.root + "/defs/items.def", "begin\nend\n"));
-	TEST_EXPECT(editor_test::write_text(paths.root + "/strings/gametext.bin", "RTXT...."));
-	TEST_EXPECT(editor_test::write_text(paths.root + "/music/menumus.bin", "SCR0...."));
-	TEST_EXPECT(editor_test::write_text(paths.root + "/ui/logo.png", "png"));
+	TEST_EXPECT(test_io::write_text(paths.root + "/menus/main.mnu", "<MENU/>"));
+	TEST_EXPECT(test_io::write_text(paths.root + "/defs/items.def", "begin\nend\n"));
+	TEST_EXPECT(test_io::write_text(paths.root + "/strings/gametext.bin", "RTXT...."));
+	TEST_EXPECT(test_io::write_text(paths.root + "/music/menumus.bin", "SCR0...."));
+	TEST_EXPECT(test_io::write_text(paths.root + "/ui/logo.png", "png"));
 	// A sidecar is an import record, never a file of the project; its source is an image
 	// source the build never packs, and an output it names that is not there is a
 	// warning, not a file. A record whose source is gone lists nothing, not even an
 	// output that is still under the cache.
-	TEST_EXPECT(editor_test::write_text(paths.root + "/ui/logo.png.import",
+	TEST_EXPECT(test_io::write_text(paths.root + "/ui/logo.png.import",
 	                                    "{\"schema_version\": 1, \"importer\": \"image\", \"version\": 1, \"options\": {}, "
 	                                    "\"source_hash\": \"0\", \"outputs\": [\"logo.pcx\"]}"));
-	TEST_EXPECT(editor_test::write_text(paths.root + "/ui/gone.png.import",
+	TEST_EXPECT(test_io::write_text(paths.root + "/ui/gone.png.import",
 	                                    "{\"schema_version\": 1, \"importer\": \"image\", \"version\": 1, \"options\": {}, "
 	                                    "\"source_hash\": \"0\", \"outputs\": [\"gone.pcx\"]}"));
-	TEST_EXPECT(editor_test::write_text(paths.root + "/" + import_output_dir(paths, "ui/gone.png") + "/gone.pcx", "x"));
-	TEST_EXPECT(editor_test::write_text(paths.root + "/.opennova/build/play/1/x.mnu", "cache")); // skipped
-	TEST_EXPECT(editor_test::write_text(paths.root + "/.git/config", "x"));                  // dot dir: skipped
-	TEST_EXPECT(editor_test::write_text(paths.root + "/build/export/exported.mnu", "x"));    // export dir: skipped
-	TEST_EXPECT(editor_test::write_text(paths.root + "/a/Same.tga", "x"));
-	TEST_EXPECT(editor_test::write_text(paths.root + "/b/same.TGA", "y"));                    // duplicate name
-	TEST_EXPECT(editor_test::write_text(paths.root + "/textures/a_much_too_long_name.tga", "x")); // too long
+	TEST_EXPECT(test_io::write_text(paths.root + "/" + import_output_dir(paths, "ui/gone.png") + "/gone.pcx", "x"));
+	TEST_EXPECT(test_io::write_text(paths.root + "/.opennova/build/play/1/x.mnu", "cache")); // skipped
+	TEST_EXPECT(test_io::write_text(paths.root + "/.git/config", "x"));                  // dot dir: skipped
+	TEST_EXPECT(test_io::write_text(paths.root + "/build/export/exported.mnu", "x"));    // export dir: skipped
+	TEST_EXPECT(test_io::write_text(paths.root + "/a/Same.tga", "x"));
+	TEST_EXPECT(test_io::write_text(paths.root + "/b/same.TGA", "y"));                    // duplicate name
+	TEST_EXPECT(test_io::write_text(paths.root + "/textures/a_much_too_long_name.tga", "x")); // too long
 	// A loose kind is copied beside the archives under any name: no finding.
-	TEST_EXPECT(editor_test::write_text(paths.root + "/video/a_much_too_long_intro.bik", "x"));
-	TEST_EXPECT(editor_test::write_text(paths.root + "/notes/readme.docx", "x"));                // unknown kind
+	TEST_EXPECT(test_io::write_text(paths.root + "/video/a_much_too_long_intro.bik", "x"));
+	TEST_EXPECT(test_io::write_text(paths.root + "/notes/readme.docx", "x"));                // unknown kind
 
 	const AssetScan scan = scan_project_assets(paths, doc);
 	TEST_EXPECT(scan.entries.size() == 10);
@@ -340,7 +340,7 @@ static int test_named() {
 }
 
 static int test_empty_project_scans_clean() {
-	editor_test::TempProjectDir dir("opennova_editor_asset_registry_empty_test");
+	test_temp::TempDir dir("opennova_editor_asset_registry_empty_test");
 	const std::string root = dir.file("E");
 	ProjectDocument doc;
 	Diagnostic error;

@@ -245,7 +245,7 @@ static int test_texts() {
 // file opened first (the wire writes it as its op and reads it back the same); applied, the two weapons
 // and no finding; Undo gives the finding back.
 static int test_session() {
-	editor_test::TempProjectDir dir("opennova_editor_line_ends");
+	test_temp::TempDir dir("opennova_editor_line_ends");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -257,7 +257,7 @@ static int test_session() {
 		if (entry.kind == AssetKind::WeaponDefs) path = entry.relative_path;
 	TEST_EXPECT(!path.empty());
 	if (path.empty()) return 1;
-	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/" + path, bytes_of(lf_only(kWeapons))));
+	TEST_EXPECT(test_io::write_file(view.project.root + "/" + path, bytes_of(lf_only(kWeapons))));
 	editor_test::handle_to_end(session, request::rescan());
 	const auto finding = [&]() -> const Diagnostic * {
 		for (const Diagnostic &d : session.view().findings.diagnostics)
