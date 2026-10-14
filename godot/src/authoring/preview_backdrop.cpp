@@ -128,6 +128,17 @@ Ref<ArrayMesh> preview_grid_mesh(PreviewBackground background) {
 		faint = Color(0.66f, 0.66f, 0.66f, 0.45f);
 		axis = Color(0.9f, 0.9f, 0.9f, 0.75f);
 	}
+	// The lines are drawn in the scene's opaque pass, their depth written, so what the picture draws after it (an
+	// effect's particles: the particle renderer's passes run before the transparent one) shows over the lines in front
+	// of it and hides behind those nearer; each line's colour is its faint one blended, as its alpha would blend it,
+	// over the background's middle (a 3D picture's own near-black clear on Dark).
+	const Vector3 under = look.own ? Vector3(0.04f, 0.04f, 0.04f) : (rgb(look.top) + rgb(look.bottom)) * 0.5f;
+	const auto opaque = [&](const Color &line) {
+		return Color(under.x + (line.r - under.x) * line.a, under.y + (line.g - under.y) * line.a,
+				under.z + (line.b - under.z) * line.a, 1.0f);
+	};
+	faint = opaque(faint);
+	axis = opaque(axis);
 	PackedVector3Array lines;
 	PackedColorArray colors;
 	for (int i = -kGridHalf; i <= kGridHalf; ++i) {
@@ -149,7 +160,6 @@ Ref<ArrayMesh> preview_grid_mesh(PreviewBackground background) {
 	material.instantiate();
 	material->set_shading_mode(BaseMaterial3D::SHADING_MODE_UNSHADED);
 	material->set_flag(BaseMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
-	material->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA);
 	mesh->surface_set_material(0, material);
 	return mesh;
 }
