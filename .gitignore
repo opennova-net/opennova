@@ -67,6 +67,8 @@ Testing/Temporary/
 infra/aws/.terraform/
 *.tfstate
 *.tfstate.*
+# the toolbox's record of the vault state this checkout last synced with (DEPLOY.md)
+infra/aws/terraform.tfstate.vault-sha256
 terraform.tfvars
 *.auto.tfvars
 
