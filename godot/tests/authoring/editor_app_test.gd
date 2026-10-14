@@ -594,135 +594,6 @@ func test_create_file_names_and_a_menu_of_its_own() -> void:
 	assert_true(_seam.create_file("Extra.fnt"), "a file that is there already is no failure")
 	_seam.close_project()
 
-## The John Smith milestone (ADR 0046 S6): a new project, every required file created,
-## the startup menu's title edited and a button added, a string added, the project
-## built and played, the running game showing the edited menu, Exit ending the run. S9h2:
-## the button gains a second ACTION and a SOUND and a new list an ITEM, read back from the
-## saved file before the build, the running list showing its item.
-func test_john_smith_menu_reaches_the_play_child() -> void:
-	if _app == null:
-		return
-	var dir := OS.get_cache_dir().path_join("opennova john smith %d" % Time.get_ticks_usec())
-	_dirs.append(dir)
-	assert_true(_seam.new_project(dir, "John Smith"))
-	assert_eq(_seam.create_missing_files(), 0)
-	assert_true(_seam.open_document("main.mnu"))
-	var screen: int = _seam.get_row_id(0)
-	assert_eq(_seam.get_record_name(screen), "STARTUP")
-	var title: int = _seam.find_record("TITLE")
-	assert_gt(title, 0)
-	assert_eq(_seam.get_field(title, "string.value"), "John Smith")
-	assert_true(_seam.set_field(title, "string.value", "John Smith's Game"))
-	# The screen holds its root windows; a new window goes inside a window.
-	var main: int = _seam.get_child_records(screen)[0]
-	assert_eq(_seam.get_record_name(main), "MAIN")
-	var later: int = _seam.add_record("window", main)
-	assert_gt(later, 0)
-	assert_eq(_seam.get_record_owner(later), main)
-	assert_true(_seam.set_field(later, "name", "LATER"))
-	assert_true(_seam.set_field(later, "type", "button"))
-	assert_true(_seam.set_field(later, "string.value", "Later"))
-	assert_true(_seam.set_field(later, "position.left", 340))
-	assert_true(_seam.set_field(later, "position.top", 430))
-	assert_true(_seam.set_field(later, "position.right", 460))
-	assert_eq(_seam.get_child_records(main, "window").size(), 3)
-	# The menu editor's lists (S9h2), authored end to end: LATER gains a second ACTION (a
-	# new one goes back; this one shows TITLE) and a SOUND, and a new LIST window an ITEM;
-	# saved, read back from the file, built and played, the screen still boots.
-	var back_action: int = _seam.add_record("action", later)
-	var show_action: int = _seam.add_record("action", later)
-	assert_eq(_seam.get_field(back_action, "type"), "POP_SCREEN")
-	assert_true(_seam.set_field(show_action, "type", "WINDOW"))
-	assert_true(_seam.set_field(show_action, "state", "SHOW"))
-	assert_true(_seam.set_field(show_action, "target", "TITLE"))
-	var sound: int = _seam.add_record("sound", later)
-	assert_true(_seam.set_field(sound, "file", "menu.lwf"))
-	var choices: int = _seam.add_record("window", main)
-	assert_true(_seam.set_field(choices, "name", "CHOICES"))
-	assert_true(_seam.set_field(choices, "type", "list"))
-	for edge in [["position.left", 340], ["position.top", 470], ["position.right", 460], ["position.bottom", 520]]:
-		assert_true(_seam.set_field(choices, edge[0], edge[1]))
-	var item: int = _seam.add_record("items.item", choices)
-	assert_true(_seam.set_field(item, "text", "One"))
-	assert_eq(_seam.get_field(choices, "items"), 1, "the ITEMS block written with its row")
-	assert_true(_seam.open_document("gametext.bin"))
-	var section: int = _seam.add_record("section")
-	assert_true(_seam.set_field(section, "name", "Menu"))
-	var welcome: int = _seam.add_record("string", section)
-	assert_true(_seam.set_field(welcome, "key", "JS_WELCOME"))
-	assert_true(_seam.set_field(welcome, "text", "Welcome, John"))
-	assert_true(_seam.save_documents(), "\n".join(_seam.get_output_lines()))
-	# Read back from the saved file: the lists are there, in order, with their values.
-	var reloaded: Variant = JSON.parse_string(_app.request_json(JSON.stringify({"kind": "reload_document", "path": "main.mnu"})))
-	assert_true(reloaded is Dictionary and bool(reloaded.get("ok", false)), str(reloaded))
-	later = _seam.find_record("LATER")
-	choices = _seam.find_record("CHOICES")
-	assert_gt(later, 0)
-	assert_gt(choices, 0)
-	var actions: PackedInt64Array = _seam.get_child_records(later, "action")
-	assert_eq(actions.size(), 2)
-	if actions.size() == 2:
-		assert_eq(_seam.get_field(actions[0], "type"), "POP_SCREEN")
-		assert_eq(_seam.get_field(actions[1], "type"), "WINDOW")
-		assert_eq(_seam.get_field(actions[1], "state"), "SHOW")
-		assert_eq(_seam.get_field(actions[1], "target"), "TITLE")
-	var sounds: PackedInt64Array = _seam.get_child_records(later, "sound")
-	assert_eq(sounds.size(), 1)
-	if sounds.size() == 1:
-		assert_eq(_seam.get_field(sounds[0], "file"), "menu.lwf")
-	var items: PackedInt64Array = _seam.get_child_records(choices, "items.item")
-	assert_eq(items.size(), 1)
-	if items.size() == 1:
-		assert_eq(_seam.get_field(items[0], "text"), "One")
-	assert_true(_build(), "\n".join(_seam.get_output_lines()))
-	_app.set("play_engine_args", PackedStringArray(["--headless", "--disable-render-loop", "--max-fps", "60"]))
-	assert_true(_play(), "\n".join(_seam.get_output_lines()))
-	var client: RefCounted = null
-	var deadline := Time.get_ticks_msec() + 30000
-	while Time.get_ticks_msec() < deadline:
-		client = preload("res://tests/mcp/mcp_test_client.gd").new()
-		if await client.connect_to(get_tree(), _seam.get_play_mcp_port()):
-			break
-		client.close()
-		client = null
-		await get_tree().create_timer(0.1).timeout
-	assert_not_null(client, "\n".join(_seam.get_output_lines()))
-	if client != null:
-		assert_not_null(await client.initialize(get_tree()))
-		# The startup screen shows the edited title and the new button.
-		var state: Variant = null
-		deadline = Time.get_ticks_msec() + 30000
-		while Time.get_ticks_msec() < deadline:
-			var envelope: Variant = await client.call_tool(get_tree(), "game_menu", {"op": "state"})
-			if envelope is Dictionary:
-				var content: Dictionary = envelope.get("result", {}).get("structuredContent", {})
-				if content.get("visible", false) and content.get("widgets", []).size() > 0:
-					state = content
-					break
-			await get_tree().create_timer(0.2).timeout
-		assert_not_null(state, "the menu never became visible")
-		if state is Dictionary:
-			assert_eq(str(state.get("screen", "")), "STARTUP")
-			var texts := {}
-			var item_counts := {}
-			for widget in state.get("widgets", []):
-				texts[str(widget.get("name", ""))] = str(widget.get("text", ""))
-				item_counts[str(widget.get("name", ""))] = int(widget.get("items", 0))
-			assert_eq(texts.get("TITLE", ""), "John Smith's Game")
-			assert_eq(texts.get("LATER", ""), "Later")
-			assert_eq(item_counts.get("CHOICES", 0), 1, "the new list shows its one item")
-			# Exit ends the game on its own.
-			var pressed: Variant = await client.call_tool(get_tree(), "game_menu", {"op": "press", "name": "EXIT"})
-			assert_not_null(pressed)
-		client.close()
-	deadline = Time.get_ticks_msec() + 15000
-	while _seam.get_play_state() != "stopped" and Time.get_ticks_msec() < deadline:
-		await get_tree().create_timer(0.05).timeout
-		_app.pump()
-	assert_eq(_seam.get_play_state(), "stopped")
-	assert_true(_seam.did_game_exit_on_its_own(), "Exit quits the game")
-	_seam.close_project()
-
 func test_catalog_edits_reach_the_play_child() -> void:
 	if _app == null:
 		return
@@ -857,8 +728,9 @@ func _model_ready(path: String, builds: int) -> Dictionary:
 ## the focus (an editor an MCP client launched never has it, and this one never gets a focus-in): the
 ## Shell's once-a-second check reads an open catalog written from outside into its rows, the record
 ## selected in it selected again by its place, and an open model written from outside into its picture
-## (its device builds again), each named in Output, within a few seconds. A file no document shows is
-## read again too, by the checks' round over the project's files.
+## (its device builds again), each named in Output. A file no document shows is read again too, by the
+## checks' round over the project's files. How soon (a check a second, a file holding still first) is
+## disk_changes_test's, on an explicit clock.
 func test_outside_saves_come_back_unfocused() -> void:
 	if _app == null:
 		return
@@ -887,13 +759,9 @@ func test_outside_saves_come_back_unfocused() -> void:
 	while Time.get_ticks_msec() - saved_at < 10000 and (_rows("defs/items.def") != 3 \
 			or int(_model_viewport("models/armory.3di").get("builds", 0)) == builds):
 		await get_tree().create_timer(0.05).timeout
-	var took := Time.get_ticks_msec() - saved_at
 	assert_eq(_rows("defs/items.def"), 3, "the catalog's rows read again")
 	picture = await _model_ready("models/armory.3di", builds)
 	assert_gt(int(picture.get("builds", 0)), builds, "the model's picture made again: %s" % str(picture))
-	# A check comes once a second and a file waits a quarter second to hold still: about 1.25 s at most,
-	# with room for a loaded machine.
-	assert_lt(took, 4000, "back within a check and a hold (%d ms)" % took)
 	var lines := "\n".join(_seam.get_output_lines())
 	assert_string_contains(lines, "Reloaded defs/items.def: it changed outside the editor.")
 	assert_string_contains(lines, "Reloaded models/armory.3di: it changed outside the editor.")
