@@ -157,7 +157,8 @@ bool parse_data_set_configs(std::string_view data_sets_json, std::string_view la
 				c->missions.clear();
 				for (const io::JsonValue &mission : v.array) {
 					if (!mission.is_string() || !is_mission_file_name(mission.string)) {
-						error = where + ".missions holds an entry that is no .bms file name of letters, digits, _ and -";
+						error = where +
+								".missions holds an entry that is no .bms file name of letters, digits, _ and -";
 						return false;
 					}
 					c->missions.push_back(mission.string);
@@ -193,7 +194,8 @@ bool parse_data_set_configs(std::string_view data_sets_json, std::string_view la
 	return true;
 }
 
-std::vector<DataSet> offered_data_sets(const std::string &provider, const std::vector<DataSetConfig> &configs) {
+std::vector<DataSet> offered_data_sets(
+		const std::string &provider, const std::vector<DataSetConfig> &configs) {
 	std::vector<DataSet> out;
 	for (const DataSet &known : known_data_sets()) {
 		const DataSetConfig *config = nullptr;
@@ -201,9 +203,9 @@ std::vector<DataSet> offered_data_sets(const std::string &provider, const std::v
 			if (c.game == known.game) config = &c;
 		}
 		if (!config) continue;
-		const bool has_data = provider == "local" ? !config->resource_dir.empty()
-				: provider == "ec2"            ? !config->launch_template.empty()
-											   : false;
+		bool has_data = false;
+		if (provider == "local") has_data = !config->resource_dir.empty();
+		if (provider == "ec2") has_data = !config->launch_template.empty();
 		if (!has_data) continue;
 		DataSet offered = known;
 		offered.missions = config->missions;

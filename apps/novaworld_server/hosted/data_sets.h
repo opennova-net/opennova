@@ -102,6 +102,7 @@ bool parse_data_set_configs(std::string_view data_sets_json, std::string_view la
 // The data sets `provider` ("local", "ec2") offers: each known one, in the
 // catalog's order, that `configs` gives the provider's data (a resource_dir, a
 // launch template), with the config's values. Any other provider offers none.
-std::vector<DataSet> offered_data_sets(const std::string &provider, const std::vector<DataSetConfig> &configs);
+std::vector<DataSet> offered_data_sets(
+		const std::string &provider, const std::vector<DataSetConfig> &configs);
 
 } // namespace opennova::novaworld_server::hosted
