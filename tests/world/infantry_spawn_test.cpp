@@ -384,75 +384,68 @@ void body_ticks_on_as_the_motor_head() {
 // idles on where its .adm authors no idle_2; a guarding body holds guard, or, where its .adm
 // authors no guard, drops it and idles, an alert one on idle_2; a damage timer alerts a calm body
 // until its decay on a key that is a multiple of 64. The alerted idle takes idle 43 alone, to
-// idle_3 with a target held. [orig: Entity_UpdateInfantryAI @0x4BD2F0..0x4BD31C; the guard leg
-// @0x4BD196..0x4BD1BB, its
-//  drop @0x4BD1B8; the decay @0x4BBE24..0x4BBE38]
+// idle_3 with a target held.
+// [orig: Entity_UpdateInfantryAI @0x4BD2F0..0x4BD31C; the guard leg @0x4BD196..0x4BD1BB, its drop
+//  @0x4BD1B8; the decay @0x4BBE24..0x4BBE38]
 void still_body_thinks_as_the_world() {
-	CHECK(infantry_alerted_idle(anim_state::kIdle, 0, 2, false) == anim_state::kIdle2);
-	CHECK(infantry_alerted_idle(anim_state::kIdle, 0, 1, true) == anim_state::kIdle3);
-	CHECK(infantry_alerted_idle(anim_state::kIdle, 3, 0, false) == anim_state::kIdle2);
-	CHECK(infantry_alerted_idle(anim_state::kIdle, 0, 0, true) == anim_state::kIdle);
-	CHECK(infantry_alerted_idle(anim_state::kGuard, 0, 2, false) == anim_state::kGuard);
-	CHECK(infantry_alerted_idle(anim_state::kWalkForward, 5, 2, true) == anim_state::kWalkForward);
-	CHECK(infantry_org1_key(1, 13) == 469u && infantry_org1_key(3, 0) == 3u);
-	struct Case {
-		int id;
-		uint8_t alert;
-		bool guarding;
-		bool idle_2; // its .adm authors idle_2
-		bool guard; // its .adm authors guard
-		int32_t damage; // its damage timer after the spawn
-		int plays; // the state played at the end
-		int thinks_at; // the tick of its first think
-	};
-	const Case cases[] = { { 13, 0, false, true, true, 0, 43, 12 },
-		{ 13, 2, false, true, true, 0, 44, 12 }, { 0, 1, false, true, true, 0, 44, 16 },
-		{ 7, 2, false, false, true, 0, 43, 4 }, { 5, 2, true, true, true, 0, 140, 12 },
-		{ 4, 0, true, true, true, 0, 140, 16 }, { 5, 2, true, true, false, 0, 44, 12 },
-		{ 9, 0, false, true, true, 1, 43, 12 } };
-	for (const Case &c : cases) {
-		Rig r(c.id);
-		RingSource world_clips, clips;
-		for (RingSource *source : { &world_clips, &clips }) {
-			if (!c.idle_2)
-				source->clips.erase(anim_state::kIdle2);
-			if (!c.guard)
-				source->clips.erase(anim_state::kGuard);
-		}
-		r.owned->ai.root_motion = &world_clips;
-		r.body().slot.bytes()[AiSlot::kAlertByte] = c.alert;
-		if (c.guarding)
-			r.entity().flags = 0x40;
-		r.init();
-		AnimVariantRings rings;
-		OrganicSpawnFacts facts;
-		facts.flags = c.guarding ? 0x40 : 0;
-		OrganicSpawnBody spawned = organic_spawn_pose(facts, uint32_t(c.id), &clips, rings, 0);
-		InfantryState &body = spawned.channels;
-		r.body().inf.damage_timer = body.damage_timer = c.damage;
-		CHECK(same_channels(body, r.body().inf));
-		const int spawn = c.guarding && c.guard ? anim_state::kGuard : anim_state::kIdle;
-		CHECK(body.anim_state == spawn);
-		int thinks = 0;
-		// The mission's first frame runs at tick 1.
-		for (uint32_t tick = 1; tick <= 200; ++tick) {
-			r.owned->ai.update_organic(r.body(), *r.owned, tick);
-			RootMotionFrame frame;
-			CHECK(infantry_org1_motor_head(body, &clips, rings, frame));
-			if (infantry_org1_still_think(body, &clips, tick, c.id, c.guarding, c.alert)) {
-				if (thinks++ == 0)
-					CHECK(int(tick) == c.thinks_at);
-				CHECK((infantry_org1_key(tick, c.id) & 15u) == 0);
-			}
-			CHECK(same_channels(body, r.body().inf));
-			CHECK(body.damage_timer == r.body().inf.damage_timer);
-			if (thinks == 0)
-				CHECK(body.anim_state == spawn);
-		}
-		CHECK(thinks >= 12);
-		CHECK(body.anim_state == c.plays && body.body_clip_state() == c.plays &&
-				body.damage_timer == 0);
-	}
+    CHECK(infantry_alerted_idle(anim_state::kIdle, 0, 2, false) == anim_state::kIdle2);
+    CHECK(infantry_alerted_idle(anim_state::kIdle, 0, 1, true) == anim_state::kIdle3);
+    CHECK(infantry_alerted_idle(anim_state::kIdle, 3, 0, false) == anim_state::kIdle2);
+    CHECK(infantry_alerted_idle(anim_state::kIdle, 0, 0, true) == anim_state::kIdle);
+    CHECK(infantry_alerted_idle(anim_state::kGuard, 0, 2, false) == anim_state::kGuard);
+    CHECK(infantry_alerted_idle(anim_state::kWalkForward, 5, 2, true) == anim_state::kWalkForward);
+    CHECK(infantry_org1_key(1, 13) == 469u && infantry_org1_key(3, 0) == 3u);
+    struct Case {
+        int id;
+        uint8_t alert;
+        bool guarding;
+        bool idle_2;    // its .adm authors idle_2
+        bool guard;     // its .adm authors guard
+        int32_t damage; // its damage timer after the spawn
+        int plays;      // the state played at the end
+        int thinks_at;  // the tick of its first think
+    };
+    const Case cases[] = {{13, 0, false, true, true, 0, 43, 12}, {13, 2, false, true, true, 0, 44, 12},
+                          {0, 1, false, true, true, 0, 44, 16},  {7, 2, false, false, true, 0, 43, 4},
+                          {5, 2, true, true, true, 0, 140, 12},  {4, 0, true, true, true, 0, 140, 16},
+                          {5, 2, true, true, false, 0, 44, 12},  {9, 0, false, true, true, 1, 43, 12}};
+    for (const Case &c : cases) {
+        Rig r(c.id);
+        RingSource world_clips, clips;
+        for (RingSource *source : {&world_clips, &clips}) {
+            if (!c.idle_2) source->clips.erase(anim_state::kIdle2);
+            if (!c.guard) source->clips.erase(anim_state::kGuard);
+        }
+        r.owned->ai.root_motion = &world_clips;
+        r.body().slot.bytes()[AiSlot::kAlertByte] = c.alert;
+        if (c.guarding) r.entity().flags = 0x40;
+        r.init();
+        AnimVariantRings rings;
+        OrganicSpawnFacts facts;
+        facts.flags = c.guarding ? 0x40 : 0;
+        OrganicSpawnBody spawned = organic_spawn_pose(facts, uint32_t(c.id), &clips, rings, 0);
+        InfantryState &body = spawned.channels;
+        r.body().inf.damage_timer = body.damage_timer = c.damage;
+        CHECK(same_channels(body, r.body().inf));
+        const int spawn = c.guarding && c.guard ? anim_state::kGuard : anim_state::kIdle;
+        CHECK(body.anim_state == spawn);
+        int thinks = 0;
+        // The mission's first frame runs at tick 1.
+        for (uint32_t tick = 1; tick <= 200; ++tick) {
+            r.owned->ai.update_organic(r.body(), *r.owned, tick);
+            RootMotionFrame frame;
+            CHECK(infantry_org1_motor_head(body, &clips, rings, frame));
+            if (infantry_org1_still_think(body, &clips, tick, c.id, c.guarding, c.alert)) {
+                if (thinks++ == 0) CHECK(int(tick) == c.thinks_at);
+                CHECK((infantry_org1_key(tick, c.id) & 15u) == 0);
+            }
+            CHECK(same_channels(body, r.body().inf));
+            CHECK(body.damage_timer == r.body().inf.damage_timer);
+            if (thinks == 0) CHECK(body.anim_state == spawn);
+        }
+        CHECK(thinks >= 12);
+        CHECK(body.anim_state == c.plays && body.body_clip_state() == c.plays && body.damage_timer == 0);
+    }
 }
 
 // A retail soldier (the install's Eindo01.adm, a body of net id 13 standing), posed and ticked on over
@@ -585,8 +578,8 @@ int main(int argc, char **argv) {
     postures_mounts_and_wash();
     world_free_pose_matches_the_world();
     body_ticks_on_as_the_motor_head();
-	still_body_thinks_as_the_world();
-	retail_soldier_ticks_on();
+    still_body_thinks_as_the_world();
+    retail_soldier_ticks_on();
     control_point_pool_precedence();
     grounding_strict_one_unit_limit();
     std::printf("infantry_spawn: %s\n", failures ? "FAIL" : "PASS");

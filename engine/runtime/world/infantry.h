@@ -1009,7 +1009,7 @@ bool infantry_org1_motor_head(InfantryState &inf, IRootMotionSource *source, Ani
 // (MissionKernel::boot). [orig: Entity_UpdateInfantryAI @0x4B9948..0x4B9953, `lea [eax+eax*8]` then
 //  `lea [tick+edx*4]`; the think's gate (key & 0xF)]
 inline uint32_t infantry_org1_key(uint32_t logic_tick, int32_t net_id) {
-	return logic_tick + 36u * static_cast<uint32_t>(net_id);
+    return logic_tick + 36u * static_cast<uint32_t>(net_id);
 }
 
 // The org1 selection's alerted idle: on a body whose damage timer (+0x2F8) or AI slot alert byte
@@ -1043,13 +1043,13 @@ int infantry_resolve_state(const IRootMotionSource *source, int adm_id, int stat
 // - nothing substitutes: dry, above half its health, in no rotor's wash;
 // - and no look target held: the attention scan, every 256 key ticks, finds no body within its
 //   radius in its line of sight to look at, whose look swaps idle 43, idle_2 44 and guard 140 for
-//   their looks 125, 126 and 141 where the .adm authors them [orig: @0x4BE729..0x4BE7E7], and sees
+//   their looks 125, 126 and 141 where the .adm authors them [orig: @0x4BE72C..0x4BE7E7], and sees
 //   no enemy and no corpse, which raise the damage timer [orig: the scan @0x4BE0CA..0x4BE463].
 // [orig: Entity_UpdateInfantryAI — the key @0x4B9948..0x4B9953; the decay @0x4BBE24..0x4BBE38;
 //  the 43 seed @0x4BAA90; the guard leg @0x4BD196..0x4BD1BB; the alerted idle
 //  @0x4BD2F0..0x4BD31C; the arbitration @0x4BD837..0x4BD874]
 bool infantry_org1_still_think(InfantryState &inf, const IRootMotionSource *source,
-		uint32_t logic_tick, int32_t net_id, bool guarding, uint8_t alert);
+                               uint32_t logic_tick, int32_t net_id, bool guarding, uint8_t alert);
 
 // Pure retail body-tick kernels, exposed so deterministic tests can pin the
 // wrap/arithmetic-shift behavior independently of locomotion.
