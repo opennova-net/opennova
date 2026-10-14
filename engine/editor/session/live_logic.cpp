@@ -16,6 +16,7 @@
 #include <editor/session/document_set.h>
 #include <editor/session/editor_request.h>
 #include <editor/session/session_core.h>
+#include <runtime/devtools/debug_control_ids.h>
 
 namespace opennova::editor {
 
@@ -49,7 +50,8 @@ JsonValue play_debug_arguments(const PlayDebugCall &call) {
 	}
 	JsonValue out = JsonValue::make_object();
 	out.set("op", io::json_string("invoke"));
-	out.set("id", io::json_string(call.op == PlayDebugOp::FireEvent ? "fire_event" : "set_mission_variable"));
+	out.set("id", io::json_string(call.op == PlayDebugOp::FireEvent ? devtools::control_id::kFireEvent
+	                                                                 : devtools::control_id::kSetMissionVariable));
 	out.set("args", std::move(args));
 	out.set("confirm_authority", JsonValue::make_bool(true));
 	return out;
@@ -58,7 +60,7 @@ JsonValue play_debug_arguments(const PlayDebugCall &call) {
 JsonValue live_snapshot_arguments() {
 	JsonValue out = JsonValue::make_object();
 	out.set("op", io::json_string("invoke"));
-	out.set("id", io::json_string("mission_logic_snapshot"));
+	out.set("id", io::json_string(devtools::control_id::kMissionLogicSnapshot));
 	return out;
 }
 
