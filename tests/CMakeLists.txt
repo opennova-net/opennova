@@ -4397,6 +4397,12 @@ add_executable(npruntime_host_settings_test npruntime/host_settings_test.cpp)
 target_link_libraries(npruntime_host_settings_test PRIVATE opennova_runtime)
 target_include_directories(npruntime_host_settings_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_host_settings COMMAND npruntime_host_settings_test)
+# The host rules a session runs by its title (docs/titles/dfx2-vs-jo-re.md §7): the cfg table's
+# title, dfx2.exe's caps, score table seeds, linger, deploy protection and its want of a revive.
+add_executable(npruntime_title_host_rules_test npruntime/title_host_rules_test.cpp)
+target_link_libraries(npruntime_title_host_rules_test PRIVATE opennova_runtime)
+target_include_directories(npruntime_title_host_rules_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_title_host_rules COMMAND npruntime_title_host_rules_test)
 # The retail host file opennova-serve reads (ADR 0051): the game.cfg walk, the
 # ServerConfig_ApplyHostSetting arms and the Mission lines' rotation seed.
 add_executable(npruntime_host_file_test npruntime/host_file_test.cpp)
@@ -4772,6 +4778,30 @@ add_test(NAME ban_list_roundtrip COMMAND ban_list_roundtrip_test)
 add_executable(npruntime_ban_lists_test npruntime/ban_lists_test.cpp)
 target_link_libraries(npruntime_ban_lists_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_ban_lists COMMAND npruntime_ban_lists_test)
+
+# Delta Force: Xtreme 2 on the in-match wire (docs/titles/dfx2-vs-jo-re.md §8): the minted bodies
+# of a retail DFX2 LAN pair (fixtures/dfx2_wire) and the codec reading them by title (DFX2-1,
+# DFX2-13), the replication seam's checkpoint and 0x66 folds, the host's and the joiner's branches.
+add_executable(dfx2_wire_gen_test fixtures/dfx2_wire_gen.cpp)
+target_link_libraries(dfx2_wire_gen_test PRIVATE opennova_net)
+target_include_directories(dfx2_wire_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME dfx2_wire_gen COMMAND dfx2_wire_gen_test)
+add_executable(nw_dfx2_frame_test novaworld/nw_dfx2_frame_test.cpp)
+target_link_libraries(nw_dfx2_frame_test PRIVATE opennova_net)
+target_include_directories(nw_dfx2_frame_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME nw_dfx2_frame COMMAND nw_dfx2_frame_test)
+add_executable(netsim_dfx2_replica_test netsim/dfx2_replica_test.cpp)
+target_link_libraries(netsim_dfx2_replica_test PRIVATE opennova_runtime)
+target_include_directories(netsim_dfx2_replica_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME netsim_dfx2_replica COMMAND netsim_dfx2_replica_test)
+add_executable(npruntime_dfx2_host_test npruntime/dfx2_host_test.cpp)
+target_link_libraries(npruntime_dfx2_host_test PRIVATE opennova_runtime)
+target_include_directories(npruntime_dfx2_host_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_dfx2_host COMMAND npruntime_dfx2_host_test)
+add_executable(npruntime_dfx2_joiner_test npruntime/dfx2_joiner_test.cpp)
+target_link_libraries(npruntime_dfx2_joiner_test PRIVATE opennova_runtime)
+target_include_directories(npruntime_dfx2_joiner_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_dfx2_joiner COMMAND npruntime_dfx2_joiner_test)
 
 # opennova-serve (apps/serve, ADR 0051): a loose directory with one synthetic mission and a
 # retail host file; the server boots it headless as a DedicatedHost, answers a LAN probe and
