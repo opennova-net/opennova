@@ -3440,6 +3440,13 @@ target_link_libraries(pubcrypto_test PRIVATE opennova_net)
 target_include_directories(pubcrypto_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME pubcrypto COMMAND pubcrypto_test)
 
+# The DFX2 CD key (net/novacrypto/cdkey.h): the RE record's vectors, the hardware
+# mix, the client's NWACT reading and the LAN host's join codes 10 to 13.
+add_executable(cdkey_test novacrypto/cdkey_test.cpp)
+target_link_libraries(cdkey_test PRIVATE opennova_net)
+target_include_directories(cdkey_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME cdkey COMMAND cdkey_test)
+
 add_executable(epask_test novacrypto/epask_test.cpp)
 target_link_libraries(epask_test PRIVATE opennova_net)
 target_include_directories(epask_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

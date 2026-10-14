@@ -20,11 +20,12 @@
 # 0009-0012, 0019). Headers keep their historical include shapes.
 
 add_library(opennova_net STATIC
-    # novacrypto — NWU crypto, URL cipher, pubcrypto, EPASK
+    # novacrypto — NWU crypto, URL cipher, pubcrypto, EPASK, the DFX2 CD key
     ${CMAKE_CURRENT_SOURCE_DIR}/novacrypto/url_cipher.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novacrypto/nwu.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novacrypto/pubcrypto.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novacrypto/epask.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/novacrypto/cdkey.cpp
     # admin — the retail remote-admin TCP protocol (CAdminServer): framing, login, replies;
     # the client codec and the server's connection machine
     ${CMAKE_CURRENT_SOURCE_DIR}/admin/admin_protocol.cpp
