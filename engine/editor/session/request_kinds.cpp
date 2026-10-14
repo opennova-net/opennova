@@ -255,6 +255,9 @@ void serve_new_font(SessionCore &core, const EditorRequest &request) {
 void serve_wave_operation(SessionCore &core, const EditorRequest &request) {
 	core.documents().wave_operation(request);
 }
+void serve_music_stream_audio(SessionCore &core, const EditorRequest &request) {
+	core.documents().music_stream_audio(request);
+}
 void serve_clear_output(SessionCore &core, const EditorRequest &) {
 	core.clear_output();
 }
@@ -1360,6 +1363,22 @@ constexpr RequestKindRow kRows[] = {
 			"resolve or is refused (a base layer's file: copy it into the project first), a stroke its plane's planner "
 			"refuses.")
 			.takes(request_params({ F::Stroke }, { F::Path }))
+			.holds(kFiles, kDocuments)
+			.names_active()
+			.row,
+	Request(K::MusicStreamAudio, "music_stream_audio", serve_music_stream_audio,
+			"A stream of the music bank at path (left out, the active one) made from a wave, one undo step: values.wave "
+			"names it (a project file, or a file on disk; a wave open in the editor as it holds it), its samples made "
+			"byte-paired stereo at 22050 a second as the stream plays them (one channel on both sides, two kept, another "
+			"rate resampled as the wave importer resamples, the wave's full scale the stream's) and encoded chunk by "
+			"chunk; values.stream, the place of the "
+			"stream whose audio it replaces (0 the first; left out, a new stream added at the end, selected); values.name, "
+			"the stream's name (a new one's left out: the wave's stem upper case, 16 characters at the most). Save writes "
+			"the bank, which play_sound then streams. open_first: the bank opened first when it is not. Refused, nothing "
+			"changed (music_bank.stream_audio): a wave that does not read, holds no sample or has more than two channels, "
+			"a stream the bank has not, a value of no key it takes, a name the stream's field refuses, a file an import "
+			"makes.")
+			.takes(request_params({ F::Values }, { F::Path, F::OpenFirst }))
 			.holds(kFiles, kDocuments)
 			.names_active()
 			.row,

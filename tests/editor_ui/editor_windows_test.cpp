@@ -106,6 +106,28 @@ void test_requests_round_trip() {
 	CHECK(windows.take_request(out) && out.kind == EditorRequestKind::SetWorkspace &&
 	              workspace_member(out, "new_project", "dir").string == "C:/mods/New" && !windows.take_request(out),
 	      "a location pick fills the form, the workspace's: it does not open");
+	// A music bank stream's ...from a wave: the Shell is asked for a file alone, and the wave picked makes the stream
+	// the button was for (its place; none, a new stream).
+	EditorRequest pick = request::pick_file(PickPurpose::MusicStreamWave);
+	pick.path = "music/gamemus.sbf";
+	pick.values = {{"stream", "3"}};
+	windows.request(pick);
+	CHECK(windows.take_request(out) && out.kind == EditorRequestKind::PickFile && out.path.empty() && out.values.empty(),
+	      "the stream's pick asks the Shell for a file alone");
+	windows.deliver_pick(PickPurpose::MusicStreamWave, "C:/music/theme.wav");
+	CHECK(windows.take_request(out) && out.kind == EditorRequestKind::MusicStreamAudio && out.path == "music/gamemus.sbf" &&
+	              out.values == request::music_stream_audio("music/gamemus.sbf", "C:/music/theme.wav", "3").values,
+	      "the wave picked makes the stream the button was for");
+	pick.values.clear();
+	windows.request(pick);
+	windows.take_request(out);
+	windows.deliver_pick(PickPurpose::MusicStreamWave, "C:/music/theme.wav");
+	const EditorRequest added = request::music_stream_audio("music/gamemus.sbf", "C:/music/theme.wav");
+	CHECK(windows.take_request(out) && out.kind == EditorRequestKind::MusicStreamAudio && out.values == added.values &&
+	              added.values.size() == 1,
+	      "a pick for no stream adds one");
+	windows.deliver_pick(PickPurpose::MusicStreamWave, "C:/music/theme.wav");
+	CHECK(!windows.take_request(out), "a pick answered once raises nothing again");
 }
 
 // The frame bracket reads the request table (S13 A4: acts_on_saved_files and
@@ -129,10 +151,11 @@ void test_frame_bracket_follows_the_table() {
 	// The plain-words lane: a string id's words set name the document whose field holds the id.
 	// S23: a wave's whole-wave edit names the active one, as a texture's does.
 	// S25: a terrain stroke names the view it is in, the active one.
+	// A music bank stream's audio from a wave names the active bank, as a wave's edit does.
 	const std::vector<K> active = {K::OpenDocument, K::ReloadDocument, K::CloseDocument, K::SelectRecord, K::EditRecord,
 	                               K::SetStringText, K::RevertToSaved, K::EndEdit, K::Copy, K::Cut, K::Paste, K::Duplicate, K::Save,
 	                               K::Undo, K::Redo, K::TextureOperation, K::SetViewport, K::EditInViewport,
-	                               K::WaveOperation, K::TerrainStroke};
+	                               K::WaveOperation, K::TerrainStroke, K::MusicStreamAudio};
 	const auto listed = [](const std::vector<K> &kinds, K kind) {
 		return std::find(kinds.begin(), kinds.end(), kind) != kinds.end();
 	};

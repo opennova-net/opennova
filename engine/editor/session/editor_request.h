@@ -119,6 +119,8 @@ enum class EditorRequestKind {
 	WaveOperation,
 	// A stroke of the terrain brush (S25): its dabs laid on the plane's file as the game resolves it for the view
 	TerrainStroke,
+	// A music bank stream's audio made from a wave, or a new stream added from one: one undo step of the bank
+	MusicStreamAudio,
 	kCount,
 };
 
@@ -133,7 +135,8 @@ enum class PickPurpose {
 	GameInstall,
 	ImportFiles,
 	NewProjectInstall, // the New project form's game install
-	TextureImage // a texture's Replace with image... (S18): the image it is made from
+	TextureImage, // a texture's Replace with image... (S18): the image it is made from
+	MusicStreamWave // a music bank stream's audio from a wave...: the wave it is made from
 };
 
 // The unsaved-changes prompt's answer: Save writes the files it lists, then what waited

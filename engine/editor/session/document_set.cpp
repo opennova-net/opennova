@@ -21,6 +21,7 @@
 #include <editor/documents/document_types.h>
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_file_set.h>
+#include <editor/documents/music_bank_document.h>
 #include <editor/documents/strings_document.h>
 #include <editor/documents/texture_document.h>
 #include <editor/documents/wave_document.h>
@@ -969,13 +970,21 @@ DocumentBase *DocumentSet::operation_target(const EditorRequest &request, CoreFi
 	return document;
 }
 
-void DocumentSet::apply_operation(DocumentBase &document, std::shared_ptr<const EditPayload> payload,
-                                  const std::string &words) {
+namespace {
+
+// A whole-file operation's change: the one Apply edit its step is.
+Edit operation_edit(std::shared_ptr<const EditPayload> payload) {
 	Edit edit;
 	edit.operation = EditOperation::Apply;
 	edit.payload = std::move(payload);
+	return edit;
+}
+
+} // namespace
+
+void DocumentSet::apply_operation(DocumentBase &document, const std::vector<Edit> &edits, const std::string &words) {
 	const std::string said = words + " (" + basename_of(document.path()) + ").";
-	if (!apply_edits(document, {edit})) return;
+	if (!apply_edits(document, edits)) return;
 	// The step named with the operation's words, what Undo says it takes back.
 	view_.activity.status = said;
 	name_step(document);
@@ -1006,7 +1015,7 @@ void DocumentSet::texture_operation(const EditorRequest &request) {
 		return;
 	}
 	const std::string words = image->words;
-	apply_operation(*document, std::move(image), words);
+	apply_operation(*document, {operation_edit(std::move(image))}, words);
 }
 
 void DocumentSet::wave_operation(const EditorRequest &request) {
@@ -1030,7 +1039,55 @@ void DocumentSet::wave_operation(const EditorRequest &request) {
 		return;
 	}
 	const std::string words = made->words;
-	apply_operation(*document, std::move(made), words);
+	apply_operation(*document, {operation_edit(std::move(made))}, words);
+}
+
+void DocumentSet::music_stream_audio(const EditorRequest &request) {
+	DocumentBase *document = operation_target(request, CoreFinding::MusicStreamAudio, "music bank", [](const DocumentBase &d) {
+		return dynamic_cast<const MusicBankDocument *>(&d) != nullptr;
+	});
+	if (!document) return;
+	const auto &bank = static_cast<const MusicBankDocument &>(*document);
+	const std::string &path = bank.path();
+	const auto refuse = [&](const std::string &why, const std::string &asset) {
+		core_.refuse_now(CoreFinding::MusicStreamAudio, "No stream made from a wave: " + why, asset);
+	};
+	std::string wave, place, name;
+	bool has_place = false;
+	for (const auto &[key, value] : request.values) {
+		if (key == "wave") wave = value;
+		else if (key == "stream") place = value, has_place = true;
+		else if (key == "name") name = value;
+		else return refuse("a stream from a wave takes wave, stream and name; '" + key + "' is none of them.", path);
+	}
+	if (wave.empty()) return refuse("values names the wave it is made from (wave).", path);
+	int index = -1;
+	if (has_place && (index = bank.stream_index(place)) < 0) {
+		const size_t streams = bank.bank_row() ? bank.bank_row()->streams.size() : 0;
+		return refuse(basename_of(path) + " has no stream at '" + place + "': a stream is named by its place" +
+		                      (streams ? ", 0 to " + std::to_string(streams - 1) : std::string(", and it has none")) + ".",
+		              path);
+	}
+	// The wave: a file of the project as the editor holds it (its document's bytes, where it is open), else a file on
+	// disk.
+	std::vector<uint8_t> bytes;
+	std::string message, source = wave;
+	const bool on_disk = path_of(wave).is_absolute();
+	const AssetEntry *entry = !on_disk && view_.project.scan ? view_.project.scan->named(wave) : nullptr;
+	if (entry) source = entry->relative_path;
+	const auto *open = entry ? dynamic_cast<const WaveDocument *>(open_at(entry->relative_path)) : nullptr;
+	if (open) bytes = open->bytes();
+	else if (!io::read_file_bytes(on_disk ? wave : join_path(view_.project.root, source), bytes, message))
+		return refuse("the wave " + wave + " could not be read: " + message + ".", entry ? source : path);
+	auto audio = std::make_shared<MusicStreamAudioEdit>();
+	std::string why;
+	if (!music_stream_audio_from_wave(source, bytes, *audio, why))
+		return refuse(basename_of(source) + " is no wave a stream is made from: " + why + ".", entry ? source : path);
+	const std::string words = has_place ? "Stream " + place + "'s audio made from " + audio->words
+	                                    : "Stream " + std::to_string(bank.bank_row() ? bank.bank_row()->streams.size() : 0) +
+	                                              " added from " + audio->words;
+	const std::string named = name.empty() && !has_place ? music_stream_name_of(source) : name;
+	apply_operation(*document, music_stream_audio_edits(bank, index, named, std::move(audio)), words);
 }
 
 void DocumentSet::set_string_text(const EditorRequest &request) {

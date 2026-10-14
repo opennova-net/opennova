@@ -71,8 +71,9 @@ void FontViewportView::draw_ready(Workspace &workspace, const ViewportModel &vie
 	}
 	if (options != model.options()) workspace.request(request::set_viewport(model.path(), font_options_change(options)));
 	if (model.shown_page() < 0) {
-		// The text it draws, sent once it changes; a new path starts from the options' text.
-		if (text_path_ != model.path()) {
+		// The text it draws, sent once it changes. The box shows the options' text whenever nobody types in it (a new
+		// path, another hand's set_viewport, an undo of the options), so what is typed next builds on the text drawn.
+		if (text_path_ != model.path() || (!typing_ && text_ != model.options().text)) {
 			text_path_ = model.path();
 			text_ = model.options().text;
 		}
@@ -85,6 +86,7 @@ void FontViewportView::draw_ready(Workspace &workspace, const ViewportModel &vie
 			typed.text = text_;
 			workspace.request(request::set_viewport(model.path(), font_options_change(typed)));
 		}
+		typing_ = ImGui::IsItemActive();
 		ui_kit::tooltip("The text drawn, its bytes the game's code page; a format tag (<B>, <cRRGGBB>) is read as the "
 		                "game reads one.");
 	}

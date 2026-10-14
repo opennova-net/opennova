@@ -414,6 +414,9 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::TextureCharMapShape, code("texture.char_map_shape", G::Textures, F::ImportFitsUse) },
 	// A char map's class at or past the twenty the tile set tables name (S25): listed, the game reads it.
 	{ C::TextureCharMapClass, code("texture.char_map_class", G::Textures) },
+	// A music_stream_audio the bank cannot take: a wave that does not read, holds no sample or has more than two
+	// channels, a stream the bank has not, a name the stream's field refuses.
+	{ C::MusicStreamAudio, code("music_bank.stream_audio", G::MusicBanks) },
 };
 
 static_assert(std::size(kEntries) == kCoreFindingCount, "every CoreFinding has exactly one row");

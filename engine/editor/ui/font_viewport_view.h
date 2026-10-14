@@ -17,9 +17,11 @@ protected:
 	void draw_ready(Workspace &workspace, const ViewportModel &model, ViewportContext &context) override;
 
 private:
-	// The text being typed, sent as the options' text once it changes.
+	// The text being typed, sent as the options' text once it changes; whether the box was being typed in at the last
+	// frame (while it is not, it follows the options' text).
 	std::string text_;
 	std::string text_path_;
+	bool typing_ = false;
 };
 
 } // namespace opennova::editor

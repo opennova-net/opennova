@@ -398,9 +398,10 @@ static int test_use_check_table() {
 				document_type_for(row->kind));
 	}
 	// The textures' check (S18), the gametext keys a single-player mission reads (the mission authoring
-	// round), the stylesheet's unused-variable check and the mission's pool check (S14).
-	TEST_EXPECT(rows == 4 && use_check(AssetKind::Texture) && use_check(AssetKind::Strings) && use_check(AssetKind::MenuStyle) &&
-	            use_check(AssetKind::Mission) && !use_check(AssetKind::ItemDefs));
+	// round), the stylesheet's unused-variable check, the mission's pool check (S14) and the particle files' token
+	// slots (the game's line tokenizer read past a line).
+	TEST_EXPECT(rows == 5 && use_check(AssetKind::Texture) && use_check(AssetKind::Strings) && use_check(AssetKind::MenuStyle) &&
+	            use_check(AssetKind::Mission) && use_check(AssetKind::Particles) && !use_check(AssetKind::ItemDefs));
 	return 0;
 }
 

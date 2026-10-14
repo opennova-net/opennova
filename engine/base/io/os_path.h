@@ -254,12 +254,17 @@ inline bool path_lexically_within(const std::filesystem::path &inner, const std:
 }
 
 // Whether `path` is the folder `dir` or under it, symbolic links resolved (weakly_canonical, which
-// also gives a folder that exists its own spelling). False when either cannot be resolved.
+// also gives a folder that exists its own spelling). False when either cannot be resolved. Each is made
+// absolute first: weakly_canonical of a relative path whose part on the disk is "." alone (".\name" for a
+// name not on the disk yet: a file landing at the top of a project opened as ".") can come back relative,
+// which no folder holds.
 inline bool path_within(const std::filesystem::path &path, const std::filesystem::path &dir) {
 	std::error_code ec;
-	const std::filesystem::path base = std::filesystem::weakly_canonical(dir, ec);
+	std::filesystem::path base = std::filesystem::absolute(dir, ec);
+	if (!ec) base = std::filesystem::weakly_canonical(base, ec);
 	if (ec) return false;
-	const std::filesystem::path full = std::filesystem::weakly_canonical(path, ec);
+	std::filesystem::path full = std::filesystem::absolute(path, ec);
+	if (!ec) full = std::filesystem::weakly_canonical(full, ec);
 	if (ec) return false;
 	const std::filesystem::path relative = full.lexically_relative(base);
 	return !relative.empty() && !relative.is_absolute() && *relative.begin() != "..";
