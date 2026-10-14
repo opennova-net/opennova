@@ -298,6 +298,20 @@ int test_settings_rules() {
 	TEST_EXPECT(refused(with([](auto &c) { c.game = "jop_3_consumer"; }), "game"));
 	TEST_EXPECT(!check(with([](auto &c) { c.game = hosted::kDataSetDeltaForceXtreme2; })));
 	TEST_EXPECT(!check(with([](auto &c) { c.game = hosted::kDataSetOpenNova; })));
+	// Delta Force Xtreme 2's host screen takes 100 players, Joint Operations' and
+	// OpenNova's 64.
+	TEST_EXPECT(!check(with([](auto &c) {
+		c.game = hosted::kDataSetDeltaForceXtreme2;
+		c.max_players = 100;
+	})));
+	TEST_EXPECT(refused(with([](auto &c) {
+		c.game = hosted::kDataSetDeltaForceXtreme2;
+		c.max_players = 101;
+	}), "max_players"));
+	TEST_EXPECT(refused(with([](auto &c) {
+		c.game = hosted::kDataSetOpenNova;
+		c.max_players = 65;
+	}), "max_players"));
 	TEST_EXPECT(refused(with([](auto &c) {
 		c.game = hosted::kDataSetDeltaForceXtreme2;
 		c.expansion = "jox01";
@@ -534,7 +548,7 @@ int test_data_sets() {
 	const auto local = hosted::offered_data_sets("local", configs);
 	TEST_EXPECT(local.size() == 2 && local[0].game == "jop_2_consumer" && local[1].game == "dfx2_consumer");
 	TEST_EXPECT(local[0].resource_dir == "C:/JO" && local[0].missions == std::vector<std::string>{ "a.bms" });
-	TEST_EXPECT(local[1].loose_root && local[1].title == "dfx2" && local[1].limits.max_players.max == 64);
+	TEST_EXPECT(local[1].loose_root && local[1].title == "dfx2" && local[1].limits.max_players.max == 100);
 	const auto ec2 = hosted::offered_data_sets("ec2", configs);
 	TEST_EXPECT(ec2.size() == 1 && ec2[0].game == "opennova_0_consumer" &&
 			ec2[0].launch_template == "lt-0fedcba9876543210" && ec2[0].missions == std::vector<std::string>{ "o.bms" });

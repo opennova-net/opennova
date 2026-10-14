@@ -359,9 +359,9 @@ git or an image, and players never reach them (the machines mount them read-only
 nothing but the server).
 
 Each data set's host-screen limits (max players, time limit, kill limit, max score,
-respawn, pre-round delay) are the service's own table. Delta Force Xtreme 2's are
-provisional: they hold Joint Operations' values until the research on its host screen
-lands.
+respawn, pre-round delay) are the service's own table, the title's host screen's:
+Delta Force Xtreme 2 takes up to 100 players where Joint Operations takes 64, and
+OpenNova's data takes Joint Operations' limits.
 
 ### Turning it on
 

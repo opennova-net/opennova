@@ -323,8 +323,8 @@ server runs one data set its owner picks. Everything here is service policy.
   game only) and `opennova_0_consumer` (OpenNova's own data, `/game jo`, base game only).
   Each has its own host-screen limits (Joint Operations': 2..64 players, a time limit of
   1..300, kill and score limits of 1..500, respawn and delay of 0..300; Delta Force Xtreme
-  2's and OpenNova's are Joint Operations' values for now, Delta Force Xtreme 2's
-  provisional until its own are read). A deployment offers the ones its provider has the
+  2's the same but 2..100 players, its host screen's cap; OpenNova's Joint Operations').
+  A deployment offers the ones its provider has the
   data of (`ONNET_HOSTED_DATA_SETS`, `ONNET_HOSTED_EC2_LAUNCH_TEMPLATES`, below); with
   none, hosting is off. A start names one (`hosted_servers.game`, the games slug; the
   rows from before 0014 ran Joint Operations' data), and a server whose data set is no

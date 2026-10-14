@@ -3496,6 +3496,7 @@ int test_hosted_server_routes(Harness &h) {
 		TEST_EXPECT(dfx2["expansions"].size() == 1 && str(dfx2["expansions"][0]["code"]).empty());
 		TEST_EXPECT(dfx2["default_missions"].size() == 2 && str(dfx2["default_missions"][1]) == "dfx2_b.bms");
 		TEST_EXPECT(dfx2["limits"].has("respawn") && dfx2["limits"]["time_limit"]["max"].i() == 300);
+		TEST_EXPECT(dfx2["limits"]["max_players"]["max"].i() == 100);
 	}
 	TEST_EXPECT(!json.has("default_missions"));
 	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
