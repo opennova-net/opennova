@@ -29,19 +29,6 @@ std::string stem(const std::string &name) {
 	return dot == std::string::npos ? name : name.substr(0, dot);
 }
 
-// The key a terrain set names each plane's image by (S20's terrain_import keys; the blend map's is the round's).
-const char *set_key(TerrainPlane plane) {
-	switch (plane) {
-	case TerrainPlane::Heights: return "heightmap";
-	case TerrainPlane::Surface: return "surface";
-	case TerrainPlane::Foliage: return "foliagemap";
-	case TerrainPlane::Colour: return "colormap";
-	case TerrainPlane::Blend: return "blendmap";
-	case TerrainPlane::kCount: break;
-	}
-	return "";
-}
-
 // The file the .trn names for each plane [orig: Terrain_ParseConfigCallback @ 0x60f330: polytrn_polydata,
 // polytrn_charmap, polytrn_foliagemap, polytrn_colormap, polytrn_detailblendmap].
 const std::string &plane_name(const TrnConfig &trn, TerrainPlane plane) {
@@ -224,7 +211,7 @@ bool resolve_uncached(const SessionView &view, const DocumentBase &document, Ter
 	const TerrainImport import = out.terrain.empty() ? TerrainImport() : terrain_uses(view, out.terrain).import;
 	for (size_t i = 0; i < kTerrainPlaneCount; ++i) {
 		const TerrainPlane plane = static_cast<TerrainPlane>(i);
-		out.planes[i] = family_file(view, plane_name(trn, plane), import, set_key(plane), terrain_plane_words(plane));
+		out.planes[i] = family_file(view, plane_name(trn, plane), import, terrain_set_key(plane), terrain_plane_words(plane));
 	}
 	// What Add makes (S25 B4): an authored .trn of the project's map it names none of; an imported terrain's map its set
 	// names no image for (the import made none, or made one from no image). A .trn the game's own takes none.
@@ -249,6 +236,18 @@ bool resolve_uncached(const SessionView &view, const DocumentBase &document, Ter
 }
 
 } // namespace
+
+const char *terrain_set_key(TerrainPlane plane) {
+	switch (plane) {
+	case TerrainPlane::Heights: return "heightmap";
+	case TerrainPlane::Surface: return "surface";
+	case TerrainPlane::Foliage: return "foliagemap";
+	case TerrainPlane::Colour: return "colormap";
+	case TerrainPlane::Blend: return "blendmap";
+	case TerrainPlane::kCount: break;
+	}
+	return "";
+}
 
 bool resolve_terrain_family(const SessionView &view, const DocumentBase &document, TerrainFamily &out) {
 	const uint64_t generation = view.findings.assets ? view.findings.assets->generation() : 0;

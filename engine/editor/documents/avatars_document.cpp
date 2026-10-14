@@ -326,7 +326,7 @@ constexpr FindingCodeEntry<AvatarsFinding> kFindingEntries[] = {
 	{ AvatarsFinding::ReaderStops,
 	  game_stops_code("avatars.reader_stops",
 	                  "the avatar table's reader stops at a 513th part or a 129th combination and the game fails "
-	                  "(ComboObj Parse Error) [orig: CAvatarDefs_ParseConfigLine @ 0x57A456; sub_579E10 @ 0x579E10; "
+	                  "(ComboObj Parse Error) [orig: CAvatarDefs_ParseConfigLine @ 0x57A456; CAvatarDefs_AllocCombo @ 0x579E10; "
 	                  "D-PLAYERINFO-2]") },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(AvatarsFinding::kCount),
@@ -342,8 +342,6 @@ const RecordTable &avatars_table() {
 	static const RecordTable table = make_table();
 	return table;
 }
-
-bool is_avatars_kind(AssetKind kind) { return asset_kind_row(kind).document == DocumentTypeId::Avatars; }
 
 std::string avatar_part_scope(const std::string &path, int kind) {
 	static const char *const kKinds[] = {"HEAD", "BODY", "ARMS"};
@@ -459,10 +457,6 @@ std::string AvatarsDocument::record_title(const NodeAddress &address) const {
 
 bool AvatarsDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                             std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues, Diagnostic &error) {
-	if (!is_avatars_kind(kind())) {
-		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not an avatars table.", path());
-		return false;
-	}
 	auto notes = std::make_shared<textlayout::Notes>();
 	avatars::AvatarsFile read{};
 	reader_stops_line_ = 0;
@@ -477,7 +471,7 @@ bool AvatarsDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 		if (!stop || avatars::avatars_parse_memory(bytes.data(), before, &read, *notes) != 0) {
 			error = make_finding(CoreFinding::DocumentParse, DiagnosticSeverity::Error,
 			                     "The avatar table's reader stops: 512 parts or 129 combinations (the game's walk ends "
-			                     "there, ComboObj Parse Error) [orig: CAvatarDefs_ParseConfigLine @ 0x57A456; sub_579E10 "
+			                     "there, ComboObj Parse Error) [orig: CAvatarDefs_ParseConfigLine @ 0x57A456; CAvatarDefs_AllocCombo "
 			                     "@ 0x579E10].",
 			                     path());
 			return false;
@@ -485,7 +479,7 @@ bool AvatarsDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 		reader_stops_line_ = stop;
 		issues.push_back({true, stop, std::string(), std::string(),
 		                  "The game's avatar reader stops at this line, a 513th part or a 129th combination, and the game "
-		                  "fails (ComboObj Parse Error) [orig: CAvatarDefs_ParseConfigLine @ 0x57A456; sub_579E10 @ "
+		                  "fails (ComboObj Parse Error) [orig: CAvatarDefs_ParseConfigLine @ 0x57A456; CAvatarDefs_AllocCombo @ "
 		                  "0x579E10; D-PLAYERINFO-2]. The editor holds what the reader reads before it, read only: fix the "
 		                  "file outside the editor."});
 		issues.back().game_stops = true;
@@ -839,7 +833,7 @@ void AvatarsDocument::saved_text_findings(std::vector<Diagnostic> &out) const {
 		out.push_back(make_finding(finding_code(AvatarsFinding::ReaderStops), DiagnosticSeverity::Error,
 		                           "The table as a save writes it holds a 513th part or a 129th combination: the game's "
 		                           "reader stops there and the game fails (ComboObj Parse Error) [orig: "
-		                           "CAvatarDefs_ParseConfigLine @ 0x57A456; sub_579E10 @ 0x579E10; D-PLAYERINFO-2].",
+		                           "CAvatarDefs_ParseConfigLine @ 0x57A456; CAvatarDefs_AllocCombo @ 0x579E10; D-PLAYERINFO-2].",
 		                           path()));
 		return;
 	}

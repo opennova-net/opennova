@@ -30,7 +30,6 @@ namespace opennova::editor {
 
 namespace {
 
-constexpr NodeKind k(MissionKind kind) { return node_kind(kind); }
 
 // The mission's words for what its records name, by the project's names where the graph stands.
 std::unique_ptr<MissionNames> names_of(const SessionView &view, const MissionDocument &mission,
@@ -58,7 +57,7 @@ void events_using(Workspace &workspace, const MissionDocument &mission, const No
 	std::string name;
 	if (row && !record.child && is_entity_kind(row->kind)) {
 		name = std::to_string(static_cast<const EntityRow &>(*row).native.id);
-	} else if (row && !record.child && row->kind == k(MissionKind::Area)) {
+	} else if (row && !record.child && row->kind == node_kind(MissionKind::Area)) {
 		kind = ReferenceKind::MissionZone;
 		name = std::to_string(static_cast<const AreaRow &>(*row).native.id);
 	}
@@ -187,7 +186,7 @@ void use_menu(Workspace &workspace, const MissionDocument &mission, const NodeAd
 		bool editable, const MissionNames &names) {
 	const std::vector<MissionSubject> subjects = mission_subjects(mission, record);
 	const Node *row = event.row ? mission.row(event.row) : nullptr;
-	const bool has_event = row && row->kind == k(MissionKind::Event);
+	const bool has_event = row && row->kind == node_kind(MissionKind::Event);
 	const std::string title = has_event ? "Use in event " + std::to_string(mission.index_of(*row) + 1) : std::string("Use in the selected event");
 	if (!ImGui::BeginMenu((title + "###use_in").c_str(), editable && has_event && !subjects.empty())) {
 		ui_kit::tooltip(!has_event ? "Select an event (on the board or in the outline) first, then right-click what it should "
@@ -250,7 +249,7 @@ void select_members(Workspace &workspace, const MissionDocument &mission, const 
 } // namespace
 
 NodeAddress mission_menu_event(const NodeAddress &primary) {
-	return mission_logic_record(primary) ? NodeAddress{ primary.row, k(MissionKind::Event), 0 } : NodeAddress();
+	return mission_logic_record(primary) ? NodeAddress{ primary.row, node_kind(MissionKind::Event), 0 } : NodeAddress();
 }
 
 void draw_mission_mark_items(Workspace &workspace, const MissionDocument &mission, const MissionMarkMenu &menu,
@@ -269,13 +268,7 @@ void draw_mission_mark_items(Workspace &workspace, const MissionDocument &missio
 	ui_kit::tooltip("Select every entity of the mission placed from the same item.");
 	const std::string locator = row ? mission.locator(record) : std::string();
 	if (ImGui::MenuItem("Go to in outline", nullptr, false, !locator.empty())) {
-		ReferenceTarget target;
-		target.label = mission.path();
-		target.file = mission.path();
-		target.locator = locator;
-		target.field = entity ? "item" : "id";
-		target.editable = true;
-		window_requests::go_to(workspace, target);
+		window_requests::go_to(workspace, window_requests::target_at(mission.path(), locator, entity ? "item" : "id"));
 	}
 	const bool finds = view.findings.graph && !locator.empty();
 	if (ImGui::MenuItem("Find usages", "Shift+F12", false, finds) && finds)
@@ -300,8 +293,8 @@ void draw_mission_mark_items(Workspace &workspace, const MissionDocument &missio
 // The outline line menu's items for a placed record (S0's seam): Frame it in the 3D view, Select group members.
 void mission_space_row_items(Workspace &workspace, const MissionDocument &mission, const NodeAddress &record) {
 	const Node *row = mission.row(record.row);
-	const bool placed = row && !record.child && (is_entity_kind(row->kind) || row->kind == k(MissionKind::Area));
-	const bool group = record.child && record.kind == k(MissionKind::Group);
+	const bool placed = row && !record.child && (is_entity_kind(row->kind) || row->kind == node_kind(MissionKind::Area));
+	const bool group = record.child && record.kind == node_kind(MissionKind::Group);
 	if (!placed && !group) return;
 	if (placed) {
 		if (ImGui::MenuItem("Frame in the 3D view")) {

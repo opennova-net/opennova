@@ -29,7 +29,9 @@ enum class TerrainViewStatus : uint8_t {
 	Ready,
 };
 // "no_project", "no_terrain", "unwritable", "refused", "ready": its token on the wire.
-const char *terrain_view_status_token(TerrainViewStatus status);
+inline constexpr const char *kTerrainViewStatusTokens[] = {
+	"no_project", "no_terrain", "unwritable", "refused", "ready",
+};
 
 // The environment option's word for no mission's: the neutral one, the engine's own with no file read (a
 // mission's start with no .env runs on Environment_InitDefaults' state [orig: Terrain_LoadEnvironmentConfig @
@@ -52,10 +54,7 @@ struct TerrainViewportOptions {
 	bool operator!=(const TerrainViewportOptions &o) const { return !(*this == o); }
 };
 
-// The options on the wire (the envelope's `options`, a SetViewport's): {mission, overlay, legend, show {foliage, water}}.
-io::JsonValue terrain_options_to_json(const TerrainViewportOptions &options);
-// The change a SetViewport makes to set the options to `options`, and to set the camera.
-std::string terrain_options_change(const TerrainViewportOptions &options);
+// The change a SetViewport makes to set the camera.
 std::string terrain_camera_change(const OrbitCamera &camera);
 
 // A terrain's viewport (DI-30b; ViewportKind::Terrain, the Document tab's main view; CONTEXT.md "Terrain viewport"):
@@ -124,7 +123,7 @@ public:
 	uint64_t heights_built_serial() const { return heights_built_serial_; }
 
 	ViewportStatus status() const override;
-	const char *reason() const override { return terrain_view_status_token(reason_); }
+	const char *reason() const override { return enum_token(kTerrainViewStatusTokens, reason_); }
 	std::string message() const override;
 	const std::string &detail() const override { return detail_; }
 	std::string caption() const override;

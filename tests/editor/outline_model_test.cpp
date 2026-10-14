@@ -782,7 +782,7 @@ int test_mission_headings() {
 	TEST_EXPECT(by_group[pool + 2].heading && by_group[pool + 2].text == "Group 7 (2)" && by_group[pool + 2].depth == 1);
 	TEST_EXPECT(by_group[pool + 3].address.row == placed[0]->id && by_group[pool + 3].depth == 2 &&
 	            by_group[pool + 4].address.row == placed[1]->id && by_group[pool + 4].depth == 2);
-	// A row whose title reads other rows follows them (S15 review m13): the first event names Zone 20, and
+	// A row whose title reads other rows follows them (S15): the first event names Zone 20, and
 	// the area made a mission area, its line reads so after the edit, though the event did not change.
 	OutlineModel follow(OutlineMode::Tree, nullptr, nullptr, mission_row_headings, mission_row_reads_others);
 	const auto event_text = [&] {

@@ -1,4 +1,5 @@
 #include "blank_makers.h"
+#include <base/io/fixed.h>
 #include <base/io/strutil.h>
 #include <formats/def/def_write.h>
 #include <runtime/audio/sound_profile.h>
@@ -26,7 +27,7 @@ bool make_blank_weapon_def(const BlankRequest &, std::vector<uint8_t> &out, Diag
 }
 bool make_blank_ammo_def(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error) {
 	def::DefAmmoDef ammo{}; def::def_init_ammo(ammo);
-	std::memcpy(ammo.name, "AT_NULL", 8); ammo.drag_fp16 = 0x10000;
+	std::memcpy(ammo.name, "AT_NULL", 8); ammo.drag_fp16 = io::kFp16OneInt;
 	def::DefAmmoFile file{}; file.entries = &ammo; file.count = 1;
 	return emit(def::def_write_ammo(file), out, error);
 }

@@ -98,9 +98,12 @@ constexpr WorkspaceMember kSettings[] = {
 	{ "game_install", J::String, "This computer's game install folder.", kPathLongest },
 	{ "runtime", J::String, "The OpenNova runtime Play runs (\"\" the one packaged beside the editor).", kPathLongest },
 	{ "play_mode", J::String,
-			"How the project plays here (its own, kept in its .opennova/local.json): runtime (the OpenNova runtime), "
-			"install (Play in the game install) or strict (Play in the game install as a player's drop-in: the build "
-			"and the install's program alone, launched without /d)." },
+			"How the project plays here (its own, kept in its .opennova/local.json): runtime (the OpenNova runtime) or "
+			"strict (Play in the game install as a player's drop-in: the build and the install's program alone, "
+			"launched without /d)." },
+	{ "save_before_play", J::Boolean,
+			"Play writes every file with unsaved edits first, as Save all does, instead of asking (the project's own, "
+			"in its .opennova/local.json)." },
 };
 constexpr WorkspaceMember kNewFile[] = {
 	{ "kind", J::String,
@@ -468,7 +471,8 @@ bool set_new_project(Change &change, const JsonValue &part) {
 bool same_settings(const WorkspaceView::Settings &a, const WorkspaceView::Settings &b) {
 	return a.open == b.open && a.title == b.title && a.mission == b.mission && a.multiplayer == b.multiplayer &&
 	       a.builds_on == b.builds_on && a.as_expansion == b.as_expansion && a.expansion == b.expansion &&
-	       a.base_project == b.base_project && a.game_install == b.game_install && a.runtime == b.runtime && a.play_mode == b.play_mode;
+	       a.base_project == b.base_project && a.game_install == b.game_install && a.runtime == b.runtime && a.play_mode == b.play_mode &&
+	       a.save_before_play == b.save_before_play;
 }
 
 // Project settings: opened over the settings in effect (the project's document, the install in effect, the
@@ -493,6 +497,7 @@ bool set_settings(Change &change, const JsonValue &part) {
 		settings.game_install = view.project.retail_directory;
 		settings.runtime = view.project.runtime_setting;
 		settings.play_mode = view.project.play_mode;
+		settings.save_before_play = view.project.save_before_play;
 	} else if (open) {
 		settings.open = open->boolean;
 	}
@@ -508,7 +513,8 @@ bool set_settings(Change &change, const JsonValue &part) {
 	if (const JsonValue *install = part.get("game_install")) settings.game_install = install->string;
 	if (const JsonValue *runtime = part.get("runtime")) settings.runtime = runtime->string;
 	if (const JsonValue *mode = part.get("play_mode"); mode && !play_mode_from_token(mode->string, settings.play_mode))
-		return change.refuse("\"settings.play_mode\" is runtime, install or strict, not \"" + mode->string + "\".");
+		return change.refuse("\"settings.play_mode\" is runtime or strict, not \"" + mode->string + "\".");
+	if (const JsonValue *save = part.get("save_before_play")) settings.save_before_play = save->boolean;
 	if (!settings.builds_on.empty() || !settings.base_project.empty()) settings.as_expansion = true;
 	if (!settings.open) settings = WorkspaceView::Settings();
 	if (same_settings(settings, view.workspace.settings)) return false;
@@ -1501,7 +1507,9 @@ bool modal_may_show(const SessionView &view, HeldModal modal, const std::string 
 	return shown.modal == HeldModal::None || (shown.modal == modal && shown.path == path);
 }
 
-const char *held_modal_token(HeldModal modal) {
+// "" none; unsaved, import, texture_source, settings, new_project, new_file, file_rename, file_delete, rename,
+// rename_back, project_find, confirm, remove_screen.
+static const char *held_modal_token(HeldModal modal) {
 	switch (modal) {
 		case HeldModal::None: return "";
 		case HeldModal::Unsaved: return "unsaved";
@@ -1564,6 +1572,7 @@ JsonValue workspace_to_json(const SessionView &view) {
 		dialog.set("game_install", text(settings.game_install));
 		dialog.set("runtime", text(settings.runtime));
 		dialog.set("play_mode", text(play_mode_token(settings.play_mode)));
+		dialog.set("save_before_play", flag(settings.save_before_play));
 	}
 	out.set("settings", std::move(dialog));
 	JsonValue prompt = JsonValue::make_object();

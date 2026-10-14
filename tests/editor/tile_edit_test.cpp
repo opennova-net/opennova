@@ -38,11 +38,7 @@ namespace {
 
 std::string fixture(const std::string &name) { return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/" + name; }
 
-bool contains(const std::string &text, const std::string &part) {
-	if (text.find(part) != std::string::npos) return true;
-	std::printf("  \"%s\" lacks \"%s\"\n", text.c_str(), part.c_str());
-	return false;
-}
+using editor_test::contains;
 
 // A picture one pixel a metre over flat ground.
 struct FlatSpace final : TerrainBrushSpace {
@@ -277,9 +273,10 @@ int test_tiles_in_a_mission() {
 
 } // namespace
 
-// The mission's .til seeded with what the game draws for it (S25, the review's M2): the project holds the mission and
-// its terrain, the game install a <mission>.til of three tiles (the terrain's own the project holds, two, hidden by it):
-// the first stamp's file holds the install's three and the stamp, never the terrain's two.
+// The mission's .til seeded with what the game draws for it (S25): the project holds the mission
+// and its terrain, the game install a <mission>.til of three tiles (the terrain's own the project
+// holds, two, hidden by it): the first stamp's file holds the install's three and the stamp, never
+// the terrain's two.
 int test_seeded_from_the_install() {
 	editor_test::TempProjectDir dir("opennova_editor_tile_edit_install");
 	editor_test::NoProcess platform;

@@ -10,7 +10,9 @@
 // along the flight, a ring scar on the object, its damage (its hit points before and after); an item of one hit
 // point dies and names its death as DI-10 plans it; the run is a function of its shots (the same shots run again
 // to the same events); a shot whose ammo ammo.def lacks is refused; the envelope; the shot's wire and refusals; and
-// the board over the same table (each class's row, the bank's place, the scar).
+// the board over the same table (each class's row, the bank's place, the scar); a person stands where the view
+// draws it (its lift) and a round meets its posed rig's bone spheres, not the torso stand-in (the skinned fixture
+// and its clips made by the editor's converters, fixtures/threedi/o3d/skinned.o3d).
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -20,6 +22,7 @@
 #include <vector>
 
 #include <base/io/json.h>
+#include <editor/import/converter.h>
 #include <editor/preview/ammo_impacts.h>
 #include <editor/preview/mission_ground_facts.h>
 #include <editor/preview/mission_scene.h>
@@ -30,19 +33,20 @@
 #include <formats/trn/charmap_legend.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ammo_table_build.h>
+#include <runtime/world/entity_spawn.h>
 
 #include "common/file_io.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
+#include "editor/editor_test_support.h"
+#include "editor/mission_test_support.h"
 
 using namespace opennova::editor;
 using opennova::io::JsonValue;
 
 namespace {
 
-std::string fixture(const std::string &rel) {
-	return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/" + rel;
-}
+using mission_test::fixture;
 
 // Each line ended CR LF, as the game's readers take a text (File_ParseASCIIFile splits on it).
 std::string crlf(const std::string &text) {
@@ -102,12 +106,7 @@ std::vector<uint8_t> charmap() {
 	return bytes;
 }
 
-// Class c's block's middle, mission metres (the island layout: a 256 map's texel four units).
-void block_middle(int c, double &x, double &y) {
-	const int tx = 32 + 32 * (c % 5), tz = 32 + 32 * (c / 5);
-	x = 4.0 * tx - 512.0 + 2.0;
-	y = 512.0 - 4.0 * tz - 2.0;
-}
+using mission_test::block_middle;
 
 // AT_NULL authors tags 1 to 12 in order, so its bank's place t holds tag t; AMMO_T authors its obj row alone.
 const char *kAmmo =
@@ -119,7 +118,21 @@ const char *kAmmo =
 		"\teffects_table\n\t\tobj Hit_O S_OBJ_T 15\n\tend\nend\n";
 
 const char *kItems = "begin \"Shot Crate\"\nid 106190\ntype object\ngraphic crate\nhp 500\nend\n"
-                     "begin \"Frail Crate\"\nid 106191\ntype object\ngraphic crate\nhusk cratehusk\nai_function gnrc\nhp 1\nend\n";
+                     "begin \"Frail Crate\"\nid 106191\ntype object\ngraphic crate\nhusk cratehusk\nai_function gnrc\nhp 1\nend\n"
+                     "begin \"Shot Soldier\"\nid 106192\ntype person\ngraphic skinned\nanim_def SKIN\nai_function org1\n"
+                     "attrib: aidata\nend\n";
+
+// The soldier's clips as the Blender add-on writes them (an .o3a): SKIN.adm's reset and idle rows over the skinned
+// fixture's three bones.
+std::string soldier_clips() {
+	std::string out = "o3a 1\nadm SKIN.adm\nrow anim_reset \"reset\"\nrow anim_idle \"reset\"\n";
+	out += "clip reset\nfps 30\nflags 0x1\nframes 1\n";
+	for (const char *bone : {"bone -1 0 0 0 0.5 \"BN01 Pelvis\"", "bone 0 0 0 1 0.5 \"BN02 Spine\"",
+	                         "bone 0 0 0 -1 0.5 \"BN03 Leg\""})
+		out += std::string(bone) + "\n k 0 0 0 1\n k 0 0 0 1\n";
+	out += "event 0 0 0 0x0 0.9 1.7\nevent 0 0 0 0x0 0.9 1.7\n";
+	return out;
+}
 
 std::shared_ptr<ShotFiles> shot_files() {
 	auto files = std::make_shared<ShotFiles>();
@@ -130,6 +143,16 @@ std::shared_ptr<ShotFiles> shot_files() {
 	files->put("cratehusk.3di", test_io::read_file(fixture("threedi/synth/crate.3di")));
 	files->put_text("ammo.def", kAmmo);
 	files->put_text("items.def", kItems);
+	// The soldier's model and clips as the editor's converters make them of the add-on's texts.
+	const std::string clips = soldier_clips();
+	const std::vector<uint8_t> scene = test_io::read_file(fixture("threedi/o3d/skinned.o3d"));
+	for (const auto &[name, bytes] : {std::pair<std::string, std::vector<uint8_t>>{"skinned.o3d", scene},
+	                                  {"skin.o3a", std::vector<uint8_t>(clips.begin(), clips.end())}}) {
+		const Converter *converter = converter_for(name);
+		ImportProduct product;
+		if (converter && converter->run(name, "", bytes, product))
+			for (ImportOutput &output : product.outputs) files->put(output.name, std::move(output.bytes));
+	}
 	return files;
 }
 
@@ -201,12 +224,7 @@ struct ShotRig {
 	}
 };
 
-JsonValue parsed(const std::string &text) {
-	JsonValue out;
-	std::string error;
-	opennova::io::json_parse(text, out, error);
-	return out;
-}
+using editor_test::parsed;
 
 std::string replaced(std::string text, const std::string &from, const std::string &to) {
 	const size_t at = text.find(from);
@@ -416,12 +434,74 @@ int test_board() {
 
 } // namespace
 
+// A person stands where the view draws it (its record lifted by its spawn's lift) and plays its channels; a round
+// meets its posed rig's bone spheres, not the torso stand-in.
+int test_person_shot() {
+	ShotRig rig;
+	TEST_EXPECT(rig.files->files.count("skinned.3di") == 1 && rig.files->files.count("skin.adm") == 1);
+	double place[3] = {0.0, 0.0, 0.0};
+	block_middle(6, place[0], place[1]);
+	place[2] = rig.height(place[0], place[1]);
+	constexpr double kLift = 3.0;
+	auto mission = std::make_shared<opennova::bms::File>(*rig.setup.mission);
+	opennova::bms::Entity soldier = item_at(6192, place[0], place[1], place[2]);
+	soldier.type = opennova::bms::ItemType::Organic;
+	mission->organics.push_back(soldier);
+	MissionShotsSetup setup = rig.setup;
+	setup.key = 2;
+	setup.mission = mission;
+	MissionEntityMark mark;
+	mark.row = NodeId(13);
+	mark.pool = MissionPool::Organic;
+	mark.index = 0;
+	mark.item = 106192;
+	mark.x = place[0];
+	mark.y = place[1];
+	mark.z = place[2];
+	setup.entities.push_back(mark);
+	setup.titles[mark.row] = "Shot Soldier (SSN 192)";
+	// Its channels as its spawn requests them (the idle), its lift three metres.
+	opennova::world::AnimVariantRings rings;
+	const opennova::world::OrganicSpawnBody spawned = opennova::world::organic_spawn_pose({}, 1, nullptr, rings, -1);
+	setup.person = [&](NodeId row, MissionShotPerson &out) {
+		if (row != mark.row) return false;
+		out.lift = kLift;
+		out.channels = &spawned.channels;
+		return true;
+	};
+	rig.shots.configure(setup);
+	rig.shots.set_shots({ShotRig::down_at("AMMO_T", place[0], place[1], place[2] + kLift)});
+	rig.shots.run_to(12);
+	// The round stops on the person first (and, the person standing, flies on to the ground under it).
+	const std::vector<MissionShotEvent> impacts = events_of(rig.shots, MissionShotEvent::Kind::Impact);
+	TEST_EXPECT(!impacts.empty());
+	if (impacts.empty()) return 1;
+	const MissionShotEvent &hit = impacts[0];
+	if (hit.on != "person" || hit.section < 0)
+		for (const MissionShotEvent &event : rig.shots.events()) std::printf("  %d %s\n", event.tick, event.words.c_str());
+	TEST_EXPECT(hit.on == "person" && hit.row == 13 && hit.item == 106192);
+	// A bone of its rig, struck over its lifted origin (the bones stand within a metre and a half of it).
+	TEST_EXPECT(hit.section >= 0 && hit.words.find("'s bone ") != std::string::npos);
+	TEST_EXPECT(hit.at[2] > place[2] + kLift - 1.5 && hit.at[2] < place[2] + kLift + 1.5);
+	const JsonValue json = rig.shots.to_json();
+	const JsonValue *events = json.get("events");
+	bool listed = false;
+	if (events)
+		for (const JsonValue &event : events->array)
+			listed = listed || (event.get_string("on", "") == "person" && event.get("section") &&
+			                    int(event.get("section")->number) == hit.section);
+	TEST_EXPECT(listed);
+	std::printf("test_person_shot passed\n");
+	return 0;
+}
+
 int main() {
 	TEST_EXPECT(test_terrain_shot() == 0);
 	TEST_EXPECT(test_object_shot() == 0);
 	TEST_EXPECT(test_the_run() == 0);
 	TEST_EXPECT(test_wire() == 0);
 	TEST_EXPECT(test_board() == 0);
+	TEST_EXPECT(test_person_shot() == 0);
 	std::printf("editor_mission_shots OK\n");
 	return 0;
 }

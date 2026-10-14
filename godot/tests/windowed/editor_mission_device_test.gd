@@ -13,7 +13,7 @@ extends GutTest
 ##   mission's would otherwise stay: the globals are process-wide and written once per environment
 ##   change), in the mission's frames the mission's environment is the writer; the water's mirror
 ##   pass is on only in the frames the mission presents.
-## - A mission building beside a model never lights it (review M1): every frame of its build the
+## - A mission building beside a model never lights it: every frame of its build the
 ##   globals hold the model's shipped values.
 ## - DI-31: the game's foliage, effects and lights drawn: the terrain's foliage grown at its foliage map's
 ##   routed witness (and gone with its option), the pumps' particle slots drawn by the particle renderer, the
@@ -22,11 +22,7 @@ extends GutTest
 ##   registered as its casters and their slots bound, the drape drawn with the terrain's pass and gone with the
 ##   Shadows option (one layer with the terrain's static shadows).
 
-const EDITOR_SCENE := "res://editor/editor_root.tscn"
-const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
-const MISSION := "res://../fixtures/bms/synth_logic.bms"
-const FIXTURES := "res://../fixtures/"
-const TERRAIN_TEXTURES := ["mnml_c", "mnml_dm", "mnml_dc1", "mnml_dc2", "mnml_dc3", "mnml_dmd", "mnml_d1", "mnml_t"]
+const EditorFixture := preload("res://tests/authoring/editor_fixture.gd")
 const MISSION_PATH := "missions/synth_logic.bms"
 const MODEL_PATH := "models/pump.3di"
 
@@ -36,110 +32,37 @@ var _seam: RefCounted = null
 
 
 func before_each() -> void:
-	# The ImGui context past its first frames before the editor attaches to it (see
-	# editor_device_test.gd).
-	for _frame in 3:
-		await get_tree().process_frame
-	var packed := load(EDITOR_SCENE) as PackedScene
-	assert_not_null(packed, "the editor scene loads (the editor-enabled variant is loaded)")
-	if packed == null:
-		return
-	_app = packed.instantiate()
-	_seam = EditorSeam.new(_app)
-	var settings_dir := OS.get_cache_dir().path_join("opennova editor mission device %d" % Time.get_ticks_usec())
-	assert_eq(DirAccess.make_dir_recursive_absolute(settings_dir), OK)
-	_dirs.append(settings_dir)
-	_app.set("settings_path", settings_dir.path_join("editor_settings.json"))
-	add_child_autofree(_app)
-	await get_tree().process_frame
+	_seam = await EditorFixture.boot(self, "mission device", _dirs, 3)
+	_app = _seam.app if _seam != null else null
 
 
 func after_each() -> void:
-	_app = null
-	for dir in _dirs:
-		TestFs.remove_dir_recursive(dir)
-	_dirs.clear()
-	await get_tree().process_frame
+	await EditorFixture.teardown(self, _dirs)
 
 
 func _state(path: String) -> Dictionary:
 	return _seam.query("viewport", {"op": "state", "path": path, "limit": 1})
 
 
+## The viewport over `path` once its device built its picture, the Shell's frames alone
+## (EditorSeam.await_viewport, nothing pumped).
 func _await_ready(path: String) -> Dictionary:
-	var state := _state(path)
-	for _frame in 900:
-		if String(state.get("status", "")) == "ready" and bool(state.get("device", {}).get("attached", false)):
-			break
-		await get_tree().process_frame
-		state = _state(path)
-	return state
+	return await _seam.await_viewport({"path": path, "limit": 1}, 0, Callable(), 900, false)
 
 
-func _write(path: String, bytes: PackedByteArray) -> void:
-	assert_eq(DirAccess.make_dir_recursive_absolute(path.get_base_dir()), OK)
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file, "wrote %s" % path)
-	if file != null:
-		file.store_buffer(bytes)
-		file.close()
-
-
-func _copy_fixture(source: String, target: String) -> void:
-	var bytes := FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(FIXTURES + source))
-	assert_false(bytes.is_empty(), "the fixture is available: " + source)
-	_write(target, bytes)
-
-
-## A texture `size` a side, grey, as an uncompressed true-colour TGA (the runtime fixture's minting).
-func _tga(size: int) -> PackedByteArray:
-	var image := Image.create(size, size, false, Image.FORMAT_RGBA8)
-	image.fill(Color(0.5, 0.5, 0.5, 1.0))
-	var header := PackedByteArray()
-	header.resize(18)
-	header[2] = 2
-	header.encode_u16(12, size)
-	header.encode_u16(14, size)
-	header[16] = 32
-	header[17] = 0x28
-	return header + image.get_data()
-
-
-## A project holding the mission and what its picture reads, the mission open and ready, drawn by the
-## Document window's canvas. `layers` (DI-31): the terrain's two foliage models (the synth crate under both
-## names), and a particle slot on the pumps (Puff at their origin) with its particle file.
+## A project holding the mission and what its picture reads (EditorFixture.mint_tmap_mission's Tmap
+## mission, the item table and the models its items draw). `layers` (DI-31): the terrain's two
+## foliage models (the synth crate under both names), and a particle slot on the pumps (Puff at
+## their origin) with its particle file.
 func _open_mission(layers := false) -> SubViewport:
-	var dir := OS.get_cache_dir().path_join("opennova editor mission device project %d" % Time.get_ticks_usec())
-	_dirs.append(dir)
-	assert_true(_seam.new_project(dir, "Mission Device Game"))
-	assert_eq(_seam.create_missing_files(), 0)
-	var root: String = _seam.get_project_root()
-	_copy_fixture("bms/synth_logic.bms", root.path_join(MISSION_PATH))
-	for name in ["Tmap.trn", "Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx"]:
-		_copy_fixture("terrain/tmap/" + name, root.path_join("terrain").path_join(name))
-	var small := _tga(32)
-	var large := _tga(2048)
-	for name in TERRAIN_TEXTURES:
-		_write(root.path_join("terrain").path_join(name + ".tga"), large if name == "mnml_c" or name == "mnml_d1" else small)
-	for name in ["synth_full.env", "cloud01.pcx", "cloud01b.pcx"]:
-		_copy_fixture("env/" + name, root.path_join("env").path_join(name))
+	var root := EditorFixture.new_project(self, _seam, _dirs, "Mission Device Game")
+	var items := EditorFixture.items_def()
 	if layers:
-		var items := FileAccess.get_file_as_string(ProjectSettings.globalize_path(FIXTURES + "def/items.def"))
-		_write(root.path_join("defs").path_join("items.def"),
-				items.replace("graphic pump\r\n", "graphic pump\r\nparticlefx Puff\r\n").to_utf8_buffer())
-		for name in ["bush1.3di", "bush2.3di"]:
-			_copy_fixture("threedi/synth/crate.3di", root.path_join("models").path_join(name))
-		var ptl := "[effectdef]\n{\n\tid = Puff;\n\tpdefs = PuffDot;\n}\n\n[particledef]\n{\n\tid = PuffDot;\n"
-		ptl += "\temit_dur = 60;\n\temit_rate = 40;\n\temit_burst = 1;\n\tage = 1.0;\n\tscale = 1.0;\n\tspeed = 1.5;\n"
-		ptl += "\tspread = 40;\n\tgraphic1 = particle_dot.tga, blend;\n\tg1_alpha = 1;\n\tg1_scale = 1;\n}\n\n"
-		_write(root.path_join("particles").path_join("fx.ptl"), ptl.to_utf8_buffer())
-		_copy_fixture("cbin/particle_dot.tga", root.path_join("particles").path_join("particle_dot.tga"))
-	else:
-		_copy_fixture("def/items.def", root.path_join("defs").path_join("items.def"))
-	for name in ["pump.3di", "armory.3di", "shed.3di"]:
-		_copy_fixture("threedi/synth/" + name, root.path_join("models").path_join(name))
-	_app.request_json(JSON.stringify({"kind": "rescan"}))
-	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
+		items = items.replace("graphic pump\r\n", "graphic pump\r\nparticlefx Puff\r\n")
+	var models := ["pump.3di", "armory.3di", "shed.3di"]
+	EditorFixture.mint_tmap_mission(
+		self, _seam, root, {"items": items, "models": models, "foliage": layers, "puff": layers}
+	)
 	return null
 
 
@@ -239,7 +162,7 @@ func test_a_mission_and_a_model_render_in_turn() -> void:
 	assert_eq(model_frames, 6)
 
 
-## S14 review M1: a mission building beside a model in the Preview never lights the model. The model
+## S14: a mission building beside a model in the Preview never lights the model. The model
 ## ready and rendering (its state, the shipped defaults, published once), the mission opened: no
 ## environment and no water writes a process-wide global while the mission builds (its environment,
 ## its water and its time set in its units; MissionEnvironment.get_global_writes,

@@ -89,12 +89,7 @@ bool mark_for_import(const std::string &source) {
 }
 
 using editor_test::NoProcess;
-
-size_t count_code(const std::vector<Diagnostic> &diagnostics, const std::string &code) {
-	size_t n = 0;
-	for (const Diagnostic &d : diagnostics) n += d.code() == code ? 1 : 0;
-	return n;
-}
+using editor_test::count_code;
 
 std::string read_text(const std::string &path) {
 	std::string text, message;
@@ -835,7 +830,8 @@ static int test_retail_source() {
 	// ones the game ships beside them, none to choose from, no walk (the setting changes nothing:
 	// a walk of every file finds nothing not chosen); imported as the plan has them, nothing echoed
 	// back (planned). A file the project holds already is marked held and not taken by default
-	// (review F2): the project's file is left as it is, the rest comes; Replace takes them too.
+	// (S19, "The import a modder reads"): the project's file is left as it is, the rest comes;
+	// Replace takes them too.
 	{
 		const DialogsView::ImportPreview &preview = view.dialogs.import_preview;
 		const std::string note_path = view.project.root + "/" + view.project.scan->find("note.txt")->relative_path;
@@ -871,14 +867,14 @@ static int test_retail_source() {
 		TEST_EXPECT(music && io::read_file_text(view.project.root + "/" + music->relative_path, text, message) && text == "music");
 		TEST_EXPECT(io::read_file_text(note_path, text, message) && text == "edited in the project");
 		// With replace and the held rows unchecked (the plan's own checks): an unchecked row is never taken, so the
-		// edited file stays as it is (review X1).
+		// edited file stays as it is.
 		editor_test::handle_to_end(session, request::import_whole_install());
 		TEST_EXPECT(preview.open && preview.plan->rows.size() == 5);
 		editor_test::handle_to_end(session, request::import_planned(preview.plan_serial, true));
 		TEST_EXPECT(view.activity.last_operation.end == OperationEnd::Done && !preview.open);
 		TEST_EXPECT(io::read_file_text(note_path, text, message) && text == "edited in the project");
 		// Replace existing files checked (the dialog's checkbox, the workspace's): the held files are written over,
-		// the edited one too, with no replace asked (the checked held rows replace: review X2).
+		// the edited one too, with no replace asked (the checked held rows replace).
 		editor_test::handle_to_end(session, request::import_whole_install());
 		TEST_EXPECT(session.handle(request::set_workspace(R"({"import": {"replace_existing": true}})")) && session.outcome().done());
 		editor_test::handle_to_end(session, request::import_planned(preview.plan_serial));
@@ -895,7 +891,7 @@ static int test_retail_source() {
 		// Nothing planned: a planned import is refused.
 		editor_test::handle_to_end(session, request::import_planned(0));
 		TEST_EXPECT(!session.outcome().done() && view.findings.diagnostics.back().code() == "import.not_planned");
-		// A request asking for two things at once is refused, never served in part (review F14): every
+		// A request asking for two things at once is refused, never served in part (S14 R4): every
 		// file and some by name, every file and a walk; an import naming nothing and planning nothing.
 		EditorRequest both = request::import_whole_install();
 		both.names = {"note.txt"};

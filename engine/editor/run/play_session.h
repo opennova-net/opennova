@@ -10,7 +10,7 @@
 
 namespace opennova::editor {
 
-// The editor's one managed game child (ADR 0046 d8/d10): Stopped, Running, or Stopping
+// The editor's one managed game child (ADR 0046 d8): Stopped, Running, or Stopping
 // after a stop request until the child is gone or the deadline forces it (PlayState). One
 // child at a time: a start while another runs is refused. poll() is non-blocking and is
 // what moves the machine; the UI calls it every frame, the CLI in a loop. The project
@@ -18,6 +18,10 @@ namespace opennova::editor {
 // EditorApp supplies the platform (godot/src/authoring/child_process.h).
 inline constexpr int64_t kPlayStopDeadlineMs = 5000;
 inline constexpr int64_t kPlayWaitStepMs = 10; // wait()'s pause between two observations
+// How long a Quit waits for a Stop asked for to be seen through before the editor closes: the game's own quit for
+// kPlayQuitGraceMs, then the deadline's kill (PlaySession::force) for the rest.
+inline constexpr int64_t kPlayQuitWaitMs = 3000;
+inline constexpr int64_t kPlayQuitGraceMs = 2000;
 
 class PlaySession {
 public:
@@ -26,6 +30,9 @@ public:
 	bool start(const LaunchPlan &plan, Diagnostic &error);
 	// Ask the child to stop; poll() escalates to a kill once kPlayStopDeadlineMs pass.
 	void stop();
+	// A stop asked for and not yet seen through, forced now: the deadline's kill at the next poll (a Quit's,
+	// which never abandons a Stop: closing the editor lets its game go).
+	void force();
 	// Observe the child; returns the state after the observation.
 	PlayState poll();
 	// Wait for the child to end, polling on the platform clock; true when Stopped in time.

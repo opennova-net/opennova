@@ -214,8 +214,6 @@ const RecordTable &score_table() {
 	return table;
 }
 
-bool is_score_kind(AssetKind kind) { return asset_kind_row(kind).document == DocumentTypeId::ScoreTable; }
-
 size_t ScoreBlockRow::footprint() const {
 	size_t bytes = sizeof(ScoreBlockRow) + footprint_of(block.name) + footprint_of(block.fields) + footprint_of(block.vars) +
 	               ids_footprint();
@@ -260,10 +258,6 @@ std::string ScoreDocument::record_title(const NodeAddress &address) const {
 
 bool ScoreDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                           std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &, Diagnostic &error) {
-	if (!is_score_kind(kind())) {
-		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not score.ini.", path());
-		return false;
-	}
 	auto notes = std::make_shared<textlayout::Notes>();
 	score::File read;
 	std::string message;

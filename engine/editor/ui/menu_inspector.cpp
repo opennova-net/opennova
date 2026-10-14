@@ -18,13 +18,6 @@ namespace opennova::editor {
 
 namespace {
 
-// A sentence of the game's words, muted and wrapped.
-void note(const std::string &text) {
-	ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-	ImGui::TextWrapped("%s", text.c_str());
-	ImGui::PopStyleColor();
-}
-
 // "On hover": a Play's head.
 std::string when_words(int state) {
 	std::string words = menu_sound_state_words(state);
@@ -69,7 +62,7 @@ bool draw_menu_inspector(Workspace &workspace, const Document &document, const N
 		ImGui::PopID();
 	}
 	if (read->type == mnu::WindowType::SpinList)
-		note("A click on one of its arrows plays the arrow's own SELECTED instead: each arrow is a button of its own.");
+		ui_kit::note("A click on one of its arrows plays the arrow's own SELECTED instead: each arrow is a button of its own.");
 	return true;
 }
 

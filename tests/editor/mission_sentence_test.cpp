@@ -39,6 +39,7 @@
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
+#include "editor/mission_test_support.h"
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
@@ -49,11 +50,7 @@ namespace {
 
 constexpr NodeKind k(MissionKind kind) { return node_kind(kind); }
 
-// Two words alike, both printed where they differ.
-bool same(const std::string &got, const std::string &want) {
-	if (got != want) std::printf("  got:  %s\n  want: %s\n", got.c_str(), want.c_str());
-	return got == want;
-}
+using mission_test::same;
 
 bms::Trigger trigger(bms::TriggerMainType main, int32_t sub, int32_t p1 = 0, int32_t p2 = 0, int32_t p3 = 0,
                      int32_t flags = 0) {
@@ -639,14 +636,7 @@ int test_game_reading() {
 	return 0;
 }
 
-std::unique_ptr<Document> open(const std::vector<uint8_t> &bytes, const char *name) {
-	const DocumentType *type = document_type_for(AssetKind::Mission);
-	if (!type) return nullptr;
-	std::unique_ptr<Document> document = records_of(type->make());
-	Diagnostic error;
-	if (!document || !document->load_bytes(bytes, name, AssetKind::Mission, "jo", error)) return nullptr;
-	return document;
-}
+using mission_test::open;
 
 // The minted mission's titles: event 1 the walker inside zone 20 re-arming event 2, event 2 event 1
 // having fired killing group 2 after its delay of 5 units; the walker by its kind and SSN (its title,

@@ -73,8 +73,6 @@ protected:
 	bool accept_step(const EditStep &step, const StagedRows &rows, StepRefusal &refusal) const override;
 };
 
-bool is_font_kind(AssetKind kind);
-
 // A glyph's rect in texels on its page, as the game reads its coordinates (fnt_uv_to_pixels: each times 256,
 // truncated).
 struct FontGlyphRect {

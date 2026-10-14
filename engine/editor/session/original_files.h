@@ -72,12 +72,11 @@ public:
 	// What it found: a new instance whenever it moves (then generation() moves too), never null.
 	const std::shared_ptr<const OriginalData> &data() const { return data_; }
 	uint64_t generation() const { return generation_; }
-	// For the tests and the measure: how many times it validated an install, of how many files, the last
-	// one's time in its steps and the longest step it took (milliseconds of the steady clock).
+	// For the tests and the measure: how many times it validated an install, of how many files, and the last
+	// one's time in its steps (milliseconds of the steady clock).
 	size_t validations() const { return validations_; }
 	size_t files() const { return files_; }
 	double last_ms() const { return last_ms_; }
-	double longest_step_ms() const { return longest_ms_; }
 	// The project closed: everything forgotten, the install let go.
 	void clear();
 
@@ -102,7 +101,6 @@ private:
 	size_t validations_ = 0;
 	size_t files_ = 0;
 	double last_ms_ = 0.0;
-	double longest_ms_ = 0.0;
 };
 
 } // namespace opennova::editor

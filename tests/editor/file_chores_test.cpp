@@ -65,9 +65,7 @@ std::vector<uint8_t> bytes_of(const std::string &root, const std::string &relati
 	return out;
 }
 
-bool has_code(const std::vector<Diagnostic> &findings, const char *code) {
-	return std::any_of(findings.begin(), findings.end(), [code](const Diagnostic &d) { return d.code() == code; });
-}
+using editor_test::has_code;
 
 // A Problems row of `code` whose words name `name`.
 bool row_naming(const SessionView &view, const char *code, const std::string &name) {
@@ -511,7 +509,8 @@ int test_empty_trash() {
 	return 0;
 }
 
-// The command line's verbs for the chores: each the session's request; a refusal exits 1, a missing argument 2.
+// The chores on the command line: each the session's request through the request verb (S26 K3: the verbs mv, rm, cp,
+// mkdir, rename-folder, rmdir and empty-trash are gone); a refusal exits 1, a request that does not read 2.
 int test_command_line() {
 	Project p;
 	TEST_EXPECT(p.made);
@@ -527,21 +526,24 @@ int test_command_line() {
 		for (const std::string &a : args) argv.push_back(a.c_str());
 		return opennova::project::run_project_command(static_cast<int>(argv.size()), argv.data(), stdout, stderr);
 	};
-	TEST_EXPECT(run({"cp", root, "main.mnu"}) == 0 && on_disk(root, join_path(folder, "main2.mnu")));
-	TEST_EXPECT(run({"cp", root, "main.mnu", "--as", "spare.mnu"}) == 0 && on_disk(root, join_path(folder, "spare.mnu")));
-	TEST_EXPECT(run({"cp", root, "main.mnu", "main2.mnu", "--as", "x.mnu"}) == 2);
-	TEST_EXPECT(run({"mkdir", root, "kept"}) == 0 && fs::is_directory(system_path(join_path(root, "kept"))));
-	TEST_EXPECT(run({"mv", root, "main2.mnu", "spare.mnu", "kept"}) == 0);
+	const auto ask = [&run, &root](const std::string &json) { return run({"request", root, json}); };
+	TEST_EXPECT(ask(R"({"kind": "duplicate_asset", "path": "main.mnu"})") == 0 && on_disk(root, join_path(folder, "main2.mnu")));
+	TEST_EXPECT(ask(R"({"kind": "duplicate_asset", "path": "main.mnu", "new_name": "spare.mnu"})") == 0 &&
+	            on_disk(root, join_path(folder, "spare.mnu")));
+	TEST_EXPECT(ask(R"({"kind": "new_folder", "folder": "kept"})") == 0 && fs::is_directory(system_path(join_path(root, "kept"))));
+	TEST_EXPECT(ask(R"({"kind": "move_asset", "path": "main2.mnu", "paths": ["spare.mnu"], "folder": "kept"})") == 0);
 	TEST_EXPECT(on_disk(root, "kept/main2.mnu") && on_disk(root, "kept/spare.mnu"));
-	TEST_EXPECT(run({"rename-folder", root, "kept", "held"}) == 0 && on_disk(root, "held/spare.mnu"));
-	TEST_EXPECT(run({"rmdir", root, "held"}) == 1 && on_disk(root, "held/spare.mnu"));
-	TEST_EXPECT(run({"rmdir", root, "held", "--all"}) == 0 && !on_disk(root, "held"));
+	TEST_EXPECT(ask(R"({"kind": "rename_folder", "folder": "kept", "new_name": "held"})") == 0 && on_disk(root, "held/spare.mnu"));
+	TEST_EXPECT(ask(R"({"kind": "delete_folder", "folder": "held"})") == 1 && on_disk(root, "held/spare.mnu"));
+	TEST_EXPECT(ask(R"({"kind": "delete_folder", "folder": "held", "all": true})") == 0 && !on_disk(root, "held"));
 	TEST_EXPECT(trash_file_count(ProjectPaths::for_root(root)) == 2);
-	TEST_EXPECT(run({"cp", root, "main.mnu"}) == 0 && run({"rm", root, "main2.mnu"}) == 0 && !on_disk(root, join_path(folder, "main2.mnu")));
-	TEST_EXPECT(run({"rm", root, "nothing.mnu"}) == 1);
-	TEST_EXPECT(run({"rm", root}) == 2);
-	TEST_EXPECT(run({"empty-trash", root}) == 1 && trash_file_count(ProjectPaths::for_root(root)) > 0);
-	TEST_EXPECT(run({"empty-trash", root, "--force"}) == 0 && trash_file_count(ProjectPaths::for_root(root)) == 0);
+	TEST_EXPECT(ask(R"({"kind": "duplicate_asset", "path": "main.mnu"})") == 0 &&
+	            ask(R"({"kind": "delete_asset", "path": "main2.mnu"})") == 0 && !on_disk(root, join_path(folder, "main2.mnu")));
+	TEST_EXPECT(ask(R"({"kind": "delete_asset", "path": "nothing.mnu"})") == 1);
+	TEST_EXPECT(ask(R"({"kind": "delete_asset"})") == 2);
+	TEST_EXPECT(ask(R"({"kind": "empty_trash", "force": false})") == 1 && trash_file_count(ProjectPaths::for_root(root)) > 0);
+	TEST_EXPECT(ask(R"({"kind": "empty_trash", "force": true})") == 0 && trash_file_count(ProjectPaths::for_root(root)) == 0);
+	TEST_EXPECT(run({"mv", root, "main.mnu", "kept"}) == 2); // the verb is gone
 	return 0;
 }
 

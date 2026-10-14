@@ -14,16 +14,15 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/terrain_heights_plan.h>
+#include <editor/session/terrain_sculpt.h>
 #include <editor/session/view/session_view.h>
 #include <formats/cpt/cpt_io.h>
 #include <formats/png/png_encode.h>
 
-#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <memory>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include "common/file_io.h"
@@ -151,20 +150,6 @@ int test_dabs() {
 	return 0;
 }
 
-// Polls until the heights at `path` have no region due, at most `seconds`.
-bool settled(ProjectSession &session, const std::string &path, double seconds) {
-	const auto start = std::chrono::steady_clock::now();
-	while (std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() < seconds) {
-		session.poll();
-		for (const auto &document : session.view().documents.open)
-			if (document->path() == path)
-				if (const auto *heights = dynamic_cast<const TerrainHeightsDocument *>(document.get()))
-					if (heights->heights().unbaked.empty() && heights->heights().bake) return true;
-		std::this_thread::sleep_for(std::chrono::milliseconds(20));
-	}
-	return false;
-}
-
 int test_session() {
 	editor_test::TempProjectDir dir("opennova_editor_heights_brushes");
 	editor_test::NoProcess platform;
@@ -199,7 +184,7 @@ int test_session() {
 	};
 	TEST_EXPECT(heights_doc() && heights_doc()->dirty() && !heights_doc()->heights().unbaked.empty());
 	// The bake lands in the stroke's step: the regions settled, the atlas there drawn back from the remade leaf.
-	TEST_EXPECT(settled(session, cpt->relative_path, 120.0));
+	TEST_EXPECT(editor_test::heights_settled(session, cpt->relative_path));
 	const TerrainHeightsDocument *heights = heights_doc();
 	CptFile shipped;
 	std::string why;
@@ -308,7 +293,7 @@ int test_view() {
 	ask.points = {{-196.0, 200.0}};
 	ask.end = true;
 	session.handle(request::terrain_stroke(m, ask));
-	TEST_EXPECT(settled(session, cpt, 120.0));
+	TEST_EXPECT(editor_test::heights_settled(session, cpt));
 	devices.sync(session);
 	size_t tiles = 0;
 	for (const HeightsDevicePatch &patch : mission->heights_patches()) tiles += patch.tile_indices.size();
@@ -349,8 +334,8 @@ struct SeedRig {
 		cpt = v.project.scan->find("Tmap.cpt")->relative_path;
 		session.handle(request::open_document(m));
 	}
-	// One sample of a Raise in the mission's view; seconds it took to serve.
-	double sample(double x, double y, bool end) {
+	// One sample of a Raise in the mission's view.
+	void sample(double x, double y, bool end) {
 		TerrainStrokeAsk ask;
 		ask.plane = TerrainPlane::Heights;
 		ask.brush.tool = TerrainTool::Raise;
@@ -360,9 +345,7 @@ struct SeedRig {
 		ask.points = {{x, y}};
 		ask.gesture = 9191;
 		ask.end = end;
-		const auto start = std::chrono::steady_clock::now();
 		session.handle(request::terrain_stroke(m, ask));
-		return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
 	}
 	const TerrainHeightsDocument *heights() {
 		for (const auto &document : session.view().documents.open)
@@ -373,47 +356,53 @@ struct SeedRig {
 
 // The seed (the first bake's state) made in the background as Sculpt is picked over the mission's terrain, before
 // its heights file opens: a stroke started while it runs is served at once, its bake landing after it, the same
-// bytes a stroke whose seed is made at its end lands.
+// bytes a stroke whose seed is made at its end lands. The seed is held on the worker (a test's hold) while the strokes
+// are served: each is served with the seed still the worker's and not begun (a stroke that waited for it would never
+// return), its regions left due for the bake after it.
 int test_seed() {
+	BakeTestHold hold;
 	SeedRig early("opennova_editor_heights_seed_early");
+	early.session.hold_bakes_for_test(&hold);
 	early.session.handle(request::set_workspace(R"({"terrain_brush": {"tool": "raise"}})"));
 	early.session.poll();
 	const SessionView &v = early.session.view();
 	TEST_EXPECT(v.documents.preparing == early.cpt);
-	const bool seeding = !v.documents.preparing.empty();
-	double slowest = early.sample(-200.0, 200.0, false);
-	slowest = std::max(slowest, early.sample(-196.0, 200.0, false));
-	slowest = std::max(slowest, early.sample(-192.0, 200.0, true));
+	early.session.wait_for_bakes(); // the worker holds the seed
+	early.sample(-200.0, 200.0, false);
+	early.sample(-196.0, 200.0, false);
+	early.sample(-192.0, 200.0, true);
 	TEST_EXPECT(early.session.outcome().done() && early.heights() && early.heights()->dirty());
-	TEST_EXPECT(slowest < 1.0);
-	std::printf("  seed: the strokes served in at most %.3f s, the seed %s\n", slowest,
-	            seeding && !v.documents.preparing.empty() ? "still running" : "done");
-	TEST_EXPECT(settled(early.session, early.cpt, 180.0));
+	TEST_EXPECT(v.documents.preparing == early.cpt && early.heights() && !early.heights()->heights().unbaked.empty());
+	early.session.hold_bakes_for_test(nullptr);
+	TEST_EXPECT(editor_test::heights_settled(early.session, early.cpt));
 
 	// The same strokes with no seed made ahead (the file's seed made as the stroke ends).
 	SeedRig late("opennova_editor_heights_seed_late");
 	late.sample(-200.0, 200.0, false);
 	late.sample(-196.0, 200.0, false);
 	late.sample(-192.0, 200.0, true);
-	TEST_EXPECT(settled(late.session, late.cpt, 180.0));
+	TEST_EXPECT(editor_test::heights_settled(late.session, late.cpt));
 	TEST_EXPECT(early.heights() && late.heights() && early.heights()->serialize().text == late.heights()->serialize().text);
 	std::printf("seed: prepared in the background as Sculpt is picked, a stroke served meanwhile, its bake landing after\n");
 	return 0;
 }
 
-// The session closed while a seed runs (the project or the editor closed as Sculpt is picked): the seed stops at its
-// next node, so the close does not wait out the bake of the whole file.
+// The session closed while a seed runs (the project or the editor closed as Sculpt is picked): the close cancels it,
+// so the close does not wait out the bake of the whole file. Here the seed is held on the worker until the close (a
+// test's hold): the worker's when the session goes, its bake begins under the close's cancel and comes back cancelled
+// at its first node. A cancel set while a bake's walk runs, stopping it at its next node, is pinned on the walk itself
+// (tests/cpt/trngen_region_bake_test's test_walk_cancelled_partway).
 int test_close_during_seed() {
+	BakeTestHold hold;
 	auto rig = std::make_unique<SeedRig>("opennova_editor_heights_seed_close");
+	rig->session.hold_bakes_for_test(&hold);
 	rig->session.handle(request::set_workspace(R"({"terrain_brush": {"tool": "raise"}})"));
 	rig->session.poll();
 	TEST_EXPECT(rig->session.view().documents.preparing == rig->cpt);
-	std::this_thread::sleep_for(std::chrono::milliseconds(50));
-	const auto start = std::chrono::steady_clock::now();
+	rig->session.wait_for_bakes(); // the worker holds the seed
 	rig.reset();
-	const double took = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-	TEST_EXPECT(took < 1.5); // left to run, Tmap's seed takes some 4.5 s more (Release)
-	std::printf("close: the session closed in %.3f s during its seed, the seed stopped\n", took);
+	TEST_EXPECT(hold.cancelled == 1);
+	std::printf("close: the session closed during its seed, the seed came back cancelled\n");
 	return 0;
 }
 
@@ -476,7 +465,7 @@ int test_imported() {
 	};
 	TEST_EXPECT(heights_doc() && heights_doc()->image() && heights_doc()->cpt_path() == cpt &&
 	            heights_doc()->import_top() == 100.0 && heights_doc()->dirty());
-	TEST_EXPECT(settled(session, image, 180.0));
+	TEST_EXPECT(editor_test::heights_settled(session, image));
 	const TerrainHeightsDocument *heights = heights_doc();
 	TEST_EXPECT(heights && heights->heights().baked && heights->stand_in_paths() == std::vector<std::string>{cpt});
 	if (!heights) return 1;
@@ -497,12 +486,10 @@ int test_imported() {
 	TEST_EXPECT(test_io::read_file(root + "/" + cpt) == standing);
 
 	// The import's white changed while the heightmap is open and clean: the document read again under it (its write
-	// decodes to what it shows).
+	// decodes to what it shows) at the next poll, which reads the imports again (no bake: the reload's operations run).
 	editor_test::handle_to_end(session, request::set_import_options(cpt, {{"top", "120"}}));
-	for (int i = 0; i < 20 && !(heights_doc() && heights_doc()->import_top() == 120.0); ++i) {
-		session.poll();
-		std::this_thread::sleep_for(std::chrono::milliseconds(20));
-	}
+	session.poll();
+	session.run_operations();
 	TEST_EXPECT(heights_doc() && heights_doc()->import_top() == 120.0 && !heights_doc()->dirty());
 	std::printf("imported: a stroke sculpts the heightmap, its bake stands in for the import's .cpt, the reimport makes those bytes\n");
 	return 0;

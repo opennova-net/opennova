@@ -41,7 +41,7 @@ inline bool operator==(const ImportChoice &a, const ImportChoice &b) {
 }
 inline bool operator!=(const ImportChoice &a, const ImportChoice &b) { return !(a == b); }
 // An order over the same members, so a set of choices looks one up in log time (a whole install's
-// nine thousand, review F7).
+// nine thousand).
 inline bool operator<(const ImportChoice &a, const ImportChoice &b) {
 	if (a.path != b.path) return a.path < b.path;
 	if (a.entry != b.entry) return a.entry < b.entry;

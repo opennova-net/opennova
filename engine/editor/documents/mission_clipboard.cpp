@@ -260,7 +260,7 @@ bool mission_clip_middle(const std::string &payload, double out[2]) {
 		high[1] = std::max(high[1], y);
 	};
 	for (const std::vector<bms::Entity> *pool : { &fragment.items, &fragment.buildings, &fragment.markers, &fragment.organics })
-		for (const bms::Entity &entity : *pool) take(entity.x / 65536.0, entity.y / 65536.0);
+		for (const bms::Entity &entity : *pool) take(entity.x / io::kFp16OneD, entity.y / io::kFp16OneD);
 	for (const bms::AreaTrigger &area : fragment.area_triggers)
 		take((area.x_min + double(area.x_max)) / 131072.0, (area.y_min + double(area.y_max)) / 131072.0);
 	if (!any) return false;

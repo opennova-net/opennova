@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -32,6 +33,12 @@ struct ViewportDeviceReport;
 // picture over the Shell's frames, the last picture drawn meanwhile (picture_status, never a kind's
 // status()), and Failed when its device could not build it.
 enum class ViewportStatus : uint8_t { Empty, Failed, Ready, Loading };
+// The token of `value` in `tokens` (an enum's tokens in its order: a kind's status tokens, k<Kind>ViewStatusTokens);
+// the first for a value past them.
+template <typename Enum, size_t N>
+const char *enum_token(const char *const (&tokens)[N], Enum value) {
+	return size_t(value) < N ? tokens[size_t(value)] : tokens[0];
+}
 // "empty", "failed", "ready", "loading".
 const char *viewport_status_token(ViewportStatus status);
 

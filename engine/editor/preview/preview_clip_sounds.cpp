@@ -2,8 +2,10 @@
 
 #include <algorithm>
 
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <editor/assets/project_asset_source.h>
+#include <editor/preview/option_reads.h>
 #include <formats/def/def.h>
 #include <formats/lwf/lwf.h>
 #include <runtime/anim/anim_event_bits.h>
@@ -18,8 +20,6 @@ namespace {
 using io::JsonValue;
 using io::json_number;
 using io::json_string;
-
-std::string file_of(const std::string &path) { return path.substr(path.find_last_of("/\\") + 1); }
 
 // What one sound of an event is in words: "left footstep", "right footstep", "sound 5".
 std::string sound_words(const world::AnimEventSound &sound) {
@@ -44,6 +44,7 @@ const PreviewBank *bank_holding(const ClipSoundSources &sources, const std::stri
 
 } // namespace
 
+// "auto", "npc", "player".
 const char *clip_sound_body_token(ClipSoundBody body) {
 	switch (body) {
 	case ClipSoundBody::Npc: return "npc";
@@ -79,10 +80,9 @@ bool read_clip_sound_options(const io::JsonValue &json, ClipSoundOptions &held, 
 			}
 			(key == "mute" ? options.mute : options.female) = value.boolean;
 		} else if (key == "surface") {
-			if (!value.is_string() || !foot_surface_of(value.string, options.surface)) {
-				error = "options.sound.surface is ground, snow, object or water.";
+			if (!read_json_token(value, foot_surface_of, options.surface, error,
+						"options.sound.surface is ground, snow, object or water."))
 				return false;
-			}
 		} else if (key == "body") {
 			if (value.is_string() && value.string == "auto") options.body = ClipSoundBody::Auto;
 			else if (value.is_string() && value.string == "npc") options.body = ClipSoundBody::Npc;
@@ -144,7 +144,7 @@ bool ClipSoundSources::refresh(const ProjectAssetSource &files, const std::strin
 	}
 	// The item pairing the clip: an item's anim_def (a weapon's animadm names no profile).
 	const bool item_pairs = !rig.record_file.empty() && rig.record_field == "anim_def";
-	const std::string catalog = item_pairs ? file_of(rig.record_file) : std::string();
+	const std::string catalog = item_pairs ? io::utf8_file_name(rig.record_file) : std::string();
 	const uint64_t stamp = item_pairs ? files.stamp(catalog) : 0;
 	if (catalog != item_file_ || rig.record != item_record_ || stamp != item_stamp_) {
 		moved = true;
@@ -242,14 +242,14 @@ ClipSoundBinding clip_sound_binding(const std::vector<audio::SoundProfile> &prof
 
 // --- the schedule --------------------------------------------------------------------------------------
 
-std::vector<ClipEventDue> clip_events_due(const anim::ClipTimeline &clock, const ClipSoundTrack &track, int32_t period,
-                                          int32_t from, int32_t to, bool player_body, bool catch_up) {
+std::vector<ClipEventDue> clip_events_due(const anim::ClipTimeline &clock, const ClipSoundTrack &track, int32_t from, int32_t to,
+                                          bool player_body, bool catch_up) {
 	std::vector<ClipEventDue> out;
 	if (track.triggers.empty() || to <= from) return out;
 	if (catch_up && to - from > kClipSoundCatchUpTicks) from = to - kClipSoundCatchUpTicks;
 	for (int32_t tick = from + 1; tick <= to; ++tick) {
 		if (!world::anim_sound_tick(uint32_t(tick), player_body)) continue;
-		const int32_t clip_tick = period > 0 ? tick % period : tick;
+		const int32_t clip_tick = tick;
 		if (clip_tick <= 0) continue;
 		const uint32_t word = anim::clip_trigger_at(clock, track.triggers, clip_tick);
 		if (word == 0) continue;

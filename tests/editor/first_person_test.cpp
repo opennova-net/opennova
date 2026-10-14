@@ -9,7 +9,7 @@
 // Pinned: the gun and the arms (fp_viewmodel_spec: a character with none draws none, an emplaced weapon
 // none); the character seeded and one chosen, its team; the actions' runs (FIRE's soundsetend on its
 // first tick, RELOAD's soundset as it begins and soundsetend 20 ticks on, the ticks the channel steps the
-// clip, the action handed to); the legs fired as the clock runs, again as a repeated one-shot plays again,
+// clip, the action handed to); the legs fired as the clock runs, a one-shot's once as the game plays it,
 // the tick-0 shot heard however many ticks the Play's first frame runs, muted, handed to the Shell; a
 // first-person clip's events not fired and its marks refused; a leg pressed (play_sound {leg}) and its
 // refusal; the eye: a posed camera standing where the game's presenter stands the view model
@@ -35,13 +35,13 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
-#include <formats/lwf/lwf.h>
 #include <runtime/renderer/fp_viewmodel_spec.h>
 #include <runtime/world/player_view.h>
 
 #include "common/file_io.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
+#include "editor/anim_test_support.h"
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
 
@@ -53,24 +53,7 @@ namespace {
 
 std::string repo() { return test_paths_repo_root(__FILE__); }
 
-// A clip of the skinned fixture's three bones held at rest, `frames` frames at 30 a second, its event words
-// by frame.
-std::string clip_text(const std::string &name, int frames, bool loop, const std::map<int, uint32_t> &events) {
-	std::string out = "clip " + name + "\nfps 30\nflags " + (loop ? "0x1" : "0x0") + "\nframes " + std::to_string(frames) + "\n";
-	const char *bones[] = {"bone -1 0 0 0 0.5 \"BN01 Pelvis\"", "bone 0 0 0 1 0.5 \"BN02 Spine\"",
-	                       "bone 0 0 0 -1 0.5 \"BN03 Leg\""};
-	for (const char *bone : bones) {
-		out += std::string(bone) + "\n";
-		for (int i = 0; i <= frames; ++i) out += " k 0 0 0 1\n";
-	}
-	for (int i = 0; i <= frames; ++i) {
-		const auto word = events.find(i < frames ? i : frames - 1);
-		char line[64];
-		std::snprintf(line, sizeof(line), "event 0 0 0 0x%X 0.9 1.7\n", word == events.end() ? 0u : word->second);
-		out += line;
-	}
-	return out;
-}
+using editor_test::clip_text;
 
 // GUN.adm: its reset, the idle (a loop), the fire (a one-shot carrying a left footstep the game never reads
 // in first person) and the reload (a one-shot).
@@ -79,39 +62,6 @@ std::string gun_clips() {
 	       "row anim_wpn_reload \"reload\"\n" +
 	       clip_text("rest", 1, true, {}) + clip_text("idle", 8, true, {}) + clip_text("fire", 8, false, {{1, 0x1u}}) +
 	       clip_text("reload", 16, false, {});
-}
-
-// A bank of one set per name, each one layer heard in either view playing its one wave.
-std::vector<uint8_t> bank_of(const std::vector<std::string> &sets) {
-	lwf::File bank;
-	for (size_t i = 0; i < sets.size(); ++i) {
-		lwf::Single single;
-		single.name = sets[i];
-		single.path = strutil::to_lower(sets[i]) + ".wav";
-		single.volume = 0xD2;
-		bank.singles.push_back(single);
-		lwf::Multi set;
-		set.name = sets[i];
-		set.pitch_base = lwf::kAuthoredSetPitchBase;
-		set.target_id = 100;
-		set.playlist_indices.push_back(uint32_t(i));
-		bank.multis.push_back(set);
-		lwf::Playlist layer;
-		layer.falloff_radius = 100;
-		layer.flags = lwf::kFlagInternal | lwf::kFlagExternal;
-		layer.sndparm_indices.push_back(uint32_t(i));
-		bank.playlists.push_back(layer);
-		lwf::Sndparm member;
-		member.single_index = uint32_t(i);
-		member.pitch_scaled = lwf::kPitchUnityQ16;
-		member.volume = 200;
-		member.clamp_volume = 255;
-		bank.sndparms.push_back(member);
-	}
-	std::vector<uint8_t> out;
-	std::string error;
-	lwf::encode_lwf(bank, out, error);
-	return out;
 }
 
 const char *kSets[] = {"GS_TEST", "RL_TEST", "RL_END"};
@@ -159,7 +109,7 @@ struct GunProject {
 		import.imports = {{source + "/gun.o3d", {}}, {source + "/arms.o3d", {}}, {source + "/gun.o3a", {}}};
 		session.handle(import);
 		session.run_operations();
-		ok = ok && editor_test::write_bytes(root + "/sounds/game.lwf", bank_of(std::vector<std::string>(std::begin(kSets), std::end(kSets))));
+		ok = ok && editor_test::write_bytes(root + "/sounds/game.lwf", editor_test::wave_bank_of(std::vector<std::string>(std::begin(kSets), std::end(kSets))));
 		const std::vector<uint8_t> tone = test_io::read_file(repo() + "/fixtures/lwf/tone.wav");
 		for (const char *set : kSets) ok = ok && editor_test::write_bytes(root + "/sounds/" + strutil::to_lower(set) + ".wav", tone);
 		ok = ok && editor_test::write_text(root + "/" + at("Avatars.def"), editor_test::crlf(kAvatars));
@@ -307,19 +257,19 @@ int test_actions_and_their_sets() {
 	            events->array[0].get("plays")->array.size() == 1 &&
 	            events->array[0].get("plays")->array[0].string.rfind("The game reads no first-person clip event", 0) == 0);
 
-	// The clock runs: the shot as the clock leaves the clip's tick 0, again as the repeated one-shot plays
-	// again (its 17 ticks and the hold), never the clip's footstep.
+	// The clock runs: the shot as the clock leaves the clip's tick 0, once (a one-shot plays once, as the game
+	// plays it), never the clip's footstep.
 	std::vector<ClipSoundFired> fired = project.run(60);
 	TEST_EXPECT(project.viewport()->clip_length_ticks() == 17);
-	TEST_EXPECT(fired.size() == 2 && fired[0].tick == 0 && fired[0].action == "fire" && fired[0].leg == "end" &&
+	TEST_EXPECT(fired.size() == 1 && fired[0].tick == 0 && fired[0].action == "fire" && fired[0].leg == "end" &&
 	            fired[0].set == "GS_TEST" && fired[0].bank == "game.lwf" && fired[0].state == "played" &&
-	            fired[0].slot == -1 && fired[1].tick == 48);
+	            fired[0].slot == -1);
 	if (!fired.empty()) {
 		TEST_EXPECT(fired[0].voices.size() == 1 && fired[0].voices[0].path == "sounds/gs_test.wav");
 		TEST_EXPECT(fired[0].words.rfind("FIRE finishes (tick 0 of its clip): GS_TEST in game.lwf: ", 0) == 0);
 		// What the Shell is handed.
 		const std::vector<ClipSoundPlay> plays = project.session.clip_sounds_since(fired[0].seq - 1);
-		TEST_EXPECT(plays.size() == 2 && plays[0].voices.size() == 1 && plays[0].voices[0].path == "sounds/gs_test.wav");
+		TEST_EXPECT(plays.size() == 1 && plays[0].voices.size() == 1 && plays[0].voices[0].path == "sounds/gs_test.wav");
 	}
 	shown = project.json();
 	const JsonValue *wire = shown.get("body")->get("animation")->get("sounds_fired");
@@ -328,14 +278,14 @@ int test_actions_and_their_sets() {
 	// The Play's first frame running four ticks at once (a slow frame; a 60 Hz frame runs one): the shot still
 	// heard on tick 0, the run from where the Play's seek put the clock heard whole.
 	fired = project.run(60, 4.0);
-	TEST_EXPECT(fired.size() == 2 && fired[0].tick == 0 && fired[0].set == "GS_TEST" && fired[1].tick == 48);
+	TEST_EXPECT(fired.size() == 1 && fired[0].tick == 0 && fired[0].set == "GS_TEST");
 	// Muted: fired and said, not handed over.
 	TEST_EXPECT(project.set(R"({"options": {"sound": {"mute": true}}})"));
 	fired = project.run(4);
 	TEST_EXPECT(fired.size() == 1 && fired[0].state == "muted");
 	TEST_EXPECT(project.set(R"({"options": {"sound": {"mute": false}}})"));
 
-	// The reload row: its begin on tick 0 and its end on the 20th, before the clip (33 ticks) plays again.
+	// The reload row: its begin on tick 0 and its end on the 20th.
 	TEST_EXPECT(project.select("anim_wpn_reload"));
 	fired = project.run(30);
 	TEST_EXPECT(fired.size() == 2 && fired[0].tick == 0 && fired[0].set == "RL_TEST" && fired[0].leg == "begin" &&

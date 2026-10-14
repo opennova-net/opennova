@@ -102,12 +102,6 @@ private:
 	CanvasPoint press_mouse_;
 };
 
-// The line under a view's picture while the brush is live (S25): in Sculpt the original editor's depth-pixel readout,
-// "Depth Pixel X: 412 Y: 655" (its DEPTHPIXEL_MODE line, med_depth_pixel), with the height there; in Paint the value
-// it lays and the ground's there in the game's words; for Stamp where the click lays the tile; "" for none.
-std::string terrain_brush_hint(const TerrainBrush &brush, bool on_ground, TerrainPoint at, double height,
-                               const MissionGround *ground);
-
 // The original editor's depth pixel under a mission point (x east, y north, metres) over the terrain's sector grid
 // `layout`: the atlas texel of its column, the second axis down the map one further, the quadrant its sector places
 // added; (0, 0) over an empty sector [orig: JOTACmed.exe sub_4228B0 @ 0x4228b0, shown by sub_417B30 @ 0x417c57 as

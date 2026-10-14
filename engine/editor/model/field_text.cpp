@@ -82,4 +82,8 @@ std::string counted(size_t count, const char *noun) {
 	return strutil::grouped(count) + " " + noun + (count == 1 ? "" : "s");
 }
 
+std::string counted(size_t count, const char *one, const char *many) {
+	return strutil::grouped(count) + " " + (count == 1 ? one : many);
+}
+
 } // namespace opennova::editor

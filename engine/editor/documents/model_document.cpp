@@ -121,10 +121,6 @@ size_t CollisionRow::footprint() const {
 	       footprint_of(faces) + footprint_of(occlusion);
 }
 
-bool is_model_kind(AssetKind kind) {
-	return asset_kind_row(kind).document == DocumentTypeId::Model;
-}
-
 void ModelDocument::refine_field(const NodeAddress &address, FieldUse &use) const {
 	// Whether the game reads the field here and what it names here: the table's labelled field (a
 	// generator's register only above style 0x70, a loaded track, a spot light's axis; a texture row's
@@ -341,10 +337,6 @@ SerializeResult ModelDocument::serialize() const {
 
 bool ModelDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                           std::shared_ptr<const FileState> &, std::vector<SourceIssue> &, Diagnostic &error) {
-	if (!is_model_kind(kind())) {
-		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not a model.", path());
-		return false;
-	}
 	const assets::Model base = assets::parse_model(bytes.data(), bytes.size());
 	if (!base) {
 		// A Black Hawk Down GP model: the game reads 3DI3 only, so it is migrated as it comes in

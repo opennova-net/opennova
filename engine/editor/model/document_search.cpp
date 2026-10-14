@@ -6,11 +6,16 @@
 
 namespace opennova::editor {
 
+namespace {
+
+// Where `text` is found in `in` (as `options` compares), or npos.
 size_t find_text(const std::string &in, const std::string &text, const SearchOptions &options) {
 	if (text.empty()) return std::string::npos;
 	if (options.match_case) return in.find(text);
 	return strutil::ifind(in, text);
 }
+
+} // namespace
 
 std::vector<DocumentHit> find_in_document(const Document &document, const std::string &text, const SearchOptions &options) {
 	std::vector<DocumentHit> hits;

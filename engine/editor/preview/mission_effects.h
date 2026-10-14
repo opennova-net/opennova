@@ -78,8 +78,10 @@ public:
 	const std::vector<DefinitionSpawn> &shot_spawns() const { return spawns_; }
 	// Whether the group spawn `spawn` made lives now.
 	bool shot_alive(size_t spawn) const;
-	// The scene played to the clock's tick `tick`.
-	void play_to(int32_t tick);
+	// The scene played to the clock's tick `tick` (EffectSchedule, its slots held standing),
+	// `frustum` the view's (scene_pass_view_frustum, the world pass's planes; none: every emitter
+	// advances).
+	void play_to(int32_t tick, const particle::ParticleViewFrustum &frustum = {});
 	// Nothing held, nothing played (the layer off, no mission).
 	void close();
 
@@ -93,7 +95,7 @@ public:
 	const MissionEffectSlot *slot(NodeId row) const;
 	// What the game resolves an effect's name to (null: no slot names it).
 	const particle::EffectClosure *closure_of(const std::string &effect) const;
-	int32_t tick() const { return tick_; }
+	int32_t tick() const { return schedule_.tick(); }
 	// Moves whenever the scene is opened, changed or advanced (the snapshot a device drew is stale); how
 	// many times it was opened and how many emitters were spawned in all (a test's measures).
 	uint64_t serial() const { return serial_; }
@@ -173,13 +175,12 @@ private:
 	std::vector<Held> held_; // the attached slots, in the start's order
 	std::vector<DefinitionSpawn> spawns_; // the Shoot tool's (DI-23)
 	std::vector<particle::EffectGroupId> spawn_groups_;
-	std::vector<bool> spawn_made_; // each spawn made since the scene last emptied
+	EffectTimedSpawns timed_; // the shots' spawns' ticks, each made since the scene last emptied
+	EffectSchedule schedule_;
 	std::vector<MissionEffectSlot> slots_;
 	std::unordered_map<NodeId, size_t> slot_index_;
 	int wind_speed_ = 0, wind_direction_ = 0;
-	bool played_ = false;
 	bool followed_ = false; // a scene's slots followed once (those first followed are born at tick 0)
-	int32_t tick_ = 0;
 	uint64_t serial_ = 0;
 	uint64_t opens_ = 0;
 	uint64_t spawns_made_ = 0;

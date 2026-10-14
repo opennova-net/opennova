@@ -6,7 +6,9 @@
 #include <cstdio>
 #include <variant>
 
+#include <base/io/fixed.h>
 #include <base/io/hash.h>
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <base/io/tick_rate.h>
 #include <editor/assets/project_asset_source.h>
@@ -18,6 +20,8 @@
 #include <editor/preview/animation_uses.h>
 #include <editor/preview/model_canvas.h>
 #include <editor/preview/model_placement.h>
+#include <editor/preview/option_reads.h>
+#include <editor/preview/orbit_canvas.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/project/project_document.h>
 #include <editor/session/request_factories.h>
@@ -40,14 +44,6 @@ using io::json_whole_in;
 bool same_camera(const OrbitCamera &a, const OrbitCamera &b) {
 	return a.target.x == b.target.x && a.target.y == b.target.y && a.target.z == b.target.z && a.yaw == b.yaw &&
 	       a.pitch == b.pitch && a.distance == b.distance;
-}
-
-JsonValue vec3(const PreviewVec3 &v) {
-	JsonValue out = JsonValue::make_array();
-	out.push(json_number(v.x));
-	out.push(json_number(v.y));
-	out.push(json_number(v.z));
-	return out;
 }
 
 // The hash of a model as it draws, its user points aside: its bytes written without them (a user
@@ -91,10 +87,6 @@ assets::Model with_user_points(const assets::Model &read, const std::vector<thre
 bool same_rig(const PreviewRig &a, const PreviewRig &b) {
 	return a.model == b.model && a.table == b.table && a.clip == b.clip && a.source == b.source &&
 	       a.pairing.file == b.pairing.file && a.pairing.locator == b.pairing.locator;
-}
-
-std::string file_of(const std::string &path) {
-	return path.substr(path.find_last_of("/\\") + 1);
 }
 
 // A colour on the wire: "RRGGBB".
@@ -176,12 +168,9 @@ bool read_options(const JsonValue &json, ModelViewportOptions &held, std::string
 				return false;
 			}
 			options.rig_model = value.string;
-		} else if (key == "repeat" || key == "bones") {
-			if (!value.is_bool()) {
-				error = "options." + key + " is true or false.";
+		} else if (key == "bones") {
+			if (!read_json_bool(value, options.bones, error, "options.bones is true or false."))
 				return false;
-			}
-			(key == "repeat" ? options.repeat : options.bones) = value.boolean;
 		} else if (key == "snap") {
 			float snap = 0.0f;
 			if (!io::json_float(value, snap) || snap < 0.0f || snap > 100.0f) {
@@ -199,7 +188,7 @@ bool read_options(const JsonValue &json, ModelViewportOptions &held, std::string
 			if (!read_clip_fire_options(value, options.fire, error)) return false;
 		} else {
 			error = "Unknown model option \"" + key +
-			        "\" (it takes lod, ctrl, overlays, rig_model, repeat, bones, snap, sound, damage, first_person, fire).";
+			        "\" (it takes lod, ctrl, overlays, rig_model, bones, snap, sound, damage, first_person, fire).";
 			return false;
 		}
 	}
@@ -207,68 +196,7 @@ bool read_options(const JsonValue &json, ModelViewportOptions &held, std::string
 	return true;
 }
 
-// The camera a `camera` member sets over `held`: {yaw, pitch, distance (> 0), target [x, y, z],
-// frame (look at the whole model again)}, each optional, the pitch kept within kOrbitPitchLimit.
-bool read_camera(const JsonValue &json, OrbitCamera &held, bool &frame, std::string &error) {
-	if (!json.is_object()) {
-		error = "\"camera\" is an object.";
-		return false;
-	}
-	OrbitCamera camera = held;
-	frame = false;
-	for (const io::JsonMember &member : json.object) {
-		const std::string &key = member.key;
-		const JsonValue &value = member.value;
-		if (key == "yaw" || key == "pitch" || key == "distance") {
-			if (!value.is_number() || !std::isfinite(value.number)) {
-				error = "camera." + key + " is a number.";
-				return false;
-			}
-			const float f = float(value.number);
-			if (key == "distance" && !(f > 0.0f)) {
-				error = "camera.distance is more than 0.";
-				return false;
-			}
-			(key == "yaw" ? camera.yaw : key == "pitch" ? camera.pitch : camera.distance) = f;
-		} else if (key == "target") {
-			bool numbers = value.is_array() && value.array.size() == 3;
-			for (size_t i = 0; numbers && i < 3; ++i) numbers = value.array[i].is_number();
-			if (!numbers) {
-				error = "camera.target is [x, y, z].";
-				return false;
-			}
-			camera.target = PreviewVec3{ float(value.array[0].number), float(value.array[1].number),
-				float(value.array[2].number) };
-		} else if (key == "frame") {
-			if (!value.is_bool()) {
-				error = "camera.frame is true or false.";
-				return false;
-			}
-			frame = value.boolean;
-		} else {
-			error = "Unknown camera member \"" + key + "\" (it takes yaw, pitch, distance, target, frame).";
-			return false;
-		}
-	}
-	camera.pitch = std::clamp(camera.pitch, -kOrbitPitchLimit, kOrbitPitchLimit);
-	held = camera;
-	return true;
-}
-
 } // namespace
-
-const char *model_view_status_token(ModelViewStatus status) {
-	switch (status) {
-	case ModelViewStatus::NoProject: return "no_project";
-	case ModelViewStatus::NoModel: return "no_model";
-	case ModelViewStatus::Unserializable: return "unserializable";
-	case ModelViewStatus::Unreadable: return "unreadable";
-	case ModelViewStatus::NoRig: return "no_rig";
-	case ModelViewStatus::Reading: return "reading";
-	case ModelViewStatus::Ready: return "ready";
-	}
-	return "no_project";
-}
 
 std::string model_view_status_message(ModelViewStatus status, const std::string &detail) {
 	switch (status) {
@@ -291,12 +219,7 @@ std::string model_view_status_message(ModelViewStatus status, const std::string 
 }
 
 std::string model_camera_change(const OrbitCamera &camera) {
-	JsonValue view = JsonValue::make_object();
-	view.set("target", vec3(camera.target));
-	view.set("yaw", json_number(camera.yaw));
-	view.set("pitch", json_number(camera.pitch));
-	view.set("distance", json_number(camera.distance));
-	return viewport_change(ViewportKind::Model, "camera", std::move(view));
+	return viewport_change(ViewportKind::Model, "camera", orbit_camera_to_json(camera));
 }
 
 io::JsonValue model_options_to_json(const ModelViewportOptions &held) {
@@ -314,7 +237,6 @@ io::JsonValue model_options_to_json(const ModelViewportOptions &held) {
 		          JsonValue::make_bool(model_collision_layer_on(held.overlays, ModelCollisionLayer(l))));
 	options.set("overlays", std::move(marks));
 	options.set("rig_model", json_string(held.rig_model));
-	options.set("repeat", JsonValue::make_bool(held.repeat));
 	options.set("bones", JsonValue::make_bool(held.bones));
 	options.set("snap", json_number(held.snap));
 	options.set("sound", clip_sound_options_to_json(held.sound));
@@ -561,21 +483,8 @@ uint32_t ModelViewport::clip_fps() const {
 	return clip ? clip->clip.fps : 0u;
 }
 
-int32_t ModelViewport::repeat_period_() const {
-	const int32_t length = clip_length_ticks();
-	if (!options_.repeat || length <= 0 || clip_loops()) return 0;
-	// A first-person action's leg past the clip's end (DI-13: a finish the counter holds beyond it) is
-	// reached before the clip plays again.
-	int32_t reach = length;
-	if (const WeaponActionRun *run = first_person_action())
-		for (const WeaponActionLeg &leg : run->legs) reach = std::max(reach, leg.tick + 1);
-	return reach + kClipRepeatHoldTicks;
-}
-
 int32_t ModelViewport::clip_ticks(const PreviewClock &clock) const {
-	const int32_t ticks = clock.ticks();
-	const int32_t period = repeat_period_();
-	return period > 0 ? ticks % period : ticks;
+	return clock.ticks();
 }
 
 double ModelViewport::clip_frame(const PreviewClock &clock) const {
@@ -694,18 +603,16 @@ std::vector<ClipSoundFired> ModelViewport::fire_sounds(const PreviewClock &clock
 	// A run longer than kClipSoundCatchUpTicks since the last (the viewport not the one previewed meanwhile,
 	// the Shell held up) fires nothing either: the sounds go on from here rather than in a burst.
 	if (!clip || from < 0 || now <= from || now - from > kClipSoundCatchUpTicks) return out;
-	// The clip's own tick of each clock tick (clip_ticks): a repeated one-shot's taken again from 0.
-	const int32_t period = repeat_period_();
+	// The clip's own tick of each clock tick (clip_ticks).
 	if (first_person_.active()) {
 		// A weapon's first-person clip (DI-13): nothing reads its events; the action playing the row plays
 		// its sets on the ticks the game's pump plays them, each heard as the clock leaves its tick (the
 		// clip's start among them) [from, now).
 		if (const WeaponActionRun *run = first_person_action())
 			for (int32_t tick = from; tick < now; ++tick) {
-				const int32_t clip_tick = period > 0 ? tick % period : tick;
 				for (const WeaponActionLeg &leg : run->legs) {
-					if (leg.tick != clip_tick) continue;
-					ClipSoundFired fired = plan_leg_(*run, leg, tick, clip_tick, selector, scan);
+					if (leg.tick != tick) continue;
+					ClipSoundFired fired = plan_leg_(*run, leg, tick, tick, selector, scan);
 					fired.seq = ++next_seq;
 					fired_.push_back(fired);
 					out.push_back(std::move(fired));
@@ -715,7 +622,7 @@ std::vector<ClipSoundFired> ModelViewport::fire_sounds(const PreviewClock &clock
 		return out;
 	}
 	for (const ClipEventDue &due :
-			clip_events_due(clip->clip.playback(), clip_track_, period, from, now, sound_binding_.player))
+			clip_events_due(clip->clip.playback(), clip_track_, from, now, sound_binding_.player))
 		for (ClipSoundFired &fired : plan_clip_event(due, options_.sound, sound_binding_, sound_sources_,
 				     camera().eye(), selector)) {
 			fired.seq = ++next_seq;
@@ -726,7 +633,8 @@ std::vector<ClipSoundFired> ModelViewport::fire_sounds(const PreviewClock &clock
 		}
 	// What the clip's shots sounded on those ticks (DI-24): each ammo's ai_launch, each stop's row, where it plays;
 	// the run taken to the clock first (a device follows after the clock ran).
-	clip_fire_.run_to(now);
+	const ViewportState picture = size();
+	clip_fire_.run_to(now, preview_view_frustum(camera(), picture.width, picture.height));
 	for (ClipSoundFired &fired : clip_fire_.sounds_between(from, now, sound_sources_, camera().eye(), selector)) {
 		fired.seq = ++next_seq;
 		fired.path = path();
@@ -954,197 +862,6 @@ bool ModelViewport::held_drawn_hash_() {
 	return drawn_hashed_;
 }
 
-// --- the damage state (DI-10, preview/model_damage) ----------------------------------------------------
-
-void ModelViewport::reset_damage_() {
-	damage_uses_.clear();
-	damage_graph_ = nullptr;
-	damage_generation_ = 0;
-	damage_use_ = SIZE_MAX;
-	damage_catalog_.clear();
-	damage_record_.clear();
-	damage_catalog_stamp_ = 0;
-	damage_item_ = DamageItem();
-	husk_model_ = DamageModel();
-	piece_model_ = DamageModel();
-	damage_models_ = DamageModels();
-	damage_plan_ = DamagePlan();
-	damage_drives_ = false;
-	damage_drawn_.clear();
-	damage_note_.clear();
-	damage_cursor_ = -1;
-}
-
-const DamageUse *ModelViewport::damage_use() const {
-	return damage_use_ < damage_uses_.size() ? &damage_uses_[damage_use_] : nullptr;
-}
-
-std::string ModelViewport::follow_damage_(const ViewportInput &input, const PreviewClock &clock) {
-	const SessionView &view = input.view;
-	// The items naming the model, again as the graph moves (the edges are not kept: a graph replaced frees
-	// them).
-	const AssetGraph *graph = view.findings.graph.get();
-	if (graph != damage_graph_ || (graph && graph->generation() != damage_generation_)) {
-		damage_graph_ = graph;
-		damage_generation_ = graph ? graph->generation() : 0;
-		damage_uses_ = graph ? model_damage_uses(*graph, path()) : std::vector<DamageUse>();
-		for (DamageUse &use : damage_uses_) use.edge = nullptr;
-	}
-	// The use the options name, else the first.
-	damage_use_ = SIZE_MAX;
-	for (size_t i = 0; i < damage_uses_.size() && !options_.damage.item.empty(); ++i)
-		if (strutil::iequals(damage_uses_[i].item, options_.damage.item)) {
-			damage_use_ = i;
-			break;
-		}
-	if (damage_use_ == SIZE_MAX && !damage_uses_.empty()) damage_use_ = 0;
-	const DamageUse *use = damage_use();
-	// The item as its catalog reads, again as the catalog's stamp moves.
-	const FileSource &files = *view.findings.assets;
-	const std::string catalog = use ? file_of(use->file) : std::string();
-	const std::string record = use ? use->item : std::string();
-	const uint64_t stamp = catalog.empty() ? 0 : files.stamp(catalog);
-	bool moved = false;
-	if (catalog != damage_catalog_ || record != damage_record_ || stamp != damage_catalog_stamp_) {
-		damage_catalog_ = catalog;
-		damage_record_ = record;
-		damage_catalog_stamp_ = stamp;
-		damage_item_ = DamageItem();
-		if (!catalog.empty()) read_damage_item(files, catalog, record, damage_item_);
-		moved = true;
-	}
-	// The husk the game draws (husk first) and the model its pieces come from (huskfinal first), each the
-	// project's file the game loads by its name, read again as its stamp moves.
-	const AssetScan *scan = view.project.scan.get();
-	const auto file_named = [&](const std::string &name) -> std::string {
-		if (!scan || name.empty()) return std::string();
-		const AssetEntry *entry = scan->find(name);
-		if (!entry && !strutil::ends_with_icase(name, ".3di")) entry = scan->find(name + ".3di");
-		return entry && entry->kind == AssetKind::Model ? entry->logical_name : std::string();
-	};
-	const auto refresh = [&](const std::string &file, DamageModel &held) {
-		const uint64_t now = file.empty() ? 0 : files.stamp(file);
-		if (file == held.file && now == held.stamp && held.read) return false;
-		held = DamageModel();
-		held.file = file;
-		held.stamp = now;
-		held.read = true;
-		std::vector<uint8_t> bytes;
-		if (!file.empty() && files.read(file, bytes)) held.model = assets::parse_model(bytes.data(), bytes.size());
-		return true;
-	};
-	const DamageItem &item = damage_item_;
-	const std::string husk_file =
-			item.found ? file_named(world::husk_render_graphic(item.husk, item.huskfinal)) : std::string();
-	const std::string piece_file =
-			item.found ? file_named(world::death_piece_graphic(item.husk, item.huskfinal)) : std::string();
-	moved = refresh(husk_file, husk_model_) || moved;
-	moved = refresh(piece_file, piece_model_) || moved;
-	if (moved) {
-		damage_models_ = DamageModels();
-		if (husk_model_.model) {
-			note_damage_husk(*husk_model_.model, damage_models_);
-			// The KZ walk reads the first husk alone: a def with only a final husk has no KZ point.
-			if (item.husk.empty()) damage_models_.kz_points = 0;
-		}
-		if (piece_model_.model) note_damage_pieces(*piece_model_.model, damage_models_);
-		damage_plan_ = editor::damage_plan(item, damage_models_);
-	}
-	// What the picture draws at the clock, and why where the destroyed state draws other than the husk.
-	const std::string self = file_of(path());
-	const bool graphic = use && (use->role == DamageRole::Graphic || use->role == DamageRole::EnemyGraphic);
-	const bool husk_is_self = !husk_file.empty() && strutil::iequals(husk_file, self);
-	damage_drives_ = use && item.found && damage_plan_.swaps && !damage_plan_.husk.empty() &&
-	                 (husk_is_self || (graphic && husk_model_.model));
-	damage_note_.clear();
-	std::string drawn;
-	if (options_.damage.state != DamageState::Destroyed) {
-		damage_drawn_.clear();
-		return drawn;
-	}
-	// The death's sounds play from the project's banks, read as the game reads them (DI-04's sources).
-	sound_sources_.refresh(*view.findings.assets,
-	                       view.project.document ? view.project.document->expansion.name : std::string(), PreviewRig());
-	if (!use) {
-		damage_note_ = "No item names this model as its graphic or its husk: it has no damage state.";
-	} else if (!item.found) {
-		damage_note_ = use->item + " does not read in " + catalog + ".";
-	} else if (!damage_plan_.swaps) {
-		damage_note_ = damage_plan_.class_words;
-	} else if (graphic) {
-		if (damage_plan_.husk.empty())
-			damage_note_ = item.name + " authors no husk model: the preview keeps drawing its graphic.";
-		else if (husk_file.empty())
-			damage_note_ = "The project has no " + damage_plan_.husk + ": the preview keeps drawing the graphic.";
-		else if (!husk_is_self && !husk_model_.model)
-			damage_note_ = husk_file + " does not read as a model: the preview keeps drawing the graphic.";
-		else if (!husk_is_self && damage_frame(damage_plan_, item, clock.ticks()).husked)
-			drawn = husk_file;
-	} else if (!husk_is_self) {
-		damage_note_ = self + " is " + item.name + "'s final husk: the game draws it only as the death pieces, each " +
-		               "its own section; " + damage_plan_.husk + " is the husk drawn.";
-	}
-	damage_drawn_ = drawn;
-	return drawn;
-}
-
-bool ModelViewport::damage_playing() const {
-	return options_.damage.state == DamageState::Destroyed && !animating_ && damage_use() && damage_item_.found &&
-	       damage_plan_.swaps;
-}
-
-bool ModelViewport::damage_driven() const {
-	return damage_playing() && damage_drives_;
-}
-
-DamageFrame ModelViewport::damage_frame_at(const PreviewClock &clock) const {
-	return damage_playing() ? damage_frame(damage_plan_, damage_item_, clock.ticks()) : DamageFrame();
-}
-
-std::map<std::string, int64_t> ModelViewport::ctrl_at(const PreviewClock &clock) const {
-	std::map<std::string, int64_t> out = options_.ctrl;
-	if (!damage_driven()) return out;
-	// The game writes the six every time the model draws: zero first, the fade's phases once husked [orig:
-	// Entity_PublishSwapFadePhases @ 0x5C3F40].
-	const DamageFrame frame = damage_frame(damage_plan_, damage_item_, clock.ticks());
-	for (int i = 0; i < 6; ++i) {
-		const char *name = threedi::threedi_ctrl_register_name(size_t(threedi::THREEDI_CTRL_OBJECT_DESTROY + i));
-		for (auto it = out.begin(); it != out.end();) it = strutil::iequals(it->first, name) ? out.erase(it) : std::next(it);
-		if (frame.fade.phases_q16[size_t(i)] != 0) out[name] = frame.fade.phases_q16[size_t(i)];
-	}
-	return out;
-}
-
-uint32_t ModelViewport::hidden_sections_at(const PreviewClock &clock) const {
-	return damage_driven() ? damage_frame(damage_plan_, damage_item_, clock.ticks()).hidden_sections : 0;
-}
-
-std::vector<ClipSoundFired> ModelViewport::fire_damage_sounds(const PreviewClock &clock, const AssetScan *scan,
-		audio::SoundSelector &selector, uint64_t &next_seq) {
-	std::vector<ClipSoundFired> out;
-	const int32_t now = clock.ticks();
-	// After a seek, from where it put the clock (the death's tick 0 after a Play from it).
-	const int32_t from = clock.heard_from(damage_cursor_, damage_seeks_);
-	damage_cursor_ = now;
-	if (!damage_playing() || reason_ != ModelViewStatus::Ready || from < 0 || now <= from ||
-	    now - from > kClipSoundCatchUpTicks)
-		return out;
-	// The legs on the ticks [from, now): the death on tick 0 heard as the clock leaves it.
-	for (const DamageLeg &leg : damage_plan_.legs) {
-		if (leg.kind != "sound" || leg.tick < from || leg.tick >= now) continue;
-		// Played at the item, the preview's origin, as the camera hears it.
-		ClipSoundFired fired =
-				plan_set_at_origin(leg.name, leg.tick, "the death sound", sound_sources_, camera().eye(), selector);
-		fired.seq = ++next_seq;
-		fired.path = path();
-		if (scan) find_clip_sound_waves(fired, *scan);
-		fired_.push_back(fired);
-		out.push_back(std::move(fired));
-	}
-	if (fired_.size() > kSoundsFiredKept) fired_.erase(fired_.begin(), fired_.end() - kSoundsFiredKept);
-	return out;
-}
-
 // A clip or a table plays on its rig's model (as the project's files hold it): the model is read
 // again when its stamp moves, the rig when the rig or a file it read moves, and the clip follows the
 // selection.
@@ -1182,7 +899,7 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 		clip_track_ = ClipSoundTrack();
 		return stop_(ModelViewStatus::Unserializable, unwritable_, true);
 	}
-	const std::string file = file_of(document.path());
+	const std::string file = io::utf8_file_name(document.path());
 	PreviewRig rig = view.findings.graph
 			? resolve_preview_rig(*view.findings.graph, *view.project.scan, file, document.kind(), options_.rig_model)
 			: PreviewRig();
@@ -1291,8 +1008,9 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 			skeleton_ && !clip_key_.empty() && !first_person_.active() ? skeleton_->find_clip_variant(clip_key_, clip_variant_)
 			                                                           : nullptr;
 	clip_fire_.refresh(view, sound_sources_.item(), sound_binding_, model_, skeleton_, clip_key_, clip_variant_,
-	                   playing ? &playing->clip.playback() : nullptr, clip_track_, repeat_period_(), options_.fire);
-	clip_fire_.run_to(clock.ticks());
+	                   playing ? &playing->clip.playback() : nullptr, clip_track_, options_.fire);
+	const ViewportState picture = size();
+	clip_fire_.run_to(clock.ticks(), preview_view_frustum(camera(), picture.width, picture.height));
 	// An event selected in the clip seeks the clock to the tick the clip first samples it, and
 	// holds it there (as a scrub does).
 	const auto *clip_document = dynamic_cast<const AnimationDocument *>(&document);
@@ -1371,7 +1089,7 @@ bool ModelViewport::check_(const io::JsonValue &json, std::string &error) const 
 		return false;
 	OrbitCamera camera = camera_;
 	bool frame = false;
-	if (const JsonValue *member = json.get("camera"); member && !read_camera(*member, camera, frame, error))
+	if (const JsonValue *member = json.get("camera"); member && !read_orbit_camera(*member, camera, frame, error))
 		return false;
 	// The first-person eye (DI-13) stands where the game's camera does: the orbit's camera moves only once
 	// the view is the orbit again.
@@ -1417,7 +1135,7 @@ void ModelViewport::apply_(const io::JsonValue &json, PreviewClock &clock) {
 		sound_binding_ = clip_sound_binding(sound_sources_.profiles(), options_.sound, sound_sources_.item(), rig_);
 	}
 	bool frame = false;
-	if (const JsonValue *member = json.get("camera")) read_camera(*member, camera_, frame, error);
+	if (const JsonValue *member = json.get("camera")) read_orbit_camera(*member, camera_, frame, error);
 	if (frame) frame_();
 }
 
@@ -1699,7 +1417,7 @@ io::JsonValue ModelViewport::options_json() const {
 
 io::JsonValue ModelViewport::camera_json() const {
 	JsonValue view = JsonValue::make_object();
-	view.set("target", vec3(camera_.target));
+	view.set("target", preview_point_json(camera_.target));
 	view.set("yaw", json_number(camera_.yaw));
 	view.set("pitch", json_number(camera_.pitch));
 	view.set("distance", json_number(camera_.distance));
@@ -1709,10 +1427,10 @@ io::JsonValue ModelViewport::camera_json() const {
 	view.set("view", json_string(eye_ ? "eye" : "orbit"));
 	if (eye_) {
 		JsonValue eye = JsonValue::make_object();
-		eye.set("eye", vec3(eye_camera_.pose.eye));
-		eye.set("right", vec3(eye_camera_.pose.right));
-		eye.set("up", vec3(eye_camera_.pose.up));
-		eye.set("back", vec3(eye_camera_.pose.back));
+		eye.set("eye", preview_point_json(eye_camera_.pose.eye));
+		eye.set("right", preview_point_json(eye_camera_.pose.right));
+		eye.set("up", preview_point_json(eye_camera_.pose.up));
+		eye.set("back", preview_point_json(eye_camera_.pose.back));
 		eye.set("near", json_number(eye_camera_.near_plane));
 		view.set("pose", std::move(eye));
 	}
@@ -1729,7 +1447,7 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 		lod_json.set("shown", json_number(lod()));
 		lod_json.set("auto", json_number(auto_lod(&projected)));
 		lod_json.set("count", json_number(double(shown.lod_count)));
-		lod_json.set("projected_px", json_number(projected / 65536.0));
+		lod_json.set("projected_px", json_number(projected / io::kFp16OneD));
 		JsonValue thresholds = JsonValue::make_array();
 		for (size_t i = 0; i < shown.lod_count; ++i) thresholds.push(json_number(shown.lods[i].lod_threshold));
 		lod_json.set("thresholds", std::move(thresholds));
@@ -1737,7 +1455,7 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 		float radius = 0.0f;
 		model_preview_sphere(shown, center, radius);
 		JsonValue sphere = JsonValue::make_object();
-		sphere.set("center", vec3(center));
+		sphere.set("center", preview_point_json(center));
 		sphere.set("radius", json_number(radius));
 		body.set("sphere", std::move(sphere));
 		// The collision layers (S17): each with its words, colour, count and whether it is shown, and the
@@ -1831,8 +1549,8 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 	animation.set("file", json_string(clip_file_));
 	animation.set("note", json_string(clip_note_));
 	animation.set("ticks", json_number(input.clock.ticks()));
-	// The clip's own clock (S17): the tick it plays (a repeated one-shot's taken again from 0), its
-	// frame, and both in seconds as the game's ticks pass.
+	// The clip's own clock (S17): the tick it plays, its frame, and both in seconds as the game's ticks
+	// pass.
 	const int32_t played = clip_ticks(input.clock);
 	const int32_t length = clip_length_ticks();
 	animation.set("clip_ticks", json_number(played));
@@ -1843,7 +1561,6 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 	animation.set("length_ticks", json_number(length));
 	animation.set("length_seconds", json_number(length > 0 ? length / io::kTickHz : 0.0));
 	animation.set("loops", JsonValue::make_bool(clip_loops()));
-	animation.set("repeat", JsonValue::make_bool(options_.repeat));
 	JsonValue events = JsonValue::make_array();
 	for (const PreviewClipEvent &event : clip_events_) {
 		JsonValue row = JsonValue::make_object();
@@ -1889,7 +1606,7 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 		row.set("bone", json_number(joint.bone));
 		row.set("name", json_string(joint.name));
 		row.set("parent", json_number(joint.parent));
-		row.set("position", vec3(joint.at));
+		row.set("position", preview_point_json(joint.at));
 		float x = 0.0f, y = 0.0f;
 		if (camera().project(joint.at, size().width, size().height, x, y)) {
 			JsonValue screen = JsonValue::make_array();
@@ -2031,7 +1748,7 @@ io::JsonValue ModelViewport::items_json(const ViewportInput &input) const {
 		row.set("id", json_number(double(record_of(input, overlay).child)));
 		row.set("name", json_string(overlay.name));
 		row.set("part", json_number(overlay.part));
-		row.set("position", vec3(overlay.at));
+		row.set("position", preview_point_json(overlay.at));
 		float x = 0.0f, y = 0.0f;
 		if (camera().project(overlay.at, size().width, size().height, x, y)) {
 			JsonValue screen = JsonValue::make_array();
@@ -2041,7 +1758,7 @@ io::JsonValue ModelViewport::items_json(const ViewportInput &input) const {
 		} else {
 			row.set("screen", JsonValue());
 		}
-		if (overlay.has_direction) row.set("direction", vec3(overlay.direction));
+		if (overlay.has_direction) row.set("direction", preview_point_json(overlay.direction));
 		if (overlay.kind == ModelOverlayKind::Light) {
 			row.set("radius", json_number(overlay.radius));
 			row.set("cone", json_number(overlay.cone));
@@ -2070,7 +1787,7 @@ io::JsonValue ModelViewport::items_json(const ViewportInput &input) const {
 		row.set("section", json_number(shape.section));
 		row.set("color", json_string(rgb_hex(shape.rgb)));
 		if (shape.sphere) {
-			row.set("center", vec3(shape.center));
+			row.set("center", preview_point_json(shape.center));
 			row.set("radius", json_number(shape.radius));
 		}
 		// Its corners once each (a face's three, a solid's), in the order first drawn.
@@ -2082,7 +1799,7 @@ io::JsonValue ModelViewport::items_json(const ViewportInput &input) const {
 				again = again || (std::fabs(p.x - q.x) < 1e-5f && std::fabs(p.y - q.y) < 1e-5f && std::fabs(p.z - q.z) < 1e-5f);
 			if (again) continue;
 			seen.push_back(p);
-			points.push(vec3(p));
+			points.push(preview_point_json(p));
 		}
 		row.set("points", std::move(points));
 		// A pixel on it (where a hit takes it, nothing nearer in the way): a sphere's centre, else the

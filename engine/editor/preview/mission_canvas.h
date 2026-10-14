@@ -97,11 +97,6 @@ struct MissionGrab {
 // the pick slop, else what the device's ray meets; with no device to say, nothing for a press and the
 // sphere for a click); -1: none, or not hovered.
 int mission_canvas_under(const MissionCanvasFrame &frame, const CanvasInput &in, MissionPick by);
-// The primary's handle within the pick slop of the pointer (its height, its yaw, an area's edges),
-// while the mission takes edits: false for none.
-bool mission_canvas_handle_under(const MissionCanvasFrame &frame, const CanvasInput &in, MissionHandle &out);
-MissionGrab mission_canvas_grab(const MissionCanvasFrame &frame, const ViewportContext &context,
-		const CanvasInput &in, int under);
 
 class MissionCanvas final : public CanvasHalf {
 public:

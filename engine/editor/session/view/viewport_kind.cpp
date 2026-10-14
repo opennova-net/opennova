@@ -1,4 +1,5 @@
 #include <editor/session/view/viewport_kind.h>
+#include <editor/session/row_table.h>
 
 #include <iterator>
 
@@ -11,14 +12,6 @@ constexpr const char *kTokens[] = { "menu", "model", "script", "mission", "textu
                                       "terrain", "font", "map" };
 
 static_assert(std::size(kTokens) == kViewportKindCount, "every ViewportKind has exactly one token");
-
-constexpr bool same_text(const char *a, const char *b) {
-	while (*a && *a == *b) {
-		++a;
-		++b;
-	}
-	return *a == *b;
-}
 
 constexpr bool tokens_well_formed() {
 	for (size_t i = 0; i < kViewportKindCount; ++i) {

@@ -15,6 +15,13 @@
 
 namespace opennova::editor {
 
+// An area's anchor height: the ground at its centre where `device` answers, else its z_min.
+double mission_area_anchor_z(const MissionAreaMark &area, const ViewportDevice *device);
+
+// The direction an entity faces in the presentation frame (its yaw a compass heading, 0 north, 90
+// east: world::presentation_forward_from_angles).
+PreviewVec3 mission_entity_heading(const MissionEntityMark &entity);
+
 namespace {
 
 // The dark ring under a selected or hovered mark's (it reads on bright ground and among glyphs).

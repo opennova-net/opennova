@@ -32,18 +32,18 @@ public:
 	virtual ~ProcessPlatform() = default;
 	// False where this platform has no spawn at all: Play says so instead of trying.
 	virtual bool can_spawn() const { return true; }
-	// Why can_spawn is false, as Play's refusal says it: an OS whose spawn the editor does not
-	// implement yet (the default), or a session that starts no game at all (the command line's).
-	virtual std::string no_spawn_reason() const {
-		return "Play is Windows-only for now: the editor cannot start the game on this system.";
-	}
-	// The child's id, or -1 when it could not be started.
-	virtual int64_t spawn(const LaunchPlan &plan) = 0;
+	// Why can_spawn is false, as Play's refusal says it: a system the process seam starts nothing on (the
+	// default), or a session that starts no game at all (the command line's).
+	virtual std::string no_spawn_reason() const { return "The editor cannot start the game on this system."; }
+	// The child's id, or -1 when it could not be started, with why in `error` (the OS's own words where it
+	// has them: the program missing, the directory gone, a path too long).
+	virtual int64_t spawn(const LaunchPlan &plan, std::string &error) = 0;
 	virtual bool is_running(int64_t pid) = 0;
 	// Ask the child to exit (close its window / SIGTERM); true when the request was delivered
 	// or the child had already exited.
 	virtual bool terminate(int64_t pid) = 0;
-	// Force the child down; true when it is gone afterwards.
+	// Force the child down, never waiting on it: true when the force was delivered (or it had exited);
+	// is_running says when it is gone.
 	virtual bool kill(int64_t pid) = 0;
 	// The code an exited child ended with, read through the handle spawn kept (so before
 	// release()); false while it runs, or where the platform cannot read one.

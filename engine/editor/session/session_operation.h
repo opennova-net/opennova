@@ -160,6 +160,10 @@ public:
 	virtual bool step(const StepBudget &budget) = 0;
 	virtual OperationProgress progress() const = 0;
 	virtual bool cancellable() const { return true; }
+	// Whether a cancel lets it finish rather than dropping it: what it made stays and its finish absorbs it (a
+	// build already published, whose Play's copies were cancelled: BuildOperation). The session finishes it at
+	// once, as the cancel is asked.
+	virtual bool finishes_on_cancel() const { return false; }
 	// Stops between two steps and discards the work (a build's staging directory goes): the
 	// operation never finishes.
 	virtual void cancel() = 0;

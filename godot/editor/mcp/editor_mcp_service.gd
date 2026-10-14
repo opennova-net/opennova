@@ -1,7 +1,7 @@
 class_name EditorMcpService
 extends McpEndpointService
 
-## The OpenNova Editor's MCP endpoint (`opennova-editor`, ADR 0046 d10): the same
+## The OpenNova Editor's MCP endpoint (`opennova-editor`, ADR 0046 S6d): the same
 ## loopback Streamable-HTTP transport the game runs (godot/game/mcp/), started by
 ## `--mcp-port <n>` on the editor's command line or by a test on port 0, over the
 ## editor's wire seam (EditorApp.request_json / query_json, ADR 0046 S13 A5). The editor loads
@@ -25,9 +25,9 @@ func setup(editor_app: Node, port: int) -> Error:
 			+ "graph, a menu's tree, the output, the operation, the catalog of every request and "
 			+ "query); editor_request raises any typed request by kind (open, edit records in the "
 			+ "batch form, save, import, rename); editor_viewport reads a document's viewport (a "
-			+ "menu's screen, a model) and drags or commands through it; editor_build packs the "
-			+ "project; editor_play runs the game on the build and reports the game's own MCP port, "
-			+ "which game_* tools then drive."))
+			+ "menu's screen, a model) and drags or commands through it; editor_request build packs "
+			+ "the project and play runs the game on the build (wait awaits them), editor_state's run "
+			+ "section reporting the game's own MCP port, which game_* tools then drive."))
 	tools = EditorMcpTools.new(self, app)
 	tools.register_all(server.registry)
 	return _start_endpoint(port, "Editor MCP")

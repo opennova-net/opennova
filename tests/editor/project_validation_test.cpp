@@ -76,10 +76,10 @@ int check_rows(const char *project, const std::vector<Diagnostic> &rows, const A
 		std::set<std::string> &codes) {
 	for (const Diagnostic &d : rows) {
 		codes.insert(d.code());
-		const char *owner = finding_owner(d.row());
-		if (!owner || finding_row(d.code()) != d.row())
+		const char *owner = editor_test::finding_owner(d.row());
+		if (!owner || editor_test::finding_row(d.code()) != d.row())
 			std::fprintf(stderr, "%s: %s has no table's row\n", project, d.code().c_str());
-		TEST_EXPECT(owner && finding_row(d.code()) == d.row());
+		TEST_EXPECT(owner && editor_test::finding_row(d.code()) == d.row());
 		if (std::string(owner) != "core") {
 			const AssetEntry *file = scan.at_path(d.asset);
 			const DocumentType *type = file ? document_type_for(file->kind) : nullptr;
@@ -209,8 +209,10 @@ static int test_rows_as_before() {
 		// rows before them gave d8ef2f1e). DI-09: a person's launch points name user points of its graphic, so
 		// the fixture rifleman's launchups_closeattack mflash01, which shed.3di lacks, adds a warning; a particle
 		// effect no file defines is a warning, as the game plays stockeffect's copy for it; a particle slot's
-		// point is looked up in its model's first-16 section (the 376 rows before them gave 28f4c1e1).
-		{ "fixtures", fixture_files, false, 377, 0xee46e4c294dbbc93ull },
+		// point is looked up in its model's first-16 section (the 376 rows before them gave 28f4c1e1). S26 (A8): a
+		// reference the game loads on without is a warning, the fixture items' graphic and husk models among them
+		// (the same rows gave ee46e4c2).
+		{ "fixtures", fixture_files, false, 377, 0xdcf0da91d8e96e91ull },
 		{ "styles", style_files, false, 15, 0xe39ad4219139a453ull },
 		{ "items", item_files, false, 4, 0xc8ca7a0734b9eac6ull },
 		{ "open", style_and_item_files, true, 19, 0x80eb2caf43356608ull },

@@ -34,7 +34,6 @@ inline constexpr int32_t kTileSquareFixed = TIL_FIXED_CELL_UNITS; // 16 units, 1
 struct TileSquare {
 	int64_t x0 = 0, y0 = 0, x1 = 0, y1 = 0;
 };
-TileSquare tile_square(const TilOverlayEntry &entry);
 
 // The tile a click at (x, y) (mission units) picks: of the tiles whose square holds it, the one drawn on top (the
 // last in file order; Nile's click takes the first, which the editor's views draw under the others), npos for none.

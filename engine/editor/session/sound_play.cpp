@@ -28,12 +28,6 @@ namespace opennova::editor {
 
 namespace {
 
-const DocumentBase *open_at(const SessionView &view, const std::string &path) {
-	for (const auto &document : view.documents.open)
-		if (document && document->path() == path) return document.get();
-	return nullptr;
-}
-
 const std::string &value_of(const EditorRequest &request, const char *token) {
 	static const std::string none;
 	for (const auto &[key, value] : request.values)
@@ -73,6 +67,29 @@ void start(SessionCore &core, std::vector<WorkspaceView::Voice> voices, const st
 	}
 }
 
+// The model preview of the request's path with a clip playing in it; null, refused, where none plays.
+ModelViewport *playing_clip(SessionCore &core, const EditorRequest &request) {
+	std::string error;
+	auto *clip = dynamic_cast<ModelViewport *>(core.viewports().resolve(core.view(), request.path, ViewportKind::Model, error));
+	if (clip && clip->animating()) return clip;
+	refuse(core, !error.empty() ? error : "No clip plays in the model preview of " + request.path + ".", request.path);
+	return nullptr;
+}
+
+// What a press of a mark fired (one set or several, every one at once), played with its words; refused with them
+// where no voice sounds.
+void play_fired(SessionCore &core, const std::vector<ClipSoundFired> &fired, const std::string &at) {
+	std::vector<WorkspaceView::Voice> voices;
+	std::string words;
+	for (const ClipSoundFired &one : fired) {
+		words += (words.empty() ? "" : " ") + one.words;
+		for (const ClipSoundFired::Voice &voice : one.voices)
+			if (!voice.path.empty()) voices.push_back({voice.path, voice.pitch_q16, voice.volume});
+	}
+	if (voices.empty()) return refuse(core, words, at);
+	start(core, std::move(voices), fired.front().set, fired.front().bank, words);
+}
+
 // A planned play's voices as project waves; a voice whose file the project lacks, or that is past what a
 // card reads, left out and said.
 void start_play(SessionCore &core, const PreviewPlay &play) {
@@ -101,51 +118,31 @@ void start_play(SessionCore &core, const PreviewPlay &play) {
 // that frame, as a press of its mark on the timeline asks (DI-04: ModelViewport::press_event, under its
 // model viewport's sound options), every sound of the event at once.
 void play_clip_event(SessionCore &core, const EditorRequest &request) {
-	const SessionView &view = core.view();
 	const std::optional<int> frame = strutil::parse_int(value_of(request, "frame"));
 	if (!frame || *frame < 0) return refuse(core, "frame is a clip's frame, a whole number from 0.");
-	std::string error;
-	auto *clip = dynamic_cast<ModelViewport *>(
-			core.viewports().resolve(view, request.path, ViewportKind::Model, error));
-	if (!clip || !clip->animating())
-		return refuse(core, !error.empty() ? error : "No clip plays in the model preview of " + request.path + ".",
-		              request.path);
+	ModelViewport *clip = playing_clip(core, request);
+	if (!clip) return;
 	std::vector<ClipSoundFired> fired;
-	if (!clip->press_event(*frame, view.project.scan.get(), core.sound_selector(), fired, error))
+	std::string error;
+	if (!clip->press_event(*frame, core.view().project.scan.get(), core.sound_selector(), fired, error))
 		return refuse(core, error, clip->path());
-	std::vector<WorkspaceView::Voice> voices;
-	std::string words;
-	for (const ClipSoundFired &one : fired) {
-		words += (words.empty() ? "" : " ") + one.words;
-		for (const ClipSoundFired::Voice &voice : one.voices)
-			if (!voice.path.empty()) voices.push_back({voice.path, voice.pitch_q16, voice.volume});
-	}
-	if (voices.empty()) return refuse(core, words, clip->path());
-	start(core, std::move(voices), fired.front().set, fired.front().bank, words);
+	play_fired(core, fired, clip->path());
 }
 
 // values {leg}: the set the weapon action playing the row of a first-person map plays as it begins (begin:
 // its soundset) or finishes (end: its soundsetend), as a press of the leg's mark asks (DI-13:
 // ModelViewport::press_leg).
 void play_action_leg(SessionCore &core, const EditorRequest &request) {
-	const SessionView &view = core.view();
 	const std::string &leg = value_of(request, "leg");
 	if (!strutil::iequals(leg, "begin") && !strutil::iequals(leg, "end"))
 		return refuse(core, "leg is begin (the action's soundset) or end (its soundsetend).");
-	std::string error;
-	auto *clip = dynamic_cast<ModelViewport *>(
-			core.viewports().resolve(view, request.path, ViewportKind::Model, error));
-	if (!clip || !clip->animating())
-		return refuse(core, !error.empty() ? error : "No clip plays in the model preview of " + request.path + ".",
-		              request.path);
+	ModelViewport *clip = playing_clip(core, request);
+	if (!clip) return;
 	std::vector<ClipSoundFired> fired;
-	if (!clip->press_leg(strutil::iequals(leg, "end"), core.sound_selector(), view.project.scan.get(), fired, error))
+	std::string error;
+	if (!clip->press_leg(strutil::iequals(leg, "end"), core.sound_selector(), core.view().project.scan.get(), fired, error))
 		return refuse(core, error, clip->path());
-	std::vector<WorkspaceView::Voice> voices;
-	for (const ClipSoundFired::Voice &voice : fired.front().voices)
-		if (!voice.path.empty()) voices.push_back({voice.path, voice.pitch_q16, voice.volume});
-	if (voices.empty()) return refuse(core, fired.front().words, clip->path());
-	start(core, std::move(voices), fired.front().set, fired.front().bank, fired.front().words);
+	play_fired(core, fired, clip->path());
 }
 
 // values {dialog, line?}: a dialog of the dialog bank `path` names, or of the bank the mission `path` loads, its
@@ -172,7 +169,7 @@ void play_dialog(SessionCore &core, const EditorRequest &request) {
 		text_mission = mission::mission_base_name(bank);
 	} else if (entry->kind == AssetKind::Mission) {
 		std::unique_ptr<MissionDocument> loaded;
-		const auto *mission = dynamic_cast<const MissionDocument *>(open_at(view, entry->relative_path));
+		const auto *mission = dynamic_cast<const MissionDocument *>(view.documents.open_at(entry->relative_path));
 		if (!mission && view.project.document) {
 			loaded = std::make_unique<MissionDocument>();
 			Diagnostic error;
@@ -226,7 +223,7 @@ void play_stream(SessionCore &core, const EditorRequest &request) {
 		                            (request.path.empty() ? std::string("none is named.") : request.path + " is none."));
 	const std::string &place = value_of(request, "stream");
 	std::unique_ptr<MusicBankDocument> loaded;
-	const auto *bank = dynamic_cast<const MusicBankDocument *>(open_at(view, entry->relative_path));
+	const auto *bank = dynamic_cast<const MusicBankDocument *>(view.documents.open_at(entry->relative_path));
 	if (bank && bank->dirty())
 		return refuse(core, entry->logical_name + " has unsaved changes: the editor streams the bank's file as the game "
 		                                          "does, so save it to hear them.",
@@ -266,7 +263,9 @@ int slot_named(const std::string &text) {
 
 } // namespace
 
-std::vector<PreviewBank> project_banks(const SessionView &view) {
+// The project's sound banks: each .lwf of the scan, an open bank document's rows in place of its file; a
+// bank that does not read left out.
+static std::vector<PreviewBank> project_banks(const SessionView &view) {
 	std::vector<PreviewBank> banks;
 	if (!view.project.open || !view.project.scan) return banks;
 	for (const AssetEntry &entry : view.project.scan->entries) {
@@ -274,7 +273,7 @@ std::vector<PreviewBank> project_banks(const SessionView &view) {
 		PreviewBank bank;
 		bank.name = entry.logical_name;
 		bank.path = entry.relative_path;
-		if (const auto *document = dynamic_cast<const SoundBankDocument *>(open_at(view, entry.relative_path))) {
+		if (const auto *document = dynamic_cast<const SoundBankDocument *>(view.documents.open_at(entry.relative_path))) {
 			if (!document->bank(bank.file)) continue;
 		} else {
 			std::vector<uint8_t> bytes;
@@ -288,11 +287,13 @@ std::vector<PreviewBank> project_banks(const SessionView &view) {
 	return banks;
 }
 
-std::vector<audio::SoundProfile> project_profiles(const SessionView &view) {
+// The project's sound profiles: its SndProf.def as the game reads it, an open document's rows in place of
+// the file; none without one.
+static std::vector<audio::SoundProfile> project_profiles(const SessionView &view) {
 	if (!view.project.open || !view.project.scan || !view.project.document) return {};
 	for (const AssetEntry &entry : view.project.scan->entries) {
 		if (entry.kind != AssetKind::SoundProfileDefs) continue;
-		if (const auto *document = dynamic_cast<const SoundProfileDocument *>(open_at(view, entry.relative_path)))
+		if (const auto *document = dynamic_cast<const SoundProfileDocument *>(view.documents.open_at(entry.relative_path)))
 			return document->profiles();
 		SoundProfileDocument document;
 		Diagnostic error;
@@ -350,7 +351,7 @@ void serve_sound_play(SessionCore &core, const EditorRequest &request) {
 	// A wave of the project, as recorded (workspace_parts.h's play_sound): the Shell plays the file, so an open wave
 	// with unsaved edits is refused, as a bank is (round S23 lane A).
 	if (const AssetEntry *entry = request.path.empty() ? nullptr : view.project.scan->named(request.path)) {
-		const DocumentBase *open = open_at(view, entry->relative_path);
+		const DocumentBase *open = view.documents.open_at(entry->relative_path);
 		if (open && open->dirty())
 			return refuse(core, entry->logical_name + " has unsaved changes: the editor plays the wave's file as the game "
 			                                          "loads it, so save it to hear them.",

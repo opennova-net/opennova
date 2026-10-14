@@ -84,14 +84,8 @@ struct Controls {
 	InspectorWindow::WordsBox &words;
 };
 
-const DocumentBase *active_document(const SessionView &view) {
-	for (const auto &document : view.documents.open)
-		if (document->path() == view.documents.active) return document.get();
-	return nullptr;
-}
-
 const Document *active(const SessionView &view) {
-	const DocumentBase *document = active_document(view);
+	const DocumentBase *document = view.documents.active_document();
 	return document ? records_of(*document) : nullptr;
 }
 
@@ -1527,7 +1521,7 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	const Document *document = active(view);
 	if (!document || !view.documents.selection.primary.row) {
 		// Nothing selected in the active document: who names the file itself (DI-05), each a Go to.
-		const DocumentBase *shown = active_document(view);
+		const DocumentBase *shown = view.documents.active_document();
 		if (!shown || document) ui_kit::empty_state("Select a record.", "Its fields and lists show here.");
 		// A document of no records: its type's own part first (the HUD layout's element picked, DI-37).
 		if (shown && !document)

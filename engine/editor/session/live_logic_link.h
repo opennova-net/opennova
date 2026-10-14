@@ -44,15 +44,6 @@ struct GameMcpResponse {
 	size_t consumed = 0; // the bytes it took
 };
 enum class GameMcpRead { Incomplete, Whole, Malformed };
-GameMcpRead read_game_mcp_response(const std::string &bytes, GameMcpResponse &out);
-// A POST of `body` to the endpoint at `port` (with `session_id` where the endpoint gave one).
-std::string game_mcp_post(int port, const std::string &session_id, const std::string &body);
-// The JSON-RPC requests the link makes: initialize, and a tools/call of game_debug with `arguments`.
-std::string game_mcp_initialize_body(uint64_t id);
-std::string game_mcp_debug_body(uint64_t id, const io::JsonValue &arguments);
-// A tools/call answer's tool result (its structuredContent, else its text read as JSON) into `out`; false with
-// `error` the tool's own words (an isError result) or why the answer does not read.
-bool game_mcp_tool_result(const std::string &body, io::JsonValue &out, std::string &error);
 
 class LiveLogicLink {
 public:

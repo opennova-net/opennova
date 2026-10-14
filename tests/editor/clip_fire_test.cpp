@@ -37,7 +37,6 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
-#include <formats/lwf/lwf.h>
 #include <runtime/anim/anim_event_bits.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/ammo_table.h>
@@ -92,38 +91,6 @@ std::string soldier_model() {
 	std::string text = test_io::read_file_text(repo() + "/fixtures/threedi/o3d/skinned.o3d");
 	text += "userpoint \"MFlash01\" 0 1 0.5 0 1 0 1 83\n";
 	return text;
-}
-
-std::vector<uint8_t> bank_of(const std::vector<std::string> &sets) {
-	lwf::File bank;
-	for (size_t i = 0; i < sets.size(); ++i) {
-		lwf::Single single;
-		single.name = sets[i];
-		single.path = strutil::to_lower(sets[i]) + ".wav";
-		single.volume = 0xD2;
-		bank.singles.push_back(single);
-		lwf::Multi set;
-		set.name = sets[i];
-		set.pitch_base = lwf::kAuthoredSetPitchBase;
-		set.target_id = 100;
-		set.playlist_indices.push_back(uint32_t(i));
-		bank.multis.push_back(set);
-		lwf::Playlist layer;
-		layer.falloff_radius = 100;
-		layer.flags = lwf::kFlagInternal | lwf::kFlagExternal;
-		layer.sndparm_indices.push_back(uint32_t(i));
-		bank.playlists.push_back(layer);
-		lwf::Sndparm member;
-		member.single_index = uint32_t(i);
-		member.pitch_scaled = lwf::kPitchUnityQ16;
-		member.volume = 200;
-		member.clamp_volume = 255;
-		bank.sndparms.push_back(member);
-	}
-	std::vector<uint8_t> out;
-	std::string error;
-	lwf::encode_lwf(bank, out, error);
-	return out;
 }
 
 const char *kSets[] = {"FS_GND_L", "GS_AI", "GS_ROCKET", "IMP_DIRT", "IMP_METAL"};
@@ -181,7 +148,7 @@ struct FireProject {
 		import.imports = {{source + "/skinned.o3d", {}}, {source + "/sold.o3a", {}}};
 		session.handle(import);
 		session.run_operations();
-		ok = ok && editor_test::write_bytes(root + "/sounds/game.lwf", bank_of(std::vector<std::string>(std::begin(kSets), std::end(kSets))));
+		ok = ok && editor_test::write_bytes(root + "/sounds/game.lwf", editor_test::wave_bank_of(std::vector<std::string>(std::begin(kSets), std::end(kSets))));
 		const std::vector<uint8_t> tone = test_io::read_file(repo() + "/fixtures/lwf/tone.wav");
 		for (const char *set : kSets) ok = ok && editor_test::write_bytes(root + "/sounds/" + strutil::to_lower(set) + ".wav", tone);
 		ok = ok && editor_test::write_text(root + "/defs/SndProf.def",

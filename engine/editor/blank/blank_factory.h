@@ -26,7 +26,7 @@ struct BlankParam {
 	bool required = false;
 };
 
-// The blank factories (ADR 0046 d7/d8): from-scratch files for the requirements a new
+// The blank factories (ADR 0046 d7): from-scratch files for the requirements a new
 // project must satisfy and for the new files an author adds, each produced through the
 // engine's own serializer (rtxt, mnu, mns, fnt, tga, dds, pcx, bms ...) or, where no writer
 // exists yet, a constant CRLF template. No retail bytes: the font is drawn in code, the

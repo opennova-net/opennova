@@ -52,7 +52,6 @@ namespace {
 using graph_names::is_style_reference;
 using graph_names::key;
 std::string extension_of(const std::string &name) { return key(utf8_of(path_of(name).extension())); }
-std::string stem_of(const std::string &name) { return utf8_of(path_of(name).stem()); }
 
 // The file a path names, else the first of its logical name (two files of one name are the
 // scan's asset.name.duplicate: the path picks which is renamed).
@@ -72,9 +71,9 @@ const AssetEntry *find_asset(const AssetScan &scan, const std::string &file) {
 // from the spelling itself stays (a normal map's .tga).
 std::string replacement(const std::string &value, const std::string &old_name, const std::string &new_name) {
 	if (key(value) == key(old_name)) return new_name;
-	const std::string old_stem = stem_of(old_name);
+	const std::string old_stem = file_stem(old_name);
 	if (value.size() >= old_stem.size() && key(value.substr(0, old_stem.size())) == key(old_stem))
-		return stem_of(new_name) + value.substr(old_stem.size());
+		return file_stem(new_name) + value.substr(old_stem.size());
 	return new_name;
 }
 
@@ -548,7 +547,7 @@ RenamePlan plan_split(const ProjectPaths &paths, const AssetScan &scan, const As
 		// binds as its outputs' would: up to 16 characters).
 		const std::string source_dir = utf8_of(path_of(asset->imported_from).parent_path());
 		const std::string source_extension = utf8_of(path_of(asset->imported_from).extension());
-		const std::string stem = stem_of(new_name);
+		const std::string stem = file_stem(new_name);
 		for (int n = 0; n < 100 && plan.split_source.empty(); ++n) {
 			const std::string suffix = n == 0 ? std::string() : "_" + std::to_string(n + 1);
 			const size_t room = size_t(pff::PFF_NAME_SIZE) - suffix.size() - source_extension.size();
@@ -574,15 +573,6 @@ RenamePlan plan_split(const ProjectPaths &paths, const AssetScan &scan, const As
 		plan.refusals.push_back(refusal(CoreFinding::TextureSplit, "None of the files named uses " + asset->logical_name + ".",
 		                                asset->relative_path));
 	return plan;
-}
-
-bool apply_rename(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
-                  const AssetGraph &graph, const RenamePlan &plan, std::vector<Diagnostic> &findings) {
-	RenameTransaction transaction(paths, project, scan, graph, plan);
-	while (!transaction.step()) {
-	}
-	findings.insert(findings.end(), transaction.findings().begin(), transaction.findings().end());
-	return transaction.ok();
 }
 
 SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGraph &graph, const GraphSymbol &symbol,

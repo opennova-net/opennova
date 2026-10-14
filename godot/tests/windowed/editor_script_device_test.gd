@@ -10,8 +10,7 @@ extends GutTest
 ## imgui-godot layer reads the OS cursor, which a test does not move. A tests/windowed/ script, run
 ## by `scripts/test_godot.sh --suite core --windowed`.
 
-const EDITOR_SCENE := "res://editor/editor_root.tscn"
-const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
+const EditorFixture := preload("res://tests/authoring/editor_fixture.gd")
 const SCRIPT := "scripts/text_document.wac"
 
 var _dirs: Array[String] = []
@@ -20,29 +19,18 @@ var _seam: RefCounted = null
 
 
 func after_each() -> void:
-	_app = null
-	for dir in _dirs:
-		TestFs.remove_dir_recursive(dir)
-	_dirs.clear()
+	await EditorFixture.teardown(self, _dirs)
 
 
 ## The editor booted in the test's tree. The ImGui context's frames come first: Dear ImGui refuses
 ## docking and viewports switched on between its first frame and its second (the editor's own launch
 ## switches them on before the first), and a script run first in the process would boot there.
 func _boot() -> bool:
-	await _frames(3)
-	var packed := load(EDITOR_SCENE) as PackedScene
-	assert_not_null(packed, "the editor scene loads (the editor-enabled variant is loaded)")
-	if packed == null:
+	_seam = await EditorFixture.boot(self, "script device", _dirs, 3)
+	if _seam == null:
 		return false
-	_app = packed.instantiate()
-	_seam = EditorSeam.new(_app)
-	var settings_dir := OS.get_cache_dir().path_join("opennova editor script device %d" % Time.get_ticks_usec())
-	assert_eq(DirAccess.make_dir_recursive_absolute(settings_dir), OK)
-	_dirs.append(settings_dir)
-	_app.set("settings_path", settings_dir.path_join("editor_settings.json"))
-	add_child_autofree(_app)
-	await _frames(2)
+	_app = _seam.app
+	await _frames(1)
 	return true
 
 

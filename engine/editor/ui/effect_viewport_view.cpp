@@ -13,22 +13,12 @@
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/viewport_widgets.h>
 #include <editor/ui/workspace.h>
 
 namespace opennova::editor {
 
 namespace {
-
-void set_clock(Workspace &workspace, const EffectViewport &model, const char *member, io::JsonValue value) {
-	io::JsonValue clock = io::JsonValue::make_object();
-	clock.set(member, std::move(value));
-	workspace.request(request::set_viewport(model.path(), viewport_change(ViewportKind::Effect, "clock", std::move(clock))));
-}
-
-// A combo as wide as its widest choice, its arrow and its padding: none is cut.
-float combo_width(float widest_text) {
-	return widest_text + ImGui::GetFrameHeight() + ImGui::GetStyle().FramePadding.x * 2.0f;
-}
 
 // The effect shown among the file's: each by its id, one the catalog spawns another definition for
 // dimmed with why.
@@ -61,11 +51,7 @@ void effect_picker(Workspace &workspace, const EffectViewport &model, ui_kit::Wr
 	// Its block in the text: the script device's caret there (a Go to, so back and forward record it).
 	const std::string place = model.place_of(shown);
 	if (ui_kit::tool(row, "Go to", !place.empty(), place.empty() ? "The effect is not in the text as it stands." : "Its block in the text.")) {
-		ReferenceTarget target;
-		target.file = model.path();
-		target.locator = place;
-		target.editable = true;
-		window_requests::go_to(workspace, target);
+		window_requests::go_to(workspace, window_requests::target_at(model.path(), place));
 	}
 }
 
@@ -88,20 +74,11 @@ void EffectViewportView::draw_ready(Workspace &workspace, const ViewportModel &v
 	ui_kit::WrapRow row;
 	effect_picker(workspace, model, row);
 	// The preview clock: Run or Pause (Play is the game's), and Replay (tick 0: the effect spawned anew).
-	const bool playing = context.input.clock.playing();
-	const char *run = playing ? "Pause" : "Run";
-	row.next(ui_kit::button_width(run));
-	if (ImGui::Button(run)) set_clock(workspace, model, "playing", io::JsonValue::make_bool(!playing));
-	ui_kit::tooltip("Run or hold the preview clock: the effect's game ticks.");
-	if (ui_kit::tool(row, "Replay", true, "The effect spawned anew: the preview clock at tick 0."))
-		set_clock(workspace, model, "ticks", io::json_number(0));
+	clock_buttons(workspace, row, model, context.input.clock, "Run or hold the preview clock: the effect's game ticks.",
+			"The effect spawned anew: the preview clock at tick 0.");
 	EffectViewportOptions options = model.options();
-	row.next(ui_kit::checkbox_width("Loop"));
-	ImGui::Checkbox("Loop", &options.play.loop);
-	ui_kit::tooltip("Spawn the effect again as it dies (the editor's aid: the game spawns it once per event).");
-	row.next(ui_kit::checkbox_width("Grid"));
-	ImGui::Checkbox("Grid", &options.grid);
-	ui_kit::tooltip("A metre's squares on the ground the effect spawns on (the editor's aid).");
+	ui_kit::check(row, "Grid", &options.grid,
+	              "A metre's squares on the ground the effect spawns on (the editor's aid).");
 	// The mission wind every GLOBALWIND particle drifts with, as a mission's header gives it.
 	row.next(ui_kit::button_width("Wind"));
 	if (ImGui::Button("Wind")) ImGui::OpenPopup("wind");
@@ -122,7 +99,7 @@ void EffectViewportView::draw_ready(Workspace &workspace, const ViewportModel &v
 	if (ui_kit::tool(row, "Frame", true, "The camera on the live particles (F, or a double click on the picture)."))
 		workspace.request(request::set_viewport(model.path(), effect_camera_change(model.framed(context.width, context.height))));
 	if (options != model.options()) workspace.request(request::set_viewport(model.path(), effect_options_change(options)));
-	// The playing cycle: its tick, its age, and what the scene holds.
+	// The spawn: its tick, its age, and what the scene holds.
 	const EffectPlayback &play = model.playback();
 	size_t particles = 0;
 	if (play.scene()) particles = play.scene()->live_counts().particle_count;
@@ -133,7 +110,7 @@ void EffectViewportView::draw_ready(Workspace &workspace, const ViewportModel &v
 	ImGui::AlignTextToFramePadding();
 	ImGui::TextDisabled("%s", readout);
 	ui_kit::tooltip(play.alive() ? "The effect as the game's effect scene steps it, a game tick at a time."
-	                             : "The effect died: Replay spawns it again, or Loop does as it dies.");
+	                             : "The effect died: Replay spawns it again (the game spawns an effect once per event).");
 	// Where the game resolves the name, when it is not this block; a file the game does not load; the
 	// graphics the project lacks.
 	const particle::EffectClosure &closure = model.closure();
@@ -146,11 +123,7 @@ void EffectViewportView::draw_ready(Workspace &workspace, const ViewportModel &v
 		std::string file, locator;
 		if (model.spawned_place(file, locator) &&
 				ui_kit::tool(note, "Go to it", true, "The definition the game spawns, in " + file + ".")) {
-			ReferenceTarget target;
-			target.file = file;
-			target.locator = locator;
-			target.editable = true;
-			window_requests::go_to(workspace, target);
+			window_requests::go_to(workspace, window_requests::target_at(file, locator));
 		}
 		ImGui::SameLine();
 		ui_kit::clipped_text(said);

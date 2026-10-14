@@ -52,10 +52,13 @@ void fragment() {
 }
 )";
 
+// A canvas drawn on a screen of its own that is then stretched over the picture (the HUD's) scales its pixels by the
+// stretch, so the checker's squares fall on the picture's pixels as every other picture's do.
 constexpr const char *kCanvasHead = "shader_type canvas_item;\n";
 constexpr const char *kCanvasBody = R"(
+uniform vec2 backdrop_pixel_scale = vec2(1.0);
 void fragment() {
-	COLOR = vec4(preview_backdrop(UV.y, FRAGCOORD.xy), 1.0);
+	COLOR = vec4(preview_backdrop(UV.y, FRAGCOORD.xy * backdrop_pixel_scale), 1.0);
 }
 )";
 

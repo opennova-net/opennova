@@ -26,10 +26,12 @@ enum class EffectViewStatus : uint8_t {
 	Ready,
 };
 // "no_project", "no_file", "unreadable", "no_effect", "spawns_nothing", "ready": its token on the wire.
-const char *effect_view_status_token(EffectViewStatus status);
+inline constexpr const char *kEffectViewStatusTokens[] = {
+	"no_project", "no_file", "unreadable", "no_effect", "spawns_nothing", "ready",
+};
 
 // How an effect viewport plays and draws its effect: the effect shown (its id; "" the file's first,
-// and an id the file no longer defines the first too), how it plays (effect_playback.h: loop, wind),
+// and an id the file no longer defines the first too), how it plays (effect_playback.h: the wind),
 // and the ground grid under it (the editor's aid: a metre's squares on the plane the effect spawns on).
 struct EffectViewportOptions {
 	std::string effect;
@@ -41,9 +43,6 @@ struct EffectViewportOptions {
 	bool operator!=(const EffectViewportOptions &other) const { return !(*this == other); }
 };
 
-// The options on the wire (the envelope's `options`, a SetViewport's): {effect, loop, wind_speed,
-// wind_direction, grid}.
-io::JsonValue effect_options_to_json(const EffectViewportOptions &options);
 // The change a SetViewport makes to set an effect viewport's options to `options`, and its camera.
 std::string effect_options_change(const EffectViewportOptions &options);
 std::string effect_camera_change(const OrbitCamera &camera);
@@ -61,8 +60,7 @@ struct EffectViewportEffect {
 // A particle file's effect viewport (ADR 0046 DI-14; ViewportKind::Effect, the Preview role of the
 // particle type; CONTEXT.md "Effect preview"): the effect the file defines that its options name,
 // spawned by the engine's own effect scene as the game spawns one alone (preview/effect_playback: at the
-// origin with no orientation, on the preview clock's ticks, spawned again as it dies while it loops,
-// pre-aged on a seek), over the catalog the game would load were the project saved now
+// origin with no orientation, once, on the preview clock's ticks, pre-aged on a seek), over the catalog the game would load were the project saved now
 // (preview/effect_catalog: every particle file in the effect system's order, the open documents standing
 // in), so what it shows is what the game spawns for the name: the first definition registered, its
 // members as the game resolves them (all or nothing), its tables. An edit of any particle file shows at
@@ -101,7 +99,7 @@ public:
 	std::string place_of(const std::string &id) const;
 
 	ViewportStatus status() const override;
-	const char *reason() const override { return effect_view_status_token(reason_); }
+	const char *reason() const override { return enum_token(kEffectViewStatusTokens, reason_); }
 	std::string message() const override;
 	const std::string &detail() const override { return detail_; }
 	std::string caption() const override;

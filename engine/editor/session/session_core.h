@@ -149,9 +149,6 @@ public:
 	// A finding: a Problems row (ProblemsService::add_reported, which never validates), the
 	// request's outcome when one is served, and a line in Output.
 	void report(const Diagnostic &d);
-	// A finding raised while serving a request is that request's outcome; one raised by a poll (the
-	// build finishing, the game's log) belongs to no request.
-	void record_outcome(const Diagnostic &d);
 	// A request that cannot run now: a warning, and the request did nothing.
 	void refuse_now(CoreFinding code, const std::string &message, const std::string &asset = std::string());
 	// A request refused for what it names (a path the project lacks, an address no record has): its
@@ -177,17 +174,12 @@ public:
 	// The running operation's steps within `budget` (the poll's: what its validation steps left of
 	// its budget, at least one step).
 	void step_operation(const PollBudget &budget);
-	// True when what reads `reads` and writes `writes` conflicts with the running operation.
-	bool busy_for(Holds reads, Holds writes) const;
-	// "Wait for the build to finish, or cancel it, first.": `until` ends it.
-	std::string busy_message(const std::string &until) const;
 	void refuse_busy(const std::string &asset);
 	// The running operation cancelled between two steps (`asked`: CancelOperation's own words);
 	// true when none runs now (none ran, or it was cancelled), false when it cannot be cancelled.
 	bool cancel_operation(bool asked);
 	// The operation the poll found done, finished: the view learns what it came to.
 	void finish_operation();
-	void show_operation();
 
 	// --- the project ------------------------------------------------------------------------
 
@@ -204,30 +196,10 @@ public:
 	// CheckInstall: the folder `path` ("" the editor's last chosen) read as an install of the open
 	// project's game (check_install), the view's install_check.
 	void check_install(const std::string &path);
-	// The recent projects' details (ProjectView::recent_details): those of a root the details hold kept, a
-	// root new to the list read from its project file, a root gone from it dropped (each project file read
-	// once, at start and as it joins the list, never on every save of the preferences); the open project's
-	// own from its document (`open`, as it closes: a title renamed in its settings).
-	void read_recent_details(const ProjectDocument *open = nullptr, const std::string &open_root = std::string());
-	// The documents open now (DocumentSet::open_with_selection) and the active one kept in the project's
-	// local settings when they changed (the UX round's project lane): as the project closes, as the editor
-	// quits. Only the workspace's fields are written, over local.json as it is on disk (a session's own
-	// install, open_project's `game_install`, is never written); nothing for a project whose project file
-	// is gone (its folder moved or removed while it was open: no `.opennova/` made at its old path), nor
-	// when the session keeps no workspace (a command line's, set_workspace_kept). restore_workspace opens
-	// them again as an Open finishes, in their order, each at its record, the active one last; a file gone
-	// since, or one the editor no longer opens, passed over.
-	void remember_workspace();
-	void restore_workspace();
 	// Whether an Open reopens the documents a project was left with and a close or a quit keeps them (the
 	// editor's; true by default): a command line's run sets it false, so its verbs neither load the
 	// documents local.json lists nor write them.
 	void set_workspace_kept(bool kept) { workspace_kept_ = kept; }
-	// Why the last New project or Open was refused, for the welcome page, which stands in for Output and
-	// Problems while no project is open (ProjectView::refused); cleared as either starts.
-	void refuse_project(const Diagnostic &why, const std::string &what);
-	// The editor's install and the one in effect shown (ProjectView::editor_install, retail_directory).
-	void show_installs();
 	// The project in `dir` read (its document, its local settings; `game_install` in place of the
 	// install they name, for the session alone, when given), then, the open one closed, opened as an
 	// operation (OpenOperation, S13 A3: the game install's names, the import pass unless `import_pass`
@@ -255,8 +227,6 @@ public:
 	// for them and the files that moved, the open documents of those files read again, the validation left
 	// due; each file that came back named in Output (ADR 0046 DI-01, note_came_back).
 	void absorb_changed(ImportRunResult &imports, const std::vector<std::string> &files);
-	// The refresh run to its end now and the project validated (the build's, before it plans).
-	void refresh_now();
 	// The project files at `paths` read again alone (AssetScan::update: a Save's, a create's, a
 	// rename's commit), the requirements evaluated again over the scan, the validation left due.
 	void update_files(const std::vector<std::string> &paths);
@@ -304,8 +274,6 @@ public:
 	// Quit: the running operation cancelled first (one that cannot be keeps the editor open,
 	// refused), then the view's quit_requested set, which the shell acts on.
 	void quit();
-	// The preferences kept by their store, and shown.
-	void save_preferences();
 	// The previews' background (the Preview background preference, session/preview_background.h): written from a
 	// copy (one that could not be written stays the one in effect, its failure a finding), shown at once, each
 	// open preview drawing it at its device's next pump.
@@ -314,8 +282,6 @@ public:
 	// since the polish, recent_items_game), shown at once; kept by the next poll's save_recent_items
 	// (nothing to keep when it was first already, or with no project open).
 	void remember_recent_item(int64_t item);
-	// The view's recently placed items: the open project's game's (none with no project open).
-	void show_recent_items();
 	// The poll's (and a quit's, and the session's end): the recently placed items kept by the store when
 	// they changed since; a store that cannot keep them says so in Output, failing no request.
 	void save_recent_items();
@@ -327,13 +293,6 @@ public:
 	// every read of the base game reads: the import's listing, the base's names, lean packing, the build's
 	// gate and the Play run's base; the game install stays the program Play in the game install starts.
 	std::string base_game() const;
-	// The game install's expansions read again into the view (ADR 0046 S16: the ones it mounts, with
-	// the Mods list's name and description of each), when the install may have moved; for an expansion of a
-	// project's base game, the base game's (base_game()).
-	void read_install_expansions();
-	// The requirements of `doc` over `scan`, with the game install's expansions weighed
-	// (evaluate_requirements: the project's expansion against them, listed).
-	RequirementReport requirements_of(const ProjectDocument &doc, const AssetScan &scan) const;
 	// The requirement row of `role`, or null.
 	const RequirementRow *requirement_row(const std::string &role) const;
 	// The project file `file` names, its case aside: the one at that project-relative path in any
@@ -361,10 +320,6 @@ public:
 	// that waited on it came to (`shipped`: its ExportRun's report, or what refused it; null when none ran).
 	OperationOutcome absorb_build(const BuildReport &result, const std::vector<Diagnostic> &gate, const PlayIntent &intent,
 	                              const ExportIntent &exported, const ExportReport *shipped);
-	// What an Export that waited on the build `built` copies (BuildOperation's ExportResolver): its folder
-	// (export_folder), the runtime beside a standalone game when the project asks for it; false with
-	// `refused` holding what refuses it.
-	bool export_request(const ExportIntent &intent, const BuildReport &built, ExportRequest &request, ExportReport &refused);
 	// The folder an Export lands in: `to` from the project's folder when relative, else the
 	// project's export folder; "" with a finding reported when it lies inside the project but the
 	// export folder (the next scan would list what it holds as the project's files).
@@ -380,6 +335,51 @@ public:
 	ShippedFiles shipped_files(const std::vector<Diagnostic> &gate);
 
 private:
+	// A finding raised while serving a request is that request's outcome; one raised by a poll (the
+	// build finishing, the game's log) belongs to no request.
+	void record_outcome(const Diagnostic &d);
+	// True when what reads `reads` and writes `writes` conflicts with the running operation.
+	bool busy_for(Holds reads, Holds writes) const;
+	// "Wait for the build to finish, or cancel it, first.": `until` ends it.
+	std::string busy_message(const std::string &until) const;
+	void show_operation();
+	// The recent projects' details (ProjectView::recent_details): those of a root the details hold kept, a
+	// root new to the list read from its project file, a root gone from it dropped (each project file read
+	// once, at start and as it joins the list, never on every save of the preferences); the open project's
+	// own from its document (`open`, as it closes: a title renamed in its settings).
+	void read_recent_details(const ProjectDocument *open = nullptr, const std::string &open_root = std::string());
+	// The documents open now (DocumentSet::open_with_selection) and the active one kept in the project's
+	// local settings when they changed (the UX round's project lane): as the project closes, as the editor
+	// quits. Only the workspace's fields are written, over local.json as it is on disk (a session's own
+	// install, open_project's `game_install`, is never written); nothing for a project whose project file
+	// is gone (its folder moved or removed while it was open: no `.opennova/` made at its old path), nor
+	// when the session keeps no workspace (a command line's, set_workspace_kept). restore_workspace opens
+	// them again as an Open finishes, in their order, each at its record, the active one last; a file gone
+	// since, or one the editor no longer opens, passed over.
+	void remember_workspace();
+	void restore_workspace();
+	// Why the last New project or Open was refused, for the welcome page, which stands in for Output and
+	// Problems while no project is open (ProjectView::refused); cleared as either starts.
+	void refuse_project(const Diagnostic &why, const std::string &what);
+	// The editor's install and the one in effect shown (ProjectView::editor_install, retail_directory).
+	void show_installs();
+	// The refresh run to its end now and the project validated (the build's, before it plans).
+	void refresh_now();
+	// The preferences kept by their store, and shown.
+	void save_preferences();
+	// The view's recently placed items: the open project's game's (none with no project open).
+	void show_recent_items();
+	// The game install's expansions read again into the view (ADR 0046 S16: the ones it mounts, with
+	// the Mods list's name and description of each), when the install may have moved; for an expansion of a
+	// project's base game, the base game's (base_game()).
+	void read_install_expansions();
+	// The requirements of `doc` over `scan`, with the game install's expansions weighed
+	// (evaluate_requirements: the project's expansion against them, listed).
+	RequirementReport requirements_of(const ProjectDocument &doc, const AssetScan &scan) const;
+	// What an Export that waited on the build `built` copies (BuildOperation's ExportResolver): its folder
+	// (export_folder), the runtime beside a standalone game when the project asks for it; false with
+	// `refused` holding what refuses it.
+	bool export_request(const ExportIntent &intent, const BuildReport &built, ExportRequest &request, ExportReport &refused);
 	// What absorb_changed says of the files that came back from outside the editor (`before` and `after` the
 	// scan, `imported` the sources the pass took and their records): an Output line each, or one line with
 	// each under it.

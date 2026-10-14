@@ -95,10 +95,7 @@ struct Rig {
 	}
 };
 
-const JsonValue *at(const JsonValue &value, const char *a, const char *b = nullptr) {
-	const JsonValue *one = value.get(a);
-	return b && one ? one->get(b) : one;
-}
+using editor_test::at;
 
 int write_mission(const std::string &root, const char *name, const char *tile_set) {
 	opennova::bms::File file;

@@ -1,5 +1,6 @@
 // A model's bullet-face surfaces on its materials (model_surfaces.h).
 
+#include <base/io/fixed.h>
 #include <editor/documents/model_surfaces.h>
 
 #include <algorithm>
@@ -40,7 +41,7 @@ static_assert(kModelSurfaceCount + kTagOffset == world::kImpactEffectTagCount, "
 // nonzero for exactly these five.
 std::string passes_words(int32_t cost_q16) {
 	char cost[16];
-	std::snprintf(cost, sizeof(cost), "%g", cost_q16 / 65536.0);
+	std::snprintf(cost, sizeof(cost), "%g", cost_q16 / io::kFp16OneD);
 	return std::string("Rounds go on through it, paying ") + cost +
 	       " of their energy (a round left with none stops in it).";
 }
@@ -62,7 +63,7 @@ ModelSurfaceWords model_surface_words(int64_t poly_type) {
 	out.tag = world::kImpactEffectTagNames[tag];
 	if (const int32_t cost_q16 = world::material_energy_cost(static_cast<uint8_t>(poly_type))) {
 		out.passes = true;
-		out.energy_cost = cost_q16 / 65536.0;
+		out.energy_cost = cost_q16 / io::kFp16OneD;
 		out.note = passes_words(cost_q16);
 	}
 	const auto also = [&](const char *words) { out.note += (out.note.empty() ? "" : " ") + std::string(words); };

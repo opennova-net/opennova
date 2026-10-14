@@ -232,16 +232,16 @@ void draw_swatches(const std::vector<Swatch> &swatches, int picked, Pick &&pick)
 void draw_fill_erase(TerrainPaneContext &context, ui_kit::WrapRow &row) {
 	const TerrainBrush &brush = context.brush;
 	bool fill = brush.fill;
-	row.next(ui_kit::checkbox_width("Fill"));
-	if (ImGui::Checkbox("Fill", &fill)) window_requests::set_workspace(context.workspace, "terrain_brush", "fill", io::JsonValue::make_bool(fill));
-	ui_kit::tooltip("A click fills the texels joined to the one under it that hold its value, wherever the terrain "
-	                "draws them (a drag fills where it was pressed).");
+	if (ui_kit::check(row, "Fill", &fill,
+	                  "A click fills the texels joined to the one under it that hold its value, wherever the terrain "
+	                  "draws them (a drag fills where it was pressed)."))
+		window_requests::set_workspace(context.workspace, "terrain_brush", "fill", io::JsonValue::make_bool(fill));
 	bool erase = brush.erase;
-	row.next(ui_kit::checkbox_width("Erase"));
-	if (ImGui::Checkbox("Erase", &erase)) window_requests::set_workspace(context.workspace, "terrain_brush", "erase", io::JsonValue::make_bool(erase));
-	ui_kit::tooltip("Lay the game's default in place of the brush's value: class 1 (dirt, the game's class where a "
-	                "terrain names no surface map), foliage code 0 (grows nothing), the first detail layer, the colour "
-	                "map as last saved.");
+	if (ui_kit::check(row, "Erase", &erase,
+	                  "Lay the game's default in place of the brush's value: class 1 (dirt, the game's class where a "
+	                  "terrain names no surface map), foliage code 0 (grows nothing), the first detail layer, the colour "
+	                  "map as last saved."))
+		window_requests::set_workspace(context.workspace, "terrain_brush", "erase", io::JsonValue::make_bool(erase));
 }
 
 } // namespace

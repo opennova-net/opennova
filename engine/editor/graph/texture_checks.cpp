@@ -159,7 +159,9 @@ void check_sizes(R role, const std::string &file, const TextureHeader &header, c
 	case R::TerrainColourMap: {
 		// Checksummed and premultiplied over exactly 0x400000 bytes [orig: PolyTrn_InitTextures @ 0x60B3BE,
 		// @ 0x60B5A9..0x60B6FD], its quadrants split at its own width into a buffer of its texels [orig: the
-		// split @ 0x60B510].
+		// split @ 0x60B510]. Listed (S26 A4): a short map's read runs on into the arena's memory past its block
+		// (FastMem, no fault [orig: FastMem_Alloc @ 0x7697B0]), and no failure of the split's write past the
+		// wider map's buffer is witnessed.
 		constexpr uint32_t side = terrain::kTerrainColourMapSide;
 		if (w == side && h == side) break;
 		const bool short_read = uint64_t(w) * h < uint64_t(side) * side;
@@ -180,7 +182,8 @@ void check_sizes(R role, const std::string &file, const TextureHeader &header, c
 	}
 	case R::TerrainBlendMap:
 		// Loaded whole, then split at its width into a buffer of its texels [orig: PolyTrn_InitTextures @
-		// 0x60B1B8 (the load), @ 0x60B29C (the buffer), @ 0x60B2C1 (the split)].
+		// 0x60B1B8 (the load), @ 0x60B29C (the buffer), @ 0x60B2C1 (the split)]: listed, no failure of it
+		// witnessed (S26 A4).
 		if (terrain::terrain_map_split_overruns(w, h))
 			add(F::TextureBlendMapSize, DiagnosticSeverity::Error,
 			    is + ": the game splits it in quadrants of half its width, copying " + sides(w & ~1u, w & ~1u) +
@@ -190,7 +193,8 @@ void check_sizes(R role, const std::string &file, const TextureHeader &header, c
 	case R::TerrainFoliageMap: {
 		// Sampled at (c & 1023) >> (10 - log2(width)) on both axes; past 1024 the shift is negative, which the
 		// processor takes modulo 32, so every sample reads the first texel (terrain::surface_sample_extent, its
-		// witnesses).
+		// witnesses). Rows past the file's read the arena's memory past its block [orig: Foliage_LoadFoliageMapPCX
+		// @ 0x605B35; Foliage_SampleFoliageMapMask @ 0x60660D]: wrong foliage, no fault, listed (S26 A4).
 		const uint32_t side = uint32_t(terrain::surface_sample_extent(int32_t(std::min<uint32_t>(w, 0x7FFFFFFF))));
 		if (w <= 1024 && h < side)
 			add(F::TextureFoliageMapOverrun, DiagnosticSeverity::Error,
@@ -209,8 +213,8 @@ void check_sizes(R role, const std::string &file, const TextureHeader &header, c
 		// Sampled as the foliage map is, at (c & 1023) >> (10 - log2(width)) on both axes, its byte the class
 		// (terrain::surface_sample_extent) [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510..0x6065C6], from a heap
 		// block the file's own size, width times height ("PolyTrn Charmap") [orig: sub_605A10 @ 0x605A58,
-		// sub_759E20(w*h)]: rows past the file's read past the block, so that one is gated; the other shapes are
-		// listed.
+		// sub_759E20(w*h)]: rows past the file's read past the block, the arena's memory beyond it, no fault (S26
+		// A4): listed, as the other shapes are.
 		const uint32_t side = uint32_t(terrain::surface_sample_extent(int32_t(std::min<uint32_t>(w, 0x7FFFFFFF))));
 		if (w <= 1024 && h < side)
 			add(F::TextureCharMapOverrun, DiagnosticSeverity::Error,
@@ -329,6 +333,42 @@ void check_budget(R role, const std::string &served, const TextureHeader &header
 	add(F::TextureMemory, DiagnosticSeverity::Warning, message);
 }
 
+// What the game's TGA reader makes of a terrain map's file (tga_reader_read), in words: the sides it reads and
+// what it writes for the texels, then what the terrain does with it (`blend`: the detail blend map, which the
+// terrain loads without where the read fails [orig: PolyTrn_InitTextures @ 0x60B1C2 -> 0x60B35B]; else the
+// colour map, whose failed read logs "colortga" and aborts the mission [orig: @ 0x60B3B1 -> 0x60C60A;
+// Game_ShowErrorLogAndAbortMission @ 0x520B4E]).
+std::string tga_reader_words(const TgaReaderRead &read, const TextureHeader &header, bool blend) {
+	const std::string sides = std::to_string(read.width) + " x " + std::to_string(read.height);
+	const std::string form = "its image type " + std::to_string(header.tga_type) + " at " + std::to_string(header.tga_bits) +
+	                         " bits";
+	switch (read.outcome) {
+	case TgaReaderOutcome::Refused:
+		return " The game's TGA reader reads its bytes 12 to 15 as a " + sides + " picture and asks its memory pool for " +
+		       texture_bytes_words(uint64_t(std::max<int64_t>(read.texel_bytes, 0))) +
+		       " of texels, more than the pool (" + texture_bytes_words(uint64_t(kGameMemoryPoolBytes)) +
+		       ") can give: the read fails, and " +
+		       (blend ? std::string("the game loads the terrain without a detail blend, logging nothing.")
+		              : std::string("the mission aborts (\"Polytrn: colortga\")."));
+	case TgaReaderOutcome::Faults:
+		return " The game's TGA reader reads its bytes 12 to 15 as a " + sides +
+		       " picture, whose texels' bytes do not fit the int it sizes their buffer in: it writes them past the buffer "
+		       "it gets, and the game faults loading the terrain.";
+	case TgaReaderOutcome::Decoded:
+		return " The game's TGA reader decodes its bytes as a " + sides + " TGA's texels (" + form +
+		       ") and the terrain loads on with them.";
+	case TgaReaderOutcome::Black:
+		return " The game's TGA reader takes it as " + sides + " black texels (" + form +
+		       ", which its reader clears) and the terrain loads on.";
+	case TgaReaderOutcome::Stale:
+		return " The game's TGA reader takes it as " + sides + " texels it never writes (" + form +
+		       ", which no arm of its reader decodes), holding what the game's memory held there, and the terrain loads on.";
+	case TgaReaderOutcome::Empty:
+		return " The game's TGA reader reads its sides as " + sides + ", no texel, and the terrain loads on.";
+	}
+	return std::string();
+}
+
 void check_use(const AssetGraph &graph, const ValidationInput &input, const GraphEdge &edge,
                std::set<std::pair<std::string, std::string>> &passed_over, std::set<std::string> &costed,
                std::vector<Diagnostic> &out) {
@@ -377,16 +417,29 @@ void check_use(const AssetGraph &graph, const ValidationInput &input, const Grap
 	const TextureReader reader = reader_of(load.reader);
 	const TextureHeader *header = header_of(input, served, reader);
 	if (!header) return;
-	// A map whose loss aborts the mission gates when its reader cannot read it, but the detail blend map: a
-	// blend map the TGA reader refuses is skipped, nothing logged, the terrain loading on without a blend
-	// [orig: PolyTrn_InitTextures @ 0x60B1B8..0x60B1C2 to @ 0x60B35B] (a missing one still aborts, the
-	// reference's own gate [orig: @ 0x60B18E, "blendermap" @ 0x60B19A]).
-	const bool skipped = role == R::TerrainBlendMap;
-	const DiagnosticSeverity reader_severity = texture_arg_gates(edge.loader_arg) && !skipped ? DiagnosticSeverity::Error
-	                                                                                           : DiagnosticSeverity::Warning;
-	const std::string skip_words = skipped ? " The game makes no detail blend from it and loads the terrain without one, "
-	                                         "logging nothing."
-	                                       : std::string();
+	// A terrain's colour map and detail blend map go through the TGA reader whatever the file holds, which fails
+	// only for a missing file [orig: CTerrainTileData_LoadTGAFromArchive @ 0x56E585] or an allocation or a
+	// decompression that fails (@ 0x56E62C, @ 0x56E65F, @ 0x56E6AA); its texels' allocation is sized by the header's
+	// words before the image type is looked at (tga_reader_read). A failed read of the colour map aborts the
+	// mission, the game's refusal its row cites; of the blend map it is skipped, nothing logged, the terrain loading
+	// on without a blend [orig: PolyTrn_InitTextures @ 0x60B1B8..0x60B1C2 to @ 0x60B35B] (a missing one aborts, the
+	// reference's own gate [orig: @ 0x60B18E, "blendermap" @ 0x60B19A]). A read that writes past its buffer faults
+	// either way. Any other read loads on, with what the type's arm wrote: a warning, listed.
+	const bool terrain_tga = reader == TextureReader::Tga && texture_arg_gates(edge.loader_arg);
+	const bool blend = role == R::TerrainBlendMap;
+	const TgaReaderRead tga = terrain_tga && header->read ? tga_reader_read(*header) : TgaReaderRead();
+	if (terrain_tga && header->read &&
+	    (tga.outcome == TgaReaderOutcome::Refused || tga.outcome == TgaReaderOutcome::Faults)) {
+		const bool fails = tga.outcome == TgaReaderOutcome::Faults || !blend;
+		add(F::TextureWrongReader, fails ? DiagnosticSeverity::Error : DiagnosticSeverity::Warning,
+		    basename_of(served) + ", " + where + ", is read by the game's TGA reader." + tga_reader_words(tga, *header, blend));
+		return;
+	}
+	// What the game makes of the file: a terrain map's texels as the TGA reader's arm writes them, or the role's own
+	// words for a file it does not get.
+	const std::string then = terrain_tga ? (header->read ? tga_reader_words(tga, *header, blend) : std::string())
+	                         : *row.missing ? " Without it: " + std::string(row.missing) + "."
+	                                        : std::string();
 	// A file of a format the role's loader does not read (a colour map that is no TGA, a particle graphic
 	// that is no TGA, a loading screen that is no PCX: roles.md's loaders).
 	const size_t dot = served.find_last_of('.');
@@ -394,23 +447,18 @@ void check_use(const AssetGraph &graph, const ValidationInput &input, const Grap
 	if (row.formats != 0 && !renderer::texture_role_takes(row, extension)) {
 		std::string formats;
 		for (const std::string &each : renderer::texture_role_extensions(row)) formats += (formats.empty() ? "" : ", ") + each;
-		add(F::TextureWrongReader, reader_severity,
+		add(F::TextureWrongReader, DiagnosticSeverity::Warning,
 		    basename_of(served) + ", " + where + ", is read by the game's " + reader_words(reader) + " reader, which takes " +
-		            (formats.empty() ? std::string("no texture file") : formats) + " files" +
-		            (skipped ? "." + skip_words
-		                     : *row.missing ? ": without one, " + std::string(row.missing) + "." : std::string(".")));
+		            (formats.empty() ? std::string("no texture file") : formats) + " files." + then);
 		return;
 	}
 	if (!header->read) {
-		// The loader cannot read the file at all (a colour map that is no TGA): for a terrain map the mission
-		// needs, the mission aborts [orig: PolyTrn_InitTextures, "colortga" @ 0x60B3BE; Game_StartMission @
-		// 0x525AD8]. Where the reader is the one the file's name picks and the use aborts nothing, the file's
-		// own finding (texture.unloadable) says it already.
+		// The loader cannot read the file at all (a TGA header cut short). Where the reader is the one the file's
+		// name picks and the use is no terrain map, the file's own finding (texture.unloadable) says it already.
 		if (reader == texture_reader_for(served) && !texture_arg_gates(edge.loader_arg)) return;
-		add(F::TextureWrongReader, reader_severity,
+		add(F::TextureWrongReader, DiagnosticSeverity::Warning,
 		    basename_of(served) + ", " + where + ", is read by the game's " + reader_words(reader) +
-		            " reader, which cannot read it: " + header->refusal +
-		            (skipped ? skip_words : *row.missing ? " Without it: " + std::string(row.missing) + "." : std::string()));
+		            " reader, which cannot read it: " + header->refusal + then);
 		return;
 	}
 	check_sizes(role, basename_of(served), *header, where, context, add);

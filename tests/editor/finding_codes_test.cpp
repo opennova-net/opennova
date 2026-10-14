@@ -34,6 +34,7 @@
 #include <vector>
 
 #include "common/test_expect.h"
+#include "editor/editor_test_support.h"
 
 using namespace opennova;
 using namespace opennova::editor;
@@ -113,10 +114,10 @@ static int test_tokens_unique() {
 		TEST_EXPECT(walked[i].owner == named[i].owner && walked[i].rows.rows == named[i].rows.rows &&
 		            walked[i].rows.count == named[i].rows.count);
 		for (const FindingCodeRow &row : named[i].rows)
-			TEST_EXPECT(finding_owner(&row) && std::string(finding_owner(&row)) == named[i].owner);
+			TEST_EXPECT(editor_test::finding_owner(&row) && std::string(editor_test::finding_owner(&row)) == named[i].owner);
 	}
 	const FindingCodeRow stray{ "stray.code" };
-	TEST_EXPECT(!finding_owner(&stray) && !finding_owner(nullptr));
+	TEST_EXPECT(!editor_test::finding_owner(&stray) && !editor_test::finding_owner(nullptr));
 	std::set<std::string> fixes;
 	for (const FindingFix fix : { FindingFix::None, FindingFix::Requirement, FindingFix::WrongKind, FindingFix::Rename,
 	                              FindingFix::ResetRow, FindingFix::Reference, FindingFix::UnimportedTexture,
@@ -138,10 +139,10 @@ static int test_tokens_unique() {
 static int test_lookup() {
 	for (const Table &table : tables())
 		for (const FindingCodeRow &row : table.rows)
-			TEST_EXPECT(finding_row(row.token) == &row);
-	TEST_EXPECT(!finding_row("") && !finding_row("reference") && !finding_row("reference.missing.") &&
-	            !finding_row("no.such_code"));
-	TEST_EXPECT(finding_row("reference.missing") == &finding_code(CoreFinding::ReferenceMissing));
+			TEST_EXPECT(editor_test::finding_row(row.token) == &row);
+	TEST_EXPECT(!editor_test::finding_row("") && !editor_test::finding_row("reference") && !editor_test::finding_row("reference.missing.") &&
+	            !editor_test::finding_row("no.such_code"));
+	TEST_EXPECT(editor_test::finding_row("reference.missing") == &finding_code(CoreFinding::ReferenceMissing));
 	TEST_EXPECT(std::string(finding_code(CoreFinding::AssetKindUnknown).token) == "asset.kind.unknown");
 	TEST_EXPECT(std::string(finding_code(CoreFinding::UnsavedNone).token) == "unsaved.none");
 	TEST_EXPECT(std::string(finding_code(CoreFinding::DocumentUnserializable).token) == "document.unserializable");
@@ -161,7 +162,7 @@ static int test_lookup() {
 // A test's stand-in in a registered type's place (S13 D6), with no finding codes of its own,
 // hides none of that type's: the lookup and the tables read the registry as registered.
 static int test_stand_in_hides_nothing() {
-	const FindingCodeRow *unused = finding_row("style.unused");
+	const FindingCodeRow *unused = editor_test::finding_row("style.unused");
 	TEST_EXPECT(unused == &finding_code(StyleFinding::Unused));
 	DocumentType blank_styles;
 	blank_styles.id = DocumentTypeId::Styles;
@@ -171,7 +172,7 @@ static int test_stand_in_hides_nothing() {
 	{
 		DocumentTypeStandIn stand_in(blank_styles);
 		TEST_EXPECT(document_type(DocumentTypeId::Styles) == &blank_styles);
-		TEST_EXPECT(finding_row("style.unused") == unused && finding_row("style.line_ending"));
+		TEST_EXPECT(editor_test::finding_row("style.unused") == unused && editor_test::finding_row("style.line_ending"));
 		bool styles = false;
 		for (const NamedFindingTable &table : finding_tables())
 			styles = styles || (std::string(table.owner) == "styles" && table.rows.holds(unused));
@@ -199,7 +200,7 @@ static int test_type_tables() {
 		const auto note = static_cast<menu::MenuFrameNoteCode>(i);
 		const FindingCodeRow &row = finding_code(note);
 		TEST_EXPECT(std::string(row.token) == std::string("menu.render.") + menu::menu_frame_note_token(note));
-		TEST_EXPECT(finding_row(row.token) == &row && menu_finding_codes().holds(&row) &&
+		TEST_EXPECT(editor_test::finding_row(row.token) == &row && menu_finding_codes().holds(&row) &&
 		            row.source == FindingSource::RenderCheck && row.group == FindingGroup::Menus);
 	}
 	TEST_EXPECT(menu_finding_codes().count ==
@@ -246,7 +247,7 @@ static int test_type_tables() {
 		const FindingCodeRow &row = finding_code(code);
 		if (token != row.token)
 			std::fprintf(stderr, "%s reads as %s\n", mns::diagnostic_code_token(code), row.token);
-		TEST_EXPECT(token == row.token && finding_row(token) == &row && style_finding_codes().holds(&row));
+		TEST_EXPECT(token == row.token && editor_test::finding_row(token) == &row && style_finding_codes().holds(&row));
 	}
 	TEST_EXPECT(&finding_code(mns::DiagnosticCode::LineEnding) == &finding_code(StyleFinding::LineEnding));
 	return 0;
@@ -329,7 +330,7 @@ static int test_columns() {
 		{ "til.ignored_input", "without the input the game ignores" },
 	};
 	for (const auto &[token, does] : rewrites) {
-		const FindingCodeRow *row = finding_row(token);
+		const FindingCodeRow *row = editor_test::finding_row(token);
 		TEST_EXPECT(row && row->rewrite_does && does == row->rewrite_does);
 	}
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.blocks_save; }) ==
@@ -347,70 +348,66 @@ static int test_columns() {
 	            Tokens({ "asset.name.duplicate", "asset.name.empty", "asset.name.too_long", "build.archive_in_project",
 	                     "build.expansion.mission_twice", "build.expansion.mission_untitled", "build.expansion.root_only",
 	                     "build.name_unstorable", "build.unread", "expansion.file.unread" }));
-	// S14, the build follows retail: the codes whose errors gate no build are listed (shown, fixable,
-	// never blocking): the ones whose subject names the game's refusal where it is witnessed (a
-	// reference, a required file), and the ones the audit found no refusal of the game's behind (the
-	// editor's own rules, a read past a table, a stylesheet read otherwise or read up to a line), and
-	// (S23) the ones whose input the editor's model cannot carry where the game reads the file on, which
-	// gate only an open file with unsaved edits (unwritable_code). An error of any other row blocks, as
-	// does an error made from no row.
-	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return !row.gates_build; }) ==
-	            Tokens({ "ai_profile.ignored_input", "ai_profile.no_type", "animation_map.invalid_input", "animation_map.no_reset",
-	                     "animation_map.row", "asset.wave_unplayable", "avatars.ignored_input", "build.archive_in_project", "build.expansion.exp_desc", "build.expansion.mission_twice",
-	                     "build.expansion.mission_untitled", "build.expansion.root_only", "build.unread", "catalog.first_row",
-	                     "catalog.invalid_input", "catalog.item_type", "catalog.name_empty", "catalog.reserved_id", "catalog.reserved_kind",
-	                     "catalog.reserved_name", "catalog.reserved_refused", "catalog.unserializable", "charattr.attribute_word", "charattr.binary_form",
-	                     "charattr.no_cammo", "charattr.not_a_number", "charattr.unread_section", "dialog_bank.line_no_wave",
-	                     "dialog_bank.name_repeated", "dialog_bank.name_unplayed", "dialog_bank.silent", "document.line_ends",
-	                     "environment.invalid_input", "environment.sky_height_default", "environment.terrain_key",
-	                     "expansion.file.unread", "export.cancelled",
-	                     "export.cleanup", "export.replaced", "face_animation.eye_texture_alone",
-	                     "face_animation.gesture_repeated", "face_animation.gesture_unplayed",
-	                     "face_animation.parameter_repeated", "face_animation.parameter_unmatched",
-	                     "font.glyph_height", "font.glyph_outside", "hudfx.name_runs", "hudfx.never_read",
-	                     "hudfx.no_model", "hudfx.power_unseen",
-	                     "menu.variable_number", "mission.event_missing",
-	                     "mission.group_range", "mission.invalid_input", "mission.names_foreign", "mission.names_locked",
-	                     "mission.names_outside",
-	                     "mission.names_refused", "mission.names_unmatched", "mission.names_unwritten", "mission.path_rebuilt",
-	                     "model.frame_missing", "model.light_part", "model.register_missing",
-	                     "music_bank.stream_silent",
-	                     "particle.duplicate_effect", "particle.unreadable",
-	                     "project.base_project", "project.expansion.name_taken", "project.expansion.not_installed", "reference.missing", "reference.wrong_kind", "requirement.missing", "requirement.wrong_kind",
-	                     "score.fanfare_unkept", "score.fields_past_34", "score.game_type_repeated", "score.unknown_game_type",
-	                     "score.version", "shader.form", "sound_bank.layer_unheard", "sound_bank.set_name_repeated", "sound_bank.set_silent",
-	                     "sound_bank.wave_file_name", "sound_bank.wave_name_repeated", "sound_bank.wave_no_file",
-	                     "sound_profiles.name_repeated", "sound_profiles.no_default", "sound_profiles.unserializable",
-	                     "strings.invalid_input", "strings.key_empty", "strings.section_empty", "style.continued_duplicate",
-	                     "style.directive_form", "style.directive_tail", "style.if_without_argument",
-	                     "style.invalid_name_char", "style.missing_value_delimiter", "style.nul_byte", "style.stops",
-	                     "style.value_is_directive", "terrain.foliage_inert", "terrain.invalid_input", "terrain.no_width",
-	                     "terrain_heights.bake_refused", "terrain_heights.multiplayer", "terrain_heights.over_rasterizer", "terrain_heights.steep_block",
-	                     "terrain_heights.unread", "texture.tga_unfilled", "til.empty", "til.ignored_input", "til.index_past_atlas",
-	                     "til.invalid_input", "til.layer_order", "til.med_cap", "til.unread" }));
-	TEST_EXPECT(finding_row("model.light_no_registers") && finding_row("model.light_no_registers")->gates_build &&
-	            finding_row("style.hangs")->gates_build && finding_row("style.line_ending")->gates_build);
+	// S14, the build follows retail; S26, a row gates only when it says why: the game's refusal, witnessed and cited
+	// (game_fails_code, game_stops_code), or the editor's integrity (a file it cannot read or write as it is, a name
+	// the archives cannot store). Every other code is listed (shown, fixable, never blocking), the default: the
+	// ones whose subject names the game's refusal gate where it is witnessed (a reference, a required file), and
+	// (S23) the ones whose input the editor's model cannot carry where the game reads the file on gate only an open
+	// file with unsaved edits (unwritable_code). An error made from no row blocks.
+	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.gates_build; }) ==
+	            Tokens({ "asset.name.duplicate", "asset.name.empty", "asset.name.too_long", "avatars.reader_stops",
+	                     "build.archive", "build.expansion.base_missing", "build.expansion.exp_name",
+	                     "build.name_unstorable", "document.config_overrun", "document.decode", "document.kind",
+	                     "document.no_records", "document.parse", "document.read", "document.stale",
+	                     "hudfx.power_slots_empty", "import.decode",
+	                     "import.encode", "import.font", "import.input", "import.migrate", "import.option", "import.read",
+	                     "import.scene", "import.sidecar", "import.terrain", "import.write", "menu.invalid_input",
+	                     "mission.runs_past_table", "model.light_no_registers", "project.root.unreadable", "style.hangs",
+	                     "style.unknown_directive", "style.value_starts_with_hash", "terrain.refused",
+	                     "texture.particle_too_big", "texture.pcx_overrun", "texture.wrong_reader" }));
+	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.integrity; }) ==
+	            Tokens({ "asset.name.duplicate", "asset.name.empty", "asset.name.too_long", "build.archive",
+	                     "build.expansion.base_missing", "build.name_unstorable", "document.decode", "document.kind",
+	                     "document.no_records", "document.parse", "document.read", "document.stale", "import.decode",
+	                     "import.encode", "import.font", "import.input", "import.migrate", "import.option", "import.read",
+	                     "import.scene", "import.sidecar", "import.terrain", "import.write", "project.root.unreadable" }));
+	// A stylesheet stored with LF ends the game reads otherwise is listed; one whose stored text hangs the game's
+	// reader is told so as style.hangs, which gates (S26 A2).
+	TEST_EXPECT(!editor_test::finding_row("style.line_ending")->gates_build);
 	// A ConfigFile past its reader's pool gates, the game's own failure, which its row says and cites: the reader
 	// clears past the pool into the heap, and the game crashes later [orig: ConfigFile_ParseText @ 0x7609e8]; so
 	// does hudfx.def's HUD model as its one line read, the power slots' draw then reading a slot of no model, and an
 	// Avatars.def past its reader's tables, where the game fails (S23 B).
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.game_refusal != nullptr; }) ==
-	            Tokens({ "avatars.reader_stops", "catalog.reader_stops", "document.config_overrun", "hudfx.power_slots_empty",
-	                     "mission.runs_past_table" }));
+	            Tokens({ "avatars.reader_stops", "build.expansion.exp_name", "document.config_overrun",
+	                     "hudfx.power_slots_empty",
+	                     "menu.invalid_input", "mission.runs_past_table", "model.light_no_registers", "style.hangs",
+	                     "style.unknown_directive", "style.value_starts_with_hash", "terrain.refused",
+	                     "texture.particle_too_big", "texture.pcx_overrun", "texture.wrong_reader" }));
 	// A finding whose file the editor's model cannot carry where the game reads it on (unwritable_code) gates only
 	// an open file with unsaved edits, which the build's Save cannot write: a closed one packs as stored. One the
 	// game's own reader stops at gates either way, saying what the game does.
 	{
 		const Diagnostic dropped =
-		        make_finding(*finding_row("strings.invalid_input"), DiagnosticSeverity::Error, "dropped", "lang/strings.bin");
+		        make_finding(*editor_test::finding_row("strings.invalid_input"), DiagnosticSeverity::Error, "dropped", "lang/strings.bin");
 		ShippedFiles closed, edited;
 		edited.unsaved.insert("lang/strings.bin");
 		TEST_EXPECT(blocks_build(dropped) && !blocks_build(dropped, nullptr, &closed) && blocks_build(dropped, nullptr, &edited) &&
 		            !blocks_build(dropped, nullptr, nullptr));
+		// A catalog's reader stopping at a block opened inside an open one: the game runs on with what it read,
+		// listed (the maintainer's S26 ruling); a menu the game crashes on gates either way.
 		const Diagnostic stops =
-		        make_finding(*finding_row("catalog.reader_stops"), DiagnosticSeverity::Error, "stops", "defs/weapon.def");
-		TEST_EXPECT(blocks_build(stops, nullptr, &closed) && blocks_build(stops, nullptr, nullptr) && blocker_is_the_games(stops) &&
-		            blocker_reason(stops).rfind("The game fails here as the original does: its reader stops", 0) == 0);
+		        make_finding(*editor_test::finding_row("catalog.reader_stops"), DiagnosticSeverity::Error, "stops", "defs/weapon.def");
+		TEST_EXPECT(!blocks_build(stops, nullptr, &closed) && !blocker_is_the_games(stops));
+		const Diagnostic crashes =
+		        make_finding(*editor_test::finding_row("menu.invalid_input"), DiagnosticSeverity::Error, "crashes", "menus/main.mnu");
+		TEST_EXPECT(blocks_build(crashes, nullptr, &closed) && blocks_build(crashes, nullptr, nullptr) &&
+		            blocker_is_the_games(crashes) &&
+		            blocker_reason(crashes).rfind("The game fails here as the original does: the game crashes or hangs", 0) == 0);
+		// Over the game's own bytes, packed as stored, it gates no build (S16).
+		ShippedFiles as_shipped;
+		as_shipped.original.insert("menus/main.mnu");
+		TEST_EXPECT(!blocks_build(crashes, nullptr, &as_shipped));
 	}
 	const Diagnostic overrun = make_finding(CoreFinding::DocumentConfigOverrun, DiagnosticSeverity::Error, "past the pool");
 	TEST_EXPECT(blocks_build(overrun) && blocker_is_the_games(overrun) &&
@@ -437,7 +434,7 @@ static int test_columns() {
 	TEST_EXPECT(!diagnostics_block_build({ make_finding(CoreFinding::ReferenceMissing, DiagnosticSeverity::Error, "missing") }) &&
 	            diagnostics_block_build({ make_finding(CoreFinding::ReferenceMissing, DiagnosticSeverity::Error, "missing"),
 	                                      make_finding(CoreFinding::DocumentStale, DiagnosticSeverity::Error, "stale") }));
-	// Review F3: where its kind's row cites the game's refusal (gates_when_missing, the terrain's), a
+	// Where its kind's row cites the game's refusal (gates_when_missing, the terrain's), a
 	// missing reference gates; one of any other kind does not. A file of the name of the wrong kind
 	// is its own code, gating where its kind's missing name does (its loader finds nothing it loads).
 	Diagnostic terrain = make_finding(CoreFinding::ReferenceMissing, DiagnosticSeverity::Error, "no terrain");
@@ -464,18 +461,15 @@ static int test_columns() {
 	for (const Table &table : tables()) {
 		for (const FindingCodeRow &row : table.rows) {
 			const std::string token = row.token;
-			// A row whose file does not serialize: the editor's own (.unserializable, .invalid_input) or input the game's
-			// reader stops at (game_stops_code: the game's refusal said); a listed one is input the game reads on.
 			// A row whose file does not serialize: the editor's own (.unserializable, .invalid_input), input the game's
-			// reader stops at (game_stops_code: the game's refusal said), or input the game reads on that the model
-			// cannot carry, apart from its code's crash cases (unwritable_code: listed). A game refusal of what a file
-			// that serializes holds (a ConfigFile past its pool, hudfx.def's HUD model as its one line) blocks no save.
+			// reader stops at that the model cannot carry (.reader_stops, a run of events past its table), or a number
+			// the menu writer cannot hold (menu.variable_number). Each gates a build only with the game's refusal said
+			// (game_stops_code); the rest are unwritable_code, listed, gating only an open file with unsaved edits. A
+			// game refusal of what a file that serializes holds (game_fails_code) blocks no save.
 			TEST_EXPECT(row.blocks_save == (ends_with(token, ".unserializable") || ends_with(token, ".invalid_input") ||
-			                                (row.game_refusal && token != "document.config_overrun" &&
-			                                 token != "hudfx.power_slots_empty") ||
+			                                ends_with(token, ".reader_stops") || token == "mission.runs_past_table" ||
 			                                token == "menu.variable_number"));
-			TEST_EXPECT(!row.blocks_save || row.gates_build || ends_with(token, ".invalid_input") ||
-			            ends_with(token, ".unserializable") || token == "menu.variable_number");
+			TEST_EXPECT(!(row.blocks_save && row.gates_build) || row.game_refusal != nullptr);
 			TEST_EXPECT(!starts_with(token, "asset.name.") || row.place == FindingPlace::File);
 			const std::string key = finding_group_key(row.group);
 			TEST_EXPECT(row.group != FindingGroup::None && (token == key || starts_with(token, key + ".")));
@@ -514,7 +508,7 @@ static int test_make_finding() {
 	            !requirement_subject(by_row) && !reference_subject(by_row) && subject_target(by_row).empty());
 	const Diagnostic note = make_finding(finding_code(menu::MenuFrameNoteCode::TextTruncated),
 	                                     DiagnosticSeverity::Warning, "Cut.");
-	TEST_EXPECT(note.row() == finding_row("menu.render.text_truncated") && note.code() == "menu.render.text_truncated");
+	TEST_EXPECT(note.row() == editor_test::finding_row("menu.render.text_truncated") && note.code() == "menu.render.text_truncated");
 	const Diagnostic core = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Warning, "Unread.");
 	TEST_EXPECT(core.code() == "graph.unreadable" && core.asset.empty() && core.field.empty());
 	const Diagnostic none;

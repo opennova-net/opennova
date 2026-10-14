@@ -294,7 +294,7 @@ bool same_image(const TextureImage &a, const TextureImage &b) {
 	return true;
 }
 
-// A painted texture's image is made from its plane, never through its codec (S25, the review's m9), and says exactly
+// A painted texture's image is made from its plane, never through its codec (S25), and says exactly
 // what decoding the bytes a Save writes says, for every paintable form; undone, the image read.
 int test_painted_image() {
 	std::string why;

@@ -84,9 +84,6 @@ public:
 	// The Problems rows of the open documents whose file changed outside the editor and was not
 	// read again.
 	std::vector<Diagnostic> findings() const;
-	// The document at `path` was read again, saved or closed: what its file did outside the editor
-	// is no longer a row.
-	void forget_file_state(const std::string &path);
 
 	// --- the requests ------------------------------------------------------------------------
 
@@ -141,8 +138,6 @@ public:
 	// failure, then one refresh; false when one could not be written. `over`: as save's.
 	bool save_documents(const std::vector<std::string> &paths, bool rewrite, const std::string &over = std::string(),
 	                    bool name_files = false);
-	// What a document's last save said beyond writing, an Output line each; how many lines.
-	size_t note_save(const DocumentBase &document);
 	// EndEdit on every open document: the coalesced groups and the gestures end, and the validation
 	// a gesture's edits left waiting is due.
 	void end_edit_groups();
@@ -155,10 +150,9 @@ public:
 	// document ends first; one in another document stays open).
 	void open_gesture(const std::string &path, uint64_t token, int64_t sampled_ms = -1);
 
-	// The unsaved-changes prompt's Discard: the document at `path` dropped unsaved (a Close or a
-	// Reload waited on it), or every document (a project switch, Quit).
+	// The document at `path` dropped unsaved (the terrain tools' quiet mission, terrain_follow). The prompt's
+	// Discard drops nothing itself: what waited runs, and drops what it replaces or closes (S26 C3, C4).
 	void discard(const std::string &path);
-	void discard_all();
 	// The project closes: every document goes, with the selections they kept and their files' states.
 	void close_all();
 
@@ -168,14 +162,6 @@ public:
 	// ground), the active document kept: a tab with its dirty dot, a status line and an Output line naming `why`. The
 	// open document (one open already as it is), null where it does not open (the refusal reported).
 	DocumentBase *open_quietly(const std::string &path, const std::string &why);
-	// The document at `edited` was edited from the view of the document at `view` (a terrain stroke, a tile tool): it
-	// joins the view's undo, save and close scope.
-	void note_edited_from(const std::string &view, const std::string &edited);
-	// The open documents of a view's scope: the view's own first, then those edited from it, in the order noted.
-	std::vector<std::string> scope_of(const std::string &view) const;
-	// What a Save in a view writes: its document, the documents of its scope with unsaved edits, and those a gesture
-	// of theirs changed with unsaved edits too (the missions that followed a stroke).
-	std::vector<std::string> save_scope(const std::string &view) const;
 	// What a Close of the document at `path` lists beside it: the documents of its scope with unsaved edits.
 	std::vector<std::string> scope_unsaved(const std::string &path) const;
 	// A batch the terrain tools planned applied to `document` as edit_record applies one (refused as it refuses one:
@@ -198,6 +184,19 @@ public:
 	static bool position_after(const Document &document, const NodeAddress &record, NodeId &parent, size_t &position);
 
 private:
+	// The document at `path` was read again, saved or closed: what its file did outside the editor
+	// is no longer a row.
+	void forget_file_state(const std::string &path);
+	// What a document's last save said beyond writing, an Output line each; how many lines.
+	size_t note_save(const DocumentBase &document);
+	// The document at `edited` was edited from the view of the document at `view` (a terrain stroke, a tile tool): it
+	// joins the view's undo, save and close scope.
+	void note_edited_from(const std::string &view, const std::string &edited);
+	// The open documents of a view's scope: the view's own first, then those edited from it, in the order noted.
+	std::vector<std::string> scope_of(const std::string &view) const;
+	// What a Save in a view writes: its document, the documents of its scope with unsaved edits, and those a gesture
+	// of theirs changed with unsaved edits too (the missions that followed a stroke).
+	std::vector<std::string> save_scope(const std::string &view) const;
 	// The name a file create_file made defines (its request's define, DI-33), added to its open document as
 	// its type's Add makes one (an edit_record of the type's batch, opened first, selecting it); false, said
 	// in Problems and on the status line, where the type defines no name of the kind there.
@@ -219,6 +218,12 @@ private:
 	std::string edit_words(const Document &document, const std::vector<Edit> &edits, const std::string &named) const;
 	// The step the last edit of `document` made named with the status line's words (what Undo says).
 	void name_step(DocumentBase &document) const;
+	// A whole-file operation's document (a texture's, a wave's): opened first when the request asks; null,
+	// refused (`code`, or DocumentNotOpen), where it is no `noun` (`is_kind`) or an import makes its file.
+	DocumentBase *operation_target(const EditorRequest &request, CoreFinding code, const char *noun,
+	                               bool (*is_kind)(const DocumentBase &));
+	// Its change applied as one step, named with its `words` and the file's name.
+	void apply_operation(DocumentBase &document, std::shared_ptr<const EditPayload> payload, const std::string &words);
 	// After `document` moved from the state (load_generation, revision) by an edit, an undo or a
 	// redo: the active selection repaired against the rows that changed since (changes_since; all
 	// of them when the document cannot say), a gone primary giving way to `owner`.
@@ -240,6 +245,11 @@ private:
 	// selection or the one it kept while another is active, selected again in `after` by their places
 	// (Document::locator, as a project reopens them: ADR 0046 DI-01); those it no longer has drop out.
 	void keep_selection(const DocumentBase &before, const DocumentBase &after);
+	// The document at `path` read again (a Reload, or reload_changed's read of a file changed outside): what
+	// the workspace keeps of it by record identity (a Remove screen prompt, a pick, the board's folds) names
+	// the old read's records, and goes (S26 C7: reload_changed kept them, and a prompt could name another
+	// screen once the ids were renumbered).
+	void read_again(const std::string &path);
 	// The gesture open in the document at `path` ends (none open there: nothing), and with
 	// `validate` the validation its edits left waiting is due: an EndEdit, an Undo or a Redo of the
 	// document, a Save of it, the document closed, discarded or read again.

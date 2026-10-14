@@ -36,12 +36,7 @@ using opennova::io::JsonValue;
 
 namespace {
 
-JsonValue parsed(const std::string &text) {
-	JsonValue out;
-	std::string error;
-	opennova::io::json_parse(text, out, error);
-	return out;
-}
+using editor_test::parsed;
 
 // A set_workspace on the wire, as the editor MCP raises it: the answer handle_json gives.
 JsonValue wire(ProjectSession &session, const std::string &workspace) {
@@ -194,7 +189,7 @@ int test_settings() {
 	TEST_EXPECT(shown.get("settings") && shown.get("settings")->get_string("title", "") == "Harbor" &&
 	            shown.get("settings")->get_bool("multiplayer", false) &&
 	            shown.get("settings")->get_string("play_mode", "") == "strict");
-	// A settings change with no serial (a menu's Play in the game install) leaves the dialog open.
+	// A settings change with no serial (a script's apply_project_settings) leaves the dialog open.
 	ProjectSettingsChange play;
 	play.play_mode = PlayMode::Runtime;
 	TEST_EXPECT(session.handle(request::apply_project_settings(play)) && settings.open);
@@ -363,7 +358,7 @@ int test_problems() {
 	TEST_EXPECT(session.handle(request::set_workspace(R"({"problems": {"blocking": false}})")));
 	TEST_EXPECT(!p.blocking && p.errors && !p.warnings && p.text == "gun" && p.scope == ProblemScope::OpenFiles && p.fixable &&
 	            p.grouping == ProblemGrouping::File);
-	// A confirmation of nothing Problems offers is refused (review X10): a group no grouping makes, a finding's
+	// A confirmation of nothing Problems offers is refused: a group no grouping makes, a finding's
 	// index that is no whole number.
 	const uint64_t serial = p.confirm_serial;
 	TEST_EXPECT(session.handle(request::set_workspace(R"({"problems": {"confirm": {"group": "requirements"}}})")) &&
@@ -400,7 +395,7 @@ int test_document_views() {
 	            session.outcome().done());
 	const WorkspaceView::DocumentView &shown = w.document(project.items_path);
 	TEST_EXPECT(shown.filter == "car" && shown.sort && shown.inspector_filter == "id");
-	// What no view of a definition table shows is refused (review X10): kinds to choose (a mission's chips), a
+	// What no view of a definition table shows is refused: kinds to choose (a mission's chips), a
 	// menu's window type or Remove prompt, a PCX's palette remap.
 	TEST_EXPECT(session.handle(request::set_workspace("{\"document\": {\"kinds\": [\"" + kind + "\"]}}")) &&
 	            refused_with(session, "workspace.refused") && shown.kinds == ~uint64_t(0));
@@ -414,7 +409,7 @@ int test_document_views() {
 	            refused_with(session, "workspace.refused"));
 	TEST_EXPECT(session.handle(request::set_workspace(R"({"document": {"remap_from": 300}})")) &&
 	            refused_with(session, "workspace.refused"));
-	// A text past what the window's field holds is refused as it is read, naming the limit (review X13).
+	// A text past what the window's field holds is refused as it is read, naming the limit.
 	TEST_EXPECT(!session.handle_json(parsed("{\"kind\": \"set_workspace\", \"workspace\": {\"document\": {\"filter\": \"" +
 	                                        std::string(kWorkspaceText, 'a') + "\"}}}")).get_bool("ok", true) &&
 	            shown.filter == "car");
@@ -424,7 +419,7 @@ int test_document_views() {
 	            documents->array[0].get_string("filter", "") == "car" && documents->array[0].get_bool("active", false));
 	TEST_EXPECT(session.handle(request::close_document(project.items_path)) && w.documents.empty());
 	// A menu's Remove prompt: a screen of the menu while it keeps a second (its last, or an id that is no screen
-	// of it, refused: review X10), dropped as the menu is read again; its window type one of TYPE's.
+	// of it, refused), dropped as the menu is read again; its window type one of TYPE's.
 	TEST_EXPECT(editor_test::write_text(v.project.root + "/menus/two.mnu",
 	                                    "<SCREEN>\r\n<NAME>FIRST</NAME>\r\n</SCREEN>\r\n<SCREEN>\r\n<NAME>SECOND</NAME>\r\n</SCREEN>\r\n"));
 	session.handle(request::rescan());
@@ -452,6 +447,20 @@ int test_document_views() {
 	reload.path = menu_path;
 	TEST_EXPECT(session.handle(reload));
 	TEST_EXPECT(w.document(menu_path).remove_screen == 0 && w.document(menu_path).new_window_type == "button");
+	// S26 C7: read again because another program changed the file (reload_changed, a rescan's), the prompt goes
+	// too: it named a screen of the old read by its id, which the new read gives another screen.
+	const Document *now = session.document_for(menu_path);
+	TEST_EXPECT(now && now->rows().size() == 2);
+	if (!now || now->rows().size() != 2) return 1;
+	TEST_EXPECT(session.handle(request::set_workspace("{\"document\": {\"remove_screen\": " +
+	                                                  std::to_string(now->rows()[1]->id) + "}}")) &&
+	            w.document(menu_path).remove_screen == now->rows()[1]->id);
+	TEST_EXPECT(editor_test::write_text(v.project.root + "/menus/two.mnu",
+	                                    "<SCREEN>\r\n<NAME>ZERO</NAME>\r\n</SCREEN>\r\n<SCREEN>\r\n<NAME>FIRST</NAME>\r\n</SCREEN>\r\n"
+	                                    "<SCREEN>\r\n<NAME>SECOND</NAME>\r\n</SCREEN>\r\n"));
+	session.handle(request::rescan());
+	session.run_operations();
+	TEST_EXPECT(session.document_for(menu_path) != now && w.document(menu_path).remove_screen == 0);
 	return 0;
 }
 
@@ -482,8 +491,8 @@ int test_import_dialog() {
 	const uint64_t serial = import.serial;
 	const std::string plan = std::to_string(preview.plan_serial);
 	TEST_EXPECT(preview.plan_serial != 0);
-	// An index names a row of a plan: check and uncheck name the plan (review X7), as the import_preview query
-	// says it, and the indices are whole numbers, as its rows' index is (review X19).
+	// An index names a row of a plan: check and uncheck name the plan, as the import_preview query
+	// says it, and the indices are whole numbers, as its rows' index is.
 	TEST_EXPECT(session.handle(request::set_workspace("{\"import\": {\"uncheck\": [" + std::to_string(menu_row) + "]}}")) &&
 	            refused_with(session, "workspace.refused") && import.checked[menu_row]);
 	TEST_EXPECT(!session.handle_json(parsed("{\"kind\": \"set_workspace\", \"workspace\": {\"import\": {\"plan\": " + plan +
@@ -534,11 +543,12 @@ int test_import_dialog() {
 	return 0;
 }
 
-// The dialogs that take the whole editor (review X3): one shows at a time, the first the session holds in its
-// order (shown_modal; the workspace section's modal); a new_project closes its form's modal as the session takes
-// it, so with unsaved edits the unsaved prompt shows alone, and its Cancel leaves neither. Opening a dialog moves
-// the workspace's opened (X17); focus moves nothing of the workspace (X22); a set_workspace refused says so in its
-// outcome alone, no Problems row and the status line as it was (X18).
+// The dialogs that take the whole editor: one shows at a time, the first the session holds in its
+// order (shown_modal; the workspace section's modal); a new_project closes its form's modal as the
+// session takes it, so with unsaved edits the unsaved prompt shows alone, and its Cancel leaves
+// neither. Opening a dialog moves the workspace's opened; focus moves nothing of the workspace; a
+// set_workspace refused says so in its outcome alone, no Problems row and the status line as it
+// was.
 int test_modals() {
 	FilesProject project;
 	TEST_EXPECT(project.open());
@@ -582,7 +592,8 @@ int test_modals() {
 	const std::string status = v.activity.status;
 	TEST_EXPECT(session.handle(request::set_workspace(R"({"card": {"path": "nothing.wav"}})")) &&
 	            refused_with(session, "workspace.refused") && v.findings.diagnostics.size() == rows && v.activity.status == status);
-	// The New file prompt opens on a kind Files' New asks a name of, its values by the kind's params (X10).
+	// The New file prompt opens on a kind Files' New asks a name of, its values by the kind's
+	// params.
 	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_file": {"kind": "music_bank"}})")) &&
 	            refused_with(session, "workspace.refused") && w.new_file.kind == AssetKind::kCount);
 	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_file": {"kind": "menu", "values": {"terrain": "x"}}})")) &&
@@ -590,10 +601,10 @@ int test_modals() {
 	return 0;
 }
 
-// The card and Rename... are the session's to keep true (review X9): a rename of the card's file moves it to the
-// new name; the file gone (deleted on disk, the files read again), the card and Rename... close, the sound it
-// played stopped; Rename everywhere closes once another rename is planned in its place, Rename back once the plan
-// is no way back (X20).
+// The card and Rename... are the session's to keep true: a rename of the card's file moves it to
+// the new name; the file gone (deleted on disk, the files read again), the card and Rename...
+// close, the sound it played stopped; Rename everywhere closes once another rename is planned in
+// its place, Rename back once the plan is no way back.
 int test_files_followed() {
 	FilesProject project;
 	TEST_EXPECT(project.open());
@@ -626,7 +637,7 @@ int test_files_followed() {
 	return 0;
 }
 
-// Problems' confirmation on the wire (review X11): a group's Fix all and the summary's offered while the project
+// Problems' confirmation on the wire: a group's Fix all and the summary's offered while the project
 // lacks required files, what it proposes in the workspace section, apply_confirmation raising it (one
 // create_missing naming every role) and closing it; one that proposes nothing refused, nothing raised.
 int test_confirmation_applied() {

@@ -13,6 +13,7 @@
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/node3d.hpp>
 
+#include <editor/preview/preview_ambient_mix.h>
 #include <editor/preview/preview_waves.h>
 #include <editor/session/view/workspace_view.h>
 #include <formats/lwf/wav_pcm.h>
@@ -130,7 +131,8 @@ private:
 // The Listen's channels (DI-36): the device half of a mission view's MissionListen. Each channel its mix binds plays its
 // wave looping on an AudioStreamPlayer3D of its own at the channel's place in the device's world, whose camera is the
 // listener, so Godot's panner pans it as the game's own ambient channels are panned (D-SND-8), unattenuated (the volume
-// is the mix's, through the engine's volume law, times the master); its pitch the member's times the registration's.
+// is the mix's, through the engine's volume law), on the game's ambient bus (SoundBank::configure_ambient_player, as
+// MissionAudio binds a channel); its pitch the member's times the registration's.
 // A channel another candidate took (its `started` moved) starts its wave again from its beginning, as the game's
 // channel opened anew does (D-SND-6); a free one stops. The picks, the places and the volumes are the session's; this
 // only sounds them.
@@ -149,9 +151,17 @@ public:
 	PreviewSoundLoops(const PreviewSoundLoops &) = delete;
 	PreviewSoundLoops &operator=(const PreviewSoundLoops &) = delete;
 
-	// The channels as they stand now (channel i the i-th) of the project under `p_root`, at the master `p_volume`
-	// (0..1); `p_audible` false holds each voice paused where it stands (the picture not drawn).
-	void follow(const std::string &p_root, const std::vector<Channel> &p_channels, float p_volume, bool p_audible);
+	// The channels as they stand now (channel i the i-th) of the project under `p_root`; `p_audible` false holds each
+	// voice paused where it stands (the picture not drawn).
+	void follow(const std::string &p_root, const std::vector<Channel> &p_channels, bool p_audible);
+	// A Listen's channels (a mission's or an environment's mix, editor/preview/preview_ambient_mix) followed while
+	// `p_on`, else every voice stopped; heard while the picture is drawn: `p_presented` counts the pictures presented,
+	// and once it has stood still kHeldFrames calls the voices hold paused.
+	void listen(const std::string &p_root, const std::vector<opennova::editor::MissionSoundChannel> &p_channels, bool p_on,
+			uint64_t p_presented);
+	// Whether the last listen() left the voices sounding (the picture drawn within kHeldFrames calls).
+	bool audible() const { return idle_frames_ < kHeldFrames; }
+	static constexpr int kHeldFrames = 30;
 	// Every voice stopped and freed; the decoded waves kept.
 	void stop();
 	// The decoded waves dropped (the project's files moved).
@@ -176,6 +186,8 @@ private:
 	PreviewWaveStreams waves_;
 	std::vector<Voice> voices_;
 	uint64_t started_ = 0;
+	int idle_frames_ = kHeldFrames;
+	uint64_t presented_ = 0;
 };
 
 } // namespace godot

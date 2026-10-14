@@ -66,6 +66,8 @@ const std::vector<ImportOptionRow> &wave_import_option_rows() {
 	return rows;
 }
 
+namespace {
+
 lwf::WaveConversion wave_conversion_of(const ImportOptions &options) {
 	lwf::WaveConversion out;
 	const auto value = [&](const char *key) {
@@ -78,6 +80,8 @@ lwf::WaveConversion wave_conversion_of(const ImportOptions &options) {
 		if (const std::optional<int> parsed = strutil::parse_int(rate)) out.rate = uint32_t(*parsed);
 	return out;
 }
+
+} // namespace
 
 bool run_wave_import(ImportContext &context, ImportProduct &out) {
 	std::vector<uint8_t> bytes;

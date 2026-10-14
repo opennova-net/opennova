@@ -32,14 +32,11 @@ enum class HudViewStatus : uint8_t {
 	Ready,
 };
 // "no_project", "no_layout", "ready".
-const char *hud_view_status_token(HudViewStatus status);
+inline constexpr const char *kHudViewStatusTokens[] = {"no_project", "no_layout", "ready"};
 
 // The first-person view a HUD preview draws over: the plain view, the binoculars' or the night-vision
 // goggles' (their masks the game's own view effects, godot/game/world/player_view_effects.gd).
 enum class HudPreviewView : uint8_t { Normal, Binoculars, NightVision };
-// "normal", "binoculars", "night_vision", and the view a token names (false for none).
-const char *hud_preview_view_token(HudPreviewView view);
-bool hud_preview_view_from_token(const std::string &token, HudPreviewView &out);
 
 // The screens the toolbar offers, the game's own design size among them (the HUD's positions are
 // authored in 1024 x 768 and scaled to the screen; the label fonts change at the 640 and 800 widths
@@ -60,9 +57,6 @@ inline constexpr int kHudScreenMost = 4096;
 // the token a SetViewport names it by.
 const std::vector<uint32_t> &hud_board_game_types();
 const char *hud_board_game_type_token(uint32_t game_type);
-bool hud_board_game_type_from_token(const std::string &token, uint32_t &out);
-// The stand-in players the board lists, at most.
-inline constexpr int kHudBoardPlayersMost = 128;
 // The distances the sights' aim can rest at, metres: what a rangefinder reads.
 inline constexpr int kHudSightsRangeLeast = 2;
 inline constexpr int kHudSightsRangeMost = 1000;
@@ -76,8 +70,7 @@ inline constexpr int kHudSightsRangeMost = 1000;
 // alpha (0 none, to its cap of 192); `detail` the HUD detail level F6 steps (0 to 3: hudpos.def's
 // HUDDECLUT rows by level, 3 the HUD hidden); `crosshair` the player's crosshair style (0 to 24,
 // cross01.tga to cross25.tga); `picked` the element a click picked (its token, "" none). The Tab board held
-// up (`board`) for a session of `game_type` listing `players` stand-in players (0 to 128); the weapon's
-// sights up (`sights`: its scope toggled and settled, as the game's frame decides the card and the readouts)
+// up (`board`) for a session of `game_type`; the weapon's sights up (`sights`: its scope toggled and settled, as the game's frame decides the card and the readouts)
 // with the aim resting `range` metres away (2 to 1000).
 struct HudViewportOptions {
 	int width = 1024;
@@ -94,7 +87,6 @@ struct HudViewportOptions {
 	std::string picked;
 	bool board = false;
 	uint32_t game_type = 0x10000u; // TDM
-	int players = 8;
 	bool sights = false;
 	int range = 100;
 	bool operator==(const HudViewportOptions &other) const;
@@ -103,17 +95,14 @@ struct HudViewportOptions {
 // The most red a hit flashes the screen with as the HUD draws it (world::kScreenFlashRedDrawCap, the red quad's alpha
 // ceiling).
 inline constexpr int kHudDamageMost = world::kScreenFlashRedDrawCap;
-// The JSON of `options` (options_json's), and the change a SetViewport makes to set them.
-io::JsonValue hud_options_json(const HudViewportOptions &options);
+// The change a SetViewport makes to set `options`.
 std::string hud_options_change(const HudViewportOptions &options);
 
 // The Tab board the preview draws (ADR 0046 S23 C): the feed's half of the board as inmatch::scoreboard_feed
-// would fill it for a session of the options' game type, its rows the editor's stand-ins (the game's rows come
-// from the server's 0x16 list): "Player 1" to "Player N" in wire order, the score falling from N, the team modes'
-// players alternating over the type's sides (game_type::active_team_count of two), each with a connection band
-// (1 to 3 in turn) and a class (5 to 9 in turn), the local player on team 1; its header's strings composed as
-// the game's drawer composes them (hud::scoreboard_header_strings) over `gametext` (loaded or not) and
-// `keyhelp`, the server and mission rungs blank.
+// would fill it for a session of the options' game type (its sides, game_type::active_team_count of two, the
+// local player on team 1), no rows (the game's rows come from the server's 0x16 list: a preview has no
+// session); its header's strings composed as the game's drawer composes them (hud::scoreboard_header_strings)
+// over `gametext` (loaded or not) and `keyhelp`, the server and mission rungs blank.
 opennova::hud::HudScoreboardState hud_preview_board(const HudViewportOptions &options,
 		const opennova::hud::GameTextLookup &gametext, bool gametext_loaded, const opennova::hud::GameTextLookup &keyhelp);
 
@@ -236,7 +225,7 @@ public:
 			CanvasRequests &out, std::string &error) const;
 
 	ViewportStatus status() const override;
-	const char *reason() const override { return hud_view_status_token(reason_); }
+	const char *reason() const override { return enum_token(kHudViewStatusTokens, reason_); }
 	std::string message() const override;
 	const std::string &detail() const override { return detail_; }
 	std::string caption() const override;

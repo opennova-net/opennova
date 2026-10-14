@@ -138,8 +138,11 @@ bool sculpting(TerrainTool tool) {
 
 } // namespace
 
-std::array<trngen::CornerLockFlags, 4> terrain_bake_locks(const SessionCore &core, const std::string &cpt_name,
-                                                          std::vector<std::string> *others) {
+// The quadrant lock flags of the first .trn (by its path) naming the .cpt `cpt_name` as its polytrn_polydata, from the
+// session's view of the project's files; none where no .trn names it. `others` names each later .trn naming it with
+// other flags (the conflict noted).
+static std::array<trngen::CornerLockFlags, 4> terrain_bake_locks(const SessionCore &core, const std::string &cpt_name,
+                                                          std::vector<std::string> *others = nullptr) {
 	std::array<trngen::CornerLockFlags, 4> out{};
 	const SessionView &view = core.view();
 	if (!view.project.scan || !view.findings.assets) return out;
@@ -402,9 +405,18 @@ void TerrainSculpt::work() {
 		wake_.wait(hold, [this] { return stopping_ || queued_; });
 		if (stopping_) return;
 		running_ = std::move(queued_);
+		// A test's hold: the job waits here (wait_idle returns meanwhile) until the test lets it go or the session
+		// closes.
+		if (test_hold_) {
+			held_ = true;
+			wake_.notify_all();
+			wake_.wait(hold, [this] { return stopping_ || !test_hold_; });
+			held_ = false;
+		}
 		hold.unlock();
 		run(*running_);
 		hold.lock();
+		if (test_hold_ && running_->cancelled) ++test_hold_->cancelled;
 		finished_ = std::move(running_);
 		running_path_.clear();
 		wake_.notify_all();
@@ -682,6 +694,23 @@ bool TerrainSculpt::settle(const std::string &path, std::string &error, std::vec
 		return false;
 	}
 	return true;
+}
+
+void TerrainSculpt::wait_idle() {
+	// The worker notifies after each job it finishes and as it holds one for a test; a job interrupt() takes back from
+	// the queue is the session thread's own, so nothing is left to wake for.
+	std::unique_lock<std::mutex> hold(mutex_);
+	wake_.wait(hold, [this] { return !queued_ && (!running_ || held_); });
+}
+
+void TerrainSculpt::hold_for_test(BakeTestHold *hold) {
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		test_hold_ = hold;
+		// Let go: the job the worker holds runs now (a wait_idle after this waits for it).
+		if (!hold) held_ = false;
+	}
+	wake_.notify_all();
 }
 
 void TerrainSculpt::remember_flatten(uint64_t gesture, int32_t raw) {

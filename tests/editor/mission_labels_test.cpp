@@ -47,6 +47,7 @@
 #include "common/test_paths.h"
 #include "common/thread_cpu_clock.h"
 #include "editor/editor_test_support.h"
+#include "editor/mission_test_support.h"
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
@@ -58,37 +59,11 @@ constexpr NodeKind k(MissionKind kind) { return node_kind(kind); }
 
 std::string repo() { return test_paths_repo_root(__FILE__); }
 
-std::unique_ptr<Document> open(const std::vector<uint8_t> &bytes, const char *name = "synth_logic.bms") {
-	const DocumentType *type = document_type_for(AssetKind::Mission);
-	if (!type) return nullptr;
-	std::unique_ptr<Document> document = records_of(type->make());
-	Diagnostic error;
-	if (!document || !document->load_bytes(bytes, name, AssetKind::Mission, "jo", error)) {
-		std::fprintf(stderr, "%s does not load: %s\n", name, error.message.c_str());
-		return nullptr;
-	}
-	return document;
-}
-
-const MissionDocument &as_mission(const Document &document) { return dynamic_cast<const MissionDocument &>(document); }
-
-NodeAddress row_at(const Document &document, MissionKind kind, size_t index) {
-	const std::vector<const Node *> rows = as_mission(document).rows_of(kind);
-	return index < rows.size() ? NodeAddress{rows[index]->id, rows[index]->kind, 0} : NodeAddress();
-}
-
-// The first record of `kind` a row holds.
-NodeAddress first_child(const Document &document, const NodeAddress &row, MissionKind kind) {
-	for (const Document::Collection &collection : document.collections_of(row))
-		if (collection.spec.kind == k(kind) && !collection.ids.empty()) return {row.row, k(kind), collection.ids[0]};
-	return NodeAddress();
-}
-
-// The words against those wanted, the two printed where they differ.
-bool same(const std::string &got, const std::string &want) {
-	if (got != want) std::printf("  got:  %s\n  want: %s\n", got.c_str(), want.c_str());
-	return got == want;
-}
+using mission_test::open;
+using mission_test::as_mission;
+using mission_test::row_at;
+using mission_test::first_child;
+using mission_test::same;
 
 int32_t ssn_of(const Document &document, const NodeAddress &row) {
 	return static_cast<const EntityRow *>(document.row(row.row))->native.id;
@@ -215,7 +190,7 @@ int test_document_words() {
 	TEST_EXPECT(mission_event_display(m, 8, nullptr).text == "No event 9 (the mission has 2 events)");
 	TEST_EXPECT(mission_group_display(m, 70).text == "No group 70 (the mission has 64)" && mission_group_display(m, 0).text == "No group");
 	TEST_EXPECT(mission_marker_display(m, 40, nullptr).text == "No marker 40 (the mission has 5 markers)");
-	// What names a record, kept while the document and the names stand (S15 review m11: the Inspector asks
+	// What names a record, kept while the document and the names stand (S15: the Inspector asks
 	// every frame).
 	MissionUsesCache uses;
 	const DocumentMissionNames plain(m);
@@ -411,7 +386,7 @@ int test_session_words() {
 	            !entity.scope.empty());
 	TEST_EXPECT(same(shown(*document, trigger, "param1", &names).text, "The player"));
 	// Its picker offers the player by name, first, and the entities after; the wire's reference_choices
-	// the same (S15 review m12).
+	// the same (S15).
 	const std::vector<ReferenceChoice> offered = picker_choices(view.findings.graph.get(), *document, trigger, entity, &names);
 	TEST_EXPECT(offered.size() > 1 && offered[0].name == "10000" && offered[0].label == "The player" &&
 	            offered[0].kind == ReferenceKind::MissionEntity);

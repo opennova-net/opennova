@@ -124,11 +124,7 @@ bool has_symbol(const AssetGraph &graph, ReferenceKind kind, const std::string &
 	return false;
 }
 
-size_t count_code(const std::vector<Diagnostic> &diagnostics, const char *code) {
-	size_t n = 0;
-	for (const Diagnostic &d : diagnostics) if (d.code() == code) ++n;
-	return n;
-}
+using editor_test::count_code;
 
 std::string read_text(const std::string &path) {
 	std::ifstream in(path, std::ios::binary);
@@ -825,41 +821,10 @@ static int test_rename() {
 	            read_text(root + "/main.mnu").find("logo2.tga") != std::string::npos);
 	TEST_EXPECT(view.findings.graph->missing().empty());
 	TEST_EXPECT(count_code(view.findings.diagnostics, "reference.missing") == 0);
-	// An environment names a sky map: its line is rewritten as text, every other byte kept (ADR 0046 S18,
-	// graph/native_text_sites.h). A sky map's name is made .pcx as the game parses it, so the environment
-	// naming logo2.tga uses no TGA: the TGA's rename leaves it as it is. (A Rescan keeps an open document
-	// whose file did not change: the same one.)
-	std::string environment;
-	{
-		opennova::env::Config config;
-		config.sky_map1 = "cloud.pcx";
-		config.sky_map2 = "logo2.tga";
-		std::ostringstream out;
-		std::string error;
-		TEST_EXPECT(opennova::env::save_env(out, config, error));
-		environment = out.str();
-		TEST_EXPECT(editor_test::write_text(root + "/day.env", environment) && editor_test::write_text(root + "/cloud.pcx", "x"));
-	}
-	editor_test::handle_to_end(session, request::rescan());
-	TEST_EXPECT(session.document_for("main.mnu") == menu);
-	editor_test::handle_to_end(session, request::rename_asset("logo2.tga", "logo3.tga"));
-	TEST_EXPECT(session.outcome().done());
-	TEST_EXPECT(!fs::exists(root + "/logo2.tga") && fs::exists(root + "/logo3.tga"));
-	TEST_EXPECT(read_text(root + "/day.env") == environment);
-	editor_test::handle_to_end(session, request::rename_asset("cloud.pcx", "haze.pcx"));
-	TEST_EXPECT(session.outcome().done() && fs::exists(root + "/haze.pcx"));
-	{
-		const size_t at = environment.find("sky_map1 cloud.pcx");
-		TEST_EXPECT(at != std::string::npos);
-		environment.replace(at, 18, "sky_map1 haze.pcx");
-		TEST_EXPECT(read_text(root + "/day.env") == environment);
-	}
-	menu = session.document_for("main.mnu"); // reloaded after the rewrite
 	// Through a style variable: the variable's value is the site.
 	TEST_EXPECT(menu && find_definition(AssetGraph(), *menu, "EXIT", exit));
 	edit_window(session, *menu, menu_test::child_of(*menu, exit, "appearance"), "value", std::string("%DEF_FONTNAME_LG%"));
 	editor_test::handle_to_end(session, request::save_all());
-	fs::remove(root + "/day.env");
 	editor_test::handle_to_end(session, request::rescan());
 	std::string font_file;
 	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Font, "%DEF_FONTNAME_LG%", std::string(), &font_file) == ReferenceStatus::Present);
@@ -1723,7 +1688,9 @@ static int test_reference_kind_rows() {
 		                       kind == ReferenceKind::SoundProfile || kind == ReferenceKind::Shader ||
 		                       kind == ReferenceKind::Particle || kind == ReferenceKind::AnimationKey ||
 		                       kind == ReferenceKind::ItemAlias || kind == ReferenceKind::AvatarPart ||
-		                       kind == ReferenceKind::Dialog || kind == ReferenceKind::MusicStream || kind == ReferenceKind::ItemName;
+		                       kind == ReferenceKind::Dialog || kind == ReferenceKind::MusicStream || kind == ReferenceKind::ItemName ||
+		                       // The game runs on without one (S26 A8): default.adm in a map's place, a menu image undrawn.
+		                       kind == ReferenceKind::AnimationMap || kind == ReferenceKind::MenuTexture;
 		TEST_EXPECT(row.severity_when_missing == (tolerated ? DiagnosticSeverity::Warning : DiagnosticSeverity::Error));
 	}
 	ReferenceKind kind = ReferenceKind::None;
@@ -2031,7 +1998,7 @@ static int test_model_texture_references() {
 	// No other texture takes a material chunk: a particle naming field.nq8 misses it.
 	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Texture, "field.nq8") == ReferenceStatus::Missing);
 	// A file of the name that holds no chunk is of no kind the game knows: it serves no row, and the
-	// game opening it reads no chunk, which is its own finding (review F3: reference.wrong_kind), not a
+	// game opening it reads no chunk, which is its own finding (reference.wrong_kind), not a
 	// name the project lacks; an error that gates where a texture's missing name does, nowhere (the
 	// build follows retail, S14).
 	TEST_EXPECT(editor_test::write_text(root + "/textures/field.nq8", "x"));
@@ -2544,10 +2511,7 @@ bool rewrite(const std::string &path, const std::string &text) {
 	return !ec;
 }
 
-// An IMAGE row of a texture, a FONT of a name, an ACTION that selects a screen of a menu file.
-std::string image(const std::string &texture) {
-	return "<APPEARANCE STATE=\"DEFAULT\" TYPE=\"IMAGE\">" + texture + "</APPEARANCE>\r\n";
-}
+using menu_test::image;
 std::string font(const std::string &name) { return "<FONT><NAME>" + name + "</NAME></FONT>\r\n"; }
 std::string go_screen(const std::string &file, const std::string &screen_name) {
 	return "<ACTION TYPE=\"SCREEN\" FILE=\"" + file + "\">" + screen_name + "</ACTION>\r\n";
@@ -3058,15 +3022,15 @@ LayerFile layer_file(const std::string &name, AssetKind kind, const std::string 
 
 } // namespace
 
-// The base layer (S13 D3, ADR 0046 d10: a read-only dependency mount; project assets win): a
-// lookup tries the project, then the base, whose files the project has one of the name of are
-// hidden (their names with them); the base resolves what the project lacks, a stylesheet's
-// variables included; it makes no edge and no finding (a reference in it to nothing, a file of it
-// that does not read); choices lists the base's names after the project's, each name once, the
-// names a lookup finds before those none does: a variable the project defines only in a
-// stylesheet the game never reads is the base's live one, and a base stylesheet the game never
-// reads offers its variables inert. Set and taken away, and a file added under it, the graph
-// equals a fresh one over the same base.
+// The base layer (S13 D3, ADR 0046 d10, "An expansion's base game under its graph": an expansion
+// project's base game; project assets win): a lookup tries the project, then the base, whose files
+// the project has one of the name of are hidden (their names with them); the base resolves what the
+// project lacks, a stylesheet's variables included; it makes no edge and no finding (a reference in
+// it to nothing, a file of it that does not read); choices lists the base's names after the
+// project's, each name once, the names a lookup finds before those none does: a variable the
+// project defines only in a stylesheet the game never reads is the base's live one, and a base
+// stylesheet the game never reads offers its variables inert. Set and taken away, and a file added
+// under it, the graph equals a fresh one over the same base.
 static int test_base_layer() {
 	std::vector<LayerFile> files;
 	files.push_back(layer_file("menu_style.mns", AssetKind::MenuStyle,

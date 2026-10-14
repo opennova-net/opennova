@@ -359,4 +359,36 @@ std::vector<NodeAddress> mission_box_records(const std::vector<MissionMark> &mar
 	return out;
 }
 
+std::vector<MissionWarmModel> mission_models_to_warm(const std::vector<const MissionEntityMark *> &entities,
+		const std::function<std::string(int64_t item)> &graphic_of, const std::function<bool(const std::string &)> &warm) {
+	std::vector<MissionWarmModel> out;
+	for (const MissionEntityMark *entity : entities) {
+		if (!entity || entity->pool == MissionPool::Marker) continue;
+		const std::string graphic = graphic_of(entity->item);
+		if (graphic.empty() || warm(graphic)) continue;
+		auto model = std::find_if(out.begin(), out.end(), [&](const MissionWarmModel &m) { return m.graphic == graphic; });
+		if (model == out.end()) {
+			out.push_back(MissionWarmModel{ graphic, {} });
+			model = out.end() - 1;
+		}
+		if (std::find(model->items.begin(), model->items.end(), entity->item) == model->items.end())
+			model->items.push_back(entity->item);
+	}
+	return out;
+}
+
+MissionPlacePlan mission_place_or_lift(const std::vector<MissionEntityMark> &entities, bool whole,
+		const std::function<bool(const MissionEntityMark &)> &placed_alike, const std::vector<NodeId> &lifted, size_t most) {
+	MissionPlacePlan out;
+	out.place = whole;
+	if (whole) return out;
+	for (const MissionEntityMark &entity : entities)
+		if (!placed_alike(entity)) out.adds.push_back(entity.row);
+	size_t count = out.adds.size();
+	for (const NodeId row : lifted)
+		if (std::find(out.adds.begin(), out.adds.end(), row) == out.adds.end()) ++count;
+	out.place = count > most;
+	return out;
+}
+
 } // namespace opennova::editor

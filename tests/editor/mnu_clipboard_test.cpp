@@ -59,11 +59,7 @@ constexpr const char *kMenu =
 constexpr NodeKind kScreen = node_kind(MenuKind::Screen);
 constexpr NodeKind kWindow = node_kind(MenuKind::Window);
 
-NodeAddress named(const Document &document, const char *name) {
-	NodeAddress address;
-	find_definition(AssetGraph(), document, name, address);
-	return address;
-}
+using menu_test::named;
 
 // A window by name wherever it sits, a part's too (find() reaches the windows a lookup finds).
 NodeAddress walked(const Document &document, const Node &row, const char *name) {

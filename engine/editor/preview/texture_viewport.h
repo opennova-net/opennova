@@ -5,7 +5,6 @@
 #include <memory>
 #include <string>
 
-#include <editor/documents/texture_compare.h>
 #include <editor/documents/texture_image.h>
 #include <editor/documents/texture_load_rules.h>
 #include <editor/documents/texture_roles.h>
@@ -23,37 +22,29 @@ enum class TextureViewStatus : uint8_t {
 	Ready,
 };
 // "no_texture", "unloadable", "undecoded", "ready": its token on the wire.
-const char *texture_view_status_token(TextureViewStatus status);
+inline constexpr const char *kTextureViewStatusTokens[] = {"no_texture", "unloadable", "undecoded", "ready"};
 
 // Which of a texture's channels the picture shows: its colour (alpha left out), one channel as grey,
 // its alpha as grey, its colour over a checkerboard by its alpha (what shows through where it is
 // transparent), or its colour read as a normal map and lit from the options' light (the relief a normal
 // map gives a surface).
 enum class TextureChannels : uint8_t { Rgb, Red, Green, Blue, Alpha, Rgba, Normals };
-// "rgb", "red", "green", "blue", "alpha", "rgba", "normals", and the token's channels (false for none).
-const char *texture_channels_token(TextureChannels channels);
-bool texture_channels_from_token(const std::string &token, TextureChannels &out);
 
 // How a texture viewport draws its texture: the channels, the mip level (0 the texture itself; a texture
 // built from pixels shows the chain the game builds of it, a DDS its own; a level past the last shows the
 // last), the use it shows the texture as, by its index among the texture's uses (texture_uses; -1 the file as
 // its reader decodes it), the object texture detail it shows the device texture at (-1 as stored; 0 to 3, by
 // the shown use's slot and loader, else the first model row's: renderer/device_texture), the light a
-// normal map is lit from (degrees round the picture, 0 from its right, 90 from its top), and the compare
-// (documents/texture_compare: the texture beside the DXT texture made of it, split at `split`, a fraction of
-// its width, the compressed alone, or their difference; a compare shows the file's texels, whatever use is
-// picked).
+// normal map is lit from (degrees round the picture, 0 from its right, 90 from its top).
 struct TextureViewportOptions {
 	TextureChannels channels = TextureChannels::Rgba;
 	int level = 0;
 	int as_used = -1;
 	int detail = -1;
 	float light = 135.0f;
-	TextureCompareView compare = TextureCompareView::Off;
-	float split = 0.5f;
 	bool operator==(const TextureViewportOptions &other) const {
 		return channels == other.channels && level == other.level && as_used == other.as_used && detail == other.detail &&
-		       light == other.light && compare == other.compare && split == other.split;
+		       light == other.light;
 	}
 	bool operator!=(const TextureViewportOptions &other) const { return !(*this == other); }
 };
@@ -83,14 +74,6 @@ struct TextureShownUse {
 		       alpha == other.alpha && alpha_words == other.alpha_words && blend_mode == other.blend_mode;
 	}
 };
-// What a viewport shows of the use `use`, the texture's use at `index`.
-TextureShownUse texture_shown_use(const TextureUse &use, int index);
-// The texels a use shows of `image`: its loader's transform, then what its role's consumer makes of them
-// (texture_role_texels: a blend map's weights, a particle graphic as its atlas page holds it), then its cut-out (alpha 255 where the
-// material's test keeps a texel, 0 where it discards it), or for a model row whose alpha the game draws as no
-// transparency (a specular brightness, unused) every texel opaque; `image` itself where the use changes nothing.
-std::shared_ptr<const TextureImage> texture_as_used(const std::shared_ptr<const TextureImage> &image,
-                                                    const TextureShownUse &use);
 
 // Its camera: fitted to the picture (the whole texture, as large as the picture holds it), or a scale
 // (picture pixels a texel of the first level) with the texel at the picture's middle (x, y, in the
@@ -177,11 +160,6 @@ public:
 	const renderer::DeviceTexture &shown_device() const { return detail_device_; }
 	uint64_t reads() const { return reads_; }
 	bool from_file() const { return from_file_; }
-	// The compare, made while the options ask for one (null otherwise): the texture beside the DXT texture made
-	// of it, or the `.dds` beside its import's source, with each level's error.
-	const std::shared_ptr<const TextureCompression> &compression() const { return compression_; }
-	// The error of the level shown, where a compare is made (null otherwise).
-	const TextureLevelError *shown_error() const;
 	const TextureViewportOptions &options() const { return options_; }
 	const TextureCamera &camera() const { return camera_; }
 	// The level drawn (the options' held within the texture's levels).
@@ -195,7 +173,7 @@ public:
 	std::string texel_words(uint32_t tx, uint32_t ty, const uint8_t rgba[4]) const;
 
 	ViewportStatus status() const override;
-	const char *reason() const override { return texture_view_status_token(reason_); }
+	const char *reason() const override { return enum_token(kTextureViewStatusTokens, reason_); }
 	std::string message() const override;
 	const std::string &detail() const override { return detail_; }
 	std::string caption() const override;
@@ -254,17 +232,6 @@ private:
 	TextureViewportOptions made_options_;
 	// The picture of the source and the use: the transforms the options ask for applied.
 	std::shared_ptr<const TextureImage> picture(const std::shared_ptr<const TextureImage> &used, const TextureBudget *budget);
-	// The compare shown (null while the options ask for none) and the one kept, made of `compared_` (and its
-	// import source's stamp, a .dds's) whether shown or not; the picture's view and split last made.
-	std::shared_ptr<const TextureCompression> compression_;
-	std::shared_ptr<const TextureCompression> kept_;
-	std::shared_ptr<const TextureImage> compared_;
-	uint64_t compared_source_size_ = 0;
-	int64_t compared_source_modified_ = 0;
-	TextureCompareView shown_compare_ = TextureCompareView::Off;
-	float shown_split_ = 0.5f;
-	// The compare of `image` as the view stands: its own texels made a .dds, or a .dds against its import's source.
-	std::shared_ptr<const TextureCompression> compare(const ViewportInput &input, const std::shared_ptr<const TextureImage> &image);
 };
 
 } // namespace opennova::editor

@@ -261,7 +261,7 @@ void HudViewportApplier::apply_board_(const opennova::editor::HudViewport &model
 		board_shown_ = false;
 		return;
 	}
-	// The model's board: its stand-in rows, its strings composed over the project's tables.
+	// The model's board: its header's strings composed over the project's tables (no rows: a preview has no session).
 	hud->set_scoreboard_board(true, int(ticks), gametext_, model.board());
 	board_shown_ = true;
 }
@@ -281,6 +281,7 @@ void HudViewportApplier::apply(const opennova::editor::ViewportModel &model, con
 		backdrop->set_position(Vector2(0.0f, 0.0f));
 		backdrop->set_size(Vector2(float(options.width), float(options.height)));
 	}
+	scale_backdrop_();
 	if (hud) {
 		hud->set_position(Vector2(0.0f, 0.0f));
 		hud->set_size(Vector2(float(options.width), float(options.height)));
@@ -359,6 +360,17 @@ void HudViewportApplier::resize(int width, int height) {
 		picture->set_position(Vector2(0.0f, 0.0f));
 		picture->set_size(Vector2(float(std::max(width, 1)), float(std::max(height, 1))));
 	}
+	scale_backdrop_();
+}
+
+void HudViewportApplier::scale_backdrop_() {
+	const TextureRect *picture = node<TextureRect>(picture_id_);
+	const SubViewport *screen = node<SubViewport>(screen_id_);
+	if (!picture || !screen || backdrop_material_.is_null()) return;
+	const Vector2 shown = picture->get_size();
+	const Vector2i size = screen->get_size();
+	if (size.x <= 0 || size.y <= 0) return;
+	backdrop_material_->set_shader_parameter("backdrop_pixel_scale", Vector2(shown.x / float(size.x), shown.y / float(size.y)));
 }
 
 

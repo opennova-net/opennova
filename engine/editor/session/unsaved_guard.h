@@ -13,7 +13,8 @@ struct SessionView;
 
 // The unsaved-changes prompt (ADR 0046 S11a, S12 C, S13 A2), session policy: a request that would
 // lose, pack or write over unsaved edits waits on the prompt instead of running, the prompt listing
-// those files, and runs once it is answered (Save writes them first, Discard drops them, Cancel
+// those files, and runs once it is answered (Save writes them first; Discard lets it run past the
+// prompt, dropping the edits of what it replaces or closes as it commits, none when it is refused; Cancel
 // drops the request). What a request guards is its row's (request_kinds.h: `guard`, and whether
 // the prompt offers Discard, `can_discard`): the document it names, every document with unsaved
 // edits, or those among the files it plans to write, each planner asked (ImportController,
@@ -38,16 +39,21 @@ public:
 	// after it.
 	bool holds(const EditorRequest &request);
 	// The prompt's answer: the request that waited, to run now (the files it lists written by a
-	// Save, dropped by a Discard); none when nothing runs (a Cancel, an answer refused, a prompt
-	// renewed with a file made unsaved since it opened, a Save that could not write every file).
+	// Save; after a Discard, past the prompt until end_discard); none when nothing runs (a Cancel, an
+	// answer refused, a prompt renewed with a file made unsaved since it opened, a Save that could not
+	// write every file).
 	std::optional<EditorRequest> resolve(UnsavedChoice choice);
-	// The prompt closed, the request it held dropped.
-	void close_prompt();
+	// The request a Discard let through has run (serve_resolve_unsaved): the prompt guards again.
+	void end_discard() { discarding_ = false; }
+	// A Discard's request is running past the prompt (a Quit drops the documents then).
+	bool discarding() const { return discarding_; }
 	void close_prompt_if_open() {
 		if (pending_) close_prompt();
 	}
 
 private:
+	// The prompt closed, the request it held dropped.
+	void close_prompt();
 	// Play's own Save all, with save_before_play on (the Play's own, else the project's; DI-26): the files written without asking;
 	// true when it wrote (what it could not stays unsaved, for the prompt).
 	bool saved_first(const EditorRequest &request, const std::vector<std::string> &unsaved);
@@ -58,6 +64,7 @@ private:
 	SessionCore &core_;
 	SessionView &view_;
 	std::optional<EditorRequest> pending_; // what the prompt holds
+	bool discarding_ = false;              // a Discard's request runs past the prompt (resolve to end_discard)
 };
 
 } // namespace opennova::editor

@@ -351,33 +351,14 @@ int validation_and_session() {
 	return 0;
 }
 
-// S11a: a string's text edited shows as changed and reverts; a string added is Added and
-// its section changed; an ungrouped table (clean, its warning a source finding) needs the
-// rewrite that regroups it, after which the finding is gone and the history stays.
+// S11a: an ungrouped table (clean, its warning a source finding) needs the rewrite that regroups
+// it, after which the finding is gone and the history stays. A string's text changed and
+// reverted is every type's (editor_document_contract_test check_real_change), a record added
+// (Added, its owner changed) the core's (document_core_test test_changes_since_save).
 int changes_since_save() {
 	editor_test::TempProjectDir dir("opennova_strings_changes_test");
 	std::string error;
-	const std::vector<uint8_t> bytes = minted_table();
-	TEST_EXPECT(opennova::io::write_file_atomic(dir.file("gametext.bin"), bytes.data(), bytes.size(), error));
-	StringsDocument document;
 	Diagnostic diagnostic;
-	TEST_EXPECT(document.load(dir.file("gametext.bin"), "gametext.bin", AssetKind::Strings, "jo", diagnostic));
-	const NodeId menu = document.rows()[0]->id;
-	const NodeAddress section{menu, kSection, 0};
-	const NodeAddress cafe{menu, kString, document.rows()[0]->collections[0][1]};
-	TEST_EXPECT(document.apply(set(cafe, "text", std::string("Tea")), diagnostic));
-	TEST_EXPECT(document.field_changed(cafe, "text") && !document.field_changed(cafe, "key"));
-	TEST_EXPECT(document.record_change(cafe) == Document::RecordChange::Changed &&
-	            document.record_change(section) == Document::RecordChange::Unchanged);
-	TEST_EXPECT(document.apply(document.revert_edits(cafe, "text"), diagnostic) && !document.field_changed(cafe, "text"));
-	TEST_EXPECT(text_of(document, cafe, "text") == "Caf\xC3\xA9");
-	Edit add;
-	add.operation = EditOperation::Add;
-	add.address = {menu, kString, 0};
-	TEST_EXPECT(document.apply(add, diagnostic));
-	TEST_EXPECT(document.record_change({menu, kString, document.last_added()}) == Document::RecordChange::Added &&
-	            document.record_change(section) == Document::RecordChange::Changed);
-
 	const std::vector<uint8_t> ungrouped = minted_table(false);
 	TEST_EXPECT(opennova::io::write_file_atomic(dir.file("ungrouped.bin"), ungrouped.data(), ungrouped.size(), error));
 	StringsDocument table;

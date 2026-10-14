@@ -20,6 +20,7 @@
 #include <editor/requirements/requirements.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/workspace_parts.h>
+#include <editor/session/row_table.h>
 
 namespace opennova::editor {
 
@@ -266,7 +267,7 @@ JsonValue run_section(const SessionView &view) {
 	out.set("runtime_executable", json_string(activity.runtime_executable));
 	out.set("runtime_setting", json_string(view.project.runtime_setting));
 	out.set("boot_missing", io::json_string_array(activity.boot_missing));
-	// The mode the game ran in (runtime, install or strict), whether the game install's first run was started
+	// The mode the game ran in (runtime or strict), whether the game install's first run was started
 	// again, and what its file log said it loaded once it exited (null before one was read).
 	out.set("ran_mode", json_string(activity.play_run_mode));
 	out.set("started_again", boolean(activity.play_started_again));
@@ -474,7 +475,6 @@ JsonValue preferences_section(const SessionView &view) {
 	out.set("runtime_setting", json_string(view.project.runtime_setting));
 	out.set("import_dependencies", boolean(view.project.import_dependencies));
 	out.set("preview_background", json_string(preview_background_token(view.project.preview_background)));
-	out.set("build_folder", json_string(view.project.build_folder));
 	JsonValue items = JsonValue::make_array();
 	for (const int64_t item : view.project.recent_items) items.push(json_number(double(item)));
 	out.set("recent_items", std::move(items));
@@ -574,7 +574,7 @@ constexpr ViewSectionRow kSections[] = {
 			"the run directory it runs in and the log there Play tails (run_dir, log_file: never "
 			"the build directory), whether that directory was emptied first (fresh) and what it kept of "
 			"what the runs before wrote there (kept: the game's game.cfg, its saves), the files it reported "
-			"missing at boot, how the open project plays (play_mode: runtime, install or strict; "
+			"missing at boot, how the open project plays (play_mode: runtime or strict; "
 			"save_before_play: its local.json's) and the mode the running or last game ran in (ran_mode), "
 			"and what Play runs (the game install, the runtime)." },
 	{ S::Import, "import", concern_set({ C::Dialogs, C::Preferences, C::Files }), import_section,
@@ -642,21 +642,7 @@ constexpr ViewSectionRow kSections[] = {
 
 static_assert(std::size(kSections) == kViewSectionCount, "every view section has exactly one row");
 
-constexpr bool sections_in_order() {
-	for (size_t i = 0; i < kViewSectionCount; ++i)
-		if (kSections[i].section != static_cast<ViewSection>(i))
-			return false;
-	return true;
-}
-static_assert(sections_in_order(), "the view section rows follow the enum's order");
-
-constexpr bool same_text(const char *a, const char *b) {
-	while (*a && *a == *b) {
-		++a;
-		++b;
-	}
-	return *a == *b;
-}
+static_assert(rows_follow(kSections, &ViewSectionRow::section), "the view section rows follow the enum's order");
 
 // Every section a token of its own, a writer, a concern it follows and a doc.
 constexpr bool sections_named() {
@@ -763,13 +749,7 @@ const ViewSectionRow &view_section_row(ViewSection section) {
 }
 
 bool view_section_from_token(const std::string &token, ViewSection &out) {
-	for (const ViewSectionRow &row : kSections) {
-		if (token == row.token) {
-			out = row.section;
-			return true;
-		}
-	}
-	return false;
+	return row_from_token(kSections, &ViewSectionRow::section, &ViewSectionRow::token, token, out);
 }
 
 JsonValue view_section_to_json(const SessionView &view, ViewSection section) {
@@ -786,7 +766,10 @@ bool view_section_moved(const SessionView &view, ViewSection section, uint64_t s
 	return false;
 }
 
-JsonValue operation_status_to_json(const OperationStatus &status) {
+// The operation that runs: {running}, and while one does its id, kind token, label, done, total,
+// unit token (bytes, files, steps), cancellable, and reads and writes (tokens: files, documents,
+// project, slot).
+static JsonValue operation_status_to_json(const OperationStatus &status) {
 	JsonValue out = JsonValue::make_object();
 	out.set("running", boolean(status.running()));
 	if (!status.running())

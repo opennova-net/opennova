@@ -158,7 +158,7 @@ RenamePlan plan_split(const ProjectPaths &paths, const AssetScan &scan, const As
                       const std::string &new_name, const std::vector<std::string> &referrers,
                       const BaseNames *base = nullptr);
 
-// Commit a plan that is ok, to its end (RenameTransaction below steps it a file at a time): every
+// A file's rename commits a plan that is ok a file at a time (RenameTransaction below): every
 // referencing document is read and rewritten through its type in memory, then the file (and an
 // import source's sidecar) is copied under the new name, the rewritten documents are saved, and
 // the old file, its sidecar and its old outputs are removed. Only the planned sites are rewritten
@@ -168,8 +168,6 @@ RenamePlan plan_split(const ProjectPaths &paths, const AssetScan &scan, const As
 // naming a renamed output resolves once the next import pass makes it, and every refresh runs that
 // pass first); the findings say what failed. Open documents among the sites must be reloaded by
 // the caller.
-bool apply_rename(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
-                  const AssetGraph &graph, const RenamePlan &plan, std::vector<Diagnostic> &findings);
 
 // A name renamed everywhere (ADR 0046 S12, "Rename everywhere"): the field that defines a
 // symbol (a weapon's or an ammo's name, an item's id, a string's key, a style variable, a menu
@@ -221,7 +219,7 @@ bool check_symbol_rename(const ProjectPaths &paths, const ProjectDocument &proje
                          const AssetGraph &graph, const SymbolRenamePlan &plan,
                          const std::vector<std::shared_ptr<const DocumentBase>> &open,
                          std::vector<Diagnostic> &findings);
-// Commit a plan that is ok, on disk as apply_rename does (not undoable, like a file's rename), to
+// Commit a plan that is ok, on disk as a file's rename does (not undoable, like a file's rename), to
 // its end (RenameTransaction steps it): every file of its sites read again from disk and rewritten
 // in memory as check_symbol_rename does, and only when every one of them takes every site and
 // would write, written together (write_files_together: each text beside its file, then each
@@ -232,7 +230,7 @@ bool apply_symbol_rename(const ProjectPaths &paths, const ProjectDocument &proje
                          const AssetGraph &graph, const SymbolRenamePlan &plan, std::vector<Diagnostic> &findings,
                          const io::FileReplace &replace = io::replace_file);
 
-// A rename's commit a file at a time (ADR 0046 S13 A3): apply_rename's or apply_symbol_rename's
+// A rename's commit a file at a time (ADR 0046 S13 A3): a file's rename's or apply_symbol_rename's
 // work as a cursor, so the session runs it as an operation's steps. Each step before the commit
 // reads one file of the sites (in the order of their paths) and sets its sites in memory, nothing
 // written, so a transaction dropped between two steps has done nothing; once every file is
@@ -258,7 +256,7 @@ public:
 	// One step: the next file staged, or once each is, the commit. True once committed.
 	bool step();
 	bool committed() const { return committed_; }
-	// What the commit came to (apply_rename's and apply_symbol_rename's answer); false before it.
+	// What the commit came to (apply_symbol_rename's answer); false before it.
 	bool ok() const { return committed_ && ok_; }
 	const std::vector<Diagnostic> &findings() const { return findings_; }
 	// Where it stands: the files staged of the files the sites are in, and the file staged last.

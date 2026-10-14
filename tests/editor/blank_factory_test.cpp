@@ -1,4 +1,4 @@
-// Pins the blank factories (ADR 0046 d8): every output parses through its own format
+// Pins the blank factories (ADR 0046 d7): every output parses through its own format
 // library and through the runtime's loader, the startup screen compiles through the
 // menu frame compiler with every font and string id it names resolvable, text lands
 // CRLF, a missing texture's placeholder is the game's own checkerboard in the name's

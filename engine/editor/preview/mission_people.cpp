@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include <base/io/fixed.h>
 #include <editor/preview/mission_poses.h>
 #include <editor/preview/model_preview_rig.h>
 #include <runtime/world/infantry_sound.h>
@@ -30,6 +31,8 @@ void MissionPeople::reset(const MissionPoses &poses, int32_t tick) {
 		// standing as the warmup left them (world::infantry_org1_motor_head).
 		if (world::physics_class_from_move_function(pose.definition.move_function) != world::PhysicsClass::Org1)
 			continue;
+		// A route's walker stands at its spawn pose: the game walks it along its route, which no think runs here.
+		if (pose.state == world::anim_state::kWalkForward) continue;
 		Person person;
 		person.row = pose.row;
 		person.channels = pose.channels;
@@ -80,6 +83,11 @@ bool MissionPeople::run_to(const MissionPoses &poses, int32_t tick) {
 const world::InfantryBodyPose *MissionPeople::pose(NodeId row) const {
 	const auto found = rows_.find(row);
 	return found == rows_.end() ? nullptr : &people_[found->second].pose;
+}
+
+const world::InfantryState *MissionPeople::channels(NodeId row) const {
+	const auto found = rows_.find(row);
+	return found == rows_.end() ? nullptr : &people_[found->second].channels;
 }
 
 io::JsonValue mission_body_json(const world::InfantryBodyPose &body, int32_t tick) {
@@ -133,7 +141,7 @@ std::vector<ClipSoundFired> mission_people_sounds(const MissionPeople &people, i
 		due.clip_tick = event.phase;
 		due.frame = event.phase;
 		due.word = event.word;
-		due.bottom = float(double(event.bottom) / 65536.0);
+		due.bottom = float(double(event.bottom) / io::kFp16OneD);
 		// The body at the preview's origin as plan_clip_event hears it: the listener where it stands from the person.
 		const PreviewVec3 from_person{ listener.x - person.origin.x, listener.y - person.origin.y,
 			listener.z - person.origin.z };

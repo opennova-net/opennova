@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdlib>
 
+#include <base/io/fixed.h>
 #include <base/io/json.h>
 #include <editor/documents/til_document.h>
 #include <editor/model/document_base.h>
@@ -232,7 +233,7 @@ bool plan_tile_drag(const TerrainViewContext &view, const ViewportDrag &drag, Ca
 	// The tile's corner goes to the ground under the pointer, as Nile's cursor carries a tile by its corner (`by`: from
 	// where the picture shows the corner).
 	const TilOverlayEntry &entry = held->entry;
-	const TerrainPoint corner{double(entry.x_fixed) / 65536.0, double(entry.z_fixed) / 65536.0};
+	const TerrainPoint corner{double(entry.x_fixed) / io::kFp16OneD, double(entry.z_fixed) / io::kFp16OneD};
 	float x = drag.x, y = drag.y;
 	if (drag.by) {
 		float hx = 0.0f, hy = 0.0f;

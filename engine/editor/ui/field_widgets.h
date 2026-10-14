@@ -63,8 +63,6 @@ Edited choice(const FieldSchema &field, const std::vector<FieldChoice> &choices,
 // %VAR%, which the stylesheet resolves), written AARRGGBB; a PackedRgb integer, written
 // 0xRRGGBB.
 Edited swatch(FieldColor color, Value &value);
-// A red / green / blue group's swatch over its three channels (0..255, in that order).
-Edited channel_swatch(std::vector<Value> &values);
 // The width a swatch takes on its line, the gap after it included.
 float swatch_width();
 

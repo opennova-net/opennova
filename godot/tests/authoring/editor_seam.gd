@@ -532,3 +532,46 @@ func _active_done(fields: Dictionary) -> bool:
 		return false
 	fields["path"] = active
 	return done(fields)
+
+
+# --- the viewports --------------------------------------------------------------------------------
+
+## Whether a viewport's state (the viewport query's) shows its picture built: ready on an attached
+## device, built past `builds` and loading nothing.
+func built(state: Dictionary, builds := 0) -> bool:
+	var device: Dictionary = state.get("device", {})
+	return (
+		String(state.get("status", "")) == "ready"
+		and bool(device.get("attached", false))
+		and int(state.get("builds", 0)) > builds
+		and not bool(device.get("build", {}).get("loading", true))
+	)
+
+
+## The viewport `args` names (the viewport query's state: its path, "" or none the active
+## document's, its kind, its page) once its device built its picture (S13 V6: a device builds over
+## the frames after the pump that takes the Rebuild, `loading` until it is built): a frame at a time
+## until the state is built past `builds` and `holds` (a Callable over the state) holds, `frames`
+## frames at most, the editor pumped before each frame when `pumped`, then pumped once more and read
+## again (what the device reports of its built picture, the files it missed, its ground, reaches
+## the viewport at the pump after the build's last unit). Its last state either way. A windowed
+## test leaves `pumped` off: its frames' draws, pumps and builds come in the Shell's order alone.
+func await_viewport(
+	args: Dictionary, builds := 0, holds := Callable(), frames := 900, pumped := true
+) -> Dictionary:
+	var asked := args.duplicate()
+	asked["op"] = "state"
+	if String(asked.get("path", "-")).is_empty():
+		asked.erase("path")
+	var state := query("viewport", asked)
+	for _frame in frames:
+		if built(state, builds) and (not holds.is_valid() or bool(holds.call(state))):
+			break
+		if pumped:
+			app.call("pump")
+		await app.get_tree().process_frame
+		state = query("viewport", asked)
+	if not pumped:
+		return state
+	app.call("pump")
+	return query("viewport", asked)

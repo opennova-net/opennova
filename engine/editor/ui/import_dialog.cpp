@@ -14,6 +14,7 @@
 #include <editor/import/import_plan.h>
 #include <editor/model/field_text.h>
 #include <editor/project/project_files.h>
+#include <editor/session/file_chores.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/session/workspace_parts.h>
@@ -29,16 +30,6 @@ namespace {
 
 using State = ImportPlanRow::State;
 using Group = ImportPlanGroup;
-
-// "a", "a and b", "a, b and c".
-std::string joined(const std::vector<std::string> &words) {
-	std::string out;
-	for (size_t i = 0; i < words.size(); ++i) {
-		if (i > 0) out += i + 1 == words.size() ? " and " : ", ";
-		out += words[i];
-	}
-	return out;
-}
 
 // Where a row's file comes from; a converter's output, the source it is made from too. Short,
 // for its cell: a folder or an archive by its own name (the whole path is the tooltip's).
@@ -68,9 +59,9 @@ void not_followed_line(const ImportPlan &plan) {
 		}
 	}
 	std::string line;
-	if (!files.empty()) line = "The files these kinds name are not looked for yet: " + joined(files) + ".";
+	if (!files.empty()) line = "The files these kinds name are not looked for yet: " + names_in_words(files) + ".";
 	if (!references.empty())
-		line += std::string(line.empty() ? "" : " ") + "References that name no file are not followed: " + joined(references) +
+		line += std::string(line.empty() ? "" : " ") + "References that name no file are not followed: " + names_in_words(references) +
 		        ".";
 	// The symbols followed to no file: what no place defines.
 	std::vector<std::string> undefined;
@@ -80,8 +71,8 @@ void not_followed_line(const ImportPlan &plan) {
 		tip += label + ": " + counted(entry.count, "reference") + " no place defines, the first in " + entry.first + "\n";
 	}
 	if (!undefined.empty())
-		line += std::string(line.empty() ? "" : " ") + "Named by the files but defined nowhere: " + joined(undefined) + ".";
-	// The symbols only a place's copy of a file the project holds defines (review F6).
+		line += std::string(line.empty() ? "" : " ") + "Named by the files but defined nowhere: " + names_in_words(undefined) + ".";
+	// The symbols only a place's copy of a file the project holds defines (S14 R4: `shadowed`).
 	std::vector<std::string> shadowed;
 	for (const ImportNotFollowed &entry : plan.shadowed) {
 		const std::string label = reference_row(entry.reference).label;
@@ -91,7 +82,7 @@ void not_followed_line(const ImportPlan &plan) {
 	}
 	if (!shadowed.empty())
 		line += std::string(line.empty() ? "" : " ") + "Defined only in the source's copy of a file the project has (its own is kept, "
-		        "so these stay undefined; import that file with Replace to take the source's): " + joined(shadowed) + ".";
+		        "so these stay undefined; import that file with Replace to take the source's): " + names_in_words(shadowed) + ".";
 	if (line.empty()) return;
 	ImGui::TextWrapped("%s", line.c_str());
 	if (!tip.empty()) tip.pop_back();
@@ -158,7 +149,7 @@ std::pair<std::string, std::string> held_words(const ImportPlanRow &row) {
 // Import the session refused, or that waits on the unsaved prompt) keeps them.
 void ImportDialog::follow(const SessionView &view) {
 	const WorkspaceView::Import &held = view.workspace.import;
-	// A member the session moved is the one sent last too (review X8): what the person sets after it, back to
+	// A member the session moved is the one sent last too: what the person sets after it, back to
 	// what the window sent before, differs from it and goes to the session.
 	if (held.filter != filter_.seen) sent_.filter = held.filter;
 	if (held.rows_filter != rows_filter_.seen) sent_.rows_filter = held.rows_filter;
@@ -563,10 +554,10 @@ void ImportDialog::draw_row(const ImportPlan &plan, size_t index, size_t depth, 
 		const std::string words = "named here too; it comes with " + row.needed_by.file;
 		ui_kit::clipped_text(words, "Listed under " + row.needed_by.file + ", which names it first: " +
 		                                    import_need_text(row.needed_by) + ". Every file that names it: " +
-		                                    joined(row.wanted_by) + ".");
+		                                    names_in_words(row.wanted_by) + ".");
 	} else if (row.state == State::Found) {
 		const std::string need = import_need_text(row.needed_by);
-		const std::string others = row.wanted_by.size() > 1 ? "\nNamed by " + joined(row.wanted_by) + " too." : std::string();
+		const std::string others = row.wanted_by.size() > 1 ? "\nNamed by " + names_in_words(row.wanted_by) + " too." : std::string();
 		ui_kit::clipped_text(need, need + " names " + row.needed_by.name + others);
 	} else if (row.held) {
 		const auto [words, tip] = held_words(row);

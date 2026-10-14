@@ -102,11 +102,7 @@ int width_of(const fnt_font_t &font, int byte) {
 	fnt_get_glyph_size(fnt_get_glyph(&font, uint8_t(byte)), &w, &h);
 	return w;
 }
-size_t count_code(const std::vector<Diagnostic> &diagnostics, const std::string &code) {
-	size_t n = 0;
-	for (const Diagnostic &d : diagnostics) n += d.code() == code ? 1 : 0;
-	return n;
-}
+using editor_test::count_code;
 
 } // namespace
 

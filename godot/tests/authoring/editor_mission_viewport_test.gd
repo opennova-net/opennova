@@ -18,16 +18,9 @@ extends GutTest
 ## drawn before with it); the mission kind keeps two devices,
 ## the third mission giving up the least recently used mission's (D3).
 
-const EDITOR_SCENE := "res://editor/editor_root.tscn"
-const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
+const EditorFixture := preload("res://tests/authoring/editor_fixture.gd")
 const MISSION := "res://../fixtures/bms/synth_logic.bms"
 const FIXTURES := "res://../fixtures/"
-## The terrain's texture slots Tmap.trn names (fixtures/terrain/tmap), minted as the runtime fixture
-## mints them (godot/tests/support/runtime_fixture.gd): the colormap and the blend map 2048 a side.
-const TERRAIN_TEXTURES := ["mnml_c", "mnml_dm", "mnml_dc1", "mnml_dc2", "mnml_dc3", "mnml_dmd", "mnml_d1", "mnml_t"]
-
-## The minted textures' bytes, made once a run.
-static var _textures: Dictionary = {}
 
 var _dirs: Array[String] = []
 var _app: Node = null
@@ -35,25 +28,12 @@ var _seam: RefCounted = null
 
 
 func before_each() -> void:
-	var packed := load(EDITOR_SCENE) as PackedScene
-	assert_not_null(packed, "the editor scene loads (the editor-enabled variant is loaded)")
-	if packed == null:
-		return
-	_app = packed.instantiate()
-	_seam = EditorSeam.new(_app)
-	var settings_dir := OS.get_cache_dir().path_join("opennova editor mission viewport %d" % Time.get_ticks_usec())
-	assert_eq(DirAccess.make_dir_recursive_absolute(settings_dir), OK)
-	_dirs.append(settings_dir)
-	_app.set("settings_path", settings_dir.path_join("editor_settings.json"))
-	add_child_autofree(_app)
+	_seam = await EditorFixture.boot(self, "mission viewport", _dirs)
+	_app = _seam.app if _seam != null else null
 
 
 func after_each() -> void:
-	_app = null
-	for dir in _dirs:
-		TestFs.remove_dir_recursive(dir)
-	_dirs.clear()
-	await get_tree().process_frame
+	await EditorFixture.teardown(self, _dirs)
 
 
 func _viewport(op: String, args := {}, path := "") -> Dictionary:
@@ -81,18 +61,10 @@ func _change(change: Dictionary, path := "") -> bool:
 	return bool(_ask({"kind": "set_viewport", "viewport": change}, path).get("outcome", {}).get("done", false))
 
 
+## The viewport over `path` ("" the active document's) once its device built its picture, the
+## device's report of it (the files it missed, its ground) read (EditorSeam.await_viewport).
 func _await_ready(path := "") -> Dictionary:
-	var state := _state(path)
-	for _frame in 900:
-		if String(state.get("status", "")) == "ready" and bool(state.get("device", {}).get("attached", false)) \
-				and int(state.get("builds", 0)) > 0:
-			break
-		await get_tree().process_frame
-		state = _state(path)
-	# What the device reports of its built picture (the files it missed, its ground) reaches the
-	# viewport at the pump after the build's last unit.
-	_app.pump()
-	return _state(path)
+	return await _seam.await_viewport({"path": path, "limit": 200})
 
 
 func _device(state: Dictionary) -> SubViewport:
@@ -107,14 +79,13 @@ func _device_node(state: Dictionary, type: String) -> Node:
 	return found[0] if not found.is_empty() else null
 
 
-## The device's own camera, "Camera" under its Mission root (the water's mirror has a camera of its
-## own under it).
+## The device's own camera, "Camera" under its Mission root (the water's mirror and the
+## environment cube's capture have cameras of their own under them).
 func _camera(state: Dictionary) -> Camera3D:
 	var device := _device(state)
 	if device == null:
 		return null
-	var found := device.find_children("Camera", "Camera3D", true, false)
-	return found[0] as Camera3D if not found.is_empty() else null
+	return device.get_node_or_null("Mission/Camera") as Camera3D
 
 
 func _write(path: String, bytes: PackedByteArray) -> void:
@@ -131,55 +102,26 @@ func _vector(values: Variant) -> Vector3:
 	return Vector3(float(list[0]), float(list[1]), float(list[2]))
 
 
-## A texture `size` a side, grey, as an uncompressed true-colour TGA (all channels alike, so RGBA
-## bytes are BGRA TGA bytes): the runtime fixture's minting.
-static func _tga(size: int) -> PackedByteArray:
-	if _textures.has(size):
-		return _textures[size]
-	var image := Image.create(size, size, false, Image.FORMAT_RGBA8)
-	image.fill(Color(0.5, 0.5, 0.5, 1.0))
-	var header := PackedByteArray()
-	header.resize(18)
-	header[2] = 2 # Uncompressed true-color TGA.
-	header.encode_u16(12, size)
-	header.encode_u16(14, size)
-	header[16] = 32
-	header[17] = 0x28 # Top-origin, eight alpha bits.
-	_textures[size] = header + image.get_data()
-	return _textures[size]
-
-
 func _copy_fixture(source: String, target: String) -> void:
 	var bytes := FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(FIXTURES + source))
 	assert_false(bytes.is_empty(), "the fixture is available: " + source)
 	_write(target, bytes)
 
 
-## The files the mission's picture reads, written into the project at `root`: the terrain (Tmap.trn,
-## its heights, its two maps and the textures it names, its two foliage definitions' models), the
-## environment (synth_full.env and its clouds), the item table the mission's items are in, and the models
-## their graphics name. `effects` (DI-31): the pumps author a particle slot at their model's ground point,
-## its effect in a particle file of the project. `listen` (DI-36): the mission's four waypoint markers (item
-## 106005, path 1's stops in master's synth_logic.bms) made the game's env-sound emitters of V_TRUCK_ILP at every
-## hour, the fixture bank that holds it (heard to 2 km, its member tone.wav) as the project's game.lwf.
-func _mint_project(root: String, skip: PackedStringArray = PackedStringArray(), effects := false,
-		listen := false) -> void:
-	for name in ["Tmap.trn", "Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx"]:
-		if skip.has(name):
-			continue
-		_copy_fixture("terrain/tmap/" + name, root.path_join("terrain").path_join(name))
-	for name in TERRAIN_TEXTURES:
-		_write(root.path_join("terrain").path_join(name + ".tga"), _tga(2048 if name == "mnml_c" or name == "mnml_d1" else 32))
-	for name in ["synth_full.env", "cloud01.pcx", "cloud01b.pcx"]:
-		_copy_fixture("env/" + name, root.path_join("env").path_join(name))
-	# The item table, its pump drawn by the synth crate (one box, no live PANM, no occlusion records):
-	# a model the placer batches, so the mission's items are retained statics beside its individual
-	# models (the armory's buildings, the persons).
-	var items := FileAccess.get_file_as_string(ProjectSettings.globalize_path(FIXTURES + "def/items.def"))
+## The item table the mission's picture reads: the fixture's, its pump drawn by the synth crate (one
+## box, no live PANM, no occlusion records): a model the placer batches, so the mission's items are
+## retained statics beside its individual models (the armory's buildings, the persons). `effects`
+## (DI-31): the pumps author a particle slot at their model's ground point, its effect in the
+## project's particle file. `listen` (DI-36): the mission's four waypoint markers (item 106005, path
+## 1's stops in master's synth_logic.bms) made the game's env-sound emitters of V_TRUCK_ILP at every
+## hour.
+func _items(effects: bool, listen: bool) -> String:
+	var items := EditorFixture.items_def()
 	# The fixture ends its lines in CR LF, the one break the retail def walk splits at.
 	assert_true(items.contains("graphic pump\r\n"))
-	var crate_line := "graphic crate\r\n" + ("particlefx Puff ground\r\n" if effects else "")
-	items = items.replace("graphic pump\r\n", crate_line)
+	items = items.replace(
+		"graphic pump\r\n", "graphic crate\r\n" + ("particlefx Puff ground\r\n" if effects else "")
+	)
 	if listen:
 		# The waypoint item the mission's four markers place (the fixture's table has none of it).
 		assert_false(items.contains("  id 106005\r\n"))
@@ -187,48 +129,42 @@ func _mint_project(root: String, skip: PackedStringArray = PackedStringArray(), 
 		for slot in 4:
 			waypoint += "  soundloop_%d V_TRUCK_ILP\r\n" % (slot + 1)
 		items += waypoint + "end\r\n"
-		_copy_fixture("lwf/menu.lwf", root.path_join("sounds").path_join("game.lwf"))
-		_copy_fixture("lwf/tone.wav", root.path_join("sounds").path_join("tone.wav"))
-	_write(root.path_join("defs").path_join("items.def"), items.to_utf8_buffer())
-	for name in ["crate.3di", "armory.3di", "shed.3di"]:
-		_copy_fixture("threedi/synth/" + name, root.path_join("models").path_join(name))
-	# The terrain's foliage definitions grow bush1 and bush2 (the synth crate under both names, as the foliage
-	# integration test stages them).
-	for name in ["bush1.3di", "bush2.3di"]:
-		_copy_fixture("threedi/synth/crate.3di", root.path_join("models").path_join(name))
-	if effects:
-		_write(root.path_join("particles").path_join("fx.ptl"), _ptl().to_utf8_buffer())
-		_copy_fixture("cbin/particle_dot.tga", root.path_join("particles").path_join("particle_dot.tga"))
+	return items
 
 
-## A particle file of one effect, Puff: a burst of dots of the fixture's graphic emitting for a minute
-## (DI-14's recipe).
-func _ptl() -> String:
-	var text := "[effectdef]\n{\n\tid = Puff;\n\tpdefs = PuffDot;\n}\n\n"
-	text += "[particledef]\n{\n\tid = PuffDot;\n\temit_dur = 60;\n\temit_rate = 40;\n\temit_burst = 1;\n"
-	text += "\tage = 1.0;\n\tscale = 1.0;\n\tspeed = 1.5;\n\tspread = 40;\n\tgraphic1 = particle_dot.tga, blend;\n"
-	text += "\tg1_alpha = 1;\n\tg1_scale = 1;\n}\n\n"
-	return text
-
-
-## A new project holding the minted mission as missions/synth_logic.bms (and, `whole`, the files its
-## picture reads), scanned, the mission open.
+## A new project holding the minted mission as missions/synth_logic.bms (and the copies `also`
+## names beside it), scanned, the mission open; `whole`, on the Tmap terrain with the files its
+## picture reads (_picture_files; with `listen`, the fixture bank that holds V_TRUCK_ILP, heard to
+## 2 km, its member tone.wav, as the project's game.lwf).
 func _open_mission(whole := true, also: PackedStringArray = PackedStringArray(),
 		skip: PackedStringArray = PackedStringArray(), effects := false, listen := false) -> bool:
-	var dir := OS.get_cache_dir().path_join("opennova editor mission project %d" % Time.get_ticks_usec())
-	_dirs.append(dir)
-	assert_true(_seam.new_project(dir, "Mission Viewport Game"))
-	assert_eq(_seam.create_missing_files(), 0)
-	var root: String = _seam.get_project_root()
+	var root := EditorFixture.new_project(self, _seam, _dirs, "Mission Viewport Game")
 	var mission := FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(MISSION))
-	_write(root.path_join("missions").path_join("synth_logic.bms"), mission)
 	for name in also:
 		_write(root.path_join("missions").path_join(name), mission)
-	if whole:
-		_mint_project(root, skip, effects, listen)
-	_app.request_json(JSON.stringify({"kind": "rescan"}))
-	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
+	if not whole:
+		_write(root.path_join("missions").path_join("synth_logic.bms"), mission)
+		_seam.request({"kind": "rescan"})
+		assert_true(_seam.settled, "a Rescan steps across pumps (S13 A3)")
+		return _seam.open_document("missions/synth_logic.bms")
+	if listen:
+		_copy_fixture("lwf/menu.lwf", root.path_join("sounds").path_join("game.lwf"))
+		_copy_fixture("lwf/tone.wav", root.path_join("sounds").path_join("tone.wav"))
+	EditorFixture.mint_tmap_mission(self, _seam, root, _picture_files(skip, effects, listen))
 	return _seam.open_document("missions/synth_logic.bms")
+
+
+## What the mission's picture reads beside the Tmap mission, as EditorFixture.mint_tmap_mission's
+## options: the terrain but the files `skip` names, its two foliage definitions' models, the item
+## table of _items and the models its items draw, the Puff particle file with `effects`.
+func _picture_files(skip := PackedStringArray(), effects := false, listen := false) -> Dictionary:
+	return {
+		"skip": skip,
+		"foliage": true,
+		"items": _items(effects, listen),
+		"models": ["crate.3di", "armory.3di", "shed.3di"],
+		"puff": effects
+	}
 
 
 ## The mission's ground, as the device's terrain data answers it: the mission height at (x, y).
@@ -629,7 +565,7 @@ func test_two_missions_keep_two_devices() -> void:
 	assert_null(_app.get_viewport_device("missions/synth_logic.bms", "mission"), "the first's, least recently used, given up")
 
 
-## S14 review m13: a device given up while it builds. Three missions over the whole minted project
+## S14: a device given up while it builds. Three missions over the whole minted project
 ## opened in turn at a budget of 0, each a few units into its build when the next opens: the third
 ## gives up the first's device mid-build (nothing of its build runs on, no error), and the third builds
 ## to ready.
@@ -913,8 +849,8 @@ func test_a_file_change_places_again() -> void:
 	assert_ne(device.get("placer"), placer, "the entities placed again over the files mounted afresh")
 	assert_eq(terrain.get_terrain_data(), data, "the terrain, which read nothing that moved, kept")
 	assert_eq(String(state.get("status", "")), "ready", str(state))
-	# The device's mount dropped its own root's caches, never the process's (review m4: another
-	# device's placer keeps its own).
+	# The device's mount dropped its own root's caches, never the process's (another device's
+	# placer keeps its own).
 	assert_eq(ResourceRoot.cache_epoch(), epoch, "the global cache epoch stands")
 
 
@@ -943,19 +879,24 @@ func _step_until(done: Callable, frames := 900) -> PackedStringArray:
 	return labels
 
 
-## S14 review M1: no device writes a process-wide shader global outside its publication. Headless no
-## canvas draws the picture, so nothing presents or publishes: the mission builds to ready, takes a time
-## of day (an Update), moves an entity, and builds its entities again for a moved file, and neither
-## the environment nor the water writes a global meanwhile (MissionEnvironment.get_global_writes,
-## Water.get_global_writes: a headless renderer keeps no global to read back). Both hold their
-## globals; the time reaches the environment's clock (6.5 h is minute 390) and a layer switched off
-## hides its node (review m13).
+## S14: no device writes a process-wide shader global outside its publication.
+## Headless no canvas draws the picture, so nothing presents or publishes: the mission builds
+## to ready, takes a time of day (an Update) with the clock playing (the weather ticking on
+## it), moves an entity, and builds its entities again for a moved file, and no row of its
+## world writes a global meanwhile: the environment, the water, the weather, the bodies, the
+## cube, the foliage masks (each row's get_global_writes: a headless renderer keeps no global
+## to read back). The environment and the water hold their globals; the time reaches the
+## environment's clock (6.5 h is minute 390) and a layer switched off hides its node.
 func test_no_global_written_outside_a_publication() -> void:
 	if _app == null:
 		return
 	_app.build_budget_ms = 0
 	var environment_writes := MissionEnvironment.get_global_writes()
 	var water_writes := Water.get_global_writes()
+	var weather_writes := Weather.get_global_writes()
+	var veil_writes := Celestial.get_global_writes()
+	var cube_writes := EnvironmentCubeCapture.get_global_writes()
+	var mask_writes := FoliageDispatcher.get_global_writes()
 	assert_true(_open_mission())
 	var state := await _await_ready()
 	assert_eq(String(state.get("status", "")), "ready", str(state))
@@ -965,9 +906,16 @@ func test_no_global_written_outside_a_publication() -> void:
 	assert_not_null(water)
 	if environment == null or water == null:
 		return
-	assert_true(environment.is_globals_held() and water.is_globals_held(), "the device's environment and water hold")
-	assert_true(_change({"kind": "mission", "options": {"time": 6.5}}))
-	assert_almost_eq(environment.get_mission_minute_of_day(), 390.0, 0.5, "the time reached the clock")
+	assert_true(
+		environment.is_globals_held() and water.is_globals_held(),
+		"the device's environment and water hold"
+	)
+	# The clock playing: the weather ticks on it (the device's tick, no frame presented).
+	var clock := {"playing": true, "rate": 20}
+	assert_true(_change({"kind": "mission", "options": {"time": 6.5}, "clock": clock}))
+	assert_almost_eq(
+		environment.get_mission_minute_of_day(), 390.0, 0.5, "the time reached the clock"
+	)
 	var item := _first_item(_state())
 	var moved: Dictionary = _ask({"kind": "edit_in_viewport",
 			"drag": {"id": int(item.get("id", 0)), "handle": "move", "by": [30, 0], "kind": "mission"}})
@@ -982,13 +930,19 @@ func test_no_global_written_outside_a_publication() -> void:
 	assert_eq(int(_mission_device().get("placements", 0)), 2, "the entities built again")
 	assert_eq(MissionEnvironment.get_global_writes(), environment_writes, "the environment wrote no global")
 	assert_eq(Water.get_global_writes(), water_writes, "the water wrote no global")
+	assert_eq(Weather.get_global_writes(), weather_writes, "the weather wrote no global")
+	assert_eq(Celestial.get_global_writes(), veil_writes, "the bodies wrote no global")
+	assert_eq(EnvironmentCubeCapture.get_global_writes(), cube_writes, "the cube wrote no global")
+	assert_eq(
+		FoliageDispatcher.get_global_writes(), mask_writes, "the foliage masks wrote no global"
+	)
 	# A layer off: its node hidden.
 	assert_true(_change({"kind": "mission", "options": {"show": {"terrain": false, "sky": false}}}))
 	assert_false((_device_node(state, "Terrain") as Node3D).visible, "the terrain off")
 	assert_false((_device_node(state, "SkyDome") as Node3D).visible, "the sky off")
 
 
-## S14 review M5: what a Rebuild replaces leaves in a unit, never as it is taken. A moved model file
+## S14: what a Rebuild replaces leaves in a unit, never as it is taken. A moved model file
 ## (the entities' layer read it): at the pumps that take the Rebuild the last whole scene stands (the
 ## placer's container in the tree, nothing retired or queued to go), and the build's first unit drops
 ## it; the build ends with the entities placed again.
@@ -1024,7 +978,7 @@ func test_a_rebuild_keeps_the_last_scene_until_its_units_run() -> void:
 	assert_eq(int(_mission_device().get("placed", 0)), 12, "every entity placed again")
 
 
-## S14 review M9: a whole placement cut short by a Rebuild is placed whole again. The model file moved
+## S14: a whole placement cut short by a Rebuild is placed whole again. The model file moved
 ## (a whole placement), a duplicate made while its place units run: the build that follows places
 ## every entity (the copy among them) and lifts none, never leaving the half the cut placement made.
 func test_a_placement_cut_short_places_whole() -> void:
@@ -1061,7 +1015,7 @@ func test_a_placement_cut_short_places_whole() -> void:
 	assert_eq(int(device.get("hidden", -1)), 0)
 
 
-## S14 review m6: a Rebuild while the first build makes the terrain carries that work on. Opened at a
+## S14: a Rebuild while the first build makes the terrain carries that work on. Opened at a
 ## budget of 0, a duplicate made while the terrain's tiles build: the build that follows goes on with
 ## the terrain's units (no terrain file read again) and ends ready with the ground.
 func test_a_rebuild_while_the_terrain_builds_carries_it_on() -> void:
@@ -1090,7 +1044,7 @@ func test_a_rebuild_while_the_terrain_builds_carries_it_on() -> void:
 	assert_eq(int(_mission_device().get("placed", 0)), 13, "the copy placed with the rest")
 
 
-## S14 review m5: a terrain without its height data is a note, never a failed picture. The minted
+## S14: a terrain without its height data is a note, never a failed picture. The minted
 ## project without Tmap.cpt: the viewport is ready, its picture with no terrain (no ground), the .cpt
 ## among its notes, the entities placed all the same.
 func test_a_terrain_without_its_height_data_is_a_note() -> void:
@@ -1117,20 +1071,14 @@ func _tile(x_fixed: int, index: int) -> TerrainTileEntry:
 	return entry
 
 
-## S14 review M4: the device reads the mission's .til as the game does before the terrain builds
+## S14: the device reads the mission's .til as the game does before the terrain builds
 ## (Terrain.set_tile_info_override), and follows it: a .til written beside the mission reaches the
 ## terrain (its one tile), one written again with two tiles builds the terrain again with both.
 func test_the_mission_til_reaches_the_terrain() -> void:
 	if _app == null:
 		return
-	var dir := OS.get_cache_dir().path_join("opennova editor mission til %d" % Time.get_ticks_usec())
-	_dirs.append(dir)
-	assert_true(_seam.new_project(dir, "Mission Til"))
-	assert_eq(_seam.create_missing_files(), 0)
-	var root: String = _seam.get_project_root()
-	_write(root.path_join("missions").path_join("synth_logic.bms"),
-			FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(MISSION)))
-	_mint_project(root)
+	var root := EditorFixture.new_project(self, _seam, _dirs, "Mission Til")
+	EditorFixture.mint_tmap_mission(self, _seam, root, _picture_files())
 	var til := TerrainTileInfo.new()
 	til.add_entry(_tile(0, 3))
 	var til_path := root.path_join("missions").path_join("synth_logic.til")
@@ -1162,7 +1110,7 @@ func test_the_mission_til_reaches_the_terrain() -> void:
 	assert_true(read != null and read.get_entry_count() == 2, "the .til followed: the terrain built again with both")
 
 
-## S14 review M3, M7: an entity's attributes place it as the game does. The first retained static
+## S14: an entity's attributes place it as the game does. The first retained static
 ## item given the Reflective attribute (0x00800000) is lifted, built as the placement builds an
 ## entity's model: reflected in the water mirror (as its attributes say), its EntityRef keyed past
 ## every placed key; given its attributes back (an undo), the placed static shows again and nothing
@@ -1238,12 +1186,13 @@ func _model_faces(model: ObjectModel) -> PackedVector3Array:
 	return out
 
 
-## The polish after its review (H1, M2): a press takes what the pointer is over, as the game's own choice
-## among the entities a ray's broad phase passes is the face it hits. The device answers what the
-## camera's ray meets first (the placed entities' faces, the nearer first, before the terrain): framed
-## close, a retained static hit through its nearest face away from its glyph is its record, and so is an
-## individual model; the ground just beside the static, past its faces yet within the sphere about its
-## anchor that holds them (what a sphere alone would take), is no record, nor is the sky.
+## The polish's picking (S15, "Picking what the pointer is over"): a press takes what the pointer is
+## over, as the game's own choice among the entities a ray's broad phase passes is the face it hits.
+## The device answers what the camera's ray meets first (the placed entities' faces, the nearer
+## first, before the terrain): framed close, a retained static hit through its nearest face away
+## from its glyph is its record, and so is an individual model; the ground just beside the static,
+## past its faces yet within the sphere about its anchor that holds them (what a sphere alone would
+## take), is no record, nor is the sky.
 func test_a_hit_takes_the_face_the_ray_meets() -> void:
 	if _app == null:
 		return
@@ -1477,7 +1426,8 @@ func test_people_play_their_clips() -> void:
 		_app.pump()
 	state = _state()
 	var people: Dictionary = state.get("body", {}).get("people", {})
-	assert_eq(int(people.get("playing", -1)), 2, str(people))
+	# The guard plays; the route's walker stands at its spawn pose (S26: no think walks it along its route).
+	assert_eq(int(people.get("playing", -1)), 1, str(people))
 	assert_gt(int(people.get("tick", 0)), int(people.get("started_at", 0)), "played on: %s" % str(people))
 	var played := 0
 	for row: Variant in state.get("items", []):
@@ -1485,6 +1435,12 @@ func test_people_play_their_clips() -> void:
 		if String(mark.get("kind", "")) != "organic":
 			continue
 		var now: Dictionary = mark.get("pose", {}).get("now", {})
+		if String(mark.get("pose", {}).get("because", "")) == "route":
+			assert_true(now.is_empty(), "the walker plays nothing: %s" % str(mark.get("pose", {})).left(300))
+			var walker := _person_model(mark)
+			if walker != null:
+				_assert_posed(walker, mark["pose"], String(mark.get("name", "")) + " at its spawn")
+			continue
 		assert_false(now.is_empty(), str(mark.get("pose", {})).left(300))
 		var model := _person_model(mark)
 		assert_not_null(model)
@@ -1493,7 +1449,7 @@ func test_people_play_their_clips() -> void:
 		_assert_posed(model, now, String(mark.get("name", "")) + " now")
 		if int(now["playing"].get("phase", -1)) != int(mark["pose"]["playing"].get("phase", -1)):
 			played += 1
-	assert_eq(played, 2, "both played on from their spawn")
+	assert_eq(played, 1, "the guard played on from its spawn")
 	# A seek back to the start: at their spawn again.
 	assert_true(_change({"kind": "mission", "clock": {"ticks": 0}}))
 	for _frame in 3:
@@ -1535,6 +1491,48 @@ func test_the_device_draws_the_games_foliage_effects_and_lights() -> void:
 	var drawn: Dictionary = _state().get("body", {}).get("drawn", {})
 	assert_true(drawn.has("foliage") and drawn.has("lights") and drawn.has("effects"), str(drawn))
 	assert_eq(int(drawn.get("foliage", {}).get("slots", 0)), 2, "Tmap's two definitions configured: %s" % str(drawn))
+
+
+## S26 (B1-B7, B12): the device draws the mission's world as the game's scene stack holds
+## it (WorldScene's rows under game_world.tscn's names: the sun, moon, glare and glint, the
+## weather bound to the environment, the drops, the cube, FrameFx the one display decode; no
+## SunShadow), its weather started as a mission's start starts it and ticked on the preview
+## clock, the clock standing at the hour shown, and the body words the environment it draws.
+func test_the_device_draws_the_games_world() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission())
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	var rows := ["Celestial", "Weather", "Precipitation", "EnvironmentCubeCapture", "FrameFx"]
+	for type in rows + ["SlotShadow"]:
+		assert_not_null(_device_node(state, type), "the device holds the game's %s" % type)
+	assert_null(_device_node(state, "SunShadow"), "no simulation drives a sun shadow here")
+	assert_null(_device_node(state, "DisplayDecode"), "FrameFx is the one decode")
+	var weather: Weather = _device_node(state, "Weather")
+	assert_not_null(weather)
+	if weather != null:
+		assert_eq(
+			String(weather.environment_path),
+			"../MissionEnvironment",
+			"the weather reads the scene's environment"
+		)
+	var clock := {"playing": true, "rate": 20}
+	assert_true(_change({"kind": "mission", "options": {"time": 6.5}, "clock": clock}))
+	for _frame in 30:
+		_app.pump()
+		await get_tree().process_frame
+	var drawn: Dictionary = _state().get("body", {}).get("drawn", {})
+	var environment: Dictionary = drawn.get("environment", {})
+	assert_true(bool(environment.get("loaded", false)), str(drawn))
+	assert_almost_eq(
+		float(environment.get("mission_minute_of_day", 0.0)),
+		390.0,
+		0.5,
+		"the clock stands at the hour shown"
+	)
+	var ticks := int(environment.get("weather", {}).get("ticks", 0))
+	assert_gt(ticks, 0, "the weather ticks on the preview clock")
 
 
 ## DI-31: each placed item's particle slot as the mission's start attaches it: the pumps author Puff at their
@@ -1757,11 +1755,13 @@ func test_a_shot_swaps_in_the_husk() -> void:
 			"eye": [at.x, at.y, at.z + 60.0]}, "clock": {"playing": true}}))
 	var husk: ObjectModel = null
 	var deaths: Array = []
+	# The carved static's husk, named by its placer key (simulation/husk_swap).
+	var husk_name := "HuskModel_%d" % key
 	for _frame in 300:
 		_app.pump()
 		await get_tree().process_frame
 		deaths = _state().get("body", {}).get("shots", {}).get("deaths", [])
-		var found := _device(_state()).find_children("HuskModel_%d" % int(pump["id"]), "ObjectModel", true, false)
+		var found := _device(_state()).find_children(husk_name, "ObjectModel", true, false)
 		if not found.is_empty():
 			husk = found[0]
 			break
@@ -1783,8 +1783,10 @@ func test_a_shot_swaps_in_the_husk() -> void:
 		_app.pump()
 		await get_tree().process_frame
 	assert_false(placer.is_static_instance_hidden(key), "the pump shown again")
-	assert_true(_device(_state()).find_children("HuskModel_%d" % int(pump["id"]), "ObjectModel", true, false).is_empty()
-			or not is_instance_valid(husk) or husk.is_queued_for_deletion(), "the husk let go")
+	var gone := _device(_state()).find_children(husk_name, "ObjectModel", true, false).is_empty()
+	assert_true(
+		gone or not is_instance_valid(husk) or husk.is_queued_for_deletion(), "the husk let go"
+	)
 
 
 ## DI-36: the Listen. The fixture's four waypoint markers made the game's env-sound emitters of a set the
@@ -1805,7 +1807,7 @@ func test_the_listen_plays_the_mixs_channels() -> void:
 		return
 	assert_true(device.is_audio_listener_3d(), "the device's camera is its world's listener")
 	assert_true(_change({"kind": "mission", "camera": {"target": [-190, -200, 0], "pitch": 60, "distance": 10},
-			"options": {"time": 12, "listen": {"on": true, "volume": 0.5}}}))
+			"options": {"time": 12, "listen": {"on": true}}}))
 	var listen := {}
 	for _frame in 60:
 		_app.pump()
@@ -1841,8 +1843,9 @@ func test_the_listen_plays_the_mixs_channels() -> void:
 	for voice: Node in voices:
 		var player := voice as AudioStreamPlayer3D
 		assert_eq(player.attenuation_model, AudioStreamPlayer3D.ATTENUATION_DISABLED)
+		assert_eq(player.bus, &"Ambient", "the game's ambient bus")
 		assert_eq((player.stream as AudioStreamWAV).loop_mode, AudioStreamWAV.LOOP_FORWARD)
-		assert_lt(player.volume_db, 0.0, "the mix's volume, the master's half")
+		assert_true(player.volume_db <= 0.0, "the mix's volume, the game's")
 	var near := 0
 	for voice: Node in voices:
 		near += 1 if (voice as AudioStreamPlayer3D).position.distance_to(at) < 0.01 else 0
@@ -1862,15 +1865,7 @@ func _map_state() -> Dictionary:
 
 
 func _await_map() -> Dictionary:
-	var state := _map_state()
-	for _frame in 900:
-		if String(state.get("status", "")) == "ready" and bool(state.get("device", {}).get("attached", false)) \
-				and int(state.get("builds", 0)) > 0:
-			break
-		await get_tree().process_frame
-		state = _map_state()
-	_app.pump()
-	return _map_state()
+	return await _seam.await_viewport({"kind": "map", "limit": 200})
 
 
 ## S23 C: the map's device draws the game's commander map pass over the project's files: the runtime's HudOverlay
