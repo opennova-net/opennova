@@ -4645,6 +4645,15 @@ target_link_libraries(npruntime_server_status_feed_test PRIVATE opennova_net ope
 target_include_directories(npruntime_server_status_feed_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_server_status_feed COMMAND npruntime_server_status_feed_test)
 
+# The NovaWorld listing's columns off the live session (inmatch/server_info.h, D-NET-373):
+# the server name and message, the game type's text, the mission's title and climate, the
+# published cap, the join lock, the skins and tracers rules, the password and the round clock;
+# the join lock's toggle and its update at once (D-NET-659).
+add_executable(npruntime_server_info_test npruntime/server_info_test.cpp)
+target_link_libraries(npruntime_server_info_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_server_info_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_server_info COMMAND npruntime_server_info_test)
+
 # The /PROFILE server log (inmatch/server_log_recorder.h, net/npwire/serverlog_encode.h,
 # formats/sph): the record writers against the decoder, a synthetic session recorded to
 # memory and decoded back, and the file name rule with its numbered rotation.
@@ -4777,6 +4786,11 @@ add_test(NAME serve_registration_parity COMMAND serve_registration_parity_test)
 add_executable(nwu_demux_test novaworld/nwu_demux_test.cpp)
 target_link_libraries(nwu_demux_test PRIVATE opennova_net)
 add_test(NAME nwu_demux COMMAND nwu_demux_test)
+# The first NovaWorld connect's give-ups (D-NET-571): the NWU lobby driver's poll over its
+# session, each give-up's stopped probe and its NWEC.
+add_executable(nwu_lobby_connect_test novaworld/nwu_lobby_connect_test.cpp)
+target_link_libraries(nwu_lobby_connect_test PRIVATE opennova_net)
+add_test(NAME nwu_lobby_connect COMMAND nwu_lobby_connect_test)
 # The NWU lobby driver's own draws (no Environment::random_u32, as opennova-nw-lister runs):
 # 32 sessions opened on 32 threads at once share no client index or key.
 add_executable(nwu_lobby_draws_test novaworld/nwu_lobby_draws_test.cpp)

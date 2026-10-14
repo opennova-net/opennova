@@ -79,7 +79,8 @@ class EntityRow;      // one typed entity-directory row
 class WeaponDef;      // one weapon.def row as a typed record (object/weapon_def.h)
 class CharacterJoinProfile; // the two-side character selection (object/character_join_profile.h)
 class FpViewmodelSpec;      // the first-person submit spec (simulation/fp_viewmodel_spec.h)
-class HostSessionOptions; class JoinTarget; // network/host_session_options.h, join_target.h
+class HostSessionOptions;   // the hosted-session request (network/host_session_options.h)
+class JoinTarget;           // the join request (network/join_target.h)
 class PlayerLocalView;      // the local view-state snapshot (simulation/player_local_view.h)
 struct NvgLaserSource;      // one NVG laser candidate (simulation/fire_presenter.h)
 class PlayerAimOverlay;     // the local per-segment aim overlay (simulation/player_aim_overlay.h)
@@ -825,8 +826,6 @@ private:
 	// every reader guards (an absent host reads exactly like an idle one).
 	opennova::inmatch::ListenHostState *host_state();
 	const opennova::inmatch::ListenHostState *host_state() const;
-	opennova::inmatch::NapiNPServerCtx *host_ctx();
-	const opennova::inmatch::NapiNPServerCtx *host_ctx() const;
 	// The role feeds' view of this session (inmatch/role_feeds.h RoleView).
 	opennova::inmatch::RoleView role_view() const;
 	// The active role's HostClient (host/SP) OR Joiner runtime; the present-snapshot source.
@@ -1026,12 +1025,7 @@ public:
 	// can't bind. _on hosts on a NovaWorld session's bound pump instead (one socket, D-NET-346).
 	bool enable_host_listen(int p_port);
 	bool enable_host_listen_on(const Ref<UdpPump> &p_pump);
-	bool is_host_listening() const {
-		const opennova::inmatch::RoleKind kind = session_.kind();
-		return kind == opennova::inmatch::RoleKind::ListenHost ||
-				kind == opennova::inmatch::RoleKind::DedicatedHost ||
-				net_.lan_host_pending;
-	}
+	bool is_host_listening() const;
 	int get_host_listen_port() const;  // the bound UDP port (0 when not listening)
 	int get_host_peer_count() const;   // joiners in handshake or admitted
 	// The gate registration's GSID (0x81 SUS1), AppId (the status page's key), cookie-key table (the
@@ -1045,19 +1039,20 @@ public:
 	// per-slot vars), keyed by roster slot; the host's own (`own`) takes the gate binding's identity.
 	struct HostPeerSlot {
 		int slot = 0;
+		uint32_t connection_id = 0; // the add's connection: a re-join is a new one
 		bool own = false;
 		String player_name, ip_and_port, pcid; // "a.b.c.d:port"; the decrypted PUBPCID or ""
 		String team, type; // the match's PlayerTeam / PlayerType ("%ld")
 	};
 	std::vector<HostPeerSlot> host_peer_slots() const;
-	int32_t round_time_remaining_ticks() const; // the live round clock (world::Match), -1 untimed
-	// A NovaWorld ServerCommand (the hosting session's `server_command` verb, target and args) at
-	// the host (inmatch::run_host_server_command): on its hosting context, else a session-less one
-	// where SetMPReset alone passes. A config change lands in the cfg block (use_game_config) and
-	// the host session record; the caller saves it, republishes, and owns `stop_hosting`.
+	// The host role's server context (null without one): the NovaWorld listing's live columns.
+	opennova::inmatch::NapiNPServerCtx *host_ctx();
+	const opennova::inmatch::NapiNPServerCtx *host_ctx() const;
+	// A NovaWorld ServerCommand's verb, target and args at the host (run_host_server_command): on
+	// its hosting context, else a session-less one where SetMPReset alone passes. A config change
+	// lands in the cfg block and the host session record; the caller saves, owns `stop_hosting`.
 	struct ServerCommandResult {
-		bool handled = false, stop_hosting = false, config_changed = false, has_config = false;
-		String server_name, server_message; // the live config after the verb ran (has_config)
+		bool handled = false, stop_hosting = false, config_changed = false;
 	};
 	ServerCommandResult execute_server_command(const String &p_verb, const String &p_target,
 			const PackedStringArray &p_args);
@@ -1069,6 +1064,7 @@ public:
 			uint32_t p_ip_packed, uint16_t p_port, const String &p_join_ticket)>;
 	void set_novaworld_join_tickets(bool p_armed, PlayerEnterRequestHook p_hook);
 	bool apply_player_enter_result(uint32_t p_connection_id, bool p_success, int32_t p_msg_code);
+	int toggle_join_lock(); // lockgame (inmatch::Server_ToggleJoinLock): 1 locked, 0 open, -1 none
 	// The hosted-session request (network/host_session_options.h): every
 	// user-facing field lands; the sim-owned fields (the mission header blob,
 	// the score tables) are untouched. Call BEFORE loading a mission.
@@ -1179,7 +1175,9 @@ public:
 	// NovaWorld-issued NAMEINFO/PCID/SQUADINFO/JOINTICKET the host validates
 	// (codes 23/24/25/28). Empty for LAN. Retained across runtime rebuilds.
 	void set_join_cd_cookie(const PackedByteArray &p_cookie);
-	void set_join_discovered_session(const Ref<JoinTarget> &p_target); // the row's 0x81
+	// The browse row's 0x81 record the join connects with (HK, SF, expansion and the
+	// browse's CI), built from the join target; a null target clears it.
+	void set_join_discovered_session(const Ref<JoinTarget> &p_target);
 	// The install root whose loose expansion/<name>/version.txt feeds the JOIN
 	// VERSIONCRCSTRING checksum (D-NET-166). Empty keeps the golden "0".
 	// Retained across runtime rebuilds like the character data.

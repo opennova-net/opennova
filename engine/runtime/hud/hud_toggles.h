@@ -115,6 +115,7 @@ struct HudToggleState {
 	HudKeyEdge pause, audio_emote, radio_macro;
 	HudKeyEdge toggle_server;
 	HudKeyEdge flipmouse, mousescale;
+	HudKeyEdge lockgame;
 };
 
 // The briefing window's open value [orig: `mov eax, 2` @0x49b615].
@@ -156,6 +157,7 @@ struct HudKeyPoll {
 	bool toggle_server = false;  // row 83 ToggleServer, dispatch 11
 	bool flipmouse = false;      // row 79 flipmouse, dispatch 9
 	bool mousescale = false;     // row 82 mousescale, dispatch 17
+	bool lockgame = false;       // row 84 lockgame, dispatch 119
 	// Shift held: the sign bit (bit 31) the keyboard fallback pass and the
 	// mouse dispatch put on the queued binding id, which steps mousescale
 	// down. The modifier pass queues no sign, so a row whose modifier word is
@@ -241,6 +243,12 @@ inline constexpr uint32_t kMouseFlipped = 0x10000000;
 // it, and posts mouse_scale_toast [orig: case 17 @0x49b185].
 inline constexpr uint32_t kMouseScaleStepped = 0x20000000;
 inline constexpr uint32_t kMouseScaleNegative = 0x40000000;
+// The lockgame row fired on an authority in a session: the embedder runs the join
+// lock's toggle (inmatch::Server_ToggleJoinLock, which runs the server-info update)
+// and posts the Misc toast STRMISC_LOCKGAME_ON with the game now locked, else
+// STRMISC_LOCKGAME_OFF, through the SYSTEM ring (Chat_AddMessageChannel2(text, -1,
+// 930)) [orig: case 119 @0x49BC1C..0x49BC36; the toast @0x49BC3B..0x49BC60].
+inline constexpr uint32_t kJoinLockToggled = 0x80000000u;
 // The pause row flipped HudToggleState::paused: the embedder applies it to
 // the session pause (and, pausing, the audio stop) [orig: case 25 @0x49b520
 // — Audio_ShutdownChannelsAndDeviceTable @0x49b550 when the word is now set].
@@ -277,6 +285,7 @@ enum HudToggleRow : int {
 	kRowToggleServer, // 83 ToggleServer
 	kRowFlipMouse,    // 79 flipmouse
 	kRowMouseScale,   // 82 mousescale
+	kRowLockGame,     // 84 lockgame
 	kHudToggleRowCount,
 };
 // The row's catalog config token.

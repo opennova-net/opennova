@@ -89,14 +89,50 @@ bool set_or_create_var(std::vector<ClientVar> &list, const ClientVar &var) {
 	return true;
 }
 
+// The same over a list whose vars carry their changed bit: a different value sets the
+// var's bit, a new entry is created with it set.
+// [orig: CNapiVarEntry_SetValue @0x630590 (the bit @0x6305c6); CNapiVarList_CreateEntry
+//  @0x6317c0 (@0x6318a1)]
+bool set_or_create_var(std::vector<ClientSession::ListVar> &list, const ClientVar &var) {
+	for (ClientSession::ListVar &v : list) {
+		if (v.var.fnum == var.fnum && strutil::iequals(v.var.name, var.name)) {
+			if (v.var.value == var.value)
+				return false;
+			v.var.value = var.value;
+			v.dirty = true;
+			return true;
+		}
+	}
+	list.push_back({ var, true });
+	return true;
+}
+
 // NapiLinkedList_RemoveByUserData: drop every var a slot owns. True when it removed one, each
 // removal raising the list's changed flag. [orig: @0x630810 (the flag @0x63086d)]
-bool remove_slot_vars(std::vector<ClientVar> &list, int slot) {
+bool remove_slot_vars(std::vector<ClientSession::ListVar> &list, int slot) {
 	const auto kept = std::remove_if(list.begin(), list.end(),
-	                                 [slot](const ClientVar &v) { return v.fnum == slot; });
+			[slot](const ClientSession::ListVar &v) { return v.var.fnum == slot; });
 	const bool removed = kept != list.end();
 	list.erase(kept, list.end());
 	return removed;
+}
+
+// NapiMemHeap_SetAllocId's var half: every var's bit to `dirty`. [orig: @0x6308b0..0x6308bb]
+void mark_vars(std::vector<ClientSession::ListVar> &list, bool dirty) {
+	for (ClientSession::ListVar &v : list)
+		v.dirty = dirty;
+}
+
+// The vars a serialization writes: all of them under includeAll, else those whose bit is set.
+// [orig: NapiStatement_SerializeVarList @0x4d0660 — `cmp includeAll, 0; jnz` @0x4d0710..0x4d0718,
+//  `cmp [var+0x18], 0; jz` @0x4d071a..0x4d071e]
+std::vector<ClientVar> list_vars(
+		const std::vector<ClientSession::ListVar> &list, bool include_all) {
+	std::vector<ClientVar> out;
+	for (const ClientSession::ListVar &v : list)
+		if (include_all || v.dirty)
+			out.push_back(v.var);
+	return out;
 }
 
 } // namespace
@@ -154,6 +190,9 @@ std::vector<uint8_t> ClientSession::start() {
 	session_flags_ = 0;
 	session_role_ = kSessionRoleNone;
 	set_lobby_state(1);
+	// The first probe runs from here (InitPlayerConnection's NapiTimer_Start) until its 0x81 or a
+	// give-up stops it. [orig: CNapiGameSession_InitPlayerConnection - NapiTimer_Start @0x4D43C2]
+	first_probe_stopped_ = false;
 	server_hk_ = 0;
 	server_sk_ = 0;
 	server_scrk_.clear();
@@ -192,6 +231,10 @@ std::vector<uint8_t> ClientSession::start() {
 	reconnect_ = Reconnect{};
 	dcnt_ = 0;
 	rcnt_ = 0;
+	jfc_ = 0;
+	jfp_ = 0;
+	jfs_.clear();
+	connection_down_ = false;
 	host_setup_.clear();
 	host_list_.clear();
 	player_list_.clear();
@@ -207,9 +250,15 @@ std::vector<uint8_t> ClientSession::retransmit_stage_datagram() {
 	// A reconnect's 0x41 / 0x42 ride the session's own pump (pump()).
 	if (reconnecting()) return {};
 	switch (state_) {
-	case State::Hello: return build_client_hello();
-	case State::Auth: return build_client_auth();
-	default: return {};
+		// The re-announce is the enumerator's, which a give-up's NapiTimer_Stop ends.
+		// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0 - the timer gate
+		// @0x6290E0..0x629170]
+		case State::Hello:
+			return first_probe_stopped_ ? std::vector<uint8_t>{} : build_client_hello();
+		case State::Auth:
+			return build_client_auth();
+		default:
+			return {};
 	}
 }
 
@@ -231,8 +280,9 @@ ClientHello make_client_hello(const ClientSession::Config &cfg, std::string_view
 	// explicit cfg.pg when use_default_pg is false. CO/AP/BDAT are read but never validated.
 	hello.pg = cfg.use_default_pg ? pg_for_pn(cfg.pn) : cfg.pg;
 	hello.pg_present = true;
-	// EIP / EPN stay 0, where retail's enumerator writes each target's address and port into the
-	// 0x41 it sends that target (D-NET-520 for the game protocol, D-NET-541 for the NWU lobby).
+	// EIP / EPN stay 0 here: the NWU lobby's enumerator writes each target's address and port
+	// into the 0x41 it sends that target (ClientSession::build_announce); the game protocol's
+	// half is D-NET-520.
 	return hello;
 }
 
@@ -268,9 +318,17 @@ ClientAuth make_client_auth(const ClientSession::Config &cfg, std::string_view c
 }
 
 std::vector<uint8_t> ClientSession::build_client_hello() {
+	return build_announce(0, 0);
+}
+
+// [orig: NapiNPSession_SendAnnouncePacket @0x61FA00 - EIP @0x61FCF5, EPN @0x61FD23, ET
+//  @0x61FD51, each written iff nonzero (client_hello_to_bytes keeps the same gates)]
+std::vector<uint8_t> ClientSession::build_announce(uint32_t eip, uint32_t epn) {
 	last_framed_send_ms_ = clock_ms_;
-	return nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO,
-	                               client_hello_to_bytes(make_client_hello(cfg_, cfg_.co)));
+	ClientHello hello = make_client_hello(cfg_, cfg_.co);
+	hello.eip = eip;
+	hello.epn = epn;
+	return nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 }
 
 std::vector<uint8_t> ClientSession::build_client_auth() {
@@ -372,14 +430,14 @@ bool ClientSession::handle_datagram(const uint8_t *data, size_t len,
 		// connection is down and armed.
 		// [orig: Nwu_HandleServerHello @0x627e3e..0x627e5f — !conn_flag0 && is_client &&
 		//  conn_flag1 && +0x710]
-		// Either is read only while the enumerator probes: a reconnect's inside its probe
-		// window, so a 0x81 in the re-join's 0x42 leg or in the gap between windows is
-		// missed; the first connect's from its start to its 0x81, which Hello stands in
-		// for, though retail's give-ups also stop that probe (NapiTimer_Stop) and ours
-		// reads a 0x81 in Hello until the lobby's own deadline (D-NET-571, OPEN).
+		// Either is read only while the enumerator probes (probing()): a reconnect's inside its
+		// probe window, so a 0x81 in the re-join's 0x42 leg or in the gap between windows is
+		// missed; the first connect's from its start until its 0x81 or a give-up stops the
+		// probe (abort_connect).
 		// [orig: Nwu_HandleServerHello - the enumerator's +0x2C @0x627559, the miss
 		//  returning 0 @0x626DCB; NapiTimer_Stop @0x61DF00 - +0x2C = 0 @0x61DF06]
-		if (state_ == State::Hello || reconnect_.probing) on_server_hello(body, out);
+		if (probing())
+			on_server_hello(body, out);
 		break;
 	case SESSION_OPCODE_SERVER_AUTH:
 		if (state_ == State::Auth) on_server_auth(body);
@@ -415,7 +473,8 @@ bool ClientSession::takes_server_hello(const uint8_t *data, size_t len) const {
 	    opcode != SESSION_OPCODE_SERVER_HELLO)
 		return false;
 	// The phase test is handle_datagram's: the enumerator probing (+0x2C @0x627559).
-	if (state_ != State::Hello && !reconnect_.probing) return false;
+	if (!probing())
+		return false;
 	ServerHello sh;
 	return parse_server_hello(body.data(), body.size(), sh) && server_hello_is_ours(sh);
 }
@@ -444,6 +503,7 @@ void ClientSession::on_server_hello(const std::vector<uint8_t> &body,
 		//  @0x626320 — the keys @0x6263fb/@0x626401, the cs_dir copies @0x626449/@0x62645c,
 		//  state 3 @0x626496]
 		reconnect_.probing = false;
+		connection_down_ = false;
 		cfg_.client_key = make_session_key(cfg_.next_client_key);
 		client_scrk_ = cfg_.next_scrk ? cfg_.next_scrk() : make_dev_scrk();
 		server_hk_ = sh.hk;
@@ -474,13 +534,26 @@ void ClientSession::on_server_auth(const std::vector<uint8_t> &body) {
 	// [orig: NapiNP_HandleServerJoinResponse @0x629840 - the CI / CK match
 	//  @0x629CAC..0x629CBF, the CR split @0x629CD2..0x629CD6]
 	if (sa.ci != cfg_.client_index || sa.ck != cfg_.client_key) return;
-	// The 0x82's reconnect count is kept (0 when absent) and rides the next re-join.
-	// [orig: NapiNP_HandleServerJoinResponse @0x629e2e]
-	rcnt_ = sa.rcnt;
+	// A zero CR rejects: the connection keeps its JFC, JFP and JFS (64 bytes) and drops straight
+	// to its down state, with no teardown and no state-change callback; RCNT is not read. A first
+	// connect's periodic update then gives the connect up (NwuLobbySession), and a re-join's
+	// reconnect goes on probing (pump_reconnect's tail).
+	// [orig: NapiNP_HandleServerJoinResponse @0x629840 - JFP / JFC @0x629CD8..0x629CF0, JFS
+	//  through CNapiSessionConfig_SetServerPassword @0x4CACE0 (the call @0x629CF6), the state
+	//  switch @0x629D1B (a connecting connection's state 3 -> 4 with no teardown, the store
+	//  @0x629F95)]
 	if (sa.cr == 0) {
-		fail("ServerAuth rejected (cr=" + std::to_string(sa.cr) + ")");
+		jfc_ = sa.jfc;
+		jfp_ = sa.jfp;
+		jfs_ = copy_capped(sa.jfs, 64);
+		state_ = State::Closed;
+		connection_down_ = true;
 		return;
 	}
+	// The accepting 0x82's reconnect count is kept (0 when absent) and rides the next re-join.
+	// [orig: NapiNP_HandleServerJoinResponse @0x629e2e]
+	rcnt_ = sa.rcnt;
+	connection_down_ = false;
 	server_sk_ = sa.sk;         // session_id for our outbound 0x43s
 	server_scrk_ = sa.scrk;     // decrypts inbound 0x83 inner streams
 	state_ = State::Verifying;
@@ -577,6 +650,32 @@ bool ClientSession::reconnecting() const {
 	return !receive_clock_armed_ && reconnect_.was_connected && reconnect_armed();
 }
 
+bool ClientSession::probing() const {
+	return (state_ == State::Hello && !first_probe_stopped_) || reconnect_.probing;
+}
+
+// The NP connection's state 5 is the accepted 0x82's (receive_clock_armed_) until its teardown.
+// [orig: CNapiNPConnection_RequestDisconnect @0x61E0F0 - `cmp eax, 5` @0x61E0F3, SetState(6)
+//  @0x61E0FA -> CNapiNPConnection_TeardownActiveConnection @0x6253C0]
+void ClientSession::request_disconnect(std::vector<std::vector<uint8_t>> &out) {
+	if (receive_clock_armed_)
+		teardown_connection(out);
+}
+
+// [orig: CNapiGameSession_PumpConnection @0x4D0A40 (CNapiGameSession_ProcessNetwork @0x4D09F0 the
+//  same) - the state-1 flag @0x4D0A48 -> SetState(0) @0x4D0A53; RequestDisconnect @0x4D0A5F;
+//  NapiTimer_Stop @0x4D0A71]
+void ClientSession::abort_connect(std::vector<std::vector<uint8_t>> &out) {
+	if ((session_flags_ & 0x1u) != 0)
+		set_lobby_state(0);
+	request_disconnect(out);
+	first_probe_stopped_ = true;
+	reconnect_.probing = false;
+	// A down connection leaves its state 4: the periodic update's leg moves it to 2 before its
+	// abort. [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 - SetState(2) @0x4D4477]
+	connection_down_ = false;
+}
+
 // The disconnect callback drops the session to state 0 (so neither the host nor the play leg
 // stands) and leaves the hosting/playing word alone; it resets the session strings the
 // connection fed: the web domain to "???", the NWUID and the GSID (the in-match SUS1) cleared
@@ -603,7 +702,8 @@ void ClientSession::latch_disconnect(const DisconnectEvent &event) {
 }
 
 // [orig: CGameSession_SetState @0x4ce140 — a no-op on the current state @0x4ce165; the
-//  leaving state's flag clear @0x4ce17c..0x4ce1bc, the entered state's set
+//  leaving state's flag clear @0x4ce17c..0x4ce1bc, the state and its GetTickCount stamp
+//  @0x4CE1CD..0x4CE1D5, the entered state's set
 //  @0x4ce1ea..0x4ce288 (state 0 zeroes the word); case 4 arms the GLSVSS deadline from
 //  GLSVSSRIMS (from any state) or GLSVSSAGRMS (returning from state 8) when a request
 //  string is set]
@@ -622,6 +722,7 @@ void ClientSession::set_lobby_state(int state) {
 	default: break;
 	}
 	lobby_state_ = state;
+	lobby_state_entered_ms_ = clock_ms_;
 	switch (state) {
 	case 0: session_flags_ = 0; break;
 	case 1: session_flags_ |= 0x1u; break;
@@ -842,7 +943,13 @@ void ClientSession::pump_reconnect(std::vector<std::vector<uint8_t>> &out) {
 	//  the timeout @0x629525..0x629564]
 	if (state_ == State::Auth) {
 		if (clock_ms_ - reconnect_.join_started_ms > SESSION_JOIN_TIMEOUT_MS) {
+			// The give-up keeps JFC 2, JFP 0 and an empty JFS on the connection.
+			// [orig: @0x629525..0x629539; the state switch to 4 @0x629556..0x629564]
+			jfc_ = 2;
+			jfp_ = 0;
+			jfs_.clear();
 			state_ = State::Closed;
+			connection_down_ = true;
 		} else if (clock_ms_ - reconnect_.join_last_send_ms > SESSION_CONNECT_RETRANSMIT_MS) {
 			reconnect_.join_last_send_ms = clock_ms_;
 			out.push_back(build_client_auth());
@@ -1031,7 +1138,14 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 				notices_.push_back(std::move(notice));
 			}
 		} else {
-			// The rejection drops the word and the state to 0 [orig: @0x4d58ac..0x4d58de].
+			// The rejection runs the connect's abort (the connection, up since its 0x82, tears
+			// down with its 0x46 burst into `out`, and the probe stops), then drops the word and
+			// the state to 0. A first connect's connection wait then finds the session not up and
+			// reports NWEC48 (NwuLobbySession::poll_connect).
+			// [orig: CNapiGameSession_HandleConnectVerifyResponse @0x4d5800 -
+			//  CNapiGameSession_PumpConnection @0x4D0A40 called @0x4d58ac, the word
+			//  @0x4d58b1..0x4d58d8, SetState(0) @0x4d58de..0x4d58e1]
+			abort_connect(out);
 			session_role_ = kSessionRoleNone;
 			set_lobby_state(0);
 			fail("ServerVerifyResult rejected (Success=" + success + ")");
@@ -1200,19 +1314,24 @@ bool ClientSession::request_hosting(const HostRegistration &cfg, int currently_h
 	HostRegistration setup = cfg;
 	setup.reconnect_counter = reconnect_counter_;
 	host_setup_ = make_host_setup_var_list(setup);
-	host_list_ = make_host_var_list(setup, HostLobbyText{}, /*full=*/false);
+	host_list_.clear();
+	for (const ClientVar &v : make_host_var_list(setup, HostLobbyText{}, /*full=*/false))
+		set_or_create_var(host_list_, v);
 	player_list_.clear();
 	mark_host_lists();
 	return send_host_request(currently_hosting);
 }
 
-// Both lists' changed flags raised: the flags the next update reads.
+// Both lists marked with 1: each list's changed flag and every var's bit, which the next update
+// reads.
 // [orig: CNapiGameSession_InitHeapsAndSerializeCounter @0x4ce300 (the Host mark @0x4ce32f, the
 //  PlayerList's @0x4ce33c; HostSetup's @0x4ce322); NapiMemHeap_SetAllocId @0x630890 (the flag
-//  @0x6308a4)]
+//  @0x6308a4, each var's bit @0x6308b3)]
 void ClientSession::mark_host_lists() {
 	host_list_changed_ = true;
 	player_list_changed_ = true;
+	mark_vars(host_list_, true);
+	mark_vars(player_list_, true);
 }
 
 // [orig: CNapiGameSession_StartHostingSession @0x4d4540 — state 4 -> 5 @0x4d4561, then
@@ -1226,7 +1345,8 @@ bool ClientSession::send_host_request(int currently_hosting) {
 	host_result_ = ServerResultFields{};
 	set_lobby_state(5);
 	if (queue_lobby_record(make_client_host_request(currently_hosting, cookie_vars(), host_setup_,
-	                                                host_list_, player_list_))) {
+				list_vars(host_list_, /*include_all=*/true),
+				list_vars(player_list_, /*include_all=*/true)))) {
 		return true;
 	}
 	host_state_ = previous;
@@ -1234,23 +1354,39 @@ bool ClientSession::send_host_request(int currently_hosting) {
 	return false;
 }
 
-// The Host and PlayerList vars land in the session's lists (SetOrCreate). The update goes
-// only when it includes both lists whole or either list's changed flag is set; it writes a
-// list whole under includeAll and otherwise only a flagged one, then clears both flags.
-// [orig: Lobby_UpdateServerInfo @0x4fe8c0 (the SetOrCreates) -> CPlayerManager_RebuildLists
-//  @0x4d4590 (the test @0x4d45ac, the clears @0x4d45c2 / @0x4d45cf; the host result's
-//  @0x4d5c95 / @0x4d5c9e) -> CNapiGameSession_SendHostUpdate @0x4d3860]
-bool ClientSession::send_host_update(const std::vector<ClientVar> &host,
-                                     const std::vector<ClientVar> &player_list, bool include_all) {
-	for (const ClientVar &v : host)
+// The writers' SetOrCreates: each var into the session's list, in any state.
+// [orig: CNapiVarList_SetOrCreate @0x6318c0; Lobby_UpdateServerInfo @0x4fe8c0 (the Host list);
+//  Server_ChangeEntityTeam @0x518e22, NapiNPServerMsg_HandlePlayerLoadout @0x515ae2,
+//  Server_SendWeaponSlotListToPlayer @0x5025db (the PlayerList)]
+void ClientSession::set_host_list_vars(const std::vector<ClientVar> &vars) {
+	for (const ClientVar &v : vars)
 		if (set_or_create_var(host_list_, v)) host_list_changed_ = true;
-	for (const ClientVar &v : player_list)
+}
+
+void ClientSession::set_player_list_vars(const std::vector<ClientVar> &vars) {
+	for (const ClientVar &v : vars)
 		if (set_or_create_var(player_list_, v)) player_list_changed_ = true;
+}
+
+// The update goes in state 6 only when it includes both lists whole or either list's changed
+// flag is set; it writes a list under includeAll or its flag, its vars whole under includeAll
+// and otherwise those whose changed bit is set, then marks both lists with 0 (the flags and every
+// var's bit).
+// [orig: CPlayerManager_RebuildLists @0x4d4590 (`cmp [esi+0x11c], 6` @0x4d4593, the test
+//  @0x4d459c..0x4d45ac, the marks with 0 @0x4d45c2 / @0x4d45cf; the host result's @0x4d5c95 /
+//  @0x4d5c9e) -> CNapiGameSession_SendHostUpdate @0x4d3860 -> NapiStatement_SerializeVarList
+//  @0x4d0660 (the list's flag @0x4d06ac..0x4d06be, a var's bit @0x4d071a)]
+bool ClientSession::send_host_update(bool include_all) {
+	if (host_state_ != HostState::Established)
+		return false;
 	if (!include_all && !host_list_changed_ && !player_list_changed_) return false;
-	const NapiMessage update = make_client_host_update(host, include_all || host_list_changed_,
-	                                                   player_list, include_all || player_list_changed_);
+	const NapiMessage update = make_client_host_update(list_vars(host_list_, include_all),
+			include_all || host_list_changed_, list_vars(player_list_, include_all),
+			include_all || player_list_changed_);
 	host_list_changed_ = false;
 	player_list_changed_ = false;
+	mark_vars(host_list_, false);
+	mark_vars(player_list_, false);
 	return queue_statement(update);
 }
 
@@ -1259,8 +1395,11 @@ bool ClientSession::send_host_update(const std::vector<ClientVar> &host,
 //  the state-6 wrapper @0x4d0e20]
 bool ClientSession::send_host_player_added(const HostPlayerSlot &player) {
 	remove_slot_vars(player_list_, player.slot);
-	for (const ClientVar &v : make_player_list({player})) player_list_.push_back(v);
-	player_list_changed_ = true; // the created entries [orig: CNapiVarList_CreateEntry @0x6318a7]
+	// Each a new entry, created with its bit set [orig: CNapiVarList_CreateEntry @0x6318a1 /
+	// @0x6318a7].
+	for (const ClientVar &v : make_player_list({ player }))
+		set_or_create_var(player_list_, v);
+	player_list_changed_ = true;
 	if (host_state_ != HostState::Established) return false;
 	return queue_statement(make_client_host_player_added(
 			player.slot, player.player_name, player.ip_and_port, player.pcid, player.team,

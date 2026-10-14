@@ -2,8 +2,9 @@
 // real loopback UDP against the real apps/novaworld_server NwUdpListener and an in-test gate
 // responder: the gate probe, the handshake to Verified, a duplicate gate reply ignored, the host
 // registration with no update after its result (D-NET-465), a roster change, the 1860-tick
-// refresh carrying a changed column, the mission start's update, the NWU reconnect's re-host
-// republishing both lists at its result, and the stop.
+// refresh carrying a changed column of the live session, the mission start's update with the
+// next map's mission (D-NET-373), the NWU reconnect's re-host carrying the outage's refresh and
+// team change in its request (D-NET-659) and republishing both lists at its result, and the stop.
 // [orig: CNapiGateManager_ProbeThreadProc @0x6339e0; CNapiGameSession_ProcessPeriodicUpdate
 //  @0x4d4400; CNapiGameSession_ConnectOrHost @0x4d4f10; Server_TickUpdate @0x51d7e0;
 //  CNapiGameSession_HandleHostVerifyResponse @0x4d59d0; Game_StartMission @0x5248c6..0x524903]
@@ -198,8 +199,22 @@ int main() {
 	expect(tick_until([&] { return players() == before + 1; }, 300),
 	       "ClientHostPlayerAdded reaches the service while hosting");
 
+	// The live session the server-info update reads its columns from at each run, as an
+	// embedder's bound match: from here a column changes with it, never with the registration.
+	// [orig: Lobby_UpdateServerInfo @0x4fe8c0]
+	std::string live_name = "Engine Driver Host";
+	std::string live_mission = "ASH_G11A";
+	bool live_session = true; // false: a map change's load, no match to read
+	role.set_column_source([&](opennova::HostRegistration &r) {
+		if (!live_session)
+			return false;
+		r.server_name = live_name;
+		r.mission_name = live_mission;
+		return true;
+	});
+
 	// The refresh: a changed column rides the next 1860-tick delta, not the edit.
-	role.set_server_name("Engine Driver Renamed");
+	live_name = "Engine Driver Renamed";
 	for (int i = 0; i < 20; ++i) tick();
 	expect(!row("Engine Driver Renamed"), "a renamed column waits for the refresh");
 	tick(30000); // past SESSION_HOST_INFO_REFRESH_TICKS (1860 ticks, ~29.8 s)
@@ -208,21 +223,44 @@ int main() {
 	expect(host_var("Engine Driver Renamed", "MissionName") == "ASH_G11A",
 			"the first refresh carries every column (nothing went out before it)");
 
-	// The mission start's update: both lists in full at once, outside the refresh timer.
-	// [orig: Game_StartMission @0x5248c6..0x524903]
-	role.set_server_name("Engine Driver Started");
+	// The mission start's update: both lists in full at once, outside the refresh timer; a map
+	// change's next mission is the column the live session now reads (D-NET-373).
+	// [orig: Game_StartMission @0x5248c6..0x524903; Lobby_UpdateServerInfo's MissionName
+	//  @0x4fe989..0x4fe9d0]
+	live_name = "Engine Driver Started";
+	live_mission = "ASH_G12A";
 	role.publish_mission_start();
 	expect(tick_until([&] { return row("Engine Driver Started"); }, 100),
 			"the mission start's update carries a changed column at once");
+	expect(host_var("Engine Driver Started", "MissionName") == "ASH_G12A",
+			"the mission start's update lists the next map's mission");
+
+	// A map change's load: the session holds no match, so the source reads nothing and the last
+	// live read stands. The refresh that lands in the load carries the role's own advanced
+	// PCIDKey and no column of the host request's registration back (its ServerName, the first
+	// map's MissionName).
+	live_session = false;
+	const std::string pcid_before = host_var("Engine Driver Started", "PCIDKey");
+	tick(30000);
+	bool load_refreshed = false;
+	for (int i = 0; i < 300 && !load_refreshed; ++i) {
+		tick();
+		const std::string pcid = host_var("Engine Driver Started", "PCIDKey");
+		load_refreshed = !pcid.empty() && pcid != pcid_before;
+	}
+	expect(load_refreshed && host_var("Engine Driver Started", "MissionName") == "ASH_G12A",
+			"a refresh with no session to read keeps the last live columns, not the "
+			"registration's");
+	live_session = true;
 
 	// The NWU reconnect's re-host: the re-verify counts ReconnectCounter up and re-sends the
-	// request with the session's kept lists, and the result republishes both lists in full. A
-	// column changed before the drop and never refreshed reaches the service with that
-	// republish alone: the role's own refresh is held off by driving the lobby alone from here.
+	// request with the session's kept lists, which the outage's refresh and a team change wrote,
+	// and the result republishes both lists in full. A column changed after the request left
+	// reaches the service with that republish alone: the role's own refresh is held off by driving
+	// the lobby alone from here.
 	// [orig: CNapiGameSession_HandleConnectVerifyResponse @0x4d5800 (the count @0x4d5968);
 	//  CNapiGameSession_HandleHostVerifyResponse @0x4d59d0 (the gate @0x4d5c52..0x4d5c58, the
 	//  republish @0x4d5c5a..0x4d5c9e)]
-	role.set_server_name("Engine Driver Rehosted");
 	auto tick_lobby = [&](uint32_t step_ms = 10) {
 		now += step_ms;
 		lobby.tick(now);
@@ -254,6 +292,15 @@ int main() {
 		dropped = !row("Engine Driver Started");
 	}
 	expect(dropped, "the listener drops the row on the burst");
+	// The outage: the refresh still runs and its server-info update writes the Host list into the
+	// session's (no state 6, so nothing is sent), and a team change writes its PlayerTeam into the
+	// session's PlayerList at once; the re-host's request carries both (D-NET-659).
+	// [orig: Lobby_UpdateServerInfo @0x4fe8c0 (its gates @0x4fe8d8 / @0x4fe8e5, no state test, the
+	//  first SetOrCreate @0x4fe911); Server_TickUpdate's call @0x51d943; Server_ChangeEntityTeam
+	//  @0x518e22; CNapiGameSession_SendHostRequest @0x4d3700 (the PlayerList @0x4d37ec..0x4d37f6)]
+	live_name = "Engine Driver Outage";
+	role.tick(now); // the refresh period passed since the role's last tick
+	role.set_player_vars(1, "2", "0");
 	// The re-probe past its first delay, the re-join, and the re-verify, which counts
 	// ReconnectCounter up and sends the re-host's request (state 5). The request leaves in its
 	// pass's pump, after that pass's receive, so the pass that first sees state 5 has not
@@ -269,6 +316,7 @@ int main() {
 	// State 5: a mission start's update sends nothing until the result. The lobby runs on with
 	// its notices held, so the role sees no result until they are handed over.
 	// [orig: CPlayerManager_RebuildLists @0x4d4590 (the state-6 test @0x4d4593)]
+	live_name = "Engine Driver Rehosted";
 	role.publish_mission_start();
 	std::vector<opennova::ClientSession::Notice> held;
 	auto tick_holding = [&]() {
@@ -298,6 +346,18 @@ int main() {
 	expect(answered, "the service re-lists the row and answers the re-host");
 	for (int i = 0; i < 20; ++i)
 		tick_holding();
+	expect(row("Engine Driver Outage"), "the re-host's request carries the outage's refresh");
+	auto team_of = [&](int slot) {
+		for (const auto &h : hosted()) {
+			if (!h.lobby.hosting)
+				continue;
+			for (const auto &player : h.lobby.roster)
+				if (player.slot == slot)
+					return player.team;
+		}
+		return std::string();
+	};
+	expect(team_of(1) == "2", "the re-host's request carries the PlayerTeam changed in the outage");
 	expect(!row("Engine Driver Rehosted"), "a mission start in state 5 sends no ClientHostUpdate");
 	// The result reaches the role: ReconnectCounter 1, so it republishes.
 	for (const auto &notice : held)
@@ -309,7 +369,7 @@ int main() {
 		republished = row("Engine Driver Rehosted");
 	}
 	expect(republished, "the re-host's result republishes the column changed before the drop");
-	expect(host_var("Engine Driver Rehosted", "MissionName") == "ASH_G11A",
+	expect(host_var("Engine Driver Rehosted", "MissionName") == "ASH_G12A",
 			"the republish carries the whole Host list");
 
 	// Stop: ClientStopHosting on one pump, then the goodbye burst; the row goes.

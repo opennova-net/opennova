@@ -190,19 +190,6 @@ LobbyStatusBlob make_host_status_blob(const HostRegistration &cfg, const HostLob
 	return blob;
 }
 
-std::vector<ClientVar> dirty_client_vars(const std::vector<ClientVar> &previous,
-                                         const std::vector<ClientVar> &next) {
-	std::vector<ClientVar> dirty;
-	for (const ClientVar &n : next) {
-		const auto it = std::find_if(previous.begin(), previous.end(), [&](const ClientVar &p) {
-			return p.fnum == n.fnum && strutil::iequals(p.name, n.name);
-		});
-		// String_ExactMatch: a changed VALUE dirties; a new entry is created dirty.
-		if (it == previous.end() || it->value != n.value) dirty.push_back(n);
-	}
-	return dirty;
-}
-
 // [orig: CNapiGameSession_SendHostRequest @ 0x4d3700]
 NapiMessage make_host_request(const HostRegistration &cfg, const std::vector<ClientVar> &cookie,
                               int currently_hosting) {

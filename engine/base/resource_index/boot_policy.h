@@ -12,6 +12,14 @@
 //                 the SCR decode key. Defaults to "jo" when absent.
 //   /LAN          every game.cfg read forces mpnovaworldhostlanonly on: a
 //                 NovaWorld host advertises LAN only.
+//   /POSTIPADDRESS <address>, /POSTPORTNUMBER <n>
+//                 override the NovaWorld gate response's POST address and
+//                 port (NwuLobbySession::CommandLine).
+//   /UDPNOVAWORLD <address>
+//                 a NovaWorld session server to probe in place of the gate's
+//                 UDPNOVAWORLD entries (up to six).
+//   /USEJUNCTION <n>, /CLEARJUNCTION <n>
+//                 override the gate response's USEJUNCTION / CLEARJUNCTION.
 //   --resource-dir <absolute path>
 //                 the game-data directory for this process. Without the flag
 //                 the shell boots its bundled assets/ (ADR 0048); the flag
@@ -88,6 +96,14 @@ inline constexpr const char *kLaunchFlagWorkingDir = "--working-dir";
 inline constexpr const char *kLaunchFlagNoHud = "/NOHUD";
 inline constexpr const char *kLaunchFlagNoReload = "/noreload";
 inline constexpr const char *kLaunchFlagLan = "/LAN";
+inline constexpr const char *kLaunchFlagPostIpAddress = "/POSTIPADDRESS";
+inline constexpr const char *kLaunchFlagPostPortNumber = "/POSTPORTNUMBER";
+inline constexpr const char *kLaunchFlagUdpNovaWorld = "/UDPNOVAWORLD";
+inline constexpr const char *kLaunchFlagUseJunction = "/USEJUNCTION";
+inline constexpr const char *kLaunchFlagClearJunction = "/CLEARJUNCTION";
+// The /UDPNOVAWORLD table's bounds: six entries of 32 bytes (31 characters and the NUL).
+inline constexpr std::size_t kLaunchUdpNovaWorldMax = 6;
+inline constexpr std::size_t kLaunchUdpNovaWorldChars = 31;
 
 struct LaunchFlags {
     bool loose_override = false;   // /d
@@ -127,6 +143,35 @@ struct LaunchFlags {
     // @0x4A74D9..0x4A74E9 -> g_LanSwitch = 1 @0x4A74EB; Game_LoadConfig
     // @0x5514B1..0x5514BA].
     bool lan = false;
+    // /POSTIPADDRESS <address> and /POSTPORTNUMBER <n>, each the whole token in any case and
+    // its next token as it stands, the last one standing: the address the game resolves (DNS
+    // on; one that does not resolve overrides nothing) and the port's CRT atol (0 overrides
+    // nothing), which the NovaWorld gate response takes over its own POSTIPADDRESS / POSTIPPORT
+    // (NwuLobbySession::CommandLine). "" / 0 when absent. These and the switches below are read
+    // in one walk in the game's order, a switch's value token being what the switches after it
+    // test (parse_launch_flags).
+    // [orig: Game_ParseCommandLineAndInit @0x4a7310 - "/POSTIPADDRESS" @0x4A75A4,
+    //  Napi_ResolveAddress(token, 1) @0x4A75C7 into dword_B4C6B0 @0x4A75CF; "/POSTPORTNUMBER"
+    //  @0x4A75D4, _atol @0x4A75F6 into dword_B4C6B4 @0x4A75FE]
+    std::string post_ip_address;
+    int post_port_number = 0;
+    // /UDPNOVAWORLD <address>, the whole token in any case: its next token is stepped over and,
+    // while fewer than kLaunchUdpNovaWorldMax are kept, kept as it stands to
+    // kLaunchUdpNovaWorldChars characters, in order; the NovaWorld connect probes these in place of the gate's entries
+    // and counts the NWU session in use for them (NwuLobbySession::CommandLine).
+    // [orig: Game_ParseCommandLineAndInit @0x4a7310 - "/UDPNOVAWORLD" @0x4A74F1, the next token
+    //  stepped onto @0x4A7503..0x4A750C, the count test dword_B4C71C < 6 @0x4A750E..0x4A7516,
+    //  Napi_CopyString(0xB4BFB0 + count * 32, token, 0x20) @0x4A751C..0x4A7528, the count
+    //  @0x4A7530]
+    std::vector<std::string> udp_novaworld;
+    // /USEJUNCTION <n> and /CLEARJUNCTION <n>: the CRT atol of the next token, the last one
+    // standing, over the gate response's USEJUNCTION / CLEARJUNCTION; -1 (the words' initial
+    // value) overrides nothing.
+    // [orig: Game_ParseCommandLineAndInit @0x4a7310 - "/USEJUNCTION" @0x4A7603, _atol into
+    //  dword_829F88 @0x4A762D; "/CLEARJUNCTION" @0x4A7632, _atol into dword_829F8C @0x4A765C;
+    //  both -1 in .data @0x829F88]
+    int use_junction = -1;
+    int clear_junction = -1;
 };
 
 LaunchFlags parse_launch_flags(const std::vector<std::string> &args);
