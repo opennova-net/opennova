@@ -262,7 +262,7 @@ static void resolve_local_into(char *out, size_t cap, int idx, const FunctionVie
 }
 
 static void resolve_method_into(char *out, size_t cap, int idx,
-                                const char (*names)[MUS_INTRINSIC_NAME_SIZE],
+                                const char (*names)[MUS_METHOD_NAME_SIZE],
                                 uint32_t name_count) {
     if (idx >= 0 && (uint32_t)idx < name_count) {
         snprintf(out, cap, "%s", names[idx]);
@@ -538,10 +538,10 @@ static void reconstruct_expression(const Instruction *insts, int start, int end_
             }
         } else if (strcmp(m, "method") == 0) {
             int idx = (inst->operand_count > 0) ? inst->operands[0] : 0;
-            char combined[64];
+            char combined[MUS_METHOD_NAME_SIZE];
             resolve_method_into(combined, sizeof(combined), idx,
                                 script->intrinsic_names, script->intrinsic_count);
-            char obj[16], mth[64];
+            char obj[16], mth[MUS_METHOD_NAME_SIZE];
             split_method_name(combined, obj, mth, sizeof(mth));
             char arg[256] = "";
             if (stk.top >= 1) {
@@ -1222,7 +1222,7 @@ static int decompile_into_buf(const MusScript *script,
         for (uint32_t i = 0; i < script->intrinsic_count; ++i) {
             const char *combined = script->intrinsic_names[i];
             if (!combined[0] || combined[0] == '@') continue;
-            char obj[16], mth[64];
+            char obj[16], mth[MUS_METHOD_NAME_SIZE];
             split_method_name(combined, obj, mth, sizeof(mth));
             if (!first) buf_puts(&b, ", ");
             first = 0;
@@ -1326,7 +1326,7 @@ static int decompile_into_buf(const MusScript *script,
         f.start = start;
         f.end = end;
         f.params = start + 1 < script->code_size ? script->code[start + 1] : 0;
-        const uint32_t base = script->locals_frame_offset ? script->locals_frame_offset : MUS_DEFAULT_LOCALS_BASE;
+        const uint32_t base = script->locals_frame_offset;   /* the chunk's frame base, as the game adds it */
         const size_t own = strlen(f.name);
         for (int k = 0; k < f.params; ++k) {
             const uint32_t offset = base + 4u * (uint32_t)k;
@@ -1380,16 +1380,28 @@ static int decompile_into_buf(const MusScript *script,
 
 }   /* anonymous namespace */
 
+/* The script with each section its label (mus_section_label): the text names a section the file names none
+   "Section_N". A shallow copy: only the sections are the copy's. */
+static int decompile_labelled(const MusScript *script, const char *const *sbf_names, uint32_t sbf_name_count,
+                              char *out_text, size_t out_capacity) {
+    if (!script) return -1;
+    std::vector<MusSection> labelled(script->sections, script->sections + script->section_count);
+    for (uint32_t i = 0; i < script->section_count; ++i)
+        snprintf(labelled[i].name, MUS_SECTION_NAME_SIZE, "%s", mus_section_label(script, i).c_str());
+    MusScript view = *script;
+    view.sections = labelled.empty() ? NULL : labelled.data();
+    return decompile_into_buf(&view, sbf_names, sbf_name_count, out_text, out_capacity);
+}
+
 int mus_decompile(const MusScript *script, char *out_text, size_t out_capacity) {
-    return decompile_into_buf(script, NULL, 0, out_text, out_capacity);
+    return decompile_labelled(script, NULL, 0, out_text, out_capacity);
 }
 
 int mus_decompile_with_names(const MusScript *script,
                                         const char *const *sbf_names,
                                         uint32_t sbf_name_count,
                                         char *out_text, size_t out_capacity) {
-    return decompile_into_buf(script, sbf_names, sbf_name_count,
-                              out_text, out_capacity);
+    return decompile_labelled(script, sbf_names, sbf_name_count, out_text, out_capacity);
 }
 
 } // namespace opennova::mus

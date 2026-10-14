@@ -33,7 +33,16 @@
 #include <string>
 #include <vector>
 
+namespace opennova {
+struct TitleIdentity; // net/title/title_identity.h
+}
+
 namespace opennova::wire {
+
+// The title a session handshake datagram (a 0x41 / 0x42 / 0x81) names by its PN, as a host's
+// gate reads it (title_identity_by_protocol_name); null for any other datagram or an unknown PN.
+// The in-match bodies a title edits (the S2C 0x0A objective body, DFX2-1) decode by it.
+const TitleIdentity *handshake_title(const std::vector<uint8_t> &raw);
 
 struct ParityHandshake {
 	int frame = 0;
@@ -203,6 +212,9 @@ private:
 	// g_GameType, learned from the S2C 0x7B `extra` field: the 0x0A sub-block 3
 	// objective body is gated on it, off the wire.
 	uint32_t game_type_ = 0;
+	// The title the handshake names (handshake_title): a DFX2 host's objective
+	// body carries the co-op checkpoint. Null decodes JO's.
+	const TitleIdentity *title_ = nullptr;
 };
 
 // The `opennova-wire --parity-events` line printer.

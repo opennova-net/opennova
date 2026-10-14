@@ -24,6 +24,7 @@
 #include <net/npwire/ingame_encode.h>      // encode_organic_spawn_batch / encode_pool3_sync_batch
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/visible_players.h>   // encode_spawn_slot_notice (0x4D)
+#include <net/title/title_identity.h>     // title_in_match (the 0x0F flags, DFX2-2)
 #include <runtime/world/angle.h>                  // world::spawn_angle_bam (0x0F spawn pose)
 #include <runtime/world/entity.h>                 // world::Entity (0x0F spawn pose)
 #include <runtime/world/geom.h>                   // world::to_fixed (0x0F spawn pose)
@@ -125,8 +126,9 @@ std::vector<uint8_t> serialize_server_config(const NapiNPServerCtx &ctx) {
 }
 
 // [orig: NetPacket_SerializeWeaponRestrictionTable @0x5102c0] S2C 0x66: count byte, then (index,value)
-// pairs for each restricted weapon (value 0 or 2). The original scans a 255-entry table; we hold the
-// restricted set directly (empty = count 0 -> single byte 0, golden frame 160).
+// pairs for each restricted weapon (value 0 or the title's armory-only value: JO's 2, DFX2's 3,
+// DFX2-10 [orig: @0x50d3b0 / @0x50d3de (dfx2.exe)]). The original scans a 255-entry table; we hold
+// the restricted set directly (empty = count 0 -> single byte 0, golden frame 160).
 std::vector<uint8_t> serialize_weapon_restrictions(const NapiNPServerCtx &ctx) {
 	std::vector<uint8_t> b;
 	b.push_back(static_cast<uint8_t>(ctx.weapon_restrictions.size()));
@@ -226,7 +228,11 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 	put_u16(b, static_cast<uint16_t>(roll));      // roll  (i16 hi word, client <<16)
 	const bool has_spawn_zones =
 			ctx.world != nullptr && ctx.world->zones.has_spawn_zone();
-	uint8_t game_flags = has_spawn_zones ? 0x01u : 0x00u;
+	// A DFX2 host sets bit 0 whatever the mission (DFX2-2) [orig: the flags byte's 1 in
+	//  NetPacket_WriteWorldStateLoad0x0F @0x4ffeed (dfx2.exe)].
+	const bool spawn_zone_flag =
+			has_spawn_zones || title_in_match(ctx.np_protocol.identity).spawn_zone_flag_always;
+	uint8_t game_flags = spawn_zone_flag ? 0x01u : 0x00u;
 	if (ctx.config.default_spawn_requires_no_team_zone != 0 &&
 			ctx.is_in_session != 0) {
 		game_flags |= 0x02u;

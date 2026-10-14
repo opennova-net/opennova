@@ -16,6 +16,7 @@
 #include <net/npwire/protocol_message.h> // opennova::SessionSequencing (the per-connection seq/ack, ADR 0013)
 #include <net/npwire/session_hello.h>    // opennova::DisconnectEvent (the latched disconnect record)
 #include <net/novaworld/join_identity.h> // JoinCookiePairs / JoinAccount (the CD cookie and its account fields)
+#include <net/novacrypto/cdkey.h> // cdkey::WireKeys (the JOIN's CD-key ids, DFX2-13)
 
 namespace opennova::inmatch {
 
@@ -579,6 +580,11 @@ struct NapiNPConnection {
 	uint8_t join_spectator_request = 0;
 	std::string join_spectator_password;
 	std::string join_password; // ClientAuth JSP, shared side/squad credential (not numeric FID)
+	// The CD-key ids the C2S 0x00 JOIN carries (its CDKIID / CDKIIDEXP1 TLVs, which a joiner in a
+	// LAN session sends from its registry key), as sent; a DFX2 LAN host's join check tests them
+	// (server_join_check.h, DFX2-13). [orig: NapiNPPlayer +724 / +728, written by
+	// NapiNPServer_HandlePlayerJoinMessage @0x512b95 / @0x512bce]
+	cdkey::WireKeys cd_keys;
 	// The team restored when the portable player-slot spectator bit is cleared.
 	uint8_t spectator_restore_team = 1;
 	std::string client_scrk;       // ClientAuth.scrk — decrypts inbound 0x43

@@ -10,18 +10,21 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <string>
+
 namespace opennova::mus {
 
 /* Witnessed: Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20 (magic compare vs 'SCR0' 0x30524353).
    Engine itself only validates the SCR0 magic; we additionally bound the chunk
-   count to a sane limit so a corrupt file does not provoke a runaway alloc. */
+   count to a sane limit so a corrupt file does not provoke a runaway alloc. The
+   name count needs no bound of ours: its resolve table must lie in the file
+   (mus_open_memory). */
 int mus_validate(const uint8_t *data, size_t size) {
     if (!data || size < sizeof(MusFileHeader)) return -1;
     MusFileHeader h;
     memcpy(&h, data, sizeof(h));
     if (h.magic != MUS_MAGIC_SCR0) return -2;
     if (h.chunk_count > 1024) return -3;
-    if (h.name_count > 1024) return -4;
     return 0;
 }
 
@@ -42,7 +45,7 @@ static uint32_t smallest_after(uint32_t lo, const uint32_t *cands, size_t n,
     return best;
 }
 
-/* MDEdit-authored MUS files carry an editor debug section at MU01 + `string_section_offset`: the 256-byte
+/* MDEdit-authored MUS files carry an editor debug section at MU01 + `debug_offset`: the 256-byte
    source path, then a 0x50-byte header of five tables, each a chunk-relative offset and a count after the
    entry size (+0 entry size, 48; +4/+8 the sections, +0xC/+0x10 the globals, +0x14/+0x18 the functions'
    parameters, +0x1C/+0x20 the functions, +0x24/+0x28 the lines; the rest zero), then the tables themselves.
@@ -70,8 +73,8 @@ static void parse_debug_export(const uint8_t *data, size_t size,
                                uint32_t chunk_off,
                                const MusChunkHeader *ch,
                                MusScript *out) {
-    if (ch->string_section_offset == 0) return;
-    uint64_t base64 = (uint64_t)chunk_off + ch->string_section_offset;
+    if (ch->debug_offset == 0) return;
+    uint64_t base64 = (uint64_t)chunk_off + ch->debug_offset;
     if (base64 + 256 > size) return;
     uint32_t base = (uint32_t)base64;
     /* The path slot: tolerate leading NULs, copy up to the first NUL after them. */
@@ -110,7 +113,7 @@ static void parse_debug_export(const uint8_t *data, size_t size,
     const uint64_t lines_at = line_count ? table_at(0x24, line_count, 8) : 0;
     const size_t name_max = entry_size - 0x10;
 
-    /* Section-name entries, by the section table's order: the editor's labels over the "Section_N" ones. */
+    /* Section-name entries, by the section table's order: the editor's labels (an empty one stays empty). */
     if (sections_at) {
         const uint32_t named = section_count < out->section_count ? section_count : out->section_count;
         for (uint32_t i = 0; i < named; ++i) {
@@ -126,7 +129,7 @@ static void parse_debug_export(const uint8_t *data, size_t size,
         for (uint32_t i = 0; i < var_count; ++i) {
             const uint8_t *e = data + vars_at + (uint64_t)i * entry_size;
             out->variables[i].byte_offset = rd32(e);
-            copy_name(out->variables[i].name, MUS_INTRINSIC_NAME_SIZE, e + 0x10, name_max);
+            copy_name(out->variables[i].name, MUS_GLOBAL_NAME_SIZE, e + 0x10, name_max);
         }
     }
     if (locals_at) {
@@ -176,9 +179,12 @@ static int parse_chunk(const uint8_t *data, size_t size, uint32_t chunk_off,
     out->locals_size         = ch.locals_size;
     out->entry_section_index = ch.entry_section_index;
     /* `enter` frame base = instance[+0x3C] (witnessed @ AudioVM_Op_Enter
-       0x672C20), which is the chunk's string_section_size field. MDEdit emits
-       0x20; carry it through so the VM matches the binary for any chunk. */
-    out->locals_frame_offset = ch.string_section_size;
+       0x672C20), the chunk's frame_base field. MDEdit emits 0x20; carry it
+       through so the VM matches the binary for any chunk. */
+    out->locals_frame_offset = ch.frame_base;
+    /* The strings `pushstr` reads [orig: AudioVM_Op_PushStr @ 0x672836]: their
+       count alone (the writer refuses a script holding any). */
+    out->string_count = ch.string_count;
 
     /* Section table: section_count uint32 chunk-relative entry-PCs. We
        normalise these to bytecode-relative offsets (subtract bytecode_offset)
@@ -198,9 +204,9 @@ static int parse_chunk(const uint8_t *data, size_t size, uint32_t chunk_off,
             /* Convert chunk-relative -> bytecode-relative. */
             if (code_off >= ch.bytecode_offset) code_off -= ch.bytecode_offset;
             out->sections[i].code_offset = code_off;
-            /* Stripped runtime files carry no debug-info names; synthesize
-               "Section_N" so callers always see a populated name field. */
-            snprintf(out->sections[i].name, MUS_SECTION_NAME_SIZE, "Section_%u", i);
+            /* The name is the debug table's (parse_debug_export), empty where the
+               file has none: the game reads no label (mus_section_label names one
+               for display). */
         }
     }
 
@@ -214,8 +220,8 @@ static int parse_chunk(const uint8_t *data, size_t size, uint32_t chunk_off,
         uint32_t chunk_max = (uint32_t)(size - chunk_off);
         uint32_t cands[] = {
             ch.section_table_offset,
-            ch.debug_info_offset,
-            ch.string_section_offset,
+            ch.strings_offset,
+            ch.debug_offset,
         };
         uint32_t end = smallest_after(ch.bytecode_offset, cands,
                                       sizeof(cands) / sizeof(cands[0]),
@@ -278,42 +284,47 @@ int mus_open_memory(MusFile *out, const uint8_t *data, size_t size) {
         }
     }
 
-    /* Intrinsic-name table: Pascal-style length-prefixed strings at file
-       name_strings_blob_offset. The length byte INCLUDES itself, so a
-       7-byte entry is `07 'G' 'E' 'c' 'h' 'o' 00`. */
-    if (out->header.name_count > 0) {
-        if (out->header.name_count > MUS_INTRINSIC_NAMES) {
+    /* The method-name table, read as the loader reads it [orig: AudioVM_LoadScriptFile @ 0x672DBD..0x672E01]:
+       when the count is not 0, from the blob's start, each name the bytes past its length byte up to its NUL
+       (the resolver strcmp's it [orig: AudioVM_FindContextByName @ 0x6723F0]), the next one its length byte on,
+       the byte read signed [orig: @ 0x672DEB movsx; @ 0x672DFC add esi, ecx]; a count the loop takes as
+       negative reads none (jle @ 0x672DDB). MDEdit writes each length byte as itself, the name and its NUL
+       (`07 'G' 'E' 'c' 'h' 'o' 00`). The loader writes each name's handler into the resolve table in the
+       file's own buffer [orig: @ 0x672DE9 mov [edi], eax], so a table reaching past the file's end is refused
+       (-21: the game writes past its buffer), as is a name read from outside the file (-22) or with no NUL
+       before its end (-23); a name longer than a MUS_METHOD_NAME_SIZE slot holds (only where its length byte
+       does not span it) is past what the writer can write back (-24). */
+    const int32_t name_count = (int32_t)out->header.name_count;
+    if (name_count > 0) {
+        if ((uint64_t)out->header.name_resolve_table_offset + 4ull * (uint64_t)name_count > size) {
             mus_close(out);
             return -21;
         }
-        if ((uint64_t)out->header.name_strings_blob_offset > size) {
-            mus_close(out);
-            return -22;
+        out->intrinsic_names = (char (*)[MUS_METHOD_NAME_SIZE])calloc((size_t)name_count, MUS_METHOD_NAME_SIZE);
+        if (!out->intrinsic_names) { mus_close(out); return -5; }
+        out->intrinsic_count = (uint32_t)name_count;
+        int64_t cursor = out->header.name_strings_blob_offset;
+        for (int32_t i = 0; i < name_count; ++i) {
+            if (cursor < 0 || (uint64_t)cursor + 1 >= size) { mus_close(out); return -22; }
+            const char *name = (const char *)data + cursor + 1;
+            const size_t room = size - (size_t)cursor - 1;
+            const size_t len = strnlen(name, room);
+            if (len == room) { mus_close(out); return -23; }
+            if (len >= (size_t)MUS_METHOD_NAME_SIZE) { mus_close(out); return -24; }
+            memcpy(out->intrinsic_names[i], name, len);
+            cursor += (int8_t)data[cursor];
         }
-        const uint8_t *p   = data + out->header.name_strings_blob_offset;
-        const uint8_t *end = data + size;
-        for (uint32_t i = 0; i < out->header.name_count; ++i) {
-            if (p >= end) { mus_close(out); return -23; }
-            uint8_t L = *p;
-            if (L < 2 || (size_t)(p + L) > (size_t)end) {
-                mus_close(out); return -24;
-            }
-            uint8_t copy = (uint8_t)((L - 1) < MUS_NAME_SIZE ? (L - 1) : MUS_NAME_SIZE);
-            memset(out->intrinsic_names[i], 0, MUS_NAME_SIZE);
-            memcpy(out->intrinsic_names[i], p + 1, copy);
-            p += L;
-        }
-        out->intrinsic_count = out->header.name_count;
     }
 
-    /* Copy file-level intrinsic names into each script so the decompiler can
-       resolve method indices from a single MusScript pointer (per spec API). */
-    if (out->scripts) {
-        for (uint32_t s = 0; s < out->header.chunk_count; ++s) {
-            memcpy(out->scripts[s].intrinsic_names, out->intrinsic_names,
-                   sizeof(out->intrinsic_names));
-            out->scripts[s].intrinsic_count = out->intrinsic_count;
-        }
+    /* Each script a copy of the file's table, so the decompiler and the VM resolve a method number from a single
+       MusScript. */
+    for (uint32_t s = 0; out->scripts && s < out->header.chunk_count && out->intrinsic_count > 0; ++s) {
+        MusScript &script = out->scripts[s];
+        const size_t bytes = (size_t)out->intrinsic_count * MUS_METHOD_NAME_SIZE;
+        script.intrinsic_names = (char (*)[MUS_METHOD_NAME_SIZE])malloc(bytes);
+        if (!script.intrinsic_names) { mus_close(out); return -5; }
+        memcpy(script.intrinsic_names, out->intrinsic_names, bytes);
+        script.intrinsic_count = out->intrinsic_count;
     }
 
     return 0;
@@ -345,20 +356,17 @@ int mus_open(MusFile *out, const char *path) {
     return rc;
 }
 
-/* Null-terminating compare bounded to MUS_NAME_SIZE. Treats either side's NUL
-   as end-of-string so the on-disk null-padded form matches a regular C string. */
-static int name_eq_n(const char *a, const char *b, size_t n) {
-    for (size_t i = 0; i < n; ++i) {
-        if (a[i] != b[i]) return 0;
-        if (a[i] == 0) return 1;
-    }
-    return 1;
+std::string mus_section_label(const MusScript *s, uint32_t index) {
+    if (!s || index >= s->section_count) return std::string();
+    const char *name = s->sections[index].name;
+    if (name[0]) return std::string(name, strnlen(name, MUS_SECTION_NAME_SIZE));
+    return "Section_" + std::to_string(index);
 }
 
 const MusSection *mus_find_section(const MusScript *s, const char *name) {
     if (!s || !name) return NULL;
     for (uint32_t i = 0; i < s->section_count; ++i) {
-        if (name_eq_n(s->sections[i].name, name, MUS_NAME_SIZE)) {
+        if (mus_section_label(s, i) == name) {
             return &s->sections[i];
         }
     }
@@ -367,6 +375,7 @@ const MusSection *mus_find_section(const MusScript *s, const char *name) {
 
 void mus_close(MusFile *file) {
     if (!file) return;
+    free(file->intrinsic_names);
     if (file->scripts) {
         for (uint32_t i = 0; i < file->header.chunk_count; ++i) {
             mus_script_free(&file->scripts[i]);

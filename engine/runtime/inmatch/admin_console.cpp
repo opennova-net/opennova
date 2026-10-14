@@ -14,6 +14,7 @@
 #include <formats/gamecfg/game_cfg.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/napi/session.h> // tokenize_quoted (String_TokenizeQuotedToArray)
+#include <net/title/title_identity.h> // title_in_match (WEAPON's armory value, DFX2-10)
 #include <runtime/hud/hud_chat_entry.h> // kChatDispatchGlobal, chat_dispatch_flood_color
 
 #include <cstdio>
@@ -588,15 +589,18 @@ void AdminConsole::handle_mission_add(const Args &args, std::vector<std::string>
 //  (the `%3d.  ` index, `NEVER `, `ARMORY` or `ALWAYS` from g_ArmoryWeaponAvailability
 //  @0x24D5600, a tab, the row's name, over every AdmDef_GetEntryByIndex @0x53FC80 row whose
 //  +936 word is set); SET: the target parsed before the sub-verb is read, ARMORY 2, NEVER 0,
-//  any other word 1]
+//  any other word 1]. ARMORY is the title's armory-only value: DFX2's listing tests 3 and its
+//  SET stores 3 (DFX2-10) [orig: CAdminServer_HandleWeaponCommand @0x40469a, @0x40480e
+//  (dfx2.exe)].
 void AdminConsole::handle_weapon(const Args &args, std::vector<std::string> &replies) {
 	const world::WeaponTable *table = ctx_.world != nullptr ? &ctx_.world->tables.weapons : nullptr;
+	const int armory = title_in_match(ctx_.np_protocol.identity).armory_only_availability;
 	const auto listed = [&](int index) {
 		const world::WeaponTableEntry *row =
 				table != nullptr ? table->by_index(static_cast<uint8_t>(index)) : nullptr;
 		return row != nullptr && row->loadout_selectable != 0 ? row : nullptr;
 	};
-	// The 255-entry table as the port keeps it: the restricted (0 / 2) entries in index
+	// The 255-entry table as the port keeps it: the restricted (0 / armory) entries in index
 	// order, every other index ALWAYS (server_initial_state.cpp's S2C 0x66).
 	const auto availability = [&](int index) -> int {
 		for (const auto &e : ctx_.weapon_restrictions)
@@ -610,7 +614,7 @@ void AdminConsole::handle_weapon(const Args &args, std::vector<std::string> &rep
 			table_entries.erase(it);
 			break;
 		}
-		if (value != 0 && value != 2) return;
+		if (value != 0 && value != armory) return;
 		auto at = table_entries.begin();
 		while (at != table_entries.end() && at->first < index) ++at;
 		table_entries.insert(at, {static_cast<uint8_t>(index), static_cast<uint8_t>(value)});
@@ -628,7 +632,7 @@ void AdminConsole::handle_weapon(const Args &args, std::vector<std::string> &rep
 			std::snprintf(index, sizeof(index), "%3d.  ", i);
 			const int value = availability(i);
 			out += index;
-			out += value == 0 ? "NEVER " : value == 2 ? "ARMORY" : "ALWAYS";
+			out += value == 0 ? "NEVER " : value == armory ? "ARMORY" : "ALWAYS";
 			out += "\t" + row->name + "\n";
 		}
 		replies.push_back(out);
@@ -644,7 +648,7 @@ void AdminConsole::handle_weapon(const Args &args, std::vector<std::string> &rep
 		replies.emplace_back(kWeaponUsage);
 		return;
 	}
-	const int value = ieq(args[2], "ARMORY") ? 2 : (ieq(args[2], "NEVER") ? 0 : 1);
+	const int value = ieq(args[2], "ARMORY") ? armory : (ieq(args[2], "NEVER") ? 0 : 1);
 	if (all) {
 		for (int i = 0; i < 255; ++i)
 			if (listed(i) != nullptr) set_availability(i, value);

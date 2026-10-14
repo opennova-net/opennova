@@ -25,6 +25,7 @@
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/napi/session.h> // tokenize_quoted (String_TokenizeQuotedToArray)
+#include <net/title/title_identity.h> // title_in_match (the 0x66 armory value, DFX2-10)
 #include <runtime/world/entity.h> // retail_pool_capacity (the SPECTATORTARGET gate)
 
 #include <base/io/crt_ftol.h>
@@ -87,16 +88,20 @@ void ClientReplicaPipeline::apply_text_command(const std::vector<uint8_t> &body)
 }
 
 // This byte-only handler intentionally zero-fills short reads, just as
-// retail does; even an empty body first restores the all-allowed table.
-// [orig: NapiNPClientMsg_HandleWeaponRestrictions @0x42D4C0]
+// retail does; even an empty body first restores the all-allowed table. It
+// keeps the 0 entries and the title's armory-only ones: JO's 2, DFX2's 3
+// (DFX2-10).
+// [orig: NapiNPClientMsg_HandleWeaponRestrictions @0x42D4C0, the test @0x42d51c]
+// [orig: @0x42f2ac (dfx2.exe)]
 void ClientReplicaPipeline::apply_weapon_restrictions(const std::vector<uint8_t> &body) {
+	const int32_t armory = title_in_match(title_).armory_only_availability;
 	state_.weapon_availability.fill(1);
 	io::ByteReader reader(body.data(), body.size());
 	const uint8_t count = reader.read_u8();
 	for (unsigned i = 0; i < count; ++i) {
 		const uint8_t index = reader.read_u8();
 		const uint8_t value = reader.read_u8();
-		if (index != 0xFF && (value == 0 || value == 2))
+		if (index != 0xFF && (value == 0 || value == armory))
 			state_.weapon_availability[index] = value;
 	}
 	if (!reader.ok()) ++malformed_bodies_;

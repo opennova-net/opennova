@@ -29,10 +29,10 @@ public:
 	void load_from_decrypted_bytes(const PackedByteArray &bytes, const String &p_source);
 	Error load_from_path(const String &p_path);
 	// The script from its model alone (formats/mus: mus_encode_file over the parsed scripts,
-	// ADR 0003), never the bytes it was read from, each program as the game reads it: its editor
-	// debug section (source path, names, line table) written empty, which the game never reads.
-	// Refused when the written bytes would not read back as the model in what the game reads (the
-	// writer writes MDEdit's intrinsic-name table, every shipped script's).
+	// ADR 0003), never the bytes it was read from: each program as it was read, its editor debug
+	// section (source path, names, line table) with it, as MDEdit writes every script. Refused when
+	// the written bytes would not read back as the model in what the game reads (a model the
+	// encoder refuses: mus.h, mus_encode_file).
 	Error save_to_path(const String &p_path) const;
 
 	int get_script_count() const;

@@ -832,7 +832,7 @@ bool decode_guided_field_group(GuidedMode mode, GuidedFieldGroup group,
 // case 0 = 11 B, 1 = 6 B, 2 = 11 B (ENV), 3 = 0 B (objective-gametype gated).
 bool decode_frame_update(const uint8_t *body, size_t len,
                          const std::function<EntityClass(uint16_t)> &class_of,
-                         FrameUpdate &out, bool is_objective_gametype,
+                         FrameUpdate &out, FrameObjectiveBody objective,
                          bool authority_recipient) {
 	Cursor c{body, body + len, true};
 	auto finish = [&](bool complete) {
@@ -898,12 +898,18 @@ bool decode_frame_update(const uint8_t *body, size_t len,
 		// @ 0x430363..0x4303D0]. That gate is NOT on the wire, so the caller supplies
 		// the hint (default false). probe3 (Co-op, g_GameType 0x30020) is the first
 		// capture to carry it (docs/net/novaworld-net-re.md D-NET-75); the 4 i32 land
-		// in dword_AC86F4/F0/EC/E8.
-		if (is_objective_gametype) {
+		// in dword_AC86F4/F0/EC/E8. A DFX2 host's fifth u32, the co-op checkpoint,
+		// follows them (DFX2-1) [orig: NapiNPClientMsg_0x00A @0x431dee..0x431e01
+		// (dfx2.exe)].
+		if (objective != FrameObjectiveBody::None) {
 			out.objective.state[0] = c.i32();
 			out.objective.state[1] = c.i32();
 			out.objective.state[2] = c.i32();
 			out.objective.state[3] = c.i32();
+			if (objective == FrameObjectiveBody::ValuesAndCheckpoint) {
+				out.objective.coop_checkpoint = c.u32();
+				out.objective.has_coop_checkpoint = true;
+			}
 			if (!c.ok) return finish(false);
 			out.objective.present = true;
 		}

@@ -503,13 +503,19 @@ public:
 	void set_host_address(const PeerAddr &host) {
 		if (joiner_) joiner_->set_host_address(host);
 	}
-	// The title identity the joiner speaks (JoinerConnection::set_title). Joiner only.
+	// The title identity the joiner speaks (JoinerConnection::set_title), and the
+	// one its view folds the in-match bodies by (ClientReplicaPipeline::set_title).
 	void set_title(const TitleIdentity *title) {
+		view_.set_title(title);
 		if (joiner_) joiner_->set_title(title);
 	}
 	// The CD identity cookie (packed PUB* blob) for the 0x00 JOIN. Joiner only.
 	void set_join_cd_cookie(std::vector<uint8_t> cookie) {
 		if (joiner_) joiner_->set_cd_cookie(std::move(cookie));
+	}
+	// The CD-key ids a LAN 0x00 JOIN leads with (JoinerConnection::set_cd_key_ids). Joiner only.
+	void set_cd_key_ids(cdkey::WireKeys ids) {
+		if (joiner_) joiner_->set_cd_key_ids(std::move(ids));
 	}
 	void set_charattr_table(CharAttrTable table) {
 		if (joiner_) joiner_->set_charattr_table(std::move(table));

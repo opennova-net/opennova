@@ -62,6 +62,26 @@ TitleIdentity jo_row() {
 	build.tag_address_b = 0x7C9714u;
 	build.date = "Jul 21 2009 18:54:42";
 	t.build = build;
+	// The joiner's CU values, its net config's defaults, and the join check's build gates on the
+	// same constants. [orig: NapiNetConfig_Init @0x4c3570 - VN @0x4c3622, BN @0x4c3629, MBN
+	//  @0x4c3630, SOPD @0x4c3637; CNapiServerInfo_SerializeToSession @0x4c3650 - VN @0x4c36ed,
+	//  BN @0x4c372c, MBN @0x4c37ac, SOPD @0x4c37ed; Server_ValidatePlayerJoinRequest @0x512100 -
+	//  BN 1 @0x5121b5 (code 2 @0x5121df), VN 2 @0x5121f3 (3), MBN 0x131D112 @0x51221a (4), SOPD
+	//  180 @0x512286 (8)]
+	t.join_build = TitleJoinBuild{1, 2, 20042002, 180};
+	// The in-match branches the DFX2 catalog reads against (docs/titles/dfx2-vs-jo-re.md §8):
+	// the 0x0A objective body's four values [orig: NetPacket_WritePlayerState @0x4ffc2d..0x4ffc99;
+	// NapiNPClientMsg_0x00A @0x430361..0x4303d0]; the 0x0F flags bit 0 only with spawn zones
+	// [orig: NetPacket_WriteWorldStateLoad0x0F @0x502da7..0x502db0]; armory-only 2 [orig:
+	// NetPacket_SerializeWeaponRestrictionTable @0x5102e0; NapiNPClientMsg_HandleWeaponRestrictions
+	// @0x42d51c; CAdminServer_HandleWeaponCommand @0x4046ba, @0x40482e]; the join's state byte 1,
+	// 3 in the pre-round, 0x10 with spawn zones, the deploy's 1 or 3 [orig: Server_OnPlayerJoin
+	// @0x51a6d3..0x51a6f2; Server_DeployPlayer @0x517803..0x517812]; the profile's 0x2F class
+	// [orig: NetPacket_SendLoadoutSubmit @0x42ceae]; no CD-key leg in the join check [orig:
+	// Server_ValidatePlayerJoinRequest @0x5122a9..0x5122f0]; the squad tag bare [orig:
+	// NapiNPServer_HandleChatMessage @0x513930]; the rules word as built [orig:
+	// CNapiGameSession_InitRandomSeedOrRequest @0x51e94b..0x51e957].
+	t.in_match = TitleInMatch{};
 	// [orig: CNapiGameSession_InitNPConnection @0x4d3d51, the literal @0x7cc73c]
 	t.lobby_pv1 = "0.0.0 2/10/2004 EM";
 	// The lobby's second build-date literal, one second before the network init's.
@@ -152,6 +172,39 @@ TitleIdentity dfx2_row() {
 	build.tag_address_b = 0x7C8524u;
 	build.date = "Jul  7 2009 11:33:09";
 	t.build = build;
+	// JO's values: the same net config defaults and serializer, and the rewritten join check
+	// keeps the build gates. [orig: NapiNetConfig_Init @0x4c3650 (dfx2.exe) - VN @0x4c3702, BN
+	//  @0x4c3709, MBN @0x4c3710, SOPD @0x4c3717; CNapiServerInfo_SerializeToSession @0x4c3730
+	//  (dfx2.exe); Server_ValidatePlayerJoinRequest
+	//  @0x50f1d0 (dfx2.exe) - BN 1 @0x50f2cb (code 2), VN 2 @0x50f2ef (3), MBN 0x131D112
+	//  @0x50f316 (4), SOPD 180 @0x50f382 (8)]
+	t.join_build = TitleJoinBuild{1, 2, 20042002, 180};
+	// docs/titles/dfx2-vs-jo-re.md §7, the §8 rows each field names.
+	TitleInMatch in_match;
+	// DFX2-1: g_CoopCheckpointSlot after the four values.
+	// [orig: NetPacket_WritePlayerState @0x4fcd84..0x4fcd9b (dfx2.exe); NapiNPClientMsg_0x00A
+	//  @0x431dee..0x431e01 (dfx2.exe)]
+	in_match.objective_checkpoint = true;
+	// DFX2-2: the flags byte starts at 1. [orig: NetPacket_WriteWorldStateLoad0x0F @0x4ffeed
+	//  (dfx2.exe)]
+	in_match.spawn_zone_flag_always = true;
+	// DFX2-10: 3 is armory-only. [orig: NetPacket_SerializeWeaponRestrictionTable @0x50d3b0 /
+	//  @0x50d3de (dfx2.exe); NapiNPClientMsg_HandleWeaponRestrictions @0x42f2ac (dfx2.exe);
+	//  CAdminServer_HandleWeaponCommand @0x40469a, @0x40480e (dfx2.exe)]
+	in_match.armory_only_availability = 3;
+	// DFX2-11: [orig: Server_OnPlayerJoin @0x517717 (dfx2.exe); Server_DeployPlayer @0x514a55
+	//  (dfx2.exe)]
+	in_match.join_state_fixed = true;
+	// DFX2-12: [orig: NetPacket_SendLoadoutSubmit @0x42ec1f..0x42ec3e (dfx2.exe)]
+	in_match.loadout_class_fixed = true;
+	// DFX2-13: the LAN CD-key leg after the app id, the chains cdkey.h's.
+	// [orig: Server_ValidatePlayerJoinRequest @0x50f3e2..0x50f565 (dfx2.exe)]
+	in_match.lan_cd_key_check = true;
+	// DFX2-14: [orig: NapiNPServer_HandleChatMessage @0x510b32..0x510b6a (dfx2.exe)]
+	in_match.chat_squad_tag_wrapped = true;
+	// DFX2-18: [orig: CNapiGameSession_InitRandomSeedOrRequest @0x51b89e (dfx2.exe)]
+	in_match.rules_word_bits = 0x10000u;
+	t.in_match = in_match;
 	// The lobby protocol is JO's but for its build date.
 	// [orig: @0x4d3f41 in the twin of CNapiGameSession_InitNPConnection @0x4d3dd0 (dfx2.exe)]
 	t.lobby_pv1 = "0.0.0 2/10/2004 EM";
@@ -259,6 +312,8 @@ std::vector<std::string> title_identity_missing(const TitleIdentity &t, TitleIde
 	missing_if(out, t.pv1 == nullptr, "PV1");
 	missing_if(out, t.pv2 == nullptr, "PV2");
 	missing_if(out, !t.build.has_value(), "PV3");
+	missing_if(out, !t.join_build.has_value(), "join build values");
+	missing_if(out, !t.in_match.has_value(), "in-match branches");
 	missing_if(out, t.lobby_pv1 == nullptr, "lobby PV1");
 	missing_if(out, t.lobby_bdat == nullptr, "lobby BDAT");
 	missing_if(out, t.ver1 == nullptr, "Ver1");
@@ -281,6 +336,16 @@ std::string title_identity_refusal(const TitleIdentity &title, TitleIdentityPart
 			part_name(part) + " identity is not witnessed yet: ";
 	for (std::size_t i = 0; i < missing.size(); ++i) out += (i == 0 ? "" : ", ") + missing[i];
 	return out;
+}
+
+const TitleInMatch &title_in_match(const TitleIdentity *title) {
+	if (title != nullptr && title->in_match.has_value()) return *title->in_match;
+	return *title_identity(GAME_JO)->in_match;
+}
+
+const TitleJoinBuild &title_join_build(const TitleIdentity *title) {
+	if (title != nullptr && title->join_build.has_value()) return *title->join_build;
+	return *title_identity(GAME_JO)->join_build;
 }
 
 const TitleIdentity *resolve_title_identity(std::string_view game_code, std::string &error) {

@@ -1212,6 +1212,13 @@ struct ClientState {
 	std::uint32_t objective_show_win = 0;
 	std::uint32_t objective_show_lose = 0;
 	std::uint32_t objective_updates_applied = 0;
+	// A DFX2 host's co-op checkpoint, the objective body's fifth value: the pool-3
+	// slot of the newest player-route marker its authority marked done, 0xFFFF
+	// outside co-op (DFX2-1). The revision advances when the value changes, the
+	// edge on which retail's joiner marks its waypoints done.
+	// [orig: NapiNPClientMsg_0x00A @0x431e0b..0x431e62 (dfx2.exe) -> g_ClientCoopCheckpointSlot]
+	std::uint32_t coop_checkpoint = 0xFFFFu;
+	std::uint64_t coop_checkpoint_revision = 0;
 	ClientEnvironmentState environment;
 	ClientMountedAmmoState mounted_ammo;
 	ClientMinimapState minimap;

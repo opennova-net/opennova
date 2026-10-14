@@ -11,6 +11,8 @@
 #include <net/npwire/outgoing_packets.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_keys.h>
+#include <net/title/title_identity.h> // title_in_match (the 0x2F class byte, DFX2-12)
+#include <formats/mission/bms.h>      // bms::Header (the mission type byte)
 
 #include <algorithm>
 #include <cstddef>
@@ -353,6 +355,15 @@ std::vector<std::vector<uint8_t>> JoinerConnection::pump(uint32_t /*now_tick*/) 
 	return out;
 }
 
+uint8_t JoinerConnection::loadout_wire_class(uint8_t profile_class) const {
+	if (!title_in_match(title_).loadout_class_fixed) return profile_class;
+	constexpr std::size_t kMissionTypeOffset = offsetof(opennova::bms::Header, mission_type);
+	static_assert(kMissionTypeOffset == 0x22A, "the BMS header's mission type byte");
+	const bool gunner_mission = mission_header_bytes_.size() > kMissionTypeOffset &&
+			mission_header_bytes_[kMissionTypeOffset] == 2;
+	return gunner_mission ? uint8_t{7} : uint8_t{8};
+}
+
 LoadoutSubmit JoinerConnection::build_profile_loadout_submit(
 		uint8_t team, bool alternate) const {
 	// Retail re-reads the PROFILE for every submission that is not the armory's: the
@@ -361,7 +372,11 @@ LoadoutSubmit JoinerConnection::build_profile_loadout_submit(
 	// fields — the reason a retail kit can never be class-illegal.
 	// [orig: Game_StartMission @0x525767-0x525836 (join) and NapiNPClientMsg_TeamAssign
 	//  @0x431a35..0x431a9a (the S2C 0x50 reselect)]
-	if (!loadout_kit_set_) return build_retail_default_loadout_submit(team, alternate);
+	if (!loadout_kit_set_) {
+		LoadoutSubmit submit = build_retail_default_loadout_submit(team, alternate);
+		submit.player_class = loadout_wire_class(submit.player_class);
+		return submit;
+	}
 	LoadoutSubmit submit;
 	submit.team = team;
 	const LoadoutKit::SideKit &side = loadout_kit_.side_for_team(team);
@@ -373,6 +388,7 @@ LoadoutSubmit JoinerConnection::build_profile_loadout_submit(
 		submit.player_class = loadout_kit_.player_class;
 		submit.entries = loadout_kit_.rows;
 	}
+	submit.player_class = loadout_wire_class(submit.player_class);
 	// [orig: @0x525836 passes 195, @0x525c2e passes g_CurrentWeaponSlot]
 	submit.weapon_slot_index = alternate && loadout_kit_.equipped_combo >= 0
 			? static_cast<uint32_t>(loadout_kit_.equipped_combo)
@@ -414,6 +430,7 @@ bool JoinerConnection::prepare_loadout_resubmit(
 	} else {
 		submit = build_retail_default_loadout_submit(assigned_team_, true);
 	}
+	submit.player_class = loadout_wire_class(submit.player_class);
 	message_out = make_protocol_message(
 			0x2F, encode_loadout_submit(submit));
 	return true;

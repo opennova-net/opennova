@@ -55,7 +55,12 @@ login and join pages its NovaWorld service serves), and refuses the same way a t
 them.
 
 Under `dfx2` the server reads and writes `game.cfg` with DFX2's one extra key, `mpdfxcategory`,
-which its NovaWorld listing publishes as `DFXCATEGORY1`.
+which its NovaWorld listing publishes as `DFXCATEGORY1`. It also plays by DFX2's in-match code
+where it differs from Joint Operations' (`docs/titles/dfx2-vs-jo-re.md` §8): among others, a LAN
+session refuses a joiner whose CD key id (`CDKIID`) is missing (the client shows `GDC010`), does
+not decode (`GDC011`) or is another player's (`GDC013`), as a DFX2 host does. The server holds no
+CD key of its own, so it refuses no joiner as its own key (`GDC012`). A NovaWorld session checks
+no CD key.
 
 The gate tag is the title's own (`jop:cus2` for Joint Operations) unless the mount carries a
 `gt.ssc` that decodes under the title's key chain, which replaces it, as the game's boot reads

@@ -27,9 +27,15 @@ static void capture_var(void *user, uint8_t idx, int32_t v) {
     cap->last_value = (int)v;
 }
 
+/* MUSIC.LAN's eleven, the method table every MDEdit script carries, which `method N` resolves through by name. */
+static char kMusicLan[11][MUS_METHOD_NAME_SIZE] = {"GEcho", "GGRnd", "GSV", "GSDV", "GFB", "FSet",
+                                                   "FClear", "FIsSet", "FIsClear", "TStart", "TStop"};
+
 static MusScript make_script(uint8_t *code, uint32_t n, MusSection *sec) {
     MusScript s; memset(&s, 0, sizeof(s));
     strcpy(s.name, "t");
+    s.intrinsic_names = kMusicLan; s.intrinsic_count = 11;
+    s.locals_frame_offset = MUS_DEFAULT_LOCALS_BASE;   /* MDEdit's frame base, every chunk's */
     s.code = code; s.code_size = n;
     s.sections = sec; s.section_count = 1; s.entry_section_index = 0;
     s.globals_size = 68; s.locals_size = 0;
@@ -202,6 +208,8 @@ int main(void) {
     strcpy(s7.name, "gamescript"); s7.code = code7; s7.code_size = sizeof(code7);
     s7.sections = sec7; s7.section_count = 6; s7.entry_section_index = 0;
     s7.globals_size = 68; s7.locals_size = 0x28;
+    s7.locals_frame_offset = MUS_DEFAULT_LOCALS_BASE;   /* the handler reads its first parameter at 0x20 */
+    s7.intrinsic_names = kMusicLan; s7.intrinsic_count = 11;
     s7.message_handler_offset = 38; s7.has_message_handler = 1;
 
     struct PlayCap { int count; int idx[32]; } plays = {0, {0}};

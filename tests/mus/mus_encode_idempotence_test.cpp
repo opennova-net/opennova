@@ -8,7 +8,9 @@
    MessageHandler function) in core; the reference fixture set's shipped pair (OPENNOVA_JO_ASSETS) and every
    music script the install's archives hold, base and each installed expansion's (OPENNOVA_JO_DIR: gamemus.bin,
    menumus.bin, jox01's GJox01.bin and MJox01.bin), as the retail legs. And the text is a fixed point: the
-   recompiled program decompiles to the same text. */
+   recompiled program decompiles to the same text. Each file is first written from its model alone (read, then
+   mus_encode_file over its parsed programs: the method table, the chunk's fields and its tables as read), which
+   is its own bytes too. */
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -54,6 +56,22 @@ static bool decompile(const MusScript &s, std::string &text) {
 static int assert_text_roundtrip(const std::vector<uint8_t> &bytes, const std::string &what) {
     MusFile mf;
     CHECK(mus_open_memory(&mf, bytes.data(), bytes.size()) == 0, "open the program");
+    /* The model: the file read, written again from what it holds (the method table, each chunk's fields and
+       tables), is its own bytes. */
+    {
+        std::vector<const MusScript *> programs;
+        for (uint32_t i = 0; i < mf.header.chunk_count; ++i) programs.push_back(&mf.scripts[i]);
+        uint8_t *out = NULL;
+        size_t n = 0;
+        const int rc = mus_encode_file(programs.data(), (uint32_t)programs.size(), &out, &n);
+        const std::vector<uint8_t> written(out, out + (rc == 0 ? n : 0));
+        mus_free(out);
+        if (rc != 0 || written != bytes) {
+            mus_close(&mf);
+            fprintf(stderr, "  %s: the model does not write back as its bytes (encoder %d)\n", what.c_str(), rc);
+            return 0;
+        }
+    }
     std::string text;
     const bool decompiled = decompile(mf.scripts[0], text);
     mus_close(&mf);

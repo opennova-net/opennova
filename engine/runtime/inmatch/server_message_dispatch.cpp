@@ -8,6 +8,7 @@
 #include <runtime/inmatch/server_emote.h>
 #include <runtime/inmatch/server_radio_call.h>
 #include <runtime/inmatch/server_loadout_grant.h> // the 0x2F grant family (GrantedWeaponLoadout, grant_weapon_loadout, ...)
+#include <runtime/inmatch/server_join_check.h>    // the 0x00 JOIN's validation ladder
 
 
 #include <runtime/inmatch/integrity_sources.h>
@@ -27,7 +28,6 @@
 #include <runtime/replication/entity_wire_bridge.h> // build_full_entity_spawn — the 0x0F -> 0x18 repair record
 
 #include <base/gameprofile/game_type.h>       // is_waypoint_family / is_stock_coop (§5.32, D-NET-203/205)
-#include <base/io/crt_ftol.h>                 // retail_atol (the VERSIONCRCSTRING compare)
 #include <base/io/strutil.h>                  // iequals (the JOIN body's CD field)
 #include <net/npwire/flat_tlv.h>        // the C2S 0x00 JOIN body walk (the CD identity blob)
 #include <net/npwire/wire_handle.h>     // is_batch_end_sentinel / kInvalid (the wire handle home)
@@ -36,6 +36,7 @@
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/session_vars.h>     // the 0x60 server-info stream
 #include <net/npwire/replication_model.h> // PlayerReplicationState (POD) — the reply builders' input
+#include <net/title/title_identity.h> // title_in_match (the 0x64 rules word, DFX2-18)
 
 #include <runtime/world/entity.h> // world::Entity / EntityHandle: the bound entity read through owned_entity
 #include <runtime/world/local_player.h>
@@ -113,62 +114,10 @@ bool stage_join_gate_reject(NapiNPConnection &conn, uint32_t reason_dpc) {
 	return Server_StageHostDisconnect(conn, event);
 }
 
-// The game-layer spectator gate, run at the 0x00 join message AFTER the
-// NP-level 0x42 admitted the connection. Order and codes are the witnessed
-// legs: 14 spectating disabled, 15 positive slot count exceeded, 16 password
-// mismatch (case-insensitive, like the side passwords). The candidate's flag
-// is latched BEFORE the count, so the count includes it and rejects on
-// strictly-greater — retail's exact shape. A -1 (shared-capacity) setting has
-// no spectator-count leg; the shared 0x42 gate already bounded the total.
-// [orig: the entry+55 latch from the stored JSR in
-// NapiNPServer_HandlePlayerJoinMessage @0x512aa0; the disabled leg @0x512364
-// (code 14), the `> g_GameConfigState.maxSpectators_26C` count @0x5123ca (code 15, type-1 rows
-// with entry+55), the Napi_StrCaseEqual JSPP compare @0x512405..0x512425
-// (code 16); Server_ValidatePlayerJoinRequest @0x512100]
-uint32_t validate_spectator_join(const GameConfig &config,
-		NapiNPConnection &conn, const std::vector<NapiNPConnection> &roster) {
-	conn.link.spectator = conn.join_spectator_request != 0;
-	if (!conn.link.spectator) return 0;
-	if (config.spectator_slots == 0) return 14;
-	if (config.spectator_slots > 0) {
-		uint32_t spectators = 0;
-		for (const NapiNPConnection &row : roster) {
-			if (row.type == NapiNPConnection::kTypeServerSide &&
-			    row.phase >= ConnectionPhase::Joined && row.link.spectator)
-				++spectators;
-		}
-		if (spectators > static_cast<uint32_t>(config.spectator_slots))
-			return 15;
-	}
-	// [orig: Napi_StrCaseEqual @0x616e70]
-	if (!config.spectator_password.empty() &&
-	    !strutil::iequals(
-				conn.join_spectator_password, config.spectator_password))
-		return 16;
-	return 0;
-}
-
-// The side-password leg follows spectator admission. TR is already narrowed
-// by the auth tag loader; -1 accepts either password (or an unlocked side).
-// [orig: Server_ValidatePlayerJoinRequest @0x5124A2..0x5125D4; the password
-//  compare Napi_StrCaseEqual @0x616e70]
-uint32_t validate_side_password(const GameConfig &config, const NapiNPConnection &conn) {
-	if ((config.mp_attributes & GameConfig::kMpAttribTeamChoose) == 0 ||
-			conn.link.spectator) return 0;
-	const auto matches = [&](const std::string &password) {
-		return password.empty() || strutil::iequals(password, conn.join_password);
-	};
-	switch (conn.char_vars.team_request) {
-		case 0xFF: return matches(config.side_a_password) || matches(config.side_b_password) ? 0 : 18;
-		case 0: return matches(config.side_a_password) ? 0 : 19;
-		case 1: return matches(config.side_b_password) ? 0 : 20;
-		default: return 22;
-	}
-}
-
 } // namespace
 
-MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config, bool mp_session_peer) {
+MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config, bool mp_session_peer,
+		const TitleIdentity *title) {
 	MissionMetadataBlob blob{};
 	auto write_u32 = [&](std::size_t offset, uint32_t value) {
 		opennova::io::write_u32_le(blob.data() + offset, value);
@@ -191,7 +140,8 @@ MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config, bool m
 	const int32_t players = static_cast<int32_t>(config.player_slot_limit()) - !mp_session_peer;
 	write_u32(36, static_cast<uint32_t>(players > 251 ? 251 : players));
 	write_u32(40, config.game_type);
-	write_u32(44, config.mp_attributes);
+	// A DFX2 authority ORs 0x10000 into the rules word [orig: @0x51b89e (dfx2.exe)].
+	write_u32(44, config.mp_attributes | title_in_match(title).rules_word_bits);
 	write_u32(48, static_cast<uint32_t>(config.unlimited_vehicles));
 	write_fixed_string(52, config.server_name);
 	write_fixed_string(84, config.mission_file);
@@ -225,49 +175,6 @@ void write_u32_le(std::vector<uint8_t> &out, size_t off, uint32_t v) {
 
 uint32_t read_u32_le(const uint8_t *data) {
 	return opennova::io::read_u32_le(data);
-}
-
-// Literal patch/account gates precede the expansion and spectator legs.
-// Missing CU fields retain zero and fail here, after the NP handshake.
-// [orig: Server_ValidatePlayerJoinRequest @0x512100]
-uint32_t validate_join_environment(const ClientGameEnvironment &env) {
-	if (env.bn != 1) return 2;
-	if (env.vn != 2) return 3;
-	if (env.mbn != 20042002) return 4;
-	if (env.bt == 1) return 6;
-	if (env.bt == 2) return 7;
-	if (env.sopd != 180) return 8;
-	return 0;
-}
-
-uint32_t validate_join_request(
-		const GameConfig &config, const std::vector<uint8_t> &payload) {
-	std::size_t pos = 0;
-	std::string expansion;
-	std::string version_crc;
-	// The TLV walk accepts unknown fields, uses the last matching value, and stops only at an
-	// empty name (read_flat_tlv; @0x512B64); tag names compare through Napi_StrCaseEqual
-	// @0x616e70. Each string copies from its value to the first NUL whatever its length
-	// (load_value_string).
-	// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512aa0 - EXP into 32 bytes @0x512BFF,
-	//  VERSIONCRCSTRING into 512 @0x512C31]
-	while (pos < payload.size()) {
-		FlatTlvField field;
-		const size_t next = read_flat_tlv(payload.data(), payload.size(), pos, field);
-		if (next == kFlatTlvEnd || field.name.empty()) break;
-		pos = next;
-		const uint8_t *end = payload.data() + payload.size();
-		if (strutil::iequals(field.name, "EXP"))
-			expansion = load_value_string(field.value, end, 32);
-		else if (strutil::iequals(field.name, "VERSIONCRCSTRING"))
-			version_crc = load_value_string(field.value, end, 512);
-	}
-	// [orig: Server_ValidatePlayerJoinRequest @0x5122fc..0x512349]
-	if (expansion != config.expansion) return 47;
-	if (!config.expansion.empty() &&
-	    io::retail_atol(version_crc.c_str()) != // the CRT atol @0x512327 (D-NET-384)
-	            config.expansion_version_checksum) return 48;
-	return 0;
 }
 
 bool validates_padding_echo(
@@ -397,7 +304,7 @@ std::vector<uint8_t> build_tag64_mission_metadata(
 		uint32_t transfer_id, uint32_t offset) {
 	MissionMetadataBlob fallback{};
 	if (session_blob == nullptr) {
-		fallback = build_mission_metadata_blob(cfg, !cfg.dedicated_server); // no ctx: cfg mode
+		fallback = build_mission_metadata_blob(cfg, !cfg.dedicated_server, nullptr); // no ctx
 		session_blob = &fallback;
 	}
 	return build_transfer_chunk(transfer_id, session_blob->data(),
@@ -929,7 +836,7 @@ std::vector<uint8_t> build_spawn_wave_status_body(
 std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		const GameConfig &config, NapiNPConnection &conn,
 		world::World &world, world::EntityHandle target_zone, uint16_t requested_handle,
-		ServerLogRecorder *server_log) {
+		ServerLogRecorder *server_log, const TitleIdentity *title) {
 	std::vector<ProtocolMessage> replies;
 	// The hold (slot state) clears first, ahead of the body's def test, so a refused
 	// mobile spawn below leaves the slot unheld (D-NET-552) [orig: Server_DeployPlayer
@@ -1030,9 +937,11 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	conn.link.death_cause_revivable = false;
 	// The deploy leg overwrites the whole +89912 state byte (1, or 3 while the
 	// pre-round timer runs: bit 1 is the pre-round loadout latch) and zeroes the
-	// +356 armory cooldown. [orig: Server_DeployPlayer @0x517803/@0x517812;
-	//  slot+0x164 = 0 @0x517900]
-	conn.link.preround_loadout_latch = world.preround_delay_seconds != 0;
+	// +356 armory cooldown; a DFX2 deploy writes 3 at every deploy (DFX2-11).
+	// [orig: Server_DeployPlayer @0x517803/@0x517812; slot+0x164 = 0 @0x517900]
+	// [orig: Server_DeployPlayer @0x514a55 (dfx2.exe)]
+	conn.link.preround_loadout_latch = world.preround_delay_seconds != 0 ||
+			title_in_match(title).join_state_fixed;
 	conn.reply.frontier_hint_pending = false; // bits 0x04/0x08 of the same byte
 	conn.reply.capture_nag_held = false;
 	conn.link.armory_reuse_seconds = 0;
@@ -1135,20 +1044,14 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// Its TLV walk keeps the CD cookie, whose PCID / SQUADINFO a remote
 				// connection on a NovaWorld session decrypts before the validator.
 				conn.join_identity_pairs = parse_join_identity_pairs(admission_message->payload);
+				read_join_cd_key_ids(conn, admission_message->payload);
 				const bool pcid_decrypted = inputs.server_ctx != nullptr &&
 						load_join_account_from_cookie(*inputs.server_ctx, conn);
 				if (conn.type != NapiNPConnection::kTypeClientSide) {
 					conn.link.spectator = conn.join_spectator_request != 0;
-					uint32_t reject_dpc = validate_join_environment(conn.join_environment);
-					if (reject_dpc == 0)
-						reject_dpc = validate_join_request(config, admission_message->payload);
-					if (reject_dpc == 0)
-						reject_dpc = validate_spectator_join(config, conn, roster);
-					if (reject_dpc == 0)
-						reject_dpc = validate_side_password(config, conn);
-					if (reject_dpc == 0 && inputs.server_ctx != nullptr)
-						reject_dpc = Server_ValidateJoinBans(
-								*inputs.server_ctx, conn, pcid_decrypted); // 29 / 30 / 31
+					const uint32_t reject_dpc = Server_ValidatePlayerJoinRequest(config,
+							inputs.server_ctx, conn, roster, admission_message->payload,
+							pcid_decrypted);
 					if (reject_dpc != 0) {
 						(void)stage_join_gate_reject(conn, reject_dpc);
 						conn.admission_stage = GameAdmissionStage::Rejected;
@@ -1748,7 +1651,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				//  the Server_DeployPlayer calls @0x519CE3/@0x519D7F/@0x519DC8/@0x519DE8].
 				std::vector<ProtocolMessage> deployment = Server_ReleasePlayerDeployment(
 						config, conn, *world, target_handle, target_handle.packed,
-						inputs.server_ctx != nullptr ? inputs.server_ctx->logs.profile : nullptr);
+						inputs.server_ctx != nullptr ? inputs.server_ctx->logs.profile : nullptr,
+						inputs.server_ctx != nullptr ? inputs.server_ctx->np_protocol.identity
+						                             : nullptr);
 				replies.insert(replies.end(),
 				               std::make_move_iterator(deployment.begin()),
 				               std::make_move_iterator(deployment.end()));

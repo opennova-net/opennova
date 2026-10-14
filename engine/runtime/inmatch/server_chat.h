@@ -101,4 +101,9 @@ std::string chat_strip_angle_tags(const std::string &text);
 // scans as three integers with any of them nonzero.
 bool chat_text_is_int_triplet(const std::string &text);
 
+// The relayed line's squad-tag text after the sender's name: the tag as it is, or, for a title
+// that wraps it (TitleInMatch::chat_squad_tag_wrapped, DFX2-14), between <ch> and <co>.
+// [orig: NapiNPServer_HandleChatMessage @0x513930] [orig: @0x510b43..0x510b6a (dfx2.exe)]
+std::string chat_squad_tag_text(const std::string &tag, bool wrapped);
+
 } // namespace opennova::inmatch
