@@ -1,4 +1,4 @@
-// Pins the Play launch plan and the one managed child (ADR 0046 d8/d10) over a fake
+// Pins the Play launch plan and the one managed child (ADR 0046 d8) over a fake
 // platform: the argument vector, where a packaged editor finds its runtime, the run directory the
 // game works in and what the game install's game finds there (S13 A8; Strict Play's: the build and the
 // program alone, no /d; the game install's file log is formats/filelog's), Strict Play's first-run start
