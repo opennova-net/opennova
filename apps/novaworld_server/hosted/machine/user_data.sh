@@ -7,8 +7,8 @@
 # machine's first boot (a stock Ubuntu 24.04 image: infra/aws, "Hosted game
 # servers"). It
 #
-#   1. installs docker (held, so no unattended upgrade restarts it under the
-#      server);
+#   1. reserves serve's two ports, then installs docker (held, so no
+#      unattended upgrade restarts it under the server);
 #   2. mounts the game data volume (the private snapshot's, labelled
 #      opennova-jo) read-only at /opt/jo;
 #   3. fetches the server's bootstrap bundle from the service over the private
@@ -59,6 +59,9 @@ end_machine() {
 trap 'end_machine "line $LINENO"' ERR
 
 # --- 1. docker -----------------------------------------------------------------
+# serve's ports (Ec2Provider kGamePort, kAdminPort) are in Linux's ephemeral
+# range; reserved, no socket of the pulls (say one in TIME_WAIT) can hold one.
+sysctl -w net.ipv4.ip_local_reserved_ports=32768,32800 >/dev/null
 log "installing docker"
 export DEBIAN_FRONTEND=noninteractive
 apt_get() { apt-get -o DPkg::Lock::Timeout=300 -q -y "$@"; }
