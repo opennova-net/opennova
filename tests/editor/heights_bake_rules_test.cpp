@@ -148,22 +148,14 @@ struct Rig {
 		const io::JsonValue answer = bake(view);
 		return answer.get("started") ? answer.get("started")->number : -1.0;
 	}
-	// Polls until the heights have no region due and a bake state, at most `seconds`.
-	bool settled(double seconds) {
-		const auto start = std::chrono::steady_clock::now();
-		while (std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() < seconds) {
-			session.poll();
-			if (const TerrainHeightsDocument *h = heights())
-				if (h->heights().unbaked.empty() && h->heights().bake) return true;
-			std::this_thread::sleep_for(std::chrono::milliseconds(20));
-		}
-		return false;
-	}
-	// Polls `count` times, a little apart (what a loop would show in).
+	// Until the heights have no region due and a bake state (their bakes landed).
+	bool settled() { return editor_test::heights_settled(session, cpt); }
+	// Polls `count` times, the worker waited on after each (a bake a poll starts has run out by the next: what a loop
+	// would show in).
 	void idle(int count) {
 		for (int i = 0; i < count; ++i) {
 			session.poll();
-			std::this_thread::sleep_for(std::chrono::milliseconds(20));
+			session.wait_for_bakes();
 		}
 	}
 	std::vector<double> heights_of(const std::string &mission) {
@@ -183,7 +175,7 @@ int test_redo_waits() {
 	rig.session.handle(request::open_document(rig.trn));
 	rig.raise(rig.trn, -200.0, 200.0, 801, true);
 	rig.raise(rig.trn, -150.0, 200.0, 802, true);
-	TEST_EXPECT(rig.settled(180.0));
+	TEST_EXPECT(rig.settled());
 	const TerrainHeightsDocument *heights = rig.heights();
 	TEST_EXPECT(heights && heights->can_undo());
 	rig.session.handle(request::undo(rig.cpt));
@@ -247,7 +239,7 @@ int test_refused() {
 	Rig rig("opennova_editor_heights_rules_refused");
 	rig.session.handle(request::open_document(rig.trn));
 	rig.raise(rig.trn, -200.0, 200.0, 821, true); // the .cpt opened through the stroke, its seed made
-	TEST_EXPECT(rig.settled(180.0));
+	TEST_EXPECT(rig.settled());
 	const std::vector<uint8_t> on_disk = test_io::read_file(rig.root + "/" + rig.cpt);
 	Edit rough;
 	rough.operation = EditOperation::Apply;
@@ -255,10 +247,7 @@ int test_refused() {
 	rig.session.handle(request::edit_record(rig.cpt, rough));
 	TEST_EXPECT(rig.session.outcome().done());
 	// Polled until the bake gives up: once.
-	const auto start = std::chrono::steady_clock::now();
-	while (rig.heights() && rig.heights()->bake_refusal().empty() &&
-	       std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() < 180.0)
-		rig.idle(1);
+	editor_test::poll_bakes_until(rig.session, [&] { return !rig.heights() || !rig.heights()->bake_refusal().empty(); });
 	const TerrainHeightsDocument *heights = rig.heights();
 	TEST_EXPECT(heights && heights->bake_refusal().find("too rough") != std::string::npos);
 	const double started = rig.started(rig.trn);
@@ -315,7 +304,7 @@ int test_placed_while_due() {
 	set.value = 30.0;
 	rig.session.handle(request::edit_record(m, set));
 	TEST_EXPECT(rig.session.outcome().done());
-	TEST_EXPECT(rig.settled(180.0));
+	TEST_EXPECT(rig.settled());
 	const std::vector<double> after = rig.heights_of(m);
 	TEST_EXPECT(after.size() == 2 && after[0] > before[0] && after[1] == 30.0);
 	std::printf("placed: an entity set while the bake was due stays where it was put\n");
@@ -340,7 +329,7 @@ int test_drag_defers() {
 	drag.value = 301.0;
 	drag.gesture = 9851;
 	rig.session.handle(request::edit_record(m, drag));
-	TEST_EXPECT(rig.settled(180.0));
+	TEST_EXPECT(rig.settled());
 	TEST_EXPECT(rig.heights_of(m)[0] == before[0]); // waiting on the drag
 	rig.session.handle(request::end_edit(m, 9851));
 	rig.idle(2);
@@ -376,7 +365,7 @@ int test_locked_stays_closed() {
 	TEST_EXPECT(!rig.open_at(m));
 	rig.session.handle(request::open_document(rig.trn));
 	rig.raise(rig.trn, -200.0, 200.0, 861, true);
-	TEST_EXPECT(rig.settled(180.0));
+	TEST_EXPECT(rig.settled());
 	TEST_EXPECT(!rig.open_at(m));
 	TEST_EXPECT(rig.open_at(free) && rig.heights_of(free).size() == 1 && rig.heights_of(free)[0] != 4.0);
 	std::printf("locked: a closed mission whose movers are locked stays closed\n");
@@ -415,7 +404,7 @@ int test_env_routing() {
 	TEST_EXPECT(error.empty() && lock.get("follow") && lock.get("follow")->number == 0.0);
 	const double near_z = rig.heights_of(near).empty() ? -1.0 : rig.heights_of(near)[0];
 	rig.raise(rig.trn, -200.0, 200.0, 881, true);
-	TEST_EXPECT(rig.settled(180.0));
+	TEST_EXPECT(rig.settled());
 	TEST_EXPECT(rig.open_at(here) && rig.heights_of(here).size() == 1 && rig.heights_of(here)[0] != 4.0);
 	TEST_EXPECT(!rig.open_at(away));
 	TEST_EXPECT(rig.heights_of(near).size() == 1 && rig.heights_of(near)[0] == near_z);

@@ -53,6 +53,9 @@ public:
 	// stroke's step or as one of its own; `followed` takes the missions the landing moved. False, with why, where a bake
 	// fails (its regions stay due).
 	bool settle(const std::string &path, std::string &error, std::vector<std::string> *followed = nullptr);
+	// The worker waited on until it holds no job, queued or running (a test's, a command line's wait): what it finished
+	// lands at the next poll, which starts the next one due. Unlike settle, it lands nothing and starts nothing.
+	void wait_idle();
 	// Whether a bake runs or is due for `path`, and its words for the pane's bake line ("" none).
 	std::string bake_words(const std::string &path) const;
 	// The bakes made since the session started (a test's count), and the bakes started (each lands, fails or is

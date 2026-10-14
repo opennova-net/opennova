@@ -8,11 +8,9 @@
 // the .til; a Close of the mission lists it and Don't save leaves it open with its edits; a drag of a tile is one
 // step; a tile command turns the selected tiles.
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include <base/io/json.h>
@@ -367,16 +365,12 @@ int test_stroke_follows() {
 	// Until no heights' bake is due (a stroke's landing joins its step: the steps after wait for it here, so an Undo
 	// takes the step a test means).
 	const auto baked = [&]() {
-		for (int i = 0; i < 9000; ++i) {
-			session.poll();
-			bool due = false;
+		return editor_test::poll_bakes_until(session, [&] {
 			for (const auto &open : v.documents.open)
 				if (const auto *heights = dynamic_cast<const TerrainHeightsDocument *>(open.get()))
-					due = due || !heights->heights().unbaked.empty();
-			if (!due) return true;
-			std::this_thread::sleep_for(std::chrono::milliseconds(20));
-		}
-		return false;
+					if (!heights->heights().unbaked.empty()) return false;
+			return true;
+		});
 	};
 	// Heights likewise, the case the plan names, and the canvas reading its ground BEFORE the viewports follow (the
 	// first read of a Shell's frame, its hint and ring): no sample has the .cpt serialized again, no Rebuild is held,

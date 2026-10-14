@@ -4,8 +4,8 @@
 // own) that is wiped on construction and destruction (through the system's paths, so a tree past
 // MAX_PATH goes too), a file writer, a tree's digest, every missing
 // required file of a session's project created, the project settings applied, a request and the
-// operation it starts run to their end, an operation that holds the documents, and a finding made
-// by its code's token with what it is about.
+// operation it starts run to their end, the session polled through its terrain bakes to a state, an
+// operation that holds the documents, and a finding made by its code's token with what it is about.
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -30,6 +30,7 @@
 #include <base/io/hash.h>
 #include <base/io/os_path.h>
 #include <editor/assets/asset_registry.h>
+#include <editor/documents/terrain_heights_document.h>
 #include <editor/project/project_files.h>
 #include <editor/requirements/requirements.h>
 #include <base/io/json.h>
@@ -158,6 +159,28 @@ inline void set_missions(opennova::editor::ProjectSession &session, bool on) {
 	opennova::editor::ProjectSettingsChange change;
 	change.mission = on;
 	apply_settings(session, change);
+}
+
+// The session polled as the Shell polls it until `done()` holds (true), the terrain sculpt's worker waited
+// on between polls (ProjectSession::wait_for_bakes: the bake it finished lands at the next poll); false
+// once a poll leaves no bake running or being prepared, so nothing left to land can bring `done` about. No
+// clock: ctest's timeout bounds a hang.
+template <typename Done> bool poll_bakes_until(opennova::editor::ProjectSession &session, Done done) {
+	for (;;) {
+		session.poll();
+		if (done()) return true;
+		const opennova::editor::SessionView &view = session.view();
+		if (view.documents.baking.empty() && view.documents.preparing.empty()) return false;
+		session.wait_for_bakes();
+	}
+}
+// Polled until the open heights at `path` have no region due and a bake state (their bakes landed).
+inline bool heights_settled(opennova::editor::ProjectSession &session, const std::string &path) {
+	return poll_bakes_until(session, [&] {
+		const auto *heights =
+		        dynamic_cast<const opennova::editor::TerrainHeightsDocument *>(session.document_base_for(path));
+		return heights && heights->heights().unbaked.empty() && heights->heights().bake;
+	});
 }
 
 // An operation that writes the project's files and open documents and cannot be cancelled (a

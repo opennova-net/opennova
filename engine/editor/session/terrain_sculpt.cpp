@@ -687,6 +687,13 @@ bool TerrainSculpt::settle(const std::string &path, std::string &error, std::vec
 	return true;
 }
 
+void TerrainSculpt::wait_idle() {
+	// The worker notifies after each job it finishes; a job interrupt() takes back from the queue is the session
+	// thread's own, so nothing is left to wake for.
+	std::unique_lock<std::mutex> hold(mutex_);
+	wake_.wait(hold, [this] { return !queued_ && !running_; });
+}
+
 void TerrainSculpt::remember_flatten(uint64_t gesture, int32_t raw) {
 	for (auto &each : flatten_)
 		if (each.first == gesture) {

@@ -151,20 +151,6 @@ int test_dabs() {
 	return 0;
 }
 
-// Polls until the heights at `path` have no region due, at most `seconds`.
-bool settled(ProjectSession &session, const std::string &path, double seconds) {
-	const auto start = std::chrono::steady_clock::now();
-	while (std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() < seconds) {
-		session.poll();
-		for (const auto &document : session.view().documents.open)
-			if (document->path() == path)
-				if (const auto *heights = dynamic_cast<const TerrainHeightsDocument *>(document.get()))
-					if (heights->heights().unbaked.empty() && heights->heights().bake) return true;
-		std::this_thread::sleep_for(std::chrono::milliseconds(20));
-	}
-	return false;
-}
-
 int test_session() {
 	editor_test::TempProjectDir dir("opennova_editor_heights_brushes");
 	editor_test::NoProcess platform;
@@ -199,7 +185,7 @@ int test_session() {
 	};
 	TEST_EXPECT(heights_doc() && heights_doc()->dirty() && !heights_doc()->heights().unbaked.empty());
 	// The bake lands in the stroke's step: the regions settled, the atlas there drawn back from the remade leaf.
-	TEST_EXPECT(settled(session, cpt->relative_path, 120.0));
+	TEST_EXPECT(editor_test::heights_settled(session, cpt->relative_path));
 	const TerrainHeightsDocument *heights = heights_doc();
 	CptFile shipped;
 	std::string why;
@@ -308,7 +294,7 @@ int test_view() {
 	ask.points = {{-196.0, 200.0}};
 	ask.end = true;
 	session.handle(request::terrain_stroke(m, ask));
-	TEST_EXPECT(settled(session, cpt, 120.0));
+	TEST_EXPECT(editor_test::heights_settled(session, cpt));
 	devices.sync(session);
 	size_t tiles = 0;
 	for (const HeightsDevicePatch &patch : mission->heights_patches()) tiles += patch.tile_indices.size();
@@ -388,14 +374,14 @@ int test_seed() {
 	TEST_EXPECT(slowest < 1.0);
 	std::printf("  seed: the strokes served in at most %.3f s, the seed %s\n", slowest,
 	            seeding && !v.documents.preparing.empty() ? "still running" : "done");
-	TEST_EXPECT(settled(early.session, early.cpt, 180.0));
+	TEST_EXPECT(editor_test::heights_settled(early.session, early.cpt));
 
 	// The same strokes with no seed made ahead (the file's seed made as the stroke ends).
 	SeedRig late("opennova_editor_heights_seed_late");
 	late.sample(-200.0, 200.0, false);
 	late.sample(-196.0, 200.0, false);
 	late.sample(-192.0, 200.0, true);
-	TEST_EXPECT(settled(late.session, late.cpt, 180.0));
+	TEST_EXPECT(editor_test::heights_settled(late.session, late.cpt));
 	TEST_EXPECT(early.heights() && late.heights() && early.heights()->serialize().text == late.heights()->serialize().text);
 	std::printf("seed: prepared in the background as Sculpt is picked, a stroke served meanwhile, its bake landing after\n");
 	return 0;
@@ -476,7 +462,7 @@ int test_imported() {
 	};
 	TEST_EXPECT(heights_doc() && heights_doc()->image() && heights_doc()->cpt_path() == cpt &&
 	            heights_doc()->import_top() == 100.0 && heights_doc()->dirty());
-	TEST_EXPECT(settled(session, image, 180.0));
+	TEST_EXPECT(editor_test::heights_settled(session, image));
 	const TerrainHeightsDocument *heights = heights_doc();
 	TEST_EXPECT(heights && heights->heights().baked && heights->stand_in_paths() == std::vector<std::string>{cpt});
 	if (!heights) return 1;
@@ -497,12 +483,10 @@ int test_imported() {
 	TEST_EXPECT(test_io::read_file(root + "/" + cpt) == standing);
 
 	// The import's white changed while the heightmap is open and clean: the document read again under it (its write
-	// decodes to what it shows).
+	// decodes to what it shows) at the next poll, which reads the imports again (no bake: the reload's operations run).
 	editor_test::handle_to_end(session, request::set_import_options(cpt, {{"top", "120"}}));
-	for (int i = 0; i < 20 && !(heights_doc() && heights_doc()->import_top() == 120.0); ++i) {
-		session.poll();
-		std::this_thread::sleep_for(std::chrono::milliseconds(20));
-	}
+	session.poll();
+	session.run_operations();
 	TEST_EXPECT(heights_doc() && heights_doc()->import_top() == 120.0 && !heights_doc()->dirty());
 	std::printf("imported: a stroke sculpts the heightmap, its bake stands in for the import's .cpt, the reimport makes those bytes\n");
 	return 0;

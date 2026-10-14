@@ -4,11 +4,9 @@
 // pressed there is one set_workspace of the brush. A tab pressed picks its family's first tool where the brush has
 // another family's (Paint: Surface, its legend then shown); the tab of the brush's own family picks nothing.
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include <base/io/json.h>
@@ -352,19 +350,19 @@ void test_ledger() {
 	const DocumentBase *heights = open_at(v, cpt);
 	CHECK(heights && heights->dirty() && v.documents.active == run.path, "2. Tmap.cpt opened beside the mission, sculpted");
 	// The stroke's bake lands in the background; the tank follows the ground with it (the follow pass), one step with
-	// the stroke.
-	// (The bake runs on a worker: a minute of the wall clock at most, polled each frame as the Shell polls it.)
+	// the stroke. (The bake runs on a worker, waited on between frames, each frame polling as the Shell polls; over
+	// once a frame leaves no bake running.)
 	bool landed = false;
-	for (int round = 0; round < 3000 && !landed; ++round) {
+	for (;;) {
+		run.settle(1);
 		opennova::io::JsonValue args = opennova::io::JsonValue::make_object();
 		args.set("path", opennova::io::json_string(run.path));
 		args.set("op", opennova::io::json_string("bake"));
 		std::string error;
 		const opennova::io::JsonValue bake = run.session.query("terrain", args, error);
 		landed = !bake.get_bool("due", true) && bake.get("landed") && bake.get("landed")->number >= 1.0;
-		if (landed) break;
-		std::this_thread::sleep_for(std::chrono::milliseconds(20));
-		run.settle(1);
+		if (landed || (v.documents.baking.empty() && v.documents.preparing.empty())) break;
+		run.session.wait_for_bakes();
 	}
 	CHECK(landed, "2. the stroke's bake landed");
 	run.take();
