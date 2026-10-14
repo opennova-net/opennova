@@ -1418,7 +1418,7 @@ int main() {
 		const opennova::env::Config empty;
 		resolved = opennova::env::mission_water_rung(none, empty, 10.5f);
 		ok &= expect(resolved.rung == WaterRung::Terrain && near(resolved.height, 10.5f),
-				"a config with no line: OpenNova's terrain fallback (D-ENV-S26B2)");
+				"a config with no line: OpenNova's terrain fallback (env #46)");
 		resolved = opennova::env::mission_water_rung(none, empty, 0.0f);
 		ok &= expect(resolved.rung == WaterRung::None && resolved.height == 0.0f,
 				"no line and no terrain height: no plane, never a stale one");
