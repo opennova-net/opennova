@@ -71,8 +71,8 @@ bool parse_ipv4_octets(const std::string &text, std::array<uint8_t, 4> &out) {
 // per line, then on the success path REQUIRES POSTIPADDRESS (dword_B5F490;
 // "NO NW POST IP" -> state -9) and POSTIPPORT (dword_B5F494; "NO NW POST
 // PORT" -> -9) unless the junction bypass `dword_B5FD2C` is set. This
-// parser absorbs the same keys; the caller enforces the post-ip/port
-// requirement.
+// parser absorbs the same keys; NwuLobbySession::poll_gate enforces the
+// post-ip/port requirement.
 bool gate_response_parse(std::string_view body, GateResponse &out) {
 	out = GateResponse{};
 

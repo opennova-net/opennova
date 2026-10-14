@@ -4,6 +4,7 @@
 #include <base/io/crt_ftol.h> // retail_atol
 #include <base/io/strutil.h>
 
+#include <cstdio>
 #include <cstdlib>
 #include <string>
 #include <utility>
@@ -84,6 +85,16 @@ std::string novaworld_gate_error_tag(int gate_result, bool response_phase) {
 			break;
 	}
 	return response_phase ? "NWEC16" : "NWEC15";
+}
+
+// [orig: UI_ShowNovaWorldConnectError @0x5584A0 - `add eax, 17h; cmp eax, 16h; ja`
+//  @0x5584A4..0x5584AA, the table @0x5586F8 (row i -> NWEC(48 - i)), the default @0x5586DF]
+std::string novaworld_connect_error_tag(int code) {
+	if (code < -23 || code > -1)
+		return "NWEC17";
+	char tag[16];
+	std::snprintf(tag, sizeof(tag), "NWEC%02d", 25 - code);
+	return tag;
 }
 
 namespace {

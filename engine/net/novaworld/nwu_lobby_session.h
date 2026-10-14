@@ -47,11 +47,19 @@ public:
 		std::function<void(const RxInfo &)> on_received;
 		// The session advanced: the owner maps ClientSession::State onto its own states.
 		std::function<void()> on_session_state;
-		// Fatal: a gate response naming no UDPNOVAWORLD, a session error, or a connect deadline.
-		// The message is the retail NWEC tag when one is witnessed for the failure.
+		// Fatal: a gate response failing the gate (NWEC25), a session error once the first
+		// connect's poll has ended, or a give-up or failure of that poll
+		// (novaworld_connect_error_tag's NWEC), which reports any session error while it runs.
+		// After a poll failure the driver has dropped the connection (session() is null once the
+		// hook returns). The message is the retail NWEC tag when one is witnessed for the
+		// failure.
 		std::function<void(const std::string &)> on_fatal;
 		// Recoverable decode noise on the gate socket (a bad envelope or response).
 		std::function<void(const std::string &)> on_soft_error;
+		// The gate named no NWU address and its POST address and port are both set: the connect
+		// goes on with no NWU session (retail's NovaWorld menu then opens its web lobby, menu
+		// state 9). No session is created; match_facts().in_use stays false.
+		std::function<void()> on_sessionless;
 	};
 	struct Environment {
 		// The client index/key draws, the reconnect's fresh CK and the host role's AppId and
@@ -68,10 +76,26 @@ public:
 		//  @0x4d4913..0x4d493e]
 		int32_t max_packet_size = 0;
 	};
-	// What a match reads of this session: the gate named an NWU address (retail's dword_B5FD2C),
-	// and the session's flags word, hosting/playing word and mission-exit store (all 0 once the
-	// session is dropped). The first is the gate response's, so it outlives a closed session as
-	// retail's global does.
+	// The NovaWorld switches of the game's command line the gate response and the connect read
+	// (LaunchFlags): the POST address (resolved with DNS on; one that does not resolve overrides
+	// nothing) and port (0 overrides nothing) that replace the gate's POSTIPADDRESS / POSTIPPORT;
+	// the /UDPNOVAWORLD entries, which mark the NWU session in use and are probed in place of the
+	// gate's; and the USEJUNCTION / CLEARJUNCTION overrides (-1 overrides nothing).
+	// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - dword_B4C6B0 into dword_B5F490
+	//  @0x4CF54B..0x4CF554, dword_B4C6B4 into dword_B5F494 @0x4CF559..0x4CF562, the command
+	//  line's count dword_B4C71C @0x4CF52E, dword_829F88 / dword_829F8C @0x4CF6ED..0x4CF709;
+	//  CNapiGameSession_ConnectToNovaWorld @0x4D4640 - the entries @0x4D4A78..0x4D4A9E]
+	struct CommandLine {
+		std::string post_ip_address;
+		int32_t post_port_number = 0;
+		std::vector<std::string> udp_novaworld;
+		int32_t use_junction = -1;
+		int32_t clear_junction = -1;
+	};
+	// What a match reads of this session: the gate or the command line named an NWU address
+	// (retail's dword_B5FD2C), and the session's flags word, hosting/playing word and mission-exit
+	// store (all 0 once the session is dropped). The first is the gate response's, so it outlives
+	// a closed session as retail's global does.
 	struct MatchFacts {
 		bool in_use = false;
 		uint32_t flags = 0;
@@ -80,6 +104,20 @@ public:
 	};
 
 	NwuLobbySession(Hooks hooks, Environment env);
+
+	// The command line's switches (unset: none), read at each gate response.
+	void set_command_line(CommandLine command_line) { command_line_ = std::move(command_line); }
+	// The NovaWorld menu's JUNCTIONCODE form field: when it is nonempty at the connect, its one
+	// address is the connect's only probe target, ahead of the command line's and the gate's
+	// entries. A gate response whose USEJUNCTION (or the command line's) is set empties it, and
+	// so does the menu's entry (open()) when the last response's USEJUNCTION and CLEARJUNCTION
+	// were both set. It outlives open() and close(), as the menu's form does. Only the web
+	// lobby's form writes it in retail, which no shell here has (unwitnessed).
+	// [orig: CNapiGameSession_ConnectToNovaWorld @0x4D4640 - the read @0x4D4A31..0x4D4A4A, its
+	//  one target @0x4D4A4F..0x4D4A71; CNapiGateManager_ProcessResponse @0x4CED20 - the clear
+	//  @0x4CF71B..0x4CF76E; UI_ProcessLANSessionStateMachine @0x558DE0 - @0x558E2D..0x558E64]
+	void set_junction_code(std::string code) { junction_code_ = std::move(code); }
+	const std::string &junction_code() const { return junction_code_; }
 
 	// Start over on the embedder's two bound sockets (non-owning; they outlive close()) and mint
 	// the ci/ck pair. The clock restarts at 0 with the first tick().
@@ -92,11 +130,13 @@ public:
 	void close();
 	// One tick at the owner's wall clock: the gate socket until its reply landed, the session
 	// socket (each datagram through the session, its immediate sends out), the receive batch's
-	// missing-sequence tail, the connection's send pump, the periodic update's statements, then
-	// the gate worker's and the first connect's retransmits and deadlines.
+	// missing-sequence tail, the connection's send pump, the periodic update's statements and its
+	// first-connect give-up, then the gate worker's retransmits and deadline, the first connect's
+	// poll (its give-ups and their NWEC reports) and its stage retransmits.
 	void tick(uint32_t now_ms);
 	// Send one datagram (fires on_sent per send): the announce (a 0x41) to every probe target,
-	// anything else to the connection's server.
+	// each target its own announce carrying that target's address and port as EIP / EPN
+	// (ClientSession::build_announce), anything else to the connection's server.
 	void send(const std::vector<uint8_t> &dg);
 	// One connection send pump now, outside the tick: what the session queued (a stop statement
 	// before the goodbye) goes out at once.
@@ -150,15 +190,23 @@ private:
 	uint32_t resolve_address(const std::string &host) const;
 	void send_one(const PeerAddr &to, const std::vector<uint8_t> &dg);
 	void poll_gate();
+	// The command line's POST address and port over the gate response's.
+	void apply_command_line_post();
 	void poll_session();
 	void send_gate_probe();
 	bool resolve(const std::string &host, uint16_t port, PeerAddr &out) const;
-	// The handshake phase for the timeout diagnostic (gate_probing / session_hello /
-	// session_join).
-	const char *phase_name() const;
+	// The periodic update's give-up legs, then the first connect's poll.
+	void give_up_stalled_connect();
+	bool poll_connect();
+	// A give-up: the session's abort, its sends out.
+	void abort_connect();
+	// A connect wait's failure: the session's reset (a connection still up tears down), the
+	// code's NWEC to on_fatal, then the connection dropped (session() null from here).
+	void fail_connect(int code);
 
 	Hooks hooks_;
 	Environment env_;
+	CommandLine command_line_;
 	IDatagramSocket *gate_socket_ = nullptr;
 	IDatagramSocket *session_socket_ = nullptr;
 	PeerAddr gate_peer_;
@@ -172,15 +220,30 @@ private:
 	std::vector<Target> targets_; // the enumerator's target list
 	PeerAddr nw_peer_;
 	GateResponse gate_response_;
+	bool in_use_ = false; // dword_B5FD2C
+	// The menu form's JUNCTIONCODE, and the last gate response's word set (dword_B5FF48) with its
+	// USEJUNCTION / CLEARJUNCTION after the command line's (dword_B5FD38 / dword_B5FD3C), which
+	// the menu's entry reads; none reset by open().
+	std::string junction_code_;
+	bool gate_ok_ = false;
+	int32_t use_junction_ = 0;
+	int32_t clear_junction_ = 0;
 	uint32_t clock_ms_ = 0;
 	// The gate worker: the probe re-sent every retry interval until the deadline.
 	uint32_t gate_started_ms_ = 0;
 	uint32_t gate_last_send_ms_ = 0;
-	// The first connect's legs: the stage datagram re-sent every retransmit interval until the
-	// session's connect deadline.
-	uint32_t connect_started_ms_ = 0;
+	// The first connect's poll, retail's NovaWorld menu running PollConnectPhase1, the validation
+	// wait, PollConnectPhase2 and the connection wait in turn: its stamp (dword_B5F444), its
+	// timed-out flag (dword_B5F448) and the give-up word the periodic update sets (session+0x12C:
+	// 1 the state-1 give-up). The stage datagram is re-sent every retransmit interval while it
+	// runs.
+	// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - states 5..8 @0x55919E..0x55923C]
+	enum class ConnectPoll { Off, Connect, Verify, Done };
+	ConnectPoll connect_poll_ = ConnectPoll::Off;
+	uint32_t connect_stamp_ms_ = 0;
+	bool connect_timed_out_ = false;
+	int give_up_ = 0;
 	uint32_t connect_last_send_ms_ = 0;
-	bool connect_reported_ = false;
 };
 
 } // namespace opennova
