@@ -8,6 +8,7 @@
 #include <editor/documents/text_types.h>
 #include <editor/model/text_document.h>
 #include <formats/mus/mus.h>
+#include <formats/sbf/sbf.h>
 
 namespace opennova::editor {
 
@@ -79,8 +80,25 @@ void hold_read_only(std::vector<SourceIssue> &issues, const std::string &why) {
 			"(the game keeps playing it as it is)."});
 }
 
-bool decode_music_script(const std::string &, const std::vector<uint8_t> &stored, std::string &text,
-		std::shared_ptr<const TextEncoding> &encoding, std::vector<SourceIssue> &issues,
+// The script's MUS text: each play by its bank's stream name where `names` has one (mus_decompile_with_names: `play
+// GAMINT`, `bind sound_1 "GAMINT"`), else by its place (`play sound_1`); false where the bytecode does not decompile.
+bool decompile_text(const mus::MusScript &script, const std::vector<std::string> &names, std::string &text) {
+	std::vector<const char *> pointers;
+	for (const std::string &name : names) pointers.push_back(name.c_str());
+	const char *const *table = pointers.empty() ? nullptr : pointers.data();
+	const int needed = mus::mus_decompile_with_names(&script, table, uint32_t(pointers.size()), nullptr, 0);
+	if (needed < 0) return false;
+	text.assign(size_t(needed) + 1, '\0');
+	mus::mus_decompile_with_names(&script, table, uint32_t(pointers.size()), &text[0], text.size());
+	text.resize(size_t(needed));
+	return true;
+}
+
+// The script read into its MUS text, its plays named by `names` (its bank's streams, in their order) where the text
+// so named writes the script back as it is (two streams of one name, or a name the compiler reads otherwise, would
+// not: the plays by place then).
+bool decode_music_script_named(const std::vector<uint8_t> &stored, const std::vector<std::string> &names,
+		std::string &text, std::shared_ptr<const TextEncoding> &encoding, std::vector<SourceIssue> &issues,
 		std::string &error) {
 	mus::MusFile file{};
 	if (mus::mus_open_memory(&file, stored.data(), stored.size()) != 0 || file.header.chunk_count == 0) {
@@ -89,15 +107,17 @@ bool decode_music_script(const std::string &, const std::vector<uint8_t> &stored
 		return false;
 	}
 	const mus::MusScript &script = file.scripts[0];
-	const int needed = mus::mus_decompile(&script, nullptr, 0);
-	if (needed < 0) {
+	bool named = false;
+	if (!names.empty() && file.header.chunk_count == 1 && decompile_text(script, names, text)) {
+		const Compiled again = compile(text);
+		named = again.ok && again.bytes.size() == stored.size() &&
+		        std::memcmp(again.bytes.data(), stored.data(), stored.size()) == 0;
+	}
+	if (!named && !decompile_text(script, {}, text)) {
 		mus::mus_close(&file);
 		error = "This music script's bytecode does not decompile.";
 		return false;
 	}
-	text.assign(size_t(needed) + 1, '\0');
-	mus::mus_decompile(&script, &text[0], text.size());
-	text.resize(size_t(needed));
 	encoding = std::make_shared<MusicEncoding>();
 	// What the MUS text cannot carry: the script is held read only. Its text compiles to MDEdit's layout (a
 	// MessageHandler its `handler`, the debug tables and the line table carried; every shipped script its own
@@ -105,7 +125,7 @@ bool decode_music_script(const std::string &, const std::vector<uint8_t> &stored
 	if (file.header.chunk_count != 1) {
 		hold_read_only(issues, "holds " + std::to_string(file.header.chunk_count) +
 				" scripts, and its MUS text the first alone");
-	} else {
+	} else if (!named) {
 		const Compiled again = compile(text);
 		if (!again.ok || again.bytes.size() != stored.size() ||
 				std::memcmp(again.bytes.data(), stored.data(), stored.size()) != 0)
@@ -117,10 +137,47 @@ bool decode_music_script(const std::string &, const std::vector<uint8_t> &stored
 	return true;
 }
 
+bool decode_music_script(const std::string &, const std::vector<uint8_t> &stored, std::string &text,
+		std::shared_ptr<const TextEncoding> &encoding, std::vector<SourceIssue> &issues,
+		std::string &error) {
+	return decode_music_script_named(stored, {}, text, encoding, issues, error);
+}
+
+// A music script's document: its text, its plays named by its bank's streams where the session read the bank
+// beside it (read_music_script_bank) before it read its file.
+class MusicScriptDocument final : public TextDocument {
+public:
+	MusicScriptDocument() : TextDocument(decode_music_script) {}
+	void set_stream_names(std::vector<std::string> names) { names_ = std::move(names); }
+
+protected:
+	bool decode(const std::vector<uint8_t> &stored, std::string &text, std::shared_ptr<const TextEncoding> &encoding,
+	            std::vector<SourceIssue> &issues, std::string &message) override {
+		return decode_music_script_named(stored, names_, text, encoding, issues, message);
+	}
+
+private:
+	std::vector<std::string> names_;
+};
+
 } // namespace
 
 std::unique_ptr<DocumentBase> make_music_script_document() {
-	return std::make_unique<TextDocument>(decode_music_script);
+	return std::make_unique<MusicScriptDocument>();
+}
+
+void read_music_script_bank(DocumentBase &document, const CompanionFile &bank) {
+	auto *script = dynamic_cast<MusicScriptDocument *>(&document);
+	if (!script) return;
+	std::vector<std::string> names;
+	sbf::SbfArchive archive{};
+	if (bank.state == CompanionFile::State::Read &&
+	    sbf::sbf_open_memory(&archive, bank.bytes.data(), bank.bytes.size()) == 0) {
+		for (uint32_t i = 0; i < archive.header.entry_count; ++i)
+			names.emplace_back(archive.entries[i].name, strnlen(archive.entries[i].name, sizeof(archive.entries[i].name)));
+		sbf::sbf_close(&archive);
+	}
+	script->set_stream_names(std::move(names));
 }
 
 std::vector<Diagnostic> validate_music_script_file(const DocumentBase &document) {

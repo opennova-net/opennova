@@ -19,9 +19,10 @@ namespace opennova::editor {
 
 class ProjectCheck;
 
-// A record type's companion (ADR 0046 S24, Names): a file the editor keeps beside a document's own file, in its
+// A type's companion (ADR 0046 S24, Names): a file the editor keeps beside a document's own file, in its
 // folder under its base name with an extension of its own, never packed and never a reference the graph reads (a
-// mission's .mis, which the original editor reads and the game never does: documents/mission_names_file.h). The
+// mission's .mis, which the original editor reads and the game never does: documents/mission_names_file.h); or one
+// it reads alone, with no `due` or `write` (a music script's bank: its streams' names, never written here). The
 // session reads it before the document reads its file, each time it does (`read`: none there, its bytes, or one
 // the file system would not read), and after each save of the document asks whether to write there (`due`,
 // given the file as it stands), then for the text (`write`: false where the document refuses, saying why in its

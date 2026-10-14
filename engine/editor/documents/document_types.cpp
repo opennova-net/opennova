@@ -70,6 +70,8 @@ void mission_names_written(DocumentBase &document, bool ok, uint64_t fingerprint
 }
 constexpr DocumentCompanions kMissionCompanions{".mis", read_mission_names, mission_names_due, write_mission_names,
                                                 mission_names_written};
+// A music script's bank, read alone (no write: it is the bank's own file).
+constexpr DocumentCompanions kMusicScriptBank{".sbf", read_music_script_bank};
 
 std::unique_ptr<DocumentBase> make_catalog() { return std::make_unique<DefCatalogDocument>(); }
 std::unique_ptr<DocumentBase> make_strings() { return std::make_unique<StringsDocument>(); }
@@ -139,7 +141,8 @@ constexpr DocumentType kTypes[] = {
 			script_finding_codes, nullptr, script_references },
 	// The music script's plays name its bank's streams by their places (S23 B).
 	{ DocumentTypeId::MusicScript, "music_script", make_music_script_document,
-			validate_music_script_file, text_fields, music_script_finding_codes, nullptr, music_script_references },
+			validate_music_script_file, text_fields, music_script_finding_codes, nullptr, music_script_references,
+			nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &kMusicScriptBank },
 	// The credits' text names the images its lines draw and the fonts its text lines draw in.
 	{ DocumentTypeId::Credits, "credits", make_credits_document, validate_credits_file,
 			text_fields, credits_finding_codes, nullptr, credits_references },
