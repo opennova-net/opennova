@@ -12,6 +12,7 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/source_issue_findings.h>
 #include <editor/model/staged_rows.h>
+#include <runtime/hud/game_font.h>
 
 namespace opennova::editor {
 
@@ -203,9 +204,8 @@ FontGlyphRect font_glyph_rect(const FontGlyph &glyph) {
 }
 
 int font_glyph_advance(const FontRow &font, const FontGlyph &glyph) {
-	// [orig: CGameFont_GetCharExtent @ 0x674de4..0x674e25]: floor(((u1 - u0) * 256 + spacing - 1) * scale + 0.5).
-	const float width = (glyph.uv.u1 - glyph.uv.u0) * float(FNT_TEXTURE_WIDTH);
-	return int(std::floor((width + float(font.spacing) - 1.0f) * fnt_design_scale(font.design_width) + 0.5f));
+	// The game's measure (hud::glyph_extent, CGameFont_GetCharExtent's fold) at the font's own scale.
+	return hud::glyph_extent(glyph.uv, font.spacing, fnt_design_scale(font.design_width));
 }
 
 // --- the row -------------------------------------------------------------------------------------
