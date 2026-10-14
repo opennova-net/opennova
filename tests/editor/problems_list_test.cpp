@@ -359,7 +359,7 @@ int test_proposals() {
 		if (fix.label == "Use spare.bin as gametext.bin") use = &fix;
 	TEST_EXPECT(use && fix_asks_first(*use) && !fix_asks_first(fixes.front()));
 	// What a field's picker offers of the same finding: the fixes raised at once alone, never one that asks first
-	// (review X16: the picker has no confirmation to wait in).
+	// (the picker has no confirmation to wait in).
 	const std::vector<ProblemFix> at_once = fixes_raised_at_once(fixes);
 	const size_t asking = size_t(std::count_if(fixes.begin(), fixes.end(), [](const ProblemFix &fix) { return fix_asks_first(fix); }));
 	TEST_EXPECT(asking >= 1 && at_once.size() + asking == fixes.size() &&

@@ -346,9 +346,8 @@ int test_sphere_picks() {
 	const MissionPickRadii second = { { 100302, 12.0f } };
 	const std::vector<MissionMark> behind = mission_marks(scene, options, camera, width, height, nullptr, &second);
 	TEST_EXPECT(pick(behind, x, y, nullptr, MissionPick::Click) == 4);
-	// Nested: on the crate's body past its glyph (a camera near it), inside the second's sphere, the crate
-	// (the review's M2: the larger sphere's entry came first); 10 m above the second, clear of the crate,
-	// the second.
+	// Nested: on the crate's body past its glyph (a camera near it), inside the second's sphere,
+	// the crate; 10 m above the second, clear of the crate, the second.
 	OrbitCamera crate_view = camera_over(4.0, 24.0, 1.0, 10.0f);
 	crate_view.pitch = 0.2f;
 	const std::vector<MissionMark> by_crate = mission_marks(scene, options, crate_view, width, height, nullptr, &radii);
@@ -398,7 +397,7 @@ int test_sphere_picks() {
 	// A device that cannot say (not placed yet): as with none.
 	device.ray = nullptr;
 	TEST_EXPECT(pick(marks, x, y, &device, MissionPick::Click) == 0 && pick(marks, x, y, &device, MissionPick::Press) == -1);
-	// A sphere is clicked by its model with its anchor off the picture (below it: the review's L1), the
+	// A sphere is clicked by its model with its anchor off the picture (below it), the
 	// eye outside it.
 	OrbitCamera close = camera_over(0.0, 0.0, 9.0, 6.0f);
 	close.pitch = 0.0f; // level, 9 m up, 6 m south: the first's anchor below the frame

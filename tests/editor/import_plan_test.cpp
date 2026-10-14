@@ -837,7 +837,7 @@ static int test_plan_mission_closure() {
 	                       {"n.bms", std::string(mission_bytes.begin(), mission_bytes.end())},
 	                       {"n.pcx", "pcx"},
                        // A bank of its name, which the game reads as its dialog's sounds only beside a .dbf it
-                       // lacks (review F5).
+                       // lacks (S14 R4).
                        {"n.lwf", bank_text({{"LINE9", "nine.wav"}})},
 	                       {"m.wac", "// the mission's script\r\n"},
 	                       {"m.dbf", "dbf"},
@@ -862,7 +862,8 @@ static int test_plan_mission_closure() {
 	                       {"day.env", env_text}, {"cloud.pcx", "pcx"}, {"m.pcx", "pcx"},
 	                       // Two of the fixed names a running mission opens that the manifest does not list.
 	                       {"overcast.def", "; overcast\r\n"}, {"eraindrp.tga", "tga"},
-                       // And the HUD's, a crosshair style's, a view effect's and an impact scar's (review F4).
+                       // And the HUD's, a crosshair style's, a view effect's and an impact
+                       // scar's (S14 R4).
                        {"compring.tga", "tga"}, {"cross03.tga", "tga"}, {"BNumbers.tga", "tga"}, {"scorch1.tga", "tga"},
 	                       {"m.til", "til"},
 	                       // An effect of two particles: a plain graphic, and a flipbook of two frames, which
@@ -992,7 +993,7 @@ static int test_plan_mission_closure() {
 	ImportPlanner planner({mission}, true, ProjectPaths::for_root(v.project.root), *v.project.document, *v.project.scan,
 	                      *v.findings.graph, install);
 	size_t steps = 0, done = 0;
-	bool fell = false; // the files followed never fall, a menu followed again included (review F13)
+	bool fell = false; // the files followed never fall, a menu followed again included
 	while (!planner.step(1)) {
 		TEST_EXPECT(++steps < 2000);
 		fell = fell || planner.files_done() < done;
@@ -1007,7 +1008,7 @@ static int test_plan_mission_closure() {
 				            plan.rows[i].problem.c_str(), stepped.rows[i].name.c_str(), int(stepped.rows[i].selected),
 				            stepped.rows[i].problem.c_str());
 	// A step takes one source, the manifest for the missions, or one file followed; the counts kept by
-	// kind come out the same too (review F13).
+	// kind come out the same too.
 	const auto same_counts = [](const std::vector<ImportNotFollowed> &a, const std::vector<ImportNotFollowed> &b) {
 		if (a.size() != b.size()) return false;
 		for (size_t i = 0; i < a.size(); ++i)
@@ -1022,7 +1023,7 @@ static int test_plan_mission_closure() {
 	TEST_EXPECT(alone.rows.size() == 1 && alone.rows[0].name == "m.bms" && alone.undefined.empty());
 	// A mission with none of its own set but its loading image: the files the game runs without
 	// (its script, its dialog bank and the bank's sounds) are no row, the sounds' bank of its name the
-	// install has never read without the .dbf (review F5); its text table is served by
+	// install has never read without the .dbf (S14 R4); its text table is served by
 	// the name its lookup takes next (medmssn.bin, which the manifest brings), no row of its own;
 	// the tile placement, which every shipped mission has, is not found.
 	ImportChoice bare = mission;
@@ -1039,7 +1040,7 @@ static int test_plan_mission_closure() {
 	return 0;
 }
 
-// A symbol only the install's copy of a file the project holds defines (review F6): the project's
+// A symbol only the install's copy of a file the project holds defines (S14 R4): the project's
 // edited items.def lacks the item the mission places; the import keeps the project's file, so the
 // install's is not brought, and the plan says so (shadowed), neither silent nor undefined.
 static int test_plan_shadowed() {

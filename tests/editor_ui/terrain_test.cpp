@@ -716,7 +716,7 @@ void test_painting_feedback() {
 	run.take();
 	legend = MissionRun::drawn_window("/overlay_legend_");
 	CHECK(legend && legend->Scroll.y > scrolled, "the legend scrolled to the brush's class");
-	// A class in the middle after the last: scrolled back up to it, short of the legend's top (the review's m5).
+	// A class in the middle after the last: scrolled back up to it, short of the legend's top.
 	const float bottom = legend ? legend->Scroll.y : 0.0f;
 	run.session.handle(request::set_workspace(R"({"terrain_brush": {"surface": 10}})"));
 	run.settle();
@@ -724,8 +724,8 @@ void test_painting_feedback() {
 	legend = MissionRun::drawn_window("/overlay_legend_");
 	const float middle = legend ? legend->Scroll.y : 0.0f;
 	CHECK(legend && middle < bottom && middle > 0.0f, "the legend scrolled back to a class in its middle");
-	// Erase: the row of what the brush lays marked, class 1 (the game's default), never the brush's class (m3); the
-	// legend scrolled up to it.
+	// Erase: the row of what the brush lays marked, class 1 (the game's default), never the brush's
+	// class; the legend scrolled up to it.
 	run.session.handle(request::set_workspace(R"({"terrain_brush": {"erase": true}})"));
 	run.settle();
 	run.take();
@@ -742,7 +742,7 @@ void test_painting_feedback() {
 	run.session.handle(request::set_workspace(R"({"terrain_brush": {"erase": false}})"));
 	run.settle();
 	run.take();
-	// A drag over the panel reaches nothing under it: no stroke, the camera standing (m5).
+	// A drag over the panel reaches nothing under it: no stroke, the camera standing.
 	legend = MissionRun::drawn_window("/overlay_legend_");
 	CHECK(legend != nullptr, "the legend drawn");
 	if (legend) {

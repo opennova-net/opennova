@@ -254,7 +254,7 @@ static int test_new_status_validate() {
 	}
 
 	// Generic native file import uses the same core; a file the project holds already is kept as it
-	// is, whatever its bytes, unless --replace writes it over (review F2).
+	// is, whatever its bytes, unless --replace writes it over (S19, "The import a modder reads").
 	TEST_EXPECT(run({"import", root}) == 2);
 	const std::string source = dir.file("source.txt");
 	TEST_EXPECT(editor_test::write_text(source, "imported file"));
@@ -694,7 +694,7 @@ static int test_one_game_install() {
 	TEST_EXPECT(editor_test::write_text(install + "/menumus.sbf", "music") && editor_test::write_text(install + "/game.cfg", "cfg"));
 	TEST_EXPECT(run_usage(dir.file("err.txt"), {"import", root, "--all", "--entry", "arial99.fnt"}, text) == 2 &&
 	            text.find("--all") != std::string::npos);
-	// Every file and a walk at once: a usage error, never a flag left unread (review F14).
+	// Every file and a walk at once: a usage error, never a flag left unread (S14 R4).
 	TEST_EXPECT(run_usage(dir.file("err.txt"), {"import", root, "--all", "--with-dependencies"}, text) == 2 &&
 	            text.find("--with-dependencies") != std::string::npos);
 	TEST_EXPECT(run_capture(capture, {"import", root, "--all", "--dry-run", "--rows"}, text) == 0);

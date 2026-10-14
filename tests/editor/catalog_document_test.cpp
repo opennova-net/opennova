@@ -149,10 +149,10 @@ static int collections() {
 	def_free_weapons(&parsed);
 	return 0;
 }
-// The review's Y2 through the catalog: a sight duplicated in its weapon is a record of its own (its copy
-// names none of the file's layout, prepare_record: written in the writer's form after its original), and
-// one moved follows the weapon's order; the comment above each stands with it, and no record is written
-// in the writer's form (the save says nothing).
+// A weapon's nested rows through the catalog: a sight duplicated in its weapon is a record of its
+// own (its copy names none of the file's layout, prepare_record: written in the writer's form after
+// its original), and one moved follows the weapon's order; the comment above each stands with it,
+// and no record is written in the writer's form (the save says nothing).
 static int nested_rows_follow_the_record() {
 	editor_test::TempProjectDir dir("opennova_catalog_nested_rows");
 	// The text as the file holds it, CR LF (editor_test::crlf: the one break the def walk splits at).
@@ -662,9 +662,9 @@ static int duplicates_apart() {
 	TEST_EXPECT(catalog_copy_name(weapon_kind, weapon_name, {}, &bare) == "WPN_ABCDEFGHIJKLMNOPQRSTUVWXYZ_2");
 	TEST_EXPECT(catalog_copy_name(weapon_kind, weapon_name, {}, &based) == "WPN_ABCDEFGHIJKLMNOPQRSTUVWXY_2");
 
-	// A name of the game's code page cut by whole characters (the review's W2: by bytes it could end inside
-	// one, the name then refused and the copy keeping its original's): 45 characters, two of them two
-	// UTF-8 bytes, kept to 39 before " (copy)". An id other files name is no copy's (W9): with 100001 and
+	// A name of the game's code page cut by whole characters (by bytes it could end inside one, the
+	// name then refused and the copy keeping its original's): 45 characters, two of them two UTF-8
+	// bytes, kept to 39 before " (copy)". An id other files name is no copy's: with 100001 and
 	// 100002 named elsewhere, the copy takes 100003.
 	TEST_EXPECT(editor_test::write_text(dir.file("items.def"),
 	                                    "begin \"V\xE9hicule blind\xE9 de transport de troupes lourd\"\nid 100000\ntype vehicle\nend\n"));
@@ -848,7 +848,7 @@ static int code_page_names() {
 	return 0;
 }
 
-// An ordinary edit through the session keeps the file's order (the review's W5): a weapon's switchcategory
+// An ordinary edit through the session keeps the file's order: a weapon's switchcategory
 // unticked (its line's present tick cleared) and saved is that one line gone, every other line as the save
 // before it wrote it, no record reordered and no note.
 static int unticked_line_saves_alone() {

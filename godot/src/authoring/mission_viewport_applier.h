@@ -257,7 +257,7 @@ private:
 	// (drop_pending_), the waves the Listen decoded read again.
 	void mount_(const opennova::editor::SessionView &view);
 	// The entities' units after the layers' (whose own plan carries a terrain load or build in
-	// flight, m6).
+	// flight).
 	void plan_(Build &build, const opennova::editor::MissionViewport &mission);
 	std::vector<Unit> model_units_(
 			const std::vector<const opennova::editor::MissionEntityMark *> &entities);

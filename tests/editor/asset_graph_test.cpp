@@ -2033,7 +2033,7 @@ static int test_model_texture_references() {
 	// No other texture takes a material chunk: a particle naming field.nq8 misses it.
 	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Texture, "field.nq8") == ReferenceStatus::Missing);
 	// A file of the name that holds no chunk is of no kind the game knows: it serves no row, and the
-	// game opening it reads no chunk, which is its own finding (review F3: reference.wrong_kind), not a
+	// game opening it reads no chunk, which is its own finding (reference.wrong_kind), not a
 	// name the project lacks; an error that gates where a texture's missing name does, nowhere (the
 	// build follows retail, S14).
 	TEST_EXPECT(editor_test::write_text(root + "/textures/field.nq8", "x"));

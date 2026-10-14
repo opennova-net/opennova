@@ -434,7 +434,7 @@ static int test_columns() {
 	TEST_EXPECT(!diagnostics_block_build({ make_finding(CoreFinding::ReferenceMissing, DiagnosticSeverity::Error, "missing") }) &&
 	            diagnostics_block_build({ make_finding(CoreFinding::ReferenceMissing, DiagnosticSeverity::Error, "missing"),
 	                                      make_finding(CoreFinding::DocumentStale, DiagnosticSeverity::Error, "stale") }));
-	// Review F3: where its kind's row cites the game's refusal (gates_when_missing, the terrain's), a
+	// Where its kind's row cites the game's refusal (gates_when_missing, the terrain's), a
 	// missing reference gates; one of any other kind does not. A file of the name of the wrong kind
 	// is its own code, gating where its kind's missing name does (its loader finds nothing it loads).
 	Diagnostic terrain = make_finding(CoreFinding::ReferenceMissing, DiagnosticSeverity::Error, "no terrain");

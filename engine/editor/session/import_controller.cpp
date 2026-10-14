@@ -104,7 +104,7 @@ void ImportController::plan(const EditorRequest &request) {
 void ImportController::preview_install(const EditorRequest &request) {
 	if (!view_.project.open) return;
 	// Every file chosen takes no names and no walk: a request asking for either too is refused, not
-	// served in part (review F14).
+	// served in part (`import.request`, S14 R4).
 	if (request.all && (!request.names.empty() || request.with_dependencies))
 		return core_.refuse_now(CoreFinding::ImportRequest,
 		                        "Every file of the game install is chosen with no walk: \"all\" takes neither \"names\" nor "
@@ -124,7 +124,7 @@ void ImportController::preview_install(const EditorRequest &request) {
 	// not have is a finding (unless the install itself is the finding). Without, every
 	// file is listed to choose from.
 	std::vector<ImportChoice> named;
-	std::map<std::string, size_t> by_name; // the install's files by name, the first of each, once (review F7)
+	std::map<std::string, size_t> by_name; // the install's files by name, the first of each, once
 	if (!request.names.empty())
 		for (size_t i = 0; i < sources.size(); ++i) by_name.emplace(pff::normalized_logical_name(sources[i].name()), i);
 	for (const std::string &name : request.names) {
@@ -842,8 +842,8 @@ void ImportController::set_dependencies(bool with_dependencies) {
 // the open documents whose files it replaced.
 void ImportController::import_files(const EditorRequest &request) {
 	if (!view_.project.open) return;
-	// An import of nothing named and nothing planned would plan again only to close the dialog: refused
-	// (review F14).
+	// An import of nothing named and nothing planned would plan again only to close the dialog:
+	// refused.
 	if (!request.planned && request.imports.empty())
 		return core_.refuse_now(CoreFinding::ImportRequest,
 		                        "An import names its files (\"imports\") or takes the open preview's plan (\"planned\"): "
@@ -887,7 +887,7 @@ bool ImportController::sources_of(const EditorRequest &request, std::vector<Impo
 		return false;
 	}
 	// The plan it means, the one shown: a plan made since (a dependency setting, a choice, the files changed) is
-	// another, its checks of other rows, and the import is refused rather than retargeted (review X7).
+	// another, its checks of other rows, and the import is refused rather than retargeted.
 	if (request.plan != preview.plan_serial) {
 		core_.report(make_finding(CoreFinding::ImportNotPlanned, DiagnosticSeverity::Error,
 		                          request.plan == 0
@@ -902,7 +902,7 @@ bool ImportController::sources_of(const EditorRequest &request, std::vector<Impo
 	}
 	// The rows the dialog's checks take, as its Import takes them (the workspace's checks: a new plan's are the
 	// plan's own, then what the person or a client checked and unchecked; the MCP gaps lane): an unchecked row is
-	// never taken, whatever `replace` says (review X1); a checked row the project holds replaces it (X2); a row
+	// never taken, whatever `replace` says; a checked row the project holds replaces it; a row
 	// the project cannot take is left out, as the command line leaves it.
 	const std::vector<bool> &held = view_.workspace.import.checked;
 	const std::vector<bool> checks = held.size() == preview.plan->rows.size()
@@ -1029,7 +1029,7 @@ void ImportController::unsaved_files(const EditorRequest &request, std::vector<s
 	}
 	if (!replace) return;
 	// A row the request takes, which the plan finds: where its file lands. The places written, gathered once
-	// over the rows (a whole install's nine thousand, each source looked up in log time: review F7), then each
+	// over the rows (a whole install's nine thousand, each source looked up in log time), then each
 	// unsaved document's.
 	const auto writes = [&asked](const ImportPlanRow &row) {
 		return row.state != ImportPlanRow::State::NotFound && asked.count(row.source) > 0;

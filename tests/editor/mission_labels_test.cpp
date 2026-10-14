@@ -215,7 +215,7 @@ int test_document_words() {
 	TEST_EXPECT(mission_event_display(m, 8, nullptr).text == "No event 9 (the mission has 2 events)");
 	TEST_EXPECT(mission_group_display(m, 70).text == "No group 70 (the mission has 64)" && mission_group_display(m, 0).text == "No group");
 	TEST_EXPECT(mission_marker_display(m, 40, nullptr).text == "No marker 40 (the mission has 5 markers)");
-	// What names a record, kept while the document and the names stand (S15 review m11: the Inspector asks
+	// What names a record, kept while the document and the names stand (S15: the Inspector asks
 	// every frame).
 	MissionUsesCache uses;
 	const DocumentMissionNames plain(m);
@@ -411,7 +411,7 @@ int test_session_words() {
 	            !entity.scope.empty());
 	TEST_EXPECT(same(shown(*document, trigger, "param1", &names).text, "The player"));
 	// Its picker offers the player by name, first, and the entities after; the wire's reference_choices
-	// the same (S15 review m12).
+	// the same (S15).
 	const std::vector<ReferenceChoice> offered = picker_choices(view.findings.graph.get(), *document, trigger, entity, &names);
 	TEST_EXPECT(offered.size() > 1 && offered[0].name == "10000" && offered[0].label == "The player" &&
 	            offered[0].kind == ReferenceKind::MissionEntity);

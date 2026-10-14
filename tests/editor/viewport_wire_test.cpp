@@ -1103,7 +1103,7 @@ static int test_viewport_click() {
 	            selection.records[0] == wired.other);
 	TEST_EXPECT(done(click(menu, R"("at": [750, 550])")) && selection.primary == named(*wired.menu, "MAIN"));
 	// A click on the selected window's resize handle (just past its corner, over MAIN) is the canvas's resize press:
-	// nothing selected (review X21).
+	// nothing selected.
 	session.handle(request::select_record(menu, wired.box));
 	TEST_EXPECT(done(click(menu, R"("at": [301, 201])")) && selection.primary == wired.box && selection.records.size() == 1);
 	TEST_EXPECT(done(click(menu, R"("at": [750, 550])")) && selection.primary == named(*wired.menu, "MAIN"));
@@ -1165,11 +1165,12 @@ static int test_viewport_click() {
 	return 0;
 }
 
-// A mission's click is its canvas's own (review X5: ViewportModel::click drives MissionCanvas): under the Place
-// tool a placement where it is (the drop the canvas's release raises, one undo step), under the Area tool nothing
-// (its box is a drag's), under the Path tool with no path picked nothing; under Select a tap on the primary's yaw
-// handle (no mark under it) leaves the selection as it is, and a click on bare ground while another document's
-// record is selected leaves that selection (the canvas empties the mission's own alone).
+// A mission's click is its canvas's own (ViewportModel::click drives MissionCanvas): under the
+// Place tool a placement where it is (the drop the canvas's release raises, one undo step), under
+// the Area tool nothing (its box is a drag's), under the Path tool with no path picked nothing;
+// under Select a tap on the primary's yaw handle (no mark under it) leaves the selection as it is,
+// and a click on bare ground while another document's record is selected leaves that selection (the
+// canvas empties the mission's own alone).
 static int test_mission_click() {
 	NoProcess platform;
 	Wired wired("opennova_editor_viewport_wire_mission_click", platform, true);
@@ -1259,7 +1260,7 @@ static int test_canvas_options() {
 	TEST_EXPECT(!done(set(menu, "menu", R"({"zoom": "huge"})")) && !done(set(menu, "menu", R"({"scale": 40})")) &&
 	            viewport->show().scale == 2.0f);
 	// What the device would do next, once what it was asked before is taken: a canvas option asks nothing of it
-	// (Keep: no Rebuild, no Update; review X23).
+	// (Keep: no Rebuild, no Update).
 	const auto next_action = [&session](const std::string &path, ViewportKind kind) {
 		session.viewports().follow_one(session.view(), path, kind);
 		return session.viewports().take_action(path, kind);

@@ -1584,11 +1584,12 @@ int test_mission_canvas() {
 	return 0;
 }
 
-// The polish's picking after its review (H1): a press takes what the pointer is over. With a device to
-// say, a press on an entity's drawn surface away from its glyph takes it (a drag moves it alone, Alt
-// copies it), and a press on the ground is the marquee, Alt's orbit and a click's clear, as before. With
-// no device to say, a press off a glyph takes nothing (a drag inside a pump's sphere is a marquee, never
-// a move) while a click there selects the pump by its sphere, and the hint offers no drag of it.
+// The polish's picking (S15, "Picking what the pointer is over"): a press takes what the pointer is
+// over. With a device to say, a press on an entity's drawn surface away from its glyph takes it (a
+// drag moves it alone, Alt copies it), and a press on the ground is the marquee, Alt's orbit and a
+// click's clear, as before. With no device to say, a press off a glyph takes nothing (a drag inside
+// a pump's sphere is a marquee, never a move) while a click there selects the pump by its sphere,
+// and the hint offers no drag of it.
 int test_mission_surface_picks() {
 	MissionRig rig;
 	GroundDevice device;
@@ -1988,7 +1989,7 @@ int test_mission_place() {
 	return 0;
 }
 
-// The primary's handles (S14 review m10, m1): a tap on its yaw handle (no travel, no mark under it)
+// The primary's handles (S14): a tap on its yaw handle (no travel, no mark under it)
 // changes nothing, the selection and its handles standing; with the Turn snap set to 90 a drag of the
 // yaw handle round to the other side lands the yaw on a multiple of 90.
 int test_mission_handle_tap_and_turn() {
@@ -2125,7 +2126,7 @@ int test_mission_hint_words() {
 	return 0;
 }
 
-// Over a device that answers a ground (z = 3 + x / 10; S14 review M2): a move of an entity with
+// Over a device that answers a ground (z = 3 + x / 10; S14): a move of an entity with
 // Stick keeps its height over that ground where it goes, the arrows' nudge too, and an area's mark
 // stands on the ground at its middle (not at its z_min), where a click selects it.
 int test_mission_ground_on_canvas() {

@@ -1519,7 +1519,7 @@ static int test_blocking() {
 	return 0;
 }
 
-// A Fix all over the required files served whole (the review's M4): where the game install has some (here
+// A Fix all over the required files served whole: where the game install has some (here
 // keyhelp.bin) and lacks the rest, the group's first fixes are an import of the one and placeholders of the
 // others. Raised in one frame, as the Problems window's drain raises them: the placeholders first (made at
 // once), then the import's preview (an operation over the project's files); neither is refused as busy.
@@ -1563,7 +1563,7 @@ static int test_fix_all_served_whole() {
 	return 0;
 }
 
-// What only the build's plan refuses (the review's M3): a name no archive stores is a Problems row before any
+// What only the build's plan refuses: a name no archive stores is a Problems row before any
 // build, marked "Blocks the build" like the gate's; the refusal's count, the rows' blocking count and Show
 // them agree; a refused build adds no second row of it; the headline says whose refusals they are. An
 // archive in the project is a row too, the build leaving it out, blocking nothing (a quality rule refuses
@@ -1617,17 +1617,17 @@ static int test_plan_refusals_are_rows() {
 	TEST_EXPECT(std::find(result.refusals.begin(), result.refusals.end(),
 	                      "a_name_far_too_long.wac's name is too long for an archive") != result.refusals.end());
 	for (const std::string &line : result.refusals) TEST_EXPECT(line.find("extra.pff") == std::string::npos);
-	// The menu bar's words, from the build's own report whatever the status line says since (the review's L5).
+	// The menu bar's words, from the build's own report whatever the status line says since.
 	TEST_EXPECT(refused_words(*v.activity.last_build) ==
 	            "Refused: " + result.refusals.front() + " (and 5 more).");
-	// A name keeps its case in a refusal's words; a sentence's opener is lowered (the review's L6).
+	// A name keeps its case in a refusal's words; a sentence's opener is lowered.
 	Diagnostic upper = editor_test::finding_of(DiagnosticSeverity::Error, "build.name_unstorable", "x", "A_NAME_FAR_TOO_LONG.WAC");
 	TEST_EXPECT(blocker_words(upper) == "A_NAME_FAR_TOO_LONG.WAC's name is too long for an archive");
 	Diagnostic named = editor_test::finding_of(DiagnosticSeverity::Error, "document.parse", "MAIN.MNU cannot be read.", "main.mnu");
 	TEST_EXPECT(blocker_words(named) == "MAIN.MNU cannot be read");
 	named.message = "The file cannot be read.";
 	TEST_EXPECT(blocker_words(named) == "the file cannot be read");
-	// A fatal table of another kind: read without a check, not refused with a message (the review's L1).
+	// A fatal table of another kind: read without a check, not refused with a message.
 	Diagnostic wrong = editor_test::finding_of(DiagnosticSeverity::Error, "requirement.wrong_kind", "x", "strings/gametext.bin");
 	wrong.subject = RequirementSubject{"gametext", "gametext.bin"};
 	TEST_EXPECT(blocker_words(wrong) == "gametext.bin is not the kind of file the game reads there: the game reads it as one "

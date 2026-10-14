@@ -291,7 +291,7 @@ void DocumentWindow::draw_find(const Document &document) {
 		ImGui::SetKeyboardFocusHere();
 		find_.focus = false;
 	}
-	// Escape closes the bar, the text typed kept (the session's too: review X14): the text box, which has the
+	// Escape closes the bar, the text typed kept (the session's too): the text box, which has the
 	// keyboard, would put back the text it had when it took it.
 	char typed[sizeof(find_.text.text)];
 	std::memcpy(typed, find_.text.text, sizeof(typed));

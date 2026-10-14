@@ -599,7 +599,7 @@ void test_view_prompt_outlives_its_tab() {
 	ui.away();
 	ui.drain();
 	// Remove screen... in the active menu's tab: the prompt open, nothing raised yet.
-	// The prompt is its menu's, known by its path (review X26: two menus' prompts never one window).
+	// The prompt is its menu's, known by its path (two menus' prompts never one window).
 	const std::string prompt = "Remove screen?##" + a->path();
 	const auto ask = [&ui, &prompt](const std::shared_ptr<MnuDocument> &menu) {
 		ui.activate(item_id(document_tab_id(menu->path()), {"Remove screen..."}));
@@ -1499,7 +1499,7 @@ void test_files_window() {
 	CHECK(one(requests, EditorRequestKind::CreateFile) && requests[0].path == "first.bms" && requests[0].file_kind == "mission" &&
 	              requests[0].values == Values({{"environment", "day.env"}, {"terrain", "island.trn"}, {"title", "The first"}}) &&
 	              !modal_open("New file"),
-	      "Create: the mission's name and its values by their tokens, sorted as the wire reads them (review F10)");
+	      "Create: the mission's name and its values by their tokens, sorted as the wire reads them");
 
 	// S20: New > Terrain from images... asks a terrain's name, its images and its numbers in the same
 	// prompt; Create waits for the heightmap and the colour map, then raises new_terrain with the values by
@@ -1554,12 +1554,12 @@ bool same_line(const std::string &text, const char *first, const char *second) {
 // unchecked. The check box raises the setting's request. A listing's choices raise PlanImport
 // with the files chosen; a changed plan says so; a file with unsaved edits holds nothing, and
 // the unsaved prompt an Import raises takes the dialog's place until it is answered (S12).
-// The import dialog's group checks (the review of the project lane, M2, L7, L8, L9). A plan of 22 chosen
-// textures and none found goes by kind: its Texture line's check leaves out every file, the chosen one the
-// project cannot take too (L8), and takes back the files it can, never the one the project has already,
-// whose replace no one asked for (M2: Import sends no replace). A tree of two chosen menus naming one font:
-// the font listed under both, leaving out a.mnu's Font keeps it while b.mnu, checked, names it (L7); Uncheck
-// shown leaves the rows of a closed line as they are (L9).
+// The import dialog's group checks (S19, "The import a modder reads"). A plan of 22 chosen textures
+// and none found goes by kind: its Texture line's check leaves out every file, the chosen one the
+// project cannot take too, and takes back the files it can, never the one the project has already,
+// whose replace no one asked for (Import sends no replace). A tree of two chosen menus naming one
+// font: the font listed under both, leaving out a.mnu's Font keeps it while b.mnu, checked, names
+// it; Uncheck shown leaves the rows of a closed line as they are.
 void test_import_dialog_groups() {
 	using State = ImportPlanRow::State;
 	const auto row = [](State state, const std::string &name, AssetKind kind) {
@@ -1598,7 +1598,7 @@ void test_import_dialog_groups() {
 		ui.activate(textures);
 		ui.away();
 		CHECK(logged_frame(ui).find("Import 0 files") != std::string::npos,
-		      "the line's uncheck: every file left out, the chosen one the project cannot take too (L8)");
+		      "the line's uncheck: every file left out, the chosen one the project cannot take too");
 		ui.activate(textures);
 		ui.away();
 		CHECK(logged_frame(ui).find("Import 20 files") != std::string::npos,
@@ -1635,7 +1635,7 @@ void test_import_dialog_groups() {
 	std::string text = logged_frame(ui);
 	CHECK(in_order(text, {"a.mnu", "Font (1 file)", "shared.fnt", "Texture (1 file)", "logo.tga", "b.mnu",
 	                      "Font (0 files, 1 more another file brings)", "shared.fnt", "named here too; it comes with a.mnu"}),
-	      "the font b.mnu names too, under b.mnu as well (L7)");
+	      "the font b.mnu names too, under b.mnu as well");
 	const auto group_item = [](size_t group, const char *label) {
 		return item_id(pushed(item_id(import_body_id(), {"import_plan"}), int(4 + group)), {label});
 	};
@@ -1646,7 +1646,7 @@ void test_import_dialog_groups() {
 	ui.activate(group_item(2, "##group"));
 	ui.away();
 	CHECK(logged_frame(ui).find("Import 2 files") != std::string::npos, "b.mnu left out too: the font goes with the line");
-	// a.mnu's Texture line closed: Uncheck shown leaves its logo as it is (L9).
+	// a.mnu's Texture line closed: Uncheck shown leaves its logo as it is.
 	ui.activate(group_item(3, "##open"));
 	ui.away();
 	ui.activate(item_id(import_body_id(), {"Uncheck shown"}));
@@ -1893,9 +1893,9 @@ void test_import_dialog_problem_root() {
 	      "Import: the menu alone");
 }
 
-// ADR 0046 S14 (review F2): a chosen file the project holds already is held, unchecked by default,
-// and the import takes the rest without asking to replace; the row checked alone is replaced (the
-// request then replaces), and Replace existing files checks every held row.
+// ADR 0046 S19, "The import a modder reads": a chosen file the project holds already is held,
+// unchecked by default, and the import takes the rest without asking to replace; the row checked
+// alone is replaced (the request then replaces), and Replace existing files checks every held row.
 void test_import_dialog_held_rows() {
 	SessionView v = seeded_view();
 	DialogsView::ImportPreview &preview = v.dialogs.import_preview;
@@ -2474,7 +2474,7 @@ void test_mission_view_input() {
 	      "a change of Team: one batch over every selected record, ended, applied");
 }
 
-// The mission's view over a device that answers a ground (z = 3 + x / 10; S14 review M2, M8), the
+// The mission's view over a device that answers a ground (z = 3 + x / 10; S14), the
 // session's viewports given the same devices: the canvas reads the device from its first frame, so a
 // drag of an entity with Stick on (the default) keeps its height over that ground where it goes, and
 // an area's mark stands on the ground, where a click selects it; the toolbar's Ground, an entity

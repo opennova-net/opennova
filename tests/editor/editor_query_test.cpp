@@ -349,7 +349,7 @@ static int test_paging() {
 // project open it is refused; a new project lacking its required files is blocked by those the game
 // refuses to boot without (the manifest's fatal rows); with them made nothing blocks it, a missing
 // reference and a file of the name of the wrong kind included (S14, the build follows retail: errors
-// that are listed and gate no build) but for a kind whose row cites the game's refusal (review F3: a
+// that are listed and gate no build) but for a kind whose row cites the game's refusal (a
 // mission's terrain); an archive in the project blocks it by
 // the build's own check of the files, which no Problems row shows; and the build then refused, as
 // the gate said.
@@ -417,7 +417,7 @@ static int test_build_gate() {
 	session.run_operations();
 	TEST_EXPECT(session.view().activity.last_operation.end == OperationEnd::Done && session.view().activity.last_build->ok &&
 			missing_references() == 1);
-	// Review F3: a file of the name the game opens that it does not load as the kind (the particle's
+	// A file of the name the game opens that it does not load as the kind (the particle's
 	// graphic naming the project's text file) is its own finding; the loader finds nothing it loads
 	// there, as for a missing name, so it gates only where its kind's missing name does (the gate
 	// follows retail): a texture's does not, and it is listed.
@@ -488,7 +488,7 @@ static int test_build_gate() {
 		archives += d.code() == "build.archive_in_project" && d.severity == DiagnosticSeverity::Warning ? 1 : 0;
 	TEST_EXPECT(!gate.get_bool("blocked", true) && archives == 1);
 	// A name no archive stores: refused by the build's own check, a Problems row before any build (the
-	// review's M3: the refusal's count, Problems' and Show them agree).
+	// refusal's count, Problems' and Show them agree).
 	TEST_EXPECT(editor_test::write_text(dir.file("project/scripts/a_name_far_too_long.wac"), "// a script\r\n"));
 	session.handle(request::rescan());
 	session.run_operations();

@@ -949,7 +949,7 @@ static int test_apply_retail_mission_closure() {
 		}
 		// The catalogs and the terrain, through the mission; no symbol kind left unfollowed.
 		TEST_EXPECT(row_called("items.def") && row_called("weapon.def") && row_called("ammo.def"));
-		// The HUD's fixed names a running mission opens (review F4): the compass ring, the map's
+		// The HUD's fixed names a running mission opens (S14 R4): the compass ring, the map's
 		// icons and the first crosshair style, each for the game.
 		for (const char *fixed : {"compring.tga", "TSDicon.tga", "cross01.tga"}) {
 			const ImportPlanRow *row = row_called(fixed);
@@ -1040,7 +1040,7 @@ static int test_apply_retail_mission_closure() {
 	return 0;
 }
 
-// ADR 0046 S14 (review F1): a mission found loose in a game's folder sits beside the player's and
+// ADR 0046 S14 R4: a mission found loose in a game's folder sits beside the player's and
 // this machine's own files. Planned with what it needs, a resource the manifest names comes from
 // that folder and none of the player's files does (every row of player_files(), a save, a
 // screenshot); each picked by hand is a row the project cannot take, the import refuses it, and the

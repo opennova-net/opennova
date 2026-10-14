@@ -1223,7 +1223,7 @@ static int test_clip_preview() {
 	            out.raised[0].path == "anims/bend.bad" &&
 	            out.raised[0].address == NodeAddress({clip_row->id, node_kind(AnimationKind::Bone), clip_row->collections[0][1]}));
 	// The wire's click (the command "click": ViewportModel::click drives the canvas itself) makes the same request
-	// there, the bone in the clip; a Shift or a Ctrl click is none of the model canvas's, refused (review X6).
+	// there, the bone in the clip; a Shift or a Ctrl click is none of the model canvas's, refused.
 	{
 		RecordedRequests clicked, added;
 		std::string click_error;

@@ -268,7 +268,7 @@ int test_references() {
 	TEST_EXPECT(sidecar(ReferenceKind::TilePlacement, "synth_logic.til", "", false, "tiles"));
 	TEST_EXPECT(sidecar(ReferenceKind::DialogBank, "synth_logic.dbf", "", true, "dialog"));
 	TEST_EXPECT(sidecar(ReferenceKind::SoundBank, "synth_logic.lwf", "synth_logic.pwf", false, "dialog_sounds"));
-	// The dialog's sounds read only beside its .dbf (review F5); no other row needs one.
+	// The dialog's sounds read only beside its .dbf (S14 R4); no other row needs one.
 	for (const GraphEdge &e : extracted.edges)
 		TEST_EXPECT(e.needs == (e.field == "dialog_sounds" && e.record.empty() ? "synth_logic.dbf" : ""));
 	TEST_EXPECT(count_edges(extracted, ReferenceKind::DialogBank) == 1);
@@ -1495,7 +1495,7 @@ int test_rename_companions() {
 }
 
 // A mission named like a game sound bank (menu.bms beside the menus' menu.lwf), with no dialog bank:
-// the game reads <stem>.lwf only beside <stem>.dbf (review F5), so the mission's dialog sounds name no
+// the game reads <stem>.lwf only beside <stem>.dbf (S14 R4), so the mission's dialog sounds name no
 // file: the bank is not the mission's (no use of it, no companion of a rename); with a .dbf it is.
 int test_mission_named_like_a_bank() {
 	editor_test::TempProjectDir dir("opennova_mission_named_like_a_bank");
@@ -1547,7 +1547,7 @@ int test_mission_named_like_a_bank() {
 }
 
 // A mission named with an inner dot finds its files by its name to the first dot, as the game's
-// readers cut it (review F8): op.v2.bms's script is op.wac, which no note calls unused, a rename takes
+// readers cut it (S14 R4): op.v2.bms's script is op.wac, which no note calls unused, a rename takes
 // it, and Play mission from op.wac starts op.v2.bms.
 int test_mission_first_dot() {
 	editor_test::TempProjectDir dir("opennova_mission_first_dot");

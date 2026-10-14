@@ -1503,7 +1503,7 @@ void test_preview_several_windows_ui() {
 void test_ui_kit() {
 	NullBackend backend;
 	ImGui::NewFrame();
-	// A path cut in its middle, its start and its end kept (the review's L9: the end tells two folders apart).
+	// A path cut in its middle, its start and its end kept (the end tells two folders apart).
 	{
 		const std::string path = "C:/Users/someone/Documents/My Mods/Builds/For Players";
 		const float narrow = ImGui::CalcTextSize("C:/Users/some...For Players").x;
@@ -1698,9 +1698,9 @@ void test_problems_window_ui() {
 	ui.activate(item_id(window, {"Whole project###scope_project"}));
 	CHECK(listed(ui).size() == 5, "the project's");
 
-	// What a build is refused for, shown whatever hid it (the review's M7): the active file's scope (a required
-	// file's finding names no file) and the errors hidden; "Show them" (the build result's, the menu bar's) lists
-	// every refusal, and turning "Blocks the build" off puts the filters back.
+	// What a build is refused for, shown whatever hid it: the active file's scope (a required
+	// file's finding names no file) and the errors hidden; "Show them" (the build result's, the
+	// menu bar's) lists every refusal, and turning "Blocks the build" off puts the filters back.
 	ui.activate(item_id(window, {"a.mnu###scope_active"}));
 	ui.activate(item_id(window, {"###errors"}));
 	CHECK(listed(ui) == List({"Bravo:"}), "the active file's, errors hidden");
@@ -2874,7 +2874,7 @@ void test_output_folded() {
 	CHECK(text.find("Imported 2 files (1.0 KB): Menu 2.  (2 lines)") != std::string::npos && text.find("Imported a.mnu") == std::string::npos,
 	      "the import's one line, its files folded");
 	CHECK(ui.windows.pending_requests() == 0, "drawing raises nothing");
-	// Its rows made again only when the log or the lines opened move, not every frame (the review's L10).
+	// Its rows made again only when the log or the lines opened move, not every frame.
 	const auto *output = dynamic_cast<const OutputWindow *>(find_window(ui.windows.pass(), "Output"));
 	CHECK(output != nullptr, "the Output window");
 	if (!output) return;

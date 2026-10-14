@@ -93,8 +93,8 @@ int test_routing() {
 	TEST_EXPECT(!terrain_map_texel(surface, 2000.0, 2000.0, x, y));
 	const TerrainMapTarget colour = terrain_map_target(trn, TerrainPlane::Colour, 1024, 1024);
 	TEST_EXPECT(!colour.shifted && colour.step() == 1.0 && terrain_map_texel(colour, 100.0, 100.0, x, y) && x == 612 && y == 412);
-	// A blend map wider than 1024 (S25, the review's m7): a unit of the atlas spans two of its texels, each reached; a
-	// disc of 2 m reaches every texel under it, none skipped.
+	// A blend map wider than 1024 (S25): a unit of the atlas spans two of its texels, each reached;
+	// a disc of 2 m reaches every texel under it, none skipped.
 	const TerrainMapTarget fine = terrain_map_target(trn, TerrainPlane::Blend, 2048, 2048);
 	TEST_EXPECT(fine.step() == 0.5 && terrain_map_texel(fine, 100.25, 100.0, x, y) && x == 1224 &&
 	            terrain_map_texel(fine, 100.75, 100.0, x, y) && x == 1225);
@@ -228,8 +228,8 @@ int test_strokes() {
 		for (const EditorRequest &each : out.requests) session.handle(each);
 		TEST_EXPECT(v.workspace.terrain_brush.colour == 0xFF2000);
 	}
-	// Erase (the review's m11): the game's default in place of the brush's value: the colour map's texel as last saved,
-	// the surface map's class 1, the foliage map's code 0.
+	// Erase: the game's default in place of the brush's value: the colour map's texel as last
+	// saved, the surface map's class 1, the foliage map's code 0.
 	ask.brush.erase = true;
 	ask.brush_named = kBrushTool | kBrushColour | kBrushStrength | kBrushRadius | kBrushErase;
 	session.handle(request::terrain_stroke(m, ask));

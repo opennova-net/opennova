@@ -585,7 +585,7 @@ static int test_item_id_sent_as_a_number() {
 	return 0;
 }
 
-// The files written together (review 2): items.def replaced, then weapon.def refused (a
+// The files written together: items.def replaced, then weapon.def refused (a
 // write-protected file; here the replace step fails it). items.def gets its bytes back, weapon.def
 // keeps its own, no written text is left beside either, and the findings say nothing was renamed.
 // The same rename then goes through.
@@ -625,7 +625,7 @@ static int test_written_together() {
 	return 0;
 }
 
-// A name its definition would hold in another form (review 2): a stylesheet trims a variable's
+// A name its definition would hold in another form: a stylesheet trims a variable's
 // name, so " BIG " would define BIG while the menu's fonts were written % BIG %. Refused, naming
 // the stylesheet, and nothing is written; also where BIG is defined already.
 static int test_name_as_its_definition_holds_it() {
@@ -645,7 +645,7 @@ static int test_name_as_its_definition_holds_it() {
 	return 0;
 }
 
-// An open menu that would not write as it stands (review 2: a quote in a window's name): a rename
+// An open menu that would not write as it stands (a quote in a window's name): a rename
 // with a use in it is refused, naming it, not planned over the older file on disk. A rename of the
 // stylesheet's shadowed SHADOWED, whose name the menu's saved %SHADOWED% does not reach (brand.mns's
 // does), goes through without asking to save the menu.
@@ -681,7 +681,7 @@ static int test_open_menu_that_does_not_write() {
 	return 0;
 }
 
-// The way back of a rename (the UX round's problems lane; the review's H1 and L3): its true inverse, shown
+// The way back of a rename (S15, "Problems, build and play"): its true inverse, shown
 // before it commits. a.mnu's HOME renamed to START: a.mnu's own use and one of b.mnu's are its sites, and
 // b.mnu's other ACTION, which named START before the rename (nothing then), is none. The way back finds
 // START by itself and rewrites only what the rename wrote: that other ACTION still names START. Renamed

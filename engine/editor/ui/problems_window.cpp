@@ -193,7 +193,7 @@ const ProblemAnswer &ProblemsWindow::draw_filters(const SessionView &view) {
 	const ProblemAnswer &counts = list_.answer(view); // every finding's, whatever it shows
 	ProblemQuery &query = list_.query();
 	// The filters as they stand before the controls (the session's: an active file's scope with no document
-	// active stays as it is, lit as no active file, review X15): one the person changes goes to the workspace.
+	// active stays as it is, lit as no active file): one the person changes goes to the workspace.
 	const ProblemQuery before = query;
 	ui_kit::WrapRow row;
 	// Your project's own counts (S15: the game's own data's are counted apart, under their group).

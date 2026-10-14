@@ -825,7 +825,8 @@ int test_names_file() {
 	TEST_EXPECT(save_text(f, beside(&original), text) && text.find("Hold the bridge") != std::string::npos);
 	f.names_file_written(true, fingerprint_of(bytes_of(text)), std::string());
 	TEST_EXPECT(f.names_file().ours && !f.companion_unsaved() && f.names_file_overwrite() == 0);
-	// The original's bytes put back after the write it was for: another program's, left as they are (m6).
+	// The original's bytes put back after the write it was for: another program's, left as they
+	// are.
 	TEST_EXPECT(!f.names_file_due(beside(&original)) && f.names_left().outside);
 	// The value names its bytes as 16 hex digits (a number past 2^53 does not survive JSON); a number is refused.
 	uint64_t back = 0;
@@ -985,8 +986,8 @@ int test_names_file() {
 	TEST_EXPECT(b.names_file().found == MissionNamesFile::Found::Unreadable && found.size() == 1 &&
 	            found[0].code() == "mission.names_unmatched" && found[0].planned.size() == 1 &&
 	            found[0].planned[0].label == "Write it from the mission");
-	// One the file system would not read: listed, never taken for none (m5); a save that cannot read it either
-	// leaves it.
+	// One the file system would not read: listed, never taken for none; a save that cannot read it
+	// either leaves it.
 	document = read_with(bms_bytes, refused_by_disk("in use by another program"));
 	auto &l = dynamic_cast<MissionDocument &>(*document);
 	found = names_findings(l);
@@ -996,7 +997,7 @@ int test_names_file() {
 	TEST_EXPECT(!l.names_file_due(refused_by_disk("in use by another program")) && !l.names_left().unwritten.empty());
 
 	// A name the setters refuse (an event's past the dialog's 59 bytes, written by hand), and path 0's description
-	// (no path): left out of the mission, listed (m2).
+	// (no path): left out of the mission, listed.
 	std::string long_text = mis_text;
 	long_text.replace(long_text.find("Get to the bridge"), std::string("Get to the bridge").size(), std::string(60, 'n'));
 	long_text += "begin waypoint 0\r\n  description \"Nowhere\"\r\nend waypoint\r\n";
@@ -1065,7 +1066,7 @@ int test_names_file_entities() {
 	return 0;
 }
 
-// A locked entity's base (D-MIS-4; the #1121 review, M4): one locked in the editor takes the ground under it at its
+// A locked entity's base (D-MIS-4): one locked in the editor takes the ground under it at its
 // first save, and the write keeps it, so a save after a sculpt writes it again unchanged, never the new ground; a base
 // its .mis gives as 0 is a base, kept, never the ground's.
 int test_names_base_kept() {
@@ -1137,7 +1138,7 @@ int test_names_base_kept() {
 	return 0;
 }
 
-// Copy, Cut and Paste carry an event's name and an area's description (m1).
+// Copy, Cut and Paste carry an event's name and an area's description.
 int test_names_clipboard() {
 	const bms::File plain = names_mission();
 	std::string error;
@@ -1384,9 +1385,9 @@ int test_names_file_original() {
 	return 0;
 }
 
-// A mission whose file another program rewrote (M2): read again, its events no longer the .mis's, nothing taken and
-// nothing written over by a later save; two missions of one name in two folders each with the .mis beside it (m4);
-// move, duplicate and delete taking the .mis with the mission.
+// A mission whose file another program rewrote: read again, its events no longer the .mis's,
+// nothing taken and nothing written over by a later save; two missions of one name in two folders
+// each with the .mis beside it; move, duplicate and delete taking the .mis with the mission.
 int test_names_file_chores() {
 	NamesProject p("opennova_mission_names_chores");
 	const SessionView &v = p.view();
@@ -1438,7 +1439,8 @@ int test_names_file_chores() {
 	TEST_EXPECT(p.exists("missions/c/y.bms") && p.exists("missions/c/y.mis") && p.text("missions/c/y.mis") == mis_text);
 	p.run(request::delete_asset("missions/c/y.bms", true));
 	TEST_EXPECT(!p.exists("missions/c/y.bms") && !p.exists("missions/c/y.mis") && p.exists("missions/c/x.mis"));
-	// A mission at the top level has none beside it though a folder holds a .mis of its name (m4): never that one.
+	// A mission at the top level has none beside it though a folder holds a .mis of its name: never
+	// that one.
 	TEST_EXPECT(p.put("x.bms", bms_bytes));
 	p.run(request::rescan());
 	p.run(request::open_document("x.bms"));
@@ -1685,8 +1687,8 @@ int test_names_base_heights() {
 	return 0;
 }
 
-// The name fields and Duplicate's wording: path 0 takes no description (m3); a Duplicate refused by a .mis of the
-// copy's name says it would hold the copy's names, never that the game would take it (m8).
+// The name fields and Duplicate's wording: path 0 takes no description; a Duplicate refused by a
+// .mis of the copy's name says it would hold the copy's names, never that the game would take it.
 int test_names_refusals() {
 	std::unique_ptr<Document> document = open_mission();
 	TEST_EXPECT(document != nullptr);

@@ -311,9 +311,10 @@ func test_a_foliage_stroke_is_an_update_its_codes_in_place() -> void:
 	assert_eq(data.get_foliage_index_world(AT.x, -AT.y), before, "the code as the terrain loaded it")
 
 
-## The review's m14: what the device's terrain shows after a tile, a colour and a foliage edit each taken in place is
-## what it shows built anew over the same files. The header's terrain set away and undone is a Rebuild of the same
-## state; the pages resident under the corner (their composed output) and the foliage codes around it match.
+## S25: what the device's terrain shows after a tile, a colour and a foliage edit each taken in
+## place is what it shows built anew over the same files. The header's terrain set away and undone
+## is a Rebuild of the same state; the pages resident under the corner (their composed output) and
+## the foliage codes around it match.
 func test_in_place_edits_equal_a_rebuild() -> void:
 	if _app == null:
 		return

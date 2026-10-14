@@ -800,7 +800,7 @@ int test_session() {
 		TEST_EXPECT(rig.session.handle(request::set_viewport(rig.script, R"({"kind": "script", "options": {}})")) &&
 		            rig.session.outcome().done());
 		// Its device no longer showing it (a person's Escape, a click, a key: its report of the ask's serial) closes it
-		// too (review X24): the viewport's state moves, its option none.
+		// too: the viewport's state moves, its option none.
 		TEST_EXPECT(rig.session.handle(request::set_viewport(
 		                    rig.script, R"({"kind": "script", "options": {"assist": {"op": "complete", "line": 3, "column": 9}}})")));
 		rig.pump();

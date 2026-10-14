@@ -738,7 +738,7 @@ static int test_pick() {
 // The polish: an entity's bound sphere about its position (the model's GHDR radius by the item's SCALE,
 // padded, none without a collision block: mission_item_bound_radius, the game's entity+0), read once per
 // item while the graph and its files stand and again when a file it read moves (a SCALE edited in the
-// open catalog, the model written again: the review's M1), each file parsed once by a cache's facts; a
+// open catalog, the model written again), each file parsed once by a cache's facts; a
 // pump clicked well above its anchor, past the slop, with no device to say, is picked through the
 // viewport's hit by its sphere, and the facts a drop reads carry the bound (the scaled pump's by its
 // SCALE).
@@ -766,7 +766,7 @@ static int test_sphere_picking() {
 			near(facts.radius, mission_item_bound_radius(radius_q16, true, int32_t(1.5 * 65536.0), false, 0), 1e-9) &&
 			facts.radius > pump * 1.4);
 	TEST_EXPECT(mission_item_facts(view, 100001, facts, error) && facts.radius == 0.0); // a marker draws no model
-	// A cache's facts parse each file once while it stands (the review's L3): asked again, nothing read.
+	// A cache's facts parse each file once while it stands: asked again, nothing read.
 	MissionItemCache cache;
 	TEST_EXPECT(cache.facts(view, 106103, facts, error) && cache.files_read() == 2); // the pump and the catalog
 	TEST_EXPECT(cache.facts(view, 106100, facts, error) && cache.facts(view, 106103, facts, error) && cache.files_read() == 2);
@@ -781,7 +781,7 @@ static int test_sphere_picking() {
 	rig.pump();
 	TEST_EXPECT(viewport->scene().serial() != serial); // the cache asked over the scene moved, not skipped
 	TEST_EXPECT(viewport->items().items_asked() == asked && viewport->items().files_read() == read);
-	// The pump's SCALE set to 3 in the open catalog (the review's M1: no edge or symbol moves, so the graph
+	// The pump's SCALE set to 3 in the open catalog (no edge or symbol moves, so the graph
 	// stands): the catalog read again, the pumps asked again, their bound tripled as the game scales it.
 	rig.session.handle(request::open_document("defs/items.def"));
 	TEST_EXPECT(rig.session.outcome().done());

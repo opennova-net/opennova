@@ -277,9 +277,10 @@ int test_tiles_in_a_mission() {
 
 } // namespace
 
-// The mission's .til seeded with what the game draws for it (S25, the review's M2): the project holds the mission and
-// its terrain, the game install a <mission>.til of three tiles (the terrain's own the project holds, two, hidden by it):
-// the first stamp's file holds the install's three and the stamp, never the terrain's two.
+// The mission's .til seeded with what the game draws for it (S25): the project holds the mission
+// and its terrain, the game install a <mission>.til of three tiles (the terrain's own the project
+// holds, two, hidden by it): the first stamp's file holds the install's three and the stamp, never
+// the terrain's two.
 int test_seeded_from_the_install() {
 	editor_test::TempProjectDir dir("opennova_editor_tile_edit_install");
 	editor_test::NoProcess platform;

@@ -13,7 +13,7 @@ extends GutTest
 ##   mission's would otherwise stay: the globals are process-wide and written once per environment
 ##   change), in the mission's frames the mission's environment is the writer; the water's mirror
 ##   pass is on only in the frames the mission presents.
-## - A mission building beside a model never lights it (review M1): every frame of its build the
+## - A mission building beside a model never lights it: every frame of its build the
 ##   globals hold the model's shipped values.
 ## - DI-31: the game's foliage, effects and lights drawn: the terrain's foliage grown at its foliage map's
 ##   routed witness (and gone with its option), the pumps' particle slots drawn by the particle renderer, the
@@ -239,7 +239,7 @@ func test_a_mission_and_a_model_render_in_turn() -> void:
 	assert_eq(model_frames, 6)
 
 
-## S14 review M1: a mission building beside a model in the Preview never lights the model. The model
+## S14: a mission building beside a model in the Preview never lights the model. The model
 ## ready and rendering (its state, the shipped defaults, published once), the mission opened: no
 ## environment and no water writes a process-wide global while the mission builds (its environment,
 ## its water and its time set in its units; MissionEnvironment.get_global_writes,

@@ -134,7 +134,7 @@ int test_forms() {
 	TEST_EXPECT(logic_form(m, f.action, names, form));
 	TEST_EXPECT(form.action && same(form.type_words, "Re-arm event") && form.params.size() == 1 &&
 	            same(form.params[0].words, "event 2"));
-	// A type the dispatcher knows whose sub-type selects nothing is no unknown type (S15 review m15).
+	// A type the dispatcher knows whose sub-type selects nothing is no unknown type (S15).
 	Fixture g;
 	TEST_EXPECT(g.load());
 	Edit no_change;

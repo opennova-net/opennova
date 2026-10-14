@@ -631,7 +631,7 @@ func test_two_missions_keep_two_devices() -> void:
 	assert_null(_app.get_viewport_device("missions/synth_logic.bms", "mission"), "the first's, least recently used, given up")
 
 
-## S14 review m13: a device given up while it builds. Three missions over the whole minted project
+## S14: a device given up while it builds. Three missions over the whole minted project
 ## opened in turn at a budget of 0, each a few units into its build when the next opens: the third
 ## gives up the first's device mid-build (nothing of its build runs on, no error), and the third builds
 ## to ready.
@@ -915,8 +915,8 @@ func test_a_file_change_places_again() -> void:
 	assert_ne(device.get("placer"), placer, "the entities placed again over the files mounted afresh")
 	assert_eq(terrain.get_terrain_data(), data, "the terrain, which read nothing that moved, kept")
 	assert_eq(String(state.get("status", "")), "ready", str(state))
-	# The device's mount dropped its own root's caches, never the process's (review m4: another
-	# device's placer keeps its own).
+	# The device's mount dropped its own root's caches, never the process's (another device's
+	# placer keeps its own).
 	assert_eq(ResourceRoot.cache_epoch(), epoch, "the global cache epoch stands")
 
 
@@ -945,14 +945,14 @@ func _step_until(done: Callable, frames := 900) -> PackedStringArray:
 	return labels
 
 
-## S14 review M1: no device writes a process-wide shader global outside its publication.
+## S14: no device writes a process-wide shader global outside its publication.
 ## Headless no canvas draws the picture, so nothing presents or publishes: the mission builds
 ## to ready, takes a time of day (an Update) with the clock playing (the weather ticking on
 ## it), moves an entity, and builds its entities again for a moved file, and no row of its
 ## world writes a global meanwhile: the environment, the water, the weather, the bodies, the
 ## cube, the foliage masks (each row's get_global_writes: a headless renderer keeps no global
 ## to read back). The environment and the water hold their globals; the time reaches the
-## environment's clock (6.5 h is minute 390) and a layer switched off hides its node (m13).
+## environment's clock (6.5 h is minute 390) and a layer switched off hides its node.
 func test_no_global_written_outside_a_publication() -> void:
 	if _app == null:
 		return
@@ -1008,7 +1008,7 @@ func test_no_global_written_outside_a_publication() -> void:
 	assert_false((_device_node(state, "SkyDome") as Node3D).visible, "the sky off")
 
 
-## S14 review M5: what a Rebuild replaces leaves in a unit, never as it is taken. A moved model file
+## S14: what a Rebuild replaces leaves in a unit, never as it is taken. A moved model file
 ## (the entities' layer read it): at the pumps that take the Rebuild the last whole scene stands (the
 ## placer's container in the tree, nothing retired or queued to go), and the build's first unit drops
 ## it; the build ends with the entities placed again.
@@ -1044,7 +1044,7 @@ func test_a_rebuild_keeps_the_last_scene_until_its_units_run() -> void:
 	assert_eq(int(_mission_device().get("placed", 0)), 12, "every entity placed again")
 
 
-## S14 review M9: a whole placement cut short by a Rebuild is placed whole again. The model file moved
+## S14: a whole placement cut short by a Rebuild is placed whole again. The model file moved
 ## (a whole placement), a duplicate made while its place units run: the build that follows places
 ## every entity (the copy among them) and lifts none, never leaving the half the cut placement made.
 func test_a_placement_cut_short_places_whole() -> void:
@@ -1081,7 +1081,7 @@ func test_a_placement_cut_short_places_whole() -> void:
 	assert_eq(int(device.get("hidden", -1)), 0)
 
 
-## S14 review m6: a Rebuild while the first build makes the terrain carries that work on. Opened at a
+## S14: a Rebuild while the first build makes the terrain carries that work on. Opened at a
 ## budget of 0, a duplicate made while the terrain's tiles build: the build that follows goes on with
 ## the terrain's units (no terrain file read again) and ends ready with the ground.
 func test_a_rebuild_while_the_terrain_builds_carries_it_on() -> void:
@@ -1110,7 +1110,7 @@ func test_a_rebuild_while_the_terrain_builds_carries_it_on() -> void:
 	assert_eq(int(_mission_device().get("placed", 0)), 13, "the copy placed with the rest")
 
 
-## S14 review m5: a terrain without its height data is a note, never a failed picture. The minted
+## S14: a terrain without its height data is a note, never a failed picture. The minted
 ## project without Tmap.cpt: the viewport is ready, its picture with no terrain (no ground), the .cpt
 ## among its notes, the entities placed all the same.
 func test_a_terrain_without_its_height_data_is_a_note() -> void:
@@ -1137,7 +1137,7 @@ func _tile(x_fixed: int, index: int) -> TerrainTileEntry:
 	return entry
 
 
-## S14 review M4: the device reads the mission's .til as the game does before the terrain builds
+## S14: the device reads the mission's .til as the game does before the terrain builds
 ## (Terrain.set_tile_info_override), and follows it: a .til written beside the mission reaches the
 ## terrain (its one tile), one written again with two tiles builds the terrain again with both.
 func test_the_mission_til_reaches_the_terrain() -> void:
@@ -1182,7 +1182,7 @@ func test_the_mission_til_reaches_the_terrain() -> void:
 	assert_true(read != null and read.get_entry_count() == 2, "the .til followed: the terrain built again with both")
 
 
-## S14 review M3, M7: an entity's attributes place it as the game does. The first retained static
+## S14: an entity's attributes place it as the game does. The first retained static
 ## item given the Reflective attribute (0x00800000) is lifted, built as the placement builds an
 ## entity's model: reflected in the water mirror (as its attributes say), its EntityRef keyed past
 ## every placed key; given its attributes back (an undo), the placed static shows again and nothing
@@ -1258,12 +1258,13 @@ func _model_faces(model: ObjectModel) -> PackedVector3Array:
 	return out
 
 
-## The polish after its review (H1, M2): a press takes what the pointer is over, as the game's own choice
-## among the entities a ray's broad phase passes is the face it hits. The device answers what the
-## camera's ray meets first (the placed entities' faces, the nearer first, before the terrain): framed
-## close, a retained static hit through its nearest face away from its glyph is its record, and so is an
-## individual model; the ground just beside the static, past its faces yet within the sphere about its
-## anchor that holds them (what a sphere alone would take), is no record, nor is the sky.
+## The polish's picking (S15, "Picking what the pointer is over"): a press takes what the pointer is
+## over, as the game's own choice among the entities a ray's broad phase passes is the face it hits.
+## The device answers what the camera's ray meets first (the placed entities' faces, the nearer
+## first, before the terrain): framed close, a retained static hit through its nearest face away
+## from its glyph is its record, and so is an individual model; the ground just beside the static,
+## past its faces yet within the sphere about its anchor that holds them (what a sphere alone would
+## take), is no record, nor is the sky.
 func test_a_hit_takes_the_face_the_ray_meets() -> void:
 	if _app == null:
 		return

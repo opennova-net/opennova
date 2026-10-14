@@ -678,8 +678,9 @@ int run_import(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 	// What the plan takes and nothing else: the sources it holds (the files a converter makes from
 	// one, whole) and each dependency found that the project can take; the files past its cap are
 	// not imported.
-	// A file the project holds already is kept unless --replace writes it over (review F2). The whole
-	// install's import names none of its rows (planned), so it lists none (review F7).
+	// A file the project holds already is kept unless --replace writes it over
+	// (S19, "The import a modder reads"). The whole install's import names none of its rows
+	// (planned), so it lists none.
 	const bool replace = args.has("--replace");
 	JsonValue taken = JsonValue::make_array();
 	std::set<std::string> taken_sources;
@@ -707,7 +708,7 @@ int run_import(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 		std::fprintf(cli.err, "the plan stopped at %zu files: the files past them are not imported (import fewer at once)\n",
 		             count_at(plan, "count"));
 	// Nothing the plan takes (each file the project holds kept): the preview closed, nothing raised (an
-	// import naming no file is refused, review F14).
+	// import naming no file is refused).
 	if (!all && taken.array.empty()) {
 		send(cli, editor::request::cancel_import());
 		if (!cli.json) std::fprintf(cli.out, "nothing to import\n");

@@ -716,7 +716,7 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::Operation: out.operation = "resize"; break;
 		// In its keys' order, as the wire keeps an object's members.
 		// Given in the New file prompt's order, through the factory, which sorts them as the wire reads
-		// them: the request equals its round trip (review F10).
+		// them: the request equals its round trip.
 		case F::Values:
 			out.values = request::create_file("", "", {{"title", "My map"}, {"terrain", "island"}, {"environment", "day"}}).values;
 			break;

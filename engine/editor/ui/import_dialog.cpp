@@ -72,7 +72,7 @@ void not_followed_line(const ImportPlan &plan) {
 	}
 	if (!undefined.empty())
 		line += std::string(line.empty() ? "" : " ") + "Named by the files but defined nowhere: " + names_in_words(undefined) + ".";
-	// The symbols only a place's copy of a file the project holds defines (review F6).
+	// The symbols only a place's copy of a file the project holds defines (S14 R4: `shadowed`).
 	std::vector<std::string> shadowed;
 	for (const ImportNotFollowed &entry : plan.shadowed) {
 		const std::string label = reference_row(entry.reference).label;
@@ -149,7 +149,7 @@ std::pair<std::string, std::string> held_words(const ImportPlanRow &row) {
 // Import the session refused, or that waits on the unsaved prompt) keeps them.
 void ImportDialog::follow(const SessionView &view) {
 	const WorkspaceView::Import &held = view.workspace.import;
-	// A member the session moved is the one sent last too (review X8): what the person sets after it, back to
+	// A member the session moved is the one sent last too: what the person sets after it, back to
 	// what the window sent before, differs from it and goes to the session.
 	if (held.filter != filter_.seen) sent_.filter = held.filter;
 	if (held.rows_filter != rows_filter_.seen) sent_.rows_filter = held.rows_filter;

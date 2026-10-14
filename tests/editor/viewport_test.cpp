@@ -2033,8 +2033,8 @@ static int test_builds() {
 	if (!menu) return 1;
 	const std::string menu_path = menu->path();
 	const auto *shown_menu = viewport_of<MenuViewport>(session, menu_path, ViewportKind::Menu);
-	// Its first picture pending, whichever device a canvas asked for last (the model's: S14 review m2,
-	// the Preview's canvas draws after the Document's): the Shell's first-picture budget stands.
+	// Its first picture pending, whichever device a canvas asked for last (the model's: the
+	// Preview's canvas draws after the Document's): the Shell's first-picture budget stands.
 	TEST_EXPECT(!devices.cache.first_picture_pending());
 	devices.sync(session);
 	const FakeDevice *first = devices.held(menu_path, ViewportKind::Menu);

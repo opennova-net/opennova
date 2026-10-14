@@ -916,7 +916,7 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	case F::Operation: return text_of(json, token, request.operation, error);
 	case F::Values: {
 		// An object of strings, sorted by key: the writer emits an object's keys sorted, so the order
-		// is the keys', and request::create_file sorts them the same way (review F10).
+		// is the keys', and request::create_file sorts them the same way.
 		if (!json.is_object()) {
 			error = "\"values\" must be an object of strings.";
 			return false;
