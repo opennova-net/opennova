@@ -2194,6 +2194,11 @@ int item_types_by_form() {
 	            text_of(document, list_item, "text") == "Play");
 	TEST_EXPECT(document.apply(set_edit(list_item, "type", std::string("id")), error) &&
 	            text_of(document, list_item, "type") == "ID");
+	// The spin list's COLOR ITEM moved into the LIST's ITEMS takes no TYPE there: its colour's word is the label the
+	// LIST reads, as a window's TYPE change leaves it.
+	TEST_EXPECT(document.apply(set_edit(spin_item, "type", std::string("COLOR")), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Move, spin_item, back.child, 0), error) &&
+	            text_of(document, spin_item, "type").empty() && text_of(document, spin_item, "text") == "00000000");
 	while (document.can_undo()) document.undo();
 	// A colour row made an image holds the word as its name; undone, the colour again, byte for byte.
 	NodeAddress colour_row;

@@ -902,6 +902,22 @@ bool MnuDocument::accept_list_edit(const Node &node, const ListChange &change, s
 }
 
 void MnuDocument::prepare_record(const Node &node, const ListChange &change, DetachedRecord &record) const {
+	// A row or an ITEM moved under another form keeps only a TYPE that form's parse knows (menu_type_tokens); one it
+	// does not is left out, its text read as no TYPE reads it, as a window's TYPE change leaves it (retype_record): a
+	// spin list's COLOR ITEM moved into a LIST's ITEMS is its colour's word, the label the game reads.
+	if (change.operation == EditOperation::Move && change.destination) {
+		std::vector<OwnerStep> owners(change.destination->trail);
+		owners.push_back({change.destination->record, change.destination_list, 0});
+		if (const char *const *tokens = menu_type_tokens(record.handle(), {owners.data(), owners.size()})) {
+			if (record.kind == menu_kind("items.item") || record.kind == menu_kind("item")) {
+				mnu::Item &item = record.handle().as<mnu::Item>();
+				if (!mnu::known_token(item.type, tokens)) mnu::set_item_type(item, std::string());
+			} else if (record.kind == menu_kind("items.appearance")) {
+				mnu::Appearance &row = record.handle().as<mnu::Appearance>();
+				if (!mnu::known_token(row.type, tokens)) mnu::set_appearance_type(row, std::string());
+			}
+		}
+	}
 	// A copy's windows are named uniquely within their screen.
 	if (change.operation != EditOperation::Duplicate || record.kind != kWindow) return;
 	std::set<std::string> taken = screen_names(screen_of(node).screen);
