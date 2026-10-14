@@ -1,11 +1,13 @@
 // A hosted server end to end with LocalProcessProvider: an in-process NovaWorld
 // service (nw_service_harness.h, hosted servers on) and its supervisor run a real
-// opennova-serve child (ctest passes the binary) over a synthetic loose game
-// directory (serve_test_support.h's deathmatch map and game text, as the serve
-// tests make them). Built only with BUILD_NOVAWORLD_HTTP.
+// opennova-serve child (ctest passes the binary) over synthetic loose game
+// directories (serve_test_support.h's deathmatch map and game text, as the serve
+// tests make them), one per data set: Joint Operations' and Delta Force Xtreme
+// 2's. Built only with BUILD_NOVAWORLD_HTTP.
 //
-//   * the owner, approved (players.can_host), starts it with POST
-//     /api/me/server/start;
+//   * the owner, approved (players.can_host), starts a Joint Operations server
+//     with POST /api/me/server/start, which runs over that data set's folder
+//     with /game jo;
 //   * the supervisor mints its service account srv-<id>, renders its working
 //     directory and launches opennova-serve there, which logs in as that
 //     account through /NWLogin.dll and /NWHost.dll, hosts and lists; the server
@@ -21,7 +23,10 @@
 //   * POST /api/me/server/stop: the supervisor pushes ServerStopHosting, the
 //     listing leaves the browser, the process is gone, the row is stopped and
 //     the service account deleted; the admin link went down at stopping (QUIT,
-//     the console's closing line).
+//     the console's closing line);
+//   * a second owner starts a Delta Force Xtreme 2 server naming no missions:
+//     it takes that data set's rotation, runs over its own folder with /game
+//     dfx2, reaches running, and stops.
 
 #include "nw_service_harness.h"
 
@@ -175,6 +180,14 @@ void dump(Service &service, hosted::LocalProcessProvider &provider, int64_t id) 
 		std::fprintf(stderr, "  event %s -> %s: %s\n", e.from_state.c_str(), e.to_state.c_str(), e.detail.c_str());
 }
 
+// Whether `argv` holds `flag` followed by `value`.
+bool has_pair(const std::vector<std::string> &argv, const std::string &flag, const std::string &value) {
+	for (size_t i = 0; i + 1 < argv.size(); ++i) {
+		if (argv[i] == flag && argv[i + 1] == value) return true;
+	}
+	return false;
+}
+
 void log_sink(opennova::io::LogLevel level, const char *message) {
 	if (level != opennova::io::LogLevel::kDebug) std::printf("%s\n", message);
 }
@@ -196,36 +209,55 @@ int main(int argc, char **argv) {
 	{
 		// Declared first, so the database's files and the working directories go last.
 		test_temp::TempDir temp("hosted_local_e2e");
-		// The synthetic game directory: one deathmatch map and the game text.
-		const fs::path data = temp.path / "data";
-		fs::create_directories(data);
-		expect(serve_test::write_bytes(data / "SERVETST.BMS", serve_test::deathmatch_mission()), "the map");
-		expect(serve_test::write_bytes(data / "gametext.bin",
-					   serve_test::gametext({
-							   { "NovaWorld",
-									   { { "STRNOVA07", "Jungle" }, { "STRNOVA08", "Desert" },
-											   { "STRNOVA09", "Snow" }, { "STRNOVA10", "None" },
-											   { "STRNOVA11", "Yes" }, { "STRNOVA12", "No" } } },
-							   { "GateTypeAbbrev", { { "DM", "DM" } } },
-					   })),
-				"the game text");
+		// Two synthetic game directories, two data sets: each one deathmatch map
+		// (named after its data set, so the listing tells which folder a server
+		// mounted) and the game text.
+		const auto write_game = [](const fs::path &dir, const char *map_file, const char *map_name) {
+			fs::create_directories(dir);
+			expect(serve_test::write_bytes(dir / map_file, serve_test::deathmatch_mission(map_name)), "a map");
+			expect(serve_test::write_bytes(dir / "gametext.bin",
+						   serve_test::gametext({
+								   { "NovaWorld",
+										   { { "STRNOVA07", "Jungle" }, { "STRNOVA08", "Desert" },
+												   { "STRNOVA09", "Snow" }, { "STRNOVA10", "None" },
+												   { "STRNOVA11", "Yes" }, { "STRNOVA12", "No" } } },
+								   { "GateTypeAbbrev", { { "DM", "DM" } } },
+						   })),
+					"the game text");
+		};
+		const fs::path data = temp.path / "jo data";
+		const fs::path dfx2_data = temp.path / "dfx2 data";
+		write_game(data, "SERVETST.BMS", "Serve Test Map");
+		write_game(dfx2_data, "DFXTEST.BMS", "DFX2 Test Map");
+		// ONNET_HOSTED_DATA_SETS as a deployment writes it (the paths with
+		// forward slashes, which JSON takes unescaped), read as main() reads it.
+		const std::string data_sets_json = "{\"jop_2_consumer\":{\"resource_dir\":\"" + data.generic_u8string() +
+				"\",\"loose_root\":true,\"missions\":[\"servetst.bms\"]},\"dfx2_consumer\":{\"resource_dir\":\"" +
+				dfx2_data.generic_u8string() + "\",\"loose_root\":true,\"missions\":[\"dfxtest.bms\"]}}";
+		std::vector<hosted::DataSetConfig> data_set_configs;
+		std::string config_error;
+		expect(hosted::parse_data_set_configs(data_sets_json, "", data_set_configs, config_error),
+				"ONNET_HOSTED_DATA_SETS reads");
+		const std::vector<hosted::DataSet> data_sets = hosted::offered_data_sets("local", data_set_configs);
+		expect(data_sets.size() == 2, "the local provider offers both data sets");
 
 		Service service(temp.path / "hosted.db");
 		const bool up = service.start(source_dir, temp.path, /*require_host_key=*/false,
-				[](nws::ServerConfig &config) {
+				[&data_sets_json](nws::ServerConfig &config) {
 					config.hosted_provider = "local";
 					config.hosted_cap = 5;
+					config.hosted_data_sets = data_sets_json;
 				});
 		expect(up, "the service starts");
 		expect(nws::set_can_host(*service.pool.acquire(), service.owner_id, true).ok, "the owner is approved");
 
 		hosted::LocalProcessConfig local;
 		local.serve_binary = serve_binary;
-		local.resource_dir = data.u8string();
-		local.loose_root = true;
+		local.data_sets = data_sets;
 		local.work_dir = (temp.path / "work").u8string();
 		hosted::LocalProcessProvider provider(local);
 		hosted::SupervisorConfig config;
+		config.data_sets = data_sets;
 		config.cap = 5;
 		config.master_host = "127.0.0.1";
 		config.master_gate_port = service.gate.bound_port();
@@ -258,7 +290,8 @@ int main(int argc, char **argv) {
 		int64_t id = 0;
 		if (!session.empty()) {
 			const auto reply = send(service, "POST", "/api/me/server/start", as_owner(session, true),
-					"{\"game_name\":\"Hosted E2E\",\"max_players\":8,\"missions\":[\"servetst.bms\"]}");
+					"{\"game\":\"jop_2_consumer\",\"game_name\":\"Hosted E2E\",\"max_players\":8,"
+					"\"missions\":[\"servetst.bms\"]}");
 			const auto json = crow::json::load(body_text(reply));
 			if (reply.code != 202) std::fprintf(stderr, "  start: %d %s\n", reply.code, body_text(reply).c_str());
 			const auto started = reply.code == 202 ? integer_at(json, { "server", "id" }) : std::nullopt;
@@ -288,6 +321,12 @@ int main(int argc, char **argv) {
 			expect(fs::exists(provider.server_dir(id) / "server.host") &&
 							fs::exists(provider.server_dir(id) / "credentials.txt"),
 					"its working directory was rendered");
+			// Joint Operations' data set: its folder and its title.
+			expect(row->settings.game == "jop_2_consumer", "the row names its data set");
+			const std::vector<std::string> command = provider.command_of(row->machine_id);
+			expect(has_pair(command, "--resource-dir", fs::absolute(data).u8string()) &&
+							has_pair(command, "/game", "jo"),
+					"opennova-serve runs over Joint Operations' folder with /game jo");
 
 			// The owner's view: the listing, as its hosted server's.
 			auto reply = send(service, "GET", "/api/me/server", as_owner(session, false));
@@ -413,6 +452,67 @@ int main(int argc, char **argv) {
 			}
 			std::printf("hosted_local_e2e: server %lld ran as RID %u, took its owner's name and stopped\n",
 					static_cast<long long>(id), rid);
+		}
+
+		// A second owner's server on Delta Force Xtreme 2's data set: its own
+		// folder (whose map alone it can start on), /game dfx2, and that data
+		// set's default rotation (the start names none).
+		int64_t second_owner = 0;
+		if (up) {
+			nws::CreateUserParams p;
+			p.username = "owner2";
+			p.password = "pw-owner2";
+			p.pcid = "0e2e0002";
+			p.nwh = "1";
+			p.nwhandle = "Owner2Handle";
+			const auto created = nws::create_user(*service.pool.acquire(), p);
+			second_owner = created.ok ? created.id : 0;
+			expect(second_owner > 0 && nws::set_can_host(*service.pool.acquire(), second_owner, true).ok,
+					"a second owner is approved");
+		}
+		const std::string second = second_owner > 0 ? site_login(service, "owner2", "pw-owner2") : std::string();
+		expect(!up || !second.empty(), "the second owner logs in to the site");
+		int64_t dfx2_id = 0;
+		if (!second.empty()) {
+			const auto reply = send(service, "POST", "/api/me/server/start", as_owner(second, true),
+					"{\"game\":\"dfx2_consumer\",\"game_name\":\"Hosted E2E DFX2\",\"max_players\":8}");
+			if (reply.code != 202) std::fprintf(stderr, "  dfx2 start: %d %s\n", reply.code, body_text(reply).c_str());
+			dfx2_id = reply.code == 202 ? integer_at(crow::json::load(body_text(reply)), { "server", "id" }).value_or(0)
+										: 0;
+			expect(dfx2_id != 0, "POST /api/me/server/start is accepted for Delta Force Xtreme 2");
+		}
+		if (dfx2_id != 0) {
+			const bool dfx2_running = wait_for([&] {
+				const auto row = server_row(service, dfx2_id);
+				return row && (row->state == hosted::State::Running || !hosted::is_live(row->state));
+			}, 90) && server_row(service, dfx2_id)->state == hosted::State::Running;
+			if (!dfx2_running) dump(service, provider, dfx2_id);
+			expect(dfx2_running, "the Delta Force Xtreme 2 server is launched, lists and runs");
+			const auto row = server_row(service, dfx2_id);
+			if (dfx2_running && row) {
+				expect(row->settings.game == "dfx2_consumer" &&
+								row->settings.missions == std::vector<std::string>{ "dfxtest.bms" },
+						"its row names its data set and that data set's rotation");
+				const std::vector<std::string> command = provider.command_of(row->machine_id);
+				expect(has_pair(command, "--resource-dir", fs::absolute(dfx2_data).u8string()) &&
+								has_pair(command, "/game", "dfx2"),
+						"opennova-serve runs over Delta Force Xtreme 2's folder with /game dfx2");
+				const auto reply = send(service, "GET", "/api/me/server", as_owner(second, false));
+				const auto json = crow::json::load(body_text(reply));
+				expect(text_at(json, { "server", "settings", "game" }) == "dfx2_consumer" &&
+								text_at(json, { "server", "game_display_name" }) == "Delta Force Xtreme 2",
+						"GET /api/me/server names the game");
+			}
+			const auto reply = send(service, "POST", "/api/me/server/stop", as_owner(second, true));
+			expect(reply.code == 202, "the second owner's stop is accepted");
+			const bool stopped = wait_for([&] {
+				const auto r = server_row(service, dfx2_id);
+				return r && !hosted::is_live(r->state);
+			}, 60);
+			const auto ended = server_row(service, dfx2_id);
+			if (!stopped || !ended || ended->state != hosted::State::Stopped) dump(service, provider, dfx2_id);
+			expect(stopped && ended && ended->state == hosted::State::Stopped, "the Delta Force Xtreme 2 server stops");
+			expect(provider.list_tagged().empty(), "every process is gone");
 		}
 
 		supervisor.stop();

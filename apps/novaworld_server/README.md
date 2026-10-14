@@ -360,10 +360,27 @@ statements to a listed server" above).
 
 An account an admin approved (`players.can_host`) can have the service run one
 `opennova-serve` for it, on a machine of its own, until it stops it (ADR 0053, proposed;
-`hosted/`, migration `0011_hosted_servers.sql`). Everything here is service policy.
+`hosted/`, migrations `0011_hosted_servers.sql` and `0014_hosted_server_game.sql`). Each
+server runs one data set its owner picks. Everything here is service policy.
+
+- **Data sets** (`hosted/data_sets.*`). A data set is a game folder a machine mounts, the
+  title `opennova-serve` speaks over it (`/game <code>`, a `gameprofile` row) and the
+  lobby it lists in (the `games` row whose slug names it). The service knows three, in
+  the order the site offers them: `jop_2_consumer` (Joint Operations, `/game jo`, base
+  game or Escalation, `jox01`), `dfx2_consumer` (Delta Force Xtreme 2, `/game dfx2`, base
+  game only) and `opennova_0_consumer` (OpenNova's own data, `/game jo`, base game only).
+  Each has its own host-screen limits (Joint Operations': 2..64 players, a time limit of
+  1..300, kill and score limits of 1..500, respawn and delay of 0..300; Delta Force Xtreme
+  2's the same but 2..100 players, its host screen's cap; OpenNova's Joint Operations').
+  A deployment offers the ones its provider has the
+  data of (`ONNET_HOSTED_DATA_SETS`, `ONNET_HOSTED_EC2_LAUNCH_TEMPLATES`, below); with
+  none, hosting is off. A start names one (`hosted_servers.game`, the games slug; the
+  rows from before 0014 ran Joint Operations' data), and a server whose data set is no
+  longer offered fails at its next launch (no restart mends that).
 
 - **The rows.** `hosted_servers` holds one row per start: its owner, its service account,
-  its state, the owner's settings (range-checked columns, never a file), the machine
+  its state, its data set (`game`), the owner's settings (range-checked columns, never a
+  file), the machine
   (`provider`, `machine_id`, `machine_address`), the remote-admin login rendered for the
   service, the restarts used and why it failed. `hosted_server_events` keeps every
   transition with what caused it. An owner has at most one live server (any state but
@@ -487,21 +504,22 @@ An account an admin approved (`players.can_host`) can have the service run one
   secret (the host file carries the game password): written owner-only and never logged.
   The admin login lives in the row's own columns, read by `hosted::admin_login_of` alone:
   `HostedServer` has no field for it, so no reply can carry it. `opennova-serve` runs with `/HOST server.host
-  --credentials credentials.txt --master-host <host> --master-gate-port <port>` and
-  `/exp jox01` for Escalation. The settings' ranges: a name of 1..31 cp1252 bytes with
-  no control character or double quote, a password of up to 16 printable ASCII
-  characters with no space or quote, 2..64 players, a time limit of 1..300, kill and
-  score limits of 1..500, respawn and delay of 0..300, base Joint Operations or
-  `jox01`, and 1..32 `.bms` names of letters, digits, `_` and `-`.
+  --credentials credentials.txt --master-host <host> --master-gate-port <port> /game
+  <title>` (the data set's) and `/exp jox01` for Escalation. The settings' rules: a game
+  the deployment offers, a name of 1..31 cp1252 bytes with no control character or double
+  quote, a password of up to 16 printable ASCII characters with no space or quote, the
+  whole numbers within the data set's limits, an expansion the data set allows, and 1..32
+  `.bms` names of letters, digits, `_` and `-`.
 - **Providers** (`hosted/machine_provider.h`): the supervisor hands a provider a
-  provider-neutral `LaunchSpec` (the files and the arguments) and asks it to launch,
+  provider-neutral `LaunchSpec` (the data set, the files and the arguments), which the
+  provider resolves to its own data for that data set, and asks it to launch,
   describe, terminate and list its tagged machines. `ONNET_HOSTED_PROVIDER=local`
   (`hosted/local_process_provider.*`) runs each server as a child process of the service
   on its own machine, for development and the tests: under
   `ONNET_HOSTED_WORK_DIR/server-<id>` (deleted and written again at every start, `0700`
   with its secret files `0600` on POSIX, a DACL granting the service's account alone on
-  Windows), `opennova-serve` (`ONNET_HOSTED_SERVE_BIN`) with `--resource-dir
-  ONNET_HOSTED_RESOURCE_DIR` (and `--loose-root` with `ONNET_HOSTED_LOOSE_ROOT=1`),
+  Windows), `opennova-serve` (`ONNET_HOSTED_SERVE_BIN`) with `--resource-dir` the data
+  set's `resource_dir` (and `--loose-root` with its `loose_root`; `ONNET_HOSTED_DATA_SETS`),
   started from an argv array with no shell (`engine/base/proc/child_process.h`), its output in
   `console.log` there, listing on this service over loopback with free loopback ports.
   Its environment is an allowlist (`PATH`, `HOME`, `LANG`, `LC_*`, `TZ`, `TMPDIR`; on
@@ -517,16 +535,17 @@ An account an admin approved (`players.can_host`) can have the service run one
   `opennova-serve` deregisters) before it kills it, so the next boot launches them
   again.
 - **The cloud provider** (`ONNET_HOSTED_PROVIDER=ec2`, `hosted/ec2_provider.*`) runs
-  each server on an EC2 machine of its own, launched from the deployment's launch template
-  (`infra/aws`, DEPLOY.md "Hosted game servers": a stock Ubuntu 24.04 image, the machine
-  type, the game data's private encrypted snapshot as a second volume, the game security
-  group, the machine role, IMDSv2 required, `InstanceInitiatedShutdownBehavior=terminate`).
+  each server on an EC2 machine of its own, launched from its data set's launch template
+  (`ONNET_HOSTED_EC2_LAUNCH_TEMPLATES`; `infra/aws`, DEPLOY.md "Hosted game servers": one
+  per data set, each a stock Ubuntu 24.04 image, the machine type, that data set's
+  private encrypted snapshot as a second volume, the game security group, the machine
+  role, IMDSv2 required, `InstanceInitiatedShutdownBehavior=terminate`).
   A machine is terminated at its server's end, never stopped, so every launch has a new
   public address. The provider runs the AWS CLI v2 (installed in the image, pinned and
   checksummed) through a `CommandRunner` (`hosted/command_runner.*`: an argv array, no
   shell, a 90 s timeout, the CLI's output and diagnostics apart, an environment of the
   system's and the `AWS_*` variables alone), its credentials the service instance's role.
-  - `launch` is `run-instances`: the launch template's default version, the subnet, one
+  - `launch` is `run-instances`: the data set's launch template at its default version, the subnet, one
     machine, the tags `opennova:hosted=1`, `opennova:deployment=<ONNET_HOSTED_DEPLOYMENT>`,
     `opennova:server-id=<id>` and `Name` on the machine and its volumes, a client token
     (it makes the CLI's own retries of that one call launch once; a later launch for the
@@ -579,7 +598,8 @@ An account an admin approved (`players.can_host`) can have the service run one
   root): serve's two ports reserved out of Linux's ephemeral range
   (`net.ipv4.ip_local_reserved_ports`, so no socket of the image pull's holds one at
   serve's bind), docker installed (and held, so no unattended upgrade restarts it under
-  the server), the data volume (label `opennova-jo`) mounted read-only at `/opt/jo`, the
+  the server), the data volume (label `opennova-data`: the data set's snapshot, which holds
+  at least `resource.pff`, `localres.pff` and `language.pff`) mounted read-only at `/opt/game`, the
   bundle fetched, `/srv/serve` written (`0700`, owned by UID 10001), the image pulled, and
   `opennova-serve.service` started: the serve image as UID 10001 with `--network host`,
   no capability and no way to gain one (`--cap-drop ALL`, `no-new-privileges`; it binds
@@ -604,15 +624,13 @@ An account an admin approved (`players.can_host`) can have the service run one
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `ONNET_HOSTED_PROVIDER` | `none` | `local` runs hosted servers as child processes, `ec2` on EC2 machines (above); `none` runs none. Any other value, `local` without `ONNET_HOSTED_SERVE_BIN` and `ONNET_HOSTED_RESOURCE_DIR`, or `ec2` missing or mistyping one of its settings below (or with a loopback `ONNET_PUBLIC_HOST`) is `none` with a boot warning naming why. |
+| `ONNET_HOSTED_PROVIDER` | `none` | `local` runs hosted servers as child processes, `ec2` on EC2 machines (above); `none` runs none. Any other value, data sets that do not read or none the provider has the data of, `local` without `ONNET_HOSTED_SERVE_BIN`, or `ec2` missing or mistyping one of its settings below (or with a loopback `ONNET_PUBLIC_HOST`) is `none` with a boot warning naming why. |
 | `ONNET_HOSTED_CAP` | 5 | The most hosted servers live at once, across every account. |
 | `ONNET_HOSTED_SERVE_BIN` | none | The local provider's `opennova-serve` binary. |
-| `ONNET_HOSTED_RESOURCE_DIR` | none | The game data the local provider's servers serve (their `--resource-dir`). Never licensed data in a repository: a Joint Operations install, or a synthetic loose directory. |
-| `ONNET_HOSTED_LOOSE_ROOT` | off | `1` adds `--loose-root` (a directory with no game archives, mounted as loose files). |
 | `ONNET_HOSTED_WORK_DIR` | `backend/data/hosted` | The root of the local provider's working directories. |
-| `ONNET_HOSTED_MISSIONS` | none | Comma-separated `.bms` names, the rotation a start takes when its request names none (the first the starting map), and the missions the site's rotation picker offers (`GET /api/me/server` `default_missions`). Unset, a start must name its missions. |
+| `ONNET_HOSTED_DATA_SETS` | none | A JSON object keyed by data set (`jop_2_consumer`, `dfx2_consumer`, `opennova_0_consumer`), each member of an entry optional: `missions`, a list of `.bms` names, the rotation a start on it takes when its request names none (the first the starting map) and the missions the site's rotation picker offers (with none, a start must name its missions); for `local`, `resource_dir`, the game folder its servers serve (their `--resource-dir`; never licensed data in a repository: an install, or a synthetic loose directory), which is what makes `local` offer the data set, and `loose_root`, `true` to add `--loose-root` (a folder with no game archives, mounted as loose files). For example `{"jop_2_consumer":{"resource_dir":"C:/Games/Joint Operations Combined Arms","missions":["ASH_G11A.bms"]}}`. Any other key or member is a boot warning, and hosting is off. |
 | `ONNET_HOSTED_EC2_REGION` | none | `ec2`: the region every AWS CLI call names. |
-| `ONNET_HOSTED_EC2_LAUNCH_TEMPLATE` | none | `ec2`: the launch template (`lt-...`) a machine launches from, its default version. |
+| `ONNET_HOSTED_EC2_LAUNCH_TEMPLATES` | none | `ec2`: a JSON object, data set to the launch template (`lt-...`) its machines launch from (its default version), the one whose data volume holds that data set; a data set it names is offered. `app deploy` sets it from the Terraform output `hosted_launch_templates`. |
 | `ONNET_HOSTED_EC2_SUBNET` | none | `ec2`: the subnet (`subnet-...`) a machine launches into; it must give its machines a public IPv4. |
 | `ONNET_HOSTED_DEPLOYMENT` | none | `ec2`: the `opennova:deployment` tag every machine carries and every describe, list and terminate is scoped to, so two stacks in one account never touch each other's machines (letters, digits, `.`, `_`, `-`). |
 | `ONNET_HOSTED_SERVE_IMAGE` | none | `ec2`: the serve image the machines run, pinned at deploy (`ghcr.io/<owner>/opennova-serve@sha256:...`). |
@@ -630,8 +648,8 @@ service's own message, never database text.
 
 | Route | Access | Replies |
 | --- | --- | --- |
-| `GET /api/me/server` | a website session | `{"enabled", "can_host", "default_missions", "server"}`: `default_missions` is `ONNET_HOSTED_MISSIONS` (a list, empty when unset), the rotation a start takes when it names none and the missions the site's rotation picker offers; `server` is the account's live server, else its newest ended one, else null: `id`, `state`, `live`, `settings` (`game_name`, `max_players`, `game_password`, `time_limit`, `kill_limit`, `max_score`, `respawn`, `start_delay`, `team_ff`, `expansion`, `missions`), `restarts`, `failure_reason`, `created_at`, `updated_at`, `running_at`, `ended_at` (UTC, null until set), `listing` (`rid`, `server_name`, `mission_name`, `players`, `max_players`, `host_ip`, `host_port` while listed, else null) and `events` (the newest 50 transitions, oldest first: `from`, `to`, `detail`, `at`); `Cache-Control: no-store` |
-| `POST /api/me/server/start` | a website session, the CSRF header | the settings as JSON (`game_name` required; `missions` defaults to `ONNET_HOSTED_MISSIONS`; every other field to its default). 503 `hosting_disabled` with no provider; 429 past the account's bucket (6, then one every 20 s, shared with the stop); 400 `invalid_json`, `invalid_field`, or `invalid_settings` with the `field` and why; 403 `not_approved` without `can_host`; 409 `already_live` (with `server_id`) or `at_capacity`; 202 `{"server"}`, `requested` |
+| `GET /api/me/server` | a website session | `{"enabled", "can_host", "data_sets", "server"}`: `enabled` is a provider with at least one data set; `data_sets` the ones it offers, in order (empty when hosting is off), each `game`, `display_name`, `expansions` (`code` and `name`, the base game's `""` first), `default_missions` (its `missions`: the rotation a start on it takes when it names none and the missions the site's rotation picker offers) and `limits` (`max_players`, `time_limit`, `kill_limit`, `max_score`, `respawn`, `start_delay`, each `min` and `max`); `server` is the account's live server, else its newest ended one, else null: `id`, `state`, `live`, `settings` (`game`, `game_name`, `max_players`, `game_password`, `time_limit`, `kill_limit`, `max_score`, `respawn`, `start_delay`, `team_ff`, `expansion`, `missions`), `game_display_name` and `expansion_display_name` (the catalog's names, so an ended server's read the same once its data set is gone), `restarts`, `failure_reason`, `created_at`, `updated_at`, `running_at`, `ended_at` (UTC, null until set), `listing` (`rid`, `server_name`, `mission_name`, `players`, `max_players`, `host_ip`, `host_port` while listed, else null) and `events` (the newest 50 transitions, oldest first: `from`, `to`, `detail`, `at`); `Cache-Control: no-store` |
+| `POST /api/me/server/start` | a website session, the CSRF header | the settings as JSON (`game_name` required; `game` defaults to the first offered data set and `missions` to that data set's; every other field to its default). 503 `hosting_disabled` with no provider; 429 past the account's bucket (6, then one every 20 s, shared with the stop); 400 `invalid_json`, `invalid_field`, or `invalid_settings` with the `field` and why; 403 `not_approved` without `can_host`; 409 `already_live` (with `server_id`) or `at_capacity`; 202 `{"server"}`, `requested` |
 | `POST /api/me/server/stop` | a website session, the CSRF header | 404 `no_live_server`; 202 `{"server"}`, `stopping` (also when it already was), or `stopped` when the supervisor finished it in between |
 | `PUT /api/admin/users/<id>/can-host` | admin | `{"can_host": true\|false}`; 200 `{"user"}` (which carries `can_host`); 400 `invalid_json`, `invalid_field` (not a boolean) or `missing_field`; 404 for an unknown id or a service account. Withdrawing it stops the account's hosted server, as a ban does |
 | `GET /api/admin/hosted` | admin | the fleet: `{"enabled", "provider", "cap", "live", "servers"}`, the newest 100, live first, each as above plus `owner` and `service_account` (`{id, username}` or null), `provider`, `machine_id`, `machine_address` and `admin_port`. Never the admin password |

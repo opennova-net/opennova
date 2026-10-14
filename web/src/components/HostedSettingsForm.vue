@@ -29,6 +29,33 @@
       {{ alertText }}
     </p>
 
+    <!-- The data set: the game the server runs, and the lobby it lists in. -->
+    <fieldset class="min-w-0 space-y-2" :aria-describedby="describedBy('game')">
+      <legend :id="fieldId('game')" tabindex="-1" :class="[labelClass, 'focus:outline-none']">
+        {{ FIELD_LABELS.game }}
+      </legend>
+      <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-6">
+        <label v-for="option in dataSets" :key="option.game" class="flex items-center gap-3 text-sm text-ink">
+          <input
+            v-model="form.game"
+            type="radio"
+            :name="`${baseId}-game`"
+            :value="option.game"
+            :disabled="busy"
+            class="h-4 w-4 border-border bg-surface text-accent focus:ring-accent"
+          />
+          {{ option.display_name }}
+        </label>
+      </div>
+      <p :id="hintId('game')" class="text-xs text-ink-muted">
+        Each game lists in its own server browser: players join with that game.
+      </p>
+      <p v-if="errors.game" :id="errorId('game')" class="text-xs text-danger">{{ errors.game }}</p>
+    </fieldset>
+    <p v-if="previousGameGone" class="rounded-panel border border-warn/40 bg-warn/10 p-3 text-sm text-warn">
+      Your last server ran a game this service no longer hosts, so pick one of these.
+    </p>
+
     <div class="grid gap-6 sm:grid-cols-2">
       <!-- GameName -->
       <div class="min-w-0 space-y-1 sm:col-span-2">
@@ -97,8 +124,8 @@
             type="number"
             inputmode="numeric"
             step="1"
-            :min="INT_RULES[spec.field].min"
-            :max="INT_RULES[spec.field].max"
+            :min="limitOf(spec.field)?.min"
+            :max="limitOf(spec.field)?.max"
             :disabled="busy"
             :aria-invalid="errors[spec.field] ? 'true' : undefined"
             :aria-describedby="describedBy(spec.field)"
@@ -107,7 +134,7 @@
           <span v-if="spec.unit" class="text-sm text-ink-muted">{{ spec.unit }}</span>
         </div>
         <p :id="hintId(spec.field)" class="text-xs text-ink-muted">
-          {{ INT_RULES[spec.field].min }} to {{ INT_RULES[spec.field].max }}.{{ spec.hint ? ` ${spec.hint}` : '' }}
+          {{ numberHint(spec) }}
         </p>
         <p v-if="errors[spec.field]" :id="errorId(spec.field)" class="text-xs text-danger">{{ errors[spec.field] }}</p>
       </div>
@@ -129,8 +156,12 @@
       </div>
     </div>
 
-    <!-- /exp jox01 -->
-    <fieldset class="min-w-0 space-y-2" :aria-describedby="describedBy('expansion')">
+    <!-- /exp: shown when the game has an expansion to choose. -->
+    <fieldset
+      v-if="expansions.length > 1"
+      class="min-w-0 space-y-2"
+      :aria-describedby="describedBy('expansion')"
+    >
       <legend
         :id="fieldId('expansion')"
         tabindex="-1"
@@ -139,21 +170,21 @@
         {{ FIELD_LABELS.expansion }}
       </legend>
       <div class="flex flex-col gap-2 sm:flex-row sm:gap-6">
-        <label v-for="option in EXPANSIONS" :key="option.value" class="flex items-center gap-3 text-sm text-ink">
+        <label v-for="option in expansions" :key="option.code" class="flex items-center gap-3 text-sm text-ink">
           <input
             v-model="form.expansion"
             type="radio"
             :name="`${baseId}-expansion`"
-            :value="option.value"
+            :value="option.code"
             :disabled="busy"
             class="h-4 w-4 border-border bg-surface text-accent focus:ring-accent"
           />
-          {{ option.label }}
+          {{ option.name }}
         </label>
       </div>
       <p :id="hintId('expansion')" class="text-xs text-ink-muted">
-        Players need the same expansion to join: a player without Escalation installed cannot join an
-        Escalation server.
+        Players need the same expansion to join: a player without it installed cannot join a server that
+        runs it.
       </p>
       <p v-if="errors.expansion" :id="errorId('expansion')" class="text-xs text-danger">{{ errors.expansion }}</p>
     </fieldset>
@@ -163,7 +194,7 @@
       class="rounded-panel border border-warn/40 bg-warn/10 p-3 text-sm text-warn"
     >
       Your last server's rotation had
-      {{ droppedMissions.length === 1 ? 'a mission' : `${droppedMissions.length} missions` }} this service no
+      {{ droppedMissions.length === 1 ? 'a mission' : `${droppedMissions.length} missions` }} this game no
       longer offers, so {{ droppedMissions.length === 1 ? 'it was' : 'they were' }} left out:
       <span class="break-all font-mono text-xs">{{ droppedMissions.join(', ') }}</span>.
     </p>
@@ -171,7 +202,7 @@
     <MissionRotationPicker
       ref="rotation"
       v-model="form.missions"
-      :available="defaultMissions"
+      :available="dataSet?.default_missions ?? []"
       :base-id="`${baseId}-missions`"
       :error="errors.missions"
       :disabled="busy"
@@ -195,24 +226,34 @@
 // the My servers page's one start control, offered only while the account
 // has no live server (the service allows one: 409 already_live). After a
 // failed server it is the owner's try again, with that server's settings.
-// Every field is checked against the backend's rule (utils/hostedSettings.ts)
-// before the request; a refusal the backend gives on one field
-// (invalid_settings) marks that field with the rule, never the backend's text.
+// The game (a data set the service offers) comes first and drives the rest:
+// the expansions it offers, the whole-number ranges and the rotation's
+// missions. Every field is checked against the backend's rule
+// (utils/hostedSettings.ts) before the request; a refusal the backend gives
+// on one field (invalid_settings) marks that field with the rule, never the
+// backend's text.
 import { computed, nextTick, reactive, ref, watch } from 'vue';
 import MissionRotationPicker from './MissionRotationPicker.vue';
 import { startHostedServer, type HostedError } from '../api/hostedServer';
-import type { HostedExpansion, HostedServer, HostedSettings } from '../types/hostedServer';
+import type {
+  HostedDataSet,
+  HostedExpansionOption,
+  HostedServer,
+  HostedSettings,
+  SettingRange,
+} from '../types/hostedServer';
 import { cp1252Length } from '../utils/cp1252';
 import {
+  allowsExpansion,
   checkSettings,
   FIELD_LABELS,
-  FIELD_RULES,
+  fieldRule,
+  findDataSet,
   formFrom,
   GAME_NAME_MAX,
   GAME_PASSWORD_MAX,
-  INT_RULES,
-  isMissionName,
-  uniqueMissions,
+  initialGame,
+  initialRotation,
   type IntField,
   type SettingsErrors,
   type SettingsField,
@@ -221,8 +262,8 @@ import {
 const props = defineProps<{
   // The account's last server's settings, to start it again; null for none.
   previous: HostedSettings | null;
-  // The service's missions (GET /api/me/server default_missions).
-  defaultMissions: string[];
+  // The games the service offers (GET /api/me/server data_sets), in its order.
+  dataSets: HostedDataSet[];
   // The last server failed: the start is another try at it.
   retry?: boolean;
 }>();
@@ -241,23 +282,20 @@ const inputBase =
   'rounded-control border border-border bg-surface px-3 py-2 text-sm text-ink focus:border-accent focus:outline-none disabled:opacity-60 aria-[invalid=true]:border-danger';
 const inputClass = `w-full ${inputBase}`;
 
-const NUMBER_FIELDS: { field: IntField; unit?: string; hint?: string }[] = [
+// `noLimit`: the field's top value is the host screen's "no limit".
+const NUMBER_FIELDS: { field: IntField; unit?: string; hint?: string; noLimit?: boolean }[] = [
   { field: 'max_players', unit: 'players' },
   { field: 'time_limit', unit: 'minutes' },
-  { field: 'kill_limit', hint: '500 means no limit.' },
-  { field: 'max_score', hint: '500 means no limit.' },
+  { field: 'kill_limit', noLimit: true },
+  { field: 'max_score', noLimit: true },
   { field: 'respawn', unit: 'seconds' },
   { field: 'start_delay', unit: 'seconds', hint: 'The wait before each round starts.' },
-];
-
-const EXPANSIONS: { value: HostedExpansion; label: string }[] = [
-  { value: '', label: 'Joint Operations (base game)' },
-  { value: 'jox01', label: 'Escalation (jox01)' },
 ];
 
 // The fields in the order the page shows them: the first refused one takes
 // the keyboard.
 const FIELD_ORDER: SettingsField[] = [
+  'game',
   'game_name',
   'game_password',
   'max_players',
@@ -271,32 +309,49 @@ const FIELD_ORDER: SettingsField[] = [
   'missions',
 ];
 
-// The rotation to begin with: the last server's, each mission once (the
-// picker holds each at most once) and kept to the service's list when it has
-// one, else the service's own. `dropped` names the last server's missions the
-// service no longer offers (or names no .bms file), which the form says it left
-// out.
-function initialMissions(): { missions: string[]; dropped: string[] } {
-  const offered = uniqueMissions(props.defaultMissions);
-  const previous = uniqueMissions(props.previous?.missions ?? []);
-  if (offered.length === 0) {
-    return { missions: previous.filter(isMissionName), dropped: previous.filter((m) => !isMissionName(m)) };
-  }
-  const known = new Map(offered.map((m) => [m.toLowerCase(), m] as const));
-  const kept: string[] = [];
-  const dropped: string[] = [];
-  for (const m of previous) {
-    const name = known.get(m.toLowerCase());
-    if (name) kept.push(name);
-    else dropped.push(m);
-  }
-  return { missions: kept.length > 0 ? kept : [...offered], dropped };
+// The game a fresh form picks (the last server's while still offered), and
+// the rotation it begins with for each game: the last server's when it ran
+// that game (each mission once, kept to the game's list), else the game's own.
+const firstGame = initialGame(props.previous, props.dataSets);
+const previousGameGone =
+  props.previous !== null && props.dataSets.length > 0 && firstGame !== props.previous.game;
+function rotationFor(game: string) {
+  return initialRotation(props.previous, findDataSet(props.dataSets, game));
 }
 
-const initial = initialMissions();
-// The last server's missions the rotation left out, said once above the picker.
-const droppedMissions = initial.dropped;
-const form = reactive(formFrom(props.previous, initial.missions));
+const form = reactive(
+  formFrom(props.previous, findDataSet(props.dataSets, firstGame), rotationFor(firstGame).missions),
+);
+const dataSet = computed(() => findDataSet(props.dataSets, form.game));
+const expansions = computed<HostedExpansionOption[]>(() => dataSet.value?.expansions ?? []);
+// The last server's missions the picked game's rotation left out, said once
+// above the picker.
+const droppedMissions = computed(() => rotationFor(form.game).dropped);
+
+// Another game: its expansions, ranges and missions. An expansion it lacks
+// goes back to its base game, and the rotation starts again from its own.
+watch(
+  () => form.game,
+  (game) => {
+    const picked = findDataSet(props.dataSets, game);
+    if (!picked || !allowsExpansion(picked, form.expansion)) form.expansion = '';
+    form.missions = rotationFor(game).missions;
+  },
+);
+
+function limitOf(field: IntField): SettingRange | null {
+  return dataSet.value?.limits[field] ?? null;
+}
+
+function numberHint(spec: { field: IntField; hint?: string; noLimit?: boolean }): string {
+  const range = limitOf(spec.field);
+  const parts: string[] = [];
+  if (range) parts.push(`${range.min} to ${range.max}.`);
+  if (range && spec.noLimit) parts.push(`${range.max} means no limit.`);
+  if (spec.hint) parts.push(spec.hint);
+  return parts.join(' ');
+}
+
 const busy = ref(false);
 // The game password is masked (it may come from the last server) until shown.
 const showPassword = ref(false);
@@ -318,7 +373,7 @@ const errors = computed<SettingsErrors>(() => {
 watch(
   form,
   () => {
-    if (attempted.value) checked.value = checkSettings(form).errors;
+    if (attempted.value) checked.value = checkSettings(form, props.dataSets).errors;
   },
   { deep: true },
 );
@@ -360,7 +415,7 @@ async function submit() {
   if (busy.value) return;
   attempted.value = true;
   serverRefusal.value = null;
-  const result = checkSettings(form);
+  const result = checkSettings(form, props.dataSets);
   checked.value = result.errors;
   if (!result.settings) {
     const count = Object.keys(result.errors).length;
@@ -379,9 +434,10 @@ async function submit() {
   const error = reply.error;
   alertText.value = error.message;
   if (error.code === 'invalid_settings' && error.field) {
+    const rule = fieldRule(error.field, dataSet.value);
     const refused: SettingsErrors = {};
-    refused[error.field] = FIELD_RULES[error.field];
-    serverRefusal.value = { field: error.field, message: FIELD_RULES[error.field] };
+    refused[error.field] = rule;
+    serverRefusal.value = { field: error.field, message: rule };
     await focusFirstError(refused);
   }
   emit('refused', error);

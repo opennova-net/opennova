@@ -22,7 +22,7 @@ constexpr const char *kServerColumns =
 		"id, owner_user_id, service_user_id, state, game_name, max_players, game_password, "
 		"time_limit, kill_limit, max_score, respawn, start_delay, team_ff, expansion, missions, "
 		"provider, machine_id, machine_address, admin_port, restarts, "
-		"failure_reason, created_at, updated_at, running_at, ended_at";
+		"failure_reason, created_at, updated_at, running_at, ended_at, game";
 
 BindValue optional_id(std::optional<int64_t> id) {
 	if (!id) return BindValue(std::monostate{});
@@ -57,6 +57,7 @@ HostedServer row_to_server(const db::Row &r) {
 	s.updated_at = r.as_text(22).value_or("");
 	s.running_at = r.as_text(23).value_or("");
 	s.ended_at = r.as_text(24).value_or("");
+	st.game = r.as_text(25).value_or("");
 	return s;
 }
 
@@ -92,9 +93,9 @@ std::optional<State> state_from_name(std::string_view name) {
 bool is_live(State state) { return state != State::Stopped && state != State::Failed; }
 
 RequestResult request_server(db::Database &db, int64_t owner_user_id,
-		const HostedSettings &settings, int cap) {
+		const HostedSettings &settings, const std::vector<DataSet> &offered, int cap) {
 	RequestResult out;
-	if (check_settings(settings)) {
+	if (check_settings(settings, offered)) {
 		out.outcome = RequestOutcome::InvalidSettings;
 		return out;
 	}
@@ -122,10 +123,10 @@ RequestResult request_server(db::Database &db, int64_t owner_user_id,
 		out.outcome = RequestOutcome::AtCapacity;
 		return out;
 	}
-	db.exec("INSERT INTO hosted_servers (owner_user_id, state, game_name, max_players, "
+	db.exec("INSERT INTO hosted_servers (owner_user_id, state, game, game_name, max_players, "
 			"game_password, time_limit, kill_limit, max_score, respawn, start_delay, team_ff, "
-			"expansion, missions) VALUES (?, 'requested', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
-			{ BindValue(owner_user_id), BindValue(settings.game_name),
+			"expansion, missions) VALUES (?, 'requested', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
+			{ BindValue(owner_user_id), BindValue(settings.game), BindValue(settings.game_name),
 					BindValue(static_cast<int64_t>(settings.max_players)),
 					BindValue(settings.game_password),
 					BindValue(static_cast<int64_t>(settings.time_limit)),

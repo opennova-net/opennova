@@ -55,7 +55,8 @@ std::string g_self;
 
 constexpr const char *kAws = "/usr/local/bin/aws";
 constexpr const char *kRegion = "us-east-1";
-constexpr const char *kTemplate = "lt-0123456789abcdef0";
+constexpr const char *kTemplate = "lt-0123456789abcdef0";     // Joint Operations' data
+constexpr const char *kDfx2Template = "lt-0abcdef0123456789"; // Delta Force Xtreme 2's
 constexpr const char *kSubnet = "subnet-0123456789abcdef0";
 constexpr const char *kDeployment = "opennova-server";
 constexpr const char *kImage =
@@ -194,7 +195,10 @@ hosted::Ec2Config config_in(const std::string &scratch) {
 	hosted::Ec2Config c;
 	c.aws_cli = kAws;
 	c.region = kRegion;
-	c.launch_template = kTemplate;
+	// A launch template per data set, each carrying its data set's snapshot.
+	c.data_sets = { hosted::known_data_sets()[0], hosted::known_data_sets()[1] };
+	c.data_sets[0].launch_template = kTemplate;
+	c.data_sets[1].launch_template = kDfx2Template;
 	c.subnet = kSubnet;
 	c.deployment = kDeployment;
 	c.serve_image = kImage;
@@ -211,6 +215,7 @@ hosted::Ec2Config config_in(const std::string &scratch) {
 hosted::LaunchSpec spec_for(int64_t server_id) {
 	hosted::LaunchSpec spec;
 	spec.server_id = server_id;
+	spec.data_set = hosted::kDataSetJointOperations;
 	spec.files.push_back({ "server.host", "GameName \"Caf\xE9\"\r\nMission a.bms 0\r\n", true });
 	spec.files.push_back({ "game.cfg", "version = \"29\"\n", false });
 	spec.files.push_back({ "credentials.txt", "NOVAWORLD_USER=srv-7\nNOVAWORLD_PASS=secretpassword\n", true });
@@ -305,8 +310,10 @@ int test_config_checks(const std::string &scratch) {
 	TEST_EXPECT(refused([](hosted::Ec2Config &c) { c.aws_cli = "aws"; }));
 	TEST_EXPECT(refused([](hosted::Ec2Config &c) { c.region = ""; }));
 	TEST_EXPECT(refused([](hosted::Ec2Config &c) { c.region = "US East 1"; }));
-	TEST_EXPECT(refused([](hosted::Ec2Config &c) { c.launch_template = "lt-XYZ"; }));
-	TEST_EXPECT(refused([](hosted::Ec2Config &c) { c.launch_template = "my-template"; }));
+	TEST_EXPECT(refused([](hosted::Ec2Config &c) { c.data_sets.clear(); }));
+	TEST_EXPECT(refused([](hosted::Ec2Config &c) { c.data_sets[1].launch_template = "lt-XYZ"; }));
+	TEST_EXPECT(refused([](hosted::Ec2Config &c) { c.data_sets[0].launch_template = "my-template"; }));
+	TEST_EXPECT(refused([](hosted::Ec2Config &c) { c.data_sets[0].launch_template.clear(); }));
 	TEST_EXPECT(refused([](hosted::Ec2Config &c) { c.subnet = "sg-0123456789abcdef0"; }));
 	TEST_EXPECT(refused([](hosted::Ec2Config &c) { c.deployment = ""; }));
 	TEST_EXPECT(refused([](hosted::Ec2Config &c) { c.deployment = "prod,dev"; }));
@@ -495,12 +502,45 @@ int test_launch_failures(const std::string &scratch) {
 	TEST_EXPECT(rig.provider.describe(kMachineA).state == MachineState::Gone);
 	TEST_EXPECT(rig.runner.calls.size() == calls);
 
-	// A spec with no server id launches nothing.
+	// A spec with no server id launches nothing, nor one of a data set with no
+	// launch template here (no token is issued for it either).
 	std::string error;
 	hosted::LaunchSpec none = spec_for(7);
 	none.server_id = 0;
 	TEST_EXPECT(!rig.provider.launch(none, error) && !error.empty());
 	TEST_EXPECT(rig.runner.calls.size() == calls);
+	hosted::LaunchSpec unknown = spec_for(7);
+	unknown.data_set = hosted::kDataSetOpenNova;
+	TEST_EXPECT(!rig.provider.launch(unknown, error) && error.find("opennova_0_consumer") != std::string::npos);
+	TEST_EXPECT(rig.runner.calls.size() == calls && rig.bootstrap.live_tokens() == 0);
+	return 0;
+}
+
+// Each data set launches from its own launch template (the one whose data
+// volume holds it); the rest of the call is the same.
+int test_launch_template_per_data_set(const std::string &scratch) {
+	Rig rig(scratch);
+	rig.runner.replies.push_back(answered(run_instances_reply(kMachineA, "10.44.0.21")));
+	rig.runner.replies.push_back(answered(run_instances_reply(kMachineB, "10.44.0.22")));
+	std::string error;
+	hosted::LaunchSpec jo = spec_for(7);
+	hosted::LaunchSpec dfx2 = spec_for(8);
+	dfx2.data_set = hosted::kDataSetDeltaForceXtreme2;
+	TEST_EXPECT(rig.provider.launch(jo, error) == std::optional<std::string>(kMachineA));
+	TEST_EXPECT(rig.provider.launch(dfx2, error) == std::optional<std::string>(kMachineB));
+	TEST_EXPECT(rig.runner.calls.size() == 2);
+	const auto template_of = [&rig](size_t call) {
+		const std::vector<std::string> &argv = rig.runner.calls.at(call).argv;
+		return argv.size() > 4 && argv[3] == "--launch-template" ? argv[4] : std::string();
+	};
+	TEST_EXPECT(template_of(0) == "{\"LaunchTemplateId\":\"lt-0123456789abcdef0\",\"Version\":\"$Default\"}");
+	TEST_EXPECT(template_of(1) == "{\"LaunchTemplateId\":\"lt-0abcdef0123456789\",\"Version\":\"$Default\"}");
+	// The bundle a machine fetches is its spec whole (the arguments name the
+	// data set's title; the supervisor rendered them).
+	std::string why;
+	const auto redeemed =
+			rig.bootstrap.redeem(8, assigned(rig.runner.calls.at(1).user_data, "BOOTSTRAP_TOKEN"), "10.44.0.22", why);
+	TEST_EXPECT(redeemed && redeemed->bundle.spec.data_set == "dfx2_consumer");
 	return 0;
 }
 
@@ -937,6 +977,7 @@ int main(int argc, char **argv) {
 		{ "plan", test_plan },
 		{ "launch", test_launch },
 		{ "launch_failures", test_launch_failures },
+		{ "launch_template_per_data_set", test_launch_template_per_data_set },
 		{ "describe", test_describe },
 		{ "describe_failures", test_describe_failures },
 		{ "terminate", test_terminate },

@@ -3783,13 +3783,16 @@ void end_stopping_servers(Harness &h) {
 }
 
 // The hosted servers' routes (hosted/hosted_routes.h; the harness listener runs
-// them with ONNET_HOSTED_PROVIDER set, a cap of 2 and the default rotation
-// "default.bms", and no supervisor, so rows stay where the routes put them):
-// the session and CSRF refusals, the approval (PUT
-// /api/admin/users/<id>/can-host, admin only), the settings' refusals, the
-// start, one live server per account, the default rotation, the cap, the
-// owner's stop, the fleet view and the admin's stops (admin only, never the
-// admin password), and a listener with hosting off.
+// them with ONNET_HOSTED_PROVIDER set, a cap of 2 and two offered data sets,
+// Joint Operations' with the default rotation "default.bms" and Delta Force
+// Xtreme 2's with its own, and no supervisor, so rows stay where the routes
+// put them): the session and CSRF refusals, the data sets the owner's view
+// lists, the approval (PUT /api/admin/users/<id>/can-host, admin only), the
+// settings' refusals (the game among them), the start (on the first data set
+// when it names none, and on Delta Force Xtreme 2's with its rotation), one
+// live server per account, the default rotation, the cap, the owner's stop,
+// the fleet view and the admin's stops (admin only, never the admin
+// password), and a listener with hosting off.
 int test_hosted_server_routes(Harness &h) {
 	namespace hosted = opennova::novaworld_server::hosted;
 	const int64_t ana = make_account(h, "hosted_ana", "pw-hosted-ana");
@@ -3842,9 +3845,28 @@ int test_hosted_server_routes(Harness &h) {
 	auto json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && json["enabled"].b() && !json["can_host"].b());
 	TEST_EXPECT(json["server"].t() == crow::json::type::Null);
-	// The configured rotation, the missions the site's rotation picker offers.
-	TEST_EXPECT(json["default_missions"].size() == 1 &&
-			str(json["default_missions"][0]) == "default.bms");
+	// The data sets the provider offers, in the service's order (Joint
+	// Operations first; OpenNova's has no folder here, so it is not offered):
+	// each one's game, name, expansions, rotation (the missions the site's
+	// picker offers) and limits.
+	TEST_EXPECT(json.has("data_sets") && json["data_sets"].size() == 2);
+	if (json.has("data_sets") && json["data_sets"].size() == 2) {
+		const auto &jo = json["data_sets"][0];
+		const auto &dfx2 = json["data_sets"][1];
+		TEST_EXPECT(str(jo["game"]) == "jop_2_consumer" && str(jo["display_name"]) == "Joint Operations");
+		TEST_EXPECT(jo["expansions"].size() == 2 && str(jo["expansions"][0]["code"]).empty() &&
+				str(jo["expansions"][1]["code"]) == "jox01" &&
+				str(jo["expansions"][1]["name"]) == "Escalation (jox01)");
+		TEST_EXPECT(jo["default_missions"].size() == 1 && str(jo["default_missions"][0]) == "default.bms");
+		TEST_EXPECT(jo["limits"]["max_players"]["min"].i() == 2 && jo["limits"]["max_players"]["max"].i() == 64);
+		TEST_EXPECT(jo["limits"]["kill_limit"]["max"].i() == 500 && jo["limits"]["start_delay"]["min"].i() == 0);
+		TEST_EXPECT(str(dfx2["game"]) == "dfx2_consumer" && str(dfx2["display_name"]) == "Delta Force Xtreme 2");
+		TEST_EXPECT(dfx2["expansions"].size() == 1 && str(dfx2["expansions"][0]["code"]).empty());
+		TEST_EXPECT(dfx2["default_missions"].size() == 2 && str(dfx2["default_missions"][1]) == "dfx2_b.bms");
+		TEST_EXPECT(dfx2["limits"].has("respawn") && dfx2["limits"]["time_limit"]["max"].i() == 300);
+		TEST_EXPECT(dfx2["limits"]["max_players"]["max"].i() == 100);
+	}
+	TEST_EXPECT(!json.has("default_missions"));
 	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
 	reply = start(ana_s, settings);
 	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "not_approved");
@@ -3887,6 +3909,27 @@ int test_hosted_server_routes(Harness &h) {
 		TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == r.error);
 		if (*r.field) TEST_EXPECT(json && str(json["field"]) == r.field && json.has("message"));
 	}
+	// The game: one the service offers (OpenNova's is known, but not offered
+	// here), whose expansions the expansion names. A bucket of its own (Eve's).
+	const int64_t eve = make_account(h, "hosted_eve", "pw-hosted-eve");
+	const std::string eve_s = login_token(h, "10.51.0.5", "hosted_eve", "pw-hosted-eve");
+	TEST_EXPECT(eve > 0 && !eve_s.empty());
+	const Refused game_refused[] = {
+		{ "{\"game\":\"jop_3_consumer\",\"game_name\":\"x\",\"missions\":[\"a.bms\"]}", "invalid_settings", "game" },
+		{ "{\"game\":\"opennova_0_consumer\",\"game_name\":\"x\",\"missions\":[\"a.bms\"]}", "invalid_settings",
+				"game" },
+		{ "{\"game\":\"dfx2_consumer\",\"game_name\":\"x\",\"expansion\":\"jox01\"}", "invalid_settings",
+				"expansion" },
+		{ "{\"game\":7,\"game_name\":\"x\"}", "invalid_field", "" },
+	};
+	for (const Refused &r : game_refused) {
+		reply = start(eve_s, r.body);
+		json = crow::json::load(body_text(reply));
+		if (reply.code != 400 || error_of_reply(reply) != r.error)
+			std::fprintf(stderr, "  %s -> %s\n", r.body, describe(reply).c_str());
+		TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == r.error);
+		if (*r.field) TEST_EXPECT(json && str(json["field"]) == r.field && json.has("message"));
+	}
 
 	// The start: 202 with the server, requested, and its first event.
 	reply = start(ana_s, settings);
@@ -3896,6 +3939,10 @@ int test_hosted_server_routes(Harness &h) {
 	const int64_t ana_server = json["server"]["id"].i();
 	TEST_EXPECT(json["server"]["live"].b());
 	TEST_EXPECT(str(json["server"]["settings"]["game_name"]) == "Ana's Server");
+	// No game named: the first the service offers, with its names.
+	TEST_EXPECT(str(json["server"]["settings"]["game"]) == "jop_2_consumer");
+	TEST_EXPECT(str(json["server"]["game_display_name"]) == "Joint Operations");
+	TEST_EXPECT(str(json["server"]["expansion_display_name"]) == "Joint Operations (base game)");
 	TEST_EXPECT(json["server"]["settings"]["max_players"].i() == 16);
 	TEST_EXPECT(json["server"]["settings"]["missions"].size() == 2);
 	TEST_EXPECT(str(json["server"]["settings"]["missions"][0]) == "first.bms");
@@ -3938,6 +3985,8 @@ int test_hosted_server_routes(Harness &h) {
 		TEST_EXPECT(s["owner"]["id"].i() == ana && str(s["owner"]["username"]) == "hosted_ana");
 		TEST_EXPECT(s["service_account"].t() == crow::json::type::Null);
 		TEST_EXPECT(str(s["state"]) == "requested");
+		TEST_EXPECT(str(s["settings"]["game"]) == "jop_2_consumer" &&
+				str(s["game_display_name"]) == "Joint Operations");
 	}
 	TEST_EXPECT(seen);
 	TEST_EXPECT(body_text(me(ana_s)).find("planted-admin-secret") == std::string::npos);
@@ -3956,10 +4005,20 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(str(json["server"]["state"]) == "stopped" && !json["server"]["live"].b());
 	TEST_EXPECT(json["server"]["events"].size() == 3);
 	TEST_EXPECT(json["server"]["ended_at"].t() == crow::json::type::String);
-	// Its place is free again.
-	reply = start(cy_s, "{\"game_name\":\"Cy's\"}");
-	TEST_EXPECT(reply.code == 202);
-	const int64_t cy_server = crow::json::load(body_text(reply))["server"]["id"].i();
+	// Its place is free again: Cy takes it with a Delta Force Xtreme 2 server,
+	// which takes that game's default rotation.
+	reply = start(cy_s, "{\"game\":\"dfx2_consumer\",\"game_name\":\"Cy's\"}");
+	json = crow::json::load(body_text(reply));
+	if (reply.code != 202) std::fprintf(stderr, "  dfx2 start: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.code == 202 && str(json["server"]["settings"]["game"]) == "dfx2_consumer");
+	TEST_EXPECT(str(json["server"]["game_display_name"]) == "Delta Force Xtreme 2");
+	TEST_EXPECT(json["server"]["settings"]["missions"].size() == 2 &&
+			str(json["server"]["settings"]["missions"][0]) == "dfx2_a.bms");
+	const int64_t cy_server = json["server"]["id"].i();
+	{
+		const auto cy_row = hosted::find_server(*h.pool.acquire(), cy_server);
+		TEST_EXPECT(cy_row && cy_row->settings.game == "dfx2_consumer");
+	}
 
 	// The admin's stops: one server (404 for none, 409 for an ended one), and the kill switch.
 	auto admin_stop = [&h](const std::string &id, std::vector<std::string> headers) {
@@ -3996,7 +4055,8 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(reply.code == 503 && error_of_reply(reply) == "hosting_disabled");
 	reply = h.send_to(h.secure_port, "GET", "/api/me/server",
 			{ with_cookie(nws::kWebSessionHostCookie, token) });
-	TEST_EXPECT(reply.code == 200 && !crow::json::load(body_text(reply))["enabled"].b());
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && !json["enabled"].b() && json["data_sets"].size() == 0);
 	return 0;
 }
 
@@ -4027,9 +4087,10 @@ int test_hosted_listing_owner(Harness &h) {
 
 	// The hosted server and its service account, as the supervisor makes them.
 	hosted::HostedSettings settings;
+	settings.game = hosted::kDataSetJointOperations;
 	settings.game_name = "Hosted Owner Test";
 	settings.missions = { "a.bms" };
-	const auto request = hosted::request_server(*h.pool.acquire(), owner, settings, 10);
+	const auto request = hosted::request_server(*h.pool.acquire(), owner, settings, hosted::known_data_sets(), 10);
 	TEST_EXPECT(request.outcome == hosted::RequestOutcome::Created);
 	const int64_t server_id = request.id;
 	const std::string service_name = nws::service_username(server_id);
@@ -4526,9 +4587,10 @@ int test_hosted_console_routes(Harness &h) {
 	auto reply = get("/api/me/server/players", as_owner);
 	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "no_live_server");
 	hosted::HostedSettings settings;
+	settings.game = hosted::kDataSetJointOperations;
 	settings.game_name = "Console Test";
 	settings.missions = { "alpha.bms" };
-	const auto request = hosted::request_server(*h.pool.acquire(), owner, settings, 10);
+	const auto request = hosted::request_server(*h.pool.acquire(), owner, settings, hosted::known_data_sets(), 10);
 	TEST_EXPECT(request.outcome == hosted::RequestOutcome::Created);
 	const int64_t id = request.id;
 	const std::string base = "/api/admin/hosted/" + std::to_string(id);
@@ -4984,10 +5046,16 @@ int main() {
 		config.trusted_proxies = {"127.0.0.1"};
 		config.api_proxy_only = true;
 		// The hosted servers' routes run (no supervisor: rows stay where the routes
-		// put them), with a cap of 2 and a default rotation.
+		// put them), with a cap of 2 and two data sets, each with a default
+		// rotation: Joint Operations and Delta Force Xtreme 2 (the local
+		// provider's folders, never read here). OpenNova's names no folder, so
+		// the local provider does not offer it.
 		config.hosted_provider = "local";
 		config.hosted_cap = 2;
-		config.hosted_missions = { "default.bms" };
+		config.hosted_data_sets =
+				"{\"dfx2_consumer\":{\"missions\":[\"dfx2_a.bms\",\"dfx2_b.bms\"],\"resource_dir\":\"unused-dfx2\"},"
+				"\"jop_2_consumer\":{\"missions\":[\"default.bms\"],\"resource_dir\":\"unused-jo\"},"
+				"\"opennova_0_consumer\":{\"missions\":[\"on.bms\"]}}";
 
 		opennova::ConnectionManager manager;
 		// The push routes' channel, as main() wires it: a real NW UDP listener on a port the

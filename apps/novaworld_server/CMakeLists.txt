@@ -28,6 +28,7 @@ if(BUILD_NOVAWORLD_HTTP)
         hosted/command_runner.cpp
         hosted/console_commands.cpp
         hosted/console_routes.cpp
+        hosted/data_sets.cpp
         hosted/ec2_provider.cpp
         hosted/hosted_repository.cpp
         hosted/hosted_routes.cpp

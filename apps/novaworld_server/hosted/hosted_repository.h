@@ -1,7 +1,7 @@
 #pragma once
 
-// The hosted servers' rows (hosted_servers, hosted_server_events; migration
-// 0011): the requests the site makes, the state each server is in, every
+// The hosted servers' rows (hosted_servers, hosted_server_events; migrations
+// 0011 and 0014, the server's data set): the requests the site makes, the state each server is in, every
 // transition with what caused it, and which listing is a hosted server's. The
 // supervisor (supervisor.h) and the routes share it; every write that spans
 // statements is one db::Transaction, and a transition is a compare-and-set on
@@ -94,12 +94,12 @@ struct RequestResult {
 	int64_t id = 0;
 };
 
-// A start the owner asks for: the settings checked again (check_settings, as
-// the routes do first), then in one transaction the account's approval, its one
-// live server and the global cap, and the row written (state requested, its
-// event beside it).
+// A start the owner asks for: the settings checked again against the offered
+// data sets (check_settings, as the routes do first), then in one transaction
+// the account's approval, its one live server and the global cap, and the row
+// written (state requested, its event beside it).
 RequestResult request_server(db::Database &db, int64_t owner_user_id,
-		const HostedSettings &settings, int cap);
+		const HostedSettings &settings, const std::vector<DataSet> &offered, int cap);
 
 std::optional<HostedServer> find_server(db::Database &db, int64_t id);
 // The owner's live server, else the newest of its ended ones.

@@ -41,14 +41,16 @@ services:
       ONNET_REQUIRE_HOST_KEY: ${ONNET_REQUIRE_HOST_KEY:-}
       # Hosted game servers (apps/novaworld_server/README.md "Hosted servers"):
       # the deploy toolbox's `app deploy` sets the provider and every ec2
-      # setting from the Terraform outputs (DEPLOY.md "Hosted game servers");
-      # unset, hosting is off. The cap and the default rotation are the
-      # operator's (app.prod.env).
+      # setting from the Terraform outputs, the launch template of each data
+      # set among them (ONNET_HOSTED_EC2_LAUNCH_TEMPLATES, a JSON object by data
+      # set; DEPLOY.md "Hosted game servers"); unset, hosting is off. The cap
+      # and each data set's default rotation (ONNET_HOSTED_DATA_SETS, a JSON
+      # object by data set) are the operator's (app.prod.env).
       ONNET_HOSTED_PROVIDER: ${ONNET_HOSTED_PROVIDER:-none}
       ONNET_HOSTED_CAP: ${ONNET_HOSTED_CAP:-}
-      ONNET_HOSTED_MISSIONS: ${ONNET_HOSTED_MISSIONS:-}
+      ONNET_HOSTED_DATA_SETS: ${ONNET_HOSTED_DATA_SETS:-}
       ONNET_HOSTED_EC2_REGION: ${ONNET_HOSTED_EC2_REGION:-}
-      ONNET_HOSTED_EC2_LAUNCH_TEMPLATE: ${ONNET_HOSTED_EC2_LAUNCH_TEMPLATE:-}
+      ONNET_HOSTED_EC2_LAUNCH_TEMPLATES: ${ONNET_HOSTED_EC2_LAUNCH_TEMPLATES:-}
       ONNET_HOSTED_EC2_SUBNET: ${ONNET_HOSTED_EC2_SUBNET:-}
       ONNET_HOSTED_DEPLOYMENT: ${ONNET_HOSTED_DEPLOYMENT:-}
       ONNET_HOSTED_SERVE_IMAGE: ${ONNET_HOSTED_SERVE_IMAGE:-}

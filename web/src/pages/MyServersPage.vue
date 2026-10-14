@@ -84,7 +84,7 @@
             <HostedSettingsForm
               :key="formKey"
               :previous="hosted.server?.settings ?? null"
-              :default-missions="hosted.default_missions"
+              :data-sets="hosted.data_sets"
               :retry="startKind(hosted.server) === 'retry'"
               @started="onStarted"
               @refused="onRefused"

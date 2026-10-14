@@ -34,7 +34,7 @@ const std::vector<std::string> LocalProcessProvider::kServeEnvironment = {
 
 LocalProcessProvider::LocalProcessProvider(LocalProcessConfig config) : config_(std::move(config)) {
 	config_.serve_binary = absolute_path(config_.serve_binary);
-	config_.resource_dir = absolute_path(config_.resource_dir);
+	for (DataSet &d : config_.data_sets) d.resource_dir = absolute_path(d.resource_dir);
 	config_.work_dir = absolute_path(config_.work_dir);
 	spawner_ = std::thread([this] { spawner_loop(); });
 }
@@ -130,9 +130,14 @@ MachinePlan LocalProcessProvider::plan(int64_t) {
 }
 
 std::optional<std::string> LocalProcessProvider::launch(const LaunchSpec &spec, std::string &error) {
-	if (config_.serve_binary.empty() || config_.resource_dir.empty() || config_.work_dir.empty()) {
-		error = "the local provider needs ONNET_HOSTED_SERVE_BIN, ONNET_HOSTED_RESOURCE_DIR and "
-				"ONNET_HOSTED_WORK_DIR";
+	if (config_.serve_binary.empty() || config_.work_dir.empty()) {
+		error = "the local provider needs ONNET_HOSTED_SERVE_BIN and ONNET_HOSTED_WORK_DIR";
+		return std::nullopt;
+	}
+	const DataSet *data_set = find_data_set(config_.data_sets, spec.data_set);
+	if (!data_set || data_set->resource_dir.empty()) {
+		error = "the local provider has no game folder for data set '" + spec.data_set +
+				"' (ONNET_HOSTED_DATA_SETS resource_dir)";
 		return std::nullopt;
 	}
 	const fs::path dir = server_dir(spec.server_id);
@@ -168,9 +173,10 @@ std::optional<std::string> LocalProcessProvider::launch(const LaunchSpec &spec, 
 	}
 
 	proc::SpawnOptions options;
-	options.argv = { config_.serve_binary, "--resource-dir", config_.resource_dir };
-	if (config_.loose_root) options.argv.push_back("--loose-root");
+	options.argv = { config_.serve_binary, "--resource-dir", data_set->resource_dir };
+	if (data_set->loose_root) options.argv.push_back("--loose-root");
 	options.argv.insert(options.argv.end(), spec.serve_args.begin(), spec.serve_args.end());
+	machine.argv = options.argv;
 	options.working_dir = dir.u8string();
 	options.output_path = (dir / kConsoleLogName).u8string();
 	options.environment = proc::filter_environment(kServeEnvironment);
@@ -182,11 +188,17 @@ std::optional<std::string> LocalProcessProvider::launch(const LaunchSpec &spec, 
 	std::lock_guard<std::mutex> lock(mu_);
 	const std::string id =
 			"local-" + std::to_string(spec.server_id) + "-" + std::to_string(next_machine_++);
-	std::printf("[hosted] local: server %lld runs as pid %lld (%s) in %s\n",
-			static_cast<long long>(spec.server_id), static_cast<long long>(machine.process.pid()),
-			id.c_str(), dir.u8string().c_str());
+	std::printf("[hosted] local: server %lld runs %s as pid %lld (%s) in %s\n",
+			static_cast<long long>(spec.server_id), data_set->game.c_str(),
+			static_cast<long long>(machine.process.pid()), id.c_str(), dir.u8string().c_str());
 	machines_.emplace(id, std::move(machine));
 	return id;
+}
+
+std::vector<std::string> LocalProcessProvider::command_of(const std::string &machine_id) {
+	std::lock_guard<std::mutex> lock(mu_);
+	const auto it = machines_.find(machine_id);
+	return it == machines_.end() ? std::vector<std::string>() : it->second.argv;
 }
 
 MachineStatus LocalProcessProvider::describe(const std::string &machine_id) {

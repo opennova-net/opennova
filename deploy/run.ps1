@@ -6,10 +6,12 @@
 #   .\deploy\run.ps1 infra apply
 #
 # $env:HOSTED_DATA_DIR mounts that folder read-only at /hosted-data, where
-# `hosted data-snapshot` reads the Joint Operations files (DEPLOY.md, "Hosted
-# game servers"):
+# `hosted data-snapshot --data-set <slug>` reads that data set's game files, one
+# data set (one folder) per run (DEPLOY.md, "Hosted game servers"):
 #   $env:HOSTED_DATA_DIR = "D:\SteamLibrary\steamapps\common\Joint Operations Combined Arms"
-#   .\deploy\run.ps1 hosted data-snapshot
+#   .\deploy\run.ps1 hosted data-snapshot --data-set jop_2_consumer
+#   $env:HOSTED_DATA_DIR = "D:\Games\Delta Force Xtreme 2"
+#   .\deploy\run.ps1 hosted data-snapshot --data-set dfx2_consumer
 $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $mount = @()

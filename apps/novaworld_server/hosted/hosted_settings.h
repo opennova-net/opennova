@@ -5,11 +5,12 @@
 // (check_settings), and the supervisor renders the server's working directory
 // from scratch at every start (the host file, game.cfg, admin.cfg and the
 // NovaWorld credentials), in retail's own formats, read by opennova-serve
-// (apps/serve/README.md). The ranges are service policy, not a witnessed
-// limit (the host screen's spin ranges are unread); the byte caps are the
-// fields' own (the host screen's GAME_NAME and SERVER_PASSWORD reads, 32 and
-// 17 bytes with their terminators, docs/mnu/menu-re.md "Host dialog rules").
+// (apps/serve/README.md). The whole-number ranges and the expansions are the
+// server's data set's (data_sets.h); the byte caps are the fields' own (the
+// host screen's GAME_NAME and SERVER_PASSWORD reads, 32 and 17 bytes with
+// their terminators, docs/mnu/menu-re.md "Host dialog rules").
 
+#include "data_sets.h"
 #include "machine_provider.h"
 
 #include <cstddef>
@@ -23,26 +24,14 @@ namespace opennova::novaworld_server::hosted {
 
 inline constexpr size_t kGameNameMaxBytes = 31;     // cp1252 bytes
 inline constexpr size_t kGamePasswordMaxBytes = 16;
-inline constexpr int kMaxPlayersMin = 2;
-inline constexpr int kMaxPlayersMax = 64;           // the host screen's MAX_PLAYERS cap
-inline constexpr int kTimeLimitMin = 1;
-inline constexpr int kTimeLimitMax = 300;
-inline constexpr int kKillLimitMin = 1;
-inline constexpr int kKillLimitMax = 500;           // 500: the host screen's "no limit"
-inline constexpr int kMaxScoreMin = 1;
-inline constexpr int kMaxScoreMax = 500;            // 500: likewise
-inline constexpr int kRespawnMin = 0;
-inline constexpr int kRespawnMax = 300;
-inline constexpr int kStartDelayMin = 0;
-inline constexpr int kStartDelayMax = 300;
 inline constexpr size_t kMissionsMax = 32;
 inline constexpr size_t kMissionNameMaxBytes = 36;  // the stem's 32 and ".bms"
-// The one expansion a hosted server may mount besides base Joint Operations
-// (Escalation; the machine's data holds expansion/jox01/). Joiners need the same.
-inline constexpr const char *kExpansionEscalation = "jox01";
 
 // The owner's settings, as stored (hosted_servers' columns); text in UTF-8.
 struct HostedSettings {
+	// The data set it runs (data_sets.h): the games row's slug, whose lobby it
+	// lists in and whose title opennova-serve speaks (/game).
+	std::string game;
 	std::string game_name;                // GameName
 	int max_players = 32;                 // MaxPlayers
 	std::string game_password;            // MPHostGamePassword ("" for none)
@@ -52,7 +41,7 @@ struct HostedSettings {
 	int respawn = 5;                      // Respawn
 	int start_delay = 0;                  // Delay
 	bool team_ff = false;                 // TeamFF
-	std::string expansion;                // "" or kExpansionEscalation (/exp)
+	std::string expansion;                // "" or one of the data set's expansions (/exp)
 	// The rotation in play order: the first map is the one the server starts on.
 	std::vector<std::string> missions;
 };
@@ -64,12 +53,14 @@ struct SettingsRefusal {
 };
 
 // Every field against its rule; the first refusal, or nullopt for settings the
-// supervisor may render. A name is 1..kGameNameMaxBytes bytes once in cp1252
-// (the host's code page), not blank, with no control byte (C1 included) and no
+// supervisor may render. The game is one of `offered` (the deployment's data
+// sets), whose limits the whole numbers take and whose expansions the
+// expansion names. A name is 1..kGameNameMaxBytes bytes once in cp1252 (the
+// host's code page), not blank, with no control byte (C1 included) and no
 // double quote (the host file quotes it and has no escape); a password is
 // printable ASCII with no space or double quote; a mission is a .bms file name
 // of letters, digits, '_' and '-'.
-std::optional<SettingsRefusal> check_settings(const HostedSettings &settings);
+std::optional<SettingsRefusal> check_settings(const HostedSettings &settings, const std::vector<DataSet> &offered);
 
 // A rotation entry's file name: a .bms name of letters, digits, '_' and '-',
 // at most kMissionNameMaxBytes bytes (check_settings' rule, and the console's
@@ -121,10 +112,12 @@ std::string render_admin_cfg(const MachinePlan &plan, const std::string &admin_p
 // The --credentials file: NOVAWORLD_USER and NOVAWORLD_PASS.
 std::string render_credentials(const std::string &username, const std::string &password);
 
-// The whole start: the four files (every one but game.cfg secret: the host file
-// carries the game password) and opennova-serve's arguments (/HOST, --credentials,
-// --master-host, --master-gate-port, and /exp for an expansion).
-LaunchSpec render_launch(const HostedSettings &settings, const RenderInputs &inputs);
+// The whole start of a server on `data_set` (its settings' game): the four
+// files (every one but game.cfg secret: the host file carries the game
+// password), the data set the machine mounts, and opennova-serve's arguments
+// (/HOST, --credentials, --master-host, --master-gate-port, /game with the data
+// set's title, and /exp for an expansion).
+LaunchSpec render_launch(const HostedSettings &settings, const DataSet &data_set, const RenderInputs &inputs);
 
 // `length` letters and digits from the OS CSPRNG.
 std::string random_secret(size_t length);

@@ -45,9 +45,10 @@ public:
 	HostedRoutes(const HostedRoutes &) = delete;
 	HostedRoutes &operator=(const HostedRoutes &) = delete;
 
-	// Takes ONNET_HOSTED_PROVIDER (hosting is on unless it is "none"),
-	// ONNET_HOSTED_CAP and ONNET_HOSTED_MISSIONS (a start's rotation when the
-	// request names none) from the config. Before register_routes().
+	// Takes ONNET_HOSTED_PROVIDER, ONNET_HOSTED_CAP and the data sets the
+	// provider offers (data_sets.h: a start's game, and its rotation when the
+	// request names none) from the config; hosting is on with a provider and
+	// at least one offered data set. Before register_routes().
 	void configure(const ServerConfig &config);
 	void register_routes(WebApp &app);
 
@@ -64,7 +65,7 @@ private:
 	bool enabled_ = false;
 	std::string provider_ = "none";
 	int cap_ = 5;
-	std::vector<std::string> default_missions_;
+	std::vector<DataSet> data_sets_;
 	RateLimiter start_stop_per_user_{ kStartStopPerUser };
 };
 

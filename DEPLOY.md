@@ -308,10 +308,16 @@ A backup sidecar also runs nightly (see `deploy/backup/`).
 ## 6. Hosted game servers
 
 An account an admin approved (`can_host` in the admin users page) can start one
-headless Joint Operations server from the site's My servers page (ADR 0053). The service
-launches one EC2 machine per server (`infra/aws/hosted.tf`, `c7a.medium` by default),
-running the public `opennova-serve` image over the game data, a private encrypted EBS
-snapshot made once from your licensed install and mounted read-only. The server lists
+headless server from the site's My servers page (ADR 0053), picking its game: a data
+set. A data set is a game folder the server mounts, named by the games slug of the
+lobby it lists in: `jop_2_consumer` (Joint Operations), `dfx2_consumer` (Delta Force
+Xtreme 2) and `opennova_0_consumer` (OpenNova's own data). The server is always the
+public `opennova-serve` image, started with `/game <title>` so it speaks that game's
+identity and lists in that game's lobby; the site offers only the data sets this
+deployment has a snapshot for. The service launches one EC2 machine per server
+(`infra/aws/hosted.tf`, `c7a.medium` by default), running `opennova-serve` over the
+data set's game data, a private encrypted EBS snapshot made once per data set from your
+licensed install and mounted read-only at `/opt/game`. The server lists
 itself on this NovaWorld through the service's public address, its owner administers it
 from the site (the service is the only client of its admin port, 32800, open to the
 service's security group alone; owners never get RAT access), and its stop terminates
@@ -321,7 +327,7 @@ address. No machine has an SSH key; break-glass is SSM Session Manager.
 How the service launches, watches and ends the machines, the bootstrap route and the
 machine script are in `apps/novaworld_server/README.md`, "Hosted servers".
 
-Hosting stays off until a data snapshot exists: with no `hosted` item in the vault,
+Hosting stays off until a data set's snapshot exists: with no `hosted` item in the vault,
 `infra apply` creates nothing for it and changes nothing but its outputs, and `app
 deploy` runs the service with `ONNET_HOSTED_PROVIDER=none`. `app deploy` reads the
 infra's `hosted_enabled` output (it pulls the state first), so after this lands run
@@ -331,44 +337,60 @@ the outputs. A state without them stops the deploy rather than guess hosting off
 
 ### The game data
 
-The snapshot holds the files `opennova-serve` reads from the install, and nothing else:
+Each data set's snapshot holds the files `opennova-serve` reads from its install, and
+nothing else:
 
-| File | Why |
-|---|---|
-| `resource.pff`, `localres.pff`, `language.pff` | the retail boot table it mounts (`engine/base/vfs/vfs.h`) |
-| `expansion/jox01/jox01.pff`, `expansion/jox01/jox01L.pff` | Escalation, for a server started with it (`/exp jox01`) |
-| `expansion/jox01/version.txt` | the expansion checksum the session advertises to joiners |
-| `score.ini` (when present) | the scoring table a server reads loose from the install |
-| `_NSTMOUT.TXT` (when present) | the session timeout override, read when it is there |
+| File | Data sets | Why |
+|---|---|---|
+| `resource.pff`, `localres.pff`, `language.pff` | every one (required) | the retail boot table it mounts (`engine/base/vfs/vfs.h`) |
+| `expansion/jox01/jox01.pff`, `expansion/jox01/jox01L.pff` | `jop_2_consumer` (required) | Escalation, for a server started with it (`/exp jox01`) |
+| `expansion/jox01/version.txt` | `jop_2_consumer` (required) | the expansion checksum the session advertises to joiners |
+| `score.ini` (when present) | `jop_2_consumer`, `dfx2_consumer` | the scoring table a server reads loose from the install |
+| `_NSTMOUT.TXT` (when present) | `jop_2_consumer`, `dfx2_consumer` | the session timeout override, read when it is there |
 
-The movies, the music, the executables and the player's files stay home. A JO:CA install
-gives about 1 GB, a 2 GiB volume. The snapshot is encrypted with the account's default
-EBS key (`aws/ebs`) and private to the account; it never goes in git or an image, and
-players never reach it (the machines mount it read-only and run nothing but the server).
+A Joint Operations Combined Arms install is the `jop_2_consumer` folder, a Delta Force
+Xtreme 2 install the `dfx2_consumer` one (its `med.pff` is the mission editor's and stays
+home), and OpenNova's own data the `opennova_0_consumer` one. The movies, the music, the
+executables and the player's files stay home. A JO:CA install gives about 1 GB, a 2 GiB
+volume. Every snapshot's file system is labelled `opennova-data`, whatever its data set:
+the machine mounts that label read-only at `/opt/game`. The snapshots are encrypted with
+the account's default EBS key (`aws/ebs`) and private to the account; they never go in
+git or an image, and players never reach them (the machines mount them read-only and run
+nothing but the server).
+
+Each data set's host-screen limits (max players, time limit, kill limit, max score,
+respawn, pre-round delay) are the service's own table, the title's host screen's:
+Delta Force Xtreme 2 takes up to 100 players where Joint Operations takes 64, and
+OpenNova's data takes Joint Operations' limits.
 
 ### Turning it on
 
-1. **Make the data snapshot, once.** Mount your JO:CA folder into the toolbox and run
-   `hosted data-snapshot`. From PowerShell:
+1. **Make each data set's snapshot, once.** For every data set you want to offer, mount
+   its game folder into the toolbox and run `hosted data-snapshot --data-set <slug>`.
+   From PowerShell, for Joint Operations:
 
    ```powershell
    $env:OP_SERVICE_ACCOUNT_TOKEN = "ops_..."
    docker compose -f deploy\docker-compose.deploy.yml run --rm -T `
      -v "D:/SteamLibrary/steamapps/common/Joint Operations Combined Arms:/hosted-data:ro" `
-     deploy hosted data-snapshot
+     deploy hosted data-snapshot --data-set jop_2_consumer
    ```
 
-   or `$env:HOSTED_DATA_DIR = "<folder>"; .\deploy\run.ps1 hosted data-snapshot`, or from
-   Git Bash `HOSTED_DATA_DIR="D:/SteamLibrary/steamapps/common/Joint Operations Combined
-   Arms" ./deploy/run.sh hosted data-snapshot`.
+   or `$env:HOSTED_DATA_DIR = "<folder>"; .\deploy\run.ps1 hosted data-snapshot --data-set
+   jop_2_consumer`, or from Git Bash `HOSTED_DATA_DIR="D:/SteamLibrary/steamapps/common/Joint
+   Operations Combined Arms" ./deploy/run.sh hosted data-snapshot --data-set
+   jop_2_consumer`. Then the same with your Delta Force Xtreme 2 folder and `--data-set
+   dfx2_consumer`, and so on: one folder, one snapshot, per data set.
 
-   The toolbox takes the files above from the folder (the one place it reads them) and
-   streams them into a helper image it builds on your docker (`deploy/hosted-data`),
-   which makes an ext4 file system of them labelled `opennova-jo` and writes it straight
-   into a new snapshot through the EBS direct APIs: no EC2 machine, no S3 bucket, no SSH.
-   The snapshot is the only AWS resource it makes, and it deletes it if anything fails;
-   the copy of the files lives only in the helper's container, which goes when it ends.
-   It prints the snapshot id (`snap-...`). The vault's AWS credentials need
+   The toolbox takes the data set's files above from the folder (the one place it reads
+   them) and streams them into a helper image it builds on your docker
+   (`deploy/hosted-data`), which makes an ext4 file system of them labelled
+   `opennova-data` and writes it straight into a new snapshot through the EBS direct
+   APIs: no EC2 machine, no S3 bucket, no SSH. The snapshot is tagged
+   `opennova:data-set=<slug>`. It is the only AWS resource the helper makes, and it
+   deletes it if anything fails; the copy of the files lives only in the helper's
+   container, which goes when it ends. It prints the snapshot id (`snap-...`). The
+   vault's AWS credentials need
    `ebs:StartSnapshot`, `ebs:PutSnapshotBlock`, `ebs:CompleteSnapshot`,
    `ec2:DescribeSnapshots` and `ec2:DeleteSnapshot`, and `kms:DescribeKey`, with which
    the helper confirms the snapshot's key is the AWS-managed `aws/ebs` (without it, it
@@ -380,13 +402,16 @@ players never reach it (the machines mount it read-only and run nothing but the 
    need `kms:GenerateDataKeyWithoutPlaintext`, `kms:Decrypt` and `kms:CreateGrant` on
    the key, as AWS's EBS direct APIs guide lists. This is untested here.
 
-2. **Record it in the vault.** Create an item `hosted` in the deploy vault with a field
-   `data_snapshot_id` holding the id. Every `infra` run reads it as
-   `TF_VAR_hosted_data_snapshot_id`; with no item titled `hosted` in the vault's listing
-   hosting is off, and any other failure (the listing, or reading the item's field)
-   stops the run, so a vault error never plans hosting away. The plan
-   reads the snapshot (its size becomes the data volume's), so a mistyped or deleted id
-   fails at `infra plan`.
+2. **Record them in the vault.** Create an item `hosted` in the deploy vault with one
+   field per data set, `data_snapshot_id_<slug>`, holding its snapshot's id (say
+   `data_snapshot_id_jop_2_consumer` and `data_snapshot_id_dfx2_consumer`). Every `infra`
+   run reads the item once and passes the fields as `TF_VAR_hosted_data_snapshots`, a
+   map by data set; with no item titled `hosted` in the vault's listing hosting is off,
+   and any other failure (the listing, reading the item, a field naming no data set, a
+   value that is no snapshot id, or an item with no such field at all) stops the run, so
+   a vault error never plans hosting away. The plan reads each snapshot (its size
+   becomes that data set's data volume), so a mistyped or deleted id fails at `infra
+   plan`. `./deploy/run.sh secrets check` checks the item the same way.
 
 3. **Check the vCPU quota.** The machines and the server instance share the account's
    On-Demand Standard instances quota: 5 `c7a.medium` (1 vCPU each) beside the
@@ -410,7 +435,8 @@ players never reach it (the machines mount it read-only and run nothing but the 
    ./deploy/run.sh infra plan
    ```
 
-   The plan must create the hosted resources alone: `aws_launch_template.hosted`,
+   The plan must create the hosted resources alone: one launch template per data set
+   (`aws_launch_template.hosted["<slug>"]`, each carrying its data set's snapshot),
    `aws_security_group.hosted` and its three rules, `aws_iam_role.hosted_machine` with
    its Session Manager policy (`aws_iam_role_policy.hosted_machine_ssm`) and instance
    profile, and `aws_iam_policy.hosted_service` with its attachment to the existing
@@ -427,7 +453,9 @@ players never reach it (the machines mount it read-only and run nothing but the 
 
    With the infra's `hosted_enabled` output true, `app deploy` gives the server
    `ONNET_HOSTED_PROVIDER=ec2` and every setting the provider needs from the Terraform
-   outputs: the region, the launch template, the subnet and its range (the only peers
+   outputs: the region, each data set's launch template
+   (`ONNET_HOSTED_EC2_LAUNCH_TEMPLATES`, a JSON object by data set: the data sets the
+   site offers), the subnet and its range (the only peers
    the bootstrap route answers), the deployment tag, the server instance's private
    address, and the serve image pinned to the digest `--serve-tag` names at that moment
    (default `latest`; pick a tag from the "Serve image" workflow). The digest lookup and
@@ -439,24 +467,58 @@ players never reach it (the machines mount it read-only and run nothing but the 
    reset-db` sets the same.
 
    Optional, in `deploy/env/app.prod.env`: `ONNET_HOSTED_CAP` (the most servers at once,
-   default 5) and `ONNET_HOSTED_MISSIONS` (the rotation a start takes when it names none,
-   and the maps the site's picker offers).
+   default 5) and `ONNET_HOSTED_DATA_SETS`, a JSON object by data set on one line whose
+   `missions` is that data set's default rotation (the rotation a start of it takes when
+   it names none, and the maps the site's picker offers for it):
+
+   ```bash
+   ONNET_HOSTED_DATA_SETS='{"jop_2_consumer":{"missions":["a.bms","b.bms"]},"dfx2_consumer":{"missions":["c.bms"]}}'
+   ```
+
+   A data set with no entry there is still offered (its launch template is what offers
+   it); a start of it must then name its own missions.
 
 6. **Approve the first account** (the admin users page, `can_host`) and run the smoke
    test below.
 
+### Moving a deployment from one snapshot to data sets
+
+A deployment set up before data sets has one snapshot, labelled `opennova-jo`, in the
+vault field `data_snapshot_id`. The machine script now mounts the label `opennova-data`
+at `/opt/game`, so that snapshot no longer boots a machine, and `infra` refuses the old
+field by name. Once, in this order:
+
+1. Stop every hosted server (the admin fleet view's **stop all**) and wait until
+   `./deploy/run.sh hosted status` lists nothing.
+2. Make the Joint Operations snapshot again:
+   `HOSTED_DATA_DIR="<your JO:CA folder>" ./deploy/run.sh hosted data-snapshot --data-set jop_2_consumer`
+   (and one per further data set you want to offer).
+3. In the vault item `hosted`, delete the field `data_snapshot_id` and add
+   `data_snapshot_id_jop_2_consumer` with the new id (and `data_snapshot_id_<slug>` for
+   each further data set).
+4. `./deploy/run.sh infra plan`, then `infra apply`. The old template moves to
+   `aws_launch_template.hosted["jop_2_consumer"]` and is replaced once, since its name
+   now carries its data set; running machines keep theirs, and the next `app deploy`
+   hands the service the new id. Each further data set adds a template of its own.
+5. `./deploy/run.sh app deploy --tag sha-<server> --serve-tag sha-<serve>`: the service
+   takes `ONNET_HOSTED_EC2_LAUNCH_TEMPLATES`. Move a rotation you set in
+   `ONNET_HOSTED_MISSIONS` (gone) to `ONNET_HOSTED_DATA_SETS` in `deploy/env/app.prod.env`.
+6. Delete the old snapshot: `./deploy/run.sh aws ec2 delete-snapshot --snapshot-id <old id>`.
+
 ### The smoke test
 
-1. Start a server from My servers. Its timeline runs `requested`, `provisioning`,
-   `booting` (the machine boots, installs docker, mounts the data and fetches its
-   bundle: a few minutes), `listing`, then `running`.
+1. Start a server from My servers, picking one of the offered games. Its timeline runs
+   `requested`, `provisioning`, `booting` (the machine boots, installs docker, mounts
+   the data and fetches its bundle: a few minutes), `listing`, then `running`.
    `./deploy/run.sh hosted status` lists the machine. Note how long `booting` and
    `listing` took (the timeline's times): the service gives a machine 10 minutes to
    boot and 5 to list (`Ec2Provider::kBootTimeoutMs`, `kListingTimeoutMs`), and real
    times near either want those raised.
-2. The server shows in the OpenNova and the retail server browsers, at the machine's
-   public address. A retail client and an OpenNova client both join. Run `/PROFILE` to
-   check the tick holds on the machine type.
+2. The server shows in its game's lobby in the OpenNova and the retail server
+   browsers, at the machine's public address. A retail client of that game and an
+   OpenNova client both join. Run `/PROFILE` to check the tick holds on the machine
+   type. With several data sets, start one of each (from two approved accounts: one
+   live server per account) and check each lists in its own game's lobby alone.
 3. The site's console works: the player list, chat, a map change.
 4. A crash: open a shell on the machine (`aws ssm start-session --target <machine>`,
    which needs the Session Manager plugin where you run it) and
@@ -477,7 +539,7 @@ players never reach it (the machines mount it read-only and run nothing but the 
 
 One always-on `c7a.medium` is about $0.05 an hour, about $37 a month, plus its public
 IPv4 address (about $3.60 a month) and its volumes (a 10 GiB root and the 2 GiB data
-volume, about $1 a month). The snapshot costs a few cents a month. Egress can add as much
+volume, about $1 a month). Each data set's snapshot costs a few cents a month. Egress can add as much
 again as the compute: a full 64-player server sends about 1.8 GB an hour. At the cap of 5
 always-on servers, budget about $200 a month and more under load. `ONNET_HOSTED_CAP`
 lowers the cap.
@@ -495,17 +557,25 @@ machine the service finds with no live server is ended at its next boot or sweep
 
 To turn hosting off for good: stop all, wait until `hosted status` lists nothing, deploy
 with `--no-hosting`, delete the `hosted` vault item, then `infra apply` (it removes the
-hosted resources; later deploys find hosting off on their own). The snapshot stays until
-you delete it (`./deploy/run.sh aws ec2 delete-snapshot --snapshot-id <id>`).
+hosted resources; later deploys find hosting off on their own). The snapshots stay until
+you delete them (`./deploy/run.sh aws ec2 delete-snapshot --snapshot-id <id>`). To stop
+offering one data set alone, delete its `data_snapshot_id_<slug>` field (the item keeps
+the others), `infra apply` (its template goes), then `app deploy`; stop its live
+servers first, since the service can no longer launch them.
 
 ### Operating notes
 
-- **A new machine image.** The launch template keeps the Ubuntu image it was made with
+- **A new machine image.** Each launch template keeps the Ubuntu image it was made with
   (it ignores later image changes, as the server instance does). To move new machines to
-  Canonical's newest: `./deploy/run.sh infra apply -replace='aws_launch_template.hosted[0]'`,
-  then `app deploy` (the template's id changes). Running machines keep theirs.
-- **New data.** Run `hosted data-snapshot` again, put the new id in the vault, `infra
-  apply` (the template moves to it), and delete the old snapshot. New machines take it.
+  Canonical's newest, replace each data set's template:
+  `./deploy/run.sh infra apply -replace='aws_launch_template.hosted["jop_2_consumer"]'`
+  (one `-replace` per data set), then `app deploy` (the templates' ids change). Running
+  machines keep theirs.
+- **New data.** Run `hosted data-snapshot --data-set <slug>` again, put the new id in
+  that data set's vault field, `infra apply` (its template moves to it), and delete the
+  old snapshot. New machines of that data set take it.
+- **A new data set.** Make its snapshot, add its `data_snapshot_id_<slug>` field, `infra
+  apply` (a template of its own), `app deploy`: the site offers it from then on.
 - **A machine's logs.** `aws ec2 get-console-output --instance-id <machine> --latest`
   (through `./deploy/run.sh aws`) shows the bootstrap's steps and the server's end, also
   after the machine is gone, but only while EC2 still lists the terminated machine

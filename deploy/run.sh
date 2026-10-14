@@ -8,10 +8,12 @@
 #   ./deploy/run.sh infra apply
 #
 # HOSTED_DATA_DIR=<folder> mounts that folder read-only at /hosted-data, where
-# `hosted data-snapshot` reads the Joint Operations files (DEPLOY.md, "Hosted
-# game servers"):
+# `hosted data-snapshot --data-set <slug>` reads that data set's game files, one
+# data set (one folder) per run (DEPLOY.md, "Hosted game servers"):
 #   HOSTED_DATA_DIR="D:/SteamLibrary/steamapps/common/Joint Operations Combined Arms" \
-#     ./deploy/run.sh hosted data-snapshot
+#     ./deploy/run.sh hosted data-snapshot --data-set jop_2_consumer
+#   HOSTED_DATA_DIR="D:/Games/Delta Force Xtreme 2" \
+#     ./deploy/run.sh hosted data-snapshot --data-set dfx2_consumer
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

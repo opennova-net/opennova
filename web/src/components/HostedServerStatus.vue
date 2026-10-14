@@ -15,7 +15,8 @@
         </h2>
         <p class="mt-2 flex flex-wrap items-center gap-2 text-sm text-ink-muted">
           <span :class="stateBadgeClass(server.state)">{{ ownerStateLabel(server.state) }}</span>
-          <span>{{ expansionLabel }}</span>
+          <span>{{ gameLabel }}</span>
+          <span v-if="server.settings.expansion">{{ expansionLabel }}</span>
         </p>
       </div>
       <dl class="grid shrink-0 grid-cols-[auto_auto] gap-x-3 gap-y-1 text-xs text-ink-muted sm:text-right">
@@ -118,6 +119,8 @@
     <section class="space-y-3" :aria-labelledby="ids.settings">
       <h3 :id="ids.settings" class="text-lg font-semibold text-ink">Settings</h3>
       <dl class="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[auto_1fr]">
+        <dt class="text-ink-muted">{{ FIELD_LABELS.game }}</dt>
+        <dd class="text-ink">{{ gameLabel }}</dd>
         <dt class="text-ink-muted">{{ FIELD_LABELS.max_players }}</dt>
         <dd class="text-ink">{{ server.settings.max_players }}</dd>
         <dt class="text-ink-muted">{{ FIELD_LABELS.game_password }}</dt>
@@ -346,8 +349,11 @@ watch(
   },
 );
 
-const expansionLabel = computed(() =>
-  props.server.settings.expansion === 'jox01' ? 'Escalation (jox01)' : 'Joint Operations (base game)',
+// The service's names for the server's game and expansion (its codes when it
+// gave none).
+const gameLabel = computed(() => props.server.game_display_name || props.server.settings.game);
+const expansionLabel = computed(
+  () => props.server.expansion_display_name || props.server.settings.expansion || 'Base game',
 );
 
 // The start step the server is on, or -1 once it is stopping or has ended.

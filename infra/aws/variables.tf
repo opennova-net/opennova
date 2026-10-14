@@ -158,14 +158,18 @@ variable "backup_bucket_name" {
 # Hosted game servers (hosted.tf; DEPLOY.md "Hosted game servers")
 # ---------------------------------------------------------------------------
 
-variable "hosted_data_snapshot_id" {
-  description = "The private, encrypted EBS snapshot holding the licensed Joint Operations data the hosted game servers mount read-only (made once by `./deploy/run.sh hosted data-snapshot`). Empty (the default) leaves hosting off: hosted.tf creates nothing and changes nothing. The toolbox reads it from the vault (item `hosted`, field `data_snapshot_id`) as TF_VAR_hosted_data_snapshot_id."
-  type        = string
-  default     = ""
+variable "hosted_data_snapshots" {
+  description = "The data sets hosted game servers run, each the games slug of the lobby it lists in (jop_2_consumer, dfx2_consumer, opennova_0_consumer) to the private, encrypted EBS snapshot holding its game data, which its machines mount read-only (made once per data set by `./deploy/run.sh hosted data-snapshot --data-set <slug>`). One launch template per entry. Empty (the default) leaves hosting off: hosted.tf creates nothing and changes nothing. The toolbox reads it from the vault (item `hosted`, one field `data_snapshot_id_<slug>` per data set) as TF_VAR_hosted_data_snapshots."
+  type        = map(string)
+  default     = {}
 
   validation {
-    condition     = var.hosted_data_snapshot_id == "" || can(regex("^snap-[0-9a-f]{8,17}$", var.hosted_data_snapshot_id))
-    error_message = "hosted_data_snapshot_id must be empty or a snapshot id (snap-...)."
+    condition     = alltrue([for slug in keys(var.hosted_data_snapshots) : contains(["jop_2_consumer", "dfx2_consumer", "opennova_0_consumer"], slug)])
+    error_message = "hosted_data_snapshots takes the data sets jop_2_consumer, dfx2_consumer and opennova_0_consumer alone."
+  }
+  validation {
+    condition     = alltrue([for id in values(var.hosted_data_snapshots) : can(regex("^snap-[0-9a-f]{8,17}$", id))])
+    error_message = "every hosted_data_snapshots value must be a snapshot id (snap-...)."
   }
 }
 
@@ -181,7 +185,7 @@ variable "hosted_instance_type" {
 }
 
 variable "hosted_ami_id" {
-  description = "Override the hosted machines' image (an Ubuntu 24.04 x86_64 AMI). Empty: Canonical's newest when the launch template is made; later images wait for `terraform apply -replace='aws_launch_template.hosted[0]'`."
+  description = "Override the hosted machines' image (an Ubuntu 24.04 x86_64 AMI). Empty: Canonical's newest when a launch template is made; later images wait for `terraform apply -replace='aws_launch_template.hosted[\"<data set>\"]'`, one per data set."
   type        = string
   default     = ""
 }

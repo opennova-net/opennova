@@ -39,6 +39,7 @@ std::vector<crow::json::wvalue> text_list(const std::vector<std::string> &texts)
 
 crow::json::wvalue settings_json(const HostedSettings &s) {
 	crow::json::wvalue out;
+	out["game"] = s.game;
 	out["game_name"] = s.game_name;
 	out["max_players"] = s.max_players;
 	out["game_password"] = s.game_password;
@@ -50,6 +51,38 @@ crow::json::wvalue settings_json(const HostedSettings &s) {
 	out["team_ff"] = s.team_ff;
 	out["expansion"] = s.expansion;
 	out["missions"] = text_list(s.missions);
+	return out;
+}
+
+crow::json::wvalue range_json(const SettingRange &range) {
+	crow::json::wvalue out;
+	out["min"] = range.min;
+	out["max"] = range.max;
+	return out;
+}
+
+// An offered data set, as the site's start form takes it.
+crow::json::wvalue data_set_json(const DataSet &d) {
+	crow::json::wvalue out;
+	out["game"] = d.game;
+	out["display_name"] = d.display_name;
+	std::vector<crow::json::wvalue> expansions;
+	for (const Expansion &e : d.expansions) {
+		crow::json::wvalue item;
+		item["code"] = e.code;
+		item["name"] = e.name;
+		expansions.push_back(std::move(item));
+	}
+	out["expansions"] = std::move(expansions);
+	out["default_missions"] = text_list(d.missions);
+	crow::json::wvalue limits;
+	limits["max_players"] = range_json(d.limits.max_players);
+	limits["time_limit"] = range_json(d.limits.time_limit);
+	limits["kill_limit"] = range_json(d.limits.kill_limit);
+	limits["max_score"] = range_json(d.limits.max_score);
+	limits["respawn"] = range_json(d.limits.respawn);
+	limits["start_delay"] = range_json(d.limits.start_delay);
+	out["limits"] = std::move(limits);
 	return out;
 }
 
@@ -96,6 +129,12 @@ crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool adm
 	e["state"] = state_name(s.state);
 	e["live"] = is_live(s.state);
 	e["settings"] = settings_json(s.settings);
+	// The names the site shows for its game and expansion: the catalog's, so an
+	// ended server's read the same once its data set is no longer offered.
+	const DataSet *data_set = find_data_set(known_data_sets(), s.settings.game);
+	const Expansion *expansion = data_set ? find_expansion(*data_set, s.settings.expansion) : nullptr;
+	e["game_display_name"] = data_set ? data_set->display_name : s.settings.game;
+	e["expansion_display_name"] = expansion ? expansion->name : s.settings.expansion;
 	e["restarts"] = s.restarts;
 	text_or_null(e, "failure_reason", s.failure_reason);
 	e["created_at"] = s.created_at;
@@ -132,11 +171,18 @@ void log_owner(const WebSessionUser &user, const char *what, const std::string &
 
 void HostedRoutes::configure(const ServerConfig &config) {
 	provider_ = config.hosted_provider.empty() ? std::string("none") : config.hosted_provider;
-	enabled_ = provider_ != "none";
+	// main() has warned of texts that do not read (and runs no provider then).
+	std::vector<DataSetConfig> configs;
+	std::string error;
+	data_sets_.clear();
+	if (parse_data_set_configs(config.hosted_data_sets, config.hosted_ec2_launch_templates, configs, error))
+		data_sets_ = offered_data_sets(provider_, configs);
+	enabled_ = provider_ != "none" && !data_sets_.empty();
 	cap_ = config.hosted_cap;
-	default_missions_ = config.hosted_missions;
-	std::printf("[http] hosted servers: %s (provider %s, cap %d)\n", enabled_ ? "on" : "off",
-			loggable(provider_).c_str(), cap_);
+	std::string games;
+	for (const DataSet &d : data_sets_) games += (games.empty() ? "" : ", ") + d.game;
+	std::printf("[http] hosted servers: %s (provider %s, cap %d, data sets %s)\n", enabled_ ? "on" : "off",
+			loggable(provider_).c_str(), cap_, games.empty() ? "(none)" : games.c_str());
 }
 
 void HostedRoutes::register_routes(WebApp &app) {
@@ -157,14 +203,18 @@ void HostedRoutes::register_routes(WebApp &app) {
 
 // GET /api/me/server — the logged-in account's hosted server: {"enabled" (this
 // service runs hosted servers), "can_host" (an admin approved the account),
-// "default_missions" (ONNET_HOSTED_MISSIONS: the rotation a start takes when it
-// names none, and the missions the site's rotation picker offers), "server"},
-// the server its live one, else its newest ended one, else null:
-// {id, state, live, settings, restarts, failure_reason, created_at, updated_at,
-// running_at, ended_at (UTC, null until set), listing ({rid, server_name,
-// mission_name, players, max_players, host_ip, host_port} while listed, else
-// null) and events, its newest kEventsShown transitions oldest first ({from,
-// to, detail, at}; the request's own has from "")}. 401 with no live session.
+// "data_sets" (the games a start may name, in the site's order: {game,
+// display_name, expansions [{code, name}], default_missions (the rotation a
+// start on it takes when it names none, and the missions the site's rotation
+// picker offers), limits {max_players, time_limit, kill_limit, max_score,
+// respawn, start_delay: {min, max}}}), "server"}, the server its live one,
+// else its newest ended one, else null: {id, state, live, settings,
+// game_display_name, expansion_display_name, restarts, failure_reason,
+// created_at, updated_at, running_at, ended_at (UTC, null until set), listing
+// ({rid, server_name, mission_name, players, max_players, host_ip, host_port}
+// while listed, else null) and events, its newest kEventsShown transitions
+// oldest first ({from, to, detail, at}; the request's own has from "")}. 401
+// with no live session.
 crow::response HostedRoutes::me_server(const crow::request &req) {
 	auto access = access_.require_user(req);
 	if (access.refusal) return std::move(*access.refusal);
@@ -175,7 +225,11 @@ crow::response HostedRoutes::me_server(const crow::request &req) {
 		out["enabled"] = enabled_;
 		const auto user = get_user_by_id(*db_conn, access.user->id);
 		out["can_host"] = user && user->can_host;
-		out["default_missions"] = text_list(default_missions_);
+		std::vector<crow::json::wvalue> sets;
+		if (enabled_) {
+			for (const DataSet &d : data_sets_) sets.push_back(data_set_json(d));
+		}
+		out["data_sets"] = std::move(sets);
 		if (const auto server = latest_server_of(*db_conn, access.user->id)) {
 			crow::json::wvalue e = server_json(*db_conn, *server, false);
 			std::vector<crow::json::wvalue> events;
@@ -202,11 +256,12 @@ crow::response HostedRoutes::me_server(const crow::request &req) {
 }
 
 // POST /api/me/server/start — the account's hosted server, started with the
-// body's settings: {"game_name" (required), "max_players", "game_password",
-// "time_limit", "kill_limit", "max_score", "respawn", "start_delay" (integers),
-// "team_ff" (true/false), "expansion" ("" or "jox01"), "missions" (a list of
-// .bms names, the first the starting map; absent: ONNET_HOSTED_MISSIONS)}, each
-// absent one its default. In order: require_user (401, 403 without the CSRF
+// body's settings: {"game" (an offered data set; absent: the first),
+// "game_name" (required), "max_players", "game_password", "time_limit",
+// "kill_limit", "max_score", "respawn", "start_delay" (integers), "team_ff"
+// (true/false), "expansion" ("" or one of the game's), "missions" (a list of
+// .bms names, the first the starting map; absent: the game's default
+// rotation)}, each absent one its default. In order: require_user (401, 403 without the CSRF
 // header), 503 hosting_disabled when this service runs none, one token from the
 // account's kStartStopPerUser bucket (429), 400 invalid_json / invalid_field (a
 // mistyped field), 400 invalid_settings with the refused "field" and why
@@ -228,7 +283,9 @@ crow::response HostedRoutes::me_start(const crow::request &req) {
 	auto body = JsonBody::parse(req.body);
 	if (!body) return json_error(400, "invalid_json");
 	HostedSettings settings;
-	settings.missions = default_missions_;
+	settings.game = data_sets_.front().game; // enabled_: at least one is offered
+	if (auto v = body->text("game")) settings.game = *v;
+	if (const DataSet *data_set = find_data_set(data_sets_, settings.game)) settings.missions = data_set->missions;
 	if (auto v = body->text("game_name")) settings.game_name = *v;
 	if (auto v = body->text("game_password")) settings.game_password = *v;
 	if (auto v = body->text("expansion")) settings.expansion = *v;
@@ -246,7 +303,7 @@ crow::response HostedRoutes::me_start(const crow::request &req) {
 	if (auto v = body->flag("team_ff")) settings.team_ff = *v;
 	if (auto v = body->text_list("missions")) settings.missions = *v;
 	if (body->wrong_type()) return json_error(400, "invalid_field");
-	if (const auto refused = check_settings(settings)) {
+	if (const auto refused = check_settings(settings, data_sets_)) {
 		crow::json::wvalue out;
 		out["error"] = "invalid_settings";
 		out["field"] = refused->field;
@@ -256,7 +313,7 @@ crow::response HostedRoutes::me_start(const crow::request &req) {
 	}
 	try {
 		auto db_conn = pool_.acquire();
-		const RequestResult result = request_server(*db_conn, user.id, settings, cap_);
+		const RequestResult result = request_server(*db_conn, user.id, settings, data_sets_, cap_);
 		switch (result.outcome) {
 			case RequestOutcome::Created:
 				log_owner(user, "start", "server " + std::to_string(result.id) + " requested");

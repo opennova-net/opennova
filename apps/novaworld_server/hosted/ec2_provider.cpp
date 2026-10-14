@@ -126,7 +126,11 @@ std::string Ec2Provider::check_config(const Ec2Config &c) {
 	if (!absolute_cli) return "ONNET_HOSTED_AWS_CLI is no absolute path";
 	if (c.region.empty() || c.region.size() > 32 || !all_of(c.region, is_region_char))
 		return "ONNET_HOSTED_EC2_REGION is no region name";
-	if (!is_aws_id(c.launch_template, "lt-")) return "ONNET_HOSTED_EC2_LAUNCH_TEMPLATE is no launch template id";
+	if (c.data_sets.empty()) return "ONNET_HOSTED_EC2_LAUNCH_TEMPLATES names no data set";
+	for (const DataSet &d : c.data_sets) {
+		if (!is_aws_id(d.launch_template, "lt-"))
+			return "ONNET_HOSTED_EC2_LAUNCH_TEMPLATES gives data set " + d.game + " no launch template id";
+	}
 	if (!is_aws_id(c.subnet, "subnet-")) return "ONNET_HOSTED_EC2_SUBNET is no subnet id";
 	if (c.deployment.empty() || c.deployment.size() > 64 || !all_of(c.deployment, is_name_char))
 		return "ONNET_HOSTED_DEPLOYMENT is not 1..64 letters, digits, '.', '_' and '-'";
@@ -196,6 +200,11 @@ std::optional<std::string> Ec2Provider::launch(const LaunchSpec &spec, std::stri
 		error = "no server id";
 		return std::nullopt;
 	}
+	const DataSet *data_set = find_data_set(config_.data_sets, spec.data_set);
+	if (!data_set) {
+		error = "no launch template for data set '" + spec.data_set + "' (ONNET_HOSTED_EC2_LAUNCH_TEMPLATES)";
+		return std::nullopt;
+	}
 	const std::string server = std::to_string(spec.server_id);
 	const std::string url = bootstrap_url(config_.service_address, config_.bootstrap_port, spec.server_id);
 	BootstrapBundle bundle;
@@ -222,7 +231,7 @@ std::optional<std::string> Ec2Provider::launch(const LaunchSpec &spec, std::stri
 	const CommandResult result = runner_.run(
 			command("run-instances",
 					{ "--launch-template",
-							"{\"LaunchTemplateId\":" + json_text(config_.launch_template) +
+							"{\"LaunchTemplateId\":" + json_text(data_set->launch_template) +
 									",\"Version\":\"$Default\"}",
 							"--subnet-id", config_.subnet, "--count", "1", "--client-token",
 							"opennova-" + random_secret(32), "--tag-specifications", tag_specifications,
@@ -273,8 +282,8 @@ std::optional<std::string> Ec2Provider::launch(const LaunchSpec &spec, std::stri
 	seen.server_id = spec.server_id;
 	instances_[id] = seen;
 	launched_ms_[id] = now;
-	std::printf("[hosted] ec2: server %lld launched as machine %s at %s\n", static_cast<long long>(spec.server_id),
-			id.c_str(), address.c_str());
+	std::printf("[hosted] ec2: server %lld (%s) launched as machine %s at %s\n",
+			static_cast<long long>(spec.server_id), data_set->game.c_str(), id.c_str(), address.c_str());
 	return id;
 }
 

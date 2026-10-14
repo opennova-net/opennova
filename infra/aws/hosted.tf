@@ -6,12 +6,16 @@
 # them itself (apps/novaworld_server/hosted/ec2_provider.h) through the AWS
 # CLI, with the service instance's role. This file gives it what it launches
 # from and the least it may do:
-#   - the launch template: a stock Ubuntu 24.04 image, var.hosted_instance_type,
-#     an encrypted root volume, the game data volume made from the private
-#     encrypted snapshot (var.hosted_data_snapshot_id; the machine mounts it
-#     read-only), the game security group, the machine role, IMDSv2 required,
-#     and InstanceInitiatedShutdownBehavior=terminate (a machine powering off
-#     is a machine ended: opennova-serve's end powers it off);
+#   - a launch template per data set (var.hosted_data_snapshots: the games slug
+#     of the lobby a data set lists in, to its snapshot): a stock Ubuntu 24.04
+#     image, var.hosted_instance_type, an encrypted root volume, the game data
+#     volume made from that data set's private encrypted snapshot (the machine
+#     mounts it read-only), the game security group, the machine role, IMDSv2
+#     required, and InstanceInitiatedShutdownBehavior=terminate (a machine
+#     powering off is a machine ended: opennova-serve's end powers it off). The
+#     service launches a server from its data set's template (the output
+#     hosted_launch_templates, which `app deploy` passes as
+#     ONNET_HOSTED_EC2_LAUNCH_TEMPLATES);
 #   - the game security group: the game port to players, the admin port to the
 #     service's security group alone, and the service's security group
 #     admitting the machines on its HTTP port (their bootstrap fetch, over the
@@ -19,31 +23,31 @@
 #   - the machine role: the five actions SSM Session Manager needs for
 #     break-glass, nothing else (no machine has an SSH key);
 #   - the service role's policy (the one instance profile the service instance
-#     carries, aws_iam_role.backup): launch only from this template, only the
-#     template's machine type with IMDSv2 required, gp3 volumes of at most
-#     hosted_max_volume_gb and the template's own image, with this deployment's tags;
-#     tag only at launch, end only machines carrying both tags, describe, and
-#     pass the machine role.
+#     carries, aws_iam_role.backup): launch only from these templates, only the
+#     templates' machine type with IMDSv2 required, gp3 volumes of at most
+#     hosted_max_volume_gb and the templates' own images, with this deployment's
+#     tags; tag only at launch, end only machines carrying both tags, describe,
+#     and pass the machine role.
 #
-# All of it exists only while var.hosted_data_snapshot_id names the snapshot.
-# Empty (the default), this file creates nothing and changes nothing: the plan
-# shows its outputs alone, and aws_instance.server and its security group stay
-# as they are.
+# All of it exists only while var.hosted_data_snapshots names a snapshot. Empty
+# (the default), this file creates nothing and changes nothing: the plan shows
+# its outputs alone, and aws_instance.server and its security group stay as
+# they are.
 #
 # The ports are pinned with the service's (ec2_provider.h kGamePort and
 # kAdminPort; game.cfg pins mpnovaworldportmin = max to the game port): change
 # them in both places or in neither.
 
 locals {
-  hosted_enabled    = var.hosted_data_snapshot_id != ""
+  hosted_enabled    = length(var.hosted_data_snapshots) > 0
   hosted_deployment = var.hosted_deployment != "" ? var.hosted_deployment : local.name
   hosted_game_port  = 32768
   hosted_admin_port = 32800
   # The only tags a launch may carry (the service's run-instances names these).
   hosted_tag_keys = ["opennova:hosted", "opennova:deployment", "opennova:server-id", "Name"]
-  # The largest volume a launch may make: the root volume, and the data volume
-  # (the snapshot's size, 2 GiB for a JO:CA install).
-  hosted_max_volume_gb = max(16, var.hosted_root_volume_gb, try(data.aws_ebs_snapshot.hosted[0].volume_size, 0))
+  # The largest volume a launch may make: the root volume, and the largest data
+  # volume (each snapshot's size, 2 GiB for a JO:CA install).
+  hosted_max_volume_gb = max(16, var.hosted_root_volume_gb, [for s in data.aws_ebs_snapshot.hosted : s.volume_size]...)
 }
 
 data "aws_caller_identity" "hosted" {
@@ -57,9 +61,10 @@ data "aws_partition" "hosted" {
 # The machines' image: Canonical's newest Ubuntu 24.04 when the launch template
 # is made, or var.hosted_ami_id. The template ignores later image changes, as
 # aws_instance.server does (#1043): a new image is a deliberate
-# `terraform apply -replace='aws_launch_template.hosted[0]'`, then an
-# `app deploy` (the service reads the template's id from the outputs). Running
-# machines never move: each keeps the image it launched with until it ends.
+# `terraform apply -replace='aws_launch_template.hosted["<data set>"]'` for each
+# template, then an `app deploy` (the service reads the templates' ids from the
+# outputs). Running machines never move: each keeps the image it launched with
+# until it ends.
 data "aws_ami" "hosted" {
   count       = local.hosted_enabled ? 1 : 0
   most_recent = true
@@ -85,12 +90,12 @@ data "aws_ami" "hosted" {
   }
 }
 
-# The game data snapshot, read so its size is explicit in the launch template
+# Each data set's snapshot, read so its size is explicit in its launch template
 # (and so a mistyped or deleted id fails at plan, not at a launch).
 data "aws_ebs_snapshot" "hosted" {
-  count        = local.hosted_enabled ? 1 : 0
+  for_each     = var.hosted_data_snapshots
   owners       = ["self"]
-  snapshot_ids = [var.hosted_data_snapshot_id]
+  snapshot_ids = [each.value]
 }
 
 # The subnet the machines launch into (the service's own): its range is the
@@ -204,12 +209,22 @@ resource "aws_iam_instance_profile" "hosted_machine" {
   role  = aws_iam_role.hosted_machine[0].name
 }
 
-# ---- the launch template --------------------------------------------------------
+# ---- the launch templates, one per data set ---------------------------------------
+
+# Before data sets the one template was aws_launch_template.hosted[0], and it
+# carried the Joint Operations snapshot: it moves to that data set's key. Its
+# name changes with the move, so the first apply after replaces it all the
+# same (running machines keep theirs; the next `app deploy` hands the service
+# the new id).
+moved {
+  from = aws_launch_template.hosted[0]
+  to   = aws_launch_template.hosted["jop_2_consumer"]
+}
 
 resource "aws_launch_template" "hosted" {
-  count       = local.hosted_enabled ? 1 : 0
-  name        = "${local.name}-hosted"
-  description = "OpenNova hosted game server machines (ADR 0053): one per hosted server, launched by the NovaWorld service"
+  for_each    = var.hosted_data_snapshots
+  name        = "${local.name}-hosted-${replace(each.key, "_", "-")}"
+  description = "OpenNova hosted game server machines (ADR 0053) for the ${each.key} data set: one per hosted server, launched by the NovaWorld service"
 
   image_id                             = data.aws_ami.hosted[0].id
   instance_type                        = var.hosted_instance_type
@@ -241,14 +256,14 @@ resource "aws_launch_template" "hosted" {
     }
   }
 
-  # The game data: the private snapshot's volume, its size the snapshot's,
-  # labelled opennova-jo, mounted read-only at /opt/jo.
+  # The game data: the data set's private snapshot's volume, its size the
+  # snapshot's, labelled opennova-data, mounted read-only at /opt/game.
   block_device_mappings {
     device_name = "/dev/sdf"
 
     ebs {
-      snapshot_id           = var.hosted_data_snapshot_id
-      volume_size           = data.aws_ebs_snapshot.hosted[0].volume_size
+      snapshot_id           = each.value
+      volume_size           = data.aws_ebs_snapshot.hosted[each.key].volume_size
       volume_type           = "gp3"
       encrypted             = true
       delete_on_termination = true
@@ -256,7 +271,8 @@ resource "aws_launch_template" "hosted" {
   }
 
   tags = merge(var.tags, {
-    Name = "${local.name}-hosted"
+    Name                = "${local.name}-hosted-${replace(each.key, "_", "-")}"
+    "opennova:data-set" = each.key
   })
 
   lifecycle {
@@ -274,9 +290,9 @@ locals {
 data "aws_iam_policy_document" "hosted_service" {
   count = local.hosted_enabled ? 1 : 0
 
-  # A machine launches only from this template, as the template's machine type
-  # with IMDSv2 required (a caller's own --instance-type or metadata options
-  # are refused), with this deployment's tags and no other tag.
+  # A machine launches only from these templates, as the templates' machine
+  # type with IMDSv2 required (a caller's own --instance-type or metadata
+  # options are refused), with this deployment's tags and no other tag.
   statement {
     sid       = "LaunchHostedMachines"
     effect    = "Allow"
@@ -286,7 +302,7 @@ data "aws_iam_policy_document" "hosted_service" {
     condition {
       test     = "ArnEquals"
       variable = "ec2:LaunchTemplate"
-      values   = [aws_launch_template.hosted[0].arn]
+      values   = [for t in aws_launch_template.hosted : t.arn]
     }
     condition {
       test     = "StringEquals"
@@ -316,10 +332,10 @@ data "aws_iam_policy_document" "hosted_service" {
   }
 
   # What such a launch touches besides the machine: its volumes (gp3, no
-  # larger than the template's; IfExists, so a request whose context lacks a
-  # key is not refused for that, though the template names both for every
-  # volume), its network interface, the template's own
-  # subnet, security group and snapshot, and the template's own image. RunInstances
+  # larger than the largest template's; IfExists, so a request whose context
+  # lacks a key is not refused for that, though the templates name both for
+  # every volume), its network interface, the templates' own subnet, security
+  # group and snapshots, and the templates' own images. RunInstances
   # on these creates nothing without the machine statement above. The snapshot
   # is encrypted with the AWS-managed aws/ebs key, whose key policy admits
   # every principal of the account through EBS: no KMS grant here (a
@@ -349,16 +365,17 @@ data "aws_iam_policy_document" "hosted_service" {
     actions   = ["ec2:RunInstances"]
     resources = ["${local.hosted_arn_prefix}::image/*"]
 
-    # The template's image by id. Not ec2:Owner: for Canonical's public Ubuntu
+    # The templates' images by id, each once (templates made at different times
+    # may hold different ones). Not ec2:Owner: for Canonical's public Ubuntu
     # images EC2 puts the owner alias "amazon" in that key, not Canonical's
     # account (decoded from a refused launch, 2026-10-14), so an owner pin
-    # refused every launch. The template's image_id is the one in state
+    # refused every launch. A template's image_id is the one in state
     # (ignore_changes keeps it across new Canonical releases), so this moves
-    # with a -replace of the template and with nothing else.
+    # with a -replace of a template and with nothing else.
     condition {
       test     = "StringEquals"
       variable = "ec2:ImageID"
-      values   = [aws_launch_template.hosted[0].image_id]
+      values   = distinct([for t in aws_launch_template.hosted : t.image_id])
     }
   }
 
@@ -366,13 +383,15 @@ data "aws_iam_policy_document" "hosted_service" {
     sid     = "LaunchHostedMachineResources"
     effect  = "Allow"
     actions = ["ec2:RunInstances"]
-    resources = [
-      "${local.hosted_arn_prefix}:${local.hosted_account}:network-interface/*",
-      "${local.hosted_arn_prefix}:${local.hosted_account}:subnet/${local.target_subnet}",
-      "${local.hosted_arn_prefix}:${local.hosted_account}:security-group/${aws_security_group.hosted[0].id}",
-      "${local.hosted_arn_prefix}:${local.hosted_account}:launch-template/${aws_launch_template.hosted[0].id}",
-      "${local.hosted_arn_prefix}::snapshot/${var.hosted_data_snapshot_id}",
-    ]
+    resources = concat(
+      [
+        "${local.hosted_arn_prefix}:${local.hosted_account}:network-interface/*",
+        "${local.hosted_arn_prefix}:${local.hosted_account}:subnet/${local.target_subnet}",
+        "${local.hosted_arn_prefix}:${local.hosted_account}:security-group/${aws_security_group.hosted[0].id}",
+      ],
+      [for t in aws_launch_template.hosted : "${local.hosted_arn_prefix}:${local.hosted_account}:launch-template/${t.id}"],
+      [for id in values(var.hosted_data_snapshots) : "${local.hosted_arn_prefix}::snapshot/${id}"],
+    )
   }
 
   # Tags only as part of a launch.
@@ -437,7 +456,7 @@ data "aws_iam_policy_document" "hosted_service" {
 resource "aws_iam_policy" "hosted_service" {
   count       = local.hosted_enabled ? 1 : 0
   name        = "${local.name}-hosted-service-policy"
-  description = "The NovaWorld service's hosted game server machines: launch from the template, end its own"
+  description = "The NovaWorld service's hosted game server machines: launch from the templates, end its own"
   policy      = data.aws_iam_policy_document.hosted_service[0].json
 }
 

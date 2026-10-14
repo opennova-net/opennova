@@ -2,9 +2,9 @@ name: Serve image
 
 # Builds and publishes the headless game server's container image to GHCR:
 # ghcr.io/<owner>/opennova-serve (apps/serve/Dockerfile), the server the hosted
-# game servers run (ADR 0053). It holds no retail byte: the game data is
-# mounted at /opt/jo (apps/serve/README.md, "Container image"). Nothing deploys
-# it yet. Tags, permissions and the PR behaviour (build, never push) follow the
+# game servers run (ADR 0053). It holds no retail byte: the game data (the
+# server's data set) is mounted at /opt/game (apps/serve/README.md, "Container
+# image"). Nothing deploys it yet. Tags, permissions and the PR behaviour (build, never push) follow the
 # NovaWorld images (novaworld-images.yml).
 
 on:
