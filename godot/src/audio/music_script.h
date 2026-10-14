@@ -28,6 +28,10 @@ public:
 	// The bytes must already be in their decrypted SCR0 form.
 	void load_from_decrypted_bytes(const PackedByteArray &bytes, const String &p_source);
 	Error load_from_path(const String &p_path);
+	// The script from its model alone (formats/mus: mus_encode_file over the parsed scripts,
+	// ADR 0003), never the bytes it was read from; refused when the written bytes would not
+	// read back as the model (the writer writes MDEdit's intrinsic-name table, every shipped
+	// script's).
 	Error save_to_path(const String &p_path) const;
 
 	int get_script_count() const;
@@ -48,8 +52,8 @@ protected:
 
 private:
 	String source_path;
-	// Retained so save_to_path can pass through the decrypted SCR0 bytes. The
-	// parser owns independent copies of its chunk data.
+	// The decrypted SCR0 bytes the script was read from (get_raw_file_bytes); the parser
+	// owns independent copies of its chunk data, and the saver never writes these.
 	PackedByteArray _file_bytes;
 	opennova::mus::MusFile _mf;
 	bool _opened = false;
