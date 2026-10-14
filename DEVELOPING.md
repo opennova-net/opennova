@@ -1,7 +1,7 @@
 # Developing OpenNova
 
 How to build and run OpenNova locally: the C++ core, the Godot GDExtension, the
-game, and the NovaWorld servers, including how to test the servers
+game, the NovaWorld servers and the launcher, including how to test the servers
 against both retail Joint Operations and our own Godot client.
 
 For the runtime build and release layout see [README.md](README.md). For
@@ -13,6 +13,7 @@ deploying your own instance to the cloud see [DEPLOY.md](DEPLOY.md).
   **C++17** compiler (MSVC, Clang, or GCC).
 - **Godot 4.6.1** (only for Godot work). Set `GODOT_BIN` to the binary, or drop it in `.godot-bin/`.
 - **Docker** (Docker Desktop on Windows/macOS) to run the NovaWorld servers locally.
+- **.NET 8 SDK** (only for the launcher, Windows).
 - **Git LFS** (binary test fixtures are LFS objects).
 
 ## First-time setup
@@ -246,12 +247,34 @@ reachable LAN IP instead of `127.0.0.1` when the game runs on another machine, a
 the line to go back to NovaLogic's service. The game files stay stock; launch `Jointops.exe`
 as usual.
 
+The OpenNova Launcher (below) writes and removes that line for you: pick **Custom
+address...** and enter the server's address, then **NovaLogic NovaWorld** to go back.
+
 Notes:
 - **Windows + WSL2**: the published container ports reach the Windows host at `127.0.0.1`,
   so retail JO on the same machine connects through.
 - UDP `7597` and `64206` must be allowed through the Windows firewall.
 - Windows Defender may flag the hosts edit (`SettingsModifier:Win32/HostsFileHijack`);
   allow that one line.
+
+## Build the launcher
+
+The OpenNova Launcher (`launcher/`, ADR 0054) is a .NET 8 WinForms tray app outside the
+CMake build. It switches retail's NovaWorld hostname (`gs.novaworld.net`) between
+OpenNova's service, NovaLogic's and a custom address through one managed block in the
+hosts file; [`launcher/README.md`](launcher/README.md) is its user guide.
+
+```bash
+dotnet test launcher/OpenNovaLauncher.sln -c Release
+dotnet publish launcher/src/OpenNovaLauncher/OpenNovaLauncher.csproj -c Release -r win-x64 -o build/launcher
+```
+
+The publish step writes the self-contained single-file `build/launcher/opennova-launcher.exe`.
+Its manifest asks for administrator rights, so starting it from a terminal that is not
+elevated shows the UAC prompt (and `dotnet run` fails there with "requires elevation").
+Its **OpenNova service URL...** setting points it at a local stack, `http://127.0.0.1:8080`,
+whose `GET /api/server-info` answers `ONNET_PUBLIC_HOST`. CI's
+`package-launcher-windows.yml` runs the suite, publishes the exe and zips it with its README.
 
 ## Test with our Godot game
 
@@ -299,7 +322,7 @@ Tag a master merge head whose master CI run passed (`git tag v0.0.N <sha>` then
 `git push origin v0.0.N`). `release.yml`'s `gate` job refuses a tag that is not on
 master or whose commit has no green master-push `ci.yml` run (it waits for one still
 running), so the release ships only what every required CI gate already passed; the
-package jobs then build the game, Blender add-on and apps zips.
+package jobs then build the game, Blender add-on, apps and launcher zips.
 
 ## Troubleshooting
 

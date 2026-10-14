@@ -68,7 +68,7 @@ jobs:
             sleep 60
           done
 
-  # Tagged releases ship the runtime, the Blender authoring add-on and the apps, without game data.
+  # Tagged releases ship the runtime, the Blender authoring add-on, the apps and the launcher, without game data.
   package-godot-windows:
     needs: gate
     runs-on: windows-latest
@@ -143,19 +143,26 @@ jobs:
       actions: write
     uses: ./.github/workflows/package-apps-windows.yml
 
+  package-launcher-windows:
+    needs: gate
+    uses: ./.github/workflows/package-launcher-windows.yml
+    with:
+      # The exe's file and product version: stamp the tag into it.
+      version: ${{ github.ref_name }}
+
   release:
     runs-on: ubuntu-latest
-    needs: [gate, package-godot-windows, package-blender-windows, package-apps-windows]
+    needs: [gate, package-godot-windows, package-blender-windows, package-apps-windows, package-launcher-windows]
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download game, Blender and apps artifacts
+      - name: Download game, Blender, apps and launcher artifacts
         uses: actions/download-artifact@v8
         with:
           path: dist
-          artifact-ids: ${{ needs.package-godot-windows.outputs.artifact_id }},${{ needs.package-blender-windows.outputs.artifact_id }},${{ needs.package-apps-windows.outputs.artifact_id }}
+          artifact-ids: ${{ needs.package-godot-windows.outputs.artifact_id }},${{ needs.package-blender-windows.outputs.artifact_id }},${{ needs.package-apps-windows.outputs.artifact_id }},${{ needs.package-launcher-windows.outputs.artifact_id }}
           merge-multiple: true
           # The package jobs upload with `archive: false` (raw blob, no archive
           # wrapper), so the .zip deliverables are stored as the bare .zip. Without
@@ -178,6 +185,17 @@ jobs:
           fi
           mv -- dist/opennova-blender-addon-windows.zip "dist/opennova-blender-addon-windows-${GITHUB_REF_NAME}.zip"
           mv -- dist/opennova-apps-windows.zip "dist/opennova-apps-windows-${GITHUB_REF_NAME}.zip"
+          mv -- dist/opennova-launcher-windows.zip "dist/opennova-launcher-windows-${GITHUB_REF_NAME}.zip"
+
+      # The launcher's exe is unsigned, so the release states the zip's hash for a
+      # player to check before running it elevated (launcher/README.md).
+      - name: SHA-256 of the launcher zip
+        shell: bash
+        working-directory: dist
+        run: |
+          zip="opennova-launcher-windows-${GITHUB_REF_NAME}.zip"
+          sha256sum "$zip" > "$zip.sha256"
+          cat "$zip.sha256"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -186,5 +204,7 @@ jobs:
             dist/opennova-game-windows-${{ github.ref_name }}.zip
             dist/opennova-blender-addon-windows-${{ github.ref_name }}.zip
             dist/opennova-apps-windows-${{ github.ref_name }}.zip
+            dist/opennova-launcher-windows-${{ github.ref_name }}.zip
+            dist/opennova-launcher-windows-${{ github.ref_name }}.zip.sha256
           fail_on_unmatched_files: true
           generate_release_notes: true

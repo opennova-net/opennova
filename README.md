@@ -17,6 +17,7 @@ retail games are tracked in the [divergence ledger](docs/divergence-ledger.md).
 | `godot/` | Godot game, project resources, and GDScript tests. |
 | `assets/` | OpenNova's own game data, shipped beside `opennova.exe`: today the placeholder main menu and a first-person carbine and arms exported from the Blender scene in `art/` (not used yet). |
 | `apps/` | Native command-line and NovaWorld service applications. |
+| `launcher/` | OpenNova Launcher: a Windows tray app that points a stock Joint Operations install at OpenNova's NovaWorld, NovaLogic's, or an address you enter, through the hosts file (.NET 8, with its xunit tests). |
 | `tools/blender/opennova_3di/` | Experimental Blender add-on for importing and exporting NovaLogic 3DI models and their ADM/BAD animations. |
 | `fixtures/` | Test fixtures: synthetic files minted by `tests/fixtures/*_gen.cpp` (the 3DI model set under `fixtures/threedi/synth/`, terrain, fonts, sound banks) plus a small retail-interop keep set (`fixtures/README.md`). |
 | `tests/` | Native CTest suite. |
@@ -32,7 +33,8 @@ round-trip limitations.
 ## Build and test
 
 Prerequisites are CMake, a C++17 compiler, Git LFS, and Git submodules. Godot
-4.6.1 is required for the game and GDScript suite.
+4.6.1 is required for the game and GDScript suite; the .NET 8 SDK for the
+Windows launcher.
 
 ```bash
 git lfs install --local
@@ -57,7 +59,7 @@ cmake --build build --config Release
 ctest --test-dir build --output-on-failure -C Release
 ```
 
-See [DEVELOPING.md](DEVELOPING.md) for the GDExtension, servers, and
+See [DEVELOPING.md](DEVELOPING.md) for the GDExtension, servers, launcher, and
 retail-compatibility development workflows.
 
 ## Run OpenNova
@@ -111,6 +113,16 @@ comment) and `opennova-apps-windows-v<version>.zip` (on tagged releases): the
 (`opennova-serve`, with a sample host file; it plays a map rotation and takes retail's
 remote admin) and the NovaWorld server (`opennova-novaworld-server`), for Windows x64. Its `README.txt`
 describes each one.
+
+The OpenNova Launcher ships as `opennova-launcher-windows.zip` (on a PR's build
+comment) and `opennova-launcher-windows-v<version>.zip` (on tagged releases):
+`opennova-launcher.exe` and its README. It is a tray app that switches a stock
+Joint Operations install between OpenNova's NovaWorld, NovaLogic's NovaWorld and
+an address you enter, by managing one block in the Windows hosts file; the game's
+files stay stock. It needs administrator rights, since the hosts file does. The
+exe is unsigned, so releases also carry the zip's SHA-256
+(`opennova-launcher-windows-v<version>.zip.sha256`) to check before running it.
+See [launcher/README.md](launcher/README.md).
 
 ## Documentation
 

@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>OpenNova.Launcher</RootNamespace>
+    <!-- The shipped binary follows the apps' naming rule (DEVELOPING.md "Naming an app"). -->
+    <AssemblyName>opennova-launcher</AssemblyName>
+    <Product>OpenNova Launcher</Product>
+    <AssemblyTitle>OpenNova Launcher</AssemblyTitle>
+    <Company>OpenNova</Company>
+    <Copyright>MIT License</Copyright>
+    <!-- A development build; a release stamps its tag over this (package-launcher-windows.yml). -->
+    <Version>0.0.0</Version>
+    <ApplicationIcon>Assets\onlauncher.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PlatformTarget>x64</PlatformTarget>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <!-- Nothing native rides the bundle: an elevated process must never load a DLL
+         it extracted into a folder the user can write (%TEMP%\.net). The only natives
+         the runtime pack brings are WPF's, which WinForms never loads (DropWpfNatives). -->
+    <IncludeNativeLibrariesForSelfExtract>false</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <PublishTrimmed>false</PublishTrimmed>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The tray icon, read from the assembly (a single-file exe has no folder beside it). -->
+    <EmbeddedResource Include="Assets\onlauncher.ico" LogicalName="onlauncher.ico" />
+  </ItemGroup>
+
+  <!-- The Windows Desktop runtime pack ships WPF's natives to every app that uses it;
+       a WinForms app never loads them, so they stay out of the publish. -->
+  <Target Name="DropWpfNatives" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+                             Condition="'%(Filename)%(Extension)' == 'D3DCompiler_47_cor3.dll' or
+                                        '%(Filename)%(Extension)' == 'PenImc_cor3.dll' or
+                                        '%(Filename)%(Extension)' == 'PresentationNative_cor3.dll' or
+                                        '%(Filename)%(Extension)' == 'vcruntime140_cor3.dll' or
+                                        '%(Filename)%(Extension)' == 'wpfgfx_cor3.dll'" />
+    </ItemGroup>
+  </Target>
+
+</Project>

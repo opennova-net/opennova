@@ -1,0 +1,8 @@
+# .NET build output
+bin/
+obj/
+publish/
+*.user
+
+# Visual Studio solution cache
+.vs/
