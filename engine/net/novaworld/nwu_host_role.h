@@ -112,15 +112,19 @@ public:
 	// The live session the server-info update reads its columns from at each run, over the
 	// registration's (the embedder's match: its name and message, game type, mission, caps,
 	// lock, rules and round clock, inmatch::read_session_listing_columns); the embedder installs
-	// it once its match binds and clears it as the match goes. Null: the registration's columns
-	// stand. A changed column rides the next update as a changed var.
+	// it once its match binds and clears it as the match goes. The source returns false when no
+	// session is there to read (a map change's load, between one mission's match and the
+	// next): the last live read then stands, as retail's globals keep their values across the
+	// load, never the registration's. A read lands in the role's columns ahead of every request,
+	// update and status heartbeat, and a changed column rides the next update as a changed var.
+	// Null: the registration's columns stand.
 	// [orig: Lobby_UpdateServerInfo @0x4fe8c0 — every column read off the session's globals at
 	//  each run, the SetOrCreates @0x4fe911..0x4ff3ff]
-	using ColumnSource = std::function<void(HostRegistration &)>;
+	using ColumnSource = std::function<bool(HostRegistration &)>;
 	void set_column_source(ColumnSource source) { column_source_ = std::move(source); }
 	// Every listing column at once (a mirrored server's new map, name, settings): the
 	// registration's own keys stay (AppId, HostKey, LobbyName, the PCIDKey ring, the
-	// ReconnectCounter) and the changed columns ride the next refresh as its dirty delta.
+	// ReconnectCounter) and the changed columns ride the next refresh as its changed vars.
 	void set_columns(const HostRegistration &columns);
 	// The gametext strings the Host list's STRNOVA / TimeOfDay tokens resolve to.
 	void set_lobby_text(const HostLobbyText &text) { lobby_text_ = text; }
@@ -139,6 +143,9 @@ public:
 	                          const std::string &join_ticket);
 
 private:
+	// The column source's read into the role's columns: a successful one replaces them, a read
+	// with no session leaves the last live columns standing.
+	void read_columns();
 	HostRegistration host_cfg() const;
 	void send_host_request(uint32_t currently_hosting);
 	void handle_host_result(const ClientSession::Notice &notice);

@@ -811,8 +811,9 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 	// From here the listing's columns follow the match: each server-info update reads them off
 	// the live session (the name and message, the game type, the mission, the caps, the join
 	// lock, the rules, the round clock; D-NET-373), as retail's reads its globals at each run.
-	// The source resolves the world and the session node by identity on every call;
-	// unbind_nw_host() clears it. [orig: Lobby_UpdateServerInfo @0x4FE8C0]
+	// The source resolves the world and the session node by identity on every call, and a call
+	// with no match (a map change's load) leaves the last live read standing; unbind_nw_host()
+	// clears it. [orig: Lobby_UpdateServerInfo @0x4FE8C0]
 	const ObjectID world_id = ObjectID(world_->get_instance_id());
 	const ObjectID columns_client_id = nw_client_id_;
 	host.set_column_source([world_id, columns_client_id](opennova::HostRegistration &r) {
@@ -823,11 +824,14 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 				live_world != nullptr ? live_world->get_sim() : Ref<Simulation>();
 		const opennova::inmatch::NapiNPServerCtx *ctx =
 				live_sim.is_valid() ? live_sim->host_ctx() : nullptr;
+		// A map change's load holds no sim (the kept session waits for the next runtime): the
+		// last live read stands.
 		if (ctx == nullptr)
-			return;
+			return false;
 		opennova::inmatch::read_session_listing_columns(r, *ctx,
 				game_text_lookup(live_client != nullptr ? live_client->get_gametext()
 														: Ref<RtxtStringFile>()));
+		return true;
 	});
 	// The join lock's toggle runs the server-info update at once (D-NET-659), through the hosting
 	// session's role; the hook resolves the session node by identity on every call.

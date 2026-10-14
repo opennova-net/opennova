@@ -57,7 +57,7 @@ void NwuHostRole::tick(uint32_t now_ms) {
 	}
 	if (phase_ != Phase::Hosting) return;
 	// The server-info refresh runs on the logic clock: every SESSION_HOST_INFO_REFRESH_TICKS the
-	// cookie-key ring advances and the Host list is republished as the dirty delta.
+	// cookie-key ring advances and the Host list is republished as its changed vars.
 	// [orig: Server_TickUpdate @0x51d7e0 (the 0x744 refresh) -> Lobby_UpdateServerInfo @0x4fe8c0]
 	refresh_ticks_ += static_cast<double>(elapsed_ms) * io::kTickHz / 1000.0;
 	if (refresh_ticks_ >= static_cast<double>(SESSION_HOST_INFO_REFRESH_TICKS)) {
@@ -81,6 +81,7 @@ void NwuHostRole::tick(uint32_t now_ms) {
 void NwuHostRole::update_server_info() {
 	if (phase_ == Phase::Idle)
 		return;
+	read_columns();
 	if (ClientSession *session = lobby_.session()) {
 		session->set_host_list_vars(make_host_var_list(host_cfg(), lobby_text_, /*full=*/true));
 		session->send_host_update(/*include_all=*/false);
@@ -307,11 +308,16 @@ void NwuHostRole::send_status_blob() {
 	lobby_.send_to(peer_addr_from_octets(gate.post_ip, static_cast<uint16_t>(gate.post_port)), packet);
 }
 
+void NwuHostRole::read_columns() {
+	if (!column_source_)
+		return;
+	HostRegistration live = cfg_;
+	if (column_source_(live))
+		cfg_ = live;
+}
+
 HostRegistration NwuHostRole::host_cfg() const {
 	HostRegistration cfg = cfg_;
-	// The session's columns as they stand now (set_column_source).
-	if (column_source_)
-		column_source_(cfg);
 	// Players counts the active slots, the host's own only when it is a peer: a listen host's
 	// slot 0 is active from the round init, a dedicated server's never counts, so its roster
 	// (the joiners) is the whole count. [orig: Lobby_UpdateServerInfo @0x4feaa6..0x4feacb;
@@ -330,6 +336,7 @@ HostRegistration NwuHostRole::host_cfg() const {
 void NwuHostRole::send_host_request(uint32_t currently_hosting) {
 	ClientSession *session = lobby_.session();
 	if (session == nullptr || !session->is_verified()) return;
+	read_columns();
 	if (!session->request_hosting(host_cfg(), static_cast<int>(currently_hosting))) return;
 	register_started_ms_ = lobby_.clock_ms();
 	phase_ = Phase::Requested;

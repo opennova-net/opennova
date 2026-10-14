@@ -204,9 +204,13 @@ int main() {
 	// [orig: Lobby_UpdateServerInfo @0x4fe8c0]
 	std::string live_name = "Engine Driver Host";
 	std::string live_mission = "ASH_G11A";
+	bool live_session = true; // false: a map change's load, no match to read
 	role.set_column_source([&](opennova::HostRegistration &r) {
+		if (!live_session)
+			return false;
 		r.server_name = live_name;
 		r.mission_name = live_mission;
+		return true;
 	});
 
 	// The refresh: a changed column rides the next 1860-tick delta, not the edit.
@@ -230,6 +234,24 @@ int main() {
 			"the mission start's update carries a changed column at once");
 	expect(host_var("Engine Driver Started", "MissionName") == "ASH_G12A",
 			"the mission start's update lists the next map's mission");
+
+	// A map change's load: the session holds no match, so the source reads nothing and the last
+	// live read stands. The refresh that lands in the load carries the role's own advanced
+	// PCIDKey and no column of the host request's registration back (its ServerName, the first
+	// map's MissionName).
+	live_session = false;
+	const std::string pcid_before = host_var("Engine Driver Started", "PCIDKey");
+	tick(30000);
+	bool load_refreshed = false;
+	for (int i = 0; i < 300 && !load_refreshed; ++i) {
+		tick();
+		const std::string pcid = host_var("Engine Driver Started", "PCIDKey");
+		load_refreshed = !pcid.empty() && pcid != pcid_before;
+	}
+	expect(load_refreshed && host_var("Engine Driver Started", "MissionName") == "ASH_G12A",
+			"a refresh with no session to read keeps the last live columns, not the "
+			"registration's");
+	live_session = true;
 
 	// The NWU reconnect's re-host: the re-verify counts ReconnectCounter up and re-sends the
 	// request with the session's kept lists, which the outage's refresh and a team change wrote,

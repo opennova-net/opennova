@@ -72,7 +72,7 @@ bool ServeListing::start(int &exit_code) {
 }
 
 // The live match changes every frame (the round clock, the joiners): once bound, every pass hands
-// the host role the columns (they ride its 1860-tick refresh as the dirty delta) and syncs the
+// the host role the columns (they ride its 1860-tick refresh as its changed vars) and syncs the
 // roster (ClientHostPlayerAdded / Removed go out at once, as Server_PlayerAdd sends them).
 bool ServeListing::refresh(uint32_t now_ms, bool force) {
 	(void)now_ms;
