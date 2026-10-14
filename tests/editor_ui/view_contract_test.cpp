@@ -24,10 +24,11 @@
 // through the workspace's device; in the Document window while an operation holds the documents,
 // its outline is held back and its canvas is not (a drag orbits its camera). ADR 0046 S14: an outline
 // that filters its rows by kind and leaves out the rows its type says hold nothing, its chips, its
-// switch, and a Shift or Ctrl click on a line.
+// switch, and a Shift or Ctrl click on a line. A font's sample text box follows the options' text another hand sets.
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -37,6 +38,7 @@
 #include <editor/documents/document_types.h>
 #include <editor/documents/strings_document.h>
 #include <editor/model/text_document.h>
+#include <editor/preview/font_viewport.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/viewport_kinds.h>
 #include <editor/session/session_operation.h>
@@ -1122,6 +1124,73 @@ void test_weapon_shows_on_the_hud() {
 	CHECK(workspace.requests.empty(), "with no mission open it places nothing");
 }
 
+// The font's sample text box (round S23 lane A's font view) follows the options' text another hand sets (the editor
+// MCP's set_viewport, an undo of the options) while nobody types in it: a key typed next builds on the text drawn,
+// never sends back the text the box held before.
+void test_font_text_follows_its_options() {
+	const std::string repo = test_paths_repo_root(__FILE__);
+	const DocumentType *type = document_type_for(AssetKind::Font);
+	std::shared_ptr<DocumentBase> loaded = type ? type->make() : nullptr;
+	Diagnostic error;
+	CHECK(loaded && loaded->load_bytes(test_io::read_file(repo + "/fixtures/fnt/synth_1page.fnt"), "fonts/synth.fnt",
+	                                   AssetKind::Font, "jo", error),
+	      "the font loads");
+	if (!loaded) return;
+	const std::shared_ptr<const DocumentBase> font = loaded;
+	NullBackend backend;
+	TestWorkspace workspace;
+	seed(workspace.seeded, font);
+	HandViewports shell;
+	shell.bind(workspace.seeded);
+	shell.viewports->ensure(font->path(), ViewportKind::Font);
+	workspace.source = &shell.devices.cache;
+	std::unique_ptr<DocumentView> view = make_view(*font);
+	CHECK(view != nullptr, "the font's view");
+	if (!view) return;
+	const auto frames = [&](int count) {
+		for (int i = 0; i < count; ++i) {
+			shell.viewports->track(workspace.seeded);
+			shell.devices.sync(*shell.viewports, workspace.seeded);
+			view_frame(workspace, *view, *font, 720.0f);
+			view->end_frame(workspace);
+		}
+	};
+	frames(4);
+	const auto *viewport = static_cast<const FontViewport *>(shell.find(font->path(), ViewportKind::Font));
+	CHECK(viewport && viewport->status() == ViewportStatus::Ready && viewport->shown_page() < 0, "the font's text shows");
+	if (!viewport) return;
+	// The text set by another hand, as the editor MCP's set_viewport sets it.
+	FontViewportOptions options = viewport->options();
+	options.text = "FROM MCP";
+	CHECK(shell.set(workspace.seeded, font->path(), font_options_change(options).c_str()), "the text set");
+	frames(2);
+	workspace.requests.clear();
+	// The box (its child window named after its id), a key typed at its end.
+	ImGuiID box = 0;
+	for (const ImGuiWindow *window : GImGui->Windows) {
+		const std::string name = window->Name;
+		const size_t at = name.rfind("/##text_");
+		if (window->Active && at != std::string::npos) box = ImGuiID(std::strtoul(name.c_str() + at + 8, nullptr, 16));
+	}
+	CHECK(box != 0, "the text box drawn");
+	ImGui::ActivateItemByID(box);
+	frames(2);
+	for (const bool down : {true, false}) {
+		ImGui::GetIO().AddKeyEvent(ImGuiKey_End, down);
+		frames(1);
+	}
+	ImGui::GetIO().AddInputCharactersUTF8("!");
+	frames(1);
+	std::string sent;
+	for (const EditorRequest &request : workspace.requests) {
+		opennova::io::JsonValue change;
+		std::string why;
+		if (request.kind == EditorRequestKind::SetViewport && opennova::io::json_parse(request.viewport, change, why))
+			if (const opennova::io::JsonValue *typed = change.get("options")) sent = typed->get_string("text", "");
+	}
+	CHECK(sent == "FROM MCP!", ("the key typed builds on the text drawn, not the box's old text: '" + sent + "'").c_str());
+}
+
 } // namespace
 
 } // namespace editor_ui_test
@@ -1137,6 +1206,7 @@ int main() {
 	editor_ui_test::test_main_viewport_view();
 	editor_ui_test::test_main_viewport_held();
 	editor_ui_test::test_weapon_shows_on_the_hud();
+	editor_ui_test::test_font_text_follows_its_options();
 	if (editor_ui_test::g_failures) {
 		std::printf("%d check(s) failed\n", editor_ui_test::g_failures);
 		return 1;
