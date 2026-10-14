@@ -73,8 +73,8 @@ public:
 		// own); null reads as no rotation and an empty catalog.
 		RotationAdmin *rotation = nullptr;
 		// A listen host's chat window display lines, oldest first (CHAT GET's walk of slots
-		// 40..1): its HUD's word-wrapped ring. A host with no client reads the context's CHAT
-		// ring instead (`console_chat`, server_console.h; D-NET-372).
+		// 40..1): its HUD's word-wrapped ring. A host with no client reads the context's own
+		// display buffer instead (`console_chat_display`, server_console.h).
 		std::function<std::vector<std::string>()> chat_window;
 		// A listen host's flood refusal echoed into its HUD window (Chat_AddMessageChannel1). A
 		// host with no client sends through Server_SendConsoleChat, which posts the sent line,

@@ -790,7 +790,7 @@ void AdminConsole::chat_send(std::string text) {
 	}
 	if (Server_SendConsoleChat(ctx_, hud::kChatDispatchGlobal, text, main_frame_) ==
 			hud::ChatSendResult::Flooded)
-		server_console_post(ctx_.console_chat, text, hud::chat_dispatch_flood_color(hud::kChatDispatchGlobal));
+		server_console_add(ctx_, text, hud::chat_dispatch_flood_color(hud::kChatDispatchGlobal));
 }
 
 // [orig: CAdminServer_HandleChatCommand @0x404AC0 — GET @0x404B0F..0x404BB3 (the window's 40
@@ -799,15 +799,14 @@ void AdminConsole::chat_send(std::string text) {
 //  buffer with no bound, D-NET-362, then `OK - Chat sent.` whatever the sender did)]
 void AdminConsole::handle_chat(const Args &args, std::vector<std::string> &replies) {
 	if (!args.empty() && ieq(args[0], "GET")) {
-		// A host with no client reads its CHAT ring, oldest first: the raw lines, where retail
-		// lists the window's word-wrapped display lines (D-NET-372); a listen host reads its
-		// HUD's window through the seam.
-		std::vector<std::string> window;
+		// A host with no client reads its own display buffer (chat_display_get); a listen
+		// host reads its HUD's window through the seam.
 		if (ctx_.is_mp_session_peer == 0) {
-			for (const ServerConsoleLine &line : ctx_.console_chat) window.push_back(line.text);
-		} else if (seams_.chat_window) {
-			window = seams_.chat_window();
+			replies.push_back(chat_display_get(ctx_.console_chat_display));
+			return;
 		}
+		std::vector<std::string> window;
+		if (seams_.chat_window) window = seams_.chat_window();
 		std::string out;
 		for (const std::string &line : window)
 			if (!line.empty()) out += line + "\r\n";

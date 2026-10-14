@@ -412,6 +412,15 @@ bool save_file(const std::string &path, const GameCfg &cfg, const WeaponRoster &
 // @0x78B319, 17 digits) -> _fptostr @0x788CB5 (`>= '5'` rounds up)]
 std::string format_fixed(double value, int precision);
 
+// String_ParseResolutionDimensions over a `video_res` value, "<width>x<height>":
+// the blanks (space, tab, CR, LF, FF) before the width and around the 'x' or 'X'
+// skipped, each dimension its run of decimal digits. False, with nothing
+// written, for no separator or a zero dimension. The cfg parse runs it over
+// the value it keeps, into the display mode's width and height.
+// [orig: String_ParseResolutionDimensions @0x51E6D0, from Config_ParseSettingsLine
+//  @0x551303 into outWidth @0x2550718 / outHeight]
+bool parse_resolution_dimensions(const std::string &text, int32_t &width, int32_t &height);
+
 // activesrvr.txt: the directory-lock marker the host-file path writes in the
 // working directory before it hosts and Game_Run deletes at every orderly exit.
 // Nothing reads it. [orig: Game_HostMultiplayerSession @0x4A65C1..0x4A65F6:

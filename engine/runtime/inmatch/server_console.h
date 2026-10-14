@@ -40,10 +40,12 @@
 // @0x625afb, enabled by NapiLog_SetEnabled(dword_B4C688) @0x4c6d15 after
 // the socket opens; `/INOUT` @0x4a743d..0x4a744f].
 
+#include <formats/fnt/fnt.h>
 #include <net/npwire/protocol_message.h>
 #include <runtime/hud/game_text_lookup.h>
 #include <runtime/inmatch/server_files.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <ctime>
@@ -81,6 +83,69 @@ inline constexpr size_t kServerConsoleShownLines = 4;   // [orig: raw slots 3..0
 // 119) with its colour in the newest slot. `ring` holds the newest slot last.
 void server_console_post(std::vector<ServerConsoleLine> &ring, const std::string &text,
 		uint32_t argb);
+
+// THE CHAT DISPLAY BUFFER: Chat_AddMessageChannel1's display leg, the 40 slots
+// of 128 bytes CHAT GET lists. Each post word-wraps the whole line with the
+// bold label font at its native size against the chat box's width, the
+// hud.def `chat_message` row's x2 - (x1 - 4); a host with no hud.def (JO:CA
+// ships none) keeps both rows 0, so the width is 4, and a line splits only
+// where the walk meets a space before its first glyph's advance passes 4: a
+// leading space, or one narrow glyph and a space ("i am" in Arial16b). The
+// buffer shifts up by the segment count, the new slots are zeroed, slot 1's
+// timer takes the post's life (930) or slot 2's plus 186 when that is later,
+// and the segments fill slots count..1: the first as it stands, each later
+// one behind two spaces, each copy at most 119 bytes (the cursor advancing by
+// the copy, so a longer segment's tail reads as the next one), then the
+// colour at +120. A slot is its text bytes (+0..+119), its colour dword
+// (+120) and its timer dword (+124); slot 1 is the newest.
+// [orig: Chat_AddMessageChannel1 @0x4985D0 — the width from HUD_GetChatBoxCoord
+//  @0x5BBE90 rows 2 and 1 @0x498673..0x49869C (g_HUDChatBoxCoords @0x28E4DF8,
+//  written only by the hud.def parser @0x5BB7D1 / @0x5BB7ED), HUD_WordWrapText
+//  @0x580980 over g_hudLabelFontBold @0x4986AC, a 0 count read as 1
+//  @0x4986BB..0x4986C5, the shift @0x4986CC..0x498701, the zeroing @0x498718,
+//  slot 1's timer @0x49872C..0x498734, the fill @0x498750..0x4987DA; the lives
+//  930 at every Chat_DispatchToChannel call @0x42B988..0x42BAEA]
+inline constexpr size_t kChatDisplaySlotCount = 40;
+inline constexpr size_t kChatDisplaySlotBytes = 128;
+inline constexpr size_t kChatDisplayColorOffset = 120;
+inline constexpr size_t kChatDisplayTimerOffset = 124;
+inline constexpr size_t kChatDisplayCopyMax = 119;
+inline constexpr int32_t kChatDisplayLife = 930;     // [orig: `push 3A2h`]
+inline constexpr int32_t kChatDisplayStagger = 186;  // [orig: dword_B3FF38 + 186 @0x498722]
+// The chat box with no hud.def: both rows 0, 0 - (0 - 4).
+inline constexpr int kChatDisplayWidthNoHudDef = 4;
+
+struct ChatDisplayBuffer {
+	// Slot k (1..40) at byte (k - 1) * 128, slot 40 the oldest.
+	std::array<uint8_t, kChatDisplaySlotCount * kChatDisplaySlotBytes> bytes{};
+};
+// The wrap's font (g_hudLabelFontBold: the bold Arial HUD_InitAllFonts picks by
+// the display's width; null, a font that did not load: no line wraps) and the
+// chat box's width.
+struct ChatDisplayWrap {
+	const fnt::fnt_font_t *font = nullptr;
+	int width = kChatDisplayWidthNoHudDef;
+};
+
+// One line into the display buffer, with its colour and life. A wrap of more
+// than 40 segments writes only the 40 slots (retail's runs past the buffer,
+// D-NET-372's successor row).
+void chat_display_post(ChatDisplayBuffer &buffer, const ChatDisplayWrap &wrap,
+		const std::string &text, uint32_t argb, int32_t life = kChatDisplayLife);
+// One logic tick: every slot's nonzero timer steps down by one
+// [orig: Input_DecrementCooldownTimers @0x498440 (the dword_B3FEB8 column)
+//  from Game_ProcessMainFrame @0x5267A6].
+void chat_display_tick(ChatDisplayBuffer &buffer);
+// CHAT GET's text: slots 40..1, each slot's bytes read as a string, the
+// non-empty ones each followed by CR LF. A slot whose 120 text bytes hold no
+// NUL reads on into its colour and timer words and the next slot's bytes, as
+// retail's strlen does; the buffer's end stops it here.
+// [orig: CAdminServer_HandleChatCommand @0x404B11..0x404BA5]
+std::string chat_display_get(const ChatDisplayBuffer &buffer);
+
+// Chat_AddMessageChannel1 on a host with no client: the raw ring's line and
+// the display buffer's, over the context's wrap (the dispatcher's 930 life).
+void server_console_add(NapiNPServerCtx &ctx, const std::string &text, uint32_t argb);
 
 // Chat_DispatchToChannel on a host with no client: the channel picks the sink
 // and colour (hud/feed_format.h chat_channel_sink / chat_channel_color); a

@@ -126,6 +126,10 @@ int main(int argc, char **argv) {
 		std::fprintf(stderr, "opennova-serve: %s\n%s", error.c_str(), serve::serve_usage());
 		return 2;
 	}
+#ifdef _WIN32
+	// The defaults' display width (server.h ServeOptions::desktop_width).
+	options.desktop_width = GetSystemMetrics(SM_CXSCREEN);
+#endif
 	// The log sink masks every registered secret, so an account name, a
 	// password or a session tag never reaches the console (opennova-nw-lister's).
 	nw_lister::install_console_log(std::string(), options.log_debug);

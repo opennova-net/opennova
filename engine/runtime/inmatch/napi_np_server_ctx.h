@@ -524,6 +524,11 @@ struct NapiNPServerCtx {
 	//  Chat_CheckFloodControl's table @0xB3B788].
 	std::vector<ServerConsoleLine> console_chat;
 	ChatFloodTable console_chat_flood{};
+	// That host's chat display buffer, the lines CHAT GET lists, and its wrap: the
+	// bold label font the embedder loads and the chat box's width
+	// (server_console.h) [orig: byte_B3FE3C, 40 x 128].
+	ChatDisplayBuffer console_chat_display;
+	ChatDisplayWrap console_chat_wrap;
 	// A Serve Only host's own slot 0 (HostSlotRow); inactive on a listen host,
 	// whose loopback connection holds slot 0.
 	HostSlotRow host_slot;

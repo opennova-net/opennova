@@ -2,6 +2,7 @@
 // its console chat and the /INOUT lines.
 #include <runtime/inmatch/server_console.h>
 
+#include <base/io/le.h>
 #include <base/io/strutil.h>
 #include <formats/def/def.h> // DefItemsFile (SAVENFO's rows)
 #include <net/napi/session.h> // tokenize_quoted (String_TokenizeQuotedToArray)
@@ -9,10 +10,13 @@
 #include <net/npwire/ingame_message_id.h>
 #include <runtime/hud/feed_format.h> // chat_channel_sink / chat_channel_color / strip_inline_tags
 #include <runtime/hud/hud_chat_entry.h>
+#include <runtime/hud/hud_frame.h> // chat_wrap_text (HUD_WordWrapText)
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/world/world.h>
 
+#include <algorithm>
 #include <cstdio>
+#include <cstring>
 
 namespace opennova::inmatch {
 
@@ -25,11 +29,93 @@ void server_console_post(std::vector<ServerConsoleLine> &ring, const std::string
 	while (ring.size() > kServerConsoleRingSlots) ring.erase(ring.begin());
 }
 
+namespace {
+
+uint8_t *display_slot(ChatDisplayBuffer &buffer, size_t k) {
+	return buffer.bytes.data() + (k - 1) * kChatDisplaySlotBytes;
+}
+
+const uint8_t *display_slot(const ChatDisplayBuffer &buffer, size_t k) {
+	return buffer.bytes.data() + (k - 1) * kChatDisplaySlotBytes;
+}
+
+} // namespace
+
+void chat_display_post(ChatDisplayBuffer &buffer, const ChatDisplayWrap &wrap,
+		const std::string &text, uint32_t argb, int32_t life) {
+	// The wrap NULs the line in place at each break; the segments are the runs.
+	std::string message = text;
+	int wrapped = 0;
+	if (wrap.font != nullptr) {
+		hud::GameFont font;
+		font.set_font(wrap.font);
+		wrapped = hud::chat_wrap_text(font, 1.0f, message, wrap.width, 0);
+	}
+	const size_t count = wrapped > 0 ? static_cast<size_t>(wrapped) : 1u;
+	// The shift: slots 1..40-count move up by count, the oldest dropping off.
+	if (count <= kChatDisplaySlotCount - 1) {
+		for (size_t k = kChatDisplaySlotCount - count; k >= 1; --k)
+			std::memcpy(display_slot(buffer, k + count), display_slot(buffer, k), kChatDisplaySlotBytes);
+	}
+	const size_t kept = std::min(count, kChatDisplaySlotCount);
+	std::memset(display_slot(buffer, 1), 0, kept * kChatDisplaySlotBytes);
+	int32_t timer = life;
+	const int32_t previous = io::read_s32_le(display_slot(buffer, 2) + kChatDisplayTimerOffset);
+	if (timer < previous + kChatDisplayStagger) timer = previous + kChatDisplayStagger;
+	io::write_u32_le(display_slot(buffer, 1) + kChatDisplayTimerOffset, static_cast<uint32_t>(timer));
+	// The segments, the first into slot `count`, the last into slot 1.
+	const char *text_bytes = message.c_str();
+	size_t cursor = 0;
+	for (size_t k = count; k >= 1; --k) {
+		size_t copy = std::strlen(text_bytes + cursor) + 1;
+		if (copy >= kChatDisplayCopyMax + 1) copy = kChatDisplayCopyMax;
+		if (k <= kChatDisplaySlotCount) {
+			uint8_t *slot = display_slot(buffer, k);
+			uint8_t *write = slot;
+			if (k != count) {
+				slot[0] = ' ';
+				slot[1] = ' ';
+				slot[2] = 0;
+				write = slot + 2;
+			}
+			std::memcpy(write, text_bytes + cursor, copy);
+			io::write_u32_le(slot + kChatDisplayColorOffset, argb);
+		}
+		cursor += copy;
+	}
+}
+
+void chat_display_tick(ChatDisplayBuffer &buffer) {
+	for (size_t k = 1; k <= kChatDisplaySlotCount; ++k) {
+		uint8_t *timer = display_slot(buffer, k) + kChatDisplayTimerOffset;
+		const int32_t value = io::read_s32_le(timer);
+		if (value != 0) io::write_u32_le(timer, static_cast<uint32_t>(value - 1));
+	}
+}
+
+std::string chat_display_get(const ChatDisplayBuffer &buffer) {
+	std::string out;
+	const uint8_t *end = buffer.bytes.data() + buffer.bytes.size();
+	for (size_t k = kChatDisplaySlotCount; k >= 1; --k) {
+		const uint8_t *begin = display_slot(buffer, k);
+		const uint8_t *nul = std::find(begin, end, uint8_t{0});
+		if (nul == begin) continue;
+		out.append(reinterpret_cast<const char *>(begin), static_cast<size_t>(nul - begin));
+		out += "\r\n";
+	}
+	return out;
+}
+
+void server_console_add(NapiNPServerCtx &ctx, const std::string &text, uint32_t argb) {
+	server_console_post(ctx.console_chat, text, argb);
+	chat_display_post(ctx.console_chat_display, ctx.console_chat_wrap, text, argb, kChatDisplayLife);
+}
+
 void server_console_dispatch(NapiNPServerCtx &ctx, int channel, const std::string &text) {
 	// The \x07 escape strip (Chat_ProcessEscapeCodes @0x424580 @0x42b94f, its
 	// interface sounds) is not ported here, as on the client's ring.
 	if (hud::chat_channel_sink(channel) != hud::ChatSink::Chat) return;
-	server_console_post(ctx.console_chat, text, hud::chat_channel_color(channel));
+	server_console_add(ctx, text, hud::chat_channel_color(channel));
 }
 
 std::vector<ServerConsoleLine> server_console_rows(const std::vector<ServerConsoleLine> &ring) {
@@ -90,8 +176,7 @@ uint32_t server_console_submit(NapiNPServerCtx &ctx, hud::ChatEntry &entry,
 	for (const char c : line) events |= entry.key(static_cast<unsigned char>(c), 0, f, gametext, send);
 	if (entry.capturing()) events |= entry.key(13, 0, f, gametext, send);
 	if ((events & kFloodEcho) != 0)
-		server_console_post(ctx.console_chat, entry.echo_text(),
-				hud::chat_dispatch_flood_color(entry.echo_dispatch()));
+		server_console_add(ctx, entry.echo_text(), hud::chat_dispatch_flood_color(entry.echo_dispatch()));
 	return events;
 }
 

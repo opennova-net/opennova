@@ -13,6 +13,7 @@
 #include <base/io/crt_rand.h>
 #include <base/io/le.h>
 #include <formats/admincfg/admin_cfg.h>
+#include <formats/fnt/fnt.h>
 #include <formats/gamecfg/game_cfg.h>
 #include <net/admin/admin_protocol.h>
 #include <net/admin/admin_server.h>
@@ -98,6 +99,18 @@ struct FakeRotation final : inmatch::RotationAdmin {
 		state.alt_cursor = index;
 		return true;
 	}
+};
+
+// A one-page font whose glyphs are 8 units wide, 'i' 2 and the space 3.
+struct NarrowFont {
+	fnt::fnt_font_t font{};
+	NarrowFont() {
+		fnt::fnt_init_blank(&font, 1, 1);
+		for (uint32_t i = 0; i < fnt::FNT_GLYPH_COUNT; ++i) font.glyphs[i].uv.u1 = 8.0f / 256.0f;
+		font.glyphs['i' - 32].uv.u1 = 2.0f / 256.0f;
+		font.glyphs[' ' - 32].uv.u1 = 3.0f / 256.0f;
+	}
+	~NarrowFont() { fnt::fnt_free(&font); }
 };
 
 // The host's working directory, in memory.
@@ -669,7 +682,16 @@ void test_weapon_cmd_goto_chat() {
 	               host.ctx.console_chat.back().color == hud::kHudColorLightBlue && host.echoes.empty(),
 	       "the flood table refuses it and the sender echoes it into the ring in Global's flood colour");
 	expect_eq(a.one("CHAT GET"), "hello <b>world \r\nhello <b>world \r\n",
-	          "GET lists the ring oldest first, CR LF each");
+	          "GET lists the display buffer oldest first, CR LF each");
+	// The display lines are the wrap's: over a bold font whose 'i' is narrow, the 4-unit chat
+	// box a host with no hud.def keeps splits "i am" after its first glyph (D-NET-372).
+	NarrowFont bold;
+	host.ctx.console_chat_wrap.font = &bold.font;
+	inmatch::server_console_dispatch(host.ctx, 10, "i am");
+	expect_eq(a.one("CHAT GET"), "hello <b>world \r\nhello <b>world \r\ni\r\n  am\r\n",
+	          "GET lists the wrapped segments, the continuation behind two spaces");
+	expect(host.ctx.console_chat.back().text == "i am", "the raw ring keeps the line whole");
+	host.ctx.console_chat_wrap.font = nullptr;
 	// The flood table is the context's one, which the console's typed line checks too: the
 	// same words over CHAT SEND within 0x500 frames are refused.
 	std::string typed = "from the console ";

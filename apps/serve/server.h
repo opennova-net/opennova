@@ -31,6 +31,7 @@
 
 #include <base/io/crt_rand.h>
 #include <base/resource_index/resource_index.h>
+#include <formats/fnt/fnt.h>
 #include <formats/gamecfg/game_cfg.h>
 #include <net/admin/admin_server.h>
 #include <runtime/assets/asset_store.h>
@@ -91,6 +92,11 @@ struct ServeOptions {
 	std::string credentials_path;                  // --credentials FILE
 	nw_lister::Credentials credentials;            // main() loads it and masks every value
 	LogSwitches log_switches; // /PROFILE <path>, /PUNT.TXT, /PUNTLOG, /CHEATLOG (server_logs.h)
+	// The primary desktop's width, the display width game.cfg's defaults take ahead of its
+	// video_res line; main() samples it on Windows, and a host with no desktop has 0, the
+	// failure value of the call [orig: Config_SetDefaults @0x54D0F3..0x54D0F6
+	// (GetSystemMetrics(SM_CXSCREEN) into outWidth)].
+	int32_t desktop_width = 0;
 };
 
 // Parses the command line (argv[1..]). Returns 0 when the options parsed, 1 on
@@ -220,6 +226,9 @@ private:
 	// The listing over the mission that just started (the first, or a map change's next).
 	void bind_listing();
 	HostRegistration listing_columns() const;
+	// The mission start's HUD_InitAllFonts over the display's width: the bold label font the
+	// chat display wraps with, read from the mount, onto the session's console wrap.
+	void select_chat_font();
 
 	ServeOptions options_;
 	ResourceIndex index_;
@@ -235,6 +244,10 @@ private:
 	inmatch::HostRotation rotation_;
 	inmatch::HostFileReport report_;
 	std::unique_ptr<mission::MissionKernel> kernel_;
+	// The chat display's wrap font (select_chat_font): its name and the parsed file.
+	std::string chat_font_name_;
+	fnt::fnt_font_t chat_font_{};
+	bool chat_font_valid_ = false;
 	std::unique_ptr<inmatch::HostRole> role_;
 	std::unique_ptr<inmatch::Session> session_;
 	inmatch::HostBoot boot_;

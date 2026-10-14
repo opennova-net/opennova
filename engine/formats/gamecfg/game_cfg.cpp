@@ -416,6 +416,29 @@ void store_switch_key(GameCfg &cfg, const SwitchKey &key, const char *value) {
 
 } // namespace
 
+bool parse_resolution_dimensions(const std::string &text, int32_t &width, int32_t &height) {
+	// [orig: String_ParseResolutionDimensions @0x51E6D0 — the blanks @0x51E6E4..0x51E6FA, the
+	//  width @0x51E6FF..0x51E71E, the blanks @0x51E730..0x51E746, 'x' / 'X' @0x51E74D..0x51E753,
+	//  the blanks after it @0x51E755..0x51E76D, the height @0x51E771..0x51E78C, the zero test
+	//  @0x51E79D; each digit `d + 10 * n - '0'` in a 32-bit int]
+	const auto blank = [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f'; };
+	const auto digit = [](char c) { return c >= '0' && c <= '9'; };
+	const char *cursor = text.c_str();
+	uint32_t w = 0;
+	uint32_t h = 0;
+	while (blank(*cursor)) ++cursor;
+	for (; digit(*cursor); ++cursor) w = static_cast<uint32_t>(*cursor) + 10u * w - '0';
+	while (blank(*cursor)) ++cursor;
+	if (*cursor != 'x' && *cursor != 'X') return false;
+	++cursor;
+	while (blank(*cursor)) ++cursor;
+	for (; digit(*cursor); ++cursor) h = static_cast<uint32_t>(*cursor) + 10u * h - '0';
+	if (w == 0 || h == 0) return false;
+	width = static_cast<int32_t>(w);
+	height = static_cast<int32_t>(h);
+	return true;
+}
+
 GameCfg defaults(const DefaultTexts &texts, int32_t player_index, int32_t hw3d_deviceno) {
 	// The block is zeroed, keeping its first word [orig: Config_SetDefaults
 	// @0x54D033..0x54D046, restored @0x54D0C4], then the cfg table's
