@@ -59,8 +59,9 @@ func before_each() -> void:
 	body += MenuDriverFixture.wnd("button", "ADDTO_FIRETEAM_A", 510)
 	body += MenuDriverFixture.wnd("window", "CHAT_MSGS", 530,
 			'<APPEARANCE type="custom" state="default"></APPEARANCE>')
-	_write(dir.path_join("cmap.mnu"), MenuDriverFixture.screen_xml("CMAP", body).to_utf8_buffer())
-	_write(dir.path_join("menutxt.BIN"), RtxtStringFile.new().to_byte_array())
+	TestFs.write_bytes(self, dir.path_join("cmap.mnu"),
+			MenuDriverFixture.screen_xml("CMAP", body).to_utf8_buffer())
+	TestFs.write_bytes(self, dir.path_join("menutxt.BIN"), RtxtStringFile.new().to_byte_array())
 
 
 func after_each() -> void:
@@ -69,14 +70,6 @@ func after_each() -> void:
 
 func after_all() -> void:
 	PresenterFixture.unstage(TMP_DIR, STAGED)
-
-
-func _write(path: String, bytes: PackedByteArray) -> void:
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file)
-	if file != null:
-		file.store_buffer(bytes)
-		file.close()
 
 
 func _make_presenter() -> CommandMapPresenter:

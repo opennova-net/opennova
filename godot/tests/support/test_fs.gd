@@ -71,8 +71,17 @@ static func settle_tile_cache(test: GutTest, terrain: Terrain) -> Dictionary:
 	return diagnostics
 
 
-## Write raw bytes to `path`, asserting on the test that the file opens.
+## Make the folder `path` lands in (and every folder above it), asserting on
+## the test that it exists after.
+static func make_parent_dir(test: GutTest, path: String) -> void:
+	var dir := path.get_base_dir()
+	test.assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK, "Fixture folder %s" % dir)
+
+
+## Write raw bytes to `path`, making its folder first and asserting on the
+## test that the file opens.
 static func write_bytes(test: GutTest, path: String, bytes: PackedByteArray) -> void:
+	make_parent_dir(test, path)
 	var file := FileAccess.open(path, FileAccess.WRITE)
 	test.assert_not_null(file, "Fixture should be writable: %s" % path)
 	if file != null:
@@ -91,9 +100,10 @@ static func crlf(text: String) -> String:
 	return lf.replace("\n", "\r\n")
 
 
-## Write text to `path`, asserting on the test that the file opens. A `.def`
-## is written with CR LF line ends (crlf above).
+## Write text to `path`, making its folder first and asserting on the test
+## that the file opens. A `.def` is written with CR LF line ends (crlf above).
 static func write_text(test: GutTest, path: String, text: String) -> void:
+	make_parent_dir(test, path)
 	var file := FileAccess.open(path, FileAccess.WRITE)
 	test.assert_not_null(file, "Fixture should be writable: %s" % path)
 	if file != null:
@@ -126,16 +136,17 @@ static func cache_dir(test: GutTest, label: String) -> String:
 
 
 ## The smallest texture the overlay's real VFS/texture path loads: an
-## uncompressed 32-bit BGRA TGA (image type 2, top-left origin with 8 alpha
-## bits) of `size`, every texel `texel`.
-static func tga_bytes(size: Vector2i, texel := Color.WHITE) -> PackedByteArray:
+## uncompressed 32-bit BGRA TGA (image type 2) of `size`, every texel
+## `texel`, its image descriptor (byte 17) `descriptor`. The default 0x28 is
+## the top-left origin with 8 alpha bits; 0x08 stores the rows bottom-up.
+static func tga_bytes(size: Vector2i, texel := Color.WHITE, descriptor := 0x28) -> PackedByteArray:
 	var bytes := PackedByteArray()
 	bytes.resize(18 + size.x * size.y * 4)
 	bytes[2] = 2
 	bytes.encode_u16(12, size.x)
 	bytes.encode_u16(14, size.y)
 	bytes[16] = 32
-	bytes[17] = 0x28
+	bytes[17] = descriptor
 	for i in range(size.x * size.y):
 		var at := 18 + i * 4
 		bytes[at] = texel.b8
@@ -143,6 +154,34 @@ static func tga_bytes(size: Vector2i, texel := Color.WHITE) -> PackedByteArray:
 		bytes[at + 2] = texel.r8
 		bytes[at + 3] = texel.a8
 	return bytes
+
+
+## A 16-bit mono PCM RIFF/WAVE at 22050 Hz holding `seconds` of a sine
+## (sample i is sin(i * 0.1) * 8000): the 44-byte RIFF, "fmt " and "data"
+## header, then int(22050 * seconds) samples.
+static func wave_bytes(seconds: float) -> PackedByteArray:
+	var samples := int(22050 * seconds)
+	var data := PackedByteArray()
+	data.resize(samples * 2)
+	for i in samples:
+		data.encode_s16(i * 2, int(sin(i * 0.1) * 8000.0))
+	var head := PackedByteArray()
+	head.resize(44)
+	head.encode_u32(0, 0x46464952)  # RIFF
+	head.encode_u32(4, 36 + data.size())
+	head.encode_u32(8, 0x45564157)  # WAVE
+	head.encode_u32(12, 0x20746d66)  # "fmt "
+	head.encode_u32(16, 16)
+	head.encode_u16(20, 1)  # PCM
+	head.encode_u16(22, 1)  # mono
+	head.encode_u32(24, 22050)
+	head.encode_u32(28, 44100)  # byte rate
+	head.encode_u16(32, 2)  # block align
+	head.encode_u16(34, 16)  # bits per sample
+	head.encode_u32(36, 0x61746164)  # data
+	head.encode_u32(40, data.size())
+	head.append_array(data)
+	return head
 
 
 ## One file's contents before a test touches it (typically a user:// config):
