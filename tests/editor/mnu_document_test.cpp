@@ -317,7 +317,7 @@ int windows_at_depth() {
 	TEST_EXPECT(lists.size() == menu_table().kind(kWindow)->lists().size());
 	TEST_EXPECT(std::string(document->kind_token(lists.back().spec.kind)) == "window" &&
 	            lists.back().ids == std::vector<NodeId>({title.child, exit.child}));
-	TEST_EXPECT(std::string(document->kind_token(lists[2].spec.kind)) == "action" && lists[2].spec.kind == menu_kind("action"));
+	TEST_EXPECT(std::string(document->kind_token(lists[1].spec.kind)) == "action" && lists[1].spec.kind == menu_kind("action"));
 	// Which lists the root's type reads: a generic window reads no ITEMS, a button no LIST_BOX.
 	for (const Document::Collection &collection : lists) {
 		const std::string token = document->kind_token(collection.spec.kind);
@@ -408,11 +408,11 @@ int windows_at_depth() {
 	TEST_EXPECT(!document->present(exit, "position.left") && document->revision() == left_out);
 	document->undo(); // the Clear
 	TEST_EXPECT(document->serialize().text == original && document->present(exit, "position.left") && !document->dirty());
-	// GROUP, never authored on the blank menu's EXIT, written with the value it reads.
-	TEST_EXPECT(!document->present(exit, "group") && original.find("GROUP") == std::string::npos);
-	write.field = "group";
-	TEST_EXPECT(document->apply(write, error) && document->present(exit, "group"));
-	TEST_EXPECT(document->serialize().text.find("GROUP") != std::string::npos);
+	// FORM, never authored on the blank menu's EXIT, written with the value it reads.
+	TEST_EXPECT(!document->present(exit, "form") && original.find("FORM") == std::string::npos);
+	write.field = "form";
+	TEST_EXPECT(document->apply(write, error) && document->present(exit, "form"));
+	TEST_EXPECT(document->serialize().text.find("FORM") != std::string::npos);
 	const uint64_t grouped = document->revision();
 	TEST_EXPECT(document->apply(write, error) && document->revision() == grouped); // already written: no step
 	document->undo();
@@ -494,10 +494,10 @@ const char *const kShippedShape =
         "\t</WINDOW>\r\n"
         "</SCREEN>\r\n";
 
-// Every list of BACK: added to, duplicated, moved, reparented into MAIN and back and
+// Every list of BACK its type reads: added to, duplicated, moved, reparented into MAIN and back and
 // removed, each undone, the identities in the native tree's shape after every step (a
-// part moved to a window that has none, refused where one is); a leaf added into an
-// absent block authors it; the parts' toggles.
+// part moved to a window that has none, refused where one is); a list it does not read takes no record (the
+// writer writes a list only where it is read); a leaf added into an absent block authors it; the parts' toggles.
 int every_list() {
 	editor_test::TempProjectDir dir("opennova_menu_every_list_test");
 	const std::string path = dir.file("options.mnu");
@@ -516,6 +516,11 @@ int every_list() {
 		const NodeKind kind = collection.spec.kind;
 		const bool part = token == "list_box" || token == "spinup" || token == "spindown" || token == "scrollbar";
 		auto step = [&](const Edit &edit) { return document.apply(edit, error) && document.identities_match(); };
+		if (collection.spec.applies != Applicability::Reads) {
+			TEST_EXPECT(!document.apply(op_edit(EditOperation::Add, {back.row, kind, 0}, back.child), error) &&
+			            error.message.find("The game reads no") != std::string::npos);
+			continue;
+		}
 		TEST_EXPECT(step(op_edit(EditOperation::Add, {back.row, kind, 0}, back.child)));
 		const NodeAddress first = child_of(document, back, token.c_str());
 		TEST_EXPECT(first.child && document.address_at(document.locator(first)) == first);
@@ -563,7 +568,11 @@ int every_list() {
 	TEST_EXPECT(!document.apply(op_edit(EditOperation::Add, {back.row, menu_kind("item"), 0}, back.child), error));
 	document.undo();
 	TEST_EXPECT(document.serialize().text == original);
-	// A leaf added into an absent block authors it: an ITEM on BACK writes an ITEMS.
+	// A leaf goes into a list the window's type reads: a button reads no ITEMS ...
+	TEST_EXPECT(!document.apply(op_edit(EditOperation::Add, {back.row, menu_kind("items.item"), 0}, back.child), error) &&
+	            error.message.find("The game reads no") != std::string::npos);
+	// ... a list does, and a leaf added into an absent block authors it: an ITEM on BACK made a LIST writes an ITEMS.
+	TEST_EXPECT(document.apply(set_edit(back, "type", std::string("list")), error));
 	TEST_EXPECT(!window_of(document, back)->items.present);
 	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {back.row, menu_kind("items.item"), 0}, back.child), error));
 	const NodeAddress item{back.row, menu_kind("items.item"), document.last_added()};
@@ -574,15 +583,16 @@ int every_list() {
 	const Document::RecordPath back_path = document.path_in(*document.row(back.row), back.child);
 	TEST_EXPECT(!back_path.empty() && item_path.size() == back_path.size() + 1 &&
 	            item_path[back_path.size()].index == 0);
-	// ... which a button does not read (flagged, still written).
+	// ... which BACK made a button again does not read (flagged).
 	FieldSchema text;
 	for (const FieldSchema &field : document.fields(item.kind))
 		if (field.id == "text") text = field;
+	TEST_EXPECT(document.field_on(item, text).applies == Applicability::Reads);
+	TEST_EXPECT(document.apply(set_edit(back, "type", std::string("button")), error));
 	TEST_EXPECT(document.field_on(item, text).applies == Applicability::Ignored);
 	TEST_EXPECT(document.apply(set_edit(back, "items", int64_t(0)), error) && !document.present(item, std::string()) &&
 	            window_of(document, back)->items.items.size() == 1);
-	document.undo();
-	document.undo();
+	while (document.can_undo()) document.undo();
 	TEST_EXPECT(document.serialize().text == original);
 	// The spin list's arrows are parts; a table's cells sit in its rows.
 	const NodeAddress up = child_of(document, spin, "spinup");
@@ -608,37 +618,27 @@ int every_list() {
 	return 0;
 }
 
-// Every list's default record, the window's and the nested ones (a row's cell, an
-// element's attribute and element), survives a save and a reload.
+// Every list's default record, the window's and the nested one (a row's cell), survives a save and a reload.
 int defaults_survive() {
 	editor_test::TempProjectDir dir("opennova_menu_defaults_test");
 	const std::string path = dir.file("options.mnu");
 	TEST_EXPECT(editor_test::write_text(path, kShippedShape));
 	MnuDocument document;
 	TEST_EXPECT(load(document, path));
-	NodeAddress back;
-	TEST_EXPECT(find_definition(AssetGraph(), document, "BACK", back));
+	NodeAddress back, results;
+	TEST_EXPECT(find_definition(AssetGraph(), document, "BACK", back) && find_definition(AssetGraph(), document, "RESULTS", results));
 	Diagnostic error;
+	// (Each list the button reads: one it does not read takes no record, the writer writing none there.)
 	for (const Document::Collection &collection : document.collections_of(back))
-		if (collection.ids.empty())
+		if (collection.ids.empty() && collection.spec.applies == Applicability::Reads)
 			TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {back.row, collection.spec.kind, 0}, back.child), error));
-	const NodeAddress row = child_of(document, back, "items.row");
-	const NodeAddress element = child_of(document, back, "element");
-	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {back.row, menu_kind("item"), 0}, row.child), error));
-	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {back.row, menu_kind("attribute"), 0}, element.child), error));
-	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {back.row, menu_kind("element"), 0}, element.child), error));
+	const NodeAddress row = child_of(document, results, "items.row");
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {results.row, menu_kind("item"), 0}, row.child), error));
 	// The defaults: a new ACTION is POP_SCREEN, a SOUND is MOUSEIN over MOUSE_OVER, a window
 	// is named uniquely.
 	TEST_EXPECT(text_of(document, child_of(document, back, "action"), "type") == "POP_SCREEN");
 	TEST_EXPECT(text_of(document, child_of(document, back, "sound"), "trigger") == "MOUSE_OVER");
 	TEST_EXPECT(text_of(document, child_of(document, back, "window"), "name") == "WINDOW1");
-	TEST_EXPECT(text_of(document, child_of(document, back, "attribute"), "name") == "PLAYERLIST" &&
-	            text_of(document, child_of(document, element, "attribute"), "name") == "NAME");
-	// A window keeps only PLAYERLIST and SERVERLIST, read by presence, and its known extras.
-	TEST_EXPECT(!document.apply(set_edit(child_of(document, back, "attribute"), "name", std::string("NAME")), error));
-	TEST_EXPECT(!document.apply(set_edit(child_of(document, back, "attribute"), "value", std::string("1")), error));
-	TEST_EXPECT(!document.apply(set_edit(element, "tag", std::string("NOT_READ")), error));
-	TEST_EXPECT(document.apply(set_edit(child_of(document, element, "element"), "tag", std::string("ANY_NAME")), error));
 	TEST_EXPECT(document.identities_match() && document.serialize().ok() && document.save(error));
 	MnuDocument reloaded;
 	TEST_EXPECT(load(reloaded, path) && reloaded.issues().empty() && reloaded.identities_match());
@@ -669,7 +669,7 @@ int window_index_matches_the_compiler() {
 	});
 	// The spin arrows are widgets past the document's index space, not counted here.
 	TEST_EXPECT(windows == 5 && compiler.widget_count() == 5);
-	TEST_EXPECT(document.record_at(screen, 1, 1, 1) == child_of(document, {screen.id, kWindow, document.window_at(screen, 1)},
+	TEST_EXPECT(document.record_at(screen, 1, 0, 1) == child_of(document, {screen.id, kWindow, document.window_at(screen, 1)},
 	                                                                      "hotkey", 1));
 	return 0;
 }
@@ -1088,9 +1088,7 @@ int screens_stay_found() {
 	return 0;
 }
 
-// The nested lists: a table cell moved between rows, an element's attribute and element
-// between extra elements, each and back; into a window only what a window keeps (a save
-// would lose anything else), so the edited menu reads back as written.
+// The nested lists: a table cell moved between rows and back, so the edited menu reads back as written.
 int nested_lists() {
 	editor_test::TempProjectDir dir("opennova_menu_nested_lists_test");
 	const std::string path = dir.file("options.mnu");
@@ -1113,45 +1111,12 @@ int nested_lists() {
 	            text_of(document, cell, "text") == "x.tga" && window_of(document, results)->items.rows[0].cells.size() == 1);
 	TEST_EXPECT(step(op_edit(EditOperation::Move, cell, row.child, SIZE_MAX)) && owner(cell) == row &&
 	            child_of(document, row, "item", 1) == cell && step(op_edit(EditOperation::Remove, other_row)));
-	// An element's attribute and element between two extra elements.
-	const NodeKind element_kind = menu_kind("element"), attribute_kind = menu_kind("attribute");
-	TEST_EXPECT(step(op_edit(EditOperation::Add, {back.row, element_kind, 0}, back.child)));
-	const NodeAddress one{back.row, element_kind, document.last_added()};
-	TEST_EXPECT(step(op_edit(EditOperation::Add, {back.row, element_kind, 0}, back.child)));
-	const NodeAddress two{back.row, element_kind, document.last_added()};
-	TEST_EXPECT(step(op_edit(EditOperation::Add, {back.row, attribute_kind, 0}, one.child)));
-	const NodeAddress attribute{back.row, attribute_kind, document.last_added()};
-	TEST_EXPECT(step(op_edit(EditOperation::Add, {back.row, element_kind, 0}, one.child)));
-	const NodeAddress inner{back.row, element_kind, document.last_added()};
-	for (const NodeAddress &record : {attribute, inner}) {
-		TEST_EXPECT(step(op_edit(EditOperation::Move, record, two.child, 0)) && owner(record) == two);
-		TEST_EXPECT(step(op_edit(EditOperation::Move, record, one.child, 0)) && owner(record) == one);
-	}
-	// Into a window: an attribute NAME, a PLAYERLIST with a value and an element tagged
-	// ANY_NAME are refused (the tag kept as the reader keeps it, upper case) ...
-	TEST_EXPECT(text_of(document, attribute, "name") == "NAME");
-	TEST_EXPECT(!document.apply(op_edit(EditOperation::Move, attribute, back.child, 0), error) &&
-	            error.message.find("PLAYERLIST and SERVERLIST attributes") != std::string::npos);
-	TEST_EXPECT(step(set_edit(attribute, "name", std::string("PLAYERLIST"))) && step(set_edit(attribute, "value", std::string("1"))));
-	TEST_EXPECT(!document.apply(op_edit(EditOperation::Move, attribute, back.child, 0), error) &&
-	            error.message.find("no value") != std::string::npos);
-	TEST_EXPECT(step(set_edit(inner, "tag", std::string("any_name"))) && text_of(document, inner, "tag") == "ANY_NAME");
-	TEST_EXPECT(!document.apply(op_edit(EditOperation::Move, inner, back.child, 0), error) &&
-	            error.message.find("keeps only these elements") != std::string::npos);
-	TEST_EXPECT(owner(attribute) == one && owner(inner) == one);
-	// ... a PLAYERLIST with none and a TARGET move in.
-	Edit clear = op_edit(EditOperation::Clear, attribute);
-	clear.field = "value";
-	TEST_EXPECT(step(clear) && step(op_edit(EditOperation::Move, attribute, back.child, 0)) && owner(attribute) == back);
-	TEST_EXPECT(step(set_edit(inner, "tag", std::string("TARGET"))) && step(op_edit(EditOperation::Move, inner, back.child, 0)) &&
-	            owner(inner) == back);
 	const SerializeResult edited = document.serialize();
 	TEST_EXPECT(edited.ok());
 	mnu::Document reread;
 	std::string message;
 	std::vector<mnu::ParseNote> notes;
-	TEST_EXPECT(mnu::parse(edited.text, reread, message, &notes, mnu::ParseLayout::Text) && notes.empty() &&
-	            mnu::serialize(reread) == edited.text);
+	TEST_EXPECT(mnu::parse(edited.text, reread, message, &notes) && notes.empty() && mnu::serialize(reread) == edited.text);
 	while (document.can_undo()) document.undo();
 	TEST_EXPECT(document.serialize().text == original && document.identities_match());
 	return 0;
@@ -1185,9 +1150,9 @@ int shipped_shape_edits() {
 	TEST_EXPECT(document.apply(std::vector<Edit>{set_edit(added, "type", std::string("IMAGE")),
 	                                             set_edit(added, "value", std::string("video.tga"))},
 	                           error));
-	TEST_EXPECT(appearances().size() == 5 && appearances()[0].type == "custom" && appearances()[4].value == "video.tga");
+	TEST_EXPECT(appearances().size() == 5 && appearances()[0].type == "CUSTOM" && appearances()[4].value == "video.tga");
 	TEST_EXPECT(document.apply(op_edit(EditOperation::Remove, added), error));
-	TEST_EXPECT(appearances().size() == 4 && appearances()[0].type == "custom" && appearances()[1].type == "color" &&
+	TEST_EXPECT(appearances().size() == 4 && appearances()[0].type == "CUSTOM" && appearances()[1].type == "COLOR" &&
 	            appearances()[2].type.empty());
 
 	// B4: the HOTKEY rows are records with their own VIRTUAL flag.
@@ -1198,7 +1163,10 @@ int shipped_shape_edits() {
 	TEST_EXPECT(hotkeys()[1].value == "B" && !hotkeys()[1].virtual_key);
 	TEST_EXPECT(document.apply(op_edit(EditOperation::Remove, escape), error) && hotkeys().size() == 1 && hotkeys()[0].value == "B");
 	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {back.row, menu_kind("hotkey"), 0}, back.child, 0), error));
-	TEST_EXPECT(document.apply(set_edit({back.row, menu_kind("hotkey"), document.last_added()}, "value", std::string("Q")), error));
+	// (A new HOTKEY is VK_ESCAPE, a VIRTUAL name: a character key is its character, not VIRTUAL.)
+	const NodeAddress made{back.row, menu_kind("hotkey"), document.last_added()};
+	TEST_EXPECT(document.apply(std::vector<Edit>{set_edit(made, "value", std::string("Q")), set_edit(made, "virtual", int64_t(0))},
+	                           error));
 	TEST_EXPECT(hotkeys().size() == 2 && hotkeys()[0].value == "Q" && !hotkeys()[0].virtual_key);
 	document.undo(); document.undo(); document.undo(); // back to VK_RETURN (virtual) + B
 	TEST_EXPECT(hotkeys().size() == 2 && hotkeys()[0].virtual_key && hotkeys()[1].value == "B");
@@ -1223,9 +1191,9 @@ int shipped_shape_edits() {
 	TEST_EXPECT(mnu::parse_file(path, reparsed, message) && reparsed.screens.size() == 1);
 	const mnu::Screen &saved = reparsed.screens[0];
 	TEST_EXPECT(saved.roots.size() == 1 && saved.roots[0].text_rsrc == "options.bin");
-	TEST_EXPECT(saved.roots[0].cursor.file == "arrow2.tga" && saved.roots[0].cursor.flags == "STANDARD");
+	TEST_EXPECT(saved.roots[0].cursor.file == "arrow2.tga" && saved.roots[0].cursor.flags == mnu::ui_material_flags_of("STANDARD"));
 	const mnu::Window &saved_back = saved.roots[0].children[0];
-	TEST_EXPECT(saved_back.appearances.size() == 4 && saved_back.appearances[0].type == "custom" &&
+	TEST_EXPECT(saved_back.appearances.size() == 4 && saved_back.appearances[0].type == "CUSTOM" &&
 	            saved_back.appearances[3].value == "back2.tga");
 	TEST_EXPECT(saved_back.hotkeys.size() == 2 && saved_back.hotkeys[0].value == "VK_RETURN" && saved_back.hotkeys[0].virtual_key);
 	// A Set of the value an unauthored field reads authors nothing: BACK has no RIGHT, no
@@ -1256,7 +1224,7 @@ int typed_clear_and_retype() {
 	Diagnostic error;
 
 	for (const char *value : {"back.tg", "", "t", "tab_new.tga"}) TEST_EXPECT(document.apply(typed(image, "value", value), error));
-	TEST_EXPECT(appearances().size() == 4 && appearances()[3].type == "image" && appearances()[3].value == "tab_new.tga");
+	TEST_EXPECT(appearances().size() == 4 && appearances()[3].type == "IMAGE" && appearances()[3].value == "tab_new.tga");
 	TEST_EXPECT(appearances()[3].has_map_state && appearances()[3].map_state == 2 && appearances()[3].height == 20);
 	document.end_edit_group();
 	document.undo(); // the typing was one step
@@ -1350,9 +1318,9 @@ int parse_notes() {
 	const Document *blocked = session.document_for("crash.mnu");
 	TEST_EXPECT(editable && !editable->blocked() && editable->ignored_lines() == 1 && editable->serialize().ok());
 	TEST_EXPECT(blocked && blocked->blocked() && !blocked->serialize().ok());
-	// An explicit Save keeps the input the game ignores with the file's look (D-MNU-22): nothing to
-	// rewrite; it refuses the one that does not serialize (S11b).
-	TEST_EXPECT(editable->rewrite_need() == Document::RewriteNeed::None);
+	// An explicit Save writes the menu from its records alone (S26), without the input the game ignores: a rewrite;
+	// it refuses the one that does not serialize (S11b).
+	TEST_EXPECT(editable->rewrite_need() == Document::RewriteNeed::Rewrite);
 	TEST_EXPECT(blocked->rewrite_need() == Document::RewriteNeed::Unserializable);
 	// S12 review: a source finding stays on its window while the window moves (its locator
 	// names the file as loaded, Document::source_address), and goes to the file once removed.
@@ -1420,10 +1388,10 @@ int blank_menu_edits() {
 	TEST_EXPECT(document->apply(std::vector<Edit>{set_edit(image, "type", std::string("IMAGE")),
 	                                              set_edit(image, "value", std::string("logo.tga"))},
 	                            error));
-	TEST_EXPECT(window_of(*document, root)->appearances.size() == 2 && window_of(*document, root)->appearances[0].type == "custom");
+	TEST_EXPECT(window_of(*document, root)->appearances.size() == 2 && window_of(*document, root)->appearances[0].type == "CUSTOM");
 	TEST_EXPECT(document->apply(op_edit(EditOperation::Remove, image), error));
 	const auto &kept = window_of(*document, root)->appearances;
-	TEST_EXPECT(kept.size() == 1 && kept[0].type == "custom" && kept[0].state == "default" && kept[0].value.empty());
+	TEST_EXPECT(kept.size() == 1 && kept[0].type == "CUSTOM" && kept[0].state == "DEFAULT" && kept[0].value.empty());
 
 	// B3 through the rename transaction: the menu names a string table; renaming the table
 	// rewrites the menu's saved TEXT_RSRC, so nothing is left dangling.
@@ -1761,6 +1729,8 @@ void sweep_structure(MnuDocument &document, const std::string &label, const std:
 			for (const Document::Collection &collection : document.collections_of(owner)) {
 				const std::string token = document.kind_token(collection.spec.kind);
 				kinds[token] = collection.spec.kind;
+				// A list the owner's window type does not read takes no record (the writer writes none there).
+				if (collection.spec.applies != Applicability::Reads) continue;
 				if (collection.ids.empty()) empty.emplace(token, Owner{owner, 0});
 				else full.emplace(token, Owner{owner, collection.ids.front()});
 			}
@@ -1830,8 +1800,8 @@ void sweep_menu(const std::string &label, const std::string &absolute, const std
 	if (document.blocked()) { sweep_fail(totals, label, "loads blocked"); return; }
 	mnu::Document native;
 	std::string message;
-	// Read with its look (D-MNU-22), as the document reads it: the writer gives the file back as it was.
-	if (!mnu::parse(decoded.data(), decoded.size(), native, message, nullptr, mnu::ParseLayout::Text)) {
+	// Read as the document reads it: the writer writes the model alone (D-MNU-22).
+	if (!mnu::parse(decoded.data(), decoded.size(), native, message, nullptr)) {
 		sweep_fail(totals, label, "mnu::parse: " + message);
 		return;
 	}
@@ -2021,9 +1991,9 @@ int changes_since_save() {
 
 // S12 D6: a style colour (a FONT colour, an APPEARANCE of type COLOR or OUTLINE, a COLOR ITEM)
 // is a hex word the Inspector draws a swatch for, a %VAR% taken as well; an IMAGE's value is
-// none; a CURSOR's and an APPEARANCE's FLAGS offer "Not written" (no text: the element left
-// out) and the material flag tokens the parse knows, and take any text; a BODY's
-// BITMAP_FLAGS and the header's sort stay free text.
+// none; a CURSOR's, an APPEARANCE's and a BODY's BITMAP_FLAGS are the FLAGS word the parse reads, offering the
+// material flag names it knows and taking any combination of them; the default word (STANDARD_TRANSPARENT, the
+// parse's where none is written) leaves the element out.
 int colours_and_flags() {
 	editor_test::TempProjectDir dir("opennova_menu_colours_test");
 	NoProcess platform;
@@ -2055,29 +2025,29 @@ int colours_and_flags() {
 	TEST_EXPECT(schema(appearance, "value").color == FieldColor::None &&
 	            schema(appearance, "value").reference == ReferenceKind::MenuTexture);
 	const FieldSchema &flags = *schema(appearance, "flags").schema, &cursor = *schema(exit, "cursor.flags").schema;
-	// No text first (the element left out), then the table's 43 tokens.
-	TEST_EXPECT(flags.open_choices && flags.choices.size() == 44 && cursor.open_choices && cursor.choices.size() == 44);
-	TEST_EXPECT(flags.choices[0].name.empty() && flags.choices[0].label == "Not written" && cursor.choices[0].name.empty() &&
-	            cursor.choices[0].label == "Not written");
+	// The table's 43 names, any combination of them taken.
+	TEST_EXPECT(flags.open_choices && flags.choices.size() == 43 && cursor.open_choices && cursor.choices.size() == 43);
 	bool transparent = false;
 	for (const FieldChoice &choice : cursor.choices)
 		transparent = transparent || (choice.name == "STANDARD_TRANSPARENT" && choice.value == 0x300651);
 	TEST_EXPECT(transparent);
-	TEST_EXPECT(document->apply(set_edit(exit, "cursor.flags", std::string("STANDARD|NATIVE2X")), error) &&
-	            text_of(*document, exit, "cursor.flags") == "STANDARD|NATIVE2X");
-	// Picking "Not written" clears it: the file leaves the element out again.
+	const std::string native2x = mnu::ui_material_flags_text(mnu::ui_material_flags_of("STANDARD|NATIVE2X"));
+	TEST_EXPECT(document->apply(set_edit(exit, "cursor.flags", std::string("standard|native2x")), error) &&
+	            text_of(*document, exit, "cursor.flags") == native2x);
 	TEST_EXPECT(document->apply({set_edit(exit, "cursor.file", std::string("cursor.tga")),
 	                             set_edit(appearance, "flags", std::string("NOCHECKDEPTH"))},
 	                            error));
 	std::string text = document->serialize().text;
-	TEST_EXPECT(text.find("STANDARD|NATIVE2X") != std::string::npos && text.find("NOCHECKDEPTH") != std::string::npos);
-	TEST_EXPECT(document->apply({set_edit(exit, "cursor.flags", cursor.choices[0].name), set_edit(appearance, "flags", flags.choices[0].name)},
+	TEST_EXPECT(text.find(native2x) != std::string::npos && text.find("NOCHECKDEPTH") != std::string::npos);
+	// The default word leaves the element out again (the parse's where none is written).
+	TEST_EXPECT(document->apply({set_edit(exit, "cursor.flags", std::string("STANDARD_TRANSPARENT")),
+	                             set_edit(appearance, "flags", std::string("STANDARD_TRANSPARENT"))},
 	                            error));
 	text = document->serialize().text;
-	TEST_EXPECT(text_of(*document, exit, "cursor.flags").empty() && text_of(*document, appearance, "flags").empty() &&
-	            text.find("STANDARD|NATIVE2X") == std::string::npos && text.find("NOCHECKDEPTH") == std::string::npos);
+	TEST_EXPECT(text_of(*document, exit, "cursor.flags") == "STANDARD_TRANSPARENT" &&
+	            text.find(native2x) == std::string::npos && text.find("NOCHECKDEPTH") == std::string::npos);
 	for (const FieldSchema &field : document->fields(menu_kind("column.body")))
-		if (field.id == "bitmap_flags") TEST_EXPECT(field.choices.empty() && !field.open_choices);
+		if (field.id == "bitmap_flags") TEST_EXPECT(field.open_choices && field.choices.size() == 43);
 	return 0;
 }
 
@@ -2149,8 +2119,9 @@ int parts_in_words() {
 	TEST_EXPECT(words("action", 1) == "Show or hide PANEL");
 	TEST_EXPECT(words("action", 2) == "Hide PANEL");
 	TEST_EXPECT(words("action", 3) == "Go back");
-	// A type the game's parse knows no code of does nothing [orig: CUIElement_ParseXMLDefinition @ 0x648ee2].
-	TEST_EXPECT(words("action", 4) == "Does nothing (JUMP is no action type)");
+	// A type the game's parse knows no code of sets none, and does nothing [orig: CUIElement_ParseXMLDefinition @
+	// 0x648ee2].
+	TEST_EXPECT(words("action", 4) == "Does nothing (no action type)");
 	TEST_EXPECT(words("hotkey", 0) == "Key O");
 	return 0;
 }

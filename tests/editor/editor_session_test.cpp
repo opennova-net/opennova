@@ -1937,17 +1937,19 @@ static int test_save_contract() {
 	session.handle(request::save(project.strings_path));
 	TEST_EXPECT(session.outcome().done() && v.activity.status == project.strings_path + " has no changes to save.");
 	TEST_EXPECT(!output_has(v, "Saved " + project.strings_path));
-	// Save naming nothing: the active item table, clean, the bytes it writes the file's own (its ignored
-	// line kept): nothing written.
+	// Save naming nothing: the active item table, clean, but its file holds a line the game ignores, which the
+	// writer does not write (S26: a writer writes its model alone): the Save rewrites it.
 	session.handle(request::save());
-	TEST_EXPECT(session.outcome().done() && !output_has(v, "Saved " + project.items_path) &&
-	            v.activity.status == project.items_path + " has no changes to save.");
-	// The open table's ignored line stands after the Save: its finding and its bytes as they were.
+	TEST_EXPECT(session.outcome().done() && output_has(v, "Saved " + project.items_path) &&
+	            v.activity.status == "Saved 1 file.");
+	// The ignored line is gone after the Save, and its finding with it; asked again, nothing to write.
 	session.run_operations();
-	TEST_EXPECT(has_code(v.findings.diagnostics, "catalog.ignored_input"));
+	TEST_EXPECT(!has_code(v.findings.diagnostics, "catalog.ignored_input"));
 	std::string text, error;
 	TEST_EXPECT(opennova::io::read_file_text(project.root + "/" + project.items_path, text, error));
-	TEST_EXPECT(text.find("subtype Ruins") != std::string::npos && text.find("hp 10") != std::string::npos);
+	TEST_EXPECT(text.find("subtype Ruins") == std::string::npos && text.find("hp 10") != std::string::npos);
+	session.handle(request::save());
+	TEST_EXPECT(session.outcome().done() && v.activity.status == project.items_path + " has no changes to save.");
 	session.handle(request::redo(project.items_path));
 	TEST_EXPECT(project.items->dirty() && project.hp() == 20);
 	session.handle(request::undo(project.items_path));
@@ -2088,7 +2090,7 @@ static int test_gestures_per_document() {
 // S11b: Save of a file that is not open (a Rewrite fix names one): read, written when it
 // would write other bytes (a menu's input the game ignores dropped), left closed, its finding
 // gone with the refresh; asked again, nothing to write; an item table's line the game ignores
-// a save keeps as the file has it (the demo round's bug 3): nothing to write either; a file the
+// dropped the same (S26: every writer writes its model alone); a file the
 // project lacks is refused, and so is one that does not serialize, closed or open, with the reason.
 static int test_rewrite_closed_file() {
 	editor_test::TempProjectDir dir("opennova_editor_session_rewrite");
@@ -2106,14 +2108,16 @@ static int test_rewrite_closed_file() {
 	session.handle(request::rescan());
 	session.run_operations();
 	TEST_EXPECT(has_code(v.findings.diagnostics, "menu.ignored_input") && !session.document_for(menu));
-	// A menu keeps what the game ignores with its look (D-MNU-22), as a catalog does: nothing to rewrite.
+	// A menu's writer writes its model alone (S26), as a catalog's does: what the game ignores is rewritten away.
 	session.handle(request::save(menu));
-	TEST_EXPECT(session.outcome().done() && v.activity.status == menu + " has no changes to save.");
+	TEST_EXPECT(session.outcome().done() && v.activity.status == "Saved " + menu + ".");
 	session.run_operations(); // the validation the save left due
 	std::string text, error;
-	TEST_EXPECT(opennova::io::read_file_text(file, text, error) && text.find("SCREENX") != std::string::npos &&
-	            text.find("POSITION") != std::string::npos);
-	TEST_EXPECT(has_code(v.findings.diagnostics, "menu.ignored_input") && !session.document_for(menu));
+	TEST_EXPECT(opennova::io::read_file_text(file, text, error) && text.find("SCREENX") == std::string::npos &&
+	            text.find("POSITION") != std::string::npos && !has_code(v.findings.diagnostics, "menu.ignored_input"));
+	session.handle(request::save(menu));
+	TEST_EXPECT(session.outcome().done() && v.activity.status == menu + " has no changes to save." &&
+	            !session.document_for(menu));
 	const AssetEntry *entry = v.project.scan->find("items.def");
 	TEST_EXPECT(entry != nullptr);
 	if (!entry) return 1;
@@ -2124,16 +2128,17 @@ static int test_rewrite_closed_file() {
 	session.run_operations();
 	TEST_EXPECT(has_code(v.findings.diagnostics, "catalog.ignored_input"));
 	session.handle(request::save(items));
-	TEST_EXPECT(session.outcome().done() && v.activity.status == items + " has no changes to save.");
-	TEST_EXPECT(opennova::io::read_file_text(v.project.root + "/" + items, text, error) && text == items_text);
+	TEST_EXPECT(session.outcome().done() && v.activity.status == "Saved " + items + ".");
+	TEST_EXPECT(opennova::io::read_file_text(v.project.root + "/" + items, text, error) &&
+	            text.find("subtype Ruins") == std::string::npos && text.find("hp 10") != std::string::npos);
+	session.run_operations();
+	TEST_EXPECT(!has_code(v.findings.diagnostics, "catalog.ignored_input"));
 	session.handle(request::save("nowhere.def"));
 	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "document.missing"));
 
 	// A menu that does not serialize (an empty ACTION TYPE, which retail crashes on) and holds
 	// input the game ignores (SCREENX): a Save of it is refused with the reason, the file
-	// untouched, closed and open alike: never "no changes". (No ignored input of a menu or a
-	// catalog offers a Rewrite, kept on save as they are: problems_test's test_fixes, whose Rewrite
-	// rows they are none of.)
+	// untouched, closed and open alike: never "no changes".
 	const std::string crash_text = "<SCREEN><NAME>C</NAME><WINDOW type=\"button\" name=\"B\" SCREENX=\"1\">"
 	                               "<POSITION><LEFT>0</LEFT></POSITION><ACTION type=\"\">X</ACTION></WINDOW></SCREEN>";
 	const std::string crash = v.project.root + "/menus/crash.mnu";
@@ -4369,7 +4374,7 @@ static int test_save_picks_like_the_rest() {
 	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
-	// A menu with input the game ignores (SCREENX), which a save keeps with its look (D-MNU-22).
+	// A menu with input the game ignores (SCREENX), which a save rewrites away (S26: the writer writes the model).
 	const std::string ignored = "<SCREEN><NAME>D</NAME><WINDOW type=\"button\" name=\"B\" SCREENX=\"1\">"
 	                            "<POSITION><LEFT>0</LEFT></POSITION></WINDOW></SCREEN>";
 	TEST_EXPECT(editor_test::write_text(v.project.root + "/menus/dup.mnu", ignored));
@@ -4386,9 +4391,11 @@ static int test_save_picks_like_the_rest() {
 	const std::string other = picked == "menus/dup.mnu" ? "extra/dup.mnu" : "menus/dup.mnu";
 	TEST_EXPECT(picked == "menus/dup.mnu" || picked == "extra/dup.mnu");
 	session.handle(request::save("dup.mnu"));
-	TEST_EXPECT(session.outcome().done() && v.activity.status == picked + " has no changes to save.");
+	TEST_EXPECT(session.outcome().done() && v.activity.status == "Saved " + picked + ".");
 	std::string text, error;
 	TEST_EXPECT(opennova::io::read_file_text(v.project.root + "/" + other, text, error) && text == ignored);
+	session.handle(request::save(other));
+	TEST_EXPECT(session.outcome().done() && v.activity.status == "Saved " + other + ".");
 	session.handle(request::save(other));
 	TEST_EXPECT(session.outcome().done() && v.activity.status == other + " has no changes to save.");
 	return 0;

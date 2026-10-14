@@ -1,11 +1,11 @@
 // The AI profile document (ADR 0046 S23 B; editor/documents/ai_profile_document.h): an .aip's one profile as a
-// record document over the game's reader with the file's layout modeled (formats/aip, formats/textlayout): its keys
-// as fields in the units the file writes them (a degree, a second, a km/h; a choice, a mask, an ammo's name), each
-// read by its type's key set alone (a HELO key ignored on a GROUND profile); a value set read back as the game
-// reads it (0.25 seconds holds 15 ticks, shown 0.24); a save that writes the file as it was but for the changed
-// line; the lines the reader reads nothing of and a profile of no type as findings; no row added. The retail leg
-// (OPENNOVA_JO_DIR): every shipped profile through the document, unchanged, saved byte for byte, its weapons Ammo
-// references.
+// record document over the game's reader (formats/aip), a save writing the profile alone in the format's writer's
+// form (the S26 ruling): its keys as fields in the units the file writes them (a degree, a second, a km/h; a choice,
+// a mask, an ammo's name), each read by its type's key set alone (a HELO key ignored on a GROUND profile); a value
+// set read back as the game reads it (0.25 seconds holds 15 ticks, shown 0.24), its own line; the lines the reader
+// reads nothing of and a profile of no type as findings; no row added. The retail leg (OPENNOVA_JO_DIR): every
+// shipped profile through the document, unchanged, saved as the format's writer writes what its reader reads, a
+// fixed point.
 #include <editor/documents/ai_profile_document.h>
 #include <editor/documents/document_types.h>
 #include <base/vfs/vfs.h>
@@ -36,6 +36,18 @@ FieldUse use_of(const AiProfileDocument &document, const NodeAddress &at, const 
 }
 
 using editor_test::has_code;
+
+// The text a save of `text` writes: the format's writer's of the profile its reader reads.
+std::string written(const std::string &text) {
+	const aip::Profile profile = aip::parse_profile(reinterpret_cast<const uint8_t *>(text.data()), text.size());
+	std::string out, error;
+	return aip::write_profile(profile, out, error) ? out : std::string();
+}
+
+std::string replaced(std::string text, const std::string &from, const std::string &to) {
+	text.replace(text.find(from), from.size(), to);
+	return text;
+}
 
 const std::string kFile =
 		"description     \"Grnd - test\"\r\n"
@@ -68,8 +80,8 @@ int test_fields() {
 	TEST_EXPECT(use_of(document, at, "patrol_altitude").applies == Applicability::Ignored);
 	TEST_EXPECT(use_of(document, at, "view_dist").applies == Applicability::Reads);
 	TEST_EXPECT(use_of(document, at, "primary_weap").reference == ReferenceKind::Ammo);
-	// Unchanged, the save is the file.
-	TEST_EXPECT(document.serialize().text == kFile);
+	// Unchanged, the save is the writer's text of the profile the game reads.
+	TEST_EXPECT(!written(kFile).empty() && document.serialize().text == written(kFile));
 	// A value set reads back as the game reads it: 0.25 seconds is 15 ticks, which the file writes 0.24.
 	Edit edit;
 	edit.address = at;
@@ -78,13 +90,14 @@ int test_fields() {
 	TEST_EXPECT(document.apply(edit, error));
 	TEST_EXPECT(document.get(at, "primary_rate", value) && value == Value(0.24));
 	std::string saved = document.serialize().text;
-	TEST_EXPECT(saved.find("primary_rate\t\t0.24\t\r\n") != std::string::npos);
-	// A key set anew: after the key before it, in the writer's form.
+	TEST_EXPECT(saved == written(replaced(kFile, "primary_rate\t\t10", "primary_rate\t\t0.25")) &&
+	            saved.find("0.24") != std::string::npos);
+	// A key set anew.
 	edit.field = "view_dist";
 	edit.value = int64_t(500);
 	TEST_EXPECT(document.apply(edit, error));
 	saved = document.serialize().text;
-	TEST_EXPECT(saved.find("view_fov\t\t360\t\r\nview_dist\t500\r\n") != std::string::npos);
+	TEST_EXPECT(saved == written(replaced(kFile, "primary_rate\t\t10", "primary_rate\t\t0.25") + "view_dist\t500\r\n"));
 	// A subtype of the other type's is refused; a choice set; no row is added.
 	edit.field = "subtype";
 	edit.value = int64_t(2);
@@ -96,7 +109,7 @@ int test_fields() {
 	add.address.kind = kProfile;
 	TEST_EXPECT(!document.apply(add, error));
 	std::printf("fields: the keys in the file's units, a type's set, a value read back as the game reads it, a key "
-	            "set anew, the save the file but for its lines\n");
+	            "set anew, the save the writer's text of the profile\n");
 	return 0;
 }
 
@@ -202,14 +215,19 @@ int test_retail() {
 		Diagnostic error;
 		TEST_EXPECT(document.load_bytes(bytes, location.logical_name, AssetKind::AiProfile, "jo", error));
 		TEST_EXPECT(!document.blocked());
-		const SerializeResult written = document.serialize();
-		if (written.text != std::string(bytes.begin(), bytes.end())) {
-			std::fprintf(stderr, "FAIL %s is not saved as it was\n", location.logical_name.c_str());
+		const SerializeResult saved = document.serialize();
+		AiProfileDocument again;
+		if (!saved.ok() || saved.text != written(std::string(bytes.begin(), bytes.end())) ||
+		    !again.load_bytes(bytes_of(saved.text), location.logical_name, AssetKind::AiProfile, "jo", error) ||
+		    again.serialize().text != saved.text) {
+			std::fprintf(stderr, "FAIL %s is not saved as the format's writer writes it\n", location.logical_name.c_str());
 			return 1;
 		}
 		++files;
 	}
-	std::printf("retail: %zu shipped profiles through the document, saved byte for byte\n", files);
+	std::printf("retail: %zu shipped profiles through the document, saved as the format's writer writes them, a fixed "
+	            "point\n",
+	            files);
 	TEST_EXPECT(files >= 98);
 	return 0;
 }

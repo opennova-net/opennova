@@ -1,6 +1,7 @@
 // The scoring table document (score_document.h, ADR 0046 S23 B): score.ini's version and fanfare and its GAMETYPE
-// blocks as rows over formats/score, read and written over the file's modeled layout; the fields' words and the
-// findings say what the game makes of the file (world-wac-ai-re §20.8b).
+// blocks as rows over formats/score, each block its row and each entry its id in its name table, written in
+// ScoreConfig_SaveFile's form from them alone; the fields' words and the findings say what the game makes of the file
+// (world-wac-ai-re §20.8b).
 #include "score_document.h"
 
 #include <algorithm>
@@ -9,7 +10,6 @@
 
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
-#include <editor/documents/noted_file_state.h>
 
 namespace opennova::editor {
 namespace {
@@ -37,13 +37,50 @@ bool whole_of(const Value &value, int64_t &out) {
 	return false;
 }
 
-// A name the reader takes as one token of its line: no quote (it would end the quoted run), no line break.
-bool set_quoted_name(std::string &field, const Value &value, std::string &error) {
-	const auto *text = std::get_if<std::string>(&value);
-	if (!text || text->empty()) return error = "A name is a text of one character or more.", false;
-	if (text->find_first_of("\"\r\n") != std::string::npos) return error = "A name holds no quote and no line break.", false;
-	field = *text;
-	return true;
+// A table's name of an id, "" for none.
+std::string name_of(const char *name) { return name ? std::string(name) : std::string(); }
+
+// The GAMETYPE lines of a name no row has, which the reader reads for nothing with every FIELD and VAR line after
+// them [orig: sub_52D850 @ 0x52D850; ScoreConfig_LoadFile @ 0x52DB7C, @ 0x52DC05], each line cut as the reader cuts
+// it (a CR LF, an LF or a lone CR ends it; one whose first or second character is '/' read for nothing) and split
+// into its tokens (white space between them, a quote toggling a quoted run, the quotes dropped) [orig:
+// Text_ReadLine @ 0x52D110; Text_SplitIntoTokens @ 0x52D1B0]; at a version other than 40 the reader reads none.
+void unknown_game_types(const std::vector<uint8_t> &bytes, int32_t version, std::vector<SourceIssue> &issues) {
+	if (version != score::kVersion) return;
+	size_t at = 0, line = 0;
+	while (at < bytes.size() && bytes[at] != 0) {
+		size_t end = at;
+		while (end < bytes.size() && bytes[end] != '\r' && bytes[end] != '\n' && bytes[end] != 0) ++end;
+		const std::string text(bytes.begin() + std::ptrdiff_t(at), bytes.begin() + std::ptrdiff_t(end));
+		++line;
+		if (end < bytes.size() && bytes[end] == '\r' && end + 1 < bytes.size() && bytes[end + 1] == '\n') ++end;
+		at = end < bytes.size() && bytes[end] != 0 ? end + 1 : end;
+		if ((!text.empty() && text[0] == '/') || (text.size() > 1 && text[1] == '/')) continue;
+		std::vector<std::string> tokens;
+		std::string token;
+		bool quoted = false, any = false;
+		for (const char c : text) {
+			if (c == '"') {
+				quoted = !quoted;
+				any = true;
+			} else if (!quoted && (c == ' ' || c == '\t')) {
+				if (any) tokens.push_back(token);
+				token.clear();
+				any = false;
+			} else {
+				token += c;
+				any = true;
+			}
+		}
+		if (any) tokens.push_back(token);
+		if (tokens.size() < 2 || !strutil::iequals(tokens[0], "GAMETYPE") || score::game_type_row(tokens[1]) >= 0) continue;
+		SourceIssue issue;
+		issue.blocks = false;
+		issue.line = line;
+		issue.message = "No game type is named '" + tokens[1] + "': the game finds no row for the block and reads its "
+		                "lines for nothing [orig: sub_52D850 @ 0x52D850]; a save writes the table without them.";
+		issues.push_back(std::move(issue));
+	}
 }
 
 RecordTable make_table() {
@@ -67,22 +104,12 @@ RecordTable make_table() {
 			fanfare.ranged = true;
 			fanfare.min = 0;
 			fanfare.max = 255;
-			// Left out where the file has no fanfare line (the defaults' 0 0 stand); a set of another value writes one,
-			// and a set where it has one rewrites that line.
-			fanfare.optional = true;
 			header.field(RF{fanfare,
 			                {[i](const RecordHandle &r, Value &out) { return out = int64_t(header_of(r).exp_fanfare[i] & 0xFF), true; },
 			                 [i](const RecordHandle &r, const Value &v, std::string &e) {
 				                 int64_t n = 0;
 				                 if (!whole_of(v, n) || n < 0 || n > 255) return e = "A fanfare byte is from 0 to 255.", false;
-				                 ScoreHeader &h = r.as<ScoreHeader>();
-				                 if (h.exp_fanfare[i] != int32_t(n)) h.has_exp_fanfare = true;
-				                 h.exp_fanfare[i] = int32_t(n);
-				                 return true;
-			                 },
-			                 [](const RecordHandle &r) { return header_of(r).has_exp_fanfare; },
-			                 [](const RecordHandle &r, bool present, std::string &) {
-				                 r.as<ScoreHeader>().has_exp_fanfare = present;
+				                 r.as<ScoreHeader>().exp_fanfare[i] = int32_t(n);
 				                 return true;
 			                 }}});
 		}
@@ -91,19 +118,28 @@ RecordTable make_table() {
 	TableKind block(RecordKindRow{kBlock, "block", "Game type", "Add game type", true});
 	{
 		FieldSchema name = schema_of("name", FieldType::Text, "Game type",
-				"The row the block's lines go into, the first of the twelve of the name, without case [orig: sub_52D850 @ "
-				"0x52D850]; a name no row has reads the block's lines for nothing. The writer puts row 2 down first (COOP), "
-				"the rows then in the ladder's order.");
-		name.open_choices = true;
+				"The row the block's lines go into, by its name: the first of the twelve of the name, without case [orig: "
+				"sub_52D850 @ 0x52D850]. The writer puts down the row's own name [orig: ScoreConfig_SaveFile @ 0x52CF81].");
 		for (size_t row = 1; row < score::game_type_names().size(); ++row)
 			name.choices.push_back({score::game_type_names()[row], int64_t(row), ""});
 		block.field(RF{name,
-		               {[](const RecordHandle &r, Value &out) { return out = block_of(r).name, true; },
+		               {[](const RecordHandle &r, Value &out) {
+			                const int row = block_of(r).row;
+			                out = row >= 0 && size_t(row) < score::game_type_names().size()
+			                              ? score::game_type_names()[size_t(row)] : std::string();
+			                return true;
+		                },
 		                [](const RecordHandle &r, const Value &v, std::string &e) {
-			                return set_quoted_name(r.as<score::GameTypeBlock>().name, v, e);
+			                const auto *text = std::get_if<std::string>(&v);
+			                const int row = text ? score::game_type_row(*text) : -1;
+			                if (row < 1) return e = "A game type is a name of the game's twelve rows.", false;
+			                r.as<score::GameTypeBlock>().row = row;
+			                return true;
 		                }}});
 		TableList fields;
-		fields.spec = Document::CollectionSpec{kField, "Scoreboard columns", "name", false, Applicability::Reads, 0};
+		// A row holds 34 [orig: sub_52CD70 @ 0x52CD70]: the reader keeps no more, and the writer writes no more.
+		fields.spec = Document::CollectionSpec{kField, "Scoreboard columns", "name", false, Applicability::Reads,
+		                                       score::kMaxFields};
 		fields.ops = vector_list<score::GameTypeBlock, score::Entry>(
 				kField, [](score::GameTypeBlock &b) -> std::vector<score::Entry> & { return b.fields; });
 		block.list(std::move(fields));
@@ -123,11 +159,12 @@ RecordTable make_table() {
 				"has any of it (net-re, \"Configured columns and ordering\").");
 		for (const score::Name &row : score::field_names()) name.choices.push_back({row.name, row.id, ""});
 		field.field(RF{name,
-		               {[](const RecordHandle &r, Value &out) { return out = entry_of(r).name, true; },
+		               {[](const RecordHandle &r, Value &out) { return out = name_of(score::field_name(entry_of(r).id)), true; },
 		                [](const RecordHandle &r, const Value &v, std::string &e) {
 			                const auto *text = std::get_if<std::string>(&v);
-			                if (!text || score::field_id(*text) < 0) return e = "A column is a name of the FIELD table.", false;
-			                r.as<score::Entry>().name = *text;
+			                const int32_t id = text ? score::field_id(*text) : -1;
+			                if (id < 0) return e = "A column is a name of the FIELD table.", false;
+			                r.as<score::Entry>().id = id;
 			                return true;
 		                }}});
 		FieldSchema value = schema_of("value", FieldType::Byte, "Shown",
@@ -153,11 +190,12 @@ RecordTable make_table() {
 				"[orig: GameEvent_ProcessScoring @ 0x52F550]. A VAR the block lacks keeps the game's default.");
 		for (const score::Name &row : score::var_names()) name.choices.push_back({row.name, row.id, ""});
 		var.field(RF{name,
-		             {[](const RecordHandle &r, Value &out) { return out = entry_of(r).name, true; },
+		             {[](const RecordHandle &r, Value &out) { return out = name_of(score::var_name(entry_of(r).id)), true; },
 		              [](const RecordHandle &r, const Value &v, std::string &e) {
 			              const auto *text = std::get_if<std::string>(&v);
-			              if (!text || score::var_id(*text) < 0) return e = "An event is a name of the VAR table.", false;
-			              r.as<score::Entry>().name = *text;
+			              const int32_t id = text ? score::var_id(*text) : -1;
+			              if (id < 0) return e = "An event is a name of the VAR table.", false;
+			              r.as<score::Entry>().id = id;
 			              return true;
 		              }}});
 		FieldSchema value = schema_of("value", FieldType::Integer, "Points", "A whole number [orig: atol @ 0x52DC50].");
@@ -180,14 +218,13 @@ bool changes_row(const score::GameTypeBlock &earlier, const score::GameTypeBlock
 	if (!later.fields.empty()) {
 		if (later.fields.size() != earlier.fields.size()) return true;
 		for (size_t i = 0; i < later.fields.size(); ++i)
-			if (score::field_id(later.fields[i].name) != score::field_id(earlier.fields[i].name) ||
+			if (later.fields[i].id != earlier.fields[i].id ||
 			    (later.fields[i].value & 0xFF) != (earlier.fields[i].value & 0xFF))
 				return true;
 	}
 	for (const score::Entry &var : later.vars) {
-		const auto same = std::find_if(earlier.vars.begin(), earlier.vars.end(), [&](const score::Entry &e) {
-			return score::var_id(e.name) == score::var_id(var.name);
-		});
+		const auto same = std::find_if(earlier.vars.begin(), earlier.vars.end(),
+		                               [&](const score::Entry &e) { return e.id == var.id; });
 		if (same == earlier.vars.end() || same->value != var.value) return true;
 	}
 	return false;
@@ -195,10 +232,10 @@ bool changes_row(const score::GameTypeBlock &earlier, const score::GameTypeBlock
 
 constexpr FindingCodeEntry<ScoreFinding> kFindingEntries[] = {
 	{ ScoreFinding::Version, listed_code("score.version") },
-	{ ScoreFinding::FanfareUnkept, listed_code("score.fanfare_unkept") },
+	// A pair the game's gate refuses: the writer writes none but a kept pair or the defaults' 0 0 (score::write).
+	{ ScoreFinding::FanfareUnkept, unwritable_code("score.fanfare_unkept") },
 	{ ScoreFinding::UnknownGameType, listed_code("score.unknown_game_type") },
 	{ ScoreFinding::GameTypeRepeated, listed_code("score.game_type_repeated") },
-	{ ScoreFinding::FieldsPast34, listed_code("score.fields_past_34") },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(ScoreFinding::kCount),
 		"every ScoreFinding has exactly one row");
@@ -214,17 +251,17 @@ const RecordTable &score_table() {
 	return table;
 }
 
+std::string ScoreBlockRow::name() const {
+	return block.row >= 0 && size_t(block.row) < score::game_type_names().size() ? score::game_type_names()[size_t(block.row)]
+	                                                                               : std::string();
+}
+
 size_t ScoreBlockRow::footprint() const {
-	size_t bytes = sizeof(ScoreBlockRow) + footprint_of(block.name) + footprint_of(block.fields) + footprint_of(block.vars) +
-	               ids_footprint();
-	for (const score::Entry &e : block.fields) bytes += footprint_of(e.name);
-	for (const score::Entry &e : block.vars) bytes += footprint_of(e.name);
-	return bytes;
+	return sizeof(ScoreBlockRow) + footprint_of(block.fields) + footprint_of(block.vars) + ids_footprint();
 }
 
 score::File ScoreDocument::file() const {
 	score::File out;
-	if (const auto *noted = noted_layout(file_state())) out.note = noted->root();
 	for (const auto &node : rows()) {
 		if (!node) continue;
 		if (node->kind == kHeader) {
@@ -232,9 +269,6 @@ score::File ScoreDocument::file() const {
 			out.version = h.version;
 			out.exp_fanfare[0] = h.exp_fanfare[0];
 			out.exp_fanfare[1] = h.exp_fanfare[1];
-			out.has_exp_fanfare = h.has_exp_fanfare;
-			out.fanfare_before = h.fanfare_before;
-			out.fanfare_after = h.fanfare_after;
 		} else if (node->kind == kBlock) {
 			out.blocks.push_back(static_cast<const ScoreBlockRow &>(*node).block);
 		}
@@ -248,27 +282,25 @@ std::string ScoreDocument::record_title(const NodeAddress &address) const {
 	if (!address.child) {
 		if (node->kind == kHeader) return "Score table (version " + std::to_string(static_cast<const ScoreHeaderRow &>(*node).header.version) + ")";
 		const score::GameTypeBlock &b = static_cast<const ScoreBlockRow &>(*node).block;
-		return b.name + " (" + std::to_string(b.fields.size()) + " columns, " + std::to_string(b.vars.size()) + " events)";
+		return node->name() + " (" + std::to_string(b.fields.size()) + " columns, " + std::to_string(b.vars.size()) + " events)";
 	}
 	const RecordHandle handle = record_in(*node, address);
 	if (!handle) return record_name(address);
 	const score::Entry &e = entry_of(handle);
-	return e.name + " " + std::to_string(address.kind == kField ? (e.value & 0xFF) : e.value);
+	return name_of(address.kind == kField ? score::field_name(e.id) : score::var_name(e.id)) + " " +
+	       std::to_string(address.kind == kField ? (e.value & 0xFF) : e.value);
 }
 
 bool ScoreDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
-                          std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &, Diagnostic &error) {
-	auto notes = std::make_shared<textlayout::Notes>();
+                          std::shared_ptr<const FileState> &, std::vector<SourceIssue> &issues, Diagnostic &error) {
 	score::File read;
 	std::string message;
-	score::parse(bytes.data(), bytes.size(), read, message, *notes);
+	score::parse(bytes.data(), bytes.size(), read, message);
+	unknown_game_types(bytes, read.version, issues);
 	auto header = std::make_shared<ScoreHeaderRow>();
 	header->header.version = read.version;
 	header->header.exp_fanfare[0] = read.exp_fanfare[0];
 	header->header.exp_fanfare[1] = read.exp_fanfare[1];
-	header->header.has_exp_fanfare = read.has_exp_fanfare;
-	header->header.fanfare_before = read.fanfare_before;
-	header->header.fanfare_after = read.fanfare_after;
 	shape(*header);
 	rows.push_back(std::move(header));
 	for (score::GameTypeBlock &block : read.blocks) {
@@ -277,9 +309,6 @@ bool ScoreDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::sh
 		shape(*row);
 		rows.push_back(std::move(row));
 	}
-	auto noted = std::make_shared<NotedFileState>();
-	noted->notes = std::move(notes);
-	state = std::move(noted);
 	return true;
 }
 
@@ -287,21 +316,18 @@ SerializeResult ScoreDocument::serialize() const {
 	SerializeResult result;
 	std::vector<uint8_t> bytes;
 	std::string error;
-	bool rewritten = false;
-	if (!score::write(file(), noted_layout(file_state()), bytes, error, &rewritten)) {
+	if (!score::write(file(), bytes, error)) {
 		result.issues.push_back({true, 0, std::string(), std::string(), "The scoring table could not be written: " + error});
 		return result;
 	}
 	result.text.assign(bytes.begin(), bytes.end());
-	if (rewritten)
-		result.notes.push_back("The table is written in the game's own form (ScoreConfig_SaveFile's): the file's lines would "
-		                       "not read back as it is.");
 	return result;
 }
 
 std::string ScoreDocument::save_words() const {
-	return "Saving writes the file in the form it was read in (the shipped score.ini is the game's own writer's form); a "
-	       "changed value changes its own line, a new column or event goes after the one before it.";
+	return "Saving writes the table in the game's own writer's form (ScoreConfig_SaveFile's, the form the shipped "
+	       "score.ini is in), from what the game reads of it: its version, its fanfare, then each game type's columns "
+	       "and events.";
 }
 
 std::shared_ptr<Node> ScoreDocument::make_node(NodeKind kind, NodeId, const std::vector<std::shared_ptr<const Node>> &rows,
@@ -311,29 +337,20 @@ std::shared_ptr<Node> ScoreDocument::make_node(NodeKind kind, NodeId, const std:
 		return nullptr;
 	}
 	auto row = std::make_shared<ScoreBlockRow>();
-	// The first game type the file has no block of, in the ladder's order from row 1.
-	for (size_t index = 1; index < score::game_type_names().size() && row->block.name.empty(); ++index) {
-		const std::string &name = score::game_type_names()[index];
+	// The first game type the file has no block of, in the ladder's order from row 1; COOP (row 2) where every row
+	// has one.
+	row->block.row = 2;
+	for (size_t index = 1; index < score::game_type_names().size(); ++index) {
 		const bool taken = std::any_of(rows.begin(), rows.end(), [&](const std::shared_ptr<const Node> &other) {
-			return other && other->kind == kBlock && strutil::iequals(other->name(), name);
+			return other && other->kind == kBlock && static_cast<const ScoreBlockRow &>(*other).block.row == int(index);
 		});
-		if (!taken) row->block.name = name;
+		if (!taken) {
+			row->block.row = int(index);
+			break;
+		}
 	}
-	if (row->block.name.empty()) row->block.name = score::game_type_names()[2];
 	shape(*row);
 	return row;
-}
-
-void ScoreDocument::prepare_duplicate(Node &copy, const Node &, const std::vector<std::shared_ptr<const Node>> &) const {
-	if (copy.kind != kBlock) return;
-	score::GameTypeBlock &b = static_cast<ScoreBlockRow &>(copy).block;
-	b.note = 0;
-	for (score::Entry &e : b.fields) e.note = 0;
-}
-
-void ScoreDocument::prepare_record(const Node &, const ListChange &change, DetachedRecord &record) const {
-	if (change.operation == EditOperation::Duplicate && record.data && record.kind == kField)
-		static_cast<score::Entry *>(record.data.get())->note = 0;
 }
 
 const FindingCodeRow &finding_code(ScoreFinding code) { return kFindingRows[static_cast<size_t>(code)]; }
@@ -352,7 +369,7 @@ std::vector<Diagnostic> validate_score_file(const DocumentBase &document) {
 		d.record = node.name();
 		findings.push_back(std::move(d));
 	};
-	std::unordered_map<std::string, const score::GameTypeBlock *> seen; // a game type's upper name -> its first block
+	std::unordered_map<int, const score::GameTypeBlock *> seen; // a row -> its first block
 	for (const auto &node : table->rows()) {
 		if (!node) continue;
 		if (node->kind == kHeader) {
@@ -362,53 +379,34 @@ std::vector<Diagnostic> validate_score_file(const DocumentBase &document) {
 				    "The version is " + std::to_string(h.version) + ": the game reads none of the file (no block of it is read "
 				    "here either) and writes its own defaults over it [orig: ScoreConfig_LoadFile @ 0x52DA8A -> "
 				    "ScoreConfig_SaveFile @ 0x52DA9E]. A save keeps the file's lines as they are.");
-			// The fanfare line's pair where the game ends up holding another: one failing the gate (the game's own 0 0,
-			// the defaults' too, holds what it says), or one a block's later line stores over.
+			// A pair the game's gate refuses (the game's own 0 0 holds what it says): written, read for nothing.
 			score::File f;
 			f.exp_fanfare[0] = h.exp_fanfare[0];
 			f.exp_fanfare[1] = h.exp_fanfare[1];
-			f.has_exp_fanfare = h.has_exp_fanfare;
-			f.fanfare_before = h.fanfare_before;
-			f.fanfare_after = h.fanfare_after;
-			int32_t kept[2] = {0, 0};
-			const bool stored = score::kept_fanfare(f, kept);
-			if (h.has_exp_fanfare && ((h.exp_fanfare[0] & 0xFF) != kept[0] || (h.exp_fanfare[1] & 0xFF) != kept[1])) {
-				const std::string held = std::to_string(kept[0]) + " " + std::to_string(kept[1]);
-				add(*node, DiagnosticSeverity::Info, ScoreFinding::FanfareUnkept, "fanfare_low",
-				    score::exp_fanfare_kept(f)
-				            ? "A later EXP_FANFARE line, in a GAMETYPE block, stores " + held + " over these, which the game "
-				              "keeps [orig: ScoreConfig_LoadFile @ 0x52DC75..0x52DC9F, each line past the gate stored over "
-				              "the last]."
-				            : "The game keeps the fanfare only when both bytes are other than 0 and the high one is the "
-				              "greater [orig: ScoreConfig_LoadFile @ 0x52DC8E]: these are read for nothing, and the game "
-				              "holds " + held + (stored ? std::string(", another EXP_FANFARE line's.") : std::string(", the defaults'.")));
-			}
+			if (!score::exp_fanfare_kept(f) && (h.exp_fanfare[0] != 0 || h.exp_fanfare[1] != 0))
+				add(*node, DiagnosticSeverity::Error, ScoreFinding::FanfareUnkept, "fanfare_low",
+				    "The game keeps the fanfare only when both bytes are other than 0 and the high one is the greater "
+				    "[orig: ScoreConfig_LoadFile @ 0x52DC8E]: the game would read this pair for nothing and hold 0 0, so "
+				    "the table is not saved until the pair is one it keeps, or 0 0.");
 			continue;
 		}
 		if (node->kind != kBlock) continue;
 		const score::GameTypeBlock &b = static_cast<const ScoreBlockRow &>(*node).block;
-		const int row = score::game_type_row(b.name);
-		if (row < 0) {
-			add(*node, DiagnosticSeverity::Warning, ScoreFinding::UnknownGameType, "name",
-			    "No game type is named '" + b.name + "': the game finds no row for the block and reads its lines for "
-			    "nothing [orig: sub_52D850 @ 0x52D850].");
-		} else {
-			const std::string key = strutil::to_upper(score::game_type_names()[size_t(row)]);
-			const auto first = seen.find(key);
-			// The game's own writer writes COOP twice, alike: a later block that changes nothing the row holds is no
-			// matter.
-			if (first != seen.end() && changes_row(*first->second, b))
-				add(*node, DiagnosticSeverity::Info, ScoreFinding::GameTypeRepeated, "name",
-				    "An earlier block is " + first->second->name + ": the game reads both into the same row, this block's "
-				    "FIELD lines replacing the earlier's and its VARs writing over theirs [orig: ScoreConfig_LoadFile @ "
-				    "0x52DB50, @ 0x52DBC3].");
-			else if (first == seen.end())
-				seen.emplace(key, &b);
-		}
-		if (b.fields.size() > score::kMaxFields)
-			add(*node, DiagnosticSeverity::Warning, ScoreFinding::FieldsPast34, "",
-			    b.name + " has " + std::to_string(b.fields.size()) + " columns: a row holds 34, and the game drops the rest "
-			    "[orig: sub_52CD70 @ 0x52CD70].");
+		const auto first = seen.find(b.row);
+		// The game's own writer writes COOP twice, alike: a later block that changes nothing the row holds is no matter.
+		if (first != seen.end() && changes_row(*first->second, b))
+			add(*node, DiagnosticSeverity::Info, ScoreFinding::GameTypeRepeated, "name",
+			    "An earlier block is " + node->name() + ": the game reads both into the same row, this block's FIELD "
+			    "lines replacing the earlier's and its VARs writing over theirs [orig: ScoreConfig_LoadFile @ 0x52DB50, @ "
+			    "0x52DBC3].");
+		else if (first == seen.end())
+			seen.emplace(b.row, &b);
+	}
+	// The GAMETYPE lines of a name no row has, which the read found (unknown_game_types).
+	for (const SourceIssue &issue : table->issues()) {
+		Diagnostic d = make_finding(ScoreFinding::UnknownGameType, DiagnosticSeverity::Warning, issue.message, document.path());
+		d.line = issue.line;
+		findings.push_back(std::move(d));
 	}
 	return findings;
 }

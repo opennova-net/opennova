@@ -181,10 +181,10 @@ static int test_query() {
 	TEST_EXPECT(rows_of(query, view) == std::vector<size_t>({3, 0}));
 	query.scope = ProblemScope::Project;
 	TEST_EXPECT(rows_of(query, view) == all.rows);
-	// Only the fixable: the missing font (Create), the stylesheet (Rewrite); the requirement has
-	// no row in this view to fix, and the catalog's ignored input none (a save keeps it).
+	// Only the fixable: the missing font (Create), the stylesheet and the catalog's ignored input (Rewrite: a
+	// save writes the model alone, S26); the requirement has no row in this view to fix.
 	query.fixable = true;
-	TEST_EXPECT(rows_of(query, view) == std::vector<size_t>({3, 4}));
+	TEST_EXPECT(rows_of(query, view) == std::vector<size_t>({3, 4, 5}));
 
 	// By file: a group per file (the project's own findings first here), in the order its
 	// first finding shows, the rows group after group.
@@ -434,18 +434,19 @@ static int test_fixes() {
 			if (row.fixes == FindingFix::Rewrite) rewrites.push_back(&row);
 			if (row.blocks_save) blockers.push_back(&row);
 		}
-	TEST_EXPECT(blockers.size() == 31);
+	TEST_EXPECT(blockers.size() == 32);
 	std::vector<std::string> rewrite_tokens;
 	for (const FindingCodeRow *row : rewrites) rewrite_tokens.push_back(row->token);
 	std::sort(rewrite_tokens.begin(), rewrite_tokens.end());
-	TEST_EXPECT(rewrite_tokens == std::vector<std::string>({"animation_map.ignored_input", "dialog_bank.ignored_input",
-	                                                        "environment.ignored_input", "face_animation.ignored_input",
-	                                                        "font.ignored_input",
-	                                                        "mission.event_order", "mission.rewrite_differs",
-	                                                        "music_bank.ignored_input",
+	TEST_EXPECT(rewrite_tokens == std::vector<std::string>({"ai_profile.ignored_input", "animation_map.ignored_input",
+	                                                        "avatars.ignored_input", "catalog.ignored_input",
+	                                                        "dialog_bank.ignored_input", "environment.ignored_input",
+	                                                        "face_animation.ignored_input", "font.ignored_input",
+	                                                        "menu.ignored_input", "mission.event_order",
+	                                                        "mission.rewrite_differs", "music_bank.ignored_input",
 	                                                        "script.line_ending", "shader.form",
-	                                                        "sound_bank.ignored_input",
-	                                                        "strings.regrouped", "style.line_ending",
+	                                                        "sound_bank.ignored_input", "strings.regrouped",
+	                                                        "style.ignored_input", "style.line_ending",
 	                                                        "terrain.ignored_input", "til.ignored_input"}));
 	for (const FindingCodeRow *row : rewrites) {
 		const Diagnostic rewrite = make_finding(*row, DiagnosticSeverity::Warning, "A rewrite fixes this.", "menus/a.mnu");

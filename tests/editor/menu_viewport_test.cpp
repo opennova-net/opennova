@@ -365,7 +365,8 @@ static int test_headless_viewport() {
 
 	// A menu the game could not read: the reason says why, and it is not tried again until
 	// the menu changes (the failure latch).
-	set(session, *menu, exit, "string.justify", std::string("CEN\"TER"));
+	// (A quote in a window's name: retail's reader ends the attribute there, so the writer refuses it.)
+	set(session, *menu, exit, "name", std::string("EX\"IT"));
 	TEST_EXPECT(rig.pump() == ViewportAction::Clear);
 	json = rig.json();
 	TEST_EXPECT(json.get_string("status", "") == "failed" && json.get_string("reason", "") == "unserializable");

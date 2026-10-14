@@ -58,10 +58,6 @@ RecordTable make_table() {
 				"stereo.");
 		flags.read_only = true;
 		bank.field(RF{flags, {[](const RecordHandle &r, Value &out) { return out = int64_t(bank_of(r).flags), true; }}});
-		FieldSchema version = schema_of("version", FieldType::Integer, "Version",
-				"The header's version word, which the game never reads; every shipped bank says 0x100.");
-		version.read_only = true;
-		bank.field(RF{version, {[](const RecordHandle &r, Value &out) { return out = int64_t(bank_of(r).version), true; }}});
 		FieldSchema streams = schema_of("stream_count", FieldType::Integer, "Streams",
 				"The streams the bank holds: the music script plays one by its place among them.");
 		streams.read_only = true;
@@ -212,12 +208,7 @@ SbfFile MusicBankDocument::bank() const {
 	SbfFile out;
 	const MusicBankRow *row = bank_row();
 	if (!row) return out;
-	out.version = row->version;
 	out.flags = row->flags;
-	out.reserved = row->reserved;
-	out.chunk_reserved_a = row->chunk_reserved_a;
-	out.chunk_reserved_b = row->chunk_reserved_b;
-	out.tail = row->tail;
 	for (const MusicBankStream &stream : row->streams) {
 		SbfStream made;
 		made.name = stream.name;
@@ -248,12 +239,7 @@ bool MusicBankDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std
 		return false;
 	}
 	auto row = std::make_shared<MusicBankRow>();
-	row->version = read.version;
 	row->flags = read.flags;
-	row->reserved = read.reserved;
-	row->chunk_reserved_a = read.chunk_reserved_a;
-	row->chunk_reserved_b = read.chunk_reserved_b;
-	row->tail = read.tail;
 	for (SbfStream &stream : read.streams) {
 		MusicBankStream held;
 		held.name = std::move(stream.name);
@@ -262,8 +248,13 @@ bool MusicBankDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std
 		held.chunks = std::make_shared<const std::vector<SbfChunk>>(std::move(stream.chunks));
 		row->streams.push_back(std::move(held));
 	}
-	// What a save lays out otherwise: the streams one after another in the index's order, nothing past the last, the
-	// names zero-padded, every chunk a whole block under the bank's reserved pair and tail rule.
+	// What a save lays out otherwise: the header's never-read words the writer's, the streams one after another in the
+	// index's order, nothing past the last, the names zero-padded, every chunk a whole block under the writer's reserved
+	// pair and tail.
+	if (layout.header_words_other)
+		issues.push_back({false, 0, std::string(), std::string(),
+		                  "The header's version or reserved word, which the game never reads, is not the writer's: a save "
+		                  "writes the writer's."});
 	if (!layout.packed)
 		issues.push_back({false, 0, std::string(), std::string(),
 		                  "The streams are not laid out one after another in the index's order: a save writes them so."});
@@ -278,13 +269,13 @@ bool MusicBankDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std
 	if (layout.reserved_other)
 		issues.push_back({false, 0, std::string(), std::string(),
 		                  std::to_string(layout.reserved_other) +
-		                          " chunks carry another pair of never-read header bytes than the bank's first: a save writes "
-		                          "the bank's one pair."});
+		                          " chunks carry another pair of never-read header bytes than the writer's: a save writes "
+		                          "the writer's pair."});
 	if (layout.tails_other)
 		issues.push_back({false, 0, std::string(), std::string(),
 		                  std::to_string(layout.tails_other) +
-		                          " chunks hold never-read bytes past their audio that the bank's encoder rule does not make: "
-		                          "a save makes them by the rule."});
+		                          " chunks hold never-read bytes past their audio other than the writer's tail: a save writes "
+		                          "the writer's."});
 	if (layout.short_chunks)
 		issues.push_back({false, 0, std::string(), std::string(),
 		                  std::to_string(layout.short_chunks) +

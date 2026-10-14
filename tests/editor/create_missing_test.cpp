@@ -105,7 +105,7 @@ static int test_default_project_fills_and_validates() {
 	// ... and it has a pointer: its root names the game's pointer, which the run made (the
 	// original game shows no system pointer, docs/mnu/menu-re.md).
 	const opennova::mnu::Cursor &cursor = startup->roots.front().cursor;
-	TEST_EXPECT(cursor.file == blank_pointer_name() && cursor.flags == "STANDARD_TRANSPARENT");
+	TEST_EXPECT(cursor.file == blank_pointer_name() && cursor.flags == opennova::mnu::ui_material_flags_of("STANDARD_TRANSPARENT"));
 	const AssetEntry *pointer = after.scan.find(cursor.file);
 	TEST_EXPECT(pointer != nullptr && pointer->kind == AssetKind::Texture);
 

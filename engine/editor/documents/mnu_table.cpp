@@ -7,6 +7,7 @@
 #include <array>
 #include <climits>
 #include <cstring>
+#include <optional>
 #include <type_traits>
 #include <utility>
 
@@ -57,6 +58,11 @@ struct Entry {
 	bool (*custom_get)(void *, Value &) = nullptr;
 	bool (*custom_set)(void *, const Value &, std::string &) = nullptr;
 	bool (*custom_present)(void *) = nullptr;
+	uint32_t *(*flags)(void *) = nullptr; // a FLAGS word (material_flags)
+	// A text the parse reads as a number (an ITEM's VALUE, a JUSTIFY's offset), held as the number's decimal; `zero_none`
+	// holds 0 as none (an ITEM's VALUE: the parse's default).
+	bool numeric = false;
+	bool zero_none = false;
 };
 
 mnu::Window &W(void *r) { return *static_cast<mnu::Window *>(r); }
@@ -96,12 +102,27 @@ Entry text(const char *path, size_t width, std::string *(*slot)(void *), Presenc
 	return e;
 }
 
-// A FLAGS text: no text (the element not written: the writer leaves an empty FLAGS out), then the
-// material flag tokens, any text taken (ui_material_flag_choices).
-Entry material_flags(Entry e) {
-	e.choices = {{"", 0}};
+// A FLAGS word [orig: sub_646CC0 @ 0x646cc0], shown and set as the table's names of it (mnu::ui_material_flags_text,
+// ui_material_flags_of: a token the table lacks sets no bit); written where it is not the default,
+// STANDARD_TRANSPARENT, which none reads as.
+Entry material_flags(const char *path, uint32_t *(*slot)(void *)) {
+	Entry e;
+	e.path = path;
+	e.type = Type::Text;
+	e.width = 256;
+	e.presence = Presence::NonEmpty;
 	for (const mnu::SchemaChoice &token : mnu::ui_material_flag_choices()) e.choices.push_back({token.name, token.value});
 	e.open = true;
+	e.flags = slot;
+	return e;
+}
+
+// A text the parse reads as a number (numeric): its decimal, "" none.
+Entry number_text(const char *path, std::string *(*slot)(void *), bool zero_none = false, const char *block = "") {
+	Entry e = text(path, 16, slot, Presence::NonEmpty, {}, block);
+	e.type = Type::Integer;
+	e.numeric = true;
+	e.zero_none = zero_none;
 	return e;
 }
 
@@ -176,30 +197,6 @@ template <mnu::WindowPart mnu::Window::*Member, mnu::WindowType Type> Entry part
 	return e;
 }
 
-// A token the writer puts down as an attribute's NAME (an ACTION's FIELD / SOURCE / NAME slot, the
-// table's primary sort key): only one the reader matches, spelled as it keeps it; any other would
-// write an attribute retail reads as something else, or faults on.
-bool name_token(const std::vector<Choice> &choices, const Value &value, std::string &slot, std::string &error,
-                const char *what) {
-	const std::string &text = std::get<std::string>(value);
-	for (const Choice &choice : choices)
-		if (iequals(text, choice.name)) {
-			slot = choice.name;
-			return true;
-		}
-	error = what;
-	return false;
-}
-
-const std::vector<Choice> &sort_token_choices() {
-	static const std::vector<Choice> c = token_choices(mnu::kPrimarySortTokens);
-	return c;
-}
-bool sort_token_set(void *r, const Value &value, std::string &error) {
-	return name_token(sort_token_choices(), value, W(r).table_data.column.primary_sort_token, error,
-	                  "The primary sort key is written as PRIMARY_SORT or DEFAULT_SORT (none writes PRIMARY_SORT).");
-}
-
 // A table sort key: the column index the HEADER walk binds it to, -1 when no HEADER sets it.
 template <int mnu::TableColumn::*Member> bool sort_present(void *r) { return W(r).table_data.column.*Member >= 0; }
 template <int mnu::TableColumn::*Member> Entry sort_key(const char *path) {
@@ -262,7 +259,7 @@ std::vector<Entry> window_entries() {
 	                     [](void *r) { return &W(r).has_scroll_extent; }));
 	out.push_back(flag("scroll_extent_width", [](void *r) { return &W(r).scroll_extent_is_width; }));
 	out.push_back(text("orientation", 32, [](void *r) { return &W(r).orientation; }, Presence::NonEmpty,
-	                   {{"", 0}, {mnu::kHorizontalOrientation, 1}, {"VERTICAL", 2}}));
+	                   {{"", 0}, {mnu::kHorizontalOrientation, 1}}));
 	{
 		Entry rsrc = text("text_rsrc", 64, [](void *r) { return &W(r).text_rsrc; }, Presence::Bit);
 		rsrc.bit = [](void *r) { return &W(r).has_text_rsrc; };
@@ -270,7 +267,7 @@ std::vector<Entry> window_entries() {
 	}
 	out.push_back(text("private_data", 1024, [](void *r) { return &W(r).private_data; }));
 	out.push_back(text("cursor.file", 64, [](void *r) { return &W(r).cursor.file; }, Presence::NonEmpty));
-	out.push_back(material_flags(text("cursor.flags", 64, [](void *r) { return &W(r).cursor.flags; })));
+	out.push_back(material_flags("cursor.flags", [](void *r) { return &W(r).cursor.flags; }));
 	out.push_back(text("font.name", 64, [](void *r) { return &W(r).font.name; }, Presence::NonEmpty));
 	out.push_back(text("font.default_fg", 32, [](void *r) { return &W(r).font.default_fg; }, Presence::NonEmpty));
 	out.push_back(text("font.default_bg", 32, [](void *r) { return &W(r).font.default_bg; }, Presence::NonEmpty));
@@ -284,8 +281,10 @@ std::vector<Entry> window_entries() {
 	out.push_back(toggle("string", [](void *r) { return &W(r).string_data.present; }));
 	out.push_back(text("string.type", 16, [](void *r) { return &W(r).string_data.type; }, Presence::NonEmpty,
 	                   id_choices(), "string"));
-	out.push_back(text("string.justify", 64, [](void *r) { return &W(r).string_data.justify; }, Presence::NonEmpty, justify_choices(), "string"));
-	out.push_back(text("string.vjustify", 64, [](void *r) { return &W(r).string_data.vjustify; }, Presence::NonEmpty, vjustify_choices(), "string"));
+	out.push_back(text("string.justify", 16, [](void *r) { return &W(r).string_data.justify; }, Presence::NonEmpty, justify_choices(), "string"));
+	out.push_back(number_text("string.justify_offset", [](void *r) { return &W(r).string_data.justify_offset; }, false, "string"));
+	out.push_back(text("string.vjustify", 16, [](void *r) { return &W(r).string_data.vjustify; }, Presence::NonEmpty, vjustify_choices(), "string"));
+	out.push_back(number_text("string.vjustify_offset", [](void *r) { return &W(r).string_data.vjustify_offset; }, false, "string"));
 	out.push_back(number("string.edge", [](void *r) { return &W(r).string_data.edge; },
 	                     [](void *r) { return &W(r).string_data.has_edge; }, "string"));
 	out.push_back(flag("string.wrap", [](void *r) { return &W(r).string_data.wrap; }, "string"));
@@ -297,10 +296,12 @@ std::vector<Entry> window_entries() {
 	                   Presence::Always, {}, "toggle_string"));
 	out.push_back(toggle("items", [](void *r) { return &W(r).items.present; }));
 	out.push_back(flag("items.multiselect", [](void *r) { return &W(r).items.multiselect; }, "items"));
-	out.push_back(text("items.justify", 64, [](void *r) { return &W(r).items.justify; }, Presence::NonEmpty,
+	out.push_back(text("items.justify", 16, [](void *r) { return &W(r).items.justify; }, Presence::NonEmpty,
 	                   justify_choices(), "items"));
-	out.push_back(text("items.vjustify", 64, [](void *r) { return &W(r).items.vjustify; }, Presence::NonEmpty,
+	out.push_back(number_text("items.justify_offset", [](void *r) { return &W(r).items.justify_offset; }, false, "items"));
+	out.push_back(text("items.vjustify", 16, [](void *r) { return &W(r).items.vjustify; }, Presence::NonEmpty,
 	                   vjustify_choices(), "items"));
+	out.push_back(number_text("items.vjustify_offset", [](void *r) { return &W(r).items.vjustify_offset; }, false, "items"));
 	out.push_back(part_toggle<&mnu::Window::list_box, mnu::WindowType::List>("list_box"));
 	out.push_back(number("list_box.sb_edge_pad", [](void *r) { return &W(r).sb_edge_pad; },
 	                     [](void *r) { return &W(r).has_sb_edge_pad; }, "list_box"));
@@ -311,12 +312,6 @@ std::vector<Entry> window_entries() {
 	out.push_back(number("column.spacing", [](void *r) { return &W(r).table_data.column.spacing; },
 	                     [](void *r) { return &W(r).table_data.column.has_spacing; }));
 	out.push_back(sort_key<&mnu::TableColumn::primary_sort>("column.primary_sort"));
-	{
-		Entry token = text("column.primary_sort_token", 16,
-		                   [](void *r) { return &W(r).table_data.column.primary_sort_token; }, Presence::NonEmpty, sort_token_choices());
-		token.custom_set = &sort_token_set;
-		out.push_back(token);
-	}
 	out.push_back(sort_key<&mnu::TableColumn::secondary_sort>("column.secondary_sort"));
 	out.push_back(sort_key<&mnu::TableColumn::tertiary_sort>("column.tertiary_sort"));
 	out.push_back(number("min_item_height", [](void *r) { return &W(r).table_data.min_item_height; },
@@ -324,6 +319,34 @@ std::vector<Entry> window_entries() {
 	out.push_back(number("fixed_header_height", [](void *r) { return &W(r).table_data.fixed_header_height; },
 	                     [](void *r) { return &W(r).table_data.has_fixed_header_height; }));
 	out.push_back(part_toggle<&mnu::Window::scrollbar, mnu::WindowType::Scroll>("scrollbar"));
+	// The LAN_LIST's buttons [orig: CLanListWnd_ParseXMLDefinition @ 0x65b9d0].
+	out.push_back(part_toggle<&mnu::Window::join_button, mnu::WindowType::Button>("join_button"));
+	out.push_back(part_toggle<&mnu::Window::search_button, mnu::WindowType::Button>("search_button"));
+	// The GLB_TABLE's own elements [orig: CLanGameBrowser_ParseExtendedXMLDefinition @ 0x65dac0; the widgets of
+	// CLanWnd_Construct @ 0x65ec30].
+	out.push_back(flag("glb_playerlist", [](void *r) { return &W(r).glb_playerlist; }));
+	out.push_back(part_toggle<&mnu::Window::glb_table, mnu::WindowType::Table>("glb_table"));
+	out.push_back(part_toggle<&mnu::Window::glb_info_player_details, mnu::WindowType::Table>("glb_info_player_details"));
+	out.push_back(part_toggle<&mnu::Window::glb_info_button, mnu::WindowType::Button>("glb_info_button"));
+	out.push_back(part_toggle<&mnu::Window::glb_info_server_details, mnu::WindowType::MultilineEdit>("glb_info_server_details"));
+	// Its FIELDS [orig: CLanGameBrowser_ParseXMLFieldDefinitions @ 0x65d850]: the count, the FORMAT, the FIELD rows.
+	out.push_back(toggle("glb_server_fields", [](void *r) { return &W(r).glb_server_fields.present; }));
+	out.push_back(number("glb_server_fields.count", [](void *r) { return &W(r).glb_server_fields.count; },
+	                     [](void *r) { return &W(r).glb_server_fields.has_count; }, "glb_server_fields"));
+	{
+		Entry format = text("glb_server_fields.format", 1024, [](void *r) { return &W(r).glb_server_fields.format; },
+		                    Presence::Bit, {}, "glb_server_fields");
+		format.bit = [](void *r) { return &W(r).glb_server_fields.has_format; };
+		out.push_back(format);
+	}
+	out.push_back(part_toggle<&mnu::Window::glb_nw_info, mnu::WindowType::Static>("glb_nw_info"));
+	{
+		Entry target = text("glb_target", 1024, [](void *r) { return &W(r).glb_target; }, Presence::Bit);
+		target.bit = [](void *r) { return &W(r).has_glb_target; };
+		out.push_back(target);
+	}
+	// The GOPHER's back button [orig: CGopherWnd_ParseXMLDefinition @ 0x65b130].
+	out.push_back(part_toggle<&mnu::Window::gopher_back, mnu::WindowType::Button>("gopher_back"));
 	return out;
 }
 
@@ -360,7 +383,7 @@ std::vector<Entry> appearance_entries() {
 	        text("value", 128, [](void *r) { return &AP(r).value; }, Presence::Always),
 	        number("map_state", [](void *r) { return &AP(r).map_state; }, [](void *r) { return &AP(r).has_map_state; }),
 	        number("height", [](void *r) { return &AP(r).height; }, [](void *r) { return &AP(r).has_height; }),
-	        material_flags(text("flags", 64, [](void *r) { return &AP(r).flags; })),
+	        material_flags("flags", [](void *r) { return &AP(r).flags; }),
 	};
 }
 
@@ -378,14 +401,6 @@ std::vector<Entry> sound_entries() {
 }
 
 mnu::Action &AC(void *r) { return *static_cast<mnu::Action *>(r); }
-const std::vector<Choice> &field_attr_choices() {
-	static const std::vector<Choice> c = token_choices(mnu::kActionFieldAttributes);
-	return c;
-}
-bool field_attr_set(void *r, const Value &value, std::string &error) {
-	return name_token(field_attr_choices(), value, AC(r).field_attr, error,
-	                  "The slot is written as FIELD, SOURCE or NAME (none writes FIELD).");
-}
 std::vector<Entry> action_entries() {
 	// A token's code is its index + 1; the empty choice is code 0.
 	std::vector<Entry> out;
@@ -395,17 +410,11 @@ std::vector<Entry> action_entries() {
 	                   token_choices(mnu::kActionStates)));
 	out.push_back(text("file", 128, [](void *r) { return &AC(r).file; }, Presence::NonEmpty));
 	out.push_back(text("field", 128, [](void *r) { return &AC(r).field; }, Presence::NonEmpty));
-	{
-		Entry slot = text("field_attr", 16, [](void *r) { return &AC(r).field_attr; }, Presence::NonEmpty,
-		                  field_attr_choices());
-		slot.custom_set = &field_attr_set;
-		out.push_back(slot);
-	}
 	out.push_back(number("target_form", [](void *r) { return &AC(r).target_form; },
 	                     [](void *r) { return &AC(r).has_target_form; }));
 	out.push_back(flag("toggle", [](void *r) { return &AC(r).toggle; }));
 	out.push_back(text("test", 8, [](void *r) { return &AC(r).test; }, Presence::NonEmpty,
-	                   token_choices(mnu::kActionTests)));
+	                   token_choices(mnu::kActionTests + 1)));
 	out.push_back(text("target", 128, [](void *r) { return &AC(r).target; }, Presence::Always));
 	out.push_back(flag("external_browser", [](void *r) { return &AC(r).external_browser; }));
 	return out;
@@ -433,11 +442,13 @@ std::vector<Entry> item_entries() {
 	return {
 	        text("type", 16, [](void *r) { return &IT(r).type; }, Presence::NonEmpty,
 	             token_choices(mnu::kItemTypes)),
-	        text("value", 64, [](void *r) { return &IT(r).value; }),
+	        number_text("value", [](void *r) { return &IT(r).value; }, true),
 	        text("text", 1024, [](void *r) { return &IT(r).text; }, Presence::Always),
-	        text("justify", 64, [](void *r) { return &IT(r).justify; }, Presence::NonEmpty, justify_choices()),
-	        text("vjustify", 64, [](void *r) { return &IT(r).vjustify; }, Presence::NonEmpty,
+	        text("justify", 16, [](void *r) { return &IT(r).justify; }, Presence::NonEmpty, justify_choices()),
+	        number_text("justify_offset", [](void *r) { return &IT(r).justify_offset; }),
+	        text("vjustify", 16, [](void *r) { return &IT(r).vjustify; }, Presence::NonEmpty,
 	             vjustify_choices()),
+	        number_text("vjustify_offset", [](void *r) { return &IT(r).vjustify_offset; }),
 	        flag("pairs_list", [](void *r) { return &IT(r).pairs_list; }),
 	        number("column", [](void *r) { return &IT(r).column; }, [](void *r) { return &IT(r).has_column; }),
 	};
@@ -446,14 +457,17 @@ std::vector<Entry> item_entries() {
 mnu::TableHeader &HD(void *r) { return *static_cast<mnu::TableHeader *>(r); }
 std::vector<Entry> header_entries() {
 	return {
-	        text("justify", 64, [](void *r) { return &HD(r).justify; }, Presence::NonEmpty, justify_choices()),
-	        text("vjustify", 64, [](void *r) { return &HD(r).vjustify; }, Presence::NonEmpty,
+	        text("justify", 16, [](void *r) { return &HD(r).justify; }, Presence::NonEmpty, justify_choices()),
+	        text("vjustify", 16, [](void *r) { return &HD(r).vjustify; }, Presence::NonEmpty,
 	             vjustify_choices()),
 	        number("column", [](void *r) { return &HD(r).column; }, [](void *r) { return &HD(r).has_column; }),
-	        text("sort", 8, [](void *r) { return &HD(r).sort; }),
+	        // SORT by its first character: 1 numeric, A alphabetic [orig: @ 0x6432ca..0x6432dd].
+	        text("sort", 8, [](void *r) { return &HD(r).sort; }, Presence::NonEmpty, {{"", 0}, {"1", 1}, {"A", 2}}),
 	        number("width", [](void *r) { return &HD(r).width; }, [](void *r) { return &HD(r).has_width; }),
 	        text("type", 8, [](void *r) { return &HD(r).type; }, Presence::NonEmpty, id_choices()),
 	        text("text", 1024, [](void *r) { return &HD(r).text; }, Presence::Always),
+	        // FIELD: the filter field a GLB_TABLE's browser reads for the column [orig: @ 0x65dc50].
+	        text("field", 128, [](void *r) { return &HD(r).field; }, Presence::NonEmpty),
 	};
 }
 
@@ -503,10 +517,12 @@ template <int K> Entry draw_flag_entry(const char *path) {
 }
 std::vector<Entry> body_entries() {
 	std::vector<Entry> out;
-	out.push_back(text("justify", 64, [](void *r) { return &BD(r).justify; }, Presence::NonEmpty,
+	out.push_back(text("justify", 16, [](void *r) { return &BD(r).justify; }, Presence::NonEmpty,
 	                   justify_choices()));
-	out.push_back(text("vjustify", 64, [](void *r) { return &BD(r).vjustify; }, Presence::NonEmpty,
+	out.push_back(number_text("justify_offset", [](void *r) { return &BD(r).justify_offset; }));
+	out.push_back(text("vjustify", 16, [](void *r) { return &BD(r).vjustify; }, Presence::NonEmpty,
 	                   vjustify_choices()));
+	out.push_back(number_text("vjustify_offset", [](void *r) { return &BD(r).vjustify_offset; }));
 	out.push_back(number("column", [](void *r) { return &BD(r).column; }, [](void *r) { return &BD(r).has_column; }));
 	Entry display = text("display", 16, [](void *r) { return &BD(r).display; }, Presence::NonEmpty,
 	                     token_choices(mnu::kBodyDisplays));
@@ -515,7 +531,7 @@ std::vector<Entry> body_entries() {
 	out.push_back(draw_flag_entry<0>("custom_draw"));
 	out.push_back(draw_flag_entry<1>("bitmap_draw"));
 	out.push_back(draw_flag_entry<2>("bitmap_text"));
-	out.push_back(text("bitmap_flags", 64, [](void *r) { return &BD(r).bitmap_flags; }));
+	out.push_back(material_flags("bitmap_flags", [](void *r) { return &BD(r).bitmap_flags; }));
 	out.push_back(flag("scale_bitmap", [](void *r) { return &BD(r).scale_bitmap; }));
 	return out;
 }
@@ -531,55 +547,36 @@ std::vector<Entry> subst_entries() {
 	};
 }
 
-// A tag or an attribute name the writer can put in an element: not empty, no whitespace and none of the
-// characters that end a name or open a value.
-bool plain_name(const std::string &name) {
-	if (name.empty()) return false;
-	for (const char c : name)
-		if (c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '<' || c == '>' || c == '/' || c == '"' ||
-		    c == '\'' || c == '=' || c == '&')
-			return false;
-	return true;
-}
-mnu::Element &EL(void *r) { return *static_cast<mnu::Element *>(r); }
-// The tag as the reader keeps it: upper case (read_extra), so a save reads back as written.
-bool tag_set(void *r, const Value &value, std::string &error) {
-	const std::string &tag = std::get<std::string>(value);
-	if (!plain_name(tag)) {
-		error = "A tag is a plain name: no spaces and none of < > / \" ' = &.";
-		return false;
-	}
-	EL(r).tag = strutil::to_upper(tag);
-	return true;
-}
-std::vector<Entry> element_entries() {
+// A GOPHER's FILTERS CATEGORY [orig: CGopherWnd_ParseCategoryXML @ 0x65a540]: its LEVEL; its LABEL and rows are lists.
+mnu::GopherCategory &CA(void *r) { return *static_cast<mnu::GopherCategory *>(r); }
+std::vector<Entry> category_entries() {
 	std::vector<Entry> out;
-	Entry tag = text("tag", 64, [](void *r) { return &EL(r).tag; }, Presence::Always);
-	tag.custom_set = &tag_set;
-	out.push_back(tag);
-	out.push_back(text("text", 1024, [](void *r) { return &EL(r).text; }, Presence::Always));
+	Entry level = text("level", 64, [](void *r) { return &CA(r).level; }, Presence::Bit);
+	level.bit = [](void *r) { return &CA(r).has_level; };
+	out.push_back(level);
 	return out;
 }
 
-mnu::ElementAttribute &AT(void *r) { return *static_cast<mnu::ElementAttribute *>(r); }
-bool attribute_name_set(void *r, const Value &value, std::string &error) {
-	const std::string &name = std::get<std::string>(value);
-	if (!plain_name(name)) {
-		error = "An attribute name is a plain name: no spaces and none of < > / \" ' = &.";
-		return false;
-	}
-	AT(r).name = name;
-	return true;
+// A category's ITEM (a button) or INFO (a static) row: NAME, TARGET (an ITEM's), FILTER, TABLE, its text.
+mnu::GopherEntry &GE(void *r) { return *static_cast<mnu::GopherEntry *>(r); }
+std::vector<Entry> gopher_entry_entries() {
+	return {
+	        flag("info", [](void *r) { return &GE(r).info; }),
+	        text("name", 128, [](void *r) { return &GE(r).name; }, Presence::NonEmpty),
+	        text("target", 1024, [](void *r) { return &GE(r).target; }, Presence::NonEmpty),
+	        text("filter", 1024, [](void *r) { return &GE(r).filter; }, Presence::NonEmpty),
+	        text("table", 128, [](void *r) { return &GE(r).table; }, Presence::NonEmpty),
+	        text("text", 1024, [](void *r) { return &GE(r).text; }, Presence::Always),
+	};
 }
-std::vector<Entry> attribute_entries() {
-	std::vector<Entry> out;
-	Entry name = text("name", 64, [](void *r) { return &AT(r).name; }, Presence::Always);
-	name.custom_set = &attribute_name_set;
-	out.push_back(name);
-	Entry value = text("value", 128, [](void *r) { return &AT(r).value; }, Presence::Bit);
-	value.bit = [](void *r) { return &AT(r).has_value; };
-	out.push_back(value);
-	return out;
+
+// A GLB server details FIELD: the slot its which names (one past the count reads 0), its text.
+mnu::GlbFieldSlot &FS(void *r) { return *static_cast<mnu::GlbFieldSlot *>(r); }
+std::vector<Entry> field_slot_entries() {
+	return {
+	        number("which", [](void *r) { return &FS(r).which; }, nullptr),
+	        text("text", 1024, [](void *r) { return &FS(r).text; }, Presence::Always),
+	};
 }
 
 constexpr size_t kShapeCount = mnu::kSchemaShapeCount;
@@ -599,8 +596,9 @@ std::vector<Entry> entries_of(mnu::SchemaShape shape) {
 	case mnu::SchemaShape::Header: return header_entries();
 	case mnu::SchemaShape::Body: return body_entries();
 	case mnu::SchemaShape::Subst: return subst_entries();
-	case mnu::SchemaShape::Element: return element_entries();
-	case mnu::SchemaShape::Attribute: return attribute_entries();
+	case mnu::SchemaShape::Category: return category_entries();
+	case mnu::SchemaShape::Entry: return gopher_entry_entries();
+	case mnu::SchemaShape::FieldSlot: return field_slot_entries();
 	}
 	return {};
 }
@@ -624,6 +622,16 @@ const Entry *entry_in(const std::vector<Entry> &entries, const char *path) {
 
 bool entry_get(const Entry &e, void *record, Value &out) {
 	if (e.custom_get) return e.custom_get(record, out);
+	if (e.flags) {
+		out = mnu::ui_material_flags_text(*e.flags(record));
+		return true;
+	}
+	if (e.numeric) {
+		// The number the text holds, as the parse reads it ("" none: 0).
+		const std::optional<int> number = strutil::parse_int(*e.text(record));
+		out = int64_t(number ? *number : 0);
+		return true;
+	}
 	if (e.text) {
 		out = *e.text(record);
 		return true;
@@ -649,7 +657,9 @@ bool entry_own_present(const Entry &e, void *record) {
 	case Presence::Always: return true;
 	case Presence::Bit:
 	case Presence::Block: return e.bit && *e.bit(record);
-	case Presence::NonEmpty: return e.text ? !e.text(record)->empty() : true;
+	case Presence::NonEmpty:
+		if (e.flags) return *e.flags(record) != mnu::kDefaultUiMaterialFlags;
+		return e.text ? !e.text(record)->empty() : true;
 	}
 	return true;
 }
@@ -696,11 +706,38 @@ bool entry_set(const Entry &e, const Entry *block, void *record, const Value &va
 			return false;
 		}
 	}
-	const Value normalized = e.type == Type::Flag ? Value(int64_t(std::get<int64_t>(value) != 0 ? 1 : 0)) : value;
+	Value normalized = e.type == Type::Flag ? Value(int64_t(std::get<int64_t>(value) != 0 ? 1 : 0)) : value;
+	if (e.type == Type::Text && !e.custom_set) {
+		const std::string &text = std::get<std::string>(normalized);
+		if (e.flags) {
+			// The table's names of a word: a name it lacks sets no bit, which the word then reads without.
+			const uint32_t word = text.empty() ? mnu::kDefaultUiMaterialFlags : mnu::ui_material_flags_of(text);
+			normalized = mnu::ui_material_flags_text(word);
+		} else if (!e.open && !e.choices.empty()) {
+			// A token the parse compares (without case), held as its table spells it; another is none the parse reads.
+			const Choice *match = nullptr;
+			for (const Choice &choice : e.choices)
+				if (iequals(text, choice.name)) match = &choice;
+			if (!match) {
+				std::string tokens;
+				for (const Choice &choice : e.choices)
+					if (*choice.name) tokens += std::string(tokens.empty() ? "" : ", ") + choice.name;
+				error = "The game reads one of " + tokens + (e.choices.front().name[0] ? "." : ", or none.");
+				return false;
+			}
+			normalized = std::string(match->name);
+		}
+	}
 	Value current;
 	if (entry_get(e, record, current) && current == normalized) return true; // nothing changes
 	if (e.custom_set) {
 		if (!e.custom_set(record, normalized, error)) return false;
+	} else if (e.flags) {
+		*e.flags(record) = mnu::ui_material_flags_of(std::get<std::string>(normalized));
+	} else if (e.numeric) {
+		// Held as its decimal; with zero_none, 0 as none (the parse's default, which the writer leaves out).
+		const int64_t number = std::get<int64_t>(normalized);
+		*e.text(record) = e.zero_none && number == 0 ? std::string() : std::to_string(number);
 	} else if (e.text) {
 		*e.text(record) = std::get<std::string>(normalized);
 	} else if (e.number) {
@@ -763,9 +800,6 @@ MenuContext step_into(const MenuContext &owner, NodeKind owner_kind, size_t list
 	const char *token = list_token(owner_kind, list);
 	MenuContext c;
 	c.applies = list_reads_in(owner, token);
-	if (is_window_kind(owner_kind) && std::strcmp(token, "element") == 0)
-		c.applies = mnu::schema_applies_both(c.applies,
-		                                     mnu::schema_element_reads(owner.window->type, record.as<mnu::Element>().tag));
 	c.root = owner.root;
 	c.text_fallback = owner.text_fallback;
 	if (is_window_kind(record.kind)) {
@@ -785,7 +819,10 @@ MenuContext step_into(const MenuContext &owner, NodeKind owner_kind, size_t list
 mnu::SchemaApplies menu_field_reads(const RecordHandle &record, const RecordOwners &owners, mnu::SchemaShape shape,
                                     const char *path) {
 	const MenuContext context = menu_context(record, owners);
-	const std::string full = context.prefix.empty() ? std::string(path) : context.prefix + "." + path;
+	// A JUSTIFY's or VJUSTIFY's offset is a token of the keyword's attribute: read where the keyword is.
+	std::string own = path;
+	if (own.size() > 7 && own.compare(own.size() - 7, 7, "_offset") == 0) own.resize(own.size() - 7);
+	const std::string full = context.prefix.empty() ? own : context.prefix + "." + own;
 	mnu::SchemaApplies applies = context.applies;
 	if (context.window) applies = mnu::schema_applies_both(applies, mnu::schema_reads(context.window->type, full));
 	if (shape == mnu::SchemaShape::Action)
@@ -825,40 +862,53 @@ const PathLabel kWindowLabels[] = {
 	{"items.vjustify", "Vertical alignment"}, {"list_box", "List box"},
 	{"list_box.sb_edge_pad", "Scrollbar edge padding"}, {"spinup", "Spin up"}, {"spindown", "Spin down"},
 	{"column.count", "Columns"}, {"column.spacing", "Column spacing"}, {"column.primary_sort", "Primary sort column"},
-	{"column.primary_sort_token", "Primary sort written as"}, {"column.secondary_sort", "Secondary sort column"},
+	{"column.secondary_sort", "Secondary sort column"},
 	{"column.tertiary_sort", "Tertiary sort column"}, {"min_item_height", "Minimum row height"},
 	{"fixed_header_height", "Header height"}, {"scrollbar", "Scrollbar"},
+	{"string.justify_offset", "Horizontal offset"}, {"string.vjustify_offset", "Vertical offset"},
+	{"items.justify_offset", "Horizontal offset"}, {"items.vjustify_offset", "Vertical offset"},
+	{"join_button", "Join button"}, {"search_button", "Search button"}, {"glb_playerlist", "Player list"},
+	{"glb_table", "Server table"}, {"glb_info_player_details", "Player details table"},
+	{"glb_info_button", "Info button"}, {"glb_info_server_details", "Server details"},
+	{"glb_server_fields", "Server details fields"}, {"glb_server_fields.count", "Field count"},
+	{"glb_server_fields.format", "Format"}, {"glb_nw_info", "NovaWorld info"}, {"glb_target", "Target"},
+	{"gopher_back", "Back button"},
 };
 // The groups a window's dotted paths form.
 const PathLabel kWindowSections[] = {
 	{"position", "Position"}, {"frame", "Frame"}, {"cursor", "Pointer"}, {"font", "Font and colours"},
 	{"string", "Text"}, {"toggle_string", "Toggle text"}, {"items", "Items"}, {"list_box", "List box"},
 	{"spinup", "Spin up"}, {"spindown", "Spin down"}, {"column", "Table columns"}, {"scrollbar", "Scrollbar"},
+	{"glb_server_fields", "Server details fields"},
 };
 const PathLabel kScreenLabels[] = {{"name", "Name"}, {"music_var", "Music"}};
 const PathLabel kAppearanceLabels[] = {{"state", "State"}, {"type", "Kind"}, {"value", "Image or colour"},
                                        {"map_state", "Sprite row"}, {"height", "Frame height"}, {"flags", "Texture flags"}};
 const PathLabel kSoundLabels[] = {{"state", "When"}, {"trigger", "Sound"}, {"file", "Sound bank"}};
 const PathLabel kActionLabels[] = {{"type", "Action"}, {"state", "Window state"}, {"file", "Menu file"},
-                                   {"field", "Source control"}, {"field_attr", "Source written as"},
+                                   {"field", "Source control"},
                                    {"target_form", "Target form"}, {"toggle", "Toggle"}, {"test", "Test"},
                                    {"target", "Target"}, {"external_browser", "Open in the web browser"}};
 const PathLabel kHotkeyLabels[] = {{"value", "Key"}, {"virtual", "Virtual key"}};
 const PathLabel kDatasourceLabels[] = {{"value", "File"}};
 const PathLabel kItemLabels[] = {{"type", "Kind"}, {"value", "Value"}, {"text", "Text"},
                                  {"justify", "Horizontal alignment"}, {"vjustify", "Vertical alignment"},
+                                 {"justify_offset", "Horizontal offset"}, {"vjustify_offset", "Vertical offset"},
                                  {"pairs_list", "Pairs list"}, {"column", "Column"}};
 const PathLabel kHeaderLabels[] = {{"justify", "Horizontal alignment"}, {"vjustify", "Vertical alignment"},
                                    {"column", "Column"}, {"sort", "Sort"}, {"width", "Width"}, {"type", "Text is"},
-                                   {"text", "Text"}};
+                                   {"text", "Text"}, {"field", "Server list field"}};
 const PathLabel kBodyLabels[] = {{"justify", "Horizontal alignment"}, {"vjustify", "Vertical alignment"},
+                                 {"justify_offset", "Horizontal offset"}, {"vjustify_offset", "Vertical offset"},
                                  {"column", "Column"}, {"display", "Draw"}, {"custom_draw", "Custom draw"},
                                  {"bitmap_draw", "Bitmap"}, {"bitmap_text", "Bitmap and text"},
                                  {"bitmap_flags", "Bitmap flags"}, {"scale_bitmap", "Scale the bitmap"}};
 const PathLabel kSubstLabels[] = {{"column", "Column"}, {"value", "Value"}, {"is_url", "Is a web address"},
                                   {"is_file", "Is a file"}, {"file", "Substitute"}};
-const PathLabel kElementLabels[] = {{"tag", "Tag"}, {"text", "Text"}};
-const PathLabel kAttributeLabels[] = {{"name", "Name"}, {"value", "Value"}};
+const PathLabel kCategoryLabels[] = {{"level", "Level"}};
+const PathLabel kEntryLabels[] = {{"info", "Information row"}, {"name", "Name"}, {"target", "Target"},
+                                  {"filter", "Filter"}, {"table", "Table"}, {"text", "Text"}};
+const PathLabel kFieldSlotLabels[] = {{"which", "Slot"}, {"text", "Text"}};
 
 template <size_t N> const char *find_label(const PathLabel (&table)[N], const std::string &path) {
 	for (const PathLabel &entry : table)
@@ -883,8 +933,9 @@ const char *field_label(mnu::SchemaShape shape, const std::string &path) {
 	case mnu::SchemaShape::Header: return find_label(kHeaderLabels, path);
 	case mnu::SchemaShape::Body: return find_label(kBodyLabels, path);
 	case mnu::SchemaShape::Subst: return find_label(kSubstLabels, path);
-	case mnu::SchemaShape::Element: return find_label(kElementLabels, path);
-	case mnu::SchemaShape::Attribute: return find_label(kAttributeLabels, path);
+	case mnu::SchemaShape::Category: return find_label(kCategoryLabels, path);
+	case mnu::SchemaShape::Entry: return find_label(kEntryLabels, path);
+	case mnu::SchemaShape::FieldSlot: return find_label(kFieldSlotLabels, path);
 	}
 	return "";
 }
@@ -898,7 +949,9 @@ const char *section_label(mnu::SchemaShape shape, const std::string &path) {
 // Whether a text field holds prose that may run over several lines.
 bool multiline(mnu::SchemaShape shape, const std::string &path) {
 	if (is_window_shape(shape)) return path == "string.value" || path == "toggle_string.value" || path == "private_data";
-	return (shape == mnu::SchemaShape::Item || shape == mnu::SchemaShape::Header || shape == mnu::SchemaShape::Element) && path == "text";
+	return (shape == mnu::SchemaShape::Item || shape == mnu::SchemaShape::Header || shape == mnu::SchemaShape::Entry ||
+	        shape == mnu::SchemaShape::FieldSlot) &&
+	       path == "text";
 }
 
 // The readable name of a choice: the token's meaning, the token itself the tooltip. The verbs follow
@@ -916,9 +969,8 @@ const ChoiceLabel kWindowChoices[] = {
 	{"type", "marquee_wnd", "Marquee"}, {"type", "glb_table", "Server table"},
 	{"type", "radioedit", "Radio button with a text box"}, {"type", "lan_list", "LAN game list"},
 	{"type", "gopher", "Gopher browser"},
-	{"orientation", "", "Not set"}, {"orientation", "HORIZONTAL", "Horizontal"}, {"orientation", "VERTICAL", "Vertical"},
+	{"orientation", "", "Not set"}, {"orientation", "HORIZONTAL", "Horizontal"},
 	{"type", "ID", "A string id"}, {"type", "", "Plain text"},
-	{"column.primary_sort_token", "", "Not set (PRIMARY_SORT)"}, {"cursor.flags", "", "Not written"},
 };
 const ChoiceLabel kAlignLabels[] = {
 	{"justify", "", "Not set"}, {"justify", "LEFT", "Left"}, {"justify", "CENTER", "Centre"},
@@ -929,7 +981,7 @@ const ChoiceLabel kAppearanceChoices[] = {
 	{"state", "DEFAULT", "Normal"}, {"state", "DISABLED", "Disabled"}, {"state", "MOUSEOVER", "Mouse over"},
 	{"state", "SELECTED", "Selected"}, {"type", "", "None (marks the state)"}, {"type", "IMAGE", "Image"},
 	{"type", "COLOR", "Colour"}, {"type", "CUSTOM", "Custom"}, {"type", "OUTLINE", "Outline"},
-	{"type", "IMAGEROW", "Image row"}, {"flags", "", "Not written"},
+	{"type", "IMAGEROW", "Image row"},
 };
 const ChoiceLabel kSoundChoices[] = {
 	{"state", "MOUSEIN", "Mouse enters"}, {"state", "MOUSEOUT", "Mouse leaves"}, {"state", "SELECTED", "Selected"},
@@ -946,13 +998,13 @@ const ChoiceLabel kActionChoices[] = {
 	{"state", "", "Not set"}, {"state", "HIDE", "Hide"}, {"state", "SHOW", "Show"}, {"state", "ENABLE", "Enable"},
 	{"state", "DISABLE", "Disable"}, {"test", "", "Not set (less than)"}, {"test", "LT", "Less than"},
 	{"test", "LE", "At most"}, {"test", "EQ", "Equal to"}, {"test", "GE", "At least"}, {"test", "GT", "Greater than"},
-	{"field_attr", "", "Not set (FIELD)"},
 };
 const ChoiceLabel kItemChoices[] = {
 	{"type", "", "Plain text"}, {"type", "ID", "A string id"}, {"type", "IMAGE", "Image"},
 	{"type", "COLOR", "Colour"}, {"type", "BITMAP", "Bitmap"},
 };
-const ChoiceLabel kHeaderChoices[] = {{"type", "", "Plain text"}, {"type", "ID", "A string id"}};
+const ChoiceLabel kHeaderChoices[] = {{"type", "", "Plain text"}, {"type", "ID", "A string id"}, {"sort", "", "Not set"},
+                                      {"sort", "1", "Numeric"}, {"sort", "A", "Alphabetic"}};
 const ChoiceLabel kBodyChoices[] = {
 	{"display", "", "Not set"}, {"display", "CUSTOM_DRAW", "Custom draw"}, {"display", "BITMAP_DRAW", "Bitmap"},
 	{"display", "BITMAP_TEXT", "Bitmap and text"},
@@ -1004,7 +1056,7 @@ LabelledField labelled(mnu::SchemaShape shape, const std::vector<Entry> &entries
 	for (const Choice &choice : e.choices) schema.choices.push_back({choice.name, choice.value, choice_label(shape, e.path, choice.name)});
 	schema.open_choices = e.open;
 	schema.color = menu_reference_colour(schema.reference);
-	schema.optional = e.presence == Presence::Bit;
+	schema.optional = e.presence == Presence::Bit || (e.numeric && !e.zero_none);
 	// A screen's and a window's NAME is what the by-name lookups find them by (MnuDocument::lookup_names);
 	// a part's NAME no lookup reads (MnuDocument::refine_field).
 	if (std::strcmp(e.path, "name") == 0) {
@@ -1035,6 +1087,16 @@ LabelledField labelled(mnu::SchemaShape shape, const std::vector<Entry> &entries
 			if (present) author_block(block, record.data);
 			return true;
 		};
+	// A number held as text that may be left out (a JUSTIFY's offset): written with the number it reads (0 where none),
+	// left out as none.
+	if (e.numeric && !e.zero_none)
+		out.value.set_present = [entry, block](const RecordHandle &record, bool present, std::string &) {
+			std::string &text = *entry->text(record.data);
+			if (!present) text.clear();
+			else if (text.empty()) text = "0";
+			if (present) author_block(block, record.data);
+			return true;
+		};
 	const char *path = e.path;
 	if (mnu::schema_reference_varies(shape, path))
 		out.reference = [shape, path](const RecordHandle &record, const RecordOwners &) {
@@ -1057,10 +1119,15 @@ void make_default(mnu::Window &w, size_t) { mnu::schema_default(w); }
 void make_default(mnu::Appearance &a, size_t) { mnu::schema_default(a); }
 void make_default(mnu::Sound &s, size_t) { mnu::schema_default(s); }
 void make_default(mnu::Action &a, size_t) { mnu::schema_default(a); }
-void make_default(mnu::Element &e, size_t) { mnu::schema_default(e); }
+void make_default(mnu::GopherCategory &c, size_t) { mnu::schema_default(c); }
+void make_default(mnu::GopherEntry &e, size_t) { mnu::schema_default(e); }
+void make_default(mnu::GlbFieldSlot &f, size_t) { mnu::schema_default(f); }
 void make_default(mnu::TableHeader &h, size_t index) { mnu::schema_default(h, index); }
 void make_default(mnu::TableBody &b, size_t index) { mnu::schema_default(b, index); }
 void make_default(mnu::TableSubst &s, size_t) { mnu::schema_default(s); }
+// A HOTKEY of a key: an empty one is key 0, which registers nothing and the parse leaves out. VK_ESCAPE, the shipped
+// menus' Back key, a VIRTUAL name (one of the three the parse knows, formats/mnu kVirtualKeyNames).
+void make_default(mnu::Hotkey &h, size_t) { h = mnu::Hotkey{"VK_ESCAPE", true}; }
 template <class T> void make_default(T &, size_t) {}
 
 // A list of the owner's: a std::vector of its records, each new one taking its list's default, an ITEMS
@@ -1114,17 +1181,17 @@ ListOps vector_ops(NodeKind kind, const char *label, const char *record_label, s
 
 // A part's list: the one window the part holds, written or left out. A part with no window holds none; a
 // new one is written with a typeless DEFAULT appearance, a moved one keeps whether it was written.
-template <mnu::WindowPart mnu::Window::*Member, mnu::WindowType Type>
-ListOps part_ops(NodeKind kind, const char *record_label) {
+template <class Owner, mnu::WindowPart Owner::*Member, mnu::WindowType Type>
+ListOps owner_part_ops(NodeKind kind, const char *record_label) {
 	ListOps ops;
-	ops.size = [](const RecordHandle &owner) -> size_t { return (owner.as<mnu::Window>().*Member).latent() ? 1 : 0; };
+	ops.size = [](const RecordHandle &owner) -> size_t { return (owner.as<Owner>().*Member).latent() ? 1 : 0; };
 	ops.at = [kind](const RecordHandle &owner, size_t index) {
-		mnu::Window *held = (owner.as<mnu::Window>().*Member).latent();
+		mnu::Window *held = (owner.as<Owner>().*Member).latent();
 		return index == 0 && held ? RecordHandle{kind, held} : RecordHandle{};
 	};
 	ops.insert = [kind, record_label](const RecordHandle &owner, size_t, const DetachedRecord *record,
 	                                  std::string &error) {
-		mnu::WindowPart &part = owner.as<mnu::Window>().*Member;
+		mnu::WindowPart &part = owner.as<Owner>().*Member;
 		if (record && (!record->data || record->kind != kind)) {
 			error = std::string("The ") + record_label + " take " + record_label + " records only.";
 			return false;
@@ -1142,22 +1209,26 @@ ListOps part_ops(NodeKind kind, const char *record_label) {
 		return true;
 	};
 	ops.erase = [](const RecordHandle &owner, size_t index) {
-		mnu::WindowPart &part = owner.as<mnu::Window>().*Member;
+		mnu::WindowPart &part = owner.as<Owner>().*Member;
 		if (index != 0 || !part.latent()) return false;
 		part.clear();
 		return true;
 	};
 	ops.copy = [kind](const RecordHandle &owner, size_t index) {
 		DetachedRecord out;
-		const mnu::WindowPart &part = owner.as<mnu::Window>().*Member;
+		const mnu::WindowPart &part = owner.as<Owner>().*Member;
 		if (index != 0 || !part.latent()) return out;
 		out.kind = kind;
 		out.data = std::make_shared<mnu::Window>(*part.latent());
 		out.shown = part.present();
 		return out;
 	};
-	ops.present = [](const RecordHandle &owner) { return (owner.as<mnu::Window>().*Member).present(); };
+	ops.present = [](const RecordHandle &owner) { return (owner.as<Owner>().*Member).present(); };
 	return ops;
+}
+template <mnu::WindowPart mnu::Window::*Member, mnu::WindowType Type>
+ListOps part_ops(NodeKind kind, const char *record_label) {
+	return owner_part_ops<mnu::Window, Member, Type>(kind, record_label);
 }
 
 // The kinds: Screen 0, Window 1, then one kind per list, named by the list's element path (a list path
@@ -1170,7 +1241,6 @@ struct KindRow {
 constexpr KindRow kKinds[] = {
 	{"screen", "Screen", mnu::SchemaShape::Screen},
 	{"window", "Window", mnu::SchemaShape::Window},
-	{"attribute", "Attribute", mnu::SchemaShape::Attribute},
 	{"hotkey", "Hotkey", mnu::SchemaShape::Hotkey},
 	{"action", "Action", mnu::SchemaShape::Action},
 	{"appearance", "Appearance", mnu::SchemaShape::Appearance},
@@ -1189,7 +1259,19 @@ constexpr KindRow kKinds[] = {
 	{"column.body", "Body", mnu::SchemaShape::Body},
 	{"column.subst", "Substitution", mnu::SchemaShape::Subst},
 	{"scrollbar", "Scrollbar", mnu::SchemaShape::Part},
-	{"element", "Element", mnu::SchemaShape::Element},
+	{"join_button", "Join button", mnu::SchemaShape::Part},
+	{"search_button", "Search button", mnu::SchemaShape::Part},
+	{"glb_table", "Server table", mnu::SchemaShape::Part},
+	{"glb_info_player_details", "Player details table", mnu::SchemaShape::Part},
+	{"glb_info_button", "Info button", mnu::SchemaShape::Part},
+	{"glb_info_server_details", "Server details", mnu::SchemaShape::Part},
+	{"glb_server_fields.field", "Server details field", mnu::SchemaShape::FieldSlot},
+	{"glb_nw_info", "NovaWorld info", mnu::SchemaShape::Part},
+	{"gopher_targets", "Target", mnu::SchemaShape::Datasource},
+	{"gopher_categories", "Category", mnu::SchemaShape::Category},
+	{"label", "Label", mnu::SchemaShape::Part},
+	{"entry", "Row", mnu::SchemaShape::Entry},
+	{"gopher_back", "Back button", mnu::SchemaShape::Part},
 	{"item", "Cell", mnu::SchemaShape::Item},
 };
 constexpr size_t kKindCount = std::size(kKinds);
@@ -1228,14 +1310,10 @@ std::vector<TableList> window_lists() {
 		return out;
 	};
 	std::vector<TableList> out;
-	out.push_back({spec("attribute", "Attributes", "name"),
-	               vector_ops<Window, mnu::ElementAttribute>(
-	                       kind_index("attribute"), "Attributes", "Attribute",
-	                       [](Window &w) -> std::vector<mnu::ElementAttribute> & { return w.extra_attributes; },
-	                       [](mnu::ElementAttribute &a, size_t) { mnu::schema_default_window_attribute(a); })});
 	out.push_back({spec("hotkey", "Hotkeys", ""),
 	               vector_ops<Window, mnu::Hotkey>(kind_index("hotkey"), "Hotkeys", "Hotkey",
-	                                               [](Window &w) -> std::vector<mnu::Hotkey> & { return w.hotkeys; })});
+	                                               [](Window &w) -> std::vector<mnu::Hotkey> & { return w.hotkeys; },
+	                                               make_default)});
 	out.push_back({spec("action", "Actions", ""),
 	               vector_ops<Window, mnu::Action>(kind_index("action"), "Actions", "Action",
 	                                               [](Window &w) -> std::vector<mnu::Action> & { return w.actions; },
@@ -1299,10 +1377,70 @@ std::vector<TableList> window_lists() {
 	                       make_default)});
 	out.push_back({spec("scrollbar", "Scrollbar", "name", 1),
 	               part_ops<&Window::scrollbar, mnu::WindowType::Scroll>(kind_index("scrollbar"), "Scrollbar")});
-	out.push_back({spec("element", "Elements", "tag"),
-	               vector_ops<Window, mnu::Element>(kind_index("element"), "Elements", "Element",
-	                                                [](Window &w) -> std::vector<mnu::Element> & { return w.extras; },
-	                                                make_default)});
+	out.push_back({spec("join_button", "Join button", "name", 1),
+	               part_ops<&Window::join_button, mnu::WindowType::Button>(kind_index("join_button"), "Join button")});
+	out.push_back({spec("search_button", "Search button", "name", 1),
+	               part_ops<&Window::search_button, mnu::WindowType::Button>(kind_index("search_button"), "Search button")});
+	out.push_back({spec("glb_table", "Server table", "name", 1),
+	               part_ops<&Window::glb_table, mnu::WindowType::Table>(kind_index("glb_table"), "Server table")});
+	out.push_back({spec("glb_info_player_details", "Player details table", "name", 1),
+	               part_ops<&Window::glb_info_player_details, mnu::WindowType::Table>(kind_index("glb_info_player_details"),
+	                                                                                "Player details table")});
+	out.push_back({spec("glb_info_button", "Info button", "name", 1),
+	               part_ops<&Window::glb_info_button, mnu::WindowType::Button>(kind_index("glb_info_button"), "Info button")});
+	out.push_back({spec("glb_info_server_details", "Server details", "name", 1),
+	               part_ops<&Window::glb_info_server_details, mnu::WindowType::MultilineEdit>(
+	                       kind_index("glb_info_server_details"), "Server details")});
+	{
+		ListOps fields = vector_ops<Window, mnu::GlbFieldSlot>(
+		        kind_index("glb_server_fields.field"), "Server details fields", "Server details field",
+		        [](Window &w) -> std::vector<mnu::GlbFieldSlot> & { return w.glb_server_fields.fields; }, make_default);
+		// A FIELD is read only inside the FIELDS of the GLB_INFO_SERVER_DETAILS window, at a slot under its COUNT
+		// (each slot once, in the slots' first order) [orig: CLanGameBrowser_ParseXMLFieldDefinitions @ 0x65d850]: a
+		// new one goes only where that part is, takes the first slot no FIELD has, and authors the FIELDS, its COUNT
+		// grown to take the slot.
+		const auto insert = fields.insert;
+		fields.insert = [insert](const RecordHandle &owner, size_t index, const DetachedRecord *record, std::string &error) {
+			if (!owner.as<Window>().glb_info_server_details) {
+				error = "The game reads a server details FIELD inside the GLB_INFO_SERVER_DETAILS window: add that part "
+				        "first.";
+				return false;
+			}
+			mnu::GlbFields &glb = owner.as<Window>().glb_server_fields;
+			index = std::min(index, glb.fields.size());
+			if (!insert(owner, index, record, error)) return false;
+			mnu::GlbFieldSlot &slot = glb.fields[index];
+			if (!record) {
+				const auto used = [&](int which) {
+					for (size_t i = 0; i < glb.fields.size(); ++i)
+						if (i != index && glb.fields[i].which == which) return true;
+					return false;
+				};
+				int open = 0;
+				while (used(open)) ++open;
+				slot.which = open;
+			}
+			glb.present = true;
+			if (!glb.has_count || glb.count <= slot.which) {
+				glb.has_count = true;
+				glb.count = slot.which + 1;
+			}
+			return true;
+		};
+		out.push_back({spec("glb_server_fields.field", "Server details fields", ""), std::move(fields)});
+	}
+	out.push_back({spec("glb_nw_info", "NovaWorld info", "name", 1),
+	               part_ops<&Window::glb_nw_info, mnu::WindowType::Static>(kind_index("glb_nw_info"), "NovaWorld info")});
+	out.push_back({spec("gopher_targets", "Targets", ""),
+	               vector_ops<Window, std::string>(kind_index("gopher_targets"), "Targets", "Target",
+	                                               [](Window &w) -> std::vector<std::string> & { return w.gopher_targets; })});
+	out.push_back({spec("gopher_categories", "Categories", "level"),
+	               vector_ops<Window, mnu::GopherCategory>(
+	                       kind_index("gopher_categories"), "Categories", "Category",
+	                       [](Window &w) -> std::vector<mnu::GopherCategory> & { return w.gopher_categories; },
+	                       make_default)});
+	out.push_back({spec("gopher_back", "Back button", "name", 1),
+	               part_ops<&Window::gopher_back, mnu::WindowType::Button>(kind_index("gopher_back"), "Back button")});
 	out.push_back({spec("window", "Windows", "name"),
 	               vector_ops<Window, mnu::Window>(kWindowKind, "Windows", "Window",
 	                                               [](Window &w) -> std::vector<mnu::Window> & { return w.children; },
@@ -1317,7 +1455,15 @@ RecordTable make_table() {
 		const bool screen = k == size_t(MenuKind::Screen);
 		TableKind kind(RecordKindRow{NodeKind(k), row.token, row.label, screen ? "Add screen" : "", screen});
 		const std::vector<Entry> &entries = all_entries()[size_t(row.shape)];
-		for (const Entry &e : entries) kind.field(labelled(row.shape, entries, e));
+		for (const Entry &e : entries) {
+			LabelledField field = labelled(row.shape, entries, e);
+			// A GOPHER's TARGET names a page, no credits file a DATASOURCE's value names.
+			if (std::strcmp(row.token, "gopher_targets") == 0) {
+				field.schema.reference = ReferenceKind::None;
+				field.schema.color = FieldColor::None;
+			}
+			kind.field(std::move(field));
+		}
 		Document::CollectionSpec windows;
 		windows.kind = kWindowKind;
 		windows.label = "Windows";
@@ -1341,22 +1487,22 @@ RecordTable make_table() {
 			                          [](mnu::TableRow &r) -> std::vector<mnu::Item> & { return r.cells; })});
 			break;
 		}
-		case mnu::SchemaShape::Element: {
-			Document::CollectionSpec attributes, elements;
-			attributes.kind = kind_index("attribute");
-			attributes.label = "Attributes";
-			attributes.name_field = "name";
-			elements.kind = kind_index("element");
-			elements.label = "Elements";
-			elements.name_field = "tag";
-			kind.list({attributes, vector_ops<mnu::Element, mnu::ElementAttribute>(
-			                               kind_index("attribute"), "Attributes", "Attribute",
-			                               [](mnu::Element &e) -> std::vector<mnu::ElementAttribute> & { return e.attributes; },
-			                               [](mnu::ElementAttribute &a, size_t) { mnu::schema_default_element_attribute(a); })});
-			kind.list({elements, vector_ops<mnu::Element, mnu::Element>(
-			                             kind_index("element"), "Elements", "Element",
-			                             [](mnu::Element &e) -> std::vector<mnu::Element> & { return e.children; },
-			                             make_default)});
+		case mnu::SchemaShape::Category: {
+			// Its LABEL static and its ITEM and INFO rows [orig: CGopherWnd_ParseCategoryXML @ 0x65a540].
+			Document::CollectionSpec label, rows;
+			label.kind = kind_index("label");
+			label.label = "Label";
+			label.name_field = "name";
+			label.max = 1;
+			rows.kind = kind_index("entry");
+			rows.label = "Rows";
+			rows.name_field = "name";
+			kind.list({label, owner_part_ops<mnu::GopherCategory, &mnu::GopherCategory::label, mnu::WindowType::Static>(
+			                          kind_index("label"), "Label")});
+			kind.list({rows, vector_ops<mnu::GopherCategory, mnu::GopherEntry>(
+			                         kind_index("entry"), "Rows", "Row",
+			                         [](mnu::GopherCategory &c) -> std::vector<mnu::GopherEntry> & { return c.entries; },
+			                         make_default)});
 			break;
 		}
 		default: break;

@@ -92,19 +92,18 @@ bool make_blank_hud_layout(const BlankRequest &request, std::vector<uint8_t> &ou
 }
 
 // The HUD effects with no model line (ADR 0046 S23 B): the file the HUD's init reads nothing of, as it reads no
-// file [orig: HUD_InitOverlaySystem @ 0x5A4633 -> HUD_CacheModelNameByTag @ 0x58F970, a line of no tag returning 0],
-// a comment saying the grammar first; the writer's lines of nothing (def::hudfx_write).
+// file [orig: HUD_InitOverlaySystem @ 0x5A4633 -> HUD_CacheModelNameByTag @ 0x58F970, a line of no tag returning 0]:
+// the writer's text of no line (def::hudfx_write), an empty file, which a save writes the same (S26: a writer writes
+// its model alone).
 bool make_blank_hudfx(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
 	std::string text, message;
-	if (!def::hudfx_write(def::HudFxFile{}, nullptr, text, message)) {
+	if (!def::hudfx_write(def::HudFxFile{}, text, message)) {
 		out.clear();
 		error = make_finding(CoreFinding::BlankDef, DiagnosticSeverity::Error, "The HUD effects could not be written.",
 		                     request.logical_name);
 		return false;
 	}
-	blank_text_to_bytes("// The HUD's 3D models of " + title_of(request) +
-	                            ": one line, 3DIHud <model> or 3DIPower1..8 <model>; the game reads the first.\n" + text,
-	                    out);
+	out.assign(text.begin(), text.end());
 	return true;
 }
 
