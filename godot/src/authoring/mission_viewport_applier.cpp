@@ -53,6 +53,7 @@
 #include "render/object_lod_frame.h"
 #include "render/scene_overlay_compositor.h"
 #include "simulation/entity_presenter.h"
+#include "util/axes.h"
 #include "terrain/foliage_frame_stats.h"
 #include "terrain/terrain_tile_info.h"
 #include "util/string_convert.h"
@@ -751,6 +752,7 @@ void MissionViewportApplier::move_entities_(const MissionScene &scene, const ope
 		if (ObjectModel *model = model_of_(placed)) {
 			// A person stands where its spawn stands it (its pose's lift; the mission's z up is the picture's y).
 			model->set_transform(xform.translated(Vector3(0.0f, float(lift_of(poses, entity.row)), 0.0f)));
+			placed.aimed = false; // its overlay, if any, given again at its next pose
 		} else if (placed.key != 0 && placer_.is_valid()) {
 			placer_->move_static_instance(placed.key, xform);
 		}
@@ -773,11 +775,13 @@ void MissionViewportApplier::pose_people_(const MissionScene &scene, const openn
 		ObjectModel *model = model_of_(placed);
 		if (model == nullptr) continue;
 		// Where the spawn stands it: its record lifted by the warmup and its ground solve.
-		model->set_transform(transform_of_(*entity).translated(Vector3(0.0f, float(pose->lift), 0.0f)));
+		const Transform3D place = transform_of_(*entity).translated(Vector3(0.0f, float(pose->lift), 0.0f));
+		model->set_transform(place);
+		placed.aimed = false; // the root is the record's again
 		// Its body as it plays now (S23 C), its spawn's before it plays.
 		const opennova::world::InfantryBodyPose *body = people.pose(entry.first);
 		pose_body_(*model, body ? *body : pose->pose);
-		aim_body_(*model, people, entry.first);
+		aim_body_(*model, placed, people, entry.first, place);
 		placed.posed_model = placed.model;
 		placed.pose_stamp = pose->stamp;
 	}
@@ -806,26 +810,46 @@ void MissionViewportApplier::play_people_(const opennova::editor::MissionViewpor
 		Placed &placed = entry.second;
 		const opennova::world::InfantryBodyPose *body = people.pose(entry.first);
 		if (body == nullptr || placed.model == 0 || placed.posed_model != placed.model) continue;
+		const MissionEntityMark *entity = mission.scene().entity(entry.first);
+		const opennova::editor::MissionPose *pose = mission.poses().pose(entry.first);
 		if (ObjectModel *model = model_of_(placed)) {
 			pose_body_(*model, *body);
-			aim_body_(*model, people, entry.first);
+			if (entity != nullptr && pose != nullptr)
+				aim_body_(*model, placed, people, entry.first,
+						transform_of_(*entity).translated(Vector3(0.0f, float(pose->lift), 0.0f)));
 		}
 	}
 }
 
-void MissionViewportApplier::aim_body_(ObjectModel &model, const opennova::editor::MissionPeople &people,
-		opennova::editor::NodeId row) {
+void MissionViewportApplier::aim_body_(ObjectModel &model, Placed &placed,
+		const opennova::editor::MissionPeople &people, opennova::editor::NodeId row, const Transform3D &place) {
+	namespace world = opennova::world;
 	opennova::anim::AimOverlayAngles angles[opennova::anim::kOverlayClassCount];
 	if (!people.aim_overlay(row, angles)) {
-		model.clear_aim_overlay();
+		if (placed.aimed) {
+			model.clear_aim_overlay();
+			model.set_transform(place);
+			placed.aimed = false;
+		}
 		return;
 	}
-	// The body row the present rows write for it, through the presenter's one rule (the root basis the body's).
-	PackedFloat32Array record;
-	record.resize(opennova::world::PF_STRIDE);
-	record.fill(0.0f);
-	opennova::inmatch::write_present_overlay(record.ptrw(), angles);
-	EntityPresenter::aim_apply(&model, record, 0, true);
+	// The body row's overlay as the present rows write it.
+	if (aim_scratch_.size() != world::PF_STRIDE) aim_scratch_.resize(world::PF_STRIDE);
+	aim_scratch_.fill(0.0f);
+	opennova::inmatch::write_present_overlay(aim_scratch_.ptrw(), angles);
+	const float *p = aim_scratch_.ptr();
+	std::array<float, 31> payload{};
+	std::copy(p + world::PF_AIM_OVERLAY_VALID, p + world::PF_AIM_OVERLAY_VALID + payload.size(), payload.begin());
+	if (placed.aimed && payload == placed.aim_payload) return;
+	// The presenter's first leg: the root from the body's angles through the placement composition, at its place.
+	model.set_transform(model.compose_entity_transform(
+			bms_to_godot_basis(Vector3(p[world::PF_AIM_BODY_PITCH_DEG], p[world::PF_AIM_BODY_YAW_DEG],
+					p[world::PF_AIM_BODY_ROLL_DEG])),
+			place.origin));
+	// Its second: the overlay on the bones, the root not driven.
+	EntityPresenter::aim_apply_valid(&model, { aim_scratch_.ptr(), int64_t(aim_scratch_.size()) }, 0, false);
+	placed.aimed = true;
+	placed.aim_payload = payload;
 }
 
 void MissionViewportApplier::flush_shadows_(const MissionScene &scene) {

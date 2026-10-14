@@ -106,6 +106,7 @@ struct MissionPose {
 	int ssn = 0;
 	uint8_t alert = 0;
 	bool guarding = false;
+	int route = 0; // the slot's route channel the init reads (0 none, or no AI slot)
 };
 
 struct PersonRecord {
@@ -194,13 +195,16 @@ public:
 	bool stand(const MissionScene &scene, const MissionPeopleFloor &floor);
 	// Whether a file the floors' world read moved since (a model's floor edited: stand them again).
 	bool floor_files_moved() const;
-	// The floors' world as stand() last made it, for the people who play in a world of their own (S27,
-	// mission_people.h): its serial (0: none made, no mission or no terrain read; moves each time it is made), a
-	// fresh load of the same world (the same records over the same files and ground: null with none), and each
-	// posed person's body in it by row (the same handles in every load).
-	uint64_t floor_serial() const { return floor_world_ ? floor_serial_ : 0; }
-	std::unique_ptr<MissionWorld> load_floor_world() const;
-	const std::map<NodeId, world::EntityHandle> &floor_bodies() const { return floor_bodies_; }
+	// The people's own world (S27, mission_people.h), made where stand() makes the floors' world (a mission and its
+	// terrain read): the mission's records thinned to what the people's think reads of the world, every person the
+	// game spawns, every respawn zone (an item whose definition carries SpawnPoint: the organic init matches a
+	// person's zone by its group anywhere in pools 1 and 2), and every item and building within the attention scan's
+	// reach of a posed person (20 units each way, 20 root 3 across, past both bounds) [orig: Entity_InitOrganicAI
+	// @0x4BFCC0, its zone match; Entity_UpdateInfantryAI, the scan @0x4BE0CA..0x4BE463]. Its serial (0: none; moves
+	// whenever what it holds or a file it reads moves: the records it keeps, the people's records whole), and a load of
+	// it over the floors' files and ground with each person's body by row (null with none).
+	uint64_t people_serial() const { return people_mission_ ? people_serial_ : 0; }
+	std::unique_ptr<MissionWorld> load_people_world(std::map<NodeId, world::EntityHandle> &bodies) const;
 	void clear();
 	// A row's pose (null: no organic row of the scene).
 	const MissionPose *pose(NodeId row) const;
@@ -236,8 +240,12 @@ private:
 	std::map<NodeId, world::EntityHandle> floor_bodies_;
 	uint64_t floor_key_ = 0;
 	uint64_t floor_serial_ = 0; // moves each time the world is made
-	std::unique_ptr<bms::File> floor_mission_; // the records it loaded, and over which ground
-	const MissionGround *floor_ground_ = nullptr;
+	const MissionGround *floor_ground_ = nullptr; // the ground the floors' world loaded over
+	// The people's world's records (thinned), the scene's marks they were thinned against, its key and serial.
+	std::unique_ptr<bms::File> people_mission_;
+	std::vector<MissionEntityMark> people_marks_;
+	uint64_t people_key_ = 0;
+	uint64_t people_serial_ = 0;
 	std::unique_ptr<anim::AdmRootMotion> motion_;
 	world::AnimVariantRings rings_;
 	std::unordered_map<std::string, Catalog> catalogs_;

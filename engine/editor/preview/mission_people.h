@@ -23,10 +23,11 @@ class MissionPoses;
 // the tick of the clock it was posed at, the first the game's tick 1; another row's body (org0, whose update is a
 // nullsub) stands as its init left it. Each tick's event word is what the body's sound block and its fire pass read
 // that tick (the mission view hears the people's footsteps and foley with Listen on).
-// - Where the mission's floors' world stands (MissionPoses::floor_serial: a mission and its terrain read), the people
-//   play in a world of their own, the same records loaded again over the same files and ground (S27): every posed
-//   person's body there initialized by the game's own organic init in pool order over the poses' tables
-//   (world::initialize_organic_ai), and each played body ticked in pool order by the game's tick of a still body
+// - Where the mission's floors' world stands (a mission and its terrain read), the people play in a world of their own
+//   (MissionPoses::load_people_world: every person, every respawn zone, every item and building within the scan's
+//   reach) (S27): every pool-0 body there initialized by the game's own organic init in pool order over the poses'
+//   tables (world::initialize_organic_ai, the world kept as the inits leave it and restored at each start), and each
+//   played body ticked in pool order by the game's tick of a still body
 //   (world::AiSystem::tick_still_body: the motor head; on its think ticks the think of a still body, an alert_state's
 //   person turning from its idle to idle_2 at its first, a guard holding guard, and the think's attention tail, which
 //   looks at a neighbour within its scan (the look idles 125 / 126 / 141 where the .adm authors them, the head look),

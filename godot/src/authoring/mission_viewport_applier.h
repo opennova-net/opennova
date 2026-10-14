@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/sub_viewport.hpp>
@@ -236,6 +238,10 @@ private:
 		// The spawn pose its model was last given (DI-38): the model it went to and the pose's stamp.
 		uint64_t posed_model = 0;
 		uint32_t pose_stamp = 0;
+		// The aim overlay its model was last given (S27): whether one stands, and its payload (the body's angles
+		// and the nine classes', the present row's PF_AIM_* run), dispatched again only when it changes.
+		bool aimed = false;
+		std::array<float, 31> aim_payload{};
 	};
 	static bool places_alike_(const Placed &placed, const opennova::editor::MissionEntityMark &entity) {
 		return placed.item == entity.item && placed.group == entity.group && placed.attributes == entity.attributes;
@@ -293,11 +299,14 @@ private:
 			const opennova::editor::MissionPeople &people);
 	// A person's model posed by its body (a clip at its playhead, or two blended).
 	void pose_body_(ObjectModel &model, const opennova::world::InfantryBodyPose &body);
-	// A person's model turned and bent as its body in the people's world faces and looks (S27): the body's
-	// own the model's root, its aim overlay on the bones, through the game's presenter's one rule
-	// (EntityPresenter::aim_apply over the overlay the present rows write); no overlay where the people play
-	// without a world.
-	void aim_body_(ObjectModel &model, const opennova::editor::MissionPeople &people, opennova::editor::NodeId row);
+	// A person's model turned and bent as its body in the people's world faces and looks (S27), as the game's
+	// presenter's two legs draw a body row: the root from the body's angles through the placement composition (its
+	// authored scale kept) at `place`, then the aim overlay on the bones (EntityPresenter::aim_apply_valid, the root
+	// not driven) over the overlay the present rows write; dispatched only when the payload moves. Without a body
+	// (no people's world, or one the init hid) no overlay, the root back at `place`.
+	void aim_body_(ObjectModel &model, Placed &placed, const opennova::editor::MissionPeople &people,
+			opennova::editor::NodeId row, const Transform3D &place);
+	PackedFloat32Array aim_scratch_; // one present row, written for each body in turn
 	// The people as they play their clips now (MissionViewport::people), posed again whenever they played on.
 	void play_people_(const opennova::editor::MissionViewport &mission);
 	uint64_t people_serial_ = UINT64_MAX; // the viewport's people's serial last posed

@@ -1,6 +1,7 @@
 #include <editor/preview/mission_people.h>
 
 #include <algorithm>
+#include <map>
 
 #include <base/io/fixed.h>
 #include <editor/preview/mission_poses.h>
@@ -17,10 +18,13 @@ namespace opennova::editor {
 
 struct MissionPeople::PeopleWorld {
 	std::unique_ptr<MissionWorld> mission;
-	world::World::Snapshot loaded; // as loaded, before the inits
-	uint64_t serial = 0;           // the floors' world's it was loaded from
-	std::unordered_map<NodeId, world::EntityHandle> bodies; // every posed person's
-	std::unordered_map<uint16_t, NodeId> rows;              // a body's row, by its handle
+	world::World::Snapshot inited; // after the inits, the bodies' AI with it (World::restore rewinds both)
+	// What it was made from: the poses' people world's serial, their generation and their root motion.
+	uint64_t serial = 0;
+	size_t generation = 0;
+	const void *motion = nullptr;
+	std::map<NodeId, world::EntityHandle> bodies; // every person's, by row
+	std::unordered_map<uint16_t, NodeId> rows;    // a body's row, by its handle
 };
 
 MissionPeople::MissionPeople() = default;
@@ -41,48 +45,47 @@ bool MissionPeople::in_world() const {
 }
 
 bool MissionPeople::start_world_(const MissionPoses &poses) {
-	const uint64_t serial = poses.floor_serial();
-	if (serial == 0) {
+	const uint64_t serial = poses.people_serial();
+	if (serial == 0 || poses.motion() == nullptr) {
 		world_.reset();
 		return false;
 	}
-	if (!world_ || world_->serial != serial) {
-		auto fresh = std::make_unique<PeopleWorld>();
-		fresh->mission = poses.load_floor_world();
-		if (!fresh->mission) {
-			world_.reset();
-			return false;
-		}
-		fresh->serial = serial;
-		// The load as it stands before the inits, the bodies' AI with it (World::restore rewinds both).
-		fresh->mission->world.ai.capture_spawn_baseline();
-		fresh->loaded = fresh->mission->world.snapshot();
-		world_ = std::move(fresh);
-	} else {
-		world_->mission->world.restore(world_->loaded);
+	if (world_ && world_->serial == serial && world_->generation == poses.generation() &&
+			world_->motion == static_cast<const void *>(poses.motion())) {
+		// The same world: back to its bodies as the inits left them.
+		world_->mission->world.restore(world_->inited);
+		world_->mission->world.logic_tick = 0;
+		return true;
 	}
-	world::World &w = world_->mission->world;
+	auto fresh = std::make_unique<PeopleWorld>();
+	fresh->mission = poses.load_people_world(fresh->bodies);
+	if (!fresh->mission) {
+		world_.reset();
+		return false;
+	}
+	fresh->serial = serial;
+	fresh->generation = poses.generation();
+	fresh->motion = poses.motion();
+	world::World &w = fresh->mission->world;
 	w.ai.root_motion = poses.motion();
 	w.ai.anim_rings = world::AnimVariantRings();
 	w.logic_tick = 0;
-	world_->bodies.clear();
-	world_->rows.clear();
-	// Every posed person's body initialized in pool order over the poses' tables, the ring heads served as the
-	// game's load serves them [orig: Entity_SpawnFromBMSRecord @0x40E9F0 -> Entity_InitOrganicAI @0x4BFCC0, in pool
-	// order].
+	// Each posed person's table as the poses registered it; then every pool-0 row's organic init in pool order, the
+	// ring heads served as the game's load serves them [orig: Entity_SpawnFromBMSRecord @0x40E9F0 ->
+	// Entity_InitOrganicAI @0x4BFCC0, in pool order; mission::MissionKernel::boot's organic_init].
 	for (const MissionPose &pose : poses.poses()) {
-		if (pose.status != "posed" || pose.adm_id < 0) continue;
-		const auto found = poses.floor_bodies().find(pose.row);
-		if (found == poses.floor_bodies().end()) continue;
-		world::Entity *entity = w.registry.get(found->second);
+		const auto found = fresh->bodies.find(pose.row);
+		if (found == fresh->bodies.end()) continue;
+		fresh->rows[found->second.packed] = pose.row;
 		world::AiEntity *body = w.ai.for_handle(found->second);
-		if (entity == nullptr || body == nullptr) continue;
-		body->inf.active = true;
-		body->inf.adm_id = pose.adm_id;
-		world::initialize_organic_ai(w, *entity);
-		world_->bodies[pose.row] = found->second;
-		world_->rows[found->second.packed] = pose.row;
+		if (body != nullptr && pose.status == "posed" && pose.adm_id >= 0) body->inf.adm_id = pose.adm_id;
 	}
+	w.registry.for_each_in_pool(0, [&](const world::Entity &row) {
+		world::initialize_organic_ai(w, *w.registry.get(row.handle));
+	});
+	w.ai.capture_spawn_baseline();
+	fresh->inited = w.snapshot();
+	world_ = std::move(fresh);
 	return true;
 }
 
@@ -97,8 +100,9 @@ void MissionPeople::reset(const MissionPoses &poses, int32_t tick) {
 		// standing as the warmup left them (world::infantry_org1_motor_head).
 		if (world::physics_class_from_move_function(pose.definition.move_function) != world::PhysicsClass::Org1)
 			continue;
-		// A route's walker stands at its spawn pose: the game walks it along its route, which no think runs here.
-		if (pose.state == world::anim_state::kWalkForward) continue;
+		// A route's walker (a route or an order to walk, 123..125 included) stands at its spawn pose: the game walks it
+		// along its route, which no think runs here; the reserved 126 and 127 stand (infantry_command_think).
+		if (pose.route != 0 && pose.route != 126 && pose.route != 127) continue;
 		Person person;
 		person.row = pose.row;
 		person.channels = pose.channels;
@@ -132,9 +136,9 @@ void MissionPeople::reset(const MissionPoses &poses, int32_t tick) {
 }
 
 bool MissionPeople::run_to(const MissionPoses &poses, int32_t tick) {
-	const uint64_t floors = world_ ? world_->serial : 0;
+	const uint64_t people_world = world_ ? world_->serial : 0;
 	if (!started_ || poses.serial() != poses_serial_ || poses.generation() != poses_generation_ ||
-			poses.floor_serial() != floors || tick < tick_ || tick - tick_ > kCatchUpTicks) {
+			poses.people_serial() != people_world || tick < tick_ || tick - tick_ > kCatchUpTicks) {
 		reset(poses, tick);
 		return true;
 	}
@@ -207,7 +211,8 @@ bool MissionPeople::aim_overlay(NodeId row, anim::AimOverlayAngles out[anim::kOv
 	const world::World &w = world_->mission->world;
 	const world::AiEntity *body = w.ai.for_handle(found->second);
 	const world::Entity *entity = w.registry.get(found->second);
-	if (body == nullptr || entity == nullptr) return false;
+	// A body the init hid draws nothing in the game [orig: Entity_UpdateInfantryAI @0x4B9A03].
+	if (body == nullptr || entity == nullptr || ((entity->flags | entity->engine_flags) & 1u) != 0) return false;
 	anim::compute_aim_overlay_angles(world::aim_overlay_inputs_for(*body, *entity), out);
 	return true;
 }

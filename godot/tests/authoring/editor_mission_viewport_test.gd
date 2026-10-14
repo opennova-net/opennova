@@ -1443,7 +1443,7 @@ func test_people_play_their_clips() -> void:
 	assert_eq(played, 1, "the guard played on from its spawn")
 	# S27: in a world of their own (the mission's floors' world), each played person's model carries its body's aim
 	# overlay as the game's presenter draws it.
-	assert_true(people.has("world"), str(people))
+	assert_true(bool(people.get("world", false)), "on Tmap, the people play in a world of their own: %s" % str(people))
 	if bool(people.get("world", false)):
 		for row: Variant in state.get("items", []):
 			var mark: Dictionary = row
