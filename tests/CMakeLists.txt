@@ -4122,6 +4122,21 @@ target_include_directories(host_key_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(host_key_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME host_key COMMAND host_key_test)
 
+# The service's CD keys below the HTTP layer (apps/novaworld_server/cd_keys.h, migration
+# 0015): the serial format, generate / list / assign / revoke, and the DFX2 activations
+# (the account's, minting its first key or not, and an admin's manual one), each NWACT
+# read back by the client's leg. Compiles the server's cd_keys.cpp directly, as
+# hosted_supervisor_test does, so it runs on every build.
+add_executable(cd_keys_test
+    novaworld/cd_keys_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/cd_keys.cpp)
+target_link_libraries(cd_keys_test PRIVATE opennova_novaworld_service)
+target_include_directories(cd_keys_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+target_compile_definitions(cd_keys_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_test(NAME cd_keys COMMAND cd_keys_test)
+
 add_executable(backend_schema_test novaworld/backend_schema_test.cpp)
 target_link_libraries(backend_schema_test PRIVATE opennova_novaworld_service)
 target_include_directories(backend_schema_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

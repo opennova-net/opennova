@@ -12,6 +12,9 @@ if(BUILD_NOVAWORLD_HTTP)
     list(APPEND NOVAWORLD_SERVER_CORE_SOURCES
         http_listener.cpp
         host_routes.cpp
+        # CD keys (migration 0015): the keys, the DFX2 activations, their routes.
+        cd_keys.cpp
+        cd_key_routes.cpp
         template_engine.cpp
         session_store.cpp
         auth.cpp
