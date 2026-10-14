@@ -21,7 +21,8 @@ class HudToggles : public RefCounted {
 	GDCLASS(HudToggles, RefCounted)
 
 public:
-	enum Event {
+	// 64-bit: EVENT_JOIN_LOCK_TOGGLED is the engine word's top bit.
+	enum Event : int64_t {
 		EVENT_HUD_DETAIL_CYCLED = opennova::hud::hud_toggle_event::kHudDetailCycled,
 		EVENT_HUD_COLOR_CYCLED = opennova::hud::hud_toggle_event::kHudColorCycled,
 		EVENT_SHOWHUD_CYCLED = opennova::hud::hud_toggle_event::kShowHudCycled,
