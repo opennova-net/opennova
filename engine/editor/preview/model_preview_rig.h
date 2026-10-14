@@ -55,6 +55,9 @@ struct PreviewRig {
 	std::string record_file;
 	std::string record;
 	std::string record_field;
+	// The weapons whose animadm names the table and whose gfx1 is a model of the project, in the graph's order: the
+	// records a first-person view may be of (two weapons sharing one map: a smoke grenade on the frag's).
+	std::vector<std::string> weapons;
 };
 
 // The model fields of a record that pair with its map field (S17 review): an item's anim_def plays
@@ -68,9 +71,10 @@ std::vector<const char *> preview_model_fields(const std::string &map_field);
 // the project: an item's graphic, else its graphic_enemy; a weapon's gfx1); a clip on the first
 // table naming it that a record pairs with a model, and that table's model (a clip two tables share,
 // one of them no item's, plays on the other's), else on the first table naming it. `chosen` (a model's
-// file name) wins.
+// file name) wins. `weapon` (a weapon's name, without case) picks among the weapons whose animadm names the table the
+// one that pairs it ("" or a name none of them has: the first record, as before).
 PreviewRig resolve_preview_rig(const AssetGraph &graph, const AssetScan &scan, const std::string &file, AssetKind kind,
-                               const std::string &chosen);
+                               const std::string &chosen, const std::string &weapon = std::string());
 
 // The rig itself: the table (else the lone clip) over the model's bone table, through the
 // game's own loader (SkeletalClips); null when it does not load.

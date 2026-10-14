@@ -7,12 +7,15 @@
 // the view made again only when what it reads moves, and patched where a stroke changed the atlas in place (the same
 // picture a whole make gives; whole where the heights' range moved).
 #include <cstdio>
+#include <string>
 #include <vector>
 
 #include <editor/preview/mission_map_terrain_view.h>
+#include <formats/trn/charmap_legend.h>
 
 #include "common/test_expect.h"
 
+using namespace opennova;
 using namespace opennova::editor;
 
 namespace {
@@ -164,6 +167,55 @@ int test_patch() {
 	return 0;
 }
 
+// The surface classes over the atlas: each atlas texel the class the char map sampler reads (a 256-wide map's texel
+// under four by four of the atlas's), in the legend's colours (white past the twenty); class 1 past the map and with
+// none; a stroke's char map patch made again in place as a whole make makes it.
+int test_surface() {
+	constexpr int kMap = 256;
+	std::vector<uint8_t> classes(size_t(kMap) * kMap, 2);
+	classes[0] = 5;                         // sand at the atlas's (0..3, 0..3)
+	classes[size_t(10) * kMap + 200] = 40;  // a class past the legend at (800..803, 40..43)
+	std::vector<uint32_t> picture;
+	surface_class_map(classes.data(), kMap, kMap, picture);
+	const auto rgb = [](int surface) {
+		const CharmapLegendColour &c = surface < kCharmapLegendCount ? kCharmapLegend[surface] : kCharmapLegendRest;
+		return 0xFF000000u | (uint32_t(c.r) << 16) | (uint32_t(c.g) << 8) | uint32_t(c.b);
+	};
+	TEST_EXPECT(picture.size() == size_t(kSide) * kSide && at(picture, 0, 0) == rgb(5) && at(picture, 3, 3) == rgb(5) &&
+	            at(picture, 0, 4) == rgb(2) && at(picture, 42, 801) == rgb(40) && at(picture, 42, 801) == 0xFFFFFFFFu);
+	// A map shorter than its width: the rows past it read class 1, as the sampler reads them.
+	std::vector<uint8_t> short_map(size_t(kMap) * 128, 3);
+	surface_class_map(short_map.data(), kMap, 128, picture);
+	TEST_EXPECT(at(picture, 10, 10) == rgb(3) && at(picture, 600, 10) == rgb(1));
+	surface_class_map(nullptr, 0, 0, picture);
+	TEST_EXPECT(at(picture, 500, 500) == rgb(1));
+	// The atlas rects a map region covers.
+	const MissionMapAtlasRect rect = surface_atlas_rect(kMap, 10, 20, 3, 2);
+	TEST_EXPECT(rect.x0 == 40 && rect.y0 == 80 && rect.x1 == 52 && rect.y1 == 88);
+	// The view: made over a terrain read, patched in place, the same as a whole make; a follow at the patched
+	// revision keeps it; with no terrain read, nothing (the device draws none).
+	MissionMapTerrainView view;
+	view.follow(MissionMapBackground::Surface, false, nullptr, 0, 0, MissionMapSurface{classes.data(), kMap, kMap, 1}, true);
+	TEST_EXPECT(view.picture().size() == size_t(kSide) * kSide && view.made() == 1 && at(view.picture(), 0, 0) == rgb(5));
+	for (int y = 100; y < 104; ++y)
+		for (int x = 50; x < 60; ++x) classes[size_t(y) * kMap + size_t(x)] = 12;
+	view.patch_surface(MissionMapSurface{classes.data(), kMap, kMap, 2}, {surface_atlas_rect(kMap, 50, 100, 10, 4)});
+	TEST_EXPECT(view.made() == 1 && view.patched() == 1 && view.dirty().size() == 1 && at(view.picture(), 400, 200) == rgb(12));
+	MissionMapTerrainView whole;
+	whole.follow(MissionMapBackground::Surface, false, nullptr, 0, 0, MissionMapSurface{classes.data(), kMap, kMap, 2}, true);
+	TEST_EXPECT(view.picture() == whole.picture());
+	view.follow(MissionMapBackground::Surface, false, nullptr, 0, 0, MissionMapSurface{classes.data(), kMap, kMap, 2}, true);
+	TEST_EXPECT(view.made() == 1);
+	MissionMapTerrainView none;
+	none.follow(MissionMapBackground::Surface, false, nullptr, 0, 0, MissionMapSurface(), false);
+	TEST_EXPECT(none.picture().empty());
+	TEST_EXPECT(std::string(mission_map_background_token(MissionMapBackground::Surface)) == "surface");
+	MissionMapBackground parsed = MissionMapBackground::Colour;
+	TEST_EXPECT(mission_map_background_from_token("surface", parsed) && parsed == MissionMapBackground::Surface);
+	std::printf("surface: the char map's classes over the atlas in the legend's colours, patched in place\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -171,5 +223,6 @@ int main() {
 	if (test_delta() != 0) return 1;
 	if (test_flatness_and_water() != 0) return 1;
 	if (test_patch() != 0) return 1;
+	if (test_surface() != 0) return 1;
 	return test_follow();
 }

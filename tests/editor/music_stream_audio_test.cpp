@@ -121,7 +121,16 @@ int test_conversion() {
 	size_t bytes = 0;
 	for (const sbf::SbfChunk &chunk : *made.chunks) bytes += chunk.audio.size();
 	TEST_EXPECT(bytes == 2205 * 2 && made.words.find("tone.wav (16-bit PCM, mono, 44100 Hz: the channel on both sides, "
-	                                                 "resampled to 22050 Hz), 0.1 s") == 0);
+	                                                 "resampled to 22050 Hz), 0.100 s") == 0);
+	// A sting of 0.050 s says so (three places under a second), never rounded to 0.1 s.
+	{
+		const std::vector<int16_t> sting = sine(1103, 441.0, 0.5, 22050);
+		std::vector<uint8_t> short_wave;
+		MusicStreamAudioEdit short_made;
+		lwf::wav_write_pcm_mono(reinterpret_cast<const uint8_t *>(sting.data()), sting.size() * 2, 22050, 16, short_wave, why);
+		TEST_EXPECT(music_stream_audio_from_wave("sting.wav", short_wave, short_made, why) &&
+		            short_made.words.size() > 9 && short_made.words.compare(short_made.words.size() - 9, 9, ", 0.050 s") == 0);
+	}
 	std::vector<int16_t> pcm;
 	TEST_EXPECT(lwf::wave_stereo_pcm16(wave, 22050, 1.0f, pcm, why) && pcm.size() == 2205 * 2 && pcm[200] == pcm[201] &&
 	            std::labs(long(pcm[200]) - long(mono[200])) <= 1);

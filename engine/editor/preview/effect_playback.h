@@ -10,6 +10,10 @@
 
 namespace opennova::editor {
 
+// How many ticks past the engine's catch-up bound (particle::kEffectInitialAgeTickLimit) a jump of the clock steps
+// the effect viewport's spawn on to the tick sought: a minute of the game's.
+inline constexpr int32_t kEffectSeekStepTicks = 3750;
+
 // How an effect's picture plays (ADR 0046 DI-14, the effect viewport's options): the mission wind the
 // game feeds every emitter's GLOBALWIND drift (the BMS header's speed and direction, as
 // particle::mission_wind_vector reads them [orig: Weather_SetMissionWind @ 0x5DE970]; 0 none).
@@ -34,10 +38,11 @@ particle::EffectPose effect_play_pose();
 // scene opened over the effect's closure (particle::effect_closure), the effect spawned at tick 0 of
 // the clock as the game spawns it (effect_play_pose), once, as the game spawns an effect once per event,
 // and played on the preview clock as every editor effect scene is (EffectSchedule: a game tick at a time
-// through the view's planes; a jump of the clock spawns it again pre-aged by its age at the tick sought,
-// bounded by kEffectInitialAgeTickLimit: past that it shows the age the bound allows), so the picture at a
-// tick is the spawn's at that age. The scene is the device's picture: it reads the scene's snapshot and
-// draws it (godot/src/authoring/preview_effects).
+// through the view's planes; a jump of the clock spawns it again pre-aged by its age at the tick sought, the
+// engine's catch-up bounded by kEffectInitialAgeTickLimit, then steps it on a game tick at a time past that
+// bound to the tick sought, while it lives and kEffectSeekStepTicks at most: past those it shows the age they
+// reach), so the picture at a tick is the spawn's at that age however the clock got there. The scene is the
+// device's picture: it reads the scene's snapshot and draws it (godot/src/authoring/preview_effects).
 class EffectPlayback {
 public:
 	// The scene opened over `config` with `effect` to spawn (its name; a name the catalog lacks spawns
@@ -57,8 +62,8 @@ public:
 	// The spawn now playing (none: the effect died, or spawns nothing) and what the last spawn came to.
 	bool alive() const;
 	particle::EffectSpawnStatus last_status() const { return last_status_; }
-	// The spawn's age at the tick played (it spawns once, on tick 0), the ticks it was pre-aged by,
-	// and how many spawns were made since the scene opened.
+	// The spawn's age at the tick played (it spawns once, on tick 0), the age a jump brought it to (pre-aged up to
+	// the engine's bound, then stepped on), and how many spawns were made since the scene opened.
 	int32_t age() const { return schedule_.tick(); }
 	uint32_t pre_aged() const { return pre_aged_; }
 	uint64_t spawns() const { return spawns_; }

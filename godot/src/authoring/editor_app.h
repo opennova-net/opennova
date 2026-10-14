@@ -8,6 +8,8 @@
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
+#include <array>
+#include <cstdint>
 #include <future>
 #include <memory>
 #include <string>
@@ -133,6 +135,15 @@ public:
 	// by `--mcp-port <n>` at boot or by a test; the bound port, or 0 when it failed.
 	int start_mcp_endpoint(int p_port);
 	int get_mcp_port() const { return mcp_port_; }
+	// The editor's window brought back from the taskbar for a capture (the editor MCP's editor_screenshot): a
+	// minimized window draws no frame, so it is restored without activation and sent to the bottom of the z-order,
+	// never taking the foreground, at the size it comes back at (a window that comes back maximized over its
+	// monitor's work area). 1 restored (minimize_window_after_capture puts it back), 0 not minimized, -1 minimized
+	// where the platform cannot restore it so (off Windows).
+	int64_t restore_window_for_capture();
+	// The window a capture restored minimized again as it was (its normal place and its restore-to-maximized kept),
+	// without activation; nothing where none was restored.
+	void minimize_window_after_capture();
 
 	// The newest message on the editor's status line (the menu bar's, which fades it after a few
 	// seconds): what the session's refusals and a device's notices say. For the tests; "" for none.
@@ -287,6 +298,10 @@ private:
 	Vector2 last_drop_at_;
 	// The system pointer hidden after the last frame (a picture under the mouse drew the game's, DI-08).
 	bool pointer_hidden_ = false;
+	// The window's placement as a capture found it minimized (Windows' WINDOWPLACEMENT, its bytes), put back after
+	// the capture (restore_window_for_capture).
+	bool capture_restored_ = false;
+	std::array<uint8_t, 64> capture_placement_{};
 };
 
 } // namespace godot

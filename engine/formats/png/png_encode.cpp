@@ -46,7 +46,7 @@ std::vector<uint8_t> encode(const uint8_t *texels, uint32_t width, uint32_t heig
 	put_u32_be(header, width);
 	put_u32_be(header, height);
 	header.push_back(bits);   // bits a sample
-	header.push_back(colour); // 6 RGBA, 3 palette, 0 grey
+	header.push_back(colour); // 6 RGBA, 2 RGB, 3 palette, 0 grey
 	header.push_back(0);      // deflate
 	header.push_back(0);      // filters of method 0
 	header.push_back(0);      // not interlaced
@@ -63,6 +63,11 @@ std::vector<uint8_t> encode(const uint8_t *texels, uint32_t width, uint32_t heig
 std::vector<uint8_t> encode_png_rgba(const uint8_t *rgba, uint32_t width, uint32_t height) {
 	if (!rgba || width == 0 || height == 0) return {};
 	return encode(rgba, width, height, size_t(width) * 4, 6, nullptr, 0, nullptr, 0);
+}
+
+std::vector<uint8_t> encode_png_rgb(const uint8_t *rgb, uint32_t width, uint32_t height) {
+	if (!rgb || width == 0 || height == 0) return {};
+	return encode(rgb, width, height, size_t(width) * 3, 2, nullptr, 0, nullptr, 0);
 }
 
 std::vector<uint8_t> encode_png_indexed(const uint8_t *indices, uint32_t width, uint32_t height, const uint8_t *palette,

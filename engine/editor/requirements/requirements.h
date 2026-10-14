@@ -52,10 +52,13 @@ bool requirement_phase_enabled(const ProjectDocument &doc, int phase);
 // Multiplayer feature puts on the checklist: mp.mnu, the NovaWorld screens the game loads as a player enters
 // NovaWorld from the startup screen or comes back to it from a game [orig: UI_EnterNovaWorldMenu @ 0x5588fa,
 // from sub_5557A0 (the startup screen's NW_MULTI_PLAYER and NW_ACTIVATE), Menu_InitShellResources @ 0x5526c2
-// and UI_NWMultiPlayer_OnBack @ 0x558cf9], on the checklist with Multiplayer whatever the phase; the mission
-// music GAMEMUS (and an expansion's G<n> in its place), which a mission opens only in a multiplayer session
-// (a single-player mission stops the music context) [orig: Game_StartMission @ 0x525581..0x5255ae], with
-// Missions and Multiplayer both.
+// and UI_NWMultiPlayer_OnBack @ 0x558cf9], on the checklist with Multiplayer whatever the phase; and pre.mnu, the join
+// screen a client loads as it joins a session [orig: sub_5693E0 @ 0x5693e0, the load @ 0x56944a], likewise. The mission
+// music GAMEMUS (and an expansion's G<n> in its place) is not: a mission opens its music context in every session
+// with a local client, single player's included (the connection mode's client bit, set in single player's
+// host+client mode 3), and stops it on a dedicated host alone [orig: Game_StartMission @ 0x525581..0x5255ae;
+// CGameSession_SetConnectionMode @ 0x4c49f0] (docs/audio/mus-sbf-re.md, D-MUS-SPGATE closed): it is a mission's
+// file, on the checklist with Missions.
 bool requirement_multiplayer_only(const std::string &role);
 const char *requirement_phase_label(int phase);
 

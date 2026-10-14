@@ -142,7 +142,8 @@ static func definitions(app: Node) -> Array[McpToolDef]:
 		_viewport_tool(catalog),
 		McpToolDef.make("editor_screenshot",
 			"Capture the editor window (its ImGui workspace, the Preview window's picture and the Document tab's); "
-			+ "a headless editor refuses.",
+			+ "a minimized window is brought back for the capture without taking the foreground (under every other "
+			+ "window) and minimized again, refused where the platform cannot; a headless editor refuses.",
 			McpScreenshot.tool_schema(), [], true, McpScreenshot.CAPTURE_TIMEOUT_MS),
 		McpToolDef.make("editor_logs",
 			"The editor MCP's own log (sources server and script); the editor's output lines (the build log, the "

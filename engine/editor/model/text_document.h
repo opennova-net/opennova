@@ -185,6 +185,10 @@ protected:
 	// A snapshot's copy: the text, its line index and its encoding, and its history frozen
 	// (TextHistory::frozen): the steps are never copied.
 	TextDocument(const TextDocument &other);
+	// The type's reading of its stored file into the text (its TextDecode; the bytes as they are with none). A type
+	// whose reading takes more than its file overrides it (a music script's, its bank's stream names).
+	virtual bool decode(const std::vector<uint8_t> &stored, std::string &text, std::shared_ptr<const TextEncoding> &encoding,
+	                    std::vector<SourceIssue> &issues, std::string &message);
 
 	bool apply_edits(const std::vector<Edit> &edits, Diagnostic &error) override;
 	void undo_step() override;

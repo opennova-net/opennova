@@ -188,8 +188,10 @@ int test_bank_edits() {
 	add_member.parent = batch_made(0);
 	TEST_EXPECT(bank.apply({add_layer, add_member}, error));
 	made = row_named(bank, SoundBankKind::Set, "NEW_SET");
-	// The new member plays the bank's first wave until one is named.
-	TEST_EXPECT(made && made->set.layers[0].members.size() == 1 && made->set.layers[0].members[0].wave == "MSOVR_2");
+	// The new member plays the bank's first wave until one is named, at the pitch the authoring tools give a member
+	// (0xFFFF, as the set's: never 1.0's 0x10000, which no authored member of a shipped bank holds).
+	TEST_EXPECT(made && made->set.layers[0].members.size() == 1 && made->set.layers[0].members[0].wave == "MSOVR_2" &&
+	            made->set.layers[0].members[0].pitch == 0xFFFFu && made->set.pitch == 0xFFFFu);
 	const NodeAddress new_member{made->id, kMember, made->ids.lists[0][0].lists[0][0].id};
 	TEST_EXPECT(bank.apply(set_edit(new_member, "wave", std::string("fs_dirt1")), error)); // names compare without case
 	// The waves before the sets, as the file holds them.
@@ -208,6 +210,8 @@ int test_bank_edits() {
 	TEST_EXPECT(edited_member.pitch_scaled == 0xC000 && edited_member.volume == 128 && edited_member.clamp_volume == 200);
 	const lwf::Multi &added = file.multis[3];
 	TEST_EXPECT(added.name == "NEW_SET" && file.sndparms[file.playlists[added.playlist_indices[0]].sndparm_indices[0]].single_index == 3);
+	TEST_EXPECT(added.pitch_base == 0xFFFFu &&
+	            file.sndparms[file.playlists[added.playlist_indices[0]].sndparm_indices[0]].pitch_scaled == 0xFFFFu);
 	// Undo takes the batch back; the bytes as they were.
 	return 0;
 }

@@ -208,11 +208,13 @@ inline bool operator==(const PasteAt &a, const PasteAt &b) {
 // are consecutive drags of one handle: `gesture` 0 begins one (the session's token, which the answer
 // names), and a sample that names the gesture open on the document goes on with it, its `by` from
 // where the gesture's samples took the handle (as a canvas drags from its press), so its batches fold
-// into one undo step; `end` ends the gesture with the sample.
+// into one undo step; `end` ends the gesture with the sample. A terrain tile's drag (handle "tile") may go
+// to a point of the ground instead (`ground`: (x, y) mission metres, x east and y north, no picture between).
 struct ViewportDrag {
 	NodeId id = 0;
 	std::string handle;
 	bool by = true;
+	bool ground = false;
 	float x = 0.0f;
 	float y = 0.0f;
 	float snap = 0.0f;
@@ -222,7 +224,7 @@ struct ViewportDrag {
 };
 
 inline bool operator==(const ViewportDrag &a, const ViewportDrag &b) {
-	return a.id == b.id && a.handle == b.handle && a.by == b.by && a.x == b.x && a.y == b.y &&
+	return a.id == b.id && a.handle == b.handle && a.by == b.by && a.ground == b.ground && a.x == b.x && a.y == b.y &&
 			a.snap == b.snap && a.gesture == b.gesture && a.end == b.end && a.kind == b.kind;
 }
 inline bool operator!=(const ViewportDrag &a, const ViewportDrag &b) {
@@ -276,11 +278,13 @@ inline bool operator!=(const ViewportCommand &a, const ViewportCommand &b) {
 // (a mission's "area": an area trigger over the box). The viewport plans what the drop makes (a
 // mission: an entity of the item added where the point meets the ground, facing the way the camera
 // looks; a path's next stop; an area, one batch), snapped by `snap` (a mission's grid in metres, 0
-// free); a kind that takes no drop refuses it.
+// free); a kind that takes no drop refuses it. A terrain tile's stamp (reference "tile") may be let go at a
+// point of the ground instead (`ground`: (x, y) mission metres, x east and y north, no picture between).
 struct ViewportDrop {
 	std::string file;
 	std::string reference;
 	std::string name;
+	bool ground = false;
 	float x = 0.0f;
 	float y = 0.0f;
 	ViewportKind kind = ViewportKind::kCount;
@@ -291,8 +295,8 @@ struct ViewportDrop {
 };
 
 inline bool operator==(const ViewportDrop &a, const ViewportDrop &b) {
-	return a.file == b.file && a.reference == b.reference && a.name == b.name && a.x == b.x && a.y == b.y &&
-			a.kind == b.kind && a.box == b.box && a.x2 == b.x2 && a.y2 == b.y2 && a.snap == b.snap;
+	return a.file == b.file && a.reference == b.reference && a.name == b.name && a.ground == b.ground && a.x == b.x &&
+			a.y == b.y && a.kind == b.kind && a.box == b.box && a.x2 == b.x2 && a.y2 == b.y2 && a.snap == b.snap;
 }
 inline bool operator!=(const ViewportDrop &a, const ViewportDrop &b) {
 	return !(a == b);

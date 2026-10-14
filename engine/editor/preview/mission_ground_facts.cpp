@@ -222,6 +222,7 @@ void MissionGround::read_(const std::shared_ptr<const FileSource> &files, const 
 	++reads_;
 	++revision_;
 	++heights_revision_;
+	++surface_revision_;
 	store_.clear();
 	error_.clear();
 	surface_map_.clear();
@@ -380,7 +381,10 @@ bool MissionGround::patch(const TerrainPatch &patch, const DocumentBase &documen
 		                             : terrain::patch_foliage_mask_raster(foliage_, rect, texels.data(), size_t(region.width));
 		if (!written) return false;
 	}
-	if (!patch.regions.empty()) ++revision_;
+	if (!patch.regions.empty()) {
+		++revision_;
+		if (surface) ++surface_revision_;
+	}
 	return true;
 }
 

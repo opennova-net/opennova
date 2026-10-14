@@ -576,6 +576,15 @@ static int test_options_from_json() {
 	TEST_EXPECT(model.apply(parse(R"({"clock": {"time_ms": 4294967296, "playing": true}})"), clock, error) &&
 	            clock.ms() == 4294967295u && clock.playing());
 	TEST_EXPECT(model.apply(parse(R"({"clock": {"time_ms": 1e15}})"), clock, error) && clock.ms() == 4294967295u);
+	// One clock: a seek by time_ms alone moves the ticks a clip reads with it (62.5 a second, floored), one by ticks
+	// alone the milliseconds (16 a tick); both given, each its own.
+	TEST_EXPECT(model.apply(parse(R"({"clock": {"time_ms": 1000}})"), clock, error) && clock.ms() == 1000 &&
+	            clock.ticks() == 62);
+	TEST_EXPECT(model.apply(parse(R"({"clock": {"time_ms": 4294967295}})"), clock, error) && clock.ticks() == 268435455);
+	TEST_EXPECT(model.apply(parse(R"({"clock": {"ticks": 125}})"), clock, error) && clock.ticks() == 125 &&
+	            clock.ms() == 2000);
+	TEST_EXPECT(model.apply(parse(R"({"clock": {"time_ms": 7, "ticks": 3}})"), clock, error) && clock.ms() == 7 &&
+	            clock.ticks() == 3);
 	TEST_EXPECT(model.apply(parse(R"({"clock": {"time_ms": 250, "playing": false, "rate": 2}})"), clock, error) &&
 	            clock.ms() == 250 && !clock.playing() && clock.rate() == 2.0);
 

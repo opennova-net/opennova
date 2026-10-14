@@ -143,7 +143,34 @@ int test_playback() {
 	far.open(closure.config, "Puff");
 	far.play_to(0, options);
 	far.play_to(1000, options);
-	TEST_EXPECT(!far.alive() && far.spawns() == 2);
+	TEST_EXPECT(!far.alive() && far.spawns() == 2 && far.pre_aged() == particle::kEffectInitialAgeTickLimit);
+	// A seek past the engine's catch-up bound: spawned at the bound's age and stepped on to the tick sought, the
+	// same picture as the clock run there from tick 0 (a long-lived emitter: emits for two minutes, each dot a second).
+	const particle::EffectClosure long_closure = particle::effect_closure(
+	        {document("long.ptl", effect_text("Long", "Dot") + particle_text("Dot", 120.0f, 20.0f, 1.0f) + table_text("grow", 128))},
+	        "Long");
+	EffectPlayback run, sought;
+	run.open(long_closure.config, "Long");
+	sought.open(long_closure.config, "Long");
+	run.play_to(0, options);
+	sought.play_to(0, options);
+	for (int32_t tick = 1; tick <= 600; ++tick) run.play_to(tick, options);
+	sought.play_to(600, options);
+	TEST_EXPECT(sought.alive() && sought.spawns() == 2 && sought.age() == 600 && sought.pre_aged() == 600);
+	particle::ParticleFrameSnapshot ran, seen;
+	run.scene()->write_snapshot(ran);
+	sought.scene()->write_snapshot(seen);
+	TEST_EXPECT(!ran.particles.empty() && ran.particles.size() == seen.particles.size());
+	for (size_t i = 0; i < ran.particles.size() && i < seen.particles.size(); ++i)
+		TEST_EXPECT(ran.particles[i].position.x == seen.particles[i].position.x &&
+		            ran.particles[i].position.y == seen.particles[i].position.y &&
+		            ran.particles[i].position.z == seen.particles[i].position.z);
+	// Past a minute of steps: the age the steps reach, the clock's tick held.
+	EffectPlayback longest;
+	longest.open(long_closure.config, "Long");
+	longest.play_to(0, options);
+	longest.play_to(100000, options);
+	TEST_EXPECT(longest.age() == 100000 && longest.pre_aged() == particle::kEffectInitialAgeTickLimit + uint32_t(kEffectSeekStepTicks));
 	// The wind: GLOBALWIND particles drift with the mission header's.
 	const particle::EffectClosure windy_closure = particle::effect_closure(
 	        {document("w.ptl", effect_text("Windy", "Drift") + particle_text("Drift", 1.0f, 30.0f, 2.0f, "", "", "GLOBALWIND") +

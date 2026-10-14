@@ -6,6 +6,7 @@
 #include <editor/documents/source_issue_findings.h>
 #include <editor/model/id_list.h>
 #include <editor/project/project_files.h>
+#include <runtime/hud/game_text_lookup.h>
 
 #include <algorithm>
 #include <cctype>
@@ -497,6 +498,35 @@ bool define_string_id(const DocumentBase &document, const ReferenceSubject &miss
 	out.detail = "Adds the string id " + missing.target + " to " + where + ", its text empty, and selects it to write its "
 	             "text: the game's lookup then finds it and shows that text in place of the id.";
 	return true;
+}
+
+void strings_references(const Document &document, Extracted &out) {
+	const auto *strings = dynamic_cast<const StringsDocument *>(&document);
+	if (!strings || !strutil::iequals(basename_of(document.path()), hud::kGameTextTable)) return;
+	for (const auto &row : document.rows()) {
+		if (!row || row->kind != kSection || !strutil::iequals(row->name(), hud::kGameTextWepDes)) continue;
+		// The first section of the name alone: a lookup reads it [orig: TextResource_FindEntryBySectionAndKey @
+		// 0x75D250].
+		const auto &section = static_cast<const StringsSection &>(*row);
+		const std::vector<NodeId> &ids = row->collections.empty() ? std::vector<NodeId>() : row->collections[0];
+		for (size_t i = 0; i < section.entries.size() && i < ids.size(); ++i) {
+			const std::string &key = section.entries[i].key;
+			if (key.empty()) continue;
+			const NodeAddress address{row->id, kString, ids[i]};
+			GraphEdge edge;
+			edge.source = document.path();
+			edge.record = document.record_path(address);
+			edge.locator = document.locator(address);
+			edge.address = address;
+			edge.field = "key";
+			edge.kind = ReferenceKind::Weapon;
+			edge.value = key;
+			edge.rewritable = true;
+			edge.optional = true;
+			out.edges.push_back(std::move(edge));
+		}
+		return;
+	}
 }
 
 std::vector<Diagnostic> validate_strings_file(const DocumentBase &document) {

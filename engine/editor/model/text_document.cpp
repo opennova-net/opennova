@@ -278,18 +278,23 @@ void TextDocument::on_saved() {
 	history_.end_edit_group();
 }
 
+bool TextDocument::decode(const std::vector<uint8_t> &stored, std::string &text,
+		std::shared_ptr<const TextEncoding> &encoding, std::vector<SourceIssue> &issues, std::string &message) {
+	if (!decode_) {
+		text.assign(stored.begin(), stored.end());
+		return true;
+	}
+	return decode_(path(), stored, text, encoding, issues, message);
+}
+
 bool TextDocument::read_source(const std::vector<uint8_t> &decoded, bool adopt,
 		std::vector<SourceIssue> &issues, Diagnostic &error) {
 	std::string text;
 	std::shared_ptr<const TextEncoding> encoding;
-	if (decode_) {
-		std::string message;
-		if (!decode_(path(), decoded, text, encoding, issues, message))
-			return refuse(error, path(), CoreFinding::DocumentParse,
-					message.empty() ? std::string("The file does not read.") : message);
-	} else {
-		text.assign(decoded.begin(), decoded.end());
-	}
+	std::string message;
+	if (!decode(decoded, text, encoding, issues, message))
+		return refuse(error, path(), CoreFinding::DocumentParse,
+				message.empty() ? std::string("The file does not read.") : message);
 	// A save's read-back: the stored form is now what the save wrote (a shader written plain is now
 	// in its form), the text the document's.
 	if (!adopt) {

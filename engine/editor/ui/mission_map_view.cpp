@@ -136,14 +136,17 @@ void MissionMapViewportView::draw_ready(Workspace &workspace, const ViewportMode
 		// S25: what the map draws under its marks, the original tools' views of the heights among them.
 		constexpr MissionMapBackground kBackgrounds[] = {MissionMapBackground::Colour, MissionMapBackground::Height,
 		                                                 MissionMapBackground::Delta, MissionMapBackground::Flatness,
-		                                                 MissionMapBackground::None};
-		const char *const words[] = {"Colour map", "Height", "Delta", "Flatness", "None"};
+		                                                 MissionMapBackground::Surface, MissionMapBackground::None};
+		const char *const words[] = {"Colour map", "Height", "Delta", "Flatness", "Surfaces", "None"};
 		const char *const tips[] = {
 				"The commander map's own colours (the terrain's colour map, its water cut as the game's map cuts it).",
 				"Nile's Height map: each texel's height in green between the terrain's lowest and highest.",
 				"Nile's Delta map: green where a texel's height equals its four neighbours', red where it does not.",
 				"The original mission editor's flatness view: black where a texel equals its four neighbours, grey "
 				"where it does not.",
+				"The surface classes the terrain's char map holds, in its legend's colours (the 3D view's Surfaces "
+				"overlay's): dirt brown, grass green, snow pale blue, cement grey, sand yellow, water blue... The placed "
+				"tiles draw over them.",
 				"Nothing under the marks."};
 		size_t current = 0;
 		for (size_t i = 0; i < std::size(kBackgrounds); ++i)

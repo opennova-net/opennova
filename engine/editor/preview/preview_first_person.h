@@ -43,18 +43,22 @@ namespace opennova::editor {
 // (weapon_action_run), which a weapon firing in the editor drives tick by tick.
 
 // The first-person view's options (the model viewport's options' `first_person`): the eye or the orbit
-// camera, the character whose arms draw (a packed character id, -1 the one a fresh profile seeds), and the
-// action whose sets a row plays ("" the first naming the row's slot, a suffix: "fire", "reload").
+// camera, the character whose arms draw (a packed character id, -1 the one a fresh profile seeds), the
+// action whose sets a row plays ("" the first naming the row's slot, a suffix: "fire", "reload"), and the
+// weapon seen, among those whose animadm names the map ("" the first that pairs it: two weapons share a map,
+// a smoke grenade on the frag's; its gun, its view record and its actions the view's).
 struct FirstPersonOptions {
 	bool eye = false;
 	int32_t character = -1;
 	std::string action;
+	std::string weapon;
 	bool operator==(const FirstPersonOptions &other) const {
-		return eye == other.eye && character == other.character && action == other.action;
+		return eye == other.eye && character == other.character && action == other.action && weapon == other.weapon;
 	}
 	bool operator!=(const FirstPersonOptions &other) const { return !(*this == other); }
 };
-// On the wire: {view ("orbit", "eye"), character (an id, -1 the seeded one), action (a suffix, "" the first)}.
+// On the wire: {view ("orbit", "eye"), character (an id, -1 the seeded one), action (a suffix, "" the first),
+// weapon (a weapon's name, "" the first)}.
 io::JsonValue first_person_options_to_json(const FirstPersonOptions &options);
 // `json`'s members over `held`, each optional; false, nothing changed, with why.
 bool read_first_person_options(const io::JsonValue &json, FirstPersonOptions &held, std::string &error);
@@ -112,6 +116,10 @@ public:
 	// The rig is a weapon's map (its animadm, paired with its gfx1) and the catalog holds the weapon.
 	bool active() const { return active_; }
 	const std::string &weapon() const { return weapon_; }
+	// The weapons whose animadm names the map (the rig's: the view's choices), and why the one asked for is not seen
+	// ("" none: no weapon asked, or the one asked shows).
+	const std::vector<std::string> &weapons() const { return weapons_; }
+	const std::string &weapon_note() const { return weapon_note_; }
 	// What the view is in words: the gun and the arms, or why a map shows no first person.
 	const std::string &words() const { return words_; }
 	const renderer::FpViewmodelSpec &spec() const { return spec_; }
@@ -153,6 +161,8 @@ private:
 
 	bool active_ = false;
 	std::string weapon_;
+	std::vector<std::string> weapons_;
+	std::string weapon_note_;
 	std::string words_;
 	renderer::FpViewmodelSpec spec_;
 	uint32_t flags_ = 0;
@@ -216,9 +226,9 @@ struct FirstPersonRoot {
 FirstPersonRoot first_person_root(const FirstPersonSources &sources, int width, int height, const float bias_units[3],
                                   const float bias_rot_deg[3]);
 
-// The envelope's `first_person` (null where the map is no weapon's): the weapon, the view, the gun and
-// the arms, the characters and the chosen one, the view record, the actions and their runs, and the
-// actions playing the clip `clip_key` with the one chosen.
+// The envelope's `first_person` (null where the map is no weapon's): the weapon, the weapons that share the map
+// and why the one asked is not seen, the view, the gun and the arms, the characters and the chosen one, the view
+// record, the actions and their runs, and the actions playing the clip `clip_key` with the one chosen.
 io::JsonValue first_person_json(const FirstPersonSources &sources, const FirstPersonOptions &options,
                                 const std::string &clip_key, const WeaponActionRun *chosen);
 

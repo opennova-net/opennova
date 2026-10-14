@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -47,6 +48,16 @@
 #include "object/object_model.h"
 #include "resource_index/launch_flags.h"
 #include "util/string_convert.h"
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 using opennova::editor::EditorRequest;
 using opennova::editor::EditorRequestKind;
@@ -88,6 +99,8 @@ void EditorApp::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_mission_entity_key", "path", "row"), &EditorApp::get_mission_entity_key);
 	ClassDB::bind_method(D_METHOD("start_mcp_endpoint", "port"), &EditorApp::start_mcp_endpoint);
 	ClassDB::bind_method(D_METHOD("get_mcp_port"), &EditorApp::get_mcp_port);
+	ClassDB::bind_method(D_METHOD("restore_window_for_capture"), &EditorApp::restore_window_for_capture);
+	ClassDB::bind_method(D_METHOD("minimize_window_after_capture"), &EditorApp::minimize_window_after_capture);
 	ClassDB::bind_method(D_METHOD("get_status_text"), &EditorApp::get_status_text);
 	ClassDB::bind_method(D_METHOD("get_sound_state"), &EditorApp::get_sound_state);
 	ClassDB::bind_method(D_METHOD("get_sound_path"), &EditorApp::get_sound_path);
@@ -261,6 +274,82 @@ int EditorApp::start_mcp_endpoint(int p_port) {
 	mcp_service_ = service;
 	mcp_port_ = int(service->call("get_port"));
 	return mcp_port_;
+}
+
+#ifdef _WIN32
+namespace {
+
+// The editor's own top-level window (null headless).
+HWND main_window() {
+	DisplayServer *display = DisplayServer::get_singleton();
+	return display ? reinterpret_cast<HWND>(display->window_get_native_handle(DisplayServer::WINDOW_HANDLE)) : nullptr;
+}
+
+} // namespace
+#endif
+
+int64_t EditorApp::restore_window_for_capture() {
+#ifdef _WIN32
+	static_assert(sizeof(WINDOWPLACEMENT) <= sizeof(capture_placement_), "the placement fits its bytes");
+	const HWND window = main_window();
+	if (!window || !IsIconic(window)) return 0;
+	WINDOWPLACEMENT placement{};
+	placement.length = sizeof(placement);
+	if (!GetWindowPlacement(window, &placement)) return -1;
+	// Restored without activation at its normal place (SW_SHOWNOACTIVATE; a restore Godot asks for, or SW_RESTORE,
+	// activates it), its own placement kept to put back.
+	std::memcpy(capture_placement_.data(), &placement, sizeof(placement));
+	capture_restored_ = true;
+	// A window that is its thread's active window comes to the foreground as it is restored, SW_SHOWNOACTIVATE or
+	// not, and Godot's main window is (DisplayServerWindows::show_window's SetFocus): a hidden window of the thread
+	// holds the activation while it is restored, and gives it back after (SetActiveWindow from the background moves
+	// no foreground).
+	HWND decoy = nullptr;
+	if (GetActiveWindow() == window) {
+		decoy = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"STATIC", L"", WS_POPUP, 0, 0, 1, 1, nullptr,
+				nullptr, GetModuleHandleW(nullptr), nullptr);
+		if (decoy) SetActiveWindow(decoy);
+	}
+	WINDOWPLACEMENT shown = placement;
+	shown.showCmd = SW_SHOWNOACTIVATE;
+	SetWindowPlacement(window, &shown);
+	// Under every other window, so it covers none of the person's while it draws; one that comes back maximized
+	// spread over its monitor's work area, the size it would come back at.
+	RECT area{};
+	MONITORINFO monitor{};
+	monitor.cbSize = sizeof(monitor);
+	const bool maximized = (placement.flags & WPF_RESTORETOMAXIMIZED) != 0 &&
+			GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor);
+	if (maximized) area = monitor.rcWork;
+	SetWindowPos(window, HWND_BOTTOM, area.left, area.top, area.right - area.left, area.bottom - area.top,
+			SWP_NOACTIVATE | SWP_NOOWNERZORDER | (maximized ? 0u : UINT(SWP_NOMOVE | SWP_NOSIZE)));
+	if (decoy) {
+		SetActiveWindow(window);
+		DestroyWindow(decoy);
+	}
+	return 1;
+#else
+	// The headless display server answers every window minimized: it has none.
+	DisplayServer *display = DisplayServer::get_singleton();
+	return display && display->get_name() != "headless" &&
+					display->window_get_mode() == DisplayServer::WINDOW_MODE_MINIMIZED
+			? -1
+			: 0;
+#endif
+}
+
+void EditorApp::minimize_window_after_capture() {
+	if (!capture_restored_) return;
+	capture_restored_ = false;
+#ifdef _WIN32
+	const HWND window = main_window();
+	if (!window) return;
+	WINDOWPLACEMENT placement{};
+	std::memcpy(&placement, capture_placement_.data(), sizeof(placement));
+	placement.length = sizeof(placement);
+	placement.showCmd = SW_SHOWMINNOACTIVE;
+	SetWindowPlacement(window, &placement);
+#endif
 }
 
 void EditorApp::_exit_tree() {

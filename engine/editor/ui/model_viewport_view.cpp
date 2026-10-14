@@ -439,6 +439,22 @@ void ModelViewportView::Tools::first_person(Workspace &workspace, ui_kit::WrapRo
 		}
 		ui_kit::tooltip("The character the player is: the game draws its Avatars.def arms with the gun's bones. A fresh "
 		                "profile is the first of the good side.");
+		// Two weapons sharing the map (a smoke grenade on the frag's): the one seen, its gun, its view record and its
+		// actions.
+		const std::vector<std::string> &weapons = sources.weapons();
+		if (weapons.size() > 1) {
+			ImGui::SetNextItemWidth(unit * 16.0f);
+			if (ImGui::BeginCombo("Weapon", sources.weapon().c_str())) {
+				for (const std::string &weapon : weapons)
+					if (ImGui::Selectable(weapon.c_str(), weapon == sources.weapon()))
+						chosen.weapon = weapon == weapons.front() ? std::string() : weapon;
+				ImGui::EndCombo();
+			}
+			ui_kit::tooltip("The weapons whose animadm names this map: the one seen in first person, its gun (gfx1), its "
+			                "view record and its actions.");
+		}
+		if (!sources.weapon_note().empty())
+			ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s", sources.weapon_note().c_str());
 		const std::vector<const WeaponActionRun *> playing = sources.actions_playing(model.clip_key());
 		const WeaponActionRun *action = model.first_person_action();
 		if (playing.size() > 1) {

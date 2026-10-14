@@ -84,6 +84,9 @@ private:
 	// The document the author asked to see the Preview beside (the Windows menu), until another is
 	// active ("" none).
 	mutable std::string shown_for_;
+	// The ask came with the document's 2D map beside it (the Map tool's: document.map and focus "preview"), or the map
+	// showed while it held: the map put away (map false) takes the ask with it, and the Preview stands aside again.
+	mutable bool asked_with_map_ = false;
 	mutable bool welcome_asked_ = false; // shown with no project open at the author's ask
 };
 

@@ -114,6 +114,11 @@ void DiskWatch::check(bool all) {
 	const std::vector<ImportedSource> none;
 	ExternalChanges changes = external_changes(paths, scan, view.project.imports ? *view.project.imports : none, now_ticks);
 	const size_t unsettled = changes.unsettled;
+	// A gesture open (a stroke's samples, a drag, its edits one undo step) holds what is ready until it ends: the
+	// refresh reads again the files and the documents the gesture edits, and the busy gate refuses its samples while it
+	// runs, so a stroke mid-gesture was refused and its gesture lapsed. The first check after the gesture ends reads
+	// them (they wait, the view's outside_waiting).
+	if (!view.documents.gestures.empty()) return publish(unsettled);
 	const std::vector<std::string> ready = changes_.take_ready();
 	if (ready.empty() && changes.empty()) return publish(unsettled);
 	std::set<std::string> sources(changes.sources.begin(), changes.sources.end());

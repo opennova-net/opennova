@@ -1980,6 +1980,65 @@ func test_the_map_draws_a_background_of_the_heights() -> void:
 	assert_eq(overlay.get_minimap_terrain_picture(), colour, "the colour map back")
 
 
+## The map's Surfaces background: the char map's classes in its legend's colours in the colour map's place, its legend
+## in the body (each class the map holds, its colour and share); a surface stroke's samples patch it where they fell.
+func test_the_map_draws_a_background_of_the_surface_classes() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission())
+	var state := await _await_map()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	var device := _device(state)
+	var overlay := device.find_child("MapState", true, false) as HudOverlay if device != null else null
+	assert_not_null(overlay, "the HUD overlay holding the map's state")
+	if overlay == null:
+		return
+	var colour: Texture2D = overlay.get_minimap_terrain_picture()
+	assert_true(_change({"kind": "map", "options": {"background": "surface"}}))
+	for _frame in 5:
+		_app.pump()
+		await get_tree().process_frame
+	state = _map_state()
+	var body: Dictionary = state.get("body", {})
+	assert_true(bool(body.get("drawn", {}).get("background", false)), str(body.get("drawn")))
+	var legend: Array = body.get("legend", [])
+	assert_gt(legend.size(), 0, "the classes the char map holds: %s" % str(body))
+	var colours := {}
+	for row: Dictionary in legend:
+		colours[String(row.get("rgb", ""))] = int(row.get("class", -1))
+		assert_gt(float(row.get("share", 0.0)), 0.0)
+	var picture: Texture2D = overlay.get_minimap_terrain_picture()
+	assert_not_null(picture)
+	if picture == null:
+		return
+	assert_ne(picture, colour, "the classes in the colour map's place")
+	var image := picture.get_image()
+	for y in range(0, 1024, 128):
+		for x in range(0, 1024, 128):
+			assert_true(colours.has(image.get_pixel(x, y).to_html(false).to_upper()),
+					"each texel a legend colour of a class the map holds (%d, %d)" % [x, y])
+	# A surface stroke patches the picture where it fell: a dab's square converted, not the 1M.
+	var drawn: Dictionary = body.get("drawn", {})
+	var uploads := int(drawn.get("background_uploads", 0))
+	var converted := int(drawn.get("background_converted", 0))
+	var sample: Dictionary = _seam.sample({"kind": "terrain_stroke", "path": "missions/synth_logic.bms",
+			"stroke": {"plane": "surface", "brush": {"tool": "surface", "surface": 12, "radius": 6},
+			"points": [[-200.0, 200.0]]}})
+	assert_true(bool(sample.get("outcome", {}).get("done", false)), str(sample.get("outcome")))
+	for _frame in 3:
+		_app.pump()
+		await get_tree().process_frame
+	drawn = _map_state().get("body", {}).get("drawn", {})
+	assert_gt(int(drawn.get("background_uploads", 0)), uploads, "the stroke uploaded: %s" % str(drawn))
+	assert_lt(int(drawn.get("background_converted", 0)) - converted, 1024 * 1024,
+			"the stroke converted less than one whole picture: %s" % str(drawn))
+	assert_true(_change({"kind": "map", "options": {"background": "colour"}}))
+	for _frame in 5:
+		_app.pump()
+		await get_tree().process_frame
+	assert_eq(overlay.get_minimap_terrain_picture(), colour, "the colour map back")
+
+
 ## S23 C: the map and the 3D view are one document's: a pin hit on the map, selected, is the selection both ring; a
 ## drag of a pin over the wire is the 3D view's move to the point under the pointer (stick: its height over the map
 ## device's ground kept), one undo step, the 3D view's mark moved with it.

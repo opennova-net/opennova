@@ -232,6 +232,30 @@ static int test_mission_rows_are_all_filled() {
 	bool script_made = false;
 	for (const std::string &made : content.created) script_made = script_made || made.find("GAMEMUS.BIN") != std::string::npos;
 	TEST_EXPECT(script_made);
+	// An expansion's music pairs (S16), under its M<name> and G<name> names: made from the base pair's blanks, each
+	// bank with its script of its stem.
+	{
+		test_temp::TempDir exp_dir("opennova_editor_create_missing_expansion_music");
+		const std::string exp_root = exp_dir.file("Jxm");
+		ProjectDocument exp_doc;
+		Diagnostic exp_error;
+		TEST_EXPECT(create_project(exp_root, "Jxm", "jo", exp_doc, exp_error, ProjectExpansion{"jxm", ""}));
+		exp_doc.features.mission = true;
+		const ProjectPaths exp_paths = ProjectPaths::for_root(exp_root);
+		Evaluated exp_before = evaluate(exp_paths, exp_doc);
+		for (const char *role : {"expansion_menumus_sbf", "expansion_menumus_bin", "expansion_gamemus_sbf", "expansion_gamemus_bin"})
+			TEST_EXPECT(find_blank_factory_for_role(role) != nullptr);
+		const CreateMissingResult music = create_missing_requirements(exp_paths, exp_doc, exp_before.scan, exp_before.report,
+		                                                              {"expansion_menumus_sbf", "expansion_gamemus_sbf"});
+		for (const std::string &name : music.unavailable) std::fprintf(stderr, "  unavailable: %s\n", name.c_str());
+		TEST_EXPECT(music.diagnostics.empty() && music.unavailable.empty() && music.created.size() == 4);
+		for (const char *name : {"Mjxm.sbf", "Mjxm.bin", "Gjxm.sbf", "Gjxm.bin"}) {
+			bool made = false;
+			for (const std::string &path : music.created) made = made || path.find(name) != std::string::npos;
+			if (!made) std::fprintf(stderr, "  not made: %s\n", name);
+			TEST_EXPECT(made);
+		}
+	}
 	// The sound banks are made empty (the sound lane: the bank document fills them).
 	const CreateMissingResult bank = create_missing_requirements(paths, doc, after.scan, after.report, {"game_lwf"});
 	TEST_EXPECT(bank.diagnostics.empty() && bank.unavailable.empty() && bank.created.size() == 1);

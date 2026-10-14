@@ -70,6 +70,8 @@ void mission_names_written(DocumentBase &document, bool ok, uint64_t fingerprint
 }
 constexpr DocumentCompanions kMissionCompanions{".mis", read_mission_names, mission_names_due, write_mission_names,
                                                 mission_names_written};
+// A music script's bank, read alone (no write: it is the bank's own file).
+constexpr DocumentCompanions kMusicScriptBank{".sbf", read_music_script_bank};
 
 std::unique_ptr<DocumentBase> make_catalog() { return std::make_unique<DefCatalogDocument>(); }
 std::unique_ptr<DocumentBase> make_strings() { return std::make_unique<StringsDocument>(); }
@@ -103,8 +105,9 @@ constexpr DocumentType kTypes[] = {
 	{ DocumentTypeId::Catalog, "catalog", make_catalog, validate_catalog_file,
 			DefCatalogDocument::schema, catalog_finding_codes, nullptr, nullptr, catalog_references,
 			catalog_record_label, nullptr, nullptr, nullptr, nullptr, nullptr, define_catalog_symbol },
+	// A key of gametext.bin's WepDes section is a use of the weapon of its name (the HUD's name of it).
 	{ DocumentTypeId::Strings, "strings", make_strings, validate_strings_file,
-			StringsDocument::schema, strings_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr,
+			StringsDocument::schema, strings_finding_codes, nullptr, nullptr, strings_references, nullptr, nullptr,
 			nullptr, nullptr, nullptr, nullptr, define_string_id },
 	// The menu: its parts by what they do (an action, a look, a sound), never "Action 1" (the plain-words
 	// lane).
@@ -139,7 +142,8 @@ constexpr DocumentType kTypes[] = {
 			script_finding_codes, nullptr, script_references },
 	// The music script's plays name its bank's streams by their places (S23 B).
 	{ DocumentTypeId::MusicScript, "music_script", make_music_script_document,
-			validate_music_script_file, text_fields, music_script_finding_codes, nullptr, music_script_references },
+			validate_music_script_file, text_fields, music_script_finding_codes, nullptr, music_script_references,
+			nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &kMusicScriptBank },
 	// The credits' text names the images its lines draw and the fonts its text lines draw in.
 	{ DocumentTypeId::Credits, "credits", make_credits_document, validate_credits_file,
 			text_fields, credits_finding_codes, nullptr, credits_references },

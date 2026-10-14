@@ -629,7 +629,7 @@ JsonValue drag_to_json(const ViewportDrag &drag) {
 	JsonValue point = JsonValue::make_array();
 	point.push(json_number(drag.x));
 	point.push(json_number(drag.y));
-	out.set(drag.by ? "by" : "to", std::move(point));
+	out.set(drag.ground ? "ground" : drag.by ? "by" : "to", std::move(point));
 	if (drag.snap != 0.0f) out.set("snap", json_number(drag.snap));
 	if (drag.gesture) out.set("gesture", json_number(double(drag.gesture)));
 	if (!drag.end) out.set("end", boolean(false));
@@ -639,10 +639,11 @@ JsonValue drag_to_json(const ViewportDrag &drag) {
 
 bool drag_from_json(const JsonValue &json, ViewportDrag &out, std::string &error) {
 	if (!json.is_object()) {
-		error = "\"drag\" must be an object {id, handle, by | to, snap, gesture, end, kind}.";
+		error = "\"drag\" must be an object {id, handle, by | to | ground, snap, gesture, end, kind}.";
 		return false;
 	}
-	if (!io::json_members_known(json, {"id", "handle", "by", "to", "snap", "gesture", "end", "kind"}, "drag", error))
+	if (!io::json_members_known(json, {"id", "handle", "by", "to", "ground", "snap", "gesture", "end", "kind"}, "drag",
+	                            error))
 		return false;
 	const auto refuse = [&error](const char *member, const char *must) {
 		error = std::string("\"drag.") + member + "\" must be " + must + ".";
@@ -656,17 +657,24 @@ bool drag_from_json(const JsonValue &json, ViewportDrag &out, std::string &error
 	const JsonValue *id = json.get("id");
 	if (!id || !io::json_exact_whole(*id, drag.id) || (drag.id == 0 && drag.handle != "brush"))
 		return refuse("id", drag.handle == "brush" ? "0 (the brush names no record)" : "a record identity");
-	const JsonValue *by = json.get("by"), *to = json.get("to");
-	if ((by != nullptr) == (to != nullptr)) {
-		error = "\"drag\" goes by [dx, dy] or to [x, y], one of them.";
+	const JsonValue *by = json.get("by"), *to = json.get("to"), *ground = json.get("ground");
+	if ((by != nullptr) + (to != nullptr) + (ground != nullptr) != 1) {
+		error = "\"drag\" goes by [dx, dy], to [x, y] of the picture or to a ground point [x, y], one of them.";
+		return false;
+	}
+	// A ground point (mission metres): a terrain tile's drag alone.
+	if (ground && drag.handle != "tile") {
+		error = "\"drag.ground\" takes a terrain tile (handle \"tile\") to a point of the ground; another handle goes by or "
+		        "to a point of the picture.";
 		return false;
 	}
 	// Numbers the drag's floats hold (finite, none past a float's largest).
-	const JsonValue &point = by ? *by : *to;
+	const JsonValue &point = by ? *by : to ? *to : *ground;
 	if (!point.is_array() || point.array.size() != 2 || !io::json_float(point.array[0], drag.x) ||
 			!io::json_float(point.array[1], drag.y))
-		return refuse(by ? "by" : "to", "two numbers, [x, y]");
+		return refuse(by ? "by" : to ? "to" : "ground", "two numbers, [x, y]");
 	drag.by = by != nullptr;
+	drag.ground = ground != nullptr;
 	if (const JsonValue *snap = json.get("snap"); snap && (!io::json_float(*snap, drag.snap) || drag.snap < 0.0f))
 		return refuse("snap", "a number, 0 or more");
 	if (const JsonValue *gesture = json.get("gesture"); gesture && !io::json_exact_whole(*gesture, drag.gesture))
@@ -802,7 +810,7 @@ JsonValue drop_to_json(const ViewportDrop &drop) {
 	JsonValue point = JsonValue::make_array();
 	point.push(json_number(drop.x));
 	point.push(json_number(drop.y));
-	out.set("at", std::move(point));
+	out.set(drop.ground ? "ground" : "at", std::move(point));
 	if (drop.box) {
 		JsonValue to = JsonValue::make_array();
 		to.push(json_number(drop.x2));
@@ -816,10 +824,11 @@ JsonValue drop_to_json(const ViewportDrop &drop) {
 
 bool drop_from_json(const JsonValue &json, ViewportDrop &out, std::string &error) {
 	if (!json.is_object()) {
-		error = "\"drop\" must be an object {file | reference + name, at, to, snap, kind}.";
+		error = "\"drop\" must be an object {file | reference + name, at | ground, to, snap, kind}.";
 		return false;
 	}
-	if (!io::json_members_known(json, {"file", "reference", "name", "at", "to", "snap", "kind"}, "drop", error)) return false;
+	if (!io::json_members_known(json, {"file", "reference", "name", "at", "ground", "to", "snap", "kind"}, "drop", error))
+		return false;
 	const auto text = [&](const char *member, std::string &into) {
 		const JsonValue *value = json.get(member);
 		if (!value) return true;
@@ -849,12 +858,24 @@ bool drop_from_json(const JsonValue &json, ViewportDrop &out, std::string &error
 		error = "\"drop\" names a file, or a reference kind and a name of it, one of them.";
 		return false;
 	}
-	const JsonValue *at = json.get("at");
-	if (!at || !at->is_array() || at->array.size() != 2 || !io::json_float(at->array[0], drop.x) ||
-			!io::json_float(at->array[1], drop.y)) {
-		error = "\"drop.at\" must be two numbers, [x, y].";
+	// At a point of the picture, or (a terrain tile's stamp) of the ground, mission metres.
+	const JsonValue *at = json.get("at"), *ground = json.get("ground");
+	if ((at != nullptr) == (ground != nullptr)) {
+		error = "\"drop\" is let go at a point of the picture (at) or of the ground (ground), one of them.";
 		return false;
 	}
+	if (ground && (drop.reference != "tile" || drop.box)) {
+		error = "\"drop.ground\" stamps a terrain tile (reference \"tile\") at a point of the ground; a file or another "
+		        "reference is let go at a point of the picture (at).";
+		return false;
+	}
+	const JsonValue &point = at ? *at : *ground;
+	if (!point.is_array() || point.array.size() != 2 || !io::json_float(point.array[0], drop.x) ||
+			!io::json_float(point.array[1], drop.y)) {
+		error = std::string("\"drop.") + (at ? "at" : "ground") + "\" must be two numbers, [x, y].";
+		return false;
+	}
+	drop.ground = ground != nullptr;
 	if (const JsonValue *snap = json.get("snap"); snap && (!io::json_float(*snap, drop.snap) || drop.snap < 0.0f)) {
 		error = "\"drop.snap\" must be a number, 0 or more.";
 		return false;

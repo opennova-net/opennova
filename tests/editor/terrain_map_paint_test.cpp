@@ -274,16 +274,17 @@ int test_imported_source() {
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Isle"));
 	const SessionView &v = session.view();
 	const std::string images = dir.file("images");
-	// An island of 8-bit grey heights, a colour map, and a surface map of grass (class 2) as a palette PNG.
+	// An island of 8-bit grey heights, a colour map as an 8-bit RGB PNG, and a surface map of grass (class 2) as a palette
+	// PNG.
 	constexpr int kSide = 1024, kMap = 512;
-	std::vector<uint8_t> heights(size_t(kSide) * kSide), colours(size_t(kSide) * kSide * 4, 120), classes(size_t(kMap) * kMap, 2);
+	std::vector<uint8_t> heights(size_t(kSide) * kSide), colours(size_t(kSide) * kSide * 3, 120), classes(size_t(kMap) * kMap, 2);
 	for (int y = 0; y < kSide; ++y)
 		for (int x = 0; x < kSide; ++x)
 			heights[size_t(y) * kSide + x] = uint8_t(std::max(0.0, 200.0 * (1.0 - std::hypot(x - 512.0, y - 512.0) / 400.0)));
 	std::vector<uint8_t> ramp;
 	for (int i = 0; i < 256; ++i) ramp.insert(ramp.end(), 3, uint8_t(i));
 	TEST_EXPECT(test_io::write_file(images + "/height.png", png::encode_png_gray(heights.data(), kSide, kSide)));
-	TEST_EXPECT(test_io::write_file(images + "/colour.png", png::encode_png_rgba(colours.data(), kSide, kSide)));
+	TEST_EXPECT(test_io::write_file(images + "/colour.png", png::encode_png_rgb(colours.data(), kSide, kSide)));
 	TEST_EXPECT(test_io::write_file(images + "/surface.png", png::encode_png_indexed(classes.data(), kMap, kMap, ramp.data(), 256)));
 	// A detail blend map's weights (the .tset's blendmap key, S25 B4): the first layer full everywhere.
 	std::vector<uint8_t> weights;
@@ -394,6 +395,35 @@ int test_imported_source() {
 			layered += texel[0] == 0 && texel[1] == 255 && texel[2] == 0 && texel[3] == 255 ? 1 : 0;
 		}
 	TEST_EXPECT(layered == 1);
+	// The colour map's source, an 8-bit RGB PNG, takes a Colour stroke as RGB texels and is written again in its own
+	// form, an RGB PNG (colour type 2) of its size, never widened to RGBA.
+	ask.plane = TerrainPlane::Colour;
+	ask.brush.tool = TerrainTool::Colour;
+	ask.brush.colour = 0x336699;
+	ask.brush.strength = 1.0f;
+	ask.brush.radius = 0.0f;
+	ask.brush_named = kBrushTool | kBrushColour | kBrushStrength | kBrushRadius;
+	session.handle(request::terrain_stroke(m, ask));
+	for (const Diagnostic &d : session.outcome().findings) std::fprintf(stderr, "  %s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(session.outcome().done() && session.outcome().stroke.changed.size() == 1);
+	const std::string colour_source = session.outcome().stroke.changed.empty() ? std::string() : session.outcome().stroke.changed.front().path;
+	TEST_EXPECT(contains(colour_source, "isle_colormap.png"));
+	const auto *coloured = dynamic_cast<const TextureDocument *>(session.document_base_for(colour_source));
+	TEST_EXPECT(coloured && coloured->plane(0).format() == RasterFormat::Rgb8);
+	size_t painted_blue = 0;
+	for (int y = 0; coloured && y < kSide; ++y)
+		for (int x = 0; x < kSide; ++x) {
+			const uint8_t *texel = coloured->plane(0).texel(x, y);
+			painted_blue += texel[0] == 0x33 && texel[1] == 0x66 && texel[2] == 0x99 ? 1 : 0;
+		}
+	TEST_EXPECT(painted_blue >= 1);
+	if (coloured) {
+		const SerializeResult rgb = coloured->serialize();
+		const std::vector<uint8_t> source = test_io::read_file(images + "/colour.png");
+		TEST_EXPECT(rgb.text.size() > 26 && uint8_t(rgb.text[25]) == 2 && uint8_t(rgb.text[24]) == 8);
+		TEST_EXPECT(rgb.text.compare(16, 8, std::string(source.begin() + 16, source.begin() + 24)) == 0); // its size
+		TEST_EXPECT(contains(coloured->save_words(), "8-bit RGB PNG"));
+	}
 	// Add (S25 B4): the set names no foliagemap, so the terrain has none: Add makes isle_foliagemap.png beside the set
 	// (grey, every level 0), writes the key, and the import made again makes isle_f.pcx and names it in the .trn; a
 	// stroke then paints the source in its place.
@@ -564,10 +594,74 @@ int test_add_maps() {
 	return 0;
 }
 
+// A stroke goes on across another program's save: while a stroke's gesture is open over the wire, the check that finds a
+// file changed outside holds it (no refresh starts, the file waits), so the stroke's next samples are served, never
+// refused by a refresh holding the documents; the check after the gesture ends reads the file again.
+int test_stroke_across_outside_save() {
+	test_temp::TempDir dir("opennova_editor_terrain_map_paint_outside");
+	editor_test::FakePlatform platform;
+	platform.clock = 10000;
+	MemoryPreferencesStore preferences;
+	ProjectSession session{platform, preferences};
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Outside"));
+	const SessionView &v = session.view();
+	const std::string root = v.project.root;
+	for (const char *name : {"Tmap.trn", "Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx"})
+		TEST_EXPECT(test_io::write_file(root + "/terrain/" + name, test_io::read_file(test_paths_fixture(std::string("terrain/tmap/") + name))));
+	TEST_EXPECT(test_io::write_text(root + "/day.env", "env") && test_io::write_text(root + "/notes.txt", "one"));
+	TEST_EXPECT(editor_test::backdate_tree(root, std::chrono::seconds(60)));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::set_missions(session, true);
+	editor_test::handle_to_end(session, request::create_file("m.bms", "mission", {{"terrain", "Tmap.trn"}, {"environment", "day.env"}}));
+	const std::string m = v.project.scan->find("m.bms")->relative_path;
+	session.handle(request::open_document(m));
+	editor_test::handle_to_end(session, request::refresh_changed_sources());
+	TEST_EXPECT(v.project.outside_waiting == 0);
+
+	// The first sample over the wire begins the gesture.
+	TerrainStrokeAsk ask;
+	ask.plane = TerrainPlane::Surface;
+	ask.brush.tool = TerrainTool::Surface;
+	ask.brush.surface = 5;
+	ask.brush.radius = 0.0f;
+	ask.brush_named = kBrushTool | kBrushSurface | kBrushRadius;
+	ask.points = {{-256.0, 256.0}};
+	ask.wire = true;
+	ask.gesture = 0;
+	ask.end = false;
+	session.handle(request::terrain_stroke(m, ask));
+	const uint64_t gesture = session.outcome().gesture;
+	TEST_EXPECT(session.outcome().done() && gesture != 0 && !v.documents.gestures.empty());
+	// Another program saves a project file (settled at once): the check holds it while the gesture is open.
+	TEST_EXPECT(test_io::write_text(root + "/notes.txt", "two") &&
+	            editor_test::backdate(root + "/notes.txt", std::chrono::seconds(30)));
+	session.handle(request::refresh_changed_sources(true));
+	TEST_EXPECT(session.outcome().operation == 0);
+	TEST_EXPECT(v.project.outside_waiting >= 1);
+	// The stroke goes on: its next samples are served, the gesture still open.
+	ask.gesture = gesture;
+	ask.points = {{-240.0, 256.0}};
+	session.handle(request::terrain_stroke(m, ask));
+	for (const Diagnostic &d : session.outcome().findings) std::fprintf(stderr, "  %s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(session.outcome().done() && session.outcome().gesture == gesture && !v.documents.gestures.empty());
+	session.handle(request::refresh_changed_sources());
+	TEST_EXPECT(session.outcome().operation == 0);
+	ask.points = {{-224.0, 256.0}};
+	ask.end = true;
+	session.handle(request::terrain_stroke(m, ask));
+	TEST_EXPECT(session.outcome().done() && v.documents.gestures.empty());
+	// The gesture ended: the next check reads the file again.
+	editor_test::handle_to_end(session, request::refresh_changed_sources());
+	TEST_EXPECT(session.outcome().operation != 0 && v.project.outside_waiting == 0);
+	std::printf("outside save: a stroke's gesture goes on while the change waits; the check after it reads the file\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
-	const int failures = test_routing() + test_strokes() + test_imported_source() + test_add_maps();
+	const int failures = test_routing() + test_strokes() + test_imported_source() + test_add_maps() +
+	                     test_stroke_across_outside_save();
 	if (failures == 0) std::printf("editor_terrain_map_paint: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

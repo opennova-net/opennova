@@ -344,7 +344,7 @@ static int test_mission_project_builds_clean() {
 	TEST_EXPECT(vfs.mount_game(report.build_dir, std::string(), opennova::VfsMountMode::Packed,
 	                           opennova::VfsArchiveDiscovery::RetailTable));
 	for (const char *name : {"ammo.def", "powerup.def", "cmap.mnu", "game.mnu", "weapon.mnu", "vehicle.mnu", "stat.mnu",
-	                         "death.mnu", "mp.mnu", "Arials18.fnt", "Arial22.fnt", "couri20b.fnt", "game.wac", "server.wac",
+	                         "death.mnu", "mp.mnu", "pre.mnu", "Arials18.fnt", "Arial22.fnt", "couri20b.fnt", "game.wac", "server.wac",
 	                         "loadscrn.pcx", "monogram.tga", "boxtile.tga", "border.tga"}) {
 		if (!vfs.has_file(name)) std::fprintf(stderr, "  not in the build: %s\n", name);
 		TEST_EXPECT(vfs.has_file(name));

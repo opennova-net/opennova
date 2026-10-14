@@ -372,8 +372,10 @@ bool music_stream_audio_from_wave(const std::string &wave_name, const std::vecto
 	if (format.channels == 1) made = "the channel on both sides";
 	if (format.rate != uint32_t(SBF_SAMPLE_RATE))
 		made += (made.empty() ? "" : ", ") + std::string("resampled to ") + std::to_string(SBF_SAMPLE_RATE) + " Hz";
+	// Its length to the stream's grain: three places under a second (a 0.050 s sting is no 0.1 s), two under ten.
+	const double length = double(pcm.size() / SBF_CHANNELS) / double(SBF_SAMPLE_RATE);
 	char seconds[32];
-	std::snprintf(seconds, sizeof(seconds), "%.1f s", double(pcm.size() / SBF_CHANNELS) / double(SBF_SAMPLE_RATE));
+	std::snprintf(seconds, sizeof(seconds), length < 1.0 ? "%.3f s" : length < 10.0 ? "%.2f s" : "%.1f s", length);
 	out.words = basename_of(wave_name) + " (" + lwf::wave_format_words(format) + (made.empty() ? "" : ": " + made) + "), " +
 	            seconds;
 	return true;

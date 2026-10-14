@@ -68,6 +68,9 @@ public:
 	// late timed spawn made with no tick run leaves it false, as the owners' serials always read it).
 	bool play_to(particle::EffectScene &scene, int32_t tick, const particle::ParticleViewFrustum &frustum,
 			EffectTimedSpawns &timed, const Make &make, const Jumped &jumped);
+	// Whether a play to `tick` (at least 0) is a jump: not played since what it plays was planned, a restart, a step
+	// back, or more ticks at once than one advance takes (particle::kEffectAdvanceTickLimit).
+	bool jumps_to(int32_t tick) const;
 	// The tick held where no scene plays.
 	void hold(int32_t tick);
 	// The next play a jump.
