@@ -162,7 +162,9 @@ struct ServerConfig {
 	// supervisor runs them. "none" (the default) runs none and the start route
 	// answers that hosting is off; "local" runs each as an opennova-serve child
 	// process on this machine (LocalProcessProvider), for development and the
-	// tests. ONNET_HOSTED_PROVIDER; any other value is "none", with a warning.
+	// tests; "ec2" runs each on an EC2 machine of its own (Ec2Provider, the
+	// settings below). ONNET_HOSTED_PROVIDER; any other value is "none", with a
+	// warning.
 	std::string hosted_provider = "none";
 	// ONNET_HOSTED_CAP: the most hosted servers live at once, across every
 	// account (each account has one at most).
@@ -180,6 +182,31 @@ struct ServerConfig {
 	// none (comma-separated .bms names, the first the starting map). Empty: a
 	// start must name its missions.
 	std::vector<std::string> hosted_missions;
+
+	// The ec2 provider's (hosted/ec2_provider.h), each set by the deploy
+	// toolbox's `app deploy` from the Terraform outputs (DEPLOY.md, "Hosted game
+	// servers"); every one is required for "ec2". The region
+	// (ONNET_HOSTED_EC2_REGION), the launch template
+	// (ONNET_HOSTED_EC2_LAUNCH_TEMPLATE) and the subnet (ONNET_HOSTED_EC2_SUBNET)
+	// a machine launches from; the deployment tag every call is scoped to
+	// (ONNET_HOSTED_DEPLOYMENT); the serve image, pinned
+	// (ONNET_HOSTED_SERVE_IMAGE); this service's PRIVATE address
+	// (ONNET_HOSTED_SERVICE_ADDRESS: where the machines fetch their bootstrap
+	// bundle and the address their admin.cfg admits); the private networks the
+	// bootstrap route answers (ONNET_HOSTED_BOOTSTRAP_CIDRS, comma-separated
+	// IPv4 CIDRs: the VPC's subnet); the AWS CLI (ONNET_HOSTED_AWS_CLI, an
+	// absolute path); and the machine script (ONNET_HOSTED_MACHINE_SCRIPT, the
+	// user-data template, hosted/machine/user_data.sh, which the server image
+	// ships at the default path; a run outside the image names its own).
+	std::string hosted_ec2_region;
+	std::string hosted_ec2_launch_template;
+	std::string hosted_ec2_subnet;
+	std::string hosted_deployment;
+	std::string hosted_serve_image;
+	std::string hosted_service_address;
+	std::vector<std::string> hosted_bootstrap_cidrs;
+	std::string hosted_aws_cli = "/usr/local/bin/aws";
+	std::string hosted_machine_script = "/app/hosted/machine_user_data.sh";
 
 	// Build a config by reading env vars, falling back to the defaults
 	// above for anything not set.

@@ -44,27 +44,13 @@
       </div>
 
       <div v-else-if="servers !== null && servers.length === 0" class="space-y-3 rounded-panel border border-border bg-panel p-8">
-        <h2 class="text-lg font-semibold text-ink">No servers are listed under your account</h2>
+        <h2 class="text-lg font-semibold text-ink">No servers yet</h2>
         <p class="text-sm text-ink-muted">
-          A server is linked to your account when it hosts while logged in to NovaWorld as
-          <span class="font-medium text-ink">{{ user?.username ?? 'you' }}</span>: host a game from the
-          OpenNova game logged in with this account, or run
-          <code class="rounded-control bg-raised px-1 font-mono text-xs text-ink">opennova-serve --credentials &lt;file&gt;</code>
-          with this account's NOVAWORLD_USER and NOVAWORLD_PASS.
+          Games you host while logged in as
+          <span class="font-medium text-ink">{{ user?.username ?? 'you' }}</span> show up here, and so does
+          <RouterLink to="/me/server" class="text-accent hover:text-ink-bright">your hosted server</RouterLink>
+          once it's running.
         </p>
-        <p class="text-sm text-ink-muted">
-          The link appears once the server's mission starts: a game client first sends NovaWorld its
-          host key then, so a server still in its lobby is listed but not yet yours. A server hosted
-          without logging in (or <code class="rounded-control bg-raised px-1 font-mono text-xs text-ink">opennova-serve</code>
-          without <code class="rounded-control bg-raised px-1 font-mono text-xs text-ink">--credentials</code>)
-          is never linked to an account.
-        </p>
-        <p class="text-sm text-ink-muted">
-          An account approved for hosting can also have NovaWorld run a server for it: its listing
-          shows here once it is up. See
-          <RouterLink to="/me/server" class="text-accent hover:text-ink-bright">your hosted server</RouterLink>.
-        </p>
-        <p class="text-sm text-ink-muted">This page refreshes itself every {{ POLL_SECONDS }} seconds.</p>
       </div>
 
       <div v-else-if="servers !== null" class="space-y-8">

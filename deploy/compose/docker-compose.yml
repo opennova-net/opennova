@@ -39,6 +39,21 @@ services:
       # 1 lists no host whose HostKey names no account (unset: listed with no
       # owner); apps/novaworld_server/README.md "Listed servers and owners".
       ONNET_REQUIRE_HOST_KEY: ${ONNET_REQUIRE_HOST_KEY:-}
+      # Hosted game servers (apps/novaworld_server/README.md "Hosted servers"):
+      # the deploy toolbox's `app deploy` sets the provider and every ec2
+      # setting from the Terraform outputs (DEPLOY.md "Hosted game servers");
+      # unset, hosting is off. The cap and the default rotation are the
+      # operator's (app.prod.env).
+      ONNET_HOSTED_PROVIDER: ${ONNET_HOSTED_PROVIDER:-none}
+      ONNET_HOSTED_CAP: ${ONNET_HOSTED_CAP:-}
+      ONNET_HOSTED_MISSIONS: ${ONNET_HOSTED_MISSIONS:-}
+      ONNET_HOSTED_EC2_REGION: ${ONNET_HOSTED_EC2_REGION:-}
+      ONNET_HOSTED_EC2_LAUNCH_TEMPLATE: ${ONNET_HOSTED_EC2_LAUNCH_TEMPLATE:-}
+      ONNET_HOSTED_EC2_SUBNET: ${ONNET_HOSTED_EC2_SUBNET:-}
+      ONNET_HOSTED_DEPLOYMENT: ${ONNET_HOSTED_DEPLOYMENT:-}
+      ONNET_HOSTED_SERVE_IMAGE: ${ONNET_HOSTED_SERVE_IMAGE:-}
+      ONNET_HOSTED_SERVICE_ADDRESS: ${ONNET_HOSTED_SERVICE_ADDRESS:-}
+      ONNET_HOSTED_BOOTSTRAP_CIDRS: ${ONNET_HOSTED_BOOTSTRAP_CIDRS:-}
 
   web:
     image: ${WEB_IMAGE:-opennova-web:local}

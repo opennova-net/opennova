@@ -48,7 +48,10 @@
 // re-host before the health checks count), and a live row whose machine is gone
 // is launched again (a service restart is no crash: it costs no restart). The
 // first half, ending the machines no live row names, runs again every
-// orphan_sweep_interval_ms.
+// orphan_sweep_interval_ms. A provider that cannot list its machines (its
+// list_tagged throws) has nothing ended or launched again on that: at the boot
+// every live row resumes as if its machine ran, until the passes' describes
+// tell, and a sweep that fails leaves its pass to step the servers.
 //
 // The admin link (admin_link.h): with set_admin_links, every pass ends by
 // syncing the links with the servers in running, so a server's link comes up

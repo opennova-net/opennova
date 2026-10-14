@@ -7,21 +7,41 @@
 #
 # Subcommands:
 #   secrets check                 dry-run every op:// reference
-#   infra plan|apply|destroy      terraform (AWS + Cloudflare)
+#   infra plan|apply|destroy      terraform (AWS + Cloudflare); plan and apply pass
+#                                 further terraform args on (-replace=ADDRESS)
 #   infra output|list [args...]   terraform output / state list
 #   aws <args...>                 run the AWS CLI with vault credentials
-#   app deploy [--tag SHA] [--game-tag SHA]
-#                                 pull GHCR images + compose up on the target
+#   app deploy [--tag SHA] [--game-tag SHA] [--serve-tag TAG] [--no-hosting]
+#                                 pull the Terraform state, then GHCR images +
+#                                 compose up on the target;
+#                                 with hosted game servers set up (infra output
+#                                 hosted_enabled), the service gets every
+#                                 ONNET_HOSTED_* ec2 setting from the Terraform
+#                                 outputs and the serve image pinned to the digest
+#                                 --serve-tag (default latest) names now;
+#                                 --no-hosting deploys with hosting off
 #   app status|logs [svc]|restart|down
 #   app sql <statement>           run SQL against the live sqlite DB
-#   app reset-db --yes-drop-database --tag SHA [--game-tag SHA] [--no-backup]
+#   app reset-db --yes-drop-database --tag SHA [--game-tag SHA] [--serve-tag TAG]
+#                [--no-hosting] [--no-backup]
 #                                 delete the sqlite DB, then deploy SHA onto an
 #                                 empty one (a deploy with an edited migration;
 #                                 DEPLOY.md "Resetting the service database").
 #                                 Takes a final backup first unless --no-backup;
 #                                 earlier backups stay in S3
 #   backup now|list               trigger / list the sqlite backups
-#   state push|pull               terraform state <-> 1Password document
+#   state push|pull [--force]     terraform state <-> 1Password document; each
+#                                 checks both sides against the checkout's
+#                                 record of its last sync and refuses to drop
+#                                 a change (or a state of another lineage)
+#                                 unless --force
+#   hosted status [--deployment NAME]
+#                                 this deployment's hosted game server machines
+#   hosted data-snapshot          the hosted servers' game data, once: the Joint
+#                                 Operations folder mounted at /hosted-data
+#                                 (HOSTED_DATA_DIR=<folder> ./deploy/run.sh ...)
+#                                 into a new private encrypted EBS snapshot;
+#                                 prints its id (DEPLOY.md, "Hosted game servers")
 #
 # OP_VAULT (default OpenNova-Deploy) names the vault.
 set -euo pipefail
@@ -42,6 +62,26 @@ die()  { err "$*"; exit 1; }
 require_op() {
   [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] || die "OP_SERVICE_ACCOUNT_TOKEN is not set"
   op whoami >/dev/null 2>&1 || die "1Password auth failed (check OP_SERVICE_ACCOUNT_TOKEN)"
+}
+
+# Whether vault $VAULT holds an item titled $1. Asked by title in the vault's
+# listing, never read off an error's wording; a listing that fails, comes back
+# empty (the deploy vault is never empty: its own items are in it) or is not a
+# JSON array stops the command, so no vault hiccup reads as an absent item.
+vault_has_item() {
+  local title="$1" list rc=0
+  list="$(op item list --vault "$VAULT" --format json)" \
+    || die "listing vault '$VAULT' failed. Refusing to go on with its items unknown (run again once the vault answers)"
+  [ -n "$list" ] \
+    || die "listing vault '$VAULT' came back empty. Refusing to go on with its items unknown (run again once the vault answers)"
+  printf '%s' "$list" \
+    | jq -e --arg t "$title" 'if type == "array" then any(.[]; .title == $t) else error("no array") end' \
+      >/dev/null 2>&1 || rc=$?
+  case "$rc" in
+    0) return 0 ;;
+    1) return 1 ;;
+    *) die "vault '$VAULT' listing unreadable (jq exit $rc)" ;;
+  esac
 }
 
 # Render an op:// template to a tmpfs file (0600). Echoes the path.
@@ -81,12 +121,29 @@ cmd_secrets() {
     check)
       log "checking vault '$VAULT' references (dry run)…"
       local rc=0
-      op inject -f -i "$TF_ENV_TPL"   -o /dev/null >/dev/null \
-        && log "  terraform.env.tpl    OK" || { err "  terraform.env.tpl    FAILED"; rc=1; }
-      op inject -f -i "$APP_ENV_TPL"  -o /dev/null >/dev/null \
-        && log "  app.prod.env.tpl     OK" || { err "  app.prod.env.tpl     FAILED"; rc=1; }
-      op read "op://$VAULT/ssh/private key?ssh-format=openssh" >/dev/null \
-        && log "  ssh private key      OK" || { err "  ssh private key      FAILED"; rc=1; }
+      if op inject -f -i "$TF_ENV_TPL" -o /dev/null >/dev/null; then
+        log "  terraform.env.tpl    OK"
+      else
+        err "  terraform.env.tpl    FAILED"; rc=1
+      fi
+      if op inject -f -i "$APP_ENV_TPL" -o /dev/null >/dev/null; then
+        log "  app.prod.env.tpl     OK"
+      else
+        err "  app.prod.env.tpl     FAILED"; rc=1
+      fi
+      if op read "op://$VAULT/ssh/private key?ssh-format=openssh" >/dev/null; then
+        log "  ssh private key      OK"
+      else
+        err "  ssh private key      FAILED"; rc=1
+      fi
+      # Optional: hosted game servers are off without it (DEPLOY.md, "Hosted game servers").
+      if ! vault_has_item hosted; then
+        log "  hosted data snapshot absent (hosted game servers off)"
+      elif op read "op://$VAULT/hosted/data_snapshot_id" >/dev/null; then
+        log "  hosted data snapshot OK"
+      else
+        err "  hosted data snapshot FAILED"; rc=1
+      fi
       [ "$rc" -eq 0 ] || die "one or more references did not resolve — create the missing vault items (DEPLOY.md §1)"
       log "all references resolved."
       ;;
@@ -94,21 +151,66 @@ cmd_secrets() {
   esac
 }
 
+# The hosted game servers' data snapshot (infra/aws/hosted.tf), from the vault:
+# item `hosted`, field `data_snapshot_id`, as TF_VAR_hosted_data_snapshot_id.
+# No item titled `hosted` in the vault's listing means hosting is off (the
+# variable stays empty, and hosted.tf makes nothing). Any other failure (the
+# listing, or reading an item that is there) stops the run, so a vault hiccup
+# never plans the hosting resources away.
+hosted_snapshot_var() {
+  local value
+  if ! vault_has_item hosted; then
+    export TF_VAR_hosted_data_snapshot_id=""
+    log "hosted game servers: off (no 'hosted' item in vault '$VAULT')"
+    return
+  fi
+  value="$(op read "op://$VAULT/hosted/data_snapshot_id")" \
+    || die "reading op://$VAULT/hosted/data_snapshot_id failed. Refusing to run terraform with hosting unknown (fix the vault access or the item's field, or delete the 'hosted' item to turn hosting off)"
+  export TF_VAR_hosted_data_snapshot_id="$value"
+  log "hosted game servers: data snapshot '${value:-<empty>}' (vault item 'hosted')"
+}
+
+# After `terraform apply|destroy` exited $2: push the state it left (a failed
+# run with no local state has none to push), then exit with terraform's code.
+# A failed run is named before its push, so a push that is then refused (or
+# succeeds) never reads as the run's success.
+tf_push_after() {
+  local action="$1" rc="$2"
+  if [ "$rc" -ne 0 ]; then
+    if [ ! -f "$TF_DIR/terraform.tfstate" ]; then
+      err "terraform $action exited $rc; it left no state to push"
+      exit "$rc"
+    fi
+    err "terraform $action exited $rc; pushing the state it left"
+  fi
+  cmd_state push
+  [ "$rc" -eq 0 ] || exit "$rc"
+}
+
 cmd_infra() {
   require_op
   cmd_state pull
   tf_init
   local action="${1:-plan}"
+  case "$action" in
+    plan|apply|destroy) hosted_snapshot_var ;;
+  esac
   log "terraform $action…"
   # op run injects AWS + Cloudflare + ssh pubkey as env for the terraform run.
+  # plan and apply pass any further arguments on (say a -replace=ADDRESS).
+  # apply and destroy push whatever state terraform leaves, a failed run's too
+  # (it can have changed resources and written a newer serial), then exit with
+  # terraform's code.
+  shift || true
+  local rc=0
   case "$action" in
-    plan)    op run --env-file="$TF_ENV_TPL" -- terraform -chdir="$TF_DIR" plan -input=false ;;
-    apply)   op run --env-file="$TF_ENV_TPL" -- terraform -chdir="$TF_DIR" apply -input=false -auto-approve
-             cmd_state push ;;
-    destroy) op run --env-file="$TF_ENV_TPL" -- terraform -chdir="$TF_DIR" destroy -input=false -auto-approve
-             cmd_state push ;;
-    output)  shift; terraform -chdir="$TF_DIR" output "$@" ;;
-    list)    shift; terraform -chdir="$TF_DIR" state list "$@" ;;
+    plan)    op run --env-file="$TF_ENV_TPL" -- terraform -chdir="$TF_DIR" plan -input=false "$@" ;;
+    apply)   op run --env-file="$TF_ENV_TPL" -- terraform -chdir="$TF_DIR" apply -input=false -auto-approve "$@" || rc=$?
+             tf_push_after "$action" "$rc" ;;
+    destroy) op run --env-file="$TF_ENV_TPL" -- terraform -chdir="$TF_DIR" destroy -input=false -auto-approve || rc=$?
+             tf_push_after "$action" "$rc" ;;
+    output)  terraform -chdir="$TF_DIR" output "$@" ;;
+    list)    terraform -chdir="$TF_DIR" state list "$@" ;;
     *) die "unknown: infra $action (try: plan|apply|destroy|output|list)" ;;
   esac
 }
@@ -154,7 +256,8 @@ SSHCFG
   # and every compose invocation parses it — so resolve it for ALL app actions
   # (deploy/status/logs/...), not just `backup`. From the AWS tf output; the
   # state file is on the mounted disk from `infra apply`.
-  export BACKUP_BUCKET="$(terraform -chdir="$TF_DIR" output -raw backup_bucket_name 2>/dev/null || true)"
+  BACKUP_BUCKET="$(terraform -chdir="$TF_DIR" output -raw backup_bucket_name 2>/dev/null || true)"
+  export BACKUP_BUCKET
   # The prod overlay requires SERVER_IMAGE/WEB_IMAGE/GAME_IMAGE to interpolate for EVERY
   # compose action (status/logs/down parse them too), but only `deploy` sets
   # them from --tag. Default the rest so those actions work; `ps`/`logs` match
@@ -186,6 +289,59 @@ app_images() {
   export SERVER_IMAGE="ghcr.io/${owner}/novaworld-server:${tag}"
   export WEB_IMAGE="ghcr.io/${owner}/novaworld-web:${tag}"
   export GAME_IMAGE="ghcr.io/${owner}/opennova-game:${game_tag}"
+}
+
+# The hosted game servers' settings for the service (apps/novaworld_server/
+# README.md, "Hosted servers"), from the Terraform outputs, so nobody copies an
+# id by hand: while hosted_data_snapshot_id is set (output hosted_enabled),
+# ONNET_HOSTED_PROVIDER=ec2 and every ec2 setting, and the serve image pinned to
+# the digest `serve_tag` names right now; with an explicit false, or with
+# --no-hosting (`hosting` 0), ONNET_HOSTED_PROVIDER=none. A state with no
+# hosted_enabled output at all (one the infra was not applied to since hosted.tf
+# came) is no answer: the deploy stops, never reading it as off. The caller has
+# pulled the state. Exported for compose's interpolation (docker-compose.yml
+# passes them to the server); the shell's values win over the env files'.
+hosted_app_env() {
+  local serve_tag="$1" hosting="$2" enabled owner ref digest
+  if [ "$hosting" -eq 0 ]; then
+    export ONNET_HOSTED_PROVIDER=none
+    log "hosted game servers: off (--no-hosting)"
+    return
+  fi
+  enabled="$(terraform -chdir="$TF_DIR" output -raw hosted_enabled 2>/dev/null)" \
+    || die "no 'hosted_enabled' infra output: run 'infra apply' first (with hosting off it only adds outputs), or deploy with --no-hosting"
+  case "$enabled" in
+    true) ;;
+    false)
+      export ONNET_HOSTED_PROVIDER=none
+      log "hosted game servers: off (no data snapshot in the infra; DEPLOY.md, \"Hosted game servers\")"
+      return ;;
+    *) die "the 'hosted_enabled' infra output reads '$enabled', neither true nor false" ;;
+  esac
+  tf_output() {
+    terraform -chdir="$TF_DIR" output -raw "$1" 2>/dev/null \
+      || die "no '$1' output; run 'infra apply' (hosted_data_snapshot_id is set, its resources are not)"
+  }
+  ONNET_HOSTED_EC2_REGION="$(tf_output region)"
+  ONNET_HOSTED_EC2_LAUNCH_TEMPLATE="$(tf_output hosted_launch_template_id)"
+  ONNET_HOSTED_EC2_SUBNET="$(tf_output hosted_subnet_id)"
+  ONNET_HOSTED_DEPLOYMENT="$(tf_output hosted_deployment)"
+  ONNET_HOSTED_SERVICE_ADDRESS="$(tf_output service_private_ip)"
+  ONNET_HOSTED_BOOTSTRAP_CIDRS="$(tf_output hosted_subnet_cidr)"
+  owner="$(op read "op://$VAULT/ghcr/owner" 2>/dev/null || echo opennova-net)"
+  ref="ghcr.io/${owner}/opennova-serve:${serve_tag}"
+  digest="$(docker buildx imagetools inspect "$ref" --format '{{json .Manifest}}' 2>/dev/null | jq -r '.digest // empty')"
+  case "$digest" in
+    sha256:*) ;;
+    *) die "cannot resolve $ref to a digest (is the opennova-serve package public, and the tag published?)" ;;
+  esac
+  ONNET_HOSTED_SERVE_IMAGE="ghcr.io/${owner}/opennova-serve@${digest}"
+  export ONNET_HOSTED_PROVIDER=ec2 ONNET_HOSTED_EC2_REGION ONNET_HOSTED_EC2_LAUNCH_TEMPLATE \
+    ONNET_HOSTED_EC2_SUBNET ONNET_HOSTED_DEPLOYMENT ONNET_HOSTED_SERVICE_ADDRESS \
+    ONNET_HOSTED_BOOTSTRAP_CIDRS ONNET_HOSTED_SERVE_IMAGE
+  log "hosted game servers: ec2 in $ONNET_HOSTED_EC2_REGION, launch template $ONNET_HOSTED_EC2_LAUNCH_TEMPLATE,"
+  log "  subnet $ONNET_HOSTED_EC2_SUBNET ($ONNET_HOSTED_BOOTSTRAP_CIDRS), deployment $ONNET_HOSTED_DEPLOYMENT,"
+  log "  service $ONNET_HOSTED_SERVICE_ADDRESS, image $ref = $ONNET_HOSTED_SERVE_IMAGE"
 }
 
 check_target() {
@@ -239,20 +395,29 @@ running_server() {
 # the reset cannot be undone without one. --no-backup is for a database known
 # to be worthless or a backup path that is itself broken.
 app_reset_db() {
-  local tag="" game_tag="latest" confirmed=0 backup=1
+  local tag="" game_tag="latest" serve_tag="latest" hosting=1 confirmed=0 backup=1
   while [ $# -gt 0 ]; do
     case "$1" in
       --yes-drop-database) confirmed=1; shift ;;
       --tag)      [ $# -ge 2 ] || die "--tag needs a value"; tag="$2"; shift 2 ;;
       --game-tag) [ $# -ge 2 ] || die "--game-tag needs a value"; game_tag="$2"; shift 2 ;;
+      --serve-tag) [ $# -ge 2 ] || die "--serve-tag needs a value"; serve_tag="$2"; shift 2 ;;
+      --no-hosting) hosting=0; shift ;;
       --no-backup) backup=0; shift ;;
-      *) die "unknown: app reset-db $1 (try: --yes-drop-database --tag SHA [--game-tag SHA] [--no-backup])" ;;
+      *) die "unknown: app reset-db $1 (try: --yes-drop-database --tag SHA [--game-tag SHA] [--serve-tag TAG] [--no-hosting] [--no-backup])" ;;
     esac
   done
   [ -n "$tag" ] || die "app reset-db needs --tag SHA: the server image carrying the edited migration, deployed onto the empty database"
 
+  # The target and the hosted settings come from the Terraform state.
+  cmd_state pull
   app_images "$tag" "$game_tag"
   remote_compose
+  # The deploy below recreates the server: with the same hosted settings as
+  # `app deploy`. (A reset drops every hosted server's row: stop them all from
+  # the admin fleet view first, or the next boot's reconciliation ends their
+  # machines, which no row names.)
+  hosted_app_env "$serve_tag" "$hosting"
   # Read-only lookups for the plan. A compose file that does not parse leaves
   # them blank here, and the pull below fails with compose's own error.
   local project volume running
@@ -335,16 +500,21 @@ cmd_app() {
   local action="${1:-status}"; shift || true
   case "$action" in
     deploy)
-      local tag="latest" game_tag="latest"
+      local tag="latest" game_tag="latest" serve_tag="latest" hosting=1
       while [ $# -gt 0 ]; do
         case "$1" in
           --tag) tag="$2"; shift 2 ;;
           --game-tag) game_tag="$2"; shift 2 ;;
-          *) die "unknown: app deploy $1 (try: --tag SHA, --game-tag SHA)" ;;
+          --serve-tag) [ $# -ge 2 ] || die "--serve-tag needs a value"; serve_tag="$2"; shift 2 ;;
+          --no-hosting) hosting=0; shift ;;
+          *) die "unknown: app deploy $1 (try: --tag SHA, --game-tag SHA, --serve-tag TAG, --no-hosting)" ;;
         esac
       done
+      # The target and the hosted settings come from the Terraform state.
+      cmd_state pull
       app_images "$tag" "$game_tag"
       remote_compose
+      hosted_app_env "$serve_tag" "$hosting"
       log "deploying $SERVER_IMAGE + $WEB_IMAGE + $GAME_IMAGE to $(target_ip)…"
       check_target
       app_pull
@@ -377,31 +547,275 @@ cmd_backup() {
   esac
 }
 
+# A state file's serial (terraform bumps it at every change); 0 when the file
+# has none or is no state at all.
+state_serial() {
+  local serial
+  serial="$(jq -r '.serial // 0' "$1" 2>/dev/null || true)"
+  case "$serial" in
+    ''|*[!0-9]*) echo 0 ;;
+    *) echo "$serial" ;;
+  esac
+}
+
+# A state file's lineage (the id terraform gives a state at its creation and
+# keeps through every serial); empty when the file has none or is no state.
+state_lineage() {
+  jq -r '.lineage // ""' "$1" 2>/dev/null || true
+}
+
+# A state file's digest: the sha256 of its state as jq writes it, keys sorted
+# and terraform_version left out (terraform stamps that at every write, so a
+# no-change apply under a newer terraform holds the same state in other
+# bytes). A file that is no JSON is digested as it is.
+state_digest() {
+  if jq empty "$1" >/dev/null 2>&1; then
+    jq -S 'if type == "object" then del(.terraform_version) else . end' "$1"
+  else
+    cat "$1"
+  fi | sha256sum | cut -d' ' -f1
+}
+
+# The base a checkout recorded at its last sync with the vault (a digest), or
+# nothing when it has none or the file holds no digest.
+state_base() {
+  local base=""
+  [ ! -f "$1" ] || base="$(head -n 1 "$1" 2>/dev/null || true)"
+  case "$base" in
+    *[!0-9a-f]*) base="" ;;
+  esac
+  [ "${#base}" -eq 64 ] || base=""
+  printf '%s' "$base"
+}
+
 cmd_state() {
   require_op
-  # Optional args let other stacks reuse this: state <pull|push> [doc] [tfdir].
+  # Optional args let other stacks reuse this:
+  #   state <pull|push> [--force] [doc] [tfdir]
   # Defaults target the AWS stack (tfstate / infra/aws).
-  local action="${1:-pull}"
-  local doc="${2:-tfstate}"
-  local tfdir="${3:-$TF_DIR}"
+  #
+  # Every pull or push that goes through records, beside the state, the digest
+  # (state_digest) of the vault document this checkout is now in step with:
+  # terraform.tfstate.vault-sha256, the base. Both directions fetch the vault's
+  # document to the tmpfs and compare three ways, so two checkouts that started
+  # from one vault state are told apart however their serials ran. Without
+  # --force:
+  #   when the local state and the vault's have BOTH changed since the base,
+  #     both directions refuse: the two diverged, and either would drop work;
+  #   pull refuses when the local state alone changed (an apply whose push
+  #     never ran): push it;
+  #   push refuses when the vault's alone changed (another operator's push):
+  #     pull it;
+  #   with no base recorded (a checkout from before the base, or one whose
+  #     state came from elsewhere), the serials decide: pull refuses a local
+  #     serial at or above the vault's, push a vault serial at or above the
+  #     local one;
+  #   both refuse two states of different lineages.
+  # A local state and a vault document that hold the same state are left alone.
+  # Only a vault with no document of that title reads as a first run (pull) or
+  # as one to create (push); any other failure stops, so no command goes on
+  # with a state of unknown age and no push makes a second document.
+  local action="${1:-pull}" force=0
+  shift || true
+  if [ "${1:-}" = "--force" ]; then force=1; shift; fi
+  local doc="${1:-tfstate}"
+  local tfdir="${2:-$TF_DIR}"
   local statefile="$tfdir/terraform.tfstate"
+  local basefile="$statefile.vault-sha256"
+  local fetched="$SECRETS_DIR/state-vault.tfstate"
+  local base="" local_digest remote_digest local_changed=0 remote_changed=0
+  local local_serial remote_serial local_lineage remote_lineage
   case "$action" in
-    pull) log "pulling state '$doc' from vault…"
-          mkdir -p "$(dirname "$statefile")"
-          # `op document get --out-file` echoes the path to STDOUT — redirect it
-          # so it can't pollute captured output (e.g. `$(... infra output -raw)`,
-          # which runs a state pull first). All progress goes via log() to stderr.
-          op document get "$doc" --vault "$VAULT" --out-file "$statefile" --force >/dev/null 2>&1 \
-            && log "wrote $statefile" || log "no remote state yet (first run)" ;;
-    push) log "pushing state to vault document '$doc'…"
-          [ -f "$statefile" ] || die "no local state at $statefile"
-          if op document get "$doc" --vault "$VAULT" >/dev/null 2>&1; then
-            op document edit "$doc" "$statefile" --vault "$VAULT"
-          else
-            op document create "$statefile" --title "$doc" --vault "$VAULT"
-          fi
-          log "state pushed." ;;
+    pull|push) ;;
     *) die "unknown: state $action (try: pull|push)" ;;
+  esac
+  log "${action}ing state: vault document '$doc' / $statefile…"
+  [ "$action" = pull ] || [ -f "$statefile" ] || die "no local state at $statefile"
+  if ! vault_has_item "$doc"; then
+    if [ "$action" = pull ]; then
+      log "no remote state yet (first run)"
+    else
+      op document create "$statefile" --title "$doc" --vault "$VAULT" >/dev/null \
+        || die "creating vault document '$doc' failed; nothing was pushed (run state push again once the vault answers)"
+      state_digest "$statefile" > "$basefile"
+      log "state pushed (a new document)."
+    fi
+    return
+  fi
+  # `op document get --out-file` echoes the path to STDOUT; redirect it so it
+  # can't pollute captured output (e.g. `$(... infra output -raw)`, which runs
+  # a state pull first). All progress goes via log() to stderr.
+  rm -f "$fetched"
+  op document get "$doc" --vault "$VAULT" --out-file "$fetched" --force >/dev/null \
+    || { rm -f "$fetched"; die "reading vault document '$doc' failed. Refusing to go on with a state of unknown age (run again once the vault answers)"; }
+  if [ ! -f "$statefile" ]; then
+    # A pull into a checkout with no state: nothing local to lose.
+    mkdir -p "$(dirname "$statefile")"
+    mv -f "$fetched" "$statefile"
+    state_digest "$statefile" > "$basefile"
+    log "wrote $statefile"
+    return
+  fi
+  local_digest="$(state_digest "$statefile")"
+  remote_digest="$(state_digest "$fetched")"
+  if [ "$local_digest" = "$remote_digest" ]; then
+    rm -f "$fetched"
+    printf '%s\n' "$local_digest" > "$basefile"
+    log "$statefile and vault document '$doc' hold the same state; nothing to $action."
+    return
+  fi
+  local refusal=""
+  if [ "$force" -eq 0 ]; then
+    local_serial="$(state_serial "$statefile")"
+    remote_serial="$(state_serial "$fetched")"
+    local_lineage="$(state_lineage "$statefile")"
+    remote_lineage="$(state_lineage "$fetched")"
+    base="$(state_base "$basefile")"
+    if [ -n "$base" ]; then
+      [ "$local_digest" = "$base" ] || local_changed=1
+      [ "$remote_digest" = "$base" ] || remote_changed=1
+    fi
+    if [ -n "$local_lineage" ] && [ -n "$remote_lineage" ] && [ "$local_lineage" != "$remote_lineage" ]; then
+      # Two lineages (both named) that differ: two different states, never two
+      # versions of one. A file that names none is no state; the rules below decide.
+      refusal="$statefile (lineage $local_lineage) and vault document '$doc' (lineage $remote_lineage) are different states, not versions of one. Find out which is this stack's; then state $action --force"
+    elif [ -n "$base" ] && [ "$local_changed" -eq 1 ] && [ "$remote_changed" -eq 1 ]; then
+      refusal="$statefile (serial $local_serial) and vault document '$doc' (serial $remote_serial) have BOTH changed since this checkout last synced: two histories from one state, and either direction would drop the other's work. Merge them by hand (terraform state rm/import here until this checkout holds both, then state push --force), or keep one side whole: state push --force (this checkout's) or state pull --force (the vault's)"
+    elif [ -n "$base" ] && [ "$action" = pull ] && [ "$local_changed" -eq 1 ]; then
+      refusal="$statefile (serial $local_serial) changed since this checkout last synced, and vault document '$doc' did not: an apply whose push never ran? Push it (state push), or discard it (state pull --force)"
+    elif [ -n "$base" ] && [ "$action" = push ] && [ "$remote_changed" -eq 1 ]; then
+      refusal="vault document '$doc' (serial $remote_serial) changed since this checkout last synced (another operator's push), and $statefile did not: pull it (state pull), then run again"
+    elif [ -z "$base" ] && [ "$action" = pull ] && [ "$local_serial" -ge "$remote_serial" ]; then
+      refusal="$statefile (serial $local_serial) is not older than vault document '$doc' (serial $remote_serial), and this checkout has no record of its last sync ($basefile) to tell whose changed. If only this checkout's changed, push it (state push); if both did, merge them by hand and state push --force; to take the vault's, state pull --force"
+    elif [ -z "$base" ] && [ "$action" = push ] && [ "$remote_serial" -ge "$local_serial" ]; then
+      refusal="vault document '$doc' (serial $remote_serial) is not older than $statefile (serial $local_serial), and this checkout has no record of its last sync ($basefile) to tell whose changed. If only the vault's changed, take it (state pull --force); if both did, merge them by hand and state push --force"
+    fi
+  fi
+  if [ -n "$refusal" ]; then
+    rm -f "$fetched"
+    die "$refusal"
+  fi
+  if [ "$action" = pull ]; then
+    mkdir -p "$(dirname "$statefile")"
+    mv -f "$fetched" "$statefile"
+    log "wrote $statefile"
+  else
+    rm -f "$fetched"
+    op document edit "$doc" "$statefile" --vault "$VAULT" >/dev/null \
+      || die "pushing to vault document '$doc' failed; the vault keeps its copy, and $statefile stays ahead of it (run state push again once the vault answers)"
+    log "state pushed."
+  fi
+  state_digest "$statefile" > "$basefile"
+}
+
+# ---------------------------------------------------------------------------
+# Hosted game servers (ADR 0053; DEPLOY.md "Hosted game servers")
+# ---------------------------------------------------------------------------
+
+# Where the Joint Operations folder is mounted into this container for
+# `hosted data-snapshot` (run.sh and run.ps1 mount HOSTED_DATA_DIR there).
+HOSTED_DATA_MOUNT=/hosted-data
+HOSTED_DATA_IMAGE=opennova-hosted-data:local
+
+# The deployment tag the hosted machines carry: --deployment, else the infra's
+# output, else the stack's default name (instance_name's default).
+hosted_deployment() {
+  local given="$1" out
+  if [ -n "$given" ]; then printf '%s' "$given"; return; fi
+  out="$(terraform -chdir="$TF_DIR" output -raw hosted_deployment 2>/dev/null || true)"
+  printf '%s' "${out:-opennova-server}"
+}
+
+# hosted status: every machine this deployment tagged (the service's own
+# listing's scope), with its server, state and addresses.
+hosted_status() {
+  local given="" dep
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --deployment) [ $# -ge 2 ] || die "--deployment needs a value"; given="$2"; shift 2 ;;
+      *) die "unknown: hosted status $1 (try: --deployment NAME)" ;;
+    esac
+  done
+  dep="$(hosted_deployment "$given")"
+  log "hosted machines tagged opennova:deployment=$dep:"
+  # shellcheck disable=SC2016  # a JMESPath literal, not a shell expansion
+  cmd_aws ec2 describe-instances \
+    --filters "Name=tag:opennova:hosted,Values=1" "Name=tag:opennova:deployment,Values=$dep" \
+    --query 'Reservations[].Instances[].{machine:InstanceId,server:Tags[?Key==`opennova:server-id`]|[0].Value,state:State.Name,type:InstanceType,private:PrivateIpAddress,public:PublicIpAddress,launched:LaunchTime}' \
+    --output table
+}
+
+# hosted data-snapshot: the hosted servers' game data, once, as a private
+# encrypted EBS snapshot. The Joint Operations Combined Arms folder is mounted
+# here (HOSTED_DATA_MOUNT) read-only; only the files opennova-serve reads are
+# taken (apps/serve/README.md, "Container image"): the three base archives,
+# Escalation's archive pair and its version.txt (required), and score.ini and
+# _NSTMOUT.TXT when present. They stream as a tar into the helper image
+# (deploy/hosted-data), built on this docker, which makes an ext4 image of them
+# labelled opennova-jo and writes it into a new snapshot through the EBS direct
+# APIs: no machine, no bucket, no SSH. The snapshot is the only AWS resource it
+# makes, and it deletes it on any failure; the image and the staging copy live
+# in the helper's container alone (--rm). Prints the snapshot id.
+hosted_data_snapshot() {
+  local given="" dep dir="$HOSTED_DATA_MOUNT" rel found
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --deployment) [ $# -ge 2 ] || die "--deployment needs a value"; given="$2"; shift 2 ;;
+      *) die "unknown: hosted data-snapshot $1 (try: --deployment NAME)" ;;
+    esac
+  done
+  if [ ! -d "$dir" ] || [ -z "$(ls -A "$dir" 2>/dev/null)" ]; then
+    die "no Joint Operations folder at $dir: run HOSTED_DATA_DIR='<your JO:CA folder>' ./deploy/run.sh hosted data-snapshot (DEPLOY.md, \"Hosted game servers\")"
+  fi
+  local files=()
+  for rel in resource.pff localres.pff language.pff expansion/jox01/jox01.pff \
+             expansion/jox01/jox01L.pff expansion/jox01/version.txt; do
+    found="$(cd "$dir" && find . -type f -ipath "./$rel" | head -n 1)"
+    [ -n "$found" ] || die "$dir has no $rel: mount a Joint Operations Combined Arms install (with expansion/jox01)"
+    files+=("${found#./}")
+  done
+  for rel in score.ini _nstmout.txt; do
+    found="$(cd "$dir" && find . -maxdepth 1 -type f -iname "$rel" | head -n 1)"
+    [ -z "$found" ] || files+=("${found#./}")
+  done
+  dep="$(hosted_deployment "$given")"
+  log "the data snapshot takes, from $dir:"
+  for rel in "${files[@]}"; do log "  $rel"; done
+  log "building the helper image (deploy/hosted-data)…"
+  docker build -q -t "$HOSTED_DATA_IMAGE" /workspace/deploy/hosted-data >/dev/null \
+    || die "the helper image did not build"
+  log "making the snapshot (tagged opennova:deployment=$dep); a GiB takes a few minutes…"
+  # The vault's AWS credentials and region alone, for the helper, in the tmpfs.
+  local all_env="$SECRETS_DIR/terraform.env" aws_env="$SECRETS_DIR/hosted-aws.env" snapshot rc=0
+  inject "$TF_ENV_TPL" "$all_env" >/dev/null
+  grep -E '^AWS_(ACCESS_KEY_ID|SECRET_ACCESS_KEY|REGION|DEFAULT_REGION)=' "$all_env" > "$aws_env" || true
+  chmod 600 "$aws_env"
+  rm -f "$all_env"
+  snapshot="$( (cd "$dir" && tar -cf - "${files[@]}") \
+    | docker run --rm -i --env-file "$aws_env" "$HOSTED_DATA_IMAGE" --deployment "$dep")" || rc=$?
+  rm -f "$aws_env"
+  [ "$rc" -eq 0 ] \
+    || die "the snapshot was not made (the helper deletes one it started; check: ./deploy/run.sh aws ec2 describe-snapshots --owner-ids self --filters Name=tag:opennova:hosted-data,Values=1)"
+  snapshot="$(printf '%s\n' "$snapshot" | tail -n 1)"
+  case "$snapshot" in
+    snap-*) ;;
+    *) die "the helper printed no snapshot id ('$snapshot')" ;;
+  esac
+  log "made $snapshot. Next (DEPLOY.md, \"Hosted game servers\"):"
+  log "  1. in vault '$VAULT', an item 'hosted' with the field data_snapshot_id = $snapshot"
+  log "  2. ./deploy/run.sh infra plan, then infra apply"
+  log "  3. ./deploy/run.sh app deploy --tag <server tag> --serve-tag <serve tag>"
+  printf '%s\n' "$snapshot"
+}
+
+cmd_hosted() {
+  require_op
+  local action="${1:-status}"
+  shift || true
+  case "$action" in
+    status)        hosted_status "$@" ;;
+    data-snapshot) hosted_data_snapshot "$@" ;;
+    *) die "unknown: hosted $action (try: status|data-snapshot)" ;;
   esac
 }
 
@@ -419,6 +833,7 @@ main() {
     app)     cmd_app "$@" ;;
     backup)  cmd_backup "$@" ;;
     state)   cmd_state "$@" ;;
+    hosted)  cmd_hosted "$@" ;;
     help|-h|--help) usage ;;
     *) err "unknown command: $group"; usage; exit 1 ;;
   esac

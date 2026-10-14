@@ -6,12 +6,15 @@ guide is [DEPLOY.md](../DEPLOY.md) at the repo root.
 - `run.sh` / `run.ps1` — wrappers that run the toolbox container.
 - `bin/on-deploy` — the orchestrator: `secrets check`, `infra plan|apply|destroy|output|list`,
   `aws <args...>`, `app deploy|status|logs|restart|down|sql|reset-db`, `backup now|list`,
-  `state push|pull`.
+  `state push|pull [--force]`, `hosted status|data-snapshot` (DEPLOY.md, "Hosted game servers").
 - `Dockerfile`, `docker-compose.deploy.yml` — the toolbox image.
 - `compose/` — the runtime stack: base + dev + prod overlays.
 - `env/` — `*.tpl` carry `op://` references; `app.prod.env` carries the
   committed non-secret prod values.
 - `backup/` — the nightly sqlite backup sidecar.
+- `hosted-data/`: the helper image `hosted data-snapshot` builds on the operator's
+  docker to write the hosted game servers' data, once, into a private encrypted EBS
+  snapshot.
 - `game/` — the web build's image (ADR 0049): the wasm GDExtension, the Godot
   Web export and the nginx the portal routes `game.<domain>` to.
 
