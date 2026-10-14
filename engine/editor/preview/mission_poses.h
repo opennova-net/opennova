@@ -190,6 +190,13 @@ public:
 	bool stand(const MissionScene &scene, const MissionPeopleFloor &floor);
 	// Whether a file the floors' world read moved since (a model's floor edited: stand them again).
 	bool floor_files_moved() const;
+	// The floors' world as stand() last made it, for the people who play in a world of their own (S27,
+	// mission_people.h): its serial (0: none made, no mission or no terrain read; moves each time it is made), a
+	// fresh load of the same world (the same records over the same files and ground: null with none), and each
+	// posed person's body in it by row (the same handles in every load).
+	uint64_t floor_serial() const { return floor_world_ ? floor_serial_ : 0; }
+	std::unique_ptr<MissionWorld> load_floor_world() const;
+	const std::map<NodeId, world::EntityHandle> &floor_bodies() const { return floor_bodies_; }
 	void clear();
 	// A row's pose (null: no organic row of the scene).
 	const MissionPose *pose(NodeId row) const;
@@ -224,6 +231,9 @@ private:
 	std::unique_ptr<MissionWorld> floor_world_;
 	std::map<NodeId, world::EntityHandle> floor_bodies_;
 	uint64_t floor_key_ = 0;
+	uint64_t floor_serial_ = 0; // moves each time the world is made
+	std::unique_ptr<bms::File> floor_mission_; // the records it loaded, and over which ground
+	const MissionGround *floor_ground_ = nullptr;
 	std::unique_ptr<anim::AdmRootMotion> motion_;
 	world::AnimVariantRings rings_;
 	std::unordered_map<std::string, Catalog> catalogs_;
