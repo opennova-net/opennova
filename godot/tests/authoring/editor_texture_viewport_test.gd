@@ -9,8 +9,7 @@ extends GutTest
 ## DDS chain bound); opened as a document, the same device keeps drawing it; another file selected lets
 ## it go; shown as one of its uses, the GPU texture holds what the use's loader makes of it.
 
-const EDITOR_SCENE := "res://editor/editor_root.tscn"
-const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
+const EditorFixture := preload("res://tests/authoring/editor_fixture.gd")
 const PreviewBackgroundChecks := preload("res://tests/authoring/preview_background_checks.gd")
 
 var _dirs: Array[String] = []
@@ -19,25 +18,12 @@ var _seam: RefCounted = null
 
 
 func before_each() -> void:
-	var packed := load(EDITOR_SCENE) as PackedScene
-	assert_not_null(packed, "the editor scene loads (the editor-enabled variant is loaded)")
-	if packed == null:
-		return
-	_app = packed.instantiate()
-	_seam = EditorSeam.new(_app)
-	var settings_dir := OS.get_cache_dir().path_join("opennova editor texture %d" % Time.get_ticks_usec())
-	assert_eq(DirAccess.make_dir_recursive_absolute(settings_dir), OK)
-	_dirs.append(settings_dir)
-	_app.set("settings_path", settings_dir.path_join("editor_settings.json"))
-	add_child_autofree(_app)
+	_seam = await EditorFixture.boot(self, "texture", _dirs)
+	_app = _seam.app if _seam != null else null
 
 
 func after_each() -> void:
-	_app = null
-	for dir in _dirs:
-		TestFs.remove_dir_recursive(dir)
-	_dirs.clear()
-	await get_tree().process_frame
+	await EditorFixture.teardown(self, _dirs)
 
 
 func _write(path: String, bytes: PackedByteArray) -> void:
@@ -109,17 +95,9 @@ func _viewport(path: String) -> Dictionary:
 	return _seam.query("viewport", {"op": "state", "path": path, "kind": "texture"})
 
 
-## The viewport over `path` ready on its device: a frame at a time until its device made its picture.
+## The viewport over `path` once its device built its picture (EditorSeam.await_viewport).
 func _await_ready(path: String) -> Dictionary:
-	var state := _viewport(path)
-	for _frame in 600:
-		if String(state.get("status", "")) == "ready" and bool(state.get("device", {}).get("attached", false)) \
-				and int(state.get("builds", 0)) > 0:
-			break
-		_app.pump()
-		await get_tree().process_frame
-		state = _viewport(path)
-	return state
+	return await _seam.await_viewport({"path": path, "kind": "texture"})
 
 
 ## The device's canvas rect and its shader material.

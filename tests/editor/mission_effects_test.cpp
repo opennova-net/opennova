@@ -70,16 +70,8 @@ std::vector<uint8_t> pump_bytes() {
 	return out;
 }
 
-// A particle `id` emitting `rate` a second for `dur` seconds, each living `age` seconds.
-std::string particle_text(const std::string &id, float dur, float rate, float age) {
-	return "[particledef]\n{\n\tid = " + id + ";\n\temit_dur = " + std::to_string(dur) + ";\n\temit_rate = " +
-			std::to_string(rate) + ";\n\temit_burst = 1;\n\tage = " + std::to_string(age) +
-			";\n\tscale = 0.5;\n\tspeed = 2.0;\n\tspread = 30.0;\n\tgravity = 1.0;\n\tscale_func = grow;\n}\n\n";
-}
-
-std::string effect_text(const std::string &id, const std::string &pdefs) {
-	return "[effectdef]\n{\n\tid = " + id + ";\n\tpdefs = " + pdefs + ";\n}\n\n";
-}
+using editor_test::particle_text;
+using editor_test::effect_text;
 
 // A smoke that emits for a long while, and a fire.
 std::string particles(float smoke_rate = 10.0f) {
@@ -135,13 +127,7 @@ std::vector<uint8_t> fires_mission() {
 	return bytes;
 }
 
-Edit set_of(const NodeAddress &record, const char *field, Value value) {
-	Edit edit;
-	edit.address = record;
-	edit.field = field;
-	edit.value = std::move(value);
-	return edit;
-}
+using editor_test::set_edit;
 
 bool near(float a, float b, float within = 1e-3f) {
 	return std::fabs(a - b) <= within;
@@ -329,7 +315,7 @@ static int test_slots_follow_the_mission_live() {
 	// A move: the pump's groups carried with it (the engine's owner pose), nothing opened or spawned again.
 	particle::EffectPose before, after;
 	TEST_EXPECT(group_pose(effects, items[0].row, before));
-	rig.session.handle(request::edit_record(kMission, set_of(items[0], "x", 25.0)));
+	rig.session.handle(request::edit_record(kMission, set_edit(items[0], "x", 25.0)));
 	rig.devices.sync(rig.session);
 	rig.viewport();
 	TEST_EXPECT(group_pose(effects, items[0].row, after));
@@ -338,7 +324,7 @@ static int test_slots_follow_the_mission_live() {
 	TEST_EXPECT(effects.opens() == 1 && effects.spawns() == spawns);
 
 	// Another item: its slot let go (its groups detached, draining) and the new one's spawned now.
-	rig.session.handle(request::edit_record(kMission, set_of(items[0], "item", int64_t(100707))));
+	rig.session.handle(request::edit_record(kMission, set_edit(items[0], "item", int64_t(100707))));
 	rig.devices.sync(rig.session);
 	rig.viewport();
 	TEST_EXPECT(effects.slot(items[0].row) && effects.slot(items[0].row)->effect == "Effect_Fire");

@@ -100,23 +100,6 @@ void SessionCore::start() {
 	view_.project.recent_projects = settings.recent_projects;
 	read_recent_details();
 	show_installs();
-	// Play's settings are each project's (its local.json): the ones an earlier editor kept in the editor's
-	// settings for every project are said once and dropped, the file written again without them, read by
-	// nothing (pre-1.0: no reader carries them into a project). A project with none of its own plays in the
-	// OpenNova runtime.
-	if (!settings.retired_play.empty()) {
-		std::string held;
-		for (const std::string &each : settings.retired_play) held += (held.empty() ? "" : ", ") + each;
-		note("note: Play's settings are each project's now, kept in its .opennova/local.json. The editor's settings "
-		     "held Play settings an earlier editor kept for every project (" + held + "), which nothing reads: "
-		     "a project plays in the OpenNova runtime until it is set to play in the game install (File > Project "
-		     "settings..., or the Build menu), and saves first before Play unless set not to. The editor's settings "
-		     "are written again without them.");
-		Preferences kept = settings;
-		kept.retired_play.clear();
-		Diagnostic unwritten;
-		if (!preferences_.write(kept, unwritten)) report(unwritten);
-	}
 	view_.project.runtime_setting = settings.runtime_executable;
 	view_.project.import_dependencies = settings.import_dependencies;
 	view_.project.preview_background = settings.preview_background;
@@ -263,9 +246,16 @@ bool SessionCore::cancel_operation(bool asked) {
 	}
 	const std::string noun = operation_kind_row(running->kind()).noun;
 	const bool plan = running->kind() == OperationKind::ImportPlan;
+	const bool finishes = running->finishes_on_cancel();
 	if (!operations_.cancel()) {
 		if (asked) refuse_now(CoreFinding::OperationNotCancellable, "This cannot be cancelled now: wait for " + noun + " to finish.");
 		return false;
+	}
+	// One whose cancel lets it finish (what it made stays: a published build) is finished now, before what asked
+	// the cancel (a close, a quit, another project) goes on; its finish says what came of it.
+	if (finishes) {
+		finish_operation();
+		return true;
 	}
 	// An import's plan cancelled: the dialog plans no more (a plan that takes its place says so again).
 	if (plan && view_.dialogs.import_preview.planning) {
@@ -451,7 +441,6 @@ OperationOutcome SessionCore::absorb_open(OpenOperation &open) {
 	// workspace, a setting's Apply).
 	run_install_ = open.run_install().empty() ? std::string() : absolute_install_path(open.run_install());
 	view_.project.refused.clear();
-	view_.project.build_folder = local_.build_folder;
 	// How it plays here, its own (a project that never said plays in the OpenNova runtime and saves first).
 	view_.project.play_mode = local_.play_mode;
 	view_.project.save_before_play = local_.save_before_play;
@@ -491,6 +480,12 @@ bool SessionCore::close_project() {
 	}
 	problems().clear();
 	if (!view_.project.open) return true;
+	// Past the unsaved-changes prompt's Discard, the documents go before the workspace is remembered, as Quit's
+	// do: the project reopens without them, their edits dropped.
+	if (guard().discarding()) {
+		documents().close_all();
+		documents().update_view();
+	}
 	remember_workspace(); // what it reopens with (the UX round's project lane)
 	const std::string title = view_.project.document->title;
 	const std::shared_ptr<const ProjectDocument> closing = view_.project.document;
@@ -529,7 +524,6 @@ bool SessionCore::close_project() {
 	paths_ = ProjectPaths();
 	local_ = LocalSettings();
 	run_install_.clear();
-	view_.project.build_folder.clear();
 	// Its Play settings go with it: the next project plays as it says.
 	view_.project.play_mode = local_.play_mode;
 	view_.project.save_before_play = local_.save_before_play;
@@ -878,28 +872,6 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 			} else {
 				failures.push_back(error);
 			}
-		}
-	}
-	// The folder Build to folder builds into, kept with the project's local settings (Build > Build to <it>): the
-	// modder's pick, never what a build request's out_dir names (a script's build keeps nothing, L4).
-	if (change.build_folder && !view_.project.open) {
-		failures.push_back(make_finding(CoreFinding::ProjectNone, DiagnosticSeverity::Error,
-		                                "Open a project to keep a folder to build it into."));
-	} else if (change.build_folder && !change.build_folder->empty() &&
-	           io::path_within(path_of(*change.build_folder).lexically_normal(), path_of(paths_.root))) {
-		failures.push_back(make_finding(CoreFinding::BuildOutDirInProject, DiagnosticSeverity::Error,
-		                                "A folder to build into for players lies outside the project: " +
-		                                        *change.build_folder + " is inside it."));
-	} else if (change.build_folder && *change.build_folder != local_.build_folder) {
-		LocalSettings local = local_;
-		local.build_folder = *change.build_folder;
-		Diagnostic error;
-		if (save_local_settings(paths_, local, error)) {
-			local_ = std::move(local);
-			view_.project.build_folder = local_.build_folder;
-			touch(ViewConcern::Preferences);
-		} else {
-			failures.push_back(error);
 		}
 	}
 	// How the project plays and whether Play saves first: the project's own, kept with its local settings on
@@ -1382,8 +1354,16 @@ void SessionCore::quit() {
 		refuse_busy(std::string());
 		return;
 	}
+	// Past the unsaved-changes prompt's Discard, the documents go before the workspace is remembered: the
+	// project reopens without them, their edits dropped (UnsavedGuard::resolve lets a Quit through).
+	if (guard().discarding()) {
+		documents().close_all();
+		documents().update_view();
+	}
 	save_recent_items();
 	remember_workspace(); // what the project reopens with (the UX round's project lane)
+	// A Stop asked for is seen through first: closing the editor lets its game go.
+	play().finish_stop();
 	view_.dialogs.quit_requested = true;
 	touch(ViewConcern::Project);
 }
@@ -1692,7 +1672,7 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 	BuildPlan plan = plan_build(paths_, *view_.project.scan, *view_.project.requirements, gate, build_target(), &base,
 	                            &shipped);
 	plan.rehash = rehash;
-	// The build is this project's: in a folder several projects build into (Build to folder), it reuses, prunes
+	// The build is this project's: in a folder several projects build into (a build request's out_dir), it reuses, prunes
 	// and replaces only its own. Inside the project (its default folder, its cache, its export folder) every
 	// build there is its own.
 	plan.project = view_.project.document->project_id;
@@ -1710,10 +1690,11 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 	std::string cache_error;
 	ensure_project_cache_dir(paths_, cache_error);
 	const uint64_t id = operations_.start(std::make_unique<BuildOperation>(
-	        plan, output_root, std::move(protected_dirs), view_.findings.diagnostics, intent, exported,
+	        plan, output_root, std::move(protected_dirs), view_.findings.diagnostics, platform_.now_ms(), intent, exported,
 	        [this](const ExportIntent &wanted, const BuildReport &built, ExportRequest &request, ExportReport &refused) {
 		        return export_request(wanted, built, request, refused);
-	        }));
+	        },
+	        [this](const PlayIntent &wanted, const BuildReport &built) { return play().copy_fill(wanted, built); }));
 	if (id == 0) return refuse_busy(std::string()); // another operation runs, holding nothing it needs
 	outcome_.operation = id;
 	build_reports_ = panel;

@@ -50,7 +50,6 @@ public:
 	// How many lines' value uses were made (only the lines drawn ask), and how many lines were
 	// matched against the filter (each a value read).
 	size_t lines_used() const { return lines_used_; }
-	size_t lines_matched() const { return lines_matched_; }
 
 private:
 	// What each variable the table draws has its value used as, and the menus' uses of it.
@@ -91,7 +90,6 @@ private:
 	Uses uses_;
 	size_t uses_made_ = 0;
 	size_t lines_used_ = 0;
-	size_t lines_matched_ = 0;
 	FindingsIndex findings_; // the stylesheet's Problems rows, for what the game makes of it
 	ReferencePicker picker_;
 	RecordReveal reveal_;

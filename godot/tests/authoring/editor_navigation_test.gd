@@ -8,8 +8,7 @@ extends GutTest
 ## goes. Headless: no ImGui context draws, so the menu bar's arrows and Alt+Left and Alt+Right are the
 ## editor_ui ctest's (tests/editor_ui/navigation_test.cpp), over the null backend.
 
-const EDITOR_SCENE := "res://editor/editor_root.tscn"
-const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
+const EditorFixture := preload("res://tests/authoring/editor_fixture.gd")
 
 var _dirs: Array[String] = []
 var _app: Node = null
@@ -18,24 +17,12 @@ var _seam: RefCounted = null
 
 
 func before_each() -> void:
-	var packed := load(EDITOR_SCENE) as PackedScene
-	assert_not_null(packed, "the editor scene loads (the editor-enabled variant is loaded)")
-	if packed == null:
-		return
-	_app = packed.instantiate()
-	_seam = EditorSeam.new(_app)
-	var settings_dir := OS.get_cache_dir().path_join("opennova editor navigation %d" % Time.get_ticks_usec())
-	assert_eq(DirAccess.make_dir_recursive_absolute(settings_dir), OK)
-	_dirs.append(settings_dir)
-	_app.set("settings_path", settings_dir.path_join("editor_settings.json"))
-	add_child_autofree(_app)
+	_seam = await EditorFixture.boot(self, "navigation", _dirs)
+	_app = _seam.app if _seam != null else null
 
 
 func after_each() -> void:
-	_app = null
-	for dir in _dirs:
-		TestFs.remove_dir_recursive(dir)
-	_dirs.clear()
+	await EditorFixture.teardown(self, _dirs)
 
 
 # A new project with its required files, main.mnu opened, then a second menu made (and opened): one

@@ -36,8 +36,6 @@ const char *mission_surface_from_token(MissionSurfaceFrom from);
 // What the ground under a point is: nothing (the sky, or no device to say), the terrain, or a placed
 // entity's drawn surface.
 enum class MissionGroundOn : uint8_t { Nothing, Terrain, Record };
-// "nothing", "terrain", "record".
-const char *mission_ground_on_token(MissionGroundOn on);
 
 // A foliage definition the terrain's foliage map selects at a point (DI-29): its slot (0 to 3, the .trn's
 // foliage block order) and the model it places.
@@ -77,8 +75,6 @@ struct MissionGroundFacts {
 // (the tile set table's name, "TSD_SNOW"; "" past them).
 std::string mission_surface_words(int surface);
 const char *mission_surface_name(int surface);
-// The char map legend's colour of a class, "#CCEFF4" (formats/trn/charmap_legend.h; "" past it).
-std::string mission_surface_colour(int surface);
 
 // What the line under the mission's picture says of the ground under the pointer ("" for nothing).
 std::string mission_ground_line(const MissionGroundFacts &facts);

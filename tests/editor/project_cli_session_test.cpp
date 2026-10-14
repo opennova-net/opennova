@@ -304,8 +304,8 @@ static int test_verb_table() {
 		TEST_EXPECT(error.empty() && (args.is_null() || args.is_object()));
 		++queries;
 	}
-	// new-terrain (S20), mv (DI-03), and the chores' rm, cp, mkdir, rename-folder, rmdir and empty-trash (DI-25).
-	TEST_EXPECT(kCliVerbCount == 18 && queries == 9 && requests >= 2 * kCliVerbCount);
+	// new-terrain (S20) among them; the file chores' verbs gone (S26 K3: the request verb carries them).
+	TEST_EXPECT(kCliVerbCount == 11 && queries == 9 && requests >= 2 * kCliVerbCount);
 	TEST_EXPECT(cli_verb_row(CliVerb::Request).answer == CliAnswer::Request &&
 	            cli_verb_row(CliVerb::Query).answer == CliAnswer::NamedQuery);
 	const Ran usage = run(dir.root(), { "--help" });
@@ -429,7 +429,7 @@ static int test_verbs_answer_as_the_session() {
 		TEST_EXPECT(fresh());
 		const Ran ran = run(scratch, { "build", root, "--out", out, "--json" });
 		TEST_EXPECT(ran.code == 0 && same(parsed(ran.out), expected));
-		TEST_EXPECT(!editor::last_good_build_dir(out).empty());
+		TEST_EXPECT(!editor_test::last_good_build_dir(out).empty());
 	}
 
 	// new: the project made and opened, its project section (its id is made anew each time).
@@ -551,7 +551,7 @@ static int test_request_and_query_verbs() {
 	TEST_EXPECT(ran.code == 0 && answer.get("outcome")->get_number("operation", 0) != 0 && ended &&
 	            ended->get_number("id", -1) == answer.get("outcome")->get_number("operation", 0) &&
 	            ended->get_string("kind", "") == "build" && ended->get_string("end", "") == "done");
-	TEST_EXPECT(!editor::last_good_build_dir(out).empty());
+	TEST_EXPECT(!editor_test::last_good_build_dir(out).empty());
 	// out_dir inside the project is refused (its files would be the next build's), the cache and the
 	// export folder aside; a relative one is taken from the project's folder.
 	ran = run(scratch, { "request", root, "{\"kind\": \"build\", \"out_dir\": \"art/out\"}" });
@@ -563,9 +563,9 @@ static int test_request_and_query_verbs() {
 	ran = run(scratch, { "build", root, "--out", root + "/art/out" });
 	TEST_EXPECT(ran.code == 1 && ran.err.find("build.out_dir_in_project") != std::string::npos);
 	ran = run(scratch, { "request", root, "{\"kind\": \"build\", \"out_dir\": \"../beside\"}" });
-	TEST_EXPECT(ran.code == 0 && !editor::last_good_build_dir(dir.file("beside")).empty());
+	TEST_EXPECT(ran.code == 0 && !editor_test::last_good_build_dir(dir.file("beside")).empty());
 	ran = run(scratch, { "request", root, "{\"kind\": \"build\", \"out_dir\": \"build/export/play\"}" });
-	TEST_EXPECT(ran.code == 0 && !editor::last_good_build_dir(root + "/build/export/play").empty());
+	TEST_EXPECT(ran.code == 0 && !editor_test::last_good_build_dir(root + "/build/export/play").empty());
 
 	// An edit, then the save that writes it, in one run; the edit alone writes nothing.
 	const std::string menu = root + "/menus/main.mnu";
@@ -605,7 +605,7 @@ static int test_request_and_query_verbs() {
 	            answer.array[2].get("outcome")->get_bool("done", false) &&
 	            answer.array[2].get("outcome")->get_number("operation", 0) > 0);
 	TEST_EXPECT(opennova::io::read_file_text(menu, after, io_error) && after.find("STARTUP2") == std::string::npos);
-	TEST_EXPECT(!editor::last_good_build_dir(played).empty());
+	TEST_EXPECT(!editor_test::last_good_build_dir(played).empty());
 
 	// Args a query refuses are the session's answer, {error}.
 	Headless headless;
@@ -785,7 +785,7 @@ static int test_retail_expansion_build() {
 	unsigned long same = 0;
 	const size_t at = ran.out.find("expansion jxm: ");
 	TEST_EXPECT(at != std::string::npos && std::sscanf(ran.out.c_str() + at, "expansion jxm: %lu", &same) == 1 && same > 0);
-	const std::string built = editor::last_good_build_dir(root + "/.opennova/build/play");
+	const std::string built = editor_test::last_good_build_dir(root + "/.opennova/build/play");
 	TEST_EXPECT(!built.empty() && fs::is_regular_file(built + "/expansion/jxm/jxm.bin"));
 	const std::string run_dir = dir.file("run");
 	fs::create_directories(run_dir);

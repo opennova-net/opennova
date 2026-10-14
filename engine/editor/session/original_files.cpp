@@ -140,7 +140,6 @@ void OriginalFiles::want(const std::string &install, const std::shared_ptr<const
 void OriginalFiles::start() {
 	run_.reset();
 	folder_ = folder_state();
-	longest_ms_ = 0.0;
 	phase_ = Phase::Mount;
 }
 
@@ -166,9 +165,7 @@ bool OriginalFiles::step(uint64_t bytes) {
 	if (settled()) return true;
 	const auto began = std::chrono::steady_clock::now();
 	const auto spent = [&] {
-		const auto took = std::chrono::steady_clock::now() - began;
-		longest_ms_ = std::max(longest_ms_, std::chrono::duration<double, std::milli>(took).count());
-		if (run_) run_->spent += took;
+		if (run_) run_->spent += std::chrono::steady_clock::now() - began;
 	};
 	switch (phase_) {
 	case Phase::Mount: {

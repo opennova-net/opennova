@@ -86,8 +86,6 @@ protected:
 	                       const std::vector<std::shared_ptr<const Node>> &rows) const override;
 };
 
-bool is_sound_profile_kind(AssetKind kind);
-
 // A slot's keyword and what it is for, in words ("SSLFootGND", "left foot on the ground"); the family
 // heading it stands under ("Footsteps").
 const char *sound_profile_slot_words(int slot);

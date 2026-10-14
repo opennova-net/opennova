@@ -19,13 +19,6 @@ namespace editor_ui_test {
 
 namespace {
 
-std::string right_click(Ui &ui, ImVec2 at) {
-	ui.mouse(at.x, at.y);
-	ui.button(true, ImGuiMouseButton_Right);
-	ui.button(false, ImGuiMouseButton_Right);
-	return logged_frame(ui);
-}
-
 void test_pick_and_row_menu() {
 	MissionRun run("opennova_editor_ui_space_pick");
 	CHECK(run.open(), "the mission open, its 3D view drawn");

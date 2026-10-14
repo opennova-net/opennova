@@ -8,6 +8,7 @@
 #include <cmath>
 #include <iterator>
 
+#include <base/io/fixed.h>
 #include <editor/documents/terrain_planes.h>
 #include <editor/preview/mission_ground_facts.h>
 #include <editor/preview/terrain_patch.h>
@@ -111,9 +112,9 @@ std::vector<uint8_t> near_tiles(const MissionOverlayImage &image, const std::vec
 	if (tiles.empty()) return out;
 	out.assign(size_t(image.width) * size_t(image.height), 0);
 	for (const terrain::SurfaceTileEntry &tile : tiles) {
-		const double x0 = double(tile.x_fixed) / 65536.0 - pad, x1 = double(tile.x_fixed) / 65536.0 + 16.0 + pad;
-		const double south = read == TileSquareRead::Drawn ? double(tile.z_fixed) / 65536.0 - 16.0
-		                                                   : -double(tile.z_fixed) / 65536.0;
+		const double x0 = double(tile.x_fixed) / io::kFp16OneD - pad, x1 = double(tile.x_fixed) / io::kFp16OneD + 16.0 + pad;
+		const double south = read == TileSquareRead::Drawn ? double(tile.z_fixed) / io::kFp16OneD - 16.0
+		                                                   : -double(tile.z_fixed) / io::kFp16OneD;
 		const double y0 = south - pad, y1 = south + 16.0 + pad;
 		const int i0 = std::max(0, int(std::floor((x0 - image.west) / image.texel)) - 1);
 		const int i1 = std::min(image.width - 1, int(std::floor((x1 - image.west) / image.texel)) + 1);
@@ -157,7 +158,7 @@ std::string class_row_words(int surface) {
 void outline_tiles(MissionOverlayImage &image, const MissionGround &ground) {
 	image.deciding = 0;
 	for (const terrain::SurfaceTileEntry &tile : ground.placed_tiles()) {
-		const double x0 = double(tile.x_fixed) / 65536.0, y0 = -double(tile.z_fixed) / 65536.0;
+		const double x0 = double(tile.x_fixed) / io::kFp16OneD, y0 = -double(tile.z_fixed) / io::kFp16OneD;
 		if (ground.terrain_at(x0 + 8.0, y0 + 8.0, 0.0).from != MissionSurfaceFrom::Tile) continue;
 		++image.deciding;
 		const int i0 = int(std::floor((x0 - image.west) / image.texel));

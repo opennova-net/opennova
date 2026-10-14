@@ -11,6 +11,9 @@
 
 namespace opennova::editor {
 
+// A thumbnail's picture as a PNG (the wire's): empty for one with none.
+std::vector<uint8_t> thumbnail_png(const TextureThumbnail &thumbnail);
+
 namespace {
 
 std::string fact_words(const TextureImage &image, const char *key) {

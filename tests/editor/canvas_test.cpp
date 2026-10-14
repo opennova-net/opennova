@@ -76,6 +76,7 @@
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
+#include "editor/menu_test_support.h"
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
@@ -259,11 +260,7 @@ struct NoFiles final : opennova::FileSource {
 	uint64_t stamp(const std::string &) const override { return 0; }
 };
 
-NodeAddress named(const Document &document, const char *name) {
-	NodeAddress address;
-	find_definition(AssetGraph(), document, name, address);
-	return address;
-}
+using menu_test::named;
 
 // A window by name wherever it sits, a part's too.
 NodeAddress walked(const Document &document, const Node &row, const char *name) {
@@ -617,104 +614,14 @@ int test_menu_canvas() {
 	return 0;
 }
 
-// The gestures end when the canvas stops drawing, once each, for the menu they began in: hidden
-// (a frame the canvas does not draw: the window closed, collapsed or its tab hidden), switched
-// to the other kind (the model's canvas draws while the menu's does not), another menu shown,
-// another screen of the same menu shown, the same menu reloaded. Letting go after raises nothing.
+// The gestures end when the menu's canvas stops drawing what they began on, once each, for the
+// menu they began in, and the button held on or let go after raises nothing. The frame bracket and
+// the subjects' compare are the machine's (test_gesture_machine, the nudge's and the model canvas's
+// cases too); these are the canvas's wiring: its end_frame (hidden mid-drag: the window closed,
+// collapsed or its tab hidden) and the subject it draws (another menu shown, the same menu
+// reloaded: another instance at the same path, another screen of it: a selection in the tree or
+// the MCP, an undo), which the drag never plans against.
 int test_menu_gestures_end() {
-	MenuRig rig;
-	TEST_EXPECT(rig.load(kLayoutMenu, "layout.mnu"));
-	if (!rig.frame.current)
-		return 1;
-	const NodeAddress box = named(rig.document, "BOX");
-	rig.select(box);
-	const auto start_drag = [&]() {
-		CanvasInput in = MenuRig::at(200.0f, 150.0f);
-		in.pressed = in.down = true;
-		rig.step(in);
-		in = MenuRig::at(224.0f, 150.0f);
-		in.down = true;
-		rig.step(in);
-		return count_of(rig.out.take(), Request::Kind::Edits) == 1;
-	};
-	const auto let_go = [&]() {
-		CanvasInput in = MenuRig::at(230.0f, 150.0f);
-		rig.step(in);
-		rig.canvas.end_frame(rig.out);
-		return rig.out.take();
-	};
-
-	// Hidden mid-drag: the frame bracket ends it once; drawn again with the button up, nothing.
-	TEST_EXPECT(start_drag());
-	rig.canvas.end_frame(rig.out); // the frame it was drawn in
-	TEST_EXPECT(rig.out.take().empty());
-	rig.canvas.end_frame(rig.out); // a frame it was not drawn in
-	std::vector<Request> requests = rig.out.take();
-	TEST_EXPECT(requests.size() == 1 && ends_once(requests, "layout.mnu"));
-	TEST_EXPECT(let_go().empty());
-
-	// Closed mid-drag and opened again with the button still down: ended once, and the button
-	// down on the canvas again begins nothing.
-	TEST_EXPECT(start_drag());
-	rig.canvas.end_frame(rig.out);
-	rig.canvas.end_frame(rig.out);
-	requests = rig.out.take();
-	TEST_EXPECT(requests.size() == 1 && ends_once(requests, "layout.mnu"));
-	CanvasInput held = MenuRig::at(260.0f, 150.0f);
-	held.down = true;
-	rig.step(held);
-	TEST_EXPECT(rig.out.take().empty() && !rig.canvas.gesture().pressed());
-	TEST_EXPECT(let_go().empty());
-
-	// Switched to the other kind mid-nudge: the model's canvas draws, the menu's does not; the
-	// menu's nudge ends once, the model's canvas (no gesture) raises nothing.
-	Recorder model_out;
-	CanvasGesture model_gesture;
-	rig.step(MenuRig::keys_at(1, 0, true));
-	rig.canvas.end_frame(rig.out);
-	TEST_EXPECT(count_of(rig.out.take(), Request::Kind::Edits) == 1);
-	model_gesture.frame(CanvasSubject{ "models/armory.3di", 7, 0 }, model_out);
-	model_gesture.end_frame(model_out);
-	rig.canvas.end_frame(rig.out);
-	requests = rig.out.take();
-	TEST_EXPECT(
-			requests.size() == 1 && ends_once(requests, "layout.mnu") && model_out.take().empty());
-	rig.canvas.end(rig.out); // the arrow let go
-	TEST_EXPECT(rig.out.take().empty());
-
-	// Another menu shown mid-drag: the drag's end, for the menu it began in.
-	TEST_EXPECT(start_drag());
-	MnuDocument other;
-	Diagnostic error;
-	const std::string bytes = kLayoutMenu;
-	TEST_EXPECT(other.load_bytes(std::vector<uint8_t>(bytes.begin(), bytes.end()), "other.mnu",
-			AssetKind::Menu, "jo", error));
-	MenuCanvasFrame shown = rig.frame;
-	shown.document = &other;
-	shown.screen = other.rows()[0].get();
-	shown.current = false;
-	rig.canvas.follow(shown, rig.out);
-	requests = rig.out.take();
-	TEST_EXPECT(requests.size() == 1 && ends_once(requests, "layout.mnu"));
-
-	// The same menu reloaded mid-drag (another instance at the same path): the drag's end.
-	rig.canvas.follow(rig.frame, rig.out);
-	TEST_EXPECT(start_drag());
-	MnuDocument reloaded;
-	TEST_EXPECT(reloaded.load_bytes(std::vector<uint8_t>(bytes.begin(), bytes.end()), "layout.mnu",
-			AssetKind::Menu, "jo", error));
-	shown.document = &reloaded;
-	shown.screen = reloaded.rows()[0].get();
-	rig.canvas.follow(shown, rig.out);
-	requests = rig.out.take();
-	TEST_EXPECT(requests.size() == 1 && ends_once(requests, "layout.mnu"));
-	TEST_EXPECT(let_go().empty());
-	return 0;
-}
-
-// Another screen of the same menu shown mid-drag (a selection in the tree or the MCP, an undo):
-// the drag begun on the first screen ends, once, for the menu; it never plans against the second.
-int test_menu_screen_switch() {
 	MenuRig rig;
 	const std::string two = std::string(kLayoutMenu) +
 			"<SCREEN>\r\n\t<NAME>SECOND</NAME>\r\n\t<WINDOW type=\"window\" name=\"ALONE\">"
@@ -724,31 +631,65 @@ int test_menu_screen_switch() {
 	if (!rig.frame.current || rig.document.rows().size() != 2)
 		return 1;
 	rig.select(named(rig.document, "BOX"));
-	CanvasInput in = MenuRig::at(200.0f, 150.0f);
-	in.pressed = in.down = true;
-	rig.step(in);
-	in = MenuRig::at(224.0f, 150.0f);
-	in.down = true;
-	rig.step(in);
-	TEST_EXPECT(count_of(rig.out.take(), Request::Kind::Edits) == 1);
-	MenuCanvasFrame second = rig.frame;
-	second.screen = rig.document.rows()[1].get();
-	second.current = false; // the device configures the second screen on the next pump
-	rig.select(NodeAddress(), {});
-	second.windows.clear();
-	second.indexes.clear();
-	second.primary = NodeAddress();
-	second.primary_index = -1;
-	in = MenuRig::at(260.0f, 150.0f);
-	in.down = true;
-	rig.canvas.follow(second, rig.out);
-	rig.canvas.input(second, in, rig.out);
+	const auto start_drag = [&]() {
+		rig.canvas.follow(rig.frame, rig.out);
+		CanvasInput in = MenuRig::at(200.0f, 150.0f);
+		in.pressed = in.down = true;
+		rig.step(in);
+		in = MenuRig::at(224.0f, 150.0f);
+		in.down = true;
+		rig.step(in);
+		return count_of(rig.out.take(), Request::Kind::Edits) == 1;
+	};
+	// A frame of `shown` with the button held on, then one let go.
+	const auto held_then_let_go = [&](const MenuCanvasFrame &shown) {
+		CanvasInput in = MenuRig::at(260.0f, 150.0f);
+		in.down = true;
+		rig.canvas.follow(shown, rig.out);
+		rig.canvas.input(shown, in, rig.out);
+		std::vector<Request> held = rig.out.take();
+		in.down = false;
+		rig.canvas.follow(shown, rig.out);
+		rig.canvas.input(shown, in, rig.out);
+		rig.canvas.end_frame(rig.out);
+		std::vector<Request> let_go = rig.out.take();
+		return held.empty() && let_go.empty() && !rig.canvas.gesture().pressed();
+	};
+
+	// Hidden mid-drag: the frame bracket ends it once; drawn again with the button still down, or
+	// let go, nothing begins.
+	TEST_EXPECT(start_drag());
+	rig.canvas.end_frame(rig.out); // the frame it was drawn in
+	TEST_EXPECT(rig.out.take().empty());
+	rig.canvas.end_frame(rig.out); // a frame it was not drawn in
 	std::vector<Request> requests = rig.out.take();
 	TEST_EXPECT(requests.size() == 1 && ends_once(requests, "layout.mnu"));
-	in.down = false;
-	rig.canvas.follow(second, rig.out);
-	rig.canvas.input(second, in, rig.out);
-	TEST_EXPECT(rig.out.take().empty());
+	TEST_EXPECT(held_then_let_go(rig.frame));
+
+	// Another subject shown mid-drag: the drag's one end, for the menu it began in.
+	const std::vector<uint8_t> bytes(two.begin(), two.end());
+	MnuDocument other, reloaded;
+	Diagnostic error;
+	TEST_EXPECT(other.load_bytes(bytes, "other.mnu", AssetKind::Menu, "jo", error) &&
+			reloaded.load_bytes(bytes, "layout.mnu", AssetKind::Menu, "jo", error));
+	MenuCanvasFrame other_menu = rig.frame, reload = rig.frame, second = rig.frame;
+	other_menu.document = &other;
+	other_menu.screen = other.rows()[0].get();
+	reload.document = &reloaded;
+	reload.screen = reloaded.rows()[0].get();
+	second.screen = rig.document.rows()[1].get();
+	for (MenuCanvasFrame *shown : { &other_menu, &reload, &second }) {
+		shown->current = false; // the device configures what it shows on the next pump
+		shown->windows.clear();
+		shown->indexes.clear();
+		shown->primary = NodeAddress();
+		shown->primary_index = -1;
+		TEST_EXPECT(start_drag());
+		rig.canvas.follow(*shown, rig.out);
+		requests = rig.out.take();
+		TEST_EXPECT(requests.size() == 1 && ends_once(requests, "layout.mnu"));
+		TEST_EXPECT(held_then_let_go(*shown));
+	}
 	return 0;
 }
 
@@ -1584,11 +1525,12 @@ int test_mission_canvas() {
 	return 0;
 }
 
-// The polish's picking after its review (H1): a press takes what the pointer is over. With a device to
-// say, a press on an entity's drawn surface away from its glyph takes it (a drag moves it alone, Alt
-// copies it), and a press on the ground is the marquee, Alt's orbit and a click's clear, as before. With
-// no device to say, a press off a glyph takes nothing (a drag inside a pump's sphere is a marquee, never
-// a move) while a click there selects the pump by its sphere, and the hint offers no drag of it.
+// The polish's picking (S15, "Picking what the pointer is over"): a press takes what the pointer is
+// over. With a device to say, a press on an entity's drawn surface away from its glyph takes it (a
+// drag moves it alone, Alt copies it), and a press on the ground is the marquee, Alt's orbit and a
+// click's clear, as before. With no device to say, a press off a glyph takes nothing (a drag inside
+// a pump's sphere is a marquee, never a move) while a click there selects the pump by its sphere,
+// and the hint offers no drag of it.
 int test_mission_surface_picks() {
 	MissionRig rig;
 	GroundDevice device;
@@ -1988,7 +1930,7 @@ int test_mission_place() {
 	return 0;
 }
 
-// The primary's handles (S14 review m10, m1): a tap on its yaw handle (no travel, no mark under it)
+// The primary's handles (S14): a tap on its yaw handle (no travel, no mark under it)
 // changes nothing, the selection and its handles standing; with the Turn snap set to 90 a drag of the
 // yaw handle round to the other side lands the yaw on a multiple of 90.
 int test_mission_handle_tap_and_turn() {
@@ -2125,7 +2067,7 @@ int test_mission_hint_words() {
 	return 0;
 }
 
-// Over a device that answers a ground (z = 3 + x / 10; S14 review M2): a move of an entity with
+// Over a device that answers a ground (z = 3 + x / 10; S14): a move of an entity with
 // Stick keeps its height over that ground where it goes, the arrows' nudge too, and an area's mark
 // stands on the ground at its middle (not at its z_min), where a click selects it.
 int test_mission_ground_on_canvas() {
@@ -2529,8 +2471,6 @@ int main() {
 	if (test_menu_canvas_held() != 0)
 		return 1;
 	if (test_menu_gestures_end() != 0)
-		return 1;
-	if (test_menu_screen_switch() != 0)
 		return 1;
 	if (test_menu_several_windows() != 0)
 		return 1;

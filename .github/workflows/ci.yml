@@ -462,7 +462,7 @@ jobs:
           esac
           cmake -S godot/src -B "$build_dir" -G Ninja \
             -DGODOTCPP_TARGET="$GODOTCPP_TARGET" -DCMAKE_BUILD_TYPE=Release
-          # Both variants, as on Windows (ADR 0046 d4): a source run such as GUT
+          # Both variants, as on Windows (ADR 0046 d2): a source run such as GUT
           # loads the editor-enabled library through the plain .gdextension row.
           cmake --build "$build_dir" --target opennova opennova_editor_gdext --parallel "$(nproc)"
           test -f "godot/bin/libopennova.linux.$GODOTCPP_TARGET.x86_64.so"
@@ -721,7 +721,7 @@ jobs:
             "-DCMAKE_POLICY_DEFAULT_CMP0141=NEW" `
             "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded"
           if ($LASTEXITCODE -ne 0) { throw "configure $env:GODOTCPP_TARGET failed" }
-          # Both variants of the flavour from the one configure (ADR 0046 d4): the
+          # Both variants of the flavour from the one configure (ADR 0046 d2): the
           # runtime-only libopennova.* and the editor-enabled libopennova_editor.*.
           cmake --build $buildDir --target opennova opennova_editor_gdext
           if ($LASTEXITCODE -ne 0) { throw "build $env:GODOTCPP_TARGET failed" }

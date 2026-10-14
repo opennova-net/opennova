@@ -29,7 +29,6 @@ namespace opennova::editor {
 
 namespace {
 
-constexpr NodeKind k(MissionKind kind) { return node_kind(kind); }
 
 const MissionDocument *mission_of(const Document &document) { return dynamic_cast<const MissionDocument *>(&document); }
 
@@ -93,11 +92,6 @@ const LogicType *type_menu(bool actions, const LogicType *current) {
 	return chosen;
 }
 
-// The planned edits raised as one batch (one undo step), or the refusal told.
-void raise(Workspace &workspace, const Document &document, bool ok, std::vector<Edit> edits) {
-	if (ok && !edits.empty()) window_requests::edits(workspace, document, std::move(edits));
-}
-
 // The events of the mission in a popup's body, each by its sentence, filtered: the one chosen.
 NodeId event_menu(const MissionDocument &mission, const ViewNames &names, NodeId except) {
 	const float em = ImGui::GetFontSize();
@@ -140,7 +134,7 @@ void record_tools(Workspace &workspace, const MissionDocument &mission, const Vi
 			std::vector<Edit> edits;
 			std::string refusal;
 			const bool ok = logic_move_edits(mission, record, to, SIZE_MAX, edits, refusal);
-			raise(workspace, mission, ok, std::move(edits));
+			window_requests::edits_if(workspace, mission, ok, std::move(edits));
 		}
 		ImGui::EndPopup();
 	}
@@ -163,7 +157,7 @@ void event_form(Workspace &workspace, const MissionDocument &mission, NodeId eve
 	                        mission_script_events(view, mission.path())))
 		return;
 	taken.fields = {"flags", "reset_after", "delay"};
-	taken.collections = {k(MissionKind::Trigger), k(MissionKind::Action)};
+	taken.collections = {node_kind(MissionKind::Trigger), node_kind(MissionKind::Action)};
 	ImGui::TextWrapped("%s", card.words.sentence.c_str());
 	ImGui::Spacing();
 	CardContext context{workspace, mission, names.source(), editable, view.documents.selection.primary,
@@ -186,7 +180,7 @@ void record_form(Workspace &workspace, const MissionDocument &mission, const Nod
 		for (const LogicParam &param : form.unread) unread = unread || param.slot == slot;
 		if (!unread) taken.fields.push_back("param" + std::to_string(slot + 1));
 	}
-	taken.collections = {k(MissionKind::Trigger), k(MissionKind::Action)};
+	taken.collections = {node_kind(MissionKind::Trigger), node_kind(MissionKind::Action)};
 	// Its event, in words: a click goes there.
 	ImGui::PushStyleColor(ImGuiCol_Text, kMuted);
 	const std::string event = mission.record_name(form.event) + ": " + form.sentence;
@@ -215,7 +209,7 @@ void record_form(Workspace &workspace, const MissionDocument &mission, const Nod
 			std::vector<Edit> edits;
 			std::string error;
 			const bool ok = logic_retype_edits(mission, record, *type, edits, error);
-			raise(workspace, mission, ok, std::move(edits));
+			window_requests::edits_if(workspace, mission, ok, std::move(edits));
 		}
 		ImGui::EndPopup();
 	}
@@ -278,13 +272,13 @@ bool draw_mission_inspector(Workspace &workspace, const Document &document, cons
 	const MissionDocument *mission = mission_of(document);
 	if (!mission) return false;
 	const bool editable = logic_editable(workspace.view(), document);
-	if (!record.child && record.kind == k(MissionKind::Event)) {
+	if (!record.child && record.kind == node_kind(MissionKind::Event)) {
 		ImGui::PushID("mission_event");
 		event_form(workspace, *mission, record.row, taken, editable);
 		ImGui::PopID();
 		return true;
 	}
-	if (record.child && (record.kind == k(MissionKind::Trigger) || record.kind == k(MissionKind::Action))) {
+	if (record.child && (record.kind == node_kind(MissionKind::Trigger) || record.kind == node_kind(MissionKind::Action))) {
 		ImGui::PushID("mission_record");
 		record_form(workspace, *mission, record, taken, editable);
 		ImGui::PopID();
@@ -334,21 +328,21 @@ void draw_mission_uses(Workspace &workspace, const Document &document, const Nod
 
 bool mission_logic_by_name(const Document &document, const NodeAddress &record) {
 	if (!mission_of(document)) return false;
-	return (!record.child && record.kind == k(MissionKind::Event)) ||
-	       (record.child && (record.kind == k(MissionKind::Trigger) || record.kind == k(MissionKind::Action)));
+	return (!record.child && record.kind == node_kind(MissionKind::Event)) ||
+	       (record.child && (record.kind == node_kind(MissionKind::Trigger) || record.kind == node_kind(MissionKind::Action)));
 }
 
-bool mission_adds_by_menu(NodeKind kind) { return kind == k(MissionKind::Trigger) || kind == k(MissionKind::Action); }
+bool mission_adds_by_menu(NodeKind kind) { return kind == node_kind(MissionKind::Trigger) || kind == node_kind(MissionKind::Action); }
 
 void draw_mission_add_menu(Workspace &workspace, const Document &document, const NodeAddress &owner, NodeKind kind) {
 	const MissionDocument *mission = mission_of(document);
 	if (!mission || !mission_adds_by_menu(kind)) return;
-	const bool actions = kind == k(MissionKind::Action);
+	const bool actions = kind == node_kind(MissionKind::Action);
 	if (const LogicType *type = type_menu(actions, nullptr)) {
 		std::vector<Edit> edits;
 		std::string error;
 		const bool ok = logic_add_edits(*mission, owner.row, *type, SIZE_MAX, edits, error);
-		raise(workspace, *mission, ok, std::move(edits));
+		window_requests::edits_if(workspace, *mission, ok, std::move(edits));
 	}
 }
 
@@ -382,9 +376,9 @@ const LogicType *type_submenu(bool actions) {
 }
 
 void mission_logic_row_items(Workspace &workspace, const MissionDocument &mission, const NodeAddress &record) {
-	const bool event = !record.child && record.kind == k(MissionKind::Event);
-	const bool trigger = record.child && record.kind == k(MissionKind::Trigger);
-	const bool action = record.child && record.kind == k(MissionKind::Action);
+	const bool event = !record.child && record.kind == node_kind(MissionKind::Event);
+	const bool trigger = record.child && record.kind == node_kind(MissionKind::Trigger);
+	const bool action = record.child && record.kind == node_kind(MissionKind::Action);
 	if (!event && !trigger && !action) return;
 	const bool editable = logic_editable(workspace.view(), mission);
 	// An event's Add trigger and Add action, each its types by name (the event selected stays so).

@@ -5,10 +5,13 @@
 #include <cstdio>
 #include <sstream>
 
+#include <base/io/fixed.h>
+#include <base/io/os_path.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/environment_document.h>
 #include <editor/preview/mission_camera.h>
+#include <editor/preview/option_reads.h>
 #include <editor/preview/orbit_canvas.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/session/request_factories.h>
@@ -23,6 +26,12 @@
 
 namespace opennova::editor {
 
+const char *environment_clock_from_token(EnvironmentClockFrom from);
+
+// The options on the wire (the envelope's `options`, a SetViewport's): {time (null: the start), day_seconds,
+// mission, header, rain {percent, seconds}, overcast {percent, seconds}, show {terrain, water}, listen {on}}.
+io::JsonValue environment_options_to_json(const EnvironmentViewportOptions &options);
+
 namespace {
 
 using io::JsonValue;
@@ -34,16 +43,9 @@ constexpr ViewportState kHeadlessSize{ 1024, 768 };
 // A new camera: a person's eye a metre behind the point it orbits, looking a little up at the horizon.
 constexpr float kEyeDistance = 1.0f;
 constexpr float kEyePitch = -0.08f;
-constexpr double kFixed24PerHour = 16777216.0;
-
-std::string base_of(const std::string &path) {
-	std::string name = path;
-	if (const size_t slash = name.find_last_of("/\\"); slash != std::string::npos) name.erase(0, slash + 1);
-	return name;
-}
 
 std::string stem_of(const std::string &path) {
-	std::string name = base_of(path);
+	std::string name = io::utf8_file_name(path);
 	if (const size_t dot = name.find_last_of('.'); dot != std::string::npos) name.erase(dot);
 	return name;
 }
@@ -56,7 +58,7 @@ std::string hex_of(const env::Rgb &rgb) {
 }
 
 double percent_of(int32_t q16) {
-	return double(q16) * 100.0 / 65536.0;
+	return double(q16) * 100.0 / io::kFp16OneD;
 }
 
 JsonValue command_json(const EnvironmentWeatherCommand &command) {
@@ -74,20 +76,16 @@ bool read_command(const JsonValue &json, const char *name, EnvironmentWeatherCom
 	}
 	EnvironmentWeatherCommand command = out;
 	for (const io::JsonMember &member : json.object) {
-		int64_t whole = 0;
 		if (member.key == "percent") {
-			if (!io::json_whole_in(member.value, 0, 100, whole)) {
-				error = what + ".percent is a whole percent from 0 to 100.";
+			if (!read_json_whole(member.value, 0, 100, command.percent, error,
+						what + ".percent is a whole percent from 0 to 100."))
 				return false;
-			}
-			command.percent = int(whole);
 		} else if (member.key == "seconds") {
-			if (!io::json_whole_in(member.value, 0, kEnvironmentCommandSecondsMost, whole)) {
-				error = what + ".seconds is the whole seconds it takes to get there, 0 to " +
-				        std::to_string(kEnvironmentCommandSecondsMost) + ".";
+			if (!read_json_whole(member.value, 0, kEnvironmentCommandSecondsMost, command.seconds,
+						error,
+						what + ".seconds is the whole seconds it takes to get there, 0 to " +
+								std::to_string(kEnvironmentCommandSecondsMost) + "."))
 				return false;
-			}
-			command.seconds = int(whole);
 		} else {
 			error = "Unknown member \"" + member.key + "\" of " + what + " (it takes percent, seconds).";
 			return false;
@@ -121,12 +119,10 @@ bool read_options(const JsonValue &json, const EnvironmentUses &uses, Environmen
 			}
 			options.time = value.number;
 		} else if (key == "day_seconds") {
-			int64_t whole = 0;
-			if (!io::json_whole_in(value, 0, 24 * 60 * 60, whole)) {
-				error = "options.day_seconds is a day's length in seconds, 0 (the game's) to 86400.";
+			if (!read_json_whole(value, 0, 24 * 60 * 60, options.day_seconds, error,
+						"options.day_seconds is a day's length in seconds, 0 (the game's) to "
+						"86400."))
 				return false;
-			}
-			options.day_seconds = int(whole);
 		} else if (key == "mission") {
 			if (!value.is_string()) {
 				error = "options.mission is the path of a mission that runs on the environment (\"\" the first).";
@@ -145,11 +141,10 @@ bool read_options(const JsonValue &json, const EnvironmentUses &uses, Environmen
 			}
 			options.mission = value.string;
 		} else if (key == "header") {
-			if (!value.is_bool()) {
-				error = "options.header is true or false: the mission header's fog and water over the environment.";
+			if (!read_json_bool(value, options.header, error,
+						"options.header is true or false: the mission header's fog and water over "
+						"the environment."))
 				return false;
-			}
-			options.header = value.boolean;
 		} else if (key == "rain") {
 			if (!read_command(value, "rain", options.rain, error)) return false;
 			named_rain = true;
@@ -194,16 +189,6 @@ JsonValue keyframe_colours(const env::TodState &tod, bool night) {
 
 } // namespace
 
-const char *environment_view_status_token(EnvironmentViewStatus status) {
-	switch (status) {
-	case EnvironmentViewStatus::NoProject: return "no_project";
-	case EnvironmentViewStatus::NoEnvironment: return "no_environment";
-	case EnvironmentViewStatus::Unwritable: return "unwritable";
-	case EnvironmentViewStatus::Ready: return "ready";
-	}
-	return "no_project";
-}
-
 const char *environment_clock_from_token(EnvironmentClockFrom from) {
 	switch (from) {
 	case EnvironmentClockFrom::Option: return "option";
@@ -240,25 +225,8 @@ io::JsonValue environment_options_to_json(const EnvironmentViewportOptions &opti
 	return out;
 }
 
-std::string environment_options_change(const EnvironmentViewportOptions &options, const EnvironmentViewportOptions &held) {
-	JsonValue out = environment_options_to_json(options);
-	// A command is issued each time a change names it: only the one that moved.
-	JsonValue taken = JsonValue::make_object();
-	for (io::JsonMember &member : out.object) {
-		if (member.key == "rain" && options.rain == held.rain) continue;
-		if (member.key == "overcast" && options.overcast == held.overcast) continue;
-		taken.set(member.key, std::move(member.value));
-	}
-	return viewport_change(ViewportKind::Environment, "options", std::move(taken));
-}
-
 std::string environment_camera_change(const OrbitCamera &camera) {
-	// What a SetViewport takes: the camera's own members in the mission's terms (mission_camera.h).
-	JsonValue view = mission_camera_to_json(camera);
-	JsonValue taken = JsonValue::make_object();
-	for (const char *member : { "target", "yaw", "pitch", "distance" })
-		if (const JsonValue *value = view.get(member)) taken.set(member, *value);
-	return viewport_change(ViewportKind::Environment, "camera", std::move(taken));
+	return viewport_change(ViewportKind::Environment, "camera", mission_camera_members(camera));
 }
 
 // --- EnvironmentViewport ---------------------------------------------------------------------------
@@ -300,7 +268,7 @@ std::string EnvironmentViewport::message() const {
 std::string EnvironmentViewport::caption() const {
 	if (reason_ != EnvironmentViewStatus::Ready) return std::string();
 	std::string out = " at " + environment_clock_words(hours());
-	if (const EnvironmentMissionUse *use = mission()) out += ", over " + base_of(use->mission);
+	if (const EnvironmentMissionUse *use = mission()) out += ", over " + io::utf8_file_name(use->mission);
 	return out;
 }
 
@@ -311,7 +279,7 @@ const EnvironmentMissionUse *EnvironmentViewport::mission() const {
 }
 
 double EnvironmentViewport::hours() const {
-	return double(weather_.tod_fixed24) / kFixed24PerHour;
+	return double(weather_.tod_fixed24) / double(env::kTodFixed24OneHour);
 }
 
 ViewportAction EnvironmentViewport::stop_(EnvironmentViewStatus reason, const std::string &detail) {
@@ -348,7 +316,7 @@ bool EnvironmentViewport::read_(const SessionView &view, const DocumentBase &doc
 		return false;
 	}
 	const AssetEntry *entry = view.project.scan ? view.project.scan->at_path(path()) : nullptr;
-	file_name_ = entry ? entry->logical_name : base_of(path());
+	file_name_ = entry ? entry->logical_name : io::utf8_file_name(path());
 	// As the drawn mission's load reads it (env::read_mission_env): its terrain's .trn, then overcast.def (the
 	// overcast table, by the runtime's own name), then this file over them.
 	bool overcast_read = false;
@@ -786,7 +754,7 @@ io::JsonValue EnvironmentViewport::body_json(const ViewportInput &) const {
 	clock.set("time", json_string(environment_clock_words(hours())));
 	clock.set("hours", json_number(hours()));
 	clock.set("fixed24", json_number(double(weather_.tod_fixed24)));
-	clock.set("start", json_string(environment_clock_words(double(start_fixed24_) / kFixed24PerHour)));
+	clock.set("start", json_string(environment_clock_words(double(start_fixed24_) / double(env::kTodFixed24OneHour))));
 	clock.set("start_from", json_string(environment_clock_from_token(start_from_)));
 	clock.set("advance_per_tick", json_number(double(advance_)));
 	clock.set("rate_from", json_string(environment_clock_from_token(rate_from_)));
@@ -804,8 +772,8 @@ io::JsonValue EnvironmentViewport::body_json(const ViewportInput &) const {
 	const std::vector<int> times = keyframe_times();
 	tod.set("keyframes", json_number(double(times.size())));
 	if (at.from >= 0) {
-		tod.set("from", json_string(environment_clock_words(double(env::hhmm_to_hours_fp(float(times[size_t(at.from)]))) / 65536.0)));
-		tod.set("to", json_string(environment_clock_words(double(env::hhmm_to_hours_fp(float(times[size_t(at.to)]))) / 65536.0)));
+		tod.set("from", json_string(environment_clock_words(double(env::hhmm_to_hours_fp(float(times[size_t(at.from)]))) / io::kFp16OneD)));
+		tod.set("to", json_string(environment_clock_words(double(env::hhmm_to_hours_fp(float(times[size_t(at.to)]))) / io::kFp16OneD)));
 		tod.set("fraction", json_number(at.fraction));
 		const float time = float(weather_.tod_hhmm());
 		const env::TodState state =
@@ -828,7 +796,7 @@ io::JsonValue EnvironmentViewport::body_json(const ViewportInput &) const {
 	overcast.set("percent", json_number(percent_of(channels.overcast_fp)));
 	overcast.set("target", json_number(percent_of(channels.overcast_target_fp)));
 	weather.set("overcast", std::move(overcast));
-	weather.set("fog", json_number(double(channels.fog_dist_fp) / 65536.0));
+	weather.set("fog", json_number(double(channels.fog_dist_fp) / io::kFp16OneD));
 	out.set("weather", std::move(weather));
 	// What the weather sounds like at the camera while the options listen (S23 C).
 	out.set("listen", options_.listen.on ? listen_.to_json(options_.listen) : JsonValue::make_null());
@@ -841,7 +809,7 @@ io::JsonValue EnvironmentViewport::body_json(const ViewportInput &) const {
 std::vector<ClipSoundFired> EnvironmentViewport::fire_listen_sounds(const AssetScan *scan, audio::SoundSelector &selector,
 		uint64_t &seq) {
 	if (!options_.listen.on || !listen_.open()) return {};
-	std::vector<ClipSoundFired> fired = listen_.fire_sounds(scan, selector, seq, options_.listen.volume);
+	std::vector<ClipSoundFired> fired = listen_.fire_sounds(scan, selector, seq);
 	for (ClipSoundFired &sound : fired) sound.path = path();
 	return fired;
 }
@@ -853,9 +821,9 @@ io::JsonValue EnvironmentViewport::items_json(const ViewportInput &) const {
 	for (size_t i = 0; i < times.size(); ++i) {
 		JsonValue item = JsonValue::make_object();
 		item.set("index", json_number(double(i)));
-		item.set("name", json_string(environment_clock_words(double(env::hhmm_to_hours_fp(float(times[i]))) / 65536.0)));
+		item.set("name", json_string(environment_clock_words(double(env::hhmm_to_hours_fp(float(times[i]))) / io::kFp16OneD)));
 		item.set("kind", json_string("keyframe"));
-		item.set("hours", json_number(double(env::hhmm_to_hours_fp(float(times[i]))) / 65536.0));
+		item.set("hours", json_number(double(env::hhmm_to_hours_fp(float(times[i]))) / io::kFp16OneD));
 		item.set("current", JsonValue::make_bool(int(i) == at.from));
 		out.push(std::move(item));
 	}
@@ -877,15 +845,15 @@ io::JsonValue EnvironmentViewport::notes_json(const ViewportInput &) const {
 		                                              : "No mission runs on it: its sky over no ground (a mission's header "
 		                                                "names its environment).");
 	else if (use->terrain_file.empty() && !use->terrain.empty())
-		note("environment.no_terrain", base_of(use->mission) + " names the terrain " + use->terrain +
+		note("environment.no_terrain", io::utf8_file_name(use->mission) + " names the terrain " + use->terrain +
 		                                       ", which the project does not have: the sky over no ground.");
 	if (use && !options_.header && !environment_overrides(*use).empty())
-		note("environment.header_overrides", base_of(use->mission) +
+		note("environment.header_overrides", io::utf8_file_name(use->mission) +
 		                                             "'s header sets its own fog or water over this environment: "
 		                                             "Mission header shows them.");
 	if (advance_ == 0)
 		note("environment.clock_stands", "The clock stands: " +
-		                                         (use ? base_of(use->mission) + "'s day length is 0"
+		                                         (use ? io::utf8_file_name(use->mission) + "'s day length is 0"
 		                                              : std::string("its day length is 0")) +
 		                                         ", as the game runs it. A day length runs it.");
 	for (const std::string &name : missing_) {

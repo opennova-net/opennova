@@ -121,12 +121,6 @@ std::string install_file_name(const SessionView &view, const std::string &name);
 std::vector<ProblemFix> fixes_for(const Diagnostic &diagnostic, const SessionView &view,
                                   const ProblemFixIndex *index = nullptr);
 
-// A planned edit of the file at `path` as the fix Problems offers (ADR 0046 DI-11): its words, saying
-// Undo takes it back, and an edit_record of its batch, the document opened first; never in bulk. What an
-// EditRecord row's finding offers (Diagnostic::planned), and what a fix planning an edit of another
-// file than its finding's makes of it.
-ProblemFix edit_fix(const std::string &path, const PlannedFix &planned);
-
 // Where a Go to on a name nothing resolves lands (the deep-integration plan's DI-17: a Go to always lands
 // somewhere): a symbol's (a string id, a style variable, a menu screen or window, a weapon, ammo or item, a
 // particle effect, a user point) the file where it belongs, as its fix opens it (the file its scope names,

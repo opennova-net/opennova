@@ -38,16 +38,19 @@ const opennova::editor::ModelViewport &model_of(const opennova::editor::Viewport
 } // namespace
 
 ModelViewportApplier::ModelViewportApplier(SubViewport &viewport) : viewport_(&viewport) {
-	viewport.set_msaa_3d(Viewport::MSAA_4X);
+	// Single-sampled, as the game's own view draws: the particle renderer's passes a clip's fire draws through
+	// bind the view's depth (DI-14's rule: under MSAA every particle went undrawn).
+	viewport.set_msaa_3d(Viewport::MSAA_DISABLED);
 	// The editor's preview background, behind everything the picture draws.
 	backdrop_ = make_preview_backdrop_3d();
 	viewport.add_child(backdrop_);
 	Node3D *root = memnew(Node3D);
 	viewport.add_child(root);
 	root_ = root;
-	// Retail shaders write gamma-domain values and rely on one terminal display decode per
-	// 3D view; the environment with no .env lights like the retail noon.
-	root->add_child(memnew(DisplayDecode));
+	// Retail shaders write gamma-domain values and rely on one terminal display decode per 3D view: the game's
+	// FrameFx's (with the distortion row a clip's class-7 particles draw on); the environment with no .env lights like
+	// the retail noon.
+	frame_effects_ = std::make_unique<PreviewFrameEffects>(*root, viewport, false);
 	environment_ = memnew(MissionEnvironment);
 	root->add_child(environment_);
 	camera_ = memnew(Camera3D);
@@ -266,10 +269,6 @@ void ModelViewportApplier::clear() {
 	applied_team_ = INT32_MIN + 1;
 	release_fire_();
 	fire_files_.reset();
-	if (single_sampled_) {
-		viewport_->set_msaa_3d(Viewport::MSAA_4X);
-		single_sampled_ = false;
-	}
 }
 
 // The CTRL registers the picture reads at the clock (a register let go reads 0 again), and the sections
@@ -338,7 +337,7 @@ void ModelViewportApplier::bind_rig_(const opennova::editor::ViewportModel &view
 
 void ModelViewportApplier::play_clip_(const opennova::editor::ViewportModel &viewport, const opennova::editor::PreviewClock &clock) {
 	const opennova::editor::ModelViewport &model = model_of(viewport);
-	// The clip's own tick (a repeated one-shot's taken again from its start): the portable half's.
+	// The clip's own tick: the portable half's.
 	if (model.skeleton() && !model.clip_key().empty() && data_.is_valid()) {
 		object_->play_body_clip_at(opennova::to_gd(model.clip_key()), int(model.clip_ticks(clock)), model.clip_variant());
 		// The first-person arms pose by the same clip on the gun's rig (DI-13).
@@ -356,10 +355,6 @@ void ModelViewportApplier::apply_fire_(const opennova::editor::ViewportModel &vi
 		effects_->mount(fire_files_);
 		range_->set_resource_root(effects_->root());
 		mounted_ = true;
-	}
-	if (firing != single_sampled_) {
-		viewport_->set_msaa_3d(firing ? Viewport::MSAA_DISABLED : Viewport::MSAA_4X);
-		single_sampled_ = firing;
 	}
 	if (!firing) {
 		if (!effects_) return;
@@ -404,8 +399,10 @@ void ModelViewportApplier::tick(const opennova::editor::ViewportModel &viewport,
 	}
 	// A model with live part animations or a dynamic material stays awake and reads it.
 	clock_->sample(int64_t(clock.ms()), ++frame_);
-	// The clip fire's effects as the viewport stepped them (DI-24).
-	if (mounted_ && effects_->scene()) effects_->render(int64_t(clock.ms()));
+	// The clip fire's effects as the viewport stepped them (DI-24), then the frame's FrameFX.
+	const bool fired = mounted_ && effects_ && effects_->scene();
+	if (fired) effects_->render(int64_t(clock.ms()));
+	frame_effects_->present(fired ? effects_->renderer() : nullptr);
 }
 
 } // namespace godot

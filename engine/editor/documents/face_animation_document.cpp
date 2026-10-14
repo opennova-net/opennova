@@ -374,8 +374,6 @@ const RecordTable &face_animation_table() {
 	return table;
 }
 
-bool is_face_animation_kind(AssetKind kind) { return asset_kind_row(kind).document == DocumentTypeId::FaceAnimation; }
-
 // --- the row -------------------------------------------------------------------------------------
 
 FaceAnimationRow::FaceAnimationRow() { kind = kFace; }
@@ -435,11 +433,6 @@ std::string FaceAnimationDocument::record_title(const NodeAddress &address) cons
 
 bool FaceAnimationDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                                   std::shared_ptr<const FileState> &, std::vector<SourceIssue> &issues, Diagnostic &error) {
-	if (!is_face_animation_kind(kind())) {
-		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not a face animation.",
-		                     path());
-		return false;
-	}
 	auto row = std::make_shared<FaceAnimationRow>();
 	std::string message;
 	if (!grm::parse(bytes.data(), bytes.size(), row->file, message)) {
@@ -593,7 +586,12 @@ constexpr FindingCodeEntry<FaceAnimationFinding> kFindingEntries[] = {
 	// The first eye texture named alone: the game reads the line as naming neither eye [orig: sub_587F20 @ 0x587F20];
 	// it refuses nothing: listed. (The second named alone is face_animation.unserializable.)
 	{ FaceAnimationFinding::EyeTextureAlone, listed_code("face_animation.eye_texture_alone") },
-	{ FaceAnimationFinding::Unserializable, { "face_animation.unserializable", FindingFix::None, nullptr, true } },
+	// The second eye texture named alone: the writer cannot write the line so (the game reads on): its Save refused.
+	{ FaceAnimationFinding::Unserializable, unwritable_code("face_animation.unserializable") },
+	// A triangle naming a vertex the face lacks: the game reads the corner at vertex_base + 44 * index, past the
+	// vertices, and draws a triangle of what it finds there [orig: Render_ScarDebugOverlay @ 0x589301..0x58931D, from
+	// Render_ScarSlot @ 0x5802A4]; no fault witnessed, and the writer writes any index: listed.
+	{ FaceAnimationFinding::VertexRange, listed_code("face_animation.vertex_range") },
 	{ FaceAnimationFinding::GestureUnplayed, listed_code("face_animation.gesture_unplayed") },
 	{ FaceAnimationFinding::GestureRepeated, listed_code("face_animation.gesture_repeated") },
 	{ FaceAnimationFinding::ParameterUnmatched, listed_code("face_animation.parameter_unmatched") },
@@ -655,12 +653,12 @@ std::vector<Diagnostic> validate_face_animation_file(const DocumentBase &documen
 		for (int corner = 0; corner < 3; ++corner) {
 			const int32_t index = file.triangles[t][size_t(corner)];
 			if (index >= 0 && size_t(index) < file.vertices.size()) continue;
-			add(child(kTriangleList, t, kTriangle), DiagnosticSeverity::Error, FaceAnimationFinding::Unserializable,
+			add(child(kTriangleList, t, kTriangle), DiagnosticSeverity::Warning, FaceAnimationFinding::VertexRange,
 			    kCornerIds[corner],
 			    "Triangle " + std::to_string(t) + " uses vertex " + std::to_string(index) + ", which the face has none of (" +
 			            std::to_string(file.vertices.size()) +
-			            " vertices): the game draws it over memory past them [orig: Render_ScarDebugOverlay @ "
-			            "0x589301..0x58931D], so the face is not saved until it names one of them.");
+			            " vertices): the game reads that corner from memory outside them and draws a triangle of what "
+			            "it finds there [orig: Render_ScarDebugOverlay @ 0x589301..0x58931D].");
 		}
 	std::unordered_map<std::string, size_t> expressions;
 	std::unordered_map<std::string, bool> groups;

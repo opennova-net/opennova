@@ -3,13 +3,17 @@
 // edited region alone, lands the bytes and the state a whole bake of the edited map makes: an edit inside one
 // leaf, on a 64 edge, at a four-leaf corner, across the map's wrap, along a locked quadrant's seam, at leaf
 // (0, 0) (whose tile is the root's too), across the map's vertical wrap, along its bottom row, several at once, and
-// two region bakes in a row. A cancel stops a whole bake, making nothing, and one never set changes no byte. One
+// two region bakes in a row. A cancel stops a whole bake, making nothing, and one never set changes no byte; one set
+// while the walk runs stops it at its next node. One
 // thread or many make the same tiles; a cancel stops a region bake with the state as it was; a
 // state not made, one made without the draw-back, a map of the wrong size, a changed rect not inside the map and
 // ground the whole bake refuses are refused in words; a .cpt not the bake's is refused by the .cpt landing.
 #include <formats/cpt/cpt_io.h>
+#include <formats/cpt/trngen/mesh_simp.h>
+#include <formats/cpt/trngen/quadtree_node.h>
 #include <formats/cpt/trngen/terrain_bake.h>
 #include <formats/cpt/trngen/terrain_bake_state.h>
+#include <formats/cpt/trngen/terrain_mesh.h>
 #include <formats/cpt/trngen/terrain_region_bake.h>
 
 #include <algorithm>
@@ -17,6 +21,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -274,11 +279,47 @@ void test_rough_ground(const Baked &baked) {
 	       "ground the whole bake refuses is refused by the region bake: " + error);
 }
 
+// A cancel set while the walk runs (an editor's close as its seed bakes): the walk the whole bake runs
+// (process_quadtree) stops at the next node it would start (make_nodes' check between nodes), "cancelled", the
+// nodes made so far kept and none after. The cancel is set as the leaves' level lands (a node count on the walk's
+// node_made), so the next level's first node is where it stops: its 256 leaves filed, no branch made.
+void test_walk_cancelled_partway() {
+	const std::vector<uint16_t> depth = ground();
+	for (const unsigned threads : {1u, 4u}) {
+		BaseMeshSet base;
+		std::string error;
+		expect(generate_base_terrain_meshes(base, error), "the base meshes: " + error);
+		std::unique_ptr<QuadtreeNode> root = build_quadtree(1024, 64);
+		TileFiles files;
+		std::atomic<bool> stop{false};
+		int made = 0;
+		int made_after = 0;
+		QuadtreeContext ctx;
+		ctx.tile_size = 1024;
+		ctx.min_tile_size = 64;
+		ctx.depth_buffer = depth.data();
+		ctx.base = &base;
+		ctx.files = &files;
+		ctx.cancel = &stop;
+		ctx.node_made = [&](const QuadtreeNode &) {
+			if (stop.load()) ++made_after;
+			if (++made == 256) stop.store(true);
+		};
+		expect(!process_quadtree(root.get(), ctx, threads, error) && error == "cancelled",
+		       "a cancel set partway stops the walk: " + error);
+		expect(made == 256 && made_after == 0 && files.size() == 256,
+		       "the walk stops at its next node, the leaves made and no branch (threads " + std::to_string(threads) +
+		           ", made " + std::to_string(made) + ", files " + std::to_string(files.size()) + ")");
+		MeshSimp_FreeAll();
+	}
+}
+
 } // namespace
 
 int main() {
 	test_regions();
 	test_locks();
+	test_walk_cancelled_partway();
 	if (failures) return 1;
 	std::printf("OK: region bakes land the whole bake's bytes and state\n");
 	return 0;

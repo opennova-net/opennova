@@ -14,16 +14,6 @@
 
 namespace opennova::editor {
 
-namespace {
-
-const DocumentBase *open_at(const SessionView &view, const std::string &path) {
-	for (const auto &document : view.documents.open)
-		if (document && document->path() == path) return document.get();
-	return nullptr;
-}
-
-} // namespace
-
 ViewportView::ViewportView(ViewportKind kind) : kind_(kind) {}
 
 ViewportView::~ViewportView() = default;
@@ -51,7 +41,7 @@ void ViewportView::draw(Workspace &workspace, const std::string &path) {
 	if (!half_) half_ = model->make_canvas();
 	// The context carries the device from the first (a toolbar's planner, the canvas's frame: a
 	// mission's ground, its area anchors and its stick read it).
-	ViewportContext context{ ViewportInput{ view, view.documents.viewports->clock(), open_at(view, path),
+	ViewportContext context{ ViewportInput{ view, view.documents.viewports->clock(), view.documents.open_at(path),
 									 ChangeClass::None },
 		model->size().width, model->size().height, snap, device };
 	draw_ready(workspace, *model, context);

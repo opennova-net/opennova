@@ -34,7 +34,16 @@ constexpr FindingCodeRow from_render_check(const char *token) {
 }
 
 constexpr FindingCodeEntry<MenuFinding> kFindingEntries[] = {
-	{ MenuFinding::InvalidInput, { "menu.invalid_input", FindingFix::None, nullptr, true } },
+	// What retail crashes or hangs on (docs/mnu/menu-re.md "Crash and hang cases"): the reader notes it fatal.
+	{ MenuFinding::InvalidInput,
+	  game_stops_code("menu.invalid_input",
+	                  "the game crashes or hangs reading it: a SCREEN action with no FILE copies a null name [orig: "
+	                  "PFF_FindEntry @ 0x7685f3], a table's MIN_ITEM_HEIGHT of 0 divides by zero [orig: "
+	                  "CTableWnd_RecalcLayout @ 0x63f26b], an empty value a consumer compares reaches the CRT's invalid "
+	                  "parameter handler, which ends the game, none registered [orig: the wcstok of no token compared, "
+	                  "CUIButtonWidget_ParseXMLAttributes @ 0x657d88 -> CRT_wcsicmp @ 0x77087f -> _invalid_parameter @ "
+	                  "0x76dfef; CRT_init_pointers @ 0x76e65b], a SCREEN with no NAME copies a null name [orig: @ "
+	                  "0x639791]") },
 	// Kept on save with the file's look (master's text layout, D-MNU-22), as a catalog's is: no Rewrite drops it.
 	{ MenuFinding::IgnoredInput, { "menu.ignored_input" } },
 	{ MenuFinding::Unserializable, { "menu.unserializable", FindingFix::None, nullptr, true } },
@@ -373,9 +382,16 @@ bool is_menu_kind(AssetKind kind) {
 	return asset_kind_row(kind).document == DocumentTypeId::Menu;
 }
 
+namespace {
+
+// A string id's scope: the "menu" section of the table its window reads (menu::window_text_rsrc; "" =
+// none, so the scope matches no symbol and the game shows the id) [orig: CUIStringTable_LookupString @
+// 0x6527c0].
 std::string menu_text_scope(const std::string &table) {
 	return strutil::to_upper(basename_of(table)) + "/" + menu::kMenuTextSection;
 }
+
+} // namespace
 
 std::string menu_screen_scope(const std::string &menu_file) {
 	return strutil::to_upper(basename_of(menu_file));
@@ -719,10 +735,6 @@ std::string MnuDocument::copy(const std::vector<NodeAddress> &records) const {
 
 bool MnuDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                         std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues, Diagnostic &error) {
-	if (!is_menu_kind(kind())) {
-		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not a menu.", path());
-		return false;
-	}
 	mnu::Document document;
 	std::string message;
 	std::vector<mnu::ParseNote> notes;

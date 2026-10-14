@@ -44,13 +44,14 @@ constexpr FindingCodeEntry<CatalogFinding> kFindingEntries[] = {
 	{ CatalogFinding::ReservedName, listed_code("catalog.reserved_name", FindingFix::ItemId) },
 	{ CatalogFinding::FirstRow, listed_code("catalog.first_row", FindingFix::FallbackRow) },
 	{ CatalogFinding::ReservedRefused, listed_code("catalog.reserved_refused") },
-	// Input the game's reader stops at, or corrupts the record over (DefCatalogDocument's game_stops): it gates.
-	{ CatalogFinding::ReaderStops,
-	  game_stops_code("catalog.reader_stops",
-	                  "its reader stops at a block opened inside an open one, reading nothing past it (\"weapon didn't "
-	                  "have an end\" [orig: WeaponDefs_ParseLineCallback @ 0x5436ad..0x5436d2]; the ammo reader's "
-	                  "\"definition missing end\" [orig: AmmoDef_LoadAll @ 0x40b0b0]), and a fifth sights row lands on "
-	                  "the record's row count [orig: WeaponDefs_ParseLineCallback, the count bump @ 0x544b11..0x544b20]") },
+	// Input the game's reader stops at, or writes a record's row count over (DefCatalogDocument's game_stops): its
+	// reader stops at a block opened inside an open one, reading nothing past it ("weapon didn't have an end"
+	// [orig: WeaponDefs_ParseLineCallback @ 0x5436ad..0x5436d2]; the ammo reader's "definition missing end" [orig:
+	// AmmoDef_LoadAll @ 0x40b0b0]), and a fifth sights row lands on the record's row count [orig:
+	// WeaponDefs_ParseLineCallback, the count bump @ 0x544b11..0x544b20]. The game runs on with what it read: listed
+	// (the maintainer's S26 ruling), the model holding none of it, so its Save is refused and a closed file packs as
+	// stored.
+	{ CatalogFinding::ReaderStops, unwritable_code("catalog.reader_stops") },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(CatalogFinding::kCount),
 		"every CatalogFinding has exactly one row");

@@ -54,12 +54,6 @@ const AssetEntry *entry_at(const SessionView &view, const std::string &path) {
 	return nullptr;
 }
 
-const DocumentBase *open_document(const SessionView &view, const std::string &path) {
-	for (const auto &document : view.documents.open)
-		if (document->path() == path) return document.get();
-	return nullptr;
-}
-
 // What the tree and each file's counts read of the view: the files and the findings (and which
 // documents are open).
 RevisionKey tree_key(const SessionView &view) {
@@ -669,7 +663,7 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 	ImGui::PushID(entry.relative_path.c_str());
 	ImGui::TableNextRow();
 	ImGui::TableNextColumn();
-	const DocumentBase *open = open_document(view, entry.relative_path);
+	const DocumentBase *open = view.documents.open_at(entry.relative_path);
 	const bool dirty = open && open->unsaved();
 	const auto found = counts_.find(entry.relative_path);
 	const Counts counts = found != counts_.end() ? found->second : Counts();

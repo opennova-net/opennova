@@ -10,8 +10,7 @@ extends GutTest
 ## view effects ride the overlay (the goggles' mask up for night vision, the damage vignette for a
 ## hit); an edit of the layout's text configures the HUD again.
 
-const EDITOR_SCENE := "res://editor/editor_root.tscn"
-const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
+const EditorFixture := preload("res://tests/authoring/editor_fixture.gd")
 const PreviewBackgroundChecks := preload("res://tests/authoring/preview_background_checks.gd")
 const LAYOUT := "defs/hudpos.def"
 
@@ -21,25 +20,12 @@ var _seam: RefCounted = null
 
 
 func before_each() -> void:
-	var packed := load(EDITOR_SCENE) as PackedScene
-	assert_not_null(packed, "the editor scene loads (the editor-enabled variant is loaded)")
-	if packed == null:
-		return
-	_app = packed.instantiate()
-	_seam = EditorSeam.new(_app)
-	var settings_dir := OS.get_cache_dir().path_join("opennova editor hud %d" % Time.get_ticks_usec())
-	assert_eq(DirAccess.make_dir_recursive_absolute(settings_dir), OK)
-	_dirs.append(settings_dir)
-	_app.set("settings_path", settings_dir.path_join("editor_settings.json"))
-	add_child_autofree(_app)
+	_seam = await EditorFixture.boot(self, "hud", _dirs)
+	_app = _seam.app if _seam != null else null
 
 
 func after_each() -> void:
-	_app = null
-	for dir in _dirs:
-		TestFs.remove_dir_recursive(dir)
-	_dirs.clear()
-	await get_tree().process_frame
+	await EditorFixture.teardown(self, _dirs)
 
 
 func _write(path: String, bytes: PackedByteArray) -> void:
@@ -104,17 +90,11 @@ func _viewport() -> Dictionary:
 	return _seam.query("viewport", {"op": "state", "path": LAYOUT, "kind": "hud"})
 
 
-## The viewport ready on its device, its elements reported: a frame at a time until they are.
+## The viewport ready on its device, its elements reported (EditorSeam.await_viewport).
 func _await_ready() -> Dictionary:
-	var state := _viewport()
-	for _frame in 600:
-		if String(state.get("status", "")) == "ready" and bool(state.get("device", {}).get("attached", false)) \
-				and not (state.get("items", []) as Array).is_empty():
-			break
-		_app.pump()
-		await get_tree().process_frame
-		state = _viewport()
-	return state
+	var reported := func(state: Dictionary) -> bool:
+		return not (state.get("items", []) as Array).is_empty()
+	return await _seam.await_viewport({"path": LAYOUT, "kind": "hud"}, 0, reported)
 
 
 func _overlay() -> HudOverlay:
@@ -272,7 +252,8 @@ func test_the_handles_write_its_lines_and_the_picture_follows() -> void:
 	assert_false(health.is_empty())
 	if not health.is_empty():
 		assert_eq(int(health["rect"][0]), (45 * 1600 + 512) / 1024, "drawn where its line now puts it")
-		assert_eq(String(health["lines"][0]["text"]), "HUDHEALTH 45,701,197,711", "its line rewritten in place")
+		assert_eq(String(health["lines"][0]["text"]), "HUDHEALTH\t45,701,197,711",
+				"its line made again from the model, as the writer writes it")
 	# Its bottom right corner 30 units further right: the bar wider, its left edge where it was.
 	assert_true(_seam.done({"kind": "edit_in_viewport", "path": LAYOUT,
 			"command": {"name": "resize", "item": "health", "handle": "bottom_right", "by": [30, 0]}}))
@@ -323,7 +304,7 @@ func test_the_preview_background_draws_behind_the_hud() -> void:
 ## S23 C: the sights and the Tab board. A scoped rifle with a rangefinder and an elevation readout, its sights up
 ## with the aim on a wall 300 metres away: the game's SIGHTS card up with its one row, the scoped view's ring over
 ## it, the scope readouts drawn at hudpos.def's HUDSCOPE places from gametext's templates; the binoculars put them
-## down. The Tab board held up for a team game over stand-in players draws as the game's board.
+## down. The Tab board held up for a team game draws as the game's board (no rows: a preview has no session).
 func test_the_sights_and_the_board_draw() -> void:
 	if _app == null:
 		return
@@ -408,14 +389,14 @@ end
 	if cards.size() == 1:
 		assert_false(bool(cards[0].call("is_card_up")), "no card under the binoculars")
 	assert_true(_item(state, "scope_details").is_empty(), "no readouts under the binoculars")
-	# The Tab board over six stand-in players of a team game.
+	# The Tab board of a team game.
 	assert_true(_seam.done({"kind": "set_viewport", "path": LAYOUT,
 			"viewport": {"kind": "hud", "options": {"view": "normal", "sights": false, "board": true,
-					"game_type": "TDM", "players": 6}}}))
+					"game_type": "TDM"}}}))
 	await _pump_frames(3)
 	state = _viewport()
 	assert_false(_item(state, "scoreboard").is_empty(), "the Tab board drew")
-	assert_eq(int(state.get("body", {}).get("board", {}).get("rows", 0)), 6)
+	assert_eq(int(state.get("body", {}).get("board", {}).get("rows", -1)), 0)
 	assert_true(_seam.done({"kind": "set_viewport", "path": LAYOUT,
 			"viewport": {"kind": "hud", "options": {"board": false}}}))
 	await _pump_frames(3)

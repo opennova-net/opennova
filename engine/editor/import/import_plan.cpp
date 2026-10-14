@@ -314,7 +314,7 @@ public:
 	bool done() const { return phase_ == Phase::Done; }
 	size_t files_known() const { return known_; }
 	// The files followed: a menu queued again after a stylesheet came is done already, so the count
-	// never falls (review F13).
+	// never falls.
 	size_t files_done() const { return files_ - std::min(files_, queue_.size() - again_queued_); }
 	ImportPlan take() { return std::move(plan_); }
 
@@ -480,7 +480,8 @@ private:
 				              output.name + ".";
 			place(row);
 			// A file of a name the project holds is left as it is unless the import is asked to replace
-			// it (review F2): marked, and not taken by default, and said whether it differs.
+			// it (S19, "The import a modder reads"): marked, and not taken by default, and said
+			// whether it differs.
 			if (const AssetEntry *own = scan_.find(output.name)) {
 				row.held = true;
 				row.selected = false;
@@ -749,7 +750,7 @@ private:
 						if (!definitions || !defines(*definitions, edge.kind, name, *scope)) continue;
 						// A file of the name the project holds, its own copy, lacks it (the graph found
 						// it nowhere): the import keeps that file, so the place's copy is not brought and
-						// the name stays undefined where the game reads it (review F6).
+						// the name stays undefined where the game reads it (S14 R4: `shadowed`).
 						if (scan_.find(candidate)) {
 							count_into(plan_.shadowed, edge.kind, from->file_kind(candidate), use.file);
 							return;

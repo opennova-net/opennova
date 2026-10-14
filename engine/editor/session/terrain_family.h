@@ -59,6 +59,9 @@ struct TerrainFamily {
 	TerrainFamilyFile &plane(TerrainPlane p) { return planes[static_cast<size_t>(p)]; }
 };
 
+// The key a terrain set names each plane's image by (S20's terrain_import keys; the blend map's is the round's).
+const char *terrain_set_key(TerrainPlane plane);
+
 // The family of `document` (a mission or a terrain) in the session's view; false with `out.error` for a document
 // that is neither, or whose terrain does not resolve.
 bool resolve_terrain_family(const SessionView &view, const DocumentBase &document, TerrainFamily &out);

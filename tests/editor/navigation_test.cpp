@@ -392,12 +392,7 @@ int test_session_panes() {
 	return 0;
 }
 
-JsonValue parsed(const std::string &text) {
-	JsonValue out;
-	std::string error;
-	opennova::io::json_parse(text, out, error);
-	return out;
-}
+using editor_test::parsed;
 
 // The lines of a page a Go to marked.
 std::vector<std::string> marked_lines(const FileCard &page) {

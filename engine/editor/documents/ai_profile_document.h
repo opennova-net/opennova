@@ -54,8 +54,6 @@ protected:
 	                                std::string &error) override;
 };
 
-bool is_ai_profile_kind(AssetKind kind);
-
 // The profile type's validator (DocumentType::validate_file): the lines the reader reads nothing of (listed), and a
 // profile of no type (the game reads none of its keys).
 std::vector<Diagnostic> validate_ai_profile_file(const DocumentBase &document);

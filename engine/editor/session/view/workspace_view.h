@@ -108,7 +108,8 @@ struct WorkspaceView {
 
 	// File > Project settings... (ADR 0046 S11d): whether it is open, and what its fields hold until Apply
 	// (one apply_project_settings naming every one): the project's name and features, its expansion (S16), how
-	// it plays here (its play_mode: the OpenNova runtime, the game install, strictly or not), and this
+	// it plays here (its play_mode: the OpenNova runtime or Strict Play in the game install, and whether Play
+	// saves first, save_before_play: Play's settings live here alone, S26 K6), and this
 	// computer's game install and the runtime Play runs ("" the one packaged beside the editor). Opening it
 	// fills the fields with the settings in effect; its project closing closes it.
 	struct Settings {
@@ -123,6 +124,7 @@ struct WorkspaceView {
 		std::string game_install;
 		std::string runtime;
 		PlayMode play_mode = PlayMode::Runtime;
+		bool save_before_play = true;
 	};
 	Settings settings;
 

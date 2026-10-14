@@ -19,11 +19,9 @@
 #include <formats/mission/mission_mis.h>
 #include <formats/trn/trn_io.h>
 
-#include <chrono>
 #include <cstdio>
 #include <memory>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include "common/file_io.h"
@@ -75,31 +73,7 @@ std::vector<double> heights_of(ProjectSession &session, const std::string &path)
 	return out;
 }
 
-// Polls until the heights at `path` have no region due and a bake state, at most `seconds`.
 bool has(const std::string &text, const char *part) { return text.find(part) != std::string::npos; }
-
-bool settled(ProjectSession &session, const std::string &path, double seconds) {
-	const auto start = std::chrono::steady_clock::now();
-	while (std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() < seconds) {
-		session.poll();
-		if (const auto *heights = dynamic_cast<const TerrainHeightsDocument *>(open_at(session, path)))
-			if (heights->heights().unbaked.empty() && heights->heights().bake) return true;
-		std::this_thread::sleep_for(std::chrono::milliseconds(20));
-	}
-	return false;
-}
-
-// Polls until the project's references are read (the graph the follow finds the missions by).
-bool read_through(ProjectSession &session, double seconds) {
-	const auto start = std::chrono::steady_clock::now();
-	while (std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() < seconds) {
-		session.poll();
-		const SessionView &v = session.view();
-		if (v.findings.graph && v.activity.validation.read && !v.activity.validation.files_unread) return true;
-		std::this_thread::sleep_for(std::chrono::milliseconds(10));
-	}
-	return false;
-}
 
 // The change of the ground under (x, y), 16.16, from `before` to `after`, as the original editor samples it over Tmap.
 int32_t change_at(const TrnConfig &trn, int32_t scale, const std::vector<uint16_t> &before,
@@ -128,7 +102,10 @@ int test_follow() {
 	TEST_EXPECT(editor_test::write_bytes(root + "/missions/away.bms", mission_at({{300.0f, -300.0f}})));
 	editor_test::set_missions(session, true);
 	editor_test::handle_to_end(session, request::rescan());
-	TEST_EXPECT(read_through(session, 60.0));
+	// The project's references read (the graph the follow finds the missions by): the operations and the validation
+	// they left due run to their end.
+	session.run_operations();
+	TEST_EXPECT(v.findings.graph && v.activity.validation.read && !v.activity.validation.files_unread);
 	const AssetEntry *open_entry = v.project.scan->find("open.bms");
 	const AssetEntry *closed_entry = v.project.scan->find("closed.bms");
 	const AssetEntry *away_entry = v.project.scan->find("away.bms");
@@ -174,7 +151,7 @@ int test_follow() {
 	ask.end = true;
 	session.handle(request::terrain_stroke(m, ask));
 	TEST_EXPECT(session.outcome().done());
-	TEST_EXPECT(settled(session, cpt, 180.0));
+	TEST_EXPECT(editor_test::heights_settled(session, cpt));
 
 	// The ground before and after, as the original editor reads it.
 	CptFile shipped;
@@ -243,7 +220,7 @@ int test_follow() {
 	elsewhere.gesture = 7272;
 	session.handle(request::terrain_stroke(m, elsewhere));
 	TEST_EXPECT(session.outcome().done());
-	TEST_EXPECT(settled(session, cpt, 180.0));
+	TEST_EXPECT(editor_test::heights_settled(session, cpt));
 	TEST_EXPECT(heights_of(session, m) == open_before);
 	session.handle(request::redo(m));
 	TEST_EXPECT(session.outcome().stepped.empty() && heights_of(session, m) == open_before);
@@ -257,14 +234,14 @@ int test_follow() {
 	under.gesture = 7373;
 	session.handle(request::terrain_stroke(m, under));
 	TEST_EXPECT(session.outcome().done());
-	TEST_EXPECT(settled(session, cpt, 180.0));
+	TEST_EXPECT(editor_test::heights_settled(session, cpt));
 	const std::vector<double> closed_raised = heights_of(session, closed);
 	TEST_EXPECT(closed_raised.size() == 1 && closed_before.size() == 1 && closed_raised[0] > closed_before[0]);
 	TerrainStrokeAsk later = elsewhere;
 	later.gesture = 7474;
 	session.handle(request::terrain_stroke(m, later));
 	TEST_EXPECT(session.outcome().done());
-	TEST_EXPECT(settled(session, cpt, 180.0));
+	TEST_EXPECT(editor_test::heights_settled(session, cpt));
 	session.handle(request::undo(closed));
 	TEST_EXPECT(heights_of(session, closed) == closed_before);
 	TEST_EXPECT(has(v.activity.status, "Tmap.cpt was edited since and keeps its later edits"));

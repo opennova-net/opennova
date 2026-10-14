@@ -60,6 +60,7 @@
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
 #include "common/png_test_support.h"
+#include "editor/mission_test_support.h"
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
@@ -70,28 +71,10 @@ namespace {
 
 constexpr NodeKind k(MissionKind kind) { return node_kind(kind); }
 
-std::vector<uint8_t> fixture_bytes() {
-	return test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/bms/synth_logic.bms");
-}
-
-std::unique_ptr<Document> open(const std::vector<uint8_t> &bytes, const char *name = "synth_logic.bms") {
-	const DocumentType *type = document_type_for(AssetKind::Mission);
-	if (!type) return nullptr;
-	std::unique_ptr<Document> document = records_of(type->make());
-	Diagnostic error;
-	if (!document || !document->load_bytes(bytes, name, AssetKind::Mission, "jo", error)) {
-		std::fprintf(stderr, "%s does not load: %s\n", name, error.message.c_str());
-		return nullptr;
-	}
-	return document;
-}
-
-const MissionDocument &as_mission(const Document &document) { return dynamic_cast<const MissionDocument &>(document); }
-
-NodeAddress row_at(const Document &document, MissionKind kind, size_t index) {
-	const std::vector<const Node *> rows = as_mission(document).rows_of(kind);
-	return index < rows.size() ? NodeAddress{rows[index]->id, rows[index]->kind, 0} : NodeAddress();
-}
+using mission_test::fixture_bytes;
+using mission_test::open;
+using mission_test::as_mission;
+using mission_test::row_at;
 
 std::string bytes_of(const Document &document) { return document.serialize().text; }
 
@@ -128,12 +111,7 @@ size_t count_symbols(const Extracted &extracted, ReferenceKind kind) {
 	return n;
 }
 
-// The first child of `kind` the row holds.
-NodeAddress first_child(const Document &document, const NodeAddress &row, MissionKind kind) {
-	for (const Document::Collection &collection : document.collections_of(row))
-		if (collection.spec.kind == k(kind) && !collection.ids.empty()) return {row.row, k(kind), collection.ids[0]};
-	return NodeAddress();
-}
+using mission_test::first_child;
 
 int test_rows() {
 	const std::vector<uint8_t> bytes = fixture_bytes();
@@ -268,7 +246,7 @@ int test_references() {
 	TEST_EXPECT(sidecar(ReferenceKind::TilePlacement, "synth_logic.til", "", false, "tiles"));
 	TEST_EXPECT(sidecar(ReferenceKind::DialogBank, "synth_logic.dbf", "", true, "dialog"));
 	TEST_EXPECT(sidecar(ReferenceKind::SoundBank, "synth_logic.lwf", "synth_logic.pwf", false, "dialog_sounds"));
-	// The dialog's sounds read only beside its .dbf (review F5); no other row needs one.
+	// The dialog's sounds read only beside its .dbf (S14 R4); no other row needs one.
 	for (const GraphEdge &e : extracted.edges)
 		TEST_EXPECT(e.needs == (e.field == "dialog_sounds" && e.record.empty() ? "synth_logic.dbf" : ""));
 	TEST_EXPECT(count_edges(extracted, ReferenceKind::DialogBank) == 1);
@@ -1495,7 +1473,7 @@ int test_rename_companions() {
 }
 
 // A mission named like a game sound bank (menu.bms beside the menus' menu.lwf), with no dialog bank:
-// the game reads <stem>.lwf only beside <stem>.dbf (review F5), so the mission's dialog sounds name no
+// the game reads <stem>.lwf only beside <stem>.dbf (S14 R4), so the mission's dialog sounds name no
 // file: the bank is not the mission's (no use of it, no companion of a rename); with a .dbf it is.
 int test_mission_named_like_a_bank() {
 	editor_test::TempProjectDir dir("opennova_mission_named_like_a_bank");
@@ -1547,7 +1525,7 @@ int test_mission_named_like_a_bank() {
 }
 
 // A mission named with an inner dot finds its files by its name to the first dot, as the game's
-// readers cut it (review F8): op.v2.bms's script is op.wac, which no note calls unused, a rename takes
+// readers cut it (S14 R4): op.v2.bms's script is op.wac, which no note calls unused, a rename takes
 // it, and Play mission from op.wac starts op.v2.bms.
 int test_mission_first_dot() {
 	editor_test::TempProjectDir dir("opennova_mission_first_dot");

@@ -5,6 +5,7 @@
 #include <iterator>
 #include <sstream>
 
+#include <editor/preview/option_reads.h>
 #include <runtime/renderer/texture_dxt.h>
 #include <formats/til/til.h>
 #include <formats/trn/trn_io.h>
@@ -13,16 +14,29 @@
 
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/texture_document.h>
-#include <editor/import/texture_import.h>
 #include <editor/preview/texture_canvas.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 #include <editor/session/request_factories.h>
-#include <editor/session/texture_import_state.h>
 #include <editor/session/texture_use_index.h>
 #include <editor/session/view/session_view.h>
 
 namespace opennova::editor {
+
+// The texels a use shows of `image`: its loader's transform, then what its role's consumer makes of them
+// (texture_role_texels: a blend map's weights, a particle graphic as its atlas page holds it), then its cut-out (alpha 255 where the
+// material's test keeps a texel, 0 where it discards it), or for a model row whose alpha the game draws as no
+// transparency (a specular brightness, unused) every texel opaque; `image` itself where the use changes nothing.
+std::shared_ptr<const TextureImage> texture_as_used(const std::shared_ptr<const TextureImage> &image,
+                                                    const TextureShownUse &use);
+
+// What a viewport shows of the use `use`, the texture's use at `index`.
+TextureShownUse texture_shown_use(const TextureUse &use, int index);
+
+bool texture_channels_from_token(const std::string &token, TextureChannels &out);
+
+// "rgb", "red", "green", "blue", "alpha", "rgba", "normals", and the token's channels (false for none).
+const char *texture_channels_token(TextureChannels channels);
 
 namespace {
 
@@ -53,8 +67,6 @@ JsonValue options_to_json(const TextureViewportOptions &options) {
 	out.set("as_used", json_number(options.as_used));
 	out.set("detail", json_number(options.detail));
 	out.set("light", json_number(options.light));
-	out.set("compare", json_string(texture_compare_view_token(options.compare)));
-	out.set("split", json_number(options.split));
 	return out;
 }
 
@@ -67,10 +79,9 @@ bool read_options(const JsonValue &json, TextureViewportOptions &held, std::stri
 	TextureViewportOptions options = held;
 	for (const io::JsonMember &member : json.object) {
 		if (member.key == "channels") {
-			if (!member.value.is_string() || !texture_channels_from_token(member.value.string, options.channels)) {
-				error = "options.channels is one of rgb, red, green, blue, alpha, rgba, normals.";
+			if (!read_json_token(member.value, texture_channels_from_token, options.channels, error,
+						"options.channels is one of rgb, red, green, blue, alpha, rgba, normals."))
 				return false;
-			}
 		} else if (member.key == "level") {
 			if (!member.value.is_number() || member.value.number < 0 || member.value.number > 31 ||
 			    std::floor(member.value.number) != member.value.number) {
@@ -98,19 +109,8 @@ bool read_options(const JsonValue &json, TextureViewportOptions &held, std::stri
 				return false;
 			}
 			options.light = float(std::fmod(std::fmod(member.value.number, 360.0) + 360.0, 360.0));
-		} else if (member.key == "compare") {
-			if (!member.value.is_string() || !texture_compare_view_from_token(member.value.string, options.compare)) {
-				error = "options.compare is one of off, split, dds, difference.";
-				return false;
-			}
-		} else if (member.key == "split") {
-			if (!member.value.is_number() || !(member.value.number >= 0.0 && member.value.number <= 1.0)) {
-				error = "options.split is a fraction of the texture's width, from 0 to 1.";
-				return false;
-			}
-			options.split = float(member.value.number);
 		} else {
-			error = "Unknown options member \"" + member.key + "\" (it takes channels, level, as_used, detail, light, compare, split).";
+			error = "Unknown options member \"" + member.key + "\" (it takes channels, level, as_used, detail, light).";
 			return false;
 		}
 	}
@@ -129,11 +129,8 @@ bool read_camera(const JsonValue &json, TextureCamera &held, std::string &error)
 	bool fit_given = false;
 	for (const io::JsonMember &member : json.object) {
 		if (member.key == "fit") {
-			if (!member.value.is_bool()) {
-				error = "camera.fit is true or false.";
+			if (!read_json_bool(member.value, camera.fit, error, "camera.fit is true or false."))
 				return false;
-			}
-			camera.fit = member.value.boolean;
 			fit_given = true;
 		} else if (member.key == "scale" || member.key == "x" || member.key == "y") {
 			if (!member.value.is_number() || !std::isfinite(member.value.number)) {
@@ -253,16 +250,6 @@ std::shared_ptr<const TextureImage> texture_as_used(const std::shared_ptr<const 
 	return out;
 }
 
-const char *texture_view_status_token(TextureViewStatus status) {
-	switch (status) {
-	case TextureViewStatus::NoTexture: return "no_texture";
-	case TextureViewStatus::Unloadable: return "unloadable";
-	case TextureViewStatus::Undecoded: return "undecoded";
-	case TextureViewStatus::Ready: return "ready";
-	}
-	return "no_texture";
-}
-
 const char *texture_channels_token(TextureChannels channels) {
 	const size_t index = static_cast<size_t>(channels);
 	return index < std::size(kChannelTokens) ? kChannelTokens[index] : "rgba";
@@ -374,62 +361,7 @@ std::string TextureViewport::texel_words(uint32_t tx, uint32_t ty, const uint8_t
 		const size_t at = size_t(ty) * image_->width() + tx;
 		if (at < image_->indices.size()) out += " (palette entry " + std::to_string(image_->indices[at]) + ")";
 	}
-	// A compare's texel: the reference's and the compressed texture's, each.
-	if (compression_ && compression_->made && options_.compare != TextureCompareView::Off) {
-		const size_t level = shown_level();
-		uint8_t before[4] = {}, after[4] = {};
-		const auto words = [](const uint8_t v[4]) {
-			return "R " + std::to_string(v[0]) + " G " + std::to_string(v[1]) + " B " + std::to_string(v[2]) + " A " +
-			       std::to_string(v[3]);
-		};
-		if (texture_texel(*compression_->reference, level, tx, ty, before) &&
-		    texture_texel(*compression_->compressed, level, tx, ty, after))
-			out += "; before: " + words(before) + "; " + compression_->format + ": " + words(after);
-	}
 	return out;
-}
-
-const TextureLevelError *TextureViewport::shown_error() const {
-	if (!compression_ || !compression_->made || options_.compare == TextureCompareView::Off) return nullptr;
-	const size_t level = shown_level();
-	return level < compression_->errors.size() ? &compression_->errors[level] : nullptr;
-}
-
-std::shared_ptr<const TextureCompression> TextureViewport::compare(const ViewportInput &input,
-                                                                   const std::shared_ptr<const TextureImage> &image) {
-	// A .dds is weighed against its import's source as that import prepares it, read again when the source moves.
-	TextureImportState state;
-	std::string error;
-	const bool dds = image->reader == TextureReader::Dds;
-	const bool imported = dds && input.view.project.open && texture_import_state(input.view, path(), state, error);
-	const AssetEntry *source = imported && input.view.project.scan ? input.view.project.scan->at_path(state.source) : nullptr;
-	if (kept_ && compared_ == image && (!source || (source->size_bytes == compared_source_size_ &&
-	                                                source->modified_ticks == compared_source_modified_)))
-		return kept_;
-	compared_ = image;
-	compared_source_size_ = source ? source->size_bytes : 0;
-	compared_source_modified_ = source ? source->modified_ticks : 0;
-	auto made = std::make_shared<TextureCompression>();
-	if (!dds) {
-		*made = compress_texture(*image);
-	} else if (!source) {
-		made->why = "A .dds holds its compressed texels alone, with no image of them to compare with; a .dds an import "
-		            "makes compares against its import's source.";
-	} else {
-		std::vector<uint8_t> bytes;
-		renderer::ImageSource decoded;
-		std::string field;
-		if (!io::read_file_bytes(join_path(input.view.project.root, state.source), bytes, error) ||
-		    !renderer::decode_image_source(state.source, bytes, decoded, error) ||
-		    !renderer::image_import_texels(decoded.image, renderer::image_import_settings(state.sidecar.options), error, field))
-			made->why = "Its import's source " + state.source + " does not read as its import reads it: " + error;
-		else
-			*made = compare_dds(image, decoded.image, state.source + ", its import's source");
-		if (const AssetEntry *file = input.view.project.scan ? input.view.project.scan->at_path(path()) : nullptr)
-			made->file_bytes = file->size_bytes;
-	}
-	kept_ = made;
-	return kept_;
 }
 
 ViewportAction TextureViewport::follow_(const ViewportInput &input, PreviewClock &) {
@@ -521,14 +453,6 @@ ViewportAction TextureViewport::follow_(const ViewportInput &input, PreviewClock
 	if (read_anew && input.document) ++reads_;
 	source_ = image;
 	use_ = use;
-	// The compare the options ask for (S18): made of the file's texels, again only when they or a .dds's import
-	// source move; its picture in place of the texture's while it is made.
-	std::shared_ptr<const TextureCompression> compression;
-	if (options_.compare != TextureCompareView::Off && image->loads && image->decoded) compression = compare(input, image);
-	if (compression != compression_ || options_.compare != shown_compare_ || options_.split != shown_split_) anew = true;
-	compression_ = compression;
-	shown_compare_ = options_.compare;
-	shown_split_ = options_.split;
 	if (anew) {
 		made_options_ = options_;
 		const std::shared_ptr<const TextureImage> used = use.index >= 0 && image->decoded ? texture_as_used(image, use) : image;
@@ -536,9 +460,6 @@ ViewportAction TextureViewport::follow_(const ViewportInput &input, PreviewClock
 		role_view_ = use.index >= 0 && used ? texture_role_view(*image, *used, use.role, use.blend_mode, terrain_.get())
 		                                    : TextureRoleView();
 		image_ = picture(used, budget);
-		if (compression_ && compression_->made)
-			if (std::shared_ptr<const TextureImage> compared = texture_compare_picture(*compression_, options_.compare, options_.split))
-				image_ = compared;
 	}
 	from_file_ = from_file;
 	if (!image->loads) {
@@ -711,7 +632,6 @@ io::JsonValue TextureViewport::body_json(const ViewportInput &) const {
 	}
 	out.set("detail", std::move(detail));
 	out.set("picture_levels", json_number(image_ ? double(image_->levels.size()) : 0.0));
-	out.set("compare", compression_ ? texture_compression_json(*compression_) : JsonValue::make_null());
 	out.set("level_shown", json_number(double(shown_level())));
 	const ViewportState at = size();
 	const TexturePlacement placed = placement(at.width, at.height);

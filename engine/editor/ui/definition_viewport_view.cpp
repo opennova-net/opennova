@@ -18,19 +18,13 @@
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/viewport_widgets.h>
 #include <editor/ui/workspace.h>
 #include <runtime/world/ammo_table.h>
 
 namespace opennova::editor {
 
 namespace {
-
-void set_clock(Workspace &workspace, const DefinitionViewport &model, const char *member, io::JsonValue value) {
-	io::JsonValue clock = io::JsonValue::make_object();
-	clock.set(member, std::move(value));
-	workspace.request(
-			request::set_viewport(model.path(), viewport_change(ViewportKind::Definition, "clock", std::move(clock))));
-}
 
 std::string seconds(int32_t ticks) {
 	char text[32];
@@ -55,12 +49,11 @@ void target_options(DefinitionFireOptions &fire, ui_kit::WrapRow &row);
 void weapon_options(const DefinitionViewport &model, DefinitionViewportOptions &options, ui_kit::WrapRow &row) {
 	DefinitionFireOptions &fire = options.fire;
 	if (options.weapon == DefinitionWeaponView::First) {
-		row.next(ui_kit::checkbox_width("Eye"));
-		ImGui::Checkbox("Eye", &fire.eye);
-		ui_kit::tooltip("Seen through the game's camera, through the weapon's renderfov: it never moves, and aiming "
-		                "brings the gun up to it, as the game does. Off, the camera orbits a still gun and the arms, "
-		                "and shows the game's camera (the white frustum, which Aim slides from pos to tpos) and its "
-		                "places at the hip (pos) and aimed (tpos), which a drag moves.");
+		ui_kit::check(row, "Eye", &fire.eye,
+		              "Seen through the game's camera, through the weapon's renderfov: it never moves, and aiming "
+		              "brings the gun up to it, as the game does. Off, the camera orbits a still gun and the arms, "
+		              "and shows the game's camera (the white frustum, which Aim slides from pos to tpos) and its "
+		              "places at the hip (pos) and aimed (tpos), which a drag moves.");
 		const std::vector<FirstPersonCharacter> &characters = model.weapon().first_person().characters();
 		if (!characters.empty()) {
 			const FirstPersonCharacter *who = model.weapon().first_person().character();
@@ -90,10 +83,9 @@ void weapon_options(const DefinitionViewport &model, DefinitionViewportOptions &
 
 // The range's target (DI-22; an ammo's too, DI-23): shown, its surface and its distance.
 void target_options(DefinitionFireOptions &fire, ui_kit::WrapRow &row) {
-	row.next(ui_kit::checkbox_width("Target"));
-	ImGui::Checkbox("Target", &fire.target.shown);
-	ui_kit::tooltip("A wall down the line of fire, whose face plays the ammo's impact row for its surface; off, the "
-	                "rounds fly on until they age out.");
+	ui_kit::check(row, "Target", &fire.target.shown,
+	              "A wall down the line of fire, whose face plays the ammo's impact row for its surface; off, the "
+	              "rounds fly on until they age out.");
 	if (fire.target.shown) {
 		const float width = ImGui::GetFontSize() * 7.0f;
 		row.next(ui_kit::field_width(width, "##target_surface"));
@@ -226,16 +218,14 @@ void options_row(Workspace &workspace, const DefinitionViewport &model, ui_kit::
 		                "its death pieces are cut from.");
 	}
 	if (kind == "item" || kind == "ammo" || (kind == "weapon" && options.weapon == DefinitionWeaponView::Third)) {
-		row.next(ui_kit::checkbox_width("Enemy"));
-		ImGui::Checkbox("Enemy", &options.enemy);
-		ui_kit::tooltip(kind == "item"   ? "As its enemies see it: its graphic_enemy."
-		                : kind == "ammo" ? "As the other side sees the round: the enemy tracer item (foe_trcr_type_id)."
-		                                 : "The shots as the other side sees them: the enemy's tracer style.");
+		ui_kit::check(row, "Enemy", &options.enemy,
+		              kind == "item"   ? "As its enemies see it: its graphic_enemy."
+		              : kind == "ammo" ? "As the other side sees the round: the enemy tracer item (foe_trcr_type_id)."
+		                               : "The shots as the other side sees them: the enemy's tracer style.");
 	}
 	if (kind == "item" && model.particle_slot().controller) {
-		row.next(ui_kit::checkbox_width("Occupied"));
-		ImGui::Checkbox("Occupied", &options.occupied);
-		ui_kit::tooltip("A driver controls it: a drivable item's particle slot attaches only then.");
+		ui_kit::check(row, "Occupied", &options.occupied,
+		              "A driver controls it: a drivable item's particle slot attaches only then.");
 	}
 	if (kind == "item" && !model.person().status.empty()) {
 		const float width = ImGui::GetFontSize() * 5.0f;
@@ -431,31 +421,18 @@ void DefinitionViewportView::draw_ready(Workspace &workspace, const ViewportMode
 	ui_kit::WrapRow row;
 	options_row(workspace, model, row);
 	// The preview clock: Run or Pause (Play is the game's), and Replay (the state from its start).
-	const bool playing = clock.playing();
-	const char *run = playing ? "Pause" : "Run";
-	row.next(ui_kit::button_width(run));
-	if (ImGui::Button(run)) set_clock(workspace, model, "playing", io::JsonValue::make_bool(!playing));
-	ui_kit::tooltip("Run or hold the preview clock: the game ticks the effects, the death and its sound play on.");
-	if (ui_kit::tool(row, "Replay", true, "The state from its start: the preview clock at tick 0, run.")) {
-		io::JsonValue from = io::JsonValue::make_object();
-		from.set("ticks", io::json_number(0));
-		from.set("playing", io::JsonValue::make_bool(true));
-		workspace.request(
-				request::set_viewport(model.path(), viewport_change(ViewportKind::Definition, "clock", std::move(from))));
-	}
+	clock_buttons(workspace, row, model, clock,
+			"Run or hold the preview clock: the game ticks the effects, the death and its sound play on.",
+			"The state from its start: the preview clock at tick 0, run.", true);
 	DefinitionViewportOptions options = model.options();
-	row.next(ui_kit::checkbox_width("Grid"));
-	ImGui::Checkbox("Grid", &options.grid);
-	ui_kit::tooltip("A metre's squares on the ground under the item (the editor's aid).");
+	ui_kit::check(row, "Grid", &options.grid, "A metre's squares on the ground under the item (the editor's aid).");
 	if (model.drawn().kind == "item" && options.state == DefinitionState::Destroying) {
-		row.next(ui_kit::checkbox_width("Mute"));
-		ImGui::Checkbox("Mute", &options.mute);
-		ui_kit::tooltip("The death's sound fires and says what it plays, and nothing is heard.");
+		ui_kit::check(row, "Mute", &options.mute,
+		              "The death's sound fires and says what it plays, and nothing is heard.");
 	}
 	if (model.range_shown()) {
-		row.next(ui_kit::checkbox_width("Mute"));
-		ImGui::Checkbox("Mute", &options.mute);
-		ui_kit::tooltip("The shots' sounds fire and say what they play, and nothing is heard.");
+		ui_kit::check(row, "Mute", &options.mute,
+		              "The shots' sounds fire and say what they play, and nothing is heard.");
 	}
 	const bool eye = model.camera().posed;
 	if (ui_kit::tool(row, "Frame", !eye,
@@ -476,11 +453,7 @@ void DefinitionViewportView::draw_ready(Workspace &workspace, const ViewportMode
 	if (!drawn.via_file.empty()) {
 		ui_kit::WrapRow line;
 		if (ui_kit::tool(line, "Go to the item", true, "Open " + drawn.via + " in " + drawn.via_file + ".")) {
-			ReferenceTarget target;
-			target.file = drawn.via_file;
-			target.locator = drawn.via_locator;
-			target.editable = true;
-			window_requests::go_to(workspace, target);
+			window_requests::go_to(workspace, window_requests::target_at(drawn.via_file, drawn.via_locator));
 		}
 	}
 	if (!model.person().status.empty() && model.person().status == "posed")

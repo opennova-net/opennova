@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 
+#include <base/io/os_path.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/terrain_document.h>
@@ -11,6 +12,7 @@
 #include <editor/preview/mission_handle_edit.h>
 #include <editor/session/terrain_family.h>
 #include <editor/preview/mission_viewport.h>
+#include <editor/preview/option_reads.h>
 #include <editor/preview/orbit_canvas.h>
 #include <editor/preview/terrain_canvas.h>
 #include <editor/preview/viewport_device.h>
@@ -26,6 +28,9 @@
 
 namespace opennova::editor {
 
+// The options on the wire (the envelope's `options`, a SetViewport's): {mission, overlay, legend, show {foliage, water}}.
+io::JsonValue terrain_options_to_json(const TerrainViewportOptions &options);
+
 namespace {
 
 using io::JsonValue;
@@ -37,14 +42,8 @@ constexpr ViewportState kHeadlessSize{ 1024, 768 };
 // The framing: looking down from the south at this pitch (radians, the orbit's: above the target).
 constexpr float kFramePitch = 0.75f;
 
-std::string base_of(const std::string &path) {
-	std::string name = path;
-	if (const size_t slash = name.find_last_of("/\\"); slash != std::string::npos) name.erase(0, slash + 1);
-	return name;
-}
-
 std::string stem_of(const std::string &path) {
-	std::string name = base_of(path);
+	std::string name = io::utf8_file_name(path);
 	if (const size_t dot = name.find_last_of('.'); dot != std::string::npos) name.erase(dot);
 	return name;
 }
@@ -80,18 +79,17 @@ bool read_options(const JsonValue &json, const TerrainUses &uses, TerrainViewpor
 			}
 			options.mission = value.string;
 		} else if (key == "overlay") {
-			if (!value.is_string() || !mission_ground_overlay_from_token(value.string, options.overlay)) {
-				error = "options.overlay is none, surfaces or foliage: what the game reads at each point, tinted over the "
-				        "terrain.";
+			if (!read_json_token(value, mission_ground_overlay_from_token, options.overlay, error,
+						"options.overlay is none, surfaces or foliage: what the game reads at each "
+						"point, tinted over the "
+						"terrain."))
 				return false;
-			}
 		} else if (key == "legend") {
-			if (!value.is_bool()) {
-				error = "options.legend is true (the overlay's legend open over the picture's corner) or false (folded to its "
-				        "title).";
+			if (!read_json_bool(value, options.legend, error,
+						"options.legend is true (the overlay's legend open over the picture's "
+						"corner) or false (folded to its "
+						"title)."))
 				return false;
-			}
-			options.legend = value.boolean;
 		} else if (key == "show") {
 			if (!value.is_object()) {
 				error = "options.show is {foliage, water}.";
@@ -115,17 +113,6 @@ bool read_options(const JsonValue &json, const TerrainUses &uses, TerrainViewpor
 
 } // namespace
 
-const char *terrain_view_status_token(TerrainViewStatus status) {
-	switch (status) {
-	case TerrainViewStatus::NoProject: return "no_project";
-	case TerrainViewStatus::NoTerrain: return "no_terrain";
-	case TerrainViewStatus::Unwritable: return "unwritable";
-	case TerrainViewStatus::Refused: return "refused";
-	case TerrainViewStatus::Ready: return "ready";
-	}
-	return "no_project";
-}
-
 io::JsonValue terrain_options_to_json(const TerrainViewportOptions &options) {
 	JsonValue out = JsonValue::make_object();
 	out.set("mission", json_string(options.mission));
@@ -138,16 +125,8 @@ io::JsonValue terrain_options_to_json(const TerrainViewportOptions &options) {
 	return out;
 }
 
-std::string terrain_options_change(const TerrainViewportOptions &options) {
-	return viewport_change(ViewportKind::Terrain, "options", terrain_options_to_json(options));
-}
-
 std::string terrain_camera_change(const OrbitCamera &camera) {
-	JsonValue view = mission_camera_to_json(camera);
-	JsonValue taken = JsonValue::make_object();
-	for (const char *member : { "target", "yaw", "pitch", "distance" })
-		if (const JsonValue *value = view.get(member)) taken.set(member, *value);
-	return viewport_change(ViewportKind::Terrain, "camera", std::move(taken));
+	return viewport_change(ViewportKind::Terrain, "camera", mission_camera_members(camera));
 }
 
 // --- TerrainViewport -------------------------------------------------------------------------------
@@ -188,7 +167,7 @@ std::string TerrainViewport::message() const {
 
 std::string TerrainViewport::caption() const {
 	if (reason_ != TerrainViewStatus::Ready) return std::string();
-	if (const TerrainMissionUse *use = mission()) return " under " + base_of(use->mission) + "'s environment";
+	if (const TerrainMissionUse *use = mission()) return " under " + io::utf8_file_name(use->mission) + "'s environment";
 	return " under the engine's own environment";
 }
 
@@ -725,7 +704,7 @@ io::JsonValue TerrainViewport::notes_json(const ViewportInput &) const {
 			                                         : "No mission runs on it: drawn under the engine's own environment "
 			                                           "(a mission's header names its terrain).");
 	} else if (const TerrainMissionUse *use = mission(); use->environment_file.empty() && !use->environment.empty()) {
-		note("terrain.no_environment", base_of(use->mission) + " names the environment " + use->environment +
+		note("terrain.no_environment", io::utf8_file_name(use->mission) + " names the environment " + use->environment +
 		                                       ", which the project does not have: the engine's own environment.");
 	}
 	for (const std::string &name : missing_) {

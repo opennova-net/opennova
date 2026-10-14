@@ -32,10 +32,6 @@ void label(const char *text, float column) {
 	ImGui::SameLine(column);
 }
 
-void raise(Workspace &workspace, const Document &document, bool ok, std::vector<Edit> edits) {
-	if (ok && !edits.empty()) window_requests::edits(workspace, document, std::move(edits));
-}
-
 // The surface of a surface picker's item: its words, the effects row it plays in its tooltip, with what
 // else the game does with it.
 std::string surface_tip(int64_t surface) {
@@ -84,7 +80,7 @@ void material_faces(Workspace &workspace, const ModelDocument &model, const Node
 				std::vector<Edit> edits;
 				std::string refusal;
 				const bool ok = model_surface_edits(model, record.child, choice.value, edits, refusal);
-				raise(workspace, model, ok, std::move(edits));
+				window_requests::edits_if(workspace, model, ok, std::move(edits));
 			}
 			ui_kit::tooltip(surface_tip(choice.value));
 			ImGui::PopID();
@@ -101,7 +97,7 @@ void material_faces(Workspace &workspace, const ModelDocument &model, const Node
 			std::vector<Edit> edits;
 			std::string refusal;
 			const bool ok = model_surface_edits(model, record.child, surface.common(), edits, refusal);
-			raise(workspace, model, ok, std::move(edits));
+			window_requests::edits_if(workspace, model, ok, std::move(edits));
 		}
 		if (ui_kit::tool(row, "Select the faces that differ", true,
 		                 "Selects the " + std::to_string(surface.differing.size()) +
@@ -124,7 +120,7 @@ void material_faces(Workspace &workspace, const ModelDocument &model, const Node
 			std::vector<Edit> edits;
 			std::string refusal;
 			const bool ok = model_face_flag_edits(model, record.child, flags[i].bit, on || mixed, edits, refusal);
-			raise(workspace, model, ok, std::move(edits));
+			window_requests::edits_if(workspace, model, ok, std::move(edits));
 		}
 		ui_kit::tooltip(std::string(flags[i].tip) + (mixed ? "\nOn " + std::to_string(count_of.on) + " of the " +
 		                                                             std::to_string(surface.faces) +

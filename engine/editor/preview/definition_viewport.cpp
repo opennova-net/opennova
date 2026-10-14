@@ -5,6 +5,7 @@
 
 #include <base/io/fixed.h>
 #include <base/io/hash.h>
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/def_catalog_document.h>
@@ -14,6 +15,7 @@
 #include <editor/preview/effect_playback.h>
 #include <editor/preview/model_placement.h>
 #include <editor/preview/model_preview_rig.h>
+#include <editor/preview/option_reads.h>
 #include <editor/preview/orbit_canvas.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/project/project_document.h>
@@ -35,6 +37,13 @@
 
 namespace opennova::editor {
 
+// On the wire (the envelope's `options`, a SetViewport's): {state, enemy, weapon ("third", "first"), occupied,
+// ssn, mute, grid, fire (definition_fire_options_to_json)}.
+io::JsonValue definition_options_to_json(const DefinitionViewportOptions &options);
+
+// "alive", "destroying", "husk", "husk_final".
+const char *definition_state_token(DefinitionState state);
+
 namespace {
 
 using io::JsonValue;
@@ -45,10 +54,6 @@ using io::json_string;
 constexpr ViewportState kHeadlessSize{800, 600};
 // The highest record id a person's warmup reads (the record's SSN is a word).
 constexpr int kMostSsn = 65535;
-
-std::string file_of(const std::string &path) {
-	return path.substr(path.find_last_of("/\\") + 1);
-}
 
 // A name as a fixed char field holds it.
 template <size_t N> std::string text_of(const char (&field)[N]) {
@@ -127,10 +132,9 @@ bool read_options(const JsonValue &json, DefinitionViewportOptions &held, std::s
 		const std::string &key = member.key;
 		const JsonValue &value = member.value;
 		if (key == "state") {
-			if (!value.is_string() || !state_from_token(value.string, options.state)) {
-				error = "options.state is \"alive\", \"destroying\", \"husk\" or \"husk_final\".";
+			if (!read_json_token(value, state_from_token, options.state, error,
+						"options.state is \"alive\", \"destroying\", \"husk\" or \"husk_final\"."))
 				return false;
-			}
 		} else if (key == "weapon") {
 			if (!value.is_string() || (value.string != "third" && value.string != "first")) {
 				error = "options.weapon is \"third\" (the gun in a soldier's hands, gfx3) or \"first\" (the player's own "
@@ -147,12 +151,10 @@ bool read_options(const JsonValue &json, DefinitionViewportOptions &held, std::s
 			                                                                                      : options.grid) =
 					value.boolean;
 		} else if (key == "ssn") {
-			int64_t whole = 0;
-			if (!io::json_whole_in(value, 0, kMostSsn, whole)) {
-				error = "options.ssn is the record id a person's spawn warms up by, a whole number from 0 to 65535.";
+			if (!read_json_whole(value, 0, kMostSsn, options.ssn, error,
+						"options.ssn is the record id a person's spawn warms up by, a whole number "
+						"from 0 to 65535."))
 				return false;
-			}
-			options.ssn = int(whole);
 		} else if (key == "fire") {
 			if (!read_definition_fire_options(value, options.fire, error)) return false;
 		} else {
@@ -166,19 +168,6 @@ bool read_options(const JsonValue &json, DefinitionViewportOptions &held, std::s
 }
 
 } // namespace
-
-const char *definition_view_status_token(DefinitionViewStatus status) {
-	switch (status) {
-	case DefinitionViewStatus::NoProject: return "no_project";
-	case DefinitionViewStatus::NoCatalog: return "no_catalog";
-	case DefinitionViewStatus::NoRecord: return "no_record";
-	case DefinitionViewStatus::NoModel: return "no_model";
-	case DefinitionViewStatus::Missing: return "missing";
-	case DefinitionViewStatus::Unreadable: return "unreadable";
-	case DefinitionViewStatus::Ready: return "ready";
-	}
-	return "no_project";
-}
 
 const char *definition_state_token(DefinitionState state) {
 	switch (state) {
@@ -319,7 +308,7 @@ bool DefinitionViewport::subject_(const ViewportInput &input, const DefCatalogDo
 		drawn_.kind = "item";
 		const auto &def = row.native.as<def::DefItemDef>();
 		item_record_ = true;
-		item_ = damage_item_of(def, file_of(document.path()));
+		item_ = damage_item_of(def, io::utf8_file_name(document.path()));
 		anim_def_ = def.anim_def;
 		attrib_ = def.attrib;
 		type_ = def.type;
@@ -774,7 +763,8 @@ ViewportAction DefinitionViewport::follow_(const ViewportInput &input, PreviewCl
 	}
 	// Its effects over the catalog the game would load, played to the clock.
 	effects_.plan(catalog_, catalog_.serial(), spawns_());
-	effects_.play_to(clock.ticks());
+	const ViewportState drawn_at = size();
+	effects_.play_to(clock.ticks(), preview_view_frustum(camera(), drawn_at.width, drawn_at.height));
 	// The death's sounds play from the project's banks, read as the game reads them (DI-04's sources).
 	if (options_.state == DefinitionState::Destroying)
 		sound_sources_.refresh(*view.findings.assets,
@@ -1191,10 +1181,9 @@ void DefinitionViewport::apply_(const io::JsonValue &json, PreviewClock &clock) 
 
 bool DefinitionViewport::read_gesture_(const io::JsonValue &json, std::vector<WeaponGestureAt> &out, std::string &error) {
 	WeaponGesture gesture = WeaponGesture::Fire;
-	if (!json.is_string() || !weapon_gesture_of(json.string, gesture)) {
-		error = "gesture is fire, hold, release, reload, scope or switch.";
+	if (!read_json_token(json, weapon_gesture_of, gesture, error,
+				"gesture is fire, hold, release, reload, scope or switch."))
 		return false;
-	}
 	out.push_back({0, gesture});
 	return true;
 }

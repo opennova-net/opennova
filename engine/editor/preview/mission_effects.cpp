@@ -5,6 +5,7 @@
 #include <cmath>
 
 #include <base/io/fixed.h>
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <base/io/tick_rate.h>
 #include <editor/assets/project_asset_source.h>
@@ -29,14 +30,8 @@ using io::json_number;
 using io::json_string;
 using io::JsonValue;
 
-// A project file by its name as the asset source serves it (a path's file name).
-std::string served_name(const std::string &file) {
-	const size_t slash = file.find_last_of('/');
-	return slash == std::string::npos ? file : file.substr(slash + 1);
-}
-
 uint64_t stamp_of(const SessionView &view, const std::string &file) {
-	return view.findings.assets && !file.empty() ? view.findings.assets->stamp(served_name(file)) : 0;
+	return view.findings.assets && !file.empty() ? view.findings.assets->stamp(io::utf8_file_name(file)) : 0;
 }
 
 // The game's entity kind of a scene pool (the kind the start's pool gates read).
@@ -136,7 +131,7 @@ const MissionEffects::Catalog &MissionEffects::catalog_(const SessionView &view,
 	catalog = Catalog();
 	catalog.stamp = stamp;
 	std::vector<uint8_t> bytes;
-	if (!view.findings.assets || !view.findings.assets->read(served_name(file), bytes) || bytes.empty()) return catalog;
+	if (!view.findings.assets || !view.findings.assets->read(io::utf8_file_name(file), bytes) || bytes.empty()) return catalog;
 	def::DefItemsFile items{};
 	if (def::def_parse_items_memory(bytes.data(), bytes.size(), &items) == 0) {
 		// A type id resolves to its first row (mission::item_defs_by_id).
@@ -162,7 +157,7 @@ const assets::Model &MissionEffects::model_(const SessionView &view, const std::
 	model = Model();
 	model.stamp = stamp;
 	std::vector<uint8_t> bytes;
-	if (!file.empty() && view.findings.assets && view.findings.assets->read(served_name(file), bytes) && !bytes.empty())
+	if (!file.empty() && view.findings.assets && view.findings.assets->read(io::utf8_file_name(file), bytes) && !bytes.empty())
 		model.model = assets::parse_model(bytes.data(), bytes.size());
 	return model.model;
 }
@@ -171,7 +166,7 @@ void MissionEffects::open_(const std::vector<std::string> &names) {
 	scene_.reset();
 	closures_.clear();
 	names_ = names;
-	played_ = false;
+	schedule_.unplay();
 	++serial_;
 	++opens_;
 	for (Held &held : held_) held.groups.clear();
@@ -229,7 +224,6 @@ std::vector<std::string> MissionEffects::names_of_(const std::vector<Held> &held
 
 void MissionEffects::spawn_shot_(size_t spawn, int32_t age) {
 	const DefinitionSpawn &planned = spawns_[spawn];
-	spawn_made_[spawn] = true;
 	spawn_groups_[spawn] = particle::EffectGroupId();
 	if (!scene_) return;
 	// Bound to the world where the round stopped, as the game's impact presenter spawns it.
@@ -257,14 +251,13 @@ bool MissionEffects::set_shot_spawns(std::vector<DefinitionSpawn> spawns) {
 		extends = same_spawns(head, spawns_);
 	}
 	spawns_ = std::move(spawns);
+	timed_.plan(spawn_ticks(spawns_), extends);
 	if (extends) {
 		spawn_groups_.resize(spawns_.size(), particle::EffectGroupId());
-		spawn_made_.resize(spawns_.size(), false);
 	} else {
 		// Another list (a shot cleared, the run made again): the scene played again from the clock's tick.
 		spawn_groups_.assign(spawns_.size(), particle::EffectGroupId());
-		spawn_made_.assign(spawns_.size(), false);
-		played_ = false;
+		schedule_.unplay();
 	}
 	// An effect the scene was not opened over: opened again over the new closures (every slot at its age).
 	bool held_names = true;
@@ -275,7 +268,7 @@ bool MissionEffects::set_shot_spawns(std::vector<DefinitionSpawn> spawns) {
 	}
 	if (!held_names) {
 		open_(names_of_(held_));
-		std::fill(spawn_made_.begin(), spawn_made_.end(), false);
+		std::fill(timed_.made.begin(), timed_.made.end(), false);
 	}
 	++serial_;
 	return true;
@@ -393,7 +386,7 @@ bool MissionEffects::refresh(const SessionView &view, const MissionScene &scene,
 	// it was added or given another item or effect.
 	std::unordered_map<NodeId, const Held *> before;
 	for (const Held &held : held_) before[held.slot.row] = &held;
-	const int32_t born_now = followed_ ? tick_ : 0;
+	const int32_t born_now = followed_ ? schedule_.tick() : 0;
 	followed_ = true;
 	bool changed = false;
 	if (catalog_moved || !held_names) {
@@ -454,16 +447,15 @@ bool MissionEffects::refresh(const SessionView &view, const MissionScene &scene,
 	for (size_t i = 0; i < held_.size(); ++i) {
 		const auto found = slot_index_.find(held_[i].slot.row);
 		if (found != slot_index_.end()) slots_[found->second].spawned = held_[i].slot.spawned;
-		if (fresh[i] && played_) spawn_(held_[i], tick_ - held_[i].born);
+		if (fresh[i] && schedule_.played()) spawn_(held_[i], schedule_.tick() - held_[i].born);
 	}
 	if (changed) ++serial_;
 	return changed;
 }
 
-void MissionEffects::play_to(int32_t tick) {
-	tick = std::max(tick, 0);
+void MissionEffects::play_to(int32_t tick, const particle::ParticleViewFrustum &frustum) {
 	if (!scene_) {
-		tick_ = tick;
+		schedule_.hold(tick);
 		return;
 	}
 	const auto start = std::chrono::steady_clock::now();
@@ -474,32 +466,13 @@ void MissionEffects::play_to(int32_t tick) {
 			out = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start).count();
 		}
 	} timed{ start, step_us_ };
-	const bool continuous = played_ && tick >= tick_ && tick - tick_ <= int32_t(particle::kEffectAdvanceTickLimit);
-	if (!continuous) {
-		// A jump: the scene emptied, each slot spawned again pre-aged by its age then.
-		scene_->reset_runtime_state();
-		tick_ = tick;
-		for (Held &held : held_) spawn_(held, tick - held.born);
-		std::fill(spawn_made_.begin(), spawn_made_.end(), false);
-		for (size_t i = 0; i < spawns_.size(); ++i)
-			if (spawns_[i].tick <= tick) spawn_shot_(i, tick - spawns_[i].tick);
-		played_ = true;
+	// A jump: each slot spawned again pre-aged by its age then (the shots' spawns follow).
+	const auto jumped = [&](int32_t at) {
+		for (Held &held : held_) spawn_(held, at - held.born);
+	};
+	if (schedule_.play_to(*scene_, tick, frustum, timed_, [&](size_t spawn, int32_t age) { spawn_shot_(spawn, age); },
+				jumped))
 		++serial_;
-		return;
-	}
-	// A spawn added after the clock passed its tick: made at once, pre-aged by its age.
-	for (size_t i = 0; i < spawns_.size(); ++i)
-		if (!spawn_made_[i] && spawns_[i].tick <= tick_) spawn_shot_(i, tick_ - spawns_[i].tick);
-	// A game tick at a time (the scene's own fixed step), each spawn made on its tick.
-	particle::EffectAdvanceRequest step;
-	step.delta_seconds = 1.0f / static_cast<float>(io::kTickHz);
-	for (int32_t at = tick_ + 1; at <= tick; ++at) {
-		scene_->advance_simulation(step);
-		for (size_t i = 0; i < spawns_.size(); ++i)
-			if (spawns_[i].tick == at && !spawn_made_[i]) spawn_shot_(i, 0);
-	}
-	if (tick != tick_) ++serial_;
-	tick_ = tick;
 }
 
 void MissionEffects::close() {
@@ -510,16 +483,15 @@ void MissionEffects::close() {
 	held_.clear();
 	spawns_.clear();
 	spawn_groups_.clear();
-	spawn_made_.clear();
+	timed_.clear();
 	slots_.clear();
 	slot_index_.clear();
 	resolved_.clear();
 	catalog_files_.clear();
 	catalog_serial_ = UINT64_MAX;
 	graph_read_ = false;
-	played_ = false;
 	followed_ = false;
-	tick_ = 0;
+	schedule_.reset();
 }
 
 io::JsonValue MissionEffects::to_json() const {
@@ -539,7 +511,7 @@ io::JsonValue MissionEffects::to_json() const {
 	out.set("controller", json_number(double(controller)));
 	out.set("no_model", json_number(double(no_model)));
 	out.set("emitters", json_number(double(emitters)));
-	out.set("tick", json_number(tick_));
+	out.set("tick", json_number(schedule_.tick()));
 	out.set("step_us", json_number(double(step_us_)));
 	if (scene_) {
 		const particle::EffectLiveCounts counts = scene_->live_counts();

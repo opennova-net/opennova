@@ -36,7 +36,6 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
-#include <formats/lwf/lwf.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <runtime/world/ammo_table.h>
 
@@ -84,39 +83,6 @@ std::string gun_model() {
 	std::string text = test_io::read_file_text(repo() + "/fixtures/threedi/o3d/skinned.o3d");
 	text += "userpoint \"muzzle\" 0 1 0.5 0 1 0 1 83\nuserpoint \"shell\" 0.25 0 0 1 0 0 0 83\n";
 	return text;
-}
-
-// A bank of one set per name, each one layer heard in either view playing its one wave.
-std::vector<uint8_t> bank_of(const std::vector<std::string> &sets) {
-	lwf::File bank;
-	for (size_t i = 0; i < sets.size(); ++i) {
-		lwf::Single single;
-		single.name = sets[i];
-		single.path = strutil::to_lower(sets[i]) + ".wav";
-		single.volume = 0xD2;
-		bank.singles.push_back(single);
-		lwf::Multi set;
-		set.name = sets[i];
-		set.pitch_base = lwf::kAuthoredSetPitchBase;
-		set.target_id = 100;
-		set.playlist_indices.push_back(uint32_t(i));
-		bank.multis.push_back(set);
-		lwf::Playlist layer;
-		layer.falloff_radius = 100;
-		layer.flags = lwf::kFlagInternal | lwf::kFlagExternal;
-		layer.sndparm_indices.push_back(uint32_t(i));
-		bank.playlists.push_back(layer);
-		lwf::Sndparm member;
-		member.single_index = uint32_t(i);
-		member.pitch_scaled = lwf::kPitchUnityQ16;
-		member.volume = 200;
-		member.clamp_volume = 255;
-		bank.sndparms.push_back(member);
-	}
-	std::vector<uint8_t> out;
-	std::string error;
-	lwf::encode_lwf(bank, out, error);
-	return out;
 }
 
 const char *kSets[] = {"GS_TEST", "GS_AI", "RL_TEST", "RL_END", "IMP_DIRT", "IMP_METAL", "ST_TEST", "SF_TEST"};
@@ -198,7 +164,7 @@ struct WeaponProject {
 		import.imports = {{source + "/gun.o3d", {}}, {source + "/arms.o3d", {}}, {source + "/gun.o3a", {}}};
 		session.handle(import);
 		session.run_operations();
-		ok = ok && editor_test::write_bytes(root + "/sounds/game.lwf", bank_of(std::vector<std::string>(std::begin(kSets), std::end(kSets))));
+		ok = ok && editor_test::write_bytes(root + "/sounds/game.lwf", editor_test::wave_bank_of(std::vector<std::string>(std::begin(kSets), std::end(kSets))));
 		const std::vector<uint8_t> tone = test_io::read_file(repo() + "/fixtures/lwf/tone.wav");
 		for (const char *set : kSets) ok = ok && editor_test::write_bytes(root + "/sounds/" + strutil::to_lower(set) + ".wav", tone);
 		ok = ok && editor_test::write_text(root + "/" + at("Avatars.def"), editor_test::crlf(kAvatars)) &&
@@ -284,12 +250,7 @@ std::vector<WeaponRangeEvent> events_of(const WeaponRange &range, Kind kind, con
 	return out;
 }
 
-std::vector<DefinitionSpawn> spawns_of(const DefinitionViewport &viewport, const std::string &source) {
-	std::vector<DefinitionSpawn> out;
-	for (const DefinitionSpawn &spawn : viewport.effects().spawns())
-		if (spawn.source == source) out.push_back(spawn);
-	return out;
-}
+using editor_test::spawns_of;
 
 float distance(const PreviewVec3 &a, const PreviewVec3 &b) {
 	return std::sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z));

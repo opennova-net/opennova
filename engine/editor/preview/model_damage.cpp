@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdio>
 
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <base/io/tick_rate.h>
 #include <base/vfs/file_source.h>
@@ -19,10 +20,6 @@ namespace opennova::editor {
 namespace {
 
 using io::JsonValue;
-
-std::string file_of(const std::string &path) {
-	return path.substr(path.find_last_of("/\\") + 1);
-}
 
 // The count of a model's user points named `name` (any case), over all of them.
 int points_named(const threedi::Threedi3di3 &model, const char *name) {

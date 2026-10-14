@@ -17,6 +17,7 @@
 #include <editor/session/editor_request.h>
 #include <editor/session/file_chores.h>
 #include <editor/session/session_core.h>
+#include <editor/session/terrain_stroke.h>
 #include <editor/session/terrain_family.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/til/til_io.h>
@@ -25,10 +26,6 @@
 namespace opennova::editor {
 
 namespace {
-
-void refuse(SessionCore &core, const std::string &why, const std::string &at) {
-	core.refuse_request(CoreFinding::TerrainStroke, why, at, DiagnosticSeverity::Error);
-}
 
 // The mission's environment, by which the game reads its terrain's configuration (D-TERRAIN-18).
 std::string environment_of(const DocumentBase &view) {
@@ -81,7 +78,7 @@ bool make_tiles(SessionCore &core, const DocumentBase &view, const TerrainFamily
 		own.clear();
 	}
 	if (!install_root.empty() && install_tried && !install) {
-		refuse(core, path + " is not made: the game install could not be read (" + install_why + "), so what it draws "
+		refuse_stroke(core, path + " is not made: the game install could not be read (" + install_why + "), so what it draws "
 		                    "for the mission is unknown and a new file would hide it.",
 		       view.path());
 		return false;
@@ -89,12 +86,12 @@ bool make_tiles(SessionCore &core, const DocumentBase &view, const TerrainFamily
 	std::vector<uint8_t> bytes;
 	std::string error;
 	if (!save_til(file, bytes, error)) {
-		refuse(core, path + " could not be made: " + error + ".", view.path());
+		refuse_stroke(core, path + " could not be made: " + error + ".", view.path());
 		return false;
 	}
 	if (!io::ensure_directory(utf8_of(path_of(target).parent_path()), error) ||
 	    !io::write_file_atomic(target, bytes.data(), bytes.size(), error)) {
-		refuse(core, path + " could not be made: " + error, view.path());
+		refuse_stroke(core, path + " could not be made: " + error, view.path());
 		return false;
 	}
 	std::string said = file.entries.empty()
@@ -134,15 +131,15 @@ void serve_terrain_tiles_edit(SessionCore &core, const EditorRequest &request) {
 	if (!core.view().project.open) return;
 	DocumentSet &documents = core.documents();
 	const DocumentBase *view = documents.document_for(request.terrain_view);
-	if (!view) return refuse(core, "Open the mission or the terrain whose tiles these are first.", request.terrain_view);
+	if (!view) return refuse_stroke(core, "Open the mission or the terrain whose tiles these are first.", request.terrain_view);
 	TerrainFamily family;
-	if (!resolve_terrain_family(core.view(), *view, family)) return refuse(core, family.error, view->path());
+	if (!resolve_terrain_family(core.view(), *view, family)) return refuse_stroke(core, family.error, view->path());
 	const TerrainFamilyFile &tiles = family.tiles;
-	if (!tiles.refusal.empty()) return refuse(core, tiles.refusal, view->path());
+	if (!tiles.refusal.empty()) return refuse_stroke(core, tiles.refusal, view->path());
 	if (tiles.path.empty())
-		return refuse(core, basename_of(view->path()) + " has no tile placement: its terrain names none.", view->path());
+		return refuse_stroke(core, basename_of(view->path()) + " has no tile placement: its terrain names none.", view->path());
 	if (!request.path.empty() && request.path != tiles.path)
-		return refuse(core, basename_of(view->path()) + "'s tiles go to " + tiles.path + ", not " + request.path + ".",
+		return refuse_stroke(core, basename_of(view->path()) + "'s tiles go to " + tiles.path + ", not " + request.path + ".",
 		              view->path());
 	const std::string view_path = view->path();
 	// A batch of none (the Tiles tool's first look) on a placement not made yet makes nothing: the first edit does.
@@ -152,7 +149,7 @@ void serve_terrain_tiles_edit(SessionCore &core, const EditorRequest &request) {
 	}
 	if (tiles.missing && !make_tiles(core, *view, family)) return;
 	DocumentBase *target = documents.open_quietly(tiles.path, "the tile tools in " + basename_of(view_path) + " edit it");
-	if (!target) return refuse(core, "Could not open " + tiles.path + " to lay tiles in it.", view_path);
+	if (!target) return refuse_stroke(core, "Could not open " + tiles.path + " to lay tiles in it.", view_path);
 	if (request.edits.empty()) return;
 	documents.apply_terrain_edits(*target, request.edits, view_path, words_of(request.edits, tiles.path));
 }

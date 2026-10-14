@@ -7,8 +7,6 @@
 #include <map>
 #include <utility>
 
-#include <base/io/ascii_config.h>
-#include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
 #include <editor/model/text_document.h>
 #include <formats/def/def_hudpos_text.h>
@@ -16,6 +14,9 @@
 #include <runtime/hud/hud_math.h>
 
 namespace opennova::editor {
+
+// "move", "top_left", "top_right", "bottom_left", "bottom_right", and back (false for none).
+const char *hud_handle_token(HudHandle handle);
 
 namespace {
 
@@ -174,46 +175,13 @@ int snapped(double value, int grid) {
 	return int(std::lround(value / step)) * step;
 }
 
-// A value's token in a line of the text: where it is, as the game's tokenizer cuts the line.
-struct LineTokens {
-	int count = 0;
-	size_t begin[io::kConfigMaxTokens] = {};
-	size_t end[io::kConfigMaxTokens] = {};
-	bool quoted[io::kConfigMaxTokens] = {};
-};
-
-LineTokens tokens_of(const std::string &line) {
-	LineTokens out;
-	// The walk cuts a line at its CR LF (a tail line with none loses its last character).
-	const std::string cut = line + "\r\n";
-	io::for_each_config_line_span(cut.data(), cut.size(), [&](io::ConfigTokens &tokens, const io::ConfigLineSpan &span) {
-		out.count = tokens.count;
-		for (int i = 0; i < tokens.count; ++i) {
-			out.begin[i] = span.token_begin[i];
-			out.end[i] = span.token_end[i];
-			out.quoted[i] = span.token_begin[i] > 0 && line[span.token_begin[i] - 1] == '"';
-		}
-		return true;
-	});
-	return out;
-}
-
-// Whether a token as written reads as `value` (a number by its value, a word without case).
-bool reads_as(const std::string &written, const std::string &value) {
-	if (strutil::iequals(written, value)) return true;
-	int a = 0, b = 0;
-	const bool numeric = !value.empty() && (std::isdigit(static_cast<unsigned char>(value[0])) || value[0] == '-');
-	if (!numeric || !hud_whole_value(value, b)) return false;
-	a = io::retail_ftol_sse2(io::retail_atof_n(written.c_str(), written.size()));
-	return a == b && io::retail_atof_n(written.c_str(), written.size()) == double(b);
-}
-
 std::string unquoted(const std::string &value) {
 	if (value.size() >= 2 && value.front() == '"' && value.back() == '"') return value.substr(1, value.size() - 2);
 	return value;
 }
 
-struct Splice {
+// A span of the text made again: a line, or the end where a line is added.
+struct Rewrite {
 	size_t offset;
 	size_t length;
 	std::string text;
@@ -464,7 +432,7 @@ bool hud_layout_edits(const TextDocument &text, const def::DefHudPosDef &hud, co
 		}
 		by_line[line][change.index] = change.value;
 	}
-	std::vector<Splice> splices;
+	std::vector<Rewrite> rewrites;
 	std::string added;
 	for (const auto &line_key : order) {
 		const std::string &key = spelled[line_key];
@@ -476,50 +444,35 @@ bool hud_layout_edits(const TextDocument &text, const def::DefHudPosDef &hud, co
 			return false;
 		}
 		const std::map<int, std::string> &set = by_line[line_key];
-		int last = -1;
 		for (const auto &each : set) {
 			if (each.first < 0 || size_t(each.first) >= values.size()) {
 				error = "hudpos.def's " + key + " has no value " + std::to_string(each.first) + ".";
 				return false;
 			}
 			values[size_t(each.first)] = each.second;
-			last = std::max(last, each.first);
 		}
+		// The line as the writer writes it of the model with the changes in it.
+		def::HudposLine written;
+		written.key = key;
+		written.values = values;
+		const std::string line = def::hudpos_line_text(written);
 		const def::HudLayoutLine *found = def::hud_layout_line(lines, key.c_str(), first.empty() ? nullptr : first.c_str());
 		if (!found) {
-			// A line of its own at the end of the text, as the writer writes it.
-			def::HudposLine written;
-			written.key = key;
-			written.values = values;
-			added += def::hudpos_line_text(written) + "\r\n";
+			// A line of its own at the end of the text.
+			added += line + "\r\n";
 			continue;
 		}
-		const std::string line = source.substr(found->offset, found->length);
-		const LineTokens tokens = tokens_of(line);
-		for (const auto &each : set) {
-			const int token = each.first + 1;
-			if (token >= tokens.count) continue;
-			const std::string written = line.substr(tokens.begin[token], tokens.end[token] - tokens.begin[token]);
-			std::string value = each.second;
-			if (tokens.quoted[token]) value = unquoted(value);
-			if (reads_as(written, unquoted(each.second))) continue;
-			splices.push_back({ found->offset + tokens.begin[token], tokens.end[token] - tokens.begin[token], value });
-		}
-		// The values the line lacks, up to the last one set, after its last token.
-		if (last + 1 >= tokens.count && tokens.count > 0) {
-			std::string tail;
-			for (int i = tokens.count - 1; i <= last; ++i) tail += "," + values[size_t(i)];
-			splices.push_back({ found->offset + tokens.end[tokens.count - 1], 0, tail });
-		}
+		// In place of the line the game takes, unless it already reads as the writer writes it.
+		if (source.compare(found->offset, found->length, line) != 0) rewrites.push_back({ found->offset, found->length, line });
 	}
 	if (!added.empty()) {
 		if (!source.empty() && source.back() != '\n') added = "\r\n" + added;
-		splices.push_back({ source.size(), 0, added });
+		rewrites.push_back({ source.size(), 0, added });
 	}
 	// Each against the text the ones before it left: from the end of the text back.
-	std::stable_sort(splices.begin(), splices.end(), [](const Splice &a, const Splice &b) { return a.offset > b.offset; });
-	for (Splice &splice : splices)
-		out.push_back(TextDocument::replace(text.span_at(splice.offset, splice.length), std::move(splice.text), false, gesture));
+	std::stable_sort(rewrites.begin(), rewrites.end(), [](const Rewrite &a, const Rewrite &b) { return a.offset > b.offset; });
+	for (Rewrite &rewrite : rewrites)
+		out.push_back(TextDocument::replace(text.span_at(rewrite.offset, rewrite.length), std::move(rewrite.text), false, gesture));
 	return true;
 }
 

@@ -57,13 +57,7 @@ std::vector<uint8_t> edited(const std::string &path, const char *name, AssetKind
 	return std::vector<uint8_t>(text.begin(), text.end());
 }
 
-Edit set_of(const NodeAddress &address, const char *field, Value value) {
-	Edit edit;
-	edit.address = address;
-	edit.field = field;
-	edit.value = std::move(value);
-	return edit;
-}
+using editor_test::set_edit;
 
 std::vector<std::string> labels_of(const std::vector<ProblemFix> &fixes) {
 	std::vector<std::string> labels;
@@ -136,8 +130,8 @@ static int test_mission_ids() {
 		        if (items.empty() || organics.empty() || areas.size() < 2) return false;
 		        walker = static_cast<const EntityRow &>(*organics[0]).native.id;
 		        const int32_t first_zone = static_cast<const AreaRow &>(*areas[0]).native.id;
-		        return document.apply(set_of({items[0]->id, items[0]->kind, 0}, "id", int64_t(walker)), error) &&
-		               document.apply(set_of({areas[1]->id, areas[1]->kind, 0}, "id", int64_t(first_zone)), error);
+		        return document.apply(set_edit({items[0]->id, items[0]->kind, 0}, "id", int64_t(walker)), error) &&
+		               document.apply(set_edit({areas[1]->id, areas[1]->kind, 0}, "id", int64_t(first_zone)), error);
 	        });
 	TEST_EXPECT(!bytes.empty() && editor_test::write_bytes(f.root + "/missions/fixes.bms", bytes));
 	if (bytes.empty()) return 1;
@@ -336,8 +330,8 @@ static int test_end_pose() {
 			}
 			last = clip->events.size() - 1;
 			const NodeKind event = node_kind(AnimationKind::Event);
-			return document.apply(set_of({clip->id, event, clip->collections[1][last - 1]}, "trigger", int64_t(before)), error) &&
-			       document.apply(set_of({clip->id, event, clip->collections[1][last]}, "trigger", int64_t(end)), error);
+			return document.apply(set_edit({clip->id, event, clip->collections[1][last - 1]}, "trigger", int64_t(before)), error) &&
+			       document.apply(set_edit({clip->id, event, clip->collections[1][last]}, "trigger", int64_t(end)), error);
 		});
 	};
 	const std::vector<uint8_t> moved = clip_with(0x40, 0x1), held = clip_with(0x1, 0x1);

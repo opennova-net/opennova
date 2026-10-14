@@ -27,8 +27,6 @@ struct ModelRow;
 // add-on's names); "None" for the value a field calls none (-1, 255); "No part 6 (LOD 0 has 5 parts)"
 // past LOD 0's parts.
 std::string model_part_name(const ModelRow &row, int64_t part);
-// Whether a part index names a part of LOD 0.
-bool model_part_exists(const ModelRow &row, int64_t part);
 
 // What a LOD draws at, by the game's level walk [orig: Model_SelectRlodLevel @ 0x5c3b20: level i draws
 // while the scaled projected radius is above its threshold and at or below the level before's; the walk

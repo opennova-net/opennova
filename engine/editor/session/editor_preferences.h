@@ -10,9 +10,9 @@ namespace opennova::editor {
 struct ProjectDocument;
 
 // The game a project's recently placed items are kept under (Preferences::recent_items): its target
-// game, the game whose catalogs its item ids are looked up in ("jo"). S16 (expansions): key by the
-// project's game profile as it stands then, the expansion it builds for with its game, once a project
-// has one; until then the target game is the whole of it.
+// game, the game whose catalogs its item ids are looked up in ("jo"), and for a project that builds as an
+// expansion the expansion with it ("jo/jxm"), whose catalogs add items of their own (S15's promise, kept
+// since S26).
 std::string recent_items_game(const ProjectDocument &project);
 
 // The editor's preferences (preferences_store.h) over the store its embedder owns (ADR 0046 S13

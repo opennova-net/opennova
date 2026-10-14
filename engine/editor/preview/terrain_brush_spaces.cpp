@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdint>
 
+#include <base/io/fixed.h>
 #include <editor/preview/mission_camera.h>
 #include <editor/preview/mission_ground_facts.h>
 #include <editor/preview/mission_handle_edit.h>
@@ -18,7 +19,7 @@ namespace opennova::editor {
 namespace {
 
 int32_t to_1616(double metres) {
-	const double fixed = std::llround(metres * 65536.0);
+	const double fixed = std::llround(metres * io::kFp16OneD);
 	return fixed > 2147483647.0 ? INT32_MAX : fixed < -2147483648.0 ? INT32_MIN : static_cast<int32_t>(fixed);
 }
 
@@ -27,7 +28,7 @@ int32_t to_1616(double metres) {
 // -y), through the editor's coords (outside the authored grid no terrain, an empty sector the height-0 floor), the point
 // sample the height there, the bilinear the shared core's.
 terrain::TerrainRaycastSample editor_ray_sample(const terrain::TerrainHeightField &field, int32_t x, int32_t z, bool bilinear) {
-	const double wx = x / 65536.0, wz = z / 65536.0;
+	const double wx = x / io::kFp16OneD, wz = z / io::kFp16OneD;
 	terrain::TerrainRaycastSample out;
 	const terrain::CoordsResult<double> r =
 			terrain::coords_world_to_source<double>(field.layout, wx, wz, terrain::coords_editor_options());
@@ -39,7 +40,7 @@ terrain::TerrainRaycastSample editor_ray_sample(const terrain::TerrainHeightFiel
 	}
 	const float height = bilinear ? terrain::height_field_height_world_bilinear(field, float(wx), float(wz))
 	                              : terrain::height_field_height_world(field, float(wx), float(wz));
-	out.height_1616 = static_cast<int32_t>(std::llround(double(height) * 65536.0));
+	out.height_1616 = static_cast<int32_t>(std::llround(double(height) * io::kFp16OneD));
 	return out;
 }
 terrain::TerrainRaycastSample editor_ray_point(void *ctx, int32_t x, int32_t z) {
@@ -81,9 +82,9 @@ bool editor_terrain_ray(const terrain::TerrainHeightField &field, const double f
 	sampler.ctx = const_cast<terrain::TerrainHeightField *>(&field);
 	int32_t met[3] = {0, 0, 0};
 	if (!terrain::terrain_raycast_refined(sampler, start, end, met)) return false;
-	hit[0] = met[0] / 65536.0;
-	hit[1] = -met[1] / 65536.0;
-	hit[2] = met[2] / 65536.0;
+	hit[0] = met[0] / io::kFp16OneD;
+	hit[1] = -met[1] / io::kFp16OneD;
+	hit[2] = met[2] / io::kFp16OneD;
 	return true;
 }
 
@@ -94,7 +95,7 @@ bool mission_ground_height(const MissionGround &ground, TerrainPoint at, double 
 	if (!field) return false;
 	int32_t fixed = 0;
 	if (!world::terrain_column_height(field, to_1616(at.x), to_1616(at.y), fixed)) return false;
-	height = double(fixed) / 65536.0;
+	height = double(fixed) / io::kFp16OneD;
 	return true;
 }
 

@@ -166,7 +166,7 @@ int test_view() {
 	TEST_EXPECT(updated_since(mark));
 	const MapsDevicePatch *surface = last_of(*mission, MapsDevicePatch::Kind::Surface);
 	TEST_EXPECT(surface && surface->rgba.empty() && accounts_for(*surface, "Tmap_m.pcx"));
-	// The ground overlays take a stroke's region in place (the review's m5), and what they show is what a whole
+	// The ground overlays take a stroke's region in place, and what they show is what a whole
 	// rebuild over the same ground shows: its texels and its legend's shares.
 	const auto same_overlay = [&](const MissionOverlayImage &a, const MissionOverlayImage &b) {
 		if (a.kind != b.kind || a.width != b.width || a.height != b.height || a.rgba != b.rgba || a.legend.size() != b.legend.size())
@@ -302,7 +302,7 @@ std::string isle_project(ProjectSession &session, editor_test::TempProjectDir &d
 	return entry ? entry->relative_path : std::string();
 }
 
-// An imported terrain (S25, the review's M5): its surface and foliage maps are painted in their source images, which
+// An imported terrain (S25): its surface and foliage maps are painted in their source images, which
 // stand for the maps the import makes. A surface stroke on the source reaches the view's ground (its class there, an
 // Update), and a foliage stroke is an Update whose device patch holds the codes, nothing built again at its end.
 int test_imported() {
@@ -363,7 +363,7 @@ int test_imported() {
 	TEST_EXPECT(foliage && std::count(foliage->indices.begin(), foliage->indices.end(), uint8_t(3)) == 1 &&
 	            !foliage->world.empty());
 	// A colour stroke on the source, whose texels' alpha is 120: the device patch shows them opaque, as the import's
-	// 24-bit colour map holds them (the review's NIT).
+	// 24-bit colour map holds them.
 	ask.plane = TerrainPlane::Colour;
 	ask.brush.tool = TerrainTool::Colour;
 	ask.brush.colour = 0x30A050;
@@ -417,11 +417,12 @@ bool legend_holds(const MissionOverlayImage &overlay, int value) {
 	return std::any_of(overlay.legend.begin(), overlay.legend.end(), [&](const MissionOverlayRow &row) { return row.value == value; });
 }
 
-// The painting feedback (2026-10-13): the terrain query's sample reads unsaved paint. On an imported terrain the maps
-// are painted in the set's source images, and the import's outputs move only as the set is saved and imported again: a
-// sample answers from the view's own ground, which holds the paint (patched in place, or laid over a ground read whole
-// after the stroke: a view first followed once the stroke is in), never from the outputs read again. A source read again
-// or closed unsaved (its paint dropped: the review's M1) has the view's ground read whole again, the overlay with it.
+// The painting feedback (2026-10-13): the terrain query's sample reads unsaved paint. On an
+// imported terrain the maps are painted in the set's source images, and the import's outputs move
+// only as the set is saved and imported again: a sample answers from the view's own ground, which
+// holds the paint (patched in place, or laid over a ground read whole after the stroke: a view
+// first followed once the stroke is in), never from the outputs read again. A source read again or
+// closed unsaved (its paint dropped) has the view's ground read whole again, the overlay with it.
 int test_sample_unsaved() {
 	editor_test::TempProjectDir dir("opennova_editor_terrain_maps_view_sample");
 	editor_test::NoProcess platform;
@@ -470,8 +471,9 @@ int test_sample_unsaved() {
 	            read.terrain_at(8.0, 8.0, 0.0).foliage_code == 3);
 	std::printf("  lay_open_sources over the surface and foliage sources (512 a side): %.2f ms\n",
 	            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - laying).count());
-	// Discarded paint is gone from the view (the review's M1): the surface source read again unsaved reads the class as
-	// imported, the overlay with it; the foliage source closed unsaved reads its code as imported.
+	// Discarded paint is gone from the view: the surface source read again unsaved reads the class
+	// as imported, the overlay with it; the foliage source closed unsaved reads its code as
+	// imported.
 	const auto discard_if_asked = [&] {
 		if (v.dialogs.unsaved_prompt.open) session.handle(request::resolve_unsaved(UnsavedChoice::Discard));
 		session.run_operations();
@@ -501,8 +503,8 @@ int test_sample_unsaved() {
 	return 0;
 }
 
-// BrushOverlay alone (the review's m2): a choice of the person's as the view is made, or equal to the brush's own while
-// it paints, stands; the body says null for it.
+// BrushOverlay alone: a choice of the person's as the view is made, or equal to the brush's own
+// while it paints, stands; the body says null for it.
 int test_brush_overlay_rule() {
 	BrushOverlay made;
 	MissionGroundOverlay overlay = MissionGroundOverlay::Foliage;

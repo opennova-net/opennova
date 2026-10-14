@@ -2,6 +2,7 @@
 // view's terrain tools edit other documents (a stroke's .cpt or map, a tile's .til, the missions that follow the
 // ground) and keeps them one person's work: one Ctrl+Z, one Save, one close prompt.
 #include <editor/session/document_set.h>
+#include <editor/session/file_chores.h>
 
 #include <algorithm>
 
@@ -19,14 +20,6 @@ namespace {
 
 void add_unique(std::vector<std::string> &paths, const std::string &path) {
 	if (std::find(paths.begin(), paths.end(), path) == paths.end()) paths.push_back(path);
-}
-
-// "a, b and c".
-std::string listed(const std::vector<std::string> &names) {
-	std::string out;
-	for (size_t i = 0; i < names.size(); ++i)
-		out += (i == 0 ? "" : i + 1 == names.size() ? " and " : ", ") + names[i];
-	return out;
 }
 
 } // namespace
@@ -211,7 +204,7 @@ void DocumentSet::undo_redo(const EditorRequest &request) {
 			}
 		if (!lost.empty()) {
 			view_.activity.status = "Nothing redone: " + (next.words.empty() ? std::string("the step") : next.words) +
-			                        " goes with " + listed(lost) + "'s, which " + (lost.size() == 1 ? "was" : "were") +
+			                        " goes with " + names_in_words(lost) + "'s, which " + (lost.size() == 1 ? "was" : "were") +
 			                        " edited after the undo and no longer " + (lost.size() == 1 ? "holds" : "hold") + " it.";
 			core_.outcome().stepped.clear();
 			core_.touch(ViewConcern::Output);
@@ -253,13 +246,13 @@ void DocumentSet::undo_redo(const EditorRequest &request) {
 		std::string status = std::string(undo ? "Undid: " : "Redid: ");
 		for (size_t i = 0; i < said.size(); ++i) status += (i ? "; " : "") + said[i];
 		if (!kept.empty())
-			status += "; " + listed(kept) + (kept.size() == 1 ? " was" : " were") + " edited since and " +
+			status += "; " + names_in_words(kept) + (kept.size() == 1 ? " was" : " were") + " edited since and " +
 			          (kept.size() == 1 ? "keeps its" : "keep their") + " later edits";
 		if (!closed.empty())
-			status += "; " + listed(closed) + (closed.size() == 1 ? " was" : " were") + " closed or read again since and " +
+			status += "; " + names_in_words(closed) + (closed.size() == 1 ? " was" : " were") + " closed or read again since and " +
 			          (closed.size() == 1 ? "keeps its" : "keep their") + " edits as saved";
 		if (!stuck.empty())
-			status += "; " + listed(stuck) + " did not take " + (stuck.size() == 1 ? "its step" : "their steps") +
+			status += "; " + names_in_words(stuck) + " did not take " + (stuck.size() == 1 ? "its step" : "their steps") +
 			          " (blocked: " + (stuck.size() == 1 ? "its file" : "their files") + " changed outside the editor)";
 		view_.activity.status = status + ".";
 	}
@@ -318,7 +311,7 @@ void DocumentSet::end_edit(const std::string &path, uint64_t gesture, bool cance
 		end_gesture_in(each, true);
 	}
 	if (!dropped.empty()) {
-		view_.activity.status = "Cancelled: " + listed(dropped) + (dropped.size() == 1 ? " is" : " are") + " as the stroke found " +
+		view_.activity.status = "Cancelled: " + names_in_words(dropped) + (dropped.size() == 1 ? " is" : " are") + " as the stroke found " +
 		                        (dropped.size() == 1 ? "it." : "them.");
 		core_.touch(ViewConcern::Output);
 		core_.touch(ViewConcern::Selection);

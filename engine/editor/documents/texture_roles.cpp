@@ -123,7 +123,7 @@ constexpr RoleWords kRows[] = {
 	        .sampling("clamped")
 	        .missing("the mission aborts (\"blendermap\"): the key alone turns the blend on, on any card with pixel shaders")
 	        .witness("Terrain_ParseConfigCallback @ 0x60F7D0; PolyTrn_InitTextures @ 0x60B15D..0x60B1A6, @ 0x60B1B8, the "
-	                 "split @ 0x60B2C1; sub_520AA0 @ 0x520B4E")
+	                 "split @ 0x60B2C1; Game_ShowErrorLogAndAbortMission @ 0x520B4E")
 	        .row,
 	Role(R::TerrainSplatDetail, "terrain_splat_detail", "terrain splat detail", G::Terrain)
 	        .alpha("kept")
@@ -426,6 +426,8 @@ std::string texture_alpha_meaning_words(renderer::TextureAlphaMeaning meaning, c
 	return "unused: " + by + " reads no alpha of this texture";
 }
 
+namespace {
+
 const char *texture_size_rule_token(renderer::TextureSizeRule rule) {
 	switch (rule) {
 	case S::Any: return "any";
@@ -440,6 +442,8 @@ const char *texture_size_rule_token(renderer::TextureSizeRule rule) {
 	}
 	return "any";
 }
+
+} // namespace
 
 io::JsonValue texture_role_json(const TextureRoleRow &row) {
 	using io::json_number;

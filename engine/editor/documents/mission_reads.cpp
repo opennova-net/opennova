@@ -3,6 +3,7 @@
 // word is the marker's index in the pool, Pool_GetEntryUnchecked @0x441FC0].
 #include "mission_reads.h"
 
+#include <base/io/fixed.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
 
@@ -13,7 +14,7 @@ namespace {
 using K = MissionKind;
 constexpr NodeKind k(K kind) { return node_kind(kind); }
 
-double units(int32_t fixed) { return double(fixed) / 65536.0; }
+double units(int32_t fixed) { return double(fixed) / io::kFp16OneD; }
 
 MissionEntityRead read_entity(const EntityRow &row) {
 	const bms::Entity &e = row.native;

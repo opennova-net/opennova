@@ -49,6 +49,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -98,7 +99,9 @@ struct MissionNamesFile {
 	// read and written back so (the original editor's atol, tested nonzero: mission_mis.h).
 	// A locked item's base comes with its lock: absolute, as the original editor keeps it through a terrain change
 	// [orig: JOTACmed.exe sub_402770 @ 0x402c9f..0x402ccd] and writes it (master #1095, D-MIS-4); kept_bases each
-	// entity's in the writer's order, 0 for one the .mis gives no lock.
+	// entity's in the writer's order, none for one the .mis gives no lock (a base of 0 is one: the .mis holds it).
+	// `locks` of a write (MissionDocument::names_file_written) are what it wrote, each base it chose kept so: a save
+	// after it takes its base from them, never from the ground again.
 	struct Lock {
 		int pool = 0;
 		int32_t id = 0;
@@ -107,7 +110,7 @@ struct MissionNamesFile {
 	};
 	std::vector<Lock> locks;
 	std::vector<int32_t> kept_locks;
-	std::vector<int32_t> kept_bases;
+	std::vector<std::optional<int32_t>> kept_bases;
 };
 
 // What the last save made of the .mis where it left it as it is (MissionDocument::names_left).
@@ -179,9 +182,11 @@ bool same_locks(const std::vector<int32_t> &a, const std::vector<int32_t> &b);
 bool mission_holds_locks(const MissionDocument &document);
 // The .mis a save writes from the mission (its file as the writer takes it, its names, each entity's base height
 // from `base_heights` where it has one, in the writer's order: mission::write_mis_text): false with the writer's
-// refusal.
+// refusal. A locked entity's base is the one the .mis as the mission knows it keeps for it (MissionNamesFile::
+// kept_bases over the mission as it stands), else the ground under it from `base_heights`; `written` takes each
+// entity's lock and base as written, in the writer's order (MissionNamesFile::locks).
 bool mission_names_text(const MissionDocument &document, const std::vector<int32_t> *base_heights, std::string &text,
-                        std::string &error);
+                        std::string &error, std::vector<MissionNamesFile::Lock> *written = nullptr);
 
 // The edits Take the names that still match makes of the mission (one undo step) from `file` (the .mis as read):
 // each event's name where the .mis's event of its index holds the same lines, each area's description by its zone

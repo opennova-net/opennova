@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <base/io/json.h>
+#include <base/io/tick_rate.h>
 #include <base/vfs/file_source.h>
 #include <editor/model/node.h>
 #include <editor/preview/mission_ground_facts.h>
@@ -18,6 +19,7 @@
 #include <runtime/renderer/scar_draw_list.h>
 #include <runtime/world/ammo_table.h>
 #include <runtime/world/geom.h>
+#include <runtime/world/infantry.h>
 
 namespace opennova::bms {
 struct File;
@@ -44,14 +46,16 @@ namespace opennova::editor {
 // miss what was clicked), with no shooter and no launch (only the impact is the tool's); the world holds the entities
 // near the shots' lines alone (each within its item's bound, kMissionShotReach past it where none is known), every
 // other record of the file loaded empty in its place; nothing ticks but the rounds and the explosions (no brain
-// moves, no person is posed: a person is struck through the torso sphere the round pass falls back to without its
-// rig); the listener stands where the shot leaves.
+// moves); each person stands and plays as the mission view draws it (its spawn's lift, MissionPoses'; its channels
+// on each tick, MissionPeople's at the clock), so a round meets its posed rig's bone spheres as the game's person pass
+// does [orig: Physics_RaycastAgainstBoneSections @ 0x4e4670], the torso sphere the pass falls back to only
+// for a person with no rig; the listener stands where the shot leaves.
 
 inline constexpr double kMissionShotStandoff = 2.0;
 inline constexpr double kMissionShotReach = 20.0;
 // How long a run is followed from its first shot: ten minutes of the game's ticks (the shots stand on the preview
 // clock's ticks, the run's world counting from the first).
-inline constexpr int32_t kMissionShotsMostTicks = 62 * 600;
+inline constexpr int32_t kMissionShotsMostTicks = io::kTicksPerSecondInt * 600;
 inline constexpr int32_t kMissionShotLastTick = 0x3FFFFFFF;
 
 // A shot of the tool: the clock's tick it fires on, the ammo (an ammo.def record), the point the click met (mission
@@ -87,6 +91,7 @@ struct MissionShotEvent {
 	std::string on;        // an impact's: "terrain", "water", "object", "person"
 	int surface = -1;      // the class it struck: the terrain's (the sampler's), an object's face material
 	MissionGroundFacts ground; // a terrain impact's ground, DI-07's words
+	int section = -1;          // a person's: the bone its rig's sphere was struck on (-1: the torso stand-in)
 	world::ImpactRowPick pick; // the row played (an impact's)
 	std::string ammo;
 	std::string effect;
@@ -100,7 +105,6 @@ struct MissionShotEvent {
 	float scar_radius = 0.0f;
 	std::string words;
 };
-const char *mission_shot_event_token(MissionShotEvent::Kind kind);
 
 // An effect a run spawned: its name, where (mission metres) and its orientation, its tick.
 struct MissionShotSpawn {
@@ -139,7 +143,17 @@ MissionHuskFrame mission_husk_frame(const MissionShotDeath &death, int32_t clock
 // mission or its ground moved (the run starts again), the mission as it stands (its file composed), its ground
 // (DI-07's: the terrain, the char map, the tiles, the water; held by the caller, read again only where the key moves),
 // its entities (the scene's: each record's pool, index, row and item), each item's bound (metres) and each row's
-// title.
+// title, and each person as the view draws it (MissionShotPerson).
+class MissionPoses;
+
+// A person as the mission view draws it: how far its spawn stands its origin over its record
+// (MissionPose's lift, metres) and its spawn's channels (MissionPose's, what it plays before the
+// people start).
+struct MissionShotPerson {
+	double lift = 0.0;
+	const world::InfantryState *channels = nullptr;
+};
+
 struct MissionShotsSetup {
 	std::shared_ptr<const FileSource> files;
 	uint64_t key = 0;
@@ -148,6 +162,15 @@ struct MissionShotsSetup {
 	std::vector<MissionEntityMark> entities;
 	std::unordered_map<int64_t, float> bounds;
 	std::unordered_map<NodeId, std::string> titles;
+	// The row's person (false: no posed person of the row): read at the load for its lift (the key
+	// moves with the poses), and on each tick for its spawn's channels.
+	std::function<bool(NodeId row, MissionShotPerson &out)> person;
+	// The people as the view plays them: MissionPeople over `poses` from the clock's tick
+	// `people_from` (the view's started_at). The run plays its own copy on to each tick it steps,
+	// so a round fired on a past tick meets each person as the view showed it on that tick, its
+	// spawn pose before the people started.
+	const MissionPoses *poses = nullptr;
+	int32_t people_from = 0;
 };
 
 class MissionShots {

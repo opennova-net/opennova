@@ -610,9 +610,6 @@ void EditorApp::show_picker(PickPurpose p_purpose, bool p_directory) {
 		case PickPurpose::ImportFiles:
 			picker_->set_title("Import files or PFF contents");
 			break;
-		case PickPurpose::BuildFolder:
-			picker_->set_title("Choose a folder to build the game's files into");
-			break;
 		case PickPurpose::TextureImage:
 			picker_->set_title("Replace the texture with an image");
 			filters.push_back("*.png, *.tga, *.pcx ; Images");

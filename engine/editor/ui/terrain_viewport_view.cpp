@@ -18,6 +18,7 @@
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/overlay_legend.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/viewport_widgets.h>
 #include <editor/ui/viewport_canvas.h>
 #include <editor/ui/workspace.h>
 #include <formats/trn/charmap_legend.h>
@@ -29,7 +30,7 @@ namespace {
 using io::JsonValue;
 
 void set_options(Workspace &workspace, const TerrainViewport &model, JsonValue options) {
-	workspace.request(request::set_viewport(model.path(), viewport_change(ViewportKind::Terrain, "options", std::move(options))));
+	set_viewport_member(workspace, model, "options", std::move(options));
 }
 
 } // namespace
@@ -113,12 +114,10 @@ void TerrainViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 	const TerrainTool brushing = workspace.view().workspace.terrain_brush.tool;
 	const std::string terrain_label =
 			terrain && brushing != TerrainTool::None ? std::string("Terrain: ") + terrain_tool_label(brushing) : std::string("Terrain");
-	if (terrain) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-	const bool terrain_pressed = ui_kit::tool(row, terrain_label.c_str(), true,
+	if (lit_tool(row, terrain_label.c_str(), terrain, true,
 			terrain ? std::string("Hide the Terrain pane (Ctrl+E).")
-					: std::string("Sculpt the ground, paint its maps and lay its tiles in the picture (Ctrl+E)."));
-	if (terrain) ImGui::PopStyleColor();
-	if (terrain_pressed) window_requests::show_terrain(workspace, model.path(), !terrain);
+					: std::string("Sculpt the ground, paint its maps and lay its tiles in the picture (Ctrl+E).")))
+		window_requests::show_terrain(workspace, model.path(), !terrain);
 	if (ui_kit::tool(row, "Frame", true, "The camera on the terrain's sectors (F, or a double click)."))
 		workspace.request(request::set_viewport(model.path(), terrain_camera_change(model.framed(context.width, context.height))));
 	if (ui_kit::tool(row, "Top", true, "Straight down over the camera's target, north up.")) {

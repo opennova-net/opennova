@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include <base/io/tick_rate.h>
+#include <runtime/world/sound_emitter_mailbox.h>
 #include <runtime/world/weather_state.h>
 
 namespace opennova::mission {
@@ -41,6 +43,15 @@ struct MissionScriptSound {
 	int32_t dialog = 0; // Dialog: its number (dlg%03i)
 	std::string wave;   // Voice: the .wav it plays
 };
+// An ambient loop an item's update registered on the clock: a placed genx item's hum, its time-of-day region's set at
+// its sound point on its cohort's last visit of the batch (world::update_item_ambient_sound [orig:
+// Entity_UpdateWaterPhysicsAndEffects @0x4A93C5..0x4A93D6 -> Entity_UpdateEnvSoundEmitter @0x4A8080]), on the clock's
+// tick it rose on.
+struct MissionScriptEmitter {
+	int32_t tick = 0;
+	world::SoundEmitterEvent event;
+};
+
 // "thunder", "relative", "positional", "dialog", "voice".
 const char *mission_script_sound_kind_token(MissionScriptSound::Kind kind);
 
@@ -92,6 +103,10 @@ public:
 	const world::WeatherState *weather() const;
 	// The sounds raised since the last take, oldest first.
 	std::vector<MissionScriptSound> take_sounds();
+	// The items' ambient loops registered since the last take, oldest first (a step back of the clock drops them).
+	std::vector<MissionScriptEmitter> take_emitters();
+	// Every set an item of the mission loops (its time-of-day loops, each once): what the Listen describes for them.
+	const std::vector<std::string> &item_loop_sets() const { return loop_sets_; }
 	// The tick it ran to; how many times it booted, the last boot's cost (microseconds); the script's executions; and
 	// whether the mission compiled a script (a layer of game.wac, server.wac and <mission>.wac the project holds).
 	int32_t tick() const { return tick_; }
@@ -121,6 +136,8 @@ private:
 	bool failed_ = false; // the last boot failed: not tried again until what it read moves
 	uint32_t clock_fixed24_ = 12u << 24; // the picture's hour on the 8.24 clock
 	std::vector<MissionScriptSound> sounds_;
+	std::vector<MissionScriptEmitter> emitters_;
+	std::vector<std::string> loop_sets_;
 	// What the start raised that the game plays once the mission runs: the dialogs the pre-mission pass queued (heard
 	// at tick 0, kept for a step back to the start).
 	std::vector<MissionScriptSound> start_sounds_;
@@ -128,6 +145,6 @@ private:
 
 // How many game ticks one run takes at most (a minute of the game's): a longer run (a jump of the clock) goes on at
 // the next call.
-inline constexpr int32_t kMissionScriptCatchUpTicks = 62 * 60;
+inline constexpr int32_t kMissionScriptCatchUpTicks = io::kTicksPerSecondInt * 60;
 
 } // namespace opennova::editor

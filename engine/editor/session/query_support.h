@@ -16,6 +16,8 @@
 
 namespace opennova::editor {
 
+class DocumentBase;
+
 inline constexpr const char *kQueryOffsetDoc = "The page's first entry, by its place in the list (0 the first).";
 inline constexpr const char *kQueryLimitDoc = "How many entries the page holds at most, 1 to 200.";
 
@@ -24,6 +26,8 @@ JsonPage page_of(const QueryArgs &args);
 // The open record document `args` names by its `path` ("" the active one), or null with `error`: none is
 // open there, or the one open is of another kind, which holds no records (S13 D6).
 const Document *document_of(const QueryContext &context, const QueryArgs &args, std::string &error);
+// The open document `args` names by its `path` ("" the active one), of any kind (S13 D6), or null with `error`.
+const DocumentBase *open_document_of(const QueryContext &context, const QueryArgs &args, std::string &error);
 // A record of `document` by the identity `args` names (`id`), or false with `error`.
 bool record_of(const Document &document, const QueryArgs &args, NodeAddress &out, std::string &error);
 // A record's identity: a nested record's own, else its row's.

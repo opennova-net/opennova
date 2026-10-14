@@ -67,13 +67,6 @@ public:
 	// `picked` its logical name. While a row is dragged over an item that does not fit, nothing
 	// is highlighted and nothing happens on release.
 	static bool accept_file(const SessionView &view, const FieldUse &field, std::string &picked);
-	// A record of `document` dropped on the item just drawn, the value of `field` of `record` (ADR 0046 S24,
-	// ui/record_drag.h: an outline row, the Inspector's heading, a board card): true when the record is one the
-	// field names, `picked` the value it gives the field (an entity its SSN, an area its zone id, a group, a path,
-	// an event its index: documents/mission_links' mission_record_value); a record of another document, or of a
-	// kind the field does not name, is never accepted. draw_field takes drops through it.
-	static bool accept_record(const SessionView &view, const Document &document, const NodeAddress &record,
-	                          const FieldUse &field, std::string &picked);
 	// A missing value's fixes from the dot its state shows (ADR 0046 DI-15: a click on the Inspector's red dot
 	// opens them, `open`): while its popup is drawn open, what Problems offers for the value (fixes_for on the
 	// reference.missing finding the graph would make, those raised at once: Add it there, Open the file, Import,
@@ -91,7 +84,6 @@ public:
 	bool draw_completions(Workspace &workspace, const Document &document, const NodeAddress &record, const FieldUse &field,
 	                      const Value &value, std::string &picked);
 	// How many times the completion's names were made (a test's measure).
-	size_t completions_made() const { return completions_made_; }
 	// How many times a popup's list was made (the graph's choices, the missing value's finding and
 	// its fixes): once per opening, and again while it is open only when what it reads moves
 	// (ListKey), never for a change of anything else (a line of Output, a build's step).
@@ -101,6 +93,13 @@ public:
 	size_t lists_held() const;
 
 private:
+	// A record of `document` dropped on the item just drawn, the value of `field` of `record` (ADR 0046 S24,
+	// ui/record_drag.h: an outline row, the Inspector's heading, a board card): true when the record is one the
+	// field names, `picked` the value it gives the field (an entity its SSN, an area its zone id, a group, a path,
+	// an event its index: documents/mission_links' mission_record_value); a record of another document, or of a
+	// kind the field does not name, is never accepted. draw_field takes drops through it.
+	static bool accept_record(const SessionView &view, const Document &document, const NodeAddress &record,
+	                          const FieldUse &field, std::string &picked);
 	// What a popup's list reads: of the view, the graph (the choices, the finding), the files, the
 	// project and the editor's settings (the fixes); the document as it is now (the field's value
 	// and scope: its instance and revision).
@@ -170,7 +169,6 @@ private:
 		bool hovered = false;     // the pointer was over the list then
 	};
 	Completing completing_;
-	size_t completions_made_ = 0;
 	const SessionView *pruned_view_ = nullptr;
 	RevisionKey pruned_key_;
 	size_t lists_made_ = 0;

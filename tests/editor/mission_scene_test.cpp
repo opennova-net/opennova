@@ -346,9 +346,8 @@ int test_sphere_picks() {
 	const MissionPickRadii second = { { 100302, 12.0f } };
 	const std::vector<MissionMark> behind = mission_marks(scene, options, camera, width, height, nullptr, &second);
 	TEST_EXPECT(pick(behind, x, y, nullptr, MissionPick::Click) == 4);
-	// Nested: on the crate's body past its glyph (a camera near it), inside the second's sphere, the crate
-	// (the review's M2: the larger sphere's entry came first); 10 m above the second, clear of the crate,
-	// the second.
+	// Nested: on the crate's body past its glyph (a camera near it), inside the second's sphere,
+	// the crate; 10 m above the second, clear of the crate, the second.
 	OrbitCamera crate_view = camera_over(4.0, 24.0, 1.0, 10.0f);
 	crate_view.pitch = 0.2f;
 	const std::vector<MissionMark> by_crate = mission_marks(scene, options, crate_view, width, height, nullptr, &radii);
@@ -398,7 +397,7 @@ int test_sphere_picks() {
 	// A device that cannot say (not placed yet): as with none.
 	device.ray = nullptr;
 	TEST_EXPECT(pick(marks, x, y, &device, MissionPick::Click) == 0 && pick(marks, x, y, &device, MissionPick::Press) == -1);
-	// A sphere is clicked by its model with its anchor off the picture (below it: the review's L1), the
+	// A sphere is clicked by its model with its anchor off the picture (below it), the
 	// eye outside it.
 	OrbitCamera close = camera_over(0.0, 0.0, 9.0, 6.0f);
 	close.pitch = 0.0f; // level, 9 m up, 6 m south: the first's anchor below the frame
@@ -816,9 +815,37 @@ int test_label_picks() {
 	return 0;
 }
 
+// The models a placement warms: each graphic once with its items, markers and warm graphics left out; the rows a
+// lift takes, folded back into a whole placement past the most.
+int test_warm_and_lift() {
+	std::vector<MissionEntityMark> entities(5);
+	for (size_t i = 0; i < entities.size(); ++i) {
+		entities[i].row = NodeId(10 + i);
+		entities[i].item = int64_t(100 + i % 2);
+	}
+	entities[3].pool = MissionPool::Marker;
+	entities[4].item = 200;
+	std::vector<const MissionEntityMark *> all;
+	for (const MissionEntityMark &entity : entities) all.push_back(&entity);
+	const auto graphic_of = [](int64_t item) { return item == 200 ? std::string("warm.3di") : "g" + std::to_string(item); };
+	const std::vector<MissionWarmModel> models =
+			mission_models_to_warm(all, graphic_of, [](const std::string &graphic) { return graphic == "warm.3di"; });
+	TEST_EXPECT(models.size() == 2 && models[0].graphic == "g100" && models[0].items == std::vector<int64_t>({ 100 }) &&
+	            models[1].graphic == "g101" && models[1].items == std::vector<int64_t>({ 101 }));
+	// Whole where asked; else the rows not placed alike lifted, and past the most a whole placement again.
+	const auto alike = [](const MissionEntityMark &entity) { return entity.row != 11 && entity.row != 12; };
+	TEST_EXPECT(mission_place_or_lift(entities, true, alike, {}, 256).place);
+	MissionPlacePlan plan = mission_place_or_lift(entities, false, alike, {}, 256);
+	TEST_EXPECT(!plan.place && plan.adds == std::vector<NodeId>({ 11, 12 }));
+	plan = mission_place_or_lift(entities, false, alike, { 12, 40 }, 2);
+	TEST_EXPECT(plan.place && plan.adds.size() == 2);
+	return 0;
+}
+
 } // namespace
 
 int main() {
+	TEST_EXPECT(test_warm_and_lift() == 0);
 	TEST_EXPECT(test_scene() == 0);
 	TEST_EXPECT(test_marks() == 0);
 	TEST_EXPECT(test_sphere_picks() == 0);

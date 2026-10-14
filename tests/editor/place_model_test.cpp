@@ -177,9 +177,7 @@ int64_t lowest_free_id(const SessionView &view) {
 		if (!def::reserved_item_by_id(int(id)) && !used.count(id)) return id;
 }
 
-std::string refusal(ProjectSession &session) {
-	return session.outcome().findings.empty() ? std::string() : session.outcome().findings.front().message;
-}
+using editor_test::refusal;
 
 } // namespace
 

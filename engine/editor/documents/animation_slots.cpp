@@ -151,8 +151,6 @@ int animation_slot_family(int slot) {
 	return -1;
 }
 
-size_t animation_slot_family_count() { return kFamilyCount; }
-
 const AnimSlotFamily &animation_slot_family_row(int family) {
 	return family >= 0 && family < kFamilyCount ? kFamilies[family] : kUnknownFamily;
 }

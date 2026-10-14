@@ -60,7 +60,7 @@ Gotchas:
 - After any native change here: run `scripts/build_godot.sh` and fully restart the Godot
   editor — GDExtension registration does not hot-reload, and GDScript referencing an
   unregistered class fails to parse (GUT then silently drops those test scripts).
-- Two GDExtension variants come out of one build (ADR 0046 d4): `libopennova.*`
+- Two GDExtension variants come out of one build (ADR 0046 d2): `libopennova.*`
   (runtime-only: the game and the editor's Play child) and `libopennova_editor.*`
   (the same bindings plus `authoring/` and the editor core: what the OpenNova
   Editor ships). A source run (the Godot editor, GUT, export scanning) loads

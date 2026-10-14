@@ -265,10 +265,6 @@ SerializeResult StringsDocument::serialize() const {
 
 bool StringsDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                             std::shared_ptr<const FileState> &, std::vector<SourceIssue> &issues, Diagnostic &error) {
-	if (!is_strings_kind(kind())) {
-		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not a string table.", path());
-		return false;
-	}
 	rtxt::File file;
 	std::string message;
 	// The empty-file guard of the loader hands a single NUL for an empty file; a

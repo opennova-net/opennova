@@ -98,10 +98,7 @@ struct Rig {
 	}
 };
 
-const JsonValue *at(const JsonValue &value, const char *a, const char *b = nullptr) {
-	const JsonValue *one = value.get(a);
-	return b && one ? one->get(b) : one;
-}
+using editor_test::at;
 
 opennova::env::Keyframe keyframe(int time, uint32_t sun, uint32_t fog) {
 	opennova::env::Keyframe out;
@@ -405,7 +402,7 @@ int test_listen() {
 	JsonValue body = rig.body();
 	TEST_EXPECT(at(body, "listen") && at(body, "listen")->is_null() && !viewport->listen().open());
 	// Listen on, the rain at once: a second on, the two loops beside the listener on two channels.
-	rig.set(R"({"kind": "environment", "options": {"listen": {"on": true, "volume": 0.5}, "rain": {"percent": 100, "seconds": 0}}, "clock": {"playing": true}})");
+	rig.set(R"({"kind": "environment", "options": {"listen": {"on": true}, "rain": {"percent": 100, "seconds": 0}}, "clock": {"playing": true}})");
 	rig.advance(1.0);
 	TEST_EXPECT(viewport->listen().open() && viewport->weather().raining());
 	size_t loops = 0;
@@ -418,7 +415,7 @@ int test_listen() {
 	body = rig.body();
 	TEST_EXPECT(at(body, "listen", "rain") && at(body, "listen", "rain")->get("loops")->number == 2.0 &&
 	            at(body, "listen", "rain")->get("sets_found")->number == 2.0);
-	TEST_EXPECT(at(body, "listen", "volume") && at(body, "listen", "volume")->number == 0.5);
+	TEST_EXPECT(!at(body, "listen", "volume"));
 	// The thunder of a tick's lightning (sequencer A, a metre off), planned from the project's bank.
 	EnvironmentListen listen;
 	TEST_EXPECT(listen.refresh(rig.session.view()));
@@ -427,10 +424,10 @@ int test_listen() {
 	listen.thunder(12, lightning);
 	opennova::audio::SoundSelector selector;
 	uint64_t seq = 0;
-	const std::vector<ClipSoundFired> fired = listen.fire_sounds(rig.session.view().project.scan.get(), selector, seq, 1.0f);
+	const std::vector<ClipSoundFired> fired = listen.fire_sounds(rig.session.view().project.scan.get(), selector, seq);
 	TEST_EXPECT(fired.size() == 1 && fired[0].set == "THUNDER" && fired[0].state == "played" && fired[0].tick == 12 &&
 	            fired[0].action == "thunder" && !fired[0].voices.empty() && fired[0].voices[0].path == "sounds/thunder.wav");
-	TEST_EXPECT(listen.fire_sounds(nullptr, selector, seq, 1.0f).empty());
+	TEST_EXPECT(listen.fire_sounds(nullptr, selector, seq).empty());
 	// Off: closed, nothing listens.
 	rig.set(R"({"kind": "environment", "options": {"listen": {"on": false}}})");
 	rig.advance(0.1);

@@ -104,7 +104,7 @@ void test_preview_room() {
 	ui.frames(3);
 	CHECK(!preview_stands_aside(v) && preview_feeds_table(v), "a string table feeds the menu shown");
 	CHECK(preview->Active && document->Size.x >= kFeedTableRoomEm * ImGui::GetFontSize(),
-	      "at 1920 wide the table has its room: the live menu shown beside it (the review's L15d)");
+	      "at 1920 wide the table has its room: the live menu shown beside it");
 	// Narrower (the audit's 1600, the Document some 330 px), the table takes the centre.
 	ImGui::GetIO().DisplaySize = ImVec2(1600.0f, 1080.0f);
 	ui.frames(4);
@@ -243,7 +243,7 @@ void test_files_kind_and_card() {
 	              text.find("menu.lwf") == std::string::npos && text.find("1 of 4 files") != std::string::npos,
 	      "Wave: the waves alone");
 	ImGui::ClosePopupsExceptModals();
-	// The card, Files closed (the review's L14: the card is drawn whether Files draws or not).
+	// The card, Files closed (the card is drawn whether Files draws or not).
 	devtools::Window *files_window = nullptr;
 	for (int i = 0; i < ui.windows.pass().window_count(); ++i)
 		if (std::strcmp(ui.windows.pass().window(i).title(), "Files") == 0) files_window = &ui.windows.pass().window(i);
@@ -269,7 +269,7 @@ void test_files_kind_and_card() {
 	session.report_sound(v.workspace.sound.serial, WorkspaceView::SoundState::Playing);
 	run.settle();
 	CHECK(logged_frame(ui).find("Playing") != std::string::npos, "the card says it plays, as the Shell reports");
-	// Closed, the card stops what its Play played (the review's L4): its close the workspace's, which stops it.
+	// Closed, the card stops what its Play played: its close the workspace's, which stops it.
 	ImGuiWindow *card_window = ImGui::FindWindowByName("###file_card");
 	if (card_window) ui.activate(card_window->GetID("#CLOSE"));
 	ui.session = &session; // the set_workspace it raises served by the session
@@ -282,8 +282,8 @@ void test_files_kind_and_card() {
 	text = logged_frame(ui);
 	CHECK(text.find("About menu.lwf") != std::string::npos && text.find("missing from the project") != std::string::npos,
 	      "a sound bank's card lists its waves");
-	// Another project: its own Files (no filter, no kind narrowing it), the card of the last one closed (the
-	// review's L15c).
+	// Another project: its own Files (no filter, no kind narrowing it), the card of the last one
+	// closed.
 	session.handle(request::new_project(dir.file("other"), "Other"));
 	run.settle();
 	text = logged_frame(ui);
@@ -297,8 +297,8 @@ void test_files_kind_and_card() {
 // offers the game's files: the main menu with what it needs.
 void test_welcome_install_and_first_steps() {
 	SessionView v;
-	// The editor's own install fills the form, never the one in effect (an open project's own, or a session's:
-	// the review's L2).
+	// The editor's own install fills the form, never the one in effect (an open project's own, or a
+	// session's).
 	v.project.editor_install = "C:/Games/JO";
 	v.project.retail_directory = "C:/Session/Other";
 	Ui ui;
@@ -319,8 +319,8 @@ void test_welcome_install_and_first_steps() {
 	std::string text = logged_frame(ui);
 	CHECK(text.find(": 9,290 files, the expansion Escalation (jox01).") != std::string::npos, "what it holds");
 	CHECK(only(ui.drain(), EditorRequestKind::CheckInstall) == nullptr, "asked once");
-	// The view's one slot taken by another field's check (Project settings'): this field keeps its own answer
-	// (the review's L12).
+	// The view's one slot taken by another field's check (Project settings'): this field keeps its
+	// own answer.
 	const InstallCheck answered = v.project.install_check;
 	v.project.install_check = InstallCheck();
 	v.project.install_check.root = absolute_install_path("C:/Elsewhere");
@@ -329,7 +329,7 @@ void test_welcome_install_and_first_steps() {
 	CHECK(logged_frame(ui).find(": 9,290 files") != std::string::npos && only(ui.drain(), EditorRequestKind::CheckInstall) == nullptr,
 	      "another field's check over the slot: this field's line as it was, nothing asked again");
 	v.project.install_check = answered;
-	// The field cleared: what a project made then takes, the editor's install (the review's L1).
+	// The field cleared: what a project made then takes, the editor's install.
 	const ImGuiID welcome = item_id(Ui::window_id("Document"), {"welcome"});
 	ImGui::ActivateItemByID(item_id(welcome, {"Game install"}));
 	GImGui->NavNextActivateFlags = ImGuiActivateFlags_PreferInput;
@@ -344,7 +344,7 @@ void test_welcome_install_and_first_steps() {
 	ui.frames(2);
 	CHECK(logged_frame(ui).find("Left empty, the project takes the editor's game install, C:/Games/JO.") != std::string::npos,
 	      "the field cleared: the install a project takes then said");
-	// A refused New project or Open says why on the page (the review's M3).
+	// A refused New project or Open says why on the page.
 	v.project.refused = "The project could not be created: C:/mods/New holds a project already.";
 	v.revisions.touch(ViewConcern::Project);
 	ui.frames(2);
@@ -395,7 +395,7 @@ void test_welcome_install_and_first_steps() {
 	ui.drain();
 	text = logged_frame(ui);
 	CHECK(text.find("Bring in the game's files") != std::string::npos, "the first steps");
-	// The windows back from standing aside take no keyboard (the review's L15a).
+	// The windows back from standing aside take no keyboard.
 	const ImGuiWindow *focused = GImGui->NavWindow ? GImGui->NavWindow->RootWindow : nullptr;
 	const std::string focused_name = focused ? focused->Name : "";
 	CHECK(focused_name.rfind("Files", 0) != 0 && focused_name.rfind("Inspector", 0) != 0 &&
@@ -410,12 +410,13 @@ void test_welcome_install_and_first_steps() {
 
 } // namespace
 
-// The dialogs that take the whole editor show one at a time, the session's order (review X3), over a real session:
-// a project with an unsaved edit; File > New project..., its Create: the session takes new_project, closing the
-// form's modal, and the unsaved prompt it waits on shows alone, frame after frame, its Cancel leaving neither
-// (nothing made, the edit kept); asked again, its Discard makes the project. Two held over the wire at once
-// (Project settings and New project...) show one at a time: the settings first, New project once they close, held
-// open the while (nothing dismissed).
+// The dialogs that take the whole editor show one at a time, the session's order, over a real
+// session: a project with an unsaved edit; File > New project..., its Create: the session takes
+// new_project, closing the form's modal, and the unsaved prompt it waits on shows alone, frame
+// after frame, its Cancel leaving neither (nothing made, the edit kept); asked again, its Discard
+// makes the project. Two held over the wire at once (Project settings and New project...) show one
+// at a time: the settings first, New project once they close, held open the while (nothing
+// dismissed).
 void test_modals_one_at_a_time() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_modals");
 	NoProcess platform;
