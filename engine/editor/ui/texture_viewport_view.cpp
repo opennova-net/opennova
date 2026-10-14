@@ -38,7 +38,6 @@ constexpr size_t kChannelCount = sizeof(kChannelNames) / sizeof(kChannelNames[0]
 // The object texture detail's choices in the toolbar: as stored, then each level, full first.
 constexpr const char *kDetailNames[] = {"As stored", "Detail 3 (full)", "Detail 2", "Detail 1", "Detail 0 (lowest)"};
 
-
 std::string percent(float scale) {
 	char text[32];
 	std::snprintf(text, sizeof(text), "%g%%", std::round(scale * 1000.0f) / 10.0f);
