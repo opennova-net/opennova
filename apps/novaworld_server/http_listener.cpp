@@ -3,6 +3,7 @@
 #include "auth.h"
 #include "catalog_repository.h"
 #include "host_routes.h"
+#include "hosted/bootstrap_route.h"
 #include "hosted/console_routes.h"
 #include "hosted/hosted_routes.h"
 #include "http_cookies.h"
@@ -332,6 +333,8 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->hosted_servers.register_routes(impl_->app);
 	impl_->console.set_handler_threads(handler_threads());
 	impl_->console.register_routes(impl_->app, admin_links_);
+	if (bootstrap_store_ != nullptr)
+		hosted::register_bootstrap_route(impl_->app, *bootstrap_store_, bootstrap_admitted_);
 	register_legacy_login_routes(templates_dir);
 	register_legacy_host_join_routes(templates_dir);
 	// The catch-all /<path> wildcard must register last: Crow rejects a

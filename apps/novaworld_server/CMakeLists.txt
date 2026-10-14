@@ -19,15 +19,21 @@ if(BUILD_NOVAWORLD_HTTP)
         web_access.cpp
         web_session.cpp
         # Hosted servers (ADR 0053, proposed): the supervisor, its rows and
-        # renders, the local MachineProvider, the admin link and its console
-        # routes.
+        # renders, the local and the EC2 MachineProviders (the AWS CLI runner,
+        # the cloud machines' bootstrap tokens and route), the admin link and
+        # its console routes.
         hosted/admin_link.cpp
+        hosted/bootstrap.cpp
+        hosted/bootstrap_route.cpp
+        hosted/command_runner.cpp
         hosted/console_commands.cpp
         hosted/console_routes.cpp
+        hosted/ec2_provider.cpp
         hosted/hosted_repository.cpp
         hosted/hosted_routes.cpp
         hosted/hosted_settings.cpp
         hosted/local_process_provider.cpp
+        hosted/owner_file.cpp
         hosted/supervisor.cpp
     )
 endif()
@@ -65,7 +71,8 @@ endif()
 target_compile_features(opennova_novaworld_server_core PUBLIC cxx_std_17)
 
 if(WIN32)
-    # advapi32: the local provider's owner-only file DACLs (SetSecurityInfo).
+    # advapi32: the hosted servers' owner-only file DACLs (SetSecurityInfo,
+    # hosted/owner_file.cpp).
     target_link_libraries(opennova_novaworld_server_core PUBLIC ws2_32 advapi32)
 endif()
 

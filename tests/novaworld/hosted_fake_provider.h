@@ -4,7 +4,8 @@
 // LaunchSpec and hands out a machine that starts Pending (or Running, with
 // `start_running`), and the test moves each machine through its states (run,
 // exit with a code, vanish) and reads what the supervisor asked for (the specs,
-// the terminations). A launch can be made to fail. Nothing runs.
+// the terminations). A launch, or the listing, can be made to fail. Nothing
+// runs.
 
 #include "hosted/machine_provider.h"
 
@@ -12,6 +13,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -77,6 +79,7 @@ public:
 	}
 
 	std::vector<hosted::TaggedMachine> list_tagged() override {
+		if (fail_list) throw std::runtime_error("the fake could not list its machines");
 		std::vector<hosted::TaggedMachine> out;
 		for (const auto &entry : machines) {
 			if (!entry.second.terminated) out.push_back({ entry.first, entry.second.server_id });
@@ -121,6 +124,8 @@ public:
 	int launches = 0;
 	bool start_running = false;
 	bool fail_next_launch = false;
+	// list_tagged() throws while set (a cloud listing that failed).
+	bool fail_list = false;
 	int hide_address_describes = 0;
 	// Runs inside launch(), once the machine exists (a route acting mid-launch).
 	std::function<void()> on_launch;

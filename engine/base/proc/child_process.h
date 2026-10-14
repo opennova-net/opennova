@@ -3,10 +3,12 @@
 // A child process: started from an argv array with no shell between (nothing in
 // an argument is ever interpreted), in a working directory of its own, its
 // standard input the null device and its output appended to a file (or
-// discarded), then polled, waited for, asked to stop, killed, or released to run
-// on its own. The one child-process seam of the engine's embedders: the
-// NovaWorld service's hosted-server supervisor runs opennova-serve through it
-// (apps/novaworld_server/hosted/local_process_provider.h), and a front end that
+// discarded; its standard error in a file of its own where asked), then polled,
+// waited for, asked to stop, killed, or released to run on its own. The one
+// child-process seam of the engine's embedders: the NovaWorld service's
+// hosted-server supervisor runs opennova-serve through it
+// (apps/novaworld_server/hosted/local_process_provider.h) and its cloud provider
+// the AWS CLI (hosted/command_runner.h), and a front end that
 // starts the game (the editor's Play) holds the game through it. Platform
 // plumbing, not a port: CreateProcessW on Windows, fork and execv elsewhere. It
 // is not in the web build: a browser starts no process.
@@ -52,6 +54,12 @@ struct SpawnOptions {
 	// The file the child's standard output and standard error are appended to
 	// (created when missing; owner-only on POSIX); empty discards them.
 	std::string output_path;
+	// The file the child's standard error is appended to instead (created when
+	// missing; owner-only on POSIX), so a program whose output is data keeps it
+	// apart from its diagnostics (the hosted servers' AWS CLI runs,
+	// apps/novaworld_server/hosted/command_runner.h); empty sends it where the
+	// output goes.
+	std::string error_path;
 	// The child's whole environment, NAME=value entries (filter_environment
 	// picks them from this process's); unset, the child inherits this process's.
 	std::optional<std::vector<std::string>> environment;
@@ -114,9 +122,9 @@ public:
 	ChildProcess &operator=(const ChildProcess &) = delete;
 
 	// Starts the child. False with `error` when it did not start (the program
-	// is missing or not executable, the directory does not exist, the output
-	// file does not open, a Windows path is too long even in its short form,
-	// with the OS's own error where there is one); nothing runs then. One child
+	// is missing or not executable, the directory does not exist, the output or
+	// error file does not open, a Windows path is too long even in its short
+	// form, with the OS's own error where there is one); nothing runs then. One child
 	// per ChildProcess: a second spawn() while one runs is refused, and one
 	// after the first has exited forgets it.
 	bool spawn(const SpawnOptions &options, std::string &error);
