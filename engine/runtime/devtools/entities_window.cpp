@@ -1,6 +1,7 @@
 #include <runtime/devtools/entities_window.h>
 
 #include <base/io/strutil.h>
+#include <runtime/devtools/ui_kit.h>
 
 #include <imgui.h>
 
@@ -229,7 +230,7 @@ void EntitiesWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 	(void)pass;
 	(void)frame_index;
 	if (!snapshot_.valid) {
-		ImGui::TextUnformatted("No entity directory pushed (load a mission).");
+		ui_kit::empty_state("No entity directory pushed (load a mission).");
 		if (pending_select_handle_ != kNoHandle) {
 			const world::EntityHandle pending{pending_select_handle_};
 			ImGui::Text("Selected entity %d:%d awaits the next directory push.",
@@ -241,8 +242,7 @@ void EntitiesWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 			row_count(), static_cast<int>(snapshot_.rows.size()),
 			static_cast<unsigned long long>(snapshot_.logic_tick), kRefreshSeconds,
 			snapshot_.authority ? "" : " | read-only (joiner)");
-	ImGui::SetNextItemWidth(-64.0f);
-	if (ImGui::InputText("Filter", filter_.data(), filter_.size())) {
+	if (ui_kit::filter_box("##filter", filter_.data(), filter_.size(), "Filter by name, item or SSN")) {
 		apply_filter();
 	}
 

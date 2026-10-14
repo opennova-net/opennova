@@ -1,6 +1,7 @@
 #include <runtime/devtools/stats_window.h>
 
 #include <runtime/devtools/stats_window_rows.h>
+#include <runtime/devtools/ui_kit.h>
 
 #include <imgui.h>
 
@@ -346,7 +347,7 @@ void StatsWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 	}
 
 	if (board_ == nullptr && !external_) {
-		ImGui::TextUnformatted("No frame-stats board bound.");
+		ui_kit::empty_state("No frame-stats board bound.");
 		return;
 	}
 	if (reading_.frames > 0) {
