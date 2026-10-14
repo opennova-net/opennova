@@ -330,6 +330,9 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/document_set_scope.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_preferences.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_queries.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/asset_queries.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/document_op_queries.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/viewport_query.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/particle_keys_query.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_preferences_store.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/environment_uses.cpp
