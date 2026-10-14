@@ -40,7 +40,7 @@ constexpr NodeKind node_kind(SoundBankKind kind) { return static_cast<NodeKind>(
 // The native records the bank's table describes (sound_bank_table in the .cpp).
 struct BankMember {
 	std::string wave;                                 // the wave's name in this bank
-	uint32_t pitch = lwf::kPitchUnityQ16;             // Q16, 0x10000 = as recorded
+	uint32_t pitch = lwf::kAuthoredMemberPitch;       // Q16, 0x10000 = as recorded; a new one the tools' 0xFFFF
 	uint32_t pitch_jitter = 0;                        // Q16, added: (range * rand8) >> 8
 	uint32_t volume = 255;                            // 0..255
 	uint32_t ceiling = 255;                           // 0..255, the distance-scaled volume's ceiling
@@ -107,7 +107,8 @@ protected:
 	// A new wave (a name no wave has, no file yet) or a new set (a name no set has, no layer yet: one
 	// batch adds the set, its layer and the layer's members, each naming what the one before it made).
 	// A new layer is heard in both views and picks at random (BankLayer's defaults); a new member plays
-	// the bank's first wave until one is named.
+	// the bank's first wave until one is named, at the pitch the authoring tools give one (0xFFFF, the set's
+	// convention: lwf::kAuthoredMemberPitch).
 	std::shared_ptr<Node> make_node(NodeKind kind, NodeId id, const std::vector<std::shared_ptr<const Node>> &rows,
 	                                std::string &error) override;
 	// The waves before the sets, as the file holds them: a wave goes among the waves, a set among the
