@@ -1024,7 +1024,7 @@ static bool infantry_terrain_motion(AiEntity &e, Entity *entity,
 // bone yaw by Entity_BuildBoneTransformMatrices @0x4b1290 (section 14).
 // [orig: Entity_UpdateInfantryAI body @0x4BE8FD..0x4BE931, carried snap
 //  @0x4BE934 -> @0x4BEB0C, legs @0x4BE944..0x4BEB0A, look @0x4BEB18..0x4BEBE7]
-static void infantry_org1_heading_chase(AiEntity &e, const Entity *ent, uint32_t key) {
+void infantry_org1_heading_chase(AiEntity &e, const Entity *ent, uint32_t key) {
     InfantryState &inf = e.inf;
     const int32_t diff = io::bam_sub(inf.target_heading, inf.body_heading);
     int32_t step = io::bam_sar(io::bam_add(diff, 2), 2);
@@ -1595,84 +1595,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     if (!npc_body) infantry_follow_carrier(e, world, frame.capsule_bottom, true);
 
     // Restamp the camera offset from the current simulated head, after the
-    // motor-head channel update and current view/seat/lean pose. The local
-    // on-foot path terrain-floors the absolute eye; the mounted path does not.
-    // The capsule fallback retains the org1/org2 extent and lean formulas.
-    // [orig: carrier selector @0x4B6386; mounted local selector @0x4B66CD;
-    //  org2 @0x4B6908..0x4B696C / @0x4B6BB3..0x4B6CC8;
-    //  org1 @0x4BF078..0x4BF14C]
-    if (have_clip) {
-        int32_t head_world[3] = {};
-        if (inf.is_local_player && world.pose_provider != nullptr &&
-                world.pose_provider->resolve_skeletal_anchor(
-                        world, e.handle, SkeletalAnchor::Head, head_world)) {
-            float head[3] = {
-                static_cast<float>(from_fixed(io::bam_sub(head_world[0], e.pos[0]))),
-                static_cast<float>(from_fixed(io::bam_sub(head_world[1], e.pos[1]))),
-                static_cast<float>(from_fixed(io::bam_sub(head_world[2], e.pos[2])))
-            };
-            const Entity *reg = world.registry.get(e.handle);
-            // The terrain floor is an ABSOLUTE-space rule, so apply it to the
-            // absolute eye and fold the correction back into the delta. It is
-            // also on-foot only: the mounted leg is unfloored in retail
-            // [orig: the 0x2000 floors @0x4b68e7/@0x4b6b98 belong to the
-            //  capsule legs, and @0x4b6908 has no floor of any kind].
-            const bool seated = reg != nullptr && reg->mounted;
-            if (!seated) {
-                float abs_eye[3] = {static_cast<float>(from_fixed(e.pos[0]) + head[0]),
-                                    static_cast<float>(from_fixed(e.pos[1]) + head[1]),
-                                    static_cast<float>(from_fixed(e.pos[2]) + head[2])};
-                player_view_floor_eye_to_terrain(
-                        terrain,
-                        reg != nullptr &&
-                                (reg->flags & kEntityFlagIndoors) != 0,
-                        abs_eye);
-                head[0] = abs_eye[0] - from_fixed(e.pos[0]);
-                head[1] = abs_eye[1] - from_fixed(e.pos[1]);
-                head[2] = abs_eye[2] - from_fixed(e.pos[2]);
-            }
-            inf.eye_offset_x = to_fixed(head[0]);
-            inf.eye_offset_y = to_fixed(head[1]);
-            inf.eye_offset_z = to_fixed(head[2]);
-        } else {
-            // Player extent cap: on foot @0x4B698C, mounted @0x4B66D9.
-            // [orig: @0x4B698C / @0x4B66D9; floors @0x4B6B98 / @0x4B68E7]
-            const int32_t extent = frame.capsule_top - frame.capsule_bottom;
-            const int32_t delta = inf.is_local_player ? std::min(extent, 0xD000)
-                                                      : std::max(extent, 0x9000);
-            const double lean_rad = static_cast<double>(inf.lean_angle) *
-                                    io::kRadiansPerBam;
-            const int32_t lean_cos =
-                static_cast<int32_t>(std::cos(lean_rad) * io::kQ22One);
-            int32_t eye_z =
-                static_cast<int32_t>((static_cast<int64_t>(delta) * lean_cos) >> 22);
-            if (inf.is_local_player && eye_z < 0x2000) eye_z = 0x2000;
-            inf.eye_offset_z = eye_z;
-            if (inf.is_local_player) {
-                // A lost sample must not leave a stale head-frame lateral pair
-                // behind: the capsule fallback carries no lateral model (the
-                // 3-angle tilt is the tracked residue), so the lanes reset.
-                inf.eye_offset_x = 0;
-                inf.eye_offset_y = 0;
-            } else {
-                const int32_t lean_sin =
-                    static_cast<int32_t>(std::sin(lean_rad) * io::kQ22One);
-                const int32_t lat_raw = static_cast<int32_t>(
-                    (static_cast<int64_t>(delta) * lean_sin) >> 22);
-                const int32_t lat = (lat_raw * 3) >> 2;
-                const double yaw_rad = static_cast<double>(e.heading) *
-                                       io::kRadiansPerBam;
-                const int32_t yaw_sin =
-                    static_cast<int32_t>(std::sin(yaw_rad) * io::kQ22One);
-                const int32_t yaw_cos =
-                    static_cast<int32_t>(std::cos(yaw_rad) * io::kQ22One);
-                inf.eye_offset_x = static_cast<int32_t>(
-                    (static_cast<int64_t>(lat) * yaw_sin) >> 22);
-                inf.eye_offset_y = -static_cast<int32_t>(
-                    (static_cast<int64_t>(lat) * yaw_cos) >> 22);
-            }
-        }
-    }
+    // motor-head channel update and current view/seat/lean pose.
+    if (have_clip) infantry_restamp_eye(e, world, frame);
 
     // Org2 selects its next gait only after the current head pose was built.
     // [orig: head @0x4B6BB3; fourth-tick selector @0x4B70CE; ladder @0x4B7484]
@@ -2377,6 +2301,85 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     }
 
     finish_infantry_tick(e, world);
+}
+
+void AiSystem::infantry_restamp_eye(AiEntity &e, World &world, const RootMotionFrame &frame) {
+    // The local on-foot path terrain-floors the absolute eye; the mounted path
+    // does not. The capsule fallback retains the org1/org2 extent and lean
+    // formulas. [orig: carrier selector @0x4B6386; mounted local selector
+    // @0x4B66CD; org2 @0x4B6908..0x4B696C / @0x4B6BB3..0x4B6CC8;
+    // org1 @0x4BF078..0x4BF14C]
+    InfantryState &inf = e.inf;
+    int32_t head_world[3] = {};
+    if (inf.is_local_player && world.pose_provider != nullptr &&
+            world.pose_provider->resolve_skeletal_anchor(
+                    world, e.handle, SkeletalAnchor::Head, head_world)) {
+        float head[3] = {
+            static_cast<float>(from_fixed(io::bam_sub(head_world[0], e.pos[0]))),
+            static_cast<float>(from_fixed(io::bam_sub(head_world[1], e.pos[1]))),
+            static_cast<float>(from_fixed(io::bam_sub(head_world[2], e.pos[2])))
+        };
+        const Entity *reg = world.registry.get(e.handle);
+        // The terrain floor is an ABSOLUTE-space rule, so apply it to the
+        // absolute eye and fold the correction back into the delta. It is
+        // also on-foot only: the mounted leg is unfloored in retail
+        // [orig: the 0x2000 floors @0x4b68e7/@0x4b6b98 belong to the
+        //  capsule legs, and @0x4b6908 has no floor of any kind].
+        const bool seated = reg != nullptr && reg->mounted;
+        if (!seated) {
+            float abs_eye[3] = {static_cast<float>(from_fixed(e.pos[0]) + head[0]),
+                                static_cast<float>(from_fixed(e.pos[1]) + head[1]),
+                                static_cast<float>(from_fixed(e.pos[2]) + head[2])};
+            player_view_floor_eye_to_terrain(
+                    terrain,
+                    reg != nullptr &&
+                            (reg->flags & kEntityFlagIndoors) != 0,
+                    abs_eye);
+            head[0] = abs_eye[0] - from_fixed(e.pos[0]);
+            head[1] = abs_eye[1] - from_fixed(e.pos[1]);
+            head[2] = abs_eye[2] - from_fixed(e.pos[2]);
+        }
+        inf.eye_offset_x = to_fixed(head[0]);
+        inf.eye_offset_y = to_fixed(head[1]);
+        inf.eye_offset_z = to_fixed(head[2]);
+    } else {
+        // Player extent cap: on foot @0x4B698C, mounted @0x4B66D9.
+        // [orig: @0x4B698C / @0x4B66D9; floors @0x4B6B98 / @0x4B68E7]
+        const int32_t extent = frame.capsule_top - frame.capsule_bottom;
+        const int32_t delta = inf.is_local_player ? std::min(extent, 0xD000)
+                                                  : std::max(extent, 0x9000);
+        const double lean_rad = static_cast<double>(inf.lean_angle) *
+                                io::kRadiansPerBam;
+        const int32_t lean_cos =
+            static_cast<int32_t>(std::cos(lean_rad) * io::kQ22One);
+        int32_t eye_z =
+            static_cast<int32_t>((static_cast<int64_t>(delta) * lean_cos) >> 22);
+        if (inf.is_local_player && eye_z < 0x2000) eye_z = 0x2000;
+        inf.eye_offset_z = eye_z;
+        if (inf.is_local_player) {
+            // A lost sample must not leave a stale head-frame lateral pair
+            // behind: the capsule fallback carries no lateral model (the
+            // 3-angle tilt is the tracked residue), so the lanes reset.
+            inf.eye_offset_x = 0;
+            inf.eye_offset_y = 0;
+        } else {
+            const int32_t lean_sin =
+                static_cast<int32_t>(std::sin(lean_rad) * io::kQ22One);
+            const int32_t lat_raw = static_cast<int32_t>(
+                (static_cast<int64_t>(delta) * lean_sin) >> 22);
+            const int32_t lat = (lat_raw * 3) >> 2;
+            const double yaw_rad = static_cast<double>(e.heading) *
+                                   io::kRadiansPerBam;
+            const int32_t yaw_sin =
+                static_cast<int32_t>(std::sin(yaw_rad) * io::kQ22One);
+            const int32_t yaw_cos =
+                static_cast<int32_t>(std::cos(yaw_rad) * io::kQ22One);
+            inf.eye_offset_x = static_cast<int32_t>(
+                (static_cast<int64_t>(lat) * yaw_sin) >> 22);
+            inf.eye_offset_y = -static_cast<int32_t>(
+                (static_cast<int64_t>(lat) * yaw_cos) >> 22);
+        }
+    }
 }
 
 void AiSystem::finish_infantry_tick(AiEntity &e, World &world) {

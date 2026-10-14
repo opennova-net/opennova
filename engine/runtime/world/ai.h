@@ -1132,6 +1132,29 @@ public:
     // state selection (every 16, authority) -> body-heading turn -> slope slide (every 8)
     // -> rotate root delta by heading -> integrate + gravity/ground (every 2).
     void tick_infantry(AiEntity &e, World &world, uint32_t logic_tick);
+    // THE ORG1 TICK OF A STILL BODY: what tick_infantry runs for a live, unhidden NPC body that
+    // stands where its spawn stood it, for a caller outside the world's entity update (the
+    // editor's mission view runs it for each such body of `world` in pool order). It runs, in
+    // tick_infantry's order:
+    // - the motor head (infantry_org1_motor_head over the system's root motion and ring heads);
+    // - on the authority's think ticks, the think of a still body (infantry_org1_still_think on
+    //   the slot's alert byte and the guard flag, which the guard leg drops where the .adm
+    //   authors no guard [orig: @0x4BD1B8]) and then the think's attention tail (the ride link,
+    //   the idle facing fan, the stop fix-up, the attention scan, the head look and its look
+    //   idles [orig: @0x4BD87E..0x4BE7FD]);
+    // - the heading chase: the body, the legs and the look [orig: @0x4BE8FD..0x4BEBD9];
+    // - the eye restamp (infantry_restamp_eye) [orig: @0x4BF078..0x4BF14C];
+    // - and the registry mirror (finish_infantry_tick).
+    // It skips what a body that stands does not run or does not show: the death edge and the
+    // corpse leg; the slope pass (a standing body only decays toward level, where it spawns); the
+    // attachment, the carrier ride and the steep-ground slide; the think's route, command and
+    // combat legs and the selection's other substitutions (no route, order, target or hit: the
+    // perception's threats, the reactions and the no-target arm's walk to a seen enemy's aim
+    // point [orig: @0x4BC34B..0x4BC4BE] are the world's); the recoil, spread and torso roll (zero
+    // for a body that never fires and stands level); the sound and fire passes; the root
+    // integrate, gravity and the resolver (the body stays where its spawn stood it).
+    // [orig: Entity_UpdateInfantryAI @0x4B9910]
+    void tick_still_body(AiEntity &e, World &world, uint32_t logic_tick);
     // The infantry combat pass (org1 riflemen; world-wac-ai-re §17.1-17.3/17.5, D-AI-4):
     // 32-tick staged perception and 16-tick reactions, movement goals and aim.
     // Returns the proposed animation (0 = no override) for the common selector.
@@ -1179,6 +1202,12 @@ public:
     // Reconcile the split AiEntity/registry stores, wire animation, and part channels
     // at either the mounted return or the ordinary end of the infantry tick.
     void finish_infantry_tick(AiEntity &e, World &world);
+    // The camera offset (+0x74) restamped from the head the motor head just posed: the local
+    // player's from its skeletal head anchor, floored on foot; else from the frame's capsule
+    // extent and the lean, an NPC's tilted laterally along its look heading.
+    // [orig: carrier selector @0x4B6386; mounted local selector @0x4B66CD;
+    //  org2 @0x4B6908..0x4B696C / @0x4B6BB3..0x4B6CC8; org1 @0x4BF078..0x4BF14C]
+    void infantry_restamp_eye(AiEntity &e, World &world, const RootMotionFrame &frame);
     // AUTHORITY body-anim selection for a net-snapped REMOTE player. The movement motor must
     // not re-simulate a wire-snapped peer (tick_infantry skips it), but the retail authority
     // still runs the player-body ANIM selection for every player, consuming the REPLICATED

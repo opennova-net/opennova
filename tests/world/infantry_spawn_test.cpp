@@ -6,6 +6,7 @@
 #include <runtime/anim/adm_root_motion.h>
 #include <runtime/anim/clip_timeline.h>
 #include <runtime/assets/asset_store.h>
+#include <runtime/world/angle.h>
 #include <runtime/world/entity_spawn.h>
 #include <runtime/world/infantry_internal.h>
 #include <runtime/world/world.h>
@@ -448,6 +449,132 @@ void still_body_thinks_as_the_world() {
     }
 }
 
+// Placed people of one team standing within the attention's reach of one another, in two worlds
+// built alike over clips whose root stands still (the world's integrate leaves each body where it
+// stands, as the still body's tick does): one runs the world's own org1 update every tick, the
+// other the still body's tick; every tick every body's channels, headings, legs, look, look
+// targets, damage timer, eye offsets and guard flag are the same. Over 600 ticks the attention
+// plays its look idles (the table authors 125, 126 and 141), its head look turns the look, and the
+// red body's idle facing turns it away from the teammate beside it.
+// [orig: Entity_UpdateInfantryAI @0x4BD87E..0x4BE7FD, @0x4BE8FD..0x4BEBD9, @0x4BF078..0x4BF14C]
+struct StandSource final : IRootMotionSource {
+    std::set<int> clips{0, 1, 43, 44, 125, 126, 140, 141};
+    bool has_clip(int, int state) const override { return clips.count(state) != 0; }
+    int variant_count(int, int state) const override { return state == 43 ? 3 : 1; }
+    int32_t clip_length_ticks(int, int state, int variant) const override { return 40 + state + 7 * variant; }
+    bool clip_loops(int, int, int) const override { return true; }
+    bool advance(int adm, int state, int32_t &phase, RootMotionFrame &out) override {
+        return advance_variant(adm, state, 0, phase, out);
+    }
+    bool advance_variant(int, int state, int, int32_t &phase, RootMotionFrame &out) override {
+        if (!has_clip(0, state)) return false;
+        ++phase;
+        out = {};
+        out.capsule_bottom = 65536;
+        out.capsule_top = 2 * 65536;
+        return true;
+    }
+};
+
+struct StillPeople {
+    std::unique_ptr<World> owned = std::make_unique<World>();
+    StandSource source;
+    std::vector<EntityHandle> bodies;
+    StillPeople() {
+        for (int pool = 0; pool < 4; ++pool) owned->registry.configure_pool(pool, 16);
+        owned->ai.root_motion = &source;
+    }
+    // A person of net id `id` at (x, y) units facing `yaw` (mission degrees), of `team`, its
+    // alert byte, its guard and its sight range (units).
+    void add(int id, float x, float y, int yaw, int team, uint8_t alert, bool guard, int sight) {
+        Entity seed;
+        seed.kind = EntityKind::Organic; seed.item_id = 41; seed.has_item_def = true;
+        seed.item_type = 3; seed.net_id = uint16_t(id); seed.team = uint8_t(team);
+        seed.position = {x, y, 0}; seed.yaw = int16_t(yaw);
+        seed.flags = guard ? 0x40u : 0u;
+        const EntityHandle handle = owned->registry.spawn(0, seed);
+        owned->ai.attach(handle);
+        AiEntity &body = *owned->ai.for_handle(handle);
+        body.inf.active = true;
+        body.net_id = id;
+        body.team = uint8_t(team);
+        body.pos[0] = int32_t(x * 65536.0f);
+        body.pos[1] = int32_t(y * 65536.0f);
+        body.heading = bam_heading_from_mission_yaw_deg(yaw);
+        body.slot.bytes()[AiSlot::kAlertByte] = alert;
+        body.slot.f[17] = sight << 16;
+        bodies.push_back(handle);
+    }
+    void init() {
+        for (const EntityHandle handle : bodies) initialize_organic_ai(*owned, *owned->registry.get(handle));
+    }
+    AiEntity &body(size_t i) { return *owned->ai.for_handle(bodies[i]); }
+    Entity &entity(size_t i) { return *owned->registry.get(bodies[i]); }
+};
+
+bool same_attention(StillPeople &a, StillPeople &b, size_t i) {
+    const AiEntity &x = a.body(i), &y = b.body(i);
+    const InfantryState &p = x.inf, &q = y.inf;
+    const Entity &u = a.entity(i), &v = b.entity(i);
+    return same_channels(p, q) && p.body_heading == q.body_heading && p.target_heading == q.target_heading &&
+           p.aim_heading == q.aim_heading && p.aim_pitch == q.aim_pitch && p.leg_yaw[0] == q.leg_yaw[0] &&
+           p.leg_yaw[1] == q.leg_yaw[1] && p.leg_target[0] == q.leg_target[0] &&
+           p.leg_target[1] == q.leg_target[1] && x.heading == y.heading && x.pitch == y.pitch &&
+           p.head_look_target == q.head_look_target && p.last_look_target == q.last_look_target &&
+           p.previous_look_target == q.previous_look_target && p.damage_timer == q.damage_timer &&
+           p.eye_offset_x == q.eye_offset_x && p.eye_offset_y == q.eye_offset_y &&
+           p.eye_offset_z == q.eye_offset_z && u.eye_offset_x == v.eye_offset_x &&
+           u.eye_offset_y == v.eye_offset_y && u.eye_offset_z == v.eye_offset_z &&
+           ((u.flags ^ v.flags) & 0x40u) == 0 && u.yaw == v.yaw;
+}
+
+void still_bodies_attend_as_the_world() {
+    StillPeople full, still;
+    for (StillPeople *people : {&full, &still}) {
+        people->add(13, 8.0f, 8.0f, 90, 1, 2, false, 40);  // red: idle_2, a teammate a unit and a half east
+        people->add(6, 9.5f, 8.0f, 270, 1, 0, false, 40);  // calm, facing it
+        people->add(7, 8.0f, 10.5f, 180, 1, 0, false, 40); // calm, two and a half units north
+        people->add(5, 10.0f, 10.0f, 0, 1, 1, true, 40);   // a yellow guard
+        people->init();
+    }
+    const int32_t spawn_heading = still.body(0).inf.body_heading;
+    bool looked = false, turned = false, look_idle = false;
+    for (uint32_t tick = 1; tick <= 600; ++tick) {
+        for (size_t i = 0; i < full.bodies.size(); ++i) {
+            full.owned->ai.update_organic(full.body(i), *full.owned, tick);
+            still.owned->ai.tick_still_body(still.body(i), *still.owned, tick);
+        }
+        for (size_t i = 0; i < full.bodies.size(); ++i) {
+            CHECK(same_attention(full, still, i));
+            const InfantryState &inf = still.body(i).inf;
+            looked = looked || inf.head_look_target.valid();
+            const int state = inf.anim_state;
+            look_idle = look_idle || state == anim_state::kIdleLook || state == anim_state::kIdle2Look ||
+                        state == anim_state::kGuardLook;
+        }
+        turned = turned || still.body(0).inf.body_heading != spawn_heading;
+    }
+    CHECK(looked && look_idle && turned);
+    CHECK(still.body(3).inf.body_clip_state() == anim_state::kGuard ||
+          still.body(3).inf.body_clip_state() == anim_state::kGuardLook);
+
+    // An enemy within the scan's reach, in front: the calm body's scan raises its damage timer
+    // and its next think turns it to idle_2 (the world's perception would engage the enemy
+    // first; the still body's tick runs no perception).
+    // [orig: the scan's enemy leg @0x4BE0CA..0x4BE463; @0x4BD2F0..0x4BD31C]
+    StillPeople alone;
+    alone.add(3, 8.0f, 8.0f, 90, 1, 0, false, 40);
+    alone.add(9, 8.0f, 12.0f, 270, 2, 0, false, 40);
+    alone.init();
+    bool alerted = false;
+    for (uint32_t tick = 1; tick <= 300; ++tick) {
+        alone.owned->ai.tick_still_body(alone.body(0), *alone.owned, tick);
+        alerted = alerted || alone.body(0).inf.damage_timer != 0;
+    }
+    CHECK(alerted && alone.body(0).inf.body_clip_state() == anim_state::kIdle2);
+    CHECK(alone.body(0).inf.ai_focus == alone.bodies[1]);
+}
+
 // A retail soldier (the install's Eindo01.adm, a body of net id 13 standing), posed and ticked on over
 // the install's clips: the world's motor and the shared head leave the same channels, the idle
 // (I_idle1.bad at 363 ticks after the warmup) wraps where its own clock wraps, and each unblended
@@ -579,6 +706,7 @@ int main(int argc, char **argv) {
     world_free_pose_matches_the_world();
     body_ticks_on_as_the_motor_head();
     still_body_thinks_as_the_world();
+    still_bodies_attend_as_the_world();
     retail_soldier_ticks_on();
     control_point_pool_precedence();
     grounding_strict_one_unit_limit();

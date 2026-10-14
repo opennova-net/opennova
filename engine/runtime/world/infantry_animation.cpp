@@ -1,9 +1,11 @@
-// Motor-head AnimMap update shared by org1, org2, and spawn warm-up.
+// Motor-head AnimMap update shared by org1, org2, and spawn warm-up, and the tick
+// of a still org1 body over it.
 // [orig: AnimMap_UpdateDualChannels @0x40B8C0; AnimMap_UpdateEntity @0x40B5F0]
 // See docs/world/world-wac-ai-re.md section 36 (D-INF-26).
 #include <runtime/world/infantry_internal.h>
 
 #include <base/io/bam.h>
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 namespace {
@@ -209,6 +211,33 @@ bool infantry_org1_still_think(InfantryState &inf, const IRootMotionSource *sour
     // [orig: the arbitration @0x4BD837..0x4BD874]
     commit_body_state(inf, infantry_resolve_state(source, inf.adm_id, target));
     return true;
+}
+
+void AiSystem::tick_still_body(AiEntity &e, World &world, uint32_t logic_tick) {
+    InfantryState &inf = e.inf;
+    Entity *self = world.registry.get(e.handle);
+    // [orig: Entity_UpdateInfantryAI @0x4B9A14..0x4B9A48]
+    RootMotionFrame frame;
+    const bool have_clip = infantry_org1_motor_head(inf, root_motion, anim_rings, frame);
+    // The think on the authority's think ticks: the still body's selection, then the
+    // attention tail after it. [orig: the gate @0x4BA970; @0x4BD87E..0x4BE7FD]
+    const uint32_t flags = self != nullptr ? (self->flags | self->engine_flags) : 0u;
+    const bool guarding = (flags & kEntityFlagMounted) != 0;
+    if (is_authority && infantry_org1_still_think(inf, root_motion, logic_tick, e.net_id, guarding,
+                                                  e.slot.bytes()[AiSlot::kAlertByte])) {
+        // The guard leg drops the flag of a guarding body whose .adm authors no
+        // guard. [orig: @0x4BD19B..0x4BD1BB, the store @0x4BD1B8]
+        if (guarding && self != nullptr &&
+                (root_motion == nullptr || !root_motion->has_clip(inf.adm_id, anim_state::kGuard))) {
+            self->flags &= ~kEntityFlagMounted;
+            self->engine_flags &= ~kEntityFlagMounted;
+        }
+        infantry_attention_think(*this, e, world, infantry_org1_key(logic_tick, e.net_id));
+    }
+    // [orig: @0x4BE8FD..0x4BEBD9]
+    infantry_org1_heading_chase(e, self, infantry_org1_key(logic_tick, e.net_id));
+    if (have_clip) infantry_restamp_eye(e, world, frame);
+    finish_infantry_tick(e, world);
 }
 
 void advance_primary_channel_fallback(InfantryState &inf) {
