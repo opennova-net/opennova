@@ -18,6 +18,7 @@
 #include <cstring>
 
 #include <runtime/inmatch/server_admin_command.h> // Server_ExecuteServerCommand (the NovaWorld ServerCommand verbs)
+#include <runtime/inmatch/server_info.h> // Server_ToggleJoinLock (the lockgame action)
 #include <runtime/inmatch/server_spawn.h> // Server_SetPlayerSpectator
 #include <runtime/inmatch/session_status.h>
 #include <formats/threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
@@ -341,6 +342,7 @@ std::vector<Simulation::HostPeerSlot> Simulation::host_peer_slots() const {
 		if (c.phase < opennova::inmatch::ConnectionPhase::PlayerAdded) continue;
 		HostPeerSlot s;
 		s.slot = c.reply.player_slot;
+		s.connection_id = c.connection_id;
 		s.own = c.type == opennova::inmatch::NapiNPConnection::kTypeClientSide;
 		s.player_name = opennova::to_gd(c.player_name);
 		s.ip_and_port = opennova::to_gd(opennova::peer_addr_to_string(c.peer));
@@ -370,17 +372,13 @@ Simulation::ServerCommandResult Simulation::execute_server_command(const String 
 	out.handled = outcome.handled;
 	out.stop_hosting = outcome.stop_hosting;
 	out.config_changed = outcome.config_changed;
-	if (ctx == nullptr)
-		return out;
-	out.has_config = true;
-	if (outcome.config_changed) {
-		// The sim's host session record is what the next session build reads.
+	if (ctx != nullptr && outcome.config_changed) {
+		// The sim's host session record is what the next session build reads; the NovaWorld
+		// listing reads the live context's (inmatch::read_session_listing_columns).
 		net_.host_session_config.server_name = ctx->config.server_name;
 		net_.host_session_config.custom_text = ctx->config.custom_text;
 		net_.host_session_config.multiplayer_reset = ctx->config.multiplayer_reset;
 	}
-	out.server_name = opennova::to_gd(ctx->config.server_name);
-	out.server_message = opennova::to_gd(ctx->config.custom_text);
 	return out;
 }
 
@@ -406,6 +404,16 @@ bool Simulation::apply_player_enter_result(uint32_t p_connection_id, bool p_succ
 	if (ctx == nullptr) return false;
 	return opennova::inmatch::Server_ApplyPlayerEnterResult(*ctx, p_connection_id, p_success,
 			p_msg_code);
+}
+
+// The lockgame action at the authority (HudToggles' EVENT_JOIN_LOCK_TOGGLED, in a session on the
+// authority): the join lock flips and a hosting NovaWorld session's server-info update runs at once
+// through the context's hook (SessionDrive::bind_nw_host).
+int Simulation::toggle_join_lock() {
+	opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
+	if (ctx == nullptr)
+		return -1;
+	return opennova::inmatch::Server_ToggleJoinLock(*ctx) ? 1 : 0;
 }
 
 void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options) {

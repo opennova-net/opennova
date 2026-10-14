@@ -148,12 +148,6 @@ Simulation::~Simulation() {
 	(void)session_.close();
 }
 
-// The live round clock in logic ticks (world::Match, -1 = untimed): the
-// NovaWorld host's TimeLeft column re-reads it at every refresh.
-int32_t Simulation::round_time_remaining_ticks() const {
-	return kernel_ ? kernel_->world.match.remaining_ticks() : -1;
-}
-
 void Simulation::reset_world() {
 	// The bound Weather node points into this kernel's World (its
 	// WeatherState is the environment's live view): release it before the

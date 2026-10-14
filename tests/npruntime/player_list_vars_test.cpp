@@ -9,7 +9,8 @@
 //   - the loadout's accept stamps the accepted class, and every weapon-slot list (an abort's
 //     re-send) the slot's live class;
 //   - the roster sync turns a kept player's team or type change into its vars alone, never a
-//     ClientHostPlayerAdded, and a slot's new player into a removal and an add;
+//     ClientHostPlayerAdded, and a slot's new player, or its player's re-join (a new
+//     connection), into a removal and an add;
 //   - a kept remote slot's round init spawns with the slot's class, its last writer's (the
 //     add's join pick, a loadout's accepted class), never the join's pick again (D-NET-677).
 // [orig: Server_PlayerAdd @0x51D368 / @0x51D382, the SetOrCreates @0x51D48F / @0x51D4AA;
@@ -250,6 +251,18 @@ void roster_sync() {
 	expect(swap.removed == std::vector<int>{1} && swap.added.size() == 1 &&
 	               swap.added[0].player_name == "Other" && swap.vars.empty(),
 	       "a slot's new player is a removal and an add");
+
+	// A leave and a re-join of the same player into the same slot between two syncs (same name,
+	// address and PCID): the re-join is a new connection, so a removal and an add, as retail's
+	// remove and add each send theirs (D-NET-659).
+	// [orig: Server_PlayerRemove @0x51b5f3; Server_PlayerAdd @0x51d4b5]
+	HostPlayerSlot rejoined = current[1];
+	rejoined.connection_id = 7;
+	const opennova::RosterSync rejoin =
+			opennova::plan_roster_sync(current, { current[0], rejoined, current[2] });
+	expect(rejoin.removed == std::vector<int>{ 1 } && rejoin.added.size() == 1 &&
+					rejoin.added[0].connection_id == 7 && rejoin.vars.empty(),
+			"a slot's re-joined player is a removal and an add");
 
 	// Nothing changed: nothing to do.
 	const opennova::RosterSync same = opennova::plan_roster_sync(current,

@@ -682,6 +682,9 @@ bool Server::host_on_novaworld(std::string &error, const std::atomic<bool> *canc
 	ServeListing::Seams seams;
 	seams.config_block = &config_.cfg();
 	seams.save_config = [this] { (void)save_config(); };
+	seams.gametext = [this](const char *section, const char *key, const char *fallback) {
+		return game_text(have_gametext_ ? &gametext_ : nullptr, section, key, fallback);
+	};
 	listing_ = std::make_unique<ServeListing>(listing_columns(), std::move(seams));
 	nw_lister::ListerOptions lister_options;
 	lister_options.master_host = options_.master_host;

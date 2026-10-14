@@ -825,8 +825,6 @@ private:
 	// every reader guards (an absent host reads exactly like an idle one).
 	opennova::inmatch::ListenHostState *host_state();
 	const opennova::inmatch::ListenHostState *host_state() const;
-	opennova::inmatch::NapiNPServerCtx *host_ctx();
-	const opennova::inmatch::NapiNPServerCtx *host_ctx() const;
 	// The role feeds' view of this session (inmatch/role_feeds.h RoleView).
 	opennova::inmatch::RoleView role_view() const;
 	// The active role's HostClient (host/SP) OR Joiner runtime; the present-snapshot source.
@@ -1045,19 +1043,20 @@ public:
 	// per-slot vars), keyed by roster slot; the host's own (`own`) takes the gate binding's identity.
 	struct HostPeerSlot {
 		int slot = 0;
+		uint32_t connection_id = 0; // the add's connection: a re-join is a new one
 		bool own = false;
 		String player_name, ip_and_port, pcid; // "a.b.c.d:port"; the decrypted PUBPCID or ""
 		String team, type; // the match's PlayerTeam / PlayerType ("%ld")
 	};
 	std::vector<HostPeerSlot> host_peer_slots() const;
-	int32_t round_time_remaining_ticks() const; // the live round clock (world::Match), -1 untimed
-	// A NovaWorld ServerCommand (the hosting session's `server_command` verb, target and args) at
-	// the host (inmatch::run_host_server_command): on its hosting context, else a session-less one
-	// where SetMPReset alone passes. A config change lands in the cfg block (use_game_config) and
-	// the host session record; the caller saves it, republishes, and owns `stop_hosting`.
+	// The host role's server context (null without one): the NovaWorld listing's live columns.
+	opennova::inmatch::NapiNPServerCtx *host_ctx();
+	const opennova::inmatch::NapiNPServerCtx *host_ctx() const;
+	// A NovaWorld ServerCommand's verb, target and args at the host (run_host_server_command): on
+	// its hosting context, else a session-less one where SetMPReset alone passes. A config change
+	// lands in the cfg block and the host session record; the caller saves, owns `stop_hosting`.
 	struct ServerCommandResult {
-		bool handled = false, stop_hosting = false, config_changed = false, has_config = false;
-		String server_name, server_message; // the live config after the verb ran (has_config)
+		bool handled = false, stop_hosting = false, config_changed = false;
 	};
 	ServerCommandResult execute_server_command(const String &p_verb, const String &p_target,
 			const PackedStringArray &p_args);
@@ -1069,6 +1068,7 @@ public:
 			uint32_t p_ip_packed, uint16_t p_port, const String &p_join_ticket)>;
 	void set_novaworld_join_tickets(bool p_armed, PlayerEnterRequestHook p_hook);
 	bool apply_player_enter_result(uint32_t p_connection_id, bool p_success, int32_t p_msg_code);
+	int toggle_join_lock(); // lockgame (inmatch::Server_ToggleJoinLock): 1 locked, 0 open, -1 none
 	// The hosted-session request (network/host_session_options.h): every
 	// user-facing field lands; the sim-owned fields (the mission header blob,
 	// the score tables) are untouched. Call BEFORE loading a mission.

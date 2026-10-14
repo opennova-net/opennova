@@ -127,6 +127,7 @@ HostScreenState host_session_settings(gamecfg::GameCfg &cfg) {
 	config.mp_attributes = static_cast<uint32_t>(cfg.mpattrib); // game_settings @0x56967F
 	config.fat_bullets = cfg.fatbullets;              // g_FatBullets @0x551C01
 	config.one_shot_kill = cfg.oneshotonekill;        // g_OneShotKill @0x551BF5
+	config.allow_custom_skins = cfg.allowcustomskins; // dword_24D218C @0x551C22
 	config.unlimited_vehicles = cfg.unlimited_vehicles; // dword_24D2258 @0x551D91
 	config.voting_enabled = cfg.mpvoting;             // g_VoteKickEnabled @0x551DC3
 	config.voting_min_players = cfg.mpvoting_min_players; // @0x551DCF

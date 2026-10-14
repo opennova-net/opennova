@@ -549,6 +549,56 @@ void test_toggle_server_row() {
 	CHECK(s.server_status_view);
 }
 
+// lockgame (row 84, dispatch 119) asks the embedder to toggle the join lock on
+// its press edge, on an authority in a session alone, a listen host or a
+// dedicated one; the event is the engine word's top bit (D-NET-659)
+// [orig: case 119 @0x49BC1C..0x49BC36].
+void test_lockgame_row() {
+	CHECK(std::strcmp(hud_toggle_row_token(kRowLockGame), "lockgame") == 0);
+	HudKeyPoll rows;
+	hud_key_poll_set_rows(rows, 1u << kRowLockGame);
+	CHECK(rows.lockgame && !rows.mousescale && !rows.toggle_server);
+	HudToggleState s;
+	HudKeyPoll k = keys();
+	const auto press = [&](const HudKeyPoll &kk) {
+		HudKeyPoll up = kk;
+		up.lockgame = false;
+		hud_toggles_poll(s, up);
+		HudKeyPoll down = kk;
+		down.lockgame = true;
+		return hud_toggles_poll(s, down);
+	};
+	// Single player carries both bits but no session: nothing.
+	k.authority = true;
+	k.mp_session_peer = true;
+	CHECK(press(k) == 0);
+	// A joiner (peer, no authority): nothing.
+	k.in_session = true;
+	k.authority = false;
+	CHECK(press(k) == 0);
+	// The listen host and the dedicated host each toggle.
+	k.authority = true;
+	CHECK(press(k) == kJoinLockToggled);
+	k.mp_session_peer = false;
+	CHECK(press(k) == kJoinLockToggled);
+	CHECK(kJoinLockToggled == 0x80000000u);
+	// A held key fires once; a chorded press and inactive input never.
+	HudKeyPoll held = k;
+	held.lockgame = true;
+	CHECK(hud_toggles_poll(s, held) == 0);
+	held.lockgame = false;
+	hud_toggles_poll(s, held);
+	held.lockgame = true;
+	held.chorded = true;
+	CHECK(hud_toggles_poll(s, held) == 0);
+	held.lockgame = false;
+	held.chorded = false;
+	hud_toggles_poll(s, held);
+	held.lockgame = true;
+	held.active = false;
+	CHECK(hud_toggles_poll(s, held) == 0);
+}
+
 // flipmouse (row 79, dispatch 9) and mousescale (row 82, dispatch 17) fire on
 // their press edge for the embedder's look words; the step carries the fire's
 // sign, and Shift (the sign) is no chord guard on either row; the toast is
@@ -814,6 +864,7 @@ int main() {
 	test_voice_macro_menus();
 	test_escape_pause_and_voice_menus();
 	test_toggle_server_row();
+	test_lockgame_row();
 	test_mouse_rows();
 	test_server_status_reroutes();
 	test_quit_dialog_escape_legs();
