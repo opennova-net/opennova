@@ -37,11 +37,12 @@ fixtures/**/*.wac -text -eol filter= diff= merge= whitespace=cr-at-eol
 # assets/ is the game's own bundled data (ADR 0048), shipped beside
 # opennova.exe and stored byte-for-byte. Small hand-written or minted files
 # (the menu, its font, its pointer, animation tables) are plain git blobs, so
-# no test needs an LFS pull; the models, clips, textures and sounds (and the
-# images a terrain set imports from) ride LFS, and the package jobs pull them.
-# A sound bank (.lwf) is a small index naming its waves, so it stays a plain
-# blob like a mission. The README is ordinary LF text. Last-match precedence:
-# these rules follow assets/**.
+# no test needs an LFS pull; the models, clips, textures, sounds and music
+# banks (and the images a terrain set imports from) ride LFS, and the package
+# jobs pull them. A sound bank (.lwf) is a small index naming its waves, and a
+# music script (.bin) a small program naming its bank's streams by place, so
+# each stays a plain blob like a mission. The README is ordinary LF text.
+# Last-match precedence: these rules follow assets/**.
 assets/** -text -eol
 assets/**/*.3di filter=lfs diff=lfs merge=lfs -text -eol
 assets/**/*.bad filter=lfs diff=lfs merge=lfs -text -eol
@@ -49,6 +50,7 @@ assets/**/*.dds filter=lfs diff=lfs merge=lfs -text -eol
 assets/**/*.mdt filter=lfs diff=lfs merge=lfs -text -eol
 assets/**/*.pcx filter=lfs diff=lfs merge=lfs -text -eol
 assets/**/*.png filter=lfs diff=lfs merge=lfs -text -eol
+assets/**/*.sbf filter=lfs diff=lfs merge=lfs -text -eol
 assets/**/*.tga filter=lfs diff=lfs merge=lfs -text -eol
 assets/**/*.wav filter=lfs diff=lfs merge=lfs -text -eol
 assets/**/*.md text eol=lf
@@ -62,8 +64,8 @@ assets/onmnbg.tga -text -eol filter= diff= merge=
 
 # expansions/ holds the game's expansions, each an editor expansion project on
 # the base game's project assets/ (ADR 0046 T5), stored as assets/ is: small
-# hand-written or edited files are plain git blobs, models, textures, images
-# and sounds ride LFS, the README is ordinary LF text.
+# hand-written or edited files are plain git blobs, models, textures, images,
+# sounds and music banks ride LFS, the README is ordinary LF text.
 expansions/** -text -eol
 expansions/**/*.3di filter=lfs diff=lfs merge=lfs -text -eol
 expansions/**/*.bad filter=lfs diff=lfs merge=lfs -text -eol
@@ -71,6 +73,7 @@ expansions/**/*.dds filter=lfs diff=lfs merge=lfs -text -eol
 expansions/**/*.mdt filter=lfs diff=lfs merge=lfs -text -eol
 expansions/**/*.pcx filter=lfs diff=lfs merge=lfs -text -eol
 expansions/**/*.png filter=lfs diff=lfs merge=lfs -text -eol
+expansions/**/*.sbf filter=lfs diff=lfs merge=lfs -text -eol
 expansions/**/*.tga filter=lfs diff=lfs merge=lfs -text -eol
 expansions/**/*.wav filter=lfs diff=lfs merge=lfs -text -eol
 expansions/**/*.md text eol=lf

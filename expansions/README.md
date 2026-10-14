@@ -36,13 +36,16 @@ included. Export the base game first, and again after changing it.
 | `defs/items.def` | The base game's item table with one item more, `Supply shed` (id 100020, `onshed1`, a landable building). The game opens `items.def` once by name, so an expansion that adds an item ships the whole table. |
 | `models/onshed1.3di`, `models/onshed1_0.dds`, `models/onshed1_0d.dds`, `models/onshed1_1d.dds`, `models/onshed1_0n.mdt` | A plank supply shed on stilts with a rusty corrugated-iron roof, a front porch and steps, about 4.5 by 5 metres: three LODs (464, 372 and 66 triangles, thresholds 96, 24 and 0, LOD type `bldg`), LOD 1's triangles its bullet faces (Wood and Metal), `CB` walk volumes for the body, the porch, both steps and the roof, and a `VC` volume for vehicles; drawn with `VS_DOT3DIFF2` (a baked base, a tiling detail per material, a 512 normal map). Exported from `art/onjo1/models/onshed1/onshed1.blend`. |
 | `art/onjo1_m1.png` | The mission's loading screen as an import source (800 x 600): the editor's image import makes `onjo1_m1.pcx` from it (8-bit, a median-cut palette), the image the game shows while `onjo1_m1.bms` loads (a mission's `<name>.pcx`, else `loadscrn.pcx`). Rendered from the scene `onjo1_m1 loading` in `onshed1.blend`, the base game's palms linked from their own `.blend`. |
+| `music/Monjo1.sbf`, `music/Monjo1.bin` | The expansion's menu music, which the game streams in place of the base game's `menumus` pair under `/exp onjo1`: the bank (1.3 MB) holds `ONMENUERR` (the base game's drone for no screen yet) and `ONSMENU01`, the storm's 24-second bed, a seamless loop; the script plays `ONMENUERR` while the screen's `MUSICVAR` is 0 and `ONSMENU01` for every other, picking again after every stream. The bank is built loose into `expansion/onjo1/`, where the game streams it by path; the script packs into `onjo1.pff`. |
+| `music/Gonjo1.sbf`, `music/Gonjo1.bin` | The expansion's mission music, in place of `gamemus` under `/exp onjo1`: the bank (1.6 MB) holds `ONNULL`, `ONSGAMINT` (the storm's opening, 18 s), `ONSWIN1_1` (the win cue) and `ONSLOSE1_1` (the loss cue); the script has the base game's shape (a second's silence, the opening once, then silence; the win or loss cue when a single-player mission ends). The game reads the expansion's music whenever its `onjo1.pff` exists, with no look for these files: without all four the expansion is silent, in the menus and in a mission. Each stream is a master of `art/onjo1/music/` made into its bank in the editor's music bank document, each script written in its music script document. |
 
 ### Build and ship
 
 - The editor's Build, Play and Export, or `opennova-project build expansions/onjo1`
   and `opennova-project export expansions/onjo1 --out <dir>`, make
   `expansion/onjo1/` with `onjo1L.pff` (the mission's text), `onjo1.pff`
-  (everything else) and the loose `onjo1.bin` and `version.txt`.
+  (everything else) and the loose `onjo1.bin`, `version.txt`, `Monjo1.sbf` and
+  `Gonjo1.sbf`.
 - The game zip (`scripts/package_godot_windows.ps1`) exports the base game and
   this project and ships the expansion as `assets/expansion/onjo1/` beside the
   base game's archives, where both OpenNova (`opennova.exe -- /exp onjo1`, or

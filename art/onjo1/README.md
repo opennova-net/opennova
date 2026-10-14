@@ -5,7 +5,8 @@ expansion `onjo1` in `expansions/onjo1/`). Each model is made from scratch in th
 look of Joint Operations: the same scale, silhouettes and muted palette, upgraded
 as far as the original engine draws it, so the original `Jointops.exe` and
 OpenNova show it alike. The game's sounds and their CC0 sources are in `sound/`,
-under their own rules (`sound/README.md`).
+under their own rules (`sound/README.md`), and its music in `music/`
+(`music/README.md`).
 
 ## Rules
 

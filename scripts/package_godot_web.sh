@@ -42,8 +42,10 @@ out="$(cd "$out" && pwd)"
 # The files of assets/ the site ships. The on_ar15/on_arms art is about 540 MB
 # of textures and nothing references it yet (assets/README.md); every visitor
 # would download it before the menu. Drop a pattern here once the game uses
-# that art.
-web_asset_excludes=("README.md" "project.opennova" "on_ar15*" "on_arms*")
+# that art. The music banks (*.sbf, about 7 MB) stay off the site too while the
+# web build is paused: without its bank a music context stays silent, as the
+# game's own does.
+web_asset_excludes=("README.md" "project.opennova" "on_ar15*" "on_arms*" "*.sbf")
 
 source "$root/scripts/godot_bin.sh"
 resolve_godot_bin "$root"
