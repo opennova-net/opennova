@@ -285,11 +285,11 @@ bool admin_replies_complete(const AdminReplyPlan &plan, const std::vector<std::s
 
 // The header "NAME            \t #\tTEAM\tClass\tKills\tDeaths\tPING\n", then one
 // "%-16s\t%2d\t%2d\t%d\t%d\t%d\t%d\n" row per active slot: the name padded (never cut) to 16,
-// the slot number, the team. The host's own slot 0 is named by GameText Server/STRSRV19, "Host"
-// (a NovaWorld listen host's takes its character name and is a player).
+// the slot number, the team. A Serve Only host's own slot 0 is named by GameText
+// Server/STRSRV19, "Host" in English (a listen host's slot 0 is its player).
 // [orig: CAdminServer_HandlePlayer @0x403f7c (the header), @0x403fe9 (the row);
 //  Server_InitNewRoundState @0x51c9c3..0x51ca2a]
-std::vector<AdminPlayer> admin_parse_player_list(std::string_view reply) {
+std::vector<AdminPlayer> admin_parse_player_list(std::string_view reply, AdminServerRow server_row) {
 	std::vector<AdminPlayer> out;
 	for (std::string_view line : split_lines(reply)) {
 		const size_t tab1 = line.find('\t');
@@ -303,7 +303,9 @@ std::vector<AdminPlayer> admin_parse_player_list(std::string_view reply) {
 		player.slot = *slot;
 		player.name = std::string(trim_right(line.substr(0, tab1)));
 		player.team = std::string(strutil::trim_view(line.substr(tab2 + 1, tab3 - tab2 - 1)));
-		if (player.name.empty() || (player.slot == 0 && player.name == "Host")) continue;
+		const bool server_slot = player.slot == 0 &&
+				(server_row == AdminServerRow::Dedicated || player.name == "Host");
+		if (player.name.empty() || server_slot) continue;
 		// Class, Kills, Deaths, PING: the four "%d" columns after the team.
 		int *const columns[] = { &player.player_class, &player.kills, &player.deaths, &player.ping };
 		size_t start = tab3 + 1;

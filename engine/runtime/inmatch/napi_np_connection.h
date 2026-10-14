@@ -861,6 +861,17 @@ inline bool player_slot_active(const NapiNPConnection &conn) {
 	return conn.phase >= ConnectionPhase::PlayerAdded && !conn.reply.player_slot_reserved;
 }
 
+// The player slot's local byte (+5): the host's own client connection, the
+// in-process loopback node (a client-side connection, or a loopback link).
+// The round init sets it on the authority's own slot when the host is a session
+// peer. [orig: Server_InitNewRoundState @0x51CA35; its readers, e.g.
+//  Server_HandleAdminNetlogCommand @0x51762F..0x51763B, the punt arm of
+//  Server_SendValidatedChatToPlayer @0x50A210]
+inline bool slot_is_local(const NapiNPConnection &conn) {
+	return conn.type == NapiNPConnection::kTypeClientSide ||
+	       conn.link.mode == replication::TransportMode::Loopback;
+}
+
 // NapiNPServer_SendFiltered's 0x80 arm accepts player-slot state 6 or 7. It
 // includes the listen host and does not inspect entity health; this runtime's
 // completed initial-state burst is the shared representation of that active

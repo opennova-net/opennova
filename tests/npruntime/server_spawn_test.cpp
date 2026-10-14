@@ -383,7 +383,8 @@ int main() {
 		make_world(*team_world);
 
 		auto reserve_sequence = [&](inmatch::GameConfig config,
-				std::initializer_list<uint8_t> requests) {
+				std::initializer_list<uint8_t> requests,
+				const inmatch::HostSlotRow *host_slot = nullptr) {
 			std::vector<inmatch::NapiNPConnection> roster;
 			std::vector<uint8_t> teams;
 			roster.reserve(requests.size());
@@ -391,7 +392,7 @@ int main() {
 				roster.emplace_back();
 				roster.back().char_vars.team_request = request;
 				teams.push_back(inmatch::Server_ReservePlayerTeam(
-						config, true, roster, roster.back(), *team_world));
+						config, true, roster, roster.back(), *team_world, nullptr, host_slot));
 			}
 			return teams;
 		};
@@ -416,6 +417,21 @@ int main() {
 		if (!expect(reserve_sequence(chosen, {1, 1}) ==
 					std::vector<uint8_t>({1, 2}),
 				"team requests are ignored when TeamChoose is disabled")) return 1;
+		// A Serve Only host's own slot 0 (team 1 from the session create) is an
+		// active row of the balance tally: its first joiner takes team 2 (D-NET-352).
+		// [orig: Server_AssignPlayerTeam @0x4FE5BD..0x4FE5DE]
+		{
+			inmatch::HostSlotRow host_slot;
+			host_slot.active = true;
+			host_slot.team = 1;
+			if (!expect(reserve_sequence(chosen, {1, 1, 1}, &host_slot) ==
+						std::vector<uint8_t>({2, 1, 2}),
+					"a Serve Only host's own slot 0 counts in the balance tally")) return 1;
+			host_slot.active = false;
+			if (!expect(reserve_sequence(chosen, {1, 1, 1}, &host_slot) ==
+						std::vector<uint8_t>({1, 2, 1}),
+					"an inactive host slot (a listen host) counts nothing")) return 1;
+		}
 		chosen.side_a_password = "side-a";
 		if (!expect(reserve_sequence(chosen, {0xFF}) ==
 					std::vector<uint8_t>({2}),

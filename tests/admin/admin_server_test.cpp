@@ -13,6 +13,7 @@
 #include <base/io/crt_rand.h>
 #include <base/io/le.h>
 #include <formats/admincfg/admin_cfg.h>
+#include <formats/fnt/fnt.h>
 #include <formats/gamecfg/game_cfg.h>
 #include <net/admin/admin_protocol.h>
 #include <net/admin/admin_server.h>
@@ -25,12 +26,14 @@
 #include <runtime/hud/hud_chat_entry.h>     // kChatDispatchGlobal
 #include <runtime/hud/feed_format.h>    // kHudColorWhite / kHudColorLightBlue
 #include <runtime/inmatch/server_session.h> // set_connection_mode
+#include <runtime/inmatch/server_spawn.h>   // Server_InitNewRoundState (the host's own slot 0)
 #include <runtime/inmatch/udp_session_transport.h>
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/world.h>
 
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -98,8 +101,37 @@ struct FakeRotation final : inmatch::RotationAdmin {
 	}
 };
 
+// A one-page font whose glyphs are 8 units wide, 'i' 2 and the space 3.
+struct NarrowFont {
+	fnt::fnt_font_t font{};
+	NarrowFont() {
+		fnt::fnt_init_blank(&font, 1, 1);
+		for (uint32_t i = 0; i < fnt::FNT_GLYPH_COUNT; ++i) font.glyphs[i].uv.u1 = 8.0f / 256.0f;
+		font.glyphs['i' - 32].uv.u1 = 2.0f / 256.0f;
+		font.glyphs[' ' - 32].uv.u1 = 3.0f / 256.0f;
+	}
+	~NarrowFont() { fnt::fnt_free(&font); }
+};
+
+// The host's working directory, in memory.
+class MemoryFiles final : public inmatch::ServerFileSink {
+public:
+	std::map<std::string, std::string> files;
+	bool exists(const std::string &name) override { return files.count(name) != 0; }
+	void remove(const std::string &name) override { files.erase(name); }
+	bool write(const std::string &name, std::string_view bytes, bool append) override {
+		std::string &f = files[name];
+		if (!append) f.clear();
+		f.append(bytes.data(), bytes.size());
+		return true;
+	}
+};
+
 struct Host {
 	inmatch::NapiNPServerCtx ctx;
+	MemoryFiles files;
+	inmatch::NetLog net_log{files};
+	std::vector<std::string> system_lines;
 	std::unique_ptr<w::World> heap = std::make_unique<w::World>();
 	w::World &world = *heap;
 	std::vector<ns::UdpSessionTransport> transports;
@@ -129,6 +161,10 @@ struct Host {
 		world.registry.configure_pool(0, 32);
 		world.weather.tod_fixed24 = 12u << 24;
 		ctx.world = &world;
+		// The session create's round init: on this Serve Only host it keeps the host's own
+		// slot 0, named by Server/STRSRV19 (D-NET-352).
+		ctx.server_text.host_name = "Host";
+		inmatch::Server_InitNewRoundState(ctx);
 		const uint8_t teams[2] = {1, 2};
 		transports.reserve(2);
 		for (size_t i = 0; i < 2; ++i) {
@@ -172,6 +208,14 @@ struct Host {
 			if (section == "Overlays" && key == "STROVER64") return "Team Deathmatch";
 			return {};
 		};
+		// CMD VERSION's texts and a listen host's SYSTEM ring; the net log and the working
+		// directory CMD NETLOG and SAVENFO reach.
+		seams.version_text = "V1.7.5.7";
+		seams.title_text = "Joint Operations: Typhoon Rising";
+		seams.system_message = [this](const std::string &text, uint32_t) { system_lines.push_back(text); };
+		net_log.set_stamp_text([] { return std::string("2026-10-13 21:07:05: "); });
+		ctx.logs.net = &net_log;
+		ctx.logs.files = &files;
 		console = std::make_unique<inmatch::AdminConsole>(ctx, std::move(seams));
 	}
 	inmatch::NapiNPConnection &conn(size_t i) { return ctx.np_protocol.connection_list[i]; }
@@ -519,13 +563,26 @@ void test_player() {
 	expect_eq(c.one("PLAYER LIST"), "ERROR - Not in Game State.", "LIST outside the Game Loop");
 	host.console->set_scene(inmatch::AdminScene::GameLoop);
 	const std::string table = c.one("PLAYER LIST");
+	// The host's own slot 0 leads: STRSRV19, team 1 and a fresh profile's side class 8 from the
+	// session create, no kills, deaths or ping (D-NET-352).
 	expect_eq(table,
 	          "NAME            \t #\tTEAM\tClass\tKills\tDeaths\tPING\n"
+	          "Host            \t 0\t 1\t8\t0\t0\t0\n"
 	          "P1              \t 1\t 1\t" + std::to_string(host.entity(0).player_class) + "\t0\t0\t100\n"
 	          "P2              \t 2\t 2\t" + std::to_string(host.entity(1).player_class) + "\t0\t0\t101\n",
 	          "the table");
 	const auto parsed = admin_parse_player_list(table);
-	expect(parsed.size() == 2 && parsed[1].name == "P2" && parsed[1].team == "2", "the client half parses it");
+	expect(parsed.size() == 2 && parsed[0].name == "P1" && parsed[1].name == "P2" && parsed[1].team == "2",
+	       "the client half parses it, the host's row not a player");
+	// A Serve Only server's slot 0 is its own row whatever STRSRV19 reads in its language; a
+	// server of unknown type is judged by the English name alone.
+	const std::string localized =
+			"NAME            \t #\tTEAM\tClass\tKills\tDeaths\tPING\n"
+			"Gastgeber       \t 0\t 1\t8\t0\t0\t0\n"
+			"P1              \t 1\t 1\t5\t0\t0\t100\n";
+	expect(admin_parse_player_list(localized, AdminServerRow::Dedicated).size() == 1 &&
+	               admin_parse_player_list(localized).size() == 2,
+	       "a dedicated server's localized slot-0 row is not a player");
 	// The team column is the slot's own byte (+416): a script team write to the
 	// body leaves it (D-NET-651). [orig: CAdminServer_HandleStatus @0x40316A]
 	host.entity(0).team = 2;
@@ -534,13 +591,30 @@ void test_player() {
 	       "a split slot lists its slot team");
 	host.entity(0).team = 1;
 	expect_eq(c.one("PLAYER KILL 7"), "ERROR - Player Not Found.", "an unknown slot");
-	expect_eq(c.one("PLAYER PUNT 0"), "ERROR - Player Not Found.", "no slot 0 on this host (D-NET-352)");
+	expect_eq(c.one("PLAYER PUNT 0"), "ERROR - Cannot punt Host.", "the host's own slot 0 is found and refused");
+	expect_eq(c.one("PLAYER BAN 0"), "ERROR - Player #0 \"Host\" not connected to a network.",
+	          "the host's slot has no net player: the error alone");
+	expect_eq(c.one("PLAYER ZEROSCORE 0"), "OK - Player Zeroed.", "ZEROSCORE takes the host's row");
+	expect(host.ctx.host_slot.stats[w::MatchStats::kRoundMarker] == 1, "its stats re-initialised");
+	expect_eq(c.one("PLAYER KILL 0"), "OK - Player Killed.", "KILL answers for the host's row");
+	// SWAPTEAM takes the host's row to the other side through Server_ChangeEntityTeam's slot leg,
+	// its stats started over. [orig: @0x4041ED..0x404202; Server_ChangeEntityTeam @0x518DD6,
+	//  +0x1A0 @0x518DEF]
+	host.ctx.host_slot.stats[w::MatchStats::kEnemyKills] = 3;
+	expect_eq(c.one("PLAYER SWAPTEAM 0"), "OK - Player Swapped.", "and SWAPTEAM");
+	expect(host.ctx.host_slot.team == 2 && host.ctx.host_slot.stats[w::MatchStats::kEnemyKills] == 0 &&
+	               host.ctx.host_slot.stats[w::MatchStats::kRoundMarker] == 1,
+	       "the host's row goes to team 2, its stats started over");
 	expect_eq(c.one("PLAYER PUNT"), "USAGE -  PLAYER [LIST | PUNT | BAN | SWAPTEAM | KILL | ZEROSCORE] [# | ALL]",
 	          "no target");
 	expect(c.command("PLAYER FROB 1").empty(), "an unknown sub-verb with a target draws no reply");
 	expect_eq(c.one("PLAYER CEASEFIRE ALL"), "OK - All Players Modified.", "CEASEFIRE changes nothing");
 	expect_eq(c.one("PLAYER SWAPTEAM 1"), "OK - Player Swapped.", "SWAPTEAM");
 	expect(host.entity(0).team == 2, "team 1 goes to 2");
+	// ALL walks from slot 0, the host's row among them. [orig: @0x404197..0x4041D9]
+	expect_eq(c.one("PLAYER SWAPTEAM ALL"), "OK - All Players Swapped.", "SWAPTEAM ALL");
+	expect(host.ctx.host_slot.team == 1 && host.entity(0).team == 1 && host.entity(1).team == 1,
+	       "every row, the host's too, goes to the other side");
 	expect_eq(c.one("PLAYER KILL 2"), "OK - Player Killed.", "KILL");
 	expect((host.entity(1).flags & 2u) != 0, "Flags |= 2 after the death transaction");
 	expect_eq(c.one("PLAYER ZEROSCORE ALL"), "OK - All Players Zeroed.", "ZEROSCORE");
@@ -619,7 +693,16 @@ void test_weapon_cmd_goto_chat() {
 	               host.ctx.console_chat.back().color == hud::kHudColorLightBlue && host.echoes.empty(),
 	       "the flood table refuses it and the sender echoes it into the ring in Global's flood colour");
 	expect_eq(a.one("CHAT GET"), "hello <b>world \r\nhello <b>world \r\n",
-	          "GET lists the ring oldest first, CR LF each");
+	          "GET lists the display buffer oldest first, CR LF each");
+	// The display lines are the wrap's: over a bold font whose 'i' is narrow, the 4-unit chat
+	// box a host with no hud.def keeps splits "i am" after its first glyph (D-NET-372).
+	NarrowFont bold;
+	host.ctx.console_chat_wrap.font = &bold.font;
+	inmatch::server_console_dispatch(host.ctx, 10, "i am");
+	expect_eq(a.one("CHAT GET"), "hello <b>world \r\nhello <b>world \r\ni\r\n  am\r\n",
+	          "GET lists the wrapped segments, the continuation behind two spaces");
+	expect(host.ctx.console_chat.back().text == "i am", "the raw ring keeps the line whole");
+	host.ctx.console_chat_wrap.font = nullptr;
 	// The flood table is the context's one, which the console's typed line checks too: the
 	// same words over CHAT SEND within 0x500 frames are refused.
 	std::string typed = "from the console ";
@@ -629,6 +712,51 @@ void test_weapon_cmd_goto_chat() {
 	host.console->set_main_frame(20);
 	expect_eq(a.one("CHAT SEND from the console"), "OK - Chat sent.", "the same words over CHAT SEND");
 	expect(host.drain(0).empty(), "the shared table refused the repeat");
+}
+
+// CMD's arms on this Serve Only host (D-NET-371): Client_ProcessLocalCommand's SAVENFO and
+// VERSION, then NETLOG (toggling the net log and going on), STAT (taken whole) and the ban arms.
+// [orig: Client_ProcessConsoleCommand @0x520E80; Client_ProcessLocalCommand @0x520BF0;
+//  Server_HandleAdminNetlogCommand @0x5175D0]
+void test_cmd_arms() {
+	Host host;
+	io::CrtRand rand;
+	AdminServer server(users_config(), *host.console, rand);
+	Client a{server};
+	a.connect(ip(127, 0, 0, 1));
+	a.login("root", "s3cret");
+	expect_eq(a.one("CMD NETLOG"), "OK - Command executed.", "CMD NETLOG");
+	expect(host.net_log.enabled() && host.net_log.pending() == "2026-10-13 21:07:05: NapiLog Started!\r\n",
+	       "NETLOG turns the net log on with its start line");
+	a.one("cmd netlog");
+	expect(!host.net_log.enabled(), "and off again");
+	expect_eq(a.one("CMD SAVENFO"), "OK - Command executed.", "CMD SAVENFO");
+	const auto nfo = host.files.files.find("debug.nfo");
+	expect(nfo != host.files.files.end() &&
+	               nfo->second.rfind("Object usage for debug.nfo\r\nNumber of OITEMS (people and players)        :\t2\r\n", 0) == 0,
+	       "SAVENFO writes debug.nfo, its lines CR LF on the disk");
+	expect(host.system_lines.empty(), "nothing on the SYSTEM ring yet");
+	expect_eq(a.one("CMD version"), "OK - Command executed.", "CMD VERSION");
+	expect(host.system_lines.size() == 1 && host.system_lines[0] == "Version V1.7.5.7  - Joint Operations: Typhoon Rising",
+	       "VERSION posts its line");
+	host.drain(1);
+	expect_eq(a.one("CMD STAT PUNT 2"), "OK - Command executed.", "a STAT line");
+	expect(host.punt(1).dpc == 0, "STAT takes the line whole: the PUNT never runs");
+	expect_eq(a.one("CMD SAVEKEYS PUNT 2"), "OK - Command executed.", "a SAVEKEYS line");
+	expect(host.punt(1).dpc == 0, "SAVEKEYS takes the line: the PUNT never runs");
+	a.one("CMD NETLOG");
+	expect(host.net_log.enabled(), "NETLOG again");
+	// A `pb_` line, behind one '/' or '\\', is taken whatever PunkBuster's state; the hook
+	// itself is not modeled (D-NET-371). [orig: Client_ProcessLocalCommand @0x520C3B..0x520CB6]
+	expect(host.console->local_command("pb_sv_ban 3") && host.console->local_command("/PB_kick 2") &&
+	               host.console->local_command("\\pb_") && !host.console->local_command("pbx") &&
+	               !host.console->local_command("//pb_x") && !host.console->local_command("NETLOG"),
+	       "the pb_ lines are taken, nothing else");
+	// A session peer runs the local arms first too.
+	host.ctx.is_mp_session_peer = 1;
+	a.one("CMD VERSION");
+	expect(host.system_lines.size() == 2, "a listen host's VERSION is its own");
+	host.ctx.is_mp_session_peer = 0;
 }
 
 void test_framing() {
@@ -708,6 +836,7 @@ void test_reply_plan() {
 	                         "MISSION ADD CTF02.BMS 0", "MISSION ADD NOPE.BMS", "MISSION REMOVE 9", "PLAYER",
 	                         "PLAYER LIST", "PLAYER PUNT", "PLAYER KILL 7", "PLAYER BAN 7", "PLAYER FROB 1",
 	                         "PLAYER FROB 7", "PLAYER SWAPTEAM 1", "PLAYER CEASEFIRE ALL", "PLAYER BAN 2",
+	                         "PLAYER BAN 0", "PLAYER PUNT 0", "PLAYER FROB 0",
 	                         "WEAPON LIST", "CMD", "CHAT", "CHAT GET", "CHAT SEND hello there", "GOTO",
 	                         "ADMINUSER LIST", "BANLIST", "PETERRABBIT", "NOSUCHVERB", "MISSION CYCLE",
 	                         "MISSION CLEAR"}) {
@@ -730,9 +859,11 @@ void test_query_report() {
 	Host host;
 	const std::string report = host.console->status_report();
 	expect_eq(report.substr(0, report.find("CURRENT PLAYERS:")),
-	          "SERVER: Admin Host\r\nUP-TIME: 1 02:03:04\r\nCURRENT TOD: 3072\r\nCURRENT # PLAYERS: 2\r\n"
+	          "SERVER: Admin Host\r\nUP-TIME: 1 02:03:04\r\nCURRENT TOD: 3072\r\nCURRENT # PLAYERS: 3\r\n"
 	          "CURRENT MAP: TDM01.BMS\r\nCURRENT GAME TYPE: Team Deathmatch\r\n",
-	          "the header lines");
+	          "the header lines, the host's own slot 0 counted (D-NET-352)");
+	expect(report.find("PING\nHost            \t 0\t 1\t8\t0\t0\t0\nP1 ") != std::string::npos,
+	       "the table leads with the host's row");
 	expect(report.find("CURRENT PLAYERS: \r\nNAME            \t #\tTEAM") != std::string::npos &&
 	               report.find("PING\n") != std::string::npos &&
 	               report.substr(report.find("MAP QUEUE: ")) == "MAP QUEUE: \r\nNo missions in queue.",
@@ -749,6 +880,7 @@ int main() {
 	test_mission();
 	test_player();
 	test_weapon_cmd_goto_chat();
+	test_cmd_arms();
 	test_framing();
 	test_reply_plan();
 	test_query_report();

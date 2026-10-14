@@ -36,9 +36,15 @@ public:
 // its switch unset).
 class ServerLogRecorder;
 class PuntLog;
+class NetLog;
 struct ServerLogs {
 	ServerLogRecorder *profile = nullptr; // /PROFILE <path> [orig: g_RunningWithProfile @0xb4c500]
 	PuntLog *punt = nullptr;              // /PUNT.TXT, /PUNTLOG, /CHEATLOG
+	// The protocol manager's net log, _NETLOG.TXT, which NETLOG toggles (server_console.h)
+	// [orig: the manager's NapiLog, CNapiNetwork_SetNetLogFile @0x4C69A0].
+	NetLog *net = nullptr;
+	// The working directory the console's dumps write to (SAVENFO's debug.nfo).
+	ServerFileSink *files = nullptr;
 };
 
 // Server_WritePuntLog(slot, reason, "") at a punt the host logs: the line goes

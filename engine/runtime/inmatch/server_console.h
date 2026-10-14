@@ -40,10 +40,17 @@
 // @0x625afb, enabled by NapiLog_SetEnabled(dword_B4C688) @0x4c6d15 after
 // the socket opens; `/INOUT` @0x4a743d..0x4a744f].
 
+#include <formats/fnt/fnt.h>
+#include <net/npwire/protocol_message.h>
 #include <runtime/hud/game_text_lookup.h>
+#include <runtime/inmatch/server_files.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <ctime>
+#include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -51,6 +58,14 @@ namespace opennova::hud {
 enum class ChatSendResult : uint8_t;
 class ChatEntry;
 } // namespace opennova::hud
+
+namespace opennova::def {
+struct DefItemsFile;
+}
+
+namespace opennova::world {
+class World;
+}
 
 namespace opennova::inmatch {
 
@@ -69,6 +84,94 @@ inline constexpr size_t kServerConsoleShownLines = 4;   // [orig: raw slots 3..0
 // 119) with its colour in the newest slot. `ring` holds the newest slot last.
 void server_console_post(std::vector<ServerConsoleLine> &ring, const std::string &text,
 		uint32_t argb);
+
+// THE CHAT DISPLAY BUFFER: Chat_AddMessageChannel1's display leg, the 40 slots
+// of 128 bytes CHAT GET lists. Each post word-wraps the whole line with the
+// bold label font at its native size against the chat box's width, the
+// hud.def `chat_message` row's x2 - (x1 - 4); a host with no hud.def (JO:CA
+// ships none) keeps both rows 0, so the width is 4, and a line splits only
+// where the walk meets a space before its first glyph's advance passes 4: a
+// leading space, or one narrow glyph and a space ("i am" in Arial16b). The
+// buffer shifts up by the segment count, the new slots are zeroed, slot 1's
+// timer takes the post's life (930) or slot 2's plus 186 when that is later,
+// and the segments fill slots count..1: the first as it stands, each later
+// one behind two spaces, each copy at most 119 bytes (the cursor advancing by
+// the copy, so a longer segment's tail reads as the next one), then the
+// colour at +120. A slot is its text bytes (+0..+119), its colour dword
+// (+120) and its timer dword (+124); slot 1 is the newest.
+// [orig: Chat_AddMessageChannel1 @0x4985D0 — the width from HUD_GetChatBoxCoord
+//  @0x5BBE90 rows 2 and 1 @0x498673..0x49869C (g_HUDChatBoxCoords @0x28E4DF8,
+//  written only by the hud.def parser @0x5BB7D1 / @0x5BB7ED), HUD_WordWrapText
+//  @0x580980 over g_hudLabelFontBold @0x4986AC, a 0 count read as 1
+//  @0x4986BB..0x4986C5, the shift @0x4986CC..0x498701, the zeroing @0x498718,
+//  slot 1's timer @0x49872C..0x498734, the fill @0x498750..0x4987DA; the lives
+//  930 at every Chat_DispatchToChannel call @0x42B988..0x42BAEA]
+inline constexpr size_t kChatDisplaySlotCount = 40;
+inline constexpr size_t kChatDisplaySlotBytes = 128;
+inline constexpr size_t kChatDisplayColorOffset = 120;
+inline constexpr size_t kChatDisplayTimerOffset = 124;
+inline constexpr size_t kChatDisplayCopyMax = 119;
+inline constexpr int32_t kChatDisplayLife = 930;     // [orig: `push 3A2h`]
+inline constexpr int32_t kChatDisplayStagger = 186;  // [orig: dword_B3FF38 + 186 @0x498722]
+// The chat box with no hud.def: both rows 0, 0 - (0 - 4).
+inline constexpr int kChatDisplayWidthNoHudDef = 4;
+
+// Slot k (1..40) at byte (k - 1) * 128, slot 40 the oldest: the 5 KiB held off the context's
+// own storage (it would sit inline in every NapiNPServerCtx, which tests keep on the stack), a
+// fixed-size array that copies whole.
+class ChatDisplayBuffer {
+public:
+	static constexpr size_t kBytes = kChatDisplaySlotCount * kChatDisplaySlotBytes;
+	using Bytes = std::array<uint8_t, kBytes>;
+	ChatDisplayBuffer() : bytes_(std::make_unique<Bytes>()) {}
+	ChatDisplayBuffer(const ChatDisplayBuffer &other) : bytes_(std::make_unique<Bytes>(*other.bytes_)) {}
+	ChatDisplayBuffer &operator=(const ChatDisplayBuffer &other) {
+		*bytes_ = *other.bytes_;
+		return *this;
+	}
+	uint8_t *data() { return bytes_->data(); }
+	const uint8_t *data() const { return bytes_->data(); }
+	static constexpr size_t size() { return kBytes; }
+	void clear() { bytes_->fill(0); }
+
+private:
+	std::unique_ptr<Bytes> bytes_;
+};
+// The wrap's font (g_hudLabelFontBold: the bold Arial HUD_InitAllFonts picks by
+// the display's width; null, a font that did not load: no line wraps) and the
+// chat box's width.
+struct ChatDisplayWrap {
+	const fnt::fnt_font_t *font = nullptr;
+	int width = kChatDisplayWidthNoHudDef;
+};
+
+// One line into the display buffer, with its colour and life. A wrap of more
+// than 40 segments writes only the 40 slots (retail's runs past the buffer,
+// D-NET-711).
+void chat_display_post(ChatDisplayBuffer &buffer, const ChatDisplayWrap &wrap,
+		const std::string &text, uint32_t argb, int32_t life = kChatDisplayLife);
+// One logic tick: every slot's nonzero timer steps down by one
+// [orig: Input_DecrementCooldownTimers @0x498440 (the dword_B3FEB8 column)
+//  from Game_ProcessMainFrame @0x5267A6].
+void chat_display_tick(ChatDisplayBuffer &buffer);
+// CHAT GET's text: slots 40..1, each slot's bytes read as a string, the
+// non-empty ones each followed by CR LF. A slot whose 120 text bytes hold no
+// NUL reads on into its colour and timer words and the next slot's bytes, as
+// retail's strlen does; the buffer's end stops it here.
+// [orig: CAdminServer_HandleChatCommand @0x404B11..0x404BA5]
+std::string chat_display_get(const ChatDisplayBuffer &buffer);
+
+// Chat_AddMessageChannel1 on a host with no client: the raw ring's line and
+// the display buffer's, over the context's wrap (the dispatcher's 930 life).
+void server_console_add(NapiNPServerCtx &ctx, const std::string &text, uint32_t argb);
+
+// Chat_ClearAllChannels on a host with no client: the raw CHAT ring and its
+// display buffer emptied, which every mission start does once its BMS has
+// loaded (the boot calls it; the other rings it zeroes are a client's).
+// [orig: Chat_ClearAllChannels @0x497D30 (the raw ring 0xB3EA38 and the display
+//  buffer 0xB3FE3C, 0x1400 bytes each, @0x497D3E / @0x497D54), from
+//  Game_StartMission @0x524A10]
+void server_console_clear(NapiNPServerCtx &ctx);
 
 // Chat_DispatchToChannel on a host with no client: the channel picks the sink
 // and colour (hud/feed_format.h chat_channel_sink / chat_channel_color); a
@@ -121,5 +224,111 @@ uint32_t server_console_submit(NapiNPServerCtx &ctx, hud::ChatEntry &entry,
 std::string inout_host_line(const NapiNPServerCtx &ctx, bool started);
 std::string inout_player_added_line(const NapiNPConnection &conn);
 std::string inout_player_removed_line(const NapiNPConnection &conn);
+
+// THE NET LOG: the protocol manager's NapiLog, which the process creates with
+// its network (buffered, mode 3; a line stamp; a 5000 ms flush interval) and
+// which only NETLOG, the `/NETLOG` switch and a `_DONETLOG.TXT` in the working
+// directory turn on, naming its file `_NETLOG.TXT`. Nothing in the image writes
+// a line into it but its own start and stop lines: an enable appends
+// "NapiLog Started!", a disable "NapiLog Stopped!", each behind the stamp
+// "yyyy-mm-dd hh:mm:ss: " and followed by CR LF, into the log's buffer. The
+// manager's pump flushes the buffer once 5000 ms have passed since the last
+// flush; the log's first open of the file truncates it, every later one
+// appends, and each flush closes it again; the shutdown stops the log (its
+// stop line when it is on) and flushes.
+// [orig: CNapiNetwork_SetNetLogFile @0x4C69A0 (NapiLog_SetFilename "_NETLOG.TXT",
+//  NapiLog_SetEnabled); NapiNPManager_Init @0x62C4BB..0x62C4D0 (CNapiLog_Init
+//  "netlog.txt", mode 3, flags 6: the stamp 4 and the append-once 2, 5000);
+//  NapiLog_SetEnabled @0x62F2B0; NapiLog_WriteEntry @0x62EE30 (the stamp
+//  "%4.4ld-%2.2ld-%2.2ld %2.2ld:%2.2ld:%2.2ld: " of Napi_GetLocalTime @0x61D160,
+//  NapiBuffer_AppendLine @0x634BB0 and its "\r\n" @0x7C1310);
+//  NapiLog_FlushIfExpired @0x62F2F0 from NapiNPManager_Pump @0x62AC98;
+//  NapiLog_Flush @0x62F1A0; NapiLog_EnsureOpen @0x62EDC0 (NapiFile_Open 0x6A, its
+//  0x20 the truncate, the first time, else 0x4A); NapiLog_Shutdown @0x62F310 from
+//  NapiNPManager_Shutdown @0x62B739; the switch @0x4A7A11..0x4A7A29 and
+//  _DONETLOG.TXT @0x4A7CBC..0x4A7CD3 in Game_ParseCommandLineAndInit]
+inline constexpr const char *kNetLogFileName = "_NETLOG.TXT";
+inline constexpr const char *kNetLogArmFileName = "_DONETLOG.TXT";
+inline constexpr uint32_t kNetLogFlushIntervalMs = 5000;
+
+// NapiLog_WriteEntry's stamp over local time `t`: "yyyy-mm-dd hh:mm:ss: ".
+std::string napi_log_stamp(std::time_t t);
+
+class NetLog {
+public:
+	explicit NetLog(ServerFileSink &files);
+
+	// The stamp text the entries take (napi_log_stamp over the current time by
+	// default); a test pins it.
+	void set_stamp_text(std::function<std::string()> stamp) { stamp_ = std::move(stamp); }
+
+	bool enabled() const { return enabled_; }
+	// NapiLog_SetEnabled: a change of state writes its line; the same state none.
+	void set_enabled(bool on);
+	// NapiLog_FlushIfExpired at the manager's pump, `now_ms` the process clock.
+	void flush_if_expired(uint32_t now_ms);
+	// NapiLog_Flush: the buffer to the file, when it holds anything.
+	void flush(uint32_t now_ms);
+	// NapiLog_Shutdown: the stop line when the log is on, then the flush.
+	void shutdown(uint32_t now_ms);
+	// What the buffer holds, not yet flushed.
+	const std::string &pending() const { return buffer_; }
+
+private:
+	void write_entry(const char *text);
+
+	ServerFileSink &files_;
+	std::function<std::string()> stamp_;
+	bool enabled_ = false;
+	bool first_open_ = true; // the log's +16: the first open truncates
+	std::string buffer_;
+	uint32_t last_flush_ms_ = 0;
+};
+
+// Server_HandleAdminNetlogCommand over one console line: a line of no token is
+// not taken; a line beginning `STAT` is taken whole; a first token NETLOG from
+// the host itself (no slot: its own console, or the slot of its own local
+// client) toggles the net log and, for a slot, answers it S2C 0x14
+// [14][slot number]["NETLOG: SERVER SET TO <0|1>"] (reliable, 310 flushes),
+// into `replies`; NETLOG is not taken either way, so the caller's arms go on.
+// A host with no net log device (ctx.logs.net) toggles nothing.
+// [orig: Server_HandleAdminNetlogCommand @0x5175D0 — the token count
+//  @0x517621..0x51762C, the host test `!input || input+5` @0x51762F..0x51763B,
+//  STAT @0x51764F..0x51765C, NETLOG @0x517670..0x5176B1, the reply
+//  @0x5176C1..0x51771A, the return 0 @0x5175FD]
+bool Server_HandleAdminNetlogCommand(NapiNPServerCtx &ctx, const std::string &line,
+		const NapiNPConnection *slot, std::vector<ProtocolMessage> &replies);
+
+// The authority's C2S 0x04 (the console line a session peer's
+// Client_ProcessConsoleCommand queues, its NUL-terminated text): from a sender
+// that holds a player slot, at most one a second by the slot's word the chat
+// throttle shares; the text, cut at 1023 characters, runs the NETLOG handler,
+// and a line it does not take goes back to the sender as S2C 0x06 [text NUL]
+// (unreliable), which the client runs as its own command; the replies are
+// appended to `replies`. `now_ms` is the host's clock.
+// [orig: NapiNPServerMsg_HandleConsoleLine @0x5199D0 — the authority
+//  @0x5199FA, the slot conn+352 -> +192 @0x519A01..0x519A18, the slot's
+//  +100360 stamp @0x519A1E..0x519A3C, the copy @0x519A4D..0x519A72,
+//  Server_HandleAdminNetlogCommand @0x519A7B, NetBuffer_WriteString and
+//  SendFiltered(6, 0, 1) to the sender @0x519AB0..0x519AC5;
+//  NapiNPClientMsg_HandleChatCommand @0x432BC0]
+void Server_HandleConsoleCommandMessage(NapiNPServerCtx &ctx, NapiNPConnection &sender,
+		const std::vector<uint8_t> &payload, uint32_t now_ms, std::vector<ProtocolMessage> &replies);
+
+// Entity_DumpUsageStatistics(name)'s text: "Object usage for <name>", the used
+// counts of pools 0..3, then a line per items.def row past row 0 that one of
+// the five pools' rows takes (its id, its count, its name), then a blank pair;
+// '\n' as written (the file opens in text mode, so the disk takes CR LF).
+// [orig: Entity_DumpUsageStatistics @0x40E620 — the formats @0x7C350C,
+//  @0x7C34D8, @0x7C34A4, @0x7C3470, @0x7C3438, @0x7C3418, @0x7C3414; the five
+//  pool walks over each row's +0x1C @0x40E725..0x40E755; the rows 1..gItemCount-1
+//  by their +0x50 id and +0x00 name @0x40E757..0x40E7A2]
+std::string entity_usage_text(const world::World &world, const def::DefItemsFile *items,
+		const std::string &name);
+// The file Entity_DumpUsageStatistics(name) writes: the name's first 27
+// characters with everything from its first '.' replaced by ".nfo", or no file
+// when it holds no '.' [orig: strncpy(.., 0x1B) and strstr(".") / strcpy(".nfo")
+// @0x40E66E..0x40E6A6].
+std::string entity_usage_file_name(const std::string &name);
 
 } // namespace opennova::inmatch

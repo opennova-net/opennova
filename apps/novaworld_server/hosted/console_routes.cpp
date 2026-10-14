@@ -341,7 +341,8 @@ crow::response ConsoleRoutes::players(const Caller &c) {
 	const auto replies = run(c, *console_command(ConsoleVerb::PlayerList), refusal);
 	if (!replies) return std::move(*refusal);
 	std::vector<crow::json::wvalue> list;
-	for (const AdminPlayer &p : admin_parse_player_list(replies->front())) {
+	// A hosted server is an opennova-serve, a Serve Only host: its slot 0 is its own row.
+	for (const AdminPlayer &p : admin_parse_player_list(replies->front(), AdminServerRow::Dedicated)) {
 		crow::json::wvalue e;
 		e["slot"] = p.slot;
 		e["name"] = utf8(p.name);

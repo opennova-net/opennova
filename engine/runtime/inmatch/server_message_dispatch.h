@@ -35,6 +35,7 @@ struct EntityHandle;
 namespace opennova::inmatch {
 
 struct HostRotation;
+struct HostSlotRow;
 
 struct NapiNPServerCtx;
 class ServerLogRecorder;
@@ -63,7 +64,7 @@ std::vector<uint8_t> build_tag7b_session_summary(const GameConfig &cfg,
 std::vector<ProtocolMessage> build_spawn_pump_metadata(
 		const GameConfig &config, NapiNPConnection &conn,
 		const std::vector<NapiNPConnection> &roster, world::World *world,
-		const HostRotation *rotation);
+		const HostRotation *rotation, const HostSlotRow *host_slot = nullptr);
 
 // Project the world-owned wave list into the requester-specific S2C 0x6E
 // body: the rows of the requester's slot team (+416), each with its ETA for

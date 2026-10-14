@@ -4668,6 +4668,21 @@ add_executable(npruntime_punt_log_test npruntime/punt_log_test.cpp)
 target_link_libraries(npruntime_punt_log_test PRIVATE opennova_runtime)
 target_include_directories(npruntime_punt_log_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_punt_log COMMAND npruntime_punt_log_test)
+
+# The console's headless arms (inmatch/server_console.h): the net log _NETLOG.TXT (its lines,
+# the flush, the truncating first open), the NETLOG / STAT handler, the authority's C2S 0x04
+# and its S2C 0x06 echo, and SAVENFO's debug.nfo text (D-NET-371).
+add_executable(npruntime_net_log_test npruntime/net_log_test.cpp)
+target_link_libraries(npruntime_net_log_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_net_log_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_net_log COMMAND npruntime_net_log_test)
+
+# The chat display buffer of a host with no client (inmatch/server_console.h): the wrap at the
+# 4-unit chat box over a synthetic font, the slots, the timers and CHAT GET's walk (D-NET-372).
+add_executable(npruntime_chat_display_test npruntime/chat_display_test.cpp)
+target_link_libraries(npruntime_chat_display_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_chat_display_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_chat_display COMMAND npruntime_chat_display_test)
 add_executable(npruntime_squad_relay_test npruntime/squad_relay_test.cpp)
 target_link_libraries(npruntime_squad_relay_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_squad_relay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

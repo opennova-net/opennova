@@ -876,7 +876,9 @@ bool check_listen_host_installs_local_character_profile() {
 			connection.char_vars.char_class[1] == 7 &&
 			connection.char_vars.avatar[0] == 3 &&
 			connection.char_vars.avatar[1] == 9,
-			"listen-host type-2 connection receives both selected characters");
+			"listen-host type-2 connection receives both selected characters") &&
+			expect(!owner.ctx.host_slot.active,
+					"a listen host's slot 0 is its loopback's: no connectionless host row");
 }
 
 // A dedicated host (mode 1) starts the server but registers no local client connection.
@@ -886,11 +888,19 @@ bool check_dedicated_host_has_no_local_client() {
 	opennova::inmatch::set_transport_mode(ctx, SocketMode::Lan);
 	opennova::inmatch::GameConfig settings;
 	settings.max_players = 16;
+	ctx.server_text.host_name = "Host";
 	opennova::inmatch::create_session(ctx, settings, opennova::inmatch::SessionStartup{}, nullptr);
 	if (!expect(ctx.np_protocol.host_running == 1, "dedicated host running")) return false;
 	if (!expect(ctx.np_protocol.connection_list.empty(), "no local client on a dedicated host"))
 		return false;
-	return true;
+	// Its own slot 0 is a connectionless row: the round init's, then the session create's
+	// PlayerSession_InitFromProfile (STRSRV19; the side byte -1 gives team 1; a fresh
+	// profile's side class 8) (D-NET-352).
+	// [orig: Server_InitNewRoundState @0x51C99A..0x51CA3C; PlayerSession_InitFromProfile
+	//  @0x50CA80]
+	const opennova::inmatch::HostSlotRow &host = ctx.host_slot;
+	return expect(host.active && host.name == "Host" && host.team == 1 && host.player_class == 8,
+			"a dedicated host keeps its own connectionless slot 0");
 }
 
 // Production serve mode is a true HostOnly session: supplying the adapter's loopback must not

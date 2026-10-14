@@ -3,7 +3,7 @@
 // temp working directory holding a game.cfg with remote_admin_port set, an admin.cfg with one
 // user and a banned.txt; a LAN joiner (a ClientRuntime on a real UDP socket) plays in it. Over
 // real loopback TCP the engine's admin client half (net/admin/admin_protocol.h) logs in and:
-//   - PLAYER LIST lists the joiner;
+//   - PLAYER LIST lists the host's own slot 0, then the joiner;
 //   - MISSION LIST, then MISSION ADD with ONESHOT at a position, SETNEXT onto it and CYCLE: the
 //     map changes to the SETNEXT entry, and the next CYCLE removes the one-shot after it played
 //     and plays the entry that slid into its slot;
@@ -257,6 +257,9 @@ int main() {
 	}
 	serve::Server &server = *holder;
 	CHECK(server.admin_port() == admin_port);
+	// No video_res and no display width from the test's platform: the chat wrap font is the
+	// 1024-wide platform equivalent's, Arial16b (D-NET-720).
+	CHECK(server.chat_font_name() == "Arial16b.fnt");
 	CHECK(serve_test::read_text(work / "admin_log.txt").empty());
 	// banned.txt loaded at the session's round init.
 	{
@@ -274,11 +277,15 @@ int main() {
 	CHECK(admin.connect(admin_port));
 	CHECK(admin.login("boss", "pw"));
 
-	// --- PLAYER LIST: the LAN joiner in slot 1 (no host row: D-NET-352).
+	// --- PLAYER LIST: the host's own slot 0 (its name STRSRV19, empty with no gametext.bin
+	// mounted; team 1, class 8), then the LAN joiner in slot 1 (D-NET-352).
 	{
 		const std::string list = admin.one("PLAYER LIST");
-		const std::vector<AdminPlayer> players = admin_parse_player_list(list);
-		CHECK(list.rfind("NAME            \t #\tTEAM\tClass\tKills\tDeaths\tPING\n", 0) == 0);
+		const std::vector<AdminPlayer> players =
+				admin_parse_player_list(list, AdminServerRow::Dedicated);
+		CHECK(list.rfind("NAME            \t #\tTEAM\tClass\tKills\tDeaths\tPING\n"
+		                 "                \t 0\t 1\t8\t0\t0\t0\n",
+		              0) == 0);
 		CHECK(players.size() == 1 && players[0].name == "ServeJoiner" && players[0].slot == 1);
 	}
 
@@ -304,6 +311,10 @@ int main() {
 					rotation_line(3, "SERVETST.BMS", "() () () <CURRENT MISSION> <>"),
 			"the inserted one-shot and the SETNEXT mark");
 	CHECK(rig.with([&] { return server.rotation().setnext_latch && server.rotation().list.alt_cursor == 2; }));
+	// A line in the chat rings ahead of the map change, which the next mission start empties
+	// [orig: Game_StartMission @0x524A10 -> Chat_ClearAllChannels @0x497D30].
+	check_eq(admin.one("CHAT SEND before the cycle"), "OK - Chat sent.", "CHAT SEND ahead of the cycle");
+	check_eq(admin.one("CHAT GET"), "before the cycle \r\n", "CHAT GET ahead of the cycle");
 	check_eq(admin.one("MISSION CYCLE"), "OK - Server is cycling...", "MISSION CYCLE");
 	// The joiner is back once it plays on the next map's file (its reload starts at the S2C 0x25).
 	CHECK(rig.wait([&] {
@@ -317,8 +328,12 @@ int main() {
 		CHECK(rig.ctx().config.mission_file == "SERVETS2.BMS");
 		CHECK(rig.client.map_file() == "SERVETS2.BMS");
 		CHECK(server.rotation().setnext_latch);
+		CHECK(rig.ctx().console_chat.empty());
 		return 0;
 	});
+	check_eq(admin.one("CHAT GET"), "", "the map change emptied the display buffer");
+	check_eq(admin.one("CHAT SEND after the cycle"), "OK - Chat sent.", "CHAT SEND on the next map");
+	check_eq(admin.one("CHAT GET"), "after the cycle \r\n", "CHAT GET lists the next map's line alone");
 	check_eq(admin.one("MISSION CYCLE"), "OK - Server is cycling...", "the second CYCLE");
 	CHECK(rig.wait([&] {
 		return server.missions_played() == 3 && rig.client.map_file() == "SERVETST.BMS" &&

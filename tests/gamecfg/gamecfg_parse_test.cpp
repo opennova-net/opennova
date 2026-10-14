@@ -329,6 +329,24 @@ int crt_fixed_print() {
 	return 0;
 }
 
+// String_ParseResolutionDimensions over a video_res value: the blanks before the width and
+// around the separator, either case of 'x', each dimension's digit run; no separator or a
+// zero dimension writes nothing (the display width the HUD fonts and the chat wrap take).
+// [orig: String_ParseResolutionDimensions @0x51E6D0]
+int resolution_dimensions() {
+	int32_t w = -1;
+	int32_t h = -1;
+	TEST_EXPECT(parse_resolution_dimensions("1024x768", w, h) && w == 1024 && h == 768);
+	TEST_EXPECT(parse_resolution_dimensions(" \t2560 X\r 1440junk", w, h) && w == 2560 && h == 1440);
+	w = h = -1;
+	TEST_EXPECT(!parse_resolution_dimensions("1024*768", w, h) && w == -1 && h == -1);
+	TEST_EXPECT(!parse_resolution_dimensions("0x768", w, h) && w == -1);
+	TEST_EXPECT(!parse_resolution_dimensions("1024x", w, h) && w == -1);
+	TEST_EXPECT(!parse_resolution_dimensions("", w, h) && w == -1);
+	TEST_EXPECT(!parse_resolution_dimensions("\v800x600", w, h)); // VT is no blank there
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -345,6 +363,7 @@ int main() {
 	if (long_line_splits() != 0) return 1;
 	if (duplicates_and_floats() != 0) return 1;
 	if (crt_fixed_print() != 0) return 1;
+	if (resolution_dimensions() != 0) return 1;
 	std::printf("OK: gamecfg parse\n");
 	return 0;
 }
