@@ -160,6 +160,19 @@ void zero_score(NapiNPServerCtx &ctx, const NapiNPConnection &conn) {
 		zero_stats(row->stats);
 }
 
+// SWAPTEAM over a Serve Only host's own row: Server_ChangeEntityTeam's slot leg, the stats
+// started over and the slot team taken to the other side (2 goes to 1, any other to 2, read
+// off the body's team byte, which is the row's); the body's own legs (its team byte, NetId,
+// the S2C 0x50) are D-NET-352's. [orig: CAdminServer_HandlePlayer SWAPTEAM ALL from slot 0
+//  @0x404197..0x4041D9, one slot @0x4041ED..0x404202; Server_ChangeEntityTeam @0x518D70:
+//  the authority gate @0x518D84, CPlayerStats_ResetAllArrays @0x518DD6, +0x1A0 @0x518DEF]
+void swap_host_team(NapiNPServerCtx &ctx) {
+	HostSlotRow &host = ctx.host_slot;
+	if (!host.active || ctx.is_authority == 0) return;
+	zero_stats(host.stats);
+	host.team = host.team == 2 ? uint8_t{1} : uint8_t{2};
+}
+
 void swap_team(NapiNPServerCtx &ctx, const NapiNPConnection &conn) {
 	world::Entity *entity = slot_entity(ctx, conn);
 	if (entity == nullptr) return; // a null deref in retail (D-NET-369)
@@ -254,13 +267,17 @@ void AdminConsole::handle_player(const Args &args, std::vector<std::string> &rep
 		return;
 	}
 	if (ieq(sub, "SWAPTEAM")) {
-		// The host's own row swaps through its body, which this port does not model
-		// (D-NET-352). [orig: @0x4041ED..0x404202]
+		// ALL walks every active slot from slot 0, the host's own row first (swap_host_team);
+		// the row's body is D-NET-352's. [orig: @0x404197..0x4041D9, @0x4041ED..0x404202]
 		if (all) {
+			swap_host_team(ctx_);
 			for (NapiNPConnection *slot : active_slots(ctx_)) swap_team(ctx_, *slot);
 			replies.emplace_back("OK - All Players Swapped.");
 		} else {
-			if (target != nullptr) swap_team(ctx_, *target);
+			if (target != nullptr)
+				swap_team(ctx_, *target);
+			else
+				swap_host_team(ctx_);
 			replies.emplace_back("OK - Player Swapped.");
 		}
 		return;

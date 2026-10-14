@@ -597,13 +597,24 @@ void test_player() {
 	expect_eq(c.one("PLAYER ZEROSCORE 0"), "OK - Player Zeroed.", "ZEROSCORE takes the host's row");
 	expect(host.ctx.host_slot.stats[w::MatchStats::kRoundMarker] == 1, "its stats re-initialised");
 	expect_eq(c.one("PLAYER KILL 0"), "OK - Player Killed.", "KILL answers for the host's row");
+	// SWAPTEAM takes the host's row to the other side through Server_ChangeEntityTeam's slot leg,
+	// its stats started over. [orig: @0x4041ED..0x404202; Server_ChangeEntityTeam @0x518DD6,
+	//  +0x1A0 @0x518DEF]
+	host.ctx.host_slot.stats[w::MatchStats::kEnemyKills] = 3;
 	expect_eq(c.one("PLAYER SWAPTEAM 0"), "OK - Player Swapped.", "and SWAPTEAM");
+	expect(host.ctx.host_slot.team == 2 && host.ctx.host_slot.stats[w::MatchStats::kEnemyKills] == 0 &&
+	               host.ctx.host_slot.stats[w::MatchStats::kRoundMarker] == 1,
+	       "the host's row goes to team 2, its stats started over");
 	expect_eq(c.one("PLAYER PUNT"), "USAGE -  PLAYER [LIST | PUNT | BAN | SWAPTEAM | KILL | ZEROSCORE] [# | ALL]",
 	          "no target");
 	expect(c.command("PLAYER FROB 1").empty(), "an unknown sub-verb with a target draws no reply");
 	expect_eq(c.one("PLAYER CEASEFIRE ALL"), "OK - All Players Modified.", "CEASEFIRE changes nothing");
 	expect_eq(c.one("PLAYER SWAPTEAM 1"), "OK - Player Swapped.", "SWAPTEAM");
 	expect(host.entity(0).team == 2, "team 1 goes to 2");
+	// ALL walks from slot 0, the host's row among them. [orig: @0x404197..0x4041D9]
+	expect_eq(c.one("PLAYER SWAPTEAM ALL"), "OK - All Players Swapped.", "SWAPTEAM ALL");
+	expect(host.ctx.host_slot.team == 1 && host.entity(0).team == 1 && host.entity(1).team == 1,
+	       "every row, the host's too, goes to the other side");
 	expect_eq(c.one("PLAYER KILL 2"), "OK - Player Killed.", "KILL");
 	expect((host.entity(1).flags & 2u) != 0, "Flags |= 2 after the death transaction");
 	expect_eq(c.one("PLAYER ZEROSCORE ALL"), "OK - All Players Zeroed.", "ZEROSCORE");
