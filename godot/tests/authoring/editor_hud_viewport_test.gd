@@ -90,17 +90,11 @@ func _viewport() -> Dictionary:
 	return _seam.query("viewport", {"op": "state", "path": LAYOUT, "kind": "hud"})
 
 
-## The viewport ready on its device, its elements reported: a frame at a time until they are.
+## The viewport ready on its device, its elements reported (EditorSeam.await_viewport).
 func _await_ready() -> Dictionary:
-	var state := _viewport()
-	for _frame in 600:
-		if String(state.get("status", "")) == "ready" and bool(state.get("device", {}).get("attached", false)) \
-				and not (state.get("items", []) as Array).is_empty():
-			break
-		_app.pump()
-		await get_tree().process_frame
-		state = _viewport()
-	return state
+	var reported := func(state: Dictionary) -> bool:
+		return not (state.get("items", []) as Array).is_empty()
+	return await _seam.await_viewport({"path": LAYOUT, "kind": "hud"}, 0, reported)
 
 
 func _overlay() -> HudOverlay:

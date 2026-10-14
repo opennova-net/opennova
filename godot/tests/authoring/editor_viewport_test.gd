@@ -234,18 +234,10 @@ func _command(name: String, ids: Array, path := "") -> bool:
 	return bool(_ask({"kind": "edit_in_viewport", "command": command}, path).get("outcome", {}).get("done", false))
 
 
-## The viewport `state` names, ready on its device: a frame at a time until the device made its
-## picture (its next pump takes what the viewport asks; S13 V6: a device builds its picture over the
-## frames that follow, `loading` until it is built).
+## The viewport over `path` ("" the active document's) once its device built its picture
+## (EditorSeam.await_viewport).
 func _await_ready(path := "") -> Dictionary:
-	var state := _state(path)
-	for _frame in 600:
-		if String(state.get("status", "")) == "ready" and bool(state.get("device", {}).get("attached", false)) \
-				and int(state.get("builds", 0)) > 0:
-			break
-		await get_tree().process_frame
-		state = _state(path)
-	return state
+	return await _seam.await_viewport({"path": path, "limit": 200})
 
 
 ## The device drawing the viewport `state` describes: its SubViewport, null for none.

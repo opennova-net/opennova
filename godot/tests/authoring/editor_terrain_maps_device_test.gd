@@ -64,17 +64,10 @@ func _state() -> Dictionary:
 	return _seam.query("viewport", {"op": "state", "limit": 10, "path": MISSION})
 
 
-func _await_ready() -> Dictionary:
-	var state := _state()
-	for _frame in 900:
-		if String(state.get("status", "")) == "ready" and bool(state.get("device", {}).get("attached", false)) \
-				and int(state.get("builds", 0)) > 0 and not bool(state.get("device", {}).get("build", {}).get("loading", true)):
-			break
-		await get_tree().process_frame
-		_app.pump()
-		state = _state()
-	_app.pump()
-	return _state()
+## The mission's viewport once its device built its picture past `builds`
+## (EditorSeam.await_viewport).
+func _await_ready(builds := 0) -> Dictionary:
+	return await _seam.await_viewport({"path": MISSION, "limit": 10}, builds)
 
 
 func _terrain(state: Dictionary) -> Terrain:
@@ -309,11 +302,11 @@ func test_in_place_edits_equal_a_rebuild() -> void:
 	var away: Dictionary = _seam.request({"kind": "edit_record", "path": MISSION,
 			"edits": [{"op": "set", "id": header_id, "field": "terrain", "value": "nightisle"}]})
 	assert_true(bool(away.get("outcome", {}).get("done", false)), str(away.get("outcome")).left(300))
-	state = await _built_after(builds)
+	state = await _await_ready(builds)
 	var away_builds := int(state.get("builds", 0))
 	assert_gt(away_builds, builds, "the terrain set away is a Rebuild")
 	assert_true(bool(_seam.request({"kind": "undo", "path": MISSION}).get("outcome", {}).get("done", false)))
-	state = await _built_after(away_builds)
+	state = await _await_ready(away_builds)
 	assert_gt(int(state.get("builds", 0)), away_builds, "and back, a Rebuild")
 	var rebuilt := _terrain(state)
 	assert_not_null(rebuilt, "the device built the terrain again")
@@ -342,15 +335,3 @@ func _codes(data: TerrainData) -> PackedInt32Array:
 	return codes
 
 
-## The viewport's state once its device has built past `builds` and is ready.
-func _built_after(builds: int) -> Dictionary:
-	var state := _state()
-	for _frame in 900:
-		if String(state.get("status", "")) == "ready" and int(state.get("builds", 0)) > builds \
-				and not bool(state.get("device", {}).get("build", {}).get("loading", true)):
-			break
-		await get_tree().process_frame
-		_app.pump()
-		state = _state()
-	_app.pump()
-	return _state()

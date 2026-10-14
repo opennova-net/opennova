@@ -82,15 +82,10 @@ func _device(path: String) -> SubViewport:
 	return _app.get_viewport_device(path, "model")
 
 
-## The viewport over `path` ready on its device, a frame at a time.
+## The viewport over `path` once its device built its picture, the Shell's frames alone
+## (EditorSeam.await_viewport, nothing pumped).
 func _await_ready(path: String) -> Dictionary:
-	var state := _state(path)
-	for _frame in 600:
-		if String(state.get("status", "")) == "ready" and bool(state.get("device", {}).get("attached", false)):
-			break
-		await get_tree().process_frame
-		state = _state(path)
-	return state
+	return await _seam.await_viewport({"path": path, "limit": 1}, 0, Callable(), 900, false)
 
 
 ## How far the build of the viewport over `path` has run.

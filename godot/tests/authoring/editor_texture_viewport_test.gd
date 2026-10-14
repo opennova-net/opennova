@@ -95,17 +95,9 @@ func _viewport(path: String) -> Dictionary:
 	return _seam.query("viewport", {"op": "state", "path": path, "kind": "texture"})
 
 
-## The viewport over `path` ready on its device: a frame at a time until its device made its picture.
+## The viewport over `path` once its device built its picture (EditorSeam.await_viewport).
 func _await_ready(path: String) -> Dictionary:
-	var state := _viewport(path)
-	for _frame in 600:
-		if String(state.get("status", "")) == "ready" and bool(state.get("device", {}).get("attached", false)) \
-				and int(state.get("builds", 0)) > 0:
-			break
-		_app.pump()
-		await get_tree().process_frame
-		state = _viewport(path)
-	return state
+	return await _seam.await_viewport({"path": path, "kind": "texture"})
 
 
 ## The device's canvas rect and its shader material.

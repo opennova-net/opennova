@@ -61,18 +61,10 @@ func _change(change: Dictionary, path := "") -> bool:
 	return bool(_ask({"kind": "set_viewport", "viewport": change}, path).get("outcome", {}).get("done", false))
 
 
+## The viewport over `path` ("" the active document's) once its device built its picture, the
+## device's report of it (the files it missed, its ground) read (EditorSeam.await_viewport).
 func _await_ready(path := "") -> Dictionary:
-	var state := _state(path)
-	for _frame in 900:
-		if String(state.get("status", "")) == "ready" and bool(state.get("device", {}).get("attached", false)) \
-				and int(state.get("builds", 0)) > 0:
-			break
-		await get_tree().process_frame
-		state = _state(path)
-	# What the device reports of its built picture (the files it missed, its ground) reaches the
-	# viewport at the pump after the build's last unit.
-	_app.pump()
-	return _state(path)
+	return await _seam.await_viewport({"path": path, "limit": 200})
 
 
 func _device(state: Dictionary) -> SubViewport:
@@ -1873,15 +1865,7 @@ func _map_state() -> Dictionary:
 
 
 func _await_map() -> Dictionary:
-	var state := _map_state()
-	for _frame in 900:
-		if String(state.get("status", "")) == "ready" and bool(state.get("device", {}).get("attached", false)) \
-				and int(state.get("builds", 0)) > 0:
-			break
-		await get_tree().process_frame
-		state = _map_state()
-	_app.pump()
-	return _map_state()
+	return await _seam.await_viewport({"kind": "map", "limit": 200})
 
 
 ## S23 C: the map's device draws the game's commander map pass over the project's files: the runtime's HudOverlay

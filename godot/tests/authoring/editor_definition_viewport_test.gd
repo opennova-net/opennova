@@ -73,17 +73,9 @@ func _change(change: Dictionary) -> bool:
 	return bool(answer.get("outcome", {}).get("done", false))
 
 
-## The viewport ready on its device, a build newer than `builds` ended: a frame at a time.
+## The viewport ready on its device, a build newer than `builds` ended (EditorSeam.await_viewport).
 func _await_built(builds := 0) -> Dictionary:
-	var state := _state()
-	for _frame in 600:
-		if String(state.get("status", "")) == "ready" and bool(state.get("device", {}).get("attached", false)) \
-				and int(state.get("builds", 0)) > builds:
-			break
-		_app.pump()
-		await get_tree().process_frame
-		state = _state()
-	return state
+	return await _seam.await_viewport({"path": ITEMS, "kind": "definition", "limit": 50}, builds)
 
 
 func _device_node(type: String) -> Node:

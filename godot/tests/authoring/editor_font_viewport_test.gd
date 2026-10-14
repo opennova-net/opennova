@@ -31,20 +31,6 @@ func _quads(state: Dictionary) -> int:
 	return int((drawn as Dictionary).get("quads", -1)) if drawn is Dictionary else -1
 
 
-## The viewport over `path` after its device drew it: a frame at a time until the device reports quads drawn of the
-## layout it holds now (the viewport's revision shown), at most `frames` frames.
-func _await_drawn(path: String, frames := 600) -> Dictionary:
-	var state := _viewport(path)
-	for _frame in frames:
-		if String(state.get("status", "")) == "ready" and bool(state.get("device", {}).get("attached", false)) \
-				and _quads(state) > 0:
-			break
-		_app.pump()
-		await get_tree().process_frame
-		state = _viewport(path)
-	return state
-
-
 ## A few frames pumped, then the viewport as it stands.
 func _settle(path: String, frames := 8) -> Dictionary:
 	for _frame in frames:
@@ -62,7 +48,11 @@ func test_the_font_stays_drawn_through_an_edit_and_its_undo() -> void:
 	# The blank font (the engine's stroke font), made and opened: its text drawn through the device.
 	assert_true(_seam.create_file("Extra.fnt"), "\n".join(_seam.get_output_lines()))
 	var path := "fonts/Extra.fnt"
-	var state := await _await_drawn(path)
+	# Until the device reports quads drawn of the layout it holds now (the viewport's revision shown).
+	var drawn := func(shown: Dictionary) -> bool: return _quads(shown) > 0
+	var state: Dictionary = await _seam.await_viewport(
+		{"path": path, "kind": "font"}, 0, drawn, 600
+	)
 	assert_eq(String(state.get("status", "")), "ready", "the font shows")
 	assert_true(bool(state.get("device", {}).get("attached", false)), "on its device")
 	var first := _quads(state)

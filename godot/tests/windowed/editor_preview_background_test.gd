@@ -86,14 +86,8 @@ func _project() -> String:
 
 ## The viewport over `path` of `kind` ready on its device, then drawn a few frames.
 func _await_drawn(path: String, kind: String) -> bool:
-	var ready := false
-	for _frame in 600:
-		var state: Dictionary = _seam.query("viewport", {"op": "state", "path": path, "kind": kind, "limit": 1})
-		if String(state.get("status", "")) == "ready" and bool(state.get("device", {}).get("attached", false)) \
-				and int(state.get("builds", 0)) > 0:
-			ready = true
-			break
-		await get_tree().process_frame
+	var asked := {"path": path, "kind": kind, "limit": 1}
+	var ready: bool = _seam.built(await _seam.await_viewport(asked, 0, Callable(), 600, false))
 	assert_true(ready, "%s's viewport ready" % kind)
 	for _frame in 6:
 		await get_tree().process_frame

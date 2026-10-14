@@ -47,12 +47,8 @@ func _open_mission() -> SubViewport:
 		self, _seam, root, {"small": true, "items": true, "models": models}
 	)
 	assert_true(_seam.open_document(MISSION_PATH))
-	var state := _state()
-	for _frame in 900:
-		if String(state.get("status", "")) == "ready" and bool(state.get("device", {}).get("attached", false)):
-			break
-		await get_tree().process_frame
-		state = _state()
+	var asked := {"path": MISSION_PATH, "limit": 200}
+	var state: Dictionary = await _seam.await_viewport(asked, 0, Callable(), 900, false)
 	assert_eq(String(state.get("status", "")), "ready", str(state))
 	var device: SubViewport = _app.get_viewport_device(MISSION_PATH, "mission")
 	assert_not_null(device)

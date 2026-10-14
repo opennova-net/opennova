@@ -44,14 +44,10 @@ func _state(path: String) -> Dictionary:
 	return _seam.query("viewport", {"op": "state", "path": path, "limit": 1})
 
 
+## The viewport over `path` once its device built its picture, the Shell's frames alone
+## (EditorSeam.await_viewport, nothing pumped).
 func _await_ready(path: String) -> Dictionary:
-	var state := _state(path)
-	for _frame in 900:
-		if String(state.get("status", "")) == "ready" and bool(state.get("device", {}).get("attached", false)):
-			break
-		await get_tree().process_frame
-		state = _state(path)
-	return state
+	return await _seam.await_viewport({"path": path, "limit": 1}, 0, Callable(), 900, false)
 
 
 ## A project holding the mission and what its picture reads (EditorFixture.mint_tmap_mission's Tmap

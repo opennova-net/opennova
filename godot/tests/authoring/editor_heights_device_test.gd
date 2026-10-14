@@ -39,18 +39,6 @@ func _state() -> Dictionary:
 	return _seam.query("viewport", {"op": "state", "limit": 10, "path": MISSION})
 
 
-func _await_ready() -> Dictionary:
-	var state := _state()
-	for _frame in 900:
-		if String(state.get("status", "")) == "ready" and bool(state.get("device", {}).get("attached", false)) \
-				and int(state.get("builds", 0)) > 0:
-			break
-		await get_tree().process_frame
-		state = _state()
-	_app.pump()
-	return _state()
-
-
 func _terrain(state: Dictionary) -> Terrain:
 	var device: SubViewport = _app.get_viewport_device(String(state.get("path", "")), String(state.get("kind", "")))
 	if device == null:
@@ -82,7 +70,7 @@ func test_a_sculpt_is_an_update_of_the_missions_view() -> void:
 	if _app == null:
 		return
 	assert_true(_open_mission())
-	var state := await _await_ready()
+	var state: Dictionary = await _seam.await_viewport({"path": MISSION, "limit": 10})
 	assert_eq(String(state.get("status", "")), "ready", str(state))
 	var builds := int(state.get("builds", 0))
 	var terrain := _terrain(state)
@@ -151,7 +139,7 @@ func test_the_devices_ground_is_the_games_under_the_ray() -> void:
 	if _app == null:
 		return
 	assert_true(_open_mission())
-	var state := await _await_ready()
+	var state: Dictionary = await _seam.await_viewport({"path": MISSION, "limit": 10})
 	assert_eq(String(state.get("status", "")), "ready", str(state))
 	var device: SubViewport = _app.get_viewport_device(MISSION, "mission")
 	assert_not_null(device, "the mission's device")

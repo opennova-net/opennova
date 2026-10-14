@@ -62,19 +62,6 @@ func _viewport() -> Dictionary:
 	return _seam.query("viewport", {"op": "state", "path": PTL, "kind": "effect"})
 
 
-## The viewport ready on its device: a frame at a time until its device took the scene.
-func _await_ready() -> Dictionary:
-	var state := _viewport()
-	for _frame in 600:
-		if String(state.get("status", "")) == "ready" and bool(state.get("device", {}).get("attached", false)) \
-				and int(state.get("builds", 0)) > 0:
-			break
-		_app.pump()
-		await get_tree().process_frame
-		state = _viewport()
-	return state
-
-
 func _renderer() -> ParticleRenderer:
 	var device: SubViewport = _app.get_viewport_device(PTL, "effect")
 	if device == null:
@@ -96,7 +83,7 @@ func test_an_open_particle_file_plays_through_the_particle_renderer() -> void:
 		return
 	_new_project()
 	assert_true(_seam.open_document(PTL), "the particle file opens")
-	var state := await _await_ready()
+	var state: Dictionary = await _seam.await_viewport({"path": PTL, "kind": "effect"})
 	assert_eq(String(state.get("status", "")), "ready", "its effect viewport is ready")
 	var body: Dictionary = state.get("body", {})
 	assert_eq(String(body.get("effect", "")), "Puff", "the file's first effect")
@@ -145,7 +132,7 @@ func test_the_preview_background_draws_behind_an_effect() -> void:
 		return
 	_new_project()
 	assert_true(_seam.open_document(PTL), "the particle file opens")
-	var state := await _await_ready()
+	var state: Dictionary = await _seam.await_viewport({"path": PTL, "kind": "effect"})
 	assert_eq(String(state.get("status", "")), "ready", str(state))
 	PreviewBackgroundChecks.check_each(self, _app, _seam, PTL, "effect")
 	var grid := _grid()
