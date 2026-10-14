@@ -554,3 +554,50 @@ wave. The markers that would play them (items.def, `type marker`,
 | `snd: ON Gnats Lp [30m]` | `LPNV_ONGNATS` all day | |
 | `snd: ON Birds [250m]` | | `ENV_ONBIRD1`: dawn 5, 21; day 6, 24; dusk 8, 34 |
 | `snd: ON Frogs night [180m]` | | `ENV_ONFROG1`: dawn 20, 5; dusk 15, 6; night 11, 7 |
+
+## The gear's sets (proposed for `game.lwf`)
+
+The knife's, the grenades', the medical pouch's and the powerups' sets, for the bank's next edit (the
+waves are in `assets/`, `SOURCES.md` says how each was made). Each copies its original counterpart's
+layers, falloff, member count where we have the waves, pitch and jitter (`GS_KNIFE`, `GF_KNIFE_ST`,
+`GF_KNIFE_SF`, `IMP_KNIFE_*`, `GF_GNADE_ST`, `GF_GNADE_THROW`, `GF_CNADE_THROW`, `EXPLO_FRAG_GREN`,
+`IMP_GREN_*`, `EXPLO_SMOK_GREN`, `MEDPAK_USE`, `GF_SATCHEL_ST`/`_SF`, `HEALTH_UP`, `PU_AMMO`, measured
+as above), and the member volumes match its loudness: the original's volume times the ratio of the
+two families' loudest 50 ms, at most 255 (where the cap holds a quiet family back, the row says so).
+Set pitch 0xFFFF, no set jitter, cull range 10000, layer flags 0xF, member clamp 255 unless noted.
+
+| Set | Layer (falloff) | Members | Pitch | Jitter | Volume | Played by |
+|---|---|---|---|---|---|---|
+| `GS_ONKNIFE` | 50 | `onknfsl1`, `onknfsl2` | 0xFFFF | 0x0F5C | 48 | `WPN_KNIFE`/`WPN_KNIFE2` fire's `soundsetend` (the original's `GS_KNIFE`: two swishes, 50) |
+| `GF_ONKNIFE_ST` | 25 | `onknfst` | 0xFFFF | 0 | 76 | the knife's switchto |
+| `GF_ONKNIFE_SF` | 25 | `onknfsf` | 0x11EB7 | 0 | 47 | the knife's switchfrom |
+| `ON_IMP_KNIFE_FLESH` | 50 | `onknfhf1` to `3` | 0xFFFF | 0x0CCC | 255 | `AMMO_ON_KNIFE`'s `kz_sound` and its flesh and player rows (the original's six stabs, 240) |
+| `ON_IMP_KNIFE_DIRT` | 50 | `onknfhd1`, `onknfhd2` | 0xFFFF | 0 | 110 | its dirt, grass, snow, packeddirt, mud, ice, sand and quicksand rows |
+| `ON_IMP_KNIFE_CEMENT` | 50 | `onknfhm1`, `onknfhm2` | 0x13332 | 0x0CCC | 255 | its cement and stone rows (the metal hits played 1.2 times, held at the cap: ours sit 8 dB under the original's) |
+| `ON_IMP_KNIFE_METAL` | 50 | `onknfhm1`, `onknfhm2` | 0xFFFF | 0x147A | 255 | its railroad, metal and hmetal rows (at the cap, 9 dB under) |
+| `ON_IMP_KNIFE_WOOD` | 50 | `onknfhw1`, `onknfhw2` | 0xFFFF | 0 | 255 | its wood row (at the cap, 10 dB under) |
+| `ON_IMP_KNIFE_CLOTH` | 50 | `onknfhf1` to `3` | 0xE665 | 0 | 200 | its cloth row (the stabs a little lower, as the original's cloth hits are the stabs' kin) |
+| `GF_ONGNADE_ST` | 25 | `onfrgpin` | 0xFFFF | 0 | 99 | the grenades' switchto and reload (the draw's pin pull; the original's `GF_GNADE_ST`, 100) |
+| `GF_ONGNADE_SF` | 25 | `onmedpsf` | 0xFFFF | 0 | 54 | the grenades' switchfrom (a sleeve's rustle; the original plays its `GF_GNADE_ST` here too) |
+| `GF_ONGNADE_THROW` | 25 | `onfrgthr` | 0xFFFF | 0 | 186 | `WPN_GRENADEHE` fire's `soundset` (the swing peaks at 1.28 s, the release at `delaystart` 80) |
+| `GF_ONCNADE_THROW` | 25 | `onfrgthr` | 0x11EB7 | 0 | 115 | `WPN_GRENADESM` fire's `soundset` (the original's own canister throw, 120) |
+| `ON_EXPLO_FRAG` | 200 | `onfrgex1`, `onfrgex2` | 0xFFFF | 0 | 255, 255 | `AMMO_ON_FRAG`'s obj row (the burst) and its underwater rows (the original's `EXPLO_FRAG_GREN`: 245, 225, held at the cap) |
+| | 700 | `onfrgxf1`, `onfrgxf2` (clamp 180) | 0xFFFF | 0x6666 | 255 | the far report |
+| | 20 | `onxpton` (clamp 40) | 0xFFFF | 0 | 255 | the ring in the ears close by |
+| `ON_IMP_GREN_DIRT` | 90 | `onfrgbd1` (clamp 140), `onfrgbd2`, `onfrgbd3` (clamp 120) | 0xFFFF | 0x147A | 242 | the grenades' bounce on dirt, grass, snow, packeddirt, mud, ice, sand and quicksand |
+| `ON_IMP_GREN_STON` | 90 | `onfrgbs1`, `onfrgbs2` (clamp 180) | 0xE665 | 0x35C2 | 164 | on cement and stone |
+| `ON_IMP_GREN_METAL` | 90 | `onfrgbm1`, `onfrgbm2` | 0xB332 | 0x11EB | 255 | on railroad, metal and hmetal |
+| `ON_IMP_GREN_WOOD` | 90 | `onfrgbw1`, `onfrgbw2` | 0xFFFF | 0x0A3D | 255 | on wood (at the cap, 9 dB under the original's) |
+| `ON_EXPLO_SMOKE` | 80 | `onsmkgr1` | 0xFFFF | 0 | 255 | `AMMO_ON_SMOKE`'s obj row: the pop and the 4 s hiss (the original's `EXPLO_SMOK_GREN`, 185, held at the cap) |
+| `ON_MEDPAK_USE` | 35 | `onmedpak` | 0xFFFF | 0 | 120 | `WPN_MEDPACK` fire's `soundsetend` (the original's `MEDPAK_USE`, 90) |
+| `MEDIC_KIT_USE` | 40 | `onmedpak` | 0xFFFF | 0 | 255 | the engine's own name: a medic's heal (S2C 0x3A) plays it at the healed man (the original's, 250) |
+| `GF_ONMEDP_ST` | 25 | `onmedpst` | 0xFFFF | 0 | 213 | the medical pouch's switchto |
+| `GF_ONMEDP_SF` | 25 | `onmedpsf` | 0xFFFF | 0 | 54 | its switchfrom |
+| `ON_HEALTH_UP` | 50 | `onpuhlt1` | 0xFFFF | 0 | 255 | `PU_ONHEALTH`'s pickup `soundset` (the original's `HEALTH_UP`, three layers at 215, 225, 150; ours one) |
+| `ON_PU_AMMO` | 50 | `onpuamm1` | 0xFFFF | 0 | 255 | `PU_ONAMMO`'s pickup `soundset` (the original's `PU_AMMO`, 250 and a chime at 215; ours one) |
+| `PUP_EMPTY` | 60 | `onar15dry` | 0xCCCC | 0x07AE | 150 | the engine's own name: a health powerup walked into at full health (the original's `Sad1`, 125; ours the dry click played at 0.8) |
+
+The grenades' and the knife's rows that hit glass, cloth, foliage, flesh and water name the bullets'
+`ON_IMP_GLASS`, `ON_IMP_CLOTH`, `ON_IMP_FOLIAGE`, `ON_IMP_FLESH` and `ON_IMP_WATER`, as the original's
+grenade names its debris and splash sets there; `DRY_CLAYSATCH` (already in the bank) is the
+grenades' empty click, as the original's.
