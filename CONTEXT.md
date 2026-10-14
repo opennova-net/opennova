@@ -540,7 +540,7 @@ a project naming none starts. Its files are copied into a project on request (Im
 game data: the files chosen, their **import closure**, or the whole install in one action), never
 redistributed: its archives' files, and the loose files the game ships beside them and reads from
 there (its music banks, its videos, the country code, the NovaWorld table and its screens; never
-a save, a configuration or a score). Play in the game install runs a build there.
+a save, a configuration or a score). **Strict Play** runs a build there.
 _Avoid_: retail directory, retail root, retail files (the names before ADR 0046 S13 A4), resource
 dir (the runtime's `--resource-dir`, which may be a build)
 
@@ -1583,15 +1583,15 @@ until the next Play of that mode, or until the project closes.
 _Avoid_: crash log, error list, log scrape
 
 **Run directory**:
-Where Play runs the game: `.opennova/run/<mode>/<n>/` (the Play's mode, `runtime`, `install` or
-`strict`; n from 1), the game's working directory, the log Play tails (`session.log`; the game
-install's own, `_filelog.txt`, read once its game has exited, never while it runs) and the saves
-the game keeps beside itself (`weapon.sav`), so the build it runs from stays as the build wrote
-it. Play in the game install puts there what the install's game needs beside it: the build's
-files (linked; one the game may write, a `.cfg`, `.sav`, `.coo` or `.txt`, copied), the
-install's executable and Bink DLL, a `game.cfg` (the project's own, else the install's) and the
-install's `player.sav` and `weapon.sav` where the project has none; Strict Play, the build's
-files and the executable and Bink DLL alone. It records its game (pid and creation time) while
+Where Play runs the game: `.opennova/run/<mode>/<n>/` (the Play's mode, `runtime` or `strict`; n
+from 1), the game's working directory, the log Play tails (`session.log`; the game install's own,
+`_filelog.txt`, read once its game has exited, never while it runs) and the saves the game keeps
+beside itself (`weapon.sav`), so the build it runs from stays as the build wrote it. Strict Play
+puts there the build's files (linked; one the game may write, a `.cfg`, `.sav`, `.coo` or `.txt`,
+copied) and the install's executable and Bink DLL alone; an expansion's Play, the install's base
+game (its archives and the loose files beside them, linked, or copied once into the project's
+copy cache where the volume will not link them) and the build's expansion folder. It records its
+game (pid and creation time) while
 the game may run; each Play takes the first free one of its mode, passing one whose game may
 still run, and keeps what the game wrote there in that mode's runs before (its `game.cfg`, its
 saves; Play fresh empties it). A Play never touches another mode's run directories.
@@ -1601,15 +1601,17 @@ _Avoid_: build directory (what the build publishes, never written after), workin
 Play in the game install as a player's drop-in: the run directory holds the build's files and the
 game install's executable and Bink DLL, nothing else of the install (no configuration, save or
 score), and the game is launched without `/d`, so it reads its archives first and writes its own
-configuration (the **Play mode** `strict`). A
-first run that wrote its own `game.cfg` and quit soon after it started is started once more; an
-expansion is refused until a project can name its base game's build. Play in the game install
-without it is the day-to-day run.
+configuration (the **Play mode** `strict`). A first run that wrote its own `game.cfg` and quit soon
+after it started is started once more. An expansion plays as the stock game's `/exp` from its
+install: over the install's base game, or over its base game's project's export. The OpenNova
+runtime is the day-to-day run; the install mode (the install's program with the install's
+configuration seeded and `/d`) was cut (ADR 0046 S26).
 _Avoid_: retail mode, clean run, vanilla run
 
 **Play mode**:
-How Play runs a project's build: `runtime` (the OpenNova runtime), `install` (Play in the game
-install) or `strict` (Strict Play), each also the name of its run directories. A project's own, kept
+How Play runs a project's build: `runtime` (the OpenNova runtime) or `strict` (Strict Play), each
+also the name of its run directories (a `local.json` that names the cut `install` plays in the
+runtime). A project's own, kept
 in its `.opennova/local.json` on that checkout with whether Play saves first (`play_mode`,
 `save_before_play`), never the editor's: the editor's settings are shared by every editor on the
 machine, so a project's Strict Play never starts the game install for another project or another
