@@ -21,8 +21,8 @@ struct LayerFile {
 	std::function<bool(std::vector<uint8_t> &bytes, std::string &error)> read;
 };
 
-// A base layer of the asset graph (ADR 0046 d10, S13 D3; "An expansion's base game under its
-// graph"): the files of the base game an expansion project builds on, read once through the same
+// A base layer of the asset graph (ADR 0046 d10, "An expansion's base game under its graph";
+// S13 D3): the files of the base game an expansion project builds on, read once through the same
 // extractors as the project's files, with the names each defines, and nothing else: no edges (what
 // the base game's files reference is the base game's business), no record sets (a Record reference
 // resolves in its own file, S13 D8) and no findings (a file that does not read leaves its names
