@@ -71,9 +71,6 @@ bool mission_mark_ring_rgb(MissionColorBy by, int team, int group, uint32_t &rgb
 void mission_group_legend(const std::vector<std::pair<int, size_t>> &groups, const std::function<std::string(int)> &title,
 		int width, OverlayList &out, size_t most = 12);
 
-// The direction an entity faces in the presentation frame (its yaw a compass heading, 0 north, 90
-// east: world::presentation_forward_from_angles).
-PreviewVec3 mission_entity_heading(const MissionEntityMark &entity);
 // Where an entity's handles sit: its yaw handle `reach` metres along its heading, its height handle
 // `reach` metres above it.
 PreviewVec3 mission_yaw_handle(const MissionEntityMark &entity, float reach);
@@ -84,8 +81,6 @@ PreviewVec3 mission_area_handle_point(const MissionAreaMark &area, MissionHandle
 // The handles an area carries as the primary: its four edges and four corners, and its bottom and top where its
 // flags bound z.
 std::vector<MissionHandle> mission_area_handles(const MissionAreaMark &area);
-// An area's anchor height: the ground at its centre where `device` answers, else its z_min.
-double mission_area_anchor_z(const MissionAreaMark &area, const ViewportDevice *device);
 
 // One frame's input to the overlays.
 struct MissionOverlayInput {

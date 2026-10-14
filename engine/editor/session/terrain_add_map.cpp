@@ -7,6 +7,7 @@
 #include <base/io/strutil.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/terrain_document.h>
+#include <editor/graph/rename_transaction.h>
 #include <editor/import/terrain_import.h>
 #include <editor/model/document_base.h>
 #include <editor/project/project_files.h>
@@ -14,6 +15,7 @@
 #include <editor/session/file_chores.h>
 #include <editor/session/import_controller.h>
 #include <editor/session/session_core.h>
+#include <editor/session/terrain_stroke.h>
 #include <editor/session/terrain_family.h>
 #include <editor/session/terrain_uses.h>
 #include <formats/pcx/pcx_io.h>
@@ -24,10 +26,6 @@
 namespace opennova::editor {
 
 namespace {
-
-void refuse(SessionCore &core, const std::string &why, const std::string &at) {
-	core.refuse_request(CoreFinding::TerrainStroke, why, at, DiagnosticSeverity::Error);
-}
 
 // The sides a new map takes: the shipped terrains' own (their char maps 512 x 512, their foliage maps 256 x 256; the
 // game reads any power of two to 1024 [orig: Terrain_GetSurfaceTypeAtPosition @ 0x6065C6; Foliage_SampleFoliageMapMask
@@ -48,14 +46,6 @@ const char *trn_field(TerrainPlane plane) {
 	default: return "";
 	}
 }
-const char *set_key(TerrainPlane plane) {
-	switch (plane) {
-	case TerrainPlane::Surface: return "surface";
-	case TerrainPlane::Foliage: return "foliagemap";
-	case TerrainPlane::Blend: return "blendmap";
-	default: return "";
-	}
-}
 const char *suffix(TerrainPlane plane) {
 	switch (plane) {
 	case TerrainPlane::Surface: return "_m.pcx";
@@ -66,10 +56,6 @@ const char *suffix(TerrainPlane plane) {
 }
 
 // The folder a project-relative path sits in ("" the top level).
-std::string folder_of(const std::string &path) {
-	const size_t slash = path.rfind('/');
-	return slash == std::string::npos ? std::string() : path.substr(0, slash);
-}
 std::string in_folder(const std::string &folder, const std::string &name) {
 	return folder.empty() ? name : folder + "/" + name;
 }
@@ -147,7 +133,7 @@ bool on_disk(const SessionCore &core, const std::string &path) {
 bool add_authored(SessionCore &core, const DocumentBase &view, const TerrainFamily &family, TerrainPlane plane) {
 	const std::string view_path = view.path();
 	const std::string name = family.terrain_name + suffix(plane);
-	const std::string path = in_folder(folder_of(family.terrain), name);
+	const std::string path = in_folder(folder_of_path(family.terrain), name);
 	const AssetEntry *held = core.view().project.scan ? core.view().project.scan->find(name) : nullptr;
 	if (!held && on_disk(core, path)) {
 		core.update_files({path});
@@ -157,7 +143,7 @@ bool add_authored(SessionCore &core, const DocumentBase &view, const TerrainFami
 		std::vector<uint8_t> bytes;
 		std::string error;
 		if (!game_form(plane, bytes, error) || !write_new(core, path, bytes, error)) {
-			refuse(core, path + " could not be made: " + error + ".", view_path);
+			refuse_stroke(core, path + " could not be made: " + error + ".", view_path);
 			return false;
 		}
 		const std::string said = "New file " + path + ", " + terrain_plane_words(plane) + " of " +
@@ -170,7 +156,7 @@ bool add_authored(SessionCore &core, const DocumentBase &view, const TerrainFami
 	DocumentBase *trn = documents.open_quietly(family.terrain, "Add names " + std::string(terrain_plane_words(plane)) + " in it");
 	auto *terrain = dynamic_cast<TerrainDocument *>(trn);
 	if (!terrain || terrain->rows().empty()) {
-		refuse(core, "Could not open " + family.terrain + " to name " + terrain_plane_words(plane) + " in it.", view_path);
+		refuse_stroke(core, "Could not open " + family.terrain + " to name " + terrain_plane_words(plane) + " in it.", view_path);
 		return false;
 	}
 	Edit edit;
@@ -188,12 +174,12 @@ bool add_authored(SessionCore &core, const DocumentBase &view, const TerrainFami
 bool add_imported(SessionCore &core, const DocumentBase &view, const TerrainFamily &family, TerrainPlane plane,
                   const TerrainImport &import) {
 	const std::string view_path = view.path();
-	const std::string key = set_key(plane);
+	const std::string key = terrain_set_key(plane);
 	std::string set_stem = basename_of(import.source);
 	const size_t dot = set_stem.rfind('.');
 	if (dot != std::string::npos) set_stem.resize(dot);
 	const std::string name = set_stem + "_" + key + ".png";
-	const std::string path = in_folder(folder_of(import.source), name);
+	const std::string path = in_folder(folder_of_path(import.source), name);
 	const AssetScan *scan = core.view().project.scan.get();
 	const bool adopted = (scan && scan->at_path(path)) || on_disk(core, path);
 	std::vector<uint8_t> set_bytes;
@@ -201,7 +187,7 @@ bool add_imported(SessionCore &core, const DocumentBase &view, const TerrainFami
 	TerrainSet set;
 	if (!io::read_file_bytes(join_path(core.paths().root, import.source), set_bytes, error) ||
 	    !parse_terrain_set(set_bytes, set, error)) {
-		refuse(core, import.source + " does not read: " + error + ".", view_path);
+		refuse_stroke(core, import.source + " does not read: " + error + ".", view_path);
 		return false;
 	}
 	std::vector<std::pair<std::string, std::vector<uint8_t>>> make;
@@ -218,7 +204,7 @@ bool add_imported(SessionCore &core, const DocumentBase &view, const TerrainFami
 		}
 		std::vector<uint8_t> bytes = source_form(plane, &seed);
 		if (bytes.empty()) {
-			refuse(core, path + " could not be made: the encoder refused it.", view_path);
+			refuse_stroke(core, path + " could not be made: the encoder refused it.", view_path);
 			return false;
 		}
 		make.emplace_back(path, std::move(bytes));
@@ -235,14 +221,14 @@ bool add_imported(SessionCore &core, const DocumentBase &view, const TerrainFami
 bool add_terrain_map(SessionCore &core, const DocumentBase &view, const TerrainFamily &family, TerrainPlane plane) {
 	const std::string view_path = view.path();
 	if (plane != TerrainPlane::Surface && plane != TerrainPlane::Foliage && plane != TerrainPlane::Blend) {
-		refuse(core, std::string("Add makes a surface, foliage or blend map: ") + terrain_plane_words(plane) +
+		refuse_stroke(core, std::string("Add makes a surface, foliage or blend map: ") + terrain_plane_words(plane) +
 		                     " every terrain has of its own (the game reads no terrain without them).",
 		       view_path);
 		return false;
 	}
 	const TerrainFamilyFile &file = family.plane(plane);
 	if (!file.addable) {
-		refuse(core, file.resolved() ? basename_of(view_path) + "'s terrain has " + terrain_plane_words(plane) +
+		refuse_stroke(core, file.resolved() ? basename_of(view_path) + "'s terrain has " + terrain_plane_words(plane) +
 		                                       " already: " + basename_of(file.path) + "."
 		                             : file.refusal,
 		       view_path);

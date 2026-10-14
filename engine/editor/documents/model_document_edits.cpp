@@ -225,9 +225,11 @@ constexpr FindingCodeEntry<ModelFinding> kFindingEntries[] = {
 	{ ModelFinding::RegisterUnknown, { "model.register_unknown" } },
 	{ ModelFinding::LodOrder, { "model.lod_order" } },
 	{ ModelFinding::FrameMissing, listed_code("model.frame_missing") },
-	// The load's light swap reads through the CTRL table the model lacks: it crashes [orig:
-	// ThreediGp_LoadFromFile @ 0x5B5F55, the table pointer loaded unchecked, read @ 0x5B5F5E]. It gates.
-	{ ModelFinding::LightNoRegisters, { "model.light_no_registers" } },
+	{ ModelFinding::LightNoRegisters,
+	  game_fails_code("model.light_no_registers",
+	                  "the load's light swap reads through the CTRL table the model lacks, the table pointer loaded "
+	                  "unchecked, and the game crashes loading the model [orig: ThreediGp_LoadFromFile @ 0x5B5F55, "
+	                  "read @ 0x5B5F5E]") },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(ModelFinding::kCount),
 		"every ModelFinding has exactly one row");

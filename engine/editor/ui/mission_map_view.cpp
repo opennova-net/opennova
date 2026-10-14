@@ -17,6 +17,7 @@
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/mission_mark_menu.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/viewport_widgets.h>
 #include <editor/ui/workspace.h>
 
 namespace opennova::editor {
@@ -94,13 +95,10 @@ void MissionMapViewportView::draw_ready(Workspace &workspace, const ViewportMode
 	if (ui_kit::tool(row, "-##zoom_out", model.camera().zoom < kMissionMapZoomMax,
 				"Zoom out a step, as the commander map's ZOOMOUT does."))
 		command(workspace, model, "zoom_out");
-	row.next(ui_kit::checkbox_width("Grid"));
-	ImGui::Checkbox("Grid", &options.grid);
-	ui_kit::tooltip("The commander map's grid (its GRID toggle): the lines and their labels about the mission's Map "
-	                "centerpoint marker, where it has one.");
-	row.next(ui_kit::checkbox_width("Text"));
-	ImGui::Checkbox("Text", &options.text);
-	ui_kit::tooltip("The commander map's text (its TEXT toggle): the names it writes on the map.");
+	ui_kit::check(row, "Grid", &options.grid,
+	              "The commander map's grid (its GRID toggle): the lines and their labels about the mission's Map "
+	              "centerpoint marker, where it has one.");
+	ui_kit::check(row, "Text", &options.text, "The commander map's text (its TEXT toggle): the names it writes on the map.");
 	struct Kind {
 		const char *label;
 		bool *shown;
@@ -119,14 +117,10 @@ void MissionMapViewportView::draw_ready(Workspace &workspace, const ViewportMode
 		  "to the other, and a distance trigger's reach seen from above. And on each pin some event names, how many "
 		  "events name it." },
 	};
-	for (const Kind &kind : kinds) {
-		row.next(ui_kit::checkbox_width(kind.label));
-		ImGui::Checkbox(kind.label, kind.shown);
-		ui_kit::tooltip(kind.tip);
-	}
+	for (const Kind &kind : kinds) ui_kit::check(row, kind.label, kind.shown, kind.tip);
 	{
 		const char *const words[] = { "Team", "Group" };
-		const float width = ui_kit::text_width("Group") + ImGui::GetFrameHeight() + ImGui::GetStyle().FramePadding.x * 2.0f;
+		const float width = combo_width(ui_kit::text_width("Group"));
 		row.next(ui_kit::field_width(width, "Colour"));
 		ImGui::SetNextItemWidth(width);
 		if (ImGui::BeginCombo("Colour", words[size_t(options.color_by)])) {
@@ -137,9 +131,7 @@ void MissionMapViewportView::draw_ready(Workspace &workspace, const ViewportMode
 		ui_kit::tooltip("What the pins and the wireframes are coloured by: the team (the game's map colours) or the "
 		                "group (the editor's own colours, group 0 none, with a legend of the groups in view).");
 	}
-	row.next(ui_kit::checkbox_width("Stick"));
-	ImGui::Checkbox("Stick", &options.stick);
-	ui_kit::tooltip("A moved entity keeps its height over the ground (as the 3D view's Stick).");
+	ui_kit::check(row, "Stick", &options.stick, "A moved entity keeps its height over the ground (as the 3D view's Stick).");
 	{
 		// S25: what the map draws under its marks, the original tools' views of the heights among them.
 		constexpr MissionMapBackground kBackgrounds[] = {MissionMapBackground::Colour, MissionMapBackground::Height,
@@ -156,7 +148,7 @@ void MissionMapViewportView::draw_ready(Workspace &workspace, const ViewportMode
 		size_t current = 0;
 		for (size_t i = 0; i < std::size(kBackgrounds); ++i)
 			if (kBackgrounds[i] == options.background) current = i;
-		const float width = ui_kit::text_width("Colour map") + ImGui::GetFrameHeight() + ImGui::GetStyle().FramePadding.x * 2.0f;
+		const float width = combo_width(ui_kit::text_width("Colour map"));
 		row.next(ui_kit::field_width(width, "Background"));
 		ImGui::SetNextItemWidth(width);
 		if (ImGui::BeginCombo("Background", words[current])) {
@@ -190,7 +182,7 @@ void MissionMapViewportView::draw_ready(Workspace &workspace, const ViewportMode
 			std::snprintf(text, sizeof(text), "%g m", double(snap));
 			return std::string(text);
 		};
-		const float width = ui_kit::text_width("0.25 m") + ImGui::GetFrameHeight() + ImGui::GetStyle().FramePadding.x * 2.0f;
+		const float width = combo_width(ui_kit::text_width("0.25 m"));
 		row.next(ui_kit::field_width(width, "Snap"));
 		ImGui::SetNextItemWidth(width);
 		if (ImGui::BeginCombo("Snap", words(options.snap).c_str())) {

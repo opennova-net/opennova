@@ -19,6 +19,12 @@
 
 namespace opennova::editor {
 
+// The menu `path` names (a project-relative path or a logical name; "" is the active
+// document, when it is a menu, and never another): the open document, else the file as the
+// last validation read it (the render check's copy). Null when the project has no such menu,
+// the active document is none or no menu, or the file does not load.
+const MnuDocument *menu_for(const SessionView &view, const std::string &path);
+
 namespace {
 
 using io::JsonValue;

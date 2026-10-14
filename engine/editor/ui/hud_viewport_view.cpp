@@ -14,6 +14,7 @@
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/viewport_widgets.h>
 #include <editor/ui/workspace.h>
 #include <runtime/hud/hud_texture_names.h>
 #include <runtime/hud/hud_math.h>
@@ -51,10 +52,6 @@ std::string weapon_words(const HudViewport &model, const std::string &weapon) {
 	return weapon;
 }
 
-float combo_width(float widest_text) {
-	return widest_text + ImGui::GetFrameHeight() + ImGui::GetStyle().FramePadding.x * 2.0f;
-}
-
 // A combo of `count` choices on `row`, the chosen one's words shown; true with `chosen` set when a choice
 // is made.
 template <typename Words>
@@ -86,11 +83,7 @@ void go_to_texture(Workspace &workspace, const SessionView &view, const std::str
 
 // Go to a line of the HUD layout that places an element.
 void go_to_line(Workspace &workspace, const HudViewport &model, const HudPreviewElement::Line &line) {
-	ReferenceTarget target;
-	target.file = model.path();
-	target.locator = TextDocument::locator(line.line, line.column);
-	target.editable = true;
-	window_requests::go_to(workspace, target);
+	window_requests::go_to(workspace, window_requests::target_at(model.path(), TextDocument::locator(line.line, line.column)));
 }
 
 } // namespace
@@ -171,9 +164,9 @@ void HudViewportView::draw_ready(Workspace &workspace, const ViewportModel &view
 		if (ImGui::SliderInt("Health", &health, 0, 100, "%d%%")) options.health = health;
 		ui_kit::tooltip("The player's health: the health bar's fill and its colour band (tagcolor_good, _middle, _bad).");
 		bool hit = options.damage > 0;
-		row.next(ui_kit::checkbox_width("Hit"));
-		if (ImGui::Checkbox("Hit", &hit)) options.damage = hit ? kHudDamageMost : 0;
-		ui_kit::tooltip("The red damage vignette (vignette.tga) at its strongest, as a hit leaves it.");
+		if (ui_kit::check(row, "Hit", &hit,
+		                  "The red damage vignette (vignette.tga) at its strongest, as a hit leaves it."))
+			options.damage = hit ? kHudDamageMost : 0;
 	}
 	// The view.
 	{
@@ -207,12 +200,12 @@ void HudViewportView::draw_ready(Workspace &workspace, const ViewportModel &view
 	                     4.0f * ImGui::GetStyle().FramePadding.x + 2.0f * ImGui::GetStyle().ItemInnerSpacing.x;
 	// The sights and where the aim rests.
 	{
-		row.next(ui_kit::checkbox_width("Sights"));
 		bool sights = options.sights;
-		if (ImGui::Checkbox("Sights", &sights)) options.sights = sights;
-		ui_kit::tooltip("The weapon's sights up, as the game's frame draws them once its scope settles: the weapon's "
-		                "SIGHTS card, the scoped view's ring, and the scope readouts (range, zero, magnification) at "
-		                "hudpos.def's HUDSCOPERANGEXY, HUDSCOPEZEROXY and HUDSCOPEMAGXY.");
+		if (ui_kit::check(row, "Sights", &sights,
+		                  "The weapon's sights up, as the game's frame draws them once its scope settles: the weapon's "
+		                  "SIGHTS card, the scoped view's ring, and the scope readouts (range, zero, magnification) at "
+		                  "hudpos.def's HUDSCOPERANGEXY, HUDSCOPEZEROXY and HUDSCOPEMAGXY."))
+			options.sights = sights;
 		if (options.sights) {
 			row.next(ui_kit::field_width(digits, "Range"));
 			ImGui::SetNextItemWidth(digits);
@@ -224,10 +217,10 @@ void HudViewportView::draw_ready(Workspace &workspace, const ViewportModel &view
 	}
 	// The player list.
 	{
-		row.next(ui_kit::checkbox_width("Player list"));
 		bool board = options.board;
-		if (ImGui::Checkbox("Player list", &board)) options.board = board;
-		ui_kit::tooltip("The Tab board held up, drawn as the game draws it over stand-in players.");
+		if (ui_kit::check(row, "Player list", &board,
+		                  "The Tab board held up, drawn as the game draws it (its rows a session's players: none here)."))
+			options.board = board;
 		if (options.board) {
 			const std::vector<uint32_t> &types = hud_board_game_types();
 			int current = 0;
@@ -240,12 +233,6 @@ void HudViewportView::draw_ready(Workspace &workspace, const ViewportModel &view
 			           "The session's game type the board is drawn for: its header's rung and team scores, and "
 			           "its columns (a team game's by side)."))
 				options.game_type = types[size_t(chosen)];
-			row.next(ui_kit::field_width(digits, "Players"));
-			ImGui::SetNextItemWidth(digits);
-			int players = options.players;
-			if (ImGui::InputInt("Players", &players, 1, 8))
-				options.players = std::clamp(players, 0, kHudBoardPlayersMost);
-			ui_kit::tooltip("How many stand-in players the board lists (the game's rows come from the server).");
 		}
 	}
 	if (options != model.options()) workspace.request(request::set_viewport(model.path(), hud_options_change(options)));

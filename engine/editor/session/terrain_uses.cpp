@@ -7,6 +7,7 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/rename_transaction.h>
 #include <editor/import/sidecar.h>
 #include <editor/import/terrain_import.h>
 #include <editor/project/project_document.h>
@@ -27,11 +28,6 @@ namespace {
 using io::JsonValue;
 using io::json_number;
 using io::json_string;
-
-std::string folder_of(const std::string &path) {
-	const size_t slash = path.find_last_of('/');
-	return slash == std::string::npos ? std::string() : path.substr(0, slash);
-}
 
 // A project file's bytes as the game would read them now: the open document standing in for its file.
 bool read_text(const SessionView &view, const std::string &path, std::string &out) {
@@ -73,7 +69,7 @@ void read_import(const SessionView &view, const AssetEntry &entry, TerrainImport
 		if (out.error.empty()) out.error = out.source + " does not read: " + why;
 		return;
 	}
-	const std::string folder = folder_of(out.source);
+	const std::string folder = folder_of_path(out.source);
 	for (const auto &[key, name] : {std::pair<const char *, const std::string *>{"heightmap", &set.heightmap},
 	                                {"colormap", &set.colormap},
 	                                {"detail", &set.detail},

@@ -44,13 +44,7 @@ using editor_test::NoProcess;
 
 std::string fixture(const char *relative) { return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/" + relative; }
 
-Edit set_of(const NodeAddress &address, const char *field, Value value) {
-	Edit edit;
-	edit.address = address;
-	edit.field = field;
-	edit.value = std::move(value);
-	return edit;
-}
+using editor_test::set_edit;
 
 // A row added with its name, then its fields set, as one batch.
 std::vector<Edit> row_with(NodeKind kind, const char *name_field, const std::string &name,
@@ -62,7 +56,7 @@ std::vector<Edit> row_with(NodeKind kind, const char *name_field, const std::str
 	add.field = name_field;
 	add.value = name;
 	edits.push_back(std::move(add));
-	for (const auto &[field, value] : fields) edits.push_back(set_of({batch_made(0), kind, 0}, field, value));
+	for (const auto &[field, value] : fields) edits.push_back(set_edit({batch_made(0), kind, 0}, field, value));
 	return edits;
 }
 
@@ -215,8 +209,8 @@ static int test_item_ids() {
 	if (items.empty() || people.empty()) return 1;
 	const int reserved = opennova::def::DEF_ITEM_ID_BASE + 2043; // the map centre, a marker the engine finds by its id
 	TEST_EXPECT(opennova::def::reserved_item_by_id(reserved) != nullptr);
-	TEST_EXPECT(mission->apply(set_of({items[0]->id, items[0]->kind, 0}, "item", int64_t(100777)), error) &&
-	            mission->apply(set_of({people[0]->id, people[0]->kind, 0}, "item", int64_t(reserved)), error));
+	TEST_EXPECT(mission->apply(set_edit({items[0]->id, items[0]->kind, 0}, "item", int64_t(100777)), error) &&
+	            mission->apply(set_edit({people[0]->id, people[0]->kind, 0}, "item", int64_t(reserved)), error));
 	const std::string text = mission->serialize().text;
 	TEST_EXPECT(editor_test::write_bytes(f.root + "/missions/di15.bms", std::vector<uint8_t>(text.begin(), text.end())));
 	editor_test::handle_to_end(f.session, request::rescan());

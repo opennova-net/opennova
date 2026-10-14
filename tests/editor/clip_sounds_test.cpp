@@ -6,9 +6,9 @@
 //
 // Pinned: the NPC body's odd ticks and the player body's even ones (a 30 fps clip of 8 frames: frame 2
 // first read on tick 5, frame 6 on tick 13); a loop's second pass; the Surface's slots (ground, snow, an
-// object, water); foley before the foot in one word; a repeated one-shot's start reading nothing and its
-// next pass firing again; nothing over a seek, a frame step or a pause; ticks passed several at a time, the
-// first run after a seek heard whole from where the seek put the clock;
+// object, water); foley before the foot in one word; a one-shot played once; nothing over a seek, a frame
+// step or a pause; ticks passed several at a time, the first run after a seek heard whole from where the
+// seek put the clock;
 // the item's profile and body (sound_profile, sound_profileFemale for a female player, move_function
 // org2), a profile picked, an empty slot; Mute; the camera's distance (a volume by the falloff, a set out
 // of range); the envelope's options, sound_profile, sound_body, each event's plays and sounds_fired; what
@@ -33,12 +33,12 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
-#include <formats/lwf/lwf.h>
 #include <runtime/audio/sound_profile.h>
 
 #include "common/file_io.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
+#include "editor/anim_test_support.h"
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
 
@@ -50,24 +50,7 @@ namespace {
 
 std::string repo() { return test_paths_repo_root(__FILE__); }
 
-// A clip of the skinned fixture's three bones held at rest, `frames` frames at 30 a second, its event
-// words by frame (the end pose's record repeating its last frame's, as retail's exporter writes it).
-std::string clip_text(const std::string &name, int frames, bool loop, const std::map<int, uint32_t> &events) {
-	std::string out = "clip " + name + "\nfps 30\nflags " + (loop ? "0x1" : "0x0") + "\nframes " + std::to_string(frames) + "\n";
-	const char *bones[] = {"bone -1 0 0 0 0.5 \"BN01 Pelvis\"", "bone 0 0 0 1 0.5 \"BN02 Spine\"",
-	                       "bone 0 0 0 -1 0.5 \"BN03 Leg\""};
-	for (const char *bone : bones) {
-		out += std::string(bone) + "\n";
-		for (int i = 0; i <= frames; ++i) out += " k 0 0 0 1\n";
-	}
-	for (int i = 0; i <= frames; ++i) {
-		const auto word = events.find(i < frames ? i : frames - 1);
-		char line[64];
-		std::snprintf(line, sizeof(line), "event 0 0 0 0x%X 0.9 1.7\n", word == events.end() ? 0u : word->second);
-		out += line;
-	}
-	return out;
-}
+using editor_test::clip_text;
 
 // SOLD.adm: its reset, a walk (a loop: the left foot on frame 2, the right on frame 6), a crawl (a loop:
 // sound 5 on frame 1, sound 5 and the left foot on frame 3) and a one-shot (the right foot on frame 1).
@@ -76,40 +59,6 @@ std::string sold_clips() {
 	       "row anim_walk_prone_forward \"crawl\"\nrow anim_idle \"once\"\n" +
 	       clip_text("rest", 1, true, {}) + clip_text("walk", 8, true, {{2, 0x1u}, {6, 0x2u}}) +
 	       clip_text("crawl", 4, true, {{1, 0x200u}, {3, 0x201u}}) + clip_text("once", 4, false, {{1, 0x2u}});
-}
-
-// A bank of one set per name, each one layer heard in either view playing its one wave (the name lower
-// case), range 100 m, falloff 100 m, volume 200.
-std::vector<uint8_t> bank_of(const std::vector<std::string> &sets) {
-	lwf::File bank;
-	for (size_t i = 0; i < sets.size(); ++i) {
-		lwf::Single single;
-		single.name = sets[i];
-		single.path = strutil::to_lower(sets[i]) + ".wav";
-		single.volume = 0xD2;
-		bank.singles.push_back(single);
-		lwf::Multi set;
-		set.name = sets[i];
-		set.pitch_base = lwf::kAuthoredSetPitchBase;
-		set.target_id = 100;
-		set.playlist_indices.push_back(uint32_t(i));
-		bank.multis.push_back(set);
-		lwf::Playlist layer;
-		layer.falloff_radius = 100;
-		layer.flags = lwf::kFlagInternal | lwf::kFlagExternal;
-		layer.sndparm_indices.push_back(uint32_t(i));
-		bank.playlists.push_back(layer);
-		lwf::Sndparm member;
-		member.single_index = uint32_t(i);
-		member.pitch_scaled = lwf::kPitchUnityQ16;
-		member.volume = 200;
-		member.clamp_volume = 255;
-		bank.sndparms.push_back(member);
-	}
-	std::vector<uint8_t> out;
-	std::string error;
-	lwf::encode_lwf(bank, out, error);
-	return out;
 }
 
 const char *kSets[] = {"FS_GND_L", "FS_GND_R", "FS_SNOW_L", "FS_SNOW_R", "FS_OBJ_L", "FS_OBJ_R", "FS_WATER", "FS_PRONE"};
@@ -142,7 +91,7 @@ struct ClipProject {
 		import.imports = {{source + "/skinned.o3d", {}}, {source + "/sold.o3a", {}}};
 		session.handle(import);
 		session.run_operations();
-		ok = ok && editor_test::write_bytes(root + "/sounds/game.lwf", bank_of(std::vector<std::string>(std::begin(kSets), std::end(kSets))));
+		ok = ok && editor_test::write_bytes(root + "/sounds/game.lwf", editor_test::wave_bank_of(std::vector<std::string>(std::begin(kSets), std::end(kSets))));
 		const std::vector<uint8_t> tone = test_io::read_file(repo() + "/fixtures/lwf/tone.wav");
 		for (const char *set : kSets) ok = ok && editor_test::write_bytes(root + "/sounds/" + strutil::to_lower(set) + ".wav", tone);
 		ok = ok && editor_test::write_text(root + "/defs/SndProf.def",
@@ -320,14 +269,11 @@ int test_crawl_and_one_shot() {
 	TEST_EXPECT(ticks_slots(fired) == TS({{3, audio::kSlotAudio1 + 4}, {7, audio::kSlotAudio1 + 4}, {7, audio::kSlotFootLGround}}));
 	if (fired.size() == 3) TEST_EXPECT(fired[0].set == "FS_PRONE" && fired[0].foot == -1 && fired[2].foot == 0);
 
-	// A one-shot of 9 ticks repeated after the hold (31): its frame 1 on tick 3, then on 40 + 3; its start
-	// (tick 40) reads nothing. With Repeat off it fires once.
+	// A one-shot of 9 ticks plays once, as the game plays it: its frame 1 on tick 3, nothing after.
 	TEST_EXPECT(project.select("anim_idle"));
 	project.json(); // followed: the clip the selection plays
 	const ModelViewport *model = project.viewport();
 	TEST_EXPECT(model && !model->clip_loops() && model->clip_length_ticks() == 9);
-	TEST_EXPECT(ticks_slots(project.run(45)) == TS({{3, audio::kSlotFootRGround}, {43, audio::kSlotFootRGround}}));
-	TEST_EXPECT(project.set(R"({"options": {"repeat": false}})"));
 	TEST_EXPECT(ticks_slots(project.run(45)) == TS({{3, audio::kSlotFootRGround}}));
 	return 0;
 }

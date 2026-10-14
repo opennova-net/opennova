@@ -345,7 +345,7 @@ inline EditorRequest cancel_operation() {
 // A blank file `path`; `file_kind` (an asset kind's token) where its name cannot say its kind;
 // `values`, what its blank takes (a mission's title, terrain and environment), by token, sorted by
 // it as the wire reads them (an object's keys are written sorted), so a request equals its round
-// trip whatever order its prompt gave them (review F10).
+// trip whatever order its prompt gave them.
 inline EditorRequest create_file(std::string path, std::string file_kind = std::string(),
 		std::vector<std::pair<std::string, std::string>> values = {}) {
 	EditorRequest request = of(EditorRequestKind::CreateFile);

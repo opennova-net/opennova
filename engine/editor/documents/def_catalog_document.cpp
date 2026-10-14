@@ -19,6 +19,8 @@ namespace opennova::editor {
 using namespace def;
 namespace {
 
+bool reserved_change_allowed(const DefItemDef *before, const DefItemDef &after, std::string &why, std::string &field);
+
 // Whether the game's own reader stops at the input, or corrupts the record over it, by the def readers'
 // sites (catalog.reader_stops): a `weapon` line inside an open weapon ends the walk [orig:
 // WeaponDefs_ParseLineCallback @ 0x5436ad..0x5436d2], as an `ammo` line inside an open ammo does [orig:
@@ -242,6 +244,13 @@ std::string reserved_item_words(const ReservedItem &row) {
 	return words;
 }
 
+namespace {
+
+// The items.def ids the engine fixes (formats/def/reserved_items.h; itemdef-re.md, "The ids and rows the
+// engine fixes"), as the catalog keeps them. Whether an item's change from `before` (null: a row the
+// step adds) to `after` keeps them: a place or an objective the engine finds by its id
+// (ReservedItemRule::Refuse) stays on its id, and its id takes no item of another kind; a mismatch the
+// file already had is left as it was. False with why, and the field it is about ("id" or "type").
 bool reserved_change_allowed(const DefItemDef *before, const DefItemDef &after, std::string &why, std::string &field) {
 	// Off its id: an item the engine finds by its id, of the kind it looks for, moved to another.
 	if (before && before->id != after.id) {
@@ -264,6 +273,8 @@ bool reserved_change_allowed(const DefItemDef *before, const DefItemDef &after, 
 	field = before && before->id == after.id ? "type" : "id";
 	return false;
 }
+
+} // namespace
 
 const ReservedItem *reserved_item_named(const std::string &name) {
 	const std::string wanted = strutil::to_upper(strutil::trim(name));

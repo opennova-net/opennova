@@ -56,6 +56,7 @@ bool UnsavedGuard::files(const EditorRequest &request, std::vector<std::string> 
 // from an earlier request is dropped: what it waited on was saved another way, and this request
 // comes after it. False when the request goes ahead.
 bool UnsavedGuard::holds(const EditorRequest &request) {
+	if (discarding_) return false;
 	std::vector<std::string> unsaved;
 	if (!files(request, unsaved)) return false;
 	// Play saves first (DI-26), its Save all as the prompt's would write it; what it could not write, the
@@ -145,10 +146,12 @@ std::optional<EditorRequest> UnsavedGuard::resolve(UnsavedChoice choice) {
 	}
 	const EditorRequest pending = *pending_;
 	close_prompt();
-	if (choice == UnsavedChoice::Discard) {
-		if (request_kind_row(pending.kind).guard == GuardScope::Document) documents.discard(pending.path);
-		else documents.discard_all();
-	}
+	// A Discard drops nothing here: what waited runs past the prompt once (serve_resolve_unsaved), and drops
+	// the documents it replaces or closes as it commits (a Reload, a Close, a project switch's close_project).
+	// One its own checks refuse drops nothing (S26 C3: a switch to a folder with no project closed every
+	// document and lost the edits, the project staying open); a Reload replaces the document it read, so its
+	// selection is found again by place (S26 C4: discarded first, the selection kept the old read's ids).
+	if (choice == UnsavedChoice::Discard) discarding_ = true;
 	return pending;
 }
 

@@ -43,11 +43,7 @@ Edit span(size_t line, size_t column, size_t length, std::string with, uint64_t 
 	return edit;
 }
 
-bool contains(const std::string &text, const std::string &part) {
-	if (text.find(part) != std::string::npos) return true;
-	std::printf("  \"%s\" lacks \"%s\"\n", text.c_str(), part.c_str());
-	return false;
-}
+using editor_test::contains;
 
 // The history's marks: a fresh serial for each step and each fold, the gesture as the link, the redo's the step
 // undone; a cancel drops the open group's step.

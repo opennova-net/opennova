@@ -7,6 +7,7 @@
 
 #include <base/io/strutil.h>
 #include <formats/bfc1/bfc1.h>
+#include <formats/configfile/config_file.h>
 #include <formats/dds/dds.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/png/png_decode.h>
@@ -506,6 +507,7 @@ TextureHeader texture_header_as(TextureReader reader, const std::vector<uint8_t>
 			return out;
 		}
 		out.read = true;
+		out.tga_held = uint32_t(std::min<size_t>(data->size(), UINT32_MAX));
 		out.width = uint32_t(std::max<int>(0, header.width));
 		out.height = uint32_t(std::max<int>(0, header.height));
 		out.tga_type = header.image_type;
@@ -573,6 +575,64 @@ TextureHeader texture_header_as(TextureReader reader, const std::vector<uint8_t>
 		return out;
 	case TextureReader::None: out.refusal = "No texture reader of the game takes a file of this name."; break;
 	}
+	return out;
+}
+
+namespace {
+
+// FastMem_Alloc's block for a request, in the int it computes: a size under 1 taken as 1, rounded up to 64,
+// wrapping as its add does [orig: FastMem_Alloc @ 0x7697C1..0x7697D7].
+int32_t fastmem_block(int32_t size) {
+	const uint32_t asked = size < 1 ? 1u : uint32_t(size);
+	return int32_t(asked + ((0u - asked) & (configfile::kFastMemStep - 1)));
+}
+
+} // namespace
+
+TgaReaderRead tga_reader_read(const TextureHeader &header) {
+	TgaReaderRead out;
+	out.width = int16_t(uint16_t(header.width));
+	out.height = int16_t(uint16_t(header.height));
+	const int32_t count = out.width * out.height; // @ 0x56E677: at most 2^30
+	out.texel_bytes = int64_t(count) * 4;
+	// The pool's one block, the held bytes taken from it first; the texels' request fails where the block left
+	// after them is smaller, however empty the pool: first fit over a signed compare [orig: FastMem_Alloc @
+	// 0x7697FC..0x7697FF], the block split where more than a header is left (@ 0x769812..0x769819).
+	const int32_t header_bytes = int32_t(configfile::kFastMemHeaderBytes);
+	const int32_t payload = kGameMemoryPoolBytes - header_bytes;
+	const int64_t held = header.tga_held > uint32_t(INT32_MAX) ? int64_t(INT32_MAX) : int64_t(header.tga_held);
+	const int64_t held_block = held < 1 ? 64 : (held + 63) / 64 * 64;
+	const int64_t left = held_block > payload ? -1 : payload - held_block - header_bytes;
+	const int32_t request = int32_t(uint32_t(count) * 4u); // @ 0x56E67F..0x56E685
+	const int32_t block = fastmem_block(request);
+	if (left <= 0 || block > left) {
+		out.outcome = TgaReaderOutcome::Refused;
+		return out;
+	}
+	// The arm of the image type (@ 0x56E6D2): its texels decoded, cleared, copied, or none written.
+	enum class Arm { Decode, Clear, Copy, None };
+	Arm arm = Arm::None;
+	switch (header.tga_type) {
+	case 1: arm = header.tga_map_entry_bits == 24 ? Arm::Decode : Arm::Clear; break; // @ 0x56E6DD
+	case 2: arm = header.tga_bits == 24 ? Arm::Decode : header.tga_bits == 32 ? Arm::Copy : Arm::Clear; break;
+	case 3: arm = header.tga_bits == 8 ? Arm::Decode : Arm::None; break; // @ 0x56E7B3
+	case 9:
+	case 11: arm = Arm::Clear; break;
+	case 10: arm = header.tga_bits == 24 || header.tga_bits == 32 ? Arm::Decode : Arm::Clear; break; // @ 0x56E7FE, @ 0x56E8B9
+	default: arm = Arm::None; break; // @ 0x56E6CC: the switch's default writes nothing
+	}
+	// The block holds the 4 x count bytes where the request neither wrapped nor fell under 1. A decoding arm
+	// writes count texels where count is above 0 (@ 0x56E6EE, @ 0x56E756, @ 0x56E7BD, @ 0x56E808, @ 0x56E8C3);
+	// the clear and the copy take 4 x count as an unsigned length (@ 0x56E971, @ 0x56E7A5); the flip swaps rows
+	// where the height is 2 or more and the width above 0 (@ 0x56E997, @ 0x56E9C2).
+	const bool holds = count >= 0 && count < (1 << 29) && block > 0;
+	const bool writes = arm == Arm::Decode ? count > 0 : arm == Arm::Clear || arm == Arm::Copy ? count != 0 : false;
+	const bool flips = out.height >= 2 && out.width > 0;
+	if ((writes || flips) && !holds) out.outcome = TgaReaderOutcome::Faults;
+	else if (count <= 0) out.outcome = TgaReaderOutcome::Empty;
+	else if (arm == Arm::Clear) out.outcome = TgaReaderOutcome::Black;
+	else if (arm == Arm::None) out.outcome = TgaReaderOutcome::Stale;
+	else out.outcome = TgaReaderOutcome::Decoded;
 	return out;
 }
 

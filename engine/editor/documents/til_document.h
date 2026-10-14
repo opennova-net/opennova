@@ -80,8 +80,6 @@ private:
 	std::vector<uint8_t> read_bytes_;
 };
 
-bool is_til_kind(AssetKind kind);
-
 // The tile placement's validator: its source findings (a file the game reads no tile of, a count past its bytes,
 // header words or bytes past the records a save writes as MED does).
 std::vector<Diagnostic> validate_til_file(const DocumentBase &document);

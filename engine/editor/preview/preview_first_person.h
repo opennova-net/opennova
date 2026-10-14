@@ -97,10 +97,6 @@ struct WeaponActionRun {
 	std::vector<WeaponActionLeg> legs;
 	std::string words;
 };
-// The run of `action` (world::weapon_action) over `def`: the slot standing done on another action with
-// this one queued, a full clip and rounds to spare, the owner the local player and the authority, then the
-// game's pump ticked until the action finishes, leaves, or a minute passes.
-WeaponActionRun weapon_action_run(const world::WeaponFsmDef &def, int32_t action);
 
 // The project's files a weapon's first-person view reads, as the game reads them by name (an open
 // document standing in for its file): the weapon from its catalog, Avatars.def's characters, the actions
@@ -196,6 +192,7 @@ private:
 // scale, with the 4:3 framing drop on a picture `width` x `height` no wider than 4:3, as the game's
 // presenter takes it standing still [orig: Player_UpdateFirstPersonCamera @0x4dd571..0x4dd578].
 void first_person_view_units(const FirstPersonSources &sources, int width, int height, float out[3]);
+
 // The first-person eye looking at the view model where the game draws it, in the preview's space (the
 // model at the origin): the camera the presenter stands the model before, inverted (the view model's root
 // is renderer::fp_viewmodel_pose of the view units, the cant and the rig's yaw-180), seeing with the

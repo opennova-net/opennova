@@ -10,13 +10,12 @@
 namespace opennova::editor {
 
 // Where Play runs the game (ADR 0046 S13 A8): a directory of its own under the project's cache,
-// `.opennova/run/<mode>/<n>/` (mode the Play's, kRunMode*: runtime, install or strict; n = 1, 2, ...),
+// `.opennova/run/<mode>/<n>/` (mode the Play's, kRunMode*: runtime or strict; n = 1, 2, ...),
 // the game's working directory and the log Play tails (session.log), so the build directory the game
 // runs from stays as the build wrote it: a game writes beside itself (the game install's game.cfg and
-// _filelog.txt, its saves), and an Export ships that directory. Play in the game install puts there
-// what the install's game needs beside it (prepare_retail_launch_plan, run/launch_plan.h): the build's
-// archives and loose files and the install's binaries (Strict Play's,
-// prepare_strict_install_launch_plan: those and nothing else). A run directory records the game it runs
+// _filelog.txt, its saves), and an Export ships that directory. Strict Play puts there what the install's
+// game needs beside it (prepare_strict_install_launch_plan, run/launch_plan.h): the build's archives and
+// loose files and the install's binaries, nothing else. A run directory records the game it runs
 // (its pid, image and creation time, as the platform reports them) from the spawn until the game stops.
 // A Play takes the first numbered one of its mode that is not there, records no game, or records one
 // the platform says is gone (Dead); it passes one whose game may still run (Alive, or Unknown: a game
@@ -31,8 +30,8 @@ namespace opennova::editor {
 // hw3d_guid; Game_InitSubsystems @ 0x4a711c the compare (Mission_HasMapOrNameChanged @ 0x53de40, a
 // misnomer) -> @ 0x4a7125 Game_RunVideoTestDialog]. Each mode keeps its own directories, so a Play of one
 // mode never takes, empties or removes another's: an OpenNova runtime Play between two strict Plays
-// leaves strict's game.cfg where the next strict Play finds it. Strict Play never inherits what lenient
-// Play copied from the install, and neither shares the OpenNova runtime's files. Only what a Play staged
+// leaves strict's game.cfg where the next strict Play finds it, and neither shares the other's files. Only
+// what a Play staged
 // there (its staging record, RunStaging) goes before the next stages again, with the logs a run writes
 // for Play to read (session.log, _filelog.txt) and the game's record. It is emptied instead when the Play
 // asks for a fresh run, or when it holds no staging record or one of another mode (a guard: a mode's
@@ -45,18 +44,16 @@ inline constexpr int kRunRecordSchemaVersion = 1;
 inline constexpr const char *kRunStagingFileName = "staging.json";
 inline constexpr int kRunStagingSchemaVersion = 1;
 
-// Which Play stages a run directory: the OpenNova runtime's, lenient Play in the game install's, or
-// Strict Play's. Each names its mode's directory under the run root, and a run directory's game state
-// belongs to the mode that made it.
+// Which Play stages a run directory: the OpenNova runtime's, or Strict Play's in the game install. Each
+// names its mode's directory under the run root, and a run directory's game state belongs to the mode that
+// made it.
 inline constexpr const char *kRunModeRuntime = "runtime";
-inline constexpr const char *kRunModeInstall = "install";
 inline constexpr const char *kRunModeStrict = "strict";
 
 // A run directory's staging record: the mode of the Play that staged it and every file the staging put
 // there ('/'-separated paths under it: the build's files, the install's program and Bink DLL, an
 // expansion's base game and folder), which the next Play of that mode removes before it stages again.
-// The files the game wrote, and the install's configuration and saves lenient Play seeds where the
-// directory has none of its own, are not in it: they are the run's own.
+// The files the game wrote are not in it: they are the run's own.
 struct RunStaging {
 	std::string mode;
 	std::vector<std::string> files;

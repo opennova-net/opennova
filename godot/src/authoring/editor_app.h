@@ -35,7 +35,7 @@ class ViewportDeviceCache;
 
 namespace godot {
 
-// The OpenNova Editor's shell (ADR 0046 d4/d10): the root node of
+// The OpenNova Editor's shell (ADR 0046 d11): the root node of
 // res://editor/editor_root.tscn. It owns the portable project session and the
 // ImGui workspace, attaches the workspace's pass through the shared ImGuiPassNode,
 // pumps the session once per frame, and serves the requests only an OS can: the
@@ -94,7 +94,7 @@ public:
 	void set_first_picture_budget_ms(int p_ms) { first_picture_budget_ms_ = p_ms > 0 ? p_ms : 0; }
 	int get_first_picture_budget_ms() const { return first_picture_budget_ms_; }
 
-	// The wire seam (ADR 0046 d10, S13 A5): a request and a query as JSON text, read and answered
+	// The wire seam (ADR 0046 S13 A5): a request and a query as JSON text, read and answered
 	// by the portable session (ProjectSession::handle_json and query), so the transport is a pump
 	// and nothing about the project lives here. request_json answers {ok, served, error?, outcome
 	// (with added, made for an edit_record, gesture for an edit_in_viewport's drag), status,

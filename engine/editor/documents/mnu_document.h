@@ -209,12 +209,9 @@ private:
 bool is_menu_kind(AssetKind kind);
 
 // The scopes a menu's names resolve in (FieldUse::scope, GraphSymbol::scope; the asset graph's
-// scope_matches compares them). A string id: the "menu" section of the table its window reads
-// (menu::window_text_rsrc; "" = none, so the scope matches no symbol and the game shows the id)
-// [orig: CUIStringTable_LookupString @ 0x6527c0]. A screen: its menu file's flat name, upper case
-// ("MAIN.MNU"). A window: its menu file and its screen's NAME, upper case ("MAIN.MNU/STARTUP");
-// screens of one name share it, the lookup finding the later one.
-std::string menu_text_scope(const std::string &table);
+// scope_matches compares them). A screen: its menu file's flat name, upper case ("MAIN.MNU"). A window:
+// its menu file and its screen's NAME, upper case ("MAIN.MNU/STARTUP"); screens of one name share it, the
+// lookup finding the later one.
 std::string menu_screen_scope(const std::string &menu_file);
 std::string menu_window_scope(const std::string &menu_file, const std::string &screen);
 

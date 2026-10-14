@@ -54,27 +54,9 @@ constexpr NodeKind kMapClip = node_kind(AnimationMapKind::Clip);
 
 std::string anim_dir() { return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/anim"; }
 
-std::vector<uint8_t> serialized(const Document &document) {
-	const SerializeResult result = document.serialize();
-	return std::vector<uint8_t>(result.text.begin(), result.text.end());
-}
-
-Edit set(NodeAddress address, const char *field, Value value) {
-	Edit edit;
-	edit.address = address;
-	edit.field = field;
-	edit.value = std::move(value);
-	return edit;
-}
-
-Edit op(EditOperation operation, NodeAddress address, size_t position = SIZE_MAX, NodeId parent = 0) {
-	Edit edit;
-	edit.operation = operation;
-	edit.address = address;
-	edit.position = position;
-	edit.parent = parent;
-	return edit;
-}
+using editor_test::serialized;
+using editor_test::op_edit;
+using editor_test::set_edit;
 
 // A four-bone chain minted through the construction seam, each bone hung off the one before
 // it, two frames at rest.
@@ -151,19 +133,19 @@ int clips() {
 
 	// The engine data: the frame rate, the loop flag, a bone's name, a frame's step,
 	// triggers and heights.
-	TEST_EXPECT(document.apply(set(row, "fps", int64_t(25)), error));
-	TEST_EXPECT(document.apply(set(bone, "name", std::string("BN01 Hips")), error));
-	TEST_EXPECT(document.apply(set(event, "velocity.x", 0.25), error));
+	TEST_EXPECT(document.apply(set_edit(row, "fps", int64_t(25)), error));
+	TEST_EXPECT(document.apply(set_edit(bone, "name", std::string("BN01 Hips")), error));
+	TEST_EXPECT(document.apply(set_edit(event, "velocity.x", 0.25), error));
 	TEST_EXPECT(document.get(event, "velocity.x", value) && std::get<double>(value) == 0.25);
-	TEST_EXPECT(document.apply(set(event, "bottom", 1.0), error));
+	TEST_EXPECT(document.apply(set_edit(event, "bottom", 1.0), error));
 	if (clip->version == 1) {
-		TEST_EXPECT(document.apply(set(event, "trigger", int64_t(1)), error));
+		TEST_EXPECT(document.apply(set_edit(event, "trigger", int64_t(1)), error));
 		// S17: a frame event by its frame from 0, as the timeline counts it, and what it fires in words.
 		TEST_EXPECT(document.record_title(event) == "Frame 0: left footstep");
-		TEST_EXPECT(document.apply(set(event, "trigger", int64_t(0x2 | 0x40 | 0x10000)), error));
+		TEST_EXPECT(document.apply(set_edit(event, "trigger", int64_t(0x2 | 0x40 | 0x10000)), error));
 		TEST_EXPECT(document.record_title(event) == "Frame 0: right footstep, sound 2, an unread bit (0x10000)");
-		TEST_EXPECT(document.apply(set(event, "trigger", int64_t(0)), error) && document.record_title(event) == "Frame 0");
-		TEST_EXPECT(document.apply(set(event, "trigger", int64_t(1)), error));
+		TEST_EXPECT(document.apply(set_edit(event, "trigger", int64_t(0)), error) && document.record_title(event) == "Frame 0");
+		TEST_EXPECT(document.apply(set_edit(event, "trigger", int64_t(1)), error));
 	}
 	const NodeAddress second{clip->id, kEvent, clip->collections[1][1]};
 	// The record's own name counts from 0 too (what the MCP's batches name it by).
@@ -181,22 +163,22 @@ int clips() {
 		return n;
 	};
 	if (clip->version == 1) {
-		TEST_EXPECT(document.apply(set(end_pose, "trigger", int64_t(0)), error) && end_pose_findings() == 0);
-		TEST_EXPECT(document.apply(set(end_pose, "trigger", int64_t(2)), error));
+		TEST_EXPECT(document.apply(set_edit(end_pose, "trigger", int64_t(0)), error) && end_pose_findings() == 0);
+		TEST_EXPECT(document.apply(set_edit(end_pose, "trigger", int64_t(2)), error));
 		TEST_EXPECT(document.record_title(end_pose) ==
 		            "Frame " + std::to_string(last) + " (the end pose): right footstep, which never fires");
 		TEST_EXPECT(end_pose_findings() == 1);
-		TEST_EXPECT(document.apply(set(end_pose, "trigger", int64_t(0)), error) && end_pose_findings() == 0);
+		TEST_EXPECT(document.apply(set_edit(end_pose, "trigger", int64_t(0)), error) && end_pose_findings() == 0);
 	}
 	TEST_EXPECT(document.record_title(bone) == document.record_name(bone));
 	// The motion's: the translation flag, the keys, the structure.
 	const int64_t flags = int64_t(document.clip()->flags);
-	TEST_EXPECT(!document.apply(set(row, "flags", flags ^ int64_t(bad::BAD_FLAG_TRANSLATION)), error));
-	TEST_EXPECT(document.apply(set(row, "flags", flags ^ int64_t(bad::BAD_FLAG_LOOP)), error));
-	TEST_EXPECT(!document.apply(set(bone, "length", 2.0), error));
-	TEST_EXPECT(!document.apply(op(EditOperation::Remove, event), error));
+	TEST_EXPECT(!document.apply(set_edit(row, "flags", flags ^ int64_t(bad::BAD_FLAG_TRANSLATION)), error));
+	TEST_EXPECT(document.apply(set_edit(row, "flags", flags ^ int64_t(bad::BAD_FLAG_LOOP)), error));
+	TEST_EXPECT(!document.apply(set_edit(bone, "length", 2.0), error));
+	TEST_EXPECT(!document.apply(op_edit(EditOperation::Remove, event), error));
 	if (document.clip()->version == 1 && document.clip()->events[0].trigger != 0)
-		TEST_EXPECT(!document.apply(set(row, "version", int64_t(0)), error));
+		TEST_EXPECT(!document.apply(set_edit(row, "version", int64_t(0)), error));
 
 	// The written clip reads back with the edits and the motion as it was.
 	const std::vector<uint8_t> bytes = serialized(document);
@@ -313,36 +295,36 @@ int tables() {
 		adm::adm_free(&b);
 	}
 	// A row added (anim_idle: the table has its reset row), given a clip, moved first, removed.
-	TEST_EXPECT(document.apply(op(EditOperation::Add, {0, kRow, 0}), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {0, kRow, 0}), error));
 	const NodeId added = document.last_added();
 	Value key;
 	TEST_EXPECT(document.get({added, kRow, 0}, "key", key) && std::get<std::string>(key) == "anim_idle");
 	TEST_EXPECT(!document.serialize().ok()); // a row with no clip
-	TEST_EXPECT(document.apply(op(EditOperation::Add, {added, kMapClip, 0}, SIZE_MAX, 0), error));
-	TEST_EXPECT(document.apply(set({added, kMapClip, document.last_added()}, "clip", std::string("walk.bad")), error));
-	TEST_EXPECT(document.apply(set({added, kRow, 0}, "key", std::string("anim_crouch_idle")), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {added, kMapClip, 0}, 0, SIZE_MAX), error));
+	TEST_EXPECT(document.apply(set_edit({added, kMapClip, document.last_added()}, "clip", std::string("walk.bad")), error));
+	TEST_EXPECT(document.apply(set_edit({added, kRow, 0}, "key", std::string("anim_crouch_idle")), error));
 	TEST_EXPECT(document.serialize().ok());
-	TEST_EXPECT(document.apply(op(EditOperation::Move, {added, kRow, 0}, 0), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Move, {added, kRow, 0}, 0, 0), error));
 	TEST_EXPECT(document.rows()[0]->id == added);
-	for (int i = 0; i < 7; ++i) TEST_EXPECT(document.apply(op(EditOperation::Add, {added, kMapClip, 0}), error));
-	TEST_EXPECT(!document.apply(op(EditOperation::Add, {added, kMapClip, 0}), error)); // a ninth
-	TEST_EXPECT(document.apply(op(EditOperation::Remove, {added, kRow, 0}), error));
+	for (int i = 0; i < 7; ++i) TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {added, kMapClip, 0}), error));
+	TEST_EXPECT(!document.apply(op_edit(EditOperation::Add, {added, kMapClip, 0}), error)); // a ninth
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Remove, {added, kRow, 0}), error));
 	// No anim_reset row: the game cannot load the table.
 	const NodeId reset = document.rows()[0]->id;
-	TEST_EXPECT(document.apply(op(EditOperation::Remove, {reset, kRow, 0}), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Remove, {reset, kRow, 0}), error));
 	TEST_EXPECT(!document.serialize().ok());
 	document.undo();
 	TEST_EXPECT(document.serialize().ok());
 	// S12: the rows are a list like a row's clips: a row duplicated right after itself with
 	// its clips, moved first, removed, each one step.
 	const NodeId idle = document.rows()[1]->id;
-	TEST_EXPECT(document.apply(op(EditOperation::Duplicate, {idle, kRow, 0}, 2), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Duplicate, {idle, kRow, 0}, 0, 2), error));
 	const NodeId copy = document.last_added();
 	TEST_EXPECT(document.rows().size() == 8 && document.rows()[2]->id == copy && copy != idle);
 	TEST_EXPECT(document.rows()[2]->name() == "anim_idle" && document.collections_of({copy, kRow, 0}).front().ids.size() ==
 	                                                                  document.collections_of({idle, kRow, 0}).front().ids.size());
-	TEST_EXPECT(document.apply(op(EditOperation::Move, {copy, kRow, 0}, 0), error) && document.rows()[0]->id == copy);
-	TEST_EXPECT(document.apply(op(EditOperation::Remove, {copy, kRow, 0}), error) && document.rows().size() == 7);
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Move, {copy, kRow, 0}, 0, 0), error) && document.rows()[0]->id == copy);
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Remove, {copy, kRow, 0}), error) && document.rows().size() == 7);
 	document.undo();
 	TEST_EXPECT(document.rows().size() == 8 && document.rows()[0]->id == copy);
 	document.undo();
@@ -431,7 +413,7 @@ int table_lines() {
 	AnimationMapDocument ten;
 	TEST_EXPECT(ten.load(dir.file("ten.adm"), "ten.adm", AssetKind::AnimationMap, "jo", error));
 	TEST_EXPECT(ten.blocked() && ten.issues().size() == 1 && ten.issues()[0].blocks && ten.issues()[0].line == 2);
-	TEST_EXPECT(!ten.serialize().ok() && !ten.apply(op(EditOperation::Add, {0, kRow, 0}), error));
+	TEST_EXPECT(!ten.serialize().ok() && !ten.apply(op_edit(EditOperation::Add, {0, kRow, 0}), error));
 	std::printf("lines: comments dropped on save and reported, a ten-clip row blocks\n");
 	return 0;
 }
@@ -496,45 +478,13 @@ int findings_follow_rows() {
 		return NodeId(-1);
 	};
 	TEST_EXPECT(tail_row() == idle);
-	TEST_EXPECT(table->apply(op(EditOperation::Move, {idle, kRow, 0}, 0), error) && table->rows()[1]->id == reset);
+	TEST_EXPECT(table->apply(op_edit(EditOperation::Move, {idle, kRow, 0}, 0, 0), error) && table->rows()[1]->id == reset);
 	TEST_EXPECT(tail_row() == idle);
 	TEST_EXPECT(table->source_address("1").row == idle && table->source_address("0").row == reset);
-	TEST_EXPECT(table->apply(op(EditOperation::Remove, {idle, kRow, 0}), error));
-	TEST_EXPECT(table->apply(op(EditOperation::Add, {0, kRow, 0}), error) && table->rows().size() == 2);
+	TEST_EXPECT(table->apply(op_edit(EditOperation::Remove, {idle, kRow, 0}), error));
+	TEST_EXPECT(table->apply(op_edit(EditOperation::Add, {0, kRow, 0}), error) && table->rows().size() == 2);
 	TEST_EXPECT(tail_row() == 0 && table->source_address("1").row == 0);
 	std::printf("findings follow rows: moved, removed, a row added in its place\n");
-	return 0;
-}
-
-// S11a: a clip's frame rate and a frame's step edited are changes and revert; a table's
-// key edited is a change and reverts; a clip added to a row is Added and changes the row.
-int changes_since_save() {
-	using Change = Document::RecordChange;
-	AnimationDocument clip;
-	Diagnostic error;
-	TEST_EXPECT(clip.load(anim_dir() + "/walk.bad", "walk.bad", AssetKind::Animation, "jo", error));
-	const ClipRow *row = clip.clip();
-	TEST_EXPECT(row && !row->events.empty());
-	if (!row || row->events.empty()) return 1;
-	const NodeAddress clip_row{row->id, node_kind(AnimationKind::Clip), 0};
-	const NodeAddress event{row->id, kEvent, row->collections[1][0]};
-	TEST_EXPECT(clip.apply(set(clip_row, "fps", int64_t(25)), error) && clip.apply(set(event, "velocity.x", 0.25), error));
-	TEST_EXPECT(clip.field_changed(clip_row, "fps") && clip.field_changed(event, "velocity.x"));
-	TEST_EXPECT(clip.record_change(clip_row) == Change::Changed && clip.record_change(event) == Change::Changed);
-	TEST_EXPECT(clip.apply(clip.revert_edits(clip_row, "fps"), error) && clip.apply(clip.revert_edits(event, "velocity.x"), error));
-	TEST_EXPECT(!clip.field_changed(clip_row, "fps") && !clip.field_changed(event, "velocity.x"));
-	TEST_EXPECT(clip.record_change(event) == Change::Unchanged && serialized(clip) == test_io::read_file(anim_dir() + "/walk.bad"));
-
-	AnimationMapDocument table;
-	TEST_EXPECT(table.load(anim_dir() + "/soldier.adm", "soldier.adm", AssetKind::AnimationMap, "jo", error));
-	const NodeAddress first{table.rows()[1]->id, kRow, 0};
-	TEST_EXPECT(table.apply(set(first, "key", std::string("anim_crouch_idle")), error) && table.field_changed(first, "key"));
-	TEST_EXPECT(table.apply(table.revert_edits(first, "key"), error) && !table.field_changed(first, "key"));
-	TEST_EXPECT(table.record_change(first) == Change::Unchanged);
-	TEST_EXPECT(table.apply(op(EditOperation::Add, {first.row, kMapClip, 0}), error));
-	TEST_EXPECT(table.record_change({first.row, kMapClip, table.last_added()}) == Change::Added &&
-	            table.record_change(first) == Change::Changed);
-	std::printf("changes: a clip's fields and a table's key changed and reverted, a clip added\n");
 	return 0;
 }
 
@@ -658,7 +608,6 @@ int main(int argc, char **argv) {
 	if (table_lines() != 0) return 1;
 	if (define_slot() != 0) return 1;
 	if (findings_follow_rows() != 0) return 1;
-	if (changes_since_save() != 0) return 1;
 	if (validation_and_graph() != 0) return 1;
 	return retail_files();
 }

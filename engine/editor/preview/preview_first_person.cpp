@@ -6,8 +6,11 @@
 #include <cstdio>
 
 #include <base/io/fixed.h>
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
+#include <base/io/tick_rate.h>
 #include <base/resource_index/resource_index.h>
+#include <editor/preview/option_reads.h>
 #include <formats/avatars/avatars.h>
 #include <formats/def/def.h>
 #include <runtime/anim/adm_clip_index.h>
@@ -19,14 +22,17 @@
 
 namespace opennova::editor {
 
+// The run of `action` (world::weapon_action) over `def`: the slot standing done on another action with
+// this one queued, a full clip and rounds to spare, the owner the local player and the authority, then the
+// game's pump ticked until the action finishes, leaves, or a minute passes.
+WeaponActionRun weapon_action_run(const world::WeaponFsmDef &def, int32_t action);
+
 namespace {
 
 using io::JsonValue;
 using io::json_number;
 using io::json_string;
 namespace wa = world::weapon_action;
-
-std::string file_of(const std::string &path) { return path.substr(path.find_last_of("/\\") + 1); }
 
 std::string upper(const std::string &text) {
 	std::string out = text;
@@ -35,7 +41,7 @@ std::string upper(const std::string &text) {
 }
 
 // How long a run of an action is followed: a minute of the game's ticks.
-constexpr int32_t kRunTicks = 62 * 60;
+constexpr int32_t kRunTicks = io::kTicksPerSecondInt * 60;
 
 const char *handler_name(const world::WeaponFsmAction &desc, int32_t action) {
 	const int8_t handler = desc.handler == world::weapon_handler::kPlaceholder ? world::weapon_action_default_handler(action)
@@ -99,11 +105,10 @@ bool read_first_person_options(const io::JsonValue &json, FirstPersonOptions &he
 			options.eye = value.string == "eye";
 		} else if (key == "character") {
 			int64_t id = 0;
-			if (!io::json_whole_in(value, -1.0, 65535.0, id)) {
-				error = "options.first_person.character is a character's id, 0 to 65535 (-1 the one a fresh profile seeds).";
+			if (!read_json_whole(value, -1.0, 65535.0, options.character, error,
+						"options.first_person.character is a character's id, 0 to 65535 (-1 the "
+						"one a fresh profile seeds)."))
 				return false;
-			}
-			options.character = int32_t(id);
 		} else if (key == "action") {
 			bool known = value.is_string() && value.string.empty();
 			for (int32_t i = 0; value.is_string() && !known && i < wa::kCount; ++i)
@@ -371,7 +376,7 @@ bool FirstPersonSources::refresh(const std::shared_ptr<const FileSource> &source
 	}
 	const FileSource &files = *source;
 	bool moved = false;
-	const std::string catalog = file_of(rig.record_file);
+	const std::string catalog = io::utf8_file_name(rig.record_file);
 	const uint64_t stamp = files.stamp(catalog);
 	if (!weapon_read_ || catalog != catalog_ || rig.record != record_ || stamp != catalog_stamp_ || bake_read_.moved(files)) {
 		catalog_ = catalog;

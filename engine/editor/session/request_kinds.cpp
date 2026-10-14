@@ -23,6 +23,7 @@
 #include <editor/session/texture_show_use.h>
 #include <editor/session/unsaved_guard.h>
 #include <editor/session/workspace_parts.h>
+#include <editor/session/row_table.h>
 
 namespace opennova::editor {
 
@@ -89,16 +90,23 @@ void serve_create_missing(SessionCore &core, const EditorRequest &request) {
 	if (core.view().project.open)
 		core.create_missing(request.roles);
 }
+// Build, Play and Export need a project: refused without one (S26 K2: the editor_build and editor_play
+// tools refused it themselves; with them gone the request says it, as it does to every client).
+bool project_needed(SessionCore &core, const char *what) {
+	if (core.view().project.open) return true;
+	core.refuse_now(CoreFinding::ProjectNone, std::string("No project is open: open or make one to ") + what + ".");
+	return false;
+}
 void serve_build(SessionCore &core, const EditorRequest &request) {
-	if (core.view().project.open)
+	if (project_needed(core, "build it"))
 		core.start_build(PlayIntent(), request.out_dir, request.rehash, ExportIntent(), request.report);
 }
 void serve_play(SessionCore &core, const EditorRequest &request) {
-	if (core.view().project.open)
+	if (project_needed(core, "play it"))
 		core.start_build(core.play().intent_of(request), std::string(), false, ExportIntent());
 }
 void serve_export(SessionCore &core, const EditorRequest &request) {
-	if (core.view().project.open)
+	if (project_needed(core, "export it"))
 		core.start_build(PlayIntent(), std::string(), request.rehash, ExportIntent{ true, request.export_dir });
 }
 void serve_stop_play(SessionCore &core, const EditorRequest &) {
@@ -173,8 +181,10 @@ void serve_undo_redo(SessionCore &core, const EditorRequest &request) {
 // The prompt's answer runs what waited on it through its own row again (serve_request), never
 // through handle(): a request from outside is one entry and one outcome.
 void serve_resolve_unsaved(SessionCore &core, const EditorRequest &request) {
-	if (const std::optional<EditorRequest> waited = core.guard().resolve(request.choice))
+	if (const std::optional<EditorRequest> waited = core.guard().resolve(request.choice)) {
 		serve_request(core, *waited);
+		core.guard().end_discard();
+	}
 }
 void serve_rename_asset(SessionCore &core, const EditorRequest &request) {
 	core.renames().rename_asset(request.path, request.new_name);
@@ -546,7 +556,7 @@ constexpr RequestKindRow kRows[] = {
 			"kept); fresh: it is emptied first, a first run (the run section says fresh). start (Play from here, "
 			"DI-26): the player starts at a point of mission, as a start marker of the build's copy of it in the run "
 			"directory, OpenNova and the game install alike (play.start without a mission). play_mode: how this "
-			"Play runs (runtime, install, strict), left out the project's own (the OpenNova runtime for a project "
+			"Play runs (runtime or strict), left out the project's own (the OpenNova runtime for a project "
 			"never set to another), which it leaves as it is; the run section says the mode it ran in (ran_mode). "
 			"With unsaved edits, Play saves them first while save_before_play is on (this Play's, else the "
 			"project's; on for a project never set), else it waits on the prompt.")
@@ -1358,21 +1368,7 @@ constexpr RequestKindRow kRows[] = {
 static_assert(
 		std::size(kRows) == kEditorRequestKindCount, "every request kind has exactly one row");
 
-constexpr bool rows_in_order() {
-	for (size_t i = 0; i < kEditorRequestKindCount; ++i)
-		if (kRows[i].kind != static_cast<EditorRequestKind>(i))
-			return false;
-	return true;
-}
-static_assert(rows_in_order(), "the request kind rows follow the enum's order");
-
-constexpr bool same_text(const char *a, const char *b) {
-	while (*a && *a == *b) {
-		++a;
-		++b;
-	}
-	return *a == *b;
-}
+static_assert(rows_follow(kRows, &RequestKindRow::kind), "the request kind rows follow the enum's order");
 
 // Every row has a token of its own and says what it does.
 constexpr bool rows_named() {
@@ -1535,13 +1531,7 @@ const RequestKindRow &request_kind_row(EditorRequestKind kind) {
 }
 
 bool request_kind_from_token(const std::string &token, EditorRequestKind &out) {
-	for (const RequestKindRow &row : kRows) {
-		if (token == row.token) {
-			out = row.kind;
-			return true;
-		}
-	}
-	return false;
+	return row_from_token(kRows, &RequestKindRow::kind, &RequestKindRow::token, token, out);
 }
 
 GateAnswer gate_answer(EditorRequestKind kind, const OperationStatus &running) {

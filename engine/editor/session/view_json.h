@@ -57,10 +57,6 @@ io::JsonValue view_section_to_json(const SessionView &view, ViewSection section)
 // Whether a concern of `section` moved after the view's revision `since` (ViewRevisions::stamp).
 bool view_section_moved(const SessionView &view, ViewSection section, uint64_t since);
 
-// The operation that runs: {running}, and while one does its id, kind token, label, done, total,
-// unit token (bytes, files, steps), cancellable, and reads and writes (tokens: files, documents,
-// project, slot).
-io::JsonValue operation_status_to_json(const OperationStatus &status);
 // What an operation came to: {id, kind, end (done, failed, cancelled), findings}; null before the
 // first ends.
 io::JsonValue operation_outcome_to_json(const OperationOutcome &outcome);

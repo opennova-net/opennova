@@ -1,11 +1,8 @@
 #include "config_overrun.h"
 
-#include <algorithm>
 #include <string>
-#include <utility>
 
 #include <editor/assets/asset_kinds.h>
-#include <editor/documents/document_types.h>
 #include <editor/documents/text_types.h>
 #include <editor/model/text_document.h>
 #include <editor/project/project_files.h>
@@ -57,36 +54,6 @@ std::vector<Diagnostic> config_overrun_findings(const DocumentBase &document) {
 	const size_t offset = configfile::data_strings_overrun_offset(sections, pool);
 	Diagnostic d = text_finding(finding_code(CoreFinding::DocumentConfigOverrun), DiagnosticSeverity::Error,
 	                            config_overrun_words(file, pool), *text, offset);
-	// The fix: the lines the kind's loader reads the same without that hold numbers alone, commented out,
-	// where that brings the file under the line.
-	const DocumentType *type = document_type_for(document.kind());
-	std::vector<size_t> idle;
-	if (type && type->config_idle_lines) type->config_idle_lines(*text, idle);
-	std::sort(idle.begin(), idle.end());
-	std::vector<size_t> starts;
-	for (const configfile::ConfigSection &section : sections)
-		for (const configfile::ConfigEntry &entry : section.entries) {
-			if (entry.values.empty() || !std::binary_search(idle.begin(), idle.end(), entry.offset)) continue;
-			const bool numbers = std::all_of(entry.values.begin(), entry.values.end(),
-			                                 [](const configfile::ConfigValue &v) { return v.type != 4; });
-			if (numbers) starts.push_back(entry.offset);
-		}
-	if (!starts.empty()) {
-		const configfile::DataStringsPool fixed = pool_of(configfile::config_commented(written, starts));
-		if (!fixed.binary && fixed.overrun() == 0) {
-			PlannedFix fix;
-			fix.label = "Comment out the " + count_of(starts.size(), "line", "lines") + " the game loads the same without";
-			fix.detail = "Puts ';', the ConfigFile reader's comment, before each line of " + file +
-			             " that holds numbers the game reads nothing of, or reads the same with the line gone: what "
-			             "the game loads stays as it is, and the file then holds " +
-			             count_of(fixed.values, "value", "values") + " against its " +
-			             std::to_string(fixed.pool_bytes) + "-byte buffer. Undo takes it back.";
-			// Last line first, so each insertion leaves the places of those before it as they are.
-			for (auto it = starts.rbegin(); it != starts.rend(); ++it)
-				fix.edits.push_back(TextDocument::replace(text->span_at(*it, 0), ";"));
-			d.planned.push_back(std::move(fix));
-		}
-	}
 	findings.push_back(std::move(d));
 	return findings;
 }

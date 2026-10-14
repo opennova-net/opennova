@@ -63,13 +63,7 @@ std::string repo() { return test_paths_repo_root(__FILE__); }
 
 std::vector<uint8_t> text_bytes(const std::string &text) { return std::vector<uint8_t>(text.begin(), text.end()); }
 
-Edit set_edit(NodeAddress address, const char *field, Value value) {
-	Edit edit;
-	edit.address = address;
-	edit.field = field;
-	edit.value = std::move(value);
-	return edit;
-}
+using editor_test::set_edit;
 
 const SoundBankRow *row_named(const SoundBankDocument &bank, SoundBankKind kind, const std::string &name) {
 	for (const SoundBankRow *row : bank.rows_of(kind))
@@ -77,9 +71,7 @@ const SoundBankRow *row_named(const SoundBankDocument &bank, SoundBankKind kind,
 	return nullptr;
 }
 
-bool has_code(const std::vector<Diagnostic> &findings, const char *code) {
-	return std::any_of(findings.begin(), findings.end(), [&](const Diagnostic &d) { return d.code() == code; });
-}
+using editor_test::has_code;
 
 // A bank of `waves` (name = file stem) and one set of a layer naming each, flags `flags`.
 std::vector<uint8_t> bank_bytes(const std::vector<std::string> &waves, const std::string &set_name, uint32_t flags,

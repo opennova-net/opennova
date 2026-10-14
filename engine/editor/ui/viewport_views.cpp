@@ -2,6 +2,7 @@
 
 #include <iterator>
 
+#include <editor/session/row_table.h>
 #include <editor/ui/definition_viewport_view.h>
 #include <editor/ui/effect_viewport_view.h>
 #include <editor/ui/environment_viewport_view.h>
@@ -19,42 +20,25 @@ namespace opennova::editor {
 
 namespace {
 
-std::unique_ptr<ViewportView> make_menu_view() { return std::make_unique<MenuViewportView>(); }
-std::unique_ptr<ViewportView> make_model_view() { return std::make_unique<ModelViewportView>(); }
-std::unique_ptr<ViewportView> make_script_view() { return std::make_unique<ScriptViewportView>(); }
-std::unique_ptr<ViewportView> make_mission_view() { return std::make_unique<MissionViewportView>(); }
-std::unique_ptr<ViewportView> make_texture_viewport_view() { return std::make_unique<TextureViewportView>(); }
-std::unique_ptr<ViewportView> make_effect_view() { return std::make_unique<EffectViewportView>(); }
-std::unique_ptr<ViewportView> make_hud_viewport_view() { return std::make_unique<HudViewportView>(); }
-std::unique_ptr<ViewportView> make_definition_view() { return std::make_unique<DefinitionViewportView>(); }
-std::unique_ptr<ViewportView> make_environment_view() { return std::make_unique<EnvironmentViewportView>(); }
-std::unique_ptr<ViewportView> make_terrain_view() { return std::make_unique<TerrainViewportView>(); }
-std::unique_ptr<ViewportView> make_font_view() { return std::make_unique<FontViewportView>(); }
-std::unique_ptr<ViewportView> make_map_view() { return std::make_unique<MissionMapViewportView>(); }
+template <class V> std::unique_ptr<ViewportView> make_view() { return std::make_unique<V>(); }
 
 constexpr ViewportViewRow kViews[] = {
-	{ ViewportKind::Menu, make_menu_view },
-	{ ViewportKind::Model, make_model_view },
-	{ ViewportKind::Script, make_script_view },
-	{ ViewportKind::Mission, make_mission_view },
-	{ ViewportKind::Texture, make_texture_viewport_view },
-	{ ViewportKind::Effect, make_effect_view },
-	{ ViewportKind::Hud, make_hud_viewport_view },
-	{ ViewportKind::Definition, make_definition_view },
-	{ ViewportKind::Environment, make_environment_view },
-	{ ViewportKind::Terrain, make_terrain_view },
-	{ ViewportKind::Font, make_font_view },
-	{ ViewportKind::Map, make_map_view },
+	{ ViewportKind::Menu, make_view<MenuViewportView> },
+	{ ViewportKind::Model, make_view<ModelViewportView> },
+	{ ViewportKind::Script, make_view<ScriptViewportView> },
+	{ ViewportKind::Mission, make_view<MissionViewportView> },
+	{ ViewportKind::Texture, make_view<TextureViewportView> },
+	{ ViewportKind::Effect, make_view<EffectViewportView> },
+	{ ViewportKind::Hud, make_view<HudViewportView> },
+	{ ViewportKind::Definition, make_view<DefinitionViewportView> },
+	{ ViewportKind::Environment, make_view<EnvironmentViewportView> },
+	{ ViewportKind::Terrain, make_view<TerrainViewportView> },
+	{ ViewportKind::Font, make_view<FontViewportView> },
+	{ ViewportKind::Map, make_view<MissionMapViewportView> },
 };
 
-constexpr bool views_in_order() {
-	for (size_t i = 0; i < kViewportKindCount; ++i)
-		if (kViews[i].kind != static_cast<ViewportKind>(i) || !kViews[i].make) return false;
-	return true;
-}
-
 static_assert(std::size(kViews) == kViewportKindCount, "every ViewportKind has exactly one view");
-static_assert(views_in_order(), "the viewport views follow ViewportKind's order, each with its make");
+static_assert(rows_follow(kViews, &ViewportViewRow::kind), "the viewport views follow ViewportKind's order");
 
 } // namespace
 

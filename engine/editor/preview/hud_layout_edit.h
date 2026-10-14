@@ -73,8 +73,6 @@ bool hud_drag_start(opennova::hud::HudElement element, const def::DefHudPosDef &
 
 // A handle of an element: the element itself (a move) or one of its corners (a resize).
 enum class HudHandle : uint8_t { Move, TopLeft, TopRight, BottomLeft, BottomRight };
-// "move", "top_left", "top_right", "bottom_left", "bottom_right", and back (false for none).
-const char *hud_handle_token(HudHandle handle);
 bool hud_handle_from_token(const std::string &token, HudHandle &out);
 
 // The values a drag of `handle` (dx, dy) design units from where it began writes, each landing on the
@@ -85,11 +83,13 @@ bool hud_handle_from_token(const std::string &token, HudHandle &out);
 bool hud_drag_changes(const HudDragStart &start, HudHandle handle, float dx, float dy, int grid,
                       std::vector<HudValueChange> &out, std::string &error);
 
-// The edits that set the changes in `text` (the HUD layout's text; `hud` its model as the game reads it):
-// each on the line the game takes of its key (def::hud_layout_line), the value's token replaced where the line
-// holds it and differs, the values it lacks up to the one set added after its last; a key with no line a
-// line of its own at the end of the text, as the writer writes it. Each edit carries `gesture` (0: none).
-// False with `error` for a key the writer does not write alone.
+// The edits that set the changes in `text` (the HUD layout's text; `hud` its model as the game reads it): each
+// key's line made from the model with the changes in it, as the writer writes it (def::hudpos_line_text over the
+// model's values, def::hudpos_key_values), in place of the line the game takes of the key (def::hud_layout_line),
+// that line's own spelling and comment gone, nothing of it spliced (the maintainer's S26 ruling: what a writer
+// writes is made from the model); a key with no line a line of its own at the end of the text. A line the
+// writer writes as it stands is left. Each edit carries `gesture` (0: none). False with `error` for a key the
+// writer does not write alone.
 bool hud_layout_edits(const TextDocument &text, const def::DefHudPosDef &hud, const std::vector<HudValueChange> &changes,
                       uint64_t gesture, std::vector<Edit> &out, std::string &error);
 

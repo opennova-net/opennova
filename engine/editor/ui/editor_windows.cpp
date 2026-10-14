@@ -130,12 +130,6 @@ devtools::DockLayout editor_layout() {
 	return layout;
 }
 
-const DocumentBase *active_document(const SessionView &v) {
-	for (const auto &document : v.documents.open)
-		if (document->path() == v.documents.active) return document.get();
-	return nullptr;
-}
-
 // A number of bytes as the bar's tooltip says it: "512 bytes", "3.4 KB", "12.0 MB".
 std::string size_text(uint64_t bytes) {
 	char text[32];
@@ -295,7 +289,7 @@ JumpSubject EditorWindows::jump_subject() const {
 	if (!subject_.definition.empty() && !subject_.usages_file.empty()) return subject_;
 	const SessionView &v = view();
 	JumpSubject out;
-	const DocumentBase *base = active_document(v);
+	const DocumentBase *base = v.documents.active_document();
 	if (base) {
 		out.usages_file = base->path();
 		const Document *document = records_of(*base);
@@ -452,14 +446,6 @@ void EditorWindows::deliver_pick(PickPurpose purpose, const std::string &path) {
 		if (!replace_target_.empty()) request(request::preview_texture_source(replace_target_, path));
 		replace_target_.clear();
 		break;
-	case PickPurpose::BuildFolder: {
-		// The modder's pick, kept with the project's local settings (Build > Build to <it>), then built into.
-		ProjectSettingsChange keep;
-		keep.build_folder = path;
-		request(request::apply_project_settings(keep));
-		request(request::build(path));
-		break;
-	}
 	case PickPurpose::None: break;
 	}
 }
@@ -472,7 +458,7 @@ void EditorWindows::deliver_picks(PickPurpose purpose, const std::vector<std::st
 
 void EditorWindows::draw_menu_bar(devtools::ImGuiPass &) {
 	const SessionView &v = view();
-	const DocumentBase *document = active_document(v);
+	const DocumentBase *document = v.documents.active_document();
 	draw_navigation(v);
 	draw_file_menu(v);
 	draw_edit_menu(v, document);
@@ -741,20 +727,6 @@ void EditorWindows::draw_build_menu(const SessionView &v) {
 	if (!ImGui::BeginMenu("Build")) return;
 	if (menu_item("Build", "Ctrl+B", v.project.open && v.allows(EditorRequestKind::Build)))
 		request(request::build());
-	// A build for players, in a folder of the modder's choosing (the UX round's problems lane): the last
-	// one again, or another.
-	if (!v.project.build_folder.empty()) {
-		// Its end tells two folders apart: the middle gives way.
-		const std::string again = "Build to " + ui_kit::fit_middle(v.project.build_folder, ImGui::GetFontSize() * 20.0f);
-		if (menu_item(again.c_str(), nullptr, v.project.open && v.allows(EditorRequestKind::Build)))
-			request(request::build(v.project.build_folder));
-		ui_kit::tooltip("Builds the game's files again into a new folder inside " + v.project.build_folder +
-		                ", for players to copy into their game.");
-	}
-	if (menu_item("Build to folder...", nullptr, v.project.open && v.allows(EditorRequestKind::Build)))
-		request(request::pick_directory(PickPurpose::BuildFolder));
-	ui_kit::tooltip("Builds the game's files into a new folder inside a folder you choose, outside the project: what "
-	                "players copy into their game to play the mod.");
 	const bool plays = v.project.open && v.activity.play_state == PlayState::Stopped && v.allows(EditorRequestKind::Play);
 	if (menu_item("Play", "F5", plays)) request(request::play());
 	// S14: the game started in the active document's mission (its own file, or the mission the game
@@ -788,42 +760,6 @@ void EditorWindows::draw_build_menu(const SessionView &v) {
 	              v.activity.has_export && v.activity.last_export->ok && v.allows(EditorRequestKind::RevealPath)))
 		request(request::reveal_path(v.activity.last_export->export_dir));
 	ImGui::Separator();
-	// How this project plays (its own, kept in its .opennova/local.json: never another project's, nor another
-	// editor's), never refused (the busy gate takes it, as it takes the settings' Apply); the next Play reads
-	// it, so it waits while a game runs.
-	const PlayMode mode = v.project.play_mode;
-	bool in_install = plays_in_install(mode);
-	const bool settable = v.project.open && v.activity.play_state == PlayState::Stopped &&
-	                      v.allows(EditorRequestKind::ApplyProjectSettings);
-	if (ImGui::MenuItem("Play in the game install", nullptr, &in_install, settable) && settable) {
-		ProjectSettingsChange change;
-		change.play_mode = in_install ? PlayMode::Install : PlayMode::Runtime;
-		request(request::apply_project_settings(change));
-	}
-	ui_kit::tooltip("This project's Play starts the game install on the build instead of the OpenNova runtime. Kept "
-	                "with the project on this computer; another project plays as it is set.");
-	// Strict Play, under it: what Play in the game install stages and how it launches the game.
-	bool strict = mode == PlayMode::Strict;
-	ImGui::Indent();
-	const bool strict_settable = settable && in_install;
-	if (ImGui::MenuItem("Strict: as a player's install", nullptr, &strict, strict_settable) && strict_settable) {
-		ProjectSettingsChange change;
-		change.play_mode = strict ? PlayMode::Strict : PlayMode::Install;
-		request(request::apply_project_settings(change));
-	}
-	ImGui::Unindent();
-	ui_kit::tooltip("The game runs on the build alone, as a player who dropped Jointops.exe into the build's folder "
-	                "runs it: nothing of the install but its program and Bink DLL, no /d.");
-	// DI-26: Play saves first instead of asking; the project's own, as the two above.
-	bool save_first = v.project.save_before_play;
-	const bool save_settable = v.project.open && v.allows(EditorRequestKind::ApplyProjectSettings);
-	if (ImGui::MenuItem("Save all before Play", nullptr, &save_first, save_settable) && save_settable) {
-		ProjectSettingsChange change;
-		change.save_before_play = save_first;
-		request(request::apply_project_settings(change));
-	}
-	ui_kit::tooltip("Play writes every file with unsaved edits first, as Save all does, and starts at once. Off, Play "
-	                "asks first, as Build does.");
 	if (menu_item("Show build folder", nullptr, v.activity.has_build && v.activity.last_build->ok && v.allows(EditorRequestKind::RevealPath)))
 		request(request::reveal_path(v.activity.last_build->build_dir));
 	ImGui::EndMenu();
@@ -904,8 +840,10 @@ void EditorWindows::draw_build_panel(const SessionView &v) {
 			close();
 		}
 		ImGui::SameLine();
-		if (enabled_button("Build to folder...", v.allows(EditorRequestKind::Build)))
-			request(request::pick_directory(PickPurpose::BuildFolder));
+		if (enabled_button("Export", v.allows(EditorRequestKind::Export))) {
+			request(request::export_project());
+			close();
+		}
 		ImGui::SameLine();
 	}
 	if (ImGui::Button("Close")) close();

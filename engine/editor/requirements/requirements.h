@@ -57,9 +57,6 @@ bool requirement_phase_enabled(const ProjectDocument &doc, int phase);
 // (a single-player mission stops the music context) [orig: Game_StartMission @ 0x525581..0x5255ae], with
 // Missions and Multiplayer both.
 bool requirement_multiplayer_only(const std::string &role);
-// Whether the project's checklist has the manifest's row: its phase on (requirement_phase_enabled), and a
-// multiplayer-only row's Multiplayer feature on; mp.mnu on Multiplayer alone.
-bool requirement_row_enabled(const ProjectDocument &doc, const gameprofile::RequiredResource &resource);
 const char *requirement_phase_label(int phase);
 
 // Beside the rows, a project's expansion (ADR 0046 S16): weighed against `install_expansions` (the

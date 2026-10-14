@@ -16,7 +16,6 @@ namespace opennova::editor {
 enum class MissionTool : uint8_t { Select, Place, Path, Area, Shoot };
 // "select", "place", "path", "area", "shoot".
 const char *mission_tool_token(MissionTool tool);
-bool mission_tool_from_token(const std::string &token, MissionTool &out);
 
 // What the marks are coloured by (ADR 0046 S24, In the views): their team (the game's map colours, a ring in team
 // 1's or team 2's), or their group (the editor's palette, mission_group_rgb: a ring in each group's colour, group 0,
@@ -26,12 +25,11 @@ enum class MissionColorBy : uint8_t { Team, Group };
 const char *mission_color_by_token(MissionColorBy by);
 bool mission_color_by_from_token(const std::string &token, MissionColorBy &out);
 
-// The mission view's Listen (ADR 0046 DI-36), its options' `listen`: on or off, and the master volume (0..1) every
-// sound it plays is scaled by (the editor's, not the game's). Off by default: a mission opened is silent until asked.
+// The mission view's Listen (ADR 0046 DI-36), its options' `listen`: on or off, each sound at the game's volume.
+// Off by default: a mission opened is silent until asked.
 struct MissionListenOptions {
 	bool on = false;
-	float volume = 1.0f;
-	bool operator==(const MissionListenOptions &o) const { return on == o.on && volume == o.volume; }
+	bool operator==(const MissionListenOptions &o) const { return on == o.on; }
 	bool operator!=(const MissionListenOptions &o) const { return !(*this == o); }
 };
 
@@ -87,16 +85,17 @@ inline constexpr float kMissionTurns[] = { 0.0f, 5.0f, 15.0f, 45.0f, 90.0f };
 bool operator==(const MissionViewportOptions &a, const MissionViewportOptions &b);
 inline bool operator!=(const MissionViewportOptions &a, const MissionViewportOptions &b) { return !(a == b); }
 
-// The wire form: {show: {terrain, sky, water, models, shadows, foliage, effects, lights}, marks: {items,
-// buildings, markers, organics, areas, paths, labels, links}, color_by (team or group), mark_range, stick, time
-// (null: the mission's start time), tool (its token), item, path, snap, turn, palette, overlay (none, surfaces or
-// foliage), legend (the overlay's legend open), ammo, listen {on, volume}}.
+// The wire form: {show: {terrain, sky, water, models, shadows, foliage, effects, lights}, marks:
+// {items, buildings, markers, organics, areas, paths, labels, links}, color_by (team or group),
+// mark_range, stick, time (null: the mission's start time), tool (its token), item, path, snap,
+// turn, palette, overlay (none, surfaces or foliage), legend (the overlay's legend open), ammo,
+// listen {on}}.
 io::JsonValue mission_options_to_json(const MissionViewportOptions &options);
 // A SetViewport's options member set over `held`: every member checked before any applies; false,
 // nothing changed, with `error` naming the member and what it takes.
 bool mission_options_from_json(const io::JsonValue &json, MissionViewportOptions &held, std::string &error);
-// The Listen's own: {on, volume}; read over `held`, every member optional (false, nothing changed, with `error` naming
-// the member, for another member or a value out of its range).
+// The Listen's own: {on}; read over `held`, the member optional (false, nothing changed, with
+// `error` naming the member, for another member or a value it does not take).
 io::JsonValue mission_listen_options_to_json(const MissionListenOptions &options);
 bool mission_listen_options_from_json(const io::JsonValue &json, MissionListenOptions &held, std::string &error);
 

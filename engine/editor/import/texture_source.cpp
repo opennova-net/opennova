@@ -12,6 +12,7 @@
 #include <editor/import/sidecar.h>
 #include <editor/import/texture_import.h>
 #include <editor/project/project_document.h>
+#include <editor/project/project_files.h>
 #include <formats/pff/pff.h>
 #include <formats/png/png_encode.h>
 
@@ -22,7 +23,6 @@ namespace opennova::editor {
 namespace {
 
 std::string extension_of(const std::string &name) { return strutil::to_lower(utf8_of(path_of(name).extension())); }
-std::string stem_of(const std::string &name) { return utf8_of(path_of(basename_of(name)).stem()); }
 
 Diagnostic refused(const std::string &message, const std::string &asset) {
 	return make_finding(CoreFinding::TextureReplace, DiagnosticSeverity::Error, message, asset);
@@ -35,7 +35,7 @@ Diagnostic refused(const std::string &message, const std::string &asset) {
 std::string free_source_name(const AssetScan &scan, const std::string &wanted, const std::string &texture,
                              const std::string &allowed_path) {
 	const std::string extension = utf8_of(path_of(wanted).extension());
-	const std::string stem = stem_of(wanted);
+	const std::string stem = file_stem(wanted);
 	const auto free = [&](const std::string &name) {
 		if (name.size() > size_t(pff::PFF_NAME_SIZE) || pff::normalized_logical_name(name) == pff::normalized_logical_name(texture))
 			return false;
@@ -134,7 +134,7 @@ ImportOptions texture_reproducing_options(const std::string &name, const std::ve
 		out["format"] = "png";
 	}
 	const auto format = out.find("format");
-	const std::string made = stem_of(source_name) + renderer::image_format_extension(format == out.end() ? "tga" : format->second);
+	const std::string made = file_stem(source_name) + renderer::image_format_extension(format == out.end() ? "tga" : format->second);
 	if (pff::normalized_logical_name(made) != pff::normalized_logical_name(basename_of(name))) out["name"] = basename_of(name);
 	return out;
 }
@@ -241,7 +241,7 @@ TextureSourcePlan plan_texture_replace(const ProjectPaths &paths, const AssetSca
 		plan.old_source.clear();
 		plan.changes.push_back(plan.source + " is written over with " + image + " (its old bytes kept in " + kReplacedFolder + "/).");
 	} else {
-		const std::string name = free_source_name(scan, stem_of(plan.texture) + source_extension, plan.texture, std::string());
+		const std::string name = free_source_name(scan, file_stem(plan.texture) + source_extension, plan.texture, std::string());
 		if (name.empty()) {
 			plan.refusals.push_back(refused("No free name in art/ for " + image + "'s copy.", plan.texture));
 			return plan;
@@ -256,7 +256,7 @@ TextureSourcePlan plan_texture_replace(const ProjectPaths &paths, const AssetSca
 	}
 	// The output takes the texture's name.
 	const auto format = options.find("format");
-	const std::string made = stem_of(plan.source) + renderer::image_format_extension(format == options.end() ? "tga" : format->second);
+	const std::string made = file_stem(plan.source) + renderer::image_format_extension(format == options.end() ? "tga" : format->second);
 	if (pff::normalized_logical_name(made) != pff::normalized_logical_name(plan.texture)) options["name"] = plan.texture;
 	else options.erase("name");
 	plan.options = std::move(options);
@@ -333,7 +333,7 @@ TextureSourcePlan plan_texture_source(const ProjectPaths &paths, const AssetScan
 	bool indexed = false;
 	if (extension == ".pcx") {
 		// A copy a paint program opens: a PCX's bytes (its indices kept).
-		wanted = stem_of(entry->logical_name) + ".pcx";
+		wanted = file_stem(entry->logical_name) + ".pcx";
 		plan.bytes = bytes;
 		indexed = !image->indices.empty();
 	} else if (extension == ".tga" || extension == ".mdt") {
@@ -341,19 +341,19 @@ TextureSourcePlan plan_texture_source(const ProjectPaths &paths, const AssetScan
 		// honoured), which a paint program opens: the same texels in a fraction of the bytes.
 		renderer::ImageSource source;
 		std::string why;
-		if (!renderer::decode_image_source(stem_of(entry->logical_name) + ".tga", bytes, source, why)) {
+		if (!renderer::decode_image_source(file_stem(entry->logical_name) + ".tga", bytes, source, why)) {
 			plan.refusals.push_back(refused(entry->logical_name + " does not read as an image program reads a TGA: " + why + ".",
 			                                entry->relative_path));
 			return plan;
 		}
-		wanted = stem_of(entry->logical_name) + ".png";
+		wanted = file_stem(entry->logical_name) + ".png";
 		plan.bytes = png::encode_png_rgba(source.image.pixels.data(), uint32_t(source.image.width), uint32_t(source.image.height));
 		if (header.reader == TextureReader::Tga && (header.tga_descriptor & 0x20))
 			plan.changes.push_back(entry->logical_name + "'s rows are stored top first, so the game draws it upside down now; made from "
 			                                             "its source, it is stored bottom first and drawn as its program shows it.");
 	} else {
 		// A DDS's first level as its reader decodes it, a PNG.
-		wanted = stem_of(entry->logical_name) + ".png";
+		wanted = file_stem(entry->logical_name) + ".png";
 		const TextureLevel &level = image->levels.front();
 		plan.bytes = png::encode_png_rgba(level.rgba.data(), level.width, level.height);
 		plan.changes.push_back(entry->logical_name + " is made again from a PNG of its first level: its " +
@@ -389,7 +389,7 @@ TextureSourcePlan plan_texture_dds(const ProjectPaths &paths, const AssetScan &s
 	if (entry->kind != AssetKind::Texture) return refuse(entry->logical_name + " is no texture.", entry->relative_path);
 	if (extension_of(entry->logical_name) != ".tga")
 		return refuse(entry->logical_name + " is no .tga: only a .tga has a .dds its loaders read before it.", entry->relative_path);
-	const std::string dds = stem_of(entry->logical_name) + ".dds";
+	const std::string dds = file_stem(entry->logical_name) + ".dds";
 	if (!reads_tga.empty())
 		return refuse(reads_tga.front() + " reads " + entry->logical_name + " itself, never " + dds + ": stored as a DDS, the texture would be lost there" +
 		                      (reads_tga.size() > 1 ? " (and " + std::to_string(reads_tga.size() - 1) + " more)." : std::string(".")),
@@ -440,7 +440,7 @@ TextureSourcePlan plan_texture_dds(const ProjectPaths &paths, const AssetScan &s
 	plan.replaced = entry->relative_path;
 	plan.bytes = std::move(bytes);
 	plan.source = "art/" + name;
-	if (pff::normalized_logical_name(stem_of(name) + ".dds") != pff::normalized_logical_name(dds)) options["name"] = dds;
+	if (pff::normalized_logical_name(file_stem(name) + ".dds") != pff::normalized_logical_name(dds)) options["name"] = dds;
 	plan.options = std::move(options);
 	if (!make_output(paths, plan, name)) return plan;
 	plan.changes.push_back(entry->logical_name + " is stored as " + dds + " (" + plan.after_words + "), which every use of it reads first: "

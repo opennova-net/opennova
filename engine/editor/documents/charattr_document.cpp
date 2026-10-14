@@ -218,8 +218,6 @@ const FindingCodeRow &finding_code(CharAttrFinding code) { return kFindingRows[s
 
 FindingTable charattr_finding_codes() { return { kFindingRows.data(), kFindingRows.size() }; }
 
-bool is_charattr_kind(AssetKind kind) { return asset_kind_row(kind).document == DocumentTypeId::CharAttrs; }
-
 charattr::Table CharAttrDocument::file() const {
 	charattr::Table out;
 	if (const auto *noted = noted_layout(file_state())) out.note = noted->root();
@@ -249,10 +247,6 @@ std::string CharAttrDocument::record_title(const NodeAddress &address) const {
 
 bool CharAttrDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                              std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues, Diagnostic &error) {
-	if (!is_charattr_kind(kind())) {
-		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not charattr.def.", path());
-		return false;
-	}
 	auto notes = std::make_shared<textlayout::Notes>();
 	charattr::Table table;
 	charattr::Reading reading;

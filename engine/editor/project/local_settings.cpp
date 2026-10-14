@@ -85,7 +85,6 @@ bool load_local_settings(const ProjectPaths &paths, LocalSettings &out, Diagnost
 	LocalSettings settings;
 	settings.runtime_executable = json.get_string("runtime_executable", "");
 	settings.game_install = json.get_string("game_install", "");
-	settings.build_folder = json.get_string("build_folder", "");
 	// A mode no PlayMode has (one edited by hand) leaves the default: the OpenNova runtime.
 	play_mode_from_token(json.get_string("play_mode", ""), settings.play_mode);
 	settings.save_before_play = json.get_bool("save_before_play", true);
@@ -105,7 +104,6 @@ bool save_local_settings(const ProjectPaths &paths, const LocalSettings &setting
 	json.set("schema_version", io::JsonValue::make_number(kLocalSettingsSchemaVersion));
 	json.set("runtime_executable", io::JsonValue::make_string(settings.runtime_executable));
 	json.set("game_install", io::JsonValue::make_string(settings.game_install));
-	if (!settings.build_folder.empty()) json.set("build_folder", io::JsonValue::make_string(settings.build_folder));
 	json.set("play_mode", io::JsonValue::make_string(play_mode_token(settings.play_mode)));
 	json.set("save_before_play", io::JsonValue::make_bool(settings.save_before_play));
 	if (!settings.open_documents.empty()) {

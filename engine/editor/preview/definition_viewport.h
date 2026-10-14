@@ -37,7 +37,9 @@ enum class DefinitionViewStatus : uint8_t {
 	Ready,
 };
 // "no_project", "no_catalog", "no_record", "no_model", "missing", "unreadable", "ready".
-const char *definition_view_status_token(DefinitionViewStatus status);
+inline constexpr const char *kDefinitionViewStatusTokens[] = {
+	"no_project", "no_catalog", "no_record", "no_model", "missing", "unreadable", "ready",
+};
 
 // The state an item is drawn in (the State menu): alive, as its mission starts; destroying, its death as the
 // game runs it from the preview clock's tick 0 (preview/model_damage's plan: the husk swap, the pieces' sections
@@ -45,8 +47,6 @@ const char *definition_view_status_token(DefinitionViewStatus status);
 // swap done, the fade at its end, the Fire and Other banks burning on it [orig: Entity_UpdateDeadWreckEffects
 // @ 0x493140]); its final husk, the model the death pieces are cut from, whole.
 enum class DefinitionState : uint8_t { Alive, Destroying, Husk, HuskFinal };
-// "alive", "destroying", "husk", "husk_final".
-const char *definition_state_token(DefinitionState state);
 // A weapon drawn as the game draws it in a soldier's hands (its gfx3), or in the player's own view (its gfx1).
 enum class DefinitionWeaponView : uint8_t { Third, First };
 
@@ -70,9 +70,6 @@ struct DefinitionViewportOptions {
 	}
 	bool operator!=(const DefinitionViewportOptions &other) const { return !(*this == other); }
 };
-// On the wire (the envelope's `options`, a SetViewport's): {state, enemy, weapon ("third", "first"), occupied,
-// ssn, mute, grid, fire (definition_fire_options_to_json)}.
-io::JsonValue definition_options_to_json(const DefinitionViewportOptions &options);
 // The change a SetViewport makes to set a definition viewport's options to `options`, and its camera.
 std::string definition_options_change(const DefinitionViewportOptions &options);
 std::string definition_camera_change(const OrbitCamera &camera);
@@ -212,7 +209,7 @@ public:
 	               int height, uint64_t gesture, std::vector<Edit> &out) const;
 
 	ViewportStatus status() const override;
-	const char *reason() const override { return definition_view_status_token(reason_); }
+	const char *reason() const override { return enum_token(kDefinitionViewStatusTokens, reason_); }
 	std::string message() const override;
 	const std::string &detail() const override { return detail_; }
 	std::string caption() const override;

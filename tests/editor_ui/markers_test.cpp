@@ -111,13 +111,7 @@ bool lit_in_sight() {
 	       top >= inspector->InnerClipRect.Min.y - 1.0f && bottom <= inspector->InnerClipRect.Max.y + 1.0f;
 }
 
-Edit set_edit(const NodeAddress &address, const char *field, Value value) {
-	Edit edit;
-	edit.address = address;
-	edit.field = field;
-	edit.value = std::move(value);
-	return edit;
-}
+using editor_test::set_edit;
 
 // BACK's left edge moved: its Left marked, the tooltip naming the saved 10; its right edge,
 // left out of the saved file, written: "Left out of the saved file". A right click on Left

@@ -28,7 +28,6 @@ namespace opennova::editor {
 // (assets/asset_import.cpp: prepare_authored_wave).
 inline constexpr int kWaveImporterVersion = 1;
 const std::vector<ImportOptionRow> &wave_import_option_rows();
-lwf::WaveConversion wave_conversion_of(const ImportOptions &options);
 bool run_wave_import(ImportContext &context, ImportProduct &out);
 
 // An author's wave as it comes into the project (import_assets): as it is where the game plays it; else made

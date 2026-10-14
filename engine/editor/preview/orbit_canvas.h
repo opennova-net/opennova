@@ -17,6 +17,8 @@ inline constexpr float kOrbitWheelDolly = 0.85f;
 // distance}; and the camera a `camera` member sets over `held`: those members and `frame` (the camera on what
 // the picture shows), each optional, the pitch kept within kOrbitPitchLimit. False, nothing changed, with why,
 // for another member or a value of another type.
+// A point of the preview's space on the wire: [x, y, z].
+io::JsonValue preview_point_json(const PreviewVec3 &v);
 io::JsonValue orbit_camera_to_json(const OrbitCamera &camera);
 bool read_orbit_camera(const io::JsonValue &json, OrbitCamera &held, bool &frame, std::string &error);
 

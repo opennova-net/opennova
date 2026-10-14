@@ -17,6 +17,11 @@
 
 namespace opennova::editor {
 
+bool script_assist_op_from_token(const std::string &token, ScriptAssistOp &out);
+
+// "none", "complete", "hover": an op's token, and back (false for another).
+const char *script_assist_op_token(ScriptAssistOp op);
+
 namespace {
 
 using io::JsonValue;
@@ -107,14 +112,6 @@ std::string script_read_only_reason(const SessionView &view, const DocumentBase 
 		return "Read only while an operation holds the documents" +
 				(view.activity.operation.label.empty() ? std::string() : " (" + view.activity.operation.label + ")") + ".";
 	return std::string();
-}
-
-const char *script_view_status_token(ScriptViewStatus status) {
-	switch (status) {
-	case ScriptViewStatus::NoText: return "no_text";
-	case ScriptViewStatus::Ready: return "ready";
-	}
-	return "no_text";
 }
 
 std::string ScriptMark::tip() const {

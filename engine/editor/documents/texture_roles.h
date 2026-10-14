@@ -41,7 +41,6 @@ const TextureRoleRow &texture_role_row(renderer::TextureRoleId id);
 bool texture_role_from_token(const std::string &token, renderer::TextureRoleId &out);
 // A size rule in words ("1024 x 1024", "powers of two", "64-pixel cells").
 std::string texture_size_words(const TextureRoleRow &row);
-const char *texture_size_rule_token(renderer::TextureSizeRule rule);
 // A role on the wire (the texture_roles query): its token, words, group, loader, formats, size
 // {rule, words, width, height}, alpha, sampling, missing, whether its loader reads the alpha, witness.
 io::JsonValue texture_role_json(const TextureRoleRow &row);

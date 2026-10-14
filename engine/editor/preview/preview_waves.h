@@ -35,6 +35,9 @@ public:
 
 	// The wave at the full path `file`, its decode begun on a worker the first time it is asked.
 	Wave wave(const std::string &file);
+	// The same once its decode has ended, the caller waiting on the worker (a test's wait: the Shell asks wave()
+	// each frame and never waits).
+	Wave wait(const std::string &file);
 	// The project's files moved (a rescan, a document edited): each wave whose file changed on disk since its
 	// decode began (its size or its last write), or is gone, or came to be, dropped and decoded anew when next
 	// asked; the rest kept as they stand, a decode in flight among them. The files dropped, in order.
@@ -95,6 +98,9 @@ public:
 	std::vector<std::string> refresh();
 	// Every voice waiting dropped (the project closing); the waves kept.
 	void clear() { waiting_.clear(); }
+	// The caller waits until every waiting voice's wave has decoded or failed (PreviewWaves::wait, a test's): the
+	// next take_ready hands them all over or drops them.
+	void wait();
 	size_t waiting() const { return waiting_.size(); }
 
 private:

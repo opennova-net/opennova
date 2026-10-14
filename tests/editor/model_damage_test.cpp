@@ -34,7 +34,6 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <formats/def/def.h>
-#include <formats/lwf/lwf.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <runtime/world/destruction.h>
 
@@ -53,39 +52,6 @@ namespace {
 
 std::string repo() { return test_paths_repo_root(__FILE__); }
 std::string synth(const char *name) { return repo() + "/fixtures/threedi/synth/" + name; }
-
-// A bank of one set per name, one layer heard in either view playing its one wave (the name lower case).
-std::vector<uint8_t> bank_of(const std::vector<std::string> &sets) {
-	lwf::File bank;
-	for (size_t i = 0; i < sets.size(); ++i) {
-		lwf::Single single;
-		single.name = sets[i];
-		single.path = strutil::to_lower(sets[i]) + ".wav";
-		single.volume = 0xD2;
-		bank.singles.push_back(single);
-		lwf::Multi set;
-		set.name = sets[i];
-		set.pitch_base = lwf::kAuthoredSetPitchBase;
-		set.target_id = 100;
-		set.playlist_indices.push_back(uint32_t(i));
-		bank.multis.push_back(set);
-		lwf::Playlist layer;
-		layer.falloff_radius = 100;
-		layer.flags = lwf::kFlagInternal | lwf::kFlagExternal;
-		layer.sndparm_indices.push_back(uint32_t(i));
-		bank.playlists.push_back(layer);
-		lwf::Sndparm member;
-		member.single_index = uint32_t(i);
-		member.pitch_scaled = lwf::kPitchUnityQ16;
-		member.volume = 200;
-		member.clamp_volume = 255;
-		bank.sndparms.push_back(member);
-	}
-	std::vector<uint8_t> out;
-	std::string error;
-	lwf::encode_lwf(bank, out, error);
-	return out;
-}
 
 // The pump: a gnrc item drawn by the crate, its husk the armory (four parts: the hull and three pieces,
 // one a WHEEL's 50% roll, two that always leave), half a second's delay, a second's fade, a quarter
@@ -116,7 +82,7 @@ struct DamageProject {
 		bool ok = editor_test::write_bytes(root + "/models/crate.3di", test_io::read_file(synth("crate.3di"))) &&
 		          editor_test::write_bytes(root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))) &&
 		          editor_test::write_bytes(root + "/models/house.3di", test_io::read_file(synth("house.3di"))) &&
-		          editor_test::write_bytes(root + "/sounds/game.lwf", bank_of({"EXPLO_PUMP"})) &&
+		          editor_test::write_bytes(root + "/sounds/game.lwf", editor_test::wave_bank_of({"EXPLO_PUMP"})) &&
 		          editor_test::write_bytes(root + "/sounds/explo_pump.wav", test_io::read_file(repo() + "/fixtures/lwf/tone.wav")) &&
 		          editor_test::write_text(root + "/defs/items.def", editor_test::crlf(kItems));
 		editor_test::handle_to_end(session, request::rescan());

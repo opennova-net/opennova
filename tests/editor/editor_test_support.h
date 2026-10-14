@@ -4,8 +4,9 @@
 // own) that is wiped on construction and destruction (through the system's paths, so a tree past
 // MAX_PATH goes too), a file writer, a tree's digest, every missing
 // required file of a session's project created, the project settings applied, a request and the
-// operation it starts run to their end, an operation that holds the documents, and a finding made
-// by its code's token with what it is about.
+// operation it starts run to their end, the session polled through its terrain bakes to a state, an
+// operation that holds the documents, the edit factories, sound banks and TGAs minted, a JSON text
+// parsed, a finding made by its code's token with what it is about and the findings of a code looked up.
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -29,9 +30,15 @@
 
 #include <base/io/hash.h>
 #include <base/io/os_path.h>
+#include <base/io/strutil.h>
 #include <editor/assets/asset_registry.h>
+#include <editor/documents/terrain_heights_document.h>
+#include <editor/model/document.h>
+#include <editor/model/edit.h>
 #include <editor/project/project_files.h>
 #include <editor/requirements/requirements.h>
+#include <base/io/json.h>
+#include <editor/project_build/build_run.h>
 #include <editor/session/finding_codes.h>
 #include <editor/session/original_files.h>
 #include <editor/session/project_session.h>
@@ -39,8 +46,45 @@
 #include <editor/session/session_operation.h>
 #include <editor/session/view/session_view.h>
 #include <formats/lwf/lwf.h>
+#include <formats/tga/tga.h>
 
 namespace editor_test {
+
+// A finding code's row by its token over every table (the editor's own, then each document type's), null
+// for a token no table declares; and whose table holds a row ("core" or the type's name, null for none).
+// (S26 D1: the tests' alone, out of session/finding_codes.)
+inline const opennova::editor::FindingCodeRow *finding_row(const std::string &token) {
+	for (const opennova::editor::NamedFindingTable &table : opennova::editor::finding_tables())
+		for (const opennova::editor::FindingCodeRow &row : table.rows)
+			if (row.token && token == row.token) return &row;
+	return nullptr;
+}
+inline const char *finding_owner(const opennova::editor::FindingCodeRow *row) {
+	for (const opennova::editor::NamedFindingTable &table : opennova::editor::finding_tables())
+		for (const opennova::editor::FindingCodeRow &held : table.rows)
+			if (&held == row) return table.owner;
+	return nullptr;
+}
+
+// ProtectedDirs naming `dirs` whenever it is asked; and the last good build's directory under `output_root`
+// as its last_good.json names it ("" when none, or when the directory is gone). (S26 D1: the tests' alone,
+// out of project_build/build_run.)
+inline opennova::editor::ProtectedDirs protect_dirs(std::vector<std::string> dirs) {
+	return [dirs = std::move(dirs)] { return dirs; };
+}
+inline std::string last_good_build_dir(const std::string &output_root) {
+	std::string text, error;
+	if (!opennova::io::read_file_text(opennova::io::utf8_join(output_root, opennova::editor::kLastGoodBuildFileName),
+	                                  text, error))
+		return std::string();
+	opennova::io::JsonValue json;
+	if (!opennova::io::json_parse(text, json, error) || !json.is_object() ||
+	    json.get_int("schema_version", -1) != opennova::editor::kBuildRecordSchemaVersion)
+		return std::string();
+	const std::string dir = opennova::io::utf8_join(output_root, json.get_string("build_id", ""));
+	std::error_code ec;
+	return std::filesystem::is_directory(opennova::editor::system_path(dir), ec) ? dir : std::string();
+}
 
 // A shared member of a hand-made view (ProjectView's document, scan, requirements and imports,
 // ActivityView's last build, an import preview's plan, a rename preview's sites: each read only
@@ -122,6 +166,28 @@ inline void set_missions(opennova::editor::ProjectSession &session, bool on) {
 	apply_settings(session, change);
 }
 
+// The session polled as the Shell polls it until `done()` holds (true), the terrain sculpt's worker waited
+// on between polls (ProjectSession::wait_for_bakes: the bake it finished lands at the next poll); false
+// once a poll leaves no bake running or being prepared, so nothing left to land can bring `done` about. No
+// clock: ctest's timeout bounds a hang.
+template <typename Done> bool poll_bakes_until(opennova::editor::ProjectSession &session, Done done) {
+	for (;;) {
+		session.poll();
+		if (done()) return true;
+		const opennova::editor::SessionView &view = session.view();
+		if (view.documents.baking.empty() && view.documents.preparing.empty()) return false;
+		session.wait_for_bakes();
+	}
+}
+// Polled until the open heights at `path` have no region due and a bake state (their bakes landed).
+inline bool heights_settled(opennova::editor::ProjectSession &session, const std::string &path) {
+	return poll_bakes_until(session, [&] {
+		const auto *heights =
+		        dynamic_cast<const opennova::editor::TerrainHeightsDocument *>(session.document_base_for(path));
+		return heights && heights->heights().unbaked.empty() && heights->heights().bake;
+	});
+}
+
 // An operation that writes the project's files and open documents and cannot be cancelled (a
 // test's: what S13 A3's rename and import operations will be), done on its first step: while it
 // runs the busy gate refuses every edit, and ProjectSession::run_operations() ends it.
@@ -179,6 +245,59 @@ inline bool write_bytes(const std::string &path, const std::vector<uint8_t> &byt
 	return static_cast<bool>(out);
 }
 
+// A JSON text parsed (a null value when it does not parse).
+inline opennova::io::JsonValue parsed(const std::string &text) {
+	opennova::io::JsonValue out;
+	std::string error;
+	opennova::io::json_parse(text, out, error);
+	return out;
+}
+
+// A 32-bit TGA of `w` x `h` RGBA pixels minted through the engine's writer (formats/tga), and a 2x2 one
+// of one grey: a texture's bytes where only a file of the kind matters.
+inline std::vector<uint8_t> tga32(const std::vector<uint8_t> &rgba, int w, int h) {
+	std::vector<uint8_t> out;
+	std::string why;
+	opennova::tga::tga_write_rgba32(rgba.data(), uint32_t(w), uint32_t(h), out, why);
+	return out;
+}
+inline std::vector<uint8_t> tga_bytes() { return tga32(std::vector<uint8_t>(16, 200), 2, 2); }
+
+// A document's bytes as it writes them now.
+inline std::vector<uint8_t> serialized(const opennova::editor::Document &document) {
+	const opennova::editor::SerializeResult result = document.serialize();
+	return std::vector<uint8_t>(result.text.begin(), result.text.end());
+}
+
+// Whether `text` holds `part`, printing both when it does not.
+inline bool contains(const std::string &text, const std::string &part) {
+	if (text.find(part) != std::string::npos) return true;
+	std::printf("  \"%s\" lacks \"%s\"\n", text.c_str(), part.c_str());
+	return false;
+}
+
+// The edit factories: a Set of one field of a record, and an edit of another operation about a
+// record (an Add, Remove, Duplicate or Move: under `parent`, 0 the row, at `position` among its
+// owner's collection of the record's kind, SIZE_MAX the end), Edit's defaults otherwise.
+inline opennova::editor::Edit set_edit(const opennova::editor::NodeAddress &address, std::string field,
+		opennova::editor::Value value) {
+	opennova::editor::Edit edit;
+	edit.address = address;
+	edit.field = std::move(field);
+	edit.value = std::move(value);
+	return edit;
+}
+inline opennova::editor::Edit op_edit(opennova::editor::EditOperation operation,
+		const opennova::editor::NodeAddress &address, opennova::editor::NodeId parent = 0,
+		size_t position = SIZE_MAX) {
+	opennova::editor::Edit edit;
+	edit.operation = operation;
+	edit.address = address;
+	edit.parent = parent;
+	edit.position = position;
+	return edit;
+}
+
 // A sound bank minted through the engine's writer (formats/lwf) holding a set of each name, each with one
 // layer heard in both views and no member: what a project's sound names resolve against (the sound
 // lane), a test's game.lwf.
@@ -198,6 +317,43 @@ inline std::vector<uint8_t> sound_bank_of(const std::vector<std::string> &sets) 
 	std::vector<uint8_t> out;
 	std::string error;
 	opennova::lwf::encode_lwf(bank, out, error);
+	return out;
+}
+
+// A sound bank minted the same way whose sets each play one wave: set i a layer heard in both views (a
+// falloff of 100) over one member playing its single, the name's wave in lower case ("<name>.wav", at
+// unity pitch): what a project's played sounds (a clip's, a weapon's fire, a model's damage) resolve
+// and play against.
+inline std::vector<uint8_t> wave_bank_of(const std::vector<std::string> &sets) {
+	namespace lwf = opennova::lwf;
+	lwf::File bank;
+	for (size_t i = 0; i < sets.size(); ++i) {
+		lwf::Single single;
+		single.name = sets[i];
+		single.path = opennova::strutil::to_lower(sets[i]) + ".wav";
+		single.volume = 0xD2;
+		bank.singles.push_back(single);
+		lwf::Multi set;
+		set.name = sets[i];
+		set.pitch_base = lwf::kAuthoredSetPitchBase;
+		set.target_id = 100;
+		set.playlist_indices.push_back(uint32_t(i));
+		bank.multis.push_back(set);
+		lwf::Playlist layer;
+		layer.falloff_radius = 100;
+		layer.flags = lwf::kFlagInternal | lwf::kFlagExternal;
+		layer.sndparm_indices.push_back(uint32_t(i));
+		bank.playlists.push_back(layer);
+		lwf::Sndparm member;
+		member.single_index = uint32_t(i);
+		member.pitch_scaled = lwf::kPitchUnityQ16;
+		member.volume = 200;
+		member.clamp_volume = 255;
+		bank.sndparms.push_back(member);
+	}
+	std::vector<uint8_t> out;
+	std::string error;
+	lwf::encode_lwf(bank, out, error);
 	return out;
 }
 
@@ -319,13 +475,43 @@ inline std::string tree_digest(const std::string &dir) {
 inline opennova::editor::Diagnostic finding_of(opennova::editor::DiagnosticSeverity severity,
 		const std::string &code, std::string message, std::string asset = std::string(),
 		std::string field = std::string()) {
-	const opennova::editor::FindingCodeRow *row = opennova::editor::finding_row(code);
+	const opennova::editor::FindingCodeRow *row = finding_row(code);
 	if (!row) {
 		std::fprintf(stderr, "no finding code row declares %s\n", code.c_str());
 		std::abort();
 	}
 	return opennova::editor::make_finding(*row, severity, std::move(message), std::move(asset),
 			std::move(field));
+}
+
+// Whether a finding of `code` is among `findings`, and how many are.
+inline bool has_code(const std::vector<opennova::editor::Diagnostic> &findings, const std::string &code) {
+	for (const opennova::editor::Diagnostic &d : findings)
+		if (d.code() == code) return true;
+	return false;
+}
+inline size_t count_code(const std::vector<opennova::editor::Diagnostic> &findings, const std::string &code) {
+	size_t n = 0;
+	for (const opennova::editor::Diagnostic &d : findings) n += d.code() == code ? 1 : 0;
+	return n;
+}
+
+// A scanned file of the project as a hand-made scan holds it.
+inline opennova::editor::AssetEntry file_entry(const std::string &name, const std::string &path,
+		opennova::editor::AssetKind kind) {
+	opennova::editor::AssetEntry entry;
+	entry.logical_name = name;
+	entry.relative_path = path;
+	entry.kind = kind;
+	return entry;
+}
+
+// The finding a required file the project lacks makes (requirement.missing, about its role).
+inline opennova::editor::Diagnostic missing_finding(const char *role, const char *name) {
+	opennova::editor::Diagnostic d = finding_of(opennova::editor::DiagnosticSeverity::Error, "requirement.missing",
+			std::string("Missing required file ") + name + ".");
+	d.subject = opennova::editor::RequirementSubject{role, name};
+	return d;
 }
 
 // What the game install makes of the files at `paths`, as its validation keys them (OriginalData, the game's

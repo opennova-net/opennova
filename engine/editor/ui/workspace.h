@@ -25,7 +25,7 @@ struct JumpSubject {
 	bool any() const { return !definition.empty() || !usages_file.empty(); }
 };
 
-// The editor's windows and their seam to the session (ADR 0046 d10, S13 A2; CONTEXT.md
+// The editor's windows and their seam to the session (ADR 0046 d11, S13 A2; CONTEXT.md
 // "Workspace"): what every window sees of the world, the session's view to read, a sink for the
 // typed requests it raises, and the devices its viewports' canvases draw through (S13 V5: the
 // Shell's, by document and kind; null where there are none, a headless run, a test), and the one its

@@ -38,6 +38,8 @@ namespace fs = std::filesystem;
 
 namespace opennova::editor {
 
+static ProblemFix edit_fix(const std::string &path, const PlannedFix &planned);
+
 namespace {
 
 // A Use fix is for a project that has the file under another name: a few files of the
@@ -865,24 +867,14 @@ ProblemFixIndex::ProblemFixIndex(const SessionView &view) {
 		if (d.row() && d.row()->blocks_save) unserializable.insert(d.asset);
 }
 
-namespace {
-
-const DocumentBase *open_at(const SessionView &view, const std::string &path) {
-	for (const auto &open : view.documents.open)
-		if (open && open->path() == path) return open.get();
-	return nullptr;
-}
-
-} // namespace
-
 const DocumentBase *ProblemFixIndex::definer(const SessionView &view, const AssetEntry &file) const {
-	if (const DocumentBase *open = open_at(view, file.relative_path)) return open;
+	if (const DocumentBase *open = view.documents.open_at(file.relative_path)) return open;
 	return trial(view, file);
 }
 
 DocumentBase *ProblemFixIndex::trial(const SessionView &view, const AssetEntry &file) const {
 	// The state it is a copy of: the open document's (its instance, its load and its revision), else the file's.
-	const DocumentBase *open = open_at(view, file.relative_path);
+	const DocumentBase *open = view.documents.open_at(file.relative_path);
 	const uint64_t identity = open ? open->identity() : 0, generation = open ? open->load_generation() : 0,
 	               revision = open ? open->revision() : 0;
 	Copy &held = copies_[file.relative_path];
@@ -911,7 +903,11 @@ std::vector<ProblemFix> fixes_for(const Diagnostic &diagnostic, const SessionVie
 	return fixes_over(diagnostic, view, index, true);
 }
 
-ProblemFix edit_fix(const std::string &path, const PlannedFix &planned) {
+// A planned edit of the file at `path` as the fix Problems offers (ADR 0046 DI-11): its words, saying
+// Undo takes it back, and an edit_record of its batch, the document opened first; never in bulk. What an
+// EditRecord row's finding offers (Diagnostic::planned), and what a fix planning an edit of another
+// file than its finding's makes of it.
+static ProblemFix edit_fix(const std::string &path, const PlannedFix &planned) {
 	return {planned.label, planned.detail + kUndoable, request::edit_record(path, planned.edits, true), false};
 }
 

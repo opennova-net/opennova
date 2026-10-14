@@ -62,12 +62,6 @@ void distribute(const std::vector<mnu::RectEdges> &rects, int mnu::RectEdges::*l
 
 } // namespace
 
-const char *arrange_op_token(ArrangeOp op) {
-	for (const OpRow &row : kOpRows)
-		if (row.op == op) return row.token;
-	return "";
-}
-
 bool arrange_op_from_token(const std::string &token, ArrangeOp &out) {
 	for (const OpRow &row : kOpRows)
 		if (token == row.token) {

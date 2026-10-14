@@ -27,6 +27,7 @@
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
+#include "editor/editor_test_support.h"
 
 using namespace opennova;
 using namespace opennova::editor;
@@ -43,21 +44,9 @@ std::vector<uint8_t> person() {
 	return test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/grm/person.grm");
 }
 
-Edit set_edit(NodeAddress address, const char *field, Value value) {
-	Edit edit;
-	edit.address = address;
-	edit.field = field;
-	edit.value = std::move(value);
-	return edit;
-}
-
-bool has_code(const std::vector<Diagnostic> &findings, const char *code) {
-	return std::any_of(findings.begin(), findings.end(), [&](const Diagnostic &d) { return d.code() == code; });
-}
-
-size_t count_code(const std::vector<Diagnostic> &findings, const char *code) {
-	return size_t(std::count_if(findings.begin(), findings.end(), [&](const Diagnostic &d) { return d.code() == code; }));
-}
+using editor_test::set_edit;
+using editor_test::has_code;
+using editor_test::count_code;
 
 const FaceAnimationRow &face_of(const FaceAnimationDocument &document) { return *document.face_row(); }
 
@@ -231,7 +220,7 @@ int test_findings() {
 	TEST_EXPECT(face.apply({stray, again}, error));
 	const std::vector<Diagnostic> findings = validate_face_animation_file(face);
 	TEST_EXPECT(has_code(findings, "face_animation.eye_texture_alone"));
-	TEST_EXPECT(has_code(findings, "face_animation.unserializable"));
+	TEST_EXPECT(has_code(findings, "face_animation.vertex_range"));
 	TEST_EXPECT(has_code(findings, "face_animation.gesture_unplayed"));
 	TEST_EXPECT(has_code(findings, "face_animation.gesture_repeated"));
 	TEST_EXPECT(has_code(findings, "face_animation.parameter_unmatched"));

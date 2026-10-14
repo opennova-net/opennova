@@ -4,7 +4,7 @@
 # the base game project assets/, ADR 0048 d8, with each expansion project under
 # expansions/ exported into its expansion/<name>/, ADR 0046 T5) and
 # dist/opennova-editor-windows-v<version>.zip (editor/ = the OpenNova Editor,
-# runtime/ = the game it plays a project with, ADR 0046 d4). Retail game data is
+# runtime/ = the game it plays a project with, ADR 0046 d1). Retail game data is
 # supplied by the player. Debug exports include the game's ImGui tools; the
 # editor carries ImGui in both.
 # Usage: pwsh -File scripts/package_godot_windows.ps1 [-ExportMode release|debug] [-SkipBuild]
@@ -107,7 +107,7 @@ if (-not (Test-Path "$TEMPLATES_DIR\version.txt")) {
 
 # ---------------------------------------------------------------------------
 # 3. Build GDExtension binaries: both variants of one flavour per configure
-#    (ADR 0046 d4): libopennova.* (runtime-only: the game, the Play child) and
+#    (ADR 0046 d2): libopennova.* (runtime-only: the game, the Play child) and
 #    libopennova_editor.* (the editor).
 # ---------------------------------------------------------------------------
 function Invoke-GDExtensionBuild {
@@ -366,7 +366,7 @@ function Test-GodotAppBoot {
     }
 }
 
-# The editor zip's two exes (ADR 0046 d4). The Play child ships no assets/ (Play
+# The editor zip's two exes (ADR 0046 d1). The Play child ships no assets/ (Play
 # always hands it --resource-dir), so it proves its scene and variant load
 # through the same usage error; the editor loads its variant and says so.
 function Test-EditorAppBoot {

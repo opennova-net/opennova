@@ -425,7 +425,7 @@ private:
 			return refuse(CoreFinding::ImportDuplicate, "More than one selected file has the name " + name + ".", name);
 		// A file of a name the project holds is decided once the source is read: the same bytes are
 		// left as they are, other bytes refused unless the import replaces (below, for each file the
-		// source makes; review F2).
+		// source makes; S19, "The import a modder reads").
 		std::vector<uint8_t> bytes;
 		if (!read(source, name, bytes)) return;
 		// What the source becomes: a converter's outputs (the source is not kept), or

@@ -6,16 +6,26 @@
 #include <utility>
 
 #include <base/gameprofile/game_type.h>
+#include <base/io/fixed.h>
 #include <base/io/strutil.h>
+#include <base/io/tick_rate.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/model/text_document.h>
 #include <editor/preview/hud_canvas.h>
+#include <editor/preview/option_reads.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <formats/def/def.h>
 #include <runtime/hud/hud_texture_names.h>
 
 namespace opennova::editor {
+
+bool hud_board_game_type_from_token(const std::string &token, uint32_t &out);
+
+bool hud_preview_view_from_token(const std::string &token, HudPreviewView &out);
+
+// "normal", "binoculars", "night_vision", and the view a token names (false for none).
+const char *hud_preview_view_token(HudPreviewView view);
 
 namespace {
 
@@ -135,7 +145,6 @@ JsonValue options_to_json(const HudViewportOptions &options) {
 	out.set("picked", json_string(options.picked));
 	out.set("board", JsonValue::make_bool(options.board));
 	out.set("game_type", json_string(hud_board_game_type_token(options.game_type)));
-	out.set("players", json_number(options.players));
 	out.set("sights", JsonValue::make_bool(options.sights));
 	out.set("range", json_number(options.range));
 	return out;
@@ -152,7 +161,7 @@ bool whole(const JsonValue &value, int least, int most, int &out) {
 bool read_options(const JsonValue &json, HudViewportOptions &held, std::string &error) {
 	if (!json.is_object()) {
 		error = "options is an object {width, height, stance, weapon, clip, reserve, health, view, damage, detail, "
-		        "crosshair, picked, board, game_type, players, sights, range}.";
+		        "crosshair, picked, board, game_type, sights, range}.";
 		return false;
 	}
 	HudViewportOptions options = held;
@@ -191,10 +200,9 @@ bool read_options(const JsonValue &json, HudViewportOptions &held, std::string &
 				return false;
 			}
 		} else if (key == "view") {
-			if (!value.is_string() || !hud_preview_view_from_token(value.string, options.view)) {
-				error = "options.view is normal, binoculars or night_vision.";
+			if (!read_json_token(value, hud_preview_view_from_token, options.view, error,
+						"options.view is normal, binoculars or night_vision."))
 				return false;
-			}
 		} else if (key == "damage") {
 			if (!whole(value, 0, kHudDamageMost, options.damage)) {
 				error = "options.damage is the damage vignette's alpha, 0 (none) to 192 (its cap).";
@@ -225,16 +233,11 @@ bool read_options(const JsonValue &json, HudViewportOptions &held, std::string &
 			}
 			(key == "board" ? options.board : options.sights) = value.boolean;
 		} else if (key == "game_type") {
-			if (!value.is_string() || !hud_board_game_type_from_token(value.string, options.game_type)) {
-				error = "options.game_type is a session game type: DM, TDM, KOTH, TKOTH, CTF, SD, AD, FB, FM, AAS, CAC or "
-				        "COOP.";
+			if (!read_json_token(value, hud_board_game_type_from_token, options.game_type, error,
+						"options.game_type is a session game type: DM, TDM, KOTH, TKOTH, CTF, SD, "
+						"AD, FB, FM, AAS, CAC or "
+						"COOP."))
 				return false;
-			}
-		} else if (key == "players") {
-			if (!whole(value, 0, kHudBoardPlayersMost, options.players)) {
-				error = "options.players is the stand-in players the board lists, 0 to 128.";
-				return false;
-			}
 		} else if (key == "range") {
 			if (!whole(value, kHudSightsRangeLeast, kHudSightsRangeMost, options.range)) {
 				error = "options.range is the metres the sights' aim rests at, 2 to 1000.";
@@ -243,7 +246,7 @@ bool read_options(const JsonValue &json, HudViewportOptions &held, std::string &
 		} else {
 			error = "Unknown options member \"" + key +
 			        "\" (it takes width, height, stance, weapon, clip, reserve, health, view, damage, detail, "
-			        "crosshair, picked, board, game_type, players, sights, range).";
+			        "crosshair, picked, board, game_type, sights, range).";
 			return false;
 		}
 	}
@@ -269,15 +272,6 @@ bool is_none(const std::string &weapon) {
 
 } // namespace
 
-const char *hud_view_status_token(HudViewStatus status) {
-	switch (status) {
-	case HudViewStatus::NoProject: return "no_project";
-	case HudViewStatus::NoLayout: return "no_layout";
-	case HudViewStatus::Ready: return "ready";
-	}
-	return "no_layout";
-}
-
 const char *hud_preview_view_token(HudPreviewView view) {
 	const size_t index = static_cast<size_t>(view);
 	return index < std::size(kViewTokens) ? kViewTokens[index] : "normal";
@@ -296,7 +290,7 @@ bool HudViewportOptions::operator==(const HudViewportOptions &other) const {
 	return width == other.width && height == other.height && stance == other.stance && weapon == other.weapon &&
 	       clip == other.clip && reserve == other.reserve && health == other.health && view == other.view &&
 	       damage == other.damage && detail == other.detail && crosshair == other.crosshair && picked == other.picked &&
-	       board == other.board && game_type == other.game_type && players == other.players && sights == other.sights &&
+	       board == other.board && game_type == other.game_type && sights == other.sights &&
 	       range == other.range;
 }
 
@@ -327,29 +321,14 @@ opennova::hud::HudScoreboardState hud_preview_board(const HudViewportOptions &op
 	board.game_type = options.game_type;
 	board.team_count = opennova::game_type::active_team_count(options.game_type, 2);
 	board.local_team = 1;
-	for (int i = 0; i < options.players; ++i) {
-		opennova::hud::ScoreboardEntry row;
-		row.slot_id = uint8_t(i + 1);
-		row.score1 = int16_t(options.players - i);
-		row.team = board.team_count > 0 ? uint8_t(i % board.team_count + 1) : uint8_t(0);
-		row.has_entity = true;
-		row.name = "Player " + std::to_string(i + 1);
-		row.quality = uint8_t(i % 3 + 1);
-		row.player_class = uint8_t(5 + i % 5);
-		board.rows.push_back(std::move(row));
-	}
 	const opennova::hud::ScoreboardHeaderStrings strings = opennova::hud::scoreboard_header_strings(
-			gametext, gametext_loaded, keyhelp, board.game_type, options.players, 0);
+			gametext, gametext_loaded, keyhelp, board.game_type, 0, 0);
 	board.title = strings.title;
 	board.game_type_label = strings.game_type_label;
 	board.players_line = strings.players_line;
 	board.spectators_line = strings.spectators_line;
 	board.footer = strings.footer;
 	return board;
-}
-
-io::JsonValue hud_options_json(const HudViewportOptions &options) {
-	return options_to_json(options);
 }
 
 std::string hud_options_change(const HudViewportOptions &options) {
@@ -441,7 +420,7 @@ void HudViewport::follow_scope_(const SessionView &view) {
 	// Entity_UpdateInfantryPlayerBody @0x4B4E9B..0x4B5215]).
 	range_->set_gestures({ WeaponGestureAt{ 0, WeaponGesture::Scope } });
 	constexpr int32_t kAimTicks = 16;
-	constexpr int32_t kMostTicks = 62 * 5;
+	constexpr int32_t kMostTicks = io::kTicksPerSecondInt * 5;
 	if (range_->tick() == 0) {
 		int32_t settled = -1;
 		for (int32_t tick = 1; tick <= kMostTicks; ++tick) {
@@ -930,7 +909,7 @@ io::JsonValue HudViewport::body_json(const ViewportInput &) const {
 	JsonValue board = JsonValue::make_object();
 	board.set("shown", JsonValue::make_bool(options_.board));
 	board.set("game_type", json_string(hud_board_game_type_token(options_.game_type)));
-	board.set("rows", json_number(options_.board ? options_.players : 0));
+	board.set("rows", json_number(options_.board ? double(board_.rows.size()) : 0.0));
 	board.set("teams", json_number(opennova::game_type::active_team_count(options_.game_type, 2)));
 	out.set("board", std::move(board));
 	JsonValue sights = JsonValue::make_object();
@@ -941,7 +920,7 @@ io::JsonValue HudViewport::body_json(const ViewportInput &) const {
 		sights.set("scoped", JsonValue::make_bool(frame->frame_fx.scoped_selector));
 		sights.set("sighted", JsonValue::make_bool(frame->frame_fx.sighted_selector));
 		sights.set("readouts", JsonValue::make_bool(frame->scope_details_active));
-		sights.set("range", json_number(double(frame->aim_range_q16) / 65536.0));
+		sights.set("range", json_number(double(frame->aim_range_q16) / io::kFp16OneD));
 		sights.set("zero", json_number(frame->scope_zero_word));
 		sights.set("magnification", json_number(frame->scope_magnification));
 		sights.set("fov", json_number(frame->fov_h_deg));

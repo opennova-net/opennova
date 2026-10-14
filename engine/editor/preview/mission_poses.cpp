@@ -1,17 +1,23 @@
 #include <editor/preview/mission_poses.h>
 
 #include <cmath>
+#include <map>
 
+#include <base/io/hash.h>
 #include <base/io/bam.h>
 #include <base/io/fixed.h>
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/preview/mission_ground_facts.h>
 #include <editor/preview/mission_scene.h>
+#include <editor/preview/mission_world.h>
 #include <editor/preview/model_preview_rig.h>
 #include <editor/preview/viewport_follow.h>
 #include <editor/session/view/session_view.h>
 #include <formats/def/def.h>
+#include <formats/mission/bms.h>
 #include <runtime/anim/adm_fallback.h>
 #include <runtime/anim/adm_root_motion.h>
 #include <runtime/assets/asset_store.h>
@@ -27,12 +33,6 @@ namespace {
 using io::JsonValue;
 using io::json_number;
 using io::json_string;
-
-// A project file by the name the asset source serves it by (a path's file name).
-std::string served_name(const std::string &file) {
-	const size_t slash = file.find_last_of('/');
-	return slash == std::string::npos ? file : file.substr(slash + 1);
-}
 
 // The record's field that chose the init's request.
 const char *because_of(const world::OrganicSpawnFacts &facts, int state) {
@@ -71,6 +71,10 @@ void MissionPoses::clear() {
 	read_ = false;
 	poses_.clear();
 	rows_.clear();
+	floor_files_.reset();
+	floor_world_.reset();
+	floor_bodies_.clear();
+	floor_key_ = 0;
 }
 
 const MissionPose *MissionPoses::pose(NodeId row) const {
@@ -86,7 +90,7 @@ size_t MissionPoses::posed() const {
 
 const MissionPoses::Catalog &MissionPoses::catalog_(const std::string &file) {
 	Catalog &catalog = catalogs_[file];
-	const std::string name = served_name(file);
+	const std::string name = io::utf8_file_name(file);
 	const uint64_t stamp = files_->stamp(name);
 	if (catalog.stamp == stamp && stamp != 0) return catalog;
 	catalog = Catalog();
@@ -164,6 +168,7 @@ bool MissionPoses::refresh(const SessionView &view, const MissionScene &scene) {
 			// Where it stood, until stand() stands it again.
 			pose.lift = were[i].lift;
 			pose.settled = were[i].settled;
+			pose.on = were[i].on;
 		}
 		if (same_row && same_pose(were[i], pose)) {
 			pose.stamp = were[i].stamp;
@@ -185,8 +190,102 @@ int32_t mission_pose_clearance(const MissionPose &pose, double x, double y, doub
 	return world::terrain_settle_clearance(terrain, at, pose.capsule_bottom, false);
 }
 
-bool MissionPoses::stand(const MissionScene &scene, const terrain::TerrainHeightField *terrain) {
+int32_t mission_pose_floor_clearance(MissionWorld &world, world::EntityHandle body, const MissionPose &pose,
+		const std::vector<MissionEntityMark> &marks, NodeId &on) {
+	on = 0;
+	const world::AiEntity *row = world.world.ai.for_handle(body);
+	if (row == nullptr) return INT32_MAX;
+	// The body lifted by its rise; the tail's probe from its height raised to the 6144 grid, down 2.0 u.
+	int32_t pos[3] = { row->pos[0], row->pos[1],
+		io::bam_add(row->pos[2], int32_t(std::lround(pose.rise * io::kFp16OneD))) };
+	const int32_t feet = pos[2] - pose.capsule_bottom;
+	pos[2] = world::ground_probe_origin_z(pos[2]);
+	world::EntityHandle met;
+	const int32_t ground = world.collision.raycast_ground(world.world, body, pos, 0, 0, 0, 0x20000, &met);
+	if (const world::Entity *floor = world.world.registry.get(met))
+		if (const MissionEntityMark *mark = world.mark_of(*floor, marks)) on = mark->row;
+	return feet - ground;
+}
+
+bool MissionPoses::floor_files_moved() const {
+	return floor_files_ && source_ && floor_files_->stamped->stamps().moved(*source_);
+}
+
+bool MissionPoses::stand(const MissionScene &scene, const MissionPeopleFloor &floor) {
 	const auto fixed = [](double units) { return int32_t(std::lround(units * io::kFp16OneD)); };
+	const terrain::TerrainHeightField *terrain = floor.ground ? floor.ground->height_field() : floor.terrain;
+	// The mission's world the solve probes: the posed people, and the items and buildings within
+	// reach of their candidates (a pool-0 body's slice reaches its bound and 4.0 u past it to a
+	// candidate's bound [orig: Entity_BuildProximityListsFromPools @0x4B8F02..0x4B8F0B], two units
+	// more over the static table's padded radius word; an item of no known bound within
+	// kMissionFloorReach), every other record loaded empty in its place. The files the floors read
+	// noted afresh where one moved, the world built or not (else the move stands and the people are
+	// stood again every frame).
+	if (source_ && (!floor_files_ || floor_files_moved())) {
+		floor_files_ = std::make_shared<MissionFiles>(source_);
+		floor_world_.reset();
+	}
+	MissionWorld *world = nullptr;
+	if (terrain && floor.mission && floor.ground && source_) {
+		const auto bound = [&](int64_t item) -> double {
+			if (!floor.bounds) return 0.0;
+			const auto found = floor.bounds->find(item);
+			return found != floor.bounds->end() ? double(found->second) : 0.0;
+		};
+		std::vector<const MissionEntityMark *> people;
+		for (const MissionPose &pose : poses_)
+			if (pose.status == "posed")
+				if (const MissionEntityMark *mark = scene.entity(pose.row)) people.push_back(mark);
+		const auto keep = [&](const MissionEntityMark &mark) {
+			if (mark.pool == MissionPool::Organic) {
+				const MissionPose *posed = this->pose(mark.row);
+				return posed && posed->status == "posed";
+			}
+			if (mark.pool != MissionPool::Item && mark.pool != MissionPool::Building) return false;
+			const double own = bound(mark.item);
+			for (const MissionEntityMark *person : people) {
+				const double reach =
+						own > 0.0 ? own + bound(person->item) + kMissionFloorPad + 2.0 : kMissionFloorReach;
+				const double dx = mark.x - person->x, dy = mark.y - person->y, dz = mark.z - person->z;
+				if (dx * dx + dy * dy + dz * dz <= reach * reach) return true;
+			}
+			return false;
+		};
+		if (!people.empty()) {
+			// The world made again only where what it holds moved: the records it keeps (each one's
+			// row, place, item, transform and stamp), its ground, the files it reads. A drag of a
+			// record no person reaches keeps it.
+			const auto mix = [](uint64_t hash, uint64_t value) {
+				return io::fnv1a64_bytes(hash, &value, sizeof(value));
+			};
+			uint64_t key = mix(io::kFnv1a64Offset, floor.ground->revision());
+			key = mix(key, uint64_t(scene.entities().size()));
+			for (const MissionEntityMark &mark : scene.entities()) {
+				if (!keep(mark))
+					continue;
+				key = mix(key, mark.row);
+				key = mix(key, uint64_t(uint32_t(mark.index)));
+				key = mix(key, uint64_t(mark.item));
+				key = mix(key, mark.stamp);
+			}
+			if (!floor_world_ || key != floor_key_) {
+				bms::File thinned = *floor.mission;
+				mission_world_thin(thinned, scene.entities(), keep);
+				floor_world_ = std::make_unique<MissionWorld>();
+				floor_world_->load(floor_files_, thinned, *floor.ground);
+				floor_bodies_.clear();
+				floor_world_->world.registry.for_each_in_pool(0, [&](const world::Entity &entity) {
+					if (const MissionEntityMark *mark =
+									floor_world_->mark_of(entity, scene.entities()))
+						floor_bodies_[mark->row] = entity.handle;
+				});
+				floor_key_ = key;
+			}
+			world = floor_world_.get();
+		}
+	}
+	const std::map<NodeId, world::EntityHandle> none;
+	const std::map<NodeId, world::EntityHandle> &bodies = world ? floor_bodies_ : none;
 	bool moved = false;
 	for (MissionPose &pose : poses_) {
 		const MissionEntityMark *entity = scene.entity(pose.row);
@@ -194,15 +293,22 @@ bool MissionPoses::stand(const MissionScene &scene, const terrain::TerrainHeight
 		const int32_t rise = fixed(pose.rise);
 		double lift = pose.rise;
 		bool settled = false;
+		NodeId on = 0;
 		// The clearance below one unit taken off, a positive one included.
-		const int32_t clearance = mission_pose_clearance(pose, entity->x, entity->y, entity->z, terrain);
+		const auto body = bodies.find(pose.row);
+		const int32_t clearance = body != bodies.end()
+				? mission_pose_floor_clearance(*world, body->second, pose, scene.entities(), on)
+				: mission_pose_clearance(pose, entity->x, entity->y, entity->z, terrain);
 		if (clearance < world::kOrganicWarmupSettleQ16) {
 			lift = double(io::bam_sub(rise, clearance)) / io::kFp16OneD;
 			settled = true;
+		} else {
+			on = 0;
 		}
-		if (lift == pose.lift && settled == pose.settled) continue;
+		if (lift == pose.lift && settled == pose.settled && on == pose.on) continue;
 		pose.lift = lift;
 		pose.settled = settled;
+		pose.on = on;
 		pose.stamp = ++serial_;
 		moved = true;
 	}
@@ -319,6 +425,7 @@ io::JsonValue mission_pose_json(const MissionPose &pose) {
 	out.set("rise", json_number(pose.rise));
 	out.set("lift", json_number(pose.lift));
 	out.set("settled", JsonValue::make_bool(pose.settled));
+	if (pose.on) out.set("on", json_number(double(pose.on)));
 	JsonValue playing = JsonValue::make_object();
 	playing.set("state", json_number(body.state));
 	playing.set("row", json_string(world::infantry_anim_key(body.state)));

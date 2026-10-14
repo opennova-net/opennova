@@ -31,8 +31,10 @@ std::vector<ImportChoice> list_import_choices(const std::vector<std::string> &pa
 // The kinds the game ships loose in its install root and reads from there, never through the
 // archives (ArchiveSlot::Loose; ADR 0046 S14): a music bank, a video, the country code, the
 // NovaWorld string table and its screens. What an import of the game install may take beside its
-// archives' files; never the player's saves, configuration or score table, nor a text beside the
-// game.
+// archives' files; never the player's saves, configuration or score table (the game writes its own
+// where the folder has none [orig: ScoreConfig_LoadFile @ 0x52d8a0, @ 0x52da99;
+// GameType_CreateDefaultSettings @ 0x52f528], so an install's is a server's settings, S26 A18), nor
+// a text beside the game.
 bool install_loose_kind(AssetKind kind);
 // The loose files of those kinds in a game install's root, each as the disk spells it, sorted by
 // their normalized names; none for a root that cannot be listed.

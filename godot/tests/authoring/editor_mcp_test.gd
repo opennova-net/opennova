@@ -12,9 +12,11 @@ extends GutTest
 ## S11b: the Problems query (severities, a page, only the fixable, grouped by kind), and a
 ## problem's fix is a request passed back as it is. S11g: an import planned with the files
 ## it needs, its rows passed back to import_files. S13 A1: a build is the editor's
-## operation, read mid-way through editor_state while it steps frame by frame, and
-## editor_build joins it and waits for it to land. S13 A4: the request table on the wire (the
-## kind enum, the fields each kind takes, the game install's words). S13 A5: one read seam and
+## operation, read mid-way through editor_state while it steps frame by frame, and a
+## build request with wait joins it and waits for it to land (S26 K2: editor_build and
+## editor_play are gone, Build and Play are editor_request's, the run editor_state's).
+## S13 A4: the request table on the wire (the kind enum, the fields each kind takes, the
+## game install's words). S13 A5: one read seam and
 ## one write seam: editor_state answers the view by section, editor_query every other read
 ## (the files, a document and its records, the problems, the asset graph, a menu's tree,
 ## findings and render, the import plan, the output, the operation, the catalog), each list a
@@ -31,8 +33,7 @@ extends GutTest
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const McpTestClient := preload("res://tests/mcp/mcp_test_client.gd")
 const CATALOG: Array[String] = [
-	"editor_state", "editor_request", "editor_query", "editor_build", "editor_play", "editor_viewport",
-	"editor_screenshot", "editor_logs",
+	"editor_state", "editor_request", "editor_query", "editor_viewport", "editor_screenshot", "editor_logs",
 ]
 
 var _dirs: Array[String] = []
@@ -117,6 +118,35 @@ func _query(name: String, args := {}) -> Dictionary:
 ## The state's sections by name.
 func _state(sections: Array) -> Dictionary:
 	return await _call("editor_state", {"sections": sections})
+
+
+## A build asked over editor_request and awaited (wait): the operation query's build, with the operation
+## it waited on and ok only when that ended done; the request's own answer when it was not done (a refusal,
+## the unsaved-changes prompt: outcome.unsaved_prompt).
+func _build() -> Dictionary:
+	var answer := await _call("editor_request", {"kind": "build"})
+	if answer.has("_error") or not bool(answer.get("outcome", {}).get("done", false)):
+		return answer
+	var build: Dictionary = (await _query("operation")).get("build", {})
+	build["operation"] = _ended(answer)
+	build["ok"] = bool(build.get("ok", false)) and String(_ended(answer).get("end", "")) == "done"
+	return build
+
+
+## Play asked over editor_request and awaited (its build lands, the game starts): the run section after it;
+## the request's own answer when it was not done.
+func _play(fields := {}) -> Dictionary:
+	var request := {"kind": "play"}
+	request.merge(fields)
+	var answer := await _call("editor_request", request)
+	if answer.has("_error") or not bool(answer.get("outcome", {}).get("done", false)):
+		return answer
+	return await _run()
+
+
+## The run section (Play's state, pid, port, exit).
+func _run() -> Dictionary:
+	return (await _state(["run"])).get("run", {})
 
 
 ## What the operation a request started came to, when the call waited for it ({} for none).
@@ -242,7 +272,7 @@ func _output() -> String:
 
 ## A build raised through editor_request returns at once with its operation, which steps a
 ## small budget a frame: editor_state reads it mid-way (running, its id, bytes done short of the
-## total, cancellable, holding the files), editor_build joins it and returns once it lands, and
+## total, cancellable, holding the files), a build request with wait joins it and returns once it lands, and
 ## the state then shows what it came to. The main thread is never held: the state answers while
 ## the build runs.
 func test_build_is_an_operation_the_state_reads_mid_way() -> void:
@@ -274,9 +304,9 @@ func test_build_is_an_operation_the_state_reads_mid_way() -> void:
 	assert_eq(int(queried.get("operation", {}).get("id", 0)), id, str(queried))
 	var saved := await _call("editor_request", {"kind": "save_all"})
 	assert_false(bool(saved.get("outcome", {}).get("done", true)), "a save waits for the build: " + str(saved))
-	var built := await _call("editor_build")
+	var built := await _build()
 	assert_true(bool(built.get("ok", false)), str(built))
-	assert_eq(int(built.get("operation", {}).get("id", 0)), id, "editor_build joined the build that ran")
+	assert_eq(int(built.get("operation", {}).get("id", 0)), id, "the build request joined the build that ran")
 	assert_eq(String(built.get("operation", {}).get("end", "")), "done")
 	state = await _state(["operation"])
 	assert_false(bool(state.get("operation", {}).get("operation", {}).get("running", true)))
@@ -311,6 +341,41 @@ func _rect_of(rects: Dictionary, name: String) -> Array:
 	return [0, 0, 0, 0]
 
 
+## S26 C1: an answer comes back whole, the session's JSON as it made it: the game MCP's sanitizer cut a list at
+## 200 entries with a string in its place, a depth past 24 and a string past 8192 characters. The catalog's
+## finding codes run past 200, every one an object.
+func test_answers_come_back_whole() -> void:
+	if _client == null:
+		return
+	var codes: Array = (await _query("catalog")).get("finding_codes", [])
+	assert_gt(codes.size(), 200, "the catalog lists every finding code")
+	for code: Variant in codes:
+		assert_true(code is Dictionary, "no sentinel in the list: %s" % str(code))
+
+
+# S26 C2: editor_request's wait is held below the tool's own budget, which cut a longer one with a bare error and
+# cancelled the handler: the schema's maximum and default, the description naming it, the handler's clamp the same,
+# and a wait asked far past it answered as any other, never a budget error.
+func test_request_waits_within_the_tool_budget() -> void:
+	if _client == null:
+		return
+	assert_lt(EditorMcpCatalog.REQUEST_WAIT_MAX_MS, EditorMcpCatalog.TOOL_BUDGET_MS)
+	assert_eq(EditorMcpTools.REQUEST_WAIT_MS, EditorMcpCatalog.REQUEST_WAIT_MAX_MS)
+	var listed: Variant = await _client.rpc(get_tree(), "tools/list")
+	var wait_ms := {}
+	var described := ""
+	for tool in (listed as Dictionary).get("result", {}).get("tools", []):
+		if String(tool["name"]) == "editor_request":
+			wait_ms = tool.get("inputSchema", {}).get("properties", {}).get("wait_ms", {})
+			described = String(tool.get("description", ""))
+	assert_eq(int(wait_ms.get("maximum", 0)), EditorMcpCatalog.REQUEST_WAIT_MAX_MS)
+	assert_true(String(wait_ms.get("description", "")).contains(str(EditorMcpCatalog.REQUEST_WAIT_MAX_MS)))
+	assert_true(described.contains("(%d when left out, and at most)" % EditorMcpCatalog.REQUEST_WAIT_MAX_MS), described)
+	var answer := await _call("editor_request", {"kind": "clear_output", "wait": true, "wait_ms": 100_000_000})
+	assert_false(answer.has("_error"), str(answer))
+	assert_false(bool(answer.get("timed_out", false)), str(answer))
+
+
 func test_catalog_state_and_refusals_without_a_project() -> void:
 	if _client == null:
 		return
@@ -330,8 +395,8 @@ func test_catalog_state_and_refusals_without_a_project() -> void:
 	assert_true((await _call("editor_request", {"kind": "build", "flagg": true})).get("_error", "").contains("flagg"),
 			"an unknown member is refused, not ignored")
 	assert_true((await _query("document")).has("_error"), "no document is open")
-	assert_true((await _call("editor_build")).get("_error", "").contains("No project"))
-	assert_true((await _call("editor_play", {"op": "start"})).get("_error", "").contains("No project"))
+	assert_true(str((await _call("editor_request", {"kind": "build"})).get("outcome", {})).contains("project.none"))
+	assert_true(str((await _call("editor_request", {"kind": "play"})).get("outcome", {})).contains("project.none"))
 	assert_true((await _call("editor_screenshot")).get("_error", "").contains("headless"))
 	assert_true((await _call("editor_viewport", {"op": "state"})).get("_error", "").contains("no document is open"),
 			"no project, no viewport")
@@ -428,7 +493,7 @@ func test_request_table_on_the_wire() -> void:
 	assert_eq(String(parts.get("card", {}).get("properties", {}).get("path", {}).get("type", "")), "string", str(parts.get("card")))
 	assert_eq(String(parts.get("build_result", {}).get("properties", {}).get("open", {}).get("type", "")), "boolean")
 	assert_eq(parts.get("focus", {}).get("enum", []), table.get("focus", []))
-	# Review X19 and X13: the import checks are whole numbers, as import_preview's rows say them; a text carries the
+	# The import checks are whole numbers, as import_preview's rows say them; a text carries the
 	# longest its window's field holds.
 	var import_members: Dictionary = parts.get("import", {}).get("properties", {})
 	assert_eq(String(import_members.get("check", {}).get("items", {}).get("type", "")), "integer", str(import_members.get("check")))
@@ -482,7 +547,7 @@ func test_request_table_on_the_wire() -> void:
 ## save_before_play, the run and preferences sections say them; a second project made after it plays in the
 ## OpenNova runtime and saves first; each opened again keeps its own; the editor's settings file names none
 ## of them, and a project's local.json names its own. With no project open they are refused (project.none).
-## editor_play and play take a play_mode for one Play alone (the catalog's modes), a mode no Play has refused.
+## play takes a play_mode for one Play alone (the catalog's modes), a mode no Play has refused.
 func test_play_settings_are_each_projects() -> void:
 	if _client == null:
 		return
@@ -521,20 +586,16 @@ func test_play_settings_are_each_projects() -> void:
 	var strict_local := FileAccess.get_file_as_string(strict_dir.path_join(".opennova/local.json"))
 	assert_true(strict_local.contains("\"play_mode\": \"strict\"") and strict_local.contains("\"save_before_play\": false"),
 			strict_local)
-	# One Play's own mode: the catalog's modes on editor_play and on the play request; a mode no Play has
-	# refused before anything is built.
+	# One Play's own mode: the catalog's modes on the play request; a mode no Play has refused before anything
+	# is built.
 	var listed: Variant = await _client.rpc(get_tree(), "tools/list")
-	var play_tool := {}
 	var request_tool := {}
 	for tool in (listed as Dictionary).get("result", {}).get("tools", []):
-		if String(tool["name"]) == "editor_play":
-			play_tool = tool
-		elif String(tool["name"]) == "editor_request":
+		if String(tool["name"]) == "editor_request":
 			request_tool = tool
-	var modes := ["runtime", "install", "strict"]
-	assert_eq(play_tool.get("inputSchema", {}).get("properties", {}).get("play_mode", {}).get("enum", []), modes)
+	var modes := ["runtime", "strict"]
 	assert_eq(request_tool.get("inputSchema", {}).get("properties", {}).get("play_mode", {}).get("enum", []), modes)
-	assert_true(play_tool.get("inputSchema", {}).get("properties", {}).has("save_before_play"), str(play_tool))
+	assert_true(request_tool.get("inputSchema", {}).get("properties", {}).has("save_before_play"), str(request_tool))
 	var refused := await _call("editor_request", {"kind": "play", "play_mode": "retail"})
 	assert_true(String(refused.get("_error", "")).contains("play_mode"), str(refused))
 	assert_eq(String((await _state(["run"])).get("run", {}).get("state", "")), "stopped")
@@ -836,8 +897,8 @@ func test_john_smith_through_the_editor_mcp() -> void:
 
 	# Dirty documents make the build wait on the unsaved prompt, which names the build and the
 	# files and offers no discard; its save writes them and builds; the build lands.
-	var waiting := await _call("editor_build")
-	assert_true(waiting.get("_error", "").contains("resolve_unsaved"), str(waiting))
+	var waiting := await _build()
+	assert_true(bool(waiting.get("outcome", {}).get("unsaved_prompt", false)), str(waiting))
 	var prompt: Dictionary = (await _state(["dialogs"])).get("dialogs", {}).get("unsaved_prompt", {})
 	assert_true(bool(prompt.get("open", false)), str(prompt))
 	assert_eq(String(prompt.get("action", "")), "build")
@@ -845,23 +906,16 @@ func test_john_smith_through_the_editor_mcp() -> void:
 	assert_false(bool(prompt.get("can_discard", true)))
 	var saved := await _call("editor_request", {"kind": "resolve_unsaved", "choice": "save"})
 	assert_true(bool(saved.get("outcome", {}).get("done", false)), str(saved))
-	var built := await _call("editor_build")
+	var built := await _build()
 	assert_true(bool(built.get("ok", false)), str(built))
 	assert_true(FileAccess.file_exists(String(built.get("dir", "")).path_join("localres.pff")), str(built))
 
 	# Play: the game runs on the build with its own endpoint, which the game tools drive.
-	# It starts the game only on Windows (godot/src/authoring/child_process.h): elsewhere
-	# it refuses and says so, and there is no running game to drive.
-	if OS.get_name() != "Windows":
-		var refused := await _call("editor_play", {"op": "start"})
-		assert_ne(String(refused.get("state", "")), "running", str(refused))
-		pending("Play is Windows-only (godot/src/authoring/child_process.h)")
-		return
 	_app.set("play_engine_args", PackedStringArray(["--headless", "--disable-render-loop", "--max-fps", "60"]))
 	# What the checkout's Godot project holds: a source Play (the Godot binary with --path on it)
 	# writes nothing there.
 	var project_before := _top_level_entries(ProjectSettings.globalize_path("res://"))
-	var play := await _call("editor_play", {"op": "start"})
+	var play := await _play()
 	assert_eq(String(play.get("state", "")), "running", str(play))
 	var port := int(play.get("mcp_port", 0))
 	assert_gt(port, 0)
@@ -908,7 +962,7 @@ func test_john_smith_through_the_editor_mcp() -> void:
 	deadline = Time.get_ticks_msec() + 15000
 	var last := {}
 	while Time.get_ticks_msec() < deadline:
-		last = await _call("editor_play", {"op": "state"})
+		last = await _run()
 		if String(last.get("state", "")) == "stopped":
 			break
 		await get_tree().create_timer(0.1).timeout
@@ -990,7 +1044,7 @@ func test_stylesheet_through_the_editor_mcp() -> void:
 	var after := _document_state(await _state(["documents"]), String(opened.get("path", "")))
 	assert_false(bool(after.get("dirty", true)), str(after))
 	assert_eq(int(after.get("revision", -1)), int(clean.get("revision", -2)), "no step")
-	var built := await _call("editor_build")
+	var built := await _build()
 	assert_true(bool(built.get("ok", false)), str(built))
 
 

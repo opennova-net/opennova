@@ -12,7 +12,7 @@ namespace opennova::editor {
 // platform's spawn). The foreground lock (no process takes the foreground: the only thing that stops a child of
 // the foreground process from taking it) is taken at the spawn and held only while it starts: until each game
 // started behind has shown a window and had it sent to the back once, or kLockMs passed, whichever is first
-// (never while the person works on, review X12). Until kTendMs after its spawn, each pump sends a game's shown
+// (never while the person works on). Until kTendMs after its spawn, each pump sends a game's shown
 // windows to the back, until one of them is the foreground window: the person brought it forward (or it took
 // the foreground once the lock went), and it is left alone from then on, never pushed back under the person's
 // other windows again. A game that exits is let go.

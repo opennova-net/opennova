@@ -25,6 +25,7 @@
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
+#include "editor/editor_test_support.h"
 
 using namespace opennova;
 using namespace opennova::editor;
@@ -52,11 +53,7 @@ struct RaiseInput : RasterEditPayload {
 
 std::string text_of(const std::vector<uint8_t> &bytes) { return std::string(bytes.begin(), bytes.end()); }
 
-bool has_code(const std::vector<Diagnostic> &findings, const char *token) {
-	for (const Diagnostic &d : findings)
-		if (d.code() == token) return true;
-	return false;
-}
+using editor_test::has_code;
 
 int test_cpt() {
 	const std::vector<uint8_t> bytes = test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/terrain/tmap/Tmap.cpt");

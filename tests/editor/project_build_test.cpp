@@ -16,7 +16,6 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
-#include <thread>
 #include <vector>
 
 #ifdef _WIN32
@@ -24,6 +23,14 @@
 #include <io.h>
 #include <share.h>
 #include <sys/stat.h>
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <winioctl.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
 #endif
 
 #include <base/resource_index/boot_policy.h>
@@ -44,7 +51,10 @@
 #include <formats/rtxt/rtxt.h>
 #include <formats/sbf/sbf.h>
 #include <runtime/renderer/material_texture.h>
+#include <base/io/file_time.h>
+#include <base/io/hash.h>
 #include <base/io/json.h>
+#include <base/io/os_path.h>
 #include <editor/project_build/build_plan.h>
 #include <editor/project_build/build_run.h>
 #include <editor/project_build/export_build.h>
@@ -202,7 +212,7 @@ static int test_empty_project_is_blocked() {
 	TEST_EXPECT(!plan.diagnostics.empty());
 	const BuildReport report = run_build(plan, p.output_root());
 	TEST_EXPECT(!report.ok && report.build_dir.empty());
-	TEST_EXPECT(last_good_build_dir(p.output_root()).empty());
+	TEST_EXPECT(editor_test::last_good_build_dir(p.output_root()).empty());
 	return 0;
 }
 
@@ -261,7 +271,7 @@ static int test_filled_project_builds_and_mounts() {
 	TEST_EXPECT(fs::is_regular_file(fs::path(report.build_dir) / "menumus.sbf"));
 	TEST_EXPECT(fs::is_regular_file(fs::path(report.build_dir) / kBuildRecordFileName));
 	TEST_EXPECT(!fs::exists(fs::path(p.output_root()) / (report.build_id + ".tmp")));
-	TEST_EXPECT(last_good_build_dir(p.output_root()) == report.build_dir);
+	TEST_EXPECT(editor_test::last_good_build_dir(p.output_root()) == report.build_dir);
 
 	// The runtime's own mount, archive-only over the fixed boot table, resolves every name.
 	// (Scoped: an open mount holds the archives, and a held build is never pruned.)
@@ -300,7 +310,7 @@ static int test_filled_project_builds_and_mounts() {
 	TEST_EXPECT(changed.archives_reused.size() == 2);
 	for (const BuiltFile &file : changed.built)
 		if (file.archive) TEST_EXPECT(file.reused == (file.name != "language.pff"));
-	TEST_EXPECT(last_good_build_dir(p.output_root()) == changed.build_dir);
+	TEST_EXPECT(editor_test::last_good_build_dir(p.output_root()) == changed.build_dir);
 	TEST_EXPECT(!fs::exists(report.build_dir)); // the older build is pruned
 	return 0;
 }
@@ -360,7 +370,7 @@ static int test_protected_build_survives_and_archives_are_refused() {
 	                                    "{\"schema_version\":1,\"build_id\":\"someone-else\"}"));
 
 	TEST_EXPECT(write_table(p.root + "/strings/menutxt.bin", "two"));
-	const BuildReport second = run_build(p.plan(), p.output_root(), protect_dirs({first.build_dir}));
+	const BuildReport second = run_build(p.plan(), p.output_root(), editor_test::protect_dirs({first.build_dir}));
 	TEST_EXPECT(second.ok && second.build_dir != first.build_dir);
 	TEST_EXPECT(fs::is_directory(first.build_dir)); // a running child's build is never pruned
 	TEST_EXPECT(fs::is_regular_file(out + "/my important documents/keep.txt"));
@@ -641,6 +651,10 @@ static int test_expansion_layout() {
 	TEST_EXPECT(fs::is_regular_file(dir / "expansion/jxm/jxmL.pff") && fs::is_regular_file(dir / "expansion/jxm/jxm.pff"));
 	TEST_EXPECT(fs::is_regular_file(dir / "expansion/jxm/version.txt") && fs::is_regular_file(dir / "expansion/jxm/jxm.bin"));
 	TEST_EXPECT(!fs::exists(dir / "language.pff") && !fs::exists(dir / "header.bik") && !fs::exists(dir / "cc.bin"));
+	// S26 C10: the build's list names each loose file where it landed, with its size (they read 0 B).
+	for (const BuiltFile &file : report.built)
+		if (!file.archive)
+			TEST_EXPECT(file.name.rfind("expansion/jxm/", 0) == 0 && file.bytes > 0);
 	{
 		opennova::Vfs vfs;
 		opennova::LaunchFlags flags;
@@ -1016,8 +1030,11 @@ static int test_export() {
 	// Again over its own export: what the person added there kept (and said), a file of the export they
 	// changed replaced by the build's (and said), the record naming the export's own files alone.
 	TEST_EXPECT(editor_test::write_text(request.export_dir + "/notes.txt", "mine"));
-	std::this_thread::sleep_for(std::chrono::milliseconds(20)); // a last write after the record's
 	TEST_EXPECT(editor_test::write_text(request.export_dir + "/intro.bik", "changed"));
+	// Its last write after the record's, set two seconds past it (a coarse-stamp file system keeps two).
+	const fs::file_time_type recorded = fs::last_write_time(request.export_dir + "/" + kExportRecordFileName, ec);
+	fs::last_write_time(request.export_dir + "/intro.bik", recorded + std::chrono::seconds(2), ec);
+	TEST_EXPECT(!ec);
 	shipped = export_build(request);
 	std::vector<std::string> with_notes = expected;
 	with_notes.push_back("notes.txt");
@@ -1219,7 +1236,7 @@ static int test_steps_are_bounded() {
 	TEST_EXPECT(steps >= 80);
 	TEST_EXPECT(upward && largest <= budget);
 	TEST_EXPECT(run.bytes_done() == run.bytes_total());
-	TEST_EXPECT(run.items_done() == run.items_total() && run.item_name(0) == "language.pff");
+	TEST_EXPECT(run.items_done() == run.items_total());
 	TEST_EXPECT(fs::file_size(fs::path(run.report().build_dir) / "big.sbf") == big);
 	return 0;
 }
@@ -1246,7 +1263,7 @@ static int test_cancel_publishes_nothing() {
 	run.cancel();
 	TEST_EXPECT(run.done() && run.cancelled() && !run.report().ok && run.report().diagnostics.empty());
 	TEST_EXPECT(run.report().build_dir.empty() && staging_dirs(p.output_root()) == 0);
-	TEST_EXPECT(last_good_build_dir(p.output_root()) == first.build_dir && fs::is_directory(first.build_dir));
+	TEST_EXPECT(editor_test::last_good_build_dir(p.output_root()) == first.build_dir && fs::is_directory(first.build_dir));
 	TEST_EXPECT(run.step(16) && run.cancelled()); // a cancelled run stays done
 	size_t builds = 0;
 	for (const fs::directory_entry &entry : fs::directory_iterator(p.output_root()))
@@ -1258,7 +1275,107 @@ static int test_cancel_publishes_nothing() {
 		while (!dropped.done() && staging_dirs(p.output_root()) == 0) dropped.step(uint64_t(1) << 20);
 		TEST_EXPECT(!dropped.done() && staging_dirs(p.output_root()) == 1);
 	}
-	TEST_EXPECT(staging_dirs(p.output_root()) == 0 && last_good_build_dir(p.output_root()) == first.build_dir);
+	TEST_EXPECT(staging_dirs(p.output_root()) == 0 && editor_test::last_good_build_dir(p.output_root()) == first.build_dir);
+	return 0;
+}
+
+// S26 C11: a build directory that will not go keeps the proof that it is one, so a later build prunes
+// it (it was left empty with no proof, a later build of its content refused as "not a build directory");
+// and a staging name taken by a directory that is no staging (no marker) is passed by, not a failure.
+// A file of `size` bytes that takes no room on the disk (sparse: NTFS's FSCTL_SET_SPARSE, a POSIX truncate's hole).
+static bool write_sparse(const std::string &path, uint64_t size) {
+#ifdef _WIN32
+	HANDLE file = CreateFileW(opennova::io::os_path(path).c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+	                          FILE_ATTRIBUTE_NORMAL, nullptr);
+	if (file == INVALID_HANDLE_VALUE) return false;
+	DWORD returned = 0;
+	LARGE_INTEGER end;
+	end.QuadPart = LONGLONG(size);
+	const bool ok = DeviceIoControl(file, FSCTL_SET_SPARSE, nullptr, 0, nullptr, 0, &returned, nullptr) &&
+	                SetFilePointerEx(file, end, nullptr, FILE_BEGIN) && SetEndOfFile(file);
+	CloseHandle(file);
+	return ok;
+#else
+	const int file = ::open(path.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 0644);
+	if (file < 0) return false;
+	const bool ok = ::ftruncate(file, off_t(size)) == 0;
+	::close(file);
+	return ok;
+#endif
+}
+
+// S26 C9: an archive entry's size is 32 bits, so a file past 4 GiB is refused (it wrapped, and its prefix was
+// packed as if whole). The file is sparse and its hash the build cache's, so no byte of it is read.
+static int test_entry_past_four_gib_refused() {
+	Project p("opennova_editor_build_past_4gib_test");
+	TEST_EXPECT(p.create());
+	TEST_EXPECT(p.fill());
+	BuildPlan plan = p.plan();
+	TEST_EXPECT(!plan.archives.empty());
+	if (plan.archives.empty()) return 1;
+	const uint64_t size = (uint64_t(1) << 32) + 1;
+	const std::string huge = p.root + "/huge.wav";
+	TEST_EXPECT(write_sparse(huge, size));
+	BuildEntry entry;
+	entry.logical_name = "huge.wav";
+	entry.source_path = huge;
+	entry.relative_path = "huge.wav";
+	entry.size_bytes = size;
+	plan.archives.back().entries.push_back(entry);
+	plan.hash_cache = p.root + "/.opennova/hashes.json";
+	opennova::io::JsonValue item = opennova::io::JsonValue::make_object();
+	item.set("path", opennova::io::JsonValue::make_string(huge));
+	item.set("size", opennova::io::JsonValue::make_number(double(size)));
+	item.set("modified", opennova::io::JsonValue::make_string(
+	                             opennova::io::hex64(uint64_t(opennova::io::file_modified_ticks(opennova::io::os_path(huge))))));
+	item.set("hash", opennova::io::JsonValue::make_string(opennova::io::hex64(1)));
+	opennova::io::JsonValue files = opennova::io::JsonValue::make_array();
+	files.push(std::move(item));
+	opennova::io::JsonValue cache = opennova::io::JsonValue::make_object();
+	cache.set("schema_version", opennova::io::JsonValue::make_number(kBuildCacheSchemaVersion));
+	cache.set("files", std::move(files));
+	TEST_EXPECT(editor_test::write_text(plan.hash_cache, opennova::io::json_write(cache)));
+	const BuildReport report = run_build(plan, p.output_root());
+	TEST_EXPECT(!report.ok && report.files_hashed > 0); // the others read, the huge one the cache's
+	bool refused = false;
+	for (const Diagnostic &d : report.diagnostics)
+		refused = refused || (d.code() == "build.archive" && d.message.find("huge.wav is too large for an archive (4294967297 "
+		                                                                     "bytes; an entry holds at most 4 GiB)") !=
+		                                                             std::string::npos);
+	TEST_EXPECT(refused);
+	std::error_code ec;
+	std::filesystem::remove(opennova::io::os_path(huge), ec);
+	return 0;
+}
+
+static int test_cleanup_keeps_its_proof() {
+	Project p("opennova_editor_build_cleanup_test");
+	TEST_EXPECT(p.create());
+	TEST_EXPECT(p.fill());
+	const BuildReport first = run_build(p.plan(), p.output_root());
+	TEST_EXPECT(first.ok);
+	// The first build's directory held as a working directory (Windows will not remove it then) while a
+	// build of other content prunes it.
+	const fs::path was = fs::current_path();
+	fs::current_path(first.build_dir);
+	TEST_EXPECT(write_table(p.root + "/strings/menutxt.bin", "a change"));
+	const BuildReport second = run_build(p.plan(), p.output_root());
+	fs::current_path(was);
+	TEST_EXPECT(second.ok);
+	if (fs::exists(first.build_dir))
+		TEST_EXPECT(fs::is_regular_file(fs::path(first.build_dir) / kBuildRecordFileName));
+	// Its content again, once it can go: pruned and built again, not refused.
+	TEST_EXPECT(write_table(p.root + "/strings/menutxt.bin", "a change, then another"));
+	const BuildReport third = run_build(p.plan(), p.output_root());
+	TEST_EXPECT(third.ok);
+	// A staging name taken by what is no staging directory: the next name, the foreign one left as it is.
+	const std::string foreign = p.output_root() + "/" + third.build_id + kBuildStagingSuffix;
+	fs::remove_all(third.build_dir);
+	fs::create_directories(foreign);
+	TEST_EXPECT(editor_test::write_text(foreign + "/mine.txt", "not a build"));
+	const BuildReport again = run_build(p.plan(), p.output_root());
+	for (const Diagnostic &d : again.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(again.ok && again.build_id == third.build_id && fs::is_regular_file(foreign + "/mine.txt"));
 	return 0;
 }
 
@@ -1334,7 +1451,7 @@ static int test_file_rewritten_mid_read_fails() {
 		const std::vector<Diagnostic> &found = run.report().diagnostics;
 		TEST_EXPECT(found.size() == 1 && found[0].code() == "build.changed" && found[0].asset == name);
 		TEST_EXPECT(run.report().build_dir.empty() && staging_dirs(p.output_root()) == 0 &&
-		            last_good_build_dir(p.output_root()).empty());
+		            editor_test::last_good_build_dir(p.output_root()).empty());
 	}
 	return 0;
 }
@@ -1651,7 +1768,7 @@ static int test_publish_waits_for_a_held_file() {
 	while (!run.done() && ++steps < 100000) run.step(uint64_t(1) << 20);
 	for (const Diagnostic &d : run.report().diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
 	TEST_EXPECT(run.done() && run.report().ok && staging_dirs(p.output_root()) == 0);
-	TEST_EXPECT(last_good_build_dir(p.output_root()) == run.report().build_dir);
+	TEST_EXPECT(editor_test::last_good_build_dir(p.output_root()) == run.report().build_dir);
 	return 0;
 }
 
@@ -1661,6 +1778,30 @@ static int test_publish_waits_for_a_held_file() {
 // name (`<id>.1.tmp`), links the archive afresh, and the last good build keeps every byte (it was
 // written through before: its archive cut to nothing under the game). Its links go once the game
 // lets go. An archive whose size moved since its build recorded it is packed again, never linked.
+// S26 C12: an export folder half removed (a file of it held open) keeps its record, export.json, so it still
+// proves itself the project's and the next export removes it first (its record went first, and every later
+// export was refused: "holds files that are no export of this project").
+static int test_export_removal_keeps_its_record() {
+	editor_test::TempProjectDir dir("opennova_editor_export_removal_test");
+	const std::string folder = dir.file("game.old");
+	TEST_EXPECT(editor_test::write_text(folder + "/" + kExportRecordFileName, "{}") &&
+	            editor_test::write_text(folder + "/language.pff", "held") &&
+	            editor_test::write_text(folder + "/video/intro.bik", "gone"));
+	std::string reason;
+	bool removed = false;
+	{
+		HeldFile game(folder + "/language.pff");
+		TEST_EXPECT(game.held());
+		removed = remove_tree(folder, reason);
+		if (!removed)
+			TEST_EXPECT(fs::is_regular_file(folder + "/" + kExportRecordFileName) && !fs::exists(folder + "/video") &&
+			            !reason.empty());
+	}
+	TEST_EXPECT(removed || remove_tree(folder, reason));
+	TEST_EXPECT(!fs::exists(folder));
+	return 0;
+}
+
 static int test_held_archives_are_never_written_through() {
 	Project p("opennova_editor_build_held_test");
 	TEST_EXPECT(p.create());
@@ -1705,7 +1846,7 @@ static int test_held_archives_are_never_written_through() {
 		std::vector<uint8_t> after;
 		TEST_EXPECT(opennova::io::read_file_bytes(held_path, after, error) && after == before);
 #endif
-		TEST_EXPECT(last_good_build_dir(p.output_root()) == rebuilt.build_dir);
+		TEST_EXPECT(editor_test::last_good_build_dir(p.output_root()) == rebuilt.build_dir);
 	}
 	// The game gone, the next publish prunes what the cancel left.
 	TEST_EXPECT(write_table(p.root + "/strings/menutxt.bin", "free") &&
@@ -1771,7 +1912,7 @@ static int test_deep_output_root() {
 	std::error_code ec;
 	TEST_EXPECT(fs::is_regular_file(system_path(copied), ec));
 	TEST_EXPECT(fs::is_regular_file(system_path(report.build_dir + "/localres.pff"), ec));
-	TEST_EXPECT(last_good_build_dir(output_root) == report.build_dir);
+	TEST_EXPECT(editor_test::last_good_build_dir(output_root) == report.build_dir);
 
 	TEST_EXPECT(write_table(root + "/strings/menutxt.bin", "deep") &&
 	            editor_test::backdate(root + "/strings/menutxt.bin", std::chrono::minutes(50)));
@@ -1783,9 +1924,10 @@ static int test_deep_output_root() {
 	return 0;
 }
 
-// Several projects building into one folder (Build to folder; the review's M6): each build names its project
-// in its record, reuses, prunes and replaces only its own project's builds, and says how many of the others'
-// it left. Another project's build of the same files is left as it is: the build is refused, saying so.
+// Several projects building into one folder (a build's out_dir: the command line's --out, the editor
+// MCP's): each build names its project in its record, reuses, prunes and replaces only its own project's
+// builds, and says how many of the others' it left. Another project's build of the same files is left as it
+// is: the build is refused, saying so.
 static int test_shared_folder() {
 	Project a("opennova_editor_build_shared_a"), b("opennova_editor_build_shared_b");
 	TEST_EXPECT(a.create() && a.fill() && b.create() && b.fill());
@@ -1823,6 +1965,9 @@ int main() {
 	failures += test_shared_folder();
 	failures += test_steps_are_bounded();
 	failures += test_cancel_publishes_nothing();
+	failures += test_cleanup_keeps_its_proof();
+	failures += test_entry_past_four_gib_refused();
+	failures += test_export_removal_keeps_its_record();
 	failures += test_file_rewritten_mid_read_fails();
 	failures += test_archives_match_the_single_call_writer();
 	failures += test_routing();

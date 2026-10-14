@@ -101,8 +101,6 @@ protected:
 	bool accept_step(const EditStep &step, const StagedRows &rows, StepRefusal &refusal) const override;
 };
 
-bool is_environment_kind(AssetKind kind);
-
 // The environment type's validator (DocumentType::validate_file), an open document standing in for
 // its file: its source findings (environment.invalid_input, environment.ignored_input), a sky
 // height the file leaves out (environment.sky_height_default: the dome at the engine's default

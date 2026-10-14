@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <runtime/particle/effect_closure.h>
+#include <editor/preview/effect_schedule.h>
 #include <runtime/particle/effect_scene.h>
 
 namespace opennova::editor {
@@ -26,15 +27,15 @@ struct DefinitionSpawn {
 	std::string point;
 };
 bool same_spawns(const std::vector<DefinitionSpawn> &a, const std::vector<DefinitionSpawn> &b);
+// Each spawn's clock tick, in order (EffectTimedSpawns::ticks).
+std::vector<int32_t> spawn_ticks(const std::vector<DefinitionSpawn> &spawns);
 
 // A definition's effects on the preview clock (ADR 0046 DI-21; the effect preview's playback, DI-14's
 // EffectPlayback, for several spawns at their poses and ticks): the engine's own effect scene opened over
 // the closures of the spawns' effects (PreviewEffectCatalog::closures: what the game spawns for each name,
-// cut to what those spawns read), each spawn made on its tick as the clock runs a game tick at a time (the
-// scene's own fixed step: what shows at a tick is the same however the frames fell), never again (the game
-// spawns each once; an effect that dies is gone). A jump of the clock (a seek, a step back, more ticks at
-// once than one advance takes) empties the scene and makes every spawn due again, pre-aged by its age then
-// (EffectSpawnRequest::initial_age_ticks, the engine's catch-up, bounded by kEffectInitialAgeTickLimit).
+// cut to what those spawns read), each spawn made on its tick as the clock runs (EffectSchedule: a game tick at
+// a time through the view's planes; a jump makes every spawn due again pre-aged by its age then), never again
+// (the game spawns each once; an effect that dies is gone).
 // The scene is the device's picture (godot/src/authoring/preview_effects draws it).
 class DefinitionEffects {
 public:
@@ -45,8 +46,9 @@ public:
 	bool plan(const PreviewEffectCatalog &catalog, uint64_t catalog_serial, std::vector<DefinitionSpawn> spawns);
 	// No scene: nothing plays.
 	void close();
-	// The scene played to the clock's tick `tick`.
-	void play_to(int32_t tick);
+	// The scene played to the clock's tick `tick`, `frustum` the view's (preview_view_frustum; none: every emitter
+	// advances).
+	void play_to(int32_t tick, const particle::ParticleViewFrustum &frustum = {});
 
 	// The scene the picture draws (null: no spawn, or none whose effect the catalog finds). Shared with the
 	// device, which only reads it.
@@ -57,7 +59,7 @@ public:
 	// Each spawn's last spawn (InvalidHandle before its tick) and whether its group lives now.
 	particle::EffectSpawnStatus status(size_t spawn) const;
 	bool alive(size_t spawn) const;
-	int32_t tick() const { return tick_; }
+	int32_t tick() const { return schedule_.tick(); }
 	// Moves whenever the scene is opened or advanced (the snapshot a device drew is stale), and how many
 	// times it was opened (a test's measure).
 	uint64_t serial() const { return serial_; }
@@ -72,10 +74,9 @@ private:
 	std::vector<particle::EffectClosure> closures_;
 	std::vector<particle::EffectGroupId> groups_;
 	std::vector<particle::EffectSpawnStatus> statuses_;
-	std::vector<bool> made_; // each spawn made since the scene last emptied
+	EffectTimedSpawns timed_;
+	EffectSchedule schedule_;
 	uint64_t catalog_serial_ = UINT64_MAX;
-	bool played_ = false;
-	int32_t tick_ = 0;
 	uint64_t serial_ = 0;
 	uint64_t opens_ = 0;
 };

@@ -58,12 +58,7 @@ std::vector<uint8_t> solid(int w, int h, uint8_t r, uint8_t g, uint8_t b, uint8_
 	return out;
 }
 
-std::vector<uint8_t> tga32(const std::vector<uint8_t> &rgba, int w, int h) {
-	std::vector<uint8_t> out;
-	std::string why;
-	tga::tga_write_rgba32(rgba.data(), uint32_t(w), uint32_t(h), out, why);
-	return out;
-}
+using editor_test::tga32;
 
 std::vector<uint8_t> png(const std::vector<uint8_t> &rgba, int w, int h) { return encode_png_rgba(rgba.data(), uint32_t(w), uint32_t(h)); }
 

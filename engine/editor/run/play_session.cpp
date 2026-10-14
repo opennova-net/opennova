@@ -8,10 +8,14 @@ bool PlaySession::start(const LaunchPlan &plan, Diagnostic &error) {
 		                     "The game is already running; stop it before starting it again.");
 		return false;
 	}
-	const int64_t pid = platform_.spawn(plan);
+	std::string why;
+	const int64_t pid = platform_.spawn(plan, why);
 	if (pid < 0) {
-		error = make_finding(CoreFinding::PlaySpawn, DiagnosticSeverity::Error,
-		                     "The game could not be started: " + plan.executable);
+		// The program named once: the platform's reason names it where it says it could not start it.
+		const std::string said = why.empty()                                       ? plan.executable
+		                         : why.find(plan.executable) != std::string::npos ? why
+		                                                                          : plan.executable + " (" + why + ")";
+		error = make_finding(CoreFinding::PlaySpawn, DiagnosticSeverity::Error, "The game could not be started: " + said);
 		return false;
 	}
 	pid_ = pid;
@@ -30,6 +34,10 @@ void PlaySession::stop() {
 	platform_.terminate(pid_);
 }
 
+void PlaySession::force() {
+	if (state_ == PlayState::Stopping) stop_requested_ms_ = platform_.now_ms() - kPlayStopDeadlineMs;
+}
+
 PlayState PlaySession::poll() {
 	if (state_ == PlayState::Stopped) return state_;
 	if (!platform_.is_running(pid_)) {
@@ -40,10 +48,12 @@ PlayState PlaySession::poll() {
 		finish();
 		return state_;
 	}
-	if (state_ == PlayState::Stopping && platform_.now_ms() - stop_requested_ms_ >= kPlayStopDeadlineMs) {
-		platform_.kill(pid_);
+	// Past the deadline the child is forced, and Stopped only once it is seen gone: a kill that did not take (a
+	// child stuck in a driver, a refused TerminateProcess) leaves Play stopping, its lease and run directory
+	// kept, and is tried again at the next poll (S26 C8: it reported a game stopped that still ran).
+	if (state_ == PlayState::Stopping && platform_.now_ms() - stop_requested_ms_ >= kPlayStopDeadlineMs &&
+	    platform_.kill(pid_) && !platform_.is_running(pid_))
 		finish();
-	}
 	return state_;
 }
 

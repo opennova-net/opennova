@@ -48,12 +48,6 @@ std::vector<const ClipSoundFired *> fired_by(const ViewportModel &model) {
 	return out;
 }
 
-// The document open at `path`, null for none.
-const DocumentBase *open_document(const SessionView &view, const std::string &path) {
-	for (const auto &open : view.documents.open)
-		if (open && open->path() == path) return open.get();
-	return nullptr;
-}
 
 } // namespace
 
@@ -126,7 +120,7 @@ void fire_menu_sounds(SessionCore &core, const std::string &path) {
 		if (model && !path.empty() && !model->attached()) model = viewports.follow_one(view, each, ViewportKind::Menu);
 		auto *menu = dynamic_cast<MenuViewport *>(model);
 		if (!menu) continue;
-		const ViewportInput input{view, viewports.clock(), open_document(view, each)};
+		const ViewportInput input{view, viewports.clock(), view.documents.open_at(each)};
 		fired = !menu->fire_sounds(input, *view.findings.assets, view.project.scan.get(), core.sound_selector(),
 		                           viewports.clip_sound_seq())
 		                 .empty() ||

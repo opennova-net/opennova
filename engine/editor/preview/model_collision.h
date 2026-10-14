@@ -58,8 +58,6 @@ void model_collision_layer_set(ModelOverlayOptions &options, ModelCollisionLayer
 // many shapes it has.
 size_t model_collision_layer_count(const threedi::Threedi3di3 &model, ModelCollisionLayer layer, int lod);
 
-// A volume's colour by its type's family, and a person's hit sphere's.
-uint32_t model_volume_rgb(int64_t type);
 inline constexpr uint32_t kModelHitSphereRgb = 0xF06292;
 
 struct ModelCollisionShape {

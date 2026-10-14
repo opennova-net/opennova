@@ -25,8 +25,7 @@ class MnuDocument;
 
 // What the drag holds: the window itself, one of its edges, or one of its corners.
 enum class LayoutHandle : uint8_t { Move, Left, Right, Top, Bottom, TopLeft, TopRight, BottomLeft, BottomRight };
-// "move", "left", "top_right", ...: the token the MCP and the tests name a handle by.
-const char *layout_handle_token(LayoutHandle handle);
+// The handle the MCP names by its token ("move", "left", "top_right", ...).
 bool layout_handle_from_token(const std::string &token, LayoutHandle &out);
 
 // The window where the drag began: its authored POSITION (each edge with whether the file
@@ -63,10 +62,6 @@ mnu::RectEdges layout_drag_target(const LayoutStart &start, const LayoutDrag &dr
 // land on the target, both edges of that axis are written at it, and if that still misses,
 // all four. An edge the file writes is never left out. False when the target has no area.
 bool plan_layout_drag(const LayoutStart &start, const LayoutDrag &drag, const LayoutSolve &solve, mnu::Position &out);
-
-// The window's POSITION as the document holds it: the four edges and whether each is
-// written. False when the record is not a window of the document.
-bool authored_position(const Document &document, const NodeAddress &window, mnu::Position &out);
 
 // The edits that bring `window` from `from` (the document's POSITION now) to `to`, each
 // carrying `gesture`: an edge written again (Write) and set, an edge set, and an edge `to`

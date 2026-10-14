@@ -53,6 +53,7 @@
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
+#include "editor/menu_test_support.h"
 #include "editor/test_platform.h"
 #include "editor/viewport_test_support.h"
 
@@ -63,10 +64,7 @@ namespace {
 
 using editor_test::FakeDevices;
 using editor_test::NoProcess;
-
-std::string synth(const char *name) {
-	return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth/" + name;
-}
+using editor_test::synth;
 
 // MAIN over the whole design, BOX, OTHER and the 12-unit TINY inside it, every edge written.
 const char *const kLayoutMenu = "<SCREEN>\r\n"
@@ -89,31 +87,10 @@ const char *const kLayoutMenu = "<SCREEN>\r\n"
 								"\t</WINDOW>\r\n"
 								"</SCREEN>\r\n";
 
-JsonValue parse(const std::string &text) {
-	JsonValue json;
-	std::string error;
-	opennova::io::json_parse(text, json, error);
-	return json;
-}
-
-// A whole-number field of a record (-1: none).
-int64_t field_of(const Document &document, const NodeAddress &address, const char *field) {
-	Value value;
-	return document.get(address, field, value) && std::holds_alternative<int64_t>(value) ? std::get<int64_t>(value)
-																						  : -1;
-}
-
-NodeAddress named(const Document &document, const char *name) {
-	NodeAddress address;
-	find_definition(AssetGraph(), document, name, address);
-	return address;
-}
-
-// A window's four edges: left, top, right, bottom.
-std::vector<int64_t> edges(const Document &document, const NodeAddress &window) {
-	return { field_of(document, window, "position.left"), field_of(document, window, "position.top"),
-		field_of(document, window, "position.right"), field_of(document, window, "position.bottom") };
-}
+using editor_test::parsed;
+using editor_test::field_of;
+using menu_test::named;
+using editor_test::edges;
 
 bool done(const JsonValue &answer) {
 	const JsonValue *outcome = answer.get("outcome");
@@ -172,7 +149,7 @@ struct Wired {
 	}
 	// A request as the editor MCP raises it, its operation run to its end.
 	JsonValue wire(const std::string &text) {
-		const JsonValue answer = session.handle_json(parse(text));
+		const JsonValue answer = session.handle_json(parsed(text));
 		session.run_operations();
 		return answer;
 	}
@@ -294,7 +271,7 @@ static int test_edits_in_viewport() {
 	// An operation holding the documents: the drag refused (the viewport plans no edit the session
 	// does not take), nothing written.
 	TEST_EXPECT(session.start_operation(std::make_unique<editor_test::HoldingOperation>()) != 0);
-	TEST_EXPECT(refused(session.handle_json(parse(R"({"kind": "edit_in_viewport", "drag": {"id": )" + id_box +
+	TEST_EXPECT(refused(session.handle_json(parsed(R"({"kind": "edit_in_viewport", "drag": {"id": )" + id_box +
 								R"(, "handle": "move", "by": [8, 8]}})")),
 			"an operation holds the documents"));
 	TEST_EXPECT(!menu->dirty());
@@ -572,16 +549,16 @@ static int test_model_edits() {
 	// any; the drag is refused, nothing written.
 	TEST_EXPECT(far_off());
 	TEST_EXPECT(session.start_operation(std::make_unique<editor_test::HoldingOperation>()) != 0);
-	TEST_EXPECT(done(session.handle_json(parse(R"({"kind": "edit_in_viewport", "command": {"name": "frame"}})"))) &&
+	TEST_EXPECT(done(session.handle_json(parsed(R"({"kind": "edit_in_viewport", "command": {"name": "frame"}})"))) &&
 			model->camera().distance < 5000.0f);
-	TEST_EXPECT(refused(session.handle_json(parse(drag + "[24, -12]}}")), "an operation holds the documents"));
+	TEST_EXPECT(refused(session.handle_json(parsed(drag + "[24, -12]}}")), "an operation holds the documents"));
 	TEST_EXPECT(document->revision() == revision);
 	session.run_operations();
 	// Beside a Rescan's refresh.
 	TEST_EXPECT(far_off());
 	session.handle(request::rescan());
 	TEST_EXPECT(session.view().activity.operation.running());
-	TEST_EXPECT(done(session.handle_json(parse(R"({"kind": "edit_in_viewport", "command": {"name": "frame"}})"))) &&
+	TEST_EXPECT(done(session.handle_json(parsed(R"({"kind": "edit_in_viewport", "command": {"name": "frame"}})"))) &&
 			model->camera().distance < 5000.0f);
 	session.run_operations();
 	std::printf("test_model_edits passed\n");
@@ -676,7 +653,7 @@ static int test_mission_edits() {
 	TEST_EXPECT(refused(drag(areas[0]->id, R"("handle": "yaw", "by": [8, 0])"), "An area has no yaw handle"));
 	TEST_EXPECT(refused(drag(first, R"("handle": "x_min", "by": [8, 0])"), "An entity has no x_min handle"));
 	TEST_EXPECT(session.start_operation(std::make_unique<editor_test::HoldingOperation>()) != 0);
-	TEST_EXPECT(refused(session.handle_json(parse(R"({"kind": "edit_in_viewport", "path": ")" + path +
+	TEST_EXPECT(refused(session.handle_json(parsed(R"({"kind": "edit_in_viewport", "path": ")" + path +
 										R"(", "drag": {"id": )" + std::to_string(first) + R"(, "handle": "move", "by": [8, 0]}})")),
 			"an operation holds the documents"));
 	session.run_operations();
@@ -792,7 +769,7 @@ static int test_canvas_sized_reads() {
 	devices.sync(session);
 	const auto ask = [&session](const std::string &args) {
 		std::string error;
-		const JsonValue answer = session.query("viewport", parse(args), error);
+		const JsonValue answer = session.query("viewport", parsed(args), error);
 		if (!error.empty()) std::printf("  viewport %s: %s\n", args.c_str(), error.c_str());
 		return answer;
 	};
@@ -1016,7 +993,7 @@ static int test_viewport_box() {
 	if (!wired.menu) return 1;
 	const auto ask = [&session](const std::string &args, std::string *why = nullptr) {
 		std::string error;
-		const JsonValue answer = session.query("viewport", parse(args), error);
+		const JsonValue answer = session.query("viewport", parsed(args), error);
 		if (why) *why = error;
 		else if (!error.empty()) std::printf("  viewport %s: %s\n", args.c_str(), error.c_str());
 		return answer;
@@ -1103,7 +1080,7 @@ static int test_viewport_click() {
 	            selection.records[0] == wired.other);
 	TEST_EXPECT(done(click(menu, R"("at": [750, 550])")) && selection.primary == named(*wired.menu, "MAIN"));
 	// A click on the selected window's resize handle (just past its corner, over MAIN) is the canvas's resize press:
-	// nothing selected (review X21).
+	// nothing selected.
 	session.handle(request::select_record(menu, wired.box));
 	TEST_EXPECT(done(click(menu, R"("at": [301, 201])")) && selection.primary == wired.box && selection.records.size() == 1);
 	TEST_EXPECT(done(click(menu, R"("at": [750, 550])")) && selection.primary == named(*wired.menu, "MAIN"));
@@ -1120,7 +1097,7 @@ static int test_viewport_click() {
 	session.handle(request::open_document("models/armory.3di"));
 	session.run_operations();
 	std::string error;
-	JsonValue args = parse(R"({"op": "items", "path": "models/armory.3di", "limit": 200})");
+	JsonValue args = parsed(R"({"op": "items", "path": "models/armory.3di", "limit": 200})");
 	JsonValue items = session.query("viewport", args, error);
 	int clicked = 0;
 	for (const JsonValue &item : items.get("items") ? items.get("items")->array : std::vector<JsonValue>()) {
@@ -1136,13 +1113,13 @@ static int test_viewport_click() {
 	const std::string mission = "missions/synth_logic.bms";
 	session.handle(request::open_document(mission));
 	session.run_operations();
-	args = parse(R"({"op": "items", "path": "missions/synth_logic.bms", "limit": 200})");
+	args = parsed(R"({"op": "items", "path": "missions/synth_logic.bms", "limit": 200})");
 	items = session.query("viewport", args, error);
 	clicked = 0;
 	for (const JsonValue &item : items.get("items") ? items.get("items")->array : std::vector<JsonValue>()) {
 		const JsonValue *screen = item.get("screen");
 		if (!screen || !screen->is_array() || screen->array.size() != 2 || clicked) continue;
-		const JsonValue hit = session.query("viewport", parse(R"({"op": "hit", "path": "missions/synth_logic.bms", "x": )" +
+		const JsonValue hit = session.query("viewport", parsed(R"({"op": "hit", "path": "missions/synth_logic.bms", "x": )" +
 		                                                     std::to_string(screen->array[0].number) + R"(, "y": )" +
 		                                                     std::to_string(screen->array[1].number) + "}"),
 		                                    error);
@@ -1165,11 +1142,12 @@ static int test_viewport_click() {
 	return 0;
 }
 
-// A mission's click is its canvas's own (review X5: ViewportModel::click drives MissionCanvas): under the Place
-// tool a placement where it is (the drop the canvas's release raises, one undo step), under the Area tool nothing
-// (its box is a drag's), under the Path tool with no path picked nothing; under Select a tap on the primary's yaw
-// handle (no mark under it) leaves the selection as it is, and a click on bare ground while another document's
-// record is selected leaves that selection (the canvas empties the mission's own alone).
+// A mission's click is its canvas's own (ViewportModel::click drives MissionCanvas): under the
+// Place tool a placement where it is (the drop the canvas's release raises, one undo step), under
+// the Area tool nothing (its box is a drag's), under the Path tool with no path picked nothing;
+// under Select a tap on the primary's yaw handle (no mark under it) leaves the selection as it is,
+// and a click on bare ground while another document's record is selected leaves that selection (the
+// canvas empties the mission's own alone).
 static int test_mission_click() {
 	NoProcess platform;
 	Wired wired("opennova_editor_viewport_wire_mission_click", platform, true);
@@ -1213,7 +1191,7 @@ static int test_mission_click() {
 	float hx = 0.0f, hy = 0.0f;
 	std::string error;
 	TEST_EXPECT(viewport->handle_point(viewport_context(view, *viewport, 0.0f), first->id, "yaw", hx, hy, error));
-	const JsonValue under = session.query("viewport", parse(R"({"op": "hit", "path": ")" + path + R"(", "x": )" +
+	const JsonValue under = session.query("viewport", parsed(R"({"op": "hit", "path": ")" + path + R"(", "x": )" +
 	                                                       std::to_string(hx) + R"(, "y": )" + std::to_string(hy) + "}"),
 	                                      error);
 	TEST_EXPECT(under.get_number("index", 0) < 0);
@@ -1237,7 +1215,7 @@ static int test_canvas_options() {
 	if (!wired.menu) return 1;
 	const auto options_of = [&session](const std::string &path) {
 		std::string error;
-		const JsonValue state = session.query("viewport", parse(R"({"op": "state", "limit": 1, "path": ")" + path + R"("})"), error);
+		const JsonValue state = session.query("viewport", parsed(R"({"op": "state", "limit": 1, "path": ")" + path + R"("})"), error);
 		const JsonValue *options = state.get("options");
 		return options ? *options : JsonValue();
 	};
@@ -1259,7 +1237,7 @@ static int test_canvas_options() {
 	TEST_EXPECT(!done(set(menu, "menu", R"({"zoom": "huge"})")) && !done(set(menu, "menu", R"({"scale": 40})")) &&
 	            viewport->show().scale == 2.0f);
 	// What the device would do next, once what it was asked before is taken: a canvas option asks nothing of it
-	// (Keep: no Rebuild, no Update; review X23).
+	// (Keep: no Rebuild, no Update).
 	const auto next_action = [&session](const std::string &path, ViewportKind kind) {
 		session.viewports().follow_one(session.view(), path, kind);
 		return session.viewports().take_action(path, kind);

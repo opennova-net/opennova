@@ -8,12 +8,10 @@
 // decoded anew from the new bytes when next asked; one whose file went dropped likewise; a wave that failed (its
 // file missing) decoded once its file comes to be; a voice whose wave fails dropped; clear drops the voices and
 // keeps the waves.
-#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include <editor/preview/preview_waves.h>
@@ -54,25 +52,10 @@ std::vector<uint8_t> wave_of(uint32_t frames) {
 	return out;
 }
 
-// The wave once its decode is done (a few seconds at most).
-PreviewWaves::Wave settled(PreviewWaves &waves, const std::string &file) {
-	PreviewWaves::Wave wave = waves.wave(file);
-	for (int i = 0; i < 5000 && wave.state == PreviewWaves::State::Decoding; ++i) {
-		std::this_thread::sleep_for(std::chrono::milliseconds(1));
-		wave = waves.wave(file);
-	}
-	return wave;
-}
-
-// The voices the queue hands over once nothing waits (a few seconds at most).
+// The voices the queue hands over once their waves' decodes have ended.
 std::vector<PreviewVoiceQueue::Ready> taken(PreviewVoiceQueue &queue) {
-	std::vector<PreviewVoiceQueue::Ready> out;
-	for (int i = 0; i < 5000; ++i) {
-		for (PreviewVoiceQueue::Ready &ready : queue.take_ready()) out.push_back(std::move(ready));
-		if (queue.waiting() == 0) break;
-		std::this_thread::sleep_for(std::chrono::milliseconds(1));
-	}
-	return out;
+	queue.wait();
+	return queue.take_ready();
 }
 
 int64_t frames_of(const PreviewWaves::Wave &wave) {
@@ -101,7 +84,7 @@ int test_a_voice_survives_a_rescan() {
 	TEST_EXPECT(ready.size() == 1 && ready[0].file == join_path(dir.root(), "sounds/shot.wav") &&
 	            ready[0].voice.path == "sounds/shot.wav");
 	// The wave kept through another rescan: the same decode, not another.
-	const PreviewWaves::Wave before = settled(waves, ready.empty() ? std::string() : ready[0].file);
+	const PreviewWaves::Wave before = waves.wait(ready.empty() ? std::string() : ready[0].file);
 	TEST_EXPECT(before.state == PreviewWaves::State::Decoded && frames_of(before) == 100);
 	TEST_EXPECT(waves.refresh().empty());
 	const PreviewWaves::Wave after = waves.wave(ready.empty() ? std::string() : ready[0].file);
@@ -124,9 +107,9 @@ int test_a_changed_or_removed_wave() {
 	PreviewWaves waves;
 	PreviewVoiceQueue queue(waves);
 	queue.add(dir.root(), {voice_of("sounds/shot.wav"), voice_of("sounds/step.wav")});
-	const uint64_t serial = settled(waves, shot).serial;
+	const uint64_t serial = waves.wait(shot).serial;
 	// Both decodes done first: a decode reading a file holds it open, and Windows refuses to delete an open file.
-	TEST_EXPECT(settled(waves, step).state == PreviewWaves::State::Decoded);
+	TEST_EXPECT(waves.wait(step).state == PreviewWaves::State::Decoded);
 	// The shot rewritten and the step deleted before the pump: both voices dropped with their waves.
 	TEST_EXPECT(editor_test::write_bytes(shot, wave_of(200)));
 	std::error_code ec;
@@ -134,16 +117,16 @@ int test_a_changed_or_removed_wave() {
 	const std::vector<std::string> dropped = queue.refresh();
 	TEST_EXPECT(dropped.size() == 2 && queue.waiting() == 0 && taken(queue).empty());
 	// Asked again: the new bytes, another decode; the step gone, a failure.
-	const PreviewWaves::Wave again = settled(waves, shot);
+	const PreviewWaves::Wave again = waves.wait(shot);
 	TEST_EXPECT(again.state == PreviewWaves::State::Decoded && frames_of(again) == 200 && again.serial != serial);
-	TEST_EXPECT(settled(waves, step).state == PreviewWaves::State::Failed);
+	TEST_EXPECT(waves.wait(step).state == PreviewWaves::State::Failed);
 	// A voice whose wave does not decode is dropped, not kept waiting.
 	queue.add(dir.root(), {voice_of("sounds/step.wav")});
 	TEST_EXPECT(taken(queue).empty() && queue.waiting() == 0);
 	// The step written again: the failure dropped at the rescan, the wave decoded.
 	TEST_EXPECT(editor_test::write_bytes(step, wave_of(75)));
 	TEST_EXPECT(waves.refresh() == std::vector<std::string>({step}));
-	const PreviewWaves::Wave back = settled(waves, step);
+	const PreviewWaves::Wave back = waves.wait(step);
 	TEST_EXPECT(back.state == PreviewWaves::State::Decoded && frames_of(back) == 75);
 	return 0;
 }

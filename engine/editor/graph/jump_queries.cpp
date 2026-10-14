@@ -38,8 +38,7 @@ const GraphSymbol *symbol_at_locator(const AssetGraph &graph, const std::string 
 	return by_path;
 }
 
-} // namespace
-
+// all, files, names.
 const char *search_scope_token(SearchScope scope) {
 	switch (scope) {
 	case SearchScope::All: return "all";
@@ -48,6 +47,8 @@ const char *search_scope_token(SearchScope scope) {
 	}
 	return "all";
 }
+
+} // namespace
 
 bool search_scope_from_token(const std::string &token, SearchScope &out) {
 	for (const SearchScope scope : {SearchScope::All, SearchScope::Files, SearchScope::Names})

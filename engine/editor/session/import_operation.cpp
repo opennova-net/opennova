@@ -97,9 +97,13 @@ OperationProgress ImportOperation::progress() const {
 	const uint64_t write_total = import_ ? import_->files_total() : written_ ? write_total_ : imports_.size();
 	progress.done = planned + write_done + (refresh_ ? refresh_->files_done() : 0);
 	progress.total = planned + std::max(write_total, write_done) + (refresh_ ? refresh_->files_total() : 0);
+	// The write's count is its steps (each source checked, each file published), not files: the label names the
+	// files the import makes and how far it is (S26 C15: "6383 of 15683" read as files, of a 9300-file import).
+	const std::string files = std::to_string(imports_.size()) + (imports_.size() == 1 ? " file" : " files");
 	progress.label = refresh_         ? refresh_->label()
-	                 : write_done > 0 ? "Importing the files: " + std::to_string(write_done) + " of " + std::to_string(write_total)
-	                                  : "Importing the files";
+	                 : write_done > 0 ? "Importing " + files + ": " +
+	                                            std::to_string(write_done * 100 / std::max<uint64_t>(write_total, 1)) + "%"
+	                                  : "Importing " + files;
 	return progress;
 }
 

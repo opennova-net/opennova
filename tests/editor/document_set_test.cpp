@@ -242,6 +242,12 @@ static int test_selection_over_rows() {
 	menus.session.handle(request::select_record("main.mnu", NodeAddress{999999, 0, 0}));
 	TEST_EXPECT(!menus.session.outcome().done() && v.documents.selection.primary == other &&
 	            v.activity.status == "main.mnu holds no record 999999.");
+	// S26 C5: a path that names no open document is refused, the active document and the selection as they
+	// were (it was made the active document, a step of the navigation history to it recorded).
+	const std::string active_before = v.documents.active;
+	menus.session.handle(request::select_record("nope.def", NodeAddress()));
+	TEST_EXPECT(!menus.session.outcome().done() && v.documents.active == active_before &&
+	            v.documents.selection.primary == other);
 	// The demo round's bug 11: a primary named by its identities alone (no kind, as the wire leaves it out,
 	// or a wrong one) is the document's record of them: selected, as its own address.
 	for (const NodeKind kind : {NodeKind(0), NodeKind(title.kind + 7)}) {

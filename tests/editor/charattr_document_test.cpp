@@ -45,13 +45,7 @@ std::string crlf(const std::string &text) {
 	return lines;
 }
 
-Edit set_edit(const NodeAddress &at, const char *field, Value value) {
-	Edit edit;
-	edit.address = at;
-	edit.field = field;
-	edit.value = std::move(value);
-	return edit;
-}
+using editor_test::set_edit;
 
 struct Project {
 	editor_test::TempProjectDir dir{"opennova_editor_charattr_document"};

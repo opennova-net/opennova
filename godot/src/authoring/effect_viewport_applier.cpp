@@ -40,16 +40,17 @@ Vector3 to_godot(const opennova::editor::PreviewVec3 &v) {
 EffectViewportApplier::EffectViewportApplier(SubViewport &viewport) {
 	// No multisampling, as the game's own view draws: the particle renderer's compositor passes draw over
 	// the view's single-sampled colour and depth (a multisampled view's resolved depth is no attachment
-	// they can bind; the model and mission devices' MSAA_4X would leave every particle undrawn).
+	// they can bind; under MSAA every particle would go undrawn).
 	viewport.set_msaa_3d(Viewport::MSAA_DISABLED);
 	// The editor's preview background, behind everything the picture draws.
 	backdrop_ = make_preview_backdrop_3d();
 	viewport.add_child(backdrop_);
 	Node3D *root = memnew(Node3D);
 	viewport.add_child(root);
-	// One terminal display decode for the view, and the environment with no .env, which lights like the
-	// retail noon: the particle tints a mission's light gives (the model preview's recipe).
-	root->add_child(memnew(DisplayDecode));
+	// The game's FrameFx for the view (its one terminal display decode, and the distortion row a class-7 particle draws
+	// on), and the environment with no .env, which lights like the retail noon: the particle tints a mission's light
+	// gives (the model preview's recipe).
+	frame_effects_ = std::make_unique<PreviewFrameEffects>(*root, viewport, false);
 	environment_ = memnew(MissionEnvironment);
 	root->add_child(environment_);
 	camera_ = memnew(Camera3D);
@@ -123,6 +124,7 @@ void EffectViewportApplier::tick(const opennova::editor::ViewportModel &viewport
 	// next one's to take).
 	(void)viewport;
 	effects_->render(int64_t(clock.ms()));
+	frame_effects_->present(effects_->renderer());
 }
 
 } // namespace godot
