@@ -8,12 +8,12 @@ extends GutTest
 ## MCP reaches the control's text; a keystroke burst typed into the control is one undo step, the
 ## control's own history kept empty, and the undo takes the control back to the document's text; a
 ## Go to's reveal selects its span; a credits file its text form cannot carry shows read only. Its
-## marks stay with their lines as text goes in above them; a burst a quiet second ended is its own
-## undo step, the next keystroke another; a character the game's code page has no byte for is
-## refused with a notice on the status line; a device given up mid-burst still ends its gesture, so
+## marks stay with their lines as text goes in above them; a character the game's code page has no
+## byte for is refused with a notice on the status line; a device given up mid-burst still ends its gesture, so
 ## the Problems go on; the control alone keeps no undo of its own for Ctrl+Z. Its device helps with the
 ## script (S15): the completion list, a word's tooltip, a marked line's note, a Ctrl+click's and F12's Go to
-## definition. The control's placement
+## definition. The quiet second that ends a burst (TextBurst) is pinned on explicit times by
+## tests/editor/script_viewport_test.cpp's test_burst, with no wall clock. The control's placement
 ## over the reserved rect and the pointer and keys it owns there need the workspace drawn
 ## (tests/windowed/editor_script_device_test.gd).
 
@@ -259,30 +259,6 @@ func test_a_mark_stays_with_its_line() -> void:
 	assert_eq(String(edit.call("get_mark_severity", 6)), "", "the line the mark was on holds none now")
 	assert_ne(String(edit.call("get_mark_severity", 7)), "", "the mark went down with its line")
 	assert_true(String(edit.call("get_mark_tip", 7)).contains("MISSION_START"), String(edit.call("get_mark_tip", 7)))
-
-
-## A burst a quiet second ended is its own undo step: one key, a pause past the second, another key,
-## and one undo takes the second key back alone.
-func test_a_quiet_second_ends_the_burst() -> void:
-	var edit := await _open_script()
-	if edit == null:
-		return
-	var first := _line(SCRIPT, 1)
-	edit.set_caret_line(0)
-	edit.set_caret_column(0)
-	edit.insert_text_at_caret("a")
-	await _frames(1)
-	await get_tree().create_timer(1.3).timeout
-	await _frames(2)
-	edit.insert_text_at_caret("b")
-	await _frames(2)
-	assert_eq(_line(SCRIPT, 1), "ab" + first)
-	_seam.undo()
-	await _frames(2)
-	assert_eq(_line(SCRIPT, 1), "a" + first, "the second key undone alone")
-	assert_eq(edit.get_line(0), "a" + first, "the control taken back with it")
-	_seam.undo()
-	assert_eq(_line(SCRIPT, 1), first, "the first key the step before")
 
 
 ## A character the game's code page has no byte for is refused, with a notice on the status line
