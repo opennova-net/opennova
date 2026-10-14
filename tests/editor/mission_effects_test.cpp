@@ -70,16 +70,8 @@ std::vector<uint8_t> pump_bytes() {
 	return out;
 }
 
-// A particle `id` emitting `rate` a second for `dur` seconds, each living `age` seconds.
-std::string particle_text(const std::string &id, float dur, float rate, float age) {
-	return "[particledef]\n{\n\tid = " + id + ";\n\temit_dur = " + std::to_string(dur) + ";\n\temit_rate = " +
-			std::to_string(rate) + ";\n\temit_burst = 1;\n\tage = " + std::to_string(age) +
-			";\n\tscale = 0.5;\n\tspeed = 2.0;\n\tspread = 30.0;\n\tgravity = 1.0;\n\tscale_func = grow;\n}\n\n";
-}
-
-std::string effect_text(const std::string &id, const std::string &pdefs) {
-	return "[effectdef]\n{\n\tid = " + id + ";\n\tpdefs = " + pdefs + ";\n}\n\n";
-}
+using editor_test::particle_text;
+using editor_test::effect_text;
 
 // A smoke that emits for a long while, and a fire.
 std::string particles(float smoke_rate = 10.0f) {

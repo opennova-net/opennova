@@ -5,7 +5,8 @@
 // MAX_PATH goes too), a file writer, a tree's digest, every missing
 // required file of a session's project created, the project settings applied, a request and the
 // operation it starts run to their end, the session polled through its terrain bakes to a state, an
-// operation that holds the documents, and a finding made by its code's token with what it is about.
+// operation that holds the documents, the edit factories, sound banks and TGAs minted, a JSON text
+// parsed, a finding made by its code's token with what it is about and the findings of a code looked up.
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -32,6 +33,7 @@
 #include <base/io/strutil.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/terrain_heights_document.h>
+#include <editor/model/document.h>
 #include <editor/model/edit.h>
 #include <editor/project/project_files.h>
 #include <editor/requirements/requirements.h>
@@ -44,6 +46,7 @@
 #include <editor/session/session_operation.h>
 #include <editor/session/view/session_view.h>
 #include <formats/lwf/lwf.h>
+#include <formats/tga/tga.h>
 
 namespace editor_test {
 
@@ -240,6 +243,37 @@ inline bool write_bytes(const std::string &path, const std::vector<uint8_t> &byt
 	if (!out) return false;
 	out.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
 	return static_cast<bool>(out);
+}
+
+// A JSON text parsed (a null value when it does not parse).
+inline opennova::io::JsonValue parsed(const std::string &text) {
+	opennova::io::JsonValue out;
+	std::string error;
+	opennova::io::json_parse(text, out, error);
+	return out;
+}
+
+// A 32-bit TGA of `w` x `h` RGBA pixels minted through the engine's writer (formats/tga), and a 2x2 one
+// of one grey: a texture's bytes where only a file of the kind matters.
+inline std::vector<uint8_t> tga32(const std::vector<uint8_t> &rgba, int w, int h) {
+	std::vector<uint8_t> out;
+	std::string why;
+	opennova::tga::tga_write_rgba32(rgba.data(), uint32_t(w), uint32_t(h), out, why);
+	return out;
+}
+inline std::vector<uint8_t> tga_bytes() { return tga32(std::vector<uint8_t>(16, 200), 2, 2); }
+
+// A document's bytes as it writes them now.
+inline std::vector<uint8_t> serialized(const opennova::editor::Document &document) {
+	const opennova::editor::SerializeResult result = document.serialize();
+	return std::vector<uint8_t>(result.text.begin(), result.text.end());
+}
+
+// Whether `text` holds `part`, printing both when it does not.
+inline bool contains(const std::string &text, const std::string &part) {
+	if (text.find(part) != std::string::npos) return true;
+	std::printf("  \"%s\" lacks \"%s\"\n", text.c_str(), part.c_str());
+	return false;
 }
 
 // The edit factories: a Set of one field of a record, and an edit of another operation about a

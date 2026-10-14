@@ -331,12 +331,7 @@ std::string tool_answer(const JsonValue &structured, bool error = false, const s
 	return opennova::io::json_write(out);
 }
 
-JsonValue parsed(const std::string &text) {
-	JsonValue out;
-	std::string error;
-	opennova::io::json_parse(text, out, error);
-	return out;
-}
+using editor_test::parsed;
 
 // The game's mission_logic_snapshot answer (the invoke's {error, result}) for mission `mission` at `tick`: event 0
 // latched waiting on its delay, its trigger held; event 1 not checked, a fire asked; V12 = 7.

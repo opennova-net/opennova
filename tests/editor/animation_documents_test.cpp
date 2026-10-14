@@ -54,11 +54,7 @@ constexpr NodeKind kMapClip = node_kind(AnimationMapKind::Clip);
 
 std::string anim_dir() { return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/anim"; }
 
-std::vector<uint8_t> serialized(const Document &document) {
-	const SerializeResult result = document.serialize();
-	return std::vector<uint8_t>(result.text.begin(), result.text.end());
-}
-
+using editor_test::serialized;
 using editor_test::op_edit;
 using editor_test::set_edit;
 

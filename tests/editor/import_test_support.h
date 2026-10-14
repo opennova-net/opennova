@@ -21,6 +21,7 @@
 #include <formats/pff/pff.h>
 
 #include "editor/editor_test_support.h"
+#include "editor/menu_test_support.h"
 #include "editor/test_platform.h"
 
 namespace import_test {
@@ -30,18 +31,12 @@ using namespace opennova::editor;
 using editor_test::NoProcess;
 
 // A menu window with a POSITION (a WINDOW with no child element is never created) and
-// `body`; a screen; a window's FONT; an IMAGE appearance; a SCREEN action loading `file`.
-inline std::string window(const char *type, const char *name, const std::string &body) {
-	return std::string("<WINDOW TYPE=\"") + type + "\" NAME=\"" + name + "\">\r\n" +
-	       "<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>20</BOTTOM></POSITION>\r\n" + body + "</WINDOW>\r\n";
-}
-inline std::string screen(const char *name, const std::string &body) {
-	return std::string("<SCREEN>\r\n<NAME>") + name + "</NAME>\r\n" + body + "</SCREEN>\r\n";
-}
+// `body`; a screen; a window's FONT; an IMAGE appearance; a SCREEN action loading `file` (the
+// window, the screen and the IMAGE row menu_test_support.h's).
+using menu_test::screen;
+using menu_test::window;
 inline std::string font(const std::string &name) { return "<FONT><NAME>" + name + "</NAME></FONT>\r\n"; }
-inline std::string image(const std::string &texture) {
-	return "<APPEARANCE STATE=\"DEFAULT\" TYPE=\"IMAGE\">" + texture + "</APPEARANCE>\r\n";
-}
+using menu_test::image;
 inline std::string go_to(const std::string &file, const char *target) {
 	return "<ACTION TYPE=\"SCREEN\" FILE=\"" + file + "\">" + target + "</ACTION>\r\n";
 }

@@ -68,9 +68,7 @@ std::string particle_text(const std::string &id, float dur, float rate, float ag
 	return out + "}\n\n";
 }
 
-std::string effect_text(const std::string &id, const std::string &pdefs) {
-	return "[effectdef]\n{\n\tid = " + id + ";\n\tpdefs = " + pdefs + ";\n}\n\n";
-}
+using editor_test::effect_text;
 
 std::string table_text(const std::string &id, int value) {
 	std::string out = "[tabledef]\n{\n\tid = " + id + ";\n";

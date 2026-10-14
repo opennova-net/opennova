@@ -41,6 +41,7 @@
 #include "common/file_io.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
+#include "editor/anim_test_support.h"
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
 
@@ -52,24 +53,7 @@ namespace {
 
 std::string repo() { return test_paths_repo_root(__FILE__); }
 
-// A clip of the skinned fixture's three bones held at rest, `frames` frames at 30 a second, its event words
-// by frame.
-std::string clip_text(const std::string &name, int frames, bool loop, const std::map<int, uint32_t> &events) {
-	std::string out = "clip " + name + "\nfps 30\nflags " + (loop ? "0x1" : "0x0") + "\nframes " + std::to_string(frames) + "\n";
-	const char *bones[] = {"bone -1 0 0 0 0.5 \"BN01 Pelvis\"", "bone 0 0 0 1 0.5 \"BN02 Spine\"",
-	                       "bone 0 0 0 -1 0.5 \"BN03 Leg\""};
-	for (const char *bone : bones) {
-		out += std::string(bone) + "\n";
-		for (int i = 0; i <= frames; ++i) out += " k 0 0 0 1\n";
-	}
-	for (int i = 0; i <= frames; ++i) {
-		const auto word = events.find(i < frames ? i : frames - 1);
-		char line[64];
-		std::snprintf(line, sizeof(line), "event 0 0 0 0x%X 0.9 1.7\n", word == events.end() ? 0u : word->second);
-		out += line;
-	}
-	return out;
-}
+using editor_test::clip_text;
 
 // GUN.adm: its reset, the idle (a loop), the fire (a one-shot carrying a left footstep the game never reads
 // in first person) and the reload (a one-shot).

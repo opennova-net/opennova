@@ -64,10 +64,7 @@ namespace {
 
 using editor_test::FakeDevices;
 using editor_test::NoProcess;
-
-std::string synth(const char *name) {
-	return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth/" + name;
-}
+using editor_test::synth;
 
 // MAIN over the whole design, BOX, OTHER and the 12-unit TINY inside it, every edge written.
 const char *const kLayoutMenu = "<SCREEN>\r\n"
@@ -90,27 +87,10 @@ const char *const kLayoutMenu = "<SCREEN>\r\n"
 								"\t</WINDOW>\r\n"
 								"</SCREEN>\r\n";
 
-JsonValue parse(const std::string &text) {
-	JsonValue json;
-	std::string error;
-	opennova::io::json_parse(text, json, error);
-	return json;
-}
-
-// A whole-number field of a record (-1: none).
-int64_t field_of(const Document &document, const NodeAddress &address, const char *field) {
-	Value value;
-	return document.get(address, field, value) && std::holds_alternative<int64_t>(value) ? std::get<int64_t>(value)
-																						  : -1;
-}
-
+using editor_test::parsed;
+using editor_test::field_of;
 using menu_test::named;
-
-// A window's four edges: left, top, right, bottom.
-std::vector<int64_t> edges(const Document &document, const NodeAddress &window) {
-	return { field_of(document, window, "position.left"), field_of(document, window, "position.top"),
-		field_of(document, window, "position.right"), field_of(document, window, "position.bottom") };
-}
+using editor_test::edges;
 
 bool done(const JsonValue &answer) {
 	const JsonValue *outcome = answer.get("outcome");
@@ -169,7 +149,7 @@ struct Wired {
 	}
 	// A request as the editor MCP raises it, its operation run to its end.
 	JsonValue wire(const std::string &text) {
-		const JsonValue answer = session.handle_json(parse(text));
+		const JsonValue answer = session.handle_json(parsed(text));
 		session.run_operations();
 		return answer;
 	}
@@ -291,7 +271,7 @@ static int test_edits_in_viewport() {
 	// An operation holding the documents: the drag refused (the viewport plans no edit the session
 	// does not take), nothing written.
 	TEST_EXPECT(session.start_operation(std::make_unique<editor_test::HoldingOperation>()) != 0);
-	TEST_EXPECT(refused(session.handle_json(parse(R"({"kind": "edit_in_viewport", "drag": {"id": )" + id_box +
+	TEST_EXPECT(refused(session.handle_json(parsed(R"({"kind": "edit_in_viewport", "drag": {"id": )" + id_box +
 								R"(, "handle": "move", "by": [8, 8]}})")),
 			"an operation holds the documents"));
 	TEST_EXPECT(!menu->dirty());
@@ -569,16 +549,16 @@ static int test_model_edits() {
 	// any; the drag is refused, nothing written.
 	TEST_EXPECT(far_off());
 	TEST_EXPECT(session.start_operation(std::make_unique<editor_test::HoldingOperation>()) != 0);
-	TEST_EXPECT(done(session.handle_json(parse(R"({"kind": "edit_in_viewport", "command": {"name": "frame"}})"))) &&
+	TEST_EXPECT(done(session.handle_json(parsed(R"({"kind": "edit_in_viewport", "command": {"name": "frame"}})"))) &&
 			model->camera().distance < 5000.0f);
-	TEST_EXPECT(refused(session.handle_json(parse(drag + "[24, -12]}}")), "an operation holds the documents"));
+	TEST_EXPECT(refused(session.handle_json(parsed(drag + "[24, -12]}}")), "an operation holds the documents"));
 	TEST_EXPECT(document->revision() == revision);
 	session.run_operations();
 	// Beside a Rescan's refresh.
 	TEST_EXPECT(far_off());
 	session.handle(request::rescan());
 	TEST_EXPECT(session.view().activity.operation.running());
-	TEST_EXPECT(done(session.handle_json(parse(R"({"kind": "edit_in_viewport", "command": {"name": "frame"}})"))) &&
+	TEST_EXPECT(done(session.handle_json(parsed(R"({"kind": "edit_in_viewport", "command": {"name": "frame"}})"))) &&
 			model->camera().distance < 5000.0f);
 	session.run_operations();
 	std::printf("test_model_edits passed\n");
@@ -673,7 +653,7 @@ static int test_mission_edits() {
 	TEST_EXPECT(refused(drag(areas[0]->id, R"("handle": "yaw", "by": [8, 0])"), "An area has no yaw handle"));
 	TEST_EXPECT(refused(drag(first, R"("handle": "x_min", "by": [8, 0])"), "An entity has no x_min handle"));
 	TEST_EXPECT(session.start_operation(std::make_unique<editor_test::HoldingOperation>()) != 0);
-	TEST_EXPECT(refused(session.handle_json(parse(R"({"kind": "edit_in_viewport", "path": ")" + path +
+	TEST_EXPECT(refused(session.handle_json(parsed(R"({"kind": "edit_in_viewport", "path": ")" + path +
 										R"(", "drag": {"id": )" + std::to_string(first) + R"(, "handle": "move", "by": [8, 0]}})")),
 			"an operation holds the documents"));
 	session.run_operations();
@@ -789,7 +769,7 @@ static int test_canvas_sized_reads() {
 	devices.sync(session);
 	const auto ask = [&session](const std::string &args) {
 		std::string error;
-		const JsonValue answer = session.query("viewport", parse(args), error);
+		const JsonValue answer = session.query("viewport", parsed(args), error);
 		if (!error.empty()) std::printf("  viewport %s: %s\n", args.c_str(), error.c_str());
 		return answer;
 	};
@@ -1013,7 +993,7 @@ static int test_viewport_box() {
 	if (!wired.menu) return 1;
 	const auto ask = [&session](const std::string &args, std::string *why = nullptr) {
 		std::string error;
-		const JsonValue answer = session.query("viewport", parse(args), error);
+		const JsonValue answer = session.query("viewport", parsed(args), error);
 		if (why) *why = error;
 		else if (!error.empty()) std::printf("  viewport %s: %s\n", args.c_str(), error.c_str());
 		return answer;
@@ -1117,7 +1097,7 @@ static int test_viewport_click() {
 	session.handle(request::open_document("models/armory.3di"));
 	session.run_operations();
 	std::string error;
-	JsonValue args = parse(R"({"op": "items", "path": "models/armory.3di", "limit": 200})");
+	JsonValue args = parsed(R"({"op": "items", "path": "models/armory.3di", "limit": 200})");
 	JsonValue items = session.query("viewport", args, error);
 	int clicked = 0;
 	for (const JsonValue &item : items.get("items") ? items.get("items")->array : std::vector<JsonValue>()) {
@@ -1133,13 +1113,13 @@ static int test_viewport_click() {
 	const std::string mission = "missions/synth_logic.bms";
 	session.handle(request::open_document(mission));
 	session.run_operations();
-	args = parse(R"({"op": "items", "path": "missions/synth_logic.bms", "limit": 200})");
+	args = parsed(R"({"op": "items", "path": "missions/synth_logic.bms", "limit": 200})");
 	items = session.query("viewport", args, error);
 	clicked = 0;
 	for (const JsonValue &item : items.get("items") ? items.get("items")->array : std::vector<JsonValue>()) {
 		const JsonValue *screen = item.get("screen");
 		if (!screen || !screen->is_array() || screen->array.size() != 2 || clicked) continue;
-		const JsonValue hit = session.query("viewport", parse(R"({"op": "hit", "path": "missions/synth_logic.bms", "x": )" +
+		const JsonValue hit = session.query("viewport", parsed(R"({"op": "hit", "path": "missions/synth_logic.bms", "x": )" +
 		                                                     std::to_string(screen->array[0].number) + R"(, "y": )" +
 		                                                     std::to_string(screen->array[1].number) + "}"),
 		                                    error);
@@ -1211,7 +1191,7 @@ static int test_mission_click() {
 	float hx = 0.0f, hy = 0.0f;
 	std::string error;
 	TEST_EXPECT(viewport->handle_point(viewport_context(view, *viewport, 0.0f), first->id, "yaw", hx, hy, error));
-	const JsonValue under = session.query("viewport", parse(R"({"op": "hit", "path": ")" + path + R"(", "x": )" +
+	const JsonValue under = session.query("viewport", parsed(R"({"op": "hit", "path": ")" + path + R"(", "x": )" +
 	                                                       std::to_string(hx) + R"(, "y": )" + std::to_string(hy) + "}"),
 	                                      error);
 	TEST_EXPECT(under.get_number("index", 0) < 0);
@@ -1235,7 +1215,7 @@ static int test_canvas_options() {
 	if (!wired.menu) return 1;
 	const auto options_of = [&session](const std::string &path) {
 		std::string error;
-		const JsonValue state = session.query("viewport", parse(R"({"op": "state", "limit": 1, "path": ")" + path + R"("})"), error);
+		const JsonValue state = session.query("viewport", parsed(R"({"op": "state", "limit": 1, "path": ")" + path + R"("})"), error);
 		const JsonValue *options = state.get("options");
 		return options ? *options : JsonValue();
 	};

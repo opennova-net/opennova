@@ -38,11 +38,7 @@ namespace {
 
 std::string fixture(const std::string &name) { return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/" + name; }
 
-bool contains(const std::string &text, const std::string &part) {
-	if (text.find(part) != std::string::npos) return true;
-	std::printf("  \"%s\" lacks \"%s\"\n", text.c_str(), part.c_str());
-	return false;
-}
+using editor_test::contains;
 
 // A picture one pixel a metre over flat ground.
 struct FlatSpace final : TerrainBrushSpace {

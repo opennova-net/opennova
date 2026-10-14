@@ -58,10 +58,7 @@ using opennova::io::JsonValue;
 namespace {
 
 using editor_test::NoProcess;
-
-std::string synth(const char *name) {
-	return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth/" + name;
-}
+using editor_test::synth;
 
 void set(ProjectSession &session, const std::string &path, const NodeAddress &address, const char *field, Value value) {
 	EditorRequest request = request::edit_record(path, Edit());

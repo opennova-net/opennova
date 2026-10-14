@@ -36,12 +36,7 @@ using opennova::io::JsonValue;
 
 namespace {
 
-JsonValue parsed(const std::string &text) {
-	JsonValue out;
-	std::string error;
-	opennova::io::json_parse(text, out, error);
-	return out;
-}
+using editor_test::parsed;
 
 // A set_workspace on the wire, as the editor MCP raises it: the answer handle_json gives.
 JsonValue wire(ProjectSession &session, const std::string &workspace) {

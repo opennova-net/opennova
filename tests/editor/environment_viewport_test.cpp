@@ -98,10 +98,7 @@ struct Rig {
 	}
 };
 
-const JsonValue *at(const JsonValue &value, const char *a, const char *b = nullptr) {
-	const JsonValue *one = value.get(a);
-	return b && one ? one->get(b) : one;
-}
+using editor_test::at;
 
 opennova::env::Keyframe keyframe(int time, uint32_t sun, uint32_t fog) {
 	opennova::env::Keyframe out;

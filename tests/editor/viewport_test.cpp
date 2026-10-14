@@ -84,9 +84,7 @@ using editor_test::FakeDevices;
 using editor_test::NoProcess;
 using Actions = std::vector<ViewportAction>;
 
-std::string synth(const char *name) {
-	return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth/" + name;
-}
+using editor_test::synth;
 
 // MAIN over the whole design, BOX, OTHER and the 12-unit TINY inside it, every edge written.
 const char *const kLayoutMenu = "<SCREEN>\r\n"
@@ -173,12 +171,7 @@ std::vector<uint8_t> tga(int width, int height) {
 	return bytes;
 }
 
-JsonValue parse(const char *text) {
-	JsonValue json;
-	std::string error;
-	opennova::io::json_parse(text, json, error);
-	return json;
-}
+using editor_test::parsed;
 
 void set(ProjectSession &session, const Document &document, const NodeAddress &address, const char *field,
 		Value value) {
@@ -189,20 +182,9 @@ void set(ProjectSession &session, const Document &document, const NodeAddress &a
 	session.handle(request);
 }
 
-// A whole-number field of a record (-1: none).
-int64_t field_of(const Document &document, const NodeAddress &address, const char *field) {
-	Value value;
-	return document.get(address, field, value) && std::holds_alternative<int64_t>(value) ? std::get<int64_t>(value)
-																						  : -1;
-}
-
+using editor_test::field_of;
 using menu_test::named;
-
-// A window's four edges: left, top, right, bottom.
-std::vector<int64_t> edges(const Document &document, const NodeAddress &window) {
-	return { field_of(document, window, "position.left"), field_of(document, window, "position.top"),
-		field_of(document, window, "position.right"), field_of(document, window, "position.bottom") };
-}
+using editor_test::edges;
 
 template <typename Kind>
 const Kind *viewport_of(ProjectSession &session, const std::string &path, ViewportKind kind) {
@@ -1036,7 +1018,7 @@ static int test_requests() {
 	const auto wire = [&](std::string text) {
 		for (size_t at = text.find("MAIN_PATH"); at != std::string::npos; at = text.find("MAIN_PATH"))
 			text.replace(at, 9, path);
-		return session.handle_json(parse(text.c_str()));
+		return session.handle_json(parsed(text.c_str()));
 	};
 	JsonValue answer = wire(
 			R"({"kind": "set_viewport", "path": "MAIN_PATH", "viewport": {"kind": "menu", "options": {"show_hidden": true}}})");
@@ -1079,10 +1061,10 @@ static int test_requests() {
 	{
 		Viewports fresh;
 		std::string error;
-		TEST_EXPECT(!fresh.set(session.view(), path, parse(R"({"kind": "menu", "options": {"bogus": 1}})"), error) &&
+		TEST_EXPECT(!fresh.set(session.view(), path, parsed(R"({"kind": "menu", "options": {"bogus": 1}})"), error) &&
 				!error.empty() && fresh.size() == 0);
 		error.clear();
-		TEST_EXPECT(fresh.set(session.view(), path, parse(R"({"kind": "menu", "options": {"show_hidden": true}})"), error) &&
+		TEST_EXPECT(fresh.set(session.view(), path, parsed(R"({"kind": "menu", "options": {"show_hidden": true}})"), error) &&
 				error.empty() && fresh.size() == 1 && fresh.find(path, ViewportKind::Menu));
 	}
 

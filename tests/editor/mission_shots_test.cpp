@@ -38,6 +38,7 @@
 #include "common/file_io.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
+#include "editor/editor_test_support.h"
 #include "editor/mission_test_support.h"
 
 using namespace opennova::editor;
@@ -223,12 +224,7 @@ struct ShotRig {
 	}
 };
 
-JsonValue parsed(const std::string &text) {
-	JsonValue out;
-	std::string error;
-	opennova::io::json_parse(text, out, error);
-	return out;
-}
+using editor_test::parsed;
 
 std::string replaced(std::string text, const std::string &from, const std::string &to) {
 	const size_t at = text.find(from);

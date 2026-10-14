@@ -57,10 +57,7 @@ constexpr NodeKind kVolume = node_kind(ModelKind::Volume);
 
 std::string synth_dir() { return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth"; }
 
-std::vector<uint8_t> serialized(const Document &document) {
-	const SerializeResult result = document.serialize();
-	return std::vector<uint8_t>(result.text.begin(), result.text.end());
-}
+using editor_test::serialized;
 
 bool load(ModelDocument &document, const std::string &path, const std::string &name) {
 	Diagnostic error;

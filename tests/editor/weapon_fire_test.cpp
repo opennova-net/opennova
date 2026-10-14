@@ -250,12 +250,7 @@ std::vector<WeaponRangeEvent> events_of(const WeaponRange &range, Kind kind, con
 	return out;
 }
 
-std::vector<DefinitionSpawn> spawns_of(const DefinitionViewport &viewport, const std::string &source) {
-	std::vector<DefinitionSpawn> out;
-	for (const DefinitionSpawn &spawn : viewport.effects().spawns())
-		if (spawn.source == source) out.push_back(spawn);
-	return out;
-}
+using editor_test::spawns_of;
 
 float distance(const PreviewVec3 &a, const PreviewVec3 &b) {
 	return std::sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z));

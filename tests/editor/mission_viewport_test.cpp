@@ -169,15 +169,11 @@ struct Rig {
 };
 
 using mission_test::first_of;
-
 using editor_test::set_edit;
 
 bool near(double a, double b, double slack = 1e-3) { return std::fabs(a - b) <= slack; }
 
-// What a refused request said ("" for none).
-std::string refusal(ProjectSession &session) {
-	return session.outcome().findings.empty() ? std::string() : session.outcome().findings.front().message;
-}
+using editor_test::refusal;
 
 } // namespace
 

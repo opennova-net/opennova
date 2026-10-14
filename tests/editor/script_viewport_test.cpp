@@ -71,12 +71,7 @@ std::string repo_file(const std::string &relative) {
 
 std::vector<uint8_t> bytes_of(const std::string &text) { return std::vector<uint8_t>(text.begin(), text.end()); }
 
-JsonValue parse(const std::string &text) {
-	JsonValue json;
-	std::string error;
-	opennova::io::json_parse(text, json, error);
-	return json;
-}
+using editor_test::parsed;
 
 // The batch a plan makes, its spans in the order the plan gives them (the ones further on first).
 std::vector<Edit> edits_of(const ShownTextEdit &planned, uint64_t gesture = 0) {
@@ -828,7 +823,7 @@ int test_session() {
 		std::string query_error;
 		const auto ask = [&](const std::string &args) {
 			query_error.clear();
-			return rig.session.query("viewport", parse(args), query_error);
+			return rig.session.query("viewport", parsed(args), query_error);
 		};
 		TEST_EXPECT(ask(R"({"op": "hit", "x": 10, "y": 10})").is_null() && query_error.find("no canvas") != std::string::npos);
 		ask(R"({"op": "render", "row": 1})");
@@ -839,7 +834,7 @@ int test_session() {
 		const JsonValue notes = ask(R"({"op": "notes"})");
 		TEST_EXPECT(query_error.empty() && notes.get("notes") && notes.get("notes")->array.empty());
 		const auto refused_no_canvas = [&](const std::string &request_json) {
-			const JsonValue answer = rig.session.handle_json(parse(request_json));
+			const JsonValue answer = rig.session.handle_json(parsed(request_json));
 			const JsonValue *outcome = answer.get("outcome");
 			const JsonValue *findings = outcome ? outcome->get("findings") : nullptr;
 			const bool ok = answer.get_bool("ok", false) && outcome && !outcome->get_bool("done", true) && findings &&
@@ -854,7 +849,7 @@ int test_session() {
 		rig.session.handle(request::set_viewport(rig.script, R"({"kind": "script", "camera": {"yaw": 1}})"));
 		TEST_EXPECT(!rig.session.outcome().done());
 		const double lines = ask(R"({"op": "state"})").get("body")->get_number("line_count", 0);
-		const JsonValue clocked = rig.session.handle_json(parse(R"({"kind": "set_viewport", "viewport": {"clock": {"time_ms": 120}}})"));
+		const JsonValue clocked = rig.session.handle_json(parsed(R"({"kind": "set_viewport", "viewport": {"clock": {"time_ms": 120}}})"));
 		const JsonValue after = ask(R"({"op": "state"})");
 		TEST_EXPECT(clocked.get_bool("ok", false) && clocked.get("outcome") && clocked.get("outcome")->get_bool("done", false) &&
 		            after.get("clock")->get_number("time_ms", 0) == 120.0 && after.get("body")->get_number("line_count", -1) == lines &&

@@ -32,6 +32,7 @@
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
+#include "editor/menu_test_support.h"
 
 using namespace opennova::editor;
 namespace mnu = opennova::mnu;
@@ -74,11 +75,7 @@ ArrangeWindow window(const mnu::Position &authored, const LayoutSolve &solve, in
 	return out;
 }
 
-bool same(const mnu::Position &a, const mnu::Position &b) {
-	return a.has_left == b.has_left && a.has_top == b.has_top && a.has_right == b.has_right &&
-	       a.has_bottom == b.has_bottom && (!a.has_left || a.left == b.left) && (!a.has_top || a.top == b.top) &&
-	       (!a.has_right || a.right == b.right) && (!a.has_bottom || a.bottom == b.bottom);
-}
+using menu_test::same;
 
 // Where a planned window lands on the screen, its parent at (parent_x, parent_y).
 mnu::RectEdges landed(const ArrangeWindow &window, const mnu::Position &position, int parent_x, int parent_y) {
@@ -86,9 +83,7 @@ mnu::RectEdges landed(const ArrangeWindow &window, const mnu::Position &position
 	return {local.left + parent_x, local.top + parent_y, local.right + parent_x, local.bottom + parent_y};
 }
 
-bool rect_is(const mnu::RectEdges &r, int left, int top, int right, int bottom) {
-	return r.left == left && r.top == top && r.right == right && r.bottom == bottom;
-}
+using menu_test::rect_is;
 
 // The order `moves` leave `from` in, applied as Document::apply applies Moves.
 std::vector<NodeId> applied(std::vector<NodeId> from, const std::vector<std::pair<NodeId, size_t>> &moves) {

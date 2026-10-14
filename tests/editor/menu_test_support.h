@@ -1,6 +1,7 @@
 #pragma once
 // Menu helpers the editor tests share: a record of a window's list by its kind token, a
-// window's native struct and depth, and a window's first APPEARANCE row made an image (the
+// window's native struct and depth, a record by the name it defines, a menu's text built from its
+// parts, two positions and a rect compared, and a window's first APPEARANCE row made an image (the
 // full mnu schema has no image field on a window: the rows are records, ADR 0046 S9h).
 #include <string>
 #include <vector>
@@ -8,6 +9,8 @@
 #include <editor/documents/mnu_document.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
+#include <formats/mnu/mnu.h>
+#include <formats/mnu/mnu_layout.h>
 
 #include "editor/editor_test_support.h"
 
@@ -50,6 +53,29 @@ inline opennova::editor::NodeAddress named(const opennova::editor::Document &doc
 	opennova::editor::NodeAddress address;
 	opennova::editor::find_definition(opennova::editor::AssetGraph(), document, name, address);
 	return address;
+}
+
+// A menu's text built from its parts: a window of a type and name (its rect 0, 0, 100, 20) holding
+// `body`, a screen of a name holding `body`, an IMAGE row of a texture.
+inline std::string window(const char *type, const char *name, const std::string &body = std::string()) {
+	return std::string("<WINDOW TYPE=\"") + type + "\" NAME=\"" + name + "\">\r\n" +
+	       "<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>20</BOTTOM></POSITION>\r\n" + body + "</WINDOW>\r\n";
+}
+inline std::string screen(const char *name, const std::string &body) {
+	return std::string("<SCREEN>\r\n<NAME>") + name + "</NAME>\r\n" + body + "</SCREEN>\r\n";
+}
+inline std::string image(const std::string &texture) {
+	return "<APPEARANCE STATE=\"DEFAULT\" TYPE=\"IMAGE\">" + texture + "</APPEARANCE>\r\n";
+}
+
+// Whether two positions write the same edges, and a rect's edges.
+inline bool same(const opennova::mnu::Position &a, const opennova::mnu::Position &b) {
+	return a.has_left == b.has_left && a.has_top == b.has_top && a.has_right == b.has_right &&
+	       a.has_bottom == b.has_bottom && (!a.has_left || a.left == b.left) && (!a.has_top || a.top == b.top) &&
+	       (!a.has_right || a.right == b.right) && (!a.has_bottom || a.bottom == b.bottom);
+}
+inline bool rect_is(const opennova::mnu::RectEdges &r, int left, int top, int right, int bottom) {
+	return r.left == left && r.top == top && r.right == right && r.bottom == bottom;
 }
 
 // One batch: the window's APPEARANCE row `row` made an IMAGE row showing `texture`.

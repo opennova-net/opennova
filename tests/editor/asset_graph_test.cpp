@@ -2511,10 +2511,7 @@ bool rewrite(const std::string &path, const std::string &text) {
 	return !ec;
 }
 
-// An IMAGE row of a texture, a FONT of a name, an ACTION that selects a screen of a menu file.
-std::string image(const std::string &texture) {
-	return "<APPEARANCE STATE=\"DEFAULT\" TYPE=\"IMAGE\">" + texture + "</APPEARANCE>\r\n";
-}
+using menu_test::image;
 std::string font(const std::string &name) { return "<FONT><NAME>" + name + "</NAME></FONT>\r\n"; }
 std::string go_screen(const std::string &file, const std::string &screen_name) {
 	return "<ACTION TYPE=\"SCREEN\" FILE=\"" + file + "\">" + screen_name + "</ACTION>\r\n";

@@ -37,13 +37,7 @@ using namespace opennova::editor;
 
 namespace {
 
-std::vector<uint8_t> tga_bytes() {
-	const std::vector<uint8_t> rgba(16, 200);
-	std::vector<uint8_t> out;
-	std::string error;
-	opennova::tga::tga_write_rgba32(rgba.data(), 2, 2, out, error);
-	return out;
-}
+using editor_test::tga_bytes;
 
 std::string read_text(const std::string &path) {
 	std::string text, error;

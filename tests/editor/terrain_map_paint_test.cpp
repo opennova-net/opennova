@@ -62,11 +62,7 @@ struct Recorder final : CanvasRequests {
 	void served(std::string, int64_t) override {}
 };
 
-bool contains(const std::string &text, const std::string &part) {
-	if (text.find(part) != std::string::npos) return true;
-	std::printf("  \"%s\" lacks \"%s\"\n", text.c_str(), part.c_str());
-	return false;
-}
+using editor_test::contains;
 
 TrnConfig tmap() {
 	const std::vector<uint8_t> bytes = test_io::read_file(fixture("terrain/tmap/Tmap.trn"));

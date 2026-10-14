@@ -37,6 +37,7 @@
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
+#include "editor/menu_test_support.h"
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
@@ -112,14 +113,8 @@ bool refused(const DialogsView::RenamePreview &plan, const char *code, const std
 	                   [&](const Diagnostic &d) { return d.code() == code && d.asset == file; });
 }
 
-std::string window(const char *type, const char *name, const std::string &body = std::string()) {
-	return std::string("<WINDOW TYPE=\"") + type + "\" NAME=\"" + name + "\">\r\n" +
-	       "<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>20</BOTTOM></POSITION>\r\n" + body + "</WINDOW>\r\n";
-}
-
-std::string screen(const char *name, const std::string &body) {
-	return std::string("<SCREEN>\r\n<NAME>") + name + "</NAME>\r\n" + body + "</SCREEN>\r\n";
-}
+using menu_test::window;
+using menu_test::screen;
 
 std::string go(const char *file, const char *screen_name) {
 	return std::string("<ACTION TYPE=\"SCREEN\" FILE=\"") + file + "\">" + screen_name + "</ACTION>\r\n";
