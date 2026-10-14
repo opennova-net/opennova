@@ -468,6 +468,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/napi_np_protocol.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_admin_command.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_ban_lists.cpp       # banlist.txt / banned.txt on the authority
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_join_check.cpp      # the 0x00 JOIN validation ladder
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_chat.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_console.cpp # the client-less host's CHAT ring, its console chat, the /INOUT lines
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_log_recorder.cpp # the /PROFILE .sph recorder
