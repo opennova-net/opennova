@@ -1919,8 +1919,8 @@ struct SaveProject {
 // S11a, the save contract. Save writes the file it names (the active one when it names
 // none), with no unsaved edits too when the file holds other bytes than it writes. A clean file
 // with nothing to rewrite writes nothing and says so: the item table, whose line the game ignores a
-// save keeps as the file has it (the demo round's bug 3; its bytes and its finding as they were:
-// test_rewrite_closed_file), its history kept. Save All goes past a
+// save keeps as the file has it (the demo round's bug 3; its bytes and its finding as they were, the
+// closed file's in test_rewrite_closed_file), its history kept. Save All goes past a
 // file it cannot write, reports it, writes the rest, and says how many of each.
 static int test_save_contract() {
 	SaveProject project("opennova_editor_session_save");
@@ -1942,6 +1942,12 @@ static int test_save_contract() {
 	session.handle(request::save());
 	TEST_EXPECT(session.outcome().done() && !output_has(v, "Saved " + project.items_path) &&
 	            v.activity.status == project.items_path + " has no changes to save.");
+	// The open table's ignored line stands after the Save: its finding and its bytes as they were.
+	session.run_operations();
+	TEST_EXPECT(has_code(v.findings.diagnostics, "catalog.ignored_input"));
+	std::string text, error;
+	TEST_EXPECT(opennova::io::read_file_text(project.root + "/" + project.items_path, text, error));
+	TEST_EXPECT(text.find("subtype Ruins") != std::string::npos && text.find("hp 10") != std::string::npos);
 	session.handle(request::redo(project.items_path));
 	TEST_EXPECT(project.items->dirty() && project.hp() == 20);
 	session.handle(request::undo(project.items_path));
