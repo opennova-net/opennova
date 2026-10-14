@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <map>
 #include <string>
 #include <utility>
@@ -39,6 +40,15 @@ using editor_test::FakePlatform;
 static bool write_empty_archive(const std::string &path) {
 	std::filesystem::create_directories(std::filesystem::path(path).parent_path());
 	return opennova::pff::pff_write_archive(path.c_str(), opennova::pff::PFF_FORMAT_PFF3, nullptr, 0) == opennova::pff::PFF_WRITE_OK;
+}
+
+// A file the game writes in its run directory: opened "w" and written in place, as the game does, so
+// a file the run linked where it should have copied it carries the write back to its source.
+static bool write_as_the_game(const std::string &path, const std::string &text) {
+	std::filesystem::create_directories(opennova::io::os_path(path).parent_path());
+	std::ofstream out(opennova::io::os_path(path), std::ios::binary);
+	out << text;
+	return static_cast<bool>(out);
 }
 
 // A game started behind (BehindStarts, what the Shell's process platform does each pump): the
@@ -245,10 +255,11 @@ static int test_strict_install_staging() {
 		TEST_EXPECT(fs::equivalent(run + "/" + name, build + "/" + name, ec)); // linked: the game only reads it
 	TEST_EXPECT(!fs::equivalent(run + "/nw_cdata.coo", build + "/nw_cdata.coo", ec)); // copied: the game rewrites it
 	TEST_EXPECT(!fs::equivalent(run + "/Jointops.exe", install + "/Jointops.exe", ec));
+	TEST_EXPECT(!fs::equivalent(run + "/binkw32.dll", install + "/binkw32_.dll", ec)); // copied: never linked
 	for (const char *name : {"nw_cdata.coo", "Jointops.exe", "binkw32.dll"})
-		TEST_EXPECT(test_io::write_text(run + "/" + name, "written by the game"));
+		TEST_EXPECT(write_as_the_game(run + "/" + name, "written by the game"));
 	for (const char *name : {"game.cfg", "player.sav", "weapon.sav", "score.ini", "_filelog.txt"})
-		TEST_EXPECT(test_io::write_text(run + "/" + name, "written by the game"));
+		TEST_EXPECT(write_as_the_game(run + "/" + name, "written by the game"));
 	TEST_EXPECT(editor_test::tree_digest(build) == build_tree && editor_test::tree_digest(install) == install_tree);
 
 	// A game.cfg the project holds is the build's own: staged with the rest, copied (the game rewrites it).
@@ -342,7 +353,7 @@ static int test_strict_expansion_staging() {
 	TEST_EXPECT(std::find(plan.staged.begin(), plan.staged.end(), "expansion/onx/onx.pff") != plan.staged.end() &&
 	            std::find(plan.staged.begin(), plan.staged.end(), "language.pff") != plan.staged.end());
 	for (const char *name : {"nw_cdata.coo", "game.cfg", "player.sav", "expansion/onx/weapon.sav", "_filelog.txt"})
-		TEST_EXPECT(test_io::write_text(run + "/" + name, "written by the game"));
+		TEST_EXPECT(write_as_the_game(run + "/" + name, "written by the game"));
 	TEST_EXPECT(editor_test::tree_digest(base) == base_tree && editor_test::tree_digest(build) == build_tree &&
 	            editor_test::tree_digest(install) == install_tree);
 
@@ -425,13 +436,13 @@ static int test_run_directory_keeps_game_state() {
 	                                                             "localres.pff", "nw_cdata.coo", "resource.pff"}));
 	TEST_EXPECT(record_run_staging(run, RunStaging{kRunModeStrict, plan.staged}, run_error));
 	// The game writes its own files, rewrites the cookie jar, logs its file opens; a record of it is left.
-	TEST_EXPECT(test_io::write_text(run + "/game.cfg", "names the adapter") && test_io::write_text(run + "/ghw.txt", "device log") &&
-	            test_io::write_text(run + "/player.sav", "the game's player") &&
-	            test_io::write_text(run + "/weapon.sav", "the game's weapons") &&
-	            test_io::write_text(run + "/hiscore.txt", "scores") &&
-	            test_io::write_text(run + "/_filelog.txt", "LOADED FILE: language.pff\n") &&
-	            test_io::write_text(run + "/nw_cdata.coo", "rewritten by the game") &&
-	            test_io::write_text(run + "/run.json", "{}") && test_io::write_text(run + "/session.log", "a log"));
+	TEST_EXPECT(write_as_the_game(run + "/game.cfg", "names the adapter") && write_as_the_game(run + "/ghw.txt", "device log") &&
+	            write_as_the_game(run + "/player.sav", "the game's player") &&
+	            write_as_the_game(run + "/weapon.sav", "the game's weapons") &&
+	            write_as_the_game(run + "/hiscore.txt", "scores") &&
+	            write_as_the_game(run + "/_filelog.txt", "LOADED FILE: language.pff\n") &&
+	            write_as_the_game(run + "/nw_cdata.coo", "rewritten by the game") &&
+	            write_as_the_game(run + "/run.json", "{}") && write_as_the_game(run + "/session.log", "a log"));
 	// The build changes: its video gone, a file added.
 	fs::remove(build + "/intro.bik");
 	TEST_EXPECT(test_io::write_text(build + "/filter.txt", "filter"));
@@ -460,7 +471,7 @@ static int test_run_directory_keeps_game_state() {
 	TEST_EXPECT(record_run_staging(run, RunStaging{kRunModeStrict, plan.staged}, run_error));
 	TEST_EXPECT(opennova::io::read_file_text(run + "/player.sav", text, io_error) && text == "project player" &&
 	            !fs::equivalent(run + "/player.sav", build + "/player.sav", ec));
-	TEST_EXPECT(test_io::write_text(run + "/player.sav", "rewritten") && opennova::io::read_file_text(build + "/player.sav", text, io_error) &&
+	TEST_EXPECT(write_as_the_game(run + "/player.sav", "rewritten") && opennova::io::read_file_text(build + "/player.sav", text, io_error) &&
 	            text == "project player");
 	fs::remove(build + "/player.sav");
 	TEST_EXPECT(editor_test::tree_digest(install) == install_tree);
@@ -470,7 +481,7 @@ static int test_run_directory_keeps_game_state() {
 	            files_in(run).empty());
 	TEST_EXPECT(prepare_strict_install_launch_plan(install, build, run, "", plan, error));
 	TEST_EXPECT(record_run_staging(run, RunStaging{kRunModeStrict, plan.staged}, run_error));
-	TEST_EXPECT(test_io::write_text(run + "/game.cfg", "names the adapter"));
+	TEST_EXPECT(write_as_the_game(run + "/game.cfg", "names the adapter"));
 
 	// A directory with no staging record (an older editor's, one whose record could not be written: none is
 	// written below) is emptied; a record naming a path outside the directory removes nothing there.
@@ -480,7 +491,7 @@ static int test_run_directory_keeps_game_state() {
 	TEST_EXPECT(!fs::exists(run + "/" + kRunStagingFileName) && fs::is_regular_file(run + "/Jointops.exe"));
 	TEST_EXPECT(take_run_directory(runs, gone, strict, run, kept, run_error) && kept.empty() && files_in(run).empty());
 	const std::string outside = dir.file("outside.txt");
-	TEST_EXPECT(test_io::write_text(outside, "mine") && test_io::write_text(run + "/game.cfg", "kept"));
+	TEST_EXPECT(test_io::write_text(outside, "mine") && write_as_the_game(run + "/game.cfg", "kept"));
 	TEST_EXPECT(record_run_staging(run, RunStaging{kRunModeStrict, {"../../outside.txt", outside, "sub/../../../outside.txt", ""}},
 	                               run_error));
 	TEST_EXPECT(take_run_directory(runs, gone, strict, run, kept, run_error) &&
@@ -515,12 +526,12 @@ static int test_run_directories_per_mode() {
 
 	// The first strict Play: its game's device dialog answered, the game writes its game.cfg.
 	TEST_EXPECT(take_run_directory(runs, liveness, strict, run, kept, run_error) && run == runs + "/strict/1" && kept.empty());
-	TEST_EXPECT(stage(run, kRunModeStrict) && test_io::write_text(run + "/game.cfg", "names the adapter"));
+	TEST_EXPECT(stage(run, kRunModeStrict) && write_as_the_game(run + "/game.cfg", "names the adapter"));
 	// An OpenNova runtime Play: a directory of its own, strict's as its game left it.
 	TEST_EXPECT(take_run_directory(runs, liveness, runtime, run, kept, run_error) && run == runs + "/runtime/1" &&
 	            kept.empty() && files_in(run).empty());
-	TEST_EXPECT(stage(run, kRunModeRuntime) && test_io::write_text(run + "/session.log", "a log") &&
-	            test_io::write_text(run + "/weapon.sav", "the runtime's weapons"));
+	TEST_EXPECT(stage(run, kRunModeRuntime) && write_as_the_game(run + "/session.log", "a log") &&
+	            write_as_the_game(run + "/weapon.sav", "the runtime's weapons"));
 	TEST_EXPECT(files_in(runs + "/strict/1") == std::vector<std::string>({"game.cfg", "staged.bin", "staging.json"}));
 	// The next strict Play keeps the game.cfg the first wrote.
 	TEST_EXPECT(take_run_directory(runs, liveness, strict, run, kept, run_error) && run == runs + "/strict/1" &&
@@ -558,7 +569,7 @@ static int test_run_directories_per_mode() {
 	TEST_EXPECT(editor_test::tree_digest(runs + "/runtime") == runtime_tree);
 
 	// Another mode's record in strict's directory (edited by hand): emptied all the same.
-	TEST_EXPECT(stage(run, kRunModeRuntime) && test_io::write_text(run + "/game.cfg", "names the adapter"));
+	TEST_EXPECT(stage(run, kRunModeRuntime) && write_as_the_game(run + "/game.cfg", "names the adapter"));
 	TEST_EXPECT(take_run_directory(runs, liveness, strict, run, kept, run_error) && run == runs + "/strict/1" &&
 	            kept.empty() && files_in(run).empty());
 
@@ -695,9 +706,9 @@ static int test_expansion_staging() {
 	}
 	// The game writes through every staged file it may write (in place, as it opens them "w"), and its
 	// expansion's weapon.sav beside the expansion's files: the build and the install keep their own.
-	for (const auto &[name, held] : copied) TEST_EXPECT(test_io::write_text(run + "/" + name, "written by the game"));
-	TEST_EXPECT(test_io::write_text(run + "/expansion/jxm/weapon.sav", "saved") &&
-	            test_io::write_text(run + "/expansion/jxm/version.txt", "edited"));
+	for (const auto &[name, held] : copied) TEST_EXPECT(write_as_the_game(run + "/" + name, "written by the game"));
+	TEST_EXPECT(write_as_the_game(run + "/expansion/jxm/weapon.sav", "saved") &&
+	            write_as_the_game(run + "/expansion/jxm/version.txt", "edited"));
 	TEST_EXPECT(editor_test::tree_digest(build) == build_tree && editor_test::tree_digest(install) == install_tree);
 	// Staged again into the same run directory (run/run_directory.h: the run keeps the game's files): each
 	// staged file put back by its name (the cookie jar the install's, the expansion's version.txt the
@@ -748,7 +759,7 @@ static int test_expansion_staging() {
 	TEST_EXPECT(fs::equivalent(run3 + "/intro.bik", copy, ec)); // linked from the cache
 	for (const auto &[name, held] : copied)
 		TEST_EXPECT(!fs::equivalent(run3 + "/" + name, install + "/" + name, ec) &&
-		            test_io::write_text(run3 + "/" + name, "written by the game"));
+		            write_as_the_game(run3 + "/" + name, "written by the game"));
 	const std::string cache_tree = editor_test::tree_digest(key);
 	TEST_EXPECT(editor_test::tree_digest(install) == settled_tree);
 	// The next run takes the same copy (a settled last write is trusted); an install file that changed

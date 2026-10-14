@@ -292,11 +292,12 @@ func test_play_dialog_plays_its_lines_in_turn() -> void:
 	# 2 * ((62 * samples + rate) / rate) = 64 ticks, then waits for the channel, then the second
 	# line's DELAY 2 runs 62 * 2 / 10 = 12 ticks.
 	assert_almost_eq(at, 1.264, 0.02, "the second after the first's doubled hold and its delay's twelve ticks")
-	# The pump that begins the decodes, the decodes waited on (a test's wait); the clock read before the pump that
-	# starts the play, so the player's own start, from which the second line's wait runs, is never before it.
+	# The clock read before the pump that begins the decodes (that same pump starts the play when they are done
+	# already), so the player's own start, from which the second line's wait runs, is never before it; the decodes
+	# waited on (a test's wait), and the pump that starts the play.
+	var started := Time.get_ticks_msec()
 	_app.pump()
 	_app.wait_for_sound()
-	var started := Time.get_ticks_msec()
 	_app.pump()
 	assert_eq(String(_app.get_sound_state()), "playing")
 	var players := _preview_players()

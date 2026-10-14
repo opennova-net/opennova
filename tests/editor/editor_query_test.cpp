@@ -267,6 +267,14 @@ static int test_paging() {
 			pages_concatenate(session, "document", R"({"path": "menu_style.mns"})", "rows", 3, 7));
 	TEST_EXPECT(pages_concatenate(session, "document_search",
 			R"({"path": "menu_style.mns", "text": "DEF"})", "hits", 2, 4));
+	// The search's own args: an empty text is refused; match_case drops the hits of another case.
+	TEST_EXPECT(refusal(session, "document_search", R"({"path": "menu_style.mns", "text": ""})")
+	                    .find("the text to find is empty") != std::string::npos);
+	const double any_case =
+			ask(session, "document_search", R"({"path": "menu_style.mns", "text": "def"})").get_number("count", -1.0);
+	const double one_case = ask(session, "document_search",
+			R"({"path": "menu_style.mns", "text": "def", "match_case": true})").get_number("count", -1.0);
+	TEST_EXPECT(any_case > 0.0 && one_case >= 0.0 && one_case < any_case);
 	TEST_EXPECT(pages_concatenate(session, "project_search", R"({"text": "DEF"})", "hits", 2, 4));
 	// The graph's lists: what the menu names, who uses the stylesheet, the names it defines.
 	TEST_EXPECT(pages_concatenate(session, "references", R"({"path": "main.mnu"})", "edges", 2, 3));
