@@ -24,7 +24,8 @@ endfunction()
 # MIXED registers it through opennova_add_mixed_test: the row and its _retail twin. SERIAL runs the
 # row (and its twin) alone, for a row whose own work takes every core (a terrain bake's threads) or
 # the disk (a build's hashing), which ctest's parallel legs would starve past its timeout; TIMEOUT
-# gives such a row its own bound in seconds.
+# gives such a row its own bound in seconds (600 for the serial rows: more than three times the 163 s one
+# took alone on CI).
 function(opennova_add_editor_test stem)
     cmake_parse_arguments(T "MIXED;SERIAL" "NAME;TIMEOUT" "SOURCES;LIBS" ${ARGN})
     if(T_UNPARSED_ARGUMENTS)
@@ -90,7 +91,7 @@ opennova_add_editor_test(terrain_import MIXED)
 
 opennova_add_editor_test(create_missing)
 
-opennova_add_editor_test(project_build SERIAL TIMEOUT 300)
+opennova_add_editor_test(project_build SERIAL TIMEOUT 600)
 
 opennova_add_editor_test(play_session)
 
@@ -834,10 +835,10 @@ opennova_add_editor_test(raster_document)
 opennova_add_editor_test(terrain_heights_document MIXED)
 
 # The heights brushes (S25).
-opennova_add_editor_test(heights_brushes SERIAL TIMEOUT 300)
+opennova_add_editor_test(heights_brushes SERIAL TIMEOUT 600)
 
 # The heights' bake rules (S25): no loop over a redo or a refused bake, Save settling first, the follow's edits.
-opennova_add_editor_test(heights_bake_rules SERIAL TIMEOUT 300)
+opennova_add_editor_test(heights_bake_rules SERIAL TIMEOUT 600)
 
 # Unlocked entities following the ground at a bake's landing, locked ones staying (S25).
 opennova_add_editor_test(height_lock_follow)
