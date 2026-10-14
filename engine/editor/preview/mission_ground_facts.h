@@ -117,6 +117,8 @@ public:
 	// Moves with each read of its files and each heights patch alone (S25: what a picture of the heights keys on, which
 	// a surface or foliage patch leaves as it is).
 	uint64_t heights_revision() const { return heights_revision_; }
+	// And with each read and each char map patch alone (what a picture of the surface classes keys on).
+	uint64_t surface_revision() const { return surface_revision_; }
 	// The files it read, each at the stamp it read it at (S25: a stroke's file among them feeds a view's ground).
 	const FileStamps &stamps() const { return stamps_; }
 	// The files `names` names (as it read them, in any case) take the stamps `files` gives them now (S25: a stroke's file
@@ -197,6 +199,7 @@ private:
 	int reads_ = 0;
 	uint64_t revision_ = 0;
 	uint64_t heights_revision_ = 0;
+	uint64_t surface_revision_ = 0;
 	// The heights read (the .trn's polytrn_polydata, a .cpt; "" none).
 	std::string heights_file_;
 };

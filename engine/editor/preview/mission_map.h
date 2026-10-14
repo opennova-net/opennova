@@ -95,7 +95,7 @@ struct MissionMapOptions {
 	bool operator!=(const MissionMapOptions &o) const { return !(*this == o); }
 };
 // {marks: {items, buildings, markers, organics, areas, paths, labels, links}, color_by (team or group), grid, text,
-// stick, snap, background (colour, height, delta, flatness or none), water}.
+// stick, snap, background (colour, height, delta, flatness, surface or none), water}.
 io::JsonValue mission_map_options_to_json(const MissionMapOptions &options);
 
 // A footprint narrower than this many pixels across its middle is drawn as its pin (its wireframe a speck there), and
@@ -282,9 +282,9 @@ private:
 	// The terrain and water as the game reads them (DI-07), which the brush and the background read too.
 	mutable MissionGround terrain_;
 	MissionMapTerrainView terrain_view_;
-	// S25: the ground patched in place during a stroke: the heights (its backgrounds patched with them), and the planes
-	// it does not draw (the surface, foliage and blend maps: nothing of its picture to make again); a colour stroke
-	// makes the commander map's colours again at its end.
+	// S25: the ground patched in place during a stroke: the heights and the surface map (the backgrounds made of them
+	// patched with them), and the planes it does not draw (the foliage and blend maps: nothing of its picture to make
+	// again); a colour stroke makes the commander map's colours again at its end.
 	TerrainStrokeFollow stroke_{terrain_plane_bit(TerrainPlane::Heights) | terrain_plane_bit(TerrainPlane::Surface) |
 	                            terrain_plane_bit(TerrainPlane::Foliage) | terrain_plane_bit(TerrainPlane::Blend)};
 	uint64_t tiles_serial_ = 0;  // S25: moves with the placed tiles drawn
