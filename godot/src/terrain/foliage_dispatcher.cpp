@@ -292,8 +292,8 @@ void FoliageDispatcher::_bind_methods() {
   BIND_ENUM_CONSTANT(PROBE_DRAW_DETAIL_LOW_FAR);
   BIND_ENUM_CONSTANT(PROBE_DRAW_DETAIL_AUTO);
 	ClassDB::bind_method(D_METHOD("is_globals_held"), &FoliageDispatcher::is_globals_held);
-	ClassDB::bind_static_method("FoliageDispatcher", D_METHOD("get_absent_writes"),
-			&FoliageDispatcher::get_absent_writes);
+	ClassDB::bind_static_method("FoliageDispatcher", D_METHOD("get_global_writes"),
+			&FoliageDispatcher::get_global_writes);
 }
 
 void FoliageDispatcher::_notification(int p_what) {

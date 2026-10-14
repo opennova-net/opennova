@@ -293,7 +293,7 @@ public:
 	bool is_globals_held() const { return mask_pass_.is_globals_held(); }
 	void republish_globals() { mask_pass_.republish_globals(); }
 	static void publish_absent() { FoliageMaskPass::publish_absent(); }
-	static int64_t get_absent_writes() { return FoliageMaskPass::get_absent_writes(); }
+	static int64_t get_global_writes() { return FoliageMaskPass::get_global_writes(); }
 
 protected:
   static void _bind_methods();

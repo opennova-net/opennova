@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 
@@ -77,6 +78,9 @@ public:
 	bool is_globals_held() const { return globals_held_; }
 	void republish_globals();
 	static void publish_absent();
+	// How many times a capture wrote its globals since the process began, the
+	// absent values too (a read-back for the hold's tests).
+	static int64_t get_global_writes() { return global_writes_.load(); }
 
 	void _notification(int p_what);
 
@@ -110,6 +114,10 @@ private:
 	bool force_pending_ = true;
 	bool warned_device_failure_ = false;
 	bool globals_held_ = false;
+	// Counted from the render thread too (the publication's copy).
+	static inline std::atomic<int64_t> global_writes_{ 0 };
+	static void _write_global(
+			RenderingServer *p_rs, const StringName &p_name, const Variant &p_value);
 };
 
 } // namespace godot

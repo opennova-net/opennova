@@ -67,6 +67,8 @@ bool is_selected_renderer(RenderingServer *p_rs) {
 } // namespace
 
 void EnvironmentCubeCapture::_bind_methods() {
+	ClassDB::bind_static_method("EnvironmentCubeCapture", D_METHOD("get_global_writes"),
+			&EnvironmentCubeCapture::get_global_writes);
 	ClassDB::bind_method(D_METHOD("set_terrain_data", "terrain_data"),
 			&EnvironmentCubeCapture::set_terrain_data);
 	ClassDB::bind_method(D_METHOD("get_terrain_data"),
@@ -146,8 +148,7 @@ void EnvironmentCubeCapture::_notification(int p_what) {
 		// been wired, and that copy is forced regardless of the cadence.
 		RenderingServer *rs = RenderingServer::get_singleton();
 		if (rs != nullptr && !globals_held_) {
-			rs->global_shader_parameter_set(
-					"opennova_environment_cube_ready", false);
+			_write_global(rs, "opennova_environment_cube_ready", false);
 		}
 		force_pending_ = true;
 	} else if (p_what == NOTIFICATION_READY) {
@@ -315,13 +316,13 @@ bool EnvironmentCubeCapture::_wire_cube(RenderingServer *p_rs) {
 		}
 		environment_cube_->set_texture_rd_rid(cube);
 		if (!globals_held_) {
-			p_rs->global_shader_parameter_set("opennova_environment_cube", environment_cube_);
+			_write_global(p_rs, "opennova_environment_cube", environment_cube_);
 		}
 	}
 	wired_publishes_ = requested_publishes_;
 	cube_ready_ = true;
 	if (!globals_held_) {
-		p_rs->global_shader_parameter_set("opennova_environment_cube_ready", true);
+		_write_global(p_rs, "opennova_environment_cube_ready", true);
 	}
 	return true;
 }
@@ -332,12 +333,18 @@ void EnvironmentCubeCapture::republish_globals() {
 		return;
 	}
 	if (environment_cube_.is_valid()) {
-		rs->global_shader_parameter_set("opennova_environment_cube", environment_cube_);
+		_write_global(rs, "opennova_environment_cube", environment_cube_);
 	} else {
-		rs->global_shader_parameter_set("opennova_environment_cube", Variant());
+		_write_global(rs, "opennova_environment_cube", Variant());
 	}
-	rs->global_shader_parameter_set(
-			"opennova_environment_cube_ready", cube_ready_ && environment_cube_.is_valid());
+	_write_global(
+			rs, "opennova_environment_cube_ready", cube_ready_ && environment_cube_.is_valid());
+}
+
+void EnvironmentCubeCapture::_write_global(
+		RenderingServer *p_rs, const StringName &p_name, const Variant &p_value) {
+	++global_writes_;
+	p_rs->global_shader_parameter_set(p_name, p_value);
 }
 
 void EnvironmentCubeCapture::publish_absent() {
@@ -345,8 +352,8 @@ void EnvironmentCubeCapture::publish_absent() {
 	if (rs == nullptr) {
 		return;
 	}
-	rs->global_shader_parameter_set("opennova_environment_cube_ready", false);
-	rs->global_shader_parameter_set("opennova_environment_cube", Variant());
+	_write_global(rs, "opennova_environment_cube_ready", false);
+	_write_global(rs, "opennova_environment_cube", Variant());
 }
 
 void EnvironmentCubeCapture::_publish_on_render_thread() {
