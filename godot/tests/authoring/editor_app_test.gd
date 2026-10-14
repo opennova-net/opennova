@@ -87,16 +87,6 @@ func _play() -> bool:
 	return _seam.get_play_state() == "running"
 
 
-# Play starts the game only on Windows (godot/src/authoring/child_process.h): elsewhere
-# it refuses and says so, and a Play leg has no running game to drive.
-func _play_refused_off_windows() -> bool:
-	if OS.get_name() == "Windows":
-		return false
-	assert_false(_play(), "Play refuses off Windows")
-	pending("Play is Windows-only (godot/src/authoring/child_process.h)")
-	return true
-
-
 func test_editor_variant_boots_headless() -> void:
 	if _app == null:
 		return
@@ -142,8 +132,6 @@ func test_new_project_fills_builds_and_plays() -> void:
 
 	# Play: the runtime is this Godot binary at the source project, headless and
 	# self-quitting, so the real process seam spawns it and sees it leave.
-	if _play_refused_off_windows():
-		return
 	_app.set("play_engine_args", PackedStringArray(["--headless", "--disable-render-loop", "--quit-after", "10"]))
 	assert_true(_play(), "\n".join(_seam.get_output_lines()))
 	assert_eq(_seam.get_play_state(), "running")
@@ -699,8 +687,6 @@ func test_john_smith_menu_reaches_the_play_child() -> void:
 	if items.size() == 1:
 		assert_eq(_seam.get_field(items[0], "text"), "One")
 	assert_true(_build(), "\n".join(_seam.get_output_lines()))
-	if _play_refused_off_windows():
-		return
 	_app.set("play_engine_args", PackedStringArray(["--headless", "--disable-render-loop", "--max-fps", "60"]))
 	assert_true(_play(), "\n".join(_seam.get_output_lines()))
 	var client: RefCounted = null
@@ -788,8 +774,6 @@ func test_catalog_edits_reach_the_play_child() -> void:
 	assert_false(_seam.is_document_dirty())
 	assert_true(_build(), "\n".join(_seam.get_output_lines()))
 	var built_root: String = _seam.get_last_build_dir()
-	if _play_refused_off_windows():
-		return
 	_app.set("play_engine_args", PackedStringArray(["--headless", "--disable-render-loop", "--max-fps", "60"]))
 	assert_true(_play(), "\n".join(_seam.get_output_lines()))
 	var client: RefCounted = null

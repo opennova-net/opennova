@@ -9,7 +9,7 @@ extends GutTest
 ## editor's
 ## StreamPeerTCP link asks the game for its logic while the mission's Logic pane shows, the editor's live op agrees
 ## with what the game holds, play_debug fires an event and sets a variable through the game's rows, and the game's
-## refusal reaches Output in its words. Play starts a game only on Windows (godot/src/authoring/child_process.h).
+## refusal reaches Output in its words.
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
@@ -104,9 +104,6 @@ func _output() -> String:
 
 func test_the_live_link_reads_the_game_and_fires_through_its_debug_table() -> void:
 	if _app == null:
-		return
-	if OS.get_name() != "Windows":
-		pending("Play is Windows-only (godot/src/authoring/child_process.h)")
 		return
 	var root := OS.get_cache_dir().path_join("opennova live project %d" % Time.get_ticks_usec())
 	_dirs.append(root)

@@ -558,7 +558,7 @@ def run(args: argparse.Namespace, project: Path, pid_file: Path, started_pids: d
         return
 
     say(f"8. Play in {args.mission}")
-    # The game's window behind the others (Windows only: elsewhere Play spawns nothing with it): the run takes
+    # The game's window behind the others (Windows only: elsewhere it starts as Play starts it): the run takes
     # no focus from whoever works at the machine.
     play = {"kind": "play", "mission": args.mission}
     if os.name == "nt":

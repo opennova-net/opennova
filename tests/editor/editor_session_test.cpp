@@ -1270,8 +1270,8 @@ static int test_outcomes_and_refusals() {
 // a Save, a create-missing or an import (S11b) while a build packs the project's files (S13
 // A1: the busy gate's operation.busy), and an edit, an undo or a redo on a file that is not
 // open, each leave a warning and an outcome that is not done, and change nothing. A blocked
-// build lists each blocker once. Play where the platform has no spawn says it is Windows-only
-// before building.
+// build lists each blocker once. Play where the platform has no spawn says the editor cannot start the
+// game there, before building.
 static int test_requests_that_cannot_run() {
 	editor_test::TempProjectDir dir("opennova_editor_session_cannot_run");
 	FakePlatform platform;
@@ -1356,7 +1356,7 @@ static int test_requests_that_cannot_run() {
 	TEST_EXPECT(!session.view().activity.operation.running() && platform.spawns == spawns);
 	TEST_EXPECT(
 			!session.outcome().done() && v.findings.diagnostics.back().code() == "play.unsupported");
-	TEST_EXPECT(v.findings.diagnostics.back().message.find("Windows-only") != std::string::npos);
+	TEST_EXPECT(v.findings.diagnostics.back().message.find("cannot start the game on this system") != std::string::npos);
 	return 0;
 }
 
@@ -1419,7 +1419,7 @@ static int test_request_faults_leave_no_rows() {
 }
 
 // A request's words are its own: Play over the command line's process seam (NullProcessPlatform,
-// which starts no game) says that session starts none, never that Play is Windows-only; an Open,
+// which starts no game) says that session starts none, never the default's words; an Open,
 // a Reload and a Create say on the status line what they did, or that they did not, never the line
 // an earlier request left.
 static int test_status_says_the_request() {
@@ -1436,7 +1436,7 @@ static int test_status_says_the_request() {
 	TEST_EXPECT(!session.outcome().done() && !v.findings.diagnostics.empty() &&
 	            v.findings.diagnostics.back().code() == "play.unsupported");
 	const std::string play = v.findings.diagnostics.empty() ? std::string() : v.findings.diagnostics.back().message;
-	TEST_EXPECT(play.find("Windows-only") == std::string::npos && play.find("starts no game") != std::string::npos);
+	TEST_EXPECT(play.find("on this system") == std::string::npos && play.find("starts no game") != std::string::npos);
 	TEST_EXPECT(v.activity.status == "Play is not available here: see Problems.");
 
 	// An Open after a line another request left: its own line.

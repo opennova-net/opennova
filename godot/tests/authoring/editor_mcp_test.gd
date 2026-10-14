@@ -888,13 +888,6 @@ func test_john_smith_through_the_editor_mcp() -> void:
 	assert_true(FileAccess.file_exists(String(built.get("dir", "")).path_join("localres.pff")), str(built))
 
 	# Play: the game runs on the build with its own endpoint, which the game tools drive.
-	# It starts the game only on Windows (godot/src/authoring/child_process.h): elsewhere
-	# it refuses and says so, and there is no running game to drive.
-	if OS.get_name() != "Windows":
-		await _play()
-		assert_ne(String((await _run()).get("state", "")), "running")
-		pending("Play is Windows-only (godot/src/authoring/child_process.h)")
-		return
 	_app.set("play_engine_args", PackedStringArray(["--headless", "--disable-render-loop", "--max-fps", "60"]))
 	# What the checkout's Godot project holds: a source Play (the Godot binary with --path on it)
 	# writes nothing there.

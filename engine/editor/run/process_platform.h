@@ -32,11 +32,9 @@ public:
 	virtual ~ProcessPlatform() = default;
 	// False where this platform has no spawn at all: Play says so instead of trying.
 	virtual bool can_spawn() const { return true; }
-	// Why can_spawn is false, as Play's refusal says it: an OS whose spawn the editor does not
-	// implement yet (the default), or a session that starts no game at all (the command line's).
-	virtual std::string no_spawn_reason() const {
-		return "Play is Windows-only for now: the editor cannot start the game on this system.";
-	}
+	// Why can_spawn is false, as Play's refusal says it: a system the process seam starts nothing on (the
+	// default), or a session that starts no game at all (the command line's).
+	virtual std::string no_spawn_reason() const { return "The editor cannot start the game on this system."; }
 	// The child's id, or -1 when it could not be started, with why in `error` (the OS's own words where it
 	// has them: the program missing, the directory gone, a path too long).
 	virtual int64_t spawn(const LaunchPlan &plan, std::string &error) = 0;

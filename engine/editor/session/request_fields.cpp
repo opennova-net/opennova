@@ -225,7 +225,7 @@ constexpr RequestField kFields[] = {
 	{ F::Behind, "behind", J::Boolean,
 			"Play's game window starts behind every other window, the editor keeping the foreground (shown without "
 			"activation, sent to the bottom while it starts, until the person brings it forward): a client driving "
-			"the editor while a person works at the machine. Windows only: elsewhere Play spawns nothing. On "
+			"the editor while a person works at the machine. Windows only: elsewhere the game starts as Play starts it. On "
 			"edit_in_viewport, the Play its command plans (play_from_here)." },
 	{ F::Fresh, "fresh", J::Boolean,
 			"Play's run directory is emptied before the game starts, of what the runs before wrote there as "
