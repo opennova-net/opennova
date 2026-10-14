@@ -10,9 +10,11 @@
 #include <editor/documents/document_types.h>
 #include <editor/documents/mns_document.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/reference_kinds.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/graph/style_value_use.h>
 #include <editor/project/project_files.h>
+#include <editor/project_build/build_plan.h>
 #include <editor/project_build/build_run.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
@@ -418,6 +420,52 @@ static int test_validation() {
 	return 0;
 }
 
+// A stylesheet the game reads whose stored text hangs its reader (S26 A2): a value ended by a lone LF with text right
+// after it [orig: NapiConfigMap_ParseKeyValueBuffer @ 0x639c3b]. The rows end CR LF and read on, so the hang is the
+// stored file's: style.hangs, an error that gates the build with the game's refusal, until a Save writes the rows;
+// then it is gone and the build goes.
+static int test_stored_hang() {
+	editor_test::TempProjectDir dir("opennova_styles_stored_hang");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Styles"));
+	editor_test::create_missing_files(session);
+	const SessionView &view = session.view();
+	const AssetEntry *style = view.project.scan->find("menu_style.mns");
+	TEST_EXPECT(style != nullptr);
+	if (!style) return 1;
+	const std::string style_dir = (dir.path / "project" / style->relative_path).parent_path().generic_string();
+	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "A 1\nB 2\r\n"));
+	editor_test::handle_to_end(session, request::rescan());
+	const AssetEntry *brand = view.project.scan->find("brand.mns");
+	TEST_EXPECT(brand != nullptr);
+	if (!brand) return 1;
+	const std::string brand_path = brand->relative_path;
+	const auto hang = [&]() -> const Diagnostic * {
+		for (const Diagnostic &d : view.findings.diagnostics)
+			if (d.code() == "style.hangs" && d.asset == brand_path) return &d;
+		return nullptr;
+	};
+	// The read stands still at B on line 2, after the value the lone LF ended.
+	const Diagnostic *found = hang();
+	TEST_EXPECT(found && found->severity == DiagnosticSeverity::Error && found->line == 2 && blocks_build(*found) &&
+	            blocker_is_the_games(*found) &&
+	            blocker_reason(*found).find("NapiConfigMap_ParseKeyValueBuffer") != std::string::npos);
+	editor_test::handle_to_end(session, request::build());
+	TEST_EXPECT(view.activity.last_build && !view.activity.last_build->ok);
+	editor_test::handle_to_end(session, request::open_document(brand_path));
+	editor_test::handle_to_end(session, request::save(brand_path));
+	TEST_EXPECT(!hang());
+	std::string written, message;
+	TEST_EXPECT(opennova::io::read_file_text(dir.file("project") + "/" + brand_path, written, message) &&
+	            written == "A 1\r\nB 2\r\n");
+	editor_test::handle_to_end(session, request::build());
+	TEST_EXPECT(view.activity.last_build && view.activity.last_build->ok);
+	std::printf("test_stored_hang passed\n");
+	return 0;
+}
+
 // S11a: a value edit is a change and reverts; a line's number and its overridden flag,
 // read off the whole document, never are, though a line added above moves every line and
 // a later definition's removal lifts the override.
@@ -521,6 +569,7 @@ int main(int argc, char **argv) {
 	failures += test_refusals();
 	failures += test_changes_since_save();
 	failures += test_validation();
+	failures += test_stored_hang();
 	const std::string fixture = retail::reference_fixture("mns/menu_style.mns");
 	if (!fixture.empty()) failures += test_the_shipped_sheet(fixture);
 	if (failures == 0) std::printf("editor_styles: all tests passed\n");

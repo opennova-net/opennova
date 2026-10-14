@@ -101,6 +101,53 @@ int test_fields() {
 	return 0;
 }
 
+// A key the profile's type does not read is refused (S26 A11): the game's reader dispatches every key but `type` on
+// the type [orig: AIProfile_ParseProperty @ 0x45DF15..0x45DF2F], so a GROUND profile holds no HELO key; setting it to
+// none is taken. A type change clears every key the new type does not read (ORGANIC reads none but the type), and
+// the profile saves and reads back as it stands.
+int test_type_keys() {
+	AiProfileDocument document;
+	Diagnostic error;
+	TEST_EXPECT(document.load_bytes(bytes_of(kFile), "ai/g_test.aip", AssetKind::AiProfile, "jo", error));
+	const NodeAddress at{document.rows()[0]->id, kProfile, 0};
+	Edit edit;
+	edit.address = at;
+	edit.field = "patrol_altitude";
+	edit.value = 100.0;
+	TEST_EXPECT(!document.apply(edit, error) && error.message.find("only in a profile of another type") != std::string::npos);
+	edit.value = 0.0;
+	TEST_EXPECT(document.apply(edit, error));
+	edit.field = "view_dist";
+	edit.value = int64_t(500);
+	TEST_EXPECT(document.apply(edit, error));
+	edit.field = "type";
+	edit.value = int64_t(aip::kTypeOrganic);
+	TEST_EXPECT(document.apply(edit, error));
+	Value value;
+	size_t cleared = 0;
+	for (const aip::KeyRow &row : aip::key_rows()) {
+		if (row.unit == aip::Unit::Type || aip::reads(row, aip::kTypeOrganic)) continue;
+		TEST_EXPECT(document.get(at, row.key, value));
+		const bool none = value == Value(std::string()) || value == Value(0.0) || value == Value(int64_t(0));
+		if (!none) std::printf("  %s still holds a value on an ORGANIC profile\n", row.key);
+		TEST_EXPECT(none);
+		++cleared;
+	}
+	TEST_EXPECT(cleared > 0);
+	const SerializeResult saved = document.serialize();
+	for (const SourceIssue &issue : saved.issues) std::printf("  the save: %s\n", issue.message.c_str());
+	TEST_EXPECT(saved.ok());
+	AiProfileDocument back;
+	TEST_EXPECT(back.load_bytes(bytes_of(saved.text), "ai/g_test.aip", AssetKind::AiProfile, "jo", error));
+	const NodeAddress back_at{back.rows()[0]->id, kProfile, 0};
+	for (const aip::KeyRow &row : aip::key_rows()) {
+		Value mine, read;
+		TEST_EXPECT(document.get(at, row.key, mine) && back.get(back_at, row.key, read) && mine == read);
+	}
+	std::printf("type keys: another type's key refused, a type change clearing the keys the new type does not read\n");
+	return 0;
+}
+
 int test_findings() {
 	AiProfileDocument document;
 	Diagnostic error;
@@ -153,6 +200,6 @@ int test_retail() {
 
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
-	if (test_fields() || test_findings() || test_retail()) return 1;
+	if (test_fields() || test_type_keys() || test_findings() || test_retail()) return 1;
 	return 0;
 }

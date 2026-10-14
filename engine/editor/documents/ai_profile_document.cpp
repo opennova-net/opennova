@@ -188,20 +188,28 @@ bool set_key(const aip::KeyRow &row, aip::Profile &p, const Value &value, std::s
 		if (stored != 0 && aip::value_words(row, p.type, stored).empty())
 			return error = "No number the file can hold reads back as that.", false;
 	}
-	row.set(p, stored);
 	// A new type's reader reads none of another type's keys, and keeps none of a subtype word of the other type
 	// [orig: AIProfile_ParseProperty @ 0x45DF15..0x45DF2F; the subtype words @ 0x45E887 (GROUND), @ 0x45FA63 (HELO)]:
-	// the profile holds what the file then holds as the game reads it, which the writer puts down.
-	if (row.unit == aip::Unit::Type)
+	// the profile becomes what the file then holds as the game reads it, which the writer puts down: the loader's
+	// zeroed record [orig: AIProfile_LoadOrFind @ 0x45FE09] of the new type, each key the type reads as it stood
+	// (a speed both types read moving to the new type's member), a value the type has no word for none.
+	if (row.unit == aip::Unit::Type && stored != p.type) {
+		const aip::Profile was = p;
+		aip::Profile made;
+		row.set(made, stored);
 		for (const aip::KeyRow &other : aip::key_rows()) {
-			if (other.unit == aip::Unit::Type) continue;
+			if (other.unit == aip::Unit::Type || !aip::reads(other, stored)) continue;
 			if (other.unit == aip::Unit::Weapon) {
-				if (!aip::reads(other, stored)) ((p.*(other.block)).*(other.name)).clear();
+				(made.*(other.block)).*(other.name) = (was.*(other.block)).*(other.name);
 				continue;
 			}
-			const int32_t held = other.get ? other.get(p) : 0;
-			if (held != 0 && (!aip::reads(other, stored) || aip::value_words(other, stored, held).empty())) other.set(p, 0);
+			const int32_t held = other.get ? other.get(was) : 0;
+			if (held != 0 && other.set && !aip::value_words(other, stored, held).empty()) other.set(made, held);
 		}
+		p = made;
+		return true;
+	}
+	row.set(p, stored);
 	return true;
 }
 
