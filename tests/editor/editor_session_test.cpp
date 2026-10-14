@@ -1937,10 +1937,10 @@ struct SaveProject {
 };
 
 // S11a, the save contract. Save writes the file it names (the active one when it names
-// none), with no unsaved edits too when the file holds other bytes than it writes (a menu's
-// ignored input: test_rewrite_closed_file). A clean file with nothing to rewrite writes nothing
-// and says so: the item table, whose line the game ignores a save keeps as the file has it (the
-// demo round's bug 3), its finding standing, its history kept. Save All goes past a
+// none), with no unsaved edits too when the file holds other bytes than it writes. A clean file
+// with nothing to rewrite writes nothing and says so: the item table, whose line the game ignores a
+// save keeps as the file has it (the demo round's bug 3; its bytes and its finding as they were:
+// test_rewrite_closed_file), its history kept. Save All goes past a
 // file it cannot write, reports it, writes the rest, and says how many of each.
 static int test_save_contract() {
 	SaveProject project("opennova_editor_session_save");
@@ -1962,11 +1962,6 @@ static int test_save_contract() {
 	session.handle(request::save());
 	TEST_EXPECT(session.outcome().done() && !output_has(v, "Saved " + project.items_path) &&
 	            v.activity.status == project.items_path + " has no changes to save.");
-	session.run_operations();
-	TEST_EXPECT(has_code(v.findings.diagnostics, "catalog.ignored_input"));
-	std::string text, error;
-	TEST_EXPECT(opennova::io::read_file_text(project.root + "/" + project.items_path, text, error));
-	TEST_EXPECT(text.find("subtype Ruins") != std::string::npos && text.find("hp 10") != std::string::npos);
 	session.handle(request::redo(project.items_path));
 	TEST_EXPECT(project.items->dirty() && project.hp() == 20);
 	session.handle(request::undo(project.items_path));
@@ -2149,17 +2144,17 @@ static int test_rewrite_closed_file() {
 	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "document.missing"));
 
 	// A menu that does not serialize (an empty ACTION TYPE, which retail crashes on) and holds
-	// input the game ignores (SCREENX): its own finding says it does not serialize, so the
-	// ignored input offers no Rewrite; a Save of it is refused with the reason, the file
-	// untouched, closed and open alike: never "no changes".
+	// input the game ignores (SCREENX): a Save of it is refused with the reason, the file
+	// untouched, closed and open alike: never "no changes". (No ignored input of a menu or a
+	// catalog offers a Rewrite, kept on save as they are: problems_test's test_fixes, whose Rewrite
+	// rows they are none of.)
 	const std::string crash_text = "<SCREEN><NAME>C</NAME><WINDOW type=\"button\" name=\"B\" SCREENX=\"1\">"
 	                               "<POSITION><LEFT>0</LEFT></POSITION><ACTION type=\"\">X</ACTION></WINDOW></SCREEN>";
 	const std::string crash = v.project.root + "/menus/crash.mnu";
 	TEST_EXPECT(editor_test::write_text(crash, crash_text));
 	session.handle(request::rescan());
 	session.run_operations();
-	ProblemFix rewrite;
-	TEST_EXPECT(has_code(v.findings.diagnostics, "menu.ignored_input") && !find_fix(v, "menu.ignored_input", "Rewrite crash.mnu", rewrite));
+	TEST_EXPECT(has_code(v.findings.diagnostics, "menu.ignored_input"));
 	session.handle(request::save("menus/crash.mnu"));
 	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "document.unserializable"));
 	TEST_EXPECT(v.activity.status.find("no changes") == std::string::npos && !session.document_for("crash.mnu"));
@@ -3231,9 +3226,8 @@ static int test_import_fix_plans_dependencies() {
 
 // S11b: a fix's request, raised through handle, does what its label says: Create makes the
 // required file; Import opens the import dialog on that one file of the game data, and
-// importing it meets the row; Use renames a file of the project to the required name;
-// Rewrite drops the input the game ignores from a closed file; a missing font's Create
-// makes the font (not opened: the editor has no font document) and the reference resolves.
+// importing it meets the row; Use renames a file of the project to the required name; a
+// missing font's Create makes the font and the reference resolves.
 static int test_fixes_apply() {
 	editor_test::TempProjectDir dir("opennova_editor_session_fixes");
 	const std::string install = dir.file("install");
@@ -3286,17 +3280,9 @@ static int test_fixes_apply() {
 	session.run_operations();
 	TEST_EXPECT(session.outcome().done() && v.project.scan->find("keyhelp.bin") && !v.project.scan->find("spare.bin"));
 	TEST_EXPECT(!finding_about(v.findings.diagnostics, "requirement.missing", "keyhelp.bin"));
-	// The rest made; then a menu with input the game ignores, closed: Rewrite drops it.
+	// The rest made.
 	editor_test::create_missing_files(session);
 	TEST_EXPECT(v.project.requirements->required_missing == 0);
-	const std::string ignored_file = root + "/menus/ignored.mnu";
-	TEST_EXPECT(editor_test::write_text(ignored_file, "<SCREEN><NAME>I</NAME><WINDOW type=\"button\" name=\"B\" SCREENX=\"1\">"
-	                                                  "<POSITION><LEFT>0</LEFT></POSITION></WINDOW></SCREEN>"));
-	session.handle(request::rescan());
-	session.run_operations();
-	// Kept on save with the menu's look (D-MNU-22): no Rewrite is offered.
-	TEST_EXPECT(has_code(v.findings.diagnostics, "menu.ignored_input") &&
-	            !find_fix(v, "menu.ignored_input", "Rewrite ignored.mnu", fix));
 	std::string io_error;
 	// A font no file of the project is: Create makes it, and the startup menu's name resolves.
 	session.handle(request::open_document("main.mnu"));

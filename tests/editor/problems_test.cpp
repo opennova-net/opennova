@@ -502,9 +502,9 @@ static int test_fixes() {
 	return 0;
 }
 
-// No Rewrite for a file whose own finding says it does not serialize (its Save is refused):
-// fixes_for, has_fixes, bulk_fixes_for and the query's fixable filter agree; another file's
-// input that a rewrite drops keeps its Rewrite.
+// No Rewrite for a file whose own finding says it does not serialize (its Save is refused), as
+// bulk_fixes_for and the query's fixable filter say it (fixes_for and has_fixes: test_fixes, every
+// Rewrite row against every blocks_save row); another file's input that a rewrite drops keeps its Rewrite.
 static int test_rewrite_unserializable() {
 	SessionView view;
 	view.project.open = true;
@@ -513,12 +513,8 @@ static int test_rewrite_unserializable() {
 	                    finding(DiagnosticSeverity::Warning, "animation_map.ignored_input", "A key the game ignores.", "anims/b.adm"),
 	                    finding(DiagnosticSeverity::Warning, "strings.regrouped", "A section read twice.", "strings/menu.bin"),
 	                    finding(DiagnosticSeverity::Error, "strings.invalid_input", "A string it cannot hold.", "strings/menu.bin")};
-	for (const size_t blocked : {size_t(0), size_t(3)}) {
-		const Diagnostic &d = view.findings.diagnostics[blocked];
-		TEST_EXPECT(fixes_for(d, view).empty() && !has_fixes(d, view) && bulk_fixes_for(d, view).empty());
-	}
-	TEST_EXPECT(labels_of(fixes_for(view.findings.diagnostics[2], view)) == std::vector<std::string>({"Rewrite b.adm"}));
-	TEST_EXPECT(bulk_fixes_for(view.findings.diagnostics[2], view).size() == 1 && has_fixes(view.findings.diagnostics[2], view));
+	for (const size_t blocked : {size_t(0), size_t(3)}) TEST_EXPECT(bulk_fixes_for(view.findings.diagnostics[blocked], view).empty());
+	TEST_EXPECT(bulk_fixes_for(view.findings.diagnostics[2], view).size() == 1);
 	ProblemQuery fixable;
 	fixable.fixable = true;
 	const ProblemAnswer answer = answer_problems(fixable, view);
