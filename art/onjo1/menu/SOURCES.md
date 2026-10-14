@@ -10,10 +10,19 @@ nothing of theirs is here.
 ## What is the source
 
 - **`fonts/<name>.png`**: the font's glyph sheet, 16 x 14 cells holding the bytes 0x20..0xFF in
-  Windows-1252, each glyph at its cell's left, the cell's height the font's line. White glyphs with a
-  dark one-texel rim (each texel darkened by its neighbours' coverage, a diagonal one at 0.6, to an alpha
-  of at most 0.72, the glyph composited white over it: the HUD sheets' form), or for the two loading-screen
-  fonts plain white coverage. The face is drawn with its own hinting (FreeType 2.14.3 through Pillow) at
+  Windows-1252, the cell's height the font's line. Each glyph is drawn with its pen origin one texel in
+  from its cell's left (the rim's column; a mask's at the edge), so it keeps the typeface's left bearing;
+  the few drawn left of their origin (`j`'s hook, `(` in the lighter faces) are moved right until their
+  rim is at the edge and step on that much further. A glyph's rect runs from its cell's left to its
+  advance (the face's hinted advance in whole texels, plus one in `Arial12b`, `Impac22b`, `Impac38b` and
+  `onttl40`, whose letters otherwise touch) plus the font's pad, the room its widest overhang needs (an
+  arm, a rim) past the next glyph's pen: its last column is marked, where the ink stops short of it, by one
+  black texel of alpha 1, which the importer reads as ink and the page's blend draws as nothing. The
+  pad is paid back by the font's negative spacing word, as the original's own fonts pay back theirs, so
+  the game steps each glyph by the typeface's advance and an arm or a rim may overhang its neighbour.
+  White glyphs with a dark one-texel rim (each texel darkened by its neighbours' coverage, a diagonal
+  one at 0.6, to an alpha of at most 0.72, the glyph composited white over it: the HUD sheets' form), or
+  for the two loading-screen fonts plain white coverage. The face is drawn with its own hinting (FreeType 2.14.3 through Pillow) at
   the largest size, in quarter texels, at which every letter and digit, ascenders and descenders, fits the
   line inside the rim; the rows left over go above the capitals. A glyph that would leave its cell (the
   accented capitals, brackets, superscripts, the cedilla, the double dagger) is drawn at four times the
@@ -25,10 +34,15 @@ nothing of theirs is here.
 - **`fonts/<name>.fntset`**: the font set the editor's font importer makes the `.fnt` from (our own
   FNT writer, `engine/formats/fnt`), its import options in its comment: `opennova-project import
   <project> art/onjo1/menu/fonts/<name>.fntset`, the options set on its record (`set_import_options`),
-  then the `.fnt` from the project's import cache copied into `assets/` under the same name. Every font
-  keeps the fallbacks `spacing 0` and `design_width 800`: the original's spacing word is -3 (0 in
-  `Arials18`, `Arial22` and `Impact50`) because its glyph rects carry clear columns, where ours are a
-  glyph's ink and its tracking (`docs/fonts/fnt-re.md`, "Authoring policy").
+  then the `.fnt` from the project's import cache copied into `assets/` under the same name. The
+  proportional fonts import with `advance left` (a rect from the cell's left to its last texel of
+  alpha above 0: the mark), `tracking 0`, the pad as `spacing` (1 minus the pad) and the space as its
+  hinted advance plus the pad, give or take a texel or two so that the clear columns between two words
+  come to the original font's of the same line or up to two texels more (measured, as the gaps between
+  letters were, by drawing both fonts as the game steps them); every font keeps `design_width 800`.
+  The original's spacing word is -3 (0 in `Arials18`, `Arial22` and `Impact50`) for the same reason:
+  its glyph rects carry clear columns (`docs/fonts/fnt-re.md`, "Authoring policy"). `couri20b` imports
+  with `advance cell` and `tracking 0`.
 
 No generator script is kept.
 
@@ -36,19 +50,19 @@ No generator script is kept.
 
 | Font (in `assets/`) | Face | Line | Sheet cell | Drawn at | Pages | Options | What it is |
 |---|---|---|---|---|---|---|---|
-| `Arial12b.fnt` | Barlow Semi Condensed Bold | 10 | 11 x 10 | 8.15 px, 4x reduced | 1 | `advance ink`, `tracking 0`, `space 3`, `color sheet` | The smallest bold label font of the HUD's label slots (the menus, the objectives, the F1 help, the end screens). |
-| `Arial14n.fnt` | Barlow Semi Condensed Medium | 12 | 15 x 12 | 11.75 px | 1 | `advance ink`, `tracking 0`, `space 4`, `color sheet` | A label font of the same slots. |
-| `Arial14b.fnt` | Barlow Semi Condensed Bold | 15 | 17 x 15 | 13.65 px | 1 | `advance ink`, `tracking 0`, `space 4`, `color sheet` | A label font of the same slots. |
-| `Arial16n.fnt` | Barlow Semi Condensed Medium | 14 | 17 x 14 | 13.85 px | 1 | `advance ink`, `tracking 0`, `space 4`, `color sheet` | A label font of the same slots. |
-| `Arial16b.fnt` | Barlow Semi Condensed Bold | 16 | 20 x 16 | 15.95 px | 1 | `advance ink`, `tracking 0`, `space 5`, `color sheet` | A label font of the same slots. |
-| `Impac22b.fnt` | Barlow Condensed Black | 19 | 20 x 19 | 17.6 px | 1 | `advance ink`, `tracking 0`, `space 5`, `color sheet` | The heading font of the same slots. |
-| `Impac38b.fnt` | Barlow Condensed Black | 32 | 34 x 32 | 30.75 px | 3 | `advance ink`, `tracking 1`, `space 8`, `color sheet` | The large heading font of the same slots. |
-| `Arials18.fnt` | Barlow Regular | 13 | 16 x 13 | 13.9 px | 1 | `advance ink`, `tracking 2`, `space 4`, `color white` | The loading screen's small font, a plain white mask. |
-| `Arial22.fnt` | Barlow Regular | 16 | 21 x 16 | 18.3 px | 1 | `advance ink`, `tracking 2`, `space 5`, `color white` | The loading screen's font, a plain white mask. |
-| `couri20b.fnt` | Barlow Semi Condensed Bold | 16 | 10 x 16 | 15.95 px | 1 | `advance cell`, `tracking 1`, `color sheet` | The cinematics' monospaced font: each glyph centred in its cell (the digits' advance with the rim), the wider ones (M, W, m, w, @, %, the ligatures) narrowed to it; the cells set edge to edge, 10 texels a character. |
-| `onmnu19.fnt` | Barlow Condensed Medium | 19 | 20 x 19 | 18.1 px | 1 | `advance ink`, `tracking 0`, `space 5`, `color sheet` | A menu stylesheet font, at the line of the original's `Gunpl22b`. |
-| `onmnub23.fnt` | Barlow Condensed SemiBold | 23 | 26 x 23 | 23.8 px | 2 | `advance ink`, `tracking 1`, `space 6`, `color sheet` | A menu stylesheet font, at the line of the original's `Gunpl27b`. |
-| `onttl40.fnt` | Barlow Condensed Black | 40 | 44 x 40 | 40.4 px | 4 | `advance ink`, `tracking 1`, `space 10`, `color sheet` | The menus' title font, at the line of the original's `Impact50`. |
+| `Arial12b.fnt` | Barlow Semi Condensed Bold | 10 | 12 x 10 | 8.15 px, 4x reduced | 1 | `advance left`, `tracking 0`, `space 5`, `spacing -1`, `color sheet` | The smallest bold label font of the HUD's label slots (the menus, the objectives, the F1 help, the end screens). |
+| `Arial14n.fnt` | Barlow Semi Condensed Medium | 12 | 16 x 12 | 11.75 px | 1 | `advance left`, `tracking 0`, `space 6`, `spacing -2`, `color sheet` | A label font of the same slots. |
+| `Arial14b.fnt` | Barlow Semi Condensed Bold | 15 | 18 x 15 | 13.65 px | 1 | `advance left`, `tracking 0`, `space 7`, `spacing -2`, `color sheet` | A label font of the same slots. |
+| `Arial16n.fnt` | Barlow Semi Condensed Medium | 14 | 18 x 14 | 13.85 px | 1 | `advance left`, `tracking 0`, `space 7`, `spacing -2`, `color sheet` | A label font of the same slots. |
+| `Arial16b.fnt` | Barlow Semi Condensed Bold | 16 | 21 x 16 | 15.95 px | 1 | `advance left`, `tracking 0`, `space 8`, `spacing -3`, `color sheet` | A label font of the same slots. |
+| `Impac22b.fnt` | Barlow Condensed Black | 19 | 22 x 19 | 17.6 px | 1 | `advance left`, `tracking 0`, `space 7`, `spacing -2`, `color sheet` | The heading font of the same slots. |
+| `Impac38b.fnt` | Barlow Condensed Black | 32 | 38 x 32 | 30.75 px | 3 | `advance left`, `tracking 0`, `space 11`, `spacing -4`, `color sheet` | The large heading font of the same slots. |
+| `Arials18.fnt` | Barlow Regular | 13 | 17 x 13 | 13.9 px | 1 | `advance left`, `tracking 0`, `space 5`, `spacing 0`, `color white` | The loading screen's small font, a plain white mask. |
+| `Arial22.fnt` | Barlow Regular | 16 | 22 x 16 | 18.3 px | 1 | `advance left`, `tracking 0`, `space 6`, `spacing 0`, `color white` | The loading screen's font, a plain white mask. |
+| `couri20b.fnt` | Barlow Semi Condensed Bold | 16 | 9 x 16 | 15.95 px | 1 | `advance cell`, `tracking 0`, `color sheet` | The cinematics' monospaced font: each glyph centred in its cell, the wider ones (M, W, m, w, @, %, the ligatures) narrowed to it; 8 texels a character (the original's `Couri20b` step), neighbours' rims sharing a column. |
+| `onmnu19.fnt` | Barlow Condensed Medium | 19 | 22 x 19 | 18.1 px | 1 | `advance left`, `tracking 0`, `space 9`, `spacing -3`, `color sheet` | A menu stylesheet font, at the line of the original's `Gunpl22b`. |
+| `onmnub23.fnt` | Barlow Condensed SemiBold | 23 | 28 x 23 | 23.8 px | 2 | `advance left`, `tracking 0`, `space 11`, `spacing -3`, `color sheet` | A menu stylesheet font, at the line of the original's `Gunpl27b`. |
+| `onttl40.fnt` | Barlow Condensed Black | 40 | 47 x 40 | 40.4 px | 4 | `advance left`, `tracking 0`, `space 12`, `spacing -4`, `color sheet` | The menus' title font, at the line of the original's `Impact50`. |
 
 ## Third-party material
 
