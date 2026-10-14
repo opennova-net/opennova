@@ -87,9 +87,14 @@ void ScoreboardHeader::_bind_methods() {
 
 // --- EndRoundOverlay --------------------------------------------------------
 
+// The lines are the game's code-page bytes (the gametext's and the roster's
+// names, D-NET-661): read as cp1252, and HudOverlay::set_end_round_overlay
+// hands them back as those bytes, so a name's high byte draws as its one glyph
+// (D-HUD-57).
 PackedStringArray EndRoundOverlay::get_texts() const {
 	PackedStringArray out;
-	for (const opennova::hud::EndRoundResolvedLine &l : value_.lines) out.push_back(to_gd(l.text));
+	for (const opennova::hud::EndRoundResolvedLine &l : value_.lines)
+		out.push_back(opennova::cp1252_to_gd(l.text));
 	return out;
 }
 

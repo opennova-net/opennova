@@ -2,9 +2,12 @@
 
 #include <runtime/devtools/debug_control_ids.h>
 
+#include <base/io/cp1252.h> // cp1252_to_utf8 (a peer's name)
+
 #include <imgui.h>
 
 #include <cstdio>
+#include <string>
 
 namespace opennova::devtools {
 
@@ -113,7 +116,10 @@ void NetWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 				ImGui::TableNextColumn();
 				ImGui::Text("%d", p.slot);
 				ImGui::TableNextColumn();
-				ImGui::Text("%s\n%s", p.name.c_str(), p.address.c_str());
+				// A peer's name is its NA bytes, the code page's (D-NET-661); ImGui
+				// draws UTF-8.
+				const std::string name = cp1252_to_utf8(p.name);
+				ImGui::Text("%s\n%s", name.c_str(), p.address.c_str());
 				ImGui::TableNextColumn();
 				ImGui::TextUnformatted(p.phase.c_str());
 				ImGui::TableNextColumn();
