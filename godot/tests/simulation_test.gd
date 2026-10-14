@@ -2294,6 +2294,8 @@ end
 """)
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md), "loaded rotated command-125 mount")
+	_install_people_table(sim)
+	_spawn_fixture_human(sim)
 	# Command-125 boarders spawn ON FOOT and attach through the infantry
 	# think's board leg; the think gate is (logic_tick + 36*net_id) & 15,
 	# so drive a few 16-tick boundaries before reading the mounted state.
@@ -2302,6 +2304,9 @@ end
 		sim.step()
 	var soldier_idx := _first_organic_ai_index(sim)
 	assert_true(soldier_idx >= 0, "found the soldier's AI row")
+	# It spawns at the seat point, so only a mount makes the position below a witness.
+	assert_true(sim.entity_card_by_ai_index(soldier_idx).is_mounted(),
+			"the command-125 soldier boarded its seat")
 	var pos := sim.get_entity_position(soldier_idx)
 	# Command 125 selects carrier's authored ctrlx13; the mounted origin is that
 	# model point through the same rotated entity transform the placer renders.

@@ -262,8 +262,26 @@ int MissionKernel::adm_id_for_runtime_type(uint16_t type_id) {
 		// is not mounted [orig: Entity_SpawnFromItemDef @0x45257c ->
 		// AnimMap_LoadAdmFile @0x40cc40; anim/adm_fallback.h].
 		const ResourceIndex *index = adm_source->index();
-		adm_id = root_motion.register_adm(adm_source, anim::adm_load_name(def->anim_def,
-				[index](const std::string &file) { return index != nullptr && index->has_file(file); }));
+		const auto mounted = [index](const std::string &file) {
+			return index != nullptr && index->has_file(file);
+		};
+		const std::string name = anim::adm_load_name(def->anim_def, mounted);
+		if (mounted(name)) {
+			// The table opened: the body holds a channel only where it
+			// registered its RESET row, slot 0, the registration freeing the
+			// channel otherwise [orig: AnimMap_RegisterEntity
+			// @0x40BBBC..0x40BBC6 -> the free @0x40BD8B]. No configured
+			// default stands in.
+			adm_id = root_motion.register_adm(adm_source, name);
+			if (adm_id >= 0 && !root_motion.has_clip(adm_id, w::anim_state::kReset)) adm_id = -1;
+			world.ai.root_motion = root_motion.empty() ? nullptr : &root_motion;
+			adm_by_runtime_type_[type_id] = adm_id;
+			return adm_id;
+		}
+		// Neither <stem>.adm nor default.adm is mounted: the game frees the
+		// new entry and leaves the map's current table dangling [orig:
+		// AnimMap_LoadAdmFile @0x40CEFB], undefined; the port keeps the
+		// configured infantry map (D-INF-33).
 	}
 	if (adm_id < 0) adm_id = default_infantry_adm_id_;
 	world.ai.root_motion = root_motion.empty() ? nullptr : &root_motion;
