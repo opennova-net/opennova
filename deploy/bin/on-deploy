@@ -17,7 +17,8 @@
 #                                 with hosted game servers set up (infra output
 #                                 hosted_enabled), the service gets every
 #                                 ONNET_HOSTED_* ec2 setting from the Terraform
-#                                 outputs and the serve image pinned to the digest
+#                                 outputs (each data set's launch template among
+#                                 them) and the serve image pinned to the digest
 #                                 --serve-tag (default latest) names now;
 #                                 --no-hosting deploys with hosting off
 #   app status|logs [svc]|restart|down
@@ -37,11 +38,14 @@
 #                                 unless --force
 #   hosted status [--deployment NAME]
 #                                 this deployment's hosted game server machines
-#   hosted data-snapshot          the hosted servers' game data, once: the Joint
-#                                 Operations folder mounted at /hosted-data
+#   hosted data-snapshot --data-set SLUG [--deployment NAME]
+#                                 one data set of the hosted servers' game data,
+#                                 once: its game folder mounted at /hosted-data
 #                                 (HOSTED_DATA_DIR=<folder> ./deploy/run.sh ...)
 #                                 into a new private encrypted EBS snapshot;
-#                                 prints its id (DEPLOY.md, "Hosted game servers")
+#                                 prints its id. SLUG: jop_2_consumer,
+#                                 dfx2_consumer or opennova_0_consumer (DEPLOY.md,
+#                                 "Hosted game servers")
 #
 # OP_VAULT (default OpenNova-Deploy) names the vault.
 set -euo pipefail
@@ -137,12 +141,13 @@ cmd_secrets() {
         err "  ssh private key      FAILED"; rc=1
       fi
       # Optional: hosted game servers are off without it (DEPLOY.md, "Hosted game servers").
+      local snapshots
       if ! vault_has_item hosted; then
-        log "  hosted data snapshot absent (hosted game servers off)"
-      elif op read "op://$VAULT/hosted/data_snapshot_id" >/dev/null; then
-        log "  hosted data snapshot OK"
+        log "  hosted data snapshots absent (hosted game servers off)"
+      elif snapshots="$(hosted_snapshot_map)"; then
+        log "  hosted data snapshots OK ($(jq -r 'keys | join(", ")' <<<"$snapshots"))"
       else
-        err "  hosted data snapshot FAILED"; rc=1
+        err "  hosted data snapshots FAILED"; rc=1
       fi
       [ "$rc" -eq 0 ] || die "one or more references did not resolve — create the missing vault items (DEPLOY.md §1)"
       log "all references resolved."
@@ -151,23 +156,69 @@ cmd_secrets() {
   esac
 }
 
-# The hosted game servers' data snapshot (infra/aws/hosted.tf), from the vault:
-# item `hosted`, field `data_snapshot_id`, as TF_VAR_hosted_data_snapshot_id.
-# No item titled `hosted` in the vault's listing means hosting is off (the
-# variable stays empty, and hosted.tf makes nothing). Any other failure (the
-# listing, or reading an item that is there) stops the run, so a vault hiccup
-# never plans the hosting resources away.
+# The data sets hosted game servers run: each the games slug of the lobby its
+# servers list in (apps/novaworld_server/hosted, the service's data-set
+# catalog), one snapshot and one launch template each (infra/aws/hosted.tf).
+HOSTED_DATA_SETS=(jop_2_consumer dfx2_consumer opennova_0_consumer)
+
+# Whether $1 is one of HOSTED_DATA_SETS.
+hosted_known_data_set() {
+  local slug
+  for slug in "${HOSTED_DATA_SETS[@]}"; do
+    [ "$slug" = "$1" ] && return 0
+  done
+  return 1
+}
+
+# The data sets' snapshots in vault item `hosted` (one field per data set,
+# data_snapshot_id_<slug>), as a JSON object slug -> snapshot id on stdout. The
+# item is read once; a failed read, a field naming no data set, the old bare
+# data_snapshot_id field, a value that is no snapshot id, or an item naming no
+# data set at all fails (the reason on stderr), so nothing reads a broken item
+# as hosting off. Run it in a command substitution and check its status.
+hosted_snapshot_map() {
+  local item fields label value slug map="{}"
+  item="$(op item get hosted --vault "$VAULT" --format json)" \
+    || die "reading vault item 'hosted' failed (fix the vault access, or delete the 'hosted' item to turn hosting off)"
+  fields="$(jq -r '.fields[]? | select((.label // "") | startswith("data_snapshot_id")) | [.label, (.value // "")] | @tsv' <<<"$item")" \
+    || die "vault item 'hosted' came back unreadable (no JSON with fields)"
+  while IFS=$'\t' read -r label value; do
+    [ -n "$label" ] || continue
+    if [ "$label" = data_snapshot_id ]; then
+      die "vault item 'hosted' holds the old field data_snapshot_id: rename it data_snapshot_id_jop_2_consumer, and remake its snapshot with 'hosted data-snapshot --data-set jop_2_consumer' (DEPLOY.md, \"Hosted game servers\")"
+    fi
+    slug="${label#data_snapshot_id_}"
+    hosted_known_data_set "$slug" \
+      || die "vault item 'hosted' has the field $label, which names no data set (data_snapshot_id_<slug>, the slug one of: ${HOSTED_DATA_SETS[*]})"
+    case "$value" in
+      snap-*) ;;
+      *) die "vault item 'hosted' field $label holds '$value', which is no snapshot id (snap-...)" ;;
+    esac
+    map="$(jq -c --arg k "$slug" --arg v "$value" '. + {($k): $v}' <<<"$map")"
+  done <<<"$fields"
+  [ "$map" != "{}" ] \
+    || die "vault item 'hosted' names no data set: add a field data_snapshot_id_<slug> per data set (the slug one of: ${HOSTED_DATA_SETS[*]}), or delete the item to turn hosting off"
+  printf '%s' "$map"
+}
+
+# The hosted game servers' data snapshots (infra/aws/hosted.tf), from the
+# vault: item `hosted`, one field data_snapshot_id_<slug> per data set, as
+# TF_VAR_hosted_data_snapshots (a JSON object, which Terraform reads as the
+# map). No item titled `hosted` in the vault's listing means hosting is off (the
+# map stays empty, and hosted.tf makes nothing). Any other failure (the listing,
+# or reading an item that is there) stops the run, so a vault hiccup never
+# plans the hosting resources away.
 hosted_snapshot_var() {
-  local value
+  local map
   if ! vault_has_item hosted; then
-    export TF_VAR_hosted_data_snapshot_id=""
+    export TF_VAR_hosted_data_snapshots="{}"
     log "hosted game servers: off (no 'hosted' item in vault '$VAULT')"
     return
   fi
-  value="$(op read "op://$VAULT/hosted/data_snapshot_id")" \
-    || die "reading op://$VAULT/hosted/data_snapshot_id failed. Refusing to run terraform with hosting unknown (fix the vault access or the item's field, or delete the 'hosted' item to turn hosting off)"
-  export TF_VAR_hosted_data_snapshot_id="$value"
-  log "hosted game servers: data snapshot '${value:-<empty>}' (vault item 'hosted')"
+  map="$(hosted_snapshot_map)" \
+    || die "Refusing to run terraform with hosting unknown (fix the vault item 'hosted', or delete it to turn hosting off)"
+  export TF_VAR_hosted_data_snapshots="$map"
+  log "hosted game servers: data sets $(jq -r 'to_entries | map("\(.key) (\(.value))") | join(", ")' <<<"$map") (vault item 'hosted')"
 }
 
 # After `terraform apply|destroy` exited $2: push the state it left (a failed
@@ -293,8 +344,10 @@ app_images() {
 
 # The hosted game servers' settings for the service (apps/novaworld_server/
 # README.md, "Hosted servers"), from the Terraform outputs, so nobody copies an
-# id by hand: while hosted_data_snapshot_id is set (output hosted_enabled),
-# ONNET_HOSTED_PROVIDER=ec2 and every ec2 setting, and the serve image pinned to
+# id by hand: while hosted_data_snapshots names a data set (output
+# hosted_enabled), ONNET_HOSTED_PROVIDER=ec2 and every ec2 setting (each data
+# set's launch template as ONNET_HOSTED_EC2_LAUNCH_TEMPLATES, a JSON object by
+# data set: the data sets the service offers), and the serve image pinned to
 # the digest `serve_tag` names right now; with an explicit false, or with
 # --no-hosting (`hosting` 0), ONNET_HOSTED_PROVIDER=none. A state with no
 # hosted_enabled output at all (one the infra was not applied to since hosted.tf
@@ -302,7 +355,7 @@ app_images() {
 # pulled the state. Exported for compose's interpolation (docker-compose.yml
 # passes them to the server); the shell's values win over the env files'.
 hosted_app_env() {
-  local serve_tag="$1" hosting="$2" enabled owner ref digest
+  local serve_tag="$1" hosting="$2" enabled templates owner ref digest
   if [ "$hosting" -eq 0 ]; then
     export ONNET_HOSTED_PROVIDER=none
     log "hosted game servers: off (--no-hosting)"
@@ -320,10 +373,15 @@ hosted_app_env() {
   esac
   tf_output() {
     terraform -chdir="$TF_DIR" output -raw "$1" 2>/dev/null \
-      || die "no '$1' output; run 'infra apply' (hosted_data_snapshot_id is set, its resources are not)"
+      || die "no '$1' output; run 'infra apply' (hosted_data_snapshots is set, its resources are not)"
   }
   ONNET_HOSTED_EC2_REGION="$(tf_output region)"
-  ONNET_HOSTED_EC2_LAUNCH_TEMPLATE="$(tf_output hosted_launch_template_id)"
+  # Each data set's launch template, by its games slug: a non-empty object of
+  # lt- ids (a state from before data sets has no such output).
+  templates="$(terraform -chdir="$TF_DIR" output -json hosted_launch_templates 2>/dev/null)" \
+    || die "no 'hosted_launch_templates' output; run 'infra apply' (hosted_data_snapshots is set, its resources are not)"
+  ONNET_HOSTED_EC2_LAUNCH_TEMPLATES="$(jq -ce 'select(type == "object" and length > 0 and all(.[]; type == "string" and startswith("lt-")))' <<<"$templates")" \
+    || die "the 'hosted_launch_templates' infra output reads '$templates', no launch template per data set; run 'infra apply' (with the vault item 'hosted' naming each data set's snapshot), or deploy with --no-hosting"
   ONNET_HOSTED_EC2_SUBNET="$(tf_output hosted_subnet_id)"
   ONNET_HOSTED_DEPLOYMENT="$(tf_output hosted_deployment)"
   ONNET_HOSTED_SERVICE_ADDRESS="$(tf_output service_private_ip)"
@@ -336,10 +394,11 @@ hosted_app_env() {
     *) die "cannot resolve $ref to a digest (is the opennova-serve package public, and the tag published?)" ;;
   esac
   ONNET_HOSTED_SERVE_IMAGE="ghcr.io/${owner}/opennova-serve@${digest}"
-  export ONNET_HOSTED_PROVIDER=ec2 ONNET_HOSTED_EC2_REGION ONNET_HOSTED_EC2_LAUNCH_TEMPLATE \
+  export ONNET_HOSTED_PROVIDER=ec2 ONNET_HOSTED_EC2_REGION ONNET_HOSTED_EC2_LAUNCH_TEMPLATES \
     ONNET_HOSTED_EC2_SUBNET ONNET_HOSTED_DEPLOYMENT ONNET_HOSTED_SERVICE_ADDRESS \
     ONNET_HOSTED_BOOTSTRAP_CIDRS ONNET_HOSTED_SERVE_IMAGE
-  log "hosted game servers: ec2 in $ONNET_HOSTED_EC2_REGION, launch template $ONNET_HOSTED_EC2_LAUNCH_TEMPLATE,"
+  log "hosted game servers: ec2 in $ONNET_HOSTED_EC2_REGION, data sets and launch templates:"
+  log "  $(jq -r 'to_entries | map("\(.key) \(.value)") | join(", ")' <<<"$ONNET_HOSTED_EC2_LAUNCH_TEMPLATES"),"
   log "  subnet $ONNET_HOSTED_EC2_SUBNET ($ONNET_HOSTED_BOOTSTRAP_CIDRS), deployment $ONNET_HOSTED_DEPLOYMENT,"
   log "  service $ONNET_HOSTED_SERVICE_ADDRESS, image $ref = $ONNET_HOSTED_SERVE_IMAGE"
 }
@@ -712,7 +771,7 @@ cmd_state() {
 # Hosted game servers (ADR 0053; DEPLOY.md "Hosted game servers")
 # ---------------------------------------------------------------------------
 
-# Where the Joint Operations folder is mounted into this container for
+# Where a data set's game folder is mounted into this container for
 # `hosted data-snapshot` (run.sh and run.ps1 mount HOSTED_DATA_DIR there).
 HOSTED_DATA_MOUNT=/hosted-data
 HOSTED_DATA_IMAGE=opennova-hosted-data:local
@@ -745,46 +804,71 @@ hosted_status() {
     --output table
 }
 
-# hosted data-snapshot: the hosted servers' game data, once, as a private
-# encrypted EBS snapshot. The Joint Operations Combined Arms folder is mounted
-# here (HOSTED_DATA_MOUNT) read-only; only the files opennova-serve reads are
-# taken (apps/serve/README.md, "Container image"): the three base archives,
-# Escalation's archive pair and its version.txt (required), and score.ini and
-# _NSTMOUT.TXT when present. They stream as a tar into the helper image
-# (deploy/hosted-data), built on this docker, which makes an ext4 image of them
-# labelled opennova-jo and writes it into a new snapshot through the EBS direct
-# APIs: no machine, no bucket, no SSH. The snapshot is the only AWS resource it
-# makes, and it deletes it on any failure; the image and the staging copy live
-# in the helper's container alone (--rm). Prints the snapshot id.
+# hosted data-snapshot --data-set SLUG: one data set of the hosted servers'
+# game data, once, as a private encrypted EBS snapshot. The data set's game
+# folder is mounted here (HOSTED_DATA_MOUNT) read-only; only the files
+# opennova-serve reads are taken (apps/serve/README.md, "Container image"):
+#   jop_2_consumer       a Joint Operations Combined Arms install: the three
+#                        base archives, Escalation's archive pair and its
+#                        version.txt (required), score.ini and _NSTMOUT.TXT
+#                        when present;
+#   dfx2_consumer        a Delta Force Xtreme 2 install: the three base
+#                        archives (required), score.ini and _NSTMOUT.TXT when
+#                        present;
+#   opennova_0_consumer  OpenNova's own data: the three base archives.
+# They stream as a tar into the helper image (deploy/hosted-data), built on this
+# docker, which makes an ext4 image of them labelled opennova-data (every data
+# set's label: the machine mounts it at /opt/game) and writes it into a new
+# snapshot through the EBS direct APIs: no machine, no bucket, no SSH. The
+# snapshot is the only AWS resource it makes, and it deletes it on any failure;
+# the image and the staging copy live in the helper's container alone (--rm).
+# Prints the snapshot id.
 hosted_data_snapshot() {
-  local given="" dep dir="$HOSTED_DATA_MOUNT" rel found
+  local given="" data_set="" what dep dir="$HOSTED_DATA_MOUNT" rel found
   while [ $# -gt 0 ]; do
     case "$1" in
+      --data-set) [ $# -ge 2 ] || die "--data-set needs a value"; data_set="$2"; shift 2 ;;
       --deployment) [ $# -ge 2 ] || die "--deployment needs a value"; given="$2"; shift 2 ;;
-      *) die "unknown: hosted data-snapshot $1 (try: --deployment NAME)" ;;
+      *) die "unknown: hosted data-snapshot $1 (try: --data-set SLUG [--deployment NAME])" ;;
     esac
   done
+  [ -n "$data_set" ] \
+    || die "hosted data-snapshot needs --data-set, one of: ${HOSTED_DATA_SETS[*]} (DEPLOY.md, \"Hosted game servers\")"
+  hosted_known_data_set "$data_set" \
+    || die "--data-set '$data_set' is no data set; one of: ${HOSTED_DATA_SETS[*]}"
+  # The data set's files: the required ones, then the ones taken when present.
+  local required=(resource.pff localres.pff language.pff) optional=()
+  case "$data_set" in
+    jop_2_consumer)
+      what="a Joint Operations Combined Arms install (with expansion/jox01)"
+      required+=(expansion/jox01/jox01.pff expansion/jox01/jox01L.pff expansion/jox01/version.txt)
+      optional=(score.ini _nstmout.txt) ;;
+    dfx2_consumer)
+      what="a Delta Force Xtreme 2 install"
+      optional=(score.ini _nstmout.txt) ;;
+    opennova_0_consumer)
+      what="OpenNova's data (its three base archives)" ;;
+  esac
   if [ ! -d "$dir" ] || [ -z "$(ls -A "$dir" 2>/dev/null)" ]; then
-    die "no Joint Operations folder at $dir: run HOSTED_DATA_DIR='<your JO:CA folder>' ./deploy/run.sh hosted data-snapshot (DEPLOY.md, \"Hosted game servers\")"
+    die "no game folder at $dir: run HOSTED_DATA_DIR='<the folder: $what>' ./deploy/run.sh hosted data-snapshot --data-set $data_set (DEPLOY.md, \"Hosted game servers\")"
   fi
   local files=()
-  for rel in resource.pff localres.pff language.pff expansion/jox01/jox01.pff \
-             expansion/jox01/jox01L.pff expansion/jox01/version.txt; do
+  for rel in "${required[@]}"; do
     found="$(cd "$dir" && find . -type f -ipath "./$rel" | head -n 1)"
-    [ -n "$found" ] || die "$dir has no $rel: mount a Joint Operations Combined Arms install (with expansion/jox01)"
+    [ -n "$found" ] || die "$dir has no $rel: mount $what"
     files+=("${found#./}")
   done
-  for rel in score.ini _nstmout.txt; do
+  for rel in ${optional[@]+"${optional[@]}"}; do
     found="$(cd "$dir" && find . -maxdepth 1 -type f -iname "$rel" | head -n 1)"
     [ -z "$found" ] || files+=("${found#./}")
   done
   dep="$(hosted_deployment "$given")"
-  log "the data snapshot takes, from $dir:"
+  log "the $data_set data snapshot takes, from $dir:"
   for rel in "${files[@]}"; do log "  $rel"; done
   log "building the helper image (deploy/hosted-data)…"
   docker build -q -t "$HOSTED_DATA_IMAGE" /workspace/deploy/hosted-data >/dev/null \
     || die "the helper image did not build"
-  log "making the snapshot (tagged opennova:deployment=$dep); a GiB takes a few minutes…"
+  log "making the snapshot (tagged opennova:deployment=$dep, opennova:data-set=$data_set); a GiB takes a few minutes…"
   # The vault's AWS credentials and region alone, for the helper, in the tmpfs.
   local all_env="$SECRETS_DIR/terraform.env" aws_env="$SECRETS_DIR/hosted-aws.env" snapshot rc=0
   inject "$TF_ENV_TPL" "$all_env" >/dev/null
@@ -792,7 +876,7 @@ hosted_data_snapshot() {
   chmod 600 "$aws_env"
   rm -f "$all_env"
   snapshot="$( (cd "$dir" && tar -cf - "${files[@]}") \
-    | docker run --rm -i --env-file "$aws_env" "$HOSTED_DATA_IMAGE" --deployment "$dep")" || rc=$?
+    | docker run --rm -i --env-file "$aws_env" "$HOSTED_DATA_IMAGE" --data-set "$data_set" --deployment "$dep")" || rc=$?
   rm -f "$aws_env"
   [ "$rc" -eq 0 ] \
     || die "the snapshot was not made (the helper deletes one it started; check: ./deploy/run.sh aws ec2 describe-snapshots --owner-ids self --filters Name=tag:opennova:hosted-data,Values=1)"
@@ -801,8 +885,9 @@ hosted_data_snapshot() {
     snap-*) ;;
     *) die "the helper printed no snapshot id ('$snapshot')" ;;
   esac
-  log "made $snapshot. Next (DEPLOY.md, \"Hosted game servers\"):"
-  log "  1. in vault '$VAULT', an item 'hosted' with the field data_snapshot_id = $snapshot"
+  log "made $snapshot for $data_set. Next (DEPLOY.md, \"Hosted game servers\"):"
+  log "  1. in vault '$VAULT', item 'hosted', the field data_snapshot_id_$data_set = $snapshot"
+  log "     (one field per data set; delete the snapshot it replaces once the infra no longer names it)"
   log "  2. ./deploy/run.sh infra plan, then infra apply"
   log "  3. ./deploy/run.sh app deploy --tag <server tag> --serve-tag <serve tag>"
   printf '%s\n' "$snapshot"

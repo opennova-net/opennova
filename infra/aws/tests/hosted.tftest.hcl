@@ -3,14 +3,16 @@
 #   docker run --rm -v "$PWD/infra/aws:/tf" -w /tf hashicorp/terraform:1.9.5 init -backend=false
 #   docker run --rm -v "$PWD/infra/aws:/tf" -w /tf hashicorp/terraform:1.9.5 test
 # Hosting off (no snapshot) plans nothing of it and leaves the server's security
-# group its six rules; hosting on plans the launch template (terminate on
-# shutdown, IMDSv2, the encrypted data volume from the snapshot), the game and
-# admin ports, the service role's policy and the outputs app deploy reads; the
-# data volume takes the snapshot's size; the policy pins a launch to the
-# template's machine type, IMDSv2, gp3 volumes of at most 16 GiB and
-# the template's own image, and the machine role holds Session
-# Manager's five actions alone (applied against the mocks, so the template's
-# ARN the policy names is known); a burstable machine type is refused.
+# group its six rules; hosting on with two data sets plans a launch template for
+# each (terminate on shutdown, IMDSv2, the encrypted data volume from that data
+# set's own snapshot, its size the snapshot's), the game and admin ports, the
+# service role's policy and the outputs app deploy reads (the templates by data
+# set); the policy pins a launch to the templates (every one's ARN), their
+# machine type, IMDSv2, gp3 volumes no larger than the largest of 16 GiB and the
+# snapshots, the templates' own images, and both snapshots, and the machine
+# role holds Session Manager's five actions alone (applied against the mocks,
+# so the templates' ARNs the policy names are known); a burstable machine type
+# and a data set the service does not know are refused.
 
 mock_provider "aws" {
   mock_data "aws_availability_zones" {
@@ -80,7 +82,7 @@ run "hosting_off" {
     error_message = "hosting off must leave the server SG's six rules"
   }
   assert {
-    condition     = output.hosted_enabled == false && output.hosted_launch_template_id == null && output.hosted_subnet_cidr == null
+    condition     = output.hosted_enabled == false && length(output.hosted_launch_templates) == 0 && output.hosted_subnet_cidr == null
     error_message = "hosting off outputs"
   }
 }
@@ -89,26 +91,40 @@ run "hosting_on" {
   command = plan
 
   variables {
-    hosted_data_snapshot_id = "snap-0123456789abcdef0"
-    vpc_id                  = "vpc-0123456789abcdef0"
-    subnet_id               = "subnet-0123456789abcdef0"
+    hosted_data_snapshots = {
+      jop_2_consumer = "snap-0123456789abcdef0"
+      dfx2_consumer  = "snap-0fedcba9876543210"
+    }
+    vpc_id    = "vpc-0123456789abcdef0"
+    subnet_id = "subnet-0123456789abcdef0"
+  }
+
+  override_data {
+    target = data.aws_ebs_snapshot.hosted["dfx2_consumer"]
+    values = { volume_size = 3 }
   }
 
   assert {
-    condition     = length(aws_launch_template.hosted) == 1
-    error_message = "a launch template"
+    condition     = length(aws_launch_template.hosted) == 2
+    error_message = "a launch template per data set"
   }
   assert {
-    condition     = aws_launch_template.hosted[0].instance_initiated_shutdown_behavior == "terminate" && aws_launch_template.hosted[0].instance_type == "c7a.medium"
-    error_message = "terminate on shutdown, c7a.medium"
+    condition = alltrue([
+      for t in aws_launch_template.hosted : t.instance_initiated_shutdown_behavior == "terminate" && t.instance_type == "c7a.medium" && t.metadata_options[0].http_tokens == "required"
+    ])
+    error_message = "every template: terminate on shutdown, c7a.medium, IMDSv2"
   }
   assert {
-    condition     = aws_launch_template.hosted[0].metadata_options[0].http_tokens == "required"
-    error_message = "IMDSv2"
+    condition     = aws_launch_template.hosted["jop_2_consumer"].name == "opennova-server-hosted-jop-2-consumer" && aws_launch_template.hosted["dfx2_consumer"].name == "opennova-server-hosted-dfx2-consumer"
+    error_message = "a template named after its data set"
   }
   assert {
-    condition     = length([for b in aws_launch_template.hosted[0].block_device_mappings : b if b.device_name == "/dev/sdf" && b.ebs[0].snapshot_id == "snap-0123456789abcdef0" && b.ebs[0].encrypted == "true" && b.ebs[0].volume_size == 2]) == 1
-    error_message = "the data volume from the snapshot, encrypted, its size the snapshot's"
+    condition     = length([for b in aws_launch_template.hosted["jop_2_consumer"].block_device_mappings : b if b.device_name == "/dev/sdf" && b.ebs[0].snapshot_id == "snap-0123456789abcdef0" && b.ebs[0].encrypted == "true" && b.ebs[0].volume_size == 2]) == 1
+    error_message = "the JO template: the data volume from JO's snapshot, encrypted, its size the snapshot's"
+  }
+  assert {
+    condition     = length([for b in aws_launch_template.hosted["dfx2_consumer"].block_device_mappings : b if b.device_name == "/dev/sdf" && b.ebs[0].snapshot_id == "snap-0fedcba9876543210" && b.ebs[0].encrypted == "true" && b.ebs[0].volume_size == 3]) == 1
+    error_message = "the DFX2 template: the data volume from DFX2's snapshot, encrypted, its size the snapshot's"
   }
   assert {
     condition     = length(aws_vpc_security_group_ingress_rule.hosted_game) == 1 && aws_vpc_security_group_ingress_rule.hosted_game["0.0.0.0/0"].from_port == 32768
@@ -123,8 +139,12 @@ run "hosting_on" {
     error_message = "hosting on outputs"
   }
   assert {
-    condition     = length(aws_iam_role_policy_attachment.hosted_service) == 1
-    error_message = "the service role takes the hosted policy"
+    condition     = toset(keys(output.hosted_launch_templates)) == toset(["jop_2_consumer", "dfx2_consumer"])
+    error_message = "the templates output names each data set"
+  }
+  assert {
+    condition     = length(aws_iam_role_policy_attachment.hosted_service) == 1 && length(aws_security_group.hosted) == 1
+    error_message = "one security group, and the service role takes the hosted policy"
   }
 }
 
@@ -132,9 +152,23 @@ run "hosted_policy" {
   command = apply
 
   variables {
-    hosted_data_snapshot_id = "snap-0123456789abcdef0"
-    vpc_id                  = "vpc-0123456789abcdef0"
-    subnet_id               = "subnet-0123456789abcdef0"
+    hosted_data_snapshots = {
+      jop_2_consumer = "snap-0123456789abcdef0"
+      dfx2_consumer  = "snap-0fedcba9876543210"
+    }
+    vpc_id    = "vpc-0123456789abcdef0"
+    subnet_id = "subnet-0123456789abcdef0"
+  }
+
+  # The DFX2 template is a launch template of its own, and its snapshot the
+  # largest volume.
+  override_resource {
+    target = aws_launch_template.hosted["dfx2_consumer"]
+    values = { arn = "arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0fedcba9876543210", id = "lt-0fedcba9876543210" }
+  }
+  override_data {
+    target = data.aws_ebs_snapshot.hosted["dfx2_consumer"]
+    values = { volume_size = 20 }
   }
 
   assert {
@@ -146,7 +180,19 @@ run "hosted_policy" {
         (c.test == "StringEquals" && c.variable == "ec2:MetadataHttpTokens" && contains(c.values, "required"))
       ]) == 2
     ]) == 1
-    error_message = "a launch must be pinned to the template's machine type and IMDSv2"
+    error_message = "a launch must be pinned to the templates' machine type and IMDSv2"
+  }
+  assert {
+    condition = length([
+      for st in data.aws_iam_policy_document.hosted_service[0].statement : st
+      if st.sid == "LaunchHostedMachines" && length([
+        for c in st.condition : c
+        if c.test == "ArnEquals" && c.variable == "ec2:LaunchTemplate" && length(c.values) == 2 &&
+        contains(c.values, "arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0123456789abcdef0") &&
+        contains(c.values, "arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0fedcba9876543210")
+      ]) == 1
+    ]) == 1
+    error_message = "a launch must come from one of the data sets' templates, every one named"
   }
   assert {
     condition = length([
@@ -154,20 +200,31 @@ run "hosted_policy" {
       if st.sid == "LaunchHostedMachineVolumes" && length([
         for c in st.condition : c
         if(c.test == "StringEqualsIfExists" && c.variable == "ec2:VolumeType" && contains(c.values, "gp3")) ||
-        (c.test == "NumericLessThanEqualsIfExists" && c.variable == "ec2:VolumeSize" && contains(c.values, "16"))
+        (c.test == "NumericLessThanEqualsIfExists" && c.variable == "ec2:VolumeSize" && contains(c.values, "20"))
       ]) == 2
     ]) == 1
-    error_message = "a launch's volumes must be gp3 of at most 16 GiB"
+    error_message = "a launch's volumes must be gp3 of at most the largest snapshot's 20 GiB"
   }
   assert {
     condition = length([
       for st in data.aws_iam_policy_document.hosted_service[0].statement : st
       if st.sid == "LaunchHostedMachineImage" && length([
         for c in st.condition : c
-        if c.test == "StringEquals" && c.variable == "ec2:ImageID" && length(c.values) == 1 && contains(c.values, aws_launch_template.hosted[0].image_id)
+        if c.test == "StringEquals" && c.variable == "ec2:ImageID" && length(c.values) == 1 && contains(c.values, aws_launch_template.hosted["jop_2_consumer"].image_id)
       ]) == 1
     ]) == 1
-    error_message = "a launch's image must be the template's own"
+    error_message = "a launch's image must be the templates' own, each once"
+  }
+  assert {
+    condition = length([
+      for st in data.aws_iam_policy_document.hosted_service[0].statement : st
+      if st.sid == "LaunchHostedMachineResources" && contains(st.resources, "arn:aws:ec2:us-east-1::snapshot/snap-0123456789abcdef0") && contains(st.resources, "arn:aws:ec2:us-east-1::snapshot/snap-0fedcba9876543210") && contains(st.resources, "arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0123456789abcdef0") && contains(st.resources, "arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0fedcba9876543210")
+    ]) == 1
+    error_message = "a launch may touch both data sets' templates and snapshots"
+  }
+  assert {
+    condition     = output.hosted_launch_templates == { jop_2_consumer = "lt-0123456789abcdef0", dfx2_consumer = "lt-0fedcba9876543210" }
+    error_message = "the templates output maps each data set to its template"
   }
   assert {
     condition     = length(aws_iam_role_policy.hosted_machine_ssm) == 1
@@ -190,16 +247,18 @@ run "hosted_policy" {
 run "new_canonical_image" {
   command = plan
   variables {
-    hosted_data_snapshot_id = "snap-0123456789abcdef0"
-    vpc_id                  = "vpc-0123456789abcdef0"
-    subnet_id               = "subnet-0123456789abcdef0"
+    hosted_data_snapshots = {
+      jop_2_consumer = "snap-0123456789abcdef0"
+    }
+    vpc_id    = "vpc-0123456789abcdef0"
+    subnet_id = "subnet-0123456789abcdef0"
   }
   override_data {
     target = data.aws_ami.hosted[0]
     values = { id = "ami-0fedcba9876543210", root_device_name = "/dev/sda1" }
   }
   assert {
-    condition = aws_launch_template.hosted[0].image_id == "ami-0123456789abcdef0" && flatten([
+    condition = aws_launch_template.hosted["jop_2_consumer"].image_id == "ami-0123456789abcdef0" && flatten([
       for st in data.aws_iam_policy_document.hosted_service[0].statement : [
         for c in st.condition : c.values if c.variable == "ec2:ImageID"
       ]
@@ -212,11 +271,43 @@ run "burstable_refused" {
   command = plan
 
   variables {
-    hosted_data_snapshot_id = "snap-0123456789abcdef0"
-    hosted_instance_type    = "t3.medium"
-    vpc_id                  = "vpc-0123456789abcdef0"
-    subnet_id               = "subnet-0123456789abcdef0"
+    hosted_data_snapshots = {
+      jop_2_consumer = "snap-0123456789abcdef0"
+    }
+    hosted_instance_type = "t3.medium"
+    vpc_id               = "vpc-0123456789abcdef0"
+    subnet_id            = "subnet-0123456789abcdef0"
   }
 
   expect_failures = [var.hosted_instance_type]
+}
+
+# A data set the service does not know (a typo, or an old field's name) and a
+# value that is no snapshot id are refused at plan.
+run "unknown_data_set_refused" {
+  command = plan
+
+  variables {
+    hosted_data_snapshots = {
+      jop_2_consumr = "snap-0123456789abcdef0"
+    }
+    vpc_id    = "vpc-0123456789abcdef0"
+    subnet_id = "subnet-0123456789abcdef0"
+  }
+
+  expect_failures = [var.hosted_data_snapshots]
+}
+
+run "no_snapshot_id_refused" {
+  command = plan
+
+  variables {
+    hosted_data_snapshots = {
+      dfx2_consumer = "vol-0123456789abcdef0"
+    }
+    vpc_id    = "vpc-0123456789abcdef0"
+    subnet_id = "subnet-0123456789abcdef0"
+  }
+
+  expect_failures = [var.hosted_data_snapshots]
 }

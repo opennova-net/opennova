@@ -35,12 +35,12 @@ output "service_private_ip" {
 
 output "hosted_enabled" {
   value       = local.hosted_enabled
-  description = "Whether hosted game servers are set up (hosted_data_snapshot_id is set): app deploy turns ONNET_HOSTED_PROVIDER=ec2 on with it"
+  description = "Whether hosted game servers are set up (hosted_data_snapshots names a data set): app deploy turns ONNET_HOSTED_PROVIDER=ec2 on with it"
 }
 
-output "hosted_launch_template_id" {
-  value       = one(aws_launch_template.hosted[*].id)
-  description = "The hosted machines' launch template (ONNET_HOSTED_EC2_LAUNCH_TEMPLATE); null while hosting is off"
+output "hosted_launch_templates" {
+  value       = { for slug, template in aws_launch_template.hosted : slug => template.id }
+  description = "The hosted machines' launch templates, one per data set, by the data set's games slug (app deploy passes it as ONNET_HOSTED_EC2_LAUNCH_TEMPLATES); empty while hosting is off"
 }
 
 output "hosted_subnet_id" {

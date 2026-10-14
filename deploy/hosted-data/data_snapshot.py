@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
-"""The hosted game servers' game data, once, as a private encrypted EBS snapshot.
+"""One data set's game data for the hosted game servers, once, as a private encrypted EBS snapshot.
 
-ADR 0053; DEPLOY.md "Hosted game servers". The deploy toolbox's `hosted data-snapshot`
-streams a tar of the Joint Operations files opennova-serve reads into this program's
-standard input. It
+ADR 0053; DEPLOY.md "Hosted game servers". A data set is a game folder a hosted
+server's machine mounts, named by the games slug of the lobby it lists in
+(--data-set: jop_2_consumer, dfx2_consumer or opennova_0_consumer). The deploy
+toolbox's `hosted data-snapshot --data-set <slug>` streams a tar of that folder's
+files opennova-serve reads into this program's standard input. It
 
   1. extracts them into a staging directory (regular files and directories alone);
-  2. checks the set (the three base archives, Escalation's pair and its version.txt);
-  3. builds an ext4 file system image labelled opennova-jo holding them (no journal:
-     every machine mounts it read-only), checked with e2fsck;
+  2. checks the set against the data set's required files (every one: the three base
+     archives; Joint Operations: Escalation's pair and its version.txt besides);
+  3. builds an ext4 file system image labelled opennova-data holding them (no journal:
+     every machine mounts it read-only, at /opt/game), checked with e2fsck;
   4. writes the image's non-zero blocks straight into a new snapshot through the EBS
      direct APIs (StartSnapshot, PutSnapshotBlock, CompleteSnapshot), encrypted with
-     the account's default EBS key, tagged opennova:hosted-data=1 and the deployment.
+     the account's default EBS key, tagged opennova:hosted-data=1, the deployment and
+     opennova:data-set=<slug>.
      That key must be the AWS-managed aws/ebs one, which infra/aws/hosted.tf's launch
      policy relies on (it grants no KMS action): another is refused before a block is
      written, and a key it cannot read (no kms:DescribeKey) is a warning;
@@ -42,17 +46,28 @@ import uuid
 import boto3
 from botocore.config import Config
 
-LABEL = "opennova-jo"
-# What opennova-serve mounts: the retail boot table and Escalation's pair, and the
-# version.txt whose checksum the session advertises (engine/base/vfs/vfs.h).
-REQUIRED = [
-    "resource.pff",
-    "localres.pff",
-    "language.pff",
-    "expansion/jox01/jox01.pff",
-    "expansion/jox01/jox01l.pff",
-    "expansion/jox01/version.txt",
-]
+# The machine script mounts the volume by this label (apps/novaworld_server/hosted/
+# machine/user_data.sh), whatever the data set.
+LABEL = "opennova-data"
+# The retail boot table every data set's opennova-serve mounts.
+BOOT_ARCHIVES = ["resource.pff", "localres.pff", "language.pff"]
+# What opennova-serve mounts, per data set: the boot table, and for Joint Operations
+# Escalation's pair and the version.txt whose checksum the session advertises
+# (engine/base/vfs/vfs.h).
+REQUIRED = {
+    "jop_2_consumer": BOOT_ARCHIVES + [
+        "expansion/jox01/jox01.pff",
+        "expansion/jox01/jox01l.pff",
+        "expansion/jox01/version.txt",
+    ],
+    "dfx2_consumer": BOOT_ARCHIVES,
+    "opennova_0_consumer": BOOT_ARCHIVES,
+}
+NAMES = {
+    "jop_2_consumer": "Joint Operations",
+    "dfx2_consumer": "Delta Force Xtreme 2",
+    "opennova_0_consumer": "OpenNova",
+}
 GIB = 1 << 30
 IN_FLIGHT = 64
 WORKERS = 16
@@ -84,11 +99,11 @@ def extract(stage: str) -> list[tuple[str, int]]:
     return sorted(files)
 
 
-def check(files: list[tuple[str, int]]) -> None:
+def check(data_set: str, files: list[tuple[str, int]]) -> None:
     present = {name.lower() for name, _ in files}
-    missing = [name for name in REQUIRED if name not in present]
+    missing = [name for name in REQUIRED[data_set] if name not in present]
     if missing:
-        raise SystemExit("the data lacks " + ", ".join(missing))
+        raise SystemExit(f"the {data_set} data lacks " + ", ".join(missing))
     empty = [name for name, size in files if size == 0 and name.lower().endswith(".pff")]
     if empty:
         raise SystemExit("empty archives: " + ", ".join(empty))
@@ -167,6 +182,8 @@ def check_key(kms, key_arn: str | None) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--data-set", required=True, choices=sorted(REQUIRED),
+                        help="the data set: the games slug of the lobby its servers list in")
     parser.add_argument("--deployment", required=True, help="the opennova:deployment tag")
     parser.add_argument("--region", default=os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION"))
     args = parser.parse_args()
@@ -183,12 +200,12 @@ def main() -> int:
         stage = os.path.join(work, "stage")
         os.mkdir(stage)
         files = extract(stage)
-        check(files)
+        check(args.data_set, files)
         data_bytes = sum(size for _, size in files)
         for name, size in files:
             log(f"  {name}  {size:,} bytes")
-        log(f"{len(files)} files, {data_bytes:,} bytes")
-        image = os.path.join(work, "opennova-jo.ext4")
+        log(f"{args.data_set}: {len(files)} files, {data_bytes:,} bytes")
+        image = os.path.join(work, "data.ext4")
         size_gib = build_image(stage, image, data_bytes)
         log(f"ext4 image labelled {LABEL}, {size_gib} GiB")
 
@@ -200,11 +217,13 @@ def main() -> int:
                 Encrypted=True,
                 Timeout=120,
                 ClientToken=str(uuid.uuid4()),
-                Description="OpenNova hosted game servers' Joint Operations data (private; ADR 0053)",
+                Description=(f"OpenNova hosted game servers' {NAMES[args.data_set]} data, "
+                             f"data set {args.data_set} (private; ADR 0053)"),
                 Tags=[
-                    {"Key": "Name", "Value": f"{args.deployment}-hosted-data"},
+                    {"Key": "Name", "Value": f"{args.deployment}-hosted-data-{args.data_set}"},
                     {"Key": "opennova:hosted-data", "Value": "1"},
                     {"Key": "opennova:deployment", "Value": args.deployment},
+                    {"Key": "opennova:data-set", "Value": args.data_set},
                 ])
             snapshot_id = started["SnapshotId"]
             log(f"snapshot {snapshot_id} started (key {started.get('KmsKeyArn', 'the default EBS key')})")

@@ -26,8 +26,9 @@ allocate_eip = true
 cloudflare_web_proxied = true   # web @/www behind Cloudflare TLS
 
 # Hosted game servers (hosted.tf; DEPLOY.md "Hosted game servers"). The data
-# snapshot's id comes from the vault (item `hosted`, field data_snapshot_id), not
-# this file: hosting is off without it.
+# snapshots (hosted_data_snapshots, one per data set) come from the vault (item
+# `hosted`, fields data_snapshot_id_<slug>, e.g. data_snapshot_id_jop_2_consumer),
+# not this file: hosting is off without one.
 # hosted_instance_type  = "c7a.medium"  # never a burstable t-family type
 # hosted_root_volume_gb = 10
 # hosted_ami_id         = ""            # empty: Canonical's newest Ubuntu 24.04

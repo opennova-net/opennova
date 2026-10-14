@@ -12,9 +12,9 @@ guide is [DEPLOY.md](../DEPLOY.md) at the repo root.
 - `env/` — `*.tpl` carry `op://` references; `app.prod.env` carries the
   committed non-secret prod values.
 - `backup/` — the nightly sqlite backup sidecar.
-- `hosted-data/`: the helper image `hosted data-snapshot` builds on the operator's
-  docker to write the hosted game servers' data, once, into a private encrypted EBS
-  snapshot.
+- `hosted-data/`: the helper image `hosted data-snapshot --data-set <slug>` builds on
+  the operator's docker to write one data set of the hosted game servers' data, once,
+  into a private encrypted EBS snapshot (one snapshot per data set).
 - `game/` — the web build's image (ADR 0049): the wasm GDExtension, the Godot
   Web export and the nginx the portal routes `game.<domain>` to.
 

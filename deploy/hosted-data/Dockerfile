@@ -1,7 +1,7 @@
 # The hosted game servers' data snapshot helper (data_snapshot.py; DEPLOY.md
 # "Hosted game servers"). The deploy toolbox builds it on the operator's own
-# docker (`./deploy/run.sh hosted data-snapshot`) and streams the Joint
-# Operations files into it; it is never published, and it holds no game byte:
+# docker (`./deploy/run.sh hosted data-snapshot --data-set <slug>`) and streams
+# one data set's game files into it; it is never published, and it holds no game byte:
 # the data arrives on its standard input at run time and leaves with the
 # container (--rm). e2fsprogs builds the ext4 image (mkfs.ext4 -d); boto3 drives
 # the EBS direct APIs.
