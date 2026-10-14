@@ -2081,7 +2081,7 @@ static int test_game_install_keys() {
 	            !run.get("ran_strict"));
 	TEST_EXPECT(view_section_to_json(SessionView(), ViewSection::Run).get_string("ran_mode", "x").empty());
 	// No game has run: the file log is there, and null.
-	const JsonValue *no_log = view_section_to_json(SessionView(), ViewSection::Run).get("file_log");
+	const JsonValue *no_log = run.get("file_log");
 	TEST_EXPECT(no_log && no_log->is_null());
 	TEST_EXPECT(import.get_int("install_files", 0) == 2 && !import.get("retail_files"));
 	TEST_EXPECT(preferences.get_string("game_install", "") == "C:/games/JO" &&
