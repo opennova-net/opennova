@@ -40,6 +40,7 @@
 #include <vector>
 
 #include "conn_fixture.h"
+#include "../world/channel_clip_source.h"
 
 namespace {
 
@@ -1501,6 +1502,9 @@ int entity_death_records(ns::LoopbackChannel &wire, w::EntityHandle victim) {
 void test_org1_death_transaction_is_the_motor_edge() {
 	w::World world;
 	world.registry.configure_pool(0, 16);
+	// The org1 people hold their channels: no clip plays, the motor edge runs.
+	test_world::ChannelClipSource channel_only;
+	world.ai.root_motion = &channel_only;
 	w::PlayerSpawn host_spawn;
 	host_spawn.position = {0.0f, 0.0f, 10.0f};
 	host_spawn.team = 1;

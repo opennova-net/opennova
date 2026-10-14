@@ -32,6 +32,8 @@
 #include <memory>
 #include <vector>
 
+#include "channel_clip_source.h"
+
 using namespace opennova::world;
 
 static int failures = 0;
@@ -55,6 +57,9 @@ VehicleTraits truck_traits() {
     return t;
 }
 
+// A body holding its animation channel that plays nothing, for a rig with no clip source.
+test_world::ChannelClipSource channel_only;
+
 struct Rig {
     std::unique_ptr<World> wp = std::make_unique<World>();
     World &w = *wp;
@@ -64,6 +69,7 @@ struct Rig {
     explicit Rig(float player_dx = 2.0f) {
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
+        sys.root_motion = &channel_only; // the bodies hold their channels
 
         Entity veh;
         veh.net_id = 11; // 00TRa's DTruck1 SSN
@@ -500,6 +506,7 @@ void test_live_pose_provider_and_static_fallback() {
         w.registry.configure_pool(0, 4);
         w.registry.configure_pool(1, 4);
         AiSystem &ai = w.ai;
+        ai.root_motion = &channel_only; // the occupant holds its channel
         FakeMountedPoseProvider provider;
         provider.pose = pose_degrees({11.0f, 12.0f, 13.0f}, 21, -8, 9);
         w.pose_provider = &provider;
@@ -4277,6 +4284,7 @@ static void test_seat_bone_failure_runs_the_seat_tail() {
         w.registry.configure_pool(1, 4);
         NoSeatBone provider;
         w.pose_provider = &provider;
+        w.ai.root_motion = &channel_only; // the occupant holds its channel
         Entity vehicle;
         vehicle.net_id = 200;
         vehicle.kind = EntityKind::Item;
@@ -4332,6 +4340,7 @@ static void test_board_pass_on_an_attached_gun_stays_on_foot() {
     World w;
     w.registry.configure_pool(0, 4);
     w.registry.configure_pool(1, 4);
+    w.ai.root_motion = &channel_only; // the soldier holds its channel
     Entity carrier;
     carrier.net_id = 30;
     carrier.kind = EntityKind::Item;
@@ -4421,6 +4430,7 @@ static void test_npc_seat_bone_failure_kills_boarders_and_detaches() {
         SeatBoneProvider provider;
         provider.resolves = resolves;
         w.pose_provider = &provider;
+        w.ai.root_motion = &channel_only; // the boarders hold their channels
         Entity attacker;
         attacker.net_id = 400;
         attacker.kind = EntityKind::Organic;

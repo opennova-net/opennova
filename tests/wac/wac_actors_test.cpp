@@ -14,8 +14,9 @@ static int failures = 0;
 
 struct Motion : IRootMotionSource {
     int missing_state = -1;
+    // RESET authored: the body holds its channel (infantry_has_anim_channel).
     bool has_clip(int, int state) const override {
-        return state > 0 && state < 252 && state != missing_state;
+        return state >= 0 && state < 252 && state != missing_state;
     }
     int32_t clip_length_ticks(int, int, int) const override { return -1; }
     bool advance(int, int state, int32_t &phase, RootMotionFrame &out) override {

@@ -153,6 +153,15 @@ func _install_native_seat_table(sim: Simulation, dir: String,
 	return root
 
 
+# The people's table, for a rig whose organics must think (a command-125 board):
+# a body with no table holds no animation channel, and the org1 update runs
+# nothing for it (world::infantry_has_anim_channel). The fixture's US01.adm
+# authors RESET, the idle and the emplaced rows.
+func _install_people_table(sim: Simulation) -> void:
+	assert_gt(sim.set_infantry_anim_map(PresenterFixture.anim_root(self), "US01.adm"), 0,
+			"the people's table registers its clips")
+
+
 func _native_asset_root(sim: Simulation, dir: String) -> ResourceRoot:
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(dir), OK)
@@ -1061,6 +1070,7 @@ end
 	sim.enable_listen_server(true)
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
+	_install_people_table(sim)
 	sim.resolve_item_traits(item_db)
 	# Command-125 boarders spawn ON FOOT and attach through the infantry
 	# think's board leg; the think gate is (logic_tick + 36*net_id) & 15,
@@ -1905,6 +1915,7 @@ end
 	_install_native_seat_table(sim, fixture_dir, item_db, PackedInt32Array([1294]))
 	sim.set_sound_profiles(FileAccess.get_file_as_bytes(sndprof_path))
 	assert_true(sim.load_from_mission_data(md), "loaded command-125 mission with seat specs")
+	_install_people_table(sim)
 	sim.resolve_item_traits(item_db)
 	# Command-125 boarders spawn ON FOOT and attach through the infantry
 	# think's board leg; the think gate is (logic_tick + 36*net_id) & 15,
@@ -2176,6 +2187,7 @@ end
 """)
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
+	_install_people_table(sim)
 	sim.resolve_item_traits(item_db)
 	# The local player stands beside the carrier from the start: it is also
 	# the human the entity update needs to run the boarding think.
@@ -2435,6 +2447,7 @@ end
 """)
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md), "loaded command-125 UseGun mount")
+	_install_people_table(sim)
 	sim.resolve_item_traits(item_db)
 	_spawn_fixture_human(sim)
 	# Command-125 boarders spawn ON FOOT and attach through the infantry

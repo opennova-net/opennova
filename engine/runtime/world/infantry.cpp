@@ -1221,6 +1221,10 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     const bool npc_body = !e.inf.is_local_player && !e.net_is_remote_peer &&
             (tick_entity == nullptr ||
              ((tick_entity->flags | tick_entity->engine_flags) & kEntityFlagPlayer) == 0);
+    // An org1 body with no animation channel runs nothing: the update's first test.
+    // [orig: Entity_UpdateInfantryAI `mov ecx,[esi+188h]; cmp ecx,ebp; jz loc_4BFC8B`
+    //  @0x4B9931..0x4B993B]
+    if (npc_body && !infantry_has_anim_channel(e.inf, root_motion)) return;
     // The org1 mounted-live local, taken at the motor head: a parent and a
     // positive Health word. A board or a detach later in the pass leaves it as
     // it was. [orig: Entity_UpdateInfantryAI @0x4B9960..0x4B9985]
@@ -1596,10 +1600,11 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
 
     // Restamp the camera offset from the current simulated head, after the
     // motor-head channel update and current view/seat/lean pose. An org1 body
-    // restamps whether or not its head had a clip: the dual update's result is
-    // never tested, and a clipless head leaves the zeroed frame, whose extent
-    // floors at 0x9000. [orig: Entity_UpdateInfantryAI - the frame zeroed
-    // @0x4B9A34..0x4B9A44, the call @0x4B9A48, the restamp @0x4BF078..0x4BF094]
+    // that got this far holds a channel and restamps unconditionally: retail
+    // never tests the dual update's result [orig: Entity_UpdateInfantryAI - the
+    // call @0x4B9A48, the restamp @0x4BF078..0x4BF094]. The player bodies keep
+    // the clip gate, which stands in for their own unported channel exit
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4B412D..0x4B4135].
     if (have_clip || npc_body) infantry_restamp_eye(e, world, frame);
 
     // Org2 selects its next gait only after the current head pose was built.

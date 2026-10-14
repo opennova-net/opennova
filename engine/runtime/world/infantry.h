@@ -988,6 +988,8 @@ inline InfantryBodyPose infantry_body_pose(const InfantryState &inf) {
 // pass read. Returns whether the primary had a clip. AiSystem::tick_infantry runs it for every NPC
 // body; a caller ticking a body outside a world runs the same function.
 // When the game runs it at all:
+// - only for a body holding an animation channel (infantry_has_anim_channel): with none the
+//   update's first test exits before anything [orig: @0x4B9931..0x4B993B];
 // - only for a body on the org1 physics row: Entity_UpdateAllEntities' pool-0 loop calls the move
 //   function's slot, entity+0x1C4 [orig: @0x4C2460..0x4C2472], and the org0 row's is a nullsub
 //   [orig: @0x82AC1C -> nullsub_28 @0x4AFF60], so an org0 body's channels never advance after the
@@ -1002,6 +1004,17 @@ inline InfantryBodyPose infantry_body_pose(const InfantryState &inf) {
 //  AnimMap_UpdateDualChannels @0x40B8C0 from @0x4B9A48]
 bool infantry_org1_motor_head(InfantryState &inf, IRootMotionSource *source, AnimVariantRings &rings,
                               RootMotionFrame &frame);
+
+// Whether the body holds an animation channel (entity+0x188): its table registered and authoring
+// the RESET row, slot 0, from which the registration fills every state the table leaves empty;
+// without slot 0 the registration frees the channel, and the org1 and org2 updates run nothing for
+// the body. None with no clip source wired. [orig: AnimMap_RegisterEntity @0x40BB60 - the slot-0
+// test @0x40BBBC..0x40BBC6 (the free at loc_40BD8A), the store @0x40BBD5, the fill
+// @0x40BC24..0x40BC81; Entity_UpdateInfantryAI @0x4B9931..0x4B993B;
+// Entity_UpdateInfantryPlayerBody @0x4B412D..0x4B4135]
+inline bool infantry_has_anim_channel(const InfantryState &inf, const IRootMotionSource *source) {
+    return source != nullptr && inf.adm_id >= 0 && source->has_clip(inf.adm_id, anim_state::kReset);
+}
 
 // The org1 body's staggered key: the logic tick plus 36 times its net id (+0x7C, a placed record's
 // SSN). Its think runs where the key is a multiple of 16, its perception where it is one of 32 and

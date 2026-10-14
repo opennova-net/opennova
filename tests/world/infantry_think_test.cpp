@@ -45,7 +45,10 @@ int32_t chop(double value) {
 
 struct Clips : IRootMotionSource {
     std::set<int> states;
-    bool has_clip(int, int state) const override { return states.count(state) != 0; }
+    // RESET authored: the body holds its channel (infantry_has_anim_channel).
+    bool has_clip(int, int state) const override {
+        return state == anim_state::kReset || states.count(state) != 0;
+    }
     int32_t clip_length_ticks(int, int, int) const override { return -1; }
     bool advance(int, int state, int32_t &phase, RootMotionFrame &out) override {
         if (!states.count(state)) return false;

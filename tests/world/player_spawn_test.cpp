@@ -13,6 +13,8 @@
 #include <cmath>
 #include <cstdio>
 
+#include "channel_clip_source.h"
+
 using namespace opennova::world;
 
 static int failures = 0;
@@ -473,6 +475,8 @@ int main() {
     {
         World w;
         AiSystem &ai = w.ai;
+        test_world::ChannelClipSource channel_only;
+        ai.root_motion = &channel_only; // the organic holds its channel
         w.registry.configure_pool(0, 8);
         Entity seed;
         seed.kind = EntityKind::Organic;

@@ -15,6 +15,8 @@
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/world.h>
 
+#include "../world/channel_clip_source.h"
+
 using namespace opennova;
 using world::AiBrain;
 using world::AiEntity;
@@ -95,11 +97,15 @@ static Entity make_dual_control_vehicle(uint16_t ssn) {
     return e;
 }
 
+// A body holding its animation channel that plays nothing, for a rig with no clip source.
+static test_world::ChannelClipSource channel_only;
+
 struct ClipSource : IRootMotionSource {
     int available_state = -1;
 
+    // RESET authored: the body holds its channel (infantry_has_anim_channel).
     bool has_clip(int /*adm_id*/, int state_id) const override {
-        return state_id == available_state;
+        return state_id == world::anim_state::kReset || state_id == available_state;
     }
 
     int32_t clip_length_ticks(int /*adm_id*/, int /*state_id*/, int /*variant*/) const override { return -1; }
@@ -234,6 +240,7 @@ static void test_target_loss_clears_zero_net_id_occupant() {
     const EntityHandle target = w.registry.spawn(1, gun);
 
     AiSystem &ai = w.ai;
+    ai.root_motion = &channel_only; // the occupant holds its channel
     const int mounted_ai_index = ai.attach(mounted);
     AiEntity *mounted_ai = ai.at(mounted_ai_index);
 
@@ -561,6 +568,7 @@ int main() {
         const EntityHandle gh = w.registry.spawn(1, make_gun(200, 10.f, 20.f, 5.f, 0));
         const EntityHandle sh = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
         AiSystem &ai = w.ai;
+        ai.root_motion = &channel_only; // the occupant holds its channel
         const int idx = ai.attach(sh);
         ai.at(idx)->net_id = 100;
         ai.at(idx)->inf.active = true;
@@ -771,6 +779,7 @@ int main() {
         const EntityHandle vh = w.registry.spawn(1, vehicle);
         const EntityHandle sh = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
         AiSystem &ai = w.ai;
+        ai.root_motion = &channel_only; // the occupant holds its channel
         const int idx = ai.attach(sh);
         ai.at(idx)->net_id = 100;
         ai.at(idx)->inf.active = true;

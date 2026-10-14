@@ -49,9 +49,10 @@ struct FlatField {
 };
 
 // Idle-only source whose frames stand the capsule bottom 1.0 u under the origin
-// and carry no root translation.
+// and carry no root translation; its RESET authored, so the body holds its animation
+// channel (infantry_has_anim_channel).
 struct IdleSource : IRootMotionSource {
-    std::set<int> clips{anim_state::kIdle};
+    std::set<int> clips{anim_state::kReset, anim_state::kIdle};
     uint32_t events = 0; // the trigger bits every frame carries
     bool has_clip(int, int id) const override { return clips.count(id) != 0; }
     int32_t clip_length_ticks(int, int, int) const override { return -1; }

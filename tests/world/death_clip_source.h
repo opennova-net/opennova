@@ -1,6 +1,7 @@
 // The root-motion double the death-state and projectile-combat rigs tick a
-// player body over: the clips its org2 anim path asks for, the idle pair plus
-// the whole death family, one phase step per tick. Header-only test
+// body over: the clips its anim path asks for, the idle pair plus the whole
+// death family, one phase step per tick, and RESET, so an NPC body holds its
+// animation channel (infantry_has_anim_channel). Header-only test
 // infrastructure (no retail counterpart to cite).
 #pragma once
 
@@ -13,7 +14,8 @@ namespace test_world {
 struct DeathClipSource final : opennova::world::IRootMotionSource {
 	bool has_clip(int, int state_id) const override {
 		namespace anim_state = opennova::world::anim_state;
-		return state_id == anim_state::kIdle || state_id == anim_state::kIdle2 ||
+		return state_id == anim_state::kReset || state_id == anim_state::kIdle ||
+		       state_id == anim_state::kIdle2 ||
 		       (state_id >= anim_state::kDeathFire &&
 		        state_id <= anim_state::kDeathBulletBase + 59);
 	}

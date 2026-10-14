@@ -247,8 +247,17 @@ int MissionKernel::adm_id_for_runtime_type(uint16_t type_id) {
 	const assets::AssetStore *adm_source = adm_assets_ != nullptr ? adm_assets_ : &assets();
 	const int visual = mission::visual_item_id_for_runtime_type(type_id, *item_rows);
 	const DefItemDef *def = mission::find_item_def(*item_rows, visual);
+	// An item naming no table registers none, so its body holds no animation
+	// channel: every pool-0 registrar skips the .adm load and the registration
+	// on an empty animDef (def+0xC0) [orig: Game_ReloadEntityModelsAndCallbacks
+	// @0x522D07..0x522D0A, Entity_SpawnFromAnimSlotProperty @0x43C4A2,
+	// Entity_SpawnFromItemDef @0x452571]. No configured default stands in.
+	if (def != nullptr && def->anim_def[0] == '\0') {
+		adm_by_runtime_type_[type_id] = -1;
+		return -1;
+	}
 	int adm_id = -1;
-	if (def != nullptr && def->anim_def[0] != '\0') {
+	if (def != nullptr) {
 		// The spawn's one .adm load: <stem>.adm, default.adm where that file
 		// is not mounted [orig: Entity_SpawnFromItemDef @0x45257c ->
 		// AnimMap_LoadAdmFile @0x40cc40; anim/adm_fallback.h].

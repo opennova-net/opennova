@@ -19,7 +19,12 @@
 #include <array>
 #include <unordered_map>
 
+#include "channel_clip_source.h"
+
 using namespace opennova::world;
+
+// A body holding its animation channel that plays nothing, for a rig with no clip source.
+static test_world::ChannelClipSource channel_only;
 
 static int failures = 0;
 #define CHECK(c)                                                              \
@@ -459,8 +464,10 @@ static void test_aim_origin_takes_the_non_person_leg() {
 // calls @0x4BC720 / @0x4BCB23; the aim delta @0x4BC825..0x4BC84E)]
 static void test_aim_solution_uses_muzzle_stamp() {
     struct AttackSource : IRootMotionSource {
+        // RESET authored: the body holds its channel (infantry_has_anim_channel).
         bool has_clip(int, int id) const override {
-            return id == anim_state::kIdle || id == anim_state::kAttack;
+            return id == anim_state::kReset || id == anim_state::kIdle ||
+                   id == anim_state::kAttack;
         }
         int32_t clip_length_ticks(int, int, int /*variant*/) const override { return -1; }
         bool advance(int, int id, int32_t &phase, RootMotionFrame &out) override {
@@ -764,8 +771,9 @@ static void test_sm_fire_stamps_the_hull_adm_byte() {
 // Compact attack-animation source for the behavioral regressions below. Retail
 // infantry fires from .bad event bit 0x4, so these drive the actual attack path.
 struct AttackEventSource final : IRootMotionSource {
+    // RESET authored: the body holds its channel (infantry_has_anim_channel).
     bool has_clip(int, int id) const override {
-        return id == anim_state::kIdle || id == anim_state::kAttack ||
+        return id == anim_state::kReset || id == anim_state::kIdle || id == anim_state::kAttack ||
                (id >= 67 && id <= 75) || (id >= 173 && id <= 239);
     }
     int32_t clip_length_ticks(int, int, int /*variant*/) const override { return -1; }
@@ -801,8 +809,9 @@ struct DeathTransitionRootSource final : IRootMotionSource {
     static constexpr int32_t kFirstBlendBottom = 65635;
     static constexpr int32_t kFirstBlendDz = kFirstBlendBottom - kIdleBottom;
 
+    // RESET authored: the body holds its channel (infantry_has_anim_channel).
     bool has_clip(int, int id) const override {
-        return id == anim_state::kIdle || (id >= 173 && id <= 239);
+        return id == anim_state::kReset || id == anim_state::kIdle || (id >= 173 && id <= 239);
     }
     int32_t clip_length_ticks(int, int, int /*variant*/) const override { return -1; }
     bool advance(int, int id, int32_t &phase, RootMotionFrame &out) override {
@@ -2240,8 +2249,9 @@ static void test_mounted_request_copies_the_parent_adm_byte() {
 // request's mounted-live test @0x4BF4B3]
 static void test_mounted_gunner_runs_the_anim_event_fire_block() {
     struct SeatClipFires final : IRootMotionSource {
+        // RESET authored: the body holds its channel (infantry_has_anim_channel).
         bool has_clip(int, int id) const override {
-            return id == anim_state::kIdle || (id >= 67 && id <= 75);
+            return id == anim_state::kReset || id == anim_state::kIdle || (id >= 67 && id <= 75);
         }
         int32_t clip_length_ticks(int, int, int /*variant*/) const override { return -1; }
         bool advance(int, int id, int32_t &phase, RootMotionFrame &out) override {
@@ -2357,6 +2367,7 @@ static void test_mounted_request_runs_for_a_passenger() {
 
         AiSystem &ai = w->ai;
         ai.is_authority = true;
+        ai.root_motion = &channel_only; // the rider holds its channel
         AiEntity &npc = *ai.at(ai.attach(npc_h));
         configure_rifleman(npc, 0x12, 1);
         npc.inf.combat_target = target_h;
@@ -2594,6 +2605,7 @@ static void test_mounted_collision_tail_uses_retail_eight_tick_phase_without_mod
     AiSystem &ai = w->ai;
     ai.is_authority = true;
     ai.collision = &collision;
+    ai.root_motion = &channel_only; // the gunner holds its channel
     AiEntity &npc = *ai.at(ai.attach(npc_h));
     configure_rifleman(npc, 0x10, 1);
     CHECK(w->commands.mount(0x10, 0x20));
@@ -4747,8 +4759,10 @@ int main() {
         // A root-motion double whose attack clip carries the .bad fire trigger (bit 0x4)
         // every frame; idle carries none. [orig: g_AnimEventTriggerBits @0xA2ED08]
         struct FiringSource : IRootMotionSource {
+            // RESET authored: the body holds its channel (infantry_has_anim_channel).
             bool has_clip(int, int id) const override {
-                return id == anim_state::kIdle || id == anim_state::kAttack;
+                return id == anim_state::kReset || id == anim_state::kIdle ||
+                   id == anim_state::kAttack;
             }
             int32_t clip_length_ticks(int, int, int /*variant*/) const override { return -1; }
             bool advance(int, int id, int32_t &phase, RootMotionFrame &out) override {

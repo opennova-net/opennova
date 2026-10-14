@@ -25,10 +25,16 @@
 //                    across compilers, so a retail digest is compared on one
 //                    machine and never committed.
 #include "common/boot_file_source.h"
+#include "common/file_io.h"
 #include "common/retail_mission_files.h"
 #include "common/retail_paths.h"
 #include "common/synthetic_mission.h"
+#include "common/test_paths.h"
 
+#include <base/io/strutil.h>
+#include <base/resource_index/resource_index.h>
+#include <base/vfs/file_source.h>
+#include <runtime/assets/asset_store.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/match.h>
@@ -38,6 +44,7 @@
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -82,7 +89,16 @@ namespace {
 // skips an airborne body's think [orig: Entity_UpdateInfantryAI
 // @0x4BAA4B..0x4BAA66], which moves the chain from 0xc35a881f8f092209
 // (reverting that one commit restores it).
-constexpr uint64_t kSyntheticDigest = 0xa22209beb52b4e4fULL;
+// The org1 update then runs nothing for a body with no animation channel
+// [orig: Entity_UpdateInfantryAI @0x4B9931..0x4B993B], and an item naming no
+// table registers none. The synthetic people named no item, so they would
+// stand and the chain would cover no think (0x00436028504af8e0); the chain
+// instead gives them an items.def row naming the minted soldier.adm (over
+// idle.bad and walk.bad), and the player's row the same. Their channels now
+// play those clips, which moves the chain from 0xa22209beb52b4e4f; with every
+// person naming its table the exit itself moves nothing (reverting it gives
+// the same value).
+constexpr uint64_t kSyntheticDigest = 0x517e7adde3a32d91ULL;
 constexpr int kSyntheticTicks = 240;
 
 struct Digest {
@@ -162,13 +178,62 @@ using test_boot::source_over;
 using test_boot::tick_no_net;
 using test_mission::synthetic_mission;
 
+// The kernel's assets for the synthetic mission: the minted soldier.adm (its
+// idle and walk rows) over the minted idle.bad and walk.bad, read from fixtures/.
+// The people's item names it (`anim_def soldier`), as the player's does (the
+// rows CRLF-terminated, as a shipped items.def's are).
+constexpr int kPeopleTypeId = 2001; // items.def 102001
+constexpr const char *kPeopleItems =
+		"begin \"Null\"\r\nid 100000\r\ntype marker\r\nend\r\n"
+		"begin \"Synthetic soldier\"\r\nid 102001\r\ntype person\r\nanim_def soldier\r\nend\r\n"
+		"begin \"Player #1, Single player\"\r\n"
+		"id 105310\r\ntype person\r\nanim_def soldier\r\nend\r\n";
+
+struct PeopleClips final : FileSource {
+	std::map<std::string, std::vector<uint8_t>> files; // by lower-case name
+	bool read(const std::string &name, std::vector<uint8_t> &out) const override {
+		const auto found = files.find(strutil::to_lower(name));
+		if (found == files.end()) return false;
+		out = found->second;
+		return true;
+	}
+	uint64_t stamp(const std::string &name) const override {
+		return files.count(strutil::to_lower(name)) != 0 ? 1 : 0;
+	}
+};
+
 bool synthetic_chain(int ticks, uint64_t &out, std::string &error) {
 	std::map<std::string, std::string> files;
 	files["synth.wac"] = "if elapse(1) then set(v1,1) endif\nif elapse(2) then inc(v1) endif\n";
+	files["items.def"] = kPeopleItems;
+	// The people's table, the one their item names: every body holds its
+	// animation channel and runs the org1 update (one without runs nothing,
+	// world::infantry_has_anim_channel). No configured default stands in.
+	auto clips = std::make_shared<PeopleClips>();
+	for (const char *name : {"soldier.adm", "idle.bad", "walk.bad"}) {
+		clips->files[name] = test_io::read_file(test_paths_fixture(std::string("anim/") + name));
+		if (clips->files[name].empty()) {
+			error = std::string("no fixture anim/") + name;
+			return false;
+		}
+	}
+	ResourceIndex index;
+	if (!index.mount_source(clips)) {
+		error = "mount: " + index.last_error();
+		return false;
+	}
+	const assets::AssetStore store(&index);
 	ms::MissionKernel kernel;
-	kernel.open_document(synthetic_mission(), "synth", source_over(&files));
+	kernel.set_assets(&store);
+	bms::File mission = synthetic_mission();
+	for (bms::Entity &person : mission.organics) person.type_id = kPeopleTypeId;
+	kernel.open_document(std::move(mission), "synth", source_over(&files));
 	ms::KernelBootOptions options;
 	if (!kernel.boot(options, error)) return false;
+	if (kernel.root_motion.clip_count(0) == 0) {
+		error = "the people's table registered no clips";
+		return false;
+	}
 	Digest d;
 	hash_world(d, kernel.world);
 	for (int i = 0; i < ticks; ++i) {

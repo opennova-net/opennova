@@ -22,7 +22,8 @@ static int failures = 0;
 constexpr int32_t fixed(float value) { return static_cast<int32_t>(value * 65536.0f); }
 
 struct Clips : IRootMotionSource {
-    std::set<int> states{1, 43, 44, 49, 67, 76, 125, 126, 140, 141, 147, 150};
+    // RESET authored: the body holds its channel (infantry_has_anim_channel).
+    std::set<int> states{0, 1, 43, 44, 49, 67, 76, 125, 126, 140, 141, 147, 150};
     int32_t step = 0;
     bool has_clip(int, int state) const override { return states.count(state) != 0; }
     int32_t clip_length_ticks(int, int, int) const override { return -1; }
