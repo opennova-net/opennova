@@ -211,11 +211,15 @@ static int test_rows_as_before() {
 		// effect no file defines is a warning, as the game plays stockeffect's copy for it; a particle slot's
 		// point is looked up in its model's first-16 section (the 376 rows before them gave 28f4c1e1). S26 (A8): a
 		// reference the game loads on without is a warning, the fixture items' graphic and husk models among them
-		// (the same rows gave ee46e4c2).
-		{ "fixtures", fixture_files, false, 377, 0xdcf0da91d8e96e91ull },
-		{ "styles", style_files, false, 15, 0xe39ad4219139a453ull },
+		// (the same rows gave ee46e4c2). S26 (the writers write their models alone, #1098): the menus' parse notes
+		// what a save leaves out (an ITEM's VALUE 0, a default FLAGS word, a MARQUEE_WND's ORIENTATION and STRING),
+		// nine menu.ignored_input (the 377 rows before them gave dcf0da91).
+		{ "fixtures", fixture_files, false, 386, 0x745d680f80fbcc07ull },
+		// S26: the stylesheet is the list the game reads (its earlier DUP inert no more: the list holds DUP once, its last
+		// value), and what a save does not write of it one style.ignored_input (the 15 rows before gave e39ad421).
+		{ "styles", style_files, false, 15, 0xec187e567b03a96aull },
 		{ "items", item_files, false, 4, 0xc8ca7a0734b9eac6ull },
-		{ "open", style_and_item_files, true, 19, 0x80eb2caf43356608ull },
+		{ "open", style_and_item_files, true, 18, 0x6932166a23abbe1eull }, // S26: as "styles" (19 rows gave 80eb2caf)
 	};
 	for (const PinnedRows &pin : pinned) {
 		Project project;
@@ -311,7 +315,8 @@ static int test_findings_keep_their_records() {
 		std::vector<Diagnostic> out;
 		for (const Diagnostic &d : validate_project(
 					 { project.paths, project.document, project.scan, open }, graph, cache))
-			if (d.asset == "menus/nested.mnu" && d.code().rfind("menu.", 0) == 0)
+			// (The parse's note of the NOPE it reads as no TYPE is the file's, no record's.)
+			if (d.asset == "menus/nested.mnu" && d.code().rfind("menu.", 0) == 0 && d.code() != "menu.ignored_input")
 				out.push_back(d);
 		return out;
 	};

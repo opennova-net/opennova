@@ -293,8 +293,8 @@ static int test_go_to_targets() {
 // find_definition reads the graph's slot while it is current for the document (the same
 // instance at the same revision), and the document's own extraction otherwise, with one answer:
 // each definition as the document's own lookup makes it. menu_style.mns defines DEF_TEXT_FG twice
-// and brand.mns once more: the graph publishes both of menu_style.mns's inert (the game reads
-// brand.mns's), the stylesheet's own lookup reads its later line, and that is the one found.
+// and brand.mns once more: the stylesheet's list holds the name once, its later line's value, which the graph
+// publishes inert (the game reads brand.mns's), and that is the one found.
 static int test_find_definition() {
 	editor_test::TempProjectDir dir("opennova_reference_queries_find");
 	NoProcess platform;
@@ -328,7 +328,7 @@ static int test_find_definition() {
 		own_inert += inert;
 		published_inert += symbol.inert;
 	}));
-	TEST_EXPECT(read > 0 && own_inert == 1 && published_inert == 2);
+	TEST_EXPECT(read > 0 && own_inert == 0 && published_inert == 1);
 	NodeAddress fg, twice, by_variable;
 	TEST_EXPECT(found_alike(graph, *sheet, "DEF_TEXT_FG", fg) &&
 			found_alike(graph, *sheet, "%def_text_fg%", by_variable) && fg == by_variable);

@@ -1151,7 +1151,7 @@ static int test_stylesheet_bindings() {
 	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::StyleVar, "%EARLY%") == ReferenceStatus::Present);
 	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::StyleVar, "%LATE_ONLY%") == ReferenceStatus::Missing);
-	TEST_EXPECT(count_code(view.findings.diagnostics, "style.invalid_name_char") == 1);
+	TEST_EXPECT(count_code(view.findings.diagnostics, "style.stops") == 1);
 
 	// A menu_style.mns font brand.mns replaces is never loaded: its missing file is no
 	// finding. Once brand.mns no longer defines the name, the game reads it: reported, once.
@@ -1251,7 +1251,9 @@ static int test_menu_names_and_targets() {
 	TEST_EXPECT(menu && !menu->blocked());
 	if (!menu) return 1;
 	for (const SourceIssue &issue : menu->issues()) std::printf("  issue: %s %s\n", issue.field.c_str(), issue.message.c_str());
-	TEST_EXPECT(menu->issues().empty());
+	// One note, listed: the JUMP the parse knows no code of, which sets no TYPE.
+	TEST_EXPECT(menu->issues().size() == 1 && !menu->issues()[0].blocks &&
+	            menu->issues()[0].message.find("\"JUMP\"") != std::string::npos);
 	const SessionView &view = session.view();
 	const AssetGraph &graph = *view.findings.graph;
 	const std::string path = menu->path();
@@ -1411,7 +1413,7 @@ static int test_menu_names_and_targets() {
 	bool unknown_type = false, no_state = false;
 	for (const Diagnostic &d : view.findings.diagnostics) {
 		if (d.code() != "menu.action_inert") continue;
-		unknown_type = unknown_type || (d.field == "type" && d.message.find("'JUMP'") != std::string::npos);
+		unknown_type = unknown_type || (d.field == "type" && d.message.find("no TYPE the game knows") != std::string::npos);
 		no_state = no_state || (d.field == "state" && d.record == "HOME/PANEL/GO/Action 8");
 	}
 	TEST_EXPECT(unknown_type && no_state);
@@ -1585,7 +1587,7 @@ static int test_symbol_locators() {
 	TEST_EXPECT(find_definition(AssetGraph(), reloaded, "exit", found) && found == at);
 	TEST_EXPECT(find_definition(AssetGraph(), reloaded, "STARTUP", found) &&
 			found.kind == reloaded.kind_from_name("screen") && !found.child);
-	// Two definitions of a name in the stylesheet the game reads: the last one is read.
+	// Two definitions of a name in the stylesheet the game reads: the list holds the name once, the last one's value.
 	const AssetEntry *style = view.project.scan->find("menu_style.mns");
 	TEST_EXPECT(style != nullptr);
 	if (!style) return 1;
@@ -1594,10 +1596,8 @@ static int test_symbol_locators() {
 	TEST_EXPECT(editor_test::write_text(style_file, read_text(style_file) + "\r\nTWICE 1\r\nTWICE 2\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	const std::vector<const GraphSymbol *> twice = view.findings.graph->symbols_named(ReferenceKind::StyleVar, "twice");
-	TEST_EXPECT(twice.size() == 2 && twice[0]->inert && !twice[1]->inert && twice[1]->value == "2" &&
-	            twice[0]->inert_reason.find("defines it again below") != std::string::npos);
-	TEST_EXPECT(view.findings.graph->style_binding("TWICE") ==
-			(twice.size() == 2 ? twice[1] : nullptr));
+	TEST_EXPECT(twice.size() == 1 && !twice[0]->inert && twice[0]->value == "2");
+	TEST_EXPECT(view.findings.graph->style_binding("TWICE") == (twice.size() == 1 ? twice[0] : nullptr));
 	// A query names a variable as the graph keys it; find_definition takes a menu's %NAME% too.
 	TEST_EXPECT(view.findings.graph->symbols_named(ReferenceKind::StyleVar, "%twice%").empty());
 	editor_test::handle_to_end(session, request::open_document(style_path));
@@ -1609,19 +1609,16 @@ static int test_symbol_locators() {
 			find_definition(AssetGraph(), *sheet_document, "%TWICE%", by_variable) &&
 			by_name == by_variable && sheet_document->get(by_name, "value", read) &&
 			std::get<std::string>(read) == "2");
-	// What the stylesheet's lookup makes of each definition (Document::refine_symbol, S13 D2): the
-	// earlier TWICE inert and why, the last the value the game reads; each the line it is on,
-	// which the graph's symbol and its JSON carry.
+	// What the stylesheet's lookup makes of the definition (Document::refine_symbol, S13 D2): the value the game
+	// reads, and the line it is on in the file a save writes, which the graph's symbol and its JSON carry.
 	const auto *styles = dynamic_cast<const MnsDocument *>(sheet_document);
-	TEST_EXPECT(styles && twice.size() == 2);
-	if (!styles || twice.size() != 2) return 1;
-	SymbolFacts earlier, last;
-	styles->refine_symbol(twice[0]->address, earlier);
-	styles->refine_symbol(twice[1]->address, last);
-	TEST_EXPECT(earlier.inert && earlier.inert_reason == twice[0]->inert_reason && !last.inert && last.value == "2");
-	TEST_EXPECT(last.line > 1 && last.line == size_t(styles->line_of(twice[1]->address.row)) && earlier.line + 1 == last.line &&
-	            twice[0]->line == earlier.line && twice[1]->line == last.line);
-	const opennova::io::JsonValue symbol_json = graph_symbol_to_json(*twice[1]);
+	TEST_EXPECT(styles && twice.size() == 1);
+	if (!styles || twice.size() != 1) return 1;
+	SymbolFacts last;
+	styles->refine_symbol(twice[0]->address, last);
+	TEST_EXPECT(!last.inert && last.value == "2");
+	TEST_EXPECT(last.line > 1 && last.line == size_t(styles->line_of(twice[0]->address.row)) && twice[0]->line == last.line);
+	const opennova::io::JsonValue symbol_json = graph_symbol_to_json(*twice[0]);
 	TEST_EXPECT(symbol_json.get("line") && symbol_json.get("line")->number == double(last.line));
 	// Go to on MAIN's font, a style variable (S12 D3): the variable where the game reads it, a
 	// line of the stylesheet the editor opens at, its name shown; and the .fnt its value names,

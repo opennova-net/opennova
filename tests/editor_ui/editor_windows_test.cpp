@@ -1197,7 +1197,7 @@ void test_preview_canvas_smoke() {
 	v.project.open = true;
 	v.revisions.touch(ViewConcern::Project);
 	ui.frames(2);
-	CHECK(document->apply(set_edit(box, "string.justify", std::string("CEN\"TER")), error), "a justify the game cannot read");
+	CHECK(document->apply(set_edit(box, "name", std::string("BO\"X")), error), "a name the game cannot read");
 	CHECK(logged_frame(ui).find("The game could not read this menu as it stands") != std::string::npos,
 			"a menu the game could not read: why");
 	document->undo();
@@ -2122,17 +2122,17 @@ void test_problems_original() {
 
 // --- S9i: the stylesheet view ---------------------------------------------------------
 
-// The stylesheet's lines as a table: an add goes after the selected line, Remove takes
-// the selected line, and a locked line (a directive) does not go.
+// The stylesheet's variables as a table: an add goes after the selected line, Remove takes the selected line.
 void test_styles_window_ui() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_styles_test");
-	CHECK(editor_test::write_text(dir.file("menu_style.mns"),
-	                              "// Colors\r\nDEF_TEXT_FG FFFFFFFF\r\n\r\n#if 0\r\nOFF 1\r\n#endif\r\n"),
+	CHECK(editor_test::write_text(dir.file("menu_style.mns"), "DEF_TEXT_FG\tFFFFFFFF\r\nTRIM_COLOR\tFF808080\r\n"),
 	      "stylesheet fixture");
 	auto document = std::make_shared<MnsDocument>();
 	Diagnostic error;
 	CHECK(document->load(dir.file("menu_style.mns"), "menu_style.mns", AssetKind::MenuStyle, "jo", error),
 	      "the stylesheet loads");
+	CHECK(document->rows().size() == 2, "a row per variable");
+	if (document->rows().size() != 2) return;
 	SessionView v;
 	v.project.open = true;
 	v.project.root = dir.root();
@@ -2144,7 +2144,7 @@ void test_styles_window_ui() {
 	editor_test::own(v.project.scan).index();
 	v.documents.open.push_back(document);
 	v.documents.active = document->path();
-	const Node &fg = *document->rows()[1];
+	const Node &fg = *document->rows()[0];
 	select_in(v, {fg.id, fg.kind, 0});
 	Ui ui;
 	ui.windows.set_view(&v);
@@ -2157,30 +2157,20 @@ void test_styles_window_ui() {
 	std::vector<EditorRequest> requests = ui.drain();
 	const EditorRequest *add = only(requests, EditorRequestKind::EditRecord);
 	CHECK(add && edit_of(*add).operation == EditOperation::Add && edit_of(*add).address.kind == node_kind(StyleKind::Variable) &&
-	              edit_of(*add).position == 2,
+	              edit_of(*add).position == 1,
 	      "Add variable goes after the selected line");
 	ui.activate(item_id(styles, {"Remove"}));
 	requests = ui.drain();
 	const EditorRequest *remove = only(requests, EditorRequestKind::EditRecord);
 	CHECK(remove && edit_of(*remove).operation == EditOperation::Remove && edit_of(*remove).address.row == fg.id,
 	      "Remove takes the selected line");
-	const Node &directive = *document->rows()[3];
-	select_in(v, {directive.id, directive.kind, 0});
-	ui.frames(2);
-	ui.activate(item_id(styles, {"Remove"}));
-	requests = ui.drain();
-	CHECK(only(requests, EditorRequestKind::EditRecord) == nullptr, "a locked line does not go");
 }
 
-// S11h2: the table lists a stylesheet's variables and its #if lines, never a comment or a
-// blank line (they stay in the file), and has no Add comment or Add blank line. Over a real
-// session, each request served and the file's text read back: Up and Down take a line to the
-// place of the listed line before or after it, past the unlisted lines between them, which
-// keep their order and their place beside the line it passes (the header first, the footer
-// last); the first listed line has no Up and the last no Down, though unlisted lines lie past
-// them; a comment a Problems row selects (the line whose end the game does not read) is no
-// line of the table, so the row tools wait for one and Add variable adds at the end of the
-// file.
+// S26: the table lists a stylesheet's variables, the list the game reads (its comments, blank lines and directives
+// read as nothing, which a save does not write). Over a real session, each request served and the file's text read
+// back: Up and Down take a variable to the place of the one before or after it; the first has no Up and the last
+// no Down; a line end the game does not read is the stored file's finding, on its line, until a save; Add variable
+// goes after the selected variable.
 void test_styles_lines_listed() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_styles_lines");
 	NoProcess platform;
@@ -2196,14 +2186,13 @@ void test_styles_lines_listed() {
 	session.run_operations();
 	session.handle(request::open_document("menu_style.mns"));
 	const auto *document = dynamic_cast<const MnsDocument *>(session.document_for("menu_style.mns"));
-	CHECK(document && document->rows().size() == 6,
-	      "the stylesheet's six lines: a header, a variable, a comment, a blank line, a variable, a footer");
-	if (!document || document->rows().size() != 6) return;
+	CHECK(document && document->rows().size() == 2, "the stylesheet's two variables");
+	if (!document || document->rows().size() != 2) return;
 	const std::string path = document->path();
-	const NodeId a = document->rows()[1]->id, b = document->rows()[4]->id, comment = document->rows()[2]->id;
+	const NodeId a = document->rows()[0]->id, b = document->rows()[1]->id;
 	const auto text = [&]() { return document->serialize().text; };
-	const std::string original = "// Header\r\nA_FG FFFFFFFF\r\n// Colours below\r\n\r\nB_FG FF000000\r\n// Footer\r\n";
-	CHECK(text() == original, "read as it is, every line ending CR LF");
+	const std::string original = "A_FG\tFFFFFFFF\r\nB_FG\tFF000000\r\n";
+	CHECK(text() == original, "a save writes the variables, one a line");
 	Ui ui;
 	ui.windows.set_view(&v);
 	ui.frames(6);
@@ -2212,7 +2201,7 @@ void test_styles_lines_listed() {
 	ui.drain();
 	const ImGuiID styles = document_tab_id(path);
 	const ImGuiTable *table = ImGui::TableFindByID(item_id(styles, {"lines"}));
-	CHECK(table && table->CurrentRow + 1 == 3, "the header and two lines: the variables, not the comments or the blank line");
+	CHECK(table && table->CurrentRow + 1 == 3, "the header and the two variables");
 	// S13 V3: what each line's value is used as is made once for the document's revision and the
 	// graph, kept across frames and a line of Output, and made again for an edit.
 	const StylesView *view = nullptr;
@@ -2270,38 +2259,34 @@ void test_styles_lines_listed() {
 		return move && edit_of(*move).operation == EditOperation::Move ? edit_of(*move).position : SIZE_MAX;
 	};
 	select_line(a);
-	CHECK(press("Up").empty() && text() == original, "the first listed line has no Up, the header above it");
+	CHECK(press("Up").empty() && text() == original, "the first variable has no Up");
 	select_line(b);
-	CHECK(press("Down").empty() && text() == original, "the last listed line has no Down, the footer below it");
-	CHECK(moved_to(press("Up")) == 1 &&
-	              text() == "// Header\r\nB_FG FF000000\r\nA_FG FFFFFFFF\r\n// Colours below\r\n\r\n// Footer\r\n",
-	      "Up: B right above A, past the comment and the blank line, which stay after A");
+	CHECK(press("Down").empty() && text() == original, "the last variable has no Down");
+	CHECK(moved_to(press("Up")) == 0 && text() == "B_FG\tFF000000\r\nA_FG\tFFFFFFFF\r\n", "Up: B above A");
 	CHECK(view && view->uses_made() > made, "an edit: the value uses made again");
 	undo();
 	CHECK(text() == original, "Up undone");
 	select_line(a);
-	CHECK(moved_to(press("Down")) == 4 &&
-	              text() == "// Header\r\n// Colours below\r\n\r\nB_FG FF000000\r\nA_FG FFFFFFFF\r\n// Footer\r\n",
-	      "Down: A right below B, past the comment and the blank line, which stay before B");
+	CHECK(moved_to(press("Down")) == 1 && text() == "B_FG\tFF000000\r\nA_FG\tFFFFFFFF\r\n", "Down: A below B");
 	undo();
 	CHECK(text() == original, "Down undone");
-
-	// The comment selected as its Problems row selects it: the first line whose end is not CR LF.
-	ProblemLocation location;
+	// The comment's line end, which the game does not read: the stored file's finding at its line, no variable's.
+	bool line_ending = false;
 	for (const Diagnostic &d : v.findings.diagnostics)
-		if (d.code() == "style.line_ending" && d.asset == path && d.row_id == comment) location = problem_location(d, v);
-	CHECK(!location.empty() && location.record.row == comment, "the line ending's finding goes to the comment");
-	session.handle(request::open_record(location.path, location.record, location.field));
-	ui.frames(2);
-	ui.drain();
-	CHECK(v.documents.selection.primary.row == comment, "the Problems row selects the comment");
-	for (const char *tool : {"Duplicate", "Remove", "Up", "Down"}) CHECK(press(tool).empty(), tool);
-	CHECK(text() == original, "no row tool acts on a line the table does not list");
+		if (d.code() == "style.line_ending" && d.asset == path) line_ending = d.line == 3 && d.row_id == 0;
+	CHECK(line_ending, "the line ending's finding at the stored file's line 3");
+	// A duplicate is a variable of a name of its own (the list holds one of each name).
+	select_line(b);
+	press("Duplicate");
+	CHECK(document->rows().size() == 3 && document->rows()[2]->name() == "B_FG_2" &&
+	              text() == original + "B_FG_2\tFF000000\r\n",
+	      "Duplicate: B_FG_2 after B_FG");
+	undo();
 	const std::vector<EditorRequest> added = press("Add variable");
 	const EditorRequest *add = only(added, EditorRequestKind::EditRecord);
-	CHECK(add && edit_of(*add).operation == EditOperation::Add && edit_of(*add).position == 6 && document->rows().size() == 7 &&
-	              document->rows()[6]->kind == variable && text().rfind(original, 0) == 0,
-	      "Add variable: at the end of the file, after the footer");
+	CHECK(add && edit_of(*add).operation == EditOperation::Add && edit_of(*add).position == 2 && document->rows().size() == 3 &&
+	              document->rows()[2]->kind == variable && text().rfind(original, 0) == 0,
+	      "Add variable: after the selected variable, the last");
 }
 
 // Go to and the uses, through the Inspector (S12 D3), over a real session. A stylesheet

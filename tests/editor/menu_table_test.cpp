@@ -11,6 +11,7 @@
 // install serves, the same menus editor_menus_retail sweeps (a SKIP-LEG without OPENNOVA_JO_DIR). Which
 // window type reads what, what a field names and what a new record is are the format's rules
 // (tests/mnu/mnu_schema_test.cpp).
+#include <algorithm>
 #include <cstdlib>
 #include <functional>
 #include <iostream>
@@ -64,7 +65,7 @@ RecordHandle window_record(mnu::Window &window) { return {node_kind(MenuKind::Wi
 // written; the members of a block are the fields named under it ("string.value").
 bool is_block(const std::string &id) {
 	static const std::set<std::string> blocks = {"string", "toggle_string", "items", "list_box", "spinup",
-	                                             "spindown", "scrollbar"};
+	                                             "spindown", "scrollbar", "glb_server_fields"};
 	return blocks.count(id) != 0;
 }
 std::string block_of(const std::string &id) {
@@ -124,17 +125,16 @@ bool parse(const std::string &text, mnu::Document &doc, std::vector<mnu::ParseNo
 // part's own part included), a second root.
 mnu::Document every_element() {
 	mnu::Appearance image;
-	image.state = "default";
-	image.type = "image";
+	image.state = "DEFAULT";
+	image.type = "IMAGE";
 	image.value = "a.tga";
 	image.has_map_state = image.has_height = true;
 	image.map_state = 0;
 	image.height = 24;
-	image.flags = "STANDARD_TRANSPARENT";
+	image.flags = mnu::ui_material_flags_of("STANDARD");
 	mnu::Window w;
 	w.name = "ALL";
 	w.type = mnu::WindowType::Table;
-	w.type_token = "table";
 	w.hidden = w.disabled = w.checked = w.draw_frame = w.modal = w.readonly = w.as_button = true;
 	w.number = w.password = true;
 	w.has_group = w.has_minval = w.has_maxval = w.has_maxchar = w.has_form = true;
@@ -154,14 +154,13 @@ mnu::Document every_element() {
 	action.state = "SHOW";
 	action.file = "f.mnu";
 	action.field = "slot";
-	action.field_attr = "NAME";
 	action.has_target_form = true;
 	action.target_form = 5;
 	action.toggle = action.external_browser = true;
 	action.test = "EQ";
 	action.target = "PANEL";
 	w.actions = {action};
-	w.string_data = {true, "ID", "CENTER", "BOTTOM", true, 6, true, "KEY"};
+	w.string_data = {true, "ID", "CENTER", "BOTTOM", "3", "", true, 6, true, "KEY"};
 	w.toggle_string = {true, "ID", "ALT"};
 	w.font = {"f.fnt", "1", "2", "3", "4", "5", "6", "7", "8"};
 	w.frame.stencil = "s.tga";
@@ -172,12 +171,14 @@ mnu::Document every_element() {
 	w.items.present = w.items.multiselect = true;
 	w.items.justify = "LEFT";
 	w.items.vjustify = "TOP";
+	w.items.vjustify_offset = "-2";
 	w.items.appearances = {image};
 	mnu::Item item;
 	item.type = "ID";
 	item.value = "1";
 	item.text = "T";
 	item.justify = "RIGHT";
+	item.justify_offset = "5";
 	item.vjustify = "CENTER";
 	item.pairs_list = true;
 	item.has_column = true;
@@ -191,9 +192,9 @@ mnu::Document every_element() {
 	w.has_sb_edge_pad = true;
 	w.sb_edge_pad = 4;
 	w.spinup.author(mnu::WindowType::Button).appearances = {image};
-	w.spindown.author(mnu::WindowType::Button).string_data = {true, "", "", "", false, 0, false, "-"};
+	w.spindown.author(mnu::WindowType::Button).string_data = {true, "", "", "", "", "", false, 0, false, "-"};
 	w.scrollbar.author(mnu::WindowType::Scroll).scrolldown = {image};
-	w.cursor = {"c.tga", "STANDARD"};
+	w.cursor = {"c.tga", mnu::ui_material_flags_of("STANDARD")};
 	w.has_text_rsrc = true;
 	w.text_rsrc = "menutxt.BIN";
 	w.private_data = "p";
@@ -204,13 +205,14 @@ mnu::Document every_element() {
 	header.has_column = header.has_width = true;
 	header.width = 100;
 	header.sort = "A";
-	header.type = "id";
+	header.type = "ID";
 	header.text = "H";
 	mnu::TableBody body;
 	body.has_column = true;
 	body.bitmap_draw = body.custom_draw = body.bitmap_text = body.scale_bitmap = true;
 	body.display = "BITMAP_TEXT";
-	body.bitmap_flags = "STANDARD";
+	body.bitmap_flags = mnu::ui_material_flags_of("STANDARD");
+	body.justify_offset = "4";
 	mnu::TableSubst subst;
 	subst.has_column = true;
 	subst.value = "1";
@@ -218,50 +220,95 @@ mnu::Document every_element() {
 	subst.file = "x.tga";
 	w.table_data.column = {true, 1, true, 3, {header}, {body}, {subst}};
 	w.table_data.column.primary_sort = 0;
-	w.table_data.column.primary_sort_token = "DEFAULT_SORT";
 	w.table_data.column.secondary_sort = w.table_data.column.tertiary_sort = 0;
 	w.table_data.has_min_item_height = true;
 	w.table_data.min_item_height = 20;
 	w.table_data.has_fixed_header_height = true;
 	w.table_data.fixed_header_height = 11;
-	mnu::Element target;
-	target.tag = "TARGET";
-	target.text = "http://x";
-	mnu::Element join;
-	join.tag = "JOIN_BUTTON";
-	join.attributes = {{"name", "J", true}, {"BARE", "", false}};
-	join.text = "note";
-	join.children = {target};
-	w.extras = {join, target};
-	w.extra_attributes = {{"SERVERLIST", "", false}};
 	mnu::Window child;
 	child.name = "CHILD";
 	child.type = mnu::WindowType::Static;
-	child.type_token = "static";
 	child.position.has_left = true;
 	w.children = {child};
+	// The LAN_LIST's, the GLB_TABLE's and the GOPHER's own elements, each on a window of the type that reads them.
+	mnu::Window lan;
+	lan.name = "LAN";
+	lan.type = mnu::WindowType::LanList;
+	lan.position.has_left = true;
+	lan.join_button.author(mnu::WindowType::Button).appearances = {image};
+	lan.search_button.author(mnu::WindowType::Button).string_data = {true, "", "", "", "", "", false, 0, false, "Find"};
+	mnu::Window glb;
+	glb.name = "GLB";
+	glb.type = mnu::WindowType::GlbTable;
+	glb.position.has_left = true;
+	glb.glb_playerlist = true;
+	mnu::TableHeader field_header;
+	field_header.has_column = true;
+	field_header.text = "Ping";
+	field_header.field = "ping";
+	mnu::Window &servers = glb.glb_table.author(mnu::WindowType::Table);
+	servers.table_data.column.has_count = true;
+	servers.table_data.column.count = 1;
+	servers.table_data.column.headers = {field_header};
+	glb.glb_info_player_details.author(mnu::WindowType::Table).appearances = {image};
+	glb.glb_info_button.author(mnu::WindowType::Button).appearances = {image};
+	glb.glb_info_server_details.author(mnu::WindowType::MultilineEdit).appearances = {image};
+	glb.glb_server_fields.present = glb.glb_server_fields.has_count = glb.glb_server_fields.has_format = true;
+	glb.glb_server_fields.count = 2;
+	glb.glb_server_fields.format = "a";
+	glb.glb_server_fields.fields = {mnu::GlbFieldSlot{1, "map"}};
+	glb.glb_nw_info.author(mnu::WindowType::Static).appearances = {image};
+	glb.has_glb_target = true;
+	glb.glb_target = "http://glb";
+	mnu::Window gopher;
+	gopher.name = "GO";
+	gopher.type = mnu::WindowType::Gopher;
+	gopher.position.has_left = true;
+	gopher.gopher_targets = {"http://x", "http://y"};
+	mnu::GopherCategory category;
+	category.has_level = true;
+	category.level = "L1";
+	category.label.author(mnu::WindowType::Static).string_data = {true, "", "", "", "", "", false, 0, false, "Maps"};
+	category.entries = {mnu::GopherEntry{false, "A", "t", "f", "tb", "Alpha"}, mnu::GopherEntry{true, "I", "", "g", "", "Info"}};
+	gopher.gopher_categories = {category};
+	gopher.gopher_back.author(mnu::WindowType::Button).appearances = {image};
 	mnu::Document doc;
 	mnu::Screen screen;
 	screen.name = "EVERY";
 	screen.has_music_var = true;
 	screen.music_var = 3;
-	screen.roots = {w, child};
+	screen.roots = {w, child, lan, glb, gopher};
 	doc.screens = {screen};
 	return doc;
 }
 
-// A record and where it sits: the screen's index, then each list's records' kind token and index.
+// A record and where it sits: the screen's index, then each list's records' kind token and index, and the
+// records it lies in (its owners, from its screen down).
 struct Walked {
 	std::string key; // "0/window:0/action:1"
 	RecordHandle record;
+	std::vector<opennova::editor::OwnerStep> owners;
 };
 
-void walk(const RecordHandle &record, const std::string &key, std::vector<Walked> &out) {
-	out.push_back({key, record});
+void walk(const RecordHandle &record, const std::string &key, std::vector<Walked> &out,
+          const std::vector<opennova::editor::OwnerStep> &owners = {}) {
+	out.push_back({key, record, owners});
 	const std::vector<TableList> &lists = kind_of(record).lists();
 	for (size_t l = 0; l < lists.size(); ++l)
-		for (size_t i = 0; i < lists[l].ops.size(record); ++i)
-			walk(lists[l].ops.at(record, i), key + "/" + token(lists[l].spec.kind) + ":" + std::to_string(i), out);
+		for (size_t i = 0; i < lists[l].ops.size(record); ++i) {
+			std::vector<opennova::editor::OwnerStep> below = owners;
+			below.push_back({record, l, i});
+			walk(lists[l].ops.at(record, i), key + "/" + token(lists[l].spec.kind) + ":" + std::to_string(i), out, below);
+		}
+}
+
+// Whether the game reads `field` of the walked record where it sits (the writer writes only what it reads).
+bool read_where_it_sits(const Walked &at, const FieldSchema &field) {
+	const TableKind &kind = kind_of(at.record);
+	const size_t index = kind.find(field.id);
+	if (index == TableKind::npos || !kind.applies(index)) return true;
+	return kind.applies(index)(at.record, opennova::editor::RecordOwners{at.owners.data(), at.owners.size()}) ==
+	       opennova::editor::Applicability::Reads;
 }
 
 std::vector<Walked> walk(mnu::Document &doc) {
@@ -325,8 +372,14 @@ bool rebuilds(mnu::Document &doc, const std::string &label) {
 		std::cerr << "  " << label << ": the rebuilt menu writes other bytes\n";
 		return false;
 	}
-	if (snapshot(built) != snapshot(doc)) {
+	const std::vector<std::string> rebuilt = snapshot(built), read = snapshot(doc);
+	if (rebuilt != read) {
 		std::cerr << "  " << label << ": a field reads differently after the rebuild\n";
+		for (size_t i = 0; i < rebuilt.size() && i < read.size(); ++i)
+			if (rebuilt[i] != read[i]) {
+				std::cerr << "    read " << read[i] << "\n    rebuilt " << rebuilt[i] << "\n";
+				break;
+			}
 		return false;
 	}
 	return true;
@@ -341,6 +394,9 @@ Value changed(const FieldSchema &field, const Value &value) {
 	if (const auto *text = std::get_if<std::string>(&value)) {
 		for (const auto &choice : field.choices)
 			if (!choice.name.empty() && *text != choice.name) return choice.name;
+		// A keyword of one token the table spells, or none: none.
+		for (const auto &choice : field.choices)
+			if (choice.name.empty() && !text->empty()) return choice.name;
 		std::string next = *text + "Z";
 		if (next.size() >= field.width) next = text->empty() ? "Z" : std::string(text->size(), text->front() == 'Z' ? 'Y' : 'Z');
 		return next;
@@ -459,7 +515,8 @@ bool test_same_value_and_clear() {
 			CHECK(get(records[r].record, field.id, value), "reads");
 			CHECK(set(records[r].record, field.id, value, error) && mnu::serialize(doc) == original,
 			      "a Set of its own value: " << records[r].key << " " << field.id);
-			if (!field.optional || !present(records[r].record, field.id)) continue;
+			// A field the game does not read where its record sits is none the writer writes.
+			if (!field.optional || !present(records[r].record, field.id) || !read_where_it_sits(records[r], field)) continue;
 			mnu::Document copy = doc;
 			const Walked target = walk(copy)[r];
 			CHECK(set_present(target.record, field.id, false, error), "Clear " << field.id);
@@ -479,11 +536,19 @@ bool test_same_value_and_clear() {
 			CHECK(refused || (parse(cleared, back, &notes) && mnu::serialize(back) == (derived ? original : cleared)),
 			      "reads back: " << target.key << " " << field.id);
 			if (!derived && !refused) {
+				// By its key: the lists the window's type does not read are not written, so the records read back
+				// are the read lists' alone.
 				const std::vector<Walked> reread = walk(back);
-				CHECK(r < reread.size() && reread[r].key == target.key && !present(reread[r].record, field.id),
-				      target.key << " " << field.id << " reads back left out");
+				const auto same = std::find_if(reread.begin(), reread.end(), [&](const Walked &w) { return w.key == target.key; });
+				CHECK(same != reread.end() && !present(same->record, field.id), target.key << " " << field.id << " reads back left out");
 			}
-			CHECK(set_present(target.record, field.id, true, error) && mnu::serialize(copy) == original,
+			// A JUSTIFY's offset is its text alone, no bit beside it to keep a latent value: Write puts it back as 0.
+			const bool offset = field.id.size() > 7 && field.id.compare(field.id.size() - 7, 7, "_offset") == 0;
+			Value written;
+			CHECK(set_present(target.record, field.id, true, error) &&
+			              (offset ? get(target.record, field.id, written) && written == Value(int64_t(0)) &&
+			                                present(target.record, field.id)
+			                      : mnu::serialize(copy) == original),
 			      "Write puts it back: " << field.id);
 		}
 	}
@@ -496,12 +561,22 @@ bool test_defaults_and_parts() {
 	const std::vector<TableList> &lists = T().kind(node_kind(MenuKind::Window))->lists();
 	for (size_t l = 0; l < lists.size(); ++l) {
 		const std::string path = token(lists[l].spec.kind);
+		// A window of the first type whose parse reads the list (the writer writes a list only where it is read).
+		mnu::WindowType reader = mnu::WindowType::Static;
+		for (int t = 0; t < mnu::kWindowTypeCount; ++t)
+			if (mnu::schema_reads(mnu::WindowType(t), path) == mnu::SchemaApplies::Reads) {
+				reader = mnu::WindowType(t);
+				break;
+			}
 		mnu::Document doc;
-		CHECK(parse("<SCREEN><NAME>S</NAME><WINDOW type=\"static\" name=\"W\"><POSITION><LEFT>0</LEFT></POSITION>"
-		            "</WINDOW></SCREEN>",
+		CHECK(parse(std::string("<SCREEN><NAME>S</NAME><WINDOW type=\"") + mnu::window_type_name(reader) +
+		                    "\" name=\"W\"><POSITION><LEFT>0</LEFT></POSITION></WINDOW></SCREEN>",
 		            doc),
 		      "parse");
 		const RecordHandle window = window_record(doc.screens[0].roots[0]);
+		// A server details FIELD is read inside its part alone.
+		if (path == "glb_server_fields.field")
+			doc.screens[0].roots[0].glb_info_server_details.author(mnu::WindowType::MultilineEdit).position.has_left = true;
 		const ListOps &ops = lists[l].ops;
 		std::string error;
 		CHECK(ops.insert(window, 0, nullptr, error), path << ": " << error);
@@ -510,8 +585,9 @@ bool test_defaults_and_parts() {
 		const std::string text = mnu::serialize(doc);
 		mnu::Document back;
 		std::vector<mnu::ParseNote> notes;
-		CHECK(parse(text, back, &notes) && notes.empty() && mnu::serialize(back) == text,
-		      path << ": the default reads back as written");
+		const bool read_back = parse(text, back, &notes);
+		for (const mnu::ParseNote &note : notes) std::cerr << "  " << path << ": line " << note.line << ": " << note.message << "\n";
+		CHECK(read_back && notes.empty() && mnu::serialize(back) == text, path << ": the default reads back as written");
 		CHECK(ops.size(window_record(back.screens[0].roots[0])) == 1, path << " survives");
 		if (lists[l].spec.max == 1) {
 			CHECK(!ops.insert(window, 0, nullptr, error), "a part at most once");
@@ -578,7 +654,7 @@ bool test_references() {
 	item.type.clear();
 	CHECK(reference(at("items.item", &item), "text") == R::None, "literal text");
 	mnu::TableHeader header;
-	header.type = "id";
+	header.type = "ID";
 	CHECK(reference(at("column.header", &header), "text") == R::TextId, "HEADER ID");
 	mnu::TableSubst subst;
 	subst.is_file = true;
@@ -617,33 +693,36 @@ bool test_references() {
 	return true;
 }
 
-// The two texts the writer puts down as attribute names (an ACTION's FIELD / SOURCE / NAME slot, the
-// table's primary sort key) take only the tokens the reader matches, in any case, kept as the reader
-// spells them; the rest changes nothing.
-bool test_name_tokens() {
+// A keyword field takes the tokens the parse compares, in any case, held as its table spells them, and refuses any
+// other (none the parse reads); a JUSTIFY's offset is a number of its own; a FLAGS word is set by its names (S26,
+// the #1098 review rounds 3 and 4).
+bool test_tokens_held_as_read() {
 	mnu::Document doc;
 	CHECK(parse("<SCREEN><NAME>S</NAME><WINDOW type=\"table\" name=\"T\"><POSITION><LEFT>0</LEFT></POSITION>"
-	            "<ACTION type=\"URL\" SOURCE=\"slot\">t</ACTION>"
-	            "<COLUMN count=\"1\"><HEADER column=\"0\" PRIMARY_SORT>H</HEADER></COLUMN></WINDOW></SCREEN>",
+	            "<APPEARANCE state=\"default\" type=\"image\">a.tga</APPEARANCE>"
+	            "<ACTION type=\"URL\" SOURCE=\"slot\">t</ACTION><STRING>x</STRING></WINDOW></SCREEN>",
 	            doc),
 	      "parse");
 	const RecordHandle table = window_record(doc.screens[0].roots[0]);
 	const RecordHandle action = ops_of(table, menu_window_list("action")).at(table, 0);
-	CHECK(action && action.kind == menu_kind("action"), "the action row");
-	const std::string original = mnu::serialize(doc);
+	const RecordHandle appearance = ops_of(table, menu_window_list("appearance")).at(table, 0);
+	CHECK(action && appearance, "the action and the appearance rows");
 	std::string error;
-	for (const char *bad : {"X", "A B", "FIELD=\"x\" Y", "SORT", "PRIMARY"}) {
-		CHECK(!set(action, "field_attr", std::string(bad), error), "field_attr refuses " << bad);
-		CHECK(!set(table, "column.primary_sort_token", std::string(bad), error), "the sort key refuses " << bad);
-	}
-	CHECK(mnu::serialize(doc) == original, "a refused token changes nothing");
-	CHECK(set(action, "field_attr", std::string("name"), error) && doc.screens[0].roots[0].actions[0].field_attr == "NAME",
-	      "NAME, as the reader spells it");
-	CHECK(set(table, "column.primary_sort_token", std::string("default_sort"), error) &&
-	              doc.screens[0].roots[0].table_data.column.primary_sort_token == "DEFAULT_SORT",
-	      "DEFAULT_SORT, as the reader spells it");
+	const mnu::Window &w = doc.screens[0].roots[0];
+	CHECK(set(action, "type", std::string("window"), error) && w.actions[0].type == "WINDOW", "WINDOW, as the table spells it");
+	CHECK(!set(action, "type", std::string("FLY"), error), "a verb the parse does not know is refused");
+	CHECK(!set(action, "test", std::string("LT"), error), "TEST LT is the parse's 0: none holds it");
+	CHECK(set(table, "string.justify", std::string("center"), error) && w.string_data.justify == "CENTER", "CENTER");
+	CHECK(!set(table, "string.justify", std::string("12"), error), "an offset is no JUSTIFY keyword");
+	CHECK(set(table, "string.justify_offset", int64_t(12), error) && w.string_data.justify_offset == "12" &&
+	              w.string_data.justify == "CENTER",
+	      "the offset apart from the keyword");
+	CHECK(set(appearance, "flags", std::string("standard|alphatest"), error) &&
+	              w.appearances[0].flags == mnu::ui_material_flags_of("STANDARD|ALPHATEST"),
+	      "a FLAGS word by its names");
 	const std::string text = mnu::serialize(doc);
-	CHECK(text.find(" NAME=\"slot\"") != std::string::npos && text.find("DEFAULT_SORT") != std::string::npos, "written");
+	CHECK(text.find("FIELD=\"slot\"") != std::string::npos && text.find("SOURCE") == std::string::npos,
+	      "the ACTION's slot written FIELD (no spelling of the file's kept)");
 	mnu::Document back;
 	std::vector<mnu::ParseNote> notes;
 	CHECK(parse(text, back, &notes) && notes.empty() && mnu::serialize(back) == text, "reads back as written");
@@ -778,7 +857,7 @@ int main(int argc, char **argv) {
 	RUN_TEST(test_same_value_and_clear);
 	RUN_TEST(test_defaults_and_parts);
 	RUN_TEST(test_references);
-	RUN_TEST(test_name_tokens);
+	RUN_TEST(test_tokens_held_as_read);
 	RUN_TEST(test_owners);
 	RUN_TEST(test_retail_fixtures);
 	RUN_TEST(test_retail_install);

@@ -16,8 +16,8 @@ namespace opennova::editor {
 // @ 0x45DE70] (formats/aip; docs/world/world-wac-ai-re.md §17.9c, §17.9d, §23.3). The file's one row is the profile,
 // its fields the reader's keys in the units the file writes them, each read only by the type's key set (HELO and
 // GROUND; ORGANIC reads none), a weapon's name an ammo of the ammo table. The document reads the file through the
-// game's reader with its layout modeled and writes it back through the profile's writer (aip::write_profile, over
-// the layout: the file as it was but for a changed value's line).
+// game's reader and writes it through the profile's writer from the profile alone (aip::write_profile; S26: the
+// words the reader reads nothing of are not kept, ai_profile.ignored_input).
 
 enum class AiProfileKind : NodeKind { Profile = 0 };
 constexpr NodeKind node_kind(AiProfileKind kind) { return static_cast<NodeKind>(kind); }

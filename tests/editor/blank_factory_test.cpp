@@ -19,7 +19,7 @@
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
-#include <formats/mns/mns_document.h>
+#include <formats/mns/mns.h>
 #include <formats/mnu/mnu.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/rtxt/rtxt.h>
@@ -62,6 +62,16 @@ static int is_crlf_text(const std::string &text) {
 		if (text[i] == '\n' && (i == 0 || text[i - 1] != '\r')) return 0;
 	}
 	return text.find("\r\n") != std::string::npos ? 1 : 0;
+}
+
+// A stylesheet's bytes as the game reads them (mns::parse): its %VAR% table; `read` false where the game stops
+// before the end.
+static opennova::mns::StyleSheet style_sheet(const std::vector<uint8_t> &bytes, bool *read = nullptr) {
+	opennova::mns::StyleSheet sheet;
+	std::string error;
+	const bool whole = opennova::mns::parse(reinterpret_cast<const char *>(bytes.data()), bytes.size(), sheet, error);
+	if (read) *read = whole;
+	return sheet;
 }
 
 static void collect_string_ids(const opennova::mnu::Window &window, std::vector<std::string> &ids) {
@@ -206,11 +216,10 @@ static int test_startup_menu_compiles() {
 
 	// The stylesheet the screen's %VAR% references resolve through.
 	const std::vector<uint8_t> style_bytes = make("menu_style", "menu_style.mns");
-	const opennova::mns::Document style = opennova::mns::Document::parse(
-	        reinterpret_cast<const char *>(style_bytes.data()), style_bytes.size());
-	const opennova::mns::EvaluationResult evaluated = style.evaluate();
-	TEST_EXPECT(evaluated.success);
-	std::map<std::string, std::string> vars(evaluated.sheet.variables.begin(), evaluated.sheet.variables.end());
+	bool style_read = false;
+	const opennova::mns::StyleSheet style = style_sheet(style_bytes, &style_read);
+	TEST_EXPECT(style_read);
+	std::map<std::string, std::string> vars(style.variables.begin(), style.variables.end());
 
 	// Compile through the runtime's own compiler with the blank font registered under
 	// the seven font files the blank project ships (the font_* factories). A font that
@@ -237,7 +246,7 @@ static int test_startup_menu_compiles() {
 	}
 	// The one texture it names is the pointer, which the root window's CURSOR names: the original
 	// game shows no system pointer (docs/mnu/menu-re.md), so a screen without one has none.
-	TEST_EXPECT(main_window.cursor.file == blank_pointer_name() && main_window.cursor.flags == "STANDARD_TRANSPARENT");
+	TEST_EXPECT(main_window.cursor.file == blank_pointer_name() && main_window.cursor.flags == opennova::mnu::ui_material_flags_of("STANDARD_TRANSPARENT"));
 	TEST_EXPECT(compiler.texture_names().size() == 1 && compiler.texture_names()[0] == blank_pointer_name());
 	TEST_EXPECT(compiler.widget_index("EXIT") >= 0);
 	opennova::menu::MenuFrameState state;
@@ -314,10 +323,8 @@ static int test_mission_menus() {
 	        {"mp_menu", "mp.mnu", "NW_MULTI_PLAYER", {{"BACK", WindowType::Button, "VK_ESCAPE"}}, false},
 	};
 	const std::vector<uint8_t> style_bytes = make("menu_style", "menu_style.mns");
-	const opennova::mns::Document style = opennova::mns::Document::parse(
-	        reinterpret_cast<const char *>(style_bytes.data()), style_bytes.size());
-	const opennova::mns::EvaluationResult evaluated = style.evaluate();
-	std::map<std::string, std::string> vars(evaluated.sheet.variables.begin(), evaluated.sheet.variables.end());
+	const opennova::mns::StyleSheet style = style_sheet(style_bytes);
+	std::map<std::string, std::string> vars(style.variables.begin(), style.variables.end());
 	const std::vector<uint8_t> font_bytes = make("font_arial16b", "Arial16b.fnt");
 	opennova::fnt::fnt_font_t font{};
 	TEST_EXPECT(opennova::fnt::fnt_parse(font_bytes.data(), font_bytes.size(), &font) == opennova::fnt::FNT_OK);
@@ -343,7 +350,7 @@ static int test_mission_menus() {
 		TEST_EXPECT(main_window.name == "MAIN" && main_window.position.width() == 800 &&
 		            main_window.position.height() == 600);
 		TEST_EXPECT(main_window.cursor.file == blank_pointer_name() &&
-		            main_window.cursor.flags == "STANDARD_TRANSPARENT");
+		            main_window.cursor.flags == opennova::mnu::ui_material_flags_of("STANDARD_TRANSPARENT"));
 		for (const LeaveControl &control : menu.controls) {
 			const opennova::mnu::Window *window = window_named(main_window, control.name);
 			TEST_EXPECT(window != nullptr && window->type == control.type && !window->hidden);
@@ -700,7 +707,7 @@ static int test_free_form_menu() {
 	if (doc.screens.size() != 1 || doc.screens[0].roots.size() != 1) return 1;
 	const opennova::mnu::Window &main = doc.screens[0].roots.front();
 	TEST_EXPECT(main.name == "MAIN" && main.type == opennova::mnu::WindowType::Window && main.children.empty());
-	TEST_EXPECT(main.cursor.file == blank_pointer_name() && main.cursor.flags == "STANDARD_TRANSPARENT");
+	TEST_EXPECT(main.cursor.file == blank_pointer_name() && main.cursor.flags == opennova::mnu::ui_material_flags_of("STANDARD_TRANSPARENT"));
 	TEST_EXPECT(main.position.has_left && main.position.left == 0 && main.position.has_top && main.position.top == 0);
 	TEST_EXPECT(main.position.width() == 800 && main.position.height() == 600);
 	TEST_EXPECT(window_named(main, "EXIT") == nullptr && window_named(main, "TITLE") == nullptr);
@@ -716,10 +723,9 @@ static int test_free_form_menu() {
 static int test_style_and_fonts() {
 	const std::vector<uint8_t> style_bytes = make("menu_style", "menu_style.mns");
 	TEST_EXPECT(is_crlf_text(text_of(style_bytes)));
-	const opennova::mns::Document style = opennova::mns::Document::parse(
-	        reinterpret_cast<const char *>(style_bytes.data()), style_bytes.size());
-	TEST_EXPECT(style.diagnostics().empty());
-	const opennova::mns::StyleSheet sheet = style.flatten();
+	bool style_read = false;
+	const opennova::mns::StyleSheet sheet = style_sheet(style_bytes, &style_read);
+	TEST_EXPECT(style_read);
 	TEST_EXPECT(sheet.get("DEF_FONTNAME") == "Arial16n.fnt");
 	TEST_EXPECT(sheet.get("DEF_FONTNAME_LG") == "Arial16b.fnt");
 	TEST_EXPECT(sheet.get("IMPACT_FONTNAME") == "Impac38b.fnt");
@@ -727,14 +733,16 @@ static int test_style_and_fonts() {
 	// Eleven: the fonts and colours the screens name (the game reads no variable by name,
 	// so nothing else is needed).
 	TEST_EXPECT(sheet.variables.size() == 11 && !sheet.has("DEF_IMAGE_DEFAULT_BG"));
-	TEST_EXPECT(style.evaluate().success);
-	TEST_EXPECT(style.serialize() == style_bytes); // lossless: the document's own bytes
-	// brand.mns: a header, no variables, read clean.
+	// The writer's own text: the list the game reads of it written again is the same bytes.
+	opennova::mns::KeyValueList list;
+	TEST_EXPECT(opennova::mns::parse_key_value_buffer(reinterpret_cast<const char *>(style_bytes.data()), style_bytes.size(),
+	                                                  list).status == opennova::mns::ReadStatus::Read);
+	std::string written, why;
+	TEST_EXPECT(opennova::mns::write(list, written, why) && written == text_of(style_bytes));
+	// brand.mns: no variables, an empty file the game reads whole.
 	const std::vector<uint8_t> brand_bytes = make("brand_style", "brand.mns");
-	TEST_EXPECT(is_crlf_text(text_of(brand_bytes)));
-	const opennova::mns::Document brand = opennova::mns::Document::parse(
-	        reinterpret_cast<const char *>(brand_bytes.data()), brand_bytes.size());
-	TEST_EXPECT(brand.diagnostics().empty() && brand.evaluate().success && brand.flatten().variables.empty());
+	bool brand_read = false;
+	TEST_EXPECT(brand_bytes.empty() && style_sheet(brand_bytes, &brand_read).variables.empty() && brand_read);
 	TEST_EXPECT(find_blank_factory_for_kind(AssetKind::MenuStyle) == find_blank_factory_for_role("menu_style"));
 
 	const char *roles[] = {"font_arial12b", "font_arial14n", "font_arial14b", "font_arial16n",

@@ -18,8 +18,9 @@ namespace opennova::editor {
 // scales, the three camouflage items (each an items.def item by its id less 100000, the one a player of the class
 // spawns as by the mission's camouflage [orig: Entity_SpawnFromAnimSlotProperty @ 0x43C390 -> CharAttr_GetCammoTypeId
 // @ 0x4127B0 -> ItemList_FindIndexByTypeId @ 0x49E100]), the run modifier and the ATTRIBUTES words. The document
-// reads the file through the loader with its layout modeled and writes it back over that layout
-// (charattr::write_table): the file as it was but for a changed value's line.
+// reads the file through the loader and writes the table from the rows alone (charattr::compose_table, S26): each
+// class's section with the keys the loader reads that hold other than 0; the file's comments and the lines the game
+// reads nothing of are not kept.
 
 enum class CharAttrKind : NodeKind { Class = 0 };
 constexpr NodeKind node_kind(CharAttrKind kind) { return static_cast<NodeKind>(kind); }
@@ -36,9 +37,6 @@ struct CharAttrRow : TableRow {
 
 const RecordTable &charattr_table();
 
-// The pool rule's fix (documents/config_overrun.h): an Edit SetFileValue of this field, its value the file's text
-// with the lines the loader reads the same without commented out, which the document takes as its layout.
-inline constexpr const char *kCommentIdleLines = "comment_idle_lines";
 
 class CharAttrDocument : public TableDocument {
 public:
@@ -56,6 +54,10 @@ public:
 	// Whether the file is in the ConfigFile's binary (CBIN) form: the document holds what the game reads of it
 	// (its text form's classes) read only, a save writing the text form alone (charattr.binary_form).
 	bool binary_form() const { return binary_form_; }
+	// The file as it sits: the bytes it was loaded from, or the text the last save wrote (read again then), which
+	// the game reads and a build packs while nothing is changed. A save writes the table in the editor's form
+	// instead, from what the game reads of it.
+	const std::string &stored_text() const { return stored_text_; }
 
 protected:
 	bool parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
@@ -69,17 +71,17 @@ protected:
 	                       const std::vector<std::shared_ptr<const Node>> &rows) const override;
 	// The classes stay CHARACTER1 to CHARACTERn, each once: the loader stops at the first it lacks.
 	bool accept_step(const EditStep &step, const StagedRows &rows, StepRefusal &refusal) const override;
-	// kCommentIdleLines: the layout of the text the edit holds, read again (the classes it reads are the rows').
-	bool set_file_value(std::shared_ptr<const FileState> &state, const Edit &edit, Diagnostic &error) override;
 
 private:
 	bool binary_form_ = false;
+	std::string stored_text_;
 };
 
-// The character attributes' validator: a section the game never reads, an ATTRIBUTES word no attribute is, a value
-// the reader reads as 0 for not being a number, a class read with no camouflage item; and the ConfigFile pool rule
-// (core document.config_overrun) over the text a save writes, its fix commenting out the lines the loader reads the
-// same table without (kCommentIdleLines). A file in the CBIN form is that finding alone (charattr.binary_form).
+// The character attributes' validator, over the file as it sits (stored_text: what the game reads of it): a section
+// the game never reads, an ATTRIBUTES word no attribute is, a value the reader reads as 0 for not being a number, a
+// class read with no camouflage item; and the ConfigFile pool rule (core document.config_overrun) over the file a
+// build packs, the file as it sits while nothing is changed, else the text a save writes (a build saves first). A
+// file in the CBIN form is that finding alone (charattr.binary_form).
 std::vector<Diagnostic> validate_charattr_file(const DocumentBase &document);
 
 // All listed (none refuses a build: the game reads what it can of the file and goes on). A file past the
@@ -104,13 +106,5 @@ enum class CharAttrFinding {
 const FindingCodeRow &finding_code(CharAttrFinding code);
 FindingTable charattr_finding_codes();
 
-// The lines of a charattr.def text the loader reads the same table without (the pool rule's fix): every line of
-// values it never reads (a key it never asks for, a later section of a label, a section of no class), and each line
-// it reads whose class's row is the same with the line commented out (a key at 0, which the cleared table holds for
-// a key the section lacks [orig: CharAttr_LoadFromDef @ 0x412168], or one a later line of the key repeats), kept
-// only where all of them out together still read the same table, byte for byte (charattr::same_rows). A class after
-// the first the file lacks is left alone: it is meant to be read, which charattr.unread_section says. Each line by
-// its first byte's offset.
-void charattr_idle_lines(const std::string &text, std::vector<size_t> &line_starts);
 
 } // namespace opennova::editor

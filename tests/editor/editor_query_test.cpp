@@ -1216,7 +1216,8 @@ static int test_menu_reads_and_batches() {
 	TEST_EXPECT(hello_json && choices_json && main_after);
 	if (!hello_json || !choices_json || !main_after)
 		return 1;
-	TEST_EXPECT(hello_json->get_string("type", "") == "BUTTON" &&
+	// The TYPE as the format writes it (no spelling of the edit's kept).
+	TEST_EXPECT(hello_json->get_string("type", "") == "button" &&
 			hello_json->get_string("text", "") == "Hello");
 	TEST_EXPECT(
 			id_of(*hello_json, "parent") == main.child && hello_json->get_int("depth", -1) == 1);
@@ -1361,7 +1362,11 @@ static int test_menu_reads_and_batches() {
 			view.revisions.stamp(ViewConcern::Output) == output_stamp &&
 			view.revisions.stamp(ViewConcern::Documents) == documents_stamp);
 	// A record's fields in the order written: a body's draw kind, then its flag cleared, leaves no
-	// draw kind; the flag cleared first, then the kind, leaves the kind.
+	// draw kind; the flag cleared first, then the kind, leaves the kind. (HELLO a TABLE meanwhile: a BUTTON
+	// reads no COLUMN, so its list takes no record.)
+	TEST_EXPECT(!done(list_edit("column.body", R"([{"display": "CUSTOM_DRAW"}])")) && menu->revision() == unchanged);
+	TEST_EXPECT(done(send(session, R"({"kind": "edit_record", "path": "main.mnu", "edits": [{"op": "set", "id": )" + h +
+	                                       R"(, "field": "type", "value": "table"}]})")));
 	std::string display;
 	int64_t custom = -1;
 	TEST_EXPECT(
@@ -1371,6 +1376,7 @@ static int test_menu_reads_and_batches() {
 			done(list_edit("column.body", R"([{"custom_draw": 0, "display": "CUSTOM_DRAW"}])")));
 	TEST_EXPECT(
 			body_draw(*menu, hello, display, custom) && display == "CUSTOM_DRAW" && custom == 1);
+	session.handle(request::undo(menu->path()));
 	session.handle(request::undo(menu->path()));
 	session.handle(request::undo(menu->path()));
 	TEST_EXPECT(!body_draw(*menu, hello, display, custom) && menu->revision() == unchanged);

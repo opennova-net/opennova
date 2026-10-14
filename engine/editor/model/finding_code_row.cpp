@@ -133,10 +133,10 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	// text values takes (documents/config_overrun.h): an error, the reader clearing past the pool into the
 	// game's heap [orig: ConfigFile_ParseText @ 0x7609e8]. It gates: the load goes on, but the game's heap is
 	// corrupt from there and the crash comes later, as the heap's next block is used (41 bytes past crashed a
-	// single-player mission start in the witness; 8 past ran, which no build may count on). Its fix, the lines
-	// the kind's loader reads the same without commented out, an edit of its document.
+	// single-player mission start in the witness; 8 past ran, which no build may count on). No fix of its own: the
+	// file holds fewer values (a charattr.def saved in the editor's form leaves out the keys at 0).
 	{ C::DocumentConfigOverrun,
-	  the_game_fails(code("document.config_overrun", G::Documents, F::EditRecord),
+	  the_game_fails(code("document.config_overrun", G::Documents),
 	                 "its ConfigFile reader clears the buffer of the file's text values one byte per value, past its "
 	                 "end into the game's memory, and the game crashes later, as a mission starts [orig: "
 	                 "ConfigFile_ParseText @ 0x7609e8]") },

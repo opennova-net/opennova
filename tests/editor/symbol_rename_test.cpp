@@ -620,9 +620,9 @@ static int test_written_together() {
 	return 0;
 }
 
-// A name its definition would hold in another form: a stylesheet trims a variable's
-// name, so " BIG " would define BIG while the menu's fonts were written % BIG %. Refused, naming
-// the stylesheet, and nothing is written; also where BIG is defined already.
+// A name its definition cannot hold as given: a stylesheet's variable name is one word the reader reads whole,
+// so " LARGE " is refused by the stylesheet (rename.site, naming it) and nothing is written; " BIG " too, where BIG
+// is defined already.
 static int test_name_as_its_definition_holds_it() {
 	Project project("opennova_rename_trimmed");
 	const std::string sheet = project.path("menu_style.mns"), menu = project.path("main.mnu");
@@ -631,8 +631,8 @@ static int test_name_as_its_definition_holds_it() {
 	const GraphSymbol *font = project.defined(ReferenceKind::StyleVar, "DEF_FONTNAME_LG", sheet);
 	TEST_EXPECT(font != nullptr);
 	if (!font) return 1;
-	TEST_EXPECT(refused(project.preview(*font, " LARGE "), "rename.name", sheet));
-	TEST_EXPECT(refused(project.preview(*font, " BIG "), "rename.name", sheet));
+	TEST_EXPECT(refused(project.preview(*font, " LARGE "), "rename.site", sheet));
+	TEST_EXPECT(refused(project.preview(*font, " BIG "), "rename.site", sheet));
 	const std::string sheet_before = project.read(sheet), menu_before = project.read(menu);
 	TEST_EXPECT(!project.rename(*font, " LARGE "));
 	TEST_EXPECT(project.read(sheet) == sheet_before && project.read(menu) == menu_before);

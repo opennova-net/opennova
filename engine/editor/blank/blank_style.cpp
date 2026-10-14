@@ -1,6 +1,6 @@
 #include "blank_makers.h"
 
-#include <formats/mns/mns_document.h>
+#include <formats/mns/mns.h>
 
 namespace opennova::editor {
 
@@ -31,36 +31,26 @@ const StyleDefine k_defines[] = {
 	{ "SEMIOPAQUE_BLACK", "80000000" },
 };
 
-std::string style_header(const BlankRequest &request, const char *what) {
-	return "// " + std::string(what) + " of " +
-	       (request.project_title.empty() ? std::string("the project") : request.project_title) + ".\r\n";
-}
-
 } // namespace
 
 bool make_blank_menu_style(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
-	// Through the lossless document model: a comment header, then one define per
-	// variable, CRLF (the only line end the game reads without stopping).
-	mns::Document doc = mns::Document::parse(
-	        style_header(request, "Menu style") + "// The fonts and colors the screens reference as %NAME%.\r\n");
-	for (const StyleDefine &define : k_defines) {
-		std::string add_error;
-		if (!doc.add_define(define.name, define.value, -1, std::string(), &add_error)) {
-			error = make_finding(CoreFinding::BlankStyle, DiagnosticSeverity::Error, add_error, request.logical_name);
-			return false;
-		}
+	// The list the game reads (mns::KeyValueList), one variable a line, CR LF (the only line end the game reads
+	// without stopping): the stylesheet's writer, from the list alone.
+	mns::KeyValueList list;
+	for (const StyleDefine &define : k_defines) list.nodes.push_back({define.name, define.value});
+	std::string text, write_error;
+	if (!mns::write(list, text, write_error)) {
+		error = make_finding(CoreFinding::BlankStyle, DiagnosticSeverity::Error, write_error, request.logical_name);
+		return false;
 	}
-	out = doc.serialize();
+	out.assign(text.begin(), text.end());
 	return true;
 }
 
-// brand.mns: read after menu_style.mns into the same variables, so a name it defines
-// replaces menu_style.mns's value [orig: Menu_InitShellResources @ 0x552616]. Blank: a
-// comment header and nothing else.
-bool make_blank_brand_style(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &) {
-	const std::string text = style_header(request, "Brand style") +
-	                         "// A variable defined here replaces menu_style.mns's value of the same name.\r\n";
-	out.assign(text.begin(), text.end());
+// brand.mns: read after menu_style.mns into the same variables, so a name it defines replaces menu_style.mns's value
+// [orig: Menu_InitShellResources @ 0x552616]. Blank: no variable, an empty file.
+bool make_blank_brand_style(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &) {
+	out.clear();
 	return true;
 }
 

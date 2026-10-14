@@ -511,8 +511,8 @@ func test_records_at_any_depth() -> void:
 	assert_true(_seam.clear_field(exit, "position.left"))
 	assert_true(_seam.set_field(exit, "position.left", 12))
 	assert_eq(_seam.get_field(exit, "position.left"), 12)
-	# A window's lists are records: a second ACTION, a SOUND, an ITEM row (which writes
-	# the ITEMS block), each with its own fields.
+	# A window's lists are records: a second ACTION, a SOUND, each with its own fields; an ITEM
+	# row goes only into a window whose type reads ITEMS (a save writes a list only there).
 	var first_action: int = _seam.add_record("action", exit)
 	var second_action: int = _seam.add_record("action", exit)
 	assert_gt(first_action, 0)
@@ -524,12 +524,10 @@ func test_records_at_any_depth() -> void:
 	var sound: int = _seam.add_record("sound", exit)
 	assert_true(_seam.set_field(sound, "file", "menu.lwf"))
 	assert_eq(_seam.get_field(sound, "trigger"), "MOUSE_OVER")
-	assert_eq(_seam.get_field(exit, "items"), 0, "no ITEMS yet")
-	var row: int = _seam.add_record("items.item", exit)
-	assert_true(_seam.set_field(row, "text", "One"))
-	assert_eq(_seam.get_field(exit, "items"), 1, "the ITEMS block written with its row")
+	assert_eq(_seam.get_field(exit, "items"), 0, "no ITEMS")
+	assert_eq(_seam.add_record("items.item", exit), 0, "a button reads no ITEMS: no row goes there")
+	assert_eq(_seam.get_field(exit, "items"), 0, "no ITEMS still")
 	assert_eq(_seam.get_record_name(second_action), "Action 2")
-	assert_eq(_seam.get_record_owner(row), exit)
 	# Windows copy and paste: TITLE pasted into EXIT is named TITLE2.
 	assert_true(_seam.select_record(title))
 	assert_true(_seam.copy_records())

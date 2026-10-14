@@ -1,12 +1,14 @@
 // The score table document (ADR 0046 S23 B; editor/documents/score_document.h): score.ini as rows over
-// formats/score with the file's layout modeled (formats/textlayout): the file's version and fanfare first, then its
-// GAMETYPE blocks, each its scoreboard columns (FIELD lines) and points (VAR lines); a value changed changes its own
-// line, a column added goes after the block's last, a block added is the first game type the file lacks; a name no
-// table has refused; the game's reading of the file as findings (a version other than 40, a fanfare it does not
-// keep, a block of no game type's name, a game type's second block, more columns than a row holds). The retail leg
-// (OPENNOVA_JO_DIR): the install's loose score.ini through the document, saved byte for byte, no finding.
+// formats/score, a save writing the model alone in ScoreConfig_SaveFile's form (the S26 ruling): the file's version
+// and fanfare first, then its GAMETYPE blocks, each its scoreboard columns (FIELD lines) and points (VAR lines); a
+// value changed changes its own line, a column added goes after the block's last, a block added is the first game
+// type the file lacks; a name no table has refused; the game's reading of the file as findings (a version other than
+// 40, a fanfare it does not keep, a block of no game type's name, a game type's second block). The retail leg
+// (OPENNOVA_JO_DIR): the install's loose score.ini through the document, saved byte for byte (it is that writer's
+// output), no finding.
 #include <editor/documents/document_types.h>
 #include <editor/documents/score_document.h>
+#include <formats/score/score.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -32,6 +34,22 @@ std::vector<uint8_t> bytes_of(const std::string &text) { return std::vector<uint
 
 using editor_test::has_code;
 using editor_test::set_edit;
+
+// The text a save of `text` writes: formats/score's writer of what its reader reads.
+std::string written(const std::string &text) {
+	score::File file;
+	std::string error;
+	std::vector<uint8_t> out;
+	if (!score::parse(reinterpret_cast<const uint8_t *>(text.data()), text.size(), file, error) ||
+	    !score::write(file, out, error))
+		return std::string();
+	return std::string(out.begin(), out.end());
+}
+
+std::string replaced(std::string text, const std::string &from, const std::string &to) {
+	text.replace(text.find(from), from.size(), to);
+	return text;
+}
 
 const ScoreBlockRow *block_named(const ScoreDocument &document, const std::string &name) {
 	for (const auto &row : document.rows())
@@ -59,7 +77,7 @@ int test_rows() {
 	Diagnostic error;
 	TEST_EXPECT(document.load_bytes(bytes_of(kFile), "score.ini", AssetKind::Score, "jo", error));
 	TEST_EXPECT(document.rows().size() == 3 && !document.blocked());
-	TEST_EXPECT(document.serialize().text == kFile);
+	TEST_EXPECT(!written(kFile).empty() && document.serialize().text == written(kFile));
 	const NodeAddress header{document.rows()[0]->id, kHeader, 0};
 	Value value;
 	TEST_EXPECT(document.get(header, "version", value) && value == Value(int64_t(40)));
@@ -73,14 +91,12 @@ int test_rows() {
 	// A value changed: its own line.
 	TEST_EXPECT(document.apply(set_edit(kill, "value", int64_t(7)), error));
 	std::string saved = document.serialize().text;
-	std::string expected = kFile;
-	expected.replace(expected.find("VAR \"ENEMYKILL\" 5"), 17, "VAR \"ENEMYKILL\" 7");
-	TEST_EXPECT(saved == expected);
+	TEST_EXPECT(saved == written(replaced(kFile, "VAR \"ENEMYKILL\" 5", "VAR \"ENEMYKILL\" 7")));
 	// A name no table has is refused; a column's value is a byte.
 	const NodeAddress deaths{tdm->id, kField, tdm->ids.lists[0][1].id};
 	TEST_EXPECT(!document.apply(set_edit(deaths, "name", std::string("NUMNOTHING")), error));
 	TEST_EXPECT(!document.apply(set_edit(deaths, "value", int64_t(300)), error));
-	// A column added: after the block's last, in the writer's form, the file's line ends.
+	// A column added: after the block's last.
 	Edit add;
 	add.operation = EditOperation::Add;
 	add.address = {tdm->id, kField, 0};
@@ -88,7 +104,8 @@ int test_rows() {
 	add.value = std::string("NUMSUICIDES");
 	TEST_EXPECT(document.apply(add, error));
 	saved = document.serialize().text;
-	TEST_EXPECT(saved.find("FIELD \"NUMDEATHS\"   1   // shown\r\nFIELD \"NUMSUICIDES\" 0\r\n") != std::string::npos);
+	TEST_EXPECT(saved == written(replaced(replaced(kFile, "VAR \"ENEMYKILL\" 5", "VAR \"ENEMYKILL\" 7"),
+	                                      "// shown\r\n", "// shown\r\nFIELD \"NUMSUICIDES\" 0\r\n")));
 	// A block added: the first game type the file lacks (TKOTH), read back as the game reads it.
 	Edit block;
 	block.operation = EditOperation::Add;
@@ -129,10 +146,10 @@ int test_findings() {
 	Edit high_byte = low;
 	high_byte.field = "fanfare_high";
 	high_byte.value = int64_t(5);
-	TEST_EXPECT(zeros.apply(low, error) && zeros.apply(high_byte, error));
+	TEST_EXPECT(zeros.apply(std::vector<Edit>{low, high_byte}, error));
 	const std::string set = zeros.serialize().text;
-	TEST_EXPECT(set == "VERSION 40\r\n\r\nEXP_FANFARE 2 5\r\n\r\nGAMETYPE \"DM\"\r\nVAR \"FIRE\" 5\r\n" &&
-	            validate_score_file(zeros).empty());
+	TEST_EXPECT(set == written(replaced(shipped, "EXP_FANFARE 0 0", "EXP_FANFARE 2 5")) &&
+	            set.find("EXP_FANFARE 2 5\r\n") != std::string::npos && validate_score_file(zeros).empty());
 	std::string fields;
 	for (int i = 0; i < 35; ++i) fields += "FIELD \"NUMDEATHS\" 1\r\n";
 	const std::string flawed = "VERSION 40\r\nGAMETYPE \"NOPE\"\r\nGAMETYPE \"tdm\"\r\nGAMETYPE \"TDM\"\r\n" + fields;
@@ -140,23 +157,30 @@ int test_findings() {
 	TEST_EXPECT(document.load_bytes(bytes_of(flawed), "score.ini", AssetKind::Score, "jo", error));
 	std::vector<Diagnostic> findings = validate_score_file(document);
 	TEST_EXPECT(has_code(findings, "score.unknown_game_type") && has_code(findings, "score.game_type_repeated") &&
-	            has_code(findings, "score.fields_past_34") && !has_code(findings, "score.version"));
-	// A fanfare the game does not keep, set in the document (a file's line failing the gate is read for nothing).
+	            !has_code(findings, "score.version"));
+	// The 35th column the reader refuses (a row holds 34) is none of the model's: the second TDM block's.
+	const ScoreBlockRow *tdm = nullptr;
+	for (const auto &row : document.rows())
+		if (row && row->kind == kBlock && row->name() == "TDM") tdm = static_cast<const ScoreBlockRow *>(row.get());
+	TEST_EXPECT(tdm && tdm->block.fields.size() == score::kMaxFields);
+	// A fanfare the game does not keep, set in the document (a file's line failing the gate is read for nothing): its
+	// save refused (the writer writes none the reader would not read back).
 	const NodeAddress header{document.rows()[0]->id, node_kind(ScoreKind::Header), 0};
 	Edit high;
 	high.address = header;
 	high.field = "fanfare_low";
 	high.value = int64_t(2);
 	TEST_EXPECT(document.apply(high, error));
-	TEST_EXPECT(has_code(validate_score_file(document), "score.fanfare_unkept"));
-	// A file of another version: the game reads none of it, nor does the document (no block), and a save keeps its
-	// lines; its version shown, not set.
+	TEST_EXPECT(has_code(validate_score_file(document), "score.fanfare_unkept") && !document.serialize().ok());
+	// A file of another version: the game reads none of it, nor does the document (no block), and a save writes its
+	// version alone; its version shown, not set.
 	const std::string old = "VERSION 39\r\nEXP_FANFARE 2 1\r\nGAMETYPE \"TDM\"\r\nVAR \"FIRE\" 5\r\n";
 	ScoreDocument older;
 	TEST_EXPECT(older.load_bytes(bytes_of(old), "score.ini", AssetKind::Score, "jo", error) && older.rows().size() == 1);
 	findings = validate_score_file(older);
 	TEST_EXPECT(has_code(findings, "score.version") && !has_code(findings, "score.fanfare_unkept"));
-	TEST_EXPECT(older.serialize().text == old);
+	TEST_EXPECT(older.serialize().ok() && older.serialize().text == written(old) &&
+	            older.serialize().text.find("GAMETYPE") == std::string::npos);
 	Edit version;
 	version.address = NodeAddress{older.rows()[0]->id, node_kind(ScoreKind::Header), 0};
 	version.field = "version";
@@ -167,10 +191,10 @@ int test_findings() {
 	TEST_EXPECT(alike.load_bytes(bytes_of("VERSION 40\r\nGAMETYPE \"COOP\"\r\nVAR \"FIRE\" 1\r\nGAMETYPE \"COOP\"\r\nVAR \"FIRE\" 1\r\n"),
 	                             "score.ini", AssetKind::Score, "jo", error) &&
 	            validate_score_file(alike).empty());
-	// None gates a build or blocks a save: the game reads any file.
-	for (const FindingCodeRow &row : score_finding_codes()) TEST_EXPECT(!row.gates_build && !row.blocks_save);
-	std::printf("findings: a version other than 40, a fanfare not kept, a block of no game type, a second block, 35 "
-	            "columns\n");
+	// None gates a build: the game reads any file. A fanfare the game does not keep blocks the save alone.
+	for (const FindingCodeRow &row : score_finding_codes())
+		TEST_EXPECT(!row.gates_build && row.blocks_save == (std::string(row.token) == "score.fanfare_unkept"));
+	std::printf("findings: a version other than 40, a fanfare not kept, a block of no game type, a second block\n");
 	return 0;
 }
 

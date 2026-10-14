@@ -19,9 +19,9 @@ constexpr FindingCodeEntry<CatalogFinding> kFindingEntries[] = {
 	// value, a fifth addeweap is ignored, an unclosed item block is registered): unwritable_code, a closed file
 	// packed as stored, its Save refused.
 	{ CatalogFinding::InvalidInput, unwritable_code("catalog.invalid_input") },
-	// Input the game ignores, which a save writes as the file has it (the file's modeled layout,
-	// def_notes.h): said, nothing to fix.
-	{ CatalogFinding::IgnoredInput, { "catalog.ignored_input" } },
+	// Input the game ignores, which a save does not keep (the writer writes what the game reads): Rewrite the file
+	// without it.
+	{ CatalogFinding::IgnoredInput, { "catalog.ignored_input", FindingFix::Rewrite, kRewriteDropsIgnoredInput } },
 	// A record the def writer cannot write back. From an edit, the writer's own refusal; from a file on disk, a
 	// value the reader took with no blocking finding of its own (none in the shipped defs), which the game reads
 	// as the reader did (unwritable_code: a closed file packs as stored, its Save refused).

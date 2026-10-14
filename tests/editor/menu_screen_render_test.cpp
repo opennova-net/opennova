@@ -246,7 +246,7 @@ static int test_render_again_only_when_moved() {
 	passes = stats.passes;
 	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(stats.passes == passes + 1 && check.rendered() == 0);
-	// A stylesheet edit that changes no variable's value (its comment) renders nothing; a
+	// A stylesheet edit that changes no value a menu names (a variable added) renders nothing; a
 	// variable changed renders again the menus naming it, and those alone.
 	editor_test::handle_to_end(session, request::open_document("menu_style.mns"));
 	Document *style = session.document_for("menu_style.mns");
@@ -256,9 +256,11 @@ static int test_render_again_only_when_moved() {
 			find_definition(AssetGraph(), *style, "SEMIOPAQUE_BLACK", black));
 	if (!style)
 		return 1;
-	const NodeAddress comment{ style->rows()[0]->id, style->rows()[0]->kind, 0 };
 	passes = stats.passes;
-	edit(session, *style, comment, "text", std::string("// The shell's variables."));
+	EditorRequest add = request::edit_record(style->path(), Edit());
+	add.edits[0].operation = EditOperation::Add;
+	add.edits[0].address.kind = style->rows()[0]->kind;
+	editor_test::handle_to_end(session, add);
 	TEST_EXPECT(style->dirty() && stats.passes == passes + 1 && check.rendered() == 0);
 	edit(session, *style, fg, "value", std::string("FFFF0000"));
 	TEST_EXPECT(check.rendered() == 1);

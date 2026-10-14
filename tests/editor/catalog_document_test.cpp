@@ -31,6 +31,15 @@ static Edit field(NodeAddress address, std::string key, DefValue value, bool coa
 	Edit edit; edit.address = address; edit.field = std::move(key);
 	edit.value = std::move(value); edit.coalesce = coalesce; return edit;
 }
+// The text a save of a catalog file of `text` writes: the def writer's form of what the game's reader reads of it
+// (S26: a writer writes its records alone), "" when it does not read.
+static std::string written_def(const std::string &text, const char *name, AssetKind kind) {
+	DefCatalogDocument document;
+	Diagnostic error;
+	if (!document.load_bytes(std::vector<uint8_t>(text.begin(), text.end()), name, kind, "jo", error)) return std::string();
+	const SerializeResult written = document.serialize();
+	return written.ok() ? written.text : std::string();
+}
 static int history_and_save() {
 	editor_test::TempProjectDir dir("opennova_catalog_document_test");
 	TEST_EXPECT(editor_test::write_text(dir.file("items.def"), "begin \"One\"\nid 100001\ntype marker\nhp 10\nend\n"));
@@ -150,9 +159,8 @@ static int collections() {
 	return 0;
 }
 // A weapon's nested rows through the catalog: a sight duplicated in its weapon is a record of its
-// own (its copy names none of the file's layout, prepare_record: written in the writer's form after
-// its original), and one moved follows the weapon's order; the comment above each stands with it,
-// and no record is written in the writer's form (the save says nothing).
+// own, written after its original, and one moved follows the weapon's order; the save is the writer's form of
+// the records (the file's comments none of it, S26), and says nothing.
 static int nested_rows_follow_the_record() {
 	editor_test::TempProjectDir dir("opennova_catalog_nested_rows");
 	// The text as the file holds it, CR LF (editor_test::crlf: the one break the def walk splits at).
@@ -168,14 +176,15 @@ static int nested_rows_follow_the_record() {
 		if (std::string(document.kind_token(collection.spec.kind)) == "sight") sights = collection.ids;
 	TEST_EXPECT(sights.size() == 2);
 	if (sights.size() != 2) return 1;
-	TEST_EXPECT(document.serialize().text == text);
+	const auto weapons = [](const std::string &file) { return written_def(file, "weapon.def", AssetKind::WeaponDefs); };
+	TEST_EXPECT(document.serialize().text == weapons(text) && document.serialize().text.find("the scope") == std::string::npos);
 	Edit duplicate; duplicate.operation = EditOperation::Duplicate;
 	duplicate.address = {parent, node_kind(DefRecordKind::Sight), sights[0]};
 	TEST_EXPECT(document.apply(duplicate, error));
 	SerializeResult written = document.serialize();
 	TEST_EXPECT(written.ok() && written.notes.empty() &&
-	            written.text == editor_test::crlf("weapon \"WPN_S\"\n\t// the scope\n\tsights scope.tga 0 0 640 480 blend\n"
-	                                              "\tsights scope.tga 0 0 640 480 blend\n\t// the dot\n\tsights reticle.tga 0 0 64 64 add\nend\n"));
+	            written.text == weapons(editor_test::crlf("weapon \"WPN_S\"\n\tsights scope.tga 0 0 640 480 blend\n"
+	                                                      "\tsights scope.tga 0 0 640 480 blend\n\tsights reticle.tga 0 0 64 64 add\nend\n")));
 	document.undo();
 	Edit move; move.operation = EditOperation::Move;
 	move.address = {parent, node_kind(DefRecordKind::Sight), sights[1]};
@@ -183,8 +192,8 @@ static int nested_rows_follow_the_record() {
 	TEST_EXPECT(document.apply(move, error));
 	written = document.serialize();
 	TEST_EXPECT(written.ok() && written.notes.empty() &&
-	            written.text == editor_test::crlf("weapon \"WPN_S\"\n\t// the dot\n\tsights reticle.tga 0 0 64 64 add\n"
-	                                              "\t// the scope\n\tsights scope.tga 0 0 640 480 blend\nend\n"));
+	            written.text == weapons(editor_test::crlf("weapon \"WPN_S\"\n\tsights reticle.tga 0 0 64 64 add\n"
+	                                                      "\tsights scope.tga 0 0 640 480 blend\nend\n")));
 	return 0;
 }
 static int session_gate() {
@@ -254,8 +263,7 @@ static int malformed() {
 	return 0;
 }
 // Lines the game ignores never block the document: they are reported, the record
-// stays editable, and saving keeps them as the file has them (the file's notes,
-// def_notes.h), the edit its own line.
+// stays editable, and a save writes the records alone (S26), without them: the findings go with them.
 static int ignored_input() {
 	editor_test::TempProjectDir dir("opennova_catalog_ignored_test");
 	// (Train: an attrib word the game matches and skips; Good, which the mission editor reads, is modeled.)
@@ -267,20 +275,21 @@ static int ignored_input() {
 	const NodeAddress row{document.rows()[0]->id, node_kind(DefRecordKind::Item), 0};
 	TEST_EXPECT(document.apply(field(row, "hp", int64_t(20)), error));
 	TEST_EXPECT(document.save(error));
-	// The findings are the written text's from then on: the kept lines are reported still.
-	TEST_EXPECT(document.ignored_lines() == 2 && document.issues().size() == 2 && document.can_undo());
+	// The findings are the written text's from then on: none.
+	TEST_EXPECT(document.ignored_lines() == 0 && document.issues().empty() && document.can_undo());
 	std::string saved, message;
 	TEST_EXPECT(opennova::io::read_file_text(dir.file("items.def"), saved, message));
-	// (the new line after the record's lines, indented as they are)
-	TEST_EXPECT(saved == editor_test::crlf("begin \"One\"\nid 100001\ntype marker\nsubtype Ruins\nattrib: train nodie\nhp 20\nend\n"));
+	TEST_EXPECT(saved == written_def(editor_test::crlf("begin \"One\"\nid 100001\ntype marker\nattrib: nodie\nhp 20\nend\n"),
+	                                 "items.def", AssetKind::ItemDefs) &&
+	            saved.find("Ruins") == std::string::npos && saved.find("train") == std::string::npos);
 	TEST_EXPECT(document.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
-	TEST_EXPECT(document.ignored_lines() == 2 && document.issues().size() == 2);
+	TEST_EXPECT(document.ignored_lines() == 0 && document.issues().empty());
 	TEST_EXPECT((row_at(document, 0).native.as<DefItemDef>().attrib & DEF_ITEM_ATTRIB_NODIE) != 0);
 	return 0;
 }
 // A later action block of a name replaces the earlier one wholesale, as the game
 // re-initializes the row, so a value the game never reads in the earlier block blocks
-// nothing: the block is one ignored-input finding, and saving keeps it as the file has it.
+// nothing: the block is one ignored-input finding, and a save writes the records alone, without it.
 static int replaced_action_block() {
 	editor_test::TempProjectDir dir("opennova_catalog_replaced_test");
 	TEST_EXPECT(editor_test::write_text(dir.file("weapon.def"),
@@ -294,9 +303,11 @@ static int replaced_action_block() {
 	TEST_EXPECT(document.save(error));
 	std::string saved, message;
 	TEST_EXPECT(opennova::io::read_file_text(dir.file("weapon.def"), saved, message));
-	TEST_EXPECT(saved == editor_test::crlf("weapon \"WPN_TWICE\"\naction \"FIRE\"\ndelayend nope\nend\naction \"FIRE\"\ndelayend 2\nend\n"
-	                                       "\tweaponweight 1.5\nend\n"));
-	TEST_EXPECT(document.issues().size() == 1 && !document.blocked());
+	TEST_EXPECT(saved == written_def(editor_test::crlf("weapon \"WPN_TWICE\"\naction \"FIRE\"\ndelayend 2\nend\n"
+	                                                   "weaponweight 1.5\nend\n"),
+	                                 "weapon.def", AssetKind::WeaponDefs) &&
+	            saved.find("nope") == std::string::npos);
+	TEST_EXPECT(document.issues().empty() && !document.blocked());
 	return 0;
 }
 // "Go to" opens the catalog that defines a name at the record the graph's lookup reaches
@@ -402,8 +413,8 @@ static int written_units() {
 	TEST_EXPECT(transfer.ranged && transfer.min == 0.0 && transfer.max == 100.0 && transfer.unit == "%");
 	TEST_EXPECT(items.apply(field(buggy, "player_speed", int64_t(45)), error));
 	TEST_EXPECT(row_at(items, 0).native.as<DefItemDef>().player_speed == 45 * 293);
-	// (the file's line, its spelling and ending kept, the number changed)
-	TEST_EXPECT(items.serialize().text.find("\nplayer_speed 45\r\n") != std::string::npos);
+	// (the line in the writer's form, the number changed)
+	TEST_EXPECT(items.serialize().text.find("player_speed 45\r\n") != std::string::npos);
 	// A Set of the number the line writes already is no edit (S12 Z2): no step.
 	const uint64_t at_45 = items.revision();
 	TEST_EXPECT(items.apply(field(buggy, "player_speed", int64_t(45)), error) && items.revision() == at_45);
@@ -541,8 +552,8 @@ static int witnessed_enums() {
 	TEST_EXPECT(schema(items, heli, "unit_type").ranged && schema(items, heli, "unit_type").max == 255.0);
 
 	// A line the game reads as another number (D10b): the document holds what the game reads,
-	// the line is reported and blocks nothing, and saving keeps the file's line while the record
-	// holds what it read (the game reads it the same); a category set writes the new one.
+	// the line is reported and blocks nothing, and a save writes what the record holds, what the game read (S26: the
+	// writer writes the records alone); a category set writes the new one.
 	TEST_EXPECT(editor_test::write_text(dir.file("wide.def"), "weapon \"WPN_WIDE\"\ncategory 13\nend\n"));
 	DefCatalogDocument wide;
 	TEST_EXPECT(wide.load(dir.file("wide.def"), "weapon.def", AssetKind::WeaponDefs, "jo", error) && !wide.blocked());
@@ -550,9 +561,10 @@ static int witnessed_enums() {
 	TEST_EXPECT(wide.get(wide_weapon, "category", value) && std::get<int64_t>(value) == 0);
 	TEST_EXPECT(wide.issues().size() == 1 && !wide.issues()[0].blocks && wide.issues()[0].field == "category" &&
 	            wide.issues()[0].message.find("reads this as 0") != std::string::npos);
-	TEST_EXPECT(wide.rewrite_need() == Document::RewriteNeed::None);
+	TEST_EXPECT(wide.rewrite_need() == Document::RewriteNeed::Rewrite);
 	TEST_EXPECT(wide.apply(field(wide_weapon, "category", int64_t(4)), error));
-	TEST_EXPECT(wide.serialize().text == editor_test::crlf("weapon \"WPN_WIDE\"\ncategory 4\nend\n"));
+	TEST_EXPECT(wide.serialize().text ==
+	            written_def(editor_test::crlf("weapon \"WPN_WIDE\"\ncategory 4\nend\n"), "weapon.def", AssetKind::WeaponDefs));
 
 	TEST_EXPECT(editor_test::write_text(dir.file("ammo.def"), "ammo AT_GLASS\nscar_type 2\nend\n"));
 	DefCatalogDocument ammo;
@@ -583,9 +595,11 @@ static int powerup_weapon() {
 	            document.get(twice, "weapon_all", value) && std::get<int64_t>(value) == 1);
 	TEST_EXPECT(document.apply(field(gun, "weapon_all", int64_t(1)), error));
 	TEST_EXPECT(document.get(gun, "weapon", value) && std::get<std::string>(value).empty());
-	// The first row's line now `weapon all`; the second row's lines stand as the file has them (both).
-	TEST_EXPECT(document.serialize().text == "powerup \"PU_GUN\"\r\nweapon all\r\nend\r\n"
-	                                         "powerup \"PU_TWICE\"\r\nweapon WPN_A\r\nweapon all\r\nend\r\n");
+	// The first row's line now `weapon all`; the second row's what the game read of its two (the later), the
+	// writer's form of the records alone (S26).
+	TEST_EXPECT(document.serialize().text == written_def("powerup \"PU_GUN\"\r\nweapon all\r\nend\r\n"
+	                                                     "powerup \"PU_TWICE\"\r\nweapon all\r\nend\r\n",
+	                                                     "powerup.def", AssetKind::PowerupDefs));
 	TEST_EXPECT(document.apply(field(gun, "weapon", std::string("WPN_B")), error));
 	TEST_EXPECT(document.get(gun, "weapon_all", value) && std::get<int64_t>(value) == 0);
 	const std::string text = document.serialize().text;
@@ -734,19 +748,19 @@ static int plain_words() {
 					if (choice.name == token) return &choice;
 		return nullptr;
 	};
-	const FieldChoice *no_shadow = choice_in("attrib", "noshadow");
+	const FieldChoice *no_shadow = choice_in("attrib", "NoShadow");
 	TEST_EXPECT(no_shadow && no_shadow->value == int64_t(DEF_ITEM_ATTRIB_NOSHADOW) && no_shadow->label == "No shadow" &&
 	            no_shadow->description.find("no sun shadow") != std::string::npos &&
 	            no_shadow->description.find("[orig: Terrain_CollectAndRenderTileModels @ 0x60D43E]") != std::string::npos);
-	const FieldChoice *static_shadow = choice_in("attrib2", "staticshadow");
-	const FieldChoice *dynamic_shadow = choice_in("attrib2", "dynamicshadow");
+	const FieldChoice *static_shadow = choice_in("attrib2", "StaticShadow");
+	const FieldChoice *dynamic_shadow = choice_in("attrib2", "DynamicShadow");
 	TEST_EXPECT(static_shadow && static_shadow->label == "Static shadow" && !static_shadow->description.empty() &&
 	            dynamic_shadow && dynamic_shadow->label == "Dynamic shadow" &&
 	            dynamic_shadow->description.find("NoShadow does not") != std::string::npos);
-	const FieldChoice *door = choice_in("attrib", "door");
+	const FieldChoice *door = choice_in("attrib", "Door");
 	TEST_EXPECT(door && door->label.empty() && door->description.empty());
 	TEST_EXPECT(field_text(*std::find_if(item.begin(), item.end(), [](const FieldSchema &f) { return f.id == "attrib"; }),
-	                       int64_t(DEF_ITEM_ATTRIB_DOOR | DEF_ITEM_ATTRIB_NOSHADOW)) == "door, No shadow");
+	                       int64_t(DEF_ITEM_ATTRIB_DOOR | DEF_ITEM_ATTRIB_NOSHADOW)) == "Door, No shadow");
 	// The sections in their kind's order, each once.
 	size_t rank = 0;
 	for (const FieldSchema &field : item) {
@@ -840,7 +854,7 @@ static int code_page_names() {
 
 // An ordinary edit through the session keeps the file's order: a weapon's switchcategory
 // unticked (its line's present tick cleared) and saved is that one line gone, every other line as the save
-// before it wrote it, no record reordered and no note.
+// before it wrote it (the writer's form of the records, S26), no record reordered and no note.
 static int unticked_line_saves_alone() {
 	editor_test::TempProjectDir dir("opennova_catalog_unticked_line");
 	NoProcess platform;
@@ -869,10 +883,11 @@ static int unticked_line_saves_alone() {
 	editor_test::handle_to_end(session, request::save(path));
 	const std::vector<uint8_t> saved = test_io::read_file(file);
 	std::string after(saved.begin(), saved.end());
-	// The document unedited writes the file as it was read (its notes, def_notes.h: its CR LF endings too,
-	// the one break the retail walk splits at, which write_text staged it with).
-	TEST_EXPECT(before == "weapon \"WPN_A\"\r\n\tcategory 2\r\n\tswitchcategory 3\r\n\tclipsize 15\r\nend\r\n"
-	                      "weapon \"WPN_B\"\r\n\tclipsize 30\r\n\tcategory 1\r\nend\r\n");
+	// The document unedited writes the writer's form of the file's records, WPN_A before WPN_B.
+	TEST_EXPECT(before == written_def("weapon \"WPN_A\"\r\n\tcategory 2\r\n\tswitchcategory 3\r\n\tclipsize 15\r\nend\r\n"
+	                                  "weapon \"WPN_B\"\r\n\tclipsize 30\r\n\tcategory 1\r\nend\r\n",
+	                                  "weapon.def", AssetKind::WeaponDefs) &&
+	            before.find("WPN_A") < before.find("WPN_B"));
 	const size_t at = before.find("\tswitchcategory 3\r\n");
 	TEST_EXPECT(at != std::string::npos && after == std::string(before).erase(at, std::strlen("\tswitchcategory 3\r\n")));
 	TEST_EXPECT(view.activity.status == "Saved 1 file." && weapons->save_notes().empty());
@@ -918,7 +933,7 @@ static int adds_keep_the_ending() {
 	TEST_EXPECT(editor_test::write_text(dir.file("items.def"), text));
 	DefCatalogDocument items; Diagnostic error;
 	TEST_EXPECT(items.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
-	TEST_EXPECT(items.serialize().text == text);
+	TEST_EXPECT(items.serialize().text == written_def(text, "items.def", AssetKind::ItemDefs));
 	const auto ending = [](const std::string &file) {
 		size_t blank = 0;
 		for (size_t at = file.size(); at >= 4 && file.compare(at - 4, 4, "\r\n\r\n") == 0; at -= 2) ++blank;
@@ -939,9 +954,9 @@ static int adds_keep_the_ending() {
 	return 0;
 }
 
-// The type line's word where the game reads two alike (foliage for 2, object for 6, as retail's trees and
-// crates write them [orig: ItemDef_ParseProperty, the type chain @0x4A02E4..0x4A04B7]): read, kept by a
-// copy (written in the writer's form), set on a new item, and dropped for a kind with one word.
+// The type line's word where the game reads two alike (foliage as decoration, 2; object as powerup, 6 [orig:
+// ItemDef_ParseProperty, the type chain @0x4A02E4..0x4A04B7]): read as the kind the game keeps, which a save writes
+// in the kind's own word (the writer writes the model alone, formats/def def_write_record).
 static int type_words() {
 	editor_test::TempProjectDir dir("opennova_catalog_type_words");
 	TEST_EXPECT(editor_test::write_text(dir.file("items.def"),
@@ -949,28 +964,16 @@ static int type_words() {
 	                                    "begin \"Crate\"\r\nid 100301\r\ntype object\r\nend\r\n\r\n"));
 	DefCatalogDocument items; Diagnostic error;
 	TEST_EXPECT(items.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
-	const auto &bush = row_at(items, 0).native.as<DefItemDef>();
-	TEST_EXPECT(bush.type == DEF_ITEM_TYPE_FOLIAGE && bush.type_word == 1 && row_at(items, 1).native.as<DefItemDef>().type_word == 1);
-	const NodeKind item = node_kind(DefRecordKind::Item);
-	Edit duplicate; duplicate.operation = EditOperation::Duplicate; duplicate.address = {items.rows()[0]->id, item, 0};
-	TEST_EXPECT(items.apply(duplicate, error));
+	TEST_EXPECT(row_at(items, 0).native.as<DefItemDef>().type == DEF_ITEM_TYPE_DECORATION &&
+	            row_at(items, 1).native.as<DefItemDef>().type == DEF_ITEM_TYPE_POWERUP);
 	// The record's lines from its header to its end, as written.
 	const auto lines_of = [&items](const char *header) {
 		const std::string text = items.serialize().text;
 		const size_t at = text.find(header);
 		return at == std::string::npos ? std::string() : text.substr(at, text.find("end\r\n", at) - at);
 	};
-	TEST_EXPECT(lines_of("begin \"Jungle Bush (copy)\"").find("\ttype foliage\r\n") != std::string::npos);
-	// A new item made foliage: its type 2, written as the other word.
-	Edit add; add.operation = EditOperation::Add; add.address.kind = item; add.field = "display_name"; add.value = std::string("Palm");
-	TEST_EXPECT(items.apply(add, error));
-	const NodeAddress palm{items.last_added(), item, 0};
-	TEST_EXPECT(items.apply(std::vector<Edit>{field(palm, "type", int64_t(DEF_ITEM_TYPE_DECORATION)), field(palm, "type_word", int64_t(1))},
-	                        error));
-	TEST_EXPECT(lines_of("begin \"Palm\"").find("\ttype foliage\r\n") != std::string::npos);
-	// Made a vehicle: one word, the other dropped.
-	TEST_EXPECT(items.apply(field(palm, "type", int64_t(DEF_ITEM_TYPE_VEHICLE)), error));
-	TEST_EXPECT(static_cast<const CatalogRow &>(*items.row(palm.row)).native.as<DefItemDef>().type_word == 0);
+	TEST_EXPECT(lines_of("begin \"Jungle Bush\"").find("\ttype decoration\r\n") != std::string::npos &&
+	            lines_of("begin \"Crate\"").find("\ttype powerup\r\n") != std::string::npos);
 	return 0;
 }
 
@@ -999,8 +1002,12 @@ static int repeated_weapon_name() {
 }
 
 int main() {
-	return repeated_weapon_name() || type_words() || adds_keep_the_ending() || item_name_cut() || unticked_line_saves_alone() || code_page_names() || history_and_save() || two_new_items() || collections() ||
-	       nested_rows_follow_the_record() || session_gate() || malformed() || ignored_input() ||
-	       replaced_action_block() || go_to_record() || remove_last_item() || changes_since_save() || written_units() ||
-	       witnessed_enums() || powerup_weapon() || duplicates_apart() || plain_words();
+	// Every test runs (a failure in one does not hide another's).
+	int failures = 0;
+	for (int (*test)() : {repeated_weapon_name, type_words, adds_keep_the_ending, item_name_cut, unticked_line_saves_alone,
+	                      code_page_names, history_and_save, two_new_items, collections, nested_rows_follow_the_record,
+	                      session_gate, malformed, ignored_input, replaced_action_block, go_to_record, remove_last_item,
+	                      changes_since_save, written_units, witnessed_enums, powerup_weapon, duplicates_apart, plain_words})
+		failures += test() ? 1 : 0;
+	return failures ? 1 : 0;
 }
