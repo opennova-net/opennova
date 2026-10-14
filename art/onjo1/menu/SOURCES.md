@@ -55,3 +55,10 @@ No generator script is kept.
 | Material | Author | Licence | Used for |
 |---|---|---|---|
 | [Barlow](https://github.com/google/fonts/tree/e9678a5385322c63730122ba464765baad83cfd8/ofl/barlow) Regular, [Barlow Semi Condensed](https://github.com/google/fonts/tree/e9678a5385322c63730122ba464765baad83cfd8/ofl/barlowsemicondensed) Medium and Bold, [Barlow Condensed](https://github.com/google/fonts/tree/e9678a5385322c63730122ba464765baad83cfd8/ofl/barlowcondensed) Medium, SemiBold and Black, v1.408 (google/fonts at `e9678a5385322c63730122ba464765baad83cfd8`) | The Barlow Project Authors (Jeremy Tribby) | SIL Open Font License 1.1 (`fonts/OFL.txt`, the copy google/fonts ships beside each of the three families) | Rasterised into the thirteen glyph sheets |
+
+## The background
+
+| File | Size | Made from | What it is |
+|---|---|---|---|
+| `src/onmnbg.png` | 1600 x 1200 | the scene `onmnbg` of `art/onjo1/screens/screens.blend`, rendered (that folder's `SOURCES.md`) | The main menu's background master: the camp at dusk in the rain, our soldier with his carbine before the guard tower and the hut's lit door, palms over it all. The left third is kept dark and calm for the menu's buttons (a graduated filter before the lens darkens it), and the only text is a small `OPENNOVA` mark top right: the menu draws its own title. |
+| `assets/onmnbg.tga` | 800 x 600 | `src/onmnbg.png` | The file the game reads: an uncompressed 24-bit TGA, bottom row first, no image ID. The editor's image importer makes it with `format tga24` and `size 800x600` (the master area-averaged down), in a scratch project as the HUD's textures are made (`../hud/SOURCES.md`): `opennova-project import <scratch> art/onjo1/menu/src/onmnbg.png`, those options set on its record (`set_import_options`), then the `.tga` from the project's import cache copied into `assets/`. It is a plain git blob, not LFS (`.gitattributes`), so the bundled-menu tests read it without an LFS pull. |
