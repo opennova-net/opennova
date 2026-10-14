@@ -7,10 +7,11 @@
 namespace opennova::editor {
 
 BuildOperation::BuildOperation(BuildPlan plan, std::string output_root, ProtectedDirs protected_dirs,
-		std::vector<Diagnostic> gate, PlayIntent play, ExportIntent exported, ExportResolver resolve_export,
-		PlayFillResolver resolve_fill) :
+		std::vector<Diagnostic> gate, int64_t started_ms, PlayIntent play, ExportIntent exported,
+		ExportResolver resolve_export, PlayFillResolver resolve_fill) :
 		run_(std::move(plan), std::move(output_root), std::move(protected_dirs)),
 		gate_(std::move(gate)),
+		started_ms_(started_ms),
 		play_(std::move(play)),
 		export_(std::move(exported)),
 		resolve_export_(std::move(resolve_export)),
@@ -77,9 +78,10 @@ void BuildOperation::join(const EditorRequest &request) {
 }
 
 OperationOutcome BuildOperation::finish(SessionCore &core) {
-	// How long it took, start to finish: what the build panel says (the UX round's problems lane).
+	// How long it took, start to finish, on the session's clock: what the build panel says (the UX round's
+	// problems lane).
 	BuildReport report = run_.report();
-	report.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started_).count();
+	report.seconds = static_cast<double>(core.platform().now_ms() - started_ms_) / 1000.0;
 	const ExportReport *shipped = export_run_ ? &export_run_->report() : export_refused_.get();
 	// A Play whose copies failed or were cancelled starts no game (its staging would copy the rest in one frame); the
 	// build it waited on is absorbed all the same, the session's last build (finishes_on_cancel).

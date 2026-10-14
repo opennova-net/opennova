@@ -1,6 +1,6 @@
 #pragma once
 
-#include <chrono>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -61,10 +61,12 @@ using PlayFillResolver = std::function<std::unique_ptr<InstallCopyFill>(const Pl
 // install's files it needs copied into the copy cache next, stepped by the same budget (InstallCopyFill, S26 C16):
 // the Play then stages its run directory at once, linking them, where it once copied them in one frame; a fill
 // that failed starts no game (a cancel, the whole operation's, finishes nothing), the whole copies kept. finish() hands the reports to the session; nothing reaches the view before.
+// How long it took is the session's clock's (its platform's now_ms): `started_ms` when it started, read
+// again at finish.
 class BuildOperation : public SessionOperation {
 public:
 	BuildOperation(BuildPlan plan, std::string output_root, ProtectedDirs protected_dirs,
-			std::vector<Diagnostic> gate, PlayIntent play, ExportIntent exported = ExportIntent(),
+			std::vector<Diagnostic> gate, int64_t started_ms, PlayIntent play, ExportIntent exported = ExportIntent(),
 			ExportResolver resolve_export = ExportResolver(), PlayFillResolver resolve_fill = PlayFillResolver());
 
 	OperationKind kind() const override { return OperationKind::Build; }
@@ -86,8 +88,8 @@ public:
 private:
 	BuildRun run_;
 	std::vector<Diagnostic> gate_;
+	int64_t started_ms_;
 	PlayIntent play_;
-	std::chrono::steady_clock::time_point started_ = std::chrono::steady_clock::now();
 	ExportIntent export_;
 	ExportResolver resolve_export_;
 	std::unique_ptr<ExportRun> export_run_;

@@ -1690,7 +1690,7 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 	std::string cache_error;
 	ensure_project_cache_dir(paths_, cache_error);
 	const uint64_t id = operations_.start(std::make_unique<BuildOperation>(
-	        plan, output_root, std::move(protected_dirs), view_.findings.diagnostics, intent, exported,
+	        plan, output_root, std::move(protected_dirs), view_.findings.diagnostics, platform_.now_ms(), intent, exported,
 	        [this](const ExportIntent &wanted, const BuildReport &built, ExportRequest &request, ExportReport &refused) {
 		        return export_request(wanted, built, request, refused);
 	        },

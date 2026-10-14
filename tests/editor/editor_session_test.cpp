@@ -172,7 +172,8 @@ static int test_lifecycle() {
 	TEST_EXPECT(output_has(v, "Created menus/main.mnu"));
 
 	// Build is an operation stepped by bytes, one 64 KiB step per poll at this budget; the view
-	// shows its progress, which never goes back, until it lands and says what it came to.
+	// shows its progress, which never goes back, until it lands and says what it came to. The
+	// session's clock moves a quarter second each poll.
 	session.set_poll_budget({0, 64 * 1024});
 	const uint64_t events_before = v.events.next_seq() - 1;
 	session.handle(request::build());
@@ -182,6 +183,7 @@ static int test_lifecycle() {
 	size_t polls = 0;
 	uint64_t done = 0;
 	while (v.activity.operation.running()) {
+		platform.clock += 250;
 		session.poll();
 		++polls;
 		TEST_EXPECT(polls < 200);
@@ -207,8 +209,8 @@ static int test_lifecycle() {
 		const BuildReport &report = *v.activity.last_build;
 		TEST_EXPECT(report.built.size() >= 3 && report.built[0].archive && report.built[0].name == "language.pff" &&
 		            report.built[2].name == "resource.pff" && report.built[2].bytes > 0);
-		// Timed by the operation, start to finish: a build that read files took some time, and not minutes.
-		TEST_EXPECT(report.seconds > 0.0 && report.seconds < 600.0);
+		// Timed by the operation on the session's clock, start to finish: a quarter second for each poll.
+		TEST_EXPECT(report.seconds == 0.25 * static_cast<double>(polls));
 		size_t packed = 0;
 		for (const BuiltFile &file : report.built) packed += file.files;
 		TEST_EXPECT(packed > 0);
