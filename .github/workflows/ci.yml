@@ -988,8 +988,7 @@ jobs:
     uses: ./.github/workflows/package-blender-windows.yml
 
   # The native apps (opennova-3di, opennova-extract, opennova-lan-probe,
-  # opennova-nw-lister, opennova-parity, opennova-serve, opennova-wire and the
-  # NovaWorld server)
+  # opennova-parity, opennova-serve, opennova-wire and the NovaWorld server)
   # in one zip, built for PRs and tagged releases alike.
   package-apps-windows:
     needs: [changes]
@@ -1046,7 +1045,8 @@ jobs:
               `| Runtime: opennova.exe with the placeholder menu; PLAY RETAIL plays your own Joint Operations install | [opennova-game-windows.zip](${process.env.GAME_URL}) |`,
               `| Editor: opennova-editor.exe with the runtime it plays a project with (experimental) | [opennova-editor-windows.zip](${process.env.EDITOR_URL}) |`,
               `| Blender 5.0+ add-on for Windows: import/export .3di models and their .adm/.bad animations; install the zip from disk | [opennova-blender-addon-windows.zip](${process.env.BLENDER_URL}) |`,
-              `| Apps: opennova-3di, opennova-extract, opennova-lan-probe, opennova-nw-lister, opennova-parity, opennova-serve (the headless game server), opennova-wire and the NovaWorld server (gate and session listeners) | [opennova-apps-windows.zip](${process.env.APPS_URL}) |`,
+              `| Apps: opennova-3di, opennova-extract, opennova-lan-probe, opennova-parity, opennova-serve (the headless game server), opennova-wire and the NovaWorld server (gate and session listeners) | [opennova-apps-windows.zip](${process.env.APPS_URL}) |`,
+              `| Launcher: opennova-launcher.exe, a tray app that switches retail Joint Operations between OpenNova's NovaWorld and NovaLogic's through the hosts file; run it as administrator | [opennova-launcher-windows.zip](${process.env.LAUNCHER_URL}) |`,
               '',
               'Downloading requires a GitHub login. Artifacts are removed after 90 days. This comment updates on each successful build.',
             ].join('\n');
