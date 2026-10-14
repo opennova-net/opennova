@@ -386,6 +386,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/selection.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_core.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_json.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/reference_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/texture_budget_list.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/texture_import_state.cpp
