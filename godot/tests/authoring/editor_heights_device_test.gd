@@ -8,10 +8,7 @@ extends GutTest
 ## build.
 
 const EditorFixture := preload("res://tests/authoring/editor_fixture.gd")
-const MISSION_FIXTURE := "res://../fixtures/bms/synth_logic.bms"
-const FIXTURES := "res://../fixtures/"
 const MISSION := "missions/synth_logic.bms"
-const TERRAIN_TEXTURES := ["mnml_c", "mnml_dm", "mnml_dc1", "mnml_dc2", "mnml_dc3", "mnml_dmd", "mnml_d1", "mnml_t"]
 # Mission (-200, 200): the Tmap terrain's sector at grid (3, 3), quadrant 1, the atlas texel (312, 312).
 const AT := Vector2(-200.0, 200.0)
 
@@ -30,42 +27,11 @@ func after_each() -> void:
 	await EditorFixture.teardown(self, _dirs)
 
 
-func _write(path: String, bytes: PackedByteArray) -> void:
-	assert_eq(DirAccess.make_dir_recursive_absolute(path.get_base_dir()), OK)
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file, "wrote %s" % path)
-	if file != null:
-		file.store_buffer(bytes)
-		file.close()
-
-
-func _copy_fixture(source: String, target: String) -> void:
-	var bytes := FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(FIXTURES + source))
-	assert_false(bytes.is_empty(), "the fixture is available: " + source)
-	_write(target, bytes)
-
-
 ## A new project holding the minted mission on the Tmap terrain (its .trn, heights, maps and the textures it names)
 ## and its environment, scanned, the mission open.
 func _open_mission() -> bool:
-	var dir := OS.get_cache_dir().path_join("opennova editor heights device project %d" % Time.get_ticks_usec())
-	_dirs.append(dir)
-	assert_true(_seam.new_project(dir, "Heights Device"))
-	assert_eq(_seam.create_missing_files(), 0)
-	var root: String = _seam.get_project_root()
-	_write(root.path_join(MISSION), FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(MISSION_FIXTURE)))
-	for name in ["Tmap.trn", "Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx"]:
-		_copy_fixture("terrain/tmap/" + name, root.path_join("terrain").path_join(name))
-	for name in TERRAIN_TEXTURES:
-		_write(root.path_join("terrain").path_join(name + ".tga"),
-				TestFs.tga_bytes(Vector2i(2048, 2048) if name == "mnml_c" or name == "mnml_d1" else Vector2i(32, 32)))
-	for name in ["synth_full.env", "cloud01.pcx", "cloud01b.pcx"]:
-		_copy_fixture("env/" + name, root.path_join("env").path_join(name))
-	# The overcast table every mission's environment load reads (env::kOvercastFile; the game notes it
-	# missing where a project lacks it), here present and empty: no keyframe, as the load with none.
-	_write(root.path_join("env").path_join("overcast.def"), PackedByteArray())
-	_app.request_json(JSON.stringify({"kind": "rescan"}))
-	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
+	var root := EditorFixture.new_project(self, _seam, _dirs, "Heights Device")
+	EditorFixture.mint_tmap_mission(self, _seam, root)
 	return _seam.open_document(MISSION)
 
 

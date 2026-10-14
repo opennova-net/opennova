@@ -9,12 +9,8 @@ extends GutTest
 ## files makes.
 
 const EditorFixture := preload("res://tests/authoring/editor_fixture.gd")
-const MISSION_FIXTURE := "res://../fixtures/bms/synth_logic.bms"
-const FIXTURES := "res://../fixtures/"
 const MISSION := "missions/synth_logic.bms"
 const TILES := "missions/synth_logic.til"
-const COLOUR_MAP := "terrain/mnml_c.tga"
-const TERRAIN_TEXTURES := ["mnml_dm", "mnml_dc1", "mnml_dc2", "mnml_dc3", "mnml_dmd", "mnml_d1"]
 # Mission (-200, 200): the Tmap terrain's sector at grid (3, 3), quadrant 1. A tile's corner at (-208, 208) (its
 # north-west: the record's x and stored z) covers the 16 units east and south of it, the point among them.
 const AT := Vector2(-200.0, 200.0)
@@ -36,21 +32,6 @@ func after_each() -> void:
 	await EditorFixture.teardown(self, _dirs)
 
 
-func _write(path: String, bytes: PackedByteArray) -> void:
-	assert_eq(DirAccess.make_dir_recursive_absolute(path.get_base_dir()), OK)
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file, "wrote %s" % path)
-	if file != null:
-		file.store_buffer(bytes)
-		file.close()
-
-
-func _copy_fixture(source: String, target: String) -> void:
-	var bytes := FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(FIXTURES + source))
-	assert_false(bytes.is_empty(), "the fixture is available: " + source)
-	_write(target, bytes)
-
-
 ## A 32-bit uncompressed TGA, the top row first, each texel `texel_at(x, y)`.
 func _tga(size: Vector2i, texel_at: Callable) -> PackedByteArray:
 	var bytes := TestFs.tga_bytes(size)
@@ -65,30 +46,17 @@ func _tga(size: Vector2i, texel_at: Callable) -> PackedByteArray:
 	return bytes
 
 
-## A new project holding the minted mission on the Tmap terrain (its .trn, heights, maps, a grey colour map and a
-## tile set of four coloured cells) and its environment, scanned, the mission open.
+## A new project holding the minted mission on the Tmap terrain (its .trn, heights, maps, a grey
+## colour map 1024 texels a side and a tile set of four coloured cells) and its environment,
+## scanned, the mission open.
 func _open_mission() -> bool:
-	var dir := OS.get_cache_dir().path_join("opennova editor maps device project %d" % Time.get_ticks_usec())
-	_dirs.append(dir)
-	assert_true(_seam.new_project(dir, "Maps Device"))
-	assert_eq(_seam.create_missing_files(), 0)
-	var root: String = _seam.get_project_root()
-	_write(root.path_join(MISSION), FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(MISSION_FIXTURE)))
-	for name in ["Tmap.trn", "Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx"]:
-		_copy_fixture("terrain/tmap/" + name, root.path_join("terrain").path_join(name))
-	for name in TERRAIN_TEXTURES:
-		_write(root.path_join("terrain").path_join(name + ".tga"),
-				TestFs.tga_bytes(Vector2i(2048, 2048) if name == "mnml_d1" else Vector2i(32, 32)))
-	_write(root.path_join(COLOUR_MAP), TestFs.tga_bytes(Vector2i(1024, 1024), Color8(128, 128, 128)))
-	_write(root.path_join("terrain/mnml_t.tga"), _tga(Vector2i(128, 128),
-			func(x: int, y: int) -> Color: return CELL_COLOURS[(y / 64) * 2 + x / 64]))
-	for name in ["synth_full.env", "cloud01.pcx", "cloud01b.pcx"]:
-		_copy_fixture("env/" + name, root.path_join("env").path_join(name))
-	# The overcast table every mission's environment load reads (env::kOvercastFile; the game notes it
-	# missing where a project lacks it), here present and empty: no keyframe, as the load with none.
-	_write(root.path_join("env").path_join("overcast.def"), PackedByteArray())
-	_app.request_json(JSON.stringify({"kind": "rescan"}))
-	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
+	var root := EditorFixture.new_project(self, _seam, _dirs, "Maps Device")
+	var cell := func(x: int, y: int) -> Color: return CELL_COLOURS[(y / 64) * 2 + x / 64]
+	var textures := {
+		"mnml_c": TestFs.tga_bytes(Vector2i(1024, 1024), Color8(128, 128, 128)),
+		"mnml_t": _tga(Vector2i(128, 128), cell),
+	}
+	EditorFixture.mint_tmap_mission(self, _seam, root, {"textures": textures})
 	return _seam.open_document(MISSION)
 
 

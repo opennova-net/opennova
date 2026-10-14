@@ -14,8 +14,6 @@ extends GutTest
 ##   (the editor's palette, mission_overlay.h's mission_group_rgb) about its mark; coloured by team, it does not.
 
 const EditorFixture := preload("res://tests/authoring/editor_fixture.gd")
-const FIXTURES := "res://../fixtures/"
-const TERRAIN_TEXTURES := ["mnml_c", "mnml_dm", "mnml_dc1", "mnml_dc2", "mnml_dc3", "mnml_dmd", "mnml_d1", "mnml_t"]
 const MISSION_PATH := "missions/synth_logic.bms"
 
 var _dirs: Array[String] = []
@@ -41,54 +39,13 @@ func _frames(count: int) -> void:
 		await get_tree().process_frame
 
 
-func _write(path: String, bytes: PackedByteArray) -> void:
-	assert_eq(DirAccess.make_dir_recursive_absolute(path.get_base_dir()), OK)
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file, "wrote %s" % path)
-	if file != null:
-		file.store_buffer(bytes)
-		file.close()
-
-
-func _copy_fixture(source: String, target: String) -> void:
-	var bytes := FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(FIXTURES + source))
-	assert_false(bytes.is_empty(), "the fixture is available: " + source)
-	_write(target, bytes)
-
-
-## A texture `size` a side, grey, as an uncompressed true-colour TGA (the runtime fixture's minting).
-func _tga(size: int) -> PackedByteArray:
-	var image := Image.create(size, size, false, Image.FORMAT_RGBA8)
-	image.fill(Color(0.5, 0.5, 0.5, 1.0))
-	var header := PackedByteArray()
-	header.resize(18)
-	header[2] = 2
-	header.encode_u16(12, size)
-	header.encode_u16(14, size)
-	header[16] = 32
-	header[17] = 0x28
-	return header + image.get_data()
-
-
 ## The project, the mission open and ready, its device drawn by the Document window's canvas; the device.
 func _open_mission() -> SubViewport:
-	var dir := OS.get_cache_dir().path_join("opennova editor mission logic device project %d" % Time.get_ticks_usec())
-	_dirs.append(dir)
-	assert_true(_seam.new_project(dir, "Mission Logic Device Game"))
-	assert_eq(_seam.create_missing_files(), 0)
-	var root: String = _seam.get_project_root()
-	_copy_fixture("bms/synth_logic.bms", root.path_join(MISSION_PATH))
-	for name in ["Tmap.trn", "Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx"]:
-		_copy_fixture("terrain/tmap/" + name, root.path_join("terrain").path_join(name))
-	for name in TERRAIN_TEXTURES:
-		_write(root.path_join("terrain").path_join(name + ".tga"), _tga(32))
-	for name in ["synth_full.env", "cloud01.pcx", "cloud01b.pcx"]:
-		_copy_fixture("env/" + name, root.path_join("env").path_join(name))
-	_copy_fixture("def/items.def", root.path_join("defs").path_join("items.def"))
-	for name in ["pump.3di", "armory.3di", "shed.3di"]:
-		_copy_fixture("threedi/synth/" + name, root.path_join("models").path_join(name))
-	_app.request_json(JSON.stringify({"kind": "rescan"}))
-	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
+	var root := EditorFixture.new_project(self, _seam, _dirs, "Mission Logic Device Game")
+	var models := ["pump.3di", "armory.3di", "shed.3di"]
+	EditorFixture.mint_tmap_mission(
+		self, _seam, root, {"small": true, "items": true, "models": models}
+	)
 	assert_true(_seam.open_document(MISSION_PATH))
 	var state := _state()
 	for _frame in 900:

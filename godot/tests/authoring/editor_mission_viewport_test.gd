@@ -21,12 +21,6 @@ extends GutTest
 const EditorFixture := preload("res://tests/authoring/editor_fixture.gd")
 const MISSION := "res://../fixtures/bms/synth_logic.bms"
 const FIXTURES := "res://../fixtures/"
-## The terrain's texture slots Tmap.trn names (fixtures/terrain/tmap), minted as the runtime fixture
-## mints them (godot/tests/support/runtime_fixture.gd): the colormap and the blend map 2048 a side.
-const TERRAIN_TEXTURES := ["mnml_c", "mnml_dm", "mnml_dc1", "mnml_dc2", "mnml_dc3", "mnml_dmd", "mnml_d1", "mnml_t"]
-
-## The minted textures' bytes, made once a run.
-static var _textures: Dictionary = {}
 
 var _dirs: Array[String] = []
 var _app: Node = null
@@ -116,58 +110,26 @@ func _vector(values: Variant) -> Vector3:
 	return Vector3(float(list[0]), float(list[1]), float(list[2]))
 
 
-## A texture `size` a side, grey, as an uncompressed true-colour TGA (all channels alike, so RGBA
-## bytes are BGRA TGA bytes): the runtime fixture's minting.
-static func _tga(size: int) -> PackedByteArray:
-	if _textures.has(size):
-		return _textures[size]
-	var image := Image.create(size, size, false, Image.FORMAT_RGBA8)
-	image.fill(Color(0.5, 0.5, 0.5, 1.0))
-	var header := PackedByteArray()
-	header.resize(18)
-	header[2] = 2 # Uncompressed true-color TGA.
-	header.encode_u16(12, size)
-	header.encode_u16(14, size)
-	header[16] = 32
-	header[17] = 0x28 # Top-origin, eight alpha bits.
-	_textures[size] = header + image.get_data()
-	return _textures[size]
-
-
 func _copy_fixture(source: String, target: String) -> void:
 	var bytes := FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(FIXTURES + source))
 	assert_false(bytes.is_empty(), "the fixture is available: " + source)
 	_write(target, bytes)
 
 
-## The files the mission's picture reads, written into the project at `root`: the terrain (Tmap.trn,
-## its heights, its two maps and the textures it names, its two foliage definitions' models), the
-## environment (synth_full.env and its clouds), the item table the mission's items are in, and the models
-## their graphics name. `effects` (DI-31): the pumps author a particle slot at their model's ground point,
-## its effect in a particle file of the project. `listen` (DI-36): the mission's four waypoint markers (item
-## 106005, path 1's stops in master's synth_logic.bms) made the game's env-sound emitters of V_TRUCK_ILP at every
-## hour, the fixture bank that holds it (heard to 2 km, its member tone.wav) as the project's game.lwf.
-func _mint_project(root: String, skip: PackedStringArray = PackedStringArray(), effects := false,
-		listen := false) -> void:
-	for name in ["Tmap.trn", "Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx"]:
-		if skip.has(name):
-			continue
-		_copy_fixture("terrain/tmap/" + name, root.path_join("terrain").path_join(name))
-	for name in TERRAIN_TEXTURES:
-		_write(root.path_join("terrain").path_join(name + ".tga"), _tga(2048 if name == "mnml_c" or name == "mnml_d1" else 32))
-	for name in ["synth_full.env", "cloud01.pcx", "cloud01b.pcx"]:
-		_copy_fixture("env/" + name, root.path_join("env").path_join(name))
-	# The overcast table every mission's environment load reads (env::kOvercastFile; the game notes it
-	# missing where a project lacks it), here present and empty: no keyframe, as the load with none.
-	_write(root.path_join("env").path_join("overcast.def"), PackedByteArray())
-	# The item table, its pump drawn by the synth crate (one box, no live PANM, no occlusion records):
-	# a model the placer batches, so the mission's items are retained statics beside its individual
-	# models (the armory's buildings, the persons).
-	var items := FileAccess.get_file_as_string(ProjectSettings.globalize_path(FIXTURES + "def/items.def"))
+## The item table the mission's picture reads: the fixture's, its pump drawn by the synth crate (one
+## box, no live PANM, no occlusion records): a model the placer batches, so the mission's items are
+## retained statics beside its individual models (the armory's buildings, the persons). `effects`
+## (DI-31): the pumps author a particle slot at their model's ground point, its effect in the
+## project's particle file. `listen` (DI-36): the mission's four waypoint markers (item 106005, path
+## 1's stops in master's synth_logic.bms) made the game's env-sound emitters of V_TRUCK_ILP at every
+## hour.
+func _items(effects: bool, listen: bool) -> String:
+	var items := EditorFixture.items_def()
 	# The fixture ends its lines in CR LF, the one break the retail def walk splits at.
 	assert_true(items.contains("graphic pump\r\n"))
-	var crate_line := "graphic crate\r\n" + ("particlefx Puff ground\r\n" if effects else "")
-	items = items.replace("graphic pump\r\n", crate_line)
+	items = items.replace(
+		"graphic pump\r\n", "graphic crate\r\n" + ("particlefx Puff ground\r\n" if effects else "")
+	)
 	if listen:
 		# The waypoint item the mission's four markers place (the fixture's table has none of it).
 		assert_false(items.contains("  id 106005\r\n"))
@@ -175,48 +137,42 @@ func _mint_project(root: String, skip: PackedStringArray = PackedStringArray(), 
 		for slot in 4:
 			waypoint += "  soundloop_%d V_TRUCK_ILP\r\n" % (slot + 1)
 		items += waypoint + "end\r\n"
-		_copy_fixture("lwf/menu.lwf", root.path_join("sounds").path_join("game.lwf"))
-		_copy_fixture("lwf/tone.wav", root.path_join("sounds").path_join("tone.wav"))
-	_write(root.path_join("defs").path_join("items.def"), items.to_utf8_buffer())
-	for name in ["crate.3di", "armory.3di", "shed.3di"]:
-		_copy_fixture("threedi/synth/" + name, root.path_join("models").path_join(name))
-	# The terrain's foliage definitions grow bush1 and bush2 (the synth crate under both names, as the foliage
-	# integration test stages them).
-	for name in ["bush1.3di", "bush2.3di"]:
-		_copy_fixture("threedi/synth/crate.3di", root.path_join("models").path_join(name))
-	if effects:
-		_write(root.path_join("particles").path_join("fx.ptl"), _ptl().to_utf8_buffer())
-		_copy_fixture("cbin/particle_dot.tga", root.path_join("particles").path_join("particle_dot.tga"))
+	return items
 
 
-## A particle file of one effect, Puff: a burst of dots of the fixture's graphic emitting for a minute
-## (DI-14's recipe).
-func _ptl() -> String:
-	var text := "[effectdef]\n{\n\tid = Puff;\n\tpdefs = PuffDot;\n}\n\n"
-	text += "[particledef]\n{\n\tid = PuffDot;\n\temit_dur = 60;\n\temit_rate = 40;\n\temit_burst = 1;\n"
-	text += "\tage = 1.0;\n\tscale = 1.0;\n\tspeed = 1.5;\n\tspread = 40;\n\tgraphic1 = particle_dot.tga, blend;\n"
-	text += "\tg1_alpha = 1;\n\tg1_scale = 1;\n}\n\n"
-	return text
-
-
-## A new project holding the minted mission as missions/synth_logic.bms (and, `whole`, the files its
-## picture reads), scanned, the mission open.
+## A new project holding the minted mission as missions/synth_logic.bms (and the copies `also`
+## names beside it), scanned, the mission open; `whole`, on the Tmap terrain with the files its
+## picture reads (_picture_files; with `listen`, the fixture bank that holds V_TRUCK_ILP, heard to
+## 2 km, its member tone.wav, as the project's game.lwf).
 func _open_mission(whole := true, also: PackedStringArray = PackedStringArray(),
 		skip: PackedStringArray = PackedStringArray(), effects := false, listen := false) -> bool:
-	var dir := OS.get_cache_dir().path_join("opennova editor mission project %d" % Time.get_ticks_usec())
-	_dirs.append(dir)
-	assert_true(_seam.new_project(dir, "Mission Viewport Game"))
-	assert_eq(_seam.create_missing_files(), 0)
-	var root: String = _seam.get_project_root()
+	var root := EditorFixture.new_project(self, _seam, _dirs, "Mission Viewport Game")
 	var mission := FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(MISSION))
-	_write(root.path_join("missions").path_join("synth_logic.bms"), mission)
 	for name in also:
 		_write(root.path_join("missions").path_join(name), mission)
-	if whole:
-		_mint_project(root, skip, effects, listen)
-	_app.request_json(JSON.stringify({"kind": "rescan"}))
-	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
+	if not whole:
+		_write(root.path_join("missions").path_join("synth_logic.bms"), mission)
+		_seam.request({"kind": "rescan"})
+		assert_true(_seam.settled, "a Rescan steps across pumps (S13 A3)")
+		return _seam.open_document("missions/synth_logic.bms")
+	if listen:
+		_copy_fixture("lwf/menu.lwf", root.path_join("sounds").path_join("game.lwf"))
+		_copy_fixture("lwf/tone.wav", root.path_join("sounds").path_join("tone.wav"))
+	EditorFixture.mint_tmap_mission(self, _seam, root, _picture_files(skip, effects, listen))
 	return _seam.open_document("missions/synth_logic.bms")
+
+
+## What the mission's picture reads beside the Tmap mission, as EditorFixture.mint_tmap_mission's
+## options: the terrain but the files `skip` names, its two foliage definitions' models, the item
+## table of _items and the models its items draw, the Puff particle file with `effects`.
+func _picture_files(skip := PackedStringArray(), effects := false, listen := false) -> Dictionary:
+	return {
+		"skip": skip,
+		"foliage": true,
+		"items": _items(effects, listen),
+		"models": ["crate.3di", "armory.3di", "shed.3di"],
+		"puff": effects
+	}
 
 
 ## The mission's ground, as the device's terrain data answers it: the mission height at (x, y).
@@ -1129,14 +1085,8 @@ func _tile(x_fixed: int, index: int) -> TerrainTileEntry:
 func test_the_mission_til_reaches_the_terrain() -> void:
 	if _app == null:
 		return
-	var dir := OS.get_cache_dir().path_join("opennova editor mission til %d" % Time.get_ticks_usec())
-	_dirs.append(dir)
-	assert_true(_seam.new_project(dir, "Mission Til"))
-	assert_eq(_seam.create_missing_files(), 0)
-	var root: String = _seam.get_project_root()
-	_write(root.path_join("missions").path_join("synth_logic.bms"),
-			FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(MISSION)))
-	_mint_project(root)
+	var root := EditorFixture.new_project(self, _seam, _dirs, "Mission Til")
+	EditorFixture.mint_tmap_mission(self, _seam, root, _picture_files())
 	var til := TerrainTileInfo.new()
 	til.add_entry(_tile(0, 3))
 	var til_path := root.path_join("missions").path_join("synth_logic.til")
