@@ -216,12 +216,69 @@ void test_join_ticket_rides_the_admission_join() {
 	CHECK(ticket); // the remote joiner's CD cookie is kept at its admission JOIN
 }
 
+// The JOIN keeps its last CD (D-NET-412 review): each CD the walk meets replaces the cookie,
+// so an overlapping run of overrunning CDs (each re-read from the previous one's value) costs
+// nothing, and only the last CD's pairs are the joiner's; a CD of no length leaves none.
+// [orig: NapiNPServer_HandlePlayerJoinMessage - the "CD" store @0x512C5D -> sub_4C6060
+//  @0x4C6072..0x4C6095]
+void test_join_keeps_the_last_cd() {
+	const auto admit = [](const std::vector<uint8_t> &body) {
+		auto heap = std::make_unique<w::World>();
+		ns::LoopbackChannel a;
+		inmatch::NapiNPServerCtx ctx;
+		ctx.world = heap.get();
+		ctx.is_authority = ctx.is_in_session = 1;
+		ctx.transport_mode = inmatch::NetworkType::Lan;
+		ctx.config.expansion.clear();
+		auto &roster = ctx.np_protocol.connection_list;
+		roster.push_back(conn_fixture::make_conn(2, 1, &a, ns::TransportMode::Client,
+				w::EntityHandle{}, false));
+		roster[0].admission_stage = inmatch::GameAdmissionStage::AwaitJoinRequest;
+		roster[0].join_environment = {0, 2, 1, 0, 20042002, 180};
+		inmatch::ServerDispatchInputs inputs;
+		inputs.server_ctx = &ctx;
+		(void)inmatch::dispatch_session_replies(ctx.config, roster[0],
+				{make_protocol_message(0x00, body)}, 1, roster, heap.get(), inputs);
+		return roster[0].join_identity_pairs;
+	};
+	const auto cd_of = [](const std::string &name, const std::string &value) {
+		std::vector<uint8_t> cd(name.begin(), name.end());
+		cd.push_back(0);
+		cd.insert(cd.end(), value.begin(), value.end());
+		cd.push_back(0);
+		return cd;
+	};
+	const uint8_t crc[] = {'0', 0};
+	// 200 overrunning CDs, then a well-formed last one.
+	std::vector<uint8_t> overlapping;
+	append_flat_tlv(overlapping, "VERSIONCRCSTRING", crc, 2);
+	for (int i = 0; i < 200; ++i) overlapping.insert(overlapping.end(), {'C', 'D', 0, 0xFF, 0xFF});
+	const std::vector<uint8_t> last = cd_of("PUBJOINTICKET", "LAST");
+	append_flat_tlv(overlapping, "CD", last.data(), static_cast<uint16_t>(last.size()));
+	const auto pairs = admit(overlapping);
+	CHECK(pairs.size() == 1);
+	CHECK(!pairs.empty() && pairs[0].first == "PUBJOINTICKET" && pairs[0].second == "LAST");
+	// Two well-formed CDs: the second replaces the first.
+	std::vector<uint8_t> two;
+	append_flat_tlv(two, "VERSIONCRCSTRING", crc, 2);
+	const std::vector<uint8_t> first = cd_of("PUBJOINTICKET", "FIRST");
+	append_flat_tlv(two, "CD", first.data(), static_cast<uint16_t>(first.size()));
+	append_flat_tlv(two, "CD", last.data(), static_cast<uint16_t>(last.size()));
+	const auto replaced = admit(two);
+	CHECK(replaced.size() == 1 && replaced[0].second == "LAST");
+	// A last CD of no length leaves no cookie.
+	std::vector<uint8_t> emptied = two;
+	append_flat_tlv(emptied, "CD", nullptr, 0);
+	CHECK(admit(emptied).empty());
+}
+
 } // namespace
 
 int main() {
 	test_spectator_field_follows_the_slot();
 	test_novaworld_account_fields_follow_the_join_cookie();
 	test_join_ticket_rides_the_admission_join();
+	test_join_keeps_the_last_cd();
 	std::printf("npruntime_player_sync_fields: %d failures\n", failures);
 	return failures ? 1 : 0;
 }

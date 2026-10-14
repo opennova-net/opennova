@@ -330,23 +330,21 @@ bool Server_HandleAdminNetlogCommand(NapiNPServerCtx &ctx, const std::string &li
 	return false;
 }
 
-std::vector<ProtocolMessage> Server_HandleConsoleCommandMessage(NapiNPServerCtx &ctx,
-		NapiNPConnection &sender, const std::vector<uint8_t> &payload, uint32_t now_ms) {
-	std::vector<ProtocolMessage> replies;
-	if (ctx.is_authority == 0 || !player_slot_active(sender)) return replies;
+void Server_HandleConsoleCommandMessage(NapiNPServerCtx &ctx, NapiNPConnection &sender,
+		const std::vector<uint8_t> &payload, uint32_t now_ms, std::vector<ProtocolMessage> &replies) {
+	if (ctx.is_authority == 0 || !player_slot_active(sender)) return;
 	const uint32_t last = sender.reply.chat_last_ms;
-	if (last != 0 && now_ms < last + kConsoleLineThrottleMs) return replies;
+	if (last != 0 && now_ms < last + kConsoleLineThrottleMs) return;
 	sender.reply.chat_last_ms = now_ms;
 	std::string line;
 	for (size_t i = 0; i < payload.size() && line.size() < kConsoleLineMaxChars && payload[i] != 0; ++i)
 		line.push_back(static_cast<char>(payload[i]));
-	if (Server_HandleAdminNetlogCommand(ctx, line, &sender, replies)) return replies;
+	if (Server_HandleAdminNetlogCommand(ctx, line, &sender, replies)) return;
 	std::vector<uint8_t> body(line.begin(), line.end());
 	body.push_back(0);
 	ProtocolMessage echo = make_protocol_message(s2c::CLIENT_CONSOLE_COMMAND, std::move(body));
 	echo.reliable = false;
 	replies.push_back(std::move(echo));
-	return replies;
 }
 
 std::string entity_usage_file_name(const std::string &name) {

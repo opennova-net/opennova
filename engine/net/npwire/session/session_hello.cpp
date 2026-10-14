@@ -155,14 +155,13 @@ bool parse_client_hello(const uint8_t *data, size_t len, ClientHello &out) {
 	while (pos < len) {
 		FlatTlvField field;
 		const size_t next = read_flat_tlv(data, len, pos, field);
-		if (next == kFlatTlvEnd) {
-			// The retail walk exits on the first read failure and keeps what
-			// it gathered.
+		// The walk ends at an empty name and keeps what it gathered
+		// [orig: NapiNPProtocol_HandleClientHello @0x621544].
+		if (next == kFlatTlvEnd)
 			break;
-		}
 		const std::string_view name = field.name;
 		const uint8_t *value = field.value;
-		const uint16_t size = field.size;
+		const size_t size = field.present;
 		const uint8_t *end = data + len;
 		const auto copy_string = [value, end](size_t buffer) {
 			return load_value_string(value, end, buffer);
@@ -258,10 +257,10 @@ bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out) {
 	while (pos < len) {
 		FlatTlvField field;
 		const size_t next = read_flat_tlv(data, len, pos, field);
+		// The walk ends at an empty name [orig: NapiNPProtocol_HandleClientJoin @0x62B907].
 		if (next == kFlatTlvEnd) break;
 		const std::string_view name = field.name;
 		const uint8_t *value = field.value;
-		const uint16_t size = field.size;
 		// Identity block — the real server validates these in HandleClientJoin
 		// @ 0x62B750 (NVS/PN/PG/PV1 + PV2); parse them so the round-trip is
 		// exact and our own server records what the client claimed. Every tag
@@ -298,14 +297,31 @@ bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out) {
 		else if (strutil::iequals(name, "SIP"))  out.sip  = load_value_dword(value, data + len);
 		else if (strutil::iequals(name, "SPN"))  out.spn  = load_value_dword(value, data + len);
 		else if (strutil::iequals(name, "SCRK")) out.scrk = copy_string(kStringBuffer);
-		else if (strutil::iequals(name, "CU"))   out.cu.emplace_back(value, value + size);
+		else if (strutil::iequals(name, "CU")) {
+			// Every CU counts into its own 2048-byte slot, bounded inside the walk: a CU
+			// whose declared length (what ReadTLV hands back, whether or not the datagram
+			// holds it) is 2048 or more, or a 65th, ends the walk and drops the 0x42
+			// unanswered (the socket pass returns without queuing it). Under the bounds the
+			// slot takes the declared length, its bytes past the datagram zero here
+			// (D-NET-410), so the walk never holds more than 64 slots of under 2048 bytes
+			// however its fields overlap.
+			// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - `mov esi, [len]` @0x62BBE7,
+			//  `cmp esi, 0x800; jge` @0x62BBEB..0x62BBF1, `cmp edi, 0x40; jge`
+			//  @0x62BBF7..0x62BBFA, the copy @0x62BC0B, the socket-pass return
+			//  @0x62C32A..0x62C331]
+			if (field.size >= kCuSlotBytes || out.cu.size() >= kCuSlots) return false;
+			std::vector<uint8_t> cu(field.size);
+			load_value_bytes(value, end, cu.data(), cu.size());
+			out.cu.push_back(std::move(cu));
+		}
 		else if (strutil::iequals(name, "NF"))   out.nf   = load_value_dword(value, data + len);
 		else if (strutil::iequals(name, "DCNT")) out.dcnt = load_value_dword(value, data + len);
 		else if (strutil::iequals(name, "RCNT")) out.rcnt = load_value_dword(value, data + len);
 		// Unknown tags (DE/PV3/etc.) intentionally ignored.
 		pos = next;
 	}
-	// No field is required: a zero (or absent) CK is the connection's remote key
+	// No field is required (false only for the CU bounds above): a zero (or absent) CK is the
+	// connection's remote key
 	// like any other, and the gates that follow the walk never test it. Only a
 	// non-stock peer sends one: a stock client draws a nonzero key and writes CK
 	// only when nonzero.
@@ -358,6 +374,9 @@ std::vector<uint8_t> client_auth_to_bytes(const ClientAuth &msg) {
 	}
 	if (!msg.scrk.empty()) append_string_field(buf, "SCRK", msg.scrk);
 	// The reconnect trailer, each tag only when nonzero [orig: @0x620309..0x62037f].
+	// NF is the client's own netflow-log flag, written only when set; no host reads it
+	// (D-NET-429) [orig: CNapiNPConnection_SendClientJoin - the +0x7BC byte @0x620309,
+	//  the gate @0x620310..0x620316].
 	if (msg.nf) append_u32_field(buf, "NF", msg.nf);
 	if (msg.dcnt) append_u32_field(buf, "DCNT", msg.dcnt);
 	if (msg.rcnt) append_u32_field(buf, "RCNT", msg.rcnt);
@@ -431,13 +450,12 @@ bool parse_disconnect_event(const uint8_t *data, size_t len, DisconnectEvent &ou
 	size_t pos = 0;
 	while (pos < len) {
 		// An empty name terminates the walk BEFORE its length is read @0x621b96.
-		if (data[pos] == 0) break;
 		FlatTlvField field;
 		const size_t next = read_flat_tlv(data, len, pos, field);
 		if (next == kFlatTlvEnd) break;
 		const std::string_view name = field.name;
 		const uint8_t *value = field.value;
-		const uint16_t size = field.size;
+		const size_t size = field.present;
 		const uint8_t *end = data + len;
 		if (strutil::iequals(name, "DS")) {
 			out.ds = read_u32_le(value, size);
@@ -701,6 +719,8 @@ bool parse_server_auth(const uint8_t *data, size_t len, ServerAuth &out) {
 	while (pos < len) {
 		FlatTlvField field;
 		const size_t next = read_flat_tlv(data, len, pos, field);
+		// The walk ends at an empty name [orig: NapiNP_HandleServerJoinResponse
+		//  @0x629A15..0x629A18 -> @0x629CA4].
 		if (next == kFlatTlvEnd) break;
 		const std::string_view name = field.name;
 		const uint8_t *value = field.value;
@@ -748,10 +768,15 @@ bool parse_server_auth(const uint8_t *data, size_t len, ServerAuth &out) {
 			//  @0x629B97..0x629B9D, the count bound @0x629BA3..0x629BA6, the copy @0x629BB7, the
 			//  socket-pass return @0x629F0B..0x629F12; NapiNPManager_HandlePacket @0x622F10 -
 			//  the flag 0 @0x622F8E]
+			// The bound reads the declared length ReadTLV hands back, whether or not the
+			// datagram holds it [orig: `mov esi, [len]` @0x629B93]; the copy's bytes past
+			// the datagram read zero here (D-NET-410).
 			if (size >= kCuSlotBytes || cu_count >= kCuSlots) return false;
 			++cu_count;
+			std::vector<uint8_t> cu(size);
+			load_value_bytes(value, end, cu.data(), cu.size());
 			std::string cu_name, cu_value;
-			if (parse_cu_inner(value, size, cu_name, cu_value)) {
+			if (parse_cu_inner(cu.data(), cu.size(), cu_name, cu_value)) {
 				out.cu.emplace_back(std::move(cu_name), std::move(cu_value));
 			}
 		}

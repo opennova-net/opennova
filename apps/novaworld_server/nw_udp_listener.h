@@ -35,12 +35,12 @@ namespace opennova::novaworld_server {
 //
 // WHY THIS IS NOT A DUPLICATE REGISTRY (checked 2026-07-28; a quality-campaign
 // slice proposed folding it into ConnectionRegistry and that would regress):
-//   * LIFETIME. A ClientHello re-inserts the peer into ConnectionRegistry as
-//     Handshaking, clearing its keys. THIS record survives that, and the 0x42
-//     retransmit leg restores the registry from it (notify_active_addr with the
-//     cached scrk). That is the D-NET-104 invariant — an exact ClientAuth
-//     repeat replays the cached ServerAuth and never re-mints session material.
-//     One merged store cannot express "wire row reset, session material kept".
+//   * LIFETIME. THIS record carries what the wire row does not: the cached
+//     ServerAuth the 0x42 retransmit leg replays for the live connection's own
+//     CI and CK (the D-NET-104 invariant: a ClientAuth repeat replays the cached
+//     ServerAuth and never re-mints session material), and the lobby, sequence
+//     and reassembly state a stray Hello must not disturb (a Hello re-names an
+//     Active row's Hello identity only, D-NET-630).
 //   * EVICTION IS ALREADY SINGLE. erase_lobby_state is the ConnectionManager
 //     on_lost sink as well as the local cleanup hook, so there is one teardown
 //     entry point, not two to keep in sync.
@@ -67,7 +67,6 @@ struct LobbyConnState {
 	// these cached bytes keeps SK/SCRK/NWUID stable and, critically, does not
 	// rewind sequencing that may already have admitted lobby traffic.
 	uint32_t client_ci = 0;
-	std::vector<uint8_t> client_auth_body;
 	std::string server_scrk;
 	std::vector<uint8_t> server_auth_datagram;
 	// Client's ClientAuth.ck — this is retail's "local_key" per the

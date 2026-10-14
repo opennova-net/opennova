@@ -4,12 +4,16 @@
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_tick.h> // Server_StageHostDisconnect
 
+#include <runtime/inmatch/punt_log.h> // napi_time_string (the /INOUT line's stamp)
+
 #include <base/io/crt_ftol.h>
+#include <base/io/log.h>
 #include <net/napi/session.h> // tokenize_quoted (String_TokenizeQuotedToArray)
 
 #include <base/io/strutil.h>
 
 #include <algorithm>
+#include <ctime>
 #include <string>
 #include <vector>
 
@@ -92,11 +96,59 @@ bool Server_NameBanned(const NapiNPServerCtx &ctx, std::string_view name) {
 	return false;
 }
 
-uint32_t Server_ValidateJoinBans(const NapiNPServerCtx &ctx, const NapiNPConnection &conn) {
+uint32_t Server_ValidateJoinBans(
+		NapiNPServerCtx &ctx, NapiNPConnection &conn, bool pcid_decrypted) {
 	std::string local_address;
-	if (get_local_address(ctx, local_address) && Server_PcidBanned(ctx, conn.account.pcid)) return 29;
+	if (get_local_address(ctx, local_address)) {
+		if (Server_PcidBanned(ctx, conn.account.pcid))
+			return 29;
+		if (pcid_decrypted && ctx.config.punt_duplicate_pcids != 0) {
+			const std::string &pcid = conn.account.pcid;
+			uint32_t holders = 0;
+			for (const NapiNPConnection &other : ctx.np_protocol.connection_list)
+				if (strutil::iequals(other.account.pcid, pcid))
+					++holders;
+			if (holders > 1) {
+				const std::string stamp = napi_time_string(std::time(nullptr));
+				for (NapiNPConnection &other : ctx.np_protocol.connection_list) {
+					if (!strutil::iequals(other.account.pcid, pcid))
+						continue;
+					if (&other != &conn && !slot_is_local(other))
+						other.duplicate_pcid_kick_pending = true;
+					// The /INOUT line for every holder, the joiner and the local one too: the
+					// port writes the protocol's /INOUT lines on the diagnostic channel
+					// (D-NET-356) [orig: "%s : REJECTING connection \"%s\" because pcid
+					//  \"%s\" matches \"%s\"!" @0x7CFAE0 -> NapiFile_AppendLine("_inout.txt")
+					//  @0x512865, gated on dword_B4C688].
+					io::logf(io::LogLevel::kInfo,
+							"%s : REJECTING connection \"%s\" because pcid \"%s\" matches \"%s\"!",
+							stamp.c_str(), peer_addr_to_string(other.peer).c_str(), pcid.c_str(),
+							other.account.pcid.c_str());
+				}
+				return 30;
+			}
+		}
+	}
 	if (ctx.is_in_session != 0 && Server_NameBanned(ctx, conn.player_name)) return 31;
 	return 0;
+}
+
+void Server_KickDuplicatePcids(NapiNPServerCtx &ctx, bool quality_boundary) {
+	// [orig: Server_TickUpdate - the 0x79 countdown's zero @0x51E1C5 gates the call @0x51E20C]
+	if (!quality_boundary)
+		return;
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (!conn.duplicate_pcid_kick_pending || slot_is_local(conn))
+			continue;
+		// DS from the node's role bytes: +0x2B (is_server) 1, +0x2A (is_client) 2.
+		uint32_t role = 0;
+		if (conn.type == NapiNPConnection::kTypeServerSide) role = 1;
+		else if (conn.type == NapiNPConnection::kTypeClientSide) role = 2;
+		latch_disconnect_event(conn,
+				make_disconnect_event(
+						role, 2, 0, 0, "N.C:SPTWNTBP[" + conn.account.pcid + "]", 0, ""));
+		conn.pending_disconnect = true;
+	}
 }
 
 bool Server_AddressBanned(const NapiNPServerCtx &ctx, uint32_t address) {

@@ -245,9 +245,10 @@ uint32_t validate_join_request(
 	std::size_t pos = 0;
 	std::string expansion;
 	std::string version_crc;
-	// The TLV walk accepts unknown fields, uses the last matching value, and stops at its first
-	// short field or an empty name; tag names compare through Napi_StrCaseEqual @0x616e70. Each
-	// string copies from its value to the first NUL whatever its length (load_value_string).
+	// The TLV walk accepts unknown fields, uses the last matching value, and stops only at an
+	// empty name (read_flat_tlv; @0x512B64); tag names compare through Napi_StrCaseEqual
+	// @0x616e70. Each string copies from its value to the first NUL whatever its length
+	// (load_value_string).
 	// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512aa0 - EXP into 32 bytes @0x512BFF,
 	//  VERSIONCRCSTRING into 512 @0x512C31]
 	while (pos < payload.size()) {
@@ -703,17 +704,24 @@ void append_connection_settings(const GameConfig &cfg,
 			PROTOCOL_MSG_FLAG_SETTINGS_UPDATE | PROTOCOL_MSG_FLAG_LEN8));
 }
 
-bool emit_admission_metadata(const GameConfig &cfg, NapiNPConnection &conn,
+void emit_admission_metadata(const GameConfig &cfg, NapiNPConnection &conn,
                              std::vector<NapiNPConnection> &roster, world::World *world,
                              const NapiNPServerCtx *ctx, std::vector<ProtocolMessage> &out) {
+	// Retail's 0x02 handler picks no slot row: it stamps the timing and the holdoff, sends the
+	// 0x01 / 0x7A / 0x7B / 0x03 records and sets game state 7, and Server_PlayerAdd picks the
+	// row at the add. So a joiner the lineup queue admitted past the rows completes its
+	// admission, and the spawn pump holds it past the cap (re-sending the 0x03) until a row
+	// frees. Ours reserves a row here when one is free (the delayed 0x04 and the live entity
+	// then agree); with none, the add reserves it.
+	// [orig: the C2S 0x02 handler @0x512FD0 - NapiNPServer_UpdateHoldoffTicks @0x513068, the
+	//  sends @0x5130AC..0x5131D5, game state 7 @0x51319C; Server_PlayerAdd's row pick
+	//  @0x51CC9A; CNapiServer_ProcessPendingPlayerSpawns's cap @0x4C8E13]
 	const uint8_t capacity =
 			static_cast<uint8_t>(cfg.total_player_slot_capacity()); // [orig @0x24c0ca4]
-	const std::optional<uint8_t> player_slot =
-			Server_ReservePlayerSlot(roster, conn, capacity);
-	if (!player_slot.has_value()) return false;
-	// Team is allocated with the roster slot, even though it is intentionally
-	// not serialized until the later spawn-pump packet. Player-add consumes this
-	// reservation, so the delayed 0x04 and the live entity cannot disagree.
+	(void)Server_ReservePlayerSlot(roster, conn, capacity);
+	// Team is allocated at admission, even though it is intentionally not serialized until
+	// the later spawn-pump packet. Player-add consumes this reservation, so the delayed 0x04
+	// and the live entity cannot disagree.
 	if (world != nullptr) {
 		(void)Server_ReservePlayerTeam(cfg, /*is_in_session=*/true, roster, conn, *world,
 				ctx != nullptr ? ctx->rotation : nullptr, ctx != nullptr ? &ctx->host_slot : nullptr);
@@ -734,7 +742,6 @@ bool emit_admission_metadata(const GameConfig &cfg, NapiNPConnection &conn,
 			s2c::FULL_PLAYER_INFO, build_tag7b_session_summary(cfg, conn)));
 	// [u8 1][u16 count=1][u16 mask=1] — the golden's live restriction record shape.
 	out.push_back(make_protocol_message(s2c::SYNC_TICK, {0x01, 0x01, 0x00, 0x01, 0x00}));
-	return true;
 }
 
 // Build a 0x46 player-sync for a SPECIFIC roster slot (the one the client's C2S 0x22 requests). Finds
@@ -780,11 +787,19 @@ void cache_client_pose(const std::vector<uint8_t> &payload, SessionReplyState &s
 // The C2S 0x00 JOIN body's CD identity blob: the flat-TLV run is walked for
 // the "CD" field, whose value packs [name\0][value\0] pairs back to back (the
 // NovaWorld NAMEINFO / PCID / SQUADINFO / JOINTICKET cookies). A LAN join
-// carries no CD and yields no pairs. [orig: NapiNPServer_HandlePlayerJoinMessage
-//  @0x512AA0 "CD" -> the cookie buffer; KeyValueBuffer_FindValue @0x4C2A30]
+// carries no CD and yields no pairs. Each CD the walk meets replaces the
+// connection's cookie buffer (the previous one freed, a CD of no length leaving
+// none), so the last CD is the cookie, however the walk's fields overlap.
+// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512AA0 - the "CD" compare
+//  @0x512C45, the store @0x512C5D -> sub_4C6060 (frees +0x2DC @0x4C6072, zeroes
+//  +0x2DC / +0x2E0 @0x4C6080..0x4C6086, keeps none for a length below 1
+//  @0x4C608E..0x4C6095, else a copy of the declared length); KeyValueBuffer_FindValue
+//  @0x4C2A30]
 std::vector<std::pair<std::string, std::string>> parse_join_identity_pairs(
 		const std::vector<uint8_t> &payload) {
 	std::vector<std::pair<std::string, std::string>> pairs;
+	const uint8_t *cookie = nullptr;
+	size_t cookie_bytes = 0;
 	size_t pos = 0;
 	while (pos < payload.size()) {
 		FlatTlvField field;
@@ -792,8 +807,14 @@ std::vector<std::pair<std::string, std::string>> parse_join_identity_pairs(
 		if (next == kFlatTlvEnd || field.name.empty()) break;
 		pos = next;
 		if (!strutil::iequals(field.name, "CD")) continue;
-		const uint8_t *cursor = field.value;
-		const uint8_t *end = field.value + field.size;
+		// The cookie's bytes inside the JOIN: a CD that runs past them reads on in retail
+		// (D-NET-410), and the pairs past them are not read here.
+		cookie = field.size < 1 ? nullptr : field.value;
+		cookie_bytes = field.size < 1 ? 0 : field.present;
+	}
+	if (cookie != nullptr) {
+		const uint8_t *cursor = cookie;
+		const uint8_t *end = cookie + cookie_bytes;
 		while (cursor < end) {
 			const uint8_t *name_end = std::find(cursor, end, uint8_t{0});
 			if (name_end == end) break;
@@ -1116,7 +1137,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// Its TLV walk keeps the CD cookie, whose PCID / SQUADINFO a remote
 				// connection on a NovaWorld session decrypts before the validator.
 				conn.join_identity_pairs = parse_join_identity_pairs(admission_message->payload);
-				if (inputs.server_ctx != nullptr) load_join_account_from_cookie(*inputs.server_ctx, conn);
+				const bool pcid_decrypted = inputs.server_ctx != nullptr &&
+						load_join_account_from_cookie(*inputs.server_ctx, conn);
 				if (conn.type != NapiNPConnection::kTypeClientSide) {
 					conn.link.spectator = conn.join_spectator_request != 0;
 					uint32_t reject_dpc = validate_join_environment(conn.join_environment);
@@ -1127,7 +1149,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					if (reject_dpc == 0)
 						reject_dpc = validate_side_password(config, conn);
 					if (reject_dpc == 0 && inputs.server_ctx != nullptr)
-						reject_dpc = Server_ValidateJoinBans(*inputs.server_ctx, conn); // 29 / 31
+						reject_dpc = Server_ValidateJoinBans(
+								*inputs.server_ctx, conn, pcid_decrypted); // 29 / 30 / 31
 					if (reject_dpc != 0) {
 						(void)stage_join_gate_reject(conn, reject_dpc);
 						conn.admission_stage = GameAdmissionStage::Rejected;
@@ -1145,6 +1168,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					conn.admission_stage = GameAdmissionStage::Rejected;
 					return {};
 				}
+				// State 3 under the ticket gate, else state 6 [orig: @0x512F87..0x512FB3].
+				conn.join_ticket_validation =
+						inputs.server_ctx != nullptr && join_tickets_required(*inputs.server_ctx);
 				std::vector<uint8_t> challenge = build_tag02_push(now_tick);
 				conn.admission_padding_x = read_u32_le(challenge.data());
 				conn.admission_padding_y = read_u32_le(challenge.data() + 4);
@@ -1161,11 +1187,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					return {};
 				}
 				if (!st.admission_metadata_pushed) {
-					if (!emit_admission_metadata(
-								config, conn, roster, world, inputs.server_ctx, replies)) {
-						conn.admission_stage = GameAdmissionStage::Rejected;
-						return {};
-					}
+					emit_admission_metadata(config, conn, roster, world, inputs.server_ctx, replies);
 					st.admission_metadata_pushed = true;
 					st.admission_completed_tick = now_tick;
 				}
@@ -1343,11 +1365,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// caller entering here gets the same one-shot metadata; spawn metadata and
 				// roster remain tick-owned boundaries.
 				if (!st.admission_metadata_pushed) {
-					if (!emit_admission_metadata(
-								config, conn, roster, world, inputs.server_ctx, replies)) {
-						conn.admission_stage = GameAdmissionStage::Rejected;
-						return {};
-					}
+					emit_admission_metadata(config, conn, roster, world, inputs.server_ctx, replies);
 					st.admission_metadata_pushed = true;
 					st.admission_completed_tick = now_tick;
 				}
@@ -1928,15 +1946,11 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				for (ProtocolMessage &m : chat) replies.push_back(std::move(m));
 				break;
 			}
-			case c2s::ADMIN_NETLOG_COMMAND: { // [orig: NapiNPServerMsg_HandleConsoleLine @0x5199D0]
-				// A session peer's console line: NETLOG / STAT, else echoed back as
-				// S2C 0x06 for the client to run (server_console.h).
-				if (inputs.server_ctx == nullptr) break;
-				for (ProtocolMessage &m : Server_HandleConsoleCommandMessage(*inputs.server_ctx, conn,
-						msg.payload, io::host_milliseconds_for_logic_tick(now_tick)))
-					replies.push_back(std::move(m));
+			case c2s::ADMIN_NETLOG_COMMAND: // [orig: NapiNPServerMsg_HandleConsoleLine @0x5199D0]
+				if (inputs.server_ctx != nullptr) // a peer's console line (server_console.h)
+					Server_HandleConsoleCommandMessage(*inputs.server_ctx, conn, msg.payload,
+							io::host_milliseconds_for_logic_tick(now_tick), replies);
 				break;
-			}
 			case c2s::LOADED_MODEL_PAGE_REPLY: { // [orig: NapiNPServerMsg_0x03D @0x500EC0]
 				// Authority-gated; the body is never read: the handler stamps the
 				// host frame clock onto the player slot (+97560 = dword_A87060).

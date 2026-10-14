@@ -78,7 +78,10 @@ public:
 
 	// (Re)build the runtime for a join; the request is retained so a load that
 	// rebuilds an as-yet unstarted joiner (bring_up) rebuilds it the same way.
-	// The shell installs its tables on the new runtime after.
+	// The shell installs its tables on the new runtime after. player_name is the
+	// callsign as the game's code-page bytes, which the 0x42's NA carries and the
+	// host's roster keeps (D-NET-661).
+	// [orig: CNapiNPConnection_SendClientJoin @0x61fe20 - the NA write @0x620162]
 	ClientRuntime &create_runtime(const std::string &player_name, JoinRole join_role,
 			const std::string &spectator_password, const std::string &server_password,
 			const std::string &join_password = {});

@@ -74,11 +74,20 @@ opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type)
 		cfg.config = inmatch::singleplayer_game_config(p_game_type,
 				player_.profile_record_set ? &player_.profile_record : nullptr);
 	}
-	// Every session create reads the process's cfg block word, single player's
+	// Every session create reads the process's cfg block words, single player's
 	// and a host's alike (engine: inmatch/game_config_block.h; the create's
-	// ProcessExit, inmatch/server_session.h).
-	if (net_.game_config.is_valid())
-		cfg.config.multiplayer_reset = net_.game_config->native().cfg().mp_reset;
+	// ProcessExit, inmatch/server_session.h): mpreset, and the lineup queue the
+	// 0x42 gate admits past the cap (GameConfig::join_capacity; the session
+	// create's copy, CNapiGameSession_BuildAndCreateSession @0x569626..0x569646).
+	if (net_.game_config.is_valid()) {
+		const opennova::gamecfg::GameCfg &block = net_.game_config->native().cfg();
+		cfg.config.multiplayer_reset = block.mp_reset;
+		cfg.config.use_lineup_queue = block.mp_use_lineup_queue;
+		cfg.config.lineup_queue_size = block.mp_lineup_queue_size;
+		// The join validator reads the block's duplicate-PCID word live
+		// (Server_ValidatePlayerJoinRequest @0x512771).
+		cfg.config.punt_duplicate_pcids = block.mp_host_punt_same_pcids;
+	}
 	cfg.socket_mode = is_host_listening() ? inmatch::SocketMode::Lan : inmatch::SocketMode::Socketless;
 	cfg.serve_and_play = is_host_listening() ? net_.host_serve_and_play : true;
 	cfg.network_type = is_host_listening() ? net_.host_network_type : inmatch::NetworkType::Lan;
@@ -344,7 +353,8 @@ std::vector<Simulation::HostPeerSlot> Simulation::host_peer_slots() const {
 		s.slot = c.reply.player_slot;
 		s.connection_id = c.connection_id;
 		s.own = c.type == opennova::inmatch::NapiNPConnection::kTypeClientSide;
-		s.player_name = opennova::to_gd(c.player_name);
+		// The roster's name is the joiner's NA bytes, the page's (D-NET-661).
+		s.player_name = opennova::cp1252_to_gd(c.player_name);
 		s.ip_and_port = opennova::to_gd(opennova::peer_addr_to_string(c.peer));
 		s.pcid = opennova::to_gd(c.account.pcid);
 		s.team = String::num_int64(c.player_list_team);
@@ -571,7 +581,10 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	joiner_role_->set_socket(net_.pump_socket.get(), net_.pump->dialed_host());
 	// Build the Joiner runtime now so get_joiner_phase reads Idle before the first load (the contract
 	// the legacy joiner_session_ held); the role retains the request for a load that rebuilds it.
-	runtime_ = &joiner_role_->create_runtime(opennova::to_std(p_player_name),
+	// The callsign goes out as the profile name's code-page bytes, the NA TLV and the host's
+	// roster carrying them (engine: inmatch/joiner_role.h create_runtime; D-NET-661).
+	runtime_ = &joiner_role_->create_runtime(
+			opennova::utf8_to_retail_text(opennova::to_std(p_player_name)),
 			p_join_role == static_cast<int>(opennova::inmatch::JoinRole::Spectator)
 					? opennova::inmatch::JoinRole::Spectator
 					: opennova::inmatch::JoinRole::Player,

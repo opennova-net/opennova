@@ -109,6 +109,14 @@ struct Host {
 	}
 };
 
+// The authority's C2S 0x04 handler's replies to one line.
+std::vector<ProtocolMessage> console_line(inmatch::NapiNPServerCtx &ctx, inmatch::NapiNPConnection &sender,
+		const std::vector<uint8_t> &payload, uint32_t now_ms) {
+	std::vector<ProtocolMessage> replies;
+	inmatch::Server_HandleConsoleCommandMessage(ctx, sender, payload, now_ms, replies);
+	return replies;
+}
+
 std::vector<uint8_t> cstr(const std::string &s) {
 	std::vector<uint8_t> out(s.begin(), s.end());
 	out.push_back(0);
@@ -135,27 +143,27 @@ void test_console_line_message() {
 	Host host;
 	inmatch::NapiNPConnection &remote = host.add(2, false);
 	// A remote player's NETLOG: not the host's, so nothing toggles, and the line comes back.
-	std::vector<ProtocolMessage> r = inmatch::Server_HandleConsoleCommandMessage(host.ctx, remote, cstr("NETLOG"), 100);
+	std::vector<ProtocolMessage> r = console_line(host.ctx, remote, cstr("NETLOG"), 100);
 	CHECK(!host.log.enabled() && r.size() == 1 && r[0].tag == s2c::CLIENT_CONSOLE_COMMAND && !r[0].reliable &&
 	      r[0].payload == cstr("NETLOG"));
 	// The slot's throttle word, shared with the chat throttle: one a second.
-	CHECK(inmatch::Server_HandleConsoleCommandMessage(host.ctx, remote, cstr("x"), 1099).empty());
-	CHECK(inmatch::Server_HandleConsoleCommandMessage(host.ctx, remote, cstr("x"), 1100).size() == 1);
+	CHECK(console_line(host.ctx, remote, cstr("x"), 1099).empty());
+	CHECK(console_line(host.ctx, remote, cstr("x"), 1100).size() == 1);
 	CHECK(remote.reply.chat_last_ms == 1100);
 	// STAT is taken whole: no echo.
-	CHECK(inmatch::Server_HandleConsoleCommandMessage(host.ctx, remote, cstr("stat me"), 2100).empty());
+	CHECK(console_line(host.ctx, remote, cstr("stat me"), 2100).empty());
 	// The copy stops at 1023 characters.
 	const std::string longline(1500, 'a');
-	r = inmatch::Server_HandleConsoleCommandMessage(host.ctx, remote, cstr(longline), 3100);
+	r = console_line(host.ctx, remote, cstr(longline), 3100);
 	CHECK(r.size() == 1 && r[0].payload.size() == 1024);
 	// A sender without a player slot draws nothing.
 	inmatch::NapiNPConnection &pending = host.add(3, false);
 	pending.phase = inmatch::ConnectionPhase::New;
-	CHECK(inmatch::Server_HandleConsoleCommandMessage(host.ctx, pending, cstr("hi"), 5000).empty());
+	CHECK(console_line(host.ctx, pending, cstr("hi"), 5000).empty());
 	// The host's own client (a listen host's local slot): NETLOG toggles, answers it S2C 0x14
 	// [14][slot]["NETLOG: SERVER SET TO 1"] (reliable, 310 flushes), and echoes the line too.
 	inmatch::NapiNPConnection &local = host.add(0, true);
-	r = inmatch::Server_HandleConsoleCommandMessage(host.ctx, local, cstr("netlog"), 6000);
+	r = console_line(host.ctx, local, cstr("netlog"), 6000);
 	CHECK(host.log.enabled() && r.size() == 2);
 	if (r.size() == 2) {
 		ChatBroadcast chat;
@@ -166,7 +174,7 @@ void test_console_line_message() {
 	}
 	// A joiner on a host that is not the authority: nothing.
 	host.ctx.is_authority = 0;
-	CHECK(inmatch::Server_HandleConsoleCommandMessage(host.ctx, local, cstr("netlog"), 9000).empty());
+	CHECK(console_line(host.ctx, local, cstr("netlog"), 9000).empty());
 }
 
 void test_usage_text() {

@@ -304,16 +304,16 @@ bool Server_HandleAdminNetlogCommand(NapiNPServerCtx &ctx, const std::string &li
 // that holds a player slot, at most one a second by the slot's word the chat
 // throttle shares; the text, cut at 1023 characters, runs the NETLOG handler,
 // and a line it does not take goes back to the sender as S2C 0x06 [text NUL]
-// (unreliable), which the client runs as its own command. `now_ms` is the
-// host's clock.
+// (unreliable), which the client runs as its own command; the replies are
+// appended to `replies`. `now_ms` is the host's clock.
 // [orig: NapiNPServerMsg_HandleConsoleLine @0x5199D0 — the authority
 //  @0x5199FA, the slot conn+352 -> +192 @0x519A01..0x519A18, the slot's
 //  +100360 stamp @0x519A1E..0x519A3C, the copy @0x519A4D..0x519A72,
 //  Server_HandleAdminNetlogCommand @0x519A7B, NetBuffer_WriteString and
 //  SendFiltered(6, 0, 1) to the sender @0x519AB0..0x519AC5;
 //  NapiNPClientMsg_HandleChatCommand @0x432BC0]
-std::vector<ProtocolMessage> Server_HandleConsoleCommandMessage(NapiNPServerCtx &ctx,
-		NapiNPConnection &sender, const std::vector<uint8_t> &payload, uint32_t now_ms);
+void Server_HandleConsoleCommandMessage(NapiNPServerCtx &ctx, NapiNPConnection &sender,
+		const std::vector<uint8_t> &payload, uint32_t now_ms, std::vector<ProtocolMessage> &replies);
 
 // Entity_DumpUsageStatistics(name)'s text: "Object usage for <name>", the used
 // counts of pools 0..3, then a line per items.def row past row 0 that one of
