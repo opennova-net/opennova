@@ -616,6 +616,23 @@ void still_bodies_attend_as_the_world() {
     CHECK(alone.body(0).inf.ai_focus == alone.bodies[1]);
 }
 
+// A body whose table registers no clip restamps its eye all the same, in the world's update and in the
+// still body's tick: the zeroed frame's extent floors at 0x9000, the lean level, no lateral.
+// [orig: Entity_UpdateInfantryAI @0x4B9A34..0x4B9A48, @0x4BF078..0x4BF094]
+void clipless_body_restamps_its_eye() {
+    for (const bool still : {false, true}) {
+        Rig r(5);
+        r.source.clips.clear();
+        r.init();
+        r.body().inf.eye_offset_x = r.body().inf.eye_offset_y = r.body().inf.eye_offset_z = 12345;
+        if (still) r.owned->ai.tick_still_body(r.body(), *r.owned, 1);
+        else r.owned->ai.update_organic(r.body(), *r.owned, 1);
+        CHECK(r.body().inf.eye_offset_z == 0x9000 && r.body().inf.eye_offset_x == 0 &&
+              r.body().inf.eye_offset_y == 0);
+        CHECK(r.entity().eye_offset_z == 0x9000);
+    }
+}
+
 // A retail soldier (the install's Eindo01.adm, a body of net id 13 standing), posed and ticked on over
 // the install's clips: the world's motor and the shared head leave the same channels, the idle
 // (I_idle1.bad at 363 ticks after the warmup) wraps where its own clock wraps, and each unblended
@@ -748,6 +765,7 @@ int main(int argc, char **argv) {
     body_ticks_on_as_the_motor_head();
     still_body_thinks_as_the_world();
     still_bodies_attend_as_the_world();
+    clipless_body_restamps_its_eye();
     retail_soldier_ticks_on();
     control_point_pool_precedence();
     grounding_strict_one_unit_limit();

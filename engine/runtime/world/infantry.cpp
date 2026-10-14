@@ -1595,8 +1595,12 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     if (!npc_body) infantry_follow_carrier(e, world, frame.capsule_bottom, true);
 
     // Restamp the camera offset from the current simulated head, after the
-    // motor-head channel update and current view/seat/lean pose.
-    if (have_clip) infantry_restamp_eye(e, world, frame);
+    // motor-head channel update and current view/seat/lean pose. An org1 body
+    // restamps whether or not its head had a clip: the dual update's result is
+    // never tested, and a clipless head leaves the zeroed frame, whose extent
+    // floors at 0x9000. [orig: Entity_UpdateInfantryAI - the frame zeroed
+    // @0x4B9A34..0x4B9A44, the call @0x4B9A48, the restamp @0x4BF078..0x4BF094]
+    if (have_clip || npc_body) infantry_restamp_eye(e, world, frame);
 
     // Org2 selects its next gait only after the current head pose was built.
     // [orig: head @0x4B6BB3; fourth-tick selector @0x4B70CE; ladder @0x4B7484]

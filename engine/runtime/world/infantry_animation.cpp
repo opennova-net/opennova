@@ -233,7 +233,7 @@ RootMotionFrame AiSystem::tick_still_body(AiEntity &e, World &world, uint32_t lo
     if (e.health <= 0) return RootMotionFrame{};
     // [orig: Entity_UpdateInfantryAI @0x4B9A14..0x4B9A48]
     RootMotionFrame frame;
-    const bool have_clip = infantry_org1_motor_head(inf, root_motion, anim_rings, frame);
+    infantry_org1_motor_head(inf, root_motion, anim_rings, frame);
     // The think on the authority's think ticks: the aim pitch seeded from the SSN, then, unless
     // airborne without the climb order, the still body's selection and the attention tail after
     // it. [orig: the gate @0x4BA970; the seed @0x4BAA4B..0x4BAA59 ahead of the airborne exit
@@ -257,7 +257,8 @@ RootMotionFrame AiSystem::tick_still_body(AiEntity &e, World &world, uint32_t lo
     }
     // [orig: @0x4BE8FD..0x4BEBE7, @0x4BEF97, @0x4BEFC5..0x4BEFED]
     infantry_org1_heading_chase(e, self, key);
-    if (have_clip) infantry_restamp_eye(e, world, frame);
+    // Whether or not the head had a clip [orig: @0x4B9A48, @0x4BF078..0x4BF094].
+    infantry_restamp_eye(e, world, frame);
     finish_infantry_tick(e, world);
     return frame;
 }

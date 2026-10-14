@@ -1147,7 +1147,8 @@ public:
     //   the head look and its look idles [orig: @0x4BD87E..0x4BE7FD]);
     // - the heading chase: the body, the legs and the look, its pitch store and its +-90 degree
     //   clamp about the body [orig: @0x4BE8FD..0x4BEBE7, @0x4BEF97, @0x4BEFC5..0x4BEFED];
-    // - the eye restamp (infantry_restamp_eye) [orig: @0x4BF078..0x4BF14C];
+    // - the eye restamp (infantry_restamp_eye), whether or not the head had a clip
+    //   [orig: @0x4BF078..0x4BF14C];
     // - and the registry mirror (finish_infantry_tick).
     // Returns the motor head's frame (its event word, what the body's sound block reads, and its
     // capsule). A body outside the contract runs nothing and returns an empty frame: one hidden at
