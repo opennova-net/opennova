@@ -8,9 +8,9 @@ extends GutTest
 ## STARTUP shows its title where the game draws it, in its font; the device places every window where
 ## the viewport's own headless compile does, and the render check's compile of the screen (render) is
 ## the same; the game's hit test finds the title; an unsaved string table and stylesheet show at once;
-## the options hold a window in a state; a drag of a window's handles writes its POSITION on the grid
-## as one undo step, several selected windows move and arrange in one step each; a TABLE draws through
-## the device (its rows' cells, a SUBST image, a clip rect) where the compile places it; a device given
+## the options hold a window in a state; a drag and an arrange go through the wire (a smoke: the
+## viewport ctests pin their rules); a TABLE draws through the device (its rows' cells, a SUBST
+## image, a clip rect) where the compile places it; a device given
 ## up retires its SubViewport, freed at the next frame; a focused edit box's caret blinks on the
 ## preview clock through the device's own frame (S13 V8); the game's pointer draws through the device's
 ## frame where a client holds it (DI-08). The model: drawn as it would save, at the level
@@ -506,60 +506,33 @@ func test_menu_follows_its_tables_and_its_style() -> void:
 	assert_true(String(_viewport("state").get("error", "")).contains("no document is open"))
 
 
-## S9k1: a drag of a window's handles through edit_in_viewport, as the canvas writes it: TITLE moved
-## by (13, 5) on the grid lands on the screen's grid (MAIN's top is 75), its text still sizing its
-## height; one undo puts it back; its right edge dragged without the snap; an unknown handle and a
-## record that is no window of the screen are refused; the held state's checked, open list and focus.
-func test_a_drag_moves_a_window_on_the_grid() -> void:
+## S9k1 and S9k2 on the editor's wire, a smoke (viewport_wire_test, menu_viewport_test and menu_arrange_test pin
+## the rules): TITLE and EXIT selected, a drag of TITLE on the grid lands it on the screen's grid and moves EXIT as
+## far, one undo step; Align left over both, one step; an unknown handle refused.
+func test_a_drag_and_an_arrange_on_the_wire() -> void:
 	if _app == null:
 		return
 	_new_project("Drag Game")
 	assert_eq(_seam.create_missing_files(), 0)
 	assert_true(_seam.open_document("main.mnu"))
 	var title: int = _seam.find_record("TITLE")
-	assert_gt(title, 0)
+	var exit: int = _seam.find_record("EXIT")
 	assert_true(_seam.select_record(title))
-	var start: Array = _item(_state(), "TITLE").get("rect", [])
-	assert_eq(start.size(), 4, str(start))
-	if start.size() != 4:
-		return
-	assert_eq(int(start[1]), 75 + 120)
-
+	assert_true(_seam.select_record(exit, "add"))
+	var start := _state()
 	assert_true(_drag({"id": title, "handle": "move", "by": [13, 5], "snap": 1}))
-	var moved: Array = _item(_state(), "TITLE").get("rect", [])
-	assert_eq(moved.size(), 4, str(moved))
-	if moved.size() != 4:
-		return
-	assert_eq(int(moved[0]) % 8, 0, "left on the grid: %s" % str(moved))
-	assert_eq(int(moved[1]) % 8, 0, "top on the grid: %s" % str(moved))
-	assert_eq(int(moved[0]), 16)
-	assert_eq(int(moved[1]), 200)
-	assert_eq(int(_seam.get_field(title, "position.left")), 16)
-	assert_eq(int(_seam.get_field(title, "position.top")), 125)
-	assert_null(_seam.get_field(title, "position.bottom"), "its text still sizes its height")
-	assert_true(_seam.is_document_dirty())
+	var moved := _state()
+	var title_at: Array = _item(moved, "TITLE").get("rect", [0, 0])
+	assert_eq(title_at.slice(0, 2), [16, 200], "TITLE on the grid: %s" % str(title_at))
+	var exit_was: Array = _item(start, "EXIT").get("rect", [0, 0])
+	var exit_at: Array = _item(moved, "EXIT").get("rect", [0, 0])
+	assert_eq(exit_at.slice(0, 2), [int(exit_was[0]) + 16, int(exit_was[1]) + 5], "EXIT moved as far")
 	_seam.undo()
-	assert_eq(str(_item(_state(), "TITLE").get("rect", [])), str(start), "one undo puts it back")
-	assert_false(_seam.is_document_dirty())
-
-	assert_true(_drag({"id": title, "handle": "right", "by": [-100, 3]}))
-	assert_eq(int(_seam.get_field(title, "position.right")), 700)
-	assert_eq(int(_seam.get_field(title, "position.left")), 0)
-	assert_false(_drag({"id": title, "handle": "middle", "by": [1, 1], "snap": 1}), "an unknown handle")
-	assert_false(_drag({"id": 999999, "handle": "move", "by": [1, 1], "snap": 1}), "no window of the screen")
-
-	assert_true(_change({"options": {"force_id": title, "force_state": "selected", "checked": true, "popup_open": true,
-			"focus": true}}))
-	var options: Dictionary = _state().get("options", {})
-	assert_eq(String(options.get("force_state", "")), "selected", str(options))
-	assert_true(bool(options.get("checked", false)))
-	assert_true(bool(options.get("popup_open", false)))
-	assert_true(bool(options.get("focus", false)))
-	assert_false(_change({"options": {"focus": 1}}), "a flag takes true or false")
-
-	_seam.close_project()
-	_seam.resolve_unsaved(1) # Discard
-	assert_true(String(_viewport("state").get("error", "")).contains("no document is open"))
+	assert_eq(str(_item(_state(), "TITLE").get("rect", [])), str(_item(start, "TITLE").get("rect", [])))
+	assert_false(_seam.is_document_dirty(), "one undo step")
+	assert_true(_command("align_left", [title, exit]))
+	assert_eq(int(_seam.get_field(exit, "position.left")), int(_seam.get_field(title, "position.left")))
+	assert_false(_drag({"id": title, "handle": "middle", "by": [1, 1]}), "an unknown handle")
 
 
 ## S13 V5 (the review): a TABLE through the device, after the trunk's third master sync made the
@@ -650,76 +623,6 @@ func test_a_closed_menus_device_is_freed_at_the_next_frame() -> void:
 	assert_not_null(device, "the menu opened again has a device of its own")
 	if device != null:
 		assert_ne(device.get_instance_id(), id)
-
-
-## S9k2: several windows through edit_in_viewport. TITLE and EXIT selected together: a move of EXIT
-## (a selected window) takes TITLE with it, one undo step; EXIT's left edge aligned to TITLE's (the
-## first window named) and EXIT sent to the back of MAIN's windows, one undo step each; the refusals.
-func test_several_windows_move_and_arrange_in_one_step() -> void:
-	if _app == null:
-		return
-	_new_project("Arrange Game")
-	assert_eq(_seam.create_missing_files(), 0)
-	assert_true(_seam.open_document("main.mnu"))
-	var main: int = _seam.find_record("MAIN")
-	var title: int = _seam.find_record("TITLE")
-	var exit: int = _seam.find_record("EXIT")
-	assert_gt(exit, 0)
-	assert_true(_seam.select_record(title))
-	assert_true(_seam.select_record(exit, "add"))
-	assert_eq(_seam.get_selected_records().size(), 2)
-	var preview := _state()
-	var title_start: Array = _item(preview, "TITLE").get("rect", [])
-	var exit_start: Array = _item(preview, "EXIT").get("rect", [])
-	assert_eq(title_start.size(), 4, str(preview))
-	assert_eq(exit_start.size(), 4, str(preview))
-	if title_start.size() != 4 or exit_start.size() != 4:
-		return
-
-	# A move of EXIT moves TITLE as far.
-	assert_true(_drag({"id": exit, "handle": "move", "by": [8, 16]}))
-	preview = _state()
-	var title_moved: Array = _item(preview, "TITLE").get("rect", [])
-	var exit_moved: Array = _item(preview, "EXIT").get("rect", [])
-	assert_eq(title_moved.size(), 4, str(preview))
-	assert_eq(exit_moved.size(), 4, str(preview))
-	if title_moved.size() != 4 or exit_moved.size() != 4:
-		return
-	assert_eq(int(title_moved[0]), int(title_start[0]) + 8, str(title_moved))
-	assert_eq(int(title_moved[1]), int(title_start[1]) + 16, str(title_moved))
-	assert_eq(int(exit_moved[0]), int(exit_start[0]) + 8, str(exit_moved))
-	assert_eq(int(exit_moved[1]), int(exit_start[1]) + 16, str(exit_moved))
-	_seam.undo()
-	preview = _state()
-	assert_eq(str(_item(preview, "TITLE").get("rect", [])), str(title_start), "one undo puts both back")
-	assert_eq(str(_item(preview, "EXIT").get("rect", [])), str(exit_start))
-	assert_false(_seam.is_document_dirty())
-
-	# EXIT's left edge to TITLE's, its width kept; then EXIT first among MAIN's windows.
-	assert_true(_command("align_left", [title, exit]))
-	assert_eq(int(_seam.get_field(exit, "position.left")), int(_seam.get_field(title, "position.left")))
-	assert_eq(int(_seam.get_field(exit, "position.right")), 120)
-	assert_true(_command("send_to_back", [exit]))
-	var order: PackedInt64Array = _seam.get_child_records(main, "window")
-	assert_eq(order.size(), 2, str(order))
-	if order.size() == 2:
-		assert_eq(order[0], exit, "sent to the back: drawn first")
-	_seam.undo()
-	_seam.undo()
-	assert_false(_seam.is_document_dirty(), "one undo step each")
-	assert_eq(int(_seam.get_field(exit, "position.left")), 340)
-
-	# Refusals: two windows cannot be distributed, an unknown command, one window cannot be aligned, a
-	# record the viewport does not show.
-	assert_false(_command("distribute_horizontally", [title, exit]))
-	assert_false(_command("align_middle", [title, exit]))
-	assert_false(_command("align_left", [title]))
-	assert_false(_command("align_left", [999999, exit]))
-	assert_false(_seam.is_document_dirty())
-
-	_seam.close_project()
-	_seam.resolve_unsaved(1) # Discard
-	assert_true(String(_viewport("state").get("error", "")).contains("no document is open"))
 
 
 ## S13 V8: a focused edit box's caret on the preview clock, through the device's own frame (the Shell's
