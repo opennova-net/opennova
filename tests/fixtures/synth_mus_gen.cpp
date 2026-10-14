@@ -206,7 +206,7 @@ bool build(const Program &p, std::vector<uint8_t> &bytes, std::string &err) {
 		return false;
 	}
 	const MusScript &s = back.scripts[0];
-	const bool shape_ok = back.header.chunk_count == 1 && back.intrinsic_count == MUS_INTRINSIC_NAMES &&
+	const bool shape_ok = back.header.chunk_count == 1 && back.intrinsic_count == 11 &&
 	                      std::strncmp(s.name, p.name, MUS_NAME_SIZE) == 0 && s.section_count == p.section_count &&
 	                      s.entry_section_index == 0 && std::strcmp(s.sections[0].name, p.entry_name) == 0 &&
 	                      std::strcmp(s.sections[p.section_count - 1].name, p.last_name) == 0 &&

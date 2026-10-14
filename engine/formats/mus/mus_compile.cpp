@@ -16,10 +16,12 @@
    in reverse and cross-checking the engine's observed opcode dispatch.
 
    The text form is the tool's own authoring syntax (the game reads only the binary). The bytes it writes are
-   MDEdit's layout as inferred from the bytes of the three distinct shipped scripts (gamemus.bin, menumus.bin and
-   jox01's MJox01.bin; its GJox01.bin is gamemus.bin byte for byte), not witnessed in MDEdit itself (no MDEdit
-   binary is at hand), so what the samples lack (a second function, a function of no parameter, the line table's
-   places for constructs none of them holds) is extrapolated: a nop at the code's start (the bytecode's first byte, where the chunk's main entry and, with no
+   MDEdit's layout as read from the bytes of the three distinct shipped scripts (gamemus.bin, menumus.bin and
+   jox01's MJox01.bin; its GJox01.bin is gamemus.bin byte for byte); the container, the chunk and its tables and
+   the name table are MDEdit's own writers' (MDEdit.exe, read through a headless database: its chunk writer
+   sub_40DF30 @ 0x40DF30 and its linker sub_40E6E0 @ 0x40E6E0), while what the samples lack of its code
+   generation (a second function, a function of no parameter, the line table's places for constructs none of
+   them holds) is extrapolated: a nop at the code's start (the bytecode's first byte, where the chunk's main entry and, with no
    MessageHandler function, its +0x40 handler pointer both point), the code padded with nops to four bytes, and
    the editor debug section MDEdit writes beside it (the source path, the sections, the globals Var00..Var15 and
    the user's, the functions and their parameters, and a line table: each statement's first instruction, an
@@ -322,9 +324,15 @@ void Lexer::advance() {
     advance();
 }
 
-/* ---- Canonical intrinsic name table (MDEdit convention) ---- */
+/* ---- The method names: MUSIC.LAN's ---- */
 
-static const char *kIntrinsicNames[MUS_INTRINSIC_NAMES] = {
+/* The methods MDEdit's music language declares, in its order (MUSIC.LAN, which MDEdit loads at its start beside
+   WPAI.LAN: each METHOD of an object numbered in turn and named the object's prefix and the method's,
+   "%s%s"; MDEdit.exe sub_405310 @ 0x405374, sub_404110 @ 0x40429E): the table its linker writes into every
+   script, whichever methods the script calls (MDEdit.exe sub_40E6E0 @ 0x40E6E0: the language's method count,
+   then each method's name), so every shipped script's eleven. The text's method calls are numbered by it. */
+static constexpr int kMusicLanMethods = 11;
+static const char *kIntrinsicNames[kMusicLanMethods] = {
     "GEcho", "GGRnd", "GSV", "GSDV", "GFB",
     "FSet", "FClear", "FIsSet", "FIsClear",
     "TStart", "TStop",
@@ -346,13 +354,13 @@ static int resolve_intrinsic_index(const char *obj, const char *method) {
         /* No prefix in source -> the original was 'G' + method. */
         snprintf(combined, sizeof(combined), "G%s", method);
     }
-    for (int i = 0; i < MUS_INTRINSIC_NAMES; ++i) {
+    for (int i = 0; i < kMusicLanMethods; ++i) {
         if (strcmp(kIntrinsicNames[i], combined) == 0) return i;
     }
     /* Also try the name as-is (some methods have no G prefix in source: e.g.
        "Echo" decompiles from GEcho but "Random" might appear). */
     if (!obj || !obj[0]) {
-        for (int i = 0; i < MUS_INTRINSIC_NAMES; ++i) {
+        for (int i = 0; i < kMusicLanMethods; ++i) {
             if (strcmp(kIntrinsicNames[i], method) == 0) return i;
         }
     }
@@ -648,7 +656,7 @@ struct Compiler {
         }
         MusVariable &v = variables[variable_count++];
         memset(&v, 0, sizeof(v));
-        strncpy(v.name, name, MUS_INTRINSIC_NAME_SIZE - 1);
+        strncpy(v.name, name, MUS_GLOBAL_NAME_SIZE - 1);
         v.byte_offset = byte_offset;
         return (int)(variable_count - 1);
     }
@@ -1533,7 +1541,7 @@ int Compiler::parse_top_decl(const char **err) {
         lex.advance();
         if (lex.cur_kind == Tok::Ident) lex.advance();   /* type token */
         if (lex.cur_kind == Tok::Ident) {
-            char name[MUS_INTRINSIC_NAME_SIZE];
+            char name[MUS_GLOBAL_NAME_SIZE];
             strncpy(name, lex.cur_text, sizeof(name) - 1);
             name[sizeof(name) - 1] = 0;
             uint32_t off = 64;
@@ -1643,7 +1651,7 @@ int Compiler::finalize(const char **err) {
     if (!out.variables) { *err = "OOM"; return -1; }
     out.variable_count = (uint32_t)(16 + variable_count);
     for (uint32_t k = 0; k < 16; ++k) {
-        snprintf(out.variables[k].name, MUS_INTRINSIC_NAME_SIZE, "Var%02u", k);
+        snprintf(out.variables[k].name, MUS_GLOBAL_NAME_SIZE, "Var%02u", k);
         out.variables[k].byte_offset = 4 * k;
     }
     if (variable_count > 0) memcpy(out.variables + 16, variables, variable_count * sizeof(MusVariable));
@@ -1682,7 +1690,7 @@ int Compiler::finalize(const char **err) {
         if (end > lsize) lsize = end;
     }
     out.locals_size = lsize;
-    out.locals_frame_offset = MUS_DEFAULT_LOCALS_BASE;   /* `enter` frame base; JO/MDEdit witness */
+    out.locals_frame_offset = MUS_DEFAULT_LOCALS_BASE;   /* `enter` frame base: MDEdit's 32 (sub_40DF30, v1[15]) */
     out.entry_section_index = 0;
     /* The +0x40 MessageHandler entry: the function of that name, else the code's start, its leading nop
        (gamemus.bin 0x09, menumus.bin 0) [orig: sub_672E50 @ 0x672eba jumps there]. */
@@ -1694,13 +1702,12 @@ int Compiler::finalize(const char **err) {
             break;
         }
 
-    /* Populate intrinsic names with the canonical 11. */
-    for (int i = 0; i < MUS_INTRINSIC_NAMES; ++i) {
-        memset(out.intrinsic_names[i], 0, MUS_INTRINSIC_NAME_SIZE);
-        strncpy(out.intrinsic_names[i], kIntrinsicNames[i],
-                MUS_INTRINSIC_NAME_SIZE - 1);
-    }
-    out.intrinsic_count = MUS_INTRINSIC_NAMES;
+    /* The method table: MUSIC.LAN's, as MDEdit's linker writes it whichever methods the script calls. */
+    out.intrinsic_names = (char (*)[MUS_METHOD_NAME_SIZE])calloc(kMusicLanMethods, MUS_METHOD_NAME_SIZE);
+    if (!out.intrinsic_names) { *err = "OOM"; return -1; }
+    for (int i = 0; i < kMusicLanMethods; ++i)
+        snprintf(out.intrinsic_names[i], MUS_METHOD_NAME_SIZE, "%s", kIntrinsicNames[i]);
+    out.intrinsic_count = kMusicLanMethods;
 
     return 0;
 }
@@ -1819,12 +1826,15 @@ void mus_script_free(MusScript *s) {
     free(s->locals);
     free(s->functions);
     free(s->lines);
+    free(s->intrinsic_names);
     s->code = NULL;
     s->sections = NULL;
     s->variables = NULL;
     s->locals = NULL;
     s->functions = NULL;
     s->lines = NULL;
+    s->intrinsic_names = NULL;
+    s->intrinsic_count = 0;
     s->code_size = 0;
     s->section_count = 0;
     s->variable_count = 0;
@@ -1876,17 +1886,41 @@ static void debug_entry(uint8_t **buf, size_t *cap, size_t *used, uint32_t first
     buf_append(buf, cap, used, entry, sizeof(entry));
 }
 
-/* The SCR0 file in MDEdit's layout, as read from the shipped scripts' bytes (above): the 44-byte header and the chunk pointer
-   table; each MU01 chunk's 0x48-byte header and 0x20 bytes of zeros, its section table (chunk-relative entry PCs)
-   and its code; zeros to 16, then the editor debug section: the 256-byte source path, a 0x50-byte header of the
-   five tables' entry size, offsets and counts, the sections' (bytecode-relative entries), the globals', the
-   parameters' and the functions' 48-byte entries and the 8-byte lines; zeros to 16, the intrinsic names'
-   resolve table (zeros the loader fills) and their length-prefixed strings. The runtime reads the header, the
-   section table, the code and the names [orig: AudioVM_LoadScriptFile @ 0x672D20, AudioVM_FixupPointers @
-   0x672470]; MDEdit's reader the rest. */
+/* The SCR0 file in MDEdit's layout (above; MDEdit.exe's chunk writer sub_40DF30 @ 0x40DF30 and linker sub_40E6E0 @
+   0x40E6E0): the 44-byte header and the chunk pointer table; each MU01 chunk's 0x48-byte header and 0x20 bytes of
+   zeros, its section table (chunk-relative entry PCs) and its code; zeros to 16, then the editor debug section:
+   the 256-byte source path, a 0x50-byte header of the five tables' entry size, offsets and counts, the sections'
+   (bytecode-relative entries), the globals', the parameters' and the functions' 48-byte entries and the 8-byte
+   lines; zeros to 16, the method names' resolve table (zeros the loader fills) and the names, each its length byte
+   (itself, the name and its NUL), the name and its NUL. Each field as the model holds it: the chunk's sizes and
+   frame base, the table the scripts hold. The runtime reads the header, the section table, the code and the names
+   [orig: AudioVM_LoadScriptFile @ 0x672D20, AudioVM_FixupPointers @ 0x672470, ScriptInstance_Init @ 0x672EF0];
+   MDEdit's reader the rest. */
 int mus_encode_file(const MusScript *const *scripts, uint32_t script_count,
                                uint8_t **out_buf, size_t *out_size) {
     if (!scripts || !out_buf || !out_size) return -1;
+    for (uint32_t i = 0; i < script_count; ++i)
+        if (!scripts[i]) return -3;
+
+    /* The method table: the file holds one, every chunk's `method` calls resolving through it [orig:
+       ScriptInstance_Init @ 0x672FAF], so the scripts written together hold the same (-4 otherwise); each name ends
+       within its slot (-5 otherwise: its length byte past 127, read signed, would step the loader back [orig:
+       AudioVM_LoadScriptFile @ 0x672DEB..0x672DFC]). */
+    const MusScript *table = script_count ? scripts[0] : NULL;
+    const uint32_t name_count = table ? table->intrinsic_count : 0;
+    if (name_count && !table->intrinsic_names) return -4;
+    for (uint32_t i = 1; i < script_count; ++i) {
+        const MusScript *s = scripts[i];
+        if (s->intrinsic_count != name_count || (name_count && !s->intrinsic_names)) return -4;
+        for (uint32_t k = 0; k < name_count; ++k)
+            if (strncmp(s->intrinsic_names[k], table->intrinsic_names[k], MUS_METHOD_NAME_SIZE) != 0) return -4;
+    }
+    for (uint32_t k = 0; k < name_count; ++k)
+        if (strnlen(table->intrinsic_names[k], MUS_METHOD_NAME_SIZE) == MUS_METHOD_NAME_SIZE) return -5;
+    /* The strings `pushstr` reads [orig: AudioVM_Op_PushStr @ 0x672836]: the model holds their count alone, so a
+       script holding any cannot be written as the game reads it (-6). */
+    for (uint32_t i = 0; i < script_count; ++i)
+        if (scripts[i]->string_count != 0) return -6;
 
     uint8_t *buf = NULL;
     size_t   cap = 0, used = 0;
@@ -1900,7 +1934,6 @@ int mus_encode_file(const MusScript *const *scripts, uint32_t script_count,
 
     for (uint32_t i = 0; i < script_count; ++i) {
         const MusScript *s = scripts[i];
-        if (!s) { free(buf); free(chunk_offs); return -3; }
 
         chunk_offs[i] = (uint32_t)used;
         const size_t chunk_hdr_at = used;
@@ -1960,17 +1993,18 @@ int mus_encode_file(const MusScript *const *scripts, uint32_t script_count,
         ch.tag                  = MUS_CHUNK_TAG_MU01;
         ch.version              = 0x00000100;
         memcpy(ch.name, s->name, strnlen(s->name, MUS_NAME_SIZE));
-        ch.globals_size         = s->globals_size ? s->globals_size : 64;
+        ch.globals_size         = s->globals_size;
         ch.locals_size          = s->locals_size;
         ch.bytecode_offset      = bc_rel;
         ch.section_table_offset = rel(sec_tab_at);
         ch.section_count        = s->section_count;
         ch.entry_section_index  = s->entry_section_index;
-        ch.debug_info_offset    = rel(debug_info_at);
-        ch.debug_info_count     = 0;
-        ch.string_section_offset = rel(str_at);
-        /* +0x3C doubles as the `enter` frame base (instance[+0x3C]); 0x20 in every MDEdit file. */
-        ch.string_section_size  = s->locals_frame_offset ? s->locals_frame_offset : MUS_DEFAULT_LOCALS_BASE;
+        ch.strings_offset       = rel(debug_info_at);   /* the code's end: MDEdit's empty string table */
+        ch.string_count         = 0;
+        ch.debug_offset         = rel(str_at);
+        /* +0x3C doubles as the `enter` frame base (instance[+0x3C], added as it is [orig: AudioVM_Op_Enter @
+           0x672C39]); 0x20 in every MDEdit file. */
+        ch.frame_base           = s->locals_frame_offset;
         /* +0x40 the MessageHandler entry, +0x44 the code's start [orig: AudioVM_FixupPointers @ 0x672495 /
            @ 0x6724a1]. */
         ch.message_handler_offset = s->has_message_handler ? bc_rel + s->message_handler_offset : 0;
@@ -1978,14 +2012,14 @@ int mus_encode_file(const MusScript *const *scripts, uint32_t script_count,
         memcpy(buf + chunk_hdr_at, &ch, sizeof(ch));
     }
 
-    /* The intrinsic names' resolve table (11 slots the loader fills) and their strings, each its length (the
-       byte, the name, its NUL) then the name. */
+    /* The method names' resolve table (a slot per name the loader fills) and the names, each its length (the
+       byte, the name, its NUL) then the name and its NUL. */
     buf_align16(&buf, &cap, &used);
     size_t resolve_at = used;
-    buf_append_zero(&buf, &cap, &used, MUS_INTRINSIC_NAMES * 4);
+    buf_append_zero(&buf, &cap, &used, (size_t)name_count * 4);
     size_t strings_at = used;
-    for (int i = 0; i < MUS_INTRINSIC_NAMES; ++i) {
-        const char *name = kIntrinsicNames[i];
+    for (uint32_t i = 0; i < name_count; ++i) {
+        const char *name = table->intrinsic_names[i];
         size_t nlen = strlen(name);
         uint8_t L = (uint8_t)(nlen + 2);
         buf_append(&buf, &cap, &used, &L, 1);
@@ -2000,7 +2034,7 @@ int mus_encode_file(const MusScript *const *scripts, uint32_t script_count,
     fh.version                   = 0x00000100;
     fh.chunk_count               = script_count;
     fh.chunk_table_offset        = (uint32_t)chunk_table_offset;
-    fh.name_count                = MUS_INTRINSIC_NAMES;
+    fh.name_count                = name_count;
     fh.name_strings_blob_offset  = (uint32_t)strings_at;
     fh.name_resolve_table_offset = (uint32_t)resolve_at;
     memcpy(buf, &fh, sizeof(fh));

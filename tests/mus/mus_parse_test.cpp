@@ -111,7 +111,7 @@ static int test_open_jo_gamemus(void) {
     CHECK(mf.scripts[0].locals_size == 0x28, "locals_size 0x28");
     CHECK(mf.scripts[0].section_count == 8, "8 sections");
     CHECK(mf.scripts[0].entry_section_index == 0, "entry section 0");
-    /* Bytecode size: bytecode_offset 0x88, debug_info_offset 0x10C => 132 bytes. */
+    /* Bytecode size: bytecode_offset 0x88, strings_offset 0x10C (the code's end) => 132 bytes. */
     CHECK(mf.scripts[0].code_size == 132, "code_size 132 bytes");
     CHECK(mf.scripts[0].code != NULL, "code allocated");
     /* First opcode of section 0 entry-PC is at chunk+0x89; the byte at +0x88 is 0x00 (nop). */
