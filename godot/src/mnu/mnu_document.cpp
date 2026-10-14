@@ -3,6 +3,7 @@
 
 #include "util/string_convert.h"
 
+#include <base/io/strutil.h>
 #include <runtime/menu/options_policy.h>
 
 #include <godot_cpp/classes/file_access.hpp>
@@ -39,15 +40,15 @@ void MnuDocument::rebuild_ids() {
 const char *MnuDocument::state_for_slot(int slot) {
 	switch (slot) {
 		case TEX_DEFAULT:
-			return "default";
+			return "DEFAULT";
 		case TEX_MOUSEOVER:
-			return "mouseover";
+			return "MOUSEOVER";
 		case TEX_SELECTED:
-			return "selected";
+			return "SELECTED";
 		case TEX_DISABLED:
-			return "disabled";
+			return "DISABLED";
 		default:
-			return "default";
+			return "DEFAULT";
 	}
 }
 
@@ -306,7 +307,7 @@ String MnuDocument::get_widget_texture(int p_id, int p_slot) const {
 	}
 	const char *state = state_for_slot(p_slot);
 	for (const auto &app : w->appearances) {
-		if (app.state == state) {
+		if (opennova::strutil::iequals(app.state, state)) {
 			return to_gd(app.value);
 		}
 	}

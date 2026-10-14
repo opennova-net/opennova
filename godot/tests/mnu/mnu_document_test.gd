@@ -63,7 +63,7 @@ func test_widget_rect_and_properties() -> void:
 	var rect := doc.get_window_rect(start_id)
 	assert_eq(rect, Rect2(270, 120, 100, 30), "StartBtn rect")
 	assert_eq(doc.get_widget_text(start_id), "MM_Start", "StartBtn string value")
-	assert_eq(doc.get_widget_string_type(start_id), "id", "StartBtn string is an id ref")
+	assert_eq(doc.get_widget_string_type(start_id), "ID", "StartBtn string is an id ref (the parse table's spelling)")
 	assert_eq(doc.get_widget_texture(start_id, MnuDocument.TEX_DEFAULT), "btn_up.tga", "default appearance")
 	assert_eq(doc.get_widget_texture(start_id, MnuDocument.TEX_MOUSEOVER), "btn_over.tga", "mouseover appearance")
 	assert_eq(doc.get_widget_font(root_id), "%DEF_FONTNAME%", "font %VAR% preserved raw")
@@ -113,8 +113,10 @@ func test_datasource_orientation_round_trip() -> void:
 	var scroll := _find_widget(doc, "VolumeBar")
 	assert_eq(doc.get_widget_type(marquee), MnuDocument.TYPE_MARQUEE, "Credits is a marquee")
 	assert_eq(doc.get_widget_datasources(marquee), PackedStringArray(["credits.txt"]), "parsed DATASOURCE")
-	assert_eq(doc.get_widget_orientation(marquee), "VERTICAL", "parsed marquee ORIENTATION")
-	assert_eq(doc.get_widget_orientation(scroll), "VERTICAL", "parsed scroll ORIENTATION")
+	# A marquee reads no ORIENTATION (a SCROLL's parse alone does), and a SCROLL's is HORIZONTAL or
+	# nothing: VERTICAL reads as vertical, the default [orig: @ 0x64c745 / 0x64c755].
+	assert_eq(doc.get_widget_orientation(marquee), "", "a marquee's ORIENTATION is left out")
+	assert_eq(doc.get_widget_orientation(scroll), "", "a VERTICAL ORIENTATION is the default, nothing held")
 
 
 func test_mns_stylesheet() -> void:
@@ -255,7 +257,7 @@ func test_item_combo_uses_list_box_and_round_trips() -> void:
 	assert_eq(doc.get_item_text(combo, 2), "LAN Server", "third LIST_BOX row")
 
 
-func test_item_combo_top_level_items_with_empty_list_box() -> void:
+func test_item_combo_reads_its_list_box_rows_alone() -> void:
 	var src := """
 <SCREEN><NAME>S</NAME><WINDOW type="window" name="ROOT">
   <WINDOW type="combobox" name="ModeBox">
@@ -273,8 +275,9 @@ func test_item_combo_top_level_items_with_empty_list_box() -> void:
 	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(src.to_utf8_buffer()), OK, "inline combo parses")
 	var combo := _find_widget(doc, "ModeBox")
-	assert_eq(doc.get_item_count(combo), 2, "reads the top-level ITEMS, not the empty LIST_BOX")
-	assert_eq(doc.get_item_text(combo, 1), "Team", "second top-level row")
+	# A combo reads ITEMS in its LIST_BOX's list alone [orig: CComboWnd_ParseXMLDefinition @ 0x65c0d0],
+	# as the shipped menus author them: the top-level ITEMS is left out.
+	assert_eq(doc.get_item_count(combo), 0, "the top-level ITEMS is not the combo's rows")
 
 
 func test_widget_sounds_read_the_authored_row() -> void:
@@ -286,7 +289,7 @@ func test_widget_sounds_read_the_authored_row() -> void:
 	var sound: MnuSoundRow = sounds[0]
 	assert_eq(sound.trigger, "MOUSE_OVER", "hover trigger read")
 	assert_eq(sound.file, "menu.lwf", "sound file read")
-	assert_eq(sound.state, "mousein", "sound state read")
+	assert_eq(sound.state, "MOUSEIN", "sound state read (the parse table's spelling)")
 
 
 
@@ -298,7 +301,7 @@ func test_widget_actions_read_the_authored_row() -> void:
 	var actions := doc.get_widget_actions(start)
 	assert_eq(actions.size(), 1, "StartBtn has one authored action")
 	var action: MnuActionRow = actions[0]
-	assert_eq(action.type, "screen", "screen verb read")
+	assert_eq(action.type, "SCREEN", "screen verb read (the parse table's spelling)")
 	assert_eq(action.target, "OPTIONS", "screen target read")
 	assert_eq(action.file, "widgets.mnu", "a SCREEN action names its file")
 	assert_eq(action.state, "", "screen action has no window state")
