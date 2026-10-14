@@ -1,6 +1,7 @@
 #pragma once
 
 #include <godot_cpp/classes/node3d.hpp>
+#include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/node_path.hpp>
@@ -166,8 +167,9 @@ public:
 	void republish_globals();
 	static void publish_absent();
 	// How many times a weather wrote its process-wide state since the process
-	// began (a read-back for the hold's tests: a headless renderer keeps no
-	// global to read back).
+	// began, one count per value written (each shader global, the models'
+	// CTRL register pair, their ring copy): a read-back for the hold's tests (a
+	// headless renderer keeps no global to read back).
 	static int64_t get_global_writes() { return global_writes_; }
 
 	void _ready() override;
@@ -205,6 +207,11 @@ private:
 	ObjectID sim_id_;
 	bool globals_held_ = false;
 	static inline int64_t global_writes_ = 0;
+	static void _write_global(
+			RenderingServer *p_rs, const StringName &p_name, const Variant &p_value);
+	static void _write_ctrl_registers(int32_t p_flicker, int32_t p_swing);
+	// The rings the models hash their own position into; none clears them.
+	static void _write_rings(const opennova::env::WeatherOscillator *p_oscillator);
 	PackedInt32Array iris_samples_;
 };
 

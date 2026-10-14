@@ -176,11 +176,21 @@ void Water::set_mirror_enabled(bool p_value) {
 
 int64_t Water::global_writes_ = 0;
 
-void Water::publish_absent() {
+void Water::_write_global(RenderingServer *p_rs, const StringName &p_name, const Variant &p_value) {
 	++global_writes_;
-	RenderingServer::get_singleton()->global_shader_parameter_set("opennova_water_active", false);
-	RenderingServer::get_singleton()->global_shader_parameter_set("opennova_water_height", 0.0f);
+	p_rs->global_shader_parameter_set(p_name, p_value);
+}
+
+void Water::_clear_water_plane() {
+	++global_writes_;
 	ObjectShaderCache::get_singleton()->clear_water_plane();
+}
+
+void Water::publish_absent() {
+	RenderingServer *rs = RenderingServer::get_singleton();
+	_write_global(rs, "opennova_water_active", false);
+	_write_global(rs, "opennova_water_height", 0.0f);
+	_clear_water_plane();
 }
 
 void Water::republish_globals() {
@@ -196,16 +206,18 @@ void Water::republish_globals() {
 
 void Water::release_runtime_renderer_resources() {
 	world_rendering_enabled_ = false;
+	// A held water leaves the process-wide globals and the plane to the
+	// picture that published them (E13).
 	RenderingServer *server = RenderingServer::get_singleton();
-	if (server != nullptr) {
-		server->global_shader_parameter_set("opennova_water_active", false);
+	if (server != nullptr && !globals_held_) {
+		_write_global(server, "opennova_water_active", false);
 	}
 	// The session's water split this node pushed leaves with it (the later
 	// _exit_tree no longer clears it once built_ drops below): a stale plane
 	// would keep ranking blended strips and arming the mirror's CLIP draws
 	// for worlds that have no water.
-	if (built_) {
-		ObjectShaderCache::get_singleton()->clear_water_plane();
+	if (built_ && !globals_held_) {
+		_clear_water_plane();
 	}
 	has_drawable_surface_ = false;
 	if (reflection_viewport_ != nullptr) {
@@ -259,19 +271,19 @@ void Water::_push_water_split_height() {
 		return;
 	}
 	const bool active = is_water_pass_active() && is_visible_in_tree();
-	++global_writes_;
 	RenderingServer *rs = RenderingServer::get_singleton();
-	rs->global_shader_parameter_set("opennova_water_active", active);
-	rs->global_shader_parameter_set("opennova_water_height", water_height_);
+	_write_global(rs, "opennova_water_active", active);
+	_write_global(rs, "opennova_water_height", water_height_);
 	if (active) {
 		Camera3D *cam = Object::cast_to<Camera3D>(
 				ObjectDB::get_instance(cached_cam_id_));
 		const bool camera_above = cam == nullptr ||
 				cam->get_camera_transform().get_origin().y >= water_height_;
+		++global_writes_; // the shader cache's water plane, process-wide too
 		ObjectShaderCache::get_singleton()->set_water_plane(
 				water_height_, camera_above);
 	} else {
-		ObjectShaderCache::get_singleton()->clear_water_plane();
+		_clear_water_plane();
 	}
 }
 
@@ -402,10 +414,8 @@ void Water::_exit_tree() {
 	// singleton during scene teardown on every quit — the never-freed
 	// extension object behind the packaging boot-smoke teardown AV.
 	if (built_ && !globals_held_) {
-		++global_writes_;
-		ObjectShaderCache::get_singleton()->clear_water_plane();
-		RenderingServer::get_singleton()->global_shader_parameter_set(
-				"opennova_water_active", false);
+		_clear_water_plane();
+		_write_global(RenderingServer::get_singleton(), "opennova_water_active", false);
 	}
 	// Reflection teardown: stop the offscreen renders and disarm the shader's
 	// reflection branch — the u_water_color fallback takes over if the

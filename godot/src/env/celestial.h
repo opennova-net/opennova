@@ -3,6 +3,7 @@
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/node3d.hpp>
+#include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -164,9 +165,11 @@ public:
 	// The veil alpha as a process has it with no bodies: 0 (a picture with no
 	// Celestial after one that published its own, E13).
 	static void publish_absent();
-	// How many times the absent veil was written since the process began (a
-	// read-back for the tests: a headless renderer keeps no global to read).
-	static int64_t get_absent_writes() { return absent_writes_; }
+	// How many times a Celestial wrote the veil global since the process
+	// began, its absent value too: one count per process-wide value written,
+	// the rule every held row counts by (a read-back for the hold's tests: a
+	// headless renderer keeps no global to read back).
+	static int64_t get_global_writes() { return global_writes_; }
 	int get_sun_veil_stopdown() const;
 
 	void _ready() override;
@@ -261,7 +264,9 @@ private:
 	// The last advanced frame's sun-veil pair (env_celestial.h SunVeil).
 	int sun_veil_glare_ = 0;
 	bool globals_held_ = false;
-	static inline int64_t absent_writes_ = 0;
+	static inline int64_t global_writes_ = 0;
+	static void _write_global(
+			RenderingServer *p_rs, const StringName &p_name, const Variant &p_value);
 	int sun_veil_stopdown_ = 0;
 	// The water-reflected sun glint accumulator
 	// [orig: Environment_UpdateSunGlare @ 0x5ad130, see docs/env/env-tod-re.md].
