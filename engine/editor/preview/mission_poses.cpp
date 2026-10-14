@@ -3,6 +3,7 @@
 #include <cmath>
 #include <map>
 
+#include <base/io/hash.h>
 #include <base/io/bam.h>
 #include <base/io/fixed.h>
 #include <base/io/os_path.h>
@@ -70,6 +71,10 @@ void MissionPoses::clear() {
 	read_ = false;
 	poses_.clear();
 	rows_.clear();
+	floor_files_.reset();
+	floor_world_.reset();
+	floor_bodies_.clear();
+	floor_key_ = 0;
 }
 
 const MissionPose *MissionPoses::pose(NodeId row) const {
@@ -213,10 +218,14 @@ bool MissionPoses::stand(const MissionScene &scene, const MissionPeopleFloor &fl
 	// candidates (a pool-0 body's slice reaches its bound and 4.0 u past it to a candidate's bound [orig:
 	// Entity_BuildProximityListsFromPools @0x4B8F02..0x4B8F0B], two units more over the static table's padded radius
 	// word; an item of no known bound within kMissionFloorReach), every other record loaded empty in its place.
-	std::unique_ptr<MissionWorld> world;
-	std::map<NodeId, world::EntityHandle> bodies;
+	// The files the floors read noted afresh where one moved, the world built or not (else the move stands and the people
+	// are stood again every frame).
+	if (source_ && (!floor_files_ || floor_files_moved())) {
+		floor_files_ = std::make_shared<MissionFiles>(source_);
+		floor_world_.reset();
+	}
+	MissionWorld *world = nullptr;
 	if (terrain && floor.mission && floor.ground && source_) {
-		if (!floor_files_ || floor_files_moved()) floor_files_ = std::make_shared<MissionFiles>(source_);
 		const auto bound = [&](int64_t item) -> double {
 			if (!floor.bounds) return 0.0;
 			const auto found = floor.bounds->find(item);
@@ -242,15 +251,35 @@ bool MissionPoses::stand(const MissionScene &scene, const MissionPeopleFloor &fl
 			return false;
 		};
 		if (!people.empty()) {
-			bms::File thinned = *floor.mission;
-			mission_world_thin(thinned, scene.entities(), keep);
-			world = std::make_unique<MissionWorld>();
-			world->load(floor_files_, thinned, *floor.ground);
-			world->world.registry.for_each_in_pool(0, [&](const world::Entity &entity) {
-				if (const MissionEntityMark *mark = world->mark_of(entity, scene.entities())) bodies[mark->row] = entity.handle;
-			});
+			// The world made again only where what it holds moved: the records it keeps (each one's row, place, item,
+			// transform and stamp), its ground, the files it reads. A drag of a record no person reaches keeps it.
+			const auto mix = [](uint64_t hash, uint64_t value) { return io::fnv1a64_bytes(hash, &value, sizeof(value)); };
+			uint64_t key = mix(io::kFnv1a64Offset, floor.ground->revision());
+			key = mix(key, uint64_t(scene.entities().size()));
+			for (const MissionEntityMark &mark : scene.entities()) {
+				if (!keep(mark)) continue;
+				key = mix(key, mark.row);
+				key = mix(key, uint64_t(uint32_t(mark.index)));
+				key = mix(key, uint64_t(mark.item));
+				key = mix(key, mark.stamp);
+			}
+			if (!floor_world_ || key != floor_key_) {
+				bms::File thinned = *floor.mission;
+				mission_world_thin(thinned, scene.entities(), keep);
+				floor_world_ = std::make_unique<MissionWorld>();
+				floor_world_->load(floor_files_, thinned, *floor.ground);
+				floor_bodies_.clear();
+				floor_world_->world.registry.for_each_in_pool(0, [&](const world::Entity &entity) {
+					if (const MissionEntityMark *mark = floor_world_->mark_of(entity, scene.entities()))
+						floor_bodies_[mark->row] = entity.handle;
+				});
+				floor_key_ = key;
+			}
+			world = floor_world_.get();
 		}
 	}
+	const std::map<NodeId, world::EntityHandle> none;
+	const std::map<NodeId, world::EntityHandle> &bodies = world ? floor_bodies_ : none;
 	bool moved = false;
 	for (MissionPose &pose : poses_) {
 		const MissionEntityMark *entity = scene.entity(pose.row);

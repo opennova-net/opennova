@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -208,6 +209,10 @@ private:
 	std::shared_ptr<const ProjectAssetSource> source_;
 	std::shared_ptr<StampedFiles> files_; // what the clips read, by the stamp they read it at
 	std::shared_ptr<MissionFiles> floor_files_; // what the floors' world read, kept while it stands
+	// The floors' world as last made, its people's bodies by row, and the key of what it holds (stand()).
+	std::unique_ptr<MissionWorld> floor_world_;
+	std::map<NodeId, world::EntityHandle> floor_bodies_;
+	uint64_t floor_key_ = 0;
 	std::unique_ptr<anim::AdmRootMotion> motion_;
 	world::AnimVariantRings rings_;
 	std::unordered_map<std::string, Catalog> catalogs_;
