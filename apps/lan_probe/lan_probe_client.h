@@ -18,6 +18,9 @@ enum class Status {
 };
 
 struct Options {
+	// The title whose identity the probe speaks and the reply must carry (complete:
+	// resolve_title_identity); wait_for_server refuses none.
+	const TitleIdentity *title = nullptr;
 	net::Endpoint endpoint{{127, 0, 0, 1}, kRetailLanPortMin};
 	int timeout_ms = 120000;
 	int retry_interval_ms = 1000;
@@ -32,8 +35,8 @@ struct Result {
 	int probes_sent = 0;
 };
 
-// Wait until the endpoint answers the exact retail JO 0x41 LAN discovery
-// probe with a valid game-server 0x81. The caller owns net::startup/shutdown.
+// Wait until the endpoint answers the title's exact retail 0x41 LAN discovery
+// probe with a valid game-server 0x81 of the same identity. The caller owns net::startup/shutdown.
 // A non-empty expected_server_name rejects stale/unrelated listeners while
 // continuing to probe until the same bounded deadline.
 Result wait_for_server(const Options &options);

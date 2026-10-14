@@ -8,6 +8,8 @@
 
 namespace opennova {
 
+struct TitleIdentity; // net/title/title_identity.h
+
 // Godot- and socket-free projection of the retail fields carried by one LAN
 // host's NP/NAPI 0x81 ServerHello.
 struct LanDiscoveryServer {
@@ -34,8 +36,8 @@ struct LanDiscoveryServer {
 };
 
 // Build a complete, ready-to-send NWU datagram containing the same NP/NAPI
-// 0x41 JointOperations identity as the existing direct-peer join path. The
-// caller owns broadcast/socket policy. `client_index` is the CI the replies
+// 0x41 title identity as the direct-peer join path (`title` complete:
+// make_title_client_hello). The caller owns broadcast/socket policy. `client_index` is the CI the replies
 // echo; it must be non-zero (the announce builder omits a zero CI entirely).
 // `target_ip` / `target_port` are the datagram's own destination, which the
 // announce writes as EIP / EPN, each only when nonzero: the address in
@@ -45,17 +47,18 @@ struct LanDiscoveryServer {
 //  EPN @0x61fd23..0x61fd47, the SendTo to the same pair @0x61fdd3..0x61fdde;
 //  CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 - one announce per port
 //  @0x629241..0x629268]
-std::vector<uint8_t> build_lan_discovery_probe(uint32_t client_index, uint32_t target_ip,
-                                               uint32_t target_port);
+std::vector<uint8_t> build_lan_discovery_probe(const TitleIdentity &title, uint32_t client_index,
+                                               uint32_t target_ip, uint32_t target_port);
 
 // Decode a complete NWU datagram and project a 0x81 ServerHello into the LAN
 // browser model. `client_index` is the browse window's CI: retail resolves the
 // reply's CI against its enumerator and drops a reply for a CI it did not
 // issue (an absent CI resolves as 0 and never matches a live enumerator).
 // Returns false for malformed packets, any opcode other than ServerHello, a
-// foreign CI, or a non-JO game identity; `out` is changed only on success.
-bool parse_lan_discovery_reply(const uint8_t *data, size_t size, uint32_t client_index,
-                               LanDiscoveryServer &out);
+// foreign CI, or a game identity other than `title`'s; `out` is changed only
+// on success.
+bool parse_lan_discovery_reply(const TitleIdentity &title, const uint8_t *data, size_t size,
+                               uint32_t client_index, LanDiscoveryServer &out);
 
 // The witnessed browse window: the LAN screen's state machine re-enables
 // LAN_SEARCH (MP_SEARCH) once GetTickCount() - search_start > 0x7530
@@ -127,12 +130,14 @@ public:
 	// P2 admits it lists (lan_session_admits_connect_type). `enumerate_ip` is the
 	// destination every announce goes to, in PeerAddr's packing (0xFFFFFFFF for the
 	// LAN broadcast, the resolved address on a direct browse; 0 writes no EIP).
-	// False (nothing changes) on an invalid port range or a zero client index.
+	// `title` is the identity the announces carry and the replies must match (complete,
+	// outliving the window). False (nothing changes) on an invalid port range or a zero
+	// client index.
 	// [orig: CNapiGameSession_InitTransportConnection @0x4c9e10 - -1 on a LAN browse
 	//  @0x4c9eab, the resolved address on a direct one @0x4c9eb5..0x4c9ec3, stored
 	//  to enumerator+4 @0x4c9f0b]
-	bool begin(uint32_t client_index, uint32_t enumerate_ip, int port_min, int port_max,
-	           int connect_type);
+	bool begin(const TitleIdentity &title, uint32_t client_index, uint32_t enumerate_ip,
+	           int port_min, int port_max, int connect_type);
 	void stop();
 	bool browsing() const { return browsing_; }
 	int port_min() const { return port_min_; }
@@ -158,6 +163,7 @@ public:
 private:
 	std::vector<LanDiscoveryRow> servers_;
 	std::unordered_map<std::string, size_t> index_by_endpoint_;
+	const TitleIdentity *title_ = nullptr;
 	uint32_t client_index_ = 0;
 	uint32_t enumerate_ip_ = 0;
 	int connect_type_ = kLanConnectTypeLan;

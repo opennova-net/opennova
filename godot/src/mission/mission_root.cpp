@@ -192,10 +192,24 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 		if (needs_join_connection && options->get_resource_root().is_valid()) {
 			sim_->load_charattr(options->get_resource_root());
 		}
+		// The title the mounted game speaks, the joiner's identity; one whose identity is
+		// not witnessed has none to join with, so the joiner does not dial.
+		bool join_identity = true;
+		if (needs_join_connection && options->get_resource_root().is_valid()) {
+			std::string title_error;
+			const opennova::TitleIdentity *title =
+					options->get_resource_root()->title_identity(title_error);
+			if (title == nullptr) {
+				UtilityFunctions::push_warning(vformat("MissionRoot: no identity to join with: %s",
+						opennova::to_gd(title_error)));
+				join_identity = false;
+			}
+			sim_->set_title(title);
+		}
 		if (needs_join_connection && options->get_join_character_profile().is_valid()) {
 			sim_->set_join_character_profile(options->get_join_character_profile());
 		}
-		if (needs_join_connection && join_target.is_valid() && !sim_->enable_join(
+		if (needs_join_connection && join_target.is_valid() && join_identity && !sim_->enable_join(
 				join_target->get_host_ip(), join_target->get_port(),
 				join_target->get_player_name(), join_target->get_join_role(),
 				join_target->get_spectator_password(), join_target->get_server_password())) {
@@ -257,6 +271,22 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 		// expansion is active (D-NET-166).
 		if (options->get_resource_root().is_valid()) {
 			session_options->set_game_root(options->get_resource_root()->get_root_dir());
+		}
+		// The title the mounted game speaks, the host's identity: a host without a
+		// witnessed one would answer no joiner, so it does not host.
+		if (options->get_resource_root().is_valid()) {
+			std::string title_error;
+			const opennova::TitleIdentity *title =
+					options->get_resource_root()->title_identity(title_error);
+			if (title == nullptr) {
+				UtilityFunctions::push_warning(vformat("MissionRoot: no identity to host with: %s",
+						opennova::to_gd(title_error)));
+				setup_error_ = ERR_UNCONFIGURED;
+				sim_.unref();
+				has_trace_stats_sampling_ = false;
+				return 0;
+			}
+			sim_->set_title(title);
 		}
 		// The loose score.ini overlays the session's score table inside the
 		// boot, ahead of the bring-up (inmatch/host_boot.h).

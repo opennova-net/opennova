@@ -223,7 +223,14 @@ public:
 	// Injectable monotonic wall clock for deterministic hosts/tests. Production uses steady_clock.
 	JoinerConnection(std::string player_name, MonotonicMilliseconds monotonic_milliseconds);
 
-	// Begin the handshake. Returns the ClientHello datagram to send (Idle -> Hello).
+	// The title identity the connection speaks: its 0x41 and 0x42 carry it and the host's
+	// 0x81 must match it (net/title/title_identity.h; complete, outliving the connection).
+	// Configure before start(); a connection with none refuses to start.
+	void set_title(const TitleIdentity *title) { title_ = title; }
+	const TitleIdentity *title() const { return title_; }
+
+	// Begin the handshake. Returns the ClientHello datagram to send (Idle -> Hello); empty,
+	// with last_error() saying why, when no title identity is set.
 	std::vector<uint8_t> start();
 	// The browse row's record of the host's 0x81 (a LAN row the player picked):
 	// a join from a discovered session goes straight to the 0x42 with the row's
@@ -902,6 +909,7 @@ private:
 	uint32_t client_key_ = 1;
 	NapiPrng *key_prng_ = nullptr;
 	std::string player_name_;
+	const TitleIdentity *title_ = nullptr; // set_title
 	JoinRole join_role_ = JoinRole::Player;
 	std::string spectator_password_;
 	std::string server_password_;

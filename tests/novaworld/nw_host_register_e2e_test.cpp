@@ -13,6 +13,8 @@
 // process that serves it. [orig: CNapiGameSession_SendHostRequest @ 0x4d3700]
 
 #include "nw_udp_listener.h"
+#include <base/gameprofile/gameprofile.h>
+#include <net/title/title_identity.h>
 #include "server_config.h"
 
 #include <net/napi/session.h>            // make_client_host_request, ClientVar
@@ -35,6 +37,9 @@
 #include <thread>
 #include <utility>
 #include <vector>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 namespace {
 
@@ -96,7 +101,7 @@ int main() {
 	// The client: a real ClientSession over a real UDP socket — exactly what
 	// NwuLobbySession::begin_session sets up (minus the gate-probe leg, which only
 	// resolves this endpoint; we know it directly).
-	opennova::ClientSession::Config cfg;
+	opennova::ClientSession::Config cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	cfg.cookie_vars = []() {
 		return std::vector<std::pair<std::string, std::string>>{{"NWUID", ""}};
 	};  // echoed from the SessionInit
@@ -118,7 +123,7 @@ int main() {
 		expect(direct_auth_client.is_valid(),
 		       "direct-Auth lobby UDP socket bound");
 
-		opennova::ClientSession::Config direct_cfg;
+		opennova::ClientSession::Config direct_cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		direct_cfg.client_index = 0x44495245u;
 		direct_cfg.client_key = 0x43544155u;
 		direct_cfg.na = "direct:auth";
@@ -180,7 +185,7 @@ int main() {
 			return true;
 		};
 
-		opennova::ClientSession::Config old_cfg;
+		opennova::ClientSession::Config old_cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		old_cfg.client_index = 0x4F4C4441u;
 		old_cfg.client_key = 0x4F4C444Bu;
 		old_cfg.na = "reordered:old";
@@ -200,7 +205,7 @@ int main() {
 		const std::vector<uint8_t> delayed_old_auth =
 				old_out.empty() ? std::vector<uint8_t>{} : old_out.front();
 
-		opennova::ClientSession::Config fresh_cfg;
+		opennova::ClientSession::Config fresh_cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		fresh_cfg.client_index = 0x4E455741u;
 		fresh_cfg.client_key = 0x4E45574Bu;
 		fresh_cfg.na = "reordered:fresh";
@@ -288,7 +293,7 @@ int main() {
 			return false;
 		};
 
-		opennova::ClientSession::Config keyless_cfg;
+		opennova::ClientSession::Config keyless_cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		keyless_cfg.client_index = 0x4B4C4553u;
 		keyless_cfg.client_key = 0x4B4C454Bu;
 		keyless_cfg.na = "keyless:lobby";
@@ -511,7 +516,7 @@ int main() {
 			if (!dg.empty() && recon_client.is_valid())
 				opennova::net::udp_send_to(recon_client, server_ep, dg.data(), dg.size());
 		};
-		opennova::ClientSession::Config rcfg;
+		opennova::ClientSession::Config rcfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		rcfg.client_index = 0x5245434Eu;
 		rcfg.client_key = 0x52454331u;
 		rcfg.na = "reconnect:host";
@@ -633,7 +638,7 @@ int main() {
 			return true;
 		};
 
-		opennova::ClientSession::Config collision_cfg;
+		opennova::ClientSession::Config collision_cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		collision_cfg.client_index = 1;
 		collision_cfg.client_key = 0x76543210u;
 		collision_cfg.na = "collision:second-peer";
@@ -724,7 +729,7 @@ int main() {
 			return true;
 		};
 
-		opennova::ClientSession::Config retry_cfg;
+		opennova::ClientSession::Config retry_cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		retry_cfg.client_index = 0x13572468u;
 		retry_cfg.client_key = 0x24681357u;
 		retry_cfg.na = "retry:stable-auth";
@@ -803,7 +808,7 @@ int main() {
 
 		// A distinct CI/CK/auth body on the same UDP endpoint is re-auth, not a
 		// retransmission. Its fresh sequence-one exchange must succeed.
-		opennova::ClientSession::Config replacement_cfg;
+		opennova::ClientSession::Config replacement_cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		replacement_cfg.client_index = 0x89ABCDEFu;
 		replacement_cfg.client_key = 0x10293847u;
 		replacement_cfg.na = "retry:new-auth";
@@ -918,6 +923,7 @@ int main() {
 		first_jo_client_port = jo_client_port;
 		expect(jo_client.is_valid(), "JO loss-probe UDP socket bound");
 		opennova::inmatch::JoinerConnection joiner("E2ELossProbe");
+		joiner.set_title(&kJo);
 
 		auto send_jo = [&](const std::vector<uint8_t> &dg) {
 			if (!dg.empty()) {
@@ -1053,6 +1059,7 @@ int main() {
 		auto live_client = opennova::net::udp_bind(0, &live_client_port);
 		expect(live_client.is_valid(), "standalone-spawn UDP socket bound");
 		opennova::inmatch::ClientRuntime live_joiner("E2EStandaloneSpawn");
+		live_joiner.set_title(&kJo);
 
 		auto send_live = [&](const std::vector<uint8_t> &dg) {
 			if (!dg.empty()) {
@@ -1156,7 +1163,7 @@ int main() {
 	auto hello_only_client =
 			opennova::net::udp_bind(0, &hello_only_port);
 	expect(hello_only_client.is_valid(), "Hello-only lobby UDP socket bound");
-	opennova::ClientSession::Config hello_only_cfg;
+	opennova::ClientSession::Config hello_only_cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	hello_only_cfg.client_index = 0x48454C4Fu;
 	hello_only_cfg.client_key = 0x4F4E4C59u;
 	hello_only_cfg.na = "restart:hello-only";
@@ -1264,6 +1271,7 @@ int main() {
 	}
 	if (restarted && restart_client.is_valid()) {
 		opennova::inmatch::JoinerConnection restart_joiner("E2ERestartProbe");
+		restart_joiner.set_title(&kJo);
 		const auto restart_hello = restart_joiner.start();
 		opennova::net::udp_send_to(
 				restart_client, server_ep,

@@ -4,6 +4,7 @@
 #include <base/io/tick_rate.h>
 #include <net/novaworld/lobby_update.h>
 #include <net/npwire/peer_addr.h>
+#include <net/title/title_identity.h>
 
 #include <string>
 #include <utility>
@@ -327,6 +328,14 @@ HostRegistration NwuHostRole::host_cfg() const {
 	// The CountryName / Lang / TZB trio follows the gate reply's METEXT (D-NET-347).
 	// [orig: CNapiGateManager_ProcessResponse @0x4cf2a1..0x4cf2c1 -> g_IsDedicatedServer]
 	cfg.met_ext = lobby_.gate_response().met_ext != 0;
+	// The title's version pair, and whether its host lists carry DFXCATEGORY1.
+	// [orig: Lobby_UpdateServerInfo @0x4ff3ea / @0x4ff3ff; CNapiGameSession_BuildHostVarLists
+	//  @0x4d0b50]
+	if (const TitleIdentity *title = lobby_.title()) {
+		cfg.ver1 = title->ver1;
+		cfg.ver2 = title->ver2;
+		cfg.category_var = title->host_category_var;
+	}
 	cfg.pcid_key = pcid_ring_.current();
 	cfg.uptime_ms = phase_ == Phase::Hosting ? lobby_.clock_ms() - hosting_started_ms_ : 0u;
 	return cfg;

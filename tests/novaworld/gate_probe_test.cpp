@@ -1,9 +1,14 @@
 #include <net/novacrypto/nwu.h>
+#include <net/title/title_identity.h>
+#include <base/gameprofile/gameprofile.h>
 #include <net/novaworld/gate_probe.h>
 
 #include <cstdio>
 #include <cstring>
 #include <vector>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 namespace {
 
@@ -18,10 +23,9 @@ bool expect(bool condition, const char *message) {
 // Probe is the NWU-transformed (tag + NUL) bytes.
 bool check_probe_length_and_determinism() {
 	using opennova::gate_probe_build;
-	using opennova::GATE_PROBE_TAG_JOINTOPS;
-	const auto p1 = gate_probe_build(GATE_PROBE_TAG_JOINTOPS);
-	const auto p2 = gate_probe_build(GATE_PROBE_TAG_JOINTOPS);
-	if (!expect(p1.size() == std::strlen(GATE_PROBE_TAG_JOINTOPS) + 1,
+	const auto p1 = gate_probe_build(kJo.gate_tag);
+	const auto p2 = gate_probe_build(kJo.gate_tag);
+	if (!expect(p1.size() == std::strlen(kJo.gate_tag) + 1,
 			"probe length == strlen(tag) + 1 NUL")) return false;
 	if (!expect(p1 == p2, "probe is deterministic")) return false;
 	return true;
@@ -31,13 +35,12 @@ bool check_probe_length_and_determinism() {
 bool check_probe_roundtrip_to_tag() {
 	using opennova::gate_probe_build;
 	using opennova::GATE_NWU_KEY;
-	using opennova::GATE_PROBE_TAG_JOINTOPS;
-	auto probe = gate_probe_build(GATE_PROBE_TAG_JOINTOPS);
+	auto probe = gate_probe_build(kJo.gate_tag);
 	opennova::nwu_encrypt(probe.data(), probe.size(), GATE_NWU_KEY);
 	if (!expect(probe.back() == 0, "last byte is NUL after inverse")) return false;
 	const std::string recovered(reinterpret_cast<const char *>(probe.data()),
 			probe.size() - 1);
-	if (!expect(recovered == GATE_PROBE_TAG_JOINTOPS, "recovered plaintext == 'jop:cus2'")) return false;
+	if (!expect(recovered == kJo.gate_tag, "recovered plaintext == 'jop:cus2'")) return false;
 	return true;
 }
 

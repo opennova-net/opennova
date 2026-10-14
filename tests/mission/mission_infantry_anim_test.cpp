@@ -2,6 +2,8 @@
 // data. Exercise the shared kernel through boot, movement, late spawn, restore,
 // and the real joiner frame rather than a replacement root-motion provider.
 #include <base/io/strutil.h>
+#include <base/gameprofile/gameprofile.h>
+#include <net/title/title_identity.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/joiner_role.h>
 #include <runtime/inmatch/local_role.h>
@@ -22,6 +24,9 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 namespace {
 using namespace opennova;
@@ -299,6 +304,7 @@ void joiner_resolves_empty_registry(Assets &assets) {
 	h.boot(false, false);
 	QuietSocket socket;
 	inmatch::JoinerRole role;
+	role.set_title(&kJo);
 	role.bind(*h.kernel);
 	role.set_socket(&socket, PeerAddr{});
 	role.create_runtime("AnimationTest", inmatch::JoinRole::Player, "", "");

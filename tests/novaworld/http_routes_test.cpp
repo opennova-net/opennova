@@ -25,6 +25,8 @@
 // writers wait on.
 
 #include "admin_tcp_server.h"
+#include <net/title/title_identity.h>
+#include <base/gameprofile/gameprofile.h>
 #include "auth.h"
 #include "hosted/admin_link.h"
 #include "hosted/console_commands.h"
@@ -80,6 +82,9 @@
 #include <thread>
 #include <utility>
 #include <vector>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 #ifndef OPENNOVA_SOURCE_DIR
 #error "OPENNOVA_SOURCE_DIR must be set by CMake"
@@ -2109,7 +2114,7 @@ public:
 
 private:
 	static opennova::ClientSession::Config config(uint32_t client_index) {
-		opennova::ClientSession::Config cfg;
+		opennova::ClientSession::Config cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		cfg.client_index = client_index;
 		cfg.client_key = 0x50555348u;
 		cfg.na = "http:push";

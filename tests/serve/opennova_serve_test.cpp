@@ -12,6 +12,8 @@
 // the server writes its game.cfg and activesrvr.txt (ADR 0051 d2; the files
 // themselves are opennova_serve_game_cfg's).
 #include "server.h"
+#include <base/gameprofile/gameprofile.h>
+#include <net/title/title_identity.h>
 #include "serve_test_support.h"
 
 #include <base/gameprofile/game_type.h>
@@ -30,6 +32,9 @@
 #include <memory>
 #include <string>
 #include <vector>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 using namespace opennova;
 namespace fs = std::filesystem;
@@ -116,6 +121,34 @@ int main() {
 		CHECK(!mod.port.has_value());
 	}
 
+	// The title: /game picks the identity the server speaks, JO's without one, DFX2's with
+	// /game dfx2; a title whose identity is not witnessed, or none at all, stops the start naming
+	// why.
+	{
+		serve::ServeOptions dfx2;
+		CHECK(parse_options(0, dfx2) == 0);
+		dfx2.game = "dfx2";
+		serve::Server served(dfx2);
+		std::string why;
+		CHECK(served.start(why));
+		CHECK(served.title() == title_identity(gameprofile::GAME_DFX2));
+		CHECK(served.gate_tag() == "dfx2:0:cus:buffy");
+		served.stop();
+		serve::ServeOptions bhd;
+		CHECK(parse_options(0, bhd) == 0);
+		bhd.game = "bhd";
+		serve::Server unwitnessed(bhd);
+		CHECK(!unwitnessed.start(why));
+		CHECK(why.find("/game bhd: the bhd title's session identity is not witnessed yet: ") == 0);
+		CHECK(why.find("PG") != std::string::npos && why.find("PV3") != std::string::npos);
+		serve::ServeOptions unknown;
+		CHECK(parse_options(0, unknown) == 0);
+		unknown.game = "nosuchgame";
+		serve::Server none(unknown);
+		CHECK(!none.start(why));
+		CHECK(why == "/game nosuchgame: unknown game 'nosuchgame'");
+	}
+
 	// --lan-port 0: the socket binds the port the OS picks, and bound_port()
 	// reports the port it holds from then on.
 	serve::ServeOptions options;
@@ -131,6 +164,9 @@ int main() {
 	}
 	CHECK(started);
 	if (!started) return 1;
+	// No /game: JO's identity, and JO's gate tag (the mount carries no gt.ssc).
+	CHECK(server.title() == title_identity(gameprofile::GAME_JO));
+	CHECK(server.gate_tag() == "jop:cus2");
 
 	// The host file reached the session: the name, the message, the cap (8; the
 	// slot limit adds the dedicated slot, 8 + 1), the 20-kill limit, the starting
@@ -183,7 +219,7 @@ int main() {
 		net::ScopedSocket browse(net::udp_bind(0, &browse_port));
 		CHECK(browse.is_valid());
 		const uint32_t ci = 0x1234;
-		const std::vector<uint8_t> probe = build_lan_discovery_probe(
+		const std::vector<uint8_t> probe = build_lan_discovery_probe(kJo,
 				ci, peer_addr_from_octets(server_ep.ip, server_ep.port).ip, server_ep.port);
 		net::udp_send_to(browse.get(), server_ep, probe.data(), probe.size());
 		LanDiscoveryServer found;
@@ -193,7 +229,7 @@ int main() {
 			uint8_t rx[2048];
 			net::Endpoint from{};
 			const int n = net::udp_recv_from(browse.get(), rx, sizeof(rx), from, 10);
-			if (n > 0) answered = parse_lan_discovery_reply(rx, static_cast<size_t>(n), ci, found);
+			if (n > 0) answered = parse_lan_discovery_reply(kJo, rx, static_cast<size_t>(n), ci, found);
 		}
 		CHECK(answered);
 		CHECK(found.server_name == "Serve Test");
@@ -208,6 +244,7 @@ int main() {
 	net::ScopedSocket joiner_sock(net::udp_bind(0, &joiner_port));
 	CHECK(joiner_sock.is_valid());
 	inmatch::ClientRuntime client("ServeJoiner");
+	client.set_title(&kJo);
 	auto ship = [&](const std::vector<uint8_t> &d) {
 		if (!d.empty()) net::udp_send_to(joiner_sock.get(), server_ep, d.data(), d.size());
 	};

@@ -97,7 +97,11 @@ public:
 	struct Config {
 		uint32_t client_index = 1;   // ci — caller-chosen (binding: random)
 		uint32_t client_key = 1;     // ck — caller-chosen (binding: random)
-		std::string na = "jop:cus2"; // gate/game tag echoed in ClientAuth NA
+		// The gate tag echoed in ClientAuth NA: the title's, or the mount's gt.ssc's
+		// (title_gate_tag), copied into the connection's parameters at the connect.
+		// [orig: CNapiGameSession_ConnectToNovaWorld @0x4d494f - Napi_CopyString(params,
+		//  stru_B5FF50.protocol, 64), handed to CNapiGameSession_InitNPConnection @0x4d49b8]
+		std::string na;
 
 		// ClientHello identity. The real NovaWorld server VALIDATES four fields
 		// in HandleClientHello @ 0x6213B0 and silently drops the ClientHello
@@ -105,21 +109,24 @@ public:
 		//   NVS  == the Milota NAPI-protocol version string (it is the protocol
 		//           version, NOT client identity),
 		//   PN   == the server game id "NOVAWORLDUDP",
-		//   PV1  == "0.0.0 2/10/2004 EM",
+		//   PV1  == the title's lobby PV1 (JO's "0.0.0 2/10/2004 EM"),
 		//   PG   == the 16-byte protocol GUID (added in build_client_hello).
-		// CO/AP/BDAT are read but never validated, so they stay our identity.
-		// All four constants are from CNapiGameSession_InitNPConnection @ 0x4d3be0.
+		// CO/AP/BDAT are read but never validated, so CO and AP stay our identity;
+		// BDAT is the title's (a free field). The constants are
+		// CNapiGameSession_InitNPConnection @ 0x4d3be0's; the title's two come from
+		// lobby() (TitleIdentity::lobby_pv1 / lobby_bdat).
 		std::string nvs  = "NAPI NP Version 0.0.1 1/12/2004 - 2/20/2004 Milota Copyright 2004 NovaLogic";
 		std::string co   = "OpenNova";
 		std::string ap   = "OpennovaGodotClient.exe";
-		std::string bdat = "Jul 21 2009 18:54:41";  // retail BDAT (free field)
+		std::string bdat;                            // the title's lobby BDAT (free field)
 		std::string pn   = "NOVAWORLDUDP";           // validated == server game id
-		std::string pv1  = "0.0.0 2/10/2004 EM";     // validated == server PV1
+		std::string pv1;                             // the title's lobby PV1, validated
 		std::string pv2  = "1";
 
 		// The 16-byte protocol GUID emitted as PG in the hello and the auth. By
 		// default (use_default_pg) the builder picks the GUID for `pn`:
-		// NOVAWORLDUDP -> the lobby GUID, JointOperations -> the game GUID. Set
+		// NOVAWORLDUDP -> the lobby GUID, a title's in-match PN -> that title's
+		// game GUID (net/title/title_identity.h). Set
 		// `pg` + use_default_pg=false to override with explicit bytes.
 		std::array<uint8_t, 16> pg{};
 		bool use_default_pg = true;
@@ -182,12 +189,17 @@ public:
 		std::function<uint32_t()> next_client_key;
 		std::function<std::string()> next_scrk;
 
+		// The NovaWorld session connection of a title (complete:
+		// resolve_title_identity) whose gate manager holds `gate_tag`
+		// (title_gate_tag): NA, PV1 and BDAT set, the rest as defaulted.
+		static Config lobby(const TitleIdentity &title, std::string gate_tag);
+
 		// Preset for the in-match game session: the ClientHello the client sends
 		// to a host after NWJoin, which flips the connection protocol from the
-		// lobby (NOVAWORLDUDP) to the game (JOINTOPERATIONS). The complete
-		// CO/AP/BDAT/PN/PG/PV1/PV2 identity is the retail CNapiNetwork_Init
-		// @ 0x4ca4a0 block, independently witnessed in the LAN ClientAuth capture.
-		static Config jointoperations();
+		// lobby (NOVAWORLDUDP) to the title's game protocol (JO's
+		// JOINTOPERATIONS). The complete CO/AP/BDAT/PN/PG/PV1/PV2 identity is the
+		// title's CNapiNetwork_Init @ 0x4ca4a0 block (make_title_client_hello).
+		static Config game_protocol(const TitleIdentity &title);
 	};
 
 	// A server notification the owner acts on (state changes are already applied).
@@ -690,11 +702,14 @@ ClientAuth make_client_auth(const ClientSession::Config &cfg, std::string_view c
 // and the host-registration (host) connection carry this same set — retail
 // builds it once in CNapiGameSession_ConnectToNovaWorld, which serves both
 // directions. `gate_tag` is the const protocol/gate tag (our ClientAuth `na`,
-// e.g. "jop:cus2" — stru_B5FF50.protocol); the rest come straight from the
+// the title's or gt.ssc's, stru_B5FF50.protocol); the rest come straight from the
 // gate response (ProcessResponse @ 0x4ced20) and are empty against the
 // permissive OpenNova gate.
 struct NovaWorldJoinCu {
 	std::string application = "OpennovaGodotClient.exe";  // exe basename
+	// BuildDateAndTime: the title's lobby BDAT (TitleIdentity::lobby_bdat).
+	// [orig: CNapiGameSession_ConnectToNovaWorld @0x4d479d]
+	std::string build_date_and_time;
 	std::string gate_tag;        // GateTag  <- stru_B5FF50.protocol (== na)
 	std::string met_tag;         // MetTag   <- gate VAR METLABEL  (byte_B5F4BC)
 	std::string udp_code1;       // UdpCode1 <- gate VAR UDPCODE1  (byte_B5F8E8)

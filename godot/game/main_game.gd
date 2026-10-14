@@ -679,6 +679,9 @@ func _enter_menu(dir: String) -> bool:
 	# The menu, loading screen, and world are one runtime resource session.
 	# GameWorld must not remount from mutable persisted settings after boot.
 	_world.set_resource_root(_root)
+	# The LAN browse speaks the mounted game's title.
+	if _lan_session != null:
+		_lan_session.resource_root = _root
 	# The mounted expansion's text-override table (a loose expansion/<n>/<n>.bin
 	# only, never the archived copy), installed as the table every string lookup
 	# tries first and re-installed on each remount of this root, the menu's and the
@@ -862,6 +865,7 @@ func _wire_shell() -> void:
 	_player_info_companion = PlayerInfoMenuCompanion.new()
 	_lan_session = LanSession.new()
 	_lan_session.name = "LanSession"
+	_lan_session.resource_root = _root
 	add_child(_lan_session)
 	_mp_companion.set_lan_session(_lan_session)
 	_menu_shell.add_companion(_mp_companion)

@@ -1,10 +1,15 @@
 #include <net/novaworld/gate_metrics.h>
+#include <net/title/title_identity.h>
+#include <base/gameprofile/gameprofile.h>
 #include <net/novaworld/gate_probe.h>
 #include <net/novacrypto/nwu.h>
 
 #include <cstdio>
 #include <string>
 #include <vector>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 static bool expect(bool ok, const char *why) {
 	if (!ok) std::fprintf(stderr, "FAIL: %s\n", why);
@@ -36,7 +41,7 @@ int main() {
 			if (!expect(!decode(text.substr(0, n), report), "truncated report rejected")) return 1;
 		if (!expect(!decode(text + '\0', report), "report has no trailing NUL")) return 1;
 	}
-	const auto gate = opennova::gate_probe_build(opennova::GATE_PROBE_TAG_JOINTOPS);
+	const auto gate = opennova::gate_probe_build(kJo.gate_tag);
 	if (!expect(!opennova::gate_metrics_decode(gate.data(), gate.size(), report),
 		"ordinary GATEAPI probe is not metrics")) return 1;
 	for (const char *row : {"LABEL \"x\"", "\tLABEL \"x", "\tGTZB -", "\tPID 12x"})

@@ -1,9 +1,12 @@
-// opennova-lan-probe -- wait for a retail-compatible JO LAN host to answer the
-// stateless 0x41 discovery probe. This is an automation/readiness tool: it
-// deliberately stops before 0x42 admission and therefore never consumes a
-// player slot or mutates the host session.
+// opennova-lan-probe -- wait for a retail-compatible LAN host of a title (JO
+// unless --game names another) to answer the stateless 0x41 discovery probe.
+// This is an automation/readiness tool: it deliberately stops before 0x42
+// admission and therefore never consumes a player slot or mutates the host
+// session.
 
 #include "lan_probe_client.h"
+
+#include <net/title/title_identity.h>
 
 #include <chrono>
 #include <cstdio>
@@ -15,8 +18,8 @@ namespace {
 
 void print_usage() {
 	std::fprintf(stderr,
-			"usage: opennova-lan-probe [--host A.B.C.D] [--port N] [--timeout-ms N] "
-			"[--interval-ms N] [--expect-name NAME]\n");
+			"usage: opennova-lan-probe [--game CODE] [--host A.B.C.D] [--port N] "
+			"[--timeout-ms N] [--interval-ms N] [--expect-name NAME]\n");
 }
 
 bool parse_bounded_int(const char *text, int minimum, int maximum, int &out) {
@@ -56,6 +59,7 @@ int main(int argc, char *argv[]) {
 	options.client_index = static_cast<uint32_t>(
 			std::chrono::steady_clock::now().time_since_epoch().count());
 	if (options.client_index == 0) options.client_index = 1;
+	std::string game = "jo";
 
 	for (int i = 1; i < argc; ++i) {
 		const char *arg = argv[i];
@@ -69,7 +73,9 @@ int main(int argc, char *argv[]) {
 		}
 		const char *value = argv[++i];
 		int parsed = 0;
-		if (std::strcmp(arg, "--host") == 0) {
+		if (std::strcmp(arg, "--game") == 0) {
+			game = value;
+		} else if (std::strcmp(arg, "--host") == 0) {
 			if (!parse_ipv4(value, options.endpoint)) {
 				std::fprintf(stderr, "opennova-lan-probe: --host must be a dotted IPv4 address\n");
 				return 2;
@@ -97,6 +103,13 @@ int main(int argc, char *argv[]) {
 			print_usage();
 			return 2;
 		}
+	}
+
+	std::string title_error;
+	options.title = resolve_title_identity(game, title_error);
+	if (options.title == nullptr) {
+		std::fprintf(stderr, "opennova-lan-probe: --game: %s\n", title_error.c_str());
+		return 2;
 	}
 
 	if (net::startup() != 0) {

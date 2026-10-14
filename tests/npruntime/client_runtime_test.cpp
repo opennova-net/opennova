@@ -1,4 +1,6 @@
 #include <runtime/world/radio_call.h>
+#include <base/gameprofile/gameprofile.h>
+#include <net/title/title_identity.h>
 
 #include <filesystem>
 #include <fstream>
@@ -77,6 +79,9 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 namespace {
 
@@ -255,6 +260,7 @@ bool build_joiner_client_auth(inmatch::JoinRole role,
 		std::string side_password = {}, uint32_t server_flags = 0,
 		const inmatch::CharacterJoinVars *installed_vars = nullptr) {
 	inmatch::JoinerConnection joiner("SpectatorWire");
+	joiner.set_title(&kJo);
 	joiner.set_join_request(role, std::move(password), std::move(server_password),
 			std::move(side_password));
 	if (installed_vars != nullptr) joiner.set_character_join_vars(*installed_vars);
@@ -380,6 +386,7 @@ bool run_spectator_clientauth_and_state_latch() {
 	constexpr uint32_t kSession = 0x10203040u;
 	constexpr uint32_t kClientKey = 0x50607080u;
 	inmatch::ClientRuntime runtime("SpectatorState");
+	runtime.set_title(&kJo);
 	runtime.seed_session(
 			kSession, kClientKey, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId);
@@ -404,6 +411,7 @@ bool run_spectator_clientauth_and_state_latch() {
 
 bool run_seeded_objective_layout_hint() {
 	inmatch::ClientRuntime client("Replay");
+	client.set_title(&kJo);
 	client.seed_session(0x1234u, 0u, "client-key", "server-key",
 	                    7, 6, 0x0001, w::kPlayerInfantryTypeId, 0x30020u);
 	if (!expect(client.view().game_type() == 0x30020u,
@@ -434,6 +442,7 @@ bool run_challenge_diagnostics_pass_through_the_runtime() {
 	const std::string server_scrk = "SERVER-CHALLENGE-DIAG-SCRK";
 	constexpr uint32_t kChallengeClientKey = 0x0BADCAFEu;
 	inmatch::ClientRuntime runtime("ChallengeDiag");
+	runtime.set_title(&kJo);
 	runtime.seed_session(
 			0x11223344u, kChallengeClientKey, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId);
@@ -453,6 +462,7 @@ bool run_challenge_diagnostics_pass_through_the_runtime() {
 	            "a healthy session carries no reject or disconnect record"))
 		return false;
 	inmatch::ClientRuntime unseeded("ChallengeDiagDefaults");
+	unseeded.set_title(&kJo);
 	return expect(unseeded.challenge_diagnostics().entity_checksum_seen == 0 &&
 	                      !unseeded.last_join_reject().set &&
 	                      !unseeded.has_disconnect_event(),
@@ -467,6 +477,7 @@ bool run_fire_queue_stamps_runtime_tick() {
 	// zero: a replay seeds it the way the capture's S2C 0x61 did.
 	constexpr uint32_t kTickSeed = 0x00110000u;
 	inmatch::ClientRuntime client("Shooter");
+	client.set_title(&kJo);
 	client.seed_session(0x11223344u, 0u, client_scrk, server_scrk,
 	                    1, 0, self_handle, w::kPlayerInfantryTypeId, 0u, kTickSeed);
 
@@ -537,6 +548,7 @@ bool run_tick_seed_anchors_the_client_clock() {
 	// not advance it — and the shot is STILL queued, stamped with that zero, exactly as
 	// retail's client arm does. The zero is what the host's own gate rejects.
 	inmatch::ClientRuntime unseeded("Unseeded");
+	unseeded.set_title(&kJo);
 	unseeded.seed_session(0x33445566u, 0u, client_scrk, server_scrk,
 	                      1, 0, self_handle, w::kPlayerInfantryTypeId, 0u, /*tick_seed=*/0u);
 	for (int i = 0; i < 5; ++i) (void)unseeded.Client_ProcessNetworkFrame(100 + i);
@@ -574,6 +586,7 @@ bool run_tick_seed_anchors_the_client_clock() {
 	// (b) SEEDED via the wire: an S2C 0x61 re-bases the clock, and the very next frame's
 	// shot stamps seed+1 — comfortably past the freshness floor the host stamped.
 	inmatch::JoinerConnection joiner("TickSeed", [] { return uint64_t(0); });
+	joiner.set_title(&kJo);
 	joiner.seed_in_match(0x44556677u, 1u, client_scrk, server_scrk,
 	                     1, 0, self_handle, 0x14B9);
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
@@ -610,6 +623,7 @@ bool run_end_round_header_pulls_complete_board() {
 	const std::string client_scrk = "CLIENT-END-ROUND-SCRK";
 	const std::string server_scrk = "SERVER-END-ROUND-SCRK";
 	inmatch::JoinerConnection joiner("RoundPull");
+	joiner.set_title(&kJo);
 	// A team game type: the 0x1D form is the session-state pick, so the
 	// joiner must know g_GameType before the header arrives.
 	joiner.seed_in_match(0x10203040u, 1u, client_scrk, server_scrk,
@@ -712,6 +726,7 @@ bool run_end_round_named_header_kicks_and_folds() {
 	const std::string client_scrk = "CLIENT-END-ROUND-DM-SCRK";
 	const std::string server_scrk = "SERVER-END-ROUND-DM-SCRK";
 	inmatch::JoinerConnection joiner("RoundPullDM");
+	joiner.set_title(&kJo);
 	joiner.seed_in_match(0x10203041u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId, /*game_type=*/0u);
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
@@ -762,6 +777,7 @@ bool run_unknown_scoreboard_row_requests_player_sync() {
 	const std::string client_scrk = "CLIENT-SYNC-RETRY-SCRK";
 	const std::string server_scrk = "SERVER-SYNC-RETRY-SCRK";
 	inmatch::ClientRuntime client("SyncRetryRuntime");
+	client.set_title(&kJo);
 	client.seed_session(0x63748596u, 1u, client_scrk, server_scrk,
 	                    1, 0, 0x0002, w::kPlayerInfantryTypeId);
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
@@ -807,6 +823,7 @@ bool run_class_allow_mask_follows_retail_host() {
 	const std::string client_scrk = "CLIENT-CLASS-MASK-SCRK";
 	const std::string server_scrk = "SERVER-CLASS-MASK-SCRK";
 	inmatch::JoinerConnection joiner("ClassMask");
+	joiner.set_title(&kJo);
 	joiner.seed_in_match(0x52637485u, 1u, client_scrk, server_scrk,
 	                     1, 0, 0x0002, w::kPlayerInfantryTypeId);
 	if (!expect(joiner.class_allow_mask() == 0x03FFu,
@@ -836,6 +853,7 @@ bool run_class_allow_mask_follows_retail_host() {
 	// The embedding runtime must expose the same receive-side state to its UI
 	// adapter, not merely consume it inside JoinerConnection.
 	inmatch::ClientRuntime client("ClassMaskRuntime");
+	client.set_title(&kJo);
 	client.seed_session(0x63748596u, 1u, client_scrk, server_scrk,
 	                    1, 0, 0x0002, w::kPlayerInfantryTypeId);
 	SessionSequencing runtime_server_tx = inmatch::make_jo_game_session_sequencing();
@@ -937,6 +955,7 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 
 	// --- the NovaWorld joiner: APPID after COUNTRYCODE, CD after VERSIONCRCSTRING
 	inmatch::JoinerConnection joiner("JoinTokens");
+	joiner.set_title(&kJo);
 	joiner.set_expansion_version_root(cc_root.string());
 	joiner.set_join_request(inmatch::JoinRole::Player, "", "", "SideSecret");
 	inmatch::CharacterJoinVars side_profile =
@@ -1011,6 +1030,7 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 
 	// --- the LAN joiner: no APPID chunk
 	inmatch::JoinerConnection lan("JoinTokensLan");
+	lan.set_title(&kJo);
 	lan.set_expansion_version_root(cc_root.string());
 	lan.set_time_zone_bias(-330);
 	ServerHello lan_hello;
@@ -1031,6 +1051,7 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 	            "TZB is the time-zone bias in signed minutes"))
 		return false;
 	inmatch::JoinerConnection bare("JoinTokensBare");
+	bare.set_title(&kJo);
 	bare.set_time_zone_bias(0);
 	ServerHello bare_hello;
 	ClientAuth bare_auth;
@@ -1046,6 +1067,7 @@ bool run_retail_post_auth_prelude() {
 	constexpr uint32_t kConnectionId = 3;
 	const std::string server_scrk = "SERVER-RETAIL-PRELUDE-SCRK";
 	inmatch::JoinerConnection joiner("RetailPrelude");
+	joiner.set_title(&kJo);
 
 	// Drive the real 0x41/0x42 builders so the post-auth fixture uses this
 	// connection's live client key and SCRK.
@@ -1603,6 +1625,7 @@ bool run_early_sync_tail_latch() {
 	constexpr uint32_t kServerKey = 0x22334455u;
 	constexpr uint32_t kConnectionId = 5;
 	inmatch::JoinerConnection joiner("EarlyTail");
+	joiner.set_title(&kJo);
 
 	const std::vector<uint8_t> hello_datagram = joiner.start();
 	uint8_t opcode = 0;
@@ -1798,6 +1821,7 @@ bool run_duplicate_s2c_session_one_shot_is_not_replayed() {
 	const std::string client_scrk = "CLIENT-REPLAY-SCRK";
 	const std::string server_scrk = "SERVER-REPLAY-SCRK";
 	inmatch::JoinerConnection joiner("Replay");
+	joiner.set_title(&kJo);
 	joiner.seed_in_match(0x11223344u, 1u, client_scrk, server_scrk,
 	                     1, 0, 0x0001, w::kPlayerInfantryTypeId);
 
@@ -1863,6 +1887,7 @@ bool run_client_reducer_preserves_packet_message_order() {
 	const std::string client_scrk = "CLIENT-REDUCER-ORDER";
 	const std::string server_scrk = "SERVER-REDUCER-ORDER";
 	inmatch::JoinerConnection joiner("ReducerOrder");
+	joiner.set_title(&kJo);
 	joiner.seed_in_match(0x10203040u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0001, w::kPlayerInfantryTypeId);
 
@@ -2045,6 +2070,7 @@ bool run_roundtrip() {
 	if (!expect(host_h.valid(), "host's own player spawned (cached.local_player)")) return false;
 
 	inmatch::ClientRuntime client(kName);
+	client.set_title(&kJo);
 	client.set_world_ready(false); // discover the authoritative mission before installing its world
 	inmatch::CharacterJoinVars join_profile;
 	join_profile.char_id[0] = 0x0400; // nat 0, div 0, combo 2, good
@@ -2640,6 +2666,7 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 	// timed loading loops (D-NET-254) send on that clock, not on the host's ticks.
 	uint64_t client_now_ms = 1000;
 	inmatch::ClientRuntime client(kName, [&client_now_ms] { return client_now_ms; });
+	client.set_title(&kJo);
 	auto client_frame = [&client, &client_now_ms](uint32_t now_tick) {
 		client_now_ms += 16;
 		return client.Client_ProcessNetworkFrame(now_tick);
@@ -2883,6 +2910,7 @@ bool run_joiner_remote_reload_stamps_before_same_frame_body_tick() {
 	constexpr uint16_t kNonPersonHandle = 0x1003;
 
 	inmatch::ClientRuntime client("ReloadOrder");
+	client.set_title(&kJo);
 	client.seed_session(
 			0x10203040u, 1u, client_scrk, server_scrk,
 			1, 0, kSelfHandle, w::kPlayerInfantryTypeId,
@@ -2952,6 +2980,7 @@ bool run_joiner_weapon_pickup_reaches_the_pipeline() {
 	const std::string server_scrk = "SERVER-WEAPON-PICKUP-SCRK";
 	constexpr uint16_t kSelfHandle = 0x0002;
 	inmatch::ClientRuntime client("WeaponPickup");
+	client.set_title(&kJo);
 	client.seed_session(
 			0x10203041u, 1u, client_scrk, server_scrk,
 			1, 0, kSelfHandle, w::kPlayerInfantryTypeId,
@@ -3351,6 +3380,7 @@ bool run_medic_request_queues_one_reliable_0x2e() {
 	const std::string client_scrk = "CLIENT-MEDIC-SCRK";
 	const std::string server_scrk = "SERVER-MEDIC-SCRK";
 	inmatch::ClientRuntime client("MedicJoiner", [] { return uint64_t{0x10203040}; });
+	client.set_title(&kJo);
 	if (!expect(!client.queue_medic_request(),
 	            "medic request: an unconnected joiner cannot queue"))
 		return false;
@@ -3389,6 +3419,7 @@ bool run_respawn_request_queues_one_reliable_0x41() {
 	const std::string client_scrk = "CLIENT-RESPAWN-SCRK";
 	const std::string server_scrk = "SERVER-RESPAWN-SCRK";
 	inmatch::ClientRuntime client("RespawnJoiner", [] { return uint64_t{0x10203040}; });
+	client.set_title(&kJo);
 	if (!expect(!client.queue_respawn_request(),
 	            "respawn request: an unconnected joiner cannot queue"))
 		return false;
@@ -3503,6 +3534,7 @@ bool run_joiner_zone_timer_preserves_mixed_wire_order() {
 	const std::string client_scrk = "CLIENT-ZONE-TIMER-SCRK";
 	const std::string server_scrk = "SERVER-ZONE-TIMER-SCRK";
 	inmatch::ClientRuntime client("ZoneJoiner");
+	client.set_title(&kJo);
 	client.seed_session(
 			0x66778899u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId,
@@ -3610,6 +3642,7 @@ bool run_host_as_client() {
 
 	inmatch::ClientRuntime host_view(host_loop); // HostClient recv-fold only
 	ns::ClientEntityState &decoded_map = host_view.state().upsert(map_handle.packed);
+	host_view.set_title(&kJo);
 	decoded_map.x = w::to_fixed(map_entity.position.x);
 	decoded_map.y = w::to_fixed(map_entity.position.y);
 	decoded_map.z = w::to_fixed(map_entity.position.z);
@@ -3748,6 +3781,7 @@ bool run_host_startup_seeds_mounted_no_callback_carrier() {
 	owner.host_loopback = &host_loop;
 	owner.ctx.world = &world;
 	inmatch::HostConfig cfg;
+	cfg.title = &kJo;
 	cfg.config.server_name = "SINGLEPLAYERGAME";
 	cfg.config.max_players = 1;
 	cfg.socket_mode = inmatch::SocketMode::Socketless;
@@ -3806,6 +3840,7 @@ bool run_host_startup_maps_claymore_preference() {
 		inmatch::HostOwner owner;
 		owner.ctx.world = &world;
 		inmatch::HostConfig cfg;
+		cfg.title = &kJo;
 		cfg.config.mp_attributes = 0x8000u;
 		cfg.socket_mode = inmatch::SocketMode::Socketless;
 		inmatch::start_host_session(owner, cfg);
@@ -3820,6 +3855,7 @@ bool run_host_startup_maps_claymore_preference() {
 		inmatch::HostOwner owner;
 		owner.ctx.world = &world;
 		inmatch::HostConfig cfg;
+		cfg.title = &kJo;
 		cfg.config.mp_attributes = 0x3A06u;
 		cfg.socket_mode = inmatch::SocketMode::Socketless;
 		inmatch::start_host_session(owner, cfg);
@@ -3839,6 +3875,7 @@ bool run_host_startup_maps_no_tracers_rule() {
 		inmatch::HostOwner owner;
 		owner.ctx.world = &world;
 		inmatch::HostConfig cfg;
+		cfg.title = &kJo;
 		cfg.config.mp_attributes = 0x0001u;
 		cfg.socket_mode = inmatch::SocketMode::Socketless;
 		inmatch::start_host_session(owner, cfg);
@@ -3853,6 +3890,7 @@ bool run_host_startup_maps_no_tracers_rule() {
 		inmatch::HostOwner owner;
 		owner.ctx.world = &world;
 		inmatch::HostConfig cfg;
+		cfg.title = &kJo;
 		cfg.config.mp_attributes = 0x3A06u;
 		cfg.socket_mode = inmatch::SocketMode::Socketless;
 		inmatch::start_host_session(owner, cfg);
@@ -4219,6 +4257,7 @@ bool run_periodic_request_quartet_is_answered() {
 	const std::string server_scrk = "SERVER-QUARTET-SCRK";
 	uint64_t now_ms = 4242;
 	inmatch::JoinerConnection joiner("Quartet", [&now_ms] { return now_ms; });
+	joiner.set_title(&kJo);
 	joiner.seed_in_match(0x77889900u, 1u, client_scrk, server_scrk,
 	                     1, 0, 0x0002, 0x14B9);
 
@@ -4470,6 +4509,7 @@ bool run_reverse_rtt_probe_is_echoed() {
 	const std::string client_scrk = "CLIENT-REVERSE-RTT-SCRK";
 	const std::string server_scrk = "SERVER-REVERSE-RTT-SCRK";
 	inmatch::JoinerConnection joiner("ReverseRtt", [] { return uint64_t{0x55667788u}; });
+	joiner.set_title(&kJo);
 	joiner.seed_in_match(0x10203040u, 1u, client_scrk, server_scrk,
 	                     1, 0, 0x0002, w::kPlayerInfantryTypeId);
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
@@ -4509,6 +4549,7 @@ bool run_rtt_pong_fills_the_client_ring() {
 	const std::string client_scrk = "CLIENT-PONG-RTT-SCRK";
 	const std::string server_scrk = "SERVER-PONG-RTT-SCRK";
 	inmatch::JoinerConnection joiner("PongRtt", [] { return uint64_t{0x55667788u}; });
+	joiner.set_title(&kJo);
 	joiner.seed_in_match(0x10203040u, 1u, client_scrk, server_scrk,
 	                     1, 0, 0x0002, w::kPlayerInfantryTypeId);
 	if (!expect(joiner.client_ping_ms() == 0 && joiner.client_average_ping_ms() == 0,
@@ -4547,6 +4588,7 @@ bool run_server_ping_answers_and_measures() {
 	const std::string server_scrk = "SERVER-PING-SCRK";
 	uint64_t now_ms = 5000;
 	inmatch::JoinerConnection joiner("OuterPing", [&now_ms] { return now_ms; });
+	joiner.set_title(&kJo);
 	joiner.seed_in_match(0x10203040u, 7u, client_scrk, server_scrk,
 	                     1, 0, 0x0002, w::kPlayerInfantryTypeId);
 	const auto ping_body = [](uint32_t key, uint8_t wr, uint32_t ms) {
@@ -4604,6 +4646,7 @@ bool run_world_state_load_bursts_on_every_0x0f() {
 	const std::string client_scrk = "CLIENT-0F-BURST-SCRK";
 	const std::string server_scrk = "SERVER-0F-BURST-SCRK";
 	inmatch::JoinerConnection joiner("Burst");
+	joiner.set_title(&kJo);
 	joiner.seed_in_match(0x10203040u, 1u, client_scrk, server_scrk,
 	                     1, 0, 0x0002, w::kPlayerInfantryTypeId);
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
@@ -4639,6 +4682,7 @@ bool run_connection_indicators_on_a_joiner() {
 	const std::string server_scrk = "SERVER-NETQ-SCRK";
 	uint64_t now_ms = 50000;
 	inmatch::ClientRuntime client("NetQ", [&now_ms] { return now_ms; });
+	client.set_title(&kJo);
 	client.seed_session(0x10203040u, 1u, client_scrk, server_scrk,
 	                    1, 0, 0x0002, w::kPlayerInfantryTypeId,
 	                    0, 0x00100000u, /*replay_mode=*/false);
@@ -4736,6 +4780,7 @@ bool run_chat_uplink_api() {
 	const std::string server_scrk = "SERVER-CHAT-SCRK";
 	uint64_t now_ms = 10000;
 	inmatch::ClientRuntime client("Chatter", [&now_ms] { return now_ms; });
+	client.set_title(&kJo);
 	client.seed_session(0x10203040u, 1u, client_scrk, server_scrk,
 	                    1, 0, 0x0002, w::kPlayerInfantryTypeId,
 	                    0, 0x00100000u, /*replay_mode=*/false);
@@ -4822,6 +4867,7 @@ bool run_client_quality_level_folds_the_ping_ring() {
 	const std::string client_scrk = "CLIENT-QUALITY-SCRK";
 	const std::string server_scrk = "SERVER-QUALITY-SCRK";
 	inmatch::ClientRuntime client("Quality", [] { return uint64_t{100000}; });
+	client.set_title(&kJo);
 	client.seed_session(0x10203040u, 1u, client_scrk, server_scrk,
 	                    1, 0, 0x0002, w::kPlayerInfantryTypeId,
 	                    0, 0x00100000u, /*replay_mode=*/false);
@@ -4862,6 +4908,7 @@ bool run_client_quality_level_folds_the_ping_ring() {
 bool run_client_quality_frame_pressure_follows_the_frame_rate() {
 	const auto fold = [](int32_t fps, bool set_rate) {
 		inmatch::ClientRuntime client("QualityFps", [] { return uint64_t{100000}; });
+		client.set_title(&kJo);
 		client.seed_session(0x10203040u, 1u, "CLIENT-QUALITY-FPS-SCRK", "SERVER-QUALITY-FPS-SCRK",
 		                    1, 0, 0x0002, w::kPlayerInfantryTypeId,
 		                    0, 0x00100000u, /*replay_mode=*/false);
@@ -4885,6 +4932,7 @@ bool run_client_quality_frame_pressure_follows_the_frame_rate() {
 bool run_novaworld_exit_on_a_joiner() {
 	const auto run = [](const hud::NovaWorldLinkFacts &nw, uint32_t frames) {
 		inmatch::ClientRuntime client("NovaWorldExit", [] { return uint64_t{100000}; });
+		client.set_title(&kJo);
 		client.seed_session(0x10203040u, 1u, "CLIENT-NWU-EXIT-SCRK", "SERVER-NWU-EXIT-SCRK",
 		                    1, 0, 0x0002, w::kPlayerInfantryTypeId,
 		                    0, 0x00100000u, /*replay_mode=*/false);
@@ -4920,6 +4968,7 @@ bool run_novaworld_exit_on_a_joiner() {
 	if (!expect(run(unused, 62 * 3) == 0, "an unused NWU session never takes it"))
 		return false;
 	inmatch::ClientRuntime stored("NovaWorldExitStore", [] { return uint64_t{100000}; });
+	stored.set_title(&kJo);
 	stored.set_mission_exit_reason(inmatch::kMissionExitNovaWorld);
 	return expect(stored.mission_exit_reason() == inmatch::kMissionExitNovaWorld,
 			"the NWU session's own exit store lands as is");
@@ -4974,6 +5023,7 @@ bool run_mission_exit_routes() {
 		return false;
 	// A joiner's latched class-2 record reads as its mapped reason.
 	inmatch::ClientRuntime stored("MissionExitStore", [] { return uint64_t{100000}; });
+	stored.set_title(&kJo);
 	return expect(stored.mission_exit_reason() == inmatch::kMissionExitNone,
 			"a healthy joiner has stored nothing");
 }
@@ -4981,6 +5031,7 @@ bool run_mission_exit_routes() {
 bool run_direct_uplink_framing_is_transient() {
 	const std::string client_scrk = "CLIENT-DIRECT-UPLINK-SCRK";
 	inmatch::JoinerConnection joiner("DirectUplink");
+	joiner.set_title(&kJo);
 	joiner.seed_in_match(
 			0x31415926u, 1u, client_scrk, "SERVER-DIRECT-UPLINK-SCRK",
 			1, 0, 0x0002, w::kPlayerInfantryTypeId);
@@ -5005,6 +5056,7 @@ bool run_network_spawn_does_not_mutate_loaded_model_snapshot() {
 	const std::string client_scrk = "CLIENT-MODEL-SNAPSHOT-SCRK";
 	const std::string server_scrk = "SERVER-MODEL-SNAPSHOT-SCRK";
 	inmatch::ClientRuntime client("ModelSnapshot", [] { return uint64_t{1000}; });
+	client.set_title(&kJo);
 	client.seed_session(
 			0x20304050u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId,
@@ -5063,6 +5115,7 @@ bool run_split_batch_keeps_deployment_pick_ack_causal() {
 	const std::string client_scrk = "CLIENT-PICK-SPLIT-SCRK";
 	const std::string server_scrk = "SERVER-PICK-SPLIT-SCRK";
 	inmatch::ClientRuntime client("PickSplit", [] { return uint64_t{2000}; });
+	client.set_title(&kJo);
 	client.seed_session(
 			0x30405060u, 1u, client_scrk, server_scrk,
 			10, 0, 0x0002, w::kPlayerInfantryTypeId,
@@ -5145,6 +5198,7 @@ bool run_unrelated_loadout_cannot_revive_dead_client() {
 	const std::string client_scrk = "CLIENT-DEAD-LOADOUT-SCRK";
 	const std::string server_scrk = "SERVER-DEAD-LOADOUT-SCRK";
 	inmatch::ClientRuntime client("DeadLoadout", [] { return uint64_t{3000}; });
+	client.set_title(&kJo);
 	client.seed_session(
 			0x40506070u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId,
@@ -5204,6 +5258,7 @@ bool run_self_respawn_edge_releases_a_revive_deploy() {
 	const std::string client_scrk = "CLIENT-REVIVE-EDGE-SCRK";
 	const std::string server_scrk = "SERVER-REVIVE-EDGE-SCRK";
 	inmatch::ClientRuntime client("ReviveEdge", [] { return uint64_t{4000}; });
+	client.set_title(&kJo);
 	client.seed_session(
 			0x50607080u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId,
@@ -5274,6 +5329,7 @@ bool run_queued_gameplay_survives_a_death_before_the_boundary() {
 	const std::string client_scrk = "CLIENT-QUEUED-DEATH-SCRK";
 	const std::string server_scrk = "SERVER-QUEUED-DEATH-SCRK";
 	inmatch::ClientRuntime client("QueuedDeath", [] { return uint64_t{4000}; });
+	client.set_title(&kJo);
 	client.seed_session(
 			0x41516171u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId,
@@ -5313,6 +5369,7 @@ bool run_live_frame_uses_wall_clock_and_batches_mount_requests() {
 	const std::string server_scrk = "SERVER-LIVE-BATCH-SCRK";
 	uint64_t now_ms = 0x11223344u;
 	inmatch::ClientRuntime client("LiveBatch", [&now_ms] { return now_ms; });
+	client.set_title(&kJo);
 	client.seed_session(
 			0x55667788u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId,
@@ -5396,6 +5453,7 @@ bool run_mounted_slot_select_and_reload_producers() {
 	const std::string client_scrk = "CLIENT-MOUNTED-SLOT-SCRK";
 	const std::string server_scrk = "SERVER-MOUNTED-SLOT-SCRK";
 	inmatch::ClientRuntime client("MountedSlot", [] { return uint64_t{0x10203040}; });
+	client.set_title(&kJo);
 	client.seed_session(
 			0x55667788u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId,
@@ -5438,6 +5496,7 @@ bool run_same_packet_holdoff_keeps_first_admission_boundary_open() {
 	constexpr uint32_t kConnectionId = 7;
 	const std::string server_scrk = "SERVER-HOLDOFF-ADMISSION-SCRK";
 	inmatch::ClientRuntime client("HoldoffAdmission");
+	client.set_title(&kJo);
 
 	const std::vector<uint8_t> hello_datagram = client.start();
 	uint8_t opcode = 0;
@@ -5578,6 +5637,7 @@ bool run_missing_sequence_request_leaves_from_the_receive_pump() {
 	const std::string client_scrk = "CLIENT-NACK-HOLDOFF-SCRK";
 	const std::string server_scrk = "SERVER-NACK-HOLDOFF-SCRK";
 	inmatch::ClientRuntime client("NackHoldoff", [] { return uint64_t{0x55667788u}; });
+	client.set_title(&kJo);
 	client.seed_session(kServerKey, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
@@ -5672,6 +5732,7 @@ bool run_resend_answer_and_pong_leave_from_the_receive_pump() {
 	const std::string client_scrk = "CLIENT-HOLDOFF-RETAINED-SCRK";
 	const std::string server_scrk = "SERVER-HOLDOFF-RETAINED-SCRK";
 	inmatch::ClientRuntime client("HoldoffRetained", [] { return uint64_t{0x10203040u}; });
+	client.set_title(&kJo);
 	client.seed_session(kServerKey, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
 
@@ -5774,6 +5835,7 @@ bool run_game_reset_ends_the_round_linger() {
 	const std::string client_scrk = "CLIENT-LINGER-SCRK";
 	const std::string server_scrk = "SERVER-LINGER-SCRK";
 	inmatch::ClientRuntime client("Linger", [] { return uint64_t{0x31323334u}; });
+	client.set_title(&kJo);
 	client.seed_session(kServerKey, 1u, client_scrk, server_scrk, 1, 0, 0x0002,
 			w::kPlayerInfantryTypeId, 0x10000u, 0, /*replay_mode=*/false);
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
@@ -5817,6 +5879,7 @@ bool run_queued_stance_waits_for_the_send_boundary() {
 	const std::string client_scrk = "CLIENT-STANCE-QUEUE-SCRK";
 	const std::string server_scrk = "SERVER-STANCE-QUEUE-SCRK";
 	inmatch::ClientRuntime client("StanceQueue", [] { return uint64_t{0x31323334u}; });
+	client.set_title(&kJo);
 	client.seed_session(kServerKey, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
@@ -5903,6 +5966,7 @@ bool run_c2s_producers_share_one_chronological_queue() {
 	};
 	{
 		inmatch::ClientRuntime client("OneQueue", [] { return uint64_t{0x41424344u}; });
+		client.set_title(&kJo);
 		client.seed_session(kServerKey, 1u, client_scrk, server_scrk,
 				1, 0, 0x0002, w::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
 		ClientFiredRound fire;
@@ -5926,6 +5990,7 @@ bool run_c2s_producers_share_one_chronological_queue() {
 			return false;
 	}
 	inmatch::ClientRuntime client("OneQueuePick", [] { return uint64_t{0x41424345u}; });
+	client.set_title(&kJo);
 	client.seed_session(kServerKey, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
 	FrameUpdate death;
@@ -5956,6 +6021,7 @@ bool run_carrier_repair_queues_at_its_record() {
 	const std::string client_scrk = "CLIENT-REPAIR-QUEUE-SCRK";
 	const std::string server_scrk = "SERVER-REPAIR-QUEUE-SCRK";
 	inmatch::ClientRuntime client("RepairQueue", [] { return uint64_t{0x51525354u}; });
+	client.set_title(&kJo);
 	client.seed_session(kServerKey, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
 	FrameUpdate frame;
@@ -5996,6 +6062,7 @@ bool run_receive_replies_queue_in_wire_order() {
 	const std::string client_scrk = "CLIENT-WIRE-ORDER-SCRK";
 	const std::string server_scrk = "SERVER-WIRE-ORDER-SCRK";
 	inmatch::ClientRuntime client("WireOrder", [] { return uint64_t{0x61626364u}; });
+	client.set_title(&kJo);
 	client.seed_session(kServerKey, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
@@ -6021,6 +6088,7 @@ bool run_settings_update_preserves_active_holdoff_countdown() {
 	const std::string client_scrk = "CLIENT-HOLDOFF-UPDATE-SCRK";
 	const std::string server_scrk = "SERVER-HOLDOFF-UPDATE-SCRK";
 	inmatch::ClientRuntime client("HoldoffUpdate");
+	client.set_title(&kJo);
 	client.seed_session(
 			0x61728394u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId,
@@ -6067,6 +6135,7 @@ bool run_settings_send_holdoff_blocks_exact_frame_count() {
 	const std::string server_scrk = "SERVER-HOLDOFF-SCRK";
 	uint64_t now_ms = 1000;
 	inmatch::ClientRuntime client("Holdoff", [&now_ms] { return now_ms; });
+	client.set_title(&kJo);
 	client.seed_session(
 			0x66778899u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId,
@@ -6137,6 +6206,7 @@ bool run_send_holdoff_defers_due_housekeeping() {
 	const std::string server_scrk = "SERVER-HOLDOFF-DUE-SCRK";
 	uint64_t now_ms = 2000;
 	inmatch::ClientRuntime client("HoldoffDue", [&now_ms] { return now_ms; });
+	client.set_title(&kJo);
 	client.seed_session(
 			0x778899AAu, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId,
@@ -6194,6 +6264,7 @@ bool run_finite_quality_retention_expires_on_flush_310() {
 	const std::string client_scrk = "CLIENT-QUALITY-TTL-SCRK";
 	const std::string server_scrk = "SERVER-QUALITY-TTL-SCRK";
 	inmatch::ClientRuntime client("QualityTtl", [] { return uint64_t{9000}; });
+	client.set_title(&kJo);
 	client.seed_session(
 			0x66778899u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId,
@@ -6235,6 +6306,7 @@ bool run_world_state_load_pools_reach_the_runtime() {
 	const std::string server_scrk = "SERVER-POOLS-SCRK";
 	uint64_t now_ms = 0x01020304u;
 	inmatch::ClientRuntime client("Pools", [&now_ms] { return now_ms; });
+	client.set_title(&kJo);
 	client.seed_session(
 			0x44556677u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId,
@@ -6280,6 +6352,7 @@ bool run_start_resets_reusable_runtime_state() {
 	const std::string server_scrk = "SERVER-REUSE-SCRK";
 	uint64_t now_ms = 0x01020304u;
 	inmatch::ClientRuntime client("Reusable", [&now_ms] { return now_ms; });
+	client.set_title(&kJo);
 	client.seed_session(
 			0x44556677u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId,
@@ -6369,6 +6442,7 @@ bool run_start_resets_reusable_runtime_state() {
 
 bool run_joiner_correlates_handshake_echoes() {
 	inmatch::JoinerConnection joiner("EchoGuard");
+	joiner.set_title(&kJo);
 	const std::vector<uint8_t> hello_datagram = joiner.start();
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
@@ -6429,6 +6503,7 @@ bool run_team_latch_is_falsifiable() {
 	const std::string client_scrk = "CLIENT-TEAM-LATCH-SCRK";
 	const std::string server_scrk = "SERVER-TEAM-LATCH-SCRK";
 	inmatch::JoinerConnection joiner("TeamLatch");
+	joiner.set_title(&kJo);
 	joiner.seed_in_match(0x33445566u, 1u, client_scrk, server_scrk,
 	                     1, 0, 0x0001, w::kPlayerInfantryTypeId);
 
@@ -6492,6 +6567,7 @@ bool run_player_sync_ack_walks_inclusive_roster_capacity() {
 	const std::string client_scrk = "CLIENT-PLAYER-SYNC-WALK-SCRK";
 	const std::string server_scrk = "SERVER-PLAYER-SYNC-WALK-SCRK";
 	inmatch::JoinerConnection joiner("RosterWalk");
+	joiner.set_title(&kJo);
 	joiner.seed_in_match(0x10293847u, 1u, client_scrk, server_scrk,
 	                     1, 0, 0x0002, w::kPlayerInfantryTypeId);
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
@@ -6543,6 +6619,7 @@ bool run_player_sync_ack_walks_inclusive_roster_capacity() {
 bool run_padding_echo_retail_clamp(uint32_t requested_len, std::size_t expected_body) {
 	constexpr uint32_t kServerKey = 0x66778899u;
 	inmatch::JoinerConnection joiner("PadClamp");
+	joiner.set_title(&kJo);
 
 	const std::vector<uint8_t> hello_datagram = joiner.start();
 	uint8_t opcode = 0;
@@ -6665,6 +6742,7 @@ bool run_joiner_goodbye_tears_down_host() {
 	inmatch::test::bring_up_host(host, inmatch::ConnectionMode::HostClient,
 			inmatch::SocketMode::Socketless, 0x0FE0E112u);
 	inmatch::ClientRuntime client("GoodbyeJoiner");
+	client.set_title(&kJo);
 	if (!expect(client.disconnect().empty(),
 			"goodbye: nothing to send before ServerAuth assigns the session key")) {
 		return false;
@@ -6719,6 +6797,7 @@ bool run_joiner_admits_exact_retail_message_prefix() {
 	const std::string client_scrk = "CLIENT-MSG-OUT-MAX-SCRK";
 	const std::string server_scrk = "SERVER-MSG-OUT-MAX-SCRK";
 	inmatch::JoinerConnection reliable_joiner("ReliablePrefix");
+	reliable_joiner.set_title(&kJo);
 	reliable_joiner.seed_in_match(
 			0x12345678u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId);
@@ -6772,6 +6851,7 @@ bool run_joiner_admits_exact_retail_message_prefix() {
 	}
 
 	inmatch::JoinerConnection failing_joiner("FailedSuffix");
+	failing_joiner.set_title(&kJo);
 	failing_joiner.seed_in_match(
 			0xAABBCCDDu, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId);
@@ -6795,6 +6875,7 @@ bool run_joiner_admits_exact_retail_message_prefix() {
 	// the pool without overflowing it, like retail's per-node Create loop (a
 	// 1,201st would be the MSGCRE overflow above).
 	inmatch::JoinerConnection transient_joiner("TransientPrefix");
+	transient_joiner.set_title(&kJo);
 	transient_joiner.seed_in_match(
 			0x87654321u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId);
@@ -6826,6 +6907,7 @@ bool run_joiner_splits_to_fill_remaining_packet_space() {
 	const std::string client_scrk = "CLIENTSPLITFILL0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 	const std::string server_scrk = "SERVERSPLITFILL0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 	inmatch::JoinerConnection joiner("SplitFill");
+	joiner.set_title(&kJo);
 	joiner.seed_in_match(0x12345678u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId);
 	auto first = make_protocol_message(0x60, std::vector<uint8_t>(10, 0xA1));
@@ -6864,6 +6946,7 @@ bool run_joiner_splits_to_fill_remaining_packet_space() {
 
 bool run_flag_event_audio_and_feed_drain_independently() {
     inmatch::ClientRuntime runtime("FlagAudio");
+    runtime.set_title(&kJo);
     w::World world;
     world.registry.configure_pool(0, 4);
     w::Entity person;
@@ -6909,6 +6992,7 @@ bool run_flag_event_audio_and_feed_drain_independently() {
 //  event 48 @0x4263c4; DialogSystem_Init table @0x82F590]
 bool run_zone_event_cues_play_on_the_client() {
     inmatch::ClientRuntime runtime("ZoneAudio");
+    runtime.set_title(&kJo);
     w::World world;
     world.registry.configure_pool(0, 4);
     w::Entity person;
@@ -6967,6 +7051,7 @@ bool run_zone_event_cues_play_on_the_client() {
 
 bool run_medic_reviving_plays_both_receive_cues() {
 	inmatch::ClientRuntime runtime("MedicAudio");
+	runtime.set_title(&kJo);
 	runtime.view().set_mp_session(true);
 	w::World world;
 	world.registry.configure_pool(0, 4);
@@ -6998,6 +7083,7 @@ bool run_medic_reviving_plays_both_receive_cues() {
 
 bool run_radio_events_preserve_order_chat_and_mute_state(bool replica_only) {
     inmatch::ClientRuntime runtime("RadioAudio");
+    runtime.set_title(&kJo);
     runtime.view().set_mp_session(true);
     w::World world;
     world.registry.configure_pool(0, 4);
@@ -7061,6 +7147,7 @@ bool run_radio_events_preserve_order_chat_and_mute_state(bool replica_only) {
 //  @0x59D050]
 bool run_emote_and_local_chat_track_the_speaker(bool replica_only) {
     inmatch::ClientRuntime runtime("EmoteTrack");
+    runtime.set_title(&kJo);
     runtime.view().set_mp_session(true);
     w::World world;
     world.registry.configure_pool(0, 4);
@@ -7146,11 +7233,13 @@ bool run_voice_menu_picks_ride_the_session() {
     if (!expect(!host_view.queue_voice_menu_pick(c2s::CHAT_MESSAGE, 1),
             "only the two menu tags are picks")) return false;
     inmatch::ClientRuntime unjoined("Unjoined");
+    unjoined.set_title(&kJo);
     if (!expect(!unjoined.queue_voice_menu_pick(c2s::EMOTE_REQUEST, 3),
             "a joiner outside a session queues nothing")) return false;
     // A joiner in session frames the pick on its one-send held queue.
     const std::string client_scrk = "CLIENT-PICK-SCRK";
     inmatch::ClientRuntime joiner("Picker", [] { return uint64_t{0x10203040}; });
+    joiner.set_title(&kJo);
     joiner.seed_session(0x55667799u, 1u, client_scrk, "SERVER-PICK-SCRK", 1, 0, 0x0007,
             w::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
     if (!expect(joiner.queue_voice_menu_pick(c2s::RADIO_CALL_REQUEST, 6),
@@ -7247,6 +7336,7 @@ bool run_voice_menu_picks_round_trip_through_a_host() {
     const std::string client_scrk = "CLIENT-VOICE-SCRK";
     const std::string server_scrk = "SERVER-VOICE-SCRK";
     inmatch::ClientRuntime joiner("Voice", [] { return uint64_t{0x10203040}; });
+    joiner.set_title(&kJo);
     joiner.seed_session(0x55667799u, 1u, client_scrk, server_scrk, 1, 0, joined.packed,
             w::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
     joiner.view().set_mp_session(true);
@@ -7387,6 +7477,7 @@ bool run_contextual_radio_keys_match_retail() {
 // +0x26C damage ammo and bms id rather than the row snapshot's zero defaults.
 bool run_explosion_sound_reads_the_pool_twin_damage_ammo() {
     inmatch::ClientRuntime runtime("ExplosionAudio");
+    runtime.set_title(&kJo);
     w::World world;
     world.rules.logic_authority = false;
     world.rules.mp_session = true;
@@ -7423,6 +7514,7 @@ bool run_explosion_sound_reads_the_pool_twin_damage_ammo() {
 bool run_explosion_sound_falls_back_to_ammo_zero_bank_row_five() {
     const auto play = [](bool authored_none) -> std::string {
         inmatch::ClientRuntime runtime("ExplosionAudioFallback");
+        runtime.set_title(&kJo);
         w::World world;
         world.rules.logic_authority = false;
         world.rules.mp_session = true;
@@ -7460,6 +7552,7 @@ bool run_explosion_sound_falls_back_to_ammo_zero_bank_row_five() {
 bool run_remote_death_edge_screams() {
     const auto scream_of = [](bool night, uint16_t self) {
         inmatch::ClientRuntime runtime("DeathScream");
+        runtime.set_title(&kJo);
         w::World world;
         if (night)
             world.tables.mission_attrib_flags = w::MissionTables::kMissionAttribEnableNVG;
@@ -7511,6 +7604,7 @@ struct StillBodySource final : w::IRootMotionSource {
 std::vector<w::SoundSlotEvent> replica_mover_sounds(uint32_t flags, int32_t vel_z,
         int32_t clearance, uint32_t chute_carry = 0, int ticks = 1) {
     inmatch::ClientRuntime runtime("ReplicaMoverAudio");
+    runtime.set_title(&kJo);
     w::World world;
     static const char kProfiles[] =
             "begin \"default\"\r\n"
@@ -7595,6 +7689,7 @@ bool run_remote_chute_family_plays() {
 // deck-standing remote (carrier = the ground link, mount_bone 0) keeps TO_PRONE.
 bool run_remote_stance_sound_parent_is_the_mount_only() {
     inmatch::ClientRuntime runtime("StanceAudio");
+    runtime.set_title(&kJo);
     w::World world;
     world.registry.configure_pool(1, 4);
     w::Entity deck; deck.item_id = 1291; deck.has_item_def = true;

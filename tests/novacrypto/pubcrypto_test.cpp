@@ -1,4 +1,6 @@
 #include <net/novacrypto/ap_alphabet.h>
+#include <net/title/title_identity.h>
+#include <base/gameprofile/gameprofile.h>
 #include <net/novacrypto/crc32.h>
 #include <net/novacrypto/nwu.h>
 #include <net/novacrypto/pubcrypto.h>
@@ -7,6 +9,9 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 namespace {
 
@@ -134,10 +139,10 @@ bool key_chain_layers() {
 	if (!expect_eq(opennova::encode_key_chain(hello, "shortkey"), "OHLMEGCCCBHHEJHFEB", "one key")) return false;
 	// gt.ssc's name and key chain [orig: Mission_LoadEncryptedConfig @ 0x4cdcd0].
 	if (!expect_eq(opennova::kGateTagFile, "gt.ssc", "the gate tag's file") ||
-	    !expect_eq(opennova::kGateTagKeys, "jop:2:oyez", "the gate tag's key chain"))
+	    !expect_eq(kJo.gate_tag_keys, "jop:2:oyez", "the gate tag's key chain"))
 		return false;
 	const std::vector<uint8_t> tag = {'j', 'o', 'p', ':', 'c', 'u', 's', '2'};
-	const std::string chained = opennova::encode_key_chain(tag, opennova::kGateTagKeys);
+	const std::string chained = opennova::encode_key_chain(tag, kJo.gate_tag_keys);
 	if (chained.size() != 2 * (tag.size() + 12)) {
 		std::fprintf(stderr, "FAIL: a chain of three keys adds three CRCs\n");
 		return false;
@@ -152,16 +157,16 @@ bool key_chain_layers() {
 	}
 	if (!expect_eq_bytes(layer, tag, "the chain's layers")) return false;
 	std::vector<uint8_t> back;
-	if (!opennova::decode_key_chain(chained + "\r\n", opennova::kGateTagKeys, back) || back != tag) {
+	if (!opennova::decode_key_chain(chained + "\r\n", kJo.gate_tag_keys, back) || back != tag) {
 		std::fprintf(stderr, "FAIL: the chain reads back past a line end\n");
 		return false;
 	}
 	std::string damaged = chained;
 	damaged[0] = damaged[0] == 'A' ? 'B' : 'A';
-	if (opennova::decode_key_chain(chained + "Z", opennova::kGateTagKeys, back) ||
-	    opennova::decode_key_chain(chained.substr(1), opennova::kGateTagKeys, back) ||
-	    opennova::decode_key_chain(damaged, opennova::kGateTagKeys, back) ||
-	    opennova::decode_key_chain(opennova::encode_key_chain(tag, "jop"), opennova::kGateTagKeys, back) || !back.empty()) {
+	if (opennova::decode_key_chain(chained + "Z", kJo.gate_tag_keys, back) ||
+	    opennova::decode_key_chain(chained.substr(1), kJo.gate_tag_keys, back) ||
+	    opennova::decode_key_chain(damaged, kJo.gate_tag_keys, back) ||
+	    opennova::decode_key_chain(opennova::encode_key_chain(tag, "jop"), kJo.gate_tag_keys, back) || !back.empty()) {
 		std::fprintf(stderr, "FAIL: the chain's decode refuses what the original returns -1 for\n");
 		return false;
 	}

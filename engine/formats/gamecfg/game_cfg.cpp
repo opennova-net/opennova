@@ -111,6 +111,23 @@ const ConfigVarRow kConfigVarRows[] = {
 };
 const size_t kConfigVarRowCount = sizeof(kConfigVarRows) / sizeof(kConfigVarRows[0]);
 
+const std::vector<ConfigVarRow> &config_var_rows(ConfigTable table) {
+	static const std::vector<ConfigVarRow> jo(kConfigVarRows, kConfigVarRows + kConfigVarRowCount);
+	static const std::vector<ConfigVarRow> dfx2 = [] {
+		std::vector<ConfigVarRow> rows = jo;
+		const ConfigVarRow category = { "mpdfxcategory", ConfigVarType::Int32, 0, "0",
+				&GameCfg::mp_dfx_category, nullptr }; // [orig: @0x831b20 (dfx2.exe)]
+		for (auto it = rows.begin(); it != rows.end(); ++it) {
+			if (std::strcmp(it->name, "mpnovaworldhostlanonly") == 0) {
+				rows.insert(it + 1, category);
+				break;
+			}
+		}
+		return rows;
+	}();
+	return table == ConfigTable::Dfx2 ? dfx2 : jo;
+}
+
 namespace {
 
 // NapiConfigVar_AssignValue for the table's types: the header row has no
@@ -439,13 +456,14 @@ bool parse_resolution_dimensions(const std::string &text, int32_t &width, int32_
 	return true;
 }
 
-GameCfg defaults(const DefaultTexts &texts, int32_t player_index, int32_t hw3d_deviceno) {
+GameCfg defaults(const DefaultTexts &texts, int32_t player_index, int32_t hw3d_deviceno,
+		ConfigTable table) {
 	// The block is zeroed, keeping its first word [orig: Config_SetDefaults
 	// @0x54D033..0x54D046, restored @0x54D0C4], then the cfg table's
 	// defaults [orig: NapiConfigVar_ApplyDefaults @0x6356D0 from @0x54D05B].
 	GameCfg cfg;
-	for (size_t i = 0; i < kConfigVarRowCount; ++i) {
-		const ConfigVarRow &row = kConfigVarRows[i];
+	cfg.table = table;
+	for (const ConfigVarRow &row : config_var_rows(table)) {
 		if (row.default_value != nullptr) assign_config_var(cfg, row, row.default_value);
 	}
 	// The packet-size and player-count folds, unsigned and signed
@@ -581,9 +599,9 @@ void apply_line(GameCfg &cfg, const io::ConfigTokens &line, const WeaponRoster &
 	// The cfg table first; a matched row ends the line whatever it assigned
 	// [orig: Config_ParseSettingsLine @0x54F75C..0x54F76B;
 	// NapiConfigVar_FindByName @0x635150 walks the rows in order].
-	for (size_t i = 0; i < kConfigVarRowCount; ++i) {
-		if (equal_nocase(kConfigVarRows[i].name, key)) {
-			assign_config_var(cfg, kConfigVarRows[i], value);
+	for (const ConfigVarRow &row : config_var_rows(cfg.table)) {
+		if (equal_nocase(row.name, key)) {
+			assign_config_var(cfg, row, value);
 			return;
 		}
 	}
@@ -612,8 +630,7 @@ namespace {
 template <typename Cfg>
 auto find_int_word(Cfg &cfg, const char *key) -> decltype(&(cfg.*kConfigVarRows[0].int_field)) {
 	if (key == nullptr || key[0] == '\0') return nullptr;
-	for (size_t i = 0; i < kConfigVarRowCount; ++i) {
-		const ConfigVarRow &row = kConfigVarRows[i];
+	for (const ConfigVarRow &row : config_var_rows(cfg.table)) {
 		if (!equal_nocase(row.name, key)) continue;
 		const bool int_row = row.type == ConfigVarType::Int32 || row.type == ConfigVarType::UInt32 ||
 				row.type == ConfigVarType::Bool;
@@ -672,7 +689,7 @@ void clamp_graphics_options(GameCfg &cfg) {
 LoadResult load(const char *text, size_t size, const LoadOptions &options) {
 	// [orig: Game_LoadConfig @0x551480]
 	LoadResult result;
-	result.cfg = defaults(options.texts, options.player_index, options.hw3d_deviceno);
+	result.cfg = defaults(options.texts, options.player_index, options.hw3d_deviceno, options.table);
 	result.cfg.version = -1; // @0x55148F
 	if (text != nullptr) {
 		result.file_read = true;
@@ -685,7 +702,8 @@ LoadResult load(const char *text, size_t size, const LoadOptions &options) {
 	if (options.lan_switch) result.cfg.mp_novaworld_host_lan_only = 1; // @0x5514BA
 	if (result.cfg.version != kConfigVersion) { // @0x5514C4
 		result.version_reset = true;
-		result.cfg = defaults(options.texts, result.cfg.player_index, result.cfg.hw3d_deviceno);
+		result.cfg = defaults(options.texts, result.cfg.player_index, result.cfg.hw3d_deviceno,
+				options.table);
 	}
 	clamp_graphics_options(result.cfg); // @0x5514D2
 	return result;

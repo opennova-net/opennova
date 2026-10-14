@@ -11,6 +11,7 @@
 #include <net/npwire/outgoing_packets.h>
 #include <net/npwire/protocol_message.h> // decode_cs_config_update
 #include <net/npwire/session_keys.h>
+#include <net/title/title_identity.h>
 
 #include <algorithm>
 #include <array>
@@ -45,10 +46,12 @@ std::array<uint8_t, 16> novaworldudp_pg() {
 	return pg;
 }
 
-// Pick the PG GUID that matches the protocol name carried in the hello/auth.
+// Pick the PG GUID that matches the protocol name carried in the hello/auth: a title's
+// in-match PN takes that title's game GUID, anything else the lobby's.
 std::array<uint8_t, 16> pg_for_pn(const std::string &pn) {
-	if (is_jointoperations_protocol_name(pn))
-		return jointoperations_protocol_guid();
+	const TitleIdentity *title = title_identity_by_protocol_name(pn);
+	if (title != nullptr && title->guid.has_value())
+		return *title->guid;
 	return novaworldudp_pg();
 }
 
@@ -143,7 +146,7 @@ std::vector<ClientSession::Config::CuVar> make_novaworld_join_cu(const NovaWorld
 	using CuVar = ClientSession::Config::CuVar;
 	return {
 	    CuVar{"Application", in.application, 2},
-	    CuVar{"BuildDateAndTime", "Jul 21 2009 18:54:41", 2},
+	    CuVar{"BuildDateAndTime", in.build_date_and_time, 2},
 	    CuVar{"Debug", "0", 2},
 	    CuVar{"CountryName", "", 2},   // empty on the join; locale rides the verify Cookie
 	    CuVar{"Language", "", 2},
@@ -156,9 +159,18 @@ std::vector<ClientSession::Config::CuVar> make_novaworld_join_cu(const NovaWorld
 	};
 }
 
-ClientSession::Config ClientSession::Config::jointoperations() {
+ClientSession::Config ClientSession::Config::lobby(const TitleIdentity &title,
+		std::string gate_tag) {
 	Config c;
-	const ClientHello retail = make_jointoperations_client_hello(c.client_index);
+	c.na = std::move(gate_tag);
+	c.pv1 = title.lobby_pv1;
+	c.bdat = title.lobby_bdat;
+	return c;
+}
+
+ClientSession::Config ClientSession::Config::game_protocol(const TitleIdentity &title) {
+	Config c;
+	const ClientHello retail = make_title_client_hello(title, c.client_index);
 	c.co = retail.co;
 	c.ap = retail.ap;
 	c.bdat = retail.bdat;
@@ -276,7 +288,7 @@ ClientHello make_client_hello(const ClientSession::Config &cfg, std::string_view
 	hello.pv2  = cfg.pv2;
 	hello.ci   = cfg.client_index;
 	// PG — the 16-byte protocol GUID the real server validates (HandleClientHello @0x6213B0 compares 16
-	// bytes at proto+284): the GUID for `pn` (NOVAWORLDUDP lobby vs JointOperations game), or the
+	// bytes at proto+284): the GUID for `pn` (the NOVAWORLDUDP lobby's vs a title's game GUID), or the
 	// explicit cfg.pg when use_default_pg is false. CO/AP/BDAT are read but never validated.
 	hello.pg = cfg.use_default_pg ? pg_for_pn(cfg.pn) : cfg.pg;
 	hello.pg_present = true;

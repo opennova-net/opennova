@@ -114,8 +114,10 @@ const char *host_push_result_name(HostPushResult result);
 //   0x46 ClientGoodBye -> 0x86 ServerGoodBye + drop the connection
 //
 // PN dispatch happens at HELLO time. "NOVAWORLDUDP" peers use the lobby
-// container path; "JointOperations"/"JOINTOPERATIONS" peers use the shared
-// authoritative inmatch host lifecycle on the same retail UDP session port.
+// container path; a title's in-match PN (classify_session_protocol), with that
+// title's complete in-match identity, uses the shared authoritative inmatch host
+// lifecycle on the same retail UDP session port when the host speaks that title
+// (JO's, "JOINTOPERATIONS").
 class NwUdpListener {
 public:
 	explicit NwUdpListener(ConnectionManager &manager);
@@ -253,7 +255,7 @@ private:
 	// state lives in the map (keyed by PeerAddr — see erase_lobby_state
 	// comment above for why CI was the wrong key).
 	LobbySession lobby_session_;
-	// JointOperations peers run through the same HostOwner/start_host_session/
+	// JO's in-match peers run through the same HostOwner/start_host_session/
 	// host_session_pump lifecycle as the game's host. This listener contributes
 	// only UDP protocol demultiplexing; the minimal authoritative World makes
 	// the complete named-spawn stream reachable.

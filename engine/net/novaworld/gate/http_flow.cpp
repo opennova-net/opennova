@@ -7,6 +7,7 @@
 #include <base/io/log.h>
 #include <base/io/strutil.h>
 #include <net/novaworld/registration_url.h>
+#include <net/title/title_identity.h>
 
 namespace opennova {
 namespace {
@@ -235,9 +236,9 @@ std::string LobbyHttpFlow::http_base() const {
 }
 
 // Fill the gate markup template. Retail substitutes exactly six tokens, each
-// matched case-insensitively, from: the gate-supplied domain, the literal
-// version pair "3"/"2345", the OS country code, the session's gate tag
-// ("jop:cus2") and the product code "jop".
+// matched case-insensitively, from: the gate-supplied domain, the title's
+// version pair (JO's "3"/"2345"), the OS country code, the session's gate tag
+// (JO's "jop:cus2", or gt.ssc's) and the title's product code (JO's "jop").
 // [orig: Mission_DeobfuscateDescription @0x4cdaa0 — NapiUtil_ReplaceAllCaseInsensitive
 //  "[DOMAINNAME]" @0x4cdb88, "[VER1]" @0x4cdb9f, "[VER2]" @0x4cdbb6, "[CC]" @0x4cdbcd,
 //  "[GT]" @0x4cdbe4, "[PRODUCTCODE]" @0x4cdbfe; called from
@@ -245,9 +246,10 @@ std::string LobbyHttpFlow::http_base() const {
 std::string LobbyHttpFlow::resolve_startup_url() const {
 	std::string su = ctx_.startup_url;
 	if (su.empty() || !startup_url_is_templated(su)) return su; // concrete (OpenNova) pass-through
+	if (ctx_.title == nullptr) return std::string();
 	su = replace_all_icase(su, "[DOMAINNAME]", ctx_.web_domain);
-	su = replace_all_icase(su, "[VER1]", "3");
-	su = replace_all_icase(su, "[VER2]", "2345");
+	su = replace_all_icase(su, "[VER1]", ctx_.title->ver1);
+	su = replace_all_icase(su, "[VER2]", ctx_.title->ver2);
 	std::string cc = "us"; // [CC] = ISO country from the OS locale (injected)
 	const std::size_t us = ctx_.locale.find("_");
 	if (us != std::string::npos) {
@@ -255,8 +257,8 @@ std::string LobbyHttpFlow::resolve_startup_url() const {
 		if (!region.empty()) cc = region;
 	}
 	su = replace_all_icase(su, "[CC]", cc);
-	su = replace_all_icase(su, "[GT]", "jop:cus2");
-	su = replace_all_icase(su, "[PRODUCTCODE]", "jop");
+	su = replace_all_icase(su, "[GT]", ctx_.gate_tag);
+	su = replace_all_icase(su, "[PRODUCTCODE]", ctx_.title->product_code);
 	return su;
 }
 
@@ -318,6 +320,9 @@ std::vector<std::pair<std::string, std::string>> LobbyHttpFlow::session_cookie_v
 
 LoginResult LobbyHttpFlow::login(const std::string &username, const std::string &password) {
 	if (login_step_ != LoginStep::Idle) return login_fail("login already in flight");
+	if (ctx_.title == nullptr) return login_fail("no title identity to log in with");
+	const std::string refusal = title_identity_refusal(*ctx_.title, TitleIdentityPart::WebFlow);
+	if (!refusal.empty()) return login_fail(refusal);
 	const std::string prepare_url = resolve_startup_url();
 	if (prepare_url.empty()) return login_fail("no gate startup_url yet — connect first");
 	login_user_ = username;
@@ -336,21 +341,29 @@ LoginResult LobbyHttpFlow::login(const std::string &username, const std::string 
 // that does not build (params the modexp gate rejects, which the Prepare leg already
 // refuses) fails the login instead of posting.
 LoginResult LobbyHttpFlow::login_post() {
-	const std::vector<LoginFormField> fields = {
+	const TitlePages &pages = *ctx_.title->pages;
+	std::vector<LoginFormField> fields = {
 		{"EPASK", epask_to_string(epask_), false}, // echoed bundle, PLAINTEXT
 		{"NAME", login_user_, true},
 		{"PASSWORD", login_pass_, true},
+	};
+	// The hidden fields as the client posts them, the reverse of the page's order (JO's captured
+	// post): a page whose form ends with charglsvssrequest (DFX2's) posts it first.
+	if (pages.glsvss_request != nullptr)
+		fields.push_back({"charglsvssrequest", pages.glsvss_request, true});
+	const std::vector<LoginFormField> hidden = {
 		{"rememberlogindata", "", false},
 		{"rememberlogin", "0", true},
-		{"pfid", "28", true},
-		{"needtoagree", "jop_2_needtoagree.htm", true},
-		{"nodb", "jop_2_nodb.htm", true},
-		{"relay", "jop_2_relay.htm", true},
-		{"msgbase", "jop_2_msg.htm", true},
-		{"enterkey", "jop_2_key.htm", true},
-		{"failure", "jop_2_login.htm", true},
-		{"success", "jop_2_main.htm", true},
+		{"pfid", std::to_string(*ctx_.title->pfid), true},
+		{"needtoagree", pages.need_to_agree, true},
+		{"nodb", pages.no_db, true},
+		{"relay", pages.relay, true},
+		{"msgbase", pages.msgbase, true},
+		{"enterkey", pages.enter_key, true},
+		{"failure", pages.login, true},
+		{"success", pages.main, true},
 	};
+	fields.insert(fields.end(), hidden.begin(), hidden.end());
 	std::string body;
 	if (!build_login_post_body(epask_, fields, body)) {
 		login_step_ = LoginStep::Idle;
@@ -415,10 +428,16 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 				HttpRequestSpec req;
 				req.valid = true;
 				req.method = HttpMethod::Get;
-				req.url = http_base() +
-						"/NWStart.dll?MSGBASE=jop_2_msg.htm&IN=jop_2_main.htm&OUT=jop_2_login.htm"
-						"&verfile=jop_2.ver&newupdateavailable=jop_2_newupdateavailable.htm"
-						"&newupdateavailablewithbypass=jop_2_newupdateavailable2.htm&junction=jop_2_junction.htm";
+				const TitlePages &pages = *ctx_.title->pages;
+				const std::string act = pages.activate != nullptr
+						? std::string("&ACT=") + pages.activate
+						: std::string();
+				req.url = http_base() + "/NWStart.dll?MSGBASE=" + pages.msgbase +
+						"&IN=" + pages.main + "&OUT=" + pages.login + act +
+						"&verfile=" + pages.version_file +
+						"&newupdateavailable=" + pages.new_update +
+						"&newupdateavailablewithbypass=" + pages.new_update_bypass +
+						"&junction=" + pages.junction;
 				req.headers = request_headers(false);
 				return login_need(std::move(req));
 			}
@@ -488,11 +507,12 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 
 // =============================== GSB browser ===============================
 
-// [orig: gsb_url()] — <base>/jop_2.gsb?a=1.
+// [orig: gsb_url()] — <base>/<the title's server list>?a=1 (JO's jop_2.gsb).
 std::string LobbyHttpFlow::gsb_url() const {
 	const std::string base = http_base();
-	if (base.empty()) return std::string();
-	return base + "/jop_2.gsb?a=1";
+	if (base.empty() || ctx_.title == nullptr || !ctx_.title->pages.has_value())
+		return std::string();
+	return base + "/" + ctx_.title->pages->server_list + "?a=1";
 }
 
 HttpRequestSpec LobbyHttpFlow::gsb_request() const {
@@ -518,16 +538,22 @@ bool LobbyHttpFlow::on_gsb_response(bool transport_ok, int code, const std::vect
 // [orig: join()] — the first NWJoin GET.
 JoinResult LobbyHttpFlow::join(uint32_t rid) {
 	if (join_step_ != JoinStep::Idle) return join_fail("join already in flight");
+	if (ctx_.title == nullptr) return join_fail("no title identity to join with");
+	const std::string refusal = title_identity_refusal(*ctx_.title, TitleIdentityPart::WebFlow);
+	if (!refusal.empty()) return join_fail(refusal);
 	if (http_base().empty()) return join_fail("no server base URL — connect first");
 	join_rid_ = rid;
 	join_step_ = JoinStep::First;
+	const TitlePages &pages = *ctx_.title->pages;
 	HttpRequestSpec req;
 	req.valid = true;
 	req.method = HttpMethod::Get;
-	req.url = http_base() +
-			"/NWJoin.dll?needexpkey=jop_2_key2err.htm&success=jop_2_join.joi&failure=jop_2_main.htm"
-			"&relay=jop_2_relay.htm&msgbase=jop_2_msg.htm&nodb=jop_2_nodb.htm&pfid=28&mode=Login&rid=" +
-			std::to_string(rid);
+	const std::string lan =
+			pages.join_lan != nullptr ? std::string("lan=") + pages.join_lan + "&" : std::string();
+	req.url = http_base() + "/NWJoin.dll?" + lan + "needexpkey=" + pages.key_error +
+			"&success=" + pages.join + "&failure=" + pages.main + "&relay=" + pages.relay +
+			"&msgbase=" + pages.msgbase + "&nodb=" + pages.no_db +
+			"&pfid=" + std::to_string(*ctx_.title->pfid) + "&mode=Login&rid=" + std::to_string(rid);
 	req.headers = request_headers(false);
 	return join_need(std::move(req));
 }

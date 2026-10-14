@@ -3,6 +3,8 @@
 // state writes [orig: SinglePlayer_StartMission @0x561af0].
 
 #include <runtime/inmatch/server_session.h>
+#include <base/gameprofile/gameprofile.h>
+#include <net/title/title_identity.h>
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/joiner_connection.h>
 #include <runtime/inmatch/server_message_dispatch.h>
@@ -39,6 +41,9 @@
 #include <memory>
 #include <utility>
 #include <vector>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 namespace {
 
@@ -561,6 +566,7 @@ bool check_retail_rate_defaults() {
 	opennova::replication::set_entity_send_budget(1600);
 	opennova::inmatch::HostOwner default_owner;
 	opennova::inmatch::HostConfig default_host;
+	default_host.title = &kJo;
 	default_host.socket_mode = SocketMode::Socketless;
 	opennova::inmatch::start_host_session(default_owner, default_host);
 	if (!expect(opennova::replication::entity_send_budget() == 600,
@@ -568,6 +574,7 @@ bool check_retail_rate_defaults() {
 
 	opennova::inmatch::HostOwner override_owner;
 	opennova::inmatch::HostConfig override_host;
+	override_host.title = &kJo;
 	override_host.socket_mode = SocketMode::Socketless;
 	override_host.config.entity_send_budget = 777;
 	opennova::inmatch::start_host_session(override_owner, override_host);
@@ -591,11 +598,13 @@ bool check_pre_dictation_holdoff_keeps_initial_settings_open() {
 	config.max_players = 8;
 	config.send_holdoff_ticks = 4;
 	opennova::inmatch::SessionStartup startup;
+	startup.title = &kJo;
 	startup.host_key = 0x0FE0E112u;
 	opennova::inmatch::create_session(owner.ctx, config, startup, nullptr);
 
 	const opennova::PeerAddr peer{0x0100007Fu, 33111};
 	opennova::inmatch::JoinerConnection joiner("HoldoffHandshake");
+	joiner.set_title(&kJo);
 	CaptureDatagramSocket socket;
 	socket.incoming.push_back({peer, joiner.start()});
 	opennova::inmatch::host_session_pump(owner, socket);
@@ -685,6 +694,7 @@ bool check_create_session_brings_up_host() {
 	settings.max_players = 1;
 
 	opennova::inmatch::SessionStartup startup;
+	startup.title = &kJo;
 	startup.host_key = 0xABCD1234;     // seed-injected (NapiNP_GenerateSessionKey result)
 	startup.host_start_tick = 100000;  // seed-injected (GetTickCount)
 	startup.session_seed_id = 654321;  // seed-injected
@@ -735,6 +745,7 @@ bool check_create_session_mpreset_exit() {
 	settings.server_name = "RESET";
 	settings.max_players = 4;
 	opennova::inmatch::SessionStartup startup;
+	startup.title = &kJo;
 	startup.host_key = 0x1234;
 	for (const int32_t word : {1, -1, 7}) {
 		settings.multiplayer_reset = word;
@@ -778,6 +789,7 @@ bool check_create_session_mpreset_exit() {
 	opennova::inmatch::HostOwner owner;
 	owner.host_loopback = &host_loop;
 	opennova::inmatch::HostConfig host;
+	host.title = &kJo;
 	host.socket_mode = SocketMode::Socketless;
 	host.serve_and_play = true;
 	host.config.multiplayer_reset = 1;
@@ -811,6 +823,7 @@ bool check_create_session_replaces_connection_role_set() {
 	opennova::inmatch::GameConfig settings;
 	settings.max_players = 8;
 	opennova::inmatch::SessionStartup startup;
+	startup.title = &kJo;
 	opennova::inmatch::create_session(ctx, settings, startup, &first_local);
 
 	opennova::inmatch::NapiNPConnection remote;
@@ -854,6 +867,7 @@ bool check_listen_host_installs_local_character_profile() {
 	opennova::inmatch::HostOwner owner;
 	owner.host_loopback = &local_client;
 	opennova::inmatch::HostConfig config;
+	config.title = &kJo;
 	config.socket_mode = SocketMode::Socketless;
 	config.serve_and_play = true;
 	config.local_character_vars.char_id[0] = 0x0400;
@@ -911,6 +925,7 @@ bool check_production_serve_mode_has_no_phantom_and_mints_startup() {
 	opennova::inmatch::HostOwner owner;
 	owner.host_loopback = &unused_local_view;
 	opennova::inmatch::HostConfig config;
+	config.title = &kJo;
 	config.socket_mode = SocketMode::Lan;
 	config.config.max_players = 16;
 	config.serve_and_play = false;
@@ -952,6 +967,7 @@ bool check_host_pump_batches_one_send_boundary() {
 	opennova::inmatch::GameConfig config;
 	config.max_players = 8;
 	opennova::inmatch::SessionStartup startup;
+	startup.title = &kJo;
 	startup.host_key = 0x01020304u;
 	opennova::inmatch::create_session(owner.ctx, config, startup, nullptr);
 
@@ -1047,6 +1063,7 @@ bool check_initial_stream_batches_with_reactive_reply() {
 	config.max_players = 8;
 	config.send_holdoff_ticks = 1;
 	opennova::inmatch::SessionStartup startup;
+	startup.title = &kJo;
 	startup.host_key = 0x01020304u;
 	opennova::inmatch::create_session(owner.ctx, config, startup, nullptr);
 
@@ -1669,6 +1686,7 @@ bool check_host_s2c_holdoff_and_frame_envelope() {
 	config.max_players = 8;
 	config.entity_send_budget = 1600;
 	opennova::inmatch::SessionStartup startup;
+	startup.title = &kJo;
 	startup.host_key = 0x01020304u;
 	opennova::inmatch::create_session(owner.ctx, config, startup, nullptr);
 
@@ -1808,6 +1826,7 @@ bool check_host_s2c_holdoff_is_per_connection() {
 	opennova::inmatch::GameConfig config;
 	config.max_players = 8;
 	opennova::inmatch::SessionStartup startup;
+	startup.title = &kJo;
 	startup.host_key = 0x01020304u;
 	opennova::inmatch::create_session(owner.ctx, config, startup, nullptr);
 
@@ -1883,6 +1902,7 @@ bool check_initial_stream_obeys_connection_holdoff() {
 	config.max_players = 8;
 	config.send_holdoff_ticks = 3;
 	opennova::inmatch::SessionStartup startup;
+	startup.title = &kJo;
 	startup.host_key = 0x01020304u;
 	opennova::inmatch::create_session(owner.ctx, config, startup, nullptr);
 
@@ -2097,6 +2117,7 @@ bool check_sparse_empty_slot_sweep_fragments_without_loss() {
 	opennova::inmatch::GameConfig config;
 	config.max_players = 8;
 	opennova::inmatch::SessionStartup startup;
+	startup.title = &kJo;
 	startup.host_key = 0x01020304u;
 	opennova::inmatch::create_session(owner.ctx, config, startup, nullptr);
 
@@ -2165,6 +2186,7 @@ bool check_sparse_empty_slot_sweep_fragments_without_loss() {
 
 	opennova::inmatch::JoinerConnection joiner(
 			"FragmentJoiner", [] { return uint64_t{0}; });
+	joiner.set_title(&kJo);
 	joiner.seed_in_match(
 			0x11223344u, remote.client_ck,
 			"CLIENTFRAGSWEEPSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
@@ -2255,6 +2277,7 @@ bool check_fragment_group_overflows_per_node() {
 	opennova::inmatch::GameConfig config;
 	config.max_players = 8;
 	opennova::inmatch::SessionStartup startup;
+	startup.title = &kJo;
 	startup.host_key = 0x01020304u;
 	opennova::inmatch::create_session(owner.ctx, config, startup, nullptr);
 
@@ -2362,6 +2385,7 @@ bool check_host_pump_reconnect_keeps_fresh_connection() {
 	// per-tick boundary explicit now that a LAN session defaults to period 12.
 	config.send_holdoff_ticks = 1;
 	opennova::inmatch::SessionStartup startup;
+	startup.title = &kJo;
 	startup.host_key = 0x0FE0E112u;
 	opennova::inmatch::create_session(owner.ctx, config, startup, nullptr);
 
@@ -2397,7 +2421,7 @@ bool check_host_pump_reconnect_keeps_fresh_connection() {
 	old.reply.player_slot = 1;
 	owner.ctx.np_protocol.connection_list.push_back(std::move(old));
 
-	opennova::ClientAuth replacement = opennova::make_jointoperations_client_auth(
+	opennova::ClientAuth replacement = opennova::make_title_client_auth(kJo,
 			2, 0x55556666u, startup.host_key, "ReplacementJoiner",
 			"NEWPUMPCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
 	add_retail_game_environment(replacement);

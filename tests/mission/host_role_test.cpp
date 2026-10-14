@@ -9,6 +9,8 @@
 // dispatcher while movement stays queued for Server_TickUpdate), and the dedicated
 // bring-up (no loopback client, no local player, no local fold).
 #include <runtime/inmatch/host_role.h>
+#include <net/title/title_identity.h>
+#include <base/gameprofile/gameprofile.h>
 #include <runtime/inmatch/local_role.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/host_session.h>
@@ -39,6 +41,9 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 using namespace opennova;
 namespace ms = opennova::mission;
@@ -102,6 +107,7 @@ void check_shell_single_player_rules_word(std::map<std::string, std::string> &fi
 		options.mp_session = mode != inmatch::SocketMode::Socketless;
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
+			cfg.title = &kJo;
 			cfg.config = inmatch::singleplayer_game_config(options.game_type, nullptr);
 			cfg.socket_mode = mode;
 			cfg.serve_and_play = true;
@@ -163,6 +169,7 @@ void check_own_world_state_location_names(std::map<std::string, std::string> &fi
 	options.game_type = mission_game_type(kernel.mission);
 	options.bringup_net_session = [&] {
 		inmatch::HostConfig cfg;
+		cfg.title = &kJo;
 		cfg.config.server_name = "location_names";
 		cfg.config.max_players = 4;
 		cfg.config.game_type = options.game_type;
@@ -219,6 +226,7 @@ void check_listen_host_deploy_convert(std::map<std::string, std::string> &files)
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
+			cfg.title = &kJo;
 			cfg.config.server_name = "deploy_convert";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;
@@ -533,6 +541,7 @@ int main() {
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
+			cfg.title = &kJo;
 			cfg.config.server_name = "listen_host_test";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;
@@ -685,6 +694,7 @@ int main() {
 			options.mp_session = true;
 			options.bringup_net_session = [&] {
 				inmatch::HostConfig cfg;
+				cfg.title = &kJo;
 				cfg.config.server_name = "gunner_walk";
 				cfg.config.max_players = 4;
 				cfg.config.game_type = options.game_type;
@@ -768,6 +778,7 @@ int main() {
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
+			cfg.title = &kJo;
 			cfg.config.server_name = "fire_gate";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;
@@ -844,6 +855,7 @@ int main() {
 				return;
 			}
 			inmatch::HostConfig cfg;
+			cfg.title = &kJo;
 			cfg.config.server_name = "respawn_key";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;
@@ -1020,6 +1032,7 @@ int main() {
 				return;
 			}
 			inmatch::HostConfig cfg;
+			cfg.title = &kJo;
 			cfg.config.server_name = "deploy_hold";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;
@@ -1222,6 +1235,7 @@ int main() {
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
+			cfg.title = &kJo;
 			cfg.config.server_name = "quality_report";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;

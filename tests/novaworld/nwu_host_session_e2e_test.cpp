@@ -10,6 +10,8 @@
 //  CNapiGameSession_HandleHostVerifyResponse @0x4d59d0; Game_StartMission @0x5248c6..0x524903]
 
 #include "nw_udp_listener.h"
+#include <net/title/title_identity.h>
+#include <base/gameprofile/gameprofile.h>
 #include "server_config.h"
 
 #include "net_datagram_socket.h"
@@ -33,6 +35,9 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 namespace {
 
@@ -111,6 +116,7 @@ int main() {
 	};
 	lobby_hooks.on_fatal = [&fatals](const std::string &message) { fatals.push_back(message); };
 	opennova::NwuLobbySession lobby(lobby_hooks, opennova::NwuLobbySession::Environment{});
+	lobby.set_title(&kJo, kJo.gate_tag);
 	bool hosting = false;
 	std::vector<std::string> host_failures;
 	opennova::NwuHostRole::Hooks role_hooks;

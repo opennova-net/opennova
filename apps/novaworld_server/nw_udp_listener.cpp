@@ -22,6 +22,9 @@
 #include <net/npwire/session_keys.h>
 #include <net/novaworld/session_protocol.h>
 #include <net/novaworld/unknown_tracker.h>
+#include <net/title/title_identity.h>
+
+#include <base/gameprofile/gameprofile.h>
 
 #include <formats/mission/bms.h>
 #include <runtime/world/ai.h>
@@ -296,6 +299,8 @@ void NwUdpListener::initialize_jo_host() {
 	jo_owner_->ctx.mission = jo_mission_.get();
 
 	inmatch::HostConfig config;
+	// The embedded host speaks JO's in-match identity.
+	config.title = title_identity(gameprofile::GAME_JO);
 	config.config.server_name = "OpenNova";
 	config.config.max_players = 64;
 	config.config.dedicated_server = true;
@@ -713,16 +718,23 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 		// add_player and remove_player_by_peer must agree byte for byte.
 		const std::string client_ip_str = peer_addr_ip_to_string(peer);
 
-		// Demultiplex JO onto the shared authoritative host pump. A route is
-		// installed only for the complete retail JO Hello identity; subsequent
-		// opcodes stay on that route so the lobby path never sees game SCRKs.
+		// Demultiplex the in-match game protocol onto the shared authoritative host
+		// pump. A hello's PN names its title; a route is installed only for a hello
+		// carrying that title's complete in-match identity, when the host speaks that
+		// title; subsequent opcodes stay on that route so the lobby path never sees
+		// game SCRKs.
 		bool route_jo = jo_peers_.count(peer) != 0;
-		if (opcode == SESSION_OPCODE_CLIENT_HELLO) {
+		if (opcode == SESSION_OPCODE_CLIENT_HELLO && jo_owner_) {
 			ClientHello probe;
-			if (parse_client_hello(body.data(), body.size(), probe) &&
-			    matches_jointoperations_identity(probe)) {
-				route_jo = true;
-				jo_peers_.insert(peer);
+			if (parse_client_hello(body.data(), body.size(), probe)) {
+				const SessionProtocol protocol = classify_session_protocol(probe.pn);
+				const TitleIdentity *title = protocol.title;
+				if (title != nullptr && title == jo_owner_->ctx.np_protocol.identity &&
+				    title_identity_complete(*title, TitleIdentityPart::Session) &&
+				    matches_title_identity(*title, probe)) {
+					route_jo = true;
+					jo_peers_.insert(peer);
+				}
 			}
 		}
 		if (route_jo && jo_owner_) {
@@ -738,7 +750,7 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 				             client_label.c_str());
 				break;
 			}
-			const SessionProtocolKind protocol = classify_session_protocol(hello.pn);
+			const SessionProtocolKind protocol = classify_session_protocol(hello.pn).kind;
 			if (protocol == SessionProtocolKind::Unsupported) {
 				std::fprintf(stderr, "[nwudp] %s — refusing PN='%s'\n", client_label.c_str(),
 						loggable(hello.pn).c_str());
@@ -795,7 +807,7 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 					hello_owner.has_value() &&
 					hello_owner->reported_id == auth.ci &&
 					hello_owner->pn == auth.pn &&
-					classify_session_protocol(hello_owner->pn) ==
+					classify_session_protocol(hello_owner->pn).kind ==
 							SessionProtocolKind::Lobby;
 			// A retransmit is the live connection's own CI and CK: once a ClientAuth
 			// has minted this endpoint's session material, its repeat replays the same
@@ -1024,8 +1036,9 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 			std::vector<ProtocolMessage> replies;
 			// The session's protocol is its accepted 0x42's; a later Hello re-names only
 			// the row's Hello identity (D-NET-630).
-			const SessionProtocolKind protocol = classify_session_protocol(conn_opt->session_pn);
-			// JointOperations peers are routed to the shared HostOwner above and
+			const SessionProtocolKind protocol =
+					classify_session_protocol(conn_opt->session_pn).kind;
+			// In-match peers of the host's title are routed to the shared HostOwner above and
 			// never reach this switch — only the lobby (NOVAWORLDUDP) container
 			// path and unsupported PNs land here.
 			if (protocol == SessionProtocolKind::Lobby) {

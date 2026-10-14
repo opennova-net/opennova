@@ -120,6 +120,9 @@ public:
 	bool has_file(const std::string &name, VfsLookupPolicy policy) const;
 	bool read_file(const std::string &name, std::vector<uint8_t> &out) const;
 	bool read_file(const std::string &name, std::vector<uint8_t> &out, VfsLookupPolicy policy) const;
+	// The stored bytes alone (Vfs::read_file_raw), for a loader that reads a file as the game
+	// stores it; a file source's read is its own.
+	bool read_file_raw(const std::string &name, std::vector<uint8_t> &out, VfsLookupPolicy policy) const;
 	const std::string &root_dir() const;
 	// The expansion whose layers ACTUALLY mounted, empty for base game — including after
 	// scan()'s silent fallback for a missing/unknown expansion (opennova::Vfs::mount_game).

@@ -43,6 +43,7 @@ uint32_t monotonic_milliseconds() {
 
 SessionStartup make_session_startup(const HostConfig &cfg) {
 	SessionStartup startup;
+	startup.title = cfg.title;
 	// The host key, from the manager's PRNG (D-NET-524).
 	// [orig: NapiNPProtocol_StartServer @0x62b5e0 - NapiNP_GenerateSessionKey on the
 	//  protocol's manager @0x62b5f3..0x62b5f5, stored @0x62b5fc]

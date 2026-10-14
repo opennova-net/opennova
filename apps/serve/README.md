@@ -2,8 +2,8 @@
 
 The headless game server (ADR 0051): the game's Serve Only host with no window and no
 Godot, configured by a host file, retail's own dedicated-server format, over the
-`game.cfg` in the directory it runs from. It mounts a Joint Operations install the way
-`opennova.exe` mounts it, boots the starting mission through the engine's one host boot
+`game.cfg` in the directory it runs from. It mounts a game install (Joint Operations unless
+`/game` names another title) the way `opennova.exe` mounts it, boots the starting mission through the engine's one host boot
 (`engine/runtime/inmatch/host_boot.h`, the same two phases the game's hosts run), binds
 `game.cfg`'s LAN port range (or, given a NovaWorld gate, its NovaWorld one, listing itself there),
 answers LAN browsers and admits joiners, retail clients included, and takes retail's remote
@@ -25,7 +25,7 @@ opennova-serve --resource-dir <game dir> /HOST <host file> [/exp <name>] [/d]
 | `/HOST <file>` | The host file (below). Required. |
 | `/exp <name>` | Mount that expansion (for example `revx02`). |
 | `/d` | Prefer loose files over the archives, as the game's `/d`. |
-| `/game <code>` | The data's game code (its SCR keying), as the game's `/game`. |
+| `/game <code>` | The data's game code, as the game's `/game`: its SCR keying and the title the server speaks (below). Default `jo`. |
 | `--loose-root` | Mount a directory that holds no game archives as loose files. |
 | `--lan-port <n>` | The first port of the bind scan (default: `game.cfg`'s `mplanserverportmin`, 32768 in a stock file). The scan steps by `mplanserverportdelta` up to `mplanserverportmax` and wraps. `0` binds a port the OS picks, which the console's `serving on UDP` line names. |
 | `--log-debug` | Print the engine's debug log lines. |
@@ -40,6 +40,27 @@ opennova-serve --resource-dir <game dir> /HOST <host file> [/exp <name>] [/d]
 `--help` prints the usage. Ctrl+C, SIGTERM or closing the console window (Windows) stops
 the server: it sends every joiner the round reset and the session's STOP goodbye, and a
 listed server deregisters (ClientStopHosting and the goodbye), before it closes the socket.
+
+## Title
+
+The game code picks the title whose identity the server speaks: the in-match identity its
+LAN and NovaWorld joiners' hellos and joins must carry and its server-info replies write, and
+on NovaWorld the gate tag it probes with, the version pair its listing publishes and the web
+pages and `pfid` its login and HOSTKEY fetch use (`engine/net/title/title_identity.h`). Without
+`/game` the server speaks Joint Operations; `/game dfx2` speaks Delta Force: Xtreme 2. A code no
+title has, or a title whose identity is not yet witnessed in full (today every one but `jo` and
+`dfx2`), stops the start with exit code 1 and a message naming the unwitnessed fields. A listing
+that logs in (`--master-host` with `--credentials`) also needs the title's web pages (the start,
+login and join pages its NovaWorld service serves), and refuses the same way a title without
+them.
+
+Under `dfx2` the server reads and writes `game.cfg` with DFX2's one extra key, `mpdfxcategory`,
+which its NovaWorld listing publishes as `DFXCATEGORY1`.
+
+The gate tag is the title's own (`jop:cus2` for Joint Operations) unless the mount carries a
+`gt.ssc` that decodes under the title's key chain, which replaces it, as the game's boot reads
+that file: loose first from the expansion's folder, then the install's folder, then the
+mounted archives. The console's `speaking` line names the title and the tag.
 
 ## NovaWorld
 

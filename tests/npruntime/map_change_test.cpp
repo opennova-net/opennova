@@ -9,6 +9,8 @@
 // swaps its team (and the side-to-team map), and the next map's first half
 // has the sides back.
 #include <base/gameprofile/game_type.h>
+#include <base/gameprofile/gameprofile.h>
+#include <net/title/title_identity.h>
 #include <formats/def/def.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/mission.h>
@@ -37,6 +39,9 @@
 #include <memory>
 #include <string>
 #include <vector>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 using namespace opennova;
 
@@ -113,6 +118,7 @@ struct Host {
 	bool boot_current(bool next_mission) {
 		const std::string map_file = rotation.list.map_file;
 		inmatch::HostBootRequest r;
+		r.host_cfg.title = &kJo;
 		r.mission = team_mission(map_file == "MAPA.BMS" ? "Map A" : "Map B");
 		r.mission_basename = mission::mission_base_name(map_file);
 		r.files = test_boot::source_over(&files);
@@ -259,6 +265,7 @@ struct PlayHost {
 
 	bool boot_map(bool next_mission) {
 		inmatch::HostBootRequest r;
+		r.host_cfg.title = &kJo;
 		r.mission = test_mission::two_entity_mission();
 		r.mission.header.attrib_flags = bms::AttribFlags::AttackAndDefend;
 		mission::sync_counts(r.mission);
@@ -411,6 +418,7 @@ int main() {
 	net::ScopedSocket joiner_sock(net::udp_bind(0, &joiner_port));
 	CHECK(joiner_sock.is_valid());
 	inmatch::ClientRuntime client("RotationJoiner");
+	client.set_title(&kJo);
 	auto ship = [&](const std::vector<uint8_t> &d) {
 		if (!d.empty()) net::udp_send_to(joiner_sock.get(), host_ep, d.data(), d.size());
 	};

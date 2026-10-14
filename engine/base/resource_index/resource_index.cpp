@@ -319,6 +319,12 @@ bool ResourceIndex::read_file(const std::string &name, std::vector<uint8_t> &out
 	return impl_->vfs.read_file(name, out, policy);
 }
 
+bool ResourceIndex::read_file_raw(const std::string &name, std::vector<uint8_t> &out,
+                                  VfsLookupPolicy policy) const {
+	if (impl_->source) return impl_->source->read(name, out);
+	return impl_->vfs.read_file_raw(name, out, policy);
+}
+
 const std::string &ResourceIndex::root_dir() const {
 	return impl_->root_dir;
 }

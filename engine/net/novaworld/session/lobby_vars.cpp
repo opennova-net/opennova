@@ -63,6 +63,7 @@ std::vector<ClientVar> make_host_setup_var_list(const HostRegistration &cfg) {
 	set_or_create(setup, "PLoad", "");
 	set_or_create(setup, "Exp", cfg.expansion);
 	set_or_create(setup, "LAN", std::to_string(cfg.lan_only));
+	if (cfg.category_var) set_or_create(setup, "DFXCATEGORY1", std::to_string(cfg.category));
 	// [orig: CNapiGameSession_InitHeapsAndSerializeCounter @0x4ce300 — sprintf("%ld",
 	//  session+0x500) -> SetOrCreate "ReconnectCounter" @0x4ce36d, called last @0x4d0e08]
 	set_or_create(setup, "ReconnectCounter", std::to_string(cfg.reconnect_counter));
@@ -81,6 +82,7 @@ std::vector<ClientVar> make_host_var_list(const HostRegistration &cfg, const Hos
 	set_or_create(host, "PLoad", "");
 	set_or_create(host, "Exp", cfg.expansion);
 	set_or_create(host, "LAN", std::to_string(cfg.lan_only));
+	if (cfg.category_var) set_or_create(host, "DFXCATEGORY1", std::to_string(cfg.category));
 	if (!full) return host;
 
 	// [orig: Lobby_UpdateServerInfo @0x4fe8c0]
@@ -156,8 +158,8 @@ std::vector<ClientVar> make_host_var_list(const HostRegistration &cfg, const Hos
 		set_or_create(host, "Lang", cfg.language);
 		set_or_create(host, "TZB", std::to_string(cfg.tz_bias));
 	}
-	set_or_create(host, "Ver1", "3");                        // @0x4ff3ea
-	set_or_create(host, "Ver2", "2345");                     // @0x4ff3ff
+	set_or_create(host, "Ver1", cfg.ver1);                   // @0x4ff3ea
+	set_or_create(host, "Ver2", cfg.ver2);                   // @0x4ff3ff
 	set_or_create(host, "PBServer", cfg.pb_server ? "1" : "0");
 	return host;
 }

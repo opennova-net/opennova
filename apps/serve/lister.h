@@ -23,6 +23,11 @@
 namespace opennova::serve {
 
 struct ListerOptions {
+	// The title the listing speaks (complete: resolve_title_identity; it outlives the lister)
+	// and its gate manager's tag (title_gate_tag over the mount): the gate probe, the session's
+	// NA, the web flow and the Host list's version pair.
+	const TitleIdentity *title = nullptr;
+	std::string gate_tag;
 	std::string master_host = "127.0.0.1";
 	uint16_t master_gate_port = GATE_DEFAULT_PORT;
 	// Until set, the destination policy holds: loopback and any host off NovaLogic's domain, a

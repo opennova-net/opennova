@@ -27,6 +27,8 @@
 //     listed with no owner.
 
 #include "nw_service_harness.h"
+#include <net/title/title_identity.h>
+#include <base/gameprofile/gameprofile.h>
 
 #include "lister.h"
 
@@ -53,6 +55,9 @@
 #include <thread>
 #include <utility>
 #include <vector>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 #ifndef OPENNOVA_SOURCE_DIR
 #error "OPENNOVA_SOURCE_DIR must be set by CMake"
@@ -195,7 +200,7 @@ class RawHost {
 public:
 	RawHost(uint16_t service_port, uint32_t ci, uint32_t ck)
 		: session_([ci, ck] {
-			  ClientSession::Config cfg;
+			  ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 			  cfg.client_index = ci;
 			  cfg.client_key = ck;
 			  cfg.na = "ownership:host";

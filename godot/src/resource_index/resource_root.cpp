@@ -5,12 +5,14 @@
 #include "fnt/fnt_resource.h"
 #include "util/texture_path_resolver.h"
 #include "util/string_convert.h"
+#include "resource_index/launch_flags.h" // the launch game (session_title)
 
 #include <base/gameprofile/gameprofile.h>
 #include <base/gameprofile/required_resources.h>
 #include <base/gameprofile/resource_missing.h>
 #include <base/resource_index/boot_policy.h>
 #include <base/vfs/vfs.h>
+#include <net/title/title_identity.h>
 #include <runtime/renderer/device_texture.h>
 #include <runtime/renderer/texture_dxt.h>
 
@@ -299,6 +301,25 @@ bool ResourceRoot::is_valid_root(const String &path) {
 		return false;
 	}
 	return true;
+}
+
+const opennova::TitleIdentity *ResourceRoot::title_identity(std::string &error) const {
+	if (game_code_.is_empty()) {
+		error = "no game is mounted";
+		return nullptr;
+	}
+	return opennova::resolve_title_identity(opennova::to_std(game_code_), error);
+}
+
+const opennova::TitleIdentity *ResourceRoot::session_title(const Ref<ResourceRoot> &root,
+		std::string &error) {
+	if (root.is_valid()) return root->title_identity(error);
+	return opennova::resolve_title_identity(opennova::to_std(LaunchFlags::game("jo")), error);
+}
+
+std::string ResourceRoot::session_gate_tag(const Ref<ResourceRoot> &root,
+		const opennova::TitleIdentity &title) {
+	return opennova::title_gate_tag(title, root.is_valid() ? &root->index_ : nullptr);
 }
 
 Error ResourceRoot::set_root_dir(const String &path) {

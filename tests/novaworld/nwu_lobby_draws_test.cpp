@@ -6,6 +6,8 @@
 // Environment::random_u32, the client key is drawn again past a zero (D-NET-438).
 
 #include <net/novaworld/nwu_lobby_session.h>
+#include <net/title/title_identity.h>
+#include <base/gameprofile/gameprofile.h>
 
 #include <atomic>
 #include <cstddef>
@@ -14,6 +16,9 @@
 #include <set>
 #include <thread>
 #include <vector>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 using namespace opennova;
 
@@ -40,6 +45,7 @@ int main() {
 		NullSocket gate;
 		NullSocket session;
 		NwuLobbySession lobby(NwuLobbySession::Hooks{}, env);
+		lobby.set_title(&kJo, kJo.gate_tag);
 		lobby.open(gate, session);
 		if (lobby.client_index() != 0x00001234u || lobby.client_key() != 0x00005678u || next != 3) {
 			std::fprintf(stderr, "FAIL: draws {ci, 0, k} open with CI %08x CK %08x after %zu draws\n",
@@ -64,6 +70,7 @@ int main() {
 			NullSocket gate;
 			NullSocket session;
 			NwuLobbySession lobby(NwuLobbySession::Hooks{}, NwuLobbySession::Environment{});
+			lobby.set_title(&kJo, kJo.gate_tag);
 			ready.fetch_add(1);
 			while (!go.load()) std::this_thread::yield();
 			lobby.open(gate, session);

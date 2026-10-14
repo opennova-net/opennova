@@ -11,7 +11,7 @@ namespace opennova::lan_probe {
 
 Result wait_for_server(const Options &options) {
 	Result result;
-	if (options.endpoint.port == 0 || options.timeout_ms <= 0 ||
+	if (options.title == nullptr || options.endpoint.port == 0 || options.timeout_ms <= 0 ||
 			options.retry_interval_ms <= 0) {
 		result.status = Status::SocketError;
 		return result;
@@ -26,7 +26,8 @@ Result wait_for_server(const Options &options) {
 	// The announce names its own destination as EIP / EPN, as a stock direct
 	// enumerator's does [orig: NapiNPSession_SendAnnouncePacket @0x61fa00 -
 	// @0x61fcf5..0x61fd47].
-	const std::vector<uint8_t> probe = opennova::build_lan_discovery_probe(options.client_index,
+	const std::vector<uint8_t> probe = opennova::build_lan_discovery_probe(*options.title,
+			options.client_index,
 			opennova::peer_addr_from_octets(options.endpoint.ip, options.endpoint.port).ip,
 			options.endpoint.port);
 	using Clock = std::chrono::steady_clock;
@@ -65,8 +66,8 @@ Result wait_for_server(const Options &options) {
 		}
 
 		opennova::LanDiscoveryServer server;
-		if (!opennova::parse_lan_discovery_reply(
-				bytes.data(), static_cast<size_t>(received), options.client_index, server)) {
+		if (!opennova::parse_lan_discovery_reply(*options.title, bytes.data(),
+				static_cast<size_t>(received), options.client_index, server)) {
 			continue;
 		}
 		if (!options.expected_server_name.empty() &&

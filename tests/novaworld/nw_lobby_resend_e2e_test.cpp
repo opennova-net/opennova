@@ -14,6 +14,8 @@
 // it with a 0x44, and require the same records back under the same sequence.
 
 #include "nw_udp_listener.h"
+#include <net/title/title_identity.h>
+#include <base/gameprofile/gameprofile.h>
 #include "server_config.h"
 
 #include <net/napi/session.h>
@@ -32,6 +34,9 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+// JO's title identity (net/title/title_identity.h), the identity these tests speak.
+static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 namespace {
 
@@ -107,7 +112,7 @@ int main() {
 		return 1;
 	}
 
-	opennova::ClientSession::Config cfg;
+	opennova::ClientSession::Config cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	cfg.client_index = 0x52455345u;
 	cfg.client_key = 0x4E444C53u;
 	cfg.na = "resend:lobby";
