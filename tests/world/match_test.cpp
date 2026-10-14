@@ -281,20 +281,20 @@ void test_every_retail_default_score_row() {
                   {{19, 1}, {3, 1}, {4, 1}, {30, 1}, {10, 1}, {11, 1}, {21, 1}});
     CHECK(default_match_score_fields(gt::kFlagMe).empty());
 
-    const auto dm = default_match_score_values(gt::kDeathmatch);
+    const auto dm = default_match_score_values(gt::kDeathmatch, opennova::gameprofile::GAME_JO);
     CHECK(dm[3] == 5 && dm[16] == 10 && dm[37] == 5);
-    const auto tkoth = default_match_score_values(gt::kTeamKingOfTheHill);
+    const auto tkoth = default_match_score_values(gt::kTeamKingOfTheHill, opennova::gameprofile::GAME_JO);
     CHECK(tkoth[3] == 2 && tkoth[12] == 10 && tkoth[21] == 5 && tkoth[33] == 1);
-    const auto sd = default_match_score_values(gt::kSearchAndDestroy);
+    const auto sd = default_match_score_values(gt::kSearchAndDestroy, opennova::gameprofile::GAME_JO);
     CHECK(sd[13] == 50 && sd[24] == 2 && sd[26] == 2);
-    const auto ad = default_match_score_values(gt::kAttackDefend);
+    const auto ad = default_match_score_values(gt::kAttackDefend, opennova::gameprofile::GAME_JO);
     CHECK(ad[13] == 50 && ad[23] == 1 && ad[24] == 2 && ad[26] == 0);
-    const auto ctf = default_match_score_values(gt::kCaptureTheFlag);
+    const auto ctf = default_match_score_values(gt::kCaptureTheFlag, opennova::gameprofile::GAME_JO);
     CHECK(ctf[9] == 10 && ctf[10] == 20 && ctf[11] == 2 && ctf[20] == 5);
-    const auto fb = default_match_score_values(gt::kFlagBall);
+    const auto fb = default_match_score_values(gt::kFlagBall, opennova::gameprofile::GAME_JO);
     CHECK(fb[10] == 40 && fb[11] == 2 && fb[20] == 5);
     const std::array<int32_t, 39> zero_values{};
-    CHECK(default_match_score_values(gt::kFlagMe) == zero_values);
+    CHECK(default_match_score_values(gt::kFlagMe, opennova::gameprofile::GAME_JO) == zero_values);
 
     CHECK(gt::score_table_index(gt::kDeathmatch) == 11);
     CHECK(gt::score_table_index(gt::kObjectiveCoop) == 2);
@@ -658,7 +658,7 @@ void test_zone_time_split_reads_the_slot_team() {
         world->registry.configure_pool(1, 4);
         MatchRules aas;
         aas.game_type = gt::kAdvanceAndSecure;
-        aas.score_values = default_match_score_values(aas.game_type);
+        aas.score_values = default_match_score_values(aas.game_type, opennova::gameprofile::GAME_JO);
         (*aas.score_values)[32] = 3;
         world->match.configure(aas);
         // Slot team 1, its body moved to team 2.
@@ -823,7 +823,7 @@ void test_retail_objective_proximity_scoring_events() {
         world->registry.configure_pool(1, 4);
         MatchRules aas;
         aas.game_type = gt::kAdvanceAndSecure;
-        aas.score_values = default_match_score_values(aas.game_type);
+        aas.score_values = default_match_score_values(aas.game_type, opennova::gameprofile::GAME_JO);
         (*aas.score_values)[32] = 3;
         world->match.configure(aas);
         const EntityHandle blue = player(*world, 0, 1, "Blue");

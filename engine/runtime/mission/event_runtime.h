@@ -197,6 +197,13 @@ private:
     // Each by the event's index in events_ (the record's place in g_Events).
     void update_entry(opennova::world::World &w, size_t index);
     void fire(opennova::world::World &w, size_t index);
+    // dfx2.exe's rewrite of the waypoint completion hook (docs/titles/dfx2-vs-jo-re.md DFX2-9):
+    // co-op only, every player-route marker linked to an event that has fired and not yet done is
+    // marked done, the newest one's pool-3 slot becoming World::script.coop_checkpoint_slot;
+    // then the selection skips past done entries as Jointops.exe's hook does.
+    // [orig: EventTrigger_MarkCoopCheckpoint @0x4534a0 (dfx2.exe), the rewrite of
+    //  EventTrigger_MarkLinkedSpawnPoints @0x452ce0]
+    void mark_coop_checkpoint(opennova::world::World &w);
     // Both return the original's raw ints: every evaluator answers 0/1 except
     // the Berserk read (the 0x200 bit) and the load-parity word, and the chain
     // folds them bitwise. [orig: EventTrigger_EvaluateCondition @0x453620;

@@ -4,7 +4,40 @@
 
 using namespace opennova::inmatch;
 
+namespace {
+constexpr int kJo = opennova::gameprofile::GAME_JO;
+constexpr int kDfx2 = opennova::gameprofile::GAME_DFX2;
+
+// dfx2.exe's caps (docs/titles/dfx2-vs-jo-re.md DFX2-8): the host screen 100, the session create,
+// the apply's ceiling and the slot table 251, the same code over other words; Jointops.exe's stand.
+// [orig: HostDialog_ReadSettings @0x553af0, g_HostMaxPlayersCap @0x835f0c;
+//  CNapiGameSession_BuildAndCreateSession @0x567707; Game_ApplySessionSettingsToGlobals @0x54ed93
+//  (dfx2.exe)]
+int title_caps() {
+    TEST_EXPECT(title_player_caps(kJo).session == 65 && title_player_caps(kJo).host_screen == 64);
+    TEST_EXPECT(title_player_caps(kDfx2).session == 251 && title_player_caps(kDfx2).host_screen == 100);
+    GameConfig dfx2;
+    dfx2.title = kDfx2;
+    int32_t limit = 32;
+    bool serve_and_play = true;
+    TEST_EXPECT(apply_host_dialog_control(dfx2, limit, serve_and_play, "MAX_PLAYERS", "99"));
+    TEST_EXPECT(limit == 99);
+    TEST_EXPECT(apply_host_dialog_control(dfx2, limit, serve_and_play, "MAX_PLAYERS", "250"));
+    TEST_EXPECT(limit == 100 && host_dialog_value(dfx2, 250, true, "MAX_PLAYERS") == "100");
+    TEST_EXPECT(session_player_cap(0, kDfx2) == 1 && session_player_cap(100, kDfx2) == 100);
+    TEST_EXPECT(session_player_cap(251, kDfx2) == 251 && session_player_cap(300, kDfx2) == 251);
+    TEST_EXPECT(host_player_slot_limit(100, false, kDfx2) == 101);
+    TEST_EXPECT(host_player_slot_limit(251, false, kDfx2) == 252);
+    TEST_EXPECT(host_player_slot_limit(252, false, kDfx2) == 251);
+    dfx2.max_players = 251;
+    dfx2.dedicated_server = true;
+    TEST_EXPECT(dfx2.player_slot_limit() == 252);
+    return 0;
+}
+} // namespace
+
 int main() {
+    if (title_caps() != 0) return 1;
     GameConfig config;
     int32_t player_limit = 32;
     bool serve_and_play = true;
@@ -53,25 +86,25 @@ int main() {
     TEST_EXPECT(read("SERVER_MESSAGE", "Join us"));
     TEST_EXPECT(config.custom_text == "Join us");
     TEST_EXPECT(read("MAX_PLAYERS", "99"));
-    TEST_EXPECT(player_limit == 64 && host_player_slot_limit(player_limit, serve_and_play) == 64);
+    TEST_EXPECT(player_limit == 64 && host_player_slot_limit(player_limit, serve_and_play, kJo) == 64);
     TEST_EXPECT(read("SERVERTYPE", "1"));
-    TEST_EXPECT(!serve_and_play && host_player_slot_limit(player_limit, serve_and_play) == 65);
+    TEST_EXPECT(!serve_and_play && host_player_slot_limit(player_limit, serve_and_play, kJo) == 65);
     TEST_EXPECT(read("MAX_PLAYERS", ""));
     // No lower clamp: a blank cap publishes 0, or 1 as the dedicated slot alone;
     // the 65 ceiling tests the pre-increment cap, so a dedicated 65 publishes 66.
-    TEST_EXPECT(player_limit == 0 && host_player_slot_limit(player_limit, serve_and_play) == 1);
-    TEST_EXPECT(host_player_slot_limit(0, true) == 0 && host_player_slot_limit(-3, true) == 0);
-    TEST_EXPECT(host_player_slot_limit(65, false) == 66 && host_player_slot_limit(65, true) == 65);
-    TEST_EXPECT(host_player_slot_limit(66, false) == 65 && host_player_slot_limit(99, true) == 65);
+    TEST_EXPECT(player_limit == 0 && host_player_slot_limit(player_limit, serve_and_play, kJo) == 1);
+    TEST_EXPECT(host_player_slot_limit(0, true, kJo) == 0 && host_player_slot_limit(-3, true, kJo) == 0);
+    TEST_EXPECT(host_player_slot_limit(65, false, kJo) == 66 && host_player_slot_limit(65, true, kJo) == 65);
+    TEST_EXPECT(host_player_slot_limit(66, false, kJo) == 65 && host_player_slot_limit(99, true, kJo) == 65);
     // In session the create clamps the cap into 1..65 first, so a blank cap
     // publishes 1 (2 dedicated) and a dedicated 65+ the ceiling's 66.
     // [orig: CNapiGameSession_BuildAndCreateSession @0x56955D..0x56956C]
-    TEST_EXPECT(session_player_cap(0) == 1 && session_player_cap(-3) == 1);
-    TEST_EXPECT(session_player_cap(1) == 1 && session_player_cap(65) == 65);
-    TEST_EXPECT(session_player_cap(66) == 65 && session_player_cap(99) == 65);
-    TEST_EXPECT(host_player_slot_limit(session_player_cap(0), true) == 1 &&
-                host_player_slot_limit(session_player_cap(0), false) == 2);
-    TEST_EXPECT(host_player_slot_limit(session_player_cap(99), false) == 66);
+    TEST_EXPECT(session_player_cap(0, kJo) == 1 && session_player_cap(-3, kJo) == 1);
+    TEST_EXPECT(session_player_cap(1, kJo) == 1 && session_player_cap(65, kJo) == 65);
+    TEST_EXPECT(session_player_cap(66, kJo) == 65 && session_player_cap(99, kJo) == 65);
+    TEST_EXPECT(host_player_slot_limit(session_player_cap(0, kJo), true, kJo) == 1 &&
+                host_player_slot_limit(session_player_cap(0, kJo), false, kJo) == 2);
+    TEST_EXPECT(host_player_slot_limit(session_player_cap(99, kJo), false, kJo) == 66);
     TEST_EXPECT(read("TAKEOVER_TIME", "20"));
     TEST_EXPECT(read("LFP_TAKEOVER", "3"));
     TEST_EXPECT(config.capture_duration_seconds == 20 && config.capture_speed_setting == 3);

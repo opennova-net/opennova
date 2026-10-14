@@ -927,8 +927,38 @@ void BmsEventSystem::fire(World &w, size_t index) {
     // [orig: EventTrigger_MarkLinkedSpawnPoints @0x452ce0, called right after
     //  both dispatch loops @0x454cbd/@0x454d25]
     // The hook returns at once off the authority [orig: the is_authority test
-    //  @0x452ce0].
-    if (w.rules.logic_authority) w.script.waypoints.on_event_fired(event, w.waypoint_context());
+    //  @0x452ce0]. dfx2.exe's rewrite marks the co-op checkpoint instead
+    //  [orig: EventTrigger_MarkCoopCheckpoint @0x4534a0 (dfx2.exe)].
+    if (!w.rules.logic_authority) return;
+    if (w.rules.title == gameprofile::GAME_DFX2)
+        mark_coop_checkpoint(w);
+    else
+        w.script.waypoints.on_event_fired(event, w.waypoint_context());
+}
+
+void BmsEventSystem::mark_coop_checkpoint(World &w) {
+    const world::WaypointCycleContext ctx = w.waypoint_context();
+    world::WaypointTrack &track = w.script.waypoints;
+    // Co-op, with or without objectives [orig: `and 0FFFDFFFFh; cmp 10020h`
+    //  @0x4534d4..0x4534da (dfx2.exe)]. The route is the first record whose flags
+    //  hold 2, its nodes at most 128: the track's own pick (promote.cpp)
+    //  [orig: `test byte ptr [eax], 2` @0x4534f1, the walk to @0x453530 (dfx2.exe)].
+    if ((ctx.game_type & 0xFFFDFFFFu) == 0x10020u) {
+        uint16_t newest = 0xFFFF;
+        for (world::WaypointEntry &entry : track.entries) {
+            // A marker linked to an event (+528 > 0), not yet done (+536), whose
+            // event has fired (+20 set, +16 run out) [orig: Pool_GetEntryUnchecked(3,
+            //  node) @0x453545, the tests @0x453551..0x45357c (dfx2.exe)].
+            if (entry.linked_event <= 0 || entry.done ||
+                    !event_fired(static_cast<size_t>(entry.linked_event)))
+                continue;
+            entry.done = true;                            // [orig: @0x453583 (dfx2.exe)]
+            newest = static_cast<uint16_t>(entry.node);   // [orig: @0x45358a (dfx2.exe)]
+        }
+        if (newest != 0xFFFF) w.script.coop_checkpoint_slot = newest; // [orig: @0x45359e (dfx2.exe)]
+    }
+    // [orig: SpawnPoint_SkipBlocked @0x4db3c0 from @0x4535a5 (dfx2.exe)]
+    track.skip_done(ctx);
 }
 
 void BmsEventSystem::update_entry(World &w, size_t index) {

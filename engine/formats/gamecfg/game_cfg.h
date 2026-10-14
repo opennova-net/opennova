@@ -350,7 +350,8 @@ extern const size_t kConfigVarRowCount;
 
 // The rows a block of `table` walks: JO's (kConfigVarRows), or dfx2.exe's, which are JO's with
 // `mpdfxcategory` between mpnovaworldhostlanonly and mpreset, the one row the two tables do not
-// share (docs/titles/dfx2-vs-jo-re.md DFX2-7; the block grows by that word).
+// share (docs/titles/dfx2-vs-jo-re.md DFX2-7; the block grows by that word), and three shared rows'
+// defaults its own: mpnovaworldportmax and mpnovaworldlanenumsessionportmax 32787, mpmaxplayers 16.
 // [orig: the key table row @0x831b20 (dfx2.exe); Config_SetDefaults @0x54d030 (@0x54d039)
 //  against @0x54a2ca (dfx2.exe), the block 0xA40 against 0xA44 bytes]
 const std::vector<ConfigVarRow> &config_var_rows(ConfigTable table);

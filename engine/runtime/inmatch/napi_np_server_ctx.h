@@ -172,6 +172,14 @@ struct HostSlotRow {
 	world::MatchStats stats;      // +0x48 CPlayerStats: Kills (5) and Deaths (7)
 };
 
+// The end-of-round linger a round end stores, in ticks: 2790 (45 s), dfx2.exe's 1550 (25 s)
+// (`title` a gameprofile::GameId; docs/titles/dfx2-vs-jo-re.md DFX2-17). The admin's CYCLE and
+// GOTO 620 is the same in both. [orig: Server_ProcessRoundEnd @0x5164F0 (@0x5166c4)] [orig:
+// Server_ProcessRoundEnd @0x513730 (@0x51391e) (dfx2.exe)]
+inline uint32_t round_end_linger_ticks_for(int title) {
+	return title == gameprofile::GAME_DFX2 ? 1550u : 2790u;
+}
+
 struct NapiNPServerCtx {
 	NetworkType transport_mode = NetworkType::Lan; // [orig +0x50]
 	SocketMode socket_state = SocketMode::Socketless; // [orig +0x54]
@@ -316,7 +324,8 @@ struct NapiNPServerCtx {
 
 	// The authoritative end-round transaction. The domain Match freezes the
 	// result; these are only the once-only wire announcement and retail MP linger
-	// clock. [orig: Server_ProcessRoundEnd @0x5164F0; 2790 store @0x5166C4]
+	// clock (round_end_linger_ticks_for). [orig: Server_ProcessRoundEnd @0x5164F0;
+	// 2790 store @0x5166C4]
 	bool round_end_announced = false;
 	uint32_t round_end_linger_ticks = 0;
 	// The frozen end-of-round board stream (stru_C947D8): built once by the

@@ -31,6 +31,7 @@
 #include <net/novaworld/lobby_vars.h>
 #include <net/novaworld/ping_sweep.h>
 #include <net/novaworld/proxy_rendezvous.h>
+#include <net/title/title_identity.h> // TitleIdentity::game_id (the hosting leg's cap)
 #include <net/npwire/net_ports.h>
 
 #include <cstdio>
@@ -1114,7 +1115,8 @@ void NovaWorldClient::start_hosting(const Ref<HostSessionOptions> &options) {
 	cfg.lobby_name = gate.lobby_name;
 	cfg.server_name = opennova::to_std(options->get_server_name());
 	cfg.max_players = opennova::host_leg_max_players(options->get_max_players(),
-			!options->get_serve_and_play());
+			!options->get_serve_and_play(),
+			lobby_.title() != nullptr ? lobby_.title()->game_id : opennova::gameprofile::GAME_JO);
 	cfg.password = !options->get_server_password().is_empty();
 	cfg.listen_host = options->get_serve_and_play();
 	cfg.lan_only = options->get_server_lan_only();

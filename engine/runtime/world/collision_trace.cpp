@@ -1189,6 +1189,8 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
         const CollisionTargetView *posed = trace_target_view(world, slot.h);
         if (posed != nullptr && posed->live_section_pose) {
             live_pose_available = true;
+            const int32_t target_radius =
+                    person_extra_radius(world.rules.title, *e, effective_radius);
             const CollisionModel &person_model = *posed->model;
             for (int32_t bone = static_cast<int32_t>(person_model.sections.size()) - 1;
                  bone >= 0; --bone) {
@@ -1212,7 +1214,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                     vec_len_ftol(closest[0] - center[0], closest[1] - center[1],
                                  closest[2] - center[2]);
                 const int32_t hit_radius =
-                    person_effective_radius(bone, sec.radius, effective_radius);
+                    person_effective_radius(bone, sec.radius, target_radius);
                 if (center_distance > hit_radius) continue;
 
                 if (!person_hit) {

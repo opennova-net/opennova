@@ -94,8 +94,11 @@ void WaypointTrack::tick_advance(const WaypointFrameInputs &in) {
         }
         // Every goal the waypoint asks for is won: advance at once, wherever
         // the player stands [orig: `cmp [esp+outEntry], ebx` @0x4de68e ->
-        // Spectator_CycleTarget(1) @0x4de695].
-        if (goals_met) {
+        // Spectator_CycleTarget(1) @0x4de695]. dfx2.exe has no such advance
+        // (DFX2-9) [orig: Player_UpdatePerFrame @0x4db400, the test gone after
+        // @0x4db73a (dfx2.exe)].
+        const bool dfx2 = in.title == gameprofile::GAME_DFX2;
+        if (goals_met && !dfx2) {
             cycle_forward(in);
             return;
         }
@@ -117,7 +120,9 @@ void WaypointTrack::tick_advance(const WaypointFrameInputs &in) {
                 ? static_cast<uint32_t>(dy) + (static_cast<uint32_t>(dx) >> 1)
                 : static_cast<uint32_t>(dx) + (static_cast<uint32_t>(dy) >> 1);
         // Never advance past the last entry. [orig: @ 0x4de6ca cmp vs list[count-1]]
-        if (approx < radius && current != count - 1)
+        // dfx2.exe advances only past a done entry, the co-op checkpoint's marking
+        // (DFX2-9) [orig: @0x4db762..0x4db774, `cmp [esi+218h], bl` @0x4db76b (dfx2.exe)].
+        if (approx < radius && current != count - 1 && (!dfx2 || cur->done))
             cycle_forward(in);
         return;
     }

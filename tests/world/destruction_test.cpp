@@ -3736,6 +3736,47 @@ void test_blast_on_a_crewed_vehicle_scales_by_occupants() {
     CHECK(w.registry.get(vehicle)->health == 500 - 50);
 }
 
+// dfx2.exe's blast path has no occupant cut: the same crewed hull takes the
+// whole 100 (docs/titles/dfx2-vs-jo-re.md DFX2-16); a round's hit keeps it.
+// [orig: Entity_ApplyWeaponDamage @0x4E6820 (@0x4E69C7..0x4E69D3)] [orig: @0x4e3960
+//  (dfx2.exe), the test and the call gone after @0x4e3b07]
+void test_dfx2_blast_on_a_crewed_vehicle_keeps_the_whole_damage() {
+    auto storage = std::make_unique<World>();
+    World &w = *storage;
+    w.rules.title = opennova::gameprofile::GAME_DFX2;
+    seed_ammo(w);
+    w.registry.configure_pool(0, 4);
+    w.registry.configure_pool(1, 4);
+    Entity hull;
+    hull.kind = EntityKind::Item;
+    hull.item_id = 700;
+    hull.has_item_def = true;
+    hull.item_type = 1;
+    hull.health = hull.health_max = 500;
+    hull.bound_radius = 1.0f;
+    hull.damage_reduc_pp = 0.25f;
+    hull.damage_reduc_max = 0.5f;
+    const EntityHandle vehicle = w.registry.spawn(1, hull);
+    for (int i = 0; i < 2; ++i) {
+        Entity rider;
+        rider.kind = EntityKind::Organic;
+        rider.has_item_def = true;
+        rider.item_type = 3;
+        rider.health = rider.health_max = 100;
+        rider.position = Vec3{100.0f + 5.0f * static_cast<float>(i), 0.0f, 0.0f}; // out of reach
+        rider.ground_target = vehicle;
+        w.registry.spawn(0, rider);
+    }
+    ExplosionEntry e;
+    e.pos = Vec3{};
+    e.type = ammo_kz::kStandard;
+    e.ammo_index = 1;
+    run_blast(w, e);
+    CHECK(w.registry.get(vehicle)->health == 500 - 100);
+    // The round path's own call stands in both titles.
+    CHECK(apply_vehicle_occupant_scale(w, *w.registry.get(vehicle), 100) == 50);
+}
+
 // The victim's damage-disabled word (entity+0x124) zeroes a blast: a death
 // piece (-1) and a spawn-protected player (the 620-tick countdown) keep their
 // health, and the same bodies take the blast once the word clears.
@@ -4376,6 +4417,7 @@ void test_medic_kill_zone_queues_both_arms() {
 
 int main() {
     test_blast_on_a_crewed_vehicle_scales_by_occupants();
+    test_dfx2_blast_on_a_crewed_vehicle_keeps_the_whole_damage();
     test_blast_respects_the_damage_disabled_word();
     test_zero_damage_blast_still_runs_the_item_leg();
     test_zero_damage_person_blast_still_draws_the_cause_roll();

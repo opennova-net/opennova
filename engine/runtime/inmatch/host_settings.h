@@ -29,16 +29,18 @@ bool apply_host_dialog_number(GameConfig& config, int32_t& player_limit,
 std::string host_dialog_value(const GameConfig& config, int32_t player_limit,
                               bool serve_and_play, std::string_view control);
 // The live player-slot limit the session apply makes of a cap: the cap, plus
-// the host's own slot when dedicated (GameConfig::player_slot_limit).
-uint32_t host_player_slot_limit(int32_t player_limit, bool serve_and_play);
-// The session create's cap: in session the cap goes into 1..65 before the apply
-// (host_player_slot_limit), so a blank cap is 1 (a slot limit of 2 dedicated)
-// and a dedicated 65 makes the ceiling's 66. It is GameConfig::max_players.
-// Both hosts run it: inmatch::host_session_settings over the cfg block and the
-// game's host request.
+// the host's own slot when dedicated (GameConfig::player_slot_limit), under the
+// title's ceiling (TitlePlayerCaps::session; `title` a gameprofile::GameId).
+uint32_t host_player_slot_limit(int32_t player_limit, bool serve_and_play, int title);
+// The session create's cap: in session the cap goes into 1..65 (dfx2.exe:
+// 1..251) before the apply (host_player_slot_limit), so a blank cap is 1 (a
+// slot limit of 2 dedicated) and a dedicated 65 makes the ceiling's 66. It is
+// GameConfig::max_players. Both hosts run it: inmatch::host_session_settings
+// over the cfg block and the game's host request.
 // [orig: CNapiGameSession_BuildAndCreateSession @0x569554 (is_in_session),
 //  @0x56955D..0x56955F (below 1 -> 1), @0x56956A..0x56956C (above 65 -> 65)]
-int32_t session_player_cap(int32_t player_limit);
+// [orig: @0x5676fb..0x56770e (dfx2.exe)]
+int32_t session_player_cap(int32_t player_limit, int title);
 // The session apply's two limit substitutions, one rule for the host screen's
 // read and for the game.cfg apply (host_config.h): a cfg point limit of 500
 // is the 65000 no-limit sentinel, and a nonpositive KOTH limit is 0x2222222

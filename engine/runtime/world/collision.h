@@ -44,6 +44,7 @@
 #include <vector>
 
 #include <runtime/devtools/tick_profile.h>
+#include <base/gameprofile/gameprofile.h>
 #include <runtime/world/entity.h>
 
 namespace opennova::terrain {
@@ -589,6 +590,21 @@ inline int32_t person_effective_radius(int32_t section, int32_t authored_radius,
     if ((section == 15 || section == 16) && effective > 0x3000)
         effective = 0x3000;
     return effective;
+}
+
+// The extra radius a round's bone walk gives one person: the round's own,
+// which dfx2.exe narrows for a player (Flags 0x100) that rides something
+// (+0x16C) or holds still (MoveOrder bit 3 clear): past 0x1000 it keeps half of
+// the rest. Jointops.exe has no such step.
+// [orig: Physics_RaycastAgainstBoneSections @0x4e4670] [orig: @0x4e17af..0x4e17e0
+//  (dfx2.exe)]
+inline int32_t person_extra_radius(int title, const Entity &target, int32_t extra_radius) {
+    if (title != gameprofile::GAME_DFX2 ||
+            ((target.flags | target.engine_flags) & kEntityFlagPlayer) == 0)
+        return extra_radius;
+    if (!target.mount_target.valid() && (target.net_move_input & Entity::kMoveOrderMoving) != 0)
+        return extra_radius;
+    return extra_radius > 0x1000 ? ((extra_radius - 0x1000) >> 1) + 0x1000 : extra_radius;
 }
 
 // Person/organic projectile narrow phase: one authored COBJ bound sphere per

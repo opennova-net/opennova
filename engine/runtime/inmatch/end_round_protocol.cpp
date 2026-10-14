@@ -71,7 +71,7 @@ EndRoundStats build_end_round_stats(const world::MatchResult &result) {
 		// primary, raw29, raw30, raw5, raw7, raw11, (raw2<<16)/raw5.
 		// [orig: Server_BuildEndOfRoundScoreboard @0x508F30]
 		row.kills = wire_i16(player.primary_score);
-		row.deaths = wire_i16(player.stats[world::MatchStats::kPoints]);
+		row.deaths = wire_i16(player.points); // the row's +0x44 column (raw29)
 		row.assists = wire_i16(player.stats[world::MatchStats::kUnitScore]);
 		row.score = wire_i16(player.stats[world::MatchStats::kEnemyKills]);
 		row.captures = wire_i16(player.stats[world::MatchStats::kDeaths]);

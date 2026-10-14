@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include <base/gameprofile/gameprofile.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/system.h>
 
@@ -31,6 +32,9 @@ struct MatchScoreField {
 // accounting one value source. [orig: GameEvent_ProcessScoring @0x52F550;
 // Server_BuildStatusReport @0x530A60 copies row+300..+452]
 struct MatchRules {
+    // The title whose built-in score table an absent score_values selects
+    // (gameprofile::GameId; default_match_score_values).
+    int title = gameprofile::GAME_JO;
     uint32_t game_type = 0;
     uint32_t game_time_minutes =
         0;                    // SET GameTime / g_RespawnTime, despite the old host-field name
@@ -75,9 +79,15 @@ struct MatchLiveScoreboard {
 // Indexed by the slot of the shipped VAR name table (retail reads
 // `scoringTable[74 + slot]`) [orig: off_830348 @ 0x830348: 38 {name, slot}
 // pairs, slots 0..37].
-// [orig: GameType_CreateDefaultSettings @0x52DD00]
-std::array<int32_t, 39> default_match_score_values(uint32_t game_type);
+// Each title compiles in its own values (`title` a gameprofile::GameId: dfx2.exe's for
+// GAME_DFX2, Jointops.exe's otherwise); the FIELD lists are the one set
+// (match_score_table.cpp, docs/titles/dfx2-vs-jo-re.md DFX2-15).
+// [orig: GameType_CreateDefaultSettings @0x52DD00] [orig: @0x52ae80 (dfx2.exe)]
+std::array<int32_t, 39> default_match_score_values(uint32_t game_type, int title);
 std::vector<MatchScoreField> default_match_score_fields(uint32_t game_type);
+// The EXP_FANFARE pair the table seeds before score.ini (lo byte the KILLTONE threshold, hi the
+// HEADSHOTTONE, GameConfig::exp_fanfare): 0 0 in Jointops.exe, 4 10 in dfx2.exe.
+uint16_t default_score_exp_fanfare(int title);
 
 // The direct CPlayerStats dword layout. Index 0 is the associated entity; the
 // counters therefore retain their retail indices rather than being repacked
@@ -274,7 +284,14 @@ struct MatchResultPlayer {
     uint8_t player_class = 0;
     MatchStats stats;
     int32_t objective_ticks = 0;
+    // The row's two score columns: the game type's primary (+0x40) and the
+    // points (+0x44, field 28). dfx2.exe multiplies both by the round-win
+    // multiplier (Match::score_multiplier) as it builds the row; Jointops.exe
+    // stores them as they stand. [orig: Server_BuildEndOfRoundScoreboard
+    //  @0x508F30 - +0x40 @0x509152, +0x44 @0x50915E] [orig: @0x5062f3..0x50630b
+    //  (dfx2.exe)]
     int32_t primary_score = 0;
+    int32_t points = 0;
 };
 
 struct MatchResult {
@@ -493,6 +510,16 @@ class Match {
 
     int32_t primary_score(const MatchStats &stats, int32_t objective_ticks = 0) const;
     int32_t primary_score(const MatchPlayer &player) const;
+    // The round-win multiplier a slot's computed score carries (the live
+    // board's sort key and the end-of-round row's two score columns): stat
+    // field 34 (raw field 35, seeded 1, 2 for the round's winners) in dfx2.exe,
+    // which reads it; 1 in Jointops.exe, which stores it and never reads it
+    // (docs/titles/dfx2-vs-jo-re.md DFX2-15).
+    int32_t score_multiplier(const MatchStats &stats) const;
+    // Player_ComputeScore: a team type's points, another's primary, each times
+    // the round-win multiplier. [orig: Player_ComputeScore @0x500A80] [orig:
+    //  @0x4fdbb0 (dfx2.exe)]
+    int32_t computed_score(const MatchPlayer &player, bool team_mode) const;
     // The team row's primary: ScoreRules_GetPrimaryScoreField over the team
     // stats with the team's hill hold timer (TeamRecord+0x150) as the KOTH
     // family's external score, on both the live and the end-round board.

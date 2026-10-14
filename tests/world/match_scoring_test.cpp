@@ -6,6 +6,7 @@
 // Entity_CheckAndProcessDeath @0x51B550; CPlayerStats_RecordEvent @0x52C8E0]
 #include <runtime/world/match.h>
 #include <base/gameprofile/game_type.h>
+#include <base/gameprofile/gameprofile.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/world.h>
 
@@ -582,6 +583,117 @@ void test_heal_scores_medicheal() {
 
 } // namespace
 
+constexpr int kJo = opennova::gameprofile::GAME_JO;
+constexpr int kDfx2 = opennova::gameprofile::GAME_DFX2;
+
+// dfx2.exe scores a mounted victim once more after the zone bonuses: VATTACHKILL (VAR 37) to the
+// killer and its team record when the victim's parent (+0x16C) is a vehicle (ItemDef type 1) or
+// stands on one (+0x28). Jointops.exe never scores it (docs/titles/dfx2-vs-jo-re.md DFX2-15).
+// [orig: GameEvent_ProcessScoring @0x52c750 (@0x52d930..0x52d9b9); Entity_HasActiveParent
+//  @0x402bb0 (dfx2.exe)]
+void test_dfx2_vehicle_attach_kill() {
+    struct Case { int title; int mount; int32_t points; };
+    // mount: 0 on foot, 1 on the vehicle, 2 on a turret standing on it, 3 on a non-vehicle.
+    const Case cases[] = {
+        {kDfx2, 0, 10}, {kDfx2, 1, 16}, {kDfx2, 2, 16}, {kDfx2, 3, 10},
+        {opennova::gameprofile::GAME_JO, 1, 10},
+    };
+    for (const Case &c : cases) {
+        MatchRules r = rules(gt::kTeamDeathmatch);
+        r.title = c.title;
+        (*r.score_values)[37] = 6; // VATTACHKILL
+        auto world = std::make_unique<World>();
+        world->registry.configure_pool(0, 16);
+        world->registry.configure_pool(1, 16);
+        world->match.configure(r);
+        const EntityHandle ace = player(*world, 0, 1);
+        const EntityHandle bee = player(*world, 1, 2);
+        const EntityHandle vehicle = npc(*world, 2, /*item_type=*/1);
+        const EntityHandle turret = npc(*world, 2, /*item_type=*/5);
+        world->registry.get(turret)->ground_target = vehicle;
+        Entity *victim = world->registry.get(bee);
+        if (c.mount == 1) victim->mount_target = vehicle;
+        if (c.mount == 2) victim->mount_target = turret;
+        if (c.mount == 3) {
+            world->registry.get(turret)->ground_target = EntityHandle{};
+            victim->mount_target = turret;
+        }
+        world->match.record_death(*world, bee, ace);
+        CHECK(world->match.player(ace)->stats[MatchStats::kEnemyKills] == 1);
+        CHECK(world->match.player(ace)->stats[MatchStats::kPoints] == c.points);
+        CHECK(world->match.team_stats(1)[MatchStats::kPoints] == c.points);
+    }
+}
+
+// The round-win multiplier (stat field 34, raw field 35: seeded 1, 2 for the winners) dfx2.exe
+// reads into the computed score and the end-of-round row's two score columns; Jointops.exe stores
+// it and never reads it (docs/titles/dfx2-vs-jo-re.md DFX2-15).
+// [orig: Player_ComputeScore @0x500A80; Server_BuildEndOfRoundScoreboard @0x508F30] [orig:
+//  Player_ComputeScore @0x4fdbb0; @0x5062f3..0x50630b (dfx2.exe)]
+void test_dfx2_round_win_multiplier() {
+    for (const int title : {kJo, kDfx2}) {
+        MatchRules r = rules(gt::kTeamDeathmatch);
+        r.title = title;
+        auto world = std::make_unique<World>();
+        world->registry.configure_pool(0, 16);
+        world->match.configure(r);
+        const EntityHandle blue = player(*world, 0, 1);
+        const EntityHandle red = player(*world, 1, 2);
+        // The spawn's seed (server_spawn.cpp), as every live slot has it.
+        world->match.player(blue)->stats[MatchStats::kRoundMarker] = 1;
+        world->match.player(red)->stats[MatchStats::kRoundMarker] = 1;
+        world->match.record_death(*world, red, blue); // blue 10 points, red -2
+        CHECK(world->match.computed_score(*world->match.player(blue), true) == 10);
+        world->process_round_end(1);
+        const int32_t factor = title == kDfx2 ? 2 : 1;
+        const MatchResult &result = world->match.result();
+        CHECK(result.players.size() == 2);
+        CHECK(result.players[0].identity.entity == blue);
+        CHECK(result.players[0].points == 10 * factor);
+        CHECK(result.players[0].primary_score ==
+              world->match.primary_score(*world->match.player(blue)) * factor);
+        CHECK(result.players[0].stats[MatchStats::kPoints] == 10); // the stat stands
+        CHECK(result.players[1].points == -2);
+        CHECK(world->match.computed_score(*world->match.player(blue), true) == 10 * factor);
+    }
+}
+
+// dfx2.exe's built-in table: the FIELD lists are Jointops.exe's, the VAR values its own, and the
+// fanfare pair 4 10 (docs/titles/dfx2-vs-jo-re.md DFX2-15).
+// [orig: GameType_CreateDefaultSettings @0x52DD00] [orig: @0x52ae80 (dfx2.exe)]
+void test_dfx2_default_score_table() {
+    const auto jo = [](uint32_t gtype) {
+        return default_match_score_values(gtype, opennova::gameprofile::GAME_JO);
+    };
+    const auto dx = [](uint32_t gtype) { return default_match_score_values(gtype, kDfx2); };
+    // ENEMYKILL, SUICIDE, MEDICSAVE, HEADSHOTKILL, KNIFEKILL, ALIVE, ALIVEQUANTUM, VATTACHKILL.
+    CHECK(jo(gt::kDeathmatch)[3] == 5 && dx(gt::kDeathmatch)[3] == 2);
+    CHECK(jo(gt::kDeathmatch)[4] == 0 && dx(gt::kDeathmatch)[4] == -5);
+    CHECK(dx(gt::kDeathmatch)[17] == 2 && dx(gt::kDeathmatch)[18] == 2);
+    CHECK(dx(gt::kDeathmatch)[35] == 2 && dx(gt::kDeathmatch)[36] == 0);
+    CHECK(jo(gt::kDeathmatch)[37] == 5 && dx(gt::kDeathmatch)[37] == 6);
+    CHECK(jo(gt::kTeamDeathmatch)[7] == 2 && dx(gt::kTeamDeathmatch)[7] == 0);
+    CHECK(dx(gt::kTeamDeathmatch)[6] == 1 && dx(gt::kTeamDeathmatch)[15] == 12);
+    CHECK(dx(0x30020u) == dx(gt::kTeamDeathmatch)); // the Co-op row is TDM's values
+    CHECK(dx(gt::kKingOfTheHill)[3] == 4 && dx(gt::kKingOfTheHill)[6] == 0);
+    CHECK(dx(gt::kKingOfTheHill)[12] == 10 && dx(gt::kKingOfTheHill)[22] == 3);
+    CHECK(dx(gt::kKingOfTheHill)[36] == 60 && dx(gt::kKingOfTheHill)[33] == 2);
+    CHECK(dx(gt::kTeamKingOfTheHill)[6] == 1 && dx(gt::kTeamKingOfTheHill)[21] == 2);
+    CHECK(dx(gt::kSearchAndDestroy)[24] == 2 && dx(gt::kSearchAndDestroy)[26] == 3);
+    CHECK(dx(gt::kAttackDefend)[23] == 2 && dx(gt::kAttackDefend)[24] == 3);
+    CHECK(dx(gt::kAttackDefend)[26] == 0 && dx(gt::kSearchAndDestroy)[23] == 0);
+    CHECK(dx(gt::kCaptureTheFlag)[10] == 20 && dx(gt::kFlagBall)[10] == 40);
+    // dfx2.exe parts Advance and Secure from Conquer and Control; Jointops.exe does not.
+    CHECK(jo(gt::kAdvanceAndSecure) == jo(gt::kConquerAndControl));
+    CHECK(dx(gt::kAdvanceAndSecure)[12] == 5 && dx(gt::kConquerAndControl)[12] == 10);
+    CHECK(dx(gt::kAdvanceAndSecure)[26] == 2 && dx(gt::kConquerAndControl)[26] == 3);
+    CHECK(dx(gt::kAdvanceAndSecure)[31] == 1 && dx(gt::kConquerAndControl)[31] == 2);
+    CHECK(dx(gt::kFlagMe) == jo(gt::kFlagMe)); // no row in either
+    CHECK(default_match_score_fields(gt::kCaptureTheFlag).size() == 18);
+    CHECK(default_score_exp_fanfare(opennova::gameprofile::GAME_JO) == 0);
+    CHECK(default_score_exp_fanfare(kDfx2) == (4u | (10u << 8)));
+}
+
 int main() {
     test_non_team_modes_never_touch_team_rows();
     test_team_kill_has_no_see_all_exemption();
@@ -600,6 +712,9 @@ int main() {
     test_team_hold_decays_after_the_round();
     test_winner_award_needs_a_score_table();
     test_heal_scores_medicheal();
+    test_dfx2_vehicle_attach_kill();
+    test_dfx2_round_win_multiplier();
+    test_dfx2_default_score_table();
     if (failures != 0) {
         std::printf("match_scoring_test: %d failure(s)\n", failures);
         return 1;

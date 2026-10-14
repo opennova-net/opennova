@@ -1,8 +1,10 @@
 #include <runtime/inmatch/server_medic.h>
 
-#include <net/npwire/ingame_decode.h>   // PlayerDownedState
+#include <base/gameprofile/game_type.h> // kTeamBit (the downed resend's team test)
+#include <net/npwire/ingame_decode.h>   // PlayerDownedState, kPlayerSyncHasDownedState
 #include <net/npwire/ingame_encode.h>   // encode_player_downed_state
 #include <net/npwire/ingame_message_id.h>
+#include <net/npwire/replication_model.h> // PlayerReplicationState (the 0x46 resend input)
 #include <runtime/inmatch/server_message_dispatch.h> // is_medic_recipient
 #include <runtime/inmatch/server_tick.h>             // Server_RerollPlayerTickSeed
 #include <runtime/world/entity.h>
@@ -154,6 +156,15 @@ void heal_player(NapiNPServerCtx &ctx, world::World &world,
 
 void Server_RouteMedicInteractions(NapiNPServerCtx &ctx, world::World &world) {
 	if (world.round_sim.medic_interactions.empty()) return;
+	// dfx2.exe's medic dispatcher keeps the tests and calls two empty functions
+	// where Jointops.exe revives and heals (docs/titles/dfx2-vs-jo-re.md DFX2-19)
+	// [orig: GameEvent_HandleMedicInteraction @0x4e6790 (@0x4e67d8, @0x4e6805)]
+	// [orig: @0x4e38d0 - nullsub_114 @0x4fcff0 from @0x4e3918, nullsub_115
+	//  @0x4fd000 from @0x4e3945 (dfx2.exe)].
+	if (world.rules.title == gameprofile::GAME_DFX2) {
+		world.round_sim.medic_interactions.clear();
+		return;
+	}
 	for (const world::MedicInteraction &interaction : world.round_sim.medic_interactions) {
 		if (interaction.revive)
 			revive_player(ctx, world, interaction);
@@ -161,6 +172,66 @@ void Server_RouteMedicInteractions(NapiNPServerCtx &ctx, world::World &world) {
 			heal_player(ctx, world, interaction);
 	}
 	world.round_sim.medic_interactions.clear();
+}
+
+// The team-mode downed-state resend: in session, when the game type carries the
+// team bit, a 62-tick countdown (fires when zero or when a positive value
+// decrements to zero, then reloads 62) walks every active slot with an entity
+// and, for each one whose entity is dead (Health <= 0 and Flags 0x2) of a
+// revivable cause, sends the 0x46 field-0x0008 form, [u8 slot][u16 0x0008]
+// [u8 pool-0 index][u8 downedState], to every state-6/7 slot whose own team
+// byte is the victim SLOT's (no entity read on either side), the listen host
+// included. downedState is the dead-and-(auto-medic or requested) packing of
+// the revive window and the request bit, else 0.
+// Retail's SendFiltered(0x46, msgClass 1, userParam 1) maps to this port's
+// transient send, as the 0x57 pong and the 0x16 list do.
+// [orig: Server_TickUpdate @0x51E2D0..0x51E378 — team test @0x51e2d0, timer
+//  @0x51e2db..0x51e307, predicate @0x51e333, form 8 @0x51e352, mask 0x180
+//  @0x51e357, `movzx edx, [esi+1A0h]` @0x51e35d, team filter @0x51e36d,
+//  send @0x51e373;
+//  NetPacket_SerializePlayerSync0x46 @0x505E80 downedState @0x5060e6..0x506131;
+//  NapiNPServer_SendFiltered @0x4C87E0 masks 0x80/0x100 @0x4c8948/@0x4c8964]
+void Server_ResendTeamDownedStates(NapiNPServerCtx &ctx, world::World &world) {
+	// dfx2.exe's tick has no such block: no revive, so no downed state to resend
+	// (docs/titles/dfx2-vs-jo-re.md DFX2-19) [orig: Server_TickUpdate @0x51a810, the
+	// periodic block's tail @0x51b2c9 (dfx2.exe)].
+	if (world.rules.title == gameprofile::GAME_DFX2) return;
+	if (!ctx.is_in_session ||
+			(world.match.rules().game_type & game_type::kTeamBit) == 0u)
+		return;
+	bool fire = world.team_downed_resend_countdown == 0;
+	if (world.team_downed_resend_countdown > 0)
+		fire = --world.team_downed_resend_countdown == 0;
+	if (!fire) return;
+	world.team_downed_resend_countdown = 62;
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (conn.phase < ConnectionPhase::PlayerAdded ||
+				conn.phase >= ConnectionPhase::Goodbye ||
+				!conn.link.owned_entity.valid())
+			continue;
+		const world::Entity *victim = world.registry.get(conn.link.owned_entity);
+		if (victim == nullptr || victim->health > 0 ||
+				((victim->flags | victim->engine_flags) & world::kEntityFlagDead) == 0u ||
+				!conn.link.death_cause_revivable)
+			continue;
+		PlayerReplicationState rep;
+		rep.player_slot = conn.reply.player_slot;
+		rep.entity_handle = conn.link.owned_entity.packed;
+		rep.team = victim->team;
+		if (conn.link.auto_medic_enabled || conn.link.medic_request_active)
+			rep.downed_state = static_cast<uint8_t>(
+					(conn.link.downed_revive_seconds & 0x7Fu) |
+					(conn.link.medic_request_active ? 0x80u : 0u));
+		const std::vector<uint8_t> body =
+				encode_player_sync(rep, kPlayerSyncHasDownedState);
+		for (NapiNPConnection &recipient : ctx.np_protocol.connection_list) {
+			if (!active_player_recipient(recipient) ||
+					recipient.assigned_team != conn.assigned_team)
+				continue;
+			recipient.link.transport->host_send(
+					s2c::PLAYER_SYNC, body, /*reliable=*/false);
+		}
+	}
 }
 
 } // namespace opennova::inmatch

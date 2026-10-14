@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include <base/gameprofile/gameprofile.h>
 #include <net/npwire/protocol_message.h>
 #include <runtime/inmatch/integrity_sources.h>
 
@@ -45,6 +46,26 @@ static_assert(kMaxFrameUpdateBodyBytes == 1278);
 //  HostDialog_ReadSettings @0x555c25..0x555c2d; see host_player_slot_limit]
 inline constexpr uint32_t kMaxPlayersCap = 65;
 
+// A title's player caps (docs/titles/dfx2-vs-jo-re.md DFX2-8). `session` is the session create's,
+// the session apply's and the slot table's ceiling (title_max_players_cap); `host_screen` the host
+// screen's MAX_PLAYERS clamp, a data word the same three readers take: 64 in Jointops.exe, 100 in
+// dfx2.exe. dfx2.exe's NovaWorld screen replaces its word with the browser variable `NWHL` when the
+// service sets one [orig: @0x5575ce (dfx2.exe), in UI_ProcessLANSessionStateMachine]; that is the
+// game's own screen, so a host started from the host file (opennova-serve) never reads it.
+// [orig: HostDialog_ReadSettings @0x555940 (@0x555c20..0x555c2d); UI_PopulateHostSettingsFromConfig
+//  @0x555fe0 (@0x55631d)] [orig: HostDialog_ReadSettings @0x553af0 (@0x553dd0), g_HostMaxPlayersCap
+//  @0x835f0c, the populate's reads @0x5544cd / @0x55450a (dfx2.exe)]
+struct TitlePlayerCaps {
+	uint32_t session = kMaxPlayersCap;
+	int32_t host_screen = 64;
+};
+// dfx2.exe's ceiling: 251 where Jointops.exe's is 65 at every site that holds it.
+// [orig: @0x54ed93..0x54ed9a in Game_ApplySessionSettingsToGlobals, @0x567707..0x56770e in
+//  CNapiGameSession_BuildAndCreateSession, @0x5191c5 in Server_AllocatePlayerSlotTable (dfx2.exe)]
+inline constexpr uint32_t kMaxPlayersCapDfx2 = 251;
+// The caps of a title (gameprofile::GameId): dfx2.exe's for GAME_DFX2, Jointops.exe's otherwise.
+TitlePlayerCaps title_player_caps(int title);
+
 // The session family that selects retail's default send divider. `Automatic`
 // is resolved from the installed transport by create_session: socketless is
 // SinglePlayer and a socketed session is LAN unless its caller explicitly
@@ -57,6 +78,11 @@ enum class GameSessionChannel : uint8_t {
 };
 
 struct GameConfig {
+	// The title whose rules the session runs (gameprofile::GameId; CONTEXT.md "Title"): its player
+	// caps (title_player_caps), its built-in score table and the in-match rules the session stamps on
+	// its World (world::SessionRules::title). opennova-serve's host_session_settings takes it from
+	// the cfg block's table, the listen host from the identity it hosts with.
+	int title = gameprofile::GAME_JO;
 	// --- §6.4 identity (lobby name + wire server name + join-gate passwords) -----------------------
 	// server_name feeds the lobby/session name [orig create_session -> np_protocol.session_name /
 	// nstmout_path @proto+0x288] AND the wire bodies [orig g_ServerNameStr @0x24D1FC4: the S2C 0x2C

@@ -82,9 +82,11 @@ bool apply_host_dialog_number(GameConfig& config, int32_t& player_limit,
     else if (control == "KILL_LIMIT") config.score_limit = session_point_limit(number);
     else if (control == "MAX_SCORE") config.max_score = session_point_limit(number);
     else if (control == "MAX_KOTH") config.time_limit_minutes = session_koth_limit_minutes(number);
-    // The dialog read clamps its edit to 64 [orig: HostDialog_ReadSettings
-    // @ 0x555c25..0x555c2d].
-    else if (control == "MAX_PLAYERS") player_limit = std::min(number, 64);
+    // The dialog read clamps its edit to the title's screen cap, 64 or 100
+    // (TitlePlayerCaps::host_screen) [orig: HostDialog_ReadSettings
+    // @ 0x555c25..0x555c2d] [orig: @0x553dd0 (dfx2.exe)].
+    else if (control == "MAX_PLAYERS")
+        player_limit = std::min(number, title_player_caps(config.title).host_screen);
     else if (control == "MAX_FF_KILLS") config.max_friendly_kills = number;
     else if (control == "TAKEOVER_TIME") config.capture_duration_seconds = number;
     else if (control == "LFP_TAKEOVER") config.capture_speed_setting = number;
@@ -109,7 +111,8 @@ std::string host_dialog_value(const GameConfig& config, int32_t player_limit,
                               bool serve_and_play, std::string_view control) {
     // The populate step that seeds the MULTI_PLAYER_HOST screen from the
     // config before it shows: text edits by SetText, numeric edits by
-    // SetIntValue, spins by SelectItemByValue. MAX_PLAYERS is clamped to 64
+    // SetIntValue, spins by SelectItemByValue. MAX_PLAYERS is clamped to the
+    // title's screen cap (64; dfx2.exe's 100 [orig: @0x5544cd (dfx2.exe)])
     // first; the four inverted flag spins show the bit CLEAR as 1; the 500-point
     // and nonpositive-KOTH sentinels map back to their dialog numbers (the read
     // side folds the apply's substitution into the config, see above).
@@ -141,7 +144,8 @@ std::string host_dialog_value(const GameConfig& config, int32_t player_limit,
     if (control == "KILL_LIMIT") return number(config.score_limit == kSessionNoPointLimit ? 500 : config.score_limit);
     if (control == "MAX_SCORE") return number(config.max_score == kSessionNoPointLimit ? 500 : config.max_score);
     if (control == "MAX_KOTH") return number(config.time_limit_minutes == kSessionNoKothLimitMinutes ? 0 : config.time_limit_minutes);
-    if (control == "MAX_PLAYERS") return number(std::min(player_limit, 64));
+    if (control == "MAX_PLAYERS")
+        return number(std::min(player_limit, title_player_caps(config.title).host_screen));
     if (control == "MAX_FF_KILLS") return number(config.max_friendly_kills);
     if (control == "TAKEOVER_TIME") return number(config.capture_duration_seconds);
     if (control == "LFP_TAKEOVER") return number(config.capture_speed_setting);
@@ -163,7 +167,18 @@ uint32_t session_koth_limit_minutes(int32_t cfg_limit) {
     return cfg_limit <= 0 ? kSessionNoKothLimitMinutes : static_cast<uint32_t>(cfg_limit);
 }
 
-uint32_t host_player_slot_limit(int32_t player_limit, bool serve_and_play) {
+TitlePlayerCaps title_player_caps(int title) {
+    TitlePlayerCaps caps;
+    if (title == gameprofile::GAME_DFX2) {
+        caps.session = kMaxPlayersCapDfx2;
+        // [orig: g_HostMaxPlayersCap @0x835f0c = 100 (dfx2.exe), against
+        //  Jointops.exe's dword_83C79C = 64]
+        caps.host_screen = 100;
+    }
+    return caps;
+}
+
+uint32_t host_player_slot_limit(int32_t player_limit, bool serve_and_play, int title) {
     // Dedicated hosting reserves the extra host slot in the live slot limit
     // (dword_24D211C); the session's advertised and admitted cap
     // (GameConfig::max_players) never carries it. The 65 ceiling tests the
@@ -174,25 +189,29 @@ uint32_t host_player_slot_limit(int32_t player_limit, bool serve_and_play) {
     // creation clamps the cap into 1..65 before the apply runs, so the ceiling
     // never cuts and a blank cap publishes 1 (2 dedicated): session_player_cap,
     // which both hosts run first. The same live count gates BMS placements.
+    // The ceiling is the title's: 65, or dfx2.exe's 251 (TitlePlayerCaps).
     // [orig: Game_ApplySessionSettingsToGlobals @0x551b26..0x551b48;
     // CNapiGameSession_BuildAndCreateSession @0x56955D..0x56956C;
     // Config_SetDefaults @0x54d1d4 (networkConnectType_480 = 1);
-    // Server_InitNewRoundState @ 0x51c8e0]
+    // Server_InitNewRoundState @ 0x51c8e0] [orig: @0x54ed93..0x54ed9a (dfx2.exe)]
+    const int32_t ceiling = static_cast<int32_t>(title_player_caps(title).session);
     int64_t total = static_cast<int64_t>(player_limit) + (serve_and_play ? 0 : 1);
-    if (player_limit > static_cast<int32_t>(kMaxPlayersCap)) total = kMaxPlayersCap;
+    if (player_limit > ceiling) total = ceiling;
     // The limit is unsigned: a negative total (no session create clamped the
     // cap) reads as 0.
     return static_cast<uint32_t>(std::max<int64_t>(total, 0));
 }
 
 uint32_t GameConfig::player_slot_limit() const {
-    return host_player_slot_limit(static_cast<int32_t>(max_players), !dedicated_server);
+    return host_player_slot_limit(static_cast<int32_t>(max_players), !dedicated_server, title);
 }
 
-int32_t session_player_cap(int32_t player_limit) {
-    constexpr int32_t kSessionCap = static_cast<int32_t>(kMaxPlayersCap);
+int32_t session_player_cap(int32_t player_limit, int title) {
+    // [orig: CNapiGameSession_BuildAndCreateSession @0x569567 (0x41)] [orig:
+    //  @0x567707 (0xFB) (dfx2.exe)]
+    const int32_t session_cap = static_cast<int32_t>(title_player_caps(title).session);
     if (player_limit < 1) return 1;
-    return player_limit > kSessionCap ? kSessionCap : player_limit;
+    return player_limit > session_cap ? session_cap : player_limit;
 }
 
 } // namespace opennova::inmatch

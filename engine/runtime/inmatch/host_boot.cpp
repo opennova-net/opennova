@@ -112,6 +112,9 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	//  FindFirstFileA check on disk; GameType_CreateDefaultSettings @0x52DD00;
 	//  ScoreConfig_LoadFile @0x52D8A0]
 	if (request.host != nullptr && request.session_score_ini) {
+		// The table's fanfare pair first, the title's, which the file only replaces
+		// (GameType_CreateDefaultSettings, world::default_score_exp_fanfare).
+		host_cfg.config.exp_fanfare = world::default_score_exp_fanfare(host_cfg.config.title);
 		std::vector<uint8_t> score_bytes;
 		if (files.read_loose("score.ini", score_bytes) && !score_bytes.empty() &&
 				!load_session_score_config(host_cfg.config,

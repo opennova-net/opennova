@@ -831,6 +831,41 @@ int main() {
         CHECK(teamless.primary == 0 && teamless.fallback == 0);
     }
 
+    // --- dfx2.exe's co-op checkpoint (docs/titles/dfx2-vs-jo-re.md DFX2-9): with
+    //     one set, a co-op player is put on the checkpoint marker's raw position
+    //     and angle words, the start marker's latches standing; none (0xFFFF), a
+    //     game type outside co-op, or Jointops.exe's rules keep the start marker.
+    // [orig: Server_PositionPlayerForSpawn @0x50a0a0 (@0x50a5b2..0x50a60d) (dfx2.exe)]
+    {
+        auto w_storage = std::make_unique<World>();
+        World &w = *w_storage;
+        w.registry.configure_pool(0, 4);
+        w.registry.configure_pool(3, 16);
+        const EntityHandle start = spawn_marker(w, 6094, {1.0f, 2.0f, 3.0f}, 90);
+        w.registry.get(start)->team = 2; // arms the queued mount, carrier = the marker
+        spawn_marker(w, 6002, {7.0f, 7.0f, 0.0f}); // the solo fallback, outside co-op
+        const EntityHandle checkpoint = spawn_marker(w, 6005, {50.0f, 60.0f, 5.0f}, 45);
+
+        w.rules.title = opennova::gameprofile::GAME_DFX2;
+        SpawnPointResult r = resolve_player_spawn_pose(
+            w, EntityHandle{}, EntityHandle{}, 0, 1, 0x10020u);
+        CHECK(r.found && approx(r.position.x, 1.0f) && r.yaw == 90); // 0xFFFF: none yet
+
+        w.script.coop_checkpoint_slot = static_cast<uint16_t>(checkpoint.slot());
+        for (const uint32_t coop : {0x10020u, 0x30020u}) {
+            r = resolve_player_spawn_pose(w, EntityHandle{}, EntityHandle{}, 0, 1, coop);
+            CHECK(r.found && approx(r.position.x, 50.0f) && approx(r.position.y, 60.0f) &&
+                  approx(r.position.z, 5.0f) && r.yaw == 45);
+            CHECK(r.flags_or == 0x200u && r.carrier == start);
+        }
+        r = resolve_player_spawn_pose(w, EntityHandle{}, EntityHandle{}, 0, 1, 0x0u);
+        CHECK(r.found && approx(r.position.x, 7.0f)); // deathmatch: no checkpoint arm
+
+        w.rules.title = opennova::gameprofile::GAME_JO;
+        r = resolve_player_spawn_pose(w, EntityHandle{}, EntityHandle{}, 0, 1, 0x10020u);
+        CHECK(r.found && approx(r.position.x, 1.0f) && r.yaw == 90);
+    }
+
     if (failures == 0) std::printf("OK spawn_select\n");
     return failures == 0 ? 0 : 1;
 }

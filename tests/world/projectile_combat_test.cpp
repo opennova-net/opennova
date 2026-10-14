@@ -616,6 +616,60 @@ void test_item_type_zone_domain_and_attrib_0200_sections() {
     }
 }
 
+// dfx2.exe's section scales and clamp order (docs/titles/dfx2-vs-jo-re.md DFX2-16): every section
+// 1.0 but the head's 13 and 14 (3.0) and the seat codes (6.0), the ammo's min and max taken on the
+// base before them; Jointops.exe's 1.25 / 0.5 bands, clamped after.
+// [orig: Weapon_CalcImpactDamage @0x4EC920] [orig: @0x4e9a50 (dfx2.exe)]
+void test_dfx2_section_scales_and_clamp_order() {
+    constexpr int kDfx2 = opennova::gameprofile::GAME_DFX2;
+    const auto damage = [](int section, int title, int32_t min_damage, int32_t max_damage,
+                           uint32_t attrib = 0) {
+        auto r = std::make_unique<PosedDamageRig>(section);
+        r->world.rules.title = title;
+        r->ammo().min_damage = min_damage;
+        r->ammo().max_damage = max_damage;
+        r->target_entity()->item_attrib = attrib;
+        r->fire_and_tick();
+        CHECK(r->world.round_sim.hits.size() == 1);
+        return r->world.round_sim.hits.empty() ? -1 : r->world.round_sim.hits[0].damage;
+    };
+    constexpr int kJo = opennova::gameprofile::GAME_JO;
+    // The base is 620 (velocity 620, 875 grains).
+    CHECK(damage(0, kJo, 0, 0) == 775 && damage(0, kDfx2, 0, 0) == 620);     // torso band
+    CHECK(damage(9, kJo, 0, 0) == 310 && damage(9, kDfx2, 0, 0) == 620);     // limb band
+    CHECK(damage(6, kJo, 0, 0) == 620 && damage(6, kDfx2, 0, 0) == 620);     // the 1.0 band
+    CHECK(damage(13, kJo, 0, 0) == 1860 && damage(13, kDfx2, 0, 0) == 1860); // head
+    CHECK(damage(14, kDfx2, 0, 0) == 1860);
+    CHECK(damage(2, kDfx2, 0, 0, 0x200u) == 3720); // a seat code
+    // A 700 ceiling cuts Jointops.exe's scaled number, dfx2.exe's base only.
+    CHECK(damage(13, kJo, 0, 700) == 700 && damage(13, kDfx2, 0, 700) == 1860);
+    CHECK(damage(13, kDfx2, 0, 500) == 1500); // 500 * 3.0
+    // A 700 floor raises Jointops.exe's scaled 310 to 700; dfx2.exe's base to 700, then scales.
+    CHECK(damage(9, kJo, 700, 0) == 700 && damage(9, kDfx2, 700, 0) == 700);
+    CHECK(damage(13, kDfx2, 700, 0) == 2100);
+}
+
+// dfx2.exe's bone walk narrows a player's extra radius past 0x1000 to half the rest when the
+// player rides something or holds still; a moving, unmounted player, a non-player and
+// Jointops.exe keep the round's. [orig: Physics_RaycastAgainstBoneSections @0x4e4670] [orig:
+//  @0x4e17af..0x4e17e0 (dfx2.exe)]
+void test_dfx2_player_bone_walk_radius() {
+    constexpr int kDfx2 = opennova::gameprofile::GAME_DFX2;
+    constexpr int kJo = opennova::gameprofile::GAME_JO;
+    Entity player;
+    player.flags = kEntityFlagPlayer;
+    CHECK(person_extra_radius(kJo, player, 0x3000) == 0x3000);
+    CHECK(person_extra_radius(kDfx2, player, 0x3000) == 0x2000); // still: (0x2000 >> 1) + 0x1000
+    CHECK(person_extra_radius(kDfx2, player, 0x1000) == 0x1000);
+    CHECK(person_extra_radius(kDfx2, player, 0x800) == 0x800);
+    player.net_move_input = Entity::kMoveOrderMoving;
+    CHECK(person_extra_radius(kDfx2, player, 0x3000) == 0x3000); // moving on foot
+    player.mount_target = EntityHandle::make(1, 2);
+    CHECK(person_extra_radius(kDfx2, player, 0x3000) == 0x2000); // riding
+    Entity npc;
+    CHECK(person_extra_radius(kDfx2, npc, 0x3000) == 0x3000);
+}
+
 void test_shooter_damage_class_runs_after_zone_truncation() {
     {
         PosedDamageRig r(0);
@@ -3959,6 +4013,8 @@ static const NamedTest kTests[] = {
     {"test_posed_head_zone_multiplier", test_posed_head_zone_multiplier},
     {"test_item_type_zone_domain_and_attrib_0200_sections", test_item_type_zone_domain_and_attrib_0200_sections},
     {"test_shooter_damage_class_runs_after_zone_truncation", test_shooter_damage_class_runs_after_zone_truncation},
+    {"test_dfx2_section_scales_and_clamp_order", test_dfx2_section_scales_and_clamp_order},
+    {"test_dfx2_player_bone_walk_radius", test_dfx2_player_bone_walk_radius},
     {"test_body_armor_energy_and_impact_row", test_body_armor_energy_and_impact_row},
     {"test_person_hit_applies_the_surface_drag_leg", test_person_hit_applies_the_surface_drag_leg},
     {"test_network_oneshot_authority_and_session_gate", test_network_oneshot_authority_and_session_gate},

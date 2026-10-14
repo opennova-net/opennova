@@ -60,12 +60,17 @@ gamecfg::DefaultTexts game_cfg_default_texts(const rtxt::File *gametext) {
 }
 
 HostScreenState host_session_settings(gamecfg::GameCfg &cfg) {
-	// In session, the cap goes into 1..65 before the apply, written back into
-	// the block (session_player_cap carries the witness).
-	cfg.mp_max_players = session_player_cap(cfg.mp_max_players);
+	// The block's table is its title's (gamecfg::config_var_rows): dfx2.exe's
+	// carries the one row Jointops.exe's lacks, so the session runs that title.
+	const int title = cfg.table == gamecfg::ConfigTable::Dfx2 ? gameprofile::GAME_DFX2
+	                                                         : gameprofile::GAME_JO;
+	// In session, the cap goes into 1..65 (dfx2.exe: 1..251) before the apply,
+	// written back into the block (session_player_cap carries the witness).
+	cfg.mp_max_players = session_player_cap(cfg.mp_max_players, title);
 
 	HostScreenState host;
 	GameConfig &config = host.config;
+	config.title = title;
 	host.player_limit = cfg.mp_max_players;
 	// SERVERTYPE: the cfg's `dedicated` word [orig: dedicatedServer_400, read
 	// by the apply's cap @0x551B30].
@@ -120,7 +125,7 @@ HostScreenState host_session_settings(gamecfg::GameCfg &cfg) {
 	config.no_crosshair_spread = cfg.mp_no_crosshair_spread;
 	config.no_scope_drift = cfg.mp_no_scope_drift;
 
-	// The session's cap, already 1..65 [orig: game_settings.max_players
+	// The session's cap, already 1..65 (or 1..251) [orig: game_settings.max_players
 	// @0x56963F], and the dedicated word the slot limit adds the host's own
 	// slot for (GameConfig::player_slot_limit) [orig: @0x551B20..0x551B35]; in
 	// session the apply's 65 ceiling never cuts.
