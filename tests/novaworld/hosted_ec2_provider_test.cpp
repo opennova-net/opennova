@@ -344,6 +344,14 @@ int test_machine_script() {
 	TEST_EXPECT(runs_line(script, "if [ -e /proc/net/if_inet6 ]; then"));
 	TEST_EXPECT(runs_line(script, "ExecStartPre=/usr/local/sbin/opennova-serve-fence"));
 	TEST_EXPECT(runs_line(script, "install --no-install-recommends docker.io iptables"));
+	// Both of serve's ports leave the ephemeral range before anything runs (the
+	// pulls' sockets), so its binds find them free.
+	const std::string reserve = "sysctl -w net.ipv4.ip_local_reserved_ports=" +
+			std::to_string(hosted::Ec2Provider::kGamePort) + "," +
+			std::to_string(hosted::Ec2Provider::kAdminPort);
+	TEST_EXPECT(runs_line(script, reserve));
+	const size_t reserved = script.find(reserve);
+	TEST_EXPECT(reserved != std::string::npos && reserved < script.find("apt_get update"));
 	// The check wants the REJECT's refusal (curl's exit 7), so a metadata service that
 	// merely does not answer cannot pass it.
 	TEST_EXPECT(runs_line(script, "[ \"$imds_rc\" -eq 7 ] || end_machine"));

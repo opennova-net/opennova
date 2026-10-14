@@ -531,8 +531,10 @@ An account an admin approved (`players.can_host`) can have the service run one
   networks (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16), and the boot logs them. The machine writes the secret files owner-only (`0600`, the serve
   image's user) and the token reaches no command line there.
 - **The machine side** (`hosted/machine/user_data.sh`, cloud-init at the first boot, as
-  root): docker installed (and held, so no unattended upgrade restarts it under the
-  server), the data volume (label `opennova-jo`) mounted read-only at `/opt/jo`, the
+  root): serve's two ports reserved out of Linux's ephemeral range
+  (`net.ipv4.ip_local_reserved_ports`, so no socket of the image pull's holds one at
+  serve's bind), docker installed (and held, so no unattended upgrade restarts it under
+  the server), the data volume (label `opennova-jo`) mounted read-only at `/opt/jo`, the
   bundle fetched, `/srv/serve` written (`0700`, owned by UID 10001), the image pulled, and
   `opennova-serve.service` started: the serve image as UID 10001 with `--network host`,
   no capability and no way to gain one (`--cap-drop ALL`, `no-new-privileges`; it binds

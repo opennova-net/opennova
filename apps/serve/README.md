@@ -254,7 +254,9 @@ and restart the server only on an exit it did not ask for (ADR 0053 d6).
 `apps/serve/Dockerfile` builds `opennova-serve` into a Linux image (ubuntu 24.04), which
 `.github/workflows/serve-image.yml` publishes as `ghcr.io/<owner>/opennova-serve`
 (tagged `sha-<short>`, the branch, and `latest` on master). It is the server the hosted
-game servers run (ADR 0053); nothing deploys it yet.
+game servers run (ADR 0053): each hosted server's EC2 machine pulls it at the digest the
+service's deploy pinned and runs it as below, with `/opt/jo` the game data volume
+(`apps/novaworld_server/hosted/machine/user_data.sh`; DEPLOY.md, "Hosted game servers").
 
 The image holds the binary and no game data. No retail byte goes into it, ever: the game
 data is a licensed Joint Operations install you mount yourself.

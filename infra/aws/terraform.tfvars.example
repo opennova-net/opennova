@@ -25,6 +25,14 @@ allocate_eip = true
 # (it has no vault field). NOTE: onnet called this cloudflare_proxied.
 cloudflare_web_proxied = true   # web @/www behind Cloudflare TLS
 
+# Hosted game servers (hosted.tf; DEPLOY.md "Hosted game servers"). The data
+# snapshot's id comes from the vault (item `hosted`, field data_snapshot_id), not
+# this file: hosting is off without it.
+# hosted_instance_type  = "c7a.medium"  # never a burstable t-family type
+# hosted_root_volume_gb = 10
+# hosted_ami_id         = ""            # empty: Canonical's newest Ubuntu 24.04
+# hosted_deployment     = ""            # empty: instance_name
+
 # Optional overrides
 # game_http_port = 8080
 # web_http_port  = 80
