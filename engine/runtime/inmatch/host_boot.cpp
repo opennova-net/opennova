@@ -28,6 +28,7 @@ ServerTextTable read_host_server_text(const mission::BootFileSource &files) {
 	text.medic_request_format = gametext.get_in_section("Server", "STRSRV_MEDREQ");
 	text.change_to_blue_format = gametext.get_in_section("Server", "C2Blue");
 	text.change_to_red_format = gametext.get_in_section("Server", "C2Red");
+	text.host_name = gametext.get_in_section("Server", "STRSRV19");
 	return text;
 }
 

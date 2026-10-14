@@ -123,8 +123,19 @@ struct AdminPlayer {
 	int deaths = 0;
 	int ping = 0;
 };
-// PLAYER LIST: the player rows. The header and the host's own slot-0 "Host" row are not players.
-std::vector<AdminPlayer> admin_parse_player_list(std::string_view reply);
+// Which slot-0 row is the server's own, not a player's. Any host's table leads with its slot 0.
+// A Serve Only host's slot 0 is always its own row, named by its GameText Server/STRSRV19 in
+// the install's language; a listen host's slot 0 is its own player, named by the profile (a
+// NovaWorld one by its character), so only the English "Host" marks a server row there.
+// [orig: Server_InitNewRoundState @0x51C9C3..0x51CA2A; CNapiGameSession_BuildAndCreateSession
+//  @0x5696E2..0x569783]
+enum class AdminServerRow : uint8_t {
+	NamedHost,  // a server of unknown type: slot 0 named "Host"
+	Dedicated,  // a Serve Only server: slot 0, whatever its name
+};
+// PLAYER LIST: the player rows. The header and the server's own slot-0 row are not players.
+std::vector<AdminPlayer> admin_parse_player_list(std::string_view reply,
+		AdminServerRow server_row = AdminServerRow::NamedHost);
 
 // One MISSION AVAILABLE row: the catalog index, the file and its title.
 struct AdminCatalogEntry {

@@ -3,7 +3,7 @@
 // temp working directory holding a game.cfg with remote_admin_port set, an admin.cfg with one
 // user and a banned.txt; a LAN joiner (a ClientRuntime on a real UDP socket) plays in it. Over
 // real loopback TCP the engine's admin client half (net/admin/admin_protocol.h) logs in and:
-//   - PLAYER LIST lists the joiner;
+//   - PLAYER LIST lists the host's own slot 0, then the joiner;
 //   - MISSION LIST, then MISSION ADD with ONESHOT at a position, SETNEXT onto it and CYCLE: the
 //     map changes to the SETNEXT entry, and the next CYCLE removes the one-shot after it played
 //     and plays the entry that slid into its slot;
@@ -274,11 +274,15 @@ int main() {
 	CHECK(admin.connect(admin_port));
 	CHECK(admin.login("boss", "pw"));
 
-	// --- PLAYER LIST: the LAN joiner in slot 1 (no host row: D-NET-352).
+	// --- PLAYER LIST: the host's own slot 0 (its name STRSRV19, empty with no gametext.bin
+	// mounted; team 1, class 8), then the LAN joiner in slot 1 (D-NET-352).
 	{
 		const std::string list = admin.one("PLAYER LIST");
-		const std::vector<AdminPlayer> players = admin_parse_player_list(list);
-		CHECK(list.rfind("NAME            \t #\tTEAM\tClass\tKills\tDeaths\tPING\n", 0) == 0);
+		const std::vector<AdminPlayer> players =
+				admin_parse_player_list(list, AdminServerRow::Dedicated);
+		CHECK(list.rfind("NAME            \t #\tTEAM\tClass\tKills\tDeaths\tPING\n"
+		                 "                \t 0\t 1\t8\t0\t0\t0\n",
+		              0) == 0);
 		CHECK(players.size() == 1 && players[0].name == "ServeJoiner" && players[0].slot == 1);
 	}
 

@@ -716,7 +716,7 @@ bool emit_admission_metadata(const GameConfig &cfg, NapiNPConnection &conn,
 	// reservation, so the delayed 0x04 and the live entity cannot disagree.
 	if (world != nullptr) {
 		(void)Server_ReservePlayerTeam(cfg, /*is_in_session=*/true, roster, conn, *world,
-				ctx != nullptr ? ctx->rotation : nullptr);
+				ctx != nullptr ? ctx->rotation : nullptr, ctx != nullptr ? &ctx->host_slot : nullptr);
 	}
 
 	// The both-direction send-holdoff dictation (H:0x00 mask 8 / CS field 3)
@@ -835,7 +835,7 @@ SessionVars host_session_vars(const GameConfig &cfg) {
 std::vector<ProtocolMessage> build_spawn_pump_metadata(
 		const GameConfig &config, NapiNPConnection &conn,
 		const std::vector<NapiNPConnection> &roster, world::World *world,
-		const HostRotation *rotation) {
+		const HostRotation *rotation, const HostSlotRow *host_slot) {
 	std::vector<ProtocolMessage> messages;
 	const uint8_t capacity = static_cast<uint8_t>(
 			config.total_player_slot_capacity());
@@ -851,7 +851,7 @@ std::vector<ProtocolMessage> build_spawn_pump_metadata(
 		team = entity != nullptr
 				? entity->team
 				: Server_ReservePlayerTeam(
-						config, /*is_in_session=*/true, roster, conn, *world, rotation);
+						config, /*is_in_session=*/true, roster, conn, *world, rotation, host_slot);
 	}
 
 	// Exact CNapiServer_ProcessPendingPlayerSpawns ordering from the retail LAN

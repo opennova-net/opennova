@@ -1,7 +1,8 @@
 // The remote-admin console's player-slot walks (admin_console.h): the PLAYER verbs, the
 // PETERRABBIT easter egg and the QUERY status report, each over the authority's slot table
 // in slot order. The table is the connection list the port keeps as retail's player-slot
-// table; a dedicated host here has no connectionless slot 0 of its own (D-NET-352).
+// table, led on a Serve Only host by its own connectionless slot 0 (ctx.host_slot), whose
+// hidden body is not modeled (D-NET-352).
 #include <runtime/inmatch/admin_console.h>
 
 #include <runtime/inmatch/character_registry.h>
@@ -76,6 +77,24 @@ uint8_t slot_team(const NapiNPConnection &conn) {
 	return conn.assigned_team_valid ? conn.assigned_team : uint8_t{0};
 }
 
+std::string format_row(const std::string &name, int slot, int team, int player_class, int kills,
+		int deaths, int ping) {
+	char line[160];
+	std::snprintf(line, sizeof(line), "%-16s\t%2d\t%2d\t%d\t%d\t%d\t%d\n", name.c_str(), slot, team,
+			player_class, kills, deaths, ping);
+	return line;
+}
+
+// A Serve Only host's own slot-0 row: its name, team and class as the session create wrote
+// them, its CPlayerStats words, and a ping word (+0x170C0) only the C2S ping reply writes,
+// which no connection sends for it. [orig: CAdminServer_HandlePlayer @0x403FAD (the ping
+// +0x170C0), @0x403FC7 (the class +0x15EDC), @0x403FCD (the team +0x1A0), @0x403FD5 (the
+// number +0x14), @0x403FDB (the name +0x28); NapiNPServerMsg_HandlePingResponse @0x515121]
+std::string host_row(const HostSlotRow &host) {
+	return format_row(host.name, 0, host.team, host.player_class,
+			host.stats[world::MatchStats::kEnemyKills], host.stats[world::MatchStats::kDeaths], 0);
+}
+
 // One PLAYER LIST / QUERY row: the name padded (never cut) to 16, the slot number, the team,
 // the class word, CPlayerStats fields 4 and 6 (Kills, Deaths: the direct layout's +1 words),
 // the ping. [orig: "%-16s\t%2d\t%2d\t%d\t%d\t%d\t%d\n" @0x7C0900; CPlayerStats_GetFieldPlusOne
@@ -90,12 +109,10 @@ std::string slot_row(const NapiNPServerCtx &ctx, const NapiNPConnection &conn) {
 			deaths = p->stats[world::MatchStats::kDeaths];
 		}
 	}
-	char line[160];
-	std::snprintf(line, sizeof(line), "%-16s\t%2d\t%2d\t%d\t%d\t%d\t%d\n", conn.reply.player_name.c_str(),
-			static_cast<int>(conn.reply.player_slot), static_cast<int>(slot_team(conn)),
+	return format_row(conn.reply.player_name, static_cast<int>(conn.reply.player_slot),
+			static_cast<int>(slot_team(conn)),
 			entity != nullptr ? static_cast<int>(entity->player_class) : 0, kills, deaths,
 			static_cast<int>(conn.reply.rtt_ms));
-	return line;
 }
 
 // Server_SendValidatedChatToPlayer (a misnomer: the punt): on the authority an in-range active
@@ -138,12 +155,15 @@ void kill_entity(NapiNPServerCtx &ctx, world::EntityHandle handle) {
 
 // CPlayerStats_FreeAllBuffers zeroes the record, CPlayerStats_InitWeaponTracking sets field
 // 35. [orig: @0x52C3E0; @0x52BF60 (+140 = 1)]
+void zero_stats(world::MatchStats &stats) {
+	stats = world::MatchStats{};
+	stats[world::MatchStats::kRoundMarker] = 1;
+}
+
 void zero_score(NapiNPServerCtx &ctx, const NapiNPConnection &conn) {
 	if (ctx.world == nullptr) return;
-	if (world::MatchPlayer *row = ctx.world->match.player(conn.link.owned_entity)) {
-		row->stats = world::MatchStats{};
-		row->stats[world::MatchStats::kRoundMarker] = 1;
-	}
+	if (world::MatchPlayer *row = ctx.world->match.player(conn.link.owned_entity))
+		zero_stats(row->stats);
 }
 
 void swap_team(NapiNPServerCtx &ctx, const NapiNPConnection &conn) {
@@ -161,8 +181,8 @@ std::string slot_message(const char *format, const NapiNPConnection &conn) {
 
 // One slot's PLAYER BAN: the PCID appended to banlist.txt's list (saved, and confirmed, only
 // where the list exists), then the punt; false (and the error line) for a slot with no PCID.
-// Every slot here carries its net player, so retail's `not connected to a network` (a
-// connectionless slot) cannot arise.
+// Every connection's slot carries its net player; retail's `not connected to a network` is
+// the connectionless host slot's, which handle_player answers.
 // [orig: CAdminServer_HandlePlayer — ALL @0x404335..0x404431, one slot @0x404476..0x40452B]
 bool ban_slot(NapiNPServerCtx &ctx, const NapiNPConnection &conn, std::vector<std::string> &replies) {
 	if (conn.account.pcid.empty()) {
@@ -181,6 +201,8 @@ bool ban_slot(NapiNPServerCtx &ctx, const NapiNPConnection &conn, std::vector<st
 
 std::string AdminConsole::player_table() const {
 	std::string out = kTableHeader;
+	// Slot 0 leads the table walk [orig: @0x403FA4..0x404036 from slotPtr].
+	if (ctx_.host_slot.active) out += host_row(ctx_.host_slot);
 	for (const NapiNPConnection *conn : active_slots(ctx_)) out += slot_row(ctx_, *conn);
 	return out;
 }
@@ -208,13 +230,17 @@ void AdminConsole::handle_player(const Args &args, std::vector<std::string> &rep
 	const bool all = ieq(args[1], "ALL");
 	const uint8_t number = all ? 0 : static_cast<uint8_t>(atol_of(args[1]));
 	NapiNPConnection *target = nullptr;
+	// A Serve Only host's own slot 0 is found like any active slot; each verb acts on its
+	// row, and the body the verbs also reach in retail is D-NET-352's.
+	bool host_target = false;
 	if (!all) {
+		host_target = number == 0 && ctx_.host_slot.active;
 		for (NapiNPConnection *slot : active_slots(ctx_))
 			if (slot->reply.player_slot == number) {
 				target = slot;
 				break;
 			}
-		if (target == nullptr) {
+		if (target == nullptr && !host_target) {
 			replies.emplace_back("ERROR - Player Not Found.");
 			return;
 		}
@@ -234,22 +260,26 @@ void AdminConsole::handle_player(const Args &args, std::vector<std::string> &rep
 		return;
 	}
 	if (ieq(sub, "SWAPTEAM")) {
+		// The host's own row swaps through its body, which this port does not model
+		// (D-NET-352). [orig: @0x4041ED..0x404202]
 		if (all) {
 			for (NapiNPConnection *slot : active_slots(ctx_)) swap_team(ctx_, *slot);
 			replies.emplace_back("OK - All Players Swapped.");
 		} else {
-			swap_team(ctx_, *target);
+			if (target != nullptr) swap_team(ctx_, *target);
 			replies.emplace_back("OK - Player Swapped.");
 		}
 		return;
 	}
 	if (ieq(sub, "KILL")) {
-		// The single form tests for no entity in retail (D-NET-369); the walk skips one.
+		// The single form tests for no entity in retail (D-NET-369); the walk skips one. The
+		// host's own row dies through its body (D-NET-352). [orig: @0x404253..0x40425E,
+		//  @0x404284..0x404291]
 		if (ctx_.world != nullptr) {
 			if (all) {
 				for (NapiNPConnection *slot : active_slots(ctx_))
 					if (slot_entity(ctx_, *slot) != nullptr) kill_entity(ctx_, slot->link.owned_entity);
-			} else {
+			} else if (target != nullptr) {
 				kill_entity(ctx_, target->link.owned_entity);
 			}
 		}
@@ -257,12 +287,21 @@ void AdminConsole::handle_player(const Args &args, std::vector<std::string> &rep
 		return;
 	}
 	if (ieq(sub, "ZEROSCORE")) {
+		// The slot's CPlayerStats freed and re-initialised. ALL takes every active slot with an
+		// entity, which retail's host slot has (its hidden body, D-NET-352), so its row is
+		// zeroed too. [orig: ALL @0x4042B7..0x4042FE (+4, the entity +0), one slot
+		//  @0x404312..0x40431E; CPlayerStats_FreeAllBuffers @0x52C3E0,
+		//  CPlayerStats_InitWeaponTracking @0x52BF60]
 		if (all) {
+			if (ctx_.host_slot.active) zero_stats(ctx_.host_slot.stats);
 			for (NapiNPConnection *slot : active_slots(ctx_))
 				if (slot_entity(ctx_, *slot) != nullptr) zero_score(ctx_, *slot);
 			replies.emplace_back("OK - All Players Zeroed.");
 		} else {
-			zero_score(ctx_, *target);
+			if (target != nullptr)
+				zero_score(ctx_, *target);
+			else
+				zero_stats(ctx_.host_slot.stats);
 			replies.emplace_back("OK - Player Zeroed.");
 		}
 		return;
@@ -270,11 +309,22 @@ void AdminConsole::handle_player(const Args &args, std::vector<std::string> &rep
 	if (ieq(sub, "BAN")) {
 		if (all) {
 			// Every active non-local slot with an entity: its lines, the punt and `OK - All
-			// Players Banned.` each, and no closing reply. [orig: @0x404298..0x40444B]
+			// Players Banned.` each, and no closing reply; the host's own slot is local.
+			// [orig: @0x404298..0x40444B]
 			for (NapiNPConnection *slot : active_slots(ctx_)) {
 				if (slot_entity(ctx_, *slot) == nullptr || slot_is_local(*slot)) continue;
 				if (ban_slot(ctx_, *slot, replies)) replies.emplace_back("OK - All Players Banned.");
 			}
+			return;
+		}
+		if (target == nullptr) {
+			// The host's own slot has no net player (+28): the error, then the handler's end,
+			// with no punt and no second reply. [orig: the +28 test @0x40445D..0x404462, the
+			//  format @0x7C0F14 over +0x14 and +0x28 @0x404464..0x404476, the reply @0x40448B]
+			char line[256];
+			std::snprintf(line, sizeof(line), "ERROR - Player #%ld \"%s\" not connected to a network.",
+					0L, ctx_.host_slot.name.c_str());
+			replies.emplace_back(line);
 			return;
 		}
 		if (ban_slot(ctx_, *target, replies)) replies.emplace_back("OK - Player Banned.");
@@ -384,6 +434,7 @@ void AdminConsole::handle_fun(const Args &args, std::vector<std::string> &replie
 std::string AdminConsole::status_report() {
 	const world::World *world = ctx_.world;
 	const std::vector<const NapiNPConnection *> slots = active_slots(static_cast<const NapiNPServerCtx &>(ctx_));
+	const bool host = ctx_.host_slot.active;
 	std::string out;
 	char line[96];
 	// dword_24D1FA4 is the session's copy of the cfg name; SET ServerName does not reach it,
@@ -397,7 +448,8 @@ std::string AdminConsole::status_report() {
 	out += line;
 	const int16_t tod_high = world != nullptr ? static_cast<int16_t>(world->weather.tod_fixed24 >> 16) : int16_t{0};
 	out += "CURRENT TOD: " + std::to_string(tod_high) + "\r\n";
-	out += "CURRENT # PLAYERS: " + std::to_string(slots.size()) + "\r\n";
+	// Every active slot, a Serve Only host's own slot 0 included.
+	out += "CURRENT # PLAYERS: " + std::to_string(slots.size() + (host ? 1u : 0u)) + "\r\n";
 	out += "CURRENT MAP: " + ctx_.config.mission_file + "\r\n";
 	// The NULL arm's Overlays key; the waypoint family's "&" rides the debug word
 	// dword_24C1930's 0x10000 (an input-binding toggle), clear on a server.
@@ -409,6 +461,7 @@ std::string AdminConsole::status_report() {
 	out += "CURRENT GAME TYPE: " + abbreviation + "\r\n";
 	out += "CURRENT PLAYERS: \r\n";
 	out += kTableHeader;
+	if (host) out += host_row(ctx_.host_slot);
 	for (const NapiNPConnection *conn : slots) out += slot_row(ctx_, *conn);
 	out += "MAP QUEUE: \r\n";
 	// The queue buffer starts as `No missions in queue.`, which only a nonempty rotation in the

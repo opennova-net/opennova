@@ -133,6 +133,13 @@ struct GameConfig {
 	// [orig: g_GameConfigState.multiplayerTeamCount_488 @0x2550B40 -> g_NumTeamsConfig @0x24D2150;
 	// Server_BuildAndBroadcastScoreboard @0x50D960]
 	uint8_t num_teams = 2;
+	// The session's own net config side byte: the cfg block's side_req (+0x424),
+	// which a host that is not a session peer reads into its own slot 0's team
+	// (HostSlotRow). The defaults leave -1, no side.
+	// [orig: CNapiGameSession_BuildAndCreateSession @0x5697C3 (net_config.jsp[60]
+	//  = dword_2550ADC); Config_SetDefaults @0x54D1FA; PlayerSession_InitFromProfile
+	//  @0x50CA92..0x50CAB8 reads it as ctx+0x107C]
+	int8_t host_side_request = -1;
 	// mpattrib bitmask — the BuildFlags team-branch input [orig game_settings +0xD0] AND the 0x64
 	// mission-metadata blob's attrib dword. Observed bits (docs/net/novaworld-net-re.md §6.4;
 	// [orig: CNapiServerConfig_BuildFlags @0x4c4dc0]):

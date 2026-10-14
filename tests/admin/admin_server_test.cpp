@@ -25,6 +25,7 @@
 #include <runtime/hud/hud_chat_entry.h>     // kChatDispatchGlobal
 #include <runtime/hud/feed_format.h>    // kHudColorWhite / kHudColorLightBlue
 #include <runtime/inmatch/server_session.h> // set_connection_mode
+#include <runtime/inmatch/server_spawn.h>   // Server_InitNewRoundState (the host's own slot 0)
 #include <runtime/inmatch/udp_session_transport.h>
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/world.h>
@@ -129,6 +130,10 @@ struct Host {
 		world.registry.configure_pool(0, 32);
 		world.weather.tod_fixed24 = 12u << 24;
 		ctx.world = &world;
+		// The session create's round init: on this Serve Only host it keeps the host's own
+		// slot 0, named by Server/STRSRV19 (D-NET-352).
+		ctx.server_text.host_name = "Host";
+		inmatch::Server_InitNewRoundState(ctx);
 		const uint8_t teams[2] = {1, 2};
 		transports.reserve(2);
 		for (size_t i = 0; i < 2; ++i) {
@@ -519,13 +524,26 @@ void test_player() {
 	expect_eq(c.one("PLAYER LIST"), "ERROR - Not in Game State.", "LIST outside the Game Loop");
 	host.console->set_scene(inmatch::AdminScene::GameLoop);
 	const std::string table = c.one("PLAYER LIST");
+	// The host's own slot 0 leads: STRSRV19, team 1 and a fresh profile's side class 8 from the
+	// session create, no kills, deaths or ping (D-NET-352).
 	expect_eq(table,
 	          "NAME            \t #\tTEAM\tClass\tKills\tDeaths\tPING\n"
+	          "Host            \t 0\t 1\t8\t0\t0\t0\n"
 	          "P1              \t 1\t 1\t" + std::to_string(host.entity(0).player_class) + "\t0\t0\t100\n"
 	          "P2              \t 2\t 2\t" + std::to_string(host.entity(1).player_class) + "\t0\t0\t101\n",
 	          "the table");
 	const auto parsed = admin_parse_player_list(table);
-	expect(parsed.size() == 2 && parsed[1].name == "P2" && parsed[1].team == "2", "the client half parses it");
+	expect(parsed.size() == 2 && parsed[0].name == "P1" && parsed[1].name == "P2" && parsed[1].team == "2",
+	       "the client half parses it, the host's row not a player");
+	// A Serve Only server's slot 0 is its own row whatever STRSRV19 reads in its language; a
+	// server of unknown type is judged by the English name alone.
+	const std::string localized =
+			"NAME            \t #\tTEAM\tClass\tKills\tDeaths\tPING\n"
+			"Gastgeber       \t 0\t 1\t8\t0\t0\t0\n"
+			"P1              \t 1\t 1\t5\t0\t0\t100\n";
+	expect(admin_parse_player_list(localized, AdminServerRow::Dedicated).size() == 1 &&
+	               admin_parse_player_list(localized).size() == 2,
+	       "a dedicated server's localized slot-0 row is not a player");
 	// The team column is the slot's own byte (+416): a script team write to the
 	// body leaves it (D-NET-651). [orig: CAdminServer_HandleStatus @0x40316A]
 	host.entity(0).team = 2;
@@ -534,7 +552,13 @@ void test_player() {
 	       "a split slot lists its slot team");
 	host.entity(0).team = 1;
 	expect_eq(c.one("PLAYER KILL 7"), "ERROR - Player Not Found.", "an unknown slot");
-	expect_eq(c.one("PLAYER PUNT 0"), "ERROR - Player Not Found.", "no slot 0 on this host (D-NET-352)");
+	expect_eq(c.one("PLAYER PUNT 0"), "ERROR - Cannot punt Host.", "the host's own slot 0 is found and refused");
+	expect_eq(c.one("PLAYER BAN 0"), "ERROR - Player #0 \"Host\" not connected to a network.",
+	          "the host's slot has no net player: the error alone");
+	expect_eq(c.one("PLAYER ZEROSCORE 0"), "OK - Player Zeroed.", "ZEROSCORE takes the host's row");
+	expect(host.ctx.host_slot.stats[w::MatchStats::kRoundMarker] == 1, "its stats re-initialised");
+	expect_eq(c.one("PLAYER KILL 0"), "OK - Player Killed.", "KILL answers for the host's row");
+	expect_eq(c.one("PLAYER SWAPTEAM 0"), "OK - Player Swapped.", "and SWAPTEAM");
 	expect_eq(c.one("PLAYER PUNT"), "USAGE -  PLAYER [LIST | PUNT | BAN | SWAPTEAM | KILL | ZEROSCORE] [# | ALL]",
 	          "no target");
 	expect(c.command("PLAYER FROB 1").empty(), "an unknown sub-verb with a target draws no reply");
@@ -708,6 +732,7 @@ void test_reply_plan() {
 	                         "MISSION ADD CTF02.BMS 0", "MISSION ADD NOPE.BMS", "MISSION REMOVE 9", "PLAYER",
 	                         "PLAYER LIST", "PLAYER PUNT", "PLAYER KILL 7", "PLAYER BAN 7", "PLAYER FROB 1",
 	                         "PLAYER FROB 7", "PLAYER SWAPTEAM 1", "PLAYER CEASEFIRE ALL", "PLAYER BAN 2",
+	                         "PLAYER BAN 0", "PLAYER PUNT 0", "PLAYER FROB 0",
 	                         "WEAPON LIST", "CMD", "CHAT", "CHAT GET", "CHAT SEND hello there", "GOTO",
 	                         "ADMINUSER LIST", "BANLIST", "PETERRABBIT", "NOSUCHVERB", "MISSION CYCLE",
 	                         "MISSION CLEAR"}) {
@@ -730,9 +755,11 @@ void test_query_report() {
 	Host host;
 	const std::string report = host.console->status_report();
 	expect_eq(report.substr(0, report.find("CURRENT PLAYERS:")),
-	          "SERVER: Admin Host\r\nUP-TIME: 1 02:03:04\r\nCURRENT TOD: 3072\r\nCURRENT # PLAYERS: 2\r\n"
+	          "SERVER: Admin Host\r\nUP-TIME: 1 02:03:04\r\nCURRENT TOD: 3072\r\nCURRENT # PLAYERS: 3\r\n"
 	          "CURRENT MAP: TDM01.BMS\r\nCURRENT GAME TYPE: Team Deathmatch\r\n",
-	          "the header lines");
+	          "the header lines, the host's own slot 0 counted (D-NET-352)");
+	expect(report.find("PING\nHost            \t 0\t 1\t8\t0\t0\t0\nP1 ") != std::string::npos,
+	       "the table leads with the host's row");
 	expect(report.find("CURRENT PLAYERS: \r\nNAME            \t #\tTEAM") != std::string::npos &&
 	               report.find("PING\n") != std::string::npos &&
 	               report.substr(report.find("MAP QUEUE: ")) == "MAP QUEUE: \r\nNo missions in queue.",

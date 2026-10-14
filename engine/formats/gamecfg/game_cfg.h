@@ -206,7 +206,7 @@ struct GameCfg {
 	int32_t max_team_lives = 0;    // +0x404
 	int32_t max_kills = 0;         // +0x408
 	int32_t max_score = 0;         // +0x40C
-	int32_t side_req = 0;          // +0x424; written, never read
+	int32_t side_req = 0;          // +0x424; parse arm dead; the net config reads it
 	int32_t startdelay = 0;        // +0x410, clamped 0..300 at read
 	int32_t destroybuild = 0;      // +0x414
 	int32_t autobalance_on_recycle_enabled = 0;     // +0x528

@@ -217,6 +217,12 @@ void test_autobalance() {
 	g.ctx.config.auto_balance_trigger_difference = 0;
 	CHECK(inmatch::Server_CalcTeamImbalance(g.ctx) == 0);
 	CHECK(!inmatch::Server_ShouldAutoBalance(g.ctx));
+	// A Serve Only host's own slot 0 is an active row on its team (D-NET-352).
+	// [orig: Server_CalcTeamImbalance @0x4FCB10..0x4FCB2A]
+	g.ctx.host_slot.active = true;
+	g.ctx.host_slot.team = 1;
+	CHECK(inmatch::Server_CalcTeamImbalance(g.ctx) == 1);
+	g.ctx.host_slot.active = false;
 	// Co-op and non-team types never balance.
 	f.ctx.config.auto_balance_trigger_difference = 1;
 	f.ctx.config.game_type = 0x30000u;

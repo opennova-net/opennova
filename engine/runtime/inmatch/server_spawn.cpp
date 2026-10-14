@@ -47,7 +47,7 @@ namespace {
 uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 		const std::vector<NapiNPConnection> &roster,
 		const NapiNPConnection &joining, const world::World &world,
-		const std::array<uint8_t, 2> &side_team) {
+		const std::array<uint8_t, 2> &side_team, const HostSlotRow *host_slot) {
 	// A spectator is a roster player on neutral team zero, bypassing the team
 	// password/selection path. Retail gates the early return on being in a
 	// live MP session; a non-session add ignores the flag and takes team 1.
@@ -126,6 +126,11 @@ uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 		if (c.assigned_team >= 1 && c.assigned_team <= 4)
 			++counts[c.assigned_team - 1];
 	}
+	// A Serve Only host's own slot 0 is an active row of the table the tally
+	// walks, with no body here to count it (D-NET-352).
+	// [orig: @0x4FE5BD..0x4FE5DE: `+4 && slot != joiner`, +416]
+	if (host_slot != nullptr && host_slot->active && host_slot->team >= 1 && host_slot->team <= 4)
+		++counts[host_slot->team - 1];
 
 	if (active_teams == 2)
 		return static_cast<uint8_t>((counts[0] > counts[1]) + 1);
@@ -190,6 +195,37 @@ std::optional<uint8_t> first_free_player_slot(
 	return std::nullopt;
 }
 
+// A host with no player profile of its own (opennova-serve keeps none) reads a
+// fresh record's: both side class bytes 8, which the session apply keeps in
+// 5..9. [orig: PlayerProfile_InitDefaults @0x54BBE0 / @0x54BBE3;
+//  Game_ApplySessionSettingsToGlobals @0x5516D0..0x5516FD]
+constexpr int32_t kFreshProfileSideClass = 8;
+
+// A Serve Only host's own slot 0 (HostSlotRow): the round init's row, then the
+// session create's PlayerSession_InitFromProfile over it. A listen host's slot 0
+// is its loopback connection's. The round init's own team assignment
+// (Server_AssignPlayerTeam over teamPref) is overwritten by the create's, so
+// only the create's rule is kept: the net config's side byte when it is 1 or
+// 2, else 1, the slot being no spectator (+100567 is set on a peer only).
+// [orig: Server_InitNewRoundState @0x51C99A..0x51CA3C, the team call
+//  @0x51CABE..0x51CAC8, the spectator latch @0x51CA53..0x51CA6D;
+//  CNapiGameSession_BuildAndCreateSession: Server_InitNewRoundState @0x5695B3
+//  ahead of CNapiGameSession_CreateSession @0x56997D; PlayerSession_InitFromProfile
+//  @0x50CA92..0x50CAB8 (the team), @0x50CB53 (the name), @0x50CB7C (the class);
+//  CNapiGameSession_CreateSession @0x4C9952..0x4C996C (teamPref 0 the side-A
+//  class, else the side-B class)]
+void init_host_slot_row(NapiNPServerCtx &ctx) {
+	ctx.host_slot = HostSlotRow{};
+	if (ctx.is_mp_session_peer != 0) return;
+	HostSlotRow &host = ctx.host_slot;
+	host.active = true;
+	// CNapiPlayer_SetName's 32-byte field keeps 31 characters [orig: @0x50CB53].
+	host.name = ctx.server_text.host_name.substr(0, 31);
+	const int8_t side = ctx.config.host_side_request;
+	host.team = side == 1 || side == 2 ? static_cast<uint8_t>(side) : uint8_t{1};
+	host.player_class = kFreshProfileSideClass;
+}
+
 } // namespace
 
 std::optional<uint8_t> Server_ReservePlayerSlot(
@@ -218,12 +254,14 @@ std::optional<uint8_t> Server_ReservePlayerSlot(
 
 uint8_t Server_ReservePlayerTeam(const GameConfig &config, bool is_in_session,
 		const std::vector<NapiNPConnection> &roster, NapiNPConnection &conn,
-		const world::World &world, const HostRotation *rotation) {
+		const world::World &world, const HostRotation *rotation,
+		const HostSlotRow *host_slot) {
 	if (!conn.assigned_team_valid) {
 		conn.assigned_team =
 				assign_player_team(config, is_in_session, roster, conn, world,
 						rotation != nullptr ? rotation->side_team
-											: std::array<uint8_t, 2>{1, 2});
+											: std::array<uint8_t, 2>{1, 2},
+						host_slot);
 		conn.assigned_team_valid = true;
 	}
 	return conn.assigned_team;
@@ -251,6 +289,7 @@ void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 	// [orig: `mov g_LastGameToggle, 0` @0x51CAA4].
 	if (ctx.rotation != nullptr) ctx.rotation->last_game = false;
 	if (!ctx.is_authority) return;
+	init_host_slot_row(ctx);
 	// Server_ResetRoundCounters copies the configured StartDelay seconds into the
 	// one live pre-round timer. Keep the timer on World: it is the authority
 	// phase predicate and the source of the phase-0 0x0A projection, rather
@@ -286,7 +325,7 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// Server_PositionPlayerForSpawn's team switch @0x50d266]
 	spawn.team = Server_ReservePlayerTeam(
 			ctx.config, ctx.is_in_session, ctx.np_protocol.connection_list,
-			conn, world, ctx.rotation); // [orig: Server_AssignPlayerTeam @0x4fe310]
+			conn, world, ctx.rotation, &ctx.host_slot); // [orig: Server_AssignPlayerTeam @0x4fe310]
 	// The join spawn enters the no-pick arm (Server_OnPlayerJoin passes spawn
 	// handle low word 0, which Server_ResolveSpawnTargetHandle rejects), where
 	// a spectator slot is POSITIONED with the substitute team (Co-op 1; team
