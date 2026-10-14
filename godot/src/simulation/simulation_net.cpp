@@ -15,6 +15,7 @@
 #include "network/join_target.h" // the join request the discovered session comes from
 #include "util/string_convert.h"
 #include "resource_index/resource_root.h" // session_title (the launch game a bare session speaks)
+#include <net/title/title_identity.h> // TitleIdentity::game_id (the session's rules title)
 
 #include <cmath>
 #include <cstring>
@@ -460,6 +461,9 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 	// tables come from score.ini at each boot (inmatch/host_boot.h).
 	opennova::inmatch::GameConfig config = p_options->config();
 	config.mission_header_blob = std::move(net_.host_session_config.mission_header_blob);
+	// The rules the session runs are the title's it hosts as (session_title); none, Jointops.exe's.
+	const opennova::TitleIdentity *title = session_title(net_.title);
+	config.title = title != nullptr ? title->game_id : opennova::gameprofile::GAME_JO;
 	net_.host_bind_port = static_cast<uint16_t>(std::clamp(p_options->get_bind_port(), 0, 0xFFFF));
 	net_.host_network_type = p_options->network_type();
 	config.spectator_slots = std::max(config.spectator_slots, -1);
@@ -489,11 +493,11 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 	}
 	// Server type + player cap (UI host config): serve_and_play gates the host's own-player spawn +
 	// loopback fold at bring-up; max_players is the session's advertised and admitted cap: the
-	// session create's 1..65 clamp (this host is in session). The dedicated word makes the
-	// engine's slot limit (GameConfig::player_slot_limit) carry the host's own slot on top.
+	// session create's 1..65 clamp, the title's (this host is in session). The dedicated word makes
+	// the engine's slot limit (GameConfig::player_slot_limit) carry the host's own slot on top.
 	net_.host_serve_and_play = p_options->get_serve_and_play();
 	net_.host_max_players = static_cast<uint32_t>(
-			opennova::inmatch::session_player_cap(p_options->get_max_players()));
+			opennova::inmatch::session_player_cap(p_options->get_max_players(), config.title));
 	config.max_players = net_.host_max_players;
 	config.dedicated_server = !net_.host_serve_and_play;
 	net_.host_session_config = std::move(config);

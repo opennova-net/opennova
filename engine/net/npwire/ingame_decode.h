@@ -1501,7 +1501,7 @@ bool decode_full_player_info(const uint8_t *body, size_t len, FullPlayerInfo &ou
 //       [orig: loop @0x42e324..0x42e34a -> WeaponSlots_RecalculateAmmoFromCapacity
 //        @0x42e424]; NOT a score table — the pre-2026-09-10 label was wrong)
 //   [u16 waypointCount]
-//     { u16 slotId, u16 nameId, u8 pad } × waypointCount  // host-gametype-gated
+//     { u16 slotId, u16 nameId, u8 done } × waypointCount  // host-gametype-gated
 //   [u16 teamNameCount]
 //     cstring × teamNameCount
 // The waypoint records are gated on the HOST by (g_GameType & 0xFFFDFFFF) ==
@@ -1512,7 +1512,11 @@ inline constexpr int kWorldStateAmmoPoolCount = 128; // (data - g_LocalAmmoPools
 struct WorldStateWaypoint {
 	uint16_t slot_id = 0;
 	uint16_t name_id = 0;
-	uint8_t  pad = 0;          // read-and-discard by the handler (cursor advance)
+	// The marker's done byte (entity+536), which both titles' writers emit; JO's handler
+	// reads and discards it, DFX2's stores it onto the marker (DFX2-9).
+	// [orig: NetPacket_WriteWorldStateLoad0x0F @0x502f5f; NapiNPClientMsg_0x00F @0x42e497;
+	//  NetPacket_WriteWorldStateLoad0x0F @0x50008f, NapiNPClientMsg_0x00F @0x42fff0 (dfx2.exe)]
+	uint8_t  done = 0;
 };
 struct WorldStateLoad {
 	uint32_t session_tick = 0;

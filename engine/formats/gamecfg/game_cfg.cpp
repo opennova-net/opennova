@@ -123,6 +123,22 @@ const std::vector<ConfigVarRow> &config_var_rows(ConfigTable table) {
 				break;
 			}
 		}
+		// Three shared rows default otherwise (docs/titles/dfx2-vs-jo-re.md DFX2-8): the
+		// NovaWorld and LAN-enumeration port ceilings take mplanserverportmax's default, the
+		// one literal all four rows point at, where Jointops.exe's are 65535; mpmaxplayers is
+		// 16 where Jointops.exe's is 64.
+		// [orig: the rows @0x831850, @0x8318b0, @0x8318f8 over the literal @0x7d1674;
+		//  @0x8319d0 (dfx2.exe)]
+		const char *lan_server_port_max = nullptr;
+		for (const ConfigVarRow &row : rows)
+			if (std::strcmp(row.name, "mplanserverportmax") == 0) lan_server_port_max = row.default_value;
+		for (ConfigVarRow &row : rows) {
+			if (std::strcmp(row.name, "mpnovaworldportmax") == 0 ||
+					std::strcmp(row.name, "mpnovaworldlanenumsessionportmax") == 0)
+				row.default_value = lan_server_port_max;
+			else if (std::strcmp(row.name, "mpmaxplayers") == 0)
+				row.default_value = "16";
+		}
 		return rows;
 	}();
 	return table == ConfigTable::Dfx2 ? dfx2 : jo;
@@ -475,10 +491,13 @@ GameCfg defaults(const DefaultTexts &texts, int32_t player_index, int32_t hw3d_d
 		cfg.mp_max_packet_size = 100;
 	else if (packet > 0x4000u)
 		cfg.mp_max_packet_size = 0x4000;
+	// The player-count fold's ceiling is the table's: 64, or dfx2.exe's 250
+	// [orig: @0x54a32b..0x54a343 (dfx2.exe)].
+	const int32_t max_players_ceiling = table == ConfigTable::Dfx2 ? 250 : 64;
 	if (cfg.mp_max_players < 1)
 		cfg.mp_max_players = 1;
-	else if (cfg.mp_max_players > 64)
-		cfg.mp_max_players = 64;
+	else if (cfg.mp_max_players > max_players_ceiling)
+		cfg.mp_max_players = max_players_ceiling;
 	cfg.player_index = player_index;
 	cfg.hw3d_deviceno = hw3d_deviceno; // dword_B4C22C is not in the block
 
@@ -682,8 +701,11 @@ void clamp_graphics_options(GameCfg &cfg) {
 		cfg.gamma = 0.5f;
 	else if (cfg.gamma > 2.0f)
 		cfg.gamma = 2.0f;
-	// atol("64") as the ceiling [orig: @0x54D600..0x54D622].
-	clamp(cfg.mp_max_players, 1, 64);
+	// atol("64") as the ceiling [orig: @0x54D600..0x54D622]; dfx2.exe's literal is
+	// "16", its mpmaxplayers default, so a dfx2.exe block reads back 1..16 whatever
+	// the file says [orig: Settings_ClampGraphicsOptions @0x54a720 (@0x54a880..0x54a8a2),
+	// the literal @0x7c9538 the row @0x8319d0 shares (dfx2.exe)].
+	clamp(cfg.mp_max_players, 1, cfg.table == ConfigTable::Dfx2 ? 16 : 64);
 }
 
 LoadResult load(const char *text, size_t size, const LoadOptions &options) {

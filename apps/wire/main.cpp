@@ -1045,9 +1045,9 @@ void print_tag_0f(const std::vector<uint8_t> &body) {
 			std::printf("            score[%zu]=%d\n", i, ws.ammo_pools[i]);
 	}
 	for (const auto &w : ws.waypoints)
-		std::printf("            waypoint slot=%s nameId=%u (STRWPNAME%03u) pad=%u\n",
+		std::printf("            waypoint slot=%s nameId=%u (STRWPNAME%03u) done=%u\n",
 		            handle_str(uint16_t((3u << 12) | (w.slot_id & 0x0FFF))).c_str(),
-		            unsigned(w.name_id), unsigned(w.name_id), unsigned(w.pad));
+		            unsigned(w.name_id), unsigned(w.name_id), unsigned(w.done));
 	for (const auto &n : ws.team_names)
 		std::printf("            team-name \"%s\"\n", n.c_str());
 }

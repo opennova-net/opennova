@@ -43,4 +43,10 @@ namespace opennova::inmatch {
 //  @0x50DE86..0x50DE96, scoring @0x50DEA4, 0x1E @0x50DEAC..0x50DF02]
 void Server_RouteMedicInteractions(NapiNPServerCtx &ctx, world::World &world);
 
+// The team-mode downed-state resend the revive feature rides: in session, when the game type
+// carries the team bit, every 62 ticks each dead player of a revivable cause goes to its slot
+// team as the S2C 0x46 field-0x0008 form. None in dfx2.exe. Body and witness in server_medic.cpp.
+// [orig: Server_TickUpdate @0x51E2D0..0x51E378]
+void Server_ResendTeamDownedStates(NapiNPServerCtx &ctx, world::World &world);
+
 } // namespace opennova::inmatch

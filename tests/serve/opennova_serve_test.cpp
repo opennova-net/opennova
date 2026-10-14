@@ -133,6 +133,14 @@ int main() {
 		CHECK(served.start(why));
 		CHECK(served.title() == title_identity(gameprofile::GAME_DFX2));
 		CHECK(served.gate_tag() == "dfx2:0:cus:buffy");
+		// The session runs the title's rules (docs/titles/dfx2-vs-jo-re.md §7): the cfg block's
+		// table is dfx2.exe's, so the session config and its World take its title, and the boot's
+		// score table seeds dfx2.exe's fanfare pair (no score.ini here).
+		const inmatch::NapiNPServerCtx &session = served.role().state.host_owner.ctx;
+		CHECK(served.game_cfg().table == gamecfg::ConfigTable::Dfx2);
+		CHECK(session.config.title == gameprofile::GAME_DFX2);
+		CHECK(session.world != nullptr && session.world->rules.title == gameprofile::GAME_DFX2);
+		CHECK(session.config.exp_fanfare == 0x0A04);
 		served.stop();
 		serve::ServeOptions bhd;
 		CHECK(parse_options(0, bhd) == 0);

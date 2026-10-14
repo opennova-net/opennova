@@ -31,6 +31,9 @@ void rebuild_route(world::World &world, const replication::ClientState &state) {
 		entry.pool = 3;
 		entry.node = wp.slot_id;
 		entry.name_id = wp.name_id;
+		// A DFX2 joiner takes the marker's done byte; JO's keeps its own.
+		// [orig: `mov [esi+218h], bl` @0x42fff0 (dfx2.exe); JO's skip @0x42e497]
+		if (state.world_state.waypoint_done_stored) entry.done = wp.done != 0;
 		// The marker's own position: the registry's pool-3 entity (a
 		// full-BMS joiner promoted it), else the decoded pool-3 row (a
 		// wire-header joiner streamed it), else whatever the old entry held.
@@ -61,6 +64,14 @@ void apply_replica_track(world::World &world, const replication::ClientState &st
 		} else {
 			world.script.waypoints.build_map_poi_list(world.registry); // [orig: @0x42e4fd]
 		}
+	}
+	// A DFX2 joiner's new co-op checkpoint marks its route done through that
+	// marker (DFX2-9); the authority's own client keeps the route its event
+	// system marks. [orig: NapiNPClientMsg_0x00A @0x431e05..0x431e62 (dfx2.exe)]
+	if (state.coop_checkpoint_revision != seen.coop_checkpoint_revision) {
+		seen.coop_checkpoint_revision = state.coop_checkpoint_revision;
+		if (route_from_wire)
+			world.script.waypoints.mark_done_through(state.coop_checkpoint, world.waypoint_context());
 	}
 	if (state.local_team_assigns != seen.local_team_assigns) {
 		seen.local_team_assigns = state.local_team_assigns;

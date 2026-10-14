@@ -20,12 +20,10 @@
 #include <base/gameprofile/game_type.h>        // the CTF / FlagBall / Flag Me carry-limit modes
 #include <base/io/le.h>                        // append_u16_le / append_u32_le (put_u16le / put_u32le)
 #include <base/io/strutil.h>                   // iequals (the JOINTICKET key lookup)
-#include <net/npwire/ingame_decode.h>          // kPlayerSyncHasDownedState (the 0x46 resend form)
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/nw_session_framing.h> // per-player 0x61 tick-seed roll
 #include <net/npwire/protocol_message.h>
-#include <net/npwire/replication_model.h>      // PlayerReplicationState (the 0x46 resend input)
 #include <net/npwire/session_hello.h>
 #include <runtime/replication/entity_wire_bridge.h> // snapshot_world / GameEntitySnapshot
 #include <runtime/replication/connection_fan.h>     // drain_connection_c2s / emit_connection_s2c
@@ -542,7 +540,7 @@ bool announce_round_end(NapiNPServerCtx &ctx, world::World &world) {
 			++ctx.round_wins[static_cast<size_t>(result.winner_team - 1)];
 	}
 	ctx.round_end_announced = true;
-	ctx.round_end_linger_ticks = 2790;
+	ctx.round_end_linger_ticks = round_end_linger_ticks_for(ctx.config.title);
 	// A ServerCommand Cycle / EndMission / GameOver overrides the stored
 	// linger right after the round end [orig: CNapiGameSession_HandleServerCommand @0x4D31CA].
 	if (ctx.round_end_linger_override_ticks != 0) {
@@ -820,62 +818,6 @@ void refresh_next_flag_state(NapiNPServerCtx &ctx, world::World &world) {
 	if (!sent) world.flag_refresh_cursor = 0;
 }
 
-// The team-mode downed-state resend: in session, when the game type carries the
-// team bit, a 62-tick countdown (fires when zero or when a positive value
-// decrements to zero, then reloads 62) walks every active slot with an entity
-// and, for each one whose entity is dead (Health <= 0 and Flags 0x2) of a
-// revivable cause, sends the 0x46 field-0x0008 form, [u8 slot][u16 0x0008]
-// [u8 pool-0 index][u8 downedState], to every state-6/7 slot whose own team
-// byte is the victim SLOT's (no entity read on either side), the listen host
-// included. downedState is the dead-and-(auto-medic or requested) packing of
-// the revive window and the request bit, else 0.
-// Retail's SendFiltered(0x46, msgClass 1, userParam 1) maps to this port's
-// transient send, as the 0x57 pong and the 0x16 list do.
-// [orig: Server_TickUpdate @0x51E2D0..0x51E378 — team test @0x51e2d0, timer
-//  @0x51e2db..0x51e307, predicate @0x51e333, form 8 @0x51e352, mask 0x180
-//  @0x51e357, `movzx edx, [esi+1A0h]` @0x51e35d, team filter @0x51e36d,
-//  send @0x51e373;
-//  NetPacket_SerializePlayerSync0x46 @0x505E80 downedState @0x5060e6..0x506131;
-//  NapiNPServer_SendFiltered @0x4C87E0 masks 0x80/0x100 @0x4c8948/@0x4c8964]
-void emit_team_downed_resend(NapiNPServerCtx &ctx, world::World &world) {
-	if (!ctx.is_in_session ||
-			(world.match.rules().game_type & game_type::kTeamBit) == 0u)
-		return;
-	bool fire = world.team_downed_resend_countdown == 0;
-	if (world.team_downed_resend_countdown > 0)
-		fire = --world.team_downed_resend_countdown == 0;
-	if (!fire) return;
-	world.team_downed_resend_countdown = 62;
-	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		if (conn.phase < ConnectionPhase::PlayerAdded ||
-				conn.phase >= ConnectionPhase::Goodbye ||
-				!conn.link.owned_entity.valid())
-			continue;
-		const world::Entity *victim = world.registry.get(conn.link.owned_entity);
-		if (victim == nullptr || victim->health > 0 ||
-				((victim->flags | victim->engine_flags) & world::kEntityFlagDead) == 0u ||
-				!conn.link.death_cause_revivable)
-			continue;
-		PlayerReplicationState rep;
-		rep.player_slot = conn.reply.player_slot;
-		rep.entity_handle = conn.link.owned_entity.packed;
-		rep.team = victim->team;
-		if (conn.link.auto_medic_enabled || conn.link.medic_request_active)
-			rep.downed_state = static_cast<uint8_t>(
-					(conn.link.downed_revive_seconds & 0x7Fu) |
-					(conn.link.medic_request_active ? 0x80u : 0u));
-		const std::vector<uint8_t> body =
-				encode_player_sync(rep, kPlayerSyncHasDownedState);
-		for (NapiNPConnection &recipient : ctx.np_protocol.connection_list) {
-			if (!active_player_recipient(recipient) ||
-					recipient.assigned_team != conn.assigned_team)
-				continue;
-			recipient.link.transport->host_send(
-					s2c::PLAYER_SYNC, body, /*reliable=*/false);
-		}
-	}
-}
-
 uint16_t next_maintenance_prng16(world::World &world) {
 	// Server_SendEntityHandleAndInputState @0x507B90 lazily consumes the
 	// process-global PRNG_Next16/dword_31BFBB0 stream. World owns that stream
@@ -1026,9 +968,14 @@ void Server_ProcessPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
 	if (victim_connection != nullptr) {
 		// A normal other-player kill opens the exact 120-second revive
 		// window. Self/environment and knife/headshot cause bits clear it.
-		// [orig: GameEvent_PlayerDeath @0x516DD0: playerSlot+368]
+		// dfx2.exe stores 0 on both arms (DFX2-20): no window, so no S2C 0x54
+		// below, and the 0x0A slot-state byte and the 0x46 downed byte stay 0.
+		// [orig: GameEvent_PlayerDeath @0x516DD0: playerSlot+368 (@0x516f4f)]
+		// [orig: GameEvent_PlayerDeath `mov [edi+170h], ebx` @0x51419b, the 0x54
+		//  gate @0x5145cb (dfx2.exe)]
+		const bool revive_window = world.rules.title != gameprofile::GAME_DFX2;
 		victim_connection->link.downed_revive_seconds =
-				d.killer.valid() && d.killer != d.victim &&
+				revive_window && d.killer.valid() && d.killer != d.victim &&
 				(victim_cause_bits & 0xC00u) == 0u
 						? 120u
 						: 0u;
@@ -2284,7 +2231,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 
 	// The in-session team-mode downed-state resend, on its own 62-tick countdown
 	// [orig: Server_TickUpdate @0x51E2D0..0x51E378].
-	emit_team_downed_resend(ctx, world);
+	Server_ResendTeamDownedStates(ctx, world);
 
 	lap.mark(devtools::Slot::SIM_SERVER_RULES);
 

@@ -94,8 +94,11 @@ void WaypointTrack::tick_advance(const WaypointFrameInputs &in) {
         }
         // Every goal the waypoint asks for is won: advance at once, wherever
         // the player stands [orig: `cmp [esp+outEntry], ebx` @0x4de68e ->
-        // Spectator_CycleTarget(1) @0x4de695].
-        if (goals_met) {
+        // Spectator_CycleTarget(1) @0x4de695]. dfx2.exe has no such advance
+        // (DFX2-9) [orig: Player_UpdatePerFrame @0x4db400, the test gone after
+        // @0x4db73a (dfx2.exe)].
+        const bool dfx2 = in.title == gameprofile::GAME_DFX2;
+        if (goals_met && !dfx2) {
             cycle_forward(in);
             return;
         }
@@ -117,7 +120,9 @@ void WaypointTrack::tick_advance(const WaypointFrameInputs &in) {
                 ? static_cast<uint32_t>(dy) + (static_cast<uint32_t>(dx) >> 1)
                 : static_cast<uint32_t>(dx) + (static_cast<uint32_t>(dy) >> 1);
         // Never advance past the last entry. [orig: @ 0x4de6ca cmp vs list[count-1]]
-        if (approx < radius && current != count - 1)
+        // dfx2.exe advances only past a done entry, the co-op checkpoint's marking
+        // (DFX2-9) [orig: @0x4db762..0x4db774, `cmp [esi+218h], bl` @0x4db76b (dfx2.exe)].
+        if (approx < radius && current != count - 1 && (!dfx2 || cur->done))
             cycle_forward(in);
         return;
     }
@@ -312,6 +317,22 @@ void WaypointTrack::skip_done(const WaypointCycleContext &ctx) {
         cycle_forward(ctx);
         cur = current_entry();
     } while (cur && current != start && cur->done);
+}
+
+void WaypointTrack::mark_done_through(uint32_t slot, const WaypointCycleContext &ctx) {
+    bool found = false;
+    for (size_t i = entries.size(); i-- > 0;) {
+        WaypointEntry &entry = entries[i];
+        if (found) {
+            entry.done = true; // [orig: @0x431e57 (dfx2.exe)]
+        } else if (entry.pool == 3 && static_cast<uint32_t>(entry.node) == slot) {
+            // [orig: Pool_GetIndexFromPtr(3, entry) @0x431e2e, the compare @0x431e36,
+            //  the store @0x431e45 (dfx2.exe)]
+            entry.done = true;
+            found = true;
+        }
+    }
+    skip_done(ctx); // [orig: SpawnPoint_SkipBlocked @0x4db3c0 from @0x431e62 (dfx2.exe)]
 }
 
 // The current-waypoint slice of the per-frame HUD info rebuild, plus the

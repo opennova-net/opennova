@@ -142,7 +142,8 @@ Dictionary HostSessionOptions::to_json_value() const {
 }
 
 int HostSessionOptions::get_player_slot_limit() const {
-	return static_cast<int>(opennova::inmatch::host_player_slot_limit(max_players_, serve_and_play_));
+	return static_cast<int>(opennova::inmatch::host_player_slot_limit(
+			max_players_, serve_and_play_, config_.title));
 }
 
 PackedStringArray HostSessionOptions::dialog_controls() {

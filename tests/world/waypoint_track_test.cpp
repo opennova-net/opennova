@@ -272,6 +272,55 @@ int main() {
         CHECK(t.current == 2);
     }
 
+    // --- dfx2.exe's advance (docs/titles/dfx2-vs-jo-re.md DFX2-9): no jump on a
+    //     met goal, and the proximity step passes only a done entry, the co-op
+    //     checkpoint's marking [orig: Player_UpdatePerFrame @0x4db400 (@0x4db73a,
+    //     @0x4db762..0x4db774) (dfx2.exe)] ---
+    {
+        WaypointTrack t;
+        t.entries = {wp(0, 0, 4), wp(100, 0, 4), wp(200, 0, 4)};
+        t.current = 0;
+        WaypointFrameInputs in;
+        in.game_type = 0x30020;
+        in.title = opennova::gameprofile::GAME_DFX2;
+        t.tick_advance(in); // standing on entry 0, not done: held
+        CHECK(t.current == 0);
+        t.entries[0].done = true;
+        t.tick_advance(in);
+        CHECK(t.current == 1);
+        t.entries[1].goals[0] = 1; // SubGoalWon slot 1 (bit 2), won
+        in.subgoals_won = 0x2;
+        in.player_x = 900 << 16;
+        t.tick_advance(in); // far away: no goal jump
+        CHECK(t.current == 1);
+        in.player_x = 100 << 16;
+        t.tick_advance(in); // on it, the goal met, not done: held
+        CHECK(t.current == 1);
+        t.entries[1].done = true;
+        t.tick_advance(in);
+        CHECK(t.current == 2);
+    }
+
+    // --- a DFX2 joiner's new co-op checkpoint: from the last entry down, the
+    //     checkpoint's marker and every entry before it are marked done, then
+    //     current skips past done entries; a slot no entry holds marks nothing
+    //     [orig: NapiNPClientMsg_0x00A @0x431e0d..0x431e62 (dfx2.exe)] ---
+    {
+        WaypointTrack t;
+        t.entries = {wp(0, 0, 4), wp(100, 0, 4), wp(200, 0, 4), wp(300, 0, 4)};
+        for (size_t i = 0; i < t.entries.size(); ++i)
+            t.entries[i].node = static_cast<int32_t>(10 + i);
+        t.current = 0;
+        t.mark_done_through(0xFFFF);
+        CHECK(!t.entries[0].done && !t.entries[3].done && t.current == 0);
+        t.mark_done_through(11);
+        CHECK(t.entries[0].done && t.entries[1].done && !t.entries[2].done && !t.entries[3].done);
+        CHECK(t.current == 2);
+        t.entries[3].pool = 2; // a slot names a pool-3 marker alone
+        t.mark_done_through(13);
+        CHECK(!t.entries[2].done && !t.entries[3].done && t.current == 2);
+    }
+
     // --- outside the waypoint gametypes: the first live entry, or the CTF
     //     pair's nearest enemy base [orig: @0x4de701..0x4de72c] ---
     {

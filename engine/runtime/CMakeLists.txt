@@ -249,6 +249,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_pose.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_registry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/match.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/match_score_table.cpp  # the titles' built-in score tables
     ${CMAKE_CURRENT_SOURCE_DIR}/world/epilog_cine.cpp  # the SP end-of-round cine
     ${CMAKE_CURRENT_SOURCE_DIR}/world/powerup.cpp     # the med/ammo pack pickups (powerup.def)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/world.cpp

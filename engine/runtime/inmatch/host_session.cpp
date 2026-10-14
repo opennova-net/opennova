@@ -577,7 +577,11 @@ namespace {
 // change's World alike.
 void configure_session_world(HostOwner &owner, const HostConfig &cfg) {
 	if (owner.ctx.world == nullptr) return;
+	// The rules the session's title runs (world::SessionRules::title): the in-match title
+	// branches read it, the match its built-in score table.
+	owner.ctx.world->rules.title = owner.ctx.config.title;
 	world::MatchRules match_rules;
+	match_rules.title = owner.ctx.config.title;
 	match_rules.game_type = owner.ctx.config.game_type;
 	// SET GameTime feeds g_RespawnTime in retail. The existing host model
 	// calls that field respawn_time; KOTHLimit/time_limit_minutes is unrelated.

@@ -114,6 +114,24 @@ constexpr double hit_zone_damage_multiplier(int32_t hit_zone) {
     if (hit_zone_is_critical(hit_zone)) return 3.0;
     return 1.0;
 }
+// dfx2.exe's table: every section 1.0 but the head's 13 and 14 (3.0, with the
+// 0x800 latch as Jointops.exe's); its seat leg is Jointops.exe's 6.0
+// (docs/titles/dfx2-vs-jo-re.md DFX2-16).
+// [orig: Weapon_CalcImpactDamage @0x4e9a50 - the zone switch @0x4e9ae2..0x4e9b17,
+//  the seat leg @0x4e9aab..0x4e9acf (dfx2.exe)]
+constexpr double dfx2_hit_zone_damage_multiplier(int32_t hit_zone) {
+    return hit_zone_is_critical(hit_zone) ? 3.0 : 1.0;
+}
+// The ammo's floor and ceiling (Def[47], Def[48]): at least the minimum, at
+// most the maximum when that is positive. Jointops.exe takes them after the
+// section and class scales, dfx2.exe before them (DFX2-16).
+// [orig: Weapon_CalcImpactDamage @0x4ecb7f..0x4ecb91] [orig: @0x4e9c4d..0x4e9c63
+//  (dfx2.exe)]
+inline int32_t clamp_impact_damage(int32_t damage, const AmmoTableEntry &ammo) {
+    if (damage <= ammo.min_damage) damage = ammo.min_damage;
+    if (ammo.max_damage > 0 && damage >= ammo.max_damage) damage = ammo.max_damage;
+    return damage;
+}
 constexpr bool seat_hit_bone_is_critical(int32_t hit_bone) {
     return hit_bone == 2 || hit_bone == 3 || hit_bone == 6 || hit_bone == 7;
 }

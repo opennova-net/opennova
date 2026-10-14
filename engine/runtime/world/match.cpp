@@ -115,6 +115,12 @@ int32_t wrap_add(int32_t value, int32_t delta) {
                                 static_cast<uint32_t>(delta));
 }
 
+// The 32-bit `imul` the score multiplier rides.
+int32_t wrap_mul(int32_t value, int32_t factor) {
+    return static_cast<int32_t>(static_cast<uint32_t>(value) *
+                                static_cast<uint32_t>(factor));
+}
+
 int32_t unique_best_team(const std::array<int32_t, 5> &scores) {
     int32_t best = std::numeric_limits<int32_t>::min();
     int32_t winner = 0;
@@ -135,65 +141,6 @@ bool is_waypoint_family(uint32_t game_type) {
     return gt::is_waypoint_family(game_type);
 }
 
-std::vector<MatchScoreField> make_default_score_fields(uint32_t game_type) {
-    // Every row installed by GameType_CreateDefaultSettings, including
-    // disabled columns and original order. score.ini replaces the whole row.
-    // [orig: GameType_CreateDefaultSettings @0x52DD00]
-    if (game_type == gt::kDeathmatch) {
-        return {{19, 1}, {3, 1}, {4, 1}, {1, 0}, {15, 0},
-                {16, 0}, {17, 0}, {27, 0}, {21, 1}};
-    }
-    if (game_type == gt::kTeamDeathmatch) {
-        return {
-            {19, 1}, {3, 1},  {2, 0},  {4, 1},  {1, 0},  {30, 1}, {10, 1},
-            {11, 0}, {12, 0}, {13, 0}, {16, 0}, {17, 0}, {27, 0}, {21, 1},
-        };
-    }
-    if (game_type == gt::kKingOfTheHill) {
-        return {{19, 1}, {5, 1}, {22, 1}, {18, 1}, {3, 1}, {4, 1},
-                {1, 0}, {15, 0}, {16, 0}, {17, 0}, {27, 0}, {21, 1}};
-    }
-    if (game_type == gt::kTeamKingOfTheHill) {
-        return {{19, 1}, {5, 1}, {22, 1}, {18, 1}, {3, 1}, {2, 0},
-                {4, 1}, {1, 0}, {30, 1}, {10, 1}, {11, 0}, {12, 0},
-                {13, 1}, {15, 0}, {16, 0}, {17, 0}, {27, 0}, {21, 1}};
-    }
-    if (game_type == gt::kSearchAndDestroy || game_type == gt::kAttackDefend) {
-        return {{19, 1}, {8, 1}, {3, 1}, {2, 0}, {4, 1}, {1, 0}, {30, 1},
-                {10, 1}, {11, 0}, {12, 0}, {13, 1}, {15, 0}, {16, 0},
-                {17, 0}, {27, 0}, {21, 1}};
-    }
-    if (game_type == gt::kCaptureTheFlag) {
-        return {{19, 1}, {6, 1}, {7, 1}, {14, 1}, {3, 1}, {2, 0}, {4, 1},
-                {1, 0}, {30, 1}, {10, 1}, {11, 0}, {12, 0}, {13, 0},
-                {15, 0}, {16, 0}, {17, 0}, {27, 0}, {21, 1}};
-    }
-    if (game_type == gt::kFlagBall) {
-        return {{19, 1}, {6, 1}, {14, 1}, {29, 1}, {28, 1}, {3, 1}, {2, 0},
-                {4, 1}, {1, 0}, {30, 1}, {10, 1}, {11, 0}, {12, 0},
-                {13, 0}, {15, 0}, {16, 0}, {17, 0}, {27, 0}, {21, 1}};
-    }
-    if (game_type == gt::kAdvanceAndSecure) {
-        return {
-            {19, 1}, {3, 1},  {2, 0},  {4, 1},  {1, 0},  {30, 1}, {10, 1}, {11, 0},
-            {32, 1}, {12, 0}, {13, 1}, {15, 0}, {16, 0}, {17, 0}, {27, 0}, {21, 1},
-        };
-    }
-    if (game_type == gt::kConquerAndControl) {
-        return {
-            {19, 1}, {6, 1},  {14, 1}, {29, 1}, {28, 1}, {3, 1},  {2, 0},
-            {4, 1},  {1, 0},  {30, 1}, {10, 1}, {11, 0}, {32, 1}, {12, 0},
-            {13, 1}, {15, 0}, {16, 0}, {17, 0}, {27, 0}, {21, 1},
-        };
-    }
-    if (is_waypoint_family(game_type)) {
-        return {
-            {19, 1}, {3, 1}, {4, 1}, {30, 1}, {10, 1}, {11, 1}, {21, 1},
-        };
-    }
-    return {};
-}
-
 // The trailing matrix row count of the frozen board: 0 for a non-team type,
 // 3 for a team type, 5 for four-team TDM and for Team KOTH / FlagBall at any
 // configured team count (rows 3 and 4 of a two-team TKOTH/FlagBall are the
@@ -210,11 +157,14 @@ uint8_t scoreboard_team_row_count(const MatchRules &rules) {
                : uint8_t{3};
 }
 
-// Player_ComputeScore's pair-list value: raw points for a team type, the
-// game-type primary (ScoreRules_GetPrimaryScoreField) otherwise.
-// [orig: Player_ComputeScore @0x500AD0..0x500ADF]
+// Player_ComputeScore's pair-list value: the points for a team type, the
+// game-type primary (ScoreRules_GetPrimaryScoreField) otherwise, each the
+// row's column, which in dfx2.exe carries the round-win multiplier as the
+// computed score does (Match::score_multiplier).
+// [orig: Player_ComputeScore @0x500AD0..0x500ADF] [orig: @0x4fdc0e..0x4fdc1a
+//  (dfx2.exe)]
 int32_t scoreboard_sort_key(const MatchResultPlayer &row, uint32_t game_type) {
-    return gt::is_team(game_type) ? row.stats[MatchStats::kPoints] : row.primary_score;
+    return gt::is_team(game_type) ? row.points : row.primary_score;
 }
 
 void sort_scoreboard_players(std::vector<MatchResultPlayer> &players, uint32_t game_type) {
@@ -256,86 +206,6 @@ bool is_person(const Entity &entity) {
 }
 
 } // namespace
-
-std::array<int32_t, 39> default_match_score_values(uint32_t game_type) {
-    std::array<int32_t, 39> values{};
-    // [orig: GameType_CreateDefaultSettings @0x52DD00]
-    auto common_combat = [&] {
-        values[3] = 5;
-        values[6] = 1;
-        values[7] = 2;
-        values[15] = 12;
-        values[16] = 10;
-        values[17] = 5;
-        values[18] = 1;
-        values[37] = 5;
-    };
-
-    if (game_type == gt::kDeathmatch) {
-        values[3] = 5;
-        values[16] = 10;
-        values[17] = 5;
-        values[18] = 1;
-        values[37] = 5;
-    } else if (game_type == gt::kTeamDeathmatch || is_waypoint_family(game_type)) {
-        common_combat();
-    } else if (game_type == gt::kKingOfTheHill) {
-        values[3] = 2;
-        values[12] = 5;
-        values[16] = 10;
-        values[17] = 5;
-        values[18] = 1;
-        values[21] = 5;
-        values[22] = 5;
-        values[33] = 1;
-        values[37] = 5;
-    } else if (game_type == gt::kTeamKingOfTheHill) {
-        values[3] = 2;
-        values[6] = 1;
-        values[7] = 2;
-        values[12] = 10;
-        values[15] = 12;
-        values[16] = 10;
-        values[17] = 5;
-        values[18] = 1;
-        values[21] = 5;
-        values[22] = 5;
-        values[33] = 1;
-        values[37] = 5;
-    } else if (game_type == gt::kSearchAndDestroy || game_type == gt::kAttackDefend) {
-        common_combat();
-        values[13] = 50;
-        values[24] = 2;
-        if (game_type == gt::kSearchAndDestroy)
-            values[26] = 2;
-        else
-            values[23] = 1;
-    } else if (game_type == gt::kCaptureTheFlag) {
-        common_combat();
-        values[9] = 10;
-        values[10] = 20;
-        values[11] = 2;
-        values[20] = 5;
-    } else if (game_type == gt::kFlagBall) {
-        common_combat();
-        values[10] = 40;
-        values[11] = 2;
-        values[20] = 5;
-    } else if (game_type == gt::kAdvanceAndSecure ||
-               game_type == gt::kConquerAndControl) {
-        common_combat();
-        values[12] = 5;
-        values[24] = 2;
-        values[26] = 2;
-        values[31] = 1;
-        values[34] = 15;
-    }
-    return values;
-}
-
-std::vector<MatchScoreField> default_match_score_fields(uint32_t game_type) {
-    return make_default_score_fields(game_type);
-}
 
 int32_t match_score_field_value(const MatchStats &stats, uint8_t field, uint32_t game_type) {
     // This switch is the retail accessor rather than a reimplementation-owned
@@ -416,7 +286,7 @@ void Match::configure(const MatchRules &rules) {
     if (rules_.score_fields.empty())
         rules_.score_fields = default_match_score_fields(rules_.game_type);
     if (!rules_.score_values.has_value())
-        rules_.score_values = default_match_score_values(rules_.game_type);
+        rules_.score_values = default_match_score_values(rules_.game_type, rules_.title);
     players_.clear();
     player_punts_.clear();
     teams_ = {};
@@ -572,6 +442,18 @@ int32_t Match::demolition_target(const World &world, uint8_t scoring_team) {
     return scoring_team < demolition_targets_.size()
                ? demolition_targets_[scoring_team]
                : 0;
+}
+
+// [orig: Player_ComputeScore @0x500A80 - no read of field 34] [orig:
+//  Player_ComputeScore @0x4fdbb0 - CPlayerStats_GetFieldPlusOne(34) @0x4fdbff,
+//  the `imul` @0x4fdc17 (dfx2.exe)]
+int32_t Match::score_multiplier(const MatchStats &stats) const {
+    return rules_.title == gameprofile::GAME_DFX2 ? stats[MatchStats::kRoundMarker] : 1;
+}
+
+int32_t Match::computed_score(const MatchPlayer &player, bool team_mode) const {
+    return wrap_mul(team_mode ? player.stats[MatchStats::kPoints] : primary_score(player),
+                    score_multiplier(player.stats));
 }
 
 int32_t Match::score_value(size_t status_index) const {
@@ -1230,6 +1112,25 @@ void Match::score_kill(World &world, EntityHandle killer_handle,
         bonus(MatchStats::kAttackerNearVictimObjectiveKills, 26);
     if (team_mode && victim_mask > 1u && (victim_mask & team_bit(killer_team)) != 0)
         bonus(MatchStats::kVictimNearAttackerObjectiveKills, 23);
+
+    // dfx2.exe scores a mounted victim once more, after the zone bonuses: when
+    // the victim's parent (+0x16C) is a vehicle (ItemDef type 1), or stands on
+    // one (its +0x28), event 41 (no counter) and event 28 with VATTACHKILL's
+    // points (VAR 37) go to the killer and to its team record. Jointops.exe
+    // parses VATTACHKILL and never scores it (docs/titles/dfx2-vs-jo-re.md
+    // DFX2-15). [orig: GameEvent_ProcessScoring @0x52c750 (@0x52d930..0x52d9b9);
+    // Entity_HasActiveParent @0x402bb0, the def's +0x5C == 1 test (dfx2.exe)]
+    if (rules_.title != gameprofile::GAME_DFX2)
+        return;
+    const auto is_vehicle = [](const Entity *entity) {
+        return entity != nullptr && entity->has_item_def && entity->item_type == 1;
+    };
+    const Entity *parent = world.registry.get(victim_entity->mount_target);
+    if (parent == nullptr ||
+            (!is_vehicle(parent) && !is_vehicle(world.registry.get(parent->ground_target))))
+        return;
+    add_points(world, *killer, score_value(37));
+    add_team_points(killer_team, score_value(37));
 }
 
 // Only the damage-pass lethal edges call Score_ProcessKillEvent
@@ -2311,13 +2212,15 @@ bool Match::finish(int32_t winner_team, const World &world) {
     result_.players.reserve(players_.size());
     for (const MatchPlayer &player : players_) {
         const Entity *entity = world.registry.get(player.identity.entity);
+        const int32_t multiplier = score_multiplier(player.stats);
         result_.players.push_back(MatchResultPlayer{
             player.identity,
             entity != nullptr ? entity->team : uint8_t{0},
             entity != nullptr ? entity->player_class : uint8_t{0},
             player.stats,
             player.objective_ticks,
-            primary_score(player),
+            wrap_mul(primary_score(player), multiplier),
+            wrap_mul(player.stats[MatchStats::kPoints], multiplier),
         });
     }
     sort_scoreboard_players(result_.players, rules_.game_type);

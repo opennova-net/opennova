@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <vector>
 
+#include <base/gameprofile/gameprofile.h>
 #include <runtime/world/entity.h>
 
 namespace opennova::world {
@@ -34,6 +35,8 @@ struct WaypointCycleContext {
     const EntityRegistry *registry = nullptr;
     uint32_t game_type = 0;
     bool in_session = false;
+    // The title whose rules the walks run (gameprofile::GameId; World::rules.title).
+    int title = gameprofile::GAME_JO;
 };
 
 // The per-frame selection pass's further inputs: the local player's
@@ -144,6 +147,13 @@ public:
     // Forward-cycle current past done entries, stopping on wrap-around.
     // [orig: SpawnPoint_SkipBlocked @ 0x4de310]
     void skip_done(const WaypointCycleContext &ctx = {});
+
+    // A DFX2 joiner's new co-op checkpoint (S2C 0x0A's fifth objective value,
+    // DFX2-9): walking from the last entry down, the entry whose pool-3 slot is
+    // `slot` and every entry before it are marked done, then current skips past
+    // done entries. A slot no entry holds (the reset's 0xFFFF) marks nothing.
+    // [orig: NapiNPClientMsg_0x00A @0x431e0d..0x431e62 (dfx2.exe)]
+    void mark_done_through(uint32_t slot, const WaypointCycleContext &ctx = {});
 
 private:
     void cycle(bool backward, const WaypointCycleContext &ctx, int depth);

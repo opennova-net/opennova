@@ -94,7 +94,7 @@ struct FrameHeaderState {
 	FrameEnv env{};
 	FrameMountAmmo mount_ammo{};
 	// The title's co-op checkpoint after the objective values (DFX2-1), and its value
-	// (coop_checkpoint_slot).
+	// (coop_checkpoint_slot, the world's DFX2-9 tracking).
 	bool coop_checkpoint_present = false;
 	uint32_t coop_checkpoint = kCoopCheckpointNone;
 };
@@ -1329,13 +1329,14 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 	return true;
 }
 
-uint32_t coop_checkpoint_slot(const world::World &) {
-	// The authority's checkpoint tracking (DFX2-9: the co-op player-route markers
-	// marked done as their linked events fire, the round reset's 0xFFFF) is the
-	// world's to keep; until it keeps the slot, every round reads as reset.
-	// [orig: Server_ResetRoundCounters @0x513ffd (dfx2.exe) stores 0xFFFF;
-	//  EventTrigger_MarkCoopCheckpoint @0x4534a0 (dfx2.exe) the slot]
-	return kCoopCheckpointNone;
+uint32_t coop_checkpoint_slot(const world::World &w) {
+	// The world keeps the slot (DFX2-9): BmsEventSystem's checkpoint marking stores
+	// the newest marked player-route marker's pool-3 slot, and each mission's World
+	// starts at the round reset's 0xFFFF. The dword read widens the 16-bit slot.
+	// [orig: NetPacket_WritePlayerState @0x4fcd99 reads g_CoopCheckpointSlot;
+	//  EventTrigger_MarkCoopCheckpoint @0x4534a0 (@0x45359e) stores it;
+	//  Server_ResetRoundCounters @0x513ffd stores 0xFFFF (dfx2.exe)]
+	return w.script.coop_checkpoint_slot;
 }
 
 } // namespace opennova::replication

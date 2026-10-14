@@ -281,14 +281,34 @@ SpawnPointResult no_pick_pose(World &world, EntityHandle spawning_player,
         world.match.team_stats(team)[MatchStats::kDeaths] == 0;
     const StartMarkerTypes types = start_marker_types(game_type_value, team);
     if (game_type::is_waypoint_family(game_type_value)) {
+        SpawnPointResult marker;
         if (primary_allowed) {
             const std::vector<const Entity *> primary = markers_of_type(world, types.primary);
             if (!primary.empty())
-                return coop_marker_pose(world, *primary[player_slot % primary.size()]);
+                marker = coop_marker_pose(world, *primary[player_slot % primary.size()]);
         }
-        const std::vector<const Entity *> fallback = markers_of_type(world, types.fallback);
-        if (!fallback.empty())
-            return coop_marker_pose(world, *fallback[player_slot % fallback.size()]);
+        if (!marker.found) {
+            const std::vector<const Entity *> fallback = markers_of_type(world, types.fallback);
+            if (!fallback.empty())
+                marker = coop_marker_pose(world, *fallback[player_slot % fallback.size()]);
+        }
+        // dfx2.exe then puts the player on the co-op checkpoint when there is
+        // one, the marker's position and angle words over the start marker's
+        // pose, whose latches stand (DFX2-9); Jointops.exe has no such arm.
+        // [orig: Server_PositionPlayerForSpawn @0x50a0a0 - @0x50a5b2..0x50a60d,
+        //  Pool_GetEntryUnchecked(3, g_CoopCheckpointSlot) @0x50a5d9 (dfx2.exe)]
+        if (world.rules.title == gameprofile::GAME_DFX2 &&
+                world.script.coop_checkpoint_slot != 0xFFFF) {
+            if (const Entity *checkpoint = world.registry.get(
+                        EntityHandle::make(3, world.script.coop_checkpoint_slot))) {
+                const SpawnPointResult latches = marker;
+                marker = entity_pose(*checkpoint);
+                marker.flags_or = latches.flags_or;
+                marker.carrier = latches.carrier;
+                return marker;
+            }
+        }
+        if (marker.found) return marker;
         return game_type::is_objective(game_type_value)
             ? objective_coop_entity_pose(world, team)
             : SpawnPointResult{};

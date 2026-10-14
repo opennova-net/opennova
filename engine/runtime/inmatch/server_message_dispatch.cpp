@@ -399,11 +399,10 @@ std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
 						player->stats[world::MatchStats::kPoints];
 				row.score1 = static_cast<uint16_t>(mode_stat);
 				row.score2 = static_cast<uint16_t>(points);
-				// The pair-list sort key is the SIGNED computed score, taken
-				// before the u16 wire fold: team modes rank by the accumulated
-				// points, others by the mode stat.
-				// [orig: Player_ComputeScore @0x500A80, call @0x50DA10]
-				computed_score = scoreboard.team_mode ? points : mode_stat;
+				// The pair-list sort key is the SIGNED computed score, taken before the u16 wire
+				// fold: team modes rank by the accumulated points, others by the mode stat
+				// (Match::computed_score) [orig: Player_ComputeScore @0x500A80, call @0x50DA10].
+				computed_score = world->match.computed_score(*player, scoreboard.team_mode);
 			}
 		}
 		rows.push_back({computed_score, row});
@@ -889,14 +888,13 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	if (world::retail_signed_i16(player->health) < ceiling) player->health = ceiling;
 	world::entity_reset_to_spawn_state(*player, ceiling);
 	// Spawn protection: every deploy of a non-bot slot whose revive latch (+89932)
-	// is clear stores 620 authority ticks into entity+292 (the reset above never
-	// touches it); the per-tick arm in Server_TickUpdate counts it down, the first
-	// validated fire clears it, and Projectile_ProcessDamageOnTarget zeroes damage
-	// while it is nonzero. The bot (+96483) and revive-latch 0-stores have no
-	// roster feature to reach them here.
-	// [orig: Server_DeployPlayer @0x517740 — 620 @0x517937/@0x517952/
-	//  @0x517960; 0 @0x51790a (bot) / @0x51791c (revive)]
-	player->damage_state = revive_deploy ? 0 : 620;
+	// is clear stores the title's ticks into entity+292 (deploy_spawn_protection_ticks;
+	// the reset above never touches it); the per-tick arm in Server_TickUpdate counts it
+	// down, the first validated fire clears it, and Projectile_ProcessDamageOnTarget
+	// zeroes damage while it is nonzero. The bot (+96483) and revive-latch 0-stores have
+	// no roster feature to reach them here.
+	// [orig: Server_DeployPlayer @0x517740 — 0 @0x51790a (bot) / @0x51791c (revive)]
+	player->damage_state = revive_deploy ? 0 : deploy_spawn_protection_ticks(config.title, target);
 	if (world::AiEntity *motor =
 			world.ai.for_handle(player->handle);
 			motor != nullptr && motor->inf.active) {

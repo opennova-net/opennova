@@ -654,11 +654,11 @@ constexpr int32_t kPersonHitDragSurface = 35;
 // The kinetic damage number [orig: Weapon_CalcImpactDamage @ 0x4EC920]. `vel` is
 // units/tick; the original wraps 62 * |vel|_16.16 as signed 32-bit, shifts it by 16,
 // applies only an upper clamp of 1219 (@0x4ecad6), then wraps the signed speed*weight
-// product before /875 (@0x4ecb1a). It next applies the hit-zone
-// multiplier (now fed by posed COBJ hit zones) and the shooter-class byte (0.9 / 1.1 —
-// replicated from the loadout's per-ammo class table), floors at min_damage
-// (@0x4ecb3a), and caps at max_damage when > 0 (@0x4ecb42). Multiplayer authority and
-// OneShotKill are explicit inputs, including the non-authority zero return @0x4ec933.
+// product before /875 (@0x4ecb1a). It next applies the hit-zone multiplier (now fed by posed
+// COBJ hit zones) and the shooter-class byte (0.9 / 1.1 — replicated from the loadout's per-ammo
+// class table), floors at min_damage (@0x4ecb3a), and caps at max_damage when > 0 (@0x4ecb42);
+// dfx2.exe floors and caps first, over its own zone table [orig: @0x4e9a50 (dfx2.exe)]. MP
+// authority and OneShotKill are explicit inputs, including the non-authority zero return @0x4ec933.
 int32_t calc_impact_damage(FixedVec3 &velocity_q16, const AmmoTableEntry &ammo,
                            int32_t hit_zone, int32_t hit_bone, const Entity &target,
                            const Entity *shooter, int32_t ammo_index,
@@ -681,9 +681,10 @@ int32_t calc_impact_damage(FixedVec3 &velocity_q16, const AmmoTableEntry &ammo,
         wrapped_signed_product(fixed_magnitude(velocity_q16), io::kTicksPerSecondInt));
     if (speed_scaled >= 1219) speed_scaled = 1219;
     int32_t damage = wrapped_signed_product(speed_scaled, ammo.weight_in_grains) / 875;
+    const bool dfx2 = world.rules.title == gameprofile::GAME_DFX2; // clamps first (DFX2-16)
+    if (dfx2) damage = clamp_impact_damage(damage, ammo);
     if (target.item_type == 3) {
-        // The zone/bone -> multiplier tables live in round_sim.h (the one home
-        // the debug views read through the binding too).
+        // The zone/bone -> multiplier tables live in round_sim.h (the debug views read them too).
         double zone_scale = 1.0;
         if ((target.item_attrib & kItemAttribLandable) != 0) {
             // The attrib-0x200 seat branch reads the primary/reaction section
@@ -692,7 +693,8 @@ int32_t calc_impact_damage(FixedVec3 &velocity_q16, const AmmoTableEntry &ammo,
             // whenever the bone walk crosses more than one sphere.
             zone_scale = seat_hit_bone_damage_multiplier(hit_bone);
         } else {
-            zone_scale = hit_zone_damage_multiplier(hit_zone);
+            zone_scale = dfx2 ? dfx2_hit_zone_damage_multiplier(hit_zone)
+                              : hit_zone_damage_multiplier(hit_zone);
         }
         damage = static_cast<int32_t>(static_cast<double>(damage) * zone_scale);
 
@@ -703,8 +705,7 @@ int32_t calc_impact_damage(FixedVec3 &velocity_q16, const AmmoTableEntry &ammo,
             damage = static_cast<int32_t>(static_cast<double>(damage) *
                                           static_cast<double>(1.1f));
     }
-    if (damage <= ammo.min_damage) damage = ammo.min_damage;
-    if (ammo.max_damage > 0 && damage >= ammo.max_damage) damage = ammo.max_damage;
+    if (!dfx2) damage = clamp_impact_damage(damage, ammo);
     if (target.item_type != 3) return damage;
     if (body_armor)
         apply_armor_deceleration(velocity_q16, ammo, ammo.armor_density[armor_class]);

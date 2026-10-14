@@ -1833,9 +1833,16 @@ void test_host_leg_gates() {
 	expect(host_leg_refusal(true, 0x1Au, true, lobby) == nullptr &&
 	               host_leg_refusal(true, 0x10Au, true, lobby) == nullptr,
 	       "host leg: a verified (or playing) session sends its request");
-	expect(host_leg_max_players(0, false) == 1 && host_leg_max_players(80, false) == 64 &&
-	               host_leg_max_players(80, true) == 65 && host_leg_max_players(16, false) == 16,
+	const int jo = opennova::gameprofile::GAME_JO;
+	const int dfx2 = opennova::gameprofile::GAME_DFX2;
+	expect(host_leg_max_players(0, false, jo) == 1 && host_leg_max_players(80, false, jo) == 64 &&
+	               host_leg_max_players(80, true, jo) == 65 && host_leg_max_players(16, false, jo) == 16,
 	       "host leg: MaxPlayers clamps to 1..64 / 1..65 dedicated");
+	// [orig: CNapiGameSession_ConnectOrHost @0x4d523b..0x4d526f (dfx2.exe)]
+	expect(host_leg_max_players(0, false, dfx2) == 1 && host_leg_max_players(300, false, dfx2) == 250 &&
+	               host_leg_max_players(300, true, dfx2) == 251 &&
+	               host_leg_max_players(100, true, dfx2) == 100,
+	       "host leg: dfx2.exe's MaxPlayers clamps to 1..250 / 1..251 dedicated");
 }
 
 // One decoded client 0x43: its header and records.

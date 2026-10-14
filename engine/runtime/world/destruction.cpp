@@ -540,10 +540,13 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
     // dead latch, a death piece's -1) zeroes the damage [orig: `cmp dword ptr
     // [esi+124h], 0` @ 0x4e69b8..0x4e69c3].
     if (target.damage_state != 0) damage = 0;
-    // A vehicle's occupants reduce what reaches its hull
+    // A vehicle's occupants reduce what reaches its hull; dfx2.exe's twin has
+    // no such call, and keeps only the projectile path's (DFX2-16)
     // [orig: ItemDef type 1 @ 0x4e69c7 -> Entity_ApplyOccupantDamageScale
-    //  @ 0x4e69d3].
-    damage = apply_vehicle_occupant_scale(world, target, damage);
+    //  @ 0x4e69d3] [orig: @0x4e3960, the test and the call gone after
+    //  @0x4e3b07 (dfx2.exe)].
+    if (world.rules.title != gameprofile::GAME_DFX2)
+        damage = apply_vehicle_occupant_scale(world, target, damage);
     // NoDie clamps to health-1 [orig: @ 0x4e69e9].
     if (traits != nullptr && traits->no_die && damage >= target.health)
         damage = target.health - 1;

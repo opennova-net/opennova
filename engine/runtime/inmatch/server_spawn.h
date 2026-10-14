@@ -162,6 +162,15 @@ world::SpawnPointResult Server_PositionDeployingPlayer(const GameConfig &config,
 		NapiNPConnection &conn, world::World &world, world::Entity &player,
 		world::EntityHandle target_zone);
 
+// The deploy's spawn protection (entity+292) for a non-bot slot without the revive latch: 620
+// ticks; dfx2.exe's 310 when the deploy targets a vehicle (ItemDef type 1) or a spawn-point item
+// (attrib 0x40000), 620 otherwise (docs/titles/dfx2-vs-jo-re.md DFX2-17). `title` is a
+// gameprofile::GameId, `target` the deploy's target entity or null.
+// [orig: Server_DeployPlayer @0x517740 — 620 @0x517937 (type 1) / @0x517952 (0x40000) /
+//  @0x517960] [orig: Server_DeployPlayer @0x514990 — 310 @0x514b78 / @0x514b93, 620 @0x514ba1
+//  (dfx2.exe)]
+int32_t deploy_spawn_protection_ticks(int title, const world::Entity *target);
+
 // Synthetic in-process peer admit WITHOUT a handshake — an owner/test hook (the Godot binding's
 // admit_test_remote_peer). Spawns a pool-0 REMOTE player at `spawn` (net_id forced to 0 — a player
 // carries no SSN, D-NET-112; identity is handle + ownerConnectionId), registers (or reuses) a type-1

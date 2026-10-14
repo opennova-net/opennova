@@ -1023,6 +1023,13 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 	return h;
 }
 
+int32_t deploy_spawn_protection_ticks(int title, const world::Entity *target) {
+	if (title == gameprofile::GAME_DFX2 && target != nullptr && target->has_item_def &&
+			(target->item_type == 1 || (target->item_attrib & world::kItemAttribSpawnPoint) != 0))
+		return 310;
+	return 620;
+}
+
 world::SpawnPointResult Server_PositionDeployingPlayer(const GameConfig &config,
 		NapiNPConnection &conn, world::World &world, world::Entity &player,
 		world::EntityHandle target_zone) {

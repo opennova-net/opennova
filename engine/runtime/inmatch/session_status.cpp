@@ -89,7 +89,7 @@ bool load_session_score_config(GameConfig &config, std::string_view score_ini) {
 	// FIELD/VAR row for it; in particular it never falls through to Co-op.
 	if (target_name == nullptr) return false;
 	std::array<int32_t, 39> parsed =
-			world::default_match_score_values(config.game_type);
+			world::default_match_score_values(config.game_type, config.title);
 	std::vector<std::pair<uint8_t, uint8_t>> parsed_fields;
 	const std::string target = target_name;
 	bool selected = false;
@@ -98,7 +98,8 @@ bool load_session_score_config(GameConfig &config, std::string_view score_ini) {
 	bool saw_score_fields = false;
 	bool saw_version = false;
 	int version = 0;
-	uint16_t exp_fanfare = 0;
+	// The pair the title's table seeds, which a line only replaces when it passes the gate.
+	uint16_t exp_fanfare = world::default_score_exp_fanfare(config.title);
 
 	std::istringstream input{std::string(score_ini)};
 	std::string line;
@@ -195,7 +196,7 @@ std::vector<uint8_t> serialize_session_status(
 	out.push_back(static_cast<uint8_t>(config.max_players));
 	append_u32(out, uptime_ms);
 	const std::array<int32_t, 39> default_values =
-			world::default_match_score_values(config.game_type);
+			world::default_match_score_values(config.game_type, config.title);
 	const std::array<int32_t, 39> &score_values =
 			config.session_status_stat_values.has_value()
 			? *config.session_status_stat_values

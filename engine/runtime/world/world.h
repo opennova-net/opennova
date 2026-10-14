@@ -16,6 +16,7 @@
 #include <vector>
 #include <variant>
 
+#include <base/gameprofile/gameprofile.h> // SessionRules::title
 #include <runtime/audio/dialog_queue.h>
 #include <runtime/audio/oneshot_play.h> // kListenerView*
 #include <runtime/audio/sound_profile.h>
@@ -417,6 +418,17 @@ struct ScriptState {
     // entries and ShowWaypoints toggles `show`. See waypoint_track.h for the
     // original anchors. (docs/interface/hud-re.md §Waypoint HUD)
     WaypointTrack waypoints;
+    // dfx2.exe's co-op checkpoint: the pool-3 slot of the newest player-route
+    // marker the authority marked done (BmsEventSystem's checkpoint marking),
+    // where a co-op player respawns (spawn_select.cpp) and the fifth objective
+    // value S2C 0x0A carries; 0xFFFF before one, and in Jointops.exe, which
+    // stores the reset and nothing else (docs/titles/dfx2-vs-jo-re.md DFX2-1,
+    // DFX2-9). Each mission's World starts it at 0xFFFF, where every mission
+    // start's round-counter reset puts it. [orig: g_CoopCheckpointSlot @0xc8dd54 -
+    //  EventTrigger_MarkCoopCheckpoint @0x4534a0 (@0x45359e), Server_ResetRoundCounters
+    //  @0x513ea0 (@0x513ffd) (dfx2.exe)] [orig: Server_ResetRoundCounters @0x516C50
+    //  (@0x516dad), dword_C947A4]
+    uint16_t coop_checkpoint_slot = 0xFFFF;
     // Active teammate heli-lift operations [orig: dword_AC4F40, slots @0xAC4F48,
     // incremented by HeliLift_SpawnPickup @0x45263a]. TeammateOperations owns
     // the slots and publishes this trigger-visible count (0 = none active).
@@ -572,6 +584,11 @@ struct MissionTables {
 // The session/game-option bits the host stamps at bring-up; the SP defaults
 // hold otherwise.
 struct SessionRules {
+	// The title whose rules the world runs (gameprofile::GameId; CONTEXT.md "Title"): Jointops.exe's
+	// unless the session names dfx2.exe's. The two executables are one engine, and the host rules
+	// that part are title branches, each cited on both binaries (docs/titles/dfx2-vs-jo-re.md §7,
+	// DFX2-8..DFX2-19). The host stamps it from its session config (inmatch configure_session_world).
+	int title = gameprofile::GAME_JO;
 	// The live rules word. A role stamps it (HostRole: the config word in a
 	// session, 0x4204 out of one; a joiner its S2C 0x64 word); a world no
 	// role brings up keeps 0, which is no SP default.

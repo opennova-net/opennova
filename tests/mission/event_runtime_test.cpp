@@ -632,6 +632,54 @@ static void back_with_markers(World &w) {
     }
 }
 
+// dfx2.exe's rewrite of the waypoint completion hook (docs/titles/dfx2-vs-jo-re.md DFX2-9): in
+// co-op, with or without objectives, every player-route marker linked to an event that has fired
+// and not yet done is marked done, and the newest one's pool-3 slot becomes the checkpoint; outside
+// co-op nothing is marked and the checkpoint stays 0xFFFF. Jointops.exe's hook marks by the firing
+// event alone and keeps no checkpoint.
+// [orig: EventTrigger_MarkCoopCheckpoint @0x4534a0 (dfx2.exe); EventTrigger_MarkLinkedSpawnPoints
+//  @0x452ce0]
+static void test_dfx2_coop_checkpoint_marking() {
+    struct Case { int title; uint32_t game_type; bool marks; bool checkpoint; };
+    const Case cases[] = {
+        {gameprofile::GAME_DFX2, 0x10020u, true, true},  // stock co-op
+        {gameprofile::GAME_DFX2, 0x30020u, true, true},  // objective co-op
+        {gameprofile::GAME_DFX2, 0x10000u, false, false}, // team deathmatch
+        {gameprofile::GAME_JO, 0x10020u, true, false},
+    };
+    for (const Case &c : cases) {
+        World w;
+        w.cached.humans = 1;
+        w.registry.configure_pool(0, 4);
+        w.rules.title = c.title;
+        world::MatchRules rules;
+        rules.game_type = c.game_type;
+        w.match.configure(rules);
+        // Two markers linked to event 1 around one with no link; event 0 a filler.
+        world::WaypointEntry linked;
+        linked.linked_event = 1;
+        w.script.waypoints.entries = {linked, {}, linked};
+        back_with_markers(w);
+        w.script.waypoints.current = 0;
+
+        bms::Event filler = simple_event(bms::EventFlags::PreMission, 0);
+        filler.action_count = 0;
+        bms::Event event = simple_event(bms::EventFlags::None, 0);
+        mission::BmsEventSystem sys;
+        sys.load({filler, event}, {}, {misvar(bms::MissionVariableActionSubType::Set, 8, 1)});
+        w.add_system(&sys);
+        w.load_systems();
+        tick_n(w, 2 * kPass); // event 1 is the second quarter's first entry
+        CHECK(sys.event_fired(1));
+        CHECK(w.script.waypoints.entries[0].done == c.marks);
+        CHECK(!w.script.waypoints.entries[1].done);
+        CHECK(w.script.waypoints.entries[2].done == c.marks);
+        CHECK(w.script.coop_checkpoint_slot == (c.checkpoint ? 2 : 0xFFFF));
+        // The selection skips past the done entries either way.
+        CHECK(w.script.waypoints.current == (c.marks ? 1 : 0));
+    }
+}
+
 static void test_signed_action_count_immediate_and_delayed() {
     struct Case { uint8_t count; int available; int executed; };
     const Case cases[] = {
@@ -2878,6 +2926,7 @@ int main() {
     test_activation_delay_signed_wrap();
     test_repeat_cooldown();
     test_signed_action_count_immediate_and_delayed();
+    test_dfx2_coop_checkpoint_marking();
     test_trigger_count_is_signed_in_the_chain();
     test_repeat_zero_refires_every_pass();
     test_pre_mission_pass();

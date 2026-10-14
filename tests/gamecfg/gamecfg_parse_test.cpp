@@ -384,11 +384,49 @@ int dfx2_table_row() {
 	return 0;
 }
 
+// dfx2.exe's table defaults three shared rows its own way, and its block clamps mpmaxplayers to
+// its own: the defaults' fold 1..250 where Jointops.exe's is 1..64, and the load's graphics clamp
+// to atol("16"), the row's default literal, where Jointops.exe's is "64" -- so a dfx2.exe game.cfg
+// reads back 1..16 whatever it says (docs/titles/dfx2-vs-jo-re.md DFX2-8).
+// [orig: Config_SetDefaults @0x54D030 (@0x54D0AB); Settings_ClampGraphicsOptions @0x54D600]
+// [orig: the rows @0x831850, @0x8318b0, @0x8319d0; Config_SetDefaults @0x54a2c0 (@0x54a33c);
+//  Settings_ClampGraphicsOptions @0x54a720 (@0x54a880) (dfx2.exe)]
+int dfx2_player_cap_defaults() {
+	const auto default_of = [](ConfigTable table, const char *key) {
+		for (const ConfigVarRow &row : config_var_rows(table))
+			if (std::string(row.name) == key) return std::string(row.default_value);
+		return std::string();
+	};
+	TEST_EXPECT(default_of(ConfigTable::Jo, "mpmaxplayers") == "64");
+	TEST_EXPECT(default_of(ConfigTable::Dfx2, "mpmaxplayers") == "16");
+	TEST_EXPECT(default_of(ConfigTable::Jo, "mpnovaworldportmax") == "65535");
+	TEST_EXPECT(default_of(ConfigTable::Dfx2, "mpnovaworldportmax") == "32787");
+	TEST_EXPECT(default_of(ConfigTable::Dfx2, "mpnovaworldlanenumsessionportmax") == "32787");
+	TEST_EXPECT(default_of(ConfigTable::Dfx2, "mplanclientportmax") == "65535"); // shared
+	const GameCfg jo = defaults();
+	const GameCfg dfx2 = defaults({}, 0, 0, ConfigTable::Dfx2);
+	TEST_EXPECT(jo.mp_max_players == 64 && dfx2.mp_max_players == 16);
+	TEST_EXPECT(jo.mp_novaworld_port_max == 65535 && dfx2.mp_novaworld_port_max == 32787);
+	TEST_EXPECT(dfx2.mp_lan_enum_port_max == 32787);
+
+	LoadOptions dfx2_options;
+	dfx2_options.table = ConfigTable::Dfx2;
+	TEST_EXPECT(load_text(with_version("mpmaxplayers = 200\r\n"), dfx2_options).cfg.mp_max_players == 16);
+	TEST_EXPECT(load_text(with_version("mpmaxplayers = 12\r\n"), dfx2_options).cfg.mp_max_players == 12);
+	TEST_EXPECT(load_text(with_version("mpmaxplayers = 200\r\n")).cfg.mp_max_players == 64);
+	GameCfg block = defaults({}, 0, 0, ConfigTable::Dfx2);
+	block.mp_max_players = 250;
+	clamp_graphics_options(block);
+	TEST_EXPECT(block.mp_max_players == 16);
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	if (defaults_match_config_set_defaults() != 0) return 1;
 	if (dfx2_table_row() != 0) return 1;
+	if (dfx2_player_cap_defaults() != 0) return 1;
 	if (comments_and_quoting() != 0) return 1;
 	if (value_is_token_two() != 0) return 1;
 	if (unknown_and_dead_keys() != 0) return 1;

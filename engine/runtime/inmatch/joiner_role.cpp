@@ -18,6 +18,7 @@
 #include <net/npwire/ingame_decode.h>    // kRoundEventFlag* (the fire-mode byte)
 #include <net/npwire/ingame_encode.h>    // the C2S 0x06 fired-round descriptor pose
 #include <net/npwire/wire_handle.h>      // pool()/kPoolItem (the wire handle home)
+#include <net/title/title_identity.h>    // TitleIdentity::game_id (the rules' title)
 
 #include <base/io/fixed.h>               // kFp16OneD, fp16_16_to_float
 #include <base/io/perf_clock.h>          // perf_now_us (the frame's phase clocks)
@@ -649,7 +650,6 @@ void JoinerRole::run_tick(const TickInput &) {
 				static_cast<int64_t>(io::perf_now_us()) - adm_start);
 }
 
-
 namespace {
 
 constexpr double kFixed16 = io::kFp16OneD;
@@ -698,10 +698,10 @@ void JoinerRole::pump() {
 	// The provider closures below persist on the pipeline across frames; they
 	// read this latched pointer at call time, never a per-call reference.
 	world_ = &world;
-	// A joiner is never the logic authority. run_logic_tick restamps this every
-	// tick, but the gameplay events applied BEFORE the first tick (a phase-4
-	// class death callback, for one) already read it; the default is true.
+	// A joiner is never the logic authority (run_logic_tick restamps it; events applied
+	// before the first tick read it; the default is true), and runs its title's rules.
 	world.rules.logic_authority = false;
+	world.rules.title = title_ != nullptr ? title_->game_id : gameprofile::GAME_JO;
 	// The phase clocks (F3 Stats): each span below laps onto the SIM_CLIENT_*
 	// rows of the world's profile; an inactive profile reads no clock at all.
 	// The wire leg (Client_ProcessNetworkFrame) has its own rows.
