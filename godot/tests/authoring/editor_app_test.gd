@@ -86,6 +86,17 @@ func test_editor_variant_boots_headless() -> void:
 	assert_eq(_seam.get_recent_projects(), PackedStringArray())
 
 
+## editor_screenshot's window restore (restore_window_for_capture): headless there is no window, so nothing is
+## minimized to bring back and nothing is minimized again (the windowed suite's editor_screenshot_minimized_test
+## brings a minimized one back).
+func test_headless_has_no_window_to_restore_for_a_capture() -> void:
+	if _app == null:
+		return
+	assert_eq(_app.restore_window_for_capture(), 0, "the headless display server's window, minimized, is none")
+	_app.minimize_window_after_capture()
+	assert_eq(_app.restore_window_for_capture(), 0, "and a minimize after no restore changed nothing")
+
+
 func test_new_project_fills_builds_and_plays() -> void:
 	if _app == null:
 		return

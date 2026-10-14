@@ -172,10 +172,23 @@ func _tool_editor_viewport(args: Dictionary, _ctx: McpToolContext) -> Variant:
 		answer["viewport"] = after
 	return _whole(answer)
 
+## editor_screenshot: the editor's window captured. A minimized window draws no frame, so it is brought back for the
+## capture without taking the foreground (under every other window: EditorApp.restore_window_for_capture) and
+## minimized again after; where the platform cannot bring it back so, the capture is refused saying why.
 func _tool_editor_screenshot(args: Dictionary, ctx: McpToolContext) -> Variant:
 	var viewport: Viewport = app.get_viewport() if app.is_inside_tree() else null
-	return await McpScreenshot.tool_capture(viewport, args, ctx,
+	var restored := int(app.call("restore_window_for_capture"))
+	if restored < 0:
+		return McpToolResult.error("The editor's window is minimized, and a minimized window draws nothing: "
+				+ "restore it to capture it (this platform cannot bring it back without taking the foreground).")
+	if restored > 0:
+		# Its size and its first frame back settle before the drawn frame the capture takes.
+		await ctx.frames(2)
+	var result: McpToolResult = await McpScreenshot.tool_capture(viewport, args, ctx,
 			"editor_screenshot", "Editor screenshot", "OpenNova Editor")
+	if restored > 0:
+		app.call("minimize_window_after_capture")
+	return result
 
 
 func _tool_editor_logs(args: Dictionary, ctx: McpToolContext) -> Variant:
