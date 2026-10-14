@@ -7,6 +7,7 @@
 #include <runtime/inmatch/host_config.h> // run_host_server_command
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/server_info.h>
 #include <runtime/inmatch/server_tick.h>
 
 namespace opennova::serve {

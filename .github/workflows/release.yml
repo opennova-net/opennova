@@ -69,7 +69,7 @@ jobs:
           done
 
   # Tagged releases ship the runtime, the editor with its own copy of the
-  # runtime, the Blender authoring add-on and the apps, without game data.
+  # runtime, the Blender authoring add-on, the apps and the launcher, without game data.
   package-godot-windows:
     needs: gate
     runs-on: windows-latest
@@ -168,11 +168,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download the game, editor, Blender and apps artifacts
+      - name: Download the game, editor, Blender, apps and launcher artifacts
         uses: actions/download-artifact@v8
         with:
           path: dist
-          artifact-ids: ${{ needs.package-godot-windows.outputs.artifact_id }},${{ needs.package-godot-windows.outputs.editor_artifact_id }},${{ needs.package-blender-windows.outputs.artifact_id }},${{ needs.package-apps-windows.outputs.artifact_id }}
+          artifact-ids: ${{ needs.package-godot-windows.outputs.artifact_id }},${{ needs.package-godot-windows.outputs.editor_artifact_id }},${{ needs.package-blender-windows.outputs.artifact_id }},${{ needs.package-apps-windows.outputs.artifact_id }},${{ needs.package-launcher-windows.outputs.artifact_id }}
           merge-multiple: true
           # The package jobs upload with `archive: false` (raw blob, no archive
           # wrapper), so the .zip deliverables are stored as the bare .zip. Without
