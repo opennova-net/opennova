@@ -37,7 +37,7 @@ struct TextureSide final : RasterSideState {
 	PcxIndexedForm pcx;                                 // Pcx8
 	std::array<uint8_t, 768> palette{};                 // Pcx8: the 256 entries; Png palette: its entries; R, G, B
 	tga::TgaForm tga;                                   // Tga
-	uint8_t png_colour = 6;                             // Png: 6 true colour (2 read as it), 3 palette, 0 grey
+	uint8_t png_colour = 6;                             // Png: 6 RGBA, 2 RGB, 3 palette, 0 grey
 	uint32_t png_entries = 0;                           // Png palette: its PLTE's entries
 	std::vector<uint8_t> png_alpha;                     // Png palette: its tRNS's entries (none: opaque), kept
 	size_t footprint() const override;
