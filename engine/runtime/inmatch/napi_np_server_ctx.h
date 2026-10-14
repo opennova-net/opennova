@@ -523,6 +523,21 @@ inline void set_server_text(NapiNPServerCtx &ctx, ServerTextTable text) {
 	ctx.server_text = std::move(text);
 }
 
+// The join-ticket gate: in session, on the NovaWorld transport, join tickets
+// required. A joiner's C2S 0x01 enters NetPlayer game state 3 (the validation
+// the timeout watchdog runs) only under it, else state 6; the validator's
+// code-28 leg reads the same three words (D-NET-702). Ours carries retail's
+// two ticket words (the NovaWorld session's +0x4FC the 0x01 tests and its
+// +0x120 bit 0x40 the watchdog tests) as the one novaworld_join_tickets_armed.
+// [orig: the C2S 0x01 handler @0x512ED0 - is_in_session @0x512F87, the
+//  transport @0x512F90, dword_B604DC @0x512F99, state 3 @0x512FA2..0x512FA6,
+//  state 6 @0x512FAF..0x512FB3; Server_ValidatePlayerJoinRequest
+//  @0x5128E2..0x5128F8]
+inline bool join_tickets_required(const NapiNPServerCtx &ctx) {
+	return ctx.is_in_session != 0 && ctx.transport_mode == NetworkType::NovaWorld &&
+			ctx.novaworld_join_tickets_armed;
+}
+
 // The host's local address: "PUB" while it is in a session on the NovaWorld
 // transport; false (no address, no cookie lookups) otherwise.
 // [orig: CNapiNetwork_GetLocalAddress @0x4C4F60 — the gate @0x4c4f75, the copy
@@ -537,14 +552,16 @@ inline bool get_local_address(const NapiNPServerCtx &ctx, std::string &out) {
 // The JOIN handler's cookie leg for a remote connection: on a NovaWorld session
 // its CD cookie's PCID and SQUADINFO land in the connection's account fields.
 // The host's own loopback skips it (its account is the shell's login PCID).
+// True when the cookie's PCID decrypted (load_join_account).
 // [orig: NapiNPServer_HandlePlayerJoinMessage @0x512AA0 — the loopback gate
 //  `!connection+0x2E` @0x512ca2, GetLocalAddress && cookie @0x512cdc]
-inline void load_join_account_from_cookie(const NapiNPServerCtx &ctx, NapiNPConnection &conn) {
+inline bool load_join_account_from_cookie(const NapiNPServerCtx &ctx, NapiNPConnection &conn) {
 	std::string local_address;
 	if (conn.type == NapiNPConnection::kTypeClientSide || !get_local_address(ctx, local_address) ||
 			conn.join_identity_pairs.empty())
-		return;
-	load_join_account(conn.join_identity_pairs, local_address, ctx.cookie_key_table, conn.account);
+		return false;
+	return load_join_account(
+			conn.join_identity_pairs, local_address, ctx.cookie_key_table, conn.account);
 }
 
 // The NovaWorld host binding's account facts: the cookie-key table, and the

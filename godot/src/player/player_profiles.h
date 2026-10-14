@@ -73,7 +73,7 @@ public:
 	bool is_nameless() const;
 	bool is_first_run() const { return store_.first_run(); }
 
-	bool rename(const String &p_text) { return store_.rename(p_text.utf8().get_data()); }
+	bool rename(const String &p_text);
 	// The PLAYERNAME edit's change notice over its label: the label, or the
 	// cut the edit is set to (engine PlayerProfiles::name_changed).
 	String name_changed(const String &p_label);

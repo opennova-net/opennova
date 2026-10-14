@@ -97,7 +97,8 @@ void check_host_loads_the_account_under_its_key_table() {
 		{"PUBSQUADINFO", pub_value(squad, key)},
 	};
 	opennova::JoinAccount account;
-	opennova::load_join_account(cookie, "PUB", ring, account);
+	check(opennova::load_join_account(cookie, "PUB", ring, account),
+			"the load answers that the PCID decrypted");
 	check(account.pcid == "00000007", "PCID decrypts under the second slot (field names match caselessly)");
 	check(account.squad_id == 0x12345678u, "the squad id is SQUADINFO's leading dword");
 	check(account.squad_name == "Clan Name" && account.squad_tag == "CLN",
@@ -106,7 +107,8 @@ void check_host_loads_the_account_under_its_key_table() {
 	opennova::SessionIdRing first_only = ring;
 	first_only.count = 1; // the second key is outside the table
 	opennova::JoinAccount none;
-	opennova::load_join_account(cookie, "PUB", first_only, none);
+	check(!opennova::load_join_account(cookie, "PUB", first_only, none),
+			"no key verifies: the load answers no PCID");
 	check(none.pcid.empty() && none.squad_id == 0 && none.squad_name.empty(),
 	      "no key of the table verifies: nothing loads");
 	opennova::JoinAccount other_prefix;
@@ -135,7 +137,8 @@ void check_host_loads_the_account_under_its_key_table() {
 	};
 	opennova::JoinAccount short_account;
 	short_account.squad_id = 9;
-	opennova::load_join_account(short_cookie, "PUB", ring, short_account);
+	check(!opennova::load_join_account(short_cookie, "PUB", ring, short_account),
+			"a cookie with no PCID field answers no PCID, its SQUADINFO loaded all the same");
 	check(short_account.squad_id == 0 && short_account.squad_name == "AB" &&
 	      short_account.squad_tag.empty(), "a short SQUADINFO carries no id");
 }
