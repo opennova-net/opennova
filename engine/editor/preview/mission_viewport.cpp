@@ -43,21 +43,27 @@
 
 namespace opennova::editor {
 
-float mission_fog_reach(const FileSource &files, const MissionSceneHeader &header) {
-	if (header.environment.empty()) return 0.0f;
+MissionFog mission_fog(const FileSource &files, const MissionSceneHeader &header) {
 	// The environment as the mission's load makes it: the terrain's .trn, overcast.def, then the .env over them,
-	// the header's overrides over that (env::load_mission_env_config).
+	// the header's overrides over that (env::load_mission_env_config); with no .env named, or none there, the
+	// earlier passes over the engine's own, as the device's load leaves it.
 	env::MissionEnv loaded;
-	if (!env::load_mission_env_config(files, header.terrain, header.environment,
-	            env::bms_env_overrides_from_header(header.attrib_flags, header.water_override, header.fog_override,
-	                    header.fog_color, header.water_color, header.water_murk),
-	            loaded))
-		return 0.0f;
+	const bool read = env::load_mission_env_config(files, header.terrain, header.environment,
+			env::bms_env_overrides_from_header(header.attrib_flags, header.water_override, header.fog_override,
+					header.fog_color, header.water_color, header.water_murk),
+			loaded);
 	const env::Config &config = loaded.config;
-	const env::FogParams fog = env::compute_fog_params(config.fog_type, env::EnvScalarChannels::settled_fog_level(config.fog_level), 0.0f);
-	if (!fog.enabled || !(fog.end > 0.0f)) return 0.0f;
+	MissionFog out;
+	out.distance = env::EnvScalarChannels::settled_fog_level(config.fog_level);
+	if (header.environment.empty() || !read) return out;
+	const env::FogParams fog = env::compute_fog_params(config.fog_type, out.distance, 0.0f);
 	// Half its end: type 1's linear haze (from the eye) half thick there, type 2's start, type 3's past it.
-	return fog.end * 0.5f;
+	if (fog.enabled && fog.end > 0.0f) out.reach = fog.end * 0.5f;
+	return out;
+}
+
+float mission_fog_reach(const FileSource &files, const MissionSceneHeader &header) {
+	return mission_fog(files, header).reach;
 }
 
 namespace {
@@ -397,7 +403,14 @@ void MissionViewport::follow_effects_(const SessionView &view, const PreviewCloc
 	// The Shoot tool's impacts in the same scene (DI-23).
 	effects_.set_shot_spawns(shot_spawns_());
 	const ViewportState picture = size();
-	effects_.play_to(clock.ticks(), preview_view_frustum(camera_, picture.width, picture.height));
+	// The view the game's effects test a NOVISNOUPDATE emitter against: the world pass's, its far plane the fog's.
+	effects_.play_to(clock.ticks(), scene_pass_view_frustum(camera_, picture.width, picture.height, fog_distance_));
+}
+
+void MissionViewport::take_fog_(const FileSource &files) {
+	const MissionFog fog = mission_fog(files, scene_.header());
+	fog_reach_ = fog.reach;
+	fog_distance_ = fog.distance;
 }
 
 double MissionViewport::hours() const {
@@ -519,7 +532,7 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 	const bool anew = !picture_.shows() || (input.change != ChangeClass::None && !rows);
 	if (anew) {
 		scene_.read(*source);
-		fog_reach_ = mission_fog_reach(files, scene_.header());
+		take_fog_(files);
 		bound_items_(view);
 		stand_people_(view, *document, poses_.refresh(view, scene_));
 		people_.run_to(poses_, clock.ticks());
@@ -569,7 +582,7 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 	if (!mapped.empty()) picture_.restamp(files, mapped);
 	if (!stroking && stroke_.patched()) {
 		stroke_.made();
-		fog_reach_ = mission_fog_reach(files, scene_.header());
+		take_fog_(files);
 		options_moved_ = false;
 		heights_built_(view, *document);
 		return picture_.built(FileStamps());
@@ -598,13 +611,13 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 	// A file the device read moved: the picture made again from the files, over the scene as it is.
 	if (picture_.follow(key, false, files, generation) == PreviewFollow::Found::Files ||
 			((heights_stale_ || maps_.stale()) && !stroking)) {
-		fog_reach_ = mission_fog_reach(files, scene_.header());
+		take_fog_(files);
 		options_moved_ = false;
 		heights_built_(view, *document);
 		return picture_.built(FileStamps());
 	}
 	if (delta.header || delta.reshaped) {
-		if (delta.header) fog_reach_ = mission_fog_reach(files, scene_.header());
+		if (delta.header) take_fog_(files);
 		options_moved_ = false;
 		heights_built_(view, *document);
 		return ViewportAction::Rebuild;

@@ -5765,6 +5765,13 @@ target_link_libraries(editor_menu_arrange_test PRIVATE opennova_editor)
 target_include_directories(editor_menu_arrange_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_menu_arrange COMMAND editor_menu_arrange_test)
 
+# The views the editor's effect schedule tests a NOVISNOUPDATE emitter against (editor/preview/effect_schedule): the
+# orbit camera's planes, and the world pass's a mission's view takes (its far plane the fog's, S26).
+add_executable(editor_effect_schedule_test editor/effect_schedule_test.cpp)
+target_link_libraries(editor_effect_schedule_test PRIVATE opennova_editor)
+target_include_directories(editor_effect_schedule_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_effect_schedule COMMAND editor_effect_schedule_test)
+
 # The mission view's pick math (editor/preview/preview_pick, S14): a segment against a box, a triangle (either
 # face), and the nearest face of a shape before a best parameter.
 add_executable(editor_preview_pick_test editor/preview_pick_test.cpp)

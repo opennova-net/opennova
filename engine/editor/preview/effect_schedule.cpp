@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include <base/io/tick_rate.h>
+#include <runtime/renderer/render_order.h>
 
 namespace opennova::editor {
 
@@ -33,9 +34,8 @@ PreviewVec3 combine(const PreviewVec3 &a, float scale, const PreviewVec3 &b, flo
 	return PreviewVec3{ a.x * scale + b.x * sign, a.y * scale + b.y * sign, a.z * scale + b.z * sign };
 }
 
-} // namespace
-
-particle::ParticleViewFrustum preview_view_frustum(const OrbitCamera &camera, int width, int height) {
+// The six planes at `camera`'s eye and axes, `near_z` and `far_z` ahead of it.
+particle::ParticleViewFrustum view_frustum(const OrbitCamera &camera, int width, int height, float near_z, float far_z) {
 	particle::ParticleViewFrustum out;
 	if (width <= 0 || height <= 0) return out;
 	PreviewVec3 right, up, back;
@@ -46,8 +46,8 @@ particle::ParticleViewFrustum preview_view_frustum(const OrbitCamera &camera, in
 	const float down = across * float(height) / float(width);
 	if (!std::isfinite(across) || across <= 0.0f) return out;
 	// Near and far: ahead of the eye by the near plane, short of the far one.
-	set_plane(out.planes[0], forward, eye, camera.near_plane);
-	set_plane(out.planes[1], back, eye, -camera.far_plane);
+	set_plane(out.planes[0], forward, eye, near_z);
+	set_plane(out.planes[1], back, eye, -far_z);
 	// The sides: a point ahead whose offset across (or up) is within the field's tangent of its depth.
 	set_plane(out.planes[2], combine(forward, across, right, 1.0f), eye, 0.0f);
 	set_plane(out.planes[3], combine(forward, across, right, -1.0f), eye, 0.0f);
@@ -55,6 +55,19 @@ particle::ParticleViewFrustum preview_view_frustum(const OrbitCamera &camera, in
 	set_plane(out.planes[5], combine(forward, down, up, -1.0f), eye, 0.0f);
 	out.valid = true;
 	return out;
+}
+
+} // namespace
+
+particle::ParticleViewFrustum preview_view_frustum(const OrbitCamera &camera, int width, int height) {
+	return view_frustum(camera, width, height, camera.near_plane, camera.far_plane);
+}
+
+particle::ParticleViewFrustum scene_pass_view_frustum(const OrbitCamera &camera, int width, int height,
+		float fog_distance) {
+	if (!(fog_distance > 0.0f)) return particle::ParticleViewFrustum();
+	return view_frustum(
+			camera, width, height, renderer::kScenePassNearZ, renderer::scene_far_plane(fog_distance));
 }
 
 void EffectSchedule::hold(int32_t tick) {
