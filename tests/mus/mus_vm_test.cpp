@@ -33,6 +33,15 @@ static int compile_or_die(const char *src, MusScript *out) {
     return 1;
 }
 
+/* A hand-built script's method table: MUSIC.LAN's eleven, the table every MDEdit script carries (the compiler's),
+   which `method N` resolves through by name. */
+static char kMusicLan[11][MUS_METHOD_NAME_SIZE] = {"GEcho", "GGRnd", "GSV", "GSDV", "GFB", "FSet",
+                                                   "FClear", "FIsSet", "FIsClear", "TStart", "TStop"};
+static void lan_methods(MusScript *s) {
+    s->intrinsic_names = kMusicLan;
+    s->intrinsic_count = 11;
+}
+
 /* ---- E1: scaffolding ---------------------------------------------------- */
 
 static int test_vm_lifecycle(void) {
@@ -695,6 +704,7 @@ static int test_vm_intrinsic_ggrnd_in_range(void) {
 
     MusScript s;
     memset(&s, 0, sizeof(s));
+    lan_methods(&s);
     strncpy(s.name, "t", sizeof(s.name) - 1);
     s.code = code;
     s.code_size = sizeof(code);
@@ -740,6 +750,7 @@ static int test_vm_intrinsic_fset(void) {
 
     MusScript s;
     memset(&s, 0, sizeof(s));
+    lan_methods(&s);
     strncpy(s.name, "t", sizeof(s.name) - 1);
     s.code = code; s.code_size = sizeof(code);
     s.sections = &sec; s.section_count = 1;
@@ -768,6 +779,7 @@ static int test_vm_intrinsic_fclear(void) {
 
     MusScript s;
     memset(&s, 0, sizeof(s));
+    lan_methods(&s);
     strncpy(s.name, "t", sizeof(s.name) - 1);
     s.code = code; s.code_size = sizeof(code);
     s.sections = &sec; s.section_count = 1;
@@ -802,6 +814,7 @@ static int test_vm_intrinsic_fisset(void) {
 
     MusScript s;
     memset(&s, 0, sizeof(s));
+    lan_methods(&s);
     strncpy(s.name, "t", sizeof(s.name) - 1);
     s.code = code; s.code_size = sizeof(code);
     s.sections = &sec; s.section_count = 1;
@@ -840,6 +853,7 @@ static int test_vm_intrinsic_fisclear(void) {
 
     MusScript s;
     memset(&s, 0, sizeof(s));
+    lan_methods(&s);
     strncpy(s.name, "t", sizeof(s.name) - 1);
     s.code = code; s.code_size = sizeof(code);
     s.sections = &sec; s.section_count = 1;
@@ -895,6 +909,99 @@ static int test_vm_intrinsic_gecho_fires_hook(void) {
     return 1;
 }
 
+/* `method N` calls the handler of the script's N-th method name, resolved by name against the game's registered
+   table [orig: AudioVM_LoadScriptFile @ 0x672DE4 -> AudioVM_FindContextByName @ 0x6723E0; AudioVM_Op_Method @
+   0x672CFD], not by N: a table {"Mine", "GEcho"} makes method 1 the echo and method 0 nothing (push 0). */
+static int test_vm_method_resolves_by_name(void) {
+    static uint8_t code[] = {
+        0x01, 42,          /* push 42 */
+        0x40, 0x01,        /* method 1: GEcho here (echoes 42, pushes 0) */
+        0x40, 0x00,        /* method 0: "Mine", no handler (push 0) */
+        0x08, 0x00,        /* pop_g Var00 */
+        0x3F,
+    };
+    static char table[2][MUS_METHOD_NAME_SIZE] = {"Mine", "GEcho"};
+    MusSection sec;
+    memset(&sec, 0, sizeof(sec));
+    strncpy(sec.name, "Begin", sizeof(sec.name) - 1);
+    MusScript s;
+    memset(&s, 0, sizeof(s));
+    strncpy(s.name, "t", sizeof(s.name) - 1);
+    s.code = code; s.code_size = sizeof(code);
+    s.sections = &sec; s.section_count = 1; s.globals_size = MUS_GLOBALS_BYTES;
+    s.intrinsic_names = table; s.intrinsic_count = 2;
+
+    int32_t echoed = -1;
+    MusVMHooks hooks = {};
+    hooks.user = &echoed;
+    hooks.on_echo = [](void *u, int32_t a) { *(int32_t *)u = a; };
+    MusVM *vm = mus_vm_create();
+    mus_vm_set_hooks(vm, &hooks);
+    mus_vm_load_script(vm, &s);
+    mus_vm_start(vm);
+    mus_vm_tick(vm, 16);
+    CHECK(echoed == 42, "method 1 is the table's GEcho");
+    CHECK(mus_vm_get_var(vm, 0) == 0 && mus_vm_state(vm) != MUS_VM_ERROR, "method 0 resolves to nothing: push 0");
+    mus_vm_destroy(vm);
+    return 1;
+}
+
+/* A method number past the script's table reads past the resolve table, a word the game calls as a handler [orig:
+   AudioVM_Op_Method @ 0x672CFD..0x672D08]: the VM stops in error. */
+static int test_vm_method_past_table_errors(void) {
+    static uint8_t code[] = {0x01, 0x01, 0x40, 0x01, 0x3F};
+    static char table[1][MUS_METHOD_NAME_SIZE] = {"GEcho"};
+    MusSection sec;
+    memset(&sec, 0, sizeof(sec));
+    strncpy(sec.name, "Begin", sizeof(sec.name) - 1);
+    MusScript s;
+    memset(&s, 0, sizeof(s));
+    strncpy(s.name, "t", sizeof(s.name) - 1);
+    s.code = code; s.code_size = sizeof(code);
+    s.sections = &sec; s.section_count = 1; s.globals_size = MUS_GLOBALS_BYTES;
+    s.intrinsic_names = table; s.intrinsic_count = 1;
+    MusVM *vm = mus_vm_create();
+    mus_vm_load_script(vm, &s);
+    mus_vm_start(vm);
+    mus_vm_tick(vm, 16);
+    CHECK(mus_vm_state(vm) == MUS_VM_ERROR, "method 1 of a one-name table stops the VM");
+    mus_vm_destroy(vm);
+    return 1;
+}
+
+/* `enter` banks its arguments at the chunk's frame base as the chunk holds it, 0 a frame at the locals' start
+   [orig: AudioVM_Op_Enter @ 0x672C39 add ebx, [edx+3Ch]]. */
+static int test_vm_enter_frame_base_as_held(void) {
+    static uint8_t code[] = {
+        0x01, 7,           /* push 7 */
+        0x38, 0x01,        /* enter 1: the argument to the frame base */
+        0x04, 0x00,        /* push_l 0 */
+        0x08, 0x00,        /* pop_g Var00 */
+        0x04, 0x20,        /* push_l 0x20 */
+        0x08, 0x04,        /* pop_g Var01 */
+        0x3F,
+    };
+    MusSection sec;
+    memset(&sec, 0, sizeof(sec));
+    strncpy(sec.name, "Begin", sizeof(sec.name) - 1);
+    for (uint32_t base : {0u, 0x20u}) {
+        MusScript s;
+        memset(&s, 0, sizeof(s));
+        strncpy(s.name, "t", sizeof(s.name) - 1);
+        s.code = code; s.code_size = sizeof(code);
+        s.sections = &sec; s.section_count = 1; s.globals_size = MUS_GLOBALS_BYTES; s.locals_size = 0x28;
+        s.locals_frame_offset = base;
+        MusVM *vm = mus_vm_create();
+        mus_vm_load_script(vm, &s);
+        mus_vm_start(vm);
+        mus_vm_tick(vm, 16);
+        const int32_t at0 = mus_vm_get_var(vm, 0), at20 = mus_vm_get_var(vm, 1);
+        mus_vm_destroy(vm);
+        CHECK(base == 0 ? (at0 == 7 && at20 == 0) : (at0 == 0 && at20 == 7), "the argument at the frame base held");
+    }
+    return 1;
+}
+
 /* TStart and TStop are silent no-ops in dfvas (NULL handler -> push 0).
    Hand-craft method calls and verify the VM doesn't crash and pushes 0. */
 static int test_vm_intrinsic_tstart_tstop_noop(void) {
@@ -913,6 +1020,7 @@ static int test_vm_intrinsic_tstart_tstop_noop(void) {
 
     MusScript s;
     memset(&s, 0, sizeof(s));
+    lan_methods(&s);
     strncpy(s.name, "t", sizeof(s.name) - 1);
     s.code = code; s.code_size = sizeof(code);
     s.sections = &sec; s.section_count = 1;
@@ -1423,6 +1531,9 @@ int main(int argc, char **argv) {
     /* E9 */
     RUN_TEST(test_vm_intrinsic_gecho_fires_hook);
     RUN_TEST(test_vm_intrinsic_tstart_tstop_noop);
+    RUN_TEST(test_vm_method_resolves_by_name);
+    RUN_TEST(test_vm_method_past_table_errors);
+    RUN_TEST(test_vm_enter_frame_base_as_held);
     /* E10 */
     RUN_TEST(test_vm_play_fires_hook);
     RUN_TEST(test_vm_playw_fires_hook_wait);

@@ -84,7 +84,7 @@ static int test_encode_file_minimal(void) {
     CHECK(memcmp(mf.scripts[0].code, script.code, script.code_size) == 0,
           "bytecode preserved");
     /* Intrinsic names must round-trip too. */
-    CHECK(mf.intrinsic_count == MUS_INTRINSIC_NAMES, "intrinsic count");
+    CHECK(mf.intrinsic_count == 11, "the method table: MUSIC.LAN's eleven");
     CHECK(strncmp(mf.intrinsic_names[0], "GEcho", 5) == 0, "intrinsic[0] GEcho");
     CHECK(strncmp(mf.intrinsic_names[10], "TStop", 5) == 0, "intrinsic[10] TStop");
     mus_close(&mf);
@@ -529,7 +529,133 @@ static int test_play_places(void) {
     return 1;
 }
 
+/* The method table `names` (malloc'd, the script's from then on) in place of the script's own. */
+static void set_methods(MusScript &script, const std::vector<std::string> &names) {
+    free(script.intrinsic_names);
+    script.intrinsic_names =
+        names.empty() ? NULL : (char (*)[MUS_METHOD_NAME_SIZE])calloc(names.size(), MUS_METHOD_NAME_SIZE);
+    for (size_t i = 0; i < names.size(); ++i)
+        memcpy(script.intrinsic_names[i], names[i].data(),
+               names[i].size() < (size_t)MUS_METHOD_NAME_SIZE ? names[i].size() : (size_t)MUS_METHOD_NAME_SIZE);
+    script.intrinsic_count = (uint32_t)names.size();
+}
+
+/* `scripts` written and read back: 0 and the parsed file, or the encoder's refusal. */
+static int encode_and_open(const MusScript *const *scripts, uint32_t count, MusFile &out, std::vector<uint8_t> &bytes) {
+    uint8_t *buf = NULL;
+    size_t size = 0;
+    const int rc = mus_encode_file(scripts, count, &buf, &size);
+    bytes.assign(buf, buf + (buf ? size : 0));
+    mus_free(buf);
+    if (rc != 0) return rc;
+    return mus_open_memory(&out, bytes.data(), bytes.size()) == 0 ? 0 : 1;
+}
+
+/* The writer writes the model's own fields: the method table the script holds, in its order, whatever its names
+   and count (the loader takes any [orig: AudioVM_LoadScriptFile @ 0x672DBD..0x672E01]), the globals' size and the
+   `enter` frame base as they are, 0 included (the game allocates and adds them as the chunk holds them [orig:
+   ScriptInstance_Init @ 0x672F78; AudioVM_Op_Enter @ 0x672C39]); each reads back as written and writes again to
+   the same bytes. It refuses a name not ended within its slot (its length byte past 127, which the loader reads
+   signed [orig: @ 0x672DEB]) and two programs of different tables (the file holds one [orig: ScriptInstance_Init
+   @ 0x672FAF]). */
+static int test_encode_model_fields(void) {
+    const char *src = "script test\nsection Begin\n{\n  play sound_0\n  done\n}\n";
+    MusScript script = {};
+    int err_line = 0, err_col = 0;
+    const char *err_msg = NULL;
+    CHECK(mus_compile(src, &script, &err_line, &err_col, &err_msg) == 0, "compile");
+    const std::string longest(125, 'L');
+    set_methods(script, {"FSet", "Mine", "GEcho", longest, ""});
+    script.globals_size = 0;
+    script.locals_frame_offset = 0;
+    const MusScript *one[1] = {&script};
+    MusFile mf = {};
+    std::vector<uint8_t> bytes;
+    CHECK(encode_and_open(one, 1, mf, bytes) == 0, "the model writes and reads back");
+    CHECK(mf.intrinsic_count == 5 && mf.scripts[0].intrinsic_count == 5, "five names, the file's and the script's");
+    CHECK(strcmp(mf.intrinsic_names[0], "FSet") == 0 && strcmp(mf.intrinsic_names[1], "Mine") == 0 &&
+          strcmp(mf.intrinsic_names[2], "GEcho") == 0 && mf.intrinsic_names[3] == longest &&
+          mf.intrinsic_names[4][0] == 0, "in the model's order, each as it is");
+    CHECK(mf.scripts[0].globals_size == 0, "the globals' size as the model holds it, 0");
+    CHECK(mf.scripts[0].locals_frame_offset == 0, "the frame base as the model holds it, 0");
+    {
+        const MusScript *again[1] = {&mf.scripts[0]};
+        MusFile mf2 = {};
+        std::vector<uint8_t> bytes2;
+        const bool same = encode_and_open(again, 1, mf2, bytes2) == 0 && bytes2 == bytes;
+        mus_close(&mf2);
+        CHECK(same, "and writes again to the same bytes");
+    }
+    mus_close(&mf);
+
+    /* No table: no name, none read. */
+    set_methods(script, {});
+    mf = {};
+    CHECK(encode_and_open(one, 1, mf, bytes) == 0 && mf.intrinsic_count == 0 && mf.intrinsic_names == NULL &&
+          mf.scripts[0].intrinsic_count == 0, "a script of no method name writes none");
+    mus_close(&mf);
+
+    /* A slot without its NUL: 126 characters. */
+    set_methods(script, {std::string(126, 'L')});
+    CHECK(encode_and_open(one, 1, mf, bytes) == -5, "a name past 125 characters is refused");
+
+    /* Two programs: one table, or nothing. */
+    MusScript other = {};
+    CHECK(mus_compile(src, &other, &err_line, &err_col, &err_msg) == 0, "compile the second");
+    set_methods(script, {"GEcho", "GSV"});
+    set_methods(other, {"GEcho", "GSDV"});
+    const MusScript *two[2] = {&script, &other};
+    CHECK(encode_and_open(two, 2, mf, bytes) == -4, "two programs of different tables are refused");
+    set_methods(other, {"GEcho", "GSV"});
+    mf = {};
+    CHECK(encode_and_open(two, 2, mf, bytes) == 0 && mf.intrinsic_count == 2 && mf.header.chunk_count == 2,
+          "two of the same table share the file's");
+    mus_close(&mf);
+    mus_script_free(&other);
+    mus_script_free(&script);
+    return 1;
+}
+
+/* The method table as the loader reads it [orig: AudioVM_LoadScriptFile @ 0x672DBD..0x672E01]: each name up to its
+   NUL, the next from its length byte on (a length byte that runs past the NUL skips the bytes after it), and a
+   resolve table that would reach past the file refused (the loader writes each handler into the file's buffer
+   [orig: @ 0x672DE9]). */
+static int test_parse_method_table(void) {
+    const char *src = "script test\nsection Begin\n{\n  done\n}\n";
+    MusScript script = {};
+    int err_line = 0, err_col = 0;
+    const char *err_msg = NULL;
+    CHECK(mus_compile(src, &script, &err_line, &err_col, &err_msg) == 0, "compile");
+    set_methods(script, {"GEcho", "GSV"});
+    const MusScript *one[1] = {&script};
+    MusFile mf = {};
+    std::vector<uint8_t> bytes;
+    CHECK(encode_and_open(one, 1, mf, bytes) == 0, "write a two-name table");
+    const MusFileHeader header = mf.header;
+    mus_close(&mf);
+    mus_script_free(&script);
+    /* The first name's length byte 7 -> 9: the second name read two bytes on ("V"), as the game reads it. */
+    const size_t blob = header.name_strings_blob_offset;
+    CHECK(bytes[blob] == 7 && memcmp(&bytes[blob + 1], "GEcho", 6) == 0, "GEcho first, its length byte 7");
+    std::vector<uint8_t> stepped = bytes;
+    stepped[blob] = 9;
+    mf = {};
+    const bool read = mus_open_memory(&mf, stepped.data(), stepped.size()) == 0 && mf.intrinsic_count == 2 &&
+                      strcmp(mf.intrinsic_names[0], "GEcho") == 0 && strcmp(mf.intrinsic_names[1], "V") == 0;
+    mus_close(&mf);
+    CHECK(read, "the next name where the length byte steps to");
+    /* A count whose resolve table reaches past the file. */
+    std::vector<uint8_t> counted = bytes;
+    const uint32_t many = (uint32_t)(bytes.size() / 4);
+    memcpy(&counted[16], &many, 4);
+    mf = {};
+    CHECK(mus_open_memory(&mf, counted.data(), counted.size()) == -21, "a resolve table past the file is refused");
+    return 1;
+}
+
 int main(void) {
+    RUN_TEST(test_encode_model_fields);
+    RUN_TEST(test_parse_method_table);
     RUN_TEST(test_function_rules);
     RUN_TEST(test_function_limits);
     RUN_TEST(test_play_places);

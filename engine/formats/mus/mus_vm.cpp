@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <new>
+#include <vector>
 
 namespace opennova::mus {
 
@@ -45,6 +46,9 @@ struct MusGlobals {
     uint8_t bytes[MUS_GLOBALS_BYTES]{};
 };
 
+/* A method's handler (an intrinsic of the game's registered table). */
+typedef void (*Intrinsic)(MusVM *);
+
 struct MusVM {
     const MusScript *script;
     MusVMHooks       hooks;
@@ -64,6 +68,10 @@ struct MusVM {
 
     /* Flag bitmap (FSet/FClear/FIsSet). 64 flags. */
     uint64_t flags;
+
+    /* The script's method table resolved: the handler of each of its names, NULL where the name resolves to none
+       (the resolve table the loader fills [orig: AudioVM_LoadScriptFile @ 0x672DE4..0x672DE9]). */
+    std::vector<Intrinsic> methods;
 
     /* Bytecode-relative PC. */
     uint32_t pc;
@@ -121,6 +129,8 @@ uint32_t mus_vm_pc(const MusVM *vm) {
 
 /* ---- E2: load + start/stop/pause/resume -------------------------------- */
 
+static Intrinsic resolve_method(const char *name);
+
 int mus_vm_load_script(MusVM *vm, const MusScript *s) {
     if (!vm || !s) return -1;
     // A fresh context owns fresh storage. Existing compiled operands retain the
@@ -141,6 +151,9 @@ int mus_vm_load_script(MusVM *vm, const MusScript *s) {
     memset(vm->locals,     0, sizeof(vm->locals));
     vm->last_error[0] = 0;
     vm->current_section_name[0] = 0;
+    /* Each method name resolved by name, as the loader does [orig: AudioVM_LoadScriptFile @ 0x672DE0..0x672E01]. */
+    vm->methods.assign(s->intrinsic_names ? s->intrinsic_count : 0, NULL);
+    for (size_t i = 0; i < vm->methods.size(); ++i) vm->methods[i] = resolve_method(s->intrinsic_names[i]);
 
     /* Witnessed: Jointops.exe!ScriptInstance_Init @ 0x00672EF0
        initial_pc = section_table[entry_section_index] (@0x672FB5..0x672FC3). */
@@ -625,15 +638,12 @@ static void op_enter  (MusVM *vm) {
          mov ebx,LocalsBase; add ebx,[instance+0x3C]
          loop: copy N dwords from the popped stack region to locals[frame + i*4]
        The frame offset is instance[+0x3C] (== the chunk's string_section_size
-       field, witnessed as 0x20 in jo_gamemus/menumus; MDEdit invariantly emits
-       0x20). We plumb it via MusScript.locals_frame_offset (default 0x20) so the
-       handler is faithful to any chunk rather than hardcoding 0x20.
+       field, 0x20 in every MDEdit chunk), added as the chunk holds it (0 is a
+       frame at the locals' start): MusScript.locals_frame_offset.
        D-MUS-6 (a.k.a. D-NEW-2): the original POPS the N args (`sub ebp,N*4`); we mirror with
        `vm->sp -= n`. (We guard sp >= n; the original does not bounds-check.) */
     int n = read_u8(vm);
-    int dst_off = vm->script ? (int)vm->script->locals_frame_offset
-                             : MUS_DEFAULT_LOCALS_BASE;
-    if (dst_off <= 0) dst_off = MUS_DEFAULT_LOCALS_BASE;
+    const int dst_off = vm->script ? (int)vm->script->locals_frame_offset : 0;
     if (n > 0 && vm->sp >= n) {
         for (int i = 0; i < n; ++i) {
             int32_t v = vm->data_stack[vm->sp - n + i];
@@ -717,18 +727,21 @@ static void op_callvl (MusVM *vm) {
     vm_push(vm, 0);
 }
 
-/* Intrinsic table forward decl (E7-E9). */
-typedef void (*Intrinsic)(MusVM *);
-static Intrinsic kIntrinsics[MUS_INTRINSIC_NAMES] = {0};
-static int       kIntrinsicsInit = 0;
-static void init_intrinsics(void);
-
-/* Op 0x40 method: dispatch instance[+0x14][byte] through the built-in intrinsic
-   table, push the result, continue [orig: AudioVM_Op_Method @ 0x672CF0]. */
+/* Op 0x40 method: call the handler the loader resolved for the script's idx-th method name (instance[+0x14],
+   the resolve table), push the result, continue; a name resolved to none pushes 0 [orig: AudioVM_Op_Method @
+   0x672CF0..0x672D10]. A number past the script's table reads past the resolve table, a word of the names (or,
+   with no table, of an address the loader never set) the game calls as a handler [orig: @ 0x672CFD mov eax,
+   [ecx+eax*4]; @ 0x672D08 call eax]: refused here, the VM stopping in error. */
 static void op_method(MusVM *vm) {
-    init_intrinsics();
-    int idx = read_u8(vm);
-    Intrinsic fn = (idx >= 0 && idx < MUS_INTRINSIC_NAMES) ? kIntrinsics[idx] : NULL;
+    const int idx = read_u8(vm);
+    if ((size_t)idx >= vm->methods.size()) {
+        snprintf(vm->last_error, sizeof(vm->last_error), "method %d past the script's %zu method names", idx,
+                 vm->methods.size());
+        vm->state = MUS_VM_ERROR;
+        vm->halt_latch = 1;
+        return;
+    }
+    const Intrinsic fn = vm->methods[(size_t)idx];
     if (fn) {
         fn(vm);
     } else {
@@ -913,49 +926,40 @@ static void intrinsic_fisset(MusVM *vm) {
 
 /* Jointops.exe!AudioVM_Intrinsic_FIsClear @ 0x6723C0: pops 2 (NOS=mask, TOS=&var),
    returns -1 when NONE of the mask bits are set (`(mask & *var) == 0`), else 0.
-   The inverse of FIsSet. The handler exists in the image but its name never
-   resolves (see init_intrinsics), so it is kept only as the reference body. */
-[[maybe_unused]] static void intrinsic_fisclear(MusVM *vm) {
+   The inverse of FIsSet. The handler is in the registered table but past the
+   count the resolver walks (kRegistered below), so its name never resolves. */
+static void intrinsic_fisclear(MusVM *vm) {
     int32_t var_addr = vm_pop(vm);
     int32_t mask     = vm_pop(vm);
     int32_t cur = read_tagged(vm, var_addr);
     vm_push(vm, ((cur & mask) == 0) ? -1 : 0);
 }
 
-/* NULL-handler fallback -> push 0. Jointops.exe's intrinsic name table (@ 0x84F0C8)
-   has 9 entries (GEcho,GGRnd,GSV,GSDV,GFB,FSet,FClear,FIsSet,FIsClear) -- all bound.
-   TStart/TStop from the canonical MDEdit set do not exist in this build, so any index
-   >= 9 resolves here and no-ops. */
-static void intrinsic_unbound(MusVM *vm) {
-    vm_push(vm, 0);
-}
+/* The game's registered methods: 36-byte records, a 32-byte name and its handler, which the loader resolves each
+   script name against by strcmp [orig: g_AudioVMIntrinsicNameTable @ 0x84F0C8, registered by
+   AudioVM_OpenContextFile @ 0x6721E1..0x6721ED -> AudioVM_RegisterIntrinsics @ 0x6726F0;
+   AudioVM_FindContextByName @ 0x6723E0]. The table holds nine, but the count it is registered with is 8 [orig:
+   g_AudioVMIntrinsicNameCount @ 0x84F20C], so the resolver never reaches FIsClear: its name, TStart's and
+   TStop's (MUSIC.LAN's, which this build does not register) and any other resolve to none (jo-c cross-check
+   2026-09-10). */
+struct Registered {
+    const char *name;
+    Intrinsic fn;
+};
+static const Registered kRegistered[] = {
+    {"GEcho", intrinsic_gecho}, {"GGRnd", intrinsic_ggrnd}, {"GSV", intrinsic_gsv},
+    {"GSDV", intrinsic_gsdv},   {"GFB", intrinsic_gfb},     {"FSet", intrinsic_fset},
+    {"FClear", intrinsic_fclear}, {"FIsSet", intrinsic_fisset}, {"FIsClear", intrinsic_fisclear},
+};
+static constexpr int kRegisteredCount = 8;
+static_assert(kRegisteredCount <= (int)(sizeof(kRegistered) / sizeof(kRegistered[0])), "the count the resolver walks");
 
-static void init_intrinsics(void) {
-    if (kIntrinsicsInit) return;
-    kIntrinsicsInit = 1;
-    /* Jointops.exe intrinsic name table (@ 0x84F0C8, 9 records x 36B): GEcho,
-       GGRnd, GSV, GSDV, GFB, FSet, FClear, FIsSet, FIsClear -- all 9 bound (matches
-       Jointops). TStart/TStop from the canonical MDEdit set are NOT present in this
-       build; indices 9/10 resolve to the no-op fallback. */
-    kIntrinsics[0]  = intrinsic_gecho;
-    kIntrinsics[1]  = intrinsic_ggrnd;
-    kIntrinsics[2]  = intrinsic_gsv;
-    kIntrinsics[3]  = intrinsic_gsdv;
-    kIntrinsics[4]  = intrinsic_gfb;
-    kIntrinsics[5]  = intrinsic_fset;
-    kIntrinsics[6]  = intrinsic_fclear;
-    kIntrinsics[7]  = intrinsic_fisset;
-    /* FIsClear's handler EXISTS in the image (@ 0x6723C0) but is unreachable:
-       the intrinsic name resolver walks `index < dword_84F20C` and that count
-       is 8, so the ninth name never resolves and a `method FIsClear` runs the
-       NULL-handler path (push 0). Bound only through index 8 exactly as retail's
-       resolver leaves it: unbound. [orig: AudioVM_FindContextByName @0x6723E0
-       bound @0x84F20C = 8; the table @0x84F0C8; AudioVM_Op_Method @0x672CF0
-       NULL path] (jo-c cross-check 2026-09-10; intrinsic_fisclear stays as the
-       reference body). */
-    kIntrinsics[8]  = intrinsic_unbound;
-    kIntrinsics[9]  = intrinsic_unbound;   /* TStart: absent in this build */
-    kIntrinsics[10] = intrinsic_unbound;   /* TStop:  absent in this build */
+/* A script's method name to its handler: the first registered record of that name among the count, NULL for none
+   [orig: AudioVM_FindContextByName @ 0x6723F0..0x672437]. */
+static Intrinsic resolve_method(const char *name) {
+    for (int i = 0; i < kRegisteredCount; ++i)
+        if (strcmp(kRegistered[i].name, name) == 0) return kRegistered[i].fn;
+    return NULL;
 }
 
 /* Bytecode-name compare bounded to MUS_SECTION_NAME_SIZE; treats either NUL

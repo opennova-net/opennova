@@ -211,20 +211,19 @@ Error MusicScript::load_from_path(const String &p_path) {
 
 namespace {
 
-// What the game reads of a script, the same in two parsed files: the intrinsic-name table it
+// What the game reads of a script, the same in two parsed files: the method-name table it
 // resolves the `method` calls through, and each program's name, code, sections, entry, the
-// globals' and locals' sizes, the `enter` frame base (0 read as the default) and the
-// MessageHandler entry (mus.h carries each field's witness).
+// globals' and locals' sizes, the `enter` frame base and the MessageHandler entry (mus.h
+// carries each field's witness).
 bool same_as_read(const MusFile &a, const MusFile &b) {
 	if (a.intrinsic_count != b.intrinsic_count || a.header.chunk_count != b.header.chunk_count) {
 		return false;
 	}
-	for (uint32_t i = 0; i < a.intrinsic_count && i < (uint32_t)MUS_INTRINSIC_NAMES; ++i) {
-		if (std::strncmp(a.intrinsic_names[i], b.intrinsic_names[i], MUS_INTRINSIC_NAME_SIZE) != 0) {
+	for (uint32_t i = 0; i < a.intrinsic_count; ++i) {
+		if (std::strncmp(a.intrinsic_names[i], b.intrinsic_names[i], MUS_METHOD_NAME_SIZE) != 0) {
 			return false;
 		}
 	}
-	const auto frame = [](uint32_t base) { return base ? base : (uint32_t)MUS_DEFAULT_LOCALS_BASE; };
 	for (uint32_t i = 0; i < a.header.chunk_count; ++i) {
 		const MusScript &x = a.scripts[i];
 		const MusScript &y = b.scripts[i];
@@ -232,7 +231,7 @@ bool same_as_read(const MusFile &a, const MusFile &b) {
 				(x.code_size && std::memcmp(x.code, y.code, x.code_size) != 0) ||
 				x.section_count != y.section_count || x.entry_section_index != y.entry_section_index ||
 				x.globals_size != y.globals_size || x.locals_size != y.locals_size ||
-				frame(x.locals_frame_offset) != frame(y.locals_frame_offset) ||
+				x.locals_frame_offset != y.locals_frame_offset ||
 				x.has_message_handler != y.has_message_handler ||
 				(x.has_message_handler && x.message_handler_offset != y.message_handler_offset)) {
 			return false;
@@ -288,8 +287,8 @@ Error MusicScript::save_to_path(const String &p_path) const {
 	}
 	const PackedByteArray bytes = to_packed_bytes(buf, size);
 	mus_free(buf);
-	// The written bytes read back as the model in what the game reads, or the save is refused: the writer
-	// writes MDEdit's intrinsic-name table, so a script of another table would be changed, not written.
+	// The written bytes read back as the model in what the game reads, or the save is refused (the writer
+	// writes the model's fields and its method table as they are).
 	MusFile again;
 	std::memset(&again, 0, sizeof(again));
 	bool same = mus_open_memory(&again, bytes.ptr(), (size_t)bytes.size()) == 0;
@@ -299,7 +298,7 @@ Error MusicScript::save_to_path(const String &p_path) const {
 	}
 	if (!same) {
 		UtilityFunctions::push_warning("MusicScript: ", source_path,
-				" cannot be written as the game reads it (the writer writes MDEdit's intrinsic-name table)");
+				" cannot be written as the game reads it");
 		return ERR_INVALID_DATA;
 	}
 	Ref<FileAccess> fa = FileAccess::open(p_path, FileAccess::WRITE);

@@ -21,7 +21,10 @@ inline constexpr uint32_t MUS_CHUNK_TAG_MU01 = 0x3130554Du;  /* 'MU01' little-en
 inline constexpr int MUS_NAME_SIZE = 16;
 inline constexpr int MUS_GLOBALS_BYTES = 68;  /* Var00..Var15 + 1 user global */
 inline constexpr int MUS_OPCODE_COUNT = 65;  /* opcodes 0x00..0x40 */
-inline constexpr int MUS_INTRINSIC_NAMES = 11;  /* full set; runtime may bind a subset */
+/* A name of the file's method table, its NUL among them: the loader steps from a name to the next by its length
+   byte read signed (the byte counts itself, the name and its NUL), so 125 characters is the longest name it steps
+   over forward [orig: AudioVM_LoadScriptFile @ 0x672DEB movsx ecx, byte ptr [esi]; @ 0x672DFC add esi, ecx]. */
+inline constexpr int MUS_METHOD_NAME_SIZE = 126;
 
 /* The bytecode opcodes referenced by NAME outside the decoder table itself
    (mus_decompile.cpp's kOps stays the full-width authority): the flow ops the
@@ -42,9 +45,10 @@ typedef enum MusOpcode {
 
 /* Locals frame base the `enter` (0x38) opcode banks caller arguments at:
    dst = base + 4k for the (k+1)-th input. The chunk carries it in the
-   string_section_size field (instance[+0x3C]); MDEdit invariantly emits 0x20
-   and the compiler defaults to it, with 0 treated as 0x20.
-   [orig: AudioVM_Op_Enter @ 0x672C20 reads instance[+0x3C]] */
+   string_section_size field (instance[+0x3C]), which the game adds as it is, 0
+   a frame at the locals' start [orig: AudioVM_Op_Enter @ 0x672C39 add ebx, [edx+3Ch]].
+   MDEdit writes 0x20 in every chunk (MDEdit.exe, its chunk writer sub_40DF30 @
+   0x40DF30: v1[15] = 32), and so does the compiler. */
 inline constexpr int MUS_DEFAULT_LOCALS_BASE = 0x20;
 
 /* --- On-disk structs --- */
@@ -58,9 +62,9 @@ typedef struct MusFileHeader {
     uint32_t version;                     /* 0x00000100; not read by engine */
     uint32_t chunk_count;                 /* # MU01 chunks (typically 1) */
     uint32_t chunk_table_offset;          /* file offset to chunk-pointer table */
-    uint32_t name_count;                  /* # intrinsic-method names that follow */
-    uint32_t name_strings_blob_offset;    /* Pascal-style length-prefixed strings */
-    uint32_t name_resolve_table_offset;   /* uint32 per name; populated at load */
+    uint32_t name_count;                  /* # method names (the table; none read when 0) */
+    uint32_t name_strings_blob_offset;    /* the names: each a length byte, the name, its NUL */
+    uint32_t name_resolve_table_offset;   /* uint32 per name; the loader writes each one's handler */
     uint32_t reserved[4];                 /* 16 bytes; never read by engine */
 } MusFileHeader;
 
@@ -70,14 +74,24 @@ typedef struct MusChunkHeader {
     uint32_t tag;                         /* 'MU01'; never validated at runtime */
     uint32_t version;                     /* 0x00000100; not read */
     char     name[MUS_NAME_SIZE];         /* "gamescript" / "menuscript" etc */
-    uint32_t globals_size;                /* bytes (typically 0x40 / 0x44) */
+    /* bytes (0x40 gamemus, 0x44 menumus): the game allocates the globals and the
+       locals in one block of the two sizes [orig: ScriptInstance_Init @ 0x672F78]
+       and a save keeps as many globals as this holds, up to 32 [orig: AudioVM_SaveScriptState
+       @ 0x672583, AudioVM_RestoreScriptState @ 0x6725FB] */
+    uint32_t globals_size;
     uint32_t locals_size;                 /* bytes (varies; 0 in menumus) */
     uint32_t bytecode_offset;             /* chunk-relative; relocated to ptr */
     uint32_t section_table_offset;        /* chunk-relative; entries also relocated */
     uint32_t section_count;
     uint32_t entry_section_index;         /* index into section table */
-    uint32_t debug_info_offset;           /* editor-only; runtime relocates */
-    uint32_t debug_info_count;            /* 0 in stripped runtime files */
+    /* +0x30/+0x34: the script's strings, a table of chunk-relative pointers
+       (relocated [orig: AudioVM_FixupPointers @ 0x6724C5..0x6724D8]) that
+       `pushstr` (0x07) indexes [orig: AudioVM_Op_PushStr @ 0x672836], then the
+       strings; MDEdit writes the table at the code's end (MDEdit.exe sub_40DF30
+       @ 0x40DF30: v1[12], v1[13]). No shipped script holds a string (count 0),
+       and the model holds none. */
+    uint32_t debug_info_offset;
+    uint32_t debug_info_count;
     uint32_t string_section_offset;       /* editor-only */
     uint32_t string_section_size;         /* observed 0x20 */
     /* +0x40: chunk-relative code pointer of the MessageHandler entry, relocated
@@ -147,10 +161,10 @@ typedef struct MusScript {
     uint32_t    entry_section_index;
     uint32_t    globals_size;             /* bytes */
     uint32_t    locals_size;              /* bytes */
-    /* Locals frame base used by the `enter` opcode: dst = LocalsBase + this.
-       Witnessed as instance[+0x3C] (the chunk's string_section_size field) in
-       AudioVM_Op_Enter @ 0x672C20; MDEdit invariantly emits 0x20. Parsed from
-       the chunk; the compiler defaults it to 0x20. 0 is treated as 0x20. */
+    /* Locals frame base used by the `enter` opcode: dst = LocalsBase + this,
+       as the chunk holds it (its string_section_size field, instance[+0x3C],
+       added as it is: 0 is 0 [orig: AudioVM_Op_Enter @ 0x672C39]). MDEdit writes
+       0x20, and so does the compiler (MUS_DEFAULT_LOCALS_BASE). */
     uint32_t    locals_frame_offset;
     /* The MessageHandler entry (bytecode-relative PC) the restart frame jumps
        to, from the chunk's +0x40 pointer; has_message_handler is 0 when the
@@ -172,18 +186,25 @@ typedef struct MusScript {
     uint32_t     function_count;
     MusLine     *lines;                   /* in code order */
     uint32_t     line_count;
-    /* File-level intrinsic-method names, copied here so the decompiler can
-       work on a single MusScript pointer per the spec API. */
-    char         intrinsic_names[MUS_INTRINSIC_NAMES][MUS_INTRINSIC_NAME_SIZE];
+    /* The file's method-name table (a copy of MusFile's, so the decompiler and
+       the VM work on one MusScript; malloc'd, freed by mus_script_free): `method
+       N` (0x40) calls the handler the game's loader resolved for the N-th name
+       [orig: AudioVM_LoadScriptFile @ 0x672DE4 -> AudioVM_FindContextByName @
+       0x6723E0; AudioVM_Op_Method @ 0x672CFD], so the table is what the code's
+       method numbers mean, in its order. MDEdit's linker writes every method its
+       language declares (MUSIC.LAN's eleven, GEcho .. TStop, in every shipped
+       script), whichever the script calls (MDEdit.exe sub_40E6E0 @ 0x40E6E0). */
+    char       (*intrinsic_names)[MUS_METHOD_NAME_SIZE];
     uint32_t     intrinsic_count;
 } MusScript;
 
 typedef struct MusFile {
     MusFileHeader header;
-    /* Intrinsic-method name table at file level. MDEdit-authored files always
-       have the same 11 names in the same order, so position == method index.
-       intrinsic_count is the actual count read from name_count (typically 11). */
-    char       intrinsic_names[MUS_INTRINSIC_NAMES][MUS_INTRINSIC_NAME_SIZE];
+    /* The method-name table, one per file, every chunk's `method` calls
+       resolving through it [orig: ScriptInstance_Init @ 0x672FAF, instance+20 =
+       the header's +0x18]: name_count names as the loader reads them (malloc'd,
+       freed by mus_close; each script holds a copy). */
+    char     (*intrinsic_names)[MUS_METHOD_NAME_SIZE];
     uint32_t   intrinsic_count;
     MusScript *scripts;                   /* chunk_count entries */
 } MusFile;
@@ -279,11 +300,17 @@ std::string mus_bank_name(const std::string &script);
    Idempotent. The script value itself (if heap-allocated) is NOT freed. */
 void mus_script_free(MusScript *script);
 
-/* Encode an array of MusScript into a complete SCR0/MU01 .bin buffer with
-   the canonical 11 intrinsic-method names (GEcho, GGRnd, GSV, GSDV, GFB,
-   FSet, FClear, FIsSet, FIsClear, TStart, TStop). The returned buffer is
-   malloc'd and must be released by the caller via `mus_free`. Returns 0 on
-   success. */
+/* Encode an array of MusScript into a complete SCR0/MU01 .bin buffer, each
+   chunk's fields as its script holds them (the globals' size, the frame base)
+   and the method-name table the scripts hold, which the file holds once: the
+   scripts written together carry the same table, or nothing is written (-4).
+   A name not ended within its MUS_METHOD_NAME_SIZE slot is refused (-5): its
+   length byte would pass 127, and the loader, stepping by it read signed,
+   would read the names after it from elsewhere [orig: AudioVM_LoadScriptFile @
+   0x672DEB..0x672DFC]. Nothing else of the table or the sizes is refused: the
+   loader takes any [orig: AudioVM_LoadScriptFile @ 0x672D20; ScriptInstance_Init
+   @ 0x672EF0]. The returned buffer is malloc'd and must be released by the
+   caller via `mus_free`. Returns 0 on success. */
 int mus_encode_file(const MusScript *const *scripts, uint32_t script_count,
                     uint8_t **out_buf, size_t *out_size);
 
@@ -294,11 +321,15 @@ void mus_free(void *p);
 
    Witnessed: Jointops.exe!AudioVM_DispatchLoop @ 0x00672720 (32-instruction budget,
    65-entry dispatch table at Jointops.exe!0x0084F220, two stacks: data EBP-tracked
-   and call EDI-tracked). The intrinsic name table @ 0x84F0C8 has 9 entries, ALL
-   bound: GEcho, GGRnd, GSV, GSDV, GFB, FSet, FClear, FIsSet, FIsClear
-   (@ 0x6720C0/0x672320/0x6720E0/0x672120/0x672150/0x672360/0x672380/0x6723A0/0x6723C0).
-   TStart/TStop from the canonical MDEdit set do NOT exist in this build; method
-   indices >= 9 resolve to a NULL handler that no-ops + pushes 0. */
+   and call EDI-tracked). `method N` calls the handler the loader resolved for
+   the script's N-th method name, by name, against the game's registered table @
+   0x84F0C8 (36-byte records: GEcho, GGRnd, GSV, GSDV, GFB, FSet, FClear, FIsSet,
+   FIsClear @ 0x6720C0/0x672320/0x6720E0/0x672120/0x672150/0x672360/0x672380/
+   0x6723A0/0x6723C0), of which the resolver walks the first 8 (the count @
+   0x84F20C): FIsClear, TStart, TStop and any other name resolve to nothing, a
+   call of which pushes 0. A number past the script's table reads past its
+   resolve table [orig: AudioVM_Op_Method @ 0x672CFD], which the VM refuses
+   (MUS_VM_ERROR). */
 
 typedef struct MusVM MusVM;
 struct MusGlobals;
