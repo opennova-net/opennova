@@ -938,12 +938,20 @@ jobs:
       actions: write   # its compiler cache's branch save replaces older entries
     uses: ./.github/workflows/package-apps-windows.yml
 
+  # The OpenNova Launcher (launcher/, .NET, ADR 0054): its xunit suite and the
+  # single-file opennova-launcher.exe in one zip, built for PRs and tagged
+  # releases alike.
+  package-launcher-windows:
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
+    uses: ./.github/workflows/package-launcher-windows.yml
+
   # Surface the Windows packages on the PR as a single comment that updates
   # in place after every package succeeds. A failed package leaves the previous
   # comment untouched.
   pr-build-links:
     runs-on: ubuntu-latest
-    needs: [package-godot-windows, package-blender-windows, package-apps-windows]
+    needs: [package-godot-windows, package-blender-windows, package-apps-windows, package-launcher-windows]
     if: github.event_name == 'pull_request'
     permissions:
       contents: read
@@ -955,6 +963,7 @@ jobs:
           GAME_URL: ${{ needs.package-godot-windows.outputs.game_artifact_url }}
           BLENDER_URL: ${{ needs.package-blender-windows.outputs.artifact_url }}
           APPS_URL: ${{ needs.package-apps-windows.outputs.artifact_url }}
+          LAUNCHER_URL: ${{ needs.package-launcher-windows.outputs.artifact_url }}
         with:
           script: |
             // A hidden marker lets us find our own comment across runs, so there
@@ -968,13 +977,14 @@ jobs:
               marker,
               '### OpenNova CI builds',
               '',
-              `Windows builds for this PR (commit \`${sha}\`, run [#${context.runNumber}](${runUrl})). The game uses the debug export template and template_debug GDExtension. The Blender add-on and the apps are Release builds. Tagged releases publish every package, with the game in release mode.`,
+              `Windows builds for this PR (commit \`${sha}\`, run [#${context.runNumber}](${runUrl})). The game uses the debug export template and template_debug GDExtension. The Blender add-on, the apps and the launcher are Release builds. Tagged releases publish every package, with the game in release mode.`,
               '',
               '| Build | Download |',
               '| --- | --- |',
               `| Runtime: opennova.exe with the placeholder menu; PLAY RETAIL plays your own Joint Operations install | [opennova-game-windows.zip](${process.env.GAME_URL}) |`,
               `| Blender 5.0+ add-on for Windows: import/export .3di models and their .adm/.bad animations; install the zip from disk | [opennova-blender-addon-windows.zip](${process.env.BLENDER_URL}) |`,
               `| Apps: opennova-3di, opennova-extract, opennova-lan-probe, opennova-parity, opennova-serve (the headless game server), opennova-wire and the NovaWorld server (gate and session listeners) | [opennova-apps-windows.zip](${process.env.APPS_URL}) |`,
+              `| Launcher: opennova-launcher.exe, a tray app that switches retail Joint Operations between OpenNova's NovaWorld and NovaLogic's through the hosts file; run it as administrator | [opennova-launcher-windows.zip](${process.env.LAUNCHER_URL}) |`,
               '',
               'Downloading requires a GitHub login. Artifacts are removed after 90 days. This comment updates on each successful build.',
             ].join('\n');

@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>OpenNova.Launcher</RootNamespace>
+    <!-- The shipped binary follows the apps' naming rule (DEVELOPING.md "Naming an app"). -->
+    <AssemblyName>opennova-launcher</AssemblyName>
+    <Product>OpenNova Launcher</Product>
+    <AssemblyTitle>OpenNova Launcher</AssemblyTitle>
+    <Company>OpenNova</Company>
+    <Copyright>MIT License</Copyright>
+    <!-- A release stamps its tag over this (package-launcher-windows.yml). -->
+    <Version>0.3.0</Version>
+    <ApplicationIcon>Assets\onlauncher.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PlatformTarget>x64</PlatformTarget>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <PublishTrimmed>false</PublishTrimmed>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The tray icon, read from the assembly (a single-file exe has no folder beside it). -->
+    <EmbeddedResource Include="Assets\onlauncher.ico" LogicalName="onlauncher.ico" />
+  </ItemGroup>
+
+</Project>
