@@ -172,40 +172,38 @@ void sbf_free(void *p);
 /* --- The bank as a model ---
 
    A bank as the fields its every byte is made from (ADR 0003): the header's
-   words; the two never-read bytes every chunk header carries, one pair a
-   bank; the rule the chunks' unread tails follow; and each stream (an index
-   entry) with its chunks, each its two channel shifts and the bytes the
-   stream plays (its header's valid count of them). A chunk on disk is a whole
-   block (block_size bytes, as every shipped chunk is): its audio area past
-   the bytes it plays is never read, and the writer makes it by the bank's
-   tail rule. The engine opens the index and streams one entry's chunks from
-   its offset, block_size bytes a read, the mixer taking the valid count
-   [orig: AudioVM_OpenContextFile @ 0x672160; Sbf_StartEntry @ 0x4ED910;
+   words and each stream (an index entry) with its chunks, each its two
+   channel shifts and the bytes the stream plays (its header's valid count of
+   them). A chunk on disk is a whole block (block_size bytes, as every shipped
+   chunk is); its header's two reserved bytes and its audio area past the
+   bytes it plays are never read, and the writer fills them with its own
+   constants (SBF_CHUNK_RESERVED_A, _B, SBF_CHUNK_TAIL), never a bank's. The
+   engine opens the index and streams one entry's chunks from its offset,
+   block_size bytes a read, the mixer taking the valid count [orig:
+   AudioVM_OpenContextFile @ 0x672160; Sbf_StartEntry @ 0x4ED910;
    Audio_StreamNextChunk @ 0x4ED7D0]. What the editor's music bank document
    holds; sbf_write_bank writes it from scratch: the index with each stream's
    offset and size worked out, the streams one after another in index order,
    so every shipped bank (JO's menumus.sbf, gamemus.sbf and the expansion's
-   MJox01.sbf, GJox01.sbf) reads into it and writes back byte for byte. The
-   model is SbfFile, as the format libs name a file's model (lwf::File):
-   SbfBank is the Godot resource over the streaming reader
+   MJox01.sbf, GJox01.sbf) reads into it and reads back from its write as
+   the same fields. The model is SbfFile, as the format libs name a file's
+   model (lwf::File): SbfBank is the Godot resource over the streaming reader
    (godot/src/audio/sbf_bank.h). */
 
 /* A name fills the index's 16 bytes; a shorter one ends at a NUL. The game
    plays a stream by its place, never its name (docs/audio/mus-sbf-re.md). */
 inline constexpr size_t SBF_STREAM_NAME_MAX = SBF_NAME_SIZE;
 
-/* How a chunk's audio area past the bytes it plays is filled. No reader reads
-   those bytes; the rule is the encoder's, measured over JO:CA's four banks
-   (2026-10-09: every stream's last chunk is its one partial chunk). */
-enum class SbfTail : uint8_t {
-    /* The retail encoder's one reused buffer: the stream's previous chunk's
-       bytes at the same offsets, zeros under a stream's first chunk (every
-       chunk of the shipped banks). */
-    Residue,
-    /* 0x80, which decodes to silence (sbf_encode_chunk's padding, the minted
-       banks'). */
-    Silence,
-};
+/* What the writer puts in the bytes of a chunk no reader reads: its header's
+   two reserved bytes (SbfChunkHeader::reserved_a, _b) and its audio area past
+   the bytes it plays. No original writer of a bank is witnessed, so these are
+   the writer's own: gamemus.sbf's reserved pair, which sbf_encode_chunk has
+   always written, and 0x80, which decodes to silence (the shipped banks carry
+   one pair a bank and the retail encoder's reused buffer in their tails,
+   docs/audio/mus-sbf-re.md; a write keeps neither). */
+inline constexpr uint8_t SBF_CHUNK_RESERVED_A = 0xFA;
+inline constexpr uint8_t SBF_CHUNK_RESERVED_B = 0x00;
+inline constexpr uint8_t SBF_CHUNK_TAIL = 0x80;
 
 struct SbfChunk {
     uint8_t scale_a = 0;           /* the left channel's shift, 0..7 */
@@ -224,21 +222,16 @@ struct SbfFile {
     uint32_t version = SBF_VERSION_DEFAULT;
     uint32_t flags = SBF_FLAGS_BYTE_PAIRED_STEREO;
     uint32_t reserved = 0;
-    /* Every chunk header's two never-read bytes (SbfChunkHeader::reserved_a,
-       _b): one pair a bank, gamemus.sbf's by default. */
-    uint8_t chunk_reserved_a = 0xFA;
-    uint8_t chunk_reserved_b = 0x00;
-    SbfTail tail = SbfTail::Residue;
     std::vector<SbfStream> streams;
 };
 
 /* What a read found that a write lays out otherwise: streams not one after
    another from the index's end in index order (a gap, another order), bytes
    past the last stream, a name with bytes after its terminator, chunks whose
-   reserved pair is not the bank's (its first chunk's), chunk tails the bank's
-   rule (the rule more of them follow) does not make, and short chunks (a last
-   chunk shorter than its block, written whole; a valid count past its block,
-   cut to it). A write keeps none of those. */
+   reserved pair is not the writer's, chunk tails not the writer's
+   SBF_CHUNK_TAIL, and short chunks (a last chunk shorter than its block,
+   written whole; a valid count past its block, cut to it). A write keeps none
+   of those. */
 struct SbfFileLayout {
     bool packed = true;
     size_t trailing_bytes = 0;

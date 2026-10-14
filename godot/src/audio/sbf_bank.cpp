@@ -108,10 +108,8 @@ Ref<SbfBank> SbfBank::create_empty() {
 	bank->_arc.entries = nullptr;
 	bank->source_path = String();
 	bank->_file_bytes = PackedByteArray();
-	// The model of a bank made in code: no stream, its chunks' unread tails 0x80 as
-	// sbf_encode_chunk pads them (the minted banks' rule, SbfTail::Silence).
+	// The model of a bank made in code: no stream.
 	bank->_model = SbfFile();
-	bank->_model.tail = SbfTail::Silence;
 	bank->_model_read = true;
 	bank->_modeled = true;
 	// _opened lights up the mutation API; a new bank is unsaved.

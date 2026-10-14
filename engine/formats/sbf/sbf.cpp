@@ -243,8 +243,8 @@ int sbf_encode_chunk(const int16_t *samples, size_t sample_count,
     h.valid_samples = (uint32_t)sample_count;
     h.scale_a = scale;
     h.scale_b = scale;
-    h.reserved_a = 0xFA;
-    h.reserved_b = 0x00;
+    h.reserved_a = SBF_CHUNK_RESERVED_A;
+    h.reserved_b = SBF_CHUNK_RESERVED_B;
     memcpy(out_buf, &h, SBF_CHUNK_HEADER);
 
     uint8_t *audio_out = out_buf + SBF_CHUNK_HEADER;
@@ -252,7 +252,7 @@ int sbf_encode_chunk(const int16_t *samples, size_t sample_count,
         audio_out[i] = sbf_encode_sample(samples[i], scale);
     }
     for (size_t i = sample_count; i < SBF_CHUNK_AUDIO; ++i) {
-        audio_out[i] = 0x80;
+        audio_out[i] = SBF_CHUNK_TAIL;
     }
     return SBF_CHUNK_TOTAL;
 }
@@ -268,8 +268,8 @@ void sbf_free(void *p) {
    sbf_write_bank: the header at the default version, flags = 1 (the
    byte-paired stereo path the decoder accepts), block_size the
    SBF_CHUNK_TOTAL stride every observed file uses, the chunks' reserved
-   pair gamemus.sbf's and their tails 0x80, as sbf_encode_chunk lays a
-   chunk out. */
+   pair and tails the writer's constants, as sbf_encode_chunk lays a chunk
+   out. */
 int sbf_encode_file(const char * const *names, uint32_t n,
                                 const int16_t * const *pcm,
                                 const size_t *counts,
@@ -281,7 +281,6 @@ int sbf_encode_file(const char * const *names, uint32_t n,
     if (n != 0 && (!names || !pcm || !counts)) return -1;
 
     SbfFile bank;
-    bank.tail = SbfTail::Silence;
     bank.streams.reserve(n);
     for (uint32_t i = 0; i < n; ++i) {
         std::string name(names[i]);
@@ -300,20 +299,6 @@ int sbf_encode_file(const char * const *names, uint32_t n,
 }
 
 /* --- The bank as a model --- */
-
-namespace {
-
-/* The bytes a chunk's audio area holds past its valid ones under the bank's
-   tail rule: the previous chunk's area at those offsets (zeros under a
-   stream's first chunk), or 0x80. `previous` is the stream's previous chunk's
-   whole area, empty for its first. */
-void append_tail(SbfTail tail, const std::vector<uint8_t> &previous, size_t from, size_t area,
-                 std::vector<uint8_t> &out) {
-    for (size_t i = from; i < area; ++i)
-        out.push_back(tail == SbfTail::Silence ? (uint8_t)0x80 : i < previous.size() ? previous[i] : (uint8_t)0);
-}
-
-} // namespace
 
 bool sbf_read_bank(const uint8_t *data, size_t size, SbfFile &out, std::string &error,
                    SbfFileLayout *layout) {
@@ -360,12 +345,9 @@ bool sbf_read_bank(const uint8_t *data, size_t size, SbfFile &out, std::string &
     }
 
     /* Each stream's chunks, every chunk's reserved pair and tail checked
-       against the bank's: the reserved pair its first chunk's, the tail rule
-       the one more of its tails follow (a tie Residue, the shipped banks'). */
+       against the writer's constants (a write keeps neither). */
     SbfFileLayout found;
     size_t expected = index_end;
-    bool have_pair = false;
-    size_t residue_tails = 0, silence_tails = 0, tails = 0;
     bank.streams.reserve(header.entry_count);
     for (uint32_t i = 0; i < header.entry_count; ++i) {
         const SbfRawEntry &entry = entries[i];
@@ -382,47 +364,30 @@ bool sbf_read_bank(const uint8_t *data, size_t size, SbfFile &out, std::string &
         stream.sample_length_hint = entry.sample_length_hint;
         const uint8_t *audio = data + entry.data_offset;
         const size_t area = entry.block_size - SBF_CHUNK_HEADER;
-        const uint8_t *previous = NULL;
-        size_t previous_size = 0;
         for (uint32_t offset = 0; offset < entry.total_size; offset += entry.block_size) {
             const uint32_t left = entry.total_size - offset;
             const size_t held = (left < entry.block_size ? left : entry.block_size) - SBF_CHUNK_HEADER;
             const uint8_t *bytes = audio + offset + SBF_CHUNK_HEADER;
             SbfChunkHeader h;
             memcpy(&h, audio + offset, SBF_CHUNK_HEADER);
-            if (!have_pair) {
-                bank.chunk_reserved_a = h.reserved_a;
-                bank.chunk_reserved_b = h.reserved_b;
-                have_pair = true;
-            } else if (h.reserved_a != bank.chunk_reserved_a || h.reserved_b != bank.chunk_reserved_b) {
-                ++found.reserved_other;
-            }
+            if (h.reserved_a != SBF_CHUNK_RESERVED_A || h.reserved_b != SBF_CHUNK_RESERVED_B) ++found.reserved_other;
             const size_t plays = h.valid_samples < held ? h.valid_samples : held;
             if (held < area || h.valid_samples > held) ++found.short_chunks;
-            if (plays < held) {
-                ++tails;
-                bool residue = true, silence = true;
-                for (size_t k = plays; k < held && (residue || silence); ++k) {
-                    residue = residue && bytes[k] == (k < previous_size ? previous[k] : 0);
-                    silence = silence && bytes[k] == 0x80;
+            for (size_t k = plays; k < held; ++k)
+                if (bytes[k] != SBF_CHUNK_TAIL) {
+                    ++found.tails_other;
+                    break;
                 }
-                residue_tails += residue ? 1 : 0;
-                silence_tails += silence ? 1 : 0;
-            }
             SbfChunk chunk;
             chunk.scale_a = h.scale_a;
             chunk.scale_b = h.scale_b;
             chunk.audio.assign(bytes, bytes + plays);
             stream.chunks.push_back(std::move(chunk));
-            previous = bytes;
-            previous_size = held;
         }
         if (entry.data_offset != expected) found.packed = false;
         expected = (size_t)entry.data_offset + entry.total_size;
         bank.streams.push_back(std::move(stream));
     }
-    bank.tail = silence_tails > residue_tails ? SbfTail::Silence : SbfTail::Residue;
-    found.tails_other = tails - (bank.tail == SbfTail::Silence ? silence_tails : residue_tails);
     if (found.packed && expected < size) found.trailing_bytes = size - expected;
     out = std::move(bank);
     if (layout) *layout = found;
@@ -490,22 +455,17 @@ bool sbf_write_bank(const SbfFile &bank, std::vector<uint8_t> &out, std::string 
         cursor += size;
     }
     /* Every chunk a whole block: its header (the valid count, the shifts, the
-       bank's reserved pair), the bytes it plays, then its tail by the bank's
-       rule. */
-    std::vector<uint8_t> previous;
+       writer's reserved pair), the bytes it plays, then the writer's tail. */
     for (const SbfStream &stream : bank.streams) {
         const size_t area = stream.block_size - SBF_CHUNK_HEADER;
-        previous.clear();
         for (const SbfChunk &chunk : stream.chunks) {
             word((uint32_t)chunk.audio.size());
             out.push_back(chunk.scale_a);
             out.push_back(chunk.scale_b);
-            out.push_back(bank.chunk_reserved_a);
-            out.push_back(bank.chunk_reserved_b);
-            const size_t start = out.size();
+            out.push_back(SBF_CHUNK_RESERVED_A);
+            out.push_back(SBF_CHUNK_RESERVED_B);
             out.insert(out.end(), chunk.audio.begin(), chunk.audio.end());
-            append_tail(bank.tail, previous, chunk.audio.size(), area, out);
-            previous.assign(out.begin() + (ptrdiff_t)start, out.end());
+            out.insert(out.end(), area - chunk.audio.size(), SBF_CHUNK_TAIL);
         }
     }
     return true;
