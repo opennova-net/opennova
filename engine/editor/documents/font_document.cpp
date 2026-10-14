@@ -338,12 +338,11 @@ namespace {
 constexpr FindingCodeEntry<FontFinding> kFindingEntries[] = {
 	{ FontFinding::InvalidInput, { "font.invalid_input", FindingFix::None, nullptr, true } },
 	{ FontFinding::IgnoredInput, { "font.ignored_input", FindingFix::Rewrite, kRewriteDropsIgnoredInput } },
-	// The drawer binds the glyph's page from the font's table past its pages: what it draws then is no texture of the
-	// font's; the writer refuses it, and a build is.
-	{ FontFinding::Unserializable,
-	  game_stops_code("font.unserializable",
-	                  "a glyph names a page the font lacks, and the game's drawer binds its texture from the font's "
-	                  "page table past its pages [orig: CGameFont_DrawText @ 0x6752c0]") },
+	// The drawer runs one pass per page of the font's, binding that page and drawing the glyphs on it alone
+	// [orig: CGameFont_DrawText @ 0x675428, the compare @ 0x675755, the loop's end @ 0x675D9D]: a glyph on a page
+	// past them is never drawn, nothing bound for it, no fault. The writer cannot write it (fnt_validate), so its
+	// Save is refused; listed.
+	{ FontFinding::Unserializable, unwritable_code("font.unserializable") },
 	// The page is sampled clamped [orig: GameFont_LoadFromBlob @ 0x674804, flags 0x140001]: the edge's texels
 	// stretched; no refusal witnessed, listed.
 	{ FontFinding::GlyphOutside, listed_code("font.glyph_outside") },
@@ -387,8 +386,9 @@ std::vector<Diagnostic> validate_font_file(const DocumentBase &document) {
 		if (glyph.page >= font->pages)
 			add(i, DiagnosticSeverity::Error, FontFinding::Unserializable, "page",
 			    byte_words(byte) + " is on page " + std::to_string(glyph.page) + ", which the font lacks (" +
-			            std::to_string(font->pages) + " pages): the game draws it from no page of the font [orig: "
-			            "CGameFont_DrawText @ 0x6752c0], so the font is not saved until it names one.");
+			            std::to_string(font->pages) + " pages): the game never draws it, drawing each page's glyphs "
+			            "in that page's pass [orig: CGameFont_DrawText @ 0x675755], and the editor's writer cannot write "
+			            "it, so the font is not saved until it names one.");
 		if (rect.x + rect.width > int(FNT_TEXTURE_WIDTH) || rect.y + rect.height > int(FNT_TEXTURE_HEIGHT) ||
 		    glyph.uv.u0 < 0.0f || glyph.uv.v0 < 0.0f)
 			add(i, DiagnosticSeverity::Warning, FontFinding::GlyphOutside, "width",

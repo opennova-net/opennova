@@ -118,6 +118,9 @@ struct TextureHeader {
 	// TGA (reader Tga)
 	uint8_t tga_type = 0, tga_bits = 0, tga_descriptor = 0, tga_map_type = 0, tga_map_entry_bits = 0;
 	uint16_t tga_map_length = 0;
+	// The bytes the TGA reader holds while it allocates the texels: the file's as stored, or BFC1's unpacked ones,
+	// the packed block freed first (tga_reader_read).
+	uint32_t tga_held = 0;
 	// The file ends before the texels the game's reader copies or decodes (its 24- and 32-bit true colour,
 	// 8-bit grey, 24-bit-mapped indices, or run-length packets), which it reads past the end.
 	bool tga_short = false;
@@ -143,5 +146,34 @@ struct TextureHeader {
 TextureHeader texture_header(const std::string &name, const std::vector<uint8_t> &bytes);
 // The same read by a given reader whatever the name (a terrain's colour map through the TGA reader).
 TextureHeader texture_header_as(TextureReader reader, const std::vector<uint8_t> &bytes);
+
+// What the game's TGA reader makes of a file whatever it holds, from its header's words alone [orig:
+// CTerrainTileData_LoadTGAFromArchive @ 0x56E570, the reader every TGA load goes through]. It allocates the
+// file's bytes (@ 0x56E620), unpacks a BFC1 one, then reads bytes 12 and 14 as two int16 sides and asks its
+// memory pool for 4 x width x height bytes, computed in an int (@ 0x56E661..0x56E694), before it looks at the
+// image type; the arm of the type at byte 2 then writes the texels, or none does, and every image is flipped
+// row for row (@ 0x56E997..0x56E9EE).
+enum class TgaReaderOutcome {
+	Refused, // an allocation the pool cannot give however empty it is: the read returns 2 (@ 0x56E62C, @ 0x56E6AA)
+	Faults,  // an arm writes past the block it was given: the int request wrapped, or a count under 0 cleared or
+	         // copied as a length past 2 GB (@ 0x56E971, @ 0x56E7A5)
+	Decoded, // the type's arm reads the bytes as its texels (types 1 with 24-bit entries, 2, 3 at 8 bits, 10)
+	Black,   // the arm of a type or depth it does not read clears the texels to 0 (memset @ 0x56E971)
+	Stale,   // no arm writes the texels (a type of no arm, @ 0x56E6CC; type 3 of another depth than 8, @ 0x56E7B3):
+	         // they hold what the pool held there
+	Empty,   // sides of no texel (a count of 0, or under 0 where nothing clears)
+};
+struct TgaReaderRead {
+	TgaReaderOutcome outcome = TgaReaderOutcome::Empty;
+	int32_t width = 0, height = 0; // the int16 words at bytes 12 and 14
+	int64_t texel_bytes = 0;       // 4 x width x height as counted, unwrapped
+};
+// The game's memory pool, from which the reader allocates: its size [orig: Game_ParseCommandLineAndInit @
+// 0x4A7CDD, 0xC000000], made at Game_InitSubsystems as one free block of it less a block header [orig: @ 0x4A6D0B
+// -> FastMem_InitDefault @ 0x759D20 -> FastMem_Init @ 0x769421], AudioMem_InitFastPool leaving it the pool every
+// AudioMem_AllocWithLabel takes from [orig: @ 0x759D92; AudioMem_AllocWithLabel @ 0x759DB7].
+inline constexpr int32_t kGameMemoryPoolBytes = 0xC000000;
+// A header the TGA reader reads (reader Tga, read).
+TgaReaderRead tga_reader_read(const TextureHeader &header);
 
 } // namespace opennova::editor

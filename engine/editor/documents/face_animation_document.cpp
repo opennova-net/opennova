@@ -588,11 +588,10 @@ constexpr FindingCodeEntry<FaceAnimationFinding> kFindingEntries[] = {
 	{ FaceAnimationFinding::EyeTextureAlone, listed_code("face_animation.eye_texture_alone") },
 	// The second eye texture named alone: the writer cannot write the line so (the game reads on): its Save refused.
 	{ FaceAnimationFinding::Unserializable, unwritable_code("face_animation.unserializable") },
-	// A triangle naming a vertex the face lacks: the game draws it over memory past the vertices.
-	{ FaceAnimationFinding::VertexRange,
-	  game_stops_code("face_animation.vertex_range",
-	                  "a triangle names a vertex the face lacks, and the game draws it over memory past the vertices "
-	                  "[orig: Render_ScarDebugOverlay @ 0x589301..0x58931D]") },
+	// A triangle naming a vertex the face lacks: the game reads the corner at vertex_base + 44 * index, past the
+	// vertices, and draws a triangle of what it finds there [orig: Render_ScarDebugOverlay @ 0x589301..0x58931D, from
+	// Render_ScarSlot @ 0x5802A4]; no fault witnessed, and the writer writes any index: listed.
+	{ FaceAnimationFinding::VertexRange, listed_code("face_animation.vertex_range") },
 	{ FaceAnimationFinding::GestureUnplayed, listed_code("face_animation.gesture_unplayed") },
 	{ FaceAnimationFinding::GestureRepeated, listed_code("face_animation.gesture_repeated") },
 	{ FaceAnimationFinding::ParameterUnmatched, listed_code("face_animation.parameter_unmatched") },
@@ -654,12 +653,12 @@ std::vector<Diagnostic> validate_face_animation_file(const DocumentBase &documen
 		for (int corner = 0; corner < 3; ++corner) {
 			const int32_t index = file.triangles[t][size_t(corner)];
 			if (index >= 0 && size_t(index) < file.vertices.size()) continue;
-			add(child(kTriangleList, t, kTriangle), DiagnosticSeverity::Error, FaceAnimationFinding::VertexRange,
+			add(child(kTriangleList, t, kTriangle), DiagnosticSeverity::Warning, FaceAnimationFinding::VertexRange,
 			    kCornerIds[corner],
 			    "Triangle " + std::to_string(t) + " uses vertex " + std::to_string(index) + ", which the face has none of (" +
 			            std::to_string(file.vertices.size()) +
-			            " vertices): the game draws it over memory past them [orig: Render_ScarDebugOverlay @ "
-			            "0x589301..0x58931D], so the face is not saved until it names one of them.");
+			            " vertices): the game reads that corner from memory outside them and draws a triangle of what "
+			            "it finds there [orig: Render_ScarDebugOverlay @ 0x589301..0x58931D].");
 		}
 	std::unordered_map<std::string, size_t> expressions;
 	std::unordered_map<std::string, bool> groups;

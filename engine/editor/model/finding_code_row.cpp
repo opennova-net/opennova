@@ -390,7 +390,15 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::TextureSplit, code("texture.split", G::Textures) },
 	{ C::TextureStoreDds, code("texture.store_dds", G::Textures) },
 	{ C::TextureTileAtlasCells, code("texture.tile_atlas_cells", G::Textures, F::ImportFitsUse) },
-	{ C::TextureWrongReader, code("texture.wrong_reader", G::Textures, F::ImportFitsUse) },
+	// A format the role's loader does not read, or a file its reader cannot: an error of it alone gates, a terrain
+	// map's TGA read that fails where the mission needs it, or writes past its buffer (graph/texture_checks); every
+	// other read loads on with what the reader's arm wrote, a warning.
+	{ C::TextureWrongReader,
+	  the_game_fails(code("texture.wrong_reader", G::Textures, F::ImportFitsUse),
+	                 "the game's TGA reader cannot allocate the terrain map's texels its header asks, and the mission "
+	                 "aborts, or writes them past their buffer, and the game faults [orig: "
+	                 "CTerrainTileData_LoadTGAFromArchive @ 0x56E694, @ 0x56E6AA, @ 0x56E971; PolyTrn_InitTextures @ "
+	                 "0x60B3B1, \"colortga\" @ 0x60C60A; Game_ShowErrorLogAndAbortMission @ 0x520B4E]") },
 	{ C::UnsavedDiscard, code("unsaved.discard", G::UnsavedChanges) },
 	{ C::UnsavedNone, code("unsaved.none", G::UnsavedChanges) },
 	{ C::ViewportRefused, code("viewport.refused", G::Viewports) },

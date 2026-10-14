@@ -337,7 +337,7 @@ static int test_columns() {
 	            Tokens({ "ai_profile.invalid_input", "animation_map.invalid_input", "avatars.invalid_input", "avatars.reader_stops", "catalog.invalid_input", "catalog.reader_stops", "catalog.unserializable",
 	                     "credits.invalid_input", "credits.unserializable", "dialog_bank.invalid_input", "document.unserializable",
 	                     "environment.invalid_input", "face_animation.invalid_input", "face_animation.unserializable",
-	                     "face_animation.vertex_range", "font.invalid_input", "font.unserializable",
+	                     "font.invalid_input", "font.unserializable",
 	                     "menu.invalid_input", "menu.unserializable", "menu.variable_number", "mission.invalid_input",
 	                     "mission.runs_past_table",
 	                     "mission.unserializable",
@@ -359,12 +359,12 @@ static int test_columns() {
 	                     "build.archive", "build.expansion.base_missing", "build.expansion.exp_name",
 	                     "build.name_unstorable", "document.config_overrun", "document.decode", "document.kind",
 	                     "document.no_records", "document.parse", "document.read", "document.stale",
-	                     "face_animation.vertex_range", "font.unserializable", "hudfx.power_slots_empty", "import.decode",
+	                     "hudfx.power_slots_empty", "import.decode",
 	                     "import.encode", "import.font", "import.input", "import.migrate", "import.option", "import.read",
 	                     "import.scene", "import.sidecar", "import.terrain", "import.write", "menu.invalid_input",
 	                     "mission.runs_past_table", "model.light_no_registers", "project.root.unreadable", "style.hangs",
 	                     "style.unknown_directive", "style.value_starts_with_hash", "terrain.refused",
-	                     "texture.particle_too_big", "texture.pcx_overrun" }));
+	                     "texture.particle_too_big", "texture.pcx_overrun", "texture.wrong_reader" }));
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.integrity; }) ==
 	            Tokens({ "asset.name.duplicate", "asset.name.empty", "asset.name.too_long", "build.archive",
 	                     "build.expansion.base_missing", "build.name_unstorable", "document.decode", "document.kind",
@@ -380,10 +380,10 @@ static int test_columns() {
 	// Avatars.def past its reader's tables, where the game fails (S23 B).
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.game_refusal != nullptr; }) ==
 	            Tokens({ "avatars.reader_stops", "build.expansion.exp_name", "document.config_overrun",
-	                     "face_animation.vertex_range", "font.unserializable", "hudfx.power_slots_empty",
+	                     "hudfx.power_slots_empty",
 	                     "menu.invalid_input", "mission.runs_past_table", "model.light_no_registers", "style.hangs",
 	                     "style.unknown_directive", "style.value_starts_with_hash", "terrain.refused",
-	                     "texture.particle_too_big", "texture.pcx_overrun" }));
+	                     "texture.particle_too_big", "texture.pcx_overrun", "texture.wrong_reader" }));
 	// A finding whose file the editor's model cannot carry where the game reads it on (unwritable_code) gates only
 	// an open file with unsaved edits, which the build's Save cannot write: a closed one packs as stored. One the
 	// game's own reader stops at gates either way, saying what the game does.
@@ -461,6 +461,15 @@ static int test_columns() {
 	for (const Table &table : tables()) {
 		for (const FindingCodeRow &row : table.rows) {
 			const std::string token = row.token;
+			// A row whose file does not serialize: the editor's own (.unserializable, .invalid_input), input the game's
+			// reader stops at that the model cannot carry (.reader_stops, a run of events past its table), or a number
+			// the menu writer cannot hold (menu.variable_number). Each gates a build only with the game's refusal said
+			// (game_stops_code); the rest are unwritable_code, listed, gating only an open file with unsaved edits. A
+			// game refusal of what a file that serializes holds (game_fails_code) blocks no save.
+			TEST_EXPECT(row.blocks_save == (ends_with(token, ".unserializable") || ends_with(token, ".invalid_input") ||
+			                                ends_with(token, ".reader_stops") || token == "mission.runs_past_table" ||
+			                                token == "menu.variable_number"));
+			TEST_EXPECT(!(row.blocks_save && row.gates_build) || row.game_refusal != nullptr);
 			TEST_EXPECT(!starts_with(token, "asset.name.") || row.place == FindingPlace::File);
 			const std::string key = finding_group_key(row.group);
 			TEST_EXPECT(row.group != FindingGroup::None && (token == key || starts_with(token, key + ".")));
