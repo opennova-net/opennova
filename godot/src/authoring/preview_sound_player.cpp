@@ -47,6 +47,11 @@ void PreviewSoundPlayer::play(const std::string &p_root, const std::vector<openn
 	state_ = voices_.empty() ? State::Idle : State::Decoding;
 }
 
+void PreviewSoundPlayer::wait() {
+	for (Voice &voice : voices_)
+		if (voice.job.valid()) voice.job.wait();
+}
+
 void PreviewSoundPlayer::stop() {
 	// A decode in flight is let finish (its future's end waits for it) and dropped.
 	for (Voice &voice : voices_) {

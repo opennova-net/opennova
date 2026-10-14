@@ -197,10 +197,10 @@ func test_play_sound_plays_and_stops() -> void:
 	var answer := _request({"kind": "play_sound", "path": "beep.wav"})
 	assert_true(bool(answer.get("ok", false)) and bool(answer.get("served", false))
 			and bool(answer.get("outcome", {}).get("done", false)), str(answer))
-	var deadline := Time.get_ticks_msec() + 5000
-	while _sound().get("state", "") != "playing" and Time.get_ticks_msec() < deadline:
-		OS.delay_msec(20)
-		_app.pump()
+	# The pump that begins the decodes, the decodes waited on (a test's wait), then the pump that starts the play.
+	_app.pump()
+	_app.wait_for_sound()
+	_app.pump()
 	assert_eq(String(_sound().get("state", "")), "playing", str(_sound()))
 	assert_eq(String(_sound().get("path", "")), "sounds/beep.wav")
 	assert_eq(String(_app.get_sound_state()), "playing")
@@ -257,10 +257,10 @@ func test_play_set_plays_its_layers() -> void:
 	_request({"kind": "save_all"})
 	var answer := _request({"kind": "play_sound", "values": {"set": "TWO_LAYERS"}})
 	assert_true(bool(answer.get("outcome", {}).get("done", false)), str(answer))
-	var deadline := Time.get_ticks_msec() + 5000
-	while _sound().get("state", "") != "playing" and Time.get_ticks_msec() < deadline:
-		OS.delay_msec(20)
-		_app.pump()
+	# The pump that begins the decodes, the decodes waited on (a test's wait), then the pump that starts the play.
+	_app.pump()
+	_app.wait_for_sound()
+	_app.pump()
 	var sound := _sound()
 	assert_eq(String(sound.get("state", "")), "playing", str(sound))
 	assert_eq(String(sound.get("set", "")), "TWO_LAYERS")
@@ -329,22 +329,23 @@ func test_play_dialog_plays_its_lines_in_turn() -> void:
 	# 2 * ((62 * samples + rate) / rate) = 64 ticks, then waits for the channel, then the second
 	# line's DELAY 2 runs 62 * 2 / 10 = 12 ticks.
 	assert_almost_eq(at, 1.264, 0.02, "the second after the first's doubled hold and its delay's twelve ticks")
-	var deadline := Time.get_ticks_msec() + 5000
-	while _sound().get("state", "") != "playing" and Time.get_ticks_msec() < deadline:
-		OS.delay_msec(20)
-		_app.pump()
+	# The pump that begins the decodes, the decodes waited on (a test's wait); the clock read before the pump that
+	# starts the play, so the player's own start, from which the second line's wait runs, is never before it.
+	_app.pump()
+	_app.wait_for_sound()
 	var started := Time.get_ticks_msec()
+	_app.pump()
 	assert_eq(String(_app.get_sound_state()), "playing")
 	var players := _preview_players()
 	assert_eq(players.size(), 2, "a player for each line")
 	if players.size() != 2:
 		return
 	assert_true(players[0].playing and not players[1].playing, "the first line plays, the second waits")
-	while not players[1].playing and Time.get_ticks_msec() - started < 3000:
+	while not players[1].playing and Time.get_ticks_msec() - started < 30000:
 		OS.delay_msec(10)
 		_app.pump()
 	assert_true(players[1].playing, "the second line starts")
-	assert_gte(Time.get_ticks_msec() - started, int(at * 1000.0) - 100, "the second line starts at its time, not before")
+	assert_gte(Time.get_ticks_msec() - started, int(at * 1000.0) - 1, "the second line starts at its time, not before")
 	_request({"kind": "stop_sound"})
 	_app.pump()
 	assert_eq(String(_app.get_sound_state()), "idle", "stopped")
