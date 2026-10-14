@@ -85,12 +85,13 @@ io::JsonValue first_person_options_to_json(const FirstPersonOptions &options) {
 	out.set("view", json_string(options.eye ? "eye" : "orbit"));
 	out.set("character", json_number(options.character));
 	out.set("action", json_string(options.action));
+	out.set("weapon", json_string(options.weapon));
 	return out;
 }
 
 bool read_first_person_options(const io::JsonValue &json, FirstPersonOptions &held, std::string &error) {
 	if (!json.is_object()) {
-		error = "options.first_person is an object {view, character, action}.";
+		error = "options.first_person is an object {view, character, action, weapon}.";
 		return false;
 	}
 	FirstPersonOptions options = held;
@@ -119,8 +120,15 @@ bool read_first_person_options(const io::JsonValue &json, FirstPersonOptions &he
 				return false;
 			}
 			options.action = strutil::to_lower(value.string);
+		} else if (key == "weapon") {
+			if (!value.is_string()) {
+				error = "options.first_person.weapon is a weapon's name, one whose animadm names the map (\"\" the "
+				        "first).";
+				return false;
+			}
+			options.weapon = value.string;
 		} else {
-			error = "Unknown first-person option \"" + key + "\" (it takes view, character, action).";
+			error = "Unknown first-person option \"" + key + "\" (it takes view, character, action, weapon).";
 			return false;
 		}
 	}
@@ -376,6 +384,15 @@ bool FirstPersonSources::refresh(const std::shared_ptr<const FileSource> &source
 	}
 	const FileSource &files = *source;
 	bool moved = false;
+	// The weapons sharing the map, and the one asked for where it is none of them (the first that pairs it shows).
+	std::string weapon_note;
+	if (!options.weapon.empty() && !strutil::iequals(options.weapon, rig.record))
+		weapon_note = options.weapon + " does not play " + io::utf8_file_name(rig.table) +
+		              " (its animadm names another map, or its gfx1 no model of the project): " + rig.record +
+		              "'s view shows.";
+	if (rig.weapons != weapons_ || weapon_note != weapon_note_) moved = true;
+	weapons_ = rig.weapons;
+	weapon_note_ = weapon_note;
 	const std::string catalog = io::utf8_file_name(rig.record_file);
 	const uint64_t stamp = files.stamp(catalog);
 	if (!weapon_read_ || catalog != catalog_ || rig.record != record_ || stamp != catalog_stamp_ || bake_read_.moved(files)) {
@@ -521,6 +538,10 @@ io::JsonValue first_person_json(const FirstPersonSources &sources, const FirstPe
 	if (!sources.active()) return JsonValue::make_null();
 	JsonValue out = JsonValue::make_object();
 	out.set("weapon", json_string(sources.weapon()));
+	JsonValue weapons = JsonValue::make_array();
+	for (const std::string &each : sources.weapons()) weapons.push(json_string(each));
+	out.set("weapons", std::move(weapons));
+	out.set("weapon_note", json_string(sources.weapon_note()));
 	out.set("view", json_string(options.eye ? "eye" : "orbit"));
 	out.set("words", json_string(sources.words()));
 	const renderer::FpViewmodelSpec &spec = sources.spec();
