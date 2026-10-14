@@ -2339,6 +2339,39 @@ int test_unknown_path_404(Harness &h) {
 	return 0;
 }
 
+// GET /api/server-info, the OpenNova Launcher's route: the configured public_host
+// (the address the gate advertises) with no credential, never cached; the Secure
+// listener, which trusts no proxy, answers it as well. A listener whose
+// public_host is a hostname answers 503 no_public_ipv4: a hosts line names an
+// address.
+int test_server_info(Harness &h) {
+	for (const uint16_t port : { h.port, h.secure_port }) {
+		const auto reply = h.send_to(port, "GET", "/api/server-info", { from_ip("198.51.100.91") });
+		if (reply.code != 200)
+			std::fprintf(
+					stderr, "  :%u %s\n", static_cast<unsigned>(port), describe(reply).c_str());
+		TEST_EXPECT(reply.transport_ok && reply.code == 200);
+		TEST_EXPECT(body_text(reply) == "{\"novaworld_ip\":\"127.0.0.1\"}");
+		TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
+		TEST_EXPECT(header_value(reply, "Content-Type") == "application/json");
+	}
+
+	opennova::ConnectionManager manager;
+	nws::ServerConfig config;
+	config.public_host = "nw.example.test";
+	config.http_port = 0;
+	config.web_dist_dir = h.temp_root / "web_dist";
+	config.templates_dir = h.temp_root / "templates";
+	config.static_dir = h.temp_root / "static";
+	nws::HttpListener named(manager, h.pool, h.sessions);
+	TEST_EXPECT(named.start(config));
+	const auto refused = h.send_to(named.bound_port(), "GET", "/api/server-info");
+	named.stop();
+	TEST_EXPECT(refused.transport_ok && refused.code == 503);
+	TEST_EXPECT(body_text(refused) == "{\"error\":\"no_public_ipv4\"}");
+	return 0;
+}
+
 // ---- Request-named files and response header values ----
 
 // What the planted secret files hold; no reply may carry it.
@@ -3097,12 +3130,12 @@ int test_join_identity(Harness &h) {
 int test_api_proxy_only(Harness &h) {
 	for (const auto &[method, path] :
 			{ std::pair<const char *, const char *>{ "GET", "/api/health" }, { "GET", "/api" },
-					{ "GET", "/api/lobbies" }, { "GET", "/api/no-such-route" },
-					{ "POST", "/api/login" }, { "POST", "/api/register" },
-					{ "GET", "/api/admin/users" }, { "PUT", "/api/admin/server-status" },
-					{ "GET", "/api/me/hosts" }, { "POST", "/api/me/hosts/1/command" },
-					{ "POST", "/api/me/hosts/1/stop" }, { "GET", "/api/admin/hosts" },
-					{ "POST", "/api/admin/hosts/1/command" },
+					{ "GET", "/api/lobbies" }, { "GET", "/api/server-info" },
+					{ "GET", "/api/no-such-route" }, { "POST", "/api/login" },
+					{ "POST", "/api/register" }, { "GET", "/api/admin/users" },
+					{ "PUT", "/api/admin/server-status" }, { "GET", "/api/me/hosts" },
+					{ "POST", "/api/me/hosts/1/command" }, { "POST", "/api/me/hosts/1/stop" },
+					{ "GET", "/api/admin/hosts" }, { "POST", "/api/admin/hosts/1/command" },
 					{ "POST", "/api/admin/hosts/1/stop" } }) {
 		const auto reply = h.send_to(h.fresh_port, method, path, { kJson, kCsrf, kBearer }, "{}");
 		if (reply.code != 403)
@@ -4490,6 +4523,7 @@ int run(Harness &h) {
 		{ "listed_server_owners", test_listed_server_owners },
 		{ "menu_urls_name_bound_port", test_menu_urls_name_bound_port },
 		{ "unknown_path_404", test_unknown_path_404 },
+		{ "server_info", test_server_info },
 		{ "admin_host_push", test_admin_host_push },
 		{ "owner_host_push", test_owner_host_push },
 		{ "hosted_server_routes", test_hosted_server_routes },

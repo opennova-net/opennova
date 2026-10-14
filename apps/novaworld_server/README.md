@@ -656,6 +656,18 @@ next-map cursor unset when the list grows) and no `ONESHOT`, and a `PLAYER ... A
 is not on the list. The commands that change the server are recorded in the console with
 their sender; the reads are not.
 
+## The launcher's address
+
+`GET /api/server-info` answers `{"novaworld_ip": "<ONNET_PUBLIC_HOST>"}` with
+`Cache-Control: no-store`: the address the gate advertises as `POSTIPADDRESS`, which
+the OpenNova Launcher ([`launcher/`](../../launcher/README.md), ADR 0054) writes into a
+player's hosts file for `gs.novaworld.net`. The site's domain is behind Cloudflare's
+proxy, so DNS cannot give that address. The route is public and read-only (the address
+is public anyway); with `ONNET_PUBLIC_HOST` not a dotted quad it answers 503
+`{"error":"no_public_ipv4"}`, since a hosts line names an address. In prod it is reached
+as `https://<domain>/api/server-info` through the portal's nginx, like every `/api`
+route. The route harness's `server_info` case pins both answers.
+
 ## Configuration
 
 All via environment (`server_config.cpp`): `ONNET_PUBLIC_HOST`,
