@@ -1138,8 +1138,9 @@ public:
     // - the motor copy's health hydrated from the registry (tick_infantry's, ahead of the death
     //   selection);
     // - the motor head (infantry_org1_motor_head over the system's root motion and ring heads);
-    // - on the authority's think ticks, unless the body is airborne without the climb order
-    //   (infantry_think's exit [orig: @0x4BAA57..0x4BAA66]), the think of a still body
+    // - on the authority's think ticks, the aim pitch seeded from the SSN [orig:
+    //   @0x4BAA4B..0x4BAA59], then, unless the body is airborne without the climb order
+    //   (infantry_think's exit [orig: @0x4BAA61..0x4BAA66]), the think of a still body
     //   (infantry_org1_still_think on the slot's alert byte and the guard flag, which the guard
     //   leg drops where the .adm authors no guard [orig: @0x4BD1B8]) and then the think's
     //   attention tail (the ride link, the idle facing fan, the stop fix-up, the attention scan,

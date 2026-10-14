@@ -2,6 +2,7 @@
 // [orig: Entity_InitOrganicAI @0x4BFCC0; Entity_WarmUpOrganicAnimation @0x4B8B20]
 #include "common/retail_paths.h"
 
+#include <base/io/bam.h>
 #include <base/resource_index/resource_index.h>
 #include <runtime/anim/adm_root_motion.h>
 #include <runtime/anim/clip_timeline.h>
@@ -557,7 +558,9 @@ void still_bodies_attend_as_the_world() {
         people->add(11, 4.0f, 4.0f, 45, 1, 2, true, 40, 1); // a red guard whose table authors no guard
         people->add(12, 20.0f, 20.0f, 0, 1, 0, false, 40);  // calm, a corpse three units in front of it
         people->corpse(20.0f, 23.0f, 1);
+        people->add(14, 30.0f, 30.0f, 0, 1, 2, false, 40);  // red, airborne: no think but the seed
         people->init();
+        people->entity(6).flags |= kEntityFlagInAir;
         // A definition's own hit points on the registry, which the tick hydrates its motor copy from.
         people->entity(1).health = 80;
         people->entity(1).health_max = 80;
@@ -585,6 +588,9 @@ void still_bodies_attend_as_the_world() {
     }
     CHECK(looked && look_idle && turned && corpse_seen && decayed);
     CHECK(still.entity(1).health == 80 && still.body(1).health == 80 && still.body(1).inf.max_health == 80);
+    // The airborne body never thinks (still idle) but every think tick seeds its aim pitch from the SSN.
+    CHECK(still.body(6).inf.body_clip_state() == anim_state::kIdle &&
+          still.body(6).inf.aim_pitch == opennova::io::bam_sar(int32_t(uint32_t(14) << 27), 4));
     // The calm body the corpse alerted idles on idle_2; the guard with no guard dropped the flag.
     CHECK(still.body(5).inf.body_clip_state() == anim_state::kIdle2 ||
           still.body(5).inf.body_clip_state() == anim_state::kIdle2Look);

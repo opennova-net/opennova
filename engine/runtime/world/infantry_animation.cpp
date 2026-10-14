@@ -234,12 +234,16 @@ RootMotionFrame AiSystem::tick_still_body(AiEntity &e, World &world, uint32_t lo
     // [orig: Entity_UpdateInfantryAI @0x4B9A14..0x4B9A48]
     RootMotionFrame frame;
     const bool have_clip = infantry_org1_motor_head(inf, root_motion, anim_rings, frame);
-    // The think on the authority's think ticks, unless airborne without the climb order: the
-    // still body's selection, then the attention tail after it. [orig: the gate @0x4BA970; the
-    // airborne exit @0x4BAA57..0x4BAA66; @0x4BD87E..0x4BE7FD]
+    // The think on the authority's think ticks: the aim pitch seeded from the SSN, then, unless
+    // airborne without the climb order, the still body's selection and the attention tail after
+    // it. [orig: the gate @0x4BA970; the seed @0x4BAA4B..0x4BAA59 ahead of the airborne exit
+    // @0x4BAA61..0x4BAA66; @0x4BD87E..0x4BE7FD]
+    const uint32_t key = infantry_org1_key(logic_tick, e.net_id);
     const bool guarding = (flags & kEntityFlagMounted) != 0;
     const bool airborne = (flags & kEntityFlagAiClimb) == 0 && (flags & kEntityFlagInAir) != 0;
-    if (is_authority && !airborne &&
+    const bool thinks = is_authority && (key & 15u) == 0;
+    if (thinks) inf.aim_pitch = io::bam_sar(static_cast<int32_t>(static_cast<uint32_t>(e.net_id) << 27), 4);
+    if (thinks && !airborne &&
             infantry_org1_still_think(inf, root_motion, logic_tick, e.net_id, guarding,
                                       e.slot.bytes()[AiSlot::kAlertByte])) {
         // The guard leg drops the flag of a guarding body whose .adm authors no guard.
@@ -249,10 +253,10 @@ RootMotionFrame AiSystem::tick_still_body(AiEntity &e, World &world, uint32_t lo
             self->flags &= ~kEntityFlagMounted;
             self->engine_flags &= ~kEntityFlagMounted;
         }
-        infantry_attention_think(*this, e, world, infantry_org1_key(logic_tick, e.net_id));
+        infantry_attention_think(*this, e, world, key);
     }
     // [orig: @0x4BE8FD..0x4BEBE7, @0x4BEF97, @0x4BEFC5..0x4BEFED]
-    infantry_org1_heading_chase(e, self, infantry_org1_key(logic_tick, e.net_id));
+    infantry_org1_heading_chase(e, self, key);
     if (have_clip) infantry_restamp_eye(e, world, frame);
     finish_infantry_tick(e, world);
     return frame;
