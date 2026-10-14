@@ -1,11 +1,12 @@
 #include <runtime/devtools/entities_window.h>
 
+#include <base/io/strutil.h>
+
 #include <imgui.h>
 
-#include <cctype>
 #include <cstdarg>
 #include <cstdio>
-#include <cstring>
+#include <string_view>
 #include <utility>
 
 namespace opennova::devtools {
@@ -20,27 +21,6 @@ void set_text(std::array<char, N> &dst, const char *fmt, ...) {
 	va_start(args, fmt);
 	std::vsnprintf(dst.data(), N, fmt, args);
 	va_end(args);
-}
-
-// Case-insensitive substring (the filter box; names are plain ASCII item /
-// mission identifiers).
-bool contains_ci(const char *haystack, const char *needle) {
-	if (needle[0] == '\0') {
-		return true;
-	}
-	const size_t needle_len = std::strlen(needle);
-	for (const char *h = haystack; *h != '\0'; ++h) {
-		size_t i = 0;
-		while (i < needle_len && h[i] != '\0' &&
-				std::tolower(static_cast<unsigned char>(h[i])) ==
-						std::tolower(static_cast<unsigned char>(needle[i]))) {
-			++i;
-		}
-		if (i == needle_len) {
-			return true;
-		}
-	}
-	return false;
 }
 
 }  // namespace
@@ -133,11 +113,14 @@ void EntitiesWindow::format_rows(uint16_t keep_handle) {
 
 void EntitiesWindow::apply_filter() {
 	filtered_.clear();
+	// Case ignored: names are plain ASCII item / mission identifiers.
+	const std::string_view filter = filter_.data();
+	const auto has = [&](std::string_view text) {
+		return strutil::ifind(text, filter) != std::string_view::npos;
+	};
 	for (size_t i = 0; i < snapshot_.rows.size(); ++i) {
 		const RowText &text = texts_[i];
-		if (contains_ci(text.name.c_str(), filter_.data()) ||
-				contains_ci(text.item.c_str(), filter_.data()) ||
-				contains_ci(text.net_id.data(), filter_.data())) {
+		if (has(text.name) || has(text.item) || has(text.net_id.data())) {
 			filtered_.push_back(static_cast<int>(i));
 		}
 	}
