@@ -7,6 +7,18 @@
 // into the system's own through base/io/os_path.h (a folder named outside the
 // ANSI code page, a path past MAX_PATH). And the CR LF text a test stages a
 // retail text file with. Header-only, infrastructure only.
+//
+// The UTF-8 contract holds here and in temp_dir.h, not yet in the two roots
+// tests/common reads from the environment: test_paths_temp_dir() (test_paths.h)
+// and the retail roots with the files found under them (retail_paths.h) are the
+// narrow strings getenv and std::filesystem::path::string() give, in the ANSI
+// code page on Windows. The tests that take them hand them to fopen, _mkdir and
+// std::filesystem::path(std::string), which read that code page, as well as to
+// the UTF-8 calls here and in the engine, so turning those roots to UTF-8 turns
+// their callers too (to io::os_path, io::fopen_utf8 or test_temp::TempDir), a
+// change beyond tests/common. Where a root is ASCII (the runners' temp
+// directories, a retail tree under an ASCII path) both spellings are the same
+// bytes and either passes here; a root outside ASCII waits on that change.
 #pragma once
 
 #include <cctype>
@@ -18,9 +30,9 @@
 #include <iterator>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <vector>
 
+#include <base/io/file_io.h>
 #include <base/io/os_path.h>
 
 namespace test_io {
@@ -64,16 +76,14 @@ inline std::string read_file_text(const std::string &path) {
 	return text;
 }
 
-// The whole of `bytes` written to `path` (created or truncated), its folders made.
+// The whole of `bytes` written to `path` (created, or replaced: io::write_file_atomic), its
+// folders made (io::ensure_directory).
 inline bool write_file(const std::string &path, const std::vector<uint8_t> &bytes) {
-	const std::filesystem::path file = opennova::io::os_path(path);
-	std::error_code ec;
-	if (file.has_parent_path())
-		std::filesystem::create_directories(file.parent_path(), ec);
-	std::ofstream f(file, std::ios::binary | std::ios::trunc);
-	if (!f) return false;
-	if (!bytes.empty()) f.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-	return static_cast<bool>(f);
+	std::string error;
+	const std::filesystem::path folder = opennova::io::os_path(path).parent_path();
+	if (!folder.empty() && !opennova::io::ensure_directory(opennova::io::utf8_path(folder), error))
+		return false;
+	return opennova::io::write_file_atomic(path, bytes.data(), bytes.size(), error);
 }
 
 // True when `bytes` is an unpulled Git LFS pointer rather than the fixture

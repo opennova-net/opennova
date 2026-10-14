@@ -14,6 +14,7 @@
 #include <system_error>
 #include <vector>
 
+#include "common/file_io.h"
 #include "common/temp_dir.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
@@ -32,20 +33,15 @@ namespace {
 const std::string kJose = "Jos\xC3\xA9";                          // José
 const std::string kModel = "\xE3\x83\xA2\xE3\x83\x87\xE3\x83\xAB"; // モデル
 
-bool write_bytes(const std::string &utf8_path, const std::string &bytes) {
-	std::ofstream out(io::os_path(utf8_path), std::ios::binary);
-	out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-	return static_cast<bool>(out);
-}
-
 // A one-entry PFF minted by the test writer at a short path, its bytes moved to `utf8_path`.
 bool write_pff(const std::string &scratch, const std::string &utf8_path, const char *name, const std::string &content) {
 	const std::string short_path = (fs::path(scratch) / "minted.pff").string();
 	PffTestEntry entry = {name, reinterpret_cast<const uint8_t *>(content.data()), static_cast<uint32_t>(content.size()), 0};
 	if (pff_test_write_modern(short_path.c_str(), &entry, 1) != 0) return false;
 	std::ifstream in(short_path, std::ios::binary);
-	const std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-	return !bytes.empty() && write_bytes(utf8_path, bytes);
+	const std::vector<uint8_t> bytes(
+			(std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+	return !bytes.empty() && test_io::write_file(utf8_path, bytes);
 }
 
 std::string read_vfs(const opennova::Vfs &vfs, const std::string &name,
@@ -75,15 +71,15 @@ int main() {
 	TEST_EXPECT(!ec && fs::is_directory(io::os_path(root), ec));
 
 	TEST_EXPECT(write_pff(scratch, root + "/resource.pff", "archived.txt", "ARCHIVE"));
-	TEST_EXPECT(write_bytes(root + "/loose.txt", "LOOSE"));
-	TEST_EXPECT(write_bytes(root + "/" + kModel + ".txt", "MODEL"));
-	TEST_EXPECT(write_bytes(root + "/skies.env", "fog_level 640\r\n"));
-	TEST_EXPECT(write_bytes(root + "/_NSTMOUT.TXT", "NEVER"));
+	TEST_EXPECT(test_io::write_text(root + "/loose.txt", "LOOSE"));
+	TEST_EXPECT(test_io::write_text(root + "/" + kModel + ".txt", "MODEL"));
+	TEST_EXPECT(test_io::write_text(root + "/skies.env", "fog_level 640\r\n"));
+	TEST_EXPECT(test_io::write_text(root + "/_NSTMOUT.TXT", "NEVER"));
 	const std::string exp_dir = root + "/expansion/x";
 	fs::create_directories(io::os_path(exp_dir), ec);
 	TEST_EXPECT(!ec && fs::is_directory(io::os_path(exp_dir), ec));
 	TEST_EXPECT(write_pff(scratch, exp_dir + "/x.pff", "expansion.txt", "EXPANSION"));
-	TEST_EXPECT(write_bytes(exp_dir + "/version.txt", "1"));
+	TEST_EXPECT(test_io::write_text(exp_dir + "/version.txt", "1"));
 
 	// The archive opens by its UTF-8 path.
 	{
@@ -153,7 +149,7 @@ int main() {
 		TEST_EXPECT(!ec);
 		fs::create_directories(io::os_path(io::utf8_join(prefixed, "joined/sub")), ec);
 		TEST_EXPECT(!ec && fs::is_directory(io::os_path(dir + "/joined/sub"), ec));
-		TEST_EXPECT(write_bytes(io::utf8_join(prefixed, "joined/sub/file.txt"), "JOINED"));
+		TEST_EXPECT(test_io::write_text(io::utf8_join(prefixed, "joined/sub/file.txt"), "JOINED"));
 		std::ifstream in(io::os_path(dir + "/joined/sub/file.txt"), std::ios::binary);
 		TEST_EXPECT(std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>()) == "JOINED");
 	}
