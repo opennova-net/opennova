@@ -25,7 +25,7 @@
 //
 // Each link runs a thread of its own: at most ONNET_HOSTED_CAP links live
 // (default 5), the apps' socket layer is blocking with per-socket timeouts
-// (apps/common/net_sockets.h, as opennova-nw-lister's AdminFeed uses it), and
+// (apps/common/net_sockets.h), and
 // a thread per link keeps one dead or slow machine (a connect or a reply
 // timing out) from holding up another server's commands, which one shared
 // thread over blocking sockets would queue behind it.

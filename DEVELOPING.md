@@ -223,9 +223,8 @@ It keeps its files in the directory it runs from, as retail's dedicated server d
 `game.cfg`, `activesrvr.txt`, and for the remote admin `admin.cfg`, `admin_log.txt`,
 `banned.txt` and `banlist.txt`. To try the remote admin, set `remote_admin_port` in that
 `game.cfg`, give `admin.cfg` a user line and a whitelist that admits you (`boss secret 4F`,
-`ip_restrict = 127.0.0.1`), and connect with retail's `RAT.exe` or
-`opennova-nw-lister --admin`. The engine halves are `engine/net/admin/admin_server.h` (the
-wire), `engine/runtime/inmatch/admin_console.h` (the verbs) and
+`ip_restrict = 127.0.0.1`), and connect with retail's `RAT.exe`. The engine halves are
+`engine/net/admin/admin_server.h` (the wire), `engine/runtime/inmatch/admin_console.h` (the verbs) and
 `engine/runtime/inmatch/rotation_admin.h` (the MISSION verbs over the host's rotation); the
 socket pump is `apps/common/admin_tcp_server.h`.
 

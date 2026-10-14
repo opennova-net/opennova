@@ -1,8 +1,8 @@
 // The NWU lobby driver's own draws (NwuLobbySession with no Environment::random_u32, what
-// opennova-nw-lister runs on): 32 sessions opened on 32 threads at once each draw a client index
-// and key no other session shares. A per-thread generator seeded from std::random_device fails
-// this where libstdc++ serves random_device from RDSEED on a CPU with AMD's RDSEED erratum: the
-// threads whose seed came back 0 open with the same index and key. First, with an injected
+// opennova-serve's lister runs on): 32 sessions opened on 32 threads at once each draw a client
+// index and key no other session shares. A per-thread generator seeded from std::random_device
+// fails this where libstdc++ serves random_device from RDSEED on a CPU with AMD's RDSEED erratum:
+// the threads whose seed came back 0 open with the same index and key. First, with an injected
 // Environment::random_u32, the client key is drawn again past a zero (D-NET-438).
 
 #include <net/novaworld/nwu_lobby_session.h>

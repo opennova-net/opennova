@@ -107,8 +107,9 @@ uint32_t wall_ms() {
 
 // The lister's outcome as start's error text.
 std::string listing_failure(int code) {
-	const char *what = code == nw_lister::kExitNetwork ? "a NovaWorld socket did not open"
-			: code == nw_lister::kExitStoppedByService ? "the NovaWorld service stopped the hosting"
+	const char *what = code == kExitNetwork ? "a NovaWorld socket did not open"
+			: code == kExitStoppedByService
+			? "the NovaWorld service stopped the hosting"
 			: "the NovaWorld session, the login, the HOSTKEY or the host request failed";
 	return std::string("the NovaWorld listing did not host: ") + what +
 			" (game.cfg networkconnecttype = 2 serves LAN only, as does a start without --master-host)";
@@ -686,15 +687,14 @@ bool Server::host_on_novaworld(std::string &error, const std::atomic<bool> *canc
 		return game_text(have_gametext_ ? &gametext_ : nullptr, section, key, fallback);
 	};
 	listing_ = std::make_unique<ServeListing>(listing_columns(), std::move(seams));
-	nw_lister::ListerOptions lister_options;
+	ListerOptions lister_options;
 	lister_options.master_host = options_.master_host;
 	lister_options.master_gate_port = options_.master_gate_port;
-	lister_options.allow_public = options_.allow_public;
 	// Loopback and the OpenNova service by default, NovaLogic's NovaWorld behind --allow-public.
-	lister_options.destinations = nw_lister::DestinationPolicy::NovaLogicGated;
+	lister_options.allow_public = options_.allow_public;
 	lister_options.credentials = options_.credentials;
 	last_lister_exit_ = -1;
-	lister_ = std::make_unique<nw_lister::Lister>(lister_options, *listing_, &demux_->session());
+	lister_ = std::make_unique<Lister>(lister_options, *listing_, &demux_->session());
 	const NwuLobbySession &lobby = lister_->lobby();
 	demux_->set_session_claim([&lobby](const PeerAddr &from, const uint8_t *data, std::size_t len) {
 		return lobby.claims(from, data, len);

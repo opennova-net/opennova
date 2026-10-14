@@ -9,7 +9,7 @@
 #include <mutex>
 #include <vector>
 
-namespace opennova::nw_lister {
+namespace opennova::serve {
 
 namespace {
 
@@ -72,4 +72,4 @@ std::string mask_value(const std::string &value, size_t keep) {
 	return value.substr(0, keep) + "...(" + std::to_string(value.size()) + ")";
 }
 
-} // namespace opennova::nw_lister
+} // namespace opennova::serve

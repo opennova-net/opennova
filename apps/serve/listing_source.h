@@ -9,13 +9,11 @@
 #include <string>
 #include <vector>
 
-namespace opennova::nw_lister {
+namespace opennova::serve {
 
-// The process exit codes.
+// How a Lister finished (Lister::exit_code).
 enum ExitCode : int {
 	kExitStopped = 0,          // stopped and deregistered
-	kExitUsage = 1,            // bad command line
-	kExitBadInput = 2,         // the listing or credentials file did not load
 	kExitNetwork = 3,          // a socket could not be opened
 	kExitFailed = 4,           // the session, the login, the HOSTKEY or the host request failed
 	kExitStoppedByService = 5, // the service stopped the hosting (ServerStopHosting)
@@ -24,9 +22,8 @@ enum ExitCode : int {
 // What a Lister lists, and the server behind it. The Lister owns the NovaWorld session (the gate,
 // the NWU session, the login and HOSTKEY, the host role) and the keys only the session knows
 // (LobbyName, HostKey, AppId, the PCIDKey ring, the machine locale); a source owns the columns and
-// the roster, and takes the session's host-direction traffic. opennova-nw-lister's sources are
-// the listing file and the game server's admin port (FileListingSource); opennova-serve's is the
-// live in-process match.
+// the roster, and takes the session's host-direction traffic. opennova-serve's is the live
+// in-process match (ServeListing); a test stands in its own.
 class ListingSource {
 public:
 	virtual ~ListingSource() = default;
@@ -43,14 +40,6 @@ public:
 	virtual HostRegistration registration() const = 0;
 	// The PlayerList roster, given the slots the session lists now (`current`, by slot).
 	virtual std::vector<HostPlayerSlot> wanted_roster(const std::map<int, HostPlayerSlot> &current) const = 0;
-	// Whether the server behind the source starts missions in this process. Such an embedder
-	// (opennova-serve) runs Lister::publish_server_info at each mission start, as
-	// Game_StartMission does, and its host result publishes nothing: a fresh host's first full
-	// Host list is its mission start's. A source that only reports a server's mission (the
-	// listing file's map, the admin port's) sees no mission start, so the lister publishes that
-	// update at its host result and again at each mission change the source reports
-	// (D-NET-488, PERMANENT).
-	virtual bool starts_missions() const { return false; }
 
 	// The host request's outcome: hosting (ServerHostResult success), or the NWEC tag it failed
 	// with (a refusal, the 60 s poll, ServerStopHosting's message key).
@@ -66,4 +55,4 @@ public:
 	virtual void stop() {}
 };
 
-} // namespace opennova::nw_lister
+} // namespace opennova::serve

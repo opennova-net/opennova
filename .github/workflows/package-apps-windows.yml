@@ -66,7 +66,6 @@ jobs:
             @{ Exe = "opennova-3di.exe"; Arguments = @(); Code = 2 },
             @{ Exe = "opennova-extract.exe"; Arguments = @("--help"); Code = 2 },
             @{ Exe = "opennova-lan-probe.exe"; Arguments = @("--help"); Code = 0 },
-            @{ Exe = "opennova-nw-lister.exe"; Arguments = @(); Code = 1 },
             @{ Exe = "opennova-parity.exe"; Arguments = @(); Code = 2 },
             @{ Exe = "opennova-serve.exe"; Arguments = @("--help"); Code = 0 },
             @{ Exe = "opennova-wire.exe"; Arguments = @(); Code = 1 }

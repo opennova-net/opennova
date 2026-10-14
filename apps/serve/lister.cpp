@@ -1,8 +1,7 @@
 #include "lister.h"
 
 #include "console_log.h"
-#include "file_listing_source.h"
-#include "policy.h"
+#include "destination_policy.h"
 
 #include <base/io/log.h>
 #include <base/io/strutil.h>
@@ -12,7 +11,7 @@
 
 #include <chrono>
 
-namespace opennova::nw_lister {
+namespace opennova::serve {
 
 using io::LogLevel;
 
@@ -50,12 +49,12 @@ std::string ip4(const std::array<uint8_t, 4> &ip) {
 // A stable machine id for the stand-in NWPSSK / NWUSID where retail's inputs do not read.
 std::string stable_identity() {
 	const std::string host = net::local_host_name();
-	return host.empty() ? std::string("nw-lister") : "nw-lister|" + host;
+	return host.empty() ? std::string("opennova-serve") : "opennova-serve|" + host;
 }
 
-// The strings the Host list's Region, TimeLeft, Y/N and TimeOfDay tokens resolve to: retail's
-// English Gametext.bin (NovaWorld STRNOVA07..12, the TimeOfDay section), which the game reads
-// through its gametext and a lister, running without retail data, carries.
+// The strings the Host list's Region, TimeLeft, Y/N and TimeOfDay tokens resolve to until the
+// embedder hands the role its mounted gametext's (opennova-serve's make_host_lobby_text): retail's
+// English Gametext.bin (NovaWorld STRNOVA07..12, the TimeOfDay section).
 // [orig: Lobby_UpdateServerInfo @0x4fe8c0 — STRNOVA07/08/09 @0x4fea56.., STRNOVA10 @0x4fed8d,
 //  STRNOVA11/12 @0x4fec2c.., the TimeOfDay quintet @0x4ff09b..0x4ff138]
 HostLobbyText english_lobby_text() {
@@ -68,105 +67,93 @@ HostLobbyText english_lobby_text() {
 	return text;
 }
 
-// The file source over the listing and the admin port, from the lister's own options.
-FileListingOptions file_listing_options(const ListerOptions &options) {
-	FileListingOptions out;
-	out.listing_path = options.listing_path;
-	out.allow_public = options.allow_public;
-	out.admin_host = options.admin_host;
-	out.admin_port = options.admin_port;
-	out.admin_user = options.credentials.admin_user;
-	out.admin_pass = options.credentials.admin_pass;
-	return out;
-}
-
 } // namespace
 
-Lister::Lister(ListerOptions options)
-    : Lister(options, std::make_unique<FileListingSource>(file_listing_options(options)), nullptr, nullptr) {}
-
-Lister::Lister(ListerOptions options, ListingSource &source, IDatagramSocket *session_socket)
-    : Lister(std::move(options), nullptr, &source, session_socket) {}
-
-Lister::Lister(ListerOptions options, std::unique_ptr<ListingSource> owned, ListingSource *source,
-               IDatagramSocket *session_socket)
-    : options_(std::move(options)),
-      owned_source_(std::move(owned)),
-      source_(source != nullptr ? source : owned_source_.get()),
-      shared_session_socket_(session_socket),
-      lobby_(
-          [this]() {
-	          NwuLobbySession::Hooks hooks;
-	          hooks.on_gate_response = [](const GateResponse &gate) {
-		          std::string addresses;
-		          for (const std::string &address : gate.udp_novaworld)
-			          addresses += (addresses.empty() ? "" : ", ") + address;
-		          io::logf(LogLevel::kInfo, "[gate] lobby %s, NovaWorld %s", gate.lobby_name.c_str(),
-		                   addresses.c_str());
-	          };
-	          hooks.cookie_vars = [this]() { return cookie_vars(); };
-	          hooks.on_fatal = [this](const std::string &message) {
-		          const char *meaning = connect_tag_meaning(message);
-		          io::logf(LogLevel::kError, "[session] failed: %s%s%s%s", message.c_str(),
-		                   meaning != nullptr ? " (" : "", meaning != nullptr ? meaning : "",
-		                   meaning != nullptr ? ")" : "");
-		          // A refused join (CR 0) keeps the 0x82's failure fields on the connection.
-		          if (const ClientSession *session = lobby_.session(); session != nullptr && message == "NWEC43")
-			          io::logf(LogLevel::kError, "[session] the 0x82 refused: JFC %u JFP %u JFS \"%s\"",
-			                   session->join_fail_code(), session->join_fail_param(),
-			                   session->join_fail_string().c_str());
-		          end(kExitFailed);
-	          };
-	          hooks.on_soft_error = [](const std::string &message) {
-		          io::logf(LogLevel::kDebug, "[gate] %s", message.c_str());
-	          };
-	          // A gate naming no UDPNOVAWORLD leaves no NWU session to register the host on.
-	          hooks.on_sessionless = [this]() {
-		          io::logf(LogLevel::kError, "[gate] the gate named no NovaWorld session server (UDPNOVAWORLD)");
-		          end(kExitFailed);
-	          };
-	          return hooks;
-          }(),
-          [this]() {
-	          NwuLobbySession::Environment env; // random_u32 unset: the OS CSPRNG
-	          env.resolve_ipv4 = [this](const std::string &host, PeerAddr &out) {
-		          net::Endpoint endpoint;
-		          if (!resolve_destination(host, endpoint, options_.destinations, options_.allow_public, "NovaWorld host"))
-			          return false;
-		          out.ip = net::NetDatagramSocket::to_peer(endpoint).ip;
-		          return true;
-	          };
-	          return env;
-          }()),
-      role_(lobby_, [this]() {
-	      NwuHostRole::Hooks hooks;
-	      hooks.on_hosting = [this]() { on_listed(); };
-	      hooks.on_failed = [this](const std::string &tag) {
-		      io::logf(LogLevel::kError, "[host] the host request failed: %s", tag.c_str());
-		      source_->on_host_result(false, tag);
-		      end(kExitFailed);
-	      };
-	      hooks.on_stopped = [this](const std::string &key) {
-		      io::logf(LogLevel::kError, "[host] the service stopped the hosting (%s)", key.c_str());
-		      source_->on_host_result(false, key);
-		      end(kExitStoppedByService);
-	      };
-	      hooks.on_command = [this](const ServerCommand &command) { source_->on_command(command); };
-	      hooks.on_player_enter_result = [this](const ClientSession::PlayerEnterResult &result) {
-		      source_->on_player_enter_result(result);
-	      };
-	      return hooks;
-      }()) {
+Lister::Lister(ListerOptions options, ListingSource &source, IDatagramSocket *session_socket) :
+		options_(std::move(options)),
+		source_(source),
+		shared_session_socket_(session_socket),
+		lobby_(
+				[this]() {
+					NwuLobbySession::Hooks hooks;
+					hooks.on_gate_response = [](const GateResponse &gate) {
+						std::string addresses;
+						for (const std::string &address : gate.udp_novaworld)
+							addresses += (addresses.empty() ? "" : ", ") + address;
+						io::logf(LogLevel::kInfo, "[gate] lobby %s, NovaWorld %s",
+								gate.lobby_name.c_str(), addresses.c_str());
+					};
+					hooks.cookie_vars = [this]() { return cookie_vars(); };
+					hooks.on_fatal = [this](const std::string &message) {
+						const char *meaning = connect_tag_meaning(message);
+						io::logf(LogLevel::kError, "[session] failed: %s%s%s%s", message.c_str(),
+								meaning != nullptr ? " (" : "", meaning != nullptr ? meaning : "",
+								meaning != nullptr ? ")" : "");
+						// A refused join (CR 0) keeps the 0x82's failure fields on the connection.
+						if (const ClientSession *session = lobby_.session();
+								session != nullptr && message == "NWEC43")
+							io::logf(LogLevel::kError,
+									"[session] the 0x82 refused: JFC %u JFP %u JFS \"%s\"",
+									session->join_fail_code(), session->join_fail_param(),
+									session->join_fail_string().c_str());
+						end(kExitFailed);
+					};
+					hooks.on_soft_error = [](const std::string &message) {
+						io::logf(LogLevel::kDebug, "[gate] %s", message.c_str());
+					};
+					// A gate naming no UDPNOVAWORLD leaves no NWU session to register the host on.
+					hooks.on_sessionless = [this]() {
+						io::logf(LogLevel::kError,
+								"[gate] the gate named no NovaWorld session server (UDPNOVAWORLD)");
+						end(kExitFailed);
+					};
+					return hooks;
+				}(),
+				[this]() {
+					NwuLobbySession::Environment env; // random_u32 unset: the OS CSPRNG
+					env.resolve_ipv4 = [this](const std::string &host, PeerAddr &out) {
+						net::Endpoint endpoint;
+						if (!resolve_destination(
+									host, endpoint, options_.allow_public, "NovaWorld host"))
+							return false;
+						out.ip = net::NetDatagramSocket::to_peer(endpoint).ip;
+						return true;
+					};
+					return env;
+				}()),
+		role_(lobby_, [this]() {
+			NwuHostRole::Hooks hooks;
+			hooks.on_hosting = [this]() { on_listed(); };
+			hooks.on_failed = [this](const std::string &tag) {
+				io::logf(LogLevel::kError, "[host] the host request failed: %s", tag.c_str());
+				source_.on_host_result(false, tag);
+				end(kExitFailed);
+			};
+			hooks.on_stopped = [this](const std::string &key) {
+				io::logf(LogLevel::kError, "[host] the service stopped the hosting (%s)",
+						key.c_str());
+				source_.on_host_result(false, key);
+				end(kExitStoppedByService);
+			};
+			hooks.on_command = [this](const ServerCommand &command) {
+				source_.on_command(command);
+			};
+			hooks.on_player_enter_result = [this](const ClientSession::PlayerEnterResult &result) {
+				source_.on_player_enter_result(result);
+			};
+			return hooks;
+		}()) {
 	role_.set_lobby_text(english_lobby_text());
 }
 
 Lister::~Lister() {
-	source_->stop();
+	source_.stop();
 	if (http_.valid()) http_.wait();
 }
 
 bool Lister::start() {
-	if (!source_->start(exit_code_)) return false;
+	if (!source_.start(exit_code_))
+		return false;
 	gate_udp_ = net::ScopedSocket(net::udp_bind(0));
 	if (shared_session_socket_ == nullptr) session_udp_ = net::ScopedSocket(net::udp_bind(0));
 	if (!gate_udp_.is_valid() || (shared_session_socket_ == nullptr && !session_udp_.is_valid())) {
@@ -174,20 +161,18 @@ bool Lister::start() {
 		exit_code_ = kExitNetwork;
 		return false;
 	}
-	gate_raw_ = std::make_unique<net::NetDatagramSocket>(gate_udp_.get());
-	gate_socket_ = std::make_unique<PolicySocket>(*gate_raw_, options_.destinations, options_.allow_public);
+	gate_socket_ = std::make_unique<net::NetDatagramSocket>(gate_udp_.get());
 	IDatagramSocket *session = shared_session_socket_;
 	if (session == nullptr) {
-		session_raw_ = std::make_unique<net::NetDatagramSocket>(session_udp_.get());
-		session = session_raw_.get();
+		session_socket_ = std::make_unique<net::NetDatagramSocket>(session_udp_.get());
+		session = session_socket_.get();
 	}
-	session_socket_ = std::make_unique<PolicySocket>(*session, options_.destinations, options_.allow_public);
-	lobby_.open(*gate_socket_, *session_socket_);
+	lobby_.open(*gate_socket_, *session);
 	lobby_.probe(options_.master_host, options_.master_gate_port);
-	io::logf(LogLevel::kInfo, "[gate] probing %s:%u (%s)", options_.master_host.c_str(), options_.master_gate_port,
-	         options_.allow_public                                          ? "public destinations allowed"
-	         : options_.destinations == DestinationPolicy::NovaLogicGated ? "NovaLogic's NovaWorld refused"
-	                                                                        : "loopback only");
+	io::logf(LogLevel::kInfo, "[gate] probing %s:%u (%s)", options_.master_host.c_str(),
+			options_.master_gate_port,
+			options_.allow_public ? "public destinations allowed"
+								  : "NovaLogic's NovaWorld refused");
 	return true;
 }
 
@@ -218,13 +203,8 @@ bool Lister::tick(uint32_t now_ms) {
 	if (!ending_ && http_.valid() && http_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
 		on_http_reply(http_.get());
 	}
-	// A source without missions stands in for each mission start with the mission change it
-	// observes (the listing file's map, or the admin port's): the mission start's update goes out
-	// at once, as a stock host's goes at each of its own (D-NET-488).
-	// [orig: Game_StartMission @0x5248c6..0x524903]
-	if (!ending_ && refresh_listing(false) && phase_ == Phase::Hosting &&
-			!source_->starts_missions())
-		role_.publish_mission_start();
+	if (!ending_)
+		refresh_listing(false);
 	if (ending_) teardown(/*stop_hosting=*/true);
 	return phase_ != Phase::Done;
 }
@@ -249,20 +229,15 @@ void Lister::disconnect() {
 	teardown(/*stop_hosting=*/false);
 }
 
-// ServerHostResult success: the listing is up. A fresh host's result publishes nothing (its first
-// full Host list, HostKey included, goes with its mission start's update, D-NET-465), so an
-// embedder whose source starts missions publishes at each one; a source that only reports a
-// server's mission sees no mission start, and its listing starts here instead (D-NET-488,
-// PERMANENT; each mission change it reports publishes again, Lister::tick).
-// [orig: CNapiGameSession_HandleHostVerifyResponse @0x4d5c52..0x4d5c58; Game_StartMission
-//  @0x5248c6..0x524903]
+// ServerHostResult success: the listing is up. A fresh host's result publishes nothing: its first
+// full Host list, HostKey included, goes with its mission start's update, which the embedder runs
+// at each one (publish_server_info, D-NET-465).
+// [orig: CNapiGameSession_HandleHostVerifyResponse @0x4d5c52..0x4d5c58]
 void Lister::on_listed() {
 	phase_ = Phase::Hosting;
 	io::logf(LogLevel::kInfo, "[host] listed: '%s', %zu player(s)",
 			registration().server_name.c_str(), role_.roster().size());
-	source_->on_host_result(true, std::string());
-	if (!source_->starts_missions())
-		publish_server_info();
+	source_.on_host_result(true, std::string());
 }
 
 // Verified: the account login first when there is one (the hosting page needs it), else the host
@@ -336,14 +311,13 @@ void Lister::ship(const HttpRequestSpec &spec) {
 		if (const std::string *value = flow_.cookies().find(tag)) add_log_secret(*value);
 	}
 	const bool allow_public = options_.allow_public;
-	const DestinationPolicy destinations = options_.destinations;
 	const char *method = spec.method == HttpMethod::Post ? "POST" : "GET";
 	io::logf(LogLevel::kDebug, "[http] %s %s", method, spec.url.c_str());
-	http_ = std::async(std::launch::async, [spec, method, allow_public, destinations]() {
+	http_ = std::async(std::launch::async, [spec, method, allow_public]() {
 		return net::http_exchange(method, spec.url, spec.headers, spec.body, kHttpTimeoutMs,
-		                          [allow_public, destinations](const std::string &host, net::Endpoint &out) {
-			                          return resolve_destination(host, out, destinations, allow_public, "web host");
-		                          });
+				[allow_public](const std::string &host, net::Endpoint &out) {
+					return resolve_destination(host, out, allow_public, "web host");
+				});
 	});
 }
 
@@ -362,8 +336,6 @@ void Lister::request_host() {
 	}
 	phase_ = Phase::Requesting;
 	refresh_listing(true);
-	// The mission the request lists: a later report of another is a mission change (D-NET-488).
-	listed_mission_ = registration().mission_name;
 	if (!role_.request(registration())) return; // on_failed finished it
 	sync_roster();
 	io::logf(LogLevel::kInfo, "[host] ClientHostRequest for '%s' on %s", registration().server_name.c_str(),
@@ -404,25 +376,20 @@ std::vector<std::pair<std::string, std::string>> Lister::cookie_vars() {
 }
 
 // The source's changes: the columns ride the host role's next refresh, the roster goes out at once.
-// True when the listed mission changed.
-bool Lister::refresh_listing(bool force) {
+void Lister::refresh_listing(bool force) {
 	if (phase_ != Phase::Requesting && phase_ != Phase::Hosting)
-		return false;
-	if (!source_->refresh(now_ms_, force))
-		return false;
-	const HostRegistration columns = registration();
-	role_.set_columns(columns);
+		return;
+	if (!source_.refresh(now_ms_, force))
+		return;
+	role_.set_columns(registration());
 	sync_roster();
-	const bool mission_changed = columns.mission_name != listed_mission_;
-	listed_mission_ = columns.mission_name;
-	return mission_changed;
 }
 
 // The source's columns plus what the session owns: the gate's LobbyName, the HOSTKEY, the leg's
 // MaxPlayers clamp and the machine's locale, which the host role sends as the CountryName / Lang /
 // TZB trio when the gate's METEXT asks for it (D-NET-347).
 HostRegistration Lister::registration() const {
-	HostRegistration r = source_->registration();
+	HostRegistration r = source_.registration();
 	r.lobby_name = lobby_.gate_response().lobby_name;
 	r.host_key = host_key_;
 	r.max_players = host_leg_max_players(r.max_players, !r.listen_host);
@@ -437,7 +404,7 @@ HostRegistration Lister::registration() const {
 // Server_PlayerAdd per slot); a kept player's team or type changes its vars alone, as a team
 // change or a loadout does (NwuHostRole::sync_roster).
 void Lister::sync_roster() {
-	role_.sync_roster(source_->wanted_roster(role_.roster()));
+	role_.sync_roster(source_.wanted_roster(role_.roster()));
 }
 
 void Lister::end(int code) {
@@ -450,8 +417,7 @@ void Lister::end(int code) {
 // send pump first and the verified connection's disconnect burst follows (NovaWorldClient::stop's
 // teardown); without it (disconnect) the burst alone, as a process exit's atexit teardown sends
 // it.
-// The NovaWorld leg goes first: a console close leaves the process a few seconds, and the admin
-// thread can be mid-poll on a dead server.
+// The NovaWorld leg goes first: a console close leaves the process a few seconds.
 void Lister::teardown(bool stop_hosting) {
 	if (phase_ == Phase::Done) return;
 	phase_ = Phase::Done;
@@ -468,7 +434,7 @@ void Lister::teardown(bool stop_hosting) {
 		}
 		lobby_.close();
 	}
-	source_->stop();
+	source_.stop();
 }
 
-} // namespace opennova::nw_lister
+} // namespace opennova::serve

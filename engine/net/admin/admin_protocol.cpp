@@ -321,47 +321,6 @@ std::vector<AdminPlayer> admin_parse_player_list(std::string_view reply, AdminSe
 	return out;
 }
 
-// One "%d: %s - %s %s %s %s %s\n" line per queue entry: the index, the mission file, then
-// "(2x)"|"()", "(IS FLIPPED)"|"()", "(ONE_SHOT)"|"()", "<CURRENT MISSION>"|"<>",
-// "<NEXT MISSION>"|"<>"; or "No missions in queue.". A file name can itself hold " - ", so the
-// tags are found from the end. [orig: CAdminServer_HandleMissionCommand @0x406447 (the format
-//  @0x7c0874), @0x40634f (the empty queue)]
-std::string admin_parse_current_mission(std::string_view reply) {
-	for (std::string_view line : split_lines(reply)) {
-		const size_t colon = line.find(": ");
-		const size_t tags = line.rfind(" - (");
-		if (colon == std::string_view::npos || tags == std::string_view::npos || tags <= colon + 2) continue;
-		if (line.substr(tags).find("<CURRENT MISSION>") == std::string_view::npos) continue;
-		std::string_view file = line.substr(colon + 2, tags - colon - 2);
-		for (const char *ext : {".bms", ".npj", ".npz"}) {
-			if (strutil::ends_with_icase(file, ext)) {
-				file.remove_suffix(4);
-				break;
-			}
-		}
-		return std::string(file);
-	}
-	return {};
-}
-
-// "GameTime             = %d/%d": the remaining whole minutes (g_RoundTimeRemaining / 60 / 62,
-// truncated) over the limit in minutes; an untimed round reads 0/0 and a spent one 0/N.
-// [orig: CAdminServer_HandleGet @0x403888..0x4038c5 (the format @0x7c0b78)]
-int admin_parse_time_left_minutes(std::string_view reply) {
-	for (std::string_view line : split_lines(reply)) {
-		const size_t eq = line.find('=');
-		if (eq == std::string_view::npos || strutil::trim_view(line.substr(0, eq)) != "GameTime") continue;
-		const std::string_view value = strutil::trim_view(line.substr(eq + 1));
-		const size_t slash = value.find('/');
-		if (slash == std::string_view::npos) return -1;
-		const auto left = strutil::parse_int(std::string(strutil::trim_view(value.substr(0, slash))));
-		const auto limit = strutil::parse_int(std::string(strutil::trim_view(value.substr(slash + 1))));
-		if (!left || !limit) return -1;
-		return (*limit > 0 && *left > 0) ? *left : -1;
-	}
-	return -1;
-}
-
 // "%d. %s (%s)\n": the row index, the file, the title (+0x414). A file name can hold spaces and
 // a title parentheses, so the title starts at the first " (" after the file's extension, and
 // at the first " (" when no known extension shows. [orig: CAdminServer_HandleMissionCommand

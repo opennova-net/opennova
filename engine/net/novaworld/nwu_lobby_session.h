@@ -17,10 +17,10 @@ namespace opennova {
 
 // The NWU gate/session driver: the gate probe and its worker clocks, then the ClientSession
 // handshake to a verified lobby session, pumped over two embedder-owned datagram sockets (the
-// gate's and the session's). Retail runs one game session per process; the game shell and the
-// opennova-nw-lister app both drive this one. Sockets, name resolution and randomness are the embedder's
-// (Environment); the protocol is ClientSession's.
-// [orig: CNapiGateManager_ProbeThreadProc @0x6339e0 (the gate worker);
+// gate's and the session's). Retail runs one game session per process; the game shell and
+// opennova-serve's listing both drive this one. Sockets, name resolution and randomness are the
+// embedder's (Environment); the protocol is ClientSession's. [orig:
+// CNapiGateManager_ProbeThreadProc @0x6339e0 (the gate worker);
 //  CNapiGameSession_InitNPConnection @0x4d3be0; CNapiGameSession_ProcessPeriodicUpdate
 //  @0x4d4400 (the per-tick pump order); CNapiGameSession_ConnectToNovaWorld @0x4d4640]
 class NwuLobbySession {

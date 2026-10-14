@@ -1,9 +1,7 @@
 #pragma once
 
-#include "admin_feed.h"
-#include "listing.h"
+#include "credentials.h"
 #include "listing_source.h"
-#include "policy.h"
 
 #include "net_datagram_socket.h"
 #include "net_http.h"
@@ -22,34 +20,28 @@
 #include <string>
 #include <vector>
 
-namespace opennova::nw_lister {
+namespace opennova::serve {
 
 struct ListerOptions {
-	std::string listing_path;
 	std::string master_host = "127.0.0.1";
 	uint16_t master_gate_port = GATE_DEFAULT_PORT;
-	// Until set, the destination policy holds: opennova-nw-lister's LoopbackOnly (every destination
-	// on 127.0.0.0/8, names unresolved), or an embedder's (policy.h).
+	// Until set, the destination policy holds: loopback and any host off NovaLogic's domain, a
+	// name under novaworld.net refused (destination_policy.h).
 	bool allow_public = false;
-	DestinationPolicy destinations = DestinationPolicy::LoopbackOnly;
 	// With an account, the host leg logs in and fetches the HOSTKEY first, as the game's menu does.
 	Credentials credentials;
-	std::string admin_host; // empty: the listing file alone
-	uint16_t admin_port = kAdminDefaultPort;
 };
 
-// One NovaWorld listing kept up: the engine's NWU driver and host role, the account login and the
-// hosting page over LobbyHttpFlow, and the columns and roster from a ListingSource. The process
-// owns the socket layer (net::startup / shutdown); the lister never starts or stops it.
+// opennova-serve's NovaWorld listing kept up: the engine's NWU driver and host role, the account
+// login and the hosting page over LobbyHttpFlow, and the columns and roster from a ListingSource
+// (the live match, ServeListing). The process owns the socket layer (net::startup / shutdown);
+// the lister never starts or stops it.
 class Lister {
 public:
-	// opennova-nw-lister: the listing file (and the admin port) as the source, and two UDP sockets
-	// of the lister's own.
-	explicit Lister(ListerOptions options);
-	// An embedder's source; with `session_socket` the NWU session rides that socket (the game
-	// host's, through its DatagramDemux view: retail's one socket, D-NET-346) instead of one of the
-	// lister's own. Both outlive the lister. The gate probe keeps a socket of its own, as retail's
-	// gate worker does.
+	// With `session_socket` the NWU session rides that socket (the game host's, through its
+	// DatagramDemux view: retail's one socket, D-NET-346) instead of one of the lister's own. The
+	// source and the socket outlive the lister. The gate probe keeps a socket of its own, as
+	// retail's gate worker does.
 	Lister(ListerOptions options, ListingSource &source, IDatagramSocket *session_socket);
 	~Lister();
 	Lister(const Lister &) = delete;
@@ -71,10 +63,9 @@ public:
 	// CNapiNPConnection_TeardownActiveConnection @0x6253C0 -> SendDisconnectPacket @0x61F2A0]
 	void disconnect();
 	// The mission start's server-info update: the source's columns and roster at once, then both
-	// lists in full (NwuHostRole::publish_mission_start). An embedder whose source starts missions
-	// runs it at each one; for a source without missions the lister runs it at its host result
-	// and the update again at each mission change the source shows it
-	// (ListingSource::starts_missions, D-NET-488). Nothing while not hosting.
+	// lists in full (NwuHostRole::publish_mission_start). The embedder runs it at each mission
+	// start; the host result publishes nothing (D-NET-465). Nothing while not hosting.
+	// [orig: Game_StartMission @0x5248c6..0x524903]
 	void publish_server_info();
 
 	int exit_code() const { return exit_code_; }
@@ -89,9 +80,6 @@ public:
 private:
 	enum class Phase { Connecting, LoggingIn, FetchingHostKey, Requesting, Hosting, Done };
 
-	Lister(ListerOptions options, std::unique_ptr<ListingSource> owned, ListingSource *source,
-	       IDatagramSocket *session_socket);
-
 	void on_verified();
 	void on_listed();
 	void on_http_reply(const net::HttpReply &reply);
@@ -99,7 +87,7 @@ private:
 	void request_host();
 	void sync_flow_context();
 	std::vector<std::pair<std::string, std::string>> cookie_vars();
-	bool refresh_listing(bool force);
+	void refresh_listing(bool force);
 	HostRegistration registration() const;
 	void sync_roster();
 	// Record the outcome; the teardown runs at the end of the tick, outside the driver's hooks.
@@ -109,8 +97,7 @@ private:
 	void teardown(bool stop_hosting);
 
 	ListerOptions options_;
-	std::unique_ptr<ListingSource> owned_source_;
-	ListingSource *source_ = nullptr;
+	ListingSource &source_;
 	IDatagramSocket *shared_session_socket_ = nullptr;
 	Phase phase_ = Phase::Connecting;
 	bool ending_ = false;
@@ -121,10 +108,9 @@ private:
 
 	net::ScopedSocket gate_udp_;
 	net::ScopedSocket session_udp_;
-	std::unique_ptr<net::NetDatagramSocket> gate_raw_;
-	std::unique_ptr<net::NetDatagramSocket> session_raw_;
-	std::unique_ptr<IDatagramSocket> gate_socket_;
-	std::unique_ptr<IDatagramSocket> session_socket_;
+	std::unique_ptr<net::NetDatagramSocket> gate_socket_;
+	// Unset when the session rides the embedder's socket.
+	std::unique_ptr<net::NetDatagramSocket> session_socket_;
 	NwuLobbySession lobby_;
 	NwuHostRole role_;
 
@@ -133,7 +119,6 @@ private:
 	std::vector<std::pair<std::string, std::string>> identity_vars_;
 	std::future<net::HttpReply> http_;
 	std::string host_key_;
-	std::string listed_mission_; // the mission the last refresh listed
 };
 
-} // namespace opennova::nw_lister
+} // namespace opennova::serve

@@ -174,9 +174,9 @@ empty, `admin.cfg`, read once at the start, and the ban lists `banned.txt` and
 
 A nonzero `remote_admin_port` in `game.cfg` (0, off, by default) opens retail's remote-admin
 console on that TCP port, on every interface, for retail's admin client (`RAT.exe`, shipped
-with the game) or `opennova-nw-lister --admin`. A port that cannot be opened is logged and
-the server serves on without it. `admin.cfg` holds its users and its address whitelist, in
-retail's format:
+with the game) or, on a hosted server, the NovaWorld service's admin link (ADR 0053). A port
+that cannot be opened is logged and the server serves on without it. `admin.cfg` holds its
+users and its address whitelist, in retail's format:
 
 ```text
 // <user> <password> <hex rights>

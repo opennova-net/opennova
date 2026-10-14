@@ -1,6 +1,6 @@
 // The remote-admin server (net/admin/admin_server.h) and its console
 // (runtime/inmatch/admin_console.h), driven by the CLIENT half (net/admin/admin_protocol.h, the
-// codec opennova-nw-lister's admin feed speaks) over in-memory bytes: the challenge, the login
+// codec the service's admin link speaks) over in-memory bytes: the challenge, the login
 // and its prefix rules, the QUERY report, every verb's replies in order and its side effects on
 // a host with two remote players, the rights gates and the usage mismatch, and the framing
 // edges. The witness record is docs/net/novaworld-net-re.md §6.9.
@@ -458,7 +458,6 @@ void test_get_and_set() {
 	expect(settings.rfind("AutoBalanceOnRecycle = 0\nPuntVote             = 0\nVotePercent          = 0.660000\n", 0) == 0,
 	       "the first rows, the key padded to 21 and %f six decimals");
 	expect(settings.find("GameTime             = 21/25\n") != std::string::npos, "GameTime remaining/limit");
-	expect(admin_parse_time_left_minutes(settings) == 21, "the client half reads the time left");
 	expect(settings.find("ServerName           = A Very Long Server Name Of \n") != std::string::npos,
 	       "a ServerName past 27 characters is cut (D-NET-359)");
 	expect(settings.find("ArmoryTimer          = 30\n") != std::string::npos, "ArmoryTimer from the cfg block");
@@ -526,7 +525,11 @@ void test_mission() {
 	          "0: KOTH03.BMS - () () () <> <>\n1: TDM01.BMS - () () () <CURRENT MISSION> <>\n"
 	          "2: CTF02.BMS - (2x) () (ONE_SHOT) <> <NEXT MISSION>\n",
 	          "LIST's marks");
-	expect(admin_parse_current_mission(c.one("MISSION LIST")) == "TDM01", "the client half reads the current mission");
+	{
+		const auto rotation = admin_parse_mission_list(c.one("MISSION LIST"));
+		expect(rotation.size() == 3 && rotation[1].current && rotation[1].file == "TDM01.BMS",
+				"the client half reads the current mission");
+	}
 	expect_eq(c.one("MISSION AVAILABLE"), "0. TDM01.BMS (Desert Run)\n1. CTF02.BMS (Two Flags)\n2. KOTH03.BMS (Hill)\n",
 	          "AVAILABLE");
 	expect_eq(c.one("MISSION ADD NOPE.BMS"), "ERROR - File Not Found.", "a miss");

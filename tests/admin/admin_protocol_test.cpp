@@ -87,9 +87,10 @@ int main() {
 		expect(!admin_decode_header(bad.data(), size), "a wrong marker is not a packet");
 		const uint8_t short_len[] = {0x00, 0x00, 0x0D, 0x0A, 7, 0, 0, 0};
 		expect(!admin_decode_header(short_len, size), "a length below the header is not a packet");
-		expect(admin_encode_command(ADMIN_COMMAND_PLAYER_LIST) ==
-		               std::vector<uint8_t>({'P', 'L', 'A', 'Y', 'E', 'R', ' ', 'L', 'I', 'S', 'T', 0}),
-		       "a command is its text and the NUL");
+		expect(admin_encode_command("PLAYER LIST") ==
+						std::vector<uint8_t>(
+								{ 'P', 'L', 'A', 'Y', 'E', 'R', ' ', 'L', 'I', 'S', 'T', 0 }),
+				"a command is its text and the NUL");
 	}
 
 	// The challenge: 33 bytes, byte 0 is 1, the NUL last.
@@ -168,28 +169,6 @@ int main() {
 		}
 		expect(admin_parse_player_list("NAME            \t #\tTEAM\tClass\tKills\tDeaths\tPING\n").empty(),
 		       "the header alone is no players");
-	}
-
-	// MISSION LIST: index, file, then the five tags.
-	{
-		expect(admin_parse_current_mission("0: CP01.bms - () () () <CURRENT MISSION> <>\n") == "CP01",
-		       "the current entry's file without its extension");
-		expect(admin_parse_current_mission("0: A.bms - () () () <> <NEXT MISSION>\n"
-		                                   "1: AS - Black Rock TAC.npj - (2x) (IS FLIPPED) () <CURRENT MISSION> <>\n") ==
-		               "AS - Black Rock TAC",
-		       "a file name holding ' - ', with the tags found from the end");
-		expect(admin_parse_current_mission("No missions in queue.").empty(), "the empty queue");
-		expect(admin_parse_current_mission("0: A.bms - () () () <> <NEXT MISSION>\n").empty(),
-		       "no entry current");
-	}
-
-	// GET GAMESETTINGS: the GameTime row.
-	{
-		expect(admin_parse_time_left_minutes("Tracers              = 1\nGameTime             = 21/25\n") == 21,
-		       "the remaining minutes");
-		expect(admin_parse_time_left_minutes("GameTime             = 0/0\n") == -1, "an untimed round");
-		expect(admin_parse_time_left_minutes("GameTime             = 0/30\n") == -1, "a spent round");
-		expect(admin_parse_time_left_minutes("Tracers              = 1\n") == -1, "no GameTime row");
 	}
 
 	// PLAYER LIST's numeric columns; MISSION AVAILABLE, MISSION LIST, CHAT GET and GET

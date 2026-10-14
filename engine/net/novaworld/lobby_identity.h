@@ -6,9 +6,9 @@
 
 namespace opennova {
 
-// The host-OS reads behind the verify Cookie's identity set, for any embedder (the game shell, the
-// opennova-nw-lister app). Each returns false, leaving `out` alone, where the platform has no such API
-// (everything but Windows); the embedder then supplies its own values.
+// The host-OS reads behind the verify Cookie's identity set, for any embedder (the game shell,
+// opennova-serve's listing). Each returns false, leaving `out` alone, where the platform has no
+// such API (everything but Windows); the embedder then supplies its own values.
 
 // The locale trio the Cookie leads with: the English country and language names and the base
 // time-zone bias (UTC = local + Bias, not the daylight-adjusted offset).

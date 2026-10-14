@@ -111,7 +111,7 @@ public:
 	// verified session's disconnect burst alone, with no ClientStopPlaying or
 	// ClientStopHosting, as the exit's atexit teardown of the NovaWorld session
 	// sends it (docs/net/novaworld-net-re.md D-NET-385; opennova-serve's
-	// nw_lister::Lister::disconnect). Nothing for a session not verified.
+	// serve::Lister::disconnect). Nothing for a session not verified.
 	void disconnect_at_exit();
 
 	State get_state() const { return state_; }
