@@ -127,7 +127,8 @@ void copy_token(char *dst, size_t dst_size, const io::ConfigTokens &tokens, int 
 }
 
 /* Weapon flags table — the FULL witnessed token set, both flag dwords, each name spelled as the
-   game's table spells it (the writer puts that spelling down).
+   game's table spells it and in its rows' order (the writer puts both down: Armor is row 32, after
+   NoSelect; OnlyFireScoped row 17, after ForceCrouch).
    [orig: the 16-B-stride {name, 0, flags1 bit, flags2 bit} table @ 0x830bf0;
    tokens compare case-insensitively]. The previous 7-entry table aliased
    whileswimming onto Underwater's 0x4 — corrected to the witnessed 0x1000000. */
@@ -144,13 +145,12 @@ static const FlagEntry flag_table[] = {
     {"norangecheck",   12, DEF_WEAPON_FLAG_NORANGECHECK, 0},
     {"ShowRange",       9, DEF_WEAPON_FLAG_SHOWRANGE, 0},
     {"ShowElevation",  13, DEF_WEAPON_FLAG_SHOWELEVATION, 0},
-    {"Armor",           5, DEF_WEAPON_FLAG_ARMOR, 0},
     {"OkWhileJumping", 14, DEF_WEAPON_FLAG_OKWHILEJUMPING, 0},
-    {"OnlyFireScoped", 14, DEF_WEAPON_FLAG_ONLYFIRESCOPED, 0},
     {"LollyPop",        8, DEF_WEAPON_FLAG_LOLLYPOP, 0},
     {"AbsorbPitch",    11, DEF_WEAPON_FLAG_ABSORBPITCH, 0},
     {"NoMove",          6, DEF_WEAPON_FLAG_NOMOVE, 0},
     {"ForceCrouch",    11, DEF_WEAPON_FLAG_FORCECROUCH, 0},
+    {"OnlyFireScoped", 14, DEF_WEAPON_FLAG_ONLYFIRESCOPED, 0},
     {"OnlyScoped",     10, DEF_WEAPON_FLAG_ONLYSCOPED, 0},
     {"2DImpact",        8, DEF_WEAPON_FLAG_2DIMPACT, 0},
     {"UseDesignator",  13, DEF_WEAPON_FLAG_USEDESIGNATOR, 0},
@@ -165,6 +165,7 @@ static const FlagEntry flag_table[] = {
     {"LaserBeam",       9, DEF_WEAPON_FLAG_LASERBEAM, 0},
     {"PowerThrow",     10, (int)DEF_WEAPON_FLAG_POWERTHROW, 0},
     {"NoSelect",        8, 0, DEF_WEAPON_FLAG2_NOSELECT},
+    {"Armor",           5, DEF_WEAPON_FLAG_ARMOR, 0},
     {"Parachute",       9, 0, DEF_WEAPON_FLAG2_PARACHUTE},
     {"Thermal",         7, 0, DEF_WEAPON_FLAG2_THERMAL},
     {"Monitor",         7, 0, DEF_WEAPON_FLAG2_MONITOR},

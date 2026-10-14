@@ -951,9 +951,50 @@ int retail_catalogs() {
 
 } // namespace
 
+// The #1098 review: the game keeps a type's value alone, so the words the chain reads alike are written as its
+// first match (foliage as decoration, object as powerup [orig: ItemDef_ParseProperty, the type chain
+// @0x4A02E4..0x4A04B7]); a door's death word of 0 (`num_doors 0` after `attrib: Door`, which gives 1 while still 0
+// [orig: @0x4a0cb0..0x4a0cb9]) is written and reads back 0; the weapon flags go down in the game's table rows'
+// order (Armor row 32, after NoSelect; OnlyFireScoped row 17, after ForceCrouch [orig: the table @ 0x830bf0]).
+int review_1098() {
+	int failures = 0;
+	const std::string items = "begin \"Tree\"\r\n\tid 100200\r\n\ttype foliage\r\nend\r\n"
+	                          "begin \"Crate\"\r\n\tid 100201\r\n\ttype OBJECT\r\nend\r\n"
+	                          "begin \"Door\"\r\n\tid 100202\r\n\ttype building\r\n\tattrib: Door\r\n\tnum_doors 0\r\nend\r\n";
+	{
+		Items read(items);
+		const DefWriteResult written = read.save();
+		failures += reads_back("items.def", "review: a type's first word", written, "\ttype decoration\r\n");
+		failures += reads_back("items.def", "review: a type's first word", written, "\ttype powerup\r\n");
+		if (written.text.find("foliage") != std::string::npos || written.text.find("object") != std::string::npos ||
+		    written.text.find("OBJECT") != std::string::npos) {
+			std::printf("FAIL review: a type's other word is written\n%s\n", written.text.c_str());
+			++failures;
+		}
+		failures += reads_back("items.def", "review: a door's death word of 0", written, "\tdeathtime -1\r\n");
+		Items again(written.text);
+		if (again.file.count != 3 || again.file.entries[2].deathtime_ticks != 0 ||
+		    !(again.file.entries[2].attrib & DEF_ITEM_ATTRIB_DOOR) || again.file.entries[0].type != DEF_ITEM_TYPE_FOLIAGE ||
+		    again.file.entries[1].type != DEF_ITEM_TYPE_OBJECT) {
+			std::printf("FAIL review: the items do not read back as read\n%s\n", written.text.c_str());
+			++failures;
+		}
+	}
+	{
+		const std::string weapons = "weapon \"WPN_F\"\r\n\tflags Armor\r\n\tflags NoSelect\r\n\tflags OnlyFireScoped\r\n"
+		                            "\tflags ForceCrouch\r\nend\r\n";
+		Weapons read(weapons);
+		failures += reads_back("weapon.def", "review: the flags in the game's rows' order", read.save(),
+		                       "\tflags ForceCrouch\r\n\tflags OnlyFireScoped\r\n\tflags NoSelect\r\n\tflags Armor\r\n");
+	}
+	std::printf("review: type words, a door's death word, the weapon flags' order\n");
+	return failures;
+}
+
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	int failures = 0;
+	failures += review_1098();
 	failures += shortest_reals();
 	failures += minted_parity();
 	failures += nested_order();

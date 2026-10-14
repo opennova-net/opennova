@@ -261,12 +261,13 @@ int64_t unscale(int64_t value, int64_t factor) {
 	return static_cast<int32_t>(static_cast<uint32_t>(answer));
 }
 
-// A type's word: of the two the chain reads for 2 and 6, the first or the other by `word`
-// (DefItemDef::type_word) [orig: ItemDef_ParseProperty, the type chain @0x4A02E4..0x4A04B7].
-const char *item_type(int value, int64_t word = 0) {
+// A type's word: the chain's first match of the value, of the two it reads for 2 (decoration @0x4A03B1, foliage
+// @0x4A03E2) and for 6 (powerup @0x4A0412, object @0x4A0476) [orig: ItemDef_ParseProperty, the type chain
+// @0x4A02E4..0x4A04B7]. The game keeps the value alone, and no writer of the file's is witnessed.
+const char *item_type(int value) {
 	switch (value) {
-	case 1: return "vehicle"; case 2: return word ? "foliage" : "decoration"; case 3: return "person";
-	case 4: return "marker"; case 5: return "building"; case 6: return word ? "object" : "powerup"; case 8: return "effect";
+	case 1: return "vehicle"; case 2: return "decoration"; case 3: return "person";
+	case 4: return "marker"; case 5: return "building"; case 6: return "powerup"; case 8: return "effect";
 	default: return "";
 	}
 }
@@ -359,6 +360,11 @@ void DefRecordWriter::record(DefRecordKind kind, const void *value, const std::s
             // ItemDef_ParseProperty @0x4a0cb0..0x4a0cb9].
             if (property.key == "deathtime" && item.deathtime_ticks == 1 && (item.attrib & DEF_ITEM_ATTRIB_DOOR))
                 changed = false;
+            // A door's death word of 0 is not what its attrib line leaves (1, while still 0): written, the line
+            // after the attrib line setting the word again (`deathtime -1`, which reads 0 [orig: ItemDef_ParseProperty
+            // @ 0x49fa6c-0x49faa0]), as a `num_doors 0` after `attrib: Door` does in a file.
+            if (property.key == "deathtime" && item.deathtime_ticks == 0 && (item.attrib & DEF_ITEM_ATTRIB_DOOR))
+                changed = true;
         }
 		// An item's attributes on `attrib:` lines, its first word's bits, its second's and Parent, as the files
 		// write them: the chain reads every token of a line, whichever word a token sets, and ORs it in, so
@@ -489,7 +495,7 @@ bool DefRecordWriter::property_args(DefRecordKind kind, const DefProperty &prope
 	switch (property.encoding) {
 	case DefEncoding::ItemType:
 		if (!*item_type(int(n(0)))) fail(name, key, "Unknown item type.");
-		args.push_back(item_type(int(n(0)), values.size() > 1 ? n(1) : 0)); break;
+		args.push_back(item_type(int(n(0)))); break;
 	case DefEncoding::AmmoKillZone: {
 		const char *keyword = def_ammo_kz_keyword(size_t(n(0)));
 		if (!keyword) { fail(name, key, "Unknown kill-zone type."); return false; }
