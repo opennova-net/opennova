@@ -1,7 +1,5 @@
 #pragma once
 
-#include "hosted/data_sets.h"
-
 #include <net/novaworld/connection/manager.h>
 #include <net/novaworld/gate_probe.h>
 #include <cstdint>
@@ -176,16 +174,15 @@ struct ServerConfig {
 	// (ONNET_HOSTED_WORK_DIR).
 	std::string hosted_serve_bin;
 	std::string hosted_work_dir = "backend/data/hosted";
-	// The data sets (hosted/data_sets.h), merged from ONNET_HOSTED_DATA_SETS (a
-	// JSON object keyed by data set: its default rotation, "missions", the
-	// first the starting map; the local provider's game folder,
-	// "resource_dir", and "loose_root" for one with no archives) and
-	// ONNET_HOSTED_EC2_LAUNCH_TEMPLATES (a JSON object, data set -> its launch
-	// template). The provider offers the ones it has the data of; none offered
-	// is hosting off.
-	std::vector<hosted::DataSetConfig> hosted_data_sets;
-	// Why those two did not read (a boot warning; hosting off); "" when they did.
-	std::string hosted_data_sets_error;
+	// The data sets (hosted/data_sets.h, which reads these texts):
+	// ONNET_HOSTED_DATA_SETS, a JSON object keyed by data set (its default
+	// rotation, "missions", the first the starting map; the local provider's
+	// game folder, "resource_dir", and "loose_root" for one with no archives),
+	// and ONNET_HOSTED_EC2_LAUNCH_TEMPLATES, a JSON object, data set -> its
+	// launch template. The provider offers the ones it has the data of; none
+	// offered, or texts that do not read, is hosting off.
+	std::string hosted_data_sets;
+	std::string hosted_ec2_launch_templates;
 
 	// The ec2 provider's (hosted/ec2_provider.h), each set by the deploy
 	// toolbox's `app deploy` from the Terraform outputs (DEPLOY.md, "Hosted game

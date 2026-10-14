@@ -4677,25 +4677,14 @@ int main() {
 		// The hosted servers' routes run (no supervisor: rows stay where the routes
 		// put them), with a cap of 2 and two data sets, each with a default
 		// rotation: Joint Operations and Delta Force Xtreme 2 (the local
-		// provider's folders, never read here).
+		// provider's folders, never read here). OpenNova's names no folder, so
+		// the local provider does not offer it.
 		config.hosted_provider = "local";
 		config.hosted_cap = 2;
-		{
-			namespace hosted = opennova::novaworld_server::hosted;
-			hosted::DataSetConfig jo;
-			jo.game = hosted::kDataSetJointOperations;
-			jo.missions = { "default.bms" };
-			jo.resource_dir = "unused-jo";
-			hosted::DataSetConfig dfx2;
-			dfx2.game = hosted::kDataSetDeltaForceXtreme2;
-			dfx2.missions = { "dfx2_a.bms", "dfx2_b.bms" };
-			dfx2.resource_dir = "unused-dfx2";
-			// OpenNova's names no folder: the local provider does not offer it.
-			hosted::DataSetConfig on;
-			on.game = hosted::kDataSetOpenNova;
-			on.missions = { "on.bms" };
-			config.hosted_data_sets = { dfx2, jo, on };
-		}
+		config.hosted_data_sets =
+				"{\"dfx2_consumer\":{\"missions\":[\"dfx2_a.bms\",\"dfx2_b.bms\"],\"resource_dir\":\"unused-dfx2\"},"
+				"\"jop_2_consumer\":{\"missions\":[\"default.bms\"],\"resource_dir\":\"unused-jo\"},"
+				"\"opennova_0_consumer\":{\"missions\":[\"on.bms\"]}}";
 
 		opennova::ConnectionManager manager;
 		// The push routes' channel, as main() wires it: a real NW UDP listener on a port the

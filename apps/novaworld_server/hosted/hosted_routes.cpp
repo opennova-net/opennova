@@ -171,7 +171,12 @@ void log_owner(const WebSessionUser &user, const char *what, const std::string &
 
 void HostedRoutes::configure(const ServerConfig &config) {
 	provider_ = config.hosted_provider.empty() ? std::string("none") : config.hosted_provider;
-	data_sets_ = offered_data_sets(provider_, config.hosted_data_sets);
+	// main() has warned of texts that do not read (and runs no provider then).
+	std::vector<DataSetConfig> configs;
+	std::string error;
+	data_sets_.clear();
+	if (parse_data_set_configs(config.hosted_data_sets, config.hosted_ec2_launch_templates, configs, error))
+		data_sets_ = offered_data_sets(provider_, configs);
 	enabled_ = provider_ != "none" && !data_sets_.empty();
 	cap_ = config.hosted_cap;
 	std::string games;

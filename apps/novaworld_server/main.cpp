@@ -235,13 +235,14 @@ HostedMachines make_hosted_machines(const opennova::novaworld_server::ServerConf
 		             loggable(config.hosted_provider).c_str());
 		return m;
 	}
-	if (!config.hosted_data_sets_error.empty()) {
-		std::fprintf(stderr, "[boot] WARN hosted servers: %s; hosting off\n",
-		             loggable(config.hosted_data_sets_error, 300).c_str());
+	std::vector<hosted_ns::DataSetConfig> configs;
+	std::string error;
+	if (!hosted_ns::parse_data_set_configs(config.hosted_data_sets, config.hosted_ec2_launch_templates, configs,
+	                                       error)) {
+		std::fprintf(stderr, "[boot] WARN hosted servers: %s; hosting off\n", loggable(error, 300).c_str());
 		return m;
 	}
-	std::vector<hosted_ns::DataSet> data_sets =
-			hosted_ns::offered_data_sets(config.hosted_provider, config.hosted_data_sets);
+	std::vector<hosted_ns::DataSet> data_sets = hosted_ns::offered_data_sets(config.hosted_provider, configs);
 	if (data_sets.empty()) {
 		std::fprintf(stderr, "[boot] WARN hosted servers: the %s provider has no data set (%s); hosting off\n",
 		             config.hosted_provider.c_str(),

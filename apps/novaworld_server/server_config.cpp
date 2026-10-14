@@ -105,13 +105,8 @@ ServerConfig ServerConfig::from_env() {
 	c.hosted_cap = getenv_int("ONNET_HOSTED_CAP", c.hosted_cap);
 	if (auto v = getenv_safe("ONNET_HOSTED_SERVE_BIN")) c.hosted_serve_bin = v;
 	if (auto v = getenv_safe("ONNET_HOSTED_WORK_DIR")) c.hosted_work_dir = v;
-	{
-		const char *sets = getenv_safe("ONNET_HOSTED_DATA_SETS");
-		const char *templates = getenv_safe("ONNET_HOSTED_EC2_LAUNCH_TEMPLATES");
-		if (!hosted::parse_data_set_configs(sets ? sets : "", templates ? templates : "", c.hosted_data_sets,
-					c.hosted_data_sets_error))
-			c.hosted_data_sets.clear();
-	}
+	if (auto v = getenv_safe("ONNET_HOSTED_DATA_SETS")) c.hosted_data_sets = v;
+	if (auto v = getenv_safe("ONNET_HOSTED_EC2_LAUNCH_TEMPLATES")) c.hosted_ec2_launch_templates = v;
 	if (auto v = getenv_safe("ONNET_HOSTED_EC2_REGION")) c.hosted_ec2_region = v;
 	if (auto v = getenv_safe("ONNET_HOSTED_EC2_SUBNET")) c.hosted_ec2_subnet = v;
 	if (auto v = getenv_safe("ONNET_HOSTED_DEPLOYMENT")) c.hosted_deployment = v;

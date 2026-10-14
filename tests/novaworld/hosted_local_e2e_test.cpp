@@ -229,24 +229,24 @@ int main(int argc, char **argv) {
 		const fs::path dfx2_data = temp.path / "dfx2 data";
 		write_game(data, "SERVETST.BMS", "Serve Test Map");
 		write_game(dfx2_data, "DFXTEST.BMS", "DFX2 Test Map");
-		std::vector<hosted::DataSetConfig> data_set_configs(2);
-		data_set_configs[0].game = hosted::kDataSetJointOperations;
-		data_set_configs[0].resource_dir = data.u8string();
-		data_set_configs[0].loose_root = true;
-		data_set_configs[0].missions = { "servetst.bms" };
-		data_set_configs[1].game = hosted::kDataSetDeltaForceXtreme2;
-		data_set_configs[1].resource_dir = dfx2_data.u8string();
-		data_set_configs[1].loose_root = true;
-		data_set_configs[1].missions = { "dfxtest.bms" };
+		// ONNET_HOSTED_DATA_SETS as a deployment writes it (the paths with
+		// forward slashes, which JSON takes unescaped), read as main() reads it.
+		const std::string data_sets_json = "{\"jop_2_consumer\":{\"resource_dir\":\"" + data.generic_u8string() +
+				"\",\"loose_root\":true,\"missions\":[\"servetst.bms\"]},\"dfx2_consumer\":{\"resource_dir\":\"" +
+				dfx2_data.generic_u8string() + "\",\"loose_root\":true,\"missions\":[\"dfxtest.bms\"]}}";
+		std::vector<hosted::DataSetConfig> data_set_configs;
+		std::string config_error;
+		expect(hosted::parse_data_set_configs(data_sets_json, "", data_set_configs, config_error),
+				"ONNET_HOSTED_DATA_SETS reads");
 		const std::vector<hosted::DataSet> data_sets = hosted::offered_data_sets("local", data_set_configs);
 		expect(data_sets.size() == 2, "the local provider offers both data sets");
 
 		Service service(temp.path / "hosted.db");
 		const bool up = service.start(source_dir, temp.path, /*require_host_key=*/false,
-				[&data_set_configs](nws::ServerConfig &config) {
+				[&data_sets_json](nws::ServerConfig &config) {
 					config.hosted_provider = "local";
 					config.hosted_cap = 5;
-					config.hosted_data_sets = data_set_configs;
+					config.hosted_data_sets = data_sets_json;
 				});
 		expect(up, "the service starts");
 		expect(nws::set_can_host(*service.pool.acquire(), service.owner_id, true).ok, "the owner is approved");
