@@ -29,6 +29,7 @@
 
 #include <base/io/hash.h>
 #include <base/io/os_path.h>
+#include <base/io/strutil.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/terrain_heights_document.h>
 #include <editor/project/project_files.h>
@@ -259,6 +260,43 @@ inline std::vector<uint8_t> sound_bank_of(const std::vector<std::string> &sets) 
 	std::vector<uint8_t> out;
 	std::string error;
 	opennova::lwf::encode_lwf(bank, out, error);
+	return out;
+}
+
+// A sound bank minted the same way whose sets each play one wave: set i a layer heard in both views (a
+// falloff of 100) over one member playing its single, the name's wave in lower case ("<name>.wav", at
+// unity pitch): what a project's played sounds (a clip's, a weapon's fire, a model's damage) resolve
+// and play against.
+inline std::vector<uint8_t> wave_bank_of(const std::vector<std::string> &sets) {
+	namespace lwf = opennova::lwf;
+	lwf::File bank;
+	for (size_t i = 0; i < sets.size(); ++i) {
+		lwf::Single single;
+		single.name = sets[i];
+		single.path = opennova::strutil::to_lower(sets[i]) + ".wav";
+		single.volume = 0xD2;
+		bank.singles.push_back(single);
+		lwf::Multi set;
+		set.name = sets[i];
+		set.pitch_base = lwf::kAuthoredSetPitchBase;
+		set.target_id = 100;
+		set.playlist_indices.push_back(uint32_t(i));
+		bank.multis.push_back(set);
+		lwf::Playlist layer;
+		layer.falloff_radius = 100;
+		layer.flags = lwf::kFlagInternal | lwf::kFlagExternal;
+		layer.sndparm_indices.push_back(uint32_t(i));
+		bank.playlists.push_back(layer);
+		lwf::Sndparm member;
+		member.single_index = uint32_t(i);
+		member.pitch_scaled = lwf::kPitchUnityQ16;
+		member.volume = 200;
+		member.clamp_volume = 255;
+		bank.sndparms.push_back(member);
+	}
+	std::vector<uint8_t> out;
+	std::string error;
+	lwf::encode_lwf(bank, out, error);
 	return out;
 }
 

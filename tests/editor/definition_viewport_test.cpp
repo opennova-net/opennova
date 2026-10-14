@@ -36,7 +36,6 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
-#include <formats/lwf/lwf.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <runtime/world/destruction.h>
@@ -121,37 +120,6 @@ std::string particles() {
 	       effect_text("Effect_Fire", "p_fire") + effect_text("Effect_Other", "p_other");
 }
 
-// A bank of one set playing one wave.
-std::vector<uint8_t> bank_of(const std::string &set) {
-	lwf::File bank;
-	lwf::Single single;
-	single.name = set;
-	single.path = strutil::to_lower(set) + ".wav";
-	single.volume = 0xD2;
-	bank.singles.push_back(single);
-	lwf::Multi multi;
-	multi.name = set;
-	multi.pitch_base = lwf::kAuthoredSetPitchBase;
-	multi.target_id = 100;
-	multi.playlist_indices.push_back(0);
-	bank.multis.push_back(multi);
-	lwf::Playlist layer;
-	layer.falloff_radius = 100;
-	layer.flags = lwf::kFlagInternal | lwf::kFlagExternal;
-	layer.sndparm_indices.push_back(0);
-	bank.playlists.push_back(layer);
-	lwf::Sndparm member;
-	member.single_index = 0;
-	member.pitch_scaled = lwf::kPitchUnityQ16;
-	member.volume = 200;
-	member.clamp_volume = 255;
-	bank.sndparms.push_back(member);
-	std::vector<uint8_t> out;
-	std::string error;
-	lwf::encode_lwf(bank, out, error);
-	return out;
-}
-
 // The soldier's clips as the Blender add-on writes them (an .o3a): SKIN.adm's reset, idle and walk rows over the
 // skinned fixture's three bones.
 std::string soldier_clips() {
@@ -213,7 +181,7 @@ struct DefinitionRig {
 		ok = ok && editor_test::write_bytes(root + "/models/fxpump.3di", pump_bytes()) &&
 		     editor_test::write_bytes(root + "/models/fxwreck.3di", wreck_bytes()) &&
 		     editor_test::write_text(root + "/particles/fx.ptl", particles()) &&
-		     editor_test::write_bytes(root + "/sounds/game.lwf", bank_of("EXPLO_PUMP")) &&
+		     editor_test::write_bytes(root + "/sounds/game.lwf", editor_test::wave_bank_of({"EXPLO_PUMP"})) &&
 		     editor_test::write_bytes(root + "/sounds/explo_pump.wav", test_io::read_file(repo() + "/fixtures/lwf/tone.wav")) &&
 		     editor_test::write_text(root + "/defs/items.def", editor_test::crlf(kItems)) &&
 		     editor_test::write_text(root + "/defs/weapon.def", kWeapons) &&
