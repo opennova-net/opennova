@@ -5,8 +5,9 @@ extends GutTest
 ## input as the OS sends them, go Back and Forward, taken at the root (EditorApp's _input) before the
 ## ImGui layer and any control and consumed, press and release; another button is none of theirs. The
 ## wire's navigate_back and navigate_forward answer the same, the navigation section saying where each
-## goes. Headless: no ImGui context draws, so the menu bar's arrows and Alt+Left and Alt+Right are the
-## editor_ui ctest's (tests/editor_ui/navigation_test.cpp), over the null backend.
+## goes (its refusals, nothing to go back to and a steps of 0, are tests/editor/navigation_test.cpp's).
+## Headless: no ImGui context draws, so the menu bar's arrows and Alt+Left and Alt+Right are the editor_ui
+## ctest's (tests/editor_ui/navigation_test.cpp), over the null backend.
 
 const EditorFixture := preload("res://tests/authoring/editor_fixture.gd")
 
@@ -112,10 +113,5 @@ func test_wire_goes_where_the_buttons_go() -> void:
 	var extra := _active()
 	assert_true(_seam.done({"kind": "navigate_back"}), "navigate_back goes back")
 	assert_string_contains(_active(), "main.mnu")
-	var refused: Dictionary = _seam.outcome({"kind": "navigate_back"})
-	assert_false(bool(refused.get("done", true)), "nothing back: navigate_back is refused")
-	assert_string_contains(str(refused.get("findings", [])), "navigation.none")
 	assert_true(_seam.done({"kind": "navigate_forward", "steps": 1}), "navigate_forward goes forward")
 	assert_eq(_active(), extra)
-	var answer: Dictionary = _seam.request({"kind": "navigate_forward", "steps": 0})
-	assert_false(bool(answer.get("ok", true)), "steps 0 is not read")

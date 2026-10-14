@@ -144,7 +144,7 @@ int test_folder_words() {
 // A project made, every required file created (laid out by kind, as an empty project is), then flattened
 // on disk as the base game is: what the session reads afterwards is a flat project.
 struct FlatProject {
-	editor_test::TempProjectDir dir{"opennova_editor_file_placement"};
+	test_temp::TempDir dir{"opennova_editor_file_placement"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -236,13 +236,13 @@ int test_move() {
 	TEST_EXPECT(has_code(plan_move(paths, doc, scan, font_name, ".opennova").refusals, "rename.path"));
 	const std::string export_dir = shown_path(paths.export_dir(doc), project.root);
 	TEST_EXPECT(has_code(plan_move(paths, doc, scan, font_name, export_dir + "/x").refusals, "rename.path"));
-	TEST_EXPECT(editor_test::write_text(join_path(project.root, "taken/" + font_name), "not a font"));
+	TEST_EXPECT(test_io::write_text(join_path(project.root, "taken/" + font_name), "not a font"));
 	TEST_EXPECT(has_code(plan_move(paths, doc, scan, font_name, "taken").refusals, "rename.exists"));
 	// An import's output moves only with its source; a source whose import reads files beside it does not
 	// move alone; a file another source's import reads from its place does not move.
 	const AssetScan outputs = scan_of({entry(".opennova/imported/01/logo.pcx", AssetKind::Texture, "logo.png")});
 	TEST_EXPECT(has_code(plan_move(paths, doc, outputs, "logo.pcx", "art").refusals, "rename.imported"));
-	TEST_EXPECT(editor_test::write_bytes(join_path(project.root, "set.png"), test_png::gradient_png(4, 4)));
+	TEST_EXPECT(test_io::write_file(join_path(project.root, "set.png"), test_png::gradient_png(4, 4)));
 	ImportSidecar reads;
 	reads.importer = importer_for("set.png")->id;
 	reads.version = importer_for("set.png")->version;
@@ -308,7 +308,7 @@ int test_move_import_source() {
 	if (!project.made) return 1;
 	ProjectSession &session = project.session;
 	const SessionView &v = project.view();
-	TEST_EXPECT(editor_test::write_bytes(join_path(project.root, "art/logo.png"), test_png::gradient_png(8, 8)));
+	TEST_EXPECT(test_io::write_file(join_path(project.root, "art/logo.png"), test_png::gradient_png(8, 8)));
 	const Importer *importer = importer_for("logo.png");
 	TEST_EXPECT(importer != nullptr);
 	if (!importer) return 1;

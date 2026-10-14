@@ -71,7 +71,7 @@ const TextureUse *use_of(const std::vector<TextureUse> &uses, renderer::TextureR
 }
 
 int test_uses() {
-	editor_test::TempProjectDir dir{"opennova_editor_texture_uses"};
+	test_temp::TempDir dir{"opennova_editor_texture_uses"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -82,7 +82,7 @@ int test_uses() {
 	// A model of two materials: an alpha-tested one with a diffuse and a detail row, a plain one with a
 	// normal map.
 	const std::string scene = dir.file("scene");
-	TEST_EXPECT(editor_test::write_text(scene + "/thing.o3d",
+	TEST_EXPECT(test_io::write_text(scene + "/thing.o3d",
 	                                    "o3d 2\nmodel THING\nmaterial VS_SKBASIC\nmatflags 1\nalphatest 128\n"
 	                                    "texture body.tga 1 0\ntexture grain.tga 2 0\nmaterial FF_ST_OP\n"
 	                                    "texture skin.mdt 3 4\nlod 0\npart 0 0 0 0\nmesh 0 0\n"
@@ -93,15 +93,15 @@ int test_uses() {
 	for (const char *name : {"body.tga", "body.dds", "grain.tga", "skin.mdt", "map.tga", "cloud.pcx", "stance.tga", "scopexh.tga",
 	                         "eraindrp.dds", "monogram.tga", "border3.tga", "face.tga", "face.mdt", "eye1.tga", "eye2.tga",
 	                         "pip.pcx"})
-		TEST_EXPECT(editor_test::write_bytes(root + "/textures/" + name,
+		TEST_EXPECT(test_io::write_file(root + "/textures/" + name,
 		                                     std::string(name).find(".dds") != std::string::npos ? dds_bytes() : tga_bytes()));
 	// A face animation: its base written with another extension (the loader makes it .TGA, and opens its .MDT
 	// too), its eyes as .tga.
-	TEST_EXPECT(editor_test::write_text(root + "/chars/face.grm", "basetexture face.bmp\r\neyetexture eye1.tga eye2.tga\r\n"));
-	TEST_EXPECT(editor_test::write_text(root + "/terrains/isle.trn",
+	TEST_EXPECT(test_io::write_text(root + "/chars/face.grm", "basetexture face.bmp\r\neyetexture eye1.tga eye2.tga\r\n"));
+	TEST_EXPECT(test_io::write_text(root + "/terrains/isle.trn",
 	                                    "polytrn_colormap map.tga\npolytrn_detailmap grain.tga\npolytrn_polydata isle.cpt\n"
 	                                    "polytrn_sectorcount 1\npolytrn_sectors 0\n") &&
-	            editor_test::write_text(root + "/defs/items.def",
+	            test_io::write_text(root + "/defs/items.def",
 	                                    "begin \"Brick\"\nid 100300\ntype building\nhud_image stance.tga\n"
 	                                    "shadow shadow1.tga 3.5 5.4 0.0 0.0\nend\n"
 	                                    "begin \"Pip\"\nid 100301\ntype building\nhud_image pip.pcx\nend\n"));
@@ -111,7 +111,7 @@ int test_uses() {
 		config.sky_map1 = "cloud.pcx";
 		config.sky_map2 = "cloud.pcx";
 		std::string error;
-		TEST_EXPECT(opennova::env::save_env(text, config, error) && editor_test::write_text(root + "/envs/day.env", text.str()));
+		TEST_EXPECT(opennova::env::save_env(text, config, error) && test_io::write_text(root + "/envs/day.env", text.str()));
 	}
 	editor_test::handle_to_end(session, request::rescan());
 	session.run_operations();
@@ -280,7 +280,7 @@ int test_uses() {
 // it, the texture's viewport naming the use; a file that does not use it, and a name the game opens
 // itself, refused; the request over the wire.
 int test_show_use() {
-	editor_test::TempProjectDir dir{"opennova_editor_texture_show_use"};
+	test_temp::TempDir dir{"opennova_editor_texture_show_use"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -289,31 +289,31 @@ int test_show_use() {
 	const SessionView &view = session.view();
 	const std::string root = view.project.root;
 	const std::string scene = dir.file("scene");
-	TEST_EXPECT(editor_test::write_text(scene + "/thing.o3d",
+	TEST_EXPECT(test_io::write_text(scene + "/thing.o3d",
 	                                    "o3d 2\nmodel THING\nmaterial FF_ST_OP\ntexture body.tga 1 0\nlod 0\npart 0 0 0 0\n"
 	                                    "mesh 0 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
 	TEST_EXPECT(import_assets({loose(scene + "/thing.o3d")}, ProjectPaths::for_root(root), *view.project.document, false)
 	                    .imported == std::vector<std::string>({"models/thing.3di"}));
 	for (const char *name : {"body.tga", "map.tga", "grain.tga", "logo.tga", "stance.tga", "scopexh.tga", "puff.tga", "strip.tga"})
-		TEST_EXPECT(editor_test::write_bytes(root + "/textures/" + name, tga_bytes()));
-	TEST_EXPECT(editor_test::write_text(root + "/effects/fx.ptl",
+		TEST_EXPECT(test_io::write_file(root + "/textures/" + name, tga_bytes()));
+	TEST_EXPECT(test_io::write_text(root + "/effects/fx.ptl",
 	                                    "[particledef]\r\n{\r\n\tid = a;\r\n\tgraphic1 = puff.tga, additive;\r\n}\r\n"
 	                                    "[particledef]\r\n{\r\n\tid = b;\r\n\tgraphic1 = puff.tga, blend;\r\n}\r\n"));
-	TEST_EXPECT(editor_test::write_text(root + "/terrains/isle.trn",
+	TEST_EXPECT(test_io::write_text(root + "/terrains/isle.trn",
 	                                    "polytrn_colormap map.tga\npolytrn_detailmap grain.tga\npolytrn_tilestrip strip.tga\n"
 	                                    "polytrn_polydata isle.cpt\npolytrn_sectorcount 1\npolytrn_sectors 0\n") &&
-	            editor_test::write_text(root + "/menus/extra.mnu",
+	            test_io::write_text(root + "/menus/extra.mnu",
 	                                    "<SCREEN>\r\n<NAME>EXTRA</NAME>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"PICTURE\">\r\n"
 	                                    "<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>90</RIGHT><BOTTOM>90</BOTTOM></POSITION>\r\n"
 	                                    "<APPEARANCE STATE=\"DEFAULT\" TYPE=\"IMAGE\">logo.tga</APPEARANCE>\r\n</WINDOW>\r\n"
 	                                    "</SCREEN>\r\n") &&
-	            editor_test::write_text(root + "/defs/items.def",
+	            test_io::write_text(root + "/defs/items.def",
 	                                    "begin \"Brick\"\nid 100300\ntype building\nhud_image stance.tga\nend\n"));
 	{
 		std::ostringstream text;
 		opennova::env::Config config;
 		std::string error;
-		TEST_EXPECT(opennova::env::save_env(text, config, error) && editor_test::write_text(root + "/envs/day.env", text.str()));
+		TEST_EXPECT(opennova::env::save_env(text, config, error) && test_io::write_text(root + "/envs/day.env", text.str()));
 	}
 	editor_test::handle_to_end(session, request::rescan());
 	session.run_operations();
@@ -372,7 +372,7 @@ int test_show_use() {
 		placed.entries = {a, b};
 		std::vector<uint8_t> til;
 		TEST_EXPECT(opennova::save_til(placed, til, error) &&
-		            editor_test::write_bytes(root + "/" + mission.substr(0, mission.find_last_of('.')) + ".til", til));
+		            test_io::write_file(root + "/" + mission.substr(0, mission.find_last_of('.')) + ".til", til));
 		editor_test::handle_to_end(session, request::rescan());
 		session.run_operations();
 		editor_test::handle_to_end(session, request::show_use("textures/strip.tga", "terrains/isle.trn"));

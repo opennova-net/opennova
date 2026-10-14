@@ -43,7 +43,7 @@ constexpr const char *kExit = "0/window:0/window:1";
 
 // A new project with its required files, main.mnu open and active.
 struct Menus {
-	editor_test::TempProjectDir dir;
+	test_temp::TempDir dir;
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session;
@@ -171,7 +171,7 @@ static int test_remembered_selections() {
 		std::string bytes;
 		std::string error;
 		TEST_EXPECT(opennova::io::read_file_text(path, bytes, error));
-		TEST_EXPECT(editor_test::write_text(path, bytes + "\r\n"));
+		TEST_EXPECT(test_io::write_text(path, bytes + "\r\n"));
 	}
 	const uint64_t before = menus.menu().identity();
 	menus.session.handle(request::rescan());

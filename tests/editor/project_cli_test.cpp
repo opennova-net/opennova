@@ -100,7 +100,7 @@ static bool write_archive(const std::string &path, const std::vector<std::pair<s
 // expansion/jxm/ with its pair and its own files loose, nothing at the build's root, and exports it laid
 // out as in an install.
 static int test_expansion_project() {
-	editor_test::TempProjectDir dir("opennova_project_cli_expansion");
+	test_temp::TempDir dir("opennova_project_cli_expansion");
 	const std::string install = dir.file("install"), root = dir.file("Mod");
 	TEST_EXPECT(write_archive(install + "/language.pff", { { "base.bin", "base" } }) &&
 	            write_archive(install + "/localres.pff", {}) && write_archive(install + "/resource.pff", {}));
@@ -135,7 +135,7 @@ static int test_usage_errors() {
 	TEST_EXPECT(run({"--help"}) == 2);
 	// `--install` names the game install before or after its entries; an `--entry` is never
 	// taken for it, and `--retail` (its name before S13 A4) is no option.
-	editor_test::TempProjectDir dir("opennova_project_cli_usage");
+	test_temp::TempDir dir("opennova_project_cli_usage");
 	std::string text;
 	TEST_EXPECT(run_usage(dir.file("err.txt"), {"import", "p", "--install", "--entry", "items.def"}, text) == 2);
 	TEST_EXPECT(text.find("--install needs the game install folder") != std::string::npos);
@@ -163,7 +163,7 @@ static int test_usage_errors() {
 // made with it; `new` and `status` say what it builds as; an expansion the game cannot take, or one to
 // build on with no name of its own, is refused with nothing made.
 static int test_new_expansion() {
-	editor_test::TempProjectDir dir("opennova_editor_project_cli_expansion");
+	test_temp::TempDir dir("opennova_editor_project_cli_expansion");
 	const std::string root = dir.file("Mod");
 	std::string text;
 	TEST_EXPECT(run({"new", dir.file("bad"), "--expansion", "my mod"}) == 2 && !fs::exists(dir.file("bad")));
@@ -183,7 +183,7 @@ static int test_new_expansion() {
 }
 
 static int test_new_status_validate() {
-	editor_test::TempProjectDir dir("opennova_editor_project_cli_test");
+	test_temp::TempDir dir("opennova_editor_project_cli_test");
 	const std::string root = dir.file("CliGame");
 	TEST_EXPECT(run({"status", root}) == 2);                              // no project yet
 	TEST_EXPECT(run({"new", root, "--title", "CLI Game", "--game", "jo"}) == 0);
@@ -247,7 +247,7 @@ static int test_new_status_validate() {
 		TEST_EXPECT(run({"export", root}) == 0);
 		TEST_EXPECT(run({"export", root, "--out", dir.file("shipped")}) == 0 &&
 		            fs::is_regular_file(dir.file("shipped") + "/localres.pff"));
-		TEST_EXPECT(editor_test::write_text(dir.file("taken") + "/mine.txt", "mine"));
+		TEST_EXPECT(test_io::write_text(dir.file("taken") + "/mine.txt", "mine"));
 		TEST_EXPECT(run({"export", root, "--out", dir.file("taken")}) == 1 && !fs::exists(dir.file("taken") + "/localres.pff"));
 		TEST_EXPECT(run({"export", root, "--out", root + "/inside"}) == 1 && !fs::exists(root + "/inside"));
 		TEST_EXPECT(run({"validate", root}) == 0); // the export folder is no file of the project
@@ -257,11 +257,11 @@ static int test_new_status_validate() {
 	// is, whatever its bytes, unless --replace writes it over (S19, "The import a modder reads").
 	TEST_EXPECT(run({"import", root}) == 2);
 	const std::string source = dir.file("source.txt");
-	TEST_EXPECT(editor_test::write_text(source, "imported file"));
+	TEST_EXPECT(test_io::write_text(source, "imported file"));
 	TEST_EXPECT(run({"import", root, source}) == 0);
 	TEST_EXPECT(std::filesystem::is_regular_file(root + "/source.txt"));
 	TEST_EXPECT(run({"import", root, source}) == 0);
-	TEST_EXPECT(editor_test::write_text(source, "changed file"));
+	TEST_EXPECT(test_io::write_text(source, "changed file"));
 	std::string held_text, held_error;
 	TEST_EXPECT(run({"import", root, source}) == 0 && opennova::io::read_file_text(root + "/source.txt", held_text, held_error) &&
 	            held_text == "imported file");
@@ -269,7 +269,7 @@ static int test_new_status_validate() {
 	            held_text == "changed file");
 
 	// A file with the wrong content behind a required name is an error too.
-	TEST_EXPECT(editor_test::write_text(root + "/strings/gametext.bin", "raw"));
+	TEST_EXPECT(test_io::write_text(root + "/strings/gametext.bin", "raw"));
 	TEST_EXPECT(run({"validate", root}) == 1);
 	TEST_EXPECT(run({"create-missing", root}) == 1); // refused, never overwritten
 	TEST_EXPECT(run({"build", root}) == 1);          // blocked until fixed
@@ -295,7 +295,7 @@ static bool mark_for_import(const std::string &source) {
 // pass first, so a fresh clone (no outputs, no import cache) still builds with the
 // imported texture, and validate lists the import findings.
 static int test_imports() {
-	editor_test::TempProjectDir dir("opennova_editor_project_cli_imports");
+	test_temp::TempDir dir("opennova_editor_project_cli_imports");
 	const std::string root = dir.file("Imports");
 	const std::string capture = dir.file("capture.txt");
 	std::string text;
@@ -303,7 +303,7 @@ static int test_imports() {
 	// A project made in a folder that holds a source imports none of it: new opens it without the
 	// import pass, and the first verb that reads it imports.
 	const std::string holder = dir.file("Holder");
-	TEST_EXPECT(editor_test::write_bytes(holder + "/art/logo.png", test_png::gradient_png(8, 8)));
+	TEST_EXPECT(test_io::write_file(holder + "/art/logo.png", test_png::gradient_png(8, 8)));
 	TEST_EXPECT(mark_for_import(holder + "/art/logo.png"));
 	TEST_EXPECT(run({"new", holder}) == 0);
 	TEST_EXPECT(!fs::exists(holder + "/.opennova/imported"));
@@ -313,14 +313,14 @@ static int test_imports() {
 	TEST_EXPECT(run({"new", root}) == 0);
 	TEST_EXPECT(run({"create-missing", root}) == 0);
 	// A PNG with no record is a texture the build packs as it is.
-	TEST_EXPECT(editor_test::write_bytes(root + "/art/plain.png", test_png::gradient_png(4, 4, 3)));
-	TEST_EXPECT(editor_test::write_bytes(root + "/art/logo.png", test_png::gradient_png(8, 8)));
+	TEST_EXPECT(test_io::write_file(root + "/art/plain.png", test_png::gradient_png(4, 4, 3)));
+	TEST_EXPECT(test_io::write_file(root + "/art/logo.png", test_png::gradient_png(8, 8)));
 	TEST_EXPECT(mark_for_import(root + "/art/logo.png"));
 	TEST_EXPECT(run_capture(capture, {"status", root}, text) == 0);
 	TEST_EXPECT(text.find("imports: 1 source, 1 imported now, 0 failed") != std::string::npos);
 	TEST_EXPECT(fs::is_regular_file(root + "/art/logo.png.import"));
 	// A PNG brought in by `import` is imported at once, as the editor's rescan does.
-	TEST_EXPECT(editor_test::write_bytes(dir.file("splash.png"), test_png::gradient_png(4, 4, 5)));
+	TEST_EXPECT(test_io::write_file(dir.file("splash.png"), test_png::gradient_png(4, 4, 5)));
 	TEST_EXPECT(run_capture(capture, {"import", root, dir.file("splash.png")}, text) == 0);
 	TEST_EXPECT(text.find("-> 1 output") != std::string::npos);
 	// It lands where the project keeps its textures (DI-03: beside art/plain.png and art/logo.png's, not in a
@@ -355,7 +355,7 @@ static int test_imports() {
 	TEST_EXPECT(run({"validate", root}) == 0);
 	// A source that no longer decodes, with its output gone: validate lists the import
 	// failure and the output it could not make, and the build is blocked.
-	TEST_EXPECT(editor_test::write_text(root + "/art/logo.png", "not a png"));
+	TEST_EXPECT(test_io::write_text(root + "/art/logo.png", "not a png"));
 	fs::remove_all(root + "/.opennova/imported", ec);
 	TEST_EXPECT(run_capture(capture, {"validate", root}, text) == 1);
 	TEST_EXPECT(text.find("import.decode") != std::string::npos && text.find("import.output_missing") != std::string::npos);
@@ -366,7 +366,7 @@ static int test_imports() {
 	TEST_EXPECT(text.find("import.orphan_record") != std::string::npos && text.find("import.decode") == std::string::npos);
 	// A PNG brought in that does not decode: it is written, the pass fails on it, and the Problems
 	// row on it is said on the error stream (exit 1).
-	TEST_EXPECT(editor_test::write_text(dir.file("broken.png"), "not a png"));
+	TEST_EXPECT(test_io::write_text(dir.file("broken.png"), "not a png"));
 	TEST_EXPECT(run_usage(capture, {"import", root, dir.file("broken.png")}, text) == 1);
 	TEST_EXPECT(text.find("error import.decode") != std::string::npos && text.find("broken.png") != std::string::npos);
 	return 0;
@@ -377,19 +377,19 @@ static int test_imports() {
 // it, where it comes from; what is not found; what is not followed) and writes nothing;
 // without --with-dependencies the plan is the source alone (S11g).
 static int test_import_with_dependencies() {
-	editor_test::TempProjectDir dir("opennova_editor_project_cli_dependencies");
+	test_temp::TempDir dir("opennova_editor_project_cli_dependencies");
 	const std::string root = dir.file("game");
 	TEST_EXPECT(run({"new", root, "--title", "Dependencies"}) == 0);
 	const std::string art = dir.file("art");
 	const std::string position = "<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>9</RIGHT><BOTTOM>9</BOTTOM></POSITION>\r\n";
-	TEST_EXPECT(editor_test::write_text(art + "/a.mnu", "<SCREEN>\r\n<NAME>A</NAME>\r\n<WINDOW TYPE=\"BUTTON\" NAME=\"GO\">\r\n" +
+	TEST_EXPECT(test_io::write_text(art + "/a.mnu", "<SCREEN>\r\n<NAME>A</NAME>\r\n<WINDOW TYPE=\"BUTTON\" NAME=\"GO\">\r\n" +
 	                                                        position + "<FONT><NAME>arial99</NAME></FONT>\r\n"
 	                                                        "<APPEARANCE STATE=\"DEFAULT\" TYPE=\"IMAGE\">gone.tga</APPEARANCE>\r\n"
 	                                                        "<ACTION TYPE=\"SCREEN\" FILE=\"b.mnu\">B</ACTION>\r\n"
 	                                                        "</WINDOW>\r\n</SCREEN>\r\n"));
-	TEST_EXPECT(editor_test::write_text(art + "/b.mnu", "<SCREEN>\r\n<NAME>B</NAME>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"BACK\">\r\n" +
+	TEST_EXPECT(test_io::write_text(art + "/b.mnu", "<SCREEN>\r\n<NAME>B</NAME>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"BACK\">\r\n" +
 	                                                        position + "</WINDOW>\r\n</SCREEN>\r\n"));
-	TEST_EXPECT(editor_test::write_text(art + "/arial99.fnt", "fnt"));
+	TEST_EXPECT(test_io::write_text(art + "/arial99.fnt", "fnt"));
 	const std::string capture = dir.file("out.txt");
 	std::string text;
 	const auto has = [&text](const std::string &line) { return text.find(line) != std::string::npos; };
@@ -447,13 +447,13 @@ static int run_list(const std::string &capture_file, const std::vector<std::stri
 // was last imported (its outputs, its record and the import cache stale), nothing on the disk
 // changes. A real import runs the pass as every command does.
 static int test_dry_run_writes_nothing() {
-	editor_test::TempProjectDir dir("opennova_editor_project_cli_dry_run");
+	test_temp::TempDir dir("opennova_editor_project_cli_dry_run");
 	const std::string root = dir.file("game");
 	TEST_EXPECT(run({"new", root}) == 0);
-	TEST_EXPECT(editor_test::write_bytes(root + "/art/logo.png", test_png::gradient_png(8, 8)));
+	TEST_EXPECT(test_io::write_file(root + "/art/logo.png", test_png::gradient_png(8, 8)));
 	TEST_EXPECT(mark_for_import(root + "/art/logo.png"));
 	TEST_EXPECT(run({"status", root}) == 0);
-	TEST_EXPECT(editor_test::write_bytes(root + "/art/logo.png", test_png::gradient_png(8, 8, 9))); // changed since
+	TEST_EXPECT(test_io::write_file(root + "/art/logo.png", test_png::gradient_png(8, 8, 9))); // changed since
 	// Dated past the import, as a later edit is: the import cache vouches for a source's hash while
 	// its size and last write hold, and a file system's clock can stand still for milliseconds
 	// (some 4 ms on Linux), so a rewrite at the same size this soon after the import would read
@@ -463,7 +463,7 @@ static int test_dry_run_writes_nothing() {
 	TEST_EXPECT(!ec);
 	fs::last_write_time(root + "/art/logo.png", rewritten + std::chrono::hours(1), ec);
 	TEST_EXPECT(!ec);
-	TEST_EXPECT(editor_test::write_text(dir.file("notes.txt"), "notes"));
+	TEST_EXPECT(test_io::write_text(dir.file("notes.txt"), "notes"));
 	const std::string record = root + "/art/logo.png.import";
 	std::string stale, now, error;
 	TEST_EXPECT(opennova::io::read_file_text(record, stale, error));
@@ -492,7 +492,7 @@ static int test_dry_run_writes_nothing() {
 // bring it; with --with-dependencies the texture beside it comes too, and only the one found
 // nowhere is said.
 static int test_scene_textures() {
-	editor_test::TempProjectDir dir("opennova_editor_project_cli_scene");
+	test_temp::TempDir dir("opennova_editor_project_cli_scene");
 	const std::string root = dir.file("game");
 	TEST_EXPECT(run({"new", root}) == 0);
 	const std::string scene = dir.file("scene");
@@ -500,7 +500,7 @@ static int test_scene_textures() {
 	fs::create_directories(scene, ec);
 	fs::copy_file(fs::path(test_paths_repo_root(__FILE__)) / "fixtures" / "threedi" / "o3d" / "spinner.o3d",
 	              scene + "/spinner.o3d", ec);
-	TEST_EXPECT(!ec && editor_test::write_text(scene + "/SPINNER.TGA", "tga")); // it names spinner.tga and glow.tga
+	TEST_EXPECT(!ec && test_io::write_text(scene + "/SPINNER.TGA", "tga")); // it names spinner.tga and glow.tga
 	std::string text;
 	TEST_EXPECT(run_usage(dir.file("err.txt"), {"import", root, scene + "/spinner.o3d"}, text) == 1);
 	TEST_EXPECT(fs::is_regular_file(root + "/models/spinner.3di") && !fs::exists(root + "/textures/SPINNER.TGA"));
@@ -524,7 +524,7 @@ static int test_scene_textures() {
 // import meets: 1001 members of an archive with --with-dependencies plan whole, and the command
 // imports every one and says nothing of a stop.
 static int test_many() {
-	editor_test::TempProjectDir dir("opennova_editor_project_cli_many");
+	test_temp::TempDir dir("opennova_editor_project_cli_many");
 	const std::string root = dir.file("game");
 	TEST_EXPECT(run({"new", root}) == 0);
 	std::vector<std::string> names;
@@ -580,16 +580,16 @@ std::vector<std::string> lines_of(const std::string &text) {
 // which no row shows, before the verdict; and exit 1, as the build is refused. The texture gone, the
 // render check's warning and the notes and exit 0: a warning never refuses a build.
 static int test_validate_pins_the_rows() {
-	editor_test::TempProjectDir dir("opennova_editor_project_cli_problems");
+	test_temp::TempDir dir("opennova_editor_project_cli_problems");
 	const std::string root = dir.file("Problems");
 	TEST_EXPECT(run({"new", root, "--title", "Problems"}) == 0);
 	TEST_EXPECT(run({"create-missing", root}) == 0);
-	TEST_EXPECT(editor_test::write_text(root + "/menus/extra.mnu",
+	TEST_EXPECT(test_io::write_text(root + "/menus/extra.mnu",
 	                                    "<SCREEN>\r\n<NAME>EXTRA</NAME>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"TITLE\">\r\n"
 	                                    "<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>90</RIGHT><BOTTOM>90</BOTTOM></POSITION>\r\n"
 	                                    "<APPEARANCE STATE=\"DEFAULT\" TYPE=\"COLOR\">FF0000</APPEARANCE>\r\n"
 	                                    "</WINDOW>\r\n</SCREEN>\r\n"));
-	TEST_EXPECT(editor_test::write_text(root + "/art/a_texture_name_too_long.pcx", "pcx"));
+	TEST_EXPECT(test_io::write_text(root + "/art/a_texture_name_too_long.pcx", "pcx"));
 	const std::string name_row =
 	        "error asset.name.too_long: The file name a_texture_name_too_long.pcx is longer than 16 characters; the "
 	        "game cannot store it in an archive. [art/a_texture_name_too_long.pcx]";
@@ -648,7 +648,7 @@ static int test_one_game_install() {
 			fs::current_path(saved, ignored);
 		}
 	} const restore;
-	editor_test::TempProjectDir dir("opennova_editor_project_cli_install");
+	test_temp::TempDir dir("opennova_editor_project_cli_install");
 	const std::string root = dir.file("Install");
 	TEST_EXPECT(run({"new", root, "--title", "Install"}) == 0);
 	const std::string install = dir.file("Joint Ops");
@@ -660,7 +660,7 @@ static int test_one_game_install() {
 	TEST_EXPECT(opennova::pff::pff_write_archive((install + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3,
 	                                             entries, 1) == opennova::pff::PFF_WRITE_OK);
 	const std::string art = dir.file("art");
-	TEST_EXPECT(editor_test::write_text(art + "/a.mnu", "<SCREEN>\r\n<NAME>A</NAME>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"GO\">\r\n"
+	TEST_EXPECT(test_io::write_text(art + "/a.mnu", "<SCREEN>\r\n<NAME>A</NAME>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"GO\">\r\n"
 	                                                    "<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>9</RIGHT><BOTTOM>9</BOTTOM>"
 	                                                    "</POSITION>\r\n<FONT><NAME>arial99</NAME></FONT>\r\n</WINDOW>\r\n"
 	                                                    "</SCREEN>\r\n"));
@@ -691,7 +691,7 @@ static int test_one_game_install() {
 	// Everything the install has (ADR 0046 S14): its archives' files and the loose files the game
 	// ships beside them, chosen at once, with no walk and nothing else named; imported as the plan
 	// has them.
-	TEST_EXPECT(editor_test::write_text(install + "/menumus.sbf", "music") && editor_test::write_text(install + "/game.cfg", "cfg"));
+	TEST_EXPECT(test_io::write_text(install + "/menumus.sbf", "music") && test_io::write_text(install + "/game.cfg", "cfg"));
 	TEST_EXPECT(run_usage(dir.file("err.txt"), {"import", root, "--all", "--entry", "arial99.fnt"}, text) == 2 &&
 	            text.find("--all") != std::string::npos);
 	// Every file and a walk at once: a usage error, never a flag left unread (S14 R4).
@@ -727,12 +727,12 @@ static int test_one_game_install() {
 // install chosen again in the project settings) makes a new file, which the command line then
 // reads with nothing to say.
 static int test_older_local_settings() {
-	editor_test::TempProjectDir dir("opennova_editor_project_cli_older_local");
+	test_temp::TempDir dir("opennova_editor_project_cli_older_local");
 	const std::string root = dir.file("Older");
 	TEST_EXPECT(run({ "new", root, "--title", "Older" }) == 0);
 	const std::string install = dir.file("Joint Ops");
 	const std::string local = opennova::editor::ProjectPaths::for_root(root).local_settings_file;
-	TEST_EXPECT(editor_test::write_text(local,
+	TEST_EXPECT(test_io::write_text(local,
 			"{\"retail_root\": \"" + install +
 					"\", \"runtime_executable\": \"\", \"schema_version\": 1}\n"));
 	std::string text;

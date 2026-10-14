@@ -266,7 +266,7 @@ int test_findings() {
 // --- the project ------------------------------------------------------------------------------------------
 
 struct TalkProject {
-	editor_test::TempProjectDir dir{"opennova_editor_dialog_bank"};
+	test_temp::TempDir dir{"opennova_editor_dialog_bank"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -277,12 +277,12 @@ struct TalkProject {
 		editor_test::create_missing_files(session);
 		root = session.view().project.root;
 		const std::vector<uint8_t> tone = test_io::read_file(repo() + "/fixtures/lwf/tone.wav");
-		made = !tone.empty() && editor_test::write_bytes(root + "/missions/talk.bms", mission_bytes()) &&
-		       editor_test::write_bytes(root + "/missions/talk.dbf", dbf_bytes()) &&
-		       editor_test::write_bytes(root + "/missions/talk.lwf", sounds_bytes()) &&
-		       editor_test::write_bytes(root + "/missions/talk.bin", text_bytes()) &&
-		       editor_test::write_bytes(root + "/sounds/z01r100.wav", tone) &&
-		       editor_test::write_bytes(root + "/sounds/z01r101.wav", tone);
+		made = !tone.empty() && test_io::write_file(root + "/missions/talk.bms", mission_bytes()) &&
+		       test_io::write_file(root + "/missions/talk.dbf", dbf_bytes()) &&
+		       test_io::write_file(root + "/missions/talk.lwf", sounds_bytes()) &&
+		       test_io::write_file(root + "/missions/talk.bin", text_bytes()) &&
+		       test_io::write_file(root + "/sounds/z01r100.wav", tone) &&
+		       test_io::write_file(root + "/sounds/z01r101.wav", tone);
 		editor_test::handle_to_end(session, request::rescan());
 		while (session.view().activity.validation.running) session.poll();
 	}

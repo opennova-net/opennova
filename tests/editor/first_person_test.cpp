@@ -87,7 +87,7 @@ const char *kAvatars =
 // A project of the gun (the skinned fixture), the arms (the same model under another name), GUN.adm's clips,
 // its bank and waves, weapon.def and Avatars.def; GUN.adm open with the row `key` selected.
 struct GunProject {
-	editor_test::TempProjectDir dir{"opennova_editor_first_person"};
+	test_temp::TempDir dir{"opennova_editor_first_person"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -102,17 +102,17 @@ struct GunProject {
 		root = session.view().project.root;
 		const std::string source = dir.file("source");
 		const std::vector<uint8_t> skinned = test_io::read_file(repo() + "/fixtures/threedi/o3d/skinned.o3d");
-		bool ok = editor_test::write_bytes(source + "/gun.o3d", skinned) &&
-		          editor_test::write_bytes(source + "/arms.o3d", skinned) &&
-		          editor_test::write_text(source + "/gun.o3a", gun_clips());
+		bool ok = test_io::write_file(source + "/gun.o3d", skinned) &&
+		          test_io::write_file(source + "/arms.o3d", skinned) &&
+		          test_io::write_text(source + "/gun.o3a", gun_clips());
 		EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 		import.imports = {{source + "/gun.o3d", {}}, {source + "/arms.o3d", {}}, {source + "/gun.o3a", {}}};
 		session.handle(import);
 		session.run_operations();
-		ok = ok && editor_test::write_bytes(root + "/sounds/game.lwf", editor_test::wave_bank_of(std::vector<std::string>(std::begin(kSets), std::end(kSets))));
+		ok = ok && test_io::write_file(root + "/sounds/game.lwf", editor_test::wave_bank_of(std::vector<std::string>(std::begin(kSets), std::end(kSets))));
 		const std::vector<uint8_t> tone = test_io::read_file(repo() + "/fixtures/lwf/tone.wav");
-		for (const char *set : kSets) ok = ok && editor_test::write_bytes(root + "/sounds/" + strutil::to_lower(set) + ".wav", tone);
-		ok = ok && editor_test::write_text(root + "/" + at("Avatars.def"), editor_test::crlf(kAvatars));
+		for (const char *set : kSets) ok = ok && test_io::write_file(root + "/sounds/" + strutil::to_lower(set) + ".wav", tone);
+		ok = ok && test_io::write_text(root + "/" + at("Avatars.def"), test_io::crlf(kAvatars));
 		made = ok && write_weapons("\tflags auto\n") && select("anim_wpn_fire");
 	}
 
@@ -123,7 +123,7 @@ struct GunProject {
 		return entry ? entry->relative_path : "defs/" + name;
 	}
 	bool write_weapons(const std::string &flags) {
-		if (!editor_test::write_text(root + "/" + at("weapon.def"), editor_test::crlf(weapons(flags)))) return false;
+		if (!test_io::write_text(root + "/" + at("weapon.def"), test_io::crlf(weapons(flags)))) return false;
 		editor_test::handle_to_end(session, request::rescan());
 		while (session.view().activity.validation.running) session.poll();
 		return true;

@@ -118,7 +118,7 @@ std::vector<uint8_t> mission_text() {
 }
 
 struct TryProject {
-	editor_test::TempProjectDir dir{"opennova_editor_menu_try"};
+	test_temp::TempDir dir{"opennova_editor_menu_try"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -135,15 +135,15 @@ struct TryProject {
 		const AssetEntry *menu = session.view().project.scan->named("main.mnu");
 		path = menu ? menu->relative_path : std::string();
 		written = main_menu();
-		bool ok = menu && editor_test::write_text(root + "/" + path, written);
-		ok = ok && editor_test::write_text(root + "/other.mnu", other_menu());
-		ok = ok && editor_test::write_text(root + "/sp.mnu", sp_menu());
-		ok = ok && editor_test::write_text(root + "/opt.mnu", options_menu());
-		ok = ok && editor_test::write_bytes(root + "/sounds/menu.lwf", editor_test::sound_bank_of({"OVER", "CLICK"}));
+		bool ok = menu && test_io::write_text(root + "/" + path, written);
+		ok = ok && test_io::write_text(root + "/other.mnu", other_menu());
+		ok = ok && test_io::write_text(root + "/sp.mnu", sp_menu());
+		ok = ok && test_io::write_text(root + "/opt.mnu", options_menu());
+		ok = ok && test_io::write_file(root + "/sounds/menu.lwf", editor_test::sound_bank_of({"OVER", "CLICK"}));
 		const std::vector<uint8_t> tone = test_io::read_file(repo() + "/fixtures/lwf/tone.wav");
-		for (const char *wave : {"over", "click"}) ok = ok && editor_test::write_bytes(root + "/sounds/" + wave + ".wav", tone);
-		ok = ok && editor_test::write_bytes(root + "/trymission.bms", test_io::read_file(repo() + "/fixtures/bms/synth_logic.bms"));
-		ok = ok && editor_test::write_bytes(root + "/trymission.bin", mission_text());
+		for (const char *wave : {"over", "click"}) ok = ok && test_io::write_file(root + "/sounds/" + wave + ".wav", tone);
+		ok = ok && test_io::write_file(root + "/trymission.bms", test_io::read_file(repo() + "/fixtures/bms/synth_logic.bms"));
+		ok = ok && test_io::write_file(root + "/trymission.bin", mission_text());
 		editor_test::handle_to_end(session, request::rescan());
 		while (session.view().activity.validation.running) session.poll();
 		session.handle(request::open_document(path));
@@ -374,14 +374,14 @@ int test_try_lists_the_mods() {
 	if (!project.made) return 1;
 	// The game install the project plays over: two expansion folders, one named by its loose <n>.bin.
 	const std::string install = project.dir.file("install");
-	bool ok = editor_test::write_bytes(install + "/expansion/onjo1/onjo1.bin", exp_info("OpenNova: Indigo Storm", "A storm."));
-	ok = ok && editor_test::write_bytes(install + "/expansion/jox01/version.txt", { '1' });
+	bool ok = test_io::write_file(install + "/expansion/onjo1/onjo1.bin", exp_info("OpenNova: Indigo Storm", "A storm."));
+	ok = ok && test_io::write_file(install + "/expansion/jox01/version.txt", { '1' });
 	const std::string mods = screen("OPTIONS",
 			button("list", "AVAIL_LIST", 100, 100, 390, 300,
 					"<FONT><NAME>Arial12b.fnt</NAME></FONT><MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>") +
 					button("multiline_edit", "MOD_DESC", 410, 100, 700, 300, "") +
 					button("button", "ACCEPT", 510, 400, 700, 440, ""));
-	ok = ok && editor_test::write_text(project.root + "/mods.mnu", mods);
+	ok = ok && test_io::write_text(project.root + "/mods.mnu", mods);
 	TEST_EXPECT(ok);
 	editor_test::handle_to_end(project.session, request::open_project(project.root, false, install));
 	while (project.session.view().activity.validation.running) project.session.poll();

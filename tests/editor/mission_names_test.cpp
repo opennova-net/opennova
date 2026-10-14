@@ -228,7 +228,7 @@ int test_variable_names() {
 // The variables op of mission_logic over a session: the names listed with the table and how many are left; the
 // edits naming one, passed back through edit_record as they are; a refusal answered in words.
 int test_variables_wire() {
-	editor_test::TempProjectDir dir("opennova_mission_names_wire");
+	test_temp::TempDir dir("opennova_mission_names_wire");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -236,7 +236,7 @@ int test_variables_wire() {
 	editor_test::create_missing_files(session);
 	const std::vector<uint8_t> bytes =
 	        test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/bms/synth_logic.bms");
-	TEST_EXPECT(editor_test::write_bytes(session.view().project.root + "/missions/logic.bms", bytes));
+	TEST_EXPECT(test_io::write_file(session.view().project.root + "/missions/logic.bms", bytes));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::handle_to_end(session, request::open_document("missions/logic.bms"));
 	const auto ask = [&](const std::string &args) {
@@ -350,7 +350,7 @@ JsonValue snapshot_of(const char *mission, int tick = 640) {
 // once the game ends; and the link to the game's endpoint (session/live_logic_link) over a fake stream: initialize,
 // the snapshot polled, a call made, an answer that does not come given up.
 int test_live_session() {
-	editor_test::TempProjectDir dir("opennova_mission_live_session");
+	test_temp::TempDir dir("opennova_mission_live_session");
 	editor_test::FakePlatform platform;
 	platform.terminate_exits = false;
 	MemoryPreferencesStore preferences;
@@ -374,11 +374,11 @@ int test_live_session() {
 		TEST_EXPECT(mission::insert_event_trigger(file, 0, 0, trigger, made) && bms::write(file, bytes, made));
 	}
 	const char *path = "missions/logic.bms";
-	TEST_EXPECT(editor_test::write_bytes(v.project.root + "/" + path, bytes));
+	TEST_EXPECT(test_io::write_file(v.project.root + "/" + path, bytes));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::handle_to_end(session, request::open_document(path));
 	const std::string runtime = dir.file("runtime/opennova.exe");
-	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
+	TEST_EXPECT(test_io::write_text(runtime, "MZ"));
 	PlayLauncher launcher;
 	launcher.executable = runtime;
 	launcher.mcp_port = 8993;
@@ -1163,7 +1163,7 @@ const Diagnostic *finding_of(const SessionView &view, const char *code, const st
 
 // A session over a new project for the .mis: missions written into it, read, edited and saved.
 struct NamesProject {
-	editor_test::TempProjectDir dir;
+	test_temp::TempDir dir;
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -1175,7 +1175,7 @@ struct NamesProject {
 	}
 	const SessionView &view() const { return session.view(); }
 	void run(const EditorRequest &request) { editor_test::handle_to_end(session, request); }
-	bool put(const std::string &file, const std::vector<uint8_t> &bytes) { return editor_test::write_bytes(root + "/" + file, bytes); }
+	bool put(const std::string &file, const std::vector<uint8_t> &bytes) { return test_io::write_file(root + "/" + file, bytes); }
 	bool put(const std::string &file, const std::string &text) { return put(file, bytes_of(text)); }
 	std::string text(const std::string &file) const { return test_io::read_file_text(root + "/" + file); }
 	bool exists(const std::string &file) const {

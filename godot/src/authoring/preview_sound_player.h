@@ -43,6 +43,8 @@ public:
 	// Starts the voices once every decode is done; how the play stands (`r_error` why it failed: every
 	// voice failed to decode). Ended once every voice played through.
 	State pump(std::string &r_error);
+	// Every voice's decode waited on (a test's): the next pump starts the play or fails it.
+	void wait();
 	State state() const { return state_; }
 	// The first voice's wave ("" idle).
 	const std::string &path() const { return path_; }

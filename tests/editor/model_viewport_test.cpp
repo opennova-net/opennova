@@ -123,7 +123,7 @@ void apply(ProjectSession &session, const std::string &path, std::vector<Edit> e
 } // namespace
 
 static int test_status_and_builds() {
-	editor_test::TempProjectDir dir("opennova_editor_model_viewport");
+	test_temp::TempDir dir("opennova_editor_model_viewport");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -134,7 +134,7 @@ static int test_status_and_builds() {
 
 	session.handle(request::new_project(dir.file("project"), "Model Viewport Test"));
 	session.run_operations();
-	TEST_EXPECT(editor_test::write_bytes(dir.file("project/models/armory.3di"), test_io::read_file(synth("armory.3di"))));
+	TEST_EXPECT(test_io::write_file(dir.file("project/models/armory.3di"), test_io::read_file(synth("armory.3di"))));
 	session.handle(request::rescan());
 	session.run_operations();
 	rig.pump();
@@ -198,12 +198,12 @@ static int test_status_and_builds() {
 	TEST_EXPECT(shown.get("options")->get("ctrl")->get("HEAT")->number == 5.0);
 
 	// A texture the device read (or looked for) changes: it builds again.
-	TEST_EXPECT(editor_test::write_bytes(dir.file("project/textures/preview_skin.tga"), std::vector<uint8_t>(18, 0)));
+	TEST_EXPECT(test_io::write_file(dir.file("project/textures/preview_skin.tga"), std::vector<uint8_t>(18, 0)));
 	session.handle(request::rescan());
 	session.run_operations();
 	TEST_EXPECT(rig.pump() == ViewportAction::Rebuild && rig.builds() == 3);
 	// Changed again in the same follow as a user point's edit (which alone is an Update): it builds.
-	TEST_EXPECT(editor_test::write_bytes(dir.file("project/textures/preview_skin.tga"), std::vector<uint8_t>(36, 0)));
+	TEST_EXPECT(test_io::write_file(dir.file("project/textures/preview_skin.tga"), std::vector<uint8_t>(36, 0)));
 	session.handle(request::rescan());
 	session.run_operations();
 	TEST_EXPECT(document->get(point, "position.x", value));
@@ -225,14 +225,14 @@ static int test_status_and_builds() {
 // aside: a light's colour another builds; a user point's place alone is an Update. A change set that
 // names nothing patches nothing and is Keep.
 static int test_unknown_and_empty_changes() {
-	editor_test::TempProjectDir dir("opennova_editor_model_viewport_unknown");
+	test_temp::TempDir dir("opennova_editor_model_viewport_unknown");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	Rig rig{session};
 	session.handle(request::new_project(dir.file("project"), "Unknown Changes"));
 	session.run_operations();
-	TEST_EXPECT(editor_test::write_bytes(dir.file("project/models/armory.3di"), test_io::read_file(synth("armory.3di"))));
+	TEST_EXPECT(test_io::write_file(dir.file("project/models/armory.3di"), test_io::read_file(synth("armory.3di"))));
 	session.handle(request::rescan());
 	session.run_operations();
 	session.handle(request::open_document("models/armory.3di"));
@@ -323,14 +323,14 @@ static int test_camera() {
 // a marker's pixel picks it and names its record, the record maps back to the marker; the pivots
 // show when asked.
 static int test_overlays() {
-	editor_test::TempProjectDir dir("opennova_editor_model_viewport_overlays");
+	test_temp::TempDir dir("opennova_editor_model_viewport_overlays");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	Rig rig{session};
 	session.handle(request::new_project(dir.file("project"), "Overlay Test"));
 	session.run_operations();
-	TEST_EXPECT(editor_test::write_bytes(dir.file("project/models/house.3di"),
+	TEST_EXPECT(test_io::write_file(dir.file("project/models/house.3di"),
 	                                     test_io::read_file(synth("house_lod0_sine_rotx.3di"))));
 	session.handle(request::rescan());
 	session.run_operations();
@@ -391,14 +391,14 @@ static int test_overlays() {
 // axis turns to the drag; one gesture is one undo step; a pivot, and an omni light's axis,
 // have no handle; a pixel on the view plane is the point the drag means; the MCP's drag.
 static int test_handles() {
-	editor_test::TempProjectDir dir("opennova_editor_model_viewport_handles");
+	test_temp::TempDir dir("opennova_editor_model_viewport_handles");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	Rig rig{session};
 	session.handle(request::new_project(dir.file("project"), "Handle Test"));
 	session.run_operations();
-	TEST_EXPECT(editor_test::write_bytes(dir.file("project/models/house.3di"),
+	TEST_EXPECT(test_io::write_file(dir.file("project/models/house.3di"),
 	                                     test_io::read_file(synth("house_lod0_sine_rotx.3di"))));
 	session.handle(request::rescan());
 	session.run_operations();
@@ -609,7 +609,7 @@ static int test_options_from_json() {
 // clock's ticks run it, and its trigger events sit on the ticks the clip's own clock first
 // samples their frames; a table no item pairs has no rig until a model is chosen.
 static int test_animation() {
-	editor_test::TempProjectDir dir("opennova_editor_model_viewport_animation");
+	test_temp::TempDir dir("opennova_editor_model_viewport_animation");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -625,14 +625,14 @@ static int test_animation() {
 	                                                  "/fixtures/threedi/o3d/skinned.o3d");
 	const std::string tip = "userpoint tip 0 0.25 1 0 0 1 1\nuserpoint hip 0 0.25 1 0 0 1 0\n";
 	skinned.insert(skinned.end(), tip.begin(), tip.end());
-	TEST_EXPECT(editor_test::write_bytes(source + "/skinned.o3d", skinned));
-	TEST_EXPECT(editor_test::write_text(source + "/skin.o3a", editor_test::kSkinClips));
+	TEST_EXPECT(test_io::write_file(source + "/skinned.o3d", skinned));
+	TEST_EXPECT(test_io::write_text(source + "/skin.o3a", editor_test::kSkinClips));
 	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 	import.imports = {{source + "/skinned.o3d", {}}, {source + "/skin.o3a", {}}};
 	session.handle(import);
 	session.run_operations();
 	TEST_EXPECT(view.project.scan->find("skinned.3di") && view.project.scan->find("SKIN.adm") && view.project.scan->find("walk.bad"));
-	TEST_EXPECT(editor_test::write_text(view.project.root + "/defs/items.def",
+	TEST_EXPECT(test_io::write_text(view.project.root + "/defs/items.def",
 	                                    "begin \"Skinned Thing\"\nid 100200\ntype building\ngraphic skinned\n"
 	                                    "anim_def skin\nend\n"));
 	session.handle(request::rescan());
@@ -700,7 +700,7 @@ static int test_animation() {
 	TEST_EXPECT(rig.clock().ticks() == clip_model->tick_of_frame(3));
 
 	// No item pairs a table: no rig, until a model is chosen.
-	TEST_EXPECT(editor_test::write_text(view.project.root + "/defs/items.def", "begin \"Nothing\"\nid 100201\ntype building\nend\n"));
+	TEST_EXPECT(test_io::write_text(view.project.root + "/defs/items.def", "begin \"Nothing\"\nid 100201\ntype building\nend\n"));
 	session.handle(request::rescan());
 	session.run_operations();
 	session.handle(request::open_document("anims/SKIN.adm"));
@@ -713,7 +713,7 @@ static int test_animation() {
 
 	// A rig model that does not read: the picture dropped, the model read once and not again each
 	// pump (the failure latch), until its file changes; another model chosen, read and shown.
-	TEST_EXPECT(editor_test::write_text(view.project.root + "/models/garbage.3di", "not a model"));
+	TEST_EXPECT(test_io::write_text(view.project.root + "/models/garbage.3di", "not a model"));
 	session.handle(request::rescan());
 	session.run_operations();
 	const uint64_t rig_reads = model->rig_model_reads();
@@ -722,7 +722,7 @@ static int test_animation() {
 	TEST_EXPECT(model->rig_model_reads() == rig_reads + 1);
 	for (int i = 0; i < 4; ++i) TEST_EXPECT(rig.pump() == ViewportAction::Keep);
 	TEST_EXPECT(model->rig_model_reads() == rig_reads + 1 && model->view_status() == ModelViewStatus::Unreadable);
-	TEST_EXPECT(editor_test::write_text(view.project.root + "/models/garbage.3di", "still not a model, a longer one"));
+	TEST_EXPECT(test_io::write_text(view.project.root + "/models/garbage.3di", "still not a model, a longer one"));
 	session.handle(request::rescan());
 	session.run_operations();
 	rig.pump();
@@ -787,7 +787,7 @@ event 0 0 0 0x2 0.9 1.7
 // [orig: AnimMap_ParseConfigLine @0x40cb60, the load gate @0x40cbe7;
 //  AnimMap_FindOrLoadBoneFile @0x40c030, no failsafe @0x40c260]
 static int test_runtime_clips() {
-	editor_test::TempProjectDir dir("opennova_editor_model_viewport_runtime");
+	test_temp::TempDir dir("opennova_editor_model_viewport_runtime");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -803,9 +803,9 @@ static int test_runtime_clips() {
 	                                                  "/fixtures/threedi/o3d/skinned.o3d");
 	const std::string tip = "userpoint tip 0 0.25 1 0 0 1 1\nuserpoint hip 0 0.25 1 0 0 1 0\n";
 	skinned.insert(skinned.end(), tip.begin(), tip.end());
-	TEST_EXPECT(editor_test::write_bytes(source + "/skinned.o3d", skinned));
-	TEST_EXPECT(editor_test::write_text(source + "/skin.o3a", editor_test::kSkinClips));
-	TEST_EXPECT(editor_test::write_text(source + "/step.o3a", kStepClips));
+	TEST_EXPECT(test_io::write_file(source + "/skinned.o3d", skinned));
+	TEST_EXPECT(test_io::write_text(source + "/skin.o3a", editor_test::kSkinClips));
+	TEST_EXPECT(test_io::write_text(source + "/step.o3a", kStepClips));
 	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 	import.imports = {{source + "/skinned.o3d", {}}, {source + "/skin.o3a", {}}, {source + "/step.o3a", {}}};
 	session.handle(import);
@@ -996,7 +996,7 @@ struct RecordedRequests final : CanvasRequests {
 // the rig's bones pose with the clip, each named, a point on a bone riding it, and a click on
 // a joint in the clip's own document selects its bone; an item is found by its catalog's name.
 static int test_clip_preview() {
-	editor_test::TempProjectDir dir("opennova_editor_model_viewport_clip_preview");
+	test_temp::TempDir dir("opennova_editor_model_viewport_clip_preview");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1012,17 +1012,17 @@ static int test_clip_preview() {
 	                                                  "/fixtures/threedi/o3d/skinned.o3d");
 	const std::string tip = "userpoint tip 0 0.25 1 0 0 1 1\nuserpoint hip 0 0.25 1 0 0 1 0\n";
 	skinned.insert(skinned.end(), tip.begin(), tip.end());
-	TEST_EXPECT(editor_test::write_bytes(source + "/skinned.o3d", skinned));
-	TEST_EXPECT(editor_test::write_text(source + "/skin.o3a", editor_test::kSkinClips));
-	TEST_EXPECT(editor_test::write_text(source + "/step.o3a", kStepClips));
-	TEST_EXPECT(editor_test::write_text(source + "/bend.o3a", kBendClips));
-	TEST_EXPECT(editor_test::write_text(source + "/flip.o3a", kFlipClips));
+	TEST_EXPECT(test_io::write_file(source + "/skinned.o3d", skinned));
+	TEST_EXPECT(test_io::write_text(source + "/skin.o3a", editor_test::kSkinClips));
+	TEST_EXPECT(test_io::write_text(source + "/step.o3a", kStepClips));
+	TEST_EXPECT(test_io::write_text(source + "/bend.o3a", kBendClips));
+	TEST_EXPECT(test_io::write_text(source + "/flip.o3a", kFlipClips));
 	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 	import.imports = {{source + "/skinned.o3d", {}}, {source + "/skin.o3a", {}}, {source + "/step.o3a", {}},
 	                  {source + "/bend.o3a", {}}, {source + "/flip.o3a", {}}};
 	session.handle(import);
 	session.run_operations();
-	TEST_EXPECT(editor_test::write_text(view.project.root + "/defs/items.def",
+	TEST_EXPECT(test_io::write_text(view.project.root + "/defs/items.def",
 	                                    "begin \"Skinned Thing\"\nid 100200\ntype building\ngraphic skinned\n"
 	                                    "anim_def skin\nend\n"));
 	session.handle(request::rescan());
@@ -1294,12 +1294,12 @@ static int test_clip_preview() {
 
 	// Pairings beyond the graphic (S17 review): an item's graphic_enemy plays its map on that model too;
 	// an item naming a map the project lacks plays default.adm there.
-	TEST_EXPECT(editor_test::write_text(
+	TEST_EXPECT(test_io::write_text(
 	        view.project.root + "/defs/items.def",
 	        "begin \"Skinned Thing\"\nid 100200\ntype building\ngraphic skinned\nanim_def skin\nend\n"
 	        "begin \"Bent Enemy\"\nid 100201\ntype building\ngraphicenemy skinned\nanim_def bend\nend\n"
 	        "begin \"Lost Map\"\nid 100202\ntype building\ngraphic skinned\nanim_def nowhere\nend\n"));
-	TEST_EXPECT(editor_test::write_text(view.project.root + "/anims/default.adm", "anim_reset\t\"reset\"\r\n"));
+	TEST_EXPECT(test_io::write_text(view.project.root + "/anims/default.adm", "anim_reset\t\"reset\"\r\n"));
 	session.handle(request::rescan());
 	session.run_operations();
 	while (view.activity.validation.running) session.poll();
@@ -1320,7 +1320,7 @@ static int test_clip_preview() {
 
 	// S23 C: a clip two tables name, the first of them no item's (the base game's one1_s155.bad, which E_STAND.adm
 	// and one1.adm both name, E_STAND.adm no item's): it plays on the paired table's model, not on none.
-	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/anims/ASTAND.adm",
+	TEST_EXPECT(test_io::write_file(view.project.root + "/anims/ASTAND.adm",
 	                                     test_io::read_file(view.project.root + "/anims/SKIN.adm")));
 	session.handle(request::rescan());
 	session.run_operations();
@@ -1343,14 +1343,14 @@ static int test_clip_preview() {
 // layers and legend; a hit on a shape names its record; the selected record's shape drawn whatever its
 // layer, Frame looking at it; a click on a shape selects its record, its words on hover; the legend drawn.
 static int test_collision() {
-	editor_test::TempProjectDir dir("opennova_editor_model_viewport_collision");
+	test_temp::TempDir dir("opennova_editor_model_viewport_collision");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	Rig rig{session};
 	session.handle(request::new_project(dir.file("project"), "Collision Test"));
 	session.run_operations();
-	TEST_EXPECT(editor_test::write_bytes(dir.file("project/models/armory.3di"), test_io::read_file(synth("armory.3di"))));
+	TEST_EXPECT(test_io::write_file(dir.file("project/models/armory.3di"), test_io::read_file(synth("armory.3di"))));
 	session.handle(request::rescan());
 	session.run_operations();
 	session.handle(request::open_document("models/armory.3di"));

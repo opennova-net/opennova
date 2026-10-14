@@ -63,7 +63,7 @@ float centre() {
 // centre; at 3600 it has the room, and the Preview shows the menu beside it; with no menu open the table has
 // nothing to preview. A menu, which the Preview shows, keeps it.
 void test_preview_room() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_preview_room");
+	test_temp::TempDir dir("opennova_editor_ui_preview_room");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -131,7 +131,7 @@ void test_preview_room() {
 // says so with Clear; another document's record is not filtered by it; the menu's comes back with it; Clear
 // empties it. A closed document's filter goes with it.
 void test_inspector_filter_per_document() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_inspector_filter");
+	test_temp::TempDir dir("opennova_editor_ui_inspector_filter");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -184,7 +184,7 @@ void test_inspector_filter_per_document() {
 // over the editor: what the wave is, how it sounds as the game decodes it, Play raising play_sound, who
 // names it; Close.
 void test_files_kind_and_card() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_files_card");
+	test_temp::TempDir dir("opennova_editor_ui_files_card");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -193,10 +193,10 @@ void test_files_kind_and_card() {
 	const SessionView &v = session.view();
 	const std::string root = v.project.root;
 	const std::string fixtures = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/lwf/";
-	CHECK(editor_test::write_bytes(root + "/sounds/menu.lwf", test_io::read_file(fixtures + "menu.lwf")) &&
-	              editor_test::write_bytes(root + "/sounds/tone.wav", test_io::read_file(fixtures + "tone.wav")) &&
-	              editor_test::write_text(root + "/rootpic.tga", "not a picture") &&
-	              editor_test::write_text(root + "/textures/aa.tga", "not a picture"),
+	CHECK(test_io::write_file(root + "/sounds/menu.lwf", test_io::read_file(fixtures + "menu.lwf")) &&
+	              test_io::write_file(root + "/sounds/tone.wav", test_io::read_file(fixtures + "tone.wav")) &&
+	              test_io::write_text(root + "/rootpic.tga", "not a picture") &&
+	              test_io::write_text(root + "/textures/aa.tga", "not a picture"),
 	      "the files");
 	session.handle(request::rescan());
 	session.run_operations();
@@ -418,7 +418,7 @@ void test_welcome_install_and_first_steps() {
 // at a time: the settings first, New project once they close, held open the while (nothing
 // dismissed).
 void test_modals_one_at_a_time() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_modals");
+	test_temp::TempDir dir("opennova_editor_ui_modals");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -524,7 +524,7 @@ void test_modals_one_at_a_time() {
 // Files' chores (DI-25): Delete... of a texture a menu names lists who names it before anything goes; its Delete
 // anyway takes it to the trash (the dialog closing as the session takes it), and Edit > Undo file brings it back.
 void test_files_delete_and_undo() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_chores");
+	test_temp::TempDir dir("opennova_editor_ui_chores");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);

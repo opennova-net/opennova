@@ -238,7 +238,7 @@ int test_document() {
 }
 
 struct Rig {
-	editor_test::TempProjectDir dir{"opennova_editor_texture_document"};
+	test_temp::TempDir dir{"opennova_editor_texture_document"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -266,9 +266,9 @@ int test_session() {
 	Rig rig;
 	editor_test::handle_to_end(rig.session, request::new_project(rig.root(), "Textures"));
 	editor_test::create_missing_files(rig.session);
-	TEST_EXPECT(editor_test::write_bytes(rig.root() + "/" + rig.brick, tga_of(pattern(4, 4, graded), 4, 4)) &&
-	            editor_test::write_bytes(rig.root() + "/" + rig.sky, pcx_of(8, 4)) &&
-	            editor_test::write_text(rig.root() + "/defs/items.def",
+	TEST_EXPECT(test_io::write_file(rig.root() + "/" + rig.brick, tga_of(pattern(4, 4, graded), 4, 4)) &&
+	            test_io::write_file(rig.root() + "/" + rig.sky, pcx_of(8, 4)) &&
+	            test_io::write_text(rig.root() + "/defs/items.def",
 	                                    "begin \"Brick\"\nid 100300\ntype building\nhud_image brick.tga\nend\n"));
 	editor_test::handle_to_end(rig.session, request::rescan());
 	rig.pump();

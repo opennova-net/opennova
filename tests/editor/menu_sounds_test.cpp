@@ -118,7 +118,7 @@ const char *kMenu = R"(<SCREEN>
 )";
 
 struct MenuProject {
-	editor_test::TempProjectDir dir{"opennova_editor_menu_sounds"};
+	test_temp::TempDir dir{"opennova_editor_menu_sounds"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -133,11 +133,11 @@ struct MenuProject {
 		root = session.view().project.root;
 		const AssetEntry *menu = session.view().project.scan->named("main.mnu");
 		path = menu ? menu->relative_path : std::string();
-		bool ok = menu && editor_test::write_text(root + "/" + path, kMenu);
-		ok = ok && editor_test::write_bytes(root + "/sounds/menu.lwf", menu_bank({"FIRST", "OVER", "CLICK", "OUT"}));
+		bool ok = menu && test_io::write_text(root + "/" + path, kMenu);
+		ok = ok && test_io::write_file(root + "/sounds/menu.lwf", menu_bank({"FIRST", "OVER", "CLICK", "OUT"}));
 		const std::vector<uint8_t> tone = test_io::read_file(repo() + "/fixtures/lwf/tone.wav");
 		for (const char *wave : {"first", "over", "click", "out"})
-			ok = ok && editor_test::write_bytes(root + "/sounds/" + wave + ".wav", tone);
+			ok = ok && test_io::write_file(root + "/sounds/" + wave + ".wav", tone);
 		editor_test::handle_to_end(session, request::rescan());
 		while (session.view().activity.validation.running) session.poll();
 		session.handle(request::open_document(path));

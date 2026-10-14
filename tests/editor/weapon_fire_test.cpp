@@ -142,7 +142,7 @@ std::string particles() {
 }
 
 struct WeaponProject {
-	editor_test::TempProjectDir dir{"opennova_editor_weapon_fire"};
+	test_temp::TempDir dir{"opennova_editor_weapon_fire"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -157,20 +157,20 @@ struct WeaponProject {
 		editor_test::create_missing_files(session);
 		root = session.view().project.root;
 		const std::string source = dir.file("source");
-		bool ok = editor_test::write_text(source + "/gun.o3d", gun_model()) &&
-		          editor_test::write_text(source + "/arms.o3d", gun_model()) &&
-		          editor_test::write_text(source + "/gun.o3a", gun_clips());
+		bool ok = test_io::write_text(source + "/gun.o3d", gun_model()) &&
+		          test_io::write_text(source + "/arms.o3d", gun_model()) &&
+		          test_io::write_text(source + "/gun.o3a", gun_clips());
 		EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 		import.imports = {{source + "/gun.o3d", {}}, {source + "/arms.o3d", {}}, {source + "/gun.o3a", {}}};
 		session.handle(import);
 		session.run_operations();
-		ok = ok && editor_test::write_bytes(root + "/sounds/game.lwf", editor_test::wave_bank_of(std::vector<std::string>(std::begin(kSets), std::end(kSets))));
+		ok = ok && test_io::write_file(root + "/sounds/game.lwf", editor_test::wave_bank_of(std::vector<std::string>(std::begin(kSets), std::end(kSets))));
 		const std::vector<uint8_t> tone = test_io::read_file(repo() + "/fixtures/lwf/tone.wav");
-		for (const char *set : kSets) ok = ok && editor_test::write_bytes(root + "/sounds/" + strutil::to_lower(set) + ".wav", tone);
-		ok = ok && editor_test::write_text(root + "/" + at("Avatars.def"), editor_test::crlf(kAvatars)) &&
-		     editor_test::write_text(root + "/" + at("weapon.def"), editor_test::crlf(weapons())) &&
-		     editor_test::write_text(root + "/" + at("ammo.def"), editor_test::crlf(kAmmo)) &&
-		     editor_test::write_text(root + "/particles/fire.ptl", particles());
+		for (const char *set : kSets) ok = ok && test_io::write_file(root + "/sounds/" + strutil::to_lower(set) + ".wav", tone);
+		ok = ok && test_io::write_text(root + "/" + at("Avatars.def"), test_io::crlf(kAvatars)) &&
+		     test_io::write_text(root + "/" + at("weapon.def"), test_io::crlf(weapons())) &&
+		     test_io::write_text(root + "/" + at("ammo.def"), test_io::crlf(kAmmo)) &&
+		     test_io::write_text(root + "/particles/fire.ptl", particles());
 		editor_test::handle_to_end(session, request::rescan());
 		while (session.view().activity.validation.running) session.poll();
 		made = ok && select("WPN_TEST");

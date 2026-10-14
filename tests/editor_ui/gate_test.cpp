@@ -106,7 +106,7 @@ bool has(const std::vector<EditorRequest> &requests, EditorRequestKind kind) {
 } // namespace
 
 void test_windows_show_the_gate() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_gate_test");
+	test_temp::TempDir dir("opennova_editor_ui_gate_test");
 	// The active menu with an unsaved edit, an undo and a redo (two edits, one undone); a second
 	// menu with an unsaved edit.
 	const std::shared_ptr<MnuDocument> a = menu_at(dir, "a.mnu", "menus/a.mnu");

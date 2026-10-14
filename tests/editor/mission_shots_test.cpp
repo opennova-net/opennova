@@ -46,7 +46,6 @@ using opennova::io::JsonValue;
 
 namespace {
 
-using mission_test::fixture;
 
 // Each line ended CR LF, as the game's readers take a text (File_ParseASCIIFile splits on it).
 std::string crlf(const std::string &text) {
@@ -136,16 +135,16 @@ std::string soldier_clips() {
 
 std::shared_ptr<ShotFiles> shot_files() {
 	auto files = std::make_shared<ShotFiles>();
-	files->put("Tmap.trn", test_io::read_file(fixture("terrain/tmap/Tmap.trn")));
-	files->put("Tmap.cpt", test_io::read_file(fixture("terrain/tmap/Tmap.cpt")));
+	files->put("Tmap.trn", test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.trn")));
+	files->put("Tmap.cpt", test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.cpt")));
 	files->put("Tmap_m.pcx", charmap());
-	files->put("crate.3di", test_io::read_file(fixture("threedi/synth/crate.3di")));
-	files->put("cratehusk.3di", test_io::read_file(fixture("threedi/synth/crate.3di")));
+	files->put("crate.3di", test_io::read_file(test_paths_fixture("threedi/synth/crate.3di")));
+	files->put("cratehusk.3di", test_io::read_file(test_paths_fixture("threedi/synth/crate.3di")));
 	files->put_text("ammo.def", kAmmo);
 	files->put_text("items.def", kItems);
 	// The soldier's model and clips as the editor's converters make them of the add-on's texts.
 	const std::string clips = soldier_clips();
-	const std::vector<uint8_t> scene = test_io::read_file(fixture("threedi/o3d/skinned.o3d"));
+	const std::vector<uint8_t> scene = test_io::read_file(test_paths_fixture("threedi/o3d/skinned.o3d"));
 	for (const auto &[name, bytes] : {std::pair<std::string, std::vector<uint8_t>>{"skinned.o3d", scene},
 	                                  {"skin.o3a", std::vector<uint8_t>(clips.begin(), clips.end())}}) {
 		const Converter *converter = converter_for(name);

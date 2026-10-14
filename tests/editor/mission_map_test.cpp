@@ -55,10 +55,9 @@ using editor_test::NoProcess;
 
 constexpr const char *kMission = "missions/synth_logic.bms";
 
-using mission_test::fixture;
 
 struct Rig {
-	editor_test::TempProjectDir dir;
+	test_temp::TempDir dir;
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{ platform, preferences };
@@ -75,17 +74,17 @@ struct Rig {
 		session.run_operations();
 		editor_test::create_missing_files(session);
 		const SessionView &view = session.view();
-		if (!editor_test::write_bytes(view.project.root + "/" + kMission, test_io::read_file(fixture("bms/synth_logic.bms"))))
+		if (!test_io::write_file(view.project.root + "/" + kMission, test_io::read_file(test_paths_fixture("bms/synth_logic.bms"))))
 			return false;
 		if (models) {
-			const std::vector<uint8_t> table = test_io::read_file(fixture("def/items.def"));
+			const std::vector<uint8_t> table = test_io::read_file(test_paths_fixture("def/items.def"));
 			std::string items(table.begin(), table.end());
 			for (size_t at = items.find("graphic pump\r\n"); at != std::string::npos; at = items.find("graphic pump\r\n"))
 				items.replace(at, 12, "graphic crate");
-			if (!editor_test::write_text(view.project.root + "/defs/items.def", items)) return false;
+			if (!test_io::write_text(view.project.root + "/defs/items.def", items)) return false;
 			for (const char *model : { "crate.3di", "armory.3di", "shed.3di" })
-				if (!editor_test::write_bytes(view.project.root + "/models/" + model,
-							test_io::read_file(fixture(std::string("threedi/synth/") + model))))
+				if (!test_io::write_file(view.project.root + "/models/" + model,
+							test_io::read_file(test_paths_fixture(std::string("threedi/synth/") + model))))
 					return false;
 		}
 		session.handle(request::rescan());
@@ -745,7 +744,7 @@ static int test_grid_origin() {
 // face's plane, an upright has no length from above, the top lands on the bottom), its hull the plan's four corners;
 // every point's words the vertex's (p2, -p0, p1), the words the device's model holds it at.
 static int test_outline_of_a_box() {
-	const std::vector<uint8_t> bytes = test_io::read_file(fixture("threedi/synth/crate.3di"));
+	const std::vector<uint8_t> bytes = test_io::read_file(test_paths_fixture("threedi/synth/crate.3di"));
 	opennova::threedi::Threedi3di3 parsed{};
 	TEST_EXPECT(opennova::threedi::threedi_3di3_read_memory(bytes.data(), bytes.size(), &parsed) == 0);
 	MissionModelOutline outline;
@@ -994,8 +993,8 @@ static int test_retail() {
 	rig.session.run_operations();
 	editor_test::create_missing_files(rig.session);
 	const std::string project = rig.session.view().project.root;
-	TEST_EXPECT(editor_test::write_bytes(project + "/missions/00TRa.bms", mission_bytes));
-	TEST_EXPECT(editor_test::write_bytes(project + "/defs/items.def", items_bytes));
+	TEST_EXPECT(test_io::write_file(project + "/missions/00TRa.bms", mission_bytes));
+	TEST_EXPECT(test_io::write_file(project + "/defs/items.def", items_bytes));
 	rig.session.handle(request::rescan());
 	rig.session.run_operations();
 	rig.session.handle(request::open_document("missions/00TRa.bms"));
@@ -1025,7 +1024,7 @@ static int test_retail() {
 	for (const std::string &model : models) {
 		const std::string file = retail::asset_file(model.c_str());
 		if (file.empty()) continue;
-		TEST_EXPECT(editor_test::write_bytes(project + "/models/" + model, test_io::read_file(file)));
+		TEST_EXPECT(test_io::write_file(project + "/models/" + model, test_io::read_file(file)));
 		++copied;
 	}
 	rig.session.handle(request::rescan());

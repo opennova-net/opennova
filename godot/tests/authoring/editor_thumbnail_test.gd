@@ -22,15 +22,6 @@ func after_each() -> void:
 	await EditorFixture.teardown(self, _dirs)
 
 
-func _write(path: String, bytes: PackedByteArray) -> void:
-	assert_eq(DirAccess.make_dir_recursive_absolute(path.get_base_dir()), OK)
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file, "wrote %s" % path)
-	if file != null:
-		file.store_buffer(bytes)
-		file.close()
-
-
 ## A 2 x 2 uncompressed 32-bit bottom-up TGA: the file's texels B, G, R, A in the order they are stored,
 ## texel k's red 10 + k, green 100 + k, blue 200 + k, alpha 50 + 60 k.
 func _tga() -> PackedByteArray:
@@ -52,8 +43,8 @@ func test_a_thumbnail_is_uploaded_as_the_cache_made_it() -> void:
 	var root := OS.get_cache_dir().path_join("opennova editor thumbnail project %d" % Time.get_ticks_usec())
 	_dirs.append(root)
 	assert_true(_seam.new_project(root, "Thumbnails"))
-	_write(root.path_join("textures/brick.tga"), _tga())
-	_write(root.path_join("notes.txt"), "a note".to_utf8_buffer())
+	TestFs.write_bytes(self, root.path_join("textures/brick.tga"), _tga())
+	TestFs.write_bytes(self, root.path_join("notes.txt"), "a note".to_utf8_buffer())
 	_seam.request({"kind": "rescan"})
 	var texture: ImageTexture = _app.get_thumbnail_texture("textures/brick.tga", "none")
 	assert_not_null(texture, "a texture of the project has a thumbnail")

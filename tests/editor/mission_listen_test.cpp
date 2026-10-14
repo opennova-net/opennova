@@ -159,7 +159,7 @@ std::vector<uint8_t> mission_bytes(bool dialogs = false) {
 }
 
 struct Rig {
-	editor_test::TempProjectDir dir{ "opennova_editor_mission_listen" };
+	test_temp::TempDir dir{ "opennova_editor_mission_listen" };
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{ platform, preferences };
@@ -172,14 +172,14 @@ struct Rig {
 		session.run_operations();
 		editor_test::create_missing_files(session);
 		root = session.view().project.root;
-		bool ok = editor_test::write_bytes(root + "/" + kMission, mission_bytes(dialogs)) &&
-				editor_test::write_text(root + "/missions/listen.wac", kScript) &&
-				editor_test::write_text(root + "/defs/items.def", kItems) &&
-				editor_test::write_bytes(root + "/sounds/game.lwf", bank_bytes());
+		bool ok = test_io::write_file(root + "/" + kMission, mission_bytes(dialogs)) &&
+				test_io::write_text(root + "/missions/listen.wac", kScript) &&
+				test_io::write_text(root + "/defs/items.def", kItems) &&
+				test_io::write_file(root + "/sounds/game.lwf", bank_bytes());
 		const std::vector<uint8_t> tone = test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/lwf/tone.wav");
 		for (const SetSpec &set : kSets)
 			if (waves || std::string(set.name) != "LP_NIGHT")
-				ok = ok && editor_test::write_bytes(root + "/sounds/" + strutil::to_lower(set.name) + ".wav", tone);
+				ok = ok && test_io::write_file(root + "/sounds/" + strutil::to_lower(set.name) + ".wav", tone);
 		// The mission's dialog bank and its sounds (DI-32): dlg001 two lines, the second after half a second; dlg002 one.
 		if (dialogs) {
 			dbf::File bank;
@@ -203,13 +203,13 @@ struct Rig {
 				single.path = strutil::to_lower(wave) + ".wav";
 				single.volume = 0xD2;
 				sounds.singles.push_back(single);
-				ok = ok && editor_test::write_bytes(root + "/sounds/" + strutil::to_lower(wave) + ".wav", tone);
+				ok = ok && test_io::write_file(root + "/sounds/" + strutil::to_lower(wave) + ".wav", tone);
 			}
 			std::vector<uint8_t> dbf_bytes, lwf_bytes;
 			std::string error;
 			ok = ok && dbf::encode_dbf(bank, dbf_bytes, error) && lwf::encode_lwf(sounds, lwf_bytes, error) &&
-					editor_test::write_bytes(root + "/missions/listen.dbf", dbf_bytes) &&
-					editor_test::write_bytes(root + "/missions/listen.lwf", lwf_bytes);
+					test_io::write_file(root + "/missions/listen.dbf", dbf_bytes) &&
+					test_io::write_file(root + "/missions/listen.lwf", lwf_bytes);
 		}
 		if (!ok) return false;
 		editor_test::handle_to_end(session, request::rescan());
@@ -413,7 +413,7 @@ static int test_the_scripts_weather() {
 	rig.viewport();
 	TEST_EXPECT(script.boots() == booted && script.tick() == 5);
 	// The script edited: the start boots again over it.
-	TEST_EXPECT(editor_test::write_text(rig.root + "/missions/listen.wac", "if never() then\n\train(0,1)\nendif\n"));
+	TEST_EXPECT(test_io::write_text(rig.root + "/missions/listen.wac", "if never() then\n\train(0,1)\nendif\n"));
 	editor_test::handle_to_end(rig.session, request::rescan());
 	while (rig.session.view().activity.validation.running) rig.session.poll();
 	rig.devices.sync(rig.session);

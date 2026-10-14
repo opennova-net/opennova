@@ -246,13 +246,13 @@ int test_variables() {
 // The board op over a session: the cards as the Logic pane shows them (its filter the workspace's), the args'
 // own filter, the Common types and the recipes.
 int test_board_op() {
-	editor_test::TempProjectDir dir("opennova_mission_board_op");
+	test_temp::TempDir dir("opennova_mission_board_op");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Board"));
 	editor_test::create_missing_files(session);
-	TEST_EXPECT(editor_test::write_bytes(session.view().project.root + "/missions/logic.bms", fixture_bytes()));
+	TEST_EXPECT(test_io::write_file(session.view().project.root + "/missions/logic.bms", fixture_bytes()));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::handle_to_end(session, request::open_document("missions/logic.bms"));
 	const auto ask = [&](const std::string &args) {
@@ -306,13 +306,13 @@ int test_board_op() {
 // next free key in the mission's own table (made from the mission text blank where the project has none, never
 // MEDMSSN.BIN), its text, and sets the field to its number, again the next.
 int test_text_and_selection() {
-	editor_test::TempProjectDir dir("opennova_mission_board_text");
+	test_temp::TempDir dir("opennova_mission_board_text");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Board"));
 	editor_test::create_missing_files(session);
-	TEST_EXPECT(editor_test::write_bytes(session.view().project.root + "/missions/logic.bms", fixture_bytes()));
+	TEST_EXPECT(test_io::write_file(session.view().project.root + "/missions/logic.bms", fixture_bytes()));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::handle_to_end(session, request::open_document("missions/logic.bms"));
 	const auto *m = dynamic_cast<const MissionDocument *>(session.document_for("missions/logic.bms"));
@@ -376,13 +376,13 @@ int test_text_and_selection() {
 // new_event over area X (the player's recipe), mission_logic add of Show text to the new event (kept selected),
 // set_string_text with create, edit_record of the wait, then the board's card reading it.
 int test_wire_acceptance() {
-	editor_test::TempProjectDir dir("opennova_mission_board_wire");
+	test_temp::TempDir dir("opennova_mission_board_wire");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Board"));
 	editor_test::create_missing_files(session);
-	TEST_EXPECT(editor_test::write_bytes(session.view().project.root + "/missions/logic.bms", fixture_bytes()));
+	TEST_EXPECT(test_io::write_file(session.view().project.root + "/missions/logic.bms", fixture_bytes()));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::handle_to_end(session, request::open_document("missions/logic.bms"));
 	const auto *m = dynamic_cast<const MissionDocument *>(session.document_for("missions/logic.bms"));
@@ -458,9 +458,9 @@ int test_wire_acceptance() {
 // mission): refused, its words saying to import the install's (it holds the mission's title and its other texts),
 // and no table made that would hide it.
 int test_new_text_install() {
-	editor_test::TempProjectDir dir("opennova_mission_board_install");
+	test_temp::TempDir dir("opennova_mission_board_install");
 	const std::string retail = dir.file("game");
-	TEST_EXPECT(editor_test::write_text(retail + "/readme.txt", "game"));
+	TEST_EXPECT(test_io::write_text(retail + "/readme.txt", "game"));
 	std::vector<uint8_t> table;
 	Diagnostic error;
 	BlankRequest blank;
@@ -476,7 +476,7 @@ int test_new_text_install() {
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Board"));
 	editor_test::create_missing_files(session);
 	editor_test::set_game_install(session, retail);
-	TEST_EXPECT(editor_test::write_bytes(session.view().project.root + "/missions/logic.bms", fixture_bytes()));
+	TEST_EXPECT(test_io::write_file(session.view().project.root + "/missions/logic.bms", fixture_bytes()));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::handle_to_end(session, request::open_document("missions/logic.bms"));
 	const auto *m = dynamic_cast<const MissionDocument *>(session.document_for("missions/logic.bms"));
@@ -514,14 +514,14 @@ int test_op_table() {
 	for (const char *op : {"form", "types", "add", "retype", "move", "negate", "join", "board"})
 		TEST_EXPECT(std::find(table.begin(), table.end(), op) != table.end());
 
-	editor_test::TempProjectDir dir("opennova_mission_board_ops");
+	test_temp::TempDir dir("opennova_mission_board_ops");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Board"));
 	editor_test::create_missing_files(session);
 	const std::string repo = test_paths_repo_root(__FILE__);
-	TEST_EXPECT(editor_test::write_bytes(session.view().project.root + "/missions/logic.bms",
+	TEST_EXPECT(test_io::write_file(session.view().project.root + "/missions/logic.bms",
 	                                     test_io::read_file(repo + "/fixtures/bms/synth_logic.bms")));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::handle_to_end(session, request::open_document("missions/logic.bms"));

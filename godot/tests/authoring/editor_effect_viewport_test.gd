@@ -25,15 +25,6 @@ func after_each() -> void:
 	await EditorFixture.teardown(self, _dirs)
 
 
-func _write(path: String, bytes: PackedByteArray) -> void:
-	assert_eq(DirAccess.make_dir_recursive_absolute(path.get_base_dir()), OK)
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file, "wrote %s" % path)
-	if file != null:
-		file.store_buffer(bytes)
-		file.close()
-
-
 ## A particle file of two effects over one definition each: Puff, a burst of dots of the fixture's
 ## graphic that emits for a second, and Glow, which emits for longer.
 func _ptl() -> String:
@@ -50,10 +41,10 @@ func _new_project() -> String:
 	var dir := OS.get_cache_dir().path_join("opennova editor effect project %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
 	assert_true(_seam.new_project(dir, "Effect Viewport"))
-	_write(dir.path_join(PTL), _ptl().to_utf8_buffer())
+	TestFs.write_bytes(self, dir.path_join(PTL), _ptl().to_utf8_buffer())
 	var dot := FileAccess.get_file_as_bytes(ProjectSettings.globalize_path("res://../fixtures/cbin/particle_dot.tga"))
 	assert_gt(dot.size(), 18, "the fixture's particle graphic reads")
-	_write(dir.path_join("particles/particle_dot.tga"), dot)
+	TestFs.write_bytes(self, dir.path_join("particles/particle_dot.tga"), dot)
 	_seam.request({"kind": "rescan"})
 	return dir
 

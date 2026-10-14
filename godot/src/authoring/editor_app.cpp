@@ -91,6 +91,8 @@ void EditorApp::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_status_text"), &EditorApp::get_status_text);
 	ClassDB::bind_method(D_METHOD("get_sound_state"), &EditorApp::get_sound_state);
 	ClassDB::bind_method(D_METHOD("get_sound_path"), &EditorApp::get_sound_path);
+	ClassDB::bind_method(D_METHOD("wait_for_bakes"), &EditorApp::wait_for_bakes);
+	ClassDB::bind_method(D_METHOD("wait_for_sound"), &EditorApp::wait_for_sound);
 	ClassDB::bind_method(D_METHOD("get_clip_voices_started"), &EditorApp::get_clip_voices_started);
 	ClassDB::bind_method(D_METHOD("get_clip_sound_seq"), &EditorApp::get_clip_sound_seq);
 	ClassDB::bind_method(D_METHOD("set_open_externally", "open"), &EditorApp::set_open_externally);
@@ -575,6 +577,15 @@ String EditorApp::get_sound_state() const {
 
 String EditorApp::get_sound_path() const {
 	return get_sound_state() == "idle" ? String() : opennova::to_gd(sound_->path());
+}
+
+void EditorApp::wait_for_bakes() {
+	ensure_session();
+	session_->wait_for_bakes();
+}
+
+void EditorApp::wait_for_sound() {
+	if (sound_) sound_->wait();
 }
 
 void EditorApp::show_picker(PickPurpose p_purpose, bool p_directory) {

@@ -27,15 +27,6 @@ func after_each() -> void:
 	await EditorFixture.teardown(self, _dirs)
 
 
-func _write(path: String, bytes: PackedByteArray) -> void:
-	assert_eq(DirAccess.make_dir_recursive_absolute(path.get_base_dir()), OK)
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file, "wrote %s" % path)
-	if file != null:
-		file.store_buffer(bytes)
-		file.close()
-
-
 ## Puff: a burst of dots of the fixture's graphic that emits for long enough to be seen.
 func _ptl() -> String:
 	var text := "[effectdef]\n{\n\tid = Puff;\n\tpdefs = PuffDot;\n}\n\n"
@@ -49,13 +40,13 @@ func _new_project() -> void:
 	var dir := OS.get_cache_dir().path_join("opennova editor definition project %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
 	assert_true(_seam.new_project(dir, "Definition Viewport"))
-	_write(dir.path_join("models/crate.3di"), FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(CRATE)))
-	_write(dir.path_join("models/armory.3di"), FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(ARMORY)))
-	_write(dir.path_join("particles/puff.ptl"), _ptl().to_utf8_buffer())
+	TestFs.write_bytes(self, dir.path_join("models/crate.3di"), FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(CRATE)))
+	TestFs.write_bytes(self, dir.path_join("models/armory.3di"), FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(ARMORY)))
+	TestFs.write_bytes(self, dir.path_join("particles/puff.ptl"), _ptl().to_utf8_buffer())
 	var dot := FileAccess.get_file_as_bytes(ProjectSettings.globalize_path("res://../fixtures/cbin/particle_dot.tga"))
 	assert_gt(dot.size(), 18, "the fixture's particle graphic reads")
-	_write(dir.path_join("particles/particle_dot.tga"), dot)
-	_write(dir.path_join(ITEMS), TestFs.crlf("begin \"Pump station\"\nid 100500\ntype object\ngraphic crate\n"
+	TestFs.write_bytes(self, dir.path_join("particles/particle_dot.tga"), dot)
+	TestFs.write_bytes(self, dir.path_join(ITEMS), TestFs.crlf("begin \"Pump station\"\nid 100500\ntype object\ngraphic crate\n"
 			+ "ai_function gnrc\nhusk armory\nhusk_sub_part_types 01_HULL 02_WHEEL 03_CHUNK_M 04_CHUNK_S\n"
 			+ "destroy_timing 0.5 1.0 0.25\nparticlefx Puff ground\nparticledeath Puff\nend\n").to_utf8_buffer())
 	_seam.request({"kind": "rescan"})
@@ -205,31 +196,6 @@ event 0 0 0 0x0 0.9 1.7
 """
 
 
-func _wave_bytes(seconds: float) -> PackedByteArray:
-	var samples := int(22050 * seconds)
-	var data := PackedByteArray()
-	data.resize(samples * 2)
-	for i in samples:
-		data.encode_s16(i * 2, int(sin(i * 0.1) * 8000.0))
-	var head := PackedByteArray()
-	head.resize(44)
-	head.encode_u32(0, 0x46464952) # RIFF
-	head.encode_u32(4, 36 + data.size())
-	head.encode_u32(8, 0x45564157) # WAVE
-	head.encode_u32(12, 0x20746d66) # "fmt "
-	head.encode_u32(16, 16)
-	head.encode_u16(20, 1) # PCM
-	head.encode_u16(22, 1) # mono
-	head.encode_u32(24, 22050)
-	head.encode_u32(28, 44100)
-	head.encode_u16(32, 2)
-	head.encode_u16(34, 16)
-	head.encode_u32(36, 0x61746164) # data
-	head.encode_u32(40, data.size())
-	head.append_array(data)
-	return head
-
-
 func _weapon_state() -> Dictionary:
 	return _seam.query("viewport", {"op": "state", "path": "weapon.def", "kind": "definition", "limit": 50})
 
@@ -251,31 +217,31 @@ func test_a_weapon_fires_in_first_person() -> void:
 	var source := dir.path_join("source")
 	var gun := FileAccess.get_file_as_string(ProjectSettings.globalize_path(SKINNED))
 	gun += "userpoint \"muzzle\" 0 1 0.5 0 1 0 1 83\nuserpoint \"shell\" 0.25 0 0 1 0 0 0 83\n"
-	_write(source.path_join("gun.o3d"), gun.to_utf8_buffer())
-	_write(source.path_join("arms.o3d"), gun.to_utf8_buffer())
-	_write(source.path_join("gun.o3a"), GUN_CLIPS.to_utf8_buffer())
+	TestFs.write_bytes(self, source.path_join("gun.o3d"), gun.to_utf8_buffer())
+	TestFs.write_bytes(self, source.path_join("arms.o3d"), gun.to_utf8_buffer())
+	TestFs.write_bytes(self, source.path_join("gun.o3a"), GUN_CLIPS.to_utf8_buffer())
 	_app.request_json(JSON.stringify({"kind": "import_files", "imports": [
 		{"path": source.path_join("gun.o3d")}, {"path": source.path_join("arms.o3d")},
 		{"path": source.path_join("gun.o3a")}]}))
 	assert_true(_seam.settle(), "the import steps across pumps")
-	_write(root.path_join("weapon.def"), TestFs.crlf("weapon \"WPN_TEST\"\n\tclipsize 30\n\tstartrounds 90\n"
+	TestFs.write_bytes(self, root.path_join("weapon.def"), TestFs.crlf("weapon \"WPN_TEST\"\n\tclipsize 30\n\tstartrounds 90\n"
 			+ "\tanimadm gun\n\tgfx1 gun\n\tgfx3 gun\n\tround_type AMMO_TEST\n\tflags auto\n"
 			+ "\tpos 25 -5 -145 0 0 0\n\taction \"fire\"\n\t\tanim anim_wpn_fire\n\t\tsoundsetend GS_TEST\n"
 			+ "\t\tdelayend 4\n\t\tparticle Puff\n\t\tparticleuserpoint muzzle\n\t\tfunction wpn_std_fire\n\tend\n"
 			+ "\taction \"recoil\"\n\t\tparticle Puff\n\t\tparticleuserpoint shell\n\t\tfunction wpn_std_recoil\n"
 			+ "\tend\nend\n").to_utf8_buffer())
-	_write(root.path_join("ammo.def"), TestFs.crlf("ammo AT_NULL\nend\nammo AMMO_TEST\n\tvelocity 600\n\tmax_age 3\n"
+	TestFs.write_bytes(self, root.path_join("ammo.def"), TestFs.crlf("ammo AT_NULL\nend\nammo AMMO_TEST\n\tvelocity 600\n\tmax_age 3\n"
 			+ "\tweight_in_grains 62\n\ttracerrate 1\n\ttracer_type 1 2\n\tscar_type 1\n\teffects_table\n"
 			+ "\t\tobj Puff GS_TEST 15\n\t\tdirt Puff GS_TEST 15\n\tend\nend\n").to_utf8_buffer())
-	_write(root.path_join("Avatars.def"), TestFs.crlf("define head H1\n{\n\tname AV_H\n\tgraphic gun.3di\n}\n"
+	TestFs.write_bytes(self, root.path_join("Avatars.def"), TestFs.crlf("define head H1\n{\n\tname AV_H\n\tgraphic gun.3di\n}\n"
 			+ "define body B1\n{\n\tname AV_B\n\tgraphic gun.3di\n}\n"
 			+ "define arms A1\n{\n\tname AV_A\n\tgraphic arms.3di\n\tcamo 1 2 3\n}\n"
 			+ "nationality 0 AV_GOOD\n{\n\talignment good\n\tdivision 0 AV_DIV\n\t{\n\t\tcombo 1 H1 B1 A1\n\t}\n}\n")
 			.to_utf8_buffer())
-	_write(root.path_join("particles/puff.ptl"), _ptl().to_utf8_buffer())
-	_write(root.path_join("particles/particle_dot.tga"),
+	TestFs.write_bytes(self, root.path_join("particles/puff.ptl"), _ptl().to_utf8_buffer())
+	TestFs.write_bytes(self, root.path_join("particles/particle_dot.tga"),
 			FileAccess.get_file_as_bytes(ProjectSettings.globalize_path("res://../fixtures/cbin/particle_dot.tga")))
-	_write(root.path_join("sounds/gs_test.wav"), _wave_bytes(0.2))
+	TestFs.write_bytes(self, root.path_join("sounds/gs_test.wav"), TestFs.wave_bytes(0.2))
 	_app.request_json(JSON.stringify({"kind": "rescan"}))
 	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
 	# The bank made in the editor: the shot, one layer playing its wave.
@@ -379,12 +345,12 @@ func test_an_ammo_plays_its_impact_rows() -> void:
 	var dir := OS.get_cache_dir().path_join("opennova editor definition ammo %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
 	assert_true(_seam.new_project(dir, "Ammo Board"))
-	_write(dir.path_join("ammo.def"), TestFs.crlf("ammo AT_NULL\n\teffects_table\n\t\tmove none none 0\n"
+	TestFs.write_bytes(self, dir.path_join("ammo.def"), TestFs.crlf("ammo AT_NULL\n\teffects_table\n\t\tmove none none 0\n"
 			+ "\t\tplayer none none 0\n\t\tzip none none 0\n\t\tobj Puff none 15\n\t\tdirt Puff none 15\n\tend\nend\n"
 			+ "ammo AMMO_T\n\tvelocity 600\n\tmax_age 3\n\tweight_in_grains 62\n\tscar_type 1\n\teffects_table\n"
 			+ "\t\tmetal Puff none 15\n\tend\nend\n").to_utf8_buffer())
-	_write(dir.path_join("particles/puff.ptl"), _ptl().to_utf8_buffer())
-	_write(dir.path_join("particles/particle_dot.tga"),
+	TestFs.write_bytes(self, dir.path_join("particles/puff.ptl"), _ptl().to_utf8_buffer())
+	TestFs.write_bytes(self, dir.path_join("particles/particle_dot.tga"),
 			FileAccess.get_file_as_bytes(ProjectSettings.globalize_path("res://../fixtures/cbin/particle_dot.tga")))
 	_app.request_json(JSON.stringify({"kind": "rescan"}))
 	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")

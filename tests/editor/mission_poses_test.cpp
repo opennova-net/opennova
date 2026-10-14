@@ -63,7 +63,6 @@ using editor_test::NoProcess;
 
 constexpr const char *kMission = "missions/people.bms";
 
-using mission_test::fixture;
 
 // A person's table (CRLF lines, as the game's config reader takes them): the reset and idle_2 rows
 // idle, idle a ring of two (idle, then walk), the walk and the guard rows walk.
@@ -119,7 +118,7 @@ using editor_test::set_edit;
 // A session over a project holding the people, their catalog and clips, the mission open and its
 // viewport followed through the fake devices.
 struct Rig {
-	editor_test::TempProjectDir dir;
+	test_temp::TempDir dir;
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{ platform, preferences };
@@ -133,12 +132,12 @@ struct Rig {
 		session.run_operations();
 		editor_test::create_missing_files(session);
 		const std::string root = session.view().project.root;
-		if (!editor_test::write_bytes(root + "/" + kMission, people_mission()) ||
-				!editor_test::write_text(root + "/defs/items.def", kItems) ||
-				!editor_test::write_text(root + "/people.adm", kPeopleAdm))
+		if (!test_io::write_file(root + "/" + kMission, people_mission()) ||
+				!test_io::write_text(root + "/defs/items.def", kItems) ||
+				!test_io::write_text(root + "/people.adm", kPeopleAdm))
 			return false;
 		for (const char *clip : { "idle.bad", "walk.bad" })
-			if (!editor_test::write_bytes(root + "/" + clip, test_io::read_file(fixture(std::string("anim/") + clip))))
+			if (!test_io::write_file(root + "/" + clip, test_io::read_file(test_paths_fixture(std::string("anim/") + clip))))
 				return false;
 		session.handle(request::rescan());
 		session.run_operations();
@@ -358,7 +357,7 @@ static int test_poses() {
 		const size_t at = edited.find(table);
 		TEST_EXPECT(at != std::string::npos);
 		edited.replace(at, table.size(), "move_function org1\nai_function org1\nattrib");
-		TEST_EXPECT(editor_test::write_text(rig.session.view().project.root + "/defs/items.def", edited));
+		TEST_EXPECT(test_io::write_text(rig.session.view().project.root + "/defs/items.def", edited));
 		rig.session.handle(request::rescan());
 		rig.session.run_operations();
 		rig.pump();
@@ -395,7 +394,7 @@ static int test_retail() {
 		std::vector<uint8_t> bytes;
 		TEST_EXPECT(game.read_file(file.logical_name, bytes));
 		const std::string at = extension == ".bms" ? "missions/" + name : lower == "items.def" ? "defs/items.def" : name;
-		TEST_EXPECT(editor_test::write_bytes(project + "/" + at, bytes));
+		TEST_EXPECT(test_io::write_file(project + "/" + at, bytes));
 		if (extension == ".bms") missions.push_back(at);
 	}
 	if (missions.empty()) return retail::skip_leg("OPENNOVA_JO_DIR with the game's missions in its archives");
@@ -590,16 +589,16 @@ static int test_people_heard() {
 	std::vector<uint8_t> bytes;
 	std::string error;
 	TEST_EXPECT(opennova::lwf::encode_lwf(bank, bytes, error));
-	const std::vector<uint8_t> tone = test_io::read_file(fixture("lwf/tone.wav"));
+	const std::vector<uint8_t> tone = test_io::read_file(test_paths_fixture("lwf/tone.wav"));
 	std::string items = kItems;
 	items.replace(items.find("ai_function org1\nattrib: aidata\nend\n"), 0, "sound_profile on_people\n");
-	TEST_EXPECT(editor_test::write_bytes(root + "/sounds/game.lwf", bytes) &&
-	            editor_test::write_bytes(root + "/sounds/pfs_gnd_l.wav", tone) &&
-	            editor_test::write_bytes(root + "/sounds/pfs_gnd_r.wav", tone) &&
-	            editor_test::write_text(root + "/defs/SndProf.def",
-	                                    editor_test::crlf("begin \"default\"\nend\nbegin \"on_people\"\n"
+	TEST_EXPECT(test_io::write_file(root + "/sounds/game.lwf", bytes) &&
+	            test_io::write_file(root + "/sounds/pfs_gnd_l.wav", tone) &&
+	            test_io::write_file(root + "/sounds/pfs_gnd_r.wav", tone) &&
+	            test_io::write_text(root + "/defs/SndProf.def",
+	                                    test_io::crlf("begin \"default\"\nend\nbegin \"on_people\"\n"
 	                                                      "\tSSLFootGND PFS_GND_L 0 0 0\n\tSSRFootGND PFS_GND_R 0 0 0\nend\n")) &&
-	            editor_test::write_text(root + "/defs/items.def", items));
+	            test_io::write_text(root + "/defs/items.def", items));
 	rig.session.handle(request::rescan());
 	rig.session.run_operations();
 	rig.pump();

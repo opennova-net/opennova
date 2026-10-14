@@ -63,10 +63,6 @@ namespace {
 
 bool g_list = false;
 
-std::string fixture(const std::string &relative) {
-	return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/" + relative;
-}
-
 bool near(double a, double b, double within = 0.01) { return std::fabs(a - b) <= within; }
 
 // Files by flat name, each put with a stamp of its own.
@@ -107,7 +103,7 @@ std::vector<uint8_t> bytes_of(const std::string &text) { return std::vector<uint
 // The synth crate (a 1-unit box standing on its origin) with its `ground` point raised to `height` (the
 // mission's z, the model's +y), through the engine's own 3DI writer.
 std::vector<uint8_t> crate_anchored_at(double height) {
-	const std::vector<uint8_t> bytes = test_io::read_file(fixture("threedi/synth/crate.3di"));
+	const std::vector<uint8_t> bytes = test_io::read_file(test_paths_fixture("threedi/synth/crate.3di"));
 	opennova::threedi::Threedi3di3 model{};
 	if (opennova::threedi::threedi_3di3_read_memory(bytes.data(), bytes.size(), &model) != 0) return {};
 	for (size_t i = 0; i < model.user_point_count; ++i)
@@ -220,20 +216,20 @@ std::vector<uint8_t> mint_mission(const std::vector<Placed> &placed) {
 
 // The project's files of the minted rig: the terrain, the catalog, the models, the people's table and clips.
 void put_rig(MemoryFiles &files) {
-	files.put("Tmap.trn", test_io::read_file(fixture("terrain/tmap/Tmap.trn")));
-	files.put("Tmap.cpt", test_io::read_file(fixture("terrain/tmap/Tmap.cpt")));
-	// CR LF, as the game's line reader cuts a .def (editor_test::write_text stages it so for a file).
+	files.put("Tmap.trn", test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.trn")));
+	files.put("Tmap.cpt", test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.cpt")));
+	// CR LF, as the game's line reader cuts a .def (test_io::write_text stages it so for a file).
 	std::string items;
 	for (const char *c = kItems; *c; ++c) items += *c == '\n' ? std::string("\r\n") : std::string(1, *c);
 	files.put("items.def", bytes_of(items));
-	files.put("crate.3di", test_io::read_file(fixture("threedi/synth/crate.3di")));
+	files.put("crate.3di", test_io::read_file(test_paths_fixture("threedi/synth/crate.3di")));
 	files.put("acrate.3di", crate_anchored_at(0.25));
 	files.put("tcrate.3di", crate_anchored_at(1.5));
-	files.put("house.3di", test_io::read_file(fixture("threedi/synth/house.3di")));
-	files.put("carrier.3di", test_io::read_file(fixture("threedi/synth/carrier.3di")));
+	files.put("house.3di", test_io::read_file(test_paths_fixture("threedi/synth/house.3di")));
+	files.put("carrier.3di", test_io::read_file(test_paths_fixture("threedi/synth/carrier.3di")));
 	files.put("people.adm", bytes_of(kPeopleAdm));
-	files.put("idle.bad", test_io::read_file(fixture("anim/idle.bad")));
-	files.put("walk.bad", test_io::read_file(fixture("anim/walk.bad")));
+	files.put("idle.bad", test_io::read_file(test_paths_fixture("anim/idle.bad")));
+	files.put("walk.bad", test_io::read_file(test_paths_fixture("anim/walk.bad")));
 }
 
 // The rig's records, by what each tests (its index in the records).
@@ -413,7 +409,7 @@ constexpr const char *kMission = "missions/ground.bms";
 // A session over a project holding the rig: the terrain, the catalog, the models, the people's table and
 // clips, and the minted mission (closed).
 struct Session {
-	editor_test::TempProjectDir dir;
+	test_temp::TempDir dir;
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{ platform, preferences };
@@ -433,9 +429,9 @@ struct Session {
 		for (const char *name : { "Tmap.trn", "Tmap.cpt", "crate.3di", "acrate.3di", "tcrate.3di", "house.3di",
 					 "carrier.3di", "people.adm", "idle.bad", "walk.bad" }) {
 			std::vector<uint8_t> bytes;
-			if (!files->read(name, bytes) || !editor_test::write_bytes(root + "/" + name, bytes)) return false;
+			if (!files->read(name, bytes) || !test_io::write_file(root + "/" + name, bytes)) return false;
 		}
-		if (!editor_test::write_text(root + "/" + items_path, kItems)) return false;
+		if (!test_io::write_text(root + "/" + items_path, kItems)) return false;
 		// The places over the terrain as the rules read it.
 		MissionGround ground;
 		MissionSceneHeader header;
@@ -445,7 +441,7 @@ struct Session {
 		const Places at = find_places(*ground.height_field(), ground.water_height());
 		if (!at.found) return false;
 		placed = rig_records(*ground.height_field(), at, ground.water_height());
-		if (!editor_test::write_bytes(root + "/" + kMission, mint_mission(placed))) return false;
+		if (!test_io::write_file(root + "/" + kMission, mint_mission(placed))) return false;
 		editor_test::handle_to_end(session, request::rescan());
 		return true;
 	}

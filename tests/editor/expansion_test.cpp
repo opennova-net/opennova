@@ -78,21 +78,21 @@ bool make_install(const std::string &root, TablePlace table = TablePlace::Archiv
 	std::filesystem::create_directories(x1, ec);
 	std::vector<std::pair<std::string, std::string>> language{ { "Mx1.bin", "x1 menu script" }, { "x1L.lwf", "x1 bank" } };
 	if (table != TablePlace::Loose) language.push_back({ "x1.bin", "x1 table" });
-	if (table != TablePlace::Archive && !editor_test::write_text(x1 + "/x1.bin", "x1 loose table")) return false;
+	if (table != TablePlace::Archive && !test_io::write_text(x1 + "/x1.bin", "x1 loose table")) return false;
 	return write_archive(root + "/resource.pff", { { "shared.txt", "base" }, { "baseonly.txt", "base only" },
 	                                               { "01TR.bms", "a mission" }, { "menumus.bin", "base menu script" },
 	                                               { "gamemus.bin", "base game script" } }) &&
 	       write_archive(x1 + "/x1.pff", { { "shared.txt", "expansion" }, { "x1only.txt", "x1 only" },
 	                                       { "version.txt", "an archived version" }, { "gt.ssc", "archived config" } }) &&
 	       write_archive(x1 + "/x1L.pff", language) &&
-	       editor_test::write_text(x1 + "/trailer.bik", "a video the game never reads") &&
-	       editor_test::write_text(x1 + "/gt.ssc", "loose config") &&
-	       editor_test::write_text(root + "/MENUMUS.SBF", "base music") &&
-	       editor_test::write_text(root + "/header.bik", "base header") &&
-	       editor_test::write_text(root + "/main.bik", "base main") && editor_test::write_text(x1 + "/Mx1.sbf", "x1 music") &&
-	       editor_test::write_text(x1 + "/header.bik", "x1 header") &&
-	       editor_test::write_text(x1 + "/version.txt", "x1 version") &&
-	       editor_test::write_text(x1 + "/weapon.sav", "a player's");
+	       test_io::write_text(x1 + "/trailer.bik", "a video the game never reads") &&
+	       test_io::write_text(x1 + "/gt.ssc", "loose config") &&
+	       test_io::write_text(root + "/MENUMUS.SBF", "base music") &&
+	       test_io::write_text(root + "/header.bik", "base header") &&
+	       test_io::write_text(root + "/main.bik", "base main") && test_io::write_text(x1 + "/Mx1.sbf", "x1 music") &&
+	       test_io::write_text(x1 + "/header.bik", "x1 header") &&
+	       test_io::write_text(x1 + "/version.txt", "x1 version") &&
+	       test_io::write_text(x1 + "/weapon.sav", "a player's");
 }
 
 std::string text_of(const InstallView &view, const std::string &name) {
@@ -193,7 +193,7 @@ static int test_project_expansion() {
 // relative, its export folder the base game; refused (project.base_project) where no project is, where it
 // builds as an expansion itself, or where it is another game's.
 static int test_base_project_dir() {
-	editor_test::TempProjectDir dir("opennova_editor_base_project_dir");
+	test_temp::TempDir dir("opennova_editor_base_project_dir");
 	const std::string mod = dir.file("game/expansions/onx");
 	ProjectDocument made;
 	Diagnostic error;
@@ -298,7 +298,7 @@ static int test_name_forms_no_game_file() {
 // The install as the game serves it (install_view.h): the base game's view; /exp x1 for a project that
 // builds as jxm on it; the base game for one that builds as jxm on it; an expansion the install lacks.
 static int test_install_view() {
-	editor_test::TempProjectDir dir("opennova_editor_expansion_install");
+	test_temp::TempDir dir("opennova_editor_expansion_install");
 	const std::string root = dir.file("install");
 	TEST_EXPECT(make_install(root));
 	ProjectDocument document;
@@ -381,7 +381,7 @@ static int test_install_view() {
 // the project's names (x1's table as jxm.bin), and validates it again when the project's expansion moves
 // (the base game holds no jxm.bin).
 static int test_fold_follows_the_view() {
-	editor_test::TempProjectDir dir("opennova_editor_expansion_fold");
+	test_temp::TempDir dir("opennova_editor_expansion_fold");
 	const std::string install = dir.file("install");
 	TEST_EXPECT(make_install(install));
 	// x1's table with a section of no name: a finding the install makes of its own file
@@ -428,11 +428,6 @@ size_t count_code(const std::vector<Diagnostic> &findings, const char *code, con
 	return count;
 }
 
-std::string file_text(const std::string &path) {
-	std::ifstream in(opennova::io::os_path(path), std::ios::binary);
-	return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-}
-
 } // namespace
 
 // A session's expansion project (ADR 0046 S16) over the synthetic install: a name the install has or
@@ -441,7 +436,7 @@ std::string file_text(const std::string &path) {
 // settings renames the project's files of the old name; the expansion it builds on checked against the
 // install, and listed when the install changes under it.
 static int test_session() {
-	editor_test::TempProjectDir dir("opennova_editor_expansion_session");
+	test_temp::TempDir dir("opennova_editor_expansion_session");
 	const std::string install = dir.file("install");
 	TEST_EXPECT(make_install(install));
 	Preferences chosen;
@@ -483,7 +478,7 @@ static int test_session() {
 	            view.project.document->expansion == (ProjectExpansion{ "jxm", "" }));
 	const AssetEntry *version = view.project.scan->find("version.txt");
 	const AssetEntry *table = view.project.scan->find("jxm.bin");
-	TEST_EXPECT(version && table && file_text(root + "/" + version->relative_path) == "Own\r\n");
+	TEST_EXPECT(version && table && test_io::read_file_text(root + "/" + version->relative_path) == "Own\r\n");
 	const std::string table_path = table ? root + "/" + table->relative_path : std::string(); // the scan moves on
 	// The base game's music files are no rows of an expansion's checklist: M<n>.* and G<n>.* take their
 	// place [orig: Expansion_LoadAssets @ 0x4a4906..0x4a494a].
@@ -498,8 +493,8 @@ static int test_session() {
 	}
 	// The base game's music bank and script in an expansion's project: the game reads Mjxm.sbf and
 	// Mjxm.bin in their place.
-	TEST_EXPECT(editor_test::write_text(root + "/MENUMUS.SBF", "music") &&
-	            editor_test::write_text(root + "/menumus.bin", "SCR0....")); // a script by its bytes, as the scan types a .bin
+	TEST_EXPECT(test_io::write_text(root + "/MENUMUS.SBF", "music") &&
+	            test_io::write_text(root + "/menumus.bin", "SCR0....")); // a script by its bytes, as the scan types a .bin
 	editor_test::handle_to_end(session, request::rescan());
 	const std::vector<Diagnostic> &listed = view.project.requirements->diagnostics;
 	TEST_EXPECT(count_code(listed, "expansion.file.unread") == 2 &&
@@ -528,14 +523,14 @@ static int test_session() {
 	const std::string table_file = renamed_table->relative_path;
 	const std::string jxk = root + "/" + table_file;
 	const std::string jxq = std::filesystem::path(jxk).parent_path().generic_string() + "/jxq.bin";
-	TEST_EXPECT(editor_test::write_text(jxq, "a stale table"));
+	TEST_EXPECT(test_io::write_text(jxq, "a stale table"));
 	editor_test::handle_to_end(session, request::rescan());
 	ProjectSettingsChange onto_stale;
 	onto_stale.expansion = "jxq";
 	editor_test::apply_settings(session, onto_stale);
 	TEST_EXPECT(count_code(view.project.settings_result.failures, "rename.exists") == 1 &&
 	            view.project.document->expansion.name == "jxk" && std::filesystem::exists(opennova::io::os_path(jxk)) &&
-	            file_text(jxq) == "a stale table");
+	            test_io::read_file_text(jxq) == "a stale table");
 	ProjectDocument on_disk;
 	Diagnostic unread;
 	TEST_EXPECT(open_project(root, on_disk, unread) && on_disk.expansion.name == "jxk");
@@ -651,7 +646,7 @@ static int test_session() {
 // while the base has no export the expansion says so and its build is refused, saying to export it; once it
 // has one, the base game it reads is that export (its names, its expansions: none), never the install's.
 static int test_session_on_base_project() {
-	editor_test::TempProjectDir dir("opennova_editor_expansion_base_project");
+	test_temp::TempDir dir("opennova_editor_expansion_base_project");
 	const std::string install = dir.file("install");
 	TEST_EXPECT(make_install(install));
 	Preferences chosen;
@@ -673,7 +668,7 @@ static int test_session_on_base_project() {
 	                                     request::new_expansion_project(mod, "Night", "onx", "", true, "../../assets"));
 	TEST_EXPECT(!outcome.refused && view.project.open &&
 	            view.project.document->expansion == (ProjectExpansion{ "onx", "", "../../assets" }));
-	TEST_EXPECT(file_text(mod + "/project.opennova").find("\"base_project\": \"../../assets\"") != std::string::npos);
+	TEST_EXPECT(test_io::read_file_text(mod + "/project.opennova").find("\"base_project\": \"../../assets\"") != std::string::npos);
 	TEST_EXPECT(view.project.scan->find("onx.bin") && view.project.scan->find("version.txt"));
 	{
 		const opennova::io::JsonValue project = view_section_to_json(view, ViewSection::Project);
@@ -690,7 +685,7 @@ static int test_session_on_base_project() {
 	std::error_code made_dir;
 	std::filesystem::create_directories(opennova::io::os_path(exported), made_dir);
 	TEST_EXPECT(write_archive(exported + "/resource.pff", { { "baseonly.txt", "base" }, { "shared.txt", "base" } }) &&
-	            write_archive(exported + "/language.pff", {}) && editor_test::write_text(exported + "/export.json", "{}"));
+	            write_archive(exported + "/language.pff", {}) && test_io::write_text(exported + "/export.json", "{}"));
 	outcome = editor_test::handle_to_end(session, request::open_project(mod));
 	TEST_EXPECT(!outcome.refused && view.project.open);
 	TEST_EXPECT(count_code(view.project.requirements->diagnostics, "project.base_project") == 0);
@@ -712,7 +707,7 @@ static int test_session_on_base_project() {
 	editor_test::apply_settings(session, install_base);
 	TEST_EXPECT(view.project.document->expansion == (ProjectExpansion{ "onx", "" }) && has("01TR.bms") &&
 	            !has("x1only.txt"));
-	TEST_EXPECT(file_text(mod + "/project.opennova").find("base_project") == std::string::npos);
+	TEST_EXPECT(test_io::read_file_text(mod + "/project.opennova").find("base_project") == std::string::npos);
 	return 0;
 }
 
@@ -723,7 +718,7 @@ static int test_session_on_base_project() {
 // step at a time within a budget, the layer is the one a single call builds; a standalone project, or a
 // base that does not mount, builds none.
 static int test_base_layer_session() {
-	editor_test::TempProjectDir dir("opennova_editor_expansion_base_layer");
+	test_temp::TempDir dir("opennova_editor_expansion_base_layer");
 	const std::string exported = dir.file("game/assets/build/export");
 	std::error_code made_dir;
 	std::filesystem::create_directories(opennova::io::os_path(exported), made_dir);
@@ -760,7 +755,7 @@ static int test_base_layer_session() {
 	ActionOutcome outcome =
 	        editor_test::handle_to_end(session, request::new_expansion_project(root, "Night", "onx", "", true, "../../assets"));
 	TEST_EXPECT(!outcome.refused && view.project.open);
-	TEST_EXPECT(editor_test::write_text(root + "/menus/night.mnu",
+	TEST_EXPECT(test_io::write_text(root + "/menus/night.mnu",
 	                                    "<SCREEN>\r\n<NAME>NIGHT</NAME>\r\n"
 	                                    "<WINDOW TYPE=\"STATIC\" NAME=\"W1\">\r\n"
 	                                    "<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>20</BOTTOM></POSITION>\r\n"
@@ -821,7 +816,7 @@ std::vector<uint8_t> table_bytes(const std::vector<std::pair<std::string, std::v
 // 0x75D473]: a key of the section the lookup names, of any section for a flat lookup, found there first, even
 // where the project lacks the table the lookup names; the table follows the expansion's name.
 static int test_override_table() {
-	editor_test::TempProjectDir dir("opennova_editor_expansion_override");
+	test_temp::TempDir dir("opennova_editor_expansion_override");
 	const std::string install = dir.file("install");
 	TEST_EXPECT(make_install(install));
 	Preferences chosen;
@@ -836,10 +831,10 @@ static int test_override_table() {
 	const AssetEntry *made = view.project.scan->find("jxm.bin");
 	TEST_EXPECT(made != nullptr);
 	if (!made || !view.findings.graph) return 1;
-	TEST_EXPECT(editor_test::write_bytes(root + "/" + made->relative_path,
+	TEST_EXPECT(test_io::write_file(root + "/" + made->relative_path,
 	                                     table_bytes({ { "WepDes", { "WEP_OVER" } }, { "Overlays", { "OVL_FLAT" } },
 	                                                   { "Client", { "STRCLI01" } } })) &&
-	            editor_test::write_bytes(root + "/gametext.bin",
+	            test_io::write_file(root + "/gametext.bin",
 	                                     table_bytes({ { "WepDes", { "WEP_OVER", "WEP_BASE" } },
 	                                                   { "Client", { "STRCLI01", "STRCLI04" } } })));
 	editor_test::handle_to_end(session, request::rescan());

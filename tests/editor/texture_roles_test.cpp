@@ -275,7 +275,7 @@ using editor_test::tga_bytes;
 // refusing a build whenever its key names one; a sky map's .dds; an item's HUD image, and one written .dds
 // the HUD's loader opens no file of.
 int test_graph() {
-	editor_test::TempProjectDir dir{"opennova_editor_texture_roles"};
+	test_temp::TempDir dir{"opennova_editor_texture_roles"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -284,19 +284,19 @@ int test_graph() {
 	editor_test::create_missing_files(session);
 	const std::string trn_head = "polytrn_detailmap detail.tga\npolytrn_polydata ground.cpt\npolytrn_sectorcount 1\n"
 	                             "polytrn_sectors 0\n";
-	TEST_EXPECT(editor_test::write_text(root + "/terrains/a.trn", trn_head +
+	TEST_EXPECT(test_io::write_text(root + "/terrains/a.trn", trn_head +
 	                                                                  "polytrn_colormap ground.tga\npolytrn_detailmap_c1 splat.tga\n"
 	                                                                  "polytrn_detailblendmap blend.tga\n") &&
-	            editor_test::write_text(root + "/terrains/b.trn",
+	            test_io::write_text(root + "/terrains/b.trn",
 	                                    trn_head + "polytrn_colormap bcol.tga\npolytrn_detailblendmap noblend.tga\n") &&
-	            editor_test::write_bytes(root + "/textures/ground.png", test_png::gradient_png(2, 2)) &&
-	            editor_test::write_bytes(root + "/textures/detail.tga", tga_bytes()) &&
-	            editor_test::write_bytes(root + "/textures/bcol.tga", tga_bytes()) &&
-	            editor_test::write_bytes(root + "/textures/splat.dds", tga_bytes()) &&
-	            editor_test::write_bytes(root + "/textures/cloud.dds", tga_bytes()) &&
-	            editor_test::write_bytes(root + "/textures/stance.tga", tga_bytes()) &&
-	            editor_test::write_bytes(root + "/textures/stance2.dds", tga_bytes()) &&
-	            editor_test::write_text(root + "/defs/items.def",
+	            test_io::write_file(root + "/textures/ground.png", test_png::gradient_png(2, 2)) &&
+	            test_io::write_file(root + "/textures/detail.tga", tga_bytes()) &&
+	            test_io::write_file(root + "/textures/bcol.tga", tga_bytes()) &&
+	            test_io::write_file(root + "/textures/splat.dds", tga_bytes()) &&
+	            test_io::write_file(root + "/textures/cloud.dds", tga_bytes()) &&
+	            test_io::write_file(root + "/textures/stance.tga", tga_bytes()) &&
+	            test_io::write_file(root + "/textures/stance2.dds", tga_bytes()) &&
+	            test_io::write_text(root + "/defs/items.def",
 	                                    "begin \"Brick\"\nid 100300\ntype building\nhud_image stance.tga\nend\n"
 	                                    "begin \"Pebble\"\nid 100301\ntype building\nhud_image stance2.dds\nend\n"));
 	std::string env;
@@ -309,8 +309,8 @@ int test_graph() {
 		TEST_EXPECT(opennova::env::save_env(text, config, error));
 		env = text.str();
 	}
-	TEST_EXPECT(editor_test::write_text(root + "/envs/sky.env", env) &&
-	            editor_test::write_bytes(root + "/textures/cloud2.png", test_png::gradient_png(2, 2)));
+	TEST_EXPECT(test_io::write_text(root + "/envs/sky.env", env) &&
+	            test_io::write_file(root + "/textures/cloud2.png", test_png::gradient_png(2, 2)));
 	// A sky map's extension made PCX as the game parses it: haze.tga finds haze.pcx; only.tga, which the
 	// project holds as a TGA alone, finds nothing (the game opens only.dds or only.pcx).
 	{
@@ -319,9 +319,9 @@ int test_graph() {
 		config.sky_map1 = "haze.tga";
 		config.sky_map2 = "only.tga";
 		std::string error;
-		TEST_EXPECT(opennova::env::save_env(text, config, error) && editor_test::write_text(root + "/envs/haze.env", text.str()) &&
-		            editor_test::write_bytes(root + "/textures/haze.pcx", tga_bytes()) &&
-		            editor_test::write_bytes(root + "/textures/only.tga", tga_bytes()));
+		TEST_EXPECT(opennova::env::save_env(text, config, error) && test_io::write_text(root + "/envs/haze.env", text.str()) &&
+		            test_io::write_file(root + "/textures/haze.pcx", tga_bytes()) &&
+		            test_io::write_file(root + "/textures/only.tga", tga_bytes()));
 	}
 	editor_test::handle_to_end(session, request::rescan());
 	session.run_operations();
@@ -388,7 +388,7 @@ int test_retail() {
 		retail::skip_leg("OPENNOVA_JO_DIR (the install's texture references by role)");
 		return 0;
 	}
-	editor_test::TempProjectDir dir{"opennova_editor_texture_roles_retail"};
+	test_temp::TempDir dir{"opennova_editor_texture_roles_retail"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -409,10 +409,10 @@ int test_retail() {
 		const std::string &name = location.logical_name;
 		const AssetKind kind = classify_asset(name, nullptr);
 		if (kind == AssetKind::Texture) {
-			textures += editor_test::write_bytes(root + "/textures/" + name, {}) ? 1 : 0;
+			textures += test_io::write_file(root + "/textures/" + name, {}) ? 1 : 0;
 		} else if (referrers.count(kind)) {
 			std::vector<uint8_t> bytes;
-			if (mount.read_file_raw(name, bytes) && editor_test::write_bytes(root + "/" + asset_kind_token(kind) + "/" + name, bytes))
+			if (mount.read_file_raw(name, bytes) && test_io::write_file(root + "/" + asset_kind_token(kind) + "/" + name, bytes))
 				++files;
 		}
 	}

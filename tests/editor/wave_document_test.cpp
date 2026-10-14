@@ -134,7 +134,7 @@ int test_operations() {
 // The wave_operation request over a session: one undo step each, the status saying what it did, Save writing it;
 // refused for an operation the wave does not take and a document that is no wave.
 int test_session() {
-	editor_test::TempProjectDir dir("opennova_editor_wave_document");
+	test_temp::TempDir dir("opennova_editor_wave_document");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -142,7 +142,7 @@ int test_session() {
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project.root;
 	const std::string path = "sounds/tone.wav";
-	TEST_EXPECT(editor_test::write_bytes(root + "/" + path, mono_wave(22050)));
+	TEST_EXPECT(test_io::write_file(root + "/" + path, mono_wave(22050)));
 	editor_test::handle_to_end(session, request::rescan());
 	ActionOutcome done = editor_test::handle_to_end(session, request::wave_operation(path, "trim", {{"start", "0"}, {"end", "0.5"}}, true));
 	TEST_EXPECT(done.done() && session.view().activity.status.find("Trimmed") != std::string::npos);

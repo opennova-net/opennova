@@ -28,35 +28,13 @@ func after_each() -> void:
 	await EditorFixture.teardown(self, _dirs)
 
 
-func _write(path: String, bytes: PackedByteArray) -> void:
-	assert_eq(DirAccess.make_dir_recursive_absolute(path.get_base_dir()), OK)
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file, "wrote %s" % path)
-	if file != null:
-		file.store_buffer(bytes)
-		file.close()
-
-
-## A `side` x `side` uncompressed 32-bit TGA, every texel opaque white.
-func _tga(side: int) -> PackedByteArray:
-	var bytes := PackedByteArray()
-	bytes.resize(18)
-	bytes[2] = 2
-	bytes[12] = side
-	bytes[14] = side
-	bytes[16] = 32
-	for _k in side * side:
-		bytes.append_array(PackedByteArray([255, 255, 255, 255]))
-	return bytes
-
-
 ## A project holding a soldier panel's layout, its art, a weapon and the damage vignette. The panel's
 ## HUDDECLUT rows show the health bar and the weapon group: without them the game hides both (D-HUD-54).
 func _project() -> String:
 	var dir := OS.get_cache_dir().path_join("opennova editor hud project %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
 	assert_true(_seam.new_project(dir, "HUD Viewport"))
-	_write(dir.path_join(LAYOUT), TestFs.crlf("""// The soldier panel
+	TestFs.write_bytes(self, dir.path_join(LAYOUT), TestFs.crlf("""// The soldier panel
 StaticFrame frame.tga 6,586
 HUDHEALTH 25,741,177,751
 HUDSTANCEPOS 30,639
@@ -74,8 +52,8 @@ HUDDECLUT_WPNGRP 1 1 1 1
 """).to_utf8_buffer())
 	for name in ["frame.tga", "stance0.tga", "stance1.tga", "stance2.tga", "stance3.tga", "stance4.tga",
 			"stance5.tga", "h_clip.tga", "h_rnd.tga", "h_icon.tga", "vignette.tga", "NVG.tga"]:
-		_write(dir.path_join("textures").path_join(name), _tga(8))
-	_write(dir.path_join("defs/weapon.def"), TestFs.crlf("""weapon "W_TEST"
+		TestFs.write_bytes(self, dir.path_join("textures").path_join(name), TestFs.tga_bytes(Vector2i(8, 8), Color.WHITE, 0))
+	TestFs.write_bytes(self, dir.path_join("defs/weapon.def"), TestFs.crlf("""weapon "W_TEST"
 	clipsize 30
 	hudicon h_icon.tga
 	hudclipgfx 0 0 h_clip.tga
@@ -310,18 +288,18 @@ func test_the_sights_and_the_board_draw() -> void:
 		return
 	var dir := _project()
 	var layout := FileAccess.get_file_as_string(dir.path_join(LAYOUT))
-	_write(dir.path_join(LAYOUT), (layout + TestFs.crlf("""fonthud1_hi Gunpl22b.fnt
+	TestFs.write_bytes(self, dir.path_join(LAYOUT), (layout + TestFs.crlf("""fonthud1_hi Gunpl22b.fnt
 HUDSCOPERANGEXY 600,400
 HUDSCOPEZEROXY 600,420
 HUDSCOPEMAGXY 600,440
 HUDDECLUT_XHAIRS 1 1 1 1
 """)).to_utf8_buffer())
-	_write(dir.path_join("fonts/Gunpl22b.fnt"), FileAccess.get_file_as_bytes("res://../fixtures/fnt/synth_1page.fnt"))
-	_write(dir.path_join("textures/card.tga"), _tga(8))
+	TestFs.write_bytes(self, dir.path_join("fonts/Gunpl22b.fnt"), FileAccess.get_file_as_bytes("res://../fixtures/fnt/synth_1page.fnt"))
+	TestFs.write_bytes(self, dir.path_join("textures/card.tga"), TestFs.tga_bytes(Vector2i(8, 8), Color.WHITE, 0))
 	# The crosshair's style 0 picture (cross01.tga), so the HUD draws its crosshair where its gate lets it.
-	_write(dir.path_join("textures/cross01.tga"), _tga(8))
+	TestFs.write_bytes(self, dir.path_join("textures/cross01.tga"), TestFs.tga_bytes(Vector2i(8, 8), Color.WHITE, 0))
 	var weapons := FileAccess.get_file_as_string(dir.path_join("defs/weapon.def"))
-	_write(dir.path_join("defs/weapon.def"), (weapons + TestFs.crlf("""weapon "W_SCOPE"
+	TestFs.write_bytes(self, dir.path_join("defs/weapon.def"), (weapons + TestFs.crlf("""weapon "W_SCOPE"
 	clipsize 5
 	startrounds 10
 	flags scoped
@@ -342,7 +320,7 @@ end
 	var hud := gametext.add_section("hud")
 	gametext.add_entry("hud_scope_zero", "Zero: %dm", hud, Vector2i.ZERO)
 	gametext.add_entry("hud_scope_mag", "%dx", hud, Vector2i.ZERO)
-	_write(dir.path_join("gametext.bin"), gametext.to_byte_array())
+	TestFs.write_bytes(self, dir.path_join("gametext.bin"), gametext.to_byte_array())
 	_seam.request({"kind": "rescan"})
 	assert_true(_seam.open_document(LAYOUT))
 	var state := await _await_ready()

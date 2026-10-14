@@ -93,7 +93,7 @@ struct Rig {
 } // namespace
 
 static int test_headless_viewport() {
-	editor_test::TempProjectDir dir("opennova_editor_menu_viewport");
+	test_temp::TempDir dir("opennova_editor_menu_viewport");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -351,7 +351,7 @@ static int test_headless_viewport() {
 
 	// A table the project has that does not parse: named apart from one it lacks (the
 	// rescan keeps the unsaved menu open as it is).
-	TEST_EXPECT(editor_test::write_text(view.project.root + "/text/broken.bin", "not a table"));
+	TEST_EXPECT(test_io::write_text(view.project.root + "/text/broken.bin", "not a table"));
 	session.handle(request::rescan());
 	session.run_operations();
 	TEST_EXPECT(session.document_for("main.mnu") == menu && menu->dirty());

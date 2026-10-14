@@ -47,8 +47,6 @@ struct Gathered final : CanvasRequests {
 	void request(EditorRequest each) override { requests.push_back(std::move(each)); }
 };
 
-std::string fixture(const std::string &name) { return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/" + name; }
-
 bool contains(const std::string &text, const std::string &part) {
 	if (text.find(part) != std::string::npos) return true;
 	std::printf("  \"%s\" lacks \"%s\"\n", text.c_str(), part.c_str());
@@ -64,7 +62,7 @@ JsonValue ask(ProjectSession &session, const std::string &path, const char *op, 
 }
 
 int test_routes() {
-	editor_test::TempProjectDir dir("opennova_editor_terrain_family");
+	test_temp::TempDir dir("opennova_editor_terrain_family");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -72,11 +70,11 @@ int test_routes() {
 	const SessionView &v = session.view();
 	const std::string root = v.project.root;
 	for (const char *name : {"Tmap.trn", "Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx"})
-		TEST_EXPECT(editor_test::write_bytes(root + "/terrain/" + name, test_io::read_file(fixture(std::string("terrain/tmap/") + name))));
+		TEST_EXPECT(test_io::write_file(root + "/terrain/" + name, test_io::read_file(test_paths_fixture(std::string("terrain/tmap/") + name))));
 	// A second terrain naming the first's height data (D-TERRAIN-17: 15 of JO:CA's 38 do).
-	const std::vector<uint8_t> tmap = test_io::read_file(fixture("terrain/tmap/Tmap.trn"));
-	TEST_EXPECT(editor_test::write_bytes(root + "/terrain/Tother.trn", tmap));
-	TEST_EXPECT(editor_test::write_text(root + "/day.env", "env"));
+	const std::vector<uint8_t> tmap = test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.trn"));
+	TEST_EXPECT(test_io::write_file(root + "/terrain/Tother.trn", tmap));
+	TEST_EXPECT(test_io::write_text(root + "/day.env", "env"));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::set_missions(session, true);
 	editor_test::handle_to_end(session, request::create_file("m.bms", "mission", {{"terrain", "Tmap.trn"}, {"environment", "day.env"}}));
@@ -157,7 +155,7 @@ int test_routes() {
 
 // The tiles' scope over the mission's .til (S25 C1: the undo scope proven over records).
 int test_tiles_scope() {
-	editor_test::TempProjectDir dir("opennova_editor_terrain_tiles_scope");
+	test_temp::TempDir dir("opennova_editor_terrain_tiles_scope");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -165,8 +163,8 @@ int test_tiles_scope() {
 	const SessionView &v = session.view();
 	const std::string root = v.project.root;
 	for (const char *name : {"Tmap.trn", "Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx"})
-		TEST_EXPECT(editor_test::write_bytes(root + "/terrain/" + name, test_io::read_file(fixture(std::string("terrain/tmap/") + name))));
-	TEST_EXPECT(editor_test::write_text(root + "/day.env", "env"));
+		TEST_EXPECT(test_io::write_file(root + "/terrain/" + name, test_io::read_file(test_paths_fixture(std::string("terrain/tmap/") + name))));
+	TEST_EXPECT(test_io::write_text(root + "/day.env", "env"));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::set_missions(session, true);
 	editor_test::handle_to_end(session, request::create_file("m.bms", "mission", {{"terrain", "Tmap.trn"}, {"environment", "day.env"}}));
@@ -306,7 +304,7 @@ int test_tiles_scope() {
 // makes the pictures again (a Rebuild). A sample after ten seconds with none (a client gone) begins a gesture of its
 // own, a step of its own.
 int test_stroke_follows() {
-	editor_test::TempProjectDir dir("opennova_editor_terrain_stroke_follows");
+	test_temp::TempDir dir("opennova_editor_terrain_stroke_follows");
 	editor_test::FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -314,8 +312,8 @@ int test_stroke_follows() {
 	const SessionView &v = session.view();
 	const std::string root = v.project.root;
 	for (const char *name : {"Tmap.trn", "Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx"})
-		TEST_EXPECT(editor_test::write_bytes(root + "/terrain/" + name, test_io::read_file(fixture(std::string("terrain/tmap/") + name))));
-	TEST_EXPECT(editor_test::write_text(root + "/day.env", "env"));
+		TEST_EXPECT(test_io::write_file(root + "/terrain/" + name, test_io::read_file(test_paths_fixture(std::string("terrain/tmap/") + name))));
+	TEST_EXPECT(test_io::write_text(root + "/day.env", "env"));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::set_missions(session, true);
 	editor_test::handle_to_end(session, request::create_file("m.bms", "mission", {{"terrain", "Tmap.trn"}, {"environment", "day.env"}}));

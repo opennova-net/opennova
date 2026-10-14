@@ -57,7 +57,7 @@ int test_kind() {
 }
 
 struct Rig {
-	editor_test::TempProjectDir dir{ "opennova_editor_terrain_viewport" };
+	test_temp::TempDir dir{ "opennova_editor_terrain_viewport" };
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{ platform, preferences };
@@ -108,7 +108,7 @@ int write_mission(const std::string &root, const char *name, const char *tile_se
 	            opennova::mission::set_header_int(file, "minutes_per_day", 60, why));
 	std::vector<uint8_t> bytes;
 	TEST_EXPECT(opennova::bms::write(file, bytes, why));
-	TEST_EXPECT(editor_test::write_bytes(root + "/" + name, bytes));
+	TEST_EXPECT(test_io::write_file(root + "/" + name, bytes));
 	return 0;
 }
 
@@ -131,18 +131,18 @@ int test_session(const std::string &repo) {
 	const std::vector<uint8_t> fixture = test_io::read_file(fixtures + "Tmap.trn");
 	std::string trn(fixture.begin(), fixture.end());
 	trn += "\r\npolytrn_tileinfo own.til\r\n";
-	TEST_EXPECT(editor_test::write_text(root + "/Tmap.trn", trn));
+	TEST_EXPECT(test_io::write_text(root + "/Tmap.trn", trn));
 	for (const char *name : { "Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx" })
-		TEST_EXPECT(editor_test::write_bytes(root + "/" + name, test_io::read_file(fixtures + name)));
-	TEST_EXPECT(editor_test::write_bytes(root + "/own.til", til_of(2)));
-	TEST_EXPECT(editor_test::write_bytes(root + "/landing.til", til_of(3)));
+		TEST_EXPECT(test_io::write_file(root + "/" + name, test_io::read_file(fixtures + name)));
+	TEST_EXPECT(test_io::write_file(root + "/own.til", til_of(2)));
+	TEST_EXPECT(test_io::write_file(root + "/landing.til", til_of(3)));
 	opennova::env::Config day;
 	day.fog_level = 800.0f;
 	day.sky_height = 175.0f;
 	std::ostringstream text;
 	std::string error;
 	TEST_EXPECT(opennova::env::save_env(text, day, error));
-	TEST_EXPECT(editor_test::write_text(root + "/day.env", text.str()));
+	TEST_EXPECT(test_io::write_text(root + "/day.env", text.str()));
 	TEST_EXPECT(write_mission(root, "landing.bms", "rock.tga") == 0);
 	editor_test::handle_to_end(rig.session, request::rescan());
 	rig.pump();
@@ -268,7 +268,7 @@ int test_stroke(const std::string &repo) {
 	const std::string root = rig.root();
 	const std::string fixtures = repo + "/fixtures/terrain/tmap/";
 	for (const char *name : { "Tmap.trn", "Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx" })
-		TEST_EXPECT(editor_test::write_bytes(root + "/" + name, test_io::read_file(fixtures + name)));
+		TEST_EXPECT(test_io::write_file(root + "/" + name, test_io::read_file(fixtures + name)));
 	editor_test::handle_to_end(rig.session, request::rescan());
 	rig.session.handle(request::open_document(rig.path));
 	TEST_EXPECT(rig.set(R"({"kind": "terrain", "device": {"width": 320, "height": 240}})"));

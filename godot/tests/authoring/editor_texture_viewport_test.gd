@@ -26,15 +26,6 @@ func after_each() -> void:
 	await EditorFixture.teardown(self, _dirs)
 
 
-func _write(path: String, bytes: PackedByteArray) -> void:
-	assert_eq(DirAccess.make_dir_recursive_absolute(path.get_base_dir()), OK)
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file, "wrote %s" % path)
-	if file != null:
-		file.store_buffer(bytes)
-		file.close()
-
-
 ## A 2 x 2 uncompressed 32-bit TGA, its descriptor `descriptor`: the file's texels B, G, R, A in the
 ## order they are stored, texel k's red 10 + k, green 100 + k, blue 200 + k, alpha 50 + 60 k.
 func _tga(descriptor: int) -> PackedByteArray:
@@ -114,7 +105,7 @@ func test_a_selected_texture_draws_through_its_device() -> void:
 		return
 	var root := _new_project()
 	# A top-left descriptor: the game takes the rows bottom up all the same.
-	_write(root.path_join("textures/brick.tga"), _tga(0x28))
+	TestFs.write_bytes(self, root.path_join("textures/brick.tga"), _tga(0x28))
 	_seam.request({"kind": "rescan"})
 	assert_true(_seam.done({"kind": "select_file", "path": "textures/brick.tga"}), "select_file is served")
 	var state := await _await_ready("textures/brick.tga")
@@ -161,7 +152,7 @@ func test_a_dds_chain_binds_the_level_shown() -> void:
 	if _app == null:
 		return
 	var root := _new_project()
-	_write(root.path_join("textures/metal.dds"), _dds(16))
+	TestFs.write_bytes(self, root.path_join("textures/metal.dds"), _dds(16))
 	_seam.request({"kind": "rescan"})
 	assert_true(_seam.done({"kind": "select_file", "path": "textures/metal.dds"}))
 	var state := await _await_ready("textures/metal.dds")
@@ -181,7 +172,7 @@ func test_a_dds_chain_binds_the_level_shown() -> void:
 	assert_eq(level2.get_size(), Vector2(4, 4), "level 2 bound")
 	assert_eq(material.get_shader_parameter("base_size"), Vector2(16, 16), "placed at the texture's size")
 	# Another file selected: the texture's viewport and its device let go.
-	_write(root.path_join("notes.txt"), "a note".to_utf8_buffer())
+	TestFs.write_bytes(self, root.path_join("notes.txt"), "a note".to_utf8_buffer())
 	_seam.request({"kind": "rescan"})
 	assert_true(_seam.done({"kind": "select_file", "path": "notes.txt"}))
 	_app.pump()
@@ -193,8 +184,8 @@ func test_a_texture_draws_as_a_use() -> void:
 	if _app == null:
 		return
 	var root := _new_project()
-	_write(root.path_join("textures/brick.tga"), _tga(0))
-	_write(root.path_join("defs/items.def"),
+	TestFs.write_bytes(self, root.path_join("textures/brick.tga"), _tga(0))
+	TestFs.write_bytes(self, root.path_join("defs/items.def"),
 			TestFs.crlf("begin \"Brick\"\nid 100300\ntype building\nhud_image brick.tga\nend\n").to_utf8_buffer())
 	_seam.request({"kind": "rescan"})
 	assert_true(_seam.done({"kind": "select_file", "path": "textures/brick.tga"}))
@@ -235,7 +226,7 @@ func test_a_texture_edit_redraws() -> void:
 	if _app == null:
 		return
 	var root := _new_project()
-	_write(root.path_join("textures/brick.tga"), _tga(0x28))
+	TestFs.write_bytes(self, root.path_join("textures/brick.tga"), _tga(0x28))
 	_seam.request({"kind": "rescan"})
 	assert_true(_seam.open_document("textures/brick.tga"))
 	var state := await _await_ready("textures/brick.tga")
@@ -272,7 +263,7 @@ func test_a_normal_map_lit() -> void:
 	if _app == null:
 		return
 	var root := _new_project()
-	_write(root.path_join("textures/brick.tga"), _tga(0))
+	TestFs.write_bytes(self, root.path_join("textures/brick.tga"), _tga(0))
 	_seam.request({"kind": "rescan"})
 	assert_true(_seam.done({"kind": "select_file", "path": "textures/brick.tga"}), "select_file is served")
 	var first := await _await_ready("textures/brick.tga")
@@ -315,7 +306,7 @@ func test_a_texture_replaced_by_an_image() -> void:
 	if _app == null:
 		return
 	var root := _new_project()
-	_write(root.path_join("textures/brick.tga"), _tga(0))
+	TestFs.write_bytes(self, root.path_join("textures/brick.tga"), _tga(0))
 	var outside := OS.get_cache_dir().path_join("opennova texture image %d" % Time.get_ticks_usec())
 	_dirs.append(outside)
 	assert_eq(DirAccess.make_dir_recursive_absolute(outside), OK)
@@ -362,7 +353,7 @@ func test_a_texture_edited_in_its_program() -> void:
 		return
 	_app.set("open_externally", false)
 	var root := _new_project()
-	_write(root.path_join("textures/brick.tga"), _tga(0))
+	TestFs.write_bytes(self, root.path_join("textures/brick.tga"), _tga(0))
 	_seam.request({"kind": "rescan"})
 	assert_true(_seam.settle())
 	assert_true(_seam.done({"kind": "edit_externally", "path": "textures/brick.tga"}), "edit_externally is served")
@@ -412,7 +403,7 @@ func test_the_preview_background_draws_around_a_texture() -> void:
 	if _app == null:
 		return
 	var root := _new_project()
-	_write(root.path_join("textures/brick.tga"), _tga(0x28))
+	TestFs.write_bytes(self, root.path_join("textures/brick.tga"), _tga(0x28))
 	_seam.request({"kind": "rescan"})
 	assert_true(_seam.done({"kind": "select_file", "path": "textures/brick.tga"}), "select_file is served")
 	var state := await _await_ready("textures/brick.tga")

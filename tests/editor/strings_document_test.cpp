@@ -62,7 +62,7 @@ std::string text_of(const Document &document, NodeAddress address, const char *f
 }
 
 int load_edit_save() {
-	editor_test::TempProjectDir dir("opennova_strings_document_test");
+	test_temp::TempDir dir("opennova_strings_document_test");
 	const std::vector<uint8_t> bytes = minted_table();
 	TEST_EXPECT(!bytes.empty());
 	std::string error;
@@ -190,7 +190,7 @@ int load_edit_save() {
 // staged row's order, not the committed one); its locator is its new place and names it back; a
 // finding on it and a reveal by its locator land on it.
 int moved_string_reads_itself() {
-	editor_test::TempProjectDir dir("opennova_strings_moved_test");
+	test_temp::TempDir dir("opennova_strings_moved_test");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -242,7 +242,7 @@ int moved_string_reads_itself() {
 }
 
 int validation_and_session() {
-	editor_test::TempProjectDir dir("opennova_strings_session_test");
+	test_temp::TempDir dir("opennova_strings_session_test");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -356,7 +356,7 @@ int validation_and_session() {
 // reverted is every type's (editor_document_contract_test check_real_change), a record added
 // (Added, its owner changed) the core's (document_core_test test_changes_since_save).
 int changes_since_save() {
-	editor_test::TempProjectDir dir("opennova_strings_changes_test");
+	test_temp::TempDir dir("opennova_strings_changes_test");
 	std::string error;
 	Diagnostic diagnostic;
 	const std::vector<uint8_t> ungrouped = minted_table(false);
@@ -382,7 +382,7 @@ int changes_since_save() {
 // another section (a Move whose parent is that section) is added there with its key, its text and its
 // position and removed here, one undo step, its section the one its symbol's scope names.
 int section_names_and_moves() {
-	editor_test::TempProjectDir dir("opennova_strings_sections_test");
+	test_temp::TempDir dir("opennova_strings_sections_test");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);

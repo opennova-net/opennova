@@ -104,7 +104,7 @@ OperationStatus status_of(OperationKind kind, bool cancellable) {
 // The slot: one operation at a time, stepped within a poll's budget (ms 0: one step; ms n: steps
 // while the clock says n milliseconds have not passed), its progress only going up, finish() once.
 static int test_slot_steps_and_finishes() {
-	editor_test::TempProjectDir dir("opennova_editor_operation_slot");
+	test_temp::TempDir dir("opennova_editor_operation_slot");
 	FakePlatform platform;
 	MemoryPreferencesStore store;
 	EditorPreferences preferences(store);
@@ -164,7 +164,7 @@ static int test_slot_steps_and_finishes() {
 // A cancel lands between two steps: the operation stops, never finishes, and the slot says it
 // was cancelled; one that cannot be cancelled is not.
 static int test_slot_cancels_between_steps() {
-	editor_test::TempProjectDir dir("opennova_editor_operation_cancel");
+	test_temp::TempDir dir("opennova_editor_operation_cancel");
 	FakePlatform platform;
 	MemoryPreferencesStore store;
 	EditorPreferences preferences(store);
@@ -299,7 +299,7 @@ static int test_request_table() {
 // cancelled it), and under a fake of every operation kind, cancellable and not, in a session of
 // its own.
 static int test_gate_is_what_busy_refuses_says() {
-	editor_test::TempProjectDir dir("opennova_editor_operation_every_kind");
+	test_temp::TempDir dir("opennova_editor_operation_every_kind");
 	FakePlatform platform;
 	const auto agree = [](EditorRequestKind kind, const OperationStatus &running, bool refused) {
 		if (refused == busy_refuses(kind, running)) return true;
@@ -353,7 +353,7 @@ static int test_gate_is_what_busy_refuses_says() {
 // the build, a Play joins it and starts the game when it lands; a project's close cancels it as
 // it commits, and a project switch that fails keeps it.
 static int test_busy_gate() {
-	editor_test::TempProjectDir dir("opennova_editor_operation_gate");
+	test_temp::TempDir dir("opennova_editor_operation_gate");
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -363,11 +363,11 @@ static int test_busy_gate() {
 	const SessionView &v = session.view();
 	const std::string root = v.project.root;
 	const std::string runtime = dir.file("runtime/opennova.exe");
-	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
+	TEST_EXPECT(test_io::write_text(runtime, "MZ"));
 	PlayLauncher launcher;
 	launcher.executable = runtime;
 	session.set_launcher_source(editor_test::fixed_launcher(launcher));
-	TEST_EXPECT(editor_test::write_text(root + "/defs/items.def", "begin \"Marker\"\nid 100001\ntype marker\nhp 10\nend\n"));
+	TEST_EXPECT(test_io::write_text(root + "/defs/items.def", "begin \"Marker\"\nid 100001\ntype marker\nhp 10\nend\n"));
 	session.handle(request::rescan());
 	session.run_operations();
 	session.set_poll_budget({0, 256});
@@ -429,7 +429,7 @@ static int test_busy_gate() {
 	// An import's preview plans as an operation of its own (S13 A3): refused beside the build,
 	// which holds the slot and is not what it supersedes; the import it would plan, likewise.
 	EditorRequest preview = request::of(EditorRequestKind::PreviewImport);
-	TEST_EXPECT(editor_test::write_text(dir.file("loose.txt"), "loose"));
+	TEST_EXPECT(test_io::write_text(dir.file("loose.txt"), "loose"));
 	preview.paths = {dir.file("loose.txt")};
 	session.handle(preview);
 	TEST_EXPECT(!session.outcome().done() && refused_busy(session) && !v.dialogs.import_preview.open &&
@@ -524,7 +524,7 @@ static int test_busy_gate() {
 	session.handle(request::new_project(dir.file("project"), "Again"));
 	TEST_EXPECT(!session.outcome().done() && v.project.open && v.project.document->title == "Gate" && v.activity.operation.id == fourth &&
 	            v.activity.last_operation.id == opened);
-	TEST_EXPECT(editor_test::write_text(dir.file("empty/readme.txt"), "no project here"));
+	TEST_EXPECT(test_io::write_text(dir.file("empty/readme.txt"), "no project here"));
 	session.handle(request::open_project(dir.file("empty")));
 	TEST_EXPECT(!session.outcome().done() && v.project.open && v.project.document->title == "Gate" && v.activity.operation.id == fourth);
 	// The switch that goes through cancels the build as the open project closes, then opens its own.
@@ -547,7 +547,7 @@ static int test_busy_gate() {
 // rename's, which writes the documents a Discard drops, and a build's, which holds none.
 static int test_uncancellable_operation() {
 	using K = EditorRequestKind;
-	editor_test::TempProjectDir dir("opennova_editor_operation_stubborn");
+	test_temp::TempDir dir("opennova_editor_operation_stubborn");
 	FakePlatform platform;
 	Tally tally, second, packed; // outlive the session, which drops the operations
 	MemoryPreferencesStore preferences;
@@ -558,7 +558,7 @@ static int test_uncancellable_operation() {
 	session.handle(request::new_project(dir.file("project"), "Stubborn"));
 	session.run_operations();
 	TEST_EXPECT(v.project.open && v.project.document->title == "Stubborn");
-	TEST_EXPECT(editor_test::write_text(v.project.root + "/defs/items.def",
+	TEST_EXPECT(test_io::write_text(v.project.root + "/defs/items.def",
 	                                    "begin \"Marker\"\nid 100001\ntype marker\nhp 10\nend\n"));
 	session.handle(request::rescan());
 	session.run_operations();
@@ -666,7 +666,7 @@ static int test_uncancellable_operation() {
 // cancelled, never finished, and the new preview runs; one that cannot be cancelled keeps the
 // slot and the preview is refused, as busy_refuses says.
 static int test_import_plan_superseded() {
-	editor_test::TempProjectDir dir("opennova_editor_operation_supersede");
+	test_temp::TempDir dir("opennova_editor_operation_supersede");
 	FakePlatform platform;
 	Tally first, second, third; // outlive the session, which drops the operations
 	MemoryPreferencesStore preferences;
@@ -674,7 +674,7 @@ static int test_import_plan_superseded() {
 	const SessionView &v = session.view();
 	session.handle(request::new_project(dir.file("project"), "Supersede"));
 	session.run_operations();
-	TEST_EXPECT(editor_test::write_text(dir.file("loose.txt"), "loose"));
+	TEST_EXPECT(test_io::write_text(dir.file("loose.txt"), "loose"));
 	EditorRequest preview = request::of(EditorRequestKind::PreviewImport);
 	preview.paths = {dir.file("loose.txt")};
 
@@ -717,7 +717,7 @@ static int test_import_plan_superseded() {
 // A3) go on beside it. An operation that writes the project (opening one) refuses the name and the
 // game install too, never the editor's own settings.
 static int test_settings_parts_weighed() {
-	editor_test::TempProjectDir dir("opennova_editor_operation_settings");
+	test_temp::TempDir dir("opennova_editor_operation_settings");
 	FakePlatform platform;
 	Tally tally; // outlives the session, which drops the operation
 	MemoryPreferencesStore preferences;
@@ -778,7 +778,7 @@ static int test_settings_parts_weighed() {
 // requirements over the scan the view holds, so it goes on beside a refresh and an import's write
 // (they hold the files) and waits for an Open, which writes the project.
 static int test_weighed_by_what_they_hold() {
-	editor_test::TempProjectDir dir("opennova_editor_operation_holds");
+	test_temp::TempDir dir("opennova_editor_operation_holds");
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -840,7 +840,7 @@ static int test_weighed_by_what_they_hold() {
 // left (S13 A2: the typed seam's add_record had answered the previous add's identity), and the
 // document is as it was; once the operation ends the same edit goes through.
 static int test_refused_edit_is_no_edit() {
-	editor_test::TempProjectDir dir("opennova_editor_operation_refused_edit");
+	test_temp::TempDir dir("opennova_editor_operation_refused_edit");
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);

@@ -97,7 +97,7 @@ const JsonValue *find_field(const JsonValue &record, const char *id) {
 // record document a request's edits are named in, and two records they name, the screen's MAIN
 // window and TITLE inside it.
 struct OpenMenu {
-	editor_test::TempProjectDir dir;
+	test_temp::TempDir dir;
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session;
@@ -191,7 +191,7 @@ static int test_tokens() {
 // kinds S13 D5 added; the reference kind a menu SOUND names its bank by is sound_bank too, and
 // wave_bank names nothing (pre-1.0, no alias). The files are the files query's (S13 A5).
 static int test_asset_kind_tokens() {
-	editor_test::TempProjectDir dir("opennova_session_json_kinds");
+	test_temp::TempDir dir("opennova_session_json_kinds");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -209,7 +209,7 @@ static int test_asset_kind_tokens() {
 	        {"game.ini", "config"},
 	};
 	for (const auto &file : files)
-		TEST_EXPECT(editor_test::write_text(root + "/" + file.first, "x"));
+		TEST_EXPECT(test_io::write_text(root + "/" + file.first, "x"));
 	editor_test::handle_to_end(session, request::rescan());
 	JsonValue args = JsonValue::make_object();
 	args.set("limit", JsonValue::make_number(200.0));
@@ -1065,7 +1065,7 @@ static int test_settings_json() {
 	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":[]}", back).find("settings") != std::string::npos);
 
 	// Over a session: the last one's result, its event with its serial, and the runtime setting.
-	editor_test::TempProjectDir dir("opennova_session_json_settings_test");
+	test_temp::TempDir dir("opennova_session_json_settings_test");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1156,7 +1156,7 @@ static int test_problem_groups_page() {
 }
 
 static int test_over_a_session() {
-	editor_test::TempProjectDir dir("opennova_session_json_test");
+	test_temp::TempDir dir("opennova_session_json_test");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -2080,6 +2080,9 @@ static int test_game_install_keys() {
 	            !run.get("retail") && !run.get("retail_directory") && !run.get("in_install") && !run.get("strict") &&
 	            !run.get("ran_strict"));
 	TEST_EXPECT(view_section_to_json(SessionView(), ViewSection::Run).get_string("ran_mode", "x").empty());
+	// No game has run: the file log is there, and null.
+	const JsonValue *no_log = run.get("file_log");
+	TEST_EXPECT(no_log && no_log->is_null());
 	TEST_EXPECT(import.get_int("install_files", 0) == 2 && !import.get("retail_files"));
 	TEST_EXPECT(preferences.get_string("game_install", "") == "C:/games/JO" &&
 	            preferences.get_string("play_mode", "") == "strict" && !preferences.get_bool("save_before_play", true) &&

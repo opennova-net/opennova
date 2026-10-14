@@ -38,7 +38,7 @@ namespace {
 // The item table's project: three models, a texture, and an item naming two of the models and
 // a texture the project lacks.
 struct PickerProject {
-	editor_test::TempProjectDir dir{"opennova_editor_ui_reference_picker"};
+	test_temp::TempDir dir{"opennova_editor_ui_reference_picker"};
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -53,8 +53,8 @@ struct PickerProject {
 		const std::string repo = test_paths_repo_root(__FILE__);
 		const std::vector<uint8_t> model = test_io::read_file(repo + "/fixtures/threedi/synth/armory.3di");
 		for (const char *name : {"alpha.3di", "beta.3di", "gamma.3di"})
-			if (!editor_test::write_bytes(v.project.root + "/models/" + name, model)) return false;
-		if (!editor_test::write_text(v.project.root + "/defs/items.def",
+			if (!test_io::write_file(v.project.root + "/models/" + name, model)) return false;
+		if (!test_io::write_text(v.project.root + "/defs/items.def",
 		                             "begin \"Picked\"\nid 100300\ntype building\ngraphic alpha\nhusk beta\n"
 		                             "hud_image gone.tga\nend\n"
 		                             "begin \"Other\"\nid 100301\ntype building\ngraphic gamma\nend\n"))
@@ -300,8 +300,8 @@ void test_cell_completes() {
 	const std::string root = project.session.view().project.root;
 	const std::vector<uint8_t> clip = test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/anim/idle.bad");
 	for (const char *name : {"gamma.bad", "garden.bad", "other.bad"})
-		CHECK(editor_test::write_bytes(root + "/anims/" + name, clip), "a clip written");
-	CHECK(editor_test::write_text(root + "/anims/gun.adm", "anim_reset\t\"ga\"\r\n"), "the map written");
+		CHECK(test_io::write_file(root + "/anims/" + name, clip), "a clip written");
+	CHECK(test_io::write_text(root + "/anims/gun.adm", "anim_reset\t\"ga\"\r\n"), "the map written");
 	project.session.handle(request::rescan());
 	project.session.run_operations();
 	project.session.handle(request::open_document("anims/gun.adm"));
@@ -455,7 +455,7 @@ void test_list_kept() {
 	draw(false);
 	CHECK(picker.lists_made() == 3, "the graph moved: the list made again");
 	const std::string repo = test_paths_repo_root(__FILE__);
-	CHECK(editor_test::write_bytes(project.session.view().project.root + "/models/delta.3di",
+	CHECK(test_io::write_file(project.session.view().project.root + "/models/delta.3di",
 	                               test_io::read_file(repo + "/fixtures/threedi/synth/armory.3di")),
 	      "another model");
 	project.session.handle(request::rescan());
@@ -543,7 +543,7 @@ void test_lists_let_go() {
 // ("Use"); the walker's name index shows its string under its control; the outline beside it lists the
 // rows under their pools' headings.
 void test_pick_by_name() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_pick_by_name");
+	test_temp::TempDir dir("opennova_editor_ui_pick_by_name");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -552,10 +552,10 @@ void test_pick_by_name() {
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	const std::string repo = test_paths_repo_root(__FILE__);
-	CHECK(editor_test::write_bytes(v.project.root + "/defs/items.def", test_io::read_file(repo + "/fixtures/def/items.def")) &&
-	              editor_test::write_bytes(v.project.root + "/missions/synth_logic.bms",
+	CHECK(test_io::write_file(v.project.root + "/defs/items.def", test_io::read_file(repo + "/fixtures/def/items.def")) &&
+	              test_io::write_file(v.project.root + "/missions/synth_logic.bms",
 	                                       test_io::read_file(repo + "/fixtures/bms/synth_logic.bms")) &&
-	              editor_test::write_bytes(v.project.root + "/missions/synth_logic.bin",
+	              test_io::write_file(v.project.root + "/missions/synth_logic.bin",
 	                                       test_io::read_file(repo + "/fixtures/bms/synth_logic.bin")),
 	      "the catalog, the mission and its table");
 	session.handle(request::rescan());
@@ -615,7 +615,7 @@ void test_texture_previews() {
 	std::vector<uint8_t> tga;
 	std::string error;
 	CHECK(opennova::tga::tga_write_rgba32(rgba.data(), 2, 2, tga, error) &&
-	              editor_test::write_bytes(root + "/textures/present.tga", tga),
+	              test_io::write_file(root + "/textures/present.tga", tga),
 	      "a texture of the project");
 	project.session.handle(request::rescan());
 	project.session.run_operations();
@@ -662,7 +662,7 @@ void test_texture_import_section() {
 	image.pixels.assign(64, 180);
 	const std::vector<uint8_t> png = encode_png_rgba(image.pixels.data(), 4, 4);
 	const std::string art = project.dir.file("art");
-	CHECK(editor_test::write_bytes(art + "/gone.png", png), "a PNG outside the project");
+	CHECK(test_io::write_file(art + "/gone.png", png), "a PNG outside the project");
 	const ImportResult imported =
 	        import_assets({{art + "/gone.png", {}}}, ProjectPaths::for_root(view.project.root), *view.project.document, false);
 	CHECK(imported.imported.size() == 1, "imported as a modder imports it");
@@ -714,10 +714,10 @@ void test_texture_budget_line() {
 	std::vector<uint8_t> big;
 	std::string error;
 	CHECK(opennova::tga::tga_write_rgba32(rgba.data(), 2048, 2048, big, error) &&
-	              editor_test::write_bytes(view.project.root + "/textures/crate.tga", big),
+	              test_io::write_file(view.project.root + "/textures/crate.tga", big),
 	      "a 2048 x 2048 32-bit diffuse");
 	const std::string scene = project.dir.file("scene");
-	CHECK(editor_test::write_text(scene + "/crate.o3d",
+	CHECK(test_io::write_text(scene + "/crate.o3d",
 	                              "o3d 2\nmodel CRATE\nmaterial VS_PHONGT\ntexture crate.tga 1 0\nlod 0\npart 0 0 0 0\n"
 	                              "mesh 0 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"),
 	      "a model naming it");
@@ -765,10 +765,10 @@ void test_texture_game_view_toolbar() {
 	std::vector<uint8_t> file;
 	std::string error;
 	CHECK(opennova::tga::tga_write_rgba32(rgba.data(), 64, 64, file, error) &&
-	              editor_test::write_bytes(view.project.root + "/textures/shine.tga", file),
+	              test_io::write_file(view.project.root + "/textures/shine.tga", file),
 	      "a 64 x 64 diffuse");
 	const std::string scene = project.dir.file("scene");
-	CHECK(editor_test::write_text(scene + "/shine.o3d",
+	CHECK(test_io::write_text(scene + "/shine.o3d",
 	                              "o3d 2\nmodel SHINE\nmaterial VS_PHONGT\ntexture shine.tga 1 0\nlod 0\npart 0 0 0 0\n"
 	                              "mesh 0 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"),
 	      "a Phong model naming it");
@@ -810,9 +810,9 @@ void test_texture_role_legend() {
 	std::vector<uint8_t> file;
 	std::string error;
 	CHECK(opennova::tga::tga_write_rgba32(rgba.data(), 2, 1, file, error) &&
-	              editor_test::write_bytes(view.project.root + "/textures/blend.tga", file),
+	              test_io::write_file(view.project.root + "/textures/blend.tga", file),
 	      "a 2 x 1 blend map");
-	CHECK(editor_test::write_text(view.project.root + "/terrains/isle.trn",
+	CHECK(test_io::write_text(view.project.root + "/terrains/isle.trn",
 	                              "polytrn_detailmap detail.tga\npolytrn_polydata isle.cpt\npolytrn_sectorcount 1\n"
 	                              "polytrn_sectors 0\npolytrn_colormap colour.tga\npolytrn_detailmap_c1 grass.tga\n"
 	                              "polytrn_detailblendmap blend.tga\n"),
@@ -851,11 +851,11 @@ void test_texture_set_aside_line() {
 	std::vector<uint8_t> tga, dds;
 	std::string error;
 	CHECK(opennova::tga::tga_write_rgba32(rgba.data(), 4, 4, tga, error) && opennova::dds::dds_write_a8r8g8b8(rgba.data(), 4, 4, dds, error) &&
-	              editor_test::write_bytes(view.project.root + "/textures/wall.tga", tga) &&
-	              editor_test::write_bytes(view.project.root + "/textures/wall.dds", dds),
+	              test_io::write_file(view.project.root + "/textures/wall.tga", tga) &&
+	              test_io::write_file(view.project.root + "/textures/wall.dds", dds),
 	      "a .tga and the .dds of its name");
 	const std::string scene = project.dir.file("scene");
-	CHECK(editor_test::write_text(scene + "/wall.o3d",
+	CHECK(test_io::write_text(scene + "/wall.o3d",
 	                              "o3d 2\nmodel WALL\nmaterial FF_ST_OP\ntexture wall.tga 1 0\nlod 0\npart 0 0 0 0\n"
 	                              "mesh 0 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"),
 	      "a model naming the .tga");
@@ -901,7 +901,7 @@ void test_texture_drop_replaces() {
 	std::vector<uint8_t> tga;
 	std::string why;
 	opennova::tga::tga_write_rgba32(image.pixels.data(), 4, 4, tga, why);
-	CHECK(editor_test::write_bytes(view.project.root + "/textures/plain.tga", tga), "a plain texture");
+	CHECK(test_io::write_file(view.project.root + "/textures/plain.tga", tga), "a plain texture");
 	project.session.handle(request::rescan());
 	project.session.run_operations();
 	project.session.handle(request::open_document("textures/plain.tga"));
@@ -966,7 +966,7 @@ void test_texture_drop_replaces() {
 	std::vector<uint8_t> other_tga;
 	opennova::tga::tga_write_rgba32(other.pixels.data(), 4, 4, other_tga, why);
 	const std::string picture = project.dir.file("new.tga");
-	CHECK(editor_test::write_bytes(picture, other_tga), "an image outside the project");
+	CHECK(test_io::write_file(picture, other_tga), "an image outside the project");
 	project.session.handle(request::preview_texture_source("textures/plain.tga", picture));
 	CHECK(view.dialogs.texture_source.open && view.dialogs.texture_source.refusal.empty() &&
 	              view.dialogs.texture_source.before && view.dialogs.texture_source.after,

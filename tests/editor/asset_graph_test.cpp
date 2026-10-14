@@ -126,18 +126,11 @@ bool has_symbol(const AssetGraph &graph, ReferenceKind kind, const std::string &
 
 using editor_test::count_code;
 
-std::string read_text(const std::string &path) {
-	std::ifstream in(path, std::ios::binary);
-	std::stringstream buffer;
-	buffer << in.rdbuf();
-	return buffer.str();
-}
-
 } // namespace
 
 // A new project after Create all missing: every reference the blank files make resolves.
 static int test_blank_project() {
-	editor_test::TempProjectDir dir("opennova_asset_graph_blank");
+	test_temp::TempDir dir("opennova_asset_graph_blank");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -204,7 +197,7 @@ static int test_blank_project() {
 // [orig: CWnd_GetInheritedTextRsrc @ 0x646AB0; CUIStringTable_LookupString @ 0x6527c0];
 // with no table up the chain it resolves nowhere (the game shows the id).
 static int test_menu_text_scope() {
-	editor_test::TempProjectDir dir("opennova_asset_graph_text_scope");
+	test_temp::TempDir dir("opennova_asset_graph_text_scope");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -374,7 +367,7 @@ static int test_menu_text_scope() {
 
 // The native kinds through the engine's parsers.
 static int test_native_extractors() {
-	editor_test::TempProjectDir dir("opennova_asset_graph_native");
+	test_temp::TempDir dir("opennova_asset_graph_native");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -390,10 +383,10 @@ static int test_native_extractors() {
 		std::ostringstream out;
 		std::string error;
 		TEST_EXPECT(opennova::env::save_env(out, config, error));
-		TEST_EXPECT(editor_test::write_text(root + "/day.env", out.str()));
+		TEST_EXPECT(test_io::write_text(root + "/day.env", out.str()));
 	}
 	// A particle file with one effect and one particle drawing a texture.
-	TEST_EXPECT(editor_test::write_text(root + "/fx.ptl",
+	TEST_EXPECT(test_io::write_text(root + "/fx.ptl",
 	                                    "[effectdef]\n{\n\tid = BOOM;\n\tpdefs = puff;\n}\n\n[particledef]\n{\n\tid = puff;\n\tgraphic1 = puff.tga, additive;\n}\n"));
 	// A mission naming a terrain, an environment and an item id.
 	{
@@ -404,12 +397,12 @@ static int test_native_extractors() {
 		TEST_EXPECT(opennova::mission::set_header_string(mission, "environment", "day", error));
 		std::vector<uint8_t> bytes;
 		TEST_EXPECT(opennova::bms::write(mission, bytes, error));
-		TEST_EXPECT(editor_test::write_bytes(root + "/test.bms", bytes));
+		TEST_EXPECT(test_io::write_file(root + "/test.bms", bytes));
 		// The same mission in the original editor's text form (S14): a mission text to the scan, a
 		// kind no document opens and the graph does not read, so it is no finding and names nothing.
 		std::string text;
 		TEST_EXPECT(opennova::mission::write_mis_text(mission, text, error));
-		TEST_EXPECT(editor_test::write_text(root + "/test.mis", text));
+		TEST_EXPECT(test_io::write_text(root + "/test.mis", text));
 	}
 	// A synthetic model from the fixtures, when the checkout carries them.
 	const fs::path fixture = fs::path(__FILE__).parent_path().parent_path().parent_path() / "fixtures" / "threedi" / "synth" / "armory.3di";
@@ -427,11 +420,11 @@ static int test_native_extractors() {
 	const int32_t sky_loader = texture_loader_arg(opennova::renderer::TextureLoader::ArchiveSelfAlpha);
 	TEST_EXPECT(sky && sky->loader_arg == texture_role_arg(renderer::TextureRoleId::SkyCloud, kTextureArgPcx));
 	TEST_EXPECT(graph.resolve(ReferenceKind::Texture, "sky_a.pcx", "", nullptr, sky_loader) == ReferenceStatus::Missing);
-	TEST_EXPECT(editor_test::write_text(root + "/sky_a.pcx", "x"));
+	TEST_EXPECT(test_io::write_text(root + "/sky_a.pcx", "x"));
 	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(graph.resolve(ReferenceKind::Texture, "sky_a.pcx", "", nullptr, sky_loader) == ReferenceStatus::Present);
 	TEST_EXPECT(graph.resolve(ReferenceKind::Texture, "sky_a", "", nullptr, sky_loader) == ReferenceStatus::Missing);
-	TEST_EXPECT(editor_test::write_text(root + "/sky_c.dds", "x"));
+	TEST_EXPECT(test_io::write_text(root + "/sky_c.dds", "x"));
 	editor_test::handle_to_end(session, request::rescan());
 	std::string sky_file;
 	TEST_EXPECT(graph.resolve(ReferenceKind::Texture, "sky_c.pcx", "", &sky_file, sky_loader) == ReferenceStatus::Present &&
@@ -444,7 +437,7 @@ static int test_native_extractors() {
 		std::string served;
 		const GraphEdge *map = edge_to(graph, "day.env", ReferenceKind::Texture, "sky_a.pcx");
 		TEST_EXPECT(map && graph.resolve(*map, &served) == ReferenceStatus::Present && served == "sky_a.pcx");
-		TEST_EXPECT(editor_test::write_text(root + "/sky_a.dds", "x"));
+		TEST_EXPECT(test_io::write_text(root + "/sky_a.dds", "x"));
 		editor_test::handle_to_end(session, request::rescan());
 		map = edge_to(graph, "day.env", ReferenceKind::Texture, "sky_a.pcx");
 		TEST_EXPECT(map && graph.resolve(*map, &served) == ReferenceStatus::Present && served == "sky_a.dds");
@@ -479,7 +472,7 @@ static int test_native_extractors() {
 	TEST_EXPECT(session.view().project.scan->find("test.mis") &&
 	            session.view().project.scan->find("test.mis")->kind == AssetKind::MissionText &&
 	            !graph_reads_kind(AssetKind::MissionText) && graph_reads_kind(AssetKind::Mission));
-	TEST_EXPECT(editor_test::write_text(root + "/test.mis", "; changed\n"));
+	TEST_EXPECT(test_io::write_text(root + "/test.mis", "; changed\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(graph.stats().files_extracted == 0 && graph.stats().files_failed == 0);
 	TEST_EXPECT(graph.references_of("test.mis").empty() &&
@@ -489,8 +482,8 @@ static int test_native_extractors() {
 	// test.bms, warnings where it has none, the area's in the script's words; a script of no mission the project
 	// has names none.
 	{
-		TEST_EXPECT(editor_test::write_text(root + "/test.wac", "v1=SSNarea(42,37) v2=SSNdead(10001)\r\n"));
-		TEST_EXPECT(editor_test::write_text(root + "/lone.wac", "v1=SSNarea(42,37)\r\n"));
+		TEST_EXPECT(test_io::write_text(root + "/test.wac", "v1=SSNarea(42,37) v2=SSNdead(10001)\r\n"));
+		TEST_EXPECT(test_io::write_text(root + "/lone.wac", "v1=SSNarea(42,37)\r\n"));
 		editor_test::handle_to_end(session, request::rescan());
 		const GraphEdge *entity = edge_to(graph, "test.wac", ReferenceKind::MissionEntity, "42");
 		const GraphEdge *zone = edge_to(graph, "test.wac", ReferenceKind::MissionZone, "37");
@@ -522,10 +515,10 @@ static int test_native_extractors() {
 		std::string error;
 		std::vector<uint8_t> bytes;
 		TEST_EXPECT(opennova::bms::write(logic, bytes, error));
-		TEST_EXPECT(editor_test::write_bytes(root + "/logic.bms", bytes));
-		TEST_EXPECT(editor_test::write_text(root + "/logic.wac",
+		TEST_EXPECT(test_io::write_file(root + "/logic.bms", bytes));
+		TEST_EXPECT(test_io::write_text(root + "/logic.wac",
 		                                    "if event(1) then set(v7,1) endif\r\nif event(5) then v12=v7 endif\r\n"));
-		TEST_EXPECT(editor_test::write_text(root + "/other.wac", "if event(1) then set(v7,1) endif\r\n"));
+		TEST_EXPECT(test_io::write_text(root + "/other.wac", "if event(1) then set(v7,1) endif\r\n"));
 		editor_test::handle_to_end(session, request::rescan());
 		const GraphEdge *event = edge_to(graph, "logic.wac", ReferenceKind::MissionEventLatch, "1");
 		const GraphEdge *past = edge_to(graph, "logic.wac", ReferenceKind::MissionEventLatch, "5");
@@ -572,10 +565,10 @@ static int test_native_extractors() {
 	// (particle.unreadable, the reader's words at the place it stops), the graph's own reading of it
 	// failing still; a document type's file that does not load (a mission, a model, a menu) is its
 	// validator's error, not the graph's.
-	TEST_EXPECT(editor_test::write_text(root + "/broken.ptl", "[effectdef]\n{\n\tid = OPEN;\n"));
-	TEST_EXPECT(editor_test::write_text(root + "/broken.bms", "not a mission"));
-	TEST_EXPECT(editor_test::write_text(root + "/broken.3di", "not a model"));
-	TEST_EXPECT(editor_test::write_bytes(root + "/broken.mnu", {0xFF, 0xFE, 0x41}));
+	TEST_EXPECT(test_io::write_text(root + "/broken.ptl", "[effectdef]\n{\n\tid = OPEN;\n"));
+	TEST_EXPECT(test_io::write_text(root + "/broken.bms", "not a mission"));
+	TEST_EXPECT(test_io::write_text(root + "/broken.3di", "not a model"));
+	TEST_EXPECT(test_io::write_file(root + "/broken.mnu", {0xFF, 0xFE, 0x41}));
 	editor_test::handle_to_end(session, request::rescan());
 	const std::vector<Diagnostic> &diagnostics = session.view().findings.diagnostics;
 	const auto unreadable = [&diagnostics](const std::string &asset) {
@@ -611,7 +604,7 @@ static int test_native_extractors() {
 // The catalogs define weapon and ammo names and item ids; a weapon's round names an
 // ammo record and "Referenced by" finds it.
 static int test_catalog_symbols() {
-	editor_test::TempProjectDir dir("opennova_asset_graph_catalog");
+	test_temp::TempDir dir("opennova_asset_graph_catalog");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -770,14 +763,14 @@ static int test_catalog_symbols() {
 
 // The rename transaction: the sites rewritten and the file moved, and the refusals.
 static int test_rename() {
-	editor_test::TempProjectDir dir("opennova_asset_graph_rename");
+	test_temp::TempDir dir("opennova_asset_graph_rename");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Rename"));
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project.root;
-	TEST_EXPECT(editor_test::write_text(root + "/logo.tga", "tga"));
+	TEST_EXPECT(test_io::write_text(root + "/logo.tga", "tga"));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::handle_to_end(session, request::open_document("main.mnu"));
 	Document *menu = session.document_for("main.mnu");
@@ -817,8 +810,8 @@ static int test_rename() {
 	Value image;
 	TEST_EXPECT(menu->get(menu_test::child_of(*menu, exit, "appearance"), "value", image) &&
 	            std::get<std::string>(image) == "logo2.tga");
-	TEST_EXPECT(read_text(root + "/menus/main.mnu").find("logo2.tga") != std::string::npos ||
-	            read_text(root + "/main.mnu").find("logo2.tga") != std::string::npos);
+	TEST_EXPECT(test_io::read_file_text(root + "/menus/main.mnu").find("logo2.tga") != std::string::npos ||
+	            test_io::read_file_text(root + "/main.mnu").find("logo2.tga") != std::string::npos);
 	TEST_EXPECT(view.findings.graph->missing().empty());
 	TEST_EXPECT(count_code(view.findings.diagnostics, "reference.missing") == 0);
 	// Through a style variable: the variable's value is the site.
@@ -850,7 +843,7 @@ static int test_rename() {
 	const AssetEntry *style_asset = view.project.scan->find("menu_style.mns");
 	TEST_EXPECT(style_asset != nullptr);
 	if (!style_asset) return 1;
-	TEST_EXPECT(read_text(root + "/" + style_asset->relative_path).find("\r\nDEF_FONTNAME_LG\tzz.fnt\r\n") != std::string::npos);
+	TEST_EXPECT(test_io::read_file_text(root + "/" + style_asset->relative_path).find("\r\nDEF_FONTNAME_LG\tzz.fnt\r\n") != std::string::npos);
 	menu = session.document_for("main.mnu");
 	TEST_EXPECT(menu && find_definition(AssetGraph(), *menu, "EXIT", exit));
 	if (!menu) return 1;
@@ -880,7 +873,7 @@ static int test_rename() {
 	TEST_EXPECT(session.outcome().done());
 	TEST_EXPECT(fs::exists(root + "/" + original_font) && !fs::exists(root + "/" + font_file));
 	// Assign: a required name satisfied by renaming a file of the right kind.
-	TEST_EXPECT(editor_test::write_text(root + "/spare.pcx", "x")); // the wrong kind for a font row
+	TEST_EXPECT(test_io::write_text(root + "/spare.pcx", "x")); // the wrong kind for a font row
 	std::string missing_role, missing_name;
 	for (const RequirementRow &row : view.project.requirements->rows)
 		if (row.state == RequirementState::Present && row.expected_kind == AssetKind::Strings) { missing_role = row.role; missing_name = row.name; break; }
@@ -926,15 +919,15 @@ static int test_rename() {
 // by the same stem, and renaming the map (m16.adm -> m16b.adm) rewrites the map's
 // field while the model's keeps naming m16.3di.
 static int test_rename_rewrites_planned_sites_only() {
-	editor_test::TempProjectDir dir("opennova_asset_graph_rename_sites");
+	test_temp::TempDir dir("opennova_asset_graph_rename_sites");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Sites"));
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project.root;
-	TEST_EXPECT(editor_test::write_text(root + "/m16.adm", "adm"));
-	TEST_EXPECT(editor_test::write_text(root + "/m16.3di", "3di"));
+	TEST_EXPECT(test_io::write_text(root + "/m16.adm", "adm"));
+	TEST_EXPECT(test_io::write_text(root + "/m16.3di", "3di"));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::handle_to_end(session, request::open_document("weapon.def"));
 	Document *weapon = session.document_for("weapon.def");
@@ -978,12 +971,12 @@ static int test_rename_rewrites_planned_sites_only() {
 	// nothing else is rewritten in its place, the rename reports rename.partial as a
 	// refusal that outlives the refresh, and the old file stays beside the copy.
 	const std::string weapon_file = root + "/" + weapon->path();
-	std::string text = read_text(weapon_file);
+	std::string text = test_io::read_file_text(weapon_file);
 	const size_t at = text.find("m16b");
 	TEST_EXPECT(at != std::string::npos && text.find("m16b", at + 1) == std::string::npos);
 	if (at == std::string::npos) return 1;
 	text.replace(at, 4, "m16x");
-	TEST_EXPECT(editor_test::write_text(weapon_file, text));
+	TEST_EXPECT(test_io::write_text(weapon_file, text));
 	// The request is done (its commit started); what the commit came to is its operation's.
 	editor_test::handle_to_end(session, request::rename_asset("m16b.adm", "m16c.adm"));
 	TEST_EXPECT(session.outcome().done() && view.activity.last_operation.end == OperationEnd::Failed &&
@@ -995,7 +988,7 @@ static int test_rename_rewrites_planned_sites_only() {
 		                                  d.message.find("still names 'm16b' in 1 of its 1") != std::string::npos);
 	TEST_EXPECT(partial_error);
 	TEST_EXPECT(fs::exists(root + "/m16b.adm") && fs::exists(root + "/m16c.adm"));
-	text = read_text(weapon_file);
+	text = test_io::read_file_text(weapon_file);
 	TEST_EXPECT(text.find("m16x") != std::string::npos && text.find("m16c") == std::string::npos);
 	return 0;
 }
@@ -1003,14 +996,14 @@ static int test_rename_rewrites_planned_sites_only() {
 // Two windows of one name in one screen name the same texture: the plan's sites share a
 // record path but not a locator, and the rename rewrites each in its own place (S9g).
 static int test_rename_by_locator() {
-	editor_test::TempProjectDir dir("opennova_asset_graph_locator");
+	test_temp::TempDir dir("opennova_asset_graph_locator");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Locator"));
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project.root;
-	TEST_EXPECT(editor_test::write_text(root + "/logo.tga", "tga"));
+	TEST_EXPECT(test_io::write_text(root + "/logo.tga", "tga"));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::handle_to_end(session, request::open_document("main.mnu"));
 	Document *menu = session.document_for("main.mnu");
@@ -1056,7 +1049,7 @@ static int test_rename_by_locator() {
 // defines nothing a menu can use; a stylesheet's font values are edges of their own, and
 // a missing font a menu names through a variable is reported once, there.
 static int test_stylesheet_bindings() {
-	editor_test::TempProjectDir dir("opennova_asset_graph_styles");
+	test_temp::TempDir dir("opennova_asset_graph_styles");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1084,9 +1077,9 @@ static int test_stylesheet_bindings() {
 	TEST_EXPECT(count_code(view.findings.diagnostics, "style.not_a_color") == 0 && count_code(view.findings.diagnostics, "style.mixed_use") == 0);
 
 	// brand.mns over menu_style.mns: a later definition wins.
-	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "DEF_TEXT_FG FF102030\r\nBRAND_ONLY 1\r\n"));
+	TEST_EXPECT(test_io::write_text(style_dir + "/brand.mns", "DEF_TEXT_FG FF102030\r\nBRAND_ONLY 1\r\n"));
 	// A stylesheet by another name is never read.
-	TEST_EXPECT(editor_test::write_text(style_dir + "/other.mns", "STRAY_ONLY 1\r\n"));
+	TEST_EXPECT(test_io::write_text(style_dir + "/other.mns", "STRAY_ONLY 1\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	const GraphSymbol *text_fg = view.findings.graph->style_binding("DEF_TEXT_FG");
 	TEST_EXPECT(text_fg && fs::path(text_fg->file).filename() == "brand.mns" && text_fg->value == "FF102030");
@@ -1115,10 +1108,10 @@ static int test_stylesheet_bindings() {
 	// A colour the menus read through a variable follows wcstoul (a sign and eight digits
 	// read whole, a 'G' stops the digits), and a value holds a %NAME% only where the
 	// game's expansion finds one (S12 B2).
-	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "DEF_TEXT_FG +FF102030\r\nBRAND_ONLY 50% of %A B%\r\n"));
+	TEST_EXPECT(test_io::write_text(style_dir + "/brand.mns", "DEF_TEXT_FG +FF102030\r\nBRAND_ONLY 50% of %A B%\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(count_code(view.findings.diagnostics, "style.not_a_color") == 0 && count_code(view.findings.diagnostics, "style.nested_var") == 0);
-	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "DEF_TEXT_FG FF10203G\r\nBRAND_ONLY x%DEF_TEXT_FG%\r\n"));
+	TEST_EXPECT(test_io::write_text(style_dir + "/brand.mns", "DEF_TEXT_FG FF10203G\r\nBRAND_ONLY x%DEF_TEXT_FG%\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(count_code(view.findings.diagnostics, "style.not_a_color") == 1 && count_code(view.findings.diagnostics, "style.nested_var") == 1);
 
@@ -1135,7 +1128,7 @@ static int test_stylesheet_bindings() {
 	editor_test::handle_to_end(session, request::undo());
 
 	// A missing font named through a variable: reported once, where brand.mns names it.
-	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "DEF_FONTNAME_LG nofont.fnt\r\n"));
+	TEST_EXPECT(test_io::write_text(style_dir + "/brand.mns", "DEF_FONTNAME_LG nofont.fnt\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	size_t missing_fonts = 0;
 	for (const Diagnostic &d : view.findings.diagnostics)
@@ -1147,7 +1140,7 @@ static int test_stylesheet_bindings() {
 	TEST_EXPECT(missing_fonts == 1);
 
 	// A line after the place the game stops reading defines nothing it reads.
-	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "EARLY 1\r\nBAD%NAME x\r\nLATE_ONLY 2\r\n"));
+	TEST_EXPECT(test_io::write_text(style_dir + "/brand.mns", "EARLY 1\r\nBAD%NAME x\r\nLATE_ONLY 2\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::StyleVar, "%EARLY%") == ReferenceStatus::Present);
 	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::StyleVar, "%LATE_ONLY%") == ReferenceStatus::Missing);
@@ -1156,13 +1149,13 @@ static int test_stylesheet_bindings() {
 	// A menu_style.mns font brand.mns replaces is never loaded: its missing file is no
 	// finding. Once brand.mns no longer defines the name, the game reads it: reported, once.
 	const std::string style_file = root + "/" + style_path;
-	std::string style_text = read_text(style_file);
+	std::string style_text = test_io::read_file_text(style_file);
 	const size_t normal_font = style_text.find("Arial16n.fnt");
 	TEST_EXPECT(normal_font != std::string::npos);
 	if (normal_font == std::string::npos) return 1;
 	style_text.replace(normal_font, 12, "Nowhere.fnt");
-	TEST_EXPECT(editor_test::write_text(style_file, style_text));
-	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "DEF_FONTNAME\tArial16n.fnt\r\n"));
+	TEST_EXPECT(test_io::write_text(style_file, style_text));
+	TEST_EXPECT(test_io::write_text(style_dir + "/brand.mns", "DEF_FONTNAME\tArial16n.fnt\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	const GraphSymbol *normal = view.findings.graph->style_binding("DEF_FONTNAME");
 	TEST_EXPECT(normal && fs::path(normal->file).filename() == "brand.mns" && normal->value == "Arial16n.fnt");
@@ -1173,7 +1166,7 @@ static int test_stylesheet_bindings() {
 		return n;
 	};
 	TEST_EXPECT(nowhere_findings() == 0);
-	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "// No fonts here.\r\n"));
+	TEST_EXPECT(test_io::write_text(style_dir + "/brand.mns", "// No fonts here.\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(nowhere_findings() == 1);
 	return 0;
@@ -1212,7 +1205,7 @@ const Diagnostic *finding(const std::vector<Diagnostic> &diagnostics, const char
 // not load one names nothing; two screens or windows of one name, a target no lookup finds
 // and an ACTION the game never runs are warnings.
 static int test_menu_names_and_targets() {
-	editor_test::TempProjectDir dir("opennova_asset_graph_names");
+	test_temp::TempDir dir("opennova_asset_graph_names");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1243,7 +1236,7 @@ static int test_menu_names_and_targets() {
 	                window("TABLE", "GRID",
 	                       "<COLUMN COUNT=\"1\"><HEADER TYPE=\"ID\">HEAD_ID</HEADER><SUBST VALUE=\"1\" "
 	                       "FILE>icon.tga</SUBST></COLUMN>\r\n"));
-	TEST_EXPECT(editor_test::write_text(root + "/graph.mnu", screen("HOME", home) + screen("AWAY", window("STATIC", "BOARD")) +
+	TEST_EXPECT(test_io::write_text(root + "/graph.mnu", screen("HOME", home) + screen("AWAY", window("STATIC", "BOARD")) +
 	                                                              screen("AWAY", window("STATIC", "ELSEWHERE"))));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::handle_to_end(session, request::open_document("graph.mnu"));
@@ -1272,8 +1265,8 @@ static int test_menu_names_and_targets() {
 	TEST_EXPECT(graph.referrers_of(ReferenceKind::StyleVar, "TRIM_COLOR").size() == 1);
 	TEST_EXPECT(edge_of(graph, path, ReferenceKind::Menu, "graph.mnu") && edge_of(graph, path, ReferenceKind::Menu, "main.mnu"));
 	TEST_EXPECT(!edge_of(graph, path, ReferenceKind::Menu, "nofile.mnu")); // POP_SCREEN loads no FILE
-	TEST_EXPECT(editor_test::write_bytes(root + "/click.lwf", editor_test::sound_bank_of({"MOUSE_OVER"})) &&
-	            editor_test::write_text(root + "/credits.kda", "[TEXT]\r\n"));
+	TEST_EXPECT(test_io::write_file(root + "/click.lwf", editor_test::sound_bank_of({"MOUSE_OVER"})) &&
+	            test_io::write_text(root + "/credits.kda", "[TEXT]\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	menu = dynamic_cast<const MnuDocument *>(session.document_for("graph.mnu"));
 	TEST_EXPECT(menu);
@@ -1442,7 +1435,7 @@ static int test_retail_menu_graph() {
 		retail::skip_leg("OPENNOVA_JO_ASSETS/*.mnu (the shipped menus' ACTION targets through the asset graph)");
 		return 0;
 	}
-	editor_test::TempProjectDir dir("opennova_asset_graph_retail");
+	test_temp::TempDir dir("opennova_asset_graph_retail");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1504,7 +1497,7 @@ static int test_retail_menu_graph() {
 // model's first 16 without case, a name it lacks a warning, a record with no graphic no
 // reference at all.
 static int test_user_point_references() {
-	editor_test::TempProjectDir dir("opennova_asset_graph_user_points");
+	test_temp::TempDir dir("opennova_asset_graph_user_points");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1517,7 +1510,7 @@ static int test_user_point_references() {
 	fs::copy_file(fixture, fs::path(root) / "models" / "armory.3di", ec);
 	TEST_EXPECT(!ec);
 	// armory.3di's user points are "Armory" and "Ground".
-	TEST_EXPECT(editor_test::write_text(root + "/defs/items.def",
+	TEST_EXPECT(test_io::write_text(root + "/defs/items.def",
 	                                    "begin \"Armory Item\"\nid 100100\ntype building\ngraphic armory\n"
 	                                    "particlefx Effect_x ARMORY\nend\n"
 	                                    "begin \"Lost Point\"\nid 100101\ntype building\ngraphic armory\n"
@@ -1567,7 +1560,7 @@ static int test_user_point_references() {
 // reload of the file finds again, and find_definition finds the record by the name it
 // defines; a stylesheet's earlier definition of a name is a symbol no lookup reads.
 static int test_symbol_locators() {
-	editor_test::TempProjectDir dir("opennova_asset_graph_locators");
+	test_temp::TempDir dir("opennova_asset_graph_locators");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1593,7 +1586,7 @@ static int test_symbol_locators() {
 	if (!style) return 1;
 	const std::string style_path = style->relative_path; // the scan is read again below
 	const std::string style_file = view.project.root + "/" + style_path;
-	TEST_EXPECT(editor_test::write_text(style_file, read_text(style_file) + "\r\nTWICE 1\r\nTWICE 2\r\n"));
+	TEST_EXPECT(test_io::write_text(style_file, test_io::read_file_text(style_file) + "\r\nTWICE 1\r\nTWICE 2\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	const std::vector<const GraphSymbol *> twice = view.findings.graph->symbols_named(ReferenceKind::StyleVar, "twice");
 	TEST_EXPECT(twice.size() == 1 && !twice[0]->inert && twice[0]->value == "2");
@@ -1816,17 +1809,17 @@ static int test_reference_file_candidates() {
 // (the game refuses the terrain), a wave it lacks a warning (nothing plays); a terrain the game's
 // gate refuses is a file the graph does not read.
 static int test_terrain_and_bank_extractors() {
-	editor_test::TempProjectDir dir("opennova_asset_graph_terrain_bank");
+	test_temp::TempDir dir("opennova_asset_graph_terrain_bank");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Terrain"));
 	const std::string root = session.view().project.root;
-	TEST_EXPECT(editor_test::write_text(root + "/isle.trn",
+	TEST_EXPECT(test_io::write_text(root + "/isle.trn",
 	                                    "polytrn_colormap isle_c.tga\r\npolytrn_detailmap det.tga\r\npolytrn_polydata isle.cpt\r\n"
 	                                    "polytrn_tilestrip tiles.tga\r\npolytrn_charmap isle_m.pcx\r\npolytrn_sectorcount 1\r\n"
 	                                    "polytrn_sectors 1\r\nfoliage\r\n  graphic palm\r\nend\r\n"));
-	TEST_EXPECT(editor_test::write_text(root + "/isle_c.tga", "x") && editor_test::write_text(root + "/shot.wav", "RIFF"));
+	TEST_EXPECT(test_io::write_text(root + "/isle_c.tga", "x") && test_io::write_text(root + "/shot.wav", "RIFF"));
 	{
 		opennova::lwf::File bank;
 		for (const auto &[name, path] : {std::pair<const char *, const char *>{"SHOT", "SFX\\WEAPON\\shot.wav"}, {"GONE", "gone.wav"}}) {
@@ -1837,7 +1830,7 @@ static int test_terrain_and_bank_extractors() {
 		}
 		std::vector<uint8_t> bytes;
 		std::string error;
-		TEST_EXPECT(opennova::lwf::encode_lwf(bank, bytes, error) && editor_test::write_bytes(root + "/game.lwf", bytes));
+		TEST_EXPECT(opennova::lwf::encode_lwf(bank, bytes, error) && test_io::write_file(root + "/game.lwf", bytes));
 	}
 	editor_test::handle_to_end(session, request::rescan());
 	const AssetGraph &graph = *session.view().findings.graph;
@@ -1881,8 +1874,8 @@ static int test_terrain_and_bank_extractors() {
 	TEST_EXPECT(count_code(session.view().findings.diagnostics, "graph.unreadable") == 0);
 	// The height data in: the terrain's reference resolves. A terrain with no height data named is one the
 	// game refuses: read through its document all the same (DI-30), its refusal the terrain's own finding.
-	TEST_EXPECT(editor_test::write_text(root + "/isle.cpt", "x") &&
-	            editor_test::write_text(root + "/bare.trn", "polytrn_colormap isle_c.tga\r\npolytrn_detailmap det.tga\r\n"));
+	TEST_EXPECT(test_io::write_text(root + "/isle.cpt", "x") &&
+	            test_io::write_text(root + "/bare.trn", "polytrn_colormap isle_c.tga\r\npolytrn_detailmap det.tga\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(graph.resolve(ReferenceKind::TerrainData, "isle.cpt") == ReferenceStatus::Present && !missing("isle.trn", "isle.cpt"));
 	TEST_EXPECT(count_code(session.view().findings.diagnostics, "graph.unreadable") == 0 &&
@@ -1898,7 +1891,7 @@ static int test_terrain_and_bank_extractors() {
 // (ADR 0046 S18: its role on the edge). The badge, the finding and the edge's JSON read the same
 // rule, the row's type carried on the edge.
 static int test_model_texture_references() {
-	editor_test::TempProjectDir dir("opennova_asset_graph_model_textures");
+	test_temp::TempDir dir("opennova_asset_graph_model_textures");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1908,14 +1901,14 @@ static int test_model_texture_references() {
 	// A model minted from scene text, its texture rows of six types (an .mdt normal map and a
 	// chunk row among them); a particle file.
 	const std::string scene = dir.file("scene");
-	TEST_EXPECT(editor_test::write_text(scene + "/typed.o3d",
+	TEST_EXPECT(test_io::write_text(scene + "/typed.o3d",
 	                                    "o3d 2\nmodel TYPED\nmaterial FF_ST_OP\ntexture wall.tga 1 0\ntexture plain.tga 1 1\n"
 	                                    "texture bump.tga 3 5\ntexture trim.tga 1 3\ntexture ready.mdt 3 4\n"
 	                                    "texture field.nq8 1 16\nlod 0\npart 0 0 0 0\nmesh 0 0\n"
 	                                    "v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
 	const ImportResult imported = import_assets({{scene + "/typed.o3d", {}}}, ProjectPaths::for_root(root), *view.project.document, false);
 	TEST_EXPECT(imported.imported == std::vector<std::string>({"models/typed.3di"}));
-	TEST_EXPECT(editor_test::write_text(root + "/fx.ptl",
+	TEST_EXPECT(test_io::write_text(root + "/fx.ptl",
 	                                    "[effectdef]\n{\n\tid = BOOM;\n\tpdefs = puff;\n}\n\n[particledef]\n{\n\tid = puff;\n\tgraphic1 = puff.tga, additive;\n}\n"));
 	// The project's textures now exactly `files` (a .nq8 a material chunk container: an 8-byte
 	// header, then an NQ8B chunk of a 2 x 2 image).
@@ -1928,9 +1921,9 @@ static int test_model_texture_references() {
 		fs::remove_all(fs::path(root) / "textures", ec);
 		for (const char *file : files)
 			if (fs::path(file).extension() == ".nq8")
-				editor_test::write_bytes(root + "/textures/" + file, chunk);
+				test_io::write_file(root + "/textures/" + file, chunk);
 			else
-				editor_test::write_text(root + "/textures/" + file, "x");
+				test_io::write_text(root + "/textures/" + file, "x");
 		editor_test::handle_to_end(session, request::rescan());
 	};
 	const std::string model = "models/typed.3di";
@@ -1998,7 +1991,7 @@ static int test_model_texture_references() {
 	// game opening it reads no chunk, which is its own finding (reference.wrong_kind), not a
 	// name the project lacks; an error that gates where a texture's missing name does, nowhere (the
 	// build follows retail, S14).
-	TEST_EXPECT(editor_test::write_text(root + "/textures/field.nq8", "x"));
+	TEST_EXPECT(test_io::write_text(root + "/textures/field.nq8", "x"));
 	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(view.project.scan->find("field.nq8") && view.project.scan->find("field.nq8")->kind == AssetKind::Unknown);
 	TEST_EXPECT(resolved("field.nq8") == ReferenceStatus::Missing && !finding_for("field.nq8"));
@@ -2049,7 +2042,7 @@ static int test_model_texture_references() {
 // fixed-function tags, an object effect its tag and #UV twin, a skinned one no twin. A missing _ffp.fx
 // is a required file the project lacks, which Create Missing makes.
 static int test_model_shader_references() {
-	editor_test::TempProjectDir dir("opennova_asset_graph_model_shaders");
+	test_temp::TempDir dir("opennova_asset_graph_model_shaders");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -2057,7 +2050,7 @@ static int test_model_shader_references() {
 	const SessionView &view = session.view();
 	const std::string root = view.project.root;
 	const std::string scene = dir.file("scene");
-	TEST_EXPECT(editor_test::write_text(scene + "/lit.o3d",
+	TEST_EXPECT(test_io::write_text(scene + "/lit.o3d",
 	                                    "o3d 2\nmodel LIT\nmaterial FF_ST_OP\ntexture wall.tga 1 0\nlod 0\npart 0 0 0 0\n"
 	                                    "mesh 0 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
 	const ImportResult imported = import_assets({{scene + "/lit.o3d", {}}}, ProjectPaths::for_root(root), *view.project.document, false);
@@ -2088,7 +2081,7 @@ static int test_model_shader_references() {
 		std::vector<uint8_t> bytes;
 		Diagnostic error;
 		return make_blank(request, AssetKind::Shader, bytes, error) &&
-		       editor_test::write_bytes(root + "/shaders/" + name, bytes);
+		       test_io::write_file(root + "/shaders/" + name, bytes);
 	};
 	TEST_EXPECT(make("_ffp.fx", nullptr));
 	editor_test::handle_to_end(session, request::rescan());
@@ -2116,7 +2109,7 @@ static int test_model_shader_references() {
 // (renderer::material_texture_transform); a menu's logo.tga, served by logo.dds, takes the
 // new name instead where its new spelling is another file of the project.
 static int test_rename_keeps_loader_spelling() {
-	editor_test::TempProjectDir dir("opennova_asset_graph_rename_spelling");
+	test_temp::TempDir dir("opennova_asset_graph_rename_spelling");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -2126,13 +2119,13 @@ static int test_rename_keeps_loader_spelling() {
 	const std::string root = view.project.root;
 	const ProjectPaths paths = ProjectPaths::for_root(root);
 	const std::string scene = dir.file("scene");
-	TEST_EXPECT(editor_test::write_text(scene + "/relief.o3d",
+	TEST_EXPECT(test_io::write_text(scene + "/relief.o3d",
 	                                    "o3d 2\nmodel RELIEF\nmaterial FF_ST_OP\ntexture bump.tga 3 4\ntexture bump.tga 3 5\n"
 	                                    "texture bump.tga 3 6\ntexture bump.tga 3 7\nlod 0\npart 0 0 0 0\nmesh 0 0\n"
 	                                    "v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
 	TEST_EXPECT(import_assets({{scene + "/relief.o3d", {}}}, paths, *view.project.document, false).imported ==
 	            std::vector<std::string>({"models/relief.3di"}));
-	TEST_EXPECT(editor_test::write_text(root + "/textures/bump.dds", "dds"));
+	TEST_EXPECT(test_io::write_text(root + "/textures/bump.dds", "dds"));
 	editor_test::handle_to_end(session, request::rescan());
 	const RenamePlan plan = plan_rename(paths, *view.project.scan, *view.findings.graph, "textures/bump.dds", "stone.dds");
 	TEST_EXPECT(plan.ok() && plan.sites.size() == 4);
@@ -2166,7 +2159,7 @@ static int test_rename_keeps_loader_spelling() {
 			request::edit_record(menu->path(), menu_test::image_edits(*menu, exit, "logo.tga"));
 	editor_test::handle_to_end(session, set);
 	editor_test::handle_to_end(session, request::save_all());
-	TEST_EXPECT(editor_test::write_text(root + "/textures/logo.dds", "dds") && editor_test::write_text(root + "/textures/shine.tga", "tga"));
+	TEST_EXPECT(test_io::write_text(root + "/textures/logo.dds", "dds") && test_io::write_text(root + "/textures/shine.tga", "tga"));
 	editor_test::handle_to_end(session, request::rescan());
 	const RenamePlan kept = plan_rename(paths, *view.project.scan, *view.findings.graph, "textures/logo.dds", "glow.dds");
 	TEST_EXPECT(kept.ok() && kept.sites.size() == 1 && kept.sites[0].after == "glow.tga");
@@ -2181,7 +2174,7 @@ static int test_rename_keeps_loader_spelling() {
 // assembles again. A generation is a process-wide counter's value: no two graphs, a copy or a
 // cleared graph share one. The symbols of a kind come in the order the files define them.
 static int test_generation() {
-	editor_test::TempProjectDir dir("opennova_asset_graph_generation");
+	test_temp::TempDir dir("opennova_asset_graph_generation");
 	const std::string root = dir.file("G");
 	ProjectDocument doc;
 	Diagnostic error;
@@ -2190,7 +2183,7 @@ static int test_generation() {
 	const std::string items = root + "/defs/items.def";
 	const std::string text = "begin \"A\"\nid 100301\ntype building\ngraphic gone\nend\n"
 	                         "begin \"B\"\nid 100300\ntype building\nend\n";
-	TEST_EXPECT(editor_test::write_text(items, text));
+	TEST_EXPECT(test_io::write_text(items, text));
 	AssetScan scan = scan_project_assets(paths, doc);
 	AssetGraph graph;
 	const uint64_t fresh = graph.generation();
@@ -2207,7 +2200,7 @@ static int test_generation() {
 	TEST_EXPECT(graph.stats().files_extracted == 0 && graph.stats().files_reused == 1);
 	TEST_EXPECT(kept());
 	// The same bytes written again: read again, and still the graph as it was.
-	TEST_EXPECT(editor_test::write_text(items, text));
+	TEST_EXPECT(test_io::write_text(items, text));
 	std::error_code ec;
 	fs::last_write_time(items, fs::last_write_time(items, ec) + std::chrono::seconds(5), ec);
 	scan = scan_project_assets(paths, doc);
@@ -2215,7 +2208,7 @@ static int test_generation() {
 	TEST_EXPECT(graph.stats().files_extracted == 1);
 	TEST_EXPECT(kept());
 	// Another file in the project (a model the item may name): the rows moved.
-	TEST_EXPECT(editor_test::write_text(root + "/models/gone.3di", "x"));
+	TEST_EXPECT(test_io::write_text(root + "/models/gone.3di", "x"));
 	scan = scan_project_assets(paths, doc);
 	graph.update(paths, doc, scan, {});
 	const uint64_t grown = graph.generation();
@@ -2223,19 +2216,19 @@ static int test_generation() {
 	// What a file references changed: assembled again.
 	const std::string other = "begin \"A\"\nid 100301\ntype building\ngraphic other\nend\n"
 	                          "begin \"B\"\nid 100300\ntype building\nend\n";
-	TEST_EXPECT(editor_test::write_text(items, other));
+	TEST_EXPECT(test_io::write_text(items, other));
 	scan = scan_project_assets(paths, doc);
 	graph.update(paths, doc, scan, {});
 	const uint64_t changed = graph.generation();
 	TEST_EXPECT(changed != grown && changed != assembled && changed != fresh);
 	// A file the graph does not read (a mission text, S14): its row counts, so one added
 	// assembles again, while what it holds is read by nothing, so a change to it keeps the graph.
-	TEST_EXPECT(editor_test::write_text(root + "/missions/m1.mis", "; one\n"));
+	TEST_EXPECT(test_io::write_text(root + "/missions/m1.mis", "; one\n"));
 	scan = scan_project_assets(paths, doc);
 	graph.update(paths, doc, scan, {});
 	const uint64_t with_mis = graph.generation();
 	TEST_EXPECT(with_mis != changed && graph.stats().files_extracted == 0);
-	TEST_EXPECT(editor_test::write_text(root + "/missions/m1.mis", "; two, a longer line\n"));
+	TEST_EXPECT(test_io::write_text(root + "/missions/m1.mis", "; two, a longer line\n"));
 	scan = scan_project_assets(paths, doc);
 	graph.update(paths, doc, scan, {});
 	TEST_EXPECT(graph.generation() == with_mis && graph.stats().files_extracted == 0);
@@ -2500,7 +2493,7 @@ std::string fresh_difference(const AssetGraph &graph, const ProjectPaths &paths,
 
 // A file written, its last write moved on (so a scan sees it changed whatever the clock's tick).
 bool rewrite(const std::string &path, const std::string &text) {
-	if (!editor_test::write_text(path, text)) return false;
+	if (!test_io::write_text(path, text)) return false;
 	std::error_code ec;
 	static int bump = 0;
 	fs::last_write_time(
@@ -2553,7 +2546,7 @@ size_t count_edges(const AssetGraph &graph, const std::function<bool(const Graph
 // mission that reads, then does not, then is gone; and a mission's .mis added and changed. The
 // generation moves exactly when the graph changed.
 static int test_incremental_equals_fresh() {
-	editor_test::TempProjectDir dir("opennova_asset_graph_incremental");
+	test_temp::TempDir dir("opennova_asset_graph_incremental");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -2762,7 +2755,7 @@ static int test_incremental_equals_fresh() {
 							window("BUTTON", "JUMP", go_screen("main.mnu", "STARTUP")) +
 							window("BUTTON", "NOWHERE", go_screen("gone.mnu", "LOST")))));
 	TEST_EXPECT(step("a menu naming a texture the project lacks", true));
-	TEST_EXPECT(editor_test::write_text(root + "/textures/logo.tga", "tga"));
+	TEST_EXPECT(test_io::write_text(root + "/textures/logo.tga", "tga"));
 	TEST_EXPECT(step("the texture added", true));
 	TEST_EXPECT(update.file_set && update.files == std::vector<std::string>{"textures/logo.tga"});
 	// A menu moved to another folder: another file at another path; then its name's case alone
@@ -2825,7 +2818,7 @@ static int test_incremental_equals_fresh() {
 	}
 	// A table whose bytes make it another kind (a string table becomes a raw table).
 	if (const AssetEntry *table = scan.find("menutxt.bin")) {
-		TEST_EXPECT(editor_test::write_bytes(root + "/" + table->relative_path, {1, 2, 3, 4}));
+		TEST_EXPECT(test_io::write_file(root + "/" + table->relative_path, {1, 2, 3, 4}));
 		TEST_EXPECT(step("a string table become a raw table", true));
 	}
 	// A mission that reads (an item the project has and one it lacks), then does not: its edges
@@ -2838,7 +2831,7 @@ static int test_incremental_equals_fresh() {
 		std::vector<uint8_t> bytes;
 		std::string error;
 		TEST_EXPECT(opennova::bms::write(mission, bytes, error));
-		TEST_EXPECT(editor_test::write_bytes(root + "/missions/broken.bms", bytes));
+		TEST_EXPECT(test_io::write_file(root + "/missions/broken.bms", bytes));
 	}
 	TEST_EXPECT(step("a mission placing two items", true));
 	TEST_EXPECT(rewrite(root + "/missions/broken.bms", "not a mission"));
@@ -2862,13 +2855,13 @@ static int test_incremental_equals_fresh() {
 // each, and the findings worded are those of the missing edges resolved again: one edit to a
 // missing reference words one finding.
 static int test_patch_counts() {
-	editor_test::TempProjectDir dir("opennova_asset_graph_counts");
+	test_temp::TempDir dir("opennova_asset_graph_counts");
 	Project project(dir.file("project"));
 	TEST_EXPECT(project.made);
 	TEST_EXPECT(rewrite(project.file("menu_style.mns"),
 			"FONT_A a.fnt\r\nFONT_B b.fnt\r\nCOLOR_C FF00FF00\r\n"));
-	TEST_EXPECT(editor_test::write_text(project.file("fonts/a.fnt"), "a"));
-	TEST_EXPECT(editor_test::write_text(project.file("fonts/b.fnt"), "b"));
+	TEST_EXPECT(test_io::write_text(project.file("fonts/a.fnt"), "a"));
+	TEST_EXPECT(test_io::write_text(project.file("fonts/b.fnt"), "b"));
 	TEST_EXPECT(rewrite(project.file("m.mnu"),
 			screen("S",
 					window("STATIC", "W1", font("%FONT_A%")) +
@@ -2918,7 +2911,7 @@ static int test_patch_counts() {
 	TEST_EXPECT(fresh().empty() && graph.missing_count() == missing_at_first);
 	// A file added: every file edge (and the screen's, whose lookup asks for its menu file); the
 	// missing texture found.
-	TEST_EXPECT(editor_test::write_text(project.file("textures/pic.tga"), "tga"));
+	TEST_EXPECT(test_io::write_text(project.file("textures/pic.tga"), "tga"));
 	update = graph.update(project.paths, project.document, project.rescan(), {});
 	const size_t file_edges = count_edges(graph, [](const GraphEdge &edge) {
 		return reference_row(edge.kind).resolution == ReferenceResolution::File ||
@@ -2955,7 +2948,7 @@ static int test_patch_counts() {
 // usages_of name a file the same way, the path first: a file at the project's root named by its
 // path is itself, even where another file of its name comes first and takes the references.
 static int test_references_of() {
-	editor_test::TempProjectDir dir("opennova_asset_graph_references_of");
+	test_temp::TempDir dir("opennova_asset_graph_references_of");
 	Project project(dir.file("project"));
 	TEST_EXPECT(project.made);
 	TEST_EXPECT(rewrite(
@@ -3009,8 +3002,8 @@ LayerFile layer_file(const std::string &name, AssetKind kind, const std::string 
 	LayerFile file;
 	file.name = name;
 	file.kind = kind;
-	// As the file holds it (a .def with CR LF, editor_test::staged).
-	file.read = [text = editor_test::staged(name, text)](std::vector<uint8_t> &bytes, std::string &) {
+	// As the file holds it (a .def with CR LF, test_io::staged).
+	file.read = [text = test_io::staged(name, text)](std::vector<uint8_t> &bytes, std::string &) {
 		bytes.assign(text.begin(), text.end());
 		return true;
 	};
@@ -3048,7 +3041,7 @@ static int test_base_layer() {
 			layer->symbol_count() > 0);
 	TEST_EXPECT(layer->index().edge_count() == 0);
 
-	editor_test::TempProjectDir dir("opennova_asset_graph_base");
+	test_temp::TempDir dir("opennova_asset_graph_base");
 	Project project(dir.file("project"));
 	TEST_EXPECT(project.made);
 	TEST_EXPECT(rewrite(project.file("m.mnu"),
@@ -3060,8 +3053,8 @@ static int test_base_layer() {
 							window("BUTTON", "W5", go_screen("menus.mnu", "OLD")) +
 							window("BUTTON", "W6", go_screen("menus.mnu", "NEW")))));
 	TEST_EXPECT(rewrite(project.file("menus/menus.mnu"), screen("NEW", window("STATIC", "Y"))));
-	TEST_EXPECT(editor_test::write_text(project.file("textures/shared.tga"), "tga"));
-	TEST_EXPECT(editor_test::write_text(project.file("fonts/project.fnt"), "font"));
+	TEST_EXPECT(test_io::write_text(project.file("textures/shared.tga"), "tga"));
+	TEST_EXPECT(test_io::write_text(project.file("fonts/project.fnt"), "font"));
 	TEST_EXPECT(rewrite(project.file("extra.mns"), "BIG FF00FF00\r\n"));
 	AssetGraph graph;
 	graph.update(project.paths, project.document, project.rescan(), {});
@@ -3180,7 +3173,7 @@ static int test_base_layer_file_set() {
 			{layer_file("ammo.def", AssetKind::AmmoDefs, "ammo BASE_AMMO\nend\n"),
 					layer_file("weapon.def", AssetKind::WeaponDefs, "weapon \"BASE_GUN\"\nend\n")},
 			"jo");
-	editor_test::TempProjectDir dir("opennova_asset_graph_base_file_set");
+	test_temp::TempDir dir("opennova_asset_graph_base_file_set");
 	Project project(dir.file("project"));
 	TEST_EXPECT(project.made);
 	TEST_EXPECT(rewrite(project.file("defs/weapon.def"),
@@ -3240,12 +3233,12 @@ static int test_base_layer_file_set() {
 // renumbered in the same step: the update patches that file alone, equal to a graph built fresh,
 // the Referenced by following; its undo the same.
 static int test_record_references() {
-	editor_test::TempProjectDir dir("opennova_asset_graph_records");
+	test_temp::TempDir dir("opennova_asset_graph_records");
 	Project project(dir.file("project"));
 	TEST_EXPECT(project.made);
 	const std::vector<uint8_t> rig = rig_model::bytes();
-	TEST_EXPECT(!rig.empty() && editor_test::write_bytes(project.file("models/rig.3di"), rig) &&
-	            editor_test::write_bytes(project.file("models/twin.3di"), rig));
+	TEST_EXPECT(!rig.empty() && test_io::write_file(project.file("models/rig.3di"), rig) &&
+	            test_io::write_file(project.file("models/twin.3di"), rig));
 	AssetGraph graph;
 	graph.update(project.paths, project.document, project.rescan(), {});
 	const std::string file = "models/rig.3di";
@@ -3338,7 +3331,7 @@ static int test_retail_record_references() {
 		retail::skip_leg("OPENNOVA_JO_DIR (the Record references of the JO install's models)");
 		return 0;
 	}
-	editor_test::TempProjectDir dir("opennova_asset_graph_retail_records");
+	test_temp::TempDir dir("opennova_asset_graph_retail_records");
 	Project project(dir.file("project"));
 	TEST_EXPECT(project.made);
 	std::vector<std::string> expansions = opennova::vfs_list_expansions(install);
@@ -3360,7 +3353,7 @@ static int test_retail_record_references() {
 				continue; // not a model the game's loader reads either
 			const std::string folder = expansion.empty() ? std::string("base") : expansion;
 			const std::string placed = "model/" + folder + "/" + std::to_string(models) + "/" + name;
-			TEST_EXPECT(editor_test::write_bytes(project.file(placed), bytes));
+			TEST_EXPECT(test_io::write_file(project.file(placed), bytes));
 			++models;
 		}
 	}
@@ -3444,7 +3437,7 @@ static int test_retail_incremental() {
 		retail::skip_leg("OPENNOVA_JO_DIR (the incremental graph over the JO install's files)");
 		return 0;
 	}
-	editor_test::TempProjectDir dir("opennova_asset_graph_retail_incremental");
+	test_temp::TempDir dir("opennova_asset_graph_retail_incremental");
 	Project project(dir.file("project"));
 	TEST_EXPECT(project.made);
 	ImportOrigin origin;
@@ -3465,7 +3458,7 @@ static int test_retail_incremental() {
 			continue;
 		std::vector<uint8_t> bytes;
 		if (!origin.read(name, bytes)) continue;
-		TEST_EXPECT(editor_test::write_bytes(
+		TEST_EXPECT(test_io::write_file(
 				project.file(std::string(asset_kind_token(kind)) + "/" + name), bytes));
 		++exported;
 	}
@@ -3516,7 +3509,7 @@ static int test_retail_incremental() {
 	}
 	std::vector<uint8_t> model;
 	TEST_EXPECT(origin.read(model_name, model));
-	TEST_EXPECT(editor_test::write_bytes(project.file("model/" + model_name), model));
+	TEST_EXPECT(test_io::write_file(project.file("model/" + model_name), model));
 	TEST_EXPECT(step("a model added"));
 	if (const AssetEntry *menu = project.scan.find("main.mnu")) {
 		fs::create_directories(project.file("moved"));
@@ -3546,7 +3539,7 @@ static int test_retail_base_layer() {
 		retail::skip_leg("OPENNOVA_JO_DIR (the base layer over the mounted JO install)");
 		return 0;
 	}
-	editor_test::TempProjectDir dir("opennova_asset_graph_retail_base");
+	test_temp::TempDir dir("opennova_asset_graph_retail_base");
 	Project project(dir.file("project"));
 	TEST_EXPECT(project.made);
 	ImportOrigin origin;

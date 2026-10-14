@@ -274,31 +274,6 @@ func _vector(values: Variant) -> Vector3:
 	return Vector3(float(list[0]), float(list[1]), float(list[2]))
 
 
-func _write(path: String, bytes: PackedByteArray) -> void:
-	assert_eq(DirAccess.make_dir_recursive_absolute(path.get_base_dir()), OK)
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file, "wrote %s" % path)
-	if file != null:
-		file.store_buffer(bytes)
-		file.close()
-
-
-## An uncompressed 32-bit TGA of `size` x `size`, top-left first, one colour.
-func _tga(size: int) -> PackedByteArray:
-	var bytes := PackedByteArray()
-	bytes.resize(18)
-	bytes[2] = 2
-	bytes[12] = size & 0xFF
-	bytes[13] = (size >> 8) & 0xFF
-	bytes[14] = size & 0xFF
-	bytes[15] = (size >> 8) & 0xFF
-	bytes[16] = 32
-	bytes[17] = 0x28
-	for i in size * size:
-		bytes.append_array(PackedByteArray([40, 200, 255, 255]))
-	return bytes
-
-
 func _string_record(table: String, key: String) -> int:
 	assert_true(_seam.open_document(table))
 	for i in _seam.get_row_count():
@@ -326,7 +301,7 @@ func _new_project_with(model: String, name: String) -> bool:
 ## A copy of `model` written into the open project's models/ as `name`, the files scanned again.
 func _add_model(model: String, name: String) -> void:
 	var root: String = _seam.get_project_root()
-	_write(root.path_join("models").path_join(name), FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(model)))
+	TestFs.write_bytes(self, root.path_join("models").path_join(name), FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(model)))
 	_app.request_json(JSON.stringify({"kind": "rescan"}))
 	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
 
@@ -526,8 +501,8 @@ func test_a_table_draws_through_the_device() -> void:
 	_new_project("Table Game")
 	assert_eq(_seam.create_missing_files(), 0)
 	var root: String = _seam.get_project_root()
-	_write(root.path_join("table.mnu"), TABLE_MENU.to_utf8_buffer())
-	_write(root.path_join("chk.tga"), _tga(16))
+	TestFs.write_bytes(self, root.path_join("table.mnu"), TABLE_MENU.to_utf8_buffer())
+	TestFs.write_bytes(self, root.path_join("chk.tga"), TestFs.tga_bytes(Vector2i(16, 16), Color8(255, 200, 40)))
 	_app.request_json(JSON.stringify({"kind": "rescan"}))
 	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
 	assert_true(_seam.open_document("table.mnu"))
@@ -616,7 +591,7 @@ func test_the_caret_blinks_on_the_preview_clock() -> void:
 	_new_project("Caret Game")
 	assert_eq(_seam.create_missing_files(), 0)
 	var root: String = _seam.get_project_root()
-	_write(root.path_join("caret.mnu"), CARET_MENU.to_utf8_buffer())
+	TestFs.write_bytes(self, root.path_join("caret.mnu"), CARET_MENU.to_utf8_buffer())
 	_app.request_json(JSON.stringify({"kind": "rescan"}))
 	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
 	assert_true(_seam.open_document("caret.mnu"))
@@ -704,7 +679,7 @@ func test_a_window_s_sounds_reach_the_shell() -> void:
 	assert_eq(_seam.create_missing_files(), 0)
 	var root: String = _seam.get_project_root()
 	for name in ["over.wav", "click.wav"]:
-		_write(root.path_join("sounds").path_join(name), _wave_bytes(0.2))
+		TestFs.write_bytes(self, root.path_join("sounds").path_join(name), TestFs.wave_bytes(0.2))
 	_app.request_json(JSON.stringify({"kind": "rescan"}))
 	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
 	assert_true(_seam.done({"kind": "create_file", "path": "game.lwf"}))
@@ -796,8 +771,8 @@ func test_try_mode_runs_the_game_s_menu_on_the_device() -> void:
 			+ position % [100, 500, 300, 540] + "</WINDOW>"
 			+ "<WINDOW type=\"button\" name=\"MORE\">" + position % [400, 500, 600, 540] + "</WINDOW>"
 			+ "</WINDOW></SCREEN>")
-	_write(root.path_join("trymain.mnu"), first.to_utf8_buffer())
-	_write(root.path_join("trynext.mnu"), second.to_utf8_buffer())
+	TestFs.write_bytes(self, root.path_join("trymain.mnu"), first.to_utf8_buffer())
+	TestFs.write_bytes(self, root.path_join("trynext.mnu"), second.to_utf8_buffer())
 	_app.request_json(JSON.stringify({"kind": "rescan"}))
 	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
 	assert_true(_seam.open_document("trymain.mnu"))
@@ -1015,12 +990,12 @@ func test_a_table_plays_on_its_rig() -> void:
 	_dirs.append(dir)
 	assert_true(_seam.new_project(dir.path_join("project"), "Rig Game"))
 	var source := dir.path_join("source")
-	_write(source.path_join("skinned.o3d"),
+	TestFs.write_bytes(self, source.path_join("skinned.o3d"),
 			FileAccess.get_file_as_string(ProjectSettings.globalize_path(SKINNED)).to_utf8_buffer())
-	_write(source.path_join("skin.o3a"), SKIN_CLIPS.to_utf8_buffer())
+	TestFs.write_bytes(self, source.path_join("skin.o3a"), SKIN_CLIPS.to_utf8_buffer())
 	_app.request_json(JSON.stringify({"kind": "import_files", "imports": [
 		{"path": source.path_join("skinned.o3d")}, {"path": source.path_join("skin.o3a")}]}))
-	_write(dir.path_join("project/defs/items.def"),
+	TestFs.write_bytes(self, dir.path_join("project/defs/items.def"),
 			TestFs.crlf("begin \"Skinned Thing\"\nid 100200\ntype building\ngraphic skinned\nanim_def skin\nend\n").to_utf8_buffer())
 	_app.request_json(JSON.stringify({"kind": "rescan"}))
 	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
@@ -1082,7 +1057,7 @@ func test_a_table_plays_on_its_rig() -> void:
 	# S23 C: the walk clip opened as its own document while a table no item pairs names it first (the base game's
 	# one1_s155.bad, which E_STAND.adm and one1.adm both name): it plays on the paired table's model, its skinned
 	# mesh drawn, where it showed no model at all.
-	_write(dir.path_join("project/anims/ASKIN.adm"), FileAccess.get_file_as_bytes(dir.path_join("project/anims/SKIN.adm")))
+	TestFs.write_bytes(self, dir.path_join("project/anims/ASKIN.adm"), FileAccess.get_file_as_bytes(dir.path_join("project/anims/SKIN.adm")))
 	_app.request_json(JSON.stringify({"kind": "rescan"}))
 	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
 	assert_true(_seam.open_document("anims/walk.bad"))
@@ -1116,17 +1091,17 @@ func test_a_clip_s_footsteps_reach_the_shell() -> void:
 	var root := dir.path_join("project")
 	assert_true(_seam.new_project(root, "Steps Game"))
 	var source := dir.path_join("source")
-	_write(source.path_join("skinned.o3d"),
+	TestFs.write_bytes(self, source.path_join("skinned.o3d"),
 			FileAccess.get_file_as_string(ProjectSettings.globalize_path(SKINNED)).to_utf8_buffer())
-	_write(source.path_join("skin.o3a"), SKIN_CLIPS.to_utf8_buffer())
+	TestFs.write_bytes(self, source.path_join("skin.o3a"), SKIN_CLIPS.to_utf8_buffer())
 	_app.request_json(JSON.stringify({"kind": "import_files", "imports": [
 		{"path": source.path_join("skinned.o3d")}, {"path": source.path_join("skin.o3a")}]}))
-	_write(root.path_join("defs/items.def"), TestFs.crlf("begin \"Walker\"\nid 100200\ntype person\ngraphic skinned\n"
+	TestFs.write_bytes(self, root.path_join("defs/items.def"), TestFs.crlf("begin \"Walker\"\nid 100200\ntype person\ngraphic skinned\n"
 			+ "anim_def skin\nsound_profile walker\nend\n").to_utf8_buffer())
-	_write(root.path_join("SndProf.def"), TestFs.crlf("begin \"default\"\nend\nbegin \"walker\"\n"
+	TestFs.write_bytes(self, root.path_join("SndProf.def"), TestFs.crlf("begin \"default\"\nend\nbegin \"walker\"\n"
 			+ "\tSSLFootGND STEP_L 0 0 0\n\tSSRFootGND STEP_R 0 0 0\nend\n").to_utf8_buffer())
 	for name in ["step_l.wav", "step_r.wav"]:
-		_write(root.path_join("sounds").path_join(name), _wave_bytes(0.2))
+		TestFs.write_bytes(self, root.path_join("sounds").path_join(name), TestFs.wave_bytes(0.2))
 	_app.request_json(JSON.stringify({"kind": "rescan"}))
 	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
 	# The bank made in the editor: a set a foot, each one layer playing its wave.
@@ -1185,27 +1160,27 @@ func test_a_clip_s_fire_events_fire_the_item_s_ammo() -> void:
 	var source := dir.path_join("source")
 	var soldier := FileAccess.get_file_as_string(ProjectSettings.globalize_path(SKINNED))
 	soldier += "userpoint \"MFlash01\" 0 1 0.5 0 1 0 1 83\n"
-	_write(source.path_join("skinned.o3d"), soldier.to_utf8_buffer())
+	TestFs.write_bytes(self, source.path_join("skinned.o3d"), soldier.to_utf8_buffer())
 	var clips := SKIN_CLIPS.replace("SKIN.adm", "SOLD.adm").replace("anim_walk_forward", "anim_attack") \
 			.replace("event 0 0 0 0x1 0.9 1.7", "event 0 0 0 0x4 0.9 1.7")
-	_write(source.path_join("sold.o3a"), clips.to_utf8_buffer())
+	TestFs.write_bytes(self, source.path_join("sold.o3a"), clips.to_utf8_buffer())
 	_app.request_json(JSON.stringify({"kind": "import_files", "imports": [
 		{"path": source.path_join("skinned.o3d")}, {"path": source.path_join("sold.o3a")}]}))
 	assert_true(_seam.settle(), "the import steps across pumps")
-	_write(root.path_join("defs/items.def"), TestFs.crlf("begin \"Rifleman\"\nid 100300\ntype person\n"
+	TestFs.write_bytes(self, root.path_join("defs/items.def"), TestFs.crlf("begin \"Rifleman\"\nid 100300\ntype person\n"
 			+ "graphic skinned\nanim_def sold\nai_function org1\nmove_function org1\n"
 			+ "ammo_closeattack AMMO_TEST\nlaunchups_closeattack MFlash01\nend\n").to_utf8_buffer())
-	_write(root.path_join("ammo.def"), TestFs.crlf("ammo AT_NULL\nend\nammo AMMO_TEST\n\tvelocity 600\n\tmax_age 3\n"
+	TestFs.write_bytes(self, root.path_join("ammo.def"), TestFs.crlf("ammo AT_NULL\nend\nammo AMMO_TEST\n\tvelocity 600\n\tmax_age 3\n"
 			+ "\tweight_in_grains 62\n\ttracerrate 1\n\ttracer_type 1 2\n\tscar_type 1\n\teffects_table\n"
 			+ "\t\tobj Puff GS_AI 15\n\t\tdirt Puff GS_AI 15\n\tend\n\tai_launch GS_AI\n\tai_launcheffect Puff\nend\n")
 			.to_utf8_buffer())
-	_write(root.path_join("particles/puff.ptl"), ("[effectdef]\n{\n\tid = Puff;\n\tpdefs = PuffDot;\n}\n\n"
+	TestFs.write_bytes(self, root.path_join("particles/puff.ptl"), ("[effectdef]\n{\n\tid = Puff;\n\tpdefs = PuffDot;\n}\n\n"
 			+ "[particledef]\n{\n\tid = PuffDot;\n\temit_dur = 30;\n\temit_rate = 40;\n\temit_burst = 1;\n"
 			+ "\tage = 1.0;\n\tscale = 1.0;\n\tspeed = 1.5;\n\tspread = 40;\n\tgraphic1 = particle_dot.tga, blend;\n"
 			+ "\tg1_alpha = 1;\n\tg1_scale = 1;\n}\n\n").to_utf8_buffer())
-	_write(root.path_join("particles/particle_dot.tga"),
+	TestFs.write_bytes(self, root.path_join("particles/particle_dot.tga"),
 			FileAccess.get_file_as_bytes(ProjectSettings.globalize_path("res://../fixtures/cbin/particle_dot.tga")))
-	_write(root.path_join("sounds/gs_ai.wav"), _wave_bytes(0.2))
+	TestFs.write_bytes(self, root.path_join("sounds/gs_ai.wav"), TestFs.wave_bytes(0.2))
 	_app.request_json(JSON.stringify({"kind": "rescan"}))
 	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
 	# The bank made in the editor: the soldier's shot, one layer playing its wave.
@@ -1287,23 +1262,23 @@ func test_a_weapon_s_map_draws_its_arms_and_fires() -> void:
 	assert_true(_seam.new_project(root, "First Person Game"))
 	var source := dir.path_join("source")
 	var skinned := FileAccess.get_file_as_string(ProjectSettings.globalize_path(SKINNED)).to_utf8_buffer()
-	_write(source.path_join("gun.o3d"), skinned)
-	_write(source.path_join("arms.o3d"), skinned)
-	_write(source.path_join("gun.o3a"), SKIN_CLIPS.replace("SKIN.adm", "GUN.adm")
+	TestFs.write_bytes(self, source.path_join("gun.o3d"), skinned)
+	TestFs.write_bytes(self, source.path_join("arms.o3d"), skinned)
+	TestFs.write_bytes(self, source.path_join("gun.o3a"), SKIN_CLIPS.replace("SKIN.adm", "GUN.adm")
 			.replace("anim_walk_forward", "anim_wpn_fire").to_utf8_buffer())
 	_app.request_json(JSON.stringify({"kind": "import_files", "imports": [
 		{"path": source.path_join("gun.o3d")}, {"path": source.path_join("arms.o3d")},
 		{"path": source.path_join("gun.o3a")}]}))
 	assert_true(_seam.settle(), "the import steps across pumps")
-	_write(root.path_join("weapon.def"), TestFs.crlf("weapon \"WPN_TEST\"\n\tclipsize 10\n\tanimadm gun\n\tgfx1 gun\n"
+	TestFs.write_bytes(self, root.path_join("weapon.def"), TestFs.crlf("weapon \"WPN_TEST\"\n\tclipsize 10\n\tanimadm gun\n\tgfx1 gun\n"
 			+ "\tpos 25 -5 -145 0 0 0\n\taction \"fire\"\n\t\tanim anim_wpn_fire\n\t\tsoundsetend GS_TEST\n"
 			+ "\t\tdelayend 4\n\t\tfunction wpn_std_fire\n\tend\nend\n").to_utf8_buffer())
-	_write(root.path_join("Avatars.def"), TestFs.crlf("define head H1\n{\n\tname AV_H\n\tgraphic gun.3di\n}\n"
+	TestFs.write_bytes(self, root.path_join("Avatars.def"), TestFs.crlf("define head H1\n{\n\tname AV_H\n\tgraphic gun.3di\n}\n"
 			+ "define body B1\n{\n\tname AV_B\n\tgraphic gun.3di\n}\n"
 			+ "define arms A1\n{\n\tname AV_A\n\tgraphic arms.3di\n\tcamo 1 2 3\n}\n"
 			+ "nationality 0 AV_GOOD\n{\n\talignment good\n\tdivision 0 AV_DIV\n\t{\n\t\tcombo 1 H1 B1 A1\n\t}\n}\n")
 			.to_utf8_buffer())
-	_write(root.path_join("sounds/gs_test.wav"), _wave_bytes(0.2))
+	TestFs.write_bytes(self, root.path_join("sounds/gs_test.wav"), TestFs.wave_bytes(0.2))
 	_app.request_json(JSON.stringify({"kind": "rescan"}))
 	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
 	# The bank made in the editor: the shot, one layer playing its wave.
@@ -1395,10 +1370,10 @@ func test_a_destroyed_item_swaps_in_its_husk() -> void:
 	assert_true(_new_project_with(CRATE, "crate.3di"))
 	_add_model(ARMORY, "armory.3di")
 	var root: String = _seam.get_project_root()
-	_write(root.path_join("defs/items.def"), TestFs.crlf("begin \"Pump station\"\nid 100500\ntype object\n"
+	TestFs.write_bytes(self, root.path_join("defs/items.def"), TestFs.crlf("begin \"Pump station\"\nid 100500\ntype object\n"
 			+ "graphic crate\nai_function gnrc\nhusk armory\nhusk_sub_part_types 01_HULL 02_WHEEL 03_CHUNK_M 04_CHUNK_S\n"
 			+ "destroy_timing 0.5 1.0 0.25\nsounddeath EXPLO_PUMP\nend\n").to_utf8_buffer())
-	_write(root.path_join("sounds/explo_pump.wav"), _wave_bytes(0.2))
+	TestFs.write_bytes(self, root.path_join("sounds/explo_pump.wav"), TestFs.wave_bytes(0.2))
 	_app.request_json(JSON.stringify({"kind": "rescan"}))
 	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
 	# The bank made in the editor: the death sound's set, one layer playing its wave.
@@ -1463,31 +1438,6 @@ func test_a_destroyed_item_swaps_in_its_husk() -> void:
 	assert_true(_change({"clock": {"playing": false}, "options": {"damage": {"state": "intact"}}}))
 
 
-func _wave_bytes(seconds: float) -> PackedByteArray:
-	var samples := int(22050 * seconds)
-	var data := PackedByteArray()
-	data.resize(samples * 2)
-	for i in samples:
-		data.encode_s16(i * 2, int(sin(i * 0.1) * 8000.0))
-	var head := PackedByteArray()
-	head.resize(44)
-	head.encode_u32(0, 0x46464952) # RIFF
-	head.encode_u32(4, 36 + data.size())
-	head.encode_u32(8, 0x45564157) # WAVE
-	head.encode_u32(12, 0x20746d66) # "fmt "
-	head.encode_u32(16, 16)
-	head.encode_u16(20, 1) # PCM
-	head.encode_u16(22, 1) # mono
-	head.encode_u32(24, 22050)
-	head.encode_u32(28, 44100)
-	head.encode_u16(32, 2)
-	head.encode_u16(34, 16)
-	head.encode_u32(36, 0x61746164) # data
-	head.encode_u32(40, data.size())
-	head.append_array(data)
-	return head
-
-
 ## S17: the bones the wire reports (and the canvas draws) stand where the device's skeleton puts its
 ## joints, the clip turning the spine a quarter off the axis.
 func test_a_clip_poses_the_bones_it_reports() -> void:
@@ -1497,12 +1447,12 @@ func test_a_clip_poses_the_bones_it_reports() -> void:
 	_dirs.append(dir)
 	assert_true(_seam.new_project(dir.path_join("project"), "Bones Game"))
 	var source := dir.path_join("source")
-	_write(source.path_join("skinned.o3d"),
+	TestFs.write_bytes(self, source.path_join("skinned.o3d"),
 			FileAccess.get_file_as_string(ProjectSettings.globalize_path(SKINNED)).to_utf8_buffer())
-	_write(source.path_join("bend.o3a"), BEND_CLIPS.to_utf8_buffer())
+	TestFs.write_bytes(self, source.path_join("bend.o3a"), BEND_CLIPS.to_utf8_buffer())
 	_app.request_json(JSON.stringify({"kind": "import_files", "imports": [
 		{"path": source.path_join("skinned.o3d")}, {"path": source.path_join("bend.o3a")}]}))
-	_write(dir.path_join("project/defs/items.def"),
+	TestFs.write_bytes(self, dir.path_join("project/defs/items.def"),
 			TestFs.crlf("begin \"Bent Thing\"\nid 100201\ntype building\ngraphic skinned\nanim_def bend\nend\n").to_utf8_buffer())
 	_app.request_json(JSON.stringify({"kind": "rescan"}))
 	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
@@ -1850,9 +1800,9 @@ func test_two_builds_share_the_frame() -> void:
 	assert_eq(_seam.create_missing_files(), 0)
 	_import_large_model(dir, "jotwo")
 	var root: String = _seam.get_project_root()
-	_write(root.path_join("tex.mnu"), _textured_menu(6).to_utf8_buffer())
+	TestFs.write_bytes(self, root.path_join("tex.mnu"), _textured_menu(6).to_utf8_buffer())
 	for index in 6:
-		_write(root.path_join("tex%d.tga" % index), _tga(32))
+		TestFs.write_bytes(self, root.path_join("tex%d.tga" % index), TestFs.tga_bytes(Vector2i(32, 32), Color8(255, 200, 40)))
 	_app.request_json(JSON.stringify({"kind": "rescan"}))
 	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
 	var paths := ["tex.mnu", "models/jotwo.3di"]
