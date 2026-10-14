@@ -796,9 +796,11 @@ int test_names_file() {
 	TEST_EXPECT(names_findings(m).empty());
 	TEST_EXPECT(save_text(m, beside(&mis), text) && text == mis_text);
 
-	// The original editor's .mis of the same mission (B1): its names read, the file never written by a save (it writes
-	// what the editor's writer does not). A name edited stays unsaved, listed with Write it from the mission, whose
-	// words say what the rewrite loses; the write spends it.
+	// The original editor's .mis of the same mission (S24 C1's write rules: a save never writes
+	// over the original editor's .mis, an unmatched one or one changed outside): its names read,
+	// the file never written by a save (it writes what the editor's writer does not). A name edited
+	// stays unsaved, listed with Write it from the mission, whose words say what the rewrite loses;
+	// the write spends it.
 	const std::vector<uint8_t> original = bytes_of(original_editors(mis_text));
 	document = read_with(bms_bytes, &original);
 	auto &f = dynamic_cast<MissionDocument &>(*document);
@@ -1301,8 +1303,10 @@ int test_names_file_session() {
 	return 0;
 }
 
-// The original editor's .mis through the session (B1): its names read, a save of the open mission and a closed
-// file's rewrite both leave it byte for byte; the editor's own one beside a closed mission is written again.
+// The original editor's .mis through the session (S24 C1's write rules: a save never writes over
+// the original editor's .mis, an unmatched one or one changed outside): its names read, a save of
+// the open mission and a closed file's rewrite both leave it byte for byte; the editor's own one
+// beside a closed mission is written again.
 int test_names_file_original() {
 	NamesProject p("opennova_mission_names_original");
 	const SessionView &v = p.view();
