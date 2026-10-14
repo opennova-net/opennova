@@ -947,17 +947,22 @@ func _step_until(done: Callable, frames := 900) -> PackedStringArray:
 
 ## S14 review M1: no device writes a process-wide shader global outside its publication. Headless no
 ## canvas draws the picture, so nothing presents or publishes: the mission builds to ready, takes a time
-## of day (an Update), moves an entity, and builds its entities again for a moved file, and neither
-## the environment nor the water writes a global meanwhile (MissionEnvironment.get_global_writes,
-## Water.get_global_writes: a headless renderer keeps no global to read back). Both hold their
-## globals; the time reaches the environment's clock (6.5 h is minute 390) and a layer switched off
-## hides its node (review m13).
+## of day (an Update) with the clock playing (the weather ticking on it), moves an entity, and builds
+## its entities again for a moved file, and no row of its world writes a global meanwhile: the
+## environment, the water, the weather, the bodies, the cube, the foliage masks (each row's
+## get_global_writes: a headless renderer keeps no global to read back). The environment and the
+## water hold their globals; the time reaches the environment's clock (6.5 h is minute 390) and a
+## layer switched off hides its node (review m13).
 func test_no_global_written_outside_a_publication() -> void:
 	if _app == null:
 		return
 	_app.build_budget_ms = 0
 	var environment_writes := MissionEnvironment.get_global_writes()
 	var water_writes := Water.get_global_writes()
+	var weather_writes := Weather.get_global_writes()
+	var veil_writes := Celestial.get_global_writes()
+	var cube_writes := EnvironmentCubeCapture.get_global_writes()
+	var mask_writes := FoliageDispatcher.get_global_writes()
 	assert_true(_open_mission())
 	var state := await _await_ready()
 	assert_eq(String(state.get("status", "")), "ready", str(state))
@@ -968,7 +973,9 @@ func test_no_global_written_outside_a_publication() -> void:
 	if environment == null or water == null:
 		return
 	assert_true(environment.is_globals_held() and water.is_globals_held(), "the device's environment and water hold")
-	assert_true(_change({"kind": "mission", "options": {"time": 6.5}}))
+	# The clock playing: the weather ticks on it (the device's tick, no frame presented).
+	var clock := {"playing": true, "rate": 20}
+	assert_true(_change({"kind": "mission", "options": {"time": 6.5}, "clock": clock}))
 	assert_almost_eq(environment.get_mission_minute_of_day(), 390.0, 0.5, "the time reached the clock")
 	var item := _first_item(_state())
 	var moved: Dictionary = _ask({"kind": "edit_in_viewport",
@@ -984,6 +991,10 @@ func test_no_global_written_outside_a_publication() -> void:
 	assert_eq(int(_mission_device().get("placements", 0)), 2, "the entities built again")
 	assert_eq(MissionEnvironment.get_global_writes(), environment_writes, "the environment wrote no global")
 	assert_eq(Water.get_global_writes(), water_writes, "the water wrote no global")
+	assert_eq(Weather.get_global_writes(), weather_writes, "the weather wrote no global")
+	assert_eq(Celestial.get_global_writes(), veil_writes, "the bodies wrote no global")
+	assert_eq(EnvironmentCubeCapture.get_global_writes(), cube_writes, "the cube wrote no global")
+	assert_eq(FoliageDispatcher.get_global_writes(), mask_writes, "the foliage masks wrote no global")
 	# A layer off: its node hidden.
 	assert_true(_change({"kind": "mission", "options": {"show": {"terrain": false, "sky": false}}}))
 	assert_false((_device_node(state, "Terrain") as Node3D).visible, "the terrain off")
