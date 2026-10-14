@@ -251,32 +251,12 @@ Error MusicScript::save_to_path(const String &p_path) const {
 	if (!_opened) {
 		return ERR_UNCONFIGURED;
 	}
-	// The script from its model alone (ADR 0003), each program as the game reads it: its editor debug
-	// section empty (the source path, the sections' names, the globals', parameters' and functions'
-	// names, the line table), which the runtime relocates and never reads (mus.h, MusChunkHeader's
-	// debug_info_offset and string_section_offset). Shallow copies: the code stays the model's.
-	std::vector<MusScript> programs((size_t)_mf.header.chunk_count);
-	std::vector<std::vector<MusSection>> nameless((size_t)_mf.header.chunk_count);
+	// The script from its model alone (ADR 0003): each parsed program as it is, its editor debug
+	// section too (the source path, the sections', globals', parameters' and functions' names, the
+	// line table), which MDEdit writes into every script from its source (formats/mus, mus.h).
 	std::vector<const MusScript *> scripts;
 	for (uint32_t i = 0; i < _mf.header.chunk_count; ++i) {
-		MusScript &program = programs[i];
-		program = _mf.scripts[i];
-		std::memset(program.source_path, 0, sizeof(program.source_path));
-		nameless[i].resize(program.section_count);
-		for (uint32_t k = 0; k < program.section_count; ++k) {
-			std::memset(&nameless[i][k], 0, sizeof(MusSection));
-			nameless[i][k].code_offset = _mf.scripts[i].sections[k].code_offset;
-		}
-		program.sections = nameless[i].empty() ? nullptr : nameless[i].data();
-		program.variables = nullptr;
-		program.variable_count = 0;
-		program.locals = nullptr;
-		program.local_count = 0;
-		program.functions = nullptr;
-		program.function_count = 0;
-		program.lines = nullptr;
-		program.line_count = 0;
-		scripts.push_back(&program);
+		scripts.push_back(&_mf.scripts[i]);
 	}
 	uint8_t *buf = nullptr;
 	size_t size = 0;

@@ -21,30 +21,28 @@ func test_decompile_yields_text() -> void:
 
 
 # The save writes the script from its model (formats/mus: mus_encode_file over the parsed
-# programs), never the bytes it was read from, and each program as the game reads it: the
-# editor debug section (the source path, the sections', globals', parameters' and functions'
-# names, the line table) written empty, the game never reading it. The minted gamescript
-# carries a source path and names: the save holds none of them, reads back as the same
-# programs, and is its own fixed point.
-func test_save_writes_what_the_game_reads_of_the_script() -> void:
+# programs), never the bytes it was read from: each program as it was read, its editor debug
+# section with it (the source path, the sections', globals', parameters' and functions' names,
+# the line table), which MDEdit writes into every script from its source. The game reads none
+# of that section (the loader only relocates it; its one reader, a source viewer, has no
+# caller). The minted gamescript, the encoder's own output, saves as its own bytes, and the
+# save reads back as the same programs.
+func test_save_writes_the_script_from_its_model() -> void:
 	var ms := MusicScript.new()
 	ms.load_from_path(FIXTURE)
 	assert_gt(ms.get_script_count(), 0, "the minted gamescript loads")
-	assert_true(_holds(FileAccess.get_file_as_bytes(FIXTURE), "synth_gamemus.mus"), "the fixture carries a source path")
 	var out := "user://test_mus_save_gamemus.bin"
 	assert_eq(ms.save_to_path(out), OK, "the script saves")
 	var saved := FileAccess.get_file_as_bytes(out)
+	assert_eq(saved, FileAccess.get_file_as_bytes(FIXTURE), "the save is the minted script's own bytes")
 	for debug in ["synth_gamemus.mus", "Multiplayerstart", "MessageHandler::msgtype", "Testmission"]:
-		assert_false(_holds(saved, debug), "the save holds no %s" % debug)
+		assert_true(_holds(saved, debug), "the save holds %s" % debug)
 	var again := MusicScript.new()
 	again.load_from_decrypted_bytes(saved, out)
 	assert_eq(again.get_script_count(), ms.get_script_count(), "the saved script holds the same programs")
 	assert_eq(again.get_default_script_name(), ms.get_default_script_name(), "by name")
-	assert_eq(again.get_section_names(StringName(again.get_default_script_name())).size(),
-			ms.get_section_names(StringName(ms.get_default_script_name())).size(), "and their sections")
-	var out2 := "user://test_mus_save_gamemus_again.bin"
-	assert_eq(again.save_to_path(out2), OK, "the saved script saves")
-	assert_eq(FileAccess.get_file_as_bytes(out2), saved, "the save is its own fixed point")
+	assert_eq(again.get_section_names(StringName(again.get_default_script_name())),
+			ms.get_section_names(StringName(ms.get_default_script_name())), "and their sections, by name")
 
 
 # Whether `bytes` holds `text`'s ASCII bytes anywhere (a match on a whole byte).
