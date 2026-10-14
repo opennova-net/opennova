@@ -40,6 +40,13 @@ struct GameRow {
 	// account with no access row of its own owns.
 	std::string exp_bits;
 	std::string pfid; // the product family id (NWPF); empty when NULL
+	// The gate's startupurl after "nwprepare.dll?", as the title's own gate
+	// answers it (DFX2's carries pfid=38; JO's names none).
+	std::string startup_query;
+	// The gate's GLSVSS leg; an empty request sends none.
+	std::string glsvss_request;
+	int64_t glsvss_rims = 0;
+	int64_t glsvss_agrms = 0;
 
 	// The .gsb route the row's browser list is served at: "/" and gsb_path
 	// up to its query ("/jop_2.gsb").

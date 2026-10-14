@@ -95,24 +95,33 @@ Each `games` row is a lobby ([`catalog_repository.h`](catalog_repository.h)). Th
 are `backend/seed/0001_games.sql`'s, which every boot applies after the migrations
 (`INSERT OR IGNORE`, so a row added there reaches every database at its next boot);
 migration 0013 adds `title`, the engine's game profile code the row's clients speak
-(`engine/base/gameprofile`).
+(`engine/base/gameprofile`), and the gate's per-row answer (`startup_query`,
+`glsvss_*`).
 
-| Gate tag | Row and LobbyName | Title | Start page | Browser list | pfid | Expansion bits |
-| --- | --- | --- | --- | --- | --- | --- |
-| `jop:cus2`, and `jopd:cus4` (the JO demo's) by alias | `jop_2_consumer` | `jo` | `jop_2_start.htm` | `/jop_2.gsb` | 28 | 3 |
-| `dfx2:0:cus:buffy` | `dfx2_consumer` | `dfx2` | `dfx2_0_start.htm` | `/dfx2_0.gsb` | 38 | 1 |
-| `opennova:0` | `opennova_0_consumer` | `jo` | `jop_2_start.htm` | `/opennova_0.gsb` | 28 | 1 |
+| Gate tag | Slug | LobbyName | Title | Start page | Browser list | pfid | Expansion bits |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `jop:cus2`, and `jopd:cus4` (the JO demo's) by alias | `jop_2_consumer` | `jop_2_consumer` | `jo` | `jop_2_start.htm` | `/jop_2.gsb` | 28 | 3 |
+| `dfx2:0:cus:buffy` | `dfx2_consumer` | `dfx2_0_consumer` | `dfx2` | `dfx2_0_start.htm` | `/dfx2_0.gsb` | 38 | 1 |
+| `opennova:0` | `opennova_0_consumer` | `opennova_0_consumer` | `jo` | `jop_2_start.htm` | `/opennova_0.gsb` | 28 | 1 |
 
 The OpenNova row (ON data) speaks JO's wire identity, so its title, version pair
-(3 / 2345), product family and pages are JO's; its gate tag, LobbyName and browser list
-are its own, so anyone running ON data lands in its lobby. Expansion bits: bit 0 is the
-base game and bit 1 JO's `jox01`; DFX2 and ON have no expansion.
+(3 / 2345), product family, pages and gate answer's shape are JO's; its gate tag,
+LobbyName and browser list are its own, so anyone running ON data lands in its lobby.
+Expansion bits: bit 0 is the base game and bit 1 JO's `jox01`; DFX2 and ON have no
+expansion.
 
-- **The gate** answers a probe from the row its tag selects: `LobbyName` and the
-  `startupurl`'s `url=` page. JO's reply is the bytes it always was. A tag no row (nor
-  the alias) answers to gets no reply, and the unknown tracker records it. The gate
-  reads the table once in `start()`, so its receive thread never touches SQLite for a
-  probe; a change to the table takes a restart.
+- **The gate** answers a probe from the row its tag selects: `LobbyName`, the
+  `startupurl`'s query (`startup_query`) and the GLSVSS leg (`glsvss_*`; a row with none
+  takes the configured `ONNET_GLSVSS_*`, none by default). JO's reply is the bytes it
+  always was. DFX2's answers what NovaLogic's live gate answered the DFX2 tag on
+  2026-10-14 (`dfx2_0_consumer`, `pfid=38` in the `startupurl`, `[DFX2]KILLS` /
+  3600000 / 45000), in this gate's shape: the `POSTIPADDRESS` / `POSTIPPORT` pair, which
+  the live DFX2 reply lacks (its `udpnovaworld` line lets a client skip them), and this
+  service's address in the `startupurl` where the live one has `[domainname]`; its
+  `TimeOnGateServer`, a key no client reads, is not sent. A tag no row (nor the alias)
+  answers to gets no reply, and the unknown tracker records it. The gate reads the table
+  once in `start()`, so its receive thread never touches SQLite for a probe; a change to
+  the table takes a restart.
 - **Listings** carry the LobbyName the gate gave their host (`active_hosts.game`), so a
   host lands in its own game: `/api/lobbies` groups the hosts by it (one group per row),
   and each row's `.gsb` route lists its own alone, showing the row's `ver1` and
@@ -719,7 +728,8 @@ All via environment (`server_config.cpp`): `ONNET_PUBLIC_HOST`,
 `ONNET_MET_IP`, `ONNET_MET_PORT`, `ONNET_MET_LABEL`, `ONNET_MET_PING`,
 `ONNET_MET_EXT` (emitted as the METIPADDRESS family when `ONNET_MET_IP` is set)
 and the GLSVSS leg `ONNET_GLSVSS_REQUEST`, `ONNET_GLSVSS_RIMS`,
-`ONNET_GLSVSS_AGRMS` (the gate VARs) plus `ONNET_GLSVSS_RESULTS` (what
+`ONNET_GLSVSS_AGRMS` (the gate VARs for a games row with no GLSVSS leg of its own;
+DFX2's row has one) plus `ONNET_GLSVSS_RESULTS` (what
 `ClientGLSVSSRequest` is answered with). The gate response carries only the
 nineteen keys the retail parser recognises. The host/join reflection override
 for a docker bridge or NAT (leave unset in production): `ONNET_CLIENT_REFLECT_IP`,
@@ -915,8 +925,11 @@ starts the real `GateListener` on port 0 over the migrated and seeded games tabl
 checks that its reported port answers a probe and comes back as POSTIPPORT, that
 `UDPNOVAWORLD` and `STARTUPURL` carry the sibling ports its config names, that each
 gate tag's reply carries its row's lobby (JO's and the JO demo's alias the reply this
-gate always sent, byte for byte; DFX2's and OpenNova's their rows'), and that a tag
-no row answers to gets no reply; the route harness's `lobby_per_title` case drives
+gate always sent, byte for byte; DFX2's the live DFX2 gate's values in this gate's shape;
+OpenNova's its row's), that a configured GLSVSS leg stands in for JO's and never for
+DFX2's, and that a tag no row answers to gets no reply; `host_register_list` takes a
+DFX2 host's lists (`DFXCATEGORY1`, `PBServer` `0`); the route harness's
+`lobby_per_title` case drives
 `/api/games`, each row's `.gsb` route and the game a retail page's `GSB_SERVER` names
 (the gate tag, the `GT` cookie, the `NWPF` cookie, the page prefix), and
 `backend_schema` migration 0013 on a fresh database and over one at 0012. The website

@@ -1149,11 +1149,14 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 
 	// GET /nwprepare.dll: the gate's startupurl, whose `gt` is the client's
 	// gate tag (the [GT] it substitutes), so the page and the GT cookie it sets
-	// name the client's game; `url` defaults to that game's start page.
+	// name the client's game; `url` defaults to that game's start page. DFX2's
+	// startupurl also carries its pfid.
 	auto handle_prepare = [this, templates_dir](const crow::request &req) {
 		const std::string url_param = req.url_params.get("url") ? req.url_params.get("url") : "";
-		const catalog::GameRow &game = client_game(
-				impl_->games, req, parse_cookie_header(request_cookie_header(req)), {}, url_param);
+		const char *pfid_param = req.url_params.get("pfid");
+		const catalog::GameRow &game =
+				client_game(impl_->games, req, parse_cookie_header(request_cookie_header(req)),
+						pfid_param ? pfid_param : "", url_param);
 		const std::string url   = url_param.empty() ? game.start_page : url_param;
 		const std::string ver1  = req.url_params.get("ver1") ? req.url_params.get("ver1") : "";
 		const std::string ver2  = req.url_params.get("ver2") ? req.url_params.get("ver2") : "";

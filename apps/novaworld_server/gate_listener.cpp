@@ -43,17 +43,28 @@ namespace {
 // NovaworldWebDomainNameAndPortNumber are 0x82 SessionInit CU chunks, not
 // gate VARs [orig: CNapiGameSession_OnNovaWorldConnected @0x4d1570].)
 //
-// POSTIPADDRESS + POSTIPPORT are REQUIRED: the parser fails the gate to
-// state -9 ("NO NW POST IP" / "NO NW POST PORT") without them, unless the
-// junction bypass is set. The host posts its status blob there
-// [orig: Lobby_UpdateServerInfo @0x4ff62c], so it names this listener.
+// POSTIPADDRESS + POSTIPPORT: the parser fails the gate to state -9 ("NO NW
+// POST IP" / "NO NW POST PORT") without them unless the NWU-in-use word is
+// set, which a UDPNOVAWORLD line (this reply always has one) or the junction
+// bypass sets [orig: CNapiGateManager_ProcessResponse @0x4ced20]. A host posts
+// its status blob there when it is off NWU [orig: Lobby_UpdateServerInfo
+// @0x4ff441..0x4ff62c], so the pair names this listener.
 //
-// LobbyName and the startupurl's `url=` page are the probe's games row's
-// (lobby_name, start_page): JO's row answers "jop_2_consumer" and
-// "jop_2_start.htm", the bytes this reply always carried.
+// LobbyName, the startupurl's query and the GLSVSS leg are the probe's games
+// row's (lobby_name, startup_query, glsvss_*): JO's row answers
+// "jop_2_consumer" and "...&gt=[GT]&url=jop_2_start.htm" with no GLSVSS, the
+// bytes this reply always carried; DFX2's row answers as NovaLogic's live gate
+// answered the DFX2 tag (dfx2-vs-jo-re.md section 6.5, DFX2-6): LobbyName
+// "dfx2_0_consumer", pfid=38 in the startupurl, GLSVSS "[DFX2]KILLS" 3600000
+// 45000, the GLSVSS lines before the reflected pair as that reply has them.
+// Service policy against that witness: the POST pair goes out for every row
+// (the live DFX2 reply has none, its UDPNOVAWORLD line skipping the client's
+// POST tests); the startupurl names this service's address where the live
+// one has [domainname]; and TimeOnGateServer, which no parse reads, is not
+// sent (JO's live reply is unrecorded).
 struct GateResponseFields {
 	std::string lobby_name;
-	std::string start_page;
+	std::string startup_query;
 	std::string public_host;
 	uint16_t post_port = 0;      // this listener's port
 	uint16_t nw_udp_port = 0;
@@ -66,8 +77,8 @@ struct GateResponseFields {
 	int met_ping = 0;
 	int met_ext = 0;
 	std::string glsvss_request;
-	int glsvss_rims = 0;
-	int glsvss_agrms = 0;
+	int64_t glsvss_rims = 0;
+	int64_t glsvss_agrms = 0;
 };
 
 std::string build_gate_response(const GateResponseFields &f) {
@@ -93,16 +104,16 @@ std::string build_gate_response(const GateResponseFields &f) {
 	append_var(os, "udpcode2", "xyz");
 	append_var(os, "startupurl",
 	           "http://" + f.public_host + ":" + std::to_string(f.http_port) +
-	           "/nwprepare.dll?ver1=[VER1]&ver2=[VER2]&cc=[CC]&gt=[GT]&url=" + f.start_page);
+	           "/nwprepare.dll?" + f.startup_query);
 	append_var(os, "usejunction", "0");
 	append_var(os, "clearjunction", "0");
-	append_var(os, "ReflectedIpAddress", f.reflected_ip);
-	append_var(os, "ReflectedPortNumber", std::to_string(f.reflected_port));
 	if (!f.glsvss_request.empty()) {
 		append_var(os, "GLSVSSREQUEST", f.glsvss_request);
 		append_var(os, "GLSVSSRIMS", std::to_string(f.glsvss_rims));
 		append_var(os, "GLSVSSAGRMS", std::to_string(f.glsvss_agrms));
 	}
+	append_var(os, "ReflectedIpAddress", f.reflected_ip);
+	append_var(os, "ReflectedPortNumber", std::to_string(f.reflected_port));
 	return os.str();
 }
 
@@ -169,8 +180,9 @@ bool GateListener::start(const ServerConfig &config) {
 		std::fprintf(stderr, "[gate] WARN no games rows: every probe goes unanswered\n");
 	}
 	for (const catalog::GameRow &g : games_.games()) {
-		std::printf("[gate] lobby %s answers tag %s (url=%s)\n", loggable(g.lobby_name).c_str(),
-		            loggable(g.gate_tag).c_str(), loggable(g.start_page).c_str());
+		std::printf("[gate] lobby %s answers tag %s (nwprepare.dll?%s)\n",
+		            loggable(g.lobby_name).c_str(), loggable(g.gate_tag).c_str(),
+		            loggable(g.startup_query, 255).c_str());
 	}
 	for (const catalog::GateTagAlias &alias : catalog::kGateTagAliases) {
 		if (const catalog::GameRow *g = games_.by_gate_tag(alias.tag)) {
@@ -292,7 +304,7 @@ void GateListener::run_loop(opennova::net::ScopedSocket socket,
 		// (the prod path).
 		GateResponseFields fields;
 		fields.lobby_name     = game->lobby_name;
-		fields.start_page     = game->start_page;
+		fields.startup_query  = game->startup_query;
 		fields.public_host    = public_host_;
 		fields.post_port      = bound_port_;
 		fields.nw_udp_port    = nw_udp_port_;
@@ -304,9 +316,12 @@ void GateListener::run_loop(opennova::net::ScopedSocket socket,
 		fields.met_label      = met_label_;
 		fields.met_ping       = met_ping_;
 		fields.met_ext        = met_ext_;
-		fields.glsvss_request = glsvss_request_;
-		fields.glsvss_rims    = glsvss_rims_;
-		fields.glsvss_agrms   = glsvss_agrms_;
+		// The row's GLSVSS leg; a row with none takes the configured one
+		// (ONNET_GLSVSS_*, none by default).
+		const bool row_glsvss = !game->glsvss_request.empty();
+		fields.glsvss_request = row_glsvss ? game->glsvss_request : glsvss_request_;
+		fields.glsvss_rims    = row_glsvss ? game->glsvss_rims : glsvss_rims_;
+		fields.glsvss_agrms   = row_glsvss ? game->glsvss_agrms : glsvss_agrms_;
 		const std::string body = build_gate_response(fields);
 
 		std::vector<uint8_t> reply_inner(body.begin(), body.end());

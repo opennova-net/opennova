@@ -29,9 +29,9 @@ struct ServerConfig;
 // the NWU tag decrypt runs.
 //
 // One lobby per title: the probe's tag selects its `games` row
-// (catalog::GameCatalog::by_gate_tag), which supplies the reply's LobbyName
-// and its startupurl's `url=` start page; a tag no row (nor alias) answers to
-// gets no reply. start() loads the catalog once from its leased connection,
+// (catalog::GameCatalog::by_gate_tag), which supplies the reply's LobbyName,
+// its startupurl's query and its GLSVSS leg (the configured one standing in
+// for a row with none); a tag no row (nor alias) answers to gets no reply. start() loads the catalog once from its leased connection,
 // so the receive thread answers a probe without touching SQLite.
 //
 // Runs on its own thread. start() returns immediately; the listener stays

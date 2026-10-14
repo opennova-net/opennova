@@ -123,6 +123,7 @@ int test_seed_populates_games() {
 	TEST_EXPECT(games[0].as_text(0).value() == "dfx2_consumer");
 	TEST_EXPECT(games[0].as_text(1).value() == "dfx2:0:cus:buffy");
 	TEST_EXPECT(games[0].as_text(2).value() == "dfx2");
+	TEST_EXPECT(games[0].as_text(3).value() == "dfx2_0_consumer");
 	TEST_EXPECT(games[0].as_text(4).value() == "38");
 	TEST_EXPECT(games[1].as_text(0).value() == "jop_2_consumer");
 	TEST_EXPECT(games[1].as_text(1).value() == "jop:cus2");
@@ -373,6 +374,38 @@ int expect_opennova_row(Database &db) {
 	return 0;
 }
 
+// Each row's gate answer: JO's LobbyName and startupurl query the ones this
+// gate always answered, with no GLSVSS; DFX2's LobbyName, query (pfid=38 in
+// it) and GLSVSS leg as NovaLogic's live gate answered the DFX2 tag
+// (dfx2-vs-jo-re.md section 6.5, DFX2-6); OpenNova's JO's shape. Every
+// query names its row's start page last.
+int expect_gate_rows(Database &db) {
+	const auto rows = db.query("SELECT slug, lobby_name, startup_query, glsvss_request, "
+							   "glsvss_rims, glsvss_agrms, start_page FROM games ORDER BY slug;");
+	TEST_EXPECT(rows.size() == 3);
+	const std::string jo_query = "ver1=[VER1]&ver2=[VER2]&cc=[CC]&gt=[GT]&url=jop_2_start.htm";
+	TEST_EXPECT(rows[0].as_text(0).value() == "dfx2_consumer");
+	TEST_EXPECT(rows[0].as_text(1).value() == "dfx2_0_consumer");
+	TEST_EXPECT(rows[0].as_text(2).value() ==
+			"ver1=[VER1]&ver2=[VER2]&cc=[CC]&pfid=38&gt=[GT]&url=dfx2_0_start.htm");
+	TEST_EXPECT(rows[0].as_text(3).value() == "[DFX2]KILLS");
+	TEST_EXPECT(rows[0].as_int(4).value() == 3600000 && rows[0].as_int(5).value() == 45000);
+	TEST_EXPECT(rows[1].as_text(1).value() == "jop_2_consumer");
+	TEST_EXPECT(rows[1].as_text(2).value() == jo_query);
+	TEST_EXPECT(rows[1].as_text(3).value().empty());
+	TEST_EXPECT(rows[1].as_int(4).value() == 0 && rows[1].as_int(5).value() == 0);
+	TEST_EXPECT(rows[2].as_text(1).value() == "opennova_0_consumer");
+	TEST_EXPECT(rows[2].as_text(2).value() == jo_query);
+	TEST_EXPECT(rows[2].as_text(3).value().empty());
+	for (const auto &row : rows) {
+		const std::string query = row.as_text(2).value();
+		const std::string tail = "&url=" + row.as_text(6).value();
+		TEST_EXPECT(query.size() > tail.size() &&
+				query.compare(query.size() - tail.size(), tail.size(), tail) == 0);
+	}
+	return 0;
+}
+
 // 0013 on a fresh database: the column, and the seed after it (the boot's
 // order) writes every row with its title, the OpenNova row among them.
 int test_games_title_fresh() {
@@ -388,14 +421,17 @@ int test_games_title_fresh() {
 	TEST_EXPECT(titles[0].as_text(1).value() == "dfx2");
 	TEST_EXPECT(titles[1].as_text(1).value() == "jo");
 	TEST_EXPECT(titles[2].as_text(1).value() == "jo");
+	if (expect_gate_rows(db) != 0)
+		return 1;
 	return expect_opennova_row(db);
 }
 
 // 0013 over a database at 0012 (every deployment before it): the migrations
 // up to 0012 and the seed of the time, then the boot's order, the full set
 // (0013 first among what it applies) and today's seed. The rows already there
-// keep their ids and take their titles (JO's its pfid 28), the accounts keep
-// their game access, and the seed adds the OpenNova row.
+// keep their ids and take their titles (JO's its pfid 28) and their gate
+// answers (DFX2's LobbyName becomes dfx2_0_consumer), the accounts keep their
+// game access, and the seed adds the OpenNova row.
 int test_games_title_over_0012() {
 	const std::filesystem::path source_dir{ OPENNOVA_SOURCE_DIR };
 	const auto migrations = source_dir / "backend" / "migrations";
@@ -429,6 +465,9 @@ int test_games_title_over_0012() {
 	TEST_EXPECT(games[2].as_text(0).value() == "opennova_0_consumer");
 	TEST_EXPECT(db.query("SELECT 1 FROM player_game_access WHERE game_slug = 'jop_2_consumer';")
 						.size() == 5);
+	// The older rows' gate answers (DFX2's LobbyName among them) are 0013's.
+	if (expect_gate_rows(db) != 0)
+		return 1;
 	return expect_opennova_row(db);
 }
 

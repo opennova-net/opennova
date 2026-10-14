@@ -9,10 +9,13 @@
 //
 // One lobby per title: the listener reads the games table (the repo's
 // migrations and the games seed, on a shared in-memory database) at start(),
-// and each probe's tag selects the row whose LobbyName and start page the
-// reply carries. JO's tag, and the JO demo's alias of it, get the reply this
-// gate always sent, byte for byte; DFX2's and OpenNova's get their rows';
-// a tag no row answers to gets nothing.
+// and each probe's tag selects the row whose LobbyName, startupurl query and
+// GLSVSS leg the reply carries. JO's tag, and the JO demo's alias of it, get
+// the reply this gate always sent, byte for byte; DFX2's gets what NovaLogic's
+// live gate answered it (dfx2-vs-jo-re.md section 6.5, DFX2-6) in this gate's
+// shape (the POST pair, this service's address); OpenNova's gets its row's; a
+// tag no row answers to gets nothing. A configured GLSVSS leg (ONNET_GLSVSS_*)
+// stands in for a row with none, never for DFX2's own.
 
 #include "gate_listener.h"
 #include "net_sockets.h"
@@ -88,40 +91,57 @@ std::optional<Exchange> probe_text(uint16_t port, const std::string &tag, int wa
 	return Exchange{ std::string(reply.begin(), reply.end()), client_port };
 }
 
+// The startupurl queries: JO's, the one this gate always answered (and a
+// retail JO client fetched), and DFX2's, as NovaLogic's live gate answers it.
+constexpr const char *kJoQuery = "ver1=[VER1]&ver2=[VER2]&cc=[CC]&gt=[GT]&url=jop_2_start.htm";
+constexpr const char *kDfx2Query =
+		"ver1=[VER1]&ver2=[VER2]&cc=[CC]&pfid=38&gt=[GT]&url=dfx2_0_start.htm";
+
+// One lobby's answer: its LobbyName, startupurl query and GLSVSS leg (an
+// empty request: none).
+struct Lobby {
+	std::string name;
+	std::string query;
+	std::string glsvss_request;
+	std::string glsvss_rims;
+	std::string glsvss_agrms;
+};
+
 // The reply this gate sent every tag before the games table chose its lobby,
-// with the row's LobbyName and start page in their places: for JO's row,
-// "jop_2_consumer" and "jop_2_start.htm", it is that reply byte for byte.
-std::string expected_reply(uint16_t gate_port, uint16_t client_port, const std::string &lobby,
-		const std::string &start_page) {
-	const std::string startup_url = "http://127.0.0.1:40456/nwprepare.dll?ver1=[VER1]&ver2=[VER2]"
-									"&cc=[CC]&gt=[GT]&url=" +
-			start_page;
+// with the lobby's values in their places: for JO's lobby, "jop_2_consumer"
+// and kJoQuery with no GLSVSS, it is that reply byte for byte.
+std::string expected_reply(uint16_t gate_port, uint16_t client_port, const Lobby &lobby) {
+	std::vector<std::pair<std::string, std::string>> vars = {
+		{ "LobbyName", lobby.name },
+		{ "POSTIPADDRESS", "127.0.0.1" },
+		{ "POSTIPPORT", std::to_string(gate_port) },
+		{ "udpnovaworld", "127.0.0.1:40123" },
+		{ "udpcode1", "abc" },
+		{ "udpcode2", "xyz" },
+		{ "startupurl", "http://127.0.0.1:40456/nwprepare.dll?" + lobby.query },
+		{ "usejunction", "0" },
+		{ "clearjunction", "0" },
+	};
+	if (!lobby.glsvss_request.empty()) {
+		vars.push_back({ "GLSVSSREQUEST", lobby.glsvss_request });
+		vars.push_back({ "GLSVSSRIMS", lobby.glsvss_rims });
+		vars.push_back({ "GLSVSSAGRMS", lobby.glsvss_agrms });
+	}
+	vars.push_back({ "ReflectedIpAddress", "127.0.0.1" });
+	vars.push_back({ "ReflectedPortNumber", std::to_string(client_port) });
 	std::string text = "GATEPROTOCOL \"1.0\"\r\n";
-	for (const auto &[key, value] : std::vector<std::pair<std::string, std::string>>{
-				 { "LobbyName", lobby },
-				 { "POSTIPADDRESS", "127.0.0.1" },
-				 { "POSTIPPORT", std::to_string(gate_port) },
-				 { "udpnovaworld", "127.0.0.1:40123" },
-				 { "udpcode1", "abc" },
-				 { "udpcode2", "xyz" },
-				 { "startupurl", startup_url },
-				 { "usejunction", "0" },
-				 { "clearjunction", "0" },
-				 { "ReflectedIpAddress", "127.0.0.1" },
-				 { "ReflectedPortNumber", std::to_string(client_port) },
-		 })
+	for (const auto &[key, value] : vars)
 		text += "VAR \"" + key + "\" \"" + value + "\"\r\n";
 	return text;
 }
 
-// `tag`'s reply is the expected one for `lobby` and `start_page`.
-int expect_lobby(uint16_t port, const std::string &tag, const std::string &lobby,
-		const std::string &start_page) {
+// `tag`'s reply is the expected one for `lobby`.
+int expect_lobby(uint16_t port, const std::string &tag, const Lobby &lobby) {
 	const auto got = probe_text(port, tag);
 	if (!got)
 		std::fprintf(stderr, "  no gate reply to %s from :%u\n", tag.c_str(), port);
 	TEST_EXPECT(got.has_value());
-	const std::string want = expected_reply(port, got->client_port, lobby, start_page);
+	const std::string want = expected_reply(port, got->client_port, lobby);
 	if (got->text != want) {
 		std::fprintf(stderr, "  %s's reply:\n%s\n  expected:\n%s\n", tag.c_str(), got->text.c_str(),
 				want.c_str());
@@ -129,7 +149,7 @@ int expect_lobby(uint16_t port, const std::string &tag, const std::string &lobby
 	TEST_EXPECT(got->text == want);
 	opennova::GateResponse parsed;
 	TEST_EXPECT(opennova::gate_response_parse(got->text, parsed));
-	TEST_EXPECT(parsed.lobby_name == lobby);
+	TEST_EXPECT(parsed.lobby_name == lobby.name);
 	return 0;
 }
 
@@ -176,16 +196,45 @@ int main() {
 	TEST_EXPECT(reply.startup_url.compare(0, startup.size(), startup) == 0);
 
 	// Each tag's lobby: JO's reply unchanged, the JO demo's alias answering as
-	// JO, and DFX2's and OpenNova's rows.
-	if (expect_lobby(port, "jop:cus2", "jop_2_consumer", "jop_2_start.htm") != 0)
+	// JO, DFX2's as the live DFX2 gate answers, and OpenNova's row.
+	const Lobby jo{ "jop_2_consumer", kJoQuery, "", "", "" };
+	const Lobby dfx2{ "dfx2_0_consumer", kDfx2Query, "[DFX2]KILLS", "3600000", "45000" };
+	const Lobby on{ "opennova_0_consumer", kJoQuery, "", "", "" };
+	if (expect_lobby(port, "jop:cus2", jo) != 0)
 		return 1;
-	if (expect_lobby(port, opennova::GATE_PROBE_TAG_JODEMO, "jop_2_consumer", "jop_2_start.htm") !=
-			0)
+	if (expect_lobby(port, opennova::GATE_PROBE_TAG_JODEMO, jo) != 0)
 		return 1;
-	if (expect_lobby(port, "dfx2:0:cus:buffy", "dfx2_consumer", "dfx2_0_start.htm") != 0)
+	if (expect_lobby(port, "dfx2:0:cus:buffy", dfx2) != 0)
 		return 1;
-	if (expect_lobby(port, "opennova:0", "opennova_0_consumer", "jop_2_start.htm") != 0)
+	if (expect_lobby(port, "opennova:0", on) != 0)
 		return 1;
+	{
+		const auto got = probe_text(port, "dfx2:0:cus:buffy");
+		TEST_EXPECT(got.has_value());
+		opennova::GateResponse parsed;
+		TEST_EXPECT(opennova::gate_response_parse(got->text, parsed));
+		TEST_EXPECT(parsed.glsvss_request == "[DFX2]KILLS");
+		TEST_EXPECT(parsed.glsvss_rims == 3600000 && parsed.glsvss_agrms == 45000);
+	}
+
+	// A configured GLSVSS leg stands in for the rows with none (JO's and
+	// OpenNova's), never for DFX2's own.
+	{
+		nws::ServerConfig glsvss = config;
+		glsvss.glsvss_request = "[JOP]CONFIGURED";
+		glsvss.glsvss_rims = 111;
+		glsvss.glsvss_agrms = 222;
+		nws::GateListener configured;
+		configured.set_db_pool(&pool);
+		TEST_EXPECT(configured.start(glsvss));
+		const uint16_t cport = configured.bound_port();
+		const Lobby jo_configured{ "jop_2_consumer", kJoQuery, "[JOP]CONFIGURED", "111", "222" };
+		if (expect_lobby(cport, "jop:cus2", jo_configured) != 0)
+			return 1;
+		if (expect_lobby(cport, "dfx2:0:cus:buffy", dfx2) != 0)
+			return 1;
+		configured.stop();
+	}
 
 	// A tag no row answers to is refused: no reply at all.
 	TEST_EXPECT(!probe_text(port, "jop:cus3", 400).has_value());

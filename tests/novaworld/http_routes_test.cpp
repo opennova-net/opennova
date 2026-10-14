@@ -1754,7 +1754,7 @@ int test_lobby_per_title(Harness &h) {
 	};
 	const Listed listed[] = {
 		{ 3101, "jop_2_consumer", "Title JO" },
-		{ 3102, "dfx2_consumer", "Title DFX2" },
+		{ 3102, "dfx2_0_consumer", "Title DFX2" },
 		{ 3103, "opennova_0_consumer", "Title ON" },
 	};
 	for (const Listed &l : listed) {
@@ -1915,7 +1915,8 @@ int test_dfx2_client_path(Harness &h) {
 	CookieJar jar;
 
 	auto reply = h.send_to(port, "GET",
-			"/nwprepare.dll?ver1=1&ver2=9013&cc=us&gt=dfx2:0:cus:buffy&url=dfx2_0_start.htm");
+			"/nwprepare.dll?ver1=1&ver2=9013&cc=us&pfid=38&gt=dfx2:0:cus:buffy&url=dfx2_0_start."
+			"htm");
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
 	TEST_EXPECT(body_text(reply) == page("dfx2_0_start.htm"));
 	TEST_EXPECT(set_cookie_value(reply, "GT") == "dfx2:0:cus:buffy");
@@ -1981,7 +1982,7 @@ int test_dfx2_client_path(Harness &h) {
 	jar.keep(reply);
 
 	// The browser list: a DFX2 listing, and a JO one it never shows.
-	for (const auto &[rid, lobby] : { std::pair<uint32_t, const char *>{ 3201, "dfx2_consumer" },
+	for (const auto &[rid, lobby] : { std::pair<uint32_t, const char *>{ 3201, "dfx2_0_consumer" },
 				 { 3202, "jop_2_consumer" } }) {
 		opennova::hostdb::HostRow row;
 		row.rid = rid;
