@@ -517,6 +517,10 @@ static int test_utf8_project_path() {
 	return 0;
 }
 
+// Import through the session: a preview of a loose file and an archive's members, a member chosen,
+// the import; a replace asked for, on the project's path and spelling; never over unsaved edits; a
+// preview of files that cannot be read opens nothing. Which selections import_assets refuses whole is
+// import_apply_test's test_apply_staging.
 static int test_import() {
 	editor_test::TempProjectDir dir("opennova_editor_import_test");
 	FakePlatform platform;
@@ -626,29 +630,6 @@ static int test_import() {
 	        *records_of(*session.view().documents.open[0])->rows()[0]);
 	TEST_EXPECT(reimported.native.as<opennova::def::DefItemDef>().hp == 30);
 
-	const ProjectPaths paths = ProjectPaths::for_root(dir.file("project"));
-	const auto invalid = import_assets({{packed, "../escape.txt"}, {packed, "absent.txt"}},
-	                                  paths, *session.view().project.document, false);
-	TEST_EXPECT(invalid.imported.empty() && invalid.diagnostics.size() == 2);
-	TEST_EXPECT(invalid.diagnostics[0].code() == "import.name");
-	TEST_EXPECT(!fs::exists(dir.file("escape.txt")));
-	// The whole selection or none of it: a file refused refuses the others.
-	const auto duplicates = import_assets({{loose, {}}, {loose, {}}}, paths, *session.view().project.document, true);
-	TEST_EXPECT(duplicates.imported.empty() && duplicates.diagnostics.size() == 1);
-	TEST_EXPECT(duplicates.diagnostics[0].code() == "import.duplicate");
-	// The archive's 16-byte name limit binds only what the build packs: a video is copied
-	// loose under any name, a texture is refused (and with it the video it came with).
-	const std::string video = dir.file("intro_cinematic.bik");
-	const std::string texture = dir.file("a_long_texture_name.tga");
-	TEST_EXPECT(editor_test::write_text(video, "bink"));
-	TEST_EXPECT(editor_test::write_text(texture, "tga"));
-	const auto long_names = import_assets({{video, {}}, {texture, {}}}, paths, *session.view().project.document, false);
-	TEST_EXPECT(long_names.imported.empty() && long_names.diagnostics.size() == 1);
-	TEST_EXPECT(!long_names.diagnostics.empty() && long_names.diagnostics[0].code() == "import.name" &&
-	            long_names.diagnostics[0].asset == "a_long_texture_name.tga");
-	const auto video_alone =
-			import_assets({ { video, {} } }, paths, *session.view().project.document, false);
-	TEST_EXPECT(video_alone.imported.size() == 1 && fs::path(video_alone.imported[0]).filename() == "intro_cinematic.bik");
 	TEST_EXPECT(editor_test::write_text(dir.file("bad.pff"), "not an archive"));
 	preview.paths = {dir.file("bad.pff"), dir.file("missing.txt")};
 	session.handle(preview);

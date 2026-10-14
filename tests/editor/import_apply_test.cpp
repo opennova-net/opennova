@@ -293,7 +293,10 @@ static int test_apply_changed() {
 
 // The write stages every file before it publishes any: where the font goes, fonts/, is a file,
 // so its staging fails after the menu's, and the menu's staged file and the folder made for it
-// are removed: the project is as it was, the failure a finding naming the file.
+// are removed: the project is as it was, the failure a finding naming the file. The whole
+// selection is imported or none of it: a file refused before the write (a name past the
+// archive's 16 bytes, a member named outside the project, one its archive lacks, two of one
+// name) refuses the rest, nothing written; a video, copied loose, takes any name.
 static int test_apply_staging() {
 	Project project("opennova_editor_apply_staging");
 	const std::string root = project.root();
@@ -314,11 +317,32 @@ static int test_apply_staging() {
 	TEST_EXPECT(write_failed);
 	TEST_EXPECT(snapshot(root) == before && !staged_left(root) && fs::exists(root + "/menus") == menus);
 	TEST_EXPECT(!fs::exists(root + "/menus/extra.mnu"));
-	// The whole selection or none of it: a file refused before the write refuses them all.
-	TEST_EXPECT(editor_test::write_text(art + "/a_very_long_texture_name.tga", "tga"));
-	const ImportResult refused = import_assets({{art + "/extra.mnu", {}}, {art + "/a_very_long_texture_name.tga", {}}},
-	                                           ProjectPaths::for_root(root), *project.view().project.document, false);
-	TEST_EXPECT(refused.imported.empty() && has_code(refused.diagnostics, "import.name") && snapshot(root) == before);
+	// The whole selection or none of it: a file refused before the write refuses them all. The
+	// archive's 16-byte name limit binds only what the build packs: the video is not refused, the
+	// texture is, and with it the video it came with.
+	const ProjectPaths paths = ProjectPaths::for_root(root);
+	const ProjectDocument &document = *project.view().project.document;
+	TEST_EXPECT(editor_test::write_text(art + "/a_very_long_texture_name.tga", "tga") &&
+	            editor_test::write_text(art + "/intro_cinematic.bik", "bink"));
+	const ImportResult refused =
+	        import_assets({{art + "/intro_cinematic.bik", {}}, {art + "/a_very_long_texture_name.tga", {}}}, paths, document, false);
+	TEST_EXPECT(refused.imported.empty() && refused.diagnostics.size() == 1 && refused.diagnostics[0].code() == "import.name" &&
+	            refused.diagnostics[0].asset == "a_very_long_texture_name.tga" && snapshot(root) == before);
+	// A member named outside the project and one its archive lacks; one name twice (import.duplicate).
+	const std::string packed = art + "/source.pff";
+	const uint8_t data[] = {'p', 'a', 'c', 'k', 'e', 'd'};
+	const opennova::pff::PffWriteEntry entries[] = {{"note.txt", data, sizeof(data), 0, 0, 0}};
+	TEST_EXPECT(opennova::pff::pff_write_archive(packed.c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 1) ==
+	            opennova::pff::PFF_WRITE_OK);
+	const ImportResult outside = import_assets({{packed, "../escape.txt"}, {packed, "absent.txt"}}, paths, document, false);
+	TEST_EXPECT(outside.imported.empty() && outside.diagnostics.size() == 2 && outside.diagnostics[0].code() == "import.name" &&
+	            !fs::exists(project.dir.file("escape.txt")) && snapshot(root) == before);
+	const ImportResult twice = import_assets({{art + "/extra.mnu", {}}, {art + "/extra.mnu", {}}}, paths, document, false);
+	TEST_EXPECT(twice.imported.empty() && twice.diagnostics.size() == 1 && twice.diagnostics[0].code() == "import.duplicate" &&
+	            snapshot(root) == before);
+	// The video alone: imported, its name as it was.
+	const ImportResult video = import_assets({{art + "/intro_cinematic.bik", {}}}, paths, document, false);
+	TEST_EXPECT(video.imported.size() == 1 && fs::path(video.imported[0]).filename() == "intro_cinematic.bik");
 	return 0;
 }
 
