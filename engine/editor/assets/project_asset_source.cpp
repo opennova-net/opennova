@@ -63,11 +63,20 @@ void ProjectAssetSource::set_open(const std::vector<std::shared_ptr<const Docume
 	if (moved) ++generation_;
 }
 
+void ProjectAssetSource::set_base(std::shared_ptr<const FileSource> base) {
+	if (base == base_) return;
+	base_ = std::move(base);
+	++base_serial_;
+	++generation_;
+}
+
 void ProjectAssetSource::clear() {
 	root_.clear();
 	files_.clear();
 	open_.clear();
 	serialized_by_path_.clear();
+	base_.reset();
+	++base_serial_;
 	++generation_;
 }
 
@@ -103,7 +112,7 @@ const ProjectAssetSource::Serialized *ProjectAssetSource::serialized_(const Open
 
 bool ProjectAssetSource::read(const std::string &name, std::vector<uint8_t> &out) const {
 	const Entry *entry = entry_(name);
-	if (!entry) return false;
+	if (!entry) return base_ && base_->read(name, out);
 	const auto open = open_.find(entry->relative);
 	if (open != open_.end()) {
 		if (const Serialized *serialized = serialized_(open->second, entry->relative)) {
@@ -118,7 +127,10 @@ bool ProjectAssetSource::read(const std::string &name, std::vector<uint8_t> &out
 
 uint64_t ProjectAssetSource::stamp(const std::string &name) const {
 	const Entry *entry = entry_(name);
-	if (!entry) return 0;
+	if (!entry) {
+		if (!base_ || !base_->stamp(name)) return 0;
+		return io::splitmix64(io::splitmix64(base_serial_) ^ text_hash(flat_name(name))) | 1;
+	}
 	const auto open = open_.find(entry->relative);
 	if (open != open_.end()) {
 		const DocumentBase &document = *open->second.document;

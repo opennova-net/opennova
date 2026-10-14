@@ -988,6 +988,9 @@ void ImportController::refresh_install_files() {
 	// settings change that moves the base, the Open builds it stepped).
 	core_.problems().set_base_layer(view_.project.open ? build_base_layer(core_.base_game(), *view_.project.document)
 	                                                   : nullptr);
+	// And under its files: what the previews and the terrain tools read of a name the project lacks.
+	core_.problems().set_base_files(view_.project.open ? base_game_files(core_.base_game(), *view_.project.document)
+	                                                   : nullptr);
 	core_.touch(ViewConcern::Files);
 }
 

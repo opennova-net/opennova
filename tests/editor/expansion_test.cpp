@@ -20,6 +20,7 @@
 #include <base/io/strutil.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/install_view.h>
+#include <editor/assets/project_asset_source.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/code_text_keys.h>
 #include <editor/import/import_plan.h>
@@ -39,7 +40,9 @@
 #include <formats/pff/pff.h>
 #include <formats/rtxt/rtxt.h>
 
+#include "common/file_io.h"
 #include "common/test_expect.h"
+#include "common/test_paths.h"
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
 
@@ -811,6 +814,80 @@ std::vector<uint8_t> table_bytes(const std::vector<std::pair<std::string, std::v
 
 } // namespace
 
+// An expansion's mission on a terrain its base game ships (a project of the base game's export): the project's files
+// read over the base's as the game mounts them below the expansion's pair (ProjectAssetSource::set_base): the
+// terrain query samples the base's ground under the mission, a file of the project's own name is the project's, and
+// the brush's planes name the base's files as no file of the project (copy one in first), so nothing writes them. A
+// standalone project reads no base.
+static int test_base_files_under_the_project() {
+	using opennova::io::JsonValue;
+	test_temp::TempDir dir("opennova_editor_expansion_base_files");
+	const std::string exported = dir.file("game/assets/build/export");
+	std::error_code made_dir;
+	std::filesystem::create_directories(opennova::io::os_path(exported), made_dir);
+	const std::string repo = test_paths_repo_root(__FILE__);
+	const auto fixture = [&](const char *name) {
+		const std::vector<uint8_t> bytes = test_io::read_file(repo + "/fixtures/terrain/tmap/" + name);
+		return std::string(bytes.begin(), bytes.end());
+	};
+	const std::vector<uint8_t> env_bytes = test_io::read_file(repo + "/fixtures/env/synth_full.env");
+	const std::string environment(env_bytes.begin(), env_bytes.end());
+	TEST_EXPECT(write_archive(exported + "/resource.pff",
+	                          { { "Tmap.trn", fixture("Tmap.trn") }, { "Tmap.cpt", fixture("Tmap.cpt") },
+	                            { "Tmap_m.pcx", fixture("Tmap_m.pcx") }, { "synth_full.env", environment },
+	                            { "shadowed.env", "the base's" } }));
+	ProjectDocument base;
+	Diagnostic error;
+	TEST_EXPECT(create_project(dir.file("game/assets"), "Base", "jo", base, error));
+	Preferences chosen;
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences(chosen);
+	ProjectSession session(platform, preferences);
+	const SessionView &view = session.view();
+	const std::string root = dir.file("game/expansions/onx");
+	ActionOutcome outcome =
+	        editor_test::handle_to_end(session, request::new_expansion_project(root, "Night", "onx", "", true, "../../assets"));
+	TEST_EXPECT(!outcome.refused && view.project.open && view.findings.assets && view.findings.assets->base());
+	if (!view.findings.assets) return 1;
+	// The expansion's mission (the minted one, on Tmap under synth_full.env, both the base's alone).
+	TEST_EXPECT(test_io::write_text(root + "/shadowed.env", "the project's") &&
+	            test_io::write_file(root + "/missions/m.bms", test_io::read_file(repo + "/fixtures/bms/synth_logic.bms")));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::set_missions(session, true);
+	const AssetEntry *mission = view.project.scan->find("m.bms");
+	TEST_EXPECT(mission != nullptr);
+	if (!mission) return 1;
+	// The base's files read by name where the project lacks them; the project's own over the base's of its name.
+	std::vector<uint8_t> bytes;
+	TEST_EXPECT(view.findings.assets->read("Tmap.trn", bytes) && !bytes.empty() &&
+	            view.findings.assets->stamp("Tmap.trn") != 0 && view.findings.assets->path_of("Tmap.trn").empty());
+	TEST_EXPECT(view.findings.assets->read("shadowed.env", bytes) &&
+	            std::string(bytes.begin(), bytes.end()).rfind("the project's", 0) == 0 &&
+	            view.findings.assets->path_of("shadowed.env") == "shadowed.env");
+	TEST_EXPECT(!view.findings.assets->read("nowhere.trn", bytes) && view.findings.assets->stamp("nowhere.trn") == 0);
+	// The terrain query samples the base's ground under the expansion's mission.
+	session.handle(request::open_document(mission->relative_path));
+	JsonValue args = JsonValue::make_object();
+	args.set("path", opennova::io::json_string(mission->relative_path));
+	args.set("op", opennova::io::json_string("sample"));
+	args.set("x", opennova::io::json_number(-256.0));
+	args.set("y", opennova::io::json_number(256.0));
+	std::string asked;
+	const JsonValue sample = session.query("terrain", args, asked);
+	TEST_EXPECT(asked.empty() && sample.get("height") && sample.get("height")->is_number() && sample.get("ground"));
+	if (!asked.empty()) std::fprintf(stderr, "sample: %s\n", asked.c_str());
+	// The brush reads the base's terrain and writes none of it: each plane's file is the game's own here.
+	args.set("op", opennova::io::json_string("family"));
+	const JsonValue family = session.query("terrain", args, asked);
+	const JsonValue *planes = family.get("planes");
+	TEST_EXPECT(asked.empty() && planes && planes->get("heights") && planes->get("heights")->get_string("path", "x").empty() &&
+	            planes->get("heights")->get_string("refusal", "").find("copy it into the project") != std::string::npos);
+	// Closed: no base under nothing.
+	editor_test::handle_to_end(session, request::close_project());
+	TEST_EXPECT(!view.findings.assets || !view.findings.assets->base());
+	return 0;
+}
+
 // The expansion's text table, which every string lookup reads before the table it names (AssetGraph::
 // text_override) [orig: TextResource_FindEntryBySectionAndKey @ 0x75D27B, TextResource_FindEntryByKey @
 // 0x75D473]: a key of the section the lookup names, of any section for a flat lookup, found there first, even
@@ -898,6 +975,7 @@ int main() {
 	failures += test_base_project_dir();
 	failures += test_session_on_base_project();
 	failures += test_base_layer_session();
+	failures += test_base_files_under_the_project();
 	failures += test_install_findings();
 	failures += test_files_table();
 	failures += test_name_forms_no_game_file();
