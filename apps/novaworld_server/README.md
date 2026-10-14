@@ -722,11 +722,11 @@ next-map cursor unset when the list grows) and no `ONESHOT`, and a `PLAYER ... A
 is not on the list. The commands that change the server are recorded in the console with
 their sender; the reads are not.
 
-## The launcher's address
+## The switcher's address
 
 `GET /api/server-info` answers `{"novaworld_ip": "<ONNET_PUBLIC_HOST>"}` with
 `Cache-Control: no-store`: the address the gate advertises as `POSTIPADDRESS`, which
-the OpenNova Launcher ([`launcher/`](../../launcher/README.md), ADR 0054) writes into a
+the OpenNova Switcher ([`switcher/`](../../switcher/README.md), ADR 0054) writes into a
 player's hosts file for `gs.novaworld.net`. The site's domain is behind Cloudflare's
 proxy, so DNS cannot give that address. The route is public and read-only (the address
 is public anyway: the gate hands it to every client); it answers 503
