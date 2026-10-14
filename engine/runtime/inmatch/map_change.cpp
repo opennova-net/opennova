@@ -51,6 +51,14 @@ void swap_sides_or_latch(NapiNPServerCtx &ctx, HostRotation &rotation) {
 			else if (conn.assigned_team == 2)
 				conn.assigned_team = 1;
 		}
+		// A Serve Only host's own slot 0 is live there too: retail's has its hidden
+		// body, which this port does not model (D-NET-352).
+		if (ctx.host_slot.active) {
+			if (ctx.host_slot.team == 1)
+				ctx.host_slot.team = 2;
+			else if (ctx.host_slot.team == 2)
+				ctx.host_slot.team = 1;
+		}
 		std::swap(rotation.side_team[0], rotation.side_team[1]);
 		if (!rotation.setnext_latch) return;
 	}

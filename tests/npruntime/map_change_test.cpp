@@ -453,8 +453,11 @@ int main() {
 	CHECK(conn != nullptr);
 	if (conn == nullptr) return 1;
 	const uint32_t connection_id = conn->connection_id;
-	CHECK(conn->assigned_team == 1 && host.remote_entity_team() == 1);
-	CHECK(client.assigned_team() == 1);
+	// The host's own slot 0 holds team 1 and counts in the join's balance tally, so the
+	// first joiner takes team 2 (D-NET-352) [orig: Server_AssignPlayerTeam @0x4FE5BD..0x4FE5DE].
+	CHECK(host.ctx().host_slot.active && host.ctx().host_slot.team == 1);
+	CHECK(conn->assigned_team == 2 && host.remote_entity_team() == 2);
+	CHECK(client.assigned_team() == 2);
 	CHECK(client.self_handle() == conn->link.owned_entity.packed);
 
 	// One round end: the Cycle command ends the round with the 620-tick linger;
@@ -476,9 +479,11 @@ int main() {
 	CHECK(host.rotation.is_flipped && host.rotation.list.cursor == 0);
 	CHECK(host.rotation.side_team[0] == 2 && host.rotation.side_team[1] == 1);
 	CHECK(host.remotes() == 1 && host.remote()->connection_id == connection_id);
-	CHECK(host.remote()->assigned_team == 2 && host.remote_entity_team() == 2);
+	// Every live slot swaps, the host's own included.
+	CHECK(host.ctx().host_slot.team == 2);
+	CHECK(host.remote()->assigned_team == 1 && host.remote_entity_team() == 1);
 	// The 0x47's S2C 0x75 re-latched the joiner's team.
-	CHECK(client.assigned_team() == 2);
+	CHECK(client.assigned_team() == 1);
 	CHECK(client.map_file() == "MAPA.BMS");
 	CHECK(host.ctx().server_info_transfer_id == 2 && host.ctx().mission_metadata_transfer_id == 2);
 	CHECK(!client.session_lost());
@@ -489,8 +494,9 @@ int main() {
 	CHECK(host.rotation.side_team[0] == 1 && host.rotation.side_team[1] == 2);
 	CHECK(host.ctx().config.mission_file == "MAPB.BMS");
 	CHECK(host.remotes() == 1 && host.remote()->connection_id == connection_id);
-	CHECK(host.remote()->assigned_team == 1 && host.remote_entity_team() == 1);
-	CHECK(client.assigned_team() == 1);
+	CHECK(host.ctx().host_slot.team == 1);
+	CHECK(host.remote()->assigned_team == 2 && host.remote_entity_team() == 2);
+	CHECK(client.assigned_team() == 2);
 	// The 0x64 block named the next map's file [orig: @0x4324DD].
 	CHECK(client.map_file() == "MAPB.BMS");
 	CHECK(reloads == 2);
