@@ -4,7 +4,7 @@ ammoclass_max_carry CLASS_ON556 1000
 ammoclass_max_carry CLASS_ON9MM 1000
 ammoclass_max_carry CLASS_ON_FRAG 1000
 ammoclass_max_carry CLASS_ON_SMOKE 1000
-weapon "WPN_ON_AR15"
+weapon "WPN_M4AUTO"
 	clipsize 30
 	startrounds 300
 	targetyawrange 120
@@ -100,7 +100,7 @@ weapon "WPN_ON_AR15"
 	end
 end
 
-weapon "WPN_ON_PISTOL"
+weapon "WPN_colt45"
 	clipsize 15
 	startrounds 45
 	targetyawrange 120

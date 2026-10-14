@@ -1,6 +1,6 @@
 # `onpist_3` sources
 
-`onpist_3.blend` is the source of truth: the third-person pistol `WPN_ON_PISTOL` names as `gfx3` (what
+`onpist_3.blend` is the source of truth: the third-person pistol `WPN_colt45` (our WK-11, named by the sidearm id the engine's default kits name) names as `gfx3` (what
 another soldier, the chase view and the `Power Up Pistol` pickup draw) and the pickup's model. Its scene
 `Scene` is the game model: three LODs of one part (thresholds 108, 25 and 0, as the original's
 `M9_3RD`), LOD 2 the collision and bullet faces, and the user points `MFLASH01` (the muzzle), `bullet`

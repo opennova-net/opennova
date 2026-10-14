@@ -2,7 +2,7 @@
 
 powerup "PU_ONAR15"
 	respawn_time 120
-	weapon WPN_ON_AR15
+	weapon WPN_M4AUTO
 	action "pickup"
 	function powerup_pickup
 	soundset GF_ONAR15_ST
@@ -14,7 +14,7 @@ end
 
 powerup "PU_ONPIST"
 	respawn_time 120
-	weapon WPN_ON_PISTOL
+	weapon WPN_colt45
 	action "pickup"
 	function powerup_pickup
 	soundset GF_ONPIST_ST

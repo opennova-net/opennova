@@ -1,6 +1,6 @@
 # `art/on_pist`: the base game's first-person pistol
 
-`on_pist.blend` is the first-person pistol, `WPN_ON_PISTOL`'s view model: `on_pist Rig` (63 parts:
+`on_pist.blend` is the first-person pistol, the view model of `WPN_colt45` (our WK-11, named by the sidearm id the engine's default kits name): `on_pist Rig` (63 parts:
 `BN01 Weapon origin`, `on_ar15 Rig`'s 54 arm bones in the same order, then the gun's eight, `BN56 Body`,
 `BN57 Slide`, `BN58 Trigger`, `BN59 Hammer`, `BN60 Magazine`, `BN61 Cartridge` (under the magazine),
 `BN62 Safety` and `BN63 Slide_Stop`), the gun's part meshes `56 Mesh` .. `63 Mesh` on their bones, the

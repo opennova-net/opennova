@@ -1,7 +1,7 @@
 # `onar15_3` sources
 
 `onar15_3.blend` is the source of truth: the third-person AR-15-pattern carbine
-`WPN_ON_AR15` names as `gfx3` (what another soldier, the chase view and the
+`WPN_M4AUTO` (our AR-15, named by the id the engine's default kits name) names as `gfx3` (what another soldier, the chase view and the
 `Power Up AR-15` pickup draw) and the pickup's model. Its scene `Scene` is the
 game model: four LODs of one part (thresholds 160, 64, 12 and 0, as the
 original's `M4_3RD`), LOD 2 the collision and bullet faces, and the user points
