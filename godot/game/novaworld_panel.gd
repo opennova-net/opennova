@@ -793,12 +793,20 @@ static func error_message(reason: String) -> String:
 	if menutxt != null and menutxt.has_string(reason):
 		var localized := menutxt.get_string(reason)
 		if not localized.is_empty() and localized != reason:
-			return "%s\n\n(%s)" % [localized, reason]
+			return _with_tag(localized, reason)
 	# The in-match join's CV* refusals are gameerr "MP Errors" keys.
 	var mp_error := Strings.lookup_or(Strings.TABLE_GAMEERR, "MP Errors", reason, "")
 	if not mp_error.is_empty() and mp_error != reason:
-		return "%s\n\n(%s)" % [mp_error, reason]
+		return _with_tag(mp_error, reason)
 	return reason
+
+
+# The text with its tag beside it, unless the text already names the tag (the
+# stock menutxt texts end in "(Code NWECnn)").
+static func _with_tag(text: String, tag: String) -> String:
+	if text.contains(tag):
+		return text
+	return "%s\n\n(%s)" % [text, tag]
 
 
 # The NWJoin handshake resolved the host's in-match address. Hand it (with the
