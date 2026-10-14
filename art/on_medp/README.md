@@ -28,7 +28,7 @@ Hand-keyed, as the knife's (`art/on_knif/README.md`, The clips), at 30 fps.
 | `on_medp_anim_wpn_switchfrom` | `anim_wpn_switchfrom` | the holster: down out of view | 12 |
 
 - **The use is the original's.** `WPN_MEDPACK`'s fire row is `delayend auto` with its `soundsetend`:
-  the round (`medpack`, an instant kill zone of `rounds_kz_Medic`) heals as the button goes down and
+  the round (`AMMO_ON_MEDPACK`, an instant kill zone of `rounds_kz_Medic`) heals as the button goes down and
   the clip plays out before the next; the recoil after it plays the held pose.
 - **The draw is timed by its clip**, as the AR-15's (`wpn_std_idle` on `delaystart` 38, `ON:Active End`
   and `ON:Ready` on its last frame); the original draws on its held pose.

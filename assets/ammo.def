@@ -2,6 +2,7 @@
 
 ammo AT_NULL
 end
+
 ammo AMMO_ON_556
 	penetration_impact 20
 	penetration_kz 20
@@ -14,11 +15,13 @@ ammo AMMO_ON_556
 	weight_in_grains 62
 	tracerrate 3
 	velocity 854
+	ai_launch GS_ONAR15AI
+	ai_launcheffect Effect_ONAR15MF
 	max_age 3
 	recoil 8 9 11
-	kztype rounds_kz_c4
+	kztype rounds_kz_C4
 	mf_light 100
-	tracer_type 1 2
+	tracer_type stdred stdgreen
 	effects_table
 		move none none 0
 		obj Effect_ONHitObj ON_IMP_DIRT 15
@@ -44,9 +47,8 @@ ammo AMMO_ON_556
 		player Effect_ONHitBody ON_IMP_PLAYER 10
 		zip none ON_BULLET_BY 10
 	end
-	ai_launch GS_ONAR15AI
-	ai_launcheffect Effect_ONAR15MF
 end
+
 ammo AMMO_ON_9MM
 	penetration_impact 10
 	penetration_kz 10
@@ -58,11 +60,13 @@ ammo AMMO_ON_9MM
 	tumble_error 0.01
 	weight_in_grains 124
 	velocity 341
+	ai_launch GS_ONPISTAI
+	ai_launcheffect Effect_ONPistMF
 	max_age 1
 	recoil 11 17 23
-	kztype rounds_kz_c4
+	kztype rounds_kz_C4
 	mf_light 100
-	tracer_type 1 2
+	tracer_type stdred stdgreen
 	effects_table
 		move none none 0
 		obj Effect_ONHitObj ON_IMP_DIRT 15
@@ -88,8 +92,172 @@ ammo AMMO_ON_9MM
 		player Effect_ONHitBody ON_IMP_PLAYER 10
 		zip none ON_BULLET_BY 10
 	end
-	ai_launch GS_ONPISTAI
-	ai_launcheffect Effect_ONPistMF
 end
 
+ammo AMMO_ON_KNIFE
+	kz_sound ON_IMP_KNIFE_FLESH
+	min_damage 30
+	max_damage 100
+	kz_damage 200
+	kz_minradius 1
+	kz_maxradius 1.8
+	velocity 1
+	max_age 1
+	kz_pieslice 34
+	flag instantkillzone
+	kztype rounds_kz_Knife
+	effects_table
+		move none none 0
+		obj none none 15
+		dirt Effect_ONHitDirt ON_IMP_KNIFE_DIRT 15
+		grass Effect_ONHitGrass ON_IMP_KNIFE_DIRT 15
+		snow Effect_ONHitSnow ON_IMP_KNIFE_DIRT 1
+		cement Effect_ONHitStone ON_IMP_KNIFE_CEMENT 15
+		packeddirt Effect_ONHitDirt ON_IMP_KNIFE_DIRT 15
+		water Effect_ONHitWater ON_IMP_WATER 5
+		railroad Effect_ONHitMetal ON_IMP_KNIFE_METAL 15
+		mud Effect_ONHitDirt ON_IMP_KNIFE_DIRT 15
+		ice Effect_ONHitSnow ON_IMP_KNIFE_DIRT 15
+		sand Effect_ONHitSand ON_IMP_KNIFE_DIRT 15
+		quicksand Effect_ONHitSand ON_IMP_KNIFE_DIRT 15
+		stone Effect_ONHitStone ON_IMP_KNIFE_CEMENT 15
+		wood Effect_ONHitWood ON_IMP_KNIFE_WOOD 5
+		metal Effect_ONHitMetal ON_IMP_KNIFE_METAL 15
+		glass Effect_ONHitGlass ON_IMP_GLASS 5
+		cloth Effect_ONHitCloth ON_IMP_KNIFE_CLOTH 3
+		foliage Effect_ONHitFoliage ON_IMP_FOLIAGE 3
+		hmetal Effect_ONHitMetal ON_IMP_KNIFE_METAL 15
+		flesh Effect_ONHitBody ON_IMP_KNIFE_FLESH 3
+		player Effect_ONHitBody ON_IMP_KNIFE_FLESH 10
+		zip none none 10
+	end
+end
+
+ammo AMMO_ON_FRAG
+	penetration_impact 40
+	penetration_kz 40
+	kz_physics 1
+	error 1
+	kz_damage 205
+	kz_minradius 6
+	kz_maxradius 12
+	scorch_id 2
+	scar_type 2
+	frndlytrcrid 1883
+	velocity 30
+	max_age 4
+	recoil 0 0 0
+	flag useownmove
+	flag forcetracer
+	flag IgnorFoilage
+	flag Priority
+	kztype rounds_kz_C4
+	effects_table
+		move none none 0
+		obj Effect_ONFragGrnd ON_EXPLO_FRAG 80
+		dirt Effect_ONFragGrnd ON_IMP_GREN_DIRT 20
+		grass Effect_ONFragGrnd ON_IMP_GREN_DIRT 20
+		snow Effect_ONFragGrnd ON_IMP_GREN_DIRT 20
+		cement Effect_ONFragGrnd ON_IMP_GREN_STON 20
+		packeddirt Effect_ONFragGrnd ON_IMP_GREN_DIRT 20
+		water Effect_ONSmlSplash ON_IMP_WATER 20
+		railroad Effect_ONFragGrnd ON_IMP_GREN_METAL 20
+		mud Effect_ONFragGrnd ON_IMP_GREN_DIRT 20
+		ice Effect_ONFragGrnd ON_IMP_GREN_DIRT 20
+		quicksand Effect_ONFragGrnd ON_IMP_GREN_DIRT 20
+		sand Effect_ONFragGrnd ON_IMP_GREN_DIRT 20
+		stone Effect_ONFragGrnd ON_IMP_GREN_STON 20
+		wood Effect_ONFragGrnd ON_IMP_GREN_WOOD 20
+		metal Effect_ONFragGrnd ON_IMP_GREN_METAL 20
+		glass Effect_ONFragGrnd ON_IMP_GLASS 20
+		cloth Effect_ONFragGrnd ON_IMP_CLOTH 20
+		foliage Effect_ONFragGrnd ON_IMP_FOLIAGE 20
+		hmetal Effect_ONFragGrnd ON_IMP_GREN_METAL 20
+		flesh Effect_ONFragGrnd ON_IMP_FLESH 20
+		player Effect_ONFragGrnd ON_IMP_FLESH 20
+		zip none none 10
+		uwaterdeep none ON_EXPLO_FRAG 20
+		uwatershallow Effect_ONSmlSplash ON_EXPLO_FRAG 20
+		uwatersurface Effect_ONSmlSplash ON_EXPLO_FRAG 20
+	end
+end
+
+ammo AMMO_ON_SMOKE
+	error 1
+	scorch_id 2
+	scar_type 2
+	frndlytrcrid 1875
+	velocity 30
+	max_age 30
+	arm_age 5
+	recoil 0 0 0
+	flag useownmove
+	flag forcetracer
+	flag IgnorFoilage
+	flag Priority
+	flag ClipWaterFx
+	effects_table
+		move Effect_ONSmokeToss none 0
+		obj none ON_EXPLO_SMOKE 80
+		dirt none ON_IMP_GREN_DIRT 20
+		grass none ON_IMP_GREN_DIRT 20
+		snow none ON_IMP_GREN_DIRT 20
+		cement none ON_IMP_GREN_STON 20
+		packeddirt none ON_IMP_GREN_DIRT 20
+		water Effect_ONSmlSplash ON_IMP_WATER 20
+		railroad none ON_IMP_GREN_METAL 20
+		mud none ON_IMP_GREN_DIRT 20
+		ice none ON_IMP_GREN_DIRT 20
+		quicksand none ON_IMP_GREN_DIRT 20
+		sand none ON_IMP_GREN_DIRT 20
+		stone none ON_IMP_GREN_STON 20
+		wood none ON_IMP_GREN_WOOD 20
+		metal none ON_IMP_GREN_METAL 20
+		glass none ON_IMP_GLASS 20
+		cloth none ON_IMP_CLOTH 20
+		foliage none ON_IMP_FOLIAGE 20
+		hmetal none ON_IMP_GREN_METAL 20
+		flesh none ON_IMP_FLESH 20
+		player none ON_IMP_FLESH 20
+		zip none none 10
+		uwaterdeep none none 20
+		uwatershallow none none 20
+		uwatersurface none none 20
+	end
+end
+
+ammo AMMO_ON_MEDPACK
+	kz_minradius 2
+	kz_maxradius 2
+	velocity 1
+	max_age 1
+	recoil 0 0 0
+	flag instantkillzone
+	kztype rounds_kz_Medic
+	effects_table
+		move none none 0
+		obj none none 50
+		dirt none none 50
+		grass none none 50
+		snow none none 50
+		cement none none 50
+		packeddirt none none 50
+		water none none 50
+		railroad none none 50
+		mud none none 50
+		ice none none 50
+		quicksand none none 50
+		sand none none 50
+		stone none none 50
+		wood none none 50
+		metal none none 50
+		glass none none 50
+		cloth none none 50
+		foliage none none 50
+		hmetal none none 50
+		flesh none none 50
+		player none none 50
+		zip none none 50
+	end
+end
 

@@ -37,7 +37,7 @@ them, the last key's time; every clip is at 30 fps.
 
 - **The slash plays in the recoil, as the original's knife plays it.** The original's `WPN_KNIFE`
   fires on `anim_wpn_idle` with no delays and runs its `recoil` on `anim_wpn_fire` with `delaystart
-  auto`, so the round (`AMMO_KNIFE01`, an instant kill zone) lands as the button goes down and the
+  auto`, so the round (`AMMO_ON_KNIFE`, an instant kill zone) lands as the button goes down and the
   slash then plays out before the next. The table follows `M9k_1st.adm`: the slash is the
   `anim_wpn_fire` clip, 15 frames as the original's `m9k_1f`. Its weapon.def rows: fire `anim
   anim_wpn_idle`, `delaystart 0`, `delayend 0`; recoil `anim anim_wpn_fire`, `delaystart auto` (the
