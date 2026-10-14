@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Security;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using Microsoft.Win32;
 using OpenNova.Launcher.Hosts;
 
@@ -24,7 +26,10 @@ public sealed class LauncherSettings
 /// what it writes into the hosts file, so they live where only administrators can write:
 /// a standard user cannot create or change a key under HKLM\SOFTWARE, where a file under
 /// %APPDATA% (or a folder a user may have made first under %ProgramData%) would let one
-/// steer the elevated process.
+/// steer the elevated process. The key does not rely on what it inherits either: every
+/// save gives it <see cref="ProtectedKeySecurity"/> (under the non-default "object
+/// creator" owner policy an inherited CREATOR OWNER entry would hand the user's own
+/// account write access).
 /// </summary>
 public sealed class LauncherSettingsStore
 {
@@ -38,18 +43,51 @@ public sealed class LauncherSettingsStore
     private readonly string _keyPath;
 
     public LauncherSettingsStore()
-        : this(Registry.LocalMachine, DefaultKeyPath)
+        : this(Registry.LocalMachine, DefaultKeyPath, protectKey: true)
     {
     }
 
-    public LauncherSettingsStore(RegistryKey root, string keyPath)
+    /// <summary>
+    /// A store over <paramref name="root"/>\<paramref name="keyPath"/>; <paramref name="protectKey"/>
+    /// gives the key <see cref="ProtectedKeySecurity"/> on every save, which needs an
+    /// elevated process (the default store's case).
+    /// </summary>
+    public LauncherSettingsStore(RegistryKey root, string keyPath, bool protectKey = false)
     {
         _root = root ?? throw new ArgumentNullException(nameof(root));
         _keyPath = string.IsNullOrWhiteSpace(keyPath) ? throw new ArgumentException("A key path is required.", nameof(keyPath)) : keyPath;
+        ProtectsKey = protectKey;
     }
 
     /// <summary>Where the settings live, for messages.</summary>
     public string Location => _root.Name + "\\" + _keyPath;
+
+    /// <summary>Whether a save gives the key <see cref="ProtectedKeySecurity"/>.</summary>
+    public bool ProtectsKey { get; }
+
+    /// <summary>
+    /// The settings key's ACL: owned by Administrators; SYSTEM and Administrators full
+    /// control, Users read; protected, so nothing is inherited (no CREATOR OWNER).
+    /// </summary>
+    public static RegistrySecurity ProtectedKeySecurity()
+    {
+        var administrators = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+        var security = new RegistrySecurity();
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        security.SetOwner(administrators);
+        foreach (var (sid, rights) in new[]
+                 {
+                     (new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null), RegistryRights.FullControl),
+                     (administrators, RegistryRights.FullControl),
+                     (new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null), RegistryRights.ReadKey),
+                 })
+        {
+            security.AddAccessRule(new RegistryAccessRule(
+                sid, rights, InheritanceFlags.ContainerInherit, PropagationFlags.None, AccessControlType.Allow));
+        }
+
+        return security;
+    }
 
     /// <summary>The saved settings; the defaults when there are none or a value is not valid.</summary>
     public LauncherSettings Load()
@@ -81,6 +119,23 @@ public sealed class LauncherSettingsStore
     {
         ArgumentNullException.ThrowIfNull(settings);
         var normalized = Normalize(settings);
+        if (ProtectsKey)
+        {
+            // A new key is created with the ACL; one that already existed gets it again
+            // before anything is written to it.
+            var security = ProtectedKeySecurity();
+            using (_root.CreateSubKey(_keyPath, RegistryKeyPermissionCheck.ReadWriteSubTree, security))
+            {
+            }
+
+            using var guard = _root.OpenSubKey(
+                _keyPath,
+                RegistryKeyPermissionCheck.ReadWriteSubTree,
+                RegistryRights.ReadPermissions | RegistryRights.ChangePermissions | RegistryRights.TakeOwnership)
+                ?? throw new IOException($"{Location} could not be opened to set its permissions.");
+            guard.SetAccessControl(security);
+        }
+
         using var key = _root.CreateSubKey(_keyPath, writable: true);
         key.SetValue(ServiceUrlValue, normalized.ServiceUrl, RegistryValueKind.String);
         SetOrDelete(key, OpenNovaAddressValue, normalized.CachedOpenNovaAddress);

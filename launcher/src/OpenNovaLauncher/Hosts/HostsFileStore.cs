@@ -1,5 +1,4 @@
 using System.Text;
-using Microsoft.Win32;
 
 namespace OpenNova.Launcher.Hosts;
 
@@ -37,8 +36,8 @@ public sealed class HostsFileChangedException : HostsFileException
 }
 
 /// <summary>
-/// Reads and writes the hosts file the Windows resolver reads: <c>hosts</c> in the
-/// Tcpip <c>DataBasePath</c> (%SystemRoot%\System32\drivers\etc by default).
+/// Reads and writes the Windows hosts file, System32\drivers\etc\hosts
+/// (<see cref="DefaultHostsPath"/>).
 /// <list type="bullet">
 /// <item>The text is read and written as Latin-1, which maps every byte to one
 /// character and back, so lines the launcher does not own keep their exact bytes in
@@ -82,31 +81,17 @@ public sealed class HostsFileStore : IHostsFileStore
     public bool Exists => File.Exists(HostsPath);
 
     /// <summary>
-    /// The resolver's hosts file: <c>DataBasePath</c> under
-    /// HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters (an admin-only key),
-    /// else %SystemRoot%\System32\drivers\etc.
+    /// System32\drivers\etc\hosts, with System32 from <see cref="Environment.SystemDirectory"/>
+    /// (GetSystemDirectory), which reads no environment variable. The launcher runs
+    /// elevated, so nothing that names this path may come from the user's environment:
+    /// not %SystemRoot% (a user can set it in HKCU\Environment), and so not the Tcpip
+    /// <c>DataBasePath</c> either, a REG_EXPAND_SZ of <c>%SystemRoot%\...</c> that would
+    /// have to be expanded in this process. A machine that moved its hosts file through
+    /// <c>DataBasePath</c> is not supported.
     /// </summary>
     public static string DefaultHostsPath()
     {
-        var directory = Path.Combine(Environment.SystemDirectory, "drivers", "etc");
-        try
-        {
-            using var key = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters");
-            if (key?.GetValue("DataBasePath") is string configured && !string.IsNullOrWhiteSpace(configured))
-            {
-                var expanded = Environment.ExpandEnvironmentVariables(configured.Trim());
-                if (Path.IsPathFullyQualified(expanded))
-                {
-                    directory = expanded;
-                }
-            }
-        }
-        catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException)
-        {
-            // The default directory, as Windows uses without the value.
-        }
-
-        return Path.Combine(directory, "hosts");
+        return Path.Combine(Environment.SystemDirectory, "drivers", "etc", "hosts");
     }
 
     public string Read()

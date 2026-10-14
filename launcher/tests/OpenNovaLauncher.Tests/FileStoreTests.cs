@@ -1,3 +1,5 @@
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using Microsoft.Win32;
 using OpenNova.Launcher.Hosts;
@@ -157,12 +159,30 @@ public sealed class FileStoreTests : IDisposable
     }
 
     [Fact]
-    public void DefaultHostsPath_IsTheResolversHostsFile()
+    public void DefaultHostsPath_IsSystem32s_AndNoEnvironmentVariableMovesIt()
     {
-        var path = HostsFileStore.DefaultHostsPath();
+        var expected = Path.Combine(Environment.SystemDirectory, "drivers", "etc", "hosts");
+        Assert.Equal(expected, HostsFileStore.DefaultHostsPath());
 
-        Assert.True(Path.IsPathFullyQualified(path));
-        Assert.Equal("hosts", Path.GetFileName(path));
+        // A user can set SystemRoot (and windir) in HKCU\Environment; the elevated
+        // launcher's hosts path must not follow it.
+        var systemRoot = Environment.GetEnvironmentVariable("SystemRoot");
+        var windir = Environment.GetEnvironmentVariable("windir");
+        try
+        {
+            Environment.SetEnvironmentVariable("SystemRoot", _directory);
+            Environment.SetEnvironmentVariable("windir", _directory);
+
+            var path = HostsFileStore.DefaultHostsPath();
+
+            Assert.Equal(expected, path);
+            Assert.False(path.StartsWith(_directory, StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("SystemRoot", systemRoot);
+            Environment.SetEnvironmentVariable("windir", windir);
+        }
     }
 
     private sealed class NoFlush : IDnsCacheFlusher
@@ -195,7 +215,36 @@ public sealed class SettingsStoreTests : IDisposable
     [Fact]
     public void TheDefaultStore_IsAnAdminOnlyMachineKey()
     {
-        Assert.Equal(@"HKEY_LOCAL_MACHINE\SOFTWARE\OpenNova\Launcher", new LauncherSettingsStore().Location);
+        var store = new LauncherSettingsStore();
+
+        Assert.Equal(@"HKEY_LOCAL_MACHINE\SOFTWARE\OpenNova\Launcher", store.Location);
+        Assert.True(store.ProtectsKey);
+        Assert.False(new LauncherSettingsStore(Registry.CurrentUser, _keyPath).ProtectsKey);
+    }
+
+    [Fact]
+    public void TheKeysAcl_IsProtected_AdminOwned_AndOnlyReadableByUsers()
+    {
+        var security = LauncherSettingsStore.ProtectedKeySecurity();
+        var administrators = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+        var system = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+        var users = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
+
+        Assert.True(security.AreAccessRulesProtected);
+        Assert.Equal(administrators, security.GetOwner(typeof(SecurityIdentifier)));
+        var rules = security.GetAccessRules(includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier))
+            .Cast<RegistryAccessRule>()
+            .ToDictionary(rule => (SecurityIdentifier)rule.IdentityReference, rule => rule);
+
+        Assert.Equal(new[] { administrators, system, users }.OrderBy(s => s.Value), rules.Keys.OrderBy(s => s.Value));
+        Assert.All(rules.Values, rule => Assert.Equal(AccessControlType.Allow, rule.AccessControlType));
+        Assert.All(rules.Values, rule => Assert.False(rule.IsInherited));
+        Assert.Equal(RegistryRights.FullControl, rules[system].RegistryRights);
+        Assert.Equal(RegistryRights.FullControl, rules[administrators].RegistryRights);
+        Assert.Equal(RegistryRights.ReadKey, rules[users].RegistryRights);
+        Assert.Equal(0, (int)(rules[users].RegistryRights & (RegistryRights.SetValue | RegistryRights.CreateSubKey |
+                                                              RegistryRights.ChangePermissions | RegistryRights.TakeOwnership |
+                                                              RegistryRights.Delete)));
     }
 
     [Fact]

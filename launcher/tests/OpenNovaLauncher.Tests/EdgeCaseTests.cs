@@ -80,6 +80,42 @@ public sealed class EdgeCaseTests : IDisposable
     }
 
     [Fact]
+    public void BeginWithoutEnd_AUsersOwnMappingBelowIt_IsForeignAndAsked()
+    {
+        // The review's U1: the user's own line for the name, right below a block that lost
+        // its end marker, must not be taken into the block and dropped unasked.
+        var text = "127.0.0.1 localhost\r\n" + HostsDocument.BeginMarker + "\r\n# mode: opennova\r\n" +
+                   "203.0.113.10 gs.novaworld.net\r\n" +
+                   "192.168.1.50 gs.novaworld.net\r\n";
+        var store = new MemStore(text);
+        var switcher = new HostsSwitcher(store, new NoFlush());
+
+        var state = switcher.ReadState();
+        Assert.Equal(NovaWorldMode.Unrecognized, state.Mode);
+        Assert.Equal(new[] { "192.168.1.50 gs.novaworld.net" }, state.ForeignLines);
+
+        // A switch without the user's yes keeps it; with it, the line goes.
+        switcher.Switch(NovaWorldMode.NovaLogic, null, removeForeign: false);
+        Assert.Equal("127.0.0.1 localhost\r\n192.168.1.50 gs.novaworld.net\r\n", store.Text);
+        switcher.Switch(NovaWorldMode.NovaLogic, null, removeForeign: true);
+        Assert.Equal("127.0.0.1 localhost\r\n", store.Text);
+    }
+
+    [Theory]
+    [InlineData("\r\n192.168.1.50 gs.novaworld.net\r\n", "\r\n192.168.1.50 gs.novaworld.net\r\n")]   // a blank line ends it
+    [InlineData("# mode: custom\r\n192.168.1.50 gs.novaworld.net\r\n", "# mode: custom\r\n192.168.1.50 gs.novaworld.net\r\n")]
+    public void BeginWithoutEnd_EndsAtABlankLineOrASecondModeLine(string after, string kept)
+    {
+        var text = HostsDocument.BeginMarker + "\r\n# mode: opennova\r\n203.0.113.10 gs.novaworld.net\r\n" + after;
+        var document = HostsDocument.Parse(text);
+
+        Assert.False(document.ManagedBlockIntact);
+        Assert.Equal(new[] { new HostsRedirect("gs.novaworld.net", "203.0.113.10") }, document.ManagedRedirects);
+        Assert.Equal(kept, document.WithoutManagedBlock().Render());
+        Assert.Equal(new[] { "192.168.1.50 gs.novaworld.net" }, document.ForeignLinesFor(new[] { "gs.novaworld.net" }));
+    }
+
+    [Fact]
     public void AUserLineInsideTheBlock_IsKeptBySwitches()
     {
         var text = HostsDocument.BeginMarker + "\r\n# mode: opennova\r\n203.0.113.10 gs.novaworld.net\r\n10.0.0.5 nas.lan\r\n" +

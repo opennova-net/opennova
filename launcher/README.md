@@ -44,10 +44,11 @@ must print the same hash. A PR build's hashes are in its CI log (the package ste
 
 ## What it changes
 
-The launcher owns one block in the hosts file the Windows resolver reads
-(`%SystemRoot%\System32\drivers\etc\hosts`, or the folder in the Tcpip `DataBasePath`
-setting). The first switch adds it at the end of the file; later switches replace it
-where it is:
+The launcher owns one block in the Windows hosts file,
+`C:\Windows\System32\drivers\etc\hosts` (the System32 folder Windows reports, whatever
+`%SystemRoot%` says; a hosts file moved elsewhere through the Tcpip `DataBasePath` setting
+is not supported). The first switch adds the block at the end of the file; later switches
+replace it where it is:
 
 ```text
 # >>> OpenNova Launcher managed block - do not edit between markers >>>
@@ -63,8 +64,10 @@ where it is:
   removing the block gives back the file as it was, a missing final newline included.
 - The block holds only the launcher's own lines. A line you add between the markers is
   kept, moved after the block, at the next switch. A block whose end marker was deleted
-  ends at its first line that is not the launcher's, and everything after it stays. Until
-  the next switch the menu shows either as a hand-edited block.
+  ends at its first line that is not the launcher's, its first blank line, or a second
+  line for `gs.novaworld.net`, and everything after it stays (such a second line is then
+  an entry the launcher did not write, below). Until the next switch the menu shows
+  either as a hand-edited block.
 - Each change goes to a temp file, flushed to disk, that then replaces the hosts file in
   one step. The file it replaced is kept as `hosts.opennova-launcher.bak`, and the file
   as it was before the launcher's first change as `hosts.opennova-launcher.orig`, which
@@ -116,7 +119,9 @@ link-local address: from any other, the launcher refuses one.
 
 The settings (the service URL, the saved OpenNova address and the last custom address)
 live in the registry under `HKEY_LOCAL_MACHINE\SOFTWARE\OpenNova\Launcher`, which only
-administrators can change, since they decide what an elevated program writes.
+administrators can change, since they decide what an elevated program writes. Each save
+gives the key its own permissions (owned by Administrators; SYSTEM and Administrators full
+control, Users read; nothing inherited) rather than relying on what it inherits.
 
 ## Administrator rights
 

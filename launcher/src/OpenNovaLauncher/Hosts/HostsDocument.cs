@@ -17,7 +17,8 @@ namespace OpenNova.Launcher.Hosts;
 /// <c>&lt;IPv4&gt; &lt;managed hostname&gt;</c>, which it rewrites as a unit. Every other
 /// line keeps its text and line ending: a line found inside the markers is kept,
 /// after the block, and a block whose end marker is gone ends at its first line that
-/// is not the launcher's. Either marks the block not intact. A file that ends without
+/// is not the launcher's, its first blank line, or a second line for a name it already
+/// holds. Either marks the block not intact. A file that ends without
 /// a newline still does after the block is added or removed, and adding then removing
 /// the block gives back the original text.
 /// </para>
@@ -125,10 +126,24 @@ public sealed class HostsDocument
             blockIndex = outside.Count;
         }
 
+        var blockNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (var i = 0; i < lines.Count; i++)
         {
             var line = lines[i];
             var trimmed = line.Text.Trim();
+            if (inBlock && i > lastEnd && EndsUnterminatedBlock(trimmed, mode is not null, blockNames, lookup))
+            {
+                // No end marker follows, so where the block stops is a guess; it stops
+                // early rather than take a line the launcher would not have written there:
+                // its first blank line, a second mode line, or a second line for a name it
+                // already holds (a user's own mapping below a damaged block, which then
+                // stays outside, a foreign line the user is asked about).
+                intact = false;
+                inBlock = false;
+                outside.Add(line);
+                continue;
+            }
+
             if (inBlock)
             {
                 if (trimmed == EndMarker)
@@ -157,6 +172,7 @@ public sealed class HostsDocument
                 else if (TryParseOwnRedirect(trimmed, lookup, out var redirect))
                 {
                     managed.Add(redirect);
+                    blockNames.Add(redirect.Hostname);
                 }
                 else
                 {
@@ -372,6 +388,22 @@ public sealed class HostsDocument
         var crlf = lines.Count(line => line.Ending == "\r\n");
         var lf = lines.Count(line => line.Ending == "\n");
         return lf > crlf ? "\n" : "\r\n";
+    }
+
+    // Inside a block with no end marker after it: whether this line ends the block before it.
+    private static bool EndsUnterminatedBlock(string trimmedLine, bool hasMode, HashSet<string> blockNames, HashSet<string> managedHostnames)
+    {
+        if (trimmedLine.Length == 0)
+        {
+            return true;
+        }
+
+        if (trimmedLine.StartsWith(ModePrefix, StringComparison.Ordinal))
+        {
+            return hasMode;
+        }
+
+        return TryParseOwnRedirect(trimmedLine, managedHostnames, out var redirect) && blockNames.Contains(redirect.Hostname);
     }
 
     // Exactly what the launcher writes: "<dotted quad> <managed name>", nothing else.
