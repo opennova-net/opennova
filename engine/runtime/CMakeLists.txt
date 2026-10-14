@@ -534,10 +534,12 @@ target_compile_features(opennova_runtime PUBLIC cxx_std_17)
 if(OPENNOVA_IMGUI)
     target_link_libraries(opennova_runtime PRIVATE opennova_imgui)
     # The pass owns the overlay registry and draws its layers, so the canvas
-    # builds with it (the editor-only release flavour has no dev-tool windows).
+    # builds with it, as does the tool kit both products' windows draw with
+    # (the editor-only release flavour has no dev-tool windows).
     target_sources(opennova_runtime PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/imgui_pass.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/overlay_canvas.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/ui_kit.cpp
     )
     target_compile_definitions(opennova_runtime PUBLIC OPENNOVA_IMGUI=1)
 else()
