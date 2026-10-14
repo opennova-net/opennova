@@ -142,4 +142,10 @@ static long test_paths_pid(void) {
 inline std::string test_paths_unique(const char *stem, const char *ext = "") {
     return std::string(stem) + "_" + std::to_string(test_paths_pid()) + ext;
 }
+
+// The committed fixture at `rel` under the repo's fixtures/ ("terrain/tmap/Tmap.trn"), the root
+// found from this header's own place in the tree.
+inline std::string test_paths_fixture(const std::string &rel) {
+	return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/" + rel;
+}
 #endif

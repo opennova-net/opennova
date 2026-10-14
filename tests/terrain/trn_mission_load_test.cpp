@@ -34,18 +34,10 @@ using opennova::TrnConfig;
 using opennova::TrnLaterLine;
 using opennova::TrnLaterTexts;
 
-std::string fixture(const std::string &relative) {
-	return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/" + relative;
-}
-
 std::string text_of(const std::vector<uint8_t> &bytes) { return std::string(bytes.begin(), bytes.end()); }
 
 // CR LF lines, as the game's line reader cuts a file.
-std::string crlf(const char *text) {
-	std::string out;
-	for (const char *c = text; *c; ++c) out += *c == '\n' ? std::string("\r\n") : std::string(1, *c);
-	return out;
-}
+using test_io::crlf;
 
 std::string lower(std::string s) {
 	std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return char(std::tolower(c)); });
@@ -74,7 +66,8 @@ private:
 };
 
 int run() {
-	const std::string trn = text_of(test_io::read_file(fixture("terrain/tmap/Tmap.trn")));
+	const std::string trn =
+			text_of(test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.trn")));
 	TEST_EXPECT(!trn.empty());
 	std::string error;
 
@@ -154,7 +147,7 @@ int run() {
 	// By name: overcast.def by its own, the .env by the mission's; a mission that names none reads no .env.
 	MemoryFiles files;
 	files.put("Tmap.trn", trn);
-	files.put("Tmap.cpt", test_io::read_file(fixture("terrain/tmap/Tmap.cpt")));
+	files.put("Tmap.cpt", test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.cpt")));
 	files.put("t18.env", environment);
 	const opennova::TrnTextReader read = [&files](const std::string &name, std::string &text) {
 		std::vector<uint8_t> bytes;
@@ -221,7 +214,8 @@ int run_key_lines() {
 	                            "match 1 2 3\nend\npolytrn_colormap \"map;x.tga\"\n"));
 	TEST_EXPECT(opennova::read_trn_key_lines(written) == expected);
 	// The terrain a mission loads under either is the same.
-	const std::string trn = text_of(test_io::read_file(fixture("terrain/tmap/Tmap.trn")));
+	const std::string trn =
+			text_of(test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.trn")));
 	TrnLaterTexts later;
 	TrnConfig original, again;
 	later.environment = &text;

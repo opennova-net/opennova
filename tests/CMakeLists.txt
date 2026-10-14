@@ -4847,6 +4847,7 @@ add_test(NAME npruntime_joiner_identity COMMAND npruntime_joiner_identity_test)
 
 add_executable(npruntime_client_runtime_test npruntime/client_runtime_test.cpp)
 target_link_libraries(npruntime_client_runtime_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_client_runtime_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_client_runtime COMMAND npruntime_client_runtime_test)
 
 add_executable(npruntime_client_message_dispatch_test npruntime/client_message_dispatch_test.cpp)

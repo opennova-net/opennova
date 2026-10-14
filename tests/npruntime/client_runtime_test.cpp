@@ -35,6 +35,7 @@
 #include <runtime/inmatch/role_feeds.h>
 #include <runtime/inmatch/server_tick.h>
 
+#include "common/file_io.h"
 #include "host_test_setup.h"
 #include "conn_fixture.h"
 #include <runtime/inmatch/server_message_dispatch.h>
@@ -3950,14 +3951,7 @@ bool run_host_pump_hook_observes_remote_before_first_tick() {
 //  reset @0x501d79), NapiNPServerMsg_0x03D @0x500EC0, NapiNPServerMsg_ValidateTimeSync @0x502210]
 // CR LF line ends, as charattr.def is stored: the ConfigFile reader ends a line at CR LF
 // and nowhere else (formats/configfile/config_file.h).
-std::string crlf(std::string_view text) {
-	std::string out;
-	for (char c : text) {
-		if (c == '\n') out += '\r';
-		out += c;
-	}
-	return out;
-}
+using test_io::crlf;
 
 bool build_retail_class8_charattr_table(inmatch::CharAttrTable &table) {
 	// Sections 1..7 only need to exist: CharAttr_LoadFromDef stops at the

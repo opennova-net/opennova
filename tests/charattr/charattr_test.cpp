@@ -22,6 +22,7 @@
 #include <formats/charattr/charattr.h>
 #include <formats/configfile/config_file.h>
 
+#include "common/file_io.h"
 #include "common/retail_paths.h"
 
 using namespace opennova;
@@ -39,14 +40,7 @@ int failures = 0;
 	} while (0)
 
 // CR LF line ends, as charattr.def is stored: the ConfigFile reader ends a line there alone.
-std::string crlf(const std::string &text) {
-	std::string out;
-	for (char c : text) {
-		if (c == '\n') out += '\r';
-		out += c;
-	}
-	return out;
-}
+using test_io::crlf;
 
 bool read(const std::string &text, charattr::Table &table, charattr::Reading *reading = nullptr) {
 	return charattr::read_table(reinterpret_cast<const uint8_t *>(text.data()), text.size(), table, reading);

@@ -14,6 +14,7 @@
 #include <system_error>
 #include <vector>
 
+#include "common/temp_dir.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "pff/pff_test_writer.h"
@@ -47,21 +48,6 @@ bool write_pff(const std::string &scratch, const std::string &utf8_path, const c
 	return !bytes.empty() && write_bytes(utf8_path, bytes);
 }
 
-// Removes a tree level by level through io::os_path, so each long descendant gets its own
-// \\?\ prefix (std::filesystem::remove_all from a short root walks into the long paths
-// without one, and fails there on Windows).
-void remove_tree(const std::string &utf8) {
-	std::error_code ec;
-	const fs::path path = io::os_path(utf8);
-	if (fs::is_directory(path, ec)) {
-		std::vector<std::string> children;
-		for (fs::directory_iterator it(path, ec), end; !ec && it != end; it.increment(ec))
-			children.push_back(utf8 + "/" + io::utf8_path(it->path().filename()));
-		for (const std::string &child : children) remove_tree(child);
-	}
-	fs::remove(path, ec);
-}
-
 std::string read_vfs(const opennova::Vfs &vfs, const std::string &name,
                      opennova::VfsLookupPolicy policy = opennova::VfsLookupPolicy::SessionDefault) {
 	std::vector<uint8_t> out;
@@ -80,7 +66,7 @@ int main() {
 	fs::create_directories(scratch, ec);
 	// The base as UTF-8: the temp directory itself may hold a name outside the code page.
 	const std::string base = io::utf8_generic_path(temp) + "/" + test_paths_unique("opennova_vfs_long_path");
-	remove_tree(base);
+	test_temp::remove_tree(base);
 	TEST_EXPECT(!fs::exists(io::os_path(base), ec));
 
 	std::string root = base + "/" + kJose + "/" + kModel;
@@ -173,7 +159,7 @@ int main() {
 	}
 #endif
 
-	remove_tree(base);
+	test_temp::remove_tree(base);
 	TEST_EXPECT(!fs::exists(io::os_path(base), ec));
 	fs::remove_all(scratch, ec);
 	std::printf("OK: a %zu-byte UTF-8 install root mounts and reads\n", root.size());

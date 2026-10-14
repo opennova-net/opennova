@@ -3,7 +3,8 @@
 // rename the system refuses while another holds the file tried again a bounded few times, several
 // files written as one and put back when one is refused, a file made only where none stands, a
 // last write set to now, mkdir -p and a hard link; every one through a UTF-8 path outside the
-// ANSI code page and deeper than MAX_PATH. And base/io/os_path.h's path_within.
+// ANSI code page and deeper than MAX_PATH. And base/io/os_path.h's path_within, and the tests'
+// own file helpers (tests/common's temp_dir.h and file_io.h) over such a path.
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -17,6 +18,7 @@
 #include <base/io/file_time.h>
 #include <base/io/os_path.h>
 
+#include "common/file_io.h"
 #include "common/temp_dir.h"
 #include "common/test_expect.h"
 
@@ -28,21 +30,6 @@ namespace {
 bool exists(const std::string &utf8) {
 	std::error_code ec;
 	return fs::exists(io::os_path(utf8), ec);
-}
-
-// Removes a tree level by level through io::os_path, so each long descendant gets its own
-// \\?\ prefix (std::filesystem::remove_all from a short root walks into the long paths
-// without one, and fails there on Windows).
-void remove_tree(const std::string &utf8) {
-	std::error_code ec;
-	const fs::path path = io::os_path(utf8);
-	if (fs::is_directory(path, ec)) {
-		std::vector<std::string> children;
-		for (fs::directory_iterator it(path, ec), end; !ec && it != end; it.increment(ec))
-			children.push_back(utf8 + "/" + io::utf8_path(it->path().filename()));
-		for (const std::string &child : children) remove_tree(child);
-	}
-	fs::remove(path, ec);
 }
 
 uint64_t size_of(const std::string &utf8) {
@@ -207,8 +194,37 @@ static int test_utf8_path_past_max_path() {
 	TEST_EXPECT(f != nullptr && std::fclose(f) == 0 && exists(copy));
 	const std::string linked = deep + "/linked.txt";
 	TEST_EXPECT(io::link_file(path, linked, error) && io::read_file_text(linked, text, error) && text == "deepest");
-	remove_tree(dir.file("Jos\xC3\xA9"));
+	test_temp::remove_tree(dir.file("Jos\xC3\xA9"));
 	TEST_EXPECT(!exists(path) && !exists(dir.file("Jos\xC3\xA9")));
+	return 0;
+}
+
+// tests/common's own helpers over the same kind of path: test_io's write_file makes the folders and
+// its reads take the UTF-8 path; a TempDir clears a tree past MAX_PATH left under its name (a run
+// that died before its destructor) at construction, and its own at destruction; crlf and staged
+// give a retail text file its CR LF lines.
+static int test_common_helpers() {
+	std::string deep;
+	{
+		test_temp::TempDir dir("opennova_file_io_common");
+		deep = dir.file("Jos\xC3\xA9");
+		while (deep.size() < 400)
+			deep += "/\xE3\x83\xA2_folder_of_some_length";
+		const std::string path = deep + "/\xE3\x83\xA2.bin";
+		TEST_EXPECT(io::os_path(path).native().size() > 260);
+		TEST_EXPECT(test_io::write_file(path, { 1, 2, 3 }) &&
+				test_io::read_file(path) == std::vector<uint8_t>({ 1, 2, 3 }));
+		TEST_EXPECT(test_io::write_text(deep + "/a.def", "[A]\nB = 1") &&
+				test_io::read_file_text(deep + "/a.def") == "[A]\r\nB = 1\r\n");
+		test_temp::TempDir again("opennova_file_io_common");
+		TEST_EXPECT(again.root() == dir.root() && !exists(path) &&
+				fs::is_directory(io::os_path(again.root())));
+		TEST_EXPECT(test_io::write_file(path, { 4 }) && exists(path));
+	}
+	TEST_EXPECT(!exists(deep));
+	TEST_EXPECT(test_io::crlf("a\nb\r\nc") == "a\r\nb\r\nc\r\n" && test_io::crlf("") == "");
+	TEST_EXPECT(
+			test_io::staged("X.TRN", "a\n") == "a\r\n" && test_io::staged("x.txt", "a\n") == "a\n");
 	return 0;
 }
 
@@ -237,6 +253,7 @@ int main() {
 	failures += test_write_files_together();
 	failures += test_create_date_mkdir_link();
 	failures += test_utf8_path_past_max_path();
+	failures += test_common_helpers();
 	failures += test_path_within();
 	if (failures == 0) std::printf("file_io: all tests passed\n");
 	return failures == 0 ? 0 : 1;
