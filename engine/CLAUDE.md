@@ -14,11 +14,12 @@
     anim, audio, particle, renderer, controls, terrain, terrain_query,
     environment, hud, menu, assets, and devtools (the Dear ImGui pass, ADR
     0039: infrastructure like io/vfs, not a port, so it sits in the citation
-    allowlist; the frame-stats board builds in every flavour, while Dear ImGui,
-    the pass and the game's F3 windows build only with `OPENNOVA_DEVTOOLS` — off for
-    the release GDExtension flavour and the web build; ImGui headers never leave
-    the group, the shell hands the context over as plain pointers via
-    `devtools/imgui_abi.h`).
+    allowlist; the frame-stats board builds in every flavour; Dear ImGui, the pass
+    and the tool kit both products' windows draw with (`devtools/ui_kit.h`) build with
+    `OPENNOVA_IMGUI` (either product), the game's F3 windows only with
+    `OPENNOVA_DEVTOOLS` — off for the release GDExtension flavour and the web build;
+    ImGui headers stay in the group and `editor/ui`, the shell hands the context over
+    as plain pointers via `devtools/imgui_abi.h`).
   - `net/` — the retail WIRE (ADRs 0009–0012, 0019; ADR 0043 d4: net means
     wire): novacrypto, napi, npwire (the in-game codec, the NWU session
     framing, capture decode, the LAN discovery codec, the datagram-socket

@@ -16,8 +16,8 @@
 // with the mouse where a user presses (the filters, the grouping and folding, the fixes and
 // what asks before it acts, a confirmation following its project and its findings, nothing
 // past its cell in a narrow dock, Only fixable, a thousand findings clipped, flat and grouped;
-// its rules are its model's, S13 V1: tests/editor/problems_list_test.cpp) and the pieces it
-// draws with (ui_kit). S12 D3: the
+// its rules are its model's, S13 V1: tests/editor/problems_list_test.cpp; the tool kit it draws
+// with is tests/devtools/ui_kit_test.cpp's). S12 D3: the
 // Inspector's Go to (a menu of the places a font through a style variable leads) and its
 // clickable "Referenced by" rows. S13 V1: a window a list's part holds is not copyable from the
 // tree (the one clipboard rule, tests/editor/mnu_clipboard_test.cpp). ADR 0046 S14: the Inspector's
@@ -1442,65 +1442,6 @@ void test_preview_several_windows_ui() {
 
 // --- S11c: the Problems window ------------------------------------------------------------
 
-// The row that wraps whole controls and the text cut to a width: in a window 220 wide, six
-// buttons wrap onto more lines and none runs past its edge; each control is as wide as its
-// measure says; a text is cut with "...", its first line only, and to what fits of it when
-// even the "..." does not; a fitted button stays within its width.
-void test_ui_kit() {
-	NullBackend backend;
-	ImGui::NewFrame();
-	// A path cut in its middle, its start and its end kept (the end tells two folders apart).
-	{
-		const std::string path = "C:/Users/someone/Documents/My Mods/Builds/For Players";
-		const float narrow = ImGui::CalcTextSize("C:/Users/some...For Players").x;
-		const std::string cut = ui_kit::fit_middle(path, narrow);
-		CHECK(cut.size() < path.size() && cut.find("...") != std::string::npos && cut.rfind("C:/", 0) == 0 &&
-		              cut.size() >= 7 && cut.compare(cut.size() - 7, 7, "Players") == 0 &&
-		              ImGui::CalcTextSize(cut.c_str()).x <= narrow + 0.5f,
-		      "a path cut in its middle");
-		CHECK(ui_kit::fit_middle(path, 10000.0f) == path, "a path that fits is whole");
-	}
-	ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
-	ImGui::SetNextWindowSize(ImVec2(220.0f, 400.0f));
-	ImGui::Begin("kit");
-	const float right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
-	ui_kit::WrapRow row;
-	float widest = 0.0f;
-	std::vector<float> tops;
-	for (int i = 0; i < 6; ++i) {
-		const std::string label = "Button " + std::to_string(i);
-		row.next(ui_kit::button_width(label.c_str()));
-		ImGui::Button(label.c_str());
-		CHECK(std::fabs(ImGui::GetItemRectSize().x - ui_kit::button_width(label.c_str())) < 0.5f, "a button is as wide as measured");
-		widest = std::max(widest, ImGui::GetItemRectMax().x);
-		tops.push_back(ImGui::GetItemRectMin().y);
-	}
-	CHECK(widest <= right, "no button runs past the window's edge");
-	CHECK(tops[1] == tops[0] && tops.back() > tops.front(), "whole buttons wrap onto the next line");
-	bool flag = false;
-	ImGui::Checkbox("Only fixable", &flag);
-	CHECK(std::fabs(ImGui::GetItemRectSize().x - ui_kit::checkbox_width("Only fixable")) < 0.5f, "a check box's measure");
-	ImGui::SetNextItemWidth(100.0f);
-	if (ImGui::BeginCombo("Scope", "Project")) ImGui::EndCombo();
-	CHECK(std::fabs(ImGui::GetItemRectSize().x - ui_kit::field_width(100.0f, "Scope")) < 0.5f, "a field and its label");
-	const std::string text = "A finding whose message runs much longer than the cell it is drawn in.";
-	const std::string cut = ui_kit::fit(text, 100.0f);
-	CHECK(cut.size() > 3 && cut.compare(cut.size() - 3, 3, "...") == 0 && ImGui::CalcTextSize(cut.c_str()).x <= 100.0f &&
-	              text.compare(0, cut.size() - 3, cut, 0, cut.size() - 3) == 0,
-	      "cut to the width, the rest an ellipsis");
-	CHECK(ui_kit::fit("Short.", 100.0f) == "Short.", "a text that fits stays whole");
-	CHECK(ui_kit::fit("One line.\nAnother.", 200.0f) == "One line....", "the first line only");
-	const float dots = ImGui::CalcTextSize("...").x;
-	const std::string narrow = ui_kit::fit(text, dots - 1.0f);
-	CHECK(narrow.find("...") == std::string::npos && ImGui::CalcTextSize(narrow.c_str()).x <= dots - 1.0f &&
-	              ui_kit::fit(text, 0.0f).empty(),
-	      "narrower than the ellipsis: what fits of the text alone");
-	ui_kit::fitted_button(text, "long", 90.0f);
-	CHECK(ImGui::GetItemRectSize().x <= 90.0f, "a fitted button stays within its width");
-	ImGui::End();
-	ImGui::Render();
-}
-
 RequirementRow missing_row(const char *role, const char *name, AssetKind kind, bool required = true) {
 	RequirementRow row;
 	row.role = role;
@@ -2814,7 +2755,6 @@ void test_output_folded() {
 }
 
 void run_problems_tests() {
-	test_ui_kit();
 	test_output_folded();
 	test_problems_window_ui();
 	test_problems_confirmation_follows();
