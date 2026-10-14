@@ -122,8 +122,8 @@ public:
 	//  each run, the SetOrCreates @0x4fe911..0x4ff3ff]
 	using ColumnSource = std::function<bool(HostRegistration &)>;
 	void set_column_source(ColumnSource source) { column_source_ = std::move(source); }
-	// Every listing column at once (a mirrored server's new map, name, settings): the
-	// registration's own keys stay (AppId, HostKey, LobbyName, the PCIDKey ring, the
+	// Every listing column at once (opennova-serve's listing source, each pass its match
+	// changed: Lister::refresh_listing): the registration's own keys stay (AppId, HostKey, LobbyName, the PCIDKey ring, the
 	// ReconnectCounter) and the changed columns ride the next refresh as its changed vars.
 	void set_columns(const HostRegistration &columns);
 	// The gametext strings the Host list's STRNOVA / TimeOfDay tokens resolve to.
