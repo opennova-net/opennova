@@ -34,33 +34,27 @@ std::string texture_load_key(const std::string &name, uint32_t flags) {
 
 // The JUSTIFY and VJUSTIFY of a list's ITEMS block or of one of its ITEMs over the layout so far
 // [orig: CListWnd_ParseXMLDefinition @ 0x6457ef..0x645907 (ITEMS), @ 0x6459b2..0x645b62 (an
-// ITEM)]: JUSTIFY LEFT 0 / CENTER 1 / RIGHT 2, another token read by wcstol as the x offset, the
-// justification kept; VJUSTIFY TOP 0 / CENTER 0x10 / BOTTOM 0x20, another the y offset. An empty
-// value is the reader's to leave out (docs/mnu/menu-re.md "Crash and hang cases").
-void list_row_justify(const std::string &justify, const std::string &vjustify, int *io_justify,
-		int *io_vjustify, int *io_x, int *io_y) {
-	if (!justify.empty()) {
-		if (iequals(justify, "LEFT")) {
-			*io_justify = 0;
-		} else if (iequals(justify, "CENTER")) {
-			*io_justify = 1;
-		} else if (iequals(justify, "RIGHT")) {
-			*io_justify = 2;
-		} else {
-			*io_x = static_cast<int>(std::strtol(justify.c_str(), nullptr, 10));
-		}
+// ITEM)]: JUSTIFY LEFT 0 / CENTER 1 / RIGHT 2, and apart another token read by wcstol as the x
+// offset; VJUSTIFY TOP 0 / CENTER 0x10 / BOTTOM 0x20, and the y offset. An empty value is the
+// reader's to leave out (docs/mnu/menu-re.md "Crash and hang cases").
+template <typename Row>
+void list_row_justify(const Row &row, int *io_justify, int *io_vjustify, int *io_x, int *io_y) {
+	if (iequals(row.justify, "LEFT")) {
+		*io_justify = 0;
+	} else if (iequals(row.justify, "CENTER")) {
+		*io_justify = 1;
+	} else if (iequals(row.justify, "RIGHT")) {
+		*io_justify = 2;
 	}
-	if (!vjustify.empty()) {
-		if (iequals(vjustify, "TOP")) {
-			*io_vjustify = 0;
-		} else if (iequals(vjustify, "CENTER")) {
-			*io_vjustify = 0x10;
-		} else if (iequals(vjustify, "BOTTOM")) {
-			*io_vjustify = 0x20;
-		} else {
-			*io_y = static_cast<int>(std::strtol(vjustify.c_str(), nullptr, 10));
-		}
+	if (!row.justify_offset.empty()) *io_x = static_cast<int>(std::strtol(row.justify_offset.c_str(), nullptr, 10));
+	if (iequals(row.vjustify, "TOP")) {
+		*io_vjustify = 0;
+	} else if (iequals(row.vjustify, "CENTER")) {
+		*io_vjustify = 0x10;
+	} else if (iequals(row.vjustify, "BOTTOM")) {
+		*io_vjustify = 0x20;
 	}
+	if (!row.vjustify_offset.empty()) *io_y = static_cast<int>(std::strtol(row.vjustify_offset.c_str(), nullptr, 10));
 }
 
 } // namespace
@@ -480,8 +474,7 @@ void MenuFrameCompiler::resolve_node_(int index) {
 	// (WidgetNode::RowLayout).
 	auto row_layout = [](const mnu::Items &items) {
 		WidgetNode::RowLayout layout;
-		list_row_justify(items.justify, items.vjustify, &layout.justify, &layout.vjustify,
-				&layout.x, &layout.y);
+		list_row_justify(items, &layout.justify, &layout.vjustify, &layout.x, &layout.y);
 		return layout;
 	};
 	node.row_layout = row_layout(w.items);
@@ -499,8 +492,8 @@ void MenuFrameCompiler::resolve_node_(int index) {
 		for (const mnu::Item &item : rows) {
 			WidgetNode::ItemVisual visual;
 			visual.layout = list_layout;
-			list_row_justify(item.justify, item.vjustify, &visual.layout.justify,
-					&visual.layout.vjustify, &visual.layout.x, &visual.layout.y);
+			list_row_justify(item, &visual.layout.justify, &visual.layout.vjustify, &visual.layout.x,
+					&visual.layout.y);
 			if (spin && iequals(item.type, "image")) {
 				visual.kind = WidgetNode::ItemVisual::kImage;
 				visual.texture = intern_texture(item.text);

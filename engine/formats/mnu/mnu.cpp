@@ -257,9 +257,15 @@ private:
   // A keyword attribute's token (effective), as its table spells it; empty when absent, and for a
   // token the table lacks (the code no token sets; noted, left out).
   std::string keyword(const Node &node, const char *name, const char *const *tokens);
-  // A JUSTIFY / VJUSTIFY the parse reads as a keyword or, another token, as the number wcstol reads
-  // (the x or y offset): the keyword as its table spells it, or the number's decimal.
-  std::string offset_keyword(const Node &node, const char *name, const char *const *tokens);
+  // A JUSTIFY / VJUSTIFY: each one's keyword sets the justification and another token's wcstol the
+  // x or y offset, two fields, so the first authored of each kind is kept (`keyword` as its table
+  // spells it, `offset` the number's decimal), each set only where one is authored.
+  void justification(const Node &node, const char *name, const char *const *tokens, std::string &keyword,
+                     std::string &offset);
+  // The first authored attribute of a name whose value has a token, the others noted: a walk that
+  // skips a value of no token (`if (token)`) and overwrites, the list last authored first [orig:
+  // CGopherWnd_ParseCategoryXML @ 0x65a5ba, @ 0x65a7da]. An empty one is noted, not fatal.
+  std::string first_token(const Node &node, const char *name);
   // A VALUE the parse reads with wcstol: the number's decimal; empty when absent (and, `zero_none`,
   // for 0, the parse's default).
   std::string number_value(const Node &node, const char *name, bool zero_none);
@@ -399,16 +405,59 @@ std::string TreeReader::keyword(const Node &node, const char *name, const char *
   return std::string();
 }
 
-std::string TreeReader::offset_keyword(const Node &node, const char *name, const char *const *tokens) {
-  const Attribute *attr = effective(node, name, tokens);
+void TreeReader::justification(const Node &node, const char *name, const char *const *tokens, std::string &keyword,
+                               std::string &offset) {
+  // The walk compares every one of the name, so an empty one faults (CRT_wcsicmp of no token).
+  const Attribute *kept_keyword = nullptr;
+  const Attribute *kept_offset = nullptr;
+  for (const Attribute &a : node.attributes) {
+    if (!mnu_xml::iequals(a.name, name)) continue;
+    Text tok;
+    if (!a.token(tok)) {
+      empty_value(node, a);
+      continue;
+    }
+    const bool is_keyword = in(tok, tokens);
+    const Attribute *&kept = is_keyword ? kept_keyword : kept_offset;
+    if (kept) {
+      because(&a, std::string("A repeated ") + name + (is_keyword ? " keyword" : " offset") +
+                      ": retail keeps the first; this one is left out.");
+      continue;
+    }
+    kept = &a;
+  }
+  std::string text;
+  if (kept_keyword && token(node, kept_keyword, text))
+    for (const char *const *t = tokens; *t; ++t)
+      if (iequals(text, *t)) keyword = *t;
+  if (kept_offset) {
+    kept_offset->read = true;
+    Text tok;
+    kept_offset->token(tok);
+    variable_number(node, kept_offset, tok);
+    offset = std::to_string(static_cast<int>(mnu_xml::wcstol(tok, 10)));
+  }
+}
+
+std::string TreeReader::first_token(const Node &node, const char *name) {
+  const Attribute *kept = nullptr;
+  for (const Attribute &a : node.attributes) {
+    if (!mnu_xml::iequals(a.name, name)) continue;
+    Text tok;
+    if (!a.token(tok)) {
+      because(&a, std::string("An empty ") + name + " on " + mnu_xml::ascii(node.tag) +
+                      ": retail skips a value of no token; it is left out.");
+      continue;
+    }
+    if (kept) {
+      because(&a, std::string("A repeated ") + name + ": retail keeps the first; this one is left out.");
+      continue;
+    }
+    kept = &a;
+  }
   std::string out;
-  if (!token(node, attr, out)) return std::string();
-  for (const char *const *t = tokens; *t; ++t)
-    if (iequals(out, *t)) return *t;
-  Text tok;
-  attr->token(tok);
-  variable_number(node, attr, tok);
-  return std::to_string(static_cast<int>(mnu_xml::wcstol(tok, 10)));
+  token(node, kept, out);
+  return out;
 }
 
 std::string TreeReader::number_value(const Node &node, const char *name, bool zero_none) {
@@ -664,15 +713,22 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
   } else {
     for (const char *name : {"PASSWORD", "NUMBER", "READONLY", "MAXCHAR", "MAXVAL", "MINVAL"}) not_read(node, name, w.type);
   }
+  // PLAYERLIST sets the browser's list mode, SERVERLIST clears it, by presence, over the attribute
+  // list last authored first: the first authored of the two decides [orig:
+  // CLanGameBrowser_ParseExtendedXMLDefinition @ 0x65dadf..0x65db16, self[3658]].
+  const Attribute *list_mode = nullptr;
   for (const Attribute &a : node.attributes) {
-    // PLAYERLIST sets the browser's list mode, SERVERLIST clears it, by presence; the last
-    // authored decides [orig: CLanGameBrowser_ParseExtendedXMLDefinition @ 0x65dac0, self[3658]].
     if (mnu_xml::iequals(a.name, "PLAYERLIST") || mnu_xml::iequals(a.name, "SERVERLIST")) {
       if (!own("glb_playerlist")) {
         not_read(node, mnu_xml::ascii(a.name).c_str(), w.type);
         continue;
       }
+      if (list_mode) {
+        because(&a, "A later PLAYERLIST or SERVERLIST: retail's mode is the first authored's; this one is left out.");
+        continue;
+      }
       a.read = true;
+      list_mode = &a;
       w.glb_playerlist = mnu_xml::iequals(a.name, "PLAYERLIST");
     } else if (mnu_xml::iequals(a.name, "GROUP")) {
       because(&a, "GROUP is read only as a child element (<GROUP>n</GROUP>); the attribute is left out.");
@@ -1123,9 +1179,9 @@ void TreeReader::read_string(const Node &node, String &s, bool repeated) {
   s.present = true;
   s.value = text_of(node);
   s.type = keyword(node, "TYPE", kStringTypes);
-  // A keyword sets the justification, another token's wcstol the offset [orig: @ 0x657c30].
-  if (node.attr("JUSTIFY")) s.justify = offset_keyword(node, "JUSTIFY", kJustify);
-  if (node.attr("VJUSTIFY")) s.vjustify = offset_keyword(node, "VJUSTIFY", kVJustify);
+  // A keyword sets the justification, another token's wcstol the offset [orig: @ 0x657d62..0x657eba].
+  justification(node, "JUSTIFY", kJustify, s.justify, s.justify_offset);
+  justification(node, "VJUSTIFY", kVJustify, s.vjustify, s.vjustify_offset);
   int number = 0;
   if (number_attr(node, "EDGE", number)) { s.edge = number; s.has_edge = true; }
   if (flag(node, "WRAP")) s.wrap = true;
@@ -1136,8 +1192,8 @@ void TreeReader::read_item(const Node &node, Item &item, bool cell, WindowType t
   node.read = true;
   item.type = keyword(node, "TYPE", item_types_for(type, cell));
   item.value = number_value(node, "VALUE", true);
-  item.justify = offset_keyword(node, "JUSTIFY", kJustify);
-  item.vjustify = offset_keyword(node, "VJUSTIFY", kVJustify);
+  justification(node, "JUSTIFY", kJustify, item.justify, item.justify_offset);
+  justification(node, "VJUSTIFY", kVJustify, item.vjustify, item.vjustify_offset);
   // PAIRS_LIST a LIST's ITEM alone reads, COLUMN a TABLE cell alone (schema_reads
   // "items.item.pairs_list", "items.item.column", "items.row.item.pairs_list").
   if (!cell && schema_reads(type, "items.item.pairs_list") == SchemaApplies::Reads)
@@ -1164,8 +1220,8 @@ bool TreeReader::read_items(const Node &node, Items &items, WindowType type) {
   node.read = true;
   items.present = true;
   if (reads("items.justify")) {
-    if (node.attr("JUSTIFY")) items.justify = offset_keyword(node, "JUSTIFY", kJustify);
-    if (node.attr("VJUSTIFY")) items.vjustify = offset_keyword(node, "VJUSTIFY", kVJustify);
+    justification(node, "JUSTIFY", kJustify, items.justify, items.justify_offset);
+    justification(node, "VJUSTIFY", kVJustify, items.vjustify, items.vjustify_offset);
   } else {
     not_read(node, "JUSTIFY", type);
     not_read(node, "VJUSTIFY", type);
@@ -1327,7 +1383,18 @@ void TreeReader::read_column(const Node &node, TableColumn &column) {
           }
         }
       }
-      if (glb_header_fields_) header.field = string_attr(c, "FIELD");
+      // The browser stores a HEADER's FIELD at its column index alone where 0 <= index < the table's
+      // column count [orig: CLanGameBrowser_ParseExtendedXMLDefinition @ 0x65dc50, @ 0x65de8c].
+      if (glb_header_fields_) {
+        if (header.column >= 0 && header.column < columns) {
+          header.field = string_attr(c, "FIELD");
+        } else {
+          for (const Attribute &a : c.attributes)
+            if (mnu_xml::iequals(a.name, "FIELD"))
+              because(&a, "The browser reads no FIELD of a HEADER whose COLUMN is below 0 or not below the "
+                          "table's column count; it is left out.");
+        }
+      }
       if (number_attr(c, "WIDTH", number)) { header.width = number; header.has_width = true; }
       // A type="id" HEADER's text is a string id, looked up as the table parses
       // [orig: CUIStringTable_LookupString call @ 0x6434df].
@@ -1344,8 +1411,8 @@ void TreeReader::read_column(const Node &node, TableColumn &column) {
       c.read = true;
       TableBody body;
       read_index(body.has_column, body.column);
-      body.justify = offset_keyword(c, "JUSTIFY", kJustify);
-      body.vjustify = offset_keyword(c, "VJUSTIFY", kVJustify);
+      justification(c, "JUSTIFY", kJustify, body.justify, body.justify_offset);
+      justification(c, "VJUSTIFY", kVJustify, body.vjustify, body.vjustify_offset);
       // The draw kind: the walk's last write, the first authored of the three.
       for (const Attribute &a : c.attributes) {
         const bool custom = mnu_xml::iequals(a.name, kBodyDisplays[0]);
@@ -1383,22 +1450,15 @@ void TreeReader::read_column(const Node &node, TableColumn &column) {
   }
 }
 
-// [orig: CLanGameBrowser_ParseXMLFieldDefinitions @ 0x65d850] count (the attribute walk's last), then
-// each FORMAT (the last; its \r and \n pairs read as CR and LF) and FIELD (its which, one past the
-// count reading 0; the last FIELD of a slot kept). A FIELD with no count writes through no array,
-// and one at the count past its array: each faults.
+// [orig: CLanGameBrowser_ParseXMLFieldDefinitions @ 0x65d850] count (an overwriting walk over the
+// attribute list, last authored first, so the first authored; an empty one faults in wcstol), then
+// each FORMAT (the last; its \r and \n pairs read as CR and LF) and FIELD (its which, the first
+// authored, one past the count reading 0; the last FIELD of a slot kept). A FIELD with no count
+// writes through no array, and one at the count past its array: each faults.
 void TreeReader::read_glb_fields(const Node &node, GlbFields &fields) {
   node.read = true;
   fields.present = true;
-  for (const Attribute &a : node.attributes) {
-    if (!mnu_xml::iequals(a.name, "count")) continue;
-    std::string text;
-    if (!token(node, &a, text)) continue;
-    Text tok;
-    a.token(tok);
-    fields.count = static_cast<int>(mnu_xml::wcstol(tok, 10));
-    fields.has_count = true;
-  }
+  if (number_attr(node, "count", fields.count)) fields.has_count = true;
   for (const auto &child_ptr : node.children) {
     const Node &c = *child_ptr;
     if (tag_is(c, "FORMAT")) {
@@ -1417,14 +1477,7 @@ void TreeReader::read_glb_fields(const Node &node, GlbFields &fields) {
     } else if (tag_is(c, "FIELD")) {
       c.read = true;
       int which = 0;
-      for (const Attribute &a : c.attributes) {
-        if (!mnu_xml::iequals(a.name, "which")) continue;
-        std::string text;
-        if (!token(c, &a, text)) continue;
-        Text tok;
-        a.token(tok);
-        which = static_cast<int>(mnu_xml::wcstol(tok, 10));
-      }
+      number_attr(c, "which", which);
       if (static_cast<unsigned>(which) > static_cast<unsigned>(fields.count)) which = 0;
       if (!fields.has_count || which == fields.count) {
         fatal_because(&c, fields.has_count ? "A FIELD whose which is the count writes past the browser's slots in "
@@ -1442,31 +1495,18 @@ void TreeReader::read_glb_fields(const Node &node, GlbFields &fields) {
   }
 }
 
-// [orig: CGopherWnd_ParseCategoryXML @ 0x65a540] LEVEL on the CATEGORY (the last token); its
-// children: LABEL (the category static parses the element's children), ITEM (a button: NAME,
-// TARGET, FILTER, TABLE, the text) and INFO (a static: NAME, FILTER, TABLE, the text). An empty
-// CATEGORY hands the parse no node, which faults.
+// [orig: CGopherWnd_ParseCategoryXML @ 0x65a540] LEVEL on the CATEGORY; its children: LABEL (the
+// category static parses the element's children), ITEM (a button: NAME, TARGET, FILTER, TABLE, the
+// text) and INFO (a static: NAME, FILTER, TABLE, the text); each attribute the first authored with a
+// token (first_token). An empty CATEGORY hands the parse no node, which faults.
 bool TreeReader::read_gopher_category(const Node &node, GopherCategory &category, ReadScope &owner) {
   if (node.children.empty()) {
     fatal_because(&node, "An empty CATEGORY crashes retail (its parse reads no element); it is left out.");
     return false;
   }
   node.read = true;
-  for (const Attribute &a : node.attributes) {
-    if (!mnu_xml::iequals(a.name, "LEVEL")) continue;
-    std::string text;
-    if (token(node, &a, text)) {
-      category.level = text;
-      category.has_level = true;
-    }
-  }
-  const auto last = [this](const Node &c, const char *name, std::string &out) {
-    for (const Attribute &a : c.attributes) {
-      if (!mnu_xml::iequals(a.name, name)) continue;
-      std::string text;
-      if (token(c, &a, text)) out = text;
-    }
-  };
+  category.level = first_token(node, "LEVEL");
+  category.has_level = !category.level.empty();
   for (const auto &child_ptr : node.children) {
     const Node &c = *child_ptr;
     if (tag_is(c, "LABEL")) {
@@ -1475,10 +1515,10 @@ bool TreeReader::read_gopher_category(const Node &node, GopherCategory &category
       c.read = true;
       GopherEntry entry;
       entry.info = tag_is(c, "INFO");
-      last(c, "NAME", entry.name);
-      if (!entry.info) last(c, "TARGET", entry.target);
-      last(c, "FILTER", entry.filter);
-      last(c, "TABLE", entry.table);
+      entry.name = first_token(c, "NAME");
+      if (!entry.info) entry.target = first_token(c, "TARGET");
+      entry.filter = first_token(c, "FILTER");
+      entry.table = first_token(c, "TABLE");
       entry.text = text_of(c);
       category.entries.push_back(std::move(entry));
     }
@@ -1858,6 +1898,8 @@ private:
   bool item(const Item &a, const Item &b) {
     return same(a.type == b.type, "type") && same(a.value == b.value, "value") && same(a.text == b.text, "text") &&
            same(a.justify == b.justify, "justify") && same(a.vjustify == b.vjustify, "vjustify") &&
+           same(a.justify_offset == b.justify_offset, "justify_offset") &&
+           same(a.vjustify_offset == b.vjustify_offset, "vjustify_offset") &&
            same(a.pairs_list == b.pairs_list, "pairs_list") &&
            same(a.has_column == b.has_column && a.column == b.column, "column");
   }
@@ -1866,6 +1908,8 @@ private:
     const bool ok =
         same(a.present == b.present, "present") && same(a.multiselect == b.multiselect, "multiselect") &&
         same(a.justify == b.justify, "justify") && same(a.vjustify == b.vjustify, "vjustify") &&
+        same(a.justify_offset == b.justify_offset, "justify_offset") &&
+        same(a.vjustify_offset == b.vjustify_offset, "vjustify_offset") &&
         appearances(a.appearances, b.appearances, "appearance") &&
         list(a.items, b.items, "item", [this](const Item &x, const Item &y) { return item(x, y); }) &&
         list(a.rows, b.rows, "row", [this](const TableRow &x, const TableRow &y) {
@@ -1890,6 +1934,8 @@ private:
         list(a.bodies, b.bodies, "body",
              [this](const TableBody &x, const TableBody &y) {
                return same(x.justify == y.justify, "justify") && same(x.vjustify == y.vjustify, "vjustify") &&
+                      same(x.justify_offset == y.justify_offset, "justify_offset") &&
+                      same(x.vjustify_offset == y.vjustify_offset, "vjustify_offset") &&
                       same(x.has_column == y.has_column && x.column == y.column, "column") &&
                       same(x.bitmap_draw == y.bitmap_draw, "bitmap_draw") &&
                       same(x.bitmap_text == y.bitmap_text, "bitmap_text") &&
@@ -1970,6 +2016,8 @@ private:
                 }) &&
            same(a.string_data.present == b.string_data.present && a.string_data.type == b.string_data.type &&
                     a.string_data.justify == b.string_data.justify && a.string_data.vjustify == b.string_data.vjustify &&
+                    a.string_data.justify_offset == b.string_data.justify_offset &&
+                    a.string_data.vjustify_offset == b.string_data.vjustify_offset &&
                     a.string_data.has_edge == b.string_data.has_edge && a.string_data.edge == b.string_data.edge &&
                     a.string_data.wrap == b.string_data.wrap && a.string_data.value == b.string_data.value,
                 "string") &&

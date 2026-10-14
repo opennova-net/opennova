@@ -95,12 +95,18 @@ std::string canon(const std::string &value, const char *const *tokens) {
 	return std::string();
 }
 
-// A JUSTIFY / VJUSTIFY: a keyword as its table spells it, else the offset's decimal (wcstol reads it).
-std::string offset(const std::string &value, const char *const *tokens) {
-	for (const char *const *t = tokens; *t; ++t)
-		if (iequals(value, *t)) return *t;
+// A number the parse reads with wcstol, written as strtol's decimal of the model's text; "" none.
+std::string decimal(const std::string &value) {
 	if (value.empty()) return value;
 	return std::to_string(static_cast<int>(std::strtol(value.c_str(), nullptr, 10)));
+}
+
+// A JUSTIFY / VJUSTIFY pair: the keyword as its table spells it and, apart, the offset's decimal, a second
+// attribute of the name (the parse keeps the first authored of each kind).
+void put_justification(std::vector<WrittenAttribute> &a, const char *name, const std::string &keyword,
+                       const std::string &offset, const char *const *tokens) {
+	put(a, name, canon(keyword, tokens));
+	put(a, name, decimal(offset));
 }
 
 // A FLAGS word's text where it is not the default (none authored reads the default).
@@ -179,9 +185,10 @@ void Words::appearance(const Appearance &a, const char *tag, std::vector<Written
 WrittenElement Words::item(const Item &i, bool cell, WindowType type) {
 	WrittenElement e = element("ITEM", WrittenForm::Leaf);
 	put(e.attributes, "type", canon(i.type, item_types_for(type, cell)));
-	put(e.attributes, "value", i.value == "0" ? std::string() : i.value);
-	put(e.attributes, "justify", offset(i.justify, kJustify));
-	put(e.attributes, "vjustify", offset(i.vjustify, kVJustify));
+	const std::string value = decimal(i.value);
+	put(e.attributes, "value", value == "0" ? std::string() : value);
+	put_justification(e.attributes, "justify", i.justify, i.justify_offset, kJustify);
+	put_justification(e.attributes, "vjustify", i.vjustify, i.vjustify_offset, kVJustify);
 	put_bare(e.attributes, "PAIRS_LIST", !cell && reads(type, "items.item.pairs_list") && i.pairs_list);
 	if (cell) put_int(e.attributes, "column", i.has_column, i.column);
 	e.text = i.text;
@@ -192,8 +199,8 @@ void Words::items(const Items &items, WindowType type, std::vector<WrittenElemen
 	if (!items.present || !reads(type, "items")) return;
 	WrittenElement e = element("ITEMS", WrittenForm::Container);
 	if (reads(type, "items.justify")) {
-		put(e.attributes, "justify", offset(items.justify, kJustify));
-		put(e.attributes, "vjustify", offset(items.vjustify, kVJustify));
+		put_justification(e.attributes, "justify", items.justify, items.justify_offset, kJustify);
+		put_justification(e.attributes, "vjustify", items.vjustify, items.vjustify_offset, kVJustify);
 	}
 	put_bare(e.attributes, "MULTISELECT", reads(type, "items.multiselect") && items.multiselect);
 	if (reads(type, "items.appearance"))
@@ -241,8 +248,8 @@ void Words::column(const TableColumn &c, std::vector<WrittenElement> &out) {
 	}
 	for (const TableBody &b : c.bodies) {
 		WrittenElement body = element("BODY", WrittenForm::Leaf);
-		put(body.attributes, "justify", offset(b.justify, kJustify));
-		put(body.attributes, "vjustify", offset(b.vjustify, kVJustify));
+		put_justification(body.attributes, "justify", b.justify, b.justify_offset, kJustify);
+		put_justification(body.attributes, "vjustify", b.vjustify, b.vjustify_offset, kVJustify);
 		put_int(body.attributes, "column", b.has_column, b.column);
 		// The draw kind retail keeps is the first authored of the three: written first.
 		const bool on[] = {b.custom_draw, b.bitmap_draw, b.bitmap_text};
@@ -424,8 +431,8 @@ void Words::window_elements(const Window &w, std::vector<WrittenElement> &out) {
 	if (s.present && reads(t, "string")) {
 		WrittenElement e = element("STRING", WrittenForm::Leaf);
 		put(e.attributes, "type", canon(s.type, kStringTypes));
-		put(e.attributes, "justify", offset(s.justify, kJustify));
-		put(e.attributes, "vjustify", offset(s.vjustify, kVJustify));
+		put_justification(e.attributes, "justify", s.justify, s.justify_offset, kJustify);
+		put_justification(e.attributes, "vjustify", s.vjustify, s.vjustify_offset, kVJustify);
 		put_int(e.attributes, "edge", s.has_edge, s.edge);
 		put_bare(e.attributes, "WRAP", s.wrap);
 		e.text = s.value;

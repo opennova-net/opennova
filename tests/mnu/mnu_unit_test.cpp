@@ -652,40 +652,61 @@ bool test_typed_parts() {
   CHECK(parse(screen_of("type=\"glb_table\" name=\"G\" SERVERLIST PLAYERLIST",
                         std::string(kPos) +
                             "<GLB_TABLE><POSITION><LEFT>1</LEFT></POSITION><COLUMN count=\"2\"><HEADER column=\"1\" "
-                            "FIELD=\"ping\">P</HEADER></COLUMN></GLB_TABLE>"
+                            "FIELD=\"ping\" FIELD=\"pong\">P</HEADER></COLUMN></GLB_TABLE>"
                             "<GLB_INFO_BUTTON><STRING>Info</STRING></GLB_INFO_BUTTON>"
-                            "<GLB_INFO_SERVER_DETAILS><POSITION><LEFT>2</LEFT></POSITION><FIELDS count=\"3\">"
+                            "<GLB_INFO_SERVER_DETAILS><POSITION><LEFT>2</LEFT></POSITION><FIELDS count=\"3\" count=\"5\">"
                             "<FORMAT>a\\nb</FORMAT><FIELD which=\"1\">map</FIELD><FIELD which=\"7\">zero</FIELD>"
-                            "<FIELD which=\"1\">mode</FIELD></FIELDS></GLB_INFO_SERVER_DETAILS>"
+                            "<FIELD which=\"1\">mode</FIELD><FIELD which=\"2\" which=\"0\">two</FIELD></FIELDS>"
+                            "</GLB_INFO_SERVER_DETAILS>"
                             "<GLB_NW_INFO><POSITION><LEFT>3</LEFT></POSITION></GLB_NW_INFO>"
                             "<TARGET>http://a</TARGET><TARGET>http://b</TARGET>"
                             "<JOIN_BUTTON><POSITION><LEFT>1</LEFT></POSITION></JOIN_BUTTON><BOGUS></BOGUS>"),
               doc, &notes),
         "parse");
   const mnu::Window &g = root(doc);
-  CHECK(g.glb_playerlist, "PLAYERLIST, the last of the two authored");
+  CHECK(!g.glb_playerlist, "SERVERLIST, the first of the two authored (the walk runs last authored first)");
+  CHECK(noted(notes, "@PLAYERLIST"), "the later PLAYERLIST noted");
   CHECK(g.glb_table && g.glb_table->type == mnu::WindowType::Table &&
             g.glb_table->table_data.column.headers.size() == 1 &&
             g.glb_table->table_data.column.headers[0].field == "ping",
-        "the browser's table, its HEADER's FIELD");
+        "the browser's table, its HEADER's first FIELD");
+  CHECK(noted(notes, "/HEADER@FIELD"), "the repeated FIELD noted");
   CHECK(g.glb_info_button && g.glb_info_button->string_data.value == "Info", "the info button");
   const mnu::GlbFields &f = g.glb_server_fields;
-  CHECK(g.glb_info_server_details && f.present && f.count == 3 && f.format == "a\nb" && f.fields.size() == 2 &&
-            f.fields[0].which == 1 && f.fields[0].text == "mode" && f.fields[1].which == 0 && f.fields[1].text == "zero",
-        "the FIELDS: the escapes read, a which past the count reads 0, the last FIELD of a slot kept");
+  CHECK(g.glb_info_server_details && f.present && f.count == 3 && f.format == "a\nb" && f.fields.size() == 3 &&
+            f.fields[0].which == 1 && f.fields[0].text == "mode" && f.fields[1].which == 0 && f.fields[1].text == "zero" &&
+            f.fields[2].which == 2 && f.fields[2].text == "two",
+        "the FIELDS: the first count, the escapes read, a which past the count reads 0, a FIELD's first which, the "
+        "last FIELD of a slot kept");
+  CHECK(noted(notes, "/FIELDS@COUNT") && noted(notes, "/FIELD@WHICH"), "the repeated count and which noted");
   CHECK(g.glb_nw_info && g.has_glb_target && g.glb_target == "http://b", "the last TARGET");
   CHECK(noted(notes, "/BOGUS") && noted(notes, "/JOIN_BUTTON") && noted(notes, "/TARGET"),
         "the unknown element, the LAN_LIST's JOIN_BUTTON and the replaced TARGET are noted");
   CHECK(fixed_point(doc), "fixed point");
   mnu::Document back;
   CHECK(parse(mnu::serialize(doc), back) && mnu::equal(back, doc), "read back as the model");
+  {
+    // The browser stores a HEADER's FIELD only at a column index under the table's count [orig: @ 0x65dc50].
+    mnu::Document past;
+    std::vector<mnu::ParseNote> past_notes;
+    CHECK(parse(screen_of("type=\"glb_table\" name=\"G\"",
+                          std::string(kPos) + "<GLB_TABLE><COLUMN count=\"2\"><HEADER column=\"2\" FIELD=\"past\">Q"
+                                              "</HEADER></COLUMN></GLB_TABLE>"),
+                past, &past_notes),
+          "parse past");
+    const mnu::Window &p = root(past);
+    CHECK(p.glb_table && p.glb_table->table_data.column.headers.size() == 1 &&
+              p.glb_table->table_data.column.headers[0].field.empty() && noted(past_notes, "/HEADER"),
+          "no FIELD of a HEADER past the column count (the HEADER noted, not set up)");
+  }
 
   notes.clear();
   CHECK(parse(screen_of("type=\"gopher\" name=\"GO\"",
                         std::string(kPos) +
                             "<TARGET>http://x</TARGET><TARGET>http://y</TARGET><FILTERS><CATEGORY LEVEL=\"L1\"><LABEL>"
-                            "<STRING>Maps</STRING></LABEL><ITEM NAME=\"A\" TARGET=\"t\" FILTER=\"f\" TABLE=\"tb\" "
-                            "NAME=\"B\">Alpha</ITEM><INFO NAME=\"I\" TARGET=\"no\" FILTER=\"g\">Info</INFO></CATEGORY>"
+                            "<STRING>Maps</STRING></LABEL><ITEM NAME=\"\" NAME=\"A\" TARGET=\"t\" FILTER=\"f\" "
+                            "TABLE=\"tb\" NAME=\"B\">Alpha</ITEM><INFO NAME=\"I\" TARGET=\"no\" FILTER=\"g\">Info</INFO>"
+                            "</CATEGORY>"
                             "</FILTERS><GOPHER_BACK><POSITION><LEFT>1</LEFT></POSITION></GOPHER_BACK>"),
               doc, &notes),
         "parse gopher");
@@ -695,11 +716,20 @@ bool test_typed_parts() {
   if (!go.gopher_categories.empty()) {
     const mnu::GopherCategory &c = go.gopher_categories[0];
     CHECK(c.has_level && c.level == "L1" && c.label && c.label->string_data.value == "Maps", "LEVEL and the LABEL");
-    CHECK(c.entries.size() == 2 && !c.entries[0].info && c.entries[0].name == "B" && c.entries[0].target == "t" &&
+    CHECK(c.entries.size() == 2 && !c.entries[0].info && c.entries[0].name == "A" && c.entries[0].target == "t" &&
               c.entries[0].filter == "f" && c.entries[0].table == "tb" && c.entries[0].text == "Alpha",
-          "an ITEM: its attributes, the last of a name, and its text");
+          "an ITEM: its attributes, the first of a name with a token, and its text");
     CHECK(c.entries[1].info && c.entries[1].name == "I" && c.entries[1].target.empty() && c.entries[1].filter == "g",
           "an INFO reads no TARGET");
+  }
+  {
+    size_t empty_name = 0;
+    for (const mnu::ParseNote &n : notes)
+      if (n.message.find("An empty NAME") != std::string::npos) {
+        ++empty_name;
+        CHECK(!n.fatal, "an empty gopher attribute is skipped, not a crash (the walk checks for a token)");
+      }
+    CHECK(empty_name == 1 && noted(notes, "/ITEM@NAME"), "the empty NAME and the repeated one noted");
   }
   CHECK(go.gopher_back, "GOPHER_BACK");
   CHECK(fixed_point(doc), "gopher fixed point");
@@ -734,7 +764,8 @@ bool test_held_as_read() {
                             "<APPEARANCE type=\"sparkle\" state=\"default\" flags=\"standard|alphatest, bogus\">a.tga"
                             "</APPEARANCE><ACTION type=\"FLY\" state=\"maybe\" test=\"lt\">X</ACTION>"
                             "<ITEMS justify=\"12px\"><ITEM type=\"image\" value=\"007\" vjustify=\"bottom\">a</ITEM>"
-                            "<ITEM value=\"0\">b</ITEM></ITEMS><STRING type=\"TEXT\" justify=\"-3\">s</STRING>"
+                            "<ITEM value=\"0\" justify=\"right\" justify=\"4\" justify=\"9\">b</ITEM></ITEMS>"
+                            "<STRING type=\"TEXT\" justify=\"-3\">s</STRING>"
                             "<HOTKEY>Vx</HOTKEY><HOTKEY VIRTUAL>vk_escape</HOTKEY><HOTKEY VIRTUAL>VK_ENTER</HOTKEY>"
                             "<CURSOR><FILE>c.tga</FILE><FLAGS>STANDARD</FLAGS></CURSOR>"),
               doc, &notes),
@@ -746,10 +777,14 @@ bool test_held_as_read() {
   CHECK(noted(notes, "/APPEARANCE@TYPE"), "the unknown TYPE noted");
   CHECK(w.actions.size() == 1 && w.actions[0].type.empty() && w.actions[0].state.empty() && w.actions[0].test.empty(),
         "an ACTION's unknown TYPE and STATE are code 0, LT the parse's 0");
-  CHECK(w.items.justify == "12" && w.items.items.size() == 2 && w.items.items[0].type.empty() &&
-            w.items.items[0].value == "7" && w.items.items[0].vjustify == "BOTTOM" && w.items.items[1].value.empty(),
+  CHECK(w.items.justify.empty() && w.items.justify_offset == "12" && w.items.items.size() == 2 &&
+            w.items.items[0].type.empty() && w.items.items[0].value == "7" && w.items.items[0].vjustify == "BOTTOM" &&
+            w.items.items[1].value.empty(),
         "a LIST's ITEMS: the offset's number, IMAGE none (a LIST reads ID alone), the VALUE's number, 0 none");
-  CHECK(w.string_data.type.empty() && w.string_data.justify == "-3", "a STRING's TYPE other than ID is none");
+  CHECK(w.items.items.size() == 2 && w.items.items[1].justify == "RIGHT" && w.items.items[1].justify_offset == "4",
+        "a keyword and an offset both kept, apart, the first of each (the parse stores them in two fields)");
+  CHECK(w.string_data.type.empty() && w.string_data.justify.empty() && w.string_data.justify_offset == "-3",
+        "a STRING's TYPE other than ID is none; its JUSTIFY of a number the offset");
   CHECK(w.hotkeys.size() == 2 && w.hotkeys[0].value == "V" && !w.hotkeys[0].virtual_key && w.hotkeys[1].value == "VK_ESCAPE",
         "a key's first character; a VIRTUAL name as the table spells it; VK_ENTER (key 0) left out");
   CHECK(w.cursor.file == "c.tga" && w.cursor.flags == 0x300600u, "the CURSOR's FLAGS word");
@@ -914,7 +949,7 @@ bool test_every_element_fixed_point() {
   action.test = "EQ";
   action.target = "PANEL";
   w.actions = {action};
-  w.string_data = {true, "ID", "CENTER", "BOTTOM", true, 0, true, "KEY"};
+  w.string_data = {true, "ID", "CENTER", "BOTTOM", "7", "", true, 0, true, "KEY"};
   w.toggle_string = {true, "ID", "ALT"};
   w.font = {"f.fnt", "1", "2", "3", "4", "5", "6", "7", "8"};
   w.frame.stencil = "s.tga";
@@ -931,6 +966,7 @@ bool test_every_element_fixed_point() {
   item.text = "T";
   item.justify = "RIGHT";
   item.vjustify = "CENTER";
+  item.vjustify_offset = "-2";
   item.pairs_list = true;
   item.has_column = true;
   item.column = 0;
@@ -942,7 +978,7 @@ bool test_every_element_fixed_point() {
   w.has_sb_edge_pad = true;
   w.sb_edge_pad = 0;
   w.spinup.author(mnu::WindowType::Button).appearances = {image};
-  w.spindown.author(mnu::WindowType::Button).string_data = {true, "", "", "", false, 0, false, "-"};
+  w.spindown.author(mnu::WindowType::Button).string_data = {true, "", "", "", "", "", false, 0, false, "-"};
   w.scrollbar.author(mnu::WindowType::Scroll).scrolldown = {image};
   w.cursor = {"c.tga", 0x300600u};
   w.has_text_rsrc = true;
@@ -1039,8 +1075,9 @@ bool test_keyword_tokens() {
               doc),
         "parse");
   const mnu::Window &w = root(doc);
-  CHECK(w.string_data.justify == "CENTER",
-        "of repeated attributes, the first token the parse knows, as its table spells it");
+  CHECK(w.string_data.justify == "CENTER" && w.string_data.justify_offset == "0",
+        "of repeated attributes, the first token the parse knows, as its table spells it, and apart the offset "
+        "wcstol reads of the other (0)");
   CHECK(w.actions.size() == 1 && w.actions[0].field == "F" && w.actions[0].type == "WINDOW",
         "SOURCE writes the FIELD slot; a known TYPE as its table spells it");
   mnu::Window table;

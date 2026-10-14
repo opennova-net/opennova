@@ -25,27 +25,23 @@ namespace opennova::menu {
 
 namespace {
 
-// HEADER / BODY JUSTIFY: LEFT 0, CENTER 1, RIGHT 2; another token is read as a
-// number (the HEADER walk discards it, the BODY walk keeps it as the cell's x
-// offset) and keeps the justification.
+// HEADER / BODY JUSTIFY: LEFT 0, CENTER 1, RIGHT 2; none keeps the justification. Another token is
+// read as a number apart (the HEADER walk discards it, the BODY walk keeps it as the cell's x offset:
+// TableBody::justify_offset).
 // [orig: CTableWnd_ParseXMLContentDefinition @ 0x6427d0 — the BODY JUSTIFY arm
 //  (+144, the wcstol store +152), the HEADER arm's reset to 1 / 16]
-int justify_word(const std::string &token, int current, int *numeric) {
-	if (token.empty()) return current;
+int justify_word(const std::string &token, int current) {
 	if (strutil::iequals(token, "LEFT")) return 0;
 	if (strutil::iequals(token, "CENTER")) return 1;
 	if (strutil::iequals(token, "RIGHT")) return 2;
-	if (numeric != nullptr) *numeric = static_cast<int>(std::strtol(token.c_str(), nullptr, 10));
 	return current;
 }
 
 // VJUSTIFY: TOP 0, CENTER 16, BOTTOM 32; another token as above (+156).
-int vjustify_word(const std::string &token, int current, int *numeric) {
-	if (token.empty()) return current;
+int vjustify_word(const std::string &token, int current) {
 	if (strutil::iequals(token, "TOP")) return 0;
 	if (strutil::iequals(token, "CENTER")) return 16;
 	if (strutil::iequals(token, "BOTTOM")) return 32;
-	if (numeric != nullptr) *numeric = static_cast<int>(std::strtol(token.c_str(), nullptr, 10));
 	return current;
 }
 
@@ -80,8 +76,8 @@ void MenuFrameCompiler::build_table_columns_(WidgetNode &node) {
 		TableColumnSetup &c = node.table_columns[static_cast<size_t>(setup[i].column)];
 		c.width = setup[i].width;
 		c.label = resolve_text_value(node.text_table, h.type, h.text).text;
-		c.header_justify = justify_word(h.justify, 1, nullptr);
-		c.header_vjustify = vjustify_word(h.vjustify, 16, nullptr);
+		c.header_justify = justify_word(h.justify, 1);
+		c.header_vjustify = vjustify_word(h.vjustify, 16);
 		c.body_justify = c.header_justify;
 		c.body_vjustify = c.header_vjustify;
 		c.numeric_sort = setup[i].numeric_sort;
@@ -94,8 +90,11 @@ void MenuFrameCompiler::build_table_columns_(WidgetNode &node) {
 		TableColumnSetup &c = node.table_columns[static_cast<size_t>(running)];
 		c.body_x = 0;
 		c.body_y = 0;
-		c.body_justify = justify_word(b.justify, 1, &c.body_x);
-		c.body_vjustify = vjustify_word(b.vjustify, 16, &c.body_y);
+		c.body_justify = justify_word(b.justify, 1);
+		c.body_vjustify = vjustify_word(b.vjustify, 16);
+		// The offset of a JUSTIFY / VJUSTIFY of another token, held apart from the keyword.
+		if (!b.justify_offset.empty()) c.body_x = static_cast<int>(std::strtol(b.justify_offset.c_str(), nullptr, 10));
+		if (!b.vjustify_offset.empty()) c.body_y = static_cast<int>(std::strtol(b.vjustify_offset.c_str(), nullptr, 10));
 		c.cell_type = b.display.empty()                          ? kTableCellText
 				: strutil::iequals(b.display, "CUSTOM_DRAW") ? kTableCellCustom
 				: strutil::iequals(b.display, "BITMAP_DRAW") ? kTableCellImage

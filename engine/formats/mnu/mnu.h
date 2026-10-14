@@ -182,11 +182,15 @@ inline constexpr const char *kHorizontalOrientation = "HORIZONTAL";
 bool known_token(const std::string &token, const char *const *tokens);
 
 // STRING [orig: CUIButtonWidget_ParseXMLAttributes @ 0x657c30].
+// A JUSTIFY / VJUSTIFY keyword sets the justification, another token's wcstol the x / y offset, two
+// fields the parse keeps apart (@ 0x657d62..0x657eba), so each holds the first authored of its kind.
 struct String {
   bool present = false;
   std::string type;     // "ID" (a string-table key) or literal
-  std::string justify;  // "LEFT", "CENTER", "RIGHT"
-  std::string vjustify; // "TOP", "CENTER", "BOTTOM"
+  std::string justify;  // "LEFT", "CENTER", "RIGHT"; "" none
+  std::string vjustify; // "TOP", "CENTER", "BOTTOM"; "" none
+  std::string justify_offset;  // a JUSTIFY of another token: the x offset wcstol reads; "" none
+  std::string vjustify_offset; // a VJUSTIFY of another token: the y offset; "" none
   bool has_edge = false;
   int edge = 0;         // Padding from edge in pixels
   bool wrap = false;    // WRAP, presence
@@ -226,14 +230,16 @@ struct Font {
 // [orig: CListWnd_ParseXMLDefinition @ 0x645770; CUISpinList_ParseXMLDefinition @ 0x64bd10;
 // CTableWnd_ParseXMLContentDefinition @ 0x6427d0]), any other none; VALUE the number
 // wcstol reads ("" for 0, the parses' default; a SUBST's VALUE is its token, matched as text);
-// JUSTIFY and VJUSTIFY a keyword or the
-// number wcstol reads of another token (the x or y offset), as a STRING's.
+// JUSTIFY and VJUSTIFY a keyword and, apart, the number wcstol reads of another token (the x or y
+// offset), as a STRING's.
 struct Item {
   std::string type;     // ID / IMAGE / COLOR (spin list) / BITMAP (table cell); "" none
   std::string value;    // VALUE, the decimal of the number read; "" 0
   std::string text;     // the element text: display text, a key or a texture name
-  std::string justify;  // JUSTIFY: LEFT / CENTER / RIGHT, or the offset's decimal
-  std::string vjustify; // VJUSTIFY: TOP / CENTER / BOTTOM, or the offset's decimal
+  std::string justify;  // JUSTIFY: LEFT / CENTER / RIGHT; "" none
+  std::string vjustify; // VJUSTIFY: TOP / CENTER / BOTTOM; "" none
+  std::string justify_offset;  // a JUSTIFY of another token: the x offset's decimal; "" none
+  std::string vjustify_offset; // a VJUSTIFY of another token: the y offset's decimal; "" none
   bool pairs_list = false; // PAIRS_LIST, presence (LIST)
   bool has_column = false; // COLUMN (a TABLE cell)
   int column = 0;
@@ -249,8 +255,10 @@ struct TableRow {
 struct Items {
   bool present = false;
   bool multiselect = false;  // MULTISELECT, presence
-  std::string justify;       // "LEFT", "CENTER", "RIGHT"
-  std::string vjustify;      // "TOP", "CENTER", "BOTTOM"
+  std::string justify;       // "LEFT", "CENTER", "RIGHT"; "" none
+  std::string vjustify;      // "TOP", "CENTER", "BOTTOM"; "" none
+  std::string justify_offset;  // the x offset's decimal (a JUSTIFY of another token); "" none
+  std::string vjustify_offset; // the y offset's decimal; "" none
   std::vector<Appearance> appearances;  // ordered, duplicates kept
   std::vector<Item> items;
   std::vector<TableRow> rows;           // TABLE only
@@ -306,8 +314,10 @@ struct TableHeader {
 
 // Table column body definition.
 struct TableBody {
-  std::string justify;   // "LEFT", "CENTER", "RIGHT"
-  std::string vjustify;  // "TOP", "CENTER", "BOTTOM"
+  std::string justify;   // "LEFT", "CENTER", "RIGHT"; "" none
+  std::string vjustify;  // "TOP", "CENTER", "BOTTOM"; "" none
+  std::string justify_offset;  // the x offset's decimal (a JUSTIFY of another token); "" none
+  std::string vjustify_offset; // the y offset's decimal; "" none
   bool has_column = false;
   int column = 0;        // Column index
   bool bitmap_draw = false;      // BITMAP_DRAW - render images in this column
@@ -409,7 +419,8 @@ struct GlbFields {
 
 // A GOPHER category's ITEM (a button) or INFO (a static) [orig: CGopherWnd_ParseCategoryXML
 // @ 0x65a540]: its NAME (GOPHER_BUTTON / GOPHER_INFO where none), an ITEM's TARGET, FILTER and
-// TABLE, an INFO's FILTER and TABLE, each the last authored, and the element text.
+// TABLE, an INFO's FILTER and TABLE, each the first authored with a token (the walk runs the
+// attribute list, last authored first, and skips one of no token), and the element text.
 struct GopherEntry {
   bool info = false;
   std::string name;
