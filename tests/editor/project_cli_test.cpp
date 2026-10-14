@@ -622,9 +622,9 @@ static int test_validate_pins_the_rows() {
 	        "warning texture.unloadable: The game cannot load it: The PCX header is cut short or is not one. "
 	        "[art/a_texture_name_too_long.pcx]";
 	const std::string render_row =
-	        "warning menu.render.color_transparent: The game reads \"FF0000\" as AARRGGBB, so with fewer than eight "
-	        "digits its alpha is 0 (the preview draws it transparent); write eight digits (FF, then RRGGBB) for an "
-	        "opaque one. [menus/extra.mnu] record EXTRA/TITLE/Appearance 1 field value";
+	        "warning menu.render.color_transparent: The game reads \"00FF0000\" as AARRGGBB, so its alpha is 0 (the "
+	        "preview draws it transparent), as a colour written with fewer than eight digits reads; write eight digits "
+	        "(FF, then RRGGBB) for an opaque one. [menus/extra.mnu] record EXTRA/TITLE/Appearance 1 field value";
 	const std::string gate_row =
 	        "error build.name_unstorable: The game cannot store a_texture_name_too_long.pcx in an "
 	        "archive (the name is too long). [art/a_texture_name_too_long.pcx]";

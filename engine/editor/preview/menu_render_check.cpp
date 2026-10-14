@@ -65,8 +65,8 @@ std::string menu_note_message(const menu::MenuFrameNote &note) {
 		       "0), so the colour is not the one written.";
 	case Code::ColorTransparent:
 		return "The game reads " + quoted(s) +
-		       " as AARRGGBB, so with fewer than eight digits its alpha is 0 (the preview draws it transparent); "
-		       "write eight digits (FF, then RRGGBB) for an opaque one.";
+		       " as AARRGGBB, so its alpha is 0 (the preview draws it transparent), as a colour written with fewer "
+		       "than eight digits reads; write eight digits (FF, then RRGGBB) for an opaque one.";
 	case Code::StyleVarUnresolved:
 		return "No stylesheet the game reads defines " + s + ", so the game uses the text as written.";
 	case Code::TableCellsDeferred:
