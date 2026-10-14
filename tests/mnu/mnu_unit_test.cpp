@@ -117,11 +117,10 @@ bool test_window_creation() {
   const mnu::Window &r = root(doc);
   CHECK(r.children.size() == 3, "NOTYPE and EMPTY are not created");
   CHECK(noted(notes, "WINDOW[NOTYPE]") && noted(notes, "WINDOW[EMPTY]"), "both are noted");
-  CHECK(r.children[0].type == mnu::WindowType::Static && r.children[0].type_token == "STATIC", "the last TYPE");
-  CHECK(r.children[1].type == mnu::WindowType::Window && r.children[1].type_token == "static'",
-        "a single-quoted keyword keeps its quote and never matches");
-  CHECK(r.children[2].type == mnu::WindowType::Window && r.children[2].type_token == "combo",
-        "an OpenNova-only alias builds a generic window, its token kept");
+  CHECK(r.children[0].type == mnu::WindowType::Static, "the last TYPE");
+  CHECK(r.children[1].type == mnu::WindowType::Window, "a single-quoted keyword keeps its quote and never matches");
+  CHECK(r.children[2].type == mnu::WindowType::Window,
+        "an OpenNova-only alias builds a generic window (the model holds the type alone, written as its name)");
   for (const char *alias : {"check", "combo", "spin", "multi", "map", "globe", "label", "goto", "marquee",
                             "multilineedit", "window"})
     CHECK(mnu::parse_window_type(alias) == mnu::WindowType::Window, std::string("alias ") + alias);
@@ -242,7 +241,7 @@ bool test_action_rules() {
   const auto &a = root(doc).actions;
   CHECK(a.size() == 3, "every row");
   CHECK(a[0].target == "PANEL" && a[0].toggle && noted(notes, "/ACTION@TARGET"), "the text; TARGET noted");
-  CHECK(a[1].field == "s" && a[1].field_attr == "SOURCE" && a[1].external_browser && a[1].target == " addr ",
+  CHECK(a[1].field == "s" && a[1].external_browser && a[1].target == " addr ",
         "one slot, the first authored; EXTERNAL_BROWSER by presence; the text untrimmed");
   CHECK(noted(notes, "/ACTION@FIELD"), "the second of the slot is noted");
   CHECK(a[2].type == "FLY" && a[2].test == "GE", "an unknown TYPE is kept (code 0 at runtime)");
@@ -267,7 +266,7 @@ bool test_text_elements() {
   CHECK(w.string_data.value == "SECOND" && w.string_data.type.empty(), "the last text, TYPE reset");
   CHECK(w.string_data.justify == "RIGHT" && w.string_data.edge == 3 && w.string_data.wrap,
         "JUSTIFY and EDGE carry over; WRAP");
-  CHECK(w.toggle_string.present && w.toggle_string.type == "id" && w.toggle_string.value == "ALT", "TOGGLE_STRING");
+  CHECK(w.toggle_string.present && w.toggle_string.type == "ID" && w.toggle_string.value == "ALT", "TOGGLE_STRING");
   CHECK(w.private_data == "p1", "PRIVATE_DATA");
   CHECK(w.font.name == "a.fnt" && w.font.default_fg == "FF0000", "FONTs merge");
   CHECK(noted(notes, "/FONT@NAME") && noted(notes, "/CURSOR@FILE"), "attribute forms are noted");
@@ -357,12 +356,35 @@ bool test_list_rules() {
         "parse");
   CHECK(root(doc).items.items.size() == 1 && !root(doc).table_data.has_min_item_height, "the list parse ends");
   CHECK(noted(notes, "/ITEMS/APPEARANCE") && noted(notes, "/MIN_ITEM_HEIGHT"), "noted");
-  // Any other type keeps the row as authored (it reads no ITEMS APPEARANCE).
+  // A SPINLIST reads no ITEMS APPEARANCE: the row is left out, noted (its ITEM rows read).
+  notes.clear();
   CHECK(parse(screen_of("type=\"spinlist\" name=\"L\"",
                         std::string(kPos) + "<ITEMS><APPEARANCE type=\"color\">FF</APPEARANCE><ITEM>b</ITEM></ITEMS>"),
-              doc) &&
-            root(doc).items.appearances.size() == 1 && root(doc).items.items.size() == 1,
-        "a spin list keeps it");
+              doc, &notes) &&
+            root(doc).items.appearances.empty() && root(doc).items.items.size() == 1 &&
+            noted(notes, "/ITEMS/APPEARANCE"),
+        "a spin list leaves it out");
+  // A SCROLL's rows on another type are left out, noted [orig: CUIScrollWidget_ParseExtendedXMLDef @ 0x64c6d0
+  // runs for a SCROLL alone]; a TABLE's ITEMS reads its cells from ROWs, a LIST's no ROW.
+  notes.clear();
+  CHECK(parse(screen_of("type=\"button\" name=\"B\"",
+                        std::string(kPos) + "<SHUTTLE type=\"image\" state=\"default\">s.tga</SHUTTLE>"
+                                            "<SCROLLUP type=\"image\" state=\"default\">u.tga</SCROLLUP>"
+                                            "<ORIENTATION>HORIZONTAL</ORIENTATION>"),
+              doc, &notes) &&
+            root(doc).shuttle.empty() && root(doc).scrollup.empty() && root(doc).orientation.empty() &&
+            noted(notes, "/SHUTTLE") && noted(notes, "/SCROLLUP") && noted(notes, "/ORIENTATION"),
+        "a BUTTON leaves the scroll rows out");
+  notes.clear();
+  CHECK(parse(screen_of("type=\"table\" name=\"T\"", std::string(kPos) + "<ITEMS><ITEM>a</ITEM></ITEMS>"), doc,
+              &notes) &&
+            root(doc).items.items.empty() && noted(notes, "/ITEMS/ITEM"),
+        "a TABLE leaves an ITEM outside a ROW out");
+  notes.clear();
+  CHECK(parse(screen_of("type=\"list\" name=\"L\"", std::string(kPos) + "<ITEMS><ROW><ITEM>a</ITEM></ROW></ITEMS>"),
+              doc, &notes) &&
+            root(doc).items.rows.empty() && noted(notes, "/ITEMS/ROW"),
+        "a LIST leaves a ROW out");
   return true;
 }
 
@@ -388,7 +410,7 @@ bool test_table_rules() {
   CHECK(c.headers[0].width == 50 && c.headers[0].sort == "A", "HEADER");
   // PRIMARY_SORT authored after the HEADER's COLUMN: the walk (last authored first)
   // meets it while the running index is still 0 [orig: @ 0x643240 / 0x64325f].
-  CHECK(c.primary_sort == 0 && c.primary_sort_token == "PRIMARY_SORT" && c.secondary_sort == -1,
+  CHECK(c.primary_sort == 0 && c.secondary_sort == -1,
         "a sort key takes the index as the walk stands");
   CHECK(c.bodies[0].has_column && c.bodies[0].column == 1, "BODY takes the running index");
   CHECK(c.bodies[0].display == "CUSTOM_DRAW" && c.bodies[0].bitmap_draw, "the first authored draw kind");
@@ -428,7 +450,7 @@ bool test_table_header_walk() {
         "parse");
   const mnu::TableColumn &c = root(doc).table_data.column;
   CHECK(c.count == 4 && noted(notes, "/COLUMN@COUNT"), "the first COUNT of 1 or more; the other noted");
-  CHECK(c.primary_sort == 1 && c.primary_sort_token == "DEFAULT_SORT", "after COLUMN: the index before it");
+  CHECK(c.primary_sort == 1, "after COLUMN: the index before it");
   CHECK(c.secondary_sort == 3 && c.tertiary_sort == 3, "before COLUMN: the HEADER's own; the last write wins");
   CHECK(noted(notes, "/HEADER@SECONDARY_SORT"), "the replaced key is noted");
   const std::vector<mnu::TableHeaderSetup> setup = mnu::table_header_setup(c);
@@ -469,7 +491,7 @@ bool test_repeated_type_elements() {
                                             "</ORIENTATION><ORIENTATION>VERTICAL</ORIENTATION>"),
               doc, &notes),
         "parse");
-  CHECK(root(doc).orientation == "horizontal" && noted(notes, "/ORIENTATION"), "any HORIZONTAL decides");
+  CHECK(root(doc).orientation == "HORIZONTAL" && noted(notes, "/ORIENTATION"), "any HORIZONTAL decides");
   CHECK(parse(screen_of("type=\"marquee_wnd\" name=\"M\"",
                         std::string(kPos) + "<DATASOURCE>a.kda</DATASOURCE><DATASOURCE>b.kda</DATASOURCE>"
                                             "<TEXT_RSRC></TEXT_RSRC>"),
@@ -512,13 +534,13 @@ bool test_fatal_notes() {
   CHECK(fatal(screen_of("type=\"combobox\" name=\"C\" MAXCHAR=\"\"", kPos), "@MAXCHAR") == 0,
         "MAXCHAR on a combo (not read)");
   CHECK(fatal(screen_of("type=\"window\" name=\"W\"", std::string(kPos) + "<STRING justify=\"\">x</STRING>"),
-              "/STRING@JUSTIFY") == 0,
-        "STRING on a generic window (not read)");
+              "/STRING") == 0,
+        "STRING on a generic window (not read: left out, not fatal)");
   CHECK(fatal("<SCREEN><NAME>S</NAME><WINDOW type=\"\" name=\"W\">" + std::string(kPos) + "</WINDOW></SCREEN>",
               "WINDOW[W]") == 1,
         "a WINDOW with an empty TYPE");
   CHECK(fatal("<SCREEN><NAME>S</NAME><MUSICVAR></MUSICVAR></SCREEN>", "/MUSICVAR") == 1, "an empty MUSICVAR");
-  CHECK(fatal(screen_of("type=\"static\" name=\"W\"", std::string(kPos) + "<GROUP>1</GROUP>"), "/GROUP") == -2,
+  CHECK(fatal(screen_of("type=\"radio\" name=\"W\"", std::string(kPos) + "<GROUP>1</GROUP>"), "/GROUP") == -2,
         "a note-free menu");
   // A number holding a stylesheet variable: retail reads the variable's value, the model
   // only the number wcstol reads here, so a save would lose it (D-MNU-1).
@@ -620,7 +642,8 @@ bool test_fatal_notes() {
   return true;
 }
 
-// What only the GLB_TABLE, GOPHER and LAN_LIST parses read is kept as read.
+// What only the GLB_TABLE, GOPHER and LAN_LIST parses read: each on the type that reads it, its
+// attribute names as the writer spells them (upper case).
 bool test_extras() {
   mnu::Document doc;
   std::vector<mnu::ParseNote> notes;
@@ -633,9 +656,12 @@ bool test_extras() {
         "parse");
   const mnu::Window &w = root(doc);
   CHECK(w.extra_attributes.size() == 1 && w.extra_attributes[0].name == "PLAYERLIST", "PLAYERLIST");
-  CHECK(w.extras.size() == 3 && w.extras[0].tag == "GLB_TABLE" && w.extras[1].text == "http://x", "extras");
-  CHECK(w.extras[0].children[0].children[0].attributes[1].value == "ping", "the subtree as read");
-  CHECK(noted(notes, "/BOGUS") && notes.size() == 1, "only the unknown element is noted");
+  CHECK(w.extras.size() == 2 && w.extras[0].tag == "GLB_TABLE" && w.extras[1].text == "http://x", "extras");
+  CHECK(w.extras[0].children[0].children[0].attributes[1].name == "FIELD" &&
+            w.extras[0].children[0].children[0].attributes[1].value == "ping",
+        "the subtree as read, its names upper case");
+  CHECK(noted(notes, "/BOGUS") && noted(notes, "/JOIN_BUTTON") && notes.size() == 2,
+        "the unknown element and the LAN_LIST's JOIN_BUTTON (a GLB_TABLE reads none) are noted");
   CHECK(fixed_point(doc), "fixed point");
   return true;
 }
@@ -704,7 +730,6 @@ bool test_write_issues() {
   CHECK(issue_for(d).find("FILE") != std::string::npos, "a SCREEN action with no FILE");
   d = base;
   d.screens[0].roots[0].type = mnu::WindowType::Edit;
-  d.screens[0].roots[0].type_token.clear();
   d.screens[0].roots[0].global_var = true;
   CHECK(issue_for(d).find("GLOBAL_VAR") != std::string::npos, "GLOBAL_VAR on an edit");
   d = base;
@@ -788,7 +813,6 @@ bool test_every_element_fixed_point() {
   action.state = "SHOW";
   action.file = "f.mnu";
   action.field = "slot";
-  action.field_attr = "NAME";
   action.has_target_form = true;
   action.target_form = 0;
   action.toggle = action.external_browser = true;
@@ -850,7 +874,6 @@ bool test_every_element_fixed_point() {
   subst.file = "x.tga";
   w.table_data.column = {true, 1, true, 0, {header}, {body}, {subst}};
   w.table_data.column.primary_sort = 0;
-  w.table_data.column.primary_sort_token = "DEFAULT_SORT";
   w.table_data.column.secondary_sort = w.table_data.column.tertiary_sort = 0;
   w.table_data.has_min_item_height = true;
   w.table_data.min_item_height = 20;
@@ -885,9 +908,15 @@ bool test_every_element_fixed_point() {
   CHECK(parse(mnu::serialize(doc), back), "parse");
   const mnu::Window &r = back.screens[0].roots[0];
   CHECK(r.table_data.column.bodies[0].display == "BITMAP_TEXT", "the draw kind written first");
-  CHECK(r.actions[0].field_attr == "NAME" && r.actions[0].field == "slot", "the slot's spelling");
-  CHECK(r.extras[0].text == "note" && r.extras[0].children.size() == 1, "text beside children, compact");
-  CHECK(r.spindown && r.spindown->string_data.value == "-" && r.list_box->scrollbar, "parts");
+  CHECK(r.actions[0].field == "slot", "the slot, written FIELD");
+  // What a TABLE's parse does not read is not written (the writer puts down what the type reads):
+  // the edit attributes, AS_BUTTON, the scroll elements, DATASOURCE, a LIST's ITEM rows, the parts
+  // a COMBOBOX and a SPINLIST read, the LAN_LIST and GLB_TABLE elements and attributes.
+  CHECK(!r.readonly && !r.as_button && !r.number && !r.password && !r.has_maxchar && r.orientation.empty() &&
+            r.shuttle.empty() && r.datasources.empty() && r.items.items.empty() && !r.items.rows.empty() &&
+            r.items.justify.empty() && !r.spindown && !r.list_box && r.extras.empty() && r.extra_attributes.empty(),
+        "what a TABLE does not read is not written");
+  CHECK(r.scrollbar && r.checked && r.has_group && r.table_data.has_min_item_height, "what a TABLE reads is");
   CHECK(back.screens[0].roots.size() == 2, "both roots");
   return true;
 }
@@ -923,9 +952,10 @@ bool test_keyword_tokens() {
               doc),
         "parse");
   const mnu::Window &w = root(doc);
-  CHECK(w.string_data.justify == "center", "of repeated attributes, the first token the parse knows");
-  CHECK(w.actions.size() == 1 && w.actions[0].field == "F" && w.actions[0].field_attr == "SOURCE",
-        "SOURCE writes the FIELD slot");
+  CHECK(w.string_data.justify == "CENTER",
+        "of repeated attributes, the first token the parse knows, as its table spells it");
+  CHECK(w.actions.size() == 1 && w.actions[0].field == "F" && w.actions[0].type == "WINDOW",
+        "SOURCE writes the FIELD slot; a known TYPE as its table spells it");
   mnu::Window table;
   table.type = mnu::WindowType::Table;
   table.table_data.column.headers.resize(1);
@@ -999,7 +1029,7 @@ std::vector<uint8_t> utf16le(const std::u16string &text) {
 // [orig: XML_ParseWithBOMDetection @ 0x76a690] The code page, UTF-8 with its mark and
 // UTF-16 LE are kept; a big-endian file is read as little-endian and loads nothing.
 bool test_source_encoding() {
-  const std::string src = "<SCREEN><NAME>S</NAME><WINDOW type=\"window\" name=\"R\"><STRING>caf\xE9</STRING>"
+  const std::string src = "<SCREEN><NAME>S</NAME><WINDOW type=\"static\" name=\"R\"><STRING>caf\xE9</STRING>"
                           "</WINDOW></SCREEN>";
   mnu::Document doc;
   std::string error;
@@ -1009,13 +1039,13 @@ bool test_source_encoding() {
   CHECK(mnu::serialize_bytes(doc, saved, error) && std::string(saved.begin(), saved.end()).find("caf\xE9") !=
                                                         std::string::npos,
         "written back as bytes");
-  const std::string bom = "\xEF\xBB\xBF<SCREEN><NAME>S</NAME><WINDOW type=\"window\" name=\"R\"><STRING>caf\xC3\xA9"
+  const std::string bom = "\xEF\xBB\xBF<SCREEN><NAME>S</NAME><WINDOW type=\"static\" name=\"R\"><STRING>caf\xC3\xA9"
                           "</STRING></WINDOW></SCREEN>";
   CHECK(mnu::parse(bom, doc, error) && doc.source_encoding == mnu::SourceEncoding::Utf8Bom &&
             root(doc).string_data.value == "caf\xC3\xA9",
         "UTF-8 with its mark");
   const std::vector<uint8_t> wide =
-      utf16le(u"<SCREEN><NAME>S</NAME><WINDOW type=\"window\" name=\"R\"><STRING>caf" + std::u16string(1, char16_t(0xE9)) +
+      utf16le(u"<SCREEN><NAME>S</NAME><WINDOW type=\"static\" name=\"R\"><STRING>caf" + std::u16string(1, char16_t(0xE9)) +
               u"</STRING></WINDOW></SCREEN>");
   CHECK(mnu::parse(wide.data(), wide.size(), doc, error) && doc.source_encoding == mnu::SourceEncoding::Utf16LE &&
             root(doc).string_data.value == "caf\xC3\xA9",

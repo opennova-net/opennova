@@ -4,6 +4,7 @@
 #include <formats/mnu/mnu.h>
 
 #include <formats/mns/mns.h>
+#include <formats/mnu/mnu_schema.h>
 #include <formats/mnu/mnu_xml.h>
 #include <formats/rtxt/rtxt.h>
 
@@ -253,11 +254,13 @@ private:
   void read_action(const Node &node, Action &out);
   void read_cursor(const Node &node, Cursor &cursor);
   void read_string(const Node &node, String &s, bool repeated);
-  // `cell`: a TABLE ROW cell, the only ITEM whose COLUMN retail reads.
-  void read_item(const Node &node, Item &item, bool cell);
-  // False when a row retail's LIST / TABLE parse stops at was read (`stops` is the
-  // window's type rule).
-  bool read_items(const Node &node, Items &items, bool list_rule, bool table_rule);
+  // `cell`: a TABLE ROW cell, the only ITEM whose COLUMN retail reads; `type` the window's.
+  void read_item(const Node &node, Item &item, bool cell, WindowType type);
+  // False when a row retail's LIST / TABLE parse stops at was read. Each row and attribute
+  // the window's `type` reads (schema_reads "items.*"); the others are left out.
+  bool read_items(const Node &node, Items &items, WindowType type);
+  // Each attribute of `name` on `node`: one the window's type does not read, left out.
+  void not_read(const Node &node, const char *name, WindowType type);
   void read_column(const Node &node, TableColumn &column);
   Element read_extra(const Node &node);
   void unread_rest(const Node &parent, size_t from, const char *const *tags, const std::string &why);
@@ -344,7 +347,18 @@ bool TreeReader::flag(const Node &node, const char *name) {
 std::string TreeReader::keyword(const Node &node, const char *name, const char *const *tokens) {
   std::string out;
   token(node, effective(node, name, tokens), out);
+  // A token the parse knows, as its table spells it: the compare is without case, so the
+  // file's spelling is none of the model's.
+  for (const char *const *t = tokens; *t; ++t)
+    if (iequals(out, *t)) return *t;
   return out;
+}
+
+void TreeReader::not_read(const Node &node, const char *name, WindowType type) {
+  for (const Attribute &a : node.attributes)
+    if (mnu_xml::iequals(a.name, name))
+      because(&a, std::string("A ") + strutil::to_upper(window_type_name(type)) + " reads no " + name +
+                      " (its type's parse does not); it is left out.");
 }
 
 std::string TreeReader::string_attr(const Node &node, const char *name) {
@@ -495,8 +509,9 @@ bool TreeReader::read_created_window(const Node &node, Window &out) {
     fatal_because(&node, "A WINDOW with an empty TYPE: retail's factory faults on it; it is left out.");
     return false;
   }
+  // The factory's match of the token (a generic window for a token it does not match); the writer
+  // puts the type's own name down.
   out.type = parse_window_type(token_text);
-  out.type_token = token_text;
   ReadScope frame;
   read_window_body(node, out, frame);
   return true;
@@ -527,8 +542,9 @@ void TreeReader::read_part(const Node &node, WindowPart &part, WindowType type, 
   if (!first_time) node.read = false; // the note covers the element; its content is read
 }
 
-// The base parse [orig: CUIElement_ParseXMLDefinition @ 0x648120] then every
-// type's own parse, flattened: the model keeps what any type reads.
+// The base parse [orig: CUIElement_ParseXMLDefinition @ 0x648120] then the window's
+// type's own parse: the model keeps what its type reads, an element or an attribute only
+// another type's parse reads left out (schema_reads, grill set A3).
 void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame) {
   node.read = true;
   // The base attribute walk: NAME and FORM (first authored), the presence flags.
@@ -547,21 +563,29 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
   // The per-type attribute walks [orig: CRadioWnd_ParseXMLDefinition @ 0x656c40;
   // CCheckWnd_ParseXMLDefinition @ 0x64ad90; CEditWnd_ParseXMLProperties
   // @ 0x661d10; CLanGameBrowser_ParseExtendedXMLDefinition @ 0x65dac0].
-  w.checked = flag(node, "CHECKED") || w.checked;
-  w.as_button = flag(node, "AS_BUTTON") || w.as_button;
-  w.password = flag(node, "PASSWORD") || w.password;  // [orig: PASSWORD compare @ 0x661d3b]
-  w.number = flag(node, "NUMBER") || w.number;
-  w.readonly = flag(node, "READONLY") || w.readonly;
-  {
-    Reads edit(*this, reads_edit_attributes(w.type));
+  const auto own = [&w](const char *path) { return schema_reads(w.type, path) == SchemaApplies::Reads; };
+  if (own("checked")) w.checked = flag(node, "CHECKED") || w.checked;
+  else not_read(node, "CHECKED", w.type);
+  if (own("as_button")) w.as_button = flag(node, "AS_BUTTON") || w.as_button;
+  else not_read(node, "AS_BUTTON", w.type);
+  if (reads_edit_attributes(w.type)) {
+    w.password = flag(node, "PASSWORD") || w.password;  // [orig: PASSWORD compare @ 0x661d3b]
+    w.number = flag(node, "NUMBER") || w.number;
+    w.readonly = flag(node, "READONLY") || w.readonly;
     if (number_attr(node, "MAXCHAR", number)) { w.maxchar = number; w.has_maxchar = true; }
     if (number_attr(node, "MAXVAL", number)) { w.maxval = number; w.has_maxval = true; }
     if (number_attr(node, "MINVAL", number)) { w.minval = number; w.has_minval = true; }
+  } else {
+    for (const char *name : {"PASSWORD", "NUMBER", "READONLY", "MAXCHAR", "MAXVAL", "MINVAL"}) not_read(node, name, w.type);
   }
   for (const Attribute &a : node.attributes) {
     if (in(a.name, kExtraAttributes)) {
+      if (!own("attribute")) {
+        not_read(node, mnu_xml::ascii(a.name).c_str(), w.type);
+        continue;
+      }
       a.read = true;
-      w.extra_attributes.push_back({mnu_xml::ascii(a.name), std::string(), false});
+      w.extra_attributes.push_back({strutil::to_upper(mnu_xml::ascii(a.name)), std::string(), false});
     } else if (mnu_xml::iequals(a.name, "GROUP")) {
       because(&a, "GROUP is read only as a child element (<GROUP>n</GROUP>); the attribute is left out.");
     } else if (mnu_xml::iequals(a.name, "DISABLED")) {
@@ -657,7 +681,6 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
   }
 
   // The type's own elements, in document order.
-  const bool scroll_rule = w.type == WindowType::Scroll;
   const bool list_rule = w.type == WindowType::List || w.type == WindowType::LanList;
   const bool table_rule = w.type == WindowType::Table;
   bool scroll_stopped = false, own_stopped = false;
@@ -667,7 +690,19 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
     if ((scroll_stopped && tag_in(child, kScrollTags)) ||
         (own_stopped && tag_in(child, list_rule ? kListTags : kTableTags)))
       continue;
-    Reads reads(*this, type_reads(w.type, child));
+    // An element only another type's parse reads: left out (the window's type never reads it).
+    const bool read_here = tag_in(child, kExtraTags)
+                               ? schema_element_reads(w.type, mnu_xml::ascii(child.tag)) == SchemaApplies::Reads
+                           : tag_is(child, "DATASOURCE") ? w.type == WindowType::Marquee
+                                                         : type_reads(w.type, child);
+    if (!read_here) {
+      if (tag_in(child, kExtraTags) || tag_is(child, "DATASOURCE") || tag_in(child, kScrollTags) ||
+          tag_in(child, kTableTags) || tag_is(child, "STRING") || tag_is(child, "TOGGLE_STRING") ||
+          tag_is(child, "GROUP") || tag_is(child, "SPINUP") || tag_is(child, "SPINDOWN") || tag_is(child, "LIST_BOX"))
+        because(&child, "A " + strutil::to_upper(window_type_name(w.type)) + " reads no " +
+                            mnu_xml::ascii(child.tag) + " (its type's parse does not); it is left out.");
+      continue;
+    }
     if (tag_is(child, "STRING")) {
       const bool first_one = singleton(frame, child, "STRING", true);
       read_string(child, w.string_data, !first_one);
@@ -682,7 +717,7 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
       w.has_group = true;
     } else if (tag_is(child, "ITEMS")) {
       const bool first_one = singleton(frame, child, "ITEMS", true);
-      if (!read_items(child, w.items, list_rule, table_rule)) {
+      if (!read_items(child, w.items, w.type)) {
         own_stopped = true;
         unread_rest(node, i + 1, list_rule ? kListTags : kTableTags,
                     "Not read: an earlier ITEMS APPEARANCE stopped this widget's list parse in retail.");
@@ -722,16 +757,20 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
       // Only a HORIZONTAL text sets anything and nothing resets it [orig: @ 0x64c745 /
       // 0x64c755]: the model keeps the first HORIZONTAL one, else the first.
       const auto seen = frame.seen.find("ORIENTATION");
+      // The model holds what the text decides: HORIZONTAL, or nothing (vertical).
+      const auto decided = [this](const Node &n) {
+        return iequals(text_of(n), kHorizontalOrientation) ? std::string(kHorizontalOrientation) : std::string();
+      };
       if (seen == frame.seen.end()) {
         frame.seen["ORIENTATION"] = &child;
-        w.orientation = text_of(child);
+        w.orientation = decided(child);
       } else if (mnu_xml::iequals(child.text, kHorizontalOrientation) &&
                  !mnu_xml::iequals(seen->second->text, kHorizontalOrientation)) {
         seen->second->read = false;
         because(seen->second, "A later HORIZONTAL ORIENTATION decides (retail never resets it to vertical); "
                               "this one is left out.");
         seen->second = &child;
-        w.orientation = text_of(child);
+        w.orientation = decided(child);
       } else {
         because(&child, "A repeated ORIENTATION changes nothing in retail (only a HORIZONTAL one sets anything, "
                         "and nothing resets it); it is left out.");
@@ -745,7 +784,7 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
     } else if (tag_in(child, kScrollTags)) {
       Appearance row;
       const bool ok = read_appearance(child, row, kAppearanceTypes);
-      if (!ok && scroll_rule) {
+      if (!ok) {
         scroll_stopped = true;
         because(&child, mnu_xml::ascii(child.tag) + " with no STATE retail knows stops the scroll parse in "
                                                    "retail: it and the scroll elements after it are left out.");
@@ -753,7 +792,6 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
                     "Not read: an earlier scroll part stopped the scroll parse in retail.");
         continue;
       }
-      // (Not a SCROLL: retail reads none of these; the row is kept as authored.)
       child.read = true;
       if (tag_is(child, "SHUTTLE")) w.shuttle.push_back(std::move(row));
       else if (tag_is(child, "SCROLLUP") || tag_is(child, "SCROLLLEFT")) w.scrollup.push_back(std::move(row));
@@ -888,7 +926,7 @@ void TreeReader::read_action(const Node &node, Action &out) {
     else because(&a, "FIELD, SOURCE and NAME write one slot and retail keeps the first authored; " +
                          mnu_xml::ascii(a.name) + " is left out.");
   }
-  if (slot && token(node, slot, out.field)) out.field_attr = strutil::to_upper(mnu_xml::ascii(slot->name));
+  if (slot) token(node, slot, out.field);
   out.state = keyword(node, "STATE", kActionStates);
   int number = 0;
   if (number_attr(node, "TARGET_FORM", number)) { out.target_form = number; out.has_target_form = true; }
@@ -934,16 +972,24 @@ void TreeReader::read_string(const Node &node, String &s, bool repeated) {
   if (repeated) node.read = false; // the merge note covers it
 }
 
-void TreeReader::read_item(const Node &node, Item &item, bool cell) {
+void TreeReader::read_item(const Node &node, Item &item, bool cell, WindowType type) {
   node.read = true;
   item.type = keyword(node, "TYPE", kItemTypes);
   item.value = string_attr(node, "VALUE");
   item.justify = keyword(node, "JUSTIFY", kJustify);
   item.vjustify = keyword(node, "VJUSTIFY", kVJustify);
-  item.pairs_list = flag(node, "PAIRS_LIST");
+  // PAIRS_LIST a LIST's ITEM alone reads, COLUMN a TABLE cell alone (schema_reads
+  // "items.item.pairs_list", "items.item.column", "items.row.item.pairs_list").
+  if (!cell && schema_reads(type, "items.item.pairs_list") == SchemaApplies::Reads)
+    item.pairs_list = flag(node, "PAIRS_LIST");
+  else
+    not_read(node, "PAIRS_LIST", type);
   int number = 0;
-  Reads column(*this, cell);
-  if (number_attr(node, "COLUMN", number)) { item.column = number; item.has_column = true; }
+  if (cell) {
+    if (number_attr(node, "COLUMN", number)) { item.column = number; item.has_column = true; }
+  } else {
+    not_read(node, "COLUMN", type);
+  }
   item.text = text_of(node);
 }
 
@@ -951,12 +997,25 @@ void TreeReader::read_item(const Node &node, Item &item, bool cell) {
 // the SPINLIST form, and the TABLE form (MULTISELECT; ROW > ITEM cells;
 // APPEARANCE with IMAGEROW) [orig: @ 0x6457b6, 0x64bd57, 0x642816]. An APPEARANCE
 // row with no known STATE ends a LIST's or a TABLE's own parse.
-bool TreeReader::read_items(const Node &node, Items &items, bool list_rule, bool table_rule) {
+bool TreeReader::read_items(const Node &node, Items &items, WindowType type) {
+  const bool list_rule = type == WindowType::List || type == WindowType::LanList;
+  const bool table_rule = type == WindowType::Table;
+  const auto reads = [type](const char *path) { return schema_reads(type, path) == SchemaApplies::Reads; };
   node.read = true;
   items.present = true;
-  if (node.attr("JUSTIFY")) items.justify = keyword(node, "JUSTIFY", kJustify);
-  if (node.attr("VJUSTIFY")) items.vjustify = keyword(node, "VJUSTIFY", kVJustify);
-  if (flag(node, "MULTISELECT")) items.multiselect = true;
+  if (reads("items.justify")) {
+    if (node.attr("JUSTIFY")) items.justify = keyword(node, "JUSTIFY", kJustify);
+    if (node.attr("VJUSTIFY")) items.vjustify = keyword(node, "VJUSTIFY", kVJustify);
+  } else {
+    not_read(node, "JUSTIFY", type);
+    not_read(node, "VJUSTIFY", type);
+  }
+  if (reads("items.multiselect")) {
+    if (flag(node, "MULTISELECT")) items.multiselect = true;
+  } else {
+    not_read(node, "MULTISELECT", type);
+  }
+  const std::string kind = strutil::to_upper(window_type_name(type));
   for (size_t i = 0; i < node.children.size(); ++i) {
     const Node &c = *node.children[i];
     // Each form reads its own rows (docs/mnu/menu-re.md, the ITEMS forms): an ITEM
@@ -965,32 +1024,41 @@ bool TreeReader::read_items(const Node &node, Items &items, bool list_rule, bool
     // CListWnd_ParseXMLDefinition @ 0x645770; CUISpinList_ParseXMLDefinition @ 0x64bd10;
     // CTableWnd_ParseXMLContentDefinition @ 0x6427d0].
     if (tag_is(c, "ITEM")) {
-      Reads reads(*this, !table_rule);
+      if (!reads("items.item")) {
+        because(&c, "A " + kind + "'s ITEMS reads no ITEM row here" +
+                        (table_rule ? " (a TABLE's cells are ITEMs in a ROW)" : "") + "; it is left out.");
+        continue;
+      }
       Item item;
-      read_item(c, item, false);
+      read_item(c, item, false, type);
       items.items.push_back(std::move(item));
     } else if (tag_is(c, "ROW")) {
-      Reads reads(*this, table_rule);
+      if (!reads("items.row")) {
+        because(&c, "A " + kind + "'s ITEMS reads no ROW (a TABLE's alone does); it is left out.");
+        continue;
+      }
       c.read = true;
       TableRow row;
       for (const auto &cell_ptr : c.children) {
         if (!tag_is(*cell_ptr, "ITEM")) continue;
         Item cell;
-        read_item(*cell_ptr, cell, true);
+        read_item(*cell_ptr, cell, true, type);
         row.cells.push_back(std::move(cell));
       }
       items.rows.push_back(std::move(row));
     } else if (tag_is(c, "APPEARANCE")) {
-      Reads reads(*this, list_rule || table_rule);
+      if (!reads("items.appearance")) {
+        because(&c, "A " + kind + "'s ITEMS reads no APPEARANCE (a LIST's and a TABLE's do); it is left out.");
+        continue;
+      }
       Appearance appearance;
       const bool ok = read_appearance(c, appearance, table_rule ? kTableAppearanceTypes : kAppearanceTypes);
-      if (!ok && (list_rule || table_rule)) {
+      if (!ok) {
         because(&c, "An ITEMS APPEARANCE with no STATE retail knows ends this widget's list parse in retail: "
                     "it and what follows are left out.");
         unread_rest(node, i + 1, nullptr, "Not read: an earlier ITEMS APPEARANCE ended the list parse.");
         return false;
       }
-      // (Another type reads no ITEMS APPEARANCE: the row is kept as authored.)
       c.read = true;
       items.appearances.push_back(std::move(appearance));
     }
@@ -1078,7 +1146,6 @@ void TreeReader::read_column(const Node &node, TableColumn &column) {
         sort_headers[slot] = &c;
         if (slot == 0) {
           column.primary_sort = walk_index;
-          column.primary_sort_token = strutil::to_upper(mnu_xml::ascii(a.name));
         } else {
           (slot == 1 ? column.secondary_sort : column.tertiary_sort) = walk_index;
         }
@@ -1147,11 +1214,16 @@ Element TreeReader::read_extra(const Node &node) {
   Element element;
   element.tag = strutil::to_upper(mnu_xml::ascii(node.tag));
   element.text = narrow(node.text);
+  // White space beside child elements is the file's layout, none of the element's text (the writer
+  // lays a container out in its own form).
+  if (!node.children.empty() &&
+      std::all_of(element.text.begin(), element.text.end(), [](char c) { return std::isspace(static_cast<unsigned char>(c)); }))
+    element.text.clear();
   for (const Attribute &a : node.attributes) {
     a.read = true;
     if (a.name.empty() && !a.has_value) continue;
     ElementAttribute attr;
-    attr.name = narrow(a.name);
+    attr.name = strutil::to_upper(narrow(a.name)); // the parses compare names without case
     Text tok;
     attr.has_value = a.has_value;
     if (a.token(tok)) attr.value = narrow(tok);
@@ -1407,6 +1479,211 @@ bool parse_file(const std::string &path, Document &out, std::string &error,
 
   return parse(content, out, error, notes);
 }
+
+// --- the model's equality ---------------------------------------------------------------------
+
+namespace {
+
+// Field-by-field equality over the model; `where` gathers the path to the first difference.
+class Same {
+public:
+  explicit Same(std::string *where) : where_(where) {}
+
+  bool document(const Document &a, const Document &b) {
+    if (!same(a.source_encoding == b.source_encoding, "source_encoding")) return false;
+    return list(a.screens, b.screens, "screen", [this](const Screen &x, const Screen &y) { return screen(x, y); });
+  }
+
+private:
+  std::string *where_;
+  std::vector<std::string> path_;
+
+  bool same(bool equal, const std::string &field) {
+    if (!equal && where_) {
+      std::string at;
+      for (const std::string &step : path_) at += step + "/";
+      *where_ = at + field;
+    }
+    return equal;
+  }
+  template <typename T, typename F>
+  bool list(const std::vector<T> &a, const std::vector<T> &b, const char *name, F each) {
+    if (!same(a.size() == b.size(), std::string(name) + " count")) return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+      path_.push_back(std::string(name) + ":" + std::to_string(i));
+      const bool ok = each(a[i], b[i]);
+      path_.pop_back();
+      if (!ok) return false;
+    }
+    return true;
+  }
+  bool screen(const Screen &a, const Screen &b) {
+    return same(a.name == b.name, "name") && same(a.has_music_var == b.has_music_var, "has_music_var") &&
+           same(a.music_var == b.music_var, "music_var") &&
+           list(a.roots, b.roots, "window", [this](const Window &x, const Window &y) { return window(x, y); });
+  }
+  bool appearance(const Appearance &a, const Appearance &b) {
+    return same(a.state == b.state, "state") && same(a.type == b.type, "type") && same(a.value == b.value, "value") &&
+           same(a.has_map_state == b.has_map_state && a.map_state == b.map_state, "map_state") &&
+           same(a.has_height == b.has_height && a.height == b.height, "height") && same(a.flags == b.flags, "flags");
+  }
+  bool appearances(const std::vector<Appearance> &a, const std::vector<Appearance> &b, const char *name) {
+    return list(a, b, name, [this](const Appearance &x, const Appearance &y) { return appearance(x, y); });
+  }
+  bool item(const Item &a, const Item &b) {
+    return same(a.type == b.type, "type") && same(a.value == b.value, "value") && same(a.text == b.text, "text") &&
+           same(a.justify == b.justify, "justify") && same(a.vjustify == b.vjustify, "vjustify") &&
+           same(a.pairs_list == b.pairs_list, "pairs_list") &&
+           same(a.has_column == b.has_column && a.column == b.column, "column");
+  }
+  bool items(const Items &a, const Items &b) {
+    path_.push_back("items");
+    const bool ok =
+        same(a.present == b.present, "present") && same(a.multiselect == b.multiselect, "multiselect") &&
+        same(a.justify == b.justify, "justify") && same(a.vjustify == b.vjustify, "vjustify") &&
+        appearances(a.appearances, b.appearances, "appearance") &&
+        list(a.items, b.items, "item", [this](const Item &x, const Item &y) { return item(x, y); }) &&
+        list(a.rows, b.rows, "row", [this](const TableRow &x, const TableRow &y) {
+          return list(x.cells, y.cells, "item", [this](const Item &p, const Item &q) { return item(p, q); });
+        });
+    path_.pop_back();
+    return ok;
+  }
+  bool column(const TableColumn &a, const TableColumn &b) {
+    path_.push_back("column");
+    const bool ok =
+        same(a.has_count == b.has_count && a.count == b.count, "count") &&
+        same(a.has_spacing == b.has_spacing && a.spacing == b.spacing, "spacing") &&
+        list(a.headers, b.headers, "header",
+             [this](const TableHeader &x, const TableHeader &y) {
+               return same(x.justify == y.justify, "justify") && same(x.vjustify == y.vjustify, "vjustify") &&
+                      same(x.has_column == y.has_column && x.column == y.column, "column") &&
+                      same(x.sort == y.sort, "sort") && same(x.has_width == y.has_width && x.width == y.width, "width") &&
+                      same(x.type == y.type, "type") && same(x.text == y.text, "text");
+             }) &&
+        list(a.bodies, b.bodies, "body",
+             [this](const TableBody &x, const TableBody &y) {
+               return same(x.justify == y.justify, "justify") && same(x.vjustify == y.vjustify, "vjustify") &&
+                      same(x.has_column == y.has_column && x.column == y.column, "column") &&
+                      same(x.bitmap_draw == y.bitmap_draw, "bitmap_draw") &&
+                      same(x.bitmap_text == y.bitmap_text, "bitmap_text") &&
+                      same(x.custom_draw == y.custom_draw, "custom_draw") && same(x.display == y.display, "display") &&
+                      same(x.bitmap_flags == y.bitmap_flags, "bitmap_flags") &&
+                      same(x.scale_bitmap == y.scale_bitmap, "scale_bitmap");
+             }) &&
+        list(a.substitutions, b.substitutions, "subst",
+             [this](const TableSubst &x, const TableSubst &y) {
+               return same(x.has_column == y.has_column && x.column == y.column, "column") &&
+                      same(x.value == y.value, "value") && same(x.is_file == y.is_file, "file") &&
+                      same(x.is_url == y.is_url, "url") && same(x.file == y.file, "text");
+             }) &&
+        same(a.primary_sort == b.primary_sort, "primary_sort") &&
+        same(a.secondary_sort == b.secondary_sort, "secondary_sort") &&
+        same(a.tertiary_sort == b.tertiary_sort, "tertiary_sort");
+    path_.pop_back();
+    return ok;
+  }
+  bool element(const Element &a, const Element &b) {
+    return same(a.tag == b.tag, "tag") && same(a.text == b.text, "text") &&
+           list(a.attributes, b.attributes, "attribute",
+                [this](const ElementAttribute &x, const ElementAttribute &y) {
+                  return same(x.name == y.name, "name") && same(x.value == y.value, "value") &&
+                         same(x.has_value == y.has_value, "has_value");
+                }) &&
+           list(a.children, b.children, "element", [this](const Element &x, const Element &y) { return element(x, y); });
+  }
+  bool part(const WindowPart &a, const WindowPart &b, const char *name) {
+    if (!same(a.present() == b.present(), std::string(name) + " present")) return false;
+    if (!a.present()) return true;
+    path_.push_back(name);
+    const bool ok = window(*a, *b);
+    path_.pop_back();
+    return ok;
+  }
+  bool window(const Window &a, const Window &b) {
+    const Font &f = a.font, &g = b.font;
+    const Frame &r = a.frame, &q = b.frame;
+    return same(a.name == b.name, "name") && same(a.type == b.type, "type") && same(a.hidden == b.hidden, "hidden") &&
+           same(a.disabled == b.disabled, "disabled") && same(a.checked == b.checked, "checked") &&
+           same(a.draw_frame == b.draw_frame, "draw_frame") && same(a.modal == b.modal, "modal") &&
+           same(a.readonly == b.readonly, "readonly") && same(a.as_button == b.as_button, "as_button") &&
+           same(a.has_group == b.has_group && a.group == b.group, "group") && same(a.number == b.number, "number") &&
+           same(a.has_minval == b.has_minval && a.minval == b.minval, "minval") &&
+           same(a.has_maxval == b.has_maxval && a.maxval == b.maxval, "maxval") &&
+           same(a.has_maxchar == b.has_maxchar && a.maxchar == b.maxchar, "maxchar") &&
+           same(a.has_form == b.has_form && a.form == b.form, "form") && same(a.global_var == b.global_var, "global_var") &&
+           same(a.password == b.password, "password") && same(a.orientation == b.orientation, "orientation") &&
+           same(a.has_scroll_extent == b.has_scroll_extent && a.scroll_extent == b.scroll_extent &&
+                    a.scroll_extent_is_width == b.scroll_extent_is_width,
+                "scroll_extent") &&
+           same(a.position.has_left == b.position.has_left && a.position.left == b.position.left &&
+                    a.position.has_top == b.position.has_top && a.position.top == b.position.top &&
+                    a.position.has_right == b.position.has_right && a.position.right == b.position.right &&
+                    a.position.has_bottom == b.position.has_bottom && a.position.bottom == b.position.bottom,
+                "position") &&
+           appearances(a.appearances, b.appearances, "appearance") &&
+           list(a.sounds, b.sounds, "sound",
+                [this](const Sound &x, const Sound &y) {
+                  return same(x.state == y.state, "state") && same(x.trigger == y.trigger, "trigger") &&
+                         same(x.file == y.file, "file");
+                }) &&
+           list(a.actions, b.actions, "action",
+                [this](const Action &x, const Action &y) {
+                  return same(x.type == y.type, "type") && same(x.state == y.state, "state") &&
+                         same(x.file == y.file, "file") && same(x.field == y.field, "field") &&
+                         same(x.has_target_form == y.has_target_form && x.target_form == y.target_form, "target_form") &&
+                         same(x.toggle == y.toggle, "toggle") && same(x.test == y.test, "test") &&
+                         same(x.target == y.target, "target") && same(x.external_browser == y.external_browser, "external_browser");
+                }) &&
+           same(a.string_data.present == b.string_data.present && a.string_data.type == b.string_data.type &&
+                    a.string_data.justify == b.string_data.justify && a.string_data.vjustify == b.string_data.vjustify &&
+                    a.string_data.has_edge == b.string_data.has_edge && a.string_data.edge == b.string_data.edge &&
+                    a.string_data.wrap == b.string_data.wrap && a.string_data.value == b.string_data.value,
+                "string") &&
+           same(a.toggle_string.present == b.toggle_string.present && a.toggle_string.type == b.toggle_string.type &&
+                    a.toggle_string.value == b.toggle_string.value,
+                "toggle_string") &&
+           same(f.name == g.name && f.default_fg == g.default_fg && f.default_bg == g.default_bg &&
+                    f.mouseover_fg == g.mouseover_fg && f.mouseover_bg == g.mouseover_bg &&
+                    f.selected_fg == g.selected_fg && f.selected_bg == g.selected_bg && f.disabled_fg == g.disabled_fg &&
+                    f.disabled_bg == g.disabled_bg,
+                "font") &&
+           same(r.stencil == q.stencil && r.has_stencil_size == q.has_stencil_size && r.stencil_size == q.stencil_size &&
+                    r.brush == q.brush && r.monogram == q.monogram && r.has_insetx == q.has_insetx &&
+                    r.insetx == q.insetx && r.has_insety == q.has_insety && r.insety == q.insety,
+                "frame") &&
+           items(a.items, b.items) && part(a.list_box, b.list_box, "list_box") &&
+           same(a.has_sb_edge_pad == b.has_sb_edge_pad && a.sb_edge_pad == b.sb_edge_pad, "sb_edge_pad") &&
+           part(a.spinup, b.spinup, "spinup") && part(a.spindown, b.spindown, "spindown") &&
+           part(a.scrollbar, b.scrollbar, "scrollbar") &&
+           same(a.cursor.file == b.cursor.file && a.cursor.flags == b.cursor.flags, "cursor") &&
+           same(a.has_text_rsrc == b.has_text_rsrc && a.text_rsrc == b.text_rsrc, "text_rsrc") &&
+           same(a.private_data == b.private_data, "private_data") && same(a.datasources == b.datasources, "datasource") &&
+           list(a.hotkeys, b.hotkeys, "hotkey",
+                [this](const Hotkey &x, const Hotkey &y) {
+                  return same(x.value == y.value, "value") && same(x.virtual_key == y.virtual_key, "virtual");
+                }) &&
+           appearances(a.shuttle, b.shuttle, "shuttle") && appearances(a.scrollup, b.scrollup, "scrollup") &&
+           appearances(a.scrolldown, b.scrolldown, "scrolldown") && column(a.table_data.column, b.table_data.column) &&
+           same(a.table_data.has_min_item_height == b.table_data.has_min_item_height &&
+                    a.table_data.min_item_height == b.table_data.min_item_height,
+                "min_item_height") &&
+           same(a.table_data.has_fixed_header_height == b.table_data.has_fixed_header_height &&
+                    a.table_data.fixed_header_height == b.table_data.fixed_header_height,
+                "fixed_header_height") &&
+           list(a.extras, b.extras, "element", [this](const Element &x, const Element &y) { return element(x, y); }) &&
+           list(a.extra_attributes, b.extra_attributes, "attribute",
+                [this](const ElementAttribute &x, const ElementAttribute &y) {
+                  return same(x.name == y.name, "name") && same(x.value == y.value, "value") &&
+                         same(x.has_value == y.has_value, "has_value");
+                }) &&
+           list(a.children, b.children, "window", [this](const Window &x, const Window &y) { return window(x, y); });
+  }
+};
+
+}  // namespace
+
+bool equal(const Document &a, const Document &b, std::string *where) { return Same(where).document(a, b); }
 
 std::string strip_hotkey_marker(const std::string &text,
                                 std::string *out_hotkey,

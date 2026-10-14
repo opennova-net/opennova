@@ -34,7 +34,6 @@ const CodeRow kCodes[kMenuFrameNoteCodeCount] = {
 	{ Code::ColorUnparsed, "color_unparsed", Basis::Witnessed },
 	{ Code::ColorTransparent, "color_transparent", Basis::Witnessed },
 	{ Code::StyleVarUnresolved, "style_var_unresolved", Basis::Witnessed },
-	{ Code::TypeUnknown, "type_unknown", Basis::Witnessed },
 	{ Code::ItemKindAsText, "item_kind_as_text", Basis::Witnessed },
 	{ Code::TableCellsDeferred, "table_cells_deferred", Basis::Deferred },
 	{ Code::TableCellsCustom, "table_cells_custom", Basis::Witnessed },
@@ -217,13 +216,11 @@ void MenuFrameCompiler::note_appearance_row_(const std::vector<mnu::Appearance> 
 	}
 }
 
-// The window's own fields: its TYPE [orig: CUIScene_CreateWidgetByType @ 0x64f630 builds
-// a generic CWnd for a token it does not match], its FONT and asset names, a SCROLL's
-// arrow length, and the rows a list, a combo or a table holds that the port does not draw.
+// The window's own fields: its FONT and asset names, a SCROLL's arrow length, and the rows a
+// list, a combo or a table holds that the port does not draw. (A TYPE token the factory does not
+// match builds a generic window [orig: CUIScene_CreateWidgetByType @ 0x64f630]: the model holds
+// the type alone.)
 void MenuFrameCompiler::note_window_(const mnu::Window &w) const {
-	if (w.type == mnu::WindowType::Window && !w.type_token.empty() && !iequals(w.type_token, "window")) {
-		note_(Code::TypeUnknown, w.type_token, nullptr, -1, "type");
-	}
 	note_var_(w.font.name, nullptr, -1, "font.name");
 	note_color_(w.font.default_fg, true, nullptr, -1, "font.default_fg");
 	note_color_(w.font.mouseover_fg, true, nullptr, -1, "font.mouseover_fg");

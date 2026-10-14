@@ -294,7 +294,6 @@ static int test_configure_notes() {
 	{
 		Rig rig;
 		Window root = window(WindowType::Window, "ROOT", 0, 0, 800, 600);
-		root.type_token = "SLIDER";
 		Window radio_edit = window(WindowType::RadioEdit, "RE", 0, 0, 10, 10);
 		Window list = window(WindowType::List, "LIST", 0, 0, 100, 100);
 		list.items.present = true;
@@ -333,7 +332,6 @@ static int test_configure_notes() {
 		root.children = {radio_edit, list, table, scroll, sized};
 		rig.configure(root);
 		const std::vector<MenuFrameNote> &notes = rig.compiler.build_notes();
-		TEST_EXPECT(is(find(notes, Code::TypeUnknown), 0, "", -1, "type", "SLIDER"));
 		// A RADIOEDIT is drawn (its radio part): no note.
 		TEST_EXPECT(count(notes, Code::ItemKindAsText) == 1);
 		TEST_EXPECT(is(find(notes, Code::ItemKindAsText), 2, "items.item", 1, "type", "IMAGE"));

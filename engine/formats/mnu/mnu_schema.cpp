@@ -193,15 +193,10 @@ Window &schema_default_part(WindowPart &part, WindowType type) {
 
 // --- a window's TYPE ---------------------------------------------------------------------------
 
-// The factory's match of the token, the token written as typed: a token it does not match builds a
-// generic window [orig: CUIScene_CreateWidgetByType @ 0x64f630].
-std::string schema_type_token(const Window &window) {
-  return window.type_token.empty() ? std::string(window_type_name(window.type)) : window.type_token;
-}
-void schema_set_type_token(Window &window, const std::string &token) {
-  window.type = parse_window_type(token);
-  window.type_token = token;
-}
+// The factory's match of the token: a token it does not match builds a generic window [orig:
+// CUIScene_CreateWidgetByType @ 0x64f630]; the writer puts the type's own name down.
+std::string schema_type_token(const Window &window) { return window_type_name(window.type); }
+void schema_set_type_token(Window &window, const std::string &token) { window.type = parse_window_type(token); }
 
 // --- a part's string ids ------------------------------------------------------------------------
 
@@ -332,7 +327,7 @@ SchemaApplies schema_action_reads(const Action &action, const std::string &field
     return SchemaApplies::Ignored;
   };
   if (field == "file") return only({"SCREEN"});                       // kept for SCREEN only
-  if (field == "field" || field == "field_attr")                       // kept for these four
+  if (field == "field")                                                // kept for these four
     return only({"URL", "GLB_FILTER", "GLB_FILTER_NUM", "GLB_JOIN"});
   if (field == "state" || field == "toggle") return only({"WINDOW"});  // the WINDOW state switch @ 0x6498f7
   if (field == "external_browser") return only({"URL"});

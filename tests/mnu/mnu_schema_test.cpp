@@ -165,9 +165,10 @@ bool test_defaults() {
   CHECK(authored.appearances.size() == 1 && authored.appearances[0].state == "default", "a part's DEFAULT appearance");
   mnu::Window typed;
   mnu::schema_set_type_token(typed, "Button");
-  CHECK(typed.type == mnu::WindowType::Button && mnu::schema_type_token(typed) == "Button", "the token as typed");
+  CHECK(typed.type == mnu::WindowType::Button && mnu::schema_type_token(typed) == "button",
+        "the factory's type, written as its own name");
   mnu::schema_set_type_token(typed, "NOT_A_TYPE");
-  CHECK(typed.type == mnu::WindowType::Window && mnu::schema_type_token(typed) == "NOT_A_TYPE",
+  CHECK(typed.type == mnu::WindowType::Window && mnu::schema_type_token(typed) == "window",
         "a token the factory does not match builds a generic window");
   CHECK(mnu::schema_part_reads_root_text("list_box") && !mnu::schema_part_reads_root_text("spinup") &&
             !mnu::schema_part_reads_root_text("scrollbar"),

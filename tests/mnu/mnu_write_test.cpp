@@ -18,6 +18,7 @@
 
 #include <base/vfs/vfs.h>
 #include <formats/mnu/mnu.h>
+#include <formats/mnu/mnu_schema.h>
 
 #include "common/file_io.h"
 #include "common/retail_paths.h"
@@ -49,7 +50,8 @@ bool parse(const std::string &text, mnu::Document &doc) {
 	return true;
 }
 
-// The edited model, written, reads back as the edited model.
+// The edited model, written, reads back as the edited model: field by field (mnu::equal), no text
+// between them, so a field the writer drops is a difference (the #1098 review, F5).
 bool reads_back(const mnu::Document &edited, std::string *written = nullptr) {
 	const std::string text = mnu::serialize(edited);
 	if (written) *written = text;
@@ -59,8 +61,9 @@ bool reads_back(const mnu::Document &edited, std::string *written = nullptr) {
 		std::fprintf(stderr, "  the written menu does not read: %s\n", error.c_str());
 		return false;
 	}
-	if (canonical(again) != canonical(edited)) {
-		std::fprintf(stderr, "  the written menu reads back as another model:\n%s\n", text.c_str());
+	std::string where;
+	if (!mnu::equal(again, edited, &where)) {
+		std::fprintf(stderr, "  the written menu reads back as another model at %s:\n%s\n", where.c_str(), text.c_str());
 		return false;
 	}
 	return true;
@@ -83,17 +86,18 @@ bool same(const std::string &written, const std::string &expected, const char *w
 
 // --- a document made in code: the writer's form ------------------------------------------------
 
-// The bytes the writer puts down for the document below (captured once from the writer at
-// f1c26a276): pretty with two spaces a step, and on one line.
+// The bytes the writer puts down for the document below (captured from the writer for the #1098
+// review: each record on a window whose type reads it, each keyword as its table spells it): pretty
+// with two spaces a step, and on one line.
 const char *const kCanonicalPretty =
     "<SCREEN>\n"
     "  <NAME>EVERY</NAME>\n"
     "  <MUSICVAR>3</MUSICVAR>\n"
-    "  <WINDOW type=\"TABLE\" name=\"ALL\" DRAW_FRAME HIDDEN MODAL READONLY DISABLE CHECKED AS_BUTTON NUMBER MINVAL=\"-1\" MAXVAL=\"99\" MAXCHAR=\"2\" GLOBAL_VAR PASSWORD FORM=\"3\" SERVERLIST PLAYERLIST>\n"
+    "  <WINDOW type=\"table\" name=\"ALL\" DRAW_FRAME HIDDEN MODAL DISABLE CHECKED GLOBAL_VAR FORM=\"3\">\n"
     "    <GROUP>2</GROUP>\n"
     "    <HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>\n"
     "    <HOTKEY>=</HOTKEY>\n"
-    "    <ACTION type=\"WINDOW\" state=\"SHOW\" file=\"f.mnu\" NAME=\"slot\" target_form=\"0\" TOGGLE test=\"EQ\" EXTERNAL_BROWSER> PANEL </ACTION>\n"
+    "    <ACTION type=\"WINDOW\" state=\"SHOW\" file=\"f.mnu\" FIELD=\"slot\" target_form=\"0\" TOGGLE test=\"EQ\" EXTERNAL_BROWSER> PANEL </ACTION>\n"
     "    <ACTION type=\"SCREEN\" file=\"next.mnu\">NEXT</ACTION>\n"
     "    <FRAME>\n"
     "      <STENCIL size=\"8\" insetx=\"5\">s.tga</STENCIL>\n"
@@ -106,16 +110,9 @@ const char *const kCanonicalPretty =
     "      <RIGHT>300</RIGHT>\n"
     "      <BOTTOM>40</BOTTOM>\n"
     "    </POSITION>\n"
-    "    <WIDTH>20</WIDTH>\n"
-    "    <ORIENTATION>HORIZONTAL</ORIENTATION>\n"
-    "    <APPEARANCE type=\"image\" state=\"default\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">a.tga</APPEARANCE>\n"
-    "    <APPEARANCE type=\"image\" state=\"mouseover\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">b&amp;c&lt;d>.tga</APPEARANCE>\n"
-    "    <SHUTTLE type=\"image\" state=\"default\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">s1.tga</SHUTTLE>\n"
-    "    <SCROLLUP type=\"image\" state=\"default\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">u1.tga</SCROLLUP>\n"
-    "    <SCROLLDOWN type=\"image\" state=\"default\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">d1.tga</SCROLLDOWN>\n"
+    "    <APPEARANCE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">a.tga</APPEARANCE>\n"
+    "    <APPEARANCE type=\"IMAGE\" state=\"MOUSEOVER\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">b&amp;c&lt;d>.tga</APPEARANCE>\n"
     "    <TEXT_RSRC>menutxt.BIN</TEXT_RSRC>\n"
-    "    <DATASOURCE>nlist.kda</DATASOURCE>\n"
-    "    <DATASOURCE>credits.ini</DATASOURCE>\n"
     "    <PRIVATE_DATA>p</PRIVATE_DATA>\n"
     "    <CURSOR>\n"
     "      <FILE>c.tga</FILE>\n"
@@ -130,9 +127,8 @@ const char *const kCanonicalPretty =
     "    <STRING type=\"ID\" justify=\"CENTER\" vjustify=\"BOTTOM\" edge=\"4\" WRAP>KEY</STRING>\n"
     "    <TOGGLE_STRING type=\"ID\">ALT</TOGGLE_STRING>\n"
     "    <SOUND state=\"MOUSEIN\" trigger=\"MOUSE_OVER\">menu.lwf</SOUND>\n"
-    "    <ITEMS justify=\"LEFT\" vjustify=\"TOP\" MULTISELECT>\n"
-    "      <APPEARANCE type=\"image\" state=\"default\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">row.tga</APPEARANCE>\n"
-    "      <ITEM type=\"ID\" value=\"1\" justify=\"RIGHT\" vjustify=\"CENTER\" PAIRS_LIST>T</ITEM>\n"
+    "    <ITEMS MULTISELECT>\n"
+    "      <APPEARANCE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">row.tga</APPEARANCE>\n"
     "      <ROW>\n"
     "        <ITEM type=\"BITMAP\" column=\"1\">c.tga</ITEM>\n"
     "        <ITEM type=\"BITMAP\" column=\"1\">c.tga</ITEM>\n"
@@ -140,37 +136,99 @@ const char *const kCanonicalPretty =
     "      <ROW>\n"
     "      </ROW>\n"
     "    </ITEMS>\n"
-    "    <LIST_BOX sb_edge_pad=\"6\" name=\"DROP\">\n"
-    "      <POSITION>\n"
-    "        <TOP>9</TOP>\n"
-    "      </POSITION>\n"
-    "      <SCROLLBAR>\n"
-    "        <SHUTTLE type=\"image\" state=\"default\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">sh.tga</SHUTTLE>\n"
-    "      </SCROLLBAR>\n"
-    "    </LIST_BOX>\n"
-    "    <SPINUP>\n"
-    "      <APPEARANCE type=\"image\" state=\"default\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">up.tga</APPEARANCE>\n"
-    "    </SPINUP>\n"
-    "    <SPINDOWN>\n"
-    "      <STRING>-</STRING>\n"
-    "    </SPINDOWN>\n"
     "    <COLUMN count=\"3\" spacing=\"2\">\n"
-    "      <HEADER justify=\"CENTER\" SECONDARY_SORT TERTIARY_SORT column=\"0\" sort=\"A\" width=\"100\" type=\"id\">H0</HEADER>\n"
-    "      <HEADER justify=\"CENTER\" DEFAULT_SORT column=\"2\" sort=\"A\" width=\"100\" type=\"id\">H2</HEADER>\n"
+    "      <HEADER justify=\"CENTER\" SECONDARY_SORT TERTIARY_SORT column=\"0\" sort=\"A\" width=\"100\" type=\"ID\">H0</HEADER>\n"
+    "      <HEADER justify=\"CENTER\" PRIMARY_SORT column=\"2\" sort=\"A\" width=\"100\" type=\"ID\">H2</HEADER>\n"
     "      <BODY column=\"1\" BITMAP_TEXT CUSTOM_DRAW BITMAP_DRAW BITMAP_FLAGS=\"STANDARD\" SCALE_BITMAP></BODY>\n"
     "      <SUBST column=\"0\" value=\"1\" URL FILE>x.tga</SUBST>\n"
     "    </COLUMN>\n"
     "    <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>\n"
     "    <FIXED_HEADER_HEIGHT>0</FIXED_HEADER_HEIGHT>\n"
     "    <SCROLLBAR>\n"
-    "      <SCROLLDOWN type=\"image\" state=\"default\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">dn.tga</SCROLLDOWN>\n"
+    "      <SCROLLDOWN type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">dn.tga</SCROLLDOWN>\n"
     "    </SCROLLBAR>\n"
-    "    <JOIN_BUTTON name=\"J\" BARE EMPTY=\"\">note<TARGET>http://x</TARGET></JOIN_BUTTON>\n"
-    "    <FILTERS>\n"
+    "    <WINDOW type=\"edit\" name=\"ED\" READONLY NUMBER MINVAL=\"-1\" MAXVAL=\"99\" MAXCHAR=\"2\" PASSWORD>\n"
+    "      <POSITION>\n"
+    "        <LEFT>10</LEFT>\n"
+    "      </POSITION>\n"
+    "    </WINDOW>\n"
+    "    <WINDOW type=\"checkbox\" name=\"CB\" CHECKED AS_BUTTON>\n"
+    "      <POSITION>\n"
+    "        <LEFT>11</LEFT>\n"
+    "      </POSITION>\n"
+    "    </WINDOW>\n"
+    "    <WINDOW type=\"scroll\" name=\"SC\">\n"
+    "      <POSITION>\n"
+    "        <LEFT>12</LEFT>\n"
+    "      </POSITION>\n"
+    "      <WIDTH>20</WIDTH>\n"
+    "      <ORIENTATION>HORIZONTAL</ORIENTATION>\n"
+    "      <SHUTTLE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">s1.tga</SHUTTLE>\n"
+    "      <SCROLLUP type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">u1.tga</SCROLLUP>\n"
+    "      <SCROLLDOWN type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">d1.tga</SCROLLDOWN>\n"
+    "    </WINDOW>\n"
+    "    <WINDOW type=\"marquee_wnd\" name=\"MQ\">\n"
+    "      <POSITION>\n"
+    "        <LEFT>13</LEFT>\n"
+    "      </POSITION>\n"
+    "      <DATASOURCE>nlist.kda</DATASOURCE>\n"
+    "      <DATASOURCE>credits.ini</DATASOURCE>\n"
+    "    </WINDOW>\n"
+    "    <WINDOW type=\"list\" name=\"LS\">\n"
+    "      <POSITION>\n"
+    "        <LEFT>14</LEFT>\n"
+    "      </POSITION>\n"
+    "      <ITEMS justify=\"LEFT\" vjustify=\"TOP\" MULTISELECT>\n"
+    "        <APPEARANCE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">row.tga</APPEARANCE>\n"
+    "        <ITEM type=\"ID\" value=\"1\" justify=\"RIGHT\" vjustify=\"CENTER\" PAIRS_LIST>T</ITEM>\n"
+    "      </ITEMS>\n"
+    "    </WINDOW>\n"
+    "    <WINDOW type=\"combobox\" name=\"CO\">\n"
+    "      <POSITION>\n"
+    "        <LEFT>15</LEFT>\n"
+    "      </POSITION>\n"
+    "      <LIST_BOX sb_edge_pad=\"6\" name=\"DROP\">\n"
+    "        <POSITION>\n"
+    "          <TOP>9</TOP>\n"
+    "        </POSITION>\n"
+    "        <SCROLLBAR>\n"
+    "          <SHUTTLE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">sh.tga</SHUTTLE>\n"
+    "        </SCROLLBAR>\n"
+    "      </LIST_BOX>\n"
+    "    </WINDOW>\n"
+    "    <WINDOW type=\"spinlist\" name=\"SP\">\n"
+    "      <POSITION>\n"
+    "        <LEFT>16</LEFT>\n"
+    "      </POSITION>\n"
+    "      <SPINUP>\n"
+    "        <APPEARANCE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">up.tga</APPEARANCE>\n"
+    "      </SPINUP>\n"
+    "      <SPINDOWN>\n"
+    "        <STRING>-</STRING>\n"
+    "      </SPINDOWN>\n"
+    "    </WINDOW>\n"
+    "    <WINDOW type=\"glb_table\" name=\"GB\" SERVERLIST PLAYERLIST>\n"
+    "      <POSITION>\n"
+    "        <LEFT>17</LEFT>\n"
+    "      </POSITION>\n"
     "      <TARGET>http://x</TARGET>\n"
-    "      <JOIN_BUTTON name=\"J\" BARE EMPTY=\"\">note<TARGET>http://x</TARGET></JOIN_BUTTON>\n"
-    "    </FILTERS>\n"
-    "    <TARGET>http://x</TARGET>\n"
+    "    </WINDOW>\n"
+    "    <WINDOW type=\"gopher\" name=\"GO\">\n"
+    "      <POSITION>\n"
+    "        <LEFT>18</LEFT>\n"
+    "      </POSITION>\n"
+    "      <FILTERS>\n"
+    "        <TARGET>http://x</TARGET>\n"
+    "        <JOIN_BUTTON NAME=\"J\" BARE EMPTY=\"\">note<TARGET>http://x</TARGET></JOIN_BUTTON>\n"
+    "      </FILTERS>\n"
+    "      <TARGET>http://x</TARGET>\n"
+    "    </WINDOW>\n"
+    "    <WINDOW type=\"lan_list\" name=\"LL\">\n"
+    "      <POSITION>\n"
+    "        <LEFT>19</LEFT>\n"
+    "      </POSITION>\n"
+    "      <JOIN_BUTTON NAME=\"J\" BARE EMPTY=\"\">note<TARGET>http://x</TARGET></JOIN_BUTTON>\n"
+    "    </WINDOW>\n"
     "    <WINDOW type=\"static\" name=\"CHILD\">\n"
     "      <POSITION>\n"
     "        <LEFT>7</LEFT>\n"
@@ -189,56 +247,68 @@ const char *const kCanonicalPretty =
     "</SCREEN>\n";
 
 const char *const kCanonicalCompact =
-    "<SCREEN><NAME>EVERY</NAME><MUSICVAR>3</MUSICVAR><"
-    "WINDOW type=\"TABLE\" name=\"ALL\" DRAW_FRAME HIDDEN MODAL READONLY DISABLE CHECKED AS_BUTTON NUMBER MINVAL=\"-1\" MAXVAL=\"99\" MAXCHAR=\"2\" GLOBAL_VAR PASSWORD FORM=\"3\" SERVERLIST PLAYERLIST><"
-    "GROUP>2</GROUP><HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY><HOTKEY>=</HOTKEY><"
-    "ACTION type=\"WINDOW\" state=\"SHOW\" file=\"f.mnu\" NAME=\"slot\" target_form=\"0\" TOGGLE test=\"EQ\" EXTERNAL_BROWSER> PANEL </ACTION><"
-    "ACTION type=\"SCREEN\" file=\"next.mnu\">NEXT</ACTION><FRAME><"
-    "STENCIL size=\"8\" insetx=\"5\">s.tga</STENCIL><BRUSH>b.tga</BRUSH><MONOGRAM>m.tga</MONOGRAM><"
-    "/FRAME><POSITION><LEFT>1</LEFT><TOP>2</TOP><RIGHT>300</RIGHT><BOTTOM>40</BOTTOM><"
-    "/POSITION><WIDTH>20</WIDTH><ORIENTATION>HORIZONTAL</ORIENTATION><"
-    "APPEARANCE type=\"image\" state=\"default\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">a.tga</APPEARANCE><"
-    "APPEARANCE type=\"image\" state=\"mouseover\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">b&amp;c&lt;d>.tga</APPEARANCE><"
-    "SHUTTLE type=\"image\" state=\"default\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">s1.tga</SHUTTLE><"
-    "SCROLLUP type=\"image\" state=\"default\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">u1.tga</SCROLLUP><"
-    "SCROLLDOWN type=\"image\" state=\"default\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">d1.tga</SCROLLDOWN><"
-    "TEXT_RSRC>menutxt.BIN</TEXT_RSRC><DATASOURCE>nlist.kda</DATASOURCE><"
-    "DATASOURCE>credits.ini</DATASOURCE><PRIVATE_DATA>p</PRIVATE_DATA><CURSOR><"
-    "FILE>c.tga</FILE><FLAGS>STANDARD</FLAGS></CURSOR><FONT><NAME>f.fnt</NAME><"
-    "DEFAULT_FG>FF000001</DEFAULT_FG><MOUSEOVER_BG>%DEF_BG%</MOUSEOVER_BG><"
-    "DISABLED_FG>3</DISABLED_FG></FONT><"
-    "STRING type=\"ID\" justify=\"CENTER\" vjustify=\"BOTTOM\" edge=\"4\" WRAP>KEY</STRING><"
-    "TOGGLE_STRING type=\"ID\">ALT</TOGGLE_STRING><"
-    "SOUND state=\"MOUSEIN\" trigger=\"MOUSE_OVER\">menu.lwf</SOUND><"
-    "ITEMS justify=\"LEFT\" vjustify=\"TOP\" MULTISELECT><"
-    "APPEARANCE type=\"image\" state=\"default\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">row.tga</APPEARANCE><"
-    "ITEM type=\"ID\" value=\"1\" justify=\"RIGHT\" vjustify=\"CENTER\" PAIRS_LIST>T</ITEM><ROW><"
-    "ITEM type=\"BITMAP\" column=\"1\">c.tga</ITEM><ITEM type=\"BITMAP\" column=\"1\">c.tga</ITEM><"
-    "/ROW><ROW></ROW></ITEMS><LIST_BOX sb_edge_pad=\"6\" name=\"DROP\"><POSITION><TOP>9</TOP><"
-    "/POSITION><SCROLLBAR><"
-    "SHUTTLE type=\"image\" state=\"default\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">sh.tga</SHUTTLE><"
-    "/SCROLLBAR></LIST_BOX><SPINUP><"
-    "APPEARANCE type=\"image\" state=\"default\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">up.tga</APPEARANCE><"
-    "/SPINUP><SPINDOWN><STRING>-</STRING></SPINDOWN><COLUMN count=\"3\" spacing=\"2\"><"
-    "HEADER justify=\"CENTER\" SECONDARY_SORT TERTIARY_SORT column=\"0\" sort=\"A\" width=\"100\" type=\"id\">H0</HEADER><"
-    "HEADER justify=\"CENTER\" DEFAULT_SORT column=\"2\" sort=\"A\" width=\"100\" type=\"id\">H2</HEADER><"
-    "BODY column=\"1\" BITMAP_TEXT CUSTOM_DRAW BITMAP_DRAW BITMAP_FLAGS=\"STANDARD\" SCALE_BITMAP><"
-    "/BODY><SUBST column=\"0\" value=\"1\" URL FILE>x.tga</SUBST></COLUMN><"
-    "MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT><FIXED_HEADER_HEIGHT>0</FIXED_HEADER_HEIGHT><"
-    "SCROLLBAR><"
-    "SCROLLDOWN type=\"image\" state=\"default\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">dn.tga</SCROLLDOWN><"
-    "/SCROLLBAR><JOIN_BUTTON name=\"J\" BARE EMPTY=\"\">note<TARGET>http://x</TARGET><"
-    "/JOIN_BUTTON><FILTERS><TARGET>http://x</TARGET><"
-    "JOIN_BUTTON name=\"J\" BARE EMPTY=\"\">note<TARGET>http://x</TARGET></JOIN_BUTTON></FILTERS><"
-    "TARGET>http://x</TARGET><WINDOW type=\"static\" name=\"CHILD\"><POSITION><LEFT>7</LEFT><"
-    "/POSITION></WINDOW><WINDOW type=\"window\" name=\"BARE\"></WINDOW></WINDOW><"
-    "WINDOW type=\"static\" name=\"CHILD\"><POSITION><LEFT>7</LEFT></POSITION></WINDOW></SCREEN><"
-    "SCREEN></SCREEN>";
+    "<SCREEN><NAME>EVERY</NAME><MUSICVAR>3</MUSICVAR>"
+    "<WINDOW type=\"table\" name=\"ALL\" DRAW_FRAME HIDDEN MODAL DISABLE CHECKED GLOBAL_VAR FORM=\"3\"><GROUP>2"
+    "</GROUP><HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY><HOTKEY>=</HOTKEY>"
+    "<ACTION type=\"WINDOW\" state=\"SHOW\" file=\"f.mnu\" FIELD=\"slot\" target_form=\"0\" TOGGLE test=\"EQ\" EXTERNAL_BROWSER> PANEL "
+    "</ACTION><ACTION type=\"SCREEN\" file=\"next.mnu\">NEXT</ACTION><FRAME>"
+    "<STENCIL size=\"8\" insetx=\"5\">s.tga</STENCIL><BRUSH>b.tga</BRUSH><MONOGRAM>m.tga</MONOGRAM></FRAME>"
+    "<POSITION><LEFT>1</LEFT><TOP>2</TOP><RIGHT>300</RIGHT><BOTTOM>40</BOTTOM></POSITION>"
+    "<APPEARANCE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">a.tga"
+    "</APPEARANCE>"
+    "<APPEARANCE type=\"IMAGE\" state=\"MOUSEOVER\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">b&amp;c&lt;d>.tga"
+    "</APPEARANCE><TEXT_RSRC>menutxt.BIN</TEXT_RSRC><PRIVATE_DATA>p</PRIVATE_DATA><CURSOR><FILE>c.tga"
+    "</FILE><FLAGS>STANDARD</FLAGS></CURSOR><FONT><NAME>f.fnt</NAME><DEFAULT_FG>FF000001</DEFAULT_FG>"
+    "<MOUSEOVER_BG>%DEF_BG%</MOUSEOVER_BG><DISABLED_FG>3</DISABLED_FG></FONT>"
+    "<STRING type=\"ID\" justify=\"CENTER\" vjustify=\"BOTTOM\" edge=\"4\" WRAP>KEY</STRING>"
+    "<TOGGLE_STRING type=\"ID\">ALT</TOGGLE_STRING><SOUND state=\"MOUSEIN\" trigger=\"MOUSE_OVER\">menu.lwf"
+    "</SOUND><ITEMS MULTISELECT>"
+    "<APPEARANCE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">row.tga"
+    "</APPEARANCE><ROW><ITEM type=\"BITMAP\" column=\"1\">c.tga</ITEM><ITEM type=\"BITMAP\" column=\"1\">c.tga"
+    "</ITEM></ROW><ROW></ROW></ITEMS><COLUMN count=\"3\" spacing=\"2\">"
+    "<HEADER justify=\"CENTER\" SECONDARY_SORT TERTIARY_SORT column=\"0\" sort=\"A\" width=\"100\" type=\"ID\">H0"
+    "</HEADER><HEADER justify=\"CENTER\" PRIMARY_SORT column=\"2\" sort=\"A\" width=\"100\" type=\"ID\">H2</HEADER>"
+    "<BODY column=\"1\" BITMAP_TEXT CUSTOM_DRAW BITMAP_DRAW BITMAP_FLAGS=\"STANDARD\" SCALE_BITMAP></BODY>"
+    "<SUBST column=\"0\" value=\"1\" URL FILE>x.tga</SUBST></COLUMN><MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>"
+    "<FIXED_HEADER_HEIGHT>0</FIXED_HEADER_HEIGHT><SCROLLBAR>"
+    "<SCROLLDOWN type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">dn.tga"
+    "</SCROLLDOWN></SCROLLBAR>"
+    "<WINDOW type=\"edit\" name=\"ED\" READONLY NUMBER MINVAL=\"-1\" MAXVAL=\"99\" MAXCHAR=\"2\" PASSWORD>"
+    "<POSITION><LEFT>10</LEFT></POSITION></WINDOW><WINDOW type=\"checkbox\" name=\"CB\" CHECKED AS_BUTTON>"
+    "<POSITION><LEFT>11</LEFT></POSITION></WINDOW><WINDOW type=\"scroll\" name=\"SC\"><POSITION><LEFT>12"
+    "</LEFT></POSITION><WIDTH>20</WIDTH><ORIENTATION>HORIZONTAL</ORIENTATION>"
+    "<SHUTTLE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">s1.tga"
+    "</SHUTTLE>"
+    "<SCROLLUP type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">u1.tga"
+    "</SCROLLUP>"
+    "<SCROLLDOWN type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">d1.tga"
+    "</SCROLLDOWN></WINDOW><WINDOW type=\"marquee_wnd\" name=\"MQ\"><POSITION><LEFT>13</LEFT></POSITION>"
+    "<DATASOURCE>nlist.kda</DATASOURCE><DATASOURCE>credits.ini</DATASOURCE></WINDOW>"
+    "<WINDOW type=\"list\" name=\"LS\"><POSITION><LEFT>14</LEFT></POSITION>"
+    "<ITEMS justify=\"LEFT\" vjustify=\"TOP\" MULTISELECT>"
+    "<APPEARANCE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">row.tga"
+    "</APPEARANCE><ITEM type=\"ID\" value=\"1\" justify=\"RIGHT\" vjustify=\"CENTER\" PAIRS_LIST>T</ITEM></ITEMS>"
+    "</WINDOW><WINDOW type=\"combobox\" name=\"CO\"><POSITION><LEFT>15</LEFT></POSITION>"
+    "<LIST_BOX sb_edge_pad=\"6\" name=\"DROP\"><POSITION><TOP>9</TOP></POSITION><SCROLLBAR>"
+    "<SHUTTLE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">sh.tga"
+    "</SHUTTLE></SCROLLBAR></LIST_BOX></WINDOW><WINDOW type=\"spinlist\" name=\"SP\"><POSITION><LEFT>16"
+    "</LEFT></POSITION><SPINUP>"
+    "<APPEARANCE type=\"IMAGE\" state=\"DEFAULT\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT\">up.tga"
+    "</APPEARANCE></SPINUP><SPINDOWN><STRING>-</STRING></SPINDOWN></WINDOW>"
+    "<WINDOW type=\"glb_table\" name=\"GB\" SERVERLIST PLAYERLIST><POSITION><LEFT>17</LEFT></POSITION>"
+    "<TARGET>http://x</TARGET></WINDOW><WINDOW type=\"gopher\" name=\"GO\"><POSITION><LEFT>18</LEFT>"
+    "</POSITION><FILTERS><TARGET>http://x</TARGET><JOIN_BUTTON NAME=\"J\" BARE EMPTY=\"\">note"
+    "<TARGET>http://x</TARGET></JOIN_BUTTON></FILTERS><TARGET>http://x</TARGET></WINDOW>"
+    "<WINDOW type=\"lan_list\" name=\"LL\"><POSITION><LEFT>19</LEFT></POSITION>"
+    "<JOIN_BUTTON NAME=\"J\" BARE EMPTY=\"\">note<TARGET>http://x</TARGET></JOIN_BUTTON></WINDOW>"
+    "<WINDOW type=\"static\" name=\"CHILD\"><POSITION><LEFT>7</LEFT></POSITION></WINDOW>"
+    "<WINDOW type=\"window\" name=\"BARE\"></WINDOW></WINDOW><WINDOW type=\"static\" name=\"CHILD\"><POSITION>"
+    "<LEFT>7</LEFT></POSITION></WINDOW></SCREEN><SCREEN></SCREEN>";
 
 mnu::Appearance image_row(const char *state, const char *value) {
 	mnu::Appearance a;
 	a.state = state;
-	a.type = "image";
+	a.type = "IMAGE";
 	a.value = value;
 	a.has_map_state = true;
 	a.map_state = 1;
@@ -248,32 +318,36 @@ mnu::Appearance image_row(const char *state, const char *value) {
 	return a;
 }
 
-// A document built in code with no source text: every record the writer puts down, so its
-// canonical bytes pin the writer's own layout.
+// A window of `type` named `name` at a left edge (a window with no element is not created).
+mnu::Window typed_window(mnu::WindowType type, const char *name, int left) {
+	mnu::Window w;
+	w.name = name;
+	w.type = type;
+	w.position.has_left = true;
+	w.position.left = left;
+	return w;
+}
+
+// A document built in code with no source text: every record the writer puts down, each on a
+// window whose type reads it (the writer puts down what the window's type reads alone, as the
+// reader keeps it), so its canonical bytes pin the writer's own layout. Every keyword is the
+// parse's table spelling, as the reader keeps it.
 mnu::Document minted() {
 	mnu::Window w;
 	w.name = "ALL";
 	w.type = mnu::WindowType::Table;
-	w.type_token = "TABLE";
-	w.hidden = w.disabled = w.checked = w.draw_frame = w.modal = w.readonly = w.as_button = true;
-	w.number = w.global_var = w.password = true;
+	w.hidden = w.disabled = w.checked = w.draw_frame = w.modal = true;
+	w.global_var = true;
 	w.has_group = true;
 	w.group = 2;
-	w.has_minval = w.has_maxval = w.has_maxchar = w.has_form = true;
-	w.minval = -1;
-	w.maxval = 99;
-	w.maxchar = 2;
+	w.has_form = true;
 	w.form = 3;
-	w.orientation = "HORIZONTAL";
-	w.has_scroll_extent = true;
-	w.scroll_extent = 20;
-	w.scroll_extent_is_width = true;
 	w.position.has_left = w.position.has_top = w.position.has_right = w.position.has_bottom = true;
 	w.position.left = 1;
 	w.position.top = 2;
 	w.position.right = 300;
 	w.position.bottom = 40;
-	w.appearances = {image_row("default", "a.tga"), image_row("mouseover", "b&c<d>.tga")};
+	w.appearances = {image_row("DEFAULT", "a.tga"), image_row("MOUSEOVER", "b&c<d>.tga")};
 	mnu::Sound sound;
 	sound.state = "MOUSEIN";
 	sound.trigger = "MOUSE_OVER";
@@ -284,7 +358,6 @@ mnu::Document minted() {
 	action.state = "SHOW";
 	action.file = "f.mnu";
 	action.field = "slot";
-	action.field_attr = "NAME";
 	action.has_target_form = true;
 	action.target_form = 0;
 	action.toggle = action.external_browser = true;
@@ -316,52 +389,29 @@ mnu::Document minted() {
 	w.frame.insetx = 5;
 	w.frame.brush = "b.tga";
 	w.frame.monogram = "m.tga";
+	// A TABLE's ITEMS: MULTISELECT, its APPEARANCE rows and its ROWs of cells.
 	w.items.present = w.items.multiselect = true;
-	w.items.justify = "LEFT";
-	w.items.vjustify = "TOP";
-	w.items.appearances = {image_row("default", "row.tga")};
-	mnu::Item item;
-	item.type = "ID";
-	item.value = "1";
-	item.text = "T";
-	item.justify = "RIGHT";
-	item.vjustify = "CENTER";
-	item.pairs_list = true;
+	w.items.appearances = {image_row("DEFAULT", "row.tga")};
 	mnu::Item cell;
 	cell.type = "BITMAP";
 	cell.text = "c.tga";
 	cell.has_column = true;
 	cell.column = 1;
-	w.items.items = {item};
 	mnu::TableRow row;
 	row.cells = {cell, cell};
 	w.items.rows = {row, mnu::TableRow{}};
-	mnu::Window &list = w.list_box.author(mnu::WindowType::List);
-	list.name = "DROP";
-	list.position.has_top = true;
-	list.position.top = 9;
-	list.scrollbar.author(mnu::WindowType::Scroll).shuttle = {image_row("default", "sh.tga")};
-	w.has_sb_edge_pad = true;
-	w.sb_edge_pad = 6;
-	w.spinup.author(mnu::WindowType::Button).appearances = {image_row("default", "up.tga")};
-	w.spindown.author(mnu::WindowType::Button).string_data.present = true;
-	w.spindown->string_data.value = "-";
-	w.scrollbar.author(mnu::WindowType::Scroll).scrolldown = {image_row("default", "dn.tga")};
+	w.scrollbar.author(mnu::WindowType::Scroll).scrolldown = {image_row("DEFAULT", "dn.tga")};
 	w.cursor.file = "c.tga";
 	w.cursor.flags = "STANDARD";
 	w.has_text_rsrc = true;
 	w.text_rsrc = "menutxt.BIN";
 	w.private_data = "p";
-	w.datasources = {"nlist.kda", "credits.ini"};
 	mnu::Hotkey escape;
 	escape.value = "VK_ESCAPE";
 	escape.virtual_key = true;
 	mnu::Hotkey equals;
 	equals.value = "=";
 	w.hotkeys = {escape, equals};
-	w.shuttle = {image_row("default", "s1.tga")};
-	w.scrollup = {image_row("default", "u1.tga")};
-	w.scrolldown = {image_row("default", "d1.tga")};
 	mnu::TableColumn &column = w.table_data.column;
 	column.has_count = column.has_spacing = true;
 	column.count = 3;
@@ -372,7 +422,7 @@ mnu::Document minted() {
 	header.column = 0;
 	header.width = 100;
 	header.sort = "A";
-	header.type = "id";
+	header.type = "ID";
 	header.text = "H0";
 	mnu::TableHeader second = header;
 	second.column = 2;
@@ -392,35 +442,87 @@ mnu::Document minted() {
 	subst.file = "x.tga";
 	column.substitutions = {subst};
 	column.primary_sort = 2;
-	column.primary_sort_token = "DEFAULT_SORT";
 	column.secondary_sort = 0;
 	column.tertiary_sort = 0;
 	w.table_data.has_min_item_height = true;
 	w.table_data.min_item_height = 20;
 	w.table_data.has_fixed_header_height = true;
 	w.table_data.fixed_header_height = 0;
+
+	// An EDIT's attributes [orig: CEditWnd_ParseXMLProperties @ 0x661d10].
+	mnu::Window edit = typed_window(mnu::WindowType::Edit, "ED", 10);
+	edit.readonly = edit.number = edit.password = true;
+	edit.has_minval = edit.has_maxval = edit.has_maxchar = true;
+	edit.minval = -1;
+	edit.maxval = 99;
+	edit.maxchar = 2;
+	// A CHECKBOX's AS_BUTTON and CHECKED [orig: CCheckWnd_ParseXMLDefinition @ 0x64ad90].
+	mnu::Window check = typed_window(mnu::WindowType::CheckBox, "CB", 11);
+	check.as_button = check.checked = true;
+	// A SCROLL's own elements [orig: CUIScrollWidget_ParseExtendedXMLDef @ 0x64c6d0].
+	mnu::Window scroll = typed_window(mnu::WindowType::Scroll, "SC", 12);
+	scroll.orientation = "HORIZONTAL";
+	scroll.has_scroll_extent = true;
+	scroll.scroll_extent = 20;
+	scroll.scroll_extent_is_width = true;
+	scroll.shuttle = {image_row("DEFAULT", "s1.tga")};
+	scroll.scrollup = {image_row("DEFAULT", "u1.tga")};
+	scroll.scrolldown = {image_row("DEFAULT", "d1.tga")};
+	// A MARQUEE_WND's DATASOURCEs [orig: CMarqueeWnd_ParseXMLDefinition @ 0x65ceb0].
+	mnu::Window marquee = typed_window(mnu::WindowType::Marquee, "MQ", 13);
+	marquee.datasources = {"nlist.kda", "credits.ini"};
+	// A LIST's ITEMS: JUSTIFY, VJUSTIFY, MULTISELECT, its APPEARANCE and ITEM rows (PAIRS_LIST).
+	mnu::Window list = typed_window(mnu::WindowType::List, "LS", 14);
+	list.items.present = list.items.multiselect = true;
+	list.items.justify = "LEFT";
+	list.items.vjustify = "TOP";
+	list.items.appearances = {image_row("DEFAULT", "row.tga")};
+	mnu::Item item;
+	item.type = "ID";
+	item.value = "1";
+	item.text = "T";
+	item.justify = "RIGHT";
+	item.vjustify = "CENTER";
+	item.pairs_list = true;
+	list.items.items = {item};
+	// A COMBOBOX's LIST_BOX and its sb_edge_pad [orig: CComboWnd_ParseXMLDefinition @ 0x65c0d0].
+	mnu::Window combo = typed_window(mnu::WindowType::Combo, "CO", 15);
+	mnu::Window &drop = combo.list_box.author(mnu::WindowType::List);
+	drop.name = "DROP";
+	drop.position.has_top = true;
+	drop.position.top = 9;
+	drop.scrollbar.author(mnu::WindowType::Scroll).shuttle = {image_row("DEFAULT", "sh.tga")};
+	combo.has_sb_edge_pad = true;
+	combo.sb_edge_pad = 6;
+	// A SPINLIST's arrows.
+	mnu::Window spin = typed_window(mnu::WindowType::SpinList, "SP", 16);
+	spin.spinup.author(mnu::WindowType::Button).appearances = {image_row("DEFAULT", "up.tga")};
+	spin.spindown.author(mnu::WindowType::Button).string_data.present = true;
+	spin.spindown->string_data.value = "-";
+	// The elements the GLB_TABLE, GOPHER and LAN_LIST parses read, and the GLB_TABLE's attributes.
 	mnu::Element target;
 	target.tag = "TARGET";
 	target.text = "http://x";
 	mnu::Element join;
 	join.tag = "JOIN_BUTTON";
-	join.attributes = {{"name", "J", true}, {"BARE", "", false}, {"EMPTY", "", true}};
+	join.attributes = {{"NAME", "J", true}, {"BARE", "", false}, {"EMPTY", "", true}};
 	join.text = "note";
 	join.children = {target};
 	mnu::Element filters;
 	filters.tag = "FILTERS";
-	filters.text = "\n";
+	filters.text = ""; // a container: white space beside its elements is layout
 	filters.children = {target, join};
-	w.extras = {join, filters, target};
-	w.extra_attributes = {{"SERVERLIST", "", false}, {"PLAYERLIST", "", false}};
-	mnu::Window child;
-	child.name = "CHILD";
-	child.type = mnu::WindowType::Static;
-	child.position.has_left = true;
-	child.position.left = 7;
+	mnu::Window glb = typed_window(mnu::WindowType::GlbTable, "GB", 17);
+	glb.extra_attributes = {{"SERVERLIST", "", false}, {"PLAYERLIST", "", false}};
+	glb.extras = {target};
+	mnu::Window gopher = typed_window(mnu::WindowType::Gopher, "GO", 18);
+	gopher.extras = {filters, target};
+	mnu::Window lan = typed_window(mnu::WindowType::LanList, "LL", 19);
+	lan.extras = {join};
+	mnu::Window child = typed_window(mnu::WindowType::Static, "CHILD", 7);
 	mnu::Window bare;
 	bare.name = "BARE";
-	w.children = {child, bare};
+	w.children = {edit, check, scroll, marquee, list, combo, spin, glb, gopher, lan, child, bare};
 
 	mnu::Document doc;
 	mnu::Screen screen;
@@ -455,7 +557,12 @@ bool test_canonical_bytes() {
 	// holds no element, so the reader creates none, as retail's factory does not).
 	mnu::Document back;
 	CHECK(parse(kCanonicalPretty, back), "parse");
-	CHECK(back.screens.size() == 2 && main_window(back).children.size() == 1, "the canonical file as the reader reads it");
+	CHECK(back.screens.size() == 2 && main_window(back).children.size() == 11, "the canonical file as the reader reads it");
+	mnu::Document expected = minted();
+	expected.screens[0].roots[0].children.pop_back(); // BARE: no element, not created
+	std::string where;
+	if (!mnu::equal(back, expected, &where)) std::fprintf(stderr, "  differs at %s\n", where.c_str());
+	CHECK(where.empty(), "the canonical file reads back as the minted model");
 	CHECK(reads_back(back), "the canonical file, read, reads back");
 	return true;
 }
@@ -510,7 +617,7 @@ bool test_hand_written() {
 mnu::Appearance appearance(const char *state, const char *value) {
 	mnu::Appearance a;
 	a.state = state;
-	a.type = "image";
+	a.type = "IMAGE";
 	a.value = value;
 	return a;
 }
@@ -558,7 +665,7 @@ const std::vector<CorpusEdit> &corpus_edits() {
 	     }},
 	    {"an APPEARANCE added to every root", [](mnu::Document &d) {
 		     for (mnu::Screen &s : d.screens)
-			     for (mnu::Window &root : s.roots) root.appearances.push_back(appearance("disabled", "added.tga"));
+			     for (mnu::Window &root : s.roots) root.appearances.push_back(appearance("DISABLED", "added.tga"));
 	     }},
 	    {"every root's windows reversed", [](mnu::Document &d) {
 		     for (mnu::Screen &s : d.screens)
@@ -580,7 +687,8 @@ const std::vector<CorpusEdit> &corpus_edits() {
 	    {"every ITEM's text changed and a row added", [](mnu::Document &d) {
 		     each_window(d, [](mnu::Window &w) {
 			     for (mnu::Item &i : w.items.items) i.text += "+";
-			     if (w.items.present) {
+			     // A row of the kind the window's type reads (a TABLE's are ROWs of cells).
+			     if (w.items.present && mnu::schema_reads(w.type, "items.item") == mnu::SchemaApplies::Reads) {
 				     mnu::Item extra;
 				     extra.text = "added";
 				     w.items.items.push_back(extra);
@@ -663,6 +771,7 @@ template <typename T> void edit_list(std::vector<T> &v, int kind, const T &fresh
 struct WindowList {
 	const char *name;
 	std::function<void(mnu::Window &, int)> edit;
+	const char *path = ""; // the list's schema path, when only some types read it (the edit skips the others)
 };
 
 mnu::Window fresh_window() {
@@ -676,7 +785,7 @@ mnu::Window fresh_window() {
 
 const std::vector<WindowList> &window_lists() {
 	static const std::vector<WindowList> lists = {
-	    {"APPEARANCE", [](mnu::Window &w, int k) { edit_list(w.appearances, k, appearance("disabled", "fresh.tga")); }},
+	    {"APPEARANCE", [](mnu::Window &w, int k) { edit_list(w.appearances, k, appearance("DISABLED", "fresh.tga")); }},
 	    {"SOUND", [](mnu::Window &w, int k) {
 		     mnu::Sound s;
 		     s.state = "MOUSEOUT";
@@ -697,21 +806,23 @@ const std::vector<WindowList> &window_lists() {
 		     edit_list(w.hotkeys, k, h);
 	     }},
 	    {"WINDOW", [](mnu::Window &w, int k) { edit_list(w.children, k, fresh_window()); }},
-	    {"SHUTTLE", [](mnu::Window &w, int k) { edit_list(w.shuttle, k, appearance("default", "fresh.tga")); }},
-	    {"SCROLLDOWN", [](mnu::Window &w, int k) { edit_list(w.scrolldown, k, appearance("default", "fresh.tga")); }},
-	    {"DATASOURCE", [](mnu::Window &w, int k) { edit_list(w.datasources, k, std::string("fresh.kda")); }},
+	    {"SHUTTLE", [](mnu::Window &w, int k) { edit_list(w.shuttle, k, appearance("DEFAULT", "fresh.tga")); }, "shuttle"},
+	    {"SCROLLDOWN", [](mnu::Window &w, int k) { edit_list(w.scrolldown, k, appearance("DEFAULT", "fresh.tga")); },
+	     "scrolldown"},
+	    {"DATASOURCE", [](mnu::Window &w, int k) { edit_list(w.datasources, k, std::string("fresh.kda")); }, "datasource"},
 	    {"ITEM", [](mnu::Window &w, int k) {
 		     mnu::Item i;
 		     i.text = "fresh";
 		     edit_list(w.items.items, k, i);
-	     }},
-	    {"ITEMS APPEARANCE", [](mnu::Window &w, int k) { edit_list(w.items.appearances, k, appearance("default", "row.tga")); }},
+	     }, "items.item"},
+	    {"ITEMS APPEARANCE", [](mnu::Window &w, int k) { edit_list(w.items.appearances, k, appearance("DEFAULT", "row.tga")); },
+	     "items.appearance"},
 	    {"HEADER", [](mnu::Window &w, int k) {
 		     mnu::TableHeader h;
 		     h.text = "H";
 		     h.has_column = true;
 		     edit_list(w.table_data.column.headers, k, h);
-	     }},
+	     }, "column"},
 	};
 	return lists;
 }
@@ -745,6 +856,7 @@ void fuzz_lists(const mnu::Document &doc, const std::string &label, int rounds, 
 			mnu::Window &w = *windows[rng() % windows.size()];
 			const WindowList &list = lists[rng() % lists.size()];
 			const int kind = int(rng() % kListEdits);
+			if (*list.path && mnu::schema_reads(w.type, list.path) != mnu::SchemaApplies::Reads) continue;
 			list.edit(w, kind);
 			what += std::string(what.empty() ? "" : "; ") + list.name + " of " + (w.name.empty() ? "?" : w.name) + ": " +
 			        kListEditNames[kind];

@@ -87,8 +87,8 @@ void schema_default_element_attribute(ElementAttribute &attribute);
 Window &schema_default_part(WindowPart &part, WindowType type);
 
 // --- a window's TYPE ---------------------------------------------------------------------------
-// The TYPE as the file writes it (the token as typed, else the type's own name), and a TYPE set: the
-// type the factory builds for the token and the token kept as typed.
+// The TYPE as the file writes it (the type's own name), and a TYPE set: the type the factory builds
+// for the token.
 std::string schema_type_token(const Window &window);
 void schema_set_type_token(Window &window, const std::string &token);
 

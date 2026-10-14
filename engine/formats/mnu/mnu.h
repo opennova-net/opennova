@@ -72,7 +72,7 @@ struct Position {
 
 // One APPEARANCE row (also SHUTTLE / SCROLLUP / SCROLLDOWN and the ITEMS rows).
 // Every attribute holds the token retail reads: STATE and TYPE the one its walk
-// keeps, spelled as authored.
+// keeps, a token the parse knows spelled as its table does (kAppearanceStates, ...).
 struct Appearance {
   std::string state;     // DEFAULT / DISABLED / MOUSEOVER / SELECTED
   std::string type;      // IMAGE / COLOR / CUSTOM / OUTLINE (IMAGEROW in a TABLE's ITEMS)
@@ -96,10 +96,9 @@ struct Action {
   std::string type;   // one of the sixteen codes; anything else is code 0 (ignored)
   std::string state;  // HIDE / SHOW / ENABLE / DISABLE (WINDOW)
   std::string file;   // FILE (SCREEN)
-  // FIELD, SOURCE and NAME write one slot; the first authored wins. `field_attr` is
-  // the spelling it was authored with (empty writes FIELD).
+  // FIELD, SOURCE and NAME write one slot; the first authored wins. The writer puts it
+  // down as FIELD (kActionFieldAttributes' first).
   std::string field;
-  std::string field_attr;
   bool has_target_form = false;
   int target_form = 0;
   bool toggle = false;           // TOGGLE, presence
@@ -119,7 +118,8 @@ inline constexpr const char *kActionTypes[] = {
 inline constexpr const char *kActionStates[] = {"HIDE", "SHOW", "ENABLE", "DISABLE", nullptr};
 
 // The tokens each keyword attribute's parse recognizes, nullptr-ended, in the order the
-// reader compares them; any other token is left out of the model (a ParseNote says so).
+// reader compares them (without case: the model holds a known token as the table spells it);
+// any other token is left out of the model (a ParseNote says so).
 // An APPEARANCE's STATE and TYPE [orig: @ 0x648226], a TABLE's ITEMS rows also knowing
 // IMAGEROW [orig: @ 0x642816]; a SOUND's STATE, its sound state the index + 1
 // (runtime/menu/menu_sound.h) [orig: @ 0x648909]; an ACTION's TEST, and the three
@@ -138,8 +138,7 @@ inline constexpr const char *kVJustify[] = {"TOP", "CENTER", "BOTTOM", nullptr};
 inline constexpr const char *kStringTypes[] = {"ID", nullptr};
 inline constexpr const char *kItemTypes[] = {"ID", "IMAGE", "COLOR", "BITMAP", nullptr};
 // A HEADER's primary sort key, one slot under either name [orig: @ 0x6431f2 / 0x643228];
-// the writer puts the first down when the model holds no spelling
-// (TableColumn::primary_sort_token).
+// the writer puts the first down.
 inline constexpr const char *kPrimarySortTokens[] = {"PRIMARY_SORT", "DEFAULT_SORT", nullptr};
 // A BODY's draw kinds (TableBody::display), in the order the writer puts them down.
 inline constexpr const char *kBodyDisplays[] = {"CUSTOM_DRAW", "BITMAP_DRAW", "BITMAP_TEXT", nullptr};
@@ -303,8 +302,7 @@ struct TableColumn {
   // walk runs last authored first, so a key authored after the HEADER's own COLUMN
   // takes the index before it); the last write wins. -1: no HEADER sets it. The
   // writer places each on a HEADER that reads back the same index.
-  int primary_sort = -1;
-  std::string primary_sort_token;  // DEFAULT_SORT or PRIMARY_SORT, as authored
+  int primary_sort = -1;            // DEFAULT_SORT or PRIMARY_SORT, written PRIMARY_SORT
   int secondary_sort = -1;
   int tertiary_sort = -1;
 };
@@ -344,8 +342,9 @@ struct Hotkey {
 };
 
 // An element a type-specific parse reads that the model does not type (the
-// LAN_LIST buttons, the GLB_TABLE parts, the GOPHER targets and filters), kept as
-// read so it writes back the same.
+// LAN_LIST buttons, the GLB_TABLE parts, the GOPHER targets and filters): its tag and
+// its attributes' names as the writer spells them (upper case; the parses compare
+// without case), each attribute's token and the element text.
 struct ElementAttribute {
   std::string name;
   std::string value;      // the token retail reads
@@ -410,10 +409,6 @@ private:
 struct Window {
   std::string name;
   WindowType type = WindowType::Window;
-  // The TYPE token as authored (its first token), written in preference to the
-  // canonical name so a token the factory does not match round-trips. Empty for
-  // windows created in code and for parts.
-  std::string type_token;
   // Flags are presence-only [orig: @ 0x648120 attribute walk]: HIDDEN="0" hides.
   bool hidden = false;
   bool disabled = false;    // DISABLE
@@ -490,7 +485,7 @@ struct Window {
   // Table-specific data.
   TableData table_data;
 
-  // What only the GLB_TABLE, GOPHER and LAN_LIST parses read, kept as read.
+  // What only the GLB_TABLE, GOPHER and LAN_LIST parses read, each on the type that reads it.
   std::vector<Element> extras;
   std::vector<ElementAttribute> extra_attributes; // PLAYERLIST / SERVERLIST
 
@@ -584,8 +579,14 @@ struct ParseNote {
   std::string locator;
 };
 
-// Parse MNU content from a string buffer.
-// Returns true on success, false on error with description in `error`.
+// Whether two documents hold the same model, field by field (no text between them): the
+// screens, their windows, parts and rows, and the source encoding. `where`, when given, says
+// the first field that differs.
+bool equal(const Document &a, const Document &b, std::string *where = nullptr);
+
+// Parse MNU content from a string buffer: each window holds what its type's parse reads
+// (an element, an attribute or a row its type does not read is left out, a ParseNote says
+// so). Returns true on success, false on error with description in `error`.
 bool parse(const std::string &content, Document &out, std::string &error,
            std::vector<ParseNote> *notes = nullptr);
 
