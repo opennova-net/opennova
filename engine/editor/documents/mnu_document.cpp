@@ -44,8 +44,8 @@ constexpr FindingCodeEntry<MenuFinding> kFindingEntries[] = {
 	                  "CUIButtonWidget_ParseXMLAttributes @ 0x657d88 -> CRT_wcsicmp @ 0x77087f -> _invalid_parameter @ "
 	                  "0x76dfef; CRT_init_pointers @ 0x76e65b], a SCREEN with no NAME copies a null name [orig: @ "
 	                  "0x639791]") },
-	// Kept on save with the file's look (master's text layout, D-MNU-22), as a catalog's is: no Rewrite drops it.
-	{ MenuFinding::IgnoredInput, { "menu.ignored_input" } },
+	// Input the game ignores: a save writes the menu from its records alone (formats/mnu mnu_write), without it.
+	{ MenuFinding::IgnoredInput, { "menu.ignored_input", FindingFix::Rewrite, kRewriteDropsIgnoredInput } },
 	{ MenuFinding::Unserializable, { "menu.unserializable", FindingFix::None, nullptr, true } },
 	// A screen or a window no by-name lookup finds: a NAME of its own (DI-11, Diagnostic::planned).
 	{ MenuFinding::DuplicateScreen, { "menu.duplicate_screen", FindingFix::EditRecord } },
@@ -77,14 +77,11 @@ using Note = menu::MenuFrameNoteCode;
 using P = FindingProblem;
 constexpr FindingCodeEntry<Note> kNoteEntries[] = {
 	{ Note::AppearanceStateUnknown, note_row("menu.render.appearance_state_unknown", P::Warning) },
-	{ Note::AppearanceTypeUnknown, note_row("menu.render.appearance_type_unknown", P::Warning) },
 	{ Note::AppearanceCustom, note_row("menu.render.appearance_custom", P::None) },
 	{ Note::AppearanceReplaced, note_row("menu.render.appearance_replaced", P::Warning) },
 	{ Note::ColorUnparsed, note_row("menu.render.color_unparsed", P::Warning) },
 	{ Note::ColorTransparent, note_row("menu.render.color_transparent", P::Warning) },
 	{ Note::StyleVarUnresolved, note_row("menu.render.style_var_unresolved", P::None) },
-	{ Note::TypeUnknown, note_row("menu.render.type_unknown", P::Warning) },
-	{ Note::ItemKindAsText, note_row("menu.render.item_kind_as_text", P::Info) },
 	{ Note::TableCellsDeferred, note_row("menu.render.table_cells_deferred", P::Info) },
 	{ Note::TableCellsCustom, note_row("menu.render.table_cells_custom", P::None) },
 	{ Note::ScrollExtentDefault, note_row("menu.render.scroll_extent_default", P::None) },
@@ -211,45 +208,6 @@ void walk_document_windows(const MenuScreen &screen, const std::function<bool(co
 		if (!step(root)) return;
 }
 
-bool text_width(const Value &value, size_t width, std::string &error) {
-	const auto *text = std::get_if<std::string>(&value);
-	if (!text) { error = "This field takes text."; return false; }
-	if (text->size() >= width) { error = "The text is too long."; return false; }
-	return true;
-}
-
-// The extra elements a window keeps at its top level, and the attributes a window keeps
-// (the reader keeps nothing else there, so a save would lose any other): mnu::kExtraTags
-// and mnu::kExtraAttributes.
-const char *const kWindowAttributes = "A window keeps only the PLAYERLIST and SERVERLIST attributes here.";
-const char *const kFlagsTakeNoValue = "PLAYERLIST and SERVERLIST are flags: they take no value.";
-
-const std::string &window_elements_error() {
-	static const std::string text = [] {
-		std::string out = "A window keeps only these elements: ";
-		for (size_t i = 0; mnu::kExtraTags[i]; ++i) out += std::string(i ? ", " : "") + mnu::kExtraTags[i];
-		return out + ".";
-	}();
-	return text;
-}
-
-// Whether a window (or a part) keeps `record` at its top level as it is: an attribute
-// only as PLAYERLIST or SERVERLIST with no value, an extra element only by a tag its
-// parses read. A record that moves into a window meets the rules a Set there meets.
-bool window_keeps(const RecordHandle &record, std::string &error) {
-	if (menu_shape(record.kind) == mnu::SchemaShape::Attribute) {
-		const auto &attribute = record.as<mnu::ElementAttribute>();
-		if (!mnu::known_token(attribute.name, mnu::kExtraAttributes)) { error = kWindowAttributes; return false; }
-		if (attribute.has_value) { error = kFlagsTakeNoValue; return false; }
-	} else if (menu_shape(record.kind) == mnu::SchemaShape::Element) {
-		if (!mnu::known_token(record.as<mnu::Element>().tag, mnu::kExtraTags)) {
-			error = window_elements_error();
-			return false;
-		}
-	}
-	return true;
-}
-
 } // namespace
 
 // --- the row -------------------------------------------------------------------------
@@ -271,8 +229,9 @@ size_t content(const mnu::TableHeader &header);
 size_t content(const mnu::TableBody &body);
 size_t content(const mnu::TableSubst &substitution);
 size_t content(const mnu::Hotkey &hotkey);
-size_t content(const mnu::ElementAttribute &attribute);
-size_t content(const mnu::Element &element);
+size_t content(const mnu::GopherCategory &category);
+size_t content(const mnu::GopherEntry &entry);
+size_t content(const mnu::GlbFieldSlot &slot);
 size_t content(const mnu::Window &window);
 
 // A list's elements, and what each holds.
@@ -283,8 +242,7 @@ template <class T> size_t list_content(const std::vector<T> &items) {
 }
 
 size_t content(const mnu::Appearance &appearance) {
-	return footprint_of(appearance.state) + footprint_of(appearance.type) +
-	       footprint_of(appearance.value) + footprint_of(appearance.flags);
+	return footprint_of(appearance.state) + footprint_of(appearance.type) + footprint_of(appearance.value);
 }
 
 size_t content(const mnu::Sound &sound) {
@@ -293,25 +251,25 @@ size_t content(const mnu::Sound &sound) {
 
 size_t content(const mnu::Action &action) {
 	return footprint_of(action.type) + footprint_of(action.state) + footprint_of(action.file) +
-	       footprint_of(action.field) + footprint_of(action.field_attr) +
-	       footprint_of(action.test) + footprint_of(action.target);
+	       footprint_of(action.field) + footprint_of(action.test) + footprint_of(action.target);
 }
 
 size_t content(const mnu::Item &item) {
 	return footprint_of(item.type) + footprint_of(item.value) + footprint_of(item.text) +
-	       footprint_of(item.justify) + footprint_of(item.vjustify);
+	       footprint_of(item.justify) + footprint_of(item.vjustify) + footprint_of(item.justify_offset) +
+	       footprint_of(item.vjustify_offset);
 }
 
 size_t content(const mnu::TableRow &row) { return list_content(row.cells); }
 
 size_t content(const mnu::TableHeader &header) {
 	return footprint_of(header.justify) + footprint_of(header.vjustify) +
-	       footprint_of(header.sort) + footprint_of(header.type) + footprint_of(header.text);
+	       footprint_of(header.sort) + footprint_of(header.type) + footprint_of(header.text) + footprint_of(header.field);
 }
 
 size_t content(const mnu::TableBody &body) {
-	return footprint_of(body.justify) + footprint_of(body.vjustify) + footprint_of(body.display) +
-	       footprint_of(body.bitmap_flags);
+	return footprint_of(body.justify) + footprint_of(body.vjustify) + footprint_of(body.justify_offset) +
+	       footprint_of(body.vjustify_offset) + footprint_of(body.display);
 }
 
 size_t content(const mnu::TableSubst &substitution) {
@@ -320,30 +278,34 @@ size_t content(const mnu::TableSubst &substitution) {
 
 size_t content(const mnu::Hotkey &hotkey) { return footprint_of(hotkey.value); }
 
-size_t content(const mnu::ElementAttribute &attribute) {
-	return footprint_of(attribute.name) + footprint_of(attribute.value);
+size_t content(const mnu::GopherEntry &entry) {
+	return footprint_of(entry.name) + footprint_of(entry.target) + footprint_of(entry.filter) + footprint_of(entry.table) +
+	       footprint_of(entry.text);
 }
 
-size_t content(const mnu::Element &element) {
-	return footprint_of(element.tag) + list_content(element.attributes) +
-	       footprint_of(element.text) + list_content(element.children);
+size_t content(const mnu::GopherCategory &category) {
+	size_t bytes = footprint_of(category.level) + list_content(category.entries);
+	if (const mnu::Window *label = category.label.latent()) bytes += sizeof(mnu::Window) + content(*label);
+	return bytes;
 }
+
+size_t content(const mnu::GlbFieldSlot &slot) { return footprint_of(slot.text); }
 
 // A window: its words, its lists, its STRING, TOGGLE_STRING, FONT, FRAME, CURSOR, ITEMS and table,
 // its children and its parts (each window it holds counted whole).
 size_t content(const mnu::Window &window) {
-	size_t bytes = footprint_of(window.name) + footprint_of(window.type_token) +
-	               footprint_of(window.orientation) + footprint_of(window.text_rsrc) +
+	size_t bytes = footprint_of(window.name) + footprint_of(window.orientation) + footprint_of(window.text_rsrc) +
 	               footprint_of(window.private_data);
 	bytes += list_content(window.appearances) + list_content(window.sounds) +
 	         list_content(window.actions) + list_content(window.datasources) +
 	         list_content(window.hotkeys) + list_content(window.shuttle) +
 	         list_content(window.scrollup) + list_content(window.scrolldown) +
-	         list_content(window.extras) + list_content(window.extra_attributes) +
-	         list_content(window.children);
+	         list_content(window.gopher_targets) + list_content(window.gopher_categories) +
+	         list_content(window.glb_server_fields.fields) + footprint_of(window.glb_server_fields.format) +
+	         footprint_of(window.glb_target) + list_content(window.children);
 	const mnu::String &label = window.string_data;
-	bytes += footprint_of(label.type) + footprint_of(label.justify) +
-	         footprint_of(label.vjustify) + footprint_of(label.value);
+	bytes += footprint_of(label.type) + footprint_of(label.justify) + footprint_of(label.vjustify) +
+	         footprint_of(label.justify_offset) + footprint_of(label.vjustify_offset) + footprint_of(label.value);
 	bytes += footprint_of(window.toggle_string.type) + footprint_of(window.toggle_string.value);
 	const mnu::Font &font = window.font;
 	for (const std::string *text :
@@ -352,16 +314,18 @@ size_t content(const mnu::Window &window) {
 		bytes += footprint_of(*text);
 	bytes += footprint_of(window.frame.stencil) + footprint_of(window.frame.brush) +
 	         footprint_of(window.frame.monogram);
-	bytes += footprint_of(window.cursor.file) + footprint_of(window.cursor.flags);
+	bytes += footprint_of(window.cursor.file);
 	const mnu::Items &items = window.items;
-	bytes += footprint_of(items.justify) + footprint_of(items.vjustify) +
-	         list_content(items.appearances) + list_content(items.items) +
+	bytes += footprint_of(items.justify) + footprint_of(items.vjustify) + footprint_of(items.justify_offset) +
+	         footprint_of(items.vjustify_offset) + list_content(items.appearances) + list_content(items.items) +
 	         list_content(items.rows);
 	const mnu::TableColumn &column = window.table_data.column;
 	bytes += list_content(column.headers) + list_content(column.bodies) +
-	         list_content(column.substitutions) + footprint_of(column.primary_sort_token);
+	         list_content(column.substitutions);
 	for (const mnu::WindowPart *part :
-	     {&window.list_box, &window.spinup, &window.spindown, &window.scrollbar})
+	     {&window.list_box, &window.spinup, &window.spindown, &window.scrollbar, &window.join_button, &window.search_button,
+	      &window.glb_table, &window.glb_info_button, &window.glb_info_player_details, &window.glb_info_server_details,
+	      &window.glb_nw_info, &window.gopher_back})
 		if (const mnu::Window *held = part->latent())
 			bytes += sizeof(mnu::Window) + content(*held);
 	return bytes;
@@ -602,7 +566,6 @@ mnu::Document MnuDocument::native() const {
 	mnu::Document document;
 	if (const auto *state = dynamic_cast<const MenuFileState *>(file_state())) {
 		document.source_encoding = state->source_encoding;
-		document.text_layout = state->text_layout;
 	}
 	for (const auto &node : rows()) document.screens.push_back(screen_of(*node).screen);
 	return document;
@@ -739,13 +702,12 @@ bool MnuDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shar
 	std::string message;
 	std::vector<mnu::ParseNote> notes;
 	if (!(bytes.size() == 1 && bytes[0] == 0) &&
-	    !mnu::parse(bytes.data(), bytes.size(), document, message, &notes, mnu::ParseLayout::Text)) {
+	    !mnu::parse(bytes.data(), bytes.size(), document, message, &notes)) {
 		error = make_finding(CoreFinding::DocumentParse, DiagnosticSeverity::Error, message, path());
 		return false;
 	}
 	auto encoding = std::make_shared<MenuFileState>();
 	encoding->source_encoding = document.source_encoding;
-	encoding->text_layout = document.text_layout;
 	state = encoding;
 	for (mnu::Screen &screen : document.screens) {
 		auto row = std::make_shared<MenuScreen>();
@@ -834,47 +796,28 @@ bool MnuDocument::set_value(Node &node, const Located &at, size_t field, const V
 			return false;
 		}
 	}
-	// A name the reader would not keep here is refused: a window keeps only its PLAYERLIST
-	// and SERVERLIST attributes, and only the extra elements its parses read at its top level.
-	if (!at.is_row() && is_window_kind(at.step().owner.kind)) {
-		const mnu::SchemaShape shape = menu_shape(at.record.kind);
-		const std::string &id = schema.id;
-		if (shape == mnu::SchemaShape::Attribute && id == "name") {
-			if (!text_width(stored, 64, error)) return false;
-			if (!mnu::known_token(std::get<std::string>(stored), mnu::kExtraAttributes)) {
-				error = kWindowAttributes;
-				return false;
-			}
-		}
-		if (shape == mnu::SchemaShape::Attribute && id == "value") {
-			Value current;
-			if (!table_kind.value(field).get(at.record, current) || current != stored) { error = kFlagsTakeNoValue; return false; }
-		}
-		if (shape == mnu::SchemaShape::Element && id == "tag") {
-			if (!text_width(stored, 64, error)) return false;
-			if (!mnu::known_token(std::get<std::string>(stored), mnu::kExtraTags)) {
-				error = window_elements_error();
-				return false;
-			}
-		}
-	}
 	return TableDocument::set_value(node, at, field, stored, error);
 }
 
 // Clear and Write flip the presence bit (the authored state) and leave the latent value in
 // place: a field written again reads what it read while left out.
 bool MnuDocument::set_written(Node &node, const Located &at, size_t field, bool present, std::string &error) {
-	if (present && !at.is_row() && is_window_kind(at.step().owner.kind) &&
-	    menu_shape(at.record.kind) == mnu::SchemaShape::Attribute && menu_table().kind(at.record.kind)->fields()[field].id == "value") {
-		error = kFlagsTakeNoValue;
-		return false;
-	}
 	return TableDocument::set_written(node, at, field, present, error);
 }
 
 bool MnuDocument::accept_list_edit(const Node &node, const ListChange &change, std::string &error) const {
 	const MenuScreen &screen = screen_of(node);
 	const bool roots = change.owner->is_row();
+	// A record goes only into a list the game reads where it sits: the writer writes a list only where the
+	// window's type reads it (formats/mnu mnu_write), so a record anywhere else would be gone on the save.
+	const auto read_here = [&](const Located &owner, size_t list) {
+		if (list_applies(node, owner, list) == Applicability::Reads) return true;
+		const TableKind *owner_kind = menu_table().kind(owner.record.kind);
+		const TableKind *kind = owner_kind ? menu_table().kind(owner_kind->lists()[list].spec.kind) : nullptr;
+		error = std::string("The game reads no ") + (kind ? kind->row().label : "record") +
+		        " here (where it sits, by its window's type): a save would not write it.";
+		return false;
+	};
 	switch (change.operation) {
 	case EditOperation::Remove:
 		if (roots && screen.screen.roots.size() == 1) {
@@ -883,9 +826,8 @@ bool MnuDocument::accept_list_edit(const Node &node, const ListChange &change, s
 		}
 		return true;
 	case EditOperation::Move: {
-		// The destination is checked before anything moves: a screen keeps a root window, a
-		// part goes only where its window has none, and a window takes an attribute or an
-		// extra element only as it keeps one (an element's own may be anything).
+		// The destination is checked before anything moves: a screen keeps a root window, and a
+		// part goes only where its window has none.
 		const Located &destination = *change.destination;
 		if (roots && !destination.is_row() && screen.screen.roots.size() == 1) {
 			error = "A screen keeps at least one root window.";
@@ -897,9 +839,11 @@ bool MnuDocument::accept_list_edit(const Node &node, const ListChange &change, s
 			error = std::string("That window already holds a ") + menu_table().kind(list.spec.kind)->row().label + ".";
 			return false;
 		}
-		if (is_window_kind(destination.record.kind) && !window_keeps(change.record->record, error)) return false;
-		return true;
+		return read_here(destination, change.destination_list);
 	}
+	case EditOperation::Add:
+	case EditOperation::Duplicate:
+		return read_here(*change.owner, change.list);
 	default:
 		return true;
 	}
@@ -1058,10 +1002,11 @@ void action_findings(const MnuDocument &menu, std::vector<Diagnostic> &findings)
 				                             "This window has no NAME: the game runs none of its ACTIONs.", "name"));
 			if (!menu.get(address, "type", type) || !menu.get(address, "state", state)) return true;
 			const std::string &verb = std::get<std::string>(type);
-			if (verb.empty()) return true; // no TYPE: a write issue (retail's parse faults on it)
+			// The parse holds a TYPE it knows, else none (formats/mnu: a word it knows no code of sets none, as no TYPE
+			// does), which sets no code: the game ignores the ACTION.
 			if (!mnu::known_token(verb, mnu::kActionTypes))
 				findings.push_back(on_record(menu, address, DiagnosticSeverity::Warning, MenuFinding::ActionInert,
-				                             "'" + verb + "' is none of the game's sixteen ACTION types: the game ignores this ACTION.",
+				                             "This ACTION has no TYPE the game knows (none of its sixteen): the game ignores it.",
 				                             "type"));
 			else if (strutil::iequals(verb, "WINDOW") &&
 			         !mnu::known_token(std::get<std::string>(state), mnu::kActionStates))

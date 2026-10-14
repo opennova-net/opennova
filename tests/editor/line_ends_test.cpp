@@ -100,7 +100,8 @@ static int test_weapons_whole_file() {
 	TEST_EXPECT(rows_of(*document) == 2 && document->dirty() && line_end_findings(*document, "jo").empty());
 	const Document &records = *records_of(*document);
 	TEST_EXPECT(records.source_state() && !records.source_state()->odd_lines);
-	TEST_EXPECT(document->serialize().text == kWeapons);
+	// Restored, it saves as the file with CR LF line ends does (the writer's text of what the game reads of it).
+	TEST_EXPECT(document->serialize().text == loaded(kWeapons, "weapon.def", AssetKind::WeaponDefs)->serialize().text);
 	document->undo();
 	TEST_EXPECT(rows_of(*document) == 0 && !document->dirty() && the_finding(line_end_findings(*document, "jo")));
 	document->redo();
@@ -132,7 +133,7 @@ static int test_blocked_reading() {
 	set.value = std::string("x");
 	TEST_EXPECT(!document->apply(set, error) && error.code() == "document.parse");
 	TEST_EXPECT(document->apply(line_ends_restore(), error) && !document->blocked() && rows_of(*document) == 2);
-	TEST_EXPECT(document->serialize().text == text);
+	TEST_EXPECT(document->serialize().text == loaded(text, "weapon.def", AssetKind::WeaponDefs)->serialize().text);
 	document->undo();
 	TEST_EXPECT(document->blocked() && rows_of(*document) == 1 && document->can_redo());
 	document->redo();

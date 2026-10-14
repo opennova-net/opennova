@@ -1,6 +1,7 @@
 // The avatars table document (avatars_document.h, ADR 0046 S23 B): Avatars.def's parts and nationalities (each
-// holding its divisions, each its combinations) as rows over formats/avatars, read and written over the file's
-// modeled layout; the fields' words say what the game does with each (docs/playerinfo/avatars-re.md).
+// holding its divisions, each its combinations) as rows over formats/avatars, read through its reader and written
+// by its writer from the rows alone (S26); the fields' words say what the game does with each
+// (docs/playerinfo/avatars-re.md).
 #include "avatars_document.h"
 
 #include <algorithm>
@@ -11,8 +12,8 @@
 
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
-#include <editor/documents/noted_file_state.h>
 #include <editor/documents/source_issue_findings.h>
+#include <editor/model/staged_rows.h>
 #include <editor/project/project_files.h>
 
 namespace opennova::editor {
@@ -62,14 +63,6 @@ bool set_whole(int &field, int64_t low, int64_t high, const char *what, const Va
 		return error = std::string(what) + " is a whole number from " + std::to_string(low) + " to " + std::to_string(high) + ".", false;
 	field = int(*whole);
 	return true;
-}
-
-// The id the reader takes from a nationality's or division's id word: a first byte above '9' (signed) skipped, then
-// atol (D-PLAYERINFO-6) [orig: CAvatarDefs_ParseConfigLine @ 0x57A628 / @ 0x57A74E].
-int lenient_id(const std::string &word) {
-	const char *t = word.c_str();
-	if (static_cast<signed char>(t[0]) > '9') ++t;
-	return int(std::strtol(t, nullptr, 10));
 }
 
 using RF = LabelledField;
@@ -154,17 +147,17 @@ RecordTable make_table() {
 	// --- a nationality -----------------------------------------------------------------------------------
 	TableKind nationality(RecordKindRow{kNationality, "nationality", "Nationality", "Add nationality", true});
 	{
-		FieldSchema id = schema_of("id", FieldType::Text, "Id",
-				"The nationality's id word: a first character above '9' skipped, then its number, 0 to 31; a repeated or "
-				"larger one refuses the block [orig: CAvatarDefs_ParseConfigLine @ 0x57A615..0x57A631].");
-		id.width = 32;
+		FieldSchema id = schema_of("id", FieldType::Integer, "Id",
+				"The nationality's id, the number its id word reads as (a first character above '9' skipped, then atol), 0 "
+				"to 31, written as its decimal; a repeated or larger one refuses the block [orig: CAvatarDefs_ParseConfigLine "
+				"@ 0x57A615..0x57A631].");
+		id.ranged = true;
+		id.min = 0;
+		id.max = 31;
 		nationality.field(RF{id,
-		                     {[](const RecordHandle &r, Value &out) { return out = nationality_of(r).raw_id, true; },
+		                     {[](const RecordHandle &r, Value &out) { return out = int64_t(nationality_of(r).id), true; },
 		                      [](const RecordHandle &r, const Value &v, std::string &e) {
-			                      auto &n = r.as<AvatarNationalityRecord>();
-			                      if (!set_word(n.raw_id, 32, v, e)) return false;
-			                      n.id = lenient_id(n.raw_id);
-			                      return true;
+			                      return set_whole(r.as<AvatarNationalityRecord>().id, 0, 31, "A nationality's id", v, e);
 		                      }}});
 		FieldSchema key = schema_of("name_key", FieldType::Text, "Shown as",
 				"A key of Game.bin's Avatars section [orig: @ 0x57A681].");
@@ -175,18 +168,6 @@ RecordTable make_table() {
 		                     {[](const RecordHandle &r, Value &out) { return out = nationality_of(r).name_key, true; },
 		                      [](const RecordHandle &r, const Value &v, std::string &e) {
 			                      return set_word(r.as<AvatarNationalityRecord>().name_key, 64, v, e);
-		                      }}});
-		FieldSchema flags = schema_of("flags", FieldType::Text, "Words after",
-				"The words after the key (skipdemo); the game reads none of them.");
-		flags.width = 128;
-		nationality.field(RF{flags,
-		                     {[](const RecordHandle &r, Value &out) { return out = nationality_of(r).flags, true; },
-		                      [](const RecordHandle &r, const Value &v, std::string &e) {
-			                      const auto *text = std::get_if<std::string>(&v);
-			                      if (!text || text->size() >= 128 || text->find_first_of("\",;\r\n") != std::string::npos)
-				                      return e = "The words are plain words separated by blanks.", false;
-			                      r.as<AvatarNationalityRecord>().flags = *text;
-			                      return true;
 		                      }}});
 		FieldSchema alignment = schema_of("alignment", FieldType::Integer, "Alignment",
 				"good or evil; any other word changes nothing [orig: @ 0x57A6BC].");
@@ -216,17 +197,16 @@ RecordTable make_table() {
 	// --- a division --------------------------------------------------------------------------------------
 	TableKind division(RecordKindRow{kDivision, "division", "Division", "", false});
 	{
-		FieldSchema id = schema_of("id", FieldType::Text, "Id",
-				"The division's id word: a first character above '9' skipped, then its number, 0 to 15 [orig: @ "
-				"0x57A73B..0x57A757].");
-		id.width = 32;
+		FieldSchema id = schema_of("id", FieldType::Integer, "Id",
+				"The division's id, the number its id word reads as (a first character above '9' skipped, then atol), 0 to "
+				"15, written as its decimal [orig: @ 0x57A73B..0x57A757].");
+		id.ranged = true;
+		id.min = 0;
+		id.max = 15;
 		division.field(RF{id,
-		                  {[](const RecordHandle &r, Value &out) { return out = division_of(r).raw_id, true; },
+		                  {[](const RecordHandle &r, Value &out) { return out = int64_t(division_of(r).id), true; },
 		                   [](const RecordHandle &r, const Value &v, std::string &e) {
-			                   auto &d = r.as<AvatarDivisionRecord>();
-			                   if (!set_word(d.raw_id, 32, v, e)) return false;
-			                   d.id = lenient_id(d.raw_id);
-			                   return true;
+			                   return set_whole(r.as<AvatarDivisionRecord>().id, 0, 15, "A division's id", v, e);
 		                   }}});
 		FieldSchema key = schema_of("name_key", FieldType::Text, "Shown as", "A key of Game.bin's Avatars section [orig: @ 0x57A7AB].");
 		key.width = 64;
@@ -237,17 +217,6 @@ RecordTable make_table() {
 		                   [](const RecordHandle &r, const Value &v, std::string &e) {
 			                   return set_word(r.as<AvatarDivisionRecord>().name_key, 64, v, e);
 		                   }}});
-		FieldSchema flags = schema_of("flags", FieldType::Text, "Words after", "The words after the key (skipdemo).");
-		flags.width = 128;
-		division.field(RF{flags,
-		                  {[](const RecordHandle &r, Value &out) { return out = division_of(r).flags, true; },
-		                   [](const RecordHandle &r, const Value &v, std::string &e) {
-			                   const auto *text = std::get_if<std::string>(&v);
-			                   if (!text || text->size() >= 128 || text->find_first_of("\",;\r\n") != std::string::npos)
-				                   return e = "The words are plain words separated by blanks.", false;
-			                   r.as<AvatarDivisionRecord>().flags = *text;
-			                   return true;
-		                   }}});
 		TableList combos;
 		combos.spec = Document::CollectionSpec{kCombo, "Combinations", "id", false, Applicability::Reads, 0};
 		combos.ops = vector_list<AvatarDivisionRecord, AvatarComboRecord>(
@@ -257,15 +226,12 @@ RecordTable make_table() {
 	// --- a combination -----------------------------------------------------------------------------------
 	TableKind combo(RecordKindRow{kCombo, "combo", "Combination", "", false});
 	{
-		FieldSchema id = schema_of("id", FieldType::Text, "Id", "The combination's id word, read by atol [orig: @ 0x57A90D].");
-		id.width = 32;
+		FieldSchema id = schema_of("id", FieldType::Integer, "Id",
+				"The combination's id, the number its id word reads as (atol), written as its decimal [orig: @ 0x57A90D].");
 		combo.field(RF{id,
-		               {[](const RecordHandle &r, Value &out) { return out = combo_of(r).raw_id, true; },
+		               {[](const RecordHandle &r, Value &out) { return out = int64_t(combo_of(r).id), true; },
 		                [](const RecordHandle &r, const Value &v, std::string &e) {
-			                auto &c = r.as<AvatarComboRecord>();
-			                if (!set_word(c.raw_id, 32, v, e)) return false;
-			                c.id = int(std::strtol(c.raw_id.c_str(), nullptr, 10));
-			                return true;
+			                return set_whole(r.as<AvatarComboRecord>().id, INT32_MIN, INT32_MAX, "A combination's id", v, e);
 		                }}});
 		const auto part_ref = [&](const char *id, const char *label, std::string AvatarComboRecord::*member, const char *desc) {
 			FieldSchema schema = schema_of(id, FieldType::Text, label, desc);
@@ -315,13 +281,11 @@ size_t reader_stop(const std::vector<uint8_t> &bytes, size_t &before) {
 	return low;
 }
 
-// A record's place in a text it was read from: its note's index (0: none).
-uint64_t place_of(uint64_t note) { return note & 0xFFFFFFFFu; }
-
 
 constexpr FindingCodeEntry<AvatarsFinding> kFindingEntries[] = {
 	{ AvatarsFinding::InvalidInput, { "avatars.invalid_input", FindingFix::None, nullptr, true } },
-	{ AvatarsFinding::IgnoredInput, listed_code("avatars.ignored_input") },
+	// What the reader reads nothing of: a save writes the table alone (formats/avatars), without it.
+	{ AvatarsFinding::IgnoredInput, listed_code("avatars.ignored_input", FindingFix::Rewrite, kRewriteDropsIgnoredInput) },
 	// The reader stopping (the document's game_stops issue, or the text a save writes): it gates, the game's failure.
 	{ AvatarsFinding::ReaderStops,
 	  game_stops_code("avatars.reader_stops",
@@ -357,19 +321,16 @@ size_t AvatarPartRow::footprint() const {
 
 size_t AvatarNationalityRow::footprint() const {
 	const AvatarNationalityRecord &n = nationality;
-	size_t bytes = sizeof(AvatarNationalityRow) + footprint_of(n.raw_id) + footprint_of(n.name_key) + footprint_of(n.flags) +
-	               footprint_of(n.divisions) + ids_footprint();
+	size_t bytes = sizeof(AvatarNationalityRow) + footprint_of(n.name_key) + footprint_of(n.divisions) + ids_footprint();
 	for (const AvatarDivisionRecord &d : n.divisions) {
-		bytes += footprint_of(d.raw_id) + footprint_of(d.name_key) + footprint_of(d.flags) + footprint_of(d.combos);
-		for (const AvatarComboRecord &c : d.combos)
-			bytes += footprint_of(c.raw_id) + footprint_of(c.head) + footprint_of(c.body) + footprint_of(c.arms);
+		bytes += footprint_of(d.name_key) + footprint_of(d.combos);
+		for (const AvatarComboRecord &c : d.combos) bytes += footprint_of(c.head) + footprint_of(c.body) + footprint_of(c.arms);
 	}
 	return bytes;
 }
 
 avatars::AvatarsFile AvatarsDocument::file() const {
 	avatars::AvatarsFile out{};
-	if (const auto *noted = noted_layout(file_state())) out.note = noted->root();
 	std::vector<const AvatarPartRecord *> parts;
 	std::vector<const AvatarNationalityRecord *> nationalities;
 	for (const auto &node : rows()) {
@@ -391,7 +352,6 @@ avatars::AvatarsFile AvatarsDocument::file() const {
 		for (int c = 0; c < 3; ++c) q.camo[c] = p.camo[size_t(c)];
 		q.voice = p.voice;
 		q.sex = p.sex;
-		q.note = p.note;
 	}
 	out.nationalities_count = nationalities.size();
 	out.nationalities = nationalities.empty() ? nullptr
@@ -399,37 +359,29 @@ avatars::AvatarsFile AvatarsDocument::file() const {
 	for (size_t i = 0; i < nationalities.size(); ++i) {
 		const AvatarNationalityRecord &n = *nationalities[i];
 		avatars::AvatarNationality &m = out.nationalities[i];
-		copy_to(n.raw_id, m.raw_id, sizeof(m.raw_id));
 		m.id = n.id;
 		copy_to(n.name_key, m.name_key, sizeof(m.name_key));
-		copy_to(n.flags, m.flags, sizeof(m.flags));
 		m.alignment = n.alignment;
 		m.has_alignment = n.has_alignment ? 1 : 0;
-		m.note = n.note;
 		m.divisions_count = n.divisions.size();
 		m.divisions = n.divisions.empty() ? nullptr
 		        : static_cast<avatars::AvatarDivision *>(std::calloc(n.divisions.size(), sizeof(avatars::AvatarDivision)));
 		for (size_t j = 0; j < n.divisions.size(); ++j) {
 			const AvatarDivisionRecord &d = n.divisions[j];
 			avatars::AvatarDivision &e = m.divisions[j];
-			copy_to(d.raw_id, e.raw_id, sizeof(e.raw_id));
 			e.id = d.id;
 			copy_to(d.name_key, e.name_key, sizeof(e.name_key));
-			copy_to(d.flags, e.flags, sizeof(e.flags));
-			e.note = d.note;
 			e.combos_count = d.combos.size();
 			e.combos = d.combos.empty() ? nullptr
 			        : static_cast<avatars::AvatarCombo *>(std::calloc(d.combos.size(), sizeof(avatars::AvatarCombo)));
 			for (size_t k = 0; k < d.combos.size(); ++k) {
 				const AvatarComboRecord &c = d.combos[k];
 				avatars::AvatarCombo &f = e.combos[k];
-				copy_to(c.raw_id, f.raw_id, sizeof(f.raw_id));
 				f.id = c.id;
 				copy_to(c.head, f.head_name, sizeof(f.head_name));
 				copy_to(c.body, f.body_name, sizeof(f.body_name));
 				copy_to(c.arms, f.arms_name, sizeof(f.arms_name));
 				f.has_arms = c.arms.empty() ? 0 : 1;
-				f.note = c.note;
 			}
 		}
 	}
@@ -446,29 +398,28 @@ std::string AvatarsDocument::record_title(const NodeAddress &address) const {
 			return std::string(p.kind >= 0 && p.kind <= 2 ? kKinds[p.kind] : "Part") + " " + p.name;
 		}
 		const AvatarNationalityRecord &n = static_cast<const AvatarNationalityRow &>(*node).nationality;
-		return "Nationality " + n.raw_id + " " + n.name_key;
+		return "Nationality " + std::to_string(n.id) + " " + n.name_key;
 	}
 	const RecordHandle handle = record_in(*node, address);
 	if (!handle) return record_name(address);
-	if (address.kind == kDivision) return "Division " + division_of(handle).raw_id + " " + division_of(handle).name_key;
+	if (address.kind == kDivision)
+		return "Division " + std::to_string(division_of(handle).id) + " " + division_of(handle).name_key;
 	const AvatarComboRecord &c = combo_of(handle);
-	return "Combination " + c.raw_id + ": " + c.head + ", " + c.body + (c.arms.empty() ? std::string() : ", " + c.arms);
+	return "Combination " + std::to_string(c.id) + ": " + c.head + ", " + c.body + (c.arms.empty() ? std::string() : ", " + c.arms);
 }
 
 bool AvatarsDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
-                            std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues, Diagnostic &error) {
-	auto notes = std::make_shared<textlayout::Notes>();
+                            std::shared_ptr<const FileState> &, std::vector<SourceIssue> &issues, Diagnostic &error) {
 	avatars::AvatarsFile read{};
 	reader_stops_line_ = 0;
-	if (avatars::avatars_parse_memory(bytes.data(), bytes.size(), &read, *notes) != 0) {
+	if (avatars::avatars_parse_memory(bytes.data(), bytes.size(), &read) != 0) {
 		// The walk ends where the part table is full (D-PLAYERINFO-2) or a 129th combination writes through no row:
 		// the game's own failure (avatars.reader_stops, which refuses a build). The document holds what the reader
 		// read before that line, read only (a save would lose the rest), so the file opens to be seen and fixed.
 		size_t before = 0;
 		const size_t stop = reader_stop(bytes, before);
-		notes = std::make_shared<textlayout::Notes>();
 		read = avatars::AvatarsFile{};
-		if (!stop || avatars::avatars_parse_memory(bytes.data(), before, &read, *notes) != 0) {
+		if (!stop || avatars::avatars_parse_memory(bytes.data(), before, &read) != 0) {
 			error = make_finding(CoreFinding::DocumentParse, DiagnosticSeverity::Error,
 			                     "The avatar table's reader stops: 512 parts or 129 combinations (the game's walk ends "
 			                     "there, ComboObj Parse Error) [orig: CAvatarDefs_ParseConfigLine @ 0x57A456; CAvatarDefs_AllocCombo "
@@ -488,7 +439,7 @@ bool AvatarsDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 		const avatars::AvatarDiagnostic &note = read.diagnostics[i];
 		issues.push_back({false, note.line, std::string(), std::string(), std::string("The game's avatar reader: ") + note.message + "."});
 	}
-	// Parts first, then nationalities: each kind keeps its order; the layout keeps where each stood.
+	// Parts first, then nationalities: each kind keeps its order.
 	for (size_t i = 0; i < read.parts_count; ++i) {
 		const avatars::AvatarPart &p = read.parts[i];
 		auto row = std::make_shared<AvatarPartRow>();
@@ -502,7 +453,6 @@ bool AvatarsDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 		for (int c = 0; c < 3; ++c) q.camo[size_t(c)] = p.camo[c];
 		q.voice = p.voice;
 		q.sex = p.sex;
-		q.note = p.note;
 		shape(*row);
 		rows.push_back(std::move(row));
 	}
@@ -510,30 +460,22 @@ bool AvatarsDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 		const avatars::AvatarNationality &n = read.nationalities[i];
 		auto row = std::make_shared<AvatarNationalityRow>();
 		AvatarNationalityRecord &m = row->nationality;
-		m.raw_id = n.raw_id;
 		m.id = n.id;
 		m.name_key = n.name_key;
-		m.flags = n.flags;
 		m.alignment = n.alignment;
 		m.has_alignment = n.has_alignment != 0;
-		m.note = n.note;
 		for (size_t j = 0; j < n.divisions_count; ++j) {
 			const avatars::AvatarDivision &d = n.divisions[j];
 			AvatarDivisionRecord e;
-			e.raw_id = d.raw_id;
 			e.id = d.id;
 			e.name_key = d.name_key;
-			e.flags = d.flags;
-			e.note = d.note;
 			for (size_t k = 0; k < d.combos_count; ++k) {
 				const avatars::AvatarCombo &c = d.combos[k];
 				AvatarComboRecord f;
-				f.raw_id = c.raw_id;
 				f.id = c.id;
 				f.head = c.head_name;
 				f.body = c.body_name;
 				f.arms = c.has_arms ? c.arms_name : "";
-				f.note = c.note;
 				e.combos.push_back(std::move(f));
 			}
 			m.divisions.push_back(std::move(e));
@@ -542,9 +484,6 @@ bool AvatarsDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 		rows.push_back(std::move(row));
 	}
 	avatars::avatars_free(&read);
-	auto noted = std::make_shared<NotedFileState>();
-	noted->notes = std::move(notes);
-	state = std::move(noted);
 	return true;
 }
 
@@ -553,8 +492,7 @@ SerializeResult AvatarsDocument::serialize() const {
 	avatars::AvatarsFile table = file();
 	char *data = nullptr;
 	size_t size = 0;
-	bool rewritten = false;
-	const int rc = avatars::avatars_write(&table, noted_layout(file_state()), &data, &size, &rewritten);
+	const int rc = avatars::avatars_write(&table, &data, &size);
 	avatars::avatars_free(&table);
 	if (rc != 0 || !data) {
 		result.issues.push_back({true, 0, std::string(), std::string(),
@@ -566,13 +504,13 @@ SerializeResult AvatarsDocument::serialize() const {
 	}
 	result.text.assign(data, size);
 	avatars::avatars_free_buffer(data);
-	if (rewritten) result.notes.push_back("The table is written in the editor's form: the file's lines would not read back as it is.");
 	return result;
 }
 
 std::string AvatarsDocument::save_words() const {
-	return "Saving writes the file in the form it was read in: its comments, its spacing and the lines the game reads "
-	       "nothing of; a changed value changes its own line, a new record goes after the last of its kind.";
+	return "Saving writes the table in the editor's form, from what the game reads of it: every part, then each "
+	       "nationality with its divisions and combinations. Comments and the lines the game reads nothing of are not "
+	       "kept.";
 }
 
 std::shared_ptr<Node> AvatarsDocument::make_node(NodeKind kind, NodeId, const std::vector<std::shared_ptr<const Node>> &rows,
@@ -594,18 +532,16 @@ std::shared_ptr<Node> AvatarsDocument::make_node(NodeKind kind, NodeId, const st
 	if (kind == kNationality) {
 		auto row = std::make_shared<AvatarNationalityRow>();
 		// The first id 0..31 no nationality has (the reader refuses a repeated one).
-		for (int id = 0; id < 32 && row->nationality.raw_id.empty(); ++id) {
+		int free_id = -1;
+		for (int id = 0; id < 32 && free_id < 0; ++id) {
 			const bool used = std::any_of(rows.begin(), rows.end(), [&](const std::shared_ptr<const Node> &other) {
 				return other && other->kind == kNationality &&
 				       static_cast<const AvatarNationalityRow &>(*other).nationality.id == id;
 			});
-			if (used) continue;
-			char word[8];
-			std::snprintf(word, sizeof(word), "N%02d", id);
-			row->nationality.raw_id = word;
-			row->nationality.id = id;
+			if (!used) free_id = id;
 		}
-		if (row->nationality.raw_id.empty()) {
+		row->nationality.id = free_id;
+		if (free_id < 0) {
 			error = "The table has a nationality of every id 0 to 31, all the game holds.";
 			return nullptr;
 		}
@@ -615,28 +551,6 @@ std::shared_ptr<Node> AvatarsDocument::make_node(NodeKind kind, NodeId, const st
 	}
 	error = "An avatars table's rows are its parts and nationalities; a division goes into a nationality.";
 	return nullptr;
-}
-
-void AvatarsDocument::prepare_duplicate(Node &copy, const Node &, const std::vector<std::shared_ptr<const Node>> &) const {
-	if (copy.kind == kPart) static_cast<AvatarPartRow &>(copy).part.note = 0;
-	if (copy.kind == kNationality) {
-		AvatarNationalityRecord &n = static_cast<AvatarNationalityRow &>(copy).nationality;
-		n.note = 0;
-		for (AvatarDivisionRecord &d : n.divisions) {
-			d.note = 0;
-			for (AvatarComboRecord &c : d.combos) c.note = 0;
-		}
-	}
-}
-
-void AvatarsDocument::prepare_record(const Node &, const ListChange &change, DetachedRecord &record) const {
-	if (change.operation != EditOperation::Duplicate || !record.data) return;
-	if (record.kind == kDivision) {
-		auto &d = *static_cast<AvatarDivisionRecord *>(record.data.get());
-		d.note = 0;
-		for (AvatarComboRecord &c : d.combos) c.note = 0;
-	}
-	if (record.kind == kCombo) static_cast<AvatarComboRecord *>(record.data.get())->note = 0;
 }
 
 // The first part of a kind the file defines, by name ("" for none).
@@ -659,6 +573,35 @@ bool AvatarsDocument::accept_list_edit(const Node &row, const ListChange &change
 	return TableDocument::accept_list_edit(row, change, error);
 }
 
+bool AvatarsDocument::accept_step(const EditStep &step, const StagedRows &rows, StepRefusal &refusal) const {
+	// The parts by kind, each name upper case (the reader compares without case).
+	std::set<std::string> parts[3];
+	for (const auto &node : rows.rows())
+		if (node && node->kind == kPart) {
+			const AvatarPartRecord &p = static_cast<const AvatarPartRow &>(*node).part;
+			if (p.kind >= 0 && p.kind <= 2) parts[p.kind].insert(strutil::to_upper(p.name));
+		}
+	static const char *const kWhat[] = {"head", "body", "arms"};
+	for (const auto &node : rows.rows()) {
+		if (!node || node->kind != kNationality) continue;
+		for (const AvatarDivisionRecord &d : static_cast<const AvatarNationalityRow &>(*node).nationality.divisions)
+			for (const AvatarComboRecord &c : d.combos) {
+				const std::string *named[] = {&c.head, &c.body, &c.arms};
+				for (int kind = 0; kind < 3; ++kind) {
+					if (kind == avatars::AVATAR_PART_ARMS && c.arms.empty()) continue;
+					if (parts[kind].count(strutil::to_upper(*named[kind]))) continue;
+					// The reader drops a combination whose head or body it does not find, and keeps one without arms
+					// it does not find [orig: CAvatarDefs_ParseConfigLine @ 0x57A804].
+					refusal.message = std::string("Combination ") + std::to_string(c.id) + " would name the " + kWhat[kind] +
+					                  " '" + *named[kind] + "', which no " + kWhat[kind] + " part of the file is: the game " +
+					                  (kind == avatars::AVATAR_PART_ARMS ? "reads it without arms." : "drops the combination.");
+					return false;
+				}
+			}
+	}
+	return TableDocument::accept_step(step, rows, refusal);
+}
+
 void AvatarsDocument::after_add(Node &row, const ListChange &change, const RecordHandle &made) {
 	if (made.kind == kDivision && row.kind == kNationality) {
 		// The first id 0..15 the nationality has no division of (the reader refuses a repeated one).
@@ -666,12 +609,9 @@ void AvatarsDocument::after_add(Node &row, const ListChange &change, const Recor
 		AvatarDivisionRecord &d = made.as<AvatarDivisionRecord>();
 		for (int id = 0; id < 16; ++id) {
 			const bool used = std::any_of(n.divisions.begin(), n.divisions.end(), [&](const AvatarDivisionRecord &other) {
-				return &other != &d && !other.raw_id.empty() && other.id == id;
+				return &other != &d && other.id == id;
 			});
 			if (used) continue;
-			char word[8];
-			std::snprintf(word, sizeof(word), "D%02d", id);
-			d.raw_id = word;
 			d.id = id;
 			break;
 		}
@@ -683,52 +623,11 @@ void AvatarsDocument::after_add(Node &row, const ListChange &change, const Recor
 		AvatarComboRecord &c = made.as<AvatarComboRecord>();
 		int next = 1;
 		for (const AvatarComboRecord &other : d.combos)
-			if (&other != &c && !other.raw_id.empty()) next = std::max(next, other.id + 1);
-		c.raw_id = std::to_string(next);
+			if (&other != &c) next = std::max(next, other.id + 1);
 		c.id = next;
 		c.head = first_part(avatars::AVATAR_PART_HEAD);
 		c.body = first_part(avatars::AVATAR_PART_BODY);
 		c.arms = first_part(avatars::AVATAR_PART_ARMS);
-	}
-}
-
-void AvatarsDocument::match_combos(
-		const avatars::AvatarsFile &reread,
-		const std::function<void(const NodeAddress &, const AvatarComboRecord &, const avatars::AvatarCombo *)> &visit) const {
-	size_t nationality_at = 0;
-	for (const auto &node : rows()) {
-		if (!node || node->kind != kNationality) continue;
-		const AvatarNationalityRecord &n = static_cast<const AvatarNationalityRow &>(*node).nationality;
-		// The reader keeps the others in their order: one the text read again lacks here, it refused.
-		if (nationality_at >= reread.nationalities_count) continue;
-		const avatars::AvatarNationality &read_n = reread.nationalities[nationality_at];
-		if (read_n.id != n.id || n.raw_id != read_n.raw_id) continue;
-		++nationality_at;
-		const avatars::AvatarDivision *read_d = nullptr;
-		size_t division_at = 0, combo_at = 0;
-		walk_records(*node, [&](const NodeAddress &record, const Placement &) {
-			const RecordHandle handle = record_in(*node, record);
-			if (!handle) return true;
-			if (record.kind == kDivision) {
-				const AvatarDivisionRecord &d = division_of(handle);
-				read_d = nullptr;
-				combo_at = 0;
-				if (division_at < read_n.divisions_count && read_n.divisions[division_at].id == d.id &&
-				    d.raw_id == read_n.divisions[division_at].raw_id)
-					read_d = &read_n.divisions[division_at++];
-				return true;
-			}
-			if (record.kind != kCombo || !read_d) return true;
-			const AvatarComboRecord &c = combo_of(handle);
-			const avatars::AvatarCombo *read = nullptr;
-			// A division's combinations all see the same parts (no part stands among them), so two alike are both
-			// kept or both dropped: the first alike is this one.
-			if (combo_at < read_d->combos_count && c.raw_id == read_d->combos[combo_at].raw_id &&
-			    c.head == read_d->combos[combo_at].head_name && c.body == read_d->combos[combo_at].body_name)
-				read = &read_d->combos[combo_at++];
-			visit(record, c, read);
-			return true;
-		});
 	}
 }
 
@@ -738,57 +637,23 @@ const AvatarsDocument::Order &AvatarsDocument::order() const {
 	made.made = true;
 	made.load_generation = load_generation();
 	made.revision = revision();
-	// Only parts of a kind that share a name need the file's order: every other combination binds the one part.
-	std::set<std::pair<int, std::string>> names;
-	bool shared = false;
+	// Each part's rank among its kind's of the name in the rows' order, the last none: the save writes every part
+	// before the first nationality, so every combination binds the last of the name.
+	std::vector<std::pair<NodeId, std::pair<int, std::string>>> parts;
 	for (const auto &node : rows())
 		if (node && node->kind == kPart) {
 			const AvatarPartRecord &p = static_cast<const AvatarPartRow &>(*node).part;
-			shared |= !names.insert({p.kind, strutil::to_upper(p.name)}).second;
+			parts.push_back({node->id, {p.kind, strutil::to_upper(p.name)}});
 		}
-	const SerializeResult saved = shared ? serialize() : SerializeResult();
-	avatars::AvatarsFile reread{};
-	textlayout::Notes notes;
-	if (shared && saved.ok() &&
-	    avatars::avatars_parse_memory(saved.text.data(), saved.text.size(), &reread, notes) == 0) {
-		// The parts as the text read again holds them, in the rows' order (the reader keeps every part).
-		struct Part {
-			NodeId id;
-			int kind;
-			std::string name;
-			uint64_t place;
-		};
-		std::vector<Part> parts;
-		size_t at = 0;
-		for (const auto &node : rows())
-			if (node && node->kind == kPart && at < reread.parts_count) {
-				const AvatarPartRecord &p = static_cast<const AvatarPartRow &>(*node).part;
-				parts.push_back({node->id, p.kind, strutil::to_upper(p.name), place_of(reread.parts[at++].note)});
-			}
-		std::stable_sort(parts.begin(), parts.end(), [](const Part &a, const Part &b) { return a.place < b.place; });
-		// Each part's rank among its kind's of the name, the last 0.
-		for (size_t i = 0; i < parts.size(); ++i) {
-			size_t rank = 1, later = 0;
-			for (size_t j = 0; j < parts.size(); ++j) {
-				if (j == i || parts[j].kind != parts[i].kind || parts[j].name != parts[i].name) continue;
-				if (j < i) ++rank;
-				else ++later;
-			}
-			if (later) made.rank[parts[i].id] = rank;
+	for (size_t i = 0; i < parts.size(); ++i) {
+		size_t rank = 1, later = 0;
+		for (size_t j = 0; j < parts.size(); ++j) {
+			if (j == i || parts[j].second != parts[i].second) continue;
+			if (j < i) ++rank;
+			else ++later;
 		}
-		match_combos(reread, [&](const NodeAddress &record, const AvatarComboRecord &c, const avatars::AvatarCombo *read) {
-			if (!read || !place_of(read->note)) return;
-			const uint64_t place = place_of(read->note);
-			std::array<NodeId, 3> binds{};
-			const std::string named[3] = {strutil::to_upper(c.head), strutil::to_upper(c.body), strutil::to_upper(c.arms)};
-			for (const Part &p : parts)
-				if (p.place < place && p.kind >= 0 && p.kind < 3 && p.name == named[p.kind]) binds[size_t(p.kind)] = p.id;
-			for (const NodeId id : binds)
-				if (id && made.rank.count(id)) made.bound.insert(id);
-			made.binds[{record.row, record.child}] = binds;
-		});
+		if (later) made.rank[parts[i].first] = rank;
 	}
-	avatars::avatars_free(&reread);
 	order_ = std::move(made);
 	return order_;
 }
@@ -810,18 +675,17 @@ void AvatarsDocument::refine_field(const NodeAddress &address, FieldUse &use) co
 		const std::string &field = use.schema->id;
 		const int kind = field == "head" ? avatars::AVATAR_PART_HEAD
 		                 : field == "body" ? avatars::AVATAR_PART_BODY : avatars::AVATAR_PART_ARMS;
-		const auto bound = order().binds.find({address.row, address.child});
-		use.scope = section(kind, bound == order().binds.end() ? 0 : bound->second[size_t(kind)]);
+		use.scope = section(kind, 0); // the last part of the name: its plain section
 	}
 }
 
 void AvatarsDocument::refine_symbol(const NodeAddress &address, SymbolFacts &facts) const {
 	const Node *node = row(address.row);
 	if (!node || address.child || node->kind != kPart) return;
-	if (!order().rank.count(node->id) || order().bound.count(node->id)) return;
+	if (!order().rank.count(node->id)) return;
 	facts.inert = true;
-	facts.inert_reason = "a later part of the name replaces it for the combinations after both, and no combination "
-	                     "stands between them";
+	facts.inert_reason = "a later part of the name replaces it, and every combination stands after both (a save writes "
+	                     "every part before the nationalities)";
 }
 
 void AvatarsDocument::saved_text_findings(std::vector<Diagnostic> &out) const {

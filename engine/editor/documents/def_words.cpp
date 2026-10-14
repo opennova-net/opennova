@@ -20,7 +20,6 @@ const DefWords kItemWords[] = {
 	{"id", "Item id", "Identity", "The type id missions place this item by; when two items share an id, the first in the file is used.", "[orig: ItemList_FindIndexByTypeId @ 0x49e100]"},
 	{"sid", "Short id", "Identity", "The name hudpos.def vehicle panel blocks use to give this item its mounted HUD panel (silhouette and seat boxes).", "[orig: HUD_ParseHudposToken @ 0x59F370]"},
 	{"type", "Item type", "Identity", "The item's kind (vehicle, decoration, person, marker, building, powerup, effect); loading treats persons and effects specially, and FARP rearming serves vehicles only.", "[orig: EntityDef_LoadModelsAndCallbacks @ 0x439f50]"},
-	{"type_word", "Type written as", "Identity", "The word the type line writes where the game reads two alike: decoration or foliage, powerup or object. The game keeps the kind alone; retail's trees and bushes say foliage, its crates and objects object.", "[orig: ItemDef_ParseProperty @ 0x49eb00, the type chain @ 0x4a02e4..0x4a04b7]"},
 	{"graphic", "Model", "Looks", "The item's model, loaded at mission start and given to each of its entities; its sitex, ctrlx and UseGun points become seats and controls.", "[orig: EntityDef_LoadModelsAndCallbacks @ 0x439f50]"},
 	{"anim_def", "Animation map", "Looks", "The .adm animation map the item's model plays; a missing file falls back to default.adm.", "[orig: AnimMap_LoadAdmFile @ 0x40cc40]"},
 	{"husk", "Wreck model", "Death and wreck", "The wreck model drawn and hit-tested after death; its KZ points place the death blasts, and it gives debris when no final wreck exists.", "[orig: Render_SectorEntity @ 0x5C4190]; [orig: Entity_QueueKzBlastAtUserPoints @ 0x4eabf0]"},
@@ -534,17 +533,17 @@ struct ChoiceWordsRow {
 	DefChoiceWords words;
 };
 const ChoiceWordsRow kChoiceWords[] = {
-	{DefRecordKind::Item, {"attrib", "noshadow", "No shadow",
+	{DefRecordKind::Item, {"attrib", "NoShadow", "No shadow",
 	        "The game draws no sun shadow of this item on the terrain, wherever a mission places it: the "
 	        "terrain's static shadow pass skips it, as it skips a placement whose own NoShadow is set. A "
 	        "person's or a DynamicShadow item's moving shadow still draws, and the item's own lighting is "
 	        "unchanged. With Shadow Quality at 0 the game draws no shadow at all.",
 	        "[orig: Terrain_CollectAndRenderTileModels @ 0x60D43E]; render-lighting-re.md"}},
-	{DefRecordKind::Item, {"attrib2", "staticshadow", "Static shadow",
+	{DefRecordKind::Item, {"attrib2", "StaticShadow", "Static shadow",
 	        "Placed among a mission's items, it casts the terrain's static sun shadow, which a placement "
 	        "among the buildings casts without it; either NoShadow still turns it off.",
 	        "[orig: Terrain_CollectAndRenderTileModels @ 0x60D44C]; render-lighting-re.md"}},
-	{DefRecordKind::Item, {"attrib2", "dynamicshadow", "Dynamic shadow",
+	{DefRecordKind::Item, {"attrib2", "DynamicShadow", "Dynamic shadow",
 	        "It casts the moving shadow every person casts, its silhouette drawn on the terrain under it "
 	        "each frame; NoShadow does not turn this one off.",
 	        "[orig: Entity_InitFromModel @ 0x40E1DD]; render-lighting-re.md"}},

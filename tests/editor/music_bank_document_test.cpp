@@ -3,7 +3,8 @@
 // written back byte for byte; a stream renamed, added, moved and removed, written and read back; the findings; a
 // stream decoded as the preview player sounds it; play_sound of a stream through a session (refused for a bank with
 // unsaved changes, a stream it has not); the blank. The retail leg (OPENNOVA_JO_DIR): every bank the install streams
-// (its own pair and each expansion's) through the document and back, byte for byte.
+// (its own pair and each expansion's) through the document: saved at its size, the writer's form of the same streams
+// (the bytes the game never reads the writer's, S26), a fixed point.
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/music_bank_document.h>
@@ -250,7 +251,9 @@ int test_script_plays_streams() {
 	return 0;
 }
 
-// Every bank the install streams through the document and back, byte for byte.
+// Every bank the install streams through the document: saved at its size as the same streams, the bytes the game
+// never reads (a header word, a chunk's reserved pair and tail) the writer's, which the findings list (S26: the
+// writer writes its model alone); saved again, the same bytes.
 int test_retail() {
 	if (!retail::selected()) return 0;
 	const std::string install = retail::install();
@@ -268,13 +271,19 @@ int test_retail() {
 		MusicBankDocument bank;
 		Diagnostic error;
 		TEST_EXPECT(bank.load_bytes(bytes, entry.path().filename().u8string(), AssetKind::MusicBank, "jo", error));
-		TEST_EXPECT(bank.issues().empty() && saved(bank) == bytes);
-		TEST_EXPECT(validate_music_bank_file(bank).empty());
+		TEST_EXPECT(std::none_of(bank.issues().begin(), bank.issues().end(), [](const SourceIssue &issue) { return issue.blocks; }));
+		const std::vector<uint8_t> written = saved(bank);
+		MusicBankDocument again;
+		TEST_EXPECT(written.size() == bytes.size() && load(again, written, error) && again.issues().empty() &&
+		            saved(again) == written && again.bank_row() &&
+		            again.bank_row()->streams.size() == bank.bank_row()->streams.size());
+		for (const Diagnostic &d : validate_music_bank_file(bank)) TEST_EXPECT(d.severity != DiagnosticSeverity::Error);
 		streams += bank.bank_row()->streams.size();
 		++banks;
 	}
 	TEST_EXPECT(banks >= 2);
-	std::printf("retail: %zu music banks, %zu streams through the document byte for byte\n", banks, streams);
+	std::printf("retail: %zu music banks, %zu streams through the document, saved at their size, a fixed point\n", banks,
+	            streams);
 	return 0;
 }
 

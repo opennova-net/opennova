@@ -212,9 +212,9 @@ const RowObject kRowObjects[] = {
 };
 // The document types whose rows keep their text in fixed-length records (a model's 3DI records, a
 // clip's bone table, a def catalog's records, a mission's header and entity slots), or hold none (the
-// character attributes' numbers): a longer text grows no row of theirs. Every other type's rows hold
-// their text as strings, which a longer text makes longer.
-const char *const kFixedText[] = {"model", "animation", "catalog", "mission", "charattr"};
+// character attributes' numbers; the score table's names, each an id of its name table): a longer text grows no
+// row of theirs. Every other type's rows hold their text as strings, which a longer text makes longer.
+const char *const kFixedText[] = {"model", "animation", "catalog", "mission", "charattr", "score"};
 bool fixed_text(const DocumentType &type) {
 	for (const char *name : kFixedText)
 		if (std::string(name) == type.name) return true;
@@ -234,8 +234,10 @@ struct PinnedPresence {
 	const char *type;
 	size_t optional, presences;
 };
-const PinnedPresence kPinnedPresence[] = {{"menu", 301, 301}, {"catalog", 27, 27}, {"mission", 4, 4}, {"environment", 3, 3},
-                                          {"terrain", 4, 4}, {"avatars", 1, 1}, {"score", 2, 2}};
+// (S26: the menu's JUSTIFY offsets and typed parts' fields 365, from 301; the score table's version and fanfare
+// none, the writer writing both always.)
+const PinnedPresence kPinnedPresence[] = {{"menu", 365, 365}, {"catalog", 27, 27}, {"mission", 4, 4}, {"environment", 3, 3},
+                                          {"terrain", 4, 4}, {"avatars", 1, 1}};
 
 // One clause of the contract, named with where it failed (the file, the record, the field).
 void check(bool ok, const std::string &where, const char *clause) {
@@ -668,9 +670,9 @@ std::vector<Fixture> flawed_files(const std::string &repo) {
 	        {AssetKind::MusicBank, "silent.sbf", music_with_a_silent_stream(file("sbf/synth_gamemus.sbf"))},
 	        {AssetKind::Wave, "stereo.wav", stereo_wave()},
 	        // An AI profile whose key stands before its type line (ai_profile.ignored_input) and a HUD effects
-	        // file of two lines, the second never read (hudfx.never_read).
+	        // file whose one line read is a power slot's, loaded and never drawn (hudfx.power_unseen).
 	        {AssetKind::AiProfile, "early.aip", text_bytes("view_dist\t500\r\ntype\tGROUND\r\n")},
-	        {AssetKind::HudFxDefs, "hudfx.def", text_bytes("3DIPower2 p2.3di\r\n3DIPower3 p3.3di\r\n")},
+	        {AssetKind::HudFxDefs, "hudfx.def", text_bytes("3DIPower2 p2.3di\r\n")},
 	        // A tile placement whose header's +8 MED would not write (S25: til.ignored_input).
 	        {AssetKind::TileInfo, "foreign.til", til_with_a_foreign_header()},
 	        // Heights past 128 units, which TrnGen's bake draws no ground back over (S25:
@@ -1387,7 +1389,8 @@ void check_foreign_payload(const Fixture &fixture, Document &document,
 
 // What the type declares it adds is added (make_node and edit_collection refuse by default, in the
 // base's words): a row of each kind the outline adds (add_label) at the end, the last row and of
-// its kind; a record into each kind of collection the file's records hold that is not fixed (each
+// its kind, or refused by a rule of the type's own (hudfx.def holds one line, which its fixture has); a record
+// into each kind of collection the file's records hold that is not fixed (each
 // owner kind and record kind once, a full one skipped), of the collection's kind, or refused in
 // the type's own words (a rule of its own: a model's LOD whose every part has its animation), and
 // its Remove giving the owner the records it held. After each Add, what serializes reads back with
@@ -1415,8 +1418,9 @@ void check_adds(const DocumentType &type, const Fixture &fixture, Document &docu
 		const std::string where = fixture.name + " (" + row.add_label + ")";
 		Diagnostic error;
 		const bool added = document.apply(edit_of(EditOperation::Add, {0, row.kind, 0}, ""), error);
-		check(added, where + " (" + error.message + ")",
-		      "a row of a kind the outline adds is added (make_node)");
+		check(added || (error.code() == "document.structure" && error.message != "This document cannot add that record."),
+		      where + " (" + error.message + ")",
+		      "a row of a kind the outline adds is added (make_node), or refused by a rule of the type's own");
 		if (!added) continue;
 		++g_row_adds;
 		// Where the type's order puts it (Document::row_position: a mission's band): the last row of

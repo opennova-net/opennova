@@ -15,8 +15,7 @@ class MnsDocument;
 // The value is a colour, with a swatch, when a use reads it as one, or when no use reads it as
 // anything (a font, an image, a string id, a name or a shown text) and the game's wcstoul reads it
 // whole; else it is picked from the project's files of the kind a use loads, or its own value
-// names (the value field's reference as the document's field_on gives it). A line that stays
-// where it is (frozen) is neither.
+// names (the value field's reference as the document's field_on gives it).
 struct StyleValueUse {
 	bool winner = false; // the definition the game reads of its name in this file
 	bool bound = false;  // and the one of all the shell's stylesheets: the menus' uses are its own
