@@ -2,9 +2,9 @@
 // planes are the files its terrain's .trn names, read through overcast.def and its .env (D-TERRAIN-18), its heights
 // the .cpt the .trn names, another terrain's where it names one (D-TERRAIN-17), its tiles its own <mission>.til; a
 // plane the .trn names no file for, or one the project lacks, refused with the fix (the pane's Add or Import); a
-// terrain's own tiles under no mission. The terrain query's family, brush and sample ops answer them; a stroke on a
+// terrain's own tiles under no mission. The terrain query's family, brush (its pane shown or not) and sample ops answer them; a stroke on a
 // plane resolves its file and opens it quietly (the active document kept). The tile tools in the mission's map: a stamp lays a tile in the mission's .til, opened quietly and noted as
-// edited from the mission; an Undo in the mission takes it back and a Redo makes it again; a Save of the mission saves
+// edited from the mission; an Undo in the mission takes it back, its answer's documents naming the .til, and a Redo makes it again; a Save of the mission saves
 // the .til; a Close of the mission lists it and Don't save leaves it open with its edits; a drag of a tile is one
 // step; a tile command turns the selected tiles.
 #include <algorithm>
@@ -118,15 +118,17 @@ int test_routes() {
 	TEST_EXPECT(error.empty() && family.get("terrain")->string == "terrain/Tother.trn");
 	TEST_EXPECT(family.get("planes")->get("heights")->get_string("path", "") == "terrain/Tmap.cpt");
 
-	// The brush: live once the Terrain pane shows, its plane and where its edits go.
+	// The brush: live once the Terrain pane shows (its `pane`), its plane and where its edits go.
 	session.handle(request::set_workspace(R"({"terrain_brush":{"tool":"surface"}})"));
 	JsonValue brush = ask(session, m->relative_path, "brush", error);
-	TEST_EXPECT(error.empty() && !brush.get_bool("live", true) && brush.get_string("plane", "") == "surface");
+	TEST_EXPECT(error.empty() && !brush.get_bool("pane", true) && !brush.get_bool("live", true) &&
+	            brush.get_string("plane", "") == "surface");
 	session.handle(request::open_document(m->relative_path));
 	session.handle(request::set_workspace(R"({"document":{"terrain":true}})"));
 	TEST_EXPECT(session.outcome().done() && v.workspace.document(m->relative_path).terrain);
 	brush = ask(session, m->relative_path, "brush", error);
-	TEST_EXPECT(brush.get_bool("live", false) && brush.get("edits")->get_string("path", "") == "terrain/Tmap_m.pcx");
+	TEST_EXPECT(brush.get_bool("pane", false) && brush.get_bool("live", false) &&
+	            brush.get("edits")->get_string("path", "") == "terrain/Tmap_m.pcx");
 
 	// A sample of the ground: its height and its surface in the game's words.
 	JsonValue args = JsonValue::make_object();
@@ -196,9 +198,18 @@ int test_tiles_scope() {
 	session.handle(request::edit_in_viewport(mission, stamp));
 	TEST_EXPECT(session.outcome().done() && rows() == 1 && v.documents.active == mission);
 	TEST_EXPECT(v.documents.edited_from.count(mission) && v.documents.edited_from.at(mission).front() == tiles);
-	// Undo in the mission takes the stamp back; Redo makes it again.
+	// Undo in the mission takes the stamp back, its answer naming the .til it stepped; Redo makes it again.
 	TEST_EXPECT(v.documents.undo_next.path == tiles);
-	session.handle(request::undo(mission));
+	{
+		JsonValue undo;
+		std::string error;
+		TEST_EXPECT(opennova::io::json_parse(R"({"kind": "undo", "path": ")" + mission + R"("})", undo, error));
+		const JsonValue answer = session.handle_json(undo);
+		const JsonValue *outcome = answer.get("outcome");
+		const JsonValue *documents = outcome ? outcome->get("documents") : nullptr;
+		TEST_EXPECT(documents && documents->is_array() && documents->array.size() == 1 &&
+		            documents->array.front().is_string() && documents->array.front().string == tiles);
+	}
 	TEST_EXPECT(rows() == 0 && session.outcome().stepped.size() == 1 && session.outcome().stepped[0] == tiles);
 	session.handle(request::redo(mission));
 	TEST_EXPECT(rows() == 1);
